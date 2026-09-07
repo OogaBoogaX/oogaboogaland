@@ -1,0 +1,112 @@
+// Minimal headless-Chrome driver over the DevTools protocol
+import { spawn } from "node:child_process";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
+const CHROME = process.env.CHROME || "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+export const launch = async ({ w = 1440, h = 900, mobile = false } = {}) => {
+  const port = 9300 + Math.floor(Math.random() * 500);
+  // Fresh profile per launch, so storage never leaks
+  const profile = mkdtempSync(join(tmpdir(), "ooga-test-"));
+  const args = [
+    "--headless=new",
+    "--hide-scrollbars",
+    `--window-size=${w},${h}`,
+    `--remote-debugging-port=${port}`,
+    `--user-data-dir=${profile}`,
+    "--enable-unsafe-swiftshader",
+    "--ignore-gpu-blocklist",
+    "--enable-precise-memory-info",
+    "about:blank"
+  ];
+  const chrome = spawn(CHROME, args, { stdio: "ignore" });
+  const logs = [];
+  let targets = null;
+  for (let i = 0; i < 40 && !targets; i++) {
+    await sleep(250);
+    try {
+      targets = await (await fetch(`http://127.0.0.1:${port}/json`)).json();
+    } catch {
+      targets = null;
+    }
+  }
+  if (!targets) {
+    chrome.kill();
+    rmSync(profile, { recursive: true, force: true });
+    throw new Error(`Chrome did not start at ${CHROME}`);
+  }
+  const page = targets.find((t) => t.type === "page");
+  const ws = new WebSocket(page.webSocketDebuggerUrl);
+  await new Promise((r) => (ws.onopen = r));
+  let id = 0;
+  const pending = new Map();
+  const listeners = new Map();
+  ws.onmessage = (e) => {
+    const m = JSON.parse(e.data);
+    if (m.id && pending.has(m.id)) {
+      pending.get(m.id)(m);
+      pending.delete(m.id);
+      return;
+    }
+    listeners.get(m.method)?.(m.params);
+    if (m.method === "Runtime.consoleAPICalled") logs.push(`[console.${m.params.type}] ${m.params.args.map((a) => a.value ?? a.description ?? "").join(" ")}`);
+    if (m.method === "Runtime.exceptionThrown") logs.push(`[exception] ${m.params.exceptionDetails.text} ${m.params.exceptionDetails.exception?.description ?? ""}`);
+    if (m.method === "Log.entryAdded") logs.push(`[log.${m.params.entry.level}] ${m.params.entry.text}`);
+  };
+  const send = (method, params = {}) => new Promise((r) => {
+    const i = ++id;
+    pending.set(i, r);
+    ws.send(JSON.stringify({ id: i, method, params }));
+  });
+  // Raw protocol events, null to stop listening
+  const on = (method, fn) => listeners.set(method, fn);
+  await send("Runtime.enable");
+  await send("Log.enable");
+  await send("Page.enable");
+  if (mobile) {
+    await send("Emulation.setDeviceMetricsOverride", { width: w, height: h, deviceScaleFactor: 2, mobile: true });
+    await send("Emulation.setTouchEmulationEnabled", { enabled: true, maxTouchPoints: 5 });
+  }
+  const evaluate = async (expression) => {
+    const r = await send("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true });
+    if (r.result?.exceptionDetails) throw new Error(r.result.exceptionDetails.exception?.description || r.result.exceptionDetails.text);
+    return r.result?.result?.value;
+  };
+  const mouse = (type, x, y, extra = {}) => send("Input.dispatchMouseEvent", { type, x, y, button: "left", clickCount: 1, ...extra });
+  const drag = async (from, to, steps = 12) => {
+    await mouse("mouseMoved", from.x, from.y, { button: "none" });
+    await mouse("mousePressed", from.x, from.y, { buttons: 1 });
+    for (let i = 1; i <= steps; i++) {
+      await mouse("mouseMoved", from.x + (to.x - from.x) * i / steps, from.y + (to.y - from.y) * i / steps, { buttons: 1 });
+      await sleep(30);
+    }
+    await mouse("mouseReleased", to.x, to.y);
+  };
+  const click = async (x, y) => {
+    await mouse("mouseMoved", x, y, { button: "none" });
+    await mouse("mousePressed", x, y, { buttons: 1 });
+    await sleep(40);
+    await mouse("mouseReleased", x, y);
+  };
+  const key = async (k, modifiers = 0) => {
+    await send("Input.dispatchKeyEvent", { type: "keyDown", key: k, text: k.length === 1 ? k : undefined, modifiers });
+    await send("Input.dispatchKeyEvent", { type: "keyUp", key: k, modifiers });
+  };
+  const focus = (enabled) => send("Emulation.setFocusEmulationEnabled", { enabled });
+  const screenshot = async (path) => {
+    const shot = await send("Page.captureScreenshot", { format: "png" });
+    writeFileSync(path, Buffer.from(shot.result.data, "base64"));
+  };
+  const open = async (url) => {
+    await send("Page.navigate", { url });
+  };
+  const close = () => {
+    ws.close();
+    chrome.kill();
+    setTimeout(() => rmSync(profile, { recursive: true, force: true }), 500).unref();
+  };
+  return { send, on, evaluate, mouse, drag, click, key, focus, screenshot, open, close, sleep, logs };
+};

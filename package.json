@@ -1,0 +1,11 @@
+{
+  "name": "oogaboogaland",
+  "version": "0.1.0",
+  "description": "EntropyLab contributor vivarium: a WebGL2 lab where donated bananas feed the Ooga Boogas",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "test": "node scripts/build.mjs && node test/run.mjs"
+  }
+}

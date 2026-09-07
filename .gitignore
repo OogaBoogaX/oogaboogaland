@@ -1,0 +1,16 @@
+# OS and editor
+.DS_Store
+Thumbs.db
+*.swp
+.idea/
+.vscode/
+
+# Node
+node_modules/
+npm-debug.log*
+
+# Local planning and scratch
+untracked/
+
+# Test artifacts (screenshots written by test/ scripts)
+test/*.png
