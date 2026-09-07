@@ -61,6 +61,14 @@ stylesheet and every script inlined and the content policy pinned to their hashe
 committed with the sources; rebuild it whenever they change. Deploy that one file, served
 as `index.html`. Nothing under `src/` goes to a server.
 
+GitHub Pages deploys through `.github/workflows/pages.yml` on pushes to `rock`, or
+manually with **Actions → Deploy GitHub Pages → Run workflow**. The workflow rebuilds
+the page and uploads only `_site/index.html`, a copy of `oogaboogaland.html`.
+Set **Settings → Pages → Build and deployment → Source** to **GitHub Actions**.
+The default site URL is https://oogaboogax.github.io/oogaboogaland/.
+Configure a custom domain in **Settings → Pages** before pointing its DNS at GitHub;
+this workflow does not need a repository `CNAME` file.
+
 ## Privacy
 
 No analytics, no external requests, no personal data. The roster lists public

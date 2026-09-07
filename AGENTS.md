@@ -37,13 +37,18 @@ do not add network code before it exists. Visitor-facing controls are in the REA
 | `src/index.html`, `src/style.css`, `src/js/` | the sources; open `src/index.html` directly to run them |
 | `oogaboogaland.html` | the built single-file page, committed; regenerate with `npm run build` after any change under `src/` |
 | `scripts/build.mjs` | inlines `src/` in script order and pins the content policy hashes |
+| `.github/workflows/pages.yml` | builds and deploys the single-file page to GitHub Pages on pushes to `rock` or manual runs |
 | `test/run.mjs`, `test/browser.mjs` | the suite and its headless Chrome driver |
 | `untracked/` | local planning notes, ignored by git |
 
-No CI, nothing to install. `npm test` needs Node 22 or newer (the driver uses the global
+Nothing to install. `npm test` needs Node 22 or newer (the driver uses the global
 `fetch` and `WebSocket`) and Chrome; the driver looks at the macOS application path, so
 on Linux or Windows set `CHROME` to the binary. A full run takes about five minutes,
 mostly in the soak blocks. Deploy only `oogaboogaland.html`, served as `index.html`.
+
+GitHub Pages uses the Actions workflow above. It rebuilds the page and uploads only
+`_site/index.html`; do not publish the source tree. The workflow deploys but does not
+run the browser suite, so run `npm test` locally before merging.
 
 ## Modules and load order
 
