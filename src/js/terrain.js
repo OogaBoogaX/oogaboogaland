@@ -111,12 +111,20 @@
   const BLUFF = 6;
   const MOUTH = { w: 5, h: 3, depth: 5 };
   const ROOM = { w: 6, h: 4, from: 2.5, to: 6.5 };
-  const RING = 8, PATH_HALF = 0.75;
+  const PATH_HALF = 0.75;
+  const PATH_CAPACITY = 8192;
+  const PATH_LIFT = 0.006;
+  const MASTER_PATH_CENTER = 2;
   const GATE_Z = -(RADIUS - 2), PASS_HALF = 2.5, PASS_TOP = 5, TRAIL_HALF = 1;
   // Bluff, apron and trail measures
   const BLUFF_LEN = 8, SIDE_OUT = 2.5, APRON = 3, TRAIL_LEAN = 1.2;
   const P = { grass: 1, grassLight: 2, grassDark: 3, path: 4, stone: 5, stoneDark: 6, inner: 7, dirt: 8, floor: 9 };
   const PALETTE = [null, "#6f7d3e", "#7b8945", "#65733a", "#a3874f", "#877869", "#5e5449", "#2f2824", "#6a4e39", "#3a302a"].map((hex) => hex && hexToRgb(hex));
+  const PATH_TILE = {
+    verts: [-UNIT / 2, 0, -UNIT / 2, UNIT / 2, 0, -UNIT / 2, UNIT / 2, 0, UNIT / 2, -UNIT / 2, 0, UNIT / 2],
+    faces: [{ i: [0, 3, 2, 1], color: PALETTE[P.path], emissive: 0 }],
+    lines: []
+  };
   const UNDER_BANDS = [P.dirt, P.stoneDark, P.dirt, P.stone];
   // Slot, its ring clock, and its tunnel clock
   const CLOCKS = [["c11", 11], ["c9", 9], ["c730", 7.5, 10.5], ["c1", 1], ["c2", 2], ["c3", 3], ["c5", 5, 2]];
@@ -141,10 +149,10 @@
     const frames = CLOCKS.map(([id, clock, axis = clock]) => ({ id, clock, ...spoke(clock / 12 * Math.PI * 2, axis / 12 * Math.PI * 2) }));
     const pass = spoke(0);
     const spokes = [...frames, pass, spoke(Math.PI)];
-    const ringPhase = rand() * Math.PI * 2;
     const grid = makeGrid(SX, SY, SZ);
     const height = new Float32Array(SX * SZ);
     const paths = new Uint8Array(SX * SZ);
+    const meadow = new Uint8Array(SX * SZ);
     // Walkable top, colour and underside per column
     const NONE = -DEPTH - 1;
     const tops = new Float32Array(SX * SZ).fill(NONE);
@@ -167,6 +175,7 @@
       const wx = (gx + 0.5) * UNIT + ORIGIN.x;
       for (let gz = 0; gz < SZ; gz++) {
         const wz = (gz + 0.5) * UNIT + ORIGIN.z;
+        const i = gx * SZ + gz;
         const r = Math.hypot(wx, wz);
         if (r >= RADIUS) continue;
         // Flatten a bluff and apron around each mouth
@@ -189,15 +198,7 @@
         const plateau = 2.5 + around(theta, 1.4, 90) * 5;
         let top = 0, surface = grassAt(wx, wz);
         if (r < edge && bluff <= 0) {
-          if (Math.abs(r - RING - Math.sin(theta * 3 + ringPhase) * 0.7) < PATH_HALF) surface = P.path;
-          if (r > RING - 0.5) {
-            for (const s of spokes) {
-              const d = theta - s.angle;
-              const lateral = r * Math.atan2(Math.sin(d), Math.cos(d));
-              const bend = Math.sin((r - RING) / (MEADOW - RING) * Math.PI * 2);
-              if (Math.abs(lateral + s.lean * TRAIL_LEAN - s.wobble * (s.lean ? Math.abs(bend) : bend)) < PATH_HALF) surface = P.path;
-            }
-          }
+          meadow[i] = 1;
         } else {
           // Terraces to a plateau, dipping at rim and six
           let h = 0.4 + (plateau + noise(wx / 12 + 80, wz / 12 + 80) * 2.5) * smooth((r - edge) / ramp) - 1.2 * smooth((r - (RADIUS - 2)) / 2) + (noise(wx / 5 + 20, wz / 5 + 20) - 0.5) * 1.2;
@@ -209,19 +210,15 @@
           else if (patch <= 0.58) surface = patch < 0.3 ? P.stoneDark : P.stone;
           if (Math.abs(wx) < PASS_HALF && wz < 0) {
             h = Math.min(PASS_TOP, Math.floor((r - MEADOW) / UNIT) * UNIT);
-            surface = Math.abs(wx - pass.wobble * Math.sin((r - MEADOW) / (-GATE_Z - MEADOW) * Math.PI * 2)) < TRAIL_HALF ? P.path : grassAt(wx, wz);
-          } else if (Math.abs(wx) < PATH_HALF && wz > 0) surface = P.path;
+            surface = grassAt(wx, wz);
+          }
           top = clamp(Math.round(h / UNIT) * UNIT, 0, MAX_HEIGHT);
         }
         // The underside drops sheer, tapering at the edge
         const depth = rim <= RADIUS - 3 ? DEPTH : DEPTH * (1 - Math.pow((rim - (RADIUS - 3)) / 3, 1.6));
-        const i = gx * SZ + gz;
         tops[i] = top;
         surfaces[i] = surface;
         bottoms[i] = Math.max(0, SURFACE - 1 - Math.floor(depth / UNIT));
-        // Only trails count as paths, so props may stand
-        if (surface === P.path) paths[i] = 1;
-        else if (r > 3 && r < edge && bluff <= 0 && noise(q(wx) / 1.5 + 200, q(wz) / 1.5 + 200) > 0.83) surfaces[i] = P.path;
       }
     }
     // Fill columns, with stone showing at step edges
@@ -315,10 +312,155 @@
       const i = column(x, z);
       return i >= 0 && land[i] === 1;
     };
+    // Banana-independent master spokes. Ring changes only clip this fixed mask.
+    const masterPaths = new Uint8Array(SX * SZ);
+    let masterPathCount = 0, masterHashValue = 2166136261;
+    for (let gx = 0; gx < SX; gx++) {
+      const wx = (gx + 0.5) * UNIT + ORIGIN.x;
+      for (let gz = 0; gz < SZ; gz++) {
+        const i = gx * SZ + gz;
+        if (!land[i]) continue;
+        const wz = (gz + 0.5) * UNIT + ORIGIN.z, r = Math.hypot(wx, wz);
+        let path = false;
+        if (meadow[i] && r >= MASTER_PATH_CENTER) {
+          const theta = Math.atan2(wx, -wz);
+          for (const s of spokes) {
+            const d = theta - s.angle;
+            const lateral = r * Math.atan2(Math.sin(d), Math.cos(d));
+            const t = (r - MASTER_PATH_CENTER) / (MEADOW - MASTER_PATH_CENTER);
+            let bend = Math.sin(t * Math.PI * 2);
+            if (s.id === "c1") bend *= 1 - smooth((t - 0.5) / 0.35);
+            if (Math.abs(lateral + s.lean * TRAIL_LEAN - s.wobble * (s.lean ? Math.abs(bend) : bend)) < PATH_HALF) {
+              path = true;
+              break;
+            }
+          }
+        }
+        if (!meadow[i]) {
+          if (Math.abs(wx) < PASS_HALF && wz < 0) {
+            path = Math.abs(wx - pass.wobble * Math.sin((r - MEADOW) / (-GATE_Z - MEADOW) * Math.PI * 2)) < TRAIL_HALF;
+          } else if (Math.abs(wx) < PATH_HALF && wz > 0) path = true;
+        }
+        if (!path) continue;
+        masterPaths[i] = 1;
+        masterPathCount++;
+        masterHashValue = Math.imul(masterHashValue ^ i, 16777619);
+      }
+    }
+    const masterPathHash = (masterHashValue >>> 0).toString(16).padStart(8, "0");
+    const pathData = new Float32Array(PATH_CAPACITY * 20);
+    let pathCount = 0, pathVersion = 0, pathReflows = 0, ringPathCount = 0, visibleSpokeCount = 0;
+    let requestedInner = 0, ringInner = 0, ringCenter = 0, ringOuter = 0, pathVisible = false;
+    const tileInnerRadius = (x, z) => Math.hypot(Math.max(0, Math.abs(x) - UNIT / 2), Math.max(0, Math.abs(z) - UNIT / 2));
+    const writePathTile = (i, x, z) => {
+      if (pathCount >= PATH_CAPACITY) throw new Error("Dynamic path instance capacity exceeded");
+      paths[i] = 1;
+      const o = pathCount++ * 20;
+      pathData[o] = 1;
+      pathData[o + 1] = 0;
+      pathData[o + 2] = 0;
+      pathData[o + 3] = 0;
+      pathData[o + 4] = 0;
+      pathData[o + 5] = 1;
+      pathData[o + 6] = 0;
+      pathData[o + 7] = 0;
+      pathData[o + 8] = 0;
+      pathData[o + 9] = 0;
+      pathData[o + 10] = 1;
+      pathData[o + 11] = 0;
+      pathData[o + 12] = x;
+      pathData[o + 13] = surface[i] + PATH_LIFT;
+      pathData[o + 14] = z;
+      pathData[o + 15] = 1;
+      pathData[o + 16] = 1;
+      pathData[o + 17] = 0;
+      pathData[o + 18] = 0;
+      pathData[o + 19] = 0;
+    };
+    const setPathRadius = (platformRadius) => {
+      requestedInner = platformRadius + UNIT;
+      const quantized = Math.ceil((requestedInner - 1e-9) / UNIT) * UNIT;
+      if (quantized === ringInner) return false;
+      ringInner = quantized;
+      ringCenter = ringInner + PATH_HALF;
+      ringOuter = ringCenter + PATH_HALF;
+      pathVisible = ringOuter <= MEADOW;
+      pathCount = 0;
+      ringPathCount = 0;
+      visibleSpokeCount = 0;
+      paths.fill(0);
+      for (let gx = 0; gx < SX; gx++) {
+        const wx = (gx + 0.5) * UNIT + ORIGIN.x;
+        for (let gz = 0; gz < SZ; gz++) {
+          const i = gx * SZ + gz;
+          if (!land[i]) continue;
+          const wz = (gz + 0.5) * UNIT + ORIGIN.z;
+          const innerRadius = tileInnerRadius(wx, wz);
+          if (innerRadius < ringInner) continue;
+          const ring = pathVisible && meadow[i] && innerRadius < ringOuter;
+          const spoke = masterPaths[i] === 1 && innerRadius >= ringOuter;
+          if (!ring && !spoke) continue;
+          writePathTile(i, wx, wz);
+          if (ring) ringPathCount++;
+          else visibleSpokeCount++;
+        }
+      }
+      pathVersion++;
+      pathReflows++;
+      return true;
+    };
+    const overlapsPath = (x, z, radius) => {
+      const gx0 = Math.max(0, Math.floor((x - radius - ORIGIN.x) / UNIT));
+      const gx1 = Math.min(SX - 1, Math.floor((x + radius - ORIGIN.x) / UNIT));
+      const gz0 = Math.max(0, Math.floor((z - radius - ORIGIN.z) / UNIT));
+      const gz1 = Math.min(SZ - 1, Math.floor((z + radius - ORIGIN.z) / UNIT));
+      const half = UNIT / 2, radius2 = radius * radius;
+      for (let gx = gx0; gx <= gx1; gx++) {
+        const cx = (gx + 0.5) * UNIT + ORIGIN.x;
+        const dx = Math.max(0, Math.abs(cx - x) - half);
+        for (let gz = gz0; gz <= gz1; gz++) {
+          const i = gx * SZ + gz;
+          if (!paths[i]) continue;
+          const cz = (gz + 0.5) * UNIT + ORIGIN.z;
+          const dz = Math.max(0, Math.abs(cz - z) - half);
+          if (dx * dx + dz * dz <= radius2) return true;
+        }
+      }
+      return false;
+    };
+    const path = {
+      geometry: PATH_TILE,
+      instanceData: pathData,
+      setRadius: setPathRadius,
+      overlaps: overlapsPath,
+      apply(node) {
+        node.instanceCount = pathCount;
+        node.instanceVersion = pathVersion;
+        node.visible = pathCount > 0;
+      },
+      debug: {
+        get active() { return pathVisible; },
+        get requestedInnerRadius() { return requestedInner; },
+        get ringInnerRadius() { return ringInner; },
+        get ringCenterRadius() { return ringCenter; },
+        get ringOuterRadius() { return ringOuter; },
+        get quantizedRadius() { return ringInner; },
+        get visibleInstanceCount() { return pathCount; },
+        masterSpokeCellCount: masterPathCount,
+        get visibleSpokeCellCount() { return visibleSpokeCount; },
+        get ringCellCount() { return ringPathCount; },
+        get clippedSpokeCellCount() { return masterPathCount - visibleSpokeCount; },
+        masterMaskBuildCount: 1,
+        masterMaskHash: masterPathHash,
+        bufferCapacity: PATH_CAPACITY,
+        get reflowCount() { return pathReflows; }
+      }
+    };
     const inside = (ROOM.from + ROOM.to) / 2;
     const mouths = frames.map((f) => ({ id: f.id, clock: f.clock, angle: f.angle, x: f.x, z: f.z, ry: facing(f.axis), floorY: 0, inside: { x: f.x + f.ox * inside, z: f.z + f.oz * inside }, apron: { x: f.x - f.ox * 1.6, z: f.z - f.oz * 1.6 } }));
     const built = {
       geometry: gridGeometry(grid, { unit: UNIT, palette: PALETTE, origin: ORIGIN }),
+      path,
       heightAt,
       surfaceAt,
       isPath,

@@ -29,7 +29,7 @@
   // Opt-in likeness overrides per handle
   const LIKENESS = {
     portlandhodl: { bald: true },
-    "w-s-bitcoin": { apple: true },
+    "w-s-bitcoin": { apple: true, symmetricTusks: true },
     MrHodlX: { gasMask: true },
     dplusplus1024: { build: "slim", hair: "#b9dcaa" }
   };
@@ -49,6 +49,7 @@
       bald: !!likeness.bald,
       apple: !!likeness.apple,
       gasMask: !!likeness.gasMask,
+      symmetricTusks: !!likeness.symmetricTusks,
       skin,
       hair: likeness.hair || hashedHair,
       fur: FURS[Math.floor(rand() * FURS.length)],

@@ -5,7 +5,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta http-equiv="Content-Security-Policy"
-    content="default-src 'none'; script-src 'sha256-5krVOvqeEKxlIT0yQrLczRZ9dANDdUA+rMJNg/Jdapo='; style-src 'sha256-dDRjKsPXfpTqnH8VPCUSd7WihWQczKIMep/Sr+vXL+s='; img-src 'self' data:; connect-src 'none'; base-uri 'none'; form-action 'none'">
+    content="default-src 'none'; script-src 'sha256-p+CLKFRuwDx9A7T8L4F1TlnmbXJL0fnGaRRSfhx8GUw='; style-src 'sha256-dDRjKsPXfpTqnH8VPCUSd7WihWQczKIMep/Sr+vXL+s='; img-src 'self' data:; connect-src 'none'; base-uri 'none'; form-action 'none'">
   <meta name="referrer" content="no-referrer">
   <meta name="color-scheme" content="dark">
   <meta name="theme-color" content="#0a0a0b">
@@ -1900,9 +1900,9 @@ select {
   const { mat4 } = BL.math;
   const { updateWorld, traverseVisible } = BL.scene;
   const QUALITY = {
-    high: { dpr: 1.5, msaa: 4, shadow: 2048, bloom: true },
-    medium: { dpr: 1.25, msaa: 2, shadow: 1024, bloom: true },
-    low: { dpr: 1, msaa: 0, shadow: 512, bloom: false }
+    high: { dpr: 1.5, msaa: 4, shadow: 2048, bloom: true, mirror: 512 },
+    medium: { dpr: 1.25, msaa: 2, shadow: 1024, bloom: true, mirror: 384 },
+    low: { dpr: 1, msaa: 0, shadow: 512, bloom: false, mirror: 256 }
   };
   const INSTANCE_FLOATS = 20;
   // Caps the pixel ratio to bound buffer memory
@@ -2048,6 +2048,39 @@ void main() {
   oColor = vec4(col, 1.0);
   oBright = vec4(vColor.rgb * glow, 1.0);
 }`;
+  const MIRROR_VS = `#version 300 es
+precision highp float;
+layout(location=0) in vec3 aPos;
+layout(location=3) in vec4 aM0;
+layout(location=4) in vec4 aM1;
+layout(location=5) in vec4 aM2;
+layout(location=6) in vec4 aM3;
+uniform mat4 uViewProj;
+uniform mat4 uReflectionViewProj;
+out vec4 vReflection;
+out vec3 vWorld;
+void main() {
+  vec4 world = mat4(aM0, aM1, aM2, aM3) * vec4(aPos, 1.0);
+  vWorld = world.xyz;
+  vReflection = uReflectionViewProj * world;
+  gl_Position = uViewProj * world;
+}`;
+  const MIRROR_FS = `#version 300 es
+precision highp float;
+in vec4 vReflection;
+in vec3 vWorld;
+uniform sampler2D uReflection;
+uniform vec3 uTint;
+layout(location=0) out vec4 oColor;
+layout(location=1) out vec4 oBright;
+void main() {
+  vec2 uv = vReflection.xy / vReflection.w * 0.5 + 0.5;
+  vec3 reflected = texture(uReflection, uv).rgb;
+  float sheen = pow(max(0.0, 1.0 - abs(fract((vWorld.x + vWorld.y) * 0.22) - 0.5) * 7.0), 5.0) * 0.08;
+  vec3 color = mix(reflected, uTint, 0.16) + sheen;
+  oColor = vec4(color, 1.0);
+  oBright = vec4(0.0);
+}`;
   const QUAD_VS = `#version 300 es
 precision highp float;
 out vec2 vUv;
@@ -2105,11 +2138,25 @@ void main() {
     const lightProj = mat4.create();
     const lightViewProj = mat4.create();
     const P4 = new Float32Array(4);
+    const MIRROR_POINT = new Float32Array(3);
+    const MIRROR_CLIP = new Float32Array(4);
+    const mirrorView = mat4.create();
+    const mirrorProj = mat4.create();
+    const mirrorViewProj = mat4.create();
+    const mirrorCapturedViewProj = mat4.create();
+    const mirrorEye = { x: 0, y: 0, z: 0 };
+    const mirrorTarget = { x: 0, y: 0, z: 0 };
+    const mirrorUp = { x: 0, y: 1, z: 0 };
     const records = new Map();
     const activeRecords = [];
     const res = { programs: {}, fbo: null, shadow: null, bloom: null, quadVao: null };
+    const mirror = { node: null, record: null, geometry: null, program: null, programReady: false, fb: null, tex: null, depth: null, width: 0, height: 0, frame: 0 };
+    const mirrorDebug = {
+      active: false, faux: false, width: 0, height: 0, allocationCount: 0, reflectionPassCount: 0, skippedPassCount: 0, resources: 0, captureExcluded: false,
+      cameraPosition: new Float32Array(3), cameraTarget: new Float32Array(3), planeCenter: new Float32Array(3), planeNormal: new Float32Array(3), skipReason: "none"
+    };
     // Compile without blocking, ready flips once linked
-    const parallel = gl.getExtension("KHR_parallel_shader_compile");
+    let parallel = null;
     let ready = false;
     let failure = null;
     const compile = (vs, fs, uniforms) => {
@@ -2134,6 +2181,26 @@ void main() {
       for (const sh of p.shaders) gl.deleteShader(sh);
       p.shaders = [];
       for (const name of p.uniforms) p.u[name] = gl.getUniformLocation(p.prog, name);
+    };
+    const destroyMirrorProgram = () => {
+      const p = mirror.program;
+      if (!p) return;
+      for (const sh of p.shaders) gl.deleteShader(sh);
+      gl.deleteProgram(p.prog);
+      mirror.program = null;
+      mirror.programReady = false;
+      mirrorDebug.resources--;
+    };
+    const ensureMirrorProgram = () => {
+      if (!mirror.program) {
+        mirror.program = compile(MIRROR_VS, MIRROR_FS, ["uViewProj", "uReflectionViewProj", "uReflection", "uTint"]);
+        mirrorDebug.resources++;
+      }
+      if (mirror.programReady) return true;
+      if (parallel && !gl.getProgramParameter(mirror.program.prog, parallel.COMPLETION_STATUS_KHR)) return false;
+      finishProgram(mirror.program);
+      mirror.programReady = true;
+      return true;
     };
     const buildPrograms = () => {
       ready = false;
@@ -2175,6 +2242,49 @@ void main() {
       if (samples > 0) gl.renderbufferStorageMultisample(gl.RENDERBUFFER, samples, internal, w, h);
       else gl.renderbufferStorage(gl.RENDERBUFFER, internal, w, h);
       return rb;
+    };
+    const destroyMirrorTarget = () => {
+      if (!mirror.fb) return;
+      gl.deleteTexture(mirror.tex);
+      gl.deleteRenderbuffer(mirror.depth);
+      gl.deleteFramebuffer(mirror.fb);
+      mirror.fb = mirror.tex = mirror.depth = null;
+      mirror.width = mirror.height = mirrorDebug.width = mirrorDebug.height = 0;
+      mirrorDebug.resources -= 3;
+    };
+    const ensureMirrorTarget = () => {
+      const cap = settings.mirror;
+      const scale = cap / Math.max(width, height, 1);
+      const w = Math.max(1, Math.round(width * scale)), h = Math.max(1, Math.round(height * scale));
+      if (mirror.fb && mirror.width === w && mirror.height === h) return;
+      destroyMirrorTarget();
+      mirror.tex = createTexture(w, h, gl.RGBA8, gl.LINEAR);
+      mirror.depth = createRenderbuffer(w, h, gl.DEPTH_COMPONENT16, 0);
+      mirror.fb = gl.createFramebuffer();
+      gl.bindFramebuffer(gl.FRAMEBUFFER, mirror.fb);
+      gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, mirror.tex, 0);
+      gl.framebufferRenderbuffer(gl.FRAMEBUFFER, gl.DEPTH_ATTACHMENT, gl.RENDERBUFFER, mirror.depth);
+      gl.drawBuffers([gl.COLOR_ATTACHMENT0]);
+      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+      mirror.width = mirrorDebug.width = w;
+      mirror.height = mirrorDebug.height = h;
+      mirrorDebug.allocationCount++;
+      mirrorDebug.resources += 3;
+    };
+    const destroyMirror = () => {
+      destroyMirrorTarget();
+      destroyMirrorProgram();
+      mirror.node = mirror.record = mirror.geometry = null;
+      mirrorDebug.active = false;
+      mirrorDebug.captureExcluded = false;
+    };
+    const forgetMirror = () => {
+      mirror.node = mirror.record = mirror.geometry = mirror.program = mirror.fb = mirror.tex = mirror.depth = null;
+      mirror.programReady = false;
+      mirror.width = mirror.height = mirrorDebug.width = mirrorDebug.height = 0;
+      mirrorDebug.active = false;
+      mirrorDebug.captureExcluded = false;
+      mirrorDebug.resources = 0;
     };
     const destroyFbo = () => {
       const f = res.fbo;
@@ -2380,7 +2490,14 @@ void main() {
     };
     const collect = (node) => {
       if (!node.geometry) return;
+      if (node.mirror) {
+        if (mirror.node) throw new Error("A scene may contain at most one mirror node");
+        mirror.node = node;
+        mirror.geometry = node.geometry;
+        mirrorDebug.active = true;
+      }
       const rec = recordFor(node.geometry);
+      if (node.mirror) mirror.record = rec;
       if (!rec.active) {
         rec.active = true;
         rec.count = 0;
@@ -2427,6 +2544,86 @@ void main() {
         gl.bufferSubData(gl.ARRAY_BUFFER, 0, d, 0, need);
       }
     };
+    const skipMirrorPass = (reason) => {
+      mirrorDebug.skippedPassCount++;
+      mirrorDebug.skipReason = reason;
+      return false;
+    };
+    const reflectMirrorPoint = (out, point, center, normal) => {
+      const d = (point.x - center[0]) * normal[0] + (point.y - center[1]) * normal[1] + (point.z - center[2]) * normal[2];
+      out.x = point.x - 2 * d * normal[0];
+      out.y = point.y - 2 * d * normal[1];
+      out.z = point.z - 2 * d * normal[2];
+    };
+    const prepareMirrorCamera = (camera) => {
+      const node = mirror.node, world = node.world, center = mirrorDebug.planeCenter, normal = mirrorDebug.planeNormal;
+      center[0] = world[12];
+      center[1] = world[13];
+      center[2] = world[14];
+      const nlen = Math.hypot(world[8], world[9], world[10]) || 1;
+      normal[0] = world[8] / nlen;
+      normal[1] = world[9] / nlen;
+      normal[2] = world[10] / nlen;
+      const cameraSide = (camera.position.x - center[0]) * normal[0] + (camera.position.y - center[1]) * normal[1] + (camera.position.z - center[2]) * normal[2];
+      if (cameraSide <= 0.001) return skipMirrorPass("back-facing");
+      mat4.transformPoint4(MIRROR_CLIP, viewProj, center[0], center[1], center[2]);
+      if (MIRROR_CLIP[3] <= 0.01) return skipMirrorPass("behind-camera");
+      let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity, projected = 0;
+      const verts = node.geometry.verts;
+      for (let i = 0; i < verts.length; i += 3) {
+        mat4.transformPoint(MIRROR_POINT, world, verts[i], verts[i + 1], verts[i + 2]);
+        mat4.transformPoint4(MIRROR_CLIP, viewProj, MIRROR_POINT[0], MIRROR_POINT[1], MIRROR_POINT[2]);
+        if (MIRROR_CLIP[3] <= 0.01) continue;
+        const x = MIRROR_CLIP[0] / MIRROR_CLIP[3], y = MIRROR_CLIP[1] / MIRROR_CLIP[3];
+        minX = Math.min(minX, x);
+        minY = Math.min(minY, y);
+        maxX = Math.max(maxX, x);
+        maxY = Math.max(maxY, y);
+        projected++;
+      }
+      if (!projected || maxX < -1 || minX > 1 || maxY < -1 || minY > 1) return skipMirrorPass("offscreen");
+      const area = (Math.min(1, maxX) - Math.max(-1, minX)) * width * 0.5 * (Math.min(1, maxY) - Math.max(-1, minY)) * height * 0.5;
+      if (area < 16) return skipMirrorPass("negligible");
+      reflectMirrorPoint(mirrorEye, camera.position, center, normal);
+      reflectMirrorPoint(mirrorTarget, camera.target, center, normal);
+      const upDot = UP.x * normal[0] + UP.y * normal[1] + UP.z * normal[2];
+      mirrorUp.x = UP.x - 2 * upDot * normal[0];
+      mirrorUp.y = UP.y - 2 * upDot * normal[1];
+      mirrorUp.z = UP.z - 2 * upDot * normal[2];
+      mat4.lookAt(mirrorView, mirrorEye, mirrorTarget, mirrorUp);
+      mat4.perspective(mirrorProj, camera.fov, width / height, camera.near, camera.far);
+      mat4.transformPoint(MIRROR_POINT, mirrorView, center[0], center[1], center[2]);
+      let cx = mirrorView[0] * normal[0] + mirrorView[4] * normal[1] + mirrorView[8] * normal[2];
+      let cy = mirrorView[1] * normal[0] + mirrorView[5] * normal[1] + mirrorView[9] * normal[2];
+      let cz = mirrorView[2] * normal[0] + mirrorView[6] * normal[1] + mirrorView[10] * normal[2];
+      const clen = Math.hypot(cx, cy, cz) || 1;
+      cx /= clen;
+      cy /= clen;
+      cz /= clen;
+      let cw = -(cx * MIRROR_POINT[0] + cy * MIRROR_POINT[1] + cz * MIRROR_POINT[2]);
+      const qx = ((cx >= 0 ? 1 : -1) + mirrorProj[8]) / mirrorProj[0];
+      const qy = ((cy >= 0 ? 1 : -1) + mirrorProj[9]) / mirrorProj[5];
+      const qz = -1;
+      const qw = (1 + mirrorProj[10]) / mirrorProj[14];
+      const clipScale = 2 / (cx * qx + cy * qy + cz * qz + cw * qw);
+      cx *= clipScale;
+      cy *= clipScale;
+      cz *= clipScale;
+      cw *= clipScale;
+      mirrorProj[2] = cx;
+      mirrorProj[6] = cy;
+      mirrorProj[10] = cz + 0.998;
+      mirrorProj[14] = cw;
+      mat4.multiply(mirrorViewProj, mirrorProj, mirrorView);
+      mirrorDebug.cameraPosition[0] = mirrorEye.x;
+      mirrorDebug.cameraPosition[1] = mirrorEye.y;
+      mirrorDebug.cameraPosition[2] = mirrorEye.z;
+      mirrorDebug.cameraTarget[0] = mirrorTarget.x;
+      mirrorDebug.cameraTarget[1] = mirrorTarget.y;
+      mirrorDebug.cameraTarget[2] = mirrorTarget.z;
+      mirrorDebug.skipReason = "none";
+      return true;
+    };
     const resize = () => {
       width = canvas.clientWidth;
       height = canvas.clientHeight;
@@ -2441,6 +2638,7 @@ void main() {
       buildFbo();
     };
     const init = () => {
+      parallel = gl.getExtension("KHR_parallel_shader_compile");
       buildPrograms();
       buildShadow();
       resize();
@@ -2452,6 +2650,7 @@ void main() {
     const onLost = (e) => {
       e.preventDefault();
       lost = true;
+      forgetMirror();
     };
     const onRestored = () => {
       records.clear();
@@ -2463,8 +2662,9 @@ void main() {
     };
     canvas.addEventListener("webglcontextlost", onLost);
     canvas.addEventListener("webglcontextrestored", onRestored);
-    const drawParts = (kind, useProgram) => {
+    const drawParts = (kind, useProgram, excludeMirror = false) => {
       for (const rec of activeRecords) {
+        if (excludeMirror && rec === mirror.record) continue;
         const part = rec[kind];
         if (!part) continue;
         if (kind === "mesh" && useProgram === "shadow" && rec.geometry.castShadow === false) continue;
@@ -2472,6 +2672,49 @@ void main() {
         gl.bindVertexArray(part.vao);
         gl.drawArraysInstanced(gl.TRIANGLES, 0, part.count, rec.count);
       }
+    };
+    const renderMirrorCapture = (clear, sky, ground, sun, lx, ly, lz, sh) => {
+      ensureMirrorTarget();
+      const pg = res.programs;
+      gl.bindFramebuffer(gl.FRAMEBUFFER, mirror.fb);
+      gl.viewport(0, 0, mirror.width, mirror.height);
+      gl.clearColor(clear[0], clear[1], clear[2], 1);
+      gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+      gl.useProgram(pg.mesh.prog);
+      gl.uniformMatrix4fv(pg.mesh.u.uViewProj, false, mirrorViewProj);
+      gl.uniformMatrix4fv(pg.mesh.u.uLightViewProj, false, lightViewProj);
+      gl.uniform3f(pg.mesh.u.uLightDir, lx, ly, lz);
+      gl.uniform3fv(pg.mesh.u.uSky, sky);
+      gl.uniform3fv(pg.mesh.u.uGround, ground);
+      gl.uniform3fv(pg.mesh.u.uSun, sun);
+      gl.uniform1f(pg.mesh.u.uShadowTexel, 1 / sh.size);
+      gl.activeTexture(gl.TEXTURE0);
+      gl.bindTexture(gl.TEXTURE_2D, sh.tex);
+      gl.uniform1i(pg.mesh.u.uShadow, 0);
+      drawParts("mesh", "mesh", true);
+      gl.useProgram(pg.line.prog);
+      gl.uniformMatrix4fv(pg.line.u.uViewProj, false, mirrorViewProj);
+      gl.uniform2f(pg.line.u.uViewport, mirror.width, mirror.height);
+      gl.disable(gl.CULL_FACE);
+      drawParts("line", "line", true);
+      gl.enable(gl.CULL_FACE);
+      mirrorCapturedViewProj.set(mirrorViewProj);
+      mirrorDebug.reflectionPassCount++;
+      mirrorDebug.captureExcluded = true;
+    };
+    const drawMirrorSurface = () => {
+      const rec = mirror.record, part = rec && rec.mesh, pg = mirror.program;
+      if (!part || !mirror.tex || !mirror.programReady) return;
+      gl.useProgram(pg.prog);
+      gl.uniformMatrix4fv(pg.u.uViewProj, false, viewProj);
+      gl.uniformMatrix4fv(pg.u.uReflectionViewProj, false, mirrorCapturedViewProj);
+      gl.uniform3f(pg.u.uTint, 0.56, 0.62, 0.67);
+      gl.activeTexture(gl.TEXTURE2);
+      gl.bindTexture(gl.TEXTURE_2D, mirror.tex);
+      gl.uniform1i(pg.u.uReflection, 2);
+      gl.bindVertexArray(part.vao);
+      gl.drawArraysInstanced(gl.TRIANGLES, 0, part.count, rec.count);
+      gl.activeTexture(gl.TEXTURE0);
     };
     const blit = (f) => {
       gl.bindFramebuffer(gl.READ_FRAMEBUFFER, f.scene);
@@ -2524,6 +2767,8 @@ void main() {
         rec.batch = null;
       }
       activeRecords.length = 0;
+      mirror.node = mirror.record = null;
+      mirrorDebug.active = false;
       updateWorld(root, null);
       traverseVisible(root, collect);
       for (const rec of activeRecords) {
@@ -2538,6 +2783,14 @@ void main() {
       gl.cullFace(gl.FRONT);
       drawParts("mesh", "shadow");
       gl.cullFace(gl.BACK);
+      if (mirror.node) {
+        mirror.frame++;
+        if (prepareMirrorCamera(camera)) {
+          if (settings !== QUALITY.high && mirror.frame % 2 === 0) skipMirrorPass("cadence");
+          else if (!ensureMirrorProgram()) skipMirrorPass("shader-pending");
+          else renderMirrorCapture(clear, sky, ground, sun, lx, ly, lz, sh);
+        }
+      }
       gl.bindFramebuffer(gl.FRAMEBUFFER, f.scene);
       gl.viewport(0, 0, pw, ph);
       gl.clearColor(clear[0], clear[1], clear[2], 1);
@@ -2554,7 +2807,8 @@ void main() {
       gl.activeTexture(gl.TEXTURE0);
       gl.bindTexture(gl.TEXTURE_2D, sh.tex);
       gl.uniform1i(pg.mesh.u.uShadow, 0);
-      drawParts("mesh", "mesh");
+      drawParts("mesh", "mesh", true);
+      drawMirrorSurface();
       gl.useProgram(pg.line.prog);
       gl.uniformMatrix4fv(pg.line.u.uViewProj, false, viewProj);
       gl.uniform2f(pg.line.u.uViewport, pw, ph);
@@ -2613,6 +2867,7 @@ void main() {
       canvas.removeEventListener("webglcontextlost", onLost);
       canvas.removeEventListener("webglcontextrestored", onRestored);
       destroyRecords();
+      destroyMirror();
       destroyFbo();
       destroyShadow();
       for (const p of Object.values(res.programs)) gl.deleteProgram(p.prog);
@@ -2624,6 +2879,7 @@ void main() {
     // Drop unreferenced buffers, rebuilt on demand
     const releaseUnused = (live) => {
       let released = 0;
+      if (mirror.geometry && !live.has(mirror.geometry)) destroyMirror();
       for (const geometry of [...records.keys()]) {
         if (live.has(geometry)) continue;
         releaseGeometry(geometry);
@@ -2652,7 +2908,10 @@ void main() {
         return Object.keys(QUALITY).find((k) => QUALITY[k] === settings);
       },
       get stats() {
-        return { records: records.size, active: activeRecords.length };
+        return { records: records.size, active: activeRecords.length, mirrorResources: mirrorDebug.resources };
+      },
+      get mirror() {
+        return mirrorDebug;
       },
       get ready() {
         return ready;
@@ -2674,10 +2933,12 @@ void main() {
   const BL = window.BL = window.BL || {};
   const { mat4, lerp } = BL.math;
   const { updateWorld, traverseVisible } = BL.scene;
+  const DEFAULT_SKY = [0.5, 0.52, 0.58];
+  const DEFAULT_GROUND = [0.22, 0.2, 0.19];
   const createRenderer = (canvas, { width: fixedW = 0, height: fixedH = 0, transparent = false } = {}) => {
     const ctx = canvas.getContext("2d");
     let width = 0, height = 0, dpr = 1, backdrop = null, lastF = 1;
-    let clearRef = null, clearStyle = "";
+    let clearRef = null, clearStyle = "", mirrorSkyRef = null, mirrorGroundRef = null, mirrorStyle = "#71808a";
     const size = { width: 0, height: 0 };
     const active = [];
     const DEFAULT_LIGHT = { x: 0.45, y: 0.85, z: 0.3 };
@@ -2688,7 +2949,7 @@ void main() {
     let poolUsed = 0;
     const acquire = () => {
       if (poolUsed === pool.length) {
-        pool.push({ pts: new Float32Array(24), n: 0, depth: 0, style: "", coreStyle: "", line: false, lineGlow: 0 });
+        pool.push({ pts: new Float32Array(24), n: 0, depth: 0, style: "", coreStyle: "", line: false, lineGlow: 0, mirror: false });
       }
       return pool[poolUsed++];
     };
@@ -2696,6 +2957,10 @@ void main() {
     const CLIP_IN = new Float32Array(30);
     const CLIP_OUT = new Float32Array(30);
     const BATCH_NODE = { geometry: null, world: new Float32Array(16), glow: 1, highlight: 0, depthBias: 0 };
+    const mirrorDebug = {
+      active: false, faux: true, width: 0, height: 0, allocationCount: 0, reflectionPassCount: 0, skippedPassCount: 0, resources: 0, captureExcluded: true,
+      cameraPosition: new Float32Array(3), cameraTarget: new Float32Array(3), planeCenter: new Float32Array(3), planeNormal: new Float32Array(3), skipReason: "canvas-faux"
+    };
     const resize = () => {
       dpr = Math.min(window.devicePixelRatio || 1, 2);
       width = fixedW || canvas.clientWidth;
@@ -2778,6 +3043,7 @@ void main() {
           rec.n = clipped;
           rec.depth = zsum / clipped - (node.depthBias || 0);
           rec.line = false;
+          rec.mirror = !!node.mirror;
           const emissive = (face.emissive || 0) * node.glow;
           const diffuse = Math.max(0, nx * lightDir[0] + ny * lightDir[1] + nz * lightDir[2]);
           const hemi = AMBIENT * (0.6 + 0.4 * (ny * 0.5 + 0.5));
@@ -2785,7 +3051,7 @@ void main() {
           k = lerp(k, 1.1, Math.min(1, emissive));
           k = lerp(k, 1.3, node.highlight * 0.4);
           const c = face.color;
-          rec.style = `rgb(${Math.min(255, Math.round(c[0] * k))},${Math.min(255, Math.round(c[1] * k))},${Math.min(255, Math.round(c[2] * k))})`;
+          rec.style = rec.mirror ? mirrorStyle : `rgb(${Math.min(255, Math.round(c[0] * k))},${Math.min(255, Math.round(c[1] * k))},${Math.min(255, Math.round(c[2] * k))})`;
         }
       }
       if (lines) {
@@ -2808,6 +3074,7 @@ void main() {
           rec.n = 2;
           rec.depth = (CLIP_OUT[2] + CLIP_OUT[5]) / 2 - (node.depthBias || 0);
           rec.line = true;
+          rec.mirror = false;
           rec.lineGlow = (line.emissive || 0) * node.glow;
           const c = line.color;
           rec.style = `rgb(${c[0]},${c[1]},${c[2]})`;
@@ -2828,11 +3095,16 @@ void main() {
       }
     };
     const render = (root, camera, opts = {}) => {
-      const { light = DEFAULT_LIGHT, clear = null } = opts;
+      const { light = DEFAULT_LIGHT, clear = null, sky = DEFAULT_SKY, ground = DEFAULT_GROUND } = opts;
       if (!fixedW && (canvas.clientWidth !== width || canvas.clientHeight !== height)) resize();
       if (clear !== clearRef) {
         clearRef = clear;
         clearStyle = clear ? `rgb(${Math.round(clear[0] * 255)},${Math.round(clear[1] * 255)},${Math.round(clear[2] * 255)})` : "";
+      }
+      if (sky !== mirrorSkyRef || ground !== mirrorGroundRef) {
+        mirrorSkyRef = sky;
+        mirrorGroundRef = ground;
+        mirrorStyle = `rgb(${Math.round((sky[0] * 0.55 + ground[0] * 0.25 + 0.12) * 255)},${Math.round((sky[1] * 0.55 + ground[1] * 0.25 + 0.14) * 255)},${Math.round((sky[2] * 0.55 + ground[2] * 0.25 + 0.17) * 255)})`;
       }
       lastF = height / 2 / Math.tan(camera.fov / 2);
       near = camera.near;
@@ -2843,8 +3115,30 @@ void main() {
       lightDir[1] = light.y / llen;
       lightDir[2] = light.z / llen;
       poolUsed = 0;
+      mirrorDebug.active = false;
       updateWorld(root, null);
       traverseVisible(root, (node) => {
+        if (node.mirror) {
+          if (mirrorDebug.active) throw new Error("A scene may contain at most one mirror node");
+          mirrorDebug.active = true;
+          mirrorDebug.skippedPassCount++;
+          const w = node.world, nlen = Math.hypot(w[8], w[9], w[10]) || 1;
+          mirrorDebug.planeCenter[0] = w[12];
+          mirrorDebug.planeCenter[1] = w[13];
+          mirrorDebug.planeCenter[2] = w[14];
+          mirrorDebug.planeNormal[0] = w[8] / nlen;
+          mirrorDebug.planeNormal[1] = w[9] / nlen;
+          mirrorDebug.planeNormal[2] = w[10] / nlen;
+          const center = mirrorDebug.planeCenter, normal = mirrorDebug.planeNormal;
+          const eyeD = (camera.position.x - center[0]) * normal[0] + (camera.position.y - center[1]) * normal[1] + (camera.position.z - center[2]) * normal[2];
+          mirrorDebug.cameraPosition[0] = camera.position.x - 2 * eyeD * normal[0];
+          mirrorDebug.cameraPosition[1] = camera.position.y - 2 * eyeD * normal[1];
+          mirrorDebug.cameraPosition[2] = camera.position.z - 2 * eyeD * normal[2];
+          const targetD = (camera.target.x - center[0]) * normal[0] + (camera.target.y - center[1]) * normal[1] + (camera.target.z - center[2]) * normal[2];
+          mirrorDebug.cameraTarget[0] = camera.target.x - 2 * targetD * normal[0];
+          mirrorDebug.cameraTarget[1] = camera.target.y - 2 * targetD * normal[1];
+          mirrorDebug.cameraTarget[2] = camera.target.z - 2 * targetD * normal[2];
+        }
         if (node.instanceData) shadeBatch(node);
         else if (node.geometry) shadeNode(node);
       });
@@ -2883,6 +3177,24 @@ void main() {
           ctx.strokeStyle = rec.style;
           ctx.lineWidth = 1;
           ctx.stroke();
+          if (rec.mirror) {
+            let minX = rec.pts[0], maxX = rec.pts[0], minY = rec.pts[1], maxY = rec.pts[1];
+            for (let k = 1; k < rec.n; k++) {
+              minX = Math.min(minX, rec.pts[k * 2]);
+              maxX = Math.max(maxX, rec.pts[k * 2]);
+              minY = Math.min(minY, rec.pts[k * 2 + 1]);
+              maxY = Math.max(maxY, rec.pts[k * 2 + 1]);
+            }
+            ctx.save();
+            ctx.clip();
+            ctx.strokeStyle = "rgba(235,245,250,.2)";
+            ctx.lineWidth = Math.max(2, (maxY - minY) * 0.06);
+            ctx.beginPath();
+            ctx.moveTo(minX - (maxY - minY) * 0.2, maxY);
+            ctx.lineTo(maxX, minY + (maxY - minY) * 0.18);
+            ctx.stroke();
+            ctx.restore();
+          }
         }
       }
       return true;
@@ -2907,12 +3219,17 @@ void main() {
       setQuality: () => { },
       releaseGeometry: () => { },
       releaseUnused: () => 0,
-      dispose: () => { },
+      dispose: () => {
+        mirrorDebug.active = false;
+      },
       get quality() {
         return "low";
       },
       get stats() {
-        return { records: 0, active: 0 };
+        return { records: 0, active: 0, mirrorResources: 0 };
+      },
+      get mirror() {
+        return mirrorDebug;
       },
       get ready() {
         return true;
@@ -3136,7 +3453,9 @@ void main() {
     return () => value || (value = build());
   };
   const BANANA_AMMO_SCALE = 0.34;
-  const BANANA_PILE_PROFILE = [[1, 0], [0.98, 0.08], [0.9, 0.24], [0.72, 0.45], [0.5, 0.62], [0.28, 0.74], [0.1, 0.8], [0, 0.81]];
+  // A full-shouldered loose heap encloses the dead space between curved bananas
+  // without returning to the old pointed silhouette.
+  const BANANA_PILE_PROFILE = [[1, 0], [0.98, 0.11], [0.9, 0.31], [0.72, 0.53], [0.5, 0.7], [0.28, 0.82], [0.1, 0.87], [0, 0.88]];
   const bananaPileRadiusScale = (angle, radius) => {
     // Keep the foot of the mound circular, then blend in the lumpy silhouette above it.
     const fade = Math.min(1, Math.max(0, (1 - radius) / 0.18));
@@ -3187,8 +3506,8 @@ void main() {
         profile.push([outer[0] + (inner[0] - outer[0]) * t, outer[1] + (inner[1] - outer[1]) * t]);
       }
     }
-    // Shadow tones: the mound is hidden under the banana shell and only shows in the gaps between them
-    const colors = ["#3a280f", "#33230d", "#42300f", "#382a11", "#2f210c"].map(hexToRgb);
+    // Golden panels keep any backing visible between shell bananas part of the pile.
+    const colors = ["#c9a21d", "#ddb72b", "#b98f14", "#e5c13a", "#d1aa22"].map(hexToRgb);
     const rings = profile.map(([radius, y], ringIndex) => {
       const ring = [];
       for (let segment = 0; segment < segments; segment++) {
@@ -3443,6 +3762,22 @@ void main() {
       }
       v.set(1, 2, 5, P.black);
       v.set(5, 2, 5, P.black);
+      if (traits.symmetricTusks) {
+        // Keep w-s-bitcoin's tusks and the stubble beside them as a clean mirror pair.
+        for (let x = 0; x <= 6; x++) {
+          for (let y = 0; y <= 1; y++) {
+            v.set(x, y, 7, P.hair);
+            for (let z = 5; z <= 6; z++) if (v.get(x, y, z) === P.stubble) v.set(x, y, z, P.hair);
+          }
+        }
+        for (const x of [0, 6]) {
+          v.set(x, 0, 7, P.stubble);
+          v.set(x, 1, 7, P.stubble);
+          v.del(x, 0, 6);
+        }
+        v.set(1, 0, 7, P.white);
+        v.set(5, 0, 7, P.white);
+      }
     }
     const headOrigin = { x: -3.5 * u, y: 0, z: -3 * u };
     const headOpen = vg(headVox, headOrigin);
@@ -3959,12 +4294,20 @@ void main() {
   const BLUFF = 6;
   const MOUTH = { w: 5, h: 3, depth: 5 };
   const ROOM = { w: 6, h: 4, from: 2.5, to: 6.5 };
-  const RING = 8, PATH_HALF = 0.75;
+  const PATH_HALF = 0.75;
+  const PATH_CAPACITY = 8192;
+  const PATH_LIFT = 0.006;
+  const MASTER_PATH_CENTER = 2;
   const GATE_Z = -(RADIUS - 2), PASS_HALF = 2.5, PASS_TOP = 5, TRAIL_HALF = 1;
   // Bluff, apron and trail measures
   const BLUFF_LEN = 8, SIDE_OUT = 2.5, APRON = 3, TRAIL_LEAN = 1.2;
   const P = { grass: 1, grassLight: 2, grassDark: 3, path: 4, stone: 5, stoneDark: 6, inner: 7, dirt: 8, floor: 9 };
   const PALETTE = [null, "#6f7d3e", "#7b8945", "#65733a", "#a3874f", "#877869", "#5e5449", "#2f2824", "#6a4e39", "#3a302a"].map((hex) => hex && hexToRgb(hex));
+  const PATH_TILE = {
+    verts: [-UNIT / 2, 0, -UNIT / 2, UNIT / 2, 0, -UNIT / 2, UNIT / 2, 0, UNIT / 2, -UNIT / 2, 0, UNIT / 2],
+    faces: [{ i: [0, 3, 2, 1], color: PALETTE[P.path], emissive: 0 }],
+    lines: []
+  };
   const UNDER_BANDS = [P.dirt, P.stoneDark, P.dirt, P.stone];
   // Slot, its ring clock, and its tunnel clock
   const CLOCKS = [["c11", 11], ["c9", 9], ["c730", 7.5, 10.5], ["c1", 1], ["c2", 2], ["c3", 3], ["c5", 5, 2]];
@@ -3989,10 +4332,10 @@ void main() {
     const frames = CLOCKS.map(([id, clock, axis = clock]) => ({ id, clock, ...spoke(clock / 12 * Math.PI * 2, axis / 12 * Math.PI * 2) }));
     const pass = spoke(0);
     const spokes = [...frames, pass, spoke(Math.PI)];
-    const ringPhase = rand() * Math.PI * 2;
     const grid = makeGrid(SX, SY, SZ);
     const height = new Float32Array(SX * SZ);
     const paths = new Uint8Array(SX * SZ);
+    const meadow = new Uint8Array(SX * SZ);
     // Walkable top, colour and underside per column
     const NONE = -DEPTH - 1;
     const tops = new Float32Array(SX * SZ).fill(NONE);
@@ -4015,6 +4358,7 @@ void main() {
       const wx = (gx + 0.5) * UNIT + ORIGIN.x;
       for (let gz = 0; gz < SZ; gz++) {
         const wz = (gz + 0.5) * UNIT + ORIGIN.z;
+        const i = gx * SZ + gz;
         const r = Math.hypot(wx, wz);
         if (r >= RADIUS) continue;
         // Flatten a bluff and apron around each mouth
@@ -4037,15 +4381,7 @@ void main() {
         const plateau = 2.5 + around(theta, 1.4, 90) * 5;
         let top = 0, surface = grassAt(wx, wz);
         if (r < edge && bluff <= 0) {
-          if (Math.abs(r - RING - Math.sin(theta * 3 + ringPhase) * 0.7) < PATH_HALF) surface = P.path;
-          if (r > RING - 0.5) {
-            for (const s of spokes) {
-              const d = theta - s.angle;
-              const lateral = r * Math.atan2(Math.sin(d), Math.cos(d));
-              const bend = Math.sin((r - RING) / (MEADOW - RING) * Math.PI * 2);
-              if (Math.abs(lateral + s.lean * TRAIL_LEAN - s.wobble * (s.lean ? Math.abs(bend) : bend)) < PATH_HALF) surface = P.path;
-            }
-          }
+          meadow[i] = 1;
         } else {
           // Terraces to a plateau, dipping at rim and six
           let h = 0.4 + (plateau + noise(wx / 12 + 80, wz / 12 + 80) * 2.5) * smooth((r - edge) / ramp) - 1.2 * smooth((r - (RADIUS - 2)) / 2) + (noise(wx / 5 + 20, wz / 5 + 20) - 0.5) * 1.2;
@@ -4057,19 +4393,15 @@ void main() {
           else if (patch <= 0.58) surface = patch < 0.3 ? P.stoneDark : P.stone;
           if (Math.abs(wx) < PASS_HALF && wz < 0) {
             h = Math.min(PASS_TOP, Math.floor((r - MEADOW) / UNIT) * UNIT);
-            surface = Math.abs(wx - pass.wobble * Math.sin((r - MEADOW) / (-GATE_Z - MEADOW) * Math.PI * 2)) < TRAIL_HALF ? P.path : grassAt(wx, wz);
-          } else if (Math.abs(wx) < PATH_HALF && wz > 0) surface = P.path;
+            surface = grassAt(wx, wz);
+          }
           top = clamp(Math.round(h / UNIT) * UNIT, 0, MAX_HEIGHT);
         }
         // The underside drops sheer, tapering at the edge
         const depth = rim <= RADIUS - 3 ? DEPTH : DEPTH * (1 - Math.pow((rim - (RADIUS - 3)) / 3, 1.6));
-        const i = gx * SZ + gz;
         tops[i] = top;
         surfaces[i] = surface;
         bottoms[i] = Math.max(0, SURFACE - 1 - Math.floor(depth / UNIT));
-        // Only trails count as paths, so props may stand
-        if (surface === P.path) paths[i] = 1;
-        else if (r > 3 && r < edge && bluff <= 0 && noise(q(wx) / 1.5 + 200, q(wz) / 1.5 + 200) > 0.83) surfaces[i] = P.path;
       }
     }
     // Fill columns, with stone showing at step edges
@@ -4163,10 +4495,155 @@ void main() {
       const i = column(x, z);
       return i >= 0 && land[i] === 1;
     };
+    // Banana-independent master spokes. Ring changes only clip this fixed mask.
+    const masterPaths = new Uint8Array(SX * SZ);
+    let masterPathCount = 0, masterHashValue = 2166136261;
+    for (let gx = 0; gx < SX; gx++) {
+      const wx = (gx + 0.5) * UNIT + ORIGIN.x;
+      for (let gz = 0; gz < SZ; gz++) {
+        const i = gx * SZ + gz;
+        if (!land[i]) continue;
+        const wz = (gz + 0.5) * UNIT + ORIGIN.z, r = Math.hypot(wx, wz);
+        let path = false;
+        if (meadow[i] && r >= MASTER_PATH_CENTER) {
+          const theta = Math.atan2(wx, -wz);
+          for (const s of spokes) {
+            const d = theta - s.angle;
+            const lateral = r * Math.atan2(Math.sin(d), Math.cos(d));
+            const t = (r - MASTER_PATH_CENTER) / (MEADOW - MASTER_PATH_CENTER);
+            let bend = Math.sin(t * Math.PI * 2);
+            if (s.id === "c1") bend *= 1 - smooth((t - 0.5) / 0.35);
+            if (Math.abs(lateral + s.lean * TRAIL_LEAN - s.wobble * (s.lean ? Math.abs(bend) : bend)) < PATH_HALF) {
+              path = true;
+              break;
+            }
+          }
+        }
+        if (!meadow[i]) {
+          if (Math.abs(wx) < PASS_HALF && wz < 0) {
+            path = Math.abs(wx - pass.wobble * Math.sin((r - MEADOW) / (-GATE_Z - MEADOW) * Math.PI * 2)) < TRAIL_HALF;
+          } else if (Math.abs(wx) < PATH_HALF && wz > 0) path = true;
+        }
+        if (!path) continue;
+        masterPaths[i] = 1;
+        masterPathCount++;
+        masterHashValue = Math.imul(masterHashValue ^ i, 16777619);
+      }
+    }
+    const masterPathHash = (masterHashValue >>> 0).toString(16).padStart(8, "0");
+    const pathData = new Float32Array(PATH_CAPACITY * 20);
+    let pathCount = 0, pathVersion = 0, pathReflows = 0, ringPathCount = 0, visibleSpokeCount = 0;
+    let requestedInner = 0, ringInner = 0, ringCenter = 0, ringOuter = 0, pathVisible = false;
+    const tileInnerRadius = (x, z) => Math.hypot(Math.max(0, Math.abs(x) - UNIT / 2), Math.max(0, Math.abs(z) - UNIT / 2));
+    const writePathTile = (i, x, z) => {
+      if (pathCount >= PATH_CAPACITY) throw new Error("Dynamic path instance capacity exceeded");
+      paths[i] = 1;
+      const o = pathCount++ * 20;
+      pathData[o] = 1;
+      pathData[o + 1] = 0;
+      pathData[o + 2] = 0;
+      pathData[o + 3] = 0;
+      pathData[o + 4] = 0;
+      pathData[o + 5] = 1;
+      pathData[o + 6] = 0;
+      pathData[o + 7] = 0;
+      pathData[o + 8] = 0;
+      pathData[o + 9] = 0;
+      pathData[o + 10] = 1;
+      pathData[o + 11] = 0;
+      pathData[o + 12] = x;
+      pathData[o + 13] = surface[i] + PATH_LIFT;
+      pathData[o + 14] = z;
+      pathData[o + 15] = 1;
+      pathData[o + 16] = 1;
+      pathData[o + 17] = 0;
+      pathData[o + 18] = 0;
+      pathData[o + 19] = 0;
+    };
+    const setPathRadius = (platformRadius) => {
+      requestedInner = platformRadius + UNIT;
+      const quantized = Math.ceil((requestedInner - 1e-9) / UNIT) * UNIT;
+      if (quantized === ringInner) return false;
+      ringInner = quantized;
+      ringCenter = ringInner + PATH_HALF;
+      ringOuter = ringCenter + PATH_HALF;
+      pathVisible = ringOuter <= MEADOW;
+      pathCount = 0;
+      ringPathCount = 0;
+      visibleSpokeCount = 0;
+      paths.fill(0);
+      for (let gx = 0; gx < SX; gx++) {
+        const wx = (gx + 0.5) * UNIT + ORIGIN.x;
+        for (let gz = 0; gz < SZ; gz++) {
+          const i = gx * SZ + gz;
+          if (!land[i]) continue;
+          const wz = (gz + 0.5) * UNIT + ORIGIN.z;
+          const innerRadius = tileInnerRadius(wx, wz);
+          if (innerRadius < ringInner) continue;
+          const ring = pathVisible && meadow[i] && innerRadius < ringOuter;
+          const spoke = masterPaths[i] === 1 && innerRadius >= ringOuter;
+          if (!ring && !spoke) continue;
+          writePathTile(i, wx, wz);
+          if (ring) ringPathCount++;
+          else visibleSpokeCount++;
+        }
+      }
+      pathVersion++;
+      pathReflows++;
+      return true;
+    };
+    const overlapsPath = (x, z, radius) => {
+      const gx0 = Math.max(0, Math.floor((x - radius - ORIGIN.x) / UNIT));
+      const gx1 = Math.min(SX - 1, Math.floor((x + radius - ORIGIN.x) / UNIT));
+      const gz0 = Math.max(0, Math.floor((z - radius - ORIGIN.z) / UNIT));
+      const gz1 = Math.min(SZ - 1, Math.floor((z + radius - ORIGIN.z) / UNIT));
+      const half = UNIT / 2, radius2 = radius * radius;
+      for (let gx = gx0; gx <= gx1; gx++) {
+        const cx = (gx + 0.5) * UNIT + ORIGIN.x;
+        const dx = Math.max(0, Math.abs(cx - x) - half);
+        for (let gz = gz0; gz <= gz1; gz++) {
+          const i = gx * SZ + gz;
+          if (!paths[i]) continue;
+          const cz = (gz + 0.5) * UNIT + ORIGIN.z;
+          const dz = Math.max(0, Math.abs(cz - z) - half);
+          if (dx * dx + dz * dz <= radius2) return true;
+        }
+      }
+      return false;
+    };
+    const path = {
+      geometry: PATH_TILE,
+      instanceData: pathData,
+      setRadius: setPathRadius,
+      overlaps: overlapsPath,
+      apply(node) {
+        node.instanceCount = pathCount;
+        node.instanceVersion = pathVersion;
+        node.visible = pathCount > 0;
+      },
+      debug: {
+        get active() { return pathVisible; },
+        get requestedInnerRadius() { return requestedInner; },
+        get ringInnerRadius() { return ringInner; },
+        get ringCenterRadius() { return ringCenter; },
+        get ringOuterRadius() { return ringOuter; },
+        get quantizedRadius() { return ringInner; },
+        get visibleInstanceCount() { return pathCount; },
+        masterSpokeCellCount: masterPathCount,
+        get visibleSpokeCellCount() { return visibleSpokeCount; },
+        get ringCellCount() { return ringPathCount; },
+        get clippedSpokeCellCount() { return masterPathCount - visibleSpokeCount; },
+        masterMaskBuildCount: 1,
+        masterMaskHash: masterPathHash,
+        bufferCapacity: PATH_CAPACITY,
+        get reflowCount() { return pathReflows; }
+      }
+    };
     const inside = (ROOM.from + ROOM.to) / 2;
     const mouths = frames.map((f) => ({ id: f.id, clock: f.clock, angle: f.angle, x: f.x, z: f.z, ry: facing(f.axis), floorY: 0, inside: { x: f.x + f.ox * inside, z: f.z + f.oz * inside }, apron: { x: f.x - f.ox * 1.6, z: f.z - f.oz * 1.6 } }));
     const built = {
       geometry: gridGeometry(grid, { unit: UNIT, palette: PALETTE, origin: ORIGIN }),
+      path,
       heightAt,
       surfaceAt,
       isPath,
@@ -4249,46 +4726,67 @@ void main() {
   const STONE = ["#3a3734", "#2d2b28", "#45413d"];
   const CLIFF = ["#7d6f61", "#5e5449", "#877869"];
   const WOOD = "#8a6236", WOOD_DK = "#5c4425", PLANK = "#a9773f";
-  const CAVE_SIGN_WIDTH = 3.78, CAVE_SIGN_HEIGHT = 0.91;
-  const caveSign = cached(() => {
-    const glyphs = {
-      E: ["111", "100", "110", "100", "111"],
-      n: ["000", "110", "101", "101", "101"],
-      t: ["010", "111", "010", "010", "011"],
-      r: ["000", "110", "101", "100", "100"],
-      o: ["000", "111", "101", "101", "111"],
-      p: ["000", "110", "101", "110", "100"],
-      y: ["000", "101", "101", "011", "110"],
-      L: ["100", "100", "100", "100", "111"],
-      a: ["000", "010", "101", "111", "101"],
-      b: ["100", "100", "110", "101", "110"]
-    };
-    const text = "EntropyLab", cell = 0.075, pixel = 0.061;
-    const textW = (text.length * 3 + text.length - 1) * cell;
+  const CAVE_SIGN_WIDTH = 3.78, CAVE_SIGN_HEIGHT = 1.06;
+  const SIGN_GLYPHS = {
+    E: ["111", "100", "110", "100", "111"],
+    n: ["000", "110", "101", "101", "101"],
+    t: ["010", "111", "010", "010", "011"],
+    r: ["000", "110", "101", "100", "100"],
+    O: ["111", "101", "101", "101", "111"],
+    o: ["000", "111", "101", "101", "111"],
+    p: ["000", "110", "101", "110", "100", "100"],
+    y: ["000", "101", "101", "011", "001", "110"],
+    g: ["000", "111", "101", "111", "001", "110"],
+    q: ["000", "111", "101", "111", "001", "001"],
+    j: ["001", "000", "001", "001", "101", "010"],
+    B: ["110", "101", "110", "101", "110"],
+    L: ["100", "100", "100", "100", "111"],
+    a: ["000", "010", "101", "111", "101"],
+    b: ["100", "100", "110", "101", "110"],
+    d: ["001", "001", "011", "101", "011"]
+  };
+  const SIGN_CELL = 0.075, SIGN_PIXEL = 0.061, SIGN_PAD = 0.855;
+  const SIGN_CACHE = new Map();
+  const caveSign = (text = "EntropyLab") => {
+    const hit = SIGN_CACHE.get(text);
+    if (hit) return hit;
+    let cells = -1;
+    for (const ch of text) cells += ch === " " ? 2 : 4;
+    const textW = cells * SIGN_CELL;
+    const width = Math.max(CAVE_SIGN_WIDTH, textW + SIGN_PAD);
     const geos = [
-      box({ w: CAVE_SIGN_WIDTH, h: CAVE_SIGN_HEIGHT, d: 0.12, color: WOOD_DK }),
-      box({ w: CAVE_SIGN_WIDTH - 0.16, h: CAVE_SIGN_HEIGHT - 0.16, d: 0.04, color: WOOD, offset: { z: 0.08 } }),
-      box({ w: CAVE_SIGN_WIDTH - 0.2, h: 0.025, d: 0.025, color: "#7a5630", offset: { y: 0.14, z: 0.115 } }),
-      box({ w: CAVE_SIGN_WIDTH - 0.2, h: 0.025, d: 0.025, color: "#7a5630", offset: { y: -0.15, z: 0.115 } })
+      box({ w: width, h: CAVE_SIGN_HEIGHT, d: 0.12, color: WOOD_DK }),
+      box({ w: width - 0.16, h: CAVE_SIGN_HEIGHT - 0.16, d: 0.04, color: WOOD, offset: { z: 0.08 } }),
+      box({ w: width - 0.2, h: 0.025, d: 0.025, color: "#7a5630", offset: { y: 0.2, z: 0.115 } }),
+      box({ w: width - 0.2, h: 0.025, d: 0.025, color: "#7a5630", offset: { y: -0.22, z: 0.115 } })
     ];
     let cursor = -textW * 0.5;
     for (const ch of text) {
-      const glyph = glyphs[ch];
+      if (ch === " ") {
+        cursor += SIGN_CELL * 2;
+        continue;
+      }
+      const glyph = SIGN_GLYPHS[ch];
+      if (!glyph) throw new Error(`No cave-sign glyph for "${ch}"`);
       for (let row = 0; row < glyph.length; row++) {
         for (let col = 0; col < glyph[row].length; col++) {
           if (glyph[row][col] !== "1") continue;
-          geos.push(box({ w: pixel, h: pixel, d: 0.035, color: "#f3efe4", emissive: 0.2, offset: { x: cursor + col * cell + cell * 0.5, y: (2 - row) * cell, z: 0.125 } }));
+          geos.push(box({ w: SIGN_PIXEL, h: SIGN_PIXEL, d: 0.035, color: "#f3efe4", emissive: 0.2, offset: { x: cursor + col * SIGN_CELL + SIGN_CELL * 0.5, y: (2 - row) * SIGN_CELL, z: 0.125 } }));
         }
       }
-      cursor += cell * 4;
+      cursor += SIGN_CELL * 4;
     }
-    for (const x of [-CAVE_SIGN_WIDTH * 0.5 + 0.13, CAVE_SIGN_WIDTH * 0.5 - 0.13]) {
+    for (const x of [-width * 0.5 + 0.13, width * 0.5 - 0.13]) {
       for (const y of [-CAVE_SIGN_HEIGHT * 0.5 + 0.13, CAVE_SIGN_HEIGHT * 0.5 - 0.13]) {
         geos.push(box({ w: 0.07, h: 0.07, d: 0.035, color: "#3a2a18", offset: { x, y, z: 0.13 } }));
       }
     }
-    return merge(...geos);
-  });
+    const geo = merge(...geos);
+    geo.signWidth = width;
+    geo.signHeight = CAVE_SIGN_HEIGHT;
+    SIGN_CACHE.set(text, geo);
+    return geo;
+  };
   // Stone frame around a cave mouth
   const caveMouthRim = cached(() => {
     const rand = mulberry32(31);
@@ -4299,6 +4797,15 @@ void main() {
     v.fill(5, 5, 0, 5, 0, 1, stone);
     v.fill(-5, 4, 6, 6, 0, 1, light);
     return voxGeo(v, { unit: VOX, palette: CLIFF, origin: { x: 0, y: 0, z: -VOX } });
+  });
+  const mirrorPanel = cached(() => {
+    const geo = {
+      verts: [-2.5, -1.75, 0, 2.5, -1.75, 0, 2.5, 1.5, 0, -2.5, 1.5, 0],
+      faces: [{ i: [0, 1, 2, 3], color: hexToRgb("#81919c"), emissive: 0 }],
+      lines: [],
+      castShadow: false
+    };
+    return geo;
   });
   // Gateway arch over the pass, trail along z
   const gate = cached(() => {
@@ -4457,7 +4964,7 @@ void main() {
     box({ w: 4, h: 0.14, d: 0.16, color: WOOD_DK, offset: { x: 2, y: -0.17, z: 0.92 } }),
     ...[[0.5, -0.8], [0.5, 0.8], [3.5, -0.8], [3.5, 0.8]].map(([x, z]) => box({ w: 0.2, h: 2.2, d: 0.2, color: "#6b4a2b", offset: { x, y: -1.2, z } }))
   ));
-  BL.hubModels = { jetpack, jetFlame, caveMouthRim, caveSign, CAVE_SIGN_WIDTH, CAVE_SIGN_HEIGHT, gate, caveShelves, bedroll, tree, bush, rock, altarSlab, altarBlock, woodCrate, barrel, flowerTuft, torch, vine, cloud, ladder, dock, TREE_HEIGHT };
+  BL.hubModels = { jetpack, jetFlame, caveMouthRim, mirrorPanel, caveSign, CAVE_SIGN_WIDTH, CAVE_SIGN_HEIGHT, gate, caveShelves, bedroll, tree, bush, rock, altarSlab, altarBlock, woodCrate, barrel, flowerTuft, torch, vine, cloud, ladder, dock, TREE_HEIGHT };
 })();
 
 // ---- js/caves.js ----
@@ -4471,7 +4978,7 @@ void main() {
     slot("c11", 11, "lab", "open", "EntropyLab"),
     slot("c9", 9),
     slot("c730", 7.5, null, "sleeping"),
-    slot("c1", 1),
+    slot("c1", 1, null, "mirror", "Ooga Booga Land"),
     slot("c2", 2),
     slot("c3", 3),
     slot("c5", 5, null, "sleeping")
@@ -4511,7 +5018,7 @@ void main() {
   // Opt-in likeness overrides per handle
   const LIKENESS = {
     portlandhodl: { bald: true },
-    "w-s-bitcoin": { apple: true },
+    "w-s-bitcoin": { apple: true, symmetricTusks: true },
     MrHodlX: { gasMask: true },
     dplusplus1024: { build: "slim", hair: "#b9dcaa" }
   };
@@ -4531,6 +5038,7 @@ void main() {
       bald: !!likeness.bald,
       apple: !!likeness.apple,
       gasMask: !!likeness.gasMask,
+      symmetricTusks: !!likeness.symmetricTusks,
       skin,
       hair: likeness.hair || hashedHair,
       fur: FURS[Math.floor(rand() * FURS.length)],
@@ -6648,28 +7156,33 @@ void main() {
   const DROP_HEIGHT = 4.3;
   const BANANA_DROP_HEIGHT = (BL.terrain.MAX_HEIGHT + BL.hubModels.TREE_HEIGHT) * 2;
   const BANANA_SCALE = models.BANANA_AMMO_SCALE;
-  const VISIBLE_BANANAS = 300;
+  const DISK_BANANAS = 302;
   const MAX_BANANAS = 10000000;
   const BASE_HEIGHT = 0.48;
+  // Extra height plus the fuller profile represents air between loosely settled fruit
+  // without widening the pile into the bounded outer meadow at very large levels.
+  const PACKING_HEIGHT = 1.2;
   const SHELL_EDGE = 0.28;
   const CORE_FACE_SIZE = 0.16;
   const GOLDEN_ANGLE = Math.PI * (3 - Math.sqrt(5));
-  // Shell bananas lie flat and overlap their neighbours, so the mound under them never shows
+  // The large-pile shell keeps its established layered spacing and orientation.
   const BANANA_LENGTH_SPACE = 0.3;
   const BANANA_ROW_SPACE = 0.1;
   const BANANA_YAW_SPREAD = 0.5;
   const BANANA_UNDERLAYER_SINK = 0.03;
   const BANANA_SURFACE_CLEARANCE = 0.008;
   const PLATFORM_CLEARANCE = 0.004;
+  const SURFACE_OUTER_RADIUS = 1;
   const DROP_POOL_SIZE = 96;
   const DROP_RATE = 72;
   const MAX_WEBGL_TILES = 65536;
   const MAX_CANVAS_TILES = 512;
-  const footprintFor = (count, scale = 0.45) => scale * (count > VISIBLE_BANANAS ? Math.cbrt(count / VISIBLE_BANANAS) : 1);
+  const footprintFor = (count, scale = 0.45) => scale * (count > DISK_BANANAS ? Math.cbrt(count / DISK_BANANAS) : 1);
   const visualFootprintFor = (count, scale = 0.45) => {
-    const mix = Math.min(1, Math.max(0, (count - VISIBLE_BANANAS) / VISIBLE_BANANAS));
+    const mix = Math.min(1, Math.max(0, (count - DISK_BANANAS) / DISK_BANANAS));
     return footprintFor(count, scale) + BANANA_SCALE * SHELL_EDGE * mix;
   };
+  const heightGrowthFor = (count) => footprintFor(count, 1) * PACKING_HEIGHT;
   const setVec = (v, x, y, z) => {
     v.x = x;
     v.y = y;
@@ -6696,7 +7209,7 @@ void main() {
     const { root, world, pileScale: SCALE = 0.45, pileY: BASE_Y = 0.02 } = ctx;
     const pileSlots = [];
     const coreFaceSize = ctx.renderer.kind === "canvas2d" ? CORE_FACE_SIZE * 1.75 : CORE_FACE_SIZE;
-    // A dark mound under the shell: it only ever shows as the shadow between bananas, so one geometry scales to every level
+    // A yellow-paneled mound under the shell uses one geometry scaled to every level.
     const core = createNode({ geometry: models.bananaPileCoreGeometry(SCALE * 6, BASE_HEIGHT * 6, coreFaceSize), visible: false });
     const bananaGeometry = models.bananaGeometry();
     const shellGeometry = models.bananaTileGeometry();
@@ -6739,46 +7252,22 @@ void main() {
     };
     addChild(root, core, shell);
     {
-      // Rain bananas into the lowest of several supported spots for an irregular heap
-      const STORY_H = 0.32 * BANANA_SCALE;
-      const SUPPORT_R = 0.05;
-      const TRIES = 3;
-      const CHAOS_CHANCE = 0.15;
-      const rand = mulberry32(2);
       const surfaceRand = mulberry32(0x51face);
       const bases = [];
-      for (let i = 0; i < VISIBLE_BANANAS; i++) {
-        let first = null, best = null, bestScore = Infinity;
-        for (let tryIndex = 0; tryIndex < TRIES; tryIndex++) {
-          const angle = rand() * Math.PI * 2;
-          const radius = Math.pow(rand(), 0.7) * SCALE;
-          const x = Math.cos(angle) * radius;
-          const z = Math.sin(angle) * radius;
-          let y = BASE_Y;
-          for (let j = 0; j < bases.length; j++) {
-            const p = bases[j].pos;
-            if (Math.hypot(x - p.x, z - p.z) < SUPPORT_R) y = Math.max(y, p.y + STORY_H);
-          }
-          const candidate = { pos: { x, y, z }, rot: null };
-          if (!first) first = candidate;
-          const score = y + rand() * STORY_H * 0.5;
-          if (score < bestScore) {
-            bestScore = score;
-            best = candidate;
-          }
-        }
-        const base = rand() < CHAOS_CHANCE ? first : best;
-        base.rot = { x: (rand() - 0.5) * 0.7, y: rand() * Math.PI * 2, z: (rand() - 0.5) * 0.55 };
-        keepAbovePlatform(base.pos, base.rot, BANANA_SCALE, bananaGeometry);
+      for (let i = 0; i < DISK_BANANAS; i++) {
+        const base = {
+          pos: { x: 0, y: BASE_Y, z: 0 },
+          rot: { x: -Math.PI * 0.5, y: 0, z: 0 }
+        };
         bases.push(base);
       }
       for (let i = 0; i < bases.length; i++) {
         const base = bases[i];
-        // A golden-angle disk gives the fixed visual pool an even, gap-resistant shell.
-        const surfaceRadius = Math.sqrt((i + 0.5) / VISIBLE_BANANAS) * 0.985;
+        // The same bounded pool becomes deterministic shell reference points at 303.
+        const surfaceRadius = Math.sqrt((i + 0.5) / DISK_BANANAS) * 0.985;
         const surfaceAngle = i * GOLDEN_ANGLE + (surfaceRand() - 0.5) * 0.08;
         const profile = domeSurface(surfaceRadius, surfaceSample);
-        const radialNormal = -profile.slope * BASE_HEIGHT / SCALE;
+        const radialNormal = -profile.slope * BASE_HEIGHT * PACKING_HEIGHT / SCALE;
         const normalLength = Math.hypot(radialNormal, 1);
         const nx = Math.cos(surfaceAngle) * radialNormal / normalLength;
         const ny = 1 / normalLength;
@@ -6884,13 +7373,11 @@ void main() {
       data[offset + 18] = 0;
       data[offset + 19] = 0;
     };
-    // Bands of overlapping bananas from the rim to within a row of the apex, with a sunken second layer
-    // between the bands filling the gaps. The layout depends only on the tile count, so a level change relays
-    // the shell only when that count changes; spacing widens only if the budget would overflow, which
-    // the cap keeps off WebGL. Bands count from the rim and bananas step around each band at a fixed
-    // arc, so growth adds bananas at the end of a band and at the apex instead of respacing the rest.
+    // Preserve the established layered shell: bands run from rim to apex, with a
+    // slightly sunken second layer filling gaps while keeping visible 3D depth.
     const rebuildSurface = (target, growth, coreFootprint) => {
-      if (target <= VISIBLE_BANANAS) {
+      const building = target <= DISK_BANANAS;
+      if (!target) {
         shell.visible = false;
         shell.instanceCount = 0;
         shellWanted = 0;
@@ -6900,17 +7387,18 @@ void main() {
       const rowStep = (normalizedRadius, spacing) => BANANA_ROW_SPACE * spacing / (coreFootprint * Math.hypot(1, domeSurface(normalizedRadius, surfaceSample).slope * radialScale));
       const bandCountAt = (normalizedRadius, spacing) => Math.max(1, Math.floor(Math.PI * 2 * normalizedRadius * coreFootprint / (BANANA_LENGTH_SPACE * spacing)));
       const stepAt = (normalizedRadius, spacing) => Math.min(Math.PI * 2, BANANA_LENGTH_SPACE * spacing / (normalizedRadius * coreFootprint));
-      // The sunken layer runs one banana longer when the arc's remainder leaves room for it
       const extraAt = (normalizedRadius, spacing) => Math.PI * 2 - bandCountAt(normalizedRadius, spacing) * stepAt(normalizedRadius, spacing) > stepAt(normalizedRadius, spacing) * 0.5 ? 1 : 0;
-      let spacing = 1, wanted;
+      let spacing = 1, fullWanted;
       for (;;) {
-        // The rim band lies on the mound's near-vertical foot with the next band right behind it, so it has no sunken layer
-        wanted = bandCountAt(0.995, spacing);
-        for (let normalizedRadius = 0.995 - rowStep(0.995, spacing); normalizedRadius > 0; normalizedRadius -= rowStep(normalizedRadius, spacing)) wanted += bandCountAt(normalizedRadius, spacing) * 2 + extraAt(normalizedRadius, spacing);
-        if (wanted <= maxTiles) break;
-        spacing *= Math.sqrt(wanted / maxTiles) * 1.02;
+        // The platform-contact ring never inherits adaptive shell thinning. Its
+        // complete circumference is the visual seal over the core's foot.
+        fullWanted = bandCountAt(SURFACE_OUTER_RADIUS, 1);
+        for (let normalizedRadius = SURFACE_OUTER_RADIUS - rowStep(SURFACE_OUTER_RADIUS, spacing); normalizedRadius > 0; normalizedRadius -= rowStep(normalizedRadius, spacing)) fullWanted += bandCountAt(normalizedRadius, spacing) * 2 + extraAt(normalizedRadius, spacing);
+        if (fullWanted <= maxTiles) break;
+        spacing *= Math.sqrt(fullWanted / maxTiles) * 1.02;
       }
-      if (wanted === shellWanted) return;
+      const wanted = building ? Math.min(target, fullWanted) : fullWanted;
+      if (!building && wanted === shellWanted) return;
       shellWanted = wanted;
       const need = wanted * 20;
       if (shell.instanceData.length < need) {
@@ -6919,20 +7407,32 @@ void main() {
         shell.instanceData = new Float32Array(Math.min(maxTiles * 20, capacity));
       }
       const data = shell.instanceData;
-      let instance = 0, band = 0;
-      for (let normalizedRadius = 0.995; normalizedRadius > 0; normalizedRadius -= rowStep(normalizedRadius, spacing), band++) {
-        const bandCount = bandCountAt(normalizedRadius, spacing);
-        const phase = (band * GOLDEN_ANGLE) % (Math.PI * 2);
-        const step = stepAt(normalizedRadius, spacing);
+      let instance = 0, candidate = 0, band = 0;
+      const all = wanted === fullWanted;
+      // Start at the true foot of the profile. An inset that is imperceptible on a
+      // small pile scales into an exposed skirt at million-banana sizes.
+      for (let normalizedRadius = SURFACE_OUTER_RADIUS; normalizedRadius > 0; normalizedRadius -= rowStep(normalizedRadius, spacing), band++) {
         const edgeBand = band === 0;
-        const last = bandCount - 1 + (edgeBand ? 0 : extraAt(normalizedRadius, spacing));
-        const underRadius = Math.max(0, normalizedRadius - rowStep(normalizedRadius, spacing) * 0.5);
+        const bandSpacing = edgeBand ? 1 : spacing;
+        const bandCount = bandCountAt(normalizedRadius, bandSpacing);
+        const phase = (band * GOLDEN_ANGLE) % (Math.PI * 2);
+        // Close the contact ring with equal angular spacing; carrying the ordinary
+        // row remainder into its final gap can expose the backing at large radii.
+        const step = edgeBand ? Math.PI * 2 / bandCount : stepAt(normalizedRadius, bandSpacing);
+        const last = bandCount - 1 + (edgeBand ? 0 : extraAt(normalizedRadius, bandSpacing));
+        const underRadius = Math.max(0, normalizedRadius - rowStep(normalizedRadius, bandSpacing) * 0.5);
         for (let j = 0; j <= last; j++) {
           const seed = band * 7919 + j + 1;
           const jitter = Math.sin(seed * 12.9898) * 0.015 / Math.max(0.05, normalizedRadius * coreFootprint);
           const angle = phase + j * step + jitter;
-          if (j < bandCount) writeTile(data, instance++, seed, angle, normalizedRadius, Math.sin(seed * 7.133) * (edgeBand ? 0.18 : BANANA_YAW_SPREAD), 0, growth, coreFootprint, radialScale, edgeBand);
-          if (!edgeBand) writeTile(data, instance++, -seed, angle + step * 0.5, underRadius, Math.sin(seed * 9.271) * BANANA_YAW_SPREAD, BANANA_UNDERLAYER_SINK, growth, coreFootprint, radialScale, false);
+          if (j < bandCount) {
+            if (instance < wanted && (all || candidate === Math.floor((instance + 0.5) * fullWanted / wanted))) writeTile(data, instance++, seed, angle, normalizedRadius, Math.sin(seed * 7.133) * (edgeBand ? 0.18 : BANANA_YAW_SPREAD), 0, growth, coreFootprint, radialScale, edgeBand);
+            candidate++;
+          }
+          if (!edgeBand) {
+            if (instance < wanted && (all || candidate === Math.floor((instance + 0.5) * fullWanted / wanted))) writeTile(data, instance++, -seed, angle + step * 0.5, underRadius, Math.sin(seed * 9.271) * BANANA_YAW_SPREAD, BANANA_UNDERLAYER_SINK, growth, coreFootprint, radialScale, false);
+            candidate++;
+          }
         }
       }
       shell.instanceCount = instance;
@@ -6942,35 +7442,30 @@ void main() {
     const reflow = (target) => {
       if (target === layoutCount) return;
       layoutCount = target;
-      const growth = footprintFor(target, 1);
+      const growth = target <= DISK_BANANAS ? PACKING_HEIGHT * target / DISK_BANANAS : heightGrowthFor(target);
       const coreFootprint = footprintFor(target, SCALE);
       footprint = visualFootprintFor(target, SCALE);
-      core.visible = target > VISIBLE_BANANAS;
+      core.visible = target > 0;
       core.position.y = BASE_Y;
       setVec(core.scale, coreFootprint, BASE_HEIGHT * growth, coreFootprint);
       rebuildSurface(target, growth, coreFootprint);
       if (ctx.onLayout) ctx.onLayout(footprint, target);
       for (let i = 0; i < pileSlots.length; i++) {
-        const slot = pileSlots[i], small = slot.small, surface = slot.surface;
+        const slot = pileSlots[i], surface = slot.surface;
         const lift = BANANA_SCALE * 0.07;
         slot.restScale = BANANA_SCALE;
-        if (target > VISIBLE_BANANAS) {
-          setVec(slot.base.pos,
-            surface.x * coreFootprint + surface.nx * lift,
-            BASE_Y + surface.y * BASE_HEIGHT * growth + surface.ny * lift,
-            surface.z * coreFootprint + surface.nz * lift);
-          Object.assign(slot.base.rot, surface.rot);
-        } else {
-          Object.assign(slot.base.pos, small.pos);
-          Object.assign(slot.base.rot, small.rot);
-        }
+        setVec(slot.base.pos,
+          surface.x * coreFootprint + surface.nx * lift,
+          BASE_Y + surface.y * BASE_HEIGHT * growth + surface.ny * lift,
+          surface.z * coreFootprint + surface.nz * lift);
+        Object.assign(slot.base.rot, surface.rot);
         keepAbovePlatform(slot.base.pos, slot.base.rot, slot.restScale, bananaGeometry);
         if (slot.node.visible && !slot.moving) restSlot(slot);
       }
     };
     const chooseLanding = (slot) => {
       const landing = slot.landing;
-      if (counted <= VISIBLE_BANANAS) {
+      if (counted <= DISK_BANANAS) {
         const base = pileSlots[Math.floor(Math.random() * Math.max(1, counted))].base;
         Object.assign(landing.pos, base.pos);
         Object.assign(landing.rot, base.rot);
@@ -6986,7 +7481,7 @@ void main() {
       } while (normalizedRadius > 0.96);
       const angle = Math.atan2(z, x);
       const cos = Math.cos(angle), sin = Math.sin(angle);
-      const growth = footprintFor(counted, 1);
+      const growth = heightGrowthFor(counted);
       const coreFootprint = footprintFor(counted, SCALE);
       const profile = domeSurface(normalizedRadius, surfaceSample);
       const radialNormal = -profile.slope * BASE_HEIGHT * growth / coreFootprint;
@@ -7072,7 +7567,7 @@ void main() {
       const target = Math.max(0, Math.floor(world.level));
       const additions = Math.max(0, target - counted);
       reflow(target);
-      const targetShown = target <= VISIBLE_BANANAS ? target : 0;
+      const targetShown = 0;
       while (shown > targetShown) {
         shown--;
         const slot = pileSlots[shown];
@@ -7132,7 +7627,7 @@ void main() {
       shown = 0;
       counted = 0;
     };
-    const stats = () => ({ slots: pileSlots.length, shown: counted, rendered: counted > VISIBLE_BANANAS ? shell.instanceCount : shown, deliveries, pendingDrops, dropsStarted, dropsLanded, dropPool: dropSlots.length, dropRate: DROP_RATE });
+    const stats = () => ({ slots: pileSlots.length, shown: counted, rendered: shell.instanceCount, deliveries, pendingDrops, dropsStarted, dropsLanded, dropPool: dropSlots.length, dropRate: DROP_RATE });
     const setLevel = (level) => {
       clearDrops();
       world.level = Math.max(0, Math.min(MAX_BANANAS, Number(level) || 0));
@@ -7144,7 +7639,7 @@ void main() {
         return counted;
       },
       get rendered() {
-        return counted > VISIBLE_BANANAS ? shell.instanceCount : shown;
+        return shell.instanceCount;
       },
       get footprintEdge() {
         return footprint;
@@ -7157,7 +7652,7 @@ void main() {
       }
     };
   };
-  BL.pile = { create, DROP_HEIGHT, BANANA_DROP_HEIGHT, DROP_POOL_SIZE, DROP_RATE, MAX_BANANAS, footprintFor, visualFootprintFor, MAX_WEBGL_TILES, MAX_CANVAS_TILES };
+  BL.pile = { create, DROP_HEIGHT, BANANA_DROP_HEIGHT, DROP_POOL_SIZE, DROP_RATE, MAX_BANANAS, DISK_BANANAS, PACKING_HEIGHT, footprintFor, visualFootprintFor, MAX_WEBGL_TILES, MAX_CANVAS_TILES };
 })();
 
 // ---- js/crates.js ----
@@ -7319,6 +7814,8 @@ void main() {
   // Props the jetpack may hide under
   const JETPACK_HIDERS = ["bush", "rock", "crate", "barrel", "flower"];
   const JETPACK_HOVER = 0.4, JETPACK_REACH = 1.3;
+  const JETPACK_APPROACH = [1.8, 1.6, 2];
+  const JETPACK_SAFE = { x: 0, z: 0 };
   // Pulse the hiding prop when the hunt stalls
   const HINT_AFTER = 120, HINT_EVERY = 12, HINT_PULSE = 1.6, HINT_MAX = 0.9;
   // Reach at which a caveman is inside a cave
@@ -7333,11 +7830,9 @@ void main() {
   const BEDROLL_DEGREES = [100, 195, 252, 300, 345];
   const BEDROLL_RADIUS = 14, BEDROLL_INNER = 10;
   const NUDGES = [0, -2, 2, -4, 4, -6, 6, -8, 8];
-  const VINES = ["c9", "c1", "c5"];
+  const VINES = ["c9", "c5"];
   const PILE_SCALE = 0.45;
-  // Props keep clear of the pile up to this level; beyond it the mound grows over the meadow
-  const PILE_CLEAR_LEVEL = 1000000;
-  const PILE_CLEAR_RADIUS = pileMod.visualFootprintFor(PILE_CLEAR_LEVEL, PILE_SCALE) + 0.5;
+  const SCENERY_CLEARANCE = 0.25;
   const MEADOW_INNER = 5, MEADOW_OUTER = MEADOW - 1.5, CLIFF_INNER = MEADOW + 1.5, CLIFF_OUTER = RADIUS - 1;
   const DOCK_DEG = 105, LADDER_Z = -3.6, LADDER_LEAN = 0.65;
   const CLOUD_COUNT = 30, CLOUD_WRAP = 60, CLOUD_NEAR = 36;
@@ -7369,7 +7864,7 @@ void main() {
   };
 
   // One visit's state, made in enter and dropped in leave
-  let renderer, game, world, go, lootEnabled, testBananas, root, camera, island, altar, hud, hooks, input, pilot, fx, pile, crew, crates, presets, entering, stash, jetpack;
+  let renderer, game, world, go, lootEnabled, testBananas, root, camera, island, pathNode, altar, hud, hooks, input, pilot, fx, pile, crew, crates, presets, entering, stash, jetpack, mirrorCave;
   let hintAt = HINT_AFTER;
   let stateTimer = 0, hintTimer = 0, meterTimer = 0, pileEdgeNow = 0, now = 0;
   const placed = [];
@@ -7382,6 +7877,9 @@ void main() {
   const spots = [];
   const openMouths = [];
   const props = [];
+  const scenery = [];
+  const sceneryClaims = [];
+  let sceneryVisible = 0, sceneryRadiusCulled = 0, sceneryPathCulled = 0, sceneryFixedCulled = 0, sceneryReflows = 0;
   const addTarget = (node, owner, opts) => {
     input.add(node, owner, opts);
     targets.push(node);
@@ -7399,7 +7897,7 @@ void main() {
   // ---------- island ----------
   // A prop with a kind answers taps and Space
   const addProp = (kind, node, x, z, radius) => {
-    const owner = { kind: "prop", prop: kind, node, x, z, ripe: 0 };
+    const owner = { kind: "prop", prop: kind, node, x, z, ripe: 0, pickRadius: radius, active: true };
     addTarget(node, owner, { radius });
     props.push(owner);
     return owner;
@@ -7411,7 +7909,11 @@ void main() {
     if (kind) addProp(kind, node, x, z, radius);
     return node;
   };
-  const claim = (x, z, r) => claimed.push({ x, z, r });
+  const claim = (x, z, r) => {
+    const value = { x, z, r, scenery: null };
+    claimed.push(value);
+    return value;
+  };
   const free = (x, z, r) => {
     for (const c of claimed) if (Math.hypot(c.x - x, c.z - z) < c.r + r) return false;
     return true;
@@ -7451,9 +7953,20 @@ void main() {
         claim(tx, tz, 0.5);
         addProp("torch", torch, tx, tz, 0.7);
       }
-      const sign = createNode({ position: { x: 0, y: 4.5, z: 0.52 }, geometry: hubModels.caveSign() });
+    } else if (slot.status === "mirror") {
+      // Sit inside the rim so the cave floor ends behind the reflection.
+      const node = createNode({ position: { x: 0, y: 1.5, z: 0.5 }, geometry: hubModels.mirrorPanel(), mirror: true });
+      addChild(group, node);
+      mirrorCave = { slot, mouth: m, group, rim, node, sign: null };
+    } else if (slot.status === "sleeping") {
+      // Bedrolls lie along +x, as the sleep pose assumes
+      addChild(group, createNode({ position: { x: 0, y: 0.05, z: -4.5 }, rotation: { x: 0, y: -m.ry, z: 0 }, geometry: hubModels.bedroll(), depthBias: 0.3 }));
+      sleepers.push({ x: m.x + ax * 0.8, y: 4.4, z: m.z + az * 0.8, timer: sleepers.length * 0.7 });
+    }
+    if (slot.status === "open" || slot.status === "mirror") {
+      const sign = createNode({ position: { x: 0, y: 4.5, z: 0.52 }, geometry: hubModels.caveSign(slot.name) });
       addChild(group, sign);
-      const halfW = hubModels.CAVE_SIGN_WIDTH * 0.5, halfH = hubModels.CAVE_SIGN_HEIGHT * 0.5;
+      const halfW = sign.geometry.signWidth * 0.5, halfH = sign.geometry.signHeight * 0.5;
       const x = m.x + ax * sign.position.z, y = m.floorY + sign.position.y, z = m.z + az * sign.position.z;
       const tx = Math.cos(m.ry), tz = -Math.sin(m.ry);
       labels.push({
@@ -7465,10 +7978,7 @@ void main() {
           { x: x - tx * halfW, y: y - halfH, z: z - tz * halfW }
         ]
       });
-    } else if (slot.status === "sleeping") {
-      // Bedrolls lie along +x, as the sleep pose assumes
-      addChild(group, createNode({ position: { x: 0, y: 0.05, z: -4.5 }, rotation: { x: 0, y: -m.ry, z: 0 }, geometry: hubModels.bedroll(), depthBias: 0.3 }));
-      sleepers.push({ x: m.x + ax * 0.8, y: 4.4, z: m.z + az * 0.8, timer: sleepers.length * 0.7 });
+      if (mirrorCave && mirrorCave.slot === slot) mirrorCave.sign = sign;
     }
     if (VINES.includes(slot.id)) for (const x of [-1.1, 1.1]) addChild(group, createNode({ position: { x, y: 3.45, z: 0.95 }, geometry: hubModels.vine() }));
     addChild(root, group);
@@ -7495,12 +8005,29 @@ void main() {
   // Scatter props by rejection, keeping off paths and mouths
   const scatter = () => {
     const rand = mulberry32(SEED);
+    const candidateFree = (x, z, radius) => {
+      for (let i = 0; i < sceneryClaims.length; i++) {
+        const c = sceneryClaims[i];
+        if (Math.hypot(c.x - x, c.z - z) < c.r + radius) return false;
+      }
+      return true;
+    };
+    const addScenery = (geometry, x, z, ry, y, kind, footprint) => {
+      const reservation = claim(x, z, footprint);
+      sceneryClaims.push(reservation);
+      const node = place(geometry, x, z, ry, y, kind, footprint + 0.3);
+      const owner = props[props.length - 1];
+      owner.footprint = footprint;
+      owner.scenery = true;
+      reservation.scenery = owner;
+      scenery.push(owner);
+      return node;
+    };
     const meadow = (count, radius, kind, geometryAt, square = false) => {
       for (let n = 0, tries = 0; n < count && tries < 1500; tries++) {
         const { x, z } = polar(rand() * 360, Math.sqrt(lerp(MEADOW_INNER * MEADOW_INNER, MEADOW_OUTER * MEADOW_OUTER, rand())));
-        if (island.heightAt(x, z) > 0 || nearPath(x, z, 1.2) || nearMouth(x, z, 3.5) || !free(x, z, radius)) continue;
-        claim(x, z, radius);
-        place(geometryAt(n), x, z, square ? Math.floor(rand() * 4) * Math.PI / 2 + (rand() - 0.5) * 0.4 : rand() * Math.PI * 2, 0, kind, radius + 0.3);
+        if (island.heightAt(x, z) > 0 || nearMouth(x, z, 3.5) || !candidateFree(x, z, radius)) continue;
+        addScenery(geometryAt(n), x, z, square ? Math.floor(rand() * 4) * Math.PI / 2 + (rand() - 0.5) * 0.4 : rand() * Math.PI * 2, 0, kind, radius);
         n++;
       }
     };
@@ -7514,9 +8041,8 @@ void main() {
           const a = (i + 0.5) * Math.PI / 2;
           if (island.heightAt(x + Math.cos(a) * 1.2, z + Math.sin(a) * 1.2) > h + 1.5) clear = false;
         }
-        if (!clear) continue;
-        claim(x, z, radius);
-        place(geometryAt(n), x, z, rand() * Math.PI * 2, h, kind, radius + 0.3);
+        if (!clear || nearMouth(x, z, 4) || !candidateFree(x, z, radius)) continue;
+        addScenery(geometryAt(n), x, z, rand() * Math.PI * 2, h, kind, radius);
         n++;
       }
     };
@@ -7524,33 +8050,119 @@ void main() {
     cliff(60, 1, 0.5, "bush", () => hubModels.bush());
     meadow(60, 0.7, "bush", () => hubModels.bush());
     meadow(8, 0.9, "rock", () => hubModels.rock(0));
-    if (lootEnabled) meadow(10, 0.7, "crate", () => hubModels.woodCrate(), true);
+    meadow(10, 0.7, "crate", () => hubModels.woodCrate(), true);
     meadow(8, 0.6, "barrel", () => hubModels.barrel());
     meadow(50, 0.35, "flower", () => hubModels.flowerTuft());
   };
-  // Hide the island's one jetpack under a prop
-  const hideJetpack = () => {
-    const approachable = (o) => {
-      for (const radius of [1.8, 1.6, 2]) {
-        for (let i = 0; i < 12; i++) {
-          const angle = i / 12 * Math.PI * 2;
-          const x = o.x + Math.cos(angle) * radius, z = o.z + Math.sin(angle) * radius;
-          if (!island.onLand(x, z)) continue;
-          let nearest = true;
-          for (const other of props) {
-            if (other !== o && Math.hypot(other.x - x, other.z - z) < radius) {
-              nearest = false;
-              break;
-            }
+  const sceneryReason = (o) => {
+    const clearance = island.path.debug.ringOuterRadius + SCENERY_CLEARANCE;
+    if (Math.hypot(o.x, o.z) - o.footprint < clearance - 1e-9) return 1;
+    if (island.path.overlaps(o.x, o.z, o.footprint)) return 2;
+    for (let i = 0; i < claimed.length; i++) {
+      const c = claimed[i];
+      if (!c.scenery && Math.hypot(c.x - o.x, c.z - o.z) < c.r + o.footprint) return 3;
+    }
+    return 0;
+  };
+  const setSceneryActive = (o, active) => {
+    if (o.active === active) return;
+    o.active = active;
+    o.node.visible = active;
+    if (active) input.add(o.node, o, { radius: o.pickRadius });
+    else input.remove(o.node);
+  };
+  const reflowScenery = () => {
+    if (!scenery.length) return;
+    let visible = 0, radiusCulled = 0, pathCulled = 0, fixedCulled = 0;
+    for (let i = 0; i < scenery.length; i++) {
+      const o = scenery[i], reason = sceneryReason(o);
+      setSceneryActive(o, reason === 0);
+      if (!reason) visible++;
+      else if (reason === 1) radiusCulled++;
+      else if (reason === 2) pathCulled++;
+      else fixedCulled++;
+    }
+    sceneryVisible = visible;
+    sceneryRadiusCulled = radiusCulled;
+    sceneryPathCulled = pathCulled;
+    sceneryFixedCulled = fixedCulled;
+    sceneryReflows++;
+    if (stash && !stash.active) rehomeJetpack(stash);
+    if (jetpack && (Math.hypot(jetpack.x, jetpack.z) - 1 < island.path.debug.ringOuterRadius + SCENERY_CLEARANCE || island.path.overlaps(jetpack.x, jetpack.z, 1))) moveJetpackSafe();
+  };
+  // Hide the island's one jetpack under a visible, approachable scenery prop.
+  const approachableHider = (o) => {
+    for (let r = 0; r < JETPACK_APPROACH.length; r++) {
+      const radius = JETPACK_APPROACH[r];
+      for (let i = 0; i < 12; i++) {
+        const angle = i / 12 * Math.PI * 2;
+        const x = o.x + Math.cos(angle) * radius, z = o.z + Math.sin(angle) * radius;
+        if (!island.onLand(x, z)) continue;
+        let nearest = true;
+        for (let j = 0; j < props.length; j++) {
+          const other = props[j];
+          if (other !== o && other.active && Math.hypot(other.x - x, other.z - z) < radius) {
+            nearest = false;
+            break;
           }
-          if (nearest) return true;
         }
+        if (nearest) return true;
       }
-      return false;
-    };
-    const hiders = props.filter((o) => JETPACK_HIDERS.includes(o.prop) && island.heightAt(o.x, o.z) === 0 && approachable(o));
+    }
+    return false;
+  };
+  const eligibleHider = (o) => o.active && JETPACK_HIDERS.includes(o.prop) && island.heightAt(o.x, o.z) === 0 && approachableHider(o);
+  const hideJetpack = () => {
+    const hiders = scenery.filter(eligibleHider);
     stash = hiders.length ? hiders[Math.floor(Math.random() * hiders.length)] : null;
     hintAt = HINT_AFTER;
+  };
+  const safeJetpackSpot = () => {
+    const firstRadius = Math.max(MEADOW_INNER, island.path.debug.ringOuterRadius + SCENERY_CLEARANCE + 1);
+    for (let radius = firstRadius; radius <= MEADOW_OUTER; radius += 0.5) {
+      for (let i = 0; i < 64; i++) {
+        const angle = (i * 137.5 + SEED * 17) * DEG;
+        const x = Math.sin(angle) * radius, z = -Math.cos(angle) * radius;
+        if (!island.onLand(x, z) || island.heightAt(x, z) !== 0 || island.path.overlaps(x, z, 1)) continue;
+        let clear = true;
+        for (let j = 0; j < claimed.length && clear; j++) {
+          const c = claimed[j];
+          if (!c.scenery && Math.hypot(c.x - x, c.z - z) < c.r + 1) clear = false;
+        }
+        for (let j = 0; j < scenery.length && clear; j++) {
+          const o = scenery[j];
+          if (o.active && Math.hypot(o.x - x, o.z - z) < o.footprint + 1) clear = false;
+        }
+        if (!clear) continue;
+        JETPACK_SAFE.x = x;
+        JETPACK_SAFE.z = z;
+        return true;
+      }
+    }
+    return false;
+  };
+  const moveJetpackSafe = () => {
+    if (!safeJetpackSpot()) throw new Error("No safe meadow location for the jetpack");
+    jetpack.x = jetpack.owner.x = jetpack.node.position.x = JETPACK_SAFE.x;
+    jetpack.z = jetpack.owner.z = jetpack.node.position.z = JETPACK_SAFE.z;
+  };
+  const revealJetpackSafe = () => {
+    if (!safeJetpackSpot()) throw new Error("No safe meadow location for the jetpack");
+    const node = place(hubModels.jetpack(), JETPACK_SAFE.x, JETPACK_SAFE.z, 0, JETPACK_HOVER, "jetpack", 1);
+    jetpack = { node, x: JETPACK_SAFE.x, z: JETPACK_SAFE.z, owner: props[props.length - 1] };
+  };
+  const rehomeJetpack = (old) => {
+    old.node.highlight = 0;
+    const start = scenery.indexOf(old);
+    stash = null;
+    for (let offset = 1; offset <= scenery.length; offset++) {
+      const candidate = scenery[(start + offset) % scenery.length];
+      if (!eligibleHider(candidate)) continue;
+      stash = candidate;
+      hintAt = now + HINT_AFTER;
+      return;
+    }
+    revealJetpackSafe();
   };
   const dropJetpack = (o) => {
     o.node.highlight = 0;
@@ -7565,6 +8177,15 @@ void main() {
     const i = list.indexOf(value);
     if (i >= 0) list.splice(i, 1);
   };
+  const equipJetpack = (cave) => {
+    if (!crew.wearJetpack(cave, hubModels.jetpack(), hubModels.jetFlame())) return;
+    pilot.showAct();
+    const p = cave.root.position;
+    fx.burst(p.x, p.y + 0.7, p.z, 14, [SPARK, DUST], 2.2);
+    fx.say(cave, "OOGA FLY!", 2);
+    hud.toast("Jetpack!");
+    hud.hint(COARSE ? "Hold Blast off to climb · stick to fly" : "Hold Space to climb · WASD to fly", 5000);
+  };
   const collectJetpack = (cave) => {
     const { node, owner } = jetpack;
     input.remove(node);
@@ -7573,13 +8194,7 @@ void main() {
     drop(placed, node);
     drop(props, owner);
     jetpack = null;
-    crew.wearJetpack(cave, hubModels.jetpack(), hubModels.jetFlame());
-    pilot.showAct();
-    const p = cave.root.position;
-    fx.burst(p.x, p.y + 0.7, p.z, 14, [SPARK, DUST], 2.2);
-    fx.say(cave, "OOGA FLY!", 2);
-    hud.toast("Jetpack!");
-    hud.hint(COARSE ? "Hold Blast off to climb · stick to fly" : "Hold Space to climb · WASD to fly", 5000);
+    equipJetpack(cave);
   };
   // Spots the crew strolls to
   const buildSpots = () => {
@@ -7720,7 +8335,7 @@ void main() {
       case "crate":
         return `${o.crate.loot.tier} crate · tap to open`;
       case "cave":
-        return o.slot.status === "open" ? `${o.slot.name} · tap to enter` : o.slot.status === "sleeping" ? "A project sleeps here · zzz" : "An empty cave";
+        return o.slot.status === "open" ? `${o.slot.name} · tap to enter` : o.slot.status === "mirror" ? `${o.slot.name} · mirror` : o.slot.status === "sleeping" ? "A project sleeps here · zzz" : "An empty cave";
       case "gate":
         return `${caves.gate.name} · leads nowhere yet`;
       case "prop":
@@ -7810,6 +8425,7 @@ void main() {
   };
   // Any use of the hiding prop frees the jetpack
   const useProp = (o) => {
+    if (!o.active) return;
     reactProp(o);
     if (stash === o) dropJetpack(o);
   };
@@ -7818,6 +8434,7 @@ void main() {
     let best = null, bestD = reach;
     for (let i = 0; i < props.length; i++) {
       const o = props[i];
+      if (!o.active) continue;
       const d = Math.hypot(o.x - x, o.z - z);
       if (d < bestD) {
         bestD = d;
@@ -7992,15 +8609,15 @@ void main() {
       pile.syncPile(true);
     }
     // J straps a jetpack on whoever is being driven
-    if (lootEnabled && (e.key === "j" || e.key === "J")) {
+    if (e.key === "j" || e.key === "J") {
       const cave = crew.player;
       if (cave && !cave.jet) {
-        crew.wearJetpack(cave, hubModels.jetpack(), hubModels.jetFlame());
-        pilot.showAct();
-        const p = cave.root.position;
-        fx.burst(p.x, p.y + 0.7, p.z, 14, [SPARK, DUST], 2.2);
-        fx.say(cave, "OOGA FLY!", 2);
-        hud.hint(COARSE ? "Hold Blast off to climb · stick to fly" : "Hold Space to climb · WASD to fly", 5000);
+        if (stash) {
+          stash.node.highlight = 0;
+          stash = null;
+        }
+        if (jetpack) collectJetpack(cave);
+        else equipJetpack(cave);
       }
     }
     const digit = parseInt(e.key, 10);
@@ -8027,18 +8644,28 @@ void main() {
     presets = { pile: PILE_VIEW, gate: GATE_VIEW };
     pilot = pilotMod.create({ renderer, camera, hud, presets, landing: "pile", pitch: [PITCH_MIN, PITCH_MAX], dist: [DIST_MIN, DIST_MAX], follow: FOLLOW, fly: FLY, clampTarget, clampCamera, coarse: COARSE });
     place(island.geometry, 0, 0, 0, 0);
-    // Nothing scattered or selected as a wander point may enter the supported pile lawn.
-    claim(0, 0, PILE_CLEAR_RADIUS);
+    pathNode = createNode({ geometry: island.path.geometry, instanceData: island.path.instanceData, instanceCount: 0, instanceVersion: 0, depthBias: 0.05 });
+    addChild(root, pathNode);
+    placed.push(pathNode);
     altar = buildAltar();
+    const layoutPile = (radius) => {
+      altar.setRadius(radius);
+      const changed = island.path.setRadius(altar.platformRadius);
+      island.path.apply(pathNode);
+      if (changed) reflowScenery();
+    };
+    layoutPile(pileMod.visualFootprintFor(world.level, PILE_SCALE));
     const gate = place(hubModels.gate(), island.gate.x, island.gate.z, island.gate.ry);
     addTarget(gate, { kind: "gate" }, { radius: 3 });
-    props.push({ kind: "prop", prop: "gate", node: gate, x: gate.position.x, z: gate.position.z, ripe: 0 });
+    props.push({ kind: "prop", prop: "gate", node: gate, x: gate.position.x, z: gate.position.z, ripe: 0, active: true });
+    claim(gate.position.x, gate.position.z, 3);
     TICKER_AT.y = gate.position.y + 6;
     GATE_VIEW.target.y = gate.position.y + 2.5;
     const bedrolls = [];
     for (const slot of caves.slots) {
       const m = island.mouths.find((mouth) => mouth.id === slot.id);
       addTarget(buildMouth(slot, m), { kind: "cave", slot, priority: 1 }, { radius: 2.6 });
+      claim(m.x, m.z, 3.5);
       if (slot.scene) {
         presets[slot.scene] = mouthView(m);
         openMouths.push({ slot, m });
@@ -8066,11 +8693,12 @@ void main() {
     });
     buildRim();
     scatter();
+    reflowScenery();
     buildSpots();
     buildClouds();
-    if (lootEnabled) hideJetpack();
+    hideJetpack();
     mark("props");
-    const shared = { root, input, hooks, hud, game, world, renderer, camera, overlay: ctx.overlay, tickerAt: TICKER_AT, buildSpots: buildSpotsList, walkIn: WALK_IN, clampDrag, viewYaw: PILE_VIEW.yaw, bedrolls, pileScale: PILE_SCALE, pileY: ALTAR_HEIGHT + 0.02, onLayout: altar.setRadius, onShown: () => { meterTimer = 0; }, crateRadius: () => Math.max(4.4, altar.platformRadius + 0.8), groundAt: supportAt, wanderSpot, walkable, flyable, useNear };
+    const shared = { root, input, hooks, hud, game, world, renderer, camera, overlay: ctx.overlay, tickerAt: TICKER_AT, buildSpots: buildSpotsList, walkIn: WALK_IN, clampDrag, viewYaw: PILE_VIEW.yaw, bedrolls, pileScale: PILE_SCALE, pileY: ALTAR_HEIGHT + 0.02, onLayout: layoutPile, onShown: () => { meterTimer = 0; }, crateRadius: () => Math.max(4.4, altar.platformRadius + 0.8), groundAt: supportAt, wanderSpot, walkable, flyable, useNear };
     fx = shared.fx = fxMod.create(shared);
     pile = shared.pile = pileMod.create(shared);
     mark("pile");
@@ -8152,9 +8780,28 @@ void main() {
         get shown() {
           return pile.shown;
         },
-        island, mouths: island.mouths, labels, camera, crew, controls: pilot.controls, props, altar,
+        island, mouths: island.mouths, labels, camera, crew, controls: pilot.controls, props, altar, path: island.path.debug,
+        scenery: {
+          get candidateCount() { return scenery.length; },
+          get visibleCount() { return sceneryVisible; },
+          get radiusCulledCount() { return sceneryRadiusCulled; },
+          get pathCulledCount() { return sceneryPathCulled; },
+          get fixedCulledCount() { return sceneryFixedCulled; },
+          get visibilityReflowCount() { return sceneryReflows; },
+          get clearanceRadius() { return island.path.debug.ringOuterRadius + SCENERY_CLEARANCE; }
+        },
+        mirrorCave,
         get jetpack() {
-          return { stash, pickup: jetpack, hintAt, hintNow: () => (hintAt = now) };
+          return {
+            stash, pickup: jetpack, hintAt,
+            hintNow: () => (hintAt = now),
+            forceHost: (o) => {
+              if (!o.scenery || !o.active) throw new Error("Jetpack test host must be active scenery");
+              if (stash) stash.node.highlight = 0;
+              stash = o;
+              hintAt = now + HINT_AFTER;
+            }
+          };
         }
       }
     });
@@ -8169,12 +8816,13 @@ void main() {
     pilot.dispose();
     for (const node of targets) input.remove(node);
     for (const node of placed) removeChild(root, node);
-    targets.length = placed.length = claimed.length = clouds.length = torches.length = sleepers.length = labels.length = spots.length = openMouths.length = props.length = 0;
+    targets.length = placed.length = claimed.length = scenery.length = sceneryClaims.length = clouds.length = torches.length = sleepers.length = labels.length = spots.length = openMouths.length = props.length = 0;
+    sceneryVisible = sceneryRadiusCulled = sceneryPathCulled = sceneryFixedCulled = sceneryReflows = 0;
     const count = input.targetCount;
     input.dispose();
     hud.dispose();
     // Drop everything but the cached island
-    altar = hud = hooks = input = pilot = fx = pile = crew = crates = presets = stash = jetpack = null;
+    pathNode = altar = hud = hooks = input = pilot = fx = pile = crew = crates = presets = stash = jetpack = mirrorCave = null;
     hubScene.input = hubScene.debug = null;
     return { targets: count };
   };
@@ -8677,7 +9325,7 @@ void main() {
   const { clearTweens, tweenCount } = scene;
   const params = new URLSearchParams(location.search);
   const DEBUG = params.has("debug");
-  // Loot crates, the locker tab, worn swag and the hidden jetpack; the suite turns them on with ?debug=1&loot=1
+  // Donation loot crates, the locker tab and worn swag; the suite turns them on with ?debug=1&loot=1
   const LOOT_DEFAULT = false;
   const LOOT_ENABLED = DEBUG && params.has("loot") ? params.get("loot") === "1" : LOOT_DEFAULT;
   const requestedBananas = Number(params.get("bananas"));
@@ -8921,6 +9569,9 @@ void main() {
       get frameInterval() {
         return frameInterval();
       },
+      get mirror() {
+        return renderer.mirror;
+      },
       get timing() {
         return Object.fromEntries(performance.getEntriesByType("mark").filter((m) => m.name.startsWith("ooga:")).map((m) => [m.name.slice(5), Math.round(m.startTime)]));
       },
@@ -8929,7 +9580,7 @@ void main() {
         return world.level;
       }
     };
-    for (const key of ["slots", "drops", "core", "shell", "cavemen", "crates", "lab", "hud", "applyAllSwag", "renderLocker", "demoTip", "setPileLevel", "refreshStates", "trimPool", "shown", "island", "mouths", "labels", "camera", "crew", "controls", "props", "altar", "jetpack"]) {
+    for (const key of ["slots", "drops", "core", "shell", "cavemen", "crates", "lab", "hud", "applyAllSwag", "renderLocker", "demoTip", "setPileLevel", "refreshStates", "trimPool", "shown", "island", "mouths", "labels", "camera", "crew", "controls", "props", "altar", "path", "scenery", "jetpack", "mirrorCave"]) {
       Object.defineProperty(ooga, key, { get: () => active.debug[key], enumerable: true });
     }
     window.__ooga = ooga;

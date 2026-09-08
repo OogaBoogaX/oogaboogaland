@@ -77,7 +77,7 @@ every scene has registered on `BL.scenes`.
 | `hud.js` | `BL.hud` | DOM panel: roster, meter, feed dialog, locker, toasts, tooltip, `renderIcon` |
 | `fx.js` | `BL.fx` | particle pool and bursts, speech bubbles, zzz marks, ticker, overlay drawing |
 | `crew.js` | `BL.crew` | cavemen from the roster: states, fan slots, walk / eat / sleep / cheer / build, strolls, the rush to fresh bananas, the driven caveman and jetpack flight, swag, pokes |
-| `pile.js` | `BL.pile` | loose heap to 300, then an instanced banana shell over a dark mound; drop-in, hatch, `MAX_BANANAS`; level on the shared `world` |
+| `pile.js` | `BL.pile` | inflating yellow-backed surface layer through 302, then the layered banana shell over a growing mound; drop-in, hatch, `MAX_BANANAS`; level on the shared `world` |
 | `crates.js` | `BL.crates` | loot crates: landing ring, spawn, open, remove |
 | `scene-hub.js` | `BL.scenes.hub` | the island scene; registers first so it is the landing scene |
 | `scene-lab.js` | `BL.scenes.lab` | the lab scene; Escape and Leave cave return to the hub |

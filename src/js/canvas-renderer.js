@@ -3,10 +3,12 @@
   const BL = window.BL = window.BL || {};
   const { mat4, lerp } = BL.math;
   const { updateWorld, traverseVisible } = BL.scene;
+  const DEFAULT_SKY = [0.5, 0.52, 0.58];
+  const DEFAULT_GROUND = [0.22, 0.2, 0.19];
   const createRenderer = (canvas, { width: fixedW = 0, height: fixedH = 0, transparent = false } = {}) => {
     const ctx = canvas.getContext("2d");
     let width = 0, height = 0, dpr = 1, backdrop = null, lastF = 1;
-    let clearRef = null, clearStyle = "";
+    let clearRef = null, clearStyle = "", mirrorSkyRef = null, mirrorGroundRef = null, mirrorStyle = "#71808a";
     const size = { width: 0, height: 0 };
     const active = [];
     const DEFAULT_LIGHT = { x: 0.45, y: 0.85, z: 0.3 };
@@ -17,7 +19,7 @@
     let poolUsed = 0;
     const acquire = () => {
       if (poolUsed === pool.length) {
-        pool.push({ pts: new Float32Array(24), n: 0, depth: 0, style: "", coreStyle: "", line: false, lineGlow: 0 });
+        pool.push({ pts: new Float32Array(24), n: 0, depth: 0, style: "", coreStyle: "", line: false, lineGlow: 0, mirror: false });
       }
       return pool[poolUsed++];
     };
@@ -25,6 +27,10 @@
     const CLIP_IN = new Float32Array(30);
     const CLIP_OUT = new Float32Array(30);
     const BATCH_NODE = { geometry: null, world: new Float32Array(16), glow: 1, highlight: 0, depthBias: 0 };
+    const mirrorDebug = {
+      active: false, faux: true, width: 0, height: 0, allocationCount: 0, reflectionPassCount: 0, skippedPassCount: 0, resources: 0, captureExcluded: true,
+      cameraPosition: new Float32Array(3), cameraTarget: new Float32Array(3), planeCenter: new Float32Array(3), planeNormal: new Float32Array(3), skipReason: "canvas-faux"
+    };
     const resize = () => {
       dpr = Math.min(window.devicePixelRatio || 1, 2);
       width = fixedW || canvas.clientWidth;
@@ -107,6 +113,7 @@
           rec.n = clipped;
           rec.depth = zsum / clipped - (node.depthBias || 0);
           rec.line = false;
+          rec.mirror = !!node.mirror;
           const emissive = (face.emissive || 0) * node.glow;
           const diffuse = Math.max(0, nx * lightDir[0] + ny * lightDir[1] + nz * lightDir[2]);
           const hemi = AMBIENT * (0.6 + 0.4 * (ny * 0.5 + 0.5));
@@ -114,7 +121,7 @@
           k = lerp(k, 1.1, Math.min(1, emissive));
           k = lerp(k, 1.3, node.highlight * 0.4);
           const c = face.color;
-          rec.style = `rgb(${Math.min(255, Math.round(c[0] * k))},${Math.min(255, Math.round(c[1] * k))},${Math.min(255, Math.round(c[2] * k))})`;
+          rec.style = rec.mirror ? mirrorStyle : `rgb(${Math.min(255, Math.round(c[0] * k))},${Math.min(255, Math.round(c[1] * k))},${Math.min(255, Math.round(c[2] * k))})`;
         }
       }
       if (lines) {
@@ -137,6 +144,7 @@
           rec.n = 2;
           rec.depth = (CLIP_OUT[2] + CLIP_OUT[5]) / 2 - (node.depthBias || 0);
           rec.line = true;
+          rec.mirror = false;
           rec.lineGlow = (line.emissive || 0) * node.glow;
           const c = line.color;
           rec.style = `rgb(${c[0]},${c[1]},${c[2]})`;
@@ -157,11 +165,16 @@
       }
     };
     const render = (root, camera, opts = {}) => {
-      const { light = DEFAULT_LIGHT, clear = null } = opts;
+      const { light = DEFAULT_LIGHT, clear = null, sky = DEFAULT_SKY, ground = DEFAULT_GROUND } = opts;
       if (!fixedW && (canvas.clientWidth !== width || canvas.clientHeight !== height)) resize();
       if (clear !== clearRef) {
         clearRef = clear;
         clearStyle = clear ? `rgb(${Math.round(clear[0] * 255)},${Math.round(clear[1] * 255)},${Math.round(clear[2] * 255)})` : "";
+      }
+      if (sky !== mirrorSkyRef || ground !== mirrorGroundRef) {
+        mirrorSkyRef = sky;
+        mirrorGroundRef = ground;
+        mirrorStyle = `rgb(${Math.round((sky[0] * 0.55 + ground[0] * 0.25 + 0.12) * 255)},${Math.round((sky[1] * 0.55 + ground[1] * 0.25 + 0.14) * 255)},${Math.round((sky[2] * 0.55 + ground[2] * 0.25 + 0.17) * 255)})`;
       }
       lastF = height / 2 / Math.tan(camera.fov / 2);
       near = camera.near;
@@ -172,8 +185,30 @@
       lightDir[1] = light.y / llen;
       lightDir[2] = light.z / llen;
       poolUsed = 0;
+      mirrorDebug.active = false;
       updateWorld(root, null);
       traverseVisible(root, (node) => {
+        if (node.mirror) {
+          if (mirrorDebug.active) throw new Error("A scene may contain at most one mirror node");
+          mirrorDebug.active = true;
+          mirrorDebug.skippedPassCount++;
+          const w = node.world, nlen = Math.hypot(w[8], w[9], w[10]) || 1;
+          mirrorDebug.planeCenter[0] = w[12];
+          mirrorDebug.planeCenter[1] = w[13];
+          mirrorDebug.planeCenter[2] = w[14];
+          mirrorDebug.planeNormal[0] = w[8] / nlen;
+          mirrorDebug.planeNormal[1] = w[9] / nlen;
+          mirrorDebug.planeNormal[2] = w[10] / nlen;
+          const center = mirrorDebug.planeCenter, normal = mirrorDebug.planeNormal;
+          const eyeD = (camera.position.x - center[0]) * normal[0] + (camera.position.y - center[1]) * normal[1] + (camera.position.z - center[2]) * normal[2];
+          mirrorDebug.cameraPosition[0] = camera.position.x - 2 * eyeD * normal[0];
+          mirrorDebug.cameraPosition[1] = camera.position.y - 2 * eyeD * normal[1];
+          mirrorDebug.cameraPosition[2] = camera.position.z - 2 * eyeD * normal[2];
+          const targetD = (camera.target.x - center[0]) * normal[0] + (camera.target.y - center[1]) * normal[1] + (camera.target.z - center[2]) * normal[2];
+          mirrorDebug.cameraTarget[0] = camera.target.x - 2 * targetD * normal[0];
+          mirrorDebug.cameraTarget[1] = camera.target.y - 2 * targetD * normal[1];
+          mirrorDebug.cameraTarget[2] = camera.target.z - 2 * targetD * normal[2];
+        }
         if (node.instanceData) shadeBatch(node);
         else if (node.geometry) shadeNode(node);
       });
@@ -212,6 +247,24 @@
           ctx.strokeStyle = rec.style;
           ctx.lineWidth = 1;
           ctx.stroke();
+          if (rec.mirror) {
+            let minX = rec.pts[0], maxX = rec.pts[0], minY = rec.pts[1], maxY = rec.pts[1];
+            for (let k = 1; k < rec.n; k++) {
+              minX = Math.min(minX, rec.pts[k * 2]);
+              maxX = Math.max(maxX, rec.pts[k * 2]);
+              minY = Math.min(minY, rec.pts[k * 2 + 1]);
+              maxY = Math.max(maxY, rec.pts[k * 2 + 1]);
+            }
+            ctx.save();
+            ctx.clip();
+            ctx.strokeStyle = "rgba(235,245,250,.2)";
+            ctx.lineWidth = Math.max(2, (maxY - minY) * 0.06);
+            ctx.beginPath();
+            ctx.moveTo(minX - (maxY - minY) * 0.2, maxY);
+            ctx.lineTo(maxX, minY + (maxY - minY) * 0.18);
+            ctx.stroke();
+            ctx.restore();
+          }
         }
       }
       return true;
@@ -236,12 +289,17 @@
       setQuality: () => { },
       releaseGeometry: () => { },
       releaseUnused: () => 0,
-      dispose: () => { },
+      dispose: () => {
+        mirrorDebug.active = false;
+      },
       get quality() {
         return "low";
       },
       get stats() {
-        return { records: 0, active: 0 };
+        return { records: 0, active: 0, mirrorResources: 0 };
+      },
+      get mirror() {
+        return mirrorDebug;
       },
       get ready() {
         return true;

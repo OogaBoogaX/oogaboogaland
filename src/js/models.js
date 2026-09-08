@@ -205,7 +205,9 @@
     return () => value || (value = build());
   };
   const BANANA_AMMO_SCALE = 0.34;
-  const BANANA_PILE_PROFILE = [[1, 0], [0.98, 0.08], [0.9, 0.24], [0.72, 0.45], [0.5, 0.62], [0.28, 0.74], [0.1, 0.8], [0, 0.81]];
+  // A full-shouldered loose heap encloses the dead space between curved bananas
+  // without returning to the old pointed silhouette.
+  const BANANA_PILE_PROFILE = [[1, 0], [0.98, 0.11], [0.9, 0.31], [0.72, 0.53], [0.5, 0.7], [0.28, 0.82], [0.1, 0.87], [0, 0.88]];
   const bananaPileRadiusScale = (angle, radius) => {
     // Keep the foot of the mound circular, then blend in the lumpy silhouette above it.
     const fade = Math.min(1, Math.max(0, (1 - radius) / 0.18));
@@ -256,8 +258,8 @@
         profile.push([outer[0] + (inner[0] - outer[0]) * t, outer[1] + (inner[1] - outer[1]) * t]);
       }
     }
-    // Shadow tones: the mound is hidden under the banana shell and only shows in the gaps between them
-    const colors = ["#3a280f", "#33230d", "#42300f", "#382a11", "#2f210c"].map(hexToRgb);
+    // Golden panels keep any backing visible between shell bananas part of the pile.
+    const colors = ["#c9a21d", "#ddb72b", "#b98f14", "#e5c13a", "#d1aa22"].map(hexToRgb);
     const rings = profile.map(([radius, y], ringIndex) => {
       const ring = [];
       for (let segment = 0; segment < segments; segment++) {
@@ -512,6 +514,22 @@
       }
       v.set(1, 2, 5, P.black);
       v.set(5, 2, 5, P.black);
+      if (traits.symmetricTusks) {
+        // Keep w-s-bitcoin's tusks and the stubble beside them as a clean mirror pair.
+        for (let x = 0; x <= 6; x++) {
+          for (let y = 0; y <= 1; y++) {
+            v.set(x, y, 7, P.hair);
+            for (let z = 5; z <= 6; z++) if (v.get(x, y, z) === P.stubble) v.set(x, y, z, P.hair);
+          }
+        }
+        for (const x of [0, 6]) {
+          v.set(x, 0, 7, P.stubble);
+          v.set(x, 1, 7, P.stubble);
+          v.del(x, 0, 6);
+        }
+        v.set(1, 0, 7, P.white);
+        v.set(5, 0, 7, P.white);
+      }
     }
     const headOrigin = { x: -3.5 * u, y: 0, z: -3 * u };
     const headOpen = vg(headVox, headOrigin);
