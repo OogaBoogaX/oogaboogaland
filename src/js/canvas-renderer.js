@@ -24,6 +24,7 @@
     const V = Array.from({ length: 8 }, () => new Float32Array(3));
     const CLIP_IN = new Float32Array(30);
     const CLIP_OUT = new Float32Array(30);
+    const BATCH_NODE = { geometry: null, world: new Float32Array(16), glow: 1, highlight: 0, depthBias: 0 };
     const resize = () => {
       dpr = Math.min(window.devicePixelRatio || 1, 2);
       width = fixedW || canvas.clientWidth;
@@ -143,6 +144,18 @@
         }
       }
     };
+    const shadeBatch = (node) => {
+      const data = node.instanceData;
+      BATCH_NODE.geometry = node.geometry;
+      BATCH_NODE.depthBias = node.depthBias || 0;
+      for (let instance = 0; instance < node.instanceCount; instance++) {
+        const offset = instance * 20;
+        for (let i = 0; i < 16; i++) BATCH_NODE.world[i] = data[offset + i];
+        BATCH_NODE.glow = data[offset + 16];
+        BATCH_NODE.highlight = data[offset + 17];
+        shadeNode(BATCH_NODE);
+      }
+    };
     const render = (root, camera, opts = {}) => {
       const { light = DEFAULT_LIGHT, clear = null } = opts;
       if (!fixedW && (canvas.clientWidth !== width || canvas.clientHeight !== height)) resize();
@@ -161,7 +174,8 @@
       poolUsed = 0;
       updateWorld(root, null);
       traverseVisible(root, (node) => {
-        if (node.geometry) shadeNode(node);
+        if (node.instanceData) shadeBatch(node);
+        else if (node.geometry) shadeNode(node);
       });
       active.length = poolUsed;
       for (let i = 0; i < poolUsed; i++) active[i] = pool[i];

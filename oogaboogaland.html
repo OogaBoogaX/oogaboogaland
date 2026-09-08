@@ -5,7 +5,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta http-equiv="Content-Security-Policy"
-    content="default-src 'none'; script-src 'sha256-h0uYdsPdSU7Y+KdOKu5DajJlHygA6HoeUO3BlAXoefY='; style-src 'sha256-bLVE6j2cNCMT2isuQWsWv3znYPmH1gcDGCV8BA4q0xE='; img-src 'self' data:; connect-src 'none'; base-uri 'none'; form-action 'none'">
+    content="default-src 'none'; script-src 'sha256-qc92x9xQau1Xk+sHXQfIk+llR8XyUnr7SqCrZqcV57c='; style-src 'sha256-dDRjKsPXfpTqnH8VPCUSd7WihWQczKIMep/Sr+vXL+s='; img-src 'self' data:; connect-src 'none'; base-uri 'none'; form-action 'none'">
   <meta name="referrer" content="no-referrer">
   <meta name="color-scheme" content="dark">
   <meta name="theme-color" content="#0a0a0b">
@@ -517,7 +517,7 @@ select {
 
 .stats {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(2, 1fr);
   gap: 8px;
   margin-top: 12px;
 }
@@ -1251,19 +1251,18 @@ select {
       <button type="button" class="sheet-toggle" id="sheet-toggle" aria-label="Toggle panel"><span></span></button>
       <div class="tabs" role="tablist">
         <button type="button" role="tab" data-tab="roster" aria-selected="true">Ooga Boogas</button>
-        <button type="button" role="tab" data-tab="loot" aria-selected="false">Loot <span class="tab-count"
+        <button type="button" role="tab" data-tab="loot" aria-selected="false" id="loot-tab" hidden>Loot <span class="tab-count"
             id="loot-count" hidden></span></button>
       </div>
       <section class="panel" data-panel="roster" role="tabpanel">
         <p class="summary" id="roster-summary"></p>
         <ul id="roster" class="roster"></ul>
         <div class="stats" aria-label="Your stats">
-          <div class="stat"><b id="stat-fed">0</b><span>hand-fed</span></div>
           <div class="stat"><b id="stat-donations">0</b><span>donations</span></div>
           <div class="stat"><b id="stat-sats">0</b><span>sats</span></div>
         </div>
-        <p class="help" data-scene="hub">Drag a banana onto a caveman to hand-feed. Tap trees, bushes, barrels and caves. Double-tap a caveman to walk in their boots. Something is hidden out there.</p>
-        <p class="help" data-scene="lab" hidden>Drag a banana onto a caveman to hand-feed. Tap racks, flasks, dice and cards. Double-tap a caveman to walk in their boots.</p>
+        <p class="help" data-scene="hub">Tap trees, bushes, barrels and caves. Double-tap a caveman to walk in their boots.<span id="world-loot-hint" hidden> Something is hidden out there.</span></p>
+        <p class="help" data-scene="lab" hidden>Tap racks, flasks, dice and cards. Double-tap a caveman to walk in their boots.</p>
         <button type="button" class="feed-open" data-action="feed">Feed the Ooga Boogas</button>
       </section>
       <section class="panel" data-panel="loot" role="tabpanel" hidden>
@@ -1300,7 +1299,7 @@ select {
         <button type="button" data-action="tip">Tip 1.2K sats</button>
         <button type="button" data-action="tip-legendary">Tip 120K sats</button>
       </div>
-      <p class="help">Payments are simulated in this build. Crates drop at 1K, 5K, 21K and 100K sats.</p>
+      <p class="help">Payments are simulated in this build.<span id="crate-help" hidden> Crates drop at 1K, 5K, 21K and 100K sats.</span></p>
     </dialog>
     <output class="toast" id="toast" hidden></output>
     <div class="hint" id="hint" hidden></div>
@@ -2269,6 +2268,7 @@ void main() {
       }
       gl.deleteBuffer(rec.ibo);
       rec.nodes.length = 0;
+      rec.batch = null;
     };
     const destroyRecords = () => {
       for (const rec of records.values()) deleteRecord(rec);
@@ -2373,7 +2373,7 @@ void main() {
       let rec = records.get(geometry);
       if (!rec) {
         const ibo = gl.createBuffer();
-        rec = { ibo, capacity: 0, mesh: buildMeshPart(geometry, ibo), line: buildLinePart(geometry, ibo), nodes: [], count: 0, active: false, data: null };
+        rec = { geometry, ibo, capacity: 0, mesh: buildMeshPart(geometry, ibo), line: buildLinePart(geometry, ibo), nodes: [], count: 0, active: false, data: null, batch: null, batchVersion: -1 };
         records.set(geometry, rec);
       }
       return rec;
@@ -2386,10 +2386,28 @@ void main() {
         rec.count = 0;
         activeRecords.push(rec);
       }
+      if (node.instanceData) {
+        rec.batch = node;
+        rec.count = node.instanceCount;
+        return;
+      }
       rec.nodes[rec.count++] = node;
     };
     const uploadInstances = (rec) => {
       const need = rec.count * INSTANCE_FLOATS;
+      if (rec.batch) {
+        gl.bindBuffer(gl.ARRAY_BUFFER, rec.ibo);
+        if (rec.capacity < need) {
+          gl.bufferData(gl.ARRAY_BUFFER, need * 4, gl.DYNAMIC_DRAW);
+          rec.capacity = need;
+          rec.batchVersion = -1;
+        }
+        if (rec.batchVersion !== rec.batch.instanceVersion) {
+          gl.bufferSubData(gl.ARRAY_BUFFER, 0, rec.batch.instanceData, 0, need);
+          rec.batchVersion = rec.batch.instanceVersion;
+        }
+        return;
+      }
       if (!rec.data || rec.data.length < need) {
         rec.data = new Float32Array(Math.max(need, (rec.data ? rec.data.length : 0) * 2, INSTANCE_FLOATS));
       }
@@ -2449,7 +2467,7 @@ void main() {
       for (const rec of activeRecords) {
         const part = rec[kind];
         if (!part) continue;
-        if (kind === "mesh" && useProgram === "shadow" && rec.nodes[0].geometry.castShadow === false) continue;
+        if (kind === "mesh" && useProgram === "shadow" && rec.geometry.castShadow === false) continue;
         if (kind === "line") gl.uniform1f(res.programs.line.u.uWidth, part.width * dpr);
         gl.bindVertexArray(part.vao);
         gl.drawArraysInstanced(gl.TRIANGLES, 0, part.count, rec.count);
@@ -2503,12 +2521,13 @@ void main() {
       for (const rec of activeRecords) {
         rec.active = false;
         rec.nodes.length = 0;
+        rec.batch = null;
       }
       activeRecords.length = 0;
       updateWorld(root, null);
       traverseVisible(root, collect);
       for (const rec of activeRecords) {
-        rec.nodes.length = rec.count;
+        if (!rec.batch) rec.nodes.length = rec.count;
         uploadInstances(rec);
       }
       gl.bindFramebuffer(gl.FRAMEBUFFER, sh.fb);
@@ -2676,6 +2695,7 @@ void main() {
     const V = Array.from({ length: 8 }, () => new Float32Array(3));
     const CLIP_IN = new Float32Array(30);
     const CLIP_OUT = new Float32Array(30);
+    const BATCH_NODE = { geometry: null, world: new Float32Array(16), glow: 1, highlight: 0, depthBias: 0 };
     const resize = () => {
       dpr = Math.min(window.devicePixelRatio || 1, 2);
       width = fixedW || canvas.clientWidth;
@@ -2795,6 +2815,18 @@ void main() {
         }
       }
     };
+    const shadeBatch = (node) => {
+      const data = node.instanceData;
+      BATCH_NODE.geometry = node.geometry;
+      BATCH_NODE.depthBias = node.depthBias || 0;
+      for (let instance = 0; instance < node.instanceCount; instance++) {
+        const offset = instance * 20;
+        for (let i = 0; i < 16; i++) BATCH_NODE.world[i] = data[offset + i];
+        BATCH_NODE.glow = data[offset + 16];
+        BATCH_NODE.highlight = data[offset + 17];
+        shadeNode(BATCH_NODE);
+      }
+    };
     const render = (root, camera, opts = {}) => {
       const { light = DEFAULT_LIGHT, clear = null } = opts;
       if (!fixedW && (canvas.clientWidth !== width || canvas.clientHeight !== height)) resize();
@@ -2813,7 +2845,8 @@ void main() {
       poolUsed = 0;
       updateWorld(root, null);
       traverseVisible(root, (node) => {
-        if (node.geometry) shadeNode(node);
+        if (node.instanceData) shadeBatch(node);
+        else if (node.geometry) shadeNode(node);
       });
       active.length = poolUsed;
       for (let i = 0; i < poolUsed; i++) active[i] = pool[i];
@@ -3102,6 +3135,22 @@ void main() {
     let value = null;
     return () => value || (value = build());
   };
+  const BANANA_AMMO_SCALE = 0.34;
+  const BANANA_PILE_PROFILE = [[1, 0], [0.98, 0.08], [0.9, 0.24], [0.72, 0.45], [0.5, 0.62], [0.28, 0.74], [0.1, 0.8], [0, 0.81]];
+  const bananaPileRadiusScale = (angle, radius) => {
+    // Keep the foot of the mound circular, then blend in the lumpy silhouette above it.
+    const fade = Math.min(1, Math.max(0, (1 - radius) / 0.18));
+    return 1 + fade * (-0.025
+      + Math.sin(angle * 3 + radius * 5.7 + 0.4) * 0.012
+      + Math.sin(angle * 5 - radius * 8.3 + 1.7) * 0.008
+      + Math.sin(angle * 9 + radius * 13.1) * 0.004);
+  };
+  const bananaPileHeightOffset = (angle, radius) => {
+    const fade = radius * (1 - radius) * 4;
+    return fade * (Math.sin(angle * 2 + radius * 4.1) * 0.018
+      + Math.sin(angle * 6 - radius * 7.3 + 0.8) * 0.009
+      + Math.sin(angle * 11 + radius * 15.7) * 0.004);
+  };
   const bananaGeometry = cached(() => tube({
     rings: 8,
     segments: 5,
@@ -3113,6 +3162,60 @@ void main() {
     colorFn: (t) => t < 0.08 || t > 0.92 ? "#5a3a1a" : t < 0.2 || t > 0.8 ? "#c9b23a" : "#f5c542"
   }));
   const banana = () => createNode({ geometry: bananaGeometry() });
+  // A centered copy for the pile skin. It has the full depth and dimensions of a
+  // carried banana, while its origin lets it sit evenly across the mound surface.
+  const bananaTileGeometry = cached(() => tube({
+    rings: 8,
+    segments: 5,
+    path: (t) => {
+      const a = (t - 0.5) * 2;
+      return { x: Math.sin(a) * 0.55, y: (1 - Math.cos(a)) * 0.55 - 0.075, z: 0 };
+    },
+    radius: (t) => 0.085 * Math.pow(Math.sin(Math.PI * t), 0.55) + 0.012,
+    colorFn: (t) => t < 0.08 || t > 0.92 ? "#5a3a1a" : t < 0.2 || t > 0.8 ? "#c9b23a" : "#f5c542"
+  }));
+  const bananaPileCoreGeometry = (worldRadius = 0.45, worldHeight = 0.48, faceSize = 0.16) => {
+    const geo = geometry();
+    const segments = Math.max(24, Math.min(384, Math.ceil(Math.PI * 2 * worldRadius / faceSize)));
+    const profile = [];
+    for (let i = 0; i < BANANA_PILE_PROFILE.length - 1; i++) {
+      const outer = BANANA_PILE_PROFILE[i], inner = BANANA_PILE_PROFILE[i + 1];
+      const length = Math.hypot((outer[0] - inner[0]) * worldRadius, (outer[1] - inner[1]) * worldHeight);
+      const steps = Math.max(1, Math.ceil(length / faceSize));
+      for (let step = 0; step < steps; step++) {
+        const t = step / steps;
+        profile.push([outer[0] + (inner[0] - outer[0]) * t, outer[1] + (inner[1] - outer[1]) * t]);
+      }
+    }
+    const colors = ["#d9ad2d", "#e2b631", "#cfa42b", "#d6aa2c", "#dcb12f"].map(hexToRgb);
+    const rings = profile.map(([radius, y], ringIndex) => {
+      const ring = [];
+      for (let segment = 0; segment < segments; segment++) {
+        const angle = segment / segments * Math.PI * 2;
+        const warpedRadius = radius * bananaPileRadiusScale(angle, radius);
+        const warpedY = y + bananaPileHeightOffset(angle, radius);
+        ring.push(pushVert(geo, Math.cos(angle) * warpedRadius, warpedY, Math.sin(angle) * warpedRadius));
+      }
+      return ring;
+    });
+    for (let ring = 0; ring < rings.length - 1; ring++) {
+      for (let segment = 0; segment < segments; segment++) {
+        const next = (segment + 1) % segments;
+        const shadeIndex = Math.floor(Math.abs(Math.sin((segment + 1) * 12.9898 + (ring + 1) * 78.233)) * colors.length) % colors.length;
+        face(geo, [rings[ring][segment], rings[ring + 1][segment], rings[ring + 1][next], rings[ring][next]], colors[shadeIndex]);
+      }
+    }
+    const top = pushVert(geo, 0, BANANA_PILE_PROFILE[BANANA_PILE_PROFILE.length - 1][1], 0);
+    const last = rings[rings.length - 1];
+    for (let segment = 0; segment < segments; segment++) {
+      const next = (segment + 1) % segments;
+      face(geo, [last[segment], top, last[next]], colors[(segment + 3) % colors.length]);
+    }
+    geo.pileSegments = segments;
+    geo.pileRings = rings.length;
+    geo.pileFaceSize = faceSize;
+    return geo;
+  };
   const particleCache = new Map();
   const particleGeometry = (color, size = 0.07, emissive = 1) => {
     const key = `${color}/${size}/${emissive}`;
@@ -3271,7 +3374,7 @@ void main() {
     addChild(parts.armL, parts.club);
     parts.snack = createNode({
       position: { x: 0, y: -0.62 * h, z: 0.18 * h },
-      scale: { x: 0.55, y: 0.55, z: 0.55 },
+      scale: { x: BANANA_AMMO_SCALE, y: BANANA_AMMO_SCALE, z: BANANA_AMMO_SCALE },
       rotation: { x: 0.4, y: 0, z: 1.2 },
       geometry: bananaGeometry(),
       visible: false
@@ -3738,7 +3841,7 @@ void main() {
       item.buildNode = () => createNode({ geometry: swagGeo(item.id, item.build) });
     }
   }
-  BL.models = { box, panel, lathe, tube, ring, polyline, merge, voxelFaces, banana, bananaGeometry, particleGeometry, caveman, labRoom, buildableGeos, crate, dieRotationFor, SWAG, TIER_COLORS };
+  BL.models = { box, panel, lathe, tube, ring, polyline, merge, voxelFaces, banana, bananaGeometry, bananaTileGeometry, bananaPileCoreGeometry, bananaPileRadiusScale, bananaPileHeightOffset, BANANA_AMMO_SCALE, BANANA_PILE_PROFILE, particleGeometry, caveman, labRoom, buildableGeos, crate, dieRotationFor, SWAG, TIER_COLORS };
 })();
 
 // ---- js/terrain.js ----
@@ -3851,6 +3954,7 @@ void main() {
   const SURFACE = 28;
   const ORIGIN = { x: -SX / 2 * UNIT, y: -SURFACE * UNIT, z: -SZ / 2 * UNIT };
   const RADIUS = 30, MEADOW = 22, DEPTH = 7;
+  const MAX_HEIGHT = 8;
   const BLUFF = 6;
   const MOUTH = { w: 5, h: 3, depth: 5 };
   const ROOM = { w: 6, h: 4, from: 2.5, to: 6.5 };
@@ -3954,7 +4058,7 @@ void main() {
             h = Math.min(PASS_TOP, Math.floor((r - MEADOW) / UNIT) * UNIT);
             surface = Math.abs(wx - pass.wobble * Math.sin((r - MEADOW) / (-GATE_Z - MEADOW) * Math.PI * 2)) < TRAIL_HALF ? P.path : grassAt(wx, wz);
           } else if (Math.abs(wx) < PATH_HALF && wz > 0) surface = P.path;
-          top = clamp(Math.round(h / UNIT) * UNIT, 0, 8);
+          top = clamp(Math.round(h / UNIT) * UNIT, 0, MAX_HEIGHT);
         }
         // The underside drops sheer, tapering at the edge
         const depth = rim <= RADIUS - 3 ? DEPTH : DEPTH * (1 - Math.pow((rim - (RADIUS - 3)) / 3, 1.6));
@@ -4076,7 +4180,7 @@ void main() {
     ISLANDS.set(seed, built);
     return built;
   };
-  BL.terrain = { makeGrid, gridGeometry, island, PALETTE };
+  BL.terrain = { makeGrid, gridGeometry, island, PALETTE, MAX_HEIGHT };
 })();
 
 // ---- js/hub-models.js ----
@@ -4144,6 +4248,46 @@ void main() {
   const STONE = ["#3a3734", "#2d2b28", "#45413d"];
   const CLIFF = ["#7d6f61", "#5e5449", "#877869"];
   const WOOD = "#8a6236", WOOD_DK = "#5c4425", PLANK = "#a9773f";
+  const CAVE_SIGN_WIDTH = 3.78, CAVE_SIGN_HEIGHT = 0.91;
+  const caveSign = cached(() => {
+    const glyphs = {
+      E: ["111", "100", "110", "100", "111"],
+      n: ["000", "110", "101", "101", "101"],
+      t: ["010", "111", "010", "010", "011"],
+      r: ["000", "110", "101", "100", "100"],
+      o: ["000", "111", "101", "101", "111"],
+      p: ["000", "110", "101", "110", "100"],
+      y: ["000", "101", "101", "011", "110"],
+      L: ["100", "100", "100", "100", "111"],
+      a: ["000", "010", "101", "111", "101"],
+      b: ["100", "100", "110", "101", "110"]
+    };
+    const text = "EntropyLab", cell = 0.075, pixel = 0.061;
+    const textW = (text.length * 3 + text.length - 1) * cell;
+    const geos = [
+      box({ w: CAVE_SIGN_WIDTH, h: CAVE_SIGN_HEIGHT, d: 0.12, color: WOOD_DK }),
+      box({ w: CAVE_SIGN_WIDTH - 0.16, h: CAVE_SIGN_HEIGHT - 0.16, d: 0.04, color: WOOD, offset: { z: 0.08 } }),
+      box({ w: CAVE_SIGN_WIDTH - 0.2, h: 0.025, d: 0.025, color: "#7a5630", offset: { y: 0.14, z: 0.115 } }),
+      box({ w: CAVE_SIGN_WIDTH - 0.2, h: 0.025, d: 0.025, color: "#7a5630", offset: { y: -0.15, z: 0.115 } })
+    ];
+    let cursor = -textW * 0.5;
+    for (const ch of text) {
+      const glyph = glyphs[ch];
+      for (let row = 0; row < glyph.length; row++) {
+        for (let col = 0; col < glyph[row].length; col++) {
+          if (glyph[row][col] !== "1") continue;
+          geos.push(box({ w: pixel, h: pixel, d: 0.035, color: "#f3efe4", emissive: 0.2, offset: { x: cursor + col * cell + cell * 0.5, y: (2 - row) * cell, z: 0.125 } }));
+        }
+      }
+      cursor += cell * 4;
+    }
+    for (const x of [-CAVE_SIGN_WIDTH * 0.5 + 0.13, CAVE_SIGN_WIDTH * 0.5 - 0.13]) {
+      for (const y of [-CAVE_SIGN_HEIGHT * 0.5 + 0.13, CAVE_SIGN_HEIGHT * 0.5 - 0.13]) {
+        geos.push(box({ w: 0.07, h: 0.07, d: 0.035, color: "#3a2a18", offset: { x, y, z: 0.13 } }));
+      }
+    }
+    return merge(...geos);
+  });
   // Stone frame around a cave mouth
   const caveMouthRim = cached(() => {
     const rand = mulberry32(31);
@@ -4210,7 +4354,8 @@ void main() {
   });
   const bedroll = cached(() => merge(box({ w: 1.9, h: 0.09, d: 0.85, color: "#2e2724" }), box({ w: 0.4, h: 0.16, d: 0.6, color: "#40342c", offset: { x: 0.65, y: 0.1 } })));
   const CANOPIES = [["#456d4f", "#365840", "#557f5d"], ["#e8b4c6", "#d697b0", "#f2c9d8"]];
-  // Trunk into a 2.5 canopy, 3 units tall
+  const TREE_HEIGHT = 3;
+  // Trunk into a 2.5 canopy, TREE_HEIGHT units tall
   const tree = variants((i) => {
     const rand = mulberry32(101 + i);
     const v = vox();
@@ -4236,6 +4381,13 @@ void main() {
     for (const [k, c] of v.map) if (c === 0 && rand() < 0.15) v.map.set(k, 2);
     return voxGeo(v, { unit: VOX, palette: ["#6b625a", "#57504a", "#7a716a"], origin: HALF });
   });
+  const altarSlab = cached(() => lathe({
+    profile: [[0, 0], [1, 0], [1, 0.82], [0.96, 1], [0, 1]],
+    segments: 32,
+    color: (t) => t < 0.5 ? "#57504a" : "#756b62"
+  }));
+  // Unit blocks are instanced around the continuously growing altar edge.
+  const altarBlock = variants((i) => box({ color: STONE[i % STONE.length], offset: { y: 0.5 } }));
   const woodCrate = cached(() => merge(
     box({ w: 0.9, h: 0.9, d: 0.9, color: PLANK, offset: { y: 0.45 } }),
     ...[[-0.42, -0.42], [0.42, -0.42], [-0.42, 0.42], [0.42, 0.42]].map(([x, z]) => box({ w: 0.1, h: 0.94, d: 0.1, color: WOOD_DK, offset: { x, y: 0.47, z } })),
@@ -4304,7 +4456,7 @@ void main() {
     box({ w: 4, h: 0.14, d: 0.16, color: WOOD_DK, offset: { x: 2, y: -0.17, z: 0.92 } }),
     ...[[0.5, -0.8], [0.5, 0.8], [3.5, -0.8], [3.5, 0.8]].map(([x, z]) => box({ w: 0.2, h: 2.2, d: 0.2, color: "#6b4a2b", offset: { x, y: -1.2, z } }))
   ));
-  BL.hubModels = { jetpack, jetFlame, caveMouthRim, gate, caveShelves, bedroll, tree, bush, rock, woodCrate, barrel, flowerTuft, torch, vine, cloud, ladder, dock };
+  BL.hubModels = { jetpack, jetFlame, caveMouthRim, caveSign, CAVE_SIGN_WIDTH, CAVE_SIGN_HEIGHT, gate, caveShelves, bedroll, tree, bush, rock, altarSlab, altarBlock, woodCrate, barrel, flowerTuft, torch, vine, cloud, ladder, dock, TREE_HEIGHT };
 })();
 
 // ---- js/caves.js ----
@@ -5152,17 +5304,19 @@ void main() {
     iconRenderer.render(iconRoot, iconCamera);
     return canvas;
   };
-  const create = ({ roster, catalog, tierColors, renderIcon }) => {
+  const create = ({ roster, catalog, tierColors, renderIcon, lootEnabled = false }) => {
     const el = {
       meterFill: $("meter-fill"),
       meterCount: $("meter-count"),
       meterForecast: $("meter-forecast"),
       roster: $("roster"),
       summary: $("roster-summary"),
-      statFed: $("stat-fed"),
       statDonations: $("stat-donations"),
       statSats: $("stat-sats"),
+      lootTab: $("loot-tab"),
       lootCount: $("loot-count"),
+      crateHelp: $("crate-help"),
+      worldLootHint: $("world-loot-hint"),
       actions: [...document.querySelectorAll("[data-action]")],
       act: $("act"),
       toast: $("toast"),
@@ -5181,6 +5335,9 @@ void main() {
       qrUrl: $("qr-url"),
       feed: $("feed")
     };
+    el.lootTab.hidden = !lootEnabled;
+    el.crateHelp.hidden = !lootEnabled;
+    el.worldLootHint.hidden = !lootEnabled;
     const listeners = [];
     const on = (target, type, fn, opts) => {
       target.addEventListener(type, fn, opts);
@@ -5217,8 +5374,7 @@ void main() {
       el.meterCount.firstChild.data = String(Math.floor(level));
       el.meterForecast.firstChild.data = forecastText;
     };
-    const setStats = ({ handFed, totalSats, donations }) => {
-      el.statFed.textContent = String(handFed);
+    const setStats = ({ totalSats, donations }) => {
       el.statDonations.textContent = String(donations);
       el.statSats.textContent = formatLarge(totalSats);
     };
@@ -5674,8 +5830,6 @@ void main() {
   const CHEW_PERIOD = 3.2;
   const BODY_PARTS = ["torso", "head", "legL", "legR", "armL", "armR"];
   const SWAG_ANCHORS = ["hat", "face"];
-  const FAN_MIN = 2.0;
-  const FAN_MAX = 3.4;
   const FAN_STANDOFF = 1.1;
   const FAN_ARC = 2.2;
   const POKES = ["Ooga?", "Booga!", "No poke.", "Hmm banana?", "Ooga booga booga."];
@@ -5850,7 +6004,8 @@ void main() {
     };
     // Eaters gather on the far side of the view
     const FAN_CENTER = Math.atan2(Math.cos(viewYaw), Math.sin(viewYaw)) + Math.PI;
-    let fanRadius = FAN_MIN;
+    const wantedFanRadius = () => Math.max(ctx.pile.footprintEdge, ctx.pile.pileEdge()) + FAN_STANDOFF;
+    let fanRadius = wantedFanRadius();
     const assignFanSlots = (entries, isWorking) => {
       const farSide = FAN_CENTER;
       // Neighbours stand FAN_ARC apart at any radius
@@ -5892,8 +6047,8 @@ void main() {
       cave.parts.head.rotation.y = 0;
     };
     const updateFan = () => {
-      const wanted = clamp(ctx.pile.pileEdge() + FAN_STANDOFF, FAN_MIN, FAN_MAX);
-      if (Math.abs(wanted - fanRadius) < 0.3) return;
+      const wanted = wantedFanRadius();
+      if (Math.abs(wanted - fanRadius) < 0.08) return;
       fanRadius = wanted;
       const entries = [...cavemen.values()];
       assignFanSlots(entries, (cave) => cave.state === "working");
@@ -5902,7 +6057,7 @@ void main() {
     const refreshStates = (settle = false) => {
       const entries = [...cavemen.values()];
       const next = new Map(entries.map((cave) => [cave, stateOf(cave)]));
-      fanRadius = clamp(ctx.pile.pileEdge() + FAN_STANDOFF, FAN_MIN, FAN_MAX);
+      fanRadius = wantedFanRadius();
       assignFanSlots(entries, (cave) => next.get(cave) === "working");
       for (const cave of entries) {
         const target = next.get(cave);
@@ -5919,6 +6074,7 @@ void main() {
         cave.act.until = elapsed + EAT_MIN + Math.random() * EAT_SPREAD;
         cave.act.trips = 0;
         walkToSlot(cave, true);
+        if (!cave.walk) cave.act.kind = "eat";
       }
     };
     // Send a caveman off to a spot
@@ -5942,7 +6098,7 @@ void main() {
     };
     const headWorldOf = (cave) => ({ x: cave.root.position.x, y: cave.state === "sleeping" ? 0.5 : cave.root.position.y - cave.baseY + cave.headOffset * 0.95, z: cave.root.position.z });
     const bulletPool = Array.from({ length: 12 }, () => {
-      const node = createNode({ geometry: models.bananaGeometry(), scale: { x: 0.34, y: 0.34, z: 0.34 }, visible: false });
+      const node = createNode({ geometry: models.bananaGeometry(), scale: { x: models.BANANA_AMMO_SCALE, y: models.BANANA_AMMO_SCALE, z: models.BANANA_AMMO_SCALE }, visible: false });
       addChild(root, node);
       return node;
     });
@@ -6298,13 +6454,13 @@ void main() {
         }
         world.level = Math.max(0, world.level - EAT_RATE * dt);
         const chew = (elapsed + cave.phase) % CHEW_PERIOD / CHEW_PERIOD;
-        const lift = chew < 0.35 ? Math.sin(chew / 0.35 * Math.PI) : 0;
-        const bite = chew < 0.35 ? Math.floor(chew / 0.35 * 3) / 3 : 0;
-        parts.armR.rotation.x = -0.2 - lift * 2.1;
-        parts.head.rotation.x = lift * 0.22 + (chew > 0.35 && chew < 0.5 ? Math.sin((chew - 0.35) / 0.15 * Math.PI * 3) * 0.05 : 0);
-        parts.snack.visible = true;
-        const s = 0.55 * (1 - bite * 0.5);
-        parts.snack.scale.x = parts.snack.scale.y = parts.snack.scale.z = s;
+        if (chew < 0.18) parts.armR.rotation.x = lerp(-0.2, -1.05, chew / 0.18);
+        else if (chew < 0.42) parts.armR.rotation.x = lerp(-1.05, -2.3, (chew - 0.18) / 0.24);
+        else if (chew < 0.58) parts.armR.rotation.x = lerp(-2.3, -0.2, (chew - 0.42) / 0.16);
+        else parts.armR.rotation.x = -0.2;
+        parts.head.rotation.x = chew > 0.34 && chew < 0.54 ? Math.sin((chew - 0.34) / 0.2 * Math.PI) * 0.22 : 0;
+        parts.snack.visible = chew >= 0.18 && chew < 0.42;
+        parts.snack.scale.x = parts.snack.scale.y = parts.snack.scale.z = models.BANANA_AMMO_SCALE;
       } else {
         parts.armR.rotation.x = -0.1;
         parts.snack.visible = false;
@@ -6486,306 +6642,530 @@ void main() {
   "use strict";
   const BL = window.BL = window.BL || {};
   const { models } = BL;
-  const { lerp, damp, ease, randomInt } = BL.math;
-  const { addChild, removeChild, addTween } = BL.scene;
+  const { mat4, lerp, damp, ease, mulberry32 } = BL.math;
+  const { createNode, addChild, removeChild, addTween } = BL.scene;
   const DROP_HEIGHT = 4.3;
-  const GROUND_DRAG_Y = 1.05;
+  const BANANA_DROP_HEIGHT = (BL.terrain.MAX_HEIGHT + BL.hubModels.TREE_HEIGHT) * 2;
+  const BANANA_SCALE = models.BANANA_AMMO_SCALE;
+  const VISIBLE_BANANAS = 300;
+  const BASE_HEIGHT = 0.48;
+  const SHELL_EDGE = 0.28;
+  const CORE_FACE_SIZE = 0.16;
+  const GOLDEN_ANGLE = Math.PI * (3 - Math.sqrt(5));
+  const BANANA_LENGTH_SPACE = 0.37;
+  const BANANA_ROW_SPACE = 0.22;
+  const BANANA_SURFACE_CLEARANCE = 0.008;
+  const MIN_BANANA_CENTER_SPACE = 0.132;
+  const PLATFORM_CLEARANCE = 0.004;
+  const DROP_POOL_SIZE = 96;
+  const DROP_RATE = 72;
+  const MAX_WEBGL_TILES = 12288;
+  const MAX_CANVAS_TILES = 512;
+  const footprintFor = (count, scale = 0.45) => scale * (count > VISIBLE_BANANAS ? Math.cbrt(count / VISIBLE_BANANAS) : 1);
+  const visualFootprintFor = (count, scale = 0.45) => {
+    const mix = Math.min(1, Math.max(0, (count - VISIBLE_BANANAS) / VISIBLE_BANANAS));
+    return footprintFor(count, scale) + BANANA_SCALE * SHELL_EDGE * mix;
+  };
   const setVec = (v, x, y, z) => {
     v.x = x;
     v.y = y;
     v.z = z;
     return v;
   };
+  const domeSurface = (radius, out) => {
+    const profile = models.BANANA_PILE_PROFILE;
+    for (let i = 0; i < profile.length - 1; i++) {
+      const outer = profile[i], inner = profile[i + 1];
+      if (radius < inner[0]) continue;
+      const span = outer[0] - inner[0];
+      const t = (outer[0] - radius) / span;
+      out.y = lerp(outer[1], inner[1], t);
+      out.slope = (outer[1] - inner[1]) / span;
+      return out;
+    }
+    out.y = profile[profile.length - 1][1];
+    out.slope = 0;
+    return out;
+  };
   // The banana pile of one scene
   const create = (ctx) => {
-    const { root, input, hooks, hud, game, world, clampDrag, pileScale: SCALE = 1 } = ctx;
+    const { root, world, pileScale: SCALE = 0.45, pileY: BASE_Y = 0.02 } = ctx;
     const pileSlots = [];
+    const coreFaceSize = ctx.renderer.kind === "canvas2d" ? CORE_FACE_SIZE * 1.75 : CORE_FACE_SIZE;
+    const core = createNode({ geometry: models.bananaPileCoreGeometry(SCALE, BASE_HEIGHT, coreFaceSize), visible: false });
+    const bananaGeometry = models.bananaGeometry();
+    const shellGeometry = models.bananaTileGeometry();
+    let shellMinZ = Infinity;
+    for (let i = 2; i < shellGeometry.verts.length; i += 3) shellMinZ = Math.min(shellMinZ, shellGeometry.verts[i]);
+    const bananaSurfaceLift = -shellMinZ * BANANA_SCALE + BANANA_SURFACE_CLEARANCE;
+    const shell = createNode({
+      geometry: shellGeometry,
+      instanceData: new Float32Array(20),
+      instanceCount: 0,
+      instanceVersion: 0,
+      visible: false
+    });
+    const maxTiles = ctx.renderer.kind === "canvas2d" ? MAX_CANVAS_TILES : MAX_WEBGL_TILES;
+    let surfaceBucketCount = 1;
+    while (surfaceBucketCount < maxTiles * 4) surfaceBucketCount *= 2;
+    const surfaceBuckets = new Int32Array(surfaceBucketCount);
+    const surfaceNext = new Int32Array(maxTiles);
+    const surfaceSample = { y: 0, slope: 0 };
+    const instanceMatrix = mat4.create();
+    const restingMatrix = mat4.create();
+    const restingScale = { x: BANANA_SCALE, y: BANANA_SCALE, z: BANANA_SCALE };
+    const tilePosition = { x: 0, y: 0, z: 0 };
+    const keepAbovePlatform = (position, rotation, scale, geometry) => {
+      setVec(restingScale, scale, scale, scale);
+      mat4.fromTRS(restingMatrix, position, rotation, restingScale);
+      let minY = Infinity;
+      for (let i = 0; i < geometry.verts.length; i += 3) {
+        minY = Math.min(minY, restingMatrix[1] * geometry.verts[i] + restingMatrix[5] * geometry.verts[i + 1] + restingMatrix[9] * geometry.verts[i + 2] + restingMatrix[13]);
+      }
+      position.y += Math.max(0, BASE_Y + PLATFORM_CLEARANCE - minY);
+    };
+    const keepInstanceAbovePlatform = (matrix) => {
+      let minY = Infinity;
+      for (let i = 0; i < shellGeometry.verts.length; i += 3) {
+        minY = Math.min(minY, matrix[1] * shellGeometry.verts[i] + matrix[5] * shellGeometry.verts[i + 1] + matrix[9] * shellGeometry.verts[i + 2] + matrix[13]);
+      }
+      matrix[13] += Math.max(0, BASE_Y + PLATFORM_CLEARANCE - minY);
+    };
+    addChild(root, core, shell);
     {
-      // Slots fill by a radius and height key
-      const RING_RADII = [0.24, 0.47, 0.72, 0.98, 1.26, 1.55, 1.85].map((r) => r * SCALE);
-      const RING_COUNTS = [4, 7, 10, 14, 18, 23, 28];
-      const STORY_H = 0.42 * SCALE;
-      const STORY_MAX_RING = [6, 5, 4, 3, 2, 1];
-      const jitter = (i, k) => Math.sin(i * 127.1 + k * 311.7) * 0.5;
-      const candidates = [];
-      let index = 0;
-      for (let story = 0; story < STORY_MAX_RING.length; story++) {
-        const baseY = 0.02 + story * STORY_H;
-        for (let ring = 0; ring <= STORY_MAX_RING[story]; ring++) {
-          const radius = RING_RADII[ring], count = RING_COUNTS[ring];
-          const lift = (RING_RADII[STORY_MAX_RING[story]] - radius) * 0.1;
-          for (let k = 0; k < count; k++, index++) {
-            const angle = k / count * Math.PI * 2 + ring * 0.45 + story * 0.3;
-            candidates.push({
-              key: radius + baseY * 1.15 + jitter(index, 6) * 0.05,
-              pos: { x: Math.cos(angle) * radius + jitter(index, 1) * 0.08, y: baseY + lift, z: Math.sin(angle) * radius + jitter(index, 2) * 0.08 },
-              rot: { x: jitter(index, 3) * 0.18, y: angle + Math.PI / 2 + jitter(index, 4) * 0.5, z: jitter(index, 5) * 0.16 }
-            });
+      // Rain bananas into the lowest of several supported spots for an irregular heap
+      const STORY_H = 0.32 * BANANA_SCALE;
+      const SUPPORT_R = 0.05;
+      const TRIES = 3;
+      const CHAOS_CHANCE = 0.15;
+      const rand = mulberry32(2);
+      const surfaceRand = mulberry32(0x51face);
+      const bases = [];
+      for (let i = 0; i < VISIBLE_BANANAS; i++) {
+        let first = null, best = null, bestScore = Infinity;
+        for (let tryIndex = 0; tryIndex < TRIES; tryIndex++) {
+          const angle = rand() * Math.PI * 2;
+          const radius = Math.pow(rand(), 0.7) * SCALE;
+          const x = Math.cos(angle) * radius;
+          const z = Math.sin(angle) * radius;
+          let y = BASE_Y;
+          for (let j = 0; j < bases.length; j++) {
+            const p = bases[j].pos;
+            if (Math.hypot(x - p.x, z - p.z) < SUPPORT_R) y = Math.max(y, p.y + STORY_H);
+          }
+          const candidate = { pos: { x, y, z }, rot: null };
+          if (!first) first = candidate;
+          const score = y + rand() * STORY_H * 0.5;
+          if (score < bestScore) {
+            bestScore = score;
+            best = candidate;
           }
         }
+        const base = rand() < CHAOS_CHANCE ? first : best;
+        base.rot = { x: (rand() - 0.5) * 0.7, y: rand() * Math.PI * 2, z: (rand() - 0.5) * 0.55 };
+        keepAbovePlatform(base.pos, base.rot, BANANA_SCALE, bananaGeometry);
+        bases.push(base);
       }
-      candidates.sort((a, b) => a.key - b.key);
-      for (const base of candidates) {
+      for (let i = 0; i < bases.length; i++) {
+        const base = bases[i];
+        // A golden-angle disk gives the fixed visual pool an even, gap-resistant shell.
+        const surfaceRadius = Math.sqrt((i + 0.5) / VISIBLE_BANANAS) * 0.985;
+        const surfaceAngle = i * GOLDEN_ANGLE + (surfaceRand() - 0.5) * 0.08;
+        const profile = domeSurface(surfaceRadius, surfaceSample);
+        const radialNormal = -profile.slope * BASE_HEIGHT / SCALE;
+        const normalLength = Math.hypot(radialNormal, 1);
+        const nx = Math.cos(surfaceAngle) * radialNormal / normalLength;
+        const ny = 1 / normalLength;
+        const nz = Math.sin(surfaceAngle) * radialNormal / normalLength;
+        const surface = {
+          x: Math.cos(surfaceAngle) * surfaceRadius,
+          y: profile.y,
+          z: Math.sin(surfaceAngle) * surfaceRadius,
+          nx, ny, nz,
+          rot: { x: -Math.asin(ny), y: Math.atan2(nx, nz), z: surfaceRand() * Math.PI * 2 }
+        };
         const node = models.banana();
+        setVec(node.scale, BANANA_SCALE, BANANA_SCALE, BANANA_SCALE);
         Object.assign(node.position, base.pos);
         Object.assign(node.rotation, base.rot);
         node.visible = false;
-        const slot = { node, base: { pos: base.pos, rot: base.rot }, token: 0, note: null, dragging: false };
+        const slot = {
+          node,
+          base: { pos: { ...base.pos }, rot: { ...base.rot } },
+          small: base,
+          surface,
+          restScale: BANANA_SCALE,
+          token: 0,
+          note: null,
+          moving: false
+        };
         pileSlots.push(slot);
         addChild(root, node);
-        input.add(node, { kind: "banana", slot, grab: true }, { radius: 0.34 * SCALE });
       }
     }
-    let shown = 0;
-    let deliveries = 0;
+    const dropSlots = [];
+    for (let i = 0; i < DROP_POOL_SIZE; i++) {
+      const node = models.banana();
+      setVec(node.scale, BANANA_SCALE, BANANA_SCALE, BANANA_SCALE);
+      node.visible = false;
+      dropSlots.push({
+        node,
+        landing: { pos: { x: 0, y: BASE_Y, z: 0 }, rot: { x: 0, y: 0, z: 0 } },
+        token: 0,
+        note: null,
+        moving: false,
+        restScale: BANANA_SCALE,
+        tween: null
+      });
+      addChild(root, node);
+    }
+    let shown = 0, counted = 0;
+    let footprint = SCALE, layoutCount = -1;
+    let coreLayoutKey = -1;
+    let deliveries = 0, pendingDrops = 0, dropsStarted = 0, dropsLanded = 0, launchCredit = 0;
     let hatchOpen = 0, hatchTarget = 0;
-    const pileEdge = () => {
-      let r = 0;
-      for (let i = 0; i < shown; i++) {
-        const p = pileSlots[i].base.pos;
-        r = Math.max(r, Math.hypot(p.x, p.z));
-      }
-      return r;
-    };
+    const pileEdge = () => footprint;
     // Park a banana at its resting spot
     const restSlot = (slot) => {
       Object.assign(slot.node.position, slot.base.pos);
       Object.assign(slot.node.rotation, slot.base.rot);
-      setVec(slot.node.scale, SCALE, SCALE, SCALE);
+      setVec(slot.node.scale, slot.restScale, slot.restScale, slot.restScale);
     };
-    const flyOut = (slot, eater) => {
-      const token = ++slot.token;
-      const from = { ...slot.node.position };
-      const to = eater ? ctx.crew.headWorldOf(eater) : { x: from.x, y: from.y + 1, z: from.z };
-      addTween({
-        dur: 0.65,
-        ease: ease.inQuad,
-        update: (k) => {
-          if (slot.token !== token) return;
-          slot.node.position.x = lerp(from.x, to.x, k);
-          slot.node.position.y = lerp(from.y, to.y, k) + Math.sin(k * Math.PI) * 0.5;
-          slot.node.position.z = lerp(from.z, to.z, k);
-          const s = SCALE * (1 - k * 0.95);
-          setVec(slot.node.scale, s, s, s);
-        },
-        done: () => {
-          if (slot.token !== token) return;
-          slot.node.visible = false;
-          restSlot(slot);
-          const note = slot.note;
-          slot.note = null;
-          if (eater && note) ctx.fx.say(eater, note.handle ? `${note.text} · @${note.handle}` : note.text, 3.4);
+    const rebuildSurface = (target, growth, coreFootprint) => {
+      if (target <= VISIBLE_BANANAS) {
+        shell.visible = false;
+        shell.instanceCount = 0;
+        return;
+      }
+      const radialScale = BASE_HEIGHT * growth / coreFootprint;
+      let wanted = 0, normalizedRadius = 0.995;
+      while (normalizedRadius > 0.025 && wanted < maxTiles) {
+        const profile = domeSurface(normalizedRadius, surfaceSample);
+        const surfaceFactor = Math.hypot(1, profile.slope * radialScale);
+        const circumference = Math.PI * 2 * normalizedRadius * coreFootprint;
+        wanted += Math.max(1, Math.floor(circumference / BANANA_LENGTH_SPACE));
+        normalizedRadius -= BANANA_ROW_SPACE / (coreFootprint * surfaceFactor);
+      }
+      wanted = Math.min(wanted, maxTiles);
+      const need = wanted * 20;
+      if (shell.instanceData.length < need) {
+        let capacity = shell.instanceData.length;
+        while (capacity < need) capacity *= 2;
+        shell.instanceData = new Float32Array(Math.min(maxTiles * 20, capacity));
+      }
+      const data = shell.instanceData;
+      surfaceBuckets.fill(-1);
+      let instance = 0, band = 0;
+      normalizedRadius = 0.995;
+      while (normalizedRadius > 0.025 && instance < wanted) {
+        const profile = domeSurface(normalizedRadius, surfaceSample);
+        const radialNormal = -profile.slope * radialScale;
+        const normalLength = Math.hypot(radialNormal, 1);
+        const ny = 1 / normalLength;
+        const circumference = Math.PI * 2 * normalizedRadius * coreFootprint;
+        const bandCount = Math.min(wanted - instance, Math.max(1, Math.floor(circumference / BANANA_LENGTH_SPACE)));
+        const phase = (band * GOLDEN_ANGLE) % (Math.PI * 2);
+        for (let j = 0; j < bandCount; j++) {
+          const edgeBand = band === 0;
+          const jitter = Math.sin((instance + 1) * 12.9898) * 0.015 / Math.max(0.05, normalizedRadius * coreFootprint);
+          const angle = phase + j / bandCount * Math.PI * 2 + jitter;
+          const cos = Math.cos(angle), sin = Math.sin(angle);
+          const nx = cos * radialNormal / normalLength;
+          const nz = sin * radialNormal / normalLength;
+          const yx = ny * cos, yy = -radialNormal / normalLength, yz = ny * sin;
+          const radialJitter = edgeBand ? 0 : Math.sin((instance + 1) * 4.229) * 0.008;
+          const lift = bananaSurfaceLift + (edgeBand ? 0 : Math.sin((instance + 1) * 5.731) * 0.004);
+          const warpedRadius = normalizedRadius * (edgeBand ? 1 : models.bananaPileRadiusScale(angle, normalizedRadius));
+          const warpedY = profile.y + models.bananaPileHeightOffset(angle, normalizedRadius);
+          setVec(tilePosition,
+            cos * warpedRadius * coreFootprint + nx * lift + yx * radialJitter,
+            BASE_Y + warpedY * BASE_HEIGHT * growth + ny * lift + yy * radialJitter,
+            sin * warpedRadius * coreFootprint + nz * lift + yz * radialJitter);
+          const tilt = Math.sin((instance + 1) * 7.133) * 0.18;
+          const tx = -sin, tz = cos;
+          const ct = Math.cos(tilt), st = Math.sin(tilt);
+          const xx = tx * ct + yx * st, xy = yy * st, xz = tz * ct + yz * st;
+          const bx = -tx * st + yx * ct, by = yy * ct, bz = -tz * st + yz * ct;
+          const flip = Math.sin((instance + 1) * 3.731) < 0 ? -BANANA_SCALE : BANANA_SCALE;
+          instanceMatrix[0] = xx * flip;
+          instanceMatrix[1] = xy * flip;
+          instanceMatrix[2] = xz * flip;
+          instanceMatrix[3] = 0;
+          instanceMatrix[4] = bx * flip;
+          instanceMatrix[5] = by * flip;
+          instanceMatrix[6] = bz * flip;
+          instanceMatrix[7] = 0;
+          instanceMatrix[8] = nx * BANANA_SCALE;
+          instanceMatrix[9] = ny * BANANA_SCALE;
+          instanceMatrix[10] = nz * BANANA_SCALE;
+          instanceMatrix[11] = 0;
+          instanceMatrix[12] = tilePosition.x;
+          instanceMatrix[13] = tilePosition.y;
+          instanceMatrix[14] = tilePosition.z;
+          instanceMatrix[15] = 1;
+          keepInstanceAbovePlatform(instanceMatrix);
+          let overlaps = false;
+          const cellX = Math.floor(instanceMatrix[12] / MIN_BANANA_CENTER_SPACE);
+          const cellY = Math.floor(instanceMatrix[13] / MIN_BANANA_CENTER_SPACE);
+          const cellZ = Math.floor(instanceMatrix[14] / MIN_BANANA_CENTER_SPACE);
+          for (let x = cellX - 1; x <= cellX + 1 && !overlaps; x++) {
+            for (let y = cellY - 1; y <= cellY + 1 && !overlaps; y++) {
+              for (let z = cellZ - 1; z <= cellZ + 1 && !overlaps; z++) {
+                const bucket = ((x * 73856093) ^ (y * 19349663) ^ (z * 83492791)) & (surfaceBucketCount - 1);
+                for (let other = surfaceBuckets[bucket]; other >= 0; other = surfaceNext[other]) {
+                  const otherOffset = other * 20;
+                  if (Math.hypot(instanceMatrix[12] - data[otherOffset + 12], instanceMatrix[13] - data[otherOffset + 13], instanceMatrix[14] - data[otherOffset + 14]) < MIN_BANANA_CENTER_SPACE) {
+                    overlaps = true;
+                    break;
+                  }
+                }
+              }
+            }
+          }
+          if (overlaps) continue;
+          const offset = instance * 20;
+          data.set(instanceMatrix, offset);
+          data[offset + 16] = 1;
+          data[offset + 17] = 0;
+          data[offset + 18] = 0;
+          data[offset + 19] = 0;
+          const bucket = ((cellX * 73856093) ^ (cellY * 19349663) ^ (cellZ * 83492791)) & (surfaceBucketCount - 1);
+          surfaceNext[instance] = surfaceBuckets[bucket];
+          surfaceBuckets[bucket] = instance;
+          instance++;
         }
-      });
+        const surfaceFactor = Math.hypot(1, profile.slope * radialScale);
+        normalizedRadius -= BANANA_ROW_SPACE / (coreFootprint * surfaceFactor);
+        band++;
+      }
+      shell.instanceCount = instance;
+      shell.instanceVersion++;
+      shell.visible = true;
     };
-    const dropIn = (slot, delay) => {
+    const reflow = (target, force = false) => {
+      if (!force && target === layoutCount) return;
+      layoutCount = target;
+      const growth = footprintFor(target, 1);
+      const coreFootprint = footprintFor(target, SCALE);
+      footprint = visualFootprintFor(target, SCALE);
+      core.visible = target > VISIBLE_BANANAS;
+      const nextCoreLayoutKey = Math.max(24, Math.min(384, Math.ceil(Math.PI * 2 * coreFootprint / coreFaceSize)));
+      if (target > VISIBLE_BANANAS && nextCoreLayoutKey !== coreLayoutKey) {
+        const oldGeometry = core.geometry;
+        core.geometry = models.bananaPileCoreGeometry(coreFootprint, BASE_HEIGHT * growth, coreFaceSize);
+        coreLayoutKey = nextCoreLayoutKey;
+        ctx.renderer.releaseGeometry(oldGeometry);
+      }
+      core.position.y = BASE_Y;
+      setVec(core.scale, coreFootprint, BASE_HEIGHT * growth, coreFootprint);
+      rebuildSurface(target, growth, coreFootprint);
+      if (ctx.onLayout) ctx.onLayout(footprint, target);
+      for (let i = 0; i < pileSlots.length; i++) {
+        const slot = pileSlots[i], small = slot.small, surface = slot.surface;
+        const lift = BANANA_SCALE * 0.07;
+        slot.restScale = BANANA_SCALE;
+        if (target > VISIBLE_BANANAS) {
+          setVec(slot.base.pos,
+            surface.x * coreFootprint + surface.nx * lift,
+            BASE_Y + surface.y * BASE_HEIGHT * growth + surface.ny * lift,
+            surface.z * coreFootprint + surface.nz * lift);
+          Object.assign(slot.base.rot, surface.rot);
+        } else {
+          Object.assign(slot.base.pos, small.pos);
+          Object.assign(slot.base.rot, small.rot);
+        }
+        keepAbovePlatform(slot.base.pos, slot.base.rot, slot.restScale, bananaGeometry);
+        if (slot.node.visible && !slot.moving) restSlot(slot);
+      }
+    };
+    const chooseLanding = (slot) => {
+      const landing = slot.landing;
+      if (counted <= VISIBLE_BANANAS) {
+        const base = pileSlots[Math.floor(Math.random() * Math.max(1, counted))].base;
+        Object.assign(landing.pos, base.pos);
+        Object.assign(landing.rot, base.rot);
+        return landing;
+      }
+      let x, z, normalizedRadius;
+      do {
+        const magnitude = Math.sqrt(-2 * Math.log(Math.max(Number.EPSILON, Math.random()))) * 0.38;
+        const angle = Math.random() * Math.PI * 2;
+        x = Math.cos(angle) * magnitude;
+        z = Math.sin(angle) * magnitude;
+        normalizedRadius = magnitude;
+      } while (normalizedRadius > 0.96);
+      const angle = Math.atan2(z, x);
+      const cos = Math.cos(angle), sin = Math.sin(angle);
+      const growth = footprintFor(counted, 1);
+      const coreFootprint = footprintFor(counted, SCALE);
+      const profile = domeSurface(normalizedRadius, surfaceSample);
+      const radialNormal = -profile.slope * BASE_HEIGHT * growth / coreFootprint;
+      const normalLength = Math.hypot(radialNormal, 1);
+      const nx = cos * radialNormal / normalLength;
+      const ny = 1 / normalLength;
+      const nz = sin * radialNormal / normalLength;
+      const warpedRadius = normalizedRadius * models.bananaPileRadiusScale(angle, normalizedRadius);
+      setVec(landing.pos,
+        cos * warpedRadius * coreFootprint + nx * bananaSurfaceLift,
+        BASE_Y + (profile.y + models.bananaPileHeightOffset(angle, normalizedRadius)) * BASE_HEIGHT * growth + ny * bananaSurfaceLift,
+        sin * warpedRadius * coreFootprint + nz * bananaSurfaceLift);
+      setVec(landing.rot, -Math.asin(ny), Math.atan2(nx, nz), Math.random() * Math.PI * 2);
+      keepAbovePlatform(landing.pos, landing.rot, BANANA_SCALE, bananaGeometry);
+      return landing;
+    };
+    const dropIn = (slot) => {
       const token = ++slot.token;
-      const { pos, rot } = slot.base;
+      const landing = chooseLanding(slot);
+      const { pos, rot } = landing;
+      const fromX = pos.x + (Math.random() - 0.5) * 0.7;
+      const fromY = BANANA_DROP_HEIGHT + Math.random() * 1.2;
+      const fromZ = pos.z + (Math.random() - 0.5) * 0.7;
+      const spinX = (Math.random() - 0.5) * 12;
+      const spinY = (Math.random() - 0.5) * 10;
+      const spinZ = (Math.random() - 0.5) * 12;
       slot.note = null;
+      slot.moving = true;
       deliveries++;
-      addTween({
-        delay,
-        dur: 0.75,
+      dropsStarted++;
+      slot.tween = addTween({
+        dur: 1.05 + Math.random() * 0.3,
         ease: ease.outBounce,
         update: (k) => {
           if (slot.token !== token) return;
           slot.node.visible = true;
-          setVec(slot.node.scale, SCALE, SCALE, SCALE);
-          setVec(slot.node.position, lerp(pos.x * 0.3, pos.x, k), lerp(DROP_HEIGHT, pos.y, k), lerp(pos.z * 0.3, pos.z, k));
-          setVec(slot.node.rotation, rot.x + (1 - k) * 4, rot.y, rot.z + (1 - k) * 2);
+          const scale = lerp(BANANA_SCALE, slot.restScale, k);
+          setVec(slot.node.scale, scale, scale, scale);
+          setVec(slot.node.position, lerp(fromX, pos.x, k), lerp(fromY, pos.y, k), lerp(fromZ, pos.z, k));
+          setVec(slot.node.rotation, rot.x + (1 - k) * spinX, rot.y + (1 - k) * spinY, rot.z + (1 - k) * spinZ);
         },
         done: () => {
-          deliveries--;
           if (slot.token !== token) return;
-          restSlot(slot);
+          deliveries--;
+          dropsLanded++;
+          slot.moving = false;
+          slot.node.visible = false;
+          slot.tween = null;
+          world.level += 1;
+          syncPile(true);
         }
       });
     };
-    // Swap two slots to keep the pile contiguous
-    const swapSlots = (i, j) => {
-      const a = pileSlots[i], b = pileSlots[j];
-      pileSlots[i] = b;
-      pileSlots[j] = a;
-      const base = a.base;
-      a.base = b.base;
-      b.base = base;
-      for (const s of [a, b]) {
-        if (s.dragging) continue;
-        s.token++;
-        s.node.visible = true;
-        restSlot(s);
+    const pumpDrops = (dt) => {
+      if (!pendingDrops) return;
+      launchCredit = Math.min(DROP_POOL_SIZE, launchCredit + dt * DROP_RATE);
+      let budget = Math.floor(launchCredit), launched = 0;
+      for (let i = 0; i < dropSlots.length && pendingDrops && launched < budget; i++) {
+        const slot = dropSlots[i];
+        if (slot.moving) continue;
+        pendingDrops--;
+        dropIn(slot);
+        launched++;
+      }
+      launchCredit -= launched;
+      if (launched < budget) launchCredit = Math.min(1, launchCredit);
+    };
+    const clearDrops = () => {
+      pendingDrops = 0;
+      deliveries = 0;
+      launchCredit = 0;
+      for (let i = 0; i < dropSlots.length; i++) {
+        const slot = dropSlots[i];
+        if (slot.tween) slot.tween.alive = false;
+        slot.token++;
+        slot.moving = false;
+        slot.node.visible = false;
+        slot.tween = null;
       }
     };
     const syncPile = (settle = false) => {
-      const target = Math.floor(world.level);
-      let stagger = 0;
-      while (shown > target) {
-        const topIndex = shown - 1;
-        if (pileSlots[topIndex].dragging) {
-          let other = -1;
-          for (let i = topIndex - 1; i >= 0; i--) {
-            if (!pileSlots[i].dragging) {
-              other = i;
-              break;
-            }
-          }
-          if (other < 0) break;
-          swapSlots(other, topIndex);
-        }
+      const target = Math.max(0, Math.floor(world.level));
+      const additions = Math.max(0, target - counted);
+      reflow(target);
+      const targetShown = target <= VISIBLE_BANANAS ? target : 0;
+      while (shown > targetShown) {
         shown--;
-        const workers = ctx.crew.eatingCavemen();
-        flyOut(pileSlots[shown], workers.length ? workers[Math.floor(Math.random() * workers.length)] : null);
-      }
-      const delivered = [];
-      while (shown < target) {
         const slot = pileSlots[shown];
-        if (settle) {
-          slot.node.visible = true;
-        } else {
-          dropIn(slot, 0.25 + stagger);
-          stagger += 0.11;
-          delivered.push(slot);
-        }
+        slot.node.visible = false;
+        restSlot(slot);
+      }
+      while (shown < targetShown) {
+        const slot = pileSlots[shown];
+        slot.node.visible = true;
+        slot.moving = false;
+        restSlot(slot);
         shown++;
       }
-      if (delivered.length) hatchTarget = 1;
-      if (ctx.onShown) ctx.onShown(shown);
+      counted = target;
+      if (additions) hatchTarget = 1;
+      if (ctx.onShown) ctx.onShown(target);
       ctx.crew.updateFan();
       // A delivery brings the crew running, one banana does not
-      if (delivered.length >= 2) ctx.crew.rush();
-      return delivered;
+      if (additions >= 2) ctx.crew.rush();
     };
-    const dragPoint = { x: 0, y: 0, z: 0 };
-    let drag = null;
-    let dragHinted = false;
-    const nearestFeedable = (x, z, radius) => {
-      let best = null, bestD = radius;
-      for (const cave of ctx.crew.feedableCavemen()) {
-        const d = Math.hypot(cave.root.position.x - x, cave.root.position.z - z);
-        if (d < bestD) {
-          bestD = d;
-          best = cave;
-        }
-      }
-      return best;
+    const deliverBananas = (amount) => {
+      const additions = Math.max(0, Math.floor(Number(amount) || 0));
+      if (!additions) return 0;
+      pendingDrops = Math.min(Number.MAX_SAFE_INTEGER, pendingDrops + additions);
+      hatchTarget = 1;
+      if (additions >= 2) ctx.crew.rush();
+      return additions;
     };
-    const setFeedTarget = (cave) => {
-      if (drag && drag.target === cave) return;
-      if (drag && drag.target) drag.target.highlightTarget = 0;
-      if (drag) drag.target = cave;
-      if (cave) cave.highlightTarget = 1;
-    };
-    const returnToPile = (slot) => {
-      const token = ++slot.token;
-      const from = { ...slot.node.position };
-      addTween({ dur: 0.35, ease: ease.outQuad, update: (k) => {
-        if (slot.token !== token) return;
-        slot.node.position.x = lerp(from.x, slot.base.pos.x, k);
-        slot.node.position.y = lerp(from.y, slot.base.pos.y, k);
-        slot.node.position.z = lerp(from.z, slot.base.pos.z, k);
-      }, done: () => {
-        if (slot.token !== token) return;
-        restSlot(slot);
-        slot.dragging = false;
-      } });
-    };
-    // Give the top banana to a caveman
-    const giveTop = (slot, cave) => {
-      shown--;
-      world.level = Math.max(0, world.level - 1);
-      if (ctx.onShown) ctx.onShown(shown);
-      ctx.crew.updateFan();
-      flyOut(slot, cave);
-      cave.catchT = 1;
-    };
-    // A caveman helps itself to the top banana
+    // A driven caveman eats from the logical pile; its hand animation owns the banana.
     const eatFromPile = (cave) => {
-      const top = shown - 1;
-      if (top < 0 || deliveries > 0 || pileSlots[top].dragging) return false;
-      giveTop(pileSlots[top], cave);
+      if (counted < 1) return false;
+      world.level = Math.max(0, world.level - 1);
+      syncPile(true);
       return true;
     };
-    const handFeed = (slot, cave) => {
-      const idx = pileSlots.indexOf(slot);
-      const top = shown - 1;
-      if (idx < 0 || top < 0) return returnToPile(slot);
-      if (idx !== top) swapSlots(idx, top);
-      slot.dragging = false;
-      giveTop(slot, cave);
-      if (cave.state === "sleeping") ctx.fx.say(cave, "zzz... mmm banana", 2.2);
-      else ctx.fx.say(cave, ["OOGA! Thank!", "Nom nom.", "Best banana."][randomInt(3)], 2);
-      game.recordHandFed();
-      hud.setStats(game.state);
-    };
-    Object.assign(hooks, {
-      onGrabStart: (hit) => {
-        const slot = hit.owner.slot;
-        if (!slot.node.visible || slot.dragging || deliveries > 0 || pileSlots.indexOf(slot) >= shown) return false;
-        slot.dragging = true;
-        drag = { slot, target: null };
-        hud.tooltip.hide();
-        if (!dragHinted) {
-          dragHinted = true;
-          hud.hint("Drop it on a caveman to hand-feed.");
-        }
-        return true;
-      },
-      onGrabMove: (hit, p) => {
-        if (!drag) return;
-        if (input.groundPoint(p.x, p.y, GROUND_DRAG_Y, dragPoint)) {
-          const s = drag.slot.node.position;
-          clampDrag(dragPoint);
-          s.x = dragPoint.x;
-          s.y = GROUND_DRAG_Y;
-          s.z = dragPoint.z;
-          setFeedTarget(nearestFeedable(s.x, s.z, 1.35));
-        }
-      },
-      onGrabEnd: (hit, p, dropHit, cancelled) => {
-        if (!drag) return;
-        const { slot } = drag;
-        let target = drag.target;
-        if (!cancelled && dropHit && dropHit.owner.kind === "caveman") target = dropHit.owner.cave;
-        setFeedTarget(null);
-        drag = null;
-        if (target && !cancelled) handFeed(slot, target);
-        else returnToPile(slot);
-      }
-    });
     const update = (dt) => {
-      if (Math.floor(world.level) !== shown) syncPile();
-      if (deliveries === 0 && hatchTarget === 1) hatchTarget = 0;
+      const target = Math.floor(world.level);
+      if (target !== counted) syncPile();
+      pumpDrops(dt);
+      if (deliveries === 0 && pendingDrops === 0 && hatchTarget === 1) hatchTarget = 0;
       hatchOpen = damp(hatchOpen, hatchTarget, 7, dt);
-      if (drag) drag.slot.node.rotation.y += dt * 2.5;
     };
     const dispose = () => {
+      world.level += pendingDrops + deliveries;
+      clearDrops();
       for (const slot of pileSlots) {
-        input.remove(slot.node);
         removeChild(root, slot.node);
       }
+      for (const slot of dropSlots) removeChild(root, slot.node);
+      removeChild(root, core);
+      removeChild(root, shell);
       pileSlots.length = 0;
+      dropSlots.length = 0;
+      shell.instanceData = new Float32Array(20);
+      shell.instanceCount = 0;
       shown = 0;
-      deliveries = 0;
-      drag = null;
-      delete hooks.onGrabStart;
-      delete hooks.onGrabMove;
-      delete hooks.onGrabEnd;
+      counted = 0;
     };
-    const stats = () => ({ slots: pileSlots.length, shown, deliveries });
+    const stats = () => ({ slots: pileSlots.length, shown: counted, rendered: counted > VISIBLE_BANANAS ? shell.instanceCount : shown, deliveries, pendingDrops, dropsStarted, dropsLanded, dropPool: dropSlots.length, dropRate: DROP_RATE });
+    const setLevel = (level) => {
+      clearDrops();
+      world.level = Math.max(0, Number(level) || 0);
+      syncPile(true);
+    };
     return {
-      slots: pileSlots, syncPile, pileEdge, eatFromPile, update, dispose, stats,
+      slots: pileSlots, drops: dropSlots, core, shell, syncPile, deliverBananas, pileEdge, eatFromPile, update, dispose, stats, setLevel,
       get shown() {
-        return shown;
+        return counted;
+      },
+      get rendered() {
+        return counted > VISIBLE_BANANAS ? shell.instanceCount : shown;
+      },
+      get footprintEdge() {
+        return footprint;
       },
       get hatchOpen() {
         return hatchOpen;
       },
       get inMotion() {
-        return deliveries > 0 || !!drag;
+        return deliveries > 0 || pendingDrops > 0;
       }
     };
   };
-  BL.pile = { create, DROP_HEIGHT };
+  BL.pile = { create, DROP_HEIGHT, BANANA_DROP_HEIGHT, DROP_POOL_SIZE, DROP_RATE, footprintFor, visualFootprintFor, MAX_WEBGL_TILES, MAX_CANVAS_TILES };
 })();
 
 // ---- js/crates.js ----
@@ -6811,7 +7191,7 @@ void main() {
     // Twelve landing slots, 30 degrees apart
     const CRATE_SLOTS = Array.from({ length: 12 }, (_, i) => {
       const angle = i / 12 * Math.PI * 2;
-      return { angle, x: Math.cos(angle) * 4.4, z: Math.sin(angle) * 4.4, taken: false };
+      return { angle, x: 0, z: 0, taken: false };
     });
     // Free slot nearest the camera
     const claimCrateSlot = () => {
@@ -6821,7 +7201,12 @@ void main() {
         if (slot.taken) continue;
         if (!best || angleDelta(slot.angle, toCamera) < angleDelta(best.angle, toCamera)) best = slot;
       }
-      if (best) best.taken = true;
+      if (best) {
+        const radius = ctx.crateRadius ? ctx.crateRadius() : 4.4;
+        best.x = Math.cos(best.angle) * radius;
+        best.z = Math.sin(best.angle) * radius;
+        best.taken = true;
+      }
       return best;
     };
     const removeCrate = (crate) => {
@@ -6957,16 +7342,15 @@ void main() {
   const BEDROLL_RADIUS = 14, BEDROLL_INNER = 10;
   const NUDGES = [0, -2, 2, -4, 4, -6, 6, -8, 8];
   const VINES = ["c9", "c1", "c5"];
+  const PILE_SCALE = 0.45;
+  const PILE_CLEAR_LEVEL = 1000000;
+  const PILE_CLEAR_RADIUS = pileMod.visualFootprintFor(PILE_CLEAR_LEVEL, PILE_SCALE) + 0.5;
   const MEADOW_INNER = 5, MEADOW_OUTER = MEADOW - 1.5, CLIFF_INNER = MEADOW + 1.5, CLIFF_OUTER = RADIUS - 1;
   const DOCK_DEG = 105, LADDER_Z = -3.6, LADDER_LEAN = 0.65;
   const CLOUD_COUNT = 30, CLOUD_WRAP = 60, CLOUD_NEAR = 36;
   // Where a strolling caveman may stop
   const WANDER_COUNT = 36, WANDER_INNER = 5.5;
-  // The heap is wider and taller than the lab's
-  const PILE_SCALE = 1.4;
-  // Signboard font for a project name
-  const LABEL_FONT = "bold 13px ui-monospace, monospace";
-  const SIGN_PAD = 14, SIGN_H = 26, SIGN_FRAME = 3, NAIL = 3;
+  const ALTAR_HEIGHT = 0.34, ALTAR_BLOCK_WIDTH = 0.2, ALTAR_BLOCK_ARC = 0.3, ALTAR_RING_GAP = 0.02, ALTAR_MAX_BLOCKS = 512;
   // Ripen time and odds for a dropped banana
   const RIPEN = 25, TREE_CHANCE = 0.5, BUSH_CHANCE = 0.25;
   const PROP_TIPS = { tree: "Tree · shake it", bush: "Bush · rustle it", rock: "Rock · solid", crate: "Crate · locked", barrel: "Barrel · empty", flower: "Flowers", torch: "Torch · warm", bedroll: "Somebody's bed", ladder: "Ladder · wobbly", dock: "Dock · creaky", jetpack: "Jetpack · walk an Ooga into it", gate: null };
@@ -6980,13 +7364,19 @@ void main() {
   const WALK_IN = { x: 0, z: -(MEADOW + 0.5) };
   // Where the thank-you ticker hangs
   const TICKER_AT = { x: 0, y: 0, z: -(RADIUS - 2) };
+  const setVec = (v, x, y, z) => {
+    v.x = x;
+    v.y = y;
+    v.z = z;
+    return v;
+  };
   const mark = (name) => {
     performance.clearMarks(`ooga:${name}`);
     performance.mark(`ooga:${name}`);
   };
 
   // One visit's state, made in enter and dropped in leave
-  let renderer, game, world, go, root, camera, island, hud, hooks, input, pilot, fx, pile, crew, crates, presets, entering, stash, jetpack;
+  let renderer, game, world, go, lootEnabled, testBananas, root, camera, island, altar, hud, hooks, input, pilot, fx, pile, crew, crates, presets, entering, stash, jetpack;
   let hintAt = HINT_AFTER;
   let stateTimer = 0, hintTimer = 0, meterTimer = 0, pileEdgeNow = 0, now = 0;
   const placed = [];
@@ -7068,7 +7458,20 @@ void main() {
         claim(tx, tz, 0.5);
         addProp("torch", torch, tx, tz, 0.7);
       }
-      labels.push({ x: m.x + ax * 0.5, y: 4.5, z: m.z + az * 0.5, ax, az, text: slot.name });
+      const sign = createNode({ position: { x: 0, y: 4.5, z: 0.52 }, geometry: hubModels.caveSign() });
+      addChild(group, sign);
+      const halfW = hubModels.CAVE_SIGN_WIDTH * 0.5, halfH = hubModels.CAVE_SIGN_HEIGHT * 0.5;
+      const x = m.x + ax * sign.position.z, y = m.floorY + sign.position.y, z = m.z + az * sign.position.z;
+      const tx = Math.cos(m.ry), tz = -Math.sin(m.ry);
+      labels.push({
+        x, y, z, ax, az, text: slot.name, node: sign,
+        world: [
+          { x: x - tx * halfW, y: y + halfH, z: z - tz * halfW },
+          { x: x + tx * halfW, y: y + halfH, z: z + tz * halfW },
+          { x: x + tx * halfW, y: y - halfH, z: z + tz * halfW },
+          { x: x - tx * halfW, y: y - halfH, z: z - tz * halfW }
+        ]
+      });
     } else if (slot.status === "sleeping") {
       // Bedrolls lie along +x, as the sleep pose assumes
       addChild(group, createNode({ position: { x: 0, y: 0.05, z: -4.5 }, rotation: { x: 0, y: -m.ry, z: 0 }, geometry: hubModels.bedroll(), depthBias: 0.3 }));
@@ -7128,13 +7531,31 @@ void main() {
     cliff(60, 1, 0.5, "bush", () => hubModels.bush());
     meadow(60, 0.7, "bush", () => hubModels.bush());
     meadow(8, 0.9, "rock", () => hubModels.rock(0));
-    meadow(10, 0.7, "crate", () => hubModels.woodCrate(), true);
+    if (lootEnabled) meadow(10, 0.7, "crate", () => hubModels.woodCrate(), true);
     meadow(8, 0.6, "barrel", () => hubModels.barrel());
     meadow(50, 0.35, "flower", () => hubModels.flowerTuft());
   };
   // Hide the island's one jetpack under a prop
   const hideJetpack = () => {
-    const hiders = props.filter((o) => JETPACK_HIDERS.includes(o.prop) && island.heightAt(o.x, o.z) === 0);
+    const approachable = (o) => {
+      for (const radius of [1.8, 1.6, 2]) {
+        for (let i = 0; i < 12; i++) {
+          const angle = i / 12 * Math.PI * 2;
+          const x = o.x + Math.cos(angle) * radius, z = o.z + Math.sin(angle) * radius;
+          if (!island.onLand(x, z)) continue;
+          let nearest = true;
+          for (const other of props) {
+            if (other !== o && Math.hypot(other.x - x, other.z - z) < radius) {
+              nearest = false;
+              break;
+            }
+          }
+          if (nearest) return true;
+        }
+      }
+      return false;
+    };
+    const hiders = props.filter((o) => JETPACK_HIDERS.includes(o.prop) && island.heightAt(o.x, o.z) === 0 && approachable(o));
     stash = hiders.length ? hiders[Math.floor(Math.random() * hiders.length)] : null;
     hintAt = HINT_AFTER;
   };
@@ -7213,6 +7634,64 @@ void main() {
       clouds.push({ node, speed: 0.4 + rand() * 0.4, beside });
     }
   };
+  // A low stone dais and its flush, one block-wide perimeter grow continuously with the pile.
+  const buildAltar = () => {
+    const node = createNode();
+    const slab = createNode({ geometry: hubModels.altarSlab(), depthBias: 0.15 });
+    const rings = [];
+    addChild(node, slab);
+    for (let i = 0; i < 3; i++) {
+      const ring = createNode({ geometry: hubModels.altarBlock(i), instanceData: new Float32Array(Math.ceil(ALTAR_MAX_BLOCKS / 3) * 20), instanceCount: 0, instanceVersion: 0, depthBias: 0.2 });
+      rings.push(ring);
+      addChild(node, ring);
+    }
+    addChild(root, node);
+    placed.push(node);
+    const result = { node, slab, rings, radius: 0, platformRadius: 0, outerRingRadius: 0, outerRingInnerRadius: 0, height: ALTAR_HEIGHT, ringCount: 1, blockCount: 0, setRadius: null };
+    result.setRadius = (radius) => {
+      result.radius = radius;
+      const halfWidth = ALTAR_BLOCK_WIDTH * 0.5;
+      const outer = radius + ALTAR_RING_GAP + halfWidth;
+      const wanted = Math.min(ALTAR_MAX_BLOCKS, Math.max(8, Math.round(outer * Math.PI * 2 / ALTAR_BLOCK_ARC)));
+      const arc = outer * Math.PI * 2 / wanted * 0.88;
+      result.blockCount = wanted;
+      result.outerRingRadius = outer;
+      result.outerRingInnerRadius = outer - halfWidth;
+      result.platformRadius = outer + halfWidth;
+      setVec(slab.scale, result.outerRingInnerRadius, ALTAR_HEIGHT, result.outerRingInnerRadius);
+      for (let i = 0; i < rings.length; i++) rings[i].instanceCount = 0;
+      for (let i = 0; i < wanted; i++) {
+        const angle = i / wanted * Math.PI * 2;
+        const cos = Math.cos(angle), sin = Math.sin(angle);
+        const ring = rings[i % rings.length];
+        const offset = ring.instanceCount++ * 20;
+        const data = ring.instanceData;
+        data[offset] = cos * ALTAR_BLOCK_WIDTH;
+        data[offset + 1] = 0;
+        data[offset + 2] = sin * ALTAR_BLOCK_WIDTH;
+        data[offset + 3] = 0;
+        data[offset + 4] = 0;
+        data[offset + 5] = ALTAR_HEIGHT;
+        data[offset + 6] = 0;
+        data[offset + 7] = 0;
+        data[offset + 8] = -sin * arc;
+        data[offset + 9] = 0;
+        data[offset + 10] = cos * arc;
+        data[offset + 11] = 0;
+        data[offset + 12] = cos * outer;
+        data[offset + 13] = 0;
+        data[offset + 14] = sin * outer;
+        data[offset + 15] = 1;
+        data[offset + 16] = 1;
+        data[offset + 17] = 0;
+        data[offset + 18] = 0;
+        data[offset + 19] = 0;
+      }
+      for (let i = 0; i < rings.length; i++) rings[i].instanceVersion++;
+    };
+    result.setRadius(PILE_SCALE);
+    return result;
+  };
 
   // ---------- donations ----------
   const celebrate = (donation, bananas) => {
@@ -7227,14 +7706,12 @@ void main() {
   const onDonation = (donation) => {
     game.recordDonation(donation);
     const bananas = gameMod.bananasFor(donation.sats);
-    world.level = Math.min(pile.slots.length, world.level + bananas);
-    const delivered = pile.syncPile();
-    if (donation.message && delivered.length) delivered[delivered.length - 1].note = { text: donation.message, handle: donation.handle };
+    pile.deliverBananas(bananas);
     celebrate(donation, bananas);
-    const loot = game.lootFor(donation);
+    const loot = lootEnabled ? game.lootFor(donation) : null;
     const who = donation.handle ? `@${donation.handle}` : "anon";
     hud.toast(`+${gameMod.formatLarge(donation.sats)} sats · ${bananas} banana${bananas > 1 ? "s" : ""} · ${who}${loot ? ` · ${loot.tier} crate!` : ""}`);
-    if (loot) crates.spawnCrate(donation, loot, 0.9 + delivered.length * 0.11);
+    if (loot) crates.spawnCrate(donation, loot, 0.9 + Math.min(1.5, bananas / pileMod.DROP_RATE));
     hud.setStats(game.state);
   };
 
@@ -7242,8 +7719,6 @@ void main() {
   const tooltipFor = (hit) => {
     const o = hit.owner;
     switch (o.kind) {
-      case "banana":
-        return o.slot.note ? `"${o.slot.note.text}"${o.slot.note.handle ? ` · @${o.slot.note.handle}` : ""}` : COARSE ? "Banana · hold to grab" : "Banana · drag onto a caveman";
       case "caveman": {
         const c = o.cave;
         const worn = crew.wornBy(c.traits.name);
@@ -7280,8 +7755,7 @@ void main() {
   const dropBanana = (o, chance) => {
     if (now < o.ripe || Math.random() > chance) return false;
     o.ripe = now + RIPEN;
-    world.level = Math.min(pile.slots.length, world.level + 1);
-    pile.syncPile();
+    pile.deliverBananas(1);
     hud.toast("A banana fell out and rolled to the pile!");
     return true;
   };
@@ -7405,9 +7879,6 @@ void main() {
       case "prop":
         useProp(o);
         break;
-      case "banana":
-        if (COARSE) hud.hint("Press and hold a banana, then drop it on a caveman.");
-        break;
       default:
         break;
     }
@@ -7492,41 +7963,15 @@ void main() {
       updateMeter();
     }
   };
-  // Build quotes, then signboards over the open mouths
+  // Build quotes over the depth-tested scene
   const drawExtra = (ctx2d, project, drawBubble) => {
     crew.drawQuotes(ctx2d, project, drawBubble);
-    ctx2d.font = LABEL_FONT;
-    ctx2d.textAlign = "center";
-    ctx2d.textBaseline = "middle";
-    for (let i = 0; i < labels.length; i++) {
-      const l = labels[i];
-      if ((camera.position.x - l.x) * l.ax + (camera.position.z - l.z) * l.az < 0) continue;
-      const pos = project(l.x, l.y, l.z);
-      if (!pos) continue;
-      const bw = Math.round(ctx2d.measureText(l.text).width + SIGN_PAD * 2);
-      const bx = Math.round(pos.x - bw / 2), by = Math.round(pos.y - SIGN_H / 2);
-      ctx2d.fillStyle = "#5c4425";
-      ctx2d.fillRect(bx - SIGN_FRAME, by - SIGN_FRAME, bw + SIGN_FRAME * 2, SIGN_H + SIGN_FRAME * 2);
-      ctx2d.fillStyle = "#8a6236";
-      ctx2d.fillRect(bx, by, bw, SIGN_H);
-      ctx2d.fillStyle = "#7a5630";
-      ctx2d.fillRect(bx, by + 8, bw, 1);
-      ctx2d.fillRect(bx, by + 17, bw, 1);
-      ctx2d.fillStyle = "#3a2a18";
-      ctx2d.fillRect(bx + 2, by + 2, NAIL, NAIL);
-      ctx2d.fillRect(bx + bw - 2 - NAIL, by + 2, NAIL, NAIL);
-      ctx2d.fillRect(bx + 2, by + SIGN_H - 2 - NAIL, NAIL, NAIL);
-      ctx2d.fillRect(bx + bw - 2 - NAIL, by + SIGN_H - 2 - NAIL, NAIL, NAIL);
-      ctx2d.fillStyle = "#f3efe4";
-      ctx2d.fillText(l.text, pos.x, pos.y + 1);
-    }
-    ctx2d.textBaseline = "alphabetic";
-    ctx2d.textAlign = "left";
   };
   const overlay = (dt) => fx.drawOverlay(dt, drawExtra);
 
   // ---------- actions and keys ----------
   const onLootCleared = () => {
+    if (!lootEnabled) return;
     crew.applyAllSwag();
     crew.renderLocker();
     hud.toast("Loot locker cleared");
@@ -7536,6 +7981,10 @@ void main() {
     onLootCleared();
   };
   const demoTip = (sats) => onDonation({ id: `demo-${Date.now()}`, sats, handle: game.state.handle, message: game.state.message, at: Date.now() });
+  const addTestBananas = (amount) => {
+    pile.deliverBananas(amount);
+    hud.toast(`+${amount} test bananas`);
+  };
   const resetDemo = () => {
     game.resetAll();
     location.reload();
@@ -7543,14 +7992,14 @@ void main() {
   const onKey = (e) => {
     if (e.key === "Escape") pilot.release();
     if (e.key === "0") pilot.goPreset("pile");
-    if (e.key === "b" || e.key === "B") demoTip(1200);
+    if (e.key === "b" || e.key === "B") addTestBananas(testBananas);
     if (e.key === "l" || e.key === "L") demoTip(120000);
     if (e.key === "p" || e.key === "P") {
-      world.level = pile.slots.length;
-      pile.syncPile();
+      world.level = Math.max(world.level, pile.slots.length);
+      pile.syncPile(true);
     }
     // J straps a jetpack on whoever is being driven
-    if (e.key === "j" || e.key === "J") {
+    if (lootEnabled && (e.key === "j" || e.key === "J")) {
       const cave = crew.player;
       if (cave && !cave.jet) {
         crew.wearJetpack(cave, hubModels.jetpack(), hubModels.jetFlame());
@@ -7574,17 +8023,20 @@ void main() {
 
   // ---------- scene contract ----------
   const enter = (ctx) => {
-    ({ renderer, game, world, go } = ctx);
+    ({ renderer, game, world, go, lootEnabled, testBananas } = ctx);
     camera = createCamera({ fov: 48, near: 0.5, far: 140 });
     root = createNode();
     island = terrain.island({ seed: SEED });
     mark("island");
-    hud = hudMod.create({ roster: contributors.roster, catalog: models.SWAG, tierColors: models.TIER_COLORS, renderIcon: hudMod.renderIcon });
+    hud = hudMod.create({ roster: contributors.roster, catalog: models.SWAG, tierColors: models.TIER_COLORS, renderIcon: hudMod.renderIcon, lootEnabled });
     hooks = {};
     input = interactMod.create({ canvas: ctx.canvas, renderer, camera, hooks });
     presets = { pile: PILE_VIEW, gate: GATE_VIEW };
     pilot = pilotMod.create({ renderer, camera, hud, presets, landing: "pile", pitch: [PITCH_MIN, PITCH_MAX], dist: [DIST_MIN, DIST_MAX], follow: FOLLOW, fly: FLY, clampTarget, clampCamera, coarse: COARSE });
     place(island.geometry, 0, 0, 0, 0);
+    // Nothing scattered or selected as a wander point may enter the supported pile lawn.
+    claim(0, 0, PILE_CLEAR_RADIUS);
+    altar = buildAltar();
     const gate = place(hubModels.gate(), island.gate.x, island.gate.z, island.gate.ry);
     addTarget(gate, { kind: "gate" }, { radius: 3 });
     props.push({ kind: "prop", prop: "gate", node: gate, x: gate.position.x, z: gate.position.z, ripe: 0 });
@@ -7623,9 +8075,9 @@ void main() {
     scatter();
     buildSpots();
     buildClouds();
-    hideJetpack();
+    if (lootEnabled) hideJetpack();
     mark("props");
-    const shared = { root, input, hooks, hud, game, world, renderer, camera, overlay: ctx.overlay, tickerAt: TICKER_AT, buildSpots: buildSpotsList, walkIn: WALK_IN, clampDrag, viewYaw: PILE_VIEW.yaw, bedrolls, pileScale: PILE_SCALE, groundAt: supportAt, wanderSpot, walkable, flyable, useNear };
+    const shared = { root, input, hooks, hud, game, world, renderer, camera, overlay: ctx.overlay, tickerAt: TICKER_AT, buildSpots: buildSpotsList, walkIn: WALK_IN, clampDrag, viewYaw: PILE_VIEW.yaw, bedrolls, pileScale: PILE_SCALE, pileY: ALTAR_HEIGHT + 0.02, onLayout: altar.setRadius, onShown: () => { meterTimer = 0; }, crateRadius: () => Math.max(4.4, altar.platformRadius + 0.8), groundAt: supportAt, wanderSpot, walkable, flyable, useNear };
     fx = shared.fx = fxMod.create(shared);
     pile = shared.pile = pileMod.create(shared);
     mark("pile");
@@ -7691,8 +8143,10 @@ void main() {
       fx.trimPool();
     }, 6e4);
     for (const cave of crew.cavemen.values()) crew.refreshRosterRow(cave);
-    crew.applyAllSwag();
-    crew.renderLocker();
+    if (lootEnabled) {
+      crew.applyAllSwag();
+      crew.renderLocker();
+    }
     hud.setStats(game.state);
     pile.syncPile(true);
     updateMeter();
@@ -7701,11 +8155,11 @@ void main() {
     Object.assign(hubScene, {
       root, camera, input,
       debug: {
-        slots: pile.slots, cavemen: crew.cavemen, crates: crates.list, lab: null, hud, applyAllSwag: crew.applyAllSwag, renderLocker: crew.renderLocker, demoTip, refreshStates: crew.refreshStates, trimPool: fx.trimPool,
+        slots: pile.slots, drops: pile.drops, core: pile.core, shell: pile.shell, cavemen: crew.cavemen, crates: crates.list, lab: null, hud, applyAllSwag: crew.applyAllSwag, renderLocker: crew.renderLocker, demoTip, setPileLevel: pile.setLevel, refreshStates: crew.refreshStates, trimPool: fx.trimPool,
         get shown() {
           return pile.shown;
         },
-        island, mouths: island.mouths, camera, crew, controls: pilot.controls, props,
+        island, mouths: island.mouths, labels, camera, crew, controls: pilot.controls, props, altar,
         get jetpack() {
           return { stash, pickup: jetpack, hintAt, hintNow: () => (hintAt = now) };
         }
@@ -7727,7 +8181,7 @@ void main() {
     input.dispose();
     hud.dispose();
     // Drop everything but the cached island
-    hud = hooks = input = pilot = fx = pile = crew = crates = presets = stash = jetpack = null;
+    altar = hud = hooks = input = pilot = fx = pile = crew = crates = presets = stash = jetpack = null;
     hubScene.input = hubScene.debug = null;
     return { targets: count };
   };
@@ -7738,7 +8192,7 @@ void main() {
     let nodes = 0;
     traverseVisible(root, () => nodes++);
     const all = (n) => 1 + n.children.reduce((sum, c) => sum + all(c), 0);
-    return { visibleNodes: nodes, allNodes: all(root), tweens: tweenCount(), targets: input.targetCount, ...fx.stats(), ...crates.stats(), ...crew.stats() };
+    return { visibleNodes: nodes, allNodes: all(root), tweens: tweenCount(), targets: input.targetCount, ...fx.stats(), ...crates.stats(), ...crew.stats(), ...pile.stats() };
   };
   const hubScene = {
     id: "hub", enter, update, overlay, onDonation, onKey, onLootCleared, renderOpts: RENDER_OPTS, leave, stats, liveGeometry,
@@ -7804,7 +8258,7 @@ void main() {
   const STATE_LED = { working: 0, sleeping: 1, away: 3 };
 
   // One visit's state, made in enter and dropped in leave
-  let renderer, game, world, go, root, camera, lab, hud, hooks, input, pilot, fx, pile, crew, crates, pulseNodes;
+  let renderer, game, world, go, lootEnabled, testBananas, root, camera, lab, hud, hooks, input, pilot, fx, pile, crew, crates, pulseNodes;
   let stateTimer = 0, hintTimer = 0, meterTimer = 0;
   const propTargets = [];
   const usables = [];
@@ -7853,14 +8307,12 @@ void main() {
   const onDonation = (donation) => {
     game.recordDonation(donation);
     const bananas = gameMod.bananasFor(donation.sats);
-    world.level = Math.min(pile.slots.length, world.level + bananas);
-    const delivered = pile.syncPile();
-    if (donation.message && delivered.length) delivered[delivered.length - 1].note = { text: donation.message, handle: donation.handle };
+    pile.deliverBananas(bananas);
     celebrate(donation, bananas);
-    const loot = game.lootFor(donation);
+    const loot = lootEnabled ? game.lootFor(donation) : null;
     const who = donation.handle ? `@${donation.handle}` : "anon";
     hud.toast(`+${gameMod.formatLarge(donation.sats)} sats · ${bananas} banana${bananas > 1 ? "s" : ""} · ${who}${loot ? ` · ${loot.tier} crate!` : ""}`);
-    if (loot) crates.spawnCrate(donation, loot, 0.9 + delivered.length * 0.11);
+    if (loot) crates.spawnCrate(donation, loot, 0.9 + Math.min(1.5, bananas / pileMod.DROP_RATE));
     hud.setStats(game.state);
   };
 
@@ -7933,8 +8385,6 @@ void main() {
   const tooltipFor = (hit) => {
     const o = hit.owner;
     switch (o.kind) {
-      case "banana":
-        return o.slot.note ? `"${o.slot.note.text}"${o.slot.note.handle ? ` · @${o.slot.note.handle}` : ""}` : COARSE ? "Banana · hold to grab" : "Banana · drag onto a caveman";
       case "caveman": {
         const c = o.cave;
         const worn = crew.wornBy(c.traits.name);
@@ -7989,9 +8439,6 @@ void main() {
         hud.toast(tooltipFor(hit));
         o.node.pulse = 1;
         break;
-      case "banana":
-        if (COARSE) hud.hint("Press and hold a banana, then drop it on a caveman.");
-        break;
       default:
         break;
     }
@@ -8041,6 +8488,7 @@ void main() {
 
   // ---------- actions and keys ----------
   const onLootCleared = () => {
+    if (!lootEnabled) return;
     crew.applyAllSwag();
     crew.renderLocker();
     hud.toast("Loot locker cleared");
@@ -8050,6 +8498,10 @@ void main() {
     onLootCleared();
   };
   const demoTip = (sats) => onDonation({ id: `demo-${Date.now()}`, sats, handle: game.state.handle, message: game.state.message, at: Date.now() });
+  const addTestBananas = (amount) => {
+    pile.deliverBananas(amount);
+    hud.toast(`+${amount} test bananas`);
+  };
   const resetDemo = () => {
     game.resetAll();
     location.reload();
@@ -8060,11 +8512,11 @@ void main() {
       else go("hub");
     }
     if (e.key === "0") pilot.goPreset("pile");
-    if (e.key === "b" || e.key === "B") demoTip(1200);
+    if (e.key === "b" || e.key === "B") addTestBananas(testBananas);
     if (e.key === "l" || e.key === "L") demoTip(120000);
     if (e.key === "p" || e.key === "P") {
-      world.level = pile.slots.length;
-      pile.syncPile();
+      world.level = Math.max(world.level, pile.slots.length);
+      pile.syncPile(true);
     }
     const digit = parseInt(e.key, 10);
     if (digit >= 1 && digit <= 9) {
@@ -8080,17 +8532,17 @@ void main() {
 
   // ---------- scene contract ----------
   const enter = (ctx) => {
-    ({ renderer, game, world, go } = ctx);
+    ({ renderer, game, world, go, lootEnabled, testBananas } = ctx);
     camera = createCamera({ fov: 48, near: 0.25, far: 60 });
     root = createNode();
     lab = models.labRoom({ half: ROOM_HALF });
     addChild(root, lab.room);
     mark("room");
-    hud = hudMod.create({ roster: contributors.roster, catalog: models.SWAG, tierColors: models.TIER_COLORS, renderIcon: hudMod.renderIcon });
+    hud = hudMod.create({ roster: contributors.roster, catalog: models.SWAG, tierColors: models.TIER_COLORS, renderIcon: hudMod.renderIcon, lootEnabled });
     hooks = {};
     input = interactMod.create({ canvas: ctx.canvas, renderer, camera, hooks });
     pilot = pilotMod.create({ renderer, camera, hud, presets: PRESETS, landing: "pile", pitch: PITCH, dist: DIST, follow: FOLLOW, fly: FLY, clampTarget, clampCamera, coarse: COARSE });
-    const shared = { root, input, hooks, hud, game, world, renderer, camera, overlay: ctx.overlay, tickerAt: TICKER_AT, buildSpots: BUILD_SPOTS.slice(), walkIn: WALK_IN, clampDrag, viewYaw: PRESETS.pile.yaw, bedrolls: lab.bedrolls, onShown: (shown) => lab.equipment.abacus.setValue(shown), walkable, useNear };
+    const shared = { root, input, hooks, hud, game, world, renderer, camera, overlay: ctx.overlay, tickerAt: TICKER_AT, buildSpots: BUILD_SPOTS.slice(), walkIn: WALK_IN, clampDrag, viewYaw: PRESETS.pile.yaw, bedrolls: lab.bedrolls, pileScale: 0.45, onShown: (shown) => { lab.equipment.abacus.setValue(shown); meterTimer = 0; }, walkable, useNear };
     fx = shared.fx = fxMod.create(shared);
     pile = shared.pile = pileMod.create(shared);
     mark("pile");
@@ -8166,17 +8618,19 @@ void main() {
       fx.trimPool();
     }, 6e4);
     for (const cave of crew.cavemen.values()) crew.refreshRosterRow(cave);
-    crew.applyAllSwag();
-    crew.renderLocker();
+    if (lootEnabled) {
+      crew.applyAllSwag();
+      crew.renderLocker();
+    }
     hud.setStats(game.state);
     pile.syncPile(true);
     updateMeter();
     if (window.matchMedia("(max-width: 720px), (max-height: 500px)").matches) hud.el.sheet.dataset.open = "false";
-    hintTimer = window.setTimeout(() => hud.hint(COARSE ? "Drag to look · pinch to zoom · sticks to fly · hold a banana to feed" : "Drag to orbit · scroll to zoom · WASD to fly · drag a banana onto a caveman"), 1200);
+    hintTimer = window.setTimeout(() => hud.hint(COARSE ? "Drag to look · pinch to zoom · sticks to fly" : "Drag to orbit · scroll to zoom · WASD to fly"), 1200);
     Object.assign(labScene, {
       root, camera, input,
       debug: {
-        slots: pile.slots, cavemen: crew.cavemen, crates: crates.list, lab, hud, applyAllSwag: crew.applyAllSwag, renderLocker: crew.renderLocker, demoTip, refreshStates: crew.refreshStates, trimPool: fx.trimPool,
+        slots: pile.slots, drops: pile.drops, core: pile.core, shell: pile.shell, cavemen: crew.cavemen, crates: crates.list, lab, hud, applyAllSwag: crew.applyAllSwag, renderLocker: crew.renderLocker, demoTip, setPileLevel: pile.setLevel, refreshStates: crew.refreshStates, trimPool: fx.trimPool,
         get shown() {
           return pile.shown;
         },
@@ -8210,7 +8664,7 @@ void main() {
     let nodes = 0;
     traverseVisible(root, () => nodes++);
     const all = (n) => 1 + n.children.reduce((sum, c) => sum + all(c), 0);
-    return { visibleNodes: nodes, allNodes: all(root), tweens: tweenCount(), targets: input.targetCount, ...fx.stats(), ...crates.stats(), ...crew.stats() };
+    return { visibleNodes: nodes, allNodes: all(root), tweens: tweenCount(), targets: input.targetCount, ...fx.stats(), ...crates.stats(), ...crew.stats(), ...pile.stats() };
   };
   const labScene = {
     id: "lab", enter, update, overlay, onDonation, onKey, onLootCleared, renderOpts: RENDER_OPTS, leave, stats, liveGeometry,
@@ -8230,7 +8684,15 @@ void main() {
   const { clearTweens, tweenCount } = scene;
   const params = new URLSearchParams(location.search);
   const DEBUG = params.has("debug");
-  const START_BANANAS = 22;
+  const LOOT_ENABLED = DEBUG && params.get("loot") === "1";
+  const requestedBananas = Number(params.get("bananas"));
+  const START_BANANAS = DEBUG && params.has("bananas") && Number.isFinite(requestedBananas) && requestedBananas >= 0
+    ? Math.min(Number.MAX_SAFE_INTEGER, Math.floor(requestedBananas))
+    : 1000;
+  const requestedTestBananas = Number(params.get("b"));
+  const TEST_BANANAS = DEBUG && params.has("b") && Number.isFinite(requestedTestBananas) && requestedTestBananas >= 0
+    ? Math.min(Number.MAX_SAFE_INTEGER, Math.floor(requestedTestBananas))
+    : 100;
   const FADE = 0.25;
   const COARSE = window.matchMedia("(pointer: coarse)").matches;
   const $ = (id) => document.getElementById(id);
@@ -8275,7 +8737,7 @@ void main() {
     if (transition) return;
     transition = { next, out: true, t: 0 };
   };
-  const ctx = { renderer, canvas: sceneCanvas, overlay: overlayCanvas, game, world, go, from: null };
+  const ctx = { renderer, canvas: sceneCanvas, overlay: overlayCanvas, game, world, go, lootEnabled: LOOT_ENABLED, testBananas: TEST_BANANAS, from: null };
   // data-scene sections show only with their scene
   const sceneSections = [...document.querySelectorAll("[data-scene]")];
   const enter = (next) => {
@@ -8409,7 +8871,7 @@ void main() {
     if (e.repeat) return;
     const typing = e.target && (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA");
     if (typing || (e.target && e.target.closest && e.target.closest("dialog"))) return;
-    if (e.shiftKey && (e.key === "Delete" || e.key === "Backspace")) {
+    if (LOOT_ENABLED && e.shiftKey && (e.key === "Delete" || e.key === "Backspace")) {
       e.preventDefault();
       game.clearLoot();
       active.onLootCleared();
@@ -8446,6 +8908,9 @@ void main() {
     const ooga = {
       game,
       renderer,
+      startLevel: START_BANANAS,
+      lootEnabled: LOOT_ENABLED,
+      testBananas: TEST_BANANAS,
       project: renderer.project,
       housekeep,
       go,
@@ -8469,7 +8934,7 @@ void main() {
         return world.level;
       }
     };
-    for (const key of ["slots", "cavemen", "crates", "lab", "hud", "applyAllSwag", "renderLocker", "demoTip", "refreshStates", "trimPool", "shown", "island", "mouths", "camera", "crew", "controls", "props", "jetpack"]) {
+    for (const key of ["slots", "drops", "core", "shell", "cavemen", "crates", "lab", "hud", "applyAllSwag", "renderLocker", "demoTip", "setPileLevel", "refreshStates", "trimPool", "shown", "island", "mouths", "labels", "camera", "crew", "controls", "props", "altar", "jetpack"]) {
       Object.defineProperty(ooga, key, { get: () => active.debug[key], enumerable: true });
     }
     window.__ooga = ooga;

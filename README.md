@@ -4,8 +4,8 @@ A small WebGL2 floating island whose cliff caves are projects. The open cave is 
 where donated bananas feed voxel cavemen who stand in for the contributors of
 [EntropyLab](https://github.com/w-s-bitcoin/entropylab). Contributors eat when they
 have committed recently, sleep when they have not, and hand-build lab equipment between
-meals. Visitors can hand-feed bananas, poke the crew, roll the dice, and open loot
-crates to dress the cavemen in swag, on the island and in the cave alike.
+meals. Visitors can poke the crew, roll the dice, and watch donated bananas rain onto the
+shared pile on the island and in the cave alike.
 
 Everything is plain JavaScript with no dependencies, no build requirement, and no
 network access. The page cannot make a request, payments are a simulator for now, and
@@ -21,22 +21,20 @@ lit cave to enter EntropyLab; **Escape** or the **Leave cave** button brings you
 Fly around the island with **W A S D** (or the arrows), **Q E** to turn, **R F** to tilt,
 **Z** or **Space** up and **X** down; drag to orbit and scroll to zoom. On a phone the left
 stick moves and the right stick looks. Double-tap a caveman to walk in their boots: the same
-keys or stick walk them, **Space** (or the Ooga! button) eats from the pile, opens a crate,
-pokes a neighbour, shakes a tree, rustles a bush, rolls a die or flips a card, and walking
+keys or stick walk them, **Space** (or the Ooga! button) eats from the pile, pokes a
+neighbour, shakes a tree, rustles a bush, rolls a die or flips a card, and walking
 into the lit cave enters it. **Escape** lets go. Lost? **0** or the **Reset view** button
 brings the camera home.
 
-One jetpack is hidden on the island, under a different bush, rock, crate, barrel or flower on
-every load. Shake the right one and it drops; walk an Ooga into it to put it on. After that,
-**hold Space** (or the **Blast off!** button) to climb, and fly with the same keys or stick.
-
-Keys: **B** test tip, **L** legendary tip, **P** fill the pile, **1** to **9** force a
-contributor to eating, **Escape** leave a cave or let go, **Shift+Delete** clear the loot
-locker, **Shift+R** reset the demo.
+Keys: **B** add 100 test bananas, **L** legendary tip, **P** fill the pile, **1** to **9** force a
+contributor to eating, **Escape** leave a cave or let go, **Shift+R** reset the demo.
 
 URL flags: `?scene=lab` opens the lab directly, `?nosim=1` silences simulated tips,
 `?canvas2d=1` forces the Canvas 2D fallback, `?yaw=1.2` sets the starting camera angle,
-`?debug=1` exposes `window.__ooga`.
+`?debug=1` exposes `window.__ooga`. In debug mode, add `&bananas=10000` (or another
+non-negative amount) to preview the pile at that starting level without changing saved state,
+use `&b=500` to choose how many test bananas each press of **B** adds and drops, or use
+`&loot=1` to exercise the dormant loot feature.
 
 ## Test
 

@@ -8,8 +8,6 @@
   const CHEW_PERIOD = 3.2;
   const BODY_PARTS = ["torso", "head", "legL", "legR", "armL", "armR"];
   const SWAG_ANCHORS = ["hat", "face"];
-  const FAN_MIN = 2.0;
-  const FAN_MAX = 3.4;
   const FAN_STANDOFF = 1.1;
   const FAN_ARC = 2.2;
   const POKES = ["Ooga?", "Booga!", "No poke.", "Hmm banana?", "Ooga booga booga."];
@@ -184,7 +182,8 @@
     };
     // Eaters gather on the far side of the view
     const FAN_CENTER = Math.atan2(Math.cos(viewYaw), Math.sin(viewYaw)) + Math.PI;
-    let fanRadius = FAN_MIN;
+    const wantedFanRadius = () => Math.max(ctx.pile.footprintEdge, ctx.pile.pileEdge()) + FAN_STANDOFF;
+    let fanRadius = wantedFanRadius();
     const assignFanSlots = (entries, isWorking) => {
       const farSide = FAN_CENTER;
       // Neighbours stand FAN_ARC apart at any radius
@@ -226,8 +225,8 @@
       cave.parts.head.rotation.y = 0;
     };
     const updateFan = () => {
-      const wanted = clamp(ctx.pile.pileEdge() + FAN_STANDOFF, FAN_MIN, FAN_MAX);
-      if (Math.abs(wanted - fanRadius) < 0.3) return;
+      const wanted = wantedFanRadius();
+      if (Math.abs(wanted - fanRadius) < 0.08) return;
       fanRadius = wanted;
       const entries = [...cavemen.values()];
       assignFanSlots(entries, (cave) => cave.state === "working");
@@ -236,7 +235,7 @@
     const refreshStates = (settle = false) => {
       const entries = [...cavemen.values()];
       const next = new Map(entries.map((cave) => [cave, stateOf(cave)]));
-      fanRadius = clamp(ctx.pile.pileEdge() + FAN_STANDOFF, FAN_MIN, FAN_MAX);
+      fanRadius = wantedFanRadius();
       assignFanSlots(entries, (cave) => next.get(cave) === "working");
       for (const cave of entries) {
         const target = next.get(cave);
@@ -253,6 +252,7 @@
         cave.act.until = elapsed + EAT_MIN + Math.random() * EAT_SPREAD;
         cave.act.trips = 0;
         walkToSlot(cave, true);
+        if (!cave.walk) cave.act.kind = "eat";
       }
     };
     // Send a caveman off to a spot
@@ -276,7 +276,7 @@
     };
     const headWorldOf = (cave) => ({ x: cave.root.position.x, y: cave.state === "sleeping" ? 0.5 : cave.root.position.y - cave.baseY + cave.headOffset * 0.95, z: cave.root.position.z });
     const bulletPool = Array.from({ length: 12 }, () => {
-      const node = createNode({ geometry: models.bananaGeometry(), scale: { x: 0.34, y: 0.34, z: 0.34 }, visible: false });
+      const node = createNode({ geometry: models.bananaGeometry(), scale: { x: models.BANANA_AMMO_SCALE, y: models.BANANA_AMMO_SCALE, z: models.BANANA_AMMO_SCALE }, visible: false });
       addChild(root, node);
       return node;
     });
@@ -632,13 +632,13 @@
         }
         world.level = Math.max(0, world.level - EAT_RATE * dt);
         const chew = (elapsed + cave.phase) % CHEW_PERIOD / CHEW_PERIOD;
-        const lift = chew < 0.35 ? Math.sin(chew / 0.35 * Math.PI) : 0;
-        const bite = chew < 0.35 ? Math.floor(chew / 0.35 * 3) / 3 : 0;
-        parts.armR.rotation.x = -0.2 - lift * 2.1;
-        parts.head.rotation.x = lift * 0.22 + (chew > 0.35 && chew < 0.5 ? Math.sin((chew - 0.35) / 0.15 * Math.PI * 3) * 0.05 : 0);
-        parts.snack.visible = true;
-        const s = 0.55 * (1 - bite * 0.5);
-        parts.snack.scale.x = parts.snack.scale.y = parts.snack.scale.z = s;
+        if (chew < 0.18) parts.armR.rotation.x = lerp(-0.2, -1.05, chew / 0.18);
+        else if (chew < 0.42) parts.armR.rotation.x = lerp(-1.05, -2.3, (chew - 0.18) / 0.24);
+        else if (chew < 0.58) parts.armR.rotation.x = lerp(-2.3, -0.2, (chew - 0.42) / 0.16);
+        else parts.armR.rotation.x = -0.2;
+        parts.head.rotation.x = chew > 0.34 && chew < 0.54 ? Math.sin((chew - 0.34) / 0.2 * Math.PI) * 0.22 : 0;
+        parts.snack.visible = chew >= 0.18 && chew < 0.42;
+        parts.snack.scale.x = parts.snack.scale.y = parts.snack.scale.z = models.BANANA_AMMO_SCALE;
       } else {
         parts.armR.rotation.x = -0.1;
         parts.snack.visible = false;

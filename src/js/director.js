@@ -4,7 +4,15 @@
   const { clearTweens, tweenCount } = scene;
   const params = new URLSearchParams(location.search);
   const DEBUG = params.has("debug");
-  const START_BANANAS = 22;
+  const LOOT_ENABLED = DEBUG && params.get("loot") === "1";
+  const requestedBananas = Number(params.get("bananas"));
+  const START_BANANAS = DEBUG && params.has("bananas") && Number.isFinite(requestedBananas) && requestedBananas >= 0
+    ? Math.min(Number.MAX_SAFE_INTEGER, Math.floor(requestedBananas))
+    : 1000;
+  const requestedTestBananas = Number(params.get("b"));
+  const TEST_BANANAS = DEBUG && params.has("b") && Number.isFinite(requestedTestBananas) && requestedTestBananas >= 0
+    ? Math.min(Number.MAX_SAFE_INTEGER, Math.floor(requestedTestBananas))
+    : 100;
   const FADE = 0.25;
   const COARSE = window.matchMedia("(pointer: coarse)").matches;
   const $ = (id) => document.getElementById(id);
@@ -49,7 +57,7 @@
     if (transition) return;
     transition = { next, out: true, t: 0 };
   };
-  const ctx = { renderer, canvas: sceneCanvas, overlay: overlayCanvas, game, world, go, from: null };
+  const ctx = { renderer, canvas: sceneCanvas, overlay: overlayCanvas, game, world, go, lootEnabled: LOOT_ENABLED, testBananas: TEST_BANANAS, from: null };
   // data-scene sections show only with their scene
   const sceneSections = [...document.querySelectorAll("[data-scene]")];
   const enter = (next) => {
@@ -183,7 +191,7 @@
     if (e.repeat) return;
     const typing = e.target && (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA");
     if (typing || (e.target && e.target.closest && e.target.closest("dialog"))) return;
-    if (e.shiftKey && (e.key === "Delete" || e.key === "Backspace")) {
+    if (LOOT_ENABLED && e.shiftKey && (e.key === "Delete" || e.key === "Backspace")) {
       e.preventDefault();
       game.clearLoot();
       active.onLootCleared();
@@ -220,6 +228,9 @@
     const ooga = {
       game,
       renderer,
+      startLevel: START_BANANAS,
+      lootEnabled: LOOT_ENABLED,
+      testBananas: TEST_BANANAS,
       project: renderer.project,
       housekeep,
       go,
@@ -243,7 +254,7 @@
         return world.level;
       }
     };
-    for (const key of ["slots", "cavemen", "crates", "lab", "hud", "applyAllSwag", "renderLocker", "demoTip", "refreshStates", "trimPool", "shown", "island", "mouths", "camera", "crew", "controls", "props", "jetpack"]) {
+    for (const key of ["slots", "drops", "core", "shell", "cavemen", "crates", "lab", "hud", "applyAllSwag", "renderLocker", "demoTip", "setPileLevel", "refreshStates", "trimPool", "shown", "island", "mouths", "labels", "camera", "crew", "controls", "props", "altar", "jetpack"]) {
       Object.defineProperty(ooga, key, { get: () => active.debug[key], enumerable: true });
     }
     window.__ooga = ooga;

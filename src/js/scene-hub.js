@@ -50,16 +50,15 @@
   const BEDROLL_RADIUS = 14, BEDROLL_INNER = 10;
   const NUDGES = [0, -2, 2, -4, 4, -6, 6, -8, 8];
   const VINES = ["c9", "c1", "c5"];
+  const PILE_SCALE = 0.45;
+  const PILE_CLEAR_LEVEL = 1000000;
+  const PILE_CLEAR_RADIUS = pileMod.visualFootprintFor(PILE_CLEAR_LEVEL, PILE_SCALE) + 0.5;
   const MEADOW_INNER = 5, MEADOW_OUTER = MEADOW - 1.5, CLIFF_INNER = MEADOW + 1.5, CLIFF_OUTER = RADIUS - 1;
   const DOCK_DEG = 105, LADDER_Z = -3.6, LADDER_LEAN = 0.65;
   const CLOUD_COUNT = 30, CLOUD_WRAP = 60, CLOUD_NEAR = 36;
   // Where a strolling caveman may stop
   const WANDER_COUNT = 36, WANDER_INNER = 5.5;
-  // The heap is wider and taller than the lab's
-  const PILE_SCALE = 1.4;
-  // Signboard font for a project name
-  const LABEL_FONT = "bold 13px ui-monospace, monospace";
-  const SIGN_PAD = 14, SIGN_H = 26, SIGN_FRAME = 3, NAIL = 3;
+  const ALTAR_HEIGHT = 0.34, ALTAR_BLOCK_WIDTH = 0.2, ALTAR_BLOCK_ARC = 0.3, ALTAR_RING_GAP = 0.02, ALTAR_MAX_BLOCKS = 512;
   // Ripen time and odds for a dropped banana
   const RIPEN = 25, TREE_CHANCE = 0.5, BUSH_CHANCE = 0.25;
   const PROP_TIPS = { tree: "Tree · shake it", bush: "Bush · rustle it", rock: "Rock · solid", crate: "Crate · locked", barrel: "Barrel · empty", flower: "Flowers", torch: "Torch · warm", bedroll: "Somebody's bed", ladder: "Ladder · wobbly", dock: "Dock · creaky", jetpack: "Jetpack · walk an Ooga into it", gate: null };
@@ -73,13 +72,19 @@
   const WALK_IN = { x: 0, z: -(MEADOW + 0.5) };
   // Where the thank-you ticker hangs
   const TICKER_AT = { x: 0, y: 0, z: -(RADIUS - 2) };
+  const setVec = (v, x, y, z) => {
+    v.x = x;
+    v.y = y;
+    v.z = z;
+    return v;
+  };
   const mark = (name) => {
     performance.clearMarks(`ooga:${name}`);
     performance.mark(`ooga:${name}`);
   };
 
   // One visit's state, made in enter and dropped in leave
-  let renderer, game, world, go, root, camera, island, hud, hooks, input, pilot, fx, pile, crew, crates, presets, entering, stash, jetpack;
+  let renderer, game, world, go, lootEnabled, testBananas, root, camera, island, altar, hud, hooks, input, pilot, fx, pile, crew, crates, presets, entering, stash, jetpack;
   let hintAt = HINT_AFTER;
   let stateTimer = 0, hintTimer = 0, meterTimer = 0, pileEdgeNow = 0, now = 0;
   const placed = [];
@@ -161,7 +166,20 @@
         claim(tx, tz, 0.5);
         addProp("torch", torch, tx, tz, 0.7);
       }
-      labels.push({ x: m.x + ax * 0.5, y: 4.5, z: m.z + az * 0.5, ax, az, text: slot.name });
+      const sign = createNode({ position: { x: 0, y: 4.5, z: 0.52 }, geometry: hubModels.caveSign() });
+      addChild(group, sign);
+      const halfW = hubModels.CAVE_SIGN_WIDTH * 0.5, halfH = hubModels.CAVE_SIGN_HEIGHT * 0.5;
+      const x = m.x + ax * sign.position.z, y = m.floorY + sign.position.y, z = m.z + az * sign.position.z;
+      const tx = Math.cos(m.ry), tz = -Math.sin(m.ry);
+      labels.push({
+        x, y, z, ax, az, text: slot.name, node: sign,
+        world: [
+          { x: x - tx * halfW, y: y + halfH, z: z - tz * halfW },
+          { x: x + tx * halfW, y: y + halfH, z: z + tz * halfW },
+          { x: x + tx * halfW, y: y - halfH, z: z + tz * halfW },
+          { x: x - tx * halfW, y: y - halfH, z: z - tz * halfW }
+        ]
+      });
     } else if (slot.status === "sleeping") {
       // Bedrolls lie along +x, as the sleep pose assumes
       addChild(group, createNode({ position: { x: 0, y: 0.05, z: -4.5 }, rotation: { x: 0, y: -m.ry, z: 0 }, geometry: hubModels.bedroll(), depthBias: 0.3 }));
@@ -221,13 +239,31 @@
     cliff(60, 1, 0.5, "bush", () => hubModels.bush());
     meadow(60, 0.7, "bush", () => hubModels.bush());
     meadow(8, 0.9, "rock", () => hubModels.rock(0));
-    meadow(10, 0.7, "crate", () => hubModels.woodCrate(), true);
+    if (lootEnabled) meadow(10, 0.7, "crate", () => hubModels.woodCrate(), true);
     meadow(8, 0.6, "barrel", () => hubModels.barrel());
     meadow(50, 0.35, "flower", () => hubModels.flowerTuft());
   };
   // Hide the island's one jetpack under a prop
   const hideJetpack = () => {
-    const hiders = props.filter((o) => JETPACK_HIDERS.includes(o.prop) && island.heightAt(o.x, o.z) === 0);
+    const approachable = (o) => {
+      for (const radius of [1.8, 1.6, 2]) {
+        for (let i = 0; i < 12; i++) {
+          const angle = i / 12 * Math.PI * 2;
+          const x = o.x + Math.cos(angle) * radius, z = o.z + Math.sin(angle) * radius;
+          if (!island.onLand(x, z)) continue;
+          let nearest = true;
+          for (const other of props) {
+            if (other !== o && Math.hypot(other.x - x, other.z - z) < radius) {
+              nearest = false;
+              break;
+            }
+          }
+          if (nearest) return true;
+        }
+      }
+      return false;
+    };
+    const hiders = props.filter((o) => JETPACK_HIDERS.includes(o.prop) && island.heightAt(o.x, o.z) === 0 && approachable(o));
     stash = hiders.length ? hiders[Math.floor(Math.random() * hiders.length)] : null;
     hintAt = HINT_AFTER;
   };
@@ -306,6 +342,64 @@
       clouds.push({ node, speed: 0.4 + rand() * 0.4, beside });
     }
   };
+  // A low stone dais and its flush, one block-wide perimeter grow continuously with the pile.
+  const buildAltar = () => {
+    const node = createNode();
+    const slab = createNode({ geometry: hubModels.altarSlab(), depthBias: 0.15 });
+    const rings = [];
+    addChild(node, slab);
+    for (let i = 0; i < 3; i++) {
+      const ring = createNode({ geometry: hubModels.altarBlock(i), instanceData: new Float32Array(Math.ceil(ALTAR_MAX_BLOCKS / 3) * 20), instanceCount: 0, instanceVersion: 0, depthBias: 0.2 });
+      rings.push(ring);
+      addChild(node, ring);
+    }
+    addChild(root, node);
+    placed.push(node);
+    const result = { node, slab, rings, radius: 0, platformRadius: 0, outerRingRadius: 0, outerRingInnerRadius: 0, height: ALTAR_HEIGHT, ringCount: 1, blockCount: 0, setRadius: null };
+    result.setRadius = (radius) => {
+      result.radius = radius;
+      const halfWidth = ALTAR_BLOCK_WIDTH * 0.5;
+      const outer = radius + ALTAR_RING_GAP + halfWidth;
+      const wanted = Math.min(ALTAR_MAX_BLOCKS, Math.max(8, Math.round(outer * Math.PI * 2 / ALTAR_BLOCK_ARC)));
+      const arc = outer * Math.PI * 2 / wanted * 0.88;
+      result.blockCount = wanted;
+      result.outerRingRadius = outer;
+      result.outerRingInnerRadius = outer - halfWidth;
+      result.platformRadius = outer + halfWidth;
+      setVec(slab.scale, result.outerRingInnerRadius, ALTAR_HEIGHT, result.outerRingInnerRadius);
+      for (let i = 0; i < rings.length; i++) rings[i].instanceCount = 0;
+      for (let i = 0; i < wanted; i++) {
+        const angle = i / wanted * Math.PI * 2;
+        const cos = Math.cos(angle), sin = Math.sin(angle);
+        const ring = rings[i % rings.length];
+        const offset = ring.instanceCount++ * 20;
+        const data = ring.instanceData;
+        data[offset] = cos * ALTAR_BLOCK_WIDTH;
+        data[offset + 1] = 0;
+        data[offset + 2] = sin * ALTAR_BLOCK_WIDTH;
+        data[offset + 3] = 0;
+        data[offset + 4] = 0;
+        data[offset + 5] = ALTAR_HEIGHT;
+        data[offset + 6] = 0;
+        data[offset + 7] = 0;
+        data[offset + 8] = -sin * arc;
+        data[offset + 9] = 0;
+        data[offset + 10] = cos * arc;
+        data[offset + 11] = 0;
+        data[offset + 12] = cos * outer;
+        data[offset + 13] = 0;
+        data[offset + 14] = sin * outer;
+        data[offset + 15] = 1;
+        data[offset + 16] = 1;
+        data[offset + 17] = 0;
+        data[offset + 18] = 0;
+        data[offset + 19] = 0;
+      }
+      for (let i = 0; i < rings.length; i++) rings[i].instanceVersion++;
+    };
+    result.setRadius(PILE_SCALE);
+    return result;
+  };
 
   // ---------- donations ----------
   const celebrate = (donation, bananas) => {
@@ -320,14 +414,12 @@
   const onDonation = (donation) => {
     game.recordDonation(donation);
     const bananas = gameMod.bananasFor(donation.sats);
-    world.level = Math.min(pile.slots.length, world.level + bananas);
-    const delivered = pile.syncPile();
-    if (donation.message && delivered.length) delivered[delivered.length - 1].note = { text: donation.message, handle: donation.handle };
+    pile.deliverBananas(bananas);
     celebrate(donation, bananas);
-    const loot = game.lootFor(donation);
+    const loot = lootEnabled ? game.lootFor(donation) : null;
     const who = donation.handle ? `@${donation.handle}` : "anon";
     hud.toast(`+${gameMod.formatLarge(donation.sats)} sats · ${bananas} banana${bananas > 1 ? "s" : ""} · ${who}${loot ? ` · ${loot.tier} crate!` : ""}`);
-    if (loot) crates.spawnCrate(donation, loot, 0.9 + delivered.length * 0.11);
+    if (loot) crates.spawnCrate(donation, loot, 0.9 + Math.min(1.5, bananas / pileMod.DROP_RATE));
     hud.setStats(game.state);
   };
 
@@ -335,8 +427,6 @@
   const tooltipFor = (hit) => {
     const o = hit.owner;
     switch (o.kind) {
-      case "banana":
-        return o.slot.note ? `"${o.slot.note.text}"${o.slot.note.handle ? ` · @${o.slot.note.handle}` : ""}` : COARSE ? "Banana · hold to grab" : "Banana · drag onto a caveman";
       case "caveman": {
         const c = o.cave;
         const worn = crew.wornBy(c.traits.name);
@@ -373,8 +463,7 @@
   const dropBanana = (o, chance) => {
     if (now < o.ripe || Math.random() > chance) return false;
     o.ripe = now + RIPEN;
-    world.level = Math.min(pile.slots.length, world.level + 1);
-    pile.syncPile();
+    pile.deliverBananas(1);
     hud.toast("A banana fell out and rolled to the pile!");
     return true;
   };
@@ -498,9 +587,6 @@
       case "prop":
         useProp(o);
         break;
-      case "banana":
-        if (COARSE) hud.hint("Press and hold a banana, then drop it on a caveman.");
-        break;
       default:
         break;
     }
@@ -585,41 +671,15 @@
       updateMeter();
     }
   };
-  // Build quotes, then signboards over the open mouths
+  // Build quotes over the depth-tested scene
   const drawExtra = (ctx2d, project, drawBubble) => {
     crew.drawQuotes(ctx2d, project, drawBubble);
-    ctx2d.font = LABEL_FONT;
-    ctx2d.textAlign = "center";
-    ctx2d.textBaseline = "middle";
-    for (let i = 0; i < labels.length; i++) {
-      const l = labels[i];
-      if ((camera.position.x - l.x) * l.ax + (camera.position.z - l.z) * l.az < 0) continue;
-      const pos = project(l.x, l.y, l.z);
-      if (!pos) continue;
-      const bw = Math.round(ctx2d.measureText(l.text).width + SIGN_PAD * 2);
-      const bx = Math.round(pos.x - bw / 2), by = Math.round(pos.y - SIGN_H / 2);
-      ctx2d.fillStyle = "#5c4425";
-      ctx2d.fillRect(bx - SIGN_FRAME, by - SIGN_FRAME, bw + SIGN_FRAME * 2, SIGN_H + SIGN_FRAME * 2);
-      ctx2d.fillStyle = "#8a6236";
-      ctx2d.fillRect(bx, by, bw, SIGN_H);
-      ctx2d.fillStyle = "#7a5630";
-      ctx2d.fillRect(bx, by + 8, bw, 1);
-      ctx2d.fillRect(bx, by + 17, bw, 1);
-      ctx2d.fillStyle = "#3a2a18";
-      ctx2d.fillRect(bx + 2, by + 2, NAIL, NAIL);
-      ctx2d.fillRect(bx + bw - 2 - NAIL, by + 2, NAIL, NAIL);
-      ctx2d.fillRect(bx + 2, by + SIGN_H - 2 - NAIL, NAIL, NAIL);
-      ctx2d.fillRect(bx + bw - 2 - NAIL, by + SIGN_H - 2 - NAIL, NAIL, NAIL);
-      ctx2d.fillStyle = "#f3efe4";
-      ctx2d.fillText(l.text, pos.x, pos.y + 1);
-    }
-    ctx2d.textBaseline = "alphabetic";
-    ctx2d.textAlign = "left";
   };
   const overlay = (dt) => fx.drawOverlay(dt, drawExtra);
 
   // ---------- actions and keys ----------
   const onLootCleared = () => {
+    if (!lootEnabled) return;
     crew.applyAllSwag();
     crew.renderLocker();
     hud.toast("Loot locker cleared");
@@ -629,6 +689,10 @@
     onLootCleared();
   };
   const demoTip = (sats) => onDonation({ id: `demo-${Date.now()}`, sats, handle: game.state.handle, message: game.state.message, at: Date.now() });
+  const addTestBananas = (amount) => {
+    pile.deliverBananas(amount);
+    hud.toast(`+${amount} test bananas`);
+  };
   const resetDemo = () => {
     game.resetAll();
     location.reload();
@@ -636,14 +700,14 @@
   const onKey = (e) => {
     if (e.key === "Escape") pilot.release();
     if (e.key === "0") pilot.goPreset("pile");
-    if (e.key === "b" || e.key === "B") demoTip(1200);
+    if (e.key === "b" || e.key === "B") addTestBananas(testBananas);
     if (e.key === "l" || e.key === "L") demoTip(120000);
     if (e.key === "p" || e.key === "P") {
-      world.level = pile.slots.length;
-      pile.syncPile();
+      world.level = Math.max(world.level, pile.slots.length);
+      pile.syncPile(true);
     }
     // J straps a jetpack on whoever is being driven
-    if (e.key === "j" || e.key === "J") {
+    if (lootEnabled && (e.key === "j" || e.key === "J")) {
       const cave = crew.player;
       if (cave && !cave.jet) {
         crew.wearJetpack(cave, hubModels.jetpack(), hubModels.jetFlame());
@@ -667,17 +731,20 @@
 
   // ---------- scene contract ----------
   const enter = (ctx) => {
-    ({ renderer, game, world, go } = ctx);
+    ({ renderer, game, world, go, lootEnabled, testBananas } = ctx);
     camera = createCamera({ fov: 48, near: 0.5, far: 140 });
     root = createNode();
     island = terrain.island({ seed: SEED });
     mark("island");
-    hud = hudMod.create({ roster: contributors.roster, catalog: models.SWAG, tierColors: models.TIER_COLORS, renderIcon: hudMod.renderIcon });
+    hud = hudMod.create({ roster: contributors.roster, catalog: models.SWAG, tierColors: models.TIER_COLORS, renderIcon: hudMod.renderIcon, lootEnabled });
     hooks = {};
     input = interactMod.create({ canvas: ctx.canvas, renderer, camera, hooks });
     presets = { pile: PILE_VIEW, gate: GATE_VIEW };
     pilot = pilotMod.create({ renderer, camera, hud, presets, landing: "pile", pitch: [PITCH_MIN, PITCH_MAX], dist: [DIST_MIN, DIST_MAX], follow: FOLLOW, fly: FLY, clampTarget, clampCamera, coarse: COARSE });
     place(island.geometry, 0, 0, 0, 0);
+    // Nothing scattered or selected as a wander point may enter the supported pile lawn.
+    claim(0, 0, PILE_CLEAR_RADIUS);
+    altar = buildAltar();
     const gate = place(hubModels.gate(), island.gate.x, island.gate.z, island.gate.ry);
     addTarget(gate, { kind: "gate" }, { radius: 3 });
     props.push({ kind: "prop", prop: "gate", node: gate, x: gate.position.x, z: gate.position.z, ripe: 0 });
@@ -716,9 +783,9 @@
     scatter();
     buildSpots();
     buildClouds();
-    hideJetpack();
+    if (lootEnabled) hideJetpack();
     mark("props");
-    const shared = { root, input, hooks, hud, game, world, renderer, camera, overlay: ctx.overlay, tickerAt: TICKER_AT, buildSpots: buildSpotsList, walkIn: WALK_IN, clampDrag, viewYaw: PILE_VIEW.yaw, bedrolls, pileScale: PILE_SCALE, groundAt: supportAt, wanderSpot, walkable, flyable, useNear };
+    const shared = { root, input, hooks, hud, game, world, renderer, camera, overlay: ctx.overlay, tickerAt: TICKER_AT, buildSpots: buildSpotsList, walkIn: WALK_IN, clampDrag, viewYaw: PILE_VIEW.yaw, bedrolls, pileScale: PILE_SCALE, pileY: ALTAR_HEIGHT + 0.02, onLayout: altar.setRadius, onShown: () => { meterTimer = 0; }, crateRadius: () => Math.max(4.4, altar.platformRadius + 0.8), groundAt: supportAt, wanderSpot, walkable, flyable, useNear };
     fx = shared.fx = fxMod.create(shared);
     pile = shared.pile = pileMod.create(shared);
     mark("pile");
@@ -784,8 +851,10 @@
       fx.trimPool();
     }, 6e4);
     for (const cave of crew.cavemen.values()) crew.refreshRosterRow(cave);
-    crew.applyAllSwag();
-    crew.renderLocker();
+    if (lootEnabled) {
+      crew.applyAllSwag();
+      crew.renderLocker();
+    }
     hud.setStats(game.state);
     pile.syncPile(true);
     updateMeter();
@@ -794,11 +863,11 @@
     Object.assign(hubScene, {
       root, camera, input,
       debug: {
-        slots: pile.slots, cavemen: crew.cavemen, crates: crates.list, lab: null, hud, applyAllSwag: crew.applyAllSwag, renderLocker: crew.renderLocker, demoTip, refreshStates: crew.refreshStates, trimPool: fx.trimPool,
+        slots: pile.slots, drops: pile.drops, core: pile.core, shell: pile.shell, cavemen: crew.cavemen, crates: crates.list, lab: null, hud, applyAllSwag: crew.applyAllSwag, renderLocker: crew.renderLocker, demoTip, setPileLevel: pile.setLevel, refreshStates: crew.refreshStates, trimPool: fx.trimPool,
         get shown() {
           return pile.shown;
         },
-        island, mouths: island.mouths, camera, crew, controls: pilot.controls, props,
+        island, mouths: island.mouths, labels, camera, crew, controls: pilot.controls, props, altar,
         get jetpack() {
           return { stash, pickup: jetpack, hintAt, hintNow: () => (hintAt = now) };
         }
@@ -820,7 +889,7 @@
     input.dispose();
     hud.dispose();
     // Drop everything but the cached island
-    hud = hooks = input = pilot = fx = pile = crew = crates = presets = stash = jetpack = null;
+    altar = hud = hooks = input = pilot = fx = pile = crew = crates = presets = stash = jetpack = null;
     hubScene.input = hubScene.debug = null;
     return { targets: count };
   };
@@ -831,7 +900,7 @@
     let nodes = 0;
     traverseVisible(root, () => nodes++);
     const all = (n) => 1 + n.children.reduce((sum, c) => sum + all(c), 0);
-    return { visibleNodes: nodes, allNodes: all(root), tweens: tweenCount(), targets: input.targetCount, ...fx.stats(), ...crates.stats(), ...crew.stats() };
+    return { visibleNodes: nodes, allNodes: all(root), tweens: tweenCount(), targets: input.targetCount, ...fx.stats(), ...crates.stats(), ...crew.stats(), ...pile.stats() };
   };
   const hubScene = {
     id: "hub", enter, update, overlay, onDonation, onKey, onLootCleared, renderOpts: RENDER_OPTS, leave, stats, liveGeometry,

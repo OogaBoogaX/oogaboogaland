@@ -62,6 +62,46 @@
   const STONE = ["#3a3734", "#2d2b28", "#45413d"];
   const CLIFF = ["#7d6f61", "#5e5449", "#877869"];
   const WOOD = "#8a6236", WOOD_DK = "#5c4425", PLANK = "#a9773f";
+  const CAVE_SIGN_WIDTH = 3.78, CAVE_SIGN_HEIGHT = 0.91;
+  const caveSign = cached(() => {
+    const glyphs = {
+      E: ["111", "100", "110", "100", "111"],
+      n: ["000", "110", "101", "101", "101"],
+      t: ["010", "111", "010", "010", "011"],
+      r: ["000", "110", "101", "100", "100"],
+      o: ["000", "111", "101", "101", "111"],
+      p: ["000", "110", "101", "110", "100"],
+      y: ["000", "101", "101", "011", "110"],
+      L: ["100", "100", "100", "100", "111"],
+      a: ["000", "010", "101", "111", "101"],
+      b: ["100", "100", "110", "101", "110"]
+    };
+    const text = "EntropyLab", cell = 0.075, pixel = 0.061;
+    const textW = (text.length * 3 + text.length - 1) * cell;
+    const geos = [
+      box({ w: CAVE_SIGN_WIDTH, h: CAVE_SIGN_HEIGHT, d: 0.12, color: WOOD_DK }),
+      box({ w: CAVE_SIGN_WIDTH - 0.16, h: CAVE_SIGN_HEIGHT - 0.16, d: 0.04, color: WOOD, offset: { z: 0.08 } }),
+      box({ w: CAVE_SIGN_WIDTH - 0.2, h: 0.025, d: 0.025, color: "#7a5630", offset: { y: 0.14, z: 0.115 } }),
+      box({ w: CAVE_SIGN_WIDTH - 0.2, h: 0.025, d: 0.025, color: "#7a5630", offset: { y: -0.15, z: 0.115 } })
+    ];
+    let cursor = -textW * 0.5;
+    for (const ch of text) {
+      const glyph = glyphs[ch];
+      for (let row = 0; row < glyph.length; row++) {
+        for (let col = 0; col < glyph[row].length; col++) {
+          if (glyph[row][col] !== "1") continue;
+          geos.push(box({ w: pixel, h: pixel, d: 0.035, color: "#f3efe4", emissive: 0.2, offset: { x: cursor + col * cell + cell * 0.5, y: (2 - row) * cell, z: 0.125 } }));
+        }
+      }
+      cursor += cell * 4;
+    }
+    for (const x of [-CAVE_SIGN_WIDTH * 0.5 + 0.13, CAVE_SIGN_WIDTH * 0.5 - 0.13]) {
+      for (const y of [-CAVE_SIGN_HEIGHT * 0.5 + 0.13, CAVE_SIGN_HEIGHT * 0.5 - 0.13]) {
+        geos.push(box({ w: 0.07, h: 0.07, d: 0.035, color: "#3a2a18", offset: { x, y, z: 0.13 } }));
+      }
+    }
+    return merge(...geos);
+  });
   // Stone frame around a cave mouth
   const caveMouthRim = cached(() => {
     const rand = mulberry32(31);
@@ -128,7 +168,8 @@
   });
   const bedroll = cached(() => merge(box({ w: 1.9, h: 0.09, d: 0.85, color: "#2e2724" }), box({ w: 0.4, h: 0.16, d: 0.6, color: "#40342c", offset: { x: 0.65, y: 0.1 } })));
   const CANOPIES = [["#456d4f", "#365840", "#557f5d"], ["#e8b4c6", "#d697b0", "#f2c9d8"]];
-  // Trunk into a 2.5 canopy, 3 units tall
+  const TREE_HEIGHT = 3;
+  // Trunk into a 2.5 canopy, TREE_HEIGHT units tall
   const tree = variants((i) => {
     const rand = mulberry32(101 + i);
     const v = vox();
@@ -154,6 +195,13 @@
     for (const [k, c] of v.map) if (c === 0 && rand() < 0.15) v.map.set(k, 2);
     return voxGeo(v, { unit: VOX, palette: ["#6b625a", "#57504a", "#7a716a"], origin: HALF });
   });
+  const altarSlab = cached(() => lathe({
+    profile: [[0, 0], [1, 0], [1, 0.82], [0.96, 1], [0, 1]],
+    segments: 32,
+    color: (t) => t < 0.5 ? "#57504a" : "#756b62"
+  }));
+  // Unit blocks are instanced around the continuously growing altar edge.
+  const altarBlock = variants((i) => box({ color: STONE[i % STONE.length], offset: { y: 0.5 } }));
   const woodCrate = cached(() => merge(
     box({ w: 0.9, h: 0.9, d: 0.9, color: PLANK, offset: { y: 0.45 } }),
     ...[[-0.42, -0.42], [0.42, -0.42], [-0.42, 0.42], [0.42, 0.42]].map(([x, z]) => box({ w: 0.1, h: 0.94, d: 0.1, color: WOOD_DK, offset: { x, y: 0.47, z } })),
@@ -222,5 +270,5 @@
     box({ w: 4, h: 0.14, d: 0.16, color: WOOD_DK, offset: { x: 2, y: -0.17, z: 0.92 } }),
     ...[[0.5, -0.8], [0.5, 0.8], [3.5, -0.8], [3.5, 0.8]].map(([x, z]) => box({ w: 0.2, h: 2.2, d: 0.2, color: "#6b4a2b", offset: { x, y: -1.2, z } }))
   ));
-  BL.hubModels = { jetpack, jetFlame, caveMouthRim, gate, caveShelves, bedroll, tree, bush, rock, woodCrate, barrel, flowerTuft, torch, vine, cloud, ladder, dock };
+  BL.hubModels = { jetpack, jetFlame, caveMouthRim, caveSign, CAVE_SIGN_WIDTH, CAVE_SIGN_HEIGHT, gate, caveShelves, bedroll, tree, bush, rock, altarSlab, altarBlock, woodCrate, barrel, flowerTuft, torch, vine, cloud, ladder, dock, TREE_HEIGHT };
 })();

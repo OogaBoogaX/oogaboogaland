@@ -372,6 +372,7 @@ void main() {
       }
       gl.deleteBuffer(rec.ibo);
       rec.nodes.length = 0;
+      rec.batch = null;
     };
     const destroyRecords = () => {
       for (const rec of records.values()) deleteRecord(rec);
@@ -476,7 +477,7 @@ void main() {
       let rec = records.get(geometry);
       if (!rec) {
         const ibo = gl.createBuffer();
-        rec = { ibo, capacity: 0, mesh: buildMeshPart(geometry, ibo), line: buildLinePart(geometry, ibo), nodes: [], count: 0, active: false, data: null };
+        rec = { geometry, ibo, capacity: 0, mesh: buildMeshPart(geometry, ibo), line: buildLinePart(geometry, ibo), nodes: [], count: 0, active: false, data: null, batch: null, batchVersion: -1 };
         records.set(geometry, rec);
       }
       return rec;
@@ -489,10 +490,28 @@ void main() {
         rec.count = 0;
         activeRecords.push(rec);
       }
+      if (node.instanceData) {
+        rec.batch = node;
+        rec.count = node.instanceCount;
+        return;
+      }
       rec.nodes[rec.count++] = node;
     };
     const uploadInstances = (rec) => {
       const need = rec.count * INSTANCE_FLOATS;
+      if (rec.batch) {
+        gl.bindBuffer(gl.ARRAY_BUFFER, rec.ibo);
+        if (rec.capacity < need) {
+          gl.bufferData(gl.ARRAY_BUFFER, need * 4, gl.DYNAMIC_DRAW);
+          rec.capacity = need;
+          rec.batchVersion = -1;
+        }
+        if (rec.batchVersion !== rec.batch.instanceVersion) {
+          gl.bufferSubData(gl.ARRAY_BUFFER, 0, rec.batch.instanceData, 0, need);
+          rec.batchVersion = rec.batch.instanceVersion;
+        }
+        return;
+      }
       if (!rec.data || rec.data.length < need) {
         rec.data = new Float32Array(Math.max(need, (rec.data ? rec.data.length : 0) * 2, INSTANCE_FLOATS));
       }
@@ -552,7 +571,7 @@ void main() {
       for (const rec of activeRecords) {
         const part = rec[kind];
         if (!part) continue;
-        if (kind === "mesh" && useProgram === "shadow" && rec.nodes[0].geometry.castShadow === false) continue;
+        if (kind === "mesh" && useProgram === "shadow" && rec.geometry.castShadow === false) continue;
         if (kind === "line") gl.uniform1f(res.programs.line.u.uWidth, part.width * dpr);
         gl.bindVertexArray(part.vao);
         gl.drawArraysInstanced(gl.TRIANGLES, 0, part.count, rec.count);
@@ -606,12 +625,13 @@ void main() {
       for (const rec of activeRecords) {
         rec.active = false;
         rec.nodes.length = 0;
+        rec.batch = null;
       }
       activeRecords.length = 0;
       updateWorld(root, null);
       traverseVisible(root, collect);
       for (const rec of activeRecords) {
-        rec.nodes.length = rec.count;
+        if (!rec.batch) rec.nodes.length = rec.count;
         uploadInstances(rec);
       }
       gl.bindFramebuffer(gl.FRAMEBUFFER, sh.fb);

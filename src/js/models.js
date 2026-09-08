@@ -204,6 +204,22 @@
     let value = null;
     return () => value || (value = build());
   };
+  const BANANA_AMMO_SCALE = 0.34;
+  const BANANA_PILE_PROFILE = [[1, 0], [0.98, 0.08], [0.9, 0.24], [0.72, 0.45], [0.5, 0.62], [0.28, 0.74], [0.1, 0.8], [0, 0.81]];
+  const bananaPileRadiusScale = (angle, radius) => {
+    // Keep the foot of the mound circular, then blend in the lumpy silhouette above it.
+    const fade = Math.min(1, Math.max(0, (1 - radius) / 0.18));
+    return 1 + fade * (-0.025
+      + Math.sin(angle * 3 + radius * 5.7 + 0.4) * 0.012
+      + Math.sin(angle * 5 - radius * 8.3 + 1.7) * 0.008
+      + Math.sin(angle * 9 + radius * 13.1) * 0.004);
+  };
+  const bananaPileHeightOffset = (angle, radius) => {
+    const fade = radius * (1 - radius) * 4;
+    return fade * (Math.sin(angle * 2 + radius * 4.1) * 0.018
+      + Math.sin(angle * 6 - radius * 7.3 + 0.8) * 0.009
+      + Math.sin(angle * 11 + radius * 15.7) * 0.004);
+  };
   const bananaGeometry = cached(() => tube({
     rings: 8,
     segments: 5,
@@ -215,6 +231,60 @@
     colorFn: (t) => t < 0.08 || t > 0.92 ? "#5a3a1a" : t < 0.2 || t > 0.8 ? "#c9b23a" : "#f5c542"
   }));
   const banana = () => createNode({ geometry: bananaGeometry() });
+  // A centered copy for the pile skin. It has the full depth and dimensions of a
+  // carried banana, while its origin lets it sit evenly across the mound surface.
+  const bananaTileGeometry = cached(() => tube({
+    rings: 8,
+    segments: 5,
+    path: (t) => {
+      const a = (t - 0.5) * 2;
+      return { x: Math.sin(a) * 0.55, y: (1 - Math.cos(a)) * 0.55 - 0.075, z: 0 };
+    },
+    radius: (t) => 0.085 * Math.pow(Math.sin(Math.PI * t), 0.55) + 0.012,
+    colorFn: (t) => t < 0.08 || t > 0.92 ? "#5a3a1a" : t < 0.2 || t > 0.8 ? "#c9b23a" : "#f5c542"
+  }));
+  const bananaPileCoreGeometry = (worldRadius = 0.45, worldHeight = 0.48, faceSize = 0.16) => {
+    const geo = geometry();
+    const segments = Math.max(24, Math.min(384, Math.ceil(Math.PI * 2 * worldRadius / faceSize)));
+    const profile = [];
+    for (let i = 0; i < BANANA_PILE_PROFILE.length - 1; i++) {
+      const outer = BANANA_PILE_PROFILE[i], inner = BANANA_PILE_PROFILE[i + 1];
+      const length = Math.hypot((outer[0] - inner[0]) * worldRadius, (outer[1] - inner[1]) * worldHeight);
+      const steps = Math.max(1, Math.ceil(length / faceSize));
+      for (let step = 0; step < steps; step++) {
+        const t = step / steps;
+        profile.push([outer[0] + (inner[0] - outer[0]) * t, outer[1] + (inner[1] - outer[1]) * t]);
+      }
+    }
+    const colors = ["#d9ad2d", "#e2b631", "#cfa42b", "#d6aa2c", "#dcb12f"].map(hexToRgb);
+    const rings = profile.map(([radius, y], ringIndex) => {
+      const ring = [];
+      for (let segment = 0; segment < segments; segment++) {
+        const angle = segment / segments * Math.PI * 2;
+        const warpedRadius = radius * bananaPileRadiusScale(angle, radius);
+        const warpedY = y + bananaPileHeightOffset(angle, radius);
+        ring.push(pushVert(geo, Math.cos(angle) * warpedRadius, warpedY, Math.sin(angle) * warpedRadius));
+      }
+      return ring;
+    });
+    for (let ring = 0; ring < rings.length - 1; ring++) {
+      for (let segment = 0; segment < segments; segment++) {
+        const next = (segment + 1) % segments;
+        const shadeIndex = Math.floor(Math.abs(Math.sin((segment + 1) * 12.9898 + (ring + 1) * 78.233)) * colors.length) % colors.length;
+        face(geo, [rings[ring][segment], rings[ring + 1][segment], rings[ring + 1][next], rings[ring][next]], colors[shadeIndex]);
+      }
+    }
+    const top = pushVert(geo, 0, BANANA_PILE_PROFILE[BANANA_PILE_PROFILE.length - 1][1], 0);
+    const last = rings[rings.length - 1];
+    for (let segment = 0; segment < segments; segment++) {
+      const next = (segment + 1) % segments;
+      face(geo, [last[segment], top, last[next]], colors[(segment + 3) % colors.length]);
+    }
+    geo.pileSegments = segments;
+    geo.pileRings = rings.length;
+    geo.pileFaceSize = faceSize;
+    return geo;
+  };
   const particleCache = new Map();
   const particleGeometry = (color, size = 0.07, emissive = 1) => {
     const key = `${color}/${size}/${emissive}`;
@@ -373,7 +443,7 @@
     addChild(parts.armL, parts.club);
     parts.snack = createNode({
       position: { x: 0, y: -0.62 * h, z: 0.18 * h },
-      scale: { x: 0.55, y: 0.55, z: 0.55 },
+      scale: { x: BANANA_AMMO_SCALE, y: BANANA_AMMO_SCALE, z: BANANA_AMMO_SCALE },
       rotation: { x: 0.4, y: 0, z: 1.2 },
       geometry: bananaGeometry(),
       visible: false
@@ -840,5 +910,5 @@
       item.buildNode = () => createNode({ geometry: swagGeo(item.id, item.build) });
     }
   }
-  BL.models = { box, panel, lathe, tube, ring, polyline, merge, voxelFaces, banana, bananaGeometry, particleGeometry, caveman, labRoom, buildableGeos, crate, dieRotationFor, SWAG, TIER_COLORS };
+  BL.models = { box, panel, lathe, tube, ring, polyline, merge, voxelFaces, banana, bananaGeometry, bananaTileGeometry, bananaPileCoreGeometry, bananaPileRadiusScale, bananaPileHeightOffset, BANANA_AMMO_SCALE, BANANA_PILE_PROFILE, particleGeometry, caveman, labRoom, buildableGeos, crate, dieRotationFor, SWAG, TIER_COLORS };
 })();

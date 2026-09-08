@@ -107,6 +107,7 @@
   const SURFACE = 28;
   const ORIGIN = { x: -SX / 2 * UNIT, y: -SURFACE * UNIT, z: -SZ / 2 * UNIT };
   const RADIUS = 30, MEADOW = 22, DEPTH = 7;
+  const MAX_HEIGHT = 8;
   const BLUFF = 6;
   const MOUTH = { w: 5, h: 3, depth: 5 };
   const ROOM = { w: 6, h: 4, from: 2.5, to: 6.5 };
@@ -210,7 +211,7 @@
             h = Math.min(PASS_TOP, Math.floor((r - MEADOW) / UNIT) * UNIT);
             surface = Math.abs(wx - pass.wobble * Math.sin((r - MEADOW) / (-GATE_Z - MEADOW) * Math.PI * 2)) < TRAIL_HALF ? P.path : grassAt(wx, wz);
           } else if (Math.abs(wx) < PATH_HALF && wz > 0) surface = P.path;
-          top = clamp(Math.round(h / UNIT) * UNIT, 0, 8);
+          top = clamp(Math.round(h / UNIT) * UNIT, 0, MAX_HEIGHT);
         }
         // The underside drops sheer, tapering at the edge
         const depth = rim <= RADIUS - 3 ? DEPTH : DEPTH * (1 - Math.pow((rim - (RADIUS - 3)) / 3, 1.6));
@@ -332,5 +333,5 @@
     ISLANDS.set(seed, built);
     return built;
   };
-  BL.terrain = { makeGrid, gridGeometry, island, PALETTE };
+  BL.terrain = { makeGrid, gridGeometry, island, PALETTE, MAX_HEIGHT };
 })();
