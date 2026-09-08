@@ -35,6 +35,8 @@
   // Props the jetpack may hide under
   const JETPACK_HIDERS = ["bush", "rock", "crate", "barrel", "flower"];
   const JETPACK_HOVER = 0.4, JETPACK_REACH = 1.3;
+  const JETPACK_APPROACH = [1.8, 1.6, 2];
+  const JETPACK_SAFE = { x: 0, z: 0 };
   // Pulse the hiding prop when the hunt stalls
   const HINT_AFTER = 120, HINT_EVERY = 12, HINT_PULSE = 1.6, HINT_MAX = 0.9;
   // Reach at which a caveman is inside a cave
@@ -49,11 +51,9 @@
   const BEDROLL_DEGREES = [100, 195, 252, 300, 345];
   const BEDROLL_RADIUS = 14, BEDROLL_INNER = 10;
   const NUDGES = [0, -2, 2, -4, 4, -6, 6, -8, 8];
-  const VINES = ["c9", "c1", "c5"];
+  const VINES = ["c9", "c5"];
   const PILE_SCALE = 0.45;
-  // Props keep clear of the pile up to this level; beyond it the mound grows over the meadow
-  const PILE_CLEAR_LEVEL = 1000000;
-  const PILE_CLEAR_RADIUS = pileMod.visualFootprintFor(PILE_CLEAR_LEVEL, PILE_SCALE) + 0.5;
+  const SCENERY_CLEARANCE = 0.25;
   const MEADOW_INNER = 5, MEADOW_OUTER = MEADOW - 1.5, CLIFF_INNER = MEADOW + 1.5, CLIFF_OUTER = RADIUS - 1;
   const DOCK_DEG = 105, LADDER_Z = -3.6, LADDER_LEAN = 0.65;
   const CLOUD_COUNT = 30, CLOUD_WRAP = 60, CLOUD_NEAR = 36;
@@ -85,7 +85,7 @@
   };
 
   // One visit's state, made in enter and dropped in leave
-  let renderer, game, world, go, lootEnabled, testBananas, root, camera, island, altar, hud, hooks, input, pilot, fx, pile, crew, crates, presets, entering, stash, jetpack;
+  let renderer, game, world, go, lootEnabled, testBananas, root, camera, island, pathNode, altar, hud, hooks, input, pilot, fx, pile, crew, crates, presets, entering, stash, jetpack, mirrorCave;
   let hintAt = HINT_AFTER;
   let stateTimer = 0, hintTimer = 0, meterTimer = 0, pileEdgeNow = 0, now = 0;
   const placed = [];
@@ -98,6 +98,9 @@
   const spots = [];
   const openMouths = [];
   const props = [];
+  const scenery = [];
+  const sceneryClaims = [];
+  let sceneryVisible = 0, sceneryRadiusCulled = 0, sceneryPathCulled = 0, sceneryFixedCulled = 0, sceneryReflows = 0;
   const addTarget = (node, owner, opts) => {
     input.add(node, owner, opts);
     targets.push(node);
@@ -115,7 +118,7 @@
   // ---------- island ----------
   // A prop with a kind answers taps and Space
   const addProp = (kind, node, x, z, radius) => {
-    const owner = { kind: "prop", prop: kind, node, x, z, ripe: 0 };
+    const owner = { kind: "prop", prop: kind, node, x, z, ripe: 0, pickRadius: radius, active: true };
     addTarget(node, owner, { radius });
     props.push(owner);
     return owner;
@@ -127,7 +130,11 @@
     if (kind) addProp(kind, node, x, z, radius);
     return node;
   };
-  const claim = (x, z, r) => claimed.push({ x, z, r });
+  const claim = (x, z, r) => {
+    const value = { x, z, r, scenery: null };
+    claimed.push(value);
+    return value;
+  };
   const free = (x, z, r) => {
     for (const c of claimed) if (Math.hypot(c.x - x, c.z - z) < c.r + r) return false;
     return true;
@@ -167,9 +174,20 @@
         claim(tx, tz, 0.5);
         addProp("torch", torch, tx, tz, 0.7);
       }
-      const sign = createNode({ position: { x: 0, y: 4.5, z: 0.52 }, geometry: hubModels.caveSign() });
+    } else if (slot.status === "mirror") {
+      // Sit inside the rim so the cave floor ends behind the reflection.
+      const node = createNode({ position: { x: 0, y: 1.5, z: 0.5 }, geometry: hubModels.mirrorPanel(), mirror: true });
+      addChild(group, node);
+      mirrorCave = { slot, mouth: m, group, rim, node, sign: null };
+    } else if (slot.status === "sleeping") {
+      // Bedrolls lie along +x, as the sleep pose assumes
+      addChild(group, createNode({ position: { x: 0, y: 0.05, z: -4.5 }, rotation: { x: 0, y: -m.ry, z: 0 }, geometry: hubModels.bedroll(), depthBias: 0.3 }));
+      sleepers.push({ x: m.x + ax * 0.8, y: 4.4, z: m.z + az * 0.8, timer: sleepers.length * 0.7 });
+    }
+    if (slot.status === "open" || slot.status === "mirror") {
+      const sign = createNode({ position: { x: 0, y: 4.5, z: 0.52 }, geometry: hubModels.caveSign(slot.name) });
       addChild(group, sign);
-      const halfW = hubModels.CAVE_SIGN_WIDTH * 0.5, halfH = hubModels.CAVE_SIGN_HEIGHT * 0.5;
+      const halfW = sign.geometry.signWidth * 0.5, halfH = sign.geometry.signHeight * 0.5;
       const x = m.x + ax * sign.position.z, y = m.floorY + sign.position.y, z = m.z + az * sign.position.z;
       const tx = Math.cos(m.ry), tz = -Math.sin(m.ry);
       labels.push({
@@ -181,10 +199,7 @@
           { x: x - tx * halfW, y: y - halfH, z: z - tz * halfW }
         ]
       });
-    } else if (slot.status === "sleeping") {
-      // Bedrolls lie along +x, as the sleep pose assumes
-      addChild(group, createNode({ position: { x: 0, y: 0.05, z: -4.5 }, rotation: { x: 0, y: -m.ry, z: 0 }, geometry: hubModels.bedroll(), depthBias: 0.3 }));
-      sleepers.push({ x: m.x + ax * 0.8, y: 4.4, z: m.z + az * 0.8, timer: sleepers.length * 0.7 });
+      if (mirrorCave && mirrorCave.slot === slot) mirrorCave.sign = sign;
     }
     if (VINES.includes(slot.id)) for (const x of [-1.1, 1.1]) addChild(group, createNode({ position: { x, y: 3.45, z: 0.95 }, geometry: hubModels.vine() }));
     addChild(root, group);
@@ -211,12 +226,29 @@
   // Scatter props by rejection, keeping off paths and mouths
   const scatter = () => {
     const rand = mulberry32(SEED);
+    const candidateFree = (x, z, radius) => {
+      for (let i = 0; i < sceneryClaims.length; i++) {
+        const c = sceneryClaims[i];
+        if (Math.hypot(c.x - x, c.z - z) < c.r + radius) return false;
+      }
+      return true;
+    };
+    const addScenery = (geometry, x, z, ry, y, kind, footprint) => {
+      const reservation = claim(x, z, footprint);
+      sceneryClaims.push(reservation);
+      const node = place(geometry, x, z, ry, y, kind, footprint + 0.3);
+      const owner = props[props.length - 1];
+      owner.footprint = footprint;
+      owner.scenery = true;
+      reservation.scenery = owner;
+      scenery.push(owner);
+      return node;
+    };
     const meadow = (count, radius, kind, geometryAt, square = false) => {
       for (let n = 0, tries = 0; n < count && tries < 1500; tries++) {
         const { x, z } = polar(rand() * 360, Math.sqrt(lerp(MEADOW_INNER * MEADOW_INNER, MEADOW_OUTER * MEADOW_OUTER, rand())));
-        if (island.heightAt(x, z) > 0 || nearPath(x, z, 1.2) || nearMouth(x, z, 3.5) || !free(x, z, radius)) continue;
-        claim(x, z, radius);
-        place(geometryAt(n), x, z, square ? Math.floor(rand() * 4) * Math.PI / 2 + (rand() - 0.5) * 0.4 : rand() * Math.PI * 2, 0, kind, radius + 0.3);
+        if (island.heightAt(x, z) > 0 || nearMouth(x, z, 3.5) || !candidateFree(x, z, radius)) continue;
+        addScenery(geometryAt(n), x, z, square ? Math.floor(rand() * 4) * Math.PI / 2 + (rand() - 0.5) * 0.4 : rand() * Math.PI * 2, 0, kind, radius);
         n++;
       }
     };
@@ -230,9 +262,8 @@
           const a = (i + 0.5) * Math.PI / 2;
           if (island.heightAt(x + Math.cos(a) * 1.2, z + Math.sin(a) * 1.2) > h + 1.5) clear = false;
         }
-        if (!clear) continue;
-        claim(x, z, radius);
-        place(geometryAt(n), x, z, rand() * Math.PI * 2, h, kind, radius + 0.3);
+        if (!clear || nearMouth(x, z, 4) || !candidateFree(x, z, radius)) continue;
+        addScenery(geometryAt(n), x, z, rand() * Math.PI * 2, h, kind, radius);
         n++;
       }
     };
@@ -240,33 +271,119 @@
     cliff(60, 1, 0.5, "bush", () => hubModels.bush());
     meadow(60, 0.7, "bush", () => hubModels.bush());
     meadow(8, 0.9, "rock", () => hubModels.rock(0));
-    if (lootEnabled) meadow(10, 0.7, "crate", () => hubModels.woodCrate(), true);
+    meadow(10, 0.7, "crate", () => hubModels.woodCrate(), true);
     meadow(8, 0.6, "barrel", () => hubModels.barrel());
     meadow(50, 0.35, "flower", () => hubModels.flowerTuft());
   };
-  // Hide the island's one jetpack under a prop
-  const hideJetpack = () => {
-    const approachable = (o) => {
-      for (const radius of [1.8, 1.6, 2]) {
-        for (let i = 0; i < 12; i++) {
-          const angle = i / 12 * Math.PI * 2;
-          const x = o.x + Math.cos(angle) * radius, z = o.z + Math.sin(angle) * radius;
-          if (!island.onLand(x, z)) continue;
-          let nearest = true;
-          for (const other of props) {
-            if (other !== o && Math.hypot(other.x - x, other.z - z) < radius) {
-              nearest = false;
-              break;
-            }
+  const sceneryReason = (o) => {
+    const clearance = island.path.debug.ringOuterRadius + SCENERY_CLEARANCE;
+    if (Math.hypot(o.x, o.z) - o.footprint < clearance - 1e-9) return 1;
+    if (island.path.overlaps(o.x, o.z, o.footprint)) return 2;
+    for (let i = 0; i < claimed.length; i++) {
+      const c = claimed[i];
+      if (!c.scenery && Math.hypot(c.x - o.x, c.z - o.z) < c.r + o.footprint) return 3;
+    }
+    return 0;
+  };
+  const setSceneryActive = (o, active) => {
+    if (o.active === active) return;
+    o.active = active;
+    o.node.visible = active;
+    if (active) input.add(o.node, o, { radius: o.pickRadius });
+    else input.remove(o.node);
+  };
+  const reflowScenery = () => {
+    if (!scenery.length) return;
+    let visible = 0, radiusCulled = 0, pathCulled = 0, fixedCulled = 0;
+    for (let i = 0; i < scenery.length; i++) {
+      const o = scenery[i], reason = sceneryReason(o);
+      setSceneryActive(o, reason === 0);
+      if (!reason) visible++;
+      else if (reason === 1) radiusCulled++;
+      else if (reason === 2) pathCulled++;
+      else fixedCulled++;
+    }
+    sceneryVisible = visible;
+    sceneryRadiusCulled = radiusCulled;
+    sceneryPathCulled = pathCulled;
+    sceneryFixedCulled = fixedCulled;
+    sceneryReflows++;
+    if (stash && !stash.active) rehomeJetpack(stash);
+    if (jetpack && (Math.hypot(jetpack.x, jetpack.z) - 1 < island.path.debug.ringOuterRadius + SCENERY_CLEARANCE || island.path.overlaps(jetpack.x, jetpack.z, 1))) moveJetpackSafe();
+  };
+  // Hide the island's one jetpack under a visible, approachable scenery prop.
+  const approachableHider = (o) => {
+    for (let r = 0; r < JETPACK_APPROACH.length; r++) {
+      const radius = JETPACK_APPROACH[r];
+      for (let i = 0; i < 12; i++) {
+        const angle = i / 12 * Math.PI * 2;
+        const x = o.x + Math.cos(angle) * radius, z = o.z + Math.sin(angle) * radius;
+        if (!island.onLand(x, z)) continue;
+        let nearest = true;
+        for (let j = 0; j < props.length; j++) {
+          const other = props[j];
+          if (other !== o && other.active && Math.hypot(other.x - x, other.z - z) < radius) {
+            nearest = false;
+            break;
           }
-          if (nearest) return true;
         }
+        if (nearest) return true;
       }
-      return false;
-    };
-    const hiders = props.filter((o) => JETPACK_HIDERS.includes(o.prop) && island.heightAt(o.x, o.z) === 0 && approachable(o));
+    }
+    return false;
+  };
+  const eligibleHider = (o) => o.active && JETPACK_HIDERS.includes(o.prop) && island.heightAt(o.x, o.z) === 0 && approachableHider(o);
+  const hideJetpack = () => {
+    const hiders = scenery.filter(eligibleHider);
     stash = hiders.length ? hiders[Math.floor(Math.random() * hiders.length)] : null;
     hintAt = HINT_AFTER;
+  };
+  const safeJetpackSpot = () => {
+    const firstRadius = Math.max(MEADOW_INNER, island.path.debug.ringOuterRadius + SCENERY_CLEARANCE + 1);
+    for (let radius = firstRadius; radius <= MEADOW_OUTER; radius += 0.5) {
+      for (let i = 0; i < 64; i++) {
+        const angle = (i * 137.5 + SEED * 17) * DEG;
+        const x = Math.sin(angle) * radius, z = -Math.cos(angle) * radius;
+        if (!island.onLand(x, z) || island.heightAt(x, z) !== 0 || island.path.overlaps(x, z, 1)) continue;
+        let clear = true;
+        for (let j = 0; j < claimed.length && clear; j++) {
+          const c = claimed[j];
+          if (!c.scenery && Math.hypot(c.x - x, c.z - z) < c.r + 1) clear = false;
+        }
+        for (let j = 0; j < scenery.length && clear; j++) {
+          const o = scenery[j];
+          if (o.active && Math.hypot(o.x - x, o.z - z) < o.footprint + 1) clear = false;
+        }
+        if (!clear) continue;
+        JETPACK_SAFE.x = x;
+        JETPACK_SAFE.z = z;
+        return true;
+      }
+    }
+    return false;
+  };
+  const moveJetpackSafe = () => {
+    if (!safeJetpackSpot()) throw new Error("No safe meadow location for the jetpack");
+    jetpack.x = jetpack.owner.x = jetpack.node.position.x = JETPACK_SAFE.x;
+    jetpack.z = jetpack.owner.z = jetpack.node.position.z = JETPACK_SAFE.z;
+  };
+  const revealJetpackSafe = () => {
+    if (!safeJetpackSpot()) throw new Error("No safe meadow location for the jetpack");
+    const node = place(hubModels.jetpack(), JETPACK_SAFE.x, JETPACK_SAFE.z, 0, JETPACK_HOVER, "jetpack", 1);
+    jetpack = { node, x: JETPACK_SAFE.x, z: JETPACK_SAFE.z, owner: props[props.length - 1] };
+  };
+  const rehomeJetpack = (old) => {
+    old.node.highlight = 0;
+    const start = scenery.indexOf(old);
+    stash = null;
+    for (let offset = 1; offset <= scenery.length; offset++) {
+      const candidate = scenery[(start + offset) % scenery.length];
+      if (!eligibleHider(candidate)) continue;
+      stash = candidate;
+      hintAt = now + HINT_AFTER;
+      return;
+    }
+    revealJetpackSafe();
   };
   const dropJetpack = (o) => {
     o.node.highlight = 0;
@@ -281,6 +398,15 @@
     const i = list.indexOf(value);
     if (i >= 0) list.splice(i, 1);
   };
+  const equipJetpack = (cave) => {
+    if (!crew.wearJetpack(cave, hubModels.jetpack(), hubModels.jetFlame())) return;
+    pilot.showAct();
+    const p = cave.root.position;
+    fx.burst(p.x, p.y + 0.7, p.z, 14, [SPARK, DUST], 2.2);
+    fx.say(cave, "OOGA FLY!", 2);
+    hud.toast("Jetpack!");
+    hud.hint(COARSE ? "Hold Blast off to climb · stick to fly" : "Hold Space to climb · WASD to fly", 5000);
+  };
   const collectJetpack = (cave) => {
     const { node, owner } = jetpack;
     input.remove(node);
@@ -289,13 +415,7 @@
     drop(placed, node);
     drop(props, owner);
     jetpack = null;
-    crew.wearJetpack(cave, hubModels.jetpack(), hubModels.jetFlame());
-    pilot.showAct();
-    const p = cave.root.position;
-    fx.burst(p.x, p.y + 0.7, p.z, 14, [SPARK, DUST], 2.2);
-    fx.say(cave, "OOGA FLY!", 2);
-    hud.toast("Jetpack!");
-    hud.hint(COARSE ? "Hold Blast off to climb · stick to fly" : "Hold Space to climb · WASD to fly", 5000);
+    equipJetpack(cave);
   };
   // Spots the crew strolls to
   const buildSpots = () => {
@@ -436,7 +556,7 @@
       case "crate":
         return `${o.crate.loot.tier} crate · tap to open`;
       case "cave":
-        return o.slot.status === "open" ? `${o.slot.name} · tap to enter` : o.slot.status === "sleeping" ? "A project sleeps here · zzz" : "An empty cave";
+        return o.slot.status === "open" ? `${o.slot.name} · tap to enter` : o.slot.status === "mirror" ? `${o.slot.name} · mirror` : o.slot.status === "sleeping" ? "A project sleeps here · zzz" : "An empty cave";
       case "gate":
         return `${caves.gate.name} · leads nowhere yet`;
       case "prop":
@@ -526,6 +646,7 @@
   };
   // Any use of the hiding prop frees the jetpack
   const useProp = (o) => {
+    if (!o.active) return;
     reactProp(o);
     if (stash === o) dropJetpack(o);
   };
@@ -534,6 +655,7 @@
     let best = null, bestD = reach;
     for (let i = 0; i < props.length; i++) {
       const o = props[i];
+      if (!o.active) continue;
       const d = Math.hypot(o.x - x, o.z - z);
       if (d < bestD) {
         bestD = d;
@@ -708,15 +830,15 @@
       pile.syncPile(true);
     }
     // J straps a jetpack on whoever is being driven
-    if (lootEnabled && (e.key === "j" || e.key === "J")) {
+    if (e.key === "j" || e.key === "J") {
       const cave = crew.player;
       if (cave && !cave.jet) {
-        crew.wearJetpack(cave, hubModels.jetpack(), hubModels.jetFlame());
-        pilot.showAct();
-        const p = cave.root.position;
-        fx.burst(p.x, p.y + 0.7, p.z, 14, [SPARK, DUST], 2.2);
-        fx.say(cave, "OOGA FLY!", 2);
-        hud.hint(COARSE ? "Hold Blast off to climb · stick to fly" : "Hold Space to climb · WASD to fly", 5000);
+        if (stash) {
+          stash.node.highlight = 0;
+          stash = null;
+        }
+        if (jetpack) collectJetpack(cave);
+        else equipJetpack(cave);
       }
     }
     const digit = parseInt(e.key, 10);
@@ -743,18 +865,28 @@
     presets = { pile: PILE_VIEW, gate: GATE_VIEW };
     pilot = pilotMod.create({ renderer, camera, hud, presets, landing: "pile", pitch: [PITCH_MIN, PITCH_MAX], dist: [DIST_MIN, DIST_MAX], follow: FOLLOW, fly: FLY, clampTarget, clampCamera, coarse: COARSE });
     place(island.geometry, 0, 0, 0, 0);
-    // Nothing scattered or selected as a wander point may enter the supported pile lawn.
-    claim(0, 0, PILE_CLEAR_RADIUS);
+    pathNode = createNode({ geometry: island.path.geometry, instanceData: island.path.instanceData, instanceCount: 0, instanceVersion: 0, depthBias: 0.05 });
+    addChild(root, pathNode);
+    placed.push(pathNode);
     altar = buildAltar();
+    const layoutPile = (radius) => {
+      altar.setRadius(radius);
+      const changed = island.path.setRadius(altar.platformRadius);
+      island.path.apply(pathNode);
+      if (changed) reflowScenery();
+    };
+    layoutPile(pileMod.visualFootprintFor(world.level, PILE_SCALE));
     const gate = place(hubModels.gate(), island.gate.x, island.gate.z, island.gate.ry);
     addTarget(gate, { kind: "gate" }, { radius: 3 });
-    props.push({ kind: "prop", prop: "gate", node: gate, x: gate.position.x, z: gate.position.z, ripe: 0 });
+    props.push({ kind: "prop", prop: "gate", node: gate, x: gate.position.x, z: gate.position.z, ripe: 0, active: true });
+    claim(gate.position.x, gate.position.z, 3);
     TICKER_AT.y = gate.position.y + 6;
     GATE_VIEW.target.y = gate.position.y + 2.5;
     const bedrolls = [];
     for (const slot of caves.slots) {
       const m = island.mouths.find((mouth) => mouth.id === slot.id);
       addTarget(buildMouth(slot, m), { kind: "cave", slot, priority: 1 }, { radius: 2.6 });
+      claim(m.x, m.z, 3.5);
       if (slot.scene) {
         presets[slot.scene] = mouthView(m);
         openMouths.push({ slot, m });
@@ -782,11 +914,12 @@
     });
     buildRim();
     scatter();
+    reflowScenery();
     buildSpots();
     buildClouds();
-    if (lootEnabled) hideJetpack();
+    hideJetpack();
     mark("props");
-    const shared = { root, input, hooks, hud, game, world, renderer, camera, overlay: ctx.overlay, tickerAt: TICKER_AT, buildSpots: buildSpotsList, walkIn: WALK_IN, clampDrag, viewYaw: PILE_VIEW.yaw, bedrolls, pileScale: PILE_SCALE, pileY: ALTAR_HEIGHT + 0.02, onLayout: altar.setRadius, onShown: () => { meterTimer = 0; }, crateRadius: () => Math.max(4.4, altar.platformRadius + 0.8), groundAt: supportAt, wanderSpot, walkable, flyable, useNear };
+    const shared = { root, input, hooks, hud, game, world, renderer, camera, overlay: ctx.overlay, tickerAt: TICKER_AT, buildSpots: buildSpotsList, walkIn: WALK_IN, clampDrag, viewYaw: PILE_VIEW.yaw, bedrolls, pileScale: PILE_SCALE, pileY: ALTAR_HEIGHT + 0.02, onLayout: layoutPile, onShown: () => { meterTimer = 0; }, crateRadius: () => Math.max(4.4, altar.platformRadius + 0.8), groundAt: supportAt, wanderSpot, walkable, flyable, useNear };
     fx = shared.fx = fxMod.create(shared);
     pile = shared.pile = pileMod.create(shared);
     mark("pile");
@@ -868,9 +1001,28 @@
         get shown() {
           return pile.shown;
         },
-        island, mouths: island.mouths, labels, camera, crew, controls: pilot.controls, props, altar,
+        island, mouths: island.mouths, labels, camera, crew, controls: pilot.controls, props, altar, path: island.path.debug,
+        scenery: {
+          get candidateCount() { return scenery.length; },
+          get visibleCount() { return sceneryVisible; },
+          get radiusCulledCount() { return sceneryRadiusCulled; },
+          get pathCulledCount() { return sceneryPathCulled; },
+          get fixedCulledCount() { return sceneryFixedCulled; },
+          get visibilityReflowCount() { return sceneryReflows; },
+          get clearanceRadius() { return island.path.debug.ringOuterRadius + SCENERY_CLEARANCE; }
+        },
+        mirrorCave,
         get jetpack() {
-          return { stash, pickup: jetpack, hintAt, hintNow: () => (hintAt = now) };
+          return {
+            stash, pickup: jetpack, hintAt,
+            hintNow: () => (hintAt = now),
+            forceHost: (o) => {
+              if (!o.scenery || !o.active) throw new Error("Jetpack test host must be active scenery");
+              if (stash) stash.node.highlight = 0;
+              stash = o;
+              hintAt = now + HINT_AFTER;
+            }
+          };
         }
       }
     });
@@ -885,12 +1037,13 @@
     pilot.dispose();
     for (const node of targets) input.remove(node);
     for (const node of placed) removeChild(root, node);
-    targets.length = placed.length = claimed.length = clouds.length = torches.length = sleepers.length = labels.length = spots.length = openMouths.length = props.length = 0;
+    targets.length = placed.length = claimed.length = scenery.length = sceneryClaims.length = clouds.length = torches.length = sleepers.length = labels.length = spots.length = openMouths.length = props.length = 0;
+    sceneryVisible = sceneryRadiusCulled = sceneryPathCulled = sceneryFixedCulled = sceneryReflows = 0;
     const count = input.targetCount;
     input.dispose();
     hud.dispose();
     // Drop everything but the cached island
-    altar = hud = hooks = input = pilot = fx = pile = crew = crates = presets = stash = jetpack = null;
+    pathNode = altar = hud = hooks = input = pilot = fx = pile = crew = crates = presets = stash = jetpack = mirrorCave = null;
     hubScene.input = hubScene.debug = null;
     return { targets: count };
   };

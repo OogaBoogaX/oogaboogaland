@@ -4,7 +4,7 @@
   const { clearTweens, tweenCount } = scene;
   const params = new URLSearchParams(location.search);
   const DEBUG = params.has("debug");
-  // Loot crates, the locker tab, worn swag and the hidden jetpack; the suite turns them on with ?debug=1&loot=1
+  // Donation loot crates, the locker tab and worn swag; the suite turns them on with ?debug=1&loot=1
   const LOOT_DEFAULT = false;
   const LOOT_ENABLED = DEBUG && params.has("loot") ? params.get("loot") === "1" : LOOT_DEFAULT;
   const requestedBananas = Number(params.get("bananas"));
@@ -248,6 +248,9 @@
       get frameInterval() {
         return frameInterval();
       },
+      get mirror() {
+        return renderer.mirror;
+      },
       get timing() {
         return Object.fromEntries(performance.getEntriesByType("mark").filter((m) => m.name.startsWith("ooga:")).map((m) => [m.name.slice(5), Math.round(m.startTime)]));
       },
@@ -256,7 +259,7 @@
         return world.level;
       }
     };
-    for (const key of ["slots", "drops", "core", "shell", "cavemen", "crates", "lab", "hud", "applyAllSwag", "renderLocker", "demoTip", "setPileLevel", "refreshStates", "trimPool", "shown", "island", "mouths", "labels", "camera", "crew", "controls", "props", "altar", "jetpack"]) {
+    for (const key of ["slots", "drops", "core", "shell", "cavemen", "crates", "lab", "hud", "applyAllSwag", "renderLocker", "demoTip", "setPileLevel", "refreshStates", "trimPool", "shown", "island", "mouths", "labels", "camera", "crew", "controls", "props", "altar", "path", "scenery", "jetpack", "mirrorCave"]) {
       Object.defineProperty(ooga, key, { get: () => active.debug[key], enumerable: true });
     }
     window.__ooga = ooga;

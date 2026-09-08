@@ -62,46 +62,67 @@
   const STONE = ["#3a3734", "#2d2b28", "#45413d"];
   const CLIFF = ["#7d6f61", "#5e5449", "#877869"];
   const WOOD = "#8a6236", WOOD_DK = "#5c4425", PLANK = "#a9773f";
-  const CAVE_SIGN_WIDTH = 3.78, CAVE_SIGN_HEIGHT = 0.91;
-  const caveSign = cached(() => {
-    const glyphs = {
-      E: ["111", "100", "110", "100", "111"],
-      n: ["000", "110", "101", "101", "101"],
-      t: ["010", "111", "010", "010", "011"],
-      r: ["000", "110", "101", "100", "100"],
-      o: ["000", "111", "101", "101", "111"],
-      p: ["000", "110", "101", "110", "100"],
-      y: ["000", "101", "101", "011", "110"],
-      L: ["100", "100", "100", "100", "111"],
-      a: ["000", "010", "101", "111", "101"],
-      b: ["100", "100", "110", "101", "110"]
-    };
-    const text = "EntropyLab", cell = 0.075, pixel = 0.061;
-    const textW = (text.length * 3 + text.length - 1) * cell;
+  const CAVE_SIGN_WIDTH = 3.78, CAVE_SIGN_HEIGHT = 1.06;
+  const SIGN_GLYPHS = {
+    E: ["111", "100", "110", "100", "111"],
+    n: ["000", "110", "101", "101", "101"],
+    t: ["010", "111", "010", "010", "011"],
+    r: ["000", "110", "101", "100", "100"],
+    O: ["111", "101", "101", "101", "111"],
+    o: ["000", "111", "101", "101", "111"],
+    p: ["000", "110", "101", "110", "100", "100"],
+    y: ["000", "101", "101", "011", "001", "110"],
+    g: ["000", "111", "101", "111", "001", "110"],
+    q: ["000", "111", "101", "111", "001", "001"],
+    j: ["001", "000", "001", "001", "101", "010"],
+    B: ["110", "101", "110", "101", "110"],
+    L: ["100", "100", "100", "100", "111"],
+    a: ["000", "010", "101", "111", "101"],
+    b: ["100", "100", "110", "101", "110"],
+    d: ["001", "001", "011", "101", "011"]
+  };
+  const SIGN_CELL = 0.075, SIGN_PIXEL = 0.061, SIGN_PAD = 0.855;
+  const SIGN_CACHE = new Map();
+  const caveSign = (text = "EntropyLab") => {
+    const hit = SIGN_CACHE.get(text);
+    if (hit) return hit;
+    let cells = -1;
+    for (const ch of text) cells += ch === " " ? 2 : 4;
+    const textW = cells * SIGN_CELL;
+    const width = Math.max(CAVE_SIGN_WIDTH, textW + SIGN_PAD);
     const geos = [
-      box({ w: CAVE_SIGN_WIDTH, h: CAVE_SIGN_HEIGHT, d: 0.12, color: WOOD_DK }),
-      box({ w: CAVE_SIGN_WIDTH - 0.16, h: CAVE_SIGN_HEIGHT - 0.16, d: 0.04, color: WOOD, offset: { z: 0.08 } }),
-      box({ w: CAVE_SIGN_WIDTH - 0.2, h: 0.025, d: 0.025, color: "#7a5630", offset: { y: 0.14, z: 0.115 } }),
-      box({ w: CAVE_SIGN_WIDTH - 0.2, h: 0.025, d: 0.025, color: "#7a5630", offset: { y: -0.15, z: 0.115 } })
+      box({ w: width, h: CAVE_SIGN_HEIGHT, d: 0.12, color: WOOD_DK }),
+      box({ w: width - 0.16, h: CAVE_SIGN_HEIGHT - 0.16, d: 0.04, color: WOOD, offset: { z: 0.08 } }),
+      box({ w: width - 0.2, h: 0.025, d: 0.025, color: "#7a5630", offset: { y: 0.2, z: 0.115 } }),
+      box({ w: width - 0.2, h: 0.025, d: 0.025, color: "#7a5630", offset: { y: -0.22, z: 0.115 } })
     ];
     let cursor = -textW * 0.5;
     for (const ch of text) {
-      const glyph = glyphs[ch];
+      if (ch === " ") {
+        cursor += SIGN_CELL * 2;
+        continue;
+      }
+      const glyph = SIGN_GLYPHS[ch];
+      if (!glyph) throw new Error(`No cave-sign glyph for "${ch}"`);
       for (let row = 0; row < glyph.length; row++) {
         for (let col = 0; col < glyph[row].length; col++) {
           if (glyph[row][col] !== "1") continue;
-          geos.push(box({ w: pixel, h: pixel, d: 0.035, color: "#f3efe4", emissive: 0.2, offset: { x: cursor + col * cell + cell * 0.5, y: (2 - row) * cell, z: 0.125 } }));
+          geos.push(box({ w: SIGN_PIXEL, h: SIGN_PIXEL, d: 0.035, color: "#f3efe4", emissive: 0.2, offset: { x: cursor + col * SIGN_CELL + SIGN_CELL * 0.5, y: (2 - row) * SIGN_CELL, z: 0.125 } }));
         }
       }
-      cursor += cell * 4;
+      cursor += SIGN_CELL * 4;
     }
-    for (const x of [-CAVE_SIGN_WIDTH * 0.5 + 0.13, CAVE_SIGN_WIDTH * 0.5 - 0.13]) {
+    for (const x of [-width * 0.5 + 0.13, width * 0.5 - 0.13]) {
       for (const y of [-CAVE_SIGN_HEIGHT * 0.5 + 0.13, CAVE_SIGN_HEIGHT * 0.5 - 0.13]) {
         geos.push(box({ w: 0.07, h: 0.07, d: 0.035, color: "#3a2a18", offset: { x, y, z: 0.13 } }));
       }
     }
-    return merge(...geos);
-  });
+    const geo = merge(...geos);
+    geo.signWidth = width;
+    geo.signHeight = CAVE_SIGN_HEIGHT;
+    SIGN_CACHE.set(text, geo);
+    return geo;
+  };
   // Stone frame around a cave mouth
   const caveMouthRim = cached(() => {
     const rand = mulberry32(31);
@@ -112,6 +133,15 @@
     v.fill(5, 5, 0, 5, 0, 1, stone);
     v.fill(-5, 4, 6, 6, 0, 1, light);
     return voxGeo(v, { unit: VOX, palette: CLIFF, origin: { x: 0, y: 0, z: -VOX } });
+  });
+  const mirrorPanel = cached(() => {
+    const geo = {
+      verts: [-2.5, -1.75, 0, 2.5, -1.75, 0, 2.5, 1.5, 0, -2.5, 1.5, 0],
+      faces: [{ i: [0, 1, 2, 3], color: hexToRgb("#81919c"), emissive: 0 }],
+      lines: [],
+      castShadow: false
+    };
+    return geo;
   });
   // Gateway arch over the pass, trail along z
   const gate = cached(() => {
@@ -270,5 +300,5 @@
     box({ w: 4, h: 0.14, d: 0.16, color: WOOD_DK, offset: { x: 2, y: -0.17, z: 0.92 } }),
     ...[[0.5, -0.8], [0.5, 0.8], [3.5, -0.8], [3.5, 0.8]].map(([x, z]) => box({ w: 0.2, h: 2.2, d: 0.2, color: "#6b4a2b", offset: { x, y: -1.2, z } }))
   ));
-  BL.hubModels = { jetpack, jetFlame, caveMouthRim, caveSign, CAVE_SIGN_WIDTH, CAVE_SIGN_HEIGHT, gate, caveShelves, bedroll, tree, bush, rock, altarSlab, altarBlock, woodCrate, barrel, flowerTuft, torch, vine, cloud, ladder, dock, TREE_HEIGHT };
+  BL.hubModels = { jetpack, jetFlame, caveMouthRim, mirrorPanel, caveSign, CAVE_SIGN_WIDTH, CAVE_SIGN_HEIGHT, gate, caveShelves, bedroll, tree, bush, rock, altarSlab, altarBlock, woodCrate, barrel, flowerTuft, torch, vine, cloud, ladder, dock, TREE_HEIGHT };
 })();

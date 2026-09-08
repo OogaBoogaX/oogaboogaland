@@ -8,7 +8,7 @@
     slot("c11", 11, "lab", "open", "EntropyLab"),
     slot("c9", 9),
     slot("c730", 7.5, null, "sleeping"),
-    slot("c1", 1),
+    slot("c1", 1, null, "mirror", "Ooga Booga Land"),
     slot("c2", 2),
     slot("c3", 3),
     slot("c5", 5, null, "sleeping")

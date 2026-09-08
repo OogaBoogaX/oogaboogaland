@@ -512,6 +512,22 @@
       }
       v.set(1, 2, 5, P.black);
       v.set(5, 2, 5, P.black);
+      if (traits.symmetricTusks) {
+        // Keep w-s-bitcoin's tusks and the stubble beside them as a clean mirror pair.
+        for (let x = 0; x <= 6; x++) {
+          for (let y = 0; y <= 1; y++) {
+            v.set(x, y, 7, P.hair);
+            for (let z = 5; z <= 6; z++) if (v.get(x, y, z) === P.stubble) v.set(x, y, z, P.hair);
+          }
+        }
+        for (const x of [0, 6]) {
+          v.set(x, 0, 7, P.stubble);
+          v.set(x, 1, 7, P.stubble);
+          v.del(x, 0, 6);
+        }
+        v.set(1, 0, 7, P.white);
+        v.set(5, 0, 7, P.white);
+      }
     }
     const headOrigin = { x: -3.5 * u, y: 0, z: -3 * u };
     const headOpen = vg(headVox, headOrigin);

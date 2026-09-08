@@ -4,9 +4,9 @@
   const { mat4 } = BL.math;
   const { updateWorld, traverseVisible } = BL.scene;
   const QUALITY = {
-    high: { dpr: 1.5, msaa: 4, shadow: 2048, bloom: true },
-    medium: { dpr: 1.25, msaa: 2, shadow: 1024, bloom: true },
-    low: { dpr: 1, msaa: 0, shadow: 512, bloom: false }
+    high: { dpr: 1.5, msaa: 4, shadow: 2048, bloom: true, mirror: 512 },
+    medium: { dpr: 1.25, msaa: 2, shadow: 1024, bloom: true, mirror: 384 },
+    low: { dpr: 1, msaa: 0, shadow: 512, bloom: false, mirror: 256 }
   };
   const INSTANCE_FLOATS = 20;
   // Caps the pixel ratio to bound buffer memory
@@ -152,6 +152,39 @@ void main() {
   oColor = vec4(col, 1.0);
   oBright = vec4(vColor.rgb * glow, 1.0);
 }`;
+  const MIRROR_VS = `#version 300 es
+precision highp float;
+layout(location=0) in vec3 aPos;
+layout(location=3) in vec4 aM0;
+layout(location=4) in vec4 aM1;
+layout(location=5) in vec4 aM2;
+layout(location=6) in vec4 aM3;
+uniform mat4 uViewProj;
+uniform mat4 uReflectionViewProj;
+out vec4 vReflection;
+out vec3 vWorld;
+void main() {
+  vec4 world = mat4(aM0, aM1, aM2, aM3) * vec4(aPos, 1.0);
+  vWorld = world.xyz;
+  vReflection = uReflectionViewProj * world;
+  gl_Position = uViewProj * world;
+}`;
+  const MIRROR_FS = `#version 300 es
+precision highp float;
+in vec4 vReflection;
+in vec3 vWorld;
+uniform sampler2D uReflection;
+uniform vec3 uTint;
+layout(location=0) out vec4 oColor;
+layout(location=1) out vec4 oBright;
+void main() {
+  vec2 uv = vReflection.xy / vReflection.w * 0.5 + 0.5;
+  vec3 reflected = texture(uReflection, uv).rgb;
+  float sheen = pow(max(0.0, 1.0 - abs(fract((vWorld.x + vWorld.y) * 0.22) - 0.5) * 7.0), 5.0) * 0.08;
+  vec3 color = mix(reflected, uTint, 0.16) + sheen;
+  oColor = vec4(color, 1.0);
+  oBright = vec4(0.0);
+}`;
   const QUAD_VS = `#version 300 es
 precision highp float;
 out vec2 vUv;
@@ -209,11 +242,25 @@ void main() {
     const lightProj = mat4.create();
     const lightViewProj = mat4.create();
     const P4 = new Float32Array(4);
+    const MIRROR_POINT = new Float32Array(3);
+    const MIRROR_CLIP = new Float32Array(4);
+    const mirrorView = mat4.create();
+    const mirrorProj = mat4.create();
+    const mirrorViewProj = mat4.create();
+    const mirrorCapturedViewProj = mat4.create();
+    const mirrorEye = { x: 0, y: 0, z: 0 };
+    const mirrorTarget = { x: 0, y: 0, z: 0 };
+    const mirrorUp = { x: 0, y: 1, z: 0 };
     const records = new Map();
     const activeRecords = [];
     const res = { programs: {}, fbo: null, shadow: null, bloom: null, quadVao: null };
+    const mirror = { node: null, record: null, geometry: null, program: null, programReady: false, fb: null, tex: null, depth: null, width: 0, height: 0, frame: 0 };
+    const mirrorDebug = {
+      active: false, faux: false, width: 0, height: 0, allocationCount: 0, reflectionPassCount: 0, skippedPassCount: 0, resources: 0, captureExcluded: false,
+      cameraPosition: new Float32Array(3), cameraTarget: new Float32Array(3), planeCenter: new Float32Array(3), planeNormal: new Float32Array(3), skipReason: "none"
+    };
     // Compile without blocking, ready flips once linked
-    const parallel = gl.getExtension("KHR_parallel_shader_compile");
+    let parallel = null;
     let ready = false;
     let failure = null;
     const compile = (vs, fs, uniforms) => {
@@ -238,6 +285,26 @@ void main() {
       for (const sh of p.shaders) gl.deleteShader(sh);
       p.shaders = [];
       for (const name of p.uniforms) p.u[name] = gl.getUniformLocation(p.prog, name);
+    };
+    const destroyMirrorProgram = () => {
+      const p = mirror.program;
+      if (!p) return;
+      for (const sh of p.shaders) gl.deleteShader(sh);
+      gl.deleteProgram(p.prog);
+      mirror.program = null;
+      mirror.programReady = false;
+      mirrorDebug.resources--;
+    };
+    const ensureMirrorProgram = () => {
+      if (!mirror.program) {
+        mirror.program = compile(MIRROR_VS, MIRROR_FS, ["uViewProj", "uReflectionViewProj", "uReflection", "uTint"]);
+        mirrorDebug.resources++;
+      }
+      if (mirror.programReady) return true;
+      if (parallel && !gl.getProgramParameter(mirror.program.prog, parallel.COMPLETION_STATUS_KHR)) return false;
+      finishProgram(mirror.program);
+      mirror.programReady = true;
+      return true;
     };
     const buildPrograms = () => {
       ready = false;
@@ -279,6 +346,49 @@ void main() {
       if (samples > 0) gl.renderbufferStorageMultisample(gl.RENDERBUFFER, samples, internal, w, h);
       else gl.renderbufferStorage(gl.RENDERBUFFER, internal, w, h);
       return rb;
+    };
+    const destroyMirrorTarget = () => {
+      if (!mirror.fb) return;
+      gl.deleteTexture(mirror.tex);
+      gl.deleteRenderbuffer(mirror.depth);
+      gl.deleteFramebuffer(mirror.fb);
+      mirror.fb = mirror.tex = mirror.depth = null;
+      mirror.width = mirror.height = mirrorDebug.width = mirrorDebug.height = 0;
+      mirrorDebug.resources -= 3;
+    };
+    const ensureMirrorTarget = () => {
+      const cap = settings.mirror;
+      const scale = cap / Math.max(width, height, 1);
+      const w = Math.max(1, Math.round(width * scale)), h = Math.max(1, Math.round(height * scale));
+      if (mirror.fb && mirror.width === w && mirror.height === h) return;
+      destroyMirrorTarget();
+      mirror.tex = createTexture(w, h, gl.RGBA8, gl.LINEAR);
+      mirror.depth = createRenderbuffer(w, h, gl.DEPTH_COMPONENT16, 0);
+      mirror.fb = gl.createFramebuffer();
+      gl.bindFramebuffer(gl.FRAMEBUFFER, mirror.fb);
+      gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, mirror.tex, 0);
+      gl.framebufferRenderbuffer(gl.FRAMEBUFFER, gl.DEPTH_ATTACHMENT, gl.RENDERBUFFER, mirror.depth);
+      gl.drawBuffers([gl.COLOR_ATTACHMENT0]);
+      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+      mirror.width = mirrorDebug.width = w;
+      mirror.height = mirrorDebug.height = h;
+      mirrorDebug.allocationCount++;
+      mirrorDebug.resources += 3;
+    };
+    const destroyMirror = () => {
+      destroyMirrorTarget();
+      destroyMirrorProgram();
+      mirror.node = mirror.record = mirror.geometry = null;
+      mirrorDebug.active = false;
+      mirrorDebug.captureExcluded = false;
+    };
+    const forgetMirror = () => {
+      mirror.node = mirror.record = mirror.geometry = mirror.program = mirror.fb = mirror.tex = mirror.depth = null;
+      mirror.programReady = false;
+      mirror.width = mirror.height = mirrorDebug.width = mirrorDebug.height = 0;
+      mirrorDebug.active = false;
+      mirrorDebug.captureExcluded = false;
+      mirrorDebug.resources = 0;
     };
     const destroyFbo = () => {
       const f = res.fbo;
@@ -484,7 +594,14 @@ void main() {
     };
     const collect = (node) => {
       if (!node.geometry) return;
+      if (node.mirror) {
+        if (mirror.node) throw new Error("A scene may contain at most one mirror node");
+        mirror.node = node;
+        mirror.geometry = node.geometry;
+        mirrorDebug.active = true;
+      }
       const rec = recordFor(node.geometry);
+      if (node.mirror) mirror.record = rec;
       if (!rec.active) {
         rec.active = true;
         rec.count = 0;
@@ -531,6 +648,86 @@ void main() {
         gl.bufferSubData(gl.ARRAY_BUFFER, 0, d, 0, need);
       }
     };
+    const skipMirrorPass = (reason) => {
+      mirrorDebug.skippedPassCount++;
+      mirrorDebug.skipReason = reason;
+      return false;
+    };
+    const reflectMirrorPoint = (out, point, center, normal) => {
+      const d = (point.x - center[0]) * normal[0] + (point.y - center[1]) * normal[1] + (point.z - center[2]) * normal[2];
+      out.x = point.x - 2 * d * normal[0];
+      out.y = point.y - 2 * d * normal[1];
+      out.z = point.z - 2 * d * normal[2];
+    };
+    const prepareMirrorCamera = (camera) => {
+      const node = mirror.node, world = node.world, center = mirrorDebug.planeCenter, normal = mirrorDebug.planeNormal;
+      center[0] = world[12];
+      center[1] = world[13];
+      center[2] = world[14];
+      const nlen = Math.hypot(world[8], world[9], world[10]) || 1;
+      normal[0] = world[8] / nlen;
+      normal[1] = world[9] / nlen;
+      normal[2] = world[10] / nlen;
+      const cameraSide = (camera.position.x - center[0]) * normal[0] + (camera.position.y - center[1]) * normal[1] + (camera.position.z - center[2]) * normal[2];
+      if (cameraSide <= 0.001) return skipMirrorPass("back-facing");
+      mat4.transformPoint4(MIRROR_CLIP, viewProj, center[0], center[1], center[2]);
+      if (MIRROR_CLIP[3] <= 0.01) return skipMirrorPass("behind-camera");
+      let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity, projected = 0;
+      const verts = node.geometry.verts;
+      for (let i = 0; i < verts.length; i += 3) {
+        mat4.transformPoint(MIRROR_POINT, world, verts[i], verts[i + 1], verts[i + 2]);
+        mat4.transformPoint4(MIRROR_CLIP, viewProj, MIRROR_POINT[0], MIRROR_POINT[1], MIRROR_POINT[2]);
+        if (MIRROR_CLIP[3] <= 0.01) continue;
+        const x = MIRROR_CLIP[0] / MIRROR_CLIP[3], y = MIRROR_CLIP[1] / MIRROR_CLIP[3];
+        minX = Math.min(minX, x);
+        minY = Math.min(minY, y);
+        maxX = Math.max(maxX, x);
+        maxY = Math.max(maxY, y);
+        projected++;
+      }
+      if (!projected || maxX < -1 || minX > 1 || maxY < -1 || minY > 1) return skipMirrorPass("offscreen");
+      const area = (Math.min(1, maxX) - Math.max(-1, minX)) * width * 0.5 * (Math.min(1, maxY) - Math.max(-1, minY)) * height * 0.5;
+      if (area < 16) return skipMirrorPass("negligible");
+      reflectMirrorPoint(mirrorEye, camera.position, center, normal);
+      reflectMirrorPoint(mirrorTarget, camera.target, center, normal);
+      const upDot = UP.x * normal[0] + UP.y * normal[1] + UP.z * normal[2];
+      mirrorUp.x = UP.x - 2 * upDot * normal[0];
+      mirrorUp.y = UP.y - 2 * upDot * normal[1];
+      mirrorUp.z = UP.z - 2 * upDot * normal[2];
+      mat4.lookAt(mirrorView, mirrorEye, mirrorTarget, mirrorUp);
+      mat4.perspective(mirrorProj, camera.fov, width / height, camera.near, camera.far);
+      mat4.transformPoint(MIRROR_POINT, mirrorView, center[0], center[1], center[2]);
+      let cx = mirrorView[0] * normal[0] + mirrorView[4] * normal[1] + mirrorView[8] * normal[2];
+      let cy = mirrorView[1] * normal[0] + mirrorView[5] * normal[1] + mirrorView[9] * normal[2];
+      let cz = mirrorView[2] * normal[0] + mirrorView[6] * normal[1] + mirrorView[10] * normal[2];
+      const clen = Math.hypot(cx, cy, cz) || 1;
+      cx /= clen;
+      cy /= clen;
+      cz /= clen;
+      let cw = -(cx * MIRROR_POINT[0] + cy * MIRROR_POINT[1] + cz * MIRROR_POINT[2]);
+      const qx = ((cx >= 0 ? 1 : -1) + mirrorProj[8]) / mirrorProj[0];
+      const qy = ((cy >= 0 ? 1 : -1) + mirrorProj[9]) / mirrorProj[5];
+      const qz = -1;
+      const qw = (1 + mirrorProj[10]) / mirrorProj[14];
+      const clipScale = 2 / (cx * qx + cy * qy + cz * qz + cw * qw);
+      cx *= clipScale;
+      cy *= clipScale;
+      cz *= clipScale;
+      cw *= clipScale;
+      mirrorProj[2] = cx;
+      mirrorProj[6] = cy;
+      mirrorProj[10] = cz + 0.998;
+      mirrorProj[14] = cw;
+      mat4.multiply(mirrorViewProj, mirrorProj, mirrorView);
+      mirrorDebug.cameraPosition[0] = mirrorEye.x;
+      mirrorDebug.cameraPosition[1] = mirrorEye.y;
+      mirrorDebug.cameraPosition[2] = mirrorEye.z;
+      mirrorDebug.cameraTarget[0] = mirrorTarget.x;
+      mirrorDebug.cameraTarget[1] = mirrorTarget.y;
+      mirrorDebug.cameraTarget[2] = mirrorTarget.z;
+      mirrorDebug.skipReason = "none";
+      return true;
+    };
     const resize = () => {
       width = canvas.clientWidth;
       height = canvas.clientHeight;
@@ -545,6 +742,7 @@ void main() {
       buildFbo();
     };
     const init = () => {
+      parallel = gl.getExtension("KHR_parallel_shader_compile");
       buildPrograms();
       buildShadow();
       resize();
@@ -556,6 +754,7 @@ void main() {
     const onLost = (e) => {
       e.preventDefault();
       lost = true;
+      forgetMirror();
     };
     const onRestored = () => {
       records.clear();
@@ -567,8 +766,9 @@ void main() {
     };
     canvas.addEventListener("webglcontextlost", onLost);
     canvas.addEventListener("webglcontextrestored", onRestored);
-    const drawParts = (kind, useProgram) => {
+    const drawParts = (kind, useProgram, excludeMirror = false) => {
       for (const rec of activeRecords) {
+        if (excludeMirror && rec === mirror.record) continue;
         const part = rec[kind];
         if (!part) continue;
         if (kind === "mesh" && useProgram === "shadow" && rec.geometry.castShadow === false) continue;
@@ -576,6 +776,49 @@ void main() {
         gl.bindVertexArray(part.vao);
         gl.drawArraysInstanced(gl.TRIANGLES, 0, part.count, rec.count);
       }
+    };
+    const renderMirrorCapture = (clear, sky, ground, sun, lx, ly, lz, sh) => {
+      ensureMirrorTarget();
+      const pg = res.programs;
+      gl.bindFramebuffer(gl.FRAMEBUFFER, mirror.fb);
+      gl.viewport(0, 0, mirror.width, mirror.height);
+      gl.clearColor(clear[0], clear[1], clear[2], 1);
+      gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+      gl.useProgram(pg.mesh.prog);
+      gl.uniformMatrix4fv(pg.mesh.u.uViewProj, false, mirrorViewProj);
+      gl.uniformMatrix4fv(pg.mesh.u.uLightViewProj, false, lightViewProj);
+      gl.uniform3f(pg.mesh.u.uLightDir, lx, ly, lz);
+      gl.uniform3fv(pg.mesh.u.uSky, sky);
+      gl.uniform3fv(pg.mesh.u.uGround, ground);
+      gl.uniform3fv(pg.mesh.u.uSun, sun);
+      gl.uniform1f(pg.mesh.u.uShadowTexel, 1 / sh.size);
+      gl.activeTexture(gl.TEXTURE0);
+      gl.bindTexture(gl.TEXTURE_2D, sh.tex);
+      gl.uniform1i(pg.mesh.u.uShadow, 0);
+      drawParts("mesh", "mesh", true);
+      gl.useProgram(pg.line.prog);
+      gl.uniformMatrix4fv(pg.line.u.uViewProj, false, mirrorViewProj);
+      gl.uniform2f(pg.line.u.uViewport, mirror.width, mirror.height);
+      gl.disable(gl.CULL_FACE);
+      drawParts("line", "line", true);
+      gl.enable(gl.CULL_FACE);
+      mirrorCapturedViewProj.set(mirrorViewProj);
+      mirrorDebug.reflectionPassCount++;
+      mirrorDebug.captureExcluded = true;
+    };
+    const drawMirrorSurface = () => {
+      const rec = mirror.record, part = rec && rec.mesh, pg = mirror.program;
+      if (!part || !mirror.tex || !mirror.programReady) return;
+      gl.useProgram(pg.prog);
+      gl.uniformMatrix4fv(pg.u.uViewProj, false, viewProj);
+      gl.uniformMatrix4fv(pg.u.uReflectionViewProj, false, mirrorCapturedViewProj);
+      gl.uniform3f(pg.u.uTint, 0.56, 0.62, 0.67);
+      gl.activeTexture(gl.TEXTURE2);
+      gl.bindTexture(gl.TEXTURE_2D, mirror.tex);
+      gl.uniform1i(pg.u.uReflection, 2);
+      gl.bindVertexArray(part.vao);
+      gl.drawArraysInstanced(gl.TRIANGLES, 0, part.count, rec.count);
+      gl.activeTexture(gl.TEXTURE0);
     };
     const blit = (f) => {
       gl.bindFramebuffer(gl.READ_FRAMEBUFFER, f.scene);
@@ -628,6 +871,8 @@ void main() {
         rec.batch = null;
       }
       activeRecords.length = 0;
+      mirror.node = mirror.record = null;
+      mirrorDebug.active = false;
       updateWorld(root, null);
       traverseVisible(root, collect);
       for (const rec of activeRecords) {
@@ -642,6 +887,14 @@ void main() {
       gl.cullFace(gl.FRONT);
       drawParts("mesh", "shadow");
       gl.cullFace(gl.BACK);
+      if (mirror.node) {
+        mirror.frame++;
+        if (prepareMirrorCamera(camera)) {
+          if (settings !== QUALITY.high && mirror.frame % 2 === 0) skipMirrorPass("cadence");
+          else if (!ensureMirrorProgram()) skipMirrorPass("shader-pending");
+          else renderMirrorCapture(clear, sky, ground, sun, lx, ly, lz, sh);
+        }
+      }
       gl.bindFramebuffer(gl.FRAMEBUFFER, f.scene);
       gl.viewport(0, 0, pw, ph);
       gl.clearColor(clear[0], clear[1], clear[2], 1);
@@ -658,7 +911,8 @@ void main() {
       gl.activeTexture(gl.TEXTURE0);
       gl.bindTexture(gl.TEXTURE_2D, sh.tex);
       gl.uniform1i(pg.mesh.u.uShadow, 0);
-      drawParts("mesh", "mesh");
+      drawParts("mesh", "mesh", true);
+      drawMirrorSurface();
       gl.useProgram(pg.line.prog);
       gl.uniformMatrix4fv(pg.line.u.uViewProj, false, viewProj);
       gl.uniform2f(pg.line.u.uViewport, pw, ph);
@@ -717,6 +971,7 @@ void main() {
       canvas.removeEventListener("webglcontextlost", onLost);
       canvas.removeEventListener("webglcontextrestored", onRestored);
       destroyRecords();
+      destroyMirror();
       destroyFbo();
       destroyShadow();
       for (const p of Object.values(res.programs)) gl.deleteProgram(p.prog);
@@ -728,6 +983,7 @@ void main() {
     // Drop unreferenced buffers, rebuilt on demand
     const releaseUnused = (live) => {
       let released = 0;
+      if (mirror.geometry && !live.has(mirror.geometry)) destroyMirror();
       for (const geometry of [...records.keys()]) {
         if (live.has(geometry)) continue;
         releaseGeometry(geometry);
@@ -756,7 +1012,10 @@ void main() {
         return Object.keys(QUALITY).find((k) => QUALITY[k] === settings);
       },
       get stats() {
-        return { records: records.size, active: activeRecords.length };
+        return { records: records.size, active: activeRecords.length, mirrorResources: mirrorDebug.resources };
+      },
+      get mirror() {
+        return mirrorDebug;
       },
       get ready() {
         return ready;

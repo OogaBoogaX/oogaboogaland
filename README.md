@@ -26,8 +26,9 @@ neighbour, shakes a tree, rustles a bush, rolls a die or flips a card, and walki
 into the lit cave enters it. **Escape** lets go. Lost? **0** or the **Reset view** button
 brings the camera home.
 
-Keys: **B** add 100 test bananas, **L** legendary tip, **P** fill the pile, **1** to **9** force a
-contributor to eating, **Escape** leave a cave or let go, **Shift+R** reset the demo.
+Keys: **B** add 100 test bananas, **J** give the controlled Ooga a jetpack, **L** legendary
+tip, **P** fill the pile, **1** to **9** force a contributor to eating, **Escape** leave a
+cave or let go, **Shift+R** reset the demo.
 
 URL flags: `?scene=lab` opens the lab directly, `?nosim=1` silences simulated tips,
 `?canvas2d=1` forces the Canvas 2D fallback, `?yaw=1.2` sets the starting camera angle,
