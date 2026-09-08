@@ -34,7 +34,8 @@ URL flags: `?scene=lab` opens the lab directly, `?nosim=1` silences simulated ti
 `?debug=1` exposes `window.__ooga`. In debug mode, add `&bananas=10000` (or another
 non-negative amount) to preview the pile at that starting level without changing saved state,
 use `&b=500` to choose how many test bananas each press of **B** adds and drops, or use
-`&loot=1` to exercise the dormant loot feature.
+`&loot=1` to exercise the loot feature. Loot ships off: `LOOT_DEFAULT` in `src/js/director.js`
+turns it on for everyone. The pile holds at most ten million bananas; every count is clamped there.
 
 ## Test
 

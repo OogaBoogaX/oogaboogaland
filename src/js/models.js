@@ -256,7 +256,8 @@
         profile.push([outer[0] + (inner[0] - outer[0]) * t, outer[1] + (inner[1] - outer[1]) * t]);
       }
     }
-    const colors = ["#d9ad2d", "#e2b631", "#cfa42b", "#d6aa2c", "#dcb12f"].map(hexToRgb);
+    // Shadow tones: the mound is hidden under the banana shell and only shows in the gaps between them
+    const colors = ["#3a280f", "#33230d", "#42300f", "#382a11", "#2f210c"].map(hexToRgb);
     const rings = profile.map(([radius, y], ringIndex) => {
       const ring = [];
       for (let segment = 0; segment < segments; segment++) {

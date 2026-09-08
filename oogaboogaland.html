@@ -5,7 +5,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta http-equiv="Content-Security-Policy"
-    content="default-src 'none'; script-src 'sha256-qc92x9xQau1Xk+sHXQfIk+llR8XyUnr7SqCrZqcV57c='; style-src 'sha256-dDRjKsPXfpTqnH8VPCUSd7WihWQczKIMep/Sr+vXL+s='; img-src 'self' data:; connect-src 'none'; base-uri 'none'; form-action 'none'">
+    content="default-src 'none'; script-src 'sha256-5krVOvqeEKxlIT0yQrLczRZ9dANDdUA+rMJNg/Jdapo='; style-src 'sha256-dDRjKsPXfpTqnH8VPCUSd7WihWQczKIMep/Sr+vXL+s='; img-src 'self' data:; connect-src 'none'; base-uri 'none'; form-action 'none'">
   <meta name="referrer" content="no-referrer">
   <meta name="color-scheme" content="dark">
   <meta name="theme-color" content="#0a0a0b">
@@ -3187,7 +3187,8 @@ void main() {
         profile.push([outer[0] + (inner[0] - outer[0]) * t, outer[1] + (inner[1] - outer[1]) * t]);
       }
     }
-    const colors = ["#d9ad2d", "#e2b631", "#cfa42b", "#d6aa2c", "#dcb12f"].map(hexToRgb);
+    // Shadow tones: the mound is hidden under the banana shell and only shows in the gaps between them
+    const colors = ["#3a280f", "#33230d", "#42300f", "#382a11", "#2f210c"].map(hexToRgb);
     const rings = profile.map(([radius, y], ringIndex) => {
       const ring = [];
       for (let segment = 0; segment < segments; segment++) {
@@ -6648,18 +6649,21 @@ void main() {
   const BANANA_DROP_HEIGHT = (BL.terrain.MAX_HEIGHT + BL.hubModels.TREE_HEIGHT) * 2;
   const BANANA_SCALE = models.BANANA_AMMO_SCALE;
   const VISIBLE_BANANAS = 300;
+  const MAX_BANANAS = 10000000;
   const BASE_HEIGHT = 0.48;
   const SHELL_EDGE = 0.28;
   const CORE_FACE_SIZE = 0.16;
   const GOLDEN_ANGLE = Math.PI * (3 - Math.sqrt(5));
-  const BANANA_LENGTH_SPACE = 0.37;
-  const BANANA_ROW_SPACE = 0.22;
+  // Shell bananas lie flat and overlap their neighbours, so the mound under them never shows
+  const BANANA_LENGTH_SPACE = 0.3;
+  const BANANA_ROW_SPACE = 0.1;
+  const BANANA_YAW_SPREAD = 0.5;
+  const BANANA_UNDERLAYER_SINK = 0.03;
   const BANANA_SURFACE_CLEARANCE = 0.008;
-  const MIN_BANANA_CENTER_SPACE = 0.132;
   const PLATFORM_CLEARANCE = 0.004;
   const DROP_POOL_SIZE = 96;
   const DROP_RATE = 72;
-  const MAX_WEBGL_TILES = 12288;
+  const MAX_WEBGL_TILES = 65536;
   const MAX_CANVAS_TILES = 512;
   const footprintFor = (count, scale = 0.45) => scale * (count > VISIBLE_BANANAS ? Math.cbrt(count / VISIBLE_BANANAS) : 1);
   const visualFootprintFor = (count, scale = 0.45) => {
@@ -6692,11 +6696,16 @@ void main() {
     const { root, world, pileScale: SCALE = 0.45, pileY: BASE_Y = 0.02 } = ctx;
     const pileSlots = [];
     const coreFaceSize = ctx.renderer.kind === "canvas2d" ? CORE_FACE_SIZE * 1.75 : CORE_FACE_SIZE;
-    const core = createNode({ geometry: models.bananaPileCoreGeometry(SCALE, BASE_HEIGHT, coreFaceSize), visible: false });
+    // A dark mound under the shell: it only ever shows as the shadow between bananas, so one geometry scales to every level
+    const core = createNode({ geometry: models.bananaPileCoreGeometry(SCALE * 6, BASE_HEIGHT * 6, coreFaceSize), visible: false });
     const bananaGeometry = models.bananaGeometry();
     const shellGeometry = models.bananaTileGeometry();
-    let shellMinZ = Infinity;
-    for (let i = 2; i < shellGeometry.verts.length; i += 3) shellMinZ = Math.min(shellMinZ, shellGeometry.verts[i]);
+    let shellMinZ = Infinity, shellReach = 0;
+    for (let i = 0; i < shellGeometry.verts.length; i += 3) {
+      shellMinZ = Math.min(shellMinZ, shellGeometry.verts[i + 2]);
+      shellReach = Math.max(shellReach, Math.hypot(shellGeometry.verts[i], shellGeometry.verts[i + 1], shellGeometry.verts[i + 2]));
+    }
+    shellReach *= BANANA_SCALE;
     const bananaSurfaceLift = -shellMinZ * BANANA_SCALE + BANANA_SURFACE_CLEARANCE;
     const shell = createNode({
       geometry: shellGeometry,
@@ -6706,10 +6715,6 @@ void main() {
       visible: false
     });
     const maxTiles = ctx.renderer.kind === "canvas2d" ? MAX_CANVAS_TILES : MAX_WEBGL_TILES;
-    let surfaceBucketCount = 1;
-    while (surfaceBucketCount < maxTiles * 4) surfaceBucketCount *= 2;
-    const surfaceBuckets = new Int32Array(surfaceBucketCount);
-    const surfaceNext = new Int32Array(maxTiles);
     const surfaceSample = { y: 0, slope: 0 };
     const instanceMatrix = mat4.create();
     const restingMatrix = mat4.create();
@@ -6725,6 +6730,7 @@ void main() {
       position.y += Math.max(0, BASE_Y + PLATFORM_CLEARANCE - minY);
     };
     const keepInstanceAbovePlatform = (matrix) => {
+      if (matrix[13] - BASE_Y - PLATFORM_CLEARANCE >= shellReach) return;
       let minY = Infinity;
       for (let i = 0; i < shellGeometry.verts.length; i += 3) {
         minY = Math.min(minY, matrix[1] * shellGeometry.verts[i] + matrix[5] * shellGeometry.verts[i + 1] + matrix[9] * shellGeometry.verts[i + 2] + matrix[13]);
@@ -6820,8 +6826,7 @@ void main() {
       addChild(root, node);
     }
     let shown = 0, counted = 0;
-    let footprint = SCALE, layoutCount = -1;
-    let coreLayoutKey = -1;
+    let footprint = SCALE, layoutCount = -1, shellWanted = 0;
     let deliveries = 0, pendingDrops = 0, dropsStarted = 0, dropsLanded = 0, launchCredit = 0;
     let hatchOpen = 0, hatchTarget = 0;
     const pileEdge = () => footprint;
@@ -6831,22 +6836,82 @@ void main() {
       Object.assign(slot.node.rotation, slot.base.rot);
       setVec(slot.node.scale, slot.restScale, slot.restScale, slot.restScale);
     };
+    // Write one flat banana on the mound surface at (angle, normalizedRadius), turned by yaw about the normal.
+    // seed is stable across relays, so a banana keeps its look while the mound grows under it.
+    const writeTile = (data, instance, seed, angle, normalizedRadius, yaw, sink, growth, coreFootprint, radialScale, edgeBand) => {
+      const profile = domeSurface(normalizedRadius, surfaceSample);
+      const radialNormal = -profile.slope * radialScale;
+      const normalLength = Math.hypot(radialNormal, 1);
+      const ny = 1 / normalLength;
+      const cos = Math.cos(angle), sin = Math.sin(angle);
+      const nx = cos * radialNormal / normalLength;
+      const nz = sin * radialNormal / normalLength;
+      const yx = ny * cos, yy = -radialNormal / normalLength, yz = ny * sin;
+      const radialJitter = edgeBand ? 0 : Math.sin(seed * 4.229) * 0.008;
+      const lift = bananaSurfaceLift - sink + (edgeBand ? 0 : Math.sin(seed * 5.731) * 0.004);
+      const warpedRadius = normalizedRadius * (edgeBand ? 1 : models.bananaPileRadiusScale(angle, normalizedRadius));
+      const warpedY = profile.y + models.bananaPileHeightOffset(angle, normalizedRadius);
+      setVec(tilePosition,
+        cos * warpedRadius * coreFootprint + nx * lift + yx * radialJitter,
+        BASE_Y + warpedY * BASE_HEIGHT * growth + ny * lift + yy * radialJitter,
+        sin * warpedRadius * coreFootprint + nz * lift + yz * radialJitter);
+      const tx = -sin, tz = cos;
+      const ct = Math.cos(yaw), st = Math.sin(yaw);
+      const xx = tx * ct + yx * st, xy = yy * st, xz = tz * ct + yz * st;
+      const bx = -tx * st + yx * ct, by = yy * ct, bz = -tz * st + yz * ct;
+      const flip = Math.sin(seed * 3.731) < 0 ? -BANANA_SCALE : BANANA_SCALE;
+      instanceMatrix[0] = xx * flip;
+      instanceMatrix[1] = xy * flip;
+      instanceMatrix[2] = xz * flip;
+      instanceMatrix[3] = 0;
+      instanceMatrix[4] = bx * flip;
+      instanceMatrix[5] = by * flip;
+      instanceMatrix[6] = bz * flip;
+      instanceMatrix[7] = 0;
+      instanceMatrix[8] = nx * BANANA_SCALE;
+      instanceMatrix[9] = ny * BANANA_SCALE;
+      instanceMatrix[10] = nz * BANANA_SCALE;
+      instanceMatrix[11] = 0;
+      instanceMatrix[12] = tilePosition.x;
+      instanceMatrix[13] = tilePosition.y;
+      instanceMatrix[14] = tilePosition.z;
+      instanceMatrix[15] = 1;
+      keepInstanceAbovePlatform(instanceMatrix);
+      const offset = instance * 20;
+      data.set(instanceMatrix, offset);
+      data[offset + 16] = 1;
+      data[offset + 17] = 0;
+      data[offset + 18] = 0;
+      data[offset + 19] = 0;
+    };
+    // Bands of overlapping bananas from the rim to within a row of the apex, with a sunken second layer
+    // between the bands filling the gaps. The layout depends only on the tile count, so a level change relays
+    // the shell only when that count changes; spacing widens only if the budget would overflow, which
+    // the cap keeps off WebGL. Bands count from the rim and bananas step around each band at a fixed
+    // arc, so growth adds bananas at the end of a band and at the apex instead of respacing the rest.
     const rebuildSurface = (target, growth, coreFootprint) => {
       if (target <= VISIBLE_BANANAS) {
         shell.visible = false;
         shell.instanceCount = 0;
+        shellWanted = 0;
         return;
       }
       const radialScale = BASE_HEIGHT * growth / coreFootprint;
-      let wanted = 0, normalizedRadius = 0.995;
-      while (normalizedRadius > 0.025 && wanted < maxTiles) {
-        const profile = domeSurface(normalizedRadius, surfaceSample);
-        const surfaceFactor = Math.hypot(1, profile.slope * radialScale);
-        const circumference = Math.PI * 2 * normalizedRadius * coreFootprint;
-        wanted += Math.max(1, Math.floor(circumference / BANANA_LENGTH_SPACE));
-        normalizedRadius -= BANANA_ROW_SPACE / (coreFootprint * surfaceFactor);
+      const rowStep = (normalizedRadius, spacing) => BANANA_ROW_SPACE * spacing / (coreFootprint * Math.hypot(1, domeSurface(normalizedRadius, surfaceSample).slope * radialScale));
+      const bandCountAt = (normalizedRadius, spacing) => Math.max(1, Math.floor(Math.PI * 2 * normalizedRadius * coreFootprint / (BANANA_LENGTH_SPACE * spacing)));
+      const stepAt = (normalizedRadius, spacing) => Math.min(Math.PI * 2, BANANA_LENGTH_SPACE * spacing / (normalizedRadius * coreFootprint));
+      // The sunken layer runs one banana longer when the arc's remainder leaves room for it
+      const extraAt = (normalizedRadius, spacing) => Math.PI * 2 - bandCountAt(normalizedRadius, spacing) * stepAt(normalizedRadius, spacing) > stepAt(normalizedRadius, spacing) * 0.5 ? 1 : 0;
+      let spacing = 1, wanted;
+      for (;;) {
+        // The rim band lies on the mound's near-vertical foot with the next band right behind it, so it has no sunken layer
+        wanted = bandCountAt(0.995, spacing);
+        for (let normalizedRadius = 0.995 - rowStep(0.995, spacing); normalizedRadius > 0; normalizedRadius -= rowStep(normalizedRadius, spacing)) wanted += bandCountAt(normalizedRadius, spacing) * 2 + extraAt(normalizedRadius, spacing);
+        if (wanted <= maxTiles) break;
+        spacing *= Math.sqrt(wanted / maxTiles) * 1.02;
       }
-      wanted = Math.min(wanted, maxTiles);
+      if (wanted === shellWanted) return;
+      shellWanted = wanted;
       const need = wanted * 20;
       if (shell.instanceData.length < need) {
         let capacity = shell.instanceData.length;
@@ -6854,108 +6919,33 @@ void main() {
         shell.instanceData = new Float32Array(Math.min(maxTiles * 20, capacity));
       }
       const data = shell.instanceData;
-      surfaceBuckets.fill(-1);
       let instance = 0, band = 0;
-      normalizedRadius = 0.995;
-      while (normalizedRadius > 0.025 && instance < wanted) {
-        const profile = domeSurface(normalizedRadius, surfaceSample);
-        const radialNormal = -profile.slope * radialScale;
-        const normalLength = Math.hypot(radialNormal, 1);
-        const ny = 1 / normalLength;
-        const circumference = Math.PI * 2 * normalizedRadius * coreFootprint;
-        const bandCount = Math.min(wanted - instance, Math.max(1, Math.floor(circumference / BANANA_LENGTH_SPACE)));
+      for (let normalizedRadius = 0.995; normalizedRadius > 0; normalizedRadius -= rowStep(normalizedRadius, spacing), band++) {
+        const bandCount = bandCountAt(normalizedRadius, spacing);
         const phase = (band * GOLDEN_ANGLE) % (Math.PI * 2);
-        for (let j = 0; j < bandCount; j++) {
-          const edgeBand = band === 0;
-          const jitter = Math.sin((instance + 1) * 12.9898) * 0.015 / Math.max(0.05, normalizedRadius * coreFootprint);
-          const angle = phase + j / bandCount * Math.PI * 2 + jitter;
-          const cos = Math.cos(angle), sin = Math.sin(angle);
-          const nx = cos * radialNormal / normalLength;
-          const nz = sin * radialNormal / normalLength;
-          const yx = ny * cos, yy = -radialNormal / normalLength, yz = ny * sin;
-          const radialJitter = edgeBand ? 0 : Math.sin((instance + 1) * 4.229) * 0.008;
-          const lift = bananaSurfaceLift + (edgeBand ? 0 : Math.sin((instance + 1) * 5.731) * 0.004);
-          const warpedRadius = normalizedRadius * (edgeBand ? 1 : models.bananaPileRadiusScale(angle, normalizedRadius));
-          const warpedY = profile.y + models.bananaPileHeightOffset(angle, normalizedRadius);
-          setVec(tilePosition,
-            cos * warpedRadius * coreFootprint + nx * lift + yx * radialJitter,
-            BASE_Y + warpedY * BASE_HEIGHT * growth + ny * lift + yy * radialJitter,
-            sin * warpedRadius * coreFootprint + nz * lift + yz * radialJitter);
-          const tilt = Math.sin((instance + 1) * 7.133) * 0.18;
-          const tx = -sin, tz = cos;
-          const ct = Math.cos(tilt), st = Math.sin(tilt);
-          const xx = tx * ct + yx * st, xy = yy * st, xz = tz * ct + yz * st;
-          const bx = -tx * st + yx * ct, by = yy * ct, bz = -tz * st + yz * ct;
-          const flip = Math.sin((instance + 1) * 3.731) < 0 ? -BANANA_SCALE : BANANA_SCALE;
-          instanceMatrix[0] = xx * flip;
-          instanceMatrix[1] = xy * flip;
-          instanceMatrix[2] = xz * flip;
-          instanceMatrix[3] = 0;
-          instanceMatrix[4] = bx * flip;
-          instanceMatrix[5] = by * flip;
-          instanceMatrix[6] = bz * flip;
-          instanceMatrix[7] = 0;
-          instanceMatrix[8] = nx * BANANA_SCALE;
-          instanceMatrix[9] = ny * BANANA_SCALE;
-          instanceMatrix[10] = nz * BANANA_SCALE;
-          instanceMatrix[11] = 0;
-          instanceMatrix[12] = tilePosition.x;
-          instanceMatrix[13] = tilePosition.y;
-          instanceMatrix[14] = tilePosition.z;
-          instanceMatrix[15] = 1;
-          keepInstanceAbovePlatform(instanceMatrix);
-          let overlaps = false;
-          const cellX = Math.floor(instanceMatrix[12] / MIN_BANANA_CENTER_SPACE);
-          const cellY = Math.floor(instanceMatrix[13] / MIN_BANANA_CENTER_SPACE);
-          const cellZ = Math.floor(instanceMatrix[14] / MIN_BANANA_CENTER_SPACE);
-          for (let x = cellX - 1; x <= cellX + 1 && !overlaps; x++) {
-            for (let y = cellY - 1; y <= cellY + 1 && !overlaps; y++) {
-              for (let z = cellZ - 1; z <= cellZ + 1 && !overlaps; z++) {
-                const bucket = ((x * 73856093) ^ (y * 19349663) ^ (z * 83492791)) & (surfaceBucketCount - 1);
-                for (let other = surfaceBuckets[bucket]; other >= 0; other = surfaceNext[other]) {
-                  const otherOffset = other * 20;
-                  if (Math.hypot(instanceMatrix[12] - data[otherOffset + 12], instanceMatrix[13] - data[otherOffset + 13], instanceMatrix[14] - data[otherOffset + 14]) < MIN_BANANA_CENTER_SPACE) {
-                    overlaps = true;
-                    break;
-                  }
-                }
-              }
-            }
-          }
-          if (overlaps) continue;
-          const offset = instance * 20;
-          data.set(instanceMatrix, offset);
-          data[offset + 16] = 1;
-          data[offset + 17] = 0;
-          data[offset + 18] = 0;
-          data[offset + 19] = 0;
-          const bucket = ((cellX * 73856093) ^ (cellY * 19349663) ^ (cellZ * 83492791)) & (surfaceBucketCount - 1);
-          surfaceNext[instance] = surfaceBuckets[bucket];
-          surfaceBuckets[bucket] = instance;
-          instance++;
+        const step = stepAt(normalizedRadius, spacing);
+        const edgeBand = band === 0;
+        const last = bandCount - 1 + (edgeBand ? 0 : extraAt(normalizedRadius, spacing));
+        const underRadius = Math.max(0, normalizedRadius - rowStep(normalizedRadius, spacing) * 0.5);
+        for (let j = 0; j <= last; j++) {
+          const seed = band * 7919 + j + 1;
+          const jitter = Math.sin(seed * 12.9898) * 0.015 / Math.max(0.05, normalizedRadius * coreFootprint);
+          const angle = phase + j * step + jitter;
+          if (j < bandCount) writeTile(data, instance++, seed, angle, normalizedRadius, Math.sin(seed * 7.133) * (edgeBand ? 0.18 : BANANA_YAW_SPREAD), 0, growth, coreFootprint, radialScale, edgeBand);
+          if (!edgeBand) writeTile(data, instance++, -seed, angle + step * 0.5, underRadius, Math.sin(seed * 9.271) * BANANA_YAW_SPREAD, BANANA_UNDERLAYER_SINK, growth, coreFootprint, radialScale, false);
         }
-        const surfaceFactor = Math.hypot(1, profile.slope * radialScale);
-        normalizedRadius -= BANANA_ROW_SPACE / (coreFootprint * surfaceFactor);
-        band++;
       }
       shell.instanceCount = instance;
       shell.instanceVersion++;
       shell.visible = true;
     };
-    const reflow = (target, force = false) => {
-      if (!force && target === layoutCount) return;
+    const reflow = (target) => {
+      if (target === layoutCount) return;
       layoutCount = target;
       const growth = footprintFor(target, 1);
       const coreFootprint = footprintFor(target, SCALE);
       footprint = visualFootprintFor(target, SCALE);
       core.visible = target > VISIBLE_BANANAS;
-      const nextCoreLayoutKey = Math.max(24, Math.min(384, Math.ceil(Math.PI * 2 * coreFootprint / coreFaceSize)));
-      if (target > VISIBLE_BANANAS && nextCoreLayoutKey !== coreLayoutKey) {
-        const oldGeometry = core.geometry;
-        core.geometry = models.bananaPileCoreGeometry(coreFootprint, BASE_HEIGHT * growth, coreFaceSize);
-        coreLayoutKey = nextCoreLayoutKey;
-        ctx.renderer.releaseGeometry(oldGeometry);
-      }
       core.position.y = BASE_Y;
       setVec(core.scale, coreFootprint, BASE_HEIGHT * growth, coreFootprint);
       rebuildSurface(target, growth, coreFootprint);
@@ -7078,6 +7068,7 @@ void main() {
       }
     };
     const syncPile = (settle = false) => {
+      if (world.level > MAX_BANANAS) world.level = MAX_BANANAS;
       const target = Math.max(0, Math.floor(world.level));
       const additions = Math.max(0, target - counted);
       reflow(target);
@@ -7103,9 +7094,10 @@ void main() {
       if (additions >= 2) ctx.crew.rush();
     };
     const deliverBananas = (amount) => {
-      const additions = Math.max(0, Math.floor(Number(amount) || 0));
+      const room = MAX_BANANAS - Math.floor(world.level) - pendingDrops - deliveries;
+      const additions = Math.max(0, Math.min(room, Math.floor(Number(amount) || 0)));
       if (!additions) return 0;
-      pendingDrops = Math.min(Number.MAX_SAFE_INTEGER, pendingDrops + additions);
+      pendingDrops += additions;
       hatchTarget = 1;
       if (additions >= 2) ctx.crew.rush();
       return additions;
@@ -7143,7 +7135,7 @@ void main() {
     const stats = () => ({ slots: pileSlots.length, shown: counted, rendered: counted > VISIBLE_BANANAS ? shell.instanceCount : shown, deliveries, pendingDrops, dropsStarted, dropsLanded, dropPool: dropSlots.length, dropRate: DROP_RATE });
     const setLevel = (level) => {
       clearDrops();
-      world.level = Math.max(0, Number(level) || 0);
+      world.level = Math.max(0, Math.min(MAX_BANANAS, Number(level) || 0));
       syncPile(true);
     };
     return {
@@ -7165,7 +7157,7 @@ void main() {
       }
     };
   };
-  BL.pile = { create, DROP_HEIGHT, BANANA_DROP_HEIGHT, DROP_POOL_SIZE, DROP_RATE, footprintFor, visualFootprintFor, MAX_WEBGL_TILES, MAX_CANVAS_TILES };
+  BL.pile = { create, DROP_HEIGHT, BANANA_DROP_HEIGHT, DROP_POOL_SIZE, DROP_RATE, MAX_BANANAS, footprintFor, visualFootprintFor, MAX_WEBGL_TILES, MAX_CANVAS_TILES };
 })();
 
 // ---- js/crates.js ----
@@ -7343,6 +7335,7 @@ void main() {
   const NUDGES = [0, -2, 2, -4, 4, -6, 6, -8, 8];
   const VINES = ["c9", "c1", "c5"];
   const PILE_SCALE = 0.45;
+  // Props keep clear of the pile up to this level; beyond it the mound grows over the meadow
   const PILE_CLEAR_LEVEL = 1000000;
   const PILE_CLEAR_RADIUS = pileMod.visualFootprintFor(PILE_CLEAR_LEVEL, PILE_SCALE) + 0.5;
   const MEADOW_INNER = 5, MEADOW_OUTER = MEADOW - 1.5, CLIFF_INNER = MEADOW + 1.5, CLIFF_OUTER = RADIUS - 1;
@@ -8680,18 +8673,20 @@ void main() {
 // ---- js/director.js ----
 (() => {
   "use strict";
-  const { scene, models, donations, glRenderer, canvasRenderer, game: gameMod, scenes } = window.BL;
+  const { scene, models, donations, glRenderer, canvasRenderer, game: gameMod, pile: pileMod, scenes } = window.BL;
   const { clearTweens, tweenCount } = scene;
   const params = new URLSearchParams(location.search);
   const DEBUG = params.has("debug");
-  const LOOT_ENABLED = DEBUG && params.get("loot") === "1";
+  // Loot crates, the locker tab, worn swag and the hidden jetpack; the suite turns them on with ?debug=1&loot=1
+  const LOOT_DEFAULT = false;
+  const LOOT_ENABLED = DEBUG && params.has("loot") ? params.get("loot") === "1" : LOOT_DEFAULT;
   const requestedBananas = Number(params.get("bananas"));
   const START_BANANAS = DEBUG && params.has("bananas") && Number.isFinite(requestedBananas) && requestedBananas >= 0
-    ? Math.min(Number.MAX_SAFE_INTEGER, Math.floor(requestedBananas))
+    ? Math.min(pileMod.MAX_BANANAS, Math.floor(requestedBananas))
     : 1000;
   const requestedTestBananas = Number(params.get("b"));
   const TEST_BANANAS = DEBUG && params.has("b") && Number.isFinite(requestedTestBananas) && requestedTestBananas >= 0
-    ? Math.min(Number.MAX_SAFE_INTEGER, Math.floor(requestedTestBananas))
+    ? Math.min(pileMod.MAX_BANANAS, Math.floor(requestedTestBananas))
     : 100;
   const FADE = 0.25;
   const COARSE = window.matchMedia("(pointer: coarse)").matches;

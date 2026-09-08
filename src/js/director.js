@@ -1,17 +1,19 @@
 (() => {
   "use strict";
-  const { scene, models, donations, glRenderer, canvasRenderer, game: gameMod, scenes } = window.BL;
+  const { scene, models, donations, glRenderer, canvasRenderer, game: gameMod, pile: pileMod, scenes } = window.BL;
   const { clearTweens, tweenCount } = scene;
   const params = new URLSearchParams(location.search);
   const DEBUG = params.has("debug");
-  const LOOT_ENABLED = DEBUG && params.get("loot") === "1";
+  // Loot crates, the locker tab, worn swag and the hidden jetpack; the suite turns them on with ?debug=1&loot=1
+  const LOOT_DEFAULT = false;
+  const LOOT_ENABLED = DEBUG && params.has("loot") ? params.get("loot") === "1" : LOOT_DEFAULT;
   const requestedBananas = Number(params.get("bananas"));
   const START_BANANAS = DEBUG && params.has("bananas") && Number.isFinite(requestedBananas) && requestedBananas >= 0
-    ? Math.min(Number.MAX_SAFE_INTEGER, Math.floor(requestedBananas))
+    ? Math.min(pileMod.MAX_BANANAS, Math.floor(requestedBananas))
     : 1000;
   const requestedTestBananas = Number(params.get("b"));
   const TEST_BANANAS = DEBUG && params.has("b") && Number.isFinite(requestedTestBananas) && requestedTestBananas >= 0
-    ? Math.min(Number.MAX_SAFE_INTEGER, Math.floor(requestedTestBananas))
+    ? Math.min(pileMod.MAX_BANANAS, Math.floor(requestedTestBananas))
     : 100;
   const FADE = 0.25;
   const COARSE = window.matchMedia("(pointer: coarse)").matches;

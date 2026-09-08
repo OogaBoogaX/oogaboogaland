@@ -51,6 +51,7 @@
   const NUDGES = [0, -2, 2, -4, 4, -6, 6, -8, 8];
   const VINES = ["c9", "c1", "c5"];
   const PILE_SCALE = 0.45;
+  // Props keep clear of the pile up to this level; beyond it the mound grows over the meadow
   const PILE_CLEAR_LEVEL = 1000000;
   const PILE_CLEAR_RADIUS = pileMod.visualFootprintFor(PILE_CLEAR_LEVEL, PILE_SCALE) + 0.5;
   const MEADOW_INNER = 5, MEADOW_OUTER = MEADOW - 1.5, CLIFF_INNER = MEADOW + 1.5, CLIFF_OUTER = RADIUS - 1;
