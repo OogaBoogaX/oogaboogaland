@@ -20,7 +20,7 @@
     // Twelve landing slots, 30 degrees apart
     const CRATE_SLOTS = Array.from({ length: 12 }, (_, i) => {
       const angle = i / 12 * Math.PI * 2;
-      return { angle, x: Math.cos(angle) * 4.4, z: Math.sin(angle) * 4.4, taken: false };
+      return { angle, x: 0, z: 0, taken: false };
     });
     // Free slot nearest the camera
     const claimCrateSlot = () => {
@@ -30,7 +30,12 @@
         if (slot.taken) continue;
         if (!best || angleDelta(slot.angle, toCamera) < angleDelta(best.angle, toCamera)) best = slot;
       }
-      if (best) best.taken = true;
+      if (best) {
+        const radius = ctx.crateRadius ? ctx.crateRadius() : 4.4;
+        best.x = Math.cos(best.angle) * radius;
+        best.z = Math.sin(best.angle) * radius;
+        best.taken = true;
+      }
       return best;
     };
     const removeCrate = (crate) => {

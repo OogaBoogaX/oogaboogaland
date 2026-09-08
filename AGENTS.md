@@ -77,7 +77,7 @@ every scene has registered on `BL.scenes`.
 | `hud.js` | `BL.hud` | DOM panel: roster, meter, feed dialog, locker, toasts, tooltip, `renderIcon` |
 | `fx.js` | `BL.fx` | particle pool and bursts, speech bubbles, zzz marks, ticker, overlay drawing |
 | `crew.js` | `BL.crew` | cavemen from the roster: states, fan slots, walk / eat / sleep / cheer / build, strolls, the rush to fresh bananas, the driven caveman and jetpack flight, swag, pokes |
-| `pile.js` | `BL.pile` | banana pile slots, drop-in / fly-out, hand-feed drag, hatch; level on the shared `world` |
+| `pile.js` | `BL.pile` | decorative banana shell, drop-in, hatch; level on the shared `world` |
 | `crates.js` | `BL.crates` | loot crates: landing ring, spawn, open, remove |
 | `scene-hub.js` | `BL.scenes.hub` | the island scene; registers first so it is the landing scene |
 | `scene-lab.js` | `BL.scenes.lab` | the lab scene; Escape and Leave cave return to the hub |
@@ -226,7 +226,7 @@ desktop and docks to the bottom under 720px.
 
 ## Debug keys and flags
 
-Keys: B test tip, L legendary tip, P fill the pile, 1 to 9 force a contributor to eating,
+Keys: B add 100 test bananas, L legendary tip, P fill the pile, 1 to 9 force a contributor to eating,
 Shift+Delete clear the locker, Shift+R reset everything. Keys are ignored while typing in
 a text field and on auto-repeat. The hub hides one jetpack under a random meadow prop each
 load; its `highlight` pulses after `HINT_AFTER` seconds of scene time, and a driven
@@ -235,7 +235,8 @@ caveman flies at `crew.js`'s `JET_SPEED` within `flyable`.
 URL flags: `?debug=1` exposes `window.__ooga` with the scene, game, renderer, input,
 `stats()`, `timing`, `frameInterval`, and in the hub `island`, `mouths`, `camera`;
 `?scene=<id>` opens that scene (unknown ids land on the hub); `?nosim=1` silences the
-simulator; `?canvas2d=1` forces the fallback; `?yaw=` sets the starting camera angle.
+simulator; `?canvas2d=1` forces the fallback; `?yaw=` sets the starting camera angle;
+`?debug=1&bananas=` overrides the initial pile level for visual testing.
 
 ## Testing
 

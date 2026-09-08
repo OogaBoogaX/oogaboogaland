@@ -26,17 +26,19 @@
     iconRenderer.render(iconRoot, iconCamera);
     return canvas;
   };
-  const create = ({ roster, catalog, tierColors, renderIcon }) => {
+  const create = ({ roster, catalog, tierColors, renderIcon, lootEnabled = false }) => {
     const el = {
       meterFill: $("meter-fill"),
       meterCount: $("meter-count"),
       meterForecast: $("meter-forecast"),
       roster: $("roster"),
       summary: $("roster-summary"),
-      statFed: $("stat-fed"),
       statDonations: $("stat-donations"),
       statSats: $("stat-sats"),
+      lootTab: $("loot-tab"),
       lootCount: $("loot-count"),
+      crateHelp: $("crate-help"),
+      worldLootHint: $("world-loot-hint"),
       actions: [...document.querySelectorAll("[data-action]")],
       act: $("act"),
       toast: $("toast"),
@@ -55,6 +57,9 @@
       qrUrl: $("qr-url"),
       feed: $("feed")
     };
+    el.lootTab.hidden = !lootEnabled;
+    el.crateHelp.hidden = !lootEnabled;
+    el.worldLootHint.hidden = !lootEnabled;
     const listeners = [];
     const on = (target, type, fn, opts) => {
       target.addEventListener(type, fn, opts);
@@ -91,8 +96,7 @@
       el.meterCount.firstChild.data = String(Math.floor(level));
       el.meterForecast.firstChild.data = forecastText;
     };
-    const setStats = ({ handFed, totalSats, donations }) => {
-      el.statFed.textContent = String(handFed);
+    const setStats = ({ totalSats, donations }) => {
       el.statDonations.textContent = String(donations);
       el.statSats.textContent = formatLarge(totalSats);
     };

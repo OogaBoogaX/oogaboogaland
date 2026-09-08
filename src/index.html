@@ -59,19 +59,18 @@
       <button type="button" class="sheet-toggle" id="sheet-toggle" aria-label="Toggle panel"><span></span></button>
       <div class="tabs" role="tablist">
         <button type="button" role="tab" data-tab="roster" aria-selected="true">Ooga Boogas</button>
-        <button type="button" role="tab" data-tab="loot" aria-selected="false">Loot <span class="tab-count"
+        <button type="button" role="tab" data-tab="loot" aria-selected="false" id="loot-tab" hidden>Loot <span class="tab-count"
             id="loot-count" hidden></span></button>
       </div>
       <section class="panel" data-panel="roster" role="tabpanel">
         <p class="summary" id="roster-summary"></p>
         <ul id="roster" class="roster"></ul>
         <div class="stats" aria-label="Your stats">
-          <div class="stat"><b id="stat-fed">0</b><span>hand-fed</span></div>
           <div class="stat"><b id="stat-donations">0</b><span>donations</span></div>
           <div class="stat"><b id="stat-sats">0</b><span>sats</span></div>
         </div>
-        <p class="help" data-scene="hub">Drag a banana onto a caveman to hand-feed. Tap trees, bushes, barrels and caves. Double-tap a caveman to walk in their boots. Something is hidden out there.</p>
-        <p class="help" data-scene="lab" hidden>Drag a banana onto a caveman to hand-feed. Tap racks, flasks, dice and cards. Double-tap a caveman to walk in their boots.</p>
+        <p class="help" data-scene="hub">Tap trees, bushes, barrels and caves. Double-tap a caveman to walk in their boots.<span id="world-loot-hint" hidden> Something is hidden out there.</span></p>
+        <p class="help" data-scene="lab" hidden>Tap racks, flasks, dice and cards. Double-tap a caveman to walk in their boots.</p>
         <button type="button" class="feed-open" data-action="feed">Feed the Ooga Boogas</button>
       </section>
       <section class="panel" data-panel="loot" role="tabpanel" hidden>
@@ -108,7 +107,7 @@
         <button type="button" data-action="tip">Tip 1.2K sats</button>
         <button type="button" data-action="tip-legendary">Tip 120K sats</button>
       </div>
-      <p class="help">Payments are simulated in this build. Crates drop at 1K, 5K, 21K and 100K sats.</p>
+      <p class="help">Payments are simulated in this build.<span id="crate-help" hidden> Crates drop at 1K, 5K, 21K and 100K sats.</span></p>
     </dialog>
     <output class="toast" id="toast" hidden></output>
     <div class="hint" id="hint" hidden></div>

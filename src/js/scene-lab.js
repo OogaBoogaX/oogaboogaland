@@ -50,7 +50,7 @@
   const STATE_LED = { working: 0, sleeping: 1, away: 3 };
 
   // One visit's state, made in enter and dropped in leave
-  let renderer, game, world, go, root, camera, lab, hud, hooks, input, pilot, fx, pile, crew, crates, pulseNodes;
+  let renderer, game, world, go, lootEnabled, testBananas, root, camera, lab, hud, hooks, input, pilot, fx, pile, crew, crates, pulseNodes;
   let stateTimer = 0, hintTimer = 0, meterTimer = 0;
   const propTargets = [];
   const usables = [];
@@ -99,14 +99,12 @@
   const onDonation = (donation) => {
     game.recordDonation(donation);
     const bananas = gameMod.bananasFor(donation.sats);
-    world.level = Math.min(pile.slots.length, world.level + bananas);
-    const delivered = pile.syncPile();
-    if (donation.message && delivered.length) delivered[delivered.length - 1].note = { text: donation.message, handle: donation.handle };
+    pile.deliverBananas(bananas);
     celebrate(donation, bananas);
-    const loot = game.lootFor(donation);
+    const loot = lootEnabled ? game.lootFor(donation) : null;
     const who = donation.handle ? `@${donation.handle}` : "anon";
     hud.toast(`+${gameMod.formatLarge(donation.sats)} sats · ${bananas} banana${bananas > 1 ? "s" : ""} · ${who}${loot ? ` · ${loot.tier} crate!` : ""}`);
-    if (loot) crates.spawnCrate(donation, loot, 0.9 + delivered.length * 0.11);
+    if (loot) crates.spawnCrate(donation, loot, 0.9 + Math.min(1.5, bananas / pileMod.DROP_RATE));
     hud.setStats(game.state);
   };
 
@@ -179,8 +177,6 @@
   const tooltipFor = (hit) => {
     const o = hit.owner;
     switch (o.kind) {
-      case "banana":
-        return o.slot.note ? `"${o.slot.note.text}"${o.slot.note.handle ? ` · @${o.slot.note.handle}` : ""}` : COARSE ? "Banana · hold to grab" : "Banana · drag onto a caveman";
       case "caveman": {
         const c = o.cave;
         const worn = crew.wornBy(c.traits.name);
@@ -235,9 +231,6 @@
         hud.toast(tooltipFor(hit));
         o.node.pulse = 1;
         break;
-      case "banana":
-        if (COARSE) hud.hint("Press and hold a banana, then drop it on a caveman.");
-        break;
       default:
         break;
     }
@@ -287,6 +280,7 @@
 
   // ---------- actions and keys ----------
   const onLootCleared = () => {
+    if (!lootEnabled) return;
     crew.applyAllSwag();
     crew.renderLocker();
     hud.toast("Loot locker cleared");
@@ -296,6 +290,10 @@
     onLootCleared();
   };
   const demoTip = (sats) => onDonation({ id: `demo-${Date.now()}`, sats, handle: game.state.handle, message: game.state.message, at: Date.now() });
+  const addTestBananas = (amount) => {
+    pile.deliverBananas(amount);
+    hud.toast(`+${amount} test bananas`);
+  };
   const resetDemo = () => {
     game.resetAll();
     location.reload();
@@ -306,11 +304,11 @@
       else go("hub");
     }
     if (e.key === "0") pilot.goPreset("pile");
-    if (e.key === "b" || e.key === "B") demoTip(1200);
+    if (e.key === "b" || e.key === "B") addTestBananas(testBananas);
     if (e.key === "l" || e.key === "L") demoTip(120000);
     if (e.key === "p" || e.key === "P") {
-      world.level = pile.slots.length;
-      pile.syncPile();
+      world.level = Math.max(world.level, pile.slots.length);
+      pile.syncPile(true);
     }
     const digit = parseInt(e.key, 10);
     if (digit >= 1 && digit <= 9) {
@@ -326,17 +324,17 @@
 
   // ---------- scene contract ----------
   const enter = (ctx) => {
-    ({ renderer, game, world, go } = ctx);
+    ({ renderer, game, world, go, lootEnabled, testBananas } = ctx);
     camera = createCamera({ fov: 48, near: 0.25, far: 60 });
     root = createNode();
     lab = models.labRoom({ half: ROOM_HALF });
     addChild(root, lab.room);
     mark("room");
-    hud = hudMod.create({ roster: contributors.roster, catalog: models.SWAG, tierColors: models.TIER_COLORS, renderIcon: hudMod.renderIcon });
+    hud = hudMod.create({ roster: contributors.roster, catalog: models.SWAG, tierColors: models.TIER_COLORS, renderIcon: hudMod.renderIcon, lootEnabled });
     hooks = {};
     input = interactMod.create({ canvas: ctx.canvas, renderer, camera, hooks });
     pilot = pilotMod.create({ renderer, camera, hud, presets: PRESETS, landing: "pile", pitch: PITCH, dist: DIST, follow: FOLLOW, fly: FLY, clampTarget, clampCamera, coarse: COARSE });
-    const shared = { root, input, hooks, hud, game, world, renderer, camera, overlay: ctx.overlay, tickerAt: TICKER_AT, buildSpots: BUILD_SPOTS.slice(), walkIn: WALK_IN, clampDrag, viewYaw: PRESETS.pile.yaw, bedrolls: lab.bedrolls, onShown: (shown) => lab.equipment.abacus.setValue(shown), walkable, useNear };
+    const shared = { root, input, hooks, hud, game, world, renderer, camera, overlay: ctx.overlay, tickerAt: TICKER_AT, buildSpots: BUILD_SPOTS.slice(), walkIn: WALK_IN, clampDrag, viewYaw: PRESETS.pile.yaw, bedrolls: lab.bedrolls, pileScale: 0.45, onShown: (shown) => { lab.equipment.abacus.setValue(shown); meterTimer = 0; }, walkable, useNear };
     fx = shared.fx = fxMod.create(shared);
     pile = shared.pile = pileMod.create(shared);
     mark("pile");
@@ -412,17 +410,19 @@
       fx.trimPool();
     }, 6e4);
     for (const cave of crew.cavemen.values()) crew.refreshRosterRow(cave);
-    crew.applyAllSwag();
-    crew.renderLocker();
+    if (lootEnabled) {
+      crew.applyAllSwag();
+      crew.renderLocker();
+    }
     hud.setStats(game.state);
     pile.syncPile(true);
     updateMeter();
     if (window.matchMedia("(max-width: 720px), (max-height: 500px)").matches) hud.el.sheet.dataset.open = "false";
-    hintTimer = window.setTimeout(() => hud.hint(COARSE ? "Drag to look · pinch to zoom · sticks to fly · hold a banana to feed" : "Drag to orbit · scroll to zoom · WASD to fly · drag a banana onto a caveman"), 1200);
+    hintTimer = window.setTimeout(() => hud.hint(COARSE ? "Drag to look · pinch to zoom · sticks to fly" : "Drag to orbit · scroll to zoom · WASD to fly"), 1200);
     Object.assign(labScene, {
       root, camera, input,
       debug: {
-        slots: pile.slots, cavemen: crew.cavemen, crates: crates.list, lab, hud, applyAllSwag: crew.applyAllSwag, renderLocker: crew.renderLocker, demoTip, refreshStates: crew.refreshStates, trimPool: fx.trimPool,
+        slots: pile.slots, drops: pile.drops, core: pile.core, shell: pile.shell, cavemen: crew.cavemen, crates: crates.list, lab, hud, applyAllSwag: crew.applyAllSwag, renderLocker: crew.renderLocker, demoTip, setPileLevel: pile.setLevel, refreshStates: crew.refreshStates, trimPool: fx.trimPool,
         get shown() {
           return pile.shown;
         },
@@ -456,7 +456,7 @@
     let nodes = 0;
     traverseVisible(root, () => nodes++);
     const all = (n) => 1 + n.children.reduce((sum, c) => sum + all(c), 0);
-    return { visibleNodes: nodes, allNodes: all(root), tweens: tweenCount(), targets: input.targetCount, ...fx.stats(), ...crates.stats(), ...crew.stats() };
+    return { visibleNodes: nodes, allNodes: all(root), tweens: tweenCount(), targets: input.targetCount, ...fx.stats(), ...crates.stats(), ...crew.stats(), ...pile.stats() };
   };
   const labScene = {
     id: "lab", enter, update, overlay, onDonation, onKey, onLootCleared, renderOpts: RENDER_OPTS, leave, stats, liveGeometry,
