@@ -13,7 +13,7 @@
   // Act button labels, action or jetpack throttle
   const ACT_DO = "Ooga!", ACT_FLY = "Blast off!";
   const create = (ctx) => {
-    const { renderer, camera, hud, presets, pitch: [PITCH_MIN, PITCH_MAX], dist: [DIST_MIN, DIST_MAX], follow, fly, clampTarget, clampCamera, coarse } = ctx;
+    const { renderer, canvas, camera, hud, presets, pitch: [PITCH_MIN, PITCH_MAX], dist: [DIST_MIN, DIST_MAX], follow, fly, clampTarget, clampCamera, coarse } = ctx;
     let crew = null, fx = null;
     const freeTarget = { x: 0, y: 0, z: 0 };
     const followTarget = { x: 0, y: 0, z: 0 };
@@ -39,7 +39,7 @@
       hud.tooltip.hide();
       fx.say(cave, "Ooga? Me?", 1.6);
       if (cave.jet) hud.hint(coarse ? "Left stick flies · hold Blast off to climb · double-tap to let go" : "WASD flies · hold Space to climb · Escape to let go");
-      else hud.hint(coarse ? "Left stick walks · Ooga! acts · double-tap to let go" : "WASD to walk · Space to act · Escape to let go");
+      else hud.hint(coarse ? "Left stick walks · Ooga! acts · double-tap to let go" : "WASD or both mouse buttons to walk · Space to act · Escape to let go");
     };
     const release = (quiet = false) => {
       const cave = player();
@@ -55,8 +55,8 @@
       crew.playerAction();
       return true;
     };
-    // Held it climbs, clicked it acts
-    const controls = createControls({ move: document.getElementById("joy-move"), look: document.getElementById("joy-look"), boost: hud.el.act, onAction: action });
+    // Held it climbs, clicked it acts; both mouse buttons on the canvas walk
+    const controls = createControls({ move: document.getElementById("joy-move"), look: document.getElementById("joy-look"), boost: hud.el.act, chord: canvas, onAction: action });
     let dragHold = 0;
     const hooks = {
       onOrbit: (dx, dy) => {

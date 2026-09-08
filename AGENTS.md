@@ -71,7 +71,7 @@ every scene has registered on `BL.scenes`.
 | `contributors.js` | `BL.contributors` | roster snapshot, state by commit age, hashed traits, `LIKENESS` |
 | `donations.js` | `BL.donations` | donation request, simulator, event contract, `sanitize` |
 | `interact.js` | `BL.interact` | pointer gestures, ray picking, drag, long-press, double tap |
-| `controls.js` | `BL.controls` | held keys, two on-screen sticks and a hold button, folded into one axes object per frame |
+| `controls.js` | `BL.controls` | held keys, two on-screen sticks, a hold button and the both-mouse-buttons chord on the canvas, folded into one axes object per frame |
 | `pilot.js` | `BL.pilot` | the visitor's view of any scene: orbit camera and presets, free flight, third person over a caveman, act button and Space (the jetpack throttle while one is worn) |
 | `game.js` | `BL.game` | loot tiers, deterministic loot, inventory, localStorage, `formatLarge` |
 | `hud.js` | `BL.hud` | DOM panel: roster, meter, feed dialog, locker, toasts, tooltip, `renderIcon` |

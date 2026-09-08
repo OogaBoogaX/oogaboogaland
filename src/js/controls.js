@@ -54,9 +54,9 @@
     };
     return s;
   };
-  // Joystick bases, a hold-to-climb button, and a Space handler
-  const create = ({ move = null, look = null, boost = null, onAction = null } = {}) => {
-    const held = { forward: 0, back: 0, left: 0, right: 0, yawLeft: 0, yawRight: 0, pitchDown: 0, pitchUp: 0, up: 0, down: 0, boost: 0 };
+  // Joystick bases, a hold-to-climb button, a canvas whose mouse chord walks, and a Space handler
+  const create = ({ move = null, look = null, boost = null, chord = null, onAction = null } = {}) => {
+    const held = { forward: 0, back: 0, left: 0, right: 0, yawLeft: 0, yawRight: 0, pitchDown: 0, pitchUp: 0, up: 0, down: 0, boost: 0, chord: 0 };
     const axes = { x: 0, y: 0, up: 0, yaw: 0, pitch: 0 };
     const typing = (e) => e.target && (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA" || (e.target.closest && e.target.closest("dialog")));
     const onKeyDown = (e) => {
@@ -92,10 +92,20 @@
       boost.addEventListener("pointercancel", onBoostUp);
       boost.addEventListener("pointerleave", onBoostUp);
     }
+    // Both mouse buttons down is forward, as W; a chorded press arrives as a move
+    const onChord = (e) => {
+      if (e.pointerType === "mouse") held.chord = (e.buttons & 3) === 3 ? 1 : 0;
+    };
+    if (chord) {
+      chord.addEventListener("pointerdown", onChord);
+      chord.addEventListener("pointermove", onChord);
+      chord.addEventListener("pointerup", onChord);
+      chord.addEventListener("pointercancel", onChord);
+    }
     // Yaw positive left, pitch positive down
     const read = () => {
       axes.x = clamp(held.right - held.left + (moveStick ? moveStick.x : 0), -1, 1);
-      axes.y = clamp(held.forward - held.back + (moveStick ? moveStick.y : 0), -1, 1);
+      axes.y = clamp(held.forward - held.back + held.chord + (moveStick ? moveStick.y : 0), -1, 1);
       axes.up = clamp(held.up + held.boost - held.down, -1, 1);
       axes.yaw = clamp(held.yawLeft - held.yawRight - (lookStick ? lookStick.x : 0), -1, 1);
       axes.pitch = clamp(held.pitchDown - held.pitchUp - (lookStick ? lookStick.y : 0), -1, 1);
@@ -110,6 +120,12 @@
         boost.removeEventListener("pointerup", onBoostUp);
         boost.removeEventListener("pointercancel", onBoostUp);
         boost.removeEventListener("pointerleave", onBoostUp);
+      }
+      if (chord) {
+        chord.removeEventListener("pointerdown", onChord);
+        chord.removeEventListener("pointermove", onChord);
+        chord.removeEventListener("pointerup", onChord);
+        chord.removeEventListener("pointercancel", onChord);
       }
       if (moveStick) moveStick.dispose();
       if (lookStick) lookStick.dispose();

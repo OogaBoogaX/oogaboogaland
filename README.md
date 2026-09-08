@@ -21,9 +21,9 @@ lit cave to enter EntropyLab; **Escape** or the **Leave cave** button brings you
 Fly around the island with **W A S D** (or the arrows), **Q E** to turn, **R F** to tilt,
 **Z** or **Space** up and **X** down; drag to orbit and scroll to zoom. On a phone the left
 stick moves and the right stick looks. Double-tap a caveman to walk in their boots: the same
-keys or stick walk them, **Space** (or the Ooga! button) eats from the pile, pokes a
-neighbour, shakes a tree, rustles a bush, rolls a die or flips a card, and walking
-into the lit cave enters it. **Escape** lets go. Lost? **0** or the **Reset view** button
+keys or stick walk them, holding **both mouse buttons** walks them forward, **Space** (or
+the Ooga! button) eats from the pile, pokes a neighbour, shakes a tree, rustles a bush,
+rolls a die or flips a card, and walking into the lit cave enters it. **Escape** lets go. Lost? **0** or the **Reset view** button
 brings the camera home.
 
 Keys: **B** add 100 test bananas, **J** give the controlled Ooga a jetpack, **L** legendary

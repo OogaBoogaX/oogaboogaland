@@ -5,7 +5,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta http-equiv="Content-Security-Policy"
-    content="default-src 'none'; script-src 'sha256-p+CLKFRuwDx9A7T8L4F1TlnmbXJL0fnGaRRSfhx8GUw='; style-src 'sha256-dDRjKsPXfpTqnH8VPCUSd7WihWQczKIMep/Sr+vXL+s='; img-src 'self' data:; connect-src 'none'; base-uri 'none'; form-action 'none'">
+    content="default-src 'none'; script-src 'sha256-nDr3v8DL23JfwbkmvnAD2RFR9PhpUjJ2j2pty4n3jWo='; style-src 'sha256-dDRjKsPXfpTqnH8VPCUSd7WihWQczKIMep/Sr+vXL+s='; img-src 'self' data:; connect-src 'none'; base-uri 'none'; form-action 'none'">
   <meta name="referrer" content="no-referrer">
   <meta name="color-scheme" content="dark">
   <meta name="theme-color" content="#0a0a0b">
@@ -2077,7 +2077,7 @@ void main() {
   vec2 uv = vReflection.xy / vReflection.w * 0.5 + 0.5;
   vec3 reflected = texture(uReflection, uv).rgb;
   float sheen = pow(max(0.0, 1.0 - abs(fract((vWorld.x + vWorld.y) * 0.22) - 0.5) * 7.0), 5.0) * 0.08;
-  vec3 color = mix(reflected, uTint, 0.16) + sheen;
+  vec3 color = mix(reflected, uTint, 0.1) + sheen;
   oColor = vec4(color, 1.0);
   oBright = vec4(0.0);
 }`;
@@ -2140,6 +2140,7 @@ void main() {
     const P4 = new Float32Array(4);
     const MIRROR_POINT = new Float32Array(3);
     const MIRROR_CLIP = new Float32Array(4);
+    const MIRROR_RECT = new Float32Array(4);
     const mirrorView = mat4.create();
     const mirrorProj = mat4.create();
     const mirrorViewProj = mat4.create();
@@ -2150,10 +2151,10 @@ void main() {
     const records = new Map();
     const activeRecords = [];
     const res = { programs: {}, fbo: null, shadow: null, bloom: null, quadVao: null };
-    const mirror = { node: null, record: null, geometry: null, program: null, programReady: false, fb: null, tex: null, depth: null, width: 0, height: 0, frame: 0 };
+    const mirror = { node: null, record: null, geometry: null, program: null, programReady: false, fb: null, tex: null, depth: null, color: null, msFb: null, msaa: -1, width: 0, height: 0, frame: 0 };
     const mirrorDebug = {
-      active: false, faux: false, width: 0, height: 0, allocationCount: 0, reflectionPassCount: 0, skippedPassCount: 0, resources: 0, captureExcluded: false,
-      cameraPosition: new Float32Array(3), cameraTarget: new Float32Array(3), planeCenter: new Float32Array(3), planeNormal: new Float32Array(3), skipReason: "none"
+      active: false, faux: false, width: 0, height: 0, samples: 0, allocationCount: 0, reflectionPassCount: 0, skippedPassCount: 0, resources: 0, captureExcluded: false,
+      cameraPosition: new Float32Array(3), cameraTarget: new Float32Array(3), planeCenter: new Float32Array(3), planeNormal: new Float32Array(3), capturedViewProj: mirrorCapturedViewProj, skipReason: "none"
     };
     // Compile without blocking, ready flips once linked
     let parallel = null;
@@ -2248,28 +2249,45 @@ void main() {
       gl.deleteTexture(mirror.tex);
       gl.deleteRenderbuffer(mirror.depth);
       gl.deleteFramebuffer(mirror.fb);
-      mirror.fb = mirror.tex = mirror.depth = null;
-      mirror.width = mirror.height = mirrorDebug.width = mirrorDebug.height = 0;
       mirrorDebug.resources -= 3;
+      if (mirror.msFb) {
+        gl.deleteRenderbuffer(mirror.color);
+        gl.deleteFramebuffer(mirror.msFb);
+        mirrorDebug.resources -= 2;
+      }
+      mirror.fb = mirror.tex = mirror.depth = mirror.color = mirror.msFb = null;
+      mirror.msaa = -1;
+      mirror.width = mirror.height = mirrorDebug.width = mirrorDebug.height = mirrorDebug.samples = 0;
     };
+    // The tier's multisampling draws into renderbuffers, resolved by blit into the sampled texture
     const ensureMirrorTarget = () => {
       const cap = settings.mirror;
       const scale = cap / Math.max(width, height, 1);
       const w = Math.max(1, Math.round(width * scale)), h = Math.max(1, Math.round(height * scale));
-      if (mirror.fb && mirror.width === w && mirror.height === h) return;
+      if (mirror.fb && mirror.width === w && mirror.height === h && mirror.msaa === settings.msaa) return;
       destroyMirrorTarget();
+      const samples = Math.min(settings.msaa, gl.getParameter(gl.MAX_SAMPLES));
       mirror.tex = createTexture(w, h, gl.RGBA8, gl.LINEAR);
-      mirror.depth = createRenderbuffer(w, h, gl.DEPTH_COMPONENT16, 0);
+      mirror.depth = createRenderbuffer(w, h, gl.DEPTH_COMPONENT16, samples);
       mirror.fb = gl.createFramebuffer();
       gl.bindFramebuffer(gl.FRAMEBUFFER, mirror.fb);
       gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, mirror.tex, 0);
+      mirrorDebug.resources += 3;
+      if (samples > 0) {
+        mirror.color = createRenderbuffer(w, h, gl.RGBA8, samples);
+        mirror.msFb = gl.createFramebuffer();
+        gl.bindFramebuffer(gl.FRAMEBUFFER, mirror.msFb);
+        gl.framebufferRenderbuffer(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.RENDERBUFFER, mirror.color);
+        mirrorDebug.resources += 2;
+      }
       gl.framebufferRenderbuffer(gl.FRAMEBUFFER, gl.DEPTH_ATTACHMENT, gl.RENDERBUFFER, mirror.depth);
       gl.drawBuffers([gl.COLOR_ATTACHMENT0]);
       gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+      mirror.msaa = settings.msaa;
       mirror.width = mirrorDebug.width = w;
       mirror.height = mirrorDebug.height = h;
+      mirrorDebug.samples = samples;
       mirrorDebug.allocationCount++;
-      mirrorDebug.resources += 3;
     };
     const destroyMirror = () => {
       destroyMirrorTarget();
@@ -2279,9 +2297,10 @@ void main() {
       mirrorDebug.captureExcluded = false;
     };
     const forgetMirror = () => {
-      mirror.node = mirror.record = mirror.geometry = mirror.program = mirror.fb = mirror.tex = mirror.depth = null;
+      mirror.node = mirror.record = mirror.geometry = mirror.program = mirror.fb = mirror.tex = mirror.depth = mirror.color = mirror.msFb = null;
       mirror.programReady = false;
-      mirror.width = mirror.height = mirrorDebug.width = mirrorDebug.height = 0;
+      mirror.msaa = -1;
+      mirror.width = mirror.height = mirrorDebug.width = mirrorDebug.height = mirrorDebug.samples = 0;
       mirrorDebug.active = false;
       mirrorDebug.captureExcluded = false;
       mirrorDebug.resources = 0;
@@ -2555,6 +2574,27 @@ void main() {
       out.y = point.y - 2 * d * normal[1];
       out.z = point.z - 2 * d * normal[2];
     };
+    // NDC bounds of the mirror's vertices under a view-projection, false when none lie in front
+    const mirrorRect = (node, vp) => {
+      const verts = node.geometry.verts, world = node.world;
+      let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+      for (let i = 0; i < verts.length; i += 3) {
+        mat4.transformPoint(MIRROR_POINT, world, verts[i], verts[i + 1], verts[i + 2]);
+        mat4.transformPoint4(MIRROR_CLIP, vp, MIRROR_POINT[0], MIRROR_POINT[1], MIRROR_POINT[2]);
+        if (MIRROR_CLIP[3] <= 0.01) continue;
+        const x = MIRROR_CLIP[0] / MIRROR_CLIP[3], y = MIRROR_CLIP[1] / MIRROR_CLIP[3];
+        minX = Math.min(minX, x);
+        minY = Math.min(minY, y);
+        maxX = Math.max(maxX, x);
+        maxY = Math.max(maxY, y);
+      }
+      if (minX === Infinity) return false;
+      MIRROR_RECT[0] = minX;
+      MIRROR_RECT[1] = minY;
+      MIRROR_RECT[2] = maxX;
+      MIRROR_RECT[3] = maxY;
+      return true;
+    };
     const prepareMirrorCamera = (camera) => {
       const node = mirror.node, world = node.world, center = mirrorDebug.planeCenter, normal = mirrorDebug.planeNormal;
       center[0] = world[12];
@@ -2568,21 +2608,8 @@ void main() {
       if (cameraSide <= 0.001) return skipMirrorPass("back-facing");
       mat4.transformPoint4(MIRROR_CLIP, viewProj, center[0], center[1], center[2]);
       if (MIRROR_CLIP[3] <= 0.01) return skipMirrorPass("behind-camera");
-      let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity, projected = 0;
-      const verts = node.geometry.verts;
-      for (let i = 0; i < verts.length; i += 3) {
-        mat4.transformPoint(MIRROR_POINT, world, verts[i], verts[i + 1], verts[i + 2]);
-        mat4.transformPoint4(MIRROR_CLIP, viewProj, MIRROR_POINT[0], MIRROR_POINT[1], MIRROR_POINT[2]);
-        if (MIRROR_CLIP[3] <= 0.01) continue;
-        const x = MIRROR_CLIP[0] / MIRROR_CLIP[3], y = MIRROR_CLIP[1] / MIRROR_CLIP[3];
-        minX = Math.min(minX, x);
-        minY = Math.min(minY, y);
-        maxX = Math.max(maxX, x);
-        maxY = Math.max(maxY, y);
-        projected++;
-      }
-      if (!projected || maxX < -1 || minX > 1 || maxY < -1 || minY > 1) return skipMirrorPass("offscreen");
-      const area = (Math.min(1, maxX) - Math.max(-1, minX)) * width * 0.5 * (Math.min(1, maxY) - Math.max(-1, minY)) * height * 0.5;
+      if (!mirrorRect(node, viewProj) || MIRROR_RECT[2] < -1 || MIRROR_RECT[0] > 1 || MIRROR_RECT[3] < -1 || MIRROR_RECT[1] > 1) return skipMirrorPass("offscreen");
+      const area = (Math.min(1, MIRROR_RECT[2]) - Math.max(-1, MIRROR_RECT[0])) * width * 0.5 * (Math.min(1, MIRROR_RECT[3]) - Math.max(-1, MIRROR_RECT[1])) * height * 0.5;
       if (area < 16) return skipMirrorPass("negligible");
       reflectMirrorPoint(mirrorEye, camera.position, center, normal);
       reflectMirrorPoint(mirrorTarget, camera.target, center, normal);
@@ -2592,6 +2619,16 @@ void main() {
       mirrorUp.z = UP.z - 2 * upDot * normal[2];
       mat4.lookAt(mirrorView, mirrorEye, mirrorTarget, mirrorUp);
       mat4.perspective(mirrorProj, camera.fov, width / height, camera.near, camera.far);
+      // Crop the reflected frustum to the glass so every texel lands on it, but never denser than the screen
+      mat4.multiply(mirrorViewProj, mirrorProj, mirrorView);
+      mirrorRect(node, mirrorViewProj);
+      const minHalf = settings.mirror / (Math.max(width, height, 1) * dpr);
+      const cropX = (MIRROR_RECT[0] + MIRROR_RECT[2]) * 0.5, cropY = (MIRROR_RECT[1] + MIRROR_RECT[3]) * 0.5;
+      const halfX = Math.max(MIRROR_RECT[2] - cropX, minHalf), halfY = Math.max(MIRROR_RECT[3] - cropY, minHalf);
+      mirrorProj[0] /= halfX;
+      mirrorProj[8] = (mirrorProj[8] + cropX) / halfX;
+      mirrorProj[5] /= halfY;
+      mirrorProj[9] = (mirrorProj[9] + cropY) / halfY;
       mat4.transformPoint(MIRROR_POINT, mirrorView, center[0], center[1], center[2]);
       let cx = mirrorView[0] * normal[0] + mirrorView[4] * normal[1] + mirrorView[8] * normal[2];
       let cy = mirrorView[1] * normal[0] + mirrorView[5] * normal[1] + mirrorView[9] * normal[2];
@@ -2676,7 +2713,7 @@ void main() {
     const renderMirrorCapture = (clear, sky, ground, sun, lx, ly, lz, sh) => {
       ensureMirrorTarget();
       const pg = res.programs;
-      gl.bindFramebuffer(gl.FRAMEBUFFER, mirror.fb);
+      gl.bindFramebuffer(gl.FRAMEBUFFER, mirror.msFb || mirror.fb);
       gl.viewport(0, 0, mirror.width, mirror.height);
       gl.clearColor(clear[0], clear[1], clear[2], 1);
       gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
@@ -2698,6 +2735,11 @@ void main() {
       gl.disable(gl.CULL_FACE);
       drawParts("line", "line", true);
       gl.enable(gl.CULL_FACE);
+      if (mirror.msFb) {
+        gl.bindFramebuffer(gl.READ_FRAMEBUFFER, mirror.msFb);
+        gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, mirror.fb);
+        gl.blitFramebuffer(0, 0, mirror.width, mirror.height, 0, 0, mirror.width, mirror.height, gl.COLOR_BUFFER_BIT, gl.NEAREST);
+      }
       mirrorCapturedViewProj.set(mirrorViewProj);
       mirrorDebug.reflectionPassCount++;
       mirrorDebug.captureExcluded = true;
@@ -4287,6 +4329,8 @@ void main() {
   // Quarter-unit cells, clocks running clockwise from -z
   const UNIT = 0.25;
   const SX = 248, SY = 60, SZ = 248;
+  // Paths sit on a grid twice as fine as the voxels, so their edges step at half a voxel
+  const PX = SX * 2, PZ = SZ * 2;
   const SURFACE = 28;
   const ORIGIN = { x: -SX / 2 * UNIT, y: -SURFACE * UNIT, z: -SZ / 2 * UNIT };
   const RADIUS = 30, MEADOW = 22, DEPTH = 7;
@@ -4295,7 +4339,8 @@ void main() {
   const MOUTH = { w: 5, h: 3, depth: 5 };
   const ROOM = { w: 6, h: 4, from: 2.5, to: 6.5 };
   const PATH_HALF = 0.75;
-  const PATH_CAPACITY = 8192;
+  const PATH_UNIT = UNIT / 2;
+  const PATH_CAPACITY = 32768;
   const PATH_LIFT = 0.006;
   const MASTER_PATH_CENTER = 2;
   const GATE_Z = -(RADIUS - 2), PASS_HALF = 2.5, PASS_TOP = 5, TRAIL_HALF = 1;
@@ -4304,7 +4349,7 @@ void main() {
   const P = { grass: 1, grassLight: 2, grassDark: 3, path: 4, stone: 5, stoneDark: 6, inner: 7, dirt: 8, floor: 9 };
   const PALETTE = [null, "#6f7d3e", "#7b8945", "#65733a", "#a3874f", "#877869", "#5e5449", "#2f2824", "#6a4e39", "#3a302a"].map((hex) => hex && hexToRgb(hex));
   const PATH_TILE = {
-    verts: [-UNIT / 2, 0, -UNIT / 2, UNIT / 2, 0, -UNIT / 2, UNIT / 2, 0, UNIT / 2, -UNIT / 2, 0, UNIT / 2],
+    verts: [-PATH_UNIT / 2, 0, -PATH_UNIT / 2, PATH_UNIT / 2, 0, -PATH_UNIT / 2, PATH_UNIT / 2, 0, PATH_UNIT / 2, -PATH_UNIT / 2, 0, PATH_UNIT / 2],
     faces: [{ i: [0, 3, 2, 1], color: PALETTE[P.path], emissive: 0 }],
     lines: []
   };
@@ -4334,7 +4379,7 @@ void main() {
     const spokes = [...frames, pass, spoke(Math.PI)];
     const grid = makeGrid(SX, SY, SZ);
     const height = new Float32Array(SX * SZ);
-    const paths = new Uint8Array(SX * SZ);
+    const paths = new Uint8Array(PX * PZ);
     const meadow = new Uint8Array(SX * SZ);
     // Walkable top, colour and underside per column
     const NONE = -DEPTH - 1;
@@ -4487,8 +4532,12 @@ void main() {
       const i = column(x, z);
       return i < 0 ? 0 : surface[i];
     };
+    const pathColumn = (x, z) => {
+      const gx = Math.floor((x - ORIGIN.x) / PATH_UNIT), gz = Math.floor((z - ORIGIN.z) / PATH_UNIT);
+      return gx >= 0 && gz >= 0 && gx < PX && gz < PZ ? gx * PZ + gz : -1;
+    };
     const isPath = (x, z) => {
-      const i = column(x, z);
+      const i = pathColumn(x, z);
       return i >= 0 && paths[i] === 1;
     };
     const onLand = (x, z) => {
@@ -4496,16 +4545,17 @@ void main() {
       return i >= 0 && land[i] === 1;
     };
     // Banana-independent master spokes. Ring changes only clip this fixed mask.
-    const masterPaths = new Uint8Array(SX * SZ);
+    const masterPaths = new Uint8Array(PX * PZ);
+    const masterList = [];
     let masterPathCount = 0, masterHashValue = 2166136261;
-    for (let gx = 0; gx < SX; gx++) {
-      const wx = (gx + 0.5) * UNIT + ORIGIN.x;
-      for (let gz = 0; gz < SZ; gz++) {
-        const i = gx * SZ + gz;
-        if (!land[i]) continue;
-        const wz = (gz + 0.5) * UNIT + ORIGIN.z, r = Math.hypot(wx, wz);
+    for (let gx = 0; gx < PX; gx++) {
+      const wx = (gx + 0.5) * PATH_UNIT + ORIGIN.x;
+      for (let gz = 0; gz < PZ; gz++) {
+        const i = gx * PZ + gz, c = (gx >> 1) * SZ + (gz >> 1);
+        if (!land[c]) continue;
+        const wz = (gz + 0.5) * PATH_UNIT + ORIGIN.z, r = Math.hypot(wx, wz);
         let path = false;
-        if (meadow[i] && r >= MASTER_PATH_CENTER) {
+        if (meadow[c] && r >= MASTER_PATH_CENTER) {
           const theta = Math.atan2(wx, -wz);
           for (const s of spokes) {
             const d = theta - s.angle;
@@ -4519,13 +4569,14 @@ void main() {
             }
           }
         }
-        if (!meadow[i]) {
+        if (!meadow[c]) {
           if (Math.abs(wx) < PASS_HALF && wz < 0) {
             path = Math.abs(wx - pass.wobble * Math.sin((r - MEADOW) / (-GATE_Z - MEADOW) * Math.PI * 2)) < TRAIL_HALF;
           } else if (Math.abs(wx) < PATH_HALF && wz > 0) path = true;
         }
         if (!path) continue;
         masterPaths[i] = 1;
+        masterList.push(i);
         masterPathCount++;
         masterHashValue = Math.imul(masterHashValue ^ i, 16777619);
       }
@@ -4534,10 +4585,11 @@ void main() {
     const pathData = new Float32Array(PATH_CAPACITY * 20);
     let pathCount = 0, pathVersion = 0, pathReflows = 0, ringPathCount = 0, visibleSpokeCount = 0;
     let requestedInner = 0, ringInner = 0, ringCenter = 0, ringOuter = 0, pathVisible = false;
-    const tileInnerRadius = (x, z) => Math.hypot(Math.max(0, Math.abs(x) - UNIT / 2), Math.max(0, Math.abs(z) - UNIT / 2));
+    const tileInnerRadius = (x, z) => Math.hypot(Math.max(0, Math.abs(x) - PATH_UNIT / 2), Math.max(0, Math.abs(z) - PATH_UNIT / 2));
     const writePathTile = (i, x, z) => {
       if (pathCount >= PATH_CAPACITY) throw new Error("Dynamic path instance capacity exceeded");
       paths[i] = 1;
+      const c = (Math.floor(i / PZ) >> 1) * SZ + ((i % PZ) >> 1);
       const o = pathCount++ * 20;
       pathData[o] = 1;
       pathData[o + 1] = 0;
@@ -4552,7 +4604,7 @@ void main() {
       pathData[o + 10] = 1;
       pathData[o + 11] = 0;
       pathData[o + 12] = x;
-      pathData[o + 13] = surface[i] + PATH_LIFT;
+      pathData[o + 13] = surface[c] + PATH_LIFT;
       pathData[o + 14] = z;
       pathData[o + 15] = 1;
       pathData[o + 16] = 1;
@@ -4560,9 +4612,10 @@ void main() {
       pathData[o + 18] = 0;
       pathData[o + 19] = 0;
     };
+    // The ring scans only its own square of cells, the spokes only their master list
     const setPathRadius = (platformRadius) => {
-      requestedInner = platformRadius + UNIT;
-      const quantized = Math.ceil((requestedInner - 1e-9) / UNIT) * UNIT;
+      requestedInner = platformRadius + PATH_UNIT;
+      const quantized = Math.ceil((requestedInner - 1e-9) / PATH_UNIT) * PATH_UNIT;
       if (quantized === ringInner) return false;
       ringInner = quantized;
       ringCenter = ringInner + PATH_HALF;
@@ -4572,39 +4625,45 @@ void main() {
       ringPathCount = 0;
       visibleSpokeCount = 0;
       paths.fill(0);
-      for (let gx = 0; gx < SX; gx++) {
-        const wx = (gx + 0.5) * UNIT + ORIGIN.x;
-        for (let gz = 0; gz < SZ; gz++) {
-          const i = gx * SZ + gz;
-          if (!land[i]) continue;
-          const wz = (gz + 0.5) * UNIT + ORIGIN.z;
-          const innerRadius = tileInnerRadius(wx, wz);
-          if (innerRadius < ringInner) continue;
-          const ring = pathVisible && meadow[i] && innerRadius < ringOuter;
-          const spoke = masterPaths[i] === 1 && innerRadius >= ringOuter;
-          if (!ring && !spoke) continue;
-          writePathTile(i, wx, wz);
-          if (ring) ringPathCount++;
-          else visibleSpokeCount++;
+      if (pathVisible) {
+        const g0 = Math.max(0, Math.floor((-ringOuter - ORIGIN.x) / PATH_UNIT)), g1 = Math.min(PX - 1, Math.ceil((ringOuter - ORIGIN.x) / PATH_UNIT));
+        for (let gx = g0; gx <= g1; gx++) {
+          const wx = (gx + 0.5) * PATH_UNIT + ORIGIN.x;
+          for (let gz = g0; gz <= g1; gz++) {
+            const i = gx * PZ + gz, c = (gx >> 1) * SZ + (gz >> 1);
+            if (!land[c] || !meadow[c]) continue;
+            const wz = (gz + 0.5) * PATH_UNIT + ORIGIN.z;
+            const innerRadius = tileInnerRadius(wx, wz);
+            if (innerRadius < ringInner || innerRadius >= ringOuter) continue;
+            writePathTile(i, wx, wz);
+            ringPathCount++;
+          }
         }
+      }
+      for (let n = 0; n < masterList.length; n++) {
+        const i = masterList[n], gx = Math.floor(i / PZ), gz = i % PZ;
+        const wx = (gx + 0.5) * PATH_UNIT + ORIGIN.x, wz = (gz + 0.5) * PATH_UNIT + ORIGIN.z;
+        if (tileInnerRadius(wx, wz) < ringOuter) continue;
+        writePathTile(i, wx, wz);
+        visibleSpokeCount++;
       }
       pathVersion++;
       pathReflows++;
       return true;
     };
     const overlapsPath = (x, z, radius) => {
-      const gx0 = Math.max(0, Math.floor((x - radius - ORIGIN.x) / UNIT));
-      const gx1 = Math.min(SX - 1, Math.floor((x + radius - ORIGIN.x) / UNIT));
-      const gz0 = Math.max(0, Math.floor((z - radius - ORIGIN.z) / UNIT));
-      const gz1 = Math.min(SZ - 1, Math.floor((z + radius - ORIGIN.z) / UNIT));
-      const half = UNIT / 2, radius2 = radius * radius;
+      const gx0 = Math.max(0, Math.floor((x - radius - ORIGIN.x) / PATH_UNIT));
+      const gx1 = Math.min(PX - 1, Math.floor((x + radius - ORIGIN.x) / PATH_UNIT));
+      const gz0 = Math.max(0, Math.floor((z - radius - ORIGIN.z) / PATH_UNIT));
+      const gz1 = Math.min(PZ - 1, Math.floor((z + radius - ORIGIN.z) / PATH_UNIT));
+      const half = PATH_UNIT / 2, radius2 = radius * radius;
       for (let gx = gx0; gx <= gx1; gx++) {
-        const cx = (gx + 0.5) * UNIT + ORIGIN.x;
+        const cx = (gx + 0.5) * PATH_UNIT + ORIGIN.x;
         const dx = Math.max(0, Math.abs(cx - x) - half);
         for (let gz = gz0; gz <= gz1; gz++) {
-          const i = gx * SZ + gz;
+          const i = gx * PZ + gz;
           if (!paths[i]) continue;
-          const cz = (gz + 0.5) * UNIT + ORIGIN.z;
+          const cz = (gz + 0.5) * PATH_UNIT + ORIGIN.z;
           const dz = Math.max(0, Math.abs(cz - z) - half);
           if (dx * dx + dz * dz <= radius2) return true;
         }
@@ -4653,7 +4712,8 @@ void main() {
       radius: RADIUS,
       meadowRadius: MEADOW,
       passHalf: PASS_HALF,
-      unit: UNIT
+      unit: UNIT,
+      pathUnit: PATH_UNIT
     };
     ISLANDS.set(seed, built);
     return built;
@@ -5242,6 +5302,17 @@ void main() {
         hoverY = p.y;
         hoverDirty = true;
       }
+      // Both mouse buttons make a walk that drags to turn: no tap on release, no grab in hand. Pressed
+      // together they arrive as one move with no pointerdown at all, so the chord registers its own pointer
+      if (e.pointerType === "mouse" && (e.buttons & 3) === 3 && (!gesture || (gesture.pointerId === e.pointerId && gesture.mode !== "chord"))) {
+        clearLongPress();
+        if (gesture && gesture.mode === "grab") call("onGrabEnd", gesture.hit, p, null, true);
+        pointers.set(e.pointerId, p);
+        canvas.setPointerCapture(e.pointerId);
+        gesture = { mode: "chord", start: p, last: p, at: performance.now(), hit: null, pointerId: e.pointerId, moved: true };
+        canvas.style.cursor = "grabbing";
+        return;
+      }
       if (!pointers.has(e.pointerId)) return;
       pointers.set(e.pointerId, p);
       if (!gesture) return;
@@ -5263,7 +5334,7 @@ void main() {
           gesture.mode = "orbit";
         }
       }
-      if (gesture.mode === "orbit") {
+      if (gesture.mode === "orbit" || gesture.mode === "chord") {
         call("onOrbit", dx, dy);
         canvas.style.cursor = "grabbing";
       } else if (gesture.mode === "grab") {
@@ -5415,9 +5486,9 @@ void main() {
     };
     return s;
   };
-  // Joystick bases, a hold-to-climb button, and a Space handler
-  const create = ({ move = null, look = null, boost = null, onAction = null } = {}) => {
-    const held = { forward: 0, back: 0, left: 0, right: 0, yawLeft: 0, yawRight: 0, pitchDown: 0, pitchUp: 0, up: 0, down: 0, boost: 0 };
+  // Joystick bases, a hold-to-climb button, a canvas whose mouse chord walks, and a Space handler
+  const create = ({ move = null, look = null, boost = null, chord = null, onAction = null } = {}) => {
+    const held = { forward: 0, back: 0, left: 0, right: 0, yawLeft: 0, yawRight: 0, pitchDown: 0, pitchUp: 0, up: 0, down: 0, boost: 0, chord: 0 };
     const axes = { x: 0, y: 0, up: 0, yaw: 0, pitch: 0 };
     const typing = (e) => e.target && (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA" || (e.target.closest && e.target.closest("dialog")));
     const onKeyDown = (e) => {
@@ -5453,10 +5524,20 @@ void main() {
       boost.addEventListener("pointercancel", onBoostUp);
       boost.addEventListener("pointerleave", onBoostUp);
     }
+    // Both mouse buttons down is forward, as W; a chorded press arrives as a move
+    const onChord = (e) => {
+      if (e.pointerType === "mouse") held.chord = (e.buttons & 3) === 3 ? 1 : 0;
+    };
+    if (chord) {
+      chord.addEventListener("pointerdown", onChord);
+      chord.addEventListener("pointermove", onChord);
+      chord.addEventListener("pointerup", onChord);
+      chord.addEventListener("pointercancel", onChord);
+    }
     // Yaw positive left, pitch positive down
     const read = () => {
       axes.x = clamp(held.right - held.left + (moveStick ? moveStick.x : 0), -1, 1);
-      axes.y = clamp(held.forward - held.back + (moveStick ? moveStick.y : 0), -1, 1);
+      axes.y = clamp(held.forward - held.back + held.chord + (moveStick ? moveStick.y : 0), -1, 1);
       axes.up = clamp(held.up + held.boost - held.down, -1, 1);
       axes.yaw = clamp(held.yawLeft - held.yawRight - (lookStick ? lookStick.x : 0), -1, 1);
       axes.pitch = clamp(held.pitchDown - held.pitchUp - (lookStick ? lookStick.y : 0), -1, 1);
@@ -5471,6 +5552,12 @@ void main() {
         boost.removeEventListener("pointerup", onBoostUp);
         boost.removeEventListener("pointercancel", onBoostUp);
         boost.removeEventListener("pointerleave", onBoostUp);
+      }
+      if (chord) {
+        chord.removeEventListener("pointerdown", onChord);
+        chord.removeEventListener("pointermove", onChord);
+        chord.removeEventListener("pointerup", onChord);
+        chord.removeEventListener("pointercancel", onChord);
       }
       if (moveStick) moveStick.dispose();
       if (lookStick) lookStick.dispose();
@@ -5497,7 +5584,7 @@ void main() {
   // Act button labels, action or jetpack throttle
   const ACT_DO = "Ooga!", ACT_FLY = "Blast off!";
   const create = (ctx) => {
-    const { renderer, camera, hud, presets, pitch: [PITCH_MIN, PITCH_MAX], dist: [DIST_MIN, DIST_MAX], follow, fly, clampTarget, clampCamera, coarse } = ctx;
+    const { renderer, canvas, camera, hud, presets, pitch: [PITCH_MIN, PITCH_MAX], dist: [DIST_MIN, DIST_MAX], follow, fly, clampTarget, clampCamera, coarse } = ctx;
     let crew = null, fx = null;
     const freeTarget = { x: 0, y: 0, z: 0 };
     const followTarget = { x: 0, y: 0, z: 0 };
@@ -5523,7 +5610,7 @@ void main() {
       hud.tooltip.hide();
       fx.say(cave, "Ooga? Me?", 1.6);
       if (cave.jet) hud.hint(coarse ? "Left stick flies · hold Blast off to climb · double-tap to let go" : "WASD flies · hold Space to climb · Escape to let go");
-      else hud.hint(coarse ? "Left stick walks · Ooga! acts · double-tap to let go" : "WASD to walk · Space to act · Escape to let go");
+      else hud.hint(coarse ? "Left stick walks · Ooga! acts · double-tap to let go" : "WASD or both mouse buttons to walk · Space to act · Escape to let go");
     };
     const release = (quiet = false) => {
       const cave = player();
@@ -5539,8 +5626,8 @@ void main() {
       crew.playerAction();
       return true;
     };
-    // Held it climbs, clicked it acts
-    const controls = createControls({ move: document.getElementById("joy-move"), look: document.getElementById("joy-look"), boost: hud.el.act, onAction: action });
+    // Held it climbs, clicked it acts; both mouse buttons on the canvas walk
+    const controls = createControls({ move: document.getElementById("joy-move"), look: document.getElementById("joy-look"), boost: hud.el.act, chord: canvas, onAction: action });
     let dragHold = 0;
     const hooks = {
       onOrbit: (dx, dy) => {
@@ -8642,7 +8729,7 @@ void main() {
     hooks = {};
     input = interactMod.create({ canvas: ctx.canvas, renderer, camera, hooks });
     presets = { pile: PILE_VIEW, gate: GATE_VIEW };
-    pilot = pilotMod.create({ renderer, camera, hud, presets, landing: "pile", pitch: [PITCH_MIN, PITCH_MAX], dist: [DIST_MIN, DIST_MAX], follow: FOLLOW, fly: FLY, clampTarget, clampCamera, coarse: COARSE });
+    pilot = pilotMod.create({ renderer, canvas: ctx.canvas, camera, hud, presets, landing: "pile", pitch: [PITCH_MIN, PITCH_MAX], dist: [DIST_MIN, DIST_MAX], follow: FOLLOW, fly: FLY, clampTarget, clampCamera, coarse: COARSE });
     place(island.geometry, 0, 0, 0, 0);
     pathNode = createNode({ geometry: island.path.geometry, instanceData: island.path.instanceData, instanceCount: 0, instanceVersion: 0, depthBias: 0.05 });
     addChild(root, pathNode);
@@ -9182,7 +9269,7 @@ void main() {
     hud = hudMod.create({ roster: contributors.roster, catalog: models.SWAG, tierColors: models.TIER_COLORS, renderIcon: hudMod.renderIcon, lootEnabled });
     hooks = {};
     input = interactMod.create({ canvas: ctx.canvas, renderer, camera, hooks });
-    pilot = pilotMod.create({ renderer, camera, hud, presets: PRESETS, landing: "pile", pitch: PITCH, dist: DIST, follow: FOLLOW, fly: FLY, clampTarget, clampCamera, coarse: COARSE });
+    pilot = pilotMod.create({ renderer, canvas: ctx.canvas, camera, hud, presets: PRESETS, landing: "pile", pitch: PITCH, dist: DIST, follow: FOLLOW, fly: FLY, clampTarget, clampCamera, coarse: COARSE });
     const shared = { root, input, hooks, hud, game, world, renderer, camera, overlay: ctx.overlay, tickerAt: TICKER_AT, buildSpots: BUILD_SPOTS.slice(), walkIn: WALK_IN, clampDrag, viewYaw: PRESETS.pile.yaw, bedrolls: lab.bedrolls, pileScale: 0.45, onShown: (shown) => { lab.equipment.abacus.setValue(shown); meterTimer = 0; }, walkable, useNear };
     fx = shared.fx = fxMod.create(shared);
     pile = shared.pile = pileMod.create(shared);

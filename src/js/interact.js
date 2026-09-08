@@ -124,6 +124,17 @@
         hoverY = p.y;
         hoverDirty = true;
       }
+      // Both mouse buttons make a walk that drags to turn: no tap on release, no grab in hand. Pressed
+      // together they arrive as one move with no pointerdown at all, so the chord registers its own pointer
+      if (e.pointerType === "mouse" && (e.buttons & 3) === 3 && (!gesture || (gesture.pointerId === e.pointerId && gesture.mode !== "chord"))) {
+        clearLongPress();
+        if (gesture && gesture.mode === "grab") call("onGrabEnd", gesture.hit, p, null, true);
+        pointers.set(e.pointerId, p);
+        canvas.setPointerCapture(e.pointerId);
+        gesture = { mode: "chord", start: p, last: p, at: performance.now(), hit: null, pointerId: e.pointerId, moved: true };
+        canvas.style.cursor = "grabbing";
+        return;
+      }
       if (!pointers.has(e.pointerId)) return;
       pointers.set(e.pointerId, p);
       if (!gesture) return;
@@ -145,7 +156,7 @@
           gesture.mode = "orbit";
         }
       }
-      if (gesture.mode === "orbit") {
+      if (gesture.mode === "orbit" || gesture.mode === "chord") {
         call("onOrbit", dx, dy);
         canvas.style.cursor = "grabbing";
       } else if (gesture.mode === "grab") {
