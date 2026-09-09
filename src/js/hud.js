@@ -39,6 +39,7 @@
       lootCount: $("loot-count"),
       crateHelp: $("crate-help"),
       worldLootHint: $("world-loot-hint"),
+      subtitle: $("subtitle"),
       actions: [...document.querySelectorAll("[data-action]")],
       act: $("act"),
       toast: $("toast"),
@@ -102,6 +103,9 @@
     };
     const setAct = (label) => {
       el.act.textContent = label;
+    };
+    const setSubtitle = (text) => {
+      el.subtitle.textContent = text;
     };
     const setSummary = ({ working, sleeping, away }) => {
       el.summary.textContent = `${working} eating · ${sleeping} sleeping · ${away} away`;
@@ -320,7 +324,7 @@
       tooltip.hide();
       closeFeed();
     };
-    return { el, openFeed, closeFeed, setRosterRow, setMeter, setStats, setAct, setSummary, onAction, toast, tooltip, hint, selectTab, onPreset, onIdentityChange, setIdentity, setDonationUrl, onAssign, onUnassign, renderInventory, dispose };
+    return { el, openFeed, closeFeed, setRosterRow, setMeter, setStats, setAct, setSubtitle, setSummary, onAction, toast, tooltip, hint, selectTab, onPreset, onIdentityChange, setIdentity, setDonationUrl, onAssign, onUnassign, renderInventory, dispose };
   };
   BL.hud = { create, renderIcon, STATE_LABELS };
 })();

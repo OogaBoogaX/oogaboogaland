@@ -2,11 +2,11 @@
   "use strict";
   const BL = window.BL = window.BL || {};
   const { mat4 } = BL.math;
-  const { updateWorld, traverseVisible } = BL.scene;
+  const { updateWorld, traverseVisible, boundsOf } = BL.scene;
   const QUALITY = {
-    high: { dpr: 1.5, msaa: 4, shadow: 2048, bloom: true, mirror: 512 },
-    medium: { dpr: 1.25, msaa: 2, shadow: 1024, bloom: true, mirror: 384 },
-    low: { dpr: 1, msaa: 0, shadow: 512, bloom: false, mirror: 256 }
+    high: { dpr: 1.5, msaa: 4, shadow: 2048, bloom: true, mirror: 512, lights: 4 },
+    medium: { dpr: 1.25, msaa: 2, shadow: 1024, bloom: true, mirror: 384, lights: 4 },
+    low: { dpr: 1, msaa: 0, shadow: 512, bloom: false, mirror: 256, lights: 0 }
   };
   const INSTANCE_FLOATS = 20;
   // Caps the pixel ratio to bound buffer memory
@@ -17,6 +17,8 @@
   const DEFAULT_SUN = [0.80, 0.74, 0.66];
   const DEFAULT_CLEAR = [0.035, 0.035, 0.04];
   const DEFAULT_SHADOW_CENTER = { x: 0, y: 1.5, z: 0 };
+  const DEFAULT_MOON = { x: 0, y: -1, z: 0 };
+  const CULL_MARGIN = 0.5;
   const UP = { x: 0, y: 1, z: 0 };
   const ZERO4 = new Float32Array([0, 0, 0, 1]);
   const LIGHT_EYE = { x: 0, y: 0, z: 0 };
@@ -38,6 +40,7 @@ out vec3 vNormal;
 out vec4 vColor;
 out vec4 vParams;
 out vec4 vShadow;
+out vec3 vWorld;
 void main() {
   mat4 m = mat4(aM0, aM1, aM2, aM3);
   vec4 w = m * vec4(aPos, 1.0);
@@ -45,6 +48,7 @@ void main() {
   vColor = aColor;
   vParams = aParams;
   vShadow = uLightViewProj * w;
+  vWorld = w.xyz;
   gl_Position = uViewProj * w;
 }`;
   const MESH_FS = `#version 300 es
@@ -54,12 +58,15 @@ in vec3 vNormal;
 in vec4 vColor;
 in vec4 vParams;
 in vec4 vShadow;
+in vec3 vWorld;
 uniform vec3 uLightDir;
 uniform vec3 uSky;
 uniform vec3 uGround;
 uniform vec3 uSun;
 uniform sampler2DShadow uShadow;
 uniform float uShadowTexel;
+uniform vec4 uLights[16];
+uniform int uLightCount;
 layout(location=0) out vec4 oColor;
 layout(location=1) out vec4 oBright;
 float shadowAt(vec3 p, float bias) {
@@ -82,6 +89,15 @@ void main() {
   float sh = shadowAt(sp, bias);
   vec3 ambient = mix(uGround, uSky, n.y * 0.5 + 0.5);
   vec3 lit = base * (ambient + uSun * ndl * sh);
+  for (int i = 0; i < 4; i++) {
+    if (i >= uLightCount) break;
+    vec4 lp = uLights[i * 2];
+    vec3 ld = lp.xyz - vWorld;
+    float dist = length(ld);
+    float a = clamp(1.0 - dist / lp.w, 0.0, 1.0);
+    a *= a;
+    lit += base * uLights[i * 2 + 1].rgb * a * max(dot(n, ld), 0.0) / max(dist, 0.0001);
+  }
   vec3 col = mix(lit, base * 1.15, emissive);
   col = mix(col, vec3(1.0, 0.86, 0.45), vParams.y * 0.4);
   float tip = clamp(vParams.z, 0.0, 1.0);
@@ -198,7 +214,60 @@ out vec2 vUv;
 void main() {
   vec2 p = vec2(float((gl_VertexID << 1) & 2), float(gl_VertexID & 2));
   vUv = p;
-  gl_Position = vec4(p * 2.0 - 1.0, 0.0, 1.0);
+  gl_Position = vec4(p * 2.0 - 1.0, 1.0, 1.0);
+}`;
+  const SKY_FS = `#version 300 es
+precision highp float;
+in vec2 vUv;
+uniform mat4 uInvViewProj;
+uniform vec3 uEye;
+uniform vec3 uHorizon;
+uniform vec3 uZenith;
+uniform vec3 uSun;
+uniform vec3 uLightDir;
+uniform vec3 uMoonDir;
+uniform float uStars;
+uniform float uTime;
+layout(location=0) out vec4 oColor;
+layout(location=1) out vec4 oBright;
+float hash(vec2 p) {
+  vec3 q = fract(vec3(p.xyx) * 0.1031);
+  q += dot(q, q.yzx + 33.33);
+  return fract((q.x + q.y) * q.z);
+}
+void main() {
+  vec4 far = uInvViewProj * vec4(vUv * 2.0 - 1.0, 1.0, 1.0);
+  vec3 d = normalize(far.xyz / far.w - uEye);
+  vec3 col = mix(uHorizon, uZenith, smoothstep(-0.02, 0.5, d.y));
+  col = mix(col, uHorizon * 0.55, smoothstep(0.0, 0.5, -d.y));
+  float sd = max(dot(d, uLightDir), 0.0);
+  float sunDisc = pow(sd, 600.0) * (1.0 - uStars);
+  vec3 sun = uSun * (sunDisc + pow(sd, 6.0) * 0.18 * (1.0 - uStars));
+  float moonDisc = smoothstep(0.9985, 0.999, dot(d, uMoonDir)) * uStars;
+  vec3 moon = vec3(0.82, 0.88, 1.0) * moonDisc;
+  vec3 stars = vec3(0.0);
+  if (uStars > 0.002) {
+    vec3 a = abs(d);
+    vec2 f;
+    float face;
+    if (a.x >= a.y && a.x >= a.z) { f = d.yz / a.x; face = d.x > 0.0 ? 0.0 : 1.0; }
+    else if (a.y >= a.z) { f = d.xz / a.y; face = d.y > 0.0 ? 2.0 : 3.0; }
+    else { f = d.xy / a.z; face = d.z > 0.0 ? 4.0 : 5.0; }
+    f = (f * 0.5 + 0.5) * 48.0;
+    vec2 cell = floor(f) + face * 97.0;
+    float h = hash(cell);
+    if (h < 0.14) {
+      float h2 = hash(cell + 17.3);
+      float h3 = hash(cell + 41.7);
+      float r = 0.12 + h2 * 0.18;
+      float pt = 1.0 - smoothstep(0.0, r, length(fract(f) - 0.5));
+      float twinkle = 0.75 + 0.25 * sin(uTime * (2.0 + h3 * 3.0) + h3 * 6.28);
+      float s = pt * (0.5 + 0.5 * h2) * twinkle * uStars * smoothstep(-0.05, 0.15, d.y);
+      stars = mix(vec3(1.0), vec3(0.75, 0.85, 1.0), h3) * s;
+    }
+  }
+  oColor = vec4(col + sun + moon + stars, 1.0);
+  oBright = vec4(uSun * sunDisc * 0.6 + moon * 0.5 + stars * 0.35, 1.0);
 }`;
   const BLUR_FS = `#version 300 es
 precision highp float;
@@ -239,6 +308,7 @@ void main() {
     const gl = canvas.getContext("webgl2", { antialias: false, alpha: false, powerPreference: "high-performance" });
     if (!gl) throw new Error("WebGL2 unavailable");
     let settings = QUALITY[quality] || QUALITY.high;
+    let qualityName = QUALITY[quality] ? quality : "high";
     let width = 0, height = 0, dpr = 1, pw = 0, ph = 0;
     let lost = false;
     const size = { width: 0, height: 0 };
@@ -256,6 +326,11 @@ void main() {
     const mirrorProj = mat4.create();
     const mirrorViewProj = mat4.create();
     const mirrorCapturedViewProj = mat4.create();
+    const invViewProj = mat4.create();
+    const mirrorInvViewProj = mat4.create();
+    const FRUSTUM = new Float32Array(24);
+    const CENTER = new Float32Array(3);
+    let culled = 0, drawn = 0;
     const mirrorEye = { x: 0, y: 0, z: 0 };
     const mirrorTarget = { x: 0, y: 0, z: 0 };
     const mirrorUp = { x: 0, y: 1, z: 0 };
@@ -318,9 +393,10 @@ void main() {
       ready = false;
       failure = null;
       res.programs = {
-        mesh: compile(MESH_VS, MESH_FS, ["uViewProj", "uLightViewProj", "uLightDir", "uSky", "uGround", "uSun", "uShadow", "uShadowTexel"]),
+        mesh: compile(MESH_VS, MESH_FS, ["uViewProj", "uLightViewProj", "uLightDir", "uSky", "uGround", "uSun", "uShadow", "uShadowTexel", "uLights", "uLightCount"]),
         shadow: compile(SHADOW_VS, SHADOW_FS, ["uLightViewProj"]),
         line: compile(LINE_VS, LINE_FS, ["uViewProj", "uViewport", "uWidth"]),
+        sky: compile(QUAD_VS, SKY_FS, ["uInvViewProj", "uEye", "uHorizon", "uZenith", "uSun", "uLightDir", "uMoonDir", "uStars", "uTime"]),
         blur: compile(QUAD_VS, BLUR_FS, ["uTex", "uDir"]),
         composite: compile(QUAD_VS, COMPOSITE_FS, ["uScene", "uBloom", "uBloomStrength"])
       };
@@ -625,10 +701,32 @@ void main() {
       let rec = records.get(geometry);
       if (!rec) {
         const ibo = gl.createBuffer();
-        rec = { geometry, ibo, capacity: 0, mesh: buildMeshPart(geometry, ibo), line: buildLinePart(geometry, ibo), nodes: [], count: 0, active: false, data: null, batch: null, batchVersion: -1 };
+        rec = { geometry, ibo, capacity: 0, mesh: buildMeshPart(geometry, ibo), line: buildLinePart(geometry, ibo), nodes: [], count: 0, drawCount: 0, active: false, data: null, batch: null, batchVersion: -1 };
         records.set(geometry, rec);
       }
       return rec;
+    };
+    // Gribb-Hartmann planes of a column-major view-projection: left, right, bottom, top, near, far
+    const extractFrustum = (m) => {
+      for (let i = 0; i < 6; i++) {
+        const row = i >> 1, sign = i & 1 ? -1 : 1, o = i * 4;
+        const a = m[3] + sign * m[row], b = m[7] + sign * m[4 + row], c = m[11] + sign * m[8 + row], d = m[15] + sign * m[12 + row];
+        const len = Math.hypot(a, b, c) || 1;
+        FRUSTUM[o] = a / len;
+        FRUSTUM[o + 1] = b / len;
+        FRUSTUM[o + 2] = c / len;
+        FRUSTUM[o + 3] = d / len;
+      }
+    };
+    const inFrustum = (node) => {
+      const b = boundsOf(node.geometry), w = node.world;
+      mat4.transformPoint(CENTER, w, b.center[0], b.center[1], b.center[2]);
+      const scale = Math.max(w[0] * w[0] + w[1] * w[1] + w[2] * w[2], w[4] * w[4] + w[5] * w[5] + w[6] * w[6], w[8] * w[8] + w[9] * w[9] + w[10] * w[10]);
+      const r = b.radius * Math.sqrt(scale) + CULL_MARGIN;
+      for (let i = 0; i < 24; i += 4) {
+        if (FRUSTUM[i] * CENTER[0] + FRUSTUM[i + 1] * CENTER[1] + FRUSTUM[i + 2] * CENTER[2] + FRUSTUM[i + 3] < -r) return false;
+      }
+      return true;
     };
     const collect = (node) => {
       if (!node.geometry) return;
@@ -646,22 +744,31 @@ void main() {
       if (!rec.active) {
         rec.active = true;
         rec.count = 0;
+        rec.drawCount = 0;
         activeRecords.push(rec);
       }
       if (node.instanceData) {
         rec.batch = node;
-        rec.count = node.instanceCount;
+        rec.count = rec.drawCount = node.instanceCount;
         return;
       }
-      rec.nodes[rec.count++] = node;
+      // In-frustum nodes stay in front of the culled ones by swapping into the draw region
+      const idx = rec.count++;
+      rec.nodes[idx] = node;
+      if (inFrustum(node)) {
+        rec.nodes[idx] = rec.nodes[rec.drawCount];
+        rec.nodes[rec.drawCount++] = node;
+      } else culled++;
     };
     const uploadInstances = (rec) => {
       const need = rec.count * INSTANCE_FLOATS;
       if (rec.batch) {
         gl.bindBuffer(gl.ARRAY_BUFFER, rec.ibo);
-        if (rec.capacity < need) {
-          gl.bufferData(gl.ARRAY_BUFFER, need * 4, gl.DYNAMIC_DRAW);
-          rec.capacity = need;
+        // Grow geometrically within the batch's own array, so a fading population reallocates a few times, not per instance
+        const cap = Math.min(rec.batch.instanceData.length, Math.max(need, rec.capacity * 2));
+        if (rec.capacity < cap) {
+          gl.bufferData(gl.ARRAY_BUFFER, cap * 4, gl.DYNAMIC_DRAW);
+          rec.capacity = cap;
           rec.batchVersion = -1;
         }
         if (rec.batchVersion !== rec.batch.instanceVersion) {
@@ -769,6 +876,9 @@ void main() {
       mirrorProj[8] = (mirrorProj[8] + cropX) / halfX;
       mirrorProj[5] /= halfY;
       mirrorProj[9] = (mirrorProj[9] + cropY) / halfY;
+      // Sky rays unproject through the cropped projection, before the oblique clip bends z
+      mat4.multiply(mirrorViewProj, mirrorProj, mirrorView);
+      mat4.invert(mirrorInvViewProj, mirrorViewProj);
       mat4.transformPoint(MIRROR_POINT, mirrorView, center[0], center[1], center[2]);
       let cx = mirrorView[0] * normal[0] + mirrorView[4] * normal[1] + mirrorView[8] * normal[2];
       let cy = mirrorView[1] * normal[0] + mirrorView[5] * normal[1] + mirrorView[9] * normal[2];
@@ -839,18 +949,31 @@ void main() {
     };
     canvas.addEventListener("webglcontextlost", onLost);
     canvas.addEventListener("webglcontextrestored", onRestored);
-    const drawParts = (kind, useProgram, excludeMirror = false) => {
+    // The camera pass draws only the in-frustum front of each record; shadow and mirror draw all
+    const drawParts = (kind, useProgram, excludeMirror = false, cull = false) => {
       for (const rec of activeRecords) {
         if (excludeMirror && rec === mirror.record) continue;
-        const part = rec[kind];
-        if (!part) continue;
+        const part = rec[kind], n = cull ? rec.drawCount : rec.count;
+        if (!part || !n) continue;
         if (kind === "mesh" && useProgram === "shadow" && rec.geometry.castShadow === false) continue;
         if (kind === "line") gl.uniform1f(res.programs.line.u.uWidth, part.width * dpr);
         gl.bindVertexArray(part.vao);
-        gl.drawArraysInstanced(gl.TRIANGLES, 0, part.count, rec.count);
+        gl.drawArraysInstanced(gl.TRIANGLES, 0, part.count, n);
       }
     };
-    const renderMirrorCapture = (clear, sky, ground, sun, lx, ly, lz, sh) => {
+    const drawSky = (inv, eye) => {
+      const p = res.programs.sky;
+      gl.useProgram(p.prog);
+      gl.uniformMatrix4fv(p.u.uInvViewProj, false, inv);
+      gl.uniform3f(p.u.uEye, eye.x, eye.y, eye.z);
+      gl.depthFunc(gl.LEQUAL);
+      gl.depthMask(false);
+      gl.bindVertexArray(res.quadVao);
+      gl.drawArrays(gl.TRIANGLES, 0, 3);
+      gl.depthMask(true);
+      gl.depthFunc(gl.LESS);
+    };
+    const renderMirrorCapture = (clear, sky, ground, sun, lx, ly, lz, sh, lights, lightCount, skyOn) => {
       ensureMirrorTarget();
       const pg = res.programs;
       gl.bindFramebuffer(gl.FRAMEBUFFER, mirror.msFb || mirror.fb);
@@ -868,7 +991,10 @@ void main() {
       gl.activeTexture(gl.TEXTURE0);
       gl.bindTexture(gl.TEXTURE_2D, sh.tex);
       gl.uniform1i(pg.mesh.u.uShadow, 0);
+      if (lights) gl.uniform4fv(pg.mesh.u.uLights, lights);
+      gl.uniform1i(pg.mesh.u.uLightCount, lightCount);
       drawParts("mesh", "mesh", true);
+      if (skyOn) drawSky(mirrorInvViewProj, mirrorEye);
       gl.useProgram(pg.line.prog);
       gl.uniformMatrix4fv(pg.line.u.uViewProj, false, mirrorViewProj);
       gl.uniform2f(pg.line.u.uViewport, mirror.width, mirror.height);
@@ -929,15 +1055,36 @@ void main() {
         clear = DEFAULT_CLEAR,
         bloomStrength = 0.9,
         shadowCenter = DEFAULT_SHADOW_CENTER,
-        shadowExtent = 13
+        shadowExtent = 13,
+        horizon,
+        zenith,
+        moon = DEFAULT_MOON,
+        stars = 0,
+        time = 0,
+        lights,
+        lightCount = 0
       } = opts;
       if (canvas.clientWidth !== width || canvas.clientHeight !== height) resize();
       const f = res.fbo, sh = res.shadow, pg = res.programs;
+      const skyOn = !!(horizon && zenith);
+      const nLights = lights ? Math.min(lightCount, settings.lights) : 0;
       mat4.lookAt(view, camera.position, camera.target, UP);
       mat4.perspective(proj, camera.fov, width / height, camera.near, camera.far);
       mat4.multiply(viewProj, proj, view);
+      extractFrustum(viewProj);
       const llen = Math.hypot(light.x, light.y, light.z) || 1;
       const lx = light.x / llen, ly = light.y / llen, lz = light.z / llen;
+      if (skyOn) {
+        mat4.invert(invViewProj, viewProj);
+        gl.useProgram(pg.sky.prog);
+        gl.uniform3fv(pg.sky.u.uHorizon, horizon);
+        gl.uniform3fv(pg.sky.u.uZenith, zenith);
+        gl.uniform3fv(pg.sky.u.uSun, sun);
+        gl.uniform3f(pg.sky.u.uLightDir, lx, ly, lz);
+        gl.uniform3f(pg.sky.u.uMoonDir, moon.x, moon.y, moon.z);
+        gl.uniform1f(pg.sky.u.uStars, stars);
+        gl.uniform1f(pg.sky.u.uTime, time);
+      }
       // Set the light back to bracket the shadowed volume
       const lightDist = shadowExtent * 1.8, lightDepth = shadowExtent * 1.5;
       LIGHT_EYE.x = shadowCenter.x + lx * lightDist;
@@ -957,10 +1104,12 @@ void main() {
       mirrorDebug.active = false;
       mirrorDebug.portal = false;
       mirrorDebug.surfaceDrawn = false;
+      culled = drawn = 0;
       updateWorld(root, null);
       traverseVisible(root, collect);
       for (const rec of activeRecords) {
         if (!rec.batch) rec.nodes.length = rec.count;
+        drawn += rec.drawCount;
         uploadInstances(rec);
       }
       gl.bindFramebuffer(gl.FRAMEBUFFER, sh.fb);
@@ -979,7 +1128,7 @@ void main() {
         } else if (prepareMirrorCamera(camera)) {
           if (settings !== QUALITY.high && mirror.frame % 2 === 0) skipMirrorPass("cadence");
           else if (!ensureMirrorProgram()) skipMirrorPass("shader-pending");
-          else renderMirrorCapture(clear, sky, ground, sun, lx, ly, lz, sh);
+          else renderMirrorCapture(clear, sky, ground, sun, lx, ly, lz, sh, lights, nLights, skyOn);
         }
       }
       gl.bindFramebuffer(gl.FRAMEBUFFER, f.scene);
@@ -998,13 +1147,16 @@ void main() {
       gl.activeTexture(gl.TEXTURE0);
       gl.bindTexture(gl.TEXTURE_2D, sh.tex);
       gl.uniform1i(pg.mesh.u.uShadow, 0);
-      drawParts("mesh", "mesh", true);
+      if (lights) gl.uniform4fv(pg.mesh.u.uLights, lights);
+      gl.uniform1i(pg.mesh.u.uLightCount, nLights);
+      drawParts("mesh", "mesh", true, true);
       drawMirrorSurface();
+      if (skyOn) drawSky(invViewProj, camera.position);
       gl.useProgram(pg.line.prog);
       gl.uniformMatrix4fv(pg.line.u.uViewProj, false, viewProj);
       gl.uniform2f(pg.line.u.uViewport, pw, ph);
       gl.disable(gl.CULL_FACE);
-      drawParts("line", "line");
+      drawParts("line", "line", false, true);
       gl.enable(gl.CULL_FACE);
       if (f.samples > 0) blit(f);
       gl.disable(gl.DEPTH_TEST);
@@ -1051,6 +1203,7 @@ void main() {
     const setQuality = (name) => {
       if (!QUALITY[name] || QUALITY[name] === settings) return;
       settings = QUALITY[name];
+      qualityName = name;
       buildShadow();
       resize();
     };
@@ -1096,10 +1249,10 @@ void main() {
       releaseUnused,
       dispose,
       get quality() {
-        return Object.keys(QUALITY).find((k) => QUALITY[k] === settings);
+        return qualityName;
       },
       get stats() {
-        return { records: records.size, active: activeRecords.length, mirrorResources: mirrorDebug.resources };
+        return { records: records.size, active: activeRecords.length, mirrorResources: mirrorDebug.resources, culled, drawn };
       },
       get mirror() {
         return mirrorDebug;

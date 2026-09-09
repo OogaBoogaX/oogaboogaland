@@ -1,7 +1,7 @@
 (() => {
   "use strict";
   const BL = window.BL = window.BL || {};
-  const { math, models, contributors, donations, qr, terrain, hubModels, caves, game: gameMod, hud: hudMod, interact: interactMod, pilot: pilotMod, fx: fxMod, crew: crewMod, pile: pileMod, crates: cratesMod } = BL;
+  const { math, models, contributors, donations, qr, terrain, hubModels, caves, daylight, game: gameMod, hud: hudMod, interact: interactMod, pilot: pilotMod, fx: fxMod, crew: crewMod, pile: pileMod, crates: cratesMod, critters: crittersMod } = BL;
   const { lerp, ease, fnv1a, mulberry32 } = math;
   const { createNode, addChild, removeChild, createCamera, addTween, stepTweens, tweenCount, traverseVisible } = BL.scene;
   const { EAT_RATE } = crewMod;
@@ -13,6 +13,10 @@
   const DEG = Math.PI / 180;
   const COARSE = window.matchMedia("(pointer: coarse)").matches;
   const yawParam = parseFloat(params.get("yaw"));
+  // Debug clock: a pinned hour and a day length in seconds
+  const DEBUG = params.has("debug");
+  const hourParam = DEBUG ? parseFloat(params.get("hour")) : NaN;
+  const daylenParam = DEBUG ? parseFloat(params.get("daylen")) : NaN;
   // Island measures, owned by terrain.js
   const MEADOW = 22, RADIUS = 30;
   const PITCH_MIN = 0.2, PITCH_MAX = 1.25, DIST_MIN = 3.5, DIST_MAX = 64;
@@ -42,8 +46,15 @@
   // Reach at which a caveman is inside a cave
   const TUNNEL_REACH = 2.2;
   const MATRIX_TYPES = 8, MATRIX_TOP = 3.62, MATRIX_RANGE = 3.45, MATRIX_GAP = 0.19, MATRIX_NEAR = 28, MATRIX_PRELOAD = 18;
-  // High-key daylight, sun from the right
-  const RENDER_OPTS = { clear: [0.36, 0.56, 0.82], sky: [0.60, 0.64, 0.74], ground: [0.34, 0.34, 0.30], sun: [0.48, 0.44, 0.38], light: { x: 0.55, y: 0.78, z: -0.25 }, shadowCenter: { x: 0, y: 0, z: 0 }, shadowExtent: 34, bloomStrength: 0.5 };
+  // Sky, light and lamps, resampled from the clock every frame
+  const RENDER_OPTS = { clear: new Float32Array(3), horizon: new Float32Array(3), zenith: new Float32Array(3), sky: new Float32Array(3), ground: new Float32Array(3), sun: new Float32Array(3), light: { x: 0.55, y: 0.78, z: -0.25 }, moon: { x: 0, y: 1, z: 0 }, stars: 0, torch: 0, day: 1, time: 0, bloomStrength: 0.5, lights: new Float32Array(64), lightCount: 0, shadowCenter: { x: 0, y: 0, z: 0 }, shadowExtent: 34 };
+  const PHASE_TOASTS = { dawn: "Dawn breaks over the island", morning: "Morning on the island", noon: "High noon", dusk: "Dusk settles over the island", night: "Night. The torches are lit.", midnight: "Midnight. The island sleeps." };
+  // Lamp colours and reach; a lamp's flame reads through node.glow
+  const LAMP = { torch: { r: 1.0, g: 0.62, b: 0.25, radius: 6, glow: 0.85, hide: false }, fire: { r: 1.0, g: 0.55, b: 0.2, radius: 9, glow: 0.9, hide: true }, lantern: { r: 1.0, g: 0.8, b: 0.45, radius: 4, glow: 0.9, hide: false } };
+  // Lamps light one after another through the dusk ramp
+  const LAMP_STAGGER = 0.12, LAMP_RAMP = 0.4, LAMP_OFF = 0.12;
+  const FIRE_DEGREES = [130, 125, 135, 120, 140, 115, 145], FIRE_RADIUS = 11.5, FIRE_SEATS = 6, FIRE_SEAT_RADIUS = 1.8;
+  const NIGHT = 0.5, FIRE_SEAT_CHANCE = 0.5;
   // Clock angle to a meadow point
   const polar = (deg, r) => ({ x: Math.sin(deg * DEG) * r, z: -Math.cos(deg * DEG) * r });
   // Clock angles where the crew builds and sleeps
@@ -63,7 +74,7 @@
   const ALTAR_HEIGHT = 0.34, ALTAR_BLOCK_WIDTH = 0.2, ALTAR_BLOCK_ARC = 0.3, ALTAR_RING_GAP = 0.02, ALTAR_MAX_BLOCKS = 512;
   // Ripen time and odds for a dropped banana
   const RIPEN = 25, TREE_CHANCE = 0.5, BUSH_CHANCE = 0.25;
-  const PROP_TIPS = { tree: "Tree · shake it", bush: "Bush · rustle it", rock: "Rock · solid", crate: "Crate · locked", barrel: "Barrel · empty", flower: "Flowers", torch: "Torch · warm", bedroll: "Somebody's bed", ladder: "Ladder · wobbly", dock: "Dock · creaky", jetpack: "Jetpack · walk an Ooga into it", gate: null };
+  const PROP_TIPS = { tree: "Tree · shake it", bush: "Bush · rustle it", rock: "Rock · solid", crate: "Crate · locked", barrel: "Barrel · empty", flower: "Flowers", torch: "Torch · warm", firepit: "Fire pit", bedroll: "Somebody's bed", ladder: "Ladder · wobbly", dock: "Dock · creaky", jetpack: "Jetpack · walk an Ooga into it", gate: null };
   const BUSH_WORDS = ["Something rustles.", "A beetle. Ooga leaves it.", "Just a bush."];
   const LEAF = models.particleGeometry("#4a8530", 0.12, 0);
   const PETALS = ["#e04a3a", "#f2c94c", "#f3efe4"].map((c) => models.particleGeometry(c, 0.09, 0));
@@ -86,14 +97,16 @@
   };
 
   // One visit's state, made in enter and dropped in leave
-  let renderer, game, world, go, lootEnabled, testBananas, root, camera, island, pathNode, altar, hud, hooks, input, pilot, fx, pile, crew, crates, presets, entering, stash, jetpack, mirrorCave, matrixCave;
+  let renderer, game, world, go, lootEnabled, testBananas, root, camera, island, pathNode, altar, hud, hooks, input, pilot, fx, pile, crew, crates, critters, clock, presets, entering, stash, jetpack, mirrorCave, matrixCave, fire;
   let hintAt = HINT_AFTER;
-  let stateTimer = 0, hintTimer = 0, meterTimer = 0, pileEdgeNow = 0, now = 0;
+  let stateTimer = 0, hintTimer = 0, meterTimer = 0, pileEdgeNow = 0, now = 0, hour = 12;
+  let phase = null;
   const placed = [];
   const targets = [];
   const claimed = [];
   const clouds = [];
-  const torches = [];
+  const lamps = [];
+  const fireSeats = [];
   const sleepers = [];
   const labels = [];
   const spots = [];
@@ -307,6 +320,63 @@
     }
     return polar(deg, r);
   };
+  // A flame that lights with the night; lit lamps also feed the point lights
+  const addLamp = (node, kind, x, y, z, light = true) => {
+    node.glow = LAMP_OFF;
+    node.flare = 0;
+    lamps.push({ node, kind, x, y, z, light, order: lamps.length, k: 0, lit: false });
+  };
+  // Light the lamps in order as the dusk ramp climbs, spark when one catches
+  const updateLamps = (dt, elapsed, spark) => {
+    const lights = RENDER_OPTS.lights;
+    let count = 0;
+    for (let i = 0; i < lamps.length; i++) {
+      const l = lamps[i], node = l.node;
+      const k = Math.min(1, Math.max(0, (RENDER_OPTS.torch - l.order * LAMP_STAGGER) / LAMP_RAMP));
+      const lit = k > 0.05;
+      if (lit && !l.lit && spark) fx.burst(l.x, l.y, l.z, 8, [SPARK], 1.3);
+      l.lit = lit;
+      l.k = k;
+      const flicker = Math.sin(elapsed * 11 + i * 2.3) * 0.15;
+      node.glow = LAMP_OFF + k * (l.kind.glow + flicker) + node.flare * 1.5;
+      if (node.flare > 0) node.flare = Math.max(0, node.flare - dt * 2);
+      // A cold fire shows no flame at all
+      if (l.kind.hide) node.visible = lit;
+      if (!lit || !l.light || count >= 8) continue;
+      const o = count++ * 8;
+      lights[o] = l.x;
+      lights[o + 1] = l.y;
+      lights[o + 2] = l.z;
+      lights[o + 3] = l.kind.radius;
+      lights[o + 4] = l.kind.r * k;
+      lights[o + 5] = l.kind.g * k;
+      lights[o + 6] = l.kind.b * k;
+    }
+    RENDER_OPTS.lightCount = count;
+  };
+  // A fire pit off the paths inside the bedroll ring, with seats around it
+  const buildFire = () => {
+    let p = null;
+    for (const deg of FIRE_DEGREES) {
+      const c = polar(deg, FIRE_RADIUS);
+      if (island.heightAt(c.x, c.z) === 0 && free(c.x, c.z, 1.6) && !nearPath(c.x, c.z, 1.8)) {
+        p = c;
+        break;
+      }
+    }
+    if (!p) throw new Error("No clear spot for the fire pit");
+    const pit = place(hubModels.firepit(), p.x, p.z, 0, 0, "firepit", 1.2);
+    const flame = createNode({ geometry: hubModels.fireFlame() });
+    addChild(pit, flame);
+    addLamp(flame, LAMP.fire, p.x, 0.6, p.z);
+    claim(p.x, p.z, 1.4);
+    for (let i = 0; i < FIRE_SEATS; i++) {
+      const a = (i + 0.5) / FIRE_SEATS * Math.PI * 2;
+      const x = p.x + Math.cos(a) * FIRE_SEAT_RADIUS, z = p.z + Math.sin(a) * FIRE_SEAT_RADIUS;
+      fireSeats.push({ x, z, ry: Math.atan2(p.x - x, p.z - z) });
+    }
+    return p;
+  };
   // Build a mouth from its slot status, +z leading out
   const buildMouth = (slot, m) => {
     const ax = Math.sin(m.ry), az = Math.cos(m.ry);
@@ -318,8 +388,8 @@
       for (const x of [-3, 3]) {
         const torch = createNode({ position: { x, y: 0, z: 1 }, geometry: hubModels.torch(), flare: 0 });
         addChild(group, torch);
-        torches.push(torch);
         const tx = m.x + ax + Math.cos(m.ry) * x, tz = m.z + az - Math.sin(m.ry) * x;
+        addLamp(torch, LAMP.torch, tx, m.floorY + 1.36, tz);
         claim(tx, tz, 0.5);
         addProp("torch", torch, tx, tz, 0.7);
       }
@@ -351,6 +421,10 @@
         ]
       });
       if (mirrorCave && mirrorCave.slot === slot) mirrorCave.sign = sign;
+      // A lantern hangs off the sign bracket; only the open cave's throws light
+      const lantern = createNode({ position: { x: halfW + 0.1, y: sign.position.y + halfH + 0.14, z: 0.52 }, geometry: hubModels.lantern() });
+      addChild(group, lantern);
+      addLamp(lantern, LAMP.lantern, x + tx * lantern.position.x, y + halfH - 0.13, z + tz * lantern.position.x, slot.status === "open");
     }
     if (VINES.includes(slot.id)) for (const x of [-1.1, 1.1]) addChild(group, createNode({ position: { x, y: 3.45, z: 0.95 }, geometry: hubModels.vine() }));
     addChild(root, group);
@@ -384,11 +458,13 @@
       }
       return true;
     };
+    // Grass is dressing: it reflows with the rest but answers no tap or Space
     const addScenery = (geometry, x, z, ry, y, kind, footprint) => {
       const reservation = claim(x, z, footprint);
       sceneryClaims.push(reservation);
-      const node = place(geometry, x, z, ry, y, kind, footprint + 0.3);
-      const owner = props[props.length - 1];
+      const quiet = kind === "grass";
+      const node = place(geometry, x, z, ry, y, quiet ? null : kind, footprint + 0.3);
+      const owner = quiet ? { kind: "prop", prop: kind, node, x, z, ripe: 0, pickRadius: 0, active: true } : props[props.length - 1];
       owner.footprint = footprint;
       owner.scenery = true;
       reservation.scenery = owner;
@@ -418,13 +494,14 @@
         n++;
       }
     };
-    cliff(40, 1.4, 3, "tree", (n) => hubModels.tree(n % 3 === 2 ? 1 : 0));
-    cliff(60, 1, 0.5, "bush", () => hubModels.bush());
-    meadow(60, 0.7, "bush", () => hubModels.bush());
+    cliff(40, 1.4, 3, "tree", (n) => hubModels.tree(n % 4 === 3 ? 3 : n % 3));
+    cliff(60, 1, 0.5, "bush", (n) => hubModels.bush(n % 3));
+    meadow(60, 0.7, "bush", (n) => hubModels.bush(n % 3));
     meadow(8, 0.9, "rock", () => hubModels.rock(0));
     meadow(10, 0.7, "crate", () => hubModels.woodCrate(), true);
     meadow(8, 0.6, "barrel", () => hubModels.barrel());
     meadow(50, 0.35, "flower", () => hubModels.flowerTuft());
+    meadow(150, 0.3, "grass", () => hubModels.grass());
   };
   const sceneryReason = (o) => {
     const clearance = island.path.debug.ringOuterRadius + SCENERY_CLEARANCE;
@@ -440,6 +517,7 @@
     if (o.active === active) return;
     o.active = active;
     o.node.visible = active;
+    if (!o.pickRadius) return;
     if (active) input.add(o.node, o, { radius: o.pickRadius });
     else input.remove(o.node);
   };
@@ -580,9 +658,29 @@
       n++;
     }
   };
+  // A seat nobody is heading for or sitting on
+  const seatTaken = (s) => {
+    for (const cave of crew.cavemen.values()) {
+      const a = cave.act;
+      if ((a.kind === "wander" || a.kind === "idle") && a.spot.x === s.x && a.spot.z === s.z) return true;
+    }
+    return false;
+  };
+  const freeSeat = () => {
+    const start = Math.floor(Math.random() * fireSeats.length);
+    for (let i = 0; i < fireSeats.length; i++) {
+      const s = fireSeats[(start + i) % fireSeats.length];
+      if (!seatTaken(s)) return s;
+    }
+    return null;
+  };
+  // By the fire at night, else anywhere on the meadow
   const wanderSpot = (out) => {
-    let s = spots[Math.floor(Math.random() * spots.length)];
-    if (s.x === out.x && s.z === out.z) s = spots[(spots.indexOf(s) + 1) % spots.length];
+    let s = RENDER_OPTS.stars > NIGHT && Math.random() < FIRE_SEAT_CHANCE ? freeSeat() : null;
+    if (!s) {
+      s = spots[Math.floor(Math.random() * spots.length)];
+      if (s.x === out.x && s.z === out.z) s = spots[(spots.indexOf(s) + 1) % spots.length];
+    }
     out.x = s.x;
     out.z = s.z;
     out.ry = s.ry;
@@ -746,6 +844,7 @@
       case "tree":
         if (!wobble(o.node, 0.1)) return;
         fx.burst(x, 2.6, z, 10, [LEAF], 1.6);
+        if (RENDER_OPTS.stars > NIGHT) critters.burst(x, z);
         if (!dropBanana(o, TREE_CHANCE)) hud.toast("Leaves. Just leaves.");
         break;
       case "bush":
@@ -773,6 +872,15 @@
       case "torch":
         o.node.flare = 1;
         fx.burst(x, w[13] + 1.4, z, 8, [SPARK], 1.3);
+        break;
+      case "firepit":
+        if (RENDER_OPTS.torch < 0.5) {
+          hud.toast("Cold ashes. Ooga waits for night.");
+          break;
+        }
+        fire.node.flare = 1;
+        fx.burst(x, 0.9, z, 10, [SPARK], 1.6);
+        hud.toast("Warm. Ooga likes.");
         break;
       case "bedroll":
         hud.toast("Somebody's bed. Ooga leaves it.");
@@ -885,8 +993,22 @@
     const seconds = game.forecast(world.level, crew.eatingCavemen().length, EAT_RATE);
     hud.setMeter(world.level, METER_CAPACITY, Number.isFinite(seconds) ? `≈ ${game.formatDuration(seconds)} left` : "stable");
   };
+  // The clock drives the sky, the lamps and who is out
+  const setPhase = (next) => {
+    const first = phase === null;
+    phase = next;
+    hud.setSubtitle(`an island of caves · ${next}`);
+    if (!first) hud.toast(PHASE_TOASTS[next]);
+  };
   const update = (dt, elapsed) => {
     now = elapsed;
+    hour = clock.read();
+    daylight.sample(hour, RENDER_OPTS);
+    RENDER_OPTS.time = elapsed;
+    updateLamps(dt, elapsed, phase !== null);
+    const next = daylight.phaseAt(hour);
+    if (next !== phase) setPhase(next);
+    critters.update(dt, elapsed, RENDER_OPTS.day, RENDER_OPTS.stars, fire.k);
     pileEdgeNow = pile.pileEdge();
     pilot.readInput(dt);
     crew.update(dt, elapsed);
@@ -895,8 +1017,8 @@
     // Pulse the prop if it still hides the jetpack
     if (stash) {
       const t = now - hintAt;
-      const phase = t > 0 ? t % HINT_EVERY : HINT_PULSE;
-      stash.node.highlight = phase < HINT_PULSE ? Math.sin(phase / HINT_PULSE * Math.PI) * HINT_MAX : 0;
+      const pulse = t > 0 ? t % HINT_EVERY : HINT_PULSE;
+      stash.node.highlight = pulse < HINT_PULSE ? Math.sin(pulse / HINT_PULSE * Math.PI) * HINT_MAX : 0;
     }
     // Turn and bob the dropped pickup
     if (jetpack) {
@@ -922,11 +1044,6 @@
         p.x += c.speed * dt;
         if (p.x > CLOUD_WRAP) p.x -= CLOUD_WRAP * 2;
       }
-    }
-    for (let i = 0; i < torches.length; i++) {
-      const t = torches[i];
-      t.glow = 0.85 + Math.sin(elapsed * 11 + i * 2.3) * 0.15 + t.flare * 1.5;
-      if (t.flare > 0) t.flare = Math.max(0, t.flare - dt * 2);
     }
     for (let i = 0; i < sleepers.length; i++) {
       const s = sleepers[i];
@@ -1010,6 +1127,8 @@
     ({ renderer, game, world, go, lootEnabled, testBananas } = ctx);
     camera = createCamera({ fov: 48, near: 0.5, far: 140 });
     root = createNode();
+    clock = daylight.createClock({ hour: hourParam, daylen: daylenParam, now: new Date() });
+    phase = null;
     island = terrain.island({ seed: SEED });
     mark("island");
     hud = hudMod.create({ roster: contributors.roster, catalog: models.SWAG, tierColors: models.TIER_COLORS, renderIcon: hudMod.renderIcon, lootEnabled });
@@ -1066,13 +1185,16 @@
       return { x, z, ry: Math.atan2(-x, -z) };
     });
     buildRim();
+    const firePos = buildFire();
+    fire = lamps[lamps.length - 1];
     scatter();
     reflowScenery();
     buildSpots();
     buildClouds();
     hideJetpack();
+    critters = crittersMod.create({ root, renderer, flowers: scenery.filter((o) => o.prop === "flower" && o.active), fire: firePos, meadowRadius: MEADOW, heightAt: island.heightAt });
     mark("props");
-    const shared = { root, input, hooks, hud, game, world, renderer, camera, overlay: ctx.overlay, overlayVisible: matrixOverlayVisible, tickerAt: TICKER_AT, buildSpots: buildSpotsList, walkIn: WALK_IN, clampDrag, viewYaw: PILE_VIEW.yaw, bedrolls, pileScale: PILE_SCALE, pileY: ALTAR_HEIGHT + 0.02, onLayout: layoutPile, onShown: () => { meterTimer = 0; }, crateRadius: () => Math.max(4.4, altar.platformRadius + 0.8), groundAt: supportAt, wanderSpot, walkable, flyable, useNear };
+    const shared = { root, input, hooks, hud, game, world, renderer, camera, overlay: ctx.overlay, overlayVisible: matrixOverlayVisible, tickerAt: TICKER_AT, buildSpots: buildSpotsList, walkIn: WALK_IN, clampDrag, viewYaw: PILE_VIEW.yaw, bedrolls, pileScale: PILE_SCALE, pileY: ALTAR_HEIGHT + 0.02, onLayout: layoutPile, onShown: () => { meterTimer = 0; }, crateRadius: () => Math.max(4.4, altar.platformRadius + 0.8), groundAt: supportAt, wanderSpot, walkable, flyable, useNear, phase: () => phase };
     fx = shared.fx = fxMod.create(shared);
     pile = shared.pile = pileMod.create(shared);
     mark("pile");
@@ -1186,6 +1308,19 @@
           viewApproach: viewMatrixApproach,
           viewInside: viewInsideMatrix
         },
+        pilot,
+        renderOpts: RENDER_OPTS,
+        lamps,
+        fireSeats,
+        get critters() {
+          return critters.stats();
+        },
+        get daylight() {
+          return { hour, phase };
+        },
+        setHour: (h, daylen = NaN) => {
+          clock = daylight.createClock({ hour: h, daylen });
+        },
         get jetpack() {
           return {
             stash, pickup: jetpack, hintAt,
@@ -1207,17 +1342,19 @@
     crates.dispose();
     pile.dispose();
     crew.dispose();
+    critters.dispose();
     fx.dispose();
     pilot.dispose();
     for (const node of targets) input.remove(node);
     for (const node of placed) removeChild(root, node);
-    targets.length = placed.length = claimed.length = scenery.length = sceneryClaims.length = clouds.length = torches.length = sleepers.length = labels.length = spots.length = openMouths.length = props.length = 0;
+    targets.length = placed.length = claimed.length = scenery.length = sceneryClaims.length = clouds.length = lamps.length = fireSeats.length = sleepers.length = labels.length = spots.length = openMouths.length = props.length = 0;
+    RENDER_OPTS.lightCount = 0;
     sceneryVisible = sceneryRadiusCulled = sceneryPathCulled = sceneryFixedCulled = sceneryReflows = 0;
     const count = input.targetCount;
     input.dispose();
     hud.dispose();
     // Drop everything but the cached island
-    pathNode = altar = hud = hooks = input = pilot = fx = pile = crew = crates = presets = stash = jetpack = mirrorCave = matrixCave = null;
+    pathNode = altar = hud = hooks = input = pilot = fx = pile = crew = crates = critters = clock = presets = stash = jetpack = mirrorCave = matrixCave = fire = null;
     hubScene.input = hubScene.debug = null;
     return { targets: count };
   };
@@ -1228,7 +1365,7 @@
     let nodes = 0;
     traverseVisible(root, () => nodes++);
     const all = (n) => 1 + n.children.reduce((sum, c) => sum + all(c), 0);
-    return { visibleNodes: nodes, allNodes: all(root), tweens: tweenCount(), targets: input.targetCount, ...fx.stats(), ...crates.stats(), ...crew.stats(), ...pile.stats() };
+    return { visibleNodes: nodes, allNodes: all(root), tweens: tweenCount(), targets: input.targetCount, ...fx.stats(), ...crates.stats(), ...crew.stats(), ...pile.stats(), ...critters.stats() };
   };
   const hubScene = {
     id: "hub", enter, update, overlay, onDonation, onKey, onLootCleared, renderOpts: RENDER_OPTS, leave, stats, liveGeometry,
