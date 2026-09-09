@@ -17,7 +17,9 @@
     let gesture = null;
     let pinchDist = 0;
     let longPressTimer = 0;
-    const lastTap = { at: -Infinity, node: null, x: 0, y: 0 };
+    const lastTap = { at: -Infinity, node: null, owner: null, x: 0, y: 0 };
+    // Every body part of one caveman is the same target, so a poke hop cannot break a double tap
+    const sameTarget = (hit) => hit ? hit.node === lastTap.node || (!!hit.owner.cave && !!lastTap.owner && hit.owner.cave === lastTap.owner.cave) : lastTap.node === null;
     const call = (name, ...args) => hooks[name] ? hooks[name](...args) : undefined;
     const add = (node, owner, { radius = 0 } = {}) => {
       targets.push({ node, owner, radius });
@@ -183,13 +185,15 @@
       } else if (g.mode === "pending" && !cancelled && performance.now() - g.at < TAP_MS) {
         const node = g.hit ? g.hit.node : null;
         const now = performance.now();
-        if (now - lastTap.at < DOUBLE_MS && lastTap.node === node && Math.hypot(p.x - lastTap.x, p.y - lastTap.y) < DOUBLE_PX) {
+        if (now - lastTap.at < DOUBLE_MS && sameTarget(g.hit) && Math.hypot(p.x - lastTap.x, p.y - lastTap.y) < DOUBLE_PX) {
           lastTap.at = -Infinity;
           lastTap.node = null;
+          lastTap.owner = null;
           call("onDoubleTap", g.hit, p);
         } else {
           lastTap.at = now;
           lastTap.node = node;
+          lastTap.owner = g.hit ? g.hit.owner : null;
           lastTap.x = p.x;
           lastTap.y = p.y;
           call("onTap", g.hit, p);

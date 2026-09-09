@@ -344,10 +344,32 @@
       .map(([hx, hy]) => box({ w: 0.03, h: 0.03, d: 0.008, color: "#0f1113", offset: { x: hx, y: 0.1 + hy, z: 0.463 } }));
     return merge(hood, snout, filter, ...holes, lens(-0.12), lens(0.12), tube(-0.21), tube(0.21), ring({ r: 0.315, thickness: 0.02, y: 0.4, segments: 14, color: trim }));
   });
+  const STATUE_LIGHT = hexToRgb("#5e4022");
+  const STATUE_DARK = hexToRgb("#37240f");
+  const STATUE_BEARD = hexToRgb("#8d6a3c");
+  const STATUE_EYES = { 21: 1 };
+  // Two carved wings rising from the shoulder blades, feathers as bands, tips above the crown
+  const wingVoxels = () => {
+    const v = makeVox();
+    const feather = (x, y) => (y - Math.floor(Math.abs(x) * 0.6)) % 3 ? 0 : 1;
+    for (let i = 0; i < 10; i++) {
+      const bottom = 3 + Math.round(i * 1.4);
+      const top = Math.min(20, 9 + Math.round(i * 1.5));
+      for (const side of [-1, 1]) v.fill(side * (2 + i), side * (2 + i), bottom, top, i < 3 ? -4 : -5, -4, feather);
+    }
+    return v;
+  };
+  // A deck slung across the back, wheels out
+  const skateboardGeometry = (h) => merge(
+    box({ w: 0.22 * h, h: 0.8 * h, d: 0.03 * h, color: "#7cc242" }),
+    box({ w: 0.2 * h, h: 0.08 * h, d: 0.03 * h, color: "#f7931a", offset: { z: -0.006 * h } }),
+    ...[-0.28, 0.28].map((y) => box({ w: 0.2 * h, h: 0.03 * h, d: 0.045 * h, color: "#8a8a8a", offset: { y: y * h, z: -0.03 * h } })),
+    ...[-0.28, 0.28].flatMap((y) => [-0.085, 0.085].map((x) => box({ w: 0.06 * h, h: 0.06 * h, d: 0.05 * h, color: "#1a1a1a", offset: { x: x * h, y: y * h, z: -0.07 * h } })))
+  );
   const caveman = (traits) => {
     const { skin, hair, height: h, belly, rand } = traits;
     const u = h / 16;
-    const P = { skin: 0, skinDk: 1, hair: 2, hairDk: 3, fur: 4, spot: 5, white: 6, black: 7, nose: 8, stubble: 9, wood: 10, stone: 11, stoneDk: 12, apple: 13, appleDk: 14, leaf: 15 };
+    const P = { skin: 0, skinDk: 1, hair: 2, hairDk: 3, fur: 4, spot: 5, white: 6, black: 7, nose: 8, stubble: 9, wood: 10, stone: 11, stoneDk: 12, apple: 13, appleDk: 14, leaf: 15, knit: 16, knitDk: 17, pom: 18, lens: 19, btc: 20, glow: 21 };
     const palette = [
       shade(skin, 1),
       shade(skin, 0.9),
@@ -364,8 +386,20 @@
       hexToRgb("#565656"),
       hexToRgb("#c8342a"),
       hexToRgb("#8f231b"),
-      hexToRgb("#4f8a3d")
+      hexToRgb("#4f8a3d"),
+      hexToRgb("#8cc63f"),
+      hexToRgb("#6faa2f"),
+      hexToRgb("#a9d94c"),
+      hexToRgb("#3f9c96"),
+      hexToRgb("#f7931a"),
+      hexToRgb("#ffb428")
     ];
+    if (traits.statue) {
+      // Carved from one block: every body colour becomes stone, light or dark
+      for (const i of [P.skin, P.hair, P.fur, P.white, P.nose]) palette[i] = STATUE_LIGHT;
+      for (const i of [P.skinDk, P.hairDk, P.spot, P.black]) palette[i] = STATUE_DARK;
+      palette[P.stubble] = STATUE_BEARD;
+    }
     const jit = (base, dark, p) => () => rand() < p ? dark : base;
     const skinJ = jit(P.skin, P.skinDk, 0.08);
     const hairJ = jit(P.hair, P.hairDk, 0.12);
@@ -380,7 +414,7 @@
         if (v.get(nx, y, z) === P.fur) v.set(nx, y, z, P.spot);
       }
     };
-    const vg = (v, origin) => voxelGeometry(v, { unit: u, palette, origin });
+    const vg = (v, origin, emissive) => voxelGeometry(v, { unit: u, palette, origin, emissive });
     const parts = {};
     const legH = 5 * u;
     const root = createNode({ position: { x: 0, y: legH, z: 0 } });
@@ -482,6 +516,10 @@
         // Nose, beard and mouth sit under the mask
       } else if (traits.slim) {
         v.fill(3, 3, 2, 3, 6, 6, P.nose);
+      } else if (traits.skater) {
+        // Clean-shaven under the shades: a low nose and a smirk
+        v.set(3, 1, 6, P.nose);
+        v.fill(2, 4, 0, 0, 6, 6, P.spot);
       } else {
         v.fill(0, 6, 0, 1, 5, 7, jit(P.hair, P.stubble, 0.25));
         v.fill(1, 5, -2, -1, 5, 7, (x, y) => y === -2 && rand() < 0.35 ? null : rand() < 0.15 ? P.hairDk : P.hair);
@@ -489,16 +527,50 @@
         v.set(5, 0, 7, P.white);
         v.fill(2, 4, 2, 3, 6, 7, jit(traits.apple ? P.appleDk : P.nose, traits.apple ? P.apple : P.skin, 0.25));
       }
-      if (!traits.gasMask) v.fill(0, 6, 4, 4, 6, 6, hairJ);
-      const hairy = !traits.bald && !traits.apple && !traits.gasMask;
+      if (!traits.gasMask && !traits.skater) v.fill(0, 6, 4, 4, 6, 6, hairJ);
+      const hairy = !traits.bald && !traits.apple && !traits.gasMask && !traits.statue && !traits.skater;
       if (hairy) {
         v.fill(-1, 7, 6, 8, -1, 6, hairJ);
         v.fill(-1, 7, traits.slim ? -5 : -2, 5, -2, -1, hairJ);
         v.fill(-1, -1, traits.slim ? -3 : 2, 5, -1, 4, hairJ);
         v.fill(7, 7, traits.slim ? -3 : 2, 5, -1, 4, hairJ);
       }
+      if (traits.statue) {
+        // The Anunnaki: a banded horned crown and a long curled beard down the chest
+        const curl = (x, y) => y % 2 ? P.hairDk : P.stubble;
+        v.fill(0, 6, 0, 1, 5, 7, curl);
+        v.fill(0, 6, -2, -1, 5, 8, curl);
+        v.fill(1, 5, -5, -3, 7, 8, curl);
+        v.fill(2, 4, -7, -6, 7, 8, curl);
+        v.fill(-1, 7, 6, 6, -1, 6, P.hairDk);
+        v.fill(0, 6, 7, 8, 0, 5, P.hair);
+        v.fill(-1, 7, 9, 9, -1, 6, P.hairDk);
+        v.fill(1, 5, 10, 11, 1, 4, P.hair);
+        v.fill(0, 6, 12, 12, 0, 5, P.hairDk);
+        v.fill(2, 4, 13, 13, 2, 3, P.hair);
+      }
+      if (traits.skater) {
+        // A slouched green beanie over dreads, shades in front of the eyes
+        const rib = (x, y, z) => (x + z) % 2 ? P.knitDk : P.knit;
+        v.fill(-1, 7, 4, 8, -1, 6, rib);
+        v.fill(-1, 5, 9, 9, 0, 5, rib);
+        v.fill(-2, 3, 10, 10, 1, 4, rib);
+        v.fill(-3, 0, 11, 12, 1, 3, jit(P.pom, P.knit, 0.2));
+        v.fill(-2, -1, 13, 13, 2, 2, P.pom);
+        for (const [bx, by] of [[3, 8], [4, 8], [3, 7], [5, 7], [3, 6], [4, 6], [3, 5], [5, 5], [3, 4], [4, 4]]) v.set(bx, by, 6, P.btc);
+        for (const z of [-1, 1, 3]) {
+          v.fill(-1, -1, -2, 3, z, z, hairJ);
+          v.fill(7, 7, -2, 3, z, z, hairJ);
+        }
+        for (const x of [0, 2, 4, 6]) v.fill(x, x, -3, 3, -1, -1, hairJ);
+        v.fill(0, 6, 3, 3, 6, 6, P.black);
+        v.fill(0, 1, 2, 3, 6, 6, P.lens);
+        v.fill(5, 6, 2, 3, 6, 6, P.lens);
+        v.fill(-1, -1, 3, 3, 4, 6, P.black);
+        v.fill(7, 7, 3, 3, 4, 6, P.black);
+      }
       for (const [k, c] of [...v.map]) {
-        if (c !== P.hair && c !== P.hairDk) continue;
+        if (traits.statue || c !== P.hair && c !== P.hairDk) continue;
         const [x, y, z] = k.split(",").map(Number);
         const exposed = !v.has(x + 1, y, z) || !v.has(x - 1, y, z) || !v.has(x, y, z + 1) || !v.has(x, y, z - 1) || !v.has(x, y + 1, z);
         if (exposed && rand() < 0.07) v.del(x, y, z);
@@ -514,6 +586,8 @@
       }
       v.set(1, 2, 5, P.black);
       v.set(5, 2, 5, P.black);
+      // The statue's eyes burn
+      if (traits.statue) for (const [x, y] of eyeCells) v.set(x, y, 5, P.glow);
       if (traits.symmetricTusks) {
         // Keep w-s-bitcoin's tusks and the stubble beside them as a clean mirror pair.
         for (let x = 0; x <= 6; x++) {
@@ -532,18 +606,20 @@
       }
     }
     const headOrigin = { x: -3.5 * u, y: 0, z: -3 * u };
-    const headOpen = vg(headVox, headOrigin);
+    const headOpen = vg(headVox, headOrigin, traits.statue ? STATUE_EYES : undefined);
     const closedVox = makeVox();
     for (const [k, c] of headVox.map) closedVox.map.set(k, c);
     for (const [x, y] of eyeCells) closedVox.set(x, y, 5, y === 2 ? P.skinDk : P.skin);
     const headClosed = vg(closedVox, headOrigin);
     parts.head = createNode({ position: { x: 0, y: 0.5 * h, z: 0.02 * h }, geometry: headOpen });
-    const hatY = traits.gasMask ? 0.66 * h : (traits.bald ? 6 : traits.apple ? 8 : 9) * u;
+    const hatY = traits.gasMask ? 0.66 * h : (traits.bald ? 6 : traits.apple ? 8 : traits.statue ? 14 : traits.skater ? 13 : 9) * u;
     parts.hat = createNode({ position: { x: 0, y: hatY, z: 0 }, scale: { x: h, y: h, z: h }, visible: false });
     parts.face = createNode({ position: { x: 0, y: 0, z: 0 }, scale: { x: h, y: h, z: h }, visible: false });
     addChild(parts.head, parts.hat, parts.face);
     if (traits.gasMask) addChild(parts.head, createNode({ scale: { x: h, y: h, z: h }, geometry: gasMaskGeometry() }));
     addChild(root, parts.legL, parts.legR, parts.torso, parts.armL, parts.armR, parts.head);
+    if (traits.statue) addChild(root, createNode({ geometry: vg(wingVoxels(), { x: -0.5 * u, y: 0, z: 0 }) }));
+    if (traits.skater) addChild(root, createNode({ position: { x: 0, y: 0.28 * h, z: -0.35 * h }, rotation: { x: 0, y: 0, z: 0.4 }, geometry: skateboardGeometry(h) }));
     return { root, parts, traits, headOffset: 1.1 * h, headOpen, headClosed, skins };
   };
   // A real die, opposite faces summing to seven
