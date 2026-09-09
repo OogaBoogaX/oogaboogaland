@@ -42,7 +42,7 @@
     ctx.globalAlpha = 1;
   };
   // Particles, bubbles, sleep marks and the ticker
-  const create = ({ root, renderer, overlay, tickerAt }) => {
+  const create = ({ root, renderer, overlay, tickerAt, overlayVisible = null }) => {
     const overlayCtx = overlay.getContext("2d");
     const particles = [];
     const particlePool = [];
@@ -124,7 +124,8 @@
       ticker = { text, t: 0, dur };
     };
     let overlayW = 0, overlayH = 0, overlayDpr = 1;
-    const project = (x, y, z) => renderer.project(x, y, z, SCREEN);
+    const projectRaw = (x, y, z) => renderer.project(x, y, z, SCREEN);
+    const project = (x, y, z) => !overlayVisible || overlayVisible(x, y, z) ? projectRaw(x, y, z) : null;
     // drawExtra paints between the bubbles and the ticker
     const drawOverlay = (dt, drawExtra) => {
       const dpr = Math.min(window.devicePixelRatio || 1, 2);
@@ -173,7 +174,7 @@
         ticker.t += dt;
         if (ticker.t > ticker.dur) ticker = null;
         else {
-          const pos = project(tickerAt.x, tickerAt.y, tickerAt.z);
+          const pos = projectRaw(tickerAt.x, tickerAt.y, tickerAt.z);
           if (pos) {
             const fade = Math.min(1, ticker.t / 0.3, (ticker.dur - ticker.t) / 0.5);
             ctx.globalAlpha = fade;

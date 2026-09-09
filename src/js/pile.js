@@ -26,6 +26,13 @@
   const SURFACE_OUTER_RADIUS = 1;
   const DROP_POOL_SIZE = 96;
   const DROP_RATE = 72;
+  const DROP_DURATION_MIN = 1.05;
+  const DROP_DURATION_RANGE = 0.3;
+  const DROP_DURATION_MAX = DROP_DURATION_MIN + DROP_DURATION_RANGE;
+  const BACKLOG_SECONDS = 10;
+  const FRAME_TIME_MAX = 0.1;
+  const DROP_THROUGHPUT = Math.min(DROP_RATE, DROP_POOL_SIZE / DROP_DURATION_MAX);
+  const BACKLOG_VISUAL_CAPACITY = Math.max(1, Math.floor((BACKLOG_SECONDS - DROP_DURATION_MAX - FRAME_TIME_MAX) * DROP_THROUGHPUT));
   const MAX_WEBGL_TILES = 65536;
   const MAX_CANVAS_TILES = 512;
   const footprintFor = (count, scale = 0.45) => scale * (count > DISK_BANANAS ? Math.cbrt(count / DISK_BANANAS) : 1);
@@ -160,6 +167,7 @@
         token: 0,
         note: null,
         moving: false,
+        bananaValue: 0,
         restScale: BANANA_SCALE,
         tween: null
       });
@@ -167,7 +175,23 @@
     }
     let shown = 0, counted = 0;
     let footprint = SCALE, layoutCount = -1, shellWanted = 0;
-    let deliveries = 0, pendingDrops = 0, dropsStarted = 0, dropsLanded = 0, launchCredit = 0;
+    const delivery = world.delivery || (world.delivery = {
+      pendingValue: 0,
+      pendingTokens: 0,
+      airborneValue: 0,
+      airborneCount: 0,
+      activeTime: 0,
+      drainDeadline: 0,
+      totalAcceptedValue: 0,
+      totalLandedValue: 0,
+      visualDropsStarted: 0,
+      visualDropsLanded: 0,
+      visualDropsCanceled: 0,
+      replanCount: 0,
+      launchCredit: 0,
+      maxConcurrentDrops: 0,
+      lastDrainSeconds: 0
+    });
     let hatchOpen = 0, hatchTarget = 0;
     const pileEdge = () => footprint;
     // Park a banana at its resting spot
@@ -349,7 +373,18 @@
       keepAbovePlatform(landing.pos, landing.rot, BANANA_SCALE, bananaGeometry);
       return landing;
     };
-    const dropIn = (slot) => {
+    const outstandingValue = () => delivery.pendingValue + delivery.airborneValue;
+    const visualCapacityForDeadline = () => {
+      const remaining = Math.max(0, delivery.drainDeadline - delivery.activeTime);
+      const occupiedDelay = delivery.airborneCount ? DROP_DURATION_MAX : 0;
+      const launchCapacity = Math.max(0, remaining - DROP_DURATION_MAX - FRAME_TIME_MAX - occupiedDelay) * DROP_THROUGHPUT;
+      return Math.max(1, Math.min(BACKLOG_VISUAL_CAPACITY, Math.floor(launchCapacity + 1e-9)));
+    };
+    const replanPending = () => {
+      delivery.pendingTokens = Math.min(delivery.pendingValue, visualCapacityForDeadline());
+      delivery.replanCount++;
+    };
+    const dropIn = (slot, bananaValue) => {
       const token = ++slot.token;
       const landing = chooseLanding(slot);
       const { pos, rot } = landing;
@@ -361,10 +396,13 @@
       const spinZ = (Math.random() - 0.5) * 12;
       slot.note = null;
       slot.moving = true;
-      deliveries++;
-      dropsStarted++;
+      slot.bananaValue = bananaValue;
+      delivery.airborneValue += bananaValue;
+      delivery.airborneCount++;
+      delivery.visualDropsStarted++;
+      delivery.maxConcurrentDrops = Math.max(delivery.maxConcurrentDrops, delivery.airborneCount);
       slot.tween = addTween({
-        dur: 1.05 + Math.random() * 0.3,
+        dur: DROP_DURATION_MIN + Math.random() * DROP_DURATION_RANGE,
         ease: ease.outBounce,
         update: (k) => {
           if (slot.token !== token) return;
@@ -376,42 +414,73 @@
         },
         done: () => {
           if (slot.token !== token) return;
-          deliveries--;
-          dropsLanded++;
+          delivery.airborneValue -= slot.bananaValue;
+          delivery.airborneCount--;
+          delivery.visualDropsLanded++;
+          delivery.totalLandedValue += slot.bananaValue;
           slot.moving = false;
           slot.node.visible = false;
           slot.tween = null;
-          world.level += 1;
+          world.level += slot.bananaValue;
+          slot.bananaValue = 0;
           syncPile(true);
+          if (!outstandingValue()) {
+            delivery.lastDrainSeconds = delivery.activeTime - (delivery.drainDeadline - BACKLOG_SECONDS);
+            delivery.drainDeadline = 0;
+            delivery.pendingTokens = 0;
+          }
         }
       });
     };
     const pumpDrops = (dt) => {
-      if (!pendingDrops) return;
-      launchCredit = Math.min(DROP_POOL_SIZE, launchCredit + dt * DROP_RATE);
-      let budget = Math.floor(launchCredit), launched = 0;
-      for (let i = 0; i < dropSlots.length && pendingDrops && launched < budget; i++) {
+      if (!delivery.pendingValue) return;
+      if (!delivery.pendingTokens) replanPending();
+      delivery.launchCredit = Math.min(DROP_POOL_SIZE, delivery.launchCredit + dt * DROP_RATE);
+      let budget = Math.floor(delivery.launchCredit), launched = 0;
+      for (let i = 0; i < dropSlots.length && delivery.pendingValue && launched < budget; i++) {
         const slot = dropSlots[i];
         if (slot.moving) continue;
-        pendingDrops--;
-        dropIn(slot);
+        const bananaValue = Math.ceil(delivery.pendingValue / delivery.pendingTokens);
+        delivery.pendingValue -= bananaValue;
+        delivery.pendingTokens--;
+        dropIn(slot, bananaValue);
         launched++;
       }
-      launchCredit -= launched;
-      if (launched < budget) launchCredit = Math.min(1, launchCredit);
+      delivery.launchCredit -= launched;
+      if (launched < budget) delivery.launchCredit = Math.min(1, delivery.launchCredit);
     };
-    const clearDrops = () => {
-      pendingDrops = 0;
-      deliveries = 0;
-      launchCredit = 0;
+    const cancelAirborne = (restorePending) => {
       for (let i = 0; i < dropSlots.length; i++) {
         const slot = dropSlots[i];
+        if (slot.moving && restorePending) {
+          delivery.pendingValue += slot.bananaValue;
+          delivery.visualDropsCanceled++;
+        }
         if (slot.tween) slot.tween.alive = false;
         slot.token++;
         slot.moving = false;
         slot.node.visible = false;
         slot.tween = null;
+        slot.bananaValue = 0;
       }
+      delivery.airborneValue = 0;
+      delivery.airborneCount = 0;
+      if (restorePending && delivery.pendingValue) replanPending();
+    };
+    const clearDrops = () => {
+      cancelAirborne(false);
+      delivery.pendingValue = 0;
+      delivery.pendingTokens = 0;
+      delivery.drainDeadline = 0;
+      delivery.totalAcceptedValue = 0;
+      delivery.totalLandedValue = 0;
+      delivery.visualDropsStarted = 0;
+      delivery.visualDropsLanded = 0;
+      delivery.visualDropsCanceled = 0;
+      delivery.replanCount = 0;
+      delivery.launchCredit = 0;
+      delivery.maxConcurrentDrops = 0;
+      delivery.lastDrainSeconds = 0;
     };
     const syncPile = (settle = false) => {
       if (world.level > MAX_BANANAS) world.level = MAX_BANANAS;
@@ -440,10 +509,13 @@
       if (additions >= 2) ctx.crew.rush();
     };
     const deliverBananas = (amount) => {
-      const room = MAX_BANANAS - Math.floor(world.level) - pendingDrops - deliveries;
+      const room = MAX_BANANAS - Math.floor(world.level) - outstandingValue();
       const additions = Math.max(0, Math.min(room, Math.floor(Number(amount) || 0)));
       if (!additions) return 0;
-      pendingDrops += additions;
+      delivery.pendingValue += additions;
+      delivery.totalAcceptedValue += additions;
+      delivery.drainDeadline = delivery.activeTime + BACKLOG_SECONDS;
+      replanPending();
       hatchTarget = 1;
       if (additions >= 2) ctx.crew.rush();
       return additions;
@@ -456,15 +528,15 @@
       return true;
     };
     const update = (dt) => {
+      delivery.activeTime += dt;
       const target = Math.floor(world.level);
       if (target !== counted) syncPile();
       pumpDrops(dt);
-      if (deliveries === 0 && pendingDrops === 0 && hatchTarget === 1) hatchTarget = 0;
+      if (!outstandingValue() && hatchTarget === 1) hatchTarget = 0;
       hatchOpen = damp(hatchOpen, hatchTarget, 7, dt);
     };
     const dispose = () => {
-      world.level += pendingDrops + deliveries;
-      clearDrops();
+      cancelAirborne(true);
       for (const slot of pileSlots) {
         removeChild(root, slot.node);
       }
@@ -478,14 +550,50 @@
       shown = 0;
       counted = 0;
     };
-    const stats = () => ({ slots: pileSlots.length, shown: counted, rendered: shell.instanceCount, deliveries, pendingDrops, dropsStarted, dropsLanded, dropPool: dropSlots.length, dropRate: DROP_RATE });
+    const currentWeightRange = () => {
+      let min = Infinity, max = 0;
+      if (delivery.pendingTokens) {
+        min = Math.floor(delivery.pendingValue / delivery.pendingTokens);
+        max = Math.ceil(delivery.pendingValue / delivery.pendingTokens);
+      }
+      for (let i = 0; i < dropSlots.length; i++) {
+        const value = dropSlots[i].bananaValue;
+        if (!value) continue;
+        min = Math.min(min, value);
+        max = Math.max(max, value);
+      }
+      return { min: min === Infinity ? 0 : min, max };
+    };
+    const deliveryDebug = {
+      get logicalOutstandingValue() { return outstandingValue(); },
+      get pendingLogicalValue() { return delivery.pendingValue; },
+      get pendingVisualDropCount() { return delivery.pendingTokens; },
+      get airborneVisualDropCount() { return delivery.airborneCount; },
+      get airborneLogicalValue() { return delivery.airborneValue; },
+      get minDropWeight() { return currentWeightRange().min; },
+      get maxDropWeight() { return currentWeightRange().max; },
+      get visualDropsStarted() { return delivery.visualDropsStarted; },
+      get visualDropsLanded() { return delivery.visualDropsLanded; },
+      get visualDropsCanceled() { return delivery.visualDropsCanceled; },
+      get totalAcceptedValue() { return delivery.totalAcceptedValue; },
+      get totalLandedValue() { return delivery.totalLandedValue; },
+      get activeTime() { return delivery.activeTime; },
+      get drainDeadline() { return delivery.drainDeadline; },
+      get estimatedActiveTimeRemaining() { return Math.max(0, delivery.drainDeadline - delivery.activeTime); },
+      get visualCapacity() { return BACKLOG_VISUAL_CAPACITY; },
+      get replanCount() { return delivery.replanCount; },
+      get maxConcurrentDrops() { return delivery.maxConcurrentDrops; },
+      get lastDrainSeconds() { return delivery.lastDrainSeconds; },
+      enqueue: deliverBananas
+    };
+    const stats = () => ({ slots: pileSlots.length, shown: counted, rendered: shell.instanceCount, deliveries: delivery.airborneValue, pendingDrops: delivery.pendingValue, dropsStarted: delivery.visualDropsStarted, dropsLanded: delivery.visualDropsLanded, landedBananaValue: delivery.totalLandedValue, dropPool: dropSlots.length, dropRate: DROP_RATE });
     const setLevel = (level) => {
       clearDrops();
       world.level = Math.max(0, Math.min(MAX_BANANAS, Number(level) || 0));
       syncPile(true);
     };
     return {
-      slots: pileSlots, drops: dropSlots, core, shell, syncPile, deliverBananas, pileEdge, eatFromPile, update, dispose, stats, setLevel,
+      slots: pileSlots, drops: dropSlots, core, shell, syncPile, deliverBananas, pileEdge, eatFromPile, update, dispose, stats, setLevel, delivery: deliveryDebug,
       get shown() {
         return counted;
       },
@@ -499,9 +607,9 @@
         return hatchOpen;
       },
       get inMotion() {
-        return deliveries > 0 || pendingDrops > 0;
+        return outstandingValue() > 0;
       }
     };
   };
-  BL.pile = { create, DROP_HEIGHT, BANANA_DROP_HEIGHT, DROP_POOL_SIZE, DROP_RATE, MAX_BANANAS, DISK_BANANAS, PACKING_HEIGHT, footprintFor, visualFootprintFor, MAX_WEBGL_TILES, MAX_CANVAS_TILES };
+  BL.pile = { create, DROP_HEIGHT, BANANA_DROP_HEIGHT, DROP_POOL_SIZE, DROP_RATE, DROP_DURATION_MAX, BACKLOG_SECONDS, BACKLOG_VISUAL_CAPACITY, MAX_BANANAS, DISK_BANANAS, PACKING_HEIGHT, footprintFor, visualFootprintFor, MAX_WEBGL_TILES, MAX_CANVAS_TILES };
 })();
