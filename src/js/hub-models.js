@@ -167,7 +167,10 @@
     v.fill(-6, -6, 0, 5, 0, 1, stone);
     v.fill(5, 5, 0, 5, 0, 1, stone);
     v.fill(-5, 4, 6, 6, 0, 1, light);
-    return voxGeo(v, { unit: VOX, palette: CLIFF, origin: { x: 0, y: 0, z: -VOX } });
+    const geo = voxGeo(v, { unit: VOX, palette: CLIFF, origin: { x: 0, y: 0, z: -VOX } });
+    geo.jambCenterX = 2.75;
+    geo.frontZ = 0.5;
+    return geo;
   });
   const mirrorPanel = cached(() => {
     const geo = {
@@ -178,6 +181,12 @@
     };
     return geo;
   });
+  const matrixRimLiner = cached(() => ({
+    verts: [-2.5, 2.995, 0.46, 2.5, 2.995, 0.46, 2.5, 2.995, 1.005, -2.5, 2.995, 1.005],
+    faces: [{ i: [0, 1, 2, 3], color: hexToRgb("#000000"), emissive: 0 }],
+    lines: [],
+    castShadow: false
+  }));
   const MATRIX_GLYPHS = [
     ["0110", "1001", "1111", "1001", "1001", "0000"],
     ["1110", "1001", "1110", "1001", "1110", "0000"],
@@ -203,6 +212,7 @@
   // A black-lined vestibule and room that stop just behind c1's mirror plane.
   const matrixChamber = cached(() => {
     const portalBack = 0.48, vestibuleBack = -2.5;
+    const headerHalfWidth = 2.9, headerTop = 3.9;
     const vestibuleDepth = portalBack - vestibuleBack;
     const vestibuleCenter = (portalBack + vestibuleBack) * 0.5;
     const roomBack = -6.2;
@@ -211,8 +221,14 @@
       geo.faces.shift();
       return geo;
     };
+    // Inward-facing sheets hide stone from the room without recoloring its exterior.
     const header = {
-      verts: [-2.9, 3, portalBack, -2.9, 3.9, portalBack, 2.9, 3.9, portalBack, 2.9, 3, portalBack],
+      verts: [-headerHalfWidth, 3, portalBack, -headerHalfWidth, headerTop, portalBack, headerHalfWidth, headerTop, portalBack, headerHalfWidth, 3, portalBack],
+      faces: [{ i: [0, 1, 2, 3], color: hexToRgb("#000000"), emissive: 0 }],
+      lines: []
+    };
+    const transitionHeader = {
+      verts: [-headerHalfWidth, 3, -2.485, -headerHalfWidth, headerTop, -2.485, headerHalfWidth, headerTop, -2.485, headerHalfWidth, 3, -2.485],
       faces: [{ i: [0, 1, 2, 3], color: hexToRgb("#000000"), emissive: 0 }],
       lines: []
     };
@@ -225,6 +241,7 @@
       openFrontBox({ w: 0.04, h: 3, d: vestibuleDepth, color: "#000000", offset: { x: -2.49, y: 1.5, z: vestibuleCenter } }),
       openFrontBox({ w: 0.04, h: 3, d: vestibuleDepth, color: "#000000", offset: { x: 2.49, y: 1.5, z: vestibuleCenter } }),
       header,
+      transitionHeader,
       box({ w: 0.4, h: 3.8, d: 0.03, color: "#000000", offset: { x: -2.7, y: 1.9, z: -2.485 } }),
       box({ w: 0.4, h: 3.8, d: 0.03, color: "#000000", offset: { x: 2.7, y: 1.9, z: -2.485 } }),
       box({ w: 5.8, h: 3.8, d: 0.14, color: "#000000", offset: { y: 1.9, z: -6.2 } })
@@ -233,7 +250,11 @@
     geo.frontZ = portalBack;
     geo.claddingFrontZ = portalBack;
     geo.headerMinY = 3;
+    geo.headerMaxY = headerTop;
+    geo.headerHalfWidth = headerHalfWidth;
     geo.transitionCladdingZ = -2.485;
+    geo.transitionHeaderMinY = 3;
+    geo.transitionHeaderMaxY = headerTop;
     return geo;
   });
   // Gateway arch over the pass, trail along z
@@ -389,6 +410,8 @@
       box({ w: 0.26, h: 0.26, d: 0.26, color: "#ffb13b", emissive: 1, offset: { y: 1.36 } })
     );
     geo.castShadow = false;
+    geo.backZ = -0.13;
+    geo.flameY = 1.36;
     return geo;
   });
   // A tuft of leaning blades, no shadow
@@ -472,5 +495,5 @@
     box({ w: 4, h: 0.14, d: 0.16, color: WOOD_DK, offset: { x: 2, y: -0.17, z: 0.92 } }),
     ...[[0.5, -0.8], [0.5, 0.8], [3.5, -0.8], [3.5, 0.8]].map(([x, z]) => box({ w: 0.2, h: 2.2, d: 0.2, color: "#6b4a2b", offset: { x, y: -1.2, z } }))
   ));
-  BL.hubModels = { jetpack, jetFlame, caveMouthRim, mirrorPanel, matrixGlyph, matrixChamber, caveSign, CAVE_SIGN_WIDTH, CAVE_SIGN_HEIGHT, gate, caveShelves, bedroll, tree, bush, rock, altarSlab, altarBlock, woodCrate, barrel, flowerTuft, torch, grass, lantern, firepit, fireFlame, butterfly, firefly, ember, vine, cloud, ladder, dock, TREE_HEIGHT };
+  BL.hubModels = { jetpack, jetFlame, caveMouthRim, mirrorPanel, matrixRimLiner, matrixGlyph, matrixChamber, caveSign, CAVE_SIGN_WIDTH, CAVE_SIGN_HEIGHT, gate, caveShelves, bedroll, tree, bush, rock, altarSlab, altarBlock, woodCrate, barrel, flowerTuft, torch, grass, lantern, firepit, fireFlame, butterfly, firefly, ember, vine, cloud, ladder, dock, TREE_HEIGHT };
 })();

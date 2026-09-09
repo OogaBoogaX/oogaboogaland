@@ -61,9 +61,9 @@ every scene has registered on `BL.scenes`.
 |---|---|---|
 | `qr.js` | `BL.qr` | QR code for the donation link |
 | `math.js` | `BL.math` | `mat4` (with `invert`), easing, damping, hashing, `rayFromView` |
-| `daylight.js` | `BL.daylight` | the clock and the day: six phases, keyframed sky, light, moon, stars, torch and day fractions, `sample`, `createClock` |
+| `daylight.js` | `BL.daylight` | the local solar clock: continuous sun/moon directions, sidereal star frame, altitude-driven sky/light factors, six semantic phases, `sample`, `createClock` |
 | `scene.js` | `BL.scene` | nodes, world transforms, camera, bounds cache, tweens |
-| `gl-renderer.js` | `BL.glRenderer` | WebGL2: instancing, frustum culling, shadow map, sky pass with sun, moon and stars, up to four point lights, bloom, MSAA, quality tiers, pixel budget |
+| `gl-renderer.js` | `BL.glRenderer` | WebGL2: instancing, frustum culling, shadow map, sky pass with sun, moon and stars, seven bounded point lights, bloom, MSAA, quality tiers, pixel budget |
 | `canvas-renderer.js` | `BL.canvasRenderer` | Canvas 2D fallback, same API; also draws locker icons |
 | `models.js` | `BL.models` | procedural geometry: room, cavemen, props, crates, `SWAG` catalog |
 | `terrain.js` | `BL.terrain` | voxel grid, greedy meshing, the island: `heightAt`, `surfaceAt`, `onLand`, `isPath`, mouths |
@@ -202,7 +202,7 @@ with terrain passes its `heightAt`.
 
 **A lamp in the hub.** Build a geometry whose flame faces are the only emissive ones, then
 `addLamp(node, LAMP.kind, x, y, z)` in `scene-hub.js`: `node.glow` follows the dusk ramp in
-stagger order and lit lamps fill the point-light array (four reach the shader). A critter
+stagger order and lit lamps fill the fixed point-light array (seven reach the shader). A critter
 kind is a batch in `critters.js`: fixed capacity, homes seeded by `mulberry32`, motion
 written straight into `instanceData`, population eased toward a phase- and tier-scaled target.
 
@@ -251,9 +251,11 @@ URL flags: `?debug=1` exposes `window.__ooga` with the scene, game, renderer, in
 `?scene=<id>` opens that scene (unknown ids land on the hub); `?nosim=1` silences the
 simulator; `?canvas2d=1` forces the fallback; `?yaw=` sets the starting camera angle;
 `?debug=1&bananas=` overrides the initial pile level for visual testing; `?debug=1&hour=`
-pins the clock at an hour and `?debug=1&daylen=` runs a day in that many seconds (from the
-pinned hour when both are given). `__ooga.daylight` reads `{ hour, phase }`, `__ooga.setHour(h)`
-repins it, `__ooga.renderOpts`, `lamps`, `fireSeats`, `critters` and `pilot` expose the rest. Counts clamp to
+pins the solar clock, `?debug=1&day=` selects a day of year, bounded `?debug=1&latitude=`
+changes the test latitude, and `?debug=1&daylen=` runs a day in that many seconds (from the
+pinned hour when both are given). `__ooga.daylight` exposes the bounded celestial state,
+`__ooga.setHour(h, daylen, day)` resets it, and `__ooga.renderOpts`, `lamps`, `fireSeats`,
+`critters` and `pilot` expose the rest. Counts clamp to
 `pile.MAX_BANANAS` (ten million). Loot ships off behind `LOOT_DEFAULT` in `director.js`;
 `?debug=1&loot=1` turns it on for a page, which is how the loot checks run.
 

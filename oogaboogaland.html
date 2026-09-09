@@ -5,7 +5,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta http-equiv="Content-Security-Policy"
-    content="default-src 'none'; script-src 'sha256-tsMfnv/VL/YCmoUW5pA8bGDMxkCsrPTRz4IC8pRdpb8='; style-src 'sha256-dDRjKsPXfpTqnH8VPCUSd7WihWQczKIMep/Sr+vXL+s='; img-src 'self' data:; connect-src 'none'; base-uri 'none'; form-action 'none'">
+    content="default-src 'none'; script-src 'sha256-RVUwKwndqopp/gHMFKuVbdvKQgubqbMJMsgmXx0wCKc='; style-src 'sha256-dDRjKsPXfpTqnH8VPCUSd7WihWQczKIMep/Sr+vXL+s='; img-src 'self' data:; connect-src 'none'; base-uri 'none'; form-action 'none'">
   <meta name="referrer" content="no-referrer">
   <meta name="color-scheme" content="dark">
   <meta name="theme-color" content="#0a0a0b">
@@ -1816,98 +1816,198 @@ select {
 (() => {
   "use strict";
   const BL = window.BL = window.BL || {};
-  const { lerp } = BL.math;
+  const { clamp, lerp } = BL.math;
   const PHASES = ["dawn", "morning", "noon", "dusk", "night", "midnight"];
-  // Phase starts in hours; midnight wraps past 23
   const PHASE_STARTS = [5, 7, 11, 16, 19, 23];
+  const ISLAND_LATITUDE_DEG = 20;
+  const AXIAL_TILT_DEG = 23.44;
+  const DEG = Math.PI / 180;
+  const RAD = 180 / Math.PI;
+  const TAU = Math.PI * 2;
+  const YEAR_DAYS = 365.2422;
+  const SIDEREAL_RATE = 1.00273790935;
+  const NIGHT_CLEAR = [0.07, 0.08, 0.16];
+  const NIGHT_HORIZON = [0.15, 0.17, 0.32];
+  const NIGHT_ZENITH = [0.05, 0.06, 0.14];
+  // Keep the backdrop dark, but lift hemispheric fill so silhouettes retain readable faces.
+  const NIGHT_SKY = [0.30, 0.33, 0.46];
+  const NIGHT_GROUND = [0.23, 0.24, 0.30];
+  const NIGHT_SUN = [0.22, 0.26, 0.40];
+  const DAY_CLEAR = [0.36, 0.56, 0.82];
+  const DAY_HORIZON = [0.70, 0.82, 0.94];
+  const DAY_ZENITH = [0.24, 0.46, 0.84];
+  const DAY_SKY = [0.60, 0.64, 0.74];
+  const DAY_GROUND = [0.34, 0.34, 0.30];
+  const DAY_SUN = [0.48, 0.44, 0.38];
+  const TWILIGHT_CLEAR = [0.34, 0.25, 0.42];
+  const TWILIGHT_HORIZON = [1.00, 0.53, 0.25];
+  const TWILIGHT_ZENITH = [0.18, 0.20, 0.48];
+  const TWILIGHT_SKY = [0.50, 0.45, 0.58];
+  const TWILIGHT_GROUND = [0.29, 0.25, 0.28];
+  const TWILIGHT_SUN = [0.78, 0.42, 0.23];
+  const MOON_LIGHT = [0.32, 0.37, 0.54];
+  const SCRATCH_SUN = { x: 0, y: 1, z: 0 };
+  const SCRATCH_DIRECT = new Float32Array(3);
+
   const phaseAt = (hour) => {
     let phase = PHASES[5];
     for (let i = 0; i < 6; i++) if (hour >= PHASE_STARTS[i]) phase = PHASES[i];
     return phase;
   };
-  const vec = (v) => ({ x: v[0], y: v[1], z: v[2] });
-  const key = (hour, clear, horizon, zenith, sky, ground, sun, light, moon, bloom, stars, torch, day) =>
-    ({ hour, clear, horizon, zenith, sky, ground, sun, light: vec(light), moon: vec(moon), bloom, stars, torch, day });
-  // Today's hub look, held through the middle of the day
-  const NOON = [[0.36, 0.56, 0.82], [0.70, 0.82, 0.94], [0.24, 0.46, 0.84], [0.60, 0.64, 0.74], [0.34, 0.34, 0.30], [0.48, 0.44, 0.38]];
-  const NIGHT_SUN = [0.26, 0.30, 0.44];
-  // Sorted by hour, cyclic; the sun rises in the east (+x) and the moon arcs over the south (-z);
-  // the light swings between sun and moon only under full stars, when the disc is invisible
-  const KEYFRAMES = [
-    key(0, [0.07, 0.08, 0.16], [0.14, 0.16, 0.30], [0.04, 0.05, 0.13], [0.17, 0.20, 0.34], [0.14, 0.14, 0.19], [0.22, 0.26, 0.40], [-0.05, 0.80, -0.55], [-0.05, 0.80, -0.55], 0.9, 1, 1, 0),
-    key(4.5, [0.07, 0.08, 0.16], [0.16, 0.17, 0.32], [0.05, 0.06, 0.14], [0.18, 0.21, 0.35], [0.14, 0.14, 0.19], NIGHT_SUN, [-0.45, 0.55, -0.55], [-0.45, 0.55, -0.55], 0.88, 1, 1, 0),
-    key(5.1, [0.10, 0.10, 0.20], [0.28, 0.20, 0.32], [0.06, 0.07, 0.18], [0.15, 0.16, 0.28], [0.11, 0.11, 0.14], [0.22, 0.21, 0.27], [0.90, 0.25, -0.30], [-0.52, 0.48, -0.54], 0.85, 1, 1, 0),
-    key(5.7, [0.22, 0.20, 0.34], [0.60, 0.36, 0.40], [0.10, 0.12, 0.30], [0.22, 0.22, 0.36], [0.14, 0.13, 0.16], [0.34, 0.24, 0.26], [0.90, 0.25, -0.30], [-0.60, 0.40, -0.52], 0.8, 0.6, 1, 0),
-    key(6.1, [0.46, 0.40, 0.52], [0.96, 0.60, 0.42], [0.24, 0.30, 0.56], [0.38, 0.38, 0.52], [0.22, 0.19, 0.20], [0.70, 0.46, 0.30], [0.92, 0.27, -0.28], [-0.70, 0.30, -0.50], 0.68, 0.25, 0, 0),
-    key(6.5, [0.54, 0.52, 0.66], [0.92, 0.70, 0.52], [0.28, 0.40, 0.68], [0.46, 0.48, 0.62], [0.26, 0.24, 0.23], [0.64, 0.50, 0.36], [0.90, 0.32, -0.28], [-0.78, 0.25, -0.48], 0.6, 0.05, 0, 1),
-    key(8, [0.48, 0.62, 0.84], [0.82, 0.86, 0.92], [0.30, 0.52, 0.86], [0.58, 0.62, 0.74], [0.32, 0.32, 0.29], [0.56, 0.48, 0.38], [0.80, 0.50, -0.25], [-0.85, 0.20, -0.45], 0.52, 0, 0, 1),
-    key(10.5, ...NOON, [0.55, 0.78, -0.25], [-0.90, 0.10, -0.40], 0.5, 0, 0, 1),
-    key(14.5, ...NOON, [0.55, 0.78, -0.25], [0.90, 0.10, -0.40], 0.5, 0, 0, 1),
-    key(16, ...NOON, [-0.08, 0.62, -0.78], [0.86, 0.18, -0.45], 0.5, 0, 0, 1),
-    key(17.2, [0.60, 0.50, 0.56], [0.98, 0.72, 0.42], [0.34, 0.38, 0.66], [0.54, 0.48, 0.58], [0.30, 0.26, 0.24], [0.66, 0.46, 0.30], [-0.80, 0.42, -0.25], [0.80, 0.30, -0.50], 0.56, 0, 0, 1),
-    key(17.6, [0.56, 0.36, 0.44], [1.00, 0.50, 0.22], [0.32, 0.24, 0.54], [0.44, 0.36, 0.50], [0.26, 0.21, 0.22], [0.74, 0.40, 0.22], [-0.90, 0.30, -0.22], [0.70, 0.40, -0.55], 0.62, 0.1, 0, 0),
-    key(18, [0.30, 0.20, 0.36], [0.78, 0.36, 0.30], [0.14, 0.12, 0.36], [0.28, 0.24, 0.40], [0.18, 0.15, 0.18], [0.36, 0.22, 0.22], [-0.92, 0.25, -0.22], [0.65, 0.45, -0.55], 0.72, 0.35, 1, 0),
-    key(19, [0.12, 0.12, 0.22], [0.32, 0.22, 0.32], [0.07, 0.07, 0.20], [0.17, 0.18, 0.30], [0.13, 0.12, 0.16], [0.22, 0.20, 0.26], [-0.92, 0.25, -0.22], [0.58, 0.48, -0.55], 0.82, 1, 1, 0),
-    key(19.5, [0.09, 0.10, 0.20], [0.22, 0.18, 0.35], [0.06, 0.07, 0.18], [0.20, 0.23, 0.38], [0.15, 0.15, 0.20], NIGHT_SUN, [0.55, 0.50, -0.55], [0.55, 0.50, -0.55], 0.86, 1, 1, 0),
-    key(22, [0.07, 0.08, 0.16], [0.15, 0.17, 0.32], [0.05, 0.06, 0.14], [0.19, 0.22, 0.37], [0.14, 0.14, 0.20], NIGHT_SUN, [0.25, 0.75, -0.55], [0.25, 0.75, -0.55], 0.9, 1, 1, 0)
-  ];
-  const LAST = KEYFRAMES.length - 1;
-  const MIN_Y = 0.25;
+  const smooth = (a, b, value) => {
+    const t = clamp((value - a) / (b - a), 0, 1);
+    return t * t * (3 - 2 * t);
+  };
+  const wrap = (value, period) => (value % period + period) % period;
   const mix3 = (out, a, b, t) => {
     out[0] = lerp(a[0], b[0], t);
     out[1] = lerp(a[1], b[1], t);
     out[2] = lerp(a[2], b[2], t);
   };
-  const mixDir = (out, a, b, t, minY) => {
-    let x = lerp(a.x, b.x, t), y = lerp(a.y, b.y, t), z = lerp(a.z, b.z, t);
-    const len = Math.hypot(x, y, z) || 1;
-    x /= len;
-    y /= len;
-    z /= len;
-    if (y < minY) {
-      const s = Math.sqrt((1 - minY * minY) / (x * x + z * z));
-      x *= s;
-      z *= s;
-      y = minY;
-    }
-    out.x = x;
-    out.y = y;
-    out.z = z;
+  const tint3 = (out, color, amount) => {
+    out[0] = lerp(out[0], color[0], amount);
+    out[1] = lerp(out[1], color[1], amount);
+    out[2] = lerp(out[2], color[2], amount);
   };
-  const sample = (hour, out) => {
-    let i = LAST;
-    while (i > 0 && KEYFRAMES[i].hour > hour) i--;
-    const a = KEYFRAMES[i], b = KEYFRAMES[i === LAST ? 0 : i + 1];
-    const span = i === LAST ? 24 - a.hour + b.hour : b.hour - a.hour;
-    let d = hour - a.hour;
-    if (d < 0) d += 24;
-    const u = Math.min(1, Math.max(0, d / span));
-    const t = u * u * (3 - 2 * u);
-    mix3(out.clear, a.clear, b.clear, t);
-    mix3(out.horizon, a.horizon, b.horizon, t);
-    mix3(out.zenith, a.zenith, b.zenith, t);
-    mix3(out.sky, a.sky, b.sky, t);
-    mix3(out.ground, a.ground, b.ground, t);
-    mix3(out.sun, a.sun, b.sun, t);
-    mixDir(out.light, a.light, b.light, t, MIN_Y);
-    mixDir(out.moon, a.moon, b.moon, t, -1);
-    out.bloomStrength = lerp(a.bloom, b.bloom, t);
-    out.stars = lerp(a.stars, b.stars, t);
-    out.torch = lerp(a.torch, b.torch, t);
-    out.day = lerp(a.day, b.day, t);
+  // Equatorial declination/hour angle into east, up, south. The gate is north (-Z).
+  const horizonDirection = (out, declination, hourAngle, latitude) => {
+    const cd = Math.cos(declination), sd = Math.sin(declination);
+    const ch = Math.cos(hourAngle), sh = Math.sin(hourAngle);
+    const cp = Math.cos(latitude), sp = Math.sin(latitude);
+    out.x = -cd * sh;
+    out.y = sp * sd + cp * cd * ch;
+    out.z = sp * cd * ch - cp * sd;
+  };
+  const sunAngles = (direction, out) => {
+    out.sunAltitude = Math.asin(clamp(direction.y, -1, 1)) * RAD;
+    out.sunAzimuth = wrap(Math.atan2(direction.x, -direction.z) * RAD, 360);
+  };
+  const moonAngles = (direction, out) => {
+    out.moonAltitude = Math.asin(clamp(direction.y, -1, 1)) * RAD;
+    out.moonAzimuth = wrap(Math.atan2(direction.x, -direction.z) * RAD, 360);
+  };
+  const starFrame = (out, latitude, sidereal) => {
+    if (!out) return;
+    const st = Math.sin(sidereal), ct = Math.cos(sidereal), sp = Math.sin(latitude), cp = Math.cos(latitude);
+    // Column-major world east/up/south -> fixed equatorial coordinates.
+    out[0] = -st; out[1] = ct; out[2] = 0;
+    out[3] = cp * ct; out[4] = cp * st; out[5] = sp;
+    out[6] = sp * ct; out[7] = sp * st; out[8] = -cp;
+  };
+  const sample = (hour, out, dayOfYear = 172, latitudeDeg = ISLAND_LATITUDE_DEG, continuousDay = NaN) => {
+    latitudeDeg = clamp(Number.isFinite(latitudeDeg) ? latitudeDeg : ISLAND_LATITUDE_DEG, -66, 66);
+    dayOfYear = clamp(Number.isFinite(dayOfYear) ? dayOfYear : 172, 1, 366);
+    if (!Number.isFinite(continuousDay)) continuousDay = dayOfYear - 1 + hour / 24;
+    const latitude = latitudeDeg * DEG;
+    const seasonalDay = wrap(continuousDay, YEAR_DAYS) + 1;
+    const declination = AXIAL_TILT_DEG * DEG * Math.sin(TAU * (284 + seasonalDay) / YEAR_DAYS);
+    const hourAngle = (hour - 12) * 15 * DEG;
+    const sunDirection = out.sunDirection || SCRATCH_SUN;
+    horizonDirection(sunDirection, declination, hourAngle, latitude);
+    sunAngles(sunDirection, out);
+
+    // A bounded low-cost lunar orbit: ecliptic longitude and latitude converted to equatorial space.
+    const moonLongitude = wrap(TAU * (continuousDay - 4.867) / 27.321661, TAU);
+    const moonLatitude = 5.145 * DEG * Math.sin(TAU * (continuousDay - 1.2) / 27.212221);
+    const ce = Math.cos(AXIAL_TILT_DEG * DEG), se = Math.sin(AXIAL_TILT_DEG * DEG);
+    const cl = Math.cos(moonLongitude), sl = Math.sin(moonLongitude), cb = Math.cos(moonLatitude), sb = Math.sin(moonLatitude);
+    const ex = cb * cl, ey = cb * sl * ce - sb * se, ez = cb * sl * se + sb * ce;
+    const moonDeclination = Math.asin(clamp(ez, -1, 1));
+    const moonRightAscension = Math.atan2(ey, ex);
+    const sidereal = wrap(TAU * (0.7790572733 + continuousDay * SIDEREAL_RATE), TAU);
+    horizonDirection(out.moon, moonDeclination, sidereal - moonRightAscension, latitude);
+    moonAngles(out.moon, out);
+    starFrame(out.starMatrix, latitude, sidereal);
+    if (out.celestialPole) {
+      out.celestialPole.x = 0;
+      out.celestialPole.y = Math.sin(latitude);
+      out.celestialPole.z = -Math.cos(latitude);
+    }
+
+    const altitude = out.sunAltitude;
+    const daylight = smooth(-6, 8, altitude);
+    const stars = 1 - smooth(-18, -6, altitude);
+    const lamps = 1 - smooth(-6, 2, altitude);
+    const twilight = smooth(-18, -3, altitude) * (1 - smooth(6, 18, altitude));
+    mix3(out.clear, NIGHT_CLEAR, DAY_CLEAR, daylight);
+    mix3(out.horizon, NIGHT_HORIZON, DAY_HORIZON, daylight);
+    mix3(out.zenith, NIGHT_ZENITH, DAY_ZENITH, daylight);
+    mix3(out.sky, NIGHT_SKY, DAY_SKY, daylight);
+    mix3(out.ground, NIGHT_GROUND, DAY_GROUND, daylight);
+    mix3(out.sun, NIGHT_SUN, DAY_SUN, daylight);
+    tint3(out.clear, TWILIGHT_CLEAR, twilight * 0.42);
+    tint3(out.horizon, TWILIGHT_HORIZON, twilight * 0.82);
+    tint3(out.zenith, TWILIGHT_ZENITH, twilight * 0.48);
+    tint3(out.sky, TWILIGHT_SKY, twilight * 0.42);
+    tint3(out.ground, TWILIGHT_GROUND, twilight * 0.34);
+    tint3(out.sun, TWILIGHT_SUN, twilight * 0.72);
+
+    const sunStrength = smooth(0, 8, altitude);
+    const moonStrength = stars * smooth(0, 10, out.moonAltitude) * 0.18;
+    let lx = sunDirection.x * sunStrength + out.moon.x * moonStrength;
+    let ly = sunDirection.y * sunStrength + out.moon.y * moonStrength;
+    let lz = sunDirection.z * sunStrength + out.moon.z * moonStrength;
+    let llen = Math.hypot(lx, ly, lz);
+    if (llen < 1e-6) {
+      lx = 0;
+      ly = 1;
+      lz = 0;
+      llen = 1;
+    }
+    out.light.x = lx / llen;
+    out.light.y = ly / llen;
+    out.light.z = lz / llen;
+    const totalStrength = clamp(sunStrength + moonStrength, 0, 1);
+    const direct = out.direct || SCRATCH_DIRECT;
+    const mixDenom = Math.max(sunStrength + moonStrength, 1e-6);
+    const sunShare = sunStrength / mixDenom;
+    direct[0] = lerp(MOON_LIGHT[0], out.sun[0], sunShare);
+    direct[1] = lerp(MOON_LIGHT[1], out.sun[1], sunShare);
+    direct[2] = lerp(MOON_LIGHT[2], out.sun[2], sunShare);
+    const horizonCos = Math.max(0.08, Math.abs(out.light.y));
+    const sunriseAngle = Math.acos(clamp(-Math.tan(latitude) * Math.tan(declination), -1, 1)) * RAD / 15;
+    out.day = daylight;
+    out.twilight = twilight;
+    out.stars = stars;
+    out.torch = lamps;
+    out.lampFactor = lamps;
+    out.bloomStrength = lerp(0.5, 0.9, stars) + twilight * 0.04;
+    out.directStrength = totalStrength;
+    out.directionalLightStrength = totalStrength;
+    out.sunStrength = sunStrength;
+    out.moonStrength = moonStrength;
+    out.shadowStrength = clamp(sunStrength + moonStrength * 0.7, 0, 1);
+    out.shadowBias = lerp(0.0012, 0.0038, 1 - horizonCos);
+    out.activeLightSource = sunStrength > 0.02 && moonStrength > 0.02 ? "mixed" : sunStrength > 0.02 ? "sun" : moonStrength > 0.01 ? "moon" : "none";
+    out.latitude = latitudeDeg;
+    out.dayOfYear = dayOfYear;
+    out.continuousDay = continuousDay;
+    out.solarDeclination = declination * RAD;
+    out.siderealAngle = sidereal;
+    out.sunriseHour = 12 - sunriseAngle;
+    out.sunsetHour = 12 + sunriseAngle;
     return out;
   };
   const localHour = (date) => date.getHours() + date.getMinutes() / 60 + date.getSeconds() / 3600 + date.getMilliseconds() / 3600000;
-  const createClock = ({ hour, daylen, now = new Date() } = {}) => {
+  const localDay = (date) => Math.floor((Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()) - Date.UTC(date.getFullYear(), 0, 0)) / 86400000);
+  const createClock = ({ hour, daylen, day, now = new Date() } = {}) => {
     const pinned = Number.isFinite(hour);
-    const base = ((pinned ? hour : localHour(now)) % 24 + 24) % 24;
+    const baseHour = wrap(pinned ? hour : localHour(now), 24);
+    const baseDay = clamp(Number.isFinite(day) ? Math.round(day) : localDay(now), 1, 366);
     const running = daylen > 0 || !pinned;
     const rate = daylen > 0 ? 24 / daylen : 1 / 3600;
     const start = performance.now();
-    const read = () => running ? (base + (performance.now() - start) * 0.001 * rate) % 24 : base;
-    return { read };
+    const state = { hour: baseHour, continuousDay: baseDay - 1 + baseHour / 24, dayOfYear: baseDay, read: null };
+    state.read = () => {
+      const hours = baseHour + (running ? (performance.now() - start) * 0.001 * rate : 0);
+      state.hour = wrap(hours, 24);
+      state.continuousDay = baseDay - 1 + hours / 24;
+      state.dayOfYear = Math.floor(wrap(state.continuousDay, 366)) + 1;
+      return state.hour;
+    };
+    return state;
   };
-  BL.daylight = { PHASES, KEYFRAMES, phaseAt, sample, createClock };
+  BL.daylight = { PHASES, ISLAND_LATITUDE_DEG, AXIAL_TILT_DEG, phaseAt, sample, createClock };
 })();
 
 // ---- js/scene.js ----
@@ -2027,10 +2127,11 @@ select {
   const BL = window.BL = window.BL || {};
   const { mat4 } = BL.math;
   const { updateWorld, traverseVisible, boundsOf } = BL.scene;
+  const POINT_LIGHT_CAPACITY = 7;
   const QUALITY = {
-    high: { dpr: 1.5, msaa: 4, shadow: 2048, bloom: true, mirror: 512, lights: 4 },
-    medium: { dpr: 1.25, msaa: 2, shadow: 1024, bloom: true, mirror: 384, lights: 4 },
-    low: { dpr: 1, msaa: 0, shadow: 512, bloom: false, mirror: 256, lights: 0 }
+    high: { dpr: 1.5, msaa: 4, shadow: 2048, bloom: true, mirror: 512, lights: POINT_LIGHT_CAPACITY },
+    medium: { dpr: 1.25, msaa: 2, shadow: 1024, bloom: true, mirror: 384, lights: POINT_LIGHT_CAPACITY },
+    low: { dpr: 1, msaa: 0, shadow: 512, bloom: false, mirror: 256, lights: POINT_LIGHT_CAPACITY }
   };
   const INSTANCE_FLOATS = 20;
   // Caps the pixel ratio to bound buffer memory
@@ -2042,8 +2143,10 @@ select {
   const DEFAULT_CLEAR = [0.035, 0.035, 0.04];
   const DEFAULT_SHADOW_CENTER = { x: 0, y: 1.5, z: 0 };
   const DEFAULT_MOON = { x: 0, y: -1, z: 0 };
+  const DEFAULT_STAR_MATRIX = new Float32Array([1, 0, 0, 0, 1, 0, 0, 0, 1]);
   const CULL_MARGIN = 0.5;
   const UP = { x: 0, y: 1, z: 0 };
+  const NORTH_UP = { x: 0, y: 0, z: -1 };
   const ZERO4 = new Float32Array([0, 0, 0, 1]);
   const LIGHT_EYE = { x: 0, y: 0, z: 0 };
   const MESH_STRIDE = 10;
@@ -2087,6 +2190,9 @@ uniform vec3 uLightDir;
 uniform vec3 uSky;
 uniform vec3 uGround;
 uniform vec3 uSun;
+uniform float uDirectStrength;
+uniform float uShadowStrength;
+uniform float uShadowBias;
 uniform sampler2DShadow uShadow;
 uniform float uShadowTexel;
 uniform vec4 uLights[16];
@@ -2109,11 +2215,11 @@ void main() {
   float emissive = clamp(vColor.a * vParams.x, 0.0, 1.0);
   float ndl = max(dot(n, uLightDir), 0.0);
   vec3 sp = vShadow.xyz / vShadow.w * 0.5 + 0.5;
-  float bias = max(0.0035 * (1.0 - ndl), 0.0012);
+  float bias = max(uShadowBias * (1.0 - ndl), uShadowBias * 0.32);
   float sh = shadowAt(sp, bias);
   vec3 ambient = mix(uGround, uSky, n.y * 0.5 + 0.5);
-  vec3 lit = base * (ambient + uSun * ndl * sh);
-  for (int i = 0; i < 4; i++) {
+  vec3 lit = base * (ambient + uSun * ndl * uDirectStrength * mix(1.0, sh, uShadowStrength));
+  for (int i = 0; i < 7; i++) {
     if (i >= uLightCount) break;
     vec4 lp = uLights[i * 2];
     vec3 ld = lp.xyz - vWorld;
@@ -2248,8 +2354,9 @@ uniform vec3 uEye;
 uniform vec3 uHorizon;
 uniform vec3 uZenith;
 uniform vec3 uSun;
-uniform vec3 uLightDir;
+uniform vec3 uSunDir;
 uniform vec3 uMoonDir;
+uniform mat3 uStarMatrix;
 uniform float uStars;
 uniform float uTime;
 layout(location=0) out vec4 oColor;
@@ -2264,19 +2371,20 @@ void main() {
   vec3 d = normalize(far.xyz / far.w - uEye);
   vec3 col = mix(uHorizon, uZenith, smoothstep(-0.02, 0.5, d.y));
   col = mix(col, uHorizon * 0.55, smoothstep(0.0, 0.5, -d.y));
-  float sd = max(dot(d, uLightDir), 0.0);
+  float sd = max(dot(d, uSunDir), 0.0);
   float sunDisc = pow(sd, 600.0) * (1.0 - uStars);
   vec3 sun = uSun * (sunDisc + pow(sd, 6.0) * 0.18 * (1.0 - uStars));
   float moonDisc = smoothstep(0.9985, 0.999, dot(d, uMoonDir)) * uStars;
   vec3 moon = vec3(0.82, 0.88, 1.0) * moonDisc;
   vec3 stars = vec3(0.0);
   if (uStars > 0.002) {
-    vec3 a = abs(d);
+    vec3 starD = normalize(uStarMatrix * d);
+    vec3 a = abs(starD);
     vec2 f;
     float face;
-    if (a.x >= a.y && a.x >= a.z) { f = d.yz / a.x; face = d.x > 0.0 ? 0.0 : 1.0; }
-    else if (a.y >= a.z) { f = d.xz / a.y; face = d.y > 0.0 ? 2.0 : 3.0; }
-    else { f = d.xy / a.z; face = d.z > 0.0 ? 4.0 : 5.0; }
+    if (a.x >= a.y && a.x >= a.z) { f = starD.yz / a.x; face = starD.x > 0.0 ? 0.0 : 1.0; }
+    else if (a.y >= a.z) { f = starD.xz / a.y; face = starD.y > 0.0 ? 2.0 : 3.0; }
+    else { f = starD.xy / a.z; face = starD.z > 0.0 ? 4.0 : 5.0; }
     f = (f * 0.5 + 0.5) * 48.0;
     vec2 cell = floor(f) + face * 97.0;
     float h = hash(cell);
@@ -2354,7 +2462,7 @@ void main() {
     const mirrorInvViewProj = mat4.create();
     const FRUSTUM = new Float32Array(24);
     const CENTER = new Float32Array(3);
-    let culled = 0, drawn = 0;
+    let culled = 0, drawn = 0, shadowPassCount = 0;
     const mirrorEye = { x: 0, y: 0, z: 0 };
     const mirrorTarget = { x: 0, y: 0, z: 0 };
     const mirrorUp = { x: 0, y: 1, z: 0 };
@@ -2417,10 +2525,10 @@ void main() {
       ready = false;
       failure = null;
       res.programs = {
-        mesh: compile(MESH_VS, MESH_FS, ["uViewProj", "uLightViewProj", "uLightDir", "uSky", "uGround", "uSun", "uShadow", "uShadowTexel", "uLights", "uLightCount"]),
+        mesh: compile(MESH_VS, MESH_FS, ["uViewProj", "uLightViewProj", "uLightDir", "uSky", "uGround", "uSun", "uDirectStrength", "uShadowStrength", "uShadowBias", "uShadow", "uShadowTexel", "uLights", "uLightCount"]),
         shadow: compile(SHADOW_VS, SHADOW_FS, ["uLightViewProj"]),
         line: compile(LINE_VS, LINE_FS, ["uViewProj", "uViewport", "uWidth"]),
-        sky: compile(QUAD_VS, SKY_FS, ["uInvViewProj", "uEye", "uHorizon", "uZenith", "uSun", "uLightDir", "uMoonDir", "uStars", "uTime"]),
+        sky: compile(QUAD_VS, SKY_FS, ["uInvViewProj", "uEye", "uHorizon", "uZenith", "uSun", "uSunDir", "uMoonDir", "uStarMatrix", "uStars", "uTime"]),
         blur: compile(QUAD_VS, BLUR_FS, ["uTex", "uDir"]),
         composite: compile(QUAD_VS, COMPOSITE_FS, ["uScene", "uBloom", "uBloomStrength"])
       };
@@ -2997,7 +3105,7 @@ void main() {
       gl.depthMask(true);
       gl.depthFunc(gl.LESS);
     };
-    const renderMirrorCapture = (clear, sky, ground, sun, lx, ly, lz, sh, lights, lightCount, skyOn) => {
+    const renderMirrorCapture = (clear, sky, ground, direct, directStrength, shadowStrength, shadowBias, lx, ly, lz, sh, lights, lightCount, skyOn) => {
       ensureMirrorTarget();
       const pg = res.programs;
       gl.bindFramebuffer(gl.FRAMEBUFFER, mirror.msFb || mirror.fb);
@@ -3010,7 +3118,10 @@ void main() {
       gl.uniform3f(pg.mesh.u.uLightDir, lx, ly, lz);
       gl.uniform3fv(pg.mesh.u.uSky, sky);
       gl.uniform3fv(pg.mesh.u.uGround, ground);
-      gl.uniform3fv(pg.mesh.u.uSun, sun);
+      gl.uniform3fv(pg.mesh.u.uSun, direct);
+      gl.uniform1f(pg.mesh.u.uDirectStrength, directStrength);
+      gl.uniform1f(pg.mesh.u.uShadowStrength, shadowStrength);
+      gl.uniform1f(pg.mesh.u.uShadowBias, shadowBias);
       gl.uniform1f(pg.mesh.u.uShadowTexel, 1 / sh.size);
       gl.activeTexture(gl.TEXTURE0);
       gl.bindTexture(gl.TEXTURE_2D, sh.tex);
@@ -3076,6 +3187,11 @@ void main() {
         sky = DEFAULT_SKY,
         ground = DEFAULT_GROUND,
         sun = DEFAULT_SUN,
+        sunDirection = light,
+        direct = sun,
+        directStrength = 1,
+        shadowStrength = 1,
+        shadowBias = 0.0035,
         clear = DEFAULT_CLEAR,
         bloomStrength = 0.9,
         shadowCenter = DEFAULT_SHADOW_CENTER,
@@ -3084,6 +3200,7 @@ void main() {
         zenith,
         moon = DEFAULT_MOON,
         stars = 0,
+        starMatrix = DEFAULT_STAR_MATRIX,
         time = 0,
         lights,
         lightCount = 0
@@ -3098,14 +3215,17 @@ void main() {
       extractFrustum(viewProj);
       const llen = Math.hypot(light.x, light.y, light.z) || 1;
       const lx = light.x / llen, ly = light.y / llen, lz = light.z / llen;
+      const slen = Math.hypot(sunDirection.x, sunDirection.y, sunDirection.z) || 1;
+      const sx = sunDirection.x / slen, sy = sunDirection.y / slen, sz = sunDirection.z / slen;
       if (skyOn) {
         mat4.invert(invViewProj, viewProj);
         gl.useProgram(pg.sky.prog);
         gl.uniform3fv(pg.sky.u.uHorizon, horizon);
         gl.uniform3fv(pg.sky.u.uZenith, zenith);
         gl.uniform3fv(pg.sky.u.uSun, sun);
-        gl.uniform3f(pg.sky.u.uLightDir, lx, ly, lz);
+        gl.uniform3f(pg.sky.u.uSunDir, sx, sy, sz);
         gl.uniform3f(pg.sky.u.uMoonDir, moon.x, moon.y, moon.z);
+        gl.uniformMatrix3fv(pg.sky.u.uStarMatrix, false, starMatrix);
         gl.uniform1f(pg.sky.u.uStars, stars);
         gl.uniform1f(pg.sky.u.uTime, time);
       }
@@ -3114,8 +3234,13 @@ void main() {
       LIGHT_EYE.x = shadowCenter.x + lx * lightDist;
       LIGHT_EYE.y = shadowCenter.y + ly * lightDist;
       LIGHT_EYE.z = shadowCenter.z + lz * lightDist;
-      mat4.lookAt(lightView, LIGHT_EYE, shadowCenter, UP);
+      mat4.lookAt(lightView, LIGHT_EYE, shadowCenter, Math.abs(ly) > 0.96 ? NORTH_UP : UP);
       mat4.ortho(lightProj, -shadowExtent, shadowExtent, -shadowExtent, shadowExtent, Math.max(0.5, lightDist - lightDepth), lightDist + lightDepth);
+      mat4.multiply(lightViewProj, lightProj, lightView);
+      mat4.transformPoint4(P4, lightViewProj, 0, 0, 0);
+      const shadowSnap = sh.size * 0.5;
+      lightProj[12] += (Math.round(P4[0] * shadowSnap) - P4[0] * shadowSnap) / shadowSnap;
+      lightProj[13] += (Math.round(P4[1] * shadowSnap) - P4[1] * shadowSnap) / shadowSnap;
       mat4.multiply(lightViewProj, lightProj, lightView);
       for (const rec of activeRecords) {
         rec.active = false;
@@ -3144,6 +3269,7 @@ void main() {
       gl.cullFace(gl.FRONT);
       drawParts("mesh", "shadow");
       gl.cullFace(gl.BACK);
+      shadowPassCount++;
       if (mirror.node) {
         mirror.frame++;
         updateMirrorSide(camera);
@@ -3152,7 +3278,7 @@ void main() {
         } else if (prepareMirrorCamera(camera)) {
           if (settings !== QUALITY.high && mirror.frame % 2 === 0) skipMirrorPass("cadence");
           else if (!ensureMirrorProgram()) skipMirrorPass("shader-pending");
-          else renderMirrorCapture(clear, sky, ground, sun, lx, ly, lz, sh, lights, nLights, skyOn);
+          else renderMirrorCapture(clear, sky, ground, direct, directStrength, shadowStrength, shadowBias, lx, ly, lz, sh, lights, nLights, skyOn);
         }
       }
       gl.bindFramebuffer(gl.FRAMEBUFFER, f.scene);
@@ -3166,7 +3292,10 @@ void main() {
       gl.uniform3f(pg.mesh.u.uLightDir, lx, ly, lz);
       gl.uniform3fv(pg.mesh.u.uSky, sky);
       gl.uniform3fv(pg.mesh.u.uGround, ground);
-      gl.uniform3fv(pg.mesh.u.uSun, sun);
+      gl.uniform3fv(pg.mesh.u.uSun, direct);
+      gl.uniform1f(pg.mesh.u.uDirectStrength, directStrength);
+      gl.uniform1f(pg.mesh.u.uShadowStrength, shadowStrength);
+      gl.uniform1f(pg.mesh.u.uShadowBias, shadowBias);
       gl.uniform1f(pg.mesh.u.uShadowTexel, 1 / sh.size);
       gl.activeTexture(gl.TEXTURE0);
       gl.bindTexture(gl.TEXTURE_2D, sh.tex);
@@ -3276,7 +3405,9 @@ void main() {
         return qualityName;
       },
       get stats() {
-        return { records: records.size, active: activeRecords.length, mirrorResources: mirrorDebug.resources, culled, drawn };
+        let shadowFinite = true;
+        for (let i = 0; i < 16; i++) if (!Number.isFinite(lightViewProj[i])) shadowFinite = false;
+        return { records: records.size, active: activeRecords.length, mirrorResources: mirrorDebug.resources, shadowResources: res.shadow ? 2 : 0, shadowSize: res.shadow ? res.shadow.size : 0, shadowPassCount, shadowFinite, culled, drawn };
       },
       get mirror() {
         return mirrorDebug;
@@ -3384,6 +3515,7 @@ void main() {
     };
     let eye = { x: 0, y: 0, z: 0 }, near = 0.2;
     const lightDir = new Float32Array([0, 1, 0]);
+    let directStrength = 1;
     const shadeNode = (node) => {
       const { verts, faces, lines } = node.geometry;
       const w = node.world;
@@ -3436,7 +3568,7 @@ void main() {
           const emissive = (face.emissive || 0) * node.glow;
           const diffuse = Math.max(0, nx * lightDir[0] + ny * lightDir[1] + nz * lightDir[2]);
           const hemi = AMBIENT * (0.6 + 0.4 * (ny * 0.5 + 0.5));
-          let k = Math.min(1, hemi + diffuse * 0.7);
+          let k = Math.min(1, hemi + diffuse * 0.7 * directStrength);
           k = lerp(k, 1.1, Math.min(1, emissive));
           k = lerp(k, 1.3, node.highlight * 0.4);
           const c = face.color;
@@ -3490,7 +3622,7 @@ void main() {
       }
     };
     const render = (root, camera, opts = {}) => {
-      const { light = DEFAULT_LIGHT, clear = null, sky = DEFAULT_SKY, ground = DEFAULT_GROUND, horizon = null, zenith = null } = opts;
+      const { light = DEFAULT_LIGHT, directStrength: strength = 1, clear = null, sky = DEFAULT_SKY, ground = DEFAULT_GROUND, horizon = null, zenith = null } = opts;
       if (!fixedW && (canvas.clientWidth !== width || canvas.clientHeight !== height)) resize();
       const gradientSky = !!(horizon && zenith);
       if (gradientSky) buildSky(horizon, zenith);
@@ -3514,6 +3646,7 @@ void main() {
       lightDir[0] = light.x / llen;
       lightDir[1] = light.y / llen;
       lightDir[2] = light.z / llen;
+      directStrength = strength;
       poolUsed = 0;
       mirrorDebug.active = false;
       mirrorDebug.portal = false;
@@ -3643,7 +3776,7 @@ void main() {
         return "low";
       },
       get stats() {
-        return { records: 0, active: 0, mirrorResources: 0, culled: 0, drawn: 0 };
+        return { records: 0, active: 0, mirrorResources: 0, shadowResources: 0, shadowSize: 0, shadowPassCount: 0, shadowFinite: true, culled: 0, drawn: 0 };
       },
       get mirror() {
         return mirrorDebug;
@@ -5266,7 +5399,10 @@ void main() {
     v.fill(-6, -6, 0, 5, 0, 1, stone);
     v.fill(5, 5, 0, 5, 0, 1, stone);
     v.fill(-5, 4, 6, 6, 0, 1, light);
-    return voxGeo(v, { unit: VOX, palette: CLIFF, origin: { x: 0, y: 0, z: -VOX } });
+    const geo = voxGeo(v, { unit: VOX, palette: CLIFF, origin: { x: 0, y: 0, z: -VOX } });
+    geo.jambCenterX = 2.75;
+    geo.frontZ = 0.5;
+    return geo;
   });
   const mirrorPanel = cached(() => {
     const geo = {
@@ -5277,6 +5413,12 @@ void main() {
     };
     return geo;
   });
+  const matrixRimLiner = cached(() => ({
+    verts: [-2.5, 2.995, 0.46, 2.5, 2.995, 0.46, 2.5, 2.995, 1.005, -2.5, 2.995, 1.005],
+    faces: [{ i: [0, 1, 2, 3], color: hexToRgb("#000000"), emissive: 0 }],
+    lines: [],
+    castShadow: false
+  }));
   const MATRIX_GLYPHS = [
     ["0110", "1001", "1111", "1001", "1001", "0000"],
     ["1110", "1001", "1110", "1001", "1110", "0000"],
@@ -5302,6 +5444,7 @@ void main() {
   // A black-lined vestibule and room that stop just behind c1's mirror plane.
   const matrixChamber = cached(() => {
     const portalBack = 0.48, vestibuleBack = -2.5;
+    const headerHalfWidth = 2.9, headerTop = 3.9;
     const vestibuleDepth = portalBack - vestibuleBack;
     const vestibuleCenter = (portalBack + vestibuleBack) * 0.5;
     const roomBack = -6.2;
@@ -5310,8 +5453,14 @@ void main() {
       geo.faces.shift();
       return geo;
     };
+    // Inward-facing sheets hide stone from the room without recoloring its exterior.
     const header = {
-      verts: [-2.9, 3, portalBack, -2.9, 3.9, portalBack, 2.9, 3.9, portalBack, 2.9, 3, portalBack],
+      verts: [-headerHalfWidth, 3, portalBack, -headerHalfWidth, headerTop, portalBack, headerHalfWidth, headerTop, portalBack, headerHalfWidth, 3, portalBack],
+      faces: [{ i: [0, 1, 2, 3], color: hexToRgb("#000000"), emissive: 0 }],
+      lines: []
+    };
+    const transitionHeader = {
+      verts: [-headerHalfWidth, 3, -2.485, -headerHalfWidth, headerTop, -2.485, headerHalfWidth, headerTop, -2.485, headerHalfWidth, 3, -2.485],
       faces: [{ i: [0, 1, 2, 3], color: hexToRgb("#000000"), emissive: 0 }],
       lines: []
     };
@@ -5324,6 +5473,7 @@ void main() {
       openFrontBox({ w: 0.04, h: 3, d: vestibuleDepth, color: "#000000", offset: { x: -2.49, y: 1.5, z: vestibuleCenter } }),
       openFrontBox({ w: 0.04, h: 3, d: vestibuleDepth, color: "#000000", offset: { x: 2.49, y: 1.5, z: vestibuleCenter } }),
       header,
+      transitionHeader,
       box({ w: 0.4, h: 3.8, d: 0.03, color: "#000000", offset: { x: -2.7, y: 1.9, z: -2.485 } }),
       box({ w: 0.4, h: 3.8, d: 0.03, color: "#000000", offset: { x: 2.7, y: 1.9, z: -2.485 } }),
       box({ w: 5.8, h: 3.8, d: 0.14, color: "#000000", offset: { y: 1.9, z: -6.2 } })
@@ -5332,7 +5482,11 @@ void main() {
     geo.frontZ = portalBack;
     geo.claddingFrontZ = portalBack;
     geo.headerMinY = 3;
+    geo.headerMaxY = headerTop;
+    geo.headerHalfWidth = headerHalfWidth;
     geo.transitionCladdingZ = -2.485;
+    geo.transitionHeaderMinY = 3;
+    geo.transitionHeaderMaxY = headerTop;
     return geo;
   });
   // Gateway arch over the pass, trail along z
@@ -5488,6 +5642,8 @@ void main() {
       box({ w: 0.26, h: 0.26, d: 0.26, color: "#ffb13b", emissive: 1, offset: { y: 1.36 } })
     );
     geo.castShadow = false;
+    geo.backZ = -0.13;
+    geo.flameY = 1.36;
     return geo;
   });
   // A tuft of leaning blades, no shadow
@@ -5571,7 +5727,7 @@ void main() {
     box({ w: 4, h: 0.14, d: 0.16, color: WOOD_DK, offset: { x: 2, y: -0.17, z: 0.92 } }),
     ...[[0.5, -0.8], [0.5, 0.8], [3.5, -0.8], [3.5, 0.8]].map(([x, z]) => box({ w: 0.2, h: 2.2, d: 0.2, color: "#6b4a2b", offset: { x, y: -1.2, z } }))
   ));
-  BL.hubModels = { jetpack, jetFlame, caveMouthRim, mirrorPanel, matrixGlyph, matrixChamber, caveSign, CAVE_SIGN_WIDTH, CAVE_SIGN_HEIGHT, gate, caveShelves, bedroll, tree, bush, rock, altarSlab, altarBlock, woodCrate, barrel, flowerTuft, torch, grass, lantern, firepit, fireFlame, butterfly, firefly, ember, vine, cloud, ladder, dock, TREE_HEIGHT };
+  BL.hubModels = { jetpack, jetFlame, caveMouthRim, mirrorPanel, matrixRimLiner, matrixGlyph, matrixChamber, caveSign, CAVE_SIGN_WIDTH, CAVE_SIGN_HEIGHT, gate, caveShelves, bedroll, tree, bush, rock, altarSlab, altarBlock, woodCrate, barrel, flowerTuft, torch, grass, lantern, firepit, fireFlame, butterfly, firefly, ember, vine, cloud, ladder, dock, TREE_HEIGHT };
 })();
 
 // ---- js/caves.js ----
@@ -8798,6 +8954,9 @@ void main() {
   const DEBUG = params.has("debug");
   const hourParam = DEBUG ? parseFloat(params.get("hour")) : NaN;
   const daylenParam = DEBUG ? parseFloat(params.get("daylen")) : NaN;
+  const dayParam = DEBUG ? parseFloat(params.get("day")) : NaN;
+  const latitudeParam = DEBUG ? parseFloat(params.get("latitude")) : NaN;
+  const islandLatitude = Number.isFinite(latitudeParam) ? Math.max(-66, Math.min(66, latitudeParam)) : daylight.ISLAND_LATITUDE_DEG;
   // Island measures, owned by terrain.js
   const MEADOW = 22, RADIUS = 30;
   const PITCH_MIN = 0.2, PITCH_MAX = 1.25, DIST_MIN = 3.5, DIST_MAX = 64;
@@ -8828,12 +8987,30 @@ void main() {
   const TUNNEL_REACH = 2.2;
   const MATRIX_TYPES = 8, MATRIX_TOP = 3.62, MATRIX_RANGE = 3.45, MATRIX_GAP = 0.19, MATRIX_NEAR = 28, MATRIX_PRELOAD = 18;
   // Sky, light and lamps, resampled from the clock every frame
-  const RENDER_OPTS = { clear: new Float32Array(3), horizon: new Float32Array(3), zenith: new Float32Array(3), sky: new Float32Array(3), ground: new Float32Array(3), sun: new Float32Array(3), light: { x: 0.55, y: 0.78, z: -0.25 }, moon: { x: 0, y: 1, z: 0 }, stars: 0, torch: 0, day: 1, time: 0, bloomStrength: 0.5, lights: new Float32Array(64), lightCount: 0, shadowCenter: { x: 0, y: 0, z: 0 }, shadowExtent: 34 };
+  const RENDER_OPTS = {
+    clear: new Float32Array(3), horizon: new Float32Array(3), zenith: new Float32Array(3), sky: new Float32Array(3), ground: new Float32Array(3), sun: new Float32Array(3), direct: new Float32Array(3),
+    light: { x: 0.55, y: 0.78, z: -0.25 }, sunDirection: { x: 0, y: 1, z: 0 }, moon: { x: 0, y: 1, z: 0 }, celestialPole: { x: 0, y: Math.sin(20 * DEG), z: -Math.cos(20 * DEG) }, starMatrix: new Float32Array(9),
+    stars: 0, torch: 0, day: 1, twilight: 0, lampFactor: 0, directStrength: 1, directionalLightStrength: 1, sunStrength: 1, moonStrength: 0, shadowStrength: 1, shadowBias: 0.002, activeLightSource: "sun", latitude: 20, dayOfYear: 172, continuousDay: 171.5, solarDeclination: 0, siderealAngle: 0, sunAltitude: 90, sunAzimuth: 180, moonAltitude: -90, moonAzimuth: 0, sunriseHour: 6, sunsetHour: 18,
+    time: 0, bloomStrength: 0.5, lights: new Float32Array(64), lightCount: 0, shadowCenter: { x: 0, y: 0, z: 0 }, shadowExtent: 34
+  };
+  RENDER_OPTS.starMatrix[0] = RENDER_OPTS.starMatrix[4] = RENDER_OPTS.starMatrix[8] = 1;
+  const DAYLIGHT_DEBUG = {
+    sunDirection: RENDER_OPTS.sunDirection, moonDirection: RENDER_OPTS.moon, celestialPole: RENDER_OPTS.celestialPole,
+    hour: 12, continuousDay: 171.5, phase: "noon", latitude: 20, dayOfYear: 172, solarDeclination: 0, siderealAngle: 0, sunAltitude: 90, sunAzimuth: 180, moonAltitude: -90, moonAzimuth: 0,
+    daylightFactor: 1, twilightFactor: 0, starFactor: 0, lampFactor: 0, directStrength: 1, directionalLightStrength: 1, shadowStrength: 1, shadowBias: 0.002, activeLightSource: "sun", sunriseHour: 6, sunsetHour: 18
+  };
   const PHASE_TOASTS = { dawn: "Dawn breaks over the island", morning: "Morning on the island", noon: "High noon", dusk: "Dusk settles over the island", night: "Night. The torches are lit.", midnight: "Midnight. The island sleeps." };
   // Lamp colours and reach; a lamp's flame reads through node.glow
   const LAMP = { torch: { r: 1.0, g: 0.62, b: 0.25, radius: 6, glow: 0.85, hide: false }, fire: { r: 1.0, g: 0.55, b: 0.2, radius: 9, glow: 0.9, hide: true }, lantern: { r: 1.0, g: 0.8, b: 0.45, radius: 4, glow: 0.9, hide: false } };
+  const LIGHT_CAPACITY = 7;
+  const LIGHTING_DEBUG = {
+    registeredLampCount: 0, activeFullLightCount: 0, approximatedLightCount: 0,
+    configuredLightCapacity: LIGHT_CAPACITY, selectedCount: 0, approximatedCount: 0,
+    tier: "high", selectedIds: new Array(LIGHT_CAPACITY).fill(null), approximatedIds: new Array(LIGHT_CAPACITY).fill(null)
+  };
   // Lamps light one after another through the dusk ramp
   const LAMP_STAGGER = 0.12, LAMP_RAMP = 0.4, LAMP_OFF = 0.12;
+  const CAVE_TORCH_GAP = 0.12;
   const FIRE_DEGREES = [130, 125, 135, 120, 140, 115, 145], FIRE_RADIUS = 11.5, FIRE_SEATS = 6, FIRE_SEAT_RADIUS = 1.8;
   const NIGHT = 0.5, FIRE_SEAT_CHANCE = 0.5;
   // Clock angle to a meadow point
@@ -8887,6 +9064,7 @@ void main() {
   const claimed = [];
   const clouds = [];
   const lamps = [];
+  const entranceLights = [];
   const fireSeats = [];
   const sleepers = [];
   const labels = [];
@@ -8911,7 +9089,7 @@ void main() {
   };
 
   // ---------- room behind the mirror ----------
-  const buildMatrixRain = (group, room, m) => {
+  const buildMatrixRain = (group, room, rimLiner, m) => {
     const streamCount = renderer.kind === "canvas2d" ? 32 : 96;
     const streamLength = renderer.kind === "canvas2d" ? 9 : 14;
     const grouped = Array.from({ length: MATRIX_TYPES }, () => []);
@@ -8948,7 +9126,7 @@ void main() {
       placed.push(node);
       nodes.push(node);
     }
-    return { group, room, mouth: m, nodes, cr, sr, cycle, streamCount, hangingStreamCount: freeCount, entranceStreamCount: entranceCount, wallStreamCount: streamCount - freeCount, streamLength, glyphCount: streamCount * streamLength, brightTipCount: streamCount * 2, capacity: streamCount * streamLength, updates: 0, prewarmCount: 0, preloaded: false, prewarmed: false, visible: false, firstGlyphY: 0 };
+    return { group, room, rimLiner, mouth: m, nodes, cr, sr, cycle, streamCount, hangingStreamCount: freeCount, entranceStreamCount: entranceCount, wallStreamCount: streamCount - freeCount, streamLength, glyphCount: streamCount * streamLength, brightTipCount: streamCount * 2, capacity: streamCount * streamLength, updates: 0, prewarmCount: 0, preloaded: false, prewarmed: false, visible: false, firstGlyphY: 0 };
   };
   const updateMatrixRain = (elapsed) => {
     if (!matrixCave) return;
@@ -8965,6 +9143,7 @@ void main() {
       setVec(matrixCave.room.scale, scale, scale, scale);
     }
     matrixCave.visible = visible;
+    matrixCave.rimLiner.visible = visible;
     if (!preloaded && !wasPreloaded) return;
     const cr = matrixCave.cr, sr = matrixCave.sr;
     let first = true;
@@ -9102,20 +9281,24 @@ void main() {
     return polar(deg, r);
   };
   // A flame that lights with the night; lit lamps also feed the point lights
-  const addLamp = (node, kind, x, y, z, light = true) => {
+  const addLamp = (node, kind, x, y, z, light = true, order = lamps.length, id = `lamp:${lamps.length}`) => {
     node.glow = LAMP_OFF;
     node.flare = 0;
-    lamps.push({ node, kind, x, y, z, light, order: lamps.length, k: 0, lit: false });
+    const lamp = { node, kind, x, y, z, light, order, id, k: 0, lit: false, selected: false, approximated: false, debug: null };
+    lamps.push(lamp);
+    return lamp;
   };
   // Light the lamps in order as the dusk ramp climbs, spark when one catches
   const updateLamps = (dt, elapsed, spark) => {
     const lights = RENDER_OPTS.lights;
-    let count = 0;
+    const webgl = renderer.kind === "webgl2";
+    const limit = webgl ? LIGHT_CAPACITY : 0;
+    let count = 0, approximated = 0;
     for (let i = 0; i < lamps.length; i++) {
       const l = lamps[i], node = l.node;
       const k = Math.min(1, Math.max(0, (RENDER_OPTS.torch - l.order * LAMP_STAGGER) / LAMP_RAMP));
       const lit = k > 0.05;
-      if (lit && !l.lit && spark) fx.burst(l.x, l.y, l.z, 8, [SPARK], 1.3);
+      if (lit && !l.lit && spark) fx.burst(l.x, l.y, l.z, 5, [SPARK], 1.3);
       l.lit = lit;
       l.k = k;
       const flicker = Math.sin(elapsed * 11 + i * 2.3) * 0.15;
@@ -9123,17 +9306,47 @@ void main() {
       if (node.flare > 0) node.flare = Math.max(0, node.flare - dt * 2);
       // A cold fire shows no flame at all
       if (l.kind.hide) node.visible = lit;
-      if (!lit || !l.light || count >= 8) continue;
-      const o = count++ * 8;
-      lights[o] = l.x;
-      lights[o + 1] = l.y;
-      lights[o + 2] = l.z;
-      lights[o + 3] = l.kind.radius;
-      lights[o + 4] = l.kind.r * k;
-      lights[o + 5] = l.kind.g * k;
-      lights[o + 6] = l.kind.b * k;
+      l.selected = false;
+      l.approximated = false;
+      if (l.debug) {
+        l.debug.factor = k;
+        l.debug.lit = lit;
+        l.debug.selected = false;
+        l.debug.approximated = false;
+      }
     }
+    // Registration order is spatially stable: camera movement never swaps lamp profiles.
+    for (let i = 0; i < lamps.length; i++) {
+      const l = lamps[i];
+      if (!l.lit || !l.light) continue;
+      if (count < limit) {
+        l.selected = true;
+        if (l.debug) l.debug.selected = true;
+        LIGHTING_DEBUG.selectedIds[count] = l.id;
+        const o = count++ * 8;
+        lights[o] = l.x;
+        lights[o + 1] = l.y;
+        lights[o + 2] = l.z;
+        lights[o + 3] = l.kind.radius;
+        lights[o + 4] = l.kind.r * l.k;
+        lights[o + 5] = l.kind.g * l.k;
+        lights[o + 6] = l.kind.b * l.k;
+      } else {
+        l.approximated = true;
+        if (l.debug) l.debug.approximated = true;
+        LIGHTING_DEBUG.approximatedIds[approximated++] = l.id;
+      }
+    }
+    for (let i = count; i < LIGHT_CAPACITY; i++) LIGHTING_DEBUG.selectedIds[i] = null;
+    for (let i = approximated; i < LIGHT_CAPACITY; i++) LIGHTING_DEBUG.approximatedIds[i] = null;
     RENDER_OPTS.lightCount = count;
+    LIGHTING_DEBUG.registeredLampCount = lamps.length;
+    LIGHTING_DEBUG.activeFullLightCount = count;
+    LIGHTING_DEBUG.approximatedLightCount = approximated;
+    LIGHTING_DEBUG.configuredLightCapacity = limit;
+    LIGHTING_DEBUG.selectedCount = count;
+    LIGHTING_DEBUG.approximatedCount = approximated;
+    LIGHTING_DEBUG.tier = webgl ? renderer.quality : "canvas2d";
   };
   // A fire pit off the paths inside the bedroll ring, with seats around it
   const buildFire = () => {
@@ -9149,7 +9362,7 @@ void main() {
     const pit = place(hubModels.firepit(), p.x, p.z, 0, 0, "firepit", 1.2);
     const flame = createNode({ geometry: hubModels.fireFlame() });
     addChild(pit, flame);
-    addLamp(flame, LAMP.fire, p.x, 0.6, p.z);
+    addLamp(flame, LAMP.fire, p.x, 0.6, p.z, true, 3, "firepit");
     claim(p.x, p.z, 1.4);
     for (let i = 0; i < FIRE_SEATS; i++) {
       const a = (i + 0.5) / FIRE_SEATS * Math.PI * 2;
@@ -9166,27 +9379,38 @@ void main() {
     addChild(group, rim);
     if (slot.status === "open") {
       for (const x of [-1.3, 1.3]) addChild(group, createNode({ position: { x, y: 0, z: -3.5 }, geometry: hubModels.caveShelves() }));
-      for (const x of [-3, 3]) {
-        const torch = createNode({ position: { x, y: 0, z: 1 }, geometry: hubModels.torch(), flare: 0 });
-        addChild(group, torch);
-        const tx = m.x + ax + Math.cos(m.ry) * x, tz = m.z + az - Math.sin(m.ry) * x;
-        addLamp(torch, LAMP.torch, tx, m.floorY + 1.36, tz);
-        claim(tx, tz, 0.5);
-        addProp("torch", torch, tx, tz, 0.7);
-      }
     } else if (slot.status === "mirror") {
       // Sit inside the rim so the cave floor ends behind the reflection.
       const node = createNode({ position: { x: 0, y: 1.5, z: 0.5 }, geometry: hubModels.mirrorPanel(), mirror: true, mirrorWalkThrough: true });
       const room = createNode({ geometry: hubModels.matrixChamber(), scale: { x: 0, y: 0, z: 0 } });
+      const rimLiner = createNode({ geometry: hubModels.matrixRimLiner(), visible: false });
+      addChild(room, rimLiner);
       addChild(group, room, node);
-      matrixCave = buildMatrixRain(group, room, m);
-      mirrorCave = { slot, mouth: m, group, rim, room, node, sign: null };
+      matrixCave = buildMatrixRain(group, room, rimLiner, m);
+      mirrorCave = { slot, mouth: m, group, rim, room, rimLiner, node, sign: null };
     } else if (slot.status === "sleeping") {
       // Bedrolls lie along +x, as the sleep pose assumes
       addChild(group, createNode({ position: { x: 0, y: 0.05, z: -4.5 }, rotation: { x: 0, y: -m.ry, z: 0 }, geometry: hubModels.bedroll(), depthBias: 0.3 }));
       sleepers.push({ x: m.x + ax * 0.8, y: 4.4, z: m.z + az * 0.8, timer: sleepers.length * 0.7 });
     }
     if (slot.status === "open" || slot.status === "mirror") {
+      const torchGeometry = hubModels.torch();
+      const torchZ = rim.position.z + rim.geometry.frontZ - torchGeometry.backZ + CAVE_TORCH_GAP;
+      for (let i = 0; i < 2; i++) {
+        const side = i ? "right" : "left", localX = (i ? 1 : -1) * rim.geometry.jambCenterX;
+        const torch = createNode({ position: { x: localX, y: 0, z: torchZ }, geometry: torchGeometry, flare: 0 });
+        addChild(group, torch);
+        const tx = m.x + ax * torchZ + Math.cos(m.ry) * localX;
+        const ty = m.floorY + torchGeometry.flameY;
+        const tz = m.z + az * torchZ - Math.sin(m.ry) * localX;
+        const id = `${slot.id}:torch:${side}`;
+        const lamp = addLamp(torch, LAMP.torch, tx, ty, tz, true, i, id);
+        const debug = { id, caveId: slot.id, kind: "torch", side, localPosition: [localX, torchGeometry.flameY, torchZ], worldPosition: [tx, ty, tz], registered: true, factor: 0, lit: false, selected: false, approximated: false, rimFront: rim.position.z + rim.geometry.frontZ, fixtureBack: torchZ + torchGeometry.backZ, gap: CAVE_TORCH_GAP };
+        lamp.debug = debug;
+        entranceLights.push(debug);
+        claim(tx, tz, 0.5);
+        addProp("torch", torch, tx, tz, 0.7);
+      }
       const sign = createNode({ position: { x: 0, y: 4.5, z: 0.52 }, geometry: hubModels.caveSign(slot.name) });
       addChild(group, sign);
       const halfW = sign.geometry.signWidth * 0.5, halfH = sign.geometry.signHeight * 0.5;
@@ -9202,10 +9426,18 @@ void main() {
         ]
       });
       if (mirrorCave && mirrorCave.slot === slot) mirrorCave.sign = sign;
-      // A lantern hangs off the sign bracket; only the open cave's throws light
+      // A lantern hangs off the sign bracket and matches the entrance torches' dusk fade.
       const lantern = createNode({ position: { x: halfW + 0.1, y: sign.position.y + halfH + 0.14, z: 0.52 }, geometry: hubModels.lantern() });
       addChild(group, lantern);
-      addLamp(lantern, LAMP.lantern, x + tx * lantern.position.x, y + halfH - 0.13, z + tz * lantern.position.x, slot.status === "open");
+      const lx = lantern.position.x, ly = lantern.position.y - 0.27, lz = lantern.position.z;
+      const wx = m.x + Math.cos(m.ry) * lx + ax * lz;
+      const wy = m.floorY + ly;
+      const wz = m.z - Math.sin(m.ry) * lx + az * lz;
+      const id = `${slot.id}:lantern:right`;
+      const lamp = addLamp(lantern, LAMP.lantern, wx, wy, wz, true, 2, id);
+      const debug = { id, caveId: slot.id, kind: "lantern", side: "right", localPosition: [lx, ly, lz], worldPosition: [wx, wy, wz], registered: true, factor: 0, lit: false, selected: false, approximated: false, rimFront: null, fixtureBack: null, gap: null };
+      lamp.debug = debug;
+      entranceLights.push(debug);
     }
     if (VINES.includes(slot.id)) for (const x of [-1.1, 1.1]) addChild(group, createNode({ position: { x, y: 3.45, z: 0.95 }, geometry: hubModels.vine() }));
     addChild(root, group);
@@ -9784,11 +10016,33 @@ void main() {
   const update = (dt, elapsed) => {
     now = elapsed;
     hour = clock.read();
-    daylight.sample(hour, RENDER_OPTS);
+    daylight.sample(hour, RENDER_OPTS, clock.dayOfYear, islandLatitude, clock.continuousDay);
     RENDER_OPTS.time = elapsed;
     updateLamps(dt, elapsed, phase !== null);
     const next = daylight.phaseAt(hour);
     if (next !== phase) setPhase(next);
+    DAYLIGHT_DEBUG.hour = hour;
+    DAYLIGHT_DEBUG.continuousDay = RENDER_OPTS.continuousDay;
+    DAYLIGHT_DEBUG.phase = phase;
+    DAYLIGHT_DEBUG.latitude = RENDER_OPTS.latitude;
+    DAYLIGHT_DEBUG.dayOfYear = RENDER_OPTS.dayOfYear;
+    DAYLIGHT_DEBUG.solarDeclination = RENDER_OPTS.solarDeclination;
+    DAYLIGHT_DEBUG.siderealAngle = RENDER_OPTS.siderealAngle;
+    DAYLIGHT_DEBUG.sunAltitude = RENDER_OPTS.sunAltitude;
+    DAYLIGHT_DEBUG.sunAzimuth = RENDER_OPTS.sunAzimuth;
+    DAYLIGHT_DEBUG.moonAltitude = RENDER_OPTS.moonAltitude;
+    DAYLIGHT_DEBUG.moonAzimuth = RENDER_OPTS.moonAzimuth;
+    DAYLIGHT_DEBUG.daylightFactor = RENDER_OPTS.day;
+    DAYLIGHT_DEBUG.twilightFactor = RENDER_OPTS.twilight;
+    DAYLIGHT_DEBUG.starFactor = RENDER_OPTS.stars;
+    DAYLIGHT_DEBUG.lampFactor = RENDER_OPTS.lampFactor;
+    DAYLIGHT_DEBUG.directStrength = RENDER_OPTS.directStrength;
+    DAYLIGHT_DEBUG.directionalLightStrength = RENDER_OPTS.directionalLightStrength;
+    DAYLIGHT_DEBUG.shadowStrength = RENDER_OPTS.shadowStrength;
+    DAYLIGHT_DEBUG.shadowBias = RENDER_OPTS.shadowBias;
+    DAYLIGHT_DEBUG.activeLightSource = RENDER_OPTS.activeLightSource;
+    DAYLIGHT_DEBUG.sunriseHour = RENDER_OPTS.sunriseHour;
+    DAYLIGHT_DEBUG.sunsetHour = RENDER_OPTS.sunsetHour;
     critters.update(dt, elapsed, RENDER_OPTS.day, RENDER_OPTS.stars, fire.k);
     pileEdgeNow = pile.pileEdge();
     pilot.readInput(dt);
@@ -9908,7 +10162,7 @@ void main() {
     ({ renderer, game, world, go, lootEnabled, testBananas } = ctx);
     camera = createCamera({ fov: 48, near: 0.5, far: 140 });
     root = createNode();
-    clock = daylight.createClock({ hour: hourParam, daylen: daylenParam, now: new Date() });
+    clock = daylight.createClock({ hour: hourParam, daylen: daylenParam, day: dayParam, now: new Date() });
     phase = null;
     island = terrain.island({ seed: SEED });
     mark("island");
@@ -10092,15 +10346,17 @@ void main() {
         pilot,
         renderOpts: RENDER_OPTS,
         lamps,
+        entranceLights,
+        lighting: LIGHTING_DEBUG,
         fireSeats,
         get critters() {
           return critters.stats();
         },
         get daylight() {
-          return { hour, phase };
+          return DAYLIGHT_DEBUG;
         },
-        setHour: (h, daylen = NaN) => {
-          clock = daylight.createClock({ hour: h, daylen });
+        setHour: (h, daylen = NaN, day = clock.dayOfYear) => {
+          clock = daylight.createClock({ hour: h, daylen, day });
         },
         get jetpack() {
           return {
@@ -10128,8 +10384,10 @@ void main() {
     pilot.dispose();
     for (const node of targets) input.remove(node);
     for (const node of placed) removeChild(root, node);
-    targets.length = placed.length = claimed.length = scenery.length = sceneryClaims.length = clouds.length = lamps.length = fireSeats.length = sleepers.length = labels.length = spots.length = openMouths.length = props.length = 0;
+    targets.length = placed.length = claimed.length = scenery.length = sceneryClaims.length = clouds.length = lamps.length = entranceLights.length = fireSeats.length = sleepers.length = labels.length = spots.length = openMouths.length = props.length = 0;
     RENDER_OPTS.lightCount = 0;
+    LIGHTING_DEBUG.registeredLampCount = LIGHTING_DEBUG.activeFullLightCount = LIGHTING_DEBUG.approximatedLightCount = LIGHTING_DEBUG.selectedCount = LIGHTING_DEBUG.approximatedCount = 0;
+    for (let i = 0; i < LIGHT_CAPACITY; i++) LIGHTING_DEBUG.selectedIds[i] = LIGHTING_DEBUG.approximatedIds[i] = null;
     sceneryVisible = sceneryRadiusCulled = sceneryPathCulled = sceneryFixedCulled = sceneryReflows = 0;
     const count = input.targetCount;
     input.dispose();
@@ -10893,7 +11151,7 @@ void main() {
         return world.level;
       }
     };
-    for (const key of ["slots", "drops", "core", "shell", "delivery", "cavemen", "crates", "lab", "hud", "applyAllSwag", "renderLocker", "demoTip", "setPileLevel", "refreshStates", "trimPool", "shown", "island", "mouths", "labels", "camera", "crew", "controls", "props", "altar", "path", "scenery", "jetpack", "mirrorCave", "matrixCave", "pilot", "renderOpts", "lamps", "fireSeats", "critters", "daylight", "setHour"]) {
+    for (const key of ["slots", "drops", "core", "shell", "delivery", "cavemen", "crates", "lab", "hud", "applyAllSwag", "renderLocker", "demoTip", "setPileLevel", "refreshStates", "trimPool", "shown", "island", "mouths", "labels", "camera", "crew", "controls", "props", "altar", "path", "scenery", "jetpack", "mirrorCave", "matrixCave", "pilot", "renderOpts", "lamps", "entranceLights", "lighting", "fireSeats", "critters", "daylight", "setHour"]) {
       Object.defineProperty(ooga, key, { get: () => active.debug[key], enumerable: true });
     }
     window.__ooga = ooga;

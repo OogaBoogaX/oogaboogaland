@@ -18,8 +18,8 @@ Open `src/index.html` in a browser, or serve `src/` with any static server.
 The page lands on the hub: a floating island whose cliff caves are the projects. Tap the
 lit cave to enter EntropyLab; **Escape** or the **Leave cave** button brings you back.
 
-The island keeps your local time. Dawn, morning, noon, dusk, night and midnight each have
-their own sky and light; the torches, the fire pit and the sign lanterns light at dusk,
+The island keeps your local date and time. The sun, moon, stars, sky, light and shadows
+move continuously through dawn, morning, noon, dusk, night and midnight; the torches, the fire pit and the sign lanterns light at dusk,
 butterflies give way to fireflies, the crew gathers at the fire and talks about the hour,
 and a shaken tree at night scatters fireflies.
 
@@ -40,8 +40,9 @@ URL flags: `?scene=lab` opens the lab directly, `?nosim=1` silences simulated ti
 `?debug=1` exposes `window.__ooga`. In debug mode, add `&bananas=10000` (or another
 non-negative amount) to preview the pile at that starting level without changing saved state,
 use `&b=500` to choose how many test bananas each press of **B** adds and drops, use
-`&hour=22` to pin the clock at an hour or `&daylen=120` to run a whole day in that many
-seconds, or use `&loot=1` to exercise the loot feature. Loot ships off: `LOOT_DEFAULT` in `src/js/director.js`
+`&hour=22` to pin the clock at an hour, `&day=172` to choose a day of year, or
+`&daylen=120` to run a whole day in that many seconds. `&latitude=20` optionally changes
+the debug latitude (bounded to 66 degrees north or south). Use `&loot=1` to exercise the loot feature. Loot ships off: `LOOT_DEFAULT` in `src/js/director.js`
 turns it on for everyone. The pile holds at most ten million bananas; every count is clamped there.
 
 ## Test

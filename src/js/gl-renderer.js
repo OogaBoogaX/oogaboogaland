@@ -3,10 +3,11 @@
   const BL = window.BL = window.BL || {};
   const { mat4 } = BL.math;
   const { updateWorld, traverseVisible, boundsOf } = BL.scene;
+  const POINT_LIGHT_CAPACITY = 7;
   const QUALITY = {
-    high: { dpr: 1.5, msaa: 4, shadow: 2048, bloom: true, mirror: 512, lights: 4 },
-    medium: { dpr: 1.25, msaa: 2, shadow: 1024, bloom: true, mirror: 384, lights: 4 },
-    low: { dpr: 1, msaa: 0, shadow: 512, bloom: false, mirror: 256, lights: 0 }
+    high: { dpr: 1.5, msaa: 4, shadow: 2048, bloom: true, mirror: 512, lights: POINT_LIGHT_CAPACITY },
+    medium: { dpr: 1.25, msaa: 2, shadow: 1024, bloom: true, mirror: 384, lights: POINT_LIGHT_CAPACITY },
+    low: { dpr: 1, msaa: 0, shadow: 512, bloom: false, mirror: 256, lights: POINT_LIGHT_CAPACITY }
   };
   const INSTANCE_FLOATS = 20;
   // Caps the pixel ratio to bound buffer memory
@@ -18,8 +19,10 @@
   const DEFAULT_CLEAR = [0.035, 0.035, 0.04];
   const DEFAULT_SHADOW_CENTER = { x: 0, y: 1.5, z: 0 };
   const DEFAULT_MOON = { x: 0, y: -1, z: 0 };
+  const DEFAULT_STAR_MATRIX = new Float32Array([1, 0, 0, 0, 1, 0, 0, 0, 1]);
   const CULL_MARGIN = 0.5;
   const UP = { x: 0, y: 1, z: 0 };
+  const NORTH_UP = { x: 0, y: 0, z: -1 };
   const ZERO4 = new Float32Array([0, 0, 0, 1]);
   const LIGHT_EYE = { x: 0, y: 0, z: 0 };
   const MESH_STRIDE = 10;
@@ -63,6 +66,9 @@ uniform vec3 uLightDir;
 uniform vec3 uSky;
 uniform vec3 uGround;
 uniform vec3 uSun;
+uniform float uDirectStrength;
+uniform float uShadowStrength;
+uniform float uShadowBias;
 uniform sampler2DShadow uShadow;
 uniform float uShadowTexel;
 uniform vec4 uLights[16];
@@ -85,11 +91,11 @@ void main() {
   float emissive = clamp(vColor.a * vParams.x, 0.0, 1.0);
   float ndl = max(dot(n, uLightDir), 0.0);
   vec3 sp = vShadow.xyz / vShadow.w * 0.5 + 0.5;
-  float bias = max(0.0035 * (1.0 - ndl), 0.0012);
+  float bias = max(uShadowBias * (1.0 - ndl), uShadowBias * 0.32);
   float sh = shadowAt(sp, bias);
   vec3 ambient = mix(uGround, uSky, n.y * 0.5 + 0.5);
-  vec3 lit = base * (ambient + uSun * ndl * sh);
-  for (int i = 0; i < 4; i++) {
+  vec3 lit = base * (ambient + uSun * ndl * uDirectStrength * mix(1.0, sh, uShadowStrength));
+  for (int i = 0; i < 7; i++) {
     if (i >= uLightCount) break;
     vec4 lp = uLights[i * 2];
     vec3 ld = lp.xyz - vWorld;
@@ -224,8 +230,9 @@ uniform vec3 uEye;
 uniform vec3 uHorizon;
 uniform vec3 uZenith;
 uniform vec3 uSun;
-uniform vec3 uLightDir;
+uniform vec3 uSunDir;
 uniform vec3 uMoonDir;
+uniform mat3 uStarMatrix;
 uniform float uStars;
 uniform float uTime;
 layout(location=0) out vec4 oColor;
@@ -240,19 +247,20 @@ void main() {
   vec3 d = normalize(far.xyz / far.w - uEye);
   vec3 col = mix(uHorizon, uZenith, smoothstep(-0.02, 0.5, d.y));
   col = mix(col, uHorizon * 0.55, smoothstep(0.0, 0.5, -d.y));
-  float sd = max(dot(d, uLightDir), 0.0);
+  float sd = max(dot(d, uSunDir), 0.0);
   float sunDisc = pow(sd, 600.0) * (1.0 - uStars);
   vec3 sun = uSun * (sunDisc + pow(sd, 6.0) * 0.18 * (1.0 - uStars));
   float moonDisc = smoothstep(0.9985, 0.999, dot(d, uMoonDir)) * uStars;
   vec3 moon = vec3(0.82, 0.88, 1.0) * moonDisc;
   vec3 stars = vec3(0.0);
   if (uStars > 0.002) {
-    vec3 a = abs(d);
+    vec3 starD = normalize(uStarMatrix * d);
+    vec3 a = abs(starD);
     vec2 f;
     float face;
-    if (a.x >= a.y && a.x >= a.z) { f = d.yz / a.x; face = d.x > 0.0 ? 0.0 : 1.0; }
-    else if (a.y >= a.z) { f = d.xz / a.y; face = d.y > 0.0 ? 2.0 : 3.0; }
-    else { f = d.xy / a.z; face = d.z > 0.0 ? 4.0 : 5.0; }
+    if (a.x >= a.y && a.x >= a.z) { f = starD.yz / a.x; face = starD.x > 0.0 ? 0.0 : 1.0; }
+    else if (a.y >= a.z) { f = starD.xz / a.y; face = starD.y > 0.0 ? 2.0 : 3.0; }
+    else { f = starD.xy / a.z; face = starD.z > 0.0 ? 4.0 : 5.0; }
     f = (f * 0.5 + 0.5) * 48.0;
     vec2 cell = floor(f) + face * 97.0;
     float h = hash(cell);
@@ -330,7 +338,7 @@ void main() {
     const mirrorInvViewProj = mat4.create();
     const FRUSTUM = new Float32Array(24);
     const CENTER = new Float32Array(3);
-    let culled = 0, drawn = 0;
+    let culled = 0, drawn = 0, shadowPassCount = 0;
     const mirrorEye = { x: 0, y: 0, z: 0 };
     const mirrorTarget = { x: 0, y: 0, z: 0 };
     const mirrorUp = { x: 0, y: 1, z: 0 };
@@ -393,10 +401,10 @@ void main() {
       ready = false;
       failure = null;
       res.programs = {
-        mesh: compile(MESH_VS, MESH_FS, ["uViewProj", "uLightViewProj", "uLightDir", "uSky", "uGround", "uSun", "uShadow", "uShadowTexel", "uLights", "uLightCount"]),
+        mesh: compile(MESH_VS, MESH_FS, ["uViewProj", "uLightViewProj", "uLightDir", "uSky", "uGround", "uSun", "uDirectStrength", "uShadowStrength", "uShadowBias", "uShadow", "uShadowTexel", "uLights", "uLightCount"]),
         shadow: compile(SHADOW_VS, SHADOW_FS, ["uLightViewProj"]),
         line: compile(LINE_VS, LINE_FS, ["uViewProj", "uViewport", "uWidth"]),
-        sky: compile(QUAD_VS, SKY_FS, ["uInvViewProj", "uEye", "uHorizon", "uZenith", "uSun", "uLightDir", "uMoonDir", "uStars", "uTime"]),
+        sky: compile(QUAD_VS, SKY_FS, ["uInvViewProj", "uEye", "uHorizon", "uZenith", "uSun", "uSunDir", "uMoonDir", "uStarMatrix", "uStars", "uTime"]),
         blur: compile(QUAD_VS, BLUR_FS, ["uTex", "uDir"]),
         composite: compile(QUAD_VS, COMPOSITE_FS, ["uScene", "uBloom", "uBloomStrength"])
       };
@@ -973,7 +981,7 @@ void main() {
       gl.depthMask(true);
       gl.depthFunc(gl.LESS);
     };
-    const renderMirrorCapture = (clear, sky, ground, sun, lx, ly, lz, sh, lights, lightCount, skyOn) => {
+    const renderMirrorCapture = (clear, sky, ground, direct, directStrength, shadowStrength, shadowBias, lx, ly, lz, sh, lights, lightCount, skyOn) => {
       ensureMirrorTarget();
       const pg = res.programs;
       gl.bindFramebuffer(gl.FRAMEBUFFER, mirror.msFb || mirror.fb);
@@ -986,7 +994,10 @@ void main() {
       gl.uniform3f(pg.mesh.u.uLightDir, lx, ly, lz);
       gl.uniform3fv(pg.mesh.u.uSky, sky);
       gl.uniform3fv(pg.mesh.u.uGround, ground);
-      gl.uniform3fv(pg.mesh.u.uSun, sun);
+      gl.uniform3fv(pg.mesh.u.uSun, direct);
+      gl.uniform1f(pg.mesh.u.uDirectStrength, directStrength);
+      gl.uniform1f(pg.mesh.u.uShadowStrength, shadowStrength);
+      gl.uniform1f(pg.mesh.u.uShadowBias, shadowBias);
       gl.uniform1f(pg.mesh.u.uShadowTexel, 1 / sh.size);
       gl.activeTexture(gl.TEXTURE0);
       gl.bindTexture(gl.TEXTURE_2D, sh.tex);
@@ -1052,6 +1063,11 @@ void main() {
         sky = DEFAULT_SKY,
         ground = DEFAULT_GROUND,
         sun = DEFAULT_SUN,
+        sunDirection = light,
+        direct = sun,
+        directStrength = 1,
+        shadowStrength = 1,
+        shadowBias = 0.0035,
         clear = DEFAULT_CLEAR,
         bloomStrength = 0.9,
         shadowCenter = DEFAULT_SHADOW_CENTER,
@@ -1060,6 +1076,7 @@ void main() {
         zenith,
         moon = DEFAULT_MOON,
         stars = 0,
+        starMatrix = DEFAULT_STAR_MATRIX,
         time = 0,
         lights,
         lightCount = 0
@@ -1074,14 +1091,17 @@ void main() {
       extractFrustum(viewProj);
       const llen = Math.hypot(light.x, light.y, light.z) || 1;
       const lx = light.x / llen, ly = light.y / llen, lz = light.z / llen;
+      const slen = Math.hypot(sunDirection.x, sunDirection.y, sunDirection.z) || 1;
+      const sx = sunDirection.x / slen, sy = sunDirection.y / slen, sz = sunDirection.z / slen;
       if (skyOn) {
         mat4.invert(invViewProj, viewProj);
         gl.useProgram(pg.sky.prog);
         gl.uniform3fv(pg.sky.u.uHorizon, horizon);
         gl.uniform3fv(pg.sky.u.uZenith, zenith);
         gl.uniform3fv(pg.sky.u.uSun, sun);
-        gl.uniform3f(pg.sky.u.uLightDir, lx, ly, lz);
+        gl.uniform3f(pg.sky.u.uSunDir, sx, sy, sz);
         gl.uniform3f(pg.sky.u.uMoonDir, moon.x, moon.y, moon.z);
+        gl.uniformMatrix3fv(pg.sky.u.uStarMatrix, false, starMatrix);
         gl.uniform1f(pg.sky.u.uStars, stars);
         gl.uniform1f(pg.sky.u.uTime, time);
       }
@@ -1090,8 +1110,13 @@ void main() {
       LIGHT_EYE.x = shadowCenter.x + lx * lightDist;
       LIGHT_EYE.y = shadowCenter.y + ly * lightDist;
       LIGHT_EYE.z = shadowCenter.z + lz * lightDist;
-      mat4.lookAt(lightView, LIGHT_EYE, shadowCenter, UP);
+      mat4.lookAt(lightView, LIGHT_EYE, shadowCenter, Math.abs(ly) > 0.96 ? NORTH_UP : UP);
       mat4.ortho(lightProj, -shadowExtent, shadowExtent, -shadowExtent, shadowExtent, Math.max(0.5, lightDist - lightDepth), lightDist + lightDepth);
+      mat4.multiply(lightViewProj, lightProj, lightView);
+      mat4.transformPoint4(P4, lightViewProj, 0, 0, 0);
+      const shadowSnap = sh.size * 0.5;
+      lightProj[12] += (Math.round(P4[0] * shadowSnap) - P4[0] * shadowSnap) / shadowSnap;
+      lightProj[13] += (Math.round(P4[1] * shadowSnap) - P4[1] * shadowSnap) / shadowSnap;
       mat4.multiply(lightViewProj, lightProj, lightView);
       for (const rec of activeRecords) {
         rec.active = false;
@@ -1120,6 +1145,7 @@ void main() {
       gl.cullFace(gl.FRONT);
       drawParts("mesh", "shadow");
       gl.cullFace(gl.BACK);
+      shadowPassCount++;
       if (mirror.node) {
         mirror.frame++;
         updateMirrorSide(camera);
@@ -1128,7 +1154,7 @@ void main() {
         } else if (prepareMirrorCamera(camera)) {
           if (settings !== QUALITY.high && mirror.frame % 2 === 0) skipMirrorPass("cadence");
           else if (!ensureMirrorProgram()) skipMirrorPass("shader-pending");
-          else renderMirrorCapture(clear, sky, ground, sun, lx, ly, lz, sh, lights, nLights, skyOn);
+          else renderMirrorCapture(clear, sky, ground, direct, directStrength, shadowStrength, shadowBias, lx, ly, lz, sh, lights, nLights, skyOn);
         }
       }
       gl.bindFramebuffer(gl.FRAMEBUFFER, f.scene);
@@ -1142,7 +1168,10 @@ void main() {
       gl.uniform3f(pg.mesh.u.uLightDir, lx, ly, lz);
       gl.uniform3fv(pg.mesh.u.uSky, sky);
       gl.uniform3fv(pg.mesh.u.uGround, ground);
-      gl.uniform3fv(pg.mesh.u.uSun, sun);
+      gl.uniform3fv(pg.mesh.u.uSun, direct);
+      gl.uniform1f(pg.mesh.u.uDirectStrength, directStrength);
+      gl.uniform1f(pg.mesh.u.uShadowStrength, shadowStrength);
+      gl.uniform1f(pg.mesh.u.uShadowBias, shadowBias);
       gl.uniform1f(pg.mesh.u.uShadowTexel, 1 / sh.size);
       gl.activeTexture(gl.TEXTURE0);
       gl.bindTexture(gl.TEXTURE_2D, sh.tex);
@@ -1252,7 +1281,9 @@ void main() {
         return qualityName;
       },
       get stats() {
-        return { records: records.size, active: activeRecords.length, mirrorResources: mirrorDebug.resources, culled, drawn };
+        let shadowFinite = true;
+        for (let i = 0; i < 16; i++) if (!Number.isFinite(lightViewProj[i])) shadowFinite = false;
+        return { records: records.size, active: activeRecords.length, mirrorResources: mirrorDebug.resources, shadowResources: res.shadow ? 2 : 0, shadowSize: res.shadow ? res.shadow.size : 0, shadowPassCount, shadowFinite, culled, drawn };
       },
       get mirror() {
         return mirrorDebug;

@@ -86,6 +86,7 @@
     };
     let eye = { x: 0, y: 0, z: 0 }, near = 0.2;
     const lightDir = new Float32Array([0, 1, 0]);
+    let directStrength = 1;
     const shadeNode = (node) => {
       const { verts, faces, lines } = node.geometry;
       const w = node.world;
@@ -138,7 +139,7 @@
           const emissive = (face.emissive || 0) * node.glow;
           const diffuse = Math.max(0, nx * lightDir[0] + ny * lightDir[1] + nz * lightDir[2]);
           const hemi = AMBIENT * (0.6 + 0.4 * (ny * 0.5 + 0.5));
-          let k = Math.min(1, hemi + diffuse * 0.7);
+          let k = Math.min(1, hemi + diffuse * 0.7 * directStrength);
           k = lerp(k, 1.1, Math.min(1, emissive));
           k = lerp(k, 1.3, node.highlight * 0.4);
           const c = face.color;
@@ -192,7 +193,7 @@
       }
     };
     const render = (root, camera, opts = {}) => {
-      const { light = DEFAULT_LIGHT, clear = null, sky = DEFAULT_SKY, ground = DEFAULT_GROUND, horizon = null, zenith = null } = opts;
+      const { light = DEFAULT_LIGHT, directStrength: strength = 1, clear = null, sky = DEFAULT_SKY, ground = DEFAULT_GROUND, horizon = null, zenith = null } = opts;
       if (!fixedW && (canvas.clientWidth !== width || canvas.clientHeight !== height)) resize();
       const gradientSky = !!(horizon && zenith);
       if (gradientSky) buildSky(horizon, zenith);
@@ -216,6 +217,7 @@
       lightDir[0] = light.x / llen;
       lightDir[1] = light.y / llen;
       lightDir[2] = light.z / llen;
+      directStrength = strength;
       poolUsed = 0;
       mirrorDebug.active = false;
       mirrorDebug.portal = false;
@@ -345,7 +347,7 @@
         return "low";
       },
       get stats() {
-        return { records: 0, active: 0, mirrorResources: 0, culled: 0, drawn: 0 };
+        return { records: 0, active: 0, mirrorResources: 0, shadowResources: 0, shadowSize: 0, shadowPassCount: 0, shadowFinite: true, culled: 0, drawn: 0 };
       },
       get mirror() {
         return mirrorDebug;
