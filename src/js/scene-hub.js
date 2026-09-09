@@ -41,6 +41,7 @@
   const HINT_AFTER = 120, HINT_EVERY = 12, HINT_PULSE = 1.6, HINT_MAX = 0.9;
   // Reach at which a caveman is inside a cave
   const TUNNEL_REACH = 2.2;
+  const MATRIX_TYPES = 8, MATRIX_TOP = 3.62, MATRIX_RANGE = 3.45, MATRIX_GAP = 0.19, MATRIX_NEAR = 28, MATRIX_PRELOAD = 18;
   // High-key daylight, sun from the right
   const RENDER_OPTS = { clear: [0.36, 0.56, 0.82], sky: [0.60, 0.64, 0.74], ground: [0.34, 0.34, 0.30], sun: [0.48, 0.44, 0.38], light: { x: 0.55, y: 0.78, z: -0.25 }, shadowCenter: { x: 0, y: 0, z: 0 }, shadowExtent: 34, bloomStrength: 0.5 };
   // Clock angle to a meadow point
@@ -85,7 +86,7 @@
   };
 
   // One visit's state, made in enter and dropped in leave
-  let renderer, game, world, go, lootEnabled, testBananas, root, camera, island, pathNode, altar, hud, hooks, input, pilot, fx, pile, crew, crates, presets, entering, stash, jetpack, mirrorCave;
+  let renderer, game, world, go, lootEnabled, testBananas, root, camera, island, pathNode, altar, hud, hooks, input, pilot, fx, pile, crew, crates, presets, entering, stash, jetpack, mirrorCave, matrixCave;
   let hintAt = HINT_AFTER;
   let stateTimer = 0, hintTimer = 0, meterTimer = 0, pileEdgeNow = 0, now = 0;
   const placed = [];
@@ -113,6 +114,154 @@
       p.z *= max / r;
     }
     return p;
+  };
+
+  // ---------- room behind the mirror ----------
+  const buildMatrixRain = (group, room, m) => {
+    const streamCount = renderer.kind === "canvas2d" ? 32 : 96;
+    const streamLength = renderer.kind === "canvas2d" ? 9 : 14;
+    const grouped = Array.from({ length: MATRIX_TYPES }, () => []);
+    const rand = mulberry32(0x0b00ba);
+    const cycle = MATRIX_RANGE + (streamLength - 1) * MATRIX_GAP;
+    const addStream = (x, z, angle) => {
+      const speed = 0.72 + rand() * 1.05, phase = rand() * cycle;
+      for (let character = 0; character < streamLength; character++) {
+        const tip = character === 0 ? 1 : character === 1 ? 0.55 : 0;
+        grouped[Math.floor(rand() * MATRIX_TYPES)].push({ x, z, angle, speed, phase, character, tip });
+      }
+    };
+    const freeCount = renderer.kind === "canvas2d" ? 18 : 48;
+    const entranceCount = renderer.kind === "canvas2d" ? 12 : 32;
+    const backCount = renderer.kind === "canvas2d" ? 8 : 24;
+    const sideCount = (streamCount - freeCount - backCount) / 2;
+    for (let i = 0; i < freeCount; i++) {
+      const z = i < entranceCount ? -2.25 + rand() * 1.55 : -5.75 + rand() * 3.2;
+      addStream(-2.5 + rand() * 5, z, (rand() - 0.5) * 0.18);
+    }
+    for (let i = 0; i < backCount; i++) addStream(-2.55 + (i + 0.5) / backCount * 5.1, -6.1, 0);
+    for (let i = 0; i < sideCount; i++) {
+      const z = -5.75 + (i + 0.5) / sideCount * 5.25;
+      const x = z > -2.5 ? 2.38 : 2.79;
+      addStream(-x, z, Math.PI / 2);
+      addStream(x, z, -Math.PI / 2);
+    }
+    const nodes = [], cr = Math.cos(m.ry), sr = Math.sin(m.ry);
+    for (let glyph = 0; glyph < MATRIX_TYPES; glyph++) {
+      const entries = grouped[glyph];
+      const node = createNode({ geometry: hubModels.matrixGlyph(glyph), instanceData: new Float32Array(entries.length * 20), instanceCount: entries.length, instanceVersion: 0 });
+      node.entries = entries;
+      addChild(root, node);
+      placed.push(node);
+      nodes.push(node);
+    }
+    return { group, room, mouth: m, nodes, cr, sr, cycle, streamCount, hangingStreamCount: freeCount, entranceStreamCount: entranceCount, wallStreamCount: streamCount - freeCount, streamLength, glyphCount: streamCount * streamLength, brightTipCount: streamCount * 2, capacity: streamCount * streamLength, updates: 0, prewarmCount: 0, preloaded: false, prewarmed: false, visible: false, firstGlyphY: 0 };
+  };
+  const updateMatrixRain = (elapsed) => {
+    if (!matrixCave) return;
+    const m = matrixCave.mouth, dx = camera.position.x - m.x, dz = camera.position.z - m.z;
+    const localX = matrixCave.cr * dx - matrixCave.sr * dz;
+    const localZ = matrixCave.sr * dx + matrixCave.cr * dz;
+    const distance = Math.hypot(dx, dz);
+    const preloaded = distance < MATRIX_PRELOAD;
+    const visible = distance < MATRIX_NEAR && Math.abs(localX) < 2.82 && localZ < 0.48 && localZ > -6.18;
+    const wasPreloaded = matrixCave.preloaded;
+    if (preloaded !== matrixCave.preloaded) {
+      matrixCave.preloaded = preloaded;
+      const scale = preloaded ? 1 : 0;
+      setVec(matrixCave.room.scale, scale, scale, scale);
+    }
+    matrixCave.visible = visible;
+    if (!preloaded && !wasPreloaded) return;
+    const cr = matrixCave.cr, sr = matrixCave.sr;
+    let first = true;
+    for (const node of matrixCave.nodes) {
+      const data = node.instanceData;
+      for (let i = 0; i < node.entries.length; i++) {
+        const entry = node.entries[i], offset = i * 20;
+        const y = m.floorY + MATRIX_TOP - ((elapsed * entry.speed + entry.phase) % matrixCave.cycle) + entry.character * MATRIX_GAP;
+        const shown = preloaded && y >= m.floorY + 0.13 && y <= m.floorY + MATRIX_TOP;
+        const ry = m.ry + entry.angle, c = Math.cos(ry), s = Math.sin(ry), scale = shown ? 1 : 0;
+        data[offset] = c * scale;
+        data[offset + 1] = 0;
+        data[offset + 2] = -s * scale;
+        data[offset + 3] = 0;
+        data[offset + 4] = 0;
+        data[offset + 5] = scale;
+        data[offset + 6] = 0;
+        data[offset + 7] = 0;
+        data[offset + 8] = s * scale;
+        data[offset + 9] = 0;
+        data[offset + 10] = c * scale;
+        data[offset + 11] = 0;
+        data[offset + 12] = m.x + cr * entry.x + sr * entry.z;
+        data[offset + 13] = y;
+        data[offset + 14] = m.z - sr * entry.x + cr * entry.z;
+        data[offset + 15] = 1;
+        data[offset + 16] = 0.78 + Math.sin(elapsed * 3 + entry.phase) * 0.16;
+        data[offset + 17] = 0;
+        data[offset + 18] = entry.tip;
+        data[offset + 19] = 0;
+        if (first) {
+          matrixCave.firstGlyphY = y;
+          first = false;
+        }
+      }
+      node.instanceVersion++;
+    }
+    if (preloaded) {
+      matrixCave.updates++;
+      if (!matrixCave.prewarmed) matrixCave.prewarmCount++;
+      matrixCave.prewarmed = true;
+    }
+  };
+  const inMatrixCave = (x, z) => {
+    if (!matrixCave) return false;
+    const m = matrixCave.mouth, dx = x - m.x, dz = z - m.z;
+    const lx = matrixCave.cr * dx - matrixCave.sr * dz;
+    const lz = matrixCave.sr * dx + matrixCave.cr * dz;
+    return Math.abs(lx) < 2.82 && lz < 0.72 && lz > -6.18;
+  };
+  const matrixOverlayVisible = (x, y, z) => {
+    if (!matrixCave || !matrixCave.visible) return true;
+    const m = matrixCave.mouth;
+    const cdx = camera.position.x - m.x, cdz = camera.position.z - m.z;
+    const tdx = x - m.x, tdz = z - m.z;
+    const cx = matrixCave.cr * cdx - matrixCave.sr * cdz;
+    const cz = matrixCave.sr * cdx + matrixCave.cr * cdz;
+    const tx = matrixCave.cr * tdx - matrixCave.sr * tdz;
+    const tz = matrixCave.sr * tdx + matrixCave.cr * tdz;
+    if (tz <= 0.5) return true;
+    const amount = (0.5 - cz) / (tz - cz);
+    if (amount <= 0 || amount >= 1) return false;
+    const ix = cx + (tx - cx) * amount;
+    const iy = camera.position.y - m.floorY + (y - camera.position.y) * amount;
+    return Math.abs(ix) <= 2.48 && iy >= -0.2 && iy <= 2.98;
+  };
+  const viewInsideMatrix = (lookOut = false) => {
+    const m = matrixCave.mouth, targetZ = lookOut ? 0.45 : -5.45;
+    const target = { x: m.x + matrixCave.sr * targetZ, y: m.floorY + 1.75, z: m.z + matrixCave.cr * targetZ };
+    const orbit = pilot.orbit, yaw = m.ry + (lookOut ? Math.PI : 0);
+    orbit.target = target;
+    orbit.tx = target.x;
+    orbit.ty = target.y;
+    orbit.tz = target.z;
+    orbit.yaw = orbit.tYaw = yaw;
+    orbit.pitch = orbit.tPitch = 0.08;
+    orbit.dist = orbit.tDist = 3.5;
+    pilot.update(0.1);
+  };
+  const viewMatrixApproach = () => {
+    const m = matrixCave.mouth;
+    const target = { x: m.x + matrixCave.sr * 0.5, y: m.floorY + 1.5, z: m.z + matrixCave.cr * 0.5 };
+    const orbit = pilot.orbit;
+    orbit.target = target;
+    orbit.tx = target.x;
+    orbit.ty = target.y;
+    orbit.tz = target.z;
+    orbit.yaw = orbit.tYaw = m.ry;
+    orbit.pitch = orbit.tPitch = 0.08;
+    orbit.dist = orbit.tDist = 12;
+    pilot.update(0.1);
   };
 
   // ---------- island ----------
@@ -176,9 +325,11 @@
       }
     } else if (slot.status === "mirror") {
       // Sit inside the rim so the cave floor ends behind the reflection.
-      const node = createNode({ position: { x: 0, y: 1.5, z: 0.5 }, geometry: hubModels.mirrorPanel(), mirror: true });
-      addChild(group, node);
-      mirrorCave = { slot, mouth: m, group, rim, node, sign: null };
+      const node = createNode({ position: { x: 0, y: 1.5, z: 0.5 }, geometry: hubModels.mirrorPanel(), mirror: true, mirrorWalkThrough: true });
+      const room = createNode({ geometry: hubModels.matrixChamber(), scale: { x: 0, y: 0, z: 0 } });
+      addChild(group, room, node);
+      matrixCave = buildMatrixRain(group, room, m);
+      mirrorCave = { slot, mouth: m, group, rim, room, node, sign: null };
     } else if (slot.status === "sleeping") {
       // Bedrolls lie along +x, as the sleep pose assumes
       addChild(group, createNode({ position: { x: 0, y: 0.05, z: -4.5 }, rotation: { x: 0, y: -m.ry, z: 0 }, geometry: hubModels.bedroll(), depthBias: 0.3 }));
@@ -725,7 +876,8 @@
     }
   };
   const clampCamera = (p) => {
-    p.y = Math.max(p.y, island.surfaceAt(p.x, p.z) + CLEARANCE);
+    if (inMatrixCave(p.x, p.z)) p.y = Math.min(matrixCave.mouth.floorY + 3.55, Math.max(p.y, matrixCave.mouth.floorY + 0.55));
+    else p.y = Math.max(p.y, island.surfaceAt(p.x, p.z) + CLEARANCE);
   };
 
   // ---------- per frame ----------
@@ -788,6 +940,7 @@
     fx.update(dt);
     stepTweens(dt);
     pilot.update(dt);
+    updateMatrixRain(elapsed);
     meterTimer -= dt;
     if (meterTimer <= 0) {
       meterTimer = 0.25;
@@ -919,7 +1072,7 @@
     buildClouds();
     hideJetpack();
     mark("props");
-    const shared = { root, input, hooks, hud, game, world, renderer, camera, overlay: ctx.overlay, tickerAt: TICKER_AT, buildSpots: buildSpotsList, walkIn: WALK_IN, clampDrag, viewYaw: PILE_VIEW.yaw, bedrolls, pileScale: PILE_SCALE, pileY: ALTAR_HEIGHT + 0.02, onLayout: layoutPile, onShown: () => { meterTimer = 0; }, crateRadius: () => Math.max(4.4, altar.platformRadius + 0.8), groundAt: supportAt, wanderSpot, walkable, flyable, useNear };
+    const shared = { root, input, hooks, hud, game, world, renderer, camera, overlay: ctx.overlay, overlayVisible: matrixOverlayVisible, tickerAt: TICKER_AT, buildSpots: buildSpotsList, walkIn: WALK_IN, clampDrag, viewYaw: PILE_VIEW.yaw, bedrolls, pileScale: PILE_SCALE, pileY: ALTAR_HEIGHT + 0.02, onLayout: layoutPile, onShown: () => { meterTimer = 0; }, crateRadius: () => Math.max(4.4, altar.platformRadius + 0.8), groundAt: supportAt, wanderSpot, walkable, flyable, useNear };
     fx = shared.fx = fxMod.create(shared);
     pile = shared.pile = pileMod.create(shared);
     mark("pile");
@@ -997,7 +1150,7 @@
     Object.assign(hubScene, {
       root, camera, input,
       debug: {
-        slots: pile.slots, drops: pile.drops, core: pile.core, shell: pile.shell, cavemen: crew.cavemen, crates: crates.list, lab: null, hud, applyAllSwag: crew.applyAllSwag, renderLocker: crew.renderLocker, demoTip, setPileLevel: pile.setLevel, refreshStates: crew.refreshStates, trimPool: fx.trimPool,
+        slots: pile.slots, drops: pile.drops, core: pile.core, shell: pile.shell, delivery: pile.delivery, cavemen: crew.cavemen, crates: crates.list, lab: null, hud, applyAllSwag: crew.applyAllSwag, renderLocker: crew.renderLocker, demoTip, setPileLevel: pile.setLevel, refreshStates: crew.refreshStates, trimPool: fx.trimPool,
         get shown() {
           return pile.shown;
         },
@@ -1012,6 +1165,27 @@
           get clearanceRadius() { return island.path.debug.ringOuterRadius + SCENERY_CLEARANCE; }
         },
         mirrorCave,
+        matrixCave: {
+          get streamCount() { return matrixCave.streamCount; },
+          get hangingStreamCount() { return matrixCave.hangingStreamCount; },
+          get entranceStreamCount() { return matrixCave.entranceStreamCount; },
+          get wallStreamCount() { return matrixCave.wallStreamCount; },
+          get streamLength() { return matrixCave.streamLength; },
+          get glyphCount() { return matrixCave.glyphCount; },
+          get brightTipCount() { return matrixCave.brightTipCount; },
+          get capacity() { return matrixCave.capacity; },
+          get updates() { return matrixCave.updates; },
+          get prewarmCount() { return matrixCave.prewarmCount; },
+          get preloaded() { return matrixCave.preloaded; },
+          get preloadDistance() { return MATRIX_PRELOAD; },
+          get roomScale() { return matrixCave.room.scale.x; },
+          get visible() { return matrixCave.visible; },
+          get firstGlyphY() { return matrixCave.firstGlyphY; },
+          contains: inMatrixCave,
+          overlayVisible: matrixOverlayVisible,
+          viewApproach: viewMatrixApproach,
+          viewInside: viewInsideMatrix
+        },
         get jetpack() {
           return {
             stash, pickup: jetpack, hintAt,
@@ -1043,7 +1217,7 @@
     input.dispose();
     hud.dispose();
     // Drop everything but the cached island
-    pathNode = altar = hud = hooks = input = pilot = fx = pile = crew = crates = presets = stash = jetpack = mirrorCave = null;
+    pathNode = altar = hud = hooks = input = pilot = fx = pile = crew = crates = presets = stash = jetpack = mirrorCave = matrixCave = null;
     hubScene.input = hubScene.debug = null;
     return { targets: count };
   };

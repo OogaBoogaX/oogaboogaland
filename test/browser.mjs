@@ -106,7 +106,15 @@ export const launch = async ({ w = 1440, h = 900, mobile = false } = {}) => {
   const close = () => {
     ws.close();
     chrome.kill();
-    setTimeout(() => rmSync(profile, { recursive: true, force: true }), 500).unref();
+    const removeProfile = (attempt = 0) => {
+      try {
+        rmSync(profile, { recursive: true, force: true });
+      } catch (err) {
+        if (err.code !== "ENOTEMPTY" || attempt === 4) return;
+        setTimeout(() => removeProfile(attempt + 1), 250 * (attempt + 1)).unref();
+      }
+    };
+    setTimeout(removeProfile, 500).unref();
   };
   return { send, on, evaluate, mouse, drag, click, key, focus, screenshot, open, close, sleep, logs };
 };

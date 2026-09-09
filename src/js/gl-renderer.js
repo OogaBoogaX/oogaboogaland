@@ -84,8 +84,10 @@ void main() {
   vec3 lit = base * (ambient + uSun * ndl * sh);
   vec3 col = mix(lit, base * 1.15, emissive);
   col = mix(col, vec3(1.0, 0.86, 0.45), vParams.y * 0.4);
+  float tip = clamp(vParams.z, 0.0, 1.0);
+  col = mix(col, vec3(0.84, 1.0, 0.89), tip * 0.88);
   oColor = vec4(col, 1.0);
-  oBright = vec4(col * (emissive * 0.9 + vParams.y * 0.5), 1.0);
+  oBright = vec4(col * (emissive * 0.9 + vParams.y * 0.5 + tip * 0.85), 1.0);
 }`;
   const SHADOW_VS = `#version 300 es
 precision highp float;
@@ -163,22 +165,27 @@ uniform mat4 uViewProj;
 uniform mat4 uReflectionViewProj;
 out vec4 vReflection;
 out vec3 vWorld;
+out vec2 vPortalUv;
 void main() {
   vec4 world = mat4(aM0, aM1, aM2, aM3) * vec4(aPos, 1.0);
   vWorld = world.xyz;
   vReflection = uReflectionViewProj * world;
+  vPortalUv = vec2(aPos.x / 5.0 + 0.5, 1.0 - (aPos.y + 1.75) / 3.25);
   gl_Position = uViewProj * world;
 }`;
   const MIRROR_FS = `#version 300 es
 precision highp float;
 in vec4 vReflection;
 in vec3 vWorld;
+in vec2 vPortalUv;
 uniform sampler2D uReflection;
 uniform vec3 uTint;
+uniform float uPortal;
 layout(location=0) out vec4 oColor;
 layout(location=1) out vec4 oBright;
 void main() {
-  vec2 uv = vReflection.xy / vReflection.w * 0.5 + 0.5;
+  vec2 projectedUv = vReflection.xy / vReflection.w * 0.5 + 0.5;
+  vec2 uv = mix(projectedUv, vPortalUv, uPortal);
   vec3 reflected = texture(uReflection, uv).rgb;
   float sheen = pow(max(0.0, 1.0 - abs(fract((vWorld.x + vWorld.y) * 0.22) - 0.5) * 7.0), 5.0) * 0.08;
   vec3 color = mix(reflected, uTint, 0.1) + sheen;
@@ -255,9 +262,9 @@ void main() {
     const records = new Map();
     const activeRecords = [];
     const res = { programs: {}, fbo: null, shadow: null, bloom: null, quadVao: null };
-    const mirror = { node: null, record: null, geometry: null, program: null, programReady: false, fb: null, tex: null, depth: null, color: null, msFb: null, msaa: -1, width: 0, height: 0, frame: 0 };
+    const mirror = { node: null, record: null, geometry: null, program: null, programReady: false, fb: null, tex: null, depth: null, color: null, msFb: null, msaa: -1, width: 0, height: 0, frame: 0, portal: false, walkThrough: false, captureValid: false };
     const mirrorDebug = {
-      active: false, faux: false, width: 0, height: 0, samples: 0, allocationCount: 0, reflectionPassCount: 0, skippedPassCount: 0, resources: 0, captureExcluded: false,
+      active: false, faux: false, portal: false, surfaceDrawn: false, captureValid: false, width: 0, height: 0, samples: 0, allocationCount: 0, reflectionPassCount: 0, skippedPassCount: 0, resources: 0, captureExcluded: false,
       cameraPosition: new Float32Array(3), cameraTarget: new Float32Array(3), planeCenter: new Float32Array(3), planeNormal: new Float32Array(3), capturedViewProj: mirrorCapturedViewProj, skipReason: "none"
     };
     // Compile without blocking, ready flips once linked
@@ -298,7 +305,7 @@ void main() {
     };
     const ensureMirrorProgram = () => {
       if (!mirror.program) {
-        mirror.program = compile(MIRROR_VS, MIRROR_FS, ["uViewProj", "uReflectionViewProj", "uReflection", "uTint"]);
+        mirror.program = compile(MIRROR_VS, MIRROR_FS, ["uViewProj", "uReflectionViewProj", "uReflection", "uTint", "uPortal"]);
         mirrorDebug.resources++;
       }
       if (mirror.programReady) return true;
@@ -353,6 +360,7 @@ void main() {
       gl.deleteTexture(mirror.tex);
       gl.deleteRenderbuffer(mirror.depth);
       gl.deleteFramebuffer(mirror.fb);
+      mirror.captureValid = mirrorDebug.captureValid = false;
       mirrorDebug.resources -= 3;
       if (mirror.msFb) {
         gl.deleteRenderbuffer(mirror.color);
@@ -397,7 +405,10 @@ void main() {
       destroyMirrorTarget();
       destroyMirrorProgram();
       mirror.node = mirror.record = mirror.geometry = null;
+      mirror.portal = mirror.walkThrough = false;
       mirrorDebug.active = false;
+      mirrorDebug.portal = false;
+      mirrorDebug.surfaceDrawn = false;
       mirrorDebug.captureExcluded = false;
     };
     const forgetMirror = () => {
@@ -405,7 +416,10 @@ void main() {
       mirror.programReady = false;
       mirror.msaa = -1;
       mirror.width = mirror.height = mirrorDebug.width = mirrorDebug.height = mirrorDebug.samples = 0;
+      mirror.portal = mirror.walkThrough = mirror.captureValid = false;
       mirrorDebug.active = false;
+      mirrorDebug.portal = mirrorDebug.captureValid = false;
+      mirrorDebug.surfaceDrawn = false;
       mirrorDebug.captureExcluded = false;
       mirrorDebug.resources = 0;
     };
@@ -491,6 +505,11 @@ void main() {
       res.shadow = { tex, fb, size };
     };
     const deleteRecord = (rec) => {
+      if (rec.active) {
+        const index = activeRecords.indexOf(rec);
+        if (index >= 0) activeRecords.splice(index, 1);
+        rec.active = false;
+      }
       if (rec.mesh) {
         gl.deleteVertexArray(rec.mesh.vao);
         gl.deleteBuffer(rec.mesh.vbo);
@@ -613,14 +632,17 @@ void main() {
     };
     const collect = (node) => {
       if (!node.geometry) return;
-      if (node.mirror) {
+      if (node.mirror || node.mirrorPortal) {
         if (mirror.node) throw new Error("A scene may contain at most one mirror node");
         mirror.node = node;
         mirror.geometry = node.geometry;
+        mirror.portal = !!node.mirrorPortal;
+        mirror.walkThrough = !!node.mirrorWalkThrough;
         mirrorDebug.active = true;
+        mirrorDebug.portal = mirror.portal;
       }
       const rec = recordFor(node.geometry);
-      if (node.mirror) mirror.record = rec;
+      if (node.mirror || node.mirrorPortal) mirror.record = rec;
       if (!rec.active) {
         rec.active = true;
         rec.count = 0;
@@ -698,6 +720,20 @@ void main() {
       MIRROR_RECT[2] = maxX;
       MIRROR_RECT[3] = maxY;
       return true;
+    };
+    const updateMirrorSide = (camera) => {
+      if (!mirror.walkThrough) return;
+      const world = mirror.node.world, center = mirrorDebug.planeCenter, normal = mirrorDebug.planeNormal;
+      center[0] = world[12];
+      center[1] = world[13];
+      center[2] = world[14];
+      const nlen = Math.hypot(world[8], world[9], world[10]) || 1;
+      normal[0] = world[8] / nlen;
+      normal[1] = world[9] / nlen;
+      normal[2] = world[10] / nlen;
+      const side = (camera.position.x - center[0]) * normal[0] + (camera.position.y - center[1]) * normal[1] + (camera.position.z - center[2]) * normal[2];
+      mirror.portal = side <= 0.001;
+      mirrorDebug.portal = mirror.portal;
     };
     const prepareMirrorCamera = (camera) => {
       const node = mirror.node, world = node.world, center = mirrorDebug.planeCenter, normal = mirrorDebug.planeNormal;
@@ -845,21 +881,24 @@ void main() {
         gl.blitFramebuffer(0, 0, mirror.width, mirror.height, 0, 0, mirror.width, mirror.height, gl.COLOR_BUFFER_BIT, gl.NEAREST);
       }
       mirrorCapturedViewProj.set(mirrorViewProj);
+      mirror.captureValid = mirrorDebug.captureValid = true;
       mirrorDebug.reflectionPassCount++;
       mirrorDebug.captureExcluded = true;
     };
     const drawMirrorSurface = () => {
       const rec = mirror.record, part = rec && rec.mesh, pg = mirror.program;
-      if (!part || !mirror.tex || !mirror.programReady) return;
+      if (mirror.portal || !part || !mirror.tex || !mirror.programReady || !mirror.captureValid) return;
       gl.useProgram(pg.prog);
       gl.uniformMatrix4fv(pg.u.uViewProj, false, viewProj);
       gl.uniformMatrix4fv(pg.u.uReflectionViewProj, false, mirrorCapturedViewProj);
       gl.uniform3f(pg.u.uTint, 0.56, 0.62, 0.67);
+      gl.uniform1f(pg.u.uPortal, mirror.portal ? 1 : 0);
       gl.activeTexture(gl.TEXTURE2);
       gl.bindTexture(gl.TEXTURE_2D, mirror.tex);
       gl.uniform1i(pg.u.uReflection, 2);
       gl.bindVertexArray(part.vao);
       gl.drawArraysInstanced(gl.TRIANGLES, 0, part.count, rec.count);
+      mirrorDebug.surfaceDrawn = true;
       gl.activeTexture(gl.TEXTURE0);
     };
     const blit = (f) => {
@@ -914,7 +953,10 @@ void main() {
       }
       activeRecords.length = 0;
       mirror.node = mirror.record = null;
+      mirror.portal = mirror.walkThrough = false;
       mirrorDebug.active = false;
+      mirrorDebug.portal = false;
+      mirrorDebug.surfaceDrawn = false;
       updateWorld(root, null);
       traverseVisible(root, collect);
       for (const rec of activeRecords) {
@@ -931,7 +973,10 @@ void main() {
       gl.cullFace(gl.BACK);
       if (mirror.node) {
         mirror.frame++;
-        if (prepareMirrorCamera(camera)) {
+        updateMirrorSide(camera);
+        if (mirror.portal) {
+          skipMirrorPass("portal-open");
+        } else if (prepareMirrorCamera(camera)) {
           if (settings !== QUALITY.high && mirror.frame % 2 === 0) skipMirrorPass("cadence");
           else if (!ensureMirrorProgram()) skipMirrorPass("shader-pending");
           else renderMirrorCapture(clear, sky, ground, sun, lx, ly, lz, sh);

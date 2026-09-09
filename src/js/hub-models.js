@@ -143,6 +143,64 @@
     };
     return geo;
   });
+  const MATRIX_GLYPHS = [
+    ["0110", "1001", "1111", "1001", "1001", "0000"],
+    ["1110", "1001", "1110", "1001", "1110", "0000"],
+    ["1111", "1000", "1110", "1000", "1111", "0000"],
+    ["1001", "1001", "1111", "0001", "1110", "0000"],
+    ["1111", "0110", "0110", "0110", "1111", "0000"],
+    ["1000", "1100", "1010", "0110", "0010", "0000"],
+    ["0110", "1111", "0110", "1111", "0110", "0000"],
+    ["1001", "0110", "1001", "0110", "1001", "0000"]
+  ];
+  const matrixGlyph = variants((i) => {
+    const rows = MATRIX_GLYPHS[i % MATRIX_GLYPHS.length], pixels = [];
+    for (let y = 0; y < rows.length; y++) {
+      for (let x = 0; x < rows[y].length; x++) {
+        if (rows[y][x] !== "1") continue;
+        pixels.push(box({ w: 0.016, h: 0.016, d: 0.01, color: i & 1 ? "#46ff70" : "#18dc4a", emissive: 1, offset: { x: (x - 1.5) * 0.021, y: (2.5 - y) * 0.021 } }));
+      }
+    }
+    const geo = merge(...pixels);
+    geo.castShadow = false;
+    return geo;
+  });
+  // A black-lined vestibule and room that stop just behind c1's mirror plane.
+  const matrixChamber = cached(() => {
+    const portalBack = 0.48, vestibuleBack = -2.5;
+    const vestibuleDepth = portalBack - vestibuleBack;
+    const vestibuleCenter = (portalBack + vestibuleBack) * 0.5;
+    const roomBack = -6.2;
+    const openFrontBox = (opts) => {
+      const geo = box(opts);
+      geo.faces.shift();
+      return geo;
+    };
+    const header = {
+      verts: [-2.9, 3, portalBack, -2.9, 3.9, portalBack, 2.9, 3.9, portalBack, 2.9, 3, portalBack],
+      faces: [{ i: [0, 1, 2, 3], color: hexToRgb("#000000"), emissive: 0 }],
+      lines: []
+    };
+    const geo = merge(
+      openFrontBox({ w: 5.8, h: 0.04, d: portalBack - roomBack, color: "#000000", offset: { y: 0, z: (portalBack + roomBack) * 0.5 } }),
+      box({ w: 5.8, h: 0.14, d: 3.7, color: "#000000", offset: { y: 3.82, z: -4.35 } }),
+      box({ w: 0.16, h: 3.8, d: 3.7, color: "#000000", offset: { x: -2.9, y: 1.9, z: -4.35 } }),
+      box({ w: 0.16, h: 3.8, d: 3.7, color: "#000000", offset: { x: 2.9, y: 1.9, z: -4.35 } }),
+      openFrontBox({ w: 5, h: 0.04, d: vestibuleDepth, color: "#000000", offset: { y: 3, z: vestibuleCenter } }),
+      openFrontBox({ w: 0.04, h: 3, d: vestibuleDepth, color: "#000000", offset: { x: -2.49, y: 1.5, z: vestibuleCenter } }),
+      openFrontBox({ w: 0.04, h: 3, d: vestibuleDepth, color: "#000000", offset: { x: 2.49, y: 1.5, z: vestibuleCenter } }),
+      header,
+      box({ w: 0.4, h: 3.8, d: 0.03, color: "#000000", offset: { x: -2.7, y: 1.9, z: -2.485 } }),
+      box({ w: 0.4, h: 3.8, d: 0.03, color: "#000000", offset: { x: 2.7, y: 1.9, z: -2.485 } }),
+      box({ w: 5.8, h: 3.8, d: 0.14, color: "#000000", offset: { y: 1.9, z: -6.2 } })
+    );
+    geo.castShadow = false;
+    geo.frontZ = portalBack;
+    geo.claddingFrontZ = portalBack;
+    geo.headerMinY = 3;
+    geo.transitionCladdingZ = -2.485;
+    return geo;
+  });
   // Gateway arch over the pass, trail along z
   const gate = cached(() => {
     const rand = mulberry32(67);
@@ -300,5 +358,5 @@
     box({ w: 4, h: 0.14, d: 0.16, color: WOOD_DK, offset: { x: 2, y: -0.17, z: 0.92 } }),
     ...[[0.5, -0.8], [0.5, 0.8], [3.5, -0.8], [3.5, 0.8]].map(([x, z]) => box({ w: 0.2, h: 2.2, d: 0.2, color: "#6b4a2b", offset: { x, y: -1.2, z } }))
   ));
-  BL.hubModels = { jetpack, jetFlame, caveMouthRim, mirrorPanel, caveSign, CAVE_SIGN_WIDTH, CAVE_SIGN_HEIGHT, gate, caveShelves, bedroll, tree, bush, rock, altarSlab, altarBlock, woodCrate, barrel, flowerTuft, torch, vine, cloud, ladder, dock, TREE_HEIGHT };
+  BL.hubModels = { jetpack, jetFlame, caveMouthRim, mirrorPanel, matrixGlyph, matrixChamber, caveSign, CAVE_SIGN_WIDTH, CAVE_SIGN_HEIGHT, gate, caveShelves, bedroll, tree, bush, rock, altarSlab, altarBlock, woodCrate, barrel, flowerTuft, torch, vine, cloud, ladder, dock, TREE_HEIGHT };
 })();
