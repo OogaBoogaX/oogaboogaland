@@ -67,7 +67,10 @@ uniform vec3 uSky;
 uniform vec3 uGround;
 uniform vec3 uSun;
 uniform float uDirectStrength;
+uniform float uAmbientFloor;
+uniform float uDiffuseFloor;
 uniform float uShadowStrength;
+uniform float uShadowFloor;
 uniform float uShadowBias;
 uniform sampler2DShadow uShadow;
 uniform float uShadowTexel;
@@ -89,12 +92,13 @@ void main() {
   vec3 n = normalize(vNormal);
   vec3 base = vColor.rgb;
   float emissive = clamp(vColor.a * vParams.x, 0.0, 1.0);
-  float ndl = max(dot(n, uLightDir), 0.0);
+  float ndl = max(max(dot(n, uLightDir), 0.0), uDiffuseFloor);
   vec3 sp = vShadow.xyz / vShadow.w * 0.5 + 0.5;
   float bias = max(uShadowBias * (1.0 - ndl), uShadowBias * 0.32);
   float sh = shadowAt(sp, bias);
-  vec3 ambient = mix(uGround, uSky, n.y * 0.5 + 0.5);
-  vec3 lit = base * (ambient + uSun * ndl * uDirectStrength * mix(1.0, sh, uShadowStrength));
+  vec3 ambient = max(mix(uGround, uSky, n.y * 0.5 + 0.5), vec3(uAmbientFloor));
+  float shadow = mix(1.0, max(sh, uShadowFloor), uShadowStrength);
+  vec3 lit = base * (ambient + uSun * ndl * uDirectStrength * shadow);
   for (int i = 0; i < 7; i++) {
     if (i >= uLightCount) break;
     vec4 lp = uLights[i * 2];
@@ -401,7 +405,7 @@ void main() {
       ready = false;
       failure = null;
       res.programs = {
-        mesh: compile(MESH_VS, MESH_FS, ["uViewProj", "uLightViewProj", "uLightDir", "uSky", "uGround", "uSun", "uDirectStrength", "uShadowStrength", "uShadowBias", "uShadow", "uShadowTexel", "uLights", "uLightCount"]),
+        mesh: compile(MESH_VS, MESH_FS, ["uViewProj", "uLightViewProj", "uLightDir", "uSky", "uGround", "uSun", "uDirectStrength", "uAmbientFloor", "uDiffuseFloor", "uShadowStrength", "uShadowFloor", "uShadowBias", "uShadow", "uShadowTexel", "uLights", "uLightCount"]),
         shadow: compile(SHADOW_VS, SHADOW_FS, ["uLightViewProj"]),
         line: compile(LINE_VS, LINE_FS, ["uViewProj", "uViewport", "uWidth"]),
         sky: compile(QUAD_VS, SKY_FS, ["uInvViewProj", "uEye", "uHorizon", "uZenith", "uSun", "uSunDir", "uMoonDir", "uStarMatrix", "uStars", "uTime"]),
@@ -846,8 +850,7 @@ void main() {
       normal[0] = world[8] / nlen;
       normal[1] = world[9] / nlen;
       normal[2] = world[10] / nlen;
-      const side = (camera.position.x - center[0]) * normal[0] + (camera.position.y - center[1]) * normal[1] + (camera.position.z - center[2]) * normal[2];
-      mirror.portal = side <= 0.001;
+      mirror.portal = !!mirror.node.mirrorPortal;
       mirrorDebug.portal = mirror.portal;
     };
     const prepareMirrorCamera = (camera) => {
@@ -981,7 +984,7 @@ void main() {
       gl.depthMask(true);
       gl.depthFunc(gl.LESS);
     };
-    const renderMirrorCapture = (clear, sky, ground, direct, directStrength, shadowStrength, shadowBias, lx, ly, lz, sh, lights, lightCount, skyOn) => {
+    const renderMirrorCapture = (clear, sky, ground, direct, directStrength, ambientFloor, diffuseFloor, shadowStrength, shadowFloor, shadowBias, lx, ly, lz, sh, lights, lightCount, skyOn) => {
       ensureMirrorTarget();
       const pg = res.programs;
       gl.bindFramebuffer(gl.FRAMEBUFFER, mirror.msFb || mirror.fb);
@@ -996,7 +999,10 @@ void main() {
       gl.uniform3fv(pg.mesh.u.uGround, ground);
       gl.uniform3fv(pg.mesh.u.uSun, direct);
       gl.uniform1f(pg.mesh.u.uDirectStrength, directStrength);
+      gl.uniform1f(pg.mesh.u.uAmbientFloor, ambientFloor);
+      gl.uniform1f(pg.mesh.u.uDiffuseFloor, diffuseFloor);
       gl.uniform1f(pg.mesh.u.uShadowStrength, shadowStrength);
+      gl.uniform1f(pg.mesh.u.uShadowFloor, shadowFloor);
       gl.uniform1f(pg.mesh.u.uShadowBias, shadowBias);
       gl.uniform1f(pg.mesh.u.uShadowTexel, 1 / sh.size);
       gl.activeTexture(gl.TEXTURE0);
@@ -1066,7 +1072,10 @@ void main() {
         sunDirection = light,
         direct = sun,
         directStrength = 1,
+        ambientFloor = 0,
+        diffuseFloor = 0,
         shadowStrength = 1,
+        shadowFloor = 0,
         shadowBias = 0.0035,
         clear = DEFAULT_CLEAR,
         bloomStrength = 0.9,
@@ -1154,7 +1163,7 @@ void main() {
         } else if (prepareMirrorCamera(camera)) {
           if (settings !== QUALITY.high && mirror.frame % 2 === 0) skipMirrorPass("cadence");
           else if (!ensureMirrorProgram()) skipMirrorPass("shader-pending");
-          else renderMirrorCapture(clear, sky, ground, direct, directStrength, shadowStrength, shadowBias, lx, ly, lz, sh, lights, nLights, skyOn);
+          else renderMirrorCapture(clear, sky, ground, direct, directStrength, ambientFloor, diffuseFloor, shadowStrength, shadowFloor, shadowBias, lx, ly, lz, sh, lights, nLights, skyOn);
         }
       }
       gl.bindFramebuffer(gl.FRAMEBUFFER, f.scene);
@@ -1170,7 +1179,10 @@ void main() {
       gl.uniform3fv(pg.mesh.u.uGround, ground);
       gl.uniform3fv(pg.mesh.u.uSun, direct);
       gl.uniform1f(pg.mesh.u.uDirectStrength, directStrength);
+      gl.uniform1f(pg.mesh.u.uAmbientFloor, ambientFloor);
+      gl.uniform1f(pg.mesh.u.uDiffuseFloor, diffuseFloor);
       gl.uniform1f(pg.mesh.u.uShadowStrength, shadowStrength);
+      gl.uniform1f(pg.mesh.u.uShadowFloor, shadowFloor);
       gl.uniform1f(pg.mesh.u.uShadowBias, shadowBias);
       gl.uniform1f(pg.mesh.u.uShadowTexel, 1 / sh.size);
       gl.activeTexture(gl.TEXTURE0);

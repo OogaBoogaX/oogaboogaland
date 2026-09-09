@@ -15,7 +15,6 @@
     const active = [];
     const DEFAULT_LIGHT = { x: 0.45, y: 0.85, z: 0.3 };
     const UP = { x: 0, y: 1, z: 0 };
-    const AMBIENT = 0.5;
     const view = mat4.create();
     const pool = [];
     let poolUsed = 0;
@@ -86,7 +85,7 @@
     };
     let eye = { x: 0, y: 0, z: 0 }, near = 0.2;
     const lightDir = new Float32Array([0, 1, 0]);
-    let directStrength = 1;
+    let directStrength = 1, ambientFloor = 0.3, diffuseFloor = 0, skyLuma = 0.5, groundLuma = 0.2;
     const shadeNode = (node) => {
       const { verts, faces, lines } = node.geometry;
       const w = node.world;
@@ -137,8 +136,8 @@
           rec.mirror = mirrorFace;
           rec.portal = portalFace;
           const emissive = (face.emissive || 0) * node.glow;
-          const diffuse = Math.max(0, nx * lightDir[0] + ny * lightDir[1] + nz * lightDir[2]);
-          const hemi = AMBIENT * (0.6 + 0.4 * (ny * 0.5 + 0.5));
+          const diffuse = Math.max(diffuseFloor, nx * lightDir[0] + ny * lightDir[1] + nz * lightDir[2]);
+          const hemi = Math.max(ambientFloor, lerp(groundLuma, skyLuma, ny * 0.5 + 0.5));
           let k = Math.min(1, hemi + diffuse * 0.7 * directStrength);
           k = lerp(k, 1.1, Math.min(1, emissive));
           k = lerp(k, 1.3, node.highlight * 0.4);
@@ -193,7 +192,7 @@
       }
     };
     const render = (root, camera, opts = {}) => {
-      const { light = DEFAULT_LIGHT, directStrength: strength = 1, clear = null, sky = DEFAULT_SKY, ground = DEFAULT_GROUND, horizon = null, zenith = null } = opts;
+      const { light = DEFAULT_LIGHT, directStrength: strength = 1, ambientFloor: ambient = 0.3, diffuseFloor: diffuse = 0, clear = null, sky = DEFAULT_SKY, ground = DEFAULT_GROUND, horizon = null, zenith = null } = opts;
       if (!fixedW && (canvas.clientWidth !== width || canvas.clientHeight !== height)) resize();
       const gradientSky = !!(horizon && zenith);
       if (gradientSky) buildSky(horizon, zenith);
@@ -218,6 +217,10 @@
       lightDir[1] = light.y / llen;
       lightDir[2] = light.z / llen;
       directStrength = strength;
+      ambientFloor = ambient;
+      diffuseFloor = diffuse;
+      skyLuma = sky[0] * 0.2126 + sky[1] * 0.7152 + sky[2] * 0.0722;
+      groundLuma = ground[0] * 0.2126 + ground[1] * 0.7152 + ground[2] * 0.0722;
       poolUsed = 0;
       mirrorDebug.active = false;
       mirrorDebug.portal = false;
@@ -237,7 +240,7 @@
           mirrorDebug.planeNormal[2] = w[10] / nlen;
           const center = mirrorDebug.planeCenter, normal = mirrorDebug.planeNormal;
           const eyeD = (camera.position.x - center[0]) * normal[0] + (camera.position.y - center[1]) * normal[1] + (camera.position.z - center[2]) * normal[2];
-          mirrorDebug.portal = !!node.mirrorPortal || !!node.mirrorWalkThrough && eyeD <= 0.001;
+          mirrorDebug.portal = !!node.mirrorPortal;
           mirrorDebug.cameraPosition[0] = camera.position.x - 2 * eyeD * normal[0];
           mirrorDebug.cameraPosition[1] = camera.position.y - 2 * eyeD * normal[1];
           mirrorDebug.cameraPosition[2] = camera.position.z - 2 * eyeD * normal[2];
