@@ -48,19 +48,20 @@
   const HINT_AFTER = 120, HINT_EVERY = 12, HINT_PULSE = 1.6, HINT_MAX = 0.9;
   // Reach at which a caveman is inside a cave
   const TUNNEL_REACH = 2.2;
-  const MATRIX_TYPES = 8, MATRIX_TOP = 3.62, MATRIX_RANGE = 3.45, MATRIX_GAP = 0.19, MATRIX_NEAR = 28, MATRIX_PRELOAD = 18;
+  const MATRIX_TYPES = 8, MATRIX_TOP = 3.62, MATRIX_RANGE = 3.45, MATRIX_GAP = 0.19, MATRIX_PRELOAD = 18;
+  const PORTAL_Z = 0.5, PORTAL_MIN_X = -2.48, PORTAL_MAX_X = 2.48, PORTAL_MIN_Y = -0.2, PORTAL_MAX_Y = 2.98;
   // Sky, light and lamps, resampled from the clock every frame
   const RENDER_OPTS = {
     clear: new Float32Array(3), horizon: new Float32Array(3), zenith: new Float32Array(3), sky: new Float32Array(3), ground: new Float32Array(3), sun: new Float32Array(3), direct: new Float32Array(3),
     light: { x: 0.55, y: 0.78, z: -0.25 }, sunDirection: { x: 0, y: 1, z: 0 }, moon: { x: 0, y: 1, z: 0 }, celestialPole: { x: 0, y: Math.sin(20 * DEG), z: -Math.cos(20 * DEG) }, starMatrix: new Float32Array(9),
-    stars: 0, torch: 0, day: 1, twilight: 0, lampFactor: 0, directStrength: 1, directionalLightStrength: 1, sunStrength: 1, moonStrength: 0, shadowStrength: 1, shadowBias: 0.002, activeLightSource: "sun", latitude: 20, dayOfYear: 172, continuousDay: 171.5, solarDeclination: 0, siderealAngle: 0, sunAltitude: 90, sunAzimuth: 180, moonAltitude: -90, moonAzimuth: 0, sunriseHour: 6, sunsetHour: 18,
+    stars: 0, torch: 0, day: 1, twilight: 0, lampFactor: 0, directStrength: 1, directionalLightStrength: 1, sunStrength: 1, moonStrength: 0, ambientFloor: 0.18, diffuseFloor: 0, shadowStrength: 1, shadowFloor: 0, shadowBias: 0.002, outdoorDarkestSurfaceEstimate: 0.34, activeLightSource: "sun", latitude: 20, dayOfYear: 172, continuousDay: 171.5, solarDeclination: 0, siderealAngle: 0, sunAltitude: 90, sunAzimuth: 180, moonAltitude: -90, moonAzimuth: 0, sunriseHour: 6, sunsetHour: 18,
     time: 0, bloomStrength: 0.5, lights: new Float32Array(64), lightCount: 0, shadowCenter: { x: 0, y: 0, z: 0 }, shadowExtent: 34
   };
   RENDER_OPTS.starMatrix[0] = RENDER_OPTS.starMatrix[4] = RENDER_OPTS.starMatrix[8] = 1;
   const DAYLIGHT_DEBUG = {
     sunDirection: RENDER_OPTS.sunDirection, moonDirection: RENDER_OPTS.moon, celestialPole: RENDER_OPTS.celestialPole,
     hour: 12, continuousDay: 171.5, phase: "noon", latitude: 20, dayOfYear: 172, solarDeclination: 0, siderealAngle: 0, sunAltitude: 90, sunAzimuth: 180, moonAltitude: -90, moonAzimuth: 0,
-    daylightFactor: 1, twilightFactor: 0, starFactor: 0, lampFactor: 0, directStrength: 1, directionalLightStrength: 1, shadowStrength: 1, shadowBias: 0.002, activeLightSource: "sun", sunriseHour: 6, sunsetHour: 18
+    daylightFactor: 1, twilightFactor: 0, starFactor: 0, lampFactor: 0, directStrength: 1, directionalLightStrength: 1, moonStrength: 0, ambientFloor: 0.18, diffuseFloor: 0, shadowStrength: 1, shadowFloor: 0, shadowBias: 0.002, outdoorDarkestSurfaceEstimate: 0.34, activeLightSource: "sun", sunriseHour: 6, sunsetHour: 18
   };
   const PHASE_TOASTS = { dawn: "Dawn breaks over the island", morning: "Morning on the island", noon: "High noon", dusk: "Dusk settles over the island", night: "Night. The torches are lit.", midnight: "Midnight. The island sleeps." };
   // Lamp colours and reach; a lamp's flame reads through node.glow
@@ -152,7 +153,7 @@
   };
 
   // ---------- room behind the mirror ----------
-  const buildMatrixRain = (group, room, rimLiner, m) => {
+  const buildMatrixRain = (group, room, rimLiner, mirrorNode, m) => {
     const streamCount = renderer.kind === "canvas2d" ? 32 : 96;
     const streamLength = renderer.kind === "canvas2d" ? 9 : 14;
     const grouped = Array.from({ length: MATRIX_TYPES }, () => []);
@@ -189,16 +190,49 @@
       placed.push(node);
       nodes.push(node);
     }
-    return { group, room, rimLiner, mouth: m, nodes, cr, sr, cycle, streamCount, hangingStreamCount: freeCount, entranceStreamCount: entranceCount, wallStreamCount: streamCount - freeCount, streamLength, glyphCount: streamCount * streamLength, brightTipCount: streamCount * 2, capacity: streamCount * streamLength, updates: 0, prewarmCount: 0, preloaded: false, prewarmed: false, visible: false, firstGlyphY: 0 };
+    const portal = {
+      inside: false, previousValid: false, previousX: 0, previousY: 0, previousZ: 0,
+      lastCrossingDirection: "none",
+      plane: { center: { x: m.x + sr * PORTAL_Z, y: m.floorY + 1.5, z: m.z + cr * PORTAL_Z }, normal: { x: sr, y: 0, z: cr } },
+      opening: { minX: PORTAL_MIN_X, maxX: PORTAL_MAX_X, minY: PORTAL_MIN_Y, maxY: PORTAL_MAX_Y, planeZ: PORTAL_Z },
+      rejected: { above: 0, below: 0, beside: 0 }
+    };
+    return { group, room, rimLiner, mirrorNode, mouth: m, nodes, cr, sr, cycle, portal, streamCount, hangingStreamCount: freeCount, entranceStreamCount: entranceCount, wallStreamCount: streamCount - freeCount, streamLength, glyphCount: streamCount * streamLength, brightTipCount: streamCount * 2, capacity: streamCount * streamLength, updates: 0, prewarmCount: 0, preloaded: false, prewarmed: false, visible: false, firstGlyphY: 0 };
+  };
+  const updateMatrixPortal = (x, y, z) => {
+    const portal = matrixCave.portal;
+    if (portal.previousValid) {
+      const from = portal.previousZ - PORTAL_Z, to = z - PORTAL_Z;
+      const inward = from > 0 && to <= 0;
+      const outward = from < 0 && to >= 0;
+      if (inward || outward) {
+        const t = from / (from - to);
+        const crossX = portal.previousX + (x - portal.previousX) * t;
+        const crossY = portal.previousY + (y - portal.previousY) * t;
+        if (crossY > PORTAL_MAX_Y) portal.rejected.above = Math.min(0x7fffffff, portal.rejected.above + 1);
+        else if (crossY < PORTAL_MIN_Y) portal.rejected.below = Math.min(0x7fffffff, portal.rejected.below + 1);
+        else if (crossX < PORTAL_MIN_X || crossX > PORTAL_MAX_X) portal.rejected.beside = Math.min(0x7fffffff, portal.rejected.beside + 1);
+        else {
+          portal.inside = inward;
+          portal.lastCrossingDirection = inward ? "in" : "out";
+          matrixCave.mirrorNode.mirrorPortal = portal.inside;
+        }
+      }
+    }
+    portal.previousX = x;
+    portal.previousY = y;
+    portal.previousZ = z;
+    portal.previousValid = true;
   };
   const updateMatrixRain = (elapsed) => {
     if (!matrixCave) return;
     const m = matrixCave.mouth, dx = camera.position.x - m.x, dz = camera.position.z - m.z;
     const localX = matrixCave.cr * dx - matrixCave.sr * dz;
     const localZ = matrixCave.sr * dx + matrixCave.cr * dz;
+    updateMatrixPortal(localX, camera.position.y - m.floorY, localZ);
     const distance = Math.hypot(dx, dz);
-    const preloaded = distance < MATRIX_PRELOAD;
-    const visible = distance < MATRIX_NEAR && Math.abs(localX) < 2.82 && localZ < 0.48 && localZ > -6.18;
+    const preloaded = distance < MATRIX_PRELOAD || matrixCave.portal.inside;
+    const visible = matrixCave.portal.inside;
     const wasPreloaded = matrixCave.preloaded;
     if (preloaded !== matrixCave.preloaded) {
       matrixCave.preloaded = preloaded;
@@ -250,12 +284,8 @@
       matrixCave.prewarmed = true;
     }
   };
-  const inMatrixCave = (x, z) => {
-    if (!matrixCave) return false;
-    const m = matrixCave.mouth, dx = x - m.x, dz = z - m.z;
-    const lx = matrixCave.cr * dx - matrixCave.sr * dz;
-    const lz = matrixCave.sr * dx + matrixCave.cr * dz;
-    return Math.abs(lx) < 2.82 && lz < 0.72 && lz > -6.18;
+  const inMatrixCave = () => {
+    return !!matrixCave && matrixCave.portal.inside;
   };
   const matrixOverlayVisible = (x, y, z) => {
     if (!matrixCave || !matrixCave.visible) return true;
@@ -277,6 +307,12 @@
     const m = matrixCave.mouth, targetZ = lookOut ? 0.45 : -5.45;
     const target = { x: m.x + matrixCave.sr * targetZ, y: m.floorY + 1.75, z: m.z + matrixCave.cr * targetZ };
     const orbit = pilot.orbit, yaw = m.ry + (lookOut ? Math.PI : 0);
+    if (!matrixCave.portal.inside) {
+      matrixCave.portal.previousX = 0;
+      matrixCave.portal.previousY = 1.75;
+      matrixCave.portal.previousZ = PORTAL_Z + 0.01;
+      matrixCave.portal.previousValid = true;
+    }
     orbit.target = target;
     orbit.tx = target.x;
     orbit.ty = target.y;
@@ -449,7 +485,7 @@
       const rimLiner = createNode({ geometry: hubModels.matrixRimLiner(), visible: false });
       addChild(room, rimLiner);
       addChild(group, room, node);
-      matrixCave = buildMatrixRain(group, room, rimLiner, m);
+      matrixCave = buildMatrixRain(group, room, rimLiner, node, m);
       mirrorCave = { slot, mouth: m, group, rim, room, rimLiner, node, sign: null };
     } else if (slot.status === "sleeping") {
       // Bedrolls lie along +x, as the sleep pose assumes
@@ -1101,8 +1137,13 @@
     DAYLIGHT_DEBUG.lampFactor = RENDER_OPTS.lampFactor;
     DAYLIGHT_DEBUG.directStrength = RENDER_OPTS.directStrength;
     DAYLIGHT_DEBUG.directionalLightStrength = RENDER_OPTS.directionalLightStrength;
+    DAYLIGHT_DEBUG.moonStrength = RENDER_OPTS.moonStrength;
+    DAYLIGHT_DEBUG.ambientFloor = RENDER_OPTS.ambientFloor;
+    DAYLIGHT_DEBUG.diffuseFloor = RENDER_OPTS.diffuseFloor;
     DAYLIGHT_DEBUG.shadowStrength = RENDER_OPTS.shadowStrength;
+    DAYLIGHT_DEBUG.shadowFloor = RENDER_OPTS.shadowFloor;
     DAYLIGHT_DEBUG.shadowBias = RENDER_OPTS.shadowBias;
+    DAYLIGHT_DEBUG.outdoorDarkestSurfaceEstimate = RENDER_OPTS.outdoorDarkestSurfaceEstimate;
     DAYLIGHT_DEBUG.activeLightSource = RENDER_OPTS.activeLightSource;
     DAYLIGHT_DEBUG.sunriseHour = RENDER_OPTS.sunriseHour;
     DAYLIGHT_DEBUG.sunsetHour = RENDER_OPTS.sunsetHour;
@@ -1400,7 +1441,15 @@
           get preloadDistance() { return MATRIX_PRELOAD; },
           get roomScale() { return matrixCave.room.scale.x; },
           get visible() { return matrixCave.visible; },
+          get inside() { return matrixCave.portal.inside; },
           get firstGlyphY() { return matrixCave.firstGlyphY; },
+          portal: {
+            get inside() { return matrixCave.portal.inside; },
+            get lastCrossingDirection() { return matrixCave.portal.lastCrossingDirection; },
+            plane: matrixCave.portal.plane,
+            opening: matrixCave.portal.opening,
+            rejected: matrixCave.portal.rejected
+          },
           contains: inMatrixCave,
           overlayVisible: matrixOverlayVisible,
           viewApproach: viewMatrixApproach,

@@ -11,12 +11,12 @@
   const TAU = Math.PI * 2;
   const YEAR_DAYS = 365.2422;
   const SIDEREAL_RATE = 1.00273790935;
-  const NIGHT_CLEAR = [0.07, 0.08, 0.16];
-  const NIGHT_HORIZON = [0.15, 0.17, 0.32];
-  const NIGHT_ZENITH = [0.05, 0.06, 0.14];
+  const NIGHT_CLEAR = [0.08, 0.10, 0.18];
+  const NIGHT_HORIZON = [0.18, 0.21, 0.37];
+  const NIGHT_ZENITH = [0.07, 0.09, 0.18];
   // Keep the backdrop dark, but lift hemispheric fill so silhouettes retain readable faces.
-  const NIGHT_SKY = [0.30, 0.33, 0.46];
-  const NIGHT_GROUND = [0.23, 0.24, 0.30];
+  const NIGHT_SKY = [0.33, 0.37, 0.50];
+  const NIGHT_GROUND = [0.27, 0.28, 0.35];
   const NIGHT_SUN = [0.22, 0.26, 0.40];
   const DAY_CLEAR = [0.36, 0.56, 0.82];
   const DAY_HORIZON = [0.70, 0.82, 0.94];
@@ -27,8 +27,8 @@
   const TWILIGHT_CLEAR = [0.34, 0.25, 0.42];
   const TWILIGHT_HORIZON = [1.00, 0.53, 0.25];
   const TWILIGHT_ZENITH = [0.18, 0.20, 0.48];
-  const TWILIGHT_SKY = [0.50, 0.45, 0.58];
-  const TWILIGHT_GROUND = [0.29, 0.25, 0.28];
+  const TWILIGHT_SKY = [0.53, 0.48, 0.62];
+  const TWILIGHT_GROUND = [0.32, 0.28, 0.31];
   const TWILIGHT_SUN = [0.78, 0.42, 0.23];
   const MOON_LIGHT = [0.32, 0.37, 0.54];
   const SCRATCH_SUN = { x: 0, y: 1, z: 0 };
@@ -128,7 +128,7 @@
     tint3(out.sun, TWILIGHT_SUN, twilight * 0.72);
 
     const sunStrength = smooth(0, 8, altitude);
-    const moonStrength = stars * smooth(0, 10, out.moonAltitude) * 0.18;
+    const moonStrength = stars * smooth(0, 10, out.moonAltitude) * 0.26;
     let lx = sunDirection.x * sunStrength + out.moon.x * moonStrength;
     let ly = sunDirection.y * sunStrength + out.moon.y * moonStrength;
     let lz = sunDirection.z * sunStrength + out.moon.z * moonStrength;
@@ -161,7 +161,12 @@
     out.directionalLightStrength = totalStrength;
     out.sunStrength = sunStrength;
     out.moonStrength = moonStrength;
-    out.shadowStrength = clamp(sunStrength + moonStrength * 0.7, 0, 1);
+    const nightFill = 1 - daylight;
+    out.ambientFloor = lerp(0.18, 0.27, nightFill);
+    out.diffuseFloor = 0.10 * nightFill;
+    out.shadowFloor = 0.38 * nightFill;
+    out.shadowStrength = clamp(sunStrength + moonStrength * 0.5, 0, 1);
+    out.outdoorDarkestSurfaceEstimate = Math.max(out.ambientFloor, Math.min(out.sky[0], out.sky[1], out.sky[2], out.ground[0], out.ground[1], out.ground[2]));
     out.shadowBias = lerp(0.0012, 0.0038, 1 - horizonCos);
     out.activeLightSource = sunStrength > 0.02 && moonStrength > 0.02 ? "mixed" : sunStrength > 0.02 ? "sun" : moonStrength > 0.01 ? "moon" : "none";
     out.latitude = latitudeDeg;
