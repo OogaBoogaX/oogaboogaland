@@ -7,10 +7,10 @@
     ["portlandhodl", 1788159681],
     ["w-s-bitcoin", 1788178261],
     ["dplusplus1024", 1788153655],
-    ["bc1gui", 1788008082],
+    ["bc1gui", 1788190400],
     ["RandyMcMillan", 1788019011],
     ["MrHodlX", 1788200000],
-    ["timechainb", 1788073569]
+    ["timechainb", 1788171200]
   ].map(([name, unixSeconds]) => ({ name, lastCommitAt: unixSeconds * 1e3 }));
   const SNAPSHOT_AT = 1788225311 * 1e3;
   const stateFor = (contributor, at = SNAPSHOT_AT) => {
@@ -31,7 +31,9 @@
     portlandhodl: { bald: true },
     "w-s-bitcoin": { apple: true, symmetricTusks: true },
     MrHodlX: { gasMask: true },
-    dplusplus1024: { build: "slim", hair: "#b9dcaa" }
+    dplusplus1024: { build: "slim", hair: "#b9dcaa" },
+    bc1gui: { skater: true, skin: "#f2a33c", hair: "#e4561f", fur: "#8f4f17" },
+    timechainb: { statue: true }
   };
   const SKINS = ["#c98a5b", "#a9744c", "#8a5a3a", "#d9a06b", "#b58057"];
   const HAIRS = ["#2b1b10", "#4a2c14", "#151312", "#5c4425", "#7a2e12"];
@@ -50,9 +52,11 @@
       apple: !!likeness.apple,
       gasMask: !!likeness.gasMask,
       symmetricTusks: !!likeness.symmetricTusks,
-      skin,
+      skater: !!likeness.skater,
+      statue: !!likeness.statue,
+      skin: likeness.skin || skin,
       hair: likeness.hair || hashedHair,
-      fur: FURS[Math.floor(rand() * FURS.length)],
+      fur: likeness.fur || FURS[Math.floor(rand() * FURS.length)],
       height: 0.92 + rand() * 0.24,
       belly: (0.9 + rand() * 0.35) * (slim ? 0.8 : 1),
       rand: mulberry32(fnv1a(name + "/body"))

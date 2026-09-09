@@ -5,7 +5,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta http-equiv="Content-Security-Policy"
-    content="default-src 'none'; script-src 'sha256-RVUwKwndqopp/gHMFKuVbdvKQgubqbMJMsgmXx0wCKc='; style-src 'sha256-dDRjKsPXfpTqnH8VPCUSd7WihWQczKIMep/Sr+vXL+s='; img-src 'self' data:; connect-src 'none'; base-uri 'none'; form-action 'none'">
+    content="default-src 'none'; script-src 'sha256-YzHVt8Sart8ZqIlkzLT5isAONhL77m9f9hrSZGRF61s='; style-src 'sha256-anF+mWpWaEyrSJyYBUstVrI1ajOdNUODxiszy0pfPHc='; img-src 'self' data:; connect-src 'none'; base-uri 'none'; form-action 'none'">
   <meta name="referrer" content="no-referrer">
   <meta name="color-scheme" content="dark">
   <meta name="theme-color" content="#0a0a0b">
@@ -14,8 +14,6 @@
 :root {
   color-scheme: dark;
   --bg: #0a0a0b;
-  --surface: rgba(18, 18, 20, 0.86);
-  --surface-solid: #141416;
   --fg: #ededea;
   --muted: #a6a6a2;
   --faint: #6f6f6c;
@@ -25,8 +23,22 @@
   --warn: #c9a44a;
   --danger: #e5533d;
   --paper: #f3efe4;
-  --radius: 12px;
-  --display: "Iowan Old Style", Palatino, Georgia, serif;
+  --wood: #8a6236;
+  --wood-dk: #5c4425;
+  --plank: #a9773f;
+  --wood-edge: #4a3319;
+  --nail: #3a2a18;
+  --stone: #3a3734;
+  --stone-dk: #2d2b28;
+  --stone-lt: #45413d;
+  --ink: #2a1a0c;
+  --ink-muted: rgba(42, 26, 12, 0.72);
+  --ink-faint: rgba(42, 26, 12, 0.5);
+  /* Planks with a dark seam between them, grain drawn across, a nail in each corner */
+  --planks: radial-gradient(circle at 9px 9px, var(--nail) 2.5px, transparent 3px), radial-gradient(circle at calc(100% - 9px) 9px, var(--nail) 2.5px, transparent 3px), radial-gradient(circle at 9px calc(100% - 9px), var(--nail) 2.5px, transparent 3px), radial-gradient(circle at calc(100% - 9px) calc(100% - 9px), var(--nail) 2.5px, transparent 3px), repeating-linear-gradient(90deg, rgba(0, 0, 0, 0.05) 0 2px, transparent 2px 11px), repeating-linear-gradient(180deg, var(--plank) 0 34px, var(--wood-edge) 34px 36px, var(--wood) 36px 70px, var(--wood-edge) 70px 72px);
+  --tablet: linear-gradient(160deg, var(--stone-lt), var(--stone) 55%, var(--stone-dk));
+  --tablet-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08), inset 0 -2px 0 rgba(0, 0, 0, 0.35), 0 2px 0 rgba(0, 0, 0, 0.4);
+  --radius: 8px;
   --mono: ui-monospace, "Cascadia Code", Menlo, Consolas, "DejaVu Sans Mono", monospace;
   --safe-top: env(safe-area-inset-top, 0px);
   --safe-bottom: env(safe-area-inset-bottom, 0px);
@@ -56,6 +68,15 @@ input,
 select {
   font: inherit;
   color: inherit;
+}
+
+/* Cave-sign lettering: the SVG takes the element's font size as its cap height */
+.sign {
+  display: inline-block;
+  height: 1em;
+  width: auto;
+  overflow: visible;
+  vertical-align: -0.2em;
 }
 
 .stage {
@@ -137,17 +158,16 @@ select {
   gap: 8px;
   padding: 18px 26px;
   border-radius: var(--radius);
-  background: rgba(10, 10, 11, 0.55);
+  background: var(--planks);
+  border: 3px solid var(--wood-edge);
   color: var(--paper);
   text-align: center;
   transition: opacity 0.25s ease;
 }
 
 .curtain-label b {
-  font-family: var(--display);
-  font-weight: 600;
   font-size: 22px;
-  letter-spacing: 0.01em;
+  line-height: 1;
 }
 
 .curtain-label span:last-child {
@@ -195,11 +215,10 @@ select {
 
 .brand h1 {
   margin: 0;
-  font-family: var(--display);
-  font-weight: 600;
-  font-size: 20px;
-  letter-spacing: 0.03em;
+  font-size: 22px;
   line-height: 1.1;
+  color: var(--paper);
+  filter: drop-shadow(0 2px 0 rgba(0, 0, 0, 0.6));
 }
 
 .brand p {
@@ -217,11 +236,10 @@ select {
   align-items: center;
   gap: 10px;
   padding: 8px 14px;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
+  background: var(--tablet);
+  border: 2px solid var(--stone-dk);
+  border-radius: 9px 7px 10px 8px;
+  box-shadow: var(--tablet-shadow);
 }
 
 .meter-label {
@@ -236,7 +254,8 @@ select {
   height: 8px;
   border-radius: 999px;
   overflow: hidden;
-  background: rgba(255, 255, 255, 0.07);
+  background: rgba(0, 0, 0, 0.45);
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.6);
 }
 
 .meter-fill {
@@ -283,33 +302,30 @@ select {
 .presets button {
   min-height: 34px;
   padding: 0 12px;
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  background: var(--surface);
-  color: var(--muted);
+  border: 2px solid var(--wood-edge);
+  border-radius: 6px;
+  background: linear-gradient(var(--plank), var(--wood));
+  color: var(--paper);
   font-size: 11px;
   letter-spacing: 0.08em;
   text-transform: uppercase;
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
+  text-shadow: 0 1px 0 rgba(0, 0, 0, 0.5);
+  box-shadow: 0 3px 0 var(--nail);
 }
 
 .presets button:hover,
 .presets button:focus-visible {
-  color: var(--fg);
-  border-color: rgba(255, 255, 255, 0.22);
+  background: linear-gradient(#b8844a, var(--plank));
   outline: none;
 }
 
 .presets .leave {
   color: var(--accent);
-  border-color: rgba(216, 137, 43, 0.45);
 }
 
 .presets .leave:hover,
 .presets .leave:focus-visible {
-  color: var(--accent);
-  border-color: var(--accent);
+  color: #ffb554;
 }
 
 .sheet {
@@ -320,73 +336,79 @@ select {
   width: 300px;
   display: flex;
   flex-direction: column;
-  background: var(--surface);
-  border: 1px solid var(--border);
+  background: var(--planks);
+  border: 3px solid var(--wood-edge);
   border-radius: var(--radius);
-  backdrop-filter: blur(10px);
-  -webkit-backdrop-filter: blur(10px);
-  overflow: hidden;
-  padding-left: 22px;
+  box-shadow: 0 6px 0 rgba(0, 0, 0, 0.35), 0 10px 30px rgba(0, 0, 0, 0.35);
+  color: var(--paper);
   transition: transform 0.28s ease;
 }
 
-/* Collapsed, leaving only the rail on screen */
+/* Collapsed, leaving only the pull tab on screen */
 .sheet[data-open="false"] {
-  transform: translateX(calc(100% - 22px));
+  transform: translateX(calc(100% + 16px + var(--safe-right)));
 }
 
+/* A wooden pull tab hanging off the panel's edge */
 .sheet-toggle {
   position: absolute;
-  top: 0;
-  left: 0;
-  bottom: 0;
-  width: 22px;
-  border: 0;
-  border-right: 1px solid var(--border);
-  background: transparent;
-  padding: 0;
+  top: 50%;
+  left: -41px;
+  width: 44px;
+  height: 64px;
+  margin-top: -32px;
+  padding: 0 4px 0 2px;
+  border: 3px solid var(--wood-edge);
+  border-right: 0;
+  border-radius: 8px 0 0 8px;
+  background: linear-gradient(90deg, var(--plank), var(--wood));
+  box-shadow: 0 4px 0 rgba(0, 0, 0, 0.35);
 }
 
-.sheet-toggle span {
+.sheet-toggle .caveman-icon {
   display: block;
-  width: 4px;
-  height: 38px;
-  margin: 0 auto;
-  border-radius: 2px;
-  background: rgba(255, 255, 255, 0.22);
+  width: 100%;
+  height: auto;
+  filter: drop-shadow(0 1px 0 rgba(0, 0, 0, 0.5));
 }
 
-.sheet-toggle:hover span,
-.sheet-toggle:focus-visible span {
-  background: rgba(255, 255, 255, 0.45);
+.sheet-toggle:hover,
+.sheet-toggle:focus-visible {
+  background: linear-gradient(90deg, #b8844a, var(--plank));
+  outline: none;
 }
 
 .tabs {
   display: flex;
-  border-bottom: 1px solid var(--border);
+  gap: 6px;
+  padding: 10px 12px 0;
+  border-bottom: 2px solid var(--wood-edge);
   flex: none;
 }
 
 .tabs button {
   flex: 1;
-  min-height: 44px;
-  border: 0;
+  min-height: 38px;
+  margin-bottom: -2px;
+  border: 2px solid transparent;
+  border-bottom: 0;
+  border-radius: 6px 6px 0 0;
   background: transparent;
-  color: var(--faint);
-  font-size: 10.5px;
+  color: rgba(243, 239, 228, 0.55);
+  font-size: 17px;
   letter-spacing: 0.14em;
   text-transform: uppercase;
-  border-bottom: 2px solid transparent;
   transition: color 0.15s ease;
 }
 
 .tabs button:hover {
-  color: var(--muted);
+  color: rgba(243, 239, 228, 0.85);
 }
 
 .tabs button[aria-selected="true"] {
-  color: var(--fg);
-  border-bottom-color: var(--accent);
+  color: var(--paper);
+  border-color: var(--wood-edge);
+  background: var(--wood-dk);
 }
 
 .tabs button:focus-visible,
@@ -417,16 +439,14 @@ select {
   padding: 14px 16px;
   overscroll-behavior: contain;
   scrollbar-width: thin;
-  scrollbar-color: rgba(255, 255, 255, 0.14) transparent;
+  scrollbar-color: rgba(0, 0, 0, 0.35) transparent;
 }
 
 .panel h2 {
   margin: 0 0 10px;
-  font-size: 11px;
-  font-weight: 600;
-  color: var(--accent);
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
+  font-size: 14px;
+  color: var(--paper);
+  filter: drop-shadow(0 1px 0 rgba(0, 0, 0, 0.5));
 }
 
 .panel-head {
@@ -442,16 +462,18 @@ select {
 
 .summary {
   margin: 0 0 8px;
-  color: var(--muted);
+  color: rgba(243, 239, 228, 0.75);
   font-size: 10.5px;
   letter-spacing: 0.06em;
+  text-shadow: 0 1px 0 rgba(0, 0, 0, 0.4);
 }
 
 .help {
   margin: 12px 0 0;
-  color: var(--faint);
+  color: rgba(243, 239, 228, 0.62);
   font-size: 10.5px;
   line-height: 1.5;
+  text-shadow: 0 1px 0 rgba(0, 0, 0, 0.4);
 }
 
 /* Feed dialog, opened from the roster panel */
@@ -459,22 +481,27 @@ select {
   display: block;
   width: 100%;
   margin-top: 14px;
-  min-height: 40px;
+  min-height: 44px;
   padding: 0 12px;
-  border: 1px solid rgba(216, 137, 43, 0.5);
-  border-radius: 8px;
-  background: rgba(216, 137, 43, 0.12);
-  color: var(--accent);
-  font-size: 11px;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
+  border: 2px solid var(--wood-edge);
+  border-radius: 6px;
+  background: linear-gradient(#e2a04a, var(--accent));
+  color: var(--ink);
+  font-size: 15px;
+  box-shadow: 0 3px 0 var(--nail);
   cursor: pointer;
   transition: background-color 0.15s ease;
 }
 
+/* Heavier pixels for the call to action */
+.feed-open .sign path {
+  stroke: currentColor;
+  stroke-width: 0.3;
+}
+
 .feed-open:hover,
 .feed-open:focus-visible {
-  background: rgba(216, 137, 43, 0.22);
+  background: linear-gradient(#f0b05a, #e2a04a);
   outline: none;
 }
 
@@ -483,10 +510,11 @@ select {
   max-width: calc(100vw - 32px);
   margin: auto;
   padding: 16px 18px 18px;
-  border: 1px solid var(--border);
+  border: 3px solid var(--wood-edge);
   border-radius: var(--radius);
-  background: var(--surface-solid);
-  color: var(--fg);
+  background: var(--planks);
+  box-shadow: 0 6px 0 rgba(0, 0, 0, 0.35), 0 10px 30px rgba(0, 0, 0, 0.35);
+  color: var(--paper);
   font: inherit;
 }
 
@@ -496,11 +524,9 @@ select {
 
 .modal h2 {
   margin: 0 0 12px;
-  font-size: 11px;
-  font-weight: 600;
-  color: var(--accent);
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
+  font-size: 14px;
+  color: var(--paper);
+  filter: drop-shadow(0 1px 0 rgba(0, 0, 0, 0.5));
 }
 
 .modal .panel-head h2 {
@@ -510,8 +536,10 @@ select {
 .help.empty {
   margin: 6px 0 0;
   padding: 14px;
-  border: 1px dashed var(--border);
-  border-radius: 10px;
+  background: var(--tablet);
+  border: 2px solid var(--stone-dk);
+  border-radius: 9px 7px 10px 8px;
+  box-shadow: var(--tablet-shadow);
   text-align: center;
 }
 
@@ -524,9 +552,10 @@ select {
 
 .stat {
   padding: 10px 8px;
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  background: rgba(255, 255, 255, 0.025);
+  background: var(--tablet);
+  border: 2px solid var(--stone-dk);
+  border-radius: 9px 7px 10px 8px;
+  box-shadow: var(--tablet-shadow);
   text-align: center;
 }
 
@@ -540,16 +569,21 @@ select {
 .stat span {
   display: block;
   margin-top: 4px;
-  color: var(--faint);
+  color: var(--muted);
   font-size: 9.5px;
   letter-spacing: 0.1em;
   text-transform: uppercase;
 }
 
+/* The roster is carved into one stone tablet */
 .roster {
   list-style: none;
   margin: 0;
-  padding: 0;
+  padding: 2px 10px;
+  background: var(--tablet);
+  border: 2px solid var(--stone-dk);
+  border-radius: 9px 7px 10px 8px;
+  box-shadow: var(--tablet-shadow);
 }
 
 .roster li {
@@ -558,7 +592,13 @@ select {
   align-items: center;
   gap: 10px;
   padding: 7px 0;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+  border-bottom: 1px solid rgba(0, 0, 0, 0.35);
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.04);
+}
+
+.roster li:last-child {
+  border-bottom: 0;
+  box-shadow: none;
 }
 
 .roster-name {
@@ -568,7 +608,7 @@ select {
 }
 
 .roster-age {
-  color: var(--faint);
+  color: var(--muted);
   font-size: 10px;
 }
 
@@ -595,8 +635,8 @@ select {
 }
 
 .roster-state[data-state="away"] {
-  color: var(--faint);
-  border-color: rgba(255, 255, 255, 0.08);
+  color: var(--muted);
+  border-color: rgba(255, 255, 255, 0.12);
 }
 
 #qr {
@@ -626,7 +666,7 @@ select {
 .field span {
   display: block;
   margin-bottom: 4px;
-  color: var(--muted);
+  color: rgba(243, 239, 228, 0.75);
   font-size: 10px;
   letter-spacing: 0.1em;
   text-transform: uppercase;
@@ -637,9 +677,10 @@ select {
   width: 100%;
   min-height: 38px;
   padding: 0 10px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: rgba(0, 0, 0, 0.35);
+  border: 2px solid var(--stone-dk);
+  border-radius: 7px 6px 8px 6px;
+  background: var(--tablet);
+  box-shadow: var(--tablet-shadow);
   outline: none;
   transition: border-color 0.15s ease;
 }
@@ -659,25 +700,27 @@ select {
 .actions button {
   min-height: 38px;
   padding: 0 10px;
-  border: 1px solid rgba(216, 137, 43, 0.45);
-  border-radius: 8px;
-  background: rgba(216, 137, 43, 0.1);
-  color: var(--accent);
+  border: 2px solid var(--wood-edge);
+  border-radius: 6px;
+  background: linear-gradient(#e2a04a, var(--accent));
+  color: var(--ink);
   font-size: 10.5px;
+  font-weight: 600;
   letter-spacing: 0.06em;
+  box-shadow: 0 3px 0 var(--nail);
   cursor: pointer;
   transition: background-color 0.15s ease;
 }
 
 .actions button:hover {
-  background: rgba(216, 137, 43, 0.2);
+  background: linear-gradient(#f0b05a, #e2a04a);
 }
 
 .link {
   border: 0;
   padding: 0;
   background: transparent;
-  color: var(--faint);
+  color: rgba(243, 239, 228, 0.6);
   font-size: 10px;
   letter-spacing: 0.1em;
   text-transform: uppercase;
@@ -685,7 +728,7 @@ select {
 }
 
 .link:hover {
-  color: var(--fg);
+  color: var(--paper);
 }
 
 .loot {
@@ -809,13 +852,13 @@ select {
   justify-content: space-between;
   gap: 10px;
   padding: 8px 16px;
-  border-top: 1px solid var(--border);
+  border-top: 2px solid var(--wood-edge);
   flex: none;
 }
 
 .quality {
   margin: 0;
-  color: var(--faint);
+  color: rgba(243, 239, 228, 0.6);
   font-size: 9.5px;
   letter-spacing: 0.1em;
   text-transform: uppercase;
@@ -827,9 +870,10 @@ select {
   left: 50%;
   transform: translate(-50%, 8px);
   padding: 10px 16px;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 999px;
+  background: linear-gradient(var(--plank), var(--wood));
+  border: 2px solid var(--wood-edge);
+  border-radius: 6px;
+  box-shadow: 0 3px 0 var(--nail);
   letter-spacing: 0.06em;
   opacity: 0;
   transition: opacity 0.3s ease, transform 0.3s ease;
@@ -842,14 +886,15 @@ select {
 
 .toast {
   bottom: calc(24px + var(--safe-bottom));
-  color: var(--accent);
-  border-color: rgba(216, 137, 43, 0.5);
+  color: #ffd27a;
+  text-shadow: 0 1px 0 rgba(0, 0, 0, 0.5);
 }
 
 .hint {
   top: calc(84px + var(--safe-top));
-  color: var(--muted);
+  color: var(--paper);
   font-size: 11px;
+  text-shadow: 0 1px 0 rgba(0, 0, 0, 0.5);
 }
 
 .toast.show,
@@ -864,9 +909,10 @@ select {
   left: 0;
   z-index: 10;
   padding: 5px 9px;
-  background: var(--surface-solid);
-  border: 1px solid var(--border);
-  border-radius: 6px;
+  background: var(--tablet);
+  border: 2px solid var(--stone-dk);
+  border-radius: 7px 6px 8px 6px;
+  box-shadow: var(--tablet-shadow);
   font-size: 11px;
   letter-spacing: 0.03em;
   pointer-events: none;
@@ -943,22 +989,22 @@ select {
   transform: translateX(-50%);
   min-height: 44px;
   padding: 0 22px;
-  border: 1px solid rgba(216, 137, 43, 0.6);
-  border-radius: 999px;
-  background: rgba(216, 137, 43, 0.18);
-  color: var(--accent);
+  border: 2px solid var(--wood-edge);
+  border-radius: 6px;
+  background: linear-gradient(#e2a04a, var(--accent));
+  color: var(--ink);
   font-size: 12px;
+  font-weight: 600;
   letter-spacing: 0.12em;
   text-transform: uppercase;
+  box-shadow: 0 3px 0 var(--nail);
   cursor: pointer;
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
   -webkit-tap-highlight-color: transparent;
 }
 
 .act:hover,
 .act:focus-visible {
-  background: rgba(216, 137, 43, 0.3);
+  background: linear-gradient(#f0b05a, #e2a04a);
   outline: none;
 }
 
@@ -1013,7 +1059,7 @@ select {
   }
 
   .brand h1 {
-    font-size: 18px;
+    font-size: 13px;
   }
 
   .meter {
@@ -1057,13 +1103,14 @@ select {
     max-height: 52vh;
     border-radius: var(--radius) var(--radius) 0 0;
     border-bottom: 0;
-    padding-left: 0;
     padding-bottom: var(--safe-bottom);
+    box-shadow: 0 -6px 30px rgba(0, 0, 0, 0.35);
     transition: transform 0.28s ease;
   }
 
+  /* Collapsed, the tab row peeks over the bottom edge under the pull tab */
   .sheet[data-open="false"] {
-    transform: translateY(calc(100% - 44px - 18px - var(--safe-bottom)));
+    transform: translateY(calc(100% - 48px - var(--safe-bottom)));
   }
 
   /* The open sheet takes the sticks with it */
@@ -1073,26 +1120,20 @@ select {
   }
 
   .sheet-toggle {
-    position: static;
-    display: block;
-    width: auto;
-    height: 18px;
-    border: 0;
-    background: transparent;
-    padding: 0;
-  }
-
-  .sheet-toggle span {
-    display: block;
-    width: 38px;
-    height: 4px;
-    margin: 7px auto 0;
-    border-radius: 2px;
-    background: rgba(255, 255, 255, 0.22);
+    top: -39px;
+    left: 50%;
+    width: 64px;
+    height: 42px;
+    margin: 0 0 0 -32px;
+    padding: 2px 18px 0;
+    border: 3px solid var(--wood-edge);
+    border-bottom: 0;
+    border-radius: 8px 8px 0 0;
+    background: linear-gradient(var(--plank), var(--wood));
   }
 
   .tabs button {
-    min-height: 44px;
+    min-height: 38px;
   }
 
   .panel {
@@ -1138,31 +1179,24 @@ select {
     max-height: 72vh;
     border-radius: var(--radius) 0 0 0;
     border-bottom: 0;
-    padding-left: 0;
     transition: transform 0.28s ease;
   }
 
   .sheet[data-open="false"] {
-    transform: translateY(calc(100% - 44px - 18px - var(--safe-bottom)));
+    transform: translateY(calc(100% - 48px - var(--safe-bottom)));
   }
 
   .sheet-toggle {
-    position: static;
-    display: block;
-    width: auto;
-    height: 18px;
-    border: 0;
-    background: transparent;
-    padding: 0;
-  }
-
-  .sheet-toggle span {
-    display: block;
-    width: 38px;
-    height: 4px;
-    margin: 7px auto 0;
-    border-radius: 2px;
-    background: rgba(255, 255, 255, 0.22);
+    top: -39px;
+    left: 50%;
+    width: 64px;
+    height: 42px;
+    margin: 0 0 0 -32px;
+    padding: 2px 18px 0;
+    border: 3px solid var(--wood-edge);
+    border-bottom: 0;
+    border-radius: 8px 8px 0 0;
+    background: linear-gradient(var(--plank), var(--wood));
   }
 
   .presets {
@@ -1215,12 +1249,12 @@ select {
     <div class="curtain" id="curtain" aria-hidden="true">
       <svg class="curtain-half left" viewBox="0 0 1440 900" preserveAspectRatio="xMidYMid slice" aria-hidden="true"><defs><symbol id="leaf" overflow="visible"><path d="M0-46C24-30 30-4 0 46-30-4-24-30 0-46Z"/><path d="M0-38V38" fill="none" stroke="#000" stroke-opacity=".22" stroke-width="3"/></symbol><symbol id="foliage" overflow="visible"><use href="#leaf" transform="translate(744 716) rotate(-81) scale(0.92)" fill="#2f7443"/><use href="#leaf" transform="translate(178 425) rotate(104) scale(0.93)" fill="#38874c"/><use href="#leaf" transform="translate(520 -9) rotate(-7) scale(0.94)" fill="#1f4d2b"/><use href="#leaf" transform="translate(1199 687) rotate(-23) scale(0.98)" fill="#38874c"/><use href="#leaf" transform="translate(1300 501) rotate(127) scale(0.99)" fill="#2f7443"/><use href="#leaf" transform="translate(1451 620) rotate(58) scale(1.00)" fill="#27603a"/><use href="#leaf" transform="translate(1361 536) rotate(121) scale(1.01)" fill="#38874c"/><use href="#leaf" transform="translate(1319 122) rotate(-89) scale(1.01)" fill="#38874c"/><use href="#leaf" transform="translate(31 575) rotate(149) scale(1.01)" fill="#1a4024"/><use href="#leaf" transform="translate(829 362) rotate(15) scale(1.04)" fill="#1a4024"/><use href="#leaf" transform="translate(330 180) rotate(-19) scale(1.04)" fill="#1f4d2b"/><use href="#leaf" transform="translate(1182 509) rotate(73) scale(1.06)" fill="#2f7443"/><use href="#leaf" transform="translate(935 -8) rotate(151) scale(1.06)" fill="#27603a"/><use href="#leaf" transform="translate(1344 -10) rotate(-121) scale(1.08)" fill="#27603a"/><use href="#leaf" transform="translate(1176 149) rotate(82) scale(1.09)" fill="#2f7443"/><use href="#leaf" transform="translate(1160 177) rotate(-126) scale(1.09)" fill="#1a4024"/><use href="#leaf" transform="translate(765 523) rotate(63) scale(1.11)" fill="#1f4d2b"/><use href="#leaf" transform="translate(1343 326) rotate(146) scale(1.11)" fill="#27603a"/><use href="#leaf" transform="translate(989 149) rotate(11) scale(1.12)" fill="#1f4d2b"/><use href="#leaf" transform="translate(1194 864) rotate(-52) scale(1.14)" fill="#27603a"/><use href="#leaf" transform="translate(1064 129) rotate(-14) scale(1.14)" fill="#38874c"/><use href="#leaf" transform="translate(1363 444) rotate(-139) scale(1.15)" fill="#27603a"/><use href="#leaf" transform="translate(392 911) rotate(159) scale(1.15)" fill="#38874c"/><use href="#leaf" transform="translate(1171 259) rotate(-95) scale(1.16)" fill="#38874c"/><use href="#leaf" transform="translate(1173 599) rotate(27) scale(1.16)" fill="#27603a"/><use href="#leaf" transform="translate(38 544) rotate(-156) scale(1.19)" fill="#1f4d2b"/><use href="#leaf" transform="translate(241 823) rotate(167) scale(1.20)" fill="#2f7443"/><use href="#leaf" transform="translate(717 472) rotate(-159) scale(1.20)" fill="#2f7443"/><use href="#leaf" transform="translate(1152 53) rotate(-113) scale(1.22)" fill="#2f7443"/><use href="#leaf" transform="translate(1116 236) rotate(17) scale(1.23)" fill="#38874c"/><use href="#leaf" transform="translate(721 723) rotate(127) scale(1.23)" fill="#38874c"/><use href="#leaf" transform="translate(1374 411) rotate(18) scale(1.23)" fill="#38874c"/><use href="#leaf" transform="translate(1357 562) rotate(-48) scale(1.24)" fill="#27603a"/><use href="#leaf" transform="translate(1407 567) rotate(70) scale(1.26)" fill="#27603a"/><use href="#leaf" transform="translate(422 758) rotate(137) scale(1.29)" fill="#38874c"/><use href="#leaf" transform="translate(1372 361) rotate(146) scale(1.30)" fill="#27603a"/><use href="#leaf" transform="translate(590 25) rotate(67) scale(1.30)" fill="#2f7443"/><use href="#leaf" transform="translate(272 566) rotate(166) scale(1.30)" fill="#27603a"/><use href="#leaf" transform="translate(565 68) rotate(-136) scale(1.34)" fill="#38874c"/><use href="#leaf" transform="translate(591 143) rotate(94) scale(1.34)" fill="#2f7443"/><use href="#leaf" transform="translate(744 848) rotate(27) scale(1.34)" fill="#27603a"/><use href="#leaf" transform="translate(35 262) rotate(127) scale(1.35)" fill="#38874c"/><use href="#leaf" transform="translate(53 586) rotate(23) scale(1.37)" fill="#1a4024"/><use href="#leaf" transform="translate(880 539) rotate(-66) scale(1.40)" fill="#1a4024"/><use href="#leaf" transform="translate(965 243) rotate(111) scale(1.41)" fill="#27603a"/><use href="#leaf" transform="translate(1429 151) rotate(114) scale(1.41)" fill="#1a4024"/><use href="#leaf" transform="translate(805 556) rotate(24) scale(1.43)" fill="#1f4d2b"/><use href="#leaf" transform="translate(458 620) rotate(-131) scale(1.43)" fill="#38874c"/><use href="#leaf" transform="translate(57 819) rotate(-65) scale(1.45)" fill="#38874c"/><use href="#leaf" transform="translate(225 299) rotate(167) scale(1.46)" fill="#1f4d2b"/><use href="#leaf" transform="translate(75 617) rotate(5) scale(1.51)" fill="#38874c"/><use href="#leaf" transform="translate(799 71) rotate(-65) scale(1.52)" fill="#2f7443"/><use href="#leaf" transform="translate(157 511) rotate(-66) scale(1.54)" fill="#1a4024"/><use href="#leaf" transform="translate(1052 188) rotate(69) scale(1.54)" fill="#38874c"/><use href="#leaf" transform="translate(982 417) rotate(-79) scale(1.55)" fill="#1f4d2b"/><use href="#leaf" transform="translate(809 676) rotate(148) scale(1.56)" fill="#38874c"/><use href="#leaf" transform="translate(379 844) rotate(151) scale(1.61)" fill="#2f7443"/><use href="#leaf" transform="translate(956 141) rotate(-87) scale(1.61)" fill="#38874c"/><use href="#leaf" transform="translate(487 702) rotate(58) scale(1.62)" fill="#38874c"/><use href="#leaf" transform="translate(1368 378) rotate(154) scale(1.65)" fill="#2f7443"/><use href="#leaf" transform="translate(805 268) rotate(-138) scale(1.68)" fill="#38874c"/><use href="#leaf" transform="translate(527 487) rotate(25) scale(1.71)" fill="#27603a"/><use href="#leaf" transform="translate(523 538) rotate(80) scale(1.74)" fill="#1a4024"/><use href="#leaf" transform="translate(156 71) rotate(-56) scale(1.76)" fill="#27603a"/><use href="#leaf" transform="translate(410 849) rotate(-149) scale(1.77)" fill="#2f7443"/><use href="#leaf" transform="translate(1404 225) rotate(-153) scale(1.79)" fill="#1f4d2b"/><use href="#leaf" transform="translate(1083 248) rotate(-6) scale(1.80)" fill="#38874c"/><use href="#leaf" transform="translate(1415 274) rotate(-141) scale(1.83)" fill="#1f4d2b"/><use href="#leaf" transform="translate(920 704) rotate(-13) scale(1.87)" fill="#2f7443"/><use href="#leaf" transform="translate(1190 -14) rotate(110) scale(1.87)" fill="#38874c"/><use href="#leaf" transform="translate(554 672) rotate(-149) scale(1.89)" fill="#27603a"/><use href="#leaf" transform="translate(-35 661) rotate(146) scale(1.92)" fill="#1a4024"/><use href="#leaf" transform="translate(1135 530) rotate(-162) scale(1.92)" fill="#1a4024"/><use href="#leaf" transform="translate(1039 435) rotate(-21) scale(1.92)" fill="#27603a"/><use href="#leaf" transform="translate(880 5) rotate(-97) scale(1.94)" fill="#1f4d2b"/><use href="#leaf" transform="translate(370 417) rotate(-79) scale(1.94)" fill="#1f4d2b"/><use href="#leaf" transform="translate(1280 864) rotate(-1) scale(1.94)" fill="#2f7443"/><use href="#leaf" transform="translate(-24 206) rotate(-179) scale(1.96)" fill="#38874c"/><use href="#leaf" transform="translate(977 867) rotate(-173) scale(2.00)" fill="#2f7443"/><use href="#leaf" transform="translate(123 830) rotate(-124) scale(2.01)" fill="#1f4d2b"/><use href="#leaf" transform="translate(1136 135) rotate(45) scale(2.01)" fill="#27603a"/><use href="#leaf" transform="translate(641 661) rotate(65) scale(2.01)" fill="#2f7443"/><use href="#leaf" transform="translate(131 606) rotate(-76) scale(2.03)" fill="#2f7443"/><use href="#leaf" transform="translate(1019 563) rotate(164) scale(2.04)" fill="#1a4024"/><use href="#leaf" transform="translate(289 187) rotate(32) scale(2.05)" fill="#27603a"/><use href="#leaf" transform="translate(988 92) rotate(-150) scale(2.07)" fill="#27603a"/><use href="#leaf" transform="translate(202 562) rotate(-133) scale(2.07)" fill="#1a4024"/><use href="#leaf" transform="translate(764 241) rotate(45) scale(2.12)" fill="#38874c"/><use href="#leaf" transform="translate(740 577) rotate(-166) scale(2.13)" fill="#1f4d2b"/><use href="#leaf" transform="translate(227 814) rotate(36) scale(2.13)" fill="#38874c"/><use href="#leaf" transform="translate(408 25) rotate(101) scale(2.15)" fill="#1f4d2b"/><use href="#leaf" transform="translate(1085 130) rotate(-147) scale(2.16)" fill="#1a4024"/><use href="#leaf" transform="translate(1147 749) rotate(143) scale(2.16)" fill="#2f7443"/><use href="#leaf" transform="translate(1466 59) rotate(171) scale(2.18)" fill="#1f4d2b"/><use href="#leaf" transform="translate(451 484) rotate(118) scale(2.18)" fill="#1a4024"/><use href="#leaf" transform="translate(647 300) rotate(-4) scale(2.18)" fill="#2f7443"/></symbol><clipPath id="cut-left"><polygon points="-20,-20 733,-20 700,33 691,82 735,130 748,174 740,211 731,263 718,293 748,332 738,371 703,423 741,454 704,490 718,524 702,584 744,616 714,656 704,716 700,758 736,814 721,870 730,920 -20,920"/></clipPath><clipPath id="cut-right"><polygon points="1460,-20 733,-20 700,33 691,82 735,130 748,174 740,211 731,263 718,293 748,332 738,371 703,423 741,454 704,490 718,524 702,584 744,616 714,656 704,716 700,758 736,814 721,870 730,920 1460,920"/></clipPath></defs><g clip-path="url(#cut-left)"><rect width="1440" height="900" fill="#12261a"/><use href="#foliage"/></g></svg>
       <svg class="curtain-half right" viewBox="0 0 1440 900" preserveAspectRatio="xMidYMid slice" aria-hidden="true"><g clip-path="url(#cut-right)"><rect width="1440" height="900" fill="#12261a"/><use href="#foliage"/></g></svg>
-      <div class="curtain-label"><span class="curtain-spinner"></span><b>Ooga Booga Land</b><span>growing the island…</span></div>
+      <div class="curtain-label"><span class="curtain-spinner"></span><b><span data-sign>Ooga Booga Land</span></b><span>growing the island…</span></div>
     </div>
 
     <header class="topbar">
       <div class="brand">
-        <h1>Ooga Booga Land</h1>
+        <h1><span data-sign>Ooga Booga Land</span></h1>
         <p data-scene="hub" id="subtitle">an island of caves</p>
         <p data-scene="lab" hidden>EntropyLab cave</p>
       </div>
@@ -1248,10 +1282,18 @@ select {
     </header>
 
     <aside class="sheet" id="sheet" data-open="true">
-      <button type="button" class="sheet-toggle" id="sheet-toggle" aria-label="Toggle panel"><span></span></button>
+      <button type="button" class="sheet-toggle" id="sheet-toggle" aria-label="Toggle panel">
+        <svg class="caveman-icon" viewBox="0 0 7 9" shape-rendering="crispEdges" aria-hidden="true">
+          <path fill="#2b1b10" d="M1 0h5v1H1zM0 1h7v2H0zM0 3h1v2H0zM6 3h1v2H6z"/>
+          <path fill="#c98a5b" d="M1 3h5v3H1zM2 6h3v1H2z"/>
+          <path fill="#141414" d="M2 3h1v1H2zM4 3h1v1H4z"/>
+          <path fill="#4a2c14" d="M1 6h1v1H1zM5 6h1v1H5zM1 7h5v1H1zM2 8h3v1H2z"/>
+          <path fill="#f2efe4" d="M1 8h1v1H1zM5 8h1v1H5z"/>
+        </svg>
+      </button>
       <div class="tabs" role="tablist">
-        <button type="button" role="tab" data-tab="roster" aria-selected="true">Ooga Boogas</button>
-        <button type="button" role="tab" data-tab="loot" aria-selected="false" id="loot-tab" hidden>Loot <span class="tab-count"
+        <button type="button" role="tab" data-tab="roster" aria-selected="true"><span data-sign>Ooga Boogas</span></button>
+        <button type="button" role="tab" data-tab="loot" aria-selected="false" id="loot-tab" hidden><span data-sign>Loot</span> <span class="tab-count"
             id="loot-count" hidden></span></button>
       </div>
       <section class="panel" data-panel="roster" role="tabpanel">
@@ -1263,11 +1305,11 @@ select {
         </div>
         <p class="help" data-scene="hub">Tap trees, bushes, barrels and caves. Double-tap a caveman to walk in their boots.<span id="world-loot-hint" hidden> Something is hidden out there.</span></p>
         <p class="help" data-scene="lab" hidden>Tap racks, flasks, dice and cards. Double-tap a caveman to walk in their boots.</p>
-        <button type="button" class="feed-open" data-action="feed">Feed the Ooga Boogas</button>
+        <button type="button" class="feed-open" data-action="feed"><span data-sign>Feed the Ooga Boogas</span></button>
       </section>
       <section class="panel" data-panel="loot" role="tabpanel" hidden>
         <div class="panel-head">
-          <h2>Swag locker</h2>
+          <h2><span data-sign>Swag locker</span></h2>
           <button type="button" class="link" data-action="clear-loot">Clear</button>
         </div>
         <p class="help empty" id="inventory-empty">Open a loot crate to earn swag, then assign it to a caveman.</p>
@@ -1286,7 +1328,7 @@ select {
     <button type="button" class="act" id="act" data-action="act" hidden>Ooga!</button>
     <dialog class="modal" id="feed" aria-label="Feed the Ooga Boogas">
       <div class="panel-head">
-        <h2>Feed the Ooga Boogas</h2>
+        <h2><span data-sign>Feed the Ooga Boogas</span></h2>
         <button type="button" class="link" data-action="feed-close">Close</button>
       </div>
       <canvas id="qr" width="0" height="0" aria-label="Donation QR code"></canvas>
@@ -4142,10 +4184,32 @@ void main() {
       .map(([hx, hy]) => box({ w: 0.03, h: 0.03, d: 0.008, color: "#0f1113", offset: { x: hx, y: 0.1 + hy, z: 0.463 } }));
     return merge(hood, snout, filter, ...holes, lens(-0.12), lens(0.12), tube(-0.21), tube(0.21), ring({ r: 0.315, thickness: 0.02, y: 0.4, segments: 14, color: trim }));
   });
+  const STATUE_LIGHT = hexToRgb("#5e4022");
+  const STATUE_DARK = hexToRgb("#37240f");
+  const STATUE_BEARD = hexToRgb("#8d6a3c");
+  const STATUE_EYES = { 21: 1 };
+  // Two carved wings rising from the shoulder blades, feathers as bands, tips above the crown
+  const wingVoxels = () => {
+    const v = makeVox();
+    const feather = (x, y) => (y - Math.floor(Math.abs(x) * 0.6)) % 3 ? 0 : 1;
+    for (let i = 0; i < 10; i++) {
+      const bottom = 3 + Math.round(i * 1.4);
+      const top = Math.min(20, 9 + Math.round(i * 1.5));
+      for (const side of [-1, 1]) v.fill(side * (2 + i), side * (2 + i), bottom, top, i < 3 ? -4 : -5, -4, feather);
+    }
+    return v;
+  };
+  // A deck slung across the back, wheels out
+  const skateboardGeometry = (h) => merge(
+    box({ w: 0.22 * h, h: 0.8 * h, d: 0.03 * h, color: "#7cc242" }),
+    box({ w: 0.2 * h, h: 0.08 * h, d: 0.03 * h, color: "#f7931a", offset: { z: -0.006 * h } }),
+    ...[-0.28, 0.28].map((y) => box({ w: 0.2 * h, h: 0.03 * h, d: 0.045 * h, color: "#8a8a8a", offset: { y: y * h, z: -0.03 * h } })),
+    ...[-0.28, 0.28].flatMap((y) => [-0.085, 0.085].map((x) => box({ w: 0.06 * h, h: 0.06 * h, d: 0.05 * h, color: "#1a1a1a", offset: { x: x * h, y: y * h, z: -0.07 * h } })))
+  );
   const caveman = (traits) => {
     const { skin, hair, height: h, belly, rand } = traits;
     const u = h / 16;
-    const P = { skin: 0, skinDk: 1, hair: 2, hairDk: 3, fur: 4, spot: 5, white: 6, black: 7, nose: 8, stubble: 9, wood: 10, stone: 11, stoneDk: 12, apple: 13, appleDk: 14, leaf: 15 };
+    const P = { skin: 0, skinDk: 1, hair: 2, hairDk: 3, fur: 4, spot: 5, white: 6, black: 7, nose: 8, stubble: 9, wood: 10, stone: 11, stoneDk: 12, apple: 13, appleDk: 14, leaf: 15, knit: 16, knitDk: 17, pom: 18, lens: 19, btc: 20, glow: 21 };
     const palette = [
       shade(skin, 1),
       shade(skin, 0.9),
@@ -4162,8 +4226,20 @@ void main() {
       hexToRgb("#565656"),
       hexToRgb("#c8342a"),
       hexToRgb("#8f231b"),
-      hexToRgb("#4f8a3d")
+      hexToRgb("#4f8a3d"),
+      hexToRgb("#8cc63f"),
+      hexToRgb("#6faa2f"),
+      hexToRgb("#a9d94c"),
+      hexToRgb("#3f9c96"),
+      hexToRgb("#f7931a"),
+      hexToRgb("#ffb428")
     ];
+    if (traits.statue) {
+      // Carved from one block: every body colour becomes stone, light or dark
+      for (const i of [P.skin, P.hair, P.fur, P.white, P.nose]) palette[i] = STATUE_LIGHT;
+      for (const i of [P.skinDk, P.hairDk, P.spot, P.black]) palette[i] = STATUE_DARK;
+      palette[P.stubble] = STATUE_BEARD;
+    }
     const jit = (base, dark, p) => () => rand() < p ? dark : base;
     const skinJ = jit(P.skin, P.skinDk, 0.08);
     const hairJ = jit(P.hair, P.hairDk, 0.12);
@@ -4178,7 +4254,7 @@ void main() {
         if (v.get(nx, y, z) === P.fur) v.set(nx, y, z, P.spot);
       }
     };
-    const vg = (v, origin) => voxelGeometry(v, { unit: u, palette, origin });
+    const vg = (v, origin, emissive) => voxelGeometry(v, { unit: u, palette, origin, emissive });
     const parts = {};
     const legH = 5 * u;
     const root = createNode({ position: { x: 0, y: legH, z: 0 } });
@@ -4280,6 +4356,10 @@ void main() {
         // Nose, beard and mouth sit under the mask
       } else if (traits.slim) {
         v.fill(3, 3, 2, 3, 6, 6, P.nose);
+      } else if (traits.skater) {
+        // Clean-shaven under the shades: a low nose and a smirk
+        v.set(3, 1, 6, P.nose);
+        v.fill(2, 4, 0, 0, 6, 6, P.spot);
       } else {
         v.fill(0, 6, 0, 1, 5, 7, jit(P.hair, P.stubble, 0.25));
         v.fill(1, 5, -2, -1, 5, 7, (x, y) => y === -2 && rand() < 0.35 ? null : rand() < 0.15 ? P.hairDk : P.hair);
@@ -4287,16 +4367,50 @@ void main() {
         v.set(5, 0, 7, P.white);
         v.fill(2, 4, 2, 3, 6, 7, jit(traits.apple ? P.appleDk : P.nose, traits.apple ? P.apple : P.skin, 0.25));
       }
-      if (!traits.gasMask) v.fill(0, 6, 4, 4, 6, 6, hairJ);
-      const hairy = !traits.bald && !traits.apple && !traits.gasMask;
+      if (!traits.gasMask && !traits.skater) v.fill(0, 6, 4, 4, 6, 6, hairJ);
+      const hairy = !traits.bald && !traits.apple && !traits.gasMask && !traits.statue && !traits.skater;
       if (hairy) {
         v.fill(-1, 7, 6, 8, -1, 6, hairJ);
         v.fill(-1, 7, traits.slim ? -5 : -2, 5, -2, -1, hairJ);
         v.fill(-1, -1, traits.slim ? -3 : 2, 5, -1, 4, hairJ);
         v.fill(7, 7, traits.slim ? -3 : 2, 5, -1, 4, hairJ);
       }
+      if (traits.statue) {
+        // The Anunnaki: a banded horned crown and a long curled beard down the chest
+        const curl = (x, y) => y % 2 ? P.hairDk : P.stubble;
+        v.fill(0, 6, 0, 1, 5, 7, curl);
+        v.fill(0, 6, -2, -1, 5, 8, curl);
+        v.fill(1, 5, -5, -3, 7, 8, curl);
+        v.fill(2, 4, -7, -6, 7, 8, curl);
+        v.fill(-1, 7, 6, 6, -1, 6, P.hairDk);
+        v.fill(0, 6, 7, 8, 0, 5, P.hair);
+        v.fill(-1, 7, 9, 9, -1, 6, P.hairDk);
+        v.fill(1, 5, 10, 11, 1, 4, P.hair);
+        v.fill(0, 6, 12, 12, 0, 5, P.hairDk);
+        v.fill(2, 4, 13, 13, 2, 3, P.hair);
+      }
+      if (traits.skater) {
+        // A slouched green beanie over dreads, shades in front of the eyes
+        const rib = (x, y, z) => (x + z) % 2 ? P.knitDk : P.knit;
+        v.fill(-1, 7, 4, 8, -1, 6, rib);
+        v.fill(-1, 5, 9, 9, 0, 5, rib);
+        v.fill(-2, 3, 10, 10, 1, 4, rib);
+        v.fill(-3, 0, 11, 12, 1, 3, jit(P.pom, P.knit, 0.2));
+        v.fill(-2, -1, 13, 13, 2, 2, P.pom);
+        for (const [bx, by] of [[3, 8], [4, 8], [3, 7], [5, 7], [3, 6], [4, 6], [3, 5], [5, 5], [3, 4], [4, 4]]) v.set(bx, by, 6, P.btc);
+        for (const z of [-1, 1, 3]) {
+          v.fill(-1, -1, -2, 3, z, z, hairJ);
+          v.fill(7, 7, -2, 3, z, z, hairJ);
+        }
+        for (const x of [0, 2, 4, 6]) v.fill(x, x, -3, 3, -1, -1, hairJ);
+        v.fill(0, 6, 3, 3, 6, 6, P.black);
+        v.fill(0, 1, 2, 3, 6, 6, P.lens);
+        v.fill(5, 6, 2, 3, 6, 6, P.lens);
+        v.fill(-1, -1, 3, 3, 4, 6, P.black);
+        v.fill(7, 7, 3, 3, 4, 6, P.black);
+      }
       for (const [k, c] of [...v.map]) {
-        if (c !== P.hair && c !== P.hairDk) continue;
+        if (traits.statue || c !== P.hair && c !== P.hairDk) continue;
         const [x, y, z] = k.split(",").map(Number);
         const exposed = !v.has(x + 1, y, z) || !v.has(x - 1, y, z) || !v.has(x, y, z + 1) || !v.has(x, y, z - 1) || !v.has(x, y + 1, z);
         if (exposed && rand() < 0.07) v.del(x, y, z);
@@ -4312,6 +4426,8 @@ void main() {
       }
       v.set(1, 2, 5, P.black);
       v.set(5, 2, 5, P.black);
+      // The statue's eyes burn
+      if (traits.statue) for (const [x, y] of eyeCells) v.set(x, y, 5, P.glow);
       if (traits.symmetricTusks) {
         // Keep w-s-bitcoin's tusks and the stubble beside them as a clean mirror pair.
         for (let x = 0; x <= 6; x++) {
@@ -4330,18 +4446,20 @@ void main() {
       }
     }
     const headOrigin = { x: -3.5 * u, y: 0, z: -3 * u };
-    const headOpen = vg(headVox, headOrigin);
+    const headOpen = vg(headVox, headOrigin, traits.statue ? STATUE_EYES : undefined);
     const closedVox = makeVox();
     for (const [k, c] of headVox.map) closedVox.map.set(k, c);
     for (const [x, y] of eyeCells) closedVox.set(x, y, 5, y === 2 ? P.skinDk : P.skin);
     const headClosed = vg(closedVox, headOrigin);
     parts.head = createNode({ position: { x: 0, y: 0.5 * h, z: 0.02 * h }, geometry: headOpen });
-    const hatY = traits.gasMask ? 0.66 * h : (traits.bald ? 6 : traits.apple ? 8 : 9) * u;
+    const hatY = traits.gasMask ? 0.66 * h : (traits.bald ? 6 : traits.apple ? 8 : traits.statue ? 14 : traits.skater ? 13 : 9) * u;
     parts.hat = createNode({ position: { x: 0, y: hatY, z: 0 }, scale: { x: h, y: h, z: h }, visible: false });
     parts.face = createNode({ position: { x: 0, y: 0, z: 0 }, scale: { x: h, y: h, z: h }, visible: false });
     addChild(parts.head, parts.hat, parts.face);
     if (traits.gasMask) addChild(parts.head, createNode({ scale: { x: h, y: h, z: h }, geometry: gasMaskGeometry() }));
     addChild(root, parts.legL, parts.legR, parts.torso, parts.armL, parts.armR, parts.head);
+    if (traits.statue) addChild(root, createNode({ geometry: vg(wingVoxels(), { x: -0.5 * u, y: 0, z: 0 }) }));
+    if (traits.skater) addChild(root, createNode({ position: { x: 0, y: 0.28 * h, z: -0.35 * h }, rotation: { x: 0, y: 0, z: 0.4 }, geometry: skateboardGeometry(h) }));
     return { root, parts, traits, headOffset: 1.1 * h, headOpen, headClosed, skins };
   };
   // A real die, opposite faces summing to seven
@@ -5340,7 +5458,44 @@ void main() {
     L: ["100", "100", "100", "100", "111"],
     a: ["000", "010", "101", "111", "101"],
     b: ["100", "100", "110", "101", "110"],
-    d: ["001", "001", "011", "101", "011"]
+    d: ["001", "001", "011", "101", "011"],
+    c: ["000", "011", "100", "100", "011"],
+    e: ["000", "010", "111", "100", "011"],
+    f: ["011", "010", "111", "010", "010"],
+    h: ["100", "100", "110", "101", "101"],
+    i: ["010", "000", "010", "010", "010"],
+    k: ["100", "101", "110", "101", "101"],
+    l: ["110", "010", "010", "010", "011"],
+    m: ["000", "111", "111", "101", "101"],
+    s: ["000", "011", "110", "001", "110"],
+    u: ["000", "101", "101", "101", "011"],
+    v: ["000", "101", "101", "101", "010"],
+    w: ["000", "101", "101", "111", "010"],
+    x: ["000", "101", "010", "010", "101"],
+    z: ["000", "111", "001", "010", "111"],
+    A: ["010", "101", "111", "101", "101"],
+    C: ["011", "100", "100", "100", "011"],
+    D: ["110", "101", "101", "101", "110"],
+    F: ["111", "100", "110", "100", "100"],
+    M: ["101", "111", "111", "101", "101"],
+    P: ["110", "101", "110", "100", "100"],
+    R: ["110", "101", "110", "101", "101"],
+    S: ["011", "100", "010", "001", "110"],
+    T: ["111", "010", "010", "010", "010"],
+    W: ["101", "101", "101", "111", "101"],
+    0: ["111", "101", "101", "101", "111"],
+    1: ["010", "110", "010", "010", "111"],
+    2: ["111", "001", "111", "100", "111"],
+    3: ["111", "001", "111", "001", "111"],
+    4: ["101", "101", "111", "001", "001"],
+    5: ["111", "100", "111", "001", "111"],
+    6: ["111", "100", "111", "101", "111"],
+    7: ["111", "001", "001", "001", "001"],
+    8: ["111", "101", "111", "101", "111"],
+    9: ["111", "101", "111", "001", "111"],
+    "!": ["010", "010", "010", "000", "010"],
+    "?": ["111", "001", "011", "000", "010"],
+    ".": ["000", "000", "000", "000", "010"]
   };
   const SIGN_CELL = 0.075, SIGN_PIXEL = 0.061, SIGN_PAD = 0.855, SIGN_FRONT = 0.23;
   const SIGN_CACHE = new Map();
@@ -5727,7 +5882,7 @@ void main() {
     box({ w: 4, h: 0.14, d: 0.16, color: WOOD_DK, offset: { x: 2, y: -0.17, z: 0.92 } }),
     ...[[0.5, -0.8], [0.5, 0.8], [3.5, -0.8], [3.5, 0.8]].map(([x, z]) => box({ w: 0.2, h: 2.2, d: 0.2, color: "#6b4a2b", offset: { x, y: -1.2, z } }))
   ));
-  BL.hubModels = { jetpack, jetFlame, caveMouthRim, mirrorPanel, matrixRimLiner, matrixGlyph, matrixChamber, caveSign, CAVE_SIGN_WIDTH, CAVE_SIGN_HEIGHT, gate, caveShelves, bedroll, tree, bush, rock, altarSlab, altarBlock, woodCrate, barrel, flowerTuft, torch, grass, lantern, firepit, fireFlame, butterfly, firefly, ember, vine, cloud, ladder, dock, TREE_HEIGHT };
+  BL.hubModels = { SIGN_GLYPHS, jetpack, jetFlame, caveMouthRim, mirrorPanel, matrixRimLiner, matrixGlyph, matrixChamber, caveSign, CAVE_SIGN_WIDTH, CAVE_SIGN_HEIGHT, gate, caveShelves, bedroll, tree, bush, rock, altarSlab, altarBlock, woodCrate, barrel, flowerTuft, torch, grass, lantern, firepit, fireFlame, butterfly, firefly, ember, vine, cloud, ladder, dock, TREE_HEIGHT };
 })();
 
 // ---- js/caves.js ----
@@ -5759,10 +5914,10 @@ void main() {
     ["portlandhodl", 1788159681],
     ["w-s-bitcoin", 1788178261],
     ["dplusplus1024", 1788153655],
-    ["bc1gui", 1788008082],
+    ["bc1gui", 1788190400],
     ["RandyMcMillan", 1788019011],
     ["MrHodlX", 1788200000],
-    ["timechainb", 1788073569]
+    ["timechainb", 1788171200]
   ].map(([name, unixSeconds]) => ({ name, lastCommitAt: unixSeconds * 1e3 }));
   const SNAPSHOT_AT = 1788225311 * 1e3;
   const stateFor = (contributor, at = SNAPSHOT_AT) => {
@@ -5783,7 +5938,9 @@ void main() {
     portlandhodl: { bald: true },
     "w-s-bitcoin": { apple: true, symmetricTusks: true },
     MrHodlX: { gasMask: true },
-    dplusplus1024: { build: "slim", hair: "#b9dcaa" }
+    dplusplus1024: { build: "slim", hair: "#b9dcaa" },
+    bc1gui: { skater: true, skin: "#f2a33c", hair: "#e4561f", fur: "#8f4f17" },
+    timechainb: { statue: true }
   };
   const SKINS = ["#c98a5b", "#a9744c", "#8a5a3a", "#d9a06b", "#b58057"];
   const HAIRS = ["#2b1b10", "#4a2c14", "#151312", "#5c4425", "#7a2e12"];
@@ -5802,9 +5959,11 @@ void main() {
       apple: !!likeness.apple,
       gasMask: !!likeness.gasMask,
       symmetricTusks: !!likeness.symmetricTusks,
-      skin,
+      skater: !!likeness.skater,
+      statue: !!likeness.statue,
+      skin: likeness.skin || skin,
       hair: likeness.hair || hashedHair,
-      fur: FURS[Math.floor(rand() * FURS.length)],
+      fur: likeness.fur || FURS[Math.floor(rand() * FURS.length)],
       height: 0.92 + rand() * 0.24,
       belly: (0.9 + rand() * 0.35) * (slim ? 0.8 : 1),
       rand: mulberry32(fnv1a(name + "/body"))
@@ -5898,7 +6057,9 @@ void main() {
     let gesture = null;
     let pinchDist = 0;
     let longPressTimer = 0;
-    const lastTap = { at: -Infinity, node: null, x: 0, y: 0 };
+    const lastTap = { at: -Infinity, node: null, owner: null, x: 0, y: 0 };
+    // Every body part of one caveman is the same target, so a poke hop cannot break a double tap
+    const sameTarget = (hit) => hit ? hit.node === lastTap.node || (!!hit.owner.cave && !!lastTap.owner && hit.owner.cave === lastTap.owner.cave) : lastTap.node === null;
     const call = (name, ...args) => hooks[name] ? hooks[name](...args) : undefined;
     const add = (node, owner, { radius = 0 } = {}) => {
       targets.push({ node, owner, radius });
@@ -6064,13 +6225,15 @@ void main() {
       } else if (g.mode === "pending" && !cancelled && performance.now() - g.at < TAP_MS) {
         const node = g.hit ? g.hit.node : null;
         const now = performance.now();
-        if (now - lastTap.at < DOUBLE_MS && lastTap.node === node && Math.hypot(p.x - lastTap.x, p.y - lastTap.y) < DOUBLE_PX) {
+        if (now - lastTap.at < DOUBLE_MS && sameTarget(g.hit) && Math.hypot(p.x - lastTap.x, p.y - lastTap.y) < DOUBLE_PX) {
           lastTap.at = -Infinity;
           lastTap.node = null;
+          lastTap.owner = null;
           call("onDoubleTap", g.hit, p);
         } else {
           lastTap.at = now;
           lastTap.node = node;
+          lastTap.owner = g.hit ? g.hit.owner : null;
           lastTap.x = p.x;
           lastTap.y = p.y;
           call("onTap", g.hit, p);
@@ -6584,6 +6747,45 @@ void main() {
   const STATE_LABELS = { working: "EATING", sleeping: "ZZZ", away: "AWAY" };
   const $ = (id) => document.getElementById(id);
   const TIER_RANK = { legendary: 0, epic: 1, rare: 2, common: 3 };
+  // Headings in the cave-sign lettering: one path of pixels per element, scaled by its CSS height
+  const SIGN_NS = "http://www.w3.org/2000/svg";
+  const signLettering = (text) => {
+    const { SIGN_GLYPHS } = BL.hubModels;
+    let cells = -1;
+    for (const ch of text) cells += ch === " " ? 2 : 4;
+    const svg = document.createElementNS(SIGN_NS, "svg");
+    svg.setAttribute("viewBox", `0 0 ${cells} 6`);
+    svg.setAttribute("class", "sign");
+    svg.setAttribute("aria-hidden", "true");
+    const path = document.createElementNS(SIGN_NS, "path");
+    let d = "", cursor = 0;
+    for (const ch of text) {
+      if (ch === " ") {
+        cursor += 2;
+        continue;
+      }
+      const glyph = SIGN_GLYPHS[ch];
+      if (!glyph) throw new Error(`No cave-sign glyph for "${ch}"`);
+      for (let row = 0; row < glyph.length; row++) {
+        for (let col = 0; col < glyph[row].length; col++) {
+          if (glyph[row][col] === "1") d += `M${cursor + col} ${row}h.82v.82h-.82z`;
+        }
+      }
+      cursor += 4;
+    }
+    path.setAttribute("d", d);
+    path.setAttribute("fill", "currentColor");
+    svg.append(path);
+    return svg;
+  };
+  for (const el of document.querySelectorAll("[data-sign]")) {
+    const text = el.textContent.trim();
+    el.setAttribute("aria-label", text);
+    el.replaceChildren(signLettering(text));
+  }
+  // The panel shows itself once on load, then folds away unless the visitor is using it
+  const INTRO_MS = 5000;
+  let introTimer = 0;
   // Swag icons drawn once into an offscreen canvas
   const ICON_PX = 48;
   const renderIcon = (item) => {
@@ -6756,8 +6958,13 @@ void main() {
       });
     }
     on(el.sheetToggle, "click", () => {
+      window.clearTimeout(introTimer);
       el.sheet.dataset.open = el.sheet.dataset.open === "true" ? "false" : "true";
     });
+    on(el.sheet, "pointerdown", () => window.clearTimeout(introTimer));
+    if (introTimer === 0) introTimer = window.setTimeout(() => {
+      el.sheet.dataset.open = "false";
+    }, INTRO_MS);
     let presetHandler = null;
     for (const b of el.presets) on(b, "click", () => {
       b.blur();
@@ -7136,6 +7343,8 @@ void main() {
   const SWAG_ANCHORS = ["hat", "face"];
   const FAN_STANDOFF = 1.1;
   const FAN_ARC = 2.2;
+  // The widest the fan opens, so the near side stays clear however many eat
+  const FAN_SPREAD = 4.2;
   const POKES = ["Ooga?", "Booga!", "No poke.", "Hmm banana?", "Ooga booga booga."];
   const SLEEP_POKES = ["zzz... grr", "five more minutes", "zzz"];
   const BUILD_QUOTES = ["Ooga Booga!", "Ooga Booga BUILD!", "Ooga Booga MORE TOOLS!"];
@@ -7328,9 +7537,9 @@ void main() {
     let fanRadius = wantedFanRadius();
     const assignFanSlots = (entries, isWorking) => {
       const farSide = FAN_CENTER;
-      // Neighbours stand FAN_ARC apart at any radius
-      const angleStep = clamp(FAN_ARC / fanRadius, 0.5, 1.1);
       const eaters = entries.filter(isWorking);
+      // Neighbours stand FAN_ARC apart at any radius, closer only when the fan would wrap
+      const angleStep = Math.min(clamp(FAN_ARC / fanRadius, 0.5, 1.1), FAN_SPREAD / Math.max(1, eaters.length - 1));
       // Nobody stands between the camera and the pile
       eaters.forEach((cave, i) => {
         const angle = farSide + (i - (eaters.length - 1) / 2) * angleStep;

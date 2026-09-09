@@ -7,6 +7,45 @@
   const STATE_LABELS = { working: "EATING", sleeping: "ZZZ", away: "AWAY" };
   const $ = (id) => document.getElementById(id);
   const TIER_RANK = { legendary: 0, epic: 1, rare: 2, common: 3 };
+  // Headings in the cave-sign lettering: one path of pixels per element, scaled by its CSS height
+  const SIGN_NS = "http://www.w3.org/2000/svg";
+  const signLettering = (text) => {
+    const { SIGN_GLYPHS } = BL.hubModels;
+    let cells = -1;
+    for (const ch of text) cells += ch === " " ? 2 : 4;
+    const svg = document.createElementNS(SIGN_NS, "svg");
+    svg.setAttribute("viewBox", `0 0 ${cells} 6`);
+    svg.setAttribute("class", "sign");
+    svg.setAttribute("aria-hidden", "true");
+    const path = document.createElementNS(SIGN_NS, "path");
+    let d = "", cursor = 0;
+    for (const ch of text) {
+      if (ch === " ") {
+        cursor += 2;
+        continue;
+      }
+      const glyph = SIGN_GLYPHS[ch];
+      if (!glyph) throw new Error(`No cave-sign glyph for "${ch}"`);
+      for (let row = 0; row < glyph.length; row++) {
+        for (let col = 0; col < glyph[row].length; col++) {
+          if (glyph[row][col] === "1") d += `M${cursor + col} ${row}h.82v.82h-.82z`;
+        }
+      }
+      cursor += 4;
+    }
+    path.setAttribute("d", d);
+    path.setAttribute("fill", "currentColor");
+    svg.append(path);
+    return svg;
+  };
+  for (const el of document.querySelectorAll("[data-sign]")) {
+    const text = el.textContent.trim();
+    el.setAttribute("aria-label", text);
+    el.replaceChildren(signLettering(text));
+  }
+  // The panel shows itself once on load, then folds away unless the visitor is using it
+  const INTRO_MS = 5000;
+  let introTimer = 0;
   // Swag icons drawn once into an offscreen canvas
   const ICON_PX = 48;
   const renderIcon = (item) => {
@@ -179,8 +218,13 @@
       });
     }
     on(el.sheetToggle, "click", () => {
+      window.clearTimeout(introTimer);
       el.sheet.dataset.open = el.sheet.dataset.open === "true" ? "false" : "true";
     });
+    on(el.sheet, "pointerdown", () => window.clearTimeout(introTimer));
+    if (introTimer === 0) introTimer = window.setTimeout(() => {
+      el.sheet.dataset.open = "false";
+    }, INTRO_MS);
     let presetHandler = null;
     for (const b of el.presets) on(b, "click", () => {
       b.blur();

@@ -13,6 +13,8 @@ const page = (base, query) => `${base}?debug=1&nosim=1&scene=lab${clock(query)}`
 const hubPage = (base, query) => `${base}?debug=1&nosim=1${clock(query)}`;
 // Sets the pile level, then measures how far any point of the mound surface is from the nearest shell banana
 const shellCoverage = `(level) => { const B = window.__ooga, M = window.BL.models, profile = M.BANANA_PILE_PROFILE; B.setPileLevel(level); const data = B.shell.instanceData, n = B.shell.instanceCount, core = B.core, coreColors = core.geometry.faces.map((f) => f.color); const surfaceY = (r) => { for (let i = 0; i < profile.length - 1; i++) { const o = profile[i], q = profile[i + 1]; if (r < q[0]) continue; return o[1] + (q[1] - o[1]) * (o[0] - r) / (o[0] - q[0]); } return profile[profile.length - 1][1]; }; let worst = 0, sum = 0; const samples = 600; for (let s = 0; s < samples; s++) { const u = (s + 0.5) / samples, angle = s * 2.399963; const r = Math.sqrt(u) * 0.97, wr = r * M.bananaPileRadiusScale(angle, r) * core.scale.x, x = Math.cos(angle) * wr, z = Math.sin(angle) * wr, y = core.position.y + (surfaceY(r) + M.bananaPileHeightOffset(angle, r)) * core.scale.y; let nearest = Infinity; for (let i = 0; i < n; i++) { const o = i * 20, d = Math.hypot(data[o + 12] - x, data[o + 13] - y, data[o + 14] - z); if (d < nearest) nearest = d; } worst = Math.max(worst, nearest); sum += nearest; } return { level, tiles: n, worstGap: +worst.toFixed(3), meanGap: +(sum / samples).toFixed(3), yellowPanels: coreColors.every((c) => c[0] >= 180 && c[1] >= 135 && c[2] <= 65), panelColors: new Set(coreColors.map((c) => c.join(","))).size }; }`;
+// The most the working crew can eat between two snapshots taken at performance.now() stamps
+const eatenBetween = (before, after) => `(() => { const B = window.__ooga; return [...B.cavemen.values()].filter((c) => c.state === "working").length * window.BL.crew.EAT_RATE * (${after} - ${before}) / 1000 + 0.05; })()`;
 const covered = (c) => c.worstGap <= 0.14 && c.meanGap <= 0.08 && c.yellowPanels && c.panelColors >= 5 && c.tiles > 0;
 const results = [];
 let scenerySignature = "";
@@ -69,7 +71,7 @@ const core = (label, base) => withPage(label, page(base), async (b) => {
   record(`${label}: the restored shell relays only when its established band layout needs more bananas`, redrawn.oneMore.edge > redrawn.edge && redrawn.oneMore.version === redrawn.beforeVersion && redrawn.oneMore.tiles === redrawn.before && redrawn.grown.version === redrawn.beforeVersion + 1 && redrawn.grown.tiles > redrawn.before && redrawn.grown.edge > redrawn.oneMore.edge && redrawn.back.version === redrawn.grown.version + 1 && redrawn.back.tiles === redrawn.before && redrawn.back.edge === redrawn.edge, JSON.stringify(redrawn));
   const drift = await b.evaluate(`(() => { const B = window.__ooga; const grab = (level) => { B.setPileLevel(level); const d = B.shell.instanceData, n = B.shell.instanceCount, out = new Float32Array(n * 6); for (let i = 0; i < n; i++) { const o = i * 20, s = Math.hypot(d[o], d[o + 1], d[o + 2]); out.set([d[o + 12], d[o + 13], d[o + 14], Math.abs(d[o]) / s * 0.15, Math.abs(d[o + 1]) / s * 0.15, Math.abs(d[o + 2]) / s * 0.15], i * 6); } return out; }; const A = grab(1000), C = grab(1030), dists = []; for (let i = 0; i < A.length; i += 6) { let best = Infinity; for (let j = 0; j < C.length; j += 6) best = Math.min(best, Math.hypot(A[i] - C[j], A[i + 1] - C[j + 1], A[i + 2] - C[j + 2], A[i + 3] - C[j + 3], A[i + 4] - C[j + 4], A[i + 5] - C[j + 5])); dists.push(best); } dists.sort((x, y) => x - y); return { relaid: A.length !== C.length, median: +dists[dists.length >> 1].toFixed(3), max: +dists[dists.length - 1].toFixed(3) }; })()`);
   record(`${label}: a relay keeps every banana in place and facing the same way while the mound grows under it`, drift.relaid && drift.median < 0.04 && drift.max < 0.1, JSON.stringify(drift));
-  const streamStart = await b.evaluate(`(() => { const B = window.__ooga, stats = B.stats(); B.demoTip(1200); B.demoTip(1200); return { level: B.level, shown: B.shown, landed: stats.dropsLanded }; })()`);
+  const streamStart = await b.evaluate(`(() => { const B = window.__ooga, stats = B.stats(); B.demoTip(1200); B.demoTip(1200); return { level: B.level, shown: B.shown, landed: stats.dropsLanded, at: performance.now() }; })()`);
   await b.key("b");
   const queued = await b.evaluate(`(() => { const B = window.__ooga, s = B.stats(); return { level: B.level, shown: B.shown, deliveries: s.deliveries, pendingDrops: s.pendingDrops, dropPool: s.dropPool, dropRate: s.dropRate, started: s.dropsStarted, landed: s.dropsLanded }; })()`);
   record(`${label}: every donated banana enters the faster bounded stream`, queued.deliveries + queued.pendingDrops === 106 && queued.dropPool === 96 && queued.dropRate === 72 && queued.level <= streamStart.level && queued.shown === Math.floor(queued.level), JSON.stringify({ before: streamStart, after: queued }));
@@ -83,8 +85,9 @@ const core = (label, base) => withPage(label, page(base), async (b) => {
   const live = await b.evaluate(`(() => { const B = window.__ooga, s = B.stats(); return { level: B.level, shown: B.shown, deliveries: s.deliveries, pendingDrops: s.pendingDrops, landed: s.dropsLanded }; })()`);
   record(`${label}: pile and counter grow as falling bananas land`, live.landed > streamStart.landed && live.deliveries > 0 && live.level > streamStart.level && live.shown === Math.floor(live.level), JSON.stringify({ before: streamStart, live }));
   await b.sleep(2000);
-  const streamed = await b.evaluate(`(() => { const B = window.__ooga, s = B.stats(); return { level: B.level, shown: B.shown, outstanding: s.deliveries + s.pendingDrops, landed: s.dropsLanded }; })()`);
-  record(`${label}: the complete donation lands promptly and exactly`, streamed.outstanding === 0 && streamed.landed - streamStart.landed === 106 && streamed.level > streamStart.level + 105 && streamed.shown === Math.floor(streamed.level), JSON.stringify({ before: streamStart, after: streamed }));
+  const streamed = await b.evaluate(`(() => { const B = window.__ooga, s = B.stats(); return { level: B.level, shown: B.shown, outstanding: s.deliveries + s.pendingDrops, landed: s.dropsLanded, at: performance.now() }; })()`);
+  const streamEaten = await b.evaluate(eatenBetween(streamStart.at, streamed.at));
+  record(`${label}: the complete donation lands promptly and exactly`, streamed.outstanding === 0 && streamed.landed - streamStart.landed === 106 && streamed.level > streamStart.level + 106 - streamEaten && streamed.level <= streamStart.level + 106 && streamed.shown === Math.floor(streamed.level), JSON.stringify({ before: streamStart, after: streamed, eaten: streamEaten }));
   const scaling = await b.evaluate(`(() => { const B = window.__ooga, geo = B.core.geometry, verts = geo.verts; const sample = (level) => { const coverage = (${shellCoverage})(level); const stats = B.stats(), positions = B.slots.map((s) => s.base.pos), scale = B.core.scale; const radius = Math.max(...positions.map((p) => Math.hypot(p.x, p.z))), height = Math.max(...positions.map((p) => p.y)); let baseMin = Infinity, baseMax = 0, innerVariance = 0; for (let ring = 0; ring < geo.pileRings; ring++) { let ringMin = Infinity, ringMax = 0; for (let i = 0; i < geo.pileSegments; i++) { const offset = (ring * geo.pileSegments + i) * 3, r = Math.hypot(verts[offset], verts[offset + 2]) * scale.x; ringMin = Math.min(ringMin, r); ringMax = Math.max(ringMax, r); } if (ring === 0) { baseMin = ringMin; baseMax = ringMax; } else innerVariance = Math.max(innerVariance, ringMax - ringMin); } return { level, radius, height, volume: radius * radius * height, nodes: stats.allNodes, rendered: stats.rendered, coverage, baseVariance: baseMax - baseMin, innerVariance, crewRadius: Math.min(...[...B.cavemen.values()].filter((c) => c.state === "working").map((c) => Math.hypot(c.slot.x, c.slot.z))) }; }; return { samples: [sample(window.BL.pile.DISK_BANANAS * 2), sample(1000), sample(10000), sample(1000000), sample(window.BL.pile.MAX_BANANAS)], coreGeometries: new Set([window.BL.pile.DISK_BANANAS * 2, 1000, 1000000].map((level) => { B.setPileLevel(level); return B.core.geometry; })).size, budget: window.BL.pile.MAX_WEBGL_TILES }; })()`);
   const [smallest, small, medium, million, cap] = scaling.samples;
   const volume10x = medium.volume / small.volume;
@@ -172,7 +175,7 @@ const keys = () => withPage("keys", page(src), async (b) => {
   await b.evaluate(`document.querySelector('[data-preset="racks"]').focus()`);
   await b.key("b");
   await b.key("b");
-  await b.key("7");
+  await b.key("5");
   await b.sleep(4800);
   const c1 = await count(), landed1 = await b.evaluate(`window.__ooga.stats().dropsLanded`);
   record("keys: B streams 100 bananas and digits force eating, even with a button focused", landed1 - landed0 === 200 && c1 - c0 > 198.5 && c1 - c0 <= 200 && (await eating()) === e0 + 1, `${landed1 - landed0} landed · ${(c1 - c0).toFixed(2)} net bananas`);
@@ -193,6 +196,15 @@ const keys = () => withPage("keys", page(src), async (b) => {
   await b.sleep(2500);
   const reset = await b.evaluate(`({ stored: localStorage.getItem("oogaboogaland.v1"), donations: document.getElementById("stat-donations").textContent })`);
   record("keys: Shift+R resets the demo", reset.stored === null && reset.donations === "0");
+});
+
+const sheetIntro = () => withPage("sheet intro", hubPage(src), async (b) => {
+  const shown = await b.evaluate(`({ open: document.getElementById("sheet").dataset.open, signs: document.querySelectorAll(".sign path").length, tab: getComputedStyle(document.getElementById("sheet-toggle")).display })`);
+  await b.sleep(3200);
+  const folded = await b.evaluate(`document.getElementById("sheet").dataset.open`);
+  await b.evaluate(`document.getElementById("sheet-toggle").click()`);
+  const reopened = await b.evaluate(`document.getElementById("sheet").dataset.open`);
+  record("sheet: shows on load in sign lettering, folds to the pull tab after five seconds, the tab reopens it", shown.open === "true" && shown.signs >= 6 && shown.tab !== "none" && folded === "false" && reopened === "true", JSON.stringify({ shown, folded, reopened }));
 });
 
 const refresh = () => withPage("refresh", page(src), async (b) => {
@@ -437,14 +449,15 @@ const hubRoute = () => withPage("hub route", hubPage(src, "scene=toString"), asy
 });
 
 const pileParameter = () => withPage("pile parameter", hubPage(src, "bananas=12345&b=37"), async (b) => {
-  const r = await b.evaluate(`(() => { const B = window.__ooga, expectedRadius = window.BL.pile.visualFootprintFor(12345, 0.45), stats = B.stats(); return { startLevel: B.startLevel, level: B.level, shown: B.shown, radius: B.altar.radius, expectedRadius, testBananas: B.testBananas, outstanding: stats.deliveries + stats.pendingDrops }; })()`);
+  const r = await b.evaluate(`(() => { const B = window.__ooga, expectedRadius = window.BL.pile.visualFootprintFor(12345, 0.45), stats = B.stats(); return { startLevel: B.startLevel, level: B.level, shown: B.shown, radius: B.altar.radius, expectedRadius, testBananas: B.testBananas, outstanding: stats.deliveries + stats.pendingDrops, at: performance.now() }; })()`);
   record("debug bananas parameter sets the starting pile", r.startLevel === 12345 && r.level <= 12345 && r.level > 12340 && r.shown === Math.floor(r.level) && Math.abs(r.radius - r.expectedRadius) < 0.001, JSON.stringify(r));
   await b.key("b");
   const added = await b.evaluate(`(() => { const B = window.__ooga, stats = B.stats(); return { level: B.level, shown: B.shown, testBananas: B.testBananas, outstanding: stats.deliveries + stats.pendingDrops }; })()`);
   record("debug b parameter sets the bananas streamed per B press", added.testBananas === 37 && added.level <= r.level && added.outstanding - r.outstanding === 37, JSON.stringify({ before: r, queued: added }));
   await b.sleep(2300);
-  const landed = await b.evaluate(`(() => { const B = window.__ooga, stats = B.stats(); return { level: B.level, shown: B.shown, outstanding: stats.deliveries + stats.pendingDrops, landed: stats.dropsLanded }; })()`);
-  record("debug b parameter credits all bananas as they land", landed.outstanding === 0 && landed.landed === 37 && landed.level - r.level > 36.5 && landed.level - r.level <= 37 && landed.shown === Math.floor(landed.level), JSON.stringify({ before: r, after: landed }));
+  const landed = await b.evaluate(`(() => { const B = window.__ooga, stats = B.stats(); return { level: B.level, shown: B.shown, outstanding: stats.deliveries + stats.pendingDrops, landed: stats.dropsLanded, at: performance.now() }; })()`);
+  const eaten = await b.evaluate(eatenBetween(r.at, landed.at));
+  record("debug b parameter credits all bananas as they land", landed.outstanding === 0 && landed.landed === 37 && landed.level - r.level > 37 - eaten && landed.level - r.level <= 37 && landed.shown === Math.floor(landed.level), JSON.stringify({ before: r, after: landed, eaten }));
   const capped = await b.evaluate(`(() => { const B = window.__ooga, max = window.BL.pile.MAX_BANANAS; B.setPileLevel(max * 5); return { max, level: B.level, shown: B.shown }; })()`);
   await b.key("b");
   const atCap = await b.evaluate(`(() => { const B = window.__ooga, stats = B.stats(); return { level: B.level, outstanding: stats.deliveries + stats.pendingDrops }; })()`);
@@ -1049,6 +1062,7 @@ await locker();
 await fan();
 await crates();
 await keys();
+await sheetIntro();
 await refresh();
 await weapons();
 await props();

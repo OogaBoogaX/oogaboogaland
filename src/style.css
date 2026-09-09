@@ -1,8 +1,6 @@
 :root {
   color-scheme: dark;
   --bg: #0a0a0b;
-  --surface: rgba(18, 18, 20, 0.86);
-  --surface-solid: #141416;
   --fg: #ededea;
   --muted: #a6a6a2;
   --faint: #6f6f6c;
@@ -12,8 +10,22 @@
   --warn: #c9a44a;
   --danger: #e5533d;
   --paper: #f3efe4;
-  --radius: 12px;
-  --display: "Iowan Old Style", Palatino, Georgia, serif;
+  --wood: #8a6236;
+  --wood-dk: #5c4425;
+  --plank: #a9773f;
+  --wood-edge: #4a3319;
+  --nail: #3a2a18;
+  --stone: #3a3734;
+  --stone-dk: #2d2b28;
+  --stone-lt: #45413d;
+  --ink: #2a1a0c;
+  --ink-muted: rgba(42, 26, 12, 0.72);
+  --ink-faint: rgba(42, 26, 12, 0.5);
+  /* Planks with a dark seam between them, grain drawn across, a nail in each corner */
+  --planks: radial-gradient(circle at 9px 9px, var(--nail) 2.5px, transparent 3px), radial-gradient(circle at calc(100% - 9px) 9px, var(--nail) 2.5px, transparent 3px), radial-gradient(circle at 9px calc(100% - 9px), var(--nail) 2.5px, transparent 3px), radial-gradient(circle at calc(100% - 9px) calc(100% - 9px), var(--nail) 2.5px, transparent 3px), repeating-linear-gradient(90deg, rgba(0, 0, 0, 0.05) 0 2px, transparent 2px 11px), repeating-linear-gradient(180deg, var(--plank) 0 34px, var(--wood-edge) 34px 36px, var(--wood) 36px 70px, var(--wood-edge) 70px 72px);
+  --tablet: linear-gradient(160deg, var(--stone-lt), var(--stone) 55%, var(--stone-dk));
+  --tablet-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08), inset 0 -2px 0 rgba(0, 0, 0, 0.35), 0 2px 0 rgba(0, 0, 0, 0.4);
+  --radius: 8px;
   --mono: ui-monospace, "Cascadia Code", Menlo, Consolas, "DejaVu Sans Mono", monospace;
   --safe-top: env(safe-area-inset-top, 0px);
   --safe-bottom: env(safe-area-inset-bottom, 0px);
@@ -43,6 +55,15 @@ input,
 select {
   font: inherit;
   color: inherit;
+}
+
+/* Cave-sign lettering: the SVG takes the element's font size as its cap height */
+.sign {
+  display: inline-block;
+  height: 1em;
+  width: auto;
+  overflow: visible;
+  vertical-align: -0.2em;
 }
 
 .stage {
@@ -124,17 +145,16 @@ select {
   gap: 8px;
   padding: 18px 26px;
   border-radius: var(--radius);
-  background: rgba(10, 10, 11, 0.55);
+  background: var(--planks);
+  border: 3px solid var(--wood-edge);
   color: var(--paper);
   text-align: center;
   transition: opacity 0.25s ease;
 }
 
 .curtain-label b {
-  font-family: var(--display);
-  font-weight: 600;
   font-size: 22px;
-  letter-spacing: 0.01em;
+  line-height: 1;
 }
 
 .curtain-label span:last-child {
@@ -182,11 +202,10 @@ select {
 
 .brand h1 {
   margin: 0;
-  font-family: var(--display);
-  font-weight: 600;
-  font-size: 20px;
-  letter-spacing: 0.03em;
+  font-size: 22px;
   line-height: 1.1;
+  color: var(--paper);
+  filter: drop-shadow(0 2px 0 rgba(0, 0, 0, 0.6));
 }
 
 .brand p {
@@ -204,11 +223,10 @@ select {
   align-items: center;
   gap: 10px;
   padding: 8px 14px;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
+  background: var(--tablet);
+  border: 2px solid var(--stone-dk);
+  border-radius: 9px 7px 10px 8px;
+  box-shadow: var(--tablet-shadow);
 }
 
 .meter-label {
@@ -223,7 +241,8 @@ select {
   height: 8px;
   border-radius: 999px;
   overflow: hidden;
-  background: rgba(255, 255, 255, 0.07);
+  background: rgba(0, 0, 0, 0.45);
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.6);
 }
 
 .meter-fill {
@@ -270,33 +289,30 @@ select {
 .presets button {
   min-height: 34px;
   padding: 0 12px;
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  background: var(--surface);
-  color: var(--muted);
+  border: 2px solid var(--wood-edge);
+  border-radius: 6px;
+  background: linear-gradient(var(--plank), var(--wood));
+  color: var(--paper);
   font-size: 11px;
   letter-spacing: 0.08em;
   text-transform: uppercase;
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
+  text-shadow: 0 1px 0 rgba(0, 0, 0, 0.5);
+  box-shadow: 0 3px 0 var(--nail);
 }
 
 .presets button:hover,
 .presets button:focus-visible {
-  color: var(--fg);
-  border-color: rgba(255, 255, 255, 0.22);
+  background: linear-gradient(#b8844a, var(--plank));
   outline: none;
 }
 
 .presets .leave {
   color: var(--accent);
-  border-color: rgba(216, 137, 43, 0.45);
 }
 
 .presets .leave:hover,
 .presets .leave:focus-visible {
-  color: var(--accent);
-  border-color: var(--accent);
+  color: #ffb554;
 }
 
 .sheet {
@@ -307,73 +323,79 @@ select {
   width: 300px;
   display: flex;
   flex-direction: column;
-  background: var(--surface);
-  border: 1px solid var(--border);
+  background: var(--planks);
+  border: 3px solid var(--wood-edge);
   border-radius: var(--radius);
-  backdrop-filter: blur(10px);
-  -webkit-backdrop-filter: blur(10px);
-  overflow: hidden;
-  padding-left: 22px;
+  box-shadow: 0 6px 0 rgba(0, 0, 0, 0.35), 0 10px 30px rgba(0, 0, 0, 0.35);
+  color: var(--paper);
   transition: transform 0.28s ease;
 }
 
-/* Collapsed, leaving only the rail on screen */
+/* Collapsed, leaving only the pull tab on screen */
 .sheet[data-open="false"] {
-  transform: translateX(calc(100% - 22px));
+  transform: translateX(calc(100% + 16px + var(--safe-right)));
 }
 
+/* A wooden pull tab hanging off the panel's edge */
 .sheet-toggle {
   position: absolute;
-  top: 0;
-  left: 0;
-  bottom: 0;
-  width: 22px;
-  border: 0;
-  border-right: 1px solid var(--border);
-  background: transparent;
-  padding: 0;
+  top: 50%;
+  left: -41px;
+  width: 44px;
+  height: 64px;
+  margin-top: -32px;
+  padding: 0 4px 0 2px;
+  border: 3px solid var(--wood-edge);
+  border-right: 0;
+  border-radius: 8px 0 0 8px;
+  background: linear-gradient(90deg, var(--plank), var(--wood));
+  box-shadow: 0 4px 0 rgba(0, 0, 0, 0.35);
 }
 
-.sheet-toggle span {
+.sheet-toggle .caveman-icon {
   display: block;
-  width: 4px;
-  height: 38px;
-  margin: 0 auto;
-  border-radius: 2px;
-  background: rgba(255, 255, 255, 0.22);
+  width: 100%;
+  height: auto;
+  filter: drop-shadow(0 1px 0 rgba(0, 0, 0, 0.5));
 }
 
-.sheet-toggle:hover span,
-.sheet-toggle:focus-visible span {
-  background: rgba(255, 255, 255, 0.45);
+.sheet-toggle:hover,
+.sheet-toggle:focus-visible {
+  background: linear-gradient(90deg, #b8844a, var(--plank));
+  outline: none;
 }
 
 .tabs {
   display: flex;
-  border-bottom: 1px solid var(--border);
+  gap: 6px;
+  padding: 10px 12px 0;
+  border-bottom: 2px solid var(--wood-edge);
   flex: none;
 }
 
 .tabs button {
   flex: 1;
-  min-height: 44px;
-  border: 0;
+  min-height: 38px;
+  margin-bottom: -2px;
+  border: 2px solid transparent;
+  border-bottom: 0;
+  border-radius: 6px 6px 0 0;
   background: transparent;
-  color: var(--faint);
-  font-size: 10.5px;
+  color: rgba(243, 239, 228, 0.55);
+  font-size: 17px;
   letter-spacing: 0.14em;
   text-transform: uppercase;
-  border-bottom: 2px solid transparent;
   transition: color 0.15s ease;
 }
 
 .tabs button:hover {
-  color: var(--muted);
+  color: rgba(243, 239, 228, 0.85);
 }
 
 .tabs button[aria-selected="true"] {
-  color: var(--fg);
-  border-bottom-color: var(--accent);
+  color: var(--paper);
+  border-color: var(--wood-edge);
+  background: var(--wood-dk);
 }
 
 .tabs button:focus-visible,
@@ -404,16 +426,14 @@ select {
   padding: 14px 16px;
   overscroll-behavior: contain;
   scrollbar-width: thin;
-  scrollbar-color: rgba(255, 255, 255, 0.14) transparent;
+  scrollbar-color: rgba(0, 0, 0, 0.35) transparent;
 }
 
 .panel h2 {
   margin: 0 0 10px;
-  font-size: 11px;
-  font-weight: 600;
-  color: var(--accent);
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
+  font-size: 14px;
+  color: var(--paper);
+  filter: drop-shadow(0 1px 0 rgba(0, 0, 0, 0.5));
 }
 
 .panel-head {
@@ -429,16 +449,18 @@ select {
 
 .summary {
   margin: 0 0 8px;
-  color: var(--muted);
+  color: rgba(243, 239, 228, 0.75);
   font-size: 10.5px;
   letter-spacing: 0.06em;
+  text-shadow: 0 1px 0 rgba(0, 0, 0, 0.4);
 }
 
 .help {
   margin: 12px 0 0;
-  color: var(--faint);
+  color: rgba(243, 239, 228, 0.62);
   font-size: 10.5px;
   line-height: 1.5;
+  text-shadow: 0 1px 0 rgba(0, 0, 0, 0.4);
 }
 
 /* Feed dialog, opened from the roster panel */
@@ -446,22 +468,27 @@ select {
   display: block;
   width: 100%;
   margin-top: 14px;
-  min-height: 40px;
+  min-height: 44px;
   padding: 0 12px;
-  border: 1px solid rgba(216, 137, 43, 0.5);
-  border-radius: 8px;
-  background: rgba(216, 137, 43, 0.12);
-  color: var(--accent);
-  font-size: 11px;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
+  border: 2px solid var(--wood-edge);
+  border-radius: 6px;
+  background: linear-gradient(#e2a04a, var(--accent));
+  color: var(--ink);
+  font-size: 15px;
+  box-shadow: 0 3px 0 var(--nail);
   cursor: pointer;
   transition: background-color 0.15s ease;
 }
 
+/* Heavier pixels for the call to action */
+.feed-open .sign path {
+  stroke: currentColor;
+  stroke-width: 0.3;
+}
+
 .feed-open:hover,
 .feed-open:focus-visible {
-  background: rgba(216, 137, 43, 0.22);
+  background: linear-gradient(#f0b05a, #e2a04a);
   outline: none;
 }
 
@@ -470,10 +497,11 @@ select {
   max-width: calc(100vw - 32px);
   margin: auto;
   padding: 16px 18px 18px;
-  border: 1px solid var(--border);
+  border: 3px solid var(--wood-edge);
   border-radius: var(--radius);
-  background: var(--surface-solid);
-  color: var(--fg);
+  background: var(--planks);
+  box-shadow: 0 6px 0 rgba(0, 0, 0, 0.35), 0 10px 30px rgba(0, 0, 0, 0.35);
+  color: var(--paper);
   font: inherit;
 }
 
@@ -483,11 +511,9 @@ select {
 
 .modal h2 {
   margin: 0 0 12px;
-  font-size: 11px;
-  font-weight: 600;
-  color: var(--accent);
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
+  font-size: 14px;
+  color: var(--paper);
+  filter: drop-shadow(0 1px 0 rgba(0, 0, 0, 0.5));
 }
 
 .modal .panel-head h2 {
@@ -497,8 +523,10 @@ select {
 .help.empty {
   margin: 6px 0 0;
   padding: 14px;
-  border: 1px dashed var(--border);
-  border-radius: 10px;
+  background: var(--tablet);
+  border: 2px solid var(--stone-dk);
+  border-radius: 9px 7px 10px 8px;
+  box-shadow: var(--tablet-shadow);
   text-align: center;
 }
 
@@ -511,9 +539,10 @@ select {
 
 .stat {
   padding: 10px 8px;
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  background: rgba(255, 255, 255, 0.025);
+  background: var(--tablet);
+  border: 2px solid var(--stone-dk);
+  border-radius: 9px 7px 10px 8px;
+  box-shadow: var(--tablet-shadow);
   text-align: center;
 }
 
@@ -527,16 +556,21 @@ select {
 .stat span {
   display: block;
   margin-top: 4px;
-  color: var(--faint);
+  color: var(--muted);
   font-size: 9.5px;
   letter-spacing: 0.1em;
   text-transform: uppercase;
 }
 
+/* The roster is carved into one stone tablet */
 .roster {
   list-style: none;
   margin: 0;
-  padding: 0;
+  padding: 2px 10px;
+  background: var(--tablet);
+  border: 2px solid var(--stone-dk);
+  border-radius: 9px 7px 10px 8px;
+  box-shadow: var(--tablet-shadow);
 }
 
 .roster li {
@@ -545,7 +579,13 @@ select {
   align-items: center;
   gap: 10px;
   padding: 7px 0;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+  border-bottom: 1px solid rgba(0, 0, 0, 0.35);
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.04);
+}
+
+.roster li:last-child {
+  border-bottom: 0;
+  box-shadow: none;
 }
 
 .roster-name {
@@ -555,7 +595,7 @@ select {
 }
 
 .roster-age {
-  color: var(--faint);
+  color: var(--muted);
   font-size: 10px;
 }
 
@@ -582,8 +622,8 @@ select {
 }
 
 .roster-state[data-state="away"] {
-  color: var(--faint);
-  border-color: rgba(255, 255, 255, 0.08);
+  color: var(--muted);
+  border-color: rgba(255, 255, 255, 0.12);
 }
 
 #qr {
@@ -613,7 +653,7 @@ select {
 .field span {
   display: block;
   margin-bottom: 4px;
-  color: var(--muted);
+  color: rgba(243, 239, 228, 0.75);
   font-size: 10px;
   letter-spacing: 0.1em;
   text-transform: uppercase;
@@ -624,9 +664,10 @@ select {
   width: 100%;
   min-height: 38px;
   padding: 0 10px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: rgba(0, 0, 0, 0.35);
+  border: 2px solid var(--stone-dk);
+  border-radius: 7px 6px 8px 6px;
+  background: var(--tablet);
+  box-shadow: var(--tablet-shadow);
   outline: none;
   transition: border-color 0.15s ease;
 }
@@ -646,25 +687,27 @@ select {
 .actions button {
   min-height: 38px;
   padding: 0 10px;
-  border: 1px solid rgba(216, 137, 43, 0.45);
-  border-radius: 8px;
-  background: rgba(216, 137, 43, 0.1);
-  color: var(--accent);
+  border: 2px solid var(--wood-edge);
+  border-radius: 6px;
+  background: linear-gradient(#e2a04a, var(--accent));
+  color: var(--ink);
   font-size: 10.5px;
+  font-weight: 600;
   letter-spacing: 0.06em;
+  box-shadow: 0 3px 0 var(--nail);
   cursor: pointer;
   transition: background-color 0.15s ease;
 }
 
 .actions button:hover {
-  background: rgba(216, 137, 43, 0.2);
+  background: linear-gradient(#f0b05a, #e2a04a);
 }
 
 .link {
   border: 0;
   padding: 0;
   background: transparent;
-  color: var(--faint);
+  color: rgba(243, 239, 228, 0.6);
   font-size: 10px;
   letter-spacing: 0.1em;
   text-transform: uppercase;
@@ -672,7 +715,7 @@ select {
 }
 
 .link:hover {
-  color: var(--fg);
+  color: var(--paper);
 }
 
 .loot {
@@ -796,13 +839,13 @@ select {
   justify-content: space-between;
   gap: 10px;
   padding: 8px 16px;
-  border-top: 1px solid var(--border);
+  border-top: 2px solid var(--wood-edge);
   flex: none;
 }
 
 .quality {
   margin: 0;
-  color: var(--faint);
+  color: rgba(243, 239, 228, 0.6);
   font-size: 9.5px;
   letter-spacing: 0.1em;
   text-transform: uppercase;
@@ -814,9 +857,10 @@ select {
   left: 50%;
   transform: translate(-50%, 8px);
   padding: 10px 16px;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 999px;
+  background: linear-gradient(var(--plank), var(--wood));
+  border: 2px solid var(--wood-edge);
+  border-radius: 6px;
+  box-shadow: 0 3px 0 var(--nail);
   letter-spacing: 0.06em;
   opacity: 0;
   transition: opacity 0.3s ease, transform 0.3s ease;
@@ -829,14 +873,15 @@ select {
 
 .toast {
   bottom: calc(24px + var(--safe-bottom));
-  color: var(--accent);
-  border-color: rgba(216, 137, 43, 0.5);
+  color: #ffd27a;
+  text-shadow: 0 1px 0 rgba(0, 0, 0, 0.5);
 }
 
 .hint {
   top: calc(84px + var(--safe-top));
-  color: var(--muted);
+  color: var(--paper);
   font-size: 11px;
+  text-shadow: 0 1px 0 rgba(0, 0, 0, 0.5);
 }
 
 .toast.show,
@@ -851,9 +896,10 @@ select {
   left: 0;
   z-index: 10;
   padding: 5px 9px;
-  background: var(--surface-solid);
-  border: 1px solid var(--border);
-  border-radius: 6px;
+  background: var(--tablet);
+  border: 2px solid var(--stone-dk);
+  border-radius: 7px 6px 8px 6px;
+  box-shadow: var(--tablet-shadow);
   font-size: 11px;
   letter-spacing: 0.03em;
   pointer-events: none;
@@ -930,22 +976,22 @@ select {
   transform: translateX(-50%);
   min-height: 44px;
   padding: 0 22px;
-  border: 1px solid rgba(216, 137, 43, 0.6);
-  border-radius: 999px;
-  background: rgba(216, 137, 43, 0.18);
-  color: var(--accent);
+  border: 2px solid var(--wood-edge);
+  border-radius: 6px;
+  background: linear-gradient(#e2a04a, var(--accent));
+  color: var(--ink);
   font-size: 12px;
+  font-weight: 600;
   letter-spacing: 0.12em;
   text-transform: uppercase;
+  box-shadow: 0 3px 0 var(--nail);
   cursor: pointer;
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
   -webkit-tap-highlight-color: transparent;
 }
 
 .act:hover,
 .act:focus-visible {
-  background: rgba(216, 137, 43, 0.3);
+  background: linear-gradient(#f0b05a, #e2a04a);
   outline: none;
 }
 
@@ -1000,7 +1046,7 @@ select {
   }
 
   .brand h1 {
-    font-size: 18px;
+    font-size: 13px;
   }
 
   .meter {
@@ -1044,13 +1090,14 @@ select {
     max-height: 52vh;
     border-radius: var(--radius) var(--radius) 0 0;
     border-bottom: 0;
-    padding-left: 0;
     padding-bottom: var(--safe-bottom);
+    box-shadow: 0 -6px 30px rgba(0, 0, 0, 0.35);
     transition: transform 0.28s ease;
   }
 
+  /* Collapsed, the tab row peeks over the bottom edge under the pull tab */
   .sheet[data-open="false"] {
-    transform: translateY(calc(100% - 44px - 18px - var(--safe-bottom)));
+    transform: translateY(calc(100% - 48px - var(--safe-bottom)));
   }
 
   /* The open sheet takes the sticks with it */
@@ -1060,26 +1107,20 @@ select {
   }
 
   .sheet-toggle {
-    position: static;
-    display: block;
-    width: auto;
-    height: 18px;
-    border: 0;
-    background: transparent;
-    padding: 0;
-  }
-
-  .sheet-toggle span {
-    display: block;
-    width: 38px;
-    height: 4px;
-    margin: 7px auto 0;
-    border-radius: 2px;
-    background: rgba(255, 255, 255, 0.22);
+    top: -39px;
+    left: 50%;
+    width: 64px;
+    height: 42px;
+    margin: 0 0 0 -32px;
+    padding: 2px 18px 0;
+    border: 3px solid var(--wood-edge);
+    border-bottom: 0;
+    border-radius: 8px 8px 0 0;
+    background: linear-gradient(var(--plank), var(--wood));
   }
 
   .tabs button {
-    min-height: 44px;
+    min-height: 38px;
   }
 
   .panel {
@@ -1125,31 +1166,24 @@ select {
     max-height: 72vh;
     border-radius: var(--radius) 0 0 0;
     border-bottom: 0;
-    padding-left: 0;
     transition: transform 0.28s ease;
   }
 
   .sheet[data-open="false"] {
-    transform: translateY(calc(100% - 44px - 18px - var(--safe-bottom)));
+    transform: translateY(calc(100% - 48px - var(--safe-bottom)));
   }
 
   .sheet-toggle {
-    position: static;
-    display: block;
-    width: auto;
-    height: 18px;
-    border: 0;
-    background: transparent;
-    padding: 0;
-  }
-
-  .sheet-toggle span {
-    display: block;
-    width: 38px;
-    height: 4px;
-    margin: 7px auto 0;
-    border-radius: 2px;
-    background: rgba(255, 255, 255, 0.22);
+    top: -39px;
+    left: 50%;
+    width: 64px;
+    height: 42px;
+    margin: 0 0 0 -32px;
+    padding: 2px 18px 0;
+    border: 3px solid var(--wood-edge);
+    border-bottom: 0;
+    border-radius: 8px 8px 0 0;
+    background: linear-gradient(var(--plank), var(--wood));
   }
 
   .presets {

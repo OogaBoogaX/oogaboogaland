@@ -10,6 +10,8 @@
   const SWAG_ANCHORS = ["hat", "face"];
   const FAN_STANDOFF = 1.1;
   const FAN_ARC = 2.2;
+  // The widest the fan opens, so the near side stays clear however many eat
+  const FAN_SPREAD = 4.2;
   const POKES = ["Ooga?", "Booga!", "No poke.", "Hmm banana?", "Ooga booga booga."];
   const SLEEP_POKES = ["zzz... grr", "five more minutes", "zzz"];
   const BUILD_QUOTES = ["Ooga Booga!", "Ooga Booga BUILD!", "Ooga Booga MORE TOOLS!"];
@@ -202,9 +204,9 @@
     let fanRadius = wantedFanRadius();
     const assignFanSlots = (entries, isWorking) => {
       const farSide = FAN_CENTER;
-      // Neighbours stand FAN_ARC apart at any radius
-      const angleStep = clamp(FAN_ARC / fanRadius, 0.5, 1.1);
       const eaters = entries.filter(isWorking);
+      // Neighbours stand FAN_ARC apart at any radius, closer only when the fan would wrap
+      const angleStep = Math.min(clamp(FAN_ARC / fanRadius, 0.5, 1.1), FAN_SPREAD / Math.max(1, eaters.length - 1));
       // Nobody stands between the camera and the pile
       eaters.forEach((cave, i) => {
         const angle = farSide + (i - (eaters.length - 1) / 2) * angleStep;
