@@ -14,6 +14,14 @@
   const SLEEP_POKES = ["zzz... grr", "five more minutes", "zzz"];
   const BUILD_QUOTES = ["Ooga Booga!", "Ooga Booga BUILD!", "Ooga Booga MORE TOOLS!"];
   const IDLE_QUOTES = ["Ooga.", "Hmm.", "Nice rock.", "Booga?", "Where banana?", "Ooga booga.", "Sky big.", "Good cave."];
+  const PHASE_QUOTES = {
+    dawn: ["Sun come.", "Big yawn.", "Cold rock.", "Bird loud.", "Sky pink.", "Ooga wake."],
+    morning: ["Good day for banana.", "Ooga work.", "Sun warm.", "Rock dry now.", "Big day.", "Booga hungry."],
+    noon: ["Hot rock.", "Sun high.", "Shade good.", "Ooga sweat.", "Banana warm.", "Too bright."],
+    dusk: ["Sky orange. Pretty.", "Fire soon.", "Sun go down.", "Long shadow.", "Ooga tired.", "Bug sing."],
+    night: ["Stars many.", "Fire warm.", "Moon big.", "Dark out there.", "Ooga count star.", "Owl."],
+    midnight: ["Ooga not sleepy.", "Owl says hoo.", "Very dark. Very quiet.", "Rock cold.", "Booga snore.", "Moon watch."]
+  };
   const SHOUTS = ["OOGA BOOGA!", "OOGA!", "BOOGA!"];
   // Meal and idle timings for a working caveman
   const EAT_MIN = 14, EAT_SPREAD = 20, HUNGRY_LINGER = 4, IDLE_MIN = 3, IDLE_SPREAD = 6, TRIPS_MAX = 3;
@@ -21,6 +29,10 @@
   // Jetpack thrust, ceiling, capped fall and speed
   const JET_ACCEL = 20, JET_RISE = 7, JET_FALL = 7, JET_CEILING = 16, JET_SPEED = 6.4, JET_PUFF = 0.05;
   const JET_SPARKS = [models.particleGeometry("#ffb13b", 0.09, 1), models.particleGeometry("#f3efe4", 0.07, 0.6)];
+  const LAND_DUST = [models.particleGeometry("#a3874f", 0.1, 0)];
+  // A drop deeper than a step, mirroring the hub's STEP_MAX
+  const STEP = 0.6;
+  const YAWN_DUR = 2.4;
   const REACH = 1.6;
   const MUZZLE = new Float32Array(3);
   const setVec = (v, x, y, z) => {
@@ -66,6 +78,9 @@
         hopV: 0,
         cheer: 0,
         catchT: 0,
+        yawn: 0,
+        yawnAt: 12 + i * 4.3 + Math.random() * 20,
+        leap: { vx: 0, vz: 0, land: 0 },
         highlightTarget: 0,
         highlight: 0,
         nextBuildAt: 8 + i * 2.5 + Math.random() * 6,
@@ -118,6 +133,7 @@
       cave.parts.head.rotation.y = 0;
       cave.parts.snack.visible = false;
       cave.parts.gun.visible = false;
+      cave.yawn = 0;
     };
     const refreshRosterRow = (cave) => {
       hud.setRosterRow(cave.traits.name, cave.state, contributors.ageLabel(cave.contributor));
@@ -453,6 +469,25 @@
       w.phase += dt * 9;
       walkPose(cave, w.phase);
     };
+    const quoteFor = () => {
+      const table = ctx.phase ? PHASE_QUOTES[ctx.phase()] : IDLE_QUOTES;
+      return table[Math.floor(Math.random() * table.length)];
+    };
+    // A midnight yawn, arms up and head back, settling like a cheer
+    const runYawn = (cave) => {
+      // Re-armed in every phase so the stagger holds when midnight arrives mid-visit
+      if (ctx.phase && elapsed > cave.yawnAt) {
+        cave.yawnAt = elapsed + 25 + Math.random() * 30;
+        if (ctx.phase() === "midnight") cave.yawn = YAWN_DUR;
+      }
+      if (cave.yawn <= 0) return false;
+      const parts = cave.parts;
+      const k = Math.sin((1 - cave.yawn / YAWN_DUR) * Math.PI);
+      parts.armL.rotation.x = parts.armR.rotation.x = -0.2 - 2.2 * k;
+      parts.head.rotation.x = -0.25 * k;
+      parts.snack.visible = false;
+      return true;
+    };
     // Standing about, with the odd scratch and remark
     const runIdle = (cave, dt) => {
       const parts = cave.parts, a = cave.act;
@@ -473,6 +508,7 @@
         parts.head.rotation.x = -k * 0.2;
         return;
       }
+      if (runYawn(cave)) return;
       parts.head.rotation.y = Math.sin(elapsed * 0.9 + cave.phase) * 0.55;
       parts.head.rotation.x = 0.08 + Math.sin(elapsed * 0.5 + cave.phase) * 0.1;
       const scratch = Math.max(0, Math.sin(elapsed * 1.7 + cave.phase * 2) - 0.6) * 2.5;
@@ -480,7 +516,7 @@
       parts.armL.rotation.x = damp(parts.armL.rotation.x, -0.2, 10, dt);
       if (!a.said && elapsed > a.sayAt) {
         a.said = true;
-        if (Math.random() < 0.6) ctx.fx.say(cave, IDLE_QUOTES[Math.floor(Math.random() * IDLE_QUOTES.length)], 2);
+        if (Math.random() < 0.6) ctx.fx.say(cave, quoteFor(), 2);
       }
       if (elapsed < a.until) return;
       parts.head.rotation.y = 0;
@@ -518,7 +554,7 @@
     };
     // Move the visitor's caveman
     const runPlayer = (cave, dt) => {
-      const p = cave.root.position;
+      const p = cave.root.position, leap = cave.leap;
       const wasGround = groundY(cave);
       if (cave.jet) runJet(cave, dt);
       const flying = !!cave.jet && (cave.jet.thrust || cave.hop > 0.05);
@@ -541,11 +577,43 @@
         standPose(cave);
         cave.parts.torso.scale.y = 1 + Math.sin(elapsed * 2.2 + cave.phase) * 0.015;
       }
+      // Airborne after a ledge the leap carries him on, fading, legs tucked
+      if (cave.hop > 0 && (leap.vx || leap.vz)) {
+        const dx = leap.vx * dt, dz = leap.vz * dt;
+        if (canStep(cave, flying, p.x, p.z, p.x + dx, p.z + dz)) {
+          p.x += dx;
+          p.z += dz;
+        }
+        leap.vx = damp(leap.vx, 0, 1.5, dt);
+        leap.vz = damp(leap.vz, 0, 1.5, dt);
+        flyPose(cave);
+      }
       if (flying) flyPose(cave);
-      // Flying holds a world height, so ground steps never lift him
-      if (flying) cave.hop = Math.max(0, cave.hop + wasGround - groundY(cave));
+      // Airborne he holds a world height, so ground steps never lift him
+      if (flying || cave.hop > 0) cave.hop = Math.max(0, cave.hop + wasGround - groundY(cave));
+      else {
+        // Off a ledge, support at the new spot is the lower layer (walkable lets any drop
+        // through) and the height line below would snap him down in one frame; carry the
+        // drop in hop instead so he leaves at his old height and falls forward
+        const drop = wasGround - groundY(cave);
+        if (drop > STEP) {
+          cave.hop += drop;
+          cave.hopV = Math.max(cave.hopV, 2.4);
+          leap.vx = Math.sin(cave.root.rotation.y) * 3;
+          leap.vz = Math.cos(cave.root.rotation.y) * 3;
+        }
+      }
       // One place sets the height, so nothing compounds
       cave.root.position.y = groundY(cave) + cave.hop;
+      if (cave.hop === 0 && (leap.vx || leap.vz)) {
+        leap.vx = leap.vz = 0;
+        leap.land = 0.25;
+        ctx.fx.burst(p.x, p.y + 0.05, p.z, 6, LAND_DUST, 1.2);
+      }
+      if (leap.land > 0) {
+        leap.land = Math.max(0, leap.land - dt);
+        cave.parts.torso.scale.y = 1 - leap.land * 0.6;
+      }
       if (cave.catchT > 0) {
         const k = cave.catchT;
         cave.parts.armL.rotation.x = -0.2 - k * 1.6;
@@ -563,6 +631,7 @@
         if (cave.hop === 0 && cave.hopV < 0) cave.hopV = 0;
       }
       if (cave.cheer > 0) cave.cheer -= dt;
+      if (cave.yawn > 0) cave.yawn -= dt;
       if (cave.catchT > 0) cave.catchT = Math.max(0, cave.catchT - dt * 1.6);
       for (const node of cave.swagNodes) {
         if (node.swag.float) node.position.y = (node.swag.offset ? node.swag.offset.y : 0) + Math.sin(elapsed * 2.5 + cave.phase) * 0.04;
@@ -616,6 +685,7 @@
         parts.head.rotation.x = -k * 0.2;
         return;
       }
+      if (runYawn(cave)) return;
       // Settle the club arm back to rest
       parts.armL.rotation.x = damp(parts.armL.rotation.x, -0.2, 10, dt);
       if (wanderSpot) {
@@ -683,6 +753,7 @@
       const cave = player;
       player = null;
       steer.x = steer.z = 0;
+      cave.leap.vx = cave.leap.vz = cave.leap.land = 0;
       if (cave.jet) {
         cave.jet.thrust = false;
         cave.jet.flame.visible = false;

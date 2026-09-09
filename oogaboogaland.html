@@ -5,7 +5,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta http-equiv="Content-Security-Policy"
-    content="default-src 'none'; script-src 'sha256-CnjZ8+VKEkWLwMPnqlQ7Em3Fn4w2lqLbBwDD4xZ1Xa4='; style-src 'sha256-dDRjKsPXfpTqnH8VPCUSd7WihWQczKIMep/Sr+vXL+s='; img-src 'self' data:; connect-src 'none'; base-uri 'none'; form-action 'none'">
+    content="default-src 'none'; script-src 'sha256-RVUwKwndqopp/gHMFKuVbdvKQgubqbMJMsgmXx0wCKc='; style-src 'sha256-dDRjKsPXfpTqnH8VPCUSd7WihWQczKIMep/Sr+vXL+s='; img-src 'self' data:; connect-src 'none'; base-uri 'none'; form-action 'none'">
   <meta name="referrer" content="no-referrer">
   <meta name="color-scheme" content="dark">
   <meta name="theme-color" content="#0a0a0b">
@@ -1221,7 +1221,7 @@ select {
     <header class="topbar">
       <div class="brand">
         <h1>Ooga Booga Land</h1>
-        <p data-scene="hub">an island of caves</p>
+        <p data-scene="hub" id="subtitle">an island of caves</p>
         <p data-scene="lab" hidden>EntropyLab cave</p>
       </div>
       <section class="meter" aria-label="Banana supply">
@@ -1754,6 +1754,36 @@ select {
       out[2] = m[2] * x + m[6] * y + m[10] * z + m[14];
       return out;
     },
+    invert: (out, m) => {
+      const a00 = m[0], a01 = m[1], a02 = m[2], a03 = m[3];
+      const a10 = m[4], a11 = m[5], a12 = m[6], a13 = m[7];
+      const a20 = m[8], a21 = m[9], a22 = m[10], a23 = m[11];
+      const a30 = m[12], a31 = m[13], a32 = m[14], a33 = m[15];
+      const b00 = a00 * a11 - a01 * a10, b01 = a00 * a12 - a02 * a10, b02 = a00 * a13 - a03 * a10;
+      const b03 = a01 * a12 - a02 * a11, b04 = a01 * a13 - a03 * a11, b05 = a02 * a13 - a03 * a12;
+      const b06 = a20 * a31 - a21 * a30, b07 = a20 * a32 - a22 * a30, b08 = a20 * a33 - a23 * a30;
+      const b09 = a21 * a32 - a22 * a31, b10 = a21 * a33 - a23 * a31, b11 = a22 * a33 - a23 * a32;
+      const det = b00 * b11 - b01 * b10 + b02 * b09 + b03 * b08 - b04 * b07 + b05 * b06;
+      if (!det) throw new Error("mat4.invert: singular matrix");
+      const d = 1 / det;
+      out[0] = (a11 * b11 - a12 * b10 + a13 * b09) * d;
+      out[1] = (a02 * b10 - a01 * b11 - a03 * b09) * d;
+      out[2] = (a31 * b05 - a32 * b04 + a33 * b03) * d;
+      out[3] = (a22 * b04 - a21 * b05 - a23 * b03) * d;
+      out[4] = (a12 * b08 - a10 * b11 - a13 * b07) * d;
+      out[5] = (a00 * b11 - a02 * b08 + a03 * b07) * d;
+      out[6] = (a32 * b02 - a30 * b05 - a33 * b01) * d;
+      out[7] = (a20 * b05 - a22 * b02 + a23 * b01) * d;
+      out[8] = (a10 * b10 - a11 * b08 + a13 * b06) * d;
+      out[9] = (a01 * b08 - a00 * b10 - a03 * b06) * d;
+      out[10] = (a30 * b04 - a31 * b02 + a33 * b00) * d;
+      out[11] = (a21 * b02 - a20 * b04 - a23 * b00) * d;
+      out[12] = (a11 * b07 - a10 * b09 - a12 * b06) * d;
+      out[13] = (a00 * b09 - a01 * b07 + a02 * b06) * d;
+      out[14] = (a31 * b01 - a30 * b03 - a32 * b00) * d;
+      out[15] = (a20 * b03 - a21 * b01 + a22 * b00) * d;
+      return out;
+    },
     // Camera ray through a screen pixel
     rayFromView: (out, view, width, height, fov, eye, px, py) => {
       const tanHalf = Math.tan(fov / 2);
@@ -1780,6 +1810,204 @@ select {
     }
   };
   BL.math = { clamp, lerp, damp, angleDelta, ease, fnv1a, mulberry32, randomInt, hexToRgb, mat4 };
+})();
+
+// ---- js/daylight.js ----
+(() => {
+  "use strict";
+  const BL = window.BL = window.BL || {};
+  const { clamp, lerp } = BL.math;
+  const PHASES = ["dawn", "morning", "noon", "dusk", "night", "midnight"];
+  const PHASE_STARTS = [5, 7, 11, 16, 19, 23];
+  const ISLAND_LATITUDE_DEG = 20;
+  const AXIAL_TILT_DEG = 23.44;
+  const DEG = Math.PI / 180;
+  const RAD = 180 / Math.PI;
+  const TAU = Math.PI * 2;
+  const YEAR_DAYS = 365.2422;
+  const SIDEREAL_RATE = 1.00273790935;
+  const NIGHT_CLEAR = [0.07, 0.08, 0.16];
+  const NIGHT_HORIZON = [0.15, 0.17, 0.32];
+  const NIGHT_ZENITH = [0.05, 0.06, 0.14];
+  // Keep the backdrop dark, but lift hemispheric fill so silhouettes retain readable faces.
+  const NIGHT_SKY = [0.30, 0.33, 0.46];
+  const NIGHT_GROUND = [0.23, 0.24, 0.30];
+  const NIGHT_SUN = [0.22, 0.26, 0.40];
+  const DAY_CLEAR = [0.36, 0.56, 0.82];
+  const DAY_HORIZON = [0.70, 0.82, 0.94];
+  const DAY_ZENITH = [0.24, 0.46, 0.84];
+  const DAY_SKY = [0.60, 0.64, 0.74];
+  const DAY_GROUND = [0.34, 0.34, 0.30];
+  const DAY_SUN = [0.48, 0.44, 0.38];
+  const TWILIGHT_CLEAR = [0.34, 0.25, 0.42];
+  const TWILIGHT_HORIZON = [1.00, 0.53, 0.25];
+  const TWILIGHT_ZENITH = [0.18, 0.20, 0.48];
+  const TWILIGHT_SKY = [0.50, 0.45, 0.58];
+  const TWILIGHT_GROUND = [0.29, 0.25, 0.28];
+  const TWILIGHT_SUN = [0.78, 0.42, 0.23];
+  const MOON_LIGHT = [0.32, 0.37, 0.54];
+  const SCRATCH_SUN = { x: 0, y: 1, z: 0 };
+  const SCRATCH_DIRECT = new Float32Array(3);
+
+  const phaseAt = (hour) => {
+    let phase = PHASES[5];
+    for (let i = 0; i < 6; i++) if (hour >= PHASE_STARTS[i]) phase = PHASES[i];
+    return phase;
+  };
+  const smooth = (a, b, value) => {
+    const t = clamp((value - a) / (b - a), 0, 1);
+    return t * t * (3 - 2 * t);
+  };
+  const wrap = (value, period) => (value % period + period) % period;
+  const mix3 = (out, a, b, t) => {
+    out[0] = lerp(a[0], b[0], t);
+    out[1] = lerp(a[1], b[1], t);
+    out[2] = lerp(a[2], b[2], t);
+  };
+  const tint3 = (out, color, amount) => {
+    out[0] = lerp(out[0], color[0], amount);
+    out[1] = lerp(out[1], color[1], amount);
+    out[2] = lerp(out[2], color[2], amount);
+  };
+  // Equatorial declination/hour angle into east, up, south. The gate is north (-Z).
+  const horizonDirection = (out, declination, hourAngle, latitude) => {
+    const cd = Math.cos(declination), sd = Math.sin(declination);
+    const ch = Math.cos(hourAngle), sh = Math.sin(hourAngle);
+    const cp = Math.cos(latitude), sp = Math.sin(latitude);
+    out.x = -cd * sh;
+    out.y = sp * sd + cp * cd * ch;
+    out.z = sp * cd * ch - cp * sd;
+  };
+  const sunAngles = (direction, out) => {
+    out.sunAltitude = Math.asin(clamp(direction.y, -1, 1)) * RAD;
+    out.sunAzimuth = wrap(Math.atan2(direction.x, -direction.z) * RAD, 360);
+  };
+  const moonAngles = (direction, out) => {
+    out.moonAltitude = Math.asin(clamp(direction.y, -1, 1)) * RAD;
+    out.moonAzimuth = wrap(Math.atan2(direction.x, -direction.z) * RAD, 360);
+  };
+  const starFrame = (out, latitude, sidereal) => {
+    if (!out) return;
+    const st = Math.sin(sidereal), ct = Math.cos(sidereal), sp = Math.sin(latitude), cp = Math.cos(latitude);
+    // Column-major world east/up/south -> fixed equatorial coordinates.
+    out[0] = -st; out[1] = ct; out[2] = 0;
+    out[3] = cp * ct; out[4] = cp * st; out[5] = sp;
+    out[6] = sp * ct; out[7] = sp * st; out[8] = -cp;
+  };
+  const sample = (hour, out, dayOfYear = 172, latitudeDeg = ISLAND_LATITUDE_DEG, continuousDay = NaN) => {
+    latitudeDeg = clamp(Number.isFinite(latitudeDeg) ? latitudeDeg : ISLAND_LATITUDE_DEG, -66, 66);
+    dayOfYear = clamp(Number.isFinite(dayOfYear) ? dayOfYear : 172, 1, 366);
+    if (!Number.isFinite(continuousDay)) continuousDay = dayOfYear - 1 + hour / 24;
+    const latitude = latitudeDeg * DEG;
+    const seasonalDay = wrap(continuousDay, YEAR_DAYS) + 1;
+    const declination = AXIAL_TILT_DEG * DEG * Math.sin(TAU * (284 + seasonalDay) / YEAR_DAYS);
+    const hourAngle = (hour - 12) * 15 * DEG;
+    const sunDirection = out.sunDirection || SCRATCH_SUN;
+    horizonDirection(sunDirection, declination, hourAngle, latitude);
+    sunAngles(sunDirection, out);
+
+    // A bounded low-cost lunar orbit: ecliptic longitude and latitude converted to equatorial space.
+    const moonLongitude = wrap(TAU * (continuousDay - 4.867) / 27.321661, TAU);
+    const moonLatitude = 5.145 * DEG * Math.sin(TAU * (continuousDay - 1.2) / 27.212221);
+    const ce = Math.cos(AXIAL_TILT_DEG * DEG), se = Math.sin(AXIAL_TILT_DEG * DEG);
+    const cl = Math.cos(moonLongitude), sl = Math.sin(moonLongitude), cb = Math.cos(moonLatitude), sb = Math.sin(moonLatitude);
+    const ex = cb * cl, ey = cb * sl * ce - sb * se, ez = cb * sl * se + sb * ce;
+    const moonDeclination = Math.asin(clamp(ez, -1, 1));
+    const moonRightAscension = Math.atan2(ey, ex);
+    const sidereal = wrap(TAU * (0.7790572733 + continuousDay * SIDEREAL_RATE), TAU);
+    horizonDirection(out.moon, moonDeclination, sidereal - moonRightAscension, latitude);
+    moonAngles(out.moon, out);
+    starFrame(out.starMatrix, latitude, sidereal);
+    if (out.celestialPole) {
+      out.celestialPole.x = 0;
+      out.celestialPole.y = Math.sin(latitude);
+      out.celestialPole.z = -Math.cos(latitude);
+    }
+
+    const altitude = out.sunAltitude;
+    const daylight = smooth(-6, 8, altitude);
+    const stars = 1 - smooth(-18, -6, altitude);
+    const lamps = 1 - smooth(-6, 2, altitude);
+    const twilight = smooth(-18, -3, altitude) * (1 - smooth(6, 18, altitude));
+    mix3(out.clear, NIGHT_CLEAR, DAY_CLEAR, daylight);
+    mix3(out.horizon, NIGHT_HORIZON, DAY_HORIZON, daylight);
+    mix3(out.zenith, NIGHT_ZENITH, DAY_ZENITH, daylight);
+    mix3(out.sky, NIGHT_SKY, DAY_SKY, daylight);
+    mix3(out.ground, NIGHT_GROUND, DAY_GROUND, daylight);
+    mix3(out.sun, NIGHT_SUN, DAY_SUN, daylight);
+    tint3(out.clear, TWILIGHT_CLEAR, twilight * 0.42);
+    tint3(out.horizon, TWILIGHT_HORIZON, twilight * 0.82);
+    tint3(out.zenith, TWILIGHT_ZENITH, twilight * 0.48);
+    tint3(out.sky, TWILIGHT_SKY, twilight * 0.42);
+    tint3(out.ground, TWILIGHT_GROUND, twilight * 0.34);
+    tint3(out.sun, TWILIGHT_SUN, twilight * 0.72);
+
+    const sunStrength = smooth(0, 8, altitude);
+    const moonStrength = stars * smooth(0, 10, out.moonAltitude) * 0.18;
+    let lx = sunDirection.x * sunStrength + out.moon.x * moonStrength;
+    let ly = sunDirection.y * sunStrength + out.moon.y * moonStrength;
+    let lz = sunDirection.z * sunStrength + out.moon.z * moonStrength;
+    let llen = Math.hypot(lx, ly, lz);
+    if (llen < 1e-6) {
+      lx = 0;
+      ly = 1;
+      lz = 0;
+      llen = 1;
+    }
+    out.light.x = lx / llen;
+    out.light.y = ly / llen;
+    out.light.z = lz / llen;
+    const totalStrength = clamp(sunStrength + moonStrength, 0, 1);
+    const direct = out.direct || SCRATCH_DIRECT;
+    const mixDenom = Math.max(sunStrength + moonStrength, 1e-6);
+    const sunShare = sunStrength / mixDenom;
+    direct[0] = lerp(MOON_LIGHT[0], out.sun[0], sunShare);
+    direct[1] = lerp(MOON_LIGHT[1], out.sun[1], sunShare);
+    direct[2] = lerp(MOON_LIGHT[2], out.sun[2], sunShare);
+    const horizonCos = Math.max(0.08, Math.abs(out.light.y));
+    const sunriseAngle = Math.acos(clamp(-Math.tan(latitude) * Math.tan(declination), -1, 1)) * RAD / 15;
+    out.day = daylight;
+    out.twilight = twilight;
+    out.stars = stars;
+    out.torch = lamps;
+    out.lampFactor = lamps;
+    out.bloomStrength = lerp(0.5, 0.9, stars) + twilight * 0.04;
+    out.directStrength = totalStrength;
+    out.directionalLightStrength = totalStrength;
+    out.sunStrength = sunStrength;
+    out.moonStrength = moonStrength;
+    out.shadowStrength = clamp(sunStrength + moonStrength * 0.7, 0, 1);
+    out.shadowBias = lerp(0.0012, 0.0038, 1 - horizonCos);
+    out.activeLightSource = sunStrength > 0.02 && moonStrength > 0.02 ? "mixed" : sunStrength > 0.02 ? "sun" : moonStrength > 0.01 ? "moon" : "none";
+    out.latitude = latitudeDeg;
+    out.dayOfYear = dayOfYear;
+    out.continuousDay = continuousDay;
+    out.solarDeclination = declination * RAD;
+    out.siderealAngle = sidereal;
+    out.sunriseHour = 12 - sunriseAngle;
+    out.sunsetHour = 12 + sunriseAngle;
+    return out;
+  };
+  const localHour = (date) => date.getHours() + date.getMinutes() / 60 + date.getSeconds() / 3600 + date.getMilliseconds() / 3600000;
+  const localDay = (date) => Math.floor((Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()) - Date.UTC(date.getFullYear(), 0, 0)) / 86400000);
+  const createClock = ({ hour, daylen, day, now = new Date() } = {}) => {
+    const pinned = Number.isFinite(hour);
+    const baseHour = wrap(pinned ? hour : localHour(now), 24);
+    const baseDay = clamp(Number.isFinite(day) ? Math.round(day) : localDay(now), 1, 366);
+    const running = daylen > 0 || !pinned;
+    const rate = daylen > 0 ? 24 / daylen : 1 / 3600;
+    const start = performance.now();
+    const state = { hour: baseHour, continuousDay: baseDay - 1 + baseHour / 24, dayOfYear: baseDay, read: null };
+    state.read = () => {
+      const hours = baseHour + (running ? (performance.now() - start) * 0.001 * rate : 0);
+      state.hour = wrap(hours, 24);
+      state.continuousDay = baseDay - 1 + hours / 24;
+      state.dayOfYear = Math.floor(wrap(state.continuousDay, 366)) + 1;
+      return state.hour;
+    };
+    return state;
+  };
+  BL.daylight = { PHASES, ISLAND_LATITUDE_DEG, AXIAL_TILT_DEG, phaseAt, sample, createClock };
 })();
 
 // ---- js/scene.js ----
@@ -1898,11 +2126,12 @@ select {
   "use strict";
   const BL = window.BL = window.BL || {};
   const { mat4 } = BL.math;
-  const { updateWorld, traverseVisible } = BL.scene;
+  const { updateWorld, traverseVisible, boundsOf } = BL.scene;
+  const POINT_LIGHT_CAPACITY = 7;
   const QUALITY = {
-    high: { dpr: 1.5, msaa: 4, shadow: 2048, bloom: true, mirror: 512 },
-    medium: { dpr: 1.25, msaa: 2, shadow: 1024, bloom: true, mirror: 384 },
-    low: { dpr: 1, msaa: 0, shadow: 512, bloom: false, mirror: 256 }
+    high: { dpr: 1.5, msaa: 4, shadow: 2048, bloom: true, mirror: 512, lights: POINT_LIGHT_CAPACITY },
+    medium: { dpr: 1.25, msaa: 2, shadow: 1024, bloom: true, mirror: 384, lights: POINT_LIGHT_CAPACITY },
+    low: { dpr: 1, msaa: 0, shadow: 512, bloom: false, mirror: 256, lights: POINT_LIGHT_CAPACITY }
   };
   const INSTANCE_FLOATS = 20;
   // Caps the pixel ratio to bound buffer memory
@@ -1913,7 +2142,11 @@ select {
   const DEFAULT_SUN = [0.80, 0.74, 0.66];
   const DEFAULT_CLEAR = [0.035, 0.035, 0.04];
   const DEFAULT_SHADOW_CENTER = { x: 0, y: 1.5, z: 0 };
+  const DEFAULT_MOON = { x: 0, y: -1, z: 0 };
+  const DEFAULT_STAR_MATRIX = new Float32Array([1, 0, 0, 0, 1, 0, 0, 0, 1]);
+  const CULL_MARGIN = 0.5;
   const UP = { x: 0, y: 1, z: 0 };
+  const NORTH_UP = { x: 0, y: 0, z: -1 };
   const ZERO4 = new Float32Array([0, 0, 0, 1]);
   const LIGHT_EYE = { x: 0, y: 0, z: 0 };
   const MESH_STRIDE = 10;
@@ -1934,6 +2167,7 @@ out vec3 vNormal;
 out vec4 vColor;
 out vec4 vParams;
 out vec4 vShadow;
+out vec3 vWorld;
 void main() {
   mat4 m = mat4(aM0, aM1, aM2, aM3);
   vec4 w = m * vec4(aPos, 1.0);
@@ -1941,6 +2175,7 @@ void main() {
   vColor = aColor;
   vParams = aParams;
   vShadow = uLightViewProj * w;
+  vWorld = w.xyz;
   gl_Position = uViewProj * w;
 }`;
   const MESH_FS = `#version 300 es
@@ -1950,12 +2185,18 @@ in vec3 vNormal;
 in vec4 vColor;
 in vec4 vParams;
 in vec4 vShadow;
+in vec3 vWorld;
 uniform vec3 uLightDir;
 uniform vec3 uSky;
 uniform vec3 uGround;
 uniform vec3 uSun;
+uniform float uDirectStrength;
+uniform float uShadowStrength;
+uniform float uShadowBias;
 uniform sampler2DShadow uShadow;
 uniform float uShadowTexel;
+uniform vec4 uLights[16];
+uniform int uLightCount;
 layout(location=0) out vec4 oColor;
 layout(location=1) out vec4 oBright;
 float shadowAt(vec3 p, float bias) {
@@ -1974,10 +2215,19 @@ void main() {
   float emissive = clamp(vColor.a * vParams.x, 0.0, 1.0);
   float ndl = max(dot(n, uLightDir), 0.0);
   vec3 sp = vShadow.xyz / vShadow.w * 0.5 + 0.5;
-  float bias = max(0.0035 * (1.0 - ndl), 0.0012);
+  float bias = max(uShadowBias * (1.0 - ndl), uShadowBias * 0.32);
   float sh = shadowAt(sp, bias);
   vec3 ambient = mix(uGround, uSky, n.y * 0.5 + 0.5);
-  vec3 lit = base * (ambient + uSun * ndl * sh);
+  vec3 lit = base * (ambient + uSun * ndl * uDirectStrength * mix(1.0, sh, uShadowStrength));
+  for (int i = 0; i < 7; i++) {
+    if (i >= uLightCount) break;
+    vec4 lp = uLights[i * 2];
+    vec3 ld = lp.xyz - vWorld;
+    float dist = length(ld);
+    float a = clamp(1.0 - dist / lp.w, 0.0, 1.0);
+    a *= a;
+    lit += base * uLights[i * 2 + 1].rgb * a * max(dot(n, ld), 0.0) / max(dist, 0.0001);
+  }
   vec3 col = mix(lit, base * 1.15, emissive);
   col = mix(col, vec3(1.0, 0.86, 0.45), vParams.y * 0.4);
   float tip = clamp(vParams.z, 0.0, 1.0);
@@ -2094,7 +2344,62 @@ out vec2 vUv;
 void main() {
   vec2 p = vec2(float((gl_VertexID << 1) & 2), float(gl_VertexID & 2));
   vUv = p;
-  gl_Position = vec4(p * 2.0 - 1.0, 0.0, 1.0);
+  gl_Position = vec4(p * 2.0 - 1.0, 1.0, 1.0);
+}`;
+  const SKY_FS = `#version 300 es
+precision highp float;
+in vec2 vUv;
+uniform mat4 uInvViewProj;
+uniform vec3 uEye;
+uniform vec3 uHorizon;
+uniform vec3 uZenith;
+uniform vec3 uSun;
+uniform vec3 uSunDir;
+uniform vec3 uMoonDir;
+uniform mat3 uStarMatrix;
+uniform float uStars;
+uniform float uTime;
+layout(location=0) out vec4 oColor;
+layout(location=1) out vec4 oBright;
+float hash(vec2 p) {
+  vec3 q = fract(vec3(p.xyx) * 0.1031);
+  q += dot(q, q.yzx + 33.33);
+  return fract((q.x + q.y) * q.z);
+}
+void main() {
+  vec4 far = uInvViewProj * vec4(vUv * 2.0 - 1.0, 1.0, 1.0);
+  vec3 d = normalize(far.xyz / far.w - uEye);
+  vec3 col = mix(uHorizon, uZenith, smoothstep(-0.02, 0.5, d.y));
+  col = mix(col, uHorizon * 0.55, smoothstep(0.0, 0.5, -d.y));
+  float sd = max(dot(d, uSunDir), 0.0);
+  float sunDisc = pow(sd, 600.0) * (1.0 - uStars);
+  vec3 sun = uSun * (sunDisc + pow(sd, 6.0) * 0.18 * (1.0 - uStars));
+  float moonDisc = smoothstep(0.9985, 0.999, dot(d, uMoonDir)) * uStars;
+  vec3 moon = vec3(0.82, 0.88, 1.0) * moonDisc;
+  vec3 stars = vec3(0.0);
+  if (uStars > 0.002) {
+    vec3 starD = normalize(uStarMatrix * d);
+    vec3 a = abs(starD);
+    vec2 f;
+    float face;
+    if (a.x >= a.y && a.x >= a.z) { f = starD.yz / a.x; face = starD.x > 0.0 ? 0.0 : 1.0; }
+    else if (a.y >= a.z) { f = starD.xz / a.y; face = starD.y > 0.0 ? 2.0 : 3.0; }
+    else { f = starD.xy / a.z; face = starD.z > 0.0 ? 4.0 : 5.0; }
+    f = (f * 0.5 + 0.5) * 48.0;
+    vec2 cell = floor(f) + face * 97.0;
+    float h = hash(cell);
+    if (h < 0.14) {
+      float h2 = hash(cell + 17.3);
+      float h3 = hash(cell + 41.7);
+      float r = 0.12 + h2 * 0.18;
+      float pt = 1.0 - smoothstep(0.0, r, length(fract(f) - 0.5));
+      float twinkle = 0.75 + 0.25 * sin(uTime * (2.0 + h3 * 3.0) + h3 * 6.28);
+      float s = pt * (0.5 + 0.5 * h2) * twinkle * uStars * smoothstep(-0.05, 0.15, d.y);
+      stars = mix(vec3(1.0), vec3(0.75, 0.85, 1.0), h3) * s;
+    }
+  }
+  oColor = vec4(col + sun + moon + stars, 1.0);
+  oBright = vec4(uSun * sunDisc * 0.6 + moon * 0.5 + stars * 0.35, 1.0);
 }`;
   const BLUR_FS = `#version 300 es
 precision highp float;
@@ -2135,6 +2440,7 @@ void main() {
     const gl = canvas.getContext("webgl2", { antialias: false, alpha: false, powerPreference: "high-performance" });
     if (!gl) throw new Error("WebGL2 unavailable");
     let settings = QUALITY[quality] || QUALITY.high;
+    let qualityName = QUALITY[quality] ? quality : "high";
     let width = 0, height = 0, dpr = 1, pw = 0, ph = 0;
     let lost = false;
     const size = { width: 0, height: 0 };
@@ -2152,6 +2458,11 @@ void main() {
     const mirrorProj = mat4.create();
     const mirrorViewProj = mat4.create();
     const mirrorCapturedViewProj = mat4.create();
+    const invViewProj = mat4.create();
+    const mirrorInvViewProj = mat4.create();
+    const FRUSTUM = new Float32Array(24);
+    const CENTER = new Float32Array(3);
+    let culled = 0, drawn = 0, shadowPassCount = 0;
     const mirrorEye = { x: 0, y: 0, z: 0 };
     const mirrorTarget = { x: 0, y: 0, z: 0 };
     const mirrorUp = { x: 0, y: 1, z: 0 };
@@ -2214,9 +2525,10 @@ void main() {
       ready = false;
       failure = null;
       res.programs = {
-        mesh: compile(MESH_VS, MESH_FS, ["uViewProj", "uLightViewProj", "uLightDir", "uSky", "uGround", "uSun", "uShadow", "uShadowTexel"]),
+        mesh: compile(MESH_VS, MESH_FS, ["uViewProj", "uLightViewProj", "uLightDir", "uSky", "uGround", "uSun", "uDirectStrength", "uShadowStrength", "uShadowBias", "uShadow", "uShadowTexel", "uLights", "uLightCount"]),
         shadow: compile(SHADOW_VS, SHADOW_FS, ["uLightViewProj"]),
         line: compile(LINE_VS, LINE_FS, ["uViewProj", "uViewport", "uWidth"]),
+        sky: compile(QUAD_VS, SKY_FS, ["uInvViewProj", "uEye", "uHorizon", "uZenith", "uSun", "uSunDir", "uMoonDir", "uStarMatrix", "uStars", "uTime"]),
         blur: compile(QUAD_VS, BLUR_FS, ["uTex", "uDir"]),
         composite: compile(QUAD_VS, COMPOSITE_FS, ["uScene", "uBloom", "uBloomStrength"])
       };
@@ -2521,10 +2833,32 @@ void main() {
       let rec = records.get(geometry);
       if (!rec) {
         const ibo = gl.createBuffer();
-        rec = { geometry, ibo, capacity: 0, mesh: buildMeshPart(geometry, ibo), line: buildLinePart(geometry, ibo), nodes: [], count: 0, active: false, data: null, batch: null, batchVersion: -1 };
+        rec = { geometry, ibo, capacity: 0, mesh: buildMeshPart(geometry, ibo), line: buildLinePart(geometry, ibo), nodes: [], count: 0, drawCount: 0, active: false, data: null, batch: null, batchVersion: -1 };
         records.set(geometry, rec);
       }
       return rec;
+    };
+    // Gribb-Hartmann planes of a column-major view-projection: left, right, bottom, top, near, far
+    const extractFrustum = (m) => {
+      for (let i = 0; i < 6; i++) {
+        const row = i >> 1, sign = i & 1 ? -1 : 1, o = i * 4;
+        const a = m[3] + sign * m[row], b = m[7] + sign * m[4 + row], c = m[11] + sign * m[8 + row], d = m[15] + sign * m[12 + row];
+        const len = Math.hypot(a, b, c) || 1;
+        FRUSTUM[o] = a / len;
+        FRUSTUM[o + 1] = b / len;
+        FRUSTUM[o + 2] = c / len;
+        FRUSTUM[o + 3] = d / len;
+      }
+    };
+    const inFrustum = (node) => {
+      const b = boundsOf(node.geometry), w = node.world;
+      mat4.transformPoint(CENTER, w, b.center[0], b.center[1], b.center[2]);
+      const scale = Math.max(w[0] * w[0] + w[1] * w[1] + w[2] * w[2], w[4] * w[4] + w[5] * w[5] + w[6] * w[6], w[8] * w[8] + w[9] * w[9] + w[10] * w[10]);
+      const r = b.radius * Math.sqrt(scale) + CULL_MARGIN;
+      for (let i = 0; i < 24; i += 4) {
+        if (FRUSTUM[i] * CENTER[0] + FRUSTUM[i + 1] * CENTER[1] + FRUSTUM[i + 2] * CENTER[2] + FRUSTUM[i + 3] < -r) return false;
+      }
+      return true;
     };
     const collect = (node) => {
       if (!node.geometry) return;
@@ -2542,22 +2876,31 @@ void main() {
       if (!rec.active) {
         rec.active = true;
         rec.count = 0;
+        rec.drawCount = 0;
         activeRecords.push(rec);
       }
       if (node.instanceData) {
         rec.batch = node;
-        rec.count = node.instanceCount;
+        rec.count = rec.drawCount = node.instanceCount;
         return;
       }
-      rec.nodes[rec.count++] = node;
+      // In-frustum nodes stay in front of the culled ones by swapping into the draw region
+      const idx = rec.count++;
+      rec.nodes[idx] = node;
+      if (inFrustum(node)) {
+        rec.nodes[idx] = rec.nodes[rec.drawCount];
+        rec.nodes[rec.drawCount++] = node;
+      } else culled++;
     };
     const uploadInstances = (rec) => {
       const need = rec.count * INSTANCE_FLOATS;
       if (rec.batch) {
         gl.bindBuffer(gl.ARRAY_BUFFER, rec.ibo);
-        if (rec.capacity < need) {
-          gl.bufferData(gl.ARRAY_BUFFER, need * 4, gl.DYNAMIC_DRAW);
-          rec.capacity = need;
+        // Grow geometrically within the batch's own array, so a fading population reallocates a few times, not per instance
+        const cap = Math.min(rec.batch.instanceData.length, Math.max(need, rec.capacity * 2));
+        if (rec.capacity < cap) {
+          gl.bufferData(gl.ARRAY_BUFFER, cap * 4, gl.DYNAMIC_DRAW);
+          rec.capacity = cap;
           rec.batchVersion = -1;
         }
         if (rec.batchVersion !== rec.batch.instanceVersion) {
@@ -2665,6 +3008,9 @@ void main() {
       mirrorProj[8] = (mirrorProj[8] + cropX) / halfX;
       mirrorProj[5] /= halfY;
       mirrorProj[9] = (mirrorProj[9] + cropY) / halfY;
+      // Sky rays unproject through the cropped projection, before the oblique clip bends z
+      mat4.multiply(mirrorViewProj, mirrorProj, mirrorView);
+      mat4.invert(mirrorInvViewProj, mirrorViewProj);
       mat4.transformPoint(MIRROR_POINT, mirrorView, center[0], center[1], center[2]);
       let cx = mirrorView[0] * normal[0] + mirrorView[4] * normal[1] + mirrorView[8] * normal[2];
       let cy = mirrorView[1] * normal[0] + mirrorView[5] * normal[1] + mirrorView[9] * normal[2];
@@ -2735,18 +3081,31 @@ void main() {
     };
     canvas.addEventListener("webglcontextlost", onLost);
     canvas.addEventListener("webglcontextrestored", onRestored);
-    const drawParts = (kind, useProgram, excludeMirror = false) => {
+    // The camera pass draws only the in-frustum front of each record; shadow and mirror draw all
+    const drawParts = (kind, useProgram, excludeMirror = false, cull = false) => {
       for (const rec of activeRecords) {
         if (excludeMirror && rec === mirror.record) continue;
-        const part = rec[kind];
-        if (!part) continue;
+        const part = rec[kind], n = cull ? rec.drawCount : rec.count;
+        if (!part || !n) continue;
         if (kind === "mesh" && useProgram === "shadow" && rec.geometry.castShadow === false) continue;
         if (kind === "line") gl.uniform1f(res.programs.line.u.uWidth, part.width * dpr);
         gl.bindVertexArray(part.vao);
-        gl.drawArraysInstanced(gl.TRIANGLES, 0, part.count, rec.count);
+        gl.drawArraysInstanced(gl.TRIANGLES, 0, part.count, n);
       }
     };
-    const renderMirrorCapture = (clear, sky, ground, sun, lx, ly, lz, sh) => {
+    const drawSky = (inv, eye) => {
+      const p = res.programs.sky;
+      gl.useProgram(p.prog);
+      gl.uniformMatrix4fv(p.u.uInvViewProj, false, inv);
+      gl.uniform3f(p.u.uEye, eye.x, eye.y, eye.z);
+      gl.depthFunc(gl.LEQUAL);
+      gl.depthMask(false);
+      gl.bindVertexArray(res.quadVao);
+      gl.drawArrays(gl.TRIANGLES, 0, 3);
+      gl.depthMask(true);
+      gl.depthFunc(gl.LESS);
+    };
+    const renderMirrorCapture = (clear, sky, ground, direct, directStrength, shadowStrength, shadowBias, lx, ly, lz, sh, lights, lightCount, skyOn) => {
       ensureMirrorTarget();
       const pg = res.programs;
       gl.bindFramebuffer(gl.FRAMEBUFFER, mirror.msFb || mirror.fb);
@@ -2759,12 +3118,18 @@ void main() {
       gl.uniform3f(pg.mesh.u.uLightDir, lx, ly, lz);
       gl.uniform3fv(pg.mesh.u.uSky, sky);
       gl.uniform3fv(pg.mesh.u.uGround, ground);
-      gl.uniform3fv(pg.mesh.u.uSun, sun);
+      gl.uniform3fv(pg.mesh.u.uSun, direct);
+      gl.uniform1f(pg.mesh.u.uDirectStrength, directStrength);
+      gl.uniform1f(pg.mesh.u.uShadowStrength, shadowStrength);
+      gl.uniform1f(pg.mesh.u.uShadowBias, shadowBias);
       gl.uniform1f(pg.mesh.u.uShadowTexel, 1 / sh.size);
       gl.activeTexture(gl.TEXTURE0);
       gl.bindTexture(gl.TEXTURE_2D, sh.tex);
       gl.uniform1i(pg.mesh.u.uShadow, 0);
+      if (lights) gl.uniform4fv(pg.mesh.u.uLights, lights);
+      gl.uniform1i(pg.mesh.u.uLightCount, lightCount);
       drawParts("mesh", "mesh", true);
+      if (skyOn) drawSky(mirrorInvViewProj, mirrorEye);
       gl.useProgram(pg.line.prog);
       gl.uniformMatrix4fv(pg.line.u.uViewProj, false, mirrorViewProj);
       gl.uniform2f(pg.line.u.uViewport, mirror.width, mirror.height);
@@ -2822,25 +3187,60 @@ void main() {
         sky = DEFAULT_SKY,
         ground = DEFAULT_GROUND,
         sun = DEFAULT_SUN,
+        sunDirection = light,
+        direct = sun,
+        directStrength = 1,
+        shadowStrength = 1,
+        shadowBias = 0.0035,
         clear = DEFAULT_CLEAR,
         bloomStrength = 0.9,
         shadowCenter = DEFAULT_SHADOW_CENTER,
-        shadowExtent = 13
+        shadowExtent = 13,
+        horizon,
+        zenith,
+        moon = DEFAULT_MOON,
+        stars = 0,
+        starMatrix = DEFAULT_STAR_MATRIX,
+        time = 0,
+        lights,
+        lightCount = 0
       } = opts;
       if (canvas.clientWidth !== width || canvas.clientHeight !== height) resize();
       const f = res.fbo, sh = res.shadow, pg = res.programs;
+      const skyOn = !!(horizon && zenith);
+      const nLights = lights ? Math.min(lightCount, settings.lights) : 0;
       mat4.lookAt(view, camera.position, camera.target, UP);
       mat4.perspective(proj, camera.fov, width / height, camera.near, camera.far);
       mat4.multiply(viewProj, proj, view);
+      extractFrustum(viewProj);
       const llen = Math.hypot(light.x, light.y, light.z) || 1;
       const lx = light.x / llen, ly = light.y / llen, lz = light.z / llen;
+      const slen = Math.hypot(sunDirection.x, sunDirection.y, sunDirection.z) || 1;
+      const sx = sunDirection.x / slen, sy = sunDirection.y / slen, sz = sunDirection.z / slen;
+      if (skyOn) {
+        mat4.invert(invViewProj, viewProj);
+        gl.useProgram(pg.sky.prog);
+        gl.uniform3fv(pg.sky.u.uHorizon, horizon);
+        gl.uniform3fv(pg.sky.u.uZenith, zenith);
+        gl.uniform3fv(pg.sky.u.uSun, sun);
+        gl.uniform3f(pg.sky.u.uSunDir, sx, sy, sz);
+        gl.uniform3f(pg.sky.u.uMoonDir, moon.x, moon.y, moon.z);
+        gl.uniformMatrix3fv(pg.sky.u.uStarMatrix, false, starMatrix);
+        gl.uniform1f(pg.sky.u.uStars, stars);
+        gl.uniform1f(pg.sky.u.uTime, time);
+      }
       // Set the light back to bracket the shadowed volume
       const lightDist = shadowExtent * 1.8, lightDepth = shadowExtent * 1.5;
       LIGHT_EYE.x = shadowCenter.x + lx * lightDist;
       LIGHT_EYE.y = shadowCenter.y + ly * lightDist;
       LIGHT_EYE.z = shadowCenter.z + lz * lightDist;
-      mat4.lookAt(lightView, LIGHT_EYE, shadowCenter, UP);
+      mat4.lookAt(lightView, LIGHT_EYE, shadowCenter, Math.abs(ly) > 0.96 ? NORTH_UP : UP);
       mat4.ortho(lightProj, -shadowExtent, shadowExtent, -shadowExtent, shadowExtent, Math.max(0.5, lightDist - lightDepth), lightDist + lightDepth);
+      mat4.multiply(lightViewProj, lightProj, lightView);
+      mat4.transformPoint4(P4, lightViewProj, 0, 0, 0);
+      const shadowSnap = sh.size * 0.5;
+      lightProj[12] += (Math.round(P4[0] * shadowSnap) - P4[0] * shadowSnap) / shadowSnap;
+      lightProj[13] += (Math.round(P4[1] * shadowSnap) - P4[1] * shadowSnap) / shadowSnap;
       mat4.multiply(lightViewProj, lightProj, lightView);
       for (const rec of activeRecords) {
         rec.active = false;
@@ -2853,10 +3253,12 @@ void main() {
       mirrorDebug.active = false;
       mirrorDebug.portal = false;
       mirrorDebug.surfaceDrawn = false;
+      culled = drawn = 0;
       updateWorld(root, null);
       traverseVisible(root, collect);
       for (const rec of activeRecords) {
         if (!rec.batch) rec.nodes.length = rec.count;
+        drawn += rec.drawCount;
         uploadInstances(rec);
       }
       gl.bindFramebuffer(gl.FRAMEBUFFER, sh.fb);
@@ -2867,6 +3269,7 @@ void main() {
       gl.cullFace(gl.FRONT);
       drawParts("mesh", "shadow");
       gl.cullFace(gl.BACK);
+      shadowPassCount++;
       if (mirror.node) {
         mirror.frame++;
         updateMirrorSide(camera);
@@ -2875,7 +3278,7 @@ void main() {
         } else if (prepareMirrorCamera(camera)) {
           if (settings !== QUALITY.high && mirror.frame % 2 === 0) skipMirrorPass("cadence");
           else if (!ensureMirrorProgram()) skipMirrorPass("shader-pending");
-          else renderMirrorCapture(clear, sky, ground, sun, lx, ly, lz, sh);
+          else renderMirrorCapture(clear, sky, ground, direct, directStrength, shadowStrength, shadowBias, lx, ly, lz, sh, lights, nLights, skyOn);
         }
       }
       gl.bindFramebuffer(gl.FRAMEBUFFER, f.scene);
@@ -2889,18 +3292,24 @@ void main() {
       gl.uniform3f(pg.mesh.u.uLightDir, lx, ly, lz);
       gl.uniform3fv(pg.mesh.u.uSky, sky);
       gl.uniform3fv(pg.mesh.u.uGround, ground);
-      gl.uniform3fv(pg.mesh.u.uSun, sun);
+      gl.uniform3fv(pg.mesh.u.uSun, direct);
+      gl.uniform1f(pg.mesh.u.uDirectStrength, directStrength);
+      gl.uniform1f(pg.mesh.u.uShadowStrength, shadowStrength);
+      gl.uniform1f(pg.mesh.u.uShadowBias, shadowBias);
       gl.uniform1f(pg.mesh.u.uShadowTexel, 1 / sh.size);
       gl.activeTexture(gl.TEXTURE0);
       gl.bindTexture(gl.TEXTURE_2D, sh.tex);
       gl.uniform1i(pg.mesh.u.uShadow, 0);
-      drawParts("mesh", "mesh", true);
+      if (lights) gl.uniform4fv(pg.mesh.u.uLights, lights);
+      gl.uniform1i(pg.mesh.u.uLightCount, nLights);
+      drawParts("mesh", "mesh", true, true);
       drawMirrorSurface();
+      if (skyOn) drawSky(invViewProj, camera.position);
       gl.useProgram(pg.line.prog);
       gl.uniformMatrix4fv(pg.line.u.uViewProj, false, viewProj);
       gl.uniform2f(pg.line.u.uViewport, pw, ph);
       gl.disable(gl.CULL_FACE);
-      drawParts("line", "line");
+      drawParts("line", "line", false, true);
       gl.enable(gl.CULL_FACE);
       if (f.samples > 0) blit(f);
       gl.disable(gl.DEPTH_TEST);
@@ -2947,6 +3356,7 @@ void main() {
     const setQuality = (name) => {
       if (!QUALITY[name] || QUALITY[name] === settings) return;
       settings = QUALITY[name];
+      qualityName = name;
       buildShadow();
       resize();
     };
@@ -2992,10 +3402,12 @@ void main() {
       releaseUnused,
       dispose,
       get quality() {
-        return Object.keys(QUALITY).find((k) => QUALITY[k] === settings);
+        return qualityName;
       },
       get stats() {
-        return { records: records.size, active: activeRecords.length, mirrorResources: mirrorDebug.resources };
+        let shadowFinite = true;
+        for (let i = 0; i < 16; i++) if (!Number.isFinite(lightViewProj[i])) shadowFinite = false;
+        return { records: records.size, active: activeRecords.length, mirrorResources: mirrorDebug.resources, shadowResources: res.shadow ? 2 : 0, shadowSize: res.shadow ? res.shadow.size : 0, shadowPassCount, shadowFinite, culled, drawn };
       },
       get mirror() {
         return mirrorDebug;
@@ -3024,9 +3436,11 @@ void main() {
   const DEFAULT_GROUND = [0.22, 0.2, 0.19];
   const createRenderer = (canvas, { width: fixedW = 0, height: fixedH = 0, transparent = false } = {}) => {
     const ctx = canvas.getContext("2d");
-    let width = 0, height = 0, dpr = 1, backdrop = null, lastF = 1;
-    let clearRef = null, clearStyle = "", mirrorSkyRef = null, mirrorGroundRef = null, mirrorStyle = "#71808a";
+    let width = 0, height = 0, dpr = 1, backdrop = null, skyGradient = null, lastF = 1;
+    let clearRef = null, clearStyle = "", mirrorStyle = "#71808a";
     const size = { width: 0, height: 0 };
+    const skyInts = new Int32Array(6);
+    const mirrorInts = new Int32Array(3);
     const active = [];
     const DEFAULT_LIGHT = { x: 0.45, y: 0.85, z: 0.3 };
     const UP = { x: 0, y: 1, z: 0 };
@@ -3060,6 +3474,21 @@ void main() {
       backdrop = ctx.createLinearGradient(0, 0, 0, height);
       backdrop.addColorStop(0, "#181818");
       backdrop.addColorStop(1, "#0a0a0a");
+      skyGradient = null;
+    };
+    const buildSky = (horizon, zenith) => {
+      let same = skyGradient !== null;
+      for (let i = 0; i < 3; i++) {
+        const h = Math.round(horizon[i] * 255), z = Math.round(zenith[i] * 255);
+        if (skyInts[i] !== h || skyInts[i + 3] !== z) same = false;
+        skyInts[i] = h;
+        skyInts[i + 3] = z;
+      }
+      if (same) return;
+      skyGradient = ctx.createLinearGradient(0, 0, 0, height);
+      skyGradient.addColorStop(0, `rgb(${skyInts[3]},${skyInts[4]},${skyInts[5]})`);
+      skyGradient.addColorStop(0.62, `rgb(${skyInts[0]},${skyInts[1]},${skyInts[2]})`);
+      skyGradient.addColorStop(1, `rgb(${Math.round(skyInts[0] * 0.55)},${Math.round(skyInts[1] * 0.55)},${Math.round(skyInts[2] * 0.55)})`);
     };
     const clipNear = (src, count, near, dst) => {
       let out = 0;
@@ -3086,6 +3515,7 @@ void main() {
     };
     let eye = { x: 0, y: 0, z: 0 }, near = 0.2;
     const lightDir = new Float32Array([0, 1, 0]);
+    let directStrength = 1;
     const shadeNode = (node) => {
       const { verts, faces, lines } = node.geometry;
       const w = node.world;
@@ -3138,7 +3568,7 @@ void main() {
           const emissive = (face.emissive || 0) * node.glow;
           const diffuse = Math.max(0, nx * lightDir[0] + ny * lightDir[1] + nz * lightDir[2]);
           const hemi = AMBIENT * (0.6 + 0.4 * (ny * 0.5 + 0.5));
-          let k = Math.min(1, hemi + diffuse * 0.7);
+          let k = Math.min(1, hemi + diffuse * 0.7 * directStrength);
           k = lerp(k, 1.1, Math.min(1, emissive));
           k = lerp(k, 1.3, node.highlight * 0.4);
           const c = face.color;
@@ -3192,16 +3622,21 @@ void main() {
       }
     };
     const render = (root, camera, opts = {}) => {
-      const { light = DEFAULT_LIGHT, clear = null, sky = DEFAULT_SKY, ground = DEFAULT_GROUND } = opts;
+      const { light = DEFAULT_LIGHT, directStrength: strength = 1, clear = null, sky = DEFAULT_SKY, ground = DEFAULT_GROUND, horizon = null, zenith = null } = opts;
       if (!fixedW && (canvas.clientWidth !== width || canvas.clientHeight !== height)) resize();
+      const gradientSky = !!(horizon && zenith);
+      if (gradientSky) buildSky(horizon, zenith);
       if (clear !== clearRef) {
         clearRef = clear;
         clearStyle = clear ? `rgb(${Math.round(clear[0] * 255)},${Math.round(clear[1] * 255)},${Math.round(clear[2] * 255)})` : "";
       }
-      if (sky !== mirrorSkyRef || ground !== mirrorGroundRef) {
-        mirrorSkyRef = sky;
-        mirrorGroundRef = ground;
-        mirrorStyle = `rgb(${Math.round((sky[0] * 0.55 + ground[0] * 0.25 + 0.12) * 255)},${Math.round((sky[1] * 0.55 + ground[1] * 0.25 + 0.14) * 255)},${Math.round((sky[2] * 0.55 + ground[2] * 0.25 + 0.17) * 255)})`;
+      // The faux tint follows the sky, rebuilt only when a channel moves
+      const mr = Math.round((sky[0] * 0.55 + ground[0] * 0.25 + 0.12) * 255), mg = Math.round((sky[1] * 0.55 + ground[1] * 0.25 + 0.14) * 255), mb = Math.round((sky[2] * 0.55 + ground[2] * 0.25 + 0.17) * 255);
+      if (mr !== mirrorInts[0] || mg !== mirrorInts[1] || mb !== mirrorInts[2]) {
+        mirrorInts[0] = mr;
+        mirrorInts[1] = mg;
+        mirrorInts[2] = mb;
+        mirrorStyle = `rgb(${mr},${mg},${mb})`;
       }
       lastF = height / 2 / Math.tan(camera.fov / 2);
       near = camera.near;
@@ -3211,6 +3646,7 @@ void main() {
       lightDir[0] = light.x / llen;
       lightDir[1] = light.y / llen;
       lightDir[2] = light.z / llen;
+      directStrength = strength;
       poolUsed = 0;
       mirrorDebug.active = false;
       mirrorDebug.portal = false;
@@ -3247,7 +3683,7 @@ void main() {
       active.sort((a, b) => a.depth - b.depth);
       if (transparent) ctx.clearRect(0, 0, width, height);
       else {
-        ctx.fillStyle = clear ? clearStyle : backdrop;
+        ctx.fillStyle = gradientSky ? skyGradient : clear ? clearStyle : backdrop;
         ctx.fillRect(0, 0, width, height);
       }
       ctx.lineJoin = "round";
@@ -3340,7 +3776,7 @@ void main() {
         return "low";
       },
       get stats() {
-        return { records: 0, active: 0, mirrorResources: 0 };
+        return { records: 0, active: 0, mirrorResources: 0, shadowResources: 0, shadowSize: 0, shadowPassCount: 0, shadowFinite: true, culled: 0, drawn: 0 };
       },
       get mirror() {
         return mirrorDebug;
@@ -4853,8 +5289,37 @@ void main() {
     }
   };
   const pick = (rand, base, alt, p) => () => rand() < p ? alt : base;
+  // Tone leaf cells between lo and hi: dark under the lower third, light caps on top
+  const foliage = (v, rand, base, lo, hi, berry = 0) => {
+    for (const [k, c] of v.map) {
+      if (c < base) continue;
+      const [x, y, z] = k.split(",").map(Number);
+      let tone;
+      if ((y - lo) / (hi - lo) < 0.34) tone = rand() < 0.75 ? 0 : 1;
+      else if (!v.has(x, y + 1, z)) tone = rand() < berry ? 4 : rand() < 0.65 ? 3 : 2;
+      else tone = rand() < 0.5 ? 1 : 2;
+      v.map.set(k, base + tone);
+    }
+  };
+  // Roll about z, then yaw about y, in place
+  const turn = (geo, yaw, roll = 0) => {
+    const p = geo.verts;
+    const cy = Math.cos(yaw), sy = Math.sin(yaw), cr = Math.cos(roll), sr = Math.sin(roll);
+    for (let i = 0; i < p.length; i += 3) {
+      const x = p[i] * cr - p[i + 1] * sr, y = p[i] * sr + p[i + 1] * cr, z = p[i + 2];
+      p[i] = x * cy + z * sy;
+      p[i + 1] = y;
+      p[i + 2] = z * cy - x * sy;
+    }
+    return geo;
+  };
+  const noShadow = (geo) => {
+    geo.castShadow = false;
+    return geo;
+  };
   const VOX = 0.5;
-  const HALF = { x: -VOX / 2, y: 0, z: -VOX / 2 };
+  const QUARTER = 0.25;
+  const QHALF = { x: -QUARTER / 2, y: 0, z: -QUARTER / 2 };
   const STONE = ["#3a3734", "#2d2b28", "#45413d"];
   const CLIFF = ["#7d6f61", "#5e5449", "#877869"];
   const WOOD = "#8a6236", WOOD_DK = "#5c4425", PLANK = "#a9773f";
@@ -4877,7 +5342,7 @@ void main() {
     b: ["100", "100", "110", "101", "110"],
     d: ["001", "001", "011", "101", "011"]
   };
-  const SIGN_CELL = 0.075, SIGN_PIXEL = 0.061, SIGN_PAD = 0.855;
+  const SIGN_CELL = 0.075, SIGN_PIXEL = 0.061, SIGN_PAD = 0.855, SIGN_FRONT = 0.23;
   const SIGN_CACHE = new Map();
   const caveSign = (text = "EntropyLab") => {
     const hit = SIGN_CACHE.get(text);
@@ -4886,11 +5351,17 @@ void main() {
     for (const ch of text) cells += ch === " " ? 2 : 4;
     const textW = cells * SIGN_CELL;
     const width = Math.max(CAVE_SIGN_WIDTH, textW + SIGN_PAD);
+    const half = CAVE_SIGN_HEIGHT * 0.5;
+    // Back slab, two planks with end grain, hung from a bar; the front face sits at SIGN_FRONT
     const geos = [
-      box({ w: width, h: CAVE_SIGN_HEIGHT, d: 0.12, color: WOOD_DK }),
-      box({ w: width - 0.16, h: CAVE_SIGN_HEIGHT - 0.16, d: 0.04, color: WOOD, offset: { z: 0.08 } }),
-      box({ w: width - 0.2, h: 0.025, d: 0.025, color: "#7a5630", offset: { y: 0.2, z: 0.115 } }),
-      box({ w: width - 0.2, h: 0.025, d: 0.025, color: "#7a5630", offset: { y: -0.22, z: 0.115 } })
+      box({ w: width, h: CAVE_SIGN_HEIGHT, d: 0.14, color: WOOD_DK }),
+      box({ w: width - 0.24, h: half, d: 0.16, color: WOOD, offset: { y: half * 0.5, z: 0.15 } }),
+      box({ w: width - 0.24, h: half, d: 0.16, color: PLANK, offset: { y: -half * 0.5, z: 0.15 } }),
+      ...[-1, 1].flatMap((side) => [half * 0.5, -half * 0.5].map((y) => box({ w: 0.12, h: half, d: 0.16, color: "#4a3319", offset: { x: side * (width * 0.5 - 0.06), y, z: 0.15 } }))),
+      box({ w: width + 0.3, h: 0.08, d: 0.34, color: WOOD_DK, offset: { y: half + 0.18, z: 0.08 } }),
+      ...[-1, 1].map((side) => box({ w: 0.06, h: 0.2, d: 0.06, color: "#3a2a18", offset: { x: side * (width * 0.5 - 0.3), y: half + 0.07, z: 0.08 } })),
+      box({ w: width - 0.2, h: 0.025, d: 0.025, color: "#7a5630", offset: { y: 0.2, z: SIGN_FRONT + 0.0175 } }),
+      box({ w: width - 0.2, h: 0.025, d: 0.025, color: "#7a5630", offset: { y: -0.22, z: SIGN_FRONT + 0.0175 } })
     ];
     let cursor = -textW * 0.5;
     for (const ch of text) {
@@ -4903,14 +5374,14 @@ void main() {
       for (let row = 0; row < glyph.length; row++) {
         for (let col = 0; col < glyph[row].length; col++) {
           if (glyph[row][col] !== "1") continue;
-          geos.push(box({ w: SIGN_PIXEL, h: SIGN_PIXEL, d: 0.035, color: "#f3efe4", emissive: 0.2, offset: { x: cursor + col * SIGN_CELL + SIGN_CELL * 0.5, y: (2 - row) * SIGN_CELL, z: 0.125 } }));
+          geos.push(box({ w: SIGN_PIXEL, h: SIGN_PIXEL, d: 0.035, color: "#f3efe4", emissive: 0.2, offset: { x: cursor + col * SIGN_CELL + SIGN_CELL * 0.5, y: (2 - row) * SIGN_CELL, z: SIGN_FRONT + 0.0125 } }));
         }
       }
       cursor += SIGN_CELL * 4;
     }
     for (const x of [-width * 0.5 + 0.13, width * 0.5 - 0.13]) {
       for (const y of [-CAVE_SIGN_HEIGHT * 0.5 + 0.13, CAVE_SIGN_HEIGHT * 0.5 - 0.13]) {
-        geos.push(box({ w: 0.07, h: 0.07, d: 0.035, color: "#3a2a18", offset: { x, y, z: 0.13 } }));
+        geos.push(box({ w: 0.07, h: 0.07, d: 0.035, color: "#3a2a18", offset: { x, y, z: SIGN_FRONT + 0.0125 } }));
       }
     }
     const geo = merge(...geos);
@@ -4928,7 +5399,10 @@ void main() {
     v.fill(-6, -6, 0, 5, 0, 1, stone);
     v.fill(5, 5, 0, 5, 0, 1, stone);
     v.fill(-5, 4, 6, 6, 0, 1, light);
-    return voxGeo(v, { unit: VOX, palette: CLIFF, origin: { x: 0, y: 0, z: -VOX } });
+    const geo = voxGeo(v, { unit: VOX, palette: CLIFF, origin: { x: 0, y: 0, z: -VOX } });
+    geo.jambCenterX = 2.75;
+    geo.frontZ = 0.5;
+    return geo;
   });
   const mirrorPanel = cached(() => {
     const geo = {
@@ -4939,6 +5413,12 @@ void main() {
     };
     return geo;
   });
+  const matrixRimLiner = cached(() => ({
+    verts: [-2.5, 2.995, 0.46, 2.5, 2.995, 0.46, 2.5, 2.995, 1.005, -2.5, 2.995, 1.005],
+    faces: [{ i: [0, 1, 2, 3], color: hexToRgb("#000000"), emissive: 0 }],
+    lines: [],
+    castShadow: false
+  }));
   const MATRIX_GLYPHS = [
     ["0110", "1001", "1111", "1001", "1001", "0000"],
     ["1110", "1001", "1110", "1001", "1110", "0000"],
@@ -4964,6 +5444,7 @@ void main() {
   // A black-lined vestibule and room that stop just behind c1's mirror plane.
   const matrixChamber = cached(() => {
     const portalBack = 0.48, vestibuleBack = -2.5;
+    const headerHalfWidth = 2.9, headerTop = 3.9;
     const vestibuleDepth = portalBack - vestibuleBack;
     const vestibuleCenter = (portalBack + vestibuleBack) * 0.5;
     const roomBack = -6.2;
@@ -4972,8 +5453,14 @@ void main() {
       geo.faces.shift();
       return geo;
     };
+    // Inward-facing sheets hide stone from the room without recoloring its exterior.
     const header = {
-      verts: [-2.9, 3, portalBack, -2.9, 3.9, portalBack, 2.9, 3.9, portalBack, 2.9, 3, portalBack],
+      verts: [-headerHalfWidth, 3, portalBack, -headerHalfWidth, headerTop, portalBack, headerHalfWidth, headerTop, portalBack, headerHalfWidth, 3, portalBack],
+      faces: [{ i: [0, 1, 2, 3], color: hexToRgb("#000000"), emissive: 0 }],
+      lines: []
+    };
+    const transitionHeader = {
+      verts: [-headerHalfWidth, 3, -2.485, -headerHalfWidth, headerTop, -2.485, headerHalfWidth, headerTop, -2.485, headerHalfWidth, 3, -2.485],
       faces: [{ i: [0, 1, 2, 3], color: hexToRgb("#000000"), emissive: 0 }],
       lines: []
     };
@@ -4986,6 +5473,7 @@ void main() {
       openFrontBox({ w: 0.04, h: 3, d: vestibuleDepth, color: "#000000", offset: { x: -2.49, y: 1.5, z: vestibuleCenter } }),
       openFrontBox({ w: 0.04, h: 3, d: vestibuleDepth, color: "#000000", offset: { x: 2.49, y: 1.5, z: vestibuleCenter } }),
       header,
+      transitionHeader,
       box({ w: 0.4, h: 3.8, d: 0.03, color: "#000000", offset: { x: -2.7, y: 1.9, z: -2.485 } }),
       box({ w: 0.4, h: 3.8, d: 0.03, color: "#000000", offset: { x: 2.7, y: 1.9, z: -2.485 } }),
       box({ w: 5.8, h: 3.8, d: 0.14, color: "#000000", offset: { y: 1.9, z: -6.2 } })
@@ -4994,7 +5482,11 @@ void main() {
     geo.frontZ = portalBack;
     geo.claddingFrontZ = portalBack;
     geo.headerMinY = 3;
+    geo.headerMaxY = headerTop;
+    geo.headerHalfWidth = headerHalfWidth;
     geo.transitionCladdingZ = -2.485;
+    geo.transitionHeaderMinY = 3;
+    geo.transitionHeaderMaxY = headerTop;
     return geo;
   });
   // Gateway arch over the pass, trail along z
@@ -5051,33 +5543,69 @@ void main() {
     return voxGeo(v, { unit: JET_UNIT, palette: ["#ffb13b", "#ffe9a8"], origin: JET_ORIGIN, emissive: { 0: 1, 1: 1 } });
   });
   const bedroll = cached(() => merge(box({ w: 1.9, h: 0.09, d: 0.85, color: "#2e2724" }), box({ w: 0.4, h: 0.16, d: 0.6, color: "#40342c", offset: { x: 0.65, y: 0.1 } })));
-  const CANOPIES = [["#456d4f", "#365840", "#557f5d"], ["#e8b4c6", "#d697b0", "#f2c9d8"]];
+  const GREENS = ["#3f7a2b", "#4f8f36", "#5fa243", "#74b552"];
+  const CANOPIES = [GREENS, ["#2f6b3a", "#3f8248", "#4f9a58", "#66b06a"], ["#5a7d2a", "#6f9436", "#86aa44", "#a2c055"], ["#c47f9d", "#d697b0", "#e8b4c6", "#f2c9d8"]];
   const TREE_HEIGHT = 3;
-  // Trunk into a 2.5 canopy, TREE_HEIGHT units tall
+  // Crown clumps per variant as [cx, cy, cz, rx, ry, rz] in quarter cells
+  const CROWNS = [
+    [[0, 8.6, 0, 4.6, 3.0, 4.4], [-2.2, 9.6, 1.4, 2.6, 2.4, 2.6], [2.0, 7.4, -1.6, 2.4, 2.0, 2.4]],
+    [[0, 8.2, 0, 4.2, 2.6, 4.6], [1.6, 10.0, 0.6, 2.8, 2.2, 2.6], [-2.4, 7.6, -0.8, 2.6, 2.2, 2.4]],
+    [[0.4, 8.8, -0.4, 4.4, 3.2, 4.2], [-2.6, 8.0, 1.8, 2.8, 2.2, 2.6]],
+    [[0, 8.6, 0, 4.6, 3.0, 4.6], [2.2, 9.6, -1.2, 2.6, 2.2, 2.6], [-2.0, 7.6, 1.6, 2.4, 2.0, 2.4]]
+  ];
+  // Rooted trunk with branch stubs under a clumped canopy, TREE_HEIGHT units tall
   const tree = variants((i) => {
     const rand = mulberry32(101 + i);
     const v = vox();
-    v.fill(0, 0, 0, 2, 0, 0, pick(rand, 0, 1, 0.3));
-    const leaf = pick(rand, 2, 3, 0.3);
-    const light = pick(rand, 2, 4, 0.5);
-    blob(v, { cx: 0.5, cy: 4, cz: 0.5, rx: 2.5, ry: 2.1, rz: 2.5, chip: 0.4, rand, color: (x, y) => y >= 5 ? light() : leaf() });
-    return voxGeo(v, { unit: VOX, palette: ["#6b4a2b", "#4e361f", ...CANOPIES[i]], origin: HALF });
+    const bark = pick(rand, 0, 1, 0.3);
+    v.fill(-1, 0, 0, 7, -1, 0, bark);
+    for (const [x, z] of [[-2, -1], [1, 0], [0, 1], [-1, -2]]) if (rand() < 0.85) v.set(x, 0, z, bark());
+    let lo = Infinity, hi = 0;
+    for (const [cx, cy, cz, rx, ry, rz] of CROWNS[i]) {
+      blob(v, { cx, cy, cz, rx, ry, rz, chip: 0.35, rand, color: () => 2 });
+      lo = Math.min(lo, cy - ry);
+      hi = Math.max(hi, cy + ry);
+    }
+    v.set(1, 6, 0, 1);
+    v.set(2, 7, 0, 1);
+    if (i % 2) {
+      v.set(-2, 6, -1, 1);
+      v.set(-3, 7, -1, 1);
+    }
+    foliage(v, rand, 2, lo, hi);
+    return voxGeo(v, { unit: QUARTER, palette: ["#6b4a2b", "#4e361f", ...CANOPIES[i]] });
   });
-  // A small tuft, one unit wide
-  const bush = cached(() => {
-    const rand = mulberry32(7);
+  // Bush clumps per variant, small tuft to a wide berry bush
+  const CLUMPS = [
+    [[0, 1.0, 0, 1.9, 1.8, 1.7], [0.7, 1.4, -0.5, 1.3, 1.3, 1.2]],
+    [[0, 1.4, 0, 2.5, 2.2, 2.3], [-1.2, 2.0, 0.8, 1.7, 1.6, 1.6], [1.3, 1.8, -0.9, 1.6, 1.5, 1.5]],
+    [[0, 1.4, 0, 3.4, 2.0, 2.9], [-1.5, 2.1, 0.6, 2.0, 1.9, 1.9], [1.7, 2.3, -0.5, 2.0, 2.0, 2.0], [0.3, 2.8, 1.0, 1.6, 1.5, 1.5]]
+  ];
+  const bush = variants((i) => {
+    const rand = mulberry32(7 + i);
     const v = vox();
-    blob(v, { cx: 0, cy: 0.5, cz: 0, rx: 1.0, ry: 1.2, rz: 1.0, chip: 0.25, floor: 0, rand, color: pick(rand, 0, 1, 0.35) });
-    return voxGeo(v, { unit: VOX, palette: ["#5b9a3a", "#4a8530"] });
+    let hi = 0;
+    for (const [cx, cy, cz, rx, ry, rz] of CLUMPS[i]) {
+      blob(v, { cx, cy, cz, rx, ry, rz, chip: 0.2 + i * 0.05, floor: 0, rand, color: () => 0 });
+      hi = Math.max(hi, cy + ry);
+    }
+    foliage(v, rand, 0, 0, hi, i === 2 ? 0.18 : 0);
+    return voxGeo(v, { unit: QUARTER, palette: [...GREENS, "#c8322e"] });
   });
-  const ROCK_SHAPES = [{ rx: 1.6, ry: 1.8, rz: 1.4 }, { rx: 2.5, ry: 1.9, rz: 2.1 }];
+  const ROCK_SHAPES = [{ rx: 3.2, ry: 3.6, rz: 2.8 }, { rx: 5, ry: 3.8, rz: 4.2 }];
   const rock = variants((i) => {
     const rand = mulberry32(211 + i);
     const v = vox();
     const { rx, ry, rz } = ROCK_SHAPES[i];
-    blob(v, { cx: 0.5, cy: 0.2, cz: 0.5, rx, ry, rz, chip: 0.15, floor: 0, rand, color: pick(rand, 0, 1, 0.3) });
-    for (const [k, c] of v.map) if (c === 0 && rand() < 0.15) v.map.set(k, 2);
-    return voxGeo(v, { unit: VOX, palette: ["#6b625a", "#57504a", "#7a716a"], origin: HALF });
+    blob(v, { cx: 0.5, cy: 0.4, cz: 0.5, rx, ry, rz, chip: 0.2, floor: 0, rand, color: pick(rand, 0, 1, 0.3) });
+    let top = 0;
+    for (const k of v.map.keys()) top = Math.max(top, +k.split(",")[1]);
+    for (const [k, c] of v.map) {
+      const [x, y, z] = k.split(",").map(Number);
+      if (y >= top * 2 / 3 && !v.has(x, y + 1, z) && rand() < 0.3) v.map.set(k, 3);
+      else if (c === 0 && rand() < 0.15) v.map.set(k, 2);
+    }
+    return voxGeo(v, { unit: QUARTER, palette: ["#6b625a", "#57504a", "#7a716a", "#5b7f3a"], origin: QHALF });
   });
   const altarSlab = cached(() => lathe({
     profile: [[0, 0], [1, 0], [1, 0.82], [0.96, 1], [0, 1]],
@@ -5114,8 +5642,53 @@ void main() {
       box({ w: 0.26, h: 0.26, d: 0.26, color: "#ffb13b", emissive: 1, offset: { y: 1.36 } })
     );
     geo.castShadow = false;
+    geo.backZ = -0.13;
+    geo.flameY = 1.36;
     return geo;
   });
+  // A tuft of leaning blades, no shadow
+  const grass = cached(() => {
+    const rand = mulberry32(89);
+    return noShadow(merge(...Array.from({ length: 6 }, (_, n) => {
+      const h = 0.28 + rand() * 0.14;
+      return turn(box({ w: 0.05, h, d: 0.12, color: n % 2 ? "#74b552" : "#4f8f36", offset: { y: h * 0.5 } }), n * Math.PI / 6 + (rand() - 0.5) * 0.4, (rand() - 0.5) * 0.4);
+    })));
+  });
+  // Caged lamp hanging from its hook at the origin
+  const lantern = cached(() => noShadow(merge(
+    box({ w: 0.06, h: 0.08, d: 0.06, color: "#3a2a18", offset: { y: -0.04 } }),
+    box({ w: 0.24, h: 0.04, d: 0.24, color: "#2b2521", offset: { y: -0.1 } }),
+    ...[[-0.105, -0.105], [0.105, -0.105], [-0.105, 0.105], [0.105, 0.105]].map(([x, z]) => box({ w: 0.03, h: 0.3, d: 0.03, color: "#2b2521", offset: { x, y: -0.27, z } })),
+    box({ w: 0.24, h: 0.04, d: 0.24, color: "#2b2521", offset: { y: -0.44 } }),
+    box({ w: 0.13, h: 0.16, d: 0.13, color: "#ffd27a", emissive: 1, offset: { y: -0.27 } })
+  )));
+  // Stone ring over an ash bed with three crossed logs; the flame is fireFlame
+  const firepit = cached(() => {
+    const rand = mulberry32(131);
+    return merge(
+      box({ w: 1.1, h: 0.04, d: 1.1, color: "#2a2522", offset: { y: 0.02 } }),
+      ...Array.from({ length: 8 }, (_, n) => {
+        const a = n * Math.PI / 4 + (rand() - 0.5) * 0.3, h = 0.2 + rand() * 0.12;
+        return turn(box({ w: 0.28 + rand() * 0.1, h, d: 0.24 + rand() * 0.1, color: STONE[n % 3], offset: { x: 0.7, y: h * 0.5 } }), a, 0);
+      }),
+      ...Array.from({ length: 3 }, (_, n) => turn(box({ w: 0.9, h: 0.14, d: 0.14, color: WOOD_DK, offset: { y: 0.12 + n * 0.05 } }), n * Math.PI / 3, 0.18))
+    );
+  });
+  const FLAME = [[0.34, 0.3, 0.22, 0, 0, "#ff9a2e"], [0.26, 0.22, 0.44, 0.02, -0.02, "#ffc148"], [0.2, 0.18, 0.6, 0.06, 0.03, "#ffc148"], [0.16, 0.14, 0.72, 0.03, 0.05, "#fff0b0"], [0.12, 0.12, 0.84, -0.01, 0.02, "#fff0b0"], [0.14, 0.16, 0.36, -0.16, 0.04, "#ffc148"], [0.12, 0.14, 0.5, 0.17, 0.1, "#ff9a2e"]];
+  const fireFlame = cached(() => noShadow(merge(...FLAME.map(([w, h, y, x, z, color]) => box({ w, h, d: w, color, emissive: 1, offset: { x, y, z } })))));
+  const WINGS = [["#f2c94c", "#e04a3a"], ["#f3efe4", "#6f9fca"]];
+  const butterfly = variants((i) => {
+    const [wing, spot] = WINGS[i];
+    return noShadow(merge(
+      box({ w: 0.02, h: 0.02, d: 0.08, color: "#2b2521" }),
+      ...[-1, 1].flatMap((side) => [
+        turn(box({ w: 0.1, h: 0.01, d: 0.07, color: wing, offset: { x: side * 0.05 } }), 0, side * 0.61),
+        turn(box({ w: 0.04, h: 0.012, d: 0.03, color: spot, offset: { x: side * 0.065, z: 0.01 } }), 0, side * 0.61)
+      ])
+    ));
+  });
+  const firefly = cached(() => noShadow(box({ w: 0.06, h: 0.06, d: 0.06, color: "#d9ff6a", emissive: 1 })));
+  const ember = cached(() => noShadow(box({ w: 0.05, h: 0.05, d: 0.05, color: "#ff8a2a", emissive: 1 })));
   // Three leaf strands, about 1.2 wide
   const vine = cached(() => {
     const rand = mulberry32(53);
@@ -5154,7 +5727,7 @@ void main() {
     box({ w: 4, h: 0.14, d: 0.16, color: WOOD_DK, offset: { x: 2, y: -0.17, z: 0.92 } }),
     ...[[0.5, -0.8], [0.5, 0.8], [3.5, -0.8], [3.5, 0.8]].map(([x, z]) => box({ w: 0.2, h: 2.2, d: 0.2, color: "#6b4a2b", offset: { x, y: -1.2, z } }))
   ));
-  BL.hubModels = { jetpack, jetFlame, caveMouthRim, mirrorPanel, matrixGlyph, matrixChamber, caveSign, CAVE_SIGN_WIDTH, CAVE_SIGN_HEIGHT, gate, caveShelves, bedroll, tree, bush, rock, altarSlab, altarBlock, woodCrate, barrel, flowerTuft, torch, vine, cloud, ladder, dock, TREE_HEIGHT };
+  BL.hubModels = { jetpack, jetFlame, caveMouthRim, mirrorPanel, matrixRimLiner, matrixGlyph, matrixChamber, caveSign, CAVE_SIGN_WIDTH, CAVE_SIGN_HEIGHT, gate, caveShelves, bedroll, tree, bush, rock, altarSlab, altarBlock, woodCrate, barrel, flowerTuft, torch, grass, lantern, firepit, fireFlame, butterfly, firefly, ember, vine, cloud, ladder, dock, TREE_HEIGHT };
 })();
 
 // ---- js/caves.js ----
@@ -6043,6 +6616,7 @@ void main() {
       lootCount: $("loot-count"),
       crateHelp: $("crate-help"),
       worldLootHint: $("world-loot-hint"),
+      subtitle: $("subtitle"),
       actions: [...document.querySelectorAll("[data-action]")],
       act: $("act"),
       toast: $("toast"),
@@ -6106,6 +6680,9 @@ void main() {
     };
     const setAct = (label) => {
       el.act.textContent = label;
+    };
+    const setSubtitle = (text) => {
+      el.subtitle.textContent = text;
     };
     const setSummary = ({ working, sleeping, away }) => {
       el.summary.textContent = `${working} eating · ${sleeping} sleeping · ${away} away`;
@@ -6324,7 +6901,7 @@ void main() {
       tooltip.hide();
       closeFeed();
     };
-    return { el, openFeed, closeFeed, setRosterRow, setMeter, setStats, setAct, setSummary, onAction, toast, tooltip, hint, selectTab, onPreset, onIdentityChange, setIdentity, setDonationUrl, onAssign, onUnassign, renderInventory, dispose };
+    return { el, openFeed, closeFeed, setRosterRow, setMeter, setStats, setAct, setSubtitle, setSummary, onAction, toast, tooltip, hint, selectTab, onPreset, onIdentityChange, setIdentity, setDonationUrl, onAssign, onUnassign, renderInventory, dispose };
   };
   BL.hud = { create, renderIcon, STATE_LABELS };
 })();
@@ -6563,6 +7140,14 @@ void main() {
   const SLEEP_POKES = ["zzz... grr", "five more minutes", "zzz"];
   const BUILD_QUOTES = ["Ooga Booga!", "Ooga Booga BUILD!", "Ooga Booga MORE TOOLS!"];
   const IDLE_QUOTES = ["Ooga.", "Hmm.", "Nice rock.", "Booga?", "Where banana?", "Ooga booga.", "Sky big.", "Good cave."];
+  const PHASE_QUOTES = {
+    dawn: ["Sun come.", "Big yawn.", "Cold rock.", "Bird loud.", "Sky pink.", "Ooga wake."],
+    morning: ["Good day for banana.", "Ooga work.", "Sun warm.", "Rock dry now.", "Big day.", "Booga hungry."],
+    noon: ["Hot rock.", "Sun high.", "Shade good.", "Ooga sweat.", "Banana warm.", "Too bright."],
+    dusk: ["Sky orange. Pretty.", "Fire soon.", "Sun go down.", "Long shadow.", "Ooga tired.", "Bug sing."],
+    night: ["Stars many.", "Fire warm.", "Moon big.", "Dark out there.", "Ooga count star.", "Owl."],
+    midnight: ["Ooga not sleepy.", "Owl says hoo.", "Very dark. Very quiet.", "Rock cold.", "Booga snore.", "Moon watch."]
+  };
   const SHOUTS = ["OOGA BOOGA!", "OOGA!", "BOOGA!"];
   // Meal and idle timings for a working caveman
   const EAT_MIN = 14, EAT_SPREAD = 20, HUNGRY_LINGER = 4, IDLE_MIN = 3, IDLE_SPREAD = 6, TRIPS_MAX = 3;
@@ -6570,6 +7155,10 @@ void main() {
   // Jetpack thrust, ceiling, capped fall and speed
   const JET_ACCEL = 20, JET_RISE = 7, JET_FALL = 7, JET_CEILING = 16, JET_SPEED = 6.4, JET_PUFF = 0.05;
   const JET_SPARKS = [models.particleGeometry("#ffb13b", 0.09, 1), models.particleGeometry("#f3efe4", 0.07, 0.6)];
+  const LAND_DUST = [models.particleGeometry("#a3874f", 0.1, 0)];
+  // A drop deeper than a step, mirroring the hub's STEP_MAX
+  const STEP = 0.6;
+  const YAWN_DUR = 2.4;
   const REACH = 1.6;
   const MUZZLE = new Float32Array(3);
   const setVec = (v, x, y, z) => {
@@ -6615,6 +7204,9 @@ void main() {
         hopV: 0,
         cheer: 0,
         catchT: 0,
+        yawn: 0,
+        yawnAt: 12 + i * 4.3 + Math.random() * 20,
+        leap: { vx: 0, vz: 0, land: 0 },
         highlightTarget: 0,
         highlight: 0,
         nextBuildAt: 8 + i * 2.5 + Math.random() * 6,
@@ -6667,6 +7259,7 @@ void main() {
       cave.parts.head.rotation.y = 0;
       cave.parts.snack.visible = false;
       cave.parts.gun.visible = false;
+      cave.yawn = 0;
     };
     const refreshRosterRow = (cave) => {
       hud.setRosterRow(cave.traits.name, cave.state, contributors.ageLabel(cave.contributor));
@@ -7002,6 +7595,25 @@ void main() {
       w.phase += dt * 9;
       walkPose(cave, w.phase);
     };
+    const quoteFor = () => {
+      const table = ctx.phase ? PHASE_QUOTES[ctx.phase()] : IDLE_QUOTES;
+      return table[Math.floor(Math.random() * table.length)];
+    };
+    // A midnight yawn, arms up and head back, settling like a cheer
+    const runYawn = (cave) => {
+      // Re-armed in every phase so the stagger holds when midnight arrives mid-visit
+      if (ctx.phase && elapsed > cave.yawnAt) {
+        cave.yawnAt = elapsed + 25 + Math.random() * 30;
+        if (ctx.phase() === "midnight") cave.yawn = YAWN_DUR;
+      }
+      if (cave.yawn <= 0) return false;
+      const parts = cave.parts;
+      const k = Math.sin((1 - cave.yawn / YAWN_DUR) * Math.PI);
+      parts.armL.rotation.x = parts.armR.rotation.x = -0.2 - 2.2 * k;
+      parts.head.rotation.x = -0.25 * k;
+      parts.snack.visible = false;
+      return true;
+    };
     // Standing about, with the odd scratch and remark
     const runIdle = (cave, dt) => {
       const parts = cave.parts, a = cave.act;
@@ -7022,6 +7634,7 @@ void main() {
         parts.head.rotation.x = -k * 0.2;
         return;
       }
+      if (runYawn(cave)) return;
       parts.head.rotation.y = Math.sin(elapsed * 0.9 + cave.phase) * 0.55;
       parts.head.rotation.x = 0.08 + Math.sin(elapsed * 0.5 + cave.phase) * 0.1;
       const scratch = Math.max(0, Math.sin(elapsed * 1.7 + cave.phase * 2) - 0.6) * 2.5;
@@ -7029,7 +7642,7 @@ void main() {
       parts.armL.rotation.x = damp(parts.armL.rotation.x, -0.2, 10, dt);
       if (!a.said && elapsed > a.sayAt) {
         a.said = true;
-        if (Math.random() < 0.6) ctx.fx.say(cave, IDLE_QUOTES[Math.floor(Math.random() * IDLE_QUOTES.length)], 2);
+        if (Math.random() < 0.6) ctx.fx.say(cave, quoteFor(), 2);
       }
       if (elapsed < a.until) return;
       parts.head.rotation.y = 0;
@@ -7067,7 +7680,7 @@ void main() {
     };
     // Move the visitor's caveman
     const runPlayer = (cave, dt) => {
-      const p = cave.root.position;
+      const p = cave.root.position, leap = cave.leap;
       const wasGround = groundY(cave);
       if (cave.jet) runJet(cave, dt);
       const flying = !!cave.jet && (cave.jet.thrust || cave.hop > 0.05);
@@ -7090,11 +7703,43 @@ void main() {
         standPose(cave);
         cave.parts.torso.scale.y = 1 + Math.sin(elapsed * 2.2 + cave.phase) * 0.015;
       }
+      // Airborne after a ledge the leap carries him on, fading, legs tucked
+      if (cave.hop > 0 && (leap.vx || leap.vz)) {
+        const dx = leap.vx * dt, dz = leap.vz * dt;
+        if (canStep(cave, flying, p.x, p.z, p.x + dx, p.z + dz)) {
+          p.x += dx;
+          p.z += dz;
+        }
+        leap.vx = damp(leap.vx, 0, 1.5, dt);
+        leap.vz = damp(leap.vz, 0, 1.5, dt);
+        flyPose(cave);
+      }
       if (flying) flyPose(cave);
-      // Flying holds a world height, so ground steps never lift him
-      if (flying) cave.hop = Math.max(0, cave.hop + wasGround - groundY(cave));
+      // Airborne he holds a world height, so ground steps never lift him
+      if (flying || cave.hop > 0) cave.hop = Math.max(0, cave.hop + wasGround - groundY(cave));
+      else {
+        // Off a ledge, support at the new spot is the lower layer (walkable lets any drop
+        // through) and the height line below would snap him down in one frame; carry the
+        // drop in hop instead so he leaves at his old height and falls forward
+        const drop = wasGround - groundY(cave);
+        if (drop > STEP) {
+          cave.hop += drop;
+          cave.hopV = Math.max(cave.hopV, 2.4);
+          leap.vx = Math.sin(cave.root.rotation.y) * 3;
+          leap.vz = Math.cos(cave.root.rotation.y) * 3;
+        }
+      }
       // One place sets the height, so nothing compounds
       cave.root.position.y = groundY(cave) + cave.hop;
+      if (cave.hop === 0 && (leap.vx || leap.vz)) {
+        leap.vx = leap.vz = 0;
+        leap.land = 0.25;
+        ctx.fx.burst(p.x, p.y + 0.05, p.z, 6, LAND_DUST, 1.2);
+      }
+      if (leap.land > 0) {
+        leap.land = Math.max(0, leap.land - dt);
+        cave.parts.torso.scale.y = 1 - leap.land * 0.6;
+      }
       if (cave.catchT > 0) {
         const k = cave.catchT;
         cave.parts.armL.rotation.x = -0.2 - k * 1.6;
@@ -7112,6 +7757,7 @@ void main() {
         if (cave.hop === 0 && cave.hopV < 0) cave.hopV = 0;
       }
       if (cave.cheer > 0) cave.cheer -= dt;
+      if (cave.yawn > 0) cave.yawn -= dt;
       if (cave.catchT > 0) cave.catchT = Math.max(0, cave.catchT - dt * 1.6);
       for (const node of cave.swagNodes) {
         if (node.swag.float) node.position.y = (node.swag.offset ? node.swag.offset.y : 0) + Math.sin(elapsed * 2.5 + cave.phase) * 0.04;
@@ -7165,6 +7811,7 @@ void main() {
         parts.head.rotation.x = -k * 0.2;
         return;
       }
+      if (runYawn(cave)) return;
       // Settle the club arm back to rest
       parts.armL.rotation.x = damp(parts.armL.rotation.x, -0.2, 10, dt);
       if (wanderSpot) {
@@ -7232,6 +7879,7 @@ void main() {
       const cave = player;
       player = null;
       steer.x = steer.z = 0;
+      cave.leap.vx = cave.leap.vz = cave.leap.land = 0;
       if (cave.jet) {
         cave.jet.thrust = false;
         cave.jet.flame.visible = false;
@@ -8102,11 +8750,195 @@ void main() {
   BL.crates = { create, MAX_CRATES };
 })();
 
+// ---- js/critters.js ----
+(() => {
+  "use strict";
+  const BL = window.BL = window.BL || {};
+  const { hubModels } = BL;
+  const { mulberry32 } = BL.math;
+  const { createNode, addChild, removeChild } = BL.scene;
+  const SEED = 9137;
+  const BUTTERFLY_CAP = 24, FIREFLY_CAP = 48, EMBER_CAP = 16;
+  const FRACTION = { high: 1, medium: 0.5, low: 0.25 };
+  // Seconds between one individual appearing or leaving
+  const FADE_STEP = 0.12;
+  const BURST_MAX = 8;
+  const BURST_DAMP = 2;
+  const makeBatch = (geometry, cap) => {
+    const node = createNode({ geometry, instanceData: new Float32Array(cap * 20), instanceCount: 0, instanceVersion: 0 });
+    return { node, cap, shown: 0, fade: 0, hx: new Float32Array(cap), hz: new Float32Array(cap), hy: new Float32Array(cap), phase: new Float32Array(cap), speed: new Float32Array(cap) };
+  };
+  // Yaw a about y, x-scale sx, translation, glow
+  const writeInstance = (data, o, a, sx, x, y, z, glow) => {
+    const c = Math.cos(a), s = Math.sin(a);
+    data[o] = c * sx;
+    data[o + 1] = 0;
+    data[o + 2] = -s * sx;
+    data[o + 3] = 0;
+    data[o + 4] = 0;
+    data[o + 5] = 1;
+    data[o + 6] = 0;
+    data[o + 7] = 0;
+    data[o + 8] = s;
+    data[o + 9] = 0;
+    data[o + 10] = c;
+    data[o + 11] = 0;
+    data[o + 12] = x;
+    data[o + 13] = y;
+    data[o + 14] = z;
+    data[o + 15] = 1;
+    data[o + 16] = glow;
+    data[o + 17] = 0;
+    data[o + 18] = 0;
+    data[o + 19] = 0;
+  };
+  const settle = (batch, target, dt) => {
+    if (batch.shown === target) {
+      batch.fade = 0;
+      return;
+    }
+    batch.fade += dt;
+    if (batch.fade < FADE_STEP) return;
+    batch.fade = 0;
+    batch.shown += batch.shown < target ? 1 : -1;
+  };
+  // Butterflies, fireflies and embers for one scene
+  const create = ({ root, renderer, flowers, fire, meadowRadius, heightAt }) => {
+    const rand = mulberry32(SEED);
+    const butterflies = [makeBatch(hubModels.butterfly(0), BUTTERFLY_CAP), makeBatch(hubModels.butterfly(1), BUTTERFLY_CAP)];
+    const fireflies = makeBatch(hubModels.firefly(), FIREFLY_CAP);
+    const embers = makeBatch(hubModels.ember(), EMBER_CAP);
+    const burstVx = new Float32Array(FIREFLY_CAP), burstVz = new Float32Array(FIREFLY_CAP);
+    const emberT = new Float32Array(EMBER_CAP), emberPeriod = new Float32Array(EMBER_CAP);
+    let burstNext = 0;
+    for (let v = 0; v < 2; v++) {
+      const b = butterflies[v];
+      for (let i = 0; i < BUTTERFLY_CAP; i++) {
+        const flower = flowers[(v * BUTTERFLY_CAP + i) % flowers.length];
+        b.hx[i] = flower.x;
+        b.hz[i] = flower.z;
+        b.hy[i] = heightAt(flower.x, flower.z);
+        b.phase[i] = rand() * Math.PI * 2;
+        b.speed[i] = 1.2 + rand() * 0.8;
+      }
+    }
+    const spread = meadowRadius - 2;
+    for (let i = 0; i < FIREFLY_CAP;) {
+      const a = rand() * Math.PI * 2, r = Math.sqrt(rand()) * spread;
+      const x = Math.cos(a) * r, z = Math.sin(a) * r;
+      if (heightAt(x, z) !== 0) continue;
+      fireflies.hx[i] = x;
+      fireflies.hz[i] = z;
+      fireflies.phase[i] = rand() * Math.PI * 2;
+      fireflies.speed[i] = 0.5 + rand() * 0.5;
+      i++;
+    }
+    if (fire) {
+      const y = heightAt(fire.x, fire.z);
+      for (let i = 0; i < EMBER_CAP; i++) {
+        embers.hx[i] = fire.x;
+        embers.hz[i] = fire.z;
+        embers.hy[i] = y + 0.5;
+        embers.phase[i] = rand() * Math.PI * 2;
+        embers.speed[i] = 0.8 + rand() * 0.6;
+        emberPeriod[i] = 1.2 + rand() * 0.6;
+        emberT[i] = rand() * emberPeriod[i];
+      }
+    }
+    addChild(root, butterflies[0].node, butterflies[1].node, fireflies.node, embers.node);
+    const updateButterflies = (b, elapsed) => {
+      const data = b.node.instanceData;
+      for (let i = 0; i < b.shown; i++) {
+        const t = elapsed * b.speed[i] + b.phase[i];
+        const x = b.hx[i] + Math.cos(t) * 0.8;
+        const z = b.hz[i] + Math.sin(t * 1.3) * 0.8;
+        const y = b.hy[i] + 0.6 + Math.sin(t * 2.1) * 0.3;
+        const yaw = Math.atan2(-Math.sin(t), Math.cos(t * 1.3) * 1.3);
+        const flap = 0.35 + 0.65 * Math.abs(Math.sin(elapsed * 22 + b.phase[i]));
+        writeInstance(data, i * 20, yaw, flap, x, y, z, 1);
+      }
+    };
+    const updateFireflies = (dt, elapsed) => {
+      const f = fireflies, data = f.node.instanceData;
+      const decay = Math.exp(-BURST_DAMP * dt);
+      for (let i = 0; i < f.shown; i++) {
+        f.hx[i] += burstVx[i] * dt;
+        f.hz[i] += burstVz[i] * dt;
+        burstVx[i] *= decay;
+        burstVz[i] *= decay;
+        const t = elapsed * f.speed[i] + f.phase[i];
+        const x = f.hx[i] + Math.sin(t) * 1.4 + Math.sin(t * 0.37 + f.phase[i]) * 0.6;
+        const z = f.hz[i] + Math.cos(t * 0.8 + f.phase[i]) * 1.4 + Math.cos(t * 0.53) * 0.6;
+        const y = f.hy[i] + 1 + Math.sin(t * 1.3) * 0.6;
+        const blink = Math.max(0, Math.sin(elapsed * 1.7 + f.phase[i]));
+        writeInstance(data, i * 20, t, 1, x, y, z, 0.2 + 0.8 * blink * blink * blink);
+      }
+    };
+    const updateEmbers = (dt, elapsed) => {
+      const e = embers, data = e.node.instanceData;
+      for (let i = 0; i < e.shown; i++) {
+        emberT[i] += dt;
+        if (emberT[i] >= emberPeriod[i]) emberT[i] -= emberPeriod[i];
+        const k = emberT[i] / emberPeriod[i];
+        const x = e.hx[i] + Math.sin(elapsed * 2.6 + e.phase[i]) * 0.12 * k;
+        const z = e.hz[i] + Math.cos(elapsed * 2.1 + e.phase[i]) * 0.12 * k;
+        writeInstance(data, i * 20, elapsed * 3 + e.phase[i], 1, x, e.hy[i] + emberT[i] * e.speed[i], z, 1 - k);
+      }
+    };
+    const finish = (b) => {
+      b.node.instanceCount = b.shown;
+      b.node.visible = b.shown > 0;
+      if (b.shown > 0) b.node.instanceVersion++;
+    };
+    const update = (dt, elapsed, day, night, fireLit) => {
+      const fraction = FRACTION[renderer.quality];
+      const butterflyTarget = Math.round(BUTTERFLY_CAP * fraction * day);
+      settle(butterflies[0], butterflyTarget, dt);
+      settle(butterflies[1], butterflyTarget, dt);
+      settle(fireflies, Math.round(FIREFLY_CAP * fraction * night), dt);
+      settle(embers, fire ? Math.round(EMBER_CAP * fraction * night * fireLit) : 0, dt);
+      updateButterflies(butterflies[0], elapsed);
+      updateButterflies(butterflies[1], elapsed);
+      updateFireflies(dt, elapsed);
+      updateEmbers(dt, elapsed);
+      finish(butterflies[0]);
+      finish(butterflies[1]);
+      finish(fireflies);
+      finish(embers);
+    };
+    // Re-home a few fireflies to a shaken tree and scatter them outward
+    const burst = (x, z) => {
+      const count = Math.min(BURST_MAX, fireflies.shown);
+      const y = heightAt(x, z);
+      for (let n = 0; n < count; n++) {
+        const i = (burstNext + n) % fireflies.shown;
+        const a = n / count * Math.PI * 2 + rand() * 0.6, s = 1.5 + rand();
+        fireflies.hx[i] = x;
+        fireflies.hz[i] = z;
+        fireflies.hy[i] = y;
+        burstVx[i] = Math.cos(a) * s;
+        burstVz[i] = Math.sin(a) * s;
+      }
+      burstNext = (burstNext + count) % FIREFLY_CAP;
+    };
+    const dispose = () => {
+      removeChild(root, butterflies[0].node);
+      removeChild(root, butterflies[1].node);
+      removeChild(root, fireflies.node);
+      removeChild(root, embers.node);
+      butterflies[0].shown = butterflies[1].shown = fireflies.shown = embers.shown = 0;
+    };
+    const stats = () => ({ butterflies: butterflies[0].shown + butterflies[1].shown, fireflies: fireflies.shown, embers: embers.shown });
+    return { update, burst, dispose, stats };
+  };
+  BL.critters = { create };
+})();
+
 // ---- js/scene-hub.js ----
 (() => {
   "use strict";
   const BL = window.BL = window.BL || {};
-  const { math, models, contributors, donations, qr, terrain, hubModels, caves, game: gameMod, hud: hudMod, interact: interactMod, pilot: pilotMod, fx: fxMod, crew: crewMod, pile: pileMod, crates: cratesMod } = BL;
+  const { math, models, contributors, donations, qr, terrain, hubModels, caves, daylight, game: gameMod, hud: hudMod, interact: interactMod, pilot: pilotMod, fx: fxMod, crew: crewMod, pile: pileMod, crates: cratesMod, critters: crittersMod } = BL;
   const { lerp, ease, fnv1a, mulberry32 } = math;
   const { createNode, addChild, removeChild, createCamera, addTween, stepTweens, tweenCount, traverseVisible } = BL.scene;
   const { EAT_RATE } = crewMod;
@@ -8118,6 +8950,13 @@ void main() {
   const DEG = Math.PI / 180;
   const COARSE = window.matchMedia("(pointer: coarse)").matches;
   const yawParam = parseFloat(params.get("yaw"));
+  // Debug clock: a pinned hour and a day length in seconds
+  const DEBUG = params.has("debug");
+  const hourParam = DEBUG ? parseFloat(params.get("hour")) : NaN;
+  const daylenParam = DEBUG ? parseFloat(params.get("daylen")) : NaN;
+  const dayParam = DEBUG ? parseFloat(params.get("day")) : NaN;
+  const latitudeParam = DEBUG ? parseFloat(params.get("latitude")) : NaN;
+  const islandLatitude = Number.isFinite(latitudeParam) ? Math.max(-66, Math.min(66, latitudeParam)) : daylight.ISLAND_LATITUDE_DEG;
   // Island measures, owned by terrain.js
   const MEADOW = 22, RADIUS = 30;
   const PITCH_MIN = 0.2, PITCH_MAX = 1.25, DIST_MIN = 3.5, DIST_MAX = 64;
@@ -8147,8 +8986,33 @@ void main() {
   // Reach at which a caveman is inside a cave
   const TUNNEL_REACH = 2.2;
   const MATRIX_TYPES = 8, MATRIX_TOP = 3.62, MATRIX_RANGE = 3.45, MATRIX_GAP = 0.19, MATRIX_NEAR = 28, MATRIX_PRELOAD = 18;
-  // High-key daylight, sun from the right
-  const RENDER_OPTS = { clear: [0.36, 0.56, 0.82], sky: [0.60, 0.64, 0.74], ground: [0.34, 0.34, 0.30], sun: [0.48, 0.44, 0.38], light: { x: 0.55, y: 0.78, z: -0.25 }, shadowCenter: { x: 0, y: 0, z: 0 }, shadowExtent: 34, bloomStrength: 0.5 };
+  // Sky, light and lamps, resampled from the clock every frame
+  const RENDER_OPTS = {
+    clear: new Float32Array(3), horizon: new Float32Array(3), zenith: new Float32Array(3), sky: new Float32Array(3), ground: new Float32Array(3), sun: new Float32Array(3), direct: new Float32Array(3),
+    light: { x: 0.55, y: 0.78, z: -0.25 }, sunDirection: { x: 0, y: 1, z: 0 }, moon: { x: 0, y: 1, z: 0 }, celestialPole: { x: 0, y: Math.sin(20 * DEG), z: -Math.cos(20 * DEG) }, starMatrix: new Float32Array(9),
+    stars: 0, torch: 0, day: 1, twilight: 0, lampFactor: 0, directStrength: 1, directionalLightStrength: 1, sunStrength: 1, moonStrength: 0, shadowStrength: 1, shadowBias: 0.002, activeLightSource: "sun", latitude: 20, dayOfYear: 172, continuousDay: 171.5, solarDeclination: 0, siderealAngle: 0, sunAltitude: 90, sunAzimuth: 180, moonAltitude: -90, moonAzimuth: 0, sunriseHour: 6, sunsetHour: 18,
+    time: 0, bloomStrength: 0.5, lights: new Float32Array(64), lightCount: 0, shadowCenter: { x: 0, y: 0, z: 0 }, shadowExtent: 34
+  };
+  RENDER_OPTS.starMatrix[0] = RENDER_OPTS.starMatrix[4] = RENDER_OPTS.starMatrix[8] = 1;
+  const DAYLIGHT_DEBUG = {
+    sunDirection: RENDER_OPTS.sunDirection, moonDirection: RENDER_OPTS.moon, celestialPole: RENDER_OPTS.celestialPole,
+    hour: 12, continuousDay: 171.5, phase: "noon", latitude: 20, dayOfYear: 172, solarDeclination: 0, siderealAngle: 0, sunAltitude: 90, sunAzimuth: 180, moonAltitude: -90, moonAzimuth: 0,
+    daylightFactor: 1, twilightFactor: 0, starFactor: 0, lampFactor: 0, directStrength: 1, directionalLightStrength: 1, shadowStrength: 1, shadowBias: 0.002, activeLightSource: "sun", sunriseHour: 6, sunsetHour: 18
+  };
+  const PHASE_TOASTS = { dawn: "Dawn breaks over the island", morning: "Morning on the island", noon: "High noon", dusk: "Dusk settles over the island", night: "Night. The torches are lit.", midnight: "Midnight. The island sleeps." };
+  // Lamp colours and reach; a lamp's flame reads through node.glow
+  const LAMP = { torch: { r: 1.0, g: 0.62, b: 0.25, radius: 6, glow: 0.85, hide: false }, fire: { r: 1.0, g: 0.55, b: 0.2, radius: 9, glow: 0.9, hide: true }, lantern: { r: 1.0, g: 0.8, b: 0.45, radius: 4, glow: 0.9, hide: false } };
+  const LIGHT_CAPACITY = 7;
+  const LIGHTING_DEBUG = {
+    registeredLampCount: 0, activeFullLightCount: 0, approximatedLightCount: 0,
+    configuredLightCapacity: LIGHT_CAPACITY, selectedCount: 0, approximatedCount: 0,
+    tier: "high", selectedIds: new Array(LIGHT_CAPACITY).fill(null), approximatedIds: new Array(LIGHT_CAPACITY).fill(null)
+  };
+  // Lamps light one after another through the dusk ramp
+  const LAMP_STAGGER = 0.12, LAMP_RAMP = 0.4, LAMP_OFF = 0.12;
+  const CAVE_TORCH_GAP = 0.12;
+  const FIRE_DEGREES = [130, 125, 135, 120, 140, 115, 145], FIRE_RADIUS = 11.5, FIRE_SEATS = 6, FIRE_SEAT_RADIUS = 1.8;
+  const NIGHT = 0.5, FIRE_SEAT_CHANCE = 0.5;
   // Clock angle to a meadow point
   const polar = (deg, r) => ({ x: Math.sin(deg * DEG) * r, z: -Math.cos(deg * DEG) * r });
   // Clock angles where the crew builds and sleeps
@@ -8168,7 +9032,7 @@ void main() {
   const ALTAR_HEIGHT = 0.34, ALTAR_BLOCK_WIDTH = 0.2, ALTAR_BLOCK_ARC = 0.3, ALTAR_RING_GAP = 0.02, ALTAR_MAX_BLOCKS = 512;
   // Ripen time and odds for a dropped banana
   const RIPEN = 25, TREE_CHANCE = 0.5, BUSH_CHANCE = 0.25;
-  const PROP_TIPS = { tree: "Tree · shake it", bush: "Bush · rustle it", rock: "Rock · solid", crate: "Crate · locked", barrel: "Barrel · empty", flower: "Flowers", torch: "Torch · warm", bedroll: "Somebody's bed", ladder: "Ladder · wobbly", dock: "Dock · creaky", jetpack: "Jetpack · walk an Ooga into it", gate: null };
+  const PROP_TIPS = { tree: "Tree · shake it", bush: "Bush · rustle it", rock: "Rock · solid", crate: "Crate · locked", barrel: "Barrel · empty", flower: "Flowers", torch: "Torch · warm", firepit: "Fire pit", bedroll: "Somebody's bed", ladder: "Ladder · wobbly", dock: "Dock · creaky", jetpack: "Jetpack · walk an Ooga into it", gate: null };
   const BUSH_WORDS = ["Something rustles.", "A beetle. Ooga leaves it.", "Just a bush."];
   const LEAF = models.particleGeometry("#4a8530", 0.12, 0);
   const PETALS = ["#e04a3a", "#f2c94c", "#f3efe4"].map((c) => models.particleGeometry(c, 0.09, 0));
@@ -8191,14 +9055,17 @@ void main() {
   };
 
   // One visit's state, made in enter and dropped in leave
-  let renderer, game, world, go, lootEnabled, testBananas, root, camera, island, pathNode, altar, hud, hooks, input, pilot, fx, pile, crew, crates, presets, entering, stash, jetpack, mirrorCave, matrixCave;
+  let renderer, game, world, go, lootEnabled, testBananas, root, camera, island, pathNode, altar, hud, hooks, input, pilot, fx, pile, crew, crates, critters, clock, presets, entering, stash, jetpack, mirrorCave, matrixCave, fire;
   let hintAt = HINT_AFTER;
-  let stateTimer = 0, hintTimer = 0, meterTimer = 0, pileEdgeNow = 0, now = 0;
+  let stateTimer = 0, hintTimer = 0, meterTimer = 0, pileEdgeNow = 0, now = 0, hour = 12;
+  let phase = null;
   const placed = [];
   const targets = [];
   const claimed = [];
   const clouds = [];
-  const torches = [];
+  const lamps = [];
+  const entranceLights = [];
+  const fireSeats = [];
   const sleepers = [];
   const labels = [];
   const spots = [];
@@ -8222,7 +9089,7 @@ void main() {
   };
 
   // ---------- room behind the mirror ----------
-  const buildMatrixRain = (group, room, m) => {
+  const buildMatrixRain = (group, room, rimLiner, m) => {
     const streamCount = renderer.kind === "canvas2d" ? 32 : 96;
     const streamLength = renderer.kind === "canvas2d" ? 9 : 14;
     const grouped = Array.from({ length: MATRIX_TYPES }, () => []);
@@ -8259,7 +9126,7 @@ void main() {
       placed.push(node);
       nodes.push(node);
     }
-    return { group, room, mouth: m, nodes, cr, sr, cycle, streamCount, hangingStreamCount: freeCount, entranceStreamCount: entranceCount, wallStreamCount: streamCount - freeCount, streamLength, glyphCount: streamCount * streamLength, brightTipCount: streamCount * 2, capacity: streamCount * streamLength, updates: 0, prewarmCount: 0, preloaded: false, prewarmed: false, visible: false, firstGlyphY: 0 };
+    return { group, room, rimLiner, mouth: m, nodes, cr, sr, cycle, streamCount, hangingStreamCount: freeCount, entranceStreamCount: entranceCount, wallStreamCount: streamCount - freeCount, streamLength, glyphCount: streamCount * streamLength, brightTipCount: streamCount * 2, capacity: streamCount * streamLength, updates: 0, prewarmCount: 0, preloaded: false, prewarmed: false, visible: false, firstGlyphY: 0 };
   };
   const updateMatrixRain = (elapsed) => {
     if (!matrixCave) return;
@@ -8276,6 +9143,7 @@ void main() {
       setVec(matrixCave.room.scale, scale, scale, scale);
     }
     matrixCave.visible = visible;
+    matrixCave.rimLiner.visible = visible;
     if (!preloaded && !wasPreloaded) return;
     const cr = matrixCave.cr, sr = matrixCave.sr;
     let first = true;
@@ -8412,6 +9280,97 @@ void main() {
     }
     return polar(deg, r);
   };
+  // A flame that lights with the night; lit lamps also feed the point lights
+  const addLamp = (node, kind, x, y, z, light = true, order = lamps.length, id = `lamp:${lamps.length}`) => {
+    node.glow = LAMP_OFF;
+    node.flare = 0;
+    const lamp = { node, kind, x, y, z, light, order, id, k: 0, lit: false, selected: false, approximated: false, debug: null };
+    lamps.push(lamp);
+    return lamp;
+  };
+  // Light the lamps in order as the dusk ramp climbs, spark when one catches
+  const updateLamps = (dt, elapsed, spark) => {
+    const lights = RENDER_OPTS.lights;
+    const webgl = renderer.kind === "webgl2";
+    const limit = webgl ? LIGHT_CAPACITY : 0;
+    let count = 0, approximated = 0;
+    for (let i = 0; i < lamps.length; i++) {
+      const l = lamps[i], node = l.node;
+      const k = Math.min(1, Math.max(0, (RENDER_OPTS.torch - l.order * LAMP_STAGGER) / LAMP_RAMP));
+      const lit = k > 0.05;
+      if (lit && !l.lit && spark) fx.burst(l.x, l.y, l.z, 5, [SPARK], 1.3);
+      l.lit = lit;
+      l.k = k;
+      const flicker = Math.sin(elapsed * 11 + i * 2.3) * 0.15;
+      node.glow = LAMP_OFF + k * (l.kind.glow + flicker) + node.flare * 1.5;
+      if (node.flare > 0) node.flare = Math.max(0, node.flare - dt * 2);
+      // A cold fire shows no flame at all
+      if (l.kind.hide) node.visible = lit;
+      l.selected = false;
+      l.approximated = false;
+      if (l.debug) {
+        l.debug.factor = k;
+        l.debug.lit = lit;
+        l.debug.selected = false;
+        l.debug.approximated = false;
+      }
+    }
+    // Registration order is spatially stable: camera movement never swaps lamp profiles.
+    for (let i = 0; i < lamps.length; i++) {
+      const l = lamps[i];
+      if (!l.lit || !l.light) continue;
+      if (count < limit) {
+        l.selected = true;
+        if (l.debug) l.debug.selected = true;
+        LIGHTING_DEBUG.selectedIds[count] = l.id;
+        const o = count++ * 8;
+        lights[o] = l.x;
+        lights[o + 1] = l.y;
+        lights[o + 2] = l.z;
+        lights[o + 3] = l.kind.radius;
+        lights[o + 4] = l.kind.r * l.k;
+        lights[o + 5] = l.kind.g * l.k;
+        lights[o + 6] = l.kind.b * l.k;
+      } else {
+        l.approximated = true;
+        if (l.debug) l.debug.approximated = true;
+        LIGHTING_DEBUG.approximatedIds[approximated++] = l.id;
+      }
+    }
+    for (let i = count; i < LIGHT_CAPACITY; i++) LIGHTING_DEBUG.selectedIds[i] = null;
+    for (let i = approximated; i < LIGHT_CAPACITY; i++) LIGHTING_DEBUG.approximatedIds[i] = null;
+    RENDER_OPTS.lightCount = count;
+    LIGHTING_DEBUG.registeredLampCount = lamps.length;
+    LIGHTING_DEBUG.activeFullLightCount = count;
+    LIGHTING_DEBUG.approximatedLightCount = approximated;
+    LIGHTING_DEBUG.configuredLightCapacity = limit;
+    LIGHTING_DEBUG.selectedCount = count;
+    LIGHTING_DEBUG.approximatedCount = approximated;
+    LIGHTING_DEBUG.tier = webgl ? renderer.quality : "canvas2d";
+  };
+  // A fire pit off the paths inside the bedroll ring, with seats around it
+  const buildFire = () => {
+    let p = null;
+    for (const deg of FIRE_DEGREES) {
+      const c = polar(deg, FIRE_RADIUS);
+      if (island.heightAt(c.x, c.z) === 0 && free(c.x, c.z, 1.6) && !nearPath(c.x, c.z, 1.8)) {
+        p = c;
+        break;
+      }
+    }
+    if (!p) throw new Error("No clear spot for the fire pit");
+    const pit = place(hubModels.firepit(), p.x, p.z, 0, 0, "firepit", 1.2);
+    const flame = createNode({ geometry: hubModels.fireFlame() });
+    addChild(pit, flame);
+    addLamp(flame, LAMP.fire, p.x, 0.6, p.z, true, 3, "firepit");
+    claim(p.x, p.z, 1.4);
+    for (let i = 0; i < FIRE_SEATS; i++) {
+      const a = (i + 0.5) / FIRE_SEATS * Math.PI * 2;
+      const x = p.x + Math.cos(a) * FIRE_SEAT_RADIUS, z = p.z + Math.sin(a) * FIRE_SEAT_RADIUS;
+      fireSeats.push({ x, z, ry: Math.atan2(p.x - x, p.z - z) });
+    }
+    return p;
+  };
   // Build a mouth from its slot status, +z leading out
   const buildMouth = (slot, m) => {
     const ax = Math.sin(m.ry), az = Math.cos(m.ry);
@@ -8420,27 +9379,38 @@ void main() {
     addChild(group, rim);
     if (slot.status === "open") {
       for (const x of [-1.3, 1.3]) addChild(group, createNode({ position: { x, y: 0, z: -3.5 }, geometry: hubModels.caveShelves() }));
-      for (const x of [-3, 3]) {
-        const torch = createNode({ position: { x, y: 0, z: 1 }, geometry: hubModels.torch(), flare: 0 });
-        addChild(group, torch);
-        torches.push(torch);
-        const tx = m.x + ax + Math.cos(m.ry) * x, tz = m.z + az - Math.sin(m.ry) * x;
-        claim(tx, tz, 0.5);
-        addProp("torch", torch, tx, tz, 0.7);
-      }
     } else if (slot.status === "mirror") {
       // Sit inside the rim so the cave floor ends behind the reflection.
       const node = createNode({ position: { x: 0, y: 1.5, z: 0.5 }, geometry: hubModels.mirrorPanel(), mirror: true, mirrorWalkThrough: true });
       const room = createNode({ geometry: hubModels.matrixChamber(), scale: { x: 0, y: 0, z: 0 } });
+      const rimLiner = createNode({ geometry: hubModels.matrixRimLiner(), visible: false });
+      addChild(room, rimLiner);
       addChild(group, room, node);
-      matrixCave = buildMatrixRain(group, room, m);
-      mirrorCave = { slot, mouth: m, group, rim, room, node, sign: null };
+      matrixCave = buildMatrixRain(group, room, rimLiner, m);
+      mirrorCave = { slot, mouth: m, group, rim, room, rimLiner, node, sign: null };
     } else if (slot.status === "sleeping") {
       // Bedrolls lie along +x, as the sleep pose assumes
       addChild(group, createNode({ position: { x: 0, y: 0.05, z: -4.5 }, rotation: { x: 0, y: -m.ry, z: 0 }, geometry: hubModels.bedroll(), depthBias: 0.3 }));
       sleepers.push({ x: m.x + ax * 0.8, y: 4.4, z: m.z + az * 0.8, timer: sleepers.length * 0.7 });
     }
     if (slot.status === "open" || slot.status === "mirror") {
+      const torchGeometry = hubModels.torch();
+      const torchZ = rim.position.z + rim.geometry.frontZ - torchGeometry.backZ + CAVE_TORCH_GAP;
+      for (let i = 0; i < 2; i++) {
+        const side = i ? "right" : "left", localX = (i ? 1 : -1) * rim.geometry.jambCenterX;
+        const torch = createNode({ position: { x: localX, y: 0, z: torchZ }, geometry: torchGeometry, flare: 0 });
+        addChild(group, torch);
+        const tx = m.x + ax * torchZ + Math.cos(m.ry) * localX;
+        const ty = m.floorY + torchGeometry.flameY;
+        const tz = m.z + az * torchZ - Math.sin(m.ry) * localX;
+        const id = `${slot.id}:torch:${side}`;
+        const lamp = addLamp(torch, LAMP.torch, tx, ty, tz, true, i, id);
+        const debug = { id, caveId: slot.id, kind: "torch", side, localPosition: [localX, torchGeometry.flameY, torchZ], worldPosition: [tx, ty, tz], registered: true, factor: 0, lit: false, selected: false, approximated: false, rimFront: rim.position.z + rim.geometry.frontZ, fixtureBack: torchZ + torchGeometry.backZ, gap: CAVE_TORCH_GAP };
+        lamp.debug = debug;
+        entranceLights.push(debug);
+        claim(tx, tz, 0.5);
+        addProp("torch", torch, tx, tz, 0.7);
+      }
       const sign = createNode({ position: { x: 0, y: 4.5, z: 0.52 }, geometry: hubModels.caveSign(slot.name) });
       addChild(group, sign);
       const halfW = sign.geometry.signWidth * 0.5, halfH = sign.geometry.signHeight * 0.5;
@@ -8456,6 +9426,18 @@ void main() {
         ]
       });
       if (mirrorCave && mirrorCave.slot === slot) mirrorCave.sign = sign;
+      // A lantern hangs off the sign bracket and matches the entrance torches' dusk fade.
+      const lantern = createNode({ position: { x: halfW + 0.1, y: sign.position.y + halfH + 0.14, z: 0.52 }, geometry: hubModels.lantern() });
+      addChild(group, lantern);
+      const lx = lantern.position.x, ly = lantern.position.y - 0.27, lz = lantern.position.z;
+      const wx = m.x + Math.cos(m.ry) * lx + ax * lz;
+      const wy = m.floorY + ly;
+      const wz = m.z - Math.sin(m.ry) * lx + az * lz;
+      const id = `${slot.id}:lantern:right`;
+      const lamp = addLamp(lantern, LAMP.lantern, wx, wy, wz, true, 2, id);
+      const debug = { id, caveId: slot.id, kind: "lantern", side: "right", localPosition: [lx, ly, lz], worldPosition: [wx, wy, wz], registered: true, factor: 0, lit: false, selected: false, approximated: false, rimFront: null, fixtureBack: null, gap: null };
+      lamp.debug = debug;
+      entranceLights.push(debug);
     }
     if (VINES.includes(slot.id)) for (const x of [-1.1, 1.1]) addChild(group, createNode({ position: { x, y: 3.45, z: 0.95 }, geometry: hubModels.vine() }));
     addChild(root, group);
@@ -8489,11 +9471,13 @@ void main() {
       }
       return true;
     };
+    // Grass is dressing: it reflows with the rest but answers no tap or Space
     const addScenery = (geometry, x, z, ry, y, kind, footprint) => {
       const reservation = claim(x, z, footprint);
       sceneryClaims.push(reservation);
-      const node = place(geometry, x, z, ry, y, kind, footprint + 0.3);
-      const owner = props[props.length - 1];
+      const quiet = kind === "grass";
+      const node = place(geometry, x, z, ry, y, quiet ? null : kind, footprint + 0.3);
+      const owner = quiet ? { kind: "prop", prop: kind, node, x, z, ripe: 0, pickRadius: 0, active: true } : props[props.length - 1];
       owner.footprint = footprint;
       owner.scenery = true;
       reservation.scenery = owner;
@@ -8523,13 +9507,14 @@ void main() {
         n++;
       }
     };
-    cliff(40, 1.4, 3, "tree", (n) => hubModels.tree(n % 3 === 2 ? 1 : 0));
-    cliff(60, 1, 0.5, "bush", () => hubModels.bush());
-    meadow(60, 0.7, "bush", () => hubModels.bush());
+    cliff(40, 1.4, 3, "tree", (n) => hubModels.tree(n % 4 === 3 ? 3 : n % 3));
+    cliff(60, 1, 0.5, "bush", (n) => hubModels.bush(n % 3));
+    meadow(60, 0.7, "bush", (n) => hubModels.bush(n % 3));
     meadow(8, 0.9, "rock", () => hubModels.rock(0));
     meadow(10, 0.7, "crate", () => hubModels.woodCrate(), true);
     meadow(8, 0.6, "barrel", () => hubModels.barrel());
     meadow(50, 0.35, "flower", () => hubModels.flowerTuft());
+    meadow(150, 0.3, "grass", () => hubModels.grass());
   };
   const sceneryReason = (o) => {
     const clearance = island.path.debug.ringOuterRadius + SCENERY_CLEARANCE;
@@ -8545,6 +9530,7 @@ void main() {
     if (o.active === active) return;
     o.active = active;
     o.node.visible = active;
+    if (!o.pickRadius) return;
     if (active) input.add(o.node, o, { radius: o.pickRadius });
     else input.remove(o.node);
   };
@@ -8685,9 +9671,29 @@ void main() {
       n++;
     }
   };
+  // A seat nobody is heading for or sitting on
+  const seatTaken = (s) => {
+    for (const cave of crew.cavemen.values()) {
+      const a = cave.act;
+      if ((a.kind === "wander" || a.kind === "idle") && a.spot.x === s.x && a.spot.z === s.z) return true;
+    }
+    return false;
+  };
+  const freeSeat = () => {
+    const start = Math.floor(Math.random() * fireSeats.length);
+    for (let i = 0; i < fireSeats.length; i++) {
+      const s = fireSeats[(start + i) % fireSeats.length];
+      if (!seatTaken(s)) return s;
+    }
+    return null;
+  };
+  // By the fire at night, else anywhere on the meadow
   const wanderSpot = (out) => {
-    let s = spots[Math.floor(Math.random() * spots.length)];
-    if (s.x === out.x && s.z === out.z) s = spots[(spots.indexOf(s) + 1) % spots.length];
+    let s = RENDER_OPTS.stars > NIGHT && Math.random() < FIRE_SEAT_CHANCE ? freeSeat() : null;
+    if (!s) {
+      s = spots[Math.floor(Math.random() * spots.length)];
+      if (s.x === out.x && s.z === out.z) s = spots[(spots.indexOf(s) + 1) % spots.length];
+    }
     out.x = s.x;
     out.z = s.z;
     out.ry = s.ry;
@@ -8851,6 +9857,7 @@ void main() {
       case "tree":
         if (!wobble(o.node, 0.1)) return;
         fx.burst(x, 2.6, z, 10, [LEAF], 1.6);
+        if (RENDER_OPTS.stars > NIGHT) critters.burst(x, z);
         if (!dropBanana(o, TREE_CHANCE)) hud.toast("Leaves. Just leaves.");
         break;
       case "bush":
@@ -8878,6 +9885,15 @@ void main() {
       case "torch":
         o.node.flare = 1;
         fx.burst(x, w[13] + 1.4, z, 8, [SPARK], 1.3);
+        break;
+      case "firepit":
+        if (RENDER_OPTS.torch < 0.5) {
+          hud.toast("Cold ashes. Ooga waits for night.");
+          break;
+        }
+        fire.node.flare = 1;
+        fx.burst(x, 0.9, z, 10, [SPARK], 1.6);
+        hud.toast("Warm. Ooga likes.");
         break;
       case "bedroll":
         hud.toast("Somebody's bed. Ooga leaves it.");
@@ -8990,8 +10006,44 @@ void main() {
     const seconds = game.forecast(world.level, crew.eatingCavemen().length, EAT_RATE);
     hud.setMeter(world.level, METER_CAPACITY, Number.isFinite(seconds) ? `≈ ${game.formatDuration(seconds)} left` : "stable");
   };
+  // The clock drives the sky, the lamps and who is out
+  const setPhase = (next) => {
+    const first = phase === null;
+    phase = next;
+    hud.setSubtitle(`an island of caves · ${next}`);
+    if (!first) hud.toast(PHASE_TOASTS[next]);
+  };
   const update = (dt, elapsed) => {
     now = elapsed;
+    hour = clock.read();
+    daylight.sample(hour, RENDER_OPTS, clock.dayOfYear, islandLatitude, clock.continuousDay);
+    RENDER_OPTS.time = elapsed;
+    updateLamps(dt, elapsed, phase !== null);
+    const next = daylight.phaseAt(hour);
+    if (next !== phase) setPhase(next);
+    DAYLIGHT_DEBUG.hour = hour;
+    DAYLIGHT_DEBUG.continuousDay = RENDER_OPTS.continuousDay;
+    DAYLIGHT_DEBUG.phase = phase;
+    DAYLIGHT_DEBUG.latitude = RENDER_OPTS.latitude;
+    DAYLIGHT_DEBUG.dayOfYear = RENDER_OPTS.dayOfYear;
+    DAYLIGHT_DEBUG.solarDeclination = RENDER_OPTS.solarDeclination;
+    DAYLIGHT_DEBUG.siderealAngle = RENDER_OPTS.siderealAngle;
+    DAYLIGHT_DEBUG.sunAltitude = RENDER_OPTS.sunAltitude;
+    DAYLIGHT_DEBUG.sunAzimuth = RENDER_OPTS.sunAzimuth;
+    DAYLIGHT_DEBUG.moonAltitude = RENDER_OPTS.moonAltitude;
+    DAYLIGHT_DEBUG.moonAzimuth = RENDER_OPTS.moonAzimuth;
+    DAYLIGHT_DEBUG.daylightFactor = RENDER_OPTS.day;
+    DAYLIGHT_DEBUG.twilightFactor = RENDER_OPTS.twilight;
+    DAYLIGHT_DEBUG.starFactor = RENDER_OPTS.stars;
+    DAYLIGHT_DEBUG.lampFactor = RENDER_OPTS.lampFactor;
+    DAYLIGHT_DEBUG.directStrength = RENDER_OPTS.directStrength;
+    DAYLIGHT_DEBUG.directionalLightStrength = RENDER_OPTS.directionalLightStrength;
+    DAYLIGHT_DEBUG.shadowStrength = RENDER_OPTS.shadowStrength;
+    DAYLIGHT_DEBUG.shadowBias = RENDER_OPTS.shadowBias;
+    DAYLIGHT_DEBUG.activeLightSource = RENDER_OPTS.activeLightSource;
+    DAYLIGHT_DEBUG.sunriseHour = RENDER_OPTS.sunriseHour;
+    DAYLIGHT_DEBUG.sunsetHour = RENDER_OPTS.sunsetHour;
+    critters.update(dt, elapsed, RENDER_OPTS.day, RENDER_OPTS.stars, fire.k);
     pileEdgeNow = pile.pileEdge();
     pilot.readInput(dt);
     crew.update(dt, elapsed);
@@ -9000,8 +10052,8 @@ void main() {
     // Pulse the prop if it still hides the jetpack
     if (stash) {
       const t = now - hintAt;
-      const phase = t > 0 ? t % HINT_EVERY : HINT_PULSE;
-      stash.node.highlight = phase < HINT_PULSE ? Math.sin(phase / HINT_PULSE * Math.PI) * HINT_MAX : 0;
+      const pulse = t > 0 ? t % HINT_EVERY : HINT_PULSE;
+      stash.node.highlight = pulse < HINT_PULSE ? Math.sin(pulse / HINT_PULSE * Math.PI) * HINT_MAX : 0;
     }
     // Turn and bob the dropped pickup
     if (jetpack) {
@@ -9027,11 +10079,6 @@ void main() {
         p.x += c.speed * dt;
         if (p.x > CLOUD_WRAP) p.x -= CLOUD_WRAP * 2;
       }
-    }
-    for (let i = 0; i < torches.length; i++) {
-      const t = torches[i];
-      t.glow = 0.85 + Math.sin(elapsed * 11 + i * 2.3) * 0.15 + t.flare * 1.5;
-      if (t.flare > 0) t.flare = Math.max(0, t.flare - dt * 2);
     }
     for (let i = 0; i < sleepers.length; i++) {
       const s = sleepers[i];
@@ -9115,6 +10162,8 @@ void main() {
     ({ renderer, game, world, go, lootEnabled, testBananas } = ctx);
     camera = createCamera({ fov: 48, near: 0.5, far: 140 });
     root = createNode();
+    clock = daylight.createClock({ hour: hourParam, daylen: daylenParam, day: dayParam, now: new Date() });
+    phase = null;
     island = terrain.island({ seed: SEED });
     mark("island");
     hud = hudMod.create({ roster: contributors.roster, catalog: models.SWAG, tierColors: models.TIER_COLORS, renderIcon: hudMod.renderIcon, lootEnabled });
@@ -9171,13 +10220,16 @@ void main() {
       return { x, z, ry: Math.atan2(-x, -z) };
     });
     buildRim();
+    const firePos = buildFire();
+    fire = lamps[lamps.length - 1];
     scatter();
     reflowScenery();
     buildSpots();
     buildClouds();
     hideJetpack();
+    critters = crittersMod.create({ root, renderer, flowers: scenery.filter((o) => o.prop === "flower" && o.active), fire: firePos, meadowRadius: MEADOW, heightAt: island.heightAt });
     mark("props");
-    const shared = { root, input, hooks, hud, game, world, renderer, camera, overlay: ctx.overlay, overlayVisible: matrixOverlayVisible, tickerAt: TICKER_AT, buildSpots: buildSpotsList, walkIn: WALK_IN, clampDrag, viewYaw: PILE_VIEW.yaw, bedrolls, pileScale: PILE_SCALE, pileY: ALTAR_HEIGHT + 0.02, onLayout: layoutPile, onShown: () => { meterTimer = 0; }, crateRadius: () => Math.max(4.4, altar.platformRadius + 0.8), groundAt: supportAt, wanderSpot, walkable, flyable, useNear };
+    const shared = { root, input, hooks, hud, game, world, renderer, camera, overlay: ctx.overlay, overlayVisible: matrixOverlayVisible, tickerAt: TICKER_AT, buildSpots: buildSpotsList, walkIn: WALK_IN, clampDrag, viewYaw: PILE_VIEW.yaw, bedrolls, pileScale: PILE_SCALE, pileY: ALTAR_HEIGHT + 0.02, onLayout: layoutPile, onShown: () => { meterTimer = 0; }, crateRadius: () => Math.max(4.4, altar.platformRadius + 0.8), groundAt: supportAt, wanderSpot, walkable, flyable, useNear, phase: () => phase };
     fx = shared.fx = fxMod.create(shared);
     pile = shared.pile = pileMod.create(shared);
     mark("pile");
@@ -9291,6 +10343,21 @@ void main() {
           viewApproach: viewMatrixApproach,
           viewInside: viewInsideMatrix
         },
+        pilot,
+        renderOpts: RENDER_OPTS,
+        lamps,
+        entranceLights,
+        lighting: LIGHTING_DEBUG,
+        fireSeats,
+        get critters() {
+          return critters.stats();
+        },
+        get daylight() {
+          return DAYLIGHT_DEBUG;
+        },
+        setHour: (h, daylen = NaN, day = clock.dayOfYear) => {
+          clock = daylight.createClock({ hour: h, daylen, day });
+        },
         get jetpack() {
           return {
             stash, pickup: jetpack, hintAt,
@@ -9312,17 +10379,21 @@ void main() {
     crates.dispose();
     pile.dispose();
     crew.dispose();
+    critters.dispose();
     fx.dispose();
     pilot.dispose();
     for (const node of targets) input.remove(node);
     for (const node of placed) removeChild(root, node);
-    targets.length = placed.length = claimed.length = scenery.length = sceneryClaims.length = clouds.length = torches.length = sleepers.length = labels.length = spots.length = openMouths.length = props.length = 0;
+    targets.length = placed.length = claimed.length = scenery.length = sceneryClaims.length = clouds.length = lamps.length = entranceLights.length = fireSeats.length = sleepers.length = labels.length = spots.length = openMouths.length = props.length = 0;
+    RENDER_OPTS.lightCount = 0;
+    LIGHTING_DEBUG.registeredLampCount = LIGHTING_DEBUG.activeFullLightCount = LIGHTING_DEBUG.approximatedLightCount = LIGHTING_DEBUG.selectedCount = LIGHTING_DEBUG.approximatedCount = 0;
+    for (let i = 0; i < LIGHT_CAPACITY; i++) LIGHTING_DEBUG.selectedIds[i] = LIGHTING_DEBUG.approximatedIds[i] = null;
     sceneryVisible = sceneryRadiusCulled = sceneryPathCulled = sceneryFixedCulled = sceneryReflows = 0;
     const count = input.targetCount;
     input.dispose();
     hud.dispose();
     // Drop everything but the cached island
-    pathNode = altar = hud = hooks = input = pilot = fx = pile = crew = crates = presets = stash = jetpack = mirrorCave = matrixCave = null;
+    pathNode = altar = hud = hooks = input = pilot = fx = pile = crew = crates = critters = clock = presets = stash = jetpack = mirrorCave = matrixCave = fire = null;
     hubScene.input = hubScene.debug = null;
     return { targets: count };
   };
@@ -9333,7 +10404,7 @@ void main() {
     let nodes = 0;
     traverseVisible(root, () => nodes++);
     const all = (n) => 1 + n.children.reduce((sum, c) => sum + all(c), 0);
-    return { visibleNodes: nodes, allNodes: all(root), tweens: tweenCount(), targets: input.targetCount, ...fx.stats(), ...crates.stats(), ...crew.stats(), ...pile.stats() };
+    return { visibleNodes: nodes, allNodes: all(root), tweens: tweenCount(), targets: input.targetCount, ...fx.stats(), ...crates.stats(), ...crew.stats(), ...pile.stats(), ...critters.stats() };
   };
   const hubScene = {
     id: "hub", enter, update, overlay, onDonation, onKey, onLootCleared, renderOpts: RENDER_OPTS, leave, stats, liveGeometry,
@@ -10080,7 +11151,7 @@ void main() {
         return world.level;
       }
     };
-    for (const key of ["slots", "drops", "core", "shell", "delivery", "cavemen", "crates", "lab", "hud", "applyAllSwag", "renderLocker", "demoTip", "setPileLevel", "refreshStates", "trimPool", "shown", "island", "mouths", "labels", "camera", "crew", "controls", "props", "altar", "path", "scenery", "jetpack", "mirrorCave", "matrixCave"]) {
+    for (const key of ["slots", "drops", "core", "shell", "delivery", "cavemen", "crates", "lab", "hud", "applyAllSwag", "renderLocker", "demoTip", "setPileLevel", "refreshStates", "trimPool", "shown", "island", "mouths", "labels", "camera", "crew", "controls", "props", "altar", "path", "scenery", "jetpack", "mirrorCave", "matrixCave", "pilot", "renderOpts", "lamps", "entranceLights", "lighting", "fireSeats", "critters", "daylight", "setHour"]) {
       Object.defineProperty(ooga, key, { get: () => active.debug[key], enumerable: true });
     }
     window.__ooga = ooga;

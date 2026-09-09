@@ -60,13 +60,14 @@ every scene has registered on `BL.scenes`.
 | File | Exposes | Job |
 |---|---|---|
 | `qr.js` | `BL.qr` | QR code for the donation link |
-| `math.js` | `BL.math` | `mat4`, easing, damping, hashing, `rayFromView` |
+| `math.js` | `BL.math` | `mat4` (with `invert`), easing, damping, hashing, `rayFromView` |
+| `daylight.js` | `BL.daylight` | the local solar clock: continuous sun/moon directions, sidereal star frame, altitude-driven sky/light factors, six semantic phases, `sample`, `createClock` |
 | `scene.js` | `BL.scene` | nodes, world transforms, camera, bounds cache, tweens |
-| `gl-renderer.js` | `BL.glRenderer` | WebGL2: instancing, shadow map, bloom, MSAA, quality tiers, pixel budget |
+| `gl-renderer.js` | `BL.glRenderer` | WebGL2: instancing, frustum culling, shadow map, sky pass with sun, moon and stars, seven bounded point lights, bloom, MSAA, quality tiers, pixel budget |
 | `canvas-renderer.js` | `BL.canvasRenderer` | Canvas 2D fallback, same API; also draws locker icons |
 | `models.js` | `BL.models` | procedural geometry: room, cavemen, props, crates, `SWAG` catalog |
 | `terrain.js` | `BL.terrain` | voxel grid, greedy meshing, the island: `heightAt`, `surfaceAt`, `onLand`, `isPath`, mouths |
-| `hub-models.js` | `BL.hubModels` | cached hub props: cave rim, gate, shelves, trees, rocks, barrels, torches, clouds, dock |
+| `hub-models.js` | `BL.hubModels` | cached hub props: cave rim, gate, shelves, sign, lantern, trees, bushes, grass, rocks, barrels, torches, fire pit, clouds, dock, critter bodies |
 | `caves.js` | `BL.caves` | the seven cave slots (clock position, status, scene, name) and the gate |
 | `contributors.js` | `BL.contributors` | roster snapshot, state by commit age, hashed traits, `LIKENESS` |
 | `donations.js` | `BL.donations` | donation request, simulator, event contract, `sanitize` |
@@ -79,15 +80,17 @@ every scene has registered on `BL.scenes`.
 | `crew.js` | `BL.crew` | cavemen from the roster: states, fan slots, walk / eat / sleep / cheer / build, strolls, the rush to fresh bananas, the driven caveman and jetpack flight, swag, pokes |
 | `pile.js` | `BL.pile` | inflating yellow-backed surface layer through 302, then the layered banana shell over a growing mound; drop-in, hatch, `MAX_BANANAS`; level on the shared `world` |
 | `crates.js` | `BL.crates` | loot crates: landing ring, spawn, open, remove |
-| `scene-hub.js` | `BL.scenes.hub` | the island scene; registers first so it is the landing scene |
+| `critters.js` | `BL.critters` | instanced butterflies by day, fireflies and embers by night, populations by phase and tier, bursts |
+| `scene-hub.js` | `BL.scenes.hub` | the island scene: the clock samples the sky and lamps each frame; registers first so it is the landing scene |
 | `scene-lab.js` | `BL.scenes.lab` | the lab scene; Escape and Leave cave return to the hub |
 | `director.js` | `window.__ooga` (debug only) | the app: renderer, frame loop, governor, housekeeping, keys, donations, routing, transitions |
 
 Both renderers implement the same surface: `render(root, camera, opts)` returning
 whether a frame was drawn, `project(x, y, z, out)`, `ray(px, py, camera, out)`,
 `resize`, `setQuality`, `releaseGeometry`, `releaseUnused(liveSet)`, `dispose`, and the
-getters `kind`, `quality`, `ready`, `failure`, `stats`, `size`. Gameplay code stays
-renderer-agnostic; anything new goes into both.
+getters `kind`, `quality`, `ready`, `failure`, `stats` (`records`, `active`,
+`mirrorResources`, `culled`, `drawn`), `size`. Gameplay code stays renderer-agnostic;
+anything new goes into both.
 
 ## Scenes and the director
 
@@ -113,9 +116,9 @@ The scene contract, as `scene-lab.js` and `scene-hub.js` implement it:
 | `onDonation(donation)` | a donation event while this scene is active |
 | `onKey(e)` | keys the director does not handle itself |
 | `onLootCleared()` | the locker was emptied with Shift+Delete |
-| `renderOpts` | any of `clear`, `sky`, `ground`, `sun`, `light`, `shadowCenter`, `shadowExtent`, `bloomStrength` |
+| `renderOpts` | any of `clear`, `sky`, `ground`, `sun`, `light`, `shadowCenter`, `shadowExtent`, `bloomStrength`; with `horizon` and `zenith` the sky pass draws (plus `moon`, `stars`, `time`); `lights` is a `Float32Array(64)` of up to eight `x, y, z, radius, r, g, b, 0` entries with `lightCount`, clamped to the tier |
 | `leave()` | tear the visit down; returns `{ targets }`, the input target count read before `input.dispose` |
-| `stats()` | `visibleNodes`, `allNodes`, `tweens`, `targets` plus the stats of fx, crates and crew |
+| `stats()` | `visibleNodes`, `allNodes`, `tweens`, `targets` plus the stats of fx, crates, crew, the pile and, in the hub, the critter counts |
 | `liveGeometry(set)` | add geometry kept off the graph but wanted on the GPU (the cavemen's swapped heads) |
 | `root`, `camera`, `input`, `debug` | set in `enter`; `input` and `debug` nulled in `leave` |
 | `inMotion` | getter, true while the pile or fx animate; the governor keeps full rate for it even unfocused |
@@ -136,7 +139,8 @@ measure exactly that.
 
 `__ooga` reads the active scene's `debug` object for `slots`, `cavemen`, `crates`, `lab`,
 `hud`, `applyAllSwag`, `renderLocker`, `demoTip`, `refreshStates`, `trimPool`, `shown`,
-`island`, `mouths`, `camera`, `crew` and `controls`; a scene fills in what it has.
+`island`, `mouths`, `camera`, `crew`, `controls`, `pilot`, `renderOpts`, `lamps`, `fireSeats`,
+`critters`, `daylight` and `setHour`; a scene fills in what it has.
 
 ## Engine patterns to keep
 
@@ -158,6 +162,10 @@ measure exactly that.
   tiers (pixel density, effects), never by throttling frames.
 - **Camera moves only on input.** No auto-orbit, drift or inertia. Held keys and sticks
   move the target or the driven caveman while held; damping settles within a few frames.
+- **The clock is the hub's.** `daylight.sample` writes the hub's `RENDER_OPTS` in place every
+  frame; phases (dawn, morning, noon, dusk, night, midnight) drive lamps, critters, quotes
+  and toasts. The lab is inside the rock and passes no sky. The roster's sleep and eat states
+  come from commit age, never from the clock.
 
 ## Checks and trust
 
@@ -191,6 +199,12 @@ the fan slot, `wander` to a spot, `idle` there, `player` under the visitor. Stro
 only when the scene passes `wanderSpot` (the lab does not); `walkToSlot` leaves a
 stroller alone unless forced, which `rush` does. Walkers stand on `groundAt`, so a scene
 with terrain passes its `heightAt`.
+
+**A lamp in the hub.** Build a geometry whose flame faces are the only emissive ones, then
+`addLamp(node, LAMP.kind, x, y, z)` in `scene-hub.js`: `node.glow` follows the dusk ramp in
+stagger order and lit lamps fill the fixed point-light array (seven reach the shader). A critter
+kind is a batch in `critters.js`: fixed capacity, homes seeded by `mulberry32`, motion
+written straight into `instanceData`, population eased toward a phase- and tier-scaled target.
 
 **A donation-driven event.** Hook `onDonation` in the scene module. Do not touch the
 event shape `{ id, sats, handle, message, at }`; the backend will emit exactly that.
@@ -236,15 +250,20 @@ URL flags: `?debug=1` exposes `window.__ooga` with the scene, game, renderer, in
 `stats()`, `timing`, `frameInterval`, and in the hub `island`, `mouths`, `camera`;
 `?scene=<id>` opens that scene (unknown ids land on the hub); `?nosim=1` silences the
 simulator; `?canvas2d=1` forces the fallback; `?yaw=` sets the starting camera angle;
-`?debug=1&bananas=` overrides the initial pile level for visual testing. Counts clamp to
+`?debug=1&bananas=` overrides the initial pile level for visual testing; `?debug=1&hour=`
+pins the solar clock, `?debug=1&day=` selects a day of year, bounded `?debug=1&latitude=`
+changes the test latitude, and `?debug=1&daylen=` runs a day in that many seconds (from the
+pinned hour when both are given). `__ooga.daylight` exposes the bounded celestial state,
+`__ooga.setHour(h, daylen, day)` resets it, and `__ooga.renderOpts`, `lamps`, `fireSeats`,
+`critters` and `pilot` expose the rest. Counts clamp to
 `pile.MAX_BANANAS` (ten million). Loot ships off behind `LOOT_DEFAULT` in `director.js`;
 `?debug=1&loot=1` turns it on for a page, which is how the loot checks run.
 
 ## Testing
 
 `npm test` builds `oogaboogaland.html` and runs `test/run.mjs` in headless Chrome over
-the DevTools protocol. Every check opens the page with `?debug=1&nosim=1` and asserts on
-real interaction: drags at projected positions, clicks, keys, DOM state, a clean console.
+the DevTools protocol. Every check opens the page with `?debug=1&nosim=1&hour=12` (noon, unless the check asks for
+another hour) and asserts on real interaction: drags at projected positions, clicks, keys, DOM state, a clean console.
 Lab checks add `scene=lab`; hub checks open the page without it and hold keys through
 `hold`. New behaviour needs a check. Follow the existing shape: one `withPage` block,
 `record(name, ok, detail)` per assertion, no fixed sleeps where waiting on

@@ -7,9 +7,11 @@
   const DEFAULT_GROUND = [0.22, 0.2, 0.19];
   const createRenderer = (canvas, { width: fixedW = 0, height: fixedH = 0, transparent = false } = {}) => {
     const ctx = canvas.getContext("2d");
-    let width = 0, height = 0, dpr = 1, backdrop = null, lastF = 1;
-    let clearRef = null, clearStyle = "", mirrorSkyRef = null, mirrorGroundRef = null, mirrorStyle = "#71808a";
+    let width = 0, height = 0, dpr = 1, backdrop = null, skyGradient = null, lastF = 1;
+    let clearRef = null, clearStyle = "", mirrorStyle = "#71808a";
     const size = { width: 0, height: 0 };
+    const skyInts = new Int32Array(6);
+    const mirrorInts = new Int32Array(3);
     const active = [];
     const DEFAULT_LIGHT = { x: 0.45, y: 0.85, z: 0.3 };
     const UP = { x: 0, y: 1, z: 0 };
@@ -43,6 +45,21 @@
       backdrop = ctx.createLinearGradient(0, 0, 0, height);
       backdrop.addColorStop(0, "#181818");
       backdrop.addColorStop(1, "#0a0a0a");
+      skyGradient = null;
+    };
+    const buildSky = (horizon, zenith) => {
+      let same = skyGradient !== null;
+      for (let i = 0; i < 3; i++) {
+        const h = Math.round(horizon[i] * 255), z = Math.round(zenith[i] * 255);
+        if (skyInts[i] !== h || skyInts[i + 3] !== z) same = false;
+        skyInts[i] = h;
+        skyInts[i + 3] = z;
+      }
+      if (same) return;
+      skyGradient = ctx.createLinearGradient(0, 0, 0, height);
+      skyGradient.addColorStop(0, `rgb(${skyInts[3]},${skyInts[4]},${skyInts[5]})`);
+      skyGradient.addColorStop(0.62, `rgb(${skyInts[0]},${skyInts[1]},${skyInts[2]})`);
+      skyGradient.addColorStop(1, `rgb(${Math.round(skyInts[0] * 0.55)},${Math.round(skyInts[1] * 0.55)},${Math.round(skyInts[2] * 0.55)})`);
     };
     const clipNear = (src, count, near, dst) => {
       let out = 0;
@@ -69,6 +86,7 @@
     };
     let eye = { x: 0, y: 0, z: 0 }, near = 0.2;
     const lightDir = new Float32Array([0, 1, 0]);
+    let directStrength = 1;
     const shadeNode = (node) => {
       const { verts, faces, lines } = node.geometry;
       const w = node.world;
@@ -121,7 +139,7 @@
           const emissive = (face.emissive || 0) * node.glow;
           const diffuse = Math.max(0, nx * lightDir[0] + ny * lightDir[1] + nz * lightDir[2]);
           const hemi = AMBIENT * (0.6 + 0.4 * (ny * 0.5 + 0.5));
-          let k = Math.min(1, hemi + diffuse * 0.7);
+          let k = Math.min(1, hemi + diffuse * 0.7 * directStrength);
           k = lerp(k, 1.1, Math.min(1, emissive));
           k = lerp(k, 1.3, node.highlight * 0.4);
           const c = face.color;
@@ -175,16 +193,21 @@
       }
     };
     const render = (root, camera, opts = {}) => {
-      const { light = DEFAULT_LIGHT, clear = null, sky = DEFAULT_SKY, ground = DEFAULT_GROUND } = opts;
+      const { light = DEFAULT_LIGHT, directStrength: strength = 1, clear = null, sky = DEFAULT_SKY, ground = DEFAULT_GROUND, horizon = null, zenith = null } = opts;
       if (!fixedW && (canvas.clientWidth !== width || canvas.clientHeight !== height)) resize();
+      const gradientSky = !!(horizon && zenith);
+      if (gradientSky) buildSky(horizon, zenith);
       if (clear !== clearRef) {
         clearRef = clear;
         clearStyle = clear ? `rgb(${Math.round(clear[0] * 255)},${Math.round(clear[1] * 255)},${Math.round(clear[2] * 255)})` : "";
       }
-      if (sky !== mirrorSkyRef || ground !== mirrorGroundRef) {
-        mirrorSkyRef = sky;
-        mirrorGroundRef = ground;
-        mirrorStyle = `rgb(${Math.round((sky[0] * 0.55 + ground[0] * 0.25 + 0.12) * 255)},${Math.round((sky[1] * 0.55 + ground[1] * 0.25 + 0.14) * 255)},${Math.round((sky[2] * 0.55 + ground[2] * 0.25 + 0.17) * 255)})`;
+      // The faux tint follows the sky, rebuilt only when a channel moves
+      const mr = Math.round((sky[0] * 0.55 + ground[0] * 0.25 + 0.12) * 255), mg = Math.round((sky[1] * 0.55 + ground[1] * 0.25 + 0.14) * 255), mb = Math.round((sky[2] * 0.55 + ground[2] * 0.25 + 0.17) * 255);
+      if (mr !== mirrorInts[0] || mg !== mirrorInts[1] || mb !== mirrorInts[2]) {
+        mirrorInts[0] = mr;
+        mirrorInts[1] = mg;
+        mirrorInts[2] = mb;
+        mirrorStyle = `rgb(${mr},${mg},${mb})`;
       }
       lastF = height / 2 / Math.tan(camera.fov / 2);
       near = camera.near;
@@ -194,6 +217,7 @@
       lightDir[0] = light.x / llen;
       lightDir[1] = light.y / llen;
       lightDir[2] = light.z / llen;
+      directStrength = strength;
       poolUsed = 0;
       mirrorDebug.active = false;
       mirrorDebug.portal = false;
@@ -230,7 +254,7 @@
       active.sort((a, b) => a.depth - b.depth);
       if (transparent) ctx.clearRect(0, 0, width, height);
       else {
-        ctx.fillStyle = clear ? clearStyle : backdrop;
+        ctx.fillStyle = gradientSky ? skyGradient : clear ? clearStyle : backdrop;
         ctx.fillRect(0, 0, width, height);
       }
       ctx.lineJoin = "round";
@@ -323,7 +347,7 @@
         return "low";
       },
       get stats() {
-        return { records: 0, active: 0, mirrorResources: 0 };
+        return { records: 0, active: 0, mirrorResources: 0, shadowResources: 0, shadowSize: 0, shadowPassCount: 0, shadowFinite: true, culled: 0, drawn: 0 };
       },
       get mirror() {
         return mirrorDebug;
