@@ -295,6 +295,8 @@ const hub = () => withPage("hub", hubPage(src), async (b) => {
   const loaded = await b.evaluate(`(() => { const B = window.__ooga; return { scene: B.scene, terrain: window.BL.scenes.hub.root.children.some((n) => n.geometry === B.island.geometry), mouths: B.mouths.length, leaveHidden: document.querySelector('[data-action="leave"]').hidden, startLevel: B.startLevel, level: B.level, lootEnabled: B.lootEnabled, lootCrates: B.crates.length, decorativeCrates: B.props.filter((o) => o.scenery && o.prop === "crate" && o.active).length, jetpackHidden: !!B.jetpack.stash, lootTabHidden: document.getElementById("loot-tab").hidden, worldLootHintHidden: document.getElementById("world-loot-hint").hidden }; })()`);
   const advanced = await rendered(3);
   record("hub: default scene starts with 1,000 bananas and loads clean", loaded.scene === "hub" && loaded.terrain && loaded.mouths === 7 && loaded.leaveHidden && loaded.startLevel === 1000 && loaded.level <= 1000 && loaded.level > 995 && advanced >= 3, JSON.stringify({ ...loaded, advanced }));
+  const underside = await b.evaluate(`(() => { const I = window.__ooga.island, g = I.geometry, radii = [0, 15, 27, 29.5, 30], profile = radii.map((r) => I.undersideDepthAt(r)), colors = new Set(); let minY = Infinity, deepFaces = 0; for (let i = 1; i < g.verts.length; i += 3) minY = Math.min(minY, g.verts[i]); for (const face of g.faces) { if (!face.i.every((i) => g.verts[i * 3 + 1] < -8)) continue; deepFaces++; colors.add(face.color.join(",")); } return { depth: I.undersideDepth, radii, profile, minY, deepFaces, deepMaterials: colors.size }; })()`);
+  record("hub terrain: the underside is a layered voxel bottom-third spherical cap instead of a flat slab", Math.abs(underside.depth - 30 / Math.SQRT2) < 1e-9 && underside.minY === -21.25 && Math.abs(underside.profile[0] - underside.depth) < 1e-9 && underside.profile.at(-1) === 0 && underside.profile.every((v, i, a) => i === 0 || v < a[i - 1]) && underside.profile[1] > 17 && underside.profile[2] > 6 && underside.profile[3] > 1 && underside.deepFaces > 0 && underside.deepMaterials === 3, JSON.stringify(underside));
   record("hub: donation loot and its panel stay hidden while decorative crates and the jetpack remain", !loaded.lootEnabled && loaded.lootCrates === 0 && loaded.decorativeCrates > 0 && loaded.jetpackHidden && loaded.lootTabHidden && loaded.worldLootHintHidden, JSON.stringify(loaded));
   const curtain = await b.evaluate(`({ drawn: window.__ooga.timing.drawn > 0, gone: !document.getElementById("curtain") })`);
   record("hub: the leaf curtain opens on the first drawn frame and leaves the DOM", curtain.drawn && curtain.gone, JSON.stringify(curtain));
@@ -946,6 +948,8 @@ const soak = async (b) => {
   const settled = (ms = 4000) => until("window.BL.scene.tweenCount() === 0", ms);
   const heap = async () => {
     await b.send("HeapProfiler.collectGarbage");
+    // Count the page before Chrome's heap-snapshot machinery can add an inspector node.
+    const dom = (await b.send("Memory.getDOMCounters")).result;
     const chunks = [];
     b.on("HeapProfiler.addHeapSnapshotChunk", (p) => chunks.push(p.chunk));
     await b.send("HeapProfiler.takeHeapSnapshot", { reportProgress: false });
@@ -958,7 +962,6 @@ const soak = async (b) => {
       total += snap.nodes[i + iSize];
       if (snap.nodes[i + iType] === code) compiled += snap.nodes[i + iSize];
     }
-    const dom = (await b.send("Memory.getDOMCounters")).result;
     return { used: (await b.send("Runtime.getHeapUsage")).result.usedSize, objects: total - compiled, code: compiled, nodes: dom.nodes, listeners: dom.jsEventListeners };
   };
   const snapshot = async () => ({ stats: await b.evaluate("window.__ooga.stats()"), ...await heap() });

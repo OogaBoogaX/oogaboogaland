@@ -103,12 +103,14 @@
   // ---------- hub island ----------
   // Quarter-unit cells, clocks running clockwise from -z
   const UNIT = 0.25;
-  const SX = 248, SY = 60, SZ = 248;
+  const SX = 248, SY = 156, SZ = 248;
   // Paths sit on a grid twice as fine as the voxels, so their edges step at half a voxel
   const PX = SX * 2, PZ = SZ * 2;
-  const SURFACE = 28;
+  const SURFACE = 120;
   const ORIGIN = { x: -SX / 2 * UNIT, y: -SURFACE * UNIT, z: -SZ / 2 * UNIT };
-  const RADIUS = 30, MEADOW = 22, DEPTH = 7;
+  const RADIUS = 30, MEADOW = 22, DEPTH = RADIUS / Math.SQRT2;
+  const UNDER_SPHERE_RADIUS = DEPTH * 1.5;
+  const UNDER_SPHERE_CENTER = DEPTH - UNDER_SPHERE_RADIUS;
   const MAX_HEIGHT = 8;
   const BLUFF = 6;
   const MOUTH = { w: 5, h: 3, depth: 5 };
@@ -129,6 +131,7 @@
     lines: []
   };
   const UNDER_BANDS = [P.dirt, P.stoneDark, P.dirt, P.stone];
+  const undersideDepthAt = (radius) => Math.max(0, UNDER_SPHERE_CENTER + Math.sqrt(Math.max(0, UNDER_SPHERE_RADIUS * UNDER_SPHERE_RADIUS - radius * radius)));
   // Slot, its ring clock, and its tunnel clock
   const CLOCKS = [["c11", 11], ["c9", 9], ["c730", 7.5, 10.5], ["c1", 1], ["c2", 2], ["c3", 3], ["c5", 5, 2]];
   const facing = (angle) => {
@@ -157,7 +160,7 @@
     const paths = new Uint8Array(PX * PZ);
     const meadow = new Uint8Array(SX * SZ);
     // Walkable top, colour and underside per column
-    const NONE = -DEPTH - 1;
+    const NONE = -SY;
     const tops = new Float32Array(SX * SZ).fill(NONE);
     const surfaces = new Uint8Array(SX * SZ);
     const bottoms = new Uint8Array(SX * SZ);
@@ -217,8 +220,8 @@
           }
           top = clamp(Math.round(h / UNIT) * UNIT, 0, MAX_HEIGHT);
         }
-        // The underside drops sheer, tapering at the edge
-        const depth = rim <= RADIUS - 3 ? DEPTH : DEPTH * (1 - Math.pow((rim - (RADIUS - 3)) / 3, 1.6));
+        // A voxel-stepped bottom-third spherical cap under the unchanged playable surface
+        const depth = undersideDepthAt(r);
         tops[i] = top;
         surfaces[i] = surface;
         bottoms[i] = Math.max(0, SURFACE - 1 - Math.floor(depth / UNIT));
@@ -485,6 +488,8 @@
       mouths,
       gate: { x: 0, z: GATE_Z, ry: 0 },
       radius: RADIUS,
+      undersideDepth: DEPTH,
+      undersideDepthAt,
       meadowRadius: MEADOW,
       passHalf: PASS_HALF,
       unit: UNIT,
