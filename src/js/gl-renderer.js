@@ -39,6 +39,7 @@ layout(location=6) in vec4 aM3;
 layout(location=7) in vec4 aParams;
 uniform mat4 uViewProj;
 uniform mat4 uLightViewProj;
+uniform vec3 uEye;
 out vec3 vNormal;
 out vec4 vColor;
 out vec4 vParams;
@@ -53,6 +54,10 @@ void main() {
   vShadow = uLightViewProj * w;
   vWorld = w.xyz;
   gl_Position = uViewProj * w;
+  if (aParams.w != 0.0) {
+    vec3 facing = normalize(aM2.xyz) * sign(aParams.w);
+    if (dot(facing, uEye - aM3.xyz) <= 0.0) gl_Position = vec4(2.0, 2.0, 2.0, 1.0);
+  }
 }`;
   const MESH_FS = `#version 300 es
 precision highp float;
@@ -342,7 +347,7 @@ void main() {
     const mirrorInvViewProj = mat4.create();
     const FRUSTUM = new Float32Array(24);
     const CENTER = new Float32Array(3);
-    let culled = 0, drawn = 0, shadowPassCount = 0;
+    let culled = 0, drawn = 0, suppressed = 0, shadowPassCount = 0;
     const mirrorEye = { x: 0, y: 0, z: 0 };
     const mirrorTarget = { x: 0, y: 0, z: 0 };
     const mirrorUp = { x: 0, y: 1, z: 0 };
@@ -405,7 +410,7 @@ void main() {
       ready = false;
       failure = null;
       res.programs = {
-        mesh: compile(MESH_VS, MESH_FS, ["uViewProj", "uLightViewProj", "uLightDir", "uSky", "uGround", "uSun", "uDirectStrength", "uAmbientFloor", "uDiffuseFloor", "uShadowStrength", "uShadowFloor", "uShadowBias", "uShadow", "uShadowTexel", "uLights", "uLightCount"]),
+        mesh: compile(MESH_VS, MESH_FS, ["uViewProj", "uLightViewProj", "uEye", "uLightDir", "uSky", "uGround", "uSun", "uDirectStrength", "uAmbientFloor", "uDiffuseFloor", "uShadowStrength", "uShadowFloor", "uShadowBias", "uShadow", "uShadowTexel", "uLights", "uLightCount"]),
         shadow: compile(SHADOW_VS, SHADOW_FS, ["uLightViewProj"]),
         line: compile(LINE_VS, LINE_FS, ["uViewProj", "uViewport", "uWidth"]),
         sky: compile(QUAD_VS, SKY_FS, ["uInvViewProj", "uEye", "uHorizon", "uZenith", "uSun", "uSunDir", "uMoonDir", "uStarMatrix", "uStars", "uTime"]),
@@ -761,7 +766,9 @@ void main() {
       }
       if (node.instanceData) {
         rec.batch = node;
-        rec.count = rec.drawCount = node.instanceCount;
+        rec.count = node.instanceCount;
+        rec.drawCount = node.drawInstanceCount === undefined ? rec.count : Math.max(0, Math.min(rec.count, node.drawInstanceCount));
+        suppressed += rec.count - rec.drawCount;
         return;
       }
       // In-frustum nodes stay in front of the culled ones by swapping into the draw region
@@ -776,8 +783,8 @@ void main() {
       const need = rec.count * INSTANCE_FLOATS;
       if (rec.batch) {
         gl.bindBuffer(gl.ARRAY_BUFFER, rec.ibo);
-        // Grow geometrically within the batch's own array, so a fading population reallocates a few times, not per instance
-        const cap = Math.min(rec.batch.instanceData.length, Math.max(need, rec.capacity * 2));
+        // Fixed-capacity systems reserve their bounded upload once; variable batches grow geometrically.
+        const cap = rec.batch.fixedInstanceCapacity ? rec.batch.instanceData.length : Math.min(rec.batch.instanceData.length, Math.max(need, rec.capacity * 2));
         if (rec.capacity < cap) {
           gl.bufferData(gl.ARRAY_BUFFER, cap * 4, gl.DYNAMIC_DRAW);
           rec.capacity = cap;
@@ -964,7 +971,7 @@ void main() {
     const drawParts = (kind, useProgram, excludeMirror = false, cull = false) => {
       for (const rec of activeRecords) {
         if (excludeMirror && rec === mirror.record) continue;
-        const part = rec[kind], n = cull ? rec.drawCount : rec.count;
+        const part = rec[kind], n = rec.batch && rec.batch.drawInstanceCount !== undefined ? rec.drawCount : cull ? rec.drawCount : rec.count;
         if (!part || !n) continue;
         if (kind === "mesh" && useProgram === "shadow" && rec.geometry.castShadow === false) continue;
         if (kind === "line") gl.uniform1f(res.programs.line.u.uWidth, part.width * dpr);
@@ -994,6 +1001,7 @@ void main() {
       gl.useProgram(pg.mesh.prog);
       gl.uniformMatrix4fv(pg.mesh.u.uViewProj, false, mirrorViewProj);
       gl.uniformMatrix4fv(pg.mesh.u.uLightViewProj, false, lightViewProj);
+      gl.uniform3f(pg.mesh.u.uEye, mirrorEye[0], mirrorEye[1], mirrorEye[2]);
       gl.uniform3f(pg.mesh.u.uLightDir, lx, ly, lz);
       gl.uniform3fv(pg.mesh.u.uSky, sky);
       gl.uniform3fv(pg.mesh.u.uGround, ground);
@@ -1138,7 +1146,7 @@ void main() {
       mirrorDebug.active = false;
       mirrorDebug.portal = false;
       mirrorDebug.surfaceDrawn = false;
-      culled = drawn = 0;
+      culled = drawn = suppressed = 0;
       updateWorld(root, null);
       traverseVisible(root, collect);
       for (const rec of activeRecords) {
@@ -1174,6 +1182,7 @@ void main() {
       gl.useProgram(pg.mesh.prog);
       gl.uniformMatrix4fv(pg.mesh.u.uViewProj, false, viewProj);
       gl.uniformMatrix4fv(pg.mesh.u.uLightViewProj, false, lightViewProj);
+      gl.uniform3f(pg.mesh.u.uEye, camera.position.x, camera.position.y, camera.position.z);
       gl.uniform3f(pg.mesh.u.uLightDir, lx, ly, lz);
       gl.uniform3fv(pg.mesh.u.uSky, sky);
       gl.uniform3fv(pg.mesh.u.uGround, ground);
@@ -1295,7 +1304,7 @@ void main() {
       get stats() {
         let shadowFinite = true;
         for (let i = 0; i < 16; i++) if (!Number.isFinite(lightViewProj[i])) shadowFinite = false;
-        return { records: records.size, active: activeRecords.length, mirrorResources: mirrorDebug.resources, shadowResources: res.shadow ? 2 : 0, shadowSize: res.shadow ? res.shadow.size : 0, shadowPassCount, shadowFinite, culled, drawn };
+        return { records: records.size, active: activeRecords.length, mirrorResources: mirrorDebug.resources, shadowResources: res.shadow ? 2 : 0, shadowSize: res.shadow ? res.shadow.size : 0, shadowPassCount, shadowFinite, culled, drawn, suppressed };
       },
       get mirror() {
         return mirrorDebug;

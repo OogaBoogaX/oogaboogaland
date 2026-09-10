@@ -17,7 +17,7 @@
     const UP = { x: 0, y: 1, z: 0 };
     const view = mat4.create();
     const pool = [];
-    let poolUsed = 0;
+    let poolUsed = 0, suppressed = 0;
     const acquire = () => {
       if (poolUsed === pool.length) {
         pool.push({ pts: new Float32Array(24), n: 0, depth: 0, style: "", coreStyle: "", line: false, lineGlow: 0, mirror: false, portal: false });
@@ -182,8 +182,12 @@
       const data = node.instanceData;
       BATCH_NODE.geometry = node.geometry;
       BATCH_NODE.depthBias = node.depthBias || 0;
-      for (let instance = 0; instance < node.instanceCount; instance++) {
+      const count = node.drawInstanceCount === undefined ? node.instanceCount : Math.max(0, Math.min(node.instanceCount, node.drawInstanceCount));
+      suppressed += node.instanceCount - count;
+      for (let instance = 0; instance < count; instance++) {
         const offset = instance * 20;
+        const facing = data[offset + 19];
+        if (facing && (data[offset + 8] * facing * (eye.x - data[offset + 12]) + data[offset + 9] * facing * (eye.y - data[offset + 13]) + data[offset + 10] * facing * (eye.z - data[offset + 14])) <= 0) continue;
         for (let i = 0; i < 16; i++) BATCH_NODE.world[i] = data[offset + i];
         BATCH_NODE.glow = data[offset + 16];
         BATCH_NODE.highlight = data[offset + 17];
@@ -222,6 +226,7 @@
       skyLuma = sky[0] * 0.2126 + sky[1] * 0.7152 + sky[2] * 0.0722;
       groundLuma = ground[0] * 0.2126 + ground[1] * 0.7152 + ground[2] * 0.0722;
       poolUsed = 0;
+      suppressed = 0;
       mirrorDebug.active = false;
       mirrorDebug.portal = false;
       mirrorDebug.surfaceDrawn = false;
@@ -350,7 +355,7 @@
         return "low";
       },
       get stats() {
-        return { records: 0, active: 0, mirrorResources: 0, shadowResources: 0, shadowSize: 0, shadowPassCount: 0, shadowFinite: true, culled: 0, drawn: 0 };
+        return { records: 0, active: 0, mirrorResources: 0, shadowResources: 0, shadowSize: 0, shadowPassCount: 0, shadowFinite: true, culled: 0, drawn: 0, suppressed };
       },
       get mirror() {
         return mirrorDebug;

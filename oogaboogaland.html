@@ -5,7 +5,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta http-equiv="Content-Security-Policy"
-    content="default-src 'none'; script-src 'sha256-6n8YWaj8YY4lONE2LNpVcfHlJ94YTwrDk1YPLBAfoh8='; style-src 'sha256-dAa0sXe9luz9cTlEGh9v+1xRrvDuVOwXECjAJTL81Es='; img-src 'self' data:; connect-src 'none'; base-uri 'none'; form-action 'none'">
+    content="default-src 'none'; script-src 'sha256-s0gOciY/PucnzETrIVcMO+mzmOV1qLC/ynZSQqjQKFE='; style-src 'sha256-dAa0sXe9luz9cTlEGh9v+1xRrvDuVOwXECjAJTL81Es='; img-src 'self' data:; connect-src 'none'; base-uri 'none'; form-action 'none'">
   <meta name="referrer" content="no-referrer">
   <meta name="color-scheme" content="dark">
   <meta name="theme-color" content="#0a0a0b">
@@ -2200,6 +2200,7 @@ layout(location=6) in vec4 aM3;
 layout(location=7) in vec4 aParams;
 uniform mat4 uViewProj;
 uniform mat4 uLightViewProj;
+uniform vec3 uEye;
 out vec3 vNormal;
 out vec4 vColor;
 out vec4 vParams;
@@ -2214,6 +2215,10 @@ void main() {
   vShadow = uLightViewProj * w;
   vWorld = w.xyz;
   gl_Position = uViewProj * w;
+  if (aParams.w != 0.0) {
+    vec3 facing = normalize(aM2.xyz) * sign(aParams.w);
+    if (dot(facing, uEye - aM3.xyz) <= 0.0) gl_Position = vec4(2.0, 2.0, 2.0, 1.0);
+  }
 }`;
   const MESH_FS = `#version 300 es
 precision highp float;
@@ -2503,7 +2508,7 @@ void main() {
     const mirrorInvViewProj = mat4.create();
     const FRUSTUM = new Float32Array(24);
     const CENTER = new Float32Array(3);
-    let culled = 0, drawn = 0, shadowPassCount = 0;
+    let culled = 0, drawn = 0, suppressed = 0, shadowPassCount = 0;
     const mirrorEye = { x: 0, y: 0, z: 0 };
     const mirrorTarget = { x: 0, y: 0, z: 0 };
     const mirrorUp = { x: 0, y: 1, z: 0 };
@@ -2566,7 +2571,7 @@ void main() {
       ready = false;
       failure = null;
       res.programs = {
-        mesh: compile(MESH_VS, MESH_FS, ["uViewProj", "uLightViewProj", "uLightDir", "uSky", "uGround", "uSun", "uDirectStrength", "uAmbientFloor", "uDiffuseFloor", "uShadowStrength", "uShadowFloor", "uShadowBias", "uShadow", "uShadowTexel", "uLights", "uLightCount"]),
+        mesh: compile(MESH_VS, MESH_FS, ["uViewProj", "uLightViewProj", "uEye", "uLightDir", "uSky", "uGround", "uSun", "uDirectStrength", "uAmbientFloor", "uDiffuseFloor", "uShadowStrength", "uShadowFloor", "uShadowBias", "uShadow", "uShadowTexel", "uLights", "uLightCount"]),
         shadow: compile(SHADOW_VS, SHADOW_FS, ["uLightViewProj"]),
         line: compile(LINE_VS, LINE_FS, ["uViewProj", "uViewport", "uWidth"]),
         sky: compile(QUAD_VS, SKY_FS, ["uInvViewProj", "uEye", "uHorizon", "uZenith", "uSun", "uSunDir", "uMoonDir", "uStarMatrix", "uStars", "uTime"]),
@@ -2922,7 +2927,9 @@ void main() {
       }
       if (node.instanceData) {
         rec.batch = node;
-        rec.count = rec.drawCount = node.instanceCount;
+        rec.count = node.instanceCount;
+        rec.drawCount = node.drawInstanceCount === undefined ? rec.count : Math.max(0, Math.min(rec.count, node.drawInstanceCount));
+        suppressed += rec.count - rec.drawCount;
         return;
       }
       // In-frustum nodes stay in front of the culled ones by swapping into the draw region
@@ -2937,8 +2944,8 @@ void main() {
       const need = rec.count * INSTANCE_FLOATS;
       if (rec.batch) {
         gl.bindBuffer(gl.ARRAY_BUFFER, rec.ibo);
-        // Grow geometrically within the batch's own array, so a fading population reallocates a few times, not per instance
-        const cap = Math.min(rec.batch.instanceData.length, Math.max(need, rec.capacity * 2));
+        // Fixed-capacity systems reserve their bounded upload once; variable batches grow geometrically.
+        const cap = rec.batch.fixedInstanceCapacity ? rec.batch.instanceData.length : Math.min(rec.batch.instanceData.length, Math.max(need, rec.capacity * 2));
         if (rec.capacity < cap) {
           gl.bufferData(gl.ARRAY_BUFFER, cap * 4, gl.DYNAMIC_DRAW);
           rec.capacity = cap;
@@ -3125,7 +3132,7 @@ void main() {
     const drawParts = (kind, useProgram, excludeMirror = false, cull = false) => {
       for (const rec of activeRecords) {
         if (excludeMirror && rec === mirror.record) continue;
-        const part = rec[kind], n = cull ? rec.drawCount : rec.count;
+        const part = rec[kind], n = rec.batch && rec.batch.drawInstanceCount !== undefined ? rec.drawCount : cull ? rec.drawCount : rec.count;
         if (!part || !n) continue;
         if (kind === "mesh" && useProgram === "shadow" && rec.geometry.castShadow === false) continue;
         if (kind === "line") gl.uniform1f(res.programs.line.u.uWidth, part.width * dpr);
@@ -3155,6 +3162,7 @@ void main() {
       gl.useProgram(pg.mesh.prog);
       gl.uniformMatrix4fv(pg.mesh.u.uViewProj, false, mirrorViewProj);
       gl.uniformMatrix4fv(pg.mesh.u.uLightViewProj, false, lightViewProj);
+      gl.uniform3f(pg.mesh.u.uEye, mirrorEye[0], mirrorEye[1], mirrorEye[2]);
       gl.uniform3f(pg.mesh.u.uLightDir, lx, ly, lz);
       gl.uniform3fv(pg.mesh.u.uSky, sky);
       gl.uniform3fv(pg.mesh.u.uGround, ground);
@@ -3299,7 +3307,7 @@ void main() {
       mirrorDebug.active = false;
       mirrorDebug.portal = false;
       mirrorDebug.surfaceDrawn = false;
-      culled = drawn = 0;
+      culled = drawn = suppressed = 0;
       updateWorld(root, null);
       traverseVisible(root, collect);
       for (const rec of activeRecords) {
@@ -3335,6 +3343,7 @@ void main() {
       gl.useProgram(pg.mesh.prog);
       gl.uniformMatrix4fv(pg.mesh.u.uViewProj, false, viewProj);
       gl.uniformMatrix4fv(pg.mesh.u.uLightViewProj, false, lightViewProj);
+      gl.uniform3f(pg.mesh.u.uEye, camera.position.x, camera.position.y, camera.position.z);
       gl.uniform3f(pg.mesh.u.uLightDir, lx, ly, lz);
       gl.uniform3fv(pg.mesh.u.uSky, sky);
       gl.uniform3fv(pg.mesh.u.uGround, ground);
@@ -3456,7 +3465,7 @@ void main() {
       get stats() {
         let shadowFinite = true;
         for (let i = 0; i < 16; i++) if (!Number.isFinite(lightViewProj[i])) shadowFinite = false;
-        return { records: records.size, active: activeRecords.length, mirrorResources: mirrorDebug.resources, shadowResources: res.shadow ? 2 : 0, shadowSize: res.shadow ? res.shadow.size : 0, shadowPassCount, shadowFinite, culled, drawn };
+        return { records: records.size, active: activeRecords.length, mirrorResources: mirrorDebug.resources, shadowResources: res.shadow ? 2 : 0, shadowSize: res.shadow ? res.shadow.size : 0, shadowPassCount, shadowFinite, culled, drawn, suppressed };
       },
       get mirror() {
         return mirrorDebug;
@@ -3495,7 +3504,7 @@ void main() {
     const UP = { x: 0, y: 1, z: 0 };
     const view = mat4.create();
     const pool = [];
-    let poolUsed = 0;
+    let poolUsed = 0, suppressed = 0;
     const acquire = () => {
       if (poolUsed === pool.length) {
         pool.push({ pts: new Float32Array(24), n: 0, depth: 0, style: "", coreStyle: "", line: false, lineGlow: 0, mirror: false, portal: false });
@@ -3660,8 +3669,12 @@ void main() {
       const data = node.instanceData;
       BATCH_NODE.geometry = node.geometry;
       BATCH_NODE.depthBias = node.depthBias || 0;
-      for (let instance = 0; instance < node.instanceCount; instance++) {
+      const count = node.drawInstanceCount === undefined ? node.instanceCount : Math.max(0, Math.min(node.instanceCount, node.drawInstanceCount));
+      suppressed += node.instanceCount - count;
+      for (let instance = 0; instance < count; instance++) {
         const offset = instance * 20;
+        const facing = data[offset + 19];
+        if (facing && (data[offset + 8] * facing * (eye.x - data[offset + 12]) + data[offset + 9] * facing * (eye.y - data[offset + 13]) + data[offset + 10] * facing * (eye.z - data[offset + 14])) <= 0) continue;
         for (let i = 0; i < 16; i++) BATCH_NODE.world[i] = data[offset + i];
         BATCH_NODE.glow = data[offset + 16];
         BATCH_NODE.highlight = data[offset + 17];
@@ -3700,6 +3713,7 @@ void main() {
       skyLuma = sky[0] * 0.2126 + sky[1] * 0.7152 + sky[2] * 0.0722;
       groundLuma = ground[0] * 0.2126 + ground[1] * 0.7152 + ground[2] * 0.0722;
       poolUsed = 0;
+      suppressed = 0;
       mirrorDebug.active = false;
       mirrorDebug.portal = false;
       mirrorDebug.surfaceDrawn = false;
@@ -3828,7 +3842,7 @@ void main() {
         return "low";
       },
       get stats() {
-        return { records: 0, active: 0, mirrorResources: 0, shadowResources: 0, shadowSize: 0, shadowPassCount: 0, shadowFinite: true, culled: 0, drawn: 0 };
+        return { records: 0, active: 0, mirrorResources: 0, shadowResources: 0, shadowSize: 0, shadowPassCount: 0, shadowFinite: true, culled: 0, drawn: 0, suppressed };
       },
       get mirror() {
         return mirrorDebug;
@@ -9227,6 +9241,31 @@ void main() {
   // Reach at which a caveman is inside a cave
   const TUNNEL_REACH = 2.2;
   const MATRIX_TYPES = 8, MATRIX_TOP = 3.62, MATRIX_RANGE = 3.45, MATRIX_GAP = 0.19, MATRIX_PRELOAD = 18;
+  const MATRIX_SURFACE_PITCH = 0.12, MATRIX_SURFACE_GAP = 0.13, MATRIX_GLYPH_HZ = 10;
+  const MATRIX_RAIN = 0, MATRIX_FLOOR = 1, MATRIX_CEILING = 2, MATRIX_BACK = 3, MATRIX_LEFT = 4, MATRIX_RIGHT = 5;
+  const MATRIX_SURFACES = ["freeRain", "mainFloor", "vestibuleFloor", "mainCeiling", "vestibuleCeiling", "mainLeftWall", "mainRightWall", "vestibuleLeftWall", "vestibuleRightWall", "backWall", "transitionHeader", "doorwayLintel", "transitionReturns", "doorwayJambs", "rimUnderside"];
+  const MATRIX_DENSITY = { high: 8, medium: 5, low: 3, canvas2d: 1 };
+  const MATRIX_LAYOUT = {
+    mainFloor: { plane: "horizontal", flow: "entrance-to-back", y: 0.035, minZ: -6.115, maxZ: -2.485 },
+    vestibuleFloor: { plane: "horizontal", flow: "entrance-to-back", y: 0.035, minZ: -2.485, maxZ: 0.43 },
+    mainCeiling: { plane: "horizontal", flow: "entrance-to-back", y: 3.735, minZ: -6.115, maxZ: -2.485 },
+    vestibuleCeiling: { plane: "horizontal", flow: "entrance-to-back", y: 2.965, minZ: -2.485, maxZ: 0.42 },
+    mainLeftWall: { plane: "vertical", flow: "down", x: -2.805, minZ: -6.115, maxZ: -2.485 },
+    mainRightWall: { plane: "vertical", flow: "down", x: 2.805, minZ: -6.115, maxZ: -2.485 },
+    vestibuleLeftWall: { plane: "vertical", flow: "down", x: -2.455, minZ: -2.485, maxZ: 0.44 },
+    vestibuleRightWall: { plane: "vertical", flow: "down", x: 2.455, minZ: -2.485, maxZ: 0.44 },
+    backWall: { plane: "vertical", flow: "down", z: -6.115 },
+    transitionHeader: { plane: "vertical", flow: "down", z: -2.47, minY: 3.055, maxY: 3.845 },
+    doorwayLintel: { plane: "vertical", flow: "down", z: 0.465, minY: 3.055, maxY: 3.845 },
+    transitionReturns: { plane: "vertical", flow: "down", z: -2.47 },
+    doorwayJambs: { plane: "vertical", flow: "down", z: 0.465 },
+    rimUnderside: { plane: "horizontal", flow: "entrance-to-back", y: 2.975, minZ: 0.385, maxZ: 0.42 },
+    floor: { plane: "horizontal", flow: "entrance-to-back", maxZ: 0.43 },
+    ceiling: { plane: "horizontal", flow: "entrance-to-back" },
+    leftWall: { plane: "vertical", flow: "down" },
+    rightWall: { plane: "vertical", flow: "down" },
+    doorway: { plane: "vertical", flow: "down", z: 0.465, minY: 3.055, portalMaxY: 2.98 }
+  };
   const PORTAL_Z = 0.5, PORTAL_MIN_X = -2.48, PORTAL_MAX_X = 2.48, PORTAL_MIN_Y = -0.2, PORTAL_MAX_Y = 2.98;
   // Sky, light and lamps, resampled from the clock every frame
   const RENDER_OPTS = {
@@ -9334,14 +9373,15 @@ void main() {
   const buildMatrixRain = (group, room, rimLiner, mirrorNode, m) => {
     const streamCount = renderer.kind === "canvas2d" ? 32 : 96;
     const streamLength = renderer.kind === "canvas2d" ? 9 : 14;
-    const grouped = Array.from({ length: MATRIX_TYPES }, () => []);
+    const entries = [], streams = [];
     const rand = mulberry32(0x0b00ba);
     const cycle = MATRIX_RANGE + (streamLength - 1) * MATRIX_GAP;
     const addStream = (x, z, angle) => {
-      const speed = 0.72 + rand() * 1.05, phase = rand() * cycle;
+      const stream = streams.length;
+      streams.push({ speed: 0.72 + rand() * 1.05, phase: rand() * cycle, brightness: 0.62 + rand() * 0.32, trainLength: streamLength, gapLength: Math.max(2, Math.round(MATRIX_RANGE / MATRIX_GAP) - streamLength), direction: -1, flowMin: 0.13, flowMax: MATRIX_TOP, flowRange: cycle });
       for (let character = 0; character < streamLength; character++) {
         const tip = character === 0 ? 1 : character === 1 ? 0.55 : 0;
-        grouped[Math.floor(rand() * MATRIX_TYPES)].push({ x, z, angle, speed, phase, character, tip });
+        entries.push({ kind: MATRIX_RAIN, surface: 0, stream, rank: 0, x, y: 0, z, angle, character, tip, start: 0, range: cycle });
       }
     };
     const freeCount = renderer.kind === "canvas2d" ? 18 : 48;
@@ -9359,11 +9399,125 @@ void main() {
       addStream(-x, z, Math.PI / 2);
       addStream(x, z, -Math.PI / 2);
     }
-    const nodes = [], cr = Math.cos(m.ry), sr = Math.sin(m.ry);
+
+    const surfaceCounts = new Int32Array(MATRIX_SURFACES.length);
+    surfaceCounts[0] = entries.length;
+    const surfaceStreams = new Int32Array(MATRIX_SURFACES.length);
+    const surfaceEdgeMargins = new Float32Array(MATRIX_SURFACES.length);
+    const surfaceRepresentativeStreams = new Int32Array(MATRIX_SURFACES.length);
+    const surfaceDirections = new Int8Array(MATRIX_SURFACES.length);
+    const surfaceFacings = new Int8Array(MATRIX_SURFACES.length);
+    const surfaceMinLocalZ = new Float32Array(MATRIX_SURFACES.length);
+    const surfaceMaxLocalZ = new Float32Array(MATRIX_SURFACES.length);
+    const surfaceHeadPositions = new Float32Array(MATRIX_SURFACES.length);
+    const surfaceGapPositions = new Float32Array(MATRIX_SURFACES.length);
+    let glyphMinX = Infinity, glyphMaxX = -Infinity, glyphMinY = Infinity, glyphMaxY = -Infinity, glyphHalfZ = 0;
     for (let glyph = 0; glyph < MATRIX_TYPES; glyph++) {
-      const entries = grouped[glyph];
-      const node = createNode({ geometry: hubModels.matrixGlyph(glyph), instanceData: new Float32Array(entries.length * 20), instanceCount: entries.length, instanceVersion: 0 });
-      node.entries = entries;
+      const verts = hubModels.matrixGlyph(glyph).verts;
+      for (let i = 0; i < verts.length; i += 3) {
+        glyphMinX = Math.min(glyphMinX, verts[i]);
+        glyphMaxX = Math.max(glyphMaxX, verts[i]);
+        glyphMinY = Math.min(glyphMinY, verts[i + 1]);
+        glyphMaxY = Math.max(glyphMaxY, verts[i + 1]);
+        glyphHalfZ = Math.max(glyphHalfZ, Math.abs(verts[i + 2]));
+      }
+    }
+    surfaceRepresentativeStreams.fill(-1);
+    surfaceDirections.fill(-1);
+    surfaceMinLocalZ.fill(Infinity);
+    surfaceMaxLocalZ.fill(-Infinity);
+    surfaceStreams[0] = streamCount;
+    const addSurface = (surface, kind, crossMin, crossMax, flowMin, flowMax, fixed, facing = 1) => {
+      const streamTotal = Math.max(1, Math.floor((crossMax - crossMin) / MATRIX_SURFACE_PITCH) + 1);
+      const characters = Math.max(2, Math.floor((flowMax - flowMin) / MATRIX_SURFACE_GAP) + 1);
+      const flowRange = flowMax - flowMin + MATRIX_SURFACE_GAP;
+      surfaceStreams[surface] += streamTotal;
+      if (surfaceFacings[surface] && surfaceFacings[surface] !== facing) throw new Error("Matrix surface facing mismatch");
+      surfaceFacings[surface] = facing;
+      let minLocalZ, maxLocalZ;
+      if (kind === MATRIX_FLOOR) {
+        minLocalZ = flowMin - glyphMaxY;
+        maxLocalZ = flowMax - glyphMinY;
+      } else if (kind === MATRIX_CEILING) {
+        minLocalZ = flowMin + glyphMinY;
+        maxLocalZ = flowMax + glyphMaxY;
+      } else if (kind === MATRIX_BACK) {
+        minLocalZ = fixed - glyphHalfZ;
+        maxLocalZ = fixed + glyphHalfZ;
+      } else {
+        minLocalZ = crossMin - Math.max(Math.abs(glyphMinX), Math.abs(glyphMaxX));
+        maxLocalZ = crossMax + Math.max(Math.abs(glyphMinX), Math.abs(glyphMaxX));
+      }
+      surfaceMinLocalZ[surface] = Math.min(surfaceMinLocalZ[surface], minLocalZ);
+      surfaceMaxLocalZ[surface] = Math.max(surfaceMaxLocalZ[surface], maxLocalZ);
+      const crossStep = streamTotal > 1 ? (crossMax - crossMin) / (streamTotal - 1) : 0;
+      const flowStep = characters > 1 ? (flowMax - flowMin) / (characters - 1) : 0;
+      surfaceEdgeMargins[surface] = Math.max(surfaceEdgeMargins[surface], Math.abs(crossMax - (crossMin + crossStep * (streamTotal - 1))), Math.abs(flowMax - (flowMin + flowStep * (characters - 1))));
+      for (let localStream = 0; localStream < streamTotal; localStream++) {
+        const cross = streamTotal === 1 ? (crossMin + crossMax) * 0.5 : crossMin + localStream / (streamTotal - 1) * (crossMax - crossMin);
+        const stream = streams.length;
+        const wantedTrain = 7 + Math.floor(rand() * 6), wantedGap = 2 + Math.floor(rand() * 5);
+        const trainLength = Math.max(1, Math.min(wantedTrain, characters - 1)), gapLength = Math.max(1, Math.min(wantedGap, characters - trainLength));
+        streams.push({ speed: 0.28 + rand() * 0.32, phase: rand() * flowRange, brightness: 0.58 + rand() * 0.36, trainLength, gapLength, direction: -1, flowMin, flowMax, flowRange });
+        if (surfaceRepresentativeStreams[surface] < 0) surfaceRepresentativeStreams[surface] = stream;
+        const rank = localStream & 7;
+        for (let character = 0; character < characters; character++) {
+          const entry = { kind, surface, stream, rank, x: 0, y: 0, z: 0, angle: 0, character, tip: 0, facing, start: flowMin, range: flowRange };
+          if (kind === MATRIX_FLOOR || kind === MATRIX_CEILING) {
+            entry.x = cross;
+            entry.y = fixed;
+          } else if (kind === MATRIX_BACK) {
+            entry.x = cross;
+            entry.z = fixed;
+          } else {
+            entry.x = fixed;
+            entry.z = cross;
+          }
+          entries.push(entry);
+          surfaceCounts[surface]++;
+        }
+      }
+    };
+    // Each registry section is anchored to the black panel it covers. Glyph centers stop
+    // far enough behind the portal that their voxel extents cannot cross its plane.
+    addSurface(1, MATRIX_FLOOR, -2.78, 2.78, -6.115, -2.485, 0.035);
+    addSurface(2, MATRIX_FLOOR, -2.43, 2.43, -2.485, 0.43, 0.035);
+    addSurface(3, MATRIX_CEILING, -2.78, 2.78, -6.115, -2.485, 3.735);
+    addSurface(4, MATRIX_CEILING, -2.43, 2.43, -2.485, 0.42, 2.965);
+    addSurface(5, MATRIX_LEFT, -6.115, -2.485, 0.075, 3.695, -2.805);
+    addSurface(6, MATRIX_RIGHT, -6.115, -2.485, 0.075, 3.695, 2.805);
+    addSurface(7, MATRIX_LEFT, -2.485, 0.44, 0.075, 2.925, -2.455);
+    addSurface(8, MATRIX_RIGHT, -2.485, 0.44, 0.075, 2.925, 2.455);
+    addSurface(9, MATRIX_BACK, -2.78, 2.78, 0.075, 3.695, -6.115);
+    addSurface(10, MATRIX_BACK, -2.86, 2.86, 3.055, 3.845, -2.47, -1);
+    addSurface(11, MATRIX_BACK, -2.86, 2.86, 3.055, 3.845, 0.465, -1);
+    addSurface(12, MATRIX_BACK, -2.86, -2.52, 0.075, 2.925, -2.47, -1);
+    addSurface(12, MATRIX_BACK, 2.52, 2.86, 0.075, 2.925, -2.47, -1);
+    addSurface(13, MATRIX_BACK, -2.86, -2.52, 0.075, 2.925, 0.465, -1);
+    addSurface(13, MATRIX_BACK, 2.52, 2.86, 0.075, 2.925, 0.465, -1);
+    addSurface(14, MATRIX_CEILING, -2.43, 2.43, 0.385, 0.42, 2.975);
+    // Mix spatial neighbours before forming balanced eight-glyph blocks. Each block
+    // mutates on its own phase while retaining exactly one instance of every glyph.
+    for (let i = entries.length - 1; i > 0; i--) {
+      const j = Math.floor(rand() * (i + 1)), swap = entries[i];
+      entries[i] = entries[j];
+      entries[j] = swap;
+    }
+    let registryHash = 2166136261;
+    for (let i = 0; i < entries.length; i++) {
+      const entry = entries[i];
+      const stream = streams[entry.stream];
+      registryHash = Math.imul(registryHash ^ entry.kind ^ (entry.surface << 4) ^ (entry.rank << 8), 16777619) >>> 0;
+      registryHash = Math.imul(registryHash ^ Math.round((entry.x + entry.y + entry.z) * 1000), 16777619) >>> 0;
+      registryHash = Math.imul(registryHash ^ Math.round(stream.brightness * 1000) ^ (stream.trainLength << 12) ^ (stream.gapLength << 20), 16777619) >>> 0;
+    }
+
+    const nodes = [], cr = Math.cos(m.ry), sr = Math.sin(m.ry);
+    const perGlyphCapacity = Math.ceil(entries.length / MATRIX_TYPES);
+    for (let glyph = 0; glyph < MATRIX_TYPES; glyph++) {
+      const node = createNode({ geometry: hubModels.matrixGlyph(glyph), instanceData: new Float32Array(perGlyphCapacity * 20), instanceCount: 0, instanceVersion: 0 });
+      node.fixedInstanceCapacity = true;
+      node.drawInstanceCount = 0;
       addChild(root, node);
       placed.push(node);
       nodes.push(node);
@@ -9375,7 +9529,31 @@ void main() {
       opening: { minX: PORTAL_MIN_X, maxX: PORTAL_MAX_X, minY: PORTAL_MIN_Y, maxY: PORTAL_MAX_Y, planeZ: PORTAL_Z },
       rejected: { above: 0, below: 0, beside: 0 }
     };
-    return { group, room, rimLiner, mirrorNode, mouth: m, nodes, cr, sr, cycle, portal, streamCount, hangingStreamCount: freeCount, entranceStreamCount: entranceCount, wallStreamCount: streamCount - freeCount, streamLength, glyphCount: streamCount * streamLength, brightTipCount: streamCount * 2, capacity: streamCount * streamLength, updates: 0, prewarmCount: 0, preloaded: false, prewarmed: false, visible: false, firstGlyphY: 0 };
+    const bufferBytes = perGlyphCapacity * MATRIX_TYPES * 20 * Float32Array.BYTES_PER_ELEMENT;
+    let minBrightness = Infinity, maxBrightness = -Infinity, minTrainLength = Infinity, maxTrainLength = 0, minGapLength = Infinity, maxGapLength = 0;
+    for (let i = 0; i < streams.length; i++) {
+      const stream = streams[i];
+      minBrightness = Math.min(minBrightness, stream.brightness);
+      maxBrightness = Math.max(maxBrightness, stream.brightness);
+      minTrainLength = Math.min(minTrainLength, stream.trainLength);
+      maxTrainLength = Math.max(maxTrainLength, stream.trainLength);
+      minGapLength = Math.min(minGapLength, stream.gapLength);
+      maxGapLength = Math.max(maxGapLength, stream.gapLength);
+    }
+    let maxLocalZ = -Infinity;
+    for (let surface = 1; surface < MATRIX_SURFACES.length; surface++) maxLocalZ = Math.max(maxLocalZ, surfaceMaxLocalZ[surface]);
+    return {
+      group, room, rimLiner, mirrorNode, mouth: m, nodes, entries, streams, cr, sr, cycle, portal,
+      streamCount, hangingStreamCount: freeCount, entranceStreamCount: entranceCount, wallStreamCount: streamCount - freeCount, streamLength,
+      rainGlyphCount: streamCount * streamLength, surfaceCounts, surfaceStreams, surfaceEdgeMargins, surfaceRepresentativeStreams, surfaceDirections, surfaceFacings, surfaceMinLocalZ, surfaceMaxLocalZ, surfaceHeadPositions, surfaceGapPositions, surfaceActiveCounts: new Int32Array(MATRIX_SURFACES.length),
+      glyphCount: entries.length, activeGlyphCount: 0, brightTipCount: 0, capacity: perGlyphCapacity * MATRIX_TYPES,
+      perGlyphCapacity, bufferBytes, registryBytes: entries.length * 64 + streams.length * 40, registryHash: registryHash.toString(16).padStart(8, "0"), quality: renderer.kind === "canvas2d" ? "canvas2d" : renderer.quality,
+      densityRankLimit: renderer.kind === "canvas2d" ? MATRIX_DENSITY.canvas2d : MATRIX_DENSITY[renderer.quality],
+      glyphVersion: -1, previousGlyphVersion: -1, mutationHash: 0, updates: 0, prewarmCount: 0,
+      allocationCount: MATRIX_TYPES, rebuildCount: 1, preloaded: false, prewarmed: false, visible: false, drawEnabled: false, drawnGlyphCount: 0, firstGlyphY: 0,
+      minBrightness, maxBrightness, minTrainLength, maxTrainLength, minGapLength, maxGapLength,
+      maxLocalZ, portalClearance: PORTAL_Z - maxLocalZ, movingGapCount: 0, representativeHeadPhase: 0
+    };
   };
   const updateMatrixPortal = (x, y, z) => {
     const portal = matrixCave.portal;
@@ -9402,6 +9580,42 @@ void main() {
     portal.previousZ = z;
     portal.previousValid = true;
   };
+  const matrixModulo = (value, range) => value - Math.floor(value / range) * range;
+  const writeMatrixGlyph = (data, offset, entry, x, y, z, scale, cr, sr, m, glow, tip) => {
+    let ax = 1, ay = 0, az = 0, bx = 0, by = 1, bz = 0, cx = 0, cy = 0, cz = 1;
+    if (entry.kind === MATRIX_RAIN) {
+      const c = Math.cos(entry.angle), s = Math.sin(entry.angle);
+      ax = c; az = -s; cx = s; cz = c;
+    } else if (entry.kind === MATRIX_FLOOR) {
+      bx = 0; by = 0; bz = -1; cx = 0; cy = 1; cz = 0;
+    } else if (entry.kind === MATRIX_CEILING) {
+      bx = 0; by = 0; bz = 1; cx = 0; cy = -1; cz = 0;
+    } else if (entry.kind === MATRIX_LEFT) {
+      ax = 0; az = -1; cx = 1; cz = 0;
+    } else if (entry.kind === MATRIX_RIGHT) {
+      ax = 0; az = 1; cx = -1; cz = 0;
+    }
+    data[offset] = (cr * ax + sr * az) * scale;
+    data[offset + 1] = ay * scale;
+    data[offset + 2] = (-sr * ax + cr * az) * scale;
+    data[offset + 3] = 0;
+    data[offset + 4] = (cr * bx + sr * bz) * scale;
+    data[offset + 5] = by * scale;
+    data[offset + 6] = (-sr * bx + cr * bz) * scale;
+    data[offset + 7] = 0;
+    data[offset + 8] = (cr * cx + sr * cz) * scale;
+    data[offset + 9] = cy * scale;
+    data[offset + 10] = (-sr * cx + cr * cz) * scale;
+    data[offset + 11] = 0;
+    data[offset + 12] = m.x + cr * x + sr * z;
+    data[offset + 13] = m.floorY + y;
+    data[offset + 14] = m.z - sr * x + cr * z;
+    data[offset + 15] = 1;
+    data[offset + 16] = glow;
+    data[offset + 17] = 0;
+    data[offset + 18] = tip;
+    data[offset + 19] = entry.facing || 0;
+  };
   const updateMatrixRain = (elapsed) => {
     if (!matrixCave) return;
     const m = matrixCave.mouth, dx = camera.position.x - m.x, dz = camera.position.z - m.z;
@@ -9418,43 +9632,90 @@ void main() {
       setVec(matrixCave.room.scale, scale, scale, scale);
     }
     matrixCave.visible = visible;
+    matrixCave.drawEnabled = visible;
     matrixCave.rimLiner.visible = visible;
-    if (!preloaded && !wasPreloaded) return;
+    if (!preloaded && !wasPreloaded) {
+      matrixCave.drawnGlyphCount = 0;
+      for (let glyph = 0; glyph < MATRIX_TYPES; glyph++) matrixCave.nodes[glyph].drawInstanceCount = 0;
+      return;
+    }
     const cr = matrixCave.cr, sr = matrixCave.sr;
-    let first = true;
-    for (const node of matrixCave.nodes) {
-      const data = node.instanceData;
-      for (let i = 0; i < node.entries.length; i++) {
-        const entry = node.entries[i], offset = i * 20;
-        const y = m.floorY + MATRIX_TOP - ((elapsed * entry.speed + entry.phase) % matrixCave.cycle) + entry.character * MATRIX_GAP;
-        const shown = preloaded && y >= m.floorY + 0.13 && y <= m.floorY + MATRIX_TOP;
-        const ry = m.ry + entry.angle, c = Math.cos(ry), s = Math.sin(ry), scale = shown ? 1 : 0;
-        data[offset] = c * scale;
-        data[offset + 1] = 0;
-        data[offset + 2] = -s * scale;
-        data[offset + 3] = 0;
-        data[offset + 4] = 0;
-        data[offset + 5] = scale;
-        data[offset + 6] = 0;
-        data[offset + 7] = 0;
-        data[offset + 8] = s * scale;
-        data[offset + 9] = 0;
-        data[offset + 10] = c * scale;
-        data[offset + 11] = 0;
-        data[offset + 12] = m.x + cr * entry.x + sr * entry.z;
-        data[offset + 13] = y;
-        data[offset + 14] = m.z - sr * entry.x + cr * entry.z;
-        data[offset + 15] = 1;
-        data[offset + 16] = 0.78 + Math.sin(elapsed * 3 + entry.phase) * 0.16;
-        data[offset + 17] = 0;
-        data[offset + 18] = entry.tip;
-        data[offset + 19] = 0;
-        if (first) {
-          matrixCave.firstGlyphY = y;
-          first = false;
+    const quality = renderer.kind === "canvas2d" ? "canvas2d" : renderer.quality;
+    const densityRankLimit = MATRIX_DENSITY[quality] || MATRIX_DENSITY.high;
+    const glyphVersion = Math.floor(elapsed * MATRIX_GLYPH_HZ);
+    const counts = matrixCave.surfaceActiveCounts;
+    counts.fill(0);
+    for (let glyph = 0; glyph < MATRIX_TYPES; glyph++) matrixCave.nodes[glyph].instanceCount = 0;
+    let active = 0, bright = 0, movingGaps = 0, first = true, mutationHash = 2166136261;
+    for (let i = 0; i < matrixCave.entries.length; i++) {
+      const entry = matrixCave.entries[i];
+      if (entry.surface !== 0 && entry.rank >= densityRankLimit) continue;
+      const stream = matrixCave.streams[entry.stream];
+      let x = entry.x, y = entry.y, z = entry.z, shown = preloaded;
+      let tip = entry.tip, glow = stream.brightness;
+      if (entry.kind === MATRIX_RAIN) {
+        y = MATRIX_TOP - matrixModulo(elapsed * stream.speed + stream.phase, matrixCave.cycle) + entry.character * MATRIX_GAP;
+        shown = shown && y >= 0.13 && y <= MATRIX_TOP;
+        glow *= 0.48 + (1 - entry.character / stream.trainLength) * 0.52;
+      } else {
+        const sequence = stream.trainLength + stream.gapLength;
+        const trainPosition = entry.character % sequence;
+        const travel = elapsed * stream.speed + stream.phase;
+        const flow = stream.direction < 0
+          ? stream.flowMax - matrixModulo(travel - entry.character * MATRIX_SURFACE_GAP, stream.flowRange)
+          : stream.flowMin + matrixModulo(travel - entry.character * MATRIX_SURFACE_GAP, stream.flowRange);
+        if (trainPosition >= stream.trainLength) movingGaps++;
+        shown = shown && trainPosition < stream.trainLength;
+        if (shown) {
+          const trail = 1 - trainPosition / stream.trainLength;
+          tip = trainPosition === 0 ? 1 : trainPosition === 1 ? 0.55 : 0;
+          glow *= 0.48 + trail * 0.52;
         }
+        if (entry.kind === MATRIX_FLOOR || entry.kind === MATRIX_CEILING) z = flow;
+        else y = flow;
       }
+      if (!shown) continue;
+      const block = i >> 3;
+      const phasedVersion = Math.floor(elapsed * MATRIX_GLYPH_HZ + ((block * 13) & 15) / 16);
+      const glyph = ((i & 7) + phasedVersion + ((block * 5) & 7)) & 7;
+      const node = matrixCave.nodes[glyph], slot = node.instanceCount++;
+      if (slot >= matrixCave.perGlyphCapacity) throw new Error("Matrix glyph instance capacity exceeded");
+      writeMatrixGlyph(node.instanceData, slot * 20, entry, x, y, z, 1, cr, sr, m, glow, tip);
+      mutationHash = Math.imul(mutationHash ^ glyph ^ Math.imul(i + 1, 16777619), 16777619) >>> 0;
+      counts[entry.surface]++;
+      active++;
+      if (tip > 0) bright++;
+      if (first && entry.kind === MATRIX_RAIN) {
+        matrixCave.firstGlyphY = m.floorY + y;
+        first = false;
+      }
+    }
+    for (let glyph = 0; glyph < MATRIX_TYPES; glyph++) {
+      const node = matrixCave.nodes[glyph];
+      node.drawInstanceCount = visible ? node.instanceCount : 0;
       node.instanceVersion++;
+    }
+    matrixCave.previousGlyphVersion = matrixCave.glyphVersion;
+    matrixCave.glyphVersion = glyphVersion;
+    matrixCave.mutationHash = mutationHash;
+    matrixCave.quality = quality;
+    matrixCave.densityRankLimit = densityRankLimit;
+    matrixCave.activeGlyphCount = active;
+    matrixCave.brightTipCount = bright;
+    matrixCave.movingGapCount = preloaded ? movingGaps : 0;
+    matrixCave.drawnGlyphCount = visible ? active : 0;
+    for (let surface = 1; surface < MATRIX_SURFACES.length; surface++) {
+      const streamIndex = matrixCave.surfaceRepresentativeStreams[surface];
+      if (streamIndex < 0) continue;
+      const stream = matrixCave.streams[streamIndex];
+      const travel = elapsed * stream.speed + stream.phase;
+      matrixCave.surfaceHeadPositions[surface] = stream.direction < 0
+        ? stream.flowMax - matrixModulo(travel, stream.flowRange)
+        : stream.flowMin + matrixModulo(travel, stream.flowRange);
+      matrixCave.surfaceGapPositions[surface] = stream.direction < 0
+        ? stream.flowMax - matrixModulo(travel - stream.trainLength * MATRIX_SURFACE_GAP, stream.flowRange)
+        : stream.flowMin + matrixModulo(travel - stream.trainLength * MATRIX_SURFACE_GAP, stream.flowRange);
+      if (surface === 1) matrixCave.representativeHeadPhase = matrixModulo(travel, stream.flowRange);
     }
     if (preloaded) {
       matrixCave.updates++;
@@ -10611,11 +10872,223 @@ void main() {
           get wallStreamCount() { return matrixCave.wallStreamCount; },
           get streamLength() { return matrixCave.streamLength; },
           get glyphCount() { return matrixCave.glyphCount; },
+          get rainGlyphCount() { return matrixCave.rainGlyphCount; },
+          get surfaceGlyphCount() { return matrixCave.glyphCount - matrixCave.rainGlyphCount; },
+          get activeGlyphCount() { return matrixCave.activeGlyphCount; },
           get brightTipCount() { return matrixCave.brightTipCount; },
           get capacity() { return matrixCave.capacity; },
+          get glyphVersion() { return matrixCave.glyphVersion; },
+          get previousGlyphVersion() { return matrixCave.previousGlyphVersion; },
+          get mutationHash() { return matrixCave.mutationHash; },
+          get glyphCadenceHz() { return MATRIX_GLYPH_HZ; },
+          get bufferCount() { return MATRIX_TYPES; },
+          get bufferBytes() { return matrixCave.bufferBytes; },
+          get registryBytes() { return matrixCave.registryBytes; },
+          get registryHash() { return matrixCave.registryHash; },
+          get allocationCount() { return matrixCave.allocationCount; },
+          get rebuildCount() { return matrixCave.rebuildCount; },
+          get quality() { return matrixCave.quality; },
+          get qualityDensity() { return matrixCave.densityRankLimit / 8; },
+          get surfacePitch() { return MATRIX_SURFACE_PITCH; },
+          get surfaceGap() { return MATRIX_SURFACE_GAP; },
+          surfaceLayout: MATRIX_LAYOUT,
+          surfaceCounts: {
+            get freeRain() { return matrixCave.surfaceCounts[0]; },
+            get floor() { return matrixCave.surfaceCounts[1] + matrixCave.surfaceCounts[2]; },
+            get ceiling() { return matrixCave.surfaceCounts[3] + matrixCave.surfaceCounts[4]; },
+            get leftWall() { return matrixCave.surfaceCounts[5] + matrixCave.surfaceCounts[7]; },
+            get rightWall() { return matrixCave.surfaceCounts[6] + matrixCave.surfaceCounts[8]; },
+            get backWall() { return matrixCave.surfaceCounts[9]; },
+            get doorway() { return matrixCave.surfaceCounts[10] + matrixCave.surfaceCounts[11] + matrixCave.surfaceCounts[12] + matrixCave.surfaceCounts[13] + matrixCave.surfaceCounts[14]; },
+            get mainFloor() { return matrixCave.surfaceCounts[1]; },
+            get vestibuleFloor() { return matrixCave.surfaceCounts[2]; },
+            get mainCeiling() { return matrixCave.surfaceCounts[3]; },
+            get vestibuleCeiling() { return matrixCave.surfaceCounts[4]; },
+            get mainLeftWall() { return matrixCave.surfaceCounts[5]; },
+            get mainRightWall() { return matrixCave.surfaceCounts[6]; },
+            get vestibuleLeftWall() { return matrixCave.surfaceCounts[7]; },
+            get vestibuleRightWall() { return matrixCave.surfaceCounts[8]; },
+            get transitionHeader() { return matrixCave.surfaceCounts[10]; },
+            get doorwayLintel() { return matrixCave.surfaceCounts[11]; },
+            get transitionReturns() { return matrixCave.surfaceCounts[12]; },
+            get doorwayJambs() { return matrixCave.surfaceCounts[13]; },
+            get rimUnderside() { return matrixCave.surfaceCounts[14]; }
+          },
+          activeSurfaceCounts: {
+            get freeRain() { return matrixCave.surfaceActiveCounts[0]; },
+            get floor() { return matrixCave.surfaceActiveCounts[1] + matrixCave.surfaceActiveCounts[2]; },
+            get ceiling() { return matrixCave.surfaceActiveCounts[3] + matrixCave.surfaceActiveCounts[4]; },
+            get leftWall() { return matrixCave.surfaceActiveCounts[5] + matrixCave.surfaceActiveCounts[7]; },
+            get rightWall() { return matrixCave.surfaceActiveCounts[6] + matrixCave.surfaceActiveCounts[8]; },
+            get backWall() { return matrixCave.surfaceActiveCounts[9]; },
+            get doorway() { return matrixCave.surfaceActiveCounts[10] + matrixCave.surfaceActiveCounts[11] + matrixCave.surfaceActiveCounts[12] + matrixCave.surfaceActiveCounts[13] + matrixCave.surfaceActiveCounts[14]; },
+            get mainFloor() { return matrixCave.surfaceActiveCounts[1]; },
+            get vestibuleFloor() { return matrixCave.surfaceActiveCounts[2]; },
+            get mainCeiling() { return matrixCave.surfaceActiveCounts[3]; },
+            get vestibuleCeiling() { return matrixCave.surfaceActiveCounts[4]; },
+            get mainLeftWall() { return matrixCave.surfaceActiveCounts[5]; },
+            get mainRightWall() { return matrixCave.surfaceActiveCounts[6]; },
+            get vestibuleLeftWall() { return matrixCave.surfaceActiveCounts[7]; },
+            get vestibuleRightWall() { return matrixCave.surfaceActiveCounts[8]; },
+            get transitionHeader() { return matrixCave.surfaceActiveCounts[10]; },
+            get doorwayLintel() { return matrixCave.surfaceActiveCounts[11]; },
+            get transitionReturns() { return matrixCave.surfaceActiveCounts[12]; },
+            get doorwayJambs() { return matrixCave.surfaceActiveCounts[13]; },
+            get rimUnderside() { return matrixCave.surfaceActiveCounts[14]; }
+          },
+          surfaceStreams: {
+            get freeRain() { return matrixCave.surfaceStreams[0]; },
+            get floor() { return matrixCave.surfaceStreams[1] + matrixCave.surfaceStreams[2]; },
+            get ceiling() { return matrixCave.surfaceStreams[3] + matrixCave.surfaceStreams[4]; },
+            get leftWall() { return matrixCave.surfaceStreams[5] + matrixCave.surfaceStreams[7]; },
+            get rightWall() { return matrixCave.surfaceStreams[6] + matrixCave.surfaceStreams[8]; },
+            get backWall() { return matrixCave.surfaceStreams[9]; },
+            get doorway() { return matrixCave.surfaceStreams[10] + matrixCave.surfaceStreams[11] + matrixCave.surfaceStreams[12] + matrixCave.surfaceStreams[13] + matrixCave.surfaceStreams[14]; },
+            get mainFloor() { return matrixCave.surfaceStreams[1]; },
+            get vestibuleFloor() { return matrixCave.surfaceStreams[2]; },
+            get mainCeiling() { return matrixCave.surfaceStreams[3]; },
+            get vestibuleCeiling() { return matrixCave.surfaceStreams[4]; },
+            get mainLeftWall() { return matrixCave.surfaceStreams[5]; },
+            get mainRightWall() { return matrixCave.surfaceStreams[6]; },
+            get vestibuleLeftWall() { return matrixCave.surfaceStreams[7]; },
+            get vestibuleRightWall() { return matrixCave.surfaceStreams[8]; },
+            get transitionHeader() { return matrixCave.surfaceStreams[10]; },
+            get doorwayLintel() { return matrixCave.surfaceStreams[11]; },
+            get transitionReturns() { return matrixCave.surfaceStreams[12]; },
+            get doorwayJambs() { return matrixCave.surfaceStreams[13]; },
+            get rimUnderside() { return matrixCave.surfaceStreams[14]; }
+          },
+          surfaceEdgeMargins: {
+            get mainFloor() { return matrixCave.surfaceEdgeMargins[1]; },
+            get vestibuleFloor() { return matrixCave.surfaceEdgeMargins[2]; },
+            get mainCeiling() { return matrixCave.surfaceEdgeMargins[3]; },
+            get vestibuleCeiling() { return matrixCave.surfaceEdgeMargins[4]; },
+            get mainLeftWall() { return matrixCave.surfaceEdgeMargins[5]; },
+            get mainRightWall() { return matrixCave.surfaceEdgeMargins[6]; },
+            get vestibuleLeftWall() { return matrixCave.surfaceEdgeMargins[7]; },
+            get vestibuleRightWall() { return matrixCave.surfaceEdgeMargins[8]; },
+            get backWall() { return matrixCave.surfaceEdgeMargins[9]; },
+            get transitionHeader() { return matrixCave.surfaceEdgeMargins[10]; },
+            get doorwayLintel() { return matrixCave.surfaceEdgeMargins[11]; },
+            get transitionReturns() { return matrixCave.surfaceEdgeMargins[12]; },
+            get doorwayJambs() { return matrixCave.surfaceEdgeMargins[13]; },
+            get rimUnderside() { return matrixCave.surfaceEdgeMargins[14]; }
+          },
+          get minBrightness() { return matrixCave.minBrightness; },
+          get maxBrightness() { return matrixCave.maxBrightness; },
+          get minTrainLength() { return matrixCave.minTrainLength; },
+          get maxTrainLength() { return matrixCave.maxTrainLength; },
+          get minGapLength() { return matrixCave.minGapLength; },
+          get maxGapLength() { return matrixCave.maxGapLength; },
+          get leadingTipCount() { return matrixCave.brightTipCount; },
+          get movingGapCount() { return matrixCave.movingGapCount; },
+          get representativeHeadPhase() { return matrixCave.representativeHeadPhase; },
+          get maxLocalZ() { return matrixCave.maxLocalZ; },
+          get portalClearance() { return matrixCave.portalClearance; },
+          surfaceDirections: {
+            freeRain: -1, mainFloor: -1, vestibuleFloor: -1, mainCeiling: -1, vestibuleCeiling: -1,
+            mainLeftWall: -1, mainRightWall: -1, vestibuleLeftWall: -1, vestibuleRightWall: -1,
+            backWall: -1, transitionHeader: -1, doorwayLintel: -1, transitionReturns: -1, doorwayJambs: -1, rimUnderside: -1
+          },
+          surfaceFacings: {
+            get mainFloor() { return matrixCave.surfaceFacings[1]; },
+            get vestibuleFloor() { return matrixCave.surfaceFacings[2]; },
+            get mainCeiling() { return matrixCave.surfaceFacings[3]; },
+            get vestibuleCeiling() { return matrixCave.surfaceFacings[4]; },
+            get mainLeftWall() { return matrixCave.surfaceFacings[5]; },
+            get mainRightWall() { return matrixCave.surfaceFacings[6]; },
+            get vestibuleLeftWall() { return matrixCave.surfaceFacings[7]; },
+            get vestibuleRightWall() { return matrixCave.surfaceFacings[8]; },
+            get backWall() { return matrixCave.surfaceFacings[9]; },
+            get transitionHeader() { return matrixCave.surfaceFacings[10]; },
+            get doorwayLintel() { return matrixCave.surfaceFacings[11]; },
+            get transitionReturns() { return matrixCave.surfaceFacings[12]; },
+            get doorwayJambs() { return matrixCave.surfaceFacings[13]; },
+            get rimUnderside() { return matrixCave.surfaceFacings[14]; }
+          },
+          surfaceMaxLocalZ: {
+            get mainFloor() { return matrixCave.surfaceMaxLocalZ[1]; },
+            get vestibuleFloor() { return matrixCave.surfaceMaxLocalZ[2]; },
+            get mainCeiling() { return matrixCave.surfaceMaxLocalZ[3]; },
+            get vestibuleCeiling() { return matrixCave.surfaceMaxLocalZ[4]; },
+            get mainLeftWall() { return matrixCave.surfaceMaxLocalZ[5]; },
+            get mainRightWall() { return matrixCave.surfaceMaxLocalZ[6]; },
+            get vestibuleLeftWall() { return matrixCave.surfaceMaxLocalZ[7]; },
+            get vestibuleRightWall() { return matrixCave.surfaceMaxLocalZ[8]; },
+            get backWall() { return matrixCave.surfaceMaxLocalZ[9]; },
+            get transitionHeader() { return matrixCave.surfaceMaxLocalZ[10]; },
+            get doorwayLintel() { return matrixCave.surfaceMaxLocalZ[11]; },
+            get transitionReturns() { return matrixCave.surfaceMaxLocalZ[12]; },
+            get doorwayJambs() { return matrixCave.surfaceMaxLocalZ[13]; },
+            get rimUnderside() { return matrixCave.surfaceMaxLocalZ[14]; }
+          },
+          surfaceHeadPositions: {
+            get mainFloor() { return matrixCave.surfaceHeadPositions[1]; },
+            get vestibuleFloor() { return matrixCave.surfaceHeadPositions[2]; },
+            get mainCeiling() { return matrixCave.surfaceHeadPositions[3]; },
+            get vestibuleCeiling() { return matrixCave.surfaceHeadPositions[4]; },
+            get mainLeftWall() { return matrixCave.surfaceHeadPositions[5]; },
+            get mainRightWall() { return matrixCave.surfaceHeadPositions[6]; },
+            get vestibuleLeftWall() { return matrixCave.surfaceHeadPositions[7]; },
+            get vestibuleRightWall() { return matrixCave.surfaceHeadPositions[8]; },
+            get backWall() { return matrixCave.surfaceHeadPositions[9]; },
+            get transitionHeader() { return matrixCave.surfaceHeadPositions[10]; },
+            get doorwayLintel() { return matrixCave.surfaceHeadPositions[11]; },
+            get transitionReturns() { return matrixCave.surfaceHeadPositions[12]; },
+            get doorwayJambs() { return matrixCave.surfaceHeadPositions[13]; },
+            get rimUnderside() { return matrixCave.surfaceHeadPositions[14]; }
+          },
+          surfaceGapPositions: {
+            get mainFloor() { return matrixCave.surfaceGapPositions[1]; },
+            get vestibuleFloor() { return matrixCave.surfaceGapPositions[2]; },
+            get mainCeiling() { return matrixCave.surfaceGapPositions[3]; },
+            get vestibuleCeiling() { return matrixCave.surfaceGapPositions[4]; },
+            get mainLeftWall() { return matrixCave.surfaceGapPositions[5]; },
+            get mainRightWall() { return matrixCave.surfaceGapPositions[6]; },
+            get vestibuleLeftWall() { return matrixCave.surfaceGapPositions[7]; },
+            get vestibuleRightWall() { return matrixCave.surfaceGapPositions[8]; },
+            get backWall() { return matrixCave.surfaceGapPositions[9]; },
+            get transitionHeader() { return matrixCave.surfaceGapPositions[10]; },
+            get doorwayLintel() { return matrixCave.surfaceGapPositions[11]; },
+            get transitionReturns() { return matrixCave.surfaceGapPositions[12]; },
+            get doorwayJambs() { return matrixCave.surfaceGapPositions[13]; },
+            get rimUnderside() { return matrixCave.surfaceGapPositions[14]; }
+          },
+          representativeStream: {
+            get speed() { return matrixCave.streams[matrixCave.surfaceRepresentativeStreams[1]].speed; },
+            get direction() { return matrixCave.streams[matrixCave.surfaceRepresentativeStreams[1]].direction; },
+            get trainLength() { return matrixCave.streams[matrixCave.surfaceRepresentativeStreams[1]].trainLength; },
+            get gapLength() { return matrixCave.streams[matrixCave.surfaceRepresentativeStreams[1]].gapLength; },
+            get flowMin() { return matrixCave.streams[matrixCave.surfaceRepresentativeStreams[1]].flowMin; },
+            get flowMax() { return matrixCave.streams[matrixCave.surfaceRepresentativeStreams[1]].flowMax; },
+            get flowRange() { return matrixCave.streams[matrixCave.surfaceRepresentativeStreams[1]].flowRange; }
+          },
+          sampleMotion: (surfaceName) => {
+            const surface = MATRIX_SURFACES.indexOf(surfaceName);
+            if (surface < 1) return null;
+            const streamIndex = matrixCave.surfaceRepresentativeStreams[surface];
+            if (streamIndex < 0) return null;
+            const stream = matrixCave.streams[streamIndex];
+            return {
+              surface: MATRIX_SURFACES[surface], direction: stream.direction, speed: stream.speed,
+              head: matrixCave.surfaceHeadPositions[surface], gap: matrixCave.surfaceGapPositions[surface],
+              flowMin: stream.flowMin, flowMax: stream.flowMax, flowRange: stream.flowRange,
+              trainLength: stream.trainLength, gapLength: stream.gapLength,
+              leadingGlow: stream.brightness,
+              secondGlow: stream.brightness * (0.48 + 0.52 * (1 - 1 / stream.trainLength)),
+              trailingGlow: stream.brightness * (0.48 + 0.52 / stream.trainLength)
+            };
+          },
           get updates() { return matrixCave.updates; },
           get prewarmCount() { return matrixCave.prewarmCount; },
           get preloaded() { return matrixCave.preloaded; },
+          get drawEnabled() { return matrixCave.drawEnabled; },
+          get drawnGlyphCount() { return matrixCave.drawnGlyphCount; },
+          get batchDrawCount() {
+            let count = 0;
+            for (let glyph = 0; glyph < MATRIX_TYPES; glyph++) count += matrixCave.nodes[glyph].drawInstanceCount;
+            return count;
+          },
           get preloadDistance() { return MATRIX_PRELOAD; },
           get roomScale() { return matrixCave.room.scale.x; },
           get visible() { return matrixCave.visible; },
