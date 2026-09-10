@@ -319,7 +319,7 @@ select {
   position: absolute;
   top: calc(74px + var(--safe-top));
   right: calc(16px + var(--safe-right));
-  bottom: calc(16px + var(--safe-bottom));
+  max-height: calc(100% - 90px - var(--safe-top) - var(--safe-bottom));
   width: 300px;
   display: flex;
   flex-direction: column;
@@ -445,14 +445,6 @@ select {
 
 .panel-head h2 {
   margin-bottom: 8px;
-}
-
-.summary {
-  margin: 0 0 8px;
-  color: rgba(243, 239, 228, 0.75);
-  font-size: 10.5px;
-  letter-spacing: 0.06em;
-  text-shadow: 0 1px 0 rgba(0, 0, 0, 0.4);
 }
 
 .help {

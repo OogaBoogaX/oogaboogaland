@@ -33,7 +33,7 @@
     MrHodlX: { gasMask: true },
     dplusplus1024: { build: "slim", hair: "#b9dcaa" },
     bc1gui: { skater: true, skin: "#f2a33c", hair: "#e4561f", fur: "#8f4f17" },
-    timechainb: { statue: true }
+    timechainb: { anunnaki: true, skin: "#b8703c", hair: "#33200f" }
   };
   const SKINS = ["#c98a5b", "#a9744c", "#8a5a3a", "#d9a06b", "#b58057"];
   const HAIRS = ["#2b1b10", "#4a2c14", "#151312", "#5c4425", "#7a2e12"];
@@ -53,7 +53,7 @@
       gasMask: !!likeness.gasMask,
       symmetricTusks: !!likeness.symmetricTusks,
       skater: !!likeness.skater,
-      statue: !!likeness.statue,
+      anunnaki: !!likeness.anunnaki,
       skin: likeness.skin || skin,
       hair: likeness.hair || hashedHair,
       fur: likeness.fur || FURS[Math.floor(rand() * FURS.length)],

@@ -139,7 +139,6 @@
     };
     const refreshRosterRow = (cave) => {
       hud.setRosterRow(cave.traits.name, cave.state, contributors.ageLabel(cave.contributor));
-      hud.setSummary(stateCounts());
     };
     let player = null;
     // World-space drive vector

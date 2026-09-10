@@ -71,7 +71,6 @@
       meterCount: $("meter-count"),
       meterForecast: $("meter-forecast"),
       roster: $("roster"),
-      summary: $("roster-summary"),
       statDonations: $("stat-donations"),
       statSats: $("stat-sats"),
       lootTab: $("loot-tab"),
@@ -145,9 +144,6 @@
     };
     const setSubtitle = (text) => {
       el.subtitle.textContent = text;
-    };
-    const setSummary = ({ working, sleeping, away }) => {
-      el.summary.textContent = `${working} eating · ${sleeping} sleeping · ${away} away`;
     };
     let actionHandler = null;
     const onAction = (fn) => {
@@ -368,7 +364,7 @@
       tooltip.hide();
       closeFeed();
     };
-    return { el, openFeed, closeFeed, setRosterRow, setMeter, setStats, setAct, setSubtitle, setSummary, onAction, toast, tooltip, hint, selectTab, onPreset, onIdentityChange, setIdentity, setDonationUrl, onAssign, onUnassign, renderInventory, dispose };
+    return { el, openFeed, closeFeed, setRosterRow, setMeter, setStats, setAct, setSubtitle, onAction, toast, tooltip, hint, selectTab, onPreset, onIdentityChange, setIdentity, setDonationUrl, onAssign, onUnassign, renderInventory, dispose };
   };
   BL.hud = { create, renderIcon, STATE_LABELS };
 })();
