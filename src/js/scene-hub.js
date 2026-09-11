@@ -50,30 +50,10 @@
   const TUNNEL_REACH = 2.2;
   const MATRIX_TYPES = 8, MATRIX_TOP = 3.62, MATRIX_RANGE = 3.45, MATRIX_GAP = 0.19, MATRIX_PRELOAD = 18;
   const MATRIX_SURFACE_PITCH = 0.12, MATRIX_SURFACE_GAP = 0.13, MATRIX_GLYPH_HZ = 10;
+  const MATRIX_CEILING_PHASE_STEP = 0.6180339887498949;
   const MATRIX_RAIN = 0, MATRIX_FLOOR = 1, MATRIX_CEILING = 2, MATRIX_BACK = 3, MATRIX_LEFT = 4, MATRIX_RIGHT = 5;
-  const MATRIX_SURFACES = ["freeRain", "mainFloor", "vestibuleFloor", "mainCeiling", "vestibuleCeiling", "mainLeftWall", "mainRightWall", "vestibuleLeftWall", "vestibuleRightWall", "backWall", "transitionHeader", "doorwayLintel", "transitionReturns", "doorwayJambs", "rimUnderside"];
+  const MATRIX_SURFACES = ["freeRain", "floor", "mainCeiling", "vestibuleCeiling", "mainLeftWall", "mainRightWall", "vestibuleLeftWall", "vestibuleRightWall", "backWall", "transitionHeader", "transitionReturns"];
   const MATRIX_DENSITY = { high: 8, medium: 5, low: 3, canvas2d: 1 };
-  const MATRIX_LAYOUT = {
-    mainFloor: { plane: "horizontal", flow: "entrance-to-back", y: 0.035, minZ: -6.115, maxZ: -2.485 },
-    vestibuleFloor: { plane: "horizontal", flow: "entrance-to-back", y: 0.035, minZ: -2.485, maxZ: 0.43 },
-    mainCeiling: { plane: "horizontal", flow: "entrance-to-back", y: 3.735, minZ: -6.115, maxZ: -2.485 },
-    vestibuleCeiling: { plane: "horizontal", flow: "entrance-to-back", y: 2.965, minZ: -2.485, maxZ: 0.42 },
-    mainLeftWall: { plane: "vertical", flow: "down", x: -2.805, minZ: -6.115, maxZ: -2.485 },
-    mainRightWall: { plane: "vertical", flow: "down", x: 2.805, minZ: -6.115, maxZ: -2.485 },
-    vestibuleLeftWall: { plane: "vertical", flow: "down", x: -2.455, minZ: -2.485, maxZ: 0.44 },
-    vestibuleRightWall: { plane: "vertical", flow: "down", x: 2.455, minZ: -2.485, maxZ: 0.44 },
-    backWall: { plane: "vertical", flow: "down", z: -6.115 },
-    transitionHeader: { plane: "vertical", flow: "down", z: -2.47, minY: 3.055, maxY: 3.845 },
-    doorwayLintel: { plane: "vertical", flow: "down", z: 0.465, minY: 3.055, maxY: 3.845 },
-    transitionReturns: { plane: "vertical", flow: "down", z: -2.47 },
-    doorwayJambs: { plane: "vertical", flow: "down", z: 0.465 },
-    rimUnderside: { plane: "horizontal", flow: "entrance-to-back", y: 2.975, minZ: 0.385, maxZ: 0.42 },
-    floor: { plane: "horizontal", flow: "entrance-to-back", maxZ: 0.43 },
-    ceiling: { plane: "horizontal", flow: "entrance-to-back" },
-    leftWall: { plane: "vertical", flow: "down" },
-    rightWall: { plane: "vertical", flow: "down" },
-    doorway: { plane: "vertical", flow: "down", z: 0.465, minY: 3.055, portalMaxY: 2.98 }
-  };
   const PORTAL_Z = 0.5, PORTAL_MIN_X = -2.48, PORTAL_MAX_X = 2.48, PORTAL_MIN_Y = -0.2, PORTAL_MAX_Y = 2.98;
   // Sky, light and lamps, resampled from the clock every frame
   const RENDER_OPTS = {
@@ -178,7 +158,7 @@
   };
 
   // ---------- room behind the mirror ----------
-  const buildMatrixRain = (group, room, rimLiner, mirrorNode, m) => {
+  const buildMatrixRain = (group, room, mirrorNode, m) => {
     const streamCount = renderer.kind === "canvas2d" ? 32 : 96;
     const streamLength = renderer.kind === "canvas2d" ? 9 : 14;
     const entries = [], streams = [];
@@ -186,7 +166,7 @@
     const cycle = MATRIX_RANGE + (streamLength - 1) * MATRIX_GAP;
     const addStream = (x, z, angle) => {
       const stream = streams.length;
-      streams.push({ speed: 0.72 + rand() * 1.05, phase: rand() * cycle, brightness: 0.62 + rand() * 0.32, trainLength: streamLength, gapLength: Math.max(2, Math.round(MATRIX_RANGE / MATRIX_GAP) - streamLength), direction: -1, flowMin: 0.13, flowMax: MATRIX_TOP, flowRange: cycle });
+      streams.push({ surface: 0, speed: 0.72 + rand() * 1.05, phase: rand() * cycle, brightness: 0.62 + rand() * 0.32, trainLength: streamLength, gapLength: Math.max(2, Math.round(MATRIX_RANGE / MATRIX_GAP) - streamLength), direction: -1, flowMin: 0.13, flowMax: MATRIX_TOP, flowRange: cycle });
       for (let character = 0; character < streamLength; character++) {
         const tip = character === 0 ? 1 : character === 1 ? 0.55 : 0;
         entries.push({ kind: MATRIX_RAIN, surface: 0, stream, rank: 0, x, y: 0, z, angle, character, tip, start: 0, range: cycle });
@@ -219,6 +199,7 @@
     const surfaceMaxLocalZ = new Float32Array(MATRIX_SURFACES.length);
     const surfaceHeadPositions = new Float32Array(MATRIX_SURFACES.length);
     const surfaceGapPositions = new Float32Array(MATRIX_SURFACES.length);
+    const surfaceSections = [], surfaceDetails = new Array(MATRIX_SURFACES.length), surfaceLayout = {};
     let glyphMinX = Infinity, glyphMaxX = -Infinity, glyphMinY = Infinity, glyphMaxY = -Infinity, glyphHalfZ = 0;
     for (let glyph = 0; glyph < MATRIX_TYPES; glyph++) {
       const verts = hubModels.matrixGlyph(glyph).verts;
@@ -235,38 +216,116 @@
     surfaceMinLocalZ.fill(Infinity);
     surfaceMaxLocalZ.fill(-Infinity);
     surfaceStreams[0] = streamCount;
-    const addSurface = (surface, kind, crossMin, crossMax, flowMin, flowMax, fixed, facing = 1) => {
+    const addSurface = (section) => {
+      const surface = MATRIX_SURFACES.indexOf(section.name);
+      if (surface < 1) throw new Error(`Unknown Matrix surface ${section.name}`);
+      const b = section.bounds, epsilon = room.geometry.surfaceEpsilon;
+      let kind, crossMin, crossMax, flowMin, flowMax, fixed, facing = 1, glyphBounds, renderNormal;
+      if (section.orientation === "floor") {
+        kind = MATRIX_FLOOR;
+        renderNormal = [0, 1, 0];
+        fixed = section.planePosition + glyphHalfZ + epsilon;
+        crossMin = b[0] - glyphMinX;
+        crossMax = b[3] - glyphMaxX;
+        flowMin = b[2] + glyphMaxY;
+        flowMax = b[5] + glyphMinY;
+        glyphBounds = [crossMin + glyphMinX, fixed - glyphHalfZ, flowMin - glyphMaxY, crossMax + glyphMaxX, fixed + glyphHalfZ, flowMax - glyphMinY];
+      } else if (section.orientation === "ceiling") {
+        kind = MATRIX_CEILING;
+        renderNormal = [0, -1, 0];
+        fixed = section.planePosition - glyphHalfZ - epsilon;
+        crossMin = b[0] - glyphMinX;
+        crossMax = b[3] - glyphMaxX;
+        flowMin = b[2] - glyphMinY;
+        flowMax = b[5] - glyphMaxY;
+        glyphBounds = [crossMin + glyphMinX, fixed - glyphHalfZ, flowMin + glyphMinY, crossMax + glyphMaxX, fixed + glyphHalfZ, flowMax + glyphMaxY];
+      } else if (section.orientation === "back") {
+        kind = MATRIX_BACK;
+        facing = section.normal[2];
+        renderNormal = [0, 0, facing];
+        fixed = section.planePosition + facing * (glyphHalfZ + epsilon);
+        crossMin = b[0] - glyphMinX;
+        crossMax = b[3] - glyphMaxX;
+        flowMin = b[1] - glyphMinY;
+        flowMax = b[4] - glyphMaxY;
+        glyphBounds = [crossMin + glyphMinX, flowMin + glyphMinY, fixed - glyphHalfZ, crossMax + glyphMaxX, flowMax + glyphMaxY, fixed + glyphHalfZ];
+      } else if (section.orientation === "left") {
+        kind = MATRIX_LEFT;
+        renderNormal = [1, 0, 0];
+        fixed = section.planePosition + glyphHalfZ + epsilon;
+        crossMin = b[2] + glyphMaxX;
+        crossMax = b[5] + glyphMinX;
+        flowMin = b[1] - glyphMinY;
+        flowMax = b[4] - glyphMaxY;
+        glyphBounds = [fixed - glyphHalfZ, flowMin + glyphMinY, crossMin - glyphMaxX, fixed + glyphHalfZ, flowMax + glyphMaxY, crossMax - glyphMinX];
+      } else if (section.orientation === "right") {
+        kind = MATRIX_RIGHT;
+        renderNormal = [-1, 0, 0];
+        fixed = section.planePosition - glyphHalfZ - epsilon;
+        crossMin = b[2] - glyphMinX;
+        crossMax = b[5] - glyphMaxX;
+        flowMin = b[1] - glyphMinY;
+        flowMax = b[4] - glyphMaxY;
+        glyphBounds = [fixed - glyphHalfZ, flowMin + glyphMinY, crossMin + glyphMinX, fixed + glyphHalfZ, flowMax + glyphMaxY, crossMax + glyphMaxX];
+      } else throw new Error(`Unknown Matrix surface orientation ${section.orientation}`);
+      if (crossMax < crossMin || flowMax < flowMin) throw new Error(`Matrix surface ${section.name} is too small for a glyph`);
       const streamTotal = Math.max(1, Math.floor((crossMax - crossMin) / MATRIX_SURFACE_PITCH) + 1);
       const characters = Math.max(2, Math.floor((flowMax - flowMin) / MATRIX_SURFACE_GAP) + 1);
-      const flowRange = flowMax - flowMin + MATRIX_SURFACE_GAP;
+      const flowRange = flowMax - flowMin;
       surfaceStreams[surface] += streamTotal;
       if (surfaceFacings[surface] && surfaceFacings[surface] !== facing) throw new Error("Matrix surface facing mismatch");
       surfaceFacings[surface] = facing;
-      let minLocalZ, maxLocalZ;
-      if (kind === MATRIX_FLOOR) {
-        minLocalZ = flowMin - glyphMaxY;
-        maxLocalZ = flowMax - glyphMinY;
-      } else if (kind === MATRIX_CEILING) {
-        minLocalZ = flowMin + glyphMinY;
-        maxLocalZ = flowMax + glyphMaxY;
-      } else if (kind === MATRIX_BACK) {
-        minLocalZ = fixed - glyphHalfZ;
-        maxLocalZ = fixed + glyphHalfZ;
-      } else {
-        minLocalZ = crossMin - Math.max(Math.abs(glyphMinX), Math.abs(glyphMaxX));
-        maxLocalZ = crossMax + Math.max(Math.abs(glyphMinX), Math.abs(glyphMaxX));
-      }
-      surfaceMinLocalZ[surface] = Math.min(surfaceMinLocalZ[surface], minLocalZ);
-      surfaceMaxLocalZ[surface] = Math.max(surfaceMaxLocalZ[surface], maxLocalZ);
       const crossStep = streamTotal > 1 ? (crossMax - crossMin) / (streamTotal - 1) : 0;
       const flowStep = characters > 1 ? (flowMax - flowMin) / (characters - 1) : 0;
-      surfaceEdgeMargins[surface] = Math.max(surfaceEdgeMargins[surface], Math.abs(crossMax - (crossMin + crossStep * (streamTotal - 1))), Math.abs(flowMax - (flowMin + flowStep * (characters - 1))));
+      const edgeMargin = Math.max(Math.abs(crossMax - (crossMin + crossStep * (streamTotal - 1))), Math.abs(flowMax - (flowMin + flowStep * (characters - 1))));
+      const alignmentError = Math.abs(Math.abs(fixed - section.planePosition) - glyphHalfZ - epsilon);
+      const clearance = Math.abs(fixed - section.planePosition) - glyphHalfZ;
+      const inwardFacing = renderNormal[0] * section.normal[0] + renderNormal[1] * section.normal[1] + renderNormal[2] * section.normal[2] > 0.999;
+      const axis = section.planeAxis === "x" ? 0 : section.planeAxis === "y" ? 1 : 2;
+      let fullyBacked = true;
+      for (let a = 0; a < 3; a++) {
+        if (a === axis) continue;
+        if (glyphBounds[a] < b[a] - 1e-8 || glyphBounds[a + 3] > b[a + 3] + 1e-8) fullyBacked = false;
+      }
+      surfaceMinLocalZ[surface] = Math.min(surfaceMinLocalZ[surface], glyphBounds[2]);
+      surfaceMaxLocalZ[surface] = Math.max(surfaceMaxLocalZ[surface], glyphBounds[5]);
+      surfaceEdgeMargins[surface] = Math.max(surfaceEdgeMargins[surface], edgeMargin);
+      surfaceSections.push({ section, surface, kind, facing, fixed, crossMin, crossMax, flowMin, flowMax, glyphBounds, alignmentError, clearance, edgeMargin, inwardFacing, fullyBacked, portalCrossing: glyphBounds[5] >= PORTAL_Z });
+      let detail = surfaceDetails[surface];
+      if (!detail) {
+        detail = surfaceDetails[surface] = { backingIds: [], planeAxis: section.planeAxis, planePosition: section.planePosition, normal: section.normal, coverageBounds: b.slice(), glyphBounds: glyphBounds.slice(), maxAlignmentError: 0, minSurfaceClearance: Infinity, uncoveredEdgeMargin: 0, inwardFacing: true, fullyBacked: true, portalCrossing: false, partCount: 0, streamCount: 0, glyphCount: 0, flowMin: Infinity, flowMax: -Infinity, minCharactersPerStream: Infinity, maxCharactersPerStream: 0, flow: section.flow };
+      }
+      detail.backingIds.push(section.backing);
+      for (let a = 0; a < 3; a++) {
+        detail.coverageBounds[a] = Math.min(detail.coverageBounds[a], b[a]);
+        detail.coverageBounds[a + 3] = Math.max(detail.coverageBounds[a + 3], b[a + 3]);
+        detail.glyphBounds[a] = Math.min(detail.glyphBounds[a], glyphBounds[a]);
+        detail.glyphBounds[a + 3] = Math.max(detail.glyphBounds[a + 3], glyphBounds[a + 3]);
+      }
+      detail.maxAlignmentError = Math.max(detail.maxAlignmentError, alignmentError);
+      detail.minSurfaceClearance = Math.min(detail.minSurfaceClearance, clearance);
+      detail.uncoveredEdgeMargin = Math.max(detail.uncoveredEdgeMargin, edgeMargin);
+      detail.inwardFacing = detail.inwardFacing && inwardFacing;
+      detail.fullyBacked = detail.fullyBacked && fullyBacked;
+      detail.portalCrossing = detail.portalCrossing || glyphBounds[5] >= PORTAL_Z;
+      detail.partCount++;
+      detail.streamCount += streamTotal;
+      detail.glyphCount += streamTotal * characters;
+      detail.flowMin = Math.min(detail.flowMin, flowMin);
+      detail.flowMax = Math.max(detail.flowMax, flowMax);
+      detail.minCharactersPerStream = Math.min(detail.minCharactersPerStream, characters);
+      detail.maxCharactersPerStream = Math.max(detail.maxCharactersPerStream, characters);
+      const ceilingPhaseOffset = kind === MATRIX_CEILING ? rand() * flowRange : 0;
       for (let localStream = 0; localStream < streamTotal; localStream++) {
         const cross = streamTotal === 1 ? (crossMin + crossMax) * 0.5 : crossMin + localStream / (streamTotal - 1) * (crossMax - crossMin);
         const stream = streams.length;
         const wantedTrain = 7 + Math.floor(rand() * 6), wantedGap = 2 + Math.floor(rand() * 5);
         const trainLength = Math.max(1, Math.min(wantedTrain, characters - 1)), gapLength = Math.max(1, Math.min(wantedGap, characters - trainLength));
-        streams.push({ speed: 0.28 + rand() * 0.32, phase: rand() * flowRange, brightness: 0.58 + rand() * 0.36, trainLength, gapLength, direction: -1, flowMin, flowMax, flowRange });
+        const speed = 0.28 + rand() * 0.32, randomPhase = rand() * flowRange;
+        const phase = kind === MATRIX_CEILING
+          ? matrixModulo(ceilingPhaseOffset + localStream * flowRange * MATRIX_CEILING_PHASE_STEP + (randomPhase / flowRange - 0.5) * MATRIX_SURFACE_GAP * 0.35, flowRange)
+          : randomPhase;
+        streams.push({ surface, speed, phase, brightness: 0.58 + rand() * 0.36, trainLength, gapLength, direction: -1, flowMin, flowMax, flowRange });
         if (surfaceRepresentativeStreams[surface] < 0) surfaceRepresentativeStreams[surface] = stream;
         const rank = localStream & 7;
         for (let character = 0; character < characters; character++) {
@@ -286,24 +345,46 @@
         }
       }
     };
-    // Each registry section is anchored to the black panel it covers. Glyph centers stop
-    // far enough behind the portal that their voxel extents cannot cross its plane.
-    addSurface(1, MATRIX_FLOOR, -2.78, 2.78, -6.115, -2.485, 0.035);
-    addSurface(2, MATRIX_FLOOR, -2.43, 2.43, -2.485, 0.43, 0.035);
-    addSurface(3, MATRIX_CEILING, -2.78, 2.78, -6.115, -2.485, 3.735);
-    addSurface(4, MATRIX_CEILING, -2.43, 2.43, -2.485, 0.42, 2.965);
-    addSurface(5, MATRIX_LEFT, -6.115, -2.485, 0.075, 3.695, -2.805);
-    addSurface(6, MATRIX_RIGHT, -6.115, -2.485, 0.075, 3.695, 2.805);
-    addSurface(7, MATRIX_LEFT, -2.485, 0.44, 0.075, 2.925, -2.455);
-    addSurface(8, MATRIX_RIGHT, -2.485, 0.44, 0.075, 2.925, 2.455);
-    addSurface(9, MATRIX_BACK, -2.78, 2.78, 0.075, 3.695, -6.115);
-    addSurface(10, MATRIX_BACK, -2.86, 2.86, 3.055, 3.845, -2.47, -1);
-    addSurface(11, MATRIX_BACK, -2.86, 2.86, 3.055, 3.845, 0.465, -1);
-    addSurface(12, MATRIX_BACK, -2.86, -2.52, 0.075, 2.925, -2.47, -1);
-    addSurface(12, MATRIX_BACK, 2.52, 2.86, 0.075, 2.925, -2.47, -1);
-    addSurface(13, MATRIX_BACK, -2.86, -2.52, 0.075, 2.925, 0.465, -1);
-    addSurface(13, MATRIX_BACK, 2.52, 2.86, 0.075, 2.925, 0.465, -1);
-    addSurface(14, MATRIX_CEILING, -2.43, 2.43, 0.385, 0.42, 2.975);
+    // The chamber owns the backing planes. Matrix placement derives from those exact
+    // local bounds so glyph thickness always sits on the room side of real geometry.
+    for (let i = 0; i < room.geometry.matrixSurfaces.length; i++) addSurface(room.geometry.matrixSurfaces[i]);
+    const ceilingEntranceBand = {
+      sampledStreams: 0, phaseBucketCount: 0, gapLengthDiversity: 0,
+      minStreamBrightness: Infinity, maxStreamBrightness: -Infinity,
+      floorMinStreamBrightness: Infinity, floorMaxStreamBrightness: -Infinity,
+      sampledGlyphs: 0, visibleGlyphs: 0, gapGlyphs: 0, brightTips: 0,
+      minVisibleBrightness: 0, maxVisibleBrightness: 0
+    };
+    let ceilingPhaseMask = 0, ceilingGapMask = 0;
+    for (let i = 0; i < streams.length; i++) {
+      const stream = streams[i];
+      if (stream.surface === 1) {
+        ceilingEntranceBand.floorMinStreamBrightness = Math.min(ceilingEntranceBand.floorMinStreamBrightness, stream.brightness);
+        ceilingEntranceBand.floorMaxStreamBrightness = Math.max(ceilingEntranceBand.floorMaxStreamBrightness, stream.brightness);
+      } else if (stream.surface === 3) {
+        ceilingEntranceBand.sampledStreams++;
+        ceilingEntranceBand.minStreamBrightness = Math.min(ceilingEntranceBand.minStreamBrightness, stream.brightness);
+        ceilingEntranceBand.maxStreamBrightness = Math.max(ceilingEntranceBand.maxStreamBrightness, stream.brightness);
+        ceilingPhaseMask |= 1 << Math.min(15, Math.floor(stream.phase / stream.flowRange * 16));
+        ceilingGapMask |= 1 << Math.min(15, stream.gapLength);
+      }
+    }
+    for (let bits = ceilingPhaseMask; bits; bits >>>= 1) ceilingEntranceBand.phaseBucketCount += bits & 1;
+    for (let bits = ceilingGapMask; bits; bits >>>= 1) ceilingEntranceBand.gapLengthDiversity += bits & 1;
+    for (let surface = 1; surface < MATRIX_SURFACES.length; surface++) {
+      const detail = surfaceDetails[surface], layout = { plane: detail.planeAxis === "y" ? "horizontal" : "vertical", flow: detail.flow };
+      layout[detail.planeAxis] = detail.planePosition;
+      layout.minX = detail.coverageBounds[0];
+      layout.minY = detail.coverageBounds[1];
+      layout.minZ = detail.coverageBounds[2];
+      layout.maxX = detail.coverageBounds[3];
+      layout.maxY = detail.coverageBounds[4];
+      layout.maxZ = detail.coverageBounds[5];
+      surfaceLayout[MATRIX_SURFACES[surface]] = layout;
+    }
+    surfaceLayout.ceiling = { plane: "horizontal", flow: "entrance-to-back" };
+    surfaceLayout.leftWall = { plane: "vertical", flow: "down" };
+    surfaceLayout.rightWall = { plane: "vertical", flow: "down" };
     // Mix spatial neighbours before forming balanced eight-glyph blocks. Each block
     // mutates on its own phase while retaining exactly one instance of every glyph.
     for (let i = entries.length - 1; i > 0; i--) {
@@ -315,13 +396,32 @@
     for (let i = 0; i < entries.length; i++) {
       const entry = entries[i];
       const stream = streams[entry.stream];
-      registryHash = Math.imul(registryHash ^ entry.kind ^ (entry.surface << 4) ^ (entry.rank << 8), 16777619) >>> 0;
+      registryHash = Math.imul(registryHash ^ entry.kind ^ (entry.surface << 4) ^ (entry.rank << 8) ^ ((entry.facing + 1) << 12), 16777619) >>> 0;
       registryHash = Math.imul(registryHash ^ Math.round((entry.x + entry.y + entry.z) * 1000), 16777619) >>> 0;
       registryHash = Math.imul(registryHash ^ Math.round(stream.brightness * 1000) ^ (stream.trainLength << 12) ^ (stream.gapLength << 20), 16777619) >>> 0;
     }
 
     const nodes = [], cr = Math.cos(m.ry), sr = Math.sin(m.ry);
-    const perGlyphCapacity = Math.ceil(entries.length / MATRIX_TYPES);
+    let perGlyphCapacity = Math.ceil(entries.length / MATRIX_TYPES);
+    if (renderer.kind === "canvas2d") {
+      const capacityCounts = new Int32Array(MATRIX_TYPES);
+      perGlyphCapacity = 0;
+      // Canvas always keeps rank zero. Enumerate the bounded mutation phases once so
+      // its fixed buffers cover every eligible glyph without reserving hidden ranks.
+      for (let phase = 0; phase < MATRIX_TYPES * 16; phase++) {
+        capacityCounts.fill(0);
+        const version = phase >> 4, fraction = phase & 15;
+        for (let i = 0; i < entries.length; i++) {
+          const entry = entries[i];
+          if (entry.surface !== 0 && entry.rank >= MATRIX_DENSITY.canvas2d) continue;
+          const block = i >> 3;
+          const phasedVersion = version + (fraction + ((block * 13) & 15) >= 16 ? 1 : 0);
+          const glyph = ((i & 7) + phasedVersion + ((block * 5) & 7)) & 7;
+          capacityCounts[glyph]++;
+        }
+        for (let glyph = 0; glyph < MATRIX_TYPES; glyph++) perGlyphCapacity = Math.max(perGlyphCapacity, capacityCounts[glyph]);
+      }
+    }
     for (let glyph = 0; glyph < MATRIX_TYPES; glyph++) {
       const node = createNode({ geometry: hubModels.matrixGlyph(glyph), instanceData: new Float32Array(perGlyphCapacity * 20), instanceCount: 0, instanceVersion: 0 });
       node.fixedInstanceCapacity = true;
@@ -351,15 +451,15 @@
     let maxLocalZ = -Infinity;
     for (let surface = 1; surface < MATRIX_SURFACES.length; surface++) maxLocalZ = Math.max(maxLocalZ, surfaceMaxLocalZ[surface]);
     return {
-      group, room, rimLiner, mirrorNode, mouth: m, nodes, entries, streams, cr, sr, cycle, portal,
+      group, room, mirrorNode, mouth: m, nodes, entries, streams, cr, sr, cycle, portal,
       streamCount, hangingStreamCount: freeCount, entranceStreamCount: entranceCount, wallStreamCount: streamCount - freeCount, streamLength,
-      rainGlyphCount: streamCount * streamLength, surfaceCounts, surfaceStreams, surfaceEdgeMargins, surfaceRepresentativeStreams, surfaceDirections, surfaceFacings, surfaceMinLocalZ, surfaceMaxLocalZ, surfaceHeadPositions, surfaceGapPositions, surfaceActiveCounts: new Int32Array(MATRIX_SURFACES.length),
+      rainGlyphCount: streamCount * streamLength, surfaceCounts, surfaceStreams, surfaceEdgeMargins, surfaceRepresentativeStreams, surfaceDirections, surfaceFacings, surfaceMinLocalZ, surfaceMaxLocalZ, surfaceHeadPositions, surfaceGapPositions, surfaceActiveCounts: new Int32Array(MATRIX_SURFACES.length), surfaceSections, surfaceDetails, surfaceLayout,
       glyphCount: entries.length, activeGlyphCount: 0, brightTipCount: 0, capacity: perGlyphCapacity * MATRIX_TYPES,
-      perGlyphCapacity, bufferBytes, registryBytes: entries.length * 64 + streams.length * 40, registryHash: registryHash.toString(16).padStart(8, "0"), quality: renderer.kind === "canvas2d" ? "canvas2d" : renderer.quality,
+      perGlyphCapacity, bufferBytes, registryBytes: entries.length * 64 + streams.length * 44 + surfaceSections.length * 128, surfaceMetadataBytes: surfaceSections.length * 128, registryHash: registryHash.toString(16).padStart(8, "0"), quality: renderer.kind === "canvas2d" ? "canvas2d" : renderer.quality,
       densityRankLimit: renderer.kind === "canvas2d" ? MATRIX_DENSITY.canvas2d : MATRIX_DENSITY[renderer.quality],
       glyphVersion: -1, previousGlyphVersion: -1, mutationHash: 0, updates: 0, prewarmCount: 0,
       allocationCount: MATRIX_TYPES, rebuildCount: 1, preloaded: false, prewarmed: false, visible: false, drawEnabled: false, drawnGlyphCount: 0, firstGlyphY: 0,
-      minBrightness, maxBrightness, minTrainLength, maxTrainLength, minGapLength, maxGapLength,
+      minBrightness, maxBrightness, minTrainLength, maxTrainLength, minGapLength, maxGapLength, ceilingEntranceBand,
       maxLocalZ, portalClearance: PORTAL_Z - maxLocalZ, movingGapCount: 0, representativeHeadPhase: 0
     };
   };
@@ -441,7 +541,6 @@
     }
     matrixCave.visible = visible;
     matrixCave.drawEnabled = visible;
-    matrixCave.rimLiner.visible = visible;
     if (!preloaded && !wasPreloaded) {
       matrixCave.drawnGlyphCount = 0;
       for (let glyph = 0; glyph < MATRIX_TYPES; glyph++) matrixCave.nodes[glyph].drawInstanceCount = 0;
@@ -454,6 +553,13 @@
     const counts = matrixCave.surfaceActiveCounts;
     counts.fill(0);
     for (let glyph = 0; glyph < MATRIX_TYPES; glyph++) matrixCave.nodes[glyph].instanceCount = 0;
+    const ceilingBand = matrixCave.ceilingEntranceBand;
+    ceilingBand.sampledGlyphs = 0;
+    ceilingBand.visibleGlyphs = 0;
+    ceilingBand.gapGlyphs = 0;
+    ceilingBand.brightTips = 0;
+    ceilingBand.minVisibleBrightness = Infinity;
+    ceilingBand.maxVisibleBrightness = -Infinity;
     let active = 0, bright = 0, movingGaps = 0, first = true, mutationHash = 2166136261;
     for (let i = 0; i < matrixCave.entries.length; i++) {
       const entry = matrixCave.entries[i];
@@ -478,6 +584,16 @@
           const trail = 1 - trainPosition / stream.trainLength;
           tip = trainPosition === 0 ? 1 : trainPosition === 1 ? 0.55 : 0;
           glow *= 0.48 + trail * 0.52;
+        }
+        if (entry.surface === 3 && flow >= stream.flowMax - MATRIX_SURFACE_GAP * 3) {
+          ceilingBand.sampledGlyphs++;
+          if (trainPosition >= stream.trainLength) ceilingBand.gapGlyphs++;
+          else {
+            ceilingBand.visibleGlyphs++;
+            if (tip > 0) ceilingBand.brightTips++;
+            ceilingBand.minVisibleBrightness = Math.min(ceilingBand.minVisibleBrightness, glow);
+            ceilingBand.maxVisibleBrightness = Math.max(ceilingBand.maxVisibleBrightness, glow);
+          }
         }
         if (entry.kind === MATRIX_FLOOR || entry.kind === MATRIX_CEILING) z = flow;
         else y = flow;
@@ -512,6 +628,7 @@
     matrixCave.brightTipCount = bright;
     matrixCave.movingGapCount = preloaded ? movingGaps : 0;
     matrixCave.drawnGlyphCount = visible ? active : 0;
+    if (ceilingBand.minVisibleBrightness === Infinity) ceilingBand.minVisibleBrightness = ceilingBand.maxVisibleBrightness = 0;
     for (let surface = 1; surface < MATRIX_SURFACES.length; surface++) {
       const streamIndex = matrixCave.surfaceRepresentativeStreams[surface];
       if (streamIndex < 0) continue;
@@ -739,11 +856,9 @@
       // Sit inside the rim so the cave floor ends behind the reflection.
       const node = createNode({ position: { x: 0, y: 1.5, z: 0.5 }, geometry: hubModels.mirrorPanel(), mirror: true, mirrorWalkThrough: true });
       const room = createNode({ geometry: hubModels.matrixChamber(), scale: { x: 0, y: 0, z: 0 } });
-      const rimLiner = createNode({ geometry: hubModels.matrixRimLiner(), visible: false });
-      addChild(room, rimLiner);
       addChild(group, room, node);
-      matrixCave = buildMatrixRain(group, room, rimLiner, node, m);
-      mirrorCave = { slot, mouth: m, group, rim, room, rimLiner, node, sign: null };
+      matrixCave = buildMatrixRain(group, room, node, m);
+      mirrorCave = { slot, mouth: m, group, rim, room, node, sign: null };
     } else if (slot.status === "sleeping") {
       // Bedrolls lie along +x, as the sleep pose assumes
       addChild(group, createNode({ position: { x: 0, y: 0.05, z: -4.5 }, rotation: { x: 0, y: -m.ry, z: 0 }, geometry: hubModels.bedroll(), depthBias: 0.3 }));
@@ -1691,6 +1806,12 @@
           get streamLength() { return matrixCave.streamLength; },
           get glyphCount() { return matrixCave.glyphCount; },
           get rainGlyphCount() { return matrixCave.rainGlyphCount; },
+          get surfaceSectionCount() { return matrixCave.surfaceSections.length; },
+          get surfaceStreamCount() {
+            let count = 0;
+            for (let surface = 1; surface < MATRIX_SURFACES.length; surface++) count += matrixCave.surfaceStreams[surface];
+            return count;
+          },
           get surfaceGlyphCount() { return matrixCave.glyphCount - matrixCave.rainGlyphCount; },
           get activeGlyphCount() { return matrixCave.activeGlyphCount; },
           get brightTipCount() { return matrixCave.brightTipCount; },
@@ -1702,6 +1823,7 @@
           get bufferCount() { return MATRIX_TYPES; },
           get bufferBytes() { return matrixCave.bufferBytes; },
           get registryBytes() { return matrixCave.registryBytes; },
+          get surfaceMetadataBytes() { return matrixCave.surfaceMetadataBytes; },
           get registryHash() { return matrixCave.registryHash; },
           get allocationCount() { return matrixCave.allocationCount; },
           get rebuildCount() { return matrixCave.rebuildCount; },
@@ -1709,88 +1831,162 @@
           get qualityDensity() { return matrixCave.densityRankLimit / 8; },
           get surfacePitch() { return MATRIX_SURFACE_PITCH; },
           get surfaceGap() { return MATRIX_SURFACE_GAP; },
-          surfaceLayout: MATRIX_LAYOUT,
+          get surfaceLayout() { return matrixCave.surfaceLayout; },
+          get removedEntrancePanel() { return mirrorCave.rim.geometry.removedInteriorPanel; },
+          get removedExteriorMatrixSurface() { return mirrorCave.room.geometry.removedMatrixSurface; },
+          get removedExteriorHeader() { return mirrorCave.room.geometry.removedExteriorHeader; },
+          get removedExteriorSoffit() { return mirrorCave.room.geometry.removedExteriorSoffit; },
+          get ceilingEntranceBand() {
+            const audit = matrixCave.ceilingEntranceBand;
+            return {
+              sampledStreamCount: audit.sampledStreams,
+              streamBrightnessMin: audit.minStreamBrightness,
+              streamBrightnessMax: audit.maxStreamBrightness,
+              floorStreamBrightnessMin: audit.floorMinStreamBrightness,
+              floorStreamBrightnessMax: audit.floorMaxStreamBrightness,
+              phaseBucketCount: audit.phaseBucketCount,
+              phaseBucketCapacity: 16,
+              gapLengthDiversity: audit.gapLengthDiversity,
+              sampledGlyphCount: audit.sampledGlyphs,
+              visibleGlyphCount: audit.visibleGlyphs,
+              gapGlyphCount: audit.gapGlyphs,
+              brightTipCount: audit.brightTips,
+              visibleBrightnessMin: audit.minVisibleBrightness,
+              visibleBrightnessMax: audit.maxVisibleBrightness
+            };
+          },
+          get invalidBackingSurfaceCount() {
+            let count = 0;
+            for (let surface = 1; surface < MATRIX_SURFACES.length; surface++) {
+              const detail = matrixCave.surfaceDetails[surface];
+              if (!detail.inwardFacing || !detail.fullyBacked) count++;
+            }
+            return count;
+          },
+          get portalCrossingSurfaceCount() {
+            let count = 0;
+            for (let surface = 1; surface < MATRIX_SURFACES.length; surface++) if (matrixCave.surfaceDetails[surface].portalCrossing) count++;
+            return count;
+          },
+          get physicalInteriorPortalCrossingFaceCount() {
+            let count = 0;
+            const geometry = mirrorCave.room.geometry;
+            for (let face = 0; face < geometry.faces.length; face++) {
+              const indices = geometry.faces[face].i;
+              for (let corner = 0; corner < indices.length; corner++) {
+                if (geometry.verts[indices[corner] * 3 + 2] >= matrixCave.portal.opening.planeZ) {
+                  count++;
+                  break;
+                }
+              }
+            }
+            return count;
+          },
+          surfaceInfo: (surfaceName) => {
+            const surface = MATRIX_SURFACES.indexOf(surfaceName), detail = surface > 0 ? matrixCave.surfaceDetails[surface] : null;
+            if (!detail) return null;
+            return {
+              id: surfaceName,
+              backingSurfaceIds: detail.backingIds.slice(),
+              planeAxis: detail.planeAxis,
+              planePosition: detail.planePosition,
+              inwardNormal: detail.normal.slice(),
+              coverageBounds: detail.coverageBounds.slice(),
+              glyphBounds: detail.glyphBounds.slice(),
+              maximumBackingPlaneAlignmentError: detail.maxAlignmentError,
+              minimumGlyphToBackingClearance: detail.minSurfaceClearance,
+              uncoveredEdgeMargin: detail.uncoveredEdgeMargin,
+              inwardFacing: detail.inwardFacing,
+              fullyBacked: detail.fullyBacked,
+              crossesPortalPlane: detail.portalCrossing,
+              partCount: detail.partCount,
+              streamCount: detail.streamCount,
+              glyphCount: detail.glyphCount,
+              flowMin: detail.flowMin,
+              flowMax: detail.flowMax,
+              minimumCharactersPerStream: detail.minCharactersPerStream,
+              maximumCharactersPerStream: detail.maxCharactersPerStream
+            };
+          },
+          get floorSectionCount() { return matrixCave.surfaceDetails[1].partCount; },
+          get floorBackingCount() { return matrixCave.surfaceDetails[1].backingIds.length; },
+          get floorBackingSurfaceIdentifier() { return matrixCave.surfaceDetails[1].backingIds[0]; },
+          get floorStreamCount() { return matrixCave.surfaceStreams[1]; },
+          get floorGlyphCount() { return matrixCave.surfaceCounts[1]; },
           surfaceCounts: {
             get freeRain() { return matrixCave.surfaceCounts[0]; },
-            get floor() { return matrixCave.surfaceCounts[1] + matrixCave.surfaceCounts[2]; },
-            get ceiling() { return matrixCave.surfaceCounts[3] + matrixCave.surfaceCounts[4]; },
-            get leftWall() { return matrixCave.surfaceCounts[5] + matrixCave.surfaceCounts[7]; },
-            get rightWall() { return matrixCave.surfaceCounts[6] + matrixCave.surfaceCounts[8]; },
-            get backWall() { return matrixCave.surfaceCounts[9]; },
-            get doorway() { return matrixCave.surfaceCounts[10] + matrixCave.surfaceCounts[11] + matrixCave.surfaceCounts[12] + matrixCave.surfaceCounts[13] + matrixCave.surfaceCounts[14]; },
-            get mainFloor() { return matrixCave.surfaceCounts[1]; },
-            get vestibuleFloor() { return matrixCave.surfaceCounts[2]; },
-            get mainCeiling() { return matrixCave.surfaceCounts[3]; },
-            get vestibuleCeiling() { return matrixCave.surfaceCounts[4]; },
-            get mainLeftWall() { return matrixCave.surfaceCounts[5]; },
-            get mainRightWall() { return matrixCave.surfaceCounts[6]; },
-            get vestibuleLeftWall() { return matrixCave.surfaceCounts[7]; },
-            get vestibuleRightWall() { return matrixCave.surfaceCounts[8]; },
-            get transitionHeader() { return matrixCave.surfaceCounts[10]; },
-            get doorwayLintel() { return matrixCave.surfaceCounts[11]; },
-            get transitionReturns() { return matrixCave.surfaceCounts[12]; },
-            get doorwayJambs() { return matrixCave.surfaceCounts[13]; },
-            get rimUnderside() { return matrixCave.surfaceCounts[14]; }
+            get floor() { return matrixCave.surfaceCounts[1]; },
+            get ceiling() { return matrixCave.surfaceCounts[2] + matrixCave.surfaceCounts[3]; },
+            get leftWall() { return matrixCave.surfaceCounts[4] + matrixCave.surfaceCounts[6]; },
+            get rightWall() { return matrixCave.surfaceCounts[5] + matrixCave.surfaceCounts[7]; },
+            get backWall() { return matrixCave.surfaceCounts[8]; },
+            get doorway() { return matrixCave.surfaceCounts[9] + matrixCave.surfaceCounts[10]; },
+            get mainCeiling() { return matrixCave.surfaceCounts[2]; },
+            get vestibuleCeiling() { return matrixCave.surfaceCounts[3]; },
+            get mainLeftWall() { return matrixCave.surfaceCounts[4]; },
+            get mainRightWall() { return matrixCave.surfaceCounts[5]; },
+            get vestibuleLeftWall() { return matrixCave.surfaceCounts[6]; },
+            get vestibuleRightWall() { return matrixCave.surfaceCounts[7]; },
+            get transitionHeader() { return matrixCave.surfaceCounts[9]; },
+            get doorwayLintel() { return 0; },
+            get transitionReturns() { return matrixCave.surfaceCounts[10]; },
+            get doorwayJambs() { return 0; },
+            get rimUnderside() { return 0; }
           },
           activeSurfaceCounts: {
             get freeRain() { return matrixCave.surfaceActiveCounts[0]; },
-            get floor() { return matrixCave.surfaceActiveCounts[1] + matrixCave.surfaceActiveCounts[2]; },
-            get ceiling() { return matrixCave.surfaceActiveCounts[3] + matrixCave.surfaceActiveCounts[4]; },
-            get leftWall() { return matrixCave.surfaceActiveCounts[5] + matrixCave.surfaceActiveCounts[7]; },
-            get rightWall() { return matrixCave.surfaceActiveCounts[6] + matrixCave.surfaceActiveCounts[8]; },
-            get backWall() { return matrixCave.surfaceActiveCounts[9]; },
-            get doorway() { return matrixCave.surfaceActiveCounts[10] + matrixCave.surfaceActiveCounts[11] + matrixCave.surfaceActiveCounts[12] + matrixCave.surfaceActiveCounts[13] + matrixCave.surfaceActiveCounts[14]; },
-            get mainFloor() { return matrixCave.surfaceActiveCounts[1]; },
-            get vestibuleFloor() { return matrixCave.surfaceActiveCounts[2]; },
-            get mainCeiling() { return matrixCave.surfaceActiveCounts[3]; },
-            get vestibuleCeiling() { return matrixCave.surfaceActiveCounts[4]; },
-            get mainLeftWall() { return matrixCave.surfaceActiveCounts[5]; },
-            get mainRightWall() { return matrixCave.surfaceActiveCounts[6]; },
-            get vestibuleLeftWall() { return matrixCave.surfaceActiveCounts[7]; },
-            get vestibuleRightWall() { return matrixCave.surfaceActiveCounts[8]; },
-            get transitionHeader() { return matrixCave.surfaceActiveCounts[10]; },
-            get doorwayLintel() { return matrixCave.surfaceActiveCounts[11]; },
-            get transitionReturns() { return matrixCave.surfaceActiveCounts[12]; },
-            get doorwayJambs() { return matrixCave.surfaceActiveCounts[13]; },
-            get rimUnderside() { return matrixCave.surfaceActiveCounts[14]; }
+            get floor() { return matrixCave.surfaceActiveCounts[1]; },
+            get ceiling() { return matrixCave.surfaceActiveCounts[2] + matrixCave.surfaceActiveCounts[3]; },
+            get leftWall() { return matrixCave.surfaceActiveCounts[4] + matrixCave.surfaceActiveCounts[6]; },
+            get rightWall() { return matrixCave.surfaceActiveCounts[5] + matrixCave.surfaceActiveCounts[7]; },
+            get backWall() { return matrixCave.surfaceActiveCounts[8]; },
+            get doorway() { return matrixCave.surfaceActiveCounts[9] + matrixCave.surfaceActiveCounts[10]; },
+            get mainCeiling() { return matrixCave.surfaceActiveCounts[2]; },
+            get vestibuleCeiling() { return matrixCave.surfaceActiveCounts[3]; },
+            get mainLeftWall() { return matrixCave.surfaceActiveCounts[4]; },
+            get mainRightWall() { return matrixCave.surfaceActiveCounts[5]; },
+            get vestibuleLeftWall() { return matrixCave.surfaceActiveCounts[6]; },
+            get vestibuleRightWall() { return matrixCave.surfaceActiveCounts[7]; },
+            get transitionHeader() { return matrixCave.surfaceActiveCounts[9]; },
+            get doorwayLintel() { return 0; },
+            get transitionReturns() { return matrixCave.surfaceActiveCounts[10]; },
+            get doorwayJambs() { return 0; },
+            get rimUnderside() { return 0; }
           },
           surfaceStreams: {
             get freeRain() { return matrixCave.surfaceStreams[0]; },
-            get floor() { return matrixCave.surfaceStreams[1] + matrixCave.surfaceStreams[2]; },
-            get ceiling() { return matrixCave.surfaceStreams[3] + matrixCave.surfaceStreams[4]; },
-            get leftWall() { return matrixCave.surfaceStreams[5] + matrixCave.surfaceStreams[7]; },
-            get rightWall() { return matrixCave.surfaceStreams[6] + matrixCave.surfaceStreams[8]; },
-            get backWall() { return matrixCave.surfaceStreams[9]; },
-            get doorway() { return matrixCave.surfaceStreams[10] + matrixCave.surfaceStreams[11] + matrixCave.surfaceStreams[12] + matrixCave.surfaceStreams[13] + matrixCave.surfaceStreams[14]; },
-            get mainFloor() { return matrixCave.surfaceStreams[1]; },
-            get vestibuleFloor() { return matrixCave.surfaceStreams[2]; },
-            get mainCeiling() { return matrixCave.surfaceStreams[3]; },
-            get vestibuleCeiling() { return matrixCave.surfaceStreams[4]; },
-            get mainLeftWall() { return matrixCave.surfaceStreams[5]; },
-            get mainRightWall() { return matrixCave.surfaceStreams[6]; },
-            get vestibuleLeftWall() { return matrixCave.surfaceStreams[7]; },
-            get vestibuleRightWall() { return matrixCave.surfaceStreams[8]; },
-            get transitionHeader() { return matrixCave.surfaceStreams[10]; },
-            get doorwayLintel() { return matrixCave.surfaceStreams[11]; },
-            get transitionReturns() { return matrixCave.surfaceStreams[12]; },
-            get doorwayJambs() { return matrixCave.surfaceStreams[13]; },
-            get rimUnderside() { return matrixCave.surfaceStreams[14]; }
+            get floor() { return matrixCave.surfaceStreams[1]; },
+            get ceiling() { return matrixCave.surfaceStreams[2] + matrixCave.surfaceStreams[3]; },
+            get leftWall() { return matrixCave.surfaceStreams[4] + matrixCave.surfaceStreams[6]; },
+            get rightWall() { return matrixCave.surfaceStreams[5] + matrixCave.surfaceStreams[7]; },
+            get backWall() { return matrixCave.surfaceStreams[8]; },
+            get doorway() { return matrixCave.surfaceStreams[9] + matrixCave.surfaceStreams[10]; },
+            get mainCeiling() { return matrixCave.surfaceStreams[2]; },
+            get vestibuleCeiling() { return matrixCave.surfaceStreams[3]; },
+            get mainLeftWall() { return matrixCave.surfaceStreams[4]; },
+            get mainRightWall() { return matrixCave.surfaceStreams[5]; },
+            get vestibuleLeftWall() { return matrixCave.surfaceStreams[6]; },
+            get vestibuleRightWall() { return matrixCave.surfaceStreams[7]; },
+            get transitionHeader() { return matrixCave.surfaceStreams[9]; },
+            get doorwayLintel() { return 0; },
+            get transitionReturns() { return matrixCave.surfaceStreams[10]; },
+            get doorwayJambs() { return 0; },
+            get rimUnderside() { return 0; }
           },
           surfaceEdgeMargins: {
-            get mainFloor() { return matrixCave.surfaceEdgeMargins[1]; },
-            get vestibuleFloor() { return matrixCave.surfaceEdgeMargins[2]; },
-            get mainCeiling() { return matrixCave.surfaceEdgeMargins[3]; },
-            get vestibuleCeiling() { return matrixCave.surfaceEdgeMargins[4]; },
-            get mainLeftWall() { return matrixCave.surfaceEdgeMargins[5]; },
-            get mainRightWall() { return matrixCave.surfaceEdgeMargins[6]; },
-            get vestibuleLeftWall() { return matrixCave.surfaceEdgeMargins[7]; },
-            get vestibuleRightWall() { return matrixCave.surfaceEdgeMargins[8]; },
-            get backWall() { return matrixCave.surfaceEdgeMargins[9]; },
-            get transitionHeader() { return matrixCave.surfaceEdgeMargins[10]; },
-            get doorwayLintel() { return matrixCave.surfaceEdgeMargins[11]; },
-            get transitionReturns() { return matrixCave.surfaceEdgeMargins[12]; },
-            get doorwayJambs() { return matrixCave.surfaceEdgeMargins[13]; },
-            get rimUnderside() { return matrixCave.surfaceEdgeMargins[14]; }
+            get floor() { return matrixCave.surfaceEdgeMargins[1]; },
+            get mainCeiling() { return matrixCave.surfaceEdgeMargins[2]; },
+            get vestibuleCeiling() { return matrixCave.surfaceEdgeMargins[3]; },
+            get mainLeftWall() { return matrixCave.surfaceEdgeMargins[4]; },
+            get mainRightWall() { return matrixCave.surfaceEdgeMargins[5]; },
+            get vestibuleLeftWall() { return matrixCave.surfaceEdgeMargins[6]; },
+            get vestibuleRightWall() { return matrixCave.surfaceEdgeMargins[7]; },
+            get backWall() { return matrixCave.surfaceEdgeMargins[8]; },
+            get transitionHeader() { return matrixCave.surfaceEdgeMargins[9]; },
+            get doorwayLintel() { return 0; },
+            get transitionReturns() { return matrixCave.surfaceEdgeMargins[10]; },
+            get doorwayJambs() { return 0; },
+            get rimUnderside() { return 0; }
           },
           get minBrightness() { return matrixCave.minBrightness; },
           get maxBrightness() { return matrixCave.maxBrightness; },
@@ -1804,73 +2000,67 @@
           get maxLocalZ() { return matrixCave.maxLocalZ; },
           get portalClearance() { return matrixCave.portalClearance; },
           surfaceDirections: {
-            freeRain: -1, mainFloor: -1, vestibuleFloor: -1, mainCeiling: -1, vestibuleCeiling: -1,
+            freeRain: -1, floor: -1, mainCeiling: -1, vestibuleCeiling: -1,
             mainLeftWall: -1, mainRightWall: -1, vestibuleLeftWall: -1, vestibuleRightWall: -1,
-            backWall: -1, transitionHeader: -1, doorwayLintel: -1, transitionReturns: -1, doorwayJambs: -1, rimUnderside: -1
+            backWall: -1, transitionHeader: -1, transitionReturns: -1
           },
           surfaceFacings: {
-            get mainFloor() { return matrixCave.surfaceFacings[1]; },
-            get vestibuleFloor() { return matrixCave.surfaceFacings[2]; },
-            get mainCeiling() { return matrixCave.surfaceFacings[3]; },
-            get vestibuleCeiling() { return matrixCave.surfaceFacings[4]; },
-            get mainLeftWall() { return matrixCave.surfaceFacings[5]; },
-            get mainRightWall() { return matrixCave.surfaceFacings[6]; },
-            get vestibuleLeftWall() { return matrixCave.surfaceFacings[7]; },
-            get vestibuleRightWall() { return matrixCave.surfaceFacings[8]; },
-            get backWall() { return matrixCave.surfaceFacings[9]; },
-            get transitionHeader() { return matrixCave.surfaceFacings[10]; },
-            get doorwayLintel() { return matrixCave.surfaceFacings[11]; },
-            get transitionReturns() { return matrixCave.surfaceFacings[12]; },
-            get doorwayJambs() { return matrixCave.surfaceFacings[13]; },
-            get rimUnderside() { return matrixCave.surfaceFacings[14]; }
+            get floor() { return matrixCave.surfaceFacings[1]; },
+            get mainCeiling() { return matrixCave.surfaceFacings[2]; },
+            get vestibuleCeiling() { return matrixCave.surfaceFacings[3]; },
+            get mainLeftWall() { return matrixCave.surfaceFacings[4]; },
+            get mainRightWall() { return matrixCave.surfaceFacings[5]; },
+            get vestibuleLeftWall() { return matrixCave.surfaceFacings[6]; },
+            get vestibuleRightWall() { return matrixCave.surfaceFacings[7]; },
+            get backWall() { return matrixCave.surfaceFacings[8]; },
+            get transitionHeader() { return matrixCave.surfaceFacings[9]; },
+            get transitionReturns() { return matrixCave.surfaceFacings[10]; },
+            get rimUnderside() { return 0; }
           },
           surfaceMaxLocalZ: {
-            get mainFloor() { return matrixCave.surfaceMaxLocalZ[1]; },
-            get vestibuleFloor() { return matrixCave.surfaceMaxLocalZ[2]; },
-            get mainCeiling() { return matrixCave.surfaceMaxLocalZ[3]; },
-            get vestibuleCeiling() { return matrixCave.surfaceMaxLocalZ[4]; },
-            get mainLeftWall() { return matrixCave.surfaceMaxLocalZ[5]; },
-            get mainRightWall() { return matrixCave.surfaceMaxLocalZ[6]; },
-            get vestibuleLeftWall() { return matrixCave.surfaceMaxLocalZ[7]; },
-            get vestibuleRightWall() { return matrixCave.surfaceMaxLocalZ[8]; },
-            get backWall() { return matrixCave.surfaceMaxLocalZ[9]; },
-            get transitionHeader() { return matrixCave.surfaceMaxLocalZ[10]; },
-            get doorwayLintel() { return matrixCave.surfaceMaxLocalZ[11]; },
-            get transitionReturns() { return matrixCave.surfaceMaxLocalZ[12]; },
-            get doorwayJambs() { return matrixCave.surfaceMaxLocalZ[13]; },
-            get rimUnderside() { return matrixCave.surfaceMaxLocalZ[14]; }
+            get floor() { return matrixCave.surfaceMaxLocalZ[1]; },
+            get mainCeiling() { return matrixCave.surfaceMaxLocalZ[2]; },
+            get vestibuleCeiling() { return matrixCave.surfaceMaxLocalZ[3]; },
+            get mainLeftWall() { return matrixCave.surfaceMaxLocalZ[4]; },
+            get mainRightWall() { return matrixCave.surfaceMaxLocalZ[5]; },
+            get vestibuleLeftWall() { return matrixCave.surfaceMaxLocalZ[6]; },
+            get vestibuleRightWall() { return matrixCave.surfaceMaxLocalZ[7]; },
+            get backWall() { return matrixCave.surfaceMaxLocalZ[8]; },
+            get transitionHeader() { return matrixCave.surfaceMaxLocalZ[9]; },
+            get doorwayLintel() { return null; },
+            get transitionReturns() { return matrixCave.surfaceMaxLocalZ[10]; },
+            get doorwayJambs() { return null; },
+            get rimUnderside() { return null; }
           },
           surfaceHeadPositions: {
-            get mainFloor() { return matrixCave.surfaceHeadPositions[1]; },
-            get vestibuleFloor() { return matrixCave.surfaceHeadPositions[2]; },
-            get mainCeiling() { return matrixCave.surfaceHeadPositions[3]; },
-            get vestibuleCeiling() { return matrixCave.surfaceHeadPositions[4]; },
-            get mainLeftWall() { return matrixCave.surfaceHeadPositions[5]; },
-            get mainRightWall() { return matrixCave.surfaceHeadPositions[6]; },
-            get vestibuleLeftWall() { return matrixCave.surfaceHeadPositions[7]; },
-            get vestibuleRightWall() { return matrixCave.surfaceHeadPositions[8]; },
-            get backWall() { return matrixCave.surfaceHeadPositions[9]; },
-            get transitionHeader() { return matrixCave.surfaceHeadPositions[10]; },
-            get doorwayLintel() { return matrixCave.surfaceHeadPositions[11]; },
-            get transitionReturns() { return matrixCave.surfaceHeadPositions[12]; },
-            get doorwayJambs() { return matrixCave.surfaceHeadPositions[13]; },
-            get rimUnderside() { return matrixCave.surfaceHeadPositions[14]; }
+            get floor() { return matrixCave.surfaceHeadPositions[1]; },
+            get mainCeiling() { return matrixCave.surfaceHeadPositions[2]; },
+            get vestibuleCeiling() { return matrixCave.surfaceHeadPositions[3]; },
+            get mainLeftWall() { return matrixCave.surfaceHeadPositions[4]; },
+            get mainRightWall() { return matrixCave.surfaceHeadPositions[5]; },
+            get vestibuleLeftWall() { return matrixCave.surfaceHeadPositions[6]; },
+            get vestibuleRightWall() { return matrixCave.surfaceHeadPositions[7]; },
+            get backWall() { return matrixCave.surfaceHeadPositions[8]; },
+            get transitionHeader() { return matrixCave.surfaceHeadPositions[9]; },
+            get doorwayLintel() { return null; },
+            get transitionReturns() { return matrixCave.surfaceHeadPositions[10]; },
+            get doorwayJambs() { return null; },
+            get rimUnderside() { return null; }
           },
           surfaceGapPositions: {
-            get mainFloor() { return matrixCave.surfaceGapPositions[1]; },
-            get vestibuleFloor() { return matrixCave.surfaceGapPositions[2]; },
-            get mainCeiling() { return matrixCave.surfaceGapPositions[3]; },
-            get vestibuleCeiling() { return matrixCave.surfaceGapPositions[4]; },
-            get mainLeftWall() { return matrixCave.surfaceGapPositions[5]; },
-            get mainRightWall() { return matrixCave.surfaceGapPositions[6]; },
-            get vestibuleLeftWall() { return matrixCave.surfaceGapPositions[7]; },
-            get vestibuleRightWall() { return matrixCave.surfaceGapPositions[8]; },
-            get backWall() { return matrixCave.surfaceGapPositions[9]; },
-            get transitionHeader() { return matrixCave.surfaceGapPositions[10]; },
-            get doorwayLintel() { return matrixCave.surfaceGapPositions[11]; },
-            get transitionReturns() { return matrixCave.surfaceGapPositions[12]; },
-            get doorwayJambs() { return matrixCave.surfaceGapPositions[13]; },
-            get rimUnderside() { return matrixCave.surfaceGapPositions[14]; }
+            get floor() { return matrixCave.surfaceGapPositions[1]; },
+            get mainCeiling() { return matrixCave.surfaceGapPositions[2]; },
+            get vestibuleCeiling() { return matrixCave.surfaceGapPositions[3]; },
+            get mainLeftWall() { return matrixCave.surfaceGapPositions[4]; },
+            get mainRightWall() { return matrixCave.surfaceGapPositions[5]; },
+            get vestibuleLeftWall() { return matrixCave.surfaceGapPositions[6]; },
+            get vestibuleRightWall() { return matrixCave.surfaceGapPositions[7]; },
+            get backWall() { return matrixCave.surfaceGapPositions[8]; },
+            get transitionHeader() { return matrixCave.surfaceGapPositions[9]; },
+            get doorwayLintel() { return null; },
+            get transitionReturns() { return matrixCave.surfaceGapPositions[10]; },
+            get doorwayJambs() { return null; },
+            get rimUnderside() { return null; }
           },
           representativeStream: {
             get speed() { return matrixCave.streams[matrixCave.surfaceRepresentativeStreams[1]].speed; },
