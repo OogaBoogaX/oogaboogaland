@@ -49,6 +49,7 @@
   // Reach at which a caveman is inside a cave
   const TUNNEL_REACH = 2.2;
   const MATRIX_TYPES = 8;
+  const MATRIX_RAIN_GAP = 0.19;
   const MATRIX_SURFACE_PITCH = 0.12, MATRIX_SURFACE_GAP = 0.13, MATRIX_GLYPH_HZ = 20;
   const MATRIX_PIXEL_PITCH = 0.021, MATRIX_PIXEL_SIZE = 0.016;
   const MATRIX_STREAM_SPEED_MIN = 0.56, MATRIX_STREAM_SPEED_RANGE = 0.64;
@@ -189,6 +190,100 @@
     const x = m.x + sr * PORTAL_Z - MATRIX_WORLD.origin[0], z = m.z + cr * PORTAL_Z - MATRIX_WORLD.origin[2];
     const cross = Math.max(minX, Math.min(maxX, -(x * cr - z * sr)));
     return Math.hypot(x + cr * cross, z - sr * cross);
+  };
+  // The original hanging code is separate from the surface-following lanes.
+  // Prepare fixed columns inside the real carved volume, never the old flat liner.
+  const buildCaveRain = (slot, m, group, caveIndex) => {
+    const canvas = renderer.kind === "canvas2d", limit = canvas ? 18 : 48, trainLength = canvas ? 9 : 14;
+    const cr = Math.cos(m.ry), sr = Math.sin(m.ry), rand = mulberry32(fnv1a(`${slot.id}:rain`));
+    const streams = [], nodes = [], obstacles = [], column = { caveIndex: 0, floor: 0, ceiling: 0 };
+    const footprint = 0.055, halfHeight = 0.0605, clearance = 0.02;
+    const visit = (node) => {
+      if (node.geometry && !node.mirror) {
+        const verts = node.geometry.verts, transform = node.world;
+        let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity, minZ = Infinity, maxZ = -Infinity;
+        for (let i = 0; i < verts.length; i += 3) {
+          const x = verts[i], y = verts[i + 1], z = verts[i + 2];
+          const wx = transform[0] * x + transform[4] * y + transform[8] * z + transform[12] - m.x;
+          const wy = transform[1] * x + transform[5] * y + transform[9] * z + transform[13];
+          const wz = transform[2] * x + transform[6] * y + transform[10] * z + transform[14] - m.z;
+          const lx = cr * wx - sr * wz, lz = sr * wx + cr * wz;
+          minX = Math.min(minX, lx); maxX = Math.max(maxX, lx);
+          minY = Math.min(minY, wy); maxY = Math.max(maxY, wy);
+          minZ = Math.min(minZ, lz); maxZ = Math.max(maxZ, lz);
+        }
+        if (minZ < -0.6) obstacles.push({ minX, maxX, minY, maxY, minZ, maxZ });
+      }
+      for (let i = 0; i < node.children.length; i++) visit(node.children[i]);
+    };
+    visit(group);
+    for (let attempt = 0; attempt < limit * 16 && streams.length < limit; attempt++) {
+      const lx = (rand() - 0.5) * 5, lz = streams.length < limit * 0.65 ? -0.7 - rand() * 1.55 : -2.55 - rand() * 3.2;
+      const x = m.x + cr * lx + sr * lz, z = m.z - sr * lx + cr * lz;
+      let minY = -Infinity, maxY = Infinity, valid = true;
+      for (let ix = -1; ix <= 1; ix++) for (let iz = -1; iz <= 1; iz++) {
+        if (!island.cavityAt(x + ix * footprint, z + iz * footprint, column) || column.caveIndex !== caveIndex || !Number.isFinite(column.ceiling)) valid = false;
+        else { minY = Math.max(minY, column.floor); maxY = Math.min(maxY, column.ceiling); }
+      }
+      minY += halfHeight + clearance; maxY -= halfHeight + clearance;
+      if (!valid || maxY - minY < 1) continue;
+      const blocked = [];
+      for (let i = 0; i < obstacles.length; i++) {
+        const o = obstacles[i];
+        if (lx + footprint < o.minX || lx - footprint > o.maxX || lz + footprint < o.minZ || lz - footprint > o.maxZ) continue;
+        blocked.push(o.minY - halfHeight - clearance, o.maxY + halfHeight + clearance);
+      }
+      const seed = fnv1a(`${slot.id}:rain:${streams.length}`), yaw = m.ry + (rand() - 0.5) * 0.18;
+      const period = maxY - minY + (trainLength - 1) * MATRIX_RAIN_GAP;
+      streams.push({ x, z, minY, maxY, yaw, cr: Math.cos(yaw), sr: Math.sin(yaw), period, trainLength, seed,
+        speed: MATRIX_STREAM_SPEED_MIN + rand() * MATRIX_STREAM_SPEED_RANGE, phase: rand() * period, brightness: 0.62 + rand() * 0.32,
+        rank: canvas ? 0 : streams.length % 8, distance: matrixTravelDistance(x, z, caveIndex), blocked });
+    }
+    const perGlyphCapacity = streams.length * Math.ceil(trainLength / MATRIX_TYPES);
+    for (let glyph = 0; glyph < MATRIX_TYPES; glyph++) {
+      const node = createNode({ geometry: { ...hubModels.matrixGlyph(glyph), matrixCave: caveIndex }, instanceData: new Float32Array(perGlyphCapacity * 20), instanceCount: 0, drawInstanceCount: 0, instanceVersion: 0, fixedInstanceCapacity: true });
+      addChild(root, node); placed.push(node); nodes.push(node);
+    }
+    return { streams, nodes, perGlyphCapacity, capacity: perGlyphCapacity * MATRIX_TYPES, bufferBytes: perGlyphCapacity * MATRIX_TYPES * 80,
+      spacing: MATRIX_RAIN_GAP, activeGlyphCount: 0, brightTipCount: 0, updates: 0, densityRankLimit: 0 };
+  };
+  const updateCaveRain = (cave, elapsed, visible, densityRankLimit) => {
+    const rain = cave.rain;
+    rain.activeGlyphCount = rain.brightTipCount = 0;
+    rain.densityRankLimit = densityRankLimit;
+    for (let glyph = 0; glyph < MATRIX_TYPES; glyph++) rain.nodes[glyph].instanceCount = rain.nodes[glyph].drawInstanceCount = 0;
+    if (!visible) return;
+    for (let i = 0; i < rain.streams.length; i++) {
+      const s = rain.streams[i];
+      if (s.rank >= densityRankLimit || s.distance - MATRIX_GLYPH_REACH >= MATRIX_WORLD.radius) continue;
+      const head = s.maxY - matrixModulo(elapsed * s.speed + s.phase, s.period);
+      const version = Math.floor(elapsed * MATRIX_GLYPH_HZ + (s.seed & 15) / 16);
+      for (let character = 0; character < s.trainLength; character++) {
+        const y = head + character * MATRIX_RAIN_GAP;
+        if (y < s.minY || y > s.maxY) continue;
+        let blocked = false;
+        for (let b = 0; b < s.blocked.length; b += 2) if (y >= s.blocked[b] && y <= s.blocked[b + 1]) { blocked = true; break; }
+        if (blocked) continue;
+        const glyph = (character + version + (s.seed & 7)) & 7, node = rain.nodes[glyph], slot = node.instanceCount++;
+        if (slot >= rain.perGlyphCapacity) throw new Error("Cave Matrix rain instance capacity exceeded");
+        const data = node.instanceData, offset = slot * 20;
+        data[offset] = s.cr; data[offset + 1] = 0; data[offset + 2] = -s.sr; data[offset + 3] = 0;
+        data[offset + 4] = 0; data[offset + 5] = 1; data[offset + 6] = 0; data[offset + 7] = 0;
+        data[offset + 8] = s.sr; data[offset + 9] = 0; data[offset + 10] = s.cr; data[offset + 11] = 0;
+        data[offset + 12] = s.x; data[offset + 13] = y; data[offset + 14] = s.z; data[offset + 15] = 1;
+        data[offset + 16] = s.brightness * (0.48 + (1 - character / s.trainLength) * 0.52);
+        data[offset + 17] = 0; data[offset + 18] = character === 0 ? 1 : character === 1 ? 0.55 : 0;
+        // Free-standing voxels, unlike surface glyphs, must be visible from behind.
+        data[offset + 19] = 0;
+        rain.activeGlyphCount++; if (character < 2) rain.brightTipCount++;
+      }
+    }
+    for (let glyph = 0; glyph < MATRIX_TYPES; glyph++) {
+      const node = rain.nodes[glyph];
+      node.drawInstanceCount = node.instanceCount;
+      if (rain.activeGlyphCount) node.instanceVersion++;
+    }
+    if (rain.activeGlyphCount) rain.updates++;
   };
   const clearMatrixDraw = (cave) => {
     cave.activeGlyphCount = cave.revealedGlyphCount = cave.drawnGlyphCount = cave.brightTipCount = cave.movingGapCount = 0;
@@ -451,6 +546,7 @@
     }
     const cave = {
       id: slot.id, caveIndex, mouth: m, cr, sr, nodes, sections, streams, entries, surfaceCounts, activeSurfaceCounts: { floor: 0, ceiling: 0, wall: 0, prop: 0 },
+      rain: buildCaveRain(slot, m, group, caveIndex),
       glyphCount: surfaceCounts.floor + surfaceCounts.ceiling + surfaceCounts.wall + surfaceCounts.prop,
       perGlyphCapacity, capacity: perGlyphCapacity * MATRIX_TYPES, bufferBytes: perGlyphCapacity * MATRIX_TYPES * 80,
       registryBytes: entries.length * 24 + streams.length * 112 + surfaceMetadataBytes, surfaceMetadataBytes, registryHash: registryHash.toString(16).padStart(8, "0"),
@@ -468,6 +564,7 @@
       cave.visible = cave.drawEnabled = visible && MATRIX_WORLD.radius > cave.minimumTravelDistance;
       cave.quality = renderer.kind === "canvas2d" ? "canvas2d" : renderer.quality;
       cave.densityRankLimit = densityRankLimit;
+      updateCaveRain(cave, elapsed, cave.visible, densityRankLimit);
       if (!visible || MATRIX_WORLD.radius <= cave.minimumTravelDistance) {
         clearMatrixDraw(cave);
         continue;
