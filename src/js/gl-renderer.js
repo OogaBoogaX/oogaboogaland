@@ -21,14 +21,17 @@
   const DEFAULT_MOON = { x: 0, y: -1, z: 0 };
   const DEFAULT_STAR_MATRIX = new Float32Array([1, 0, 0, 0, 1, 0, 0, 0, 1]);
   const CULL_MARGIN = 1;
+  const MIRROR_EPSILON = 1e-7;
   const UP = { x: 0, y: 1, z: 0 };
   const NORTH_UP = { x: 0, y: 0, z: -1 };
   const ZERO4 = new Float32Array([0, 0, 0, 1]);
   const NO_FOG = new Float32Array(3);
+  const NO_MATRIX_CAVES = new Float32Array(28);
   const FOG_OFF = 1e8;
   const LIGHT_EYE = { x: 0, y: 0, z: 0 };
   const MESH_STRIDE = 10;
   const LINE_STRIDE = 12;
+  const MATRIX_MASKS = new Int32Array([630678, 497559, 988959, 495513, 1009263, 288049, 456438, 616809]);
   const MESH_VS = `#version 300 es
 precision highp float;
 layout(location=0) in vec3 aPos;
@@ -47,14 +50,24 @@ out vec4 vColor;
 out vec4 vParams;
 out vec4 vShadow;
 out vec3 vWorld;
+out vec3 vInstanceFacing;
+out float vMatrixSurface;
+flat out float vMatrixCave;
 void main() {
   mat4 m = mat4(aM0, aM1, aM2, aM3);
   vec4 w = m * vec4(aPos, 1.0);
   vNormal = normalize(mat3(m) * aNormal);
   vColor = aColor;
+  // Cave ownership shares the otherwise nonnegative emissive channel. Decode it
+  // before lighting so leaving the portal restores the original material exactly.
+  vMatrixSurface = aColor.a < 0.0 ? 1.0 : 0.0;
+  float encoded = max(0.0, -aColor.a - 1.0);
+  vMatrixCave = floor(encoded * 0.5);
+  vColor.a = aColor.a < 0.0 ? encoded - vMatrixCave * 2.0 : aColor.a;
   vParams = aParams;
   vShadow = uLightViewProj * w;
   vWorld = w.xyz;
+  vInstanceFacing = normalize(aM2.xyz);
   gl_Position = uViewProj * w;
   if (aParams.w != 0.0) {
     vec3 facing = normalize(aM2.xyz) * sign(aParams.w);
@@ -69,6 +82,9 @@ in vec4 vColor;
 in vec4 vParams;
 in vec4 vShadow;
 in vec3 vWorld;
+in vec3 vInstanceFacing;
+in float vMatrixSurface;
+flat in float vMatrixCave;
 uniform vec3 uLightDir;
 uniform vec3 uSky;
 uniform vec3 uGround;
@@ -86,8 +102,158 @@ uniform int uLightCount;
 uniform vec3 uEye;
 uniform vec3 uFog;
 uniform vec2 uFogRange;
+uniform vec4 uMatrixParams;
+uniform vec3 uMatrixOrigin;
+uniform float uMatrixGlyph;
+uniform float uMatrixCave;
+uniform vec4 uMatrixCaves[7];
+uniform vec4 uMatrixCaveBounds[7];
+uniform float uMatrixCaveNear;
+uniform sampler2D uMatrixGlyphTex;
+uniform int uMatrixSamples;
+#ifdef MATRIX_SAMPLE_INTERPOLATION
+vec2 matrixSampleOffsets[4];
+#endif
 layout(location=0) out vec4 oColor;
 layout(location=1) out vec4 oBright;
+float matrixHash(int n) {
+  uint x = uint(n);
+  x ^= x >> 16;
+  x *= 2146121005u;
+  x ^= x >> 15;
+  x *= 2221713035u;
+  x ^= x >> 16;
+  return float(x >> 8) / 16777216.0;
+}
+float matrixPixelCoverage(vec2 p, vec2 halfSize, vec2 footprint) {
+#ifdef MATRIX_SAMPLE_INTERPOLATION
+  if (uMatrixSamples > 1) {
+    float covered = 0.0;
+    for (int i = 0; i < 4; i++) {
+      if (i >= uMatrixSamples) break;
+      covered += all(lessThanEqual(abs(p + matrixSampleOffsets[i]), halfSize)) ? 1.0 : 0.0;
+    }
+    return covered / float(uMatrixSamples);
+  }
+#endif
+  // Integrate the pixel rectangle over the screen pixel's footprint. A distance
+  // smoothstep dims resolved cores and loses energy as several voxels minify.
+  vec2 lo = max(p - footprint * 0.5, -halfSize);
+  vec2 hi = min(p + footprint * 0.5, halfSize);
+  vec2 covered = max(hi - lo, vec2(0.0)) / footprint;
+  return covered.x * covered.y;
+}
+float matrixGlyphAt(vec3 n, float flow, out float glow, out float tip, out float palette, out float sideMix, out float sideShade) {
+  const float streamPitch = 0.12;
+  const float glyphGap = 0.13;
+  const float pixelPitch = 0.021;
+  const float pixelSize = 0.016;
+  vec3 viewDir = normalize(uEye - vWorld);
+  float viewNormal = max(abs(dot(viewDir, n)), 0.08);
+  vec3 glyphWorld = vWorld + viewDir * (0.015 / viewNormal);
+  vec3 rel = glyphWorld - uMatrixOrigin;
+  flow = length(rel.xz);
+  vec3 worldDx = dFdx(vWorld), worldDy = dFdy(vWorld);
+  vec3 an = abs(n);
+  float streamGrid;
+  float localCross;
+  float travelCoord;
+  vec3 crossAxis;
+  vec3 flowAxis;
+  int stream;
+  if (an.y >= an.x && an.y >= an.z) {
+    vec2 radial = flow > 0.0001 ? rel.xz / flow : vec2(1.0, 0.0);
+    crossAxis = vec3(-radial.y, 0.0, radial.x);
+    flowAxis = vec3(radial.x, 0.0, radial.y);
+    float angle = atan(rel.z, rel.x);
+    float level = clamp(ceil(log2(max(flow, 0.75) / 0.75)), 0.0, 6.0);
+    int rayCount = int(32.0 * exp2(level));
+    float rayStep = 6.28318530718 / float(rayCount);
+    int ray = int(floor((angle + 3.14159265359) / rayStep + 0.5));
+    int wrappedRay = ray % rayCount;
+    if (wrappedRay < 0) wrappedRay += rayCount;
+    stream = wrappedRay * (2048 / rayCount);
+    float centerAngle = float(ray) * rayStep - 3.14159265359;
+    localCross = atan(sin(angle - centerAngle), cos(angle - centerAngle)) * flow;
+    streamGrid = float(stream);
+    travelCoord = flow;
+  } else if (an.x >= an.z) {
+    crossAxis = vec3(0.0, 0.0, -sign(n.x));
+    flowAxis = vec3(0.0, 1.0, 0.0);
+    streamGrid = glyphWorld.z / streamPitch;
+    stream = int(floor(streamGrid));
+    localCross = (fract(streamGrid) * streamPitch - streamPitch * 0.5) * -sign(n.x);
+    travelCoord = -glyphWorld.y;
+  } else {
+    crossAxis = vec3(sign(n.z), 0.0, 0.0);
+    flowAxis = vec3(0.0, 1.0, 0.0);
+    streamGrid = glyphWorld.x / streamPitch;
+    stream = int(floor(streamGrid));
+    localCross = (fract(streamGrid) * streamPitch - streamPitch * 0.5) * sign(n.z);
+    travelCoord = -glyphWorld.y;
+  }
+  int rank = int(floor(matrixHash(stream + 7) * 8.0));
+  glow = tip = palette = sideMix = 0.0;
+  sideShade = 1.0;
+  if (float(rank) >= uMatrixParams.w * 8.0) return 0.0;
+  float streamSeed = matrixHash(stream);
+  float speed = 0.56 + matrixHash(stream + 19) * 0.64;
+  int trainLength = 7 + int(floor(streamSeed * 6.0));
+  int gapLength = 2 + int(floor(matrixHash(stream + 41) * 5.0));
+  int sequence = trainLength + gapLength;
+  float phase = matrixHash(stream + 73) * float(sequence) * glyphGap;
+  float movingGrid = (travelCoord - uMatrixParams.z * speed - phase) / glyphGap;
+  int flowCell = int(floor(movingGrid));
+  int trainPosition = flowCell % sequence;
+  if (trainPosition < 0) trainPosition += sequence;
+  if (trainPosition >= trainLength) return 0.0;
+  float trail = float(trainPosition + 1) / float(trainLength);
+  glow = (0.58 + matrixHash(stream + 101) * 0.36) * (0.48 + trail * 0.52);
+  tip = trainPosition == trainLength - 1 ? 1.0 : trainPosition == trainLength - 2 ? 0.55 : 0.0;
+  vec2 local = vec2(localCross, fract(movingGrid) * glyphGap - glyphGap * 0.5);
+  // Falling motion and glyph orientation are independent: wall characters keep
+  // the reference mesh's upright Y axis while their centres travel downward.
+  if (an.y < max(an.x, an.z)) local.y = -local.y;
+  vec2 footprint = max(abs(vec2(dot(worldDx, crossAxis), dot(worldDx, flowAxis)))
+    + abs(vec2(dot(worldDy, crossAxis), dot(worldDy, flowAxis))), vec2(0.00001));
+#ifdef MATRIX_SAMPLE_INTERPOLATION
+  // Use the framebuffer's real sample locations, just as the voxel meshes do.
+  // Explicit interpolation here does not force sample-frequency shading on the
+  // normal scene, and requires no extra pass or per-frame resources.
+  for (int i = 0; i < 4; i++) {
+    if (i >= uMatrixSamples) break;
+    vec3 offset = interpolateAtSample(vWorld, i) - vWorld;
+    matrixSampleOffsets[i] = vec2(dot(offset, crossAxis), dot(offset, flowAxis));
+  }
+#endif
+  // The reference boxes are .01 deep with .01 surface clearance: their back,
+  // centre and front lie at .01, .015 and .02. Project that same silhouette.
+  vec2 slope = vec2(dot(viewDir, crossAxis), dot(viewDir, flowAxis)) / viewNormal;
+  vec2 middle = local;
+  ivec2 nearest = ivec2(floor(vec2(middle.x / pixelPitch + 2.0, 3.0 - middle.y / pixelPitch)));
+  int version = int(floor(uMatrixParams.z * 20.0));
+  int glyph = (abs(stream * 73 + flowCell * 151) + version) & 7;
+  palette = float(glyph & 1);
+  float coverage = 0.0, frontCoverage = 0.0;
+  for (int dy = -1; dy <= 1; dy++) {
+    for (int dx = -1; dx <= 1; dx++) {
+      ivec2 pixel = nearest + ivec2(dx, dy);
+      if (pixel.x < 0 || pixel.x >= 4 || pixel.y < 0 || pixel.y >= 6) continue;
+      float mask = texelFetch(uMatrixGlyphTex, ivec2(glyph * 6 + 1 + pixel.x, 5 - pixel.y), 0).r;
+      if (mask == 0.0) continue;
+      vec2 center = vec2((float(pixel.x) - 1.5) * pixelPitch, (2.5 - float(pixel.y)) * pixelPitch);
+      coverage += matrixPixelCoverage(middle - center, vec2(pixelSize * 0.5) + abs(slope) * 0.005, footprint);
+      frontCoverage += matrixPixelCoverage(local + slope * 0.005 - center, vec2(pixelSize * 0.5), footprint);
+    }
+  }
+  coverage = min(coverage, 1.0);
+  sideMix = clamp(1.0 - frontCoverage / max(coverage, 0.00001), 0.0, 1.0);
+  vec3 sideNormal = abs(slope.x) >= abs(slope.y)
+    ? crossAxis * (slope.x < 0.0 ? -1.0 : 1.0)
+    : flowAxis * (slope.y < 0.0 ? -1.0 : 1.0);
+  sideShade = 0.7 + max(dot(sideNormal, uLightDir), 0.0) * 0.22 + max(dot(sideNormal, viewDir), 0.0) * 0.08;
+  return coverage;
+}
 float shadowAt(vec3 p, float bias) {
   if (p.x < 0.0 || p.x > 1.0 || p.y < 0.0 || p.y > 1.0 || p.z > 1.0) return 1.0;
   float s = 0.0;
@@ -98,17 +264,13 @@ float shadowAt(vec3 p, float bias) {
   }
   return s / 9.0;
 }
-void main() {
-  vec3 n = normalize(vNormal);
-  vec3 base = vColor.rgb;
-  float emissive = clamp(vColor.a * vParams.x, 0.0, 1.0);
+vec3 lightFactorAt(vec3 n) {
   float ndl = max(max(dot(n, uLightDir), 0.0), uDiffuseFloor);
   vec3 sp = vShadow.xyz / vShadow.w * 0.5 + 0.5;
   float bias = max(uShadowBias * (1.0 - ndl), uShadowBias * 0.32);
   float sh = shadowAt(sp, bias);
-  vec3 ambient = max(mix(uGround, uSky, n.y * 0.5 + 0.5), vec3(uAmbientFloor));
-  float shadow = mix(1.0, max(sh, uShadowFloor), uShadowStrength);
-  vec3 lit = base * (ambient + uSun * ndl * uDirectStrength * shadow);
+  vec3 factor = max(mix(uGround, uSky, n.y * 0.5 + 0.5), vec3(uAmbientFloor));
+  factor += uSun * ndl * uDirectStrength * mix(1.0, max(sh, uShadowFloor), uShadowStrength);
   for (int i = 0; i < 10; i++) {
     if (i >= uLightCount) break;
     vec4 lp = uLights[i * 2];
@@ -116,15 +278,132 @@ void main() {
     float dist = length(ld);
     float a = clamp(1.0 - dist / lp.w, 0.0, 1.0);
     a *= a;
-    lit += base * uLights[i * 2 + 1].rgb * a * max(dot(n, ld), 0.0) / max(dist, 0.0001);
+    factor += uLights[i * 2 + 1].rgb * a * max(dot(n, ld), 0.0) / max(dist, 0.0001);
   }
+  return factor;
+}
+vec3 matrixGlyphColor(vec3 base, float glow, float tip, float sideMix, float sideShade) {
+  float emission = mix(0.78, 1.15, glow);
+  vec3 front = base * emission;
+  vec3 side = base * emission * sideShade;
+  return mix(mix(front, side, sideMix), vec3(0.84, 1.0, 0.89), tip * 0.88);
+}
+float matrixTravel(vec2 point, float caveIndex) {
+  if (caveIndex < 0.5) return length(point - uMatrixOrigin.xz);
+  vec4 cave = uMatrixCaves[int(caveIndex) - 1];
+  float depth = max(0.0, cave.z - dot(point, cave.xy));
+  // Project to this point's entrance crossing, not the mouth center: the path
+  // agrees exactly with the exterior radial wave across the entire opening.
+  return length(point + cave.xy * depth - uMatrixOrigin.xz) + depth;
+}
+void main() {
+  vec3 n = normalize(vNormal);
+  vec3 base = vColor.rgb;
+  float wholeLiving = step(1.5, vParams.z) * (1.0 - step(2.5, vParams.z));
+  float emissiveLiving = step(2.5, vParams.z) * step(0.001, vColor.a);
+  float living = max(wholeLiving, emissiveLiving);
+  float caveIndex = max(vMatrixCave, uMatrixCave);
+  float flow = uMatrixParams.x > 0.0 ? matrixTravel(vWorld.xz, caveIndex) : 0.0;
+  // Moving Oogas and insects do not own static carved faces. Locate only bright
+  // occupants near the cliffs; the pile and meadow bypass the bounded lookup.
+  if (uMatrixParams.x > 0.0 && living > 0.0 && caveIndex < 0.5 && flow > uMatrixCaveNear) {
+    for (int i = 0; i < 7; i++) {
+      vec4 cave = uMatrixCaves[i], bounds = uMatrixCaveBounds[i];
+      float depth = cave.z - dot(vWorld.xz, cave.xy);
+      float across = dot(vWorld.xz - bounds.xz, vec2(cave.y, -cave.x));
+      float height = vWorld.y - bounds.y;
+      bool room = depth > 3.0;
+      if (depth >= 0.0 && depth <= bounds.w && abs(across) <= (room ? 3.35 : 2.7) && height >= 0.0 && height <= (room ? 4.15 : 3.15)) {
+        caveIndex = float(i + 1);
+        flow = matrixTravel(vWorld.xz, caveIndex);
+        break;
+      }
+    }
+  }
+  float localSurface = max(vMatrixSurface, step(1.5, uMatrixGlyph));
+  float front = uMatrixParams.x * (1.0 - smoothstep(uMatrixParams.y - 1.5, uMatrixParams.y, flow));
+  if (uMatrixGlyph > 2.5) {
+    // The original black liner is an effect, not the unrevealed cave material.
+    // Blend it only behind the advancing front; the ordinary stone stays below.
+    if (front <= 0.0) discard;
+    float fog = smoothstep(uFogRange.x, uFogRange.y, distance(vWorld, uEye));
+    oColor = vec4(uFog * fog, front);
+    oBright = vec4(0.0, 0.0, 0.0, front);
+    return;
+  }
+  float ndl = max(max(dot(n, uLightDir), 0.0), uDiffuseFloor);
+  float localGlyph = step(0.5, uMatrixGlyph) * (1.0 - step(1.5, uMatrixGlyph));
+  if (localGlyph > 0.0) {
+    float reveal = caveIndex > 0.0 ? front : 1.0;
+    if (reveal <= 0.0) discard;
+    float glow = clamp(vColor.a * vParams.x, 0.0, 1.0);
+    float tip = clamp(vParams.z, 0.0, 1.0);
+    float sideMix = 1.0 - smoothstep(0.45, 0.9, abs(dot(n, normalize(vInstanceFacing))));
+    vec3 viewDir = normalize(uEye - vWorld);
+    float sideShade = 0.7 + max(dot(n, uLightDir), 0.0) * 0.22 + max(dot(n, viewDir), 0.0) * 0.08;
+    vec3 matrixGreen = matrixGlyphColor(base, glow, tip, sideMix, sideShade);
+    float matrixFog = smoothstep(uFogRange.x, uFogRange.y, distance(vWorld, uEye));
+    oColor = vec4(mix(matrixGreen, uFog, matrixFog), reveal);
+    oBright = vec4(matrixGreen * (glow * 0.9 + tip * 0.85) * (1.0 - matrixFog), reveal);
+    return;
+  }
+  float fog = smoothstep(uFogRange.x, uFogRange.y, distance(vWorld, uEye));
+  vec3 matrixColorResult = vec3(0.0);
+  vec3 matrixBrightResult = vec3(0.0);
+  if (front > 0.0) {
+    vec3 matrixGreen;
+    float matrixBloom;
+    vec3 matrixColor;
+    float matrixCoverage = 1.0;
+    vec3 matrixSide = vec3(0.0);
+    float matrixSideWeight = 0.0;
+    if (living > 0.0) {
+      matrixGreen = vec3(0.72, 1.0, 0.8) * (0.72 + ndl * 0.28);
+      matrixColor = matrixGreen;
+      matrixBloom = 0.72;
+    } else if (localSurface > 0.0) {
+      matrixGreen = matrixColor = vec3(0.0);
+      matrixBloom = 0.0;
+    } else {
+      float glow, tip, palette, sideMix, sideShade;
+      float glyph = matrixGlyphAt(n, flow, glow, tip, palette, sideMix, sideShade);
+      vec3 glyphBase = mix(vec3(24.0, 220.0, 74.0), vec3(70.0, 255.0, 112.0), palette) / 255.0;
+      matrixGreen = matrixGlyphColor(glyphBase, glow, tip, 0.0, sideShade);
+      matrixSide = matrixGlyphColor(glyphBase, glow, tip, 1.0, sideShade);
+      matrixSideWeight = sideMix;
+      matrixColor = matrixGreen;
+      matrixCoverage = glyph;
+      matrixBloom = glow * 0.9 + tip * 0.85;
+    }
+    // RGBA8 stores each covered voxel sample before MSAA resolves it. Clamp
+    // color and bloom separately BEFORE coverage to preserve that same order.
+    // Multiplying coverage first overfeeds bloom on partially covered hot tips.
+    vec3 frontColor = clamp(mix(matrixColor, uFog, fog), 0.0, 1.0);
+    vec3 sideColor = clamp(mix(matrixSide, uFog, fog), 0.0, 1.0);
+    vec3 frontBright = clamp(matrixGreen * matrixBloom * (1.0 - fog), 0.0, 1.0);
+    vec3 sideBright = clamp(matrixSide * matrixBloom * (1.0 - fog), 0.0, 1.0);
+    matrixColorResult = mix(uFog * fog, mix(frontColor, sideColor, matrixSideWeight), matrixCoverage);
+    matrixBrightResult = mix(frontBright, sideBright, matrixSideWeight) * matrixCoverage;
+    if (front >= 1.0) {
+      oColor = vec4(matrixColorResult, 1.0);
+      oBright = vec4(matrixBrightResult, 1.0);
+      return;
+    }
+  }
+  float emissive = clamp(vColor.a * vParams.x, 0.0, 1.0);
+  vec3 lightFactor = lightFactorAt(n);
+  vec3 lit = base * lightFactor;
   vec3 col = mix(lit, base * 1.15, emissive);
   col = mix(col, vec3(1.0, 0.86, 0.45), vParams.y * 0.4);
-  float tip = clamp(vParams.z, 0.0, 1.0);
+  float tip = clamp(vParams.z, 0.0, 1.0) * (1.0 - step(1.5, vParams.z));
   col = mix(col, vec3(0.84, 1.0, 0.89), tip * 0.88);
-  float fog = smoothstep(uFogRange.x, uFogRange.y, distance(vWorld, uEye));
-  oColor = vec4(mix(col, uFog, fog), 1.0);
-  oBright = vec4(col * (emissive * 0.9 + vParams.y * 0.5 + tip * 0.85) * (1.0 - fog), 1.0);
+  // Blend the two finished RGBA8 appearances, including their independent bloom.
+  // Original emission fades out with the stone instead of surviving in Matrix
+  // colors until the front becomes fully covered.
+  vec3 normalColor = clamp(mix(col, uFog, fog), 0.0, 1.0);
+  vec3 normalBright = clamp(col * (emissive * 0.9 + vParams.y * 0.5 + tip * 0.85) * (1.0 - fog), 0.0, 1.0);
+  oColor = vec4(mix(normalColor, matrixColorResult, front), 1.0);
+  oBright = vec4(mix(normalBright, matrixBrightResult, front), 1.0);
 }`;
   const SHADOW_VS = `#version 300 es
 precision highp float;
@@ -209,6 +488,9 @@ void main() {
   vReflection = uReflectionViewProj * world;
   vPortalUv = vec2(aPos.x / 5.0 + 0.5, 1.0 - (aPos.y + 1.75) / 3.25);
   gl_Position = uViewProj * world;
+  // Close the portal even while its glass is closer than the camera near plane.
+  // Only depth moves; the physical outline and reflection coordinates stay put.
+  gl_Position.z = max(gl_Position.z, -gl_Position.w);
 }`;
   const MIRROR_FS = `#version 300 es
 precision highp float;
@@ -359,8 +641,8 @@ void main() {
     const mirrorUp = { x: 0, y: 1, z: 0 };
     const records = new Map();
     const activeRecords = [];
-    const res = { programs: {}, fbo: null, shadow: null, bloom: null, quadVao: null };
-    const mirror = { node: null, record: null, geometry: null, program: null, programReady: false, fb: null, tex: null, depth: null, color: null, msFb: null, msaa: -1, width: 0, height: 0, frame: 0, portal: false, walkThrough: false, captureValid: false };
+    const res = { programs: {}, fbo: null, shadow: null, bloom: null, quadVao: null, matrixTexture: null };
+    const mirror = { node: null, record: null, geometry: null, program: null, programReady: false, fb: null, tex: null, depth: null, color: null, msFb: null, msaa: -1, width: 0, height: 0, frame: 0, portal: false, walkThrough: false, captureValid: false, capturePending: false };
     const mirrorDebug = {
       active: false, faux: false, portal: false, surfaceDrawn: false, captureValid: false, width: 0, height: 0, samples: 0, allocationCount: 0, reflectionPassCount: 0, skippedPassCount: 0, resources: 0, captureExcluded: false,
       cameraPosition: new Float32Array(3), cameraTarget: new Float32Array(3), planeCenter: new Float32Array(3), planeNormal: new Float32Array(3), capturedViewProj: mirrorCapturedViewProj, skipReason: "none"
@@ -415,8 +697,10 @@ void main() {
     const buildPrograms = () => {
       ready = false;
       failure = null;
+      const matrixSampling = gl.getExtension("OES_shader_multisample_interpolation");
+      const meshFragment = matrixSampling ? MESH_FS.replace("#version 300 es", "#version 300 es\n#extension GL_OES_shader_multisample_interpolation : require\n#define MATRIX_SAMPLE_INTERPOLATION") : MESH_FS;
       res.programs = {
-        mesh: compile(MESH_VS, MESH_FS, ["uViewProj", "uLightViewProj", "uEye", "uLightDir", "uSky", "uGround", "uSun", "uDirectStrength", "uAmbientFloor", "uDiffuseFloor", "uShadowStrength", "uShadowFloor", "uShadowBias", "uShadow", "uShadowTexel", "uLights", "uLightCount", "uFog", "uFogRange"]),
+        mesh: compile(MESH_VS, meshFragment, ["uViewProj", "uLightViewProj", "uEye", "uLightDir", "uSky", "uGround", "uSun", "uDirectStrength", "uAmbientFloor", "uDiffuseFloor", "uShadowStrength", "uShadowFloor", "uShadowBias", "uShadow", "uShadowTexel", "uLights", "uLightCount", "uFog", "uFogRange", "uMatrixParams", "uMatrixOrigin", "uMatrixGlyph", "uMatrixCave", "uMatrixCaves", "uMatrixCaveBounds", "uMatrixCaveNear", "uMatrixGlyphTex", "uMatrixSamples"]),
         shadow: compile(SHADOW_VS, SHADOW_FS, ["uLightViewProj"]),
         line: compile(LINE_VS, LINE_FS, ["uViewProj", "uViewport", "uWidth"]),
         sky: compile(QUAD_VS, SKY_FS, ["uInvViewProj", "uEye", "uHorizon", "uZenith", "uSun", "uSunDir", "uMoonDir", "uStarMatrix", "uStars", "uTime"]),
@@ -446,6 +730,32 @@ void main() {
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
       return tex;
+    };
+    const buildMatrixTexture = () => {
+      const width = 48, height = 7, data = new Uint8Array(width * height);
+      for (let glyph = 0; glyph < MATRIX_MASKS.length; glyph++) {
+        const mask = MATRIX_MASKS[glyph];
+        for (let bit = 0; bit < 24; bit++) {
+          if (!((mask >> bit) & 1)) continue;
+          const x = glyph * 6 + 1 + (bit & 3), y = 5 - (bit >> 2);
+          data[y * width + x] = 255;
+        }
+      }
+      const tex = gl.createTexture();
+      gl.bindTexture(gl.TEXTURE_2D, tex);
+      gl.texStorage2D(gl.TEXTURE_2D, 1, gl.R8, width, height);
+      gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, width, height, gl.RED, gl.UNSIGNED_BYTE, data);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+      res.matrixTexture = tex;
+    };
+    const bindMatrixTexture = (program) => {
+      gl.activeTexture(gl.TEXTURE3);
+      gl.bindTexture(gl.TEXTURE_2D, res.matrixTexture);
+      gl.uniform1i(program.u.uMatrixGlyphTex, 3);
+      gl.activeTexture(gl.TEXTURE0);
     };
     const createRenderbuffer = (w, h, internal, samples) => {
       const rb = gl.createRenderbuffer();
@@ -504,7 +814,7 @@ void main() {
       destroyMirrorTarget();
       destroyMirrorProgram();
       mirror.node = mirror.record = mirror.geometry = null;
-      mirror.portal = mirror.walkThrough = false;
+      mirror.portal = mirror.walkThrough = mirror.capturePending = false;
       mirrorDebug.active = false;
       mirrorDebug.portal = false;
       mirrorDebug.surfaceDrawn = false;
@@ -515,7 +825,7 @@ void main() {
       mirror.programReady = false;
       mirror.msaa = -1;
       mirror.width = mirror.height = mirrorDebug.width = mirrorDebug.height = mirrorDebug.samples = 0;
-      mirror.portal = mirror.walkThrough = mirror.captureValid = false;
+      mirror.portal = mirror.walkThrough = mirror.captureValid = mirror.capturePending = false;
       mirrorDebug.active = false;
       mirrorDebug.portal = mirrorDebug.captureValid = false;
       mirrorDebug.surfaceDrawn = false;
@@ -684,7 +994,8 @@ void main() {
         nx /= len;
         ny /= len;
         nz /= len;
-        const e = f.emissive || 0;
+        const emissive = f.emissive || 0;
+        const e = f.matrixCave || f.matrixLocalGlyphSurface ? -1 - (f.matrixCave || 0) * 2 - emissive : emissive;
         for (let k = 1; k < f.i.length - 1; k++) {
           put(f.i[0], nx, ny, nz, f.color, e);
           put(f.i[k], nx, ny, nz, f.color, e);
@@ -785,6 +1096,15 @@ void main() {
         rec.nodes[rec.drawCount++] = node;
       } else culled++;
     };
+    const matrixModeOf = (node) => {
+      let partial = 0;
+      while (node) {
+        if (node.matrixLiving) return 2;
+        if (node.matrixEmissiveLiving) partial = 3;
+        node = node.parent;
+      }
+      return partial;
+    };
     const uploadInstances = (rec) => {
       const need = rec.count * INSTANCE_FLOATS;
       if (rec.batch) {
@@ -797,7 +1117,9 @@ void main() {
           rec.batchVersion = -1;
         }
         if (rec.batchVersion !== rec.batch.instanceVersion) {
-          gl.bufferSubData(gl.ARRAY_BUFFER, 0, rec.batch.instanceData, 0, need);
+          // WebGL treats a zero source length as "the rest of the array". Empty
+          // cave batches must not upload their whole reserved pool on restore.
+          if (need > 0) gl.bufferSubData(gl.ARRAY_BUFFER, 0, rec.batch.instanceData, 0, need);
           rec.batchVersion = rec.batch.instanceVersion;
         }
         return;
@@ -812,6 +1134,8 @@ void main() {
         d.set(n.world, o);
         d[o + 16] = n.glow;
         d[o + 17] = n.highlight;
+        d[o + 18] = matrixModeOf(n);
+        d[o + 19] = 0;
       }
       gl.bindBuffer(gl.ARRAY_BUFFER, rec.ibo);
       if (rec.capacity < d.length) {
@@ -839,7 +1163,7 @@ void main() {
       for (let i = 0; i < verts.length; i += 3) {
         mat4.transformPoint(MIRROR_POINT, world, verts[i], verts[i + 1], verts[i + 2]);
         mat4.transformPoint4(MIRROR_CLIP, vp, MIRROR_POINT[0], MIRROR_POINT[1], MIRROR_POINT[2]);
-        if (MIRROR_CLIP[3] <= 0.01) continue;
+        if (MIRROR_CLIP[3] <= MIRROR_EPSILON) continue;
         const x = MIRROR_CLIP[0] / MIRROR_CLIP[3], y = MIRROR_CLIP[1] / MIRROR_CLIP[3];
         minX = Math.min(minX, x);
         minY = Math.min(minY, y);
@@ -876,9 +1200,9 @@ void main() {
       normal[1] = world[9] / nlen;
       normal[2] = world[10] / nlen;
       const cameraSide = (camera.position.x - center[0]) * normal[0] + (camera.position.y - center[1]) * normal[1] + (camera.position.z - center[2]) * normal[2];
-      if (cameraSide <= 0.001) return skipMirrorPass("back-facing");
+      if (cameraSide <= MIRROR_EPSILON) return skipMirrorPass("back-facing");
       mat4.transformPoint4(MIRROR_CLIP, viewProj, center[0], center[1], center[2]);
-      if (MIRROR_CLIP[3] <= 0.01) return skipMirrorPass("behind-camera");
+      if (MIRROR_CLIP[3] <= MIRROR_EPSILON) return skipMirrorPass("behind-camera");
       if (!mirrorRect(node, viewProj) || MIRROR_RECT[2] < -1 || MIRROR_RECT[0] > 1 || MIRROR_RECT[3] < -1 || MIRROR_RECT[1] > 1) return skipMirrorPass("offscreen");
       const area = (Math.min(1, MIRROR_RECT[2]) - Math.max(-1, MIRROR_RECT[0])) * width * 0.5 * (Math.min(1, MIRROR_RECT[3]) - Math.max(-1, MIRROR_RECT[1])) * height * 0.5;
       if (area < 16) return skipMirrorPass("negligible");
@@ -951,6 +1275,7 @@ void main() {
     const init = () => {
       parallel = gl.getExtension("KHR_parallel_shader_compile");
       buildPrograms();
+      buildMatrixTexture();
       buildShadow();
       resize();
       gl.enable(gl.DEPTH_TEST);
@@ -968,18 +1293,25 @@ void main() {
       activeRecords.length = 0;
       res.fbo = null;
       res.shadow = null;
+      res.matrixTexture = null;
       init();
       lost = false;
     };
     canvas.addEventListener("webglcontextlost", onLost);
     canvas.addEventListener("webglcontextrestored", onRestored);
     // The camera pass draws only the in-frustum front of each record; shadow and mirror draw all
-    const drawParts = (kind, useProgram, excludeMirror = false, cull = false) => {
+    const drawParts = (kind, useProgram, excludeMirror = false, cull = false, matrixStage = 0) => {
       for (const rec of activeRecords) {
         if (excludeMirror && rec === mirror.record) continue;
         const part = rec[kind], n = rec.batch && rec.batch.drawInstanceCount !== undefined ? rec.drawCount : cull ? rec.drawCount : rec.count;
         if (!part || !n) continue;
         if (kind === "mesh" && useProgram === "shadow" && rec.geometry.castShadow === false) continue;
+        if (kind === "mesh" && useProgram === "mesh") {
+          const stage = rec.geometry.matrixRevealBacking ? 1 : rec.geometry.matrixGlyph ? 2 : 0;
+          if (stage !== matrixStage) continue;
+          gl.uniform1f(res.programs.mesh.u.uMatrixGlyph, stage === 1 ? 3 : stage === 2 ? 1 : rec.geometry.matrixLocalGlyphSurface ? 2 : 0);
+          gl.uniform1f(res.programs.mesh.u.uMatrixCave, rec.geometry.matrixCave || 0);
+        }
         if (kind === "line") gl.uniform1f(res.programs.line.u.uWidth, part.width * dpr);
         gl.bindVertexArray(part.vao);
         gl.drawArraysInstanced(gl.TRIANGLES, 0, part.count, n);
@@ -997,7 +1329,7 @@ void main() {
       gl.depthMask(true);
       gl.depthFunc(gl.LESS);
     };
-    const renderMirrorCapture = (clear, sky, ground, direct, directStrength, ambientFloor, diffuseFloor, shadowStrength, shadowFloor, shadowBias, lx, ly, lz, sh, lights, lightCount, skyOn, fog, fogNear, fogFar) => {
+    const renderMirrorCapture = (clear, sky, ground, direct, directStrength, ambientFloor, diffuseFloor, shadowStrength, shadowFloor, shadowBias, lx, ly, lz, sh, lights, lightCount, skyOn, fog, fogNear, fogFar, matrix) => {
       ensureMirrorTarget();
       const pg = res.programs;
       gl.bindFramebuffer(gl.FRAMEBUFFER, mirror.msFb || mirror.fb);
@@ -1007,7 +1339,7 @@ void main() {
       gl.useProgram(pg.mesh.prog);
       gl.uniformMatrix4fv(pg.mesh.u.uViewProj, false, mirrorViewProj);
       gl.uniformMatrix4fv(pg.mesh.u.uLightViewProj, false, lightViewProj);
-      gl.uniform3f(pg.mesh.u.uEye, mirrorEye[0], mirrorEye[1], mirrorEye[2]);
+      gl.uniform3f(pg.mesh.u.uEye, mirrorEye.x, mirrorEye.y, mirrorEye.z);
       gl.uniform3f(pg.mesh.u.uLightDir, lx, ly, lz);
       gl.uniform3fv(pg.mesh.u.uSky, sky);
       gl.uniform3fv(pg.mesh.u.uGround, ground);
@@ -1022,12 +1354,28 @@ void main() {
       gl.activeTexture(gl.TEXTURE0);
       gl.bindTexture(gl.TEXTURE_2D, sh.tex);
       gl.uniform1i(pg.mesh.u.uShadow, 0);
+      bindMatrixTexture(pg.mesh);
       if (lights) gl.uniform4fv(pg.mesh.u.uLights, lights);
       gl.uniform1i(pg.mesh.u.uLightCount, lightCount);
       gl.uniform3fv(pg.mesh.u.uFog, fog);
       gl.uniform2f(pg.mesh.u.uFogRange, fogNear, fogFar);
+      // The mirror closes before the retreat reaches the pile. Its reflection
+      // must still show the same partially transformed world as the main view.
+      gl.uniform4f(pg.mesh.u.uMatrixParams, matrix ? matrix.active : 0, matrix ? matrix.radius : 0, matrix ? matrix.time : 0, matrix ? matrix.density : 0);
+      gl.uniform1i(pg.mesh.u.uMatrixSamples, Math.max(1, mirrorDebug.samples));
+      if (matrix) gl.uniform3fv(pg.mesh.u.uMatrixOrigin, matrix.origin);
+      else gl.uniform3f(pg.mesh.u.uMatrixOrigin, 0, 0, 0);
+      gl.uniform4fv(pg.mesh.u.uMatrixCaves, matrix && matrix.caves || NO_MATRIX_CAVES);
+      gl.uniform4fv(pg.mesh.u.uMatrixCaveBounds, matrix && matrix.caveBounds || NO_MATRIX_CAVES);
+      gl.uniform1f(pg.mesh.u.uMatrixCaveNear, matrix && matrix.caveBounds ? matrix.caveNear : FOG_OFF);
       drawParts("mesh", "mesh", true);
       if (skyOn) drawSky(mirrorInvViewProj, mirrorEye);
+      gl.useProgram(pg.mesh.prog);
+      gl.enable(gl.BLEND);
+      gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+      drawParts("mesh", "mesh", true, false, 1);
+      drawParts("mesh", "mesh", true, false, 2);
+      gl.disable(gl.BLEND);
       gl.useProgram(pg.line.prog);
       gl.uniformMatrix4fv(pg.line.u.uViewProj, false, mirrorViewProj);
       gl.uniform2f(pg.line.u.uViewport, mirror.width, mirror.height);
@@ -1041,6 +1389,7 @@ void main() {
       }
       mirrorCapturedViewProj.set(mirrorViewProj);
       mirror.captureValid = mirrorDebug.captureValid = true;
+      mirror.capturePending = false;
       mirrorDebug.reflectionPassCount++;
       mirrorDebug.captureExcluded = true;
     };
@@ -1107,7 +1456,8 @@ void main() {
         lightCount = 0,
         fog = null,
         fogNear = 0,
-        fogFar = 0
+        fogFar = 0,
+        matrix = null
       } = opts;
       const fogColor = fog || NO_FOG, fogA = fog ? fogNear : FOG_OFF, fogB = fog ? fogFar : FOG_OFF + 1;
       if (canvas.clientWidth !== width || canvas.clientHeight !== height) resize();
@@ -1179,11 +1529,13 @@ void main() {
         mirror.frame++;
         updateMirrorSide(camera);
         if (mirror.portal) {
+          // Closing must refresh the reflection on its very first visible frame.
+          mirror.capturePending = true;
           skipMirrorPass("portal-open");
         } else if (prepareMirrorCamera(camera)) {
-          if (settings !== QUALITY.high && mirror.frame % 2 === 0) skipMirrorPass("cadence");
+          if (!mirror.capturePending && settings !== QUALITY.high && mirror.frame % 2 === 0) skipMirrorPass("cadence");
           else if (!ensureMirrorProgram()) skipMirrorPass("shader-pending");
-          else renderMirrorCapture(clear, sky, ground, direct, directStrength, ambientFloor, diffuseFloor, shadowStrength, shadowFloor, shadowBias, lx, ly, lz, sh, lights, nLights, skyOn, fogColor, fogA, fogB);
+          else renderMirrorCapture(clear, sky, ground, direct, directStrength, ambientFloor, diffuseFloor, shadowStrength, shadowFloor, shadowBias, lx, ly, lz, sh, lights, nLights, skyOn, fogColor, fogA, fogB, matrix);
         }
       }
       gl.bindFramebuffer(gl.FRAMEBUFFER, f.scene);
@@ -1209,13 +1561,30 @@ void main() {
       gl.activeTexture(gl.TEXTURE0);
       gl.bindTexture(gl.TEXTURE_2D, sh.tex);
       gl.uniform1i(pg.mesh.u.uShadow, 0);
+      bindMatrixTexture(pg.mesh);
       if (lights) gl.uniform4fv(pg.mesh.u.uLights, lights);
       gl.uniform1i(pg.mesh.u.uLightCount, nLights);
       gl.uniform3fv(pg.mesh.u.uFog, fogColor);
       gl.uniform2f(pg.mesh.u.uFogRange, fogA, fogB);
+      gl.uniform4f(pg.mesh.u.uMatrixParams, matrix ? matrix.active : 0, matrix ? matrix.radius : 0, matrix ? matrix.time : time, matrix ? matrix.density : 0);
+      gl.uniform1i(pg.mesh.u.uMatrixSamples, Math.max(1, f.samples));
+      if (matrix) gl.uniform3fv(pg.mesh.u.uMatrixOrigin, matrix.origin);
+      else gl.uniform3f(pg.mesh.u.uMatrixOrigin, 0, 0, 0);
+      gl.uniform4fv(pg.mesh.u.uMatrixCaves, matrix && matrix.caves || NO_MATRIX_CAVES);
+      gl.uniform4fv(pg.mesh.u.uMatrixCaveBounds, matrix && matrix.caveBounds || NO_MATRIX_CAVES);
+      gl.uniform1f(pg.mesh.u.uMatrixCaveNear, matrix && matrix.caveBounds ? matrix.caveNear : FOG_OFF);
       drawParts("mesh", "mesh", true, true);
       drawMirrorSurface();
       if (skyOn) drawSky(invViewProj, camera.position);
+      // Ordinary surfaces first, then the effect-only black liner and native
+      // voxel glyphs. Alpha follows the same wave as the backing shader; depth
+      // still rejects hidden faces and keeps the glyphs on their real surfaces.
+      gl.useProgram(pg.mesh.prog);
+      gl.enable(gl.BLEND);
+      gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+      drawParts("mesh", "mesh", true, true, 1);
+      drawParts("mesh", "mesh", true, true, 2);
+      gl.disable(gl.BLEND);
       gl.useProgram(pg.line.prog);
       gl.uniformMatrix4fv(pg.line.u.uViewProj, false, viewProj);
       gl.uniform2f(pg.line.u.uViewport, pw, ph);
@@ -1278,6 +1647,7 @@ void main() {
       destroyMirror();
       destroyFbo();
       destroyShadow();
+      if (res.matrixTexture) gl.deleteTexture(res.matrixTexture);
       for (const p of Object.values(res.programs)) gl.deleteProgram(p.prog);
       if (res.quadVao) gl.deleteVertexArray(res.quadVao);
       res.programs = {};

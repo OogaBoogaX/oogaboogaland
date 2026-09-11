@@ -11,12 +11,12 @@
   const FADE_STEP = 0.12;
   const BURST_MAX = 8;
   const BURST_DAMP = 2;
-  const makeBatch = (geometry, cap) => {
-    const node = createNode({ geometry, instanceData: new Float32Array(cap * 20), instanceCount: 0, instanceVersion: 0 });
-    return { node, cap, shown: 0, fade: 0, hx: new Float32Array(cap), hz: new Float32Array(cap), hy: new Float32Array(cap), phase: new Float32Array(cap), speed: new Float32Array(cap) };
+  const makeBatch = (geometry, cap, matrixLiving = false) => {
+    const node = createNode({ geometry, instanceData: new Float32Array(cap * 20), instanceCount: 0, instanceVersion: 0, matrixLiving });
+    return { node, cap, shown: 0, fade: 0, matrixLiving, hx: new Float32Array(cap), hz: new Float32Array(cap), hy: new Float32Array(cap), phase: new Float32Array(cap), speed: new Float32Array(cap) };
   };
   // Yaw a about y, x-scale sx, translation, glow
-  const writeInstance = (data, o, a, sx, x, y, z, glow) => {
+  const writeInstance = (data, o, a, sx, x, y, z, glow, matrixLiving) => {
     const c = Math.cos(a), s = Math.sin(a);
     data[o] = c * sx;
     data[o + 1] = 0;
@@ -36,7 +36,7 @@
     data[o + 15] = 1;
     data[o + 16] = glow;
     data[o + 17] = 0;
-    data[o + 18] = 0;
+    data[o + 18] = matrixLiving ? 2 : 0;
     data[o + 19] = 0;
   };
   const settle = (batch, target, dt) => {
@@ -52,9 +52,9 @@
   // Butterflies, fireflies and embers for one scene
   const create = ({ root, renderer, flowers, fire, meadowRadius, heightAt }) => {
     const rand = mulberry32(SEED);
-    const butterflies = [makeBatch(hubModels.butterfly(0), BUTTERFLY_CAP), makeBatch(hubModels.butterfly(1), BUTTERFLY_CAP)];
-    const fireflies = makeBatch(hubModels.firefly(), FIREFLY_CAP);
-    const embers = makeBatch(hubModels.ember(), EMBER_CAP);
+    const butterflies = [makeBatch(hubModels.butterfly(0), BUTTERFLY_CAP, true), makeBatch(hubModels.butterfly(1), BUTTERFLY_CAP, true)];
+    const fireflies = makeBatch(hubModels.firefly(), FIREFLY_CAP, true);
+    const embers = makeBatch(hubModels.ember(), EMBER_CAP, true);
     const burstVx = new Float32Array(FIREFLY_CAP), burstVz = new Float32Array(FIREFLY_CAP);
     const emberT = new Float32Array(EMBER_CAP), emberPeriod = new Float32Array(EMBER_CAP);
     let burstNext = 0;
@@ -102,7 +102,7 @@
         const y = b.hy[i] + 0.6 + Math.sin(t * 2.1) * 0.3;
         const yaw = Math.atan2(-Math.sin(t), Math.cos(t * 1.3) * 1.3);
         const flap = 0.35 + 0.65 * Math.abs(Math.sin(elapsed * 22 + b.phase[i]));
-        writeInstance(data, i * 20, yaw, flap, x, y, z, 1);
+        writeInstance(data, i * 20, yaw, flap, x, y, z, 1, b.matrixLiving);
       }
     };
     const updateFireflies = (dt, elapsed) => {
@@ -118,7 +118,7 @@
         const z = f.hz[i] + Math.cos(t * 0.8 + f.phase[i]) * 1.4 + Math.cos(t * 0.53) * 0.6;
         const y = f.hy[i] + 1 + Math.sin(t * 1.3) * 0.6;
         const blink = Math.max(0, Math.sin(elapsed * 1.7 + f.phase[i]));
-        writeInstance(data, i * 20, t, 1, x, y, z, 0.2 + 0.8 * blink * blink * blink);
+        writeInstance(data, i * 20, t, 1, x, y, z, 0.2 + 0.8 * blink * blink * blink, f.matrixLiving);
       }
     };
     const updateEmbers = (dt, elapsed) => {
@@ -129,7 +129,7 @@
         const k = emberT[i] / emberPeriod[i];
         const x = e.hx[i] + Math.sin(elapsed * 2.6 + e.phase[i]) * 0.12 * k;
         const z = e.hz[i] + Math.cos(elapsed * 2.1 + e.phase[i]) * 0.12 * k;
-        writeInstance(data, i * 20, elapsed * 3 + e.phase[i], 1, x, e.hy[i] + emberT[i] * e.speed[i], z, 1 - k);
+        writeInstance(data, i * 20, elapsed * 3 + e.phase[i], 1, x, e.hy[i] + emberT[i] * e.speed[i], z, 1 - k, e.matrixLiving);
       }
     };
     const finish = (b) => {

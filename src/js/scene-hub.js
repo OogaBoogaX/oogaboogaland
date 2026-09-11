@@ -48,19 +48,22 @@
   const HINT_AFTER = 120, HINT_EVERY = 12, HINT_PULSE = 1.6, HINT_MAX = 0.9;
   // Reach at which a caveman is inside a cave
   const TUNNEL_REACH = 2.2;
-  const MATRIX_TYPES = 8, MATRIX_TOP = 3.62, MATRIX_RANGE = 3.45, MATRIX_GAP = 0.19, MATRIX_PRELOAD = 18;
-  const MATRIX_SURFACE_PITCH = 0.12, MATRIX_SURFACE_GAP = 0.13, MATRIX_GLYPH_HZ = 10;
-  const MATRIX_CEILING_PHASE_STEP = 0.6180339887498949;
-  const MATRIX_RAIN = 0, MATRIX_FLOOR = 1, MATRIX_CEILING = 2, MATRIX_BACK = 3, MATRIX_LEFT = 4, MATRIX_RIGHT = 5;
-  const MATRIX_SURFACES = ["freeRain", "floor", "mainCeiling", "vestibuleCeiling", "mainLeftWall", "mainRightWall", "vestibuleLeftWall", "vestibuleRightWall", "backWall", "transitionHeader", "transitionReturns"];
+  const MATRIX_TYPES = 8;
+  const MATRIX_RAIN_GAP = 0.19;
+  const MATRIX_SURFACE_PITCH = 0.12, MATRIX_SURFACE_GAP = 0.13, MATRIX_GLYPH_HZ = 20;
+  const MATRIX_PIXEL_PITCH = 0.021, MATRIX_PIXEL_SIZE = 0.016;
+  const MATRIX_STREAM_SPEED_MIN = 0.56, MATRIX_STREAM_SPEED_RANGE = 0.64;
+  const MATRIX_TRAIN_MIN = 7, MATRIX_TRAIN_RANGE = 6, MATRIX_TRAIN_GAP_MIN = 2, MATRIX_TRAIN_GAP_RANGE = 5;
+  const MATRIX_WORLD_SPEED = 72, MATRIX_WORLD_MAX = RADIUS + 8, MATRIX_FRONT_WIDTH = 1.5, MATRIX_GLYPH_REACH = 0.16;
+  const MATRIX_WORLD = { active: 0, direction: 0, radius: 0, time: 0, density: 1, speed: MATRIX_WORLD_SPEED, retreatSpeed: MATRIX_WORLD_SPEED, maxRadius: MATRIX_WORLD_MAX, origin: new Float32Array([0, 0, 0]), caves: new Float32Array(7 * 4), caveBounds: new Float32Array(7 * 4), caveNear: 0 };
   const MATRIX_DENSITY = { high: 8, medium: 5, low: 3, canvas2d: 1 };
-  const PORTAL_Z = 0.5, PORTAL_MIN_X = -2.48, PORTAL_MAX_X = 2.48, PORTAL_MIN_Y = -0.2, PORTAL_MAX_Y = 2.98;
+  const PORTAL_Z = 0.5, PORTAL_MIN_X = -2.48, PORTAL_MAX_X = 2.48, PORTAL_MIN_Y = 0, PORTAL_MAX_Y = 2.98;
   // Sky, light and lamps, resampled from the clock every frame
   const RENDER_OPTS = {
     clear: new Float32Array(3), horizon: new Float32Array(3), zenith: new Float32Array(3), sky: new Float32Array(3), ground: new Float32Array(3), sun: new Float32Array(3), direct: new Float32Array(3),
     light: { x: 0.55, y: 0.78, z: -0.25 }, sunDirection: { x: 0, y: 1, z: 0 }, moon: { x: 0, y: 1, z: 0 }, celestialPole: { x: 0, y: Math.sin(20 * DEG), z: -Math.cos(20 * DEG) }, starMatrix: new Float32Array(9),
     stars: 0, torch: 0, day: 1, twilight: 0, lampFactor: 0, directStrength: 1, directionalLightStrength: 1, sunStrength: 1, moonStrength: 0, ambientFloor: 0.18, diffuseFloor: 0, shadowStrength: 1, shadowFloor: 0, shadowBias: 0.002, outdoorDarkestSurfaceEstimate: 0.34, activeLightSource: "sun", latitude: 20, dayOfYear: 172, continuousDay: 171.5, solarDeclination: 0, siderealAngle: 0, sunAltitude: 90, sunAzimuth: 180, moonAltitude: -90, moonAzimuth: 0, sunriseHour: 6, sunsetHour: 18,
-    time: 0, bloomStrength: 0.5, lights: new Float32Array(80), lightCount: 0, shadowCenter: { x: 0, y: 0, z: 0 }, shadowExtent: 34
+    time: 0, bloomStrength: 0.5, lights: new Float32Array(80), lightCount: 0, shadowCenter: { x: 0, y: 0, z: 0 }, shadowExtent: 34, matrix: MATRIX_WORLD
   };
   RENDER_OPTS.starMatrix[0] = RENDER_OPTS.starMatrix[4] = RENDER_OPTS.starMatrix[8] = 1;
   const DAYLIGHT_DEBUG = {
@@ -102,6 +105,7 @@
   // Ripen time and odds for a dropped banana
   const RIPEN = 25, TREE_CHANCE = 0.5, BUSH_CHANCE = 0.25;
   const PROP_TIPS = { tree: "Tree · shake it", bush: "Bush · rustle it", rock: "Rock · solid", crate: "Crate · locked", barrel: "Barrel · empty", flower: "Flowers", torch: "Torch · warm", firepit: "Fire pit", bedroll: "Somebody's bed", ladder: "Ladder · wobbly", dock: "Dock · creaky", jetpack: "Jetpack · walk an Ooga into it", gate: null };
+  const MATRIX_LIVING_PROPS = new Set(["tree"]);
   const BUSH_WORDS = ["Something rustles.", "A beetle. Ooga leaves it.", "Just a bush."];
   const LEAF = models.particleGeometry("#4a8530", 0.12, 0);
   const PETALS = ["#e04a3a", "#f2c94c", "#f3efe4"].map((c) => models.particleGeometry(c, 0.09, 0));
@@ -142,6 +146,7 @@
   const props = [];
   const scenery = [];
   const sceneryClaims = [];
+  const matrixInteriors = [];
   let sceneryVisible = 0, sceneryRadiusCulled = 0, sceneryPathCulled = 0, sceneryFixedCulled = 0, sceneryReflows = 0;
   const addTarget = (node, owner, opts) => {
     input.add(node, owner, opts);
@@ -157,502 +162,515 @@
     return p;
   };
 
-  // ---------- room behind the mirror ----------
-  const buildMatrixRain = (group, room, mirrorNode, m) => {
-    const streamCount = renderer.kind === "canvas2d" ? 32 : 96;
-    const streamLength = renderer.kind === "canvas2d" ? 9 : 14;
-    const entries = [], streams = [];
-    const rand = mulberry32(0x0b00ba);
-    const cycle = MATRIX_RANGE + (streamLength - 1) * MATRIX_GAP;
-    const addStream = (x, z, angle) => {
-      const stream = streams.length;
-      streams.push({ surface: 0, speed: 0.72 + rand() * 1.05, phase: rand() * cycle, brightness: 0.62 + rand() * 0.32, trainLength: streamLength, gapLength: Math.max(2, Math.round(MATRIX_RANGE / MATRIX_GAP) - streamLength), direction: -1, flowMin: 0.13, flowMax: MATRIX_TOP, flowRange: cycle });
-      for (let character = 0; character < streamLength; character++) {
-        const tip = character === 0 ? 1 : character === 1 ? 0.55 : 0;
-        entries.push({ kind: MATRIX_RAIN, surface: 0, stream, rank: 0, x, y: 0, z, angle, character, tip, start: 0, range: cycle });
-      }
-    };
-    const freeCount = renderer.kind === "canvas2d" ? 18 : 48;
-    const entranceCount = renderer.kind === "canvas2d" ? 12 : 32;
-    const backCount = renderer.kind === "canvas2d" ? 8 : 24;
-    const sideCount = (streamCount - freeCount - backCount) / 2;
-    for (let i = 0; i < freeCount; i++) {
-      const z = i < entranceCount ? -2.25 + rand() * 1.55 : -5.75 + rand() * 3.2;
-      addStream(-2.5 + rand() * 5, z, (rand() - 0.5) * 0.18);
-    }
-    for (let i = 0; i < backCount; i++) addStream(-2.55 + (i + 0.5) / backCount * 5.1, -6.1, 0);
-    for (let i = 0; i < sideCount; i++) {
-      const z = -5.75 + (i + 0.5) / sideCount * 5.25;
-      const x = z > -2.5 ? 2.38 : 2.79;
-      addStream(-x, z, Math.PI / 2);
-      addStream(x, z, -Math.PI / 2);
-    }
-
-    const surfaceCounts = new Int32Array(MATRIX_SURFACES.length);
-    surfaceCounts[0] = entries.length;
-    const surfaceStreams = new Int32Array(MATRIX_SURFACES.length);
-    const surfaceEdgeMargins = new Float32Array(MATRIX_SURFACES.length);
-    const surfaceRepresentativeStreams = new Int32Array(MATRIX_SURFACES.length);
-    const surfaceDirections = new Int8Array(MATRIX_SURFACES.length);
-    const surfaceFacings = new Int8Array(MATRIX_SURFACES.length);
-    const surfaceMinLocalZ = new Float32Array(MATRIX_SURFACES.length);
-    const surfaceMaxLocalZ = new Float32Array(MATRIX_SURFACES.length);
-    const surfaceHeadPositions = new Float32Array(MATRIX_SURFACES.length);
-    const surfaceGapPositions = new Float32Array(MATRIX_SURFACES.length);
-    const surfaceSections = [], surfaceDetails = new Array(MATRIX_SURFACES.length), surfaceLayout = {};
-    let glyphMinX = Infinity, glyphMaxX = -Infinity, glyphMinY = Infinity, glyphMaxY = -Infinity, glyphHalfZ = 0;
-    for (let glyph = 0; glyph < MATRIX_TYPES; glyph++) {
-      const verts = hubModels.matrixGlyph(glyph).verts;
-      for (let i = 0; i < verts.length; i += 3) {
-        glyphMinX = Math.min(glyphMinX, verts[i]);
-        glyphMaxX = Math.max(glyphMaxX, verts[i]);
-        glyphMinY = Math.min(glyphMinY, verts[i + 1]);
-        glyphMaxY = Math.max(glyphMaxY, verts[i + 1]);
-        glyphHalfZ = Math.max(glyphHalfZ, Math.abs(verts[i + 2]));
-      }
-    }
-    surfaceRepresentativeStreams.fill(-1);
-    surfaceDirections.fill(-1);
-    surfaceMinLocalZ.fill(Infinity);
-    surfaceMaxLocalZ.fill(-Infinity);
-    surfaceStreams[0] = streamCount;
-    const addSurface = (section) => {
-      const surface = MATRIX_SURFACES.indexOf(section.name);
-      if (surface < 1) throw new Error(`Unknown Matrix surface ${section.name}`);
-      const b = section.bounds, epsilon = room.geometry.surfaceEpsilon;
-      let kind, crossMin, crossMax, flowMin, flowMax, fixed, facing = 1, glyphBounds, renderNormal;
-      if (section.orientation === "floor") {
-        kind = MATRIX_FLOOR;
-        renderNormal = [0, 1, 0];
-        fixed = section.planePosition + glyphHalfZ + epsilon;
-        crossMin = b[0] - glyphMinX;
-        crossMax = b[3] - glyphMaxX;
-        flowMin = b[2] + glyphMaxY;
-        flowMax = b[5] + glyphMinY;
-        glyphBounds = [crossMin + glyphMinX, fixed - glyphHalfZ, flowMin - glyphMaxY, crossMax + glyphMaxX, fixed + glyphHalfZ, flowMax - glyphMinY];
-      } else if (section.orientation === "ceiling") {
-        kind = MATRIX_CEILING;
-        renderNormal = [0, -1, 0];
-        fixed = section.planePosition - glyphHalfZ - epsilon;
-        crossMin = b[0] - glyphMinX;
-        crossMax = b[3] - glyphMaxX;
-        flowMin = b[2] - glyphMinY;
-        flowMax = b[5] - glyphMaxY;
-        glyphBounds = [crossMin + glyphMinX, fixed - glyphHalfZ, flowMin + glyphMinY, crossMax + glyphMaxX, fixed + glyphHalfZ, flowMax + glyphMaxY];
-      } else if (section.orientation === "back") {
-        kind = MATRIX_BACK;
-        facing = section.normal[2];
-        renderNormal = [0, 0, facing];
-        fixed = section.planePosition + facing * (glyphHalfZ + epsilon);
-        crossMin = b[0] - glyphMinX;
-        crossMax = b[3] - glyphMaxX;
-        flowMin = b[1] - glyphMinY;
-        flowMax = b[4] - glyphMaxY;
-        glyphBounds = [crossMin + glyphMinX, flowMin + glyphMinY, fixed - glyphHalfZ, crossMax + glyphMaxX, flowMax + glyphMaxY, fixed + glyphHalfZ];
-      } else if (section.orientation === "left") {
-        kind = MATRIX_LEFT;
-        renderNormal = [1, 0, 0];
-        fixed = section.planePosition + glyphHalfZ + epsilon;
-        crossMin = b[2] + glyphMaxX;
-        crossMax = b[5] + glyphMinX;
-        flowMin = b[1] - glyphMinY;
-        flowMax = b[4] - glyphMaxY;
-        glyphBounds = [fixed - glyphHalfZ, flowMin + glyphMinY, crossMin - glyphMaxX, fixed + glyphHalfZ, flowMax + glyphMaxY, crossMax - glyphMinX];
-      } else if (section.orientation === "right") {
-        kind = MATRIX_RIGHT;
-        renderNormal = [-1, 0, 0];
-        fixed = section.planePosition - glyphHalfZ - epsilon;
-        crossMin = b[2] - glyphMinX;
-        crossMax = b[5] - glyphMaxX;
-        flowMin = b[1] - glyphMinY;
-        flowMax = b[4] - glyphMaxY;
-        glyphBounds = [fixed - glyphHalfZ, flowMin + glyphMinY, crossMin + glyphMinX, fixed + glyphHalfZ, flowMax + glyphMaxY, crossMax + glyphMaxX];
-      } else throw new Error(`Unknown Matrix surface orientation ${section.orientation}`);
-      if (crossMax < crossMin || flowMax < flowMin) throw new Error(`Matrix surface ${section.name} is too small for a glyph`);
-      const streamTotal = Math.max(1, Math.floor((crossMax - crossMin) / MATRIX_SURFACE_PITCH) + 1);
-      const characters = Math.max(2, Math.floor((flowMax - flowMin) / MATRIX_SURFACE_GAP) + 1);
-      const flowRange = flowMax - flowMin;
-      surfaceStreams[surface] += streamTotal;
-      if (surfaceFacings[surface] && surfaceFacings[surface] !== facing) throw new Error("Matrix surface facing mismatch");
-      surfaceFacings[surface] = facing;
-      const crossStep = streamTotal > 1 ? (crossMax - crossMin) / (streamTotal - 1) : 0;
-      const flowStep = characters > 1 ? (flowMax - flowMin) / (characters - 1) : 0;
-      const edgeMargin = Math.max(Math.abs(crossMax - (crossMin + crossStep * (streamTotal - 1))), Math.abs(flowMax - (flowMin + flowStep * (characters - 1))));
-      const alignmentError = Math.abs(Math.abs(fixed - section.planePosition) - glyphHalfZ - epsilon);
-      const clearance = Math.abs(fixed - section.planePosition) - glyphHalfZ;
-      const inwardFacing = renderNormal[0] * section.normal[0] + renderNormal[1] * section.normal[1] + renderNormal[2] * section.normal[2] > 0.999;
-      const axis = section.planeAxis === "x" ? 0 : section.planeAxis === "y" ? 1 : 2;
-      let fullyBacked = true;
-      for (let a = 0; a < 3; a++) {
-        if (a === axis) continue;
-        if (glyphBounds[a] < b[a] - 1e-8 || glyphBounds[a + 3] > b[a + 3] + 1e-8) fullyBacked = false;
-      }
-      surfaceMinLocalZ[surface] = Math.min(surfaceMinLocalZ[surface], glyphBounds[2]);
-      surfaceMaxLocalZ[surface] = Math.max(surfaceMaxLocalZ[surface], glyphBounds[5]);
-      surfaceEdgeMargins[surface] = Math.max(surfaceEdgeMargins[surface], edgeMargin);
-      surfaceSections.push({ section, surface, kind, facing, fixed, crossMin, crossMax, flowMin, flowMax, glyphBounds, alignmentError, clearance, edgeMargin, inwardFacing, fullyBacked, portalCrossing: glyphBounds[5] >= PORTAL_Z });
-      let detail = surfaceDetails[surface];
-      if (!detail) {
-        detail = surfaceDetails[surface] = { backingIds: [], planeAxis: section.planeAxis, planePosition: section.planePosition, normal: section.normal, coverageBounds: b.slice(), glyphBounds: glyphBounds.slice(), maxAlignmentError: 0, minSurfaceClearance: Infinity, uncoveredEdgeMargin: 0, inwardFacing: true, fullyBacked: true, portalCrossing: false, partCount: 0, streamCount: 0, glyphCount: 0, flowMin: Infinity, flowMax: -Infinity, minCharactersPerStream: Infinity, maxCharactersPerStream: 0, flow: section.flow };
-      }
-      detail.backingIds.push(section.backing);
-      for (let a = 0; a < 3; a++) {
-        detail.coverageBounds[a] = Math.min(detail.coverageBounds[a], b[a]);
-        detail.coverageBounds[a + 3] = Math.max(detail.coverageBounds[a + 3], b[a + 3]);
-        detail.glyphBounds[a] = Math.min(detail.glyphBounds[a], glyphBounds[a]);
-        detail.glyphBounds[a + 3] = Math.max(detail.glyphBounds[a + 3], glyphBounds[a + 3]);
-      }
-      detail.maxAlignmentError = Math.max(detail.maxAlignmentError, alignmentError);
-      detail.minSurfaceClearance = Math.min(detail.minSurfaceClearance, clearance);
-      detail.uncoveredEdgeMargin = Math.max(detail.uncoveredEdgeMargin, edgeMargin);
-      detail.inwardFacing = detail.inwardFacing && inwardFacing;
-      detail.fullyBacked = detail.fullyBacked && fullyBacked;
-      detail.portalCrossing = detail.portalCrossing || glyphBounds[5] >= PORTAL_Z;
-      detail.partCount++;
-      detail.streamCount += streamTotal;
-      detail.glyphCount += streamTotal * characters;
-      detail.flowMin = Math.min(detail.flowMin, flowMin);
-      detail.flowMax = Math.max(detail.flowMax, flowMax);
-      detail.minCharactersPerStream = Math.min(detail.minCharactersPerStream, characters);
-      detail.maxCharactersPerStream = Math.max(detail.maxCharactersPerStream, characters);
-      const ceilingPhaseOffset = kind === MATRIX_CEILING ? rand() * flowRange : 0;
-      for (let localStream = 0; localStream < streamTotal; localStream++) {
-        const cross = streamTotal === 1 ? (crossMin + crossMax) * 0.5 : crossMin + localStream / (streamTotal - 1) * (crossMax - crossMin);
-        const stream = streams.length;
-        const wantedTrain = 7 + Math.floor(rand() * 6), wantedGap = 2 + Math.floor(rand() * 5);
-        const trainLength = Math.max(1, Math.min(wantedTrain, characters - 1)), gapLength = Math.max(1, Math.min(wantedGap, characters - trainLength));
-        const speed = 0.28 + rand() * 0.32, randomPhase = rand() * flowRange;
-        const phase = kind === MATRIX_CEILING
-          ? matrixModulo(ceilingPhaseOffset + localStream * flowRange * MATRIX_CEILING_PHASE_STEP + (randomPhase / flowRange - 0.5) * MATRIX_SURFACE_GAP * 0.35, flowRange)
-          : randomPhase;
-        streams.push({ surface, speed, phase, brightness: 0.58 + rand() * 0.36, trainLength, gapLength, direction: -1, flowMin, flowMax, flowRange });
-        if (surfaceRepresentativeStreams[surface] < 0) surfaceRepresentativeStreams[surface] = stream;
-        const rank = localStream & 7;
-        for (let character = 0; character < characters; character++) {
-          const entry = { kind, surface, stream, rank, x: 0, y: 0, z: 0, angle: 0, character, tip: 0, facing, start: flowMin, range: flowRange };
-          if (kind === MATRIX_FLOOR || kind === MATRIX_CEILING) {
-            entry.x = cross;
-            entry.y = fixed;
-          } else if (kind === MATRIX_BACK) {
-            entry.x = cross;
-            entry.z = fixed;
-          } else {
-            entry.x = fixed;
-            entry.z = cross;
-          }
-          entries.push(entry);
-          surfaceCounts[surface]++;
-        }
-      }
-    };
-    // The chamber owns the backing planes. Matrix placement derives from those exact
-    // local bounds so glyph thickness always sits on the room side of real geometry.
-    for (let i = 0; i < room.geometry.matrixSurfaces.length; i++) addSurface(room.geometry.matrixSurfaces[i]);
-    const ceilingEntranceBand = {
-      sampledStreams: 0, phaseBucketCount: 0, gapLengthDiversity: 0,
-      minStreamBrightness: Infinity, maxStreamBrightness: -Infinity,
-      floorMinStreamBrightness: Infinity, floorMaxStreamBrightness: -Infinity,
-      sampledGlyphs: 0, visibleGlyphs: 0, gapGlyphs: 0, brightTips: 0,
-      minVisibleBrightness: 0, maxVisibleBrightness: 0
-    };
-    let ceilingPhaseMask = 0, ceilingGapMask = 0;
-    for (let i = 0; i < streams.length; i++) {
-      const stream = streams[i];
-      if (stream.surface === 1) {
-        ceilingEntranceBand.floorMinStreamBrightness = Math.min(ceilingEntranceBand.floorMinStreamBrightness, stream.brightness);
-        ceilingEntranceBand.floorMaxStreamBrightness = Math.max(ceilingEntranceBand.floorMaxStreamBrightness, stream.brightness);
-      } else if (stream.surface === 3) {
-        ceilingEntranceBand.sampledStreams++;
-        ceilingEntranceBand.minStreamBrightness = Math.min(ceilingEntranceBand.minStreamBrightness, stream.brightness);
-        ceilingEntranceBand.maxStreamBrightness = Math.max(ceilingEntranceBand.maxStreamBrightness, stream.brightness);
-        ceilingPhaseMask |= 1 << Math.min(15, Math.floor(stream.phase / stream.flowRange * 16));
-        ceilingGapMask |= 1 << Math.min(15, stream.gapLength);
-      }
-    }
-    for (let bits = ceilingPhaseMask; bits; bits >>>= 1) ceilingEntranceBand.phaseBucketCount += bits & 1;
-    for (let bits = ceilingGapMask; bits; bits >>>= 1) ceilingEntranceBand.gapLengthDiversity += bits & 1;
-    for (let surface = 1; surface < MATRIX_SURFACES.length; surface++) {
-      const detail = surfaceDetails[surface], layout = { plane: detail.planeAxis === "y" ? "horizontal" : "vertical", flow: detail.flow };
-      layout[detail.planeAxis] = detail.planePosition;
-      layout.minX = detail.coverageBounds[0];
-      layout.minY = detail.coverageBounds[1];
-      layout.minZ = detail.coverageBounds[2];
-      layout.maxX = detail.coverageBounds[3];
-      layout.maxY = detail.coverageBounds[4];
-      layout.maxZ = detail.coverageBounds[5];
-      surfaceLayout[MATRIX_SURFACES[surface]] = layout;
-    }
-    surfaceLayout.ceiling = { plane: "horizontal", flow: "entrance-to-back" };
-    surfaceLayout.leftWall = { plane: "vertical", flow: "down" };
-    surfaceLayout.rightWall = { plane: "vertical", flow: "down" };
-    // Mix spatial neighbours before forming balanced eight-glyph blocks. Each block
-    // mutates on its own phase while retaining exactly one instance of every glyph.
-    for (let i = entries.length - 1; i > 0; i--) {
-      const j = Math.floor(rand() * (i + 1)), swap = entries[i];
-      entries[i] = entries[j];
-      entries[j] = swap;
-    }
-    let registryHash = 2166136261;
-    for (let i = 0; i < entries.length; i++) {
-      const entry = entries[i];
-      const stream = streams[entry.stream];
-      registryHash = Math.imul(registryHash ^ entry.kind ^ (entry.surface << 4) ^ (entry.rank << 8) ^ ((entry.facing + 1) << 12), 16777619) >>> 0;
-      registryHash = Math.imul(registryHash ^ Math.round((entry.x + entry.y + entry.z) * 1000), 16777619) >>> 0;
-      registryHash = Math.imul(registryHash ^ Math.round(stream.brightness * 1000) ^ (stream.trainLength << 12) ^ (stream.gapLength << 20), 16777619) >>> 0;
-    }
-
-    const nodes = [], cr = Math.cos(m.ry), sr = Math.sin(m.ry);
-    let perGlyphCapacity = Math.ceil(entries.length / MATRIX_TYPES);
-    if (renderer.kind === "canvas2d") {
-      const capacityCounts = new Int32Array(MATRIX_TYPES);
-      perGlyphCapacity = 0;
-      // Canvas always keeps rank zero. Enumerate the bounded mutation phases once so
-      // its fixed buffers cover every eligible glyph without reserving hidden ranks.
-      for (let phase = 0; phase < MATRIX_TYPES * 16; phase++) {
-        capacityCounts.fill(0);
-        const version = phase >> 4, fraction = phase & 15;
-        for (let i = 0; i < entries.length; i++) {
-          const entry = entries[i];
-          if (entry.surface !== 0 && entry.rank >= MATRIX_DENSITY.canvas2d) continue;
-          const block = i >> 3;
-          const phasedVersion = version + (fraction + ((block * 13) & 15) >= 16 ? 1 : 0);
-          const glyph = ((i & 7) + phasedVersion + ((block * 5) & 7)) & 7;
-          capacityCounts[glyph]++;
-        }
-        for (let glyph = 0; glyph < MATRIX_TYPES; glyph++) perGlyphCapacity = Math.max(perGlyphCapacity, capacityCounts[glyph]);
-      }
-    }
-    for (let glyph = 0; glyph < MATRIX_TYPES; glyph++) {
-      const node = createNode({ geometry: hubModels.matrixGlyph(glyph), instanceData: new Float32Array(perGlyphCapacity * 20), instanceCount: 0, instanceVersion: 0 });
-      node.fixedInstanceCapacity = true;
-      node.drawInstanceCount = 0;
-      addChild(root, node);
-      placed.push(node);
-      nodes.push(node);
-    }
-    const portal = {
+  // ---------- surface glyphs behind the mirror ----------
+  const buildMatrixPortal = (m) => {
+    const cr = Math.cos(m.ry), sr = Math.sin(m.ry);
+    return {
       inside: false, previousValid: false, previousX: 0, previousY: 0, previousZ: 0,
       lastCrossingDirection: "none",
       plane: { center: { x: m.x + sr * PORTAL_Z, y: m.floorY + 1.5, z: m.z + cr * PORTAL_Z }, normal: { x: sr, y: 0, z: cr } },
       opening: { minX: PORTAL_MIN_X, maxX: PORTAL_MAX_X, minY: PORTAL_MIN_Y, maxY: PORTAL_MAX_Y, planeZ: PORTAL_Z },
       rejected: { above: 0, below: 0, beside: 0 }
     };
-    const bufferBytes = perGlyphCapacity * MATRIX_TYPES * 20 * Float32Array.BYTES_PER_ELEMENT;
-    let minBrightness = Infinity, maxBrightness = -Infinity, minTrainLength = Infinity, maxTrainLength = 0, minGapLength = Infinity, maxGapLength = 0;
-    for (let i = 0; i < streams.length; i++) {
-      const stream = streams[i];
-      minBrightness = Math.min(minBrightness, stream.brightness);
-      maxBrightness = Math.max(maxBrightness, stream.brightness);
-      minTrainLength = Math.min(minTrainLength, stream.trainLength);
-      maxTrainLength = Math.max(maxTrainLength, stream.trainLength);
-      minGapLength = Math.min(minGapLength, stream.gapLength);
-      maxGapLength = Math.max(maxGapLength, stream.gapLength);
-    }
-    let maxLocalZ = -Infinity;
-    for (let surface = 1; surface < MATRIX_SURFACES.length; surface++) maxLocalZ = Math.max(maxLocalZ, surfaceMaxLocalZ[surface]);
-    return {
-      group, room, mirrorNode, mouth: m, nodes, entries, streams, cr, sr, cycle, portal,
-      streamCount, hangingStreamCount: freeCount, entranceStreamCount: entranceCount, wallStreamCount: streamCount - freeCount, streamLength,
-      rainGlyphCount: streamCount * streamLength, surfaceCounts, surfaceStreams, surfaceEdgeMargins, surfaceRepresentativeStreams, surfaceDirections, surfaceFacings, surfaceMinLocalZ, surfaceMaxLocalZ, surfaceHeadPositions, surfaceGapPositions, surfaceActiveCounts: new Int32Array(MATRIX_SURFACES.length), surfaceSections, surfaceDetails, surfaceLayout,
-      glyphCount: entries.length, activeGlyphCount: 0, brightTipCount: 0, capacity: perGlyphCapacity * MATRIX_TYPES,
-      perGlyphCapacity, bufferBytes, registryBytes: entries.length * 64 + streams.length * 44 + surfaceSections.length * 128, surfaceMetadataBytes: surfaceSections.length * 128, registryHash: registryHash.toString(16).padStart(8, "0"), quality: renderer.kind === "canvas2d" ? "canvas2d" : renderer.quality,
-      densityRankLimit: renderer.kind === "canvas2d" ? MATRIX_DENSITY.canvas2d : MATRIX_DENSITY[renderer.quality],
-      glyphVersion: -1, previousGlyphVersion: -1, mutationHash: 0, updates: 0, prewarmCount: 0,
-      allocationCount: MATRIX_TYPES, rebuildCount: 1, preloaded: false, prewarmed: false, visible: false, drawEnabled: false, drawnGlyphCount: 0, firstGlyphY: 0,
-      minBrightness, maxBrightness, minTrainLength, maxTrainLength, minGapLength, maxGapLength, ceilingEntranceBand,
-      maxLocalZ, portalClearance: PORTAL_Z - maxLocalZ, movingGapCount: 0, representativeHeadPhase: 0
-    };
-  };
-  const updateMatrixPortal = (x, y, z) => {
-    const portal = matrixCave.portal;
-    if (portal.previousValid) {
-      const from = portal.previousZ - PORTAL_Z, to = z - PORTAL_Z;
-      const inward = from > 0 && to <= 0;
-      const outward = from < 0 && to >= 0;
-      if (inward || outward) {
-        const t = from / (from - to);
-        const crossX = portal.previousX + (x - portal.previousX) * t;
-        const crossY = portal.previousY + (y - portal.previousY) * t;
-        if (crossY > PORTAL_MAX_Y) portal.rejected.above = Math.min(0x7fffffff, portal.rejected.above + 1);
-        else if (crossY < PORTAL_MIN_Y) portal.rejected.below = Math.min(0x7fffffff, portal.rejected.below + 1);
-        else if (crossX < PORTAL_MIN_X || crossX > PORTAL_MAX_X) portal.rejected.beside = Math.min(0x7fffffff, portal.rejected.beside + 1);
-        else {
-          portal.inside = inward;
-          portal.lastCrossingDirection = inward ? "in" : "out";
-          matrixCave.mirrorNode.mirrorPortal = portal.inside;
-        }
-      }
-    }
-    portal.previousX = x;
-    portal.previousY = y;
-    portal.previousZ = z;
-    portal.previousValid = true;
   };
   const matrixModulo = (value, range) => value - Math.floor(value / range) * range;
-  const writeMatrixGlyph = (data, offset, entry, x, y, z, scale, cr, sr, m, glow, tip) => {
-    let ax = 1, ay = 0, az = 0, bx = 0, by = 1, bz = 0, cx = 0, cy = 0, cz = 1;
-    if (entry.kind === MATRIX_RAIN) {
-      const c = Math.cos(entry.angle), s = Math.sin(entry.angle);
-      ax = c; az = -s; cx = s; cz = c;
-    } else if (entry.kind === MATRIX_FLOOR) {
-      bx = 0; by = 0; bz = -1; cx = 0; cy = 1; cz = 0;
-    } else if (entry.kind === MATRIX_CEILING) {
-      bx = 0; by = 0; bz = 1; cx = 0; cy = -1; cz = 0;
-    } else if (entry.kind === MATRIX_LEFT) {
-      ax = 0; az = -1; cx = 1; cz = 0;
-    } else if (entry.kind === MATRIX_RIGHT) {
-      ax = 0; az = 1; cx = -1; cz = 0;
-    }
-    data[offset] = (cr * ax + sr * az) * scale;
-    data[offset + 1] = ay * scale;
-    data[offset + 2] = (-sr * ax + cr * az) * scale;
-    data[offset + 3] = 0;
-    data[offset + 4] = (cr * bx + sr * bz) * scale;
-    data[offset + 5] = by * scale;
-    data[offset + 6] = (-sr * bx + cr * bz) * scale;
-    data[offset + 7] = 0;
-    data[offset + 8] = (cr * cx + sr * cz) * scale;
-    data[offset + 9] = cy * scale;
-    data[offset + 10] = (-sr * cx + cr * cz) * scale;
-    data[offset + 11] = 0;
-    data[offset + 12] = m.x + cr * x + sr * z;
-    data[offset + 13] = m.floorY + y;
-    data[offset + 14] = m.z - sr * x + cr * z;
-    data[offset + 15] = 1;
-    data[offset + 16] = glow;
-    data[offset + 17] = 0;
-    data[offset + 18] = tip;
-    data[offset + 19] = entry.facing || 0;
+  const matrixTravelDistance = (x, z, caveIndex = 0) => {
+    if (!caveIndex) return Math.hypot(x - MATRIX_WORLD.origin[0], z - MATRIX_WORLD.origin[2]);
+    const offset = (caveIndex - 1) * 4, descriptor = MATRIX_WORLD.caves;
+    const depth = Math.max(0, descriptor[offset + 2] - x * descriptor[offset] - z * descriptor[offset + 1]);
+    return Math.hypot(x + descriptor[offset] * depth - MATRIX_WORLD.origin[0], z + descriptor[offset + 1] * depth - MATRIX_WORLD.origin[2]) + depth;
   };
-  const updateMatrixRain = (elapsed) => {
-    if (!matrixCave) return;
-    const m = matrixCave.mouth, dx = camera.position.x - m.x, dz = camera.position.z - m.z;
-    const localX = matrixCave.cr * dx - matrixCave.sr * dz;
-    const localZ = matrixCave.sr * dx + matrixCave.cr * dz;
-    updateMatrixPortal(localX, camera.position.y - m.floorY, localZ);
-    const distance = Math.hypot(dx, dz);
-    const preloaded = distance < MATRIX_PRELOAD || matrixCave.portal.inside;
-    const visible = matrixCave.portal.inside;
-    const wasPreloaded = matrixCave.preloaded;
-    if (preloaded !== matrixCave.preloaded) {
-      matrixCave.preloaded = preloaded;
-      const scale = preloaded ? 1 : 0;
-      setVec(matrixCave.room.scale, scale, scale, scale);
-    }
-    matrixCave.visible = visible;
-    matrixCave.drawEnabled = visible;
-    if (!preloaded && !wasPreloaded) {
-      matrixCave.drawnGlyphCount = 0;
-      for (let glyph = 0; glyph < MATRIX_TYPES; glyph++) matrixCave.nodes[glyph].drawInstanceCount = 0;
-      return;
-    }
-    const cr = matrixCave.cr, sr = matrixCave.sr;
-    const quality = renderer.kind === "canvas2d" ? "canvas2d" : renderer.quality;
-    const densityRankLimit = MATRIX_DENSITY[quality] || MATRIX_DENSITY.high;
-    const glyphVersion = Math.floor(elapsed * MATRIX_GLYPH_HZ);
-    const counts = matrixCave.surfaceActiveCounts;
-    counts.fill(0);
-    for (let glyph = 0; glyph < MATRIX_TYPES; glyph++) matrixCave.nodes[glyph].instanceCount = 0;
-    const ceilingBand = matrixCave.ceilingEntranceBand;
-    ceilingBand.sampledGlyphs = 0;
-    ceilingBand.visibleGlyphs = 0;
-    ceilingBand.gapGlyphs = 0;
-    ceilingBand.brightTips = 0;
-    ceilingBand.minVisibleBrightness = Infinity;
-    ceilingBand.maxVisibleBrightness = -Infinity;
-    let active = 0, bright = 0, movingGaps = 0, first = true, mutationHash = 2166136261;
-    for (let i = 0; i < matrixCave.entries.length; i++) {
-      const entry = matrixCave.entries[i];
-      if (entry.surface !== 0 && entry.rank >= densityRankLimit) continue;
-      const stream = matrixCave.streams[entry.stream];
-      let x = entry.x, y = entry.y, z = entry.z, shown = preloaded;
-      let tip = entry.tip, glow = stream.brightness;
-      if (entry.kind === MATRIX_RAIN) {
-        y = MATRIX_TOP - matrixModulo(elapsed * stream.speed + stream.phase, matrixCave.cycle) + entry.character * MATRIX_GAP;
-        shown = shown && y >= 0.13 && y <= MATRIX_TOP;
-        glow *= 0.48 + (1 - entry.character / stream.trainLength) * 0.52;
-      } else {
-        const sequence = stream.trainLength + stream.gapLength;
-        const trainPosition = entry.character % sequence;
-        const travel = elapsed * stream.speed + stream.phase;
-        const flow = stream.direction < 0
-          ? stream.flowMax - matrixModulo(travel - entry.character * MATRIX_SURFACE_GAP, stream.flowRange)
-          : stream.flowMin + matrixModulo(travel - entry.character * MATRIX_SURFACE_GAP, stream.flowRange);
-        if (trainPosition >= stream.trainLength) movingGaps++;
-        shown = shown && trainPosition < stream.trainLength;
-        if (shown) {
-          const trail = 1 - trainPosition / stream.trainLength;
-          tip = trainPosition === 0 ? 1 : trainPosition === 1 ? 0.55 : 0;
-          glow *= 0.48 + trail * 0.52;
+  const matrixCoverage = (x, z, caveIndex = 0) => {
+    if (!MATRIX_WORLD.active) return 0;
+    const amount = Math.max(0, Math.min(1, (MATRIX_WORLD.radius - matrixTravelDistance(x, z, caveIndex)) / MATRIX_FRONT_WIDTH));
+    return amount * amount * (3 - 2 * amount);
+  };
+  const matrixEntranceMinimum = (m, minX, maxX) => {
+    const sr = Math.sin(m.ry), cr = Math.cos(m.ry);
+    const x = m.x + sr * PORTAL_Z - MATRIX_WORLD.origin[0], z = m.z + cr * PORTAL_Z - MATRIX_WORLD.origin[2];
+    const cross = Math.max(minX, Math.min(maxX, -(x * cr - z * sr)));
+    return Math.hypot(x + cr * cross, z - sr * cross);
+  };
+  // The original hanging code is separate from the surface-following lanes.
+  // Prepare fixed columns inside the real carved volume, never the old flat liner.
+  const buildCaveRain = (slot, m, group, caveIndex) => {
+    const canvas = renderer.kind === "canvas2d", limit = canvas ? 18 : 48, trainLength = canvas ? 9 : 14;
+    const cr = Math.cos(m.ry), sr = Math.sin(m.ry), rand = mulberry32(fnv1a(`${slot.id}:rain`));
+    const streams = [], nodes = [], obstacles = [], column = { caveIndex: 0, floor: 0, ceiling: 0 };
+    const footprint = 0.055, halfHeight = 0.0605, clearance = 0.02;
+    const visit = (node) => {
+      if (node.geometry && !node.mirror) {
+        const verts = node.geometry.verts, transform = node.world;
+        let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity, minZ = Infinity, maxZ = -Infinity;
+        for (let i = 0; i < verts.length; i += 3) {
+          const x = verts[i], y = verts[i + 1], z = verts[i + 2];
+          const wx = transform[0] * x + transform[4] * y + transform[8] * z + transform[12] - m.x;
+          const wy = transform[1] * x + transform[5] * y + transform[9] * z + transform[13];
+          const wz = transform[2] * x + transform[6] * y + transform[10] * z + transform[14] - m.z;
+          const lx = cr * wx - sr * wz, lz = sr * wx + cr * wz;
+          minX = Math.min(minX, lx); maxX = Math.max(maxX, lx);
+          minY = Math.min(minY, wy); maxY = Math.max(maxY, wy);
+          minZ = Math.min(minZ, lz); maxZ = Math.max(maxZ, lz);
         }
-        if (entry.surface === 3 && flow >= stream.flowMax - MATRIX_SURFACE_GAP * 3) {
-          ceilingBand.sampledGlyphs++;
-          if (trainPosition >= stream.trainLength) ceilingBand.gapGlyphs++;
-          else {
-            ceilingBand.visibleGlyphs++;
-            if (tip > 0) ceilingBand.brightTips++;
-            ceilingBand.minVisibleBrightness = Math.min(ceilingBand.minVisibleBrightness, glow);
-            ceilingBand.maxVisibleBrightness = Math.max(ceilingBand.maxVisibleBrightness, glow);
-          }
-        }
-        if (entry.kind === MATRIX_FLOOR || entry.kind === MATRIX_CEILING) z = flow;
-        else y = flow;
+        if (minZ < -0.6) obstacles.push({ minX, maxX, minY, maxY, minZ, maxZ });
       }
-      if (!shown) continue;
-      const block = i >> 3;
-      const phasedVersion = Math.floor(elapsed * MATRIX_GLYPH_HZ + ((block * 13) & 15) / 16);
-      const glyph = ((i & 7) + phasedVersion + ((block * 5) & 7)) & 7;
-      const node = matrixCave.nodes[glyph], slot = node.instanceCount++;
-      if (slot >= matrixCave.perGlyphCapacity) throw new Error("Matrix glyph instance capacity exceeded");
-      writeMatrixGlyph(node.instanceData, slot * 20, entry, x, y, z, 1, cr, sr, m, glow, tip);
-      mutationHash = Math.imul(mutationHash ^ glyph ^ Math.imul(i + 1, 16777619), 16777619) >>> 0;
-      counts[entry.surface]++;
-      active++;
-      if (tip > 0) bright++;
-      if (first && entry.kind === MATRIX_RAIN) {
-        matrixCave.firstGlyphY = m.floorY + y;
-        first = false;
+      for (let i = 0; i < node.children.length; i++) visit(node.children[i]);
+    };
+    visit(group);
+    for (let attempt = 0; attempt < limit * 16 && streams.length < limit; attempt++) {
+      const lx = (rand() - 0.5) * 5, lz = streams.length < limit * 0.65 ? -0.7 - rand() * 1.55 : -2.55 - rand() * 3.2;
+      const x = m.x + cr * lx + sr * lz, z = m.z - sr * lx + cr * lz;
+      let minY = -Infinity, maxY = Infinity, valid = true;
+      for (let ix = -1; ix <= 1; ix++) for (let iz = -1; iz <= 1; iz++) {
+        if (!island.cavityAt(x + ix * footprint, z + iz * footprint, column) || column.caveIndex !== caveIndex || !Number.isFinite(column.ceiling)) valid = false;
+        else { minY = Math.max(minY, column.floor); maxY = Math.min(maxY, column.ceiling); }
+      }
+      minY += halfHeight + clearance; maxY -= halfHeight + clearance;
+      if (!valid || maxY - minY < 1) continue;
+      const blocked = [];
+      for (let i = 0; i < obstacles.length; i++) {
+        const o = obstacles[i];
+        if (lx + footprint < o.minX || lx - footprint > o.maxX || lz + footprint < o.minZ || lz - footprint > o.maxZ) continue;
+        blocked.push(o.minY - halfHeight - clearance, o.maxY + halfHeight + clearance);
+      }
+      const seed = fnv1a(`${slot.id}:rain:${streams.length}`), yaw = m.ry + (rand() - 0.5) * 0.18;
+      const period = maxY - minY + (trainLength - 1) * MATRIX_RAIN_GAP;
+      streams.push({ x, z, minY, maxY, yaw, cr: Math.cos(yaw), sr: Math.sin(yaw), period, trainLength, seed,
+        speed: MATRIX_STREAM_SPEED_MIN + rand() * MATRIX_STREAM_SPEED_RANGE, phase: rand() * period, brightness: 0.62 + rand() * 0.32,
+        rank: canvas ? 0 : streams.length % 8, distance: matrixTravelDistance(x, z, caveIndex), blocked });
+    }
+    const perGlyphCapacity = streams.length * Math.ceil(trainLength / MATRIX_TYPES);
+    for (let glyph = 0; glyph < MATRIX_TYPES; glyph++) {
+      const node = createNode({ geometry: { ...hubModels.matrixGlyph(glyph), matrixCave: caveIndex }, instanceData: new Float32Array(perGlyphCapacity * 20), instanceCount: 0, drawInstanceCount: 0, instanceVersion: 0, fixedInstanceCapacity: true });
+      addChild(root, node); placed.push(node); nodes.push(node);
+    }
+    return { streams, nodes, perGlyphCapacity, capacity: perGlyphCapacity * MATRIX_TYPES, bufferBytes: perGlyphCapacity * MATRIX_TYPES * 80,
+      spacing: MATRIX_RAIN_GAP, activeGlyphCount: 0, brightTipCount: 0, updates: 0, densityRankLimit: 0 };
+  };
+  const updateCaveRain = (cave, elapsed, visible, densityRankLimit) => {
+    const rain = cave.rain;
+    rain.activeGlyphCount = rain.brightTipCount = 0;
+    rain.densityRankLimit = densityRankLimit;
+    for (let glyph = 0; glyph < MATRIX_TYPES; glyph++) rain.nodes[glyph].instanceCount = rain.nodes[glyph].drawInstanceCount = 0;
+    if (!visible) return;
+    for (let i = 0; i < rain.streams.length; i++) {
+      const s = rain.streams[i];
+      if (s.rank >= densityRankLimit || s.distance - MATRIX_GLYPH_REACH >= MATRIX_WORLD.radius) continue;
+      const head = s.maxY - matrixModulo(elapsed * s.speed + s.phase, s.period);
+      const version = Math.floor(elapsed * MATRIX_GLYPH_HZ + (s.seed & 15) / 16);
+      for (let character = 0; character < s.trainLength; character++) {
+        const y = head + character * MATRIX_RAIN_GAP;
+        if (y < s.minY || y > s.maxY) continue;
+        let blocked = false;
+        for (let b = 0; b < s.blocked.length; b += 2) if (y >= s.blocked[b] && y <= s.blocked[b + 1]) { blocked = true; break; }
+        if (blocked) continue;
+        const glyph = (character + version + (s.seed & 7)) & 7, node = rain.nodes[glyph], slot = node.instanceCount++;
+        if (slot >= rain.perGlyphCapacity) throw new Error("Cave Matrix rain instance capacity exceeded");
+        const data = node.instanceData, offset = slot * 20;
+        data[offset] = s.cr; data[offset + 1] = 0; data[offset + 2] = -s.sr; data[offset + 3] = 0;
+        data[offset + 4] = 0; data[offset + 5] = 1; data[offset + 6] = 0; data[offset + 7] = 0;
+        data[offset + 8] = s.sr; data[offset + 9] = 0; data[offset + 10] = s.cr; data[offset + 11] = 0;
+        data[offset + 12] = s.x; data[offset + 13] = y; data[offset + 14] = s.z; data[offset + 15] = 1;
+        data[offset + 16] = s.brightness * (0.48 + (1 - character / s.trainLength) * 0.52);
+        data[offset + 17] = 0; data[offset + 18] = character === 0 ? 1 : character === 1 ? 0.55 : 0;
+        // Free-standing voxels, unlike surface glyphs, must be visible from behind.
+        data[offset + 19] = 0;
+        rain.activeGlyphCount++; if (character < 2) rain.brightTipCount++;
       }
     }
     for (let glyph = 0; glyph < MATRIX_TYPES; glyph++) {
-      const node = matrixCave.nodes[glyph];
-      node.drawInstanceCount = visible ? node.instanceCount : 0;
-      node.instanceVersion++;
+      const node = rain.nodes[glyph];
+      node.drawInstanceCount = node.instanceCount;
+      if (rain.activeGlyphCount) node.instanceVersion++;
     }
-    matrixCave.previousGlyphVersion = matrixCave.glyphVersion;
-    matrixCave.glyphVersion = glyphVersion;
-    matrixCave.mutationHash = mutationHash;
-    matrixCave.quality = quality;
-    matrixCave.densityRankLimit = densityRankLimit;
-    matrixCave.activeGlyphCount = active;
-    matrixCave.brightTipCount = bright;
-    matrixCave.movingGapCount = preloaded ? movingGaps : 0;
-    matrixCave.drawnGlyphCount = visible ? active : 0;
-    if (ceilingBand.minVisibleBrightness === Infinity) ceilingBand.minVisibleBrightness = ceilingBand.maxVisibleBrightness = 0;
-    for (let surface = 1; surface < MATRIX_SURFACES.length; surface++) {
-      const streamIndex = matrixCave.surfaceRepresentativeStreams[surface];
-      if (streamIndex < 0) continue;
-      const stream = matrixCave.streams[streamIndex];
-      const travel = elapsed * stream.speed + stream.phase;
-      matrixCave.surfaceHeadPositions[surface] = stream.direction < 0
-        ? stream.flowMax - matrixModulo(travel, stream.flowRange)
-        : stream.flowMin + matrixModulo(travel, stream.flowRange);
-      matrixCave.surfaceGapPositions[surface] = stream.direction < 0
-        ? stream.flowMax - matrixModulo(travel - stream.trainLength * MATRIX_SURFACE_GAP, stream.flowRange)
-        : stream.flowMin + matrixModulo(travel - stream.trainLength * MATRIX_SURFACE_GAP, stream.flowRange);
-      if (surface === 1) matrixCave.representativeHeadPhase = matrixModulo(travel, stream.flowRange);
+    if (rain.activeGlyphCount) rain.updates++;
+  };
+  const clearMatrixDraw = (cave) => {
+    cave.activeGlyphCount = cave.revealedGlyphCount = cave.drawnGlyphCount = cave.brightTipCount = cave.movingGapCount = 0;
+    const counts = cave.activeSurfaceCounts;
+    counts.floor = counts.ceiling = counts.wall = counts.prop = 0;
+    for (let glyph = 0; glyph < MATRIX_TYPES; glyph++) {
+      const node = cave.nodes[glyph];
+      node.instanceCount = node.drawInstanceCount = 0;
     }
-    if (preloaded) {
-      matrixCave.updates++;
-      if (!matrixCave.prewarmed) matrixCave.prewarmCount++;
-      matrixCave.prewarmed = true;
+  };
+  // Intersect a lane's full width with the union of coplanar terrain faces. Between
+  // vertex U coordinates, each connected V interval has linear boundary edges.
+  // Keep their endpoint limits, including at hole vertices where an exact point
+  // sample alone would incorrectly join the intervals on either side of a hole.
+  const matrixSupportIntervals = (supports, left, right) => {
+    const cuts = [left, right];
+    for (const support of supports) for (const point of support.polygon) {
+      if (point[0] > left && point[0] < right) cuts.push(point[0]);
     }
+    cuts.sort((a, b) => a - b);
+    let allowed = null;
+    for (let slab = 1; slab < cuts.length; slab++) {
+      const loU = cuts[slab - 1], hiU = cuts[slab];
+      if (hiU - loU < 1e-8) continue;
+      const middle = (loU + hiU) * 0.5, intervals = [];
+      for (const support of supports) {
+        const polygon = support.polygon;
+        let lo = Infinity, hi = -Infinity, loLeft = 0, loRight = 0, hiLeft = 0, hiRight = 0;
+        for (let i = 0; i < polygon.length; i++) {
+          const a = polygon[i], b = polygon[(i + 1) % polygon.length];
+          if (middle <= Math.min(a[0], b[0]) || middle >= Math.max(a[0], b[0])) continue;
+          const slope = (b[1] - a[1]) / (b[0] - a[0]);
+          const v = a[1] + (middle - a[0]) * slope;
+          const atLeft = a[1] + (loU - a[0]) * slope, atRight = a[1] + (hiU - a[0]) * slope;
+          if (v < lo) { lo = v; loLeft = atLeft; loRight = atRight; }
+          if (v > hi) { hi = v; hiLeft = atLeft; hiRight = atRight; }
+        }
+        if (hi > lo) intervals.push({ lo, hi, loLeft, loRight, hiLeft, hiRight });
+      }
+      intervals.sort((a, b) => a.lo - b.lo);
+      const union = [];
+      for (let i = 0; i < intervals.length;) {
+        const first = intervals[i++];
+        let hi = first.hi, hiLeft = first.hiLeft, hiRight = first.hiRight;
+        while (i < intervals.length && intervals[i].lo <= hi + 1e-8) {
+          const next = intervals[i++];
+          if (next.hi > hi) { hi = next.hi; hiLeft = next.hiLeft; hiRight = next.hiRight; }
+        }
+        const lo = Math.max(first.loLeft, first.loRight), top = Math.min(hiLeft, hiRight);
+        if (top > lo) union.push([lo, top]);
+      }
+      if (allowed === null) allowed = union;
+      else {
+        const intersection = [];
+        for (let a = 0, b = 0; a < allowed.length && b < union.length;) {
+          const lo = Math.max(allowed[a][0], union[b][0]), hi = Math.min(allowed[a][1], union[b][1]);
+          if (hi > lo) intersection.push([lo, hi]);
+          if (allowed[a][1] < union[b][1]) a++; else b++;
+        }
+        allowed = intersection;
+      }
+      if (!allowed.length) break;
+    }
+    return allowed || [];
+  };
+  // Sample actual carved polygons and prop faces once. Horizontal terrain lanes
+  // span coplanar mesh seams; only genuine holes, steps and outer edges inset them.
+  // All caves share the original eight voxel meshes and immutable backing geometry.
+  const buildCaveGlyphs = (slot, m, group) => {
+    const caveIndex = island.mouths.indexOf(m) + 1, cr = Math.cos(m.ry), sr = Math.sin(m.ry);
+    const sections = [], streams = [], entries = [], nodes = [], horizontalDomains = [];
+    const surfaceCounts = { floor: 0, ceiling: 0, wall: 0, prop: 0 };
+    const halfX = 0.0395, halfY = 0.0605, halfZ = 0.005, clearance = 0.01;
+    let maximumLocalZ = -Infinity, minEntranceX = Infinity, maxEntranceX = -Infinity, propFaces = 0, terrainFaces = 0, perGlyphCapacity = 0;
+    const addStream = (section, column, flowMin, flowMax) => {
+      const { nx, ny, nz, ux, uz, vx, vz, plane, horizontal } = section;
+      const cross = column * MATRIX_SURFACE_PITCH;
+      const seed = fnv1a(`${slot.id}:${Math.round(nx * 1000)}:${Math.round(ny * 1000)}:${Math.round(nz * 1000)}:${column}`);
+      const rand = mulberry32(seed), trainLength = MATRIX_TRAIN_MIN + Math.floor(rand() * MATRIX_TRAIN_RANGE), gapLength = MATRIX_TRAIN_GAP_MIN + Math.floor(rand() * MATRIX_TRAIN_GAP_RANGE);
+      const sequence = trainLength + gapLength, span = sequence * MATRIX_SURFACE_GAP;
+      const speed = MATRIX_STREAM_SPEED_MIN + rand() * MATRIX_STREAM_SPEED_RANGE, phase = rand() * span, brightness = 0.58 + rand() * 0.36;
+      const direction = horizontal && ny > 0 ? 1 : -1;
+      const characters = Math.ceil((flowMax - flowMin) / MATRIX_SURFACE_GAP) + 1, rank = matrixModulo(column, 8);
+      const stream = { section: sections.length, cross, speed, phase, brightness, trainLength, gapLength, direction, flowMin, flowMax, flowRange: span, seed, head: 0, gap: 0 };
+      const streamIndex = streams.length;
+      streams.push(stream);
+      if (renderer.kind !== "canvas2d" || rank < MATRIX_DENSITY.canvas2d) {
+        for (let character = 0; character < characters; character++) entries.push({ stream: streamIndex, character, rank });
+        // Advected cell identities cover every glyph once per eight consecutive slots.
+        perGlyphCapacity += Math.ceil(characters / MATRIX_TYPES);
+      }
+      section.streamCount++;
+      section.glyphCount += characters;
+      const portalU = sr * ux + cr * uz, portalV = sr * vx + cr * vz, portalN = sr * nx + cr * nz;
+      for (let edge = 0; edge < 2; edge++) {
+        const flow = edge ? flowMax : flowMin;
+        const localZ = portalU * cross + portalV * flow + portalN * (plane + halfZ + clearance) - sr * m.x - cr * m.z;
+        maximumLocalZ = Math.max(maximumLocalZ, localZ + Math.abs(portalU) * halfX + Math.abs(portalV) * halfY + Math.abs(portalN) * halfZ);
+      }
+    };
+    const addFace = (geometry, face, transform, source) => {
+      const points = [];
+      for (let i = 0; i < face.i.length; i++) {
+        const p = face.i[i] * 3, x = geometry.verts[p], y = geometry.verts[p + 1], z = geometry.verts[p + 2];
+        points.push(transform ? [transform[0] * x + transform[4] * y + transform[8] * z + transform[12], transform[1] * x + transform[5] * y + transform[9] * z + transform[13], transform[2] * x + transform[6] * y + transform[10] * z + transform[14]] : [x, y, z]);
+      }
+      const a = points[0];
+      let nx = 0, ny = 0, nz = 0;
+      for (let i = 0; i < points.length; i++) {
+        const p = points[i], q = points[(i + 1) % points.length];
+        nx += (p[1] - q[1]) * (p[2] + q[2]);
+        ny += (p[2] - q[2]) * (p[0] + q[0]);
+        nz += (p[0] - q[0]) * (p[1] + q[1]);
+      }
+      const length = Math.hypot(nx, ny, nz);
+      if (length < 1e-8) return;
+      nx /= length; ny /= length; nz /= length;
+      const horizontal = Math.abs(ny) > 0.999;
+      let vx = horizontal ? sr * (ny > 0 ? -1 : 1) : -ny * nx;
+      let vy = horizontal ? 0 : 1 - ny * ny;
+      let vz = horizontal ? cr * (ny > 0 ? -1 : 1) : -ny * nz;
+      const vLength = Math.hypot(vx, vy, vz);
+      vx /= vLength; vy /= vLength; vz /= vLength;
+      const ux = vy * nz - vz * ny, uy = vz * nx - vx * nz, uz = vx * ny - vy * nx;
+      const plane = nx * a[0] + ny * a[1] + nz * a[2], polygon = [];
+      let minU = Infinity, maxU = -Infinity, minV = Infinity, maxV = -Infinity;
+      for (let i = 0; i < points.length; i++) {
+        const p = points[i], u = ux * p[0] + uy * p[1] + uz * p[2], v = vx * p[0] + vy * p[1] + vz * p[2];
+        const entranceX = cr * (p[0] - m.x) - sr * (p[2] - m.z);
+        minEntranceX = Math.min(minEntranceX, entranceX); maxEntranceX = Math.max(maxEntranceX, entranceX);
+        polygon.push([u, v]);
+        minU = Math.min(minU, u); maxU = Math.max(maxU, u);
+        minV = Math.min(minV, v); maxV = Math.max(maxV, v);
+      }
+      if (source === "terrain" && horizontal) {
+        let domain = null;
+        for (let i = 0; i < horizontalDomains.length; i++) {
+          const candidate = horizontalDomains[i];
+          if (candidate.ny === ny && candidate.plane === plane) { domain = candidate; break; }
+        }
+        if (!domain) {
+          domain = { source, category: ny > 0 ? "floor" : "ceiling", face: null, polygon: null, supports: [], constraints: [], ux, uy, uz, vx, vy, vz, nx, ny, nz, plane, clearance, horizontal, minU, maxU, streamStart: 0, streamCount: 0, glyphCount: 0 };
+          horizontalDomains.push(domain);
+        }
+        domain.supports.push({ face, polygon });
+        domain.minU = Math.min(domain.minU, minU); domain.maxU = Math.max(domain.maxU, maxU);
+        terrainFaces++;
+        return;
+      }
+      let area = 0;
+      for (let i = 0; i < polygon.length; i++) {
+        const p = polygon[i], q = polygon[(i + 1) % polygon.length];
+        area += p[0] * q[1] - q[0] * p[1];
+      }
+      const winding = area < 0 ? -1 : 1, constraints = [];
+      for (let i = 0; i < polygon.length; i++) {
+        const p = polygon[i], q = polygon[(i + 1) % polygon.length];
+        const cu = winding * (q[1] - p[1]), cv = winding * (p[0] - q[0]);
+        constraints.push([cu, cv, cu * p[0] + cv * p[1] - Math.abs(cu) * halfX - Math.abs(cv) * halfY]);
+      }
+      // Account for the entire extruded glyph at the real portal, not only its centre.
+      const portalU = sr * ux + cr * uz, portalV = sr * vx + cr * vz, portalN = sr * nx + cr * nz;
+      constraints.push([portalU, portalV, PORTAL_Z - 0.02 + sr * m.x + cr * m.z - portalN * (plane + halfZ + clearance) - Math.abs(portalU) * halfX - Math.abs(portalV) * halfY - Math.abs(portalN) * halfZ]);
+      const category = source === "prop" ? "prop" : horizontal ? ny > 0 ? "floor" : "ceiling" : "wall";
+      const section = { source, category, face, polygon, constraints, ux, uy, uz, vx, vy, vz, nx, ny, nz, plane, clearance, horizontal, streamStart: streams.length, streamCount: 0, glyphCount: 0 };
+      for (let column = Math.ceil((minU + halfX) / MATRIX_SURFACE_PITCH); column * MATRIX_SURFACE_PITCH <= maxU - halfX + 1e-8; column++) {
+        const cross = column * MATRIX_SURFACE_PITCH;
+        let flowMin = minV + halfY, flowMax = maxV - halfY, valid = true;
+        for (let i = 0; i < constraints.length; i++) {
+          const constraint = constraints[i], remain = constraint[2] - constraint[0] * cross;
+          if (constraint[1] > 1e-8) flowMax = Math.min(flowMax, remain / constraint[1]);
+          else if (constraint[1] < -1e-8) flowMin = Math.max(flowMin, remain / constraint[1]);
+          else if (remain < -1e-8) { valid = false; break; }
+        }
+        if (!valid || flowMax - flowMin < 1e-6) continue;
+        addStream(section, column, flowMin, flowMax);
+      }
+      if (section.streamCount) {
+        sections.push(section);
+        surfaceCounts[category] += section.glyphCount;
+      }
+      if (source === "terrain") terrainFaces++; else propFaces++;
+    };
+    for (let i = 0; i < island.geometry.faces.length; i++) {
+      const face = island.geometry.faces[i];
+      if (face.matrixCave === caveIndex) addFace(island.geometry, face, null, "terrain");
+    }
+    for (const section of horizontalDomains) {
+      section.streamStart = streams.length;
+      const portalU = sr * section.ux + cr * section.uz, portalV = sr * section.vx + cr * section.vz;
+      const portalN = sr * section.nx + cr * section.nz;
+      const portalLimit = PORTAL_Z - 0.02 + sr * m.x + cr * m.z - portalN * (section.plane + halfZ + clearance) - Math.abs(portalU) * halfX - Math.abs(portalV) * halfY - Math.abs(portalN) * halfZ;
+      section.constraints.push([portalU, portalV, portalLimit]);
+      for (let column = Math.ceil((section.minU + halfX) / MATRIX_SURFACE_PITCH); column * MATRIX_SURFACE_PITCH <= section.maxU - halfX + 1e-8; column++) {
+        const cross = column * MATRIX_SURFACE_PITCH;
+        const intervals = matrixSupportIntervals(section.supports, cross - halfX, cross + halfX);
+        for (let i = 0; i < intervals.length; i++) {
+          let flowMin = intervals[i][0] + halfY, flowMax = intervals[i][1] - halfY;
+          const remain = portalLimit - portalU * cross;
+          if (portalV > 1e-8) flowMax = Math.min(flowMax, remain / portalV);
+          else if (portalV < -1e-8) flowMin = Math.max(flowMin, remain / portalV);
+          else if (remain < -1e-8) continue;
+          if (flowMax - flowMin >= 1e-6) addStream(section, column, flowMin, flowMax);
+        }
+      }
+      if (section.streamCount) {
+        sections.push(section);
+        surfaceCounts[section.category] += section.glyphCount;
+      }
+    }
+    BL.scene.updateWorld(group);
+    const visit = (node, inheritedLiving = false, inheritedEmissive = false) => {
+      const living = inheritedLiving || !!node.matrixLiving, emissiveLiving = inheritedEmissive || !!node.matrixEmissiveLiving;
+      if (node.geometry && !node.geometry.matrixGlyph && !node.geometry.matrixLocalGlyphSurface && !node.mirror) {
+        const original = node.geometry, faces = [], transform = node.world;
+        let owned = false;
+        for (let f = 0; f < original.faces.length; f++) {
+          const face = original.faces[f];
+          let inside = true;
+          for (let i = 0; i < face.i.length; i++) {
+            const p = face.i[i] * 3, x = original.verts[p], y = original.verts[p + 1], z = original.verts[p + 2];
+            const wx = transform[0] * x + transform[4] * y + transform[8] * z + transform[12];
+            const wz = transform[2] * x + transform[6] * y + transform[10] * z + transform[14];
+            if (sr * (wx - m.x) + cr * (wz - m.z) > PORTAL_Z - 0.02) { inside = false; break; }
+          }
+          if (inside) {
+            const local = { ...face, matrixCave: caveIndex, matrixLocalGlyphSurface: true };
+            faces.push(local);
+            if (!living && !(emissiveLiving && face.emissive > 0)) addFace(original, local, transform, "prop");
+            owned = true;
+          } else faces.push(face);
+        }
+        if (owned) node.geometry = { ...original, faces };
+      }
+      for (let i = 0; i < node.children.length; i++) visit(node.children[i], living, emissiveLiving);
+    };
+    visit(group);
+    for (let glyph = 0; glyph < MATRIX_TYPES; glyph++) {
+      // A record owns one raw instance buffer. Its geometry wrapper is per cave;
+      // the immutable voxel vertices and faces themselves remain shared.
+      const node = createNode({ geometry: { ...hubModels.matrixGlyph(glyph), matrixCave: caveIndex }, instanceData: new Float32Array(perGlyphCapacity * 20), instanceCount: 0, drawInstanceCount: 0, instanceVersion: 0, fixedInstanceCapacity: true });
+      addChild(root, node); placed.push(node); nodes.push(node);
+    }
+    let registryHash = 2166136261, minBrightness = Infinity, maxBrightness = 0, minTrainLength = Infinity, maxTrainLength = 0, minGapLength = Infinity, maxGapLength = 0;
+    let surfaceMetadataBytes = 0;
+    for (let i = 0; i < sections.length; i++) {
+      const section = sections[i];
+      registryHash = Math.imul(registryHash ^ Math.round(section.plane * 1000) ^ section.streamCount, 16777619) >>> 0;
+      surfaceMetadataBytes += 128 + section.constraints.length * 24;
+      if (section.supports) {
+        for (const support of section.supports) surfaceMetadataBytes += 32 + support.polygon.length * 16;
+      } else surfaceMetadataBytes += section.polygon.length * 16;
+    }
+    for (let i = 0; i < streams.length; i++) {
+      const stream = streams[i];
+      registryHash = Math.imul(registryHash ^ stream.seed ^ Math.round(stream.flowMin * 1000) ^ Math.round(stream.flowMax * 1000), 16777619) >>> 0;
+      minBrightness = Math.min(minBrightness, stream.brightness); maxBrightness = Math.max(maxBrightness, stream.brightness);
+      minTrainLength = Math.min(minTrainLength, stream.trainLength); maxTrainLength = Math.max(maxTrainLength, stream.trainLength);
+      minGapLength = Math.min(minGapLength, stream.gapLength); maxGapLength = Math.max(maxGapLength, stream.gapLength);
+    }
+    const cave = {
+      id: slot.id, caveIndex, mouth: m, cr, sr, nodes, sections, streams, entries, surfaceCounts, activeSurfaceCounts: { floor: 0, ceiling: 0, wall: 0, prop: 0 },
+      rain: buildCaveRain(slot, m, group, caveIndex),
+      glyphCount: surfaceCounts.floor + surfaceCounts.ceiling + surfaceCounts.wall + surfaceCounts.prop,
+      perGlyphCapacity, capacity: perGlyphCapacity * MATRIX_TYPES, bufferBytes: perGlyphCapacity * MATRIX_TYPES * 80,
+      registryBytes: entries.length * 24 + streams.length * 112 + surfaceMetadataBytes, surfaceMetadataBytes, registryHash: registryHash.toString(16).padStart(8, "0"),
+      activeGlyphCount: 0, revealedGlyphCount: 0, drawnGlyphCount: 0, brightTipCount: 0, movingGapCount: 0, maximumLocalZ,
+      minimumTravelDistance: matrixEntranceMinimum(m, minEntranceX, maxEntranceX), terrainFaces, propFaces, updates: 0, allocationCount: MATRIX_TYPES, rebuildCount: 1,
+      quality: renderer.kind === "canvas2d" ? "canvas2d" : renderer.quality, densityRankLimit: MATRIX_DENSITY[renderer.kind === "canvas2d" ? "canvas2d" : renderer.quality], glyphVersion: -1, previousGlyphVersion: -1, mutationHash: 0, firstGlyphY: 0,
+      minBrightness, maxBrightness, minTrainLength, maxTrainLength, minGapLength, maxGapLength, visible: false, drawEnabled: false
+    };
+    matrixInteriors.push(cave);
+    return cave;
+  };
+  const updateCaveGlyphs = (elapsed, visible, densityRankLimit) => {
+    for (let c = 0; c < matrixInteriors.length; c++) {
+      const cave = matrixInteriors[c];
+      cave.visible = cave.drawEnabled = visible && MATRIX_WORLD.radius > cave.minimumTravelDistance;
+      cave.quality = renderer.kind === "canvas2d" ? "canvas2d" : renderer.quality;
+      cave.densityRankLimit = densityRankLimit;
+      updateCaveRain(cave, elapsed, cave.visible, densityRankLimit);
+      if (!visible || MATRIX_WORLD.radius <= cave.minimumTravelDistance) {
+        clearMatrixDraw(cave);
+        continue;
+      }
+      for (let glyph = 0; glyph < MATRIX_TYPES; glyph++) cave.nodes[glyph].instanceCount = 0;
+      const counts = cave.activeSurfaceCounts;
+      counts.floor = counts.ceiling = counts.wall = counts.prop = 0;
+      let active = 0, revealed = 0, bright = 0, gaps = 0, first = true, mutationHash = 2166136261;
+      for (let i = 0; i < cave.entries.length; i++) {
+        const entry = cave.entries[i];
+        if (entry.rank >= densityRankLimit) continue;
+        const stream = cave.streams[entry.stream], section = cave.sections[stream.section];
+        const sequence = stream.trainLength + stream.gapLength;
+        const travel = elapsed * stream.speed + stream.phase;
+        const cell = Math.ceil((stream.flowMin - stream.direction * travel) / MATRIX_SURFACE_GAP) + entry.character;
+        const flow = cell * MATRIX_SURFACE_GAP + stream.direction * travel;
+        if (flow < stream.flowMin || flow > stream.flowMax) continue;
+        const plane = section.plane + 0.015;
+        const x = section.ux * stream.cross + section.vx * flow + section.nx * plane;
+        const z = section.uz * stream.cross + section.vz * flow + section.nz * plane;
+        const distance = matrixTravelDistance(x, z, cave.caveIndex);
+        if (distance - MATRIX_GLYPH_REACH >= MATRIX_WORLD.radius) continue;
+        const trainPosition = matrixModulo(-stream.direction * cell, sequence);
+        if (trainPosition >= stream.trainLength) { gaps++; continue; }
+        const tip = trainPosition === 0 ? 1 : trainPosition === 1 ? 0.55 : 0;
+        const glow = stream.brightness * (0.48 + (1 - trainPosition / stream.trainLength) * 0.52);
+        const version = Math.floor(elapsed * MATRIX_GLYPH_HZ + (stream.seed & 15) / 16);
+        const glyph = (cell + version + (stream.seed & 7)) & 7;
+        const node = cave.nodes[glyph], slot = node.instanceCount++;
+        if (slot >= cave.perGlyphCapacity) throw new Error("Cave Matrix glyph instance capacity exceeded");
+        const data = node.instanceData, offset = slot * 20;
+        data[offset] = section.ux; data[offset + 1] = section.uy; data[offset + 2] = section.uz; data[offset + 3] = 0;
+        data[offset + 4] = section.vx; data[offset + 5] = section.vy; data[offset + 6] = section.vz; data[offset + 7] = 0;
+        data[offset + 8] = section.nx; data[offset + 9] = section.ny; data[offset + 10] = section.nz; data[offset + 11] = 0;
+        data[offset + 12] = x;
+        data[offset + 13] = section.uy * stream.cross + section.vy * flow + section.ny * plane;
+        data[offset + 14] = z;
+        data[offset + 15] = 1; data[offset + 16] = glow; data[offset + 17] = 0; data[offset + 18] = tip; data[offset + 19] = 1;
+        mutationHash = Math.imul(mutationHash ^ glyph ^ Math.imul(i + 1, 16777619), 16777619) >>> 0;
+        counts[section.category]++;
+        if (first && !section.horizontal) { cave.firstGlyphY = data[offset + 13]; first = false; }
+        active++; if (distance < MATRIX_WORLD.radius) revealed++; if (tip) bright++;
+      }
+      for (let i = 0; i < cave.streams.length; i++) {
+        const stream = cave.streams[i], travel = matrixModulo(elapsed * stream.speed + stream.phase, stream.flowRange);
+        stream.head = stream.direction * travel;
+        stream.gap = stream.direction * matrixModulo(travel - stream.trainLength * MATRIX_SURFACE_GAP, stream.flowRange);
+      }
+      for (let glyph = 0; glyph < MATRIX_TYPES; glyph++) {
+        const node = cave.nodes[glyph];
+        node.drawInstanceCount = node.instanceCount;
+        if (active) node.instanceVersion++;
+      }
+      cave.activeGlyphCount = cave.drawnGlyphCount = active;
+      cave.revealedGlyphCount = revealed;
+      cave.brightTipCount = bright; cave.movingGapCount = gaps; if (active) cave.updates++;
+      cave.previousGlyphVersion = cave.glyphVersion;
+      cave.glyphVersion = Math.floor(elapsed * MATRIX_GLYPH_HZ);
+      cave.mutationHash = mutationHash;
+    }
+  };
+  const matrixWorldStreamSample = (stream, time, downward) => {
+    const hash = (n) => {
+      let value = n | 0;
+      value ^= value >>> 16;
+      value = Math.imul(value, 2146121005);
+      value ^= value >>> 15;
+      value = Math.imul(value, -2073254261);
+      value ^= value >>> 16;
+      return (value >>> 8) / 16777216;
+    };
+    const speed = MATRIX_STREAM_SPEED_MIN + hash(stream + 19) * MATRIX_STREAM_SPEED_RANGE;
+    const trainLength = MATRIX_TRAIN_MIN + Math.floor(hash(stream) * MATRIX_TRAIN_RANGE);
+    const gapLength = MATRIX_TRAIN_GAP_MIN + Math.floor(hash(stream + 41) * MATRIX_TRAIN_GAP_RANGE);
+    const sequenceLength = trainLength + gapLength, span = sequenceLength * MATRIX_SURFACE_GAP;
+    const phase = hash(stream + 73) * span, direction = downward ? -1 : 1;
+    const brightness = 0.58 + hash(stream + 101) * 0.36;
+    return {
+      stream, time, speed, trainLength, gapLength, span, direction, brightness,
+      leadingGlow: brightness,
+      secondGlow: brightness * (0.48 + 0.52 * (trainLength - 1) / trainLength),
+      trailingGlow: brightness * (0.48 + 0.52 / trainLength),
+      head: direction * matrixModulo(time * speed + phase + (trainLength - 1) * MATRIX_SURFACE_GAP, span),
+      gap: direction * matrixModulo(time * speed + phase + trainLength * MATRIX_SURFACE_GAP, span)
+    };
+  };
+  const updateMatrixWorld = (dt, elapsed) => {
+    if (!matrixCave) return;
+    const quality = renderer.kind === "canvas2d" ? "canvas2d" : renderer.quality;
+    const densityRankLimit = MATRIX_DENSITY[quality] || MATRIX_DENSITY.high;
+    MATRIX_WORLD.time = elapsed;
+    MATRIX_WORLD.density = densityRankLimit / MATRIX_DENSITY.high;
+    if (MATRIX_WORLD.direction > 0) MATRIX_WORLD.radius = Math.min(MATRIX_WORLD.maxRadius, MATRIX_WORLD.radius + dt * MATRIX_WORLD.speed);
+    else if (MATRIX_WORLD.direction < 0) {
+      MATRIX_WORLD.radius = Math.max(0, MATRIX_WORLD.radius - dt * MATRIX_WORLD.retreatSpeed);
+      if (MATRIX_WORLD.radius === 0) MATRIX_WORLD.direction = 0;
+    }
+    MATRIX_WORLD.active = MATRIX_WORLD.radius > 0 ? 1 : 0;
+    matrixCave.mirrorNode.mirrorPortal = matrixCave.portal.inside;
+    updateCaveGlyphs(elapsed, !!MATRIX_WORLD.active, densityRankLimit);
   };
   const inMatrixCave = () => {
     return !!matrixCave && matrixCave.portal.inside;
   };
   const matrixOverlayVisible = (x, y, z) => {
-    if (!matrixCave || !matrixCave.visible) return true;
+    if (!matrixCave || !matrixCave.portal.inside) return true;
     const m = matrixCave.mouth;
     const cdx = camera.position.x - m.x, cdz = camera.position.z - m.z;
     const tdx = x - m.x, tdz = z - m.z;
@@ -665,17 +683,16 @@
     if (amount <= 0 || amount >= 1) return false;
     const ix = cx + (tx - cx) * amount;
     const iy = camera.position.y - m.floorY + (y - camera.position.y) * amount;
-    return Math.abs(ix) <= 2.48 && iy >= -0.2 && iy <= 2.98;
+    return ix >= PORTAL_MIN_X && ix <= PORTAL_MAX_X && iy >= PORTAL_MIN_Y && iy <= PORTAL_MAX_Y;
   };
   const viewInsideMatrix = (lookOut = false) => {
     const m = matrixCave.mouth, targetZ = lookOut ? 0.45 : -5.45;
     const target = { x: m.x + matrixCave.sr * targetZ, y: m.floorY + 1.75, z: m.z + matrixCave.cr * targetZ };
     const orbit = pilot.orbit, yaw = m.ry + (lookOut ? Math.PI : 0);
     if (!matrixCave.portal.inside) {
-      matrixCave.portal.previousX = 0;
-      matrixCave.portal.previousY = 1.75;
-      matrixCave.portal.previousZ = PORTAL_Z + 0.01;
-      matrixCave.portal.previousValid = true;
+      setCameraCave(0);
+      setVec(CAMERA_PREVIOUS, m.x + matrixCave.sr * (PORTAL_Z + 0.01), m.floorY + 1.75, m.z + matrixCave.cr * (PORTAL_Z + 0.01));
+      cameraPreviousValid = true;
     }
     orbit.target = target;
     orbit.tx = target.x;
@@ -709,7 +726,7 @@
     return owner;
   };
   const place = (geometry, x, z, ry = 0, y = island.heightAt(x, z), kind = null, radius = 0) => {
-    const node = createNode({ position: { x, y, z }, rotation: { x: 0, y: ry, z: 0 }, geometry });
+    const node = createNode({ position: { x, y, z }, rotation: { x: 0, y: ry, z: 0 }, geometry, matrixLiving: MATRIX_LIVING_PROPS.has(kind) });
     addChild(root, node);
     placed.push(node);
     if (kind) addProp(kind, node, x, z, radius);
@@ -823,7 +840,7 @@
     }
     if (!p) throw new Error("No clear spot for the fire pit");
     const pit = place(hubModels.firepit(), p.x, p.z, 0, 0, "firepit", 1.2);
-    const flame = createNode({ geometry: hubModels.fireFlame() });
+    const flame = createNode({ geometry: hubModels.fireFlame(), matrixEmissiveLiving: true });
     addChild(pit, flame);
     addLamp(flame, LAMP.fire, p.x, 0.6, p.z, true, 3, "firepit");
     claim(p.x, p.z, 1.4);
@@ -855,10 +872,8 @@
     } else if (slot.status === "mirror") {
       // Sit inside the rim so the cave floor ends behind the reflection.
       const node = createNode({ position: { x: 0, y: 1.5, z: 0.5 }, geometry: hubModels.mirrorPanel(), mirror: true, mirrorWalkThrough: true });
-      const room = createNode({ geometry: hubModels.matrixChamber(), scale: { x: 0, y: 0, z: 0 } });
-      addChild(group, room, node);
-      matrixCave = buildMatrixRain(group, room, node, m);
-      mirrorCave = { slot, mouth: m, group, rim, room, node, sign: null };
+      addChild(group, node);
+      mirrorCave = { slot, mouth: m, group, rim, node, sign: null };
     } else if (slot.status === "sleeping") {
       // Bedrolls lie along +x, as the sleep pose assumes
       addChild(group, createNode({ position: { x: 0, y: 0.05, z: -4.5 }, rotation: { x: 0, y: -m.ry, z: 0 }, geometry: hubModels.bedroll(), depthBias: 0.3 }));
@@ -869,7 +884,7 @@
       const torchZ = rim.position.z + rim.geometry.frontZ - torchGeometry.backZ + CAVE_TORCH_GAP;
       for (let i = 0; i < 2; i++) {
         const side = i ? "right" : "left", localX = (i ? 1 : -1) * rim.geometry.jambCenterX;
-        const torch = createNode({ position: { x: localX, y: 0, z: torchZ }, geometry: torchGeometry, flare: 0 });
+        const torch = createNode({ position: { x: localX, y: 0, z: torchZ }, geometry: torchGeometry, flare: 0, matrixEmissiveLiving: true });
         addChild(group, torch);
         const tx = m.x + ax * torchZ + Math.cos(m.ry) * localX;
         const ty = m.floorY + torchGeometry.flameY;
@@ -882,7 +897,7 @@
         claim(tx, tz, 0.5);
         addProp("torch", torch, tx, tz, 0.7);
       }
-      const sign = createNode({ position: { x: 0, y: 4.5, z: 0.52 }, geometry: hubModels.caveSign(slot.name) });
+      const sign = createNode({ position: { x: 0, y: 4.5, z: 0.52 }, geometry: hubModels.caveSign(slot.name), matrixEmissiveLiving: true });
       addChild(group, sign);
       const halfW = sign.geometry.signWidth * 0.5, halfH = sign.geometry.signHeight * 0.5;
       const x = m.x + ax * sign.position.z, y = m.floorY + sign.position.y, z = m.z + az * sign.position.z;
@@ -913,6 +928,12 @@
     if (VINES.includes(slot.id)) for (const x of [-1.1, 1.1]) addChild(group, createNode({ position: { x, y: 3.45, z: 0.95 }, geometry: hubModels.vine() }));
     addChild(root, group);
     placed.push(group);
+    const glyphs = buildCaveGlyphs(slot, m, group);
+    if (slot.status === "mirror") {
+      matrixCave = glyphs;
+      matrixCave.portal = buildMatrixPortal(m);
+      matrixCave.mirrorNode = mirrorCave.node;
+    }
     return rim;
   };
   // Dock over the drop and ladder on the bluff
@@ -948,6 +969,7 @@
       sceneryClaims.push(reservation);
       const quiet = kind === "grass";
       const node = place(geometry, x, z, ry, y, quiet ? null : kind, footprint + 0.3);
+      if (MATRIX_LIVING_PROPS.has(kind)) node.matrixLiving = true;
       const owner = quiet ? { kind: "prop", prop: kind, node, x, z, ripe: 0, pickRadius: 0, active: true } : props[props.length - 1];
       owner.footprint = footprint;
       owner.scenery = true;
@@ -1459,6 +1481,112 @@
   };
 
   // ---------- camera bounds ----------
+  const CAMERA_RADIUS = 0.3, CAMERA_FLOOR = 0.55;
+  const CAMERA_PREVIOUS = { x: 0, y: 0, z: 0 };
+  const PLAYER_PREVIOUS = { x: 0, y: 0, z: 0 }, PLAYER_POSITION = { x: 0, y: 0, z: 0 };
+  const CAMERA_SPACE = { floor: 0, ceiling: 0 }, CAMERA_COLUMN = { caveIndex: 0, floor: 0, ceiling: 0 };
+  const CAMERA_CROSSING = { direction: 0, valid: false, reason: null, amount: 0 };
+  const CAMERA_OPENINGS = [];
+  let cameraCaveIndex = 0, cameraPreviousValid = false;
+  let caveEntryPlayer = null, playerCaveIndex = 0;
+  const cameraCrossing = (from, to, opening) => {
+    const m = opening.mouth, sr = opening.sr, cr = opening.cr;
+    const a = (from.x - m.x) * sr + (from.z - m.z) * cr - opening.planeZ;
+    const b = (to.x - m.x) * sr + (to.z - m.z) * cr - opening.planeZ;
+    const direction = a >= -1e-7 && b < -1e-7 ? 1 : a <= 1e-7 && b > 1e-7 ? -1 : 0;
+    CAMERA_CROSSING.direction = direction;
+    CAMERA_CROSSING.valid = false;
+    CAMERA_CROSSING.reason = null;
+    if (!direction) return CAMERA_CROSSING;
+    const t = Math.max(0, Math.min(1, a / (a - b))), x = lerp(from.x, to.x, t), y = lerp(from.y, to.y, t) - m.floorY, z = lerp(from.z, to.z, t);
+    const across = (x - m.x) * cr - (z - m.z) * sr;
+    CAMERA_CROSSING.amount = t;
+    if (y < opening.minY) CAMERA_CROSSING.reason = "below";
+    else if (y > opening.maxY) CAMERA_CROSSING.reason = "above";
+    else if (across < opening.minX || across > opening.maxX) CAMERA_CROSSING.reason = "beside";
+    else if (caveColumnAt(x - sr * 0.05, z - cr * 0.05, opening)) CAMERA_CROSSING.valid = true;
+    return CAMERA_CROSSING;
+  };
+  const setCameraCave = (index) => {
+    if (cameraCaveIndex === index) return;
+    cameraCaveIndex = index;
+    if (!matrixCave) return;
+    const portal = matrixCave.portal, inside = index === matrixCave.caveIndex;
+    if (portal.inside === inside) return;
+    portal.inside = inside;
+    portal.lastCrossingDirection = inside ? "in" : "out";
+    MATRIX_WORLD.direction = inside ? 1 : -1;
+    MATRIX_WORLD.active = inside || MATRIX_WORLD.radius > 0 ? 1 : 0;
+    // Close the doorway on the crossing itself; glyph retraction runs independently.
+    matrixCave.mirrorNode.mirrorPortal = inside;
+  };
+  const caveColumnAt = (x, z, opening) => {
+    const dx = x - opening.mouth.x, dz = z - opening.mouth.z;
+    const along = dx * opening.sr + dz * opening.cr, across = dx * opening.cr - dz * opening.sr;
+    if (!island.cavityAt(x, z, CAMERA_COLUMN) || CAMERA_COLUMN.caveIndex !== opening.caveIndex) {
+      // Rotated voxel columns straddle the doorway plane. Uncarved, open-air
+      // apron cells there are still traversable; solid cliff columns are not.
+      const ground = island.heightAt(x, z);
+      if (along < opening.planeZ - island.unit * Math.SQRT2 || along > 3 || across < opening.minX || across > opening.maxX || island.surfaceAt(x, z) !== ground) return false;
+      CAMERA_COLUMN.floor = ground;
+      CAMERA_COLUMN.ceiling = Infinity;
+    }
+    // The original stone frame has its own soffit even where the carved voxel
+    // column is open sky. Use the model's real bounds, not the cliff top.
+    const rim = opening.rim;
+    if (along >= rim.minZ + PORTAL_Z && along <= rim.maxZ + PORTAL_Z) {
+      if (across < rim.minX || across > rim.maxX) return false;
+      CAMERA_COLUMN.floor = Math.max(CAMERA_COLUMN.floor, opening.mouth.floorY + rim.floorY);
+      CAMERA_COLUMN.ceiling = Math.min(CAMERA_COLUMN.ceiling, opening.mouth.floorY + rim.ceilingY);
+    }
+    CAMERA_COLUMN.caveIndex = opening.caveIndex;
+    return true;
+  };
+  // Sample the real quarter-unit cavity around the eye, including the open apron.
+  // Its floor/roof bounds are independent of the Matrix state and cliff-top height.
+  const cameraSpaceAt = (x, z, opening) => {
+    let floor = -Infinity, ceiling = Infinity;
+    for (let i = 0; i < 25; i++) {
+      const sx = x + (i % 5 - 2) * CAMERA_RADIUS * 0.5, sz = z + (Math.floor(i / 5) - 2) * CAMERA_RADIUS * 0.5;
+      if (!caveColumnAt(sx, sz, opening)) return false;
+      floor = Math.max(floor, CAMERA_COLUMN.floor);
+      ceiling = Math.min(ceiling, CAMERA_COLUMN.ceiling);
+    }
+    CAMERA_SPACE.floor = floor + CAMERA_FLOOR;
+    CAMERA_SPACE.ceiling = ceiling - CAMERA_RADIUS;
+    return CAMERA_SPACE.floor <= CAMERA_SPACE.ceiling;
+  };
+  const CAMERA_CAVE_DEBUG = {
+    get index() { return cameraCaveIndex; },
+    get playerIndex() { return playerCaveIndex; },
+    get id() { return cameraCaveIndex ? CAMERA_OPENINGS[cameraCaveIndex - 1].id : null; },
+    openings: CAMERA_OPENINGS,
+    contains(x, y, z) {
+      return !!cameraCaveIndex && caveColumnAt(x, z, CAMERA_OPENINGS[cameraCaveIndex - 1]) && y >= CAMERA_COLUMN.floor && y < CAMERA_COLUMN.ceiling;
+    }
+  };
+  const updatePlayerCave = (player) => {
+    if (!player) {
+      caveEntryPlayer = null;
+      playerCaveIndex = 0;
+      return;
+    }
+    const p = player.root.position;
+    setVec(PLAYER_POSITION, p.x, p.y - player.baseY, p.z);
+    if (caveEntryPlayer !== player) {
+      caveEntryPlayer = player;
+      playerCaveIndex = 0;
+    } else {
+      for (let i = 0; i < CAMERA_OPENINGS.length; i++) {
+        const opening = CAMERA_OPENINGS[i], crossing = cameraCrossing(PLAYER_PREVIOUS, PLAYER_POSITION, opening);
+        if (!crossing.valid) continue;
+        if (!playerCaveIndex && crossing.direction > 0) playerCaveIndex = opening.caveIndex;
+        else if (playerCaveIndex === opening.caveIndex && crossing.direction < 0) playerCaveIndex = 0;
+      }
+      if (playerCaveIndex && (!caveColumnAt(p.x, p.z, CAMERA_OPENINGS[playerCaveIndex - 1]) || PLAYER_POSITION.y < CAMERA_COLUMN.floor || PLAYER_POSITION.y >= CAMERA_COLUMN.ceiling)) playerCaveIndex = 0;
+    }
+    setVec(PLAYER_PREVIOUS, PLAYER_POSITION.x, PLAYER_POSITION.y, PLAYER_POSITION.z);
+  };
   // Keep flight in a drum and the eye above rock
   const clampTarget = (t) => {
     const r = Math.hypot(t.x, t.z);
@@ -1468,8 +1596,72 @@
     }
   };
   const clampCamera = (p) => {
-    if (inMatrixCave(p.x, p.z)) p.y = Math.min(matrixCave.mouth.floorY + 3.55, Math.max(p.y, matrixCave.mouth.floorY + 0.55));
-    else p.y = Math.max(p.y, island.surfaceAt(p.x, p.z) + CLEARANCE);
+    let opening = cameraCaveIndex ? CAMERA_OPENINGS[cameraCaveIndex - 1] : null, start = 0, exit = false;
+    if (cameraPreviousValid) {
+      for (let i = 0; i < CAMERA_OPENINGS.length; i++) {
+        const candidate = CAMERA_OPENINGS[i], crossing = cameraCrossing(CAMERA_PREVIOUS, p, candidate);
+        if (matrixCave && candidate.caveIndex === matrixCave.caveIndex && crossing.reason) {
+          const rejected = matrixCave.portal.rejected, reason = crossing.reason;
+          rejected[reason] = Math.min(0x7fffffff, rejected[reason] + 1);
+        }
+        if (!crossing.valid) continue;
+        if (!opening && crossing.direction > 0) {
+          opening = candidate;
+          start = crossing.amount;
+        } else if (opening === candidate && crossing.direction < 0) exit = true;
+      }
+    }
+    if (opening) {
+      const fromX = lerp(CAMERA_PREVIOUS.x, p.x, start), fromY = lerp(CAMERA_PREVIOUS.y, p.y, start), fromZ = lerp(CAMERA_PREVIOUS.z, p.z, start);
+      const dx = p.x - fromX, dy = p.y - fromY, dz = p.z - fromZ;
+      const steps = Math.max(1, Math.min(768, Math.ceil(Math.hypot(dx, dz) / (island.unit * 0.5))));
+      let x = CAMERA_PREVIOUS.x, y = CAMERA_PREVIOUS.y, z = CAMERA_PREVIOUS.z, outside = false, accepted = false;
+      for (let i = 0; i <= steps; i++) {
+        const k = i / steps, sx = fromX + dx * k, sz = fromZ + dz * k;
+        const along = (sx - opening.mouth.x) * opening.sr + (sz - opening.mouth.z) * opening.cr;
+        if (cameraCaveIndex && along > opening.planeZ + 1e-7) {
+          if (exit) outside = true;
+          break;
+        }
+        if (!cameraSpaceAt(sx, sz, opening)) break;
+        accepted = true;
+        x = sx; z = sz;
+        y = Math.max(CAMERA_SPACE.floor, Math.min(CAMERA_SPACE.ceiling, fromY + dy * k));
+      }
+      if (outside) setCameraCave(0);
+      else {
+        p.x = x; p.y = y; p.z = z;
+        const along = (x - opening.mouth.x) * opening.sr + (z - opening.mouth.z) * opening.cr;
+        if (accepted && along < opening.planeZ - 1e-7) setCameraCave(opening.caveIndex);
+      }
+    }
+    let caveView = !!cameraCaveIndex;
+    if (!cameraCaveIndex) {
+      let floor = island.surfaceAt(p.x, p.z) + CLEARANCE;
+      for (let i = 0; i < CAMERA_OPENINGS.length; i++) {
+        const entry = CAMERA_OPENINGS[i], dx = p.x - entry.mouth.x, dz = p.z - entry.mouth.z;
+        const along = dx * entry.sr + dz * entry.cr, across = dx * entry.cr - dz * entry.sr;
+        if (along < entry.planeZ - 1e-7 || along > 3 || across < entry.minX + CAMERA_RADIUS || across > entry.maxX - CAMERA_RADIUS || p.y < entry.mouth.floorY || p.y > entry.mouth.floorY + entry.maxY) continue;
+        const k = (along - entry.planeZ) / (3 - entry.planeZ);
+        caveView = true;
+        floor = island.heightAt(p.x, p.z) + CAMERA_FLOOR + (CLEARANCE - CAMERA_FLOOR) * k * k * (3 - 2 * k);
+        if (cameraSpaceAt(p.x, p.z, entry)) p.y = Math.min(p.y, CAMERA_SPACE.ceiling);
+        break;
+      }
+      p.y = Math.max(p.y, floor);
+    }
+    // The outdoor near plane is wider than the cave eye clearance. Shorten it
+    // at low entrances/interiors so nearby jagged rock is not sliced away.
+    camera.near = caveView ? 0.1 : 0.5;
+    setVec(CAMERA_PREVIOUS, p.x, p.y, p.z);
+    cameraPreviousValid = true;
+    if (matrixCave) {
+      const portal = matrixCave.portal, m = matrixCave.mouth, dx = p.x - m.x, dz = p.z - m.z;
+      portal.previousX = matrixCave.cr * dx - matrixCave.sr * dz;
+      portal.previousY = p.y - m.floorY;
+      portal.previousZ = matrixCave.sr * dx + matrixCave.cr * dz;
+      portal.previousValid = true;
+    }
   };
 
   // ---------- per frame ----------
@@ -1525,6 +1717,7 @@
     crew.update(dt, elapsed);
     pile.update(dt);
     const player = pilot.player;
+    updatePlayerCave(player);
     // Pulse the prop if it still hides the jetpack
     if (stash) {
       const t = now - hintAt;
@@ -1538,12 +1731,13 @@
       if (player && !player.jet && Math.hypot(player.root.position.x - jetpack.x, player.root.position.z - jetpack.z) < JETPACK_REACH) collectJetpack(player);
     }
     // Walking into an open cave enters it, flying or standing on its roof does not
-    if (player && !entering && player.hop < 1) {
+    if (player && playerCaveIndex && !entering && player.hop < 1) {
       const p = player.root.position;
       const y = p.y - player.baseY;
+      const overhead = island.cavityAt(camera.position.x, camera.position.z, CAMERA_COLUMN) && CAMERA_COLUMN.caveIndex === playerCaveIndex && camera.position.y >= CAMERA_COLUMN.ceiling;
       for (let i = 0; i < openMouths.length; i++) {
         const { slot, m } = openMouths[i];
-        if (Math.abs(y - m.floorY) < 1 && Math.hypot(p.x - m.inside.x, p.z - m.inside.z) < TUNNEL_REACH) enterCave(slot);
+        if (!overhead && m === CAMERA_OPENINGS[playerCaveIndex - 1].mouth && Math.abs(y - m.floorY) < 1 && Math.hypot(p.x - m.inside.x, p.z - m.inside.z) < TUNNEL_REACH) enterCave(slot);
       }
     }
     for (let i = 0; i < clouds.length; i++) {
@@ -1568,7 +1762,7 @@
     fx.update(dt);
     stepTweens(dt);
     pilot.update(dt);
-    updateMatrixRain(elapsed);
+    updateMatrixWorld(dt, elapsed);
     meterTimer -= dt;
     if (meterTimer <= 0) {
       meterTimer = 0.25;
@@ -1636,11 +1830,32 @@
   // ---------- scene contract ----------
   const enter = (ctx) => {
     ({ renderer, game, world, go, lootEnabled, testBananas } = ctx);
+    MATRIX_WORLD.active = MATRIX_WORLD.direction = MATRIX_WORLD.radius = MATRIX_WORLD.time = 0;
+    MATRIX_WORLD.density = renderer.kind === "canvas2d" ? MATRIX_DENSITY.canvas2d / MATRIX_DENSITY.high : MATRIX_DENSITY[renderer.quality] / MATRIX_DENSITY.high;
     camera = createCamera({ fov: 48, near: 0.5, far: 140 });
     root = createNode();
     clock = daylight.createClock({ hour: hourParam, daylen: daylenParam, day: dayParam, now: new Date() });
     phase = null;
     island = terrain.island({ seed: SEED });
+    cameraCaveIndex = 0;
+    cameraPreviousValid = false;
+    caveEntryPlayer = null;
+    playerCaveIndex = 0;
+    CAMERA_OPENINGS.length = 0;
+    MATRIX_WORLD.caveNear = Infinity;
+    for (let i = 0; i < island.mouths.length; i++) {
+      const m = island.mouths[i], sr = Math.sin(m.ry), cr = Math.cos(m.ry), offset = i * 4;
+      CAMERA_OPENINGS.push({ id: m.id, caveIndex: i + 1, mouth: m, sr, cr, minX: PORTAL_MIN_X, maxX: PORTAL_MAX_X, minY: PORTAL_MIN_Y, maxY: PORTAL_MAX_Y, planeZ: PORTAL_Z, rim: hubModels.caveMouthRim().openingBounds });
+      MATRIX_WORLD.caves[offset] = sr;
+      MATRIX_WORLD.caves[offset + 1] = cr;
+      MATRIX_WORLD.caves[offset + 2] = sr * m.x + cr * m.z + PORTAL_Z;
+      MATRIX_WORLD.caves[offset + 3] = Math.hypot(m.x + sr * PORTAL_Z - MATRIX_WORLD.origin[0], m.z + cr * PORTAL_Z - MATRIX_WORLD.origin[2]);
+      MATRIX_WORLD.caveBounds[offset] = m.x;
+      MATRIX_WORLD.caveBounds[offset + 1] = m.floorY;
+      MATRIX_WORLD.caveBounds[offset + 2] = m.z;
+      MATRIX_WORLD.caveBounds[offset + 3] = 7;
+      MATRIX_WORLD.caveNear = Math.min(MATRIX_WORLD.caveNear, MATRIX_WORLD.caves[offset + 3] - 4);
+    }
     mark("island");
     hud = hudMod.create({ roster: contributors.roster, catalog: models.SWAG, tierColors: models.TIER_COLORS, renderIcon: hudMod.renderIcon, lootEnabled });
     hooks = {};
@@ -1705,11 +1920,12 @@
     hideJetpack();
     critters = crittersMod.create({ root, renderer, flowers: scenery.filter((o) => o.prop === "flower" && o.active), fire: firePos, meadowRadius: MEADOW, heightAt: island.heightAt });
     mark("props");
-    const shared = { root, input, hooks, hud, game, world, renderer, camera, overlay: ctx.overlay, overlayVisible: matrixOverlayVisible, tickerAt: TICKER_AT, buildSpots: buildSpotsList, walkIn: WALK_IN, clampDrag, viewYaw: PILE_VIEW.yaw, bedrolls, pileScale: PILE_SCALE, pileY: ALTAR_HEIGHT + 0.02, onLayout: layoutPile, onShown: () => { meterTimer = 0; }, crateRadius: () => Math.max(4.4, altar.platformRadius + 0.8), groundAt: supportAt, wanderSpot, walkable, flyable, useNear, phase: () => phase };
+    const shared = { root, input, hooks, hud, game, world, renderer, camera, overlay: ctx.overlay, overlayVisible: matrixOverlayVisible, tickerAt: TICKER_AT, buildSpots: buildSpotsList, walkIn: WALK_IN, clampDrag, viewYaw: PILE_VIEW.yaw, bedrolls, pileScale: PILE_SCALE, pileY: ALTAR_HEIGHT + 0.02, matrixLivingPile: true, onLayout: layoutPile, onShown: () => { meterTimer = 0; }, crateRadius: () => Math.max(4.4, altar.platformRadius + 0.8), groundAt: supportAt, wanderSpot, walkable, flyable, useNear, phase: () => phase };
     fx = shared.fx = fxMod.create(shared);
     pile = shared.pile = pileMod.create(shared);
     mark("pile");
     crew = shared.crew = crewMod.create(shared);
+    for (const cave of crew.cavemen.values()) cave.root.matrixLiving = true;
     mark("cavemen");
     crates = shared.crates = cratesMod.create(shared);
     pilot.bind(shared);
@@ -1798,21 +2014,13 @@
           get clearanceRadius() { return island.path.debug.ringOuterRadius + SCENERY_CLEARANCE; }
         },
         mirrorCave,
+        cameraCave: CAMERA_CAVE_DEBUG,
         matrixCave: {
-          get streamCount() { return matrixCave.streamCount; },
-          get hangingStreamCount() { return matrixCave.hangingStreamCount; },
-          get entranceStreamCount() { return matrixCave.entranceStreamCount; },
-          get wallStreamCount() { return matrixCave.wallStreamCount; },
-          get streamLength() { return matrixCave.streamLength; },
+          get streamCount() { return matrixCave.streams.length; },
           get glyphCount() { return matrixCave.glyphCount; },
-          get rainGlyphCount() { return matrixCave.rainGlyphCount; },
-          get surfaceSectionCount() { return matrixCave.surfaceSections.length; },
-          get surfaceStreamCount() {
-            let count = 0;
-            for (let surface = 1; surface < MATRIX_SURFACES.length; surface++) count += matrixCave.surfaceStreams[surface];
-            return count;
-          },
-          get surfaceGlyphCount() { return matrixCave.glyphCount - matrixCave.rainGlyphCount; },
+          get surfaceSectionCount() { return matrixCave.sections.length; },
+          get surfaceStreamCount() { return matrixCave.streams.length; },
+          get surfaceGlyphCount() { return matrixCave.glyphCount; },
           get activeGlyphCount() { return matrixCave.activeGlyphCount; },
           get brightTipCount() { return matrixCave.brightTipCount; },
           get capacity() { return matrixCave.capacity; },
@@ -1831,265 +2039,40 @@
           get qualityDensity() { return matrixCave.densityRankLimit / 8; },
           get surfacePitch() { return MATRIX_SURFACE_PITCH; },
           get surfaceGap() { return MATRIX_SURFACE_GAP; },
-          get surfaceLayout() { return matrixCave.surfaceLayout; },
-          get removedEntrancePanel() { return mirrorCave.rim.geometry.removedInteriorPanel; },
-          get removedExteriorMatrixSurface() { return mirrorCave.room.geometry.removedMatrixSurface; },
-          get removedExteriorHeader() { return mirrorCave.room.geometry.removedExteriorHeader; },
-          get removedExteriorSoffit() { return mirrorCave.room.geometry.removedExteriorSoffit; },
-          get ceilingEntranceBand() {
-            const audit = matrixCave.ceilingEntranceBand;
-            return {
-              sampledStreamCount: audit.sampledStreams,
-              streamBrightnessMin: audit.minStreamBrightness,
-              streamBrightnessMax: audit.maxStreamBrightness,
-              floorStreamBrightnessMin: audit.floorMinStreamBrightness,
-              floorStreamBrightnessMax: audit.floorMaxStreamBrightness,
-              phaseBucketCount: audit.phaseBucketCount,
-              phaseBucketCapacity: 16,
-              gapLengthDiversity: audit.gapLengthDiversity,
-              sampledGlyphCount: audit.sampledGlyphs,
-              visibleGlyphCount: audit.visibleGlyphs,
-              gapGlyphCount: audit.gapGlyphs,
-              brightTipCount: audit.brightTips,
-              visibleBrightnessMin: audit.minVisibleBrightness,
-              visibleBrightnessMax: audit.maxVisibleBrightness
-            };
-          },
-          get invalidBackingSurfaceCount() {
-            let count = 0;
-            for (let surface = 1; surface < MATRIX_SURFACES.length; surface++) {
-              const detail = matrixCave.surfaceDetails[surface];
-              if (!detail.inwardFacing || !detail.fullyBacked) count++;
-            }
-            return count;
-          },
-          get portalCrossingSurfaceCount() {
-            let count = 0;
-            for (let surface = 1; surface < MATRIX_SURFACES.length; surface++) if (matrixCave.surfaceDetails[surface].portalCrossing) count++;
-            return count;
-          },
-          get physicalInteriorPortalCrossingFaceCount() {
-            let count = 0;
-            const geometry = mirrorCave.room.geometry;
-            for (let face = 0; face < geometry.faces.length; face++) {
-              const indices = geometry.faces[face].i;
-              for (let corner = 0; corner < indices.length; corner++) {
-                if (geometry.verts[indices[corner] * 3 + 2] >= matrixCave.portal.opening.planeZ) {
-                  count++;
-                  break;
-                }
-              }
-            }
-            return count;
-          },
-          surfaceInfo: (surfaceName) => {
-            const surface = MATRIX_SURFACES.indexOf(surfaceName), detail = surface > 0 ? matrixCave.surfaceDetails[surface] : null;
-            if (!detail) return null;
-            return {
-              id: surfaceName,
-              backingSurfaceIds: detail.backingIds.slice(),
-              planeAxis: detail.planeAxis,
-              planePosition: detail.planePosition,
-              inwardNormal: detail.normal.slice(),
-              coverageBounds: detail.coverageBounds.slice(),
-              glyphBounds: detail.glyphBounds.slice(),
-              maximumBackingPlaneAlignmentError: detail.maxAlignmentError,
-              minimumGlyphToBackingClearance: detail.minSurfaceClearance,
-              uncoveredEdgeMargin: detail.uncoveredEdgeMargin,
-              inwardFacing: detail.inwardFacing,
-              fullyBacked: detail.fullyBacked,
-              crossesPortalPlane: detail.portalCrossing,
-              partCount: detail.partCount,
-              streamCount: detail.streamCount,
-              glyphCount: detail.glyphCount,
-              flowMin: detail.flowMin,
-              flowMax: detail.flowMax,
-              minimumCharactersPerStream: detail.minCharactersPerStream,
-              maximumCharactersPerStream: detail.maxCharactersPerStream
-            };
-          },
-          get floorSectionCount() { return matrixCave.surfaceDetails[1].partCount; },
-          get floorBackingCount() { return matrixCave.surfaceDetails[1].backingIds.length; },
-          get floorBackingSurfaceIdentifier() { return matrixCave.surfaceDetails[1].backingIds[0]; },
-          get floorStreamCount() { return matrixCave.surfaceStreams[1]; },
-          get floorGlyphCount() { return matrixCave.surfaceCounts[1]; },
-          surfaceCounts: {
-            get freeRain() { return matrixCave.surfaceCounts[0]; },
-            get floor() { return matrixCave.surfaceCounts[1]; },
-            get ceiling() { return matrixCave.surfaceCounts[2] + matrixCave.surfaceCounts[3]; },
-            get leftWall() { return matrixCave.surfaceCounts[4] + matrixCave.surfaceCounts[6]; },
-            get rightWall() { return matrixCave.surfaceCounts[5] + matrixCave.surfaceCounts[7]; },
-            get backWall() { return matrixCave.surfaceCounts[8]; },
-            get doorway() { return matrixCave.surfaceCounts[9] + matrixCave.surfaceCounts[10]; },
-            get mainCeiling() { return matrixCave.surfaceCounts[2]; },
-            get vestibuleCeiling() { return matrixCave.surfaceCounts[3]; },
-            get mainLeftWall() { return matrixCave.surfaceCounts[4]; },
-            get mainRightWall() { return matrixCave.surfaceCounts[5]; },
-            get vestibuleLeftWall() { return matrixCave.surfaceCounts[6]; },
-            get vestibuleRightWall() { return matrixCave.surfaceCounts[7]; },
-            get transitionHeader() { return matrixCave.surfaceCounts[9]; },
-            get doorwayLintel() { return 0; },
-            get transitionReturns() { return matrixCave.surfaceCounts[10]; },
-            get doorwayJambs() { return 0; },
-            get rimUnderside() { return 0; }
-          },
-          activeSurfaceCounts: {
-            get freeRain() { return matrixCave.surfaceActiveCounts[0]; },
-            get floor() { return matrixCave.surfaceActiveCounts[1]; },
-            get ceiling() { return matrixCave.surfaceActiveCounts[2] + matrixCave.surfaceActiveCounts[3]; },
-            get leftWall() { return matrixCave.surfaceActiveCounts[4] + matrixCave.surfaceActiveCounts[6]; },
-            get rightWall() { return matrixCave.surfaceActiveCounts[5] + matrixCave.surfaceActiveCounts[7]; },
-            get backWall() { return matrixCave.surfaceActiveCounts[8]; },
-            get doorway() { return matrixCave.surfaceActiveCounts[9] + matrixCave.surfaceActiveCounts[10]; },
-            get mainCeiling() { return matrixCave.surfaceActiveCounts[2]; },
-            get vestibuleCeiling() { return matrixCave.surfaceActiveCounts[3]; },
-            get mainLeftWall() { return matrixCave.surfaceActiveCounts[4]; },
-            get mainRightWall() { return matrixCave.surfaceActiveCounts[5]; },
-            get vestibuleLeftWall() { return matrixCave.surfaceActiveCounts[6]; },
-            get vestibuleRightWall() { return matrixCave.surfaceActiveCounts[7]; },
-            get transitionHeader() { return matrixCave.surfaceActiveCounts[9]; },
-            get doorwayLintel() { return 0; },
-            get transitionReturns() { return matrixCave.surfaceActiveCounts[10]; },
-            get doorwayJambs() { return 0; },
-            get rimUnderside() { return 0; }
-          },
-          surfaceStreams: {
-            get freeRain() { return matrixCave.surfaceStreams[0]; },
-            get floor() { return matrixCave.surfaceStreams[1]; },
-            get ceiling() { return matrixCave.surfaceStreams[2] + matrixCave.surfaceStreams[3]; },
-            get leftWall() { return matrixCave.surfaceStreams[4] + matrixCave.surfaceStreams[6]; },
-            get rightWall() { return matrixCave.surfaceStreams[5] + matrixCave.surfaceStreams[7]; },
-            get backWall() { return matrixCave.surfaceStreams[8]; },
-            get doorway() { return matrixCave.surfaceStreams[9] + matrixCave.surfaceStreams[10]; },
-            get mainCeiling() { return matrixCave.surfaceStreams[2]; },
-            get vestibuleCeiling() { return matrixCave.surfaceStreams[3]; },
-            get mainLeftWall() { return matrixCave.surfaceStreams[4]; },
-            get mainRightWall() { return matrixCave.surfaceStreams[5]; },
-            get vestibuleLeftWall() { return matrixCave.surfaceStreams[6]; },
-            get vestibuleRightWall() { return matrixCave.surfaceStreams[7]; },
-            get transitionHeader() { return matrixCave.surfaceStreams[9]; },
-            get doorwayLintel() { return 0; },
-            get transitionReturns() { return matrixCave.surfaceStreams[10]; },
-            get doorwayJambs() { return 0; },
-            get rimUnderside() { return 0; }
-          },
-          surfaceEdgeMargins: {
-            get floor() { return matrixCave.surfaceEdgeMargins[1]; },
-            get mainCeiling() { return matrixCave.surfaceEdgeMargins[2]; },
-            get vestibuleCeiling() { return matrixCave.surfaceEdgeMargins[3]; },
-            get mainLeftWall() { return matrixCave.surfaceEdgeMargins[4]; },
-            get mainRightWall() { return matrixCave.surfaceEdgeMargins[5]; },
-            get vestibuleLeftWall() { return matrixCave.surfaceEdgeMargins[6]; },
-            get vestibuleRightWall() { return matrixCave.surfaceEdgeMargins[7]; },
-            get backWall() { return matrixCave.surfaceEdgeMargins[8]; },
-            get transitionHeader() { return matrixCave.surfaceEdgeMargins[9]; },
-            get doorwayLintel() { return 0; },
-            get transitionReturns() { return matrixCave.surfaceEdgeMargins[10]; },
-            get doorwayJambs() { return 0; },
-            get rimUnderside() { return 0; }
-          },
+          get surfaceCounts() { return matrixCave.surfaceCounts; },
+          get activeSurfaceCounts() { return matrixCave.activeSurfaceCounts; },
+          get terrainFaceCount() { return matrixCave.terrainFaces; },
+          get propFaceCount() { return matrixCave.propFaces; },
+          get geometrySource() { return "carved-terrain"; },
           get minBrightness() { return matrixCave.minBrightness; },
           get maxBrightness() { return matrixCave.maxBrightness; },
           get minTrainLength() { return matrixCave.minTrainLength; },
           get maxTrainLength() { return matrixCave.maxTrainLength; },
           get minGapLength() { return matrixCave.minGapLength; },
           get maxGapLength() { return matrixCave.maxGapLength; },
-          get leadingTipCount() { return matrixCave.brightTipCount; },
           get movingGapCount() { return matrixCave.movingGapCount; },
-          get representativeHeadPhase() { return matrixCave.representativeHeadPhase; },
-          get maxLocalZ() { return matrixCave.maxLocalZ; },
-          get portalClearance() { return matrixCave.portalClearance; },
-          surfaceDirections: {
-            freeRain: -1, floor: -1, mainCeiling: -1, vestibuleCeiling: -1,
-            mainLeftWall: -1, mainRightWall: -1, vestibuleLeftWall: -1, vestibuleRightWall: -1,
-            backWall: -1, transitionHeader: -1, transitionReturns: -1
-          },
-          surfaceFacings: {
-            get floor() { return matrixCave.surfaceFacings[1]; },
-            get mainCeiling() { return matrixCave.surfaceFacings[2]; },
-            get vestibuleCeiling() { return matrixCave.surfaceFacings[3]; },
-            get mainLeftWall() { return matrixCave.surfaceFacings[4]; },
-            get mainRightWall() { return matrixCave.surfaceFacings[5]; },
-            get vestibuleLeftWall() { return matrixCave.surfaceFacings[6]; },
-            get vestibuleRightWall() { return matrixCave.surfaceFacings[7]; },
-            get backWall() { return matrixCave.surfaceFacings[8]; },
-            get transitionHeader() { return matrixCave.surfaceFacings[9]; },
-            get transitionReturns() { return matrixCave.surfaceFacings[10]; },
-            get rimUnderside() { return 0; }
-          },
-          surfaceMaxLocalZ: {
-            get floor() { return matrixCave.surfaceMaxLocalZ[1]; },
-            get mainCeiling() { return matrixCave.surfaceMaxLocalZ[2]; },
-            get vestibuleCeiling() { return matrixCave.surfaceMaxLocalZ[3]; },
-            get mainLeftWall() { return matrixCave.surfaceMaxLocalZ[4]; },
-            get mainRightWall() { return matrixCave.surfaceMaxLocalZ[5]; },
-            get vestibuleLeftWall() { return matrixCave.surfaceMaxLocalZ[6]; },
-            get vestibuleRightWall() { return matrixCave.surfaceMaxLocalZ[7]; },
-            get backWall() { return matrixCave.surfaceMaxLocalZ[8]; },
-            get transitionHeader() { return matrixCave.surfaceMaxLocalZ[9]; },
-            get doorwayLintel() { return null; },
-            get transitionReturns() { return matrixCave.surfaceMaxLocalZ[10]; },
-            get doorwayJambs() { return null; },
-            get rimUnderside() { return null; }
-          },
-          surfaceHeadPositions: {
-            get floor() { return matrixCave.surfaceHeadPositions[1]; },
-            get mainCeiling() { return matrixCave.surfaceHeadPositions[2]; },
-            get vestibuleCeiling() { return matrixCave.surfaceHeadPositions[3]; },
-            get mainLeftWall() { return matrixCave.surfaceHeadPositions[4]; },
-            get mainRightWall() { return matrixCave.surfaceHeadPositions[5]; },
-            get vestibuleLeftWall() { return matrixCave.surfaceHeadPositions[6]; },
-            get vestibuleRightWall() { return matrixCave.surfaceHeadPositions[7]; },
-            get backWall() { return matrixCave.surfaceHeadPositions[8]; },
-            get transitionHeader() { return matrixCave.surfaceHeadPositions[9]; },
-            get doorwayLintel() { return null; },
-            get transitionReturns() { return matrixCave.surfaceHeadPositions[10]; },
-            get doorwayJambs() { return null; },
-            get rimUnderside() { return null; }
-          },
-          surfaceGapPositions: {
-            get floor() { return matrixCave.surfaceGapPositions[1]; },
-            get mainCeiling() { return matrixCave.surfaceGapPositions[2]; },
-            get vestibuleCeiling() { return matrixCave.surfaceGapPositions[3]; },
-            get mainLeftWall() { return matrixCave.surfaceGapPositions[4]; },
-            get mainRightWall() { return matrixCave.surfaceGapPositions[5]; },
-            get vestibuleLeftWall() { return matrixCave.surfaceGapPositions[6]; },
-            get vestibuleRightWall() { return matrixCave.surfaceGapPositions[7]; },
-            get backWall() { return matrixCave.surfaceGapPositions[8]; },
-            get transitionHeader() { return matrixCave.surfaceGapPositions[9]; },
-            get doorwayLintel() { return null; },
-            get transitionReturns() { return matrixCave.surfaceGapPositions[10]; },
-            get doorwayJambs() { return null; },
-            get rimUnderside() { return null; }
-          },
-          representativeStream: {
-            get speed() { return matrixCave.streams[matrixCave.surfaceRepresentativeStreams[1]].speed; },
-            get direction() { return matrixCave.streams[matrixCave.surfaceRepresentativeStreams[1]].direction; },
-            get trainLength() { return matrixCave.streams[matrixCave.surfaceRepresentativeStreams[1]].trainLength; },
-            get gapLength() { return matrixCave.streams[matrixCave.surfaceRepresentativeStreams[1]].gapLength; },
-            get flowMin() { return matrixCave.streams[matrixCave.surfaceRepresentativeStreams[1]].flowMin; },
-            get flowMax() { return matrixCave.streams[matrixCave.surfaceRepresentativeStreams[1]].flowMax; },
-            get flowRange() { return matrixCave.streams[matrixCave.surfaceRepresentativeStreams[1]].flowRange; }
-          },
-          sampleMotion: (surfaceName) => {
-            const surface = MATRIX_SURFACES.indexOf(surfaceName);
-            if (surface < 1) return null;
-            const streamIndex = matrixCave.surfaceRepresentativeStreams[surface];
-            if (streamIndex < 0) return null;
-            const stream = matrixCave.streams[streamIndex];
-            return {
-              surface: MATRIX_SURFACES[surface], direction: stream.direction, speed: stream.speed,
-              head: matrixCave.surfaceHeadPositions[surface], gap: matrixCave.surfaceGapPositions[surface],
-              flowMin: stream.flowMin, flowMax: stream.flowMax, flowRange: stream.flowRange,
-              trainLength: stream.trainLength, gapLength: stream.gapLength,
-              leadingGlow: stream.brightness,
-              secondGlow: stream.brightness * (0.48 + 0.52 * (1 - 1 / stream.trainLength)),
-              trailingGlow: stream.brightness * (0.48 + 0.52 / stream.trainLength)
-            };
+          get maxLocalZ() { return matrixCave.maximumLocalZ; },
+          get portalClearance() { return PORTAL_Z - matrixCave.maximumLocalZ; },
+          sampleMotion: (category) => {
+            for (let i = 0; i < matrixCave.sections.length; i++) {
+              const section = matrixCave.sections[i];
+              if (section.category !== category) continue;
+              const stream = matrixCave.streams[section.streamStart];
+              return {
+                surface: category, direction: stream.direction, speed: stream.speed,
+                head: stream.head, gap: stream.gap, flowMin: stream.flowMin, flowMax: stream.flowMax, flowRange: stream.flowRange,
+                trainLength: stream.trainLength, gapLength: stream.gapLength,
+                flowX: section.vx * stream.direction, flowY: section.vy * stream.direction, flowZ: section.vz * stream.direction,
+                leadingGlow: stream.brightness,
+                secondGlow: stream.brightness * (0.48 + 0.52 * (1 - 1 / stream.trainLength)),
+                trailingGlow: stream.brightness * (0.48 + 0.52 / stream.trainLength)
+              };
+            }
+            return null;
           },
           get updates() { return matrixCave.updates; },
-          get prewarmCount() { return matrixCave.prewarmCount; },
-          get preloaded() { return matrixCave.preloaded; },
+          get prewarmCount() { return 0; },
+          get preloaded() { return false; },
           get drawEnabled() { return matrixCave.drawEnabled; },
           get drawnGlyphCount() { return matrixCave.drawnGlyphCount; },
           get batchDrawCount() {
@@ -2097,11 +2080,63 @@
             for (let glyph = 0; glyph < MATRIX_TYPES; glyph++) count += matrixCave.nodes[glyph].drawInstanceCount;
             return count;
           },
-          get preloadDistance() { return MATRIX_PRELOAD; },
-          get roomScale() { return matrixCave.room.scale.x; },
+          get preloadDistance() { return 0; },
+          get revealedGlyphCount() { return matrixCave.revealedGlyphCount; },
           get visible() { return matrixCave.visible; },
           get inside() { return matrixCave.portal.inside; },
           get firstGlyphY() { return matrixCave.firstGlyphY; },
+          world: {
+            get active() { return !!MATRIX_WORLD.active; },
+            get radius() { return MATRIX_WORLD.radius; },
+            get direction() { return MATRIX_WORLD.direction; },
+            get maxRadius() { return MATRIX_WORLD.maxRadius; },
+            get speed() { return MATRIX_WORLD.speed; },
+            get retreatSpeed() { return MATRIX_WORLD.retreatSpeed; },
+            get frontWidth() { return MATRIX_FRONT_WIDTH; },
+            get density() { return MATRIX_WORLD.density; },
+            get streamPitch() { return MATRIX_SURFACE_PITCH; },
+            get glyphGap() { return MATRIX_SURFACE_GAP; },
+            get pixelPitch() { return MATRIX_PIXEL_PITCH; },
+            get pixelSize() { return MATRIX_PIXEL_SIZE; },
+            get glyphCadenceHz() { return MATRIX_GLYPH_HZ; },
+            get minimumStreamSpeed() { return MATRIX_STREAM_SPEED_MIN; },
+            get maximumStreamSpeed() { return MATRIX_STREAM_SPEED_MIN + MATRIX_STREAM_SPEED_RANGE; },
+            get minimumTrainLength() { return MATRIX_TRAIN_MIN; },
+            get maximumTrainLength() { return MATRIX_TRAIN_MIN + MATRIX_TRAIN_RANGE - 1; },
+            get minimumGapLength() { return MATRIX_TRAIN_GAP_MIN; },
+            get maximumGapLength() { return MATRIX_TRAIN_GAP_MIN + MATRIX_TRAIN_GAP_RANGE - 1; },
+            get palette() { return "#46ff70|#18dc4a"; },
+            get leadingTipColor() { return "#d6ffe3"; },
+            get voxelFaceShading() { return true; },
+            get antialiasedGlyphEdges() { return true; },
+            get caveEmissiveLighting() { return true; },
+            get sharedEmissionCurve() { return true; },
+            get lightingIndependentBrightness() { return true; },
+            get emissionFloor() { return 0.78; },
+            get emissionCeiling() { return 1.15; },
+            get viewDependentPixelSides() { return true; },
+            get opaqueGlyphFaces() { return true; },
+            get brightClasses() { return "cavemen|trees|banana-pile|flying-bees|cave-sign-letters|fireflies|fires"; },
+            get referenceCaveLayerIsolated() { return matrixCave.sections.every((section) => section.supports ? section.supports.every((support) => support.face.matrixCave === matrixCave.caveIndex) : section.face.matrixCave === matrixCave.caveIndex); },
+            get coordinateSystem() { return "pile-centered-world-space"; },
+            get caveRestartCount() { return 0; },
+            get wallFlowDirection() { return "down"; },
+            get radialBaseStreamCount() { return 32; },
+            get radialMaximumStreamCount() { return 2048; },
+            origin: MATRIX_WORLD.origin,
+            caves: MATRIX_WORLD.caves,
+            caveBounds: MATRIX_WORLD.caveBounds,
+            get caveNear() { return MATRIX_WORLD.caveNear; },
+            travelDistance: matrixTravelDistance,
+            coverage: matrixCoverage,
+            flowDistance: (x, z) => Math.hypot(x - MATRIX_WORLD.origin[0], z - MATRIX_WORLD.origin[2]),
+            covered: (x, z) => !!MATRIX_WORLD.active && Math.hypot(x - MATRIX_WORLD.origin[0], z - MATRIX_WORLD.origin[2]) <= MATRIX_WORLD.radius,
+            radialStreamCountAt: (radius) => 32 * 2 ** Math.max(0, Math.min(6, Math.ceil(Math.log2(Math.max(radius, 0.75) / 0.75)))),
+            radialSpacingAt: (radius) => Math.PI * 2 * radius / (32 * 2 ** Math.max(0, Math.min(6, Math.ceil(Math.log2(Math.max(radius, 0.75) / 0.75))))),
+            radialLinePoint: (stream, radius) => ({ x: Math.cos(-Math.PI + stream / 2048 * Math.PI * 2) * radius, z: Math.sin(-Math.PI + stream / 2048 * Math.PI * 2) * radius }),
+            sampleStream: (stream = 0, time = MATRIX_WORLD.time) => matrixWorldStreamSample(stream, time, false),
+            sampleWallStream: (stream = 0, time = MATRIX_WORLD.time) => matrixWorldStreamSample(stream, time, true)
+          },
           portal: {
             get inside() { return matrixCave.portal.inside; },
             get lastCrossingDirection() { return matrixCave.portal.lastCrossingDirection; },
@@ -2143,6 +2178,7 @@
         }
       }
     });
+    Object.defineProperty(hubScene.debug.matrixCave, "caves", { value: matrixInteriors });
   };
   const leave = () => {
     window.clearInterval(stateTimer);
@@ -2155,8 +2191,14 @@
     pilot.dispose();
     for (const node of targets) input.remove(node);
     for (const node of placed) removeChild(root, node);
-    targets.length = placed.length = claimed.length = scenery.length = sceneryClaims.length = clouds.length = lamps.length = entranceLights.length = fireSeats.length = sleepers.length = labels.length = spots.length = openMouths.length = props.length = 0;
+    targets.length = placed.length = claimed.length = scenery.length = sceneryClaims.length = matrixInteriors.length = clouds.length = lamps.length = entranceLights.length = fireSeats.length = sleepers.length = labels.length = spots.length = openMouths.length = props.length = 0;
     RENDER_OPTS.lightCount = 0;
+    MATRIX_WORLD.active = MATRIX_WORLD.direction = MATRIX_WORLD.radius = 0;
+    cameraCaveIndex = 0;
+    cameraPreviousValid = false;
+    caveEntryPlayer = null;
+    playerCaveIndex = 0;
+    CAMERA_OPENINGS.length = 0;
     LIGHTING_DEBUG.registeredLampCount = LIGHTING_DEBUG.activeFullLightCount = LIGHTING_DEBUG.approximatedLightCount = LIGHTING_DEBUG.selectedCount = LIGHTING_DEBUG.approximatedCount = 0;
     for (let i = 0; i < LIGHT_CAPACITY; i++) LIGHTING_DEBUG.selectedIds[i] = LIGHTING_DEBUG.approximatedIds[i] = null;
     sceneryVisible = sceneryRadiusCulled = sceneryPathCulled = sceneryFixedCulled = sceneryReflows = 0;
@@ -2181,7 +2223,7 @@
     id: "hub", enter, update, overlay, onDonation, onKey, onLootCleared, renderOpts: RENDER_OPTS, leave, stats, liveGeometry,
     root: null, camera: null, input: null, debug: null,
     get inMotion() {
-      return pile.inMotion || fx.inMotion;
+      return pile.inMotion || fx.inMotion || !!MATRIX_WORLD.active;
     }
   };
   BL.scenes = BL.scenes || {};

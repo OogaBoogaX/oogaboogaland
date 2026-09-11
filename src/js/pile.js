@@ -65,10 +65,11 @@
   // The banana pile of one scene
   const create = (ctx) => {
     const { root, world, pileScale: SCALE = 0.45, pileY: BASE_Y = 0.02 } = ctx;
+    const matrixLiving = !!ctx.matrixLivingPile;
     const pileSlots = [];
     const coreFaceSize = ctx.renderer.kind === "canvas2d" ? CORE_FACE_SIZE * 1.75 : CORE_FACE_SIZE;
     // A yellow-paneled mound under the shell uses one geometry scaled to every level.
-    const core = createNode({ geometry: models.bananaPileCoreGeometry(SCALE * 6, BASE_HEIGHT * 6, coreFaceSize), visible: false });
+    const core = createNode({ geometry: models.bananaPileCoreGeometry(SCALE * 6, BASE_HEIGHT * 6, coreFaceSize), visible: false, matrixLiving });
     const bananaGeometry = models.bananaGeometry();
     const shellGeometry = models.bananaTileGeometry();
     let shellMinZ = Infinity, shellReach = 0;
@@ -83,7 +84,8 @@
       instanceData: new Float32Array(20),
       instanceCount: 0,
       instanceVersion: 0,
-      visible: false
+      visible: false,
+      matrixLiving
     });
     const maxTiles = ctx.renderer.kind === "canvas2d" ? MAX_CANVAS_TILES : MAX_WEBGL_TILES;
     const surfaceSample = { y: 0, slope: 0 };
@@ -245,7 +247,7 @@
       data.set(instanceMatrix, offset);
       data[offset + 16] = 1;
       data[offset + 17] = 0;
-      data[offset + 18] = 0;
+      data[offset + 18] = matrixLiving ? 2 : 0;
       data[offset + 19] = 0;
     };
     // Preserve the established layered shell: bands run from rim to apex, with a
