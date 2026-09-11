@@ -205,6 +205,26 @@
     v.fill(5, 5, 0, 5, 0, 1, stone);
     v.fill(-5, 4, 6, 6, 0, 1, light);
     const geo = voxGeo(v, { unit: VOX, palette: CLIFF, origin: { x: 0, y: 0, z: -VOX } });
+    // The chamber's black doorway sheets own the inward face. Keeping the voxel rim's
+    // rear quads put a gray lintel and jamb skin in front of them during a crossing.
+    const rearZ = -VOX, kept = [], removed = [];
+    for (let i = 0; i < geo.faces.length; i++) {
+      const face = geo.faces[i];
+      if (face.i.every((index) => geo.verts[index * 3 + 2] === rearZ)) removed.push(face);
+      else kept.push(face);
+    }
+    geo.faces = kept;
+    geo.removedInteriorPanel = {
+      id: "caveRimInteriorRear",
+      planeAxis: "z",
+      planePosition: rearZ,
+      inwardNormal: [0, 0, -1],
+      bounds: [-3, 0, rearZ, 3, 3.5, rearZ],
+      lintelBounds: [-2.5, 3, rearZ, 2.5, 3.5, rearZ],
+      removedFaceCount: removed.length,
+      removedLintelFaceCount: removed.filter((face) => face.i.every((index) => geo.verts[index * 3 + 1] >= 3)).length,
+      remainingFaceCount: kept.length
+    };
     geo.jambCenterX = 2.75;
     geo.frontZ = 0.5;
     return geo;
@@ -218,12 +238,6 @@
     };
     return geo;
   });
-  const matrixRimLiner = cached(() => ({
-    verts: [-2.5, 2.995, 0.46, 2.5, 2.995, 0.46, 2.5, 2.995, 1.005, -2.5, 2.995, 1.005],
-    faces: [{ i: [0, 1, 2, 3], color: hexToRgb("#000000"), emissive: 0 }],
-    lines: [],
-    castShadow: false
-  }));
   const MATRIX_GLYPHS = [
     ["0110", "1001", "1111", "1001", "1001", "0000"],
     ["1110", "1001", "1110", "1001", "1110", "0000"],
@@ -253,45 +267,107 @@
     const vestibuleDepth = portalBack - vestibuleBack;
     const vestibuleCenter = (portalBack + vestibuleBack) * 0.5;
     const roomBack = -6.2;
+    const floorTop = 0.02, mainCeiling = 3.75, vestibuleCeiling = 2.98;
+    const mainInner = 2.82, vestibuleInner = 2.47, backInner = -6.13;
     const openFrontBox = (opts) => {
       const geo = box(opts);
       geo.faces.shift();
       return geo;
     };
+    const inwardZPanel = (x0, x1, y0, y1, z) => ({
+      verts: [x0, y0, z, x0, y1, z, x1, y1, z, x1, y0, z],
+      faces: [{ i: [0, 1, 2, 3], color: hexToRgb("#000000"), emissive: 0 }],
+      lines: []
+    });
     // Inward-facing sheets hide stone from the room without recoloring its exterior.
-    const header = {
-      verts: [-headerHalfWidth, 3, portalBack, -headerHalfWidth, headerTop, portalBack, headerHalfWidth, headerTop, portalBack, headerHalfWidth, 3, portalBack],
-      faces: [{ i: [0, 1, 2, 3], color: hexToRgb("#000000"), emissive: 0 }],
-      lines: []
-    };
-    const transitionHeader = {
-      verts: [-headerHalfWidth, 3, -2.485, -headerHalfWidth, headerTop, -2.485, headerHalfWidth, headerTop, -2.485, headerHalfWidth, 3, -2.485],
-      faces: [{ i: [0, 1, 2, 3], color: hexToRgb("#000000"), emissive: 0 }],
-      lines: []
-    };
+    const transitionHeader = inwardZPanel(-mainInner, mainInner, vestibuleCeiling, mainCeiling, vestibuleBack);
+    const transitionLeft = inwardZPanel(-mainInner, -vestibuleInner, floorTop, vestibuleCeiling, vestibuleBack);
+    const transitionRight = inwardZPanel(vestibuleInner, mainInner, floorTop, vestibuleCeiling, vestibuleBack);
+    const doorwayLeft = inwardZPanel(-headerHalfWidth, -2.5, 0, 3, portalBack);
+    const doorwayRight = inwardZPanel(2.5, headerHalfWidth, 0, 3, portalBack);
     const geo = merge(
       openFrontBox({ w: 5.8, h: 0.04, d: portalBack - roomBack, color: "#000000", offset: { y: 0, z: (portalBack + roomBack) * 0.5 } }),
-      box({ w: 5.8, h: 0.14, d: 3.7, color: "#000000", offset: { y: 3.82, z: -4.35 } }),
-      box({ w: 0.16, h: 3.8, d: 3.7, color: "#000000", offset: { x: -2.9, y: 1.9, z: -4.35 } }),
-      box({ w: 0.16, h: 3.8, d: 3.7, color: "#000000", offset: { x: 2.9, y: 1.9, z: -4.35 } }),
+      openFrontBox({ w: 5.8, h: 0.14, d: 3.7, color: "#000000", offset: { y: 3.82, z: -4.35 } }),
+      openFrontBox({ w: 0.16, h: 3.8, d: 3.7, color: "#000000", offset: { x: -2.9, y: 1.9, z: -4.35 } }),
+      openFrontBox({ w: 0.16, h: 3.8, d: 3.7, color: "#000000", offset: { x: 2.9, y: 1.9, z: -4.35 } }),
       openFrontBox({ w: 5, h: 0.04, d: vestibuleDepth, color: "#000000", offset: { y: 3, z: vestibuleCenter } }),
       openFrontBox({ w: 0.04, h: 3, d: vestibuleDepth, color: "#000000", offset: { x: -2.49, y: 1.5, z: vestibuleCenter } }),
       openFrontBox({ w: 0.04, h: 3, d: vestibuleDepth, color: "#000000", offset: { x: 2.49, y: 1.5, z: vestibuleCenter } }),
-      header,
       transitionHeader,
-      box({ w: 0.4, h: 3.8, d: 0.03, color: "#000000", offset: { x: -2.7, y: 1.9, z: -2.485 } }),
-      box({ w: 0.4, h: 3.8, d: 0.03, color: "#000000", offset: { x: 2.7, y: 1.9, z: -2.485 } }),
+      transitionLeft,
+      transitionRight,
+      doorwayLeft,
+      doorwayRight,
       box({ w: 5.8, h: 3.8, d: 0.14, color: "#000000", offset: { y: 1.9, z: -6.2 } })
     );
+    geo.matrixSurfaces = [
+      { name: "floor", backing: "chamberFloorTop", orientation: "floor", planeAxis: "y", planePosition: floorTop, normal: [0, 1, 0], bounds: [-mainInner, floorTop, backInner, mainInner, floorTop, portalBack], flow: "entrance-to-back" },
+      { name: "mainCeiling", backing: "mainCeilingUnderside", orientation: "ceiling", planeAxis: "y", planePosition: mainCeiling, normal: [0, -1, 0], bounds: [-mainInner, mainCeiling, backInner, mainInner, mainCeiling, vestibuleBack], flow: "entrance-to-back" },
+      { name: "vestibuleCeiling", backing: "vestibuleCeilingUnderside", orientation: "ceiling", planeAxis: "y", planePosition: vestibuleCeiling, normal: [0, -1, 0], bounds: [-vestibuleInner, vestibuleCeiling, vestibuleBack, vestibuleInner, vestibuleCeiling, portalBack], flow: "entrance-to-back" },
+      { name: "mainLeftWall", backing: "mainLeftWallInner", orientation: "left", planeAxis: "x", planePosition: -mainInner, normal: [1, 0, 0], bounds: [-mainInner, floorTop, backInner, -mainInner, mainCeiling, vestibuleBack], flow: "down" },
+      { name: "mainRightWall", backing: "mainRightWallInner", orientation: "right", planeAxis: "x", planePosition: mainInner, normal: [-1, 0, 0], bounds: [mainInner, floorTop, backInner, mainInner, mainCeiling, vestibuleBack], flow: "down" },
+      { name: "vestibuleLeftWall", backing: "vestibuleLeftWallInner", orientation: "left", planeAxis: "x", planePosition: -vestibuleInner, normal: [1, 0, 0], bounds: [-vestibuleInner, floorTop, vestibuleBack, -vestibuleInner, vestibuleCeiling, portalBack], flow: "down" },
+      { name: "vestibuleRightWall", backing: "vestibuleRightWallInner", orientation: "right", planeAxis: "x", planePosition: vestibuleInner, normal: [-1, 0, 0], bounds: [vestibuleInner, floorTop, vestibuleBack, vestibuleInner, vestibuleCeiling, portalBack], flow: "down" },
+      { name: "backWall", backing: "backWallInner", orientation: "back", planeAxis: "z", planePosition: backInner, normal: [0, 0, 1], bounds: [-mainInner, floorTop, backInner, mainInner, mainCeiling, backInner], flow: "down" },
+      { name: "transitionHeader", backing: "recessedCeilingRiser", orientation: "back", planeAxis: "z", planePosition: vestibuleBack, normal: [0, 0, -1], bounds: [-mainInner, vestibuleCeiling, vestibuleBack, mainInner, mainCeiling, vestibuleBack], flow: "down" },
+      { name: "transitionReturns", backing: "transitionLeftReturn", orientation: "back", planeAxis: "z", planePosition: vestibuleBack, normal: [0, 0, -1], bounds: [-mainInner, floorTop, vestibuleBack, -vestibuleInner, vestibuleCeiling, vestibuleBack], flow: "down" },
+      { name: "transitionReturns", backing: "transitionRightReturn", orientation: "back", planeAxis: "z", planePosition: vestibuleBack, normal: [0, 0, -1], bounds: [vestibuleInner, floorTop, vestibuleBack, mainInner, vestibuleCeiling, vestibuleBack], flow: "down" }
+    ];
+    // The jamb sheets remain as black interior backing, but must not carry Matrix glyphs.
+    // Their portal-plane overlays were visible past the exterior stone from oblique views.
+    geo.removedMatrixSurface = {
+      id: "doorwayJambs",
+      planeAxis: "z",
+      planePosition: portalBack,
+      inwardNormal: [0, 0, -1],
+      partBounds: [
+        [-headerHalfWidth, 0, portalBack, -2.5, 3, portalBack],
+        [2.5, 0, portalBack, headerHalfWidth, 3, portalBack]
+      ],
+      backingSurfaceIds: ["doorwayLeftJambInner", "doorwayRightJambInner"],
+      removedSectionCount: 2,
+      physicalBackingRetained: true
+    };
+    geo.removedExteriorHeader = {
+      id: "doorwayLintel",
+      backingSurfaceId: "doorwayLintelInner",
+      planeAxis: "z",
+      planePosition: portalBack,
+      inwardNormal: [0, 0, -1],
+      bounds: [-headerHalfWidth, 3, portalBack, headerHalfWidth, headerTop, portalBack],
+      vestibuleCeiling,
+      removedSectionCount: 1,
+      removedPhysicalFaceCount: 1,
+      physicalBackingRetained: false
+    };
+    geo.removedExteriorSoffit = {
+      id: "matrixRimLiner",
+      backingSurfaceId: "rimUnderside",
+      planeAxis: "y",
+      planePosition: 2.995,
+      normal: [0, -1, 0],
+      bounds: [-2.5, 2.995, 0.34, 2.5, 2.995, 1.005],
+      matrixBounds: [-2.5, 2.995, 0.34, 2.5, 2.995, 0.49],
+      portalPlane: 0.5,
+      classification: "exterior-frame-underside",
+      removedMaterial: "black-interior-lining",
+      restoredMaterial: "original-stone-rim",
+      removedFaceCount: 1,
+      removedSectionCount: 1,
+      removedStreamCount: 42,
+      removedGlyphCount: 84,
+      previousTrainLength: 1,
+      previousGapLength: 1,
+      previousVisibleTipRatio: 1,
+      stoneBackingRetained: true
+    };
     geo.castShadow = false;
+    geo.surfaceEpsilon = 0.01;
     geo.frontZ = portalBack;
     geo.claddingFrontZ = portalBack;
-    geo.headerMinY = 3;
-    geo.headerMaxY = headerTop;
-    geo.headerHalfWidth = headerHalfWidth;
-    geo.transitionCladdingZ = -2.485;
-    geo.transitionHeaderMinY = 3;
-    geo.transitionHeaderMaxY = headerTop;
+    geo.transitionCladdingZ = vestibuleBack;
+    geo.transitionHeaderMinY = vestibuleCeiling;
+    geo.transitionHeaderMaxY = mainCeiling;
     return geo;
   });
   // Gateway arch over the pass, trail along z
@@ -532,5 +608,5 @@
     box({ w: 4, h: 0.14, d: 0.16, color: WOOD_DK, offset: { x: 2, y: -0.17, z: 0.92 } }),
     ...[[0.5, -0.8], [0.5, 0.8], [3.5, -0.8], [3.5, 0.8]].map(([x, z]) => box({ w: 0.2, h: 2.2, d: 0.2, color: "#6b4a2b", offset: { x, y: -1.2, z } }))
   ));
-  BL.hubModels = { SIGN_GLYPHS, jetpack, jetFlame, caveMouthRim, mirrorPanel, matrixRimLiner, matrixGlyph, matrixChamber, caveSign, CAVE_SIGN_WIDTH, CAVE_SIGN_HEIGHT, gate, caveShelves, bedroll, tree, bush, rock, altarSlab, altarBlock, woodCrate, barrel, flowerTuft, torch, grass, lantern, firepit, fireFlame, butterfly, firefly, ember, vine, cloud, ladder, dock, TREE_HEIGHT };
+  BL.hubModels = { SIGN_GLYPHS, jetpack, jetFlame, caveMouthRim, mirrorPanel, matrixGlyph, matrixChamber, caveSign, CAVE_SIGN_WIDTH, CAVE_SIGN_HEIGHT, gate, caveShelves, bedroll, tree, bush, rock, altarSlab, altarBlock, woodCrate, barrel, flowerTuft, torch, grass, lantern, firepit, fireFlame, butterfly, firefly, ember, vine, cloud, ladder, dock, TREE_HEIGHT };
 })();
