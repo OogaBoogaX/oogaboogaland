@@ -22,7 +22,7 @@
   };
   // Exposed grid faces, greedy-merged a slice at a time
   const DIR_BIT = 0x100;
-  const gridGeometry = (grid, { unit, palette, origin = { x: 0, y: 0, z: 0 } }) => {
+  const gridGeometry = (grid, { unit, palette, origin = { x: 0, y: 0, z: 0 }, matrixCaves = null }) => {
     const { data, sx, sy, sz } = grid;
     const dims = [sx, sy, sz], strides = [sy * sz, sz, 1];
     const geo = { verts: [], faces: [], lines: [] };
@@ -46,7 +46,8 @@
           for (let i = 0; i < nu; i++, n++) {
             const base = i * su + j * sv + k * sd;
             const a = k > 0 ? data[base - sd] : 0, b = k < nd ? data[base] : 0;
-            mask[n] = a && !b ? a | DIR_BIT : !a && b ? b : 0;
+            const cave = matrixCaves && (a && !b && k < nd ? matrixCaves[base] : !a && b && k > 0 ? matrixCaves[base - sd] : 0);
+            mask[n] = a && !b ? a | DIR_BIT | (cave << 9) : !a && b ? b | (cave << 9) : 0;
           }
         }
         n = 0;
@@ -68,7 +69,7 @@
             }
             // (d, u, v) is cyclic, so this order faces +d
             const c0 = at(d, k, u, i, v, j), c1 = at(d, k, u, i + w, v, j), c2 = at(d, k, u, i + w, v, j + h), c3 = at(d, k, u, i, v, j + h);
-            geo.faces.push({ i: c & DIR_BIT ? [c0, c1, c2, c3] : [c0, c3, c2, c1], color: palette[c & 0xff], emissive: 0 });
+            geo.faces.push({ i: c & DIR_BIT ? [c0, c1, c2, c3] : [c0, c3, c2, c1], color: palette[c & 0xff], emissive: 0, matrixCave: c >> 9, matrixLocalGlyphSurface: (c >> 9) !== 0 });
             for (let y = 0; y < h; y++) mask.fill(0, n + y * nu, n + y * nu + w);
             i += w;
             n += w;
@@ -156,6 +157,12 @@
     const pass = spoke(0);
     const spokes = [...frames, pass, spoke(Math.PI)];
     const grid = makeGrid(SX, SY, SZ);
+    // Ownership follows carved empty cells, so merged exterior faces cannot inherit
+    // a cave's local Matrix layer merely because they share a bounding box.
+    const matrixCaves = new Uint8Array(grid.data.length);
+    // Exact carved column ownership plus the ceiling in quarter-unit cells.
+    // Zero ceiling means open sky; queries need not retain the dense voxel grid.
+    const cavities = new Uint8Array(SX * SZ);
     const height = new Float32Array(SX * SZ);
     const paths = new Uint8Array(PX * PZ);
     const meadow = new Uint8Array(SX * SZ);
@@ -248,7 +255,7 @@
       }
     }
     // Carve tunnel and room as rotated boxes
-    const carve = (f) => {
+    const carve = (f, caveIndex) => {
       const e = f.e;
       const cx = f.x + f.ox * 4, cz = f.z + f.oz * 4;
       const gx0 = Math.max(0, Math.floor((cx - 7 - ORIGIN.x) / UNIT)), gx1 = Math.min(SX - 1, Math.ceil((cx + 7 - ORIGIN.x) / UNIT));
@@ -263,7 +270,15 @@
           const room = along > ROOM.from - e && along < ROOM.to + e && across < ROOM.w / 2 + e;
           if (!room && !(along > -0.5 && along < MOUTH.depth + e && across < MOUTH.w / 2 + e)) continue;
           const gyTop = SURFACE - 1 + Math.round((room ? ROOM.h : MOUTH.h) / UNIT);
-          for (let gy = SURFACE; gy <= gyTop; gy++) grid.set(gx, gy, gz, 0);
+          for (let gy = SURFACE; gy <= gyTop; gy++) {
+            grid.set(gx, gy, gz, 0);
+            // The opening lies at local z=.5; the exterior rim remains global.
+            if (along > e - 0.48) matrixCaves[grid.index(gx, gy, gz)] = caveIndex;
+          }
+          if (grid.has(gx, SURFACE - 1, gz)) {
+            const ceiling = grid.has(gx, gyTop + 1, gz) ? gyTop + 1 - SURFACE : 0;
+            cavities[gx * SZ + gz] = (caveIndex << 5) | ceiling;
+          }
           if (along > -e) columns.push(gx, gyTop, gz);
         }
       }
@@ -279,7 +294,7 @@
         }
       }
     };
-    for (const f of frames) carve(f);
+    for (let i = 0; i < frames.length; i++) carve(frames[i], i + 1);
     // Walkable height is the lowest run's top
     const surface = new Float32Array(SX * SZ);
     const land = new Uint8Array(SX * SZ);
@@ -309,6 +324,14 @@
     const surfaceAt = (x, z) => {
       const i = column(x, z);
       return i < 0 ? 0 : surface[i];
+    };
+    const cavityAt = (x, z, out) => {
+      const i = column(x, z), cavity = i < 0 ? 0 : cavities[i];
+      if (!cavity) return false;
+      out.caveIndex = cavity >> 5;
+      out.floor = 0;
+      out.ceiling = cavity & 31 ? (cavity & 31) * UNIT : Infinity;
+      return true;
     };
     const pathColumn = (x, z) => {
       const gx = Math.floor((x - ORIGIN.x) / PATH_UNIT), gz = Math.floor((z - ORIGIN.z) / PATH_UNIT);
@@ -479,10 +502,12 @@
     const inside = (ROOM.from + ROOM.to) / 2;
     const mouths = frames.map((f) => ({ id: f.id, clock: f.clock, angle: f.angle, x: f.x, z: f.z, ry: facing(f.axis), floorY: 0, inside: { x: f.x + f.ox * inside, z: f.z + f.oz * inside }, apron: { x: f.x - f.ox * 1.6, z: f.z - f.oz * 1.6 } }));
     const built = {
-      geometry: gridGeometry(grid, { unit: UNIT, palette: PALETTE, origin: ORIGIN }),
+      geometry: gridGeometry(grid, { unit: UNIT, palette: PALETTE, origin: ORIGIN, matrixCaves }),
       path,
       heightAt,
       surfaceAt,
+      cavityAt,
+      cavityBytes: cavities.byteLength,
       isPath,
       onLand,
       mouths,
