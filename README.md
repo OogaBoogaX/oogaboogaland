@@ -45,11 +45,27 @@ all three in a row for points and a saved cup medal. Now and then a race loads i
 (snow on Frost Peak) and the tarmac gets slick; the sound is synthesized in the browser,
 nothing is downloaded.
 
+On the roof of the Ooga Rally cave sits a plane: tap it, or walk a driven Ooga up to it, for
+**Ooga Drop**. Pick an Ooga and **Fly!**: the plane climbs in a circle while the island shrinks
+below (hold **Space** to hurry), **GET READY!** and **JUMP SOON!** call the mark as it comes
+round once a lap, **JUMP** opens it, and Space throws you
+out. In freefall **W S** pitch, **A D** roll and **Q E** turn the body, and the air answers the
+way it does to a flat plate: belly down is slow and steady, head down is fast, a tilt tracks
+you sideways. Fall through the glowing hoops, then Space pulls the chute; **A D** steer the
+canopy on the same keys: **W** dives, **S** flares, **A D** bank, **Q E** turn. Any landing under
+the canopy is a good one, the target pays by distance and the banana pile is a great one. Without a
+chute the impact picks its ending: spine first punches a hole, flat and fast tumbles, flat and
+slow flattens. Miss the island and you are lost in the clouds. Drag to look round in every
+phase, all the way round in flight, where the view eases back behind you a moment after you let
+go; **0** puts the camera back, **M** mutes the synthesized engine, wind and canopy,
+**Escape** returns to the board. On a phone the left stick pitches and rolls, the right stick
+turns, and the button jumps, pulls and flares. The best drop is kept in your browser.
+
 Keys: **B** add 100 test bananas, **J** give the controlled Ooga a jetpack, **L** legendary
 tip, **P** fill the pile, **1** to **9** force a contributor to eating, **Escape** leave a
 cave or let go, **Shift+R** reset the demo.
 
-URL flags: `?scene=lab` opens the lab directly and `?scene=race` the rally garage, `?nosim=1` silences simulated tips,
+URL flags: `?scene=lab` opens the lab directly, `?scene=race` the rally garage and `?scene=drop` the drop board, `?nosim=1` silences simulated tips,
 `?canvas2d=1` forces the Canvas 2D fallback, `?yaw=1.2` sets the starting camera angle,
 `?debug=1` exposes `window.__ooga`. In debug mode, add `&bananas=10000` (or another
 non-negative amount) to preview the pile at that starting level without changing saved state,

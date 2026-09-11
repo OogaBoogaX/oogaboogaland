@@ -6,6 +6,7 @@ import { join } from "node:path";
 
 const CHROME = process.env.CHROME || "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const COMMAND_MS = 90000;
 
 export const launch = async ({ w = 1440, h = 900, mobile = false } = {}) => {
   const port = 9300 + Math.floor(Math.random() * 500);
@@ -57,9 +58,17 @@ export const launch = async ({ w = 1440, h = 900, mobile = false } = {}) => {
     if (m.method === "Runtime.exceptionThrown") logs.push(`[exception] ${m.params.exceptionDetails.text} ${m.params.exceptionDetails.exception?.description ?? ""}`);
     if (m.method === "Log.entryAdded") logs.push(`[log.${m.params.entry.level}] ${m.params.entry.text}`);
   };
-  const send = (method, params = {}) => new Promise((r) => {
+  // A reply that never comes (Chrome's DevTools channel can die silently) fails the case instead of freezing the run
+  const send = (method, params = {}) => new Promise((resolve, reject) => {
     const i = ++id;
-    pending.set(i, r);
+    const timer = setTimeout(() => {
+      pending.delete(i);
+      reject(new Error(`${method} got no reply in ${COMMAND_MS / 1000} s: Chrome hung`));
+    }, COMMAND_MS);
+    pending.set(i, (m) => {
+      clearTimeout(timer);
+      resolve(m);
+    });
     ws.send(JSON.stringify({ id: i, method, params }));
   });
   // Raw protocol events, null to stop listening

@@ -9,9 +9,10 @@ modules around it, and verified by the suite before it lands.
 
 A WebGL2 floating island whose cliff caves are projects. The page lands on the hub; the
 open caves are the EntropyLab lab, where donated bananas feed voxel cavemen who
-represent its contributors, and Ooga Rally, a three-track kart race for the same crew.
+represent its contributors, and Ooga Rally, a three-track kart race for the same crew. On
+the rally cave's roof a plane launches Ooga Drop, a skydive back onto the island.
 Pile, crew, effects and loot crates are the same systems in the hub and the lab and the
-pile level is shared everywhere; the rally has its own systems over the same cavemen. The page is static and network-free: the
+pile level is shared everywhere; the rally and the drop have their own systems over the same cavemen. The page is static and network-free: the
 content policy forbids every connection, payments are a simulator stub, all state lives
 in localStorage. A backend comes later and must fit the contract in `src/js/donations.js`;
 do not add network code before it exists. Visitor-facing controls are in the README.
@@ -44,8 +45,10 @@ do not add network code before it exists. Visitor-facing controls are in the REA
 
 Nothing to install. `npm test` needs Node 22 or newer (the driver uses the global
 `fetch` and `WebSocket`) and Chrome; the driver looks at the macOS application path, so
-on Linux or Windows set `CHROME` to the binary. A full run takes about five minutes,
-mostly in the soak blocks. Deploy only `oogaboogaland.html`, served as `index.html`.
+on Linux or Windows set `CHROME` to the binary. A full run takes about nine minutes,
+mostly in the soak blocks; each case's closing record carries its seconds. A DevTools
+command with no reply in 90 s fails its case rather than freezing the run, so never
+return a scene node or a pick hit from an evaluate, only the fields a check reads. Deploy only `oogaboogaland.html`, served as `index.html`.
 
 GitHub Pages uses the Actions workflow above. It rebuilds the page and uploads only
 `_site/index.html`; do not publish the source tree. The workflow deploys but does not
@@ -61,9 +64,9 @@ every scene has registered on `BL.scenes`.
 | File | Exposes | Job |
 |---|---|---|
 | `qr.js` | `BL.qr` | QR code for the donation link |
-| `math.js` | `BL.math` | `mat4` (with `invert`), easing, damping, hashing, `rayFromView` |
+| `math.js` | `BL.math` | `mat4` (with `invert` and `fromTQS`), `quat` (unit quaternions: axis-angle, YXZ Euler, multiply, world-frame `integrate`, `rotateVec`, `slerpTo`), easing, damping, hashing, `rayFromView` |
 | `daylight.js` | `BL.daylight` | the local solar clock: continuous sun/moon directions, sidereal star frame, altitude-driven sky/light factors, six semantic phases, `sample`, `createClock` |
-| `scene.js` | `BL.scene` | nodes, world transforms, camera, bounds cache, tweens |
+| `scene.js` | `BL.scene` | nodes (a node with a `quaternion` turns by it instead of its Euler `rotation`), world transforms, camera, bounds cache, tweens |
 | `gl-renderer.js` | `BL.glRenderer` | WebGL2: instancing, frustum culling, shadow map, sky pass with sun, moon and stars, ten bounded point lights, bloom, MSAA, quality tiers, pixel budget |
 | `canvas-renderer.js` | `BL.canvasRenderer` | Canvas 2D fallback, same API; also draws locker icons |
 | `models.js` | `BL.models` | procedural geometry: room, cavemen, props, crates, `SWAG` catalog |
@@ -84,6 +87,7 @@ every scene has registered on `BL.scenes`.
 | `critters.js` | `BL.critters` | instanced butterflies by day, fireflies and embers by night, populations by phase and tier, bursts |
 | `scene-hub.js` | `BL.scenes.hub` | the island scene: the clock samples the sky and lamps each frame; registers first so it is the landing scene |
 | `scene-lab.js` | `BL.scenes.lab` | the lab scene; Escape and Leave cave return to the hub |
+| `drop-models.js` | `BL.dropModels` | cached drop props: the roof plane (body, propeller node, shared kart wheels), the windsock, the unit hoop, the canopy with its lines, the pack, the target, the wind streak; `roofSpot` places the plane over a mouth's room |
 | `race-models.js` | `BL.raceModels` | cached rally props: Rock Kart and Dino mounts, gantry and lamps, boost pad, item crate, rock, peel, boulder, spectators, banners, torch stands, and the themed decor (palms, lagoon rocks, lava rocks, obsidian, bones, pines, crystals, ice spikes, snow rocks, buoys) |
 | `race-track.js` | `BL.raceTrack` | `TRACKS` and `THEMES`; `build` turns a closed Catmull-Rom spline into a road ribbon with curbs, walls and lips before gaps, a terrain skirt in chunks, decor baked per sector, spectators, torches, checkpoints, the grid, item spawns and the minimap; `nearest`, `project`, `heightAt`, `surfaceAt`, `roadY` |
 | `racers.js` | `BL.racers` | the seven contributors as racers on a mount (`MOUNTS`): a fixed-step arcade controller (throttle, steer, drift charge and tiered boost, hop, launches and landings, walls, falls, hazards, respawn), racer pushes, checkpoints, laps, ranks, rubber band, the AI driver, mount animation |
@@ -91,10 +95,15 @@ every scene has registered on `BL.scenes`.
 | `race-hud.js` | `BL.raceHud` | the garage board, the in-race strip, countdown and notices, results, pause, minimap and speed lines on the overlay |
 | `race-audio.js` | `BL.raceAudio` | procedural sound: one `AudioContext` opened on the first real gesture, a fixed pool of eight pre-started oscillator voices gated by gain envelopes, one looped noise buffer behind wind, drift scrub and crowd filters, a three-speed engine (first gear pulls from idle, later gears drop in at half revs and wind to a limiter, two cruise shifts drop the note flat out, a held throttle blips it in place during the countdown) or a growl pitched by speed, footfalls on foot; `cues`, `update`, `quiet`, `setMuted`, `dispose` |
 | `scene-race.js` | `BL.scenes.race` | the rally scene: garage, countdown, racing, paused, finished; chase camera, lighting from the ten nearest torches, donations, `leave` |
+| `skydiver.js` | `BL.skydiver` | one contributor body on a quaternion: `place`, `jump`, `deploy`, `land` (under the canopy every touchdown stands; without one the impact picks `hole`, `tumble` or `pancake` from the spine angle and the ground speed); the fixed-step flat-plate model (gravity, plate pressure along the belly normal, skin drag, player rates, a weathervane the stick cannot outmuscle), the canopy flight (bloom, sink, forward, toggles, flare reserve), `pose` by phase |
+| `drop-audio.js` | `BL.dropAudio` | the drop's procedural sound on the rally's pattern: one context from an activated gesture, eight pooled voices, one noise loop behind the plane's engine drone (pitched by its speed, fading with its distance), the wind (band and level by the diver's speed) and the canopy flutter; cues for the mark, jump, rings, misses, pull, flare, the landings and crashes, lost and a medal; the same mute key as the rally |
+| `drop-hud.js` | `BL.dropHud` | the launch board, the flight strip (altitude, sink, rings, time, chute), centre calls and notices, the results rows; text nodes mutate only on change |
+| `scene-drop.js` | `BL.scenes.drop` | Ooga Drop: phases `board`, `climb`, `air`, `down`, `lost`, `results`; the plane's roll, helix climb and jump mark, the course laid on a hands-off reference fall, ring crossings, the streak batch, clouds, the two-axis orbit camera (unbounded yaw in flight, easing back behind the subject 1.5 s after the last drag), the island's clock, donations, `leave` |
 | `director.js` | `window.__ooga` (debug only) | the app: renderer, frame loop, governor, housekeeping, keys, donations, routing, transitions |
 
-The rally modules load after both scenes so the hub stays the landing scene, and before
-`director.js`.
+The rally and drop modules load after both scenes so the hub stays the landing scene, and
+before `director.js`; `drop-models.js` loads before `scene-hub.js` because the hub parks the
+plane on the rally roof.
 
 Both renderers implement the same surface: `render(root, camera, opts)` returning
 whether a frame was drawn, `project(x, y, z, out)`, `ray(px, py, camera, out)`,
@@ -113,8 +122,9 @@ pause, `game`, `world`, the donation subscription, `BL.scenes`, `?scene=` routin
 transitions, the `[data-scene]` HUD sections, `__ooga`, and `destroy` on pagehide. A
 scene builds its root, camera, input, HUD and systems in `enter` and drops them in `leave`.
 
-`world` is `{ level }`, the banana level every scene shares. With `game` it is the only
-gameplay state that crosses a transition.
+`world` is `{ level, pilot }`: the banana level every scene shares, and the handle of the
+Ooga driven into a launcher (the drop reads and clears it in `enter`). With `game` it is the
+only gameplay state that crosses a transition.
 
 The scene contract, as `scene-lab.js` and `scene-hub.js` implement it:
 
@@ -151,8 +161,8 @@ measure exactly that.
 `__ooga` reads the active scene's `debug` object for `slots`, `cavemen`, `crates`, `lab`,
 `hud`, `applyAllSwag`, `renderLocker`, `demoTip`, `refreshStates`, `trimPool`, `shown`,
 `island`, `mouths`, `camera`, `crew`, `controls`, `pilot`, `renderOpts`, `lamps`, `fireSeats`,
-`critters`, `daylight`, `setHour`, `track`, `racers`, `items` and `race`; a scene fills in
-what it has.
+`critters`, `daylight`, `setHour`, `track`, `racers`, `items`, `race`, `launchers`, `drop`,
+`diver`, `plane` and `course`; a scene fills in what it has.
 
 ## Engine patterns to keep
 
@@ -188,8 +198,14 @@ what it has.
   the context in `leave`.
 - **The clock is the hub's.** `daylight.sample` writes the hub's `RENDER_OPTS` in place every
   frame; phases (dawn, morning, noon, dusk, night, midnight) drive lamps, critters, quotes
-  and toasts. The lab is inside the rock and passes no sky. The roster's sleep and eat states
+  and toasts. The lab is inside the rock and passes no sky. The drop samples the same clock
+  parameters so its sky matches the island it left. The roster's sleep and eat states
   come from commit age, never from the clock.
+- **Free rotation is a quaternion.** Bodies that turn about all three axes (the plane, the
+  diver) carry `node.quaternion` and integrate a world-frame angular velocity with
+  `quat.integrate`; Euler `rotation` stays for everything that only yaws or swings. The
+  skydive runs on the rally's 1/120 s substep and every vector it touches is preallocated;
+  the course is laid once per visit by flying the diver's own physics without frames.
 
 ## Checks and trust
 
@@ -258,6 +274,12 @@ turn, drift turn, mass, hop, off-road factor, body radius, garage bars) and a bu
 **A donation-driven event.** Hook `onDonation` in the scene module. Do not touch the
 event shape `{ id, sats, handle, message, at }`; the backend will emit exactly that.
 
+**A launcher on the island.** A scene need not be a cave: the drop's plane is a hub prop
+(`addProp("plane", …)`) parked at `dropModels.roofSpot` over the rally room, with its roof
+point pushed onto `launchers`, a `presets.drop` view and `enterLaunch` (the cave dolly with
+another view, then `go("drop")`). A tap, Space in reach and a driven Ooga within
+`LAUNCH_REACH` at roof height all enter. Claim its footprint so the scatter keeps off it.
+
 **A cave.** The seven mouths exist in the terrain, one per slot in `caves.js`. Opening
 one is one line there (`scene`, `status: "open"`, `name`) plus a scene module registering
 `BL.scenes.<scene>`. An open mouth gets shelves, torches, a label, a camera preset and a
@@ -312,6 +334,13 @@ points a race, shows standings on each podium and saves the best cup medal throu
 `startRace`, `toGarage`, `pause`, `finishRace`, `cam` and `simulate(seconds)`, which runs
 substeps without frames; `__ooga.racers.autopilot = true` lets the AI drive the visitor.
 
+In the drop: Enter flies, Space jumps at the mark (held, it hurries the climb and jumps when
+the mark comes), then pulls; W S A D Q E turn the body, S or a held Space flares, 0 resets
+the orbit, Escape returns to the board. `__ooga.drop` exposes `phase`, `score`, `ringsHit`,
+`result`, `jumpOpen`, `cam`, `start`, `toBoard`, `jump`, `deploy`, `finish`, `jumpNow`
+(from the course start), `setInput(pitch, roll, yaw, flare)` and `simulate(seconds)`;
+`__ooga.diver` is the skydiver, `__ooga.course` its rings, target and `jumpAngle`.
+
 URL flags: `?debug=1` exposes `window.__ooga` with the scene, game, renderer, input,
 `stats()`, `timing`, `frameInterval`, and in the hub `island`, `mouths`, `camera`;
 `?scene=<id>` opens that scene (unknown ids land on the hub); `?nosim=1` silences the
@@ -331,7 +360,9 @@ pinned hour when both are given). `__ooga.daylight` exposes the bounded celestia
 the DevTools protocol. Every check opens the page with `?debug=1&nosim=1&hour=12` (noon, unless the check asks for
 another hour) and asserts on real interaction: drags at projected positions, clicks, keys, DOM state, a clean console.
 Lab checks add `scene=lab`, rally checks `scene=race` (they drive the physics through
-`race.simulate` and `racers.setInput`, isolating the visitor with the `isolate` helper);
+`race.simulate` and `racers.setInput`, isolating the visitor with the `isolate` helper),
+drop checks `scene=drop` (`drop.jumpNow`, `drop.setInput` and `drop.simulate`, the diver
+parked high in still air by `isolateDiver`);
 hub checks open the page without it and hold keys through `hold`. New behaviour needs a check. Follow the existing shape: one `withPage` block,
 `record(name, ok, detail)` per assertion, no fixed sleeps where waiting on
 `renderedFrames` is possible. A failure prints `FAIL` with its detail, so
@@ -344,8 +375,8 @@ target, tween, DOM, listener and GPU record counts identical and the heap within
 GPU residency: each scene after visiting the other holds only its own geometry.
 Donations, per scene: sixty tips in fifteen seconds with every crate opened end with
 crates, particles and tweens at zero, nodes and targets back to base plus the trimmed
-pool and what the crew built, GPU records bounded, heap within 15%. The rally has its own
-turn: six hub/race round trips and sixty tips mid-race. Anything a scene creates per visit
+pool and what the crew built, GPU records bounded, heap within 15%. The rally and the drop
+have their own turns: six hub round trips each, sixty tips mid-race and mid-fall. Anything a scene creates per visit
 must come back to base there.
 
 Profile before optimizing. Boot phases are `performance.mark`s readable from

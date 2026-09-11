@@ -197,7 +197,122 @@
       out[2] = m[2] * x + m[6] * y + m[10] * z + m[14];
       out[3] = m[3] * x + m[7] * y + m[11] * z + m[15];
       return out;
+    },
+    // Translation, unit quaternion and scale, the quaternion twin of fromTRS
+    fromTQS: (out, p, q, s) => {
+      const x = q[0], y = q[1], z = q[2], w = q[3];
+      const xx = x * x, yy = y * y, zz = z * z, xy = x * y, xz = x * z, yz = y * z, wx = w * x, wy = w * y, wz = w * z;
+      out[0] = (1 - 2 * (yy + zz)) * s.x;
+      out[1] = 2 * (xy + wz) * s.x;
+      out[2] = 2 * (xz - wy) * s.x;
+      out[3] = 0;
+      out[4] = 2 * (xy - wz) * s.y;
+      out[5] = (1 - 2 * (xx + zz)) * s.y;
+      out[6] = 2 * (yz + wx) * s.y;
+      out[7] = 0;
+      out[8] = 2 * (xz + wy) * s.z;
+      out[9] = 2 * (yz - wx) * s.z;
+      out[10] = (1 - 2 * (xx + yy)) * s.z;
+      out[11] = 0;
+      out[12] = p.x;
+      out[13] = p.y;
+      out[14] = p.z;
+      out[15] = 1;
+      return out;
     }
   };
-  BL.math = { clamp, lerp, damp, angleDelta, ease, fnv1a, mulberry32, randomInt, hexToRgb, mat4 };
+  // Unit quaternions as Float32Array(4) [x, y, z, w], every operation in place
+  const QUAT_TEMP = new Float32Array(4);
+  const quat = {
+    create: () => {
+      const q = new Float32Array(4);
+      q[3] = 1;
+      return q;
+    },
+    identity: (out) => {
+      out[0] = out[1] = out[2] = 0;
+      out[3] = 1;
+      return out;
+    },
+    copy: (out, q) => {
+      out[0] = q[0];
+      out[1] = q[1];
+      out[2] = q[2];
+      out[3] = q[3];
+      return out;
+    },
+    fromAxisAngle: (out, x, y, z, angle) => {
+      const s = Math.sin(angle / 2);
+      out[0] = x * s;
+      out[1] = y * s;
+      out[2] = z * s;
+      out[3] = Math.cos(angle / 2);
+      return out;
+    },
+    // Yaw about y, then pitch about x, then roll about z, matching fromTRS's YXZ order
+    fromEuler: (out, x, y, z) => {
+      const cx = Math.cos(x / 2), sx = Math.sin(x / 2), cy = Math.cos(y / 2), sy = Math.sin(y / 2), cz = Math.cos(z / 2), sz = Math.sin(z / 2);
+      out[0] = sx * cy * cz + cx * sy * sz;
+      out[1] = cx * sy * cz - sx * cy * sz;
+      out[2] = cx * cy * sz - sx * sy * cz;
+      out[3] = cx * cy * cz + sx * sy * sz;
+      return out;
+    },
+    // out = a ⊗ b: rotating a vector by out applies b first, then a
+    multiply: (out, a, b) => {
+      const t = QUAT_TEMP;
+      t[0] = a[3] * b[0] + a[0] * b[3] + a[1] * b[2] - a[2] * b[1];
+      t[1] = a[3] * b[1] - a[0] * b[2] + a[1] * b[3] + a[2] * b[0];
+      t[2] = a[3] * b[2] + a[0] * b[1] - a[1] * b[0] + a[2] * b[3];
+      t[3] = a[3] * b[3] - a[0] * b[0] - a[1] * b[1] - a[2] * b[2];
+      out.set(t);
+      return out;
+    },
+    normalize: (out) => {
+      const len = Math.hypot(out[0], out[1], out[2], out[3]) || 1;
+      out[0] /= len;
+      out[1] /= len;
+      out[2] /= len;
+      out[3] /= len;
+      return out;
+    },
+    // Advance by a world-frame angular velocity over dt
+    integrate: (out, q, wx, wy, wz, dt) => {
+      const hx = wx * dt / 2, hy = wy * dt / 2, hz = wz * dt / 2;
+      const x = q[0], y = q[1], z = q[2], w = q[3];
+      out[0] = x + hy * z - hz * y + hx * w;
+      out[1] = y + hz * x - hx * z + hy * w;
+      out[2] = z + hx * y - hy * x + hz * w;
+      out[3] = w - hx * x - hy * y - hz * z;
+      return quat.normalize(out);
+    },
+    // Rotate a vector, written into out as x, y, z
+    rotateVec: (out, q, x, y, z) => {
+      const qx = q[0], qy = q[1], qz = q[2], qw = q[3];
+      const ix = qw * x + qy * z - qz * y, iy = qw * y + qz * x - qx * z, iz = qw * z + qx * y - qy * x, iw = -qx * x - qy * y - qz * z;
+      out[0] = ix * qw + iw * -qx + iy * -qz - iz * -qy;
+      out[1] = iy * qw + iw * -qy + iz * -qx - ix * -qz;
+      out[2] = iz * qw + iw * -qz + ix * -qy - iy * -qx;
+      return out;
+    },
+    // Ease toward another rotation by a fraction, renormalised
+    slerpTo: (out, target, t) => {
+      let d = out[0] * target[0] + out[1] * target[1] + out[2] * target[2] + out[3] * target[3];
+      const sign = d < 0 ? -1 : 1;
+      d = Math.abs(d);
+      // Nearly parallel rotations lerp; the rest slerp
+      let ka = 1 - t, kb = t;
+      if (d < 0.9995) {
+        const theta = Math.acos(Math.min(1, d)), s = Math.sin(theta);
+        ka = Math.sin((1 - t) * theta) / s;
+        kb = Math.sin(t * theta) / s;
+      }
+      out[0] = out[0] * ka + target[0] * sign * kb;
+      out[1] = out[1] * ka + target[1] * sign * kb;
+      out[2] = out[2] * ka + target[2] * sign * kb;
+      out[3] = out[3] * ka + target[3] * sign * kb;
+      return quat.normalize(out);
+    }
+  };
+  BL.math = { clamp, lerp, damp, angleDelta, ease, fnv1a, mulberry32, randomInt, hexToRgb, mat4, quat };
 })();
