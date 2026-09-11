@@ -9,8 +9,11 @@
   const TIER_RANK = { legendary: 0, epic: 1, rare: 2, common: 3 };
   // Headings in the cave-sign lettering: one path of pixels per element, scaled by its CSS height
   const SIGN_NS = "http://www.w3.org/2000/svg";
-  const signLettering = (text) => {
+  // Markup may wrap a sign across lines; the lettering wants one run of words
+  const signText = (raw) => raw.replace(/\s+/g, " ").trim();
+  const signLettering = (raw) => {
     const { SIGN_GLYPHS } = BL.hubModels;
+    const text = signText(raw);
     let cells = -1;
     for (const ch of text) cells += ch === " " ? 2 : 4;
     const svg = document.createElementNS(SIGN_NS, "svg");
@@ -39,7 +42,7 @@
     return svg;
   };
   for (const el of document.querySelectorAll("[data-sign]")) {
-    const text = el.textContent.trim();
+    const text = signText(el.textContent);
     el.setAttribute("aria-label", text);
     el.replaceChildren(signLettering(text));
   }
@@ -372,5 +375,5 @@
     };
     return { el, openFeed, closeFeed, setRosterRow, setMeter, setStats, setAct, setSubtitle, onAction, toast, tooltip, hint, selectTab, onPreset, onIdentityChange, setIdentity, setDonationUrl, onAssign, onUnassign, renderInventory, dispose };
   };
-  BL.hud = { create, renderIcon, STATE_LABELS };
+  BL.hud = { create, renderIcon, signLettering, STATE_LABELS };
 })();
