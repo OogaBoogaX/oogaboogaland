@@ -218,10 +218,11 @@ select {
 }
 
 .meter {
-  justify-self: center;
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 10px;
+  gap: 8px 10px;
+  margin-bottom: 10px;
   padding: 8px 14px;
   background: var(--tablet);
   border: 2px solid var(--stone-dk);
@@ -237,7 +238,8 @@ select {
 }
 
 .meter-bar {
-  width: 150px;
+  flex: 1 1 90px;
+  min-width: 90px;
   height: 8px;
   border-radius: 999px;
   overflow: hidden;
@@ -268,13 +270,20 @@ select {
 }
 
 .meter-forecast {
+  flex-basis: 100%;
   color: var(--muted);
   font-size: 10.5px;
   letter-spacing: 0.06em;
   white-space: nowrap;
 }
 
+.metrics {
+  margin-top: 8px;
+  grid-template-columns: 1fr 1fr;
+}
+
 .presets {
+  grid-column: 3;
   display: flex;
   gap: 6px;
 }
@@ -308,6 +317,11 @@ select {
 
 .presets .leave {
   color: var(--accent);
+}
+
+.presets [data-action="mute"][aria-pressed="true"] {
+  color: var(--muted);
+  text-decoration: line-through;
 }
 
 .presets .leave:hover,
@@ -350,6 +364,19 @@ select {
   border-radius: 8px 0 0 8px;
   background: linear-gradient(90deg, var(--plank), var(--wood));
   box-shadow: 0 4px 0 rgba(0, 0, 0, 0.35);
+}
+
+/* The banana tab hangs above the caveman tab */
+.sheet-toggle-bananas {
+  margin-top: -104px;
+  height: 56px;
+}
+
+.sheet-toggle .banana-icon {
+  display: block;
+  width: 100%;
+  height: auto;
+  filter: drop-shadow(0 1px 0 rgba(0, 0, 0, 0.5));
 }
 
 .sheet-toggle .caveman-icon {
@@ -987,6 +1014,486 @@ select {
   outline: none;
 }
 
+/* ---------- Ooga Rally ---------- */
+.race {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.race>* {
+  pointer-events: auto;
+}
+
+/* The garage: a plank board with three stone columns */
+.garage {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: min(880px, calc(100vw - 32px));
+  max-height: calc(100% - 120px - var(--safe-top) - var(--safe-bottom));
+  display: flex;
+  flex-direction: column;
+  padding: 14px 18px 16px;
+  border: 3px solid var(--wood-edge);
+  border-radius: var(--radius);
+  background: var(--planks);
+  box-shadow: 0 6px 0 rgba(0, 0, 0, 0.35), 0 10px 30px rgba(0, 0, 0, 0.35);
+  color: var(--paper);
+}
+
+.garage-head h2,
+.race-results h2,
+.race-pause h2 {
+  margin: 0;
+  font-size: 22px;
+  line-height: 1;
+  text-shadow: 0 2px 0 rgba(0, 0, 0, 0.5);
+}
+
+.garage-head .help {
+  margin: 6px 0 0;
+}
+
+/* Help lines on the planks: bright and a size up, so they read at arm's length */
+.garage .help {
+  color: var(--paper);
+  font-size: 12px;
+  letter-spacing: 0.03em;
+  text-shadow: 0 1px 0 rgba(0, 0, 0, 0.7);
+}
+
+.garage-columns {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 12px;
+  margin-top: 12px;
+  min-height: 0;
+  overflow: auto;
+}
+
+.garage-col h3 {
+  margin: 0 0 6px;
+  color: var(--accent);
+  font-size: 10.5px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.garage-list {
+  list-style: none;
+  margin: 0;
+  padding: 2px 8px;
+  background: var(--tablet);
+  border: 2px solid var(--stone-dk);
+  border-radius: 9px 7px 10px 8px;
+  box-shadow: var(--tablet-shadow);
+}
+
+.garage-list li {
+  border-bottom: 1px solid rgba(0, 0, 0, 0.35);
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.04);
+}
+
+.garage-list li:last-child {
+  border-bottom: 0;
+  box-shadow: none;
+}
+
+.garage-list button {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 40px;
+  margin: 3px 0;
+  padding: 6px 8px;
+  border: 2px solid transparent;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+  border-radius: 6px;
+  transition: transform 0.12s ease, box-shadow 0.12s ease;
+}
+
+.garage-list button:hover,
+.garage-list button:focus-visible {
+  background: rgba(255, 255, 255, 0.06);
+  outline: none;
+}
+
+/* The picked row is a golden plank card, the way a phone game marks a choice */
+.garage-list button[aria-pressed="true"] {
+  background: linear-gradient(#f0b05a, var(--accent));
+  color: var(--ink);
+  border: 2px solid var(--wood-edge);
+  box-shadow: 0 3px 0 var(--nail), 0 0 14px rgba(240, 176, 90, 0.45);
+  transform: translateX(2px);
+  font-weight: 700;
+}
+
+.garage-list button[aria-pressed="true"] .garage-name::before {
+  content: "\2713  ";
+  font-weight: 700;
+}
+
+.garage-list button[aria-pressed="true"] .garage-note {
+  color: var(--ink-muted);
+}
+
+.garage-list button[aria-pressed="true"] .garage-stat i {
+  background: rgba(42, 26, 12, 0.22);
+}
+
+.garage-list button[aria-pressed="true"] .garage-stat i.on {
+  background: var(--ink);
+}
+
+.garage-list button[aria-pressed="true"] .garage-medal,
+.garage-list button[aria-pressed="true"] .roster-state {
+  border-color: rgba(42, 26, 12, 0.35);
+  color: var(--ink);
+  background: rgba(255, 255, 255, 0.22);
+}
+
+.garage-name {
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.garage-note {
+  grid-column: 1 / -1;
+  color: var(--muted);
+  font-size: 10px;
+  letter-spacing: 0.04em;
+}
+
+.garage-stat {
+  grid-column: 1 / -1;
+  display: flex;
+  gap: 3px;
+}
+
+.garage-stat i {
+  width: 6px;
+  height: 10px;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.14);
+}
+
+.garage-stat i.on {
+  background: var(--ok);
+}
+
+.garage-medal {
+  font-size: 9.5px;
+  letter-spacing: 0.12em;
+  padding: 2px 7px;
+  border-radius: 4px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: var(--muted);
+}
+
+.garage-medal[data-medal="gold"] {
+  color: #f5c542;
+  border-color: rgba(245, 197, 66, 0.5);
+}
+
+.garage-medal[data-medal="silver"] {
+  color: #d8dde3;
+  border-color: rgba(216, 221, 227, 0.5);
+}
+
+.garage-medal[data-medal="bronze"] {
+  color: #d1762e;
+  border-color: rgba(209, 118, 46, 0.5);
+}
+
+.garage-foot {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  align-items: center;
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.race-cup {
+  background: linear-gradient(#f0d060, #d8b12b);
+}
+
+.garage-cup {
+  vertical-align: middle;
+  margin-left: 8px;
+  font-size: 9px;
+}
+
+.race-note {
+  margin: 8px 0 0;
+  color: var(--accent);
+  font-size: 10.5px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.race-standings-head {
+  margin: 12px 0 0;
+  color: var(--accent);
+  font-size: 10.5px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.race-standings li {
+  padding: 4px 0;
+}
+
+.race-results .actions {
+  grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+}
+
+.garage-foot .help {
+  margin: 0;
+}
+
+.race-go {
+  width: auto;
+  margin: 0;
+  padding: 0 26px;
+  font-size: 18px;
+}
+
+/* In-race readouts in the top corners, under the topbar */
+.race-strip {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.race-hud {
+  position: absolute;
+  top: calc(74px + var(--safe-top));
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 14px;
+  background: var(--tablet);
+  border: 2px solid var(--stone-dk);
+  border-radius: 9px 7px 10px 8px;
+  box-shadow: var(--tablet-shadow);
+  color: var(--paper);
+  white-space: nowrap;
+}
+
+.race-hud-left {
+  left: calc(16px + var(--safe-left));
+}
+
+.race-hud-right {
+  right: calc(16px + var(--safe-right));
+}
+
+.race-rank {
+  display: flex;
+  align-items: baseline;
+  gap: 2px;
+}
+
+.race-rank b {
+  font-size: 30px;
+  line-height: 1;
+  color: var(--accent);
+}
+
+.race-rank span {
+  font-size: 12px;
+  color: var(--accent);
+}
+
+.race-rank small,
+.race-lap small {
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.race-lap {
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+}
+
+.race-lap span,
+.race-speed span {
+  color: var(--muted);
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.race-lap b {
+  font-size: 20px;
+  line-height: 1;
+}
+
+.race-time {
+  min-width: 8ch;
+  font-size: 15px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.race-item {
+  width: 44px;
+  height: 44px;
+  display: grid;
+  place-items: center;
+  border: 2px solid var(--stone-dk);
+  border-radius: 7px 6px 8px 6px;
+  background: rgba(0, 0, 0, 0.35);
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+  text-align: center;
+}
+
+.race-item[data-item="rock"],
+.race-item[data-item="peel"],
+.race-item[data-item="turbo"],
+.race-item[data-item="shout"] {
+  border-color: var(--accent);
+  color: var(--paper);
+  box-shadow: 0 0 12px rgba(216, 137, 43, 0.35);
+}
+
+.race-boost {
+  width: 90px;
+  height: 10px;
+  border-radius: 999px;
+  overflow: hidden;
+  background: rgba(0, 0, 0, 0.45);
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.6);
+}
+
+.race-boost-fill {
+  display: block;
+  width: 0%;
+  height: 100%;
+  background: linear-gradient(90deg, #f5c542, #ffb13b);
+}
+
+.race-boost-fill.full {
+  background: linear-gradient(90deg, #79d8ff, #fff);
+}
+
+.race-speed {
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+}
+
+.race-speed b {
+  min-width: 2ch;
+  font-size: 18px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Countdown and lap calls in the middle of the screen */
+.race-center {
+  position: absolute;
+  left: 50%;
+  top: 34%;
+  transform: translate(-50%, -50%);
+  font-size: 64px;
+  font-weight: 700;
+  color: var(--paper);
+  text-shadow: 0 4px 0 rgba(0, 0, 0, 0.6), 0 0 24px rgba(216, 137, 43, 0.6);
+  letter-spacing: 0.1em;
+  pointer-events: none;
+}
+
+.race-notice {
+  position: absolute;
+  left: 50%;
+  top: calc(84px + var(--safe-top));
+  transform: translateX(-50%);
+  padding: 6px 14px;
+  border: 2px solid var(--wood-edge);
+  border-radius: 6px;
+  background: var(--planks);
+  color: var(--paper);
+  font-size: 12px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  box-shadow: 0 3px 0 rgba(0, 0, 0, 0.4);
+  pointer-events: none;
+}
+
+.race-item-btn {
+  left: auto;
+  right: calc(24px + var(--safe-right));
+  transform: none;
+}
+
+.race-results,
+.race-pause {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: min(420px, calc(100vw - 32px));
+  padding: 16px 18px 18px;
+  border: 3px solid var(--wood-edge);
+  border-radius: var(--radius);
+  background: var(--planks);
+  box-shadow: 0 6px 0 rgba(0, 0, 0, 0.35), 0 10px 30px rgba(0, 0, 0, 0.35);
+  color: var(--paper);
+}
+
+.race-podium {
+  margin: 12px 0 0;
+  padding: 2px 10px;
+  background: var(--tablet);
+  border: 2px solid var(--stone-dk);
+  border-radius: 9px 7px 10px 8px;
+  box-shadow: var(--tablet-shadow);
+  list-style: none;
+  counter-reset: place;
+}
+
+.race-podium li {
+  display: grid;
+  grid-template-columns: 2ch 1fr auto;
+  gap: 10px;
+  padding: 7px 0;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.35);
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.04);
+  font-variant-numeric: tabular-nums;
+}
+
+.race-podium li:last-child {
+  border-bottom: 0;
+  box-shadow: none;
+}
+
+.race-podium li::before {
+  counter-increment: place;
+  content: counter(place);
+  color: var(--accent);
+  font-weight: 700;
+}
+
+.race-podium li.you {
+  color: #f5c542;
+}
+
+.race-pause .actions {
+  grid-template-columns: 1fr 1fr;
+}
+
 [hidden] {
   display: none !important;
 }
@@ -1093,8 +1600,8 @@ select {
   }
 
   /* The open sheet takes the sticks with it */
-  .sheet[data-open="true"] ~ .joysticks,
-  .sheet[data-open="true"] ~ .act {
+  .sheet[data-open="true"]~.joysticks,
+  .sheet[data-open="true"]~.act {
     display: none;
   }
 
@@ -1109,6 +1616,12 @@ select {
     border-bottom: 0;
     border-radius: 8px 8px 0 0;
     background: linear-gradient(var(--plank), var(--wood));
+  }
+
+  .sheet-toggle-bananas {
+    margin: 0 0 0 -104px;
+    height: 42px;
+    padding: 4px 18px 0;
   }
 
   .tabs button {
@@ -1146,6 +1659,61 @@ select {
   .act {
     bottom: calc(112px + var(--safe-bottom));
   }
+
+  .garage {
+    max-height: calc(100% - 90px - var(--safe-top) - var(--safe-bottom));
+    padding: 10px 12px 12px;
+  }
+
+  .garage-columns {
+    grid-template-columns: 1fr;
+    gap: 8px;
+  }
+
+  .garage-foot {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .garage-foot .help {
+    display: none;
+  }
+
+  .race-hud {
+    top: calc(100px + var(--safe-top));
+    gap: 8px;
+    padding: 6px 10px;
+  }
+
+  .garage-list button {
+    min-height: 34px;
+    margin: 2px 0;
+    padding: 4px 8px;
+  }
+
+  .garage-head .help {
+    display: none;
+  }
+
+  .race-hud-left {
+    left: calc(10px + var(--safe-left));
+  }
+
+  .race-hud-right {
+    right: calc(10px + var(--safe-right));
+  }
+
+  .race-speed,
+  .race-time {
+    display: none;
+  }
+
+  .race-center {
+    font-size: 44px;
+  }
+
+  .race-item-btn {
+    bottom: calc(112px + var(--safe-bottom));
+  }
 }
 
 @media (max-height: 500px) and (orientation: landscape) {
@@ -1179,7 +1747,13 @@ select {
   }
 
   .presets {
-    grid-column: auto;
+    grid-column: 3;
+  }
+
+  .sheet-toggle-bananas {
+    margin: 0 0 0 -104px;
+    height: 42px;
+    padding: 4px 18px 0;
   }
 
   .toast,
@@ -1208,6 +1782,37 @@ select {
     right: calc(440px + var(--safe-right));
     bottom: calc(96px + var(--safe-bottom));
     transform: none;
+  }
+
+  .race-item-btn {
+    right: calc(330px + var(--safe-right));
+  }
+
+  .race-hud {
+    top: calc(64px + var(--safe-top));
+  }
+
+  .garage {
+    top: calc(58px + var(--safe-top));
+    transform: translateX(-50%);
+    max-height: calc(100% - 66px - var(--safe-top));
+    padding: 8px 12px 10px;
+  }
+
+  .garage-head .help,
+  .garage-foot .help {
+    display: none;
+  }
+
+  .garage-foot {
+    grid-template-columns: auto auto;
+    justify-content: end;
+  }
+
+  .garage-list button {
+    min-height: 32px;
+    margin: 2px 0;
+    padding: 3px 8px;
   }
 
   .toast.show,

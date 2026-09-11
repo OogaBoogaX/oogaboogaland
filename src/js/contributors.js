@@ -8,7 +8,7 @@
     ["w-s-bitcoin", 1788178261],
     ["dplusplus1024", 1788153655],
     ["bc1gui", 1788190400],
-    ["RandyMcMillan", 1788019011],
+    ["RandyMcMillan", 1788210011],
     ["MrHodlX", 1788200000],
     ["timechainb", 1788171200]
   ].map(([name, unixSeconds]) => ({ name, lastCommitAt: unixSeconds * 1e3 }));
@@ -33,6 +33,7 @@
     MrHodlX: { gasMask: true },
     dplusplus1024: { build: "slim", hair: "#b9dcaa" },
     bc1gui: { skater: true, skin: "#f2a33c", hair: "#e4561f", fur: "#8f4f17" },
+    RandyMcMillan: { bee: true, skin: "#f3b52a", hair: "#151515" },
     timechainb: { anunnaki: true, skin: "#b8703c", hair: "#33200f" }
   };
   const SKINS = ["#c98a5b", "#a9744c", "#8a5a3a", "#d9a06b", "#b58057"];
@@ -54,6 +55,7 @@
       symmetricTusks: !!likeness.symmetricTusks,
       skater: !!likeness.skater,
       anunnaki: !!likeness.anunnaki,
+      bee: !!likeness.bee,
       skin: likeness.skin || skin,
       hair: likeness.hair || hashedHair,
       fur: likeness.fur || FURS[Math.floor(rand() * FURS.length)],

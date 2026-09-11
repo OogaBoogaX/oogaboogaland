@@ -85,6 +85,7 @@
       hint: $("hint"),
       sheet: $("sheet"),
       sheetToggle: $("sheet-toggle"),
+      sheetBananas: $("sheet-bananas"),
       tabs: [...document.querySelectorAll("[data-tab]")],
       panels: [...document.querySelectorAll("[data-panel]")],
       presets: [...document.querySelectorAll("[data-preset]")],
@@ -213,10 +214,15 @@
         else selectTab(t.dataset.tab);
       });
     }
-    on(el.sheetToggle, "click", () => {
+    // Each pull tab opens straight onto its panel, and folds the sheet when that panel is already showing
+    const pull = (name) => {
       window.clearTimeout(introTimer);
-      el.sheet.dataset.open = el.sheet.dataset.open === "true" ? "false" : "true";
-    });
+      const showing = el.sheet.dataset.open === "true" && el.tabs.some((t) => t.dataset.tab === name && t.getAttribute("aria-selected") === "true");
+      if (showing) el.sheet.dataset.open = "false";
+      else selectTab(name);
+    };
+    on(el.sheetToggle, "click", () => pull("roster"));
+    on(el.sheetBananas, "click", () => pull("bananas"));
     on(el.sheet, "pointerdown", () => window.clearTimeout(introTimer));
     if (introTimer === 0) introTimer = window.setTimeout(() => {
       el.sheet.dataset.open = "false";

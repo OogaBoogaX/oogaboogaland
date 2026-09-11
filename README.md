@@ -17,6 +17,9 @@ Open `src/index.html` in a browser, or serve `src/` with any static server.
 
 The page lands on the hub: a floating island whose cliff caves are the projects. Tap the
 lit cave to enter EntropyLab; **Escape** or the **Leave cave** button brings you back.
+The 9 o'clock cave is **Ooga Rally**, a kart race the size of a world: pick an Ooga, a
+ride (on foot, a Rock Kart or a Dino) and one of three tracks (Banana Bay, Lava Gorge,
+Frost Peak), then race the crew over three laps.
 
 The island keeps your local date and time. The sun, moon, stars, sky, light and shadows
 move continuously through dawn, morning, noon, dusk, night and midnight; the torches, the fire pit and the sign lanterns light at dusk,
@@ -31,11 +34,22 @@ the Ooga! button) eats from the pile, pokes a neighbour, shakes a tree, rustles 
 rolls a die or flips a card, and walking into the lit cave enters it. **Escape** lets go. Lost? **0** or the **Reset view** button
 brings the camera home.
 
+In Ooga Rally, **W** or **Up** accelerates, **S** or **Down** brakes and reverses, **A D**
+or **Left Right** steer, **Space** held drifts (release for a boost, tap to hop), **E** or
+**Shift** throws the item, **Q** looks back, **0** resets the camera behind you, **M**
+mutes the synthesized sound and **Escape** pauses. Bananas on the track fill a turbo meter; crates hand out a Rock, a Peel,
+a Turbo or an Ooga Shout. On a phone the left stick steers with the throttle held, **Drift**
+and **Throw** buttons do the rest. Best times and medals are kept per track in your browser.
+Finish on the podium and **Next track** takes you to the following track; **Cup** races
+all three in a row for points and a saved cup medal. Now and then a race loads in the rain
+(snow on Frost Peak) and the tarmac gets slick; the sound is synthesized in the browser,
+nothing is downloaded.
+
 Keys: **B** add 100 test bananas, **J** give the controlled Ooga a jetpack, **L** legendary
 tip, **P** fill the pile, **1** to **9** force a contributor to eating, **Escape** leave a
 cave or let go, **Shift+R** reset the demo.
 
-URL flags: `?scene=lab` opens the lab directly, `?nosim=1` silences simulated tips,
+URL flags: `?scene=lab` opens the lab directly and `?scene=race` the rally garage, `?nosim=1` silences simulated tips,
 `?canvas2d=1` forces the Canvas 2D fallback, `?yaw=1.2` sets the starting camera angle,
 `?debug=1` exposes `window.__ooga`. In debug mode, add `&bananas=10000` (or another
 non-negative amount) to preview the pile at that starting level without changing saved state,

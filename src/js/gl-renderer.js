@@ -3,7 +3,7 @@
   const BL = window.BL = window.BL || {};
   const { mat4 } = BL.math;
   const { updateWorld, traverseVisible, boundsOf } = BL.scene;
-  const POINT_LIGHT_CAPACITY = 7;
+  const POINT_LIGHT_CAPACITY = 10;
   const QUALITY = {
     high: { dpr: 1.5, msaa: 4, shadow: 2048, bloom: true, mirror: 512, lights: POINT_LIGHT_CAPACITY },
     medium: { dpr: 1.25, msaa: 2, shadow: 1024, bloom: true, mirror: 384, lights: POINT_LIGHT_CAPACITY },
@@ -20,10 +20,12 @@
   const DEFAULT_SHADOW_CENTER = { x: 0, y: 1.5, z: 0 };
   const DEFAULT_MOON = { x: 0, y: -1, z: 0 };
   const DEFAULT_STAR_MATRIX = new Float32Array([1, 0, 0, 0, 1, 0, 0, 0, 1]);
-  const CULL_MARGIN = 0.5;
+  const CULL_MARGIN = 1;
   const UP = { x: 0, y: 1, z: 0 };
   const NORTH_UP = { x: 0, y: 0, z: -1 };
   const ZERO4 = new Float32Array([0, 0, 0, 1]);
+  const NO_FOG = new Float32Array(3);
+  const FOG_OFF = 1e8;
   const LIGHT_EYE = { x: 0, y: 0, z: 0 };
   const MESH_STRIDE = 10;
   const LINE_STRIDE = 12;
@@ -79,8 +81,11 @@ uniform float uShadowFloor;
 uniform float uShadowBias;
 uniform sampler2DShadow uShadow;
 uniform float uShadowTexel;
-uniform vec4 uLights[16];
+uniform vec4 uLights[20];
 uniform int uLightCount;
+uniform vec3 uEye;
+uniform vec3 uFog;
+uniform vec2 uFogRange;
 layout(location=0) out vec4 oColor;
 layout(location=1) out vec4 oBright;
 float shadowAt(vec3 p, float bias) {
@@ -104,7 +109,7 @@ void main() {
   vec3 ambient = max(mix(uGround, uSky, n.y * 0.5 + 0.5), vec3(uAmbientFloor));
   float shadow = mix(1.0, max(sh, uShadowFloor), uShadowStrength);
   vec3 lit = base * (ambient + uSun * ndl * uDirectStrength * shadow);
-  for (int i = 0; i < 7; i++) {
+  for (int i = 0; i < 10; i++) {
     if (i >= uLightCount) break;
     vec4 lp = uLights[i * 2];
     vec3 ld = lp.xyz - vWorld;
@@ -117,8 +122,9 @@ void main() {
   col = mix(col, vec3(1.0, 0.86, 0.45), vParams.y * 0.4);
   float tip = clamp(vParams.z, 0.0, 1.0);
   col = mix(col, vec3(0.84, 1.0, 0.89), tip * 0.88);
-  oColor = vec4(col, 1.0);
-  oBright = vec4(col * (emissive * 0.9 + vParams.y * 0.5 + tip * 0.85), 1.0);
+  float fog = smoothstep(uFogRange.x, uFogRange.y, distance(vWorld, uEye));
+  oColor = vec4(mix(col, uFog, fog), 1.0);
+  oBright = vec4(col * (emissive * 0.9 + vParams.y * 0.5 + tip * 0.85) * (1.0 - fog), 1.0);
 }`;
   const SHADOW_VS = `#version 300 es
 precision highp float;
@@ -410,7 +416,7 @@ void main() {
       ready = false;
       failure = null;
       res.programs = {
-        mesh: compile(MESH_VS, MESH_FS, ["uViewProj", "uLightViewProj", "uEye", "uLightDir", "uSky", "uGround", "uSun", "uDirectStrength", "uAmbientFloor", "uDiffuseFloor", "uShadowStrength", "uShadowFloor", "uShadowBias", "uShadow", "uShadowTexel", "uLights", "uLightCount"]),
+        mesh: compile(MESH_VS, MESH_FS, ["uViewProj", "uLightViewProj", "uEye", "uLightDir", "uSky", "uGround", "uSun", "uDirectStrength", "uAmbientFloor", "uDiffuseFloor", "uShadowStrength", "uShadowFloor", "uShadowBias", "uShadow", "uShadowTexel", "uLights", "uLightCount", "uFog", "uFogRange"]),
         shadow: compile(SHADOW_VS, SHADOW_FS, ["uLightViewProj"]),
         line: compile(LINE_VS, LINE_FS, ["uViewProj", "uViewport", "uWidth"]),
         sky: compile(QUAD_VS, SKY_FS, ["uInvViewProj", "uEye", "uHorizon", "uZenith", "uSun", "uSunDir", "uMoonDir", "uStarMatrix", "uStars", "uTime"]),
@@ -991,7 +997,7 @@ void main() {
       gl.depthMask(true);
       gl.depthFunc(gl.LESS);
     };
-    const renderMirrorCapture = (clear, sky, ground, direct, directStrength, ambientFloor, diffuseFloor, shadowStrength, shadowFloor, shadowBias, lx, ly, lz, sh, lights, lightCount, skyOn) => {
+    const renderMirrorCapture = (clear, sky, ground, direct, directStrength, ambientFloor, diffuseFloor, shadowStrength, shadowFloor, shadowBias, lx, ly, lz, sh, lights, lightCount, skyOn, fog, fogNear, fogFar) => {
       ensureMirrorTarget();
       const pg = res.programs;
       gl.bindFramebuffer(gl.FRAMEBUFFER, mirror.msFb || mirror.fb);
@@ -1018,6 +1024,8 @@ void main() {
       gl.uniform1i(pg.mesh.u.uShadow, 0);
       if (lights) gl.uniform4fv(pg.mesh.u.uLights, lights);
       gl.uniform1i(pg.mesh.u.uLightCount, lightCount);
+      gl.uniform3fv(pg.mesh.u.uFog, fog);
+      gl.uniform2f(pg.mesh.u.uFogRange, fogNear, fogFar);
       drawParts("mesh", "mesh", true);
       if (skyOn) drawSky(mirrorInvViewProj, mirrorEye);
       gl.useProgram(pg.line.prog);
@@ -1096,8 +1104,12 @@ void main() {
         starMatrix = DEFAULT_STAR_MATRIX,
         time = 0,
         lights,
-        lightCount = 0
+        lightCount = 0,
+        fog = null,
+        fogNear = 0,
+        fogFar = 0
       } = opts;
+      const fogColor = fog || NO_FOG, fogA = fog ? fogNear : FOG_OFF, fogB = fog ? fogFar : FOG_OFF + 1;
       if (canvas.clientWidth !== width || canvas.clientHeight !== height) resize();
       const f = res.fbo, sh = res.shadow, pg = res.programs;
       const skyOn = !!(horizon && zenith);
@@ -1171,7 +1183,7 @@ void main() {
         } else if (prepareMirrorCamera(camera)) {
           if (settings !== QUALITY.high && mirror.frame % 2 === 0) skipMirrorPass("cadence");
           else if (!ensureMirrorProgram()) skipMirrorPass("shader-pending");
-          else renderMirrorCapture(clear, sky, ground, direct, directStrength, ambientFloor, diffuseFloor, shadowStrength, shadowFloor, shadowBias, lx, ly, lz, sh, lights, nLights, skyOn);
+          else renderMirrorCapture(clear, sky, ground, direct, directStrength, ambientFloor, diffuseFloor, shadowStrength, shadowFloor, shadowBias, lx, ly, lz, sh, lights, nLights, skyOn, fogColor, fogA, fogB);
         }
       }
       gl.bindFramebuffer(gl.FRAMEBUFFER, f.scene);
@@ -1199,6 +1211,8 @@ void main() {
       gl.uniform1i(pg.mesh.u.uShadow, 0);
       if (lights) gl.uniform4fv(pg.mesh.u.uLights, lights);
       gl.uniform1i(pg.mesh.u.uLightCount, nLights);
+      gl.uniform3fv(pg.mesh.u.uFog, fogColor);
+      gl.uniform2f(pg.mesh.u.uFogRange, fogA, fogB);
       drawParts("mesh", "mesh", true, true);
       drawMirrorSurface();
       if (skyOn) drawSky(invViewProj, camera.position);

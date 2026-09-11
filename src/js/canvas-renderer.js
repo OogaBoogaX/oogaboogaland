@@ -86,6 +86,9 @@
     let eye = { x: 0, y: 0, z: 0 }, near = 0.2;
     const lightDir = new Float32Array([0, 1, 0]);
     let directStrength = 1, ambientFloor = 0.3, diffuseFloor = 0, skyLuma = 0.5, groundLuma = 0.2;
+    // Distance fog toward a colour, off until a frame passes one
+    const fogRgb = [0, 0, 0];
+    let fogNear = 1e8, fogFar = 1e8 + 1;
     const shadeNode = (node) => {
       const { verts, faces, lines } = node.geometry;
       const w = node.world;
@@ -143,9 +146,10 @@
           k = lerp(k, 1.3, node.highlight * 0.4);
           const c = face.color;
           const tip = node.tip || 0;
-          const red = lerp(c[0] * k, 214, tip * 0.88);
-          const green = lerp(c[1] * k, 255, tip * 0.88);
-          const blue = lerp(c[2] * k, 227, tip * 0.88);
+          const fog = Math.min(1, Math.max(0, (-rec.depth - fogNear) / (fogFar - fogNear)));
+          const red = lerp(lerp(c[0] * k, 214, tip * 0.88), fogRgb[0], fog);
+          const green = lerp(lerp(c[1] * k, 255, tip * 0.88), fogRgb[1], fog);
+          const blue = lerp(lerp(c[2] * k, 227, tip * 0.88), fogRgb[2], fog);
           rec.style = rec.mirror ? mirrorStyle : `rgb(${Math.min(255, Math.round(red))},${Math.min(255, Math.round(green))},${Math.min(255, Math.round(blue))})`;
         }
       }
@@ -196,7 +200,17 @@
       }
     };
     const render = (root, camera, opts = {}) => {
-      const { light = DEFAULT_LIGHT, directStrength: strength = 1, ambientFloor: ambient = 0.3, diffuseFloor: diffuse = 0, clear = null, sky = DEFAULT_SKY, ground = DEFAULT_GROUND, horizon = null, zenith = null } = opts;
+      const { light = DEFAULT_LIGHT, directStrength: strength = 1, ambientFloor: ambient = 0.3, diffuseFloor: diffuse = 0, clear = null, sky = DEFAULT_SKY, ground = DEFAULT_GROUND, horizon = null, zenith = null, fog = null, fogNear: near0 = 0, fogFar: far0 = 0 } = opts;
+      if (fog) {
+        fogRgb[0] = fog[0] * 255;
+        fogRgb[1] = fog[1] * 255;
+        fogRgb[2] = fog[2] * 255;
+        fogNear = near0;
+        fogFar = Math.max(far0, near0 + 1);
+      } else {
+        fogNear = 1e8;
+        fogFar = 1e8 + 1;
+      }
       if (!fixedW && (canvas.clientWidth !== width || canvas.clientHeight !== height)) resize();
       const gradientSky = !!(horizon && zenith);
       if (gradientSky) buildSky(horizon, zenith);
