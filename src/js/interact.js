@@ -249,6 +249,10 @@
     return {
       add, remove, pick, groundPoint, update, dispose, get targetCount() {
         return targets.length;
+      },
+      // A drag is still held, even if it has paused
+      get orbiting() {
+        return !!gesture && (gesture.mode === "orbit" || gesture.mode === "chord");
       }
     };
   };

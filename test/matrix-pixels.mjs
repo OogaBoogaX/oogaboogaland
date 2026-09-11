@@ -296,6 +296,13 @@ export const matrixCaveSnapshot = () => {
         for (let axis = 0; axis < 3; axis++) { const direction = sr * data[o + axis * 4] + cr * data[o + axis * 4 + 2]; extent += Math.max(direction * bounds.min[axis], direction * bounds.max[axis]); }
         maxLocalZ = Math.max(maxLocalZ, sr * (x - m.x) + cr * (z - m.z) + extent);
         const plane = nx * x + ny * y + nz * z - 0.015, candidates = byPlane.get(key(nx, ny, nz, plane)) || [];
+        // Instance transforms live in Float32 buffers. A value on a four-decimal
+        // rounding boundary can land in the neighbouring key while remaining on
+        // the same physical source plane, so recover only that narrowly matching
+        // plane before applying the full polygon/constraint support proof below.
+        if (!candidates.length) for (const section of cave.sections) {
+          if (Math.abs(section.nx - nx) < 0.00001 && Math.abs(section.ny - ny) < 0.00001 && Math.abs(section.nz - nz) < 0.00001 && Math.abs(section.plane - plane) < 0.00002) candidates.push(section);
+        }
         let backed = false;
         for (const section of candidates) {
           const u = section.ux * x + section.uy * y + section.uz * z, v = section.vx * x + section.vy * y + section.vz * z;

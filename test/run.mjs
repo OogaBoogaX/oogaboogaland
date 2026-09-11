@@ -32,13 +32,14 @@ const record = (name, ok, detail = "") => {
 };
 const withPage = async (name, url, fn, opts = {}) => {
   const b = await launch(opts);
+  const started = Date.now();
   try {
     await b.open(url);
     await b.focus(true);
     await b.sleep(opts.wait || 2500);
     await fn(b);
     const noise = b.logs.filter((l) => !l.includes("WebGL2 renderer failed"));
-    record(`${name}: clean console`, noise.length === 0, noise.join(" | ").slice(0, 200));
+    record(`${name}: clean console`, noise.length === 0, `${((Date.now() - started) / 1000).toFixed(1)}s ${noise.join(" | ").slice(0, 200)}`);
   } catch (err) {
     record(name, false, String(err.message || err).slice(0, 200));
   } finally {
@@ -493,7 +494,7 @@ const mirrorCanvas = () => withPage("mirror canvas fallback", hubPage(src, "canv
   const canvasLights = await b.evaluate(`(() => { const B = window.__ooga; return { count: B.entranceLights.length, registered: B.entranceLights.every((l) => l.registered), lit: B.entranceLights.every((l) => l.lit && l.factor > 0.9), pointLights: B.renderOpts.lightCount, lighting: { registered: B.lighting.registeredLampCount, active: B.lighting.activeFullLightCount, approximated: B.lighting.approximatedLightCount, capacity: B.lighting.configuredLightCapacity, ids: B.lighting.approximatedIds.slice(0, B.lighting.approximatedCount), tier: B.lighting.tier } }; })()`);
   record("entrance lights: Canvas fallback draws all emissive fixtures without point-light resources", canvasLights.count === 9 && canvasLights.registered && canvasLights.lit && canvasLights.pointLights === 0 && canvasLights.lighting.registered === 10 && canvasLights.lighting.active === 0 && canvasLights.lighting.approximated === 10 && canvasLights.lighting.capacity === 0 && canvasLights.lighting.ids.length === 10 && canvasLights.lighting.tier === "canvas2d", JSON.stringify(canvasLights));
   record("dynamic path: Canvas fallback renders the same immutable million-banana network", r.path.active && r.path.inner === 7.25 && r.path.outer === 8.75 && r.path.count > 0 && r.path.count <= r.path.capacity && r.path.masterMaskBuildCount === 1 && r.path.masterMaskHash === pathMasterHash, JSON.stringify(r.path));
-  record("dynamic scenery: Canvas fallback starts large with the same deterministic registry", r.scenery.candidateCount === 376 && r.scenery.visibleCount > 0 && r.scenery.signature === scenerySignature, JSON.stringify({ candidateCount: r.scenery.candidateCount, visibleCount: r.scenery.visibleCount, radiusCulledCount: r.scenery.radiusCulledCount, pathCulledCount: r.scenery.pathCulledCount }));
+  record("dynamic scenery: Canvas fallback starts large with the same deterministic registry", r.scenery.candidateCount === 369 && r.scenery.visibleCount > 0 && r.scenery.signature === scenerySignature, JSON.stringify({ candidateCount: r.scenery.candidateCount, visibleCount: r.scenery.visibleCount, radiusCulledCount: r.scenery.radiusCulledCount, pathCulledCount: r.scenery.pathCulledCount }));
   await b.evaluate(`window.__ooga.matrixCave.viewApproach()`);
   await matrixSettled(b, false);
   const canvasExterior = await b.evaluate(`(${matrixSurfaceSnapshot.toString()})()`);
@@ -755,7 +756,7 @@ const dynamicPaths = () => withPage("dynamic paths", hubPage(src, "bananas=1000&
 
   const scenery = await b.evaluate(`(() => { const B = window.__ooga, kinds = ["flower", "bush", "tree", "crate", "barrel", "rock"], candidates = B.props.filter((o) => o.scenery), transforms = new Map(candidates.map((o) => [o, [o.x, o.z, o.node.position.y, o.node.rotation.y]])); const sample = (level) => { B.setPileLevel(level); const active = candidates.filter((o) => o.active), byKind = Object.fromEntries(kinds.map((kind) => [kind, active.filter((o) => o.prop === kind).length])); let radiusViolations = 0, pathViolations = 0; for (const o of active) { if (Math.hypot(o.x, o.z) - o.footprint < B.scenery.clearanceRadius - 1e-8) radiusViolations++; if (B.island.path.overlaps(o.x, o.z, o.footprint)) pathViolations++; } return { level, debug: { ...B.scenery }, byKind, radiusViolations, pathViolations, targets: B.input.targetCount, active }; }; const small = sample(1000), medium = sample(10000), large = sample(1000000), crossed = candidates.find((o) => small.active.includes(o) && !o.active), hidden = crossed && { active: crossed.active, visible: crossed.node.visible, transform: transforms.get(crossed) }; sample(1000); const restored = crossed && { active: crossed.active, visible: crossed.node.visible, sameTransform: transforms.get(crossed).every((v, i) => v === [crossed.x, crossed.z, crossed.node.position.y, crossed.node.rotation.y][i]), targets: B.input.targetCount }; B.jetpack.forceHost(crossed); const oldHost = crossed; const forcedTargets = B.input.targetCount; const rehoused = sample(1000000), host = B.jetpack.stash, pickup = B.jetpack.pickup, jetSafe = host ? host !== oldHost && host.active : !!pickup && Math.hypot(pickup.x, pickup.z) - 1 >= B.scenery.clearanceRadius - 1e-8 && !B.island.path.overlaps(pickup.x, pickup.z, 1); const signature = candidates.map((o) => [o.prop, o.x, o.z, o.node.rotation.y].join(":" )).join("|"); return { small: { ...small, active: undefined }, medium: { ...medium, active: undefined }, large: { ...large, active: undefined }, rehoused: { ...rehoused, active: undefined }, hidden, restored, forcedTargets, jetSafe, oldHostActive: oldHost.active, newHost: host && { prop: host.prop, active: host.active }, pickup: !!pickup, candidateCount: candidates.length, signature }; })()`);
   scenerySignature = scenery.signature;
-  record("dynamic scenery: representative meadow props return outside the 1K ring", scenery.candidateCount === 226 && Object.values(scenery.small.byKind).every((count) => count > 0) && scenery.small.debug.visibleCount > 0, JSON.stringify({ candidates: scenery.candidateCount, visible: scenery.small.debug.visibleCount, kinds: scenery.small.byKind }));
+  record("dynamic scenery: representative meadow props return outside the 1K ring", scenery.candidateCount === 219 && Object.values(scenery.small.byKind).every((count) => count > 0) && scenery.small.debug.visibleCount > 0, JSON.stringify({ candidates: scenery.candidateCount, visible: scenery.small.debug.visibleCount, kinds: scenery.small.byKind }));
   record("dynamic scenery: visible footprints clear the ring and path at 1K, 10K and 1M", [scenery.small, scenery.medium, scenery.large].every((s) => s.radiusViolations === 0 && s.pathViolations === 0 && s.debug.visibleCount + s.debug.radiusCulledCount + s.debug.pathCulledCount + s.debug.fixedCulledCount === s.debug.candidateCount), JSON.stringify({ small: scenery.small, medium: scenery.medium, large: scenery.large }));
   record("dynamic scenery: growth hides and unregisters crossed props, then shrink restores them exactly once", scenery.hidden && !scenery.hidden.active && !scenery.hidden.visible && scenery.large.targets < scenery.small.targets && scenery.restored.active && scenery.restored.visible && scenery.restored.sameTransform && scenery.restored.targets === scenery.small.targets && scenery.forcedTargets === scenery.small.targets, JSON.stringify({ hidden: scenery.hidden, restored: scenery.restored, targets: [scenery.small.targets, scenery.large.targets, scenery.restored.targets] }));
   record("dynamic scenery: an unsafe jetpack host is deterministically replaced by a safe one", !scenery.oldHostActive && scenery.jetSafe && (!!scenery.newHost || scenery.pickup), JSON.stringify({ oldHostActive: scenery.oldHostActive, newHost: scenery.newHost, pickup: scenery.pickup, safe: scenery.jetSafe }));
@@ -1304,7 +1305,7 @@ const hubRace = () => withPage("hub race route", hubPage(src), async (b) => {
   await b.click(mouth.x, mouth.y);
   await b.sleep(1600);
   const entered = await b.evaluate(`({ scene: window.__ooga.scene, phase: window.__ooga.race.phase, garage: !document.getElementById("garage").hidden })`);
-  record("hub race route: the Ooga Rally cave is lit, signed and tapping it enters the garage", mouth.kind === "cave" && mouth.slot === "c9" && mouth.status === "open" && mouth.label && mouth.torches === 3 && mouth.wheels === 7 && mouth.shelves === 2 && entered.scene === "race" && entered.phase === "garage" && entered.garage, JSON.stringify({ ...mouth, ...entered }));
+  record("hub race route: the Ooga Rally cave is lit, signed and tapping it enters the garage", mouth.kind === "cave" && mouth.slot === "c9" && mouth.status === "open" && mouth.label && mouth.torches === 3 && mouth.wheels === 9 && mouth.shelves === 2 && entered.scene === "race" && entered.phase === "garage" && entered.garage, JSON.stringify({ ...mouth, ...entered }));
   await b.key("Escape");
   await b.sleep(900);
   const back = await b.evaluate(`(() => { const B = window.__ooga; const c = B.camera; return { scene: B.scene, toPile: +Math.hypot(c.target.x, c.target.z).toFixed(2), raceHidden: document.getElementById("race").hidden, garageBtnHidden: document.getElementById("race-garage-btn").hidden }; })()`);
@@ -1312,12 +1313,222 @@ const hubRace = () => withPage("hub race route", hubPage(src), async (b) => {
   const rejectedRoutes = await b.evaluate(`(${caveRoutingRejections.toString()})()`);
   record("hub cave routes: neither standing above an open cave nor occupying its interior without crossing enters its scene", rejectedRoutes.length === 6 && rejectedRoutes.every((r) => r.scene === "hub") && rejectedRoutes.filter((r) => r.name === "actor-on-roof").every((r) => r.atTrigger && r.actorY >= r.ground && r.actorY > 3 && r.playerIndex === 0) && rejectedRoutes.filter((r) => r.name === "inside-without-crossing").every((r) => r.atTrigger && Math.abs(r.actorY) < 0.001 && r.playerIndex === 0), JSON.stringify(rejectedRoutes));
   record("hub cave routes: an admitted Ooga at an inner trigger cannot route through a camera view above the roof", rejectedRoutes.filter((r) => r.name === "camera-above-admitted-actor").length === 2 && rejectedRoutes.filter((r) => r.name === "camera-above-admitted-actor").every((r) => r.scene === "hub" && r.atTrigger && Math.abs(r.actorY) < 0.001 && r.playerIndex > 0 && r.cameraCavity === r.playerIndex && r.ceiling !== null && r.cameraY >= r.ceiling), JSON.stringify(rejectedRoutes));
-  await b.evaluate(`(() => { const B = window.__ooga; const cave = [...B.cavemen.values()].find((c) => c.state === "working" && !c.walk && !c.build); const m = B.mouths.find((m) => m.id === "c9"); B.crew.control(cave); cave.root.position.x = m.apron.x; cave.root.position.z = m.apron.z; cave.root.position.y = cave.baseY; cave.hop = 0; cave.root.rotation.y = Math.PI - m.angle + Math.PI; B.pilot.orbit.tYaw = B.pilot.orbit.yaw = m.angle + Math.PI; })()`);
+  await b.evaluate(`(() => { const B = window.__ooga; const cave = [...B.cavemen.values()].find((c) => c.state === "working" && !c.walk && !c.build); const m = B.mouths.find((m) => m.id === "c9"), o = B.pilot.orbit; B.crew.control(cave); cave.root.position.x = m.apron.x; cave.root.position.z = m.apron.z; cave.root.position.y = cave.baseY; cave.hop = 0; cave.root.rotation.y = Math.PI - m.angle + Math.PI; o.tYaw = o.yaw = m.angle + Math.PI; o.tPitch = o.pitch = 0.25; o.tDist = o.dist = 4; })()`);
   await b.sleep(300);
   await b.send("Input.dispatchKeyEvent", { type: "keyDown", key: "w", text: "w" });
   const walked = await b.evaluate(`new Promise((resolve) => { const B = window.__ooga; const t0 = performance.now(); const tick = () => { if (B.scene === "race" || performance.now() - t0 > 6000) resolve({ scene: B.scene, ms: Math.round(performance.now() - t0) }); else requestAnimationFrame(tick); }; tick(); })`);
   await b.send("Input.dispatchKeyEvent", { type: "keyUp", key: "w" });
   record("hub race route: walking a driven Ooga into the cave enters the race", walked.scene === "race", JSON.stringify(walked));
+});
+
+// ---------- Ooga Drop ----------
+const dropPage = (base, query) => `${base}?debug=1&nosim=1&scene=drop${clock(query)}`;
+const dropBoard = () => withPage("drop board", dropPage(src), async (b) => {
+  const board = await b.evaluate(`(() => { const B = window.__ooga; const q = (s) => document.querySelectorAll(s).length; const hoop = window.BL.dropModels.hoop(); let hoops = 0; const walk = (n) => { if (n.geometry === hoop) hoops++; for (const c of n.children) walk(c); }; walk(window.BL.scenes.drop.root); return { scene: B.scene, phase: B.drop.phase, oogas: q("#drop-oogas button"), rows: q("#drop-best li"), boardShown: !document.getElementById("drop-board").hidden, stripHidden: document.getElementById("drop-strip").hidden, leaveShown: !document.querySelector('[data-scene="drop"] [data-action="leave"]').hidden, hoops, rings: B.course.rings.length, ringsDescend: B.course.rings.every((r, i, a) => !i || r.y < a[i - 1].y), records: B.renderer.stats.records, targets: B.input.targetCount, sheet: document.getElementById("sheet").dataset.open, seated: B.diver.body.visible && Math.hypot(B.diver.state.p.x - B.plane.node.position.x, B.diver.state.p.z - B.plane.node.position.z) < 1.5, signed: window.BL.scenes.drop.root.children.some((n) => n.geometry === window.BL.dropModels.roofSign() && Math.hypot(n.position.x - B.plane.node.position.x, n.position.z - B.plane.node.position.z) < 4.5), pressed: document.querySelector('#drop-oogas [aria-pressed="true"]').dataset.racer, target: B.course.target, targetOnMeadow: B.island.heightAt(B.course.target.x, B.course.target.z) === 0 }; })()`);
+  record("drop board: the scene lands on the board with seven Oogas, the diver seated in the plane on the roof and ten hoops sharing one geometry", board.scene === "drop" && board.phase === "board" && board.oogas === 7 && board.rows === 4 && board.boardShown && board.stripHidden && board.leaveShown && board.hoops === 8 && board.rings === 8 && board.ringsDescend && board.seated && board.signed && board.pressed === "portlandhodl" && board.sheet === "false" && board.targetOnMeadow && board.records < 40, JSON.stringify(board));
+  const eye = await b.evaluate(`(() => { const c = window.__ooga.camera; return { x: c.position.x, z: c.position.z, y: c.position.y, tx: c.target.x, tz: c.target.z }; })()`);
+  await b.drag({ x: 150, y: 520 }, { x: 350, y: 480 });
+  const swung = await b.evaluate(`(() => { const c = window.__ooga.camera, cam = window.__ooga.drop.cam; return { x: c.position.x, z: c.position.z, y: c.position.y, tx: c.target.x, tz: c.target.z, yaw: cam.boardYaw, lift: cam.boardLift, phase: window.__ooga.drop.phase }; })()`);
+  const radius = (e) => Math.hypot(e.x - e.tx, e.z - e.tz);
+  record("drop board: a drag swings the view round the plane and tilts it", swung.phase === "board" && swung.yaw < -0.5 && swung.lift < 0 && Math.abs(radius(swung) - radius(eye)) < 0.01 && Math.abs(swung.tx - eye.tx) < 1e-6 && Math.hypot(swung.x - eye.x, swung.z - eye.z) > 3 && swung.y < eye.y, JSON.stringify({ eye, swung }));
+  await b.evaluate(`document.querySelector('[data-racer="bc1gui"]').click()`);
+  const picked = await b.evaluate(`(() => { const B = window.__ooga; return { name: B.diver.cave.traits.name, skater: B.diver.cave.traits.skater, targets: B.input.targetCount, phase: B.drop.phase }; })()`);
+  record("drop board: picking an Ooga rebuilds the diver without leaking input targets", picked.name === "bc1gui" && picked.skater && picked.targets === board.targets && picked.phase === "board", JSON.stringify(picked));
+  await b.key("Enter");
+  await b.sleep(1800);
+  const climbing = await b.evaluate(`(() => { const B = window.__ooga, s = B.plane.state, c = B.camera; return { phase: B.drop.phase, t: s.t, alt: s.alt, speed: s.speed, stripShown: !document.getElementById("drop-strip").hidden, boardHidden: document.getElementById("drop-board").hidden, prop: B.plane.prop.rotation.z, seated: Math.hypot(B.diver.state.p.x - B.plane.node.position.x, B.diver.state.p.y - B.plane.node.position.y, B.diver.state.p.z - B.plane.node.position.z) < 3, camBehind: Math.hypot(c.position.x - B.plane.node.position.x, c.position.z - B.plane.node.position.z) < 16, subtitle: document.getElementById("subtitle").textContent }; })()`);
+  record("drop board: Enter starts the climb with the Ooga in the seat, the strip up and the camera chasing the plane", climbing.phase === "climb" && climbing.t > 1 && climbing.alt > 7 && climbing.speed > 8 && climbing.stripShown && climbing.boardHidden && climbing.prop > 3 && climbing.seated && climbing.camBehind && climbing.subtitle.includes("climbing"), JSON.stringify(climbing));
+  await b.key(" ");
+  await b.sleep(150);
+  const early = await b.evaluate(`({ phase: window.__ooga.drop.phase, notice: document.getElementById("drop-notice").textContent })`);
+  await hold(b, " ", 2500);
+  const hurried = await b.evaluate(`(() => { const B = window.__ooga, s = B.plane.state; return { phase: B.drop.phase, t: s.t, alt: s.alt }; })()`);
+  record("drop board: Space before the mark waits, holding it hurries the climb", early.phase === "climb" && early.notice.includes("wait") && hurried.phase === "climb" && hurried.t > 8 && hurried.alt > 60, JSON.stringify({ early, hurried }));
+  const camAt = () => b.evaluate(`(() => { const B = window.__ooga, cam = B.drop.cam; return { phase: B.drop.phase, offset: +cam.offset.toFixed(3), tilt: +cam.tilt.toFixed(3), orbiting: window.BL.scenes.drop.input.orbiting, since: +(B.drop.sceneTime - cam.dragAt).toFixed(2) }; })()`);
+  await b.drag({ x: 300, y: 450 }, { x: 1300, y: 250 }, 20);
+  const swungFar = await camAt();
+  await b.mouse("mouseMoved", 400, 450, { button: "none" });
+  await b.mouse("mousePressed", 400, 450, { buttons: 1 });
+  for (let i = 1; i <= 8; i++) { await b.mouse("mouseMoved", 400 + 30 * i, 450, { buttons: 1 }); await b.sleep(30); }
+  await b.sleep(2000);
+  const heldStill = await camAt();
+  await b.mouse("mouseReleased", 640, 450);
+  await b.sleep(2600);
+  const eased = await camAt();
+  record("drop board: in flight a drag swings the eye more than a quarter turn and tilts it, a held drag keeps it, and it eases back behind the plane 1.5 s after the release", swungFar.phase === "climb" && Math.abs(swungFar.offset) > 1.6 && swungFar.tilt < -0.5 && heldStill.orbiting && Math.abs(heldStill.offset) > 0.5 && heldStill.since < 0.2 && !eased.orbiting && Math.abs(eased.offset) < 0.05 && Math.abs(eased.tilt) < 0.05, JSON.stringify({ swungFar, heldStill, eased }));
+  const mark_ = await b.evaluate(`(() => { const B = window.__ooga; B.drop.simulate(30); const s = B.plane.state; let opened = false; for (let t = 0; t < 14 && !opened; t += 0.1) { B.drop.simulate(0.1); opened = B.drop.jumpOpen; } return { opened, alt: s.alt, laps: (s.angle - B.course.jumpAngle) / (Math.PI * 2) }; })()`);
+  record("drop board: at height the plane circles until the jump window opens on the course start", mark_.opened && mark_.alt > 358 && mark_.alt <= 360.01, JSON.stringify(mark_));
+  await b.key("Escape");
+  await b.sleep(200);
+  const back = await b.evaluate(`(() => { const B = window.__ooga; return { phase: B.drop.phase, boardShown: !document.getElementById("drop-board").hidden, parked: B.plane.state.t === 0 && B.plane.node.position.y === B.plane.state.alt, stripHidden: document.getElementById("drop-strip").hidden }; })()`);
+  record("drop board: Escape in the climb parks the plane back on the roof", back.phase === "board" && back.boardShown && back.parked && back.stripHidden, JSON.stringify(back));
+});
+
+// The diver placed high in still air, with the plane's course out of the way
+const isolateDiver = `(() => { const B = window.__ooga; if (B.drop.phase !== "air") B.drop.jumpNow(); const s = B.diver.state; s.p.x = 0; s.p.y = 900; s.p.z = 0; s.v.x = s.v.z = 0; s.v.y = -20; B.drop.setInput(0, 0, 0, false); return s; })()`;
+const dropPhysics = () => withPage("drop physics", dropPage(src), async (b) => {
+  const snap = `(s) => ({ speed: +s.speed.toFixed(2), h: +Math.hypot(s.v.x, s.v.z).toFixed(2), vy: +s.v.y.toFixed(2), front: Array.from(s.front).map((v) => +v.toFixed(3)), headDir: +Math.atan2(s.up[0], s.up[2]).toFixed(2), hDir: +Math.atan2(s.v.x, s.v.z).toFixed(2), y: +s.p.y.toFixed(1) })`;
+  const fall = await b.evaluate(`(() => { const B = window.__ooga, K = window.BL.skydiver, snap = ${snap}; const s = ${isolateDiver}; B.drop.simulate(6); const flat = snap(s); B.drop.setInput(1, 0, 0, false); B.drop.simulate(5); const dive = snap(s); B.drop.setInput(0, 0, 0, false); B.drop.simulate(5); const back = snap(s); B.drop.setInput(0, 1, 0, false); B.drop.simulate(3); const roll = snap(s); B.drop.setInput(0, 0, 1, false); B.drop.simulate(0.7); const yaw = snap(s); return { flat, dive, back, roll, yaw, terminal: [K.TERMINAL_FLAT, K.TERMINAL_DIVE] }; })()`);
+  record("drop physics: a hands-off diver settles belly down near the flat terminal speed", Math.abs(fall.flat.speed - fall.terminal[0]) < 1.5 && fall.flat.h < 0.5 && fall.flat.front[1] < -0.98, JSON.stringify(fall.flat));
+  record("drop physics: holding pitch tips the head down, speeds the fall and tracks toward the head; releasing settles flat again", fall.dive.speed > fall.flat.speed + 4 && fall.dive.h > 4 && Math.abs(Math.atan2(Math.sin(fall.dive.hDir - fall.dive.headDir), Math.cos(fall.dive.hDir - fall.dive.headDir))) < 0.3 && fall.dive.front[1] > -0.96 && fall.back.front[1] < -0.97 && fall.back.h < fall.dive.h, JSON.stringify({ dive: fall.dive, back: fall.back }));
+  // Headings grow to the left in this frame: a slide to the right of the head is a negative offset, a left turn a positive one
+  const offset = (a, z) => Math.atan2(Math.sin(a - z), Math.cos(a - z));
+  record("drop physics: D slides the diver to the right of the head and Q turns the head left", fall.roll.h > 3 && offset(fall.roll.hDir, fall.roll.headDir) < -0.9 && offset(fall.roll.hDir, fall.roll.headDir) > -2.2 && offset(fall.yaw.headDir, fall.roll.headDir) > 0.6, JSON.stringify({ roll: fall.roll, yaw: fall.yaw }));
+  const rings = await b.evaluate(`(() => { const B = window.__ooga, R = B.course.rings; const s = ${isolateDiver}; s.v.y = -20; const through = (dx) => { const ring = R[3]; B.drop.toBoard(); B.drop.jumpNow(); const s = B.diver.state; s.p.x = ring.x + dx; s.p.y = ring.y + 3; s.p.z = ring.z; s.v.x = s.v.z = 0; s.v.y = -20; B.drop.setInput(0, 0, 0, false); const before = B.drop.ringsHit; B.drop.simulate(0.4); return { hit: B.drop.ringsHit - before, glow: ring.node.glow, below: s.p.y < ring.y }; }; return { inside: through(0), edge: through(R[3].r - 0.3), outside: through(R[3].r + 0.6), particles: B.stats().particles }; })()`);
+  record("drop physics: a hoop counts when the fall crosses its plane inside the radius, not outside it", rings.inside.hit === 1 && rings.inside.glow < 0.5 && rings.inside.below && rings.edge.hit === 1 && rings.outside.hit === 0 && rings.outside.glow === 1 && rings.outside.below && rings.particles > 0, JSON.stringify(rings));
+  const chute = await b.evaluate(`(() => { const B = window.__ooga, K = window.BL.skydiver; const s = ${isolateDiver}; B.drop.simulate(5); const before = { vy: s.v.y, canopy: B.diver.canopy.visible }; B.drop.deploy(); B.drop.simulate(0.4); const opening = { phase: s.phase, scale: B.diver.canopy.scale.x, visible: B.diver.canopy.visible }; B.drop.simulate(3); const flying = { phase: s.phase, vy: +s.v.y.toFixed(2), forward: +Math.hypot(s.v.x, s.v.z).toFixed(2), scale: +B.diver.canopy.scale.x.toFixed(2), chute: document.getElementById("drop-chute-name").textContent }; const h0 = s.heading; B.drop.setInput(0, 1, 0, false); B.drop.simulate(1); const turned = s.heading - h0; const h1 = s.heading; B.drop.setInput(0, 0, 1, false); B.drop.simulate(1); const yawed = Math.atan2(Math.sin(s.heading - h1), Math.cos(s.heading - h1)); B.drop.setInput(0, 0, 0, true); B.drop.simulate(1.5); const flare = { vy: +s.v.y.toFixed(2), forward: +Math.hypot(s.v.x, s.v.z).toFixed(2), flaring: s.flaring }; B.drop.simulate(2); const spent = { flaring: s.flaring, reserve: +s.flare.toFixed(2) }; return { before, opening, flying, turned, yawed, flare, spent, sink: K.SINK, flareSink: K.FLARE_SINK, again: B.drop.deploy() }; })()`);
+  record("drop physics: pulling blooms the canopy, the sink settles at its rate, D banks it right, Q turns it left, a flare slows the sink until the reserve runs out", chute.before.vy < -20 && !chute.before.canopy && chute.opening.phase === "open" && chute.opening.visible && chute.opening.scale > 0.3 && chute.opening.scale < 1 && chute.flying.phase === "canopy" && Math.abs(chute.flying.vy + chute.sink) < 0.3 && chute.flying.forward > 5 && chute.flying.scale === 1 && chute.flying.chute === "canopy" && chute.turned < -0.8 && chute.yawed > 0.8 && chute.flare.flaring && chute.flare.vy > -chute.flareSink - 0.4 && chute.flare.forward < 4 && !chute.spent.flaring && chute.spent.reserve === 0 && !chute.again, JSON.stringify(chute));
+  const landings = await b.evaluate(`(() => { const B = window.__ooga, T = B.course.target; const drop = (setup) => { B.drop.toBoard(); B.drop.jumpNow(); const s = B.diver.state; setup(s); B.drop.simulate(8); return { phase: B.drop.phase, landing: s.landing, result: B.drop.result && B.drop.result.landing, score: B.drop.score, dist: B.drop.result && +B.drop.result.dist.toFixed(2), bananaBonus: B.drop.result && B.drop.result.banana, y: +s.p.y.toFixed(2), ground: B.island.surfaceAt(s.p.x, s.p.z) }; }; const stand = drop((s) => { s.p.x = T.x - 2; s.p.y = 3.6; s.p.z = T.z; s.v.x = s.v.z = 0; s.v.y = -5; B.drop.deploy(); s.open = 1; s.phase = "canopy"; s.heading = Math.PI / 2; B.drop.setInput(0, 0, 0, true); }); const fast = drop((s) => { s.p.x = T.x + 6; s.p.y = 3.5; s.p.z = T.z; s.v.x = s.v.z = 0; B.drop.deploy(); s.open = 1; s.phase = "canopy"; s.v.y = -8; s.flare = 0; }); const pancake = drop((s) => { s.p.x = 2; s.p.y = 30; s.p.z = 2; s.v.x = s.v.z = 0; }); const tumble = drop((s) => { s.p.x = 2; s.p.y = 8; s.p.z = 2; s.v.x = 22; s.v.z = 0; s.v.y = -24; }); const hole = drop((s) => { s.p.x = -5; s.p.y = 10; s.p.z = 5; s.v.x = s.v.z = 0; s.v.y = -40; window.BL.math.quat.fromEuler(s.q, Math.PI, 0, 0); }); const holeShown = window.BL.scenes.drop.root.children.some((n) => n.geometry === window.BL.dropModels.hole() && n.visible); const lost = drop((s) => { s.p.x = 80; s.p.y = 10; s.p.z = 80; s.v.x = s.v.z = 0; }); return { stand, fast, pancake, tumble, hole, holeShown, lost, best: B.game.state.drop.best }; })()`);
+  record("drop physics: any canopy touchdown, slow or fast, is a good landing scored by its distance to the target", landings.stand.phase === "results" && landings.stand.landing === "stand" && landings.stand.result === "stand" && landings.stand.score >= 600 && landings.stand.dist < 4 && landings.fast.landing === "stand" && landings.fast.score > 0 && landings.fast.score < landings.stand.score && landings.best && landings.best.landing === "stand", JSON.stringify({ stand: landings.stand, fast: landings.fast }));
+  record("drop physics: without a chute a flat slow fall flattens, a flat fast one tumbles, a spine-first one punches a hole, all for nothing", landings.pancake.landing === "pancake" && landings.tumble.landing === "tumble" && landings.hole.landing === "hole" && landings.holeShown && [landings.pancake, landings.tumble, landings.hole].every((l) => l.phase === "results" && l.score === 0 && l.bananaBonus === 0), JSON.stringify({ pancake: landings.pancake, tumble: landings.tumble, hole: landings.hole, holeShown: landings.holeShown }));
+  record("drop physics: off the island the fall is lost as soon as it drops past the rim", landings.lost.result === "lost" && landings.lost.y < -8 && landings.lost.y > -60, JSON.stringify(landings.lost));
+});
+
+const dropFlow = () => withPage("drop flow", dropPage(src), async (b) => {
+  const rendered = (frames) => b.evaluate(`new Promise((resolve) => { const B = window.__ooga; const start = B.renderedFrames; const t0 = performance.now(); const tick = () => { if (B.renderedFrames >= start + ${frames} || performance.now() - t0 > 4000) resolve(B.renderedFrames - start); else requestAnimationFrame(tick); }; requestAnimationFrame(tick); })`);
+  const jumped = await b.evaluate(`(() => { const B = window.__ooga; const ok = B.drop.jumpNow(); return { ok, phase: B.drop.phase, diver: B.diver.state.phase, alt: B.diver.state.p.y, speed: B.diver.state.speed, act: document.getElementById("act").textContent, centerHidden: document.getElementById("drop-center").hidden }; })()`);
+  await rendered(8);
+  const falling = await b.evaluate(`(() => { const B = window.__ooga, s = B.diver.state, c = B.camera; return { alt: s.p.y, streaks: B.drop.streaks, camAbove: c.position.y > s.p.y + 0.5, camNear: Math.hypot(c.position.x - s.p.x, c.position.y - s.p.y, c.position.z - s.p.z) < 12, fov: +(c.fov * 180 / Math.PI).toFixed(1), up: document.getElementById("drop-alt").textContent, time: document.getElementById("drop-time").textContent }; })()`);
+  record("drop flow: the jump leaves the plane in freefall with the camera above the diver, the streaks up and the strip counting", jumped.ok && jumped.phase === "air" && jumped.diver === "free" && jumped.alt > 350 && jumped.speed > 15 && jumped.centerHidden && falling.alt < jumped.alt && falling.streaks === 160 && falling.camAbove && falling.camNear && +falling.up > 200 && falling.time !== "0:00.00", JSON.stringify({ jumped, falling }));
+  // Fall to the pull height in simulated time, then pull for real with Space
+  await b.evaluate(`(() => { const B = window.__ooga, s = B.diver.state; s.p.x = 0; s.p.z = 0; s.v.x = s.v.z = 0; while (s.p.y > 87 && B.drop.phase === "air") B.drop.simulate(0.25); })()`);
+  await rendered(3);
+  const prompt = await b.evaluate(`({ center: document.getElementById("drop-center").textContent, hidden: document.getElementById("drop-center").hidden, alt: window.__ooga.diver.state.p.y })`);
+  await b.key(" ");
+  await rendered(3);
+  const pulled = await b.evaluate(`(() => { const B = window.__ooga, s = B.diver.state; return { phase: s.phase, canopy: B.diver.canopy.visible, chute: document.getElementById("drop-chute-name").textContent, act: document.getElementById("act").textContent }; })()`);
+  record("drop flow: the PULL call shows near the ground and Space opens the canopy", !prompt.hidden && prompt.center === "PULL" && prompt.alt < 90 && pulled.phase !== "free" && pulled.canopy && pulled.chute === "canopy" && pulled.act === "Flare", JSON.stringify({ prompt, pulled }));
+  // Bring the canopy down over the banana mound, flaring in
+  await b.evaluate(`(() => { const B = window.__ooga, s = B.diver.state; B.drop.simulate(3); s.p.x = -2.4; s.p.y = 3.4; s.p.z = 0; s.v.x = s.v.z = 0; s.heading = Math.PI / 2; B.drop.setInput(0, 0, 0, true); B.drop.simulate(8); })()`);
+  await rendered(3);
+  const landed = await b.evaluate(`(() => { const B = window.__ooga, s = B.diver.state; return { phase: B.drop.phase, landing: s.landing, shown: !document.getElementById("drop-results").hidden, rows: document.querySelectorAll("#drop-score li").length, summary: document.getElementById("drop-summary").textContent, best: B.game.state.drop.best, stored: JSON.parse(localStorage.getItem("oogaboogaland.v1")).drop.best, result: B.drop.result, actHidden: document.getElementById("act").hidden, canopyDown: !B.diver.canopy.visible || B.diver.canopy.scale.y < 1 }; })()`);
+  record("drop flow: the landing shows the results with the score rows, saves the best and folds the canopy", landed.phase === "results" && landed.landing === "stand" && landed.shown && landed.rows >= 5 && landed.summary.length > 0 && landed.best && landed.best.score === landed.result.score && landed.stored && landed.stored.score === landed.best.score && landed.result.banana === 300 && landed.actHidden && landed.canopyDown, JSON.stringify(landed));
+  await b.evaluate(`document.querySelector('#drop-results [data-action="drop-again"]').click()`);
+  await b.sleep(200);
+  const again = await b.evaluate(`(() => { const B = window.__ooga; return { phase: B.drop.phase, resultsHidden: document.getElementById("drop-results").hidden, score: B.drop.score, rings: B.drop.ringsHit, ringsLit: B.course.rings.every((r) => r.node.glow === 1 && !r.hit), diverPhase: B.diver.state.phase }; })()`);
+  record("drop flow: Again restarts the climb with the course reset", again.phase === "climb" && again.resultsHidden && again.score === 0 && again.rings === 0 && again.ringsLit && again.diverPhase === "idle", JSON.stringify(again));
+  await b.evaluate(`(() => { const bad = JSON.parse(localStorage.getItem("oogaboogaland.v1")); bad.drop.best = { score: "x", rings: 3, ringTotal: 10, landing: "stand" }; localStorage.setItem("oogaboogaland.v1", JSON.stringify(bad)); })()`);
+  await b.open(dropPage(src));
+  await b.sleep(2500);
+  const reloaded = await b.evaluate(`(() => { const B = window.__ooga; return { best: B.game.state.drop.best, rows: [...document.querySelectorAll("#drop-best li")].map((li) => li.textContent) }; })()`);
+  record("drop flow: a malformed saved best is dropped on reload", reloaded.best === null && reloaded.rows[0].startsWith("Score"), JSON.stringify(reloaded));
+  await b.evaluate(`document.querySelector('[data-scene="drop"] [data-action="leave"]').click()`);
+  await b.sleep(900);
+  const left = await b.evaluate(`(() => { const B = window.__ooga; const c = B.camera; return { scene: B.scene, toPile: +Math.hypot(c.target.x, c.target.z).toFixed(2), dropHidden: document.getElementById("drop").hidden, boardBtnHidden: document.getElementById("drop-board-btn").hidden }; })()`);
+  record("drop flow: Back to the island returns to the hub landing view with the drop HUD hidden", left.scene === "hub" && left.toPile < 0.5 && left.dropHidden && left.boardBtnHidden, JSON.stringify(left));
+});
+
+const dropCanvas = () => withPage("drop canvas", dropPage(src, "canvas2d=1"), async (b) => {
+  const r = await b.evaluate(`(() => { const B = window.__ooga; B.drop.jumpNow(); return { kind: B.renderer.kind, phase: B.drop.phase }; })()`);
+  const frames = await b.evaluate(`new Promise((resolve) => { const B = window.__ooga; const start = B.renderedFrames; const t0 = performance.now(); const tick = () => { if (B.renderedFrames >= start + 30 || performance.now() - t0 > 6000) resolve({ frames: B.renderedFrames - start, alt: B.diver.state.p.y, streaks: B.drop.streaks }); else requestAnimationFrame(tick); }; requestAnimationFrame(tick); })`);
+  record("drop canvas: the Canvas 2D fallback draws the fall with the streak batch", r.kind === "canvas2d" && r.phase === "air" && frames.frames >= 30 && frames.alt < 360 && frames.streaks === 160, JSON.stringify({ ...r, ...frames }));
+});
+
+const dropPhone = () => withPage("drop phone", dropPage(src), async (b) => {
+  const board = await b.evaluate(`(() => { const g = document.getElementById("drop-board").getBoundingClientRect(); return { fits: g.bottom <= window.innerHeight && g.width <= window.innerWidth, columns: getComputedStyle(document.querySelector(".drop-columns")).gridTemplateColumns.split(" ").length, help: document.getElementById("drop-help").textContent }; })()`);
+  await b.evaluate(`document.querySelector('[data-action="drop-start"]').click()`);
+  await b.sleep(800);
+  const climb = await b.evaluate(`(() => { const B = window.__ooga; const act = document.getElementById("act"), strip = document.querySelector(".race-hud-right").getBoundingClientRect(); return { phase: B.drop.phase, act: !act.hidden && act.textContent, stripFits: strip.right <= window.innerWidth && strip.left >= 0, sticks: getComputedStyle(document.getElementById("joy-move")).display, look: getComputedStyle(document.getElementById("joy-look")).display }; })()`);
+  await b.evaluate(`(() => { const B = window.__ooga; B.drop.jumpNow(); const s = B.diver.state; s.p.y = 900; s.v.x = s.v.z = 0; s.v.y = -20; B.drop.simulate(4); })()`);
+  const stick = await b.evaluate(`(() => { const r = document.getElementById("joy-move").getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; })()`);
+  const flat = await b.evaluate(`Array.from(window.__ooga.diver.state.front).map((v) => +v.toFixed(2))`);
+  await b.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ x: stick.x, y: stick.y }] });
+  for (let i = 1; i <= 6; i++) {
+    await b.send("Input.dispatchTouchEvent", { type: "touchMove", touchPoints: [{ x: stick.x, y: stick.y - i * 6 }] });
+    await b.sleep(100);
+  }
+  await b.sleep(900);
+  const tipped = await b.evaluate(`(() => { const s = window.__ooga.diver.state; return { front: Array.from(s.front).map((v) => +v.toFixed(2)), act: document.getElementById("act").textContent }; })()`);
+  await b.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+  record("drop phone: the board stacks, the climb shows the Jump button and both sticks, and the left stick tips the diver", board.fits && board.columns === 1 && board.help.includes("stick") && climb.phase === "climb" && climb.act === "Jump!" && climb.stripFits && climb.sticks === "block" && climb.look === "block" && flat[1] < -0.95 && tipped.front[1] > flat[1] + 0.15 && tipped.act === "Pull!", JSON.stringify({ board, climb, flat, tipped }));
+}, { w: 390, h: 844, mobile: true, wait: 3000 });
+
+const dropAudio = () => withPage("drop audio", dropPage(src), async (b) => {
+  const before = await b.evaluate(`(() => { const A = window.__ooga.audio; return { ready: A.ready, context: !!A.context }; })()`);
+  await b.click(720, 450);
+  await b.sleep(200);
+  const after = await b.evaluate(`(() => { const A = window.__ooga.audio; for (const name of Object.keys(A.cues)) A.cues[name](); A.state.planeSpeed = 20; A.state.speed = 30; A.state.falling = 1; A.update(1 / 60); A.state.canopy = 1; A.state.flaring = 1; A.update(1 / 60); return { ready: A.ready, state: A.context.state, voices: A.voices, cues: Object.keys(A.cues).length, muted: A.muted }; })()`);
+  await b.key("m");
+  await b.sleep(100);
+  const muted = await b.evaluate(`(() => { const A = window.__ooga.audio; return { muted: A.muted, pressed: document.getElementById("drop-mute").getAttribute("aria-pressed"), stored: localStorage.getItem("oogaboogaland.audio") }; })()`);
+  await b.key("m");
+  await b.evaluate(`window.__ooga.go("hub")`);
+  await b.sleep(900);
+  const left = await b.evaluate(`(() => { const B = window.__ooga; return { scene: B.scene, audio: B.audio === undefined }; })()`);
+  record("drop audio: silent until a real gesture, then a running context with a fixed voice pool and every cue playable", !before.ready && !before.context && after.ready && after.state === "running" && after.voices === 8 && after.cues >= 14 && !after.muted, JSON.stringify({ before, after }));
+  record("drop audio: M mutes, remembers it, and leaving the drop closes the context", muted.muted && muted.pressed === "true" && muted.stored === "off" && left.scene === "hub" && left.audio, JSON.stringify({ muted, left }));
+});
+
+const hubDrop = () => withPage("hub drop route", hubPage(src), async (b) => {
+  await b.evaluate(`window.__ooga.pilot.goPreset("drop")`);
+  await b.sleep(1200);
+  const roof = await b.evaluate(`(() => { const B = window.__ooga; const l = B.launchers[0], m = B.mouths.find((m) => m.id === "c9"); const p = B.project(l.x, l.y + 1, l.z); const hit = B.input.pick(p.x, p.y); const wheel = window.BL.raceModels.kartWheel(), body = window.BL.dropModels.planeBody(); let wheels = 0, planes = 0; const isGeometry = (node, geometry) => node.geometry === geometry || node.geometry?.matrixSourceGeometry === geometry; const walk = (node) => { if (isGeometry(node, wheel)) wheels++; if (isGeometry(node, body)) planes++; for (const c of node.children) walk(c); }; walk(window.BL.scenes.hub.root); return { launchers: B.launchers.length, onRoof: l.y > 3 && Math.abs(l.y - window.BL.dropModels.roofSpot(B.island, m, {}, 0.8).y) < 1e-6 && Math.abs(l.y - B.island.surfaceAt(l.x, l.z)) < 0.1, overRoom: Math.hypot(l.x - m.x, l.z - m.z) > 3 && Math.hypot(l.x - m.x, l.z - m.z) < 5, x: Math.round(p.x), y: Math.round(p.y), kind: hit && hit.owner.kind, prop: hit && hit.owner.prop, wheels, planes, sign: (() => { const o = B.props.find((o) => o.prop === "sign"); return o ? { tip: (() => { const q = B.project(o.x, o.node.world[13] + 0.8, o.z), hit = B.input.pick(q.x, q.y); return hit && hit.owner.prop; })(), onRoof: Math.abs(o.node.world[13] - B.island.surfaceAt(o.x, o.z)) < 1e-6, nearPlane: Math.hypot(o.x - l.x, o.z - l.z) < 4.5, text: o.node.geometry === window.BL.dropModels.roofSign() } : null; })(), scenery: B.scenery.candidateCount, clear: B.props.filter((o) => o.scenery && o.active && Math.hypot(o.x - l.x, o.z - l.z) < o.footprint + 3.6).length }; })()`);
+  await b.mouse("mouseMoved", roof.x, roof.y, { button: "none" });
+  await b.sleep(300);
+  const tip = await b.evaluate(`document.getElementById("tooltip").textContent`);
+  await b.click(roof.x, roof.y);
+  await b.sleep(1600);
+  const entered = await b.evaluate(`({ scene: window.__ooga.scene, phase: window.__ooga.drop.phase, board: !document.getElementById("drop-board").hidden })`);
+  record("hub drop route: the plane parks on the rally cave roof with its sign on pegs beside it, tooltips, and tapping it enters the board", roof.launchers === 1 && roof.onRoof && roof.overRoom && roof.kind === "prop" && roof.prop === "plane" && roof.wheels === 9 && roof.planes === 1 && roof.sign && roof.sign.onRoof && roof.sign.nearPlane && roof.sign.text && roof.sign.tip === "sign" && roof.clear === 0 && roof.scenery === 369 && tip === "Ooga Drop · tap to fly" && entered.scene === "drop" && entered.phase === "board" && entered.board, JSON.stringify({ ...roof, tip, ...entered }));
+  await b.key("Escape");
+  await b.sleep(900);
+  const back = await b.evaluate(`(() => { const B = window.__ooga; const c = B.camera; return { scene: B.scene, toPile: +Math.hypot(c.target.x, c.target.z).toFixed(2), dropHidden: document.getElementById("drop").hidden }; })()`);
+  record("hub drop route: Escape on the board returns to the hub landing view", back.scene === "hub" && back.toPile < 0.5 && back.dropHidden, JSON.stringify(back));
+  // Stand the Ooga on the roof beside the wing, facing the plane, with the camera behind him
+  const driver = await b.evaluate(`(() => { const B = window.__ooga; const l = B.launchers[0]; const cave = [...B.cavemen.values()].find((c) => c.state === "working" && !c.walk && !c.build && c.traits.name !== "portlandhodl"); const dx = Math.cos(l.ry), dz = -Math.sin(l.ry); B.crew.control(cave); cave.root.position.x = l.x + dx * 3.6; cave.root.position.z = l.z + dz * 3.6; cave.root.position.y = cave.baseY + l.y; cave.hop = 0; cave.root.rotation.y = Math.atan2(-dx, -dz); B.pilot.orbit.tYaw = B.pilot.orbit.yaw = Math.atan2(dx, dz); return cave.traits.name; })()`);
+  await b.sleep(300);
+  await b.send("Input.dispatchKeyEvent", { type: "keyDown", key: "w", text: "w" });
+  const walked = await b.evaluate(`new Promise((resolve) => { const B = window.__ooga; const t0 = performance.now(); const tick = () => { if (B.scene === "drop" || performance.now() - t0 > 6000) resolve({ scene: B.scene, ms: Math.round(performance.now() - t0) }); else requestAnimationFrame(tick); }; tick(); })`);
+  await b.send("Input.dispatchKeyEvent", { type: "keyUp", key: "w" });
+  await b.sleep(400);
+  const preselected = await b.evaluate(`({ picked: document.querySelector('#drop-oogas [aria-pressed="true"]').dataset.racer, diver: window.__ooga.diver.cave.traits.name })`);
+  record("hub drop route: walking a driven Ooga along the roof into the plane enters the drop with that Ooga picked", walked.scene === "drop" && preselected.picked === driver && preselected.diver === driver, JSON.stringify({ walked, driver, preselected }));
+});
+
+const soakDrop = () => withPage("soak: drop cycles", hubPage(src), async (b) => {
+  const { rendered, settled, snapshot, travel, heapDetail, within } = await soak(b);
+  await settled();
+  await rendered(2);
+  const s0 = await snapshot();
+  for (let i = 0; i < 6; i++) {
+    for (const id of ["drop", "hub"]) {
+      const t = await travel(id);
+      if (!t) throw new Error(`round trip ${i + 1}: the transition to the ${id} did not settle`);
+      await b.sleep(400);
+    }
+  }
+  const s6 = await snapshot();
+  const same = (key) => s0.stats[key] === s6.stats[key];
+  record("soak: drop cycles: node, target, tween and DOM counts identical after six hub/drop round trips", s6.stats.tweens === 0 && same("allNodes") && same("targets") && same("tweens") && same("dom"), `${JSON.stringify(s0.stats)} -> ${JSON.stringify(s6.stats)}`);
+  record("soak: drop cycles: GPU records stable", Math.abs(s6.stats.gl.records - s0.stats.gl.records) <= 3, `${s0.stats.gl.records} -> ${s6.stats.gl.records}`);
+  record("soak: drop cycles: live DOM nodes and event listeners identical", s6.nodes === s0.nodes && s6.listeners === s0.listeners, `nodes ${s0.nodes} -> ${s6.nodes}, listeners ${s0.listeners} -> ${s6.listeners}`);
+  record("soak: drop cycles: heap after GC within 10%", within(s0, s6, 0.1), heapDetail(s0, s6));
+  record("soak: drop cycles: no error thrown", !b.logs.some((l) => l.startsWith("[exception]")), b.logs.join(" | ").slice(0, 200));
+});
+
+// Sixty tips in fifteen seconds while the diver falls, then back to base
+const soakDropDonations = () => withPage("soak: donations (drop)", dropPage(src), async (b) => {
+  const { until, rendered, settled, snapshot, heapDetail, within } = await soak(b);
+  await settled();
+  await rendered(2);
+  const before = await snapshot();
+  await b.evaluate(`(() => { const B = window.__ooga; B.drop.jumpNow(); const s = B.diver.state; s.p.y = 2000; s.v.x = s.v.z = 0; })()`);
+  const level0 = await b.evaluate("window.__ooga.level");
+  const start = await b.evaluate("performance.now()");
+  for (let i = 0; i < 60; i++) {
+    await b.evaluate(`window.__ooga.demoTip(${i % 4 === 3 ? 120000 : 1200})`);
+    await until(`performance.now() >= ${start + 250 * (i + 1)}`, 2000);
+  }
+  const mid = await b.evaluate(`(() => { const B = window.__ooga; return { level: B.level, phase: B.drop.phase, donations: B.game.state.donations, sats: document.getElementById("stat-sats").textContent, falling: B.diver.state.phase === "free" }; })()`);
+  await b.evaluate(`window.__ooga.drop.toBoard()`);
+  const quiet = await until("B.stats().particles === 0", 15000) && await settled(15000);
+  await b.evaluate("(() => { const B = window.__ooga; B.trimPool(); B.housekeep(); })()");
+  const after = await snapshot();
+  const a = after.stats, s = before.stats;
+  record("soak: donations (drop): tips credit the shared banana level mid-fall and the pools drain", quiet && mid.phase === "air" && mid.falling && mid.level > level0 + 150 && mid.donations === 60 && a.particles === 0 && a.tweens === 0 && a.pool <= 32 && a.streaks === 0, JSON.stringify({ level0, mid, particles: a.particles, pool: a.pool, tweens: a.tweens }));
+  record("soak: donations (drop): node and target counts back to base", a.allNodes - a.pool === s.allNodes - s.pool && a.targets === s.targets, `allNodes ${s.allNodes} -> ${a.allNodes} (pool ${a.pool}), targets ${s.targets} -> ${a.targets}, dom ${s.dom} -> ${a.dom}, listeners ${before.listeners} -> ${after.listeners}`);
+  record("soak: donations (drop): GPU records bounded", a.gl.records - s.gl.records <= 20, `${s.gl.records} -> ${a.gl.records}`);
+  record("soak: donations (drop): heap after GC within 15%", within(before, after, 0.15), heapDetail(before, after));
 });
 
 const soakRace = () => withPage("soak: race cycles", hubPage(src), async (b) => {
@@ -1556,13 +1767,22 @@ await raceAudio();
 await raceCanvas();
 await racePhone();
 await hubRace();
+await dropBoard();
+await dropPhysics();
+await dropFlow();
+await dropCanvas();
+await dropPhone();
+await dropAudio();
+await hubDrop();
 await soakScenes();
 await soakRace();
+await soakDrop();
 await soakResidency();
 await soakDonations("hub", hubPage(src));
 await soakDonations("hub night", hubPage(src, "hour=22"));
 await soakDonations("lab", page(src), { w: 1920 });
 await soakRaceDonations();
+await soakDropDonations();
 
 const failed = results.filter((r) => !r.ok);
 console.log(`\n${results.length - failed.length}/${results.length} checks passed`);

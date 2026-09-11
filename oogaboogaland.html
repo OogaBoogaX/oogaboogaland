@@ -5,7 +5,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta http-equiv="Content-Security-Policy"
-    content="default-src 'none'; script-src 'sha256-/ZuqV3SSjY+xlkY1mbDMSC20jj/Vr30WslnfSr2Lp/U='; style-src 'sha256-09Qrr1ltKmH6wPFG0DWsDpsdwOMP+bI5sCaRJOqk2V8='; img-src 'self' data:; connect-src 'none'; base-uri 'none'; form-action 'none'">
+    content="default-src 'none'; script-src 'sha256-1bIYuW7XYPcgwVsjRVBs8jNFgNScBpN22VONsmh3tsE='; style-src 'sha256-3C/lZtrs9H11VfLxejw4WH1Oq4EePnFjR7bYVG9kp+c='; img-src 'self' data:; connect-src 'none'; base-uri 'none'; form-action 'none'">
   <meta name="referrer" content="no-referrer">
   <meta name="color-scheme" content="dark">
   <meta name="theme-color" content="#0a0a0b">
@@ -1265,6 +1265,20 @@ select {
   padding: 4px 0;
 }
 
+/* Help lines on the planks sit on their own stone tablet: the results summaries and the feed dialog's note */
+.race-results .help,
+.modal .help {
+  margin: 12px 0 0;
+  padding: 8px 12px;
+  background: var(--tablet);
+  border: 2px solid var(--stone-dk);
+  border-radius: 9px 7px 10px 8px;
+  box-shadow: var(--tablet-shadow);
+  color: var(--paper);
+  font-size: 11px;
+  text-shadow: 0 1px 0 rgba(0, 0, 0, 0.6);
+}
+
 .race-results .actions {
   grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
 }
@@ -1508,6 +1522,42 @@ select {
   grid-template-columns: 1fr 1fr;
 }
 
+/* ---------- Ooga Drop ---------- */
+/* The board has two columns; its rows are plain label and value pairs, no place numbers */
+.drop-columns {
+  grid-template-columns: 1fr 1fr;
+}
+
+.drop-rows {
+  margin: 0;
+  padding: 2px 10px;
+  list-style: none;
+}
+
+.drop-rows li {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 10px;
+  padding: 7px 0;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.35);
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.04);
+  font-variant-numeric: tabular-nums;
+}
+
+.drop-rows li:last-child {
+  border-bottom: 0;
+  box-shadow: none;
+}
+
+.drop-rows li::before {
+  content: none;
+}
+
+.drop-rows li span:last-child {
+  color: var(--accent);
+  font-weight: 600;
+}
+
 [hidden] {
   display: none !important;
 }
@@ -1679,7 +1729,8 @@ select {
     padding: 10px 12px 12px;
   }
 
-  .garage-columns {
+  .garage-columns,
+  .drop-columns {
     grid-template-columns: 1fr;
     gap: 8px;
   }
@@ -1999,6 +2050,11 @@ select {
         <button type="button" data-action="mute" id="race-mute" aria-pressed="false">Sound</button>
         <button type="button" class="leave" data-action="leave">Leave<span> cave</span></button>
       </nav>
+      <nav class="presets" aria-label="Drop" data-scene="drop" hidden>
+        <button type="button" data-action="drop-board" id="drop-board-btn">Board</button>
+        <button type="button" data-action="mute" id="drop-mute" aria-pressed="false">Sound</button>
+        <button type="button" class="leave" data-action="leave">Back<span> to the island</span></button>
+      </nav>
     </header>
 
     <aside class="sheet" id="sheet" data-open="true">
@@ -2136,6 +2192,52 @@ select {
           <button type="button" data-action="race-again">Restart</button>
           <button type="button" data-action="garage">Garage</button>
           <button type="button" data-action="leave">Leave cave</button>
+        </div>
+      </section>
+    </div>
+    <div class="race" id="drop" data-scene="drop" hidden>
+      <section class="garage" id="drop-board" aria-label="Drop board">
+        <div class="garage-head">
+          <h2><span data-sign>Ooga Drop</span> <span class="garage-medal garage-cup" id="drop-medal" hidden></span></h2>
+          <p class="help">Pick an Ooga. The plane climbs, you jump, steer through the rings, pull the chute and land on the
+            target.</p>
+        </div>
+        <div class="garage-columns drop-columns">
+          <div class="garage-col">
+            <h3>Ooga</h3>
+            <ul class="garage-list" id="drop-oogas"></ul>
+          </div>
+          <div class="garage-col">
+            <h3>Best drop</h3>
+            <ul class="garage-list drop-rows" id="drop-best"></ul>
+          </div>
+        </div>
+        <div class="garage-foot">
+          <p class="help" id="drop-help">W S pitch · A D roll · Q E turn · Space jumps, pulls the chute · S flares</p>
+          <button type="button" class="feed-open race-go" data-action="drop-start"><span data-sign>Fly!</span></button>
+        </div>
+      </section>
+      <div class="race-strip" id="drop-strip" hidden>
+        <div class="race-hud race-hud-left">
+          <div class="race-lap"><span>Up</span><b id="drop-alt">0</b></div>
+          <div class="race-lap"><span>Rings</span><b id="drop-rings">0</b><small id="drop-ring-total">/8</small></div>
+        </div>
+        <div class="race-hud race-hud-right">
+          <div class="race-time" id="drop-time">0:00.00</div>
+          <div class="race-speed"><b id="drop-speed">0</b><span>down</span></div>
+          <div class="race-item" id="drop-chute" data-item=""><span id="drop-chute-name">pack</span></div>
+        </div>
+      </div>
+      <div class="race-center" id="drop-center" hidden>JUMP</div>
+      <div class="race-notice" id="drop-notice" hidden>&nbsp;</div>
+      <section class="race-results" id="drop-results" hidden aria-label="Drop results">
+        <h2><span data-sign>Landed</span></h2>
+        <ol class="race-podium drop-rows" id="drop-score"></ol>
+        <p class="help" id="drop-summary"></p>
+        <div class="actions">
+          <button type="button" data-action="drop-again">Again</button>
+          <button type="button" data-action="drop-board">Board</button>
+          <button type="button" data-action="leave">Back to the island</button>
         </div>
       </section>
     </div>
@@ -2663,9 +2765,124 @@ select {
       out[2] = m[2] * x + m[6] * y + m[10] * z + m[14];
       out[3] = m[3] * x + m[7] * y + m[11] * z + m[15];
       return out;
+    },
+    // Translation, unit quaternion and scale, the quaternion twin of fromTRS
+    fromTQS: (out, p, q, s) => {
+      const x = q[0], y = q[1], z = q[2], w = q[3];
+      const xx = x * x, yy = y * y, zz = z * z, xy = x * y, xz = x * z, yz = y * z, wx = w * x, wy = w * y, wz = w * z;
+      out[0] = (1 - 2 * (yy + zz)) * s.x;
+      out[1] = 2 * (xy + wz) * s.x;
+      out[2] = 2 * (xz - wy) * s.x;
+      out[3] = 0;
+      out[4] = 2 * (xy - wz) * s.y;
+      out[5] = (1 - 2 * (xx + zz)) * s.y;
+      out[6] = 2 * (yz + wx) * s.y;
+      out[7] = 0;
+      out[8] = 2 * (xz + wy) * s.z;
+      out[9] = 2 * (yz - wx) * s.z;
+      out[10] = (1 - 2 * (xx + yy)) * s.z;
+      out[11] = 0;
+      out[12] = p.x;
+      out[13] = p.y;
+      out[14] = p.z;
+      out[15] = 1;
+      return out;
     }
   };
-  BL.math = { clamp, lerp, damp, angleDelta, ease, fnv1a, mulberry32, randomInt, hexToRgb, mat4 };
+  // Unit quaternions as Float32Array(4) [x, y, z, w], every operation in place
+  const QUAT_TEMP = new Float32Array(4);
+  const quat = {
+    create: () => {
+      const q = new Float32Array(4);
+      q[3] = 1;
+      return q;
+    },
+    identity: (out) => {
+      out[0] = out[1] = out[2] = 0;
+      out[3] = 1;
+      return out;
+    },
+    copy: (out, q) => {
+      out[0] = q[0];
+      out[1] = q[1];
+      out[2] = q[2];
+      out[3] = q[3];
+      return out;
+    },
+    fromAxisAngle: (out, x, y, z, angle) => {
+      const s = Math.sin(angle / 2);
+      out[0] = x * s;
+      out[1] = y * s;
+      out[2] = z * s;
+      out[3] = Math.cos(angle / 2);
+      return out;
+    },
+    // Yaw about y, then pitch about x, then roll about z, matching fromTRS's YXZ order
+    fromEuler: (out, x, y, z) => {
+      const cx = Math.cos(x / 2), sx = Math.sin(x / 2), cy = Math.cos(y / 2), sy = Math.sin(y / 2), cz = Math.cos(z / 2), sz = Math.sin(z / 2);
+      out[0] = sx * cy * cz + cx * sy * sz;
+      out[1] = cx * sy * cz - sx * cy * sz;
+      out[2] = cx * cy * sz - sx * sy * cz;
+      out[3] = cx * cy * cz + sx * sy * sz;
+      return out;
+    },
+    // out = a ⊗ b: rotating a vector by out applies b first, then a
+    multiply: (out, a, b) => {
+      const t = QUAT_TEMP;
+      t[0] = a[3] * b[0] + a[0] * b[3] + a[1] * b[2] - a[2] * b[1];
+      t[1] = a[3] * b[1] - a[0] * b[2] + a[1] * b[3] + a[2] * b[0];
+      t[2] = a[3] * b[2] + a[0] * b[1] - a[1] * b[0] + a[2] * b[3];
+      t[3] = a[3] * b[3] - a[0] * b[0] - a[1] * b[1] - a[2] * b[2];
+      out.set(t);
+      return out;
+    },
+    normalize: (out) => {
+      const len = Math.hypot(out[0], out[1], out[2], out[3]) || 1;
+      out[0] /= len;
+      out[1] /= len;
+      out[2] /= len;
+      out[3] /= len;
+      return out;
+    },
+    // Advance by a world-frame angular velocity over dt
+    integrate: (out, q, wx, wy, wz, dt) => {
+      const hx = wx * dt / 2, hy = wy * dt / 2, hz = wz * dt / 2;
+      const x = q[0], y = q[1], z = q[2], w = q[3];
+      out[0] = x + hy * z - hz * y + hx * w;
+      out[1] = y + hz * x - hx * z + hy * w;
+      out[2] = z + hx * y - hy * x + hz * w;
+      out[3] = w - hx * x - hy * y - hz * z;
+      return quat.normalize(out);
+    },
+    // Rotate a vector, written into out as x, y, z
+    rotateVec: (out, q, x, y, z) => {
+      const qx = q[0], qy = q[1], qz = q[2], qw = q[3];
+      const ix = qw * x + qy * z - qz * y, iy = qw * y + qz * x - qx * z, iz = qw * z + qx * y - qy * x, iw = -qx * x - qy * y - qz * z;
+      out[0] = ix * qw + iw * -qx + iy * -qz - iz * -qy;
+      out[1] = iy * qw + iw * -qy + iz * -qx - ix * -qz;
+      out[2] = iz * qw + iw * -qz + ix * -qy - iy * -qx;
+      return out;
+    },
+    // Ease toward another rotation by a fraction, renormalised
+    slerpTo: (out, target, t) => {
+      let d = out[0] * target[0] + out[1] * target[1] + out[2] * target[2] + out[3] * target[3];
+      const sign = d < 0 ? -1 : 1;
+      d = Math.abs(d);
+      // Nearly parallel rotations lerp; the rest slerp
+      let ka = 1 - t, kb = t;
+      if (d < 0.9995) {
+        const theta = Math.acos(Math.min(1, d)), s = Math.sin(theta);
+        ka = Math.sin((1 - t) * theta) / s;
+        kb = Math.sin(t * theta) / s;
+      }
+      out[0] = out[0] * ka + target[0] * sign * kb;
+      out[1] = out[1] * ka + target[1] * sign * kb;
+      out[2] = out[2] * ka + target[2] * sign * kb;
+      out[3] = out[3] * ka + target[3] * sign * kb;
+      return quat.normalize(out);
+    }
+  };
+  BL.math = { clamp, lerp, damp, angleDelta, ease, fnv1a, mulberry32, randomInt, hexToRgb, mat4, quat };
 })();
 
 // ---- js/daylight.js ----
@@ -2906,7 +3123,9 @@ select {
   };
   const updateWorld = (node, parentWorld) => {
     if (!node.visible) return;
-    mat4.fromTRS(node.local, node.position, node.rotation, node.scale);
+    // A node carrying a quaternion turns by it instead of its Euler rotation
+    if (node.quaternion) mat4.fromTQS(node.local, node.position, node.quaternion, node.scale);
+    else mat4.fromTRS(node.local, node.position, node.rotation, node.scale);
     if (parentWorld) mat4.multiply(node.world, parentWorld, node.local);
     else node.world.set(node.local);
     for (const child of node.children) updateWorld(child, node.world);
@@ -7996,6 +8215,10 @@ void main() {
     return {
       add, remove, pick, groundPoint, update, dispose, get targetCount() {
         return targets.length;
+      },
+      // A drag is still held, even if it has paused
+      get orbiting() {
+        return !!gesture && (gesture.mode === "orbit" || gesture.mode === "chord");
       }
     };
   };
@@ -8338,7 +8561,8 @@ void main() {
   };
   const isString = (v, max) => typeof v === "string" && v.length <= max;
   const isEntry = (e, catalog) => e && typeof e === "object" && isString(e.id, 40) && catalog.some((c) => c.id === e.itemId) && LOOT_TIERS.some((t) => t.tier === e.tier) && isString(e.donationId, 64) && Number.isFinite(e.at);
-  const defaults = () => ({ inventory: [], assignments: {}, handle: "", message: "", handFed: 0, totalSats: 0, donations: 0, race: { best: {}, cup: null } });
+  const defaults = () => ({ inventory: [], assignments: {}, handle: "", message: "", handFed: 0, totalSats: 0, donations: 0, race: { best: {}, cup: null }, drop: { best: null } });
+  const LANDINGS = ["stand", "stumble", "tumble", "hole", "pancake", "lost"];
   const CUP_MEDALS = ["gold", "silver", "bronze"];
   const isTime = (v) => Number.isFinite(v) && v > 0 && v < 36e5;
   const load = (catalog) => {
@@ -8365,6 +8589,10 @@ void main() {
       }
       if (parsed.race && parsed.race.cup && CUP_MEDALS.includes(parsed.race.cup.medal) && Number.isFinite(parsed.race.cup.points) && parsed.race.cup.points >= 0) {
         state.race.cup = { medal: parsed.race.cup.medal, points: Math.floor(parsed.race.cup.points) };
+      }
+      const d = parsed.drop && parsed.drop.best;
+      if (d && Number.isFinite(d.score) && d.score >= 0 && d.score < 1e6 && Number.isFinite(d.rings) && d.rings >= 0 && Number.isFinite(d.ringTotal) && d.ringTotal >= d.rings && d.ringTotal <= 99 && LANDINGS.includes(d.landing)) {
+        state.drop.best = { score: Math.floor(d.score), rings: Math.floor(d.rings), ringTotal: Math.floor(d.ringTotal), landing: d.landing };
       }
     } catch {
       return defaults();
@@ -8454,6 +8682,14 @@ void main() {
       }
       return better;
     };
+    // The best drop by score
+    const recordDrop = ({ score, rings, ringTotal, landing }) => {
+      const b = state.drop.best;
+      if (b && b.score >= score) return false;
+      state.drop.best = { score: Math.floor(score), rings, ringTotal, landing };
+      save(state);
+      return true;
+    };
     const setIdentity = ({ handle, message }) => {
       state.handle = handle;
       state.message = message;
@@ -8470,7 +8706,7 @@ void main() {
       if (seconds < 5400) return `${Math.round(seconds / 60)}m`;
       return `${(seconds / 3600).toFixed(1)}h`;
     };
-    return { state, countOf, lootFor: lootForVisitor, addItem, assign, unassign, itemOf, assignedTo, clearLoot, resetAll, recordDonation, recordHandFed, recordRace, recordCup, setIdentity, forecast, formatDuration };
+    return { state, countOf, lootFor: lootForVisitor, addItem, assign, unassign, itemOf, assignedTo, clearLoot, resetAll, recordDonation, recordHandFed, recordRace, recordCup, recordDrop, setIdentity, forecast, formatDuration };
   };
   BL.game = { create, LOOT_TIERS, STACK_MAX, SATS_PER_BANANA, tierFor, lootFor, bananasFor, formatLarge };
 })();
@@ -11357,11 +11593,193 @@ void main() {
   BL.raceModels = { KART, GANTRY, gantryLampY, DINO_HIDES, kart, kartWheel, dino, gantry, gantryLamp, boostFlame, stalactite, rainDrop, snowFlake, boostPad, itemCrate, rockShot, peel, boulder, spectator, banner, torchStand, torchFlame, palm, lagoonRock, lavaRock, obsidianSpike, bones, pine, crystal, iceSpike, snowRock, planks, buoy, post, turn, shift, yToX, yToZ };
 })();
 
+// ---- js/drop-models.js ----
+// Ooga Drop props: the roof plane, the hoop, the canopy, the pack, the target and the wind streak, one cached geometry per builder
+(() => {
+  "use strict";
+  const BL = window.BL = window.BL || {};
+  const { hexToRgb } = BL.math;
+  const { createNode, addChild } = BL.scene;
+  const { box, lathe, merge } = BL.models;
+  const { kartWheel, yToZ, turn, shift } = BL.raceModels;
+  const { caveSign } = BL.hubModels;
+  const cached = (build) => {
+    let value = null;
+    return () => value || (value = build());
+  };
+  const noShadow = (geo) => {
+    geo.castShadow = false;
+    return geo;
+  };
+  const WOOD = "#8a6236", WOOD_DK = "#5c4425", PLANK = "#a9773f", LEAF = "#4f8a3d", LEAF_DK = "#3e7a2c", FUR = "#d98a2e", BANANA = "#f5c542", SPOT = "#4a2f16", BONE = "#e8e2d2";
+  // Plane measures: the fuselage axis height, the propeller's nose, the seat behind the wing
+  const PLANE = { length: 4.4, span: 6.4, axisY: 0.95, noseZ: 2.3, seatZ: -0.95, seatY: 1.45, wheelR: 0.3, wheelX: 0.75, wheelZ: 0.45 };
+  // A rope-bound log under a leopard-fur wing, a banana-leaf fin, bone struts and a horned skull on the nose; +z is the
+  // nose, stone wheels touch the ground at the origin
+  const FUR_DK = "#c97a24";
+  const SPOTS = [[-2.6, 0.1], [-2.1, -0.35], [-1.5, 0.3], [-0.9, -0.2], [-0.3, 0.35], [0.4, -0.3], [1.0, 0.25], [1.7, -0.35], [2.3, 0.15], [2.8, -0.15], [-1.9, 0.5], [1.4, 0.5]];
+  const planeBody = cached(() => {
+    const y = PLANE.axisY, half = PLANE.length / 2, wingY = y + 0.44, wingZ = 0.35;
+    const fuselage = yToZ(lathe({
+      profile: [[0.16, -half], [0.34, -half + 0.6], [0.46, -0.4], [0.46, 0.6], [0.38, half - 0.4], [0.2, half], [0, half]],
+      segments: 8,
+      color: (t) => t < 0.34 || t > 0.66 ? WOOD : WOOD_DK
+    }));
+    for (let i = 1; i < fuselage.verts.length; i += 3) fuselage.verts[i] += y;
+    const planks = Array.from({ length: 5 }, (_, n) => box({ w: PLANE.span / 5 - 0.02, h: 0.12, d: 1.3, color: n % 2 ? FUR_DK : FUR, offset: { x: (n - 2) * PLANE.span / 5, y: wingY, z: wingZ } }));
+    return merge(
+      fuselage,
+      ...planks,
+      ...SPOTS.map(([x, z]) => box({ w: 0.22, h: 0.03, d: 0.18, color: SPOT, offset: { x, y: wingY + 0.07, z: wingZ + z } })),
+      box({ w: PLANE.span, h: 0.06, d: 0.1, color: WOOD_DK, offset: { y: wingY, z: wingZ + 0.7 } }),
+      ...[-1, 1].map((side) => box({ w: 0.6, h: 0.05, d: 1.1, color: LEAF, offset: { x: side * (PLANE.span / 2 + 0.28), y: wingY - 0.02, z: wingZ - 0.05 } })),
+      // Bone struts hold the wing, rope binds the log
+      ...[-0.7, 0.7].map((x) => box({ w: 0.1, h: 0.36, d: 0.1, color: BONE, offset: { x, y: y + 0.22, z: wingZ } })),
+      ...[-1.5, -0.1, 1.2].map((z) => box({ w: 0.98, h: 0.1, d: 0.12, color: SPOT, offset: { y: y, z } })),
+      ...[-1.5, -0.1, 1.2].map((z) => box({ w: 0.12, h: 0.98, d: 0.12, color: SPOT, offset: { y: y, z } })),
+      // Open seat on a fur cushion with a back rest, a stick in front of it
+      box({ w: 0.62, h: 0.24, d: 0.8, color: "#2b1b10", offset: { y: y + 0.36, z: PLANE.seatZ } }),
+      box({ w: 0.5, h: 0.08, d: 0.6, color: FUR, offset: { y: y + 0.5, z: PLANE.seatZ } }),
+      box({ w: 0.6, h: 0.5, d: 0.08, color: WOOD_DK, offset: { y: y + 0.55, z: PLANE.seatZ - 0.42 } }),
+      box({ w: 0.05, h: 0.5, d: 0.05, color: SPOT, offset: { y: y + 0.6, z: PLANE.seatZ + 0.55 } }),
+      // Tail: a plank stabiliser, a banana-leaf fin with a banana lashed to its tip, a bone skid
+      box({ w: 2.2, h: 0.1, d: 0.7, color: PLANK, offset: { y: y + 0.1, z: -half + 0.3 } }),
+      box({ w: 0.08, h: 0.9, d: 0.85, color: LEAF, offset: { y: y + 0.58, z: -half + 0.35 } }),
+      box({ w: 0.1, h: 0.3, d: 0.35, color: LEAF_DK, offset: { y: y + 1.05, z: -half + 0.15 } }),
+      shift(turn(box({ w: 0.1, h: 0.1, d: 0.42, color: BANANA }), 0, 0, 0.5), 0, y + 1.24, -half + 0.3),
+      box({ w: 0.1, h: 0.4, d: 0.1, color: BONE, offset: { y: 0.2, z: -half + 0.5 } }),
+      // Gear struts down to the wheels
+      ...[-0.75, 0.75].map((x) => box({ w: 0.1, h: 0.7, d: 0.1, color: WOOD_DK, offset: { x, y: y - 0.32, z: 0.45 } })),
+      box({ w: 1.6, h: 0.08, d: 0.08, color: WOOD_DK, offset: { y: y - 0.55, z: 0.45 } }),
+      // A stone engine block behind the nose, a horned skull perched on it, a hot vent
+      box({ w: 0.5, h: 0.3, d: 0.4, color: "#6b625a", offset: { y: y + 0.4, z: 1.55 } }),
+      box({ w: 0.34, h: 0.26, d: 0.3, color: BONE, offset: { y: y + 0.68, z: 1.55 } }),
+      ...[-1, 1].map((side) => box({ w: 0.06, h: 0.06, d: 0.08, color: "#141414", offset: { x: side * 0.09, y: y + 0.7, z: 1.71 } })),
+      ...[-1, 1].map((side) => shift(turn(box({ w: 0.08, h: 0.34, d: 0.08, color: BONE }), 0, side * -0.5), side * 0.2, y + 0.92, 1.5)),
+      box({ w: 0.16, h: 0.08, d: 0.16, color: "#ff8a2a", emissive: 0.8, offset: { y: y + 0.58, z: 1.28 } })
+    );
+  });
+  const propeller = cached(() => merge(
+    box({ w: 0.24, h: 0.24, d: 0.16, color: SPOT }),
+    box({ w: 0.14, h: 1.7, d: 0.06, color: WOOD_DK, offset: { z: 0.04 } }),
+    ...[-0.75, 0.75].map((y) => box({ w: 0.15, h: 0.2, d: 0.065, color: BANANA, offset: { y, z: 0.04 } }))
+  ));
+  // A plane: body, four shared stone wheels, a propeller node the scene spins
+  const plane = () => {
+    const node = createNode();
+    const body = createNode({ geometry: planeBody() });
+    const prop = createNode({ position: { x: 0, y: PLANE.axisY, z: PLANE.noseZ }, geometry: propeller() });
+    addChild(node, body, prop);
+    for (const x of [-PLANE.wheelX, PLANE.wheelX]) addChild(node, createNode({ position: { x, y: PLANE.wheelR, z: PLANE.wheelZ }, geometry: kartWheel() }));
+    return { node, prop, seat: { x: 0, y: PLANE.seatY, z: PLANE.seatZ } };
+  };
+  // A pole with a striped cone blowing along +x
+  const windsock = cached(() => {
+    const cone = yToZ(lathe({ profile: [[0.02, 0], [0.26, 0.05], [0.24, 0.5], [0.16, 0.9], [0.1, 1.3], [0, 1.3]], segments: 8, color: (t) => t < 0.25 || (t >= 0.5 && t < 0.75) ? "#e04a3a" : BONE }));
+    return merge(
+      box({ w: 0.08, h: 2.4, d: 0.08, color: WOOD_DK, offset: { y: 1.2 } }),
+      shift(turn(cone, Math.PI / 2), 0.08, 2.3, 0)
+    );
+  });
+  // A unit hoop lying in the xz plane; the scene scales each ring's node to its radius
+  const HOOP_SIDES = 6, HOOP_TUBE = 0.07;
+  const hoop = cached(() => {
+    const profile = [];
+    for (let i = 0; i <= HOOP_SIDES; i++) {
+      const a = i / HOOP_SIDES * Math.PI * 2;
+      profile.push([1 + Math.cos(a) * HOOP_TUBE, Math.sin(a) * HOOP_TUBE]);
+    }
+    return noShadow(lathe({ profile, segments: 28, color: (t) => t < 0.5 ? "#ffd27a" : "#e0b53a", emissive: 0.75 }));
+  });
+  // The canopy: twelve gores in the crew's colours over a dome, lines down to the harness at the origin
+  const CANOPY = { radius: 3.1, rise: 2.8, gores: 12 };
+  const CANOPY_PROFILE = [[0, 1.55], [0.9, 1.45], [1.9, 1.15], [2.7, 0.65], [3.1, 0]];
+  const GORES = [FUR, BANANA, FUR, SPOT].map(hexToRgb);
+  const GORES_INNER = GORES.map((c) => c.map((v) => Math.round(v * 0.55)));
+  const canopy = cached(() => {
+    const geo = { verts: [], faces: [], lines: [] };
+    const vert = (x, y, z) => {
+      geo.verts.push(x, y, z);
+      return geo.verts.length / 3 - 1;
+    };
+    const rings = CANOPY_PROFILE.map(([r, y]) => Array.from({ length: CANOPY.gores }, (_, s) => {
+      const a = s / CANOPY.gores * Math.PI * 2;
+      return vert(Math.cos(a) * r, CANOPY.rise + y, Math.sin(a) * r);
+    }));
+    for (let p = 0; p < rings.length - 1; p++) {
+      for (let s = 0; s < CANOPY.gores; s++) {
+        const s2 = (s + 1) % CANOPY.gores, c = GORES[s % GORES.length], inner = GORES_INNER[s % GORES.length];
+        if (p === 0) {
+          geo.faces.push({ i: [rings[0][0], rings[1][s2], rings[1][s]], color: c, emissive: 0 });
+          geo.faces.push({ i: [rings[0][0], rings[1][s], rings[1][s2]], color: inner, emissive: 0 });
+          continue;
+        }
+        geo.faces.push({ i: [rings[p][s], rings[p + 1][s], rings[p + 1][s2], rings[p][s2]], color: c, emissive: 0 });
+        geo.faces.push({ i: [rings[p][s], rings[p][s2], rings[p + 1][s2], rings[p + 1][s]], color: inner, emissive: 0 });
+      }
+    }
+    const harness = vert(0, 0.35, 0), lineColor = hexToRgb(BONE), rim = rings[rings.length - 1];
+    for (let s = 0; s < CANOPY.gores; s += 2) geo.lines.push({ i: [rim[s], harness], color: lineColor, emissive: 0 });
+    geo.lineWidth = 1.2;
+    return geo;
+  });
+  // The pack on the diver's back, in caveman-height units like the jetpack
+  const pack = cached(() => merge(
+    box({ w: 0.34, h: 0.4, d: 0.2, color: FUR, offset: { y: 0.22, z: -0.1 } }),
+    box({ w: 0.3, h: 0.14, d: 0.22, color: BANANA, offset: { y: 0.4, z: -0.1 } }),
+    ...[[-0.08, 0.14], [0.06, 0.28], [0.1, 0.1]].map(([x, y]) => box({ w: 0.06, h: 0.06, d: 0.03, color: SPOT, offset: { x, y, z: -0.21 } })),
+    ...[-0.12, 0.12].map((x) => box({ w: 0.06, h: 0.42, d: 0.26, color: SPOT, offset: { x, y: 0.22, z: 0.02 } })),
+    box({ w: 0.08, h: 0.06, d: 0.08, color: "#e04a3a", emissive: 0.3, offset: { x: 0.16, y: 0.05, z: -0.05 } })
+  ));
+  // A painted bullseye on the meadow
+  const target = cached(() => noShadow(lathe({ profile: [[0, 0.02], [0.7, 0.02], [1.4, 0.02], [2.1, 0.02], [2.8, 0.02], [3.4, 0.02]], segments: 24, color: (t) => Math.round(t * 4) % 2 ? "#e04a3a" : "#f3efe4", emissive: 0.15 })));
+  // Where the plane parks, a little nose up, clear of the crest in front of it
+  const ROOF_BACK = -3.7, PARK_PITCH = -0.16;
+  // The cave sign at two fifths, standing on two pegs driven into the roof
+  const SIGN_SCALE = 0.42, PEG_H = 0.5;
+  const roofSign = cached(() => {
+    const sign = caveSign("Ooga Drop"), board = { verts: sign.verts.slice(), faces: sign.faces, lines: sign.lines };
+    const lift = PEG_H + sign.signHeight * SIGN_SCALE * 0.5;
+    for (let i = 0; i < board.verts.length; i += 3) {
+      board.verts[i] *= SIGN_SCALE;
+      board.verts[i + 1] = board.verts[i + 1] * SIGN_SCALE + lift;
+      board.verts[i + 2] *= SIGN_SCALE;
+    }
+    const half = sign.signWidth * SIGN_SCALE * 0.5 - 0.12;
+    const geo = merge(board, ...[-half, half].map((x) => box({ w: 0.07, h: PEG_H + 0.2, d: 0.07, color: WOOD_DK, offset: { x, y: (PEG_H + 0.2) * 0.5 - 0.1 } })));
+    geo.signWidth = sign.signWidth * SIGN_SCALE;
+    return geo;
+  });
+  // Where the sign stands beside the parked plane, in the mouth's local frame
+  const SIGN_AT = { x: -2.7, z: ROOF_BACK + 1.4 };
+  // The hole an Ooga leaves in the meadow
+  const hole = cached(() => noShadow(lathe({ profile: [[0, 0.03], [0.45, 0.03], [0.62, 0.03], [0.62, -0.02]], segments: 12, color: (t) => t < 0.5 ? "#1a120b" : "#3a2a18" })));
+  // Air rushing past, a thin line the scene stretches along the diver's velocity
+  const streak = cached(() => noShadow(box({ w: 0.03, h: 0.03, d: 1, color: "#eef3f7", emissive: 0.35 })));
+  // Where the plane parks: on the roof over a mouth's room, nose toward the meadow; shared by the hub and the scene
+  // The roof is read under both wheels, the higher one wins, and the nose-up park turns about the axle so the wheels
+  // stay on it: out.y is where the plane's origin goes at that scale
+  const roofSpot = (island, m, out = {}, scale = 1) => {
+    const ax = Math.sin(m.ry), az = Math.cos(m.ry), rx = Math.cos(m.ry), rz = -Math.sin(m.ry);
+    out.x = m.x + ax * ROOF_BACK;
+    out.z = m.z + az * ROOF_BACK;
+    const wx = ax * PLANE.wheelZ * scale, wz = az * PLANE.wheelZ * scale;
+    const left = island.surfaceAt(out.x + wx - rx * PLANE.wheelX * scale, out.z + wz - rz * PLANE.wheelX * scale);
+    const right = island.surfaceAt(out.x + wx + rx * PLANE.wheelX * scale, out.z + wz + rz * PLANE.wheelX * scale);
+    out.y = Math.max(left, right) - (PLANE.wheelR * (Math.cos(PARK_PITCH) - 1) - PLANE.wheelZ * Math.sin(PARK_PITCH)) * scale;
+    out.ry = m.ry;
+    out.ax = ax;
+    out.az = az;
+    return out;
+  };
+  BL.dropModels = { PLANE, CANOPY, ROOF_BACK, PARK_PITCH, SIGN_AT, roofSign, plane, planeBody, propeller, windsock, hoop, canopy, pack, target, streak, hole, roofSpot };
+})();
+
 // ---- js/scene-hub.js ----
 (() => {
   "use strict";
   const BL = window.BL = window.BL || {};
-  const { math, models, contributors, donations, qr, terrain, hubModels, caves, daylight, game: gameMod, hud: hudMod, interact: interactMod, pilot: pilotMod, fx: fxMod, crew: crewMod, pile: pileMod, crates: cratesMod, critters: crittersMod } = BL;
+  const { math, models, contributors, donations, qr, terrain, hubModels, dropModels, caves, daylight, game: gameMod, hud: hudMod, interact: interactMod, pilot: pilotMod, fx: fxMod, crew: crewMod, pile: pileMod, crates: cratesMod, critters: crittersMod } = BL;
   const { lerp, ease, fnv1a, mulberry32 } = math;
   const { createNode, addChild, removeChild, createCamera, addTween, stepTweens, tweenCount, traverseVisible } = BL.scene;
   const { EAT_RATE } = crewMod;
@@ -11406,8 +11824,8 @@ void main() {
   const JETPACK_SAFE = { x: 0, z: 0 };
   // Pulse the hiding prop when the hunt stalls
   const HINT_AFTER = 120, HINT_EVERY = 12, HINT_PULSE = 1.6, HINT_MAX = 0.9;
-  // Reach at which a caveman is inside a cave
-  const TUNNEL_REACH = 2.2;
+  // Reach at which a caveman is inside a cave, or at the plane on the roof
+  const TUNNEL_REACH = 2.2, LAUNCH_REACH = 2.6;
   const MATRIX_TYPES = 8;
   const MATRIX_RAIN_GAP = 0.19;
   const MATRIX_SURFACE_PITCH = 0.12, MATRIX_SURFACE_GAP = 0.13, MATRIX_GLYPH_HZ = 20;
@@ -11464,7 +11882,7 @@ void main() {
   const ALTAR_HEIGHT = 0.34, ALTAR_BLOCK_WIDTH = 0.2, ALTAR_BLOCK_ARC = 0.3, ALTAR_RING_GAP = 0.02, ALTAR_MAX_BLOCKS = 512;
   // Ripen time and odds for a dropped banana
   const RIPEN = 25, TREE_CHANCE = 0.5, BUSH_CHANCE = 0.25;
-  const PROP_TIPS = { tree: "Tree · shake it", bush: "Bush · rustle it", rock: "Rock · solid", crate: "Crate · locked", barrel: "Barrel · empty", flower: "Flowers", torch: "Torch · warm", firepit: "Fire pit", bedroll: "Somebody's bed", ladder: "Ladder · wobbly", dock: "Dock · creaky", jetpack: "Jetpack · walk an Ooga into it", gate: null };
+  const PROP_TIPS = { tree: "Tree · shake it", bush: "Bush · rustle it", rock: "Rock · solid", crate: "Crate · locked", barrel: "Barrel · empty", flower: "Flowers", torch: "Torch · warm", firepit: "Fire pit", bedroll: "Somebody's bed", ladder: "Ladder · wobbly", dock: "Dock · creaky", jetpack: "Jetpack · walk an Ooga into it", plane: "Ooga Drop · tap to fly", sign: "Ooga Drop · the plane flies from here", windsock: "Windsock · a fair wind", gate: null };
   const MATRIX_LIVING_PROPS = new Set(["tree"]);
   const BUSH_WORDS = ["Something rustles.", "A beetle. Ooga leaves it.", "Just a bush."];
   const LEAF = models.particleGeometry("#4a8530", 0.12, 0);
@@ -11503,6 +11921,7 @@ void main() {
   const labels = [];
   const spots = [];
   const openMouths = [];
+  const launchers = [];
   const props = [];
   const scenery = [];
   const sceneryClaims = [];
@@ -11855,9 +12274,9 @@ void main() {
       }
     }
     BL.scene.updateWorld(group);
-    const visit = (node, inheritedLiving = false, inheritedEmissive = false) => {
-      const living = inheritedLiving || !!node.matrixLiving, emissiveLiving = inheritedEmissive || !!node.matrixEmissiveLiving;
-      if (node.geometry && !node.geometry.matrixGlyph && !node.geometry.matrixLocalGlyphSurface && !node.mirror) {
+    const visit = (node, inheritedLiving = false, inheritedEmissive = false, inheritedExterior = false) => {
+      const living = inheritedLiving || !!node.matrixLiving, emissiveLiving = inheritedEmissive || !!node.matrixEmissiveLiving, exterior = inheritedExterior || !!node.matrixExterior;
+      if (node.geometry && !node.geometry.matrixGlyph && !node.geometry.matrixLocalGlyphSurface && !node.mirror && !exterior) {
         const original = node.geometry, faces = [], transform = node.world;
         let owned = false;
         for (let f = 0; f < original.faces.length; f++) {
@@ -11876,9 +12295,9 @@ void main() {
             owned = true;
           } else faces.push(face);
         }
-        if (owned) node.geometry = { ...original, faces };
+        if (owned) node.geometry = { ...original, faces, matrixSourceGeometry: original };
       }
-      for (let i = 0; i < node.children.length; i++) visit(node.children[i], living, emissiveLiving);
+      for (let i = 0; i < node.children.length; i++) visit(node.children[i], living, emissiveLiving, exterior);
     };
     visit(group);
     for (let glyph = 0; glyph < MATRIX_TYPES; glyph++) {
@@ -12227,6 +12646,26 @@ void main() {
       const wheels = createNode({ position: { x: -1.7, y: 0, z: -2.6 } });
       for (let i = 0; i < 3; i++) addChild(wheels, createNode({ position: { x: 0, y: 0.12 + i * 0.24, z: 0 }, rotation: { x: 0, y: 0, z: Math.PI / 2 }, geometry: BL.raceModels.kartWheel() }));
       addChild(group, plinth, kart.node, wheels, createNode({ position: { x: 1.7, y: 0, z: -3 }, rotation: { x: 0, y: 0.3, z: 0 }, geometry: hubModels.woodCrate() }), createNode({ position: { x: 1.9, y: 0, z: -1.9 }, geometry: hubModels.barrel() }));
+      // The Ooga Drop plane parks on the roof over the room, nose toward the meadow, a windsock beside it
+      const roof = dropModels.roofSpot(island, m, {}, 0.8);
+      const plane = dropModels.plane();
+      Object.assign(plane.node.position, { x: 0, y: roof.y - m.floorY, z: dropModels.ROOF_BACK });
+      Object.assign(plane.node.scale, { x: 0.8, y: 0.8, z: 0.8 });
+      plane.node.rotation.x = dropModels.PARK_PITCH;
+      plane.node.matrixExterior = true;
+      const sockX = 3.2, sockZ = dropModels.ROOF_BACK + 0.6;
+      const sock = createNode({ position: { x: sockX, y: roof.y - m.floorY, z: sockZ }, geometry: dropModels.windsock() });
+      sock.matrixExterior = true;
+      addChild(group, plane.node, sock);
+      addProp("plane", plane.node.children[0], roof.x, roof.z, 2.6).roof = roof;
+      addProp("windsock", sock, m.x + ax * sockZ + Math.cos(m.ry) * sockX, m.z + az * sockZ - Math.sin(m.ry) * sockX, 1);
+      const signX = m.x + ax * dropModels.SIGN_AT.z + Math.cos(m.ry) * dropModels.SIGN_AT.x, signZ = m.z + az * dropModels.SIGN_AT.z - Math.sin(m.ry) * dropModels.SIGN_AT.x;
+      const sign = createNode({ position: { x: dropModels.SIGN_AT.x, y: island.surfaceAt(signX, signZ) - m.floorY, z: dropModels.SIGN_AT.z }, geometry: dropModels.roofSign() });
+      sign.matrixExterior = true;
+      addChild(group, sign);
+      addProp("sign", sign, signX, signZ, 1);
+      claim(roof.x, roof.z, 3.8);
+      launchers.push(roof);
     } else if (slot.status === "open") {
       for (const x of [-1.3, 1.3]) addChild(group, createNode({ position: { x, y: 0, z: -3.5 }, geometry: hubModels.caveShelves() }));
     } else if (slot.status === "mirror") {
@@ -12765,6 +13204,13 @@ void main() {
       case "gate":
         hud.toast(`${caves.gate.name} · leads nowhere yet`);
         break;
+      case "plane":
+      case "sign":
+        enterLaunch();
+        break;
+      case "windsock":
+        hud.toast("A fair wind for a drop.");
+        break;
       default:
         break;
     }
@@ -12791,13 +13237,12 @@ void main() {
     useProp(best);
     return true;
   };
-  // Dolly onto the mouth, then enter the cave
-  const enterCave = (slot) => {
+  // Dolly onto a view, then change scene
+  const enterScene = (view, id) => {
     if (entering) return;
     entering = true;
     pilot.release(true);
     hud.tooltip.hide();
-    const view = presets[slot.scene];
     const orbit = pilot.orbit;
     const from = { x: orbit.tx, y: orbit.ty, z: orbit.tz, dist: orbit.dist, yaw: orbit.yaw };
     const turn = Math.atan2(Math.sin(view.yaw - from.yaw), Math.cos(view.yaw - from.yaw));
@@ -12812,8 +13257,15 @@ void main() {
         orbit.tz = lerp(from.z, view.target.z, k);
         orbit.dist = lerp(from.dist, ENTER_DIST, k);
         orbit.yaw = from.yaw + turn * k;
-      }, done: () => go(slot.scene)
+      }, done: () => go(id)
     });
+  };
+  const enterCave = (slot) => enterScene(presets[slot.scene], slot.scene);
+  // The Ooga at the wheel flies the plane
+  const enterLaunch = () => {
+    if (entering) return;
+    world.pilot = pilot.player ? pilot.player.traits.name : null;
+    enterScene(presets.drop, "drop");
   };
   const onTap = (hit) => {
     if (!hit) return;
@@ -13077,6 +13529,8 @@ void main() {
     crew.update(dt, elapsed);
     pile.update(dt);
     const player = pilot.player;
+    const continuingPlayer = !!player && caveEntryPlayer === player;
+    const previousPlayerX = PLAYER_PREVIOUS.x, previousPlayerZ = PLAYER_PREVIOUS.z;
     updatePlayerCave(player);
     // Pulse the prop if it still hides the jetpack
     if (stash) {
@@ -13090,14 +13544,24 @@ void main() {
       jetpack.node.position.y = JETPACK_HOVER + Math.sin(elapsed * 2) * 0.09;
       if (player && !player.jet && Math.hypot(player.root.position.x - jetpack.x, player.root.position.z - jetpack.z) < JETPACK_REACH) collectJetpack(player);
     }
-    // Walking into an open cave enters it, flying or standing on its roof does not
-    if (player && playerCaveIndex && !entering && player.hop < 1) {
+    // Walking into an open cave enters it, flying or standing on its roof does not.
+    // The drop plane is deliberately on that roof and uses its own proximity gate.
+    if (player && !entering && player.hop < 1) {
       const p = player.root.position;
       const y = p.y - player.baseY;
-      const overhead = island.cavityAt(camera.position.x, camera.position.z, CAMERA_COLUMN) && CAMERA_COLUMN.caveIndex === playerCaveIndex && camera.position.y >= CAMERA_COLUMN.ceiling;
-      for (let i = 0; i < openMouths.length; i++) {
-        const { slot, m } = openMouths[i];
-        if (!overhead && m === CAMERA_OPENINGS[playerCaveIndex - 1].mouth && Math.abs(y - m.floorY) < 1 && Math.hypot(p.x - m.inside.x, p.z - m.inside.z) < TUNNEL_REACH) enterCave(slot);
+      if (playerCaveIndex) {
+        const playerOpening = CAMERA_OPENINGS[playerCaveIndex - 1];
+        const overhead = camera.position.y >= playerOpening.mouth.floorY + playerOpening.maxY;
+        for (let i = 0; i < openMouths.length; i++) {
+          const { slot, m } = openMouths[i];
+          if (!overhead && m === playerOpening.mouth && Math.abs(y - m.floorY) < 1 && Math.hypot(p.x - m.inside.x, p.z - m.inside.z) < TUNNEL_REACH) enterCave(slot);
+        }
+      }
+      if (!playerCaveIndex && continuingPlayer) for (let i = 0; i < launchers.length; i++) {
+        const l = launchers[i];
+        const distance = Math.hypot(p.x - l.x, p.z - l.z);
+        const previousDistance = Math.hypot(previousPlayerX - l.x, previousPlayerZ - l.z);
+        if (Math.abs(y - l.y) < 1 && distance < LAUNCH_REACH && previousDistance >= LAUNCH_REACH) enterLaunch();
       }
     }
     for (let i = 0; i < clouds.length; i++) {
@@ -13251,6 +13715,8 @@ void main() {
       }
       if (slot.status === "sleeping") bedrolls.push(m.inside);
     }
+    // The roof view the drop launch dollies onto
+    for (const roof of launchers) presets.drop = { yaw: roof.ry, pitch: 0.36, dist: 14, target: { x: roof.x, y: roof.y + 1.2, z: roof.z } };
     for (const deg of BEDROLL_DEGREES) {
       const p = spotAt(deg, BEDROLL_RADIUS, 1.4);
       place(hubModels.bedroll(), p.x, p.z, 0, 0.05, "bedroll", 1.1).depthBias = 0.3;
@@ -13363,7 +13829,7 @@ void main() {
         get shown() {
           return pile.shown;
         },
-        island, mouths: island.mouths, labels, camera, crew, controls: pilot.controls, props, altar, path: island.path.debug,
+        island, mouths: island.mouths, labels, launchers, camera, crew, controls: pilot.controls, props, altar, path: island.path.debug,
         scenery: {
           get candidateCount() { return scenery.length; },
           get visibleCount() { return sceneryVisible; },
@@ -13551,7 +14017,7 @@ void main() {
     pilot.dispose();
     for (const node of targets) input.remove(node);
     for (const node of placed) removeChild(root, node);
-    targets.length = placed.length = claimed.length = scenery.length = sceneryClaims.length = matrixInteriors.length = clouds.length = lamps.length = entranceLights.length = fireSeats.length = sleepers.length = labels.length = spots.length = openMouths.length = props.length = 0;
+    targets.length = placed.length = claimed.length = scenery.length = sceneryClaims.length = matrixInteriors.length = clouds.length = lamps.length = entranceLights.length = fireSeats.length = sleepers.length = labels.length = spots.length = openMouths.length = launchers.length = props.length = 0;
     RENDER_OPTS.lightCount = 0;
     MATRIX_WORLD.active = MATRIX_WORLD.direction = MATRIX_WORLD.radius = 0;
     cameraCaveIndex = 0;
@@ -17398,6 +17864,1732 @@ void main() {
   BL.scenes.race = raceScene;
 })();
 
+// ---- js/skydiver.js ----
+// The skydiver: one contributor body turning freely on a quaternion, air pushing on it like a flat plate, then a canopy
+(() => {
+  "use strict";
+  const BL = window.BL = window.BL || {};
+  const { models, dropModels } = BL;
+  const { lerp, damp, quat } = BL.math;
+  const { createNode, addChild, removeChild } = BL.scene;
+  // Gravity and the two freefall terminal speeds: belly to the wind, and head down; the drag follows from them
+  const G = 9.8, TERMINAL_FLAT = 24, TERMINAL_DIVE = 45;
+  const K_SKIN = G / (TERMINAL_DIVE * TERMINAL_DIVE);
+  const K_PLATE = G / (TERMINAL_FLAT * TERMINAL_FLAT) - K_SKIN;
+  // Arms and legs steer harder than a bare plate would: the plate force's horizontal part is scaled, the vertical is not
+  const TRACK = 3.4;
+  // The weathervane outmuscles the stick, so a held input settles at an angle (about sixty-five degrees) and a released one comes back flat
+  const RATE = { pitch: 3, roll: 3, yaw: 2.2 }, RESPONSE = 6, WEATHERVANE = 3.3;
+  // Canopy: the bloom, the trimmed, dived and flared speeds, the flare reserve, the turn and the crab
+  const OPEN_T = 0.7, FORWARD = 6.5, DIVE_FORWARD = 10.5, FLARE_FORWARD = 3, SINK = 5, DIVE_SINK = 8.5, FLARE_SINK = 2.2, FLARE_MAX = 2, TURN = 1.3, CRAB = 3;
+  // How far the body's centre sits above the feet
+  const FOOT = 0.55;
+  // Under the canopy every touchdown is a landing; without one the impact chooses a crash
+  const LANDING = { tumbleSpeed: 6, spine: 0.6 };
+  const setVec = (v, x, y, z) => {
+    v.x = x;
+    v.y = y;
+    v.z = z;
+    return v;
+  };
+  const create = ({ root, traits }) => {
+    const cave = models.caveman(traits);
+    const h = traits.height, legY = cave.root.position.y;
+    const body = createNode({ quaternion: quat.create() });
+    // The body's origin is the belly, so the diver turns about its middle
+    cave.root.position.y = legY - FOOT * h;
+    const pack = createNode({ position: { x: 0, y: 0.06 * h, z: -0.18 * h }, scale: { x: h, y: h, z: h }, geometry: dropModels.pack() });
+    const canopy = createNode({ position: { x: 0, y: 0.45 * h, z: 0 }, scale: { x: 0.01, y: 0.01, z: 0.01 }, geometry: dropModels.canopy(), visible: false });
+    addChild(cave.root, pack);
+    addChild(body, cave.root, canopy);
+    addChild(root, body);
+    body.visible = false;
+    const s = {
+      phase: "idle", p: body.position, pp: { x: 0, y: 0, z: 0 }, v: { x: 0, y: 0, z: 0 }, q: body.quaternion, w: { x: 0, y: 0, z: 0 },
+      speed: 0, heading: 0, open: 0, flare: FLARE_MAX, flaring: false, steer: 0, landing: null, landT: 0, tumble: 0, slideX: 0, slideZ: 0,
+      up: new Float32Array(3), front: new Float32Array(3), right: new Float32Array(3)
+    };
+    const target = quat.create();
+    const axes = () => {
+      quat.rotateVec(s.right, s.q, 1, 0, 0);
+      quat.rotateVec(s.up, s.q, 0, 1, 0);
+      quat.rotateVec(s.front, s.q, 0, 0, 1);
+    };
+    // Sit in the plane, or stand on the roof
+    const place = (x, y, z, heading) => {
+      setVec(s.p, x, y, z);
+      setVec(s.pp, x, y, z);
+      setVec(s.v, 0, 0, 0);
+      setVec(s.w, 0, 0, 0);
+      s.heading = heading;
+      quat.fromEuler(s.q, 0, heading, 0);
+      s.phase = "idle";
+      s.open = 0;
+      s.flare = FLARE_MAX;
+      s.landing = null;
+      s.landT = 0;
+      s.tumble = 0;
+      canopy.visible = false;
+      setVec(canopy.scale, 0.01, 0.01, 0.01);
+      canopy.position.z = 0;
+      s.slideX = s.slideZ = 0;
+      body.visible = true;
+      resetLimbs();
+    };
+    // Leave the plane belly down with its speed, the head along the flight
+    const jump = (vx, vy, vz, heading) => {
+      setVec(s.v, vx, vy - 1.5, vz);
+      setVec(s.w, 0, 0, 0);
+      s.heading = heading;
+      quat.fromEuler(s.q, Math.PI / 2, heading, 0);
+      s.phase = "free";
+    };
+    const deploy = () => {
+      if (s.phase !== "free") return false;
+      s.phase = "open";
+      s.open = 0;
+      s.heading = Math.atan2(s.v.x, s.v.z);
+      if (Math.hypot(s.v.x, s.v.z) < 1) {
+        axes();
+        s.heading = Math.atan2(s.up[0], s.up[2]);
+      }
+      canopy.visible = true;
+      return true;
+    };
+    // Input: pitch, roll and yaw in -1..1, flare held
+    const freefall = (dt, input) => {
+      const v = s.v, w = s.w;
+      axes();
+      const speed = Math.hypot(v.x, v.y, v.z), F = s.front, R = s.right, U = s.up;
+      s.speed = speed;
+      // Gravity, the plate pressure along the belly normal, skin drag along the flow
+      const vn = v.x * F[0] + v.y * F[1] + v.z * F[2];
+      const plate = -K_PLATE * vn * speed, skin = -K_SKIN * speed;
+      v.x += (plate * F[0] * TRACK + skin * v.x) * dt;
+      v.y += (-G + plate * F[1] + skin * v.y) * dt;
+      v.z += (plate * F[2] * TRACK + skin * v.z) * dt;
+      // The player's rates on the body axes, plus the wind turning the belly to face it
+      // Roll right dips the right side, yaw left turns the head left, seen from behind the head
+      const pr = input.pitch * RATE.pitch, rr = input.roll * RATE.roll, yr = -input.yaw * RATE.yaw;
+      let tx = R[0] * pr + U[0] * rr + F[0] * yr, ty = R[1] * pr + U[1] * rr + F[1] * yr, tz = R[2] * pr + U[2] * rr + F[2] * yr;
+      if (speed > 1) {
+        const k = WEATHERVANE * Math.min(1, speed / TERMINAL_FLAT);
+        const wx = v.x / speed, wy = v.y / speed, wz = v.z / speed;
+        tx += (F[1] * wz - F[2] * wy) * k;
+        ty += (F[2] * wx - F[0] * wz) * k;
+        tz += (F[0] * wy - F[1] * wx) * k;
+      }
+      w.x = damp(w.x, tx, RESPONSE, dt);
+      w.y = damp(w.y, ty, RESPONSE, dt);
+      w.z = damp(w.z, tz, RESPONSE, dt);
+      quat.integrate(s.q, s.q, w.x, w.y, w.z, dt);
+    };
+    // Under the canopy the body hangs upright and the same stick flies it: pitch dives or flares, roll banks and
+    // crabs, yaw turns
+    const canopyFlight = (dt, input) => {
+      const v = s.v;
+      if (s.phase === "open") {
+        s.open += dt;
+        const k = Math.min(1, s.open / OPEN_T);
+        const bloom = 0.01 + 0.99 * (1 - (1 - k) * (1 - k));
+        setVec(canopy.scale, bloom, bloom, bloom);
+        if (k >= 1) s.phase = "canopy";
+      }
+      s.steer = input.roll;
+      // Roll is positive to the right, yaw positive to the left: both turn the way they lean
+      s.heading -= (s.steer - input.yaw) * TURN * dt;
+      const wantFlare = Math.max(input.flare ? 1 : 0, -input.pitch);
+      const flare = s.flare > 0 ? wantFlare : 0;
+      s.flaring = flare > 0.05;
+      if (s.flaring) s.flare = Math.max(0, s.flare - dt * flare);
+      else s.flare = Math.min(FLARE_MAX, s.flare + dt * 0.5);
+      const dive = Math.max(0, input.pitch);
+      const forward = lerp(lerp(FORWARD, DIVE_FORWARD, dive), FLARE_FORWARD, flare), sink = lerp(lerp(SINK, DIVE_SINK, dive), FLARE_SINK, flare);
+      const rate = s.phase === "open" ? 2.5 : 3;
+      const hx = Math.sin(s.heading), hz = Math.cos(s.heading);
+      v.x = damp(v.x, hx * forward - hz * s.steer * CRAB, rate, dt);
+      v.z = damp(v.z, hz * forward + hx * s.steer * CRAB, rate, dt);
+      v.y = damp(v.y, -sink, s.phase === "open" ? 4 : 3, dt);
+      s.speed = Math.hypot(v.x, v.y, v.z);
+      quat.fromEuler(target, 0.12, s.heading, s.steer * 0.35);
+      quat.slerpTo(s.q, target, 1 - Math.exp(-4 * dt));
+    };
+    const substep = (dt, input) => {
+      const p = s.p;
+      s.pp.x = p.x;
+      s.pp.y = p.y;
+      s.pp.z = p.z;
+      if (s.phase === "free") freefall(dt, input);
+      else if (s.phase === "open" || s.phase === "canopy") canopyFlight(dt, input);
+      else return;
+      p.x += s.v.x * dt;
+      p.y += s.v.y * dt;
+      p.z += s.v.z * dt;
+    };
+    // Touch the ground: under the canopy the diver stands it up; without one, spine first punches a hole, flat and
+    // fast tumbles, flat and slow flattens
+    const land = (groundY) => {
+      const chute = s.phase === "canopy" || s.phase === "open", h2 = Math.hypot(s.v.x, s.v.z);
+      axes();
+      if (chute) s.landing = "stand";
+      else s.landing = Math.abs(s.up[1]) > LANDING.spine ? "hole" : h2 > LANDING.tumbleSpeed ? "tumble" : "pancake";
+      s.phase = "down";
+      s.landT = 0;
+      if (h2 > 1) s.heading = Math.atan2(s.v.x, s.v.z);
+      s.slideX = s.landing === "tumble" ? s.v.x * 0.5 : 0;
+      s.slideZ = s.landing === "tumble" ? s.v.z * 0.5 : 0;
+      const headFirst = s.up[1] < 0;
+      s.p.y = groundY + FOOT * h;
+      setVec(s.v, 0, 0, 0);
+      setVec(s.w, 0, 0, 0);
+      if (s.landing === "hole") {
+        // Head first leaves the legs kicking out of the ground, feet first buries him to the belly
+        quat.fromEuler(s.q, 0, s.heading, headFirst ? Math.PI : 0);
+        s.p.y = groundY + (headFirst ? -0.25 : 0.12) * h;
+        canopy.visible = false;
+      } else if (s.landing === "pancake") {
+        quat.fromEuler(s.q, Math.PI / 2, s.heading, 0);
+        s.p.y = groundY + 0.1 * h;
+        canopy.visible = false;
+      } else quat.fromEuler(s.q, 0, s.heading, 0);
+      return s.landing;
+    };
+    const resetLimbs = () => {
+      const parts = cave.parts;
+      Object.assign(parts.armL.rotation, { x: -0.2, y: 0, z: -0.12 });
+      Object.assign(parts.armR.rotation, { x: -0.2, y: 0, z: 0.12 });
+      Object.assign(parts.legL.rotation, { x: 0, y: 0, z: 0 });
+      Object.assign(parts.legR.rotation, { x: 0, y: 0, z: 0 });
+      Object.assign(parts.head.rotation, { x: 0, y: 0, z: 0 });
+      Object.assign(cave.root.rotation, { x: 0, y: 0, z: 0 });
+      cave.root.position.y = legY - FOOT * h;
+      parts.torso.scale.x = parts.torso.scale.z = cave.traits.belly;
+      parts.torso.scale.y = 1;
+      parts.snack.visible = false;
+      parts.gun.visible = false;
+    };
+    // Limbs by phase, once a frame
+    const pose = (dt, elapsed, input) => {
+      const parts = cave.parts;
+      if (s.phase === "idle") {
+        // Seated in the plane, hands on the stick
+        parts.legL.rotation.x = parts.legR.rotation.x = -1.45;
+        parts.armL.rotation.x = parts.armR.rotation.x = -1.05;
+        parts.armL.rotation.z = -0.25;
+        parts.armR.rotation.z = 0.25;
+        parts.head.rotation.x = 0;
+        return;
+      }
+      if (s.phase === "free") {
+        // Spread eagle, the arms and legs following the inputs, the head up into the wind
+        const flap = Math.sin(elapsed * 9) * 0.05;
+        parts.armL.rotation.x = damp(parts.armL.rotation.x, -1.15 - input.pitch * 0.4 + input.roll * 0.3, 8, dt);
+        parts.armR.rotation.x = damp(parts.armR.rotation.x, -1.15 - input.pitch * 0.4 - input.roll * 0.3, 8, dt);
+        parts.armL.rotation.z = damp(parts.armL.rotation.z, -0.95 + flap, 8, dt);
+        parts.armR.rotation.z = damp(parts.armR.rotation.z, 0.95 - flap, 8, dt);
+        parts.legL.rotation.x = damp(parts.legL.rotation.x, -0.5 + input.pitch * 0.3, 8, dt);
+        parts.legR.rotation.x = damp(parts.legR.rotation.x, -0.5 + input.pitch * 0.3, 8, dt);
+        parts.legL.rotation.z = damp(parts.legL.rotation.z, -0.35, 8, dt);
+        parts.legR.rotation.z = damp(parts.legR.rotation.z, 0.35, 8, dt);
+        parts.head.rotation.x = damp(parts.head.rotation.x, -0.45, 8, dt);
+        parts.head.rotation.y = damp(parts.head.rotation.y, -input.yaw * 0.3, 8, dt);
+        return;
+      }
+      if (s.phase === "open" || s.phase === "canopy") {
+        // Hanging in the harness, arms up on the toggles, the legs dangling
+        parts.armL.rotation.x = damp(parts.armL.rotation.x, -2.7 + (s.steer < 0 ? 0.5 : 0), 6, dt);
+        parts.armR.rotation.x = damp(parts.armR.rotation.x, -2.7 + (s.steer > 0 ? 0.5 : 0), 6, dt);
+        parts.armL.rotation.z = damp(parts.armL.rotation.z, -0.25, 6, dt);
+        parts.armR.rotation.z = damp(parts.armR.rotation.z, 0.25, 6, dt);
+        const swing = Math.sin(elapsed * 2.2) * 0.08;
+        parts.legL.rotation.x = damp(parts.legL.rotation.x, 0.25 + swing, 6, dt);
+        parts.legR.rotation.x = damp(parts.legR.rotation.x, 0.25 - swing, 6, dt);
+        parts.legL.rotation.z = damp(parts.legL.rotation.z, -0.08, 6, dt);
+        parts.legR.rotation.z = damp(parts.legR.rotation.z, 0.08, 6, dt);
+        parts.head.rotation.x = damp(parts.head.rotation.x, s.flaring ? 0.3 : 0.15, 6, dt);
+        parts.head.rotation.y = damp(parts.head.rotation.y, 0, 6, dt);
+        return;
+      }
+      if (s.phase === "down") {
+        s.landT += dt;
+        const t = s.landT;
+        if (s.landing === "hole") {
+          // Stuck, the free end waving
+          const k = Math.min(1, t / 0.5);
+          const kick = Math.sin(t * 9) * 0.5 * (1 - k);
+          parts.legL.rotation.x = 0.3 + kick;
+          parts.legR.rotation.x = 0.3 - kick;
+          parts.armL.rotation.x = parts.armR.rotation.x = -2.4 + kick;
+          return;
+        }
+        if (s.landing === "pancake") {
+          // Flattened, limbs splayed
+          const k = Math.min(1, t / 0.25);
+          parts.torso.scale.y = 1 - 0.75 * k;
+          parts.torso.scale.x = parts.torso.scale.z = 1 + 0.5 * k;
+          parts.armL.rotation.z = -1.4;
+          parts.armR.rotation.z = 1.4;
+          parts.armL.rotation.x = parts.armR.rotation.x = -1.2;
+          parts.legL.rotation.z = -0.5;
+          parts.legR.rotation.z = 0.5;
+          parts.head.rotation.x = -0.6;
+          return;
+        }
+        if (s.landing === "tumble") {
+          // Over and out, sliding to a stop and ending flat on the back
+          const decay = Math.exp(-3 * dt);
+          s.p.x += s.slideX * dt;
+          s.p.z += s.slideZ * dt;
+          s.slideX *= decay;
+          s.slideZ *= decay;
+          s.tumble = Math.min(1, t / 0.9);
+          cave.root.rotation.x = -Math.PI * 0.5 * Math.min(1, t / 0.6) * (1 + 0.6 * Math.sin(Math.min(1, t / 0.6) * Math.PI));
+          cave.root.rotation.z = Math.sin(Math.min(1, t / 0.9) * Math.PI) * 0.6;
+          cave.root.position.y = legY - FOOT * h - 0.2 * h * Math.min(1, t / 0.6);
+          parts.armL.rotation.x = parts.armR.rotation.x = -2.4;
+          parts.legL.rotation.x = parts.legR.rotation.x = 0.4;
+          canopy.visible = false;
+          return;
+        }
+        // A squat that stands back up; the stumble dips deeper and lurches forward
+        const deep = s.landing === "stumble" ? 0.32 : 0.14;
+        const squat = Math.sin(Math.min(1, t / 0.7) * Math.PI) * deep;
+        parts.torso.scale.y = 1 - squat;
+        parts.legL.rotation.x = squat * 1.6;
+        parts.legR.rotation.x = squat * 1.6;
+        cave.root.rotation.x = s.landing === "stumble" ? Math.sin(Math.min(1, t / 0.9) * Math.PI) * 0.5 : 0;
+        parts.armL.rotation.x = damp(parts.armL.rotation.x, -0.2 - squat * 2, 6, dt);
+        parts.armR.rotation.x = damp(parts.armR.rotation.x, -0.2 - squat * 2, 6, dt);
+        parts.armL.rotation.z = damp(parts.armL.rotation.z, -0.12, 6, dt);
+        parts.armR.rotation.z = damp(parts.armR.rotation.z, 0.12, 6, dt);
+        parts.head.rotation.x = damp(parts.head.rotation.x, 0, 6, dt);
+        // The canopy settles onto the ground behind the diver
+        if (canopy.visible) {
+          canopy.scale.y = Math.max(0.05, canopy.scale.y - dt * 1.4);
+          canopy.position.z = damp(canopy.position.z, -1.4, 3, dt);
+          if (canopy.scale.y <= 0.05) canopy.visible = false;
+        }
+      }
+    };
+    const hide = () => {
+      body.visible = false;
+      s.phase = "idle";
+    };
+    const dispose = () => {
+      removeChild(root, body);
+    };
+    return {
+      cave, body, canopy, state: s, FOOT: FOOT * h, place, jump, deploy, substep, land, pose, hide, dispose
+    };
+  };
+  BL.skydiver = { create, G, TERMINAL_FLAT, TERMINAL_DIVE, OPEN_T, FORWARD, DIVE_FORWARD, SINK, DIVE_SINK, FLARE_SINK, LANDING };
+})();
+
+// ---- js/drop-hud.js ----
+// Ooga Drop HUD: the launch board, the flight strip, centre calls and the results board
+(() => {
+  "use strict";
+  const BL = window.BL = window.BL || {};
+  const $ = (id) => document.getElementById(id);
+  const MEDALS = { gold: 1400, silver: 1000, bronze: 600 };
+  const formatTime = (ms) => {
+    const total = Math.max(0, Math.floor(ms));
+    const m = Math.floor(total / 60000), s = Math.floor(total / 1000) % 60, h = Math.floor(total / 10) % 100;
+    return `${m}:${String(s).padStart(2, "0")}.${String(h).padStart(2, "0")}`;
+  };
+  const medalFor = (score) => score >= MEDALS.gold ? "gold" : score >= MEDALS.silver ? "silver" : score >= MEDALS.bronze ? "bronze" : null;
+  const create = ({ roster, best, onPick }) => {
+    const el = {
+      drop: $("drop"), board: $("drop-board"), oogas: $("drop-oogas"), bestList: $("drop-best"), medal: $("drop-medal"), help: $("drop-help"),
+      strip: $("drop-strip"), alt: $("drop-alt"), rings: $("drop-rings"), ringTotal: $("drop-ring-total"), time: $("drop-time"), speed: $("drop-speed"), chute: $("drop-chute"), chuteName: $("drop-chute-name"),
+      center: $("drop-center"), notice: $("drop-notice"), results: $("drop-results"), score: $("drop-score"), summary: $("drop-summary"), boardBtn: $("drop-board-btn"), mute: $("drop-mute"), joyLook: $("joy-look")
+    };
+    const listeners = [];
+    const on = (target, type, fn) => {
+      target.addEventListener(type, fn);
+      listeners.push(() => target.removeEventListener(type, fn));
+    };
+    for (const node of [el.alt, el.rings, el.time, el.speed, el.center, el.notice, el.chuteName]) if (!node.firstChild) node.append("");
+    const selection = { racer: roster[0].name };
+    const buttons = new Map();
+    const mark = () => {
+      for (const [key, b] of buttons) b.setAttribute("aria-pressed", String(key === selection.racer));
+    };
+    const buildBoard = (stateOf) => {
+      el.oogas.replaceChildren(...roster.map((c) => {
+        const li = document.createElement("li");
+        const b = document.createElement("button");
+        b.type = "button";
+        b.dataset.racer = c.name;
+        const name = document.createElement("span");
+        name.className = "garage-name";
+        name.textContent = c.name;
+        const state = document.createElement("span");
+        state.className = "roster-state";
+        state.dataset.state = stateOf(c.name);
+        state.textContent = { working: "EATING", sleeping: "ZZZ", away: "AWAY" }[state.dataset.state];
+        b.append(name, state);
+        on(b, "click", () => {
+          b.blur();
+          selection.racer = c.name;
+          mark();
+          if (onPick) onPick(c.name);
+        });
+        li.append(b);
+        buttons.set(c.name, b);
+        return li;
+      }));
+      mark();
+      refreshBest();
+    };
+    const row = (label, value) => {
+      const li = document.createElement("li");
+      const a = document.createElement("span");
+      a.textContent = label;
+      const b = document.createElement("span");
+      b.textContent = value;
+      li.append(a, b);
+      return li;
+    };
+    const refreshBest = () => {
+      const b = best();
+      const medal = b ? medalFor(b.score) : null;
+      el.medal.hidden = !medal;
+      if (medal) {
+        el.medal.dataset.medal = medal;
+        el.medal.textContent = `${medal.toUpperCase()} · ${b.score}`;
+      }
+      el.bestList.replaceChildren(...(b
+        ? [row("Score", String(b.score)), row("Rings", `${b.rings} of ${b.ringTotal}`), row("Landing", b.landing), row("Medal", medal ? medal.toUpperCase() : "none")]
+        : [row("Score", "–"), row("Gold", `${MEDALS.gold}+`), row("Silver", `${MEDALS.silver}+`), row("Bronze", `${MEDALS.bronze}+`)]));
+    };
+    const show = (section) => {
+      el.board.hidden = section !== "board";
+      el.strip.hidden = section !== "flight";
+      el.results.hidden = section !== "results";
+      el.boardBtn.hidden = section === "board";
+      if (section !== "flight") {
+        el.center.hidden = true;
+        el.notice.hidden = true;
+      }
+    };
+    let lastAlt = -1, lastRings = -1, lastTime = -1, lastSpeed = -1, lastChute = "";
+    const setAlt = (v) => {
+      const n = Math.max(0, Math.round(v));
+      if (n === lastAlt) return;
+      lastAlt = n;
+      el.alt.firstChild.data = String(n);
+    };
+    const setRings = (hit, total) => {
+      if (hit === lastRings) return;
+      lastRings = hit;
+      el.rings.firstChild.data = String(hit);
+      el.ringTotal.textContent = `/${total}`;
+    };
+    const setTime = (ms) => {
+      const tenth = Math.floor(ms / 10);
+      if (tenth === lastTime) return;
+      lastTime = tenth;
+      el.time.firstChild.data = formatTime(ms);
+    };
+    const setSpeed = (v) => {
+      const n = Math.round(v);
+      if (n === lastSpeed) return;
+      lastSpeed = n;
+      el.speed.firstChild.data = String(n);
+    };
+    // The chute slot reads pack, then the open canopy, then flaring
+    const setChute = (state) => {
+      if (state === lastChute) return;
+      lastChute = state;
+      el.chute.dataset.item = state === "pack" ? "" : "turbo";
+      el.chuteName.firstChild.data = state;
+    };
+    let centerTimer = 0, noticeTimer = 0;
+    const center = (text, ms = 900) => {
+      el.center.firstChild.data = text;
+      el.center.hidden = !text;
+      window.clearTimeout(centerTimer);
+      if (text && ms > 0) centerTimer = window.setTimeout(() => {
+        el.center.hidden = true;
+      }, ms);
+    };
+    const notice = (text, ms = 1600) => {
+      el.notice.firstChild.data = text;
+      el.notice.hidden = !text;
+      window.clearTimeout(noticeTimer);
+      if (text && ms > 0) noticeTimer = window.setTimeout(() => {
+        el.notice.hidden = true;
+      }, ms);
+    };
+    const results = (rows, summary) => {
+      el.score.replaceChildren(...rows.map(([label, value]) => row(label, value)));
+      el.summary.textContent = summary;
+      refreshBest();
+      show("results");
+    };
+    const dispose = () => {
+      window.clearTimeout(centerTimer);
+      window.clearTimeout(noticeTimer);
+      for (const off of listeners) off();
+      el.oogas.replaceChildren();
+      el.bestList.replaceChildren();
+      el.score.replaceChildren();
+      show(null);
+      el.boardBtn.hidden = true;
+      buttons.clear();
+    };
+    return { el, selection, buildBoard, refreshBest, show, setAlt, setRings, setTime, setSpeed, setChute, center, notice, results, formatTime, medalFor, dispose };
+  };
+  BL.dropHud = { create, formatTime, medalFor, MEDALS };
+})();
+
+// ---- js/drop-audio.js ----
+// Procedural drop sound: one context made on the first gesture, a fixed voice pool gated by gain, one noise loop
+// behind the engine drone, the wind and the canopy flutter
+(() => {
+  "use strict";
+  const BL = window.BL = window.BL || {};
+  const { clamp } = BL.math;
+  const VOICES = 8;
+  const NOISE_SECONDS = 2;
+  const MASTER = 0.55;
+  // Shared with the rally, so one mute covers both caves
+  const STORAGE_KEY = "oogaboogaland.audio";
+  const NOTE = (semis) => 220 * Math.pow(2, semis / 12);
+  const create = () => {
+    let ctx = null, master = null, noise = null, ready = false, muted = false;
+    try {
+      muted = localStorage.getItem(STORAGE_KEY) === "off";
+    } catch {
+      // Storage may be unavailable
+    }
+    const voices = [];
+    let voiceNext = 0;
+    // Continuous layers, all started once and shaped by gain
+    const layers = { engine: null, engineSub: null, engineLow: null, engineGain: null, wind: null, windFilter: null, flutter: null, flutterLfo: null, rush: null };
+    // What the scene tells us each frame: the plane's speed and distance, the diver's speed, the phase
+    const state = { planeSpeed: 0, planeDistance: 0, speed: 0, falling: 0, canopy: 0, flaring: 0 };
+    const init = () => {
+      if (ctx || typeof AudioContext === "undefined") return;
+      ctx = new AudioContext();
+      master = ctx.createGain();
+      master.gain.value = muted ? 0 : MASTER;
+      master.connect(ctx.destination);
+      const filter = (type, freq, q = 1) => {
+        const f = ctx.createBiquadFilter();
+        f.type = type;
+        f.frequency.value = freq;
+        f.Q.value = q;
+        return f;
+      };
+      const gain = (value, to) => {
+        const g = ctx.createGain();
+        g.gain.value = value;
+        g.connect(to);
+        return g;
+      };
+      for (let i = 0; i < VOICES; i++) {
+        const g = gain(0, master);
+        const osc = ctx.createOscillator();
+        osc.type = "square";
+        osc.frequency.value = 220;
+        osc.connect(g);
+        osc.start();
+        voices.push({ osc, gain: g, until: 0 });
+      }
+      const buffer = ctx.createBuffer(1, Math.floor(ctx.sampleRate * NOISE_SECONDS), ctx.sampleRate);
+      const data = buffer.getChannelData(0);
+      for (let i = 0; i < data.length; i++) data[i] = Math.random() * 2 - 1;
+      noise = ctx.createBufferSource();
+      noise.buffer = buffer;
+      noise.loop = true;
+      // Wind: a band of noise that climbs with speed
+      const wind = filter("bandpass", 500, 0.5);
+      layers.windFilter = wind;
+      layers.wind = gain(0, master);
+      wind.connect(layers.wind);
+      // Canopy flutter: a higher band chopped by a slow wobble
+      const flutter = filter("bandpass", 1100, 2.2);
+      layers.flutter = gain(0, master);
+      flutter.connect(layers.flutter);
+      const lfo = ctx.createOscillator();
+      lfo.type = "sine";
+      lfo.frequency.value = 5.5;
+      const lfoGain = ctx.createGain();
+      lfoGain.gain.value = 0.02;
+      lfo.connect(lfoGain);
+      lfoGain.connect(layers.flutter.gain);
+      lfo.start();
+      layers.flutterLfo = lfo;
+      // Rush: a low whoosh for the jump and the chute opening
+      const rush = filter("lowpass", 900, 0.8);
+      layers.rush = gain(0, master);
+      rush.connect(layers.rush);
+      noise.connect(wind);
+      noise.connect(flutter);
+      noise.connect(rush);
+      noise.start();
+      // The plane: a sawtooth and a square an octave under it, a low-pass that opens with the revs
+      const engineLow = filter("lowpass", 600, 1.4);
+      layers.engineLow = engineLow;
+      layers.engineGain = gain(0, master);
+      engineLow.connect(layers.engineGain);
+      layers.engine = ctx.createOscillator();
+      layers.engine.type = "sawtooth";
+      layers.engine.frequency.value = 70;
+      layers.engine.connect(engineLow);
+      layers.engine.start();
+      layers.engineSub = ctx.createOscillator();
+      layers.engineSub.type = "square";
+      layers.engineSub.frequency.value = 35;
+      const subGain = gain(0.35, engineLow);
+      layers.engineSub.connect(subGain);
+      layers.engineSub.start();
+      ready = true;
+    };
+    // The browser only lets sound start from a gesture; the first one opens the context
+    const unlock = () => {
+      if (navigator.userActivation && !navigator.userActivation.hasBeenActive) return;
+      init();
+      if (ctx && ctx.state === "suspended") ctx.resume();
+    };
+    const voice = () => {
+      const now = ctx.currentTime;
+      let pick = voices[voiceNext];
+      for (let i = 0; i < VOICES; i++) {
+        const v = voices[(voiceNext + i) % VOICES];
+        if (v.until <= now) {
+          pick = v;
+          voiceNext = (voiceNext + i + 1) % VOICES;
+          return pick;
+        }
+      }
+      voiceNext = (voiceNext + 1) % VOICES;
+      return pick;
+    };
+    // One shaped note: type, start and end pitch, attack, hold, release, level, and a delay before it
+    const blip = (type, f0, f1, attack, hold, release, level, delay = 0) => {
+      if (!ready) return;
+      const now = ctx.currentTime + delay, v = voice();
+      v.osc.type = type;
+      v.osc.frequency.cancelScheduledValues(now);
+      v.osc.frequency.setValueAtTime(f0, now);
+      if (f1 !== f0) v.osc.frequency.exponentialRampToValueAtTime(Math.max(20, f1), now + attack + hold + release);
+      v.gain.gain.cancelScheduledValues(now);
+      v.gain.gain.setValueAtTime(0, now);
+      v.gain.gain.linearRampToValueAtTime(level, now + attack);
+      v.gain.gain.setValueAtTime(level, now + attack + hold);
+      v.gain.gain.linearRampToValueAtTime(0, now + attack + hold + release);
+      v.until = now + attack + hold + release + 0.02;
+    };
+    // A whoosh of the rush layer: level and length
+    const whoosh = (level, dur) => {
+      if (!ready) return;
+      const now = ctx.currentTime, g = layers.rush.gain;
+      g.cancelScheduledValues(now);
+      g.setValueAtTime(g.value, now);
+      g.linearRampToValueAtTime(level, now + 0.08);
+      g.linearRampToValueAtTime(0, now + dur);
+    };
+    const cues = {
+      mark: () => {
+        blip("square", NOTE(7), NOTE(7), 0.01, 0.08, 0.06, 0.2);
+        blip("square", NOTE(12), NOTE(12), 0.01, 0.14, 0.1, 0.22, 0.14);
+      },
+      jump: () => {
+        whoosh(0.18, 0.9);
+        blip("sine", NOTE(-5), NOTE(-17), 0.02, 0.1, 0.4, 0.2);
+      },
+      ring: () => {
+        blip("triangle", NOTE(12), NOTE(12), 0.005, 0.06, 0.1, 0.22);
+        blip("triangle", NOTE(16), NOTE(16), 0.005, 0.06, 0.1, 0.22, 0.08);
+        blip("triangle", NOTE(19), NOTE(24), 0.005, 0.12, 0.25, 0.24, 0.16);
+      },
+      miss: () => blip("square", NOTE(-2), NOTE(-7), 0.01, 0.06, 0.12, 0.08),
+      pull: () => {
+        blip("sine", 160, 50, 0.005, 0.08, 0.3, 0.4);
+        whoosh(0.2, 0.7);
+      },
+      open: () => blip("triangle", 90, 60, 0.01, 0.12, 0.35, 0.28, 0.25),
+      flare: () => blip("triangle", 300, 220, 0.02, 0.08, 0.16, 0.08),
+      stand: () => blip("triangle", 90, 45, 0.005, 0.05, 0.2, 0.3),
+      stumble: () => {
+        blip("triangle", 100, 50, 0.005, 0.05, 0.18, 0.3);
+        blip("triangle", 80, 40, 0.005, 0.05, 0.2, 0.22, 0.22);
+      },
+      tumble: () => {
+        blip("sawtooth", 120, 30, 0.005, 0.15, 0.5, 0.4);
+        whoosh(0.22, 0.6);
+      },
+      hole: () => {
+        blip("sine", 70, 25, 0.005, 0.2, 0.6, 0.5);
+        whoosh(0.3, 0.5);
+      },
+      pancake: () => {
+        blip("triangle", 400, 60, 0.005, 0.03, 0.25, 0.35);
+        blip("sawtooth", 90, 40, 0.005, 0.08, 0.3, 0.2, 0.03);
+      },
+      lost: () => blip("sine", NOTE(0), NOTE(-24), 0.02, 0.4, 0.9, 0.25),
+      finish: () => {
+        for (let i = 0; i < 4; i++) blip("square", NOTE([0, 4, 7, 12][i]), NOTE([0, 4, 7, 12][i]), 0.01, 0.1, 0.1, 0.22, i * 0.13);
+        blip("sawtooth", NOTE(12), NOTE(12), 0.01, 0.5, 0.4, 0.18, 0.55);
+      }
+    };
+    // Per frame: the engine follows the plane's speed and fades with its distance, the wind with the diver's speed,
+    // the flutter under the canopy
+    const update = (dt) => {
+      if (!ready) return;
+      const now = ctx.currentTime;
+      const revs = clamp(state.planeSpeed / 24, 0, 1.3);
+      const near = clamp(1 - state.planeDistance / 90, 0, 1);
+      const engine = (0.012 + revs * 0.04) * near;
+      layers.engine.frequency.setTargetAtTime(48 + revs * 70 + Math.sin(now * 9) * 3 * (1 - revs), now, 0.05);
+      layers.engineSub.frequency.setTargetAtTime(24 + revs * 35, now, 0.05);
+      layers.engineLow.frequency.setTargetAtTime(400 + revs * 1400, now, 0.06);
+      layers.engineGain.gain.setTargetAtTime(engine, now, 0.08);
+      const k = clamp(state.speed / 45, 0, 1);
+      layers.windFilter.frequency.setTargetAtTime(350 + k * 1600, now, 0.1);
+      layers.wind.gain.setTargetAtTime(state.falling * (0.01 + k * 0.1) + state.canopy * 0.012, now, 0.1);
+      layers.flutter.gain.setTargetAtTime(state.canopy * (0.025 + state.flaring * 0.02), now, 0.12);
+    };
+    const quiet = () => {
+      if (!ready) return;
+      const now = ctx.currentTime;
+      layers.engineGain.gain.setTargetAtTime(0, now, 0.05);
+      layers.wind.gain.setTargetAtTime(0, now, 0.05);
+      layers.flutter.gain.setTargetAtTime(0, now, 0.05);
+      layers.rush.gain.cancelScheduledValues(now);
+      layers.rush.gain.setTargetAtTime(0, now, 0.05);
+    };
+    const setMuted = (on) => {
+      muted = !!on;
+      if (master) master.gain.setTargetAtTime(muted ? 0 : MASTER, ctx.currentTime, 0.05);
+      try {
+        localStorage.setItem(STORAGE_KEY, muted ? "off" : "on");
+      } catch {
+        // Storage may be unavailable
+      }
+    };
+    // The scene is leaving: silence everything and close the context
+    const dispose = () => {
+      if (!ctx) return;
+      quiet();
+      ctx.close();
+      ctx = master = noise = null;
+      voices.length = 0;
+      ready = false;
+    };
+    return {
+      state, cues, unlock, update, quiet, setMuted, dispose,
+      get muted() {
+        return muted;
+      },
+      get ready() {
+        return ready;
+      },
+      get voices() {
+        return voices.length;
+      },
+      get context() {
+        return ctx;
+      }
+    };
+  };
+  BL.dropAudio = { create, VOICES };
+})();
+
+// ---- js/scene-drop.js ----
+// Ooga Drop: the skydiving scene launched from the plane on the rally cave roof
+(() => {
+  "use strict";
+  const BL = window.BL = window.BL || {};
+  const { math, models, contributors, donations, qr, terrain, hubModels, dropModels, daylight, pile: pileMod, game: gameMod, hud: hudMod, interact: interactMod, controls: controlsMod, fx: fxMod, skydiver, dropHud, dropAudio } = BL;
+  const { clamp, lerp, damp, quat, mulberry32 } = math;
+  const { createNode, addChild, removeChild, createCamera, addTween, stepTweens, tweenCount, traverseVisible } = BL.scene;
+  const { CONFETTI } = fxMod;
+  const params = new URLSearchParams(location.search);
+  const DEBUG = params.has("debug");
+  const COARSE = window.matchMedia("(pointer: coarse)").matches;
+  const hourParam = DEBUG ? parseFloat(params.get("hour")) : NaN;
+  const daylenParam = DEBUG ? parseFloat(params.get("daylen")) : NaN;
+  const dayParam = DEBUG ? parseFloat(params.get("day")) : NaN;
+  const latitudeParam = DEBUG ? parseFloat(params.get("latitude")) : NaN;
+  const islandLatitude = Number.isFinite(latitudeParam) ? Math.max(-66, Math.min(66, latitudeParam)) : daylight.ISLAND_LATITUDE_DEG;
+  const SEED = 1;
+  const METER_CAPACITY = 60;
+  const FIXED = 1 / 120, MAX_SUBSTEPS = 4;
+  // The climb: a roll along the roof, then a helix round the island up to jump height, blended from the straight run
+  const JUMP_ALT = 360, HELIX_R = 40, PLANE_SPEED = 20, HELIX_W = PLANE_SPEED / HELIX_R, ROLL_T = 1.3, CLIMB_T = 17, BLEND_T = 4, SKIP_SCALE = 4;
+  // The jump window opens once a lap when the plane passes the course start, and stays open a moment once it has
+  // The calls on the way round to the mark, in radians before it
+  const JUMP_WINDOW = 0.42, JUMP_GRACE = 1.6, JUMP_GET_READY = 3, JUMP_SOON = 1.4;
+  const NEXT_RING_PULSE = 0.1;
+  // The course: rings from the top altitude down, radii shrinking, laid on the path of a diver steering for the target at
+  // half stick, so the course is flyable by construction, with a little wander to keep the player honest
+  const RING_COUNT = 8, RING_TOP = 300, RING_BOTTOM = 118, RING_STEP = (RING_TOP - RING_BOTTOM) / (RING_COUNT - 1), RING_R0 = 8, RING_R1 = 5, RING_WANDER = 3, TARGET_R = 11, AUTOPILOT = { pitch: 0.5, yaw: 1.5, settle: 30, dogleg: 24, doglegFrom: 250, doglegTo: 170 };
+  // Off the island the fall is lost as soon as it drops past the rim; crashes and landings hold before the results
+  const PULL_ALT = 90, LOST_Y = -8, LANDED_T = 1.9, LOST_T = 1.1;
+  const SCORE = { ring: 100, land: 500, landRadius: 10, stand: 200, stumble: 50, banana: 300 };
+  const STREAKS = 160, STREAK_BOX = 18, STREAK_MIN = 9;
+  const CLOUD_HIGH = 36, CLOUD_LOW = 14;
+  // Camera distances, default elevations in radians and look-ahead per phase
+  // On the final approach to the mark the plane's eye rises and looks down ahead so the rings show below
+  const CHASE = { climbDist: 12, climbElevation: 0.3, climbAhead: 7, markDist: 3, markLift: 0.35, markAhead: 5, markDrop: 8, freeDist: 6.5, freeElevation: 1.05, freeAhead: 4, canopyDist: 8.5, canopyElevation: 0.5, canopyAhead: 2.5, eyeRate: 7, targetRate: 12 };
+  const FOV_BASE = 50 * Math.PI / 180, FOV_FAST = 72 * Math.PI / 180;
+  const TICKER_AT = { x: 0, y: 14, z: 0 };
+  const DUST = models.particleGeometry("#a3874f", 0.1, 0);
+  const DIRT = models.particleGeometry("#3a2a18", 0.12, 0);
+  const BANANA_BIT = models.particleGeometry("#f5c542", 0.08, 0.5);
+  const CLOUD_PUFF = models.particleGeometry("#eef3f7", 0.14, 0.2);
+  // Sky, light and haze, resampled from the island's clock every frame
+  const RENDER_OPTS = {
+    clear: new Float32Array(3), horizon: new Float32Array(3), zenith: new Float32Array(3), sky: new Float32Array(3), ground: new Float32Array(3), sun: new Float32Array(3), direct: new Float32Array(3),
+    light: { x: 0.55, y: 0.78, z: -0.25 }, sunDirection: { x: 0, y: 1, z: 0 }, moon: { x: 0, y: 1, z: 0 }, starMatrix: new Float32Array(9),
+    stars: 0, torch: 0, day: 1, twilight: 0, lampFactor: 0, directStrength: 1, sunStrength: 1, moonStrength: 0, ambientFloor: 0.18, diffuseFloor: 0, shadowStrength: 1, shadowFloor: 0, shadowBias: 0.002,
+    time: 0, bloomStrength: 0.5, lights: new Float32Array(80), lightCount: 0, shadowCenter: { x: 0, y: 0, z: 0 }, shadowExtent: 34, fog: null, fogNear: 240, fogFar: 760
+  };
+  RENDER_OPTS.starMatrix[0] = RENDER_OPTS.starMatrix[4] = RENDER_OPTS.starMatrix[8] = 1;
+  RENDER_OPTS.fog = RENDER_OPTS.horizon;
+  const setVec = (v, x, y, z) => {
+    v.x = x;
+    v.y = y;
+    v.z = z;
+    return v;
+  };
+  const wrap = (a) => Math.atan2(Math.sin(a), Math.cos(a));
+  const smooth = (t) => {
+    const k = clamp(t, 0, 1);
+    return k * k * (3 - 2 * k);
+  };
+  const mark = (name) => {
+    performance.clearMarks(`ooga:${name}`);
+    performance.mark(`ooga:${name}`);
+  };
+  // The board remembers the last pick for the page's life
+  const selection = { racer: contributors.roster[0].name };
+
+  // One visit's state, made in enter and dropped in leave
+  let renderer, game, world, go, lootEnabled, testBananas, root, camera, island, hud, dhud, hooks, input, fx, controls, audio, clock, diver, plane, streaks, mound, hole;
+  let phase = "board", jumpOpenUntil = 0, callStage = 0, markNear = 0, accumulator = 0, sceneTime = 0, flightTime = 0, landedAt = 0, score = 0, ringsHit = 0, pulled = false, jumpOpen = false, result = null;
+  let meterTimer = 0, stateTimer = 0, hintTimer = 0;
+  const placed = [];
+  const clouds = [];
+  const rings = [];
+  const roof = { x: 0, y: 0, z: 0, ry: 0, ax: 0, az: 1 };
+  const landingSpot = { x: 0, z: 0, y: 0 };
+  // A drag swings the eye any distance round the subject; left alone for a moment in flight it eases back behind
+  const CAM_RETURN_AFTER = 1.5, CAM_RETURN_RATE = 4;
+  const cam = { x: 0, y: 0, z: 0, tx: 0, ty: 0, tz: 0, warm: false, offset: 0, tilt: 0, dragAt: -9, boardYaw: 0, boardLift: 0, shake: 0 };
+  const EYE = { x: 0, y: 0, z: 0 };
+  // Where the diver's head points across the ground, kept through a head-down dive so the view never swings
+  const HEAD = { x: 0, z: 1 };
+  const ctrl = { pitch: 0, roll: 0, yaw: 0, flare: false };
+  const NO_INPUT = { pitch: 0, roll: 0, yaw: 0, flare: false };
+  const AUTO = { pitch: 0, roll: 0, yaw: 0, flare: false };
+  const PATH = { x: 0, y: 0, z: 0 }, PATH_AHEAD = { x: 0, y: 0, z: 0 }, SEAT = new Float32Array(3);
+  const planeState = { t: 0, speed: 0, yaw: 0, pitch: 0, roll: 0, angle: 0, alt: 0, vx: 0, vy: 0, vz: 0 };
+  let jumpAngle = 0;
+  const jumpT = ROLL_T + CLIMB_T;
+  const dropScene = {
+    id: "drop", renderOpts: RENDER_OPTS, root: null, camera: null, input: null, debug: null,
+    get inMotion() {
+      return phase === "climb" || phase === "air" || phase === "down" || phase === "lost" || fx.inMotion;
+    }
+  };
+
+  // ---------- the plane's path ----------
+  // Position along the climb at time t, written into out
+  const pathAt = (t, out) => {
+    const roll = Math.min(t, ROLL_T), accel = PLANE_SPEED / ROLL_T;
+    let along = 0.5 * accel * roll * roll;
+    if (t > ROLL_T) along += PLANE_SPEED * (t - ROLL_T);
+    const sx = roof.x + roof.ax * along, sz = roof.z + roof.az * along;
+    const rise = (JUMP_ALT - roof.y) * smooth((t - ROLL_T) / CLIMB_T);
+    const y = roof.y + rise;
+    if (t <= ROLL_T) return setVec(out, sx, y, sz);
+    const angle = planeAngle(t);
+    const hx = Math.sin(angle) * HELIX_R, hz = -Math.cos(angle) * HELIX_R;
+    const k = smooth((t - ROLL_T) / BLEND_T);
+    return setVec(out, lerp(sx, hx, k), y, lerp(sz, hz, k));
+  };
+  const planeAngle = (t) => Math.atan2(roof.x, -roof.z) + Math.PI + HELIX_W * Math.max(0, t - ROLL_T);
+  const flyPlane = (dt) => {
+    const s = planeState;
+    s.t += dt;
+    pathAt(s.t, PATH);
+    pathAt(s.t + 0.02, PATH_AHEAD);
+    s.vx = (PATH_AHEAD.x - PATH.x) / 0.02;
+    s.vy = (PATH_AHEAD.y - PATH.y) / 0.02;
+    s.vz = (PATH_AHEAD.z - PATH.z) / 0.02;
+    const h = Math.hypot(s.vx, s.vz);
+    s.speed = Math.hypot(h, s.vy);
+    const yaw = h > 0.01 ? Math.atan2(s.vx, s.vz) : s.yaw;
+    const yawRate = dt > 0 ? wrap(yaw - s.yaw) / dt : 0;
+    s.yaw = yaw;
+    s.pitch = damp(s.pitch, h > 0.01 ? -Math.atan2(s.vy, h) : 0, 6, dt);
+    s.roll = damp(s.roll, clamp(-yawRate * s.speed / 14, -0.7, 0.7), 4, dt);
+    s.angle = planeAngle(s.t);
+    s.alt = PATH.y;
+    setVec(plane.node.position, PATH.x, PATH.y, PATH.z);
+    quat.fromEuler(plane.node.quaternion, s.pitch, s.yaw, s.roll);
+    plane.prop.rotation.z += dt * (8 + s.speed * 2);
+  };
+  const parkPlane = () => {
+    const s = planeState;
+    s.t = 0;
+    s.speed = s.roll = 0;
+    s.pitch = dropModels.PARK_PITCH;
+    s.yaw = roof.ry;
+    s.vx = s.vy = s.vz = 0;
+    s.angle = planeAngle(0);
+    s.alt = roof.y;
+    setVec(plane.node.position, roof.x, roof.y, roof.z);
+    quat.fromEuler(plane.node.quaternion, s.pitch, roof.ry, 0);
+  };
+  // The diver rides in the seat while the plane flies
+  const seatDiver = () => {
+    const seat = plane.seat;
+    quat.rotateVec(SEAT, plane.node.quaternion, seat.x, seat.y + 0.12, seat.z);
+    setVec(diver.state.p, plane.node.position.x + SEAT[0], plane.node.position.y + SEAT[1], plane.node.position.z + SEAT[2]);
+    quat.copy(diver.state.q, plane.node.quaternion);
+  };
+
+  // ---------- the course ----------
+  // Rings hang along the fall a hands-off diver would make from the jump, bending toward the target
+  const layCourse = () => {
+    const rand = mulberry32(SEED + 41);
+    jumpAngle = planeAngle(jumpT);
+    pathAt(jumpT, PATH);
+    pathAt(jumpT + 0.02, PATH_AHEAD);
+    const vx = (PATH_AHEAD.x - PATH.x) / 0.02, vy = (PATH_AHEAD.y - PATH.y) / 0.02, vz = (PATH_AHEAD.z - PATH.z) / 0.02;
+    // The target sits on the meadow on the jump's side of the island
+    setVec(landingSpot, Math.sin(jumpAngle) * TARGET_R, 0, -Math.cos(jumpAngle) * TARGET_R);
+    landingSpot.y = island.heightAt(landingSpot.x, landingSpot.z);
+    // Fly the reference fall without frames: the diver turns its head toward the target and tracks at half stick,
+    // easing off as it arrives over it; each ring sits on that path at its height
+    diver.place(PATH.x, PATH.y, PATH.z, Math.atan2(vx, vz));
+    diver.jump(vx, vy, vz, Math.atan2(vx, vz));
+    const s = diver.state;
+    let head = Math.atan2(vx, vz);
+    // High up the reference aims beside the target and slides its aim onto it through a band of altitude, so the
+    // course doglegs gently before it lines up
+    const legX = landingSpot.x + Math.cos(jumpAngle) * AUTOPILOT.dogleg, legZ = landingSpot.z + Math.sin(jumpAngle) * AUTOPILOT.dogleg;
+    for (let i = 0, guard = 0; i < RING_COUNT && guard < 6000; guard++) {
+      const k = smooth((AUTOPILOT.doglegFrom - s.p.y) / (AUTOPILOT.doglegFrom - AUTOPILOT.doglegTo));
+      const dx = lerp(legX, landingSpot.x, k) - s.p.x, dz = lerp(legZ, landingSpot.z, k) - s.p.z, dist = Math.hypot(dx, dz);
+      if (Math.hypot(s.up[0], s.up[2]) > 0.3) head = Math.atan2(s.up[0], s.up[2]);
+      const diff = wrap(Math.atan2(dx, dz) - head);
+      AUTO.yaw = clamp(diff * AUTOPILOT.yaw, -1, 1);
+      AUTO.pitch = Math.abs(diff) < 0.6 ? AUTOPILOT.pitch * Math.min(1, dist / AUTOPILOT.settle) : 0;
+      diver.substep(FIXED, AUTO);
+      const y = RING_TOP - i * RING_STEP;
+      if (s.p.y > y) continue;
+      const ring = rings[i];
+      const wander = RING_WANDER * i / (RING_COUNT - 1), a = rand() * Math.PI * 2;
+      ring.x = s.p.x + Math.cos(a) * wander * rand();
+      ring.z = s.p.z + Math.sin(a) * wander * rand();
+      ring.y = y;
+      ring.r = lerp(RING_R0, RING_R1, i / (RING_COUNT - 1));
+      i++;
+    }
+    for (const ring of rings) {
+      setVec(ring.node.position, ring.x, ring.y, ring.z);
+      setVec(ring.node.scale, ring.r, ring.r, ring.r);
+    }
+    diver.hide();
+  };
+  const resetRings = () => {
+    for (const ring of rings) {
+      ring.hit = false;
+      ring.node.glow = 1;
+      setVec(ring.node.scale, ring.r, ring.r, ring.r);
+    }
+  };
+  let ringIndex = 0;
+  const hitRing = (ring, i) => {
+    ring.hit = true;
+    ring.node.glow = 0.2;
+    ringsHit++;
+    score += SCORE.ring;
+    fx.burst(ring.x, ring.y, ring.z, 14, CONFETTI, 3);
+    audio.cues.ring();
+    dhud.center(`+${SCORE.ring}`, 700);
+    dhud.notice(i === RING_COUNT - 1 ? "last ring!" : `ring ${ringsHit}`, 1200);
+    cam.shake = Math.max(cam.shake, 0.25);
+    addTween({
+      dur: 0.5, ease: math.ease.outBack, update: (k) => {
+        const s = ring.r * (1 + 0.18 * Math.sin(k * Math.PI));
+        setVec(ring.node.scale, s, s, s);
+      }
+    });
+  };
+  // A substep's segment crossing a ring's plane inside its radius counts
+  const checkRings = () => {
+    const s = diver.state, p = s.p, pp = s.pp;
+    while (ringIndex < RING_COUNT && rings[ringIndex].y > pp.y) ringIndex++;
+    while (ringIndex < RING_COUNT && rings[ringIndex].y > p.y) {
+      const ring = rings[ringIndex];
+      const t = (pp.y - ring.y) / Math.max(1e-6, pp.y - p.y);
+      const qx = pp.x + (p.x - pp.x) * t, qz = pp.z + (p.z - pp.z) * t;
+      if ((qx - ring.x) ** 2 + (qz - ring.z) ** 2 < ring.r * ring.r) hitRing(ring, ringIndex);
+      else {
+        audio.cues.miss();
+        setVec(ring.node.scale, ring.r, ring.r, ring.r);
+      }
+      ringIndex++;
+    }
+  };
+
+  // ---------- ground ----------
+  // The island's walkable surface, the mound of bananas at its middle, nothing off the edge
+  const groundAt = (x, z) => {
+    if (!island.onLand(x, z)) return -Infinity;
+    const r = Math.hypot(x, z);
+    if (r < mound.node.scale.x) return mound.y + mound.height * Math.max(0, 1 - (r / mound.node.scale.x) ** 2);
+    if (r < mound.radius) return mound.y;
+    return island.surfaceAt(x, z);
+  };
+  const onBanana = (x, z) => Math.hypot(x, z) < mound.radius;
+
+  // ---------- flow ----------
+  const toBoard = () => {
+    phase = "board";
+    parkPlane();
+    diver.place(roof.x, roof.y, roof.z, roof.ry);
+    seatDiver();
+    resetRings();
+    ringIndex = 0;
+    score = ringsHit = 0;
+    pulled = jumpOpen = false;
+    callStage = markNear = 0;
+    jumpOpenUntil = 0;
+    result = null;
+    flightTime = 0;
+    streaks.node.instanceCount = 0;
+    streaks.node.visible = false;
+    hole.visible = false;
+    cam.boardYaw = cam.boardLift = 0;
+    cam.offset = cam.tilt = 0;
+    cam.warm = false;
+    dhud.show("board");
+    hud.el.act.hidden = true;
+    hud.setSubtitle("Ooga Drop · the roof");
+    boardView();
+  };
+  const startFlight = () => {
+    toBoard();
+    phase = "climb";
+    dhud.show("flight");
+    dhud.setRings(0, RING_COUNT);
+    dhud.setChute("pack");
+    dhud.setTime(0);
+    hud.el.act.hidden = !COARSE;
+    hud.setAct("Jump!");
+    hud.setSubtitle("Ooga Drop · climbing");
+    window.clearTimeout(hintTimer);
+    hud.hint("", 0);
+    dhud.notice("hold Space to hurry the climb", 2600);
+    fx.say(diver.cave, "Ooga fly!", 1.6);
+  };
+  const jump = () => {
+    if (phase !== "climb" || !jumpOpen) return false;
+    seatDiver();
+    const s = planeState;
+    diver.jump(s.vx, s.vy, s.vz, s.yaw);
+    phase = "air";
+    accumulator = 0;
+    ringIndex = 0;
+    flightTime = 0;
+    dhud.center("", 0);
+    dhud.notice("", 1);
+    cam.offset = cam.tilt = 0;
+    HEAD.x = Math.sin(s.yaw);
+    HEAD.z = Math.cos(s.yaw);
+    hud.setAct("Pull!");
+    hud.setSubtitle("Ooga Drop · freefall");
+    fx.say(diver.cave, "OOGA GERONIMO!", 1.8);
+    audio.cues.jump();
+    cam.warm = false;
+    return true;
+  };
+  const deploy = () => {
+    if (phase !== "air" || !diver.deploy()) return false;
+    dhud.setChute("canopy");
+    hud.setAct("Flare");
+    hud.setSubtitle("Ooga Drop · under canopy");
+    dhud.center("PULL", 700);
+    dhud.notice("", 1);
+    cam.offset = cam.tilt = 0;
+    audio.cues.pull();
+    audio.cues.open();
+    cam.shake = Math.max(cam.shake, 0.4);
+    fx.burst(diver.state.p.x, diver.state.p.y + 1.5, diver.state.p.z, 8, [CLOUD_PUFF], 2);
+    return true;
+  };
+  const landingLabel = { stand: "Stood it up", stumble: "Stumbled", tumble: "Tumbled", hole: "Went through the ground", pancake: "Flattened", lost: "Lost in the clouds" };
+  const CRASHES = { tumble: "Ooga rolled to a stop. The ground won.", hole: "Ooga went through the meadow. Ooga is a hole now.", pancake: "Ooga is a pancake now." };
+  const crashed = (landing) => landing === "tumble" || landing === "hole" || landing === "pancake";
+  const finish = (landing, dist) => {
+    phase = "results";
+    const accuracy = landing === "lost" || crashed(landing) ? 0 : Math.round(SCORE.land * clamp(1 - dist / SCORE.landRadius, 0, 1));
+    const soft = landing === "stand" ? SCORE.stand : landing === "stumble" ? SCORE.stumble : 0;
+    const banana = landing !== "lost" && !crashed(landing) && onBanana(diver.state.p.x, diver.state.p.z) ? SCORE.banana : 0;
+    score += accuracy + soft + banana;
+    const medal = dhud.medalFor(score);
+    const improved = game.recordDrop({ score, rings: ringsHit, ringTotal: RING_COUNT, landing });
+    result = { landing, dist, accuracy, soft, banana, score, medal, improved };
+    const rows = [["Rings", `${ringsHit} × ${SCORE.ring} = ${ringsHit * SCORE.ring}`], ["Landing", landing === "lost" ? landingLabel.lost : `${landingLabel[landing]} · ${dist.toFixed(1)} from the target · ${accuracy}`], ["Touchdown", `${soft}`]];
+    if (banana) rows.push(["Banana landing", `${banana}`]);
+    rows.push(["Time", dhud.formatTime(flightTime * 1000)], ["Score", `${score}${medal ? ` · ${medal.toUpperCase()}` : ""}`]);
+    dhud.results(rows, crashed(landing) ? CRASHES[landing] : landing === "lost" ? "The island went by. Try aiming at it." : `${medal ? `${medal.toUpperCase()} drop` : "A drop"}${improved ? " · new best" : ""}`);
+    hud.el.act.hidden = true;
+    hud.setSubtitle("Ooga Drop · landed");
+    if (medal) audio.cues.finish();
+    if (medal === "gold") fx.say(diver.cave, "OOGA CHAMPION!", 3);
+    else if (landing === "stand") fx.say(diver.cave, "Ooga land good.", 2);
+  };
+  const touchdown = (groundY) => {
+    const landing = diver.land(groundY);
+    phase = "down";
+    landedAt = sceneTime;
+    const p = diver.state.p, crash = crashed(landing);
+    fx.burst(p.x, groundY + 0.1, p.z, crash ? 14 : 6, [landing === "hole" ? DIRT : DUST], crash ? 2.4 : 1.2);
+    if (landing === "hole") {
+      setVec(hole.position, p.x, groundY + 0.01, p.z);
+      hole.visible = true;
+    }
+    if (onBanana(p.x, p.z)) fx.burst(p.x, groundY + 0.3, p.z, 10, [BANANA_BIT], 2);
+    dhud.center(landing === "stand" ? (onBanana(p.x, p.z) ? "GREAT" : "NICE") : landing === "hole" ? "THUD" : landing === "pancake" ? "SPLAT" : "CRASH", 1400);
+    dhud.setChute("down");
+    cam.shake = Math.max(cam.shake, crash ? 0.9 : 0.3);
+    audio.cues[landing]();
+    hud.el.act.hidden = true;
+    if (crash) fx.say(diver.cave, landing === "hole" ? "Dark in here." : landing === "pancake" ? "Ooga flat." : "Ow. Ooga bones.", 2);
+    else if (onBanana(p.x, p.z)) fx.say(diver.cave, "BANANA LANDING!", 2);
+  };
+  const lost = () => {
+    phase = "lost";
+    landedAt = sceneTime;
+    dhud.center("LOST", 1400);
+    audio.cues.lost();
+    fx.say(diver.cave, "Where island go?", 2);
+    hud.el.act.hidden = true;
+  };
+  // Space or the act button, by phase
+  const act = () => {
+    if (phase === "board") {
+      startFlight();
+      return true;
+    }
+    if (phase === "climb") {
+      if (jump()) return true;
+      dhud.notice("wait for the mark", 900);
+      return false;
+    }
+    if (phase === "air") return deploy();
+    if (phase === "results") {
+      startFlight();
+      return true;
+    }
+    return false;
+  };
+
+  // ---------- per frame ----------
+  const readInput = () => {
+    const a = controls.read();
+    ctrl.pitch = clamp(a.y - (COARSE ? 0 : a.pitch), -1, 1);
+    ctrl.roll = a.x;
+    ctrl.yaw = a.yaw;
+    ctrl.flare = a.up > 0;
+    return a;
+  };
+  const simulate = (dt) => {
+    accumulator = Math.min(accumulator + dt, FIXED * MAX_SUBSTEPS);
+    while (accumulator >= FIXED && phase === "air") {
+      accumulator -= FIXED;
+      diver.substep(FIXED, ctrl);
+      flightTime += FIXED;
+      const p = diver.state.p;
+      if (diver.state.phase === "free") checkRings();
+      const ground = groundAt(p.x, p.z);
+      if (p.y - diver.FOOT <= ground) touchdown(ground);
+      else if (p.y < LOST_Y && ground === -Infinity) lost();
+    }
+  };
+  // Air rushing past: lines fixed in the world inside a box round the diver, reseeded ahead as they fall behind
+  const updateStreaks = () => {
+    const s = diver.state, v = s.v, speed = s.speed, node = streaks.node;
+    if (phase !== "air" || speed < STREAK_MIN) {
+      node.instanceCount = 0;
+      node.visible = false;
+      return;
+    }
+    const p = s.p, data = node.instanceData;
+    const dx = v.x / speed, dy = v.y / speed, dz = v.z / speed;
+    // A perpendicular pair for the line's cross section
+    const ax = Math.abs(dy) < 0.9 ? 0 : 1, ay = Math.abs(dy) < 0.9 ? 1 : 0;
+    let px = ay * dz, py = -ax * dz, pz = ax * dy - ay * dx;
+    const pl = Math.hypot(px, py, pz) || 1;
+    px /= pl;
+    py /= pl;
+    pz /= pl;
+    const qx = dy * pz - dz * py, qy = dz * px - dx * pz, qz = dx * py - dy * px;
+    const len = clamp(speed * 0.09, 0.4, 3.2);
+    for (let i = 0; i < STREAKS; i++) {
+      let x = streaks.x[i] - p.x, y = streaks.y[i] - p.y, z = streaks.z[i] - p.z;
+      // Behind the diver, or outside the box, the streak reappears ahead
+      if (x * dx + y * dy + z * dz < -4 || Math.abs(x) > STREAK_BOX || Math.abs(y) > STREAK_BOX || Math.abs(z) > STREAK_BOX) {
+        const ahead = 4 + Math.random() * (STREAK_BOX - 4), a = Math.random() * Math.PI * 2, r = Math.random() * 12;
+        x = dx * ahead + (px * Math.cos(a) + qx * Math.sin(a)) * r;
+        y = dy * ahead + (py * Math.cos(a) + qy * Math.sin(a)) * r;
+        z = dz * ahead + (pz * Math.cos(a) + qz * Math.sin(a)) * r;
+        streaks.x[i] = p.x + x;
+        streaks.y[i] = p.y + y;
+        streaks.z[i] = p.z + z;
+      }
+      const o = i * 20;
+      data[o] = px; data[o + 1] = py; data[o + 2] = pz; data[o + 3] = 0;
+      data[o + 4] = qx; data[o + 5] = qy; data[o + 6] = qz; data[o + 7] = 0;
+      data[o + 8] = dx * len; data[o + 9] = dy * len; data[o + 10] = dz * len; data[o + 11] = 0;
+      data[o + 12] = streaks.x[i]; data[o + 13] = streaks.y[i]; data[o + 14] = streaks.z[i]; data[o + 15] = 1;
+      data[o + 16] = Math.min(1, (speed - STREAK_MIN) / 12); data[o + 17] = 0; data[o + 18] = 0; data[o + 19] = 0;
+    }
+    node.instanceCount = STREAKS;
+    node.visible = true;
+    node.instanceVersion++;
+  };
+  // The board view stands off the roof looking at the plane; a drag swings it round
+  const boardView = () => {
+    const c = Math.cos(roof.ry + cam.boardYaw), s = Math.sin(roof.ry + cam.boardYaw);
+    cam.tx = roof.x;
+    cam.ty = roof.y + 1.4;
+    cam.tz = roof.z;
+    cam.x = roof.x + s * 13 + c * 4;
+    cam.z = roof.z + c * 13 - s * 4;
+    cam.y = roof.y + 4.2 + cam.boardLift;
+    setVec(camera.position, cam.x, cam.y, cam.z);
+    setVec(camera.target, cam.tx, cam.ty, cam.tz);
+    camera.fov = FOV_BASE;
+  };
+  // The eye sits behind the subject's heading at a distance and elevation; a drag swings it round both ways, 0 puts it back
+  const orbitEye = (px, py, pz, fx, fz, dist, elevation) => {
+    const yaw = Math.atan2(fx, fz) + Math.PI + cam.offset;
+    const el = clamp(elevation + cam.tilt, -1.2, 1.5);
+    EYE.x = px + Math.sin(yaw) * Math.cos(el) * dist;
+    EYE.y = py + Math.sin(el) * dist;
+    EYE.z = pz + Math.cos(yaw) * Math.cos(el) * dist;
+    return EYE;
+  };
+  const updateCamera = (dt) => {
+    const s = diver.state, p = s.p;
+    let tx, ty, tz, fast = 0, eye = EYE;
+    if (input.orbiting) cam.dragAt = sceneTime;
+    if ((phase === "climb" || phase === "air") && sceneTime - cam.dragAt > CAM_RETURN_AFTER) {
+      cam.offset = damp(cam.offset, 0, CAM_RETURN_RATE, dt);
+      cam.tilt = damp(cam.tilt, 0, CAM_RETURN_RATE, dt);
+    }
+    if (phase === "climb") {
+      const ps = planeState, pp = plane.node.position, h = Math.hypot(ps.vx, ps.vz);
+      const fx0 = h > 0.5 ? ps.vx / h : roof.ax, fz0 = h > 0.5 ? ps.vz / h : roof.az;
+      const near = markNear, ahead = CHASE.climbAhead + near * CHASE.markAhead;
+      eye = orbitEye(pp.x, pp.y, pp.z, fx0, fz0, CHASE.climbDist + near * CHASE.markDist, CHASE.climbElevation + near * CHASE.markLift);
+      tx = pp.x + fx0 * ahead;
+      ty = pp.y + 0.6 - near * CHASE.markDrop;
+      tz = pp.z + fz0 * ahead;
+    } else if (phase === "air" && s.phase === "free") {
+      // Behind the head and above; the head's ground direction steers the view, a slide only moves it
+      const speed = Math.max(1, s.speed), hl = Math.hypot(s.up[0], s.up[2]);
+      if (hl > 0.25) {
+        HEAD.x = damp(HEAD.x, s.up[0] / hl, 6, dt);
+        HEAD.z = damp(HEAD.z, s.up[2] / hl, 6, dt);
+      }
+      eye = orbitEye(p.x, p.y, p.z, HEAD.x, HEAD.z, CHASE.freeDist, CHASE.freeElevation);
+      tx = p.x + s.v.x / speed * CHASE.freeAhead;
+      ty = p.y + s.v.y / speed * CHASE.freeAhead;
+      tz = p.z + s.v.z / speed * CHASE.freeAhead;
+      fast = clamp((speed - 18) / 27, 0, 1);
+    } else if (phase === "air" || phase === "lost") {
+      const hx = Math.sin(s.heading), hz = Math.cos(s.heading);
+      eye = orbitEye(p.x, p.y, p.z, hx, hz, CHASE.canopyDist, CHASE.canopyElevation);
+      tx = p.x + hx * CHASE.canopyAhead;
+      ty = p.y - 0.6;
+      tz = p.z + hz * CHASE.canopyAhead;
+    } else {
+      // Down or on the results the eye stays put and only watches
+      EYE.x = cam.x;
+      EYE.y = cam.y;
+      EYE.z = cam.z;
+      tx = p.x;
+      ty = p.y;
+      tz = p.z;
+    }
+    let ex = eye.x, ey = eye.y, ez = eye.z;
+    if (island.onLand(ex, ez)) ey = Math.max(ey, island.surfaceAt(ex, ez) + 0.9);
+    if (!cam.warm) {
+      cam.x = ex;
+      cam.y = ey;
+      cam.z = ez;
+      cam.tx = tx;
+      cam.ty = ty;
+      cam.tz = tz;
+      cam.warm = true;
+    } else {
+      cam.x = damp(cam.x, ex, CHASE.eyeRate, dt);
+      cam.y = damp(cam.y, ey, CHASE.eyeRate, dt);
+      cam.z = damp(cam.z, ez, CHASE.eyeRate, dt);
+      cam.tx = damp(cam.tx, tx, CHASE.targetRate, dt);
+      cam.ty = damp(cam.ty, ty, CHASE.targetRate, dt);
+      cam.tz = damp(cam.tz, tz, CHASE.targetRate, dt);
+    }
+    cam.shake = Math.max(0, cam.shake - dt * 3);
+    const jolt = cam.shake * cam.shake * 0.35;
+    setVec(camera.position, cam.x + Math.sin(sceneTime * 43) * jolt, cam.y + Math.sin(sceneTime * 37) * jolt, cam.z + Math.cos(sceneTime * 41) * jolt);
+    setVec(camera.target, cam.tx, cam.ty, cam.tz);
+    camera.fov = damp(camera.fov, lerp(FOV_BASE, FOV_FAST, fast), 5, dt);
+  };
+  const updateLighting = () => {
+    const p = diver.state.p;
+    const low = phase !== "board" && p.y < 60;
+    setVec(RENDER_OPTS.shadowCenter, low ? p.x : 0, low ? Math.max(0, p.y - 4) : 0, low ? p.z : 0);
+    RENDER_OPTS.time = sceneTime;
+  };
+  // The engine follows the plane and fades as it flies off; the wind follows the diver; everything is quiet on the boards
+  let flaringWas = false;
+  const updateAudio = (dt) => {
+    if (phase === "board" || phase === "results") {
+      audio.quiet();
+      return;
+    }
+    const a = audio.state, s = diver.state, pp = plane.node.position;
+    a.planeSpeed = planeState.speed;
+    a.planeDistance = Math.hypot(pp.x - camera.position.x, pp.y - camera.position.y, pp.z - camera.position.z);
+    a.speed = s.speed;
+    a.falling = phase === "air" && s.phase === "free" || phase === "lost" ? 1 : 0;
+    a.canopy = (phase === "air" || phase === "lost") && (s.phase === "open" || s.phase === "canopy") ? 1 : 0;
+    a.flaring = s.flaring ? 1 : 0;
+    if (s.flaring && !flaringWas) audio.cues.flare();
+    flaringWas = s.flaring;
+    audio.update(dt);
+  };
+  const toggleMute = () => {
+    audio.setMuted(!audio.muted);
+    dhud.el.mute.setAttribute("aria-pressed", String(audio.muted));
+    hud.toast(audio.muted ? "Sound off" : "Sound on");
+  };
+  const onGesture = () => audio.unlock();
+  const updateMeter = () => {
+    hud.setMeter(world.level, METER_CAPACITY, phase === "air" ? `${ringsHit} of ${RING_COUNT} rings` : "stable");
+  };
+  const update = (dt, elapsed) => {
+    sceneTime = elapsed;
+    const hour = clock.read();
+    daylight.sample(hour, RENDER_OPTS, clock.dayOfYear, islandLatitude, clock.continuousDay);
+    const a = readInput();
+    if (phase === "climb") {
+      // Holding Space hurries the climb, never the circling at height
+      const s = planeState;
+      flyPlane(dt * (a.up > 0 && s.alt < JUMP_ALT - 1 && callStage === 0 ? SKIP_SCALE : 1));
+      seatDiver();
+      const toMark = wrap(jumpAngle - s.angle);
+      // Radians left to the next mark: the first lap is still climbing to it, after that it is a lap round
+      const left = s.t < jumpT ? (jumpT - s.t) * HELIX_W : (toMark + Math.PI * 2) % (Math.PI * 2);
+      markNear = damp(markNear, left < JUMP_GET_READY ? 1 : 0, 1.5, dt);
+      const atMark = s.alt >= JUMP_ALT - 1 && Math.abs(toMark) < JUMP_WINDOW;
+      if (atMark && !jumpOpen) jumpOpenUntil = sceneTime + JUMP_GRACE;
+      const open = atMark || sceneTime < jumpOpenUntil;
+      // Two calls as the mark comes round, the call at the mark, and the way home when it passes
+      if (!open && left > JUMP_WINDOW) {
+        if (callStage < 1 && left < JUMP_GET_READY) {
+          callStage = 1;
+          dhud.center("GET READY!", 1300);
+          dhud.notice("the mark is coming round", 0);
+          fx.say(diver.cave, "Ooga ready!", 1.4);
+        }
+        if (callStage < 2 && left < JUMP_SOON) {
+          callStage = 2;
+          dhud.center("JUMP SOON!", 1300);
+          dhud.notice("Be ready to jump soon! Almost at the mark!", 0);
+        }
+      }
+      if (open && !jumpOpen) {
+        dhud.center("JUMP", 0);
+        dhud.notice("Space · jump", 0);
+        audio.cues.mark();
+        fx.say(diver.cave, "Now! Ooga now!", 1.4);
+      } else if (!open && jumpOpen) {
+        callStage = 0;
+        dhud.center("", 0);
+        dhud.notice("Flying back around, wait for the mark", 3000);
+      }
+      jumpOpen = open;
+      // A Space still held from the hurry means go
+      if (jumpOpen && a.up > 0) jump();
+    } else if (phase === "air") {
+      simulate(dt);
+      const s = diver.state;
+      if (!pulled && s.phase === "free" && s.p.y < PULL_ALT) {
+        pulled = true;
+        dhud.center("PULL", 0);
+        dhud.notice("Space · chute", 0);
+      }
+      if (s.phase === "canopy") dhud.setChute(s.flaring ? "flare" : "canopy");
+    } else if (phase === "down" || phase === "lost") {
+      if (phase === "lost") {
+        diver.substep(dt, NO_INPUT);
+        flightTime += dt;
+      }
+      if (sceneTime - landedAt > (phase === "lost" ? LOST_T : LANDED_T)) {
+        const p = diver.state.p;
+        finish(phase === "lost" ? "lost" : diver.state.landing, Math.hypot(p.x - landingSpot.x, p.z - landingSpot.z));
+      }
+    }
+    if (phase === "board") plane.prop.rotation.z += dt * 3;
+    if (phase !== "climb" && phase !== "board" && planeState.t > 0) flyPlane(dt);
+    diver.pose(dt, elapsed, ctrl);
+    if (phase === "air" && diver.state.phase === "free" && ringIndex < RING_COUNT && !rings[ringIndex].hit) {
+      const ring = rings[ringIndex], k = ring.r * (1 + NEXT_RING_PULSE * (0.5 + 0.5 * Math.sin(sceneTime * 5)));
+      setVec(ring.node.scale, k, k, k);
+    }
+    updateStreaks();
+    for (let i = 0; i < clouds.length; i++) {
+      const c = clouds[i], p = c.node.position;
+      p.x += c.speed * dt;
+      if (p.x > c.wrap) p.x -= c.wrap * 2;
+    }
+    if (phase === "board") boardView();
+    else updateCamera(dt);
+    updateLighting();
+    updateAudio(dt);
+    fx.update(dt);
+    stepTweens(dt);
+    if (phase === "air" || phase === "down" || phase === "lost") {
+      const s = diver.state;
+      const ground = groundAt(s.p.x, s.p.z);
+      dhud.setAlt(s.p.y - diver.FOOT - (ground === -Infinity ? 0 : Math.max(0, ground)));
+      dhud.setSpeed(Math.max(0, -s.v.y));
+      dhud.setRings(ringsHit, RING_COUNT);
+      dhud.setTime(flightTime * 1000);
+    } else if (phase === "climb") {
+      dhud.setAlt(planeState.alt);
+      dhud.setSpeed(0);
+    }
+    meterTimer -= dt;
+    if (meterTimer <= 0) {
+      meterTimer = 0.25;
+      updateMeter();
+    }
+  };
+  const NO_EXTRA = () => { };
+  const overlay = (dt) => fx.drawOverlay(dt, NO_EXTRA);
+
+  // ---------- donations ----------
+  const onDonation = (donation) => {
+    game.recordDonation(donation);
+    const bananas = gameMod.bananasFor(donation.sats);
+    world.level = Math.min(pileMod.MAX_BANANAS, world.level + bananas);
+    const who = donation.handle ? `@${donation.handle}` : "anon";
+    const loot = lootEnabled ? game.lootFor(donation) : null;
+    hud.toast(`+${gameMod.formatLarge(donation.sats)} sats · ${bananas} banana${bananas > 1 ? "s" : ""} · ${who}${loot ? ` · ${loot.tier} ${loot.item.name}` : ""}`);
+    fx.showTicker(`THANKS ${donation.handle ? "@" + donation.handle.toUpperCase() : "ANON"} · ${bananas} BANANAS`, 4.5);
+    const p = diver.state.p;
+    if (diver.body.visible) fx.burst(p.x, p.y + 1.2, p.z, 20, CONFETTI, 2.2);
+    if (loot) {
+      game.addItem({ item: loot.item, tier: loot.tier, donationId: donation.id });
+      renderLocker();
+    }
+    hud.setStats(game.state);
+    meterTimer = 0;
+  };
+  const renderLocker = () => hud.renderInventory(game.state.inventory, game.assignedTo, () => null);
+
+  // ---------- actions and keys ----------
+  const onLootCleared = () => {
+    if (!lootEnabled) return;
+    renderLocker();
+    hud.toast("Loot locker cleared");
+  };
+  const demoTip = (sats) => onDonation({ id: `demo-${Date.now()}`, sats, handle: game.state.handle, message: game.state.message, at: Date.now() });
+  const onKey = (e) => {
+    if (e.key === "Escape") {
+      if (phase === "board") go("hub");
+      else toBoard();
+    }
+    if (e.key === "Enter" && (phase === "board" || phase === "results")) startFlight();
+    if (e.key === "0") cam.offset = cam.tilt = 0;
+    if (e.key === "m" || e.key === "M") toggleMute();
+    if (e.key === "b" || e.key === "B") {
+      world.level = Math.min(pileMod.MAX_BANANAS, world.level + testBananas);
+      hud.toast(`+${testBananas} test bananas`);
+    }
+    if (e.key === "l" || e.key === "L") demoTip(120000);
+  };
+  const tooltipFor = (hit) => hit.owner.kind === "diver" ? `${diver.cave.traits.name} · ${phase === "board" ? "ready to fly" : phase === "air" ? "falling" : "your Ooga"}` : "";
+  const pickDiver = (name) => {
+    selection.racer = name;
+    buildDiver();
+    toBoard();
+  };
+  // The diver is rebuilt for the picked contributor; its heads are the geometry kept live off the graph
+  const buildDiver = () => {
+    if (diver) {
+      for (const key of ["torso", "head"]) input.remove(diver.cave.parts[key]);
+      diver.dispose();
+    }
+    diver = skydiver.create({ root, traits: contributors.traitsFor(selection.racer) });
+    for (const key of ["torso", "head"]) input.add(diver.cave.parts[key], { kind: "diver", priority: 1 });
+  };
+
+  // ---------- scene contract ----------
+  const enter = (ctx) => {
+    ({ renderer, game, world, go, lootEnabled, testBananas } = ctx);
+    camera = createCamera({ fov: 50, near: 0.4, far: 820 });
+    root = createNode();
+    clock = daylight.createClock({ hour: hourParam, daylen: daylenParam, day: dayParam, now: new Date() });
+    island = terrain.island({ seed: SEED });
+    hud = hudMod.create({ roster: contributors.roster, catalog: models.SWAG, tierColors: models.TIER_COLORS, renderIcon: hudMod.renderIcon, lootEnabled });
+    hooks = {};
+    input = interactMod.create({ canvas: ctx.canvas, renderer, camera, hooks });
+    fx = fxMod.create({ root, renderer, overlay: ctx.overlay, tickerAt: TICKER_AT });
+    // The island itself, resident from the hub, and the mound of bananas at its middle
+    const place = (node) => {
+      addChild(root, node);
+      placed.push(node);
+      return node;
+    };
+    place(createNode({ geometry: island.geometry }));
+    const level = Math.floor(world.level), footprint = pileMod.footprintFor(level, 0.45);
+    const growth = level <= pileMod.DISK_BANANAS ? pileMod.PACKING_HEIGHT * level / pileMod.DISK_BANANAS : pileMod.footprintFor(level, 1) * pileMod.PACKING_HEIGHT;
+    const core = place(createNode({ position: { x: 0, y: 0.36, z: 0 }, scale: { x: footprint, y: 0.48 * growth, z: footprint }, geometry: models.bananaPileCoreGeometry(0.45 * 6, 0.48 * 6, 0.45), visible: level > 0 }));
+    const slab = place(createNode({ geometry: hubModels.altarSlab(), depthBias: 0.15 }));
+    setVec(slab.scale, footprint + 0.3, 0.34, footprint + 0.3);
+    // Small piles still count a landing on the dais as a banana landing
+    mound = { node: core, radius: Math.max(2.4, footprint + 0.2), height: 0.48 * growth * 0.88, y: 0.36 };
+    // Clouds above the island and a floor of them far below
+    const rand = mulberry32(SEED + 77);
+    for (let i = 0; i < CLOUD_HIGH + CLOUD_LOW; i++) {
+      const low = i >= CLOUD_HIGH;
+      const wrapAt = low ? 160 : 150;
+      const y = low ? -52 - rand() * 26 : 24 + rand() * 270;
+      const s = low ? 3 + rand() * 2 : 1.1 + rand() * 1.2;
+      const node = createNode({ position: { x: lerp(-wrapAt, wrapAt, rand()), y, z: low ? lerp(-140, 140, rand()) : (rand() < 0.5 ? -1 : 1) * lerp(38, 140, rand()) }, scale: { x: s, y: s, z: s }, geometry: hubModels.cloud(i % 3) });
+      place(node);
+      clouds.push({ node, speed: 0.3 + rand() * 0.5, wrap: wrapAt });
+    }
+    // The roof spot from the hub's own mouth, the plane parked on it, the windsock beside it
+    const mouth = island.mouths.find((m) => m.id === "c9");
+    dropModels.roofSpot(island, mouth, roof);
+    plane = dropModels.plane();
+    plane.node.quaternion = quat.create();
+    place(plane.node);
+    place(createNode({ position: { x: roof.x + Math.cos(roof.ry) * 3.2 + roof.ax * 0.6, y: roof.y, z: roof.z - Math.sin(roof.ry) * 3.2 + roof.az * 0.6 }, geometry: dropModels.windsock() }));
+    const signX = mouth.x + roof.ax * dropModels.SIGN_AT.z + Math.cos(roof.ry) * dropModels.SIGN_AT.x, signZ = mouth.z + roof.az * dropModels.SIGN_AT.z - Math.sin(roof.ry) * dropModels.SIGN_AT.x;
+    place(createNode({ position: { x: signX, y: island.surfaceAt(signX, signZ), z: signZ }, rotation: { x: 0, y: roof.ry, z: 0 }, geometry: dropModels.roofSign() }));
+    // The course: ten hoops sharing one geometry, and the target on the meadow
+    for (let i = 0; i < RING_COUNT; i++) {
+      const node = place(createNode({ geometry: dropModels.hoop() }));
+      rings.push({ node, x: 0, y: 0, z: 0, r: 1, hit: false });
+    }
+    const targetNode = place(createNode({ geometry: dropModels.target() }));
+    hole = place(createNode({ geometry: dropModels.hole(), visible: false }));
+    streaks = { node: place(createNode({ geometry: dropModels.streak(), instanceData: new Float32Array(STREAKS * 20), instanceCount: 0, instanceVersion: 0, fixedInstanceCapacity: true, visible: false })), x: new Float32Array(STREAKS), y: new Float32Array(STREAKS), z: new Float32Array(STREAKS) };
+    mark("drop world");
+    // An Ooga walked or tapped into the plane flies it
+    if (world.pilot) {
+      selection.racer = world.pilot;
+      world.pilot = null;
+    }
+    buildDiver();
+    layCourse();
+    setVec(targetNode.position, landingSpot.x, landingSpot.y + 0.02, landingSpot.z);
+    dhud = dropHud.create({ roster: contributors.roster, best: () => game.state.drop.best, onPick: pickDiver });
+    dhud.selection.racer = selection.racer;
+    dhud.buildBoard((name) => contributors.stateFor(contributors.roster.find((c) => c.name === name)));
+    controls = controlsMod.create({ move: document.getElementById("joy-move"), look: document.getElementById("joy-look"), boost: hud.el.act, chord: ctx.canvas, onAction: act });
+    audio = dropAudio.create();
+    dhud.el.mute.setAttribute("aria-pressed", String(audio.muted));
+    window.addEventListener("pointerdown", onGesture);
+    window.addEventListener("keydown", onGesture);
+    const donationRequest = donations.createRequest(game.state);
+    qr.drawTo(hud.el.qr, donationRequest.url, { quiet: 3, dark: "#000000", light: "#f3efe4" });
+    hud.setDonationUrl(donationRequest.url);
+    hud.setIdentity(game.state);
+    hud.onIdentityChange(({ handle, message }) => {
+      game.setIdentity({ handle: donations.sanitize(handle, donations.HANDLE_MAX), message: donations.sanitize(message, donations.MESSAGE_MAX) });
+      hud.setIdentity(game.state);
+    });
+    hud.onAssign((entryId, name) => {
+      if (game.assign(entryId, name)) renderLocker();
+    });
+    hud.onUnassign((name) => {
+      game.unassign(name);
+      renderLocker();
+    });
+    Object.assign(hooks, {
+      onHover: (hit, p) => {
+        if (hit) hud.tooltip.show(tooltipFor(hit), p.x, p.y);
+        else hud.tooltip.hide();
+      },
+      onHoverMove: (hit, p) => hud.tooltip.show(tooltipFor(hit), p.x, p.y),
+      onTap: (hit) => {
+        if (hit && hit.owner.kind === "diver" && phase !== "board") fx.say(diver.cave, phase === "air" ? "Ooga busy falling!" : "Ooga!", 1.2);
+      },
+      onOrbit: (dx, dy) => {
+        if (phase === "board") {
+          cam.boardYaw = wrap(cam.boardYaw - dx * 5e-3);
+          cam.boardLift = clamp(cam.boardLift + dy * 0.02, -2, 6);
+        } else {
+          cam.offset = wrap(cam.offset - dx * 4e-3);
+          cam.tilt = clamp(cam.tilt + dy * 3.5e-3, -1.4, 1.4);
+          cam.dragAt = sceneTime;
+        }
+      },
+      onZoom: () => { }
+    });
+    hud.onAction((action) => {
+      if (action === "drop-start" || action === "drop-again") startFlight();
+      else if (action === "drop-board") toBoard();
+      else if (action === "leave") go("hub");
+      else if (action === "act") act();
+      else if (action === "mute") toggleMute();
+      else if (action === "tip") demoTip(1200);
+      else if (action === "tip-legendary") demoTip(120000);
+      else if (action === "clear-loot") {
+        game.clearLoot();
+        onLootCleared();
+      } else if (action === "reset") {
+        game.resetAll();
+        location.reload();
+      }
+    });
+    for (const c of contributors.roster) hud.setRosterRow(c.name, contributors.stateFor(c), contributors.ageLabel(c));
+    if (lootEnabled) renderLocker();
+    hud.setStats(game.state);
+    hud.el.sheet.dataset.open = "false";
+    dhud.el.help.textContent = COARSE ? "Left stick pitches and rolls · right stick turns · the button jumps, pulls and flares" : "W S pitch · A D roll · Q E turn · Space jumps, pulls the chute · S flares · drag to look";
+    meterTimer = 0;
+    toBoard();
+    stateTimer = window.setInterval(() => fx.trimPool(), 6e4);
+    hintTimer = window.setTimeout(() => hud.hint(COARSE ? "Pick an Ooga, then Fly!" : "Pick an Ooga, then Fly! (Enter)"), 1200);
+    Object.assign(dropScene, {
+      root, camera, input,
+      debug: {
+        hud, demoTip, trimPool: fx.trimPool, camera, controls, island, cavemen: null, crates: null,
+        get audio() {
+          return audio;
+        },
+        get diver() {
+          return diver;
+        },
+        get plane() {
+          return { node: plane.node, prop: plane.prop, state: planeState };
+        },
+        get course() {
+          return { rings, target: landingSpot, jumpAngle };
+        },
+        get renderOpts() {
+          return RENDER_OPTS;
+        },
+        drop: {
+          get phase() {
+            return phase;
+          },
+          get score() {
+            return score;
+          },
+          get ringsHit() {
+            return ringsHit;
+          },
+          get result() {
+            return result;
+          },
+          get jumpOpen() {
+            return jumpOpen;
+          },
+          get cam() {
+            return cam;
+          },
+          get sceneTime() {
+            return sceneTime;
+          },
+          get streaks() {
+            return streaks.node.instanceCount;
+          },
+          selection, start: startFlight, toBoard, jump, deploy, finish,
+          // Run the clock forward without frames: the climb, then substeps in the air
+          simulate: (seconds) => {
+            for (let t = 0; t < seconds; t += FIXED) {
+              sceneTime += FIXED;
+              if (phase === "climb") {
+                flyPlane(FIXED);
+                seatDiver();
+                const s = planeState;
+                jumpOpen = s.alt >= JUMP_ALT - 1 && Math.abs(wrap(s.angle - jumpAngle)) < JUMP_WINDOW;
+              } else if (phase === "air") {
+                accumulator = FIXED;
+                simulate(0);
+              } else if (phase === "down" || phase === "lost") {
+                if (phase === "lost") diver.substep(FIXED, NO_INPUT);
+                if (sceneTime - landedAt > (phase === "lost" ? LOST_T : LANDED_T)) finish(phase === "lost" ? "lost" : diver.state.landing, Math.hypot(diver.state.p.x - landingSpot.x, diver.state.p.z - landingSpot.z));
+              }
+            }
+          },
+          setInput: (pitch, roll, yaw, flare) => {
+            ctrl.pitch = pitch;
+            ctrl.roll = roll;
+            ctrl.yaw = yaw;
+            ctrl.flare = !!flare;
+          },
+          // Jump straight from the plane's course start, as the prompt would
+          jumpNow: () => {
+            if (phase !== "climb") startFlight();
+            planeState.t = ROLL_T + CLIMB_T;
+            flyPlane(0.001);
+            seatDiver();
+            jumpOpen = true;
+            return jump();
+          }
+        }
+      }
+    });
+  };
+  const leave = () => {
+    window.clearInterval(stateTimer);
+    window.clearTimeout(hintTimer);
+    window.removeEventListener("pointerdown", onGesture);
+    window.removeEventListener("keydown", onGesture);
+    audio.dispose();
+    for (const key of ["torso", "head"]) input.remove(diver.cave.parts[key]);
+    diver.dispose();
+    fx.dispose();
+    controls.dispose();
+    hud.el.act.hidden = true;
+    hud.setAct("Ooga!");
+    for (const node of placed) removeChild(root, node);
+    placed.length = clouds.length = rings.length = 0;
+    const count = input.targetCount;
+    input.dispose();
+    dhud.dispose();
+    hud.dispose();
+    phase = "board";
+    diver = plane = streaks = mound = hole = hud = dhud = hooks = input = fx = controls = audio = clock = island = null;
+    dropScene.input = dropScene.debug = null;
+    return { targets: count };
+  };
+  const liveGeometry = (set) => {
+    set.add(diver.cave.headOpen).add(diver.cave.headClosed);
+  };
+  const stats = () => {
+    let nodes = 0;
+    traverseVisible(root, () => nodes++);
+    const all = (n) => 1 + n.children.reduce((sum, c) => sum + all(c), 0);
+    return { visibleNodes: nodes, allNodes: all(root), tweens: tweenCount(), targets: input.targetCount, ...fx.stats(), phase, rings: ringsHit, streaks: streaks.node.instanceCount };
+  };
+  Object.assign(dropScene, { enter, update, overlay, onDonation, onKey, onLootCleared, leave, stats, liveGeometry });
+  BL.scenes = BL.scenes || {};
+  BL.scenes.drop = dropScene;
+})();
+
 // ---- js/director.js ----
 (() => {
   "use strict";
@@ -17445,8 +19637,8 @@ void main() {
   };
   showQuality();
   const game = gameMod.create({ catalog: models.SWAG });
-  // The banana level, shared by every scene
-  const world = { level: START_BANANAS };
+  // The banana level, shared by every scene, and the Ooga handed from the hub to a launched scene
+  const world = { level: START_BANANAS, pilot: null };
 
   // ---------- scenes ----------
   // One active scene owns its root, camera and systems
@@ -17660,7 +19852,7 @@ void main() {
         return world.level;
       }
     };
-    for (const key of ["slots", "drops", "core", "shell", "delivery", "cavemen", "crates", "lab", "hud", "applyAllSwag", "renderLocker", "demoTip", "setPileLevel", "refreshStates", "trimPool", "shown", "island", "mouths", "labels", "camera", "cameraCave", "crew", "controls", "props", "altar", "path", "scenery", "jetpack", "mirrorCave", "matrixCave", "pilot", "renderOpts", "lamps", "entranceLights", "lighting", "fireSeats", "critters", "daylight", "setHour", "track", "racers", "items", "race", "audio", "weather"]) {
+    for (const key of ["slots", "drops", "core", "shell", "delivery", "cavemen", "crates", "lab", "hud", "applyAllSwag", "renderLocker", "demoTip", "setPileLevel", "refreshStates", "trimPool", "shown", "island", "mouths", "labels", "camera", "cameraCave", "crew", "controls", "props", "altar", "path", "scenery", "jetpack", "mirrorCave", "matrixCave", "pilot", "renderOpts", "lamps", "entranceLights", "lighting", "fireSeats", "critters", "daylight", "setHour", "track", "racers", "items", "race", "audio", "weather", "launchers", "drop", "diver", "plane", "course"]) {
       Object.defineProperty(ooga, key, { get: () => active.debug[key], enumerable: true });
     }
     window.__ooga = ooga;

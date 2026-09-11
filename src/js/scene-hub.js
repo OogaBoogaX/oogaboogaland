@@ -1,7 +1,7 @@
 (() => {
   "use strict";
   const BL = window.BL = window.BL || {};
-  const { math, models, contributors, donations, qr, terrain, hubModels, caves, daylight, game: gameMod, hud: hudMod, interact: interactMod, pilot: pilotMod, fx: fxMod, crew: crewMod, pile: pileMod, crates: cratesMod, critters: crittersMod } = BL;
+  const { math, models, contributors, donations, qr, terrain, hubModels, dropModels, caves, daylight, game: gameMod, hud: hudMod, interact: interactMod, pilot: pilotMod, fx: fxMod, crew: crewMod, pile: pileMod, crates: cratesMod, critters: crittersMod } = BL;
   const { lerp, ease, fnv1a, mulberry32 } = math;
   const { createNode, addChild, removeChild, createCamera, addTween, stepTweens, tweenCount, traverseVisible } = BL.scene;
   const { EAT_RATE } = crewMod;
@@ -46,8 +46,8 @@
   const JETPACK_SAFE = { x: 0, z: 0 };
   // Pulse the hiding prop when the hunt stalls
   const HINT_AFTER = 120, HINT_EVERY = 12, HINT_PULSE = 1.6, HINT_MAX = 0.9;
-  // Reach at which a caveman is inside a cave
-  const TUNNEL_REACH = 2.2;
+  // Reach at which a caveman is inside a cave, or at the plane on the roof
+  const TUNNEL_REACH = 2.2, LAUNCH_REACH = 2.6;
   const MATRIX_TYPES = 8;
   const MATRIX_RAIN_GAP = 0.19;
   const MATRIX_SURFACE_PITCH = 0.12, MATRIX_SURFACE_GAP = 0.13, MATRIX_GLYPH_HZ = 20;
@@ -104,7 +104,7 @@
   const ALTAR_HEIGHT = 0.34, ALTAR_BLOCK_WIDTH = 0.2, ALTAR_BLOCK_ARC = 0.3, ALTAR_RING_GAP = 0.02, ALTAR_MAX_BLOCKS = 512;
   // Ripen time and odds for a dropped banana
   const RIPEN = 25, TREE_CHANCE = 0.5, BUSH_CHANCE = 0.25;
-  const PROP_TIPS = { tree: "Tree · shake it", bush: "Bush · rustle it", rock: "Rock · solid", crate: "Crate · locked", barrel: "Barrel · empty", flower: "Flowers", torch: "Torch · warm", firepit: "Fire pit", bedroll: "Somebody's bed", ladder: "Ladder · wobbly", dock: "Dock · creaky", jetpack: "Jetpack · walk an Ooga into it", gate: null };
+  const PROP_TIPS = { tree: "Tree · shake it", bush: "Bush · rustle it", rock: "Rock · solid", crate: "Crate · locked", barrel: "Barrel · empty", flower: "Flowers", torch: "Torch · warm", firepit: "Fire pit", bedroll: "Somebody's bed", ladder: "Ladder · wobbly", dock: "Dock · creaky", jetpack: "Jetpack · walk an Ooga into it", plane: "Ooga Drop · tap to fly", sign: "Ooga Drop · the plane flies from here", windsock: "Windsock · a fair wind", gate: null };
   const MATRIX_LIVING_PROPS = new Set(["tree"]);
   const BUSH_WORDS = ["Something rustles.", "A beetle. Ooga leaves it.", "Just a bush."];
   const LEAF = models.particleGeometry("#4a8530", 0.12, 0);
@@ -143,6 +143,7 @@
   const labels = [];
   const spots = [];
   const openMouths = [];
+  const launchers = [];
   const props = [];
   const scenery = [];
   const sceneryClaims = [];
@@ -495,9 +496,9 @@
       }
     }
     BL.scene.updateWorld(group);
-    const visit = (node, inheritedLiving = false, inheritedEmissive = false) => {
-      const living = inheritedLiving || !!node.matrixLiving, emissiveLiving = inheritedEmissive || !!node.matrixEmissiveLiving;
-      if (node.geometry && !node.geometry.matrixGlyph && !node.geometry.matrixLocalGlyphSurface && !node.mirror) {
+    const visit = (node, inheritedLiving = false, inheritedEmissive = false, inheritedExterior = false) => {
+      const living = inheritedLiving || !!node.matrixLiving, emissiveLiving = inheritedEmissive || !!node.matrixEmissiveLiving, exterior = inheritedExterior || !!node.matrixExterior;
+      if (node.geometry && !node.geometry.matrixGlyph && !node.geometry.matrixLocalGlyphSurface && !node.mirror && !exterior) {
         const original = node.geometry, faces = [], transform = node.world;
         let owned = false;
         for (let f = 0; f < original.faces.length; f++) {
@@ -516,9 +517,9 @@
             owned = true;
           } else faces.push(face);
         }
-        if (owned) node.geometry = { ...original, faces };
+        if (owned) node.geometry = { ...original, faces, matrixSourceGeometry: original };
       }
-      for (let i = 0; i < node.children.length; i++) visit(node.children[i], living, emissiveLiving);
+      for (let i = 0; i < node.children.length; i++) visit(node.children[i], living, emissiveLiving, exterior);
     };
     visit(group);
     for (let glyph = 0; glyph < MATRIX_TYPES; glyph++) {
@@ -867,6 +868,26 @@
       const wheels = createNode({ position: { x: -1.7, y: 0, z: -2.6 } });
       for (let i = 0; i < 3; i++) addChild(wheels, createNode({ position: { x: 0, y: 0.12 + i * 0.24, z: 0 }, rotation: { x: 0, y: 0, z: Math.PI / 2 }, geometry: BL.raceModels.kartWheel() }));
       addChild(group, plinth, kart.node, wheels, createNode({ position: { x: 1.7, y: 0, z: -3 }, rotation: { x: 0, y: 0.3, z: 0 }, geometry: hubModels.woodCrate() }), createNode({ position: { x: 1.9, y: 0, z: -1.9 }, geometry: hubModels.barrel() }));
+      // The Ooga Drop plane parks on the roof over the room, nose toward the meadow, a windsock beside it
+      const roof = dropModels.roofSpot(island, m, {}, 0.8);
+      const plane = dropModels.plane();
+      Object.assign(plane.node.position, { x: 0, y: roof.y - m.floorY, z: dropModels.ROOF_BACK });
+      Object.assign(plane.node.scale, { x: 0.8, y: 0.8, z: 0.8 });
+      plane.node.rotation.x = dropModels.PARK_PITCH;
+      plane.node.matrixExterior = true;
+      const sockX = 3.2, sockZ = dropModels.ROOF_BACK + 0.6;
+      const sock = createNode({ position: { x: sockX, y: roof.y - m.floorY, z: sockZ }, geometry: dropModels.windsock() });
+      sock.matrixExterior = true;
+      addChild(group, plane.node, sock);
+      addProp("plane", plane.node.children[0], roof.x, roof.z, 2.6).roof = roof;
+      addProp("windsock", sock, m.x + ax * sockZ + Math.cos(m.ry) * sockX, m.z + az * sockZ - Math.sin(m.ry) * sockX, 1);
+      const signX = m.x + ax * dropModels.SIGN_AT.z + Math.cos(m.ry) * dropModels.SIGN_AT.x, signZ = m.z + az * dropModels.SIGN_AT.z - Math.sin(m.ry) * dropModels.SIGN_AT.x;
+      const sign = createNode({ position: { x: dropModels.SIGN_AT.x, y: island.surfaceAt(signX, signZ) - m.floorY, z: dropModels.SIGN_AT.z }, geometry: dropModels.roofSign() });
+      sign.matrixExterior = true;
+      addChild(group, sign);
+      addProp("sign", sign, signX, signZ, 1);
+      claim(roof.x, roof.z, 3.8);
+      launchers.push(roof);
     } else if (slot.status === "open") {
       for (const x of [-1.3, 1.3]) addChild(group, createNode({ position: { x, y: 0, z: -3.5 }, geometry: hubModels.caveShelves() }));
     } else if (slot.status === "mirror") {
@@ -1405,6 +1426,13 @@
       case "gate":
         hud.toast(`${caves.gate.name} · leads nowhere yet`);
         break;
+      case "plane":
+      case "sign":
+        enterLaunch();
+        break;
+      case "windsock":
+        hud.toast("A fair wind for a drop.");
+        break;
       default:
         break;
     }
@@ -1431,13 +1459,12 @@
     useProp(best);
     return true;
   };
-  // Dolly onto the mouth, then enter the cave
-  const enterCave = (slot) => {
+  // Dolly onto a view, then change scene
+  const enterScene = (view, id) => {
     if (entering) return;
     entering = true;
     pilot.release(true);
     hud.tooltip.hide();
-    const view = presets[slot.scene];
     const orbit = pilot.orbit;
     const from = { x: orbit.tx, y: orbit.ty, z: orbit.tz, dist: orbit.dist, yaw: orbit.yaw };
     const turn = Math.atan2(Math.sin(view.yaw - from.yaw), Math.cos(view.yaw - from.yaw));
@@ -1452,8 +1479,15 @@
         orbit.tz = lerp(from.z, view.target.z, k);
         orbit.dist = lerp(from.dist, ENTER_DIST, k);
         orbit.yaw = from.yaw + turn * k;
-      }, done: () => go(slot.scene)
+      }, done: () => go(id)
     });
+  };
+  const enterCave = (slot) => enterScene(presets[slot.scene], slot.scene);
+  // The Ooga at the wheel flies the plane
+  const enterLaunch = () => {
+    if (entering) return;
+    world.pilot = pilot.player ? pilot.player.traits.name : null;
+    enterScene(presets.drop, "drop");
   };
   const onTap = (hit) => {
     if (!hit) return;
@@ -1717,6 +1751,8 @@
     crew.update(dt, elapsed);
     pile.update(dt);
     const player = pilot.player;
+    const continuingPlayer = !!player && caveEntryPlayer === player;
+    const previousPlayerX = PLAYER_PREVIOUS.x, previousPlayerZ = PLAYER_PREVIOUS.z;
     updatePlayerCave(player);
     // Pulse the prop if it still hides the jetpack
     if (stash) {
@@ -1730,14 +1766,24 @@
       jetpack.node.position.y = JETPACK_HOVER + Math.sin(elapsed * 2) * 0.09;
       if (player && !player.jet && Math.hypot(player.root.position.x - jetpack.x, player.root.position.z - jetpack.z) < JETPACK_REACH) collectJetpack(player);
     }
-    // Walking into an open cave enters it, flying or standing on its roof does not
-    if (player && playerCaveIndex && !entering && player.hop < 1) {
+    // Walking into an open cave enters it, flying or standing on its roof does not.
+    // The drop plane is deliberately on that roof and uses its own proximity gate.
+    if (player && !entering && player.hop < 1) {
       const p = player.root.position;
       const y = p.y - player.baseY;
-      const overhead = island.cavityAt(camera.position.x, camera.position.z, CAMERA_COLUMN) && CAMERA_COLUMN.caveIndex === playerCaveIndex && camera.position.y >= CAMERA_COLUMN.ceiling;
-      for (let i = 0; i < openMouths.length; i++) {
-        const { slot, m } = openMouths[i];
-        if (!overhead && m === CAMERA_OPENINGS[playerCaveIndex - 1].mouth && Math.abs(y - m.floorY) < 1 && Math.hypot(p.x - m.inside.x, p.z - m.inside.z) < TUNNEL_REACH) enterCave(slot);
+      if (playerCaveIndex) {
+        const playerOpening = CAMERA_OPENINGS[playerCaveIndex - 1];
+        const overhead = camera.position.y >= playerOpening.mouth.floorY + playerOpening.maxY;
+        for (let i = 0; i < openMouths.length; i++) {
+          const { slot, m } = openMouths[i];
+          if (!overhead && m === playerOpening.mouth && Math.abs(y - m.floorY) < 1 && Math.hypot(p.x - m.inside.x, p.z - m.inside.z) < TUNNEL_REACH) enterCave(slot);
+        }
+      }
+      if (!playerCaveIndex && continuingPlayer) for (let i = 0; i < launchers.length; i++) {
+        const l = launchers[i];
+        const distance = Math.hypot(p.x - l.x, p.z - l.z);
+        const previousDistance = Math.hypot(previousPlayerX - l.x, previousPlayerZ - l.z);
+        if (Math.abs(y - l.y) < 1 && distance < LAUNCH_REACH && previousDistance >= LAUNCH_REACH) enterLaunch();
       }
     }
     for (let i = 0; i < clouds.length; i++) {
@@ -1891,6 +1937,8 @@
       }
       if (slot.status === "sleeping") bedrolls.push(m.inside);
     }
+    // The roof view the drop launch dollies onto
+    for (const roof of launchers) presets.drop = { yaw: roof.ry, pitch: 0.36, dist: 14, target: { x: roof.x, y: roof.y + 1.2, z: roof.z } };
     for (const deg of BEDROLL_DEGREES) {
       const p = spotAt(deg, BEDROLL_RADIUS, 1.4);
       place(hubModels.bedroll(), p.x, p.z, 0, 0.05, "bedroll", 1.1).depthBias = 0.3;
@@ -2003,7 +2051,7 @@
         get shown() {
           return pile.shown;
         },
-        island, mouths: island.mouths, labels, camera, crew, controls: pilot.controls, props, altar, path: island.path.debug,
+        island, mouths: island.mouths, labels, launchers, camera, crew, controls: pilot.controls, props, altar, path: island.path.debug,
         scenery: {
           get candidateCount() { return scenery.length; },
           get visibleCount() { return sceneryVisible; },
@@ -2191,7 +2239,7 @@
     pilot.dispose();
     for (const node of targets) input.remove(node);
     for (const node of placed) removeChild(root, node);
-    targets.length = placed.length = claimed.length = scenery.length = sceneryClaims.length = matrixInteriors.length = clouds.length = lamps.length = entranceLights.length = fireSeats.length = sleepers.length = labels.length = spots.length = openMouths.length = props.length = 0;
+    targets.length = placed.length = claimed.length = scenery.length = sceneryClaims.length = matrixInteriors.length = clouds.length = lamps.length = entranceLights.length = fireSeats.length = sleepers.length = labels.length = spots.length = openMouths.length = launchers.length = props.length = 0;
     RENDER_OPTS.lightCount = 0;
     MATRIX_WORLD.active = MATRIX_WORLD.direction = MATRIX_WORLD.radius = 0;
     cameraCaveIndex = 0;

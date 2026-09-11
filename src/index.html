@@ -176,6 +176,11 @@
         <button type="button" data-action="mute" id="race-mute" aria-pressed="false">Sound</button>
         <button type="button" class="leave" data-action="leave">Leave<span> cave</span></button>
       </nav>
+      <nav class="presets" aria-label="Drop" data-scene="drop" hidden>
+        <button type="button" data-action="drop-board" id="drop-board-btn">Board</button>
+        <button type="button" data-action="mute" id="drop-mute" aria-pressed="false">Sound</button>
+        <button type="button" class="leave" data-action="leave">Back<span> to the island</span></button>
+      </nav>
     </header>
 
     <aside class="sheet" id="sheet" data-open="true">
@@ -316,6 +321,52 @@
         </div>
       </section>
     </div>
+    <div class="race" id="drop" data-scene="drop" hidden>
+      <section class="garage" id="drop-board" aria-label="Drop board">
+        <div class="garage-head">
+          <h2><span data-sign>Ooga Drop</span> <span class="garage-medal garage-cup" id="drop-medal" hidden></span></h2>
+          <p class="help">Pick an Ooga. The plane climbs, you jump, steer through the rings, pull the chute and land on the
+            target.</p>
+        </div>
+        <div class="garage-columns drop-columns">
+          <div class="garage-col">
+            <h3>Ooga</h3>
+            <ul class="garage-list" id="drop-oogas"></ul>
+          </div>
+          <div class="garage-col">
+            <h3>Best drop</h3>
+            <ul class="garage-list drop-rows" id="drop-best"></ul>
+          </div>
+        </div>
+        <div class="garage-foot">
+          <p class="help" id="drop-help">W S pitch · A D roll · Q E turn · Space jumps, pulls the chute · S flares</p>
+          <button type="button" class="feed-open race-go" data-action="drop-start"><span data-sign>Fly!</span></button>
+        </div>
+      </section>
+      <div class="race-strip" id="drop-strip" hidden>
+        <div class="race-hud race-hud-left">
+          <div class="race-lap"><span>Up</span><b id="drop-alt">0</b></div>
+          <div class="race-lap"><span>Rings</span><b id="drop-rings">0</b><small id="drop-ring-total">/8</small></div>
+        </div>
+        <div class="race-hud race-hud-right">
+          <div class="race-time" id="drop-time">0:00.00</div>
+          <div class="race-speed"><b id="drop-speed">0</b><span>down</span></div>
+          <div class="race-item" id="drop-chute" data-item=""><span id="drop-chute-name">pack</span></div>
+        </div>
+      </div>
+      <div class="race-center" id="drop-center" hidden>JUMP</div>
+      <div class="race-notice" id="drop-notice" hidden>&nbsp;</div>
+      <section class="race-results" id="drop-results" hidden aria-label="Drop results">
+        <h2><span data-sign>Landed</span></h2>
+        <ol class="race-podium drop-rows" id="drop-score"></ol>
+        <p class="help" id="drop-summary"></p>
+        <div class="actions">
+          <button type="button" data-action="drop-again">Again</button>
+          <button type="button" data-action="drop-board">Board</button>
+          <button type="button" data-action="leave">Back to the island</button>
+        </div>
+      </section>
+    </div>
     <dialog class="modal" id="feed" aria-label="Feed the Ooga Boogas">
       <div class="panel-head">
         <h2><span data-sign>Feed the Ooga Boogas</span></h2>
@@ -362,6 +413,7 @@
   <script src="js/crates.js"></script>
   <script src="js/critters.js"></script>
   <script src="js/race-models.js"></script>
+  <script src="js/drop-models.js"></script>
   <script src="js/scene-hub.js"></script>
   <script src="js/scene-lab.js"></script>
   <script src="js/race-track.js"></script>
@@ -370,6 +422,10 @@
   <script src="js/race-hud.js"></script>
   <script src="js/race-audio.js"></script>
   <script src="js/scene-race.js"></script>
+  <script src="js/skydiver.js"></script>
+  <script src="js/drop-hud.js"></script>
+  <script src="js/drop-audio.js"></script>
+  <script src="js/scene-drop.js"></script>
   <script src="js/director.js"></script>
 </body>
 

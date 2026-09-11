@@ -32,7 +32,9 @@
   };
   const updateWorld = (node, parentWorld) => {
     if (!node.visible) return;
-    mat4.fromTRS(node.local, node.position, node.rotation, node.scale);
+    // A node carrying a quaternion turns by it instead of its Euler rotation
+    if (node.quaternion) mat4.fromTQS(node.local, node.position, node.quaternion, node.scale);
+    else mat4.fromTRS(node.local, node.position, node.rotation, node.scale);
     if (parentWorld) mat4.multiply(node.world, parentWorld, node.local);
     else node.world.set(node.local);
     for (const child of node.children) updateWorld(child, node.world);

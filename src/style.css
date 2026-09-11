@@ -1251,6 +1251,20 @@ select {
   padding: 4px 0;
 }
 
+/* Help lines on the planks sit on their own stone tablet: the results summaries and the feed dialog's note */
+.race-results .help,
+.modal .help {
+  margin: 12px 0 0;
+  padding: 8px 12px;
+  background: var(--tablet);
+  border: 2px solid var(--stone-dk);
+  border-radius: 9px 7px 10px 8px;
+  box-shadow: var(--tablet-shadow);
+  color: var(--paper);
+  font-size: 11px;
+  text-shadow: 0 1px 0 rgba(0, 0, 0, 0.6);
+}
+
 .race-results .actions {
   grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
 }
@@ -1494,6 +1508,42 @@ select {
   grid-template-columns: 1fr 1fr;
 }
 
+/* ---------- Ooga Drop ---------- */
+/* The board has two columns; its rows are plain label and value pairs, no place numbers */
+.drop-columns {
+  grid-template-columns: 1fr 1fr;
+}
+
+.drop-rows {
+  margin: 0;
+  padding: 2px 10px;
+  list-style: none;
+}
+
+.drop-rows li {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 10px;
+  padding: 7px 0;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.35);
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.04);
+  font-variant-numeric: tabular-nums;
+}
+
+.drop-rows li:last-child {
+  border-bottom: 0;
+  box-shadow: none;
+}
+
+.drop-rows li::before {
+  content: none;
+}
+
+.drop-rows li span:last-child {
+  color: var(--accent);
+  font-weight: 600;
+}
+
 [hidden] {
   display: none !important;
 }
@@ -1665,7 +1715,8 @@ select {
     padding: 10px 12px 12px;
   }
 
-  .garage-columns {
+  .garage-columns,
+  .drop-columns {
     grid-template-columns: 1fr;
     gap: 8px;
   }
