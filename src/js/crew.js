@@ -11,7 +11,7 @@
   const FAN_STANDOFF = 1.1;
   const FAN_ARC = 2.2;
   // The widest the fan opens, so the near side stays clear however many eat
-  const FAN_SPREAD = 4.2;
+  const FAN_SPREAD = 5;
   const POKES = ["Ooga?", "Booga!", "No poke.", "Hmm banana?", "Ooga booga booga."];
   const SLEEP_POKES = ["zzz... grr", "five more minutes", "zzz"];
   const BUILD_QUOTES = ["Ooga Booga!", "Ooga Booga BUILD!", "Ooga Booga MORE TOOLS!"];

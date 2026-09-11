@@ -36,7 +36,9 @@
   };
   const isString = (v, max) => typeof v === "string" && v.length <= max;
   const isEntry = (e, catalog) => e && typeof e === "object" && isString(e.id, 40) && catalog.some((c) => c.id === e.itemId) && LOOT_TIERS.some((t) => t.tier === e.tier) && isString(e.donationId, 64) && Number.isFinite(e.at);
-  const defaults = () => ({ inventory: [], assignments: {}, handle: "", message: "", handFed: 0, totalSats: 0, donations: 0 });
+  const defaults = () => ({ inventory: [], assignments: {}, handle: "", message: "", handFed: 0, totalSats: 0, donations: 0, race: { best: {}, cup: null } });
+  const CUP_MEDALS = ["gold", "silver", "bronze"];
+  const isTime = (v) => Number.isFinite(v) && v > 0 && v < 36e5;
   const load = (catalog) => {
     const state = defaults();
     try {
@@ -53,6 +55,14 @@
       if (isString(parsed.message, MESSAGE_MAX)) state.message = parsed.message;
       for (const key of ["handFed", "totalSats", "donations"]) {
         if (Number.isFinite(parsed[key]) && parsed[key] >= 0) state[key] = Math.floor(parsed[key]);
+      }
+      if (parsed.race && parsed.race.best && typeof parsed.race.best === "object") {
+        for (const [track, b] of Object.entries(parsed.race.best)) {
+          if (isString(track, 16) && b && isTime(b.lap) && isTime(b.race)) state.race.best[track] = { lap: Math.floor(b.lap), race: Math.floor(b.race) };
+        }
+      }
+      if (parsed.race && parsed.race.cup && CUP_MEDALS.includes(parsed.race.cup.medal) && Number.isFinite(parsed.race.cup.points) && parsed.race.cup.points >= 0) {
+        state.race.cup = { medal: parsed.race.cup.medal, points: Math.floor(parsed.race.cup.points) };
       }
     } catch {
       return defaults();
@@ -121,6 +131,27 @@
       for (const name of Object.keys(state.assignments)) delete state.assignments[name];
       save(state);
     };
+    // Keep the fastest lap and race per track
+    const recordRace = (track, lap, race) => {
+      const b = state.race.best[track];
+      const entry = { lap: Math.floor(b && b.lap < lap ? b.lap : lap), race: Math.floor(b && b.race < race ? b.race : race) };
+      const improved = !b || entry.race < b.race || entry.lap < b.lap;
+      state.race.best[track] = entry;
+      save(state);
+      return improved;
+    };
+    // The best cup finish: a higher medal, or the same medal with more points
+    const recordCup = (place, points) => {
+      const medal = CUP_MEDALS[place - 1];
+      if (!medal) return false;
+      const c = state.race.cup;
+      const better = !c || CUP_MEDALS.indexOf(medal) < CUP_MEDALS.indexOf(c.medal) || (medal === c.medal && points > c.points);
+      if (better) {
+        state.race.cup = { medal, points: Math.floor(points) };
+        save(state);
+      }
+      return better;
+    };
     const setIdentity = ({ handle, message }) => {
       state.handle = handle;
       state.message = message;
@@ -137,7 +168,7 @@
       if (seconds < 5400) return `${Math.round(seconds / 60)}m`;
       return `${(seconds / 3600).toFixed(1)}h`;
     };
-    return { state, countOf, lootFor: lootForVisitor, addItem, assign, unassign, itemOf, assignedTo, clearLoot, resetAll, recordDonation, recordHandFed, setIdentity, forecast, formatDuration };
+    return { state, countOf, lootFor: lootForVisitor, addItem, assign, unassign, itemOf, assignedTo, clearLoot, resetAll, recordDonation, recordHandFed, recordRace, recordCup, setIdentity, forecast, formatDuration };
   };
   BL.game = { create, LOOT_TIERS, STACK_MAX, SATS_PER_BANANA, tierFor, lootFor, bananasFor, formatLarge };
 })();

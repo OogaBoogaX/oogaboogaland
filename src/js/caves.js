@@ -6,7 +6,7 @@
   const slot = (id, clock, scene = null, status = "dark", name = null) => ({ id, clock, scene, status, name });
   const slots = [
     slot("c11", 11, "lab", "open", "EntropyLab"),
-    slot("c9", 9),
+    slot("c9", 9, "race", "open", "Ooga Rally"),
     slot("c730", 7.5, null, "sleeping"),
     slot("c1", 1, null, "mirror", "Ooga Booga Land"),
     slot("c2", 2),

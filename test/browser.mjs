@@ -14,6 +14,7 @@ export const launch = async ({ w = 1440, h = 900, mobile = false } = {}) => {
   const args = [
     "--headless=new",
     "--hide-scrollbars",
+    "--mute-audio",
     `--window-size=${w},${h}`,
     `--remote-debugging-port=${port}`,
     `--user-data-dir=${profile}`,

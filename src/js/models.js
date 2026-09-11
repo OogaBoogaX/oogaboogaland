@@ -391,7 +391,7 @@
   const caveman = (traits) => {
     const { skin, hair, height: h, belly, rand } = traits;
     const u = h / 16;
-    const P = { skin: 0, skinDk: 1, hair: 2, hairDk: 3, fur: 4, spot: 5, white: 6, black: 7, nose: 8, stubble: 9, wood: 10, stone: 11, stoneDk: 12, apple: 13, appleDk: 14, leaf: 15, knit: 16, knitDk: 17, pom: 18, lens: 19, btc: 20, gold: 21, goldDk: 22 };
+    const P = { skin: 0, skinDk: 1, hair: 2, hairDk: 3, fur: 4, spot: 5, white: 6, black: 7, nose: 8, stubble: 9, wood: 10, stone: 11, stoneDk: 12, apple: 13, appleDk: 14, leaf: 15, knit: 16, knitDk: 17, pom: 18, lens: 19, btc: 20, gold: 21, goldDk: 22, wing: 23, wingDk: 24, goggle: 25, goggleDk: 26 };
     const palette = [
       shade(skin, 1),
       shade(skin, 0.9),
@@ -415,7 +415,11 @@
       hexToRgb("#3f9c96"),
       hexToRgb("#f7931a"),
       hexToRgb("#d4a83a"),
-      hexToRgb("#9c7a22")
+      hexToRgb("#9c7a22"),
+      hexToRgb("#e4f3fb"),
+      hexToRgb("#bcdcec"),
+      hexToRgb("#3a9dff"),
+      hexToRgb("#1f6fc4")
     ];
     const jit = (base, dark, p) => () => rand() < p ? dark : base;
     const skinJ = jit(P.skin, P.skinDk, 0.08);
@@ -456,6 +460,13 @@
         v.fill(0, 8, 0, 2, 0, 5, leopard);
         rosettes(v, 0, 8, 0, 2, 0, 5, 8);
         v.fill(1, 7, 3, 7, 1, 4, skinJ);
+      }
+      if (traits.bee) {
+        // The Bee: black bands round the fuzz and two pale wings folded off the back, baked into the torso
+        v.fill(1, 7, 4, 4, 1, 4, P.black);
+        v.fill(1, 7, 6, 6, 1, 4, P.black);
+        const vein = jit(P.wing, P.wingDk, 0.3);
+        for (const cx of [0.5, 7.5]) v.fill(-2, 10, 2, 10, -1, -1, (x, y) => ((x - cx) / 2.6) ** 2 + ((y - 6.5) / 4) ** 2 <= 1 ? vein() : null);
       }
       for (let x = 0; x <= 8; x++) for (let z = 0; z <= 5; z++) if (rand() < 0.18) v.del(x, 0, z);
       return v;
@@ -535,7 +546,7 @@
         // Nose, beard and mouth sit under the mask
       } else if (traits.slim) {
         v.fill(3, 3, 2, 3, 6, 6, P.nose);
-      } else if (traits.skater) {
+      } else if (traits.skater || traits.bee) {
         // Clean-shaven under the shades: a low nose and a smirk
         v.set(3, 1, 6, P.nose);
         v.fill(2, 4, 0, 0, 6, 6, P.spot);
@@ -546,8 +557,8 @@
         v.set(5, 0, 7, P.white);
         v.fill(2, 4, 2, 3, 6, 7, jit(traits.apple ? P.appleDk : P.nose, traits.apple ? P.apple : P.skin, 0.25));
       }
-      if (!traits.gasMask && !traits.skater) v.fill(0, 6, 4, 4, 6, 6, hairJ);
-      const hairy = !traits.bald && !traits.apple && !traits.gasMask && !traits.anunnaki && !traits.skater;
+      if (!traits.gasMask && !traits.skater && !traits.bee) v.fill(0, 6, 4, 4, 6, 6, hairJ);
+      const hairy = !traits.bald && !traits.apple && !traits.gasMask && !traits.anunnaki && !traits.skater && !traits.bee;
       if (hairy) {
         v.fill(-1, 7, 6, 8, -1, 6, hairJ);
         v.fill(-1, 7, traits.slim ? -5 : -2, 5, -2, -1, hairJ);
@@ -590,6 +601,24 @@
         v.fill(-1, -1, 3, 3, 4, 6, P.black);
         v.fill(7, 7, 3, 3, 4, 6, P.black);
       }
+      if (traits.bee) {
+        // The Bee: round blue goggles on a black strap, two antennae bent forward off the crown
+        for (const cx of [1, 5]) {
+          v.fill(cx - 1, cx + 1, 1, 4, 6, 6, P.black);
+          v.fill(cx, cx, 2, 3, 6, 6, P.goggle);
+          v.set(cx - 1, 3, 6, P.goggle);
+          v.set(cx + 1, 2, 6, P.goggleDk);
+        }
+        v.set(3, 3, 6, P.black);
+        v.fill(-1, -1, 3, 3, 3, 6, P.black);
+        v.fill(7, 7, 3, 3, 3, 6, P.black);
+        for (const ax of [1, 5]) {
+          v.fill(ax, ax, 6, 7, 2, 2, P.black);
+          v.set(ax, 8, 3, P.black);
+          v.set(ax, 9, 4, P.black);
+          v.set(ax, 10, 4, P.goggleDk);
+        }
+      }
       for (const [k, c] of [...v.map]) {
         if (c !== P.hair && c !== P.hairDk) continue;
         const [x, y, z] = k.split(",").map(Number);
@@ -631,7 +660,7 @@
     for (const [x, y] of eyeCells) closedVox.set(x, y, 5, y === 2 ? P.skinDk : P.skin);
     const headClosed = vg(closedVox, headOrigin);
     parts.head = createNode({ position: { x: 0, y: 0.5 * h, z: 0.02 * h }, geometry: headOpen });
-    const hatY = traits.gasMask ? 0.66 * h : (traits.bald ? 6 : traits.apple ? 8 : traits.anunnaki ? 12 : traits.skater ? 13 : 9) * u;
+    const hatY = traits.gasMask ? 0.66 * h : (traits.bald ? 6 : traits.apple ? 8 : traits.anunnaki ? 12 : traits.skater ? 13 : traits.bee ? 11 : 9) * u;
     parts.hat = createNode({ position: { x: 0, y: hatY, z: 0 }, scale: { x: h, y: h, z: h }, visible: false });
     parts.face = createNode({ position: { x: 0, y: 0, z: 0 }, scale: { x: h, y: h, z: h }, visible: false });
     addChild(parts.head, parts.hat, parts.face);
@@ -991,20 +1020,22 @@
   const SWAG = [
     { id: "party-hat", name: "Party Hat", tier: "common", slot: "head", offset: { y: -0.03 }, build: () => lathe({ profile: [[0.36, 0], [0.26, 0.2], [0.14, 0.42], [0.0, 0.62]], segments: 8, color: (t) => t < 0.34 ? "#d8892b" : t < 0.67 ? "#f3efe4" : "#22c55e" }) },
     { id: "bandana", name: "Bandana", tier: "common", slot: "head", offset: { y: -0.16 }, build: () => merge(ring({ r: 0.4, thickness: 0.045, segments: 10, color: "#c8342a" }), box({ w: 0.1, h: 0.04, d: 0.26, color: "#c8342a", offset: { x: 0.06, y: -0.03, z: -0.5 } }), box({ w: 0.1, h: 0.04, d: 0.2, color: "#a82a22", offset: { x: -0.08, y: -0.05, z: -0.46 } })) },
-    { id: "banana-peel", name: "Banana Peel Hat", tier: "common", slot: "head", offset: { y: -0.06 }, build: () => merge(
-      lathe({ profile: [[0.23, 0], [0.22, 0.08], [0.16, 0.16], [0.07, 0.22], [0, 0.24]], segments: 8, color: "#f5c542" }),
-      box({ w: 0.05, h: 0.09, d: 0.05, color: "#5a3a1a", offset: { y: 0.27 } }),
-      ...[0, 1, 2, 3].map((i) => {
-        const a = i / 4 * Math.PI * 2 + Math.PI / 4;
-        return tube({
-          rings: 6,
-          segments: 5,
-          path: (t) => ({ x: Math.cos(a) * (0.08 + t * 0.34), y: 0.14 - t * t * 0.42, z: Math.sin(a) * (0.08 + t * 0.34) }),
-          radius: (t) => 0.065 - t * 0.02,
-          colorFn: (t) => t > 0.8 ? "#5a3a1a" : t > 0.55 ? "#e0b53a" : "#f5c542"
-        });
-      })
-    ) },
+    {
+      id: "banana-peel", name: "Banana Peel Hat", tier: "common", slot: "head", offset: { y: -0.06 }, build: () => merge(
+        lathe({ profile: [[0.23, 0], [0.22, 0.08], [0.16, 0.16], [0.07, 0.22], [0, 0.24]], segments: 8, color: "#f5c542" }),
+        box({ w: 0.05, h: 0.09, d: 0.05, color: "#5a3a1a", offset: { y: 0.27 } }),
+        ...[0, 1, 2, 3].map((i) => {
+          const a = i / 4 * Math.PI * 2 + Math.PI / 4;
+          return tube({
+            rings: 6,
+            segments: 5,
+            path: (t) => ({ x: Math.cos(a) * (0.08 + t * 0.34), y: 0.14 - t * t * 0.42, z: Math.sin(a) * (0.08 + t * 0.34) }),
+            radius: (t) => 0.065 - t * 0.02,
+            colorFn: (t) => t > 0.8 ? "#5a3a1a" : t > 0.55 ? "#e0b53a" : "#f5c542"
+          });
+        })
+      )
+    },
     { id: "miner-helmet", name: "Miner Helmet", tier: "rare", slot: "head", offset: { y: -0.12 }, build: () => merge(lathe({ profile: [[0.42, 0], [0.41, 0.12], [0.32, 0.26], [0.14, 0.36], [0, 0.38]], segments: 10, color: "#e0b53a" }), box({ w: 0.14, h: 0.12, d: 0.1, color: "#fff2b0", emissive: 1, offset: { y: 0.18, z: 0.4 } })) },
     { id: "tinfoil-hat", name: "Tinfoil Hat", tier: "rare", slot: "head", offset: { y: -0.04 }, build: () => lathe({ profile: [[0.38, 0], [0.27, 0.2], [0.14, 0.38], [0.02, 0.56]], segments: 5, color: "#c9ccd2" }) },
     { id: "golden-club", name: "Golden Club", tier: "rare", slot: "hand", skin: "club", build: () => voxelGeometry(clubVoxels(BL.math.mulberry32(7)), { unit: 1 / 16, palette: GOLD_CLUB_PALETTE, origin: { x: -1 / 16, y: -1 / 16, z: -1 / 16 } }) },
