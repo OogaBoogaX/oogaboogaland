@@ -75,7 +75,7 @@
     }
     return geo;
   };
-  const tube = ({ path, radius, rings = 8, segments = 6, colorFn, emissive = 0 } = {}) => {
+  const tube = ({ path, radius, rings = 8, segments = 6, colorFn, startCapColor = null, endCapColor = null, emissive = 0 } = {}) => {
     const geo = geometry();
     const ringIdx = [];
     for (let p = 0; p <= rings; p++) {
@@ -110,6 +110,8 @@
         face(geo, [ringIdx[p][s], ringIdx[p][s2], ringIdx[p + 1][s2], ringIdx[p + 1][s]], c, { emissive });
       }
     }
+    if (startCapColor) face(geo, [...ringIdx[0]].reverse(), hexToRgb(startCapColor), { emissive });
+    if (endCapColor) face(geo, [...ringIdx[rings]], hexToRgb(endCapColor), { emissive });
     return geo;
   };
   const ring = ({ r = 0.3, thickness = 0.05, y = 0, segments = 12, color, emissive = 0 } = {}) => lathe({
@@ -205,6 +207,10 @@
     return () => value || (value = build());
   };
   const BANANA_AMMO_SCALE = 0.34;
+  const BANANA_END_RADIUS = 0.032;
+  const BANANA_END_COLOR = "#5a3a1a";
+  const bananaRadius = (t) => t === 0 ? BANANA_END_RADIUS : 0.085 * Math.pow(Math.sin(Math.PI * t), 0.55) + 0.012;
+  const bananaColor = (t) => t < 0.08 || t > 0.92 ? BANANA_END_COLOR : t < 0.2 || t > 0.8 ? "#c9b23a" : "#f5c542";
   // A full-shouldered loose heap encloses the dead space between curved bananas
   // without returning to the old pointed silhouette.
   const BANANA_PILE_PROFILE = [[1, 0], [0.98, 0.11], [0.9, 0.31], [0.72, 0.53], [0.5, 0.7], [0.28, 0.82], [0.1, 0.87], [0, 0.88]];
@@ -229,8 +235,9 @@
       const a = (t - 0.5) * 2;
       return { x: Math.sin(a) * 0.55, y: (1 - Math.cos(a)) * 0.55 + 0.1, z: 0 };
     },
-    radius: (t) => 0.085 * Math.pow(Math.sin(Math.PI * t), 0.55) + 0.012,
-    colorFn: (t) => t < 0.08 || t > 0.92 ? "#5a3a1a" : t < 0.2 || t > 0.8 ? "#c9b23a" : "#f5c542"
+    radius: bananaRadius,
+    colorFn: bananaColor,
+    startCapColor: BANANA_END_COLOR
   }));
   const banana = () => createNode({ geometry: bananaGeometry() });
   // A centered copy for the pile skin. It has the full depth and dimensions of a
@@ -242,8 +249,9 @@
       const a = (t - 0.5) * 2;
       return { x: Math.sin(a) * 0.55, y: (1 - Math.cos(a)) * 0.55 - 0.075, z: 0 };
     },
-    radius: (t) => 0.085 * Math.pow(Math.sin(Math.PI * t), 0.55) + 0.012,
-    colorFn: (t) => t < 0.08 || t > 0.92 ? "#5a3a1a" : t < 0.2 || t > 0.8 ? "#c9b23a" : "#f5c542"
+    radius: bananaRadius,
+    colorFn: bananaColor,
+    startCapColor: BANANA_END_COLOR
   }));
   const bananaPileCoreGeometry = (worldRadius = 0.45, worldHeight = 0.48, faceSize = 0.16) => {
     const geo = geometry();
