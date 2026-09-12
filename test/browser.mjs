@@ -1,6 +1,6 @@
 // Minimal headless-Chrome driver over the DevTools protocol
 import { spawn } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -9,15 +9,15 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const COMMAND_MS = 90000;
 
 export const launch = async ({ w = 1440, h = 900, mobile = false } = {}) => {
-  const port = 9300 + Math.floor(Math.random() * 500);
   // Fresh profile per launch, so storage never leaks
   const profile = mkdtempSync(join(tmpdir(), "ooga-test-"));
+  // Chrome picks a free port and writes it into the profile, so concurrent launches never collide
   const args = [
     "--headless=new",
     "--hide-scrollbars",
     "--mute-audio",
     `--window-size=${w},${h}`,
-    `--remote-debugging-port=${port}`,
+    "--remote-debugging-port=0",
     `--user-data-dir=${profile}`,
     "--enable-unsafe-swiftshader",
     "--ignore-gpu-blocklist",
@@ -27,10 +27,11 @@ export const launch = async ({ w = 1440, h = 900, mobile = false } = {}) => {
   const chrome = spawn(CHROME, args, { stdio: "ignore" });
   const logs = [];
   let targets = null;
-  for (let i = 0; i < 40 && !targets; i++) {
-    await sleep(250);
+  for (let i = 0; i < 100 && !targets; i++) {
+    await sleep(100);
     try {
-      targets = await (await fetch(`http://127.0.0.1:${port}/json`)).json();
+      const port = parseInt(readFileSync(join(profile, "DevToolsActivePort"), "utf8"), 10);
+      if (port) targets = await (await fetch(`http://127.0.0.1:${port}/json`)).json();
     } catch {
       targets = null;
     }
@@ -41,8 +42,26 @@ export const launch = async ({ w = 1440, h = 900, mobile = false } = {}) => {
     throw new Error(`Chrome did not start at ${CHROME}`);
   }
   const page = targets.find((t) => t.type === "page");
-  const ws = new WebSocket(page.webSocketDebuggerUrl);
-  await new Promise((r) => (ws.onopen = r));
+  // Chrome can refuse or drop the first socket while it is still starting up: retry, and never wait on a socket that failed
+  const connect = () => new Promise((resolve, reject) => {
+    const socket = new WebSocket(page.webSocketDebuggerUrl);
+    socket.onopen = () => resolve(socket);
+    socket.onerror = () => reject(new Error("DevTools socket failed"));
+    socket.onclose = () => reject(new Error("DevTools socket closed before opening"));
+  });
+  let ws = null;
+  for (let attempt = 0; !ws; attempt++) {
+    try {
+      ws = await connect();
+    } catch (err) {
+      if (attempt === 4) {
+        chrome.kill();
+        rmSync(profile, { recursive: true, force: true });
+        throw err;
+      }
+      await sleep(250);
+    }
+  }
   let id = 0;
   const pending = new Map();
   const listeners = new Map();
