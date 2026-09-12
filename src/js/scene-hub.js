@@ -556,6 +556,10 @@
       quality: renderer.kind === "canvas2d" ? "canvas2d" : renderer.quality, densityRankLimit: MATRIX_DENSITY[renderer.kind === "canvas2d" ? "canvas2d" : renderer.quality], glyphVersion: -1, previousGlyphVersion: -1, mutationHash: 0, firstGlyphY: 0,
       minBrightness, maxBrightness, minTrainLength, maxTrainLength, minGapLength, maxGapLength, visible: false, drawEnabled: false
     };
+    // One world-space sphere around the whole interior (portal at local z .5 to depth 7) lets the renderer skip the cave's batches
+    const cullSphere = new Float32Array([m.x + sr * -3.25, m.floorY + 2.1, m.z + cr * -3.25, 5.6]);
+    for (let i = 0; i < nodes.length; i++) nodes[i].cullSphere = cullSphere;
+    for (let i = 0; i < cave.rain.nodes.length; i++) cave.rain.nodes[i].cullSphere = cullSphere;
     matrixInteriors.push(cave);
     return cave;
   };

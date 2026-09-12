@@ -371,6 +371,13 @@
       BATCH_NODE.matrixEmissiveLiving = !!node.matrixEmissiveLiving;
       const count = node.drawInstanceCount === undefined ? node.instanceCount : Math.max(0, Math.min(node.instanceCount, node.drawInstanceCount));
       suppressed += node.instanceCount - count;
+      if (node.cullSphere) {
+        const sphere = node.cullSphere, x = sphere[0], y = sphere[1], z = sphere[2], r = sphere[3];
+        const cx = view[0] * x + view[4] * y + view[8] * z + view[12];
+        const cy = view[1] * x + view[5] * y + view[9] * z + view[13];
+        const depth = -(view[2] * x + view[6] * y + view[10] * z + view[14]);
+        if (depth + r < near || Math.abs(cx) > depth * tanX + r * sideX || Math.abs(cy) > depth * tanY + r * sideY) { matrixCulled += count; return; }
+      }
       for (let instance = 0; instance < count; instance++) {
         const offset = instance * 20;
         const facing = data[offset + 19];

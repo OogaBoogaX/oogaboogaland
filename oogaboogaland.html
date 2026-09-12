@@ -5,7 +5,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta http-equiv="Content-Security-Policy"
-    content="default-src 'none'; script-src 'sha256-1bIYuW7XYPcgwVsjRVBs8jNFgNScBpN22VONsmh3tsE='; style-src 'sha256-3C/lZtrs9H11VfLxejw4WH1Oq4EePnFjR7bYVG9kp+c='; img-src 'self' data:; connect-src 'none'; base-uri 'none'; form-action 'none'">
+    content="default-src 'none'; script-src 'sha256-NgdII8LJcAtwXPMuytkP8ZO3Ek23FJQa+7yyOE0cBAI='; style-src 'sha256-3C/lZtrs9H11VfLxejw4WH1Oq4EePnFjR7bYVG9kp+c='; img-src 'self' data:; connect-src 'none'; base-uri 'none'; form-action 'none'">
   <meta name="referrer" content="no-referrer">
   <meta name="color-scheme" content="dark">
   <meta name="theme-color" content="#0a0a0b">
@@ -3280,6 +3280,7 @@ void main() {
 }`;
   const MESH_FS = `#version 300 es
 precision highp float;
+precision highp int;
 precision highp sampler2DShadow;
 in vec3 vNormal;
 in vec4 vColor;
@@ -4256,15 +4257,17 @@ void main() {
         FRUSTUM[o + 3] = d / len;
       }
     };
+    const sphereInFrustum = (x, y, z, r) => {
+      for (let i = 0; i < 24; i += 4) {
+        if (FRUSTUM[i] * x + FRUSTUM[i + 1] * y + FRUSTUM[i + 2] * z + FRUSTUM[i + 3] < -r) return false;
+      }
+      return true;
+    };
     const inFrustum = (node) => {
       const b = boundsOf(node.geometry), w = node.world;
       mat4.transformPoint(CENTER, w, b.center[0], b.center[1], b.center[2]);
       const scale = Math.max(w[0] * w[0] + w[1] * w[1] + w[2] * w[2], w[4] * w[4] + w[5] * w[5] + w[6] * w[6], w[8] * w[8] + w[9] * w[9] + w[10] * w[10]);
-      const r = b.radius * Math.sqrt(scale) + CULL_MARGIN;
-      for (let i = 0; i < 24; i += 4) {
-        if (FRUSTUM[i] * CENTER[0] + FRUSTUM[i + 1] * CENTER[1] + FRUSTUM[i + 2] * CENTER[2] + FRUSTUM[i + 3] < -r) return false;
-      }
-      return true;
+      return sphereInFrustum(CENTER[0], CENTER[1], CENTER[2], b.radius * Math.sqrt(scale) + CULL_MARGIN);
     };
     const collect = (node) => {
       if (!node.geometry) return;
@@ -4290,6 +4293,7 @@ void main() {
         rec.count = node.instanceCount;
         rec.drawCount = node.drawInstanceCount === undefined ? rec.count : Math.max(0, Math.min(rec.count, node.drawInstanceCount));
         suppressed += rec.count - rec.drawCount;
+        rec.offscreen = !!node.cullSphere && !sphereInFrustum(node.cullSphere[0], node.cullSphere[1], node.cullSphere[2], node.cullSphere[3] + CULL_MARGIN);
         return;
       }
       // In-frustum nodes stay in front of the culled ones by swapping into the draw region
@@ -4509,6 +4513,7 @@ void main() {
         if (excludeMirror && rec === mirror.record) continue;
         const part = rec[kind], n = rec.batch && rec.batch.drawInstanceCount !== undefined ? rec.drawCount : cull ? rec.drawCount : rec.count;
         if (!part || !n) continue;
+        if (cull && rec.offscreen) continue;
         if (kind === "mesh" && useProgram === "shadow" && rec.geometry.castShadow === false) continue;
         if (kind === "mesh" && useProgram === "mesh") {
           const stage = rec.geometry.matrixRevealBacking ? 1 : rec.geometry.matrixGlyph ? 2 : 0;
@@ -4705,6 +4710,7 @@ void main() {
         rec.active = false;
         rec.nodes.length = 0;
         rec.batch = null;
+        rec.offscreen = false;
       }
       activeRecords.length = 0;
       mirror.node = mirror.record = null;
@@ -4717,7 +4723,7 @@ void main() {
       traverseVisible(root, collect);
       for (const rec of activeRecords) {
         if (!rec.batch) rec.nodes.length = rec.count;
-        drawn += rec.drawCount;
+        if (rec.offscreen) culled += rec.drawCount; else drawn += rec.drawCount;
         uploadInstances(rec);
       }
       gl.bindFramebuffer(gl.FRAMEBUFFER, sh.fb);
@@ -5285,6 +5291,13 @@ void main() {
       BATCH_NODE.matrixEmissiveLiving = !!node.matrixEmissiveLiving;
       const count = node.drawInstanceCount === undefined ? node.instanceCount : Math.max(0, Math.min(node.instanceCount, node.drawInstanceCount));
       suppressed += node.instanceCount - count;
+      if (node.cullSphere) {
+        const sphere = node.cullSphere, x = sphere[0], y = sphere[1], z = sphere[2], r = sphere[3];
+        const cx = view[0] * x + view[4] * y + view[8] * z + view[12];
+        const cy = view[1] * x + view[5] * y + view[9] * z + view[13];
+        const depth = -(view[2] * x + view[6] * y + view[10] * z + view[14]);
+        if (depth + r < near || Math.abs(cx) > depth * tanX + r * sideX || Math.abs(cy) > depth * tanY + r * sideY) { matrixCulled += count; return; }
+      }
       for (let instance = 0; instance < count; instance++) {
         const offset = instance * 20;
         const facing = data[offset + 19];
@@ -12334,6 +12347,10 @@ void main() {
       quality: renderer.kind === "canvas2d" ? "canvas2d" : renderer.quality, densityRankLimit: MATRIX_DENSITY[renderer.kind === "canvas2d" ? "canvas2d" : renderer.quality], glyphVersion: -1, previousGlyphVersion: -1, mutationHash: 0, firstGlyphY: 0,
       minBrightness, maxBrightness, minTrainLength, maxTrainLength, minGapLength, maxGapLength, visible: false, drawEnabled: false
     };
+    // One world-space sphere around the whole interior (portal at local z .5 to depth 7) lets the renderer skip the cave's batches
+    const cullSphere = new Float32Array([m.x + sr * -3.25, m.floorY + 2.1, m.z + cr * -3.25, 5.6]);
+    for (let i = 0; i < nodes.length; i++) nodes[i].cullSphere = cullSphere;
+    for (let i = 0; i < cave.rain.nodes.length; i++) cave.rain.nodes[i].cullSphere = cullSphere;
     matrixInteriors.push(cave);
     return cave;
   };

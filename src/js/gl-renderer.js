@@ -76,6 +76,7 @@ void main() {
 }`;
   const MESH_FS = `#version 300 es
 precision highp float;
+precision highp int;
 precision highp sampler2DShadow;
 in vec3 vNormal;
 in vec4 vColor;
@@ -1052,15 +1053,17 @@ void main() {
         FRUSTUM[o + 3] = d / len;
       }
     };
+    const sphereInFrustum = (x, y, z, r) => {
+      for (let i = 0; i < 24; i += 4) {
+        if (FRUSTUM[i] * x + FRUSTUM[i + 1] * y + FRUSTUM[i + 2] * z + FRUSTUM[i + 3] < -r) return false;
+      }
+      return true;
+    };
     const inFrustum = (node) => {
       const b = boundsOf(node.geometry), w = node.world;
       mat4.transformPoint(CENTER, w, b.center[0], b.center[1], b.center[2]);
       const scale = Math.max(w[0] * w[0] + w[1] * w[1] + w[2] * w[2], w[4] * w[4] + w[5] * w[5] + w[6] * w[6], w[8] * w[8] + w[9] * w[9] + w[10] * w[10]);
-      const r = b.radius * Math.sqrt(scale) + CULL_MARGIN;
-      for (let i = 0; i < 24; i += 4) {
-        if (FRUSTUM[i] * CENTER[0] + FRUSTUM[i + 1] * CENTER[1] + FRUSTUM[i + 2] * CENTER[2] + FRUSTUM[i + 3] < -r) return false;
-      }
-      return true;
+      return sphereInFrustum(CENTER[0], CENTER[1], CENTER[2], b.radius * Math.sqrt(scale) + CULL_MARGIN);
     };
     const collect = (node) => {
       if (!node.geometry) return;
@@ -1086,6 +1089,7 @@ void main() {
         rec.count = node.instanceCount;
         rec.drawCount = node.drawInstanceCount === undefined ? rec.count : Math.max(0, Math.min(rec.count, node.drawInstanceCount));
         suppressed += rec.count - rec.drawCount;
+        rec.offscreen = !!node.cullSphere && !sphereInFrustum(node.cullSphere[0], node.cullSphere[1], node.cullSphere[2], node.cullSphere[3] + CULL_MARGIN);
         return;
       }
       // In-frustum nodes stay in front of the culled ones by swapping into the draw region
@@ -1305,6 +1309,7 @@ void main() {
         if (excludeMirror && rec === mirror.record) continue;
         const part = rec[kind], n = rec.batch && rec.batch.drawInstanceCount !== undefined ? rec.drawCount : cull ? rec.drawCount : rec.count;
         if (!part || !n) continue;
+        if (cull && rec.offscreen) continue;
         if (kind === "mesh" && useProgram === "shadow" && rec.geometry.castShadow === false) continue;
         if (kind === "mesh" && useProgram === "mesh") {
           const stage = rec.geometry.matrixRevealBacking ? 1 : rec.geometry.matrixGlyph ? 2 : 0;
@@ -1501,6 +1506,7 @@ void main() {
         rec.active = false;
         rec.nodes.length = 0;
         rec.batch = null;
+        rec.offscreen = false;
       }
       activeRecords.length = 0;
       mirror.node = mirror.record = null;
@@ -1513,7 +1519,7 @@ void main() {
       traverseVisible(root, collect);
       for (const rec of activeRecords) {
         if (!rec.batch) rec.nodes.length = rec.count;
-        drawn += rec.drawCount;
+        if (rec.offscreen) culled += rec.drawCount; else drawn += rec.drawCount;
         uploadInstances(rec);
       }
       gl.bindFramebuffer(gl.FRAMEBUFFER, sh.fb);
