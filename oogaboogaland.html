@@ -5,7 +5,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta http-equiv="Content-Security-Policy"
-    content="default-src 'none'; script-src 'sha256-NgdII8LJcAtwXPMuytkP8ZO3Ek23FJQa+7yyOE0cBAI='; style-src 'sha256-3C/lZtrs9H11VfLxejw4WH1Oq4EePnFjR7bYVG9kp+c='; img-src 'self' data:; connect-src 'none'; base-uri 'none'; form-action 'none'">
+    content="default-src 'none'; script-src 'sha256-KwNgMn6sy/QPc/okbUdlWNp7TpjEqCfsQ0fdfu5yN1U='; style-src 'sha256-3C/lZtrs9H11VfLxejw4WH1Oq4EePnFjR7bYVG9kp+c='; img-src 'self' data:; connect-src 'none'; base-uri 'none'; form-action 'none'">
   <meta name="referrer" content="no-referrer">
   <meta name="color-scheme" content="dark">
   <meta name="theme-color" content="#0a0a0b">
@@ -3101,6 +3101,7 @@ select {
     glow: 1,
     highlight: 0,
     visible: true,
+    cameraHidden: false,
     parent: null,
     children: [],
     world: mat4.create(),
@@ -3504,11 +3505,13 @@ float matrixTravel(vec2 point, float caveIndex) {
 void main() {
   vec3 n = normalize(vNormal);
   vec3 base = vColor.rgb;
+  float cloud = step(3.5, vParams.z);
   float wholeLiving = step(1.5, vParams.z) * (1.0 - step(2.5, vParams.z));
-  float emissiveLiving = step(2.5, vParams.z) * step(0.001, vColor.a);
+  float emissiveLiving = step(2.5, vParams.z) * (1.0 - cloud) * step(0.001, vColor.a);
   float living = max(wholeLiving, emissiveLiving);
   float caveIndex = max(vMatrixCave, uMatrixCave);
   float flow = uMatrixParams.x > 0.0 ? matrixTravel(vWorld.xz, caveIndex) : 0.0;
+  if (cloud > 0.0) flow = min(flow, 36.0);
   // Moving Oogas and insects do not own static carved faces. Locate only bright
   // occupants near the cliffs; the pile and meadow bypass the bounded lookup.
   if (uMatrixParams.x > 0.0 && living > 0.0 && caveIndex < 0.5 && flow > uMatrixCaveNear) {
@@ -3849,7 +3852,7 @@ void main() {
     const res = { programs: {}, fbo: null, shadow: null, bloom: null, quadVao: null, matrixTexture: null };
     const mirror = { node: null, record: null, geometry: null, program: null, programReady: false, fb: null, tex: null, depth: null, color: null, msFb: null, msaa: -1, width: 0, height: 0, frame: 0, portal: false, walkThrough: false, captureValid: false, capturePending: false };
     const mirrorDebug = {
-      active: false, faux: false, portal: false, surfaceDrawn: false, captureValid: false, width: 0, height: 0, samples: 0, allocationCount: 0, reflectionPassCount: 0, skippedPassCount: 0, resources: 0, captureExcluded: false,
+      active: false, faux: false, portal: false, surfaceDrawn: false, captureValid: false, width: 0, height: 0, samples: 0, allocationCount: 0, reflectionPassCount: 0, skippedPassCount: 0, resources: 0, captureExcluded: false, reflectionOnlyCount: 0, planeDistance: 0,
       cameraPosition: new Float32Array(3), cameraTarget: new Float32Array(3), planeCenter: new Float32Array(3), planeNormal: new Float32Array(3), capturedViewProj: mirrorCapturedViewProj, skipReason: "none"
     };
     // Compile without blocking, ready flips once linked
@@ -4024,6 +4027,7 @@ void main() {
       mirrorDebug.portal = false;
       mirrorDebug.surfaceDrawn = false;
       mirrorDebug.captureExcluded = false;
+      mirrorDebug.reflectionOnlyCount = 0;
     };
     const forgetMirror = () => {
       mirror.node = mirror.record = mirror.geometry = mirror.program = mirror.fb = mirror.tex = mirror.depth = mirror.color = mirror.msFb = null;
@@ -4035,6 +4039,7 @@ void main() {
       mirrorDebug.portal = mirrorDebug.captureValid = false;
       mirrorDebug.surfaceDrawn = false;
       mirrorDebug.captureExcluded = false;
+      mirrorDebug.reflectionOnlyCount = 0;
       mirrorDebug.resources = 0;
     };
     const destroyFbo = () => {
@@ -4240,7 +4245,7 @@ void main() {
       let rec = records.get(geometry);
       if (!rec) {
         const ibo = gl.createBuffer();
-        rec = { geometry, ibo, capacity: 0, mesh: buildMeshPart(geometry, ibo), line: buildLinePart(geometry, ibo), nodes: [], count: 0, drawCount: 0, active: false, data: null, batch: null, batchVersion: -1 };
+        rec = { geometry, ibo, capacity: 0, mesh: buildMeshPart(geometry, ibo), line: buildLinePart(geometry, ibo), nodes: [], count: 0, drawCount: 0, cameraHiddenCount: 0, active: false, data: null, batch: null, batchVersion: -1 };
         records.set(geometry, rec);
       }
       return rec;
@@ -4269,6 +4274,10 @@ void main() {
       const scale = Math.max(w[0] * w[0] + w[1] * w[1] + w[2] * w[2], w[4] * w[4] + w[5] * w[5] + w[6] * w[6], w[8] * w[8] + w[9] * w[9] + w[10] * w[10]);
       return sphereInFrustum(CENTER[0], CENTER[1], CENTER[2], b.radius * Math.sqrt(scale) + CULL_MARGIN);
     };
+    const hiddenFromCamera = (node) => {
+      for (let n = node; n; n = n.parent) if (n.cameraHidden) return true;
+      return false;
+    };
     const collect = (node) => {
       if (!node.geometry) return;
       if (node.mirror || node.mirrorPortal) {
@@ -4286,6 +4295,7 @@ void main() {
         rec.active = true;
         rec.count = 0;
         rec.drawCount = 0;
+        rec.cameraHiddenCount = 0;
         activeRecords.push(rec);
       }
       if (node.instanceData) {
@@ -4299,7 +4309,10 @@ void main() {
       // In-frustum nodes stay in front of the culled ones by swapping into the draw region
       const idx = rec.count++;
       rec.nodes[idx] = node;
-      if (inFrustum(node)) {
+      if (hiddenFromCamera(node)) {
+        rec.cameraHiddenCount++;
+        suppressed++;
+      } else if (inFrustum(node)) {
         rec.nodes[idx] = rec.nodes[rec.drawCount];
         rec.nodes[rec.drawCount++] = node;
       } else culled++;
@@ -4308,6 +4321,7 @@ void main() {
       let partial = 0;
       while (node) {
         if (node.matrixLiving) return 2;
+        if (node.matrixCloud) return 4;
         if (node.matrixEmissiveLiving) partial = 3;
         node = node.parent;
       }
@@ -4395,6 +4409,7 @@ void main() {
       normal[0] = world[8] / nlen;
       normal[1] = world[9] / nlen;
       normal[2] = world[10] / nlen;
+      mirrorDebug.planeDistance = Math.abs((camera.position.x - center[0]) * normal[0] + (camera.position.y - center[1]) * normal[1] + (camera.position.z - center[2]) * normal[2]);
       mirror.portal = !!mirror.node.mirrorPortal;
       mirrorDebug.portal = mirror.portal;
     };
@@ -4412,22 +4427,48 @@ void main() {
       mat4.transformPoint4(MIRROR_CLIP, viewProj, center[0], center[1], center[2]);
       if (MIRROR_CLIP[3] <= MIRROR_EPSILON) return skipMirrorPass("behind-camera");
       if (!mirrorRect(node, viewProj) || MIRROR_RECT[2] < -1 || MIRROR_RECT[0] > 1 || MIRROR_RECT[3] < -1 || MIRROR_RECT[1] > 1) return skipMirrorPass("offscreen");
+      const screenWidth = Math.max(1, (MIRROR_RECT[2] - MIRROR_RECT[0]) * width * 0.5);
+      const screenHeight = Math.max(1, (MIRROR_RECT[3] - MIRROR_RECT[1]) * height * 0.5);
       const area = (Math.min(1, MIRROR_RECT[2]) - Math.max(-1, MIRROR_RECT[0])) * width * 0.5 * (Math.min(1, MIRROR_RECT[3]) - Math.max(-1, MIRROR_RECT[1])) * height * 0.5;
       if (area < 16) return skipMirrorPass("negligible");
       reflectMirrorPoint(mirrorEye, camera.position, center, normal);
-      reflectMirrorPoint(mirrorTarget, camera.target, center, normal);
-      const upDot = UP.x * normal[0] + UP.y * normal[1] + UP.z * normal[2];
-      mirrorUp.x = UP.x - 2 * upDot * normal[0];
-      mirrorUp.y = UP.y - 2 * upDot * normal[1];
-      mirrorUp.z = UP.z - 2 * upDot * normal[2];
+      // At face distance the real eye can approach the glass more closely
+      // than the capture near plane. Keep the reflected capture one near-plane
+      // away so aperture vertices never reach projective w=0 and stretch into
+      // a radial point; the visible camera and mirror remain untouched.
+      if (cameraSide < camera.near) {
+        const push = camera.near - cameraSide;
+        mirrorEye.x -= normal[0] * push;
+        mirrorEye.y -= normal[1] * push;
+        mirrorEye.z -= normal[2] * push;
+      }
+      // A planar reflection is fixed by the reflected eye and glass aperture.
+      // Keep its optical axis perpendicular to the plane, then shift the crop
+      // around the aperture below. Aiming at either the visitor's look target
+      // or the aperture centre lets close, edge-offset glass cross behind this
+      // camera; its projective w then crosses zero and stretches the reflection
+      // into a point.
+      mirrorTarget.x = mirrorEye.x + normal[0];
+      mirrorTarget.y = mirrorEye.y + normal[1];
+      mirrorTarget.z = mirrorEye.z + normal[2];
+      mirrorUp.x = UP.x;
+      mirrorUp.y = UP.y;
+      mirrorUp.z = UP.z;
       mat4.lookAt(mirrorView, mirrorEye, mirrorTarget, mirrorUp);
       mat4.perspective(mirrorProj, camera.fov, width / height, camera.near, camera.far);
-      // Crop the reflected frustum to the glass so every texel lands on it, but never denser than the screen
+      // Crop the reflected frustum to the glass, limiting each axis independently
+      // to one capture texel per visible screen pixel. The fixed perpendicular
+      // capture axis does not share the main camera's projected aspect at oblique
+      // angles, so a single scalar density bound under-samples one axis.
       mat4.multiply(mirrorViewProj, mirrorProj, mirrorView);
       mirrorRect(node, mirrorViewProj);
-      const minHalf = settings.mirror / (Math.max(width, height, 1) * dpr);
       const cropX = (MIRROR_RECT[0] + MIRROR_RECT[2]) * 0.5, cropY = (MIRROR_RECT[1] + MIRROR_RECT[3]) * 0.5;
-      const halfX = Math.max(MIRROR_RECT[2] - cropX, minHalf), halfY = Math.max(MIRROR_RECT[3] - cropY, minHalf);
+      const apertureHalfX = MIRROR_RECT[2] - cropX, apertureHalfY = MIRROR_RECT[3] - cropY;
+      const targetScale = settings.mirror / Math.max(width, height, 1);
+      const targetWidth = Math.max(1, Math.round(width * targetScale));
+      const targetHeight = Math.max(1, Math.round(height * targetScale));
+      const halfX = apertureHalfX * targetWidth / Math.min(screenWidth, targetWidth);
+      const halfY = apertureHalfY * targetHeight / Math.min(screenHeight, targetHeight);
       mirrorProj[0] /= halfX;
       mirrorProj[8] = (mirrorProj[8] + cropX) / halfX;
       mirrorProj[5] /= halfY;
@@ -4591,6 +4632,8 @@ void main() {
       gl.disable(gl.CULL_FACE);
       drawParts("line", "line", true);
       gl.enable(gl.CULL_FACE);
+      mirrorDebug.reflectionOnlyCount = 0;
+      for (const rec of activeRecords) if (rec !== mirror.record) mirrorDebug.reflectionOnlyCount += rec.cameraHiddenCount;
       if (mirror.msFb) {
         gl.bindFramebuffer(gl.READ_FRAMEBUFFER, mirror.msFb);
         gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, mirror.fb);
@@ -4983,9 +5026,9 @@ void main() {
     const V = Array.from({ length: 8 }, () => new Float32Array(3));
     const CLIP_IN = new Float32Array(30);
     const CLIP_OUT = new Float32Array(30);
-    const BATCH_NODE = { geometry: null, world: new Float32Array(16), glow: 1, highlight: 0, tip: 0, depthBias: 0, matrixLiving: false, matrixEmissiveLiving: false };
+    const BATCH_NODE = { geometry: null, world: new Float32Array(16), glow: 1, highlight: 0, tip: 0, depthBias: 0, matrixLiving: false, matrixEmissiveLiving: false, matrixCloud: false };
     const mirrorDebug = {
-      active: false, faux: true, portal: false, surfaceDrawn: false, captureValid: false, width: 0, height: 0, allocationCount: 0, reflectionPassCount: 0, skippedPassCount: 0, resources: 0, captureExcluded: true,
+      active: false, faux: true, portal: false, surfaceDrawn: false, captureValid: false, width: 0, height: 0, allocationCount: 0, reflectionPassCount: 0, skippedPassCount: 0, resources: 0, captureExcluded: true, reflectionOnlyCount: 0, planeDistance: 0,
       cameraPosition: new Float32Array(3), cameraTarget: new Float32Array(3), planeCenter: new Float32Array(3), planeNormal: new Float32Array(3), skipReason: "canvas-faux"
     };
     const resize = () => {
@@ -5049,6 +5092,7 @@ void main() {
       let partial = 0;
       while (node) {
         if (node.matrixLiving) return 2;
+        if (node.matrixCloud) return 4;
         if (node.matrixEmissiveLiving) partial = 3;
         node = node.parent;
       }
@@ -5099,6 +5143,10 @@ void main() {
       }
       return -1;
     };
+    const hiddenFromCamera = (node) => {
+      for (let n = node; n; n = n.parent) if (n.cameraHidden) return true;
+      return false;
+    };
     const shadeNode = (node) => {
       const { verts, faces, lines } = node.geometry;
       const w = node.world;
@@ -5137,7 +5185,8 @@ void main() {
           centerY /= count;
           centerZ /= count;
           const flow = Math.hypot(centerX - matrixOriginX, centerZ - matrixOriginZ);
-          const matrixLiving = matrixMode > 1.5 && (matrixMode < 2.5 || face.emissive > 0);
+          const matrixCloud = matrixMode > 3.5;
+          const matrixLiving = matrixMode > 1.5 && matrixMode < 3.5 && (matrixMode < 2.5 || face.emissive > 0);
           const staticCave = face.matrixCave || node.geometry.matrixCave || 0;
           const dynamicCave = !staticCave && matrixActive && matrixRadius >= matrixCaveNear && matrixLiving && matrixCaveBounds && flow >= matrixCaveNear;
           const cave = staticCave || (dynamicCave ? matrixLivingCave(centerX, centerY, centerZ) : 0);
@@ -5148,7 +5197,7 @@ void main() {
           if (matrixActive && (!localMatrixGlyph || ownedGlyph)) {
             let radiusSquared = 0;
             for (let k = 0; k < count; k++) radiusSquared = Math.max(radiusSquared, (V[k][0] - centerX) ** 2 + (V[k][2] - centerZ) ** 2);
-            const distance = matrixTravel(centerX, centerZ, cave), margin = Math.sqrt(radiusSquared) * (cave && matrixCaves ? Math.SQRT2 : 1);
+            const distance = matrixCloud ? Math.min(matrixTravel(centerX, centerZ, cave), 36) : matrixTravel(centerX, centerZ, cave), margin = Math.sqrt(radiusSquared) * (cave && matrixCaves ? Math.SQRT2 : 1);
             minimumFront = matrixFront(distance + margin);
             maximumFront = matrixFront(Math.max(0, distance - margin));
           }
@@ -5289,6 +5338,7 @@ void main() {
       BATCH_NODE.depthBias = node.depthBias || 0;
       BATCH_NODE.matrixLiving = !!node.matrixLiving;
       BATCH_NODE.matrixEmissiveLiving = !!node.matrixEmissiveLiving;
+      BATCH_NODE.matrixCloud = !!node.matrixCloud;
       const count = node.drawInstanceCount === undefined ? node.instanceCount : Math.max(0, Math.min(node.instanceCount, node.drawInstanceCount));
       suppressed += node.instanceCount - count;
       if (node.cullSphere) {
@@ -5591,17 +5641,20 @@ void main() {
           mirrorDebug.planeNormal[2] = w[10] / nlen;
           const center = mirrorDebug.planeCenter, normal = mirrorDebug.planeNormal;
           const eyeD = (camera.position.x - center[0]) * normal[0] + (camera.position.y - center[1]) * normal[1] + (camera.position.z - center[2]) * normal[2];
+          const captureD = Math.max(eyeD, camera.near);
+          mirrorDebug.planeDistance = Math.abs(eyeD);
           mirrorDebug.portal = !!node.mirrorPortal;
-          mirrorDebug.cameraPosition[0] = camera.position.x - 2 * eyeD * normal[0];
-          mirrorDebug.cameraPosition[1] = camera.position.y - 2 * eyeD * normal[1];
-          mirrorDebug.cameraPosition[2] = camera.position.z - 2 * eyeD * normal[2];
-          const targetD = (camera.target.x - center[0]) * normal[0] + (camera.target.y - center[1]) * normal[1] + (camera.target.z - center[2]) * normal[2];
-          mirrorDebug.cameraTarget[0] = camera.target.x - 2 * targetD * normal[0];
-          mirrorDebug.cameraTarget[1] = camera.target.y - 2 * targetD * normal[1];
-          mirrorDebug.cameraTarget[2] = camera.target.z - 2 * targetD * normal[2];
+          mirrorDebug.cameraPosition[0] = camera.position.x - (eyeD + captureD) * normal[0];
+          mirrorDebug.cameraPosition[1] = camera.position.y - (eyeD + captureD) * normal[1];
+          mirrorDebug.cameraPosition[2] = camera.position.z - (eyeD + captureD) * normal[2];
+          mirrorDebug.cameraTarget[0] = mirrorDebug.cameraPosition[0] + normal[0];
+          mirrorDebug.cameraTarget[1] = mirrorDebug.cameraPosition[1] + normal[1];
+          mirrorDebug.cameraTarget[2] = mirrorDebug.cameraPosition[2] + normal[2];
         }
-        if (node.instanceData) shadeBatch(node);
-        else if (node.geometry) shadeNode(node);
+        if (!hiddenFromCamera(node)) {
+          if (node.instanceData) shadeBatch(node);
+          else if (node.geometry) shadeNode(node);
+        }
       });
       active.length = poolUsed;
       for (let i = 0; i < poolUsed; i++) {
@@ -7135,6 +7188,23 @@ void main() {
       const i = column(x, z);
       return i < 0 ? 0 : surface[i];
     };
+    // Continuous movement-only support across neighboring walkable voxel tops.
+    // Rendering and collision continue to use the exact stepped arrays above.
+    const smoothSupportAt = (x, z, y, maxStep) => {
+      const px = (x - ORIGIN.x) / UNIT - 0.5, pz = (z - ORIGIN.z) / UNIT - 0.5;
+      const gx = Math.floor(px), gz = Math.floor(pz), tx = px - gx, tz = pz - gz;
+      if (gx < 0 || gz < 0 || gx + 1 >= SX || gz + 1 >= SZ) return y;
+      const i00 = gx * SZ + gz, i10 = i00 + SZ, i01 = i00 + 1, i11 = i10 + 1;
+      let a = land[i00] ? y >= surface[i00] - maxStep ? surface[i00] : height[i00] : y;
+      let b = land[i10] ? y >= surface[i10] - maxStep ? surface[i10] : height[i10] : y;
+      let c = land[i01] ? y >= surface[i01] - maxStep ? surface[i01] : height[i01] : y;
+      let d = land[i11] ? y >= surface[i11] - maxStep ? surface[i11] : height[i11] : y;
+      if (Math.abs(a - y) > maxStep) a = y;
+      if (Math.abs(b - y) > maxStep) b = y;
+      if (Math.abs(c - y) > maxStep) c = y;
+      if (Math.abs(d - y) > maxStep) d = y;
+      return (a + (b - a) * tx) * (1 - tz) + (c + (d - c) * tx) * tz;
+    };
     const cavityAt = (x, z, out) => {
       const i = column(x, z), cavity = i < 0 ? 0 : cavities[i];
       if (!cavity) return false;
@@ -7316,6 +7386,7 @@ void main() {
       path,
       heightAt,
       surfaceAt,
+      smoothSupportAt,
       cavityAt,
       cavityBytes: cavities.byteLength,
       isPath,
@@ -8013,7 +8084,7 @@ void main() {
       }
     };
     const nodeShown = (node) => {
-      for (let n = node; n; n = n.parent) if (!n.visible) return false;
+      for (let n = node; n; n = n.parent) if (!n.visible || n.cameraHidden) return false;
       return true;
     };
     const worldScale = (m) => Math.max(Math.hypot(m[0], m[1], m[2]), Math.hypot(m[4], m[5], m[6]), Math.hypot(m[8], m[9], m[10]));
@@ -8388,22 +8459,76 @@ void main() {
   const MAX_FOV = 64 * Math.PI / 180;
   const MIN_HFOV = 58 * Math.PI / 180;
   const YAW_RATE = 1.7, PITCH_RATE = 1.1;
+  const CLOSE_RATE = 12, CLOSE_SNAP = 0.001, CLOSE_PINCH_EXIT = 1.08, CLOSE_LOOK_DIST = 4, CLOSE_HEAD_MIX = 0.1;
+  const CLOSE_GROUND_RATE = 9, CLOSE_TELEPORT = 0.8;
   // The camera swings behind while walking forward
   const FOLLOW_TURN = 1.8, DRAG_HOLD = 1.5;
   // Act button labels, action or jetpack throttle
   const ACT_DO = "Ooga!", ACT_FLY = "Blast off!";
   const create = (ctx) => {
-    const { renderer, canvas, camera, hud, presets, pitch: [PITCH_MIN, PITCH_MAX], dist: [DIST_MIN, DIST_MAX], follow, fly, clampTarget, clampCamera, coarse } = ctx;
+    const { renderer, canvas, camera, hud, presets, pitch: [PITCH_MIN, PITCH_MAX], dist: [DIST_MIN, DIST_MAX], follow, fly, clampTarget, clampCamera, coarse, close = null } = ctx;
     let crew = null, fx = null;
     const freeTarget = { x: 0, y: 0, z: 0 };
     const followTarget = { x: 0, y: 0, z: 0 };
     const view = presets[ctx.landing];
     const orbit = { ...view, tYaw: view.yaw, tPitch: view.pitch, tDist: view.dist, tx: view.target.x, ty: view.target.y, tz: view.target.z };
+    let closeWanted = false, closeMix = 0, closeExitScale = 1, closeCave = null, hiddenHead = null, hiddenHeadCameraHidden = false, viewPitch = orbit.pitch;
+    let groundView = 0, groundTarget = 0, groundX = 0, groundZ = 0, groundZone = 0, groundValid = false, groundLift = 0, groundEasing = false;
     const bind = (systems) => {
       crew = systems.crew;
       fx = systems.fx;
     };
     const player = () => crew ? crew.player : null;
+    const resetGroundView = () => {
+      const cave = player();
+      if (cave) crew.elevate(0);
+      groundView = groundTarget = groundLift = 0;
+      groundEasing = false;
+      groundValid = false;
+    };
+    const restoreHead = () => {
+      if (!hiddenHead) return;
+      hiddenHead.parts.head.cameraHidden = hiddenHeadCameraHidden;
+      hiddenHead = null;
+    };
+    const hideHead = (cave) => {
+      if (hiddenHead === cave) return;
+      restoreHead();
+      hiddenHead = cave;
+      hiddenHeadCameraHidden = cave.parts.head.cameraHidden;
+      cave.parts.head.cameraHidden = true;
+    };
+    const setFreeEye = () => {
+      const eyeHeight = close.eyeHeight;
+      freeTarget.x = camera.position.x;
+      freeTarget.z = camera.position.z;
+      freeTarget.y = close.groundAt(freeTarget.x, freeTarget.z, camera.position.y - eyeHeight) + eyeHeight;
+      clampTarget(freeTarget);
+      orbit.target = freeTarget;
+    };
+    const faceWith = (cave) => {
+      closeCave = cave;
+      const desired = cave.root.rotation.y + Math.PI;
+      orbit.tYaw = orbit.yaw + Math.atan2(Math.sin(desired - orbit.yaw), Math.cos(desired - orbit.yaw));
+      orbit.tPitch = 0;
+    };
+    const enterClose = () => {
+      if (!close || closeWanted) return;
+      closeWanted = true;
+      closeExitScale = 1;
+      const cave = player();
+      if (cave) faceWith(cave);
+      else setFreeEye();
+    };
+    const exitClose = () => {
+      if (!closeWanted) return;
+      closeWanted = false;
+      closeExitScale = 1;
+      closeCave = null;
+      const cave = player();
+      orbit.tDist = clamp(cave ? close.trailingDist : close.orbitDist, DIST_MIN, DIST_MAX);
+      orbit.tPitch = clamp(orbit.tPitch, cave ? follow.pitch[0] : PITCH_MIN, cave ? follow.pitch[1] : PITCH_MAX);
+    };
     // ---------- possession ----------
     // Relabel the act button for what the press does
     const showAct = () => {
@@ -8412,18 +8537,27 @@ void main() {
     };
     const possess = (cave) => {
       if (!crew.control(cave)) return;
+      resetGroundView();
       orbit.tDist = clamp(orbit.tDist, follow.min, follow.max);
       orbit.tPitch = clamp(orbit.tPitch, follow.pitch[0], follow.pitch[1]);
+      if (closeWanted) {
+        closeMix = 0;
+        faceWith(cave);
+      }
       hud.el.act.hidden = false;
       showAct();
       hud.tooltip.hide();
       fx.say(cave, "Ooga? Me?", 1.6);
-      if (cave.jet) hud.hint(coarse ? "Left stick flies · hold Blast off to climb · double-tap to let go" : "WASD flies · hold Space to climb · Escape to let go");
-      else hud.hint(coarse ? "Left stick walks · Ooga! acts · double-tap to let go" : "WASD or both mouse buttons to walk · Space to act · Escape to let go");
+      if (cave.jet) hud.hint(coarse ? "Left stick flies · pinch in for first person · hold Blast off to climb" : "WASD flies · scroll in for first person · hold Space to climb · Escape to let go");
+      else hud.hint(coarse ? "Left stick walks · pinch in for first person · Ooga! acts" : "WASD or both mouse buttons to walk · scroll in for first person · Space to act");
     };
     const release = (quiet = false) => {
       const cave = player();
       if (!cave) return;
+      if (closeWanted) setFreeEye();
+      resetGroundView();
+      restoreHead();
+      closeCave = null;
       crew.release();
       hud.el.act.hidden = true;
       if (!quiet) hud.toast(`${cave.traits.name} wanders off`);
@@ -8437,15 +8571,38 @@ void main() {
     };
     // Held it climbs, clicked it acts; both mouse buttons on the canvas walk
     const controls = createControls({ move: document.getElementById("joy-move"), look: document.getElementById("joy-look"), boost: hud.el.act, chord: canvas, onAction: action });
-    let dragHold = 0;
+    let dragHold = 0, trailingViewInput = false, trailingZoomInput = false;
     const hooks = {
       onOrbit: (dx, dy) => {
         dragHold = DRAG_HOLD;
         orbit.tYaw -= dx * 4e-3;
-        orbit.tPitch = clamp(orbit.tPitch + dy * 3.5e-3, PITCH_MIN, PITCH_MAX);
+        const pitch = close && (closeWanted || closeMix > 0.5) ? close.pitch : null;
+        orbit.tPitch = clamp(orbit.tPitch + dy * 3.5e-3, pitch ? pitch[0] : PITCH_MIN, pitch ? pitch[1] : PITCH_MAX);
+        if (player() && !closeWanted) trailingViewInput = true;
       },
       onZoom: (factor) => {
+        if (!close) {
+          orbit.tDist = clamp(orbit.tDist * factor, DIST_MIN, DIST_MAX);
+          return;
+        }
+        if (closeWanted) {
+          if (factor > 1) {
+            closeExitScale *= factor;
+            if (closeExitScale >= CLOSE_PINCH_EXIT) {
+              exitClose();
+              if (player()) trailingZoomInput = true;
+            }
+          } else closeExitScale = 1;
+          return;
+        }
         orbit.tDist = clamp(orbit.tDist * factor, DIST_MIN, DIST_MAX);
+        if (player()) {
+          // A deliberate third-person zoom owns its distance immediately. The
+          // terrain smoother must not turn it into a second lateral dolly.
+          orbit.dist = orbit.tDist;
+          trailingZoomInput = true;
+        }
+        if (factor < 1 && orbit.tDist <= DIST_MIN + 0.001) enterClose();
       },
       onDoubleTap: (hit) => {
         if (hit && hit.owner.kind === "caveman") {
@@ -8461,6 +8618,11 @@ void main() {
       const p = presets[name];
       if (!p) return;
       release(true);
+      closeWanted = false;
+      closeMix = 0;
+      closeExitScale = 1;
+      closeCave = null;
+      restoreHead();
       orbit.target = p.target;
       orbit.tYaw = p.yaw;
       orbit.tPitch = p.pitch;
@@ -8479,9 +8641,9 @@ void main() {
         followTarget.z = p.z;
         orbit.target = followTarget;
         if (cave.jet) crew.thrust(a.up > 0);
-        crew.steer(fx0 * a.y + rx * a.x, fz0 * a.y + rz * a.x);
+        crew.steer(fx0 * a.y + rx * a.x, fz0 * a.y + rz * a.x, close ? closeMix : 0, a.y, a.x);
         if (dragHold > 0) dragHold -= dt;
-        else if (a.y > 0.05 && !a.yaw) {
+        else if (!closeWanted && a.y > 0.05 && !a.yaw) {
           const behind = cave.root.rotation.y + Math.PI;
           orbit.tYaw += Math.atan2(Math.sin(behind - orbit.tYaw), Math.cos(behind - orbit.tYaw)) * Math.min(1, FOLLOW_TURN * dt);
         }
@@ -8498,13 +8660,68 @@ void main() {
         freeTarget.y = clamp(freeTarget.y + a.up * fly.climb * dt, 0, fly.yMax);
         clampTarget(freeTarget);
       }
-      if (a.yaw) orbit.tYaw += a.yaw * YAW_RATE * dt;
-      if (a.pitch) orbit.tPitch = clamp(orbit.tPitch + a.pitch * PITCH_RATE * dt, PITCH_MIN, PITCH_MAX);
+      if (a.yaw) {
+        orbit.tYaw += a.yaw * YAW_RATE * dt;
+        if (cave && !closeWanted) trailingViewInput = true;
+      }
+      if (a.pitch) {
+        const pitch = close && (closeWanted || closeMix > 0.5) ? close.pitch : null;
+        orbit.tPitch = clamp(orbit.tPitch + a.pitch * PITCH_RATE * dt, pitch ? pitch[0] : PITCH_MIN, pitch ? pitch[1] : PITCH_MAX);
+        if (cave && !closeWanted) trailingViewInput = true;
+      }
     };
     // The camera moves only on input, no drift
     const update = (dt) => {
-      orbit.yaw = damp(orbit.yaw, orbit.tYaw, 14, dt);
-      orbit.pitch = damp(orbit.pitch, orbit.tPitch, 14, dt);
+      const cave = player();
+      const directTrailingView = trailingViewInput && !!cave && !closeWanted;
+      const directCameraPosition = directTrailingView || trailingZoomInput && !!cave;
+      trailingViewInput = false;
+      trailingZoomInput = false;
+      let groundReset = false;
+      if (closeWanted && cave !== closeCave) {
+        if (cave) {
+          resetGroundView();
+          closeMix = 0;
+          faceWith(cave);
+        } else {
+          if (closeCave) setFreeEye();
+          resetGroundView();
+          closeCave = null;
+          restoreHead();
+        }
+      }
+      closeMix = close ? damp(closeMix, closeWanted ? 1 : 0, CLOSE_RATE, dt) : 0;
+      if (Math.abs(closeMix - (closeWanted ? 1 : 0)) < CLOSE_SNAP) closeMix = closeWanted ? 1 : 0;
+      if (cave && closeMix > CLOSE_HEAD_MIX) hideHead(cave);
+      else restoreHead();
+      orbit.yaw = directTrailingView ? orbit.tYaw : damp(orbit.yaw, orbit.tYaw, 14, dt);
+      orbit.pitch = directTrailingView ? orbit.tPitch : damp(orbit.pitch, orbit.tPitch, 14, dt);
+      if (cave && close) crew.look(orbit.yaw + Math.PI, orbit.pitch, closeMix);
+      if (cave && close) {
+        const p = cave.root.position;
+        const ground = p.y - cave.baseY - cave.hop;
+        const zone = close.zone ? close.zone() : 0;
+        const moved = Math.hypot(p.x - groundX, p.z - groundZ);
+        const airborne = cave.hop > 0.001 || Math.abs(cave.hopV) > 0.001 || !!cave.jet && cave.jet.thrust;
+        groundReset = !groundValid || airborne || zone !== groundZone || moved > CLOSE_TELEPORT || Math.abs(ground - groundTarget) > close.maxStep + 1e-6;
+        if (groundReset) groundView = ground;
+        else groundView = close.visualGroundAt ? close.visualGroundAt(p.x, p.z, ground) : damp(groundView, ground, CLOSE_GROUND_RATE, dt);
+        groundLift = clamp(groundView - ground, -cave.baseY * 0.5, cave.baseY * 0.75);
+        groundView = ground + groundLift;
+        groundTarget = ground;
+        groundX = p.x;
+        groundZ = p.z;
+        groundZone = zone;
+        groundValid = true;
+        groundEasing = !airborne;
+        crew.elevate(groundLift);
+        followTarget.y = p.y - cave.baseY + follow.y + cave.viewLift;
+      } else {
+        if (cave && close) crew.elevate(0);
+        groundLift = 0;
+        groundEasing = false;
+        groundValid = false;
+      }
       orbit.dist = damp(orbit.dist, orbit.tDist, 8, dt);
       orbit.tx = damp(orbit.tx, orbit.target.x, 5, dt);
       orbit.ty = damp(orbit.ty, orbit.target.y, 5, dt);
@@ -8513,16 +8730,43 @@ void main() {
       const aspect = width / Math.max(1, height);
       camera.fov = clamp(2 * Math.atan(Math.tan(MIN_HFOV / 2) / aspect), BASE_FOV, MAX_FOV);
       const portrait = clamp(1 - aspect, 0, 0.6);
-      const cp = Math.cos(orbit.pitch), sp = Math.sin(orbit.pitch);
-      camera.target.x = orbit.tx;
-      camera.target.y = orbit.ty - portrait * 0.6;
-      camera.target.z = orbit.tz;
-      camera.position.x = orbit.tx + Math.sin(orbit.yaw) * cp * orbit.dist;
-      camera.position.y = orbit.ty + sp * orbit.dist;
-      camera.position.z = orbit.tz + Math.cos(orbit.yaw) * cp * orbit.dist;
-      clampCamera(camera.position);
+      let flatten = 0;
+      if (cave && close) {
+        const span = close.trailingDist - DIST_MIN;
+        flatten = span > 0 ? clamp((close.trailingDist - orbit.dist) / span, 0, 1) : 1;
+        flatten = flatten * flatten * (3 - 2 * flatten);
+      }
+      viewPitch = orbit.pitch * (1 - flatten);
+      const cp = Math.cos(viewPitch), sp = Math.sin(viewPitch);
+      const targetX = orbit.tx, targetY = orbit.ty - portrait * 0.6, targetZ = orbit.tz;
+      const orbitX = orbit.tx + Math.sin(orbit.yaw) * cp * orbit.dist;
+      const orbitY = orbit.ty + sp * orbit.dist;
+      const orbitZ = orbit.tz + Math.cos(orbit.yaw) * cp * orbit.dist;
+      let eyeX = freeTarget.x, eyeZ = freeTarget.z, eyeY = freeTarget.y, eyeClearance = close ? close.eyeHeight : 0;
+      if (closeMix > 0) {
+        if (cave) {
+          const heading = cave.root.rotation.y, forward = close.eyeForward;
+          eyeX = cave.root.position.x + Math.sin(heading) * forward;
+          eyeY = cave.root.position.y - cave.baseY + cave.headOffset * close.eyeRatio + cave.viewLift;
+          eyeZ = cave.root.position.z + Math.cos(heading) * forward;
+          eyeClearance = eyeY - close.groundAt(eyeX, eyeZ, cave.root.position.y - cave.baseY - cave.hop);
+        } else eyeY = close.groundAt(eyeX, eyeZ, camera.position.y - close.eyeHeight) + close.eyeHeight;
+      }
+      camera.position.x = orbitX + (eyeX - orbitX) * closeMix;
+      camera.position.y = orbitY + (eyeY - orbitY) * closeMix;
+      camera.position.z = orbitZ + (eyeZ - orbitZ) * closeMix;
+      clampCamera(camera.position, closeMix, eyeClearance, groundEasing, dt, groundReset, directCameraPosition);
+      const lookCp = Math.cos(orbit.pitch), lookSp = Math.sin(orbit.pitch);
+      const lookX = camera.position.x - Math.sin(orbit.yaw) * lookCp * CLOSE_LOOK_DIST;
+      const lookY = camera.position.y - lookSp * CLOSE_LOOK_DIST;
+      const lookZ = camera.position.z - Math.cos(orbit.yaw) * lookCp * CLOSE_LOOK_DIST;
+      camera.target.x = targetX + (lookX - targetX) * closeMix;
+      camera.target.y = targetY + (lookY - targetY) * closeMix;
+      camera.target.z = targetZ + (lookZ - targetZ) * closeMix;
     };
     const dispose = () => {
+      resetGroundView();
+      restoreHead();
       hud.el.act.hidden = true;
       hud.setAct(ACT_DO);
       controls.dispose();
@@ -8530,6 +8774,20 @@ void main() {
     };
     return { orbit, hooks, controls, bind, readInput, update, goPreset, possess, release, action, showAct, dispose, get player() {
       return player();
+    }, get mode() {
+      return closeWanted ? (player() ? "first-person" : "eye-level") : (player() ? "trailing" : "orbit");
+    }, get closeMix() {
+      return closeMix;
+    }, get closeWanted() {
+      return closeWanted;
+    }, get groundLift() {
+      return groundLift;
+    }, get groundView() {
+      return groundView;
+    }, get groundTarget() {
+      return groundTarget;
+    }, get viewPitch() {
+      return viewPitch;
     } };
   };
   BL.pilot = { create };
@@ -9412,6 +9670,7 @@ void main() {
         highlight: 0,
         nextBuildAt: 8 + i * 2.5 + Math.random() * 6,
         jet: null,
+        viewLift: 0,
         act: { kind: "eat", until: 0, trips: 0, sayAt: 0, said: true, phase: 0, spot: { x: 0, z: 0, ry: NaN } },
         swagNodes: []
       });
@@ -9466,8 +9725,8 @@ void main() {
       hud.setRosterRow(cave.traits.name, cave.state, contributors.ageLabel(cave.contributor));
     };
     let player = null;
-    // World-space drive vector
-    const steer = { x: 0, z: 0 };
+    // World-space drive vector plus signed close-view intent. Reused every frame.
+    const steer = { x: 0, z: 0, view: 0, forward: 0, strafe: 0 };
     const applyState = (cave, state) => {
       if (cave.state === state) {
         // Re-seat a moved eater, interrupt nothing else
@@ -9616,7 +9875,7 @@ void main() {
       a.sayAt = elapsed + 0.8 + Math.random() * 2;
       a.said = false;
     };
-    const headWorldOf = (cave) => ({ x: cave.root.position.x, y: cave.state === "sleeping" ? 0.5 : cave.root.position.y - cave.baseY + cave.headOffset * 0.95, z: cave.root.position.z });
+    const headWorldOf = (cave) => ({ x: cave.root.position.x, y: cave.state === "sleeping" ? 0.5 : cave.root.position.y - cave.baseY + cave.headOffset * 0.95 + cave.viewLift, z: cave.root.position.z });
     const bulletPool = Array.from({ length: 12 }, () => {
       const node = createNode({ geometry: models.bananaGeometry(), scale: { x: models.BANANA_AMMO_SCALE, y: models.BANANA_AMMO_SCALE, z: models.BANANA_AMMO_SCALE }, visible: false });
       addChild(root, node);
@@ -9760,7 +10019,17 @@ void main() {
     const standPose = (cave) => {
       const parts = cave.parts;
       parts.legL.rotation.x = parts.legR.rotation.x = 0;
+      parts.legL.rotation.z = parts.legR.rotation.z = 0;
       parts.armL.rotation.x = parts.armR.rotation.x = -0.2;
+      parts.torso.rotation.x = parts.torso.rotation.z = 0;
+    };
+    // Keep backward and lateral steps readable in a mirror without turning the body.
+    const closeWalkPose = (cave) => {
+      const parts = cave.parts;
+      const side = steer.strafe, backward = steer.forward < -0.05;
+      parts.torso.rotation.x = backward ? 0.07 : 0;
+      parts.torso.rotation.z = -side * 0.08;
+      parts.legL.rotation.z = parts.legR.rotation.z = side * 0.1;
     };
     // Flying pose, legs trailing and arms out
     const flyPose = (cave) => {
@@ -9894,9 +10163,10 @@ void main() {
         } else if (canStep(cave, flying, p.x, p.z, p.x + dx, p.z)) p.x += dx;
         else if (canStep(cave, flying, p.x, p.z, p.x, p.z + dz)) p.z += dz;
         const heading = Math.atan2(steer.x, steer.z);
-        cave.root.rotation.y += Math.atan2(Math.sin(heading - cave.root.rotation.y), Math.cos(heading - cave.root.rotation.y)) * Math.min(1, 12 * dt);
-        cave.act.phase += dt * 10;
+        cave.root.rotation.y += Math.atan2(Math.sin(heading - cave.root.rotation.y), Math.cos(heading - cave.root.rotation.y)) * Math.min(1, 12 * dt) * (1 - steer.view);
+        cave.act.phase += dt * 10 * (steer.view > 0 && steer.forward < -0.05 ? -1 : 1);
         walkPose(cave, cave.act.phase);
+        if (steer.view > 0) closeWalkPose(cave);
         cave.parts.snack.visible = false;
       } else {
         cave.act.phase = 0;
@@ -10046,7 +10316,7 @@ void main() {
     const wearJetpack = (cave, geometry, flameGeometry) => {
       if (cave.jet) return null;
       const h = cave.traits.height;
-      const node = createNode({ position: { x: 0, y: 0.06 * h, z: -0.18 * h }, scale: { x: h, y: h, z: h }, geometry });
+      const node = createNode({ position: { x: 0, y: 0.06 * h + cave.viewLift, z: -0.18 * h }, scale: { x: h, y: h, z: h }, geometry });
       const flame = createNode({ geometry: flameGeometry, visible: false });
       addChild(node, flame);
       addChild(cave.root, node);
@@ -10077,8 +10347,9 @@ void main() {
     const release = () => {
       if (!player) return;
       const cave = player;
+      elevatePlayer(0);
       player = null;
-      steer.x = steer.z = 0;
+      steer.x = steer.z = steer.view = steer.forward = steer.strafe = 0;
       cave.leap.vx = cave.leap.vz = cave.leap.land = 0;
       if (cave.jet) {
         cave.jet.thrust = false;
@@ -10091,9 +10362,37 @@ void main() {
       cave.act.said = true;
       cave.act.trips = 0;
     };
-    const steerPlayer = (x, z) => {
+    const steerPlayer = (x, z, view = 0, forward = 0, strafe = 0) => {
       steer.x = x;
       steer.z = z;
+      steer.view = clamp(view, 0, 1);
+      steer.forward = forward;
+      steer.strafe = strafe;
+    };
+    // Applied after the camera's damped angles update, keeping pose and view in lockstep.
+    const lookPlayer = (heading, pitch, mix) => {
+      if (!player || mix <= 0) return;
+      const root = player.root, head = player.parts.head;
+      root.rotation.y += Math.atan2(Math.sin(heading - root.rotation.y), Math.cos(heading - root.rotation.y)) * mix;
+      head.rotation.x += (pitch - head.rotation.x) * mix;
+      head.rotation.y = 0;
+    };
+    // Shift the visible body while its root remains on the exact collision surface.
+    // Scaling each leg about its hip keeps the feet on that same voxel step.
+    const elevatePlayer = (lift) => {
+      if (!player) return;
+      const cave = player, delta = lift - cave.viewLift, parts = cave.parts;
+      if (!delta) return;
+      parts.legL.position.y += delta;
+      parts.legR.position.y += delta;
+      parts.torso.position.y += delta;
+      parts.armL.position.y += delta;
+      parts.armR.position.y += delta;
+      parts.head.position.y += delta;
+      if (parts.lion) parts.lion.position.y += delta;
+      if (cave.jet) cave.jet.node.position.y += delta;
+      cave.viewLift = lift;
+      parts.legL.scale.y = parts.legR.scale.y = (cave.baseY + lift) / cave.baseY;
     };
     // Space eats, opens, pokes, uses props or shouts
     const playerAction = () => {
@@ -10176,7 +10475,7 @@ void main() {
       for (const cave of cavemen.values()) {
         const b = cave.build;
         if (!b || b.phase === "return") continue;
-        const pos = project(cave.root.position.x, cave.root.position.y - cave.baseY + cave.headOffset + 0.45, cave.root.position.z);
+        const pos = project(cave.root.position.x, cave.root.position.y - cave.baseY + cave.headOffset + cave.viewLift + 0.45, cave.root.position.z);
         if (pos) drawBubble(ctx2d, b.quote, pos.x, pos.y, Math.min(1, (b.age || 0) / 0.25));
       }
     };
@@ -10203,7 +10502,7 @@ void main() {
     const stats = () => ({ built: builtEquipment.length });
     return {
       cavemen, stateOf, stateCounts, workingCavemen, eatingCavemen, feedableCavemen, refreshStates, refreshRosterRow, updateFan, rush, headWorldOf, applyAllSwag, wornBy, renderLocker, pokeCave, drawQuotes,
-      control, release, steer: steerPlayer, playerAction, wearJetpack, thrust, update, dispose, stats,
+      control, release, steer: steerPlayer, look: lookPlayer, elevate: elevatePlayer, playerAction, wearJetpack, thrust, update, dispose, stats,
       get player() {
         return player;
       }
@@ -11828,6 +12127,10 @@ void main() {
   const FLY = { speed: 6, perDist: 0.5, climb: 6, yMax: 30 }, FLY_BOUND = RADIUS + 14;
   // Third person follow height and distance
   const FOLLOW = { y: 0.9, min: 4, max: 10, pitch: [0.25, 0.8] };
+  // A close free view rests at an average Ooga eye; first person sits at the
+  // face surface so looking down clears the hidden head and keeps the body and
+  // feet in view. Portal ownership stays with the Ooga, not this look offset.
+  const CLOSE_VIEW = { eyeHeight: 1.1, eyeRatio: 0.95, eyeForward: 0.16, pitch: [-1.35, 1.35], trailingDist: 6, orbitDist: 6 };
   // Tallest step a caveman may climb
   const STEP_MAX = 0.6;
   // Props the jetpack may hide under
@@ -11919,7 +12222,7 @@ void main() {
   };
 
   // One visit's state, made in enter and dropped in leave
-  let renderer, game, world, go, lootEnabled, testBananas, root, camera, island, pathNode, altar, hud, hooks, input, pilot, fx, pile, crew, crates, critters, clock, presets, entering, stash, jetpack, mirrorCave, matrixCave, fire;
+  let renderer, game, world, go, lootEnabled, testBananas, root, camera, island, pathNode, altar, hud, hooks, input, pilot, fx, pile, crew, crates, critters, clock, presets, entering, stash, jetpack, mirrorCave, matrixCave, gateRain, fire;
   let hintAt = HINT_AFTER;
   let stateTimer = 0, hintTimer = 0, meterTimer = 0, pileEdgeNow = 0, now = 0, hour = 12;
   let phase = null;
@@ -12039,8 +12342,28 @@ void main() {
     return { streams, nodes, perGlyphCapacity, capacity: perGlyphCapacity * MATRIX_TYPES, bufferBytes: perGlyphCapacity * MATRIX_TYPES * 80,
       spacing: MATRIX_RAIN_GAP, activeGlyphCount: 0, brightTipCount: 0, updates: 0, densityRankLimit: 0 };
   };
-  const updateCaveRain = (cave, elapsed, visible, densityRankLimit) => {
-    const rain = cave.rain;
+  const buildGateRain = (gate) => {
+    const canvas = renderer.kind === "canvas2d", columns = canvas ? 8 : 14, depths = canvas ? 1 : 2, trainLength = canvas ? 9 : 14;
+    const rand = mulberry32(fnv1a("old-gate:rain")), streams = [], nodes = [];
+    const minY = gate.position.y + 0.09, maxY = gate.position.y + 3.91;
+    for (let depth = 0; depth < depths; depth++) for (let column = 0; column < columns; column++) {
+      const x = gate.position.x + lerp(-0.84, 0.84, (column + 0.5) / columns);
+      const z = gate.position.z + (depths === 1 ? 0 : depth ? 0.18 : -0.18);
+      const seed = fnv1a(`old-gate:rain:${streams.length}`), period = maxY - minY + (trainLength - 1) * MATRIX_RAIN_GAP;
+      streams.push({ x, z, minY, maxY, yaw: 0, cr: 1, sr: 0, period, trainLength, seed,
+        speed: MATRIX_STREAM_SPEED_MIN + rand() * MATRIX_STREAM_SPEED_RANGE, phase: rand() * period, brightness: 0.62 + rand() * 0.32,
+        rank: canvas ? 0 : streams.length % 8, distance: matrixTravelDistance(x, z), blocked: [] });
+    }
+    const perGlyphCapacity = streams.length * Math.ceil(trainLength / MATRIX_TYPES);
+    for (let glyph = 0; glyph < MATRIX_TYPES; glyph++) {
+      const node = createNode({ geometry: { ...hubModels.matrixGlyph(glyph) }, instanceData: new Float32Array(perGlyphCapacity * 20), instanceCount: 0, drawInstanceCount: 0, instanceVersion: 0, fixedInstanceCapacity: true });
+      addChild(root, node); placed.push(node); nodes.push(node);
+    }
+    return { streams, nodes, perGlyphCapacity, capacity: perGlyphCapacity * MATRIX_TYPES, bufferBytes: perGlyphCapacity * MATRIX_TYPES * 80,
+      spacing: MATRIX_RAIN_GAP, activeGlyphCount: 0, brightTipCount: 0, updates: 0, densityRankLimit: 0,
+      minX: gate.position.x - 0.84, maxX: gate.position.x + 0.84, minY, maxY, minZ: gate.position.z - 0.18, maxZ: gate.position.z + 0.18 };
+  };
+  const updateCaveRain = (rain, elapsed, visible, densityRankLimit) => {
     rain.activeGlyphCount = rain.brightTipCount = 0;
     rain.densityRankLimit = densityRankLimit;
     for (let glyph = 0; glyph < MATRIX_TYPES; glyph++) rain.nodes[glyph].instanceCount = rain.nodes[glyph].drawInstanceCount = 0;
@@ -12360,7 +12683,7 @@ void main() {
       cave.visible = cave.drawEnabled = visible && MATRIX_WORLD.radius > cave.minimumTravelDistance;
       cave.quality = renderer.kind === "canvas2d" ? "canvas2d" : renderer.quality;
       cave.densityRankLimit = densityRankLimit;
-      updateCaveRain(cave, elapsed, cave.visible, densityRankLimit);
+      updateCaveRain(cave.rain, elapsed, cave.visible, densityRankLimit);
       if (!visible || MATRIX_WORLD.radius <= cave.minimumTravelDistance) {
         clearMatrixDraw(cave);
         continue;
@@ -12461,6 +12784,7 @@ void main() {
     MATRIX_WORLD.active = MATRIX_WORLD.radius > 0 ? 1 : 0;
     matrixCave.mirrorNode.mirrorPortal = matrixCave.portal.inside;
     updateCaveGlyphs(elapsed, !!MATRIX_WORLD.active, densityRankLimit);
+    if (gateRain) updateCaveRain(gateRain, elapsed, !!MATRIX_WORLD.active, densityRankLimit);
   };
   const inMatrixCave = () => {
     return !!matrixCave && matrixCave.portal.inside;
@@ -13012,6 +13336,7 @@ void main() {
     const roof = island.surfaceAt(x, z);
     return y >= roof - STEP_MAX ? roof : island.heightAt(x, z);
   };
+  const visualSupportAt = (x, z, y) => island.smoothSupportAt(x, z, y, STEP_MAX);
   // A driven step stays on rock, off the heap, and on its own layer
   const walkable = (fromX, fromZ, toX, toZ, y) => {
     if (!island.onLand(toX, toZ) || Math.hypot(toX, toZ) <= pileEdgeNow + 0.4) return false;
@@ -13028,7 +13353,7 @@ void main() {
       const out = (rand() < 0.5 ? -1 : 1) * lerp(CLOUD_NEAR, CLOUD_WRAP, rand());
       const span = lerp(-CLOUD_WRAP, CLOUD_WRAP, rand());
       const y = beside ? lerp(-4, 6, rand()) : lerp(2, 8, rand());
-      const node = createNode({ position: { x: beside ? out : span, y, z: beside ? span : -Math.abs(out) }, geometry: hubModels.cloud(Math.min(2, i % 4)) });
+      const node = createNode({ position: { x: beside ? out : span, y, z: beside ? span : -Math.abs(out) }, geometry: hubModels.cloud(Math.min(2, i % 4)), matrixCloud: true });
       addChild(root, node);
       placed.push(node);
       clouds.push({ node, speed: 0.4 + rand() * 0.4, beside });
@@ -13310,13 +13635,13 @@ void main() {
   };
 
   // ---------- camera bounds ----------
-  const CAMERA_RADIUS = 0.3, CAMERA_FLOOR = 0.55;
+  const CAMERA_RADIUS = 0.3, CAMERA_FLOOR = 0.55, CAMERA_STEP_FLOOR = CAMERA_RADIUS + 0.02, CAMERA_VERTICAL_RATE = 3.2, CAMERA_HORIZONTAL_RATE = 8;
   const CAMERA_PREVIOUS = { x: 0, y: 0, z: 0 };
   const PLAYER_PREVIOUS = { x: 0, y: 0, z: 0 }, PLAYER_POSITION = { x: 0, y: 0, z: 0 };
   const CAMERA_SPACE = { floor: 0, ceiling: 0 }, CAMERA_COLUMN = { caveIndex: 0, floor: 0, ceiling: 0 };
   const CAMERA_CROSSING = { direction: 0, valid: false, reason: null, amount: 0 };
   const CAMERA_OPENINGS = [];
-  let cameraCaveIndex = 0, cameraPreviousValid = false;
+  let cameraCaveIndex = 0, cameraEntranceIndex = 0, cameraPreviousValid = false, cameraTerrainY = 0, cameraTerrainX = 0, cameraTerrainZ = 0, cameraTerrainValid = false, cameraTerrainRecovering = false, cameraTerrainEntranceIndex = 0;
   let caveEntryPlayer = null, playerCaveIndex = 0;
   const cameraCrossing = (from, to, opening) => {
     const m = opening.mouth, sr = opening.sr, cr = opening.cr;
@@ -13336,18 +13661,38 @@ void main() {
     else if (caveColumnAt(x - sr * 0.05, z - cr * 0.05, opening)) CAMERA_CROSSING.valid = true;
     return CAMERA_CROSSING;
   };
-  const setCameraCave = (index) => {
-    if (cameraCaveIndex === index) return;
-    cameraCaveIndex = index;
+  const setMatrixInside = (inside) => {
     if (!matrixCave) return;
-    const portal = matrixCave.portal, inside = index === matrixCave.caveIndex;
+    const portal = matrixCave.portal;
     if (portal.inside === inside) return;
     portal.inside = inside;
     portal.lastCrossingDirection = inside ? "in" : "out";
-    MATRIX_WORLD.direction = inside ? 1 : -1;
-    MATRIX_WORLD.active = inside || MATRIX_WORLD.radius > 0 ? 1 : 0;
+    if (inside) {
+      MATRIX_WORLD.radius = MATRIX_WORLD.maxRadius;
+      MATRIX_WORLD.direction = 0;
+      MATRIX_WORLD.active = 1;
+    } else {
+      MATRIX_WORLD.direction = MATRIX_WORLD.radius > 0 ? -1 : 0;
+      MATRIX_WORLD.active = MATRIX_WORLD.radius > 0 ? 1 : 0;
+    }
     // Close the doorway on the crossing itself; glyph retraction runs independently.
     matrixCave.mirrorNode.mirrorPortal = inside;
+  };
+  const syncMatrixInside = (player) => {
+    if (!matrixCave) return;
+    // A controlled Ooga owns the portal in both camera modes. The first-person
+    // eye sits forward on the face and follows head-look, which must not open
+    // or close the mirror while the body remains stationary.
+    setMatrixInside((player ? playerCaveIndex : cameraCaveIndex) === matrixCave.caveIndex);
+  };
+  const setCameraCave = (index) => {
+    if (cameraCaveIndex === index) return;
+    cameraCaveIndex = index;
+    // Free-camera crossings have no separate character owner, so commit their
+    // portal state as soon as the validated camera crossing changes caves.
+    // Character views are synchronized after pilot.update, when the active
+    // first-person eye or third-person Ooga position is final for this frame.
+    if (!pilot || !pilot.player) syncMatrixInside(null);
   };
   const caveColumnAt = (x, z, opening) => {
     const dx = x - opening.mouth.x, dz = z - opening.mouth.z;
@@ -13388,6 +13733,8 @@ void main() {
   const CAMERA_CAVE_DEBUG = {
     get index() { return cameraCaveIndex; },
     get playerIndex() { return playerCaveIndex; },
+    get entranceIndex() { return cameraEntranceIndex; },
+    get constraint() { return cameraCaveIndex ? "interior" : cameraEntranceIndex ? "entrance" : "exterior"; },
     get id() { return cameraCaveIndex ? CAMERA_OPENINGS[cameraCaveIndex - 1].id : null; },
     openings: CAMERA_OPENINGS,
     contains(x, y, z) {
@@ -13424,7 +13771,40 @@ void main() {
       t.z *= FLY_BOUND / r;
     }
   };
-  const clampCamera = (p) => {
+  let exteriorEntranceIndex = 0, exteriorCeiling = Infinity;
+  const exteriorCameraFloorAt = (x, y, z, clearance, smoothStep, closeMix) => {
+    const physicalFloor = island.surfaceAt(x, z);
+    let floor = (smoothStep && closeMix <= 0.5 ? visualSupportAt(x, z, physicalFloor) : physicalFloor) + clearance;
+    exteriorEntranceIndex = 0;
+    exteriorCeiling = Infinity;
+    for (let i = 0; i < CAMERA_OPENINGS.length; i++) {
+      const entry = CAMERA_OPENINGS[i], dx = x - entry.mouth.x, dz = z - entry.mouth.z;
+      const along = dx * entry.sr + dz * entry.cr, across = dx * entry.cr - dz * entry.sr;
+      if (along < entry.planeZ - 1e-7 || along > 3 || across < entry.minX + CAMERA_RADIUS || across > entry.maxX - CAMERA_RADIUS || y < entry.mouth.floorY || y > entry.mouth.floorY + entry.maxY) continue;
+      const k = (along - entry.planeZ) / (3 - entry.planeZ);
+      exteriorEntranceIndex = entry.caveIndex;
+      floor = island.heightAt(x, z) + CAMERA_FLOOR + (clearance - CAMERA_FLOOR) * k * k * (3 - 2 * k);
+      if (cameraSpaceAt(x, z, entry)) exteriorCeiling = CAMERA_SPACE.ceiling;
+      break;
+    }
+    return floor;
+  };
+  const clampCamera = (p, closeMix = 0, closeClearance = CLEARANCE, smoothStep = false, dt = 0, resetSmooth = false, directView = false) => {
+    const clearance = lerp(CLEARANCE, Math.max(smoothStep ? CAMERA_STEP_FLOOR : CAMERA_FLOOR, closeClearance), closeMix);
+    // The first-person eye sits on the face, but it must not pass through the
+    // sealed mirror before the Ooga makes a valid body crossing. Keep only
+    // that eye at the entrance plane; normal face-level placement resumes as
+    // soon as the Ooga owns the cave.
+    if (matrixCave && closeMix > 0.5 && pilot && pilot.player && playerCaveIndex !== matrixCave.caveIndex) {
+      const m = matrixCave.mouth, dx = p.x - m.x, dz = p.z - m.z;
+      const x = matrixCave.cr * dx - matrixCave.sr * dz;
+      const y = p.y - m.floorY;
+      const z = matrixCave.sr * dx + matrixCave.cr * dz;
+      if (x >= PORTAL_MIN_X && x <= PORTAL_MAX_X && y >= PORTAL_MIN_Y && y <= PORTAL_MAX_Y && z < PORTAL_Z + 1e-4) {
+        p.x = m.x + matrixCave.cr * x + matrixCave.sr * (PORTAL_Z + 1e-4);
+        p.z = m.z - matrixCave.sr * x + matrixCave.cr * (PORTAL_Z + 1e-4);
+      }
+    }
     let opening = cameraCaveIndex ? CAMERA_OPENINGS[cameraCaveIndex - 1] : null, start = 0, exit = false;
     if (cameraPreviousValid) {
       for (let i = 0; i < CAMERA_OPENINGS.length; i++) {
@@ -13464,24 +13844,57 @@ void main() {
         if (accepted && along < opening.planeZ - 1e-7) setCameraCave(opening.caveIndex);
       }
     }
-    let caveView = !!cameraCaveIndex;
+    const caveView = !!cameraCaveIndex;
+    cameraEntranceIndex = 0;
     if (!cameraCaveIndex) {
-      let floor = island.surfaceAt(p.x, p.z) + CLEARANCE;
-      for (let i = 0; i < CAMERA_OPENINGS.length; i++) {
-        const entry = CAMERA_OPENINGS[i], dx = p.x - entry.mouth.x, dz = p.z - entry.mouth.z;
-        const along = dx * entry.sr + dz * entry.cr, across = dx * entry.cr - dz * entry.sr;
-        if (along < entry.planeZ - 1e-7 || along > 3 || across < entry.minX + CAMERA_RADIUS || across > entry.maxX - CAMERA_RADIUS || p.y < entry.mouth.floorY || p.y > entry.mouth.floorY + entry.maxY) continue;
-        const k = (along - entry.planeZ) / (3 - entry.planeZ);
-        caveView = true;
-        floor = island.heightAt(p.x, p.z) + CAMERA_FLOOR + (CLEARANCE - CAMERA_FLOOR) * k * k * (3 - 2 * k);
-        if (cameraSpaceAt(p.x, p.z, entry)) p.y = Math.min(p.y, CAMERA_SPACE.ceiling);
-        break;
-      }
+      const floor = exteriorCameraFloorAt(p.x, p.y, p.z, clearance, smoothStep, closeMix);
+      cameraEntranceIndex = exteriorEntranceIndex;
+      p.y = Math.min(p.y, exteriorCeiling);
       p.y = Math.max(p.y, floor);
+    }
+    if (smoothStep && closeMix <= 0.5 && !caveView) {
+      const moved = Math.hypot(p.x - cameraTerrainX, p.z - cameraTerrainZ);
+      const verticalStep = CAMERA_VERTICAL_RATE * Math.min(dt, 0.05);
+      const horizontalStep = CAMERA_HORIZONTAL_RATE * Math.min(dt, 0.05);
+      if (!cameraTerrainValid || resetSmooth || directView) {
+        cameraTerrainY = p.y;
+        cameraTerrainRecovering = false;
+      } else {
+        const targetY = p.y;
+        if (targetY > cameraTerrainY + verticalStep) {
+          cameraTerrainY += verticalStep;
+          cameraTerrainRecovering = true;
+        } else if (targetY < cameraTerrainY) cameraTerrainY = Math.max(targetY, cameraTerrainY - verticalStep);
+        else cameraTerrainY = targetY;
+        if ((cameraEntranceIndex || cameraTerrainEntranceIndex) && moved > horizontalStep) cameraTerrainRecovering = true;
+        if (cameraTerrainRecovering && moved > horizontalStep) {
+          const k = horizontalStep / moved, x = lerp(cameraTerrainX, p.x, k), z = lerp(cameraTerrainZ, p.z, k);
+          if (exteriorCameraFloorAt(x, cameraTerrainY, z, clearance, smoothStep, closeMix) <= cameraTerrainY + 1e-7) {
+            p.x = x;
+            p.z = z;
+          } else {
+            p.x = cameraTerrainX;
+            p.z = cameraTerrainZ;
+          }
+        }
+        if (cameraTerrainRecovering && moved <= horizontalStep && Math.abs(cameraTerrainY - targetY) <= 1e-7) cameraTerrainRecovering = false;
+      }
+      p.y = cameraTerrainY;
+      exteriorCameraFloorAt(p.x, p.y, p.z, clearance, smoothStep, closeMix);
+      cameraEntranceIndex = exteriorEntranceIndex;
+      p.y = Math.min(p.y, exteriorCeiling);
+      cameraTerrainX = p.x;
+      cameraTerrainZ = p.z;
+      cameraTerrainEntranceIndex = cameraEntranceIndex;
+      cameraTerrainValid = true;
+    } else {
+      cameraTerrainValid = false;
+      cameraTerrainRecovering = false;
+      cameraTerrainEntranceIndex = 0;
     }
     // The outdoor near plane is wider than the cave eye clearance. Shorten it
     // at low entrances/interiors so nearby jagged rock is not sliced away.
-    camera.near = caveView ? 0.1 : 0.5;
+    camera.near = caveView || cameraEntranceIndex || closeMix > 0.5 ? 0.1 : 0.5;
     setVec(CAMERA_PREVIOUS, p.x, p.y, p.z);
     cameraPreviousValid = true;
     if (matrixCave) {
@@ -13603,6 +14016,10 @@ void main() {
     fx.update(dt);
     stepTweens(dt);
     pilot.update(dt);
+    // clampCamera resolves the active eye's entrance crossing inside pilot.update.
+    // Commit the portal and Matrix state only after that result, before rendering,
+    // so the mirror and the covered interior can never disagree for one frame.
+    syncMatrixInside(player);
     updateMatrixWorld(dt, elapsed);
     meterTimer -= dt;
     if (meterTimer <= 0) {
@@ -13679,7 +14096,11 @@ void main() {
     phase = null;
     island = terrain.island({ seed: SEED });
     cameraCaveIndex = 0;
+    cameraEntranceIndex = 0;
     cameraPreviousValid = false;
+    cameraTerrainValid = false;
+    cameraTerrainRecovering = false;
+    cameraTerrainEntranceIndex = 0;
     caveEntryPlayer = null;
     playerCaveIndex = 0;
     CAMERA_OPENINGS.length = 0;
@@ -13702,7 +14123,7 @@ void main() {
     hooks = {};
     input = interactMod.create({ canvas: ctx.canvas, renderer, camera, hooks });
     presets = { pile: PILE_VIEW, gate: GATE_VIEW };
-    pilot = pilotMod.create({ renderer, canvas: ctx.canvas, camera, hud, presets, landing: "pile", pitch: [PITCH_MIN, PITCH_MAX], dist: [DIST_MIN, DIST_MAX], follow: FOLLOW, fly: FLY, clampTarget, clampCamera, coarse: COARSE });
+    pilot = pilotMod.create({ renderer, canvas: ctx.canvas, camera, hud, presets, landing: "pile", pitch: [PITCH_MIN, PITCH_MAX], dist: [DIST_MIN, DIST_MAX], follow: FOLLOW, fly: FLY, clampTarget, clampCamera, coarse: COARSE, close: { ...CLOSE_VIEW, maxStep: STEP_MAX, groundAt: supportAt, visualGroundAt: visualSupportAt, zone: () => playerCaveIndex } });
     place(island.geometry, 0, 0, 0, 0);
     pathNode = createNode({ geometry: island.path.geometry, instanceData: island.path.instanceData, instanceCount: 0, instanceVersion: 0, depthBias: 0.05 });
     addChild(root, pathNode);
@@ -13716,6 +14137,7 @@ void main() {
     };
     layoutPile(pileMod.visualFootprintFor(world.level, PILE_SCALE));
     const gate = place(hubModels.gate(), island.gate.x, island.gate.z, island.gate.ry);
+    gateRain = buildGateRain(gate);
     addTarget(gate, { kind: "gate" }, { radius: 3 });
     props.push({ kind: "prop", prop: "gate", node: gate, x: gate.position.x, z: gate.position.z, ripe: 0, active: true });
     claim(gate.position.x, gate.position.z, 3);
@@ -13838,7 +14260,7 @@ void main() {
     pile.syncPile(true);
     updateMeter();
     if (window.matchMedia("(max-width: 720px), (max-height: 500px)").matches) hud.el.sheet.dataset.open = "false";
-    hintTimer = window.setTimeout(() => hud.hint(COARSE ? "Drag to look · pinch to zoom · sticks to fly · tap a cave" : "Drag to orbit · scroll to zoom · WASD to fly · tap a cave to enter"), 1200);
+    hintTimer = window.setTimeout(() => hud.hint(COARSE ? "Drag to look · pinch to eye level · sticks to fly · tap a cave" : "Drag to look · scroll to eye level · WASD to fly · tap a cave to enter"), 1200);
     Object.assign(hubScene, {
       root, camera, input,
       debug: {
@@ -13927,6 +14349,8 @@ void main() {
           get revealedGlyphCount() { return matrixCave.revealedGlyphCount; },
           get visible() { return matrixCave.visible; },
           get inside() { return matrixCave.portal.inside; },
+          get gateRain() { return gateRain; },
+          get clouds() { return clouds; },
           get firstGlyphY() { return matrixCave.firstGlyphY; },
           world: {
             get active() { return !!MATRIX_WORLD.active; },
@@ -14038,7 +14462,11 @@ void main() {
     RENDER_OPTS.lightCount = 0;
     MATRIX_WORLD.active = MATRIX_WORLD.direction = MATRIX_WORLD.radius = 0;
     cameraCaveIndex = 0;
+    cameraEntranceIndex = 0;
     cameraPreviousValid = false;
+    cameraTerrainValid = false;
+    cameraTerrainRecovering = false;
+    cameraTerrainEntranceIndex = 0;
     caveEntryPlayer = null;
     playerCaveIndex = 0;
     CAMERA_OPENINGS.length = 0;
@@ -14049,7 +14477,7 @@ void main() {
     input.dispose();
     hud.dispose();
     // Drop everything but the cached island
-    pathNode = altar = hud = hooks = input = pilot = fx = pile = crew = crates = critters = clock = presets = stash = jetpack = mirrorCave = matrixCave = fire = null;
+    pathNode = altar = hud = hooks = input = pilot = fx = pile = crew = crates = critters = clock = presets = stash = jetpack = mirrorCave = matrixCave = gateRain = fire = null;
     hubScene.input = hubScene.debug = null;
     return { targets: count };
   };

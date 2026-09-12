@@ -87,6 +87,7 @@
         highlight: 0,
         nextBuildAt: 8 + i * 2.5 + Math.random() * 6,
         jet: null,
+        viewLift: 0,
         act: { kind: "eat", until: 0, trips: 0, sayAt: 0, said: true, phase: 0, spot: { x: 0, z: 0, ry: NaN } },
         swagNodes: []
       });
@@ -141,8 +142,8 @@
       hud.setRosterRow(cave.traits.name, cave.state, contributors.ageLabel(cave.contributor));
     };
     let player = null;
-    // World-space drive vector
-    const steer = { x: 0, z: 0 };
+    // World-space drive vector plus signed close-view intent. Reused every frame.
+    const steer = { x: 0, z: 0, view: 0, forward: 0, strafe: 0 };
     const applyState = (cave, state) => {
       if (cave.state === state) {
         // Re-seat a moved eater, interrupt nothing else
@@ -291,7 +292,7 @@
       a.sayAt = elapsed + 0.8 + Math.random() * 2;
       a.said = false;
     };
-    const headWorldOf = (cave) => ({ x: cave.root.position.x, y: cave.state === "sleeping" ? 0.5 : cave.root.position.y - cave.baseY + cave.headOffset * 0.95, z: cave.root.position.z });
+    const headWorldOf = (cave) => ({ x: cave.root.position.x, y: cave.state === "sleeping" ? 0.5 : cave.root.position.y - cave.baseY + cave.headOffset * 0.95 + cave.viewLift, z: cave.root.position.z });
     const bulletPool = Array.from({ length: 12 }, () => {
       const node = createNode({ geometry: models.bananaGeometry(), scale: { x: models.BANANA_AMMO_SCALE, y: models.BANANA_AMMO_SCALE, z: models.BANANA_AMMO_SCALE }, visible: false });
       addChild(root, node);
@@ -435,7 +436,17 @@
     const standPose = (cave) => {
       const parts = cave.parts;
       parts.legL.rotation.x = parts.legR.rotation.x = 0;
+      parts.legL.rotation.z = parts.legR.rotation.z = 0;
       parts.armL.rotation.x = parts.armR.rotation.x = -0.2;
+      parts.torso.rotation.x = parts.torso.rotation.z = 0;
+    };
+    // Keep backward and lateral steps readable in a mirror without turning the body.
+    const closeWalkPose = (cave) => {
+      const parts = cave.parts;
+      const side = steer.strafe, backward = steer.forward < -0.05;
+      parts.torso.rotation.x = backward ? 0.07 : 0;
+      parts.torso.rotation.z = -side * 0.08;
+      parts.legL.rotation.z = parts.legR.rotation.z = side * 0.1;
     };
     // Flying pose, legs trailing and arms out
     const flyPose = (cave) => {
@@ -569,9 +580,10 @@
         } else if (canStep(cave, flying, p.x, p.z, p.x + dx, p.z)) p.x += dx;
         else if (canStep(cave, flying, p.x, p.z, p.x, p.z + dz)) p.z += dz;
         const heading = Math.atan2(steer.x, steer.z);
-        cave.root.rotation.y += Math.atan2(Math.sin(heading - cave.root.rotation.y), Math.cos(heading - cave.root.rotation.y)) * Math.min(1, 12 * dt);
-        cave.act.phase += dt * 10;
+        cave.root.rotation.y += Math.atan2(Math.sin(heading - cave.root.rotation.y), Math.cos(heading - cave.root.rotation.y)) * Math.min(1, 12 * dt) * (1 - steer.view);
+        cave.act.phase += dt * 10 * (steer.view > 0 && steer.forward < -0.05 ? -1 : 1);
         walkPose(cave, cave.act.phase);
+        if (steer.view > 0) closeWalkPose(cave);
         cave.parts.snack.visible = false;
       } else {
         cave.act.phase = 0;
@@ -721,7 +733,7 @@
     const wearJetpack = (cave, geometry, flameGeometry) => {
       if (cave.jet) return null;
       const h = cave.traits.height;
-      const node = createNode({ position: { x: 0, y: 0.06 * h, z: -0.18 * h }, scale: { x: h, y: h, z: h }, geometry });
+      const node = createNode({ position: { x: 0, y: 0.06 * h + cave.viewLift, z: -0.18 * h }, scale: { x: h, y: h, z: h }, geometry });
       const flame = createNode({ geometry: flameGeometry, visible: false });
       addChild(node, flame);
       addChild(cave.root, node);
@@ -752,8 +764,9 @@
     const release = () => {
       if (!player) return;
       const cave = player;
+      elevatePlayer(0);
       player = null;
-      steer.x = steer.z = 0;
+      steer.x = steer.z = steer.view = steer.forward = steer.strafe = 0;
       cave.leap.vx = cave.leap.vz = cave.leap.land = 0;
       if (cave.jet) {
         cave.jet.thrust = false;
@@ -766,9 +779,37 @@
       cave.act.said = true;
       cave.act.trips = 0;
     };
-    const steerPlayer = (x, z) => {
+    const steerPlayer = (x, z, view = 0, forward = 0, strafe = 0) => {
       steer.x = x;
       steer.z = z;
+      steer.view = clamp(view, 0, 1);
+      steer.forward = forward;
+      steer.strafe = strafe;
+    };
+    // Applied after the camera's damped angles update, keeping pose and view in lockstep.
+    const lookPlayer = (heading, pitch, mix) => {
+      if (!player || mix <= 0) return;
+      const root = player.root, head = player.parts.head;
+      root.rotation.y += Math.atan2(Math.sin(heading - root.rotation.y), Math.cos(heading - root.rotation.y)) * mix;
+      head.rotation.x += (pitch - head.rotation.x) * mix;
+      head.rotation.y = 0;
+    };
+    // Shift the visible body while its root remains on the exact collision surface.
+    // Scaling each leg about its hip keeps the feet on that same voxel step.
+    const elevatePlayer = (lift) => {
+      if (!player) return;
+      const cave = player, delta = lift - cave.viewLift, parts = cave.parts;
+      if (!delta) return;
+      parts.legL.position.y += delta;
+      parts.legR.position.y += delta;
+      parts.torso.position.y += delta;
+      parts.armL.position.y += delta;
+      parts.armR.position.y += delta;
+      parts.head.position.y += delta;
+      if (parts.lion) parts.lion.position.y += delta;
+      if (cave.jet) cave.jet.node.position.y += delta;
+      cave.viewLift = lift;
+      parts.legL.scale.y = parts.legR.scale.y = (cave.baseY + lift) / cave.baseY;
     };
     // Space eats, opens, pokes, uses props or shouts
     const playerAction = () => {
@@ -851,7 +892,7 @@
       for (const cave of cavemen.values()) {
         const b = cave.build;
         if (!b || b.phase === "return") continue;
-        const pos = project(cave.root.position.x, cave.root.position.y - cave.baseY + cave.headOffset + 0.45, cave.root.position.z);
+        const pos = project(cave.root.position.x, cave.root.position.y - cave.baseY + cave.headOffset + cave.viewLift + 0.45, cave.root.position.z);
         if (pos) drawBubble(ctx2d, b.quote, pos.x, pos.y, Math.min(1, (b.age || 0) / 0.25));
       }
     };
@@ -878,7 +919,7 @@
     const stats = () => ({ built: builtEquipment.length });
     return {
       cavemen, stateOf, stateCounts, workingCavemen, eatingCavemen, feedableCavemen, refreshStates, refreshRosterRow, updateFan, rush, headWorldOf, applyAllSwag, wornBy, renderLocker, pokeCave, drawQuotes,
-      control, release, steer: steerPlayer, playerAction, wearJetpack, thrust, update, dispose, stats,
+      control, release, steer: steerPlayer, look: lookPlayer, elevate: elevatePlayer, playerAction, wearJetpack, thrust, update, dispose, stats,
       get player() {
         return player;
       }

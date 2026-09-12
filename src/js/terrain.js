@@ -325,6 +325,23 @@
       const i = column(x, z);
       return i < 0 ? 0 : surface[i];
     };
+    // Continuous movement-only support across neighboring walkable voxel tops.
+    // Rendering and collision continue to use the exact stepped arrays above.
+    const smoothSupportAt = (x, z, y, maxStep) => {
+      const px = (x - ORIGIN.x) / UNIT - 0.5, pz = (z - ORIGIN.z) / UNIT - 0.5;
+      const gx = Math.floor(px), gz = Math.floor(pz), tx = px - gx, tz = pz - gz;
+      if (gx < 0 || gz < 0 || gx + 1 >= SX || gz + 1 >= SZ) return y;
+      const i00 = gx * SZ + gz, i10 = i00 + SZ, i01 = i00 + 1, i11 = i10 + 1;
+      let a = land[i00] ? y >= surface[i00] - maxStep ? surface[i00] : height[i00] : y;
+      let b = land[i10] ? y >= surface[i10] - maxStep ? surface[i10] : height[i10] : y;
+      let c = land[i01] ? y >= surface[i01] - maxStep ? surface[i01] : height[i01] : y;
+      let d = land[i11] ? y >= surface[i11] - maxStep ? surface[i11] : height[i11] : y;
+      if (Math.abs(a - y) > maxStep) a = y;
+      if (Math.abs(b - y) > maxStep) b = y;
+      if (Math.abs(c - y) > maxStep) c = y;
+      if (Math.abs(d - y) > maxStep) d = y;
+      return (a + (b - a) * tx) * (1 - tz) + (c + (d - c) * tx) * tz;
+    };
     const cavityAt = (x, z, out) => {
       const i = column(x, z), cavity = i < 0 ? 0 : cavities[i];
       if (!cavity) return false;
@@ -506,6 +523,7 @@
       path,
       heightAt,
       surfaceAt,
+      smoothSupportAt,
       cavityAt,
       cavityBytes: cavities.byteLength,
       isPath,

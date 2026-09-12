@@ -300,11 +300,13 @@ float matrixTravel(vec2 point, float caveIndex) {
 void main() {
   vec3 n = normalize(vNormal);
   vec3 base = vColor.rgb;
+  float cloud = step(3.5, vParams.z);
   float wholeLiving = step(1.5, vParams.z) * (1.0 - step(2.5, vParams.z));
-  float emissiveLiving = step(2.5, vParams.z) * step(0.001, vColor.a);
+  float emissiveLiving = step(2.5, vParams.z) * (1.0 - cloud) * step(0.001, vColor.a);
   float living = max(wholeLiving, emissiveLiving);
   float caveIndex = max(vMatrixCave, uMatrixCave);
   float flow = uMatrixParams.x > 0.0 ? matrixTravel(vWorld.xz, caveIndex) : 0.0;
+  if (cloud > 0.0) flow = min(flow, 36.0);
   // Moving Oogas and insects do not own static carved faces. Locate only bright
   // occupants near the cliffs; the pile and meadow bypass the bounded lookup.
   if (uMatrixParams.x > 0.0 && living > 0.0 && caveIndex < 0.5 && flow > uMatrixCaveNear) {
@@ -645,7 +647,7 @@ void main() {
     const res = { programs: {}, fbo: null, shadow: null, bloom: null, quadVao: null, matrixTexture: null };
     const mirror = { node: null, record: null, geometry: null, program: null, programReady: false, fb: null, tex: null, depth: null, color: null, msFb: null, msaa: -1, width: 0, height: 0, frame: 0, portal: false, walkThrough: false, captureValid: false, capturePending: false };
     const mirrorDebug = {
-      active: false, faux: false, portal: false, surfaceDrawn: false, captureValid: false, width: 0, height: 0, samples: 0, allocationCount: 0, reflectionPassCount: 0, skippedPassCount: 0, resources: 0, captureExcluded: false,
+      active: false, faux: false, portal: false, surfaceDrawn: false, captureValid: false, width: 0, height: 0, samples: 0, allocationCount: 0, reflectionPassCount: 0, skippedPassCount: 0, resources: 0, captureExcluded: false, reflectionOnlyCount: 0, planeDistance: 0,
       cameraPosition: new Float32Array(3), cameraTarget: new Float32Array(3), planeCenter: new Float32Array(3), planeNormal: new Float32Array(3), capturedViewProj: mirrorCapturedViewProj, skipReason: "none"
     };
     // Compile without blocking, ready flips once linked
@@ -820,6 +822,7 @@ void main() {
       mirrorDebug.portal = false;
       mirrorDebug.surfaceDrawn = false;
       mirrorDebug.captureExcluded = false;
+      mirrorDebug.reflectionOnlyCount = 0;
     };
     const forgetMirror = () => {
       mirror.node = mirror.record = mirror.geometry = mirror.program = mirror.fb = mirror.tex = mirror.depth = mirror.color = mirror.msFb = null;
@@ -831,6 +834,7 @@ void main() {
       mirrorDebug.portal = mirrorDebug.captureValid = false;
       mirrorDebug.surfaceDrawn = false;
       mirrorDebug.captureExcluded = false;
+      mirrorDebug.reflectionOnlyCount = 0;
       mirrorDebug.resources = 0;
     };
     const destroyFbo = () => {
@@ -1036,7 +1040,7 @@ void main() {
       let rec = records.get(geometry);
       if (!rec) {
         const ibo = gl.createBuffer();
-        rec = { geometry, ibo, capacity: 0, mesh: buildMeshPart(geometry, ibo), line: buildLinePart(geometry, ibo), nodes: [], count: 0, drawCount: 0, active: false, data: null, batch: null, batchVersion: -1 };
+        rec = { geometry, ibo, capacity: 0, mesh: buildMeshPart(geometry, ibo), line: buildLinePart(geometry, ibo), nodes: [], count: 0, drawCount: 0, cameraHiddenCount: 0, active: false, data: null, batch: null, batchVersion: -1 };
         records.set(geometry, rec);
       }
       return rec;
@@ -1065,6 +1069,10 @@ void main() {
       const scale = Math.max(w[0] * w[0] + w[1] * w[1] + w[2] * w[2], w[4] * w[4] + w[5] * w[5] + w[6] * w[6], w[8] * w[8] + w[9] * w[9] + w[10] * w[10]);
       return sphereInFrustum(CENTER[0], CENTER[1], CENTER[2], b.radius * Math.sqrt(scale) + CULL_MARGIN);
     };
+    const hiddenFromCamera = (node) => {
+      for (let n = node; n; n = n.parent) if (n.cameraHidden) return true;
+      return false;
+    };
     const collect = (node) => {
       if (!node.geometry) return;
       if (node.mirror || node.mirrorPortal) {
@@ -1082,6 +1090,7 @@ void main() {
         rec.active = true;
         rec.count = 0;
         rec.drawCount = 0;
+        rec.cameraHiddenCount = 0;
         activeRecords.push(rec);
       }
       if (node.instanceData) {
@@ -1095,7 +1104,10 @@ void main() {
       // In-frustum nodes stay in front of the culled ones by swapping into the draw region
       const idx = rec.count++;
       rec.nodes[idx] = node;
-      if (inFrustum(node)) {
+      if (hiddenFromCamera(node)) {
+        rec.cameraHiddenCount++;
+        suppressed++;
+      } else if (inFrustum(node)) {
         rec.nodes[idx] = rec.nodes[rec.drawCount];
         rec.nodes[rec.drawCount++] = node;
       } else culled++;
@@ -1104,6 +1116,7 @@ void main() {
       let partial = 0;
       while (node) {
         if (node.matrixLiving) return 2;
+        if (node.matrixCloud) return 4;
         if (node.matrixEmissiveLiving) partial = 3;
         node = node.parent;
       }
@@ -1191,6 +1204,7 @@ void main() {
       normal[0] = world[8] / nlen;
       normal[1] = world[9] / nlen;
       normal[2] = world[10] / nlen;
+      mirrorDebug.planeDistance = Math.abs((camera.position.x - center[0]) * normal[0] + (camera.position.y - center[1]) * normal[1] + (camera.position.z - center[2]) * normal[2]);
       mirror.portal = !!mirror.node.mirrorPortal;
       mirrorDebug.portal = mirror.portal;
     };
@@ -1208,22 +1222,48 @@ void main() {
       mat4.transformPoint4(MIRROR_CLIP, viewProj, center[0], center[1], center[2]);
       if (MIRROR_CLIP[3] <= MIRROR_EPSILON) return skipMirrorPass("behind-camera");
       if (!mirrorRect(node, viewProj) || MIRROR_RECT[2] < -1 || MIRROR_RECT[0] > 1 || MIRROR_RECT[3] < -1 || MIRROR_RECT[1] > 1) return skipMirrorPass("offscreen");
+      const screenWidth = Math.max(1, (MIRROR_RECT[2] - MIRROR_RECT[0]) * width * 0.5);
+      const screenHeight = Math.max(1, (MIRROR_RECT[3] - MIRROR_RECT[1]) * height * 0.5);
       const area = (Math.min(1, MIRROR_RECT[2]) - Math.max(-1, MIRROR_RECT[0])) * width * 0.5 * (Math.min(1, MIRROR_RECT[3]) - Math.max(-1, MIRROR_RECT[1])) * height * 0.5;
       if (area < 16) return skipMirrorPass("negligible");
       reflectMirrorPoint(mirrorEye, camera.position, center, normal);
-      reflectMirrorPoint(mirrorTarget, camera.target, center, normal);
-      const upDot = UP.x * normal[0] + UP.y * normal[1] + UP.z * normal[2];
-      mirrorUp.x = UP.x - 2 * upDot * normal[0];
-      mirrorUp.y = UP.y - 2 * upDot * normal[1];
-      mirrorUp.z = UP.z - 2 * upDot * normal[2];
+      // At face distance the real eye can approach the glass more closely
+      // than the capture near plane. Keep the reflected capture one near-plane
+      // away so aperture vertices never reach projective w=0 and stretch into
+      // a radial point; the visible camera and mirror remain untouched.
+      if (cameraSide < camera.near) {
+        const push = camera.near - cameraSide;
+        mirrorEye.x -= normal[0] * push;
+        mirrorEye.y -= normal[1] * push;
+        mirrorEye.z -= normal[2] * push;
+      }
+      // A planar reflection is fixed by the reflected eye and glass aperture.
+      // Keep its optical axis perpendicular to the plane, then shift the crop
+      // around the aperture below. Aiming at either the visitor's look target
+      // or the aperture centre lets close, edge-offset glass cross behind this
+      // camera; its projective w then crosses zero and stretches the reflection
+      // into a point.
+      mirrorTarget.x = mirrorEye.x + normal[0];
+      mirrorTarget.y = mirrorEye.y + normal[1];
+      mirrorTarget.z = mirrorEye.z + normal[2];
+      mirrorUp.x = UP.x;
+      mirrorUp.y = UP.y;
+      mirrorUp.z = UP.z;
       mat4.lookAt(mirrorView, mirrorEye, mirrorTarget, mirrorUp);
       mat4.perspective(mirrorProj, camera.fov, width / height, camera.near, camera.far);
-      // Crop the reflected frustum to the glass so every texel lands on it, but never denser than the screen
+      // Crop the reflected frustum to the glass, limiting each axis independently
+      // to one capture texel per visible screen pixel. The fixed perpendicular
+      // capture axis does not share the main camera's projected aspect at oblique
+      // angles, so a single scalar density bound under-samples one axis.
       mat4.multiply(mirrorViewProj, mirrorProj, mirrorView);
       mirrorRect(node, mirrorViewProj);
-      const minHalf = settings.mirror / (Math.max(width, height, 1) * dpr);
       const cropX = (MIRROR_RECT[0] + MIRROR_RECT[2]) * 0.5, cropY = (MIRROR_RECT[1] + MIRROR_RECT[3]) * 0.5;
-      const halfX = Math.max(MIRROR_RECT[2] - cropX, minHalf), halfY = Math.max(MIRROR_RECT[3] - cropY, minHalf);
+      const apertureHalfX = MIRROR_RECT[2] - cropX, apertureHalfY = MIRROR_RECT[3] - cropY;
+      const targetScale = settings.mirror / Math.max(width, height, 1);
+      const targetWidth = Math.max(1, Math.round(width * targetScale));
+      const targetHeight = Math.max(1, Math.round(height * targetScale));
+      const halfX = apertureHalfX * targetWidth / Math.min(screenWidth, targetWidth);
+      const halfY = apertureHalfY * targetHeight / Math.min(screenHeight, targetHeight);
       mirrorProj[0] /= halfX;
       mirrorProj[8] = (mirrorProj[8] + cropX) / halfX;
       mirrorProj[5] /= halfY;
@@ -1387,6 +1427,8 @@ void main() {
       gl.disable(gl.CULL_FACE);
       drawParts("line", "line", true);
       gl.enable(gl.CULL_FACE);
+      mirrorDebug.reflectionOnlyCount = 0;
+      for (const rec of activeRecords) if (rec !== mirror.record) mirrorDebug.reflectionOnlyCount += rec.cameraHiddenCount;
       if (mirror.msFb) {
         gl.bindFramebuffer(gl.READ_FRAMEBUFFER, mirror.msFb);
         gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, mirror.fb);
