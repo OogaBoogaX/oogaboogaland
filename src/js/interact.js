@@ -34,7 +34,7 @@
       }
     };
     const nodeShown = (node) => {
-      for (let n = node; n; n = n.parent) if (!n.visible) return false;
+      for (let n = node; n; n = n.parent) if (!n.visible || n.cameraHidden) return false;
       return true;
     };
     const worldScale = (m) => Math.max(Math.hypot(m[0], m[1], m[2]), Math.hypot(m[4], m[5], m[6]), Math.hypot(m[8], m[9], m[10]));

@@ -63,9 +63,9 @@
     const V = Array.from({ length: 8 }, () => new Float32Array(3));
     const CLIP_IN = new Float32Array(30);
     const CLIP_OUT = new Float32Array(30);
-    const BATCH_NODE = { geometry: null, world: new Float32Array(16), glow: 1, highlight: 0, tip: 0, depthBias: 0, matrixLiving: false, matrixEmissiveLiving: false };
+    const BATCH_NODE = { geometry: null, world: new Float32Array(16), glow: 1, highlight: 0, tip: 0, depthBias: 0, matrixLiving: false, matrixEmissiveLiving: false, matrixCloud: false };
     const mirrorDebug = {
-      active: false, faux: true, portal: false, surfaceDrawn: false, captureValid: false, width: 0, height: 0, allocationCount: 0, reflectionPassCount: 0, skippedPassCount: 0, resources: 0, captureExcluded: true,
+      active: false, faux: true, portal: false, surfaceDrawn: false, captureValid: false, width: 0, height: 0, allocationCount: 0, reflectionPassCount: 0, skippedPassCount: 0, resources: 0, captureExcluded: true, reflectionOnlyCount: 0, planeDistance: 0,
       cameraPosition: new Float32Array(3), cameraTarget: new Float32Array(3), planeCenter: new Float32Array(3), planeNormal: new Float32Array(3), skipReason: "canvas-faux"
     };
     const resize = () => {
@@ -129,6 +129,7 @@
       let partial = 0;
       while (node) {
         if (node.matrixLiving) return 2;
+        if (node.matrixCloud) return 4;
         if (node.matrixEmissiveLiving) partial = 3;
         node = node.parent;
       }
@@ -179,6 +180,10 @@
       }
       return -1;
     };
+    const hiddenFromCamera = (node) => {
+      for (let n = node; n; n = n.parent) if (n.cameraHidden) return true;
+      return false;
+    };
     const shadeNode = (node) => {
       const { verts, faces, lines } = node.geometry;
       const w = node.world;
@@ -217,7 +222,8 @@
           centerY /= count;
           centerZ /= count;
           const flow = Math.hypot(centerX - matrixOriginX, centerZ - matrixOriginZ);
-          const matrixLiving = matrixMode > 1.5 && (matrixMode < 2.5 || face.emissive > 0);
+          const matrixCloud = matrixMode > 3.5;
+          const matrixLiving = matrixMode > 1.5 && matrixMode < 3.5 && (matrixMode < 2.5 || face.emissive > 0);
           const staticCave = face.matrixCave || node.geometry.matrixCave || 0;
           const dynamicCave = !staticCave && matrixActive && matrixRadius >= matrixCaveNear && matrixLiving && matrixCaveBounds && flow >= matrixCaveNear;
           const cave = staticCave || (dynamicCave ? matrixLivingCave(centerX, centerY, centerZ) : 0);
@@ -228,7 +234,7 @@
           if (matrixActive && (!localMatrixGlyph || ownedGlyph)) {
             let radiusSquared = 0;
             for (let k = 0; k < count; k++) radiusSquared = Math.max(radiusSquared, (V[k][0] - centerX) ** 2 + (V[k][2] - centerZ) ** 2);
-            const distance = matrixTravel(centerX, centerZ, cave), margin = Math.sqrt(radiusSquared) * (cave && matrixCaves ? Math.SQRT2 : 1);
+            const distance = matrixCloud ? Math.min(matrixTravel(centerX, centerZ, cave), 36) : matrixTravel(centerX, centerZ, cave), margin = Math.sqrt(radiusSquared) * (cave && matrixCaves ? Math.SQRT2 : 1);
             minimumFront = matrixFront(distance + margin);
             maximumFront = matrixFront(Math.max(0, distance - margin));
           }
@@ -369,6 +375,7 @@
       BATCH_NODE.depthBias = node.depthBias || 0;
       BATCH_NODE.matrixLiving = !!node.matrixLiving;
       BATCH_NODE.matrixEmissiveLiving = !!node.matrixEmissiveLiving;
+      BATCH_NODE.matrixCloud = !!node.matrixCloud;
       const count = node.drawInstanceCount === undefined ? node.instanceCount : Math.max(0, Math.min(node.instanceCount, node.drawInstanceCount));
       suppressed += node.instanceCount - count;
       if (node.cullSphere) {
@@ -671,17 +678,20 @@
           mirrorDebug.planeNormal[2] = w[10] / nlen;
           const center = mirrorDebug.planeCenter, normal = mirrorDebug.planeNormal;
           const eyeD = (camera.position.x - center[0]) * normal[0] + (camera.position.y - center[1]) * normal[1] + (camera.position.z - center[2]) * normal[2];
+          const captureD = Math.max(eyeD, camera.near);
+          mirrorDebug.planeDistance = Math.abs(eyeD);
           mirrorDebug.portal = !!node.mirrorPortal;
-          mirrorDebug.cameraPosition[0] = camera.position.x - 2 * eyeD * normal[0];
-          mirrorDebug.cameraPosition[1] = camera.position.y - 2 * eyeD * normal[1];
-          mirrorDebug.cameraPosition[2] = camera.position.z - 2 * eyeD * normal[2];
-          const targetD = (camera.target.x - center[0]) * normal[0] + (camera.target.y - center[1]) * normal[1] + (camera.target.z - center[2]) * normal[2];
-          mirrorDebug.cameraTarget[0] = camera.target.x - 2 * targetD * normal[0];
-          mirrorDebug.cameraTarget[1] = camera.target.y - 2 * targetD * normal[1];
-          mirrorDebug.cameraTarget[2] = camera.target.z - 2 * targetD * normal[2];
+          mirrorDebug.cameraPosition[0] = camera.position.x - (eyeD + captureD) * normal[0];
+          mirrorDebug.cameraPosition[1] = camera.position.y - (eyeD + captureD) * normal[1];
+          mirrorDebug.cameraPosition[2] = camera.position.z - (eyeD + captureD) * normal[2];
+          mirrorDebug.cameraTarget[0] = mirrorDebug.cameraPosition[0] + normal[0];
+          mirrorDebug.cameraTarget[1] = mirrorDebug.cameraPosition[1] + normal[1];
+          mirrorDebug.cameraTarget[2] = mirrorDebug.cameraPosition[2] + normal[2];
         }
-        if (node.instanceData) shadeBatch(node);
-        else if (node.geometry) shadeNode(node);
+        if (!hiddenFromCamera(node)) {
+          if (node.instanceData) shadeBatch(node);
+          else if (node.geometry) shadeNode(node);
+        }
       });
       active.length = poolUsed;
       for (let i = 0; i < poolUsed; i++) {

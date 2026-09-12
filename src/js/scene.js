@@ -10,6 +10,7 @@
     glow: 1,
     highlight: 0,
     visible: true,
+    cameraHidden: false,
     parent: null,
     children: [],
     world: mat4.create(),
