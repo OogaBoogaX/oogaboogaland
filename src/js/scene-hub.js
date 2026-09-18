@@ -1103,7 +1103,7 @@
       launchers.push(roof);
     } else if (slot.status === "headquarters") {
       addChild(group, createNode({ position: { x: 0, y: 0, z: 0 }, geometry: headquartersModels.entranceRamp(), depthBias: 0.25 }));
-    } else if (slot.status === "open") {
+    } else if (slot.status === "open" && slot.scene !== "dsb") {
       for (const x of [-1.3, 1.3]) addChild(group, createNode({ position: { x, y: 0, z: -3.5 }, geometry: hubModels.caveShelves() }));
     } else if (slot.status === "mirror") {
       // Sit inside the rim so the cave floor ends behind the reflection.
@@ -2431,7 +2431,8 @@
         crates.openCrate(o.crate);
         break;
       case "cave":
-        if (o.slot.status === "open") enterCave(o.slot);
+        if (o.slot.scene === "dsb") hud.toast("Walk to the back wall to enter DSB Land.");
+        else if (o.slot.status === "open") enterCave(o.slot);
         else hud.toast(tooltipFor(hit));
         break;
       case "gate":
@@ -3542,7 +3543,7 @@
         if (Math.hypot(p.x - jetpack.x, py - jetpack.node.position.y, p.z - jetpack.z) < JETPACK_REACH) collectJetpack(player);
       }
     }
-    // The lab still opens on entry. Game launchers wait for a nearby action.
+    // DSB opens at the rear wall; the lab opens on entry. Rally waits for an action.
     if (player && !entering && player.hop < 1) {
       const p = player.root.position;
       const y = p.y - player.baseY;
@@ -3552,7 +3553,14 @@
         for (let i = 0; i < openMouths.length; i++) {
           const { slot, m } = openMouths[i];
           if (slot.scene === "race") continue;
-          if (!overhead && m === playerOpening.mouth && Math.abs(y - m.floorY) < 1 && Math.hypot(p.x - m.inside.x, p.z - m.inside.z) < TUNNEL_REACH) enterCave(slot);
+          if (m !== playerOpening.mouth || Math.abs(y - m.floorY) >= 1) continue;
+          if (slot.scene === "dsb") {
+            // The room ends 6.5 units behind the mouth. Leave room for the body radius.
+            const dx = p.x - m.x, dz = p.z - m.z;
+            const along = dx * Math.sin(m.ry) + dz * Math.cos(m.ry);
+            const across = dx * Math.cos(m.ry) - dz * Math.sin(m.ry);
+            if (along < -5.8 && Math.abs(across) < 2.5) enterCave(slot);
+          } else if (!overhead && Math.hypot(p.x - m.inside.x, p.z - m.inside.z) < TUNNEL_REACH) enterCave(slot);
         }
       }
     }

@@ -8,7 +8,7 @@ meals. Visitors can poke the crew, roll the dice, and watch donated bananas rain
 shared pile on the island and in the cave alike.
 
 Everything is plain JavaScript with no dependencies, no build requirement, and no
-network access. The page cannot make a request, payments are a simulator for now, and
+network access in the hub. DSB Land automatically connects to public Bitcoin data feeds; payments are a simulator for now, and
 all visitor state stays in the visitor's own browser (for now).
 
 ## Run it
@@ -288,3 +288,52 @@ their own localStorage and nowhere else.
 Read [AGENTS.md](AGENTS.md) first. It describes the module layout, the engine patterns
 the code relies on, how to add props, swag, behaviors, and HUD elements, and the checks
 every change must pass.
+
+## DSB Land
+
+The 10 o'clock cave opens **DSB Land**, adding the sixth active hub gate. Walk to
+the back wall to enter its tunnel, then toward the arched, pale-yellow light
+with W / Up or the left touch stick. Four recordings play once per visit, in order,
+with the Journey kazoo cover quiet beneath them and footsteps following movement.
+The passage follows the current hub YellowBrokeIt character and glances gently with
+each voice. A skippable 13-second arrival tour shows the plain and supporting turtle;
+reduced-motion preferences skip the tour automatically.
+
+WASD moves, dragging looks around, and the mouse wheel adjusts the shared hub camera.
+**Turtle view** shows the whole world; **Walk** returns to the entrance area.
+The river is the outer ring. Beside the southern dock are the stone return cave and
+marked **Bitcoin coaster** station. The raised coaster circles the plain inside the
+river, clear of the cave and dock roofs. Both vehicles run continuously and stop for
+eight seconds at their stations. Walk near a station and use **Take a ride** when the
+vehicle is waiting; an unavailable button announces its next arrival. Both rides have
+a forward first-person view with limited mouse dragging. **Leave ride** disembarks at
+the station. Enter the stone cave to reveal **Return to Ooga Booga Land**.
+
+Walk near the meme stand and choose **Visit meme shop**. Each visit starts with 20 demo
+tokens: bananas and tomatoes cost one, banana bread costs three, with nine of each
+allowed. **Eat snack** / B eats bread or a banana; **Throw tomato** / T throws a tomato,
+and tapping a local Ooga aims at them. Shop purchases are simulated; characters are local.
+
+The nearby **Use TV** button opens a centered five-channel menu. Channel 1 is Noderunners
+Radio; 2-5 say **Soon added**. The station supplies current song, queue and recent history,
+refreshed every 15 seconds with outages labelled. Search for a song inside channel 1,
+select it to request the station's Lightning invoice, then scan its QR, copy it or open
+a Lightning wallet. Payment remains an explicit action in the visitor's wallet; the TV
+polls the station for payment and queue confirmation. Closing an invoice stops local
+monitoring; it does not cancel an invoice at the station. An official jukebox link and
+QR remain available. Audio buffering can delay playback behind the displayed metadata.
+
+Closing the TV keeps its broadcast audible across DSB Land, louder nearby and quieter
+farther away. **Music** and **Ambient** are independent; **Mute** silences everything.
+The Journey track plays only in the tunnel. Radio outages retry while ambient sound
+continues. **Play radio** resumes playback if the browser requires a gesture. Procedural
+river, waterfalls, boat motor, crowd and wildlife sounds follow nearby sources.
+
+The Bitcoin sky and coaster connect automatically. mempool.space supplies backlog,
+fees and block height; Coinbase Exchange supplies BTC-USD one-minute candles and ticker
+updates. Each coaster lap uses a stable snapshot of completed candles, replaced at the
+station. Prices are scaled and clamped for safe track clearance. Feed outages retain
+last received data; unavailable initial data is explicitly labelled demo. **Live data
+on / off** pauses or resumes these feeds. All connections and visit resources close on exit.
+
+A direct visit is `?scene=dsb`; `?debug=1&scene=dsb` exposes `__ooga.dsb`.

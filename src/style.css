@@ -2146,3 +2146,94 @@ select {
     top: calc(98px + var(--safe-top));
   }
 }
+
+/* DSB keeps controls in the existing page and its world in a separate scene. */
+.dsb-panel { position: absolute; z-index: 5; right: 20px; top: 104px; width: 300px; max-height: calc(100% - 230px); overflow: auto; padding: 18px; background: rgba(25, 15, 42, 0.92); border: 1px solid #8863a5; border-radius: 10px; box-shadow: 0 8px 35px #0005; }
+.dsb-panel h2 { margin: 4px 0 12px; color: #ffdf38; font-size: 25px; }
+.dsb-panel p { margin: 8px 0; }
+.dsb-eyebrow { color: #57e1dc; font-size: 10px; letter-spacing: 0.15em; }
+.dsb-panel button { padding: 8px; margin: 4px 4px 4px 0; background: #37234c; border: 1px solid #765594; border-radius: 5px; cursor: pointer; }
+.dsb-panel button:hover, .dsb-panel button:focus-visible { border-color: #ffdf38; }
+.dsb-panel output { display: block; color: #ffdf38; margin: 12px 0; }
+.dsb-panel summary { cursor: pointer; color: #bfb0d0; padding: 8px 0; }
+.dsb-panel details { border-top: 1px solid #ffffff20; margin-top: 10px; }
+.dsb-panel label { display: block; margin: 10px 0; }
+.dsb-panel input { max-width: 100%; font-size: 11px; }
+.dsb-panel .help { font-size: 11px; color: #bfb0d0; }
+#dsb-feed { white-space: pre-line; font-size: 11px; color: #57e1dc; }
+.dsb-intro, .dsb-stop { display: none; }
+.dsb-panel[data-phase="boat"] .dsb-stop, .dsb-panel[data-phase="coaster"] .dsb-stop { display: inline-block; }
+.dsb-entry .topbar, .dsb-entry .sheet, .dsb-entry .world-clock, .dsb-entry #joy-look { visibility: hidden; }
+.dsb-entry .dsb-panel { background: transparent; border: 0; box-shadow: none; right: 50%; transform: translateX(50%); top: auto; bottom: 20px; width: min(460px, 75vw); text-align: center; max-height: 44%; }
+.dsb-entry .dsb-intro { display: block; }
+.dsb-entry .dsb-world { display: none; }
+.dsb-entry .dsb-intro h2 { color: white; }
+.dsb-entry .dsb-sounds { font-size: 11px; }
+.dsb-active .world-clock { visibility: hidden; }
+.dsb-shop { border-top: 1px solid #ffdf38; margin-top: 12px; }
+@media (max-width: 720px) {
+  .dsb-panel { top: 100px; right: 8px; width: 220px; padding: 10px; max-height: calc(100% - 300px); font-size: 11px; }
+  .dsb-panel h2 { font-size: 19px; }
+  .dsb-entry .dsb-panel { bottom: 210px; max-height: 35%; width: 75vw; }
+  .dsb-active .brand { display: none; }
+}
+.dsb-toggle { display: block; }
+.dsb-active .world-bananas { display: none; }
+
+  .dsb-panel[data-folded="true"]:not([data-phase="entrance"]) { width: auto; padding: 3px 8px; }
+  .dsb-panel[data-folded="true"] .dsb-world > :not(.dsb-toggle),
+  .dsb-panel[data-folded="true"]:not([data-phase="entrance"]) .dsb-sounds { display: none; }
+
+.dsb-arrival-card { display: none; }
+.dsb-arrival .dsb-arrival-card { display: block; text-align: center; }
+.dsb-arrival .dsb-world, .dsb-arrival .dsb-sounds, .dsb-arrival #joy-move, .dsb-arrival #joy-look, .dsb-arrival #act, .dsb-arrival .topbar { visibility: hidden; }
+.dsb-arrival .dsb-world, .dsb-arrival .dsb-sounds { display: none; }
+.dsb-arrival .dsb-panel { top: auto; bottom: 24px; right: 50%; transform: translateX(50%); width: max-content; max-width: 85vw; }
+
+.dsb-entry .dsb-panel { top: 24px; bottom: auto; left: 24px; right: auto; transform: none; width: min(340px, 75vw); text-align: left; }
+@media (max-width: 720px) { .dsb-entry .dsb-panel { top: 12px; left: 50%; transform: translateX(-50%); width: 85vw; max-height: 30%; text-align: center; } }
+
+/* Nearby, opt-in CRT menu. The broadcast continues with the cabinet closed. */
+#dsb-tv { width: min(820px, 94vw); max-height: 90dvh; overflow: auto; padding: 20px; border: 8px solid #78543b; border-radius: 24px; background: #392739; color: #e6fff2; box-shadow: 0 20px 90px #000b; }
+#dsb-tv::backdrop { background: #080512bb; }
+#dsb-tv header { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 14px; }
+#dsb-tv h2, #dsb-tv h3, #dsb-tv p { margin: 8px 0; overflow-wrap: anywhere; }
+#dsb-tv h2 { color: #ffdf38; font-size: 28px; }
+#dsb-tv button, #dsb-tv a { color: #ffdf38; background: #251c39; border: 1px solid #9574ad; border-radius: 6px; padding: 10px 12px; font: inherit; cursor: pointer; }
+#dsb-tv button:focus-visible, #dsb-tv a:focus-visible { outline: 3px solid #49ddd9; outline-offset: 2px; }
+#dsb-tv button:disabled { color: #a49cac; border-color: #4d435a; cursor: default; }
+.dsb-tv-glass { padding: 20px; background: #0b191c; border: 4px solid #11101c; border-radius: 24px; }
+#dsb-tv-menu { display: flex; flex-wrap: wrap; gap: 8px; }
+#dsb-tv-channel[aria-expanded="true"] { border-color: #49ddd9; color: #49ddd9; }
+#dsb-tv-status, .dsb-tv-help { color: #a6bfc4; font-size: 12px; }
+#dsb-tv-song { color: #ffdf38; font-size: 23px; }
+.dsb-tv-columns { display: grid; grid-template-columns: 1fr 240px; gap: 22px; margin-top: 18px; }
+#dsb-tv ol { padding-left: 22px; }
+#dsb-tv li { margin-bottom: 8px; overflow-wrap: anywhere; }
+.dsb-tv-request { text-align: center; }
+#dsb-tv-qr { width: 156px; height: 156px; image-rendering: pixelated; display: block; margin: 0 auto 16px; }
+.dsb-tv-request a { display: block; }
+.dsb-tv-request p { font-size: 12px; line-height: 1.6; }
+@media (max-width: 600px) { #dsb-tv { padding: 10px; border-width: 5px; } .dsb-tv-glass { padding: 12px; } .dsb-tv-columns { grid-template-columns: 1fr; } #dsb-tv-menu { flex-direction: column; } }
+
+/* DSB controls must receive real pointer input over the passive HUD layer. */
+.dsb-panel, #dsb-tv, .dsb-context { pointer-events: auto; }
+.dsb-context { position: absolute; z-index: 8; bottom: 130px; left: 50%; transform: translateX(-50%); max-width: 90vw; padding: 14px 22px; border: 2px solid #ffe36a; border-radius: 10px; background: #30203e; color: #fff2a0; font: inherit; cursor: pointer; box-shadow: 0 4px 18px #0008; }
+.dsb-context:disabled { color: #c5b4ce; border-color: #8e719e; cursor: default; }
+.dsb-context:focus-visible { outline: 3px solid #49ddd9; }
+@media (max-width: 720px) { .dsb-context { bottom: 235px; font-size: 12px; padding: 12px; } }
+
+.dsb-tv-jukebox { border-top: 1px solid #416168; border-bottom: 1px solid #416168; padding: 14px 0; margin: 16px 0; }
+.dsb-tv-search { display: flex; gap: 8px; margin: 8px 0; }
+#dsb-tv-query { width: 100%; min-width: 0; padding: 10px; border: 1px solid #49ddd9; border-radius: 5px; background: #16272a; color: white; font: inherit; }
+#dsb-tv-results > div { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 8px 0; border-top: 1px solid #ffffff18; }
+#dsb-tv-results span { min-width: 0; overflow-wrap: anywhere; }
+#dsb-tv-results button { flex-shrink: 0; }
+#dsb-tv-invoice { padding: 16px; background: #16272a; text-align: center; }
+#dsb-tv-invoice-qr { display: block; width: min(280px, 100%); height: auto; margin: 12px auto; image-rendering: pixelated; }
+#dsb-tv-wallet { display: inline-block; }
+#dsb-tv-invoice-text { display: block; width: 100%; margin-top: 12px; height: 64px; font-size: 10px; background: #0b191c; color: #e6fff2; }
+@media (max-width: 600px) { #dsb-tv-results > div { align-items: stretch; flex-direction: column; } }
+
+#dsb-tv-menu[hidden] { display: none; }
+.dsb-panel[data-folded="true"] #dsb-shop { display: none; }

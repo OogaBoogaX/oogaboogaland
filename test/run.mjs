@@ -9064,7 +9064,7 @@ const { caveOutlineSectionsProbe } = (() => {
         }
       }
     }
-    if (registry.missing || registry.duplicate || registry.headquarters || registry.blockedInteriors || registry.accessible !== 3 || registry.sealed !== 3) fail("invalid cave registry", registry);
+    if (registry.missing || registry.duplicate || registry.headquarters || registry.blockedInteriors || registry.accessible !== 4 || registry.sealed !== 2) fail("invalid cave registry", registry);
     if (geometry.nonvertical || geometry.roofRisers || geometry.wrongCave || geometry.degenerate || geometry.sealedWalls !== registry.sealed) fail("invalid cave surfaces", geometry);
     if (!coverage.interiorSamples || coverage.missingInterior || !coverage.sealSamples || coverage.missingSeal || coverage.filledDoorway) fail("incomplete cave surfaces", coverage);
 
@@ -9301,7 +9301,7 @@ const { sealedCaveBlocksProbe } = (() => {
       }
       const accessible = B.cameraCave.openings.filter((opening) => !opening.blocked);
       const closedOpenings = accessible.filter((opening) => B.headquarters.rockGuides.contexts.some((context) => context.kind === "sealed" && context.source.id === opening.id)).map((opening) => opening.id);
-      if (variants.length !== 3 || closedOpenings.length) fail("incorrect sealed cave registry", { count: variants.length, closedOpenings });
+      if (variants.length !== 2 || closedOpenings.length) fail("incorrect sealed cave registry", { count: variants.length, closedOpenings });
       return { backend: renderer.kind, variants, accessible: accessible.length, closedOpenings, failures };
     } finally { cover.dispose(); renderer.dispose(); }
   };
@@ -14318,9 +14318,41 @@ const session = (url, steps, opts, final) => output.run({ lines: [], results: []
     // fails its pending commands at once. The longest healthy session is ~40 s.
     const browser = b;
     watchdog = setTimeout(() => { overran = true; browser.close(); }, SESSION_MS);
+    // DSB exercises the real automatic startup against deterministic public-feed fixtures.
+    if (steps.some(([name]) => name.includes("dsb"))) await b.send("Page.addScriptToEvaluateOnNewDocument", { source: `(() => {
+      window.__dsbRadioFixture = { plays: 0, pauses: 0, element: null };
+      if (${process.env.DSB_RADIO_LIVE !== "1"}) window.Audio = class {
+        constructor() { this.src = ""; __dsbRadioFixture.element = this; }
+        play() { __dsbRadioFixture.plays++; queueMicrotask(() => { if (this.src && this.onplaying) this.onplaying(); }); return Promise.resolve(); }
+        pause() { __dsbRadioFixture.pauses++; }
+        load() {}
+        removeAttribute(name) { if (name === "src") this.src = ""; }
+      };
+      const originalFetch = window.fetch;
+      window.__dsbFeedFixture = { requests: 0, sockets: 0, closed: 0 };
+      window.fetch = async (url, options) => {
+        if (true && String(url).startsWith("https://noderunnersradio.com/")) {
+          window.__dsbTvFixture = window.__dsbTvFixture || { invoices: 0, searches: 0 }; let value;
+          if (url.includes("/api/search")) { __dsbTvFixture.searches++; value = { results: [{ title: "Banana Beats", artist: "Ooga", source: "library", sats: 21 }] }; }
+          else if (url.includes("/api/play/status")) value = { paid: true, queued: true };
+          else if (url.endsWith("/api/play")) { __dsbTvFixture.invoices++; value = { bolt11: "lnbc210n1" + "q".repeat(340), sats: 21, payment_hash: "fixture-hash" }; }
+          else value = url.includes("nowplaying") ? { now_playing: { title: "Turtle Radio", artist: "DSB Band", note: "Hello island" }, queue: [{ title: "Banana Beats", artist: "Ooga" }] } : { history: [{ title: "Neon River", artist: "Purple Crew" }] };
+          return { ok: true, json: async () => value };
+        }
+        if (!String(url).startsWith("https://mempool.space/") && !String(url).startsWith("https://api.exchange.coinbase.com/")) return originalFetch(url, options);
+        __dsbFeedFixture.requests++;
+        const minute = Math.floor(Date.now() / 60000) * 60;
+        return { ok: true, json: async () => url.includes("candles") ? [[minute - 120, 59900, 60200, 60000, 60100], [minute - 60, 60000, 60400, 60100, 60300], [minute, 60200, 60500, 60300, 60400]] : url.endsWith("/height") ? 900000 : url.includes("recommended") ? { fastestFee: 8 } : { vsize: 20000000 } };
+      };
+      window.WebSocket = class {
+        constructor() { __dsbFeedFixture.sockets++; this.closed = false; queueMicrotask(() => { if (!this.closed) { if (this.onopen) this.onopen(); if (this.onmessage) this.onmessage({ data: JSON.stringify({ type: "ticker", product_id: "BTC-USD", price: "60400", time: new Date().toISOString() }) }); } }); }
+        send() {}
+        close() { if (!this.closed) { this.closed = true; __dsbFeedFixture.closed++; } }
+      };
+    })()` });
     await b.open(url);
     await b.focus(true);
-    await untilReady(b);
+    await untilReady(b).catch(async (error) => { error.message += " | " + b.logs.join(" | ") + " | " + JSON.stringify(await b.evaluate(`({ ready: document.readyState, app: !!window.__ooga, frames: window.__ooga?.renderedFrames, curtain: !!document.getElementById("curtain") })`)); throw error; });
     ready = Date.now();
     for (const [i, [name, fn]] of steps.entries()) {
       const from = i ? b.logs.length : 0;
@@ -14591,6 +14623,10 @@ const phone = () => withPage("phone", hubPage(src), async (b) => {
   const sticks = { open: await stickWith("true"), closed: await stickWith("false") };
   record("phone: the sticks hide behind the open sheet and return when it collapses", sticks.open.box === "none" && !sticks.open.laidOut && sticks.open.width === 0 && sticks.closed.box === "block" && sticks.closed.width > 0, JSON.stringify(sticks));
   // Hold the move stick up and the camera flies
+  const enable = await b.evaluate(`(() => { const r = document.getElementById("dsb-start-audio").getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; })()`);
+  await b.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [enable] });
+  await b.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+  await untilPage(b, "B.audio.ready", 10000);
   const stick = await b.evaluate(`(() => { const r = document.getElementById("joy-move").getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; })()`);
   const target = () => b.evaluate(`(() => { const c = window.__ooga.camera; return { x: +c.target.x.toFixed(2), z: +c.target.z.toFixed(2) }; })()`);
   const t0 = await target();
@@ -14680,13 +14716,13 @@ const mirrorCave = ["mirror cave", async (b) => {
   const built = await b.evaluate(`(() => { const B = window.__ooga, H = window.BL.hubModels, C = B.mirrorCave, slot = window.BL.caves.slots.find((s) => s.id === "c1"), g = C.node.geometry, rim = C.rim.geometry, original = H.caveMouthRim(), bounds = window.BL.scene.boundsOf(g), ooga = H.caveSign("Ooga Booga Land"), entropy = H.caveSign("EntropyLab"); let liners = 0; const scan = (node) => { if (node.geometry?.matrixRevealBacking) liners++; for (const child of node.children) scan(child); }; scan(window.BL.scenes.hub.root); const rear = rim.faces.filter((face) => face.i.every((i) => rim.verts[i * 3 + 2] === -0.5)), soffit = rim.faces.filter((face) => { const a = face.i[0] * 3, b = face.i[1] * 3, c = face.i[2] * 3, v = rim.verts; return face.i.every((i) => v[i * 3 + 1] === 3 && Math.abs(v[i * 3]) <= 2.5) && (v[b + 2] - v[a + 2]) * (v[c] - v[a]) - (v[b] - v[a]) * (v[c + 2] - v[a + 2]) < 0; }); return { status: slot.status, name: slot.name, scene: slot.scene, children: C.group.children.length - C.guides.doorwayNodes.length, glyphBatches: C.guides.doorwayNodes.length, glyphsAttached: C.guides.doorwayNodes.every((node) => node.parent === C.group && node.sightHidden && node.geometry.matrixGlyph && node.fixedInstanceCapacity), mirrorMarked: C.node.mirror === true, walkThrough: C.node.mirrorWalkThrough === true, attached: [C.node, C.rim, C.sign].every((n) => n.parent === C.group), bounds: { min: bounds.min, max: bounds.max }, worldBottom: C.node.position.y + bounds.min[1], plane: C.node.position.z, noRoom: !("room" in C), liners, originalVertices: rim.verts === original.verts, originalFaces: rim.faces.length === original.faces.length && rim.faces.every((face, i) => face.i === original.faces[i].i && face.color === original.faces[i].color && face.emissive === original.faces[i].emissive), rear: rear.length, soffit: soffit.length, stone: [...rear, ...soffit].every((f) => f.color.some((v) => v > 0)), sign: { label: B.labels.find((l) => l.text === slot.name).text, cached: ooga === H.caveSign(slot.name), wider: ooga.signWidth > entropy.signWidth, faces: ooga.faces.length } }; })()`);
   record("mirror cave: c1 keeps its sign and walk-through mirror without a separate room shell", built.status === "mirror" && built.name === "Ooga Booga Land" && built.scene === null && built.children === 8 && built.glyphBatches === 8 && built.glyphsAttached && built.mirrorMarked && built.walkThrough && built.attached && built.worldBottom < 0 && built.plane === 0.5 && built.bounds.min.join("|") === "-2.5|-1.75|0" && built.bounds.max.join("|") === "2.5|1.5|0" && built.sign.label === built.name && built.sign.cached && built.sign.wider && built.sign.faces > 100 && built.noRoom && built.liners === 0, JSON.stringify(built));
   const matrixGateBuilt = await b.evaluate(`(() => { const B = window.__ooga, G = B.matrixGate, cave = B.matrixCave.caves.find((c) => c.id === "c1").caveIndex, bounds = window.BL.scene.boundsOf; return { count: G.gates.length, caveIndices: G.gates.map((g) => g.caveIndex), sealedIndices: G.sealed.map((s) => s.caveIndex), sealedIds: G.sealed.map((s) => s.mouth.id), uniqueSeals: new Set(G.sealed.map((s) => s.node.geometry)).size, sealed: G.sealed.map((s) => { const b = bounds(s.node.geometry); return { exterior: s.node.matrixExterior, span: [b.max[0] - b.min[0], b.max[1] - b.min[1]], faces: s.node.geometry.faces.length }; }), blocked: B.cameraCave.openings.filter((o) => o.blocked).map((o) => o.caveIndex), hiddenHeight: G.hiddenHeight, hidden: G.gates.every((g) => g.node.position.y === G.hiddenHeight && !g.open), mapped: G.gates.every((g) => g.node.geometry.matrixCave === g.caveIndex && g.node.matrixExterior), glyphFaces: G.gates.map((g) => g.node.geometry.faces.filter((f) => f.emissive > 0).length), spans: G.gates.map((g) => { const b = bounds(g.node.geometry); return [b.max[0] - b.min[0], b.max[1] - b.min[1]]; }), pressed: G.pressed, unlocked: G.unlocked, buttonMapped: G.button.geometry.matrixCave === cave && G.button.matrixExterior && !G.button.matrixLiving && G.button.glow < 0.5, standMapped: G.stand.geometry.matrixCave === cave && G.stand.matrixExterior, target: B.input.targets ? B.input.targets.includes(G.button) : true }; })()`);
-  record("matrix gates: only occupied caves own overhead glyph bars while all three unused mouths have unique sealed stone faces", matrixGateBuilt.count === 5 && matrixGateBuilt.caveIndices.join("|") === "1|3|4|5|8" && matrixGateBuilt.sealedIndices.join("|") === "2|6|7" && matrixGateBuilt.sealedIds.join("|") === "c10|c2|c3" && matrixGateBuilt.uniqueSeals === 3 && matrixGateBuilt.blocked.join("|") === "2|6|7" && matrixGateBuilt.sealed.every((s) => s.exterior && s.span[0] >= 4.9 && s.span[1] >= 2.9 && s.faces >= 300) && matrixGateBuilt.hiddenHeight > 3 && matrixGateBuilt.hidden && matrixGateBuilt.mapped && matrixGateBuilt.glyphFaces.every((count) => count > 250) && matrixGateBuilt.spans.every((s) => s[0] >= 4.8 && s[1] >= 3.1) && !matrixGateBuilt.pressed && !matrixGateBuilt.unlocked && matrixGateBuilt.buttonMapped && matrixGateBuilt.standMapped && matrixGateBuilt.target, JSON.stringify(matrixGateBuilt));
+  record("matrix gates: only occupied caves own overhead glyph bars while both unused mouths have unique sealed stone faces", matrixGateBuilt.count === 6 && matrixGateBuilt.caveIndices.join("|") === "1|2|3|4|5|8" && matrixGateBuilt.sealedIndices.join("|") === "6|7" && matrixGateBuilt.sealedIds.join("|") === "c2|c3" && matrixGateBuilt.uniqueSeals === 2 && matrixGateBuilt.blocked.join("|") === "6|7" && matrixGateBuilt.sealed.every((s) => s.exterior && s.span[0] >= 4.9 && s.span[1] >= 2.9 && s.faces >= 300) && matrixGateBuilt.hiddenHeight > 3 && matrixGateBuilt.hidden && matrixGateBuilt.mapped && matrixGateBuilt.glyphFaces.every((count) => count > 250) && matrixGateBuilt.spans.every((s) => s[0] >= 4.8 && s[1] >= 3.1) && !matrixGateBuilt.pressed && !matrixGateBuilt.unlocked && matrixGateBuilt.buttonMapped && matrixGateBuilt.standMapped && matrixGateBuilt.target, JSON.stringify(matrixGateBuilt));
   record("mirror cave: original jagged rim, rear stone and soffit geometry remain intact with no artificial black paneling", built.originalVertices && built.originalFaces && built.rear === 18 && built.soffit === 11 && built.stone && built.noRoom && built.liners === 0, JSON.stringify(built));
   const descenders = await b.evaluate(`(() => { const glyphMin = (ch) => { const g = window.BL.hubModels.caveSign(ch); let min = Infinity; for (const face of g.faces) { if (face.emissive !== 0.2) continue; for (const i of face.i) min = Math.min(min, g.verts[i * 3 + 1]); } return min; }, baseline = glyphMin("o"), samples = ["g", "p", "q", "y", "j"].map((ch) => ({ ch, min: glyphMin(ch) })), board = window.BL.hubModels.caveSign("Ooga Booga Land"); return { baseline, samples, height: board.signHeight, contained: samples.every((sample) => sample.min > -board.signHeight * 0.5) }; })()`);
   record("cave signs: descenders extend below the lowercase baseline and remain inside the taller board", descenders.samples.every((sample) => sample.min < descenders.baseline - 0.05) && descenders.contained && descenders.height > 0.91, JSON.stringify(descenders));
-  const entranceLayout = await b.evaluate(`(() => { const B = window.__ooga, all = B.entranceLights.map((l) => ({ ...l, localPosition: [...l.localPosition], worldPosition: [...l.worldPosition] })), caves = ["c11", "c9", "c1"].map((id) => { const m = B.mouths.find((v) => v.id === id), fixtures = all.filter((l) => l.caveId === id), torches = fixtures.filter((l) => l.kind === "torch"), lanterns = fixtures.filter((l) => l.kind === "lantern"), transformError = Math.max(...fixtures.map((l) => { const p = l.localPosition, x = m.x + Math.cos(m.ry) * p[0] + Math.sin(m.ry) * p[2], y = m.floorY + p[1], z = m.z - Math.sin(m.ry) * p[0] + Math.cos(m.ry) * p[2]; return Math.max(Math.abs(x - l.worldPosition[0]), Math.abs(y - l.worldPosition[1]), Math.abs(z - l.worldPosition[2])); })); return { id, fixtures, torches, lanterns, transformError }; }); return { all, caves, mirrorPlane: B.mirrorCave.node.position.z }; })()`);
+  const entranceLayout = await b.evaluate(`(() => { const B = window.__ooga, all = B.entranceLights.map((l) => ({ ...l, localPosition: [...l.localPosition], worldPosition: [...l.worldPosition] })), caves = ["c11", "c10", "c9", "c1"].map((id) => { const m = B.mouths.find((v) => v.id === id), fixtures = all.filter((l) => l.caveId === id), torches = fixtures.filter((l) => l.kind === "torch"), lanterns = fixtures.filter((l) => l.kind === "lantern"), transformError = Math.max(...fixtures.map((l) => { const p = l.localPosition, x = m.x + Math.cos(m.ry) * p[0] + Math.sin(m.ry) * p[2], y = m.floorY + p[1], z = m.z - Math.sin(m.ry) * p[0] + Math.cos(m.ry) * p[2]; return Math.max(Math.abs(x - l.worldPosition[0]), Math.abs(y - l.worldPosition[1]), Math.abs(z - l.worldPosition[2])); })); return { id, fixtures, torches, lanterns, transformError }; }); return { all, caves, mirrorPlane: B.mirrorCave.node.position.z }; })()`);
   const torchPairs = entranceLayout.caves.map((c) => c.torches);
-  record("entrance lights: EntropyLab, Ooga Rally and Ooga Booga Land use symmetric cave-local torch pairs", entranceLayout.all.length === 9 && entranceLayout.caves.every((c) => c.fixtures.length === 3 && c.torches.length === 2 && c.lanterns.length === 1 && c.transformError < 1e-6 && c.fixtures.every((l) => l.registered)) && torchPairs.every((pair) => pair[0].side === "left" && pair[1].side === "right" && Math.abs(pair[0].localPosition[0] + pair[1].localPosition[0]) < 1e-8 && Math.abs(Math.abs(pair[0].localPosition[0]) - 2.75) < 1e-8 && pair[0].localPosition[1] === pair[1].localPosition[1] && pair[0].localPosition[2] === pair[1].localPosition[2]), JSON.stringify(entranceLayout));
+  record("entrance lights: EntropyLab, DSB Land, Ooga Rally and Ooga Booga Land use symmetric cave-local torch pairs", entranceLayout.all.length === 12 && entranceLayout.caves.every((c) => c.fixtures.length === 3 && c.torches.length === 2 && c.lanterns.length === 1 && c.transformError < 1e-6 && c.fixtures.every((l) => l.registered)) && torchPairs.every((pair) => pair[0].side === "left" && pair[1].side === "right" && Math.abs(pair[0].localPosition[0] + pair[1].localPosition[0]) < 1e-8 && Math.abs(Math.abs(pair[0].localPosition[0]) - 2.75) < 1e-8 && pair[0].localPosition[1] === pair[1].localPosition[1] && pair[0].localPosition[2] === pair[1].localPosition[2]), JSON.stringify(entranceLayout));
   record("entrance lights: every torch clears the front of its jamb and the c1 mirror plane", torchPairs.flat().every((l) => Math.abs(l.gap - 0.12) < 1e-8 && Math.abs(l.fixtureBack - l.rimFront - 0.12) < 1e-8 && l.fixtureBack > l.rimFront && (l.caveId !== "c1" || l.fixtureBack > entranceLayout.mirrorPlane)), JSON.stringify(torchPairs));
   const approach = await b.evaluate(`(() => { const B = window.__ooga, m = B.mouths.find((mouth) => mouth.id === "c1"), ox = -Math.sin(m.ry), oz = -Math.cos(m.ry), px = oz, pz = -ox, stations = [0.5, 1, 1.5, 2, 2.5].map((distance) => { let sum = 0, count = 0; for (let lateral = -2; lateral <= 2.0001; lateral += 0.025) { const x = m.x - ox * distance + px * lateral, z = m.z - oz * distance + pz * lateral; if (B.island.isPath(x, z)) { sum += lateral; count++; } } return { distance, center: count ? sum / count : null, count }; }); return { stations, maxOffset: Math.max(...stations.map((station) => Math.abs(station.center))) }; })()`);
   record("mirror cave: only c1's path eases into a perpendicular final approach", approach.stations.every((station) => station.count > 0) && approach.maxOffset <= 0.15, JSON.stringify(approach));
@@ -14764,7 +14800,7 @@ const mirrorCave = ["mirror cave", async (b) => {
   record("mirror portal: the raw overhead orbit retains its requested pose while glyphs stay behind the closed mirror", overhead.samples.length === 2 && overhead.samples.every((sample) => sample.error < 1e-7 && sample.mode === "orbit" && !sample.selected && !sample.inside && !sample.portal && sample.cameraY > overhead.openingTop) && overhead.visible && overhead.drawEnabled && overhead.drawnGlyphs > 0 && overhead.maxLocalZ < overhead.portalZ - 0.0099 && overhead.rejectedAbove === 0, JSON.stringify(overhead));
   await b.evaluate(`window.__ooga.matrixCave.viewApproach()`);
   await rendered(4);
-  const matrixWorldOutside = await b.evaluate(`(() => { const B = window.__ooga, H = window.BL.hubModels, nodes = [], walk = (node) => { nodes.push(node); for (const child of node.children) walk(child); }; walk(window.BL.scenes.hub.root); const crew = new Set([...B.cavemen.values()].map((cave) => cave.root)), trees = new Set(B.props.filter((o) => o.prop === "tree").map((o) => o.node)), settled = new Set(B.slots.map((slot) => slot.node)), falling = new Set(B.drops.map((slot) => slot.node)), bananaGeometry = window.BL.models.bananaGeometry(), bullets = nodes.filter((node) => node.parent === window.BL.scenes.hub.root && node.geometry === bananaGeometry && !settled.has(node) && !falling.has(node)), butterflyGeometry = new Set([H.butterfly(0), H.butterfly(1)]), butterflies = nodes.filter((node) => butterflyGeometry.has(node.geometry)), fireflies = nodes.filter((node) => node.geometry === H.firefly()), embers = nodes.filter((node) => node.geometry === H.ember()), signs = B.labels.map((label) => label.node), undergroundSigns = nodes.filter((node) => node.geometry?.signWidth && node.world[13] < -3), undergroundFires = B.headquarters.lights.map((lamp) => lamp.node), torches = B.props.filter((o) => o.prop === "torch").map((o) => o.node), fires = B.lamps.filter((lamp) => lamp.id === "firepit").map((lamp) => lamp.node), smallPlantGeometry = new Set([H.bush(0), H.bush(1), H.bush(2), H.flowerTuft(), H.grass(), H.vine()]), glowing = nodes.filter((node) => node.matrixLiving), partial = nodes.filter((node) => node.matrixEmissiveLiving), allowed = new Set([...crew, ...trees, B.shell, B.spillEffect.node, ...falling, ...bullets, ...butterflies, ...fireflies, ...embers]), allowedPartial = new Set([...signs, ...undergroundFires, ...torches, ...fires]), hasMixedFaces = (node) => node.geometry.faces.some((face) => face.emissive > 0) && node.geometry.faces.some((face) => !face.emissive); return { active: B.matrixCave.world.active, radius: B.matrixCave.world.radius, origin: Array.from(B.matrixCave.world.origin), crew: [...crew].length > 0 && [...crew].every((node) => node.matrixLiving), trees: [...trees].length > 0 && [...trees].every((node) => node.matrixLiving), bananaPile: !B.core.matrixLiving && !B.core.matrixEmissiveLiving && B.shell.matrixLiving && B.shell.instanceCount > 0 && B.shell.instanceData[18] === 2, spillingBananas: B.spillEffect.node.matrixLiving && B.spillEffect.node.fixedInstanceCapacity && B.spillEffect.node.geometry.faces === bananaGeometry.faces, fallingBananas: falling.size === 96 && [...falling].every((node) => node.matrixLiving), firedBananas: bullets.length === 12 && bullets.every((node) => node.matrixLiving), flyingBees: butterflies.length === 2 && butterflies.every((node) => node.matrixLiving && node.instanceCount > 0 && node.instanceData[18] === 2), fireflies: fireflies.length === 1 && fireflies.every((node) => node.matrixLiving), embers: embers.length === 2 && embers.every((node) => node.matrixLiving), signLetters: signs.length === 3 && signs.every((node) => node.matrixEmissiveLiving && hasMixedFaces(node)) && undergroundSigns.length === 0, torchFires: torches.length === 6 && torches.every((node) => node.matrixEmissiveLiving && hasMixedFaces(node)) && undergroundFires.length === 3 && undergroundFires.every((node) => node.matrixEmissiveLiving && node.geometry.faces.some((face) => face.emissive > 0)), firePit: fires.length === 1 && fires.every((node) => node.matrixEmissiveLiving && node.geometry.faces.every((face) => face.emissive > 0)), smallPlants: nodes.filter((node) => smallPlantGeometry.has(node.geometry)).every((node) => !node.matrixLiving && !node.matrixEmissiveLiving), onlyBrightClasses: glowing.every((node) => allowed.has(node)) && glowing.length === allowed.size && partial.every((node) => allowedPartial.has(node)) && partial.length === allowedPartial.size, inanimate: B.props.filter((o) => ["bush", "flower", "rock", "crate", "barrel", "gate"].includes(o.prop)).every((o) => !o.node.matrixLiving && !o.node.matrixEmissiveLiving), glyphAlphabet: Array.from({ length: 8 }, (_, i) => H.matrixGlyph(i).matrixGlyph === true).every(Boolean), referenceIsolated: B.matrixCave.caves.every((c) => c.sections.every((s) => (s.supports || [s]).every((support) => support.face.matrixLocalGlyphSurface && support.face.matrixCave === c.caveIndex))), brightClasses: B.matrixCave.world.brightClasses, livingNodes: glowing.length, expectedLivingNodes: allowed.size, partialNodes: partial.length, expectedPartialNodes: allowedPartial.size }; })()`);
+  const matrixWorldOutside = await b.evaluate(`(() => { const B = window.__ooga, H = window.BL.hubModels, nodes = [], walk = (node) => { nodes.push(node); for (const child of node.children) walk(child); }; walk(window.BL.scenes.hub.root); const crew = new Set([...B.cavemen.values()].map((cave) => cave.root)), trees = new Set(B.props.filter((o) => o.prop === "tree").map((o) => o.node)), settled = new Set(B.slots.map((slot) => slot.node)), falling = new Set(B.drops.map((slot) => slot.node)), bananaGeometry = window.BL.models.bananaGeometry(), bullets = nodes.filter((node) => node.parent === window.BL.scenes.hub.root && node.geometry === bananaGeometry && !settled.has(node) && !falling.has(node)), butterflyGeometry = new Set([H.butterfly(0), H.butterfly(1)]), butterflies = nodes.filter((node) => butterflyGeometry.has(node.geometry)), fireflies = nodes.filter((node) => node.geometry === H.firefly()), embers = nodes.filter((node) => node.geometry === H.ember()), signs = B.labels.map((label) => label.node), undergroundSigns = nodes.filter((node) => node.geometry?.signWidth && node.world[13] < -3), undergroundFires = B.headquarters.lights.map((lamp) => lamp.node), torches = B.props.filter((o) => o.prop === "torch").map((o) => o.node), fires = B.lamps.filter((lamp) => lamp.id === "firepit").map((lamp) => lamp.node), smallPlantGeometry = new Set([H.bush(0), H.bush(1), H.bush(2), H.flowerTuft(), H.grass(), H.vine()]), glowing = nodes.filter((node) => node.matrixLiving), partial = nodes.filter((node) => node.matrixEmissiveLiving), allowed = new Set([...crew, ...trees, B.shell, B.spillEffect.node, ...falling, ...bullets, ...butterflies, ...fireflies, ...embers]), allowedPartial = new Set([...signs, ...undergroundFires, ...torches, ...fires]), hasMixedFaces = (node) => node.geometry.faces.some((face) => face.emissive > 0) && node.geometry.faces.some((face) => !face.emissive); return { active: B.matrixCave.world.active, radius: B.matrixCave.world.radius, origin: Array.from(B.matrixCave.world.origin), crew: [...crew].length > 0 && [...crew].every((node) => node.matrixLiving), trees: [...trees].length > 0 && [...trees].every((node) => node.matrixLiving), bananaPile: !B.core.matrixLiving && !B.core.matrixEmissiveLiving && B.shell.matrixLiving && B.shell.instanceCount > 0 && B.shell.instanceData[18] === 2, spillingBananas: B.spillEffect.node.matrixLiving && B.spillEffect.node.fixedInstanceCapacity && B.spillEffect.node.geometry.faces === bananaGeometry.faces, fallingBananas: falling.size === 96 && [...falling].every((node) => node.matrixLiving), firedBananas: bullets.length === 12 && bullets.every((node) => node.matrixLiving), flyingBees: butterflies.length === 2 && butterflies.every((node) => node.matrixLiving && node.instanceCount > 0 && node.instanceData[18] === 2), fireflies: fireflies.length === 1 && fireflies.every((node) => node.matrixLiving), embers: embers.length === 2 && embers.every((node) => node.matrixLiving), signLetters: signs.length === 4 && signs.every((node) => node.matrixEmissiveLiving && hasMixedFaces(node)) && undergroundSigns.length === 0, torchFires: torches.length === 8 && torches.every((node) => node.matrixEmissiveLiving && hasMixedFaces(node)) && undergroundFires.length === 3 && undergroundFires.every((node) => node.matrixEmissiveLiving && node.geometry.faces.some((face) => face.emissive > 0)), firePit: fires.length === 1 && fires.every((node) => node.matrixEmissiveLiving && node.geometry.faces.every((face) => face.emissive > 0)), smallPlants: nodes.filter((node) => smallPlantGeometry.has(node.geometry)).every((node) => !node.matrixLiving && !node.matrixEmissiveLiving), onlyBrightClasses: glowing.every((node) => allowed.has(node)) && glowing.length === allowed.size && partial.every((node) => allowedPartial.has(node)) && partial.length === allowedPartial.size, inanimate: B.props.filter((o) => ["bush", "flower", "rock", "crate", "barrel", "gate"].includes(o.prop)).every((o) => !o.node.matrixLiving && !o.node.matrixEmissiveLiving), glyphAlphabet: Array.from({ length: 8 }, (_, i) => H.matrixGlyph(i).matrixGlyph === true).every(Boolean), referenceIsolated: B.matrixCave.caves.every((c) => c.sections.every((s) => (s.supports || [s]).every((support) => support.face.matrixLocalGlyphSurface && support.face.matrixCave === c.caveIndex))), brightClasses: B.matrixCave.world.brightClasses, livingNodes: glowing.length, expectedLivingNodes: allowed.size, partialNodes: partial.length, expectedPartialNodes: allowedPartial.size }; })()`);
   record("mirror world: surface, spilled, falling and fired bananas glow while the supporting dome remains a falling-glyph receiver", !matrixWorldOutside.active && matrixWorldOutside.radius === 0 && matrixWorldOutside.origin.join("|") === "0|0|0" && matrixWorldOutside.crew && matrixWorldOutside.trees && matrixWorldOutside.bananaPile && matrixWorldOutside.spillingBananas && matrixWorldOutside.fallingBananas && matrixWorldOutside.firedBananas && matrixWorldOutside.flyingBees && matrixWorldOutside.fireflies && matrixWorldOutside.embers && matrixWorldOutside.signLetters && matrixWorldOutside.torchFires && matrixWorldOutside.firePit && matrixWorldOutside.smallPlants && matrixWorldOutside.onlyBrightClasses && matrixWorldOutside.inanimate && matrixWorldOutside.glyphAlphabet && matrixWorldOutside.referenceIsolated && matrixWorldOutside.brightClasses === "cavemen|trees|banana-pile|flying-bees|cave-sign-letters|fireflies|fires" && matrixWorldOutside.livingNodes === matrixWorldOutside.expectedLivingNodes && matrixWorldOutside.partialNodes === matrixWorldOutside.expectedPartialNodes, JSON.stringify(matrixWorldOutside));
   const passAtEntry = await b.evaluate(`(() => { const B = window.__ooga, pass = B.mirror.reflectionPassCount; B.matrixCave.viewInside(false); return pass; })()`);
   await rendered(3);
@@ -14821,8 +14857,8 @@ const mirrorCave = ["mirror cave", async (b) => {
   const entranceLighting = await b.evaluate(`new Promise((resolve) => { const B = window.__ooga, sample = () => ({ fixtures: B.entranceLights.map((l) => ({ id: l.id, caveId: l.caveId, kind: l.kind, side: l.side, worldPosition: [...l.worldPosition], factor: l.factor, lit: l.lit, selected: l.selected, approximated: l.approximated })), lighting: { registered: B.lighting.registeredLampCount, active: B.lighting.activeFullLightCount, approximated: B.lighting.approximatedLightCount, capacity: B.lighting.configuredLightCapacity, selected: B.lighting.selectedIds.slice(0, B.lighting.selectedCount), approximateIds: B.lighting.approximatedIds.slice(0, B.lighting.approximatedCount), tier: B.lighting.tier }, lightData: Array.from(B.renderOpts.lights.slice(0, B.renderOpts.lightCount * 8)) }), wait = (frames, done) => { const start = B.renderedFrames, tick = () => B.renderedFrames >= start + frames ? done() : requestAnimationFrame(tick); requestAnimationFrame(tick); }, setView = (id) => { const m = B.mouths.find((v) => v.id === id), o = B.pilot.orbit, target = { x: m.x, y: m.floorY + 1.5, z: m.z }; o.target = target; o.tx = target.x; o.ty = target.y; o.tz = target.z; o.yaw = o.tYaw = m.ry; o.pitch = o.tPitch = 0.15; o.dist = o.tDist = 6; B.pilot.update(0.1); }; B.renderer.setQuality("high"); B.setHour(12, NaN, 80); wait(3, () => { const day = sample(); B.setHour(18.08, NaN, 80); wait(3, () => { const dusk = sample(); B.setHour(22, NaN, 80); setView("c11"); wait(3, () => { const entropy = sample(); setView("c1"); wait(3, () => { const ooga = sample(); B.renderer.setQuality("medium"); wait(3, () => { const medium = sample(); B.renderer.setQuality("low"); wait(3, () => { const low = sample(); B.renderer.setQuality("high"); wait(3, () => resolve({ day, dusk, entropy, ooga, medium, low })); }); }); }); }); }); }); })`);
   const equivalent = (sample) => ["torch:left", "torch:right", "lantern:right"].every((key) => { const [kind, side] = key.split(":"), a = sample.fixtures.find((l) => l.caveId === "c11" && l.kind === kind && l.side === side), z = sample.fixtures.find((l) => l.caveId === "c1" && l.kind === kind && l.side === side); return a && z && Math.abs(a.factor - z.factor) < 1e-8 && a.lit === z.lit; });
   record("entrance lights: both caves fade identically through day, dusk, and night", entranceLighting.day.fixtures.every((l) => !l.lit && l.factor === 0) && entranceLighting.dusk.fixtures.some((l) => l.factor > 0 && l.factor < 1) && equivalent(entranceLighting.day) && equivalent(entranceLighting.dusk) && equivalent(entranceLighting.entropy), JSON.stringify(entranceLighting));
-  const exactProfiles = (sample) => sample.fixtures.every((l) => l.selected && !l.approximated && sample.lighting.selected.includes(l.id) && Array.from({ length: sample.lightData.length / 8 }, (_, i) => i * 8).some((i) => Math.max(Math.abs(sample.lightData[i] - l.worldPosition[0]), Math.abs(sample.lightData[i + 1] - l.worldPosition[1]), Math.abs(sample.lightData[i + 2] - l.worldPosition[2])) < 1e-5));
-  record("entrance lights: all nine fixtures keep simultaneous full local-light profiles on every WebGL tier", [entranceLighting.entropy, entranceLighting.ooga, entranceLighting.medium, entranceLighting.low].every((sample) => sample.lighting.registered === 10 && sample.lighting.active === 10 && sample.lighting.approximated === 0 && sample.lighting.capacity === 10 && sample.lighting.selected.length === 10 && sample.lighting.selected.includes("firepit") && exactProfiles(sample)), JSON.stringify(entranceLighting));
+  const exactProfiles = (sample) => sample.fixtures.every((l) => (l.approximated ? !l.selected && sample.lighting.approximateIds.includes(l.id) : l.selected && !l.approximated && sample.lighting.selected.includes(l.id) && Array.from({ length: sample.lightData.length / 8 }, (_, i) => i * 8).some((i) => Math.max(Math.abs(sample.lightData[i] - l.worldPosition[0]), Math.abs(sample.lightData[i + 1] - l.worldPosition[1]), Math.abs(sample.lightData[i + 2] - l.worldPosition[2])) < 1e-5)));
+  record("entrance lights: twelve fixtures retain ten exact point lights and bounded emissive overflow on every WebGL tier", [entranceLighting.entropy, entranceLighting.ooga, entranceLighting.medium, entranceLighting.low].every((sample) => sample.lighting.registered === 13 && sample.lighting.active === 10 && sample.lighting.approximated === 3 && sample.lighting.capacity === 10 && sample.lighting.selected.length === 10 && sample.lighting.approximateIds.join("|") === "c1:torch:right|c1:lantern:right|firepit" && exactProfiles(sample)), JSON.stringify(entranceLighting));
   record("entrance lights: camera movement cannot exchange or reorder the fixed light set", entranceLighting.entropy.lighting.selected.join("|") === entranceLighting.ooga.lighting.selected.join("|") && entranceLighting.entropy.lightData.every((v, i) => v === entranceLighting.ooga.lightData[i]), JSON.stringify({ entropy: entranceLighting.entropy.lighting, ooga: entranceLighting.ooga.lighting }));
   await b.evaluate(`window.__ooga.matrixCave.viewInside(false)`);
   // The lighting views above leave the cave and retract its wave. Wait for
@@ -14874,7 +14910,7 @@ const mirrorCave = ["mirror cave", async (b) => {
     };
     requestAnimationFrame(tick);
   })`);
-  record("mirror cave: scene cycling and context restoration release and recreate a fixed resource set", cycled.lab.scene === "lab" && !cycled.lab.active && cycled.lab.resources === 0 && cycled.hub.scene === "hub" && cycled.hub.active && cycled.hub.resources === 6 && cycled.hub.entranceLights === 9 && cycled.hub.registered && restored.before.resources === 6 && restored.after.resources === 6 && restored.after.records === restored.after.visible && restored.after.records > 0 && Math.max(restored.after.width, restored.after.height) <= 512, JSON.stringify({ cycled, restored }));
+  record("mirror cave: scene cycling and context restoration release and recreate a fixed resource set", cycled.lab.scene === "lab" && !cycled.lab.active && cycled.lab.resources === 0 && cycled.hub.scene === "hub" && cycled.hub.active && cycled.hub.resources === 6 && cycled.hub.entranceLights === 12 && cycled.hub.registered && restored.before.resources === 6 && restored.after.resources === 6 && restored.after.records === restored.after.visible && restored.after.records > 0 && Math.max(restored.after.width, restored.after.height) <= 512, JSON.stringify({ cycled, restored }));
   record("mirror interior: scene cycling rebuilds the same bounded deterministic surface registry", cycled.hub.matrix.hash === matrixBefore.hash && cycled.hub.matrix.capacity === matrixBefore.capacity && cycled.hub.matrix.buffers === 8 && cycled.hub.matrix.allocations === 8 && cycled.hub.matrix.rebuilds === 1, JSON.stringify({ before: { hash: matrixBefore.hash, capacity: matrixBefore.capacity }, after: cycled.hub.matrix }));
 }];
 
@@ -14884,7 +14920,7 @@ const mirrorCanvas = () => withPage("mirror canvas fallback", hubPage(src, "canv
   const canvasPanel = await b.evaluate(`(() => { const B = window.__ooga, rim = B.mirrorCave.rim.geometry, original = window.BL.hubModels.caveMouthRim(); return { vertices: rim.verts === original.verts, faces: rim.faces.length === original.faces.length && rim.faces.every((face, i) => face.i === original.faces[i].i && face.color === original.faces[i].color), rear: rim.faces.filter((face) => face.i.every((i) => rim.verts[i * 3 + 2] === -0.5)).length, noRoom: !("room" in B.mirrorCave) }; })()`);
   record("mirror canvas fallback: the original stone rim is complete and no artificial room replaces the terrain", canvasPanel.vertices && canvasPanel.faces && canvasPanel.rear === 18 && canvasPanel.noRoom, JSON.stringify(canvasPanel));
   const canvasLights = await b.evaluate(`(() => { const B = window.__ooga; return { count: B.entranceLights.length, registered: B.entranceLights.every((l) => l.registered), lit: B.entranceLights.every((l) => l.lit && l.factor > 0.9), pointLights: B.renderOpts.lightCount, lighting: { registered: B.lighting.registeredLampCount, active: B.lighting.activeFullLightCount, approximated: B.lighting.approximatedLightCount, capacity: B.lighting.configuredLightCapacity, ids: B.lighting.approximatedIds.slice(0, B.lighting.approximatedCount), tier: B.lighting.tier } }; })()`);
-  record("entrance lights: Canvas fallback draws all emissive fixtures without point-light resources", canvasLights.count === 9 && canvasLights.registered && canvasLights.lit && canvasLights.pointLights === 0 && canvasLights.lighting.registered === 10 && canvasLights.lighting.active === 0 && canvasLights.lighting.approximated === 10 && canvasLights.lighting.capacity === 0 && canvasLights.lighting.ids.length === 10 && canvasLights.lighting.tier === "canvas2d", JSON.stringify(canvasLights));
+  record("entrance lights: Canvas fallback draws all emissive fixtures without point-light resources", canvasLights.count === 12 && canvasLights.registered && canvasLights.lit && canvasLights.pointLights === 0 && canvasLights.lighting.registered === 13 && canvasLights.lighting.active === 0 && canvasLights.lighting.approximated === 13 && canvasLights.lighting.capacity === 0 && canvasLights.lighting.ids.length === 13 && canvasLights.lighting.tier === "canvas2d", JSON.stringify(canvasLights));
   record("dynamic path: Canvas fallback renders the same immutable million-banana network", r.path.active && r.path.inner === 7.25 && r.path.outer === 8.75 && r.path.count > 0 && r.path.count <= r.path.capacity && r.path.masterMaskBuildCount === 1 && r.path.masterMaskHash === pathMasterHash, JSON.stringify(r.path));
   record("dynamic scenery: Canvas fallback starts large with the same deterministic registry", r.scenery.candidateCount === 367 && r.scenery.visibleCount > 0 && r.scenery.signature === scenerySignature, JSON.stringify({ candidateCount: r.scenery.candidateCount, visibleCount: r.scenery.visibleCount, radiusCulledCount: r.scenery.radiusCulledCount, pathCulledCount: r.scenery.pathCulledCount }));
   await b.evaluate(`window.__ooga.matrixCave.viewApproach()`);
@@ -14939,8 +14975,8 @@ const matrixNavigation = (backend) => withPage(`cave camera ${backend}`, hubPage
   const entered = (p) => p.requested[1] < 0.499, left = (p) => p.requested[1] > 0.501;
   const routes = r.cases.map((c) => ({ id: c.id, active: c.active, samples: c.route.map((p) => ({ requested: p.requested, actual: p.actual, error: p.error, id: p.id, contains: p.contains, matrixInside: p.matrixInside, active: p.active })) }));
   record(`${label}: raw free orbit keeps exact requested views through floors, side walls and roofs`, r.raw.length === 24 && r.raw.every((p) => p.mode === "orbit" && p.near === 0.1 && p.actual.every((v, i) => Math.abs(v - p.requested[i]) < 0.00001)), JSON.stringify(r.raw));
-  record(`${label}: first-person entry and exit follow every occupied aperture and both real HQ ramps`, r.openings === 8 && r.occupied === 5 && r.cases.length === 10 && r.cases.every((c) => c.route.every((p) => p.mode === "eye-level" && p.error < 0.001 && (entered(p) ? p.id === c.id && p.contains : left(p) ? p.index === 0 : true))), JSON.stringify(routes));
-  record(`${label}: all three unused cave mouths still reject a physical low crossing`, r.sealed.length === 3 && r.sealed.map((s) => s.id).sort().join("|") === "c10|c2|c3" && r.sealed.every((s) => s.before.index === 0 && s.after.index === 0 && !s.after.contains && s.after.actual[2] >= 0.499 && s.after.error > 0.39 && s.after.clear), JSON.stringify(r.sealed));
+  record(`${label}: first-person entry and exit follow every occupied aperture and both real HQ ramps`, r.openings === 8 && r.occupied === 6 && r.cases.length === 12 && r.cases.every((c) => c.route.every((p) => p.mode === "eye-level" && p.error < 0.001 && (entered(p) ? p.id === c.id && p.contains : left(p) ? p.index === 0 : true))), JSON.stringify(routes));
+  record(`${label}: both unused cave mouths still reject a physical low crossing`, r.sealed.length === 2 && r.sealed.map((s) => s.id).sort().join("|") === "c2|c3" && r.sealed.every((s) => s.before.index === 0 && s.after.index === 0 && !s.after.contains && s.after.actual[2] >= 0.499 && s.after.error > 0.39 && s.after.clear), JSON.stringify(r.sealed));
   record(`${label}: rotated apron slivers preserve physical lateral entry and exit on both sides of every cave`, r.cases.every((c) => c.lateral.length === 4 && c.lateral.every((path) => path.route.every((p) => p.error < 0.001 && p.clear && Math.abs(p.actual[0] - path.x) < 0.001 && (entered(p) ? p.id === c.id && p.contains : p.index === 0)))), JSON.stringify(r.cases.map((c) => ({ id: c.id, active: c.active, lateral: c.lateral }))));
   record(`${label}: touching the exact entrance plane preserves the grounded eye and the following crossing`, r.cases.every((c) => c.route.filter((p) => p.requested[1] === 0.5).length === 2 && c.route.filter((p) => p.requested[1] === 0.5).every((p) => Math.abs(p.actual[1] - 1.1) < 0.001) && c.route.filter((p) => p.requested[1] === 0.4).every((p) => p.id === c.id) && c.route.filter((p) => p.requested[1] === 0.6).every((p) => p.index === 0)), JSON.stringify(routes));
   record(`${label}: the Mirror portal follows physical ownership while the button keeps the full wave active`, r.cases.every((c) => c.route.every((p) => (entered(p) ? p.matrixInside === (c.id === "c1") : left(p) ? !p.matrixInside : true) && (!c.active || p.active)) && (!c.active && c.id !== "c1" ? c.route.every((p) => !p.active) : true)), JSON.stringify(routes));
@@ -15014,8 +15050,9 @@ const matrixWave = (backend) => [`matrix reversible wave ${backend}`, async (b) 
   record(`${label}: the closed Mirror Cave stays populated while a viewer crossing starts the world at the pile center`, permanent >= 0 && r.start.radius === 0 && !r.start.active && r.start.caves.every((c, i) => i === permanent ? c.count > 0 && c.drawn > 0 : c.count === 0 && c.drawn === 0) && r.entryCrossing.inside && r.entryCrossing.active && r.entryCrossing.radius === 0 && r.entryCrossing.direction === 1 && !r.entryCrossing.nodePortal && r.entryCrossing.nodeReveal === 0 && !r.entered.portal && r.entered.reveal === 0 && r.entered.radius > 0 && r.entered.radius < r.mirrorDistance && r.entered.direction === 1 && r.entered.caves[permanent].updates > r.start.caves[permanent].updates, JSON.stringify({ permanent, start: r.start, crossing: r.entryCrossing, entered: r.entered }));
   const revealSlope = (a, z) => Math.abs((z.reveal - a.reveal) * r.mirrorHeight - (z.radius - a.radius)) < 1e-6;
   record(`${label}: the mirror waits for the global glyph front, then wipes bottom-to-top at its 72-unit travel rate`, r.mirrorHeight === 3.25 && r.mirrorWaiting.radius < r.mirrorDistance && r.mirrorWaiting.reveal === 0 && r.mirrorWaiting.nodeReveal === 0 && !r.mirrorWaiting.portal && r.mirrorWaiting.surfaceDrawn && r.mirrorStarted.radius > r.mirrorDistance && r.mirrorStarted.reveal > 0 && r.mirrorStarted.reveal < 1 && r.mirrorStarted.reveal === r.mirrorStarted.nodeReveal && !r.mirrorStarted.portal && r.mirrorStarted.surfaceDrawn && r.mirrorContinuing.reveal > r.mirrorStarted.reveal && revealSlope(r.mirrorStarted, r.mirrorContinuing) && r.mirrorGone.reveal === 1 && r.mirrorGone.nodeReveal === 1 && r.mirrorGone.portal && !r.mirrorGone.surfaceDrawn, JSON.stringify({ distance: r.mirrorDistance, height: r.mirrorHeight, waiting: r.mirrorWaiting, started: r.mirrorStarted, continuing: r.mirrorContinuing, gone: r.mirrorGone }));
+  // DSB intentionally adds the sixth hub gate; every gate must start exactly once.
   const gateSamples = [r.start, r.mirrorWaiting, r.mirrorStarted, r.mirrorContinuing, r.mirrorGone, r.expanded, r.gatesClosed];
-  record(`${label}: each occupied cave's bars begin descending at the glyph front and move continuously to the floor`, r.gateMotion.samples > 0 && !r.gateMotion.failures.length && r.gateMotion.maxStep <= r.gateSpeed * r.dt + 1e-8 && r.gateMotion.starts.length === 5 && r.gateMotion.starts.every((gate) => gate.radius >= gate.distance && gate.radius < gate.distance + r.speed * r.dt + 1e-8 && Math.abs(gate.step - r.gateSpeed * r.dt) < 1e-8) && r.start.gates.items.every((gate) => gate.y === r.start.gates.hidden) && r.mirrorContinuing.gates.items.some((gate) => gate.y > r.mirrorContinuing.gates.visible && gate.y < r.mirrorContinuing.gates.hidden) && r.gatesClosed.gates.items.every((gate) => gate.y === r.gatesClosed.gates.visible), JSON.stringify({ motion: r.gateMotion, samples: gateSamples.map((sample) => ({ radius: sample.radius, active: sample.active, gates: sample.gates })) }));
+  record(`${label}: each occupied cave's bars begin descending at the glyph front and move continuously to the floor`, r.gateMotion.samples > 0 && !r.gateMotion.failures.length && r.gateMotion.maxStep <= r.gateSpeed * r.dt + 1e-8 && r.start.gates.items.length === 6 && r.gateMotion.starts.length === 6 && r.start.gates.items.every((gate) => r.gateMotion.starts.filter((start) => start.cave === gate.cave).length === 1) && r.gateMotion.starts.every((gate) => gate.radius >= gate.distance && gate.radius < gate.distance + r.speed * r.dt + 1e-8 && Math.abs(gate.step - r.gateSpeed * r.dt) < 1e-8) && r.start.gates.items.every((gate) => gate.y === r.start.gates.hidden) && r.mirrorContinuing.gates.items.some((gate) => gate.y > r.mirrorContinuing.gates.visible && gate.y < r.mirrorContinuing.gates.hidden) && r.gatesClosed.gates.items.every((gate) => gate.y === r.gatesClosed.gates.visible), JSON.stringify({ motion: r.gateMotion, samples: gateSamples.map((sample) => ({ radius: sample.radius, active: sample.active, gates: sample.gates })) }));
   record(`${label}: removal and expansion retain their 72-unit speeds while reentry resumes the interrupted wave`, r.speed === 72 && r.retreatSpeed === 72 && !r.exit.inside && r.exit.direction === -1 && r.exit.active && slope(r.beforeExit, r.exit, -r.retreatSpeed) && slope(r.exit, r.reverse, -r.retreatSpeed) && r.partialReentryCrossing.inside && r.partialReentryCrossing.radius === r.reverse.radius && r.partialReentryCrossing.direction === 1 && slope(r.partialReentryCrossing, r.reentry, r.speed) && r.reentry.direction === 1 && r.resumed.radius > r.reentry.radius && r.resumed.radius < r.maxRadius && r.resumed.direction === 1, JSON.stringify({ speed: r.speed, retreatSpeed: r.retreatSpeed, beforeExit: r.beforeExit.radius, exit: r.exit.radius, reverse: r.reverse.radius, crossing: r.partialReentryCrossing.radius, reentry: r.reentry.radius, resumed: r.resumed.radius }));
   const immediateExits = [[r.beforeExit, r.partialCrossing, r.exit, r.partialMirror], [r.beforeFullExit, r.fullCrossing, r.fullExit, r.fullMirror]];
   record(`${label}: crossing just outside keeps or restores the closed mirror on the first frame`, immediateExits.every(([before, crossing, exit, mirror]) => before.inside && !before.nodePortal && !crossing.inside && !crossing.nodePortal && crossing.radius === before.radius && Math.abs(crossing.entranceZ - 0.52) < 0.00001 && exit.active && exit.direction === -1 && slope(before, exit, -r.retreatSpeed) && !exit.portal && !exit.nodePortal && exit.caves[permanent].count > 0 && exit.caves[permanent].drawn > 0 && mirror.drawn && !mirror.portal && mirror.surfaceDrawn && (backend === "canvas2d" ? mirror.faux && mirror.captures === 0 : !mirror.faux && mirror.captures === 1)), JSON.stringify(immediateExits.map(([before, crossing, exit, mirror]) => ({ before: before.radius, crossing: { radius: crossing.radius, z: crossing.entranceZ, inside: crossing.inside, nodePortal: crossing.nodePortal }, exit: { radius: exit.radius, portal: exit.portal, caves: exit.caves.map((c) => c.count) }, mirror }))));
@@ -15135,9 +15172,9 @@ const matrixGateClipping = () => withPage("matrix gate clipping", hubPage(src), 
   const mirror = await b.evaluate(`(${mirrorGateClipProbe.toString()})()`);
   record("matrix gates: the custom mirror silhouette excludes stored bars and clips partial gates exactly at the doorway", mirror.samples.length === 8 && mirror.failures.length === 0 && mirror.disposed, JSON.stringify(mirror));
   const lifecycle = await b.evaluate(`(() => { const B = window.__ooga, G = B.matrixGate, scene = window.BL.scenes.hub, rim = window.BL.hubModels.caveMouthRim().openingBounds, initial = G.gates.map((gate) => { const mouth = B.mouths.find((mouth) => mouth.id === B.matrixCave.caves.find((cave) => cave.caveIndex === gate.caveIndex).id); return { hidden: !gate.node.visible && gate.node.position.y === G.hiddenHeight, floor: gate.node.geometry.clipMinY, ceiling: gate.node.geometry.clipMaxY, mouthFloor: mouth.floorY + rim.floorY, mouthCeiling: mouth.floorY + rim.ceilingY }; }); let time = B.renderOpts.matrix.time; G.set(true); for (const gate of G.gates) gate.node.position.y = 1.7; scene.update(1 / 60, time += 1 / 60); const partial = G.gates.map((gate) => ({ visible: gate.node.visible, y: gate.node.position.y })); for (let i = 0; i < 40; i++) scene.update(1 / 60, time += 1 / 60); return { initial, partial, hiddenHeight: G.hiddenHeight, overhead: G.gates.every((gate) => !gate.node.visible && gate.node.position.y === G.hiddenHeight) }; })()`);
-  record("matrix gates: each doorway clips at its actual floor and ceiling, keeps partial rises visible, and suppresses stored overhead nodes", lifecycle.initial.length === 5 && lifecycle.initial.every((gate) => gate.hidden && gate.floor === gate.mouthFloor && gate.ceiling === gate.mouthCeiling) && lifecycle.partial.every((gate) => gate.visible && gate.y > 1.7 && gate.y < lifecycle.hiddenHeight) && lifecycle.overhead, JSON.stringify(lifecycle));
+  record("matrix gates: each doorway clips at its actual floor and ceiling, keeps partial rises visible, and suppresses stored overhead nodes", lifecycle.initial.length === 6 && lifecycle.initial.every((gate) => gate.hidden && gate.floor === gate.mouthFloor && gate.ceiling === gate.mouthCeiling) && lifecycle.partial.every((gate) => gate.visible && gate.y > 1.7 && gate.y < lifecycle.hiddenHeight) && lifecycle.overhead, JSON.stringify(lifecycle));
   const motion = await b.evaluate(`(${matrixGateAnimationProbe.toString()})()`);
-  record("matrix gates: releasing the button lowers every gate at the same smooth speed as opening, including mid-motion reversals", motion.length === 2 && motion.every((r) => r.count === 5 && r.inside && r.settled && [r.down, r.up].every((m) => m.complete && m.monotonic && m.visibility && m.intermediate > 50 && m.start.every((y, i) => y === m.immediate[i]) && m.duration >= 1 - r.dt && m.duration <= 1 + r.dt * 1.01 && m.maxStep <= 3.2 * r.dt + 1e-7) && Math.abs(r.down.maxStep - r.up.maxStep) < 1e-7 && r.reversal.rising.every((y, i) => y === r.reversal.release[i] && r.reversal.falling[i] < y && r.reversal.falling[i] === r.reversal.press[i] && r.reversal.reversed[i] > r.reversal.press[i])), JSON.stringify(motion));
+  record("matrix gates: releasing the button lowers every gate at the same smooth speed as opening, including mid-motion reversals", motion.length === 2 && motion.every((r) => r.count === 6 && r.inside && r.settled && [r.down, r.up].every((m) => m.complete && m.monotonic && m.visibility && m.intermediate > 50 && m.start.every((y, i) => y === m.immediate[i]) && m.duration >= 1 - r.dt && m.duration <= 1 + r.dt * 1.01 && m.maxStep <= 3.2 * r.dt + 1e-7) && Math.abs(r.down.maxStep - r.up.maxStep) < 1e-7 && r.reversal.rising.every((y, i) => y === r.reversal.release[i] && r.reversal.falling[i] < y && r.reversal.falling[i] === r.reversal.press[i] && r.reversal.reversed[i] > r.reversal.press[i])), JSON.stringify(motion));
   record("matrix gates: initial wave arrival and early button release both wait for the front then descend smoothly", motion.length === 2 && motion.every((r) => r.initialAppearance.inactive && r.initialAppearance.appeared === r.count && r.initialAppearance.complete && r.initialAppearance.monotonic && r.initialAppearance.intermediate > 50 && r.initialAppearance.firstStep.every((step) => Math.abs(step - 3.2 * r.dt) < 1e-7) && r.initialAppearance.maxStep <= 3.2 * r.dt + 1e-7 && r.early.releasedBeforeFront && r.early.hidden && r.early.complete && r.early.monotonic && r.early.visibility && r.early.waiting.every((frames) => frames > 0) && r.early.intermediate.every((frames) => frames > 10) && r.early.firstStep.every((step) => Math.abs(step - 3.2 * r.dt) < 1e-7) && r.early.maxStep <= 3.2 * r.dt + 1e-7), JSON.stringify(motion.map(({ dt, initialAppearance, early }) => ({ dt, initialAppearance, early }))));
   for (const backend of ["webgl2", "canvas2d"]) {
     const clipping = await b.evaluate(`(${matrixGateClipProbe.toString()})(${JSON.stringify(backend)})`);
@@ -15675,7 +15712,7 @@ const headquarters = () => withPage("headquarters", hubPage(src), async (b) => {
   record("headquarters: both smooth ramps begin descending at the cave threshold and curve along the island shell", routes.samples.length === 2 && routes.samples.every((r) => Math.abs(r.first) < 0.001 && r.next < -0.001 && r.last === -7 && r.cavities && r.entranceGap < 0.3 && r.maxDrop < 0.1 && r.uphill === 0 && r.plateaus === 0 && r.fractional > 128 && r.angle > 1 && r.length > r.direct * 1.05 && r.outer > 21 && r.inner < built.floor.radius) && routes.slopedFaces > 100, JSON.stringify({ ramps: routes.samples, faces: routes.rampFaces, slopedFaces: routes.slopedFaces }));
   record("headquarters: the path runs across each entrance face without turning into the cave or down its ramp", routes.fronts.every((front) => front.along.every(Boolean) && front.into.every((cell) => !cell)), JSON.stringify(routes.fronts));
   record("headquarters: the lower chamber has a continuous circular walkable floor", routes.circle.every(Boolean), JSON.stringify(routes.circle));
-  record("headquarters: all seven upper caves retain flat floors, connected entrances and their enclosing stone", routes.rooms.length === 7 && routes.rooms.every((r) => r.connected && (r.nook ? r.walls.length === 3 && r.walls.every((wall) => wall.solid && wall.outsideFlare) : r.wall) && r.floorSamples >= (r.nook ? 143 : 81) && r.floorErrors.length === 0), JSON.stringify(routes.rooms));
+  record("headquarters: all seven upper caves retain flat floors, connected entrances and their enclosing stone", routes.rooms.length === 7 && routes.rooms.every((r) => r.connected && (r.nook ? r.walls.length === 2 && r.walls.every((wall) => wall.solid && wall.outsideFlare) : r.wall) && r.floorSamples >= (r.nook ? 143 : 81) && r.floorErrors.length === 0), JSON.stringify(routes.rooms));
   const basement = await b.evaluate(`(${headquartersBasementProbe.toString()})()`);
   record("headquarters: a second common floor uses the minimum depth that preserves full height and rock beneath the upper HQ", basement.height === 4.25 && basement.radius === 9 && basement.floor < -11 && basement.upperFloor === -7 && basement.upperSupport === -7 && basement.ceiling <= basement.requiredCeiling + 1e-7 && basement.requiredCeiling - basement.ceiling < basement.unit + 1e-7 && basement.rockCover >= 0.75, JSON.stringify(basement));
   record("headquarters: eight unclaimed basement rooms have flat floors, clear connected corridors, exterior windows and solid separating rock", basement.rooms.length === 8 && basement.rooms.every((room, i) => room.index === i && room.basement && room.floor === basement.floor && room.ceiling === basement.ceiling && room.radius === 18 && room.width === 5 && room.depth === 5 && room.floorSamples >= 289 && room.corridorSamples > 40 && room.walls.every(Boolean) && room.windowFloor === basement.floor && room.resident === null) && basement.commonSamples > 500 && basement.rockSamples > 10000 && basement.failures.length === 0, JSON.stringify({ rooms: basement.rooms, commonSamples: basement.commonSamples, rockSamples: basement.rockSamples, failures: basement.failures }));
@@ -17126,6 +17163,10 @@ const racePhone = () => withPage("race phone", racePage(src), async (b) => {
   await b.sleep(4200);
   const race = await b.evaluate(`(() => { const B = window.__ooga; const act = document.getElementById("act"), item = document.getElementById("item-btn"), strip = document.querySelector(".race-hud-right").getBoundingClientRect(); return { phase: B.race.phase, act: !act.hidden && act.textContent, item: !item.hidden && item.textContent, stripFits: strip.right <= window.innerWidth && strip.left >= 0, sticks: getComputedStyle(document.getElementById("joy-move")).display, speedHidden: getComputedStyle(document.querySelector(".race-speed")).display === "none" }; })()`);
   await b.evaluate(isolate(0));
+  const enable = await b.evaluate(`(() => { const r = document.getElementById("dsb-start-audio").getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; })()`);
+  await b.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [enable] });
+  await b.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+  await untilPage(b, "B.audio.ready", 10000);
   const stick = await b.evaluate(`(() => { const r = document.getElementById("joy-move").getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; })()`);
   const heading = () => b.evaluate("window.__ooga.racers.player.heading");
   const h0 = await heading();
@@ -17297,6 +17338,10 @@ const dropPhone = () => withPage("drop phone", dropPage(src), async (b) => {
   await b.sleep(800);
   const climb = await b.evaluate(`(() => { const B = window.__ooga; const act = document.getElementById("act"), strip = document.querySelector(".race-hud-right").getBoundingClientRect(); return { phase: B.drop.phase, act: !act.hidden && act.textContent, stripFits: strip.right <= window.innerWidth && strip.left >= 0, sticks: getComputedStyle(document.getElementById("joy-move")).display, look: getComputedStyle(document.getElementById("joy-look")).display }; })()`);
   await b.evaluate(`(() => { const B = window.__ooga; B.drop.jumpNow(); const s = B.diver.state; s.p.y = 900; s.v.x = s.v.z = 0; s.v.y = -20; B.drop.simulate(4); })()`);
+  const enable = await b.evaluate(`(() => { const r = document.getElementById("dsb-start-audio").getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; })()`);
+  await b.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [enable] });
+  await b.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+  await untilPage(b, "B.audio.ready", 10000);
   const stick = await b.evaluate(`(() => { const r = document.getElementById("joy-move").getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; })()`);
   const flat = await b.evaluate(`Array.from(window.__ooga.diver.state.front).map((v) => +v.toFixed(2))`);
   await b.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ x: stick.x, y: stick.y }] });
@@ -17621,6 +17666,398 @@ const IN_LANE = {
 if (!IN_LANE) throw new Error(`Unknown LANE "${LANE}" (unit | fast | canvas | soak | perf | full)`);
 const tasks = [];
 const task = (name, run, opts = {}) => tasks.push({ name, run, ...opts });
+const dsbExit = async (b) => {
+  await b.evaluate(`__ooga.pilot.navigate({ yaw: 0, pitch: 0, dist: 6, target: { x: -7, y: 1.7, z: 30.5 }, position: { x: -7, y: 0, z: 30.5 } }); __ooga.advance(0.1); document.getElementById("dsb-context").click();`);
+  await untilPage(b, 'B.scene === "hub" && !B.transitioning', 15000);
+};
+for (const fallback of [false, true]) task("dsb gameplay " + (fallback ? "canvas2d" : "webgl2"), () => withPage("dsb gameplay " + (fallback ? "canvas2d" : "webgl2"), hubPage(dist, "scene=dsb" + (fallback ? "&canvas2d=1" : "")), async (b) => {
+  const click = async (selector) => { const p = await b.evaluate(`(() => { const e = document.querySelector(${JSON.stringify(selector)}); e.scrollIntoView({ block: "center" }); const r = e.getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2, hits: e.contains(document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2)) }; })()`); if (!p.hits) throw Error("Blocked pointer: " + selector); await b.click(p.x, p.y); };
+  const walkTo = async (x, z) => b.evaluate(`__ooga.pilot.navigate({ yaw: 0, pitch: 0.2, dist: 7, target: { x: ${x}, y: 1.7, z: ${z} }, position: { x: ${x}, y: 0, z: ${z} } }); __ooga.advance(0.15);`);
+  await b.send("Emulation.setEmulatedMedia", { features: [{ name: "prefers-reduced-motion", value: "reduce" }] });
+  await b.key("m"); await untilPage(b, "B.audio.ready", 10000);
+  if (process.env.DSB_CAPTURE && !fallback) await b.screenshot(join(root, "untracked", "dsb-round-tunnel.png"));
+  await b.evaluate(`window.dispatchEvent(new KeyboardEvent("keydown", { key: "w" })); __ooga.advance(__ooga.audio.duration + 1, 0.1); window.dispatchEvent(new KeyboardEvent("keyup", { key: "w" }));`);
+  const bodies = await b.evaluate(`({ phase: __ooga.dsb.phase, name: __ooga.dsb.avatar.traits.name, face: __ooga.dsb.avatar.traits.yellowFace, feet: __ooga.dsb.avatar.root.position.y - __ooga.dsb.avatar.baseY, npcFeet: __ooga.dsb.visitors.every(v => Math.abs(v.root.position.y - v.baseY - v.floorY) < 0.001), railMin: Math.min(...__ooga.dsb.railY), radius: Math.hypot(__ooga.dsb.land.cart.position.x, __ooga.dsb.land.cart.position.z) })`);
+  record("dsb gameplay: hub Yellow stands on the floor; perimeter track clears the cave", bodies.phase === "land" && bodies.name === "YellowBrokeIt" && bodies.face && Math.abs(bodies.feet) < 0.001 && bodies.npcFeet && bodies.railMin >= 7.5 && Math.abs(bodies.radius - 31) < 0.01, JSON.stringify(bodies));
+  await click("#dsb-toggle");
+  record("dsb menu: hide leaves a show button", await b.evaluate(`document.getElementById("dsb-toggle").textContent === "Show DSB menu" && getComputedStyle(document.getElementById("dsb-bag")).display === "none"`));
+  await click("#dsb-toggle");
+  record("dsb menu: show restores contents", await b.evaluate(`document.getElementById("dsb-toggle").textContent === "Hide DSB menu" && getComputedStyle(document.getElementById("dsb-bag")).display !== "none"`));
+  await walkTo(12, 12);
+  const facing = await b.evaluate(`(() => { const rows = []; for (const key of ["w", "s"]) { window.dispatchEvent(new KeyboardEvent("keydown", { key })); __ooga.advance(0.3); const before = __ooga.dsb.avatar.root.rotation.y; window.dispatchEvent(new KeyboardEvent("keyup", { key })); __ooga.advance(0.8); rows.push({ before, after: __ooga.dsb.avatar.root.rotation.y }); } return rows; })()`);
+  record("dsb walking: forward and backward stops preserve facing", facing.every(r => Math.abs(r.before - r.after) < 0.001) && Math.cos(facing[0].before - facing[1].before) < -0.9, JSON.stringify(facing));
+  await walkTo(-10, 17);
+  if (process.env.DSB_CAPTURE && !fallback) await b.screenshot(join(root, "untracked", "dsb-standing-yellow.png"));
+  record("dsb gameplay: Use TV appears nearby", await b.evaluate(`!document.getElementById("dsb-context").hidden && document.getElementById("dsb-context").textContent === "Use TV"`));
+  await click("#dsb-context"); await click("#dsb-tv-channel");
+  record("dsb gameplay: real mouse clicks open the TV channel", await b.evaluate(`document.getElementById("dsb-tv").open && !document.getElementById("dsb-tv-radio").hidden`));
+  record("dsb TV: submenu hides channel choices", await b.evaluate(`getComputedStyle(document.getElementById("dsb-tv-menu")).display === "none"`));
+  await click("#dsb-tv-back");
+  record("dsb TV: back restores the five choices", await b.evaluate(`!document.getElementById("dsb-tv-menu").hidden && document.getElementById("dsb-tv-radio").hidden && document.querySelectorAll("#dsb-tv-menu button").length === 5`));
+  await click("#dsb-tv-channel");
+  await b.evaluate(`document.getElementById("dsb-tv-query").value = "Ooga"`); await click("#dsb-tv-search"); await untilPage(b, 'document.querySelector("#dsb-tv-results button") !== null');
+  await click("#dsb-tv-results button"); await untilPage(b, '!document.getElementById("dsb-tv-invoice").hidden');
+  record("dsb gameplay: song selection creates one invoice QR and wallet link", await b.evaluate(`__dsbTvFixture.invoices === 1 && document.getElementById("dsb-tv-invoice-qr").width > 200 && document.getElementById("dsb-tv-wallet").href.startsWith("lightning:lnbc") && document.getElementById("dsb-tv-price").textContent.includes("21 sats")`));
+  record("dsb gameplay: station payment confirmation is shown", await untilPage(b, 'document.getElementById("dsb-tv-payment-status").textContent.includes("confirmed")', 10000));
+  if (process.env.DSB_CAPTURE && !fallback) await b.screenshot(join(root, "untracked", "dsb-jukebox.png"));
+  await click("#dsb-tv-close"); await walkTo(-20, 17); await click("#dsb-context"); await click('[data-action="dsb-banana"]'); await click('[data-action="dsb-tomato"]');
+  const bought = await b.evaluate(`__ooga.dsb.inventory`); record("dsb gameplay: real shop clicks add a banana and tomato", bought.bananas === 1 && bought.tomatoes === 1 && bought.tokens === 18, JSON.stringify(bought));
+  await click('[data-action="dsb-close-shop"]'); await click('[data-action="dsb-throw"]');
+  const projectile = await b.evaluate(`(() => {
+    const B = __ooga, geometry = BL.dsbModels.cube("#ef4256"), node = B.dsb.land.root.children.find(n => n.geometry === geometry && n.visible);
+    if (!node) return { created: false };
+    const start = { ...node.position }, screen = B.project(start.x, start.y, start.z), inventory = B.dsb.inventory.tomatoes;
+    B.advance(0.12); const moved = Math.hypot(node.position.x - start.x, node.position.z - start.z);
+    B.advance(0.8); const splat = node.visible && node.position.y === 0.04 && node.scale.y === 0.06;
+    B.advance(1.5); return { created: true, inventory, visibleInView: screen.x >= 0 && screen.x <= innerWidth && screen.y >= 0 && screen.y <= innerHeight, moved, splat, expired: !node.visible && B.dsb.shots === 0 };
+  })()`);
+  record("dsb gameplay: throwing consumes inventory and creates a visible moving tomato that splats and expires", projectile.created && projectile.inventory === 0 && projectile.visibleInView && projectile.moved > 1 && projectile.splat && projectile.expired, JSON.stringify(projectile));
+  await b.key("b"); record("dsb gameplay: banana can be eaten", await b.evaluate(`__ooga.dsb.inventory.bananas === 0`));
+  for (const kind of ["boat", "coaster"]) {
+    await walkTo(kind === "boat" ? 0 : 7, kind === "boat" ? 34 : 24);
+    const trip = kind === "boat" ? "boatTrip" : "trainTrip";
+    await b.evaluate(`__ooga.dsb.${trip}.wait = 0; __ooga.dsb.${trip}.angle = __ooga.dsb.${trip}.start + 1; __ooga.advance(0.1);`);
+    record("dsb gameplay: " + kind + " cannot board while away", await b.evaluate(`document.getElementById("dsb-context").disabled`));
+    await b.evaluate(`__ooga.dsb.${trip}.angle = __ooga.dsb.${trip}.start + Math.PI * 2 - 0.001; __ooga.advance(0.1);`);
+    const stopped = await b.evaluate(`(() => { const t = __ooga.dsb.${trip}, a = t.angle; __ooga.advance(1); return t.wait > 0 && t.angle === a; })()`);
+    record("dsb gameplay: " + kind + " pauses at the station", stopped);
+    await click("#dsb-context"); await b.evaluate(`__ooga.advance(0.2)`);
+    const view = await b.evaluate(`(() => { const B = __ooga, p = B.dsb.land.${kind === "boat" ? "boats[0]" : "cart"}.position, c = B.camera, a = B.dsb.${trip}.angle + Math.PI / 2, dx = c.target.x - c.position.x, dz = c.target.z - c.position.z; return { phase: B.dsb.phase, distance: Math.hypot(c.position.x-p.x,c.position.z-p.z), forward: (dx*Math.sin(a)+dz*Math.cos(a))/Math.hypot(dx,dz) }; })()`);
+    record("dsb gameplay: " + kind + " uses a forward first-person camera", view.phase === kind && view.distance < 1 && view.forward > 0.99, JSON.stringify(view));
+    await b.drag({ x: 500, y: 350 }, { x: 760, y: 410 }, 4);
+    const look = await b.evaluate(`__ooga.dsb.rideLook`); record("dsb gameplay: " + kind + " mouse look is bounded", Math.abs(look.yaw) > 0.01 && Math.abs(look.yaw) <= 0.65 && Math.abs(look.pitch) <= 0.3, JSON.stringify(look));
+    if (process.env.DSB_CAPTURE && !fallback) await b.screenshot(join(root, "untracked", "dsb-" + kind + "-ride.png"));
+    await click("#dsb-context");
+  }
+  await b.key("Escape"); record("dsb gameplay: Escape outside cave stays in DSB", await b.evaluate(`__ooga.scene === "dsb"`));
+  await walkTo(-7, 30.5); record("dsb gameplay: return appears inside cave", await b.evaluate(`document.getElementById("dsb-context").textContent === "Return to Ooga Booga Land"`));
+  if (process.env.DSB_CAPTURE && !fallback) { await walkTo(0, 23); await b.evaluate(`__ooga.pilot.navigate({ yaw: Math.PI, pitch: 0.28, dist: 24, target: { x: 0, y: 2, z: 29 }, position: { x: 0, y: 0, z: 23 } }); __ooga.advance(0.2)`); await b.screenshot(join(root,"untracked","dsb-stations.png")); await walkTo(-7,30.5); }
+  await click("#dsb-context"); record("dsb gameplay: cave button returns to hub", await untilPage(b, 'B.scene === "hub" && !B.transitioning', 15000));
+}));
+if (process.env.DSB_RADIO_LIVE === "1") task("dsb radio live", () => withPage("dsb radio live", hubPage(dist, "scene=dsb"), async (b) => {
+  await b.key("w"); await untilPage(b, "B.audio.ready", 10000);
+  await b.evaluate(`__ooga.audio.arrive()`);
+  const playing = await untilPage(b, 'B.audio.radioStatus.startsWith("Live")', 20000);
+  record("dsb radio live: production page plays the station after the entrance gesture", playing, await b.evaluate(`__ooga.audio.radioStatus`));
+  await b.key("Escape"); await untilPage(b, 'B.scene === "hub" && !B.transitioning', 15000);
+}));
+
+if (process.env.DSB_TV_LIVE === "1") task("dsb television live", () => withPage("dsb television live", hubPage(dist, "scene=dsb"), async (b) => {
+  const live = await untilPage(b, 'B.dsb.tv.status.startsWith("Live")', 20000);
+  record("dsb TV: production page reads the real station API", live, await b.evaluate(`document.getElementById("dsb-tv-song").textContent + " / " + __ooga.dsb.tv.status`));
+  await b.key("Escape"); await untilPage(b, 'B.scene === "hub" && !B.transitioning', 15000);
+}));
+
+for (const fallback of [false, true]) task("dsb television " + (fallback ? "canvas2d" : "webgl2"), () => withPage("dsb television " + (fallback ? "canvas2d" : "webgl2"), hubPage(dist, "scene=dsb" + (fallback ? "&canvas2d=1" : "")), async (b) => {
+  await b.send("Emulation.setEmulatedMedia", { features: [{ name: "prefers-reduced-motion", value: "reduce" }] });
+  await b.key("w"); await untilPage(b, "B.audio.ready", 10000);
+  await b.evaluate(`__ooga.audio.toggle(); window.dispatchEvent(new KeyboardEvent("keydown", { key: "w", code: "KeyW" })); __ooga.advance(__ooga.audio.duration + 2, 0.1); window.dispatchEvent(new KeyboardEvent("keyup", { key: "w", code: "KeyW" }));`);
+  record("dsb TV: enters the plain without opening a menu", await b.evaluate(`__ooga.dsb.phase === "land" && !__ooga.dsb.tv.isOpen`));
+  const result = await b.evaluate(`(() => {
+    const d = __ooga.dsb, p = __ooga.pilot;
+    d.openTv(); const farClosed = !d.tv.isOpen;
+    p.navigate({ yaw: 0, pitch: 0.1, dist: 7, target: { x: -10, y: 1.7, z: 17 }, position: { x: -10, y: 0, z: 17 } }); p.update(0); d.openTv();
+    const opened = d.tv.isOpen, count = document.querySelectorAll("#dsb-tv-menu button").length, disabled = document.querySelectorAll("#dsb-tv-menu button:disabled").length;
+    document.getElementById("dsb-tv-channel").click();
+    const song = document.getElementById("dsb-tv-song").textContent, queue = document.getElementById("dsb-tv-queue").textContent, history = document.getElementById("dsb-tv-history").textContent;
+    const href = document.querySelector(".dsb-tv-request a").href, qr = document.getElementById("dsb-tv-qr").width;
+    return { farClosed, opened, count, disabled, song, queue, history, href, qr, faces: d.land.tvScreen.geometry.faces.length };
+  })()`);
+  record("dsb TV: nearby opt-in menu, five channels and live station info", result.farClosed && result.opened && result.count === 5 && result.disabled === 4 && result.song === "Turtle Radio" && result.queue.includes("Banana Beats") && result.history.includes("Neon River") && result.faces > 0, JSON.stringify(result));
+  if (process.env.DSB_CAPTURE && !fallback) { await b.screenshot(join(root, "untracked", "dsb-tv-menu.png")); await b.send("Emulation.setDeviceMetricsOverride", { width: 390, height: 844, deviceScaleFactor: 1, mobile: true }); await b.screenshot(join(root, "untracked", "dsb-tv-phone.png")); await b.send("Emulation.clearDeviceMetricsOverride"); }
+  record("dsb TV: song requests use the official jukebox and a generated QR", result.href === "https://noderunnersradio.com/?jukebox" && result.qr > 100);
+  await b.key("Escape");
+  record("dsb TV: Escape closes the television without leaving the island", await b.evaluate(`__ooga.scene === "dsb" && !__ooga.dsb.tv.isOpen`));
+  await b.key(" ");
+  record("dsb TV: Space opens the nearby TV through the normal player controls", await b.evaluate(`__ooga.dsb.tv.isOpen`));
+  await b.evaluate(`document.getElementById("dsb-tv-close").click()`);
+  if (process.env.DSB_CAPTURE && !fallback) { await b.evaluate(`__ooga.pilot.navigate({ yaw: 0.15, pitch: 0.1, dist: 17, target: { x: -14, y: 2.5, z: 13 }, position: { x: -14, y: 0, z: 20 } }); __ooga.advance(0.5)`); await b.screenshot(join(root, "untracked", "dsb-tv-world.png")); }
+  const volume = await b.evaluate(`(() => { const a = __ooga.audio, boat = __ooga.dsb.land.boats[0].position; a.environment({ position: { x: -10, y: 3.3, z: 14.6 } }, boat, 5); const near = a.radioVolume; a.environment({ position: { x: 35, y: 2, z: -20 } }, boat, 5); return { near, far: a.radioVolume }; })()`);
+  record("dsb TV: broadcast is louder nearby but remains audible across the island", volume.near > volume.far * 2 && volume.far >= 0.04, JSON.stringify(volume));
+  await dsbExit(b);
+  record("dsb TV: leaving closes and clears the menu", await b.evaluate(`!document.getElementById("dsb-tv").open && !document.getElementById("dsb-tv-queue").children.length`));
+}));
+
+task("dsb radio controls", () => withPage("dsb radio controls", hubPage(dist, "scene=dsb"), async (b) => {
+  await b.key("w"); await untilPage(b, "B.audio.ready", 10000);
+  record("dsb radio: stream stays disconnected in the tunnel", await b.evaluate(`__dsbRadioFixture.plays === 0`));
+  await b.evaluate(`__ooga.audio.arrive()`);
+  await untilPage(b, 'B.audio.radioStatus.startsWith("Live")');
+  const live = await b.evaluate(`({ url: __dsbRadioFixture.element.src, volume: __dsbRadioFixture.element.volume, music: __ooga.audio.musicEnabled, ambient: __ooga.audio.ambientEnabled })`);
+  record("dsb radio: outdoor playback uses the station MP3 stream at background volume", live.url.startsWith("https://stream.noderunnersradio.com/stream?") && live.volume === 0.075 && live.music && live.ambient, JSON.stringify(live));
+  const controls = await b.evaluate(`(() => {
+    const click = (name) => document.querySelector('[data-action="' + name + '"]').click(), a = __ooga.audio;
+    click("dsb-music"); const musicOff = !a.musicEnabled && a.ambientEnabled && __dsbRadioFixture.element.src === "";
+    click("dsb-ambient"); const ambientOff = !a.ambientEnabled;
+    click("dsb-music"); const musicOnly = a.musicEnabled && !a.ambientEnabled;
+    click("dsb-mute"); const allMuted = a.muted && __dsbRadioFixture.element.src === "";
+    click("dsb-mute"); const restored = !a.muted && a.musicEnabled && !a.ambientEnabled;
+    return { musicOff, ambientOff, musicOnly, allMuted, restored };
+  })()`);
+  record("dsb radio: separate switches preserve preferences and master mute stops everything", Object.values(controls).every(Boolean), JSON.stringify(controls));
+  await b.evaluate(`__dsbRadioFixture.element.onerror()`);
+  const failed = await b.evaluate(`({ status: __ooga.audio.radioStatus, source: __dsbRadioFixture.element.src, music: __ooga.audio.musicEnabled })`);
+  record("dsb radio: unavailable station reports an outage and releases the failed stream", failed.status.includes("offline") && failed.source === "" && failed.music, JSON.stringify(failed));
+  await b.key("Escape"); await untilPage(b, 'B.scene === "hub" && !B.transitioning', 15000);
+  record("dsb radio: leaving releases playback and its event handlers", await b.evaluate(`__dsbRadioFixture.element.src === "" && __dsbRadioFixture.element.onerror === null && __dsbRadioFixture.element.onplaying === null`));
+}));
+
+task("dsb automatic feeds", () => withPage("dsb automatic feeds", hubPage(dist, "scene=dsb"), async (b) => {
+  const initial = await b.evaluate(`({ live: __ooga.dsb.data.state.live, price: __ooga.dsb.data.state.priceStatus, sky: __ooga.dsb.data.state.skyStatus, requests: __dsbFeedFixture.requests, sockets: __dsbFeedFixture.sockets, pressed: document.getElementById("dsb-live").getAttribute("aria-pressed") })`);
+  record("dsb automatic feeds: entering connects both providers without a button press", initial.live && initial.price.startsWith("Live") && initial.sky.startsWith("Live") && initial.requests === 4 && initial.sockets === 1 && initial.pressed === "true", JSON.stringify(initial));
+  const outage = await b.evaluate(`(async () => {
+    const fetch = window.fetch, timeout = window.setTimeout, clear = window.clearTimeout, pending = new Map(); let id = 50000;
+    window.setTimeout = (fn, ms) => { const key = ++id; pending.set(key, { fn, ms }); return key; }; window.clearTimeout = (key) => { if (!pending.delete(key)) clear(key); };
+    const d = BL.dsbData.create();
+    try {
+      window.fetch = async () => { throw Error("offline fixture"); }; await d.start(); await Promise.resolve();
+      const offline = { price: d.state.priceStatus, sky: d.state.skyStatus, retries: [...pending.values()].map((v) => v.ms).sort() };
+      window.fetch = fetch;
+      const retry = [...pending.entries()].find(([,v]) => v.ms === 15000); pending.delete(retry[0]); await retry[1].fn(); await Promise.resolve();
+      const recovered = d.state.priceStatus, price = d.state.price;
+      window.fetch = async () => { throw Error("offline fixture"); }; await d.start();
+      const retained = { price: d.state.price, status: d.state.priceStatus };
+      d.dispose(); return { offline, recovered, price, retained, pending: pending.size };
+    } finally { d.dispose(); window.fetch = fetch; window.setTimeout = timeout; window.clearTimeout = clear; }
+  })()`);
+  record("dsb automatic feeds: initial failure labels demo data and retries to recover", outage.offline.price.includes("demo prices") && outage.offline.sky.includes("demo sky") && outage.offline.retries.includes(15000) && outage.offline.retries.includes(30000) && outage.recovered.startsWith("Live"), JSON.stringify(outage));
+  record("dsb automatic feeds: outages retain real prices and disposal cancels retries", outage.retained.price === outage.price && outage.retained.status.includes("last prices retained") && outage.pending === 0, JSON.stringify(outage));
+  await b.key("Escape"); await untilPage(b, 'B.scene === "hub" && !B.transitioning', 15000);
+  record("dsb automatic feeds: leaving closes all price connections", await b.evaluate(`__dsbFeedFixture.sockets === __dsbFeedFixture.closed`));
+}));
+
+task("dsb feeds and audio", () => withPage("dsb feeds and audio", hubPage(src, "scene=dsb"), async (b) => {
+  const feed = await b.evaluate(`(async () => {
+    const fetchOriginal = window.fetch, socketOriginal = window.WebSocket, sockets = [];
+    class Socket { constructor() { sockets.push(this); } send() {} close() { this.closed = true; } }
+    const rows = [[120, 98, 105, 100, 103], [60, 95, 104, 99, 100]];
+    window.WebSocket = Socket;
+    window.fetch = async (url) => ({ ok: true, json: async () => url.includes("candles") ? rows : url.endsWith("/height") ? 900000 : url.includes("recommended") ? { fastestFee: 8 } : { vsize: 20000000 } });
+    const d = BL.dsbData.create();
+    try {
+      await d.start(); await Promise.resolve(); await Promise.resolve();
+      sockets[0].onopen(); sockets[0].onmessage({ data: JSON.stringify({ type: "ticker", product_id: "BTC-USD", price: "107", time: "1970-01-01T00:03:05Z" }) });
+      const connected = { price: d.state.price, height: d.state.height, backlog: d.state.backlog, status: d.state.priceStatus };
+      d.stop(); const stopped = !d.state.live && sockets[0].closed;
+      let finish;
+      window.fetch = () => new Promise((resolve) => { finish = resolve; });
+      const waiting = d.start(); d.dispose();
+      finish({ ok: true, json: async () => rows }); await waiting;
+      return { connected, stopped, sockets: sockets.length };
+    } finally { d.dispose(); window.fetch = fetchOriginal; window.WebSocket = socketOriginal; }
+  })()`);
+  record("dsb feeds: public responses drive the world and exit cancels late connections", feed.connected.price === 107 && feed.connected.height === 900000 && feed.connected.backlog === 0.2 && feed.connected.status.startsWith("Live") && feed.stopped && feed.sockets === 1, JSON.stringify(feed));
+  await b.evaluate(`(() => {
+    const original = AudioContext.prototype.createBufferSource;
+    window.__dsbSoundProbe = { original, starts: [], loops: [], context: null };
+    AudioContext.prototype.createBufferSource = function() {
+      const source = original.call(this), start = source.start.bind(source), ctx = this;
+      window.__dsbSoundProbe.context = ctx;
+      source.start = (...args) => { if (!source.loop) window.__dsbSoundProbe.starts.push({ at: ctx.currentTime, duration: source.buffer.duration }); else window.__dsbSoundProbe.loops.push(source.buffer.duration); start(...args); };
+      return source;
+    };
+  })()`);
+  try {
+    await b.key("m");
+    await untilPage(b, "B.audio.ready", 10000);
+    const fixed = await b.evaluate(`(() => { const g = BL.dsbModels.portalGeometry(); return { uploads: document.querySelectorAll("[data-dsb-audio]").length, canReplace: typeof __ooga.audio.load === "function", corners: g.verts.slice(3, 9), top: Math.max(...g.verts.filter((v, i) => i % 3 === 1)), faces: g.faces.length }; })()`);
+    record("dsb entrance: fixed sounds and flat-bottom arched light", fixed.uploads === 0 && !fixed.canReplace && fixed.corners.join(",") === "-1.5,-1.5,0,1.5,-1.5,0" && fixed.top === 1.5 && fixed.faces === 27, JSON.stringify(fixed));
+    const supplied = await b.evaluate(`({ durations: __ooga.audio.durations, passage: __ooga.audio.duration, failure: __ooga.audio.failure })`);
+    record("dsb audio: all four supplied MP3s decode and determine the passage length", supplied.durations.length === 4 && supplied.durations.every((d) => d > 1 && d < 60) && supplied.passage >= supplied.durations.reduce((sum, d) => sum + d, 0) + 6.99 && !supplied.failure, JSON.stringify(supplied));
+    const music = await b.evaluate(`({ duration: __ooga.audio.musicDuration, loops: __dsbSoundProbe.loops.filter((duration) => duration > 30), levels: __ooga.audio.levels })`);
+    record("dsb music: supplied track decodes into one quiet loop beneath full-level speech", music.duration > 30 && music.loops.length === 1 && music.loops[0] === music.duration && music.levels.music <= 0.1 && music.levels.speech === 1, JSON.stringify(music));
+    await b.key("m");
+    const footsteps = await b.evaluate(`(() => {
+      const a = __ooga.audio, before = a.levels.steps;
+      a.update(0, 100, true); const walking = a.levels.steps;
+      a.update(0, 101, false); const stopped = a.levels.steps;
+      a.update(0, 102, true); const resumed = a.levels.steps;
+      a.toggle(); a.update(0, 103, true); const muted = a.levels.steps; a.toggle();
+      return { before, walking, stopped, resumed, muted };
+    })()`);
+    record("dsb footsteps: pooled steps follow movement, stop at rest and obey mute", footsteps.walking === footsteps.before + 1 && footsteps.stopped === footsteps.walking && footsteps.resumed === footsteps.walking + 1 && footsteps.muted === footsteps.resumed, JSON.stringify(footsteps));
+    await b.evaluate(`__ooga.audio.update(0.9, 1)`);
+    await untilPage(b, 'B.audio.pending && B.audio.levels.music < 0.019', 5000);
+    const ducked = await b.evaluate(`__ooga.audio.levels`);
+    record("dsb music: speech ducks the soundtrack without reducing voice gain", ducked.music < 0.019 && ducked.speech === 1, JSON.stringify(ducked));
+    await untilPage(b, 'window.__dsbSoundProbe.starts.length === 4 && !B.audio.pending', 40000);
+    const sound = await b.evaluate(`(() => { __ooga.audio.update(0, 2); __ooga.audio.update(1, 3); return { starts: __dsbSoundProbe.starts, fired: __ooga.dsb.fired }; })()`);
+    record("dsb audio: four supplied clips play sequentially once despite reversing", sound.starts.length === 4 && sound.fired.every((f) => f === 1) && sound.starts.every((s, i, a) => !i || s.at >= a[i - 1].at + a[i - 1].duration - 0.01), JSON.stringify(sound));
+    await b.key("Escape"); await untilPage(b, 'B.scene === "hub" && !B.transitioning', 15000);
+    record("dsb audio: leaving closes its audio context", await b.evaluate(`__dsbSoundProbe.context.state === "closed"`));
+  } finally { await b.evaluate(`AudioContext.prototype.createBufferSource = __dsbSoundProbe.original; delete window.__dsbSoundProbe;`); }
+}));
+task("dsb arrival camera", () => withPage("dsb arrival camera", hubPage(src, "scene=dsb"), async (b) => {
+  await b.send("Emulation.setEmulatedMedia", { features: [{ name: "prefers-reduced-motion", value: "no-preference" }] });
+  await b.key("w"); await untilPage(b, "B.audio.ready", 10000);
+  await b.send("Input.dispatchKeyEvent", { type: "keyDown", key: "w" });
+  await b.evaluate(`__ooga.advance(2.6, 1 / 60)`);
+  await b.send("Input.dispatchKeyEvent", { type: "keyUp", key: "w" });
+  const left = await b.evaluate(`({ cue: __ooga.audio.cue, glance: __ooga.dsb.glance, behind: __ooga.camera.position.z - __ooga.dsb.avatar.root.position.z })`);
+  if (process.env.DSB_CAPTURE) await b.screenshot(join(root, "untracked", "dsb-passage.png"));
+  await untilPage(b, "!B.audio.pending", 12000);
+  await b.send("Input.dispatchKeyEvent", { type: "keyDown", key: "w" });
+  await b.evaluate(`__ooga.advance(8.7, 1 / 60)`);
+  await b.send("Input.dispatchKeyEvent", { type: "keyUp", key: "w" });
+  const right = await b.evaluate(`({ cue: __ooga.audio.cue, glance: __ooga.dsb.glance })`);
+  record("dsb passage camera: real voice starts alternate gentle glances while staying behind the Ooga", left.cue === 0 && left.glance < -0.03 && left.behind > 3.9 && right.cue === 1 && right.glance > 0.03 && Math.abs(left.glance) <= 0.16 && Math.abs(right.glance) <= 0.16, JSON.stringify({ left, right }));
+  await b.key("m");
+  await b.send("Input.dispatchKeyEvent", { type: "keyDown", key: "w" });
+  await b.evaluate(`__ooga.advance(__ooga.audio.duration * (1 - __ooga.dsb.progress) + 0.1, 1 / 30)`);
+  await b.send("Input.dispatchKeyEvent", { type: "keyUp", key: "w" });
+  await untilPage(b, "B.audio.levels.music < 0.001", 3000);
+  await b.evaluate(`__ooga.advance(Math.max(0, 2.5 - __ooga.dsb.arrivalTime), 1 / 60)`);
+  if (process.env.DSB_CAPTURE) await b.screenshot(join(root, "untracked", "dsb-arrival-above.png"));
+  await b.evaluate(`__ooga.advance(Math.max(0, 6.5 - __ooga.dsb.arrivalTime), 1 / 60)`);
+  const lifted = await b.evaluate(`({ phase: __ooga.dsb.phase, music: __ooga.audio.levels.music, y: __ooga.camera.position.y })`);
+  if (process.env.DSB_CAPTURE) await b.screenshot(join(root, "untracked", "dsb-arrival-below.png"));
+  record("dsb arrival audio: tunnel music fades out for the outdoor radio", lifted.phase === "arrival" && lifted.music < 0.001 && lifted.y < -25, JSON.stringify(lifted));
+  await b.evaluate(`document.querySelector('[data-action="dsb-skip"]').click()`);
+  const handoff = await b.evaluate(`(() => { const B = __ooga, before = { ...B.camera.position }; B.advance(1); return { phase: B.dsb.phase, drift: Math.hypot(B.camera.position.x - before.x, B.camera.position.y - before.y, B.camera.position.z - before.z), hidden: document.body.classList.contains("dsb-arrival"), mode: B.pilot.mode }; })()`);
+  record("dsb arrival camera: skip returns control without residual automatic motion", handoff.phase === "land" && handoff.mode === "orbit" && handoff.drift < 0.01 && !handoff.hidden, JSON.stringify(handoff));
+}));
+
+task("dsb ambience", () => withPage("dsb ambience", hubPage(dist, "scene=dsb"), async (b) => {
+  await b.evaluate(`(() => {
+    const buffer = AudioContext.prototype.createBufferSource, oscillator = AudioContext.prototype.createOscillator;
+    const probe = window.__ambientProbe = { buffer, oscillator, created: 0, stopped: 0, context: null };
+    for (const name of ["createBufferSource", "createOscillator"]) {
+      const original = name === "createBufferSource" ? buffer : oscillator;
+      AudioContext.prototype[name] = function() { const source = original.call(this), stop = source.stop.bind(source); probe.context = this; probe.created++; source.stop = (...args) => { probe.stopped++; return stop(...args); }; return source; };
+    }
+  })()`);
+  try {
+    await b.key("w"); await untilPage(b, "B.audio.ready", 10000);
+    const tunnel = await b.evaluate(`__ooga.audio.ambience`);
+    record("dsb ambience: outdoor graph remains silent throughout the entrance", !tunnel.enabled && tunnel.gain === 0 && tunnel.sources === 4, JSON.stringify(tunnel));
+    const spatial = await b.evaluate(`(() => {
+      const a = __ooga.audio, camera = { position: { x: 0, y: 1.7, z: 0 }, target: { x: 0, y: 1.7, z: -1 } }, boat = { x: 0, y: 0, z: 40 };
+      a.arrive(); a.environment(camera, boat); const center = a.ambience;
+      camera.position.z = 39; camera.target.z = 38; a.environment(camera, boat); const river = a.ambience;
+      camera.position.z = 44; camera.position.y = -5; a.environment(camera, boat); const falls = a.ambience;
+      camera.position.x = -18; camera.position.z = -9; camera.position.y = 1; a.environment(camera, boat); const stage = a.ambience;
+      const created = __ambientProbe.created;
+      for (let i = 0; i < 500; i++) a.environment(camera, boat);
+      return { center, river, falls, stage, created, after: __ambientProbe.created };
+    })()`);
+    record("dsb ambience: water follows the river, waterfall edges, moving boat and stage", spatial.river.river > spatial.center.river * 3 && spatial.falls.waterfall > spatial.center.waterfall * 3 && spatial.river.motor > spatial.center.motor * 4 && spatial.stage.crowd > spatial.center.crowd * 3 && spatial.center.wildlife > 0 && spatial.center.calls > 0, JSON.stringify(spatial));
+    record("dsb ambience: repeated updates reuse a fixed source graph", spatial.created === spatial.after && spatial.stage.sources === 4, JSON.stringify({ before: spatial.created, after: spatial.after }));
+    await b.evaluate(`__ooga.audio.environment({ position: { x: 0, y: 0, z: 0 }, target: { x: 0, y: 0, z: -1 } }, { x: -20, y: 0, z: 0 })`);
+    await untilPage(b, 'B.audio.ambience.motorPan < -0.7', 3000);
+    await b.evaluate(`__ooga.audio.environment({ position: { x: 0, y: 0, z: 0 }, target: { x: 0, y: 0, z: -1 } }, { x: 20, y: 0, z: 0 })`);
+    await untilPage(b, 'B.audio.ambience.motorPan > 0.7', 3000);
+    record("dsb ambience: boat motor crosses the stereo field with its world position", true);
+    await b.key("m");
+    await b.evaluate(`__ooga.audio.environment(__ooga.camera, __ooga.dsb.land.boats[0].position)`);
+    await untilPage(b, '!B.audio.ambience.enabled && B.audio.ambience.gain < 0.001', 4000);
+    record("dsb ambience: mute silences all outdoor layers", true);
+    await b.key("Escape"); await untilPage(b, 'B.scene === "hub" && !B.transitioning', 15000);
+    const cleanup = await b.evaluate(`({ created: __ambientProbe.created, stopped: __ambientProbe.stopped, state: __ambientProbe.context.state })`);
+    record("dsb ambience: leaving stops every source and closes the audio context", cleanup.created === cleanup.stopped && cleanup.state === "closed", JSON.stringify(cleanup));
+  } finally { await b.evaluate(`AudioContext.prototype.createBufferSource = __ambientProbe.buffer; AudioContext.prototype.createOscillator = __ambientProbe.oscillator; delete window.__ambientProbe;`); }
+}));
+
+task("dsb hub entrance", () => withPage("dsb hub entrance", hubPage(src), async (b) => {
+  await b.evaluate(`__ooga.pilot.goPreset("dsb"); __ooga.advance(1.2)`);
+  const hit = await b.evaluate(`(() => { const B = __ooga, m = B.mouths.find((m) => m.id === "c10"), p = B.project(m.x, m.floorY + 1.5, m.z), hit = B.input.pick(p.x, p.y); return { x: p.x, y: p.y, slot: hit?.owner.slot?.id }; })()`);
+  record("dsb hub: entrance is pickable in its camera preset", hit.slot === "c10", JSON.stringify(hit));
+  await b.click(hit.x, hit.y);
+  await b.evaluate('__ooga.advance(1.2)');
+  record("dsb hub: clicking does not skip the walk", await b.evaluate('__ooga.scene === "hub" && !__ooga.transitioning'));
+  const interior = await b.evaluate(`(() => {
+    const B = __ooga, m = B.mouths.find(m => m.id === "c10"), cave = [...B.cavemen.values()].find(c => c.state === "working" && !c.jet);
+    B.pilot.possess(cave);
+    B.crew.relocatePlayer({ x: m.x + Math.sin(m.ry) * 1.5, y: m.floorY, z: m.z + Math.cos(m.ry) * 1.5 }, m.ry + Math.PI);
+    B.pilot.orbit.yaw = B.pilot.orbit.tYaw = m.ry;
+    B.pilot.orbit.pitch = B.pilot.orbit.tPitch = 0;
+    B.advance(0.2);
+    return { shelves: BL.scenes.hub.root.children.filter(n => n.position.x === m.x && n.position.z === m.z).some(n => n.children.some(c => c.geometry === BL.hubModels.caveShelves())) };
+  })()`);
+  record("dsb hub: entrance has no shelves", !interior.shelves, JSON.stringify(interior));
+  await b.send("Input.dispatchKeyEvent", { type: "keyDown", key: "w", code: "KeyW" });
+  await b.evaluate('__ooga.advance(0.9)');
+  record("dsb hub: the front of the room does not trigger entry", await b.evaluate('__ooga.scene === "hub" && !__ooga.transitioning'));
+  const entered = await untilPage(b, 'B.scene === "dsb" && !B.transitioning', 15000);
+  await b.send("Input.dispatchKeyEvent", { type: "keyUp", key: "w", code: "KeyW" });
+  record("dsb hub: walking to the back wall starts the voiced passage", entered && await b.evaluate('__ooga.dsb.phase === "entrance"'));
+}));
+task("dsb phone", () => withPage("dsb phone", hubPage(dist, "scene=dsb"), async (b) => {
+  const layout = await b.evaluate(`(() => { const p = document.getElementById("dsb-panel").getBoundingClientRect(), j = document.getElementById("joy-move").getBoundingClientRect(); return { width: innerWidth, height: innerHeight, left: p.left, right: p.right, bottom: p.bottom, stick: j.width > 0, overlap: p.left < j.right && p.right > j.left && p.bottom > j.top }; })()`);
+  record("dsb phone: entrance fits and leaves the movement stick usable", layout.left >= 0 && layout.right <= layout.width && layout.bottom <= layout.height && layout.stick && !layout.overlap, JSON.stringify(layout));
+  const enable = await b.evaluate(`(() => { const r = document.getElementById("dsb-start-audio").getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; })()`);
+  await b.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [enable] });
+  await b.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+  await untilPage(b, "B.audio.ready", 10000);
+  const stick = await b.evaluate(`(() => { const r = document.getElementById("joy-move").getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2, top: r.y + 10 }; })()`);
+  await b.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ x: stick.x, y: stick.top }] });
+  await untilPage(b, "B.audio.ready", 10000);
+  await b.evaluate(`__ooga.audio.toggle(); __ooga.advance(__ooga.audio.duration * 1.02, 1 / 20)`);
+  await b.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+  const phase = await b.evaluate(`({ phase: __ooga.dsb.phase, progress: __ooga.dsb.progress, muted: __ooga.audio.muted, pending: __ooga.audio.pending, ready: __ooga.audio.ready, duration: __ooga.audio.duration })`);
+  record("dsb phone: reduced motion enters land without an automatic camera tour", phase.phase === "land", JSON.stringify(phase));
+  await b.evaluate(`document.querySelector('[data-action="dsb-skip"]').click(); __ooga.advance(0.1)`);
+  record("dsb phone: skip tour restores the playable camera", await b.evaluate(`__ooga.dsb.phase === "land" && !document.body.classList.contains("dsb-arrival")`));
+  await b.evaluate(`__ooga.advance(1)`);
+  const alpha = await b.evaluate(`document.getElementById("overlay").getContext("2d").getImageData(10, 10, 1, 1).data[3]`);
+  record("dsb reveal: overlay clears after the white fade", alpha === 0, String(alpha));
+  if (process.env.DSB_CAPTURE) await b.screenshot(join(root, "untracked", "dsb-phone.png"));
+}, { w: 390, h: 844, mobile: true }));
+task("soak: dsb cycles", () => withPage("soak: dsb cycles", hubPage(src), async (b) => {
+  const { rendered, settled, snapshot, travel, heapDetail, within } = await soak(b);
+  // Warm the new cached model builders before comparing retained memory.
+  await travel("dsb"); await travel("hub"); await settled(); await rendered(2);
+  const before = await snapshot();
+  for (let i = 0; i < 6; i++) { await travel("dsb"); await travel("hub"); }
+  const after = await snapshot();
+  const same = (key) => before.stats[key] === after.stats[key];
+  record("soak: dsb cycles: six round trips retain node, target, tween and DOM counts", same("allNodes") && same("targets") && same("tweens") && same("dom") && after.stats.tweens === 0, JSON.stringify({ before: before.stats, after: after.stats }));
+  record("soak: dsb cycles: GPU records, listeners and heap remain bounded", Math.abs(after.stats.gl.records - before.stats.gl.records) <= 3 && before.nodes === after.nodes && before.listeners === after.listeners && within(before, after, 0.1), heapDetail(before, after));
+}));
+for (const backend of ["webgl2", "canvas2d"]) task(`dsb land ${backend}`, () => withPage(`dsb land ${backend}`, hubPage(src, `scene=dsb${backend === "canvas2d" ? "&canvas2d=1" : ""}`), async (b) => {
+  await b.send("Emulation.setEmulatedMedia", { features: [{ name: "prefers-reduced-motion", value: "no-preference" }] });
+  await b.evaluate(`(() => { const scene = BL.scenes.dsb, update = scene.update; window.__dsbClockProbe = { time: 0, min: 0 }; scene.update = (dt, time) => { __dsbClockProbe.time = time; __dsbClockProbe.min = Math.min(__dsbClockProbe.min, time); update(dt, time); }; })()`);
+  const initial = await b.evaluate(`({ phase: __ooga.dsb.phase, progress: __ooga.dsb.progress, live: __ooga.dsb.data.state.live, nodes: __ooga.stats().allNodes })`);
+  record("dsb entrance: starts dark and connects live feeds automatically", initial.phase === "entrance" && initial.progress === 0 && initial.live, JSON.stringify(initial));
+  await b.key("m");
+  await untilPage(b, "B.audio.ready", 10000);
+  await b.send("Input.dispatchKeyEvent", { type: "keyDown", key: "w" });
+  await b.evaluate(`__ooga.advance(__ooga.audio.duration * 0.3, 1 / 20)`);
+  await b.send("Input.dispatchKeyEvent", { type: "keyUp", key: "w" });
+  const partial = await b.evaluate(`({ progress: __ooga.dsb.progress, z: __ooga.camera.position.z, avatarZ: __ooga.dsb.avatar.root.position.z, fired: __ooga.dsb.fired })`);
+  await b.send("Input.dispatchKeyEvent", { type: "keyDown", key: "s" });
+  await b.evaluate(`__ooga.advance(__ooga.audio.duration * 0.1, 1 / 20)`);
+  await b.send("Input.dispatchKeyEvent", { type: "keyUp", key: "s" });
+  const back = await b.evaluate(`({ progress: __ooga.dsb.progress, fired: __ooga.dsb.fired })`);
+  record("dsb entrance: walking grows the opening and reversing does not replay a cue", partial.progress > 0.2 && partial.z < 24 && Math.abs(partial.z - partial.avatarZ - 4) < 0.01 && back.progress < partial.progress && back.fired[0] === 1, JSON.stringify({ partial, back }));
+  await b.send("Input.dispatchKeyEvent", { type: "keyDown", key: "w" });
+  await b.evaluate(`__ooga.advance(__ooga.audio.duration * 0.83, 1 / 20)`);
+  await b.send("Input.dispatchKeyEvent", { type: "keyUp", key: "w" });
+  const tour = await b.evaluate(`(() => {
+    const B = __ooga, start = B.dsb.phase, samples = [];
+    for (let i = 0; i < 30; i++) { B.advance(0.5, 1 / 30); samples.push({ x: B.camera.position.x, y: B.camera.position.y, z: B.camera.position.z }); }
+    return { start, end: B.dsb.phase, samples, mode: B.pilot.mode, avatar: B.dsb.avatar.root.visible };
+  })()`);
+  record("dsb arrival: full circle shows upper plain and turtle underside before handing back control", tour.start === "arrival" && tour.end === "land" && tour.samples.some((p) => p.x > 70) && tour.samples.some((p) => p.x < -70) && tour.samples.some((p) => p.y > 40) && tour.samples.some((p) => p.y < -25) && tour.mode === "orbit" && tour.avatar, JSON.stringify(tour));
+  const land = await b.evaluate(`({ phase: __ooga.dsb.phase, fired: __ooga.dsb.fired, boats: __ooga.dsb.land.boats.length, water: __ooga.dsb.land.water.visible, turtle: __ooga.dsb.land.turtle.children.length, finite: [...__ooga.dsb.railY].every(Number.isFinite) })`);
+  record("dsb land: all four cues fire once and the independent world opens", land.phase === "land" && land.fired.every((v) => v === 1) && land.boats === 3 && land.water && land.turtle > 20 && land.finite, JSON.stringify(land));
+  if (process.env.DSB_CAPTURE && backend === "webgl2") {
+    await b.screenshot(join(root, "untracked", "dsb-walk.png"));
+    await b.evaluate(`__ooga.pilot.goPreset("lookout"); __ooga.advance(2)`);
+    await b.screenshot(join(root, "untracked", "dsb-turtle.png"));
+    await b.evaluate(`document.querySelector('[data-scene="dsb"] [data-action="reset-view"]').click(); __ooga.advance(0.3)`);
+  }
+  const shop = await b.evaluate(`(() => { const B = __ooga; B.pilot.navigate({ yaw: 0, pitch: 0, dist: 12, position: { x: -20, y: 0, z: 17 }, target: { x: -20, y: 1.7, z: 17 } }); B.dsb.buy("bread"); B.dsb.buy("tomato"); const bought = B.dsb.inventory; B.dsb.eat(); B.dsb.throwTomato(); const used = B.dsb.inventory; return { bought, used, shots: B.dsb.shots, clock: window.__dsbClockProbe }; })()`);
+  record("dsb shop: simulated purchases charge once and consume inventory", shop.bought.tokens === 16 && shop.bought.bread === 1 && shop.bought.tomatoes === 1 && shop.used.bread === 0 && shop.used.tomatoes === 0 && shop.shots === 1 && shop.clock.min >= 0, JSON.stringify(shop));
+  const ride = await b.evaluate(`(() => { const B = __ooga; B.pilot.navigate({ yaw: 0, pitch: 0, dist: 12, position: { x: 0, y: 0, z: 33 }, target: { x: 0, y: 1.7, z: 33 } }); B.dsb.boatTrip.wait = 8; B.dsb.boatTrip.angle = 0; B.dsb.board("boat"); B.advance(0.2); const boat = B.dsb.phase; B.dsb.stopRide(); const landed = B.dsb.phase; B.pilot.navigate({ yaw: 0, pitch: 0, dist: 12, position: { x: 7, y: 0, z: 24 }, target: { x: 7, y: 1.7, z: 24 } }); B.dsb.trainTrip.wait = 8; B.dsb.trainTrip.angle = B.dsb.trainTrip.start; B.dsb.board("coaster"); B.advance(0.2); const coaster = B.dsb.phase, y = B.camera.position.y; B.dsb.stopRide(); return { boat, landed, coaster, y, stopped: B.dsb.phase }; })()`);
+  record("dsb rides: board, move and disembark on dry ground", ride.boat === "boat" && ride.landed === "land" && ride.coaster === "coaster" && ride.y > 3 && ride.stopped === "land", JSON.stringify(ride));
+  const data = await b.evaluate(`(() => { const d = BL.dsbData.create(), bad = d.ingestCandles([[1, -1, 10, 3, 4]]); const good = d.ingestCandles([[120, 98, 105, 100, 103], [60, 95, 104, 99, 100]]); const stale = d.ingestTick(104, 30); for (let i = 0; i < 200; i++) d.ingestTick(100 + i, 180 + i * 60); const out = { bad, good, stale, count: d.state.count, size: d.state.candles.length, price: d.state.price }; d.dispose(); return out; })()`);
+  record("dsb data: validates and orders feeds, rejects stale ticks, caps history", !data.bad && data.good && !data.stale && data.count === 48 && data.size === 240 && data.price === 299, JSON.stringify(data));
+  await dsbExit(b);
+  const hub = await b.evaluate(`({ scene: __ooga.scene, dsb: BL.caves.slots.find((s) => s.id === "c10"), sheet: document.getElementById("sheet").hidden, body: document.body.classList.contains("dsb-active") })`);
+  record("dsb return: restores hub, interface and cave registry", hub.scene === "hub" && hub.dsb.scene === "dsb" && hub.dsb.name === "DSB Land" && !hub.sheet && !hub.body, JSON.stringify(hub));
+  record("dsb land: console remains clean", b.logs.length === 0, b.logs.join(" | "));
+}));
+
 for (const backend of ["webgl2", "canvas2d"]) for (const scene of ["hub", "lab"]) {
   const label = `contributor likeness ${scene} ${backend}`, base = scene === "hub" ? src : dist;
   task(label, () => withPage(label, (scene === "hub" ? hubPage : page)(base, `loot=1${backend === "canvas2d" ? "&canvas2d=1" : ""}`), async (b) => {
@@ -17942,7 +18379,7 @@ const windowOutlines = (backend) => [`window outlines ${backend}`, async (b) => 
 }];
 const cameraRockGuides = (backend) => [`camera rock guides ${backend}`, async (b) => {
   const r = await b.evaluate(`(${rockGuidesProbe.toString()})()`);
-  record(`camera rock guides ${backend}: occupied room, ramp and common-area references retain bounded cached structural geometry`, r.rows.length === 21 && r.rows.every((row) => row.cached && row.selected?.kind === row.kind && row.selected.index === row.index && row.selected.basement === row.basement && row.count > 0 && row.count <= 96) && r.sky && r.stats.surfaceContexts > 0 && r.stats.frontageContexts === 2 && r.stats.caveContexts === 3 && r.stats.contexts === 22 + r.stats.surfaceContexts + r.stats.frontageContexts + r.stats.caveContexts && r.stats.lines <= 21 * 96 && r.stats.taggedWindowReveals > 0 && r.stats.windowReveals === r.stats.taggedWindowReveals && r.finite && r.points > 5000 && r.failures.length === 0 && r.disposed, JSON.stringify({ ...r, views: undefined }));
+  record(`camera rock guides ${backend}: occupied room, ramp and common-area references retain bounded cached structural geometry`, r.rows.length === 21 && r.rows.every((row) => row.cached && row.selected?.kind === row.kind && row.selected.index === row.index && row.selected.basement === row.basement && row.count > 0 && row.count <= 96) && r.sky && r.stats.surfaceContexts > 0 && r.stats.frontageContexts === 2 && r.stats.caveContexts === 4 && r.stats.contexts === 22 + r.stats.surfaceContexts + r.stats.frontageContexts + r.stats.caveContexts && r.stats.lines <= 21 * 96 && r.stats.taggedWindowReveals > 0 && r.stats.windowReveals === r.stats.taggedWindowReveals && r.finite && r.points > 5000 && r.failures.length === 0 && r.disposed, JSON.stringify({ ...r, views: undefined }));
   record(`camera rock guides ${backend}: faint structural lines project across full and partial rock views`, r.views.length === 2 && r.views.every((view) => view.guideLines > 0 && view.guideLines <= 96 && view.changed > 10 && view.maximumDelta > 0 && view.maximumDelta < 100 && (view.partial ? view.partialRock && view.rockCoverage > 0 && view.rockCoverage < 1 && view.leaked > 0 : view.insideRock && view.leaked === 0)) && r.failures.length === 0, JSON.stringify(r.views));
   const walls = r.wholeWalls, fade = walls.fade;
   record(`camera rock guides ${backend}: recognized wall runs stay continuous between visible ends while hidden rooms, levels and every window reveal remain excluded`, walls.activeContexts > 0 && walls.patches > 100 && walls.actorBlocked > 0 && walls.unequalPhases === 0 && walls.distanceError < 1e-5 && walls.targetError < 1e-6 && walls.reused && walls.orbitStable && walls.blockedNearbyWalls > 0 && walls.blockedActivated === 0 && walls.perceptionErrors === 0 && walls.otherLevelActive === 0 && walls.ceilingFaces === 0 && walls.auditedWindows === walls.totalWindows && walls.totalWindows > 0 && walls.windowRevealFaces === 0 && walls.intervalError < 1e-6 && walls.sectionError < 1e-6 && walls.hiddenEndTargets === 0, JSON.stringify(walls));
@@ -17983,18 +18420,18 @@ const slopeOutlines = (backend) => [`slope outlines ${backend}`, async (b) => {
 }];
 const caveOutlines = (backend) => [`cave outlines ${backend}`, async (b) => {
   const caves = await b.evaluate(`(${caveOutlineSectionsProbe.toString()})()`);
-  record(`cave outlines ${backend}: accessible cave walls reveal through camera rock while sealed entrances remain solid and their interiors stay absent`, caves.registry.accessible === 3 && caves.registry.sealed === 3 && caves.coverage.interiorSamples > 100 && caves.coverage.sealSamples === 720 && caves.runtime.revealed === 6 && caves.runtime.sealedWhole === 3 && caves.runtime.fadeIn === 6 && caves.runtime.fadeOut === 6 && caves.runtime.cameraVisible > 0 && caves.failures.length === 0, JSON.stringify(caves));
+  record(`cave outlines ${backend}: accessible cave walls reveal through camera rock while sealed entrances remain solid and their interiors stay absent`, caves.registry.accessible === 4 && caves.registry.sealed === 2 && caves.coverage.interiorSamples > 100 && caves.coverage.sealSamples === 480 && caves.runtime.revealed === 6 && caves.runtime.sealedWhole === 2 && caves.runtime.fadeIn === 6 && caves.runtime.fadeOut === 6 && caves.runtime.cameraVisible > 0 && caves.failures.length === 0, JSON.stringify(caves));
 }];
 const sealedCaveBlocks = (backend) => [`sealed cave blocks ${backend}`, async (b) => {
   const r = await b.evaluate(`(${sealedCaveBlocksProbe.toString()})(${JSON.stringify(backend)})`);
-  record(`sealed cave blocks ${backend}: all blocked caves have a solid core fitted to the rim and one complete outline while open caves stay open`, r.backend === backend && r.variants.length === 3 && r.accessible === 5 && r.closedOpenings.length === 0 && r.failures.length === 0, JSON.stringify(r));
+  record(`sealed cave blocks ${backend}: all blocked caves have a solid core fitted to the rim and one complete outline while open caves stay open`, r.backend === backend && r.variants.length === 2 && r.accessible === 6 && r.closedOpenings.length === 0 && r.failures.length === 0, JSON.stringify(r));
 }];
 for (const backend of ["webgl2", "canvas2d"]) task(`sealed cave walking ${backend}`, () => withPage(`sealed cave walking ${backend}`, hubPage(backend === "webgl2" ? src : dist, `bananas=1000000${backend === "canvas2d" ? "&canvas2d=1" : ""}`), async (b) => {
   const r = await b.evaluate(`(${sealedCaveWalkingProbe.toString()})(${JSON.stringify({ dt: backend === "webgl2" ? 1 / 20 : 1 / 120 })})`);
   const valid = r.rows.filter((row) => row.name !== "embedded goal"), rejected = r.rows.filter((row) => row.name === "embedded goal");
-  record(`sealed cave walking ${backend}: NPCs reach and leave all three cave aprons without trying to pass walls beyond their destinations`, r.backend === backend && valid.length === 9 && valid.every((row) => row.initialClear && row.destinationClear && row.arrived && row.goalsPreserved && row.distance < 1e-6 && row.intersections === 0 && row.peakYaw === 0 && row.searches === 0 && row.jumps === 0 && row.maximumStep <= 1.7 * r.dt + 1e-7), JSON.stringify(valid));
-  record(`sealed cave walking ${backend}: destinations overlapping sealed rock are rejected and walkers can safely resume`, rejected.length === 3 && rejected.every((row) => row.initialClear && !row.destinationClear && row.retargeted && row.replacementClear && !row.goalsPreserved && row.arrived && row.distance < 1e-6 && row.intersections === 0 && row.maximumStep <= 1.8 * r.dt + 1e-7), JSON.stringify(rejected));
-  record(`sealed cave walking ${backend}: solid seals stop the full body and allow walking away after contact`, r.walls.length === 3 && r.walls.every((row) => row.initialClear && row.insideBlocked && row.partialBlocked && row.sweepBlocked && row.intersections === 0 && row.walkedAway && row.maximumStep <= 7.75 * r.dt + 1e-7), JSON.stringify(r.walls));
+  record(`sealed cave walking ${backend}: NPCs reach and leave both sealed cave aprons without trying to pass walls beyond their destinations`, r.backend === backend && valid.length === 6 && valid.every((row) => row.initialClear && row.destinationClear && row.arrived && row.goalsPreserved && row.distance < 1e-6 && row.intersections === 0 && row.peakYaw === 0 && row.searches === 0 && row.jumps === 0 && row.maximumStep <= 1.7 * r.dt + 1e-7), JSON.stringify(valid));
+  record(`sealed cave walking ${backend}: destinations overlapping sealed rock are rejected and walkers can safely resume`, rejected.length === 2 && rejected.every((row) => row.initialClear && !row.destinationClear && row.retargeted && row.replacementClear && !row.goalsPreserved && row.arrived && row.distance < 1e-6 && row.intersections === 0 && row.maximumStep <= 1.8 * r.dt + 1e-7), JSON.stringify(rejected));
+  record(`sealed cave walking ${backend}: solid seals stop the full body and allow walking away after contact`, r.walls.length === 2 && r.walls.every((row) => row.initialClear && row.insideBlocked && row.partialBlocked && row.sweepBlocked && row.intersections === 0 && row.walkedAway && row.maximumStep <= 7.75 * r.dt + 1e-7), JSON.stringify(r.walls));
 }));
 const outlineMovingCharacters = (backend) => [`outline moving characters ${backend}`, async (b) => {
   const r = await b.evaluate(`(${outlineMovingCharactersProbe.toString()})()`);
@@ -18462,6 +18899,14 @@ const unitChecks = async () => {
     }
   }
   const BL = globalThis.BL;
+  {
+    // Independent ECC-M matrix fingerprints from Project Nayuki's reference encoder,
+    // forced to the selected mask. Covers long invoices through maximum capacity.
+    const fixtures = [[10,1,1471854537],[200,10,201264220],[250,11,3408431571],[340,14,4015936575],[500,17,1072042424],[666,20,2628850123],[1000,26,4139649153],[1800,35,1046637826],[2331,40,2741459166]];
+    const rows = fixtures.map(([length, version, expected]) => { const code = BL.qr.encode("lnbc1" + "q".repeat(length - 5)); let hash = 2166136261; for (const bit of code.modules) hash = Math.imul(hash ^ bit, 16777619); return { length, version: code.version, pass: code.version === version && (hash >>> 0) === expected }; });
+    let rejected = false; try { BL.qr.encode("q".repeat(2332)); } catch (error) { rejected = error instanceof RangeError; }
+    record("QR invoices: matrices match independent reference at short and long capacities", rows.every(r => r.pass) && rejected, JSON.stringify(rows));
+  }
 
   // The scene state these probes read, built directly instead of booted. SEED
   // matches scene-hub.js; sealed cave guides need the hub's seal nodes, so the
