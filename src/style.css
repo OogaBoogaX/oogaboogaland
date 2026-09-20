@@ -1880,6 +1880,32 @@ select {
   text-shadow: 0 1px 0 rgba(0, 0, 0, 0.6);
 }
 
+/* The prompt is read and copied, so it takes the width a desktop can spare. */
+#recipe {
+  width: min(620px, calc(100vw - 32px));
+}
+
+.recipe {
+  max-height: min(46vh, 420px);
+  margin: 10px 0 0;
+  padding: 10px 12px;
+  overflow: auto;
+  background: var(--tablet);
+  border: 2px solid var(--stone-dk);
+  border-radius: 9px 7px 10px 8px;
+  box-shadow: var(--tablet-shadow);
+  color: var(--paper);
+  font-family: ui-monospace, Menlo, Consolas, monospace;
+  font-size: 10.5px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  overscroll-behavior: contain;
+}
+
+.recipe-actions {
+  grid-template-columns: 1fr;
+}
+
 .race-results .actions {
   grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
 }

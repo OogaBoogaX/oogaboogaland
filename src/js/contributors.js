@@ -7,7 +7,11 @@
   // Historical EntropyLab activity; a backend can refresh it with applyActivity.
   // One entry per file in src/characters/, in join order.
   const characters = BL.characters.all();
-  const roster = characters.map(({ handle, lastCommit }) => ({ name: handle, lastCommitAt: lastCommit * 1e3, activity: new Map([[ENTROPY, lastCommit * 1e3]]) }));
+  // `look.maintainer` marks someone who keeps every project on the island: until
+  // the backend reports their commits they are busy in all of them, whatever the
+  // clock or the debug fixture says. Delete the flag from the character file once
+  // real activity arrives and the dates take over again.
+  const roster = characters.map(({ handle, lastCommit, look }) => ({ name: handle, lastCommitAt: lastCommit * 1e3, activity: new Map([[ENTROPY, lastCommit * 1e3]]), maintainer: !!(look && look.maintainer) }));
   // Filter construction, not visibility: solo worlds do no work for absent Oogas.
   // Keep the canonical roster intact for activity, likenesses and stable indices.
   const params = new URLSearchParams(location.search);
@@ -25,16 +29,19 @@
   };
   // Callers use the canonical lowercase repository key, keeping frame queries allocation-free.
   const hasRecentActivity = (contributor, repo, at = Date.now()) => {
+    if (contributor.maintainer) return true;
     const seen = contributor.activity.get(repo);
     return seen > 0 && seen <= at && at - seen < WORK_WINDOW;
   };
   const stateFor = (contributor, at = Date.now()) => {
+    if (contributor.maintainer) return "working";
     const age = at - contributor.lastCommitAt;
     if (!Number.isFinite(age) || contributor.lastCommitAt <= 0 || age < 0) return "sleeping";
     if (age < WORK_WINDOW) return "working";
     return age < CHILL_WINDOW ? "chilling" : "sleeping";
   };
   const ageLabel = (contributor, at = Date.now()) => {
+    if (contributor.maintainer) return "building";
     if (!Number.isFinite(contributor.lastCommitAt) || contributor.lastCommitAt <= 0) return "no activity";
     const minutes = Math.max(0, Math.floor((at - contributor.lastCommitAt) / MINUTE));
     if (minutes < 60) return `${minutes}m ago`;

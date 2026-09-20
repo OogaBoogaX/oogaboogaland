@@ -622,6 +622,25 @@
       <p class="help">Payments are simulated in this build.<span id="crate-help" hidden> Crates drop at 1K, 5K, 21K and
           100K sats.</span></p>
     </dialog>
+    <dialog class="modal" id="recipe" aria-label="Add an Ooga">
+      <div class="panel-head">
+        <h2><span data-sign>Add an Ooga</span></h2>
+        <button type="button" class="link" data-action="recipe-close">Close</button>
+      </div>
+      <p class="help">2140data hands you the prompt. Paste it to your coding agent.</p>
+      <pre class="recipe" id="recipe-text">Add an Ooga to Ooga Booga Land. Create one new file, src/characters/&lt;handle&gt;.js, and change nothing else.
+
+It is a plain IIFE (const BL = window.BL;) calling BL.characters.add({ handle, joined, lastCommit, github, look, voice, dress }). joined and lastCommit are Unix seconds; joined orders the roster.
+
+look overrides the hashed skin, hair, fur and height and carries the flags build:"slim", bald, hairless, cleanShaven, noBrow, wideEyes, noPupils, face:"nose"|"smirk"|"beard"|"none", eyeColor with eyeGlow, and hatY in sixteenths of height. voice is { poke, idle: [...] }.
+
+dress hooks build the voxels, each called with the kit k (h, u, rand, P, color(hex), jit, vg, root, parts, eyeCells): torso(k, v), club(k), gear(k), skull(k, v), crown(k, v), eyes(k, v), mark(k, v), hatY(k), headgear(k), extras(k). The head is a 7x6x6 block with the eyes at z=5 and the brow at y=4. Keep accessory builders and their caches in the file, and draw from k.rand in build order.
+
+Then run npm run build and ONLY=characters node test/run.mjs.</pre>
+      <div class="actions recipe-actions">
+        <button type="button" data-action="recipe-copy">Copy prompt</button>
+      </div>
+    </dialog>
     <div class="bottom-hud">
       <button type="button" class="act" id="act" data-action="act" hidden>JUMP!</button>
       <div class="message-stack" id="message-stack">

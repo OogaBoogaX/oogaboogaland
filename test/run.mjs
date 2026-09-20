@@ -14791,13 +14791,18 @@ const { contributorActivityProbe } = (() => {
       unsubscribe();
       const unsubscribed = applyActivity([{ name: first.name, lastCommitAt: at }], at) === 1 && notifications === lastNotification;
       contributors.seedDebugActivity(at);
-      const debugFixture = roster.every((entry, i) => stateFor(entry, at) === (i < 3 ? "working" : i < 6 ? "chilling" : "sleeping") &&
-        entry.activity.size === 1 && hasRecentActivity(entry, "oogaboogax/entropylab", at) === (i < 3));
+      // A character pinned to its own repository keeps working on it whatever the
+      // dates say, so the debug fixture cannot put that one to sleep either.
+      const pinned = roster.find((entry) => entry.maintainer);
+      const pinnedWorks = !pinned || stateFor(pinned, at) === "working" && ageLabel(pinned, at) === "building"
+        && ["oogaboogax/entropylab", "oogaboogax/oogaboogaland"].every((repo) => hasRecentActivity(pinned, repo, at));
+      const debugFixture = roster.every((entry, i) => stateFor(entry, at) === (entry.maintainer || i < 3 ? "working" : i < 6 ? "chilling" : "sleeping") &&
+        entry.activity.size === 1 && hasRecentActivity(entry, "oogaboogax/entropylab", at) === (!!entry.maintainer || i < 3));
       applyActivity(Array.from({ length: 70 }, (_, i) => ({ name: first.name, repo: `OogaBoogaX/project-${i}`, lastCommitAt: at })), at);
       const boundedProjects = first.activity.size === 64 && hasRecentActivity(first, "oogaboogax/project-62", at) &&
         !hasRecentActivity(first, "oogaboogax/project-63", at);
       return { boundaries, invalidStates, labels, update, invalid, expires, projects, otherRepo, orgWide, wrongOrg, noSyntheticActivity, strictTimestamp,
-        unsubscribed, debugFixture, boundedProjects, rosterUnchanged: roster.length === saved.length };
+        unsubscribed, debugFixture, pinnedWorks, boundedProjects, rosterUnchanged: roster.length === saved.length };
     } finally {
       unsubscribe();
       roster.forEach((entry, i) => {
@@ -21969,6 +21974,82 @@ const core = (label, base) => withPage(label, page(base), async (b) => {
     const poke = await b.evaluate(`(() => { const B = window.__ooga, c = B.cavemen.get(${JSON.stringify(point.name)}); return { names: B.crew.pokeCave.names, hop: c.hop, velocity: c.hopV, bubbles: B.stats().bubbles }; })()`);
     record(`${label}: clicking an Ooga shows a talking bubble without making it hop`, poke.names.length === 1 && poke.names[0] === point.name && poke.hop === 0 && poke.velocity <= 0 && poke.bubbles > 0, JSON.stringify(poke));
   } finally { await b.evaluate(`{ const crew = window.__ooga.crew; crew.update = crew.update.fixtureOriginal; crew.pokeCave = crew.pokeCave.fixtureOriginal; }`); }
+  // 2140data is the plated Ooga: one body baked in two colourways over the same
+  // voxel maps, a nunchaku whose free stick swings on the handle, and a poke
+  // that hands the visitor the prompt for adding another Ooga.
+  const robot = await b.evaluate(`(() => {
+    const B = window.__ooga, BL = window.BL, cave = B.cavemen.get("2140data"), laser = BL.math.hexToRgb("#ff2a1e").join(",");
+    const colors = (g) => new Set(g.faces.map((f) => f.color.join(",")));
+    const parts = () => ({ torso: cave.parts.torso.geometry, leg: cave.parts.legL.geometry, arm: cave.parts.armL.geometry, head: cave.headOpen, closed: cave.headClosed });
+    const first = parts(), red = colors(first.torso), redHead = colors(first.head), wait = cave.tintTime;
+    cave.tintTime = 0.0001;
+    B.advance(0.05, 0.05);
+    const second = parts(), green = colors(second.torso), greenHead = colors(second.head);
+    const changed = Object.keys(first).every((key) => first[key] !== second[key]);
+    cave.tintTime = 0.0001;
+    B.advance(0.05, 0.05);
+    const returned = Object.keys(first).filter((key) => first[key] !== parts()[key]).join(",");
+    cave.tintTime = wait;
+    // Swing the nunchaku and watch the free stick whip round and settle folded.
+    // The carry swap drives an idle flick of its own, so hold it off the settle.
+    const carried = cave.meleeOut;
+    cave.meleeOut = false;
+    cave.weapon.primaryEquipped = true;
+    B.advance(0.5, 0.05);
+    const fold = cave.parts.chuk.rotation.x;
+    B.crew.swingWeapon(cave);
+    let peak = 0;
+    for (let i = 0; i < 30; i++) {
+      B.advance(0.02, 0.02);
+      peak = Math.max(peak, cave.parts.chuk.rotation.x - fold);
+    }
+    B.advance(0.4, 0.05);
+    cave.weapon.primaryEquipped = false;
+    cave.meleeOut = carried;
+    return { hooks: Object.keys(cave.traits.dress).sort().join(","), wait, changed, returned, head: cave.parts.head.geometry === cave.headOpen,
+      shared: [...red].filter((c) => green.has(c)).length, recoloured: [...red].filter((c) => !green.has(c)).length,
+      laser: redHead.has(laser) && greenHead.has(laser), pairs: cave.tint.size,
+      chukOnClub: cave.parts.chuk.parent === cave.parts.club, peak: +peak.toFixed(2), settled: +(cave.parts.chuk.rotation.x - fold).toFixed(2) };
+  })()`);
+  record(`${label}: 2140data changes between two whole-body colourways on a 6 to 15 minute timer, keeping his lasers red`,
+    robot.hooks === "club,extras,eyes,gear,skull,tint" && robot.wait >= 360 && robot.wait <= 900 && robot.changed && robot.returned === ""
+    && robot.recoloured >= 4 && robot.laser && robot.pairs === 14, JSON.stringify(robot));
+  record(`${label}: his free stick hangs off the handle and whips a full turn through a strike`,
+    robot.chukOnClub && robot.peak > 5.4 && Math.abs(robot.settled) < 0.2, JSON.stringify(robot));
+  // Park him in front of the camera with the crew held still, so the pick is his.
+  await b.evaluate(`(() => {
+    const B = window.__ooga, crew = B.crew, update = crew.update, cave = B.cavemen.get("2140data"), camera = B.camera;
+    crew.update = Object.assign(() => {}, { fixtureOriginal: update });
+    cave.root.position.x = camera.target.x;
+    cave.root.position.z = camera.target.z;
+    for (const other of B.cavemen.values()) if (other !== cave) other.root.visible = false;
+  })()`);
+  const target = await b.evaluate(`(() => {
+    const B = window.__ooga, BL = window.BL, cave = B.cavemen.get("2140data"), canvas = document.getElementById("scene"), world = [];
+    BL.scene.updateWorld(BL.scenes[B.scene].root);
+    for (const name of ["head", "torso", "armL", "armR", "legL", "legR"]) {
+      const part = cave.parts[name], center = BL.scene.boundsOf(part.geometry).center;
+      BL.math.mat4.transformPoint(world, part.world, center[0], center[1], center[2]);
+      const projected = B.project(world[0], world[1], world[2]);
+      if (!projected) continue;
+      for (const [dx, dy] of [[0, 0], [-6, 0], [6, 0], [0, -6], [0, 6]]) {
+        const x = projected.x + dx, y = projected.y + dy, hit = B.input.pick(x, y);
+        if (hit?.owner.cave === cave && document.elementFromPoint(x, y) === canvas) return { x, y };
+      }
+    }
+    throw new Error("core: 2140data has no exposed pointer target");
+  })()`);
+  await b.click(target.x, target.y);
+  await untilPage(b, `document.getElementById("recipe").open`);
+  const opened = await b.evaluate(`(() => { const text = document.getElementById("recipe-text").textContent; return { open: document.getElementById("recipe").open, chars: text.length, add: text.includes("BL.characters.add"), file: text.includes("src/characters/"), hooks: text.includes("skull(k, v)"), build: text.includes("npm run build") }; })()`);
+  record(`${label}: poking 2140data opens the prompt for adding an Ooga`, opened.open && opened.add && opened.file && opened.hooks && opened.build && opened.chars < 1400, JSON.stringify(opened));
+  const copyBox = await b.evaluate(`(() => { const r = document.querySelector('[data-action="recipe-copy"]').getBoundingClientRect(); return { x: Math.round(r.x + r.width / 2), y: Math.round(r.y + r.height / 2) }; })()`);
+  await b.click(copyBox.x, copyBox.y);
+  const closeBox = await b.evaluate(`(() => { const r = document.querySelector('[data-action="recipe-close"]').getBoundingClientRect(); return { label: document.querySelector('[data-action="recipe-copy"]').textContent, x: Math.round(r.x + r.width / 2), y: Math.round(r.y + r.height / 2) }; })()`);
+  await b.click(closeBox.x, closeBox.y);
+  const closed = await b.evaluate(`(() => ({ open: document.getElementById("recipe").open, focus: document.activeElement.tagName }))()`);
+  await b.evaluate(`{ const B = window.__ooga; B.crew.update = B.crew.update.fixtureOriginal; for (const cave of B.cavemen.values()) cave.root.visible = true; }`);
+  record(`${label}: the prompt copies and the dialog closes again`, closeBox.label === "Copied" && !closed.open, JSON.stringify({ ...closeBox, ...closed }));
   const landedBeforeTip = await b.evaluate("window.__ooga.stats().dropsLanded");
   await b.key("l");
   await untilPage(b, `s.dropsLanded > ${landedBeforeTip} && s.deliveries + s.pendingDrops === 0`);
@@ -23534,6 +23615,31 @@ const maskBreath = (backend, lab = false) => withPage(`mask breath ${lab ? "lab"
 });
 
 const hubCrew = () => withPage("hub crew", hubPage(src), async (b) => {
+  // A maintainer keeps every project on the island: it takes each work site in
+  // turn, including the lab it has no bundled activity in, and arms a pause at
+  // the pile between trips that an ordinary worker never gets.
+  const keeper = await b.evaluate(`(() => {
+    const B = window.__ooga, cave = B.cavemen.get("2140data"), sites = B.crew.workSites, dt = 1 / 30, visits = [];
+    const trip = (actor) => {
+      actor.work.phase = "";
+      actor.weapon.ammo = 30;
+      B.advance(dt, dt);
+      return { site: actor.work.site, repo: sites[actor.work.site].repo, phase: actor.work.phase, rest: +actor.work.rest.toFixed(1) };
+    };
+    for (let i = 0; i < 6; i++) visits.push(trip(cave));
+    const other = [...B.cavemen.values()].find((c) => c !== cave && c.state === "working");
+    const ordinary = other ? trip(other) : null;
+    const row = document.querySelector('#roster li[data-name="2140data"]');
+    return { state: cave.state, maintainer: !!cave.traits.maintainer, sites: sites.map((s) => s.repo), visits, ordinary,
+      age: row.querySelector(".roster-age").textContent, badge: row.querySelector(".roster-state").textContent };
+  })()`);
+  record("hub crew: 2140data keeps every project cave in turn and arms a pause between trips",
+    keeper.state === "working" && keeper.maintainer && keeper.badge === "clankin" && keeper.age === "building"
+    && keeper.sites.length === 3 && keeper.sites.filter((repo) => repo === "oogaboogax/oogaboogaland").length === 2
+    && keeper.sites.includes("oogaboogax/entropylab")
+    && keeper.visits.length === 6 && keeper.visits.every((visit) => visit.phase === "outbound" && visit.rest >= 7 && visit.rest <= 23)
+    && new Set(keeper.visits.map((visit) => visit.site)).size === keeper.sites.length
+    && (!keeper.ordinary || keeper.ordinary.phase === "outbound" && keeper.ordinary.rest === 0), JSON.stringify(keeper));
   const r = await b.evaluate(`(() => {
     const B = window.__ooga, crew = B.crew, dt = 1 / 30;
     const cave = [...B.cavemen.values()].find(c => c.state === "chilling" && !c.camp.seat && !c.bedTravel.mode);
@@ -23556,7 +23662,8 @@ const hubCrew = () => withPage("hub crew", hubPage(src), async (b) => {
     const waiting = () => workers.every(c => c.work.phase === "reload" && c.weapon.ammo === 0 && !c.weapon.reloading && crew.nearReload(c));
     frames = 0;
     while (!waiting() && frames++ < 90 / dt) B.advance(dt, dt);
-    const before = workers.map(c => ({ name: c.traits.name, waiting: c.work.phase === "reload" && c.weapon.ammo === 0 && crew.nearReload(c),
+    const before = workers.map(c => ({ name: c.traits.name, maintainer: !!c.traits.maintainer,
+      waiting: c.work.phase === "reload" && c.weapon.ammo === 0 && crew.nearReload(c),
       x: c.root.position.x, z: c.root.position.z, loaded: false, departed: false, stayedAtPile: true, repo: null }));
     const landed = B.stats().dropsLanded;
     window.dispatchEvent(new KeyboardEvent("keydown", { key: "b" }));
@@ -23572,12 +23679,23 @@ const hubCrew = () => withPage("hub crew", hubPage(src), async (b) => {
         if (row.loaded && c.work.phase === "outbound" && Math.hypot(c.root.position.x - row.x, c.root.position.z - row.z) > 0.5) row.departed = true;
       });
     }
-    return { stroll, idle, workers: before, landed: B.stats().dropsLanded - landed, expected: B.testBananas };
+    // The maintainer holds its pause at the pile; spending it sends it off too.
+    const index = workers.findIndex((c) => c.traits.maintainer), keeper = workers[index], row = before[index];
+    const paused = !!keeper && row.loaded && !row.departed && keeper.work.rest > 0;
+    if (keeper) {
+      keeper.work.rest = 0;
+      frames = 0;
+      while (frames++ < 20 / dt && !row.departed) {
+        B.advance(dt, dt);
+        if (keeper.work.phase === "outbound" && Math.hypot(keeper.root.position.x - row.x, keeper.root.position.z - row.z) > 0.5) row.departed = true;
+      }
+    }
+    return { stroll, idle, workers: before, paused, landed: B.stats().dropsLanded - landed, expected: B.testBananas };
   })()`);
   record("hub crew: a finished chilling pause becomes a stroll to a meadow spot", r.stroll.state === "chilling" && r.stroll.kind === "wander" && r.stroll.to === "spot" && r.stroll.away >= 5, JSON.stringify(r.stroll));
   record("hub crew: the stroller arrives and idles away from the pile", r.idle.kind === "idle" && !r.idle.walk && r.idle.r >= 5 && r.idle.goalError < 0.1, JSON.stringify(r.idle));
-  record("hub crew: fresh bananas refill empty workers at the pile", r.workers.length === 3 && r.workers.every(c => c.waiting && c.loaded && c.stayedAtPile) && r.landed === r.expected, JSON.stringify(r));
-  record("hub crew: refilled workers leave their slots for their repository", r.workers.every(c => c.departed && typeof c.repo === "string" && c.repo.length > 0), JSON.stringify(r.workers));
+  record("hub crew: fresh bananas refill empty workers at the pile", r.workers.length === 4 && r.workers.filter(c => c.maintainer).length === 1 && r.workers.every(c => c.waiting && c.loaded && c.stayedAtPile) && r.landed === r.expected, JSON.stringify(r));
+  record("hub crew: refilled workers leave their slots for their repository, the maintainer once its pause is spent", r.paused && r.workers.every(c => c.departed && typeof c.repo === "string" && c.repo.length > 0), JSON.stringify(r.workers));
 });
 
 const hubProps = () => withPage("hub props", hubPage(src, "loot=1"), async (b) => {
@@ -23733,6 +23851,36 @@ const hubJetpack = () => withPage("hub jetpack", hubPage(src, "loot=1"), async (
   record("hub jetpack: underground travel removes only the worn pack and the icon works again outside", restricted.owned && !restricted.equipped && !restricted.hidden && restricted.expanded === "false" && restored.owned && restored.equipped, JSON.stringify({ restricted, restored }));
   const lost = await b.evaluate(`(() => { const B = window.__ooga, p = B.crew.player; p.hop = 59; p.hopV = -2; p.root.position.x = 45; p.root.position.z = 0; p.root.position.y = p.baseY - 61; window.BL.scenes.hub.update(1 / 60, B.renderOpts.matrix.time + 6 / 30); return { owned: B.jetpack.owned, equipped: !!p.jet, pickup: !!B.jetpack.pickup, host: !!B.jetpack.pickup?.host, hud: document.getElementById("jetpack-hud").hidden, feet: p.root.position.y - p.baseY, radius: Math.hypot(p.root.position.x, p.root.position.z) }; })()`);
   record("hub jetpack: abyss recovery removes ownership and returns the pickup to a cloud", !lost.owned && !lost.equipped && lost.pickup && lost.host && lost.hud && lost.feet === 0 && lost.radius < 20, JSON.stringify(lost));
+  // 2140data's pack is part of the robot: he leaves the world's one on its cloud,
+  // the icon cannot take his off, and under ground it stops burning instead.
+  const own = await b.evaluate(`(() => {
+    const B = window.__ooga, cave = B.cavemen.get("2140data"), panel = document.getElementById("jetpack-hud");
+    const step = (n) => window.BL.scenes.hub.update(1 / 30, B.renderOpts.matrix.time + n / 30);
+    B.pilot.possess(cave);
+    B.crew.relocatePlayer({ x: 12, y: 0, z: 0 }, 0);
+    cave.jetFuel = 0.5;
+    step(7);
+    const worn = { builtIn: B.crew.builtInJetpack(cave), onRoot: cave.root.children.includes(cave.jet.node), hidden: panel.hidden, fuel: parseInt(document.getElementById("jetpack-fuel-value").textContent, 10), worldOwned: B.jetpack.owned };
+    const refused = B.crew.removeJetpack(cave) === false && !!cave.jet;
+    panel.click();
+    step(8);
+    const kept = !!cave.jet;
+    // The world's pack sits on its cloud: standing on it must not hand it over.
+    const pickup = B.jetpack.pickup, host = pickup.host;
+    B.crew.relocatePlayer({ x: pickup.x, y: host.node.position.y + host.centerTop, z: pickup.z }, 0);
+    step(9);
+    const ignored = !B.jetpack.owned && !!B.jetpack.pickup;
+    // Under ground the pack stays on, with its thrust cut.
+    cave.jet.thrust = true;
+    B.crew.relocatePlayer({ x: 0, y: B.island.headquarters.floor, z: 0 }, 0);
+    step(10);
+    const underground = { jet: !!cave.jet, thrust: cave.jet.thrust, flame: cave.jet.flame.visible };
+    B.crew.release();
+    return { worn, refused, kept, ignored, underground };
+  })()`);
+  record("hub jetpack: a built-in pack never comes off, leaves the world's pack alone and only loses thrust under ground",
+    own.worn.builtIn && own.worn.onRoot && !own.worn.hidden && own.worn.fuel >= 48 && own.worn.fuel <= 60 && !own.worn.worldOwned && own.refused && own.kept
+    && own.ignored && own.underground.jet && !own.underground.thrust && !own.underground.flame, JSON.stringify(own));
 });
 
 const daylightNight = () => withPage("daylight night", hubPage(src, "hour=22&day=80"), async (b) => {
@@ -24374,16 +24522,21 @@ task("banana weapon activity", contributorActivityChecks);
 const characterChecks = async () => {
   const context = { window: {}, URLSearchParams, location: { search: "" } };
   for (const name of CONTRIBUTOR_SOURCES) runInNewContext(await readFile(new URL(`../src/js/${name}.js`, import.meta.url), "utf8"), context);
-  const BL = context.window.BL, all = BL.characters.all(), hooks = ["torso", "club", "gear", "skull", "crown", "eyes", "mark", "hatY", "headgear", "extras"];
+  const BL = context.window.BL, all = BL.characters.all(), hooks = ["torso", "club", "gear", "skull", "crown", "eyes", "mark", "hatY", "headgear", "extras", "tint"];
   const rows = all.map((c) => {
     const traits = BL.contributors.traitsFor(c.handle), m = BL.models.caveman(traits);
+    // A second colourway has to pair every voxel part both ways, heads included,
+    // so crew.js changes the whole body and a second change puts it back.
+    const parts = ["legL", "legR", "torso", "armL", "armR", "head"].map((key) => m.parts[key].geometry).concat([m.headOpen, m.headClosed]);
+    const tint = !c.dress || !c.dress.tint ? !m.tint
+      : !!m.tint && parts.every((geo) => m.tint.has(geo) && m.tint.get(m.tint.get(geo)) === geo && m.tint.get(geo).faces.length === geo.faces.length);
     return { handle: c.handle, joined: c.joined > 1.7e9 && c.joined < 4e9, built: m.headOpen.faces.length > 0 && m.headClosed.faces.length > 0 && m.headOpen !== m.headClosed,
       parts: ["legL", "legR", "torso", "armL", "armR", "head", "club", "gun"].every((key) => m.parts[key]), hooks: Object.keys(c.dress || {}).every((key) => hooks.includes(key) && typeof c.dress[key] === "function"),
-      voice: !c.voice || typeof c.voice.poke === "string" && Array.isArray(c.voice.idle) };
+      tint, voice: !c.voice || typeof c.voice.poke === "string" && Array.isArray(c.voice.idle) };
   });
   const unique = new Set(all.map((c) => c.handle.toLowerCase())).size === all.length;
   const ordered = all.every((c, i) => !i || all[i - 1].joined <= c.joined);
-  record("characters: every src/characters file registers one handle, builds a whole Ooga and uses only known hooks", rows.length === CAST && CAST === BL.contributors.roster.length && unique && ordered && rows.every((r) => r.joined && r.built && r.parts && r.hooks && r.voice), JSON.stringify(rows.filter((r) => !(r.joined && r.built && r.parts && r.hooks && r.voice))));
+  record("characters: every src/characters file registers one handle, builds a whole Ooga and uses only known hooks", rows.length === CAST && CAST === BL.contributors.roster.length && unique && ordered && rows.every((r) => r.joined && r.built && r.parts && r.hooks && r.tint && r.voice), JSON.stringify(rows.filter((r) => !(r.joined && r.built && r.parts && r.hooks && r.tint && r.voice))));
 };
 task("characters", characterChecks);
 // The mempool.space feed parser in Node: message shapes as the socket sends them, no socket.

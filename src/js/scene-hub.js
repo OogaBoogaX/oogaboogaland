@@ -1704,9 +1704,11 @@
     if (i >= 0) list.splice(i, 1);
   };
   const jetpackHudStatus = (cave) => {
-    JETPACK_HUD_STATE.owned = !!jetpackState && jetpackState.owned;
+    // A built-in pack owns itself: its gauge is the wearer's own fuel.
+    const builtIn = !!(cave && crew.builtInJetpack(cave));
+    JETPACK_HUD_STATE.owned = builtIn || !!jetpackState && jetpackState.owned;
     JETPACK_HUD_STATE.equipped = !!(cave && cave.jet);
-    JETPACK_HUD_STATE.fuel = cave && jetpackCarrier === cave ? cave.jetFuel : jetpackState ? jetpackState.fuel : 1;
+    JETPACK_HUD_STATE.fuel = cave && (builtIn || jetpackCarrier === cave) ? cave.jetFuel : jetpackState ? jetpackState.fuel : 1;
     JETPACK_HUD_STATE.blocked = JETPACK_HUD_STATE.owned && (cave ? !jetpackAllowed(cave) : cameraCaveIndex !== 0);
     return JETPACK_HUD_STATE;
   };
@@ -1714,6 +1716,7 @@
     if (jetpackState && jetpackState.owned && jetpackCarrier) jetpackState.fuel = jetpackCarrier.jetFuel;
   };
   const equipJetpack = (cave) => {
+    if (crew.builtInJetpack(cave)) return true;
     if (!jetpackState.owned) return false;
     if (jetpackWearer && jetpackWearer !== cave) crew.removeJetpack(jetpackWearer);
     if (jetpackCarrier !== cave) {
@@ -1744,7 +1747,8 @@
     refreshObjectGuides();
   };
   const collectJetpack = (cave) => {
-    if (!jetpack || jetpack.falling) return false;
+    // Leave the world's pack on its cloud for someone who needs one.
+    if (!jetpack || jetpack.falling || crew.builtInJetpack(cave)) return false;
     removeJetpackPickup();
     jetpackState.owned = true;
     jetpackState.fuel = cave.jetFuel = 1;
@@ -1766,6 +1770,10 @@
   };
   const toggleJetpack = () => {
     const cave = crew.player;
+    if (cave && crew.builtInJetpack(cave)) {
+      hud.toast("Built in. It never comes off.");
+      return false;
+    }
     if (!jetpackState.owned) {
       hud.toast("Find the jetpack on a distant cloud");
       return false;
@@ -4521,6 +4529,8 @@
     }
     // J mirrors the carried jetpack button without changing its fuel.
     if ((e.key === "j" || e.key === "J") && !e.repeat) toggleJetpack();
+    // C changes the colourway of a driven Ooga that was built with two.
+    if ((e.key === "c" || e.key === "C") && !e.repeat && crew.toggleTint(crew.player)) return;
     if (e.key === "g" || e.key === "G") pilot.weaponAction("weapon-toggle");
     if (e.key === "v" || e.key === "V") pilot.weaponAction("weapon-fire");
     const digit = parseInt(e.key, 10);
@@ -4767,7 +4777,9 @@
       sleepRouteFrom.x = p.x; sleepRouteFrom.y = p.y - cave.baseY; sleepRouteFrom.z = p.z;
       return sleepNavigation.clearSegment(sleepRouteFrom, to, false, 0.3);
     };
-    shared.workSites = caves.slots.filter((slot) => slot.repo && slot.status === "open").map((slot) => {
+    // Any dressed mouth with a repository is a work site: the lab, the games cave
+    // and the island's own cave, which is the mirror.
+    shared.workSites = caves.slots.filter((slot) => slot.repo && (slot.status === "open" || slot.status === "mirror")).map((slot) => {
       const mouth = island.mouths.find((entry) => entry.id === slot.id), sr = Math.sin(mouth.ry), cr = Math.cos(mouth.ry);
       workZones.push({ x: mouth.x, z: mouth.z, floor: mouth.floorY, sr, cr, active: false, half: 3.4, front: 5.8 });
       const aimX = mouth.x + sr * 5.8, aimZ = mouth.z + cr * 5.8, approach = { x: aimX, z: aimZ };

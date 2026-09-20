@@ -127,7 +127,9 @@
       message: $("message"),
       qr: $("qr"),
       qrUrl: $("qr-url"),
-      feed: $("feed")
+      feed: $("feed"),
+      recipe: $("recipe"),
+      recipeText: $("recipe-text")
     };
     el.lootTab.hidden = !lootEnabled;
     el.crateHelp.hidden = !lootEnabled;
@@ -140,7 +142,7 @@
       target.addEventListener(type, fn, opts);
       listeners.push(() => target.removeEventListener(type, fn, opts));
     };
-    let toastTimer = 0, toastHideTimer = 0, hintTimer = 0, hintHideTimer = 0;
+    let toastTimer = 0, toastHideTimer = 0, hintTimer = 0, hintHideTimer = 0, copyTimer = 0;
     const rosterRows = new Map();
     const orderedRoster = [...roster].sort((a, b) => b.lastCommitAt - a.lastCommitAt);
     for (let rosterIndex = 0; rosterIndex < orderedRoster.length; rosterIndex++) {
@@ -415,10 +417,40 @@
       e.preventDefault();
       closeFeed();
     });
+    const openRecipe = () => {
+      if (!el.recipe.open) el.recipe.showModal();
+    };
+    const closeRecipe = () => {
+      if (el.recipe.open) el.recipe.close();
+    };
+    on(el.recipe, "keydown", (e) => {
+      if (e.key !== "Escape") return;
+      e.preventDefault();
+      closeRecipe();
+    });
+    // The prompt is written to be pasted, so it leaves in one click.
+    const copyRecipe = (button) => {
+      const text = el.recipeText.textContent;
+      if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text).catch(() => {});
+      else {
+        const field = document.createElement("textarea");
+        field.value = text;
+        document.body.append(field);
+        field.select();
+        document.execCommand("copy");
+        field.remove();
+      }
+      // A toast would sit behind the modal's backdrop, so the button answers.
+      window.clearTimeout(copyTimer);
+      button.textContent = "Copied";
+      copyTimer = window.setTimeout(() => { button.textContent = "Copy prompt"; }, 1600);
+    };
     for (const b of el.actions) on(b, "click", () => {
       b.blur();
       if (b.dataset.action === "feed") openFeed();
       else if (b.dataset.action === "feed-close") closeFeed();
+      else if (b.dataset.action === "recipe-close") closeRecipe();
+      else if (b.dataset.action === "recipe-copy") copyRecipe(b);
       else actionHandler && actionHandler(b.dataset.action);
     });
     const toast = (text) => {
@@ -698,6 +730,7 @@
       window.clearTimeout(toastHideTimer);
       window.clearTimeout(hintTimer);
       window.clearTimeout(hintHideTimer);
+      window.clearTimeout(copyTimer);
       for (const off of listeners) off();
       el.roster.replaceChildren();
       el.inventory.replaceChildren();
@@ -710,8 +743,9 @@
       setMagazine(0, 0, 0, false);
       setJetpack(false, false, 0);
       closeFeed();
+      closeRecipe();
     };
-    return { el, openFeed, closeFeed, setRosterRow, setMeter, setStats, setAct, setWeapon, setMagazine, setJetpack, setSubtitle, setFlyby, onAction, toast, tooltip, hint, selectTab, onPreset, onIdentityChange, setIdentity, setDonationUrl, onAssign, onUnassign, renderInventory, dispose };
+    return { el, openFeed, closeFeed, openRecipe, closeRecipe, setRosterRow, setMeter, setStats, setAct, setWeapon, setMagazine, setJetpack, setSubtitle, setFlyby, onAction, toast, tooltip, hint, selectTab, onPreset, onIdentityChange, setIdentity, setDonationUrl, onAssign, onUnassign, renderInventory, dispose };
   };
   BL.hud = { create, renderIcon, signLettering, STATE_LABELS, statusFor };
 })();

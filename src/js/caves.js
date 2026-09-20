@@ -6,9 +6,9 @@
   const slots = [
     slot("c11", 11, "lab", "open", "EntropyLab", "oogaboogax/entropylab"),
     slot("c10", 10),
-    slot("c9", 9, "race", "open", "Ooga Rally"),
+    slot("c9", 9, "race", "open", "Ooga Rally", "oogaboogax/oogaboogaland"),
     slot("c730", 7.5, null, "headquarters", "Headquarters"),
-    slot("c1", 1, null, "mirror", "Ooga Booga Land"),
+    slot("c1", 1, null, "mirror", "Ooga Booga Land", "oogaboogax/oogaboogaland"),
     slot("c2", 2),
     slot("c3", 3),
     slot("c5", 5, null, "headquarters", "Headquarters")

@@ -444,6 +444,8 @@
   //   crown(k, v)  hats and hair over the head    eyes(k, v)   replaces the eyes
   //   mark(k, v)   face paint after the pupils    hatY(k)      where swag hats sit
   //   headgear(k)  nodes on the head              extras(k)    nodes on the root, last
+  //   tint(k, palette)  a second colourway: return an alternate palette and every
+  //                     voxel part is baked again under it, paired in `tint`
   // `look` flags read here: slim, bald, cleanShaven, wideEyes, hairless, noBrow, noPupils,
   // face ("nose" | "smirk" | "beard" | "none"), eyeColor, eyeGlow, hatY.
   const buildCaveman = (traits) => {
@@ -490,7 +492,14 @@
         if (v.get(nx, y, z) === P.fur) v.set(nx, y, z, P.spot);
       }
     };
-    const vg = (v, origin, emissive) => voxelGeometry(v, { unit: u, palette, origin, emissive });
+    // Each voxel map is kept with what it was baked from, so a second colourway
+    // can bake the same maps again under another palette.
+    const bakes = [];
+    const vg = (v, origin, emissive) => {
+      const geo = voxelGeometry(v, { unit: u, palette, origin, emissive });
+      bakes.push({ v, origin, emissive, geo });
+      return geo;
+    };
     const parts = {};
     const legH = 5 * u;
     const root = createNode({ position: { x: 0, y: legH, z: 0 } });
@@ -668,7 +677,25 @@
     if (dress.headgear) dress.headgear(k);
     addChild(root, parts.legL, parts.legR, parts.torso, parts.armL, parts.armR, parts.head);
     if (dress.extras) dress.extras(k);
-    return { root, parts, traits, headOffset: 1.1 * h, headOpen, headClosed, skins, clubRest, clubCarry, gunHeadBounds: BL.scene.boundsOf(headOpen) };
+    // A second colourway bakes every voxel part still in use under the alternate
+    // palette and pairs each geometry with its twin both ways, so swapping a
+    // clone's geometry twice returns it to the colour it was built in.
+    let tint = null;
+    if (dress.tint) {
+      const alt = dress.tint(k, palette), live = new Set([headClosed]);
+      const visit = (node) => {
+        if (node.geometry) live.add(node.geometry);
+        for (const child of node.children) visit(child);
+      };
+      visit(root);
+      tint = new Map();
+      for (const bake of bakes) {
+        if (!live.has(bake.geo) || tint.has(bake.geo)) continue;
+        const twin = voxelGeometry(bake.v, { unit: u, palette: alt, origin: bake.origin, emissive: bake.emissive });
+        tint.set(bake.geo, twin).set(twin, bake.geo);
+      }
+    }
+    return { root, parts, traits, headOffset: 1.1 * h, headOpen, headClosed, skins, clubRest, clubCarry, tint, gunHeadBounds: BL.scene.boundsOf(headOpen) };
   };
   // Traits hash from the handle, so one handle always builds the same voxels.
   // Callers get fresh nodes over shared geometry: one build per contributor, GPU records survive a scene swap.
@@ -689,7 +716,7 @@
       parts[key] = Array.isArray(part) ? part.map((node) => copies.get(node)) : copies.get(part);
     }
     const skins = { club: { ...template.skins.club }, gun: { ...template.skins.gun } };
-    return { root, parts, traits, headOffset: template.headOffset, headOpen: template.headOpen, headClosed: template.headClosed, skins, clubRest: template.clubRest, clubCarry: template.clubCarry, gunHeadBounds: template.gunHeadBounds };
+    return { root, parts, traits, headOffset: template.headOffset, headOpen: template.headOpen, headClosed: template.headClosed, skins, clubRest: template.clubRest, clubCarry: template.clubCarry, tint: template.tint, gunHeadBounds: template.gunHeadBounds };
   };
   // A real die: opposite faces sum to seven.
   const die = ({ size = 0.3 } = {}) => {

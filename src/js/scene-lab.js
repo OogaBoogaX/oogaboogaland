@@ -318,6 +318,8 @@
       if (pilot.player) pilot.release();
       else go("hub");
     }
+    // C changes the colourway of a driven Ooga that was built with two.
+    if ((e.key === "c" || e.key === "C") && !e.repeat && crew.toggleTint(crew.player)) return;
     if (e.key === "g" || e.key === "G") pilot.weaponAction("weapon-toggle");
     if (e.key === "v" || e.key === "V") pilot.weaponAction("weapon-fire");
     if (e.key === "b" || e.key === "B") addTestBananas(testBananas);

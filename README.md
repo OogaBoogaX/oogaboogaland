@@ -27,7 +27,7 @@ The island keeps your local time and moves through dawn, morning, noon, dusk, ni
 
 Walk through the lower half of a tree's foliage and stand on its canopy; trunks stay solid. The banana pile passes at half speed. Rock covers the part of the view crossing a surface, and faint outlines show what your Ooga can see while the camera cannot.
 
-Walk off the edge and you fall: steer through an open window into HQ or the basement on the way down, or drop into the abyss and come back to the pile. Land on the clouds to walk their tops. One jetpack spins above a distant cloud — jump into it to collect it, then **J** wears it and a held **Space** climbs. A tank is eight seconds of **Space** or sixteen of directional flight, refilling in four on the ground. It comes off underground.
+Walk off the edge and you fall: steer through an open window into HQ or the basement on the way down, or drop into the abyss and come back to the pile. Land on the clouds to walk their tops. One jetpack spins above a distant cloud — jump into it to collect it, then **J** wears it and a held **Space** climbs. A tank is eight seconds of **Space** or sixteen of directional flight, refilling in four on the ground. It comes off underground. 2140data needs no pack: he has thrusters in his feet and flies whenever he likes.
 
 Two ramps inside HQ lead to a basement of rooms, each with a mattress whose pillow carries a LifeHash of its coordinates. Stand on a free one and **Space** or **SLEEP** lies down; **W S** turn onto stomach and back, **A D** face left and right, **WAKE UP!** gets up. Near a bench **Space** sits. Touch the fire and you burn: **Space** drops and rolls until it is out, and fire spreads by touch.
 
@@ -129,3 +129,5 @@ Ooga Booga Land is released into the public domain under [The Ooga Booga License
 ## Contributing
 
 Read [AGENTS.md](AGENTS.md) first. It describes the module layout, the engine patterns the code relies on, how to add props, swag, behaviors, and HUD elements, and the checks every change must pass.
+
+For a character of your own, click **2140data** on the island: he hands over a prompt that describes the whole job, ready to paste.

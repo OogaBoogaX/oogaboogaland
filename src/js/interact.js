@@ -360,5 +360,5 @@
       }
     };
   };
-  BL.interact = { create };
+  BL.interact = { create, DOUBLE_MS };
 })();
