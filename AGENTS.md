@@ -26,6 +26,7 @@ A WebGL2 floating island whose cliff caves are projects. The page lands on the h
 | `scripts/characters.mjs` | joins `src/characters/*.js` into the gitignored `src/js/characters.gen.js`; the build and the suite run it first |
 | `scripts/build.mjs` | inlines `src/` in script order and pins the content policy hashes |
 | `.github/workflows/pages.yml` | builds and deploys the page on pushes to `rock`, a ten-minute cron, or manual runs. The deploy job's token stays read-only with `persist-credentials: false`; only the separate `artifact` job takes `contents: write`, and only on merges to `rock`. Keep that split |
+| `.github/workflows/preview.yml` | builds each pull request's page with a read-only token and keeps it on the run as an artifact; for branches of this repository a second job commits it to the generated `previews` branch as `<number>/index.html`, dispatches the Pages workflow (whose deploy job stages that branch under `pr/`) and keeps one sticky comment with the preview link. Closing the pull request removes its preview. No pull request code runs with a write token; keep that split too |
 | `test/run.mjs`, `test/browser.mjs` | the suite and its headless Chrome driver; these two files are the whole of `test/` |
 | `untracked/` | local planning notes, ignored by git |
 

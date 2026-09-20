@@ -1,0 +1,134 @@
+name: Pull request preview
+
+# Builds the page from a pull request and serves it beside the live site so it can be
+# reviewed on the pull request itself. The build job runs the pull request's own code
+# with a read-only token and keeps the built page on the run as an artifact. For pull
+# requests from this repository the publish job then commits that page to the generated
+# `previews` branch as `<number>/index.html`, asks the Pages workflow to redeploy (it
+# stages that branch under `pr/`), and keeps one sticky comment on the pull request with
+# the preview link. Closing the pull request removes its preview again. Pull requests
+# from forks run with a read-only token, so they get the artifact and no preview.
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, closed]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: preview-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build · the pull request's page
+    if: github.event.action != 'closed'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          package-manager-cache: false
+      - name: Build the page
+        run: npm run build
+      - name: Upload the built page
+        uses: actions/upload-artifact@v4
+        with:
+          name: pr-${{ github.event.pull_request.number }}-page
+          path: oogaboogaland.html
+
+  publish:
+    name: Publish · the preview on the previews branch
+    # Only this repository's own branches carry a token that can write; the closed event
+    # skips the build and only removes the preview.
+    if: ${{ !cancelled() && github.event.pull_request.head.repo.full_name == github.repository && (github.event.action == 'closed' || needs.build.result == 'success') }}
+    needs: [build]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      pull-requests: write
+      actions: write
+      pages: read
+    concurrency:
+      group: previews-branch
+      cancel-in-progress: false
+    env:
+      NUMBER: ${{ github.event.pull_request.number }}
+      CLOSED: ${{ github.event.action == 'closed' }}
+      HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Download the built page
+        if: env.CLOSED != 'true'
+        uses: actions/download-artifact@v4
+        with:
+          name: pr-${{ github.event.pull_request.number }}-page
+          path: ${{ runner.temp }}/page
+      - uses: actions/checkout@v6
+        with:
+          ref: rock
+      - name: Update the previews branch
+        id: branch
+        run: |
+          if git fetch --depth=1 origin previews; then
+            git checkout -q -B previews FETCH_HEAD
+          else
+            echo "No previews branch yet; starting one."
+            git checkout -q --orphan previews
+            git rm -rfq .
+          fi
+          if [ "$CLOSED" = "true" ]; then
+            rm -rf "$NUMBER"
+          else
+            mkdir -p "$NUMBER"
+            cp "$RUNNER_TEMP/page/oogaboogaland.html" "$NUMBER/index.html"
+          fi
+          git add -A
+          if git diff --cached --quiet; then
+            echo "Previews branch is unchanged; nothing to commit."
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if [ "$CLOSED" = "true" ]; then
+            git commit -q -m "Remove the preview of #$NUMBER"
+          else
+            git commit -q -m "Preview #$NUMBER at $HEAD_SHA"
+          fi
+          git push origin previews
+          echo "changed=true" >> "$GITHUB_OUTPUT"
+      - name: Redeploy the site with the previews
+        if: steps.branch.outputs.changed == 'true'
+        # The Pages workflow also runs every ten minutes, so a failed dispatch only delays the preview.
+        run: gh workflow run pages.yml --ref rock || echo "Could not dispatch the Pages workflow; the next scheduled deploy will pick the preview up."
+      - name: Comment on the pull request
+        run: |
+          site="$(gh api "repos/$GITHUB_REPOSITORY/pages" --jq .html_url 2>/dev/null || true)"
+          if [ -z "$site" ]; then
+            owner="$(printf '%s' "${GITHUB_REPOSITORY%%/*}" | tr '[:upper:]' '[:lower:]')"
+            site="https://${owner}.github.io/${GITHUB_REPOSITORY#*/}/"
+          fi
+          case "$site" in */) ;; *) site="$site/";; esac
+          marker="<!-- ooga-pr-preview -->"
+          if [ "$CLOSED" = "true" ]; then
+            body="$marker
+          **Preview** removed: the pull request is closed."
+          else
+            body="$marker
+          **Preview** of ${HEAD_SHA:0:7}: ${site}pr/${NUMBER}/
+
+          It goes live with the next Pages deploy, usually within a couple of minutes and at most ten. Hard-refresh to skip a cached page. The built page is also attached to the [workflow run](${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}) as an artifact."
+          fi
+          existing="$(gh api "repos/$GITHUB_REPOSITORY/issues/$NUMBER/comments" --paginate --jq ".[] | select(.body | startswith(\"$marker\")) | .id" | head -n 1)"
+          if [ -n "$existing" ]; then
+            gh api -X PATCH "repos/$GITHUB_REPOSITORY/issues/comments/$existing" -f body="$body" > /dev/null
+          else
+            gh api "repos/$GITHUB_REPOSITORY/issues/$NUMBER/comments" -f body="$body" > /dev/null
+          fi

@@ -74,6 +74,8 @@ To add your Ooga, add one file to `src/characters/` named after your GitHub hand
 
 GitHub Pages deploys through `.github/workflows/pages.yml` on pushes to `rock`, every ten minutes after refreshing the Oogatron activity snapshot, or manually with **Actions → Deploy GitHub Pages → Run workflow**. It rebuilds the page and uploads only `_site/index.html`, a copy of `oogaboogaland.html`, to https://oogaboogax.github.io/oogaboogaland/. The repository's **Settings → Pages** source is **GitHub Actions**, and no `CNAME` file is needed for a custom domain.
 
+Every pull request gets its own preview through `.github/workflows/preview.yml`: it builds the page from the pull request, attaches it to the run as an artifact and, for branches of this repository, publishes it at `https://oogaboogax.github.io/oogaboogaland/pr/<number>/` with a sticky comment on the pull request carrying the link. The previews live on the generated `previews` branch, one `<number>/index.html` each, which the Pages deploy stages under `pr/` beside the live page; closing the pull request removes its preview. Pull requests from forks run with a read-only token, so they get the artifact only.
+
 ## Privacy
 
 No analytics, no external requests, no personal data. The roster lists public contributor handles only. The donation handle and message a visitor types are stored in their own localStorage and nowhere else.
