@@ -5,7 +5,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta http-equiv="Content-Security-Policy"
-    content="default-src 'none'; script-src 'sha256-JdRi878HtkD1HDD+Mprnp6fFqjeJV6cxoZbxpFIO8gY='; style-src 'sha256-nT2jKlduo6uMz/sr8RBx5zzp36t7rYKrcFhJLHSS2+E='; img-src 'self' data:; media-src https://stream.noderunnersradio.com; connect-src https://noderunnersradio.com https://mempool.space https://api.exchange.coinbase.com wss://ws-feed.exchange.coinbase.com; base-uri 'none'; form-action 'none'">
+    content="default-src 'none'; script-src 'sha256-U4Fhh+plLgCh5XE2CJUhG7VOnUExjw4V5BY57yJ2T3A='; style-src 'sha256-8wvU8R+YaNCaoGcsXiud3RFv948/Vmw0/+2M4JI/wOo='; img-src 'self' data:; media-src https://stream.noderunnersradio.com; connect-src wss://mempool.space https://noderunnersradio.com https://mempool.space https://api.exchange.coinbase.com wss://ws-feed.exchange.coinbase.com; base-uri 'none'; form-action 'none'">
   <meta name="referrer" content="no-referrer">
   <meta name="color-scheme" content="dark">
   <meta name="theme-color" content="#0a0a0b">
@@ -1039,6 +1039,70 @@ select {
   cursor: copy;
   user-select: text;
   overflow-x: auto;
+}
+
+/* The feed panel: the Konami code toggles it, page-wide, over any scene. */
+.feed-debug {
+  position: fixed;
+  right: calc(16px + var(--safe-right));
+  bottom: calc(16px + var(--safe-bottom));
+  z-index: 12;
+  width: min(380px, calc(100vw - 32px - var(--safe-left) - var(--safe-right)));
+  max-height: calc(60vh - var(--safe-bottom));
+  display: flex;
+  flex-direction: column;
+  padding: 8px 10px;
+  color: #bfe0ff;
+  background: rgba(8, 14, 22, 0.92);
+  border: 1px solid rgba(96, 170, 255, 0.6);
+  border-radius: 4px;
+  font-family: var(--mono);
+  font-size: 10px;
+  line-height: 1.45;
+  user-select: text;
+}
+
+.feed-debug[hidden] {
+  display: none;
+}
+
+.feed-debug-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  color: #e6f2ff;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.feed-debug-close {
+  flex: none;
+  padding: 0 6px;
+  color: inherit;
+  background: none;
+  border: 1px solid rgba(96, 170, 255, 0.4);
+  border-radius: 3px;
+  font: inherit;
+  font-size: 12px;
+  line-height: 1.3;
+  cursor: pointer;
+}
+
+.feed-debug-state,
+.feed-debug-log {
+  margin: 6px 0 0;
+  font: inherit;
+  white-space: pre;
+  overflow-x: auto;
+}
+
+.feed-debug-log {
+  color: #8fb8e8;
+  border-top: 1px solid rgba(96, 170, 255, 0.25);
+  padding-top: 6px;
+  overflow-y: auto;
 }
 
 .position-debug[data-copied="true"] {
@@ -4587,6 +4651,14 @@ body.orbit-dragging #tooltip {
     </div>
     <button type="button" class="position-debug" id="position-debug"
       aria-label="Debug character and camera state. Click to copy an exact replay URL." hidden></button>
+    <section class="feed-debug" id="feed-debug" aria-label="mempool.space feed" hidden>
+      <header class="feed-debug-head">
+        <span>mempool.space · wss://mempool.space/api/v1/ws</span>
+        <button type="button" class="feed-debug-close" id="feed-debug-close" aria-label="Close the feed panel">×</button>
+      </header>
+      <pre class="feed-debug-state" id="feed-debug-state"></pre>
+      <pre class="feed-debug-log" id="feed-debug-log"></pre>
+    </section>
     <div class="tooltip" id="tooltip" role="tooltip" hidden></div>
     <div id="carry-cursor" class="carry-cursor" aria-hidden="true" hidden>
       <svg viewBox="0 0 16 22" focusable="false">
@@ -19358,6 +19430,124 @@ void main() {
   BL.donations = { config, createRequest, subscribe, sanitize, HANDLE_MAX, MESSAGE_MAX };
 })();
 
+// ---- js/mempool.js ----
+// Live Bitcoin feed from mempool.space: one socket for the page life, reconnecting with backoff.
+// Subscribers get plain events, { type: "tx", vsize, weight, fee } for each transaction the
+// mempool accepts, { type: "block", height, txCount } for each block mined after connect and
+// { type: "fees", nextFee, blocks } whenever the projected next block's median fee moves.
+// The only network code on the page; the content policy allows exactly this origin.
+(() => {
+  "use strict";
+  const BL = window.BL = window.BL || {};
+  const ENDPOINT = "wss://mempool.space/api/v1/ws";
+  const BACKOFF_MIN = 2000, BACKOFF_MAX = 60000;
+  const subscribers = new Set();
+  const state = { enabled: false, connected: false, attempts: 0, transactions: 0, blocks: 0, height: 0, nextFee: 0, projectedBlocks: 0, messages: 0, bytes: 0, lastKeys: "", lastAt: 0 };
+  let socket = null, timer = 0, backoff = BACKOFF_MIN;
+
+  const emit = (event) => {
+    if (event.type === "tx") state.transactions++;
+    else if (event.type === "block") state.blocks++;
+    for (const fn of subscribers) fn(event);
+  };
+  const block = (b) => {
+    if (!b || !(b.height > state.height)) return;
+    state.height = b.height;
+    emit({ type: "block", height: b.height, txCount: b.tx_count || 0 });
+  };
+  const onMessage = (text) => {
+    state.messages++;
+    state.bytes += text.length;
+    state.lastAt = Date.now();
+    let data;
+    try {
+      data = JSON.parse(text);
+    } catch {
+      return;
+    }
+    if (!data || typeof data !== "object" || Array.isArray(data)) return;
+    state.lastKeys = Object.keys(data).join(", ");
+    // The tip list arrives once per connection and only seeds the height; a later, taller one is news.
+    if (Array.isArray(data.blocks)) {
+      let top = 0;
+      for (const b of data.blocks) if (b && b.height > top) top = b.height;
+      if (state.height === 0) state.height = top;
+      else if (top > state.height) block({ height: top });
+    }
+    if (data.block) block(data.block);
+    // The projection is the fee pressure: the next block's median sat/vB, zero for an empty mempool.
+    const projected = data["mempool-blocks"];
+    if (Array.isArray(projected)) {
+      const first = projected[0];
+      state.nextFee = first && first.medianFee > 0 ? first.medianFee : 0;
+      state.projectedBlocks = projected.length;
+      emit({ type: "fees", nextFee: state.nextFee, blocks: projected.length });
+    }
+    const txs = data["mempool-transactions"];
+    if (txs && Array.isArray(txs.added)) {
+      for (const tx of txs.added) {
+        if (!tx || !(tx.vsize > 0)) continue;
+        emit({ type: "tx", vsize: tx.vsize, weight: tx.weight || tx.vsize * 4, fee: tx.fee || 0 });
+      }
+    }
+  };
+  const retry = () => {
+    if (state.enabled && !timer) {
+      timer = window.setTimeout(connect, backoff);
+      backoff = Math.min(BACKOFF_MAX, backoff * 2);
+    }
+  };
+  const connect = () => {
+    timer = 0;
+    if (!state.enabled || socket) return;
+    state.attempts++;
+    let ws;
+    try {
+      ws = new WebSocket(ENDPOINT);
+    } catch {
+      retry();
+      return;
+    }
+    socket = ws;
+    ws.onopen = () => {
+      state.connected = true;
+      backoff = BACKOFF_MIN;
+      ws.send(JSON.stringify({ action: "want", data: ["blocks", "mempool-blocks"] }));
+      ws.send(JSON.stringify({ "track-mempool": true }));
+    };
+    ws.onmessage = (e) => onMessage(e.data);
+    ws.onclose = () => {
+      if (socket === ws) socket = null;
+      state.connected = false;
+      retry();
+    };
+    ws.onerror = () => {};
+  };
+  const start = () => {
+    if (state.enabled || typeof WebSocket === "undefined") return;
+    state.enabled = true;
+    connect();
+  };
+  const subscribe = (fn) => {
+    subscribers.add(fn);
+    return () => subscribers.delete(fn);
+  };
+  const dispose = () => {
+    state.enabled = false;
+    window.clearTimeout(timer);
+    timer = 0;
+    if (socket) {
+      const ws = socket;
+      socket = null;
+      ws.onclose = null;
+      ws.close();
+    }
+    state.connected = false;
+    subscribers.clear();
+  };
+  BL.mempool = { ENDPOINT, state, start, subscribe, dispose, emit, parse: onMessage };
+})();
+
 // ---- js/weapon-targets.js ----
 // Precise weapon contacts share the interactive targets, without hover padding.
 (() => {
@@ -30890,6 +31080,288 @@ void main() {
   BL.critters = { create };
 })();
 
+// ---- js/storm.js ----
+// Weather driven by the Bitcoin feed: each transaction rains drops sized by its weight,
+// each block strikes lightning and rolls thunder, and the next block's median fee sets the
+// overcast, sunny at a cheap block and a full storm at an expensive one. One fixed-capacity
+// instanced batch for the drops, one polyline bolt, a sky flash and an overcast tint written
+// over the clock's colours after it samples (the clock itself, its sun, moon, phases and
+// factors are never touched, and sunny leaves every sampled value as it was), and a small
+// procedural rumble on the rally's audio pattern.
+(() => {
+  "use strict";
+  const BL = window.BL = window.BL || {};
+  const { models, math } = BL;
+  const { createNode, addChild, removeChild } = BL.scene;
+  const { clamp, lerp } = math;
+  const RAIN_CAP = 480, RAIN_CAP_CANVAS = 120, RAIN_RANGE = 14, RAIN_HEIGHT = 16, RAIN_SPREAD = 6;
+  const DROP_MIN = 0.7, DROP_MAX = 4, DROP_BASE_VSIZE = 140, DROPS_MIN = 2, DROPS_MAX = 8;
+  const FALL_BASE = 10, FALL_PER_SIZE = 3, SPLASH_SIZE = 1.4;
+  const FLASH_MAX = 0.85, FLASH_TAU = 0.12, BOLT_SHOW = 0.25, BOLT_RANGE = 18, BOLT_HEIGHT = 26;
+  const THUNDER_DELAY_MIN = 0.5, THUNDER_DELAY_SPREAD = 1, STORAGE_KEY = "oogaboogaland.audio", MASTER = 0.6, NOISE_SECONDS = 2;
+  // Overcast from fee pressure on a log scale: an empty mempool or SUNNY_FEE sat/vB and under is clear, STORM_FEE and
+  // over is the full storm. Relay floors sit near 0.1 sat/vB, so a quiet night at 0.3 already reads as light cloud.
+  const SUNNY_FEE = 0.1, STORM_FEE = 20, OVERCAST_EASE = 1.5, OVERCAST_STEP = 0.05, OVERCAST_MIX = 0.7, OVERCAST_DARKEN = 0.22, OVERCAST_DIM = 0.45;
+  const OVERCAST_TINT = [0.9, 0.93, 1], FOG_NEAR = 40, FOG_FAR = 150, FOG_OFF_NEAR = 400, FOG_OFF_FAR = 600;
+  // The sky stays clear until the overcast passes a band, wider by day, so the island is sunny more often and
+  // the rain can drizzle under a clear sky; the band reads the clock's day factor and never writes it.
+  const CLEAR_NIGHT = 0.25, CLEAR_DAY = 0.55;
+  const overcastFor = (fee) => clamp(Math.log(Math.max(SUNNY_FEE, fee) / SUNNY_FEE) / Math.log(STORM_FEE / SUNNY_FEE), 0, 1);
+  const cloudFor = (overcast, day) => {
+    const band = lerp(CLEAR_NIGHT, CLEAR_DAY, clamp(day, 0, 1));
+    return clamp((overcast - band) / (1 - band), 0, 1);
+  };
+  // Desaturate toward a cool grey of the colour's own brightness, so day stays bright and night stays dark.
+  const greyen = (c, k) => {
+    if (!c) return;
+    const grey = (c[0] * 0.299 + c[1] * 0.587 + c[2] * 0.114) * (1 - OVERCAST_DARKEN * k);
+    c[0] += (grey * OVERCAST_TINT[0] - c[0]) * k;
+    c[1] += (grey * OVERCAST_TINT[1] - c[1]) * k;
+    c[2] += (grey * OVERCAST_TINT[2] - c[2]) * k;
+  };
+  const rainDrop = models.cached(() => models.noShadow(models.box({ w: 0.05, h: 0.6, d: 0.05, color: "#c6dbee", emissive: 0.45 })));
+  const SPLASH = [models.particleGeometry("#d8e8f4", 0.07, 0.6)];
+  // One jagged trunk with two branches, unit height, built once for every strike.
+  const bolt = models.cached(() => {
+    const rand = math.mulberry32(7);
+    const jag = (x0, z0, y0, y1, steps, spread) => {
+      const points = [];
+      for (let i = 0; i <= steps; i++) {
+        const t = i / steps;
+        points.push({ x: x0 + (rand() - 0.5) * spread * (i && i < steps ? 1 : 0.3), y: lerp(y0, y1, t), z: z0 + (rand() - 0.5) * spread * (i && i < steps ? 1 : 0.3) });
+      }
+      return points;
+    };
+    const trunk = jag(0, 0, 1, 0, 9, 0.16);
+    const b1 = trunk[3], b2 = trunk[6];
+    return models.merge(
+      models.polyline({ points: trunk, color: "#eef5ff", emissive: 1 }),
+      models.polyline({ points: [b1, ...jag(b1.x + 0.12, b1.z, b1.y, b1.y - 0.3, 4, 0.12).slice(1)], color: "#dbe9ff", emissive: 1 }),
+      models.polyline({ points: [b2, ...jag(b2.x - 0.1, b2.z + 0.05, b2.y, b2.y - 0.22, 3, 0.1).slice(1)], color: "#dbe9ff", emissive: 1 })
+    );
+  });
+  const brighten = (c, k) => {
+    if (!c) return;
+    c[0] += (1 - c[0]) * k;
+    c[1] += (1 - c[1]) * k;
+    c[2] += (1 - c[2]) * k;
+  };
+  // The flash strobes twice, then decays: full, dip, second bright, tail.
+  const flashAt = (t) => t < 0.08 ? 1 : t < 0.14 ? 0.25 : t < 0.22 ? 0.85 : 0.85 * Math.exp(-(t - 0.22) / FLASH_TAU);
+
+  const create = ({ root, renderer, camera, heightAt, fx = null }) => {
+    const cap = renderer.kind === "canvas2d" ? RAIN_CAP_CANVAS : RAIN_CAP;
+    const node = createNode({ geometry: rainDrop(), instanceData: new Float32Array(cap * 20), instanceCount: 0, drawInstanceCount: 0, instanceVersion: 0, fixedInstanceCapacity: true });
+    const x = new Float32Array(cap), y = new Float32Array(cap), z = new Float32Array(cap), w = new Float32Array(cap), h = new Float32Array(cap), vy = new Float32Array(cap);
+    let count = 0, transactions = 0, strikes = 0, flash = 0, flashT = -1, boltT = -1, thunderAt = -1;
+    // Sunny until the feed projects a fee, so an offline page keeps the clock's frame; the first projection snaps, later ones ease.
+    let overcast = 0, overcastTarget = 0, projected = false, nextFee = 0, cloud = 0;
+    const fog = new Float32Array(3);
+    const boltNode = createNode({ geometry: bolt(), visible: false });
+    addChild(root, node);
+    addChild(root, boltNode);
+    // Sound: the context opens only after a real gesture, so a strike on a fresh page stays silent and warns nothing.
+    let ctx = null, master = null, noise = null, rainGain = null, muted = false;
+    try {
+      muted = localStorage.getItem(STORAGE_KEY) === "off";
+    } catch {
+    }
+    const initAudio = () => {
+      if (ctx || typeof AudioContext === "undefined" || navigator.userActivation && !navigator.userActivation.hasBeenActive) return false;
+      ctx = new AudioContext();
+      master = ctx.createGain();
+      master.gain.value = muted ? 0 : MASTER;
+      master.connect(ctx.destination);
+      const buffer = ctx.createBuffer(1, Math.floor(ctx.sampleRate * NOISE_SECONDS), ctx.sampleRate);
+      const data = buffer.getChannelData(0);
+      for (let i = 0; i < data.length; i++) data[i] = Math.random() * 2 - 1;
+      noise = ctx.createBufferSource();
+      noise.buffer = buffer;
+      noise.loop = true;
+      const hiss = ctx.createBiquadFilter();
+      hiss.type = "bandpass";
+      hiss.frequency.value = 2600;
+      hiss.Q.value = 0.5;
+      rainGain = ctx.createGain();
+      rainGain.gain.value = 0;
+      noise.connect(hiss);
+      hiss.connect(rainGain);
+      rainGain.connect(master);
+      noise.start();
+      if (ctx.state === "suspended") ctx.resume();
+      return true;
+    };
+    const rumble = () => {
+      if (!initAudio() && !ctx) return;
+      const t = ctx.currentTime;
+      const low = ctx.createBiquadFilter();
+      low.type = "lowpass";
+      low.frequency.setValueAtTime(420, t);
+      low.frequency.exponentialRampToValueAtTime(90, t + 2.8);
+      low.Q.value = 1.2;
+      const g = ctx.createGain();
+      g.gain.setValueAtTime(0.0001, t);
+      g.gain.exponentialRampToValueAtTime(0.9, t + 0.06);
+      g.gain.exponentialRampToValueAtTime(0.35, t + 0.5);
+      g.gain.exponentialRampToValueAtTime(0.7, t + 0.9);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + 3.2);
+      noise.connect(low);
+      low.connect(g);
+      g.connect(master);
+      window.setTimeout(() => {
+        low.disconnect();
+        g.disconnect();
+      }, 3400);
+    };
+    const weather = (fee) => {
+      nextFee = fee;
+      const target = overcastFor(fee);
+      if (!projected) {
+        projected = true;
+        overcast = overcastTarget = target;
+      } else if (target === 0 || target === 1 || Math.abs(target - overcastTarget) >= OVERCAST_STEP) overcastTarget = target;
+    };
+    const rain = (vsize) => {
+      transactions++;
+      const size = clamp(DROP_MIN + Math.log2(Math.max(1, vsize / DROP_BASE_VSIZE)) * 0.5, DROP_MIN, DROP_MAX);
+      // Any overcast rains at least one drop a transaction; the full count comes with the full storm.
+      const drops = overcast > 0 ? Math.max(1, Math.round(Math.min(DROPS_MAX, DROPS_MIN + Math.floor(vsize / 200)) * overcast)) : 0;
+      const t = camera.target;
+      for (let n = 0; n < drops && count < cap; n++, count++) {
+        const a = Math.random() * Math.PI * 2, r = Math.sqrt(Math.random()) * RAIN_RANGE;
+        x[count] = t.x + Math.cos(a) * r;
+        z[count] = t.z + Math.sin(a) * r;
+        y[count] = t.y + RAIN_HEIGHT + Math.random() * RAIN_SPREAD;
+        w[count] = size;
+        h[count] = 0.8 + size * 0.35;
+        vy[count] = FALL_BASE + FALL_PER_SIZE * size;
+      }
+    };
+    const strike = () => {
+      strikes++;
+      flashT = 0;
+      boltT = 0;
+      thunderAt = THUNDER_DELAY_MIN + Math.random() * THUNDER_DELAY_SPREAD;
+      const a = Math.random() * Math.PI * 2, r = 6 + Math.random() * (BOLT_RANGE - 6), t = camera.target;
+      const bx = t.x + Math.cos(a) * r, bz = t.z + Math.sin(a) * r;
+      const ground = heightAt(bx, bz);
+      boltNode.position.x = bx;
+      boltNode.position.z = bz;
+      boltNode.position.y = ground;
+      boltNode.rotation.y = Math.random() * Math.PI * 2;
+      boltNode.scale.x = boltNode.scale.z = 4 + Math.random() * 3;
+      boltNode.scale.y = t.y + RAIN_HEIGHT + BOLT_HEIGHT - ground;
+      boltNode.visible = true;
+    };
+    const update = (dt, opts) => {
+      const previousCount = node.instanceCount;
+      // A steady walk, OVERCAST_EASE seconds across the whole range, so the target is reached exactly.
+      if (overcast !== overcastTarget) {
+        const step = dt / OVERCAST_EASE;
+        overcast = overcast > overcastTarget ? Math.max(overcastTarget, overcast - step) : Math.min(overcastTarget, overcast + step);
+      }
+      const data = node.instanceData;
+      for (let i = 0; i < count; i++) {
+        y[i] -= vy[i] * dt;
+        if (y[i] <= heightAt(x[i], z[i])) {
+          if (fx && w[i] >= SPLASH_SIZE) fx.burst(x[i], y[i] + 0.05, z[i], 2, SPLASH, 0.9);
+          count--;
+          x[i] = x[count]; y[i] = y[count]; z[i] = z[count]; w[i] = w[count]; h[i] = h[count]; vy[i] = vy[count];
+          i--;
+          continue;
+        }
+        const o = i * 20, s = w[i] * 0.5 + 0.5;
+        data[o] = s; data[o + 1] = 0; data[o + 2] = 0; data[o + 3] = 0;
+        data[o + 4] = 0; data[o + 5] = h[i]; data[o + 6] = 0; data[o + 7] = 0;
+        data[o + 8] = 0; data[o + 9] = 0; data[o + 10] = s; data[o + 11] = 0;
+        data[o + 12] = x[i]; data[o + 13] = y[i]; data[o + 14] = z[i]; data[o + 15] = 1;
+        data[o + 16] = 1; data[o + 17] = 0; data[o + 18] = 0; data[o + 19] = 0;
+      }
+      node.instanceCount = node.drawInstanceCount = count;
+      if (count || previousCount) node.instanceVersion++;
+      if (rainGain) rainGain.gain.setTargetAtTime(Math.min(1, count / 120) * 0.14, ctx.currentTime, 0.2);
+      if (boltT >= 0) {
+        boltT += dt;
+        if (boltT > BOLT_SHOW) {
+          boltT = -1;
+          boltNode.visible = false;
+        }
+      }
+      if (thunderAt >= 0) {
+        thunderAt -= dt;
+        if (thunderAt < 0) {
+          thunderAt = -1;
+          rumble();
+        }
+      }
+      flash = 0;
+      if (flashT >= 0) {
+        flashT += dt;
+        flash = flashAt(flashT);
+        if (flash < 0.01) {
+          flash = 0;
+          flashT = -1;
+        }
+      }
+      if (opts) {
+        // A clear sky leaves the clock's colours, light and fog exactly as sampled.
+        cloud = cloudFor(overcast, opts.day);
+        if (cloud > 0.02) {
+          const k = cloud * OVERCAST_MIX;
+          greyen(opts.clear, k); greyen(opts.horizon, k); greyen(opts.zenith, k);
+          greyen(opts.sky, k); greyen(opts.ground, k); greyen(opts.direct, k);
+          opts.directStrength *= 1 - cloud * (1 - OVERCAST_DIM);
+          fog[0] = opts.horizon[0]; fog[1] = opts.horizon[1]; fog[2] = opts.horizon[2];
+          opts.fog = fog;
+          opts.fogNear = lerp(FOG_OFF_NEAR, FOG_NEAR, cloud);
+          opts.fogFar = lerp(FOG_OFF_FAR, FOG_FAR, cloud);
+        } else opts.fog = null;
+      }
+      if (flash > 0 && opts) {
+        const k = flash * FLASH_MAX;
+        brighten(opts.clear, k); brighten(opts.horizon, k); brighten(opts.zenith, k);
+        brighten(opts.sky, k); brighten(opts.ground, k); brighten(opts.direct, k);
+        opts.ambientFloor = lerp(opts.ambientFloor, 0.9, k);
+        opts.directStrength *= 1 + k;
+      }
+    };
+    const setMuted = (on) => {
+      muted = !!on;
+      if (master) master.gain.setTargetAtTime(muted ? 0 : MASTER, ctx.currentTime, 0.05);
+    };
+    const dispose = () => {
+      removeChild(root, node);
+      removeChild(root, boltNode);
+      count = 0;
+      if (ctx) ctx.close();
+      ctx = master = noise = rainGain = null;
+    };
+    const state = {
+      get drops() { return count; },
+      get capacity() { return cap; },
+      get flash() { return flash; },
+      get bolt() { return boltT >= 0; },
+      get thunderPending() { return thunderAt >= 0; },
+      get strikes() { return strikes; },
+      get overcast() { return overcast; },
+      get overcastTarget() { return overcastTarget; },
+      get cloud() { return cloud; },
+      get nextFee() { return nextFee; },
+      get projected() { return projected; },
+      get transactions() { return transactions; },
+      get audio() { return !!ctx; },
+      get muted() { return muted; },
+      drop: (i) => i < count ? { x: x[i], y: y[i], z: z[i], size: w[i], fall: vy[i] } : null
+    };
+    return {
+      rain, strike, weather, update, setMuted, dispose, state,
+      get active() { return count > 0 || flashT >= 0 || boltT >= 0 || thunderAt >= 0; },
+      stats: () => ({ rainDrops: count, strikes })
+    };
+  };
+  BL.storm = { RAIN_CAP, SUNNY_FEE, STORM_FEE, CLEAR_NIGHT, CLEAR_DAY, overcastFor, cloudFor, create };
+})();
+
 // ---- js/race-models.js ----
 // Race props: mounts, gantry, pickups, spectators, themed decor; one cached geometry per builder.
 (() => {
@@ -33283,7 +33755,7 @@ void main() {
 (() => {
   "use strict";
   const BL = window.BL = window.BL || {};
-  const { math, models, contributors, donations, qr, terrain, hubModels, headquartersModels, dropModels, rocketModels, rocketParts, caves, daylight, game: gameMod, hud: hudMod, interact: interactMod, pilot: pilotMod, fx: fxMod, crew: crewMod, pile: pileMod, crates: cratesMod, critters: crittersMod } = BL;
+  const { math, models, contributors, donations, qr, terrain, hubModels, headquartersModels, dropModels, rocketModels, rocketParts, caves, daylight, game: gameMod, hud: hudMod, interact: interactMod, pilot: pilotMod, fx: fxMod, crew: crewMod, pile: pileMod, crates: cratesMod, critters: crittersMod, storm: stormMod, mempool } = BL;
   const { clamp, lerp, ease, fnv1a, mulberry32 } = math;
   const { createNode, addChild, removeChild, createCamera, addTween, stepTweens, tweenCount, traverseVisible } = BL.scene;
   const { JET_SPEED, JET_RISE, JET_FUEL_SECONDS, JET_MOVE_SECONDS } = crewMod;
@@ -33454,6 +33926,7 @@ void main() {
   const JETPACK_HUD_STATE = { owned: false, equipped: false, fuel: 1, blocked: false };
   let enteringTween = null;
   let stateTimer = 0, hintTimer = 0, meterTimer = 0, now = 0, hour = 12, unsubscribeActivity = null;
+  let storm = null, unsubscribeMempool = null;
   let positionDebugNext = 0, positionDebugJSON = "";
   function createPositionPose() {
     return { version: 1, character: "", mode: "orbit", position: [0, 0, 0], target: [0, 0, -1], direction: [0, 0, -1], up: [0, 1, 0], fov: 48 * Math.PI / 180,
@@ -36022,6 +36495,15 @@ void main() {
     fx.burst(0, DROP_HEIGHT - 0.2, 0, 26, CONFETTI, 2.2);
     fx.showTicker(`THANKS ${donation.handle ? "@" + donation.handle.toUpperCase() : "ANON"} · ${bananas} BANANAS`, 4.5);
   };
+  // The Bitcoin feed: a transaction rains drops sized by its weight, a block strikes and thunders.
+  const onMempool = (event) => {
+    if (event.type === "tx") storm.rain(event.vsize);
+    else if (event.type === "fees") storm.weather(event.nextFee);
+    else if (event.type === "block") {
+      storm.strike();
+      hud.toast(`Block ${event.height} mined${event.txCount ? ` · ${event.txCount} transactions` : ""}`);
+    }
+  };
   const onDonation = (donation) => {
     game.recordDonation(donation);
     const bananas = gameMod.bananasFor(donation.sats);
@@ -37338,6 +37820,7 @@ void main() {
     hour = clock.read();
     daylight.sample(hour, RENDER_OPTS, clock.dayOfYear, islandLatitude, clock.continuousDay);
     RENDER_OPTS.time = elapsed;
+    storm.update(dt, RENDER_OPTS);
     updateLamps(dt, elapsed, phase !== null);
     if (jumbotron) jumbotron.update(elapsed, renderer);
     const next = daylight.phaseAt(hour);
@@ -37838,6 +38321,9 @@ void main() {
     shared.onAbyssRespawn = loseMagazine;
     shared.characterOccluded = characterUiOccluded;
     fx = shared.fx = fxMod.create(shared);
+    storm = stormMod.create({ root, renderer, camera, heightAt: island.surfaceAt, fx });
+    if (mempool.state.projectedBlocks) storm.weather(mempool.state.nextFee);
+    unsubscribeMempool = mempool.subscribe(onMempool);
     shared.characterSupportAt = characterSupportAt;
     shared.carryCharacter = carryCharacter;
     shared.npcWalkable = npcWalkable;
@@ -38127,7 +38613,7 @@ void main() {
         get shown() {
           return pile.shown;
         },
-        island, mouths: island.mouths, labels, launchers, camera, cameraPose: POSITION_POSE, crew, controls: pilot.controls, props, altar, path: island.path.debug, headquarters, jumbotron, agent: agent.debug,
+        island, mouths: island.mouths, labels, launchers, camera, storm, cameraPose: POSITION_POSE, crew, controls: pilot.controls, props, altar, path: island.path.debug, headquarters, jumbotron, agent: agent.debug,
         scenery: {
           get candidateCount() { return scenery.length; },
           get visibleCount() { return sceneryVisible; },
@@ -38362,6 +38848,9 @@ void main() {
     window.clearInterval(stateTimer);
     unsubscribeActivity();
     unsubscribeActivity = null;
+    unsubscribeMempool();
+    unsubscribeMempool = null;
+    storm.dispose();
     window.clearTimeout(hintTimer);
     if (positionDebug) {
       positionDebug.removeEventListener("click", copyPositionDebug);
@@ -38428,7 +38917,7 @@ void main() {
     hud.dispose();
     // Drop every per-visit ref but the cached island.
     pathNode = altar = hud = hooks = input = pilot = fx = cameraCover = bananaCover = solids = rockGuides = objectGuides = sightGuides = bananaGuides = pileGuides = platformGuides = mirrorGuides = pile = crew = crates = critters = clock = presets = jetpack = jetpackState = jetpackCarrier = jetpackWearer = lastJetpackCloud = mirrorCave = matrixCave = matrixControl = gateRain = fire = headquarters = positionDebug = agent = agentPlay = null;
-    magazine = magazineState = breakables = null;
+    magazine = magazineState = breakables = storm = null;
     hubScene.input = hubScene.debug = hubScene.agent = hubScene.agentView = hubScene.agentControls = hubScene.agentHandoff = null;
     return { targets: count };
   };
@@ -38443,13 +38932,13 @@ void main() {
     let nodes = 0;
     traverseVisible(root, () => nodes++);
     const all = (n) => 1 + n.children.reduce((sum, c) => sum + all(c), 0);
-    return { visibleNodes: nodes, allNodes: all(root), tweens: tweenCount(), targets: input.targetCount, ...fx.stats(), ...crates.stats(), ...crew.stats(), ...pile.stats(), ...critters.stats(), ...breakables.stats() };
+    return { visibleNodes: nodes, allNodes: all(root), tweens: tweenCount(), targets: input.targetCount, ...fx.stats(), ...crates.stats(), ...crew.stats(), ...pile.stats(), ...critters.stats(), ...breakables.stats(), ...storm.stats() };
   };
   const hubScene = {
     id: "hub", enter, update, overlay, onDonation, onKey, onLootCleared, renderOpts: RENDER_OPTS, leave, stats, liveGeometry,
     root: null, camera: null, input: null, debug: null, agent: null, agentView: null, agentControls: null, agentHandoff: null,
     get inMotion() {
-      if (pile.inMotion || fx.inMotion || breakables.inMotion || jetpack || magazine && magazine.revealed || MATRIX_WORLD.active || mirrorGuides.state.doorway || mirrorCave.damage.active || mirrorCave.ripples.active || mirrorCave.body.active) return true;
+      if (pile.inMotion || fx.inMotion || breakables.inMotion || storm.active || jetpack || magazine && magazine.revealed || MATRIX_WORLD.active || mirrorGuides.state.doorway || mirrorCave.damage.active || mirrorCave.ripples.active || mirrorCave.body.active) return true;
       for (const sign of headquarters.roomSigns) if (sign.velocity || sign.node.rotation.x) return true;
       for (let i = 0; i < matrixGates.length; i++) if (matrixCave && (matrixGates[i].raising || matrixCave.unlocked && matrixGates[i].node.position.y !== MATRIX_GATE_HIDDEN_Y)) return true;
       return false;
@@ -48652,6 +49141,12 @@ window.BL.dsbAudioData.music = "SUQzBAAAAAABAFRYWFgAAAASAAADbWFqb3JfYnJhbmQAZGFz
     if (e.repeat) return;
     const typing = e.target && (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA");
     if (typing || (e.target && e.target.closest && e.target.closest("dialog"))) return;
+    const key = e.key.length === 1 ? e.key.toLowerCase() : e.key;
+    konamiAt = key === KONAMI[konamiAt] ? konamiAt + 1 : key === KONAMI[0] ? 1 : 0;
+    if (konamiAt === KONAMI.length) {
+      konamiAt = 0;
+      feedPanel.toggle();
+    }
     if (LOOT_ENABLED && e.shiftKey && (e.key === "Delete" || e.key === "Backspace")) {
       e.preventDefault();
       game.clearLoot();
@@ -48685,7 +49180,60 @@ window.BL.dsbAudioData.music = "SUQzBAAAAAABAFRYWFgAAAASAAADbWFqb3JfYnJhbmQAZGFz
   window.addEventListener("keydown", onKeyDown);
   document.addEventListener("visibilitychange", onVisibility);
   if (params.has("nosim")) donations.config.simulate = false;
+  // The live feed stays off under nosim (the suite) and mempool=0; checks drive the hub's storm through emit.
+  const mempool = window.BL.mempool;
+  if (!params.has("nosim") && params.get("mempool") !== "0") mempool.start();
   const unsubscribeDonations = donations.subscribe((donation) => active.onDonation(donation), { identity: () => game.state });
+  // The feed panel: the Konami code toggles a page-wide readout of the socket, its counters and its last events.
+  // It subscribes and ticks only while open, and its text nodes change only with their value.
+  const KONAMI = ["ArrowUp", "ArrowUp", "ArrowDown", "ArrowDown", "ArrowLeft", "ArrowRight", "ArrowLeft", "ArrowRight", "b", "a"];
+  const FEED_LOG = 24, FEED_TICK = 250;
+  let konamiAt = 0;
+  const feedPanel = (() => {
+    const el = document.getElementById("feed-debug"), stateEl = document.getElementById("feed-debug-state"), logEl = document.getElementById("feed-debug-log");
+    const log = new Array(FEED_LOG).fill("");
+    let logNext = 0, logCount = 0, timer = 0, unsubscribe = null, dirty = false;
+    const stamp = () => new Date().toTimeString().slice(0, 8);
+    const push = (line) => {
+      log[logNext] = `${stamp()}  ${line}`;
+      logNext = (logNext + 1) % FEED_LOG;
+      if (logCount < FEED_LOG) logCount++;
+      dirty = true;
+    };
+    const describe = (e) => e.type === "tx" ? `tx     ${e.vsize} vB · ${(e.fee / e.vsize).toFixed(1)} sat/vB · fee ${e.fee}`
+      : e.type === "block" ? `block  ${e.height} · ${e.txCount} tx`
+      : e.type === "fees" ? `fees   next block ${e.nextFee.toFixed(2)} sat/vB · ${e.blocks} projected`
+      : `${e.type}`;
+    const render = () => {
+      const s = mempool.state, storm = active && active.debug && active.debug.storm;
+      const link = !s.enabled ? "off (nosim or mempool=0)" : s.connected ? `connected · attempt ${s.attempts}` : `reconnecting · attempt ${s.attempts}`;
+      const age = s.lastAt ? `${((Date.now() - s.lastAt) / 1000).toFixed(1)} s ago` : "none yet";
+      const text = `socket    ${link}\nlast msg  ${age}${s.lastKeys ? ` · ${s.lastKeys}` : ""}\nmessages  ${s.messages} · ${(s.bytes / 1024).toFixed(0)} KB\nchain     height ${s.height} · next block ${s.nextFee.toFixed(2)} sat/vB · ${s.projectedBlocks} projected\nevents    ${s.transactions} tx · ${s.blocks} blocks\nweather   ${storm ? `overcast ${storm.state.overcast.toFixed(2)} → ${storm.state.overcastTarget.toFixed(2)} · cloud ${storm.state.cloud.toFixed(2)} · ${storm.state.drops} drops · ${storm.state.strikes} strikes` : "no storm in this scene"}`;
+      if (stateEl.textContent !== text) stateEl.textContent = text;
+      if (!dirty) return;
+      dirty = false;
+      let lines = "";
+      for (let i = 0; i < logCount; i++) lines += `${log[(logNext - logCount + i + FEED_LOG) % FEED_LOG]}\n`;
+      logEl.textContent = lines || "no events yet";
+    };
+    const open = () => {
+      el.hidden = false;
+      dirty = true;
+      render();
+      unsubscribe = mempool.subscribe((e) => push(describe(e)));
+      timer = window.setInterval(render, FEED_TICK);
+    };
+    const close = () => {
+      el.hidden = true;
+      window.clearInterval(timer);
+      timer = 0;
+      if (unsubscribe) unsubscribe();
+      unsubscribe = null;
+    };
+    const toggle = () => (el.hidden ? open() : close());
+    document.getElementById("feed-debug-close").addEventListener("click", close);
+    return { toggle, close, get open() { return !el.hidden; }, get logged() { return logCount; } };
+  })();
   const housekeepTimer = window.setInterval(housekeep, 6e4);
   const sceneId = params.get("scene");
   // Building the first scene holds the main thread with nothing painted yet.
@@ -48708,6 +49256,8 @@ window.BL.dsbAudioData.music = "SUQzBAAAAAABAFRYWFgAAAASAAADbWFqb3JfYnJhbmQAZGFz
       project: renderer.project,
       housekeep,
       go,
+      mempool,
+      feedPanel,
       // Whole frames at a fixed step without waiting on the display: a check runs seconds of play in little wall time.
       advance: (seconds, dt = 1 / 60) => {
         for (let n = Math.round(seconds / dt); n > 0; n--) {
@@ -48742,7 +49292,7 @@ window.BL.dsbAudioData.music = "SUQzBAAAAAABAFRYWFgAAAASAAADbWFqb3JfYnJhbmQAZGFz
         return world.level;
       }
     };
-    for (const key of ["slots", "drops", "core", "shell", "delivery", "spillEffect", "cavemen", "crates", "lab", "headquarters", "hud", "applyAllSwag", "renderLocker", "demoTip", "setPileLevel", "refreshStates", "trimPool", "shown", "island", "mouths", "labels", "camera", "cameraCave", "crew", "controls", "props", "altar", "path", "scenery", "jetpack", "magazine", "mirrorCave", "matrixCave", "matrixGate", "pilot", "renderOpts", "lamps", "entranceLights", "lighting", "fireSeats", "critters", "daylight", "setHour", "track", "racers", "items", "race", "audio", "weather", "launchers", "drop", "diver", "plane", "course", "jumbotron", "orbit", "flight", "site", "agent", "dsb"]) {
+    for (const key of ["slots", "drops", "core", "shell", "delivery", "spillEffect", "cavemen", "crates", "lab", "headquarters", "hud", "applyAllSwag", "renderLocker", "demoTip", "setPileLevel", "refreshStates", "trimPool", "shown", "island", "mouths", "labels", "camera", "cameraCave", "crew", "controls", "props", "altar", "path", "scenery", "jetpack", "magazine", "mirrorCave", "matrixCave", "matrixGate", "pilot", "renderOpts", "lamps", "entranceLights", "lighting", "fireSeats", "critters", "storm", "daylight", "setHour", "track", "racers", "items", "race", "audio", "weather", "launchers", "drop", "diver", "plane", "course", "jumbotron", "orbit", "flight", "site", "agent", "dsb"]) {
       Object.defineProperty(ooga, key, { get: () => active.debug && active.debug[key], enumerable: true });
     }
     window.__ooga = ooga;
@@ -48751,6 +49301,8 @@ window.BL.dsbAudioData.music = "SUQzBAAAAAABAFRYWFgAAAASAAADbWFqb3JfYnJhbmQAZGFz
     window.cancelAnimationFrame(raf);
     window.clearInterval(housekeepTimer);
     unsubscribeDonations();
+    feedPanel.close();
+    mempool.dispose();
     window.removeEventListener("keydown", onKeyDown);
     document.removeEventListener("visibilitychange", onVisibility);
     active.leave();

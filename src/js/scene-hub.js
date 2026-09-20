@@ -1,7 +1,7 @@
 (() => {
   "use strict";
   const BL = window.BL = window.BL || {};
-  const { math, models, contributors, donations, qr, terrain, hubModels, headquartersModels, dropModels, rocketModels, rocketParts, caves, daylight, game: gameMod, hud: hudMod, interact: interactMod, pilot: pilotMod, fx: fxMod, crew: crewMod, pile: pileMod, crates: cratesMod, critters: crittersMod } = BL;
+  const { math, models, contributors, donations, qr, terrain, hubModels, headquartersModels, dropModels, rocketModels, rocketParts, caves, daylight, game: gameMod, hud: hudMod, interact: interactMod, pilot: pilotMod, fx: fxMod, crew: crewMod, pile: pileMod, crates: cratesMod, critters: crittersMod, storm: stormMod, mempool } = BL;
   const { clamp, lerp, ease, fnv1a, mulberry32 } = math;
   const { createNode, addChild, removeChild, createCamera, addTween, stepTweens, tweenCount, traverseVisible } = BL.scene;
   const { JET_SPEED, JET_RISE, JET_FUEL_SECONDS, JET_MOVE_SECONDS } = crewMod;
@@ -172,6 +172,7 @@
   const JETPACK_HUD_STATE = { owned: false, equipped: false, fuel: 1, blocked: false };
   let enteringTween = null;
   let stateTimer = 0, hintTimer = 0, meterTimer = 0, now = 0, hour = 12, unsubscribeActivity = null;
+  let storm = null, unsubscribeMempool = null;
   let positionDebugNext = 0, positionDebugJSON = "";
   function createPositionPose() {
     return { version: 1, character: "", mode: "orbit", position: [0, 0, 0], target: [0, 0, -1], direction: [0, 0, -1], up: [0, 1, 0], fov: 48 * Math.PI / 180,
@@ -2740,6 +2741,15 @@
     fx.burst(0, DROP_HEIGHT - 0.2, 0, 26, CONFETTI, 2.2);
     fx.showTicker(`THANKS ${donation.handle ? "@" + donation.handle.toUpperCase() : "ANON"} · ${bananas} BANANAS`, 4.5);
   };
+  // The Bitcoin feed: a transaction rains drops sized by its weight, a block strikes and thunders.
+  const onMempool = (event) => {
+    if (event.type === "tx") storm.rain(event.vsize);
+    else if (event.type === "fees") storm.weather(event.nextFee);
+    else if (event.type === "block") {
+      storm.strike();
+      hud.toast(`Block ${event.height} mined${event.txCount ? ` · ${event.txCount} transactions` : ""}`);
+    }
+  };
   const onDonation = (donation) => {
     game.recordDonation(donation);
     const bananas = gameMod.bananasFor(donation.sats);
@@ -4056,6 +4066,7 @@
     hour = clock.read();
     daylight.sample(hour, RENDER_OPTS, clock.dayOfYear, islandLatitude, clock.continuousDay);
     RENDER_OPTS.time = elapsed;
+    storm.update(dt, RENDER_OPTS);
     updateLamps(dt, elapsed, phase !== null);
     if (jumbotron) jumbotron.update(elapsed, renderer);
     const next = daylight.phaseAt(hour);
@@ -4556,6 +4567,9 @@
     shared.onAbyssRespawn = loseMagazine;
     shared.characterOccluded = characterUiOccluded;
     fx = shared.fx = fxMod.create(shared);
+    storm = stormMod.create({ root, renderer, camera, heightAt: island.surfaceAt, fx });
+    if (mempool.state.projectedBlocks) storm.weather(mempool.state.nextFee);
+    unsubscribeMempool = mempool.subscribe(onMempool);
     shared.characterSupportAt = characterSupportAt;
     shared.carryCharacter = carryCharacter;
     shared.npcWalkable = npcWalkable;
@@ -4845,7 +4859,7 @@
         get shown() {
           return pile.shown;
         },
-        island, mouths: island.mouths, labels, launchers, camera, cameraPose: POSITION_POSE, crew, controls: pilot.controls, props, altar, path: island.path.debug, headquarters, jumbotron, agent: agent.debug,
+        island, mouths: island.mouths, labels, launchers, camera, storm, cameraPose: POSITION_POSE, crew, controls: pilot.controls, props, altar, path: island.path.debug, headquarters, jumbotron, agent: agent.debug,
         scenery: {
           get candidateCount() { return scenery.length; },
           get visibleCount() { return sceneryVisible; },
@@ -5080,6 +5094,9 @@
     window.clearInterval(stateTimer);
     unsubscribeActivity();
     unsubscribeActivity = null;
+    unsubscribeMempool();
+    unsubscribeMempool = null;
+    storm.dispose();
     window.clearTimeout(hintTimer);
     if (positionDebug) {
       positionDebug.removeEventListener("click", copyPositionDebug);
@@ -5146,7 +5163,7 @@
     hud.dispose();
     // Drop every per-visit ref but the cached island.
     pathNode = altar = hud = hooks = input = pilot = fx = cameraCover = bananaCover = solids = rockGuides = objectGuides = sightGuides = bananaGuides = pileGuides = platformGuides = mirrorGuides = pile = crew = crates = critters = clock = presets = jetpack = jetpackState = jetpackCarrier = jetpackWearer = lastJetpackCloud = mirrorCave = matrixCave = matrixControl = gateRain = fire = headquarters = positionDebug = agent = agentPlay = null;
-    magazine = magazineState = breakables = null;
+    magazine = magazineState = breakables = storm = null;
     hubScene.input = hubScene.debug = hubScene.agent = hubScene.agentView = hubScene.agentControls = hubScene.agentHandoff = null;
     return { targets: count };
   };
@@ -5161,13 +5178,13 @@
     let nodes = 0;
     traverseVisible(root, () => nodes++);
     const all = (n) => 1 + n.children.reduce((sum, c) => sum + all(c), 0);
-    return { visibleNodes: nodes, allNodes: all(root), tweens: tweenCount(), targets: input.targetCount, ...fx.stats(), ...crates.stats(), ...crew.stats(), ...pile.stats(), ...critters.stats(), ...breakables.stats() };
+    return { visibleNodes: nodes, allNodes: all(root), tweens: tweenCount(), targets: input.targetCount, ...fx.stats(), ...crates.stats(), ...crew.stats(), ...pile.stats(), ...critters.stats(), ...breakables.stats(), ...storm.stats() };
   };
   const hubScene = {
     id: "hub", enter, update, overlay, onDonation, onKey, onLootCleared, renderOpts: RENDER_OPTS, leave, stats, liveGeometry,
     root: null, camera: null, input: null, debug: null, agent: null, agentView: null, agentControls: null, agentHandoff: null,
     get inMotion() {
-      if (pile.inMotion || fx.inMotion || breakables.inMotion || jetpack || magazine && magazine.revealed || MATRIX_WORLD.active || mirrorGuides.state.doorway || mirrorCave.damage.active || mirrorCave.ripples.active || mirrorCave.body.active) return true;
+      if (pile.inMotion || fx.inMotion || breakables.inMotion || storm.active || jetpack || magazine && magazine.revealed || MATRIX_WORLD.active || mirrorGuides.state.doorway || mirrorCave.damage.active || mirrorCave.ripples.active || mirrorCave.body.active) return true;
       for (const sign of headquarters.roomSigns) if (sign.velocity || sign.node.rotation.x) return true;
       for (let i = 0; i < matrixGates.length; i++) if (matrixCave && (matrixGates[i].raising || matrixCave.unlocked && matrixGates[i].node.position.y !== MATRIX_GATE_HIDDEN_Y)) return true;
       return false;

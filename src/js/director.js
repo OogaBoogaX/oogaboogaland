@@ -284,6 +284,12 @@
     if (e.repeat) return;
     const typing = e.target && (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA");
     if (typing || (e.target && e.target.closest && e.target.closest("dialog"))) return;
+    const key = e.key.length === 1 ? e.key.toLowerCase() : e.key;
+    konamiAt = key === KONAMI[konamiAt] ? konamiAt + 1 : key === KONAMI[0] ? 1 : 0;
+    if (konamiAt === KONAMI.length) {
+      konamiAt = 0;
+      feedPanel.toggle();
+    }
     if (LOOT_ENABLED && e.shiftKey && (e.key === "Delete" || e.key === "Backspace")) {
       e.preventDefault();
       game.clearLoot();
@@ -317,7 +323,60 @@
   window.addEventListener("keydown", onKeyDown);
   document.addEventListener("visibilitychange", onVisibility);
   if (params.has("nosim")) donations.config.simulate = false;
+  // The live feed stays off under nosim (the suite) and mempool=0; checks drive the hub's storm through emit.
+  const mempool = window.BL.mempool;
+  if (!params.has("nosim") && params.get("mempool") !== "0") mempool.start();
   const unsubscribeDonations = donations.subscribe((donation) => active.onDonation(donation), { identity: () => game.state });
+  // The feed panel: the Konami code toggles a page-wide readout of the socket, its counters and its last events.
+  // It subscribes and ticks only while open, and its text nodes change only with their value.
+  const KONAMI = ["ArrowUp", "ArrowUp", "ArrowDown", "ArrowDown", "ArrowLeft", "ArrowRight", "ArrowLeft", "ArrowRight", "b", "a"];
+  const FEED_LOG = 24, FEED_TICK = 250;
+  let konamiAt = 0;
+  const feedPanel = (() => {
+    const el = document.getElementById("feed-debug"), stateEl = document.getElementById("feed-debug-state"), logEl = document.getElementById("feed-debug-log");
+    const log = new Array(FEED_LOG).fill("");
+    let logNext = 0, logCount = 0, timer = 0, unsubscribe = null, dirty = false;
+    const stamp = () => new Date().toTimeString().slice(0, 8);
+    const push = (line) => {
+      log[logNext] = `${stamp()}  ${line}`;
+      logNext = (logNext + 1) % FEED_LOG;
+      if (logCount < FEED_LOG) logCount++;
+      dirty = true;
+    };
+    const describe = (e) => e.type === "tx" ? `tx     ${e.vsize} vB · ${(e.fee / e.vsize).toFixed(1)} sat/vB · fee ${e.fee}`
+      : e.type === "block" ? `block  ${e.height} · ${e.txCount} tx`
+      : e.type === "fees" ? `fees   next block ${e.nextFee.toFixed(2)} sat/vB · ${e.blocks} projected`
+      : `${e.type}`;
+    const render = () => {
+      const s = mempool.state, storm = active && active.debug && active.debug.storm;
+      const link = !s.enabled ? "off (nosim or mempool=0)" : s.connected ? `connected · attempt ${s.attempts}` : `reconnecting · attempt ${s.attempts}`;
+      const age = s.lastAt ? `${((Date.now() - s.lastAt) / 1000).toFixed(1)} s ago` : "none yet";
+      const text = `socket    ${link}\nlast msg  ${age}${s.lastKeys ? ` · ${s.lastKeys}` : ""}\nmessages  ${s.messages} · ${(s.bytes / 1024).toFixed(0)} KB\nchain     height ${s.height} · next block ${s.nextFee.toFixed(2)} sat/vB · ${s.projectedBlocks} projected\nevents    ${s.transactions} tx · ${s.blocks} blocks\nweather   ${storm ? `overcast ${storm.state.overcast.toFixed(2)} → ${storm.state.overcastTarget.toFixed(2)} · cloud ${storm.state.cloud.toFixed(2)} · ${storm.state.drops} drops · ${storm.state.strikes} strikes` : "no storm in this scene"}`;
+      if (stateEl.textContent !== text) stateEl.textContent = text;
+      if (!dirty) return;
+      dirty = false;
+      let lines = "";
+      for (let i = 0; i < logCount; i++) lines += `${log[(logNext - logCount + i + FEED_LOG) % FEED_LOG]}\n`;
+      logEl.textContent = lines || "no events yet";
+    };
+    const open = () => {
+      el.hidden = false;
+      dirty = true;
+      render();
+      unsubscribe = mempool.subscribe((e) => push(describe(e)));
+      timer = window.setInterval(render, FEED_TICK);
+    };
+    const close = () => {
+      el.hidden = true;
+      window.clearInterval(timer);
+      timer = 0;
+      if (unsubscribe) unsubscribe();
+      unsubscribe = null;
+    };
+    const toggle = () => (el.hidden ? open() : close());
+    document.getElementById("feed-debug-close").addEventListener("click", close);
+    return { toggle, close, get open() { return !el.hidden; }, get logged() { return logCount; } };
+  })();
   const housekeepTimer = window.setInterval(housekeep, 6e4);
   const sceneId = params.get("scene");
   // Building the first scene holds the main thread with nothing painted yet.
@@ -340,6 +399,8 @@
       project: renderer.project,
       housekeep,
       go,
+      mempool,
+      feedPanel,
       // Whole frames at a fixed step without waiting on the display: a check runs seconds of play in little wall time.
       advance: (seconds, dt = 1 / 60) => {
         for (let n = Math.round(seconds / dt); n > 0; n--) {
@@ -374,7 +435,7 @@
         return world.level;
       }
     };
-    for (const key of ["slots", "drops", "core", "shell", "delivery", "spillEffect", "cavemen", "crates", "lab", "headquarters", "hud", "applyAllSwag", "renderLocker", "demoTip", "setPileLevel", "refreshStates", "trimPool", "shown", "island", "mouths", "labels", "camera", "cameraCave", "crew", "controls", "props", "altar", "path", "scenery", "jetpack", "magazine", "mirrorCave", "matrixCave", "matrixGate", "pilot", "renderOpts", "lamps", "entranceLights", "lighting", "fireSeats", "critters", "daylight", "setHour", "track", "racers", "items", "race", "audio", "weather", "launchers", "drop", "diver", "plane", "course", "jumbotron", "orbit", "flight", "site", "agent", "dsb"]) {
+    for (const key of ["slots", "drops", "core", "shell", "delivery", "spillEffect", "cavemen", "crates", "lab", "headquarters", "hud", "applyAllSwag", "renderLocker", "demoTip", "setPileLevel", "refreshStates", "trimPool", "shown", "island", "mouths", "labels", "camera", "cameraCave", "crew", "controls", "props", "altar", "path", "scenery", "jetpack", "magazine", "mirrorCave", "matrixCave", "matrixGate", "pilot", "renderOpts", "lamps", "entranceLights", "lighting", "fireSeats", "critters", "storm", "daylight", "setHour", "track", "racers", "items", "race", "audio", "weather", "launchers", "drop", "diver", "plane", "course", "jumbotron", "orbit", "flight", "site", "agent", "dsb"]) {
       Object.defineProperty(ooga, key, { get: () => active.debug && active.debug[key], enumerable: true });
     }
     window.__ooga = ooga;
@@ -383,6 +444,8 @@
     window.cancelAnimationFrame(raf);
     window.clearInterval(housekeepTimer);
     unsubscribeDonations();
+    feedPanel.close();
+    mempool.dispose();
     window.removeEventListener("keydown", onKeyDown);
     document.removeEventListener("visibilitychange", onVisibility);
     active.leave();

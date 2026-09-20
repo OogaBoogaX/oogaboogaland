@@ -24345,6 +24345,24 @@ const dsbExit = async (b) => {
   await untilPage(b, 'B.scene === "hub" && !B.transitioning', 15000);
 };
 task("dsb zuzu conversation", () => withPage("dsb zuzu conversation", hubPage(dist), async (b) => {
+  const weather = await b.evaluate(`(() => {
+    const B = __ooga, m = B.mempool, s = B.storm;
+    const exports = ["agent", "storm", "dsb"].every(key => Object.hasOwn(B, key));
+    m.parse(JSON.stringify({ "mempool-blocks": [{ medianFee: 20 }] }));
+    m.parse(JSON.stringify({ "mempool-transactions": { added: [{ vsize: 140, fee: 100 }] } }));
+    m.parse(JSON.stringify({ blocks: [{ height: 900000 }] }));
+    m.parse(JSON.stringify({ block: { height: 900001, tx_count: 12 } }));
+    B.advance(1 / 60);
+    const result = { exports, offline: !m.state.enabled, projected: s.state.projected, rain: s.state.drops, strikes: s.state.strikes, transactions: m.state.transactions };
+    m.parse(JSON.stringify({ "mempool-blocks": [] })); B.advance(5);
+    return result;
+  })()`);
+  record("dsb compatibility: upstream mempool events drive hub weather and all debug exports survive", weather.exports && weather.offline && weather.projected && weather.rain > 0 && weather.strikes === 1 && weather.transactions === 1, JSON.stringify(weather));
+  record("dsb compatibility: built CSP preserves exactly the weather and DSB network permissions", await b.evaluate(`(() => {
+    const policy = document.querySelector('meta[http-equiv="Content-Security-Policy"]').content;
+    const sources = name => policy.split(";").map(s => s.trim().split(/\\s+/)).find(s => s[0] === name).slice(1).sort().join("|");
+    return sources("connect-src") === ["wss://mempool.space", "https://noderunnersradio.com", "https://mempool.space", "https://api.exchange.coinbase.com", "wss://ws-feed.exchange.coinbase.com"].sort().join("|") && sources("media-src") === "https://stream.noderunnersradio.com" && !policy.includes("unsafe-");
+  })()`));
   record("dsb compatibility: hub initializes upstream agent and both debug exports", await b.evaluate(`__ooga.scene === "hub" && !!__ooga.agent && !!BL.agent && !!BL.characters.get("genXbtc") && Object.hasOwn(__ooga, "agent") && Object.hasOwn(__ooga, "dsb") && !__ooga.dsb`));
   await b.evaluate(`(() => {
     const B = __ooga, cave = B.cavemen.get("genXbtc"), m = B.mouths.find(m => m.id === "c10");
@@ -25097,6 +25115,203 @@ const characterChecks = async () => {
   record("characters: every src/characters file registers one handle, builds a whole Ooga and uses only known hooks", rows.length === CAST && CAST === BL.contributors.roster.length && unique && ordered && rows.every((r) => r.joined && r.built && r.parts && r.hooks && r.voice), JSON.stringify(rows.filter((r) => !(r.joined && r.built && r.parts && r.hooks && r.voice))));
 };
 task("characters", characterChecks);
+// The mempool.space feed parser in Node: message shapes as the socket sends them, no socket.
+const mempoolFeedChecks = async () => {
+  const context = { window: { setTimeout() { return 1; }, clearTimeout() {} } };
+  runInNewContext(await readFile(new URL("../src/js/mempool.js", import.meta.url), "utf8"), context);
+  const feed = context.window.BL.mempool, events = [];
+  const unsubscribe = feed.subscribe((e) => events.push(e));
+  feed.start();
+  const offline = !feed.state.enabled && !feed.state.connected;
+  feed.parse(JSON.stringify({ blocks: [{ height: 900000, tx_count: 1 }, { height: 899999, tx_count: 2 }] }));
+  const seeded = feed.state.height === 900000 && events.length === 0;
+  feed.parse(JSON.stringify({ block: { height: 900001, tx_count: 3210 } }));
+  feed.parse(JSON.stringify({ block: { height: 900001, tx_count: 3210 } }));
+  feed.parse(JSON.stringify({ block: { height: 899000, tx_count: 5 } }));
+  const mined = events.length === 1 && events[0].type === "block" && events[0].height === 900001 && events[0].txCount === 3210 && feed.state.blocks === 1;
+  feed.parse(JSON.stringify({ blocks: [{ height: 900002 }] }));
+  const tallerTip = events.length === 2 && events[1].type === "block" && events[1].height === 900002 && feed.state.height === 900002;
+  let malformedSafe = true;
+  try {
+    feed.parse("not json");
+    feed.parse("null");
+    feed.parse("1");
+    feed.parse('"text"');
+    feed.parse("[]");
+  } catch {
+    malformedSafe = false;
+  }
+  feed.parse(JSON.stringify({ "mempool-transactions": { sequence: 1, added: [{ txid: "a", vsize: 141, weight: 561, fee: 269 }, { vsize: 0 }, null, { txid: "b", vsize: 4000 }], removed: ["c"] } }));
+  const txs = events.slice(2);
+  const transactions = txs.length === 2 && txs.every((e) => e.type === "tx") && txs[0].vsize === 141 && txs[0].weight === 561 && txs[0].fee === 269 && txs[1].vsize === 4000 && txs[1].weight === 16000 && txs[1].fee === 0 && feed.state.transactions === 2;
+  feed.parse(JSON.stringify({ "mempool-blocks": [{ medianFee: 12.5, nTx: 3000 }, { medianFee: 2 }] }));
+  feed.parse(JSON.stringify({ "mempool-blocks": [] }));
+  const fees = events.slice(4);
+  const projection = fees.length === 2 && fees[0].type === "fees" && fees[0].nextFee === 12.5 && fees[0].blocks === 2 && fees[1].nextFee === 0 && fees[1].blocks === 0 && feed.state.nextFee === 0 && feed.state.projectedBlocks === 0;
+  unsubscribe();
+  feed.emit({ type: "tx", vsize: 1 });
+  const unsubscribed = events.length === 6;
+  feed.subscribe(() => events.push("after dispose"));
+  feed.dispose();
+  feed.emit({ type: "tx", vsize: 1 });
+  const disposed = events.length === 6 && !feed.state.enabled;
+  let retries = 0, constructorSafe = true;
+  class BlockedWebSocket {
+    constructor() {
+      throw new Error("blocked");
+    }
+  }
+  const blockedContext = { WebSocket: BlockedWebSocket, window: { setTimeout() { retries++; return 1; }, clearTimeout() {} } };
+  runInNewContext(await readFile(new URL("../src/js/mempool.js", import.meta.url), "utf8"), blockedContext);
+  try {
+    blockedContext.window.BL.mempool.start();
+  } catch {
+    constructorSafe = false;
+  }
+  const backedOff = constructorSafe && blockedContext.window.BL.mempool.state.enabled && blockedContext.window.BL.mempool.state.attempts === 1 && retries === 1;
+  blockedContext.window.BL.mempool.dispose();
+  record("mempool feed: the tip list seeds the height silently, a taller block thunders once, duplicates and lower blocks are ignored, a taller tip list counts", offline && seeded && mined && tallerTip, JSON.stringify({ offline, seeded, mined, tallerTip, events }));
+  record("mempool feed: each accepted transaction is one event with vsize, weight and fee, malformed entries and messages are skipped, unsubscribe and dispose stop delivery", malformedSafe && transactions && unsubscribed && disposed, JSON.stringify({ malformedSafe, transactions, unsubscribed, disposed, txs }));
+  record("mempool feed: a projection is one fees event with the next block's median fee, zero for an empty mempool", projection, JSON.stringify(fees));
+  record("mempool feed: a WebSocket constructor failure enters bounded retry instead of escaping startup", backedOff, JSON.stringify({ constructorSafe, enabled: blockedContext.window.BL.mempool.state.enabled, attempts: blockedContext.window.BL.mempool.state.attempts, retries }));
+};
+task("mempool feed", mempoolFeedChecks);
+// The hub's storm from injected feed events: no socket under nosim, so emit and parse drive it.
+const mempoolStormProbe = async () => {
+  const B = window.__ooga, m = B.mempool, o = B.renderOpts, hub = window.BL.scenes.hub;
+  let stage = "start";
+  const wait = (condition) => new Promise((resolve, reject) => { const start = performance.now(), tick = () => condition() ? resolve() : performance.now() - start > 30000 ? reject(new Error(`the storm probe did not settle at ${stage} (scene ${B.scene}, transitioning ${B.transitioning})`)) : requestAnimationFrame(tick); requestAnimationFrame(tick); });
+  const frames = (n) => { const f = B.renderedFrames; return wait(() => B.renderedFrames >= f + n); };
+  let s = B.storm;
+  const near = (d) => { const t = B.camera.target; return Math.hypot(d.x - t.x, d.z - t.z) <= 14.01 && d.y > t.y + 15; };
+  const feed = { enabled: m.state.enabled, connected: m.state.connected, storm: !!s, capacity: s.state.capacity, drops: s.state.drops, active: s.active };
+  const clock = () => ({ hour: B.daylight.hour, altitude: B.daylight.sunAltitude, sun: { ...o.sunDirection }, day: o.day, stars: o.stars, torch: o.torch, phase: B.daylight.phase });
+  const sample = () => ({ overcast: s.state.overcast, target: s.state.overcastTarget, cloud: s.state.cloud, sky: Array.from(o.sky), horizon: Array.from(o.horizon), direct: o.directStrength, fog: o.fog ? Array.from(o.fog) : null, fogNear: o.fogNear, clock: clock() });
+  B.advance(1 / 60);
+  const initial = sample(), unprojected = s.state.projected;
+  m.parse(JSON.stringify({ "mempool-blocks": [{ medianFee: 50 }] }));
+  const snapped = s.state.overcast;
+  B.advance(1 / 60);
+  const baseSky = o.sky[0], baseDirect = o.directStrength, baseStats = B.stats();
+  m.emit({ type: "tx", vsize: 140, weight: 560, fee: 100 });
+  const smallCount = s.state.drops, small = s.state.drop(0);
+  m.emit({ type: "tx", vsize: 4000, weight: 16000, fee: 1000 });
+  const bigCount = s.state.drops - smallCount, big = s.state.drop(smallCount);
+  const rain = { smallCount, bigCount, small, big, smallNear: near(small), bigNear: near(big) };
+  B.advance(1 / 60);
+  const raining = { drops: s.state.drops, rainDrops: B.stats().rainDrops, inMotion: hub.inMotion, active: s.active, fell: s.state.drop(0).y < small.y };
+  m.parse(JSON.stringify({ blocks: [{ height: 900000, tx_count: 1 }] }));
+  const seeded = { height: m.state.height, strikes: s.state.strikes };
+  m.parse(JSON.stringify({ block: { height: 900001, tx_count: 3210 } }));
+  B.advance(1 / 60);
+  const flash = { strikes: s.state.strikes, flash: s.state.flash, sky: o.sky[0], ground: o.ground[0], direct: o.directStrength, bolt: s.state.bolt, thunderPending: s.state.thunderPending, audio: s.state.audio, toast: document.getElementById("toast").textContent };
+  m.parse(JSON.stringify({ block: { height: 900001, tx_count: 3210 } }));
+  const dup = s.state.strikes;
+  for (let i = 0; i < 300; i++) m.emit({ type: "tx", vsize: 4000, weight: 16000, fee: 1 });
+  const capped = s.state.drops;
+  B.advance(5, 1 / 10);
+  const settled = { drops: s.state.drops, flash: s.state.flash, bolt: s.state.bolt, thunderPending: s.state.thunderPending, active: s.active, sky: o.sky[0], particles: B.stats().particles, audio: s.state.audio, transactions: s.state.transactions };
+  stage = "to lab"; await wait(() => !B.transitioning); B.go("lab"); await wait(() => B.scene === "lab" && !B.transitioning); stage = "lab frames"; await frames(12);
+  const lab = { storm: B.storm === undefined || B.storm === null, hubDebug: hub.debug === null };
+  m.emit({ type: "tx", vsize: 140 });
+  m.parse(JSON.stringify({ block: { height: 900002 } }));
+  stage = "to hub"; B.go("hub"); await wait(() => B.scene === "hub" && !B.transitioning); stage = "hub frames"; await frames(12);
+  s = B.storm;
+  const back = { fresh: s !== null && s.state.drops === 0 && s.state.strikes === 0, transactions: s.state.transactions };
+  m.emit({ type: "tx", vsize: 300 });
+  back.rains = s.state.drops > 0;
+  B.advance(5, 1 / 10);
+  back.settled = s.state.drops === 0 && !s.active;
+  const stats = B.stats();
+  // Fee pressure: the clock's own outputs must not move while the sampled colours do.
+  B.advance(1 / 60);
+  const stormy = sample();
+  m.parse(JSON.stringify({ "mempool-blocks": [] }));
+  const eased = s.state.overcast;
+  B.advance(0.5, 1 / 10);
+  const easing = sample();
+  B.advance(2, 1 / 10);
+  const sunny = sample();
+  m.emit({ type: "tx", vsize: 4000 });
+  const dryDrops = s.state.drops;
+  m.parse(JSON.stringify({ "mempool-blocks": [{ medianFee: 0.34 }] }));
+  B.advance(2, 1 / 10);
+  const light = sample();
+  m.emit({ type: "tx", vsize: 140 });
+  const lightDrops = s.state.drops;
+  B.advance(3, 1 / 10);
+  m.parse(JSON.stringify({ "mempool-blocks": [{ medianFee: 20 }] }));
+  B.advance(2, 1 / 10);
+  const storm = sample();
+  m.emit({ type: "tx", vsize: 4000 });
+  const stormDrops = s.state.drops;
+  m.parse(JSON.stringify({ "mempool-blocks": [{ medianFee: 18 }] }));
+  const jitterTarget = s.state.overcastTarget;
+  m.parse(JSON.stringify({ "mempool-blocks": [{ medianFee: 1.4 }] }));
+  const midTarget = s.state.overcastTarget;
+  m.parse(JSON.stringify({ "mempool-blocks": [] }));
+  const emptyTarget = s.state.overcastTarget;
+  B.advance(2, 1 / 10);
+  const cleared = sample();
+  const cf = window.BL.storm.cloudFor, band = { nightLight: cf(0.23, 0), nightOne: cf(0.43, 0), dayOne: cf(0.43, 1), dayFive: cf(0.74, 1), dayStorm: cf(1, 1), nightStorm: cf(1, 0), dusk: cf(0.6, 0.5) };
+  const weather = { initial, unprojected, snapped, stormy, dryDrops, sunny, eased, easing, light, lightDrops, storm, stormDrops, jitterTarget, midTarget, emptyTarget, cleared, band, nextFee: s.state.nextFee, projected: s.state.projected };
+  return { feed, baseSky, baseDirect, rain, raining, seeded, flash, dup, capped, settled, lab, back, weather, nodes: { before: baseStats.allNodes, after: stats.allNodes }, particles: { before: baseStats.particles, after: stats.particles } };
+};
+// The feed panel: the Konami code on the window, keys in a field ignored, live text while open and nothing ticking when closed.
+const feedPanelProbe = async () => {
+  const B = window.__ooga, m = B.mempool, panel = B.feedPanel, el = document.getElementById("feed-debug");
+  const key = (k, target = window) => target.dispatchEvent(new KeyboardEvent("keydown", { key: k, bubbles: true }));
+  const KONAMI = ["ArrowUp", "ArrowUp", "ArrowDown", "ArrowDown", "ArrowLeft", "ArrowRight", "ArrowLeft", "ArrowRight", "b", "a"];
+  const closed = { hidden: el.hidden, open: panel.open, logged: panel.logged };
+  const input = document.createElement("input");
+  document.body.append(input);
+  for (const k of KONAMI) key(k, input);
+  const typing = { open: panel.open };
+  input.remove();
+  for (const k of KONAMI.slice(0, 5)) key(k);
+  key("x");
+  for (const k of KONAMI) key(k);
+  const opened = { open: panel.open, hidden: el.hidden, state: document.getElementById("feed-debug-state").textContent, log: document.getElementById("feed-debug-log").textContent };
+  m.parse(JSON.stringify({ blocks: [{ height: 900000 }] }));
+  m.parse(JSON.stringify({ block: { height: 900001, tx_count: 3210 } }));
+  m.parse(JSON.stringify({ "mempool-blocks": [{ medianFee: 12.5 }] }));
+  m.parse(JSON.stringify({ "mempool-transactions": { added: [{ vsize: 141, fee: 269 }] } }));
+  for (let i = 0; i < 40; i++) m.emit({ type: "tx", vsize: 200 + i, fee: 400 });
+  await new Promise((r) => setTimeout(r, 700));
+  const live = { logged: panel.logged, state: document.getElementById("feed-debug-state").textContent, log: document.getElementById("feed-debug-log").textContent };
+  for (const k of KONAMI) key(k);
+  const reclosed = { open: panel.open, hidden: el.hidden, logged: panel.logged };
+  m.emit({ type: "block", height: 900002, txCount: 1 });
+  await new Promise((r) => setTimeout(r, 400));
+  const quiet = { logged: panel.logged, log: document.getElementById("feed-debug-log").textContent };
+  panel.toggle();
+  const reopened = { open: panel.open };
+  document.getElementById("feed-debug-close").click();
+  const clicked = { open: panel.open };
+  return { closed, typing, opened, live, reclosed, quiet, reopened, clicked };
+};
+task("mempool panel", () => withPage("mempool panel", hubPage(src), async (b) => {
+  const r = await b.evaluate(`(${feedPanelProbe.toString()})()`);
+  const lines = r.live.log.trim().split("\n");
+  record("mempool panel: the Konami code on the page toggles the panel, keys typed in a field and a broken sequence do not, and it opens with the socket off under nosim", r.closed.hidden && !r.closed.open && r.closed.logged === 0 && !r.typing.open && r.opened.open && !r.opened.hidden && r.opened.state.includes("off (nosim or mempool=0)") && r.opened.state.includes("overcast 0.00") && r.opened.log === "no events yet", JSON.stringify({ closed: r.closed, typing: r.typing, opened: r.opened }));
+  record("mempool panel: while open the state and the last 24 events follow the feed, and closing stops the log and the ticks", r.live.state.includes("height 900001") && r.live.state.includes("next block 12.50 sat/vB") && r.live.state.includes("1 blocks") && r.live.state.includes("41 tx") && r.live.state.includes("messages  4 ") && r.live.logged === 24 && lines.length === 24 && lines.every((l) => /^\d\d:\d\d:\d\d  tx {5}\d+ vB · [\d.]+ sat\/vB · fee 400$/.test(l)) && r.reclosed.hidden && !r.reclosed.open && r.reclosed.logged === 24 && r.quiet.logged === 24 && r.quiet.log === r.live.log && r.reopened.open && !r.clicked.open, JSON.stringify({ live: { state: r.live.state, logged: r.live.logged, first: lines[0], last: lines[lines.length - 1] }, reclosed: r.reclosed, quiet: { logged: r.quiet.logged }, reopened: r.reopened, clicked: r.clicked }));
+}));
+for (const backend of ["webgl2", "canvas2d"]) task(`mempool storm ${backend}`, () => withPage(`mempool storm ${backend}`, hubBackend(backend), async (b) => {
+  const r = await b.evaluate(`(${mempoolStormProbe.toString()})()`);
+  const { feed, rain, raining, flash, settled, lab, back } = r;
+  record(`mempool storm ${backend}: nosim leaves the socket closed and a transaction rains drops near the view, more and bigger for a heavier one`, !feed.enabled && !feed.connected && feed.storm && feed.drops === 0 && !feed.active && rain.smallCount >= 2 && rain.bigCount > rain.smallCount && rain.big.size > rain.small.size && rain.big.fall > rain.small.fall && rain.smallNear && rain.bigNear && raining.drops === raining.rainDrops && raining.inMotion && raining.active && raining.fell, JSON.stringify({ feed, rain, raining }));
+  record(`mempool storm ${backend}: a new block strikes once with a bolt, a sky flash and a toast; a repeat is ignored`, r.seeded.height === 900000 && r.seeded.strikes === 0 && flash.strikes === 1 && flash.flash === 1 && flash.sky > r.baseSky && flash.sky <= 1 && flash.direct > r.baseDirect && flash.bolt && flash.thunderPending && !flash.audio && flash.toast === "Block 900001 mined · 3210 transactions" && r.dup === 1, JSON.stringify({ seeded: r.seeded, flash, dup: r.dup, baseSky: r.baseSky }));
+  record(`mempool storm ${backend}: the batch caps at its capacity and everything settles back to base within seconds`, r.capped === feed.capacity && settled.drops === 0 && settled.flash === 0 && !settled.bolt && !settled.thunderPending && !settled.active && Math.abs(settled.sky - r.baseSky) < 1e-6 && settled.particles === 0 && !settled.audio && settled.transactions === 302, JSON.stringify({ capped: r.capped, capacity: feed.capacity, settled }));
+  record(`mempool storm ${backend}: the lab has no storm, events there are dropped, and a re-entered hub starts fresh and still rains`, lab.storm && lab.hubDebug && back.fresh && back.transactions === 0 && back.rains && back.settled && r.nodes.before === r.nodes.after && r.particles.after === 0, JSON.stringify({ lab, back, nodes: r.nodes, particles: r.particles }));
+  const w = r.weather, same = (a, b) => JSON.stringify(a) === JSON.stringify(b), luma = (c) => c[0] * 0.299 + c[1] * 0.587 + c[2] * 0.114;
+  const clockSteady = [w.stormy, w.easing, w.sunny, w.storm, w.cleared].every((x) => same(x.clock, w.initial.clock));
+  const clearSky = (x) => x.cloud === 0 && x.fog === null && same(x.sky, w.initial.sky) && same(x.horizon, w.initial.horizon) && x.direct === w.initial.direct;
+  const untouched = (x) => x.overcast === 0 && clearSky(x);
+  record(`mempool storm ${backend}: sunny before any projection and on an empty mempool leaves every sampled value exactly as the clock wrote it, the first projection snaps and later ones walk, a dry island keeps its transactions without rain, and a quiet night's fee is light cloud that still rains a drop`, !w.unprojected && untouched(w.initial) && w.snapped === 1 && w.stormy.overcast === 1 && w.stormy.fog && w.stormy.direct < 1 && w.eased === 1 && w.easing.overcast > 0.5 && w.easing.overcast < 0.8 && untouched(w.sunny) && w.dryDrops === 0 && w.light.overcast > 0.15 && w.light.overcast < 0.35 && clearSky(w.light) && w.lightDrops === 1 && w.projected && w.nextFee === 0, JSON.stringify({ initial: w.initial, unprojected: w.unprojected, snapped: w.snapped, stormy: w.stormy, eased: w.eased, easing: w.easing, sunny: w.sunny, dryDrops: w.dryDrops, light: w.light, lightDrops: w.lightDrops }));
+  const band = w.band;
+  record(`mempool storm ${backend}: the sky holds clear until the overcast passes a band that is wider by day, so a noon drizzle falls under an untouched sky while the same fee at night is light cloud`, band.nightLight === 0 && band.nightOne > 0.2 && band.nightOne < 0.3 && band.dayOne === 0 && band.dayFive > 0.35 && band.dayFive < 0.5 && band.dayStorm === 1 && band.nightStorm === 1 && band.dusk > 0.2 && band.dusk < 0.4 && w.stormy.cloud === 1, JSON.stringify(band));
+  record(`mempool storm ${backend}: an expensive projection eases into a grey, dim, foggy storm that rains again, small jitter holds, a mid fee sits between, an empty mempool clears, and the clock never moves`, w.storm.overcast === 1 && luma(w.storm.sky) < luma(w.sunny.sky) && Math.abs(w.storm.sky[0] - w.storm.sky[2]) < Math.abs(w.sunny.sky[0] - w.sunny.sky[2]) && w.storm.direct < 0.5 && w.storm.fog && w.storm.fogNear === 40 && w.stormDrops > 0 && w.jitterTarget === 1 && w.midTarget > 0.4 && w.midTarget < 0.6 && w.emptyTarget === 0 && untouched(w.cleared) && clockSteady, JSON.stringify({ storm: w.storm, stormDrops: w.stormDrops, jitterTarget: w.jitterTarget, midTarget: w.midTarget, emptyTarget: w.emptyTarget, cleared: w.cleared, clockSteady }));
+}));
 const soloDebugChecks = async () => {
   const sources = await Promise.all(CONTRIBUTOR_SOURCES.map((name) => readFile(new URL(`../src/js/${name}.js`, import.meta.url), "utf8")));
   const r = soloDebugParsingProbe((search) => {
@@ -26833,7 +27048,7 @@ const unitChecks = async () => {
     let rejected = false; try { BL.qr.encode("q".repeat(2332)); } catch (error) { rejected = error instanceof RangeError; }
     record("QR invoices: matrices match independent reference at short and long capacities", rows.every(r => r.pass) && rejected, JSON.stringify(rows));
   }
-  if (LANE === "unit") { await characterChecks(); await contributorActivityChecks(); await soloDebugChecks(); await adaptiveQualityChecks(); }
+  if (LANE === "unit") { await characterChecks(); await contributorActivityChecks(); await mempoolFeedChecks(); await soloDebugChecks(); await adaptiveQualityChecks(); }
 
   // Scene state built directly instead of booted; seed 1 matches scene-hub.js.
   // Sealed cave guides need the hub's seal nodes, so probes reading them stay in the browser tier.
