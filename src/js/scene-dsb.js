@@ -14,7 +14,7 @@
   let rideYaw = 0, ridePitch = 0, proximity, lastContext = "", bananas = 0;
   const RENDER = { clear: [0.025, 0.014, 0.06], horizon: [0.11, 0.04, 0.19], zenith: [0.008, 0.006, 0.025], sky: [0.52, 0.43, 0.7], ground: [0.26, 0.17, 0.32], sun: [0.8, 0.7, 0.9], light: { x: -0.4, y: 0.8, z: 0.4 }, stars: 1, shadowCenter: { x: 0, y: 0, z: 0 }, shadowExtent: 48, bloomStrength: 0.5, lights: new Float32Array(80), lightCount: 2 };
   const DARK = { clear: [0, 0, 0], sky: [0.12, 0.1, 0.16], ground: [0.04, 0.03, 0.06], sun: [0.18, 0.16, 0.22], bloomStrength: 0.15 };
-  let root, camera, input, pilot, hud, renderer, world, game, go, land, portal, audio, data, tv, panel, readout, bag, prompt, overlayCanvas, overlayCtx, avatar, crew, fx, playerWorld, zuzu;
+  let root, camera, input, pilot, hud, renderer, world, game, go, land, portal, audio, data, tv, panel, readout, bag, prompt, overlayCanvas, overlayCtx, avatar, crew, fx, playerWorld, zuzu, conversation;
   let exiting = false;
   let phase = "entrance", progress = 0, elapsed = 0, flash = 0, boatAngle = 0, rideAngle = 0, priceTimer = 0, tokens = 20, bread = 0, tomatoes = 0, throwAt = -1, fedUntil = 0, disposed = false, oldSheetHidden = false, oldSheetOpen = "true";
   let arrivalTime = 0, glanceTime = 3, lastCue = -1, glance = 0, gait = 0, avatarView = true;
@@ -61,7 +61,7 @@
     savedRevision = state.revision;
   };
   const location = () => phase === "land" && avatarView ? avatar.root.position : pilot.orbit.target;
-  const cameraEnabled = () => phase === "land" && !exiting && !tv.isOpen && document.getElementById("dsb-shop").hidden;
+  const cameraEnabled = () => phase === "land" && !exiting && !tv.isOpen && !conversation?.isOpen && document.getElementById("dsb-shop").hidden;
   const playerEnabled = () => avatarView && cameraEnabled();
   const syncPlayer = () => pilot.setActive(cameraEnabled());
   const clearAt = (x, z, radius = 0.35) => Math.hypot(x, z) < 35 - radius
@@ -167,7 +167,7 @@
   const returnHub = () => { if (phase === "entrance" || phase === "land" && inCave()) { exiting = true; syncPlayer(); go("hub"); } else toast("Enter the stone cave to return to Ooga Booga Land."); };
   const contextAction = () => {
     if (phase === "boat" || phase === "coaster") return "ride";
-    if (phase !== "land" || tv.isOpen) return "";
+    if (phase !== "land" || tv.isOpen || conversation.isOpen) return "";
     if (inCave()) return "exit";
     if (atDock()) return boatTrip.wait > 0 ? "boat" : "boat-wait";
     if (atStation()) return trainTrip.wait > 0 ? "coaster" : "coaster-wait";
@@ -228,7 +228,7 @@
     else if (atStation()) board("coaster");
     else if (near(-10, 16, 6)) openTv();
     else if (near(-20, 16, 7)) openShop();
-    else if (nearZuzu()) zuzu.talk();
+    else if (nearZuzu()) conversation.open();
     else if (near(-18, -10, 7)) perform();
     else if (inCave()) returnHub();
     else throwTomato();
@@ -237,7 +237,7 @@
   const onTap = (hit) => {
     if (!playerEnabled() || pilot.aiming || !hit) return;
     const owner = hit.owner;
-    if (owner.kind === "dsb-agent") { if (nearZuzu()) zuzu.talk(); else toast("Walk closer to talk to Zuzu."); }
+    if (owner.kind === "dsb-agent") { if (nearZuzu()) conversation.open(); else toast("Walk closer to talk to Zuzu."); }
     else if (owner.kind === "visitor") { if (tomatoes) throwTomato(owner.cave); else toast("Grab tomatoes at the meme stand, then tap an Ooga."); }
     else if (owner.kind === "tv") openTv();
     else if (owner.kind === "shop") openShop();
@@ -274,6 +274,7 @@
     return false;
   };
   const onKey = (event) => {
+    if (conversation.isOpen) return;
     if (playerEnabled()) {
       if (event.key === "1" || event.key === "2") { pilot.weaponMode(Number(event.key)); return; }
       if (event.key.toLowerCase() === "g") { pilot.weaponAction("weapon-toggle"); return; }
@@ -315,7 +316,7 @@
       avatar.root.visible = true;
       if (cameraEnabled()) { pilot.readInput(dt); if (avatarView) crew.update(dt, time); pilot.update(dt); }
     } else avatar.root.visible = phase === "arrival";
-    agentPerception.name = avatar.traits.name; agentPerception.x = avatar.root.position.x; agentPerception.y = avatar.root.position.y - avatar.baseY; agentPerception.z = avatar.root.position.z; agentPerception.food = bananas + bread; agentPerception.active = playerEnabled();
+    agentPerception.name = avatar.traits.name; agentPerception.x = avatar.root.position.x; agentPerception.y = avatar.root.position.y - avatar.baseY; agentPerception.z = avatar.root.position.z; agentPerception.food = bananas + bread; agentPerception.active = playerEnabled() || conversation.isOpen && phase === "land" && !exiting;
     zuzu.update(dt, time, agentPerception);
     advanceTrip(boatTrip, dt); boatAngle = boatTrip.angle;
     for (let i = 0; i < land.boats.length; i++) {
@@ -408,6 +409,7 @@
     hud.onAction(action); hud.onPreset((name) => { if (phase === "land") pilot.goPreset(name); });
     data = BL.dsbData.create(); data.start(); audio = BL.dsbAudio.create();
     tv = BL.dsbTv.create(land.tvScreen, renderer);
+    conversation = BL.dsbConversation.create({ agent: zuzu, onChange: () => { syncPlayer(); syncContext(); } });
     for (let i = 0; i < N; i++) {
       for (let side = 0; side < 2; side++) rails.push(M.block(land.root, "#55e49b", 0, 0, 0, 0.13, 0.14, 1, 0.5));
       ties.push(M.block(land.root, M.C.stone, 0, 0, 0, 1.65, 0.12, 0.2));
@@ -429,18 +431,19 @@
     document.getElementById("dsb-shop").hidden = true; document.getElementById("dsb-live").setAttribute("aria-pressed", "true"); soundUi();
     document.body.classList.add("dsb-active", "dsb-entry"); document.addEventListener("visibilitychange", onVisibility); bagText();
     dsbScene.renderOpts = DARK;
-    Object.assign(dsbScene, { root, camera, input, debug: { camera, pilot, crew, controls: pilot.controls, hud, audio, dsb: { zuzu, get phase() { return phase; }, get arrivalTime() { return arrivalTime; }, get glance() { return glance; }, avatar, get progress() { return progress; }, get inventory() { return { tokens, bread, bananas, tomatoes }; }, get shots() { return shots.filter((s) => s.life > 0).length; }, land, visitors, data, tv, openTv, boatTrip, trainTrip, get rideLook() { return { yaw: rideYaw, pitch: ridePitch }; }, railY, board, buy, eat, throwTomato, stopRide, get fired() { return Array.from(audio.fired); } } } });
+    Object.assign(dsbScene, { root, camera, input, debug: { camera, pilot, crew, controls: pilot.controls, hud, audio, dsb: { zuzu, conversation, get phase() { return phase; }, get arrivalTime() { return arrivalTime; }, get glance() { return glance; }, avatar, get progress() { return progress; }, get inventory() { return { tokens, bread, bananas, tomatoes }; }, get shots() { return shots.filter((s) => s.life > 0).length; }, land, visitors, data, tv, openTv, boatTrip, trainTrip, get rideLook() { return { yaw: rideYaw, pitch: ridePitch }; }, railY, board, buy, eat, throwTomato, stopRide, get fired() { return Array.from(audio.fired); } } } });
     syncContext(); update(0, 0);
   };
   const leave = () => {
     disposed = true; document.removeEventListener("visibilitychange", onVisibility);
+    exiting = true; conversation.dispose();
     proximity.hidden = true; tv.dispose(); audio.dispose(); data.dispose(); pilot.dispose(); crew.dispose(); zuzu.dispose(); fx.dispose();
     for (const node of targets) input.remove(node); targets.length = 0;
     const count = input.targetCount; input.dispose(); hud.el.sheet.hidden = oldSheetHidden; hud.el.sheet.dataset.open = oldSheetOpen; hud.dispose();
     while (root.children.length) removeChild(root, root.children[root.children.length - 1]);
     visitors.length = shots.length = rails.length = ties.length = candles.length = 0;
     document.body.classList.remove("dsb-active", "dsb-entry", "dsb-arrival");
-    crew = fx = playerWorld = zuzu = null;
+    crew = fx = playerWorld = zuzu = conversation = null;
     avatar = land = portal = camera = input = pilot = hud = renderer = world = game = go = audio = data = tv = panel = readout = bag = prompt = overlayCanvas = overlayCtx = proximity = null;
     dsbScene.input = dsbScene.debug = null; return { targets: count };
   };

@@ -9,10 +9,12 @@
   const SHOTS = ["Absolutely not. Indoor voice. Outdoor everything.", "I'm a cat, not target practice. Meeting adjourned.", "That is not how you open a tin."];
   let visits = 0;
   const create = () => {
-    let id = 0, cursor = visits++ % HELLO.length, greetAt = Infinity, nextInterest = 0, nextIdle = 8, pendingLine = "", retryAt = 0, closed = false;
+    let cursor = visits++ % HELLO.length, greetAt = Infinity, nextInterest = 0, nextIdle = 8, pendingLine = "", retryAt = 0, closed = false;
     const pick = (pool) => pool[cursor++ % pool.length];
+    const reply = p => p.self.tomatoHits ? "Yes, I remember the tomato. No, we are not even." : p.player.food || p.self.foodInterest > 0.5 ? pick(FOOD) : pick(CHAT);
     const observe = (p, event, submit) => {
       if (closed || !p.active) return;
+      let id = p.nextRequestId - 1;
       const ask = (type, args = {}) => submit({ visit: p.visit, id: ++id, at: p.time, type, ...args });
       const say = text => ask("say", { text });
       if (event === "tomato_hit" || event === "weapon_hit" || event === "shot_nearby") {
@@ -26,7 +28,7 @@
       if (event === "player_seen") { ask("look_at", { entity: "player" }); greetAt = p.time + 1.5; }
       if (event === "talk") {
         ask("look_at", { entity: "player" });
-        say(p.self.tomatoHits ? "Yes, I remember the tomato. No, we are not even." : p.player.food || p.self.foodInterest > 0.5 ? pick(FOOD) : pick(CHAT));
+        say(reply(p));
         greetAt = Infinity;
       }
       if ((event === "food_seen" || event === "food_activity") && p.time >= nextInterest) {
@@ -41,7 +43,7 @@
         }
       }
     };
-    return { observe, dispose: () => { closed = true; } };
+    return { observe, reply, dispose: () => { closed = true; } };
   };
   BL.dsbAgentBrain = { create };
 })();

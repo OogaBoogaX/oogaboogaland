@@ -61,6 +61,7 @@
     const memory = Array.from({ length: CAPACITY }, () => ({ seq: 0, time: 0, type: "", entity: "player", value: 0 }));
     const state = { tomatoHits: 0, nearbyShots: 0, weaponHits: 0, greeted: false, foodInterest: 0, mood: "content", intent: "sit" };
     const sense = { name: "", x: 0, y: 0, z: 0, food: 0, active: false };
+    let conversing = false, conversationLine = "";
     let seq = 0, count = 0, now = 0, disposed = false, nearPlayer = false, hadFood = false, sampleAt = 0;
     let lastRequest = 0, rateAt = 0, rateCount = 0, sayAt = -10, talkAt = -10, shotAt = -10, threatUntil = 0;
     let text = "", textUntil = 0, gait = 0, sit = 1, flinch = 0, gesture = "sit", gestureUntil = 0;
@@ -77,7 +78,7 @@
       const row = memory[seq % CAPACITY]; row.seq = ++seq; row.time = now; row.type = type; row.entity = "player"; row.value = value; count = Math.min(CAPACITY, count + 1);
     };
     // Copies exist only at the brain boundary/debug reads, never in the animation loop.
-    const snapshot = () => Object.freeze({ visit, time: now, active: sense.active, near: nearPlayer,
+    const snapshot = () => Object.freeze({ visit, nextRequestId: lastRequest + 1, time: now, active: sense.active, near: nearPlayer,
       player: Object.freeze({ id: "player", name: sense.name, x: sense.x, y: sense.y, z: sense.z, food: sense.food }),
       self: Object.freeze({ id: "zuzu", name: "Zuzu", pronouns: "she/her", x: p.x, z: p.z, ...state }),
       events: Object.freeze(Array.from({ length: count }, (_, i) => Object.freeze({ ...memory[(seq - count + i) % CAPACITY] }))) });
@@ -115,7 +116,7 @@
       }
       return "accepted";
     };
-    const notify = (type) => { if (!disposed && sense.active) brain.observe(snapshot(), type, request); };
+    const notify = (type) => { if (!disposed && sense.active && !conversing) brain.observe(snapshot(), type, request); };
     const event = (type) => {
       if (disposed || !sense.active) return;
       if (type === "tomato_hit") { state.tomatoHits++; state.mood = "offended"; flinch = 1; }
@@ -133,6 +134,20 @@
     const tomato = (ax, ay, az, bx, by, bz) => { if (!sense.active || distanceToSegment(ax, ay, az, bx, by, bz) > 0.65) return false; event("tomato_hit"); return true; };
     const projectile = (ax, ay, az, bx, by, bz) => { if (sense.active && distanceToSegment(ax, ay, az, bx, by, bz) < 2.1) event("shot_nearby"); };
     const talk = () => { if (!sense.active || Math.hypot(p.x - sense.x, p.z - sense.z) > 3.5 || now - talkAt < 3) return false; talkAt = now; notify("talk"); return true; };
+    const setConversation = value => {
+      if (disposed) return;
+      conversing = value; conversationLine = ""; setIntent(value ? "look_at_player" : "sit");
+    };
+    const conversationContext = () => {
+      let location = "dsb_land", distance = 8;
+      for (const q of POINTS) { const d = Math.hypot(q.x - sense.x, q.z - sense.z); if (d < distance) { distance = d; location = q.id; } }
+      return { playerName: sense.name, location, mood: state.mood, foodCount: sense.food, recentEvents: snapshot().events };
+    };
+    const sayConversation = value => {
+      if (disposed || !conversing || typeof value !== "string" || !value.trim() || value.length > 1000) return false;
+      // The panel retains the full answer; the world bubble stays readable on mobile.
+      const line = value.replace(/\s+/g, " ").trim(); conversationLine = line.length > 160 ? line.slice(0, 157) + "…" : line; return true;
+    };
     // Route using a small prebuilt DSB visibility graph, then sweep every actual step.
     const route = (gx, gz) => {
       if (segment(p.x, p.z, gx, gz)) { tx = gx; tz = gz; return true; }
@@ -153,6 +168,10 @@
       if (disposed) return;
       now = time; sense.name = perception.name; sense.x = perception.x; sense.y = perception.y; sense.z = perception.z; sense.food = perception.food; sense.active = perception.active;
       if (!sense.active) { if (state.intent === "follow") setIntent("sit"); return; }
+      if (conversing && conversationLine && now >= sayAt + 3) {
+        const result = request({ visit, id: lastRequest + 1, at: now, type: "say", text: conversationLine });
+        if (result === "accepted") conversationLine = "";
+      }
       const distance = Math.hypot(p.x - sense.x, p.z - sense.z);
       state.foodInterest = Math.max(0, state.foodInterest - dt * 0.025);
       if (now >= sampleAt) {
@@ -196,7 +215,7 @@
     };
     const draw = (ctx, project, drawSpeech) => { if (disposed || !sense.active || now >= textUntil) return; const screen = project(p.x, 1.7, p.z); if (screen) drawSpeech(ctx, "Zuzu: " + text, screen.x, screen.y, Math.min(1, (textUntil - now) * 2)); };
     const dispose = () => { disposed = true; brain.dispose(); for (const node of targets) input.remove(node); targets.length = 0; removeChild(parent, cat.root); text = ""; count = seq = 0; };
-    return { root: cat.root, update, draw, event, tomato, projectile, talk, request, snapshot, dispose, get dialogue() { return text; }, get disposed() { return disposed; } };
+    return { root: cat.root, update, draw, event, tomato, projectile, talk, request, snapshot, setConversation, conversationContext, sayConversation, fallbackReply: () => brain.reply(snapshot()), dispose, get dialogue() { return text; }, get disposed() { return disposed; } };
   };
   BL.dsbAgent = { create };
 })();

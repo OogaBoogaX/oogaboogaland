@@ -624,6 +624,15 @@
       </div>
       <div id="dsb-shop" class="dsb-shop" hidden><h3>DSB meme stand</h3><p>20 free demo tokens each visit. No real payments.</p><button type="button" data-action="dsb-banana">Banana &#183; 1 token</button><button type="button" data-action="dsb-bread">Banana bread · 3 tokens</button><button type="button" data-action="dsb-tomato">Tomato · 1 token</button><button type="button" data-action="dsb-close-shop">Close</button></div>
     </section>
+    <dialog id="zuzu-conversation" aria-labelledby="zuzu-title" aria-describedby="zuzu-mode">
+      <header><div><h2 id="zuzu-title">Zuzu</h2><p id="zuzu-mode">Local mock · no AI connected</p></div><button id="zuzu-close" type="button" aria-label="Close conversation">Close</button></header>
+      <ol id="zuzu-history" aria-label="Recent conversation" aria-live="polite" aria-relevant="additions text"></ol>
+      <form id="zuzu-form">
+        <label for="zuzu-message">Say something to Zuzu</label>
+        <div><textarea id="zuzu-message" rows="2" maxlength="1000" enterkeyhint="send" autocomplete="off" placeholder="Ask me anything. Snacks get priority." autofocus></textarea><button id="zuzu-send" type="submit">Send</button></div>
+      </form>
+      <p id="zuzu-status" role="status"></p>
+    </dialog>
     <dialog id="dsb-tv" aria-labelledby="dsb-tv-title">
       <header><div><p class="dsb-eyebrow">DSB LAND BROADCASTING</p><h2 id="dsb-tv-title">DSB TV</h2></div><button type="button" id="dsb-tv-close" autofocus>Close TV</button></header>
       <div class="dsb-tv-glass">
@@ -761,6 +770,8 @@
   <script src="js/dsb-audio-data.js"></script>
   <script src="js/dsb-audio.js"></script>
   <script src="js/dsb-tv.js"></script>
+  <script src="js/dsb-agent-remote.js"></script>
+  <script src="js/dsb-conversation.js"></script>
   <script src="js/dsb-agent-brain.js"></script>
   <script src="js/dsb-agent.js"></script>
   <script src="js/scene-dsb.js"></script>

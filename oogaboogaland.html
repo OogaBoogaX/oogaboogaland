@@ -5,7 +5,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta http-equiv="Content-Security-Policy"
-    content="default-src 'none'; script-src 'sha256-Z+Tt4Hp1McfaZN6/uA/ZTyHbKmHtiEe/hdmmt2uIaIU='; style-src 'sha256-Zkj+ZnWTvPYbxz7o43Qe0zv3Donf0NQWSCiWzvohWBI='; img-src 'self' data:; media-src https://stream.noderunnersradio.com; connect-src https://noderunnersradio.com https://mempool.space https://api.exchange.coinbase.com wss://ws-feed.exchange.coinbase.com; base-uri 'none'; form-action 'none'">
+    content="default-src 'none'; script-src 'sha256-Jq6a0hTV/ZI+tW64eeGkoTndR6NSFiGSqVfnT0Pg250='; style-src 'sha256-nT2jKlduo6uMz/sr8RBx5zzp36t7rYKrcFhJLHSS2+E='; img-src 'self' data:; media-src https://stream.noderunnersradio.com; connect-src https://noderunnersradio.com https://mempool.space https://api.exchange.coinbase.com wss://ws-feed.exchange.coinbase.com; base-uri 'none'; form-action 'none'">
   <meta name="referrer" content="no-referrer">
   <meta name="color-scheme" content="dark">
   <meta name="theme-color" content="#0a0a0b">
@@ -3885,6 +3885,31 @@ body.orbit-dragging #tooltip {
 
 #dsb-tv-menu[hidden] { display: none; }
 .dsb-panel[data-folded="true"] #dsb-shop { display: none; }
+
+/* Zuzu's compact, native-input conversation stays beside the physical world. */
+#zuzu-conversation { position: fixed; inset: auto 16px calc(16px + var(--zuzu-keyboard, 0px)) auto; margin: 0; width: min(380px, calc(100vw - 32px)); max-height: min(440px, calc(var(--zuzu-viewport, 100dvh) - 24px)); padding: 16px; border: 1px solid #b68a43; border-radius: 14px; background: #21192ff5; color: #f5edf9; box-shadow: 0 8px 36px #0008; pointer-events: auto; overflow: auto; }
+#zuzu-conversation[open] { display: flex; flex-direction: column; gap: 10px; }
+#zuzu-conversation::backdrop { background: #08051222; }
+#zuzu-conversation header { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+#zuzu-conversation h2 { margin: 0; color: #ffd267; font-size: 22px; }
+#zuzu-conversation p { margin: 0; font-size: 11px; line-height: 1.5; }
+#zuzu-mode, #zuzu-status { color: #cebdd7; }
+#zuzu-history { margin: 0; padding: 0; list-style: none; overflow: auto; min-height: 0; max-height: 180px; overscroll-behavior: contain; }
+#zuzu-history li { padding: 8px 0; border-bottom: 1px solid #ffffff18; }
+#zuzu-history strong { display: block; font-size: 11px; color: #e9c17a; }
+#zuzu-history span { display: block; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 13px; line-height: 1.5; }
+#zuzu-form { flex-shrink: 0; }
+#zuzu-form label { display: block; font-size: 12px; margin-bottom: 6px; }
+#zuzu-form > div { display: flex; gap: 8px; }
+#zuzu-message { flex: 1; min-width: 0; width: 100%; resize: none; padding: 10px; border: 1px solid #9874ad; border-radius: 8px; color: #fff; background: #110e1b; font: 16px/1.35 system-ui, sans-serif; touch-action: auto; user-select: text; -webkit-user-select: text; }
+#zuzu-conversation button { min-height: 44px; padding: 8px 12px; border: 1px solid #b68a43; border-radius: 8px; color: #ffdc85; background: #382641; font: inherit; cursor: pointer; }
+#zuzu-conversation button:disabled { opacity: 0.5; cursor: default; }
+#zuzu-conversation button:focus-visible, #zuzu-message:focus-visible { outline: 2px solid #49ddd9; outline-offset: 2px; }
+.dsb-talking .dsb-panel, .dsb-talking #dsb-context, .dsb-talking #joy-move, .dsb-talking #joy-look, .dsb-talking #act { visibility: hidden; }
+@media (max-width: 720px) {
+  #zuzu-conversation { right: max(8px, var(--safe-right)); bottom: calc(8px + var(--safe-bottom) + var(--zuzu-keyboard, 0px)); width: calc(100vw - 16px - var(--safe-left) - var(--safe-right)); padding: 12px; max-height: min(360px, calc(var(--zuzu-viewport, 100dvh) - 24px)); }
+  #zuzu-history { max-height: 120px; }
+}
 </style>
 </head>
 
@@ -4498,6 +4523,15 @@ body.orbit-dragging #tooltip {
       </div>
       <div id="dsb-shop" class="dsb-shop" hidden><h3>DSB meme stand</h3><p>20 free demo tokens each visit. No real payments.</p><button type="button" data-action="dsb-banana">Banana &#183; 1 token</button><button type="button" data-action="dsb-bread">Banana bread · 3 tokens</button><button type="button" data-action="dsb-tomato">Tomato · 1 token</button><button type="button" data-action="dsb-close-shop">Close</button></div>
     </section>
+    <dialog id="zuzu-conversation" aria-labelledby="zuzu-title" aria-describedby="zuzu-mode">
+      <header><div><h2 id="zuzu-title">Zuzu</h2><p id="zuzu-mode">Local mock · no AI connected</p></div><button id="zuzu-close" type="button" aria-label="Close conversation">Close</button></header>
+      <ol id="zuzu-history" aria-label="Recent conversation" aria-live="polite" aria-relevant="additions text"></ol>
+      <form id="zuzu-form">
+        <label for="zuzu-message">Say something to Zuzu</label>
+        <div><textarea id="zuzu-message" rows="2" maxlength="1000" enterkeyhint="send" autocomplete="off" placeholder="Ask me anything. Snacks get priority." autofocus></textarea><button id="zuzu-send" type="submit">Send</button></div>
+      </form>
+      <p id="zuzu-status" role="status"></p>
+    </dialog>
     <dialog id="dsb-tv" aria-labelledby="dsb-tv-title">
       <header><div><p class="dsb-eyebrow">DSB LAND BROADCASTING</p><h2 id="dsb-tv-title">DSB TV</h2></div><button type="button" id="dsb-tv-close" autofocus>Close TV</button></header>
       <div class="dsb-tv-glass">
@@ -46587,6 +46621,153 @@ window.BL.dsbAudioData.music = "SUQzBAAAAAABAFRYWFgAAAASAAADbWFqb3JfYnJhbmQAZGFz
   BL.dsbTv = { create };
 })();
 
+// ---- js/dsb-agent-remote.js ----
+// Provider-independent conversation boundary. No network transport is installed in V2.
+(() => {
+  "use strict";
+  const BL = window.BL = window.BL || {};
+  const LIMITS = Object.freeze({ message: 1000, response: 1000, history: 12, events: 8, requestBytes: 49152, responseBytes: 8192, timeoutMs: 8000 });
+  const EVENTS = new Set(["player_seen", "player_left", "player_greeted", "food_seen", "food_activity", "tomato_hit", "shot_nearby", "weapon_hit", "follow_started", "follow_stopped"]);
+  const LOCATIONS = new Set(["arrival", "perch", "snack_watch", "west", "west_lane", "shop_lane", "courtyard", "east_lane", "garden", "east", "watch", "dsb_land"]);
+  const MOODS = new Set(["content", "watchful", "offended", "alarmed"]), encoder = new TextEncoder();
+  const cleanText = (value, limit) => {
+    if (typeof value !== "string" || value.length > limit || /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/.test(value)) throw new Error("invalid_text");
+    const text = value.replace(/\r\n?/g, "\n").trim();
+    if (!text) throw new Error("empty_text");
+    return text;
+  };
+  const makeRequest = (message, context, history) => {
+    const body = { version: 1, agent: "zuzu", message: cleanText(message, LIMITS.message), session: {
+      playerName: cleanText(context.playerName, 40), location: LOCATIONS.has(context.location) ? context.location : "dsb_land",
+      mood: MOODS.has(context.mood) ? context.mood : "content", foodCount: Math.min(18, Math.max(0, Math.trunc(context.foodCount) || 0)),
+      recentEvents: context.recentEvents.slice(-LIMITS.events).filter(e => EVENTS.has(e.type) && Number.isSafeInteger(e.seq) && e.seq > 0 && Number.isFinite(e.time) && e.time >= 0 && Number.isFinite(e.value)).map(e => ({ seq: e.seq, time: Math.min(1e8, Math.round(e.time * 10) / 10), type: e.type, entity: "player", value: Math.min(1e6, Math.max(0, e.value)) }))
+    }, history: history.slice(-LIMITS.history).map(row => {
+      if (row.role !== "player" && row.role !== "zuzu") throw new Error("invalid_role");
+      return { role: row.role, text: cleanText(row.text, row.role === "player" ? LIMITS.message : LIMITS.response) };
+    }) };
+    if (encoder.encode(JSON.stringify(body)).length > LIMITS.requestBytes) throw new Error("request_too_large");
+    return body;
+  };
+  const validateResponse = (raw) => {
+    if (typeof raw !== "string" || encoder.encode(raw).length > LIMITS.responseBytes) throw new Error("response_too_large");
+    const value = JSON.parse(raw);
+    if (!value || Array.isArray(value) || typeof value !== "object" || value.version !== 1 || Object.keys(value).length !== 2 || !Object.hasOwn(value, "text")) throw new Error("invalid_response");
+    const text = cleanText(value.text, LIMITS.response);
+    if (/<\/?[a-z][^>]*>/i.test(text)) throw new Error("html_not_allowed");
+    return Object.freeze({ version: 1, text });
+  };
+  const mock = async () => JSON.stringify({ version: 1, text: "You've got my attention. Briefly. This is a local mock reply; my AI isn't connected yet. We can still discuss the alarming lack of snacks." });
+  // A future transport receives bounded JSON plus AbortSignal and returns bounded JSON text.
+  // It must enforce the response byte cap while reading, not only after buffering it.
+  const create = ({ mode = "mock", transport = null, timeoutMs = LIMITS.timeoutMs } = {}) => {
+    if (mode !== "mock" && mode !== "remote" || mode === "remote" && typeof transport !== "function" || !Number.isFinite(timeoutMs) || timeoutMs < 50 || timeoutMs > 15000) throw new Error("invalid_adapter");
+    const send = async (message, context, history, signal) => {
+      const body = JSON.stringify(makeRequest(message, context, history));
+      if (signal.aborted) throw new Error("cancelled");
+      const controller = new AbortController();
+      const cancel = () => controller.abort(new Error("cancelled"));
+      signal.addEventListener("abort", cancel, { once: true });
+      let abortListener;
+      const aborted = new Promise((resolve, reject) => { abortListener = () => reject(controller.signal.reason); controller.signal.addEventListener("abort", abortListener, { once: true }); });
+      const timer = setTimeout(() => controller.abort(new Error("timeout")), timeoutMs);
+      try {
+        const raw = await Promise.race([Promise.resolve().then(() => { if (controller.signal.aborted) throw new Error("cancelled"); return (mode === "mock" ? mock : transport)(body, { signal: controller.signal }); }), aborted]);
+        if (controller.signal.aborted) throw new Error("cancelled");
+        return validateResponse(raw);
+      } finally {
+        clearTimeout(timer); signal.removeEventListener("abort", cancel); controller.signal.removeEventListener("abort", abortListener);
+      }
+    };
+    return { mode, send };
+  };
+  BL.dsbAgentRemote = { create, makeRequest, validateResponse, cleanText, LIMITS, endpoint: "/api/zuzu/chat" };
+})();
+
+// ---- js/dsb-conversation.js ----
+// Small scene-owned conversation panel. Native text input, no model-generated markup.
+(() => {
+  "use strict";
+  const BL = window.BL = window.BL || {};
+  const create = ({ agent, onChange, client = BL.dsbAgentRemote.create() }) => {
+    const R = BL.dsbAgentRemote, el = id => document.getElementById("zuzu-" + id);
+    const dialog = el("conversation"), form = el("form"), input = el("message"), sendButton = el("send"), closeButton = el("close"), log = el("history"), status = el("status"), mode = el("mode");
+    const history = [], viewport = window.visualViewport;
+    let opened = false, disposed = false, busy = false, composing = false, revision = 0, controller = null;
+    input.maxLength = R.LIMITS.message;
+    mode.textContent = client.mode === "mock" ? "Local mock · no AI connected" : "Protected conversation service";
+    const fit = () => {
+      if (!opened) return;
+      const height = viewport ? viewport.height : window.innerHeight, offset = viewport ? viewport.offsetTop : 0;
+      dialog.style.setProperty("--zuzu-keyboard", Math.max(0, window.innerHeight - height - offset) + "px");
+      dialog.style.setProperty("--zuzu-viewport", height + "px");
+    };
+    const render = () => {
+      log.replaceChildren();
+      for (const row of history) {
+        const item = document.createElement("li"), label = document.createElement("strong"), text = document.createElement("span");
+        label.textContent = row.role === "player" ? "You" : "Zuzu" + (row.source === "mock" ? " · mock" : row.source === "fallback" ? " · local reply" : "");
+        text.textContent = row.text; item.append(label, text); log.appendChild(item);
+      }
+      log.scrollTop = log.scrollHeight;
+    };
+    const append = (role, text, source) => { history.push({ role, text, source }); if (history.length > R.LIMITS.history) history.shift(); render(); };
+    const setBusy = value => { busy = value; sendButton.disabled = value; form.setAttribute("aria-busy", String(value)); };
+    const submit = async event => {
+      event.preventDefault();
+      if (disposed || !opened || busy || composing) return;
+      let message;
+      try { message = R.cleanText(input.value, R.LIMITS.message); }
+      catch { status.textContent = "Write a message of 1–1,000 characters."; input.focus(); return; }
+      const prior = history.slice(), context = agent.conversationContext(), turn = ++revision;
+      controller = new AbortController(); const pending = controller;
+      append("player", message, "player"); input.value = ""; setBusy(true);
+      status.textContent = client.mode === "mock" ? "Preparing a local mock reply…" : "Waiting for Zuzu…";
+      let text, source = client.mode === "mock" ? "mock" : "service";
+      try { const response = await client.send(message, context, prior, pending.signal); text = response.text; }
+      catch {
+        if (disposed || !opened || turn !== revision || pending.signal.aborted) return;
+        text = agent.fallbackReply(); source = "fallback";
+      } finally {
+        if (turn === revision && !disposed) { controller = null; setBusy(false); }
+      }
+      if (disposed || !opened || turn !== revision) return;
+      append("zuzu", text, source); agent.sayConversation(text);
+      status.textContent = source === "fallback" ? "Service unavailable or invalid reply. Zuzu is using her local replies." : source === "mock" ? "Mock reply · no message was sent to an AI service." : "Reply received.";
+    };
+    const finishClose = () => {
+      if (!opened) return;
+      opened = false; revision++; if (controller) controller.abort(); controller = null; setBusy(false); composing = false;
+      input.blur(); document.body.classList.remove("dsb-talking"); agent.setConversation(false); onChange(false);
+    };
+    const nativeClose = () => { if (!dialog.open) finishClose(); };
+    const close = () => { if (dialog.open) dialog.close(); finishClose(); };
+    const keydown = event => {
+      event.stopPropagation();
+      if (event.key === "Escape") { event.preventDefault(); close(); }
+      else if (event.target === input && event.key === "Enter" && !event.shiftKey && !event.isComposing && event.keyCode !== 229 && !composing) { event.preventDefault(); form.requestSubmit(); }
+    };
+    const cancel = event => { event.preventDefault(); close(); };
+    const compositionStart = () => { composing = true; }, compositionEnd = () => { composing = false; };
+    const open = () => {
+      if (disposed || opened) return;
+      opened = true; agent.setConversation(true); document.body.classList.add("dsb-talking");
+      dialog.showModal(); onChange(true); fit(); input.focus({ preventScroll: true });
+      status.textContent = "Ask about anything. Enter sends; Shift+Enter adds a line.";
+    };
+    form.addEventListener("submit", submit); closeButton.addEventListener("click", close); dialog.addEventListener("cancel", cancel); dialog.addEventListener("close", nativeClose); dialog.addEventListener("keydown", keydown);
+    input.addEventListener("compositionstart", compositionStart); input.addEventListener("compositionend", compositionEnd);
+    window.addEventListener("resize", fit); if (viewport) { viewport.addEventListener("resize", fit); viewport.addEventListener("scroll", fit); }
+    const dispose = () => {
+      disposed = true; close(); history.length = 0; log.replaceChildren(); input.value = "";
+      form.removeEventListener("submit", submit); closeButton.removeEventListener("click", close); dialog.removeEventListener("cancel", cancel); dialog.removeEventListener("close", nativeClose); dialog.removeEventListener("keydown", keydown);
+      input.removeEventListener("compositionstart", compositionStart); input.removeEventListener("compositionend", compositionEnd);
+      window.removeEventListener("resize", fit); if (viewport) { viewport.removeEventListener("resize", fit); viewport.removeEventListener("scroll", fit); }
+    };
+    return { open, close, dispose, get isOpen() { return opened; }, get busy() { return busy; }, get history() { return history.map(row => ({ ...row })); } };
+  };
+  BL.dsbConversation = { create };
+})();
+
 // ---- js/dsb-agent-brain.js ----
 // Deterministic Zuzu decisions. Only frozen observations and validated requests cross this boundary.
 (() => {
@@ -46599,10 +46780,12 @@ window.BL.dsbAudioData.music = "SUQzBAAAAAABAFRYWFgAAAASAAADbWFqb3JfYnJhbmQAZGFz
   const SHOTS = ["Absolutely not. Indoor voice. Outdoor everything.", "I'm a cat, not target practice. Meeting adjourned.", "That is not how you open a tin."];
   let visits = 0;
   const create = () => {
-    let id = 0, cursor = visits++ % HELLO.length, greetAt = Infinity, nextInterest = 0, nextIdle = 8, pendingLine = "", retryAt = 0, closed = false;
+    let cursor = visits++ % HELLO.length, greetAt = Infinity, nextInterest = 0, nextIdle = 8, pendingLine = "", retryAt = 0, closed = false;
     const pick = (pool) => pool[cursor++ % pool.length];
+    const reply = p => p.self.tomatoHits ? "Yes, I remember the tomato. No, we are not even." : p.player.food || p.self.foodInterest > 0.5 ? pick(FOOD) : pick(CHAT);
     const observe = (p, event, submit) => {
       if (closed || !p.active) return;
+      let id = p.nextRequestId - 1;
       const ask = (type, args = {}) => submit({ visit: p.visit, id: ++id, at: p.time, type, ...args });
       const say = text => ask("say", { text });
       if (event === "tomato_hit" || event === "weapon_hit" || event === "shot_nearby") {
@@ -46616,7 +46799,7 @@ window.BL.dsbAudioData.music = "SUQzBAAAAAABAFRYWFgAAAASAAADbWFqb3JfYnJhbmQAZGFz
       if (event === "player_seen") { ask("look_at", { entity: "player" }); greetAt = p.time + 1.5; }
       if (event === "talk") {
         ask("look_at", { entity: "player" });
-        say(p.self.tomatoHits ? "Yes, I remember the tomato. No, we are not even." : p.player.food || p.self.foodInterest > 0.5 ? pick(FOOD) : pick(CHAT));
+        say(reply(p));
         greetAt = Infinity;
       }
       if ((event === "food_seen" || event === "food_activity") && p.time >= nextInterest) {
@@ -46631,7 +46814,7 @@ window.BL.dsbAudioData.music = "SUQzBAAAAAABAFRYWFgAAAASAAADbWFqb3JfYnJhbmQAZGFz
         }
       }
     };
-    return { observe, dispose: () => { closed = true; } };
+    return { observe, reply, dispose: () => { closed = true; } };
   };
   BL.dsbAgentBrain = { create };
 })();
@@ -46700,6 +46883,7 @@ window.BL.dsbAudioData.music = "SUQzBAAAAAABAFRYWFgAAAASAAADbWFqb3JfYnJhbmQAZGFz
     const memory = Array.from({ length: CAPACITY }, () => ({ seq: 0, time: 0, type: "", entity: "player", value: 0 }));
     const state = { tomatoHits: 0, nearbyShots: 0, weaponHits: 0, greeted: false, foodInterest: 0, mood: "content", intent: "sit" };
     const sense = { name: "", x: 0, y: 0, z: 0, food: 0, active: false };
+    let conversing = false, conversationLine = "";
     let seq = 0, count = 0, now = 0, disposed = false, nearPlayer = false, hadFood = false, sampleAt = 0;
     let lastRequest = 0, rateAt = 0, rateCount = 0, sayAt = -10, talkAt = -10, shotAt = -10, threatUntil = 0;
     let text = "", textUntil = 0, gait = 0, sit = 1, flinch = 0, gesture = "sit", gestureUntil = 0;
@@ -46716,7 +46900,7 @@ window.BL.dsbAudioData.music = "SUQzBAAAAAABAFRYWFgAAAASAAADbWFqb3JfYnJhbmQAZGFz
       const row = memory[seq % CAPACITY]; row.seq = ++seq; row.time = now; row.type = type; row.entity = "player"; row.value = value; count = Math.min(CAPACITY, count + 1);
     };
     // Copies exist only at the brain boundary/debug reads, never in the animation loop.
-    const snapshot = () => Object.freeze({ visit, time: now, active: sense.active, near: nearPlayer,
+    const snapshot = () => Object.freeze({ visit, nextRequestId: lastRequest + 1, time: now, active: sense.active, near: nearPlayer,
       player: Object.freeze({ id: "player", name: sense.name, x: sense.x, y: sense.y, z: sense.z, food: sense.food }),
       self: Object.freeze({ id: "zuzu", name: "Zuzu", pronouns: "she/her", x: p.x, z: p.z, ...state }),
       events: Object.freeze(Array.from({ length: count }, (_, i) => Object.freeze({ ...memory[(seq - count + i) % CAPACITY] }))) });
@@ -46754,7 +46938,7 @@ window.BL.dsbAudioData.music = "SUQzBAAAAAABAFRYWFgAAAASAAADbWFqb3JfYnJhbmQAZGFz
       }
       return "accepted";
     };
-    const notify = (type) => { if (!disposed && sense.active) brain.observe(snapshot(), type, request); };
+    const notify = (type) => { if (!disposed && sense.active && !conversing) brain.observe(snapshot(), type, request); };
     const event = (type) => {
       if (disposed || !sense.active) return;
       if (type === "tomato_hit") { state.tomatoHits++; state.mood = "offended"; flinch = 1; }
@@ -46772,6 +46956,20 @@ window.BL.dsbAudioData.music = "SUQzBAAAAAABAFRYWFgAAAASAAADbWFqb3JfYnJhbmQAZGFz
     const tomato = (ax, ay, az, bx, by, bz) => { if (!sense.active || distanceToSegment(ax, ay, az, bx, by, bz) > 0.65) return false; event("tomato_hit"); return true; };
     const projectile = (ax, ay, az, bx, by, bz) => { if (sense.active && distanceToSegment(ax, ay, az, bx, by, bz) < 2.1) event("shot_nearby"); };
     const talk = () => { if (!sense.active || Math.hypot(p.x - sense.x, p.z - sense.z) > 3.5 || now - talkAt < 3) return false; talkAt = now; notify("talk"); return true; };
+    const setConversation = value => {
+      if (disposed) return;
+      conversing = value; conversationLine = ""; setIntent(value ? "look_at_player" : "sit");
+    };
+    const conversationContext = () => {
+      let location = "dsb_land", distance = 8;
+      for (const q of POINTS) { const d = Math.hypot(q.x - sense.x, q.z - sense.z); if (d < distance) { distance = d; location = q.id; } }
+      return { playerName: sense.name, location, mood: state.mood, foodCount: sense.food, recentEvents: snapshot().events };
+    };
+    const sayConversation = value => {
+      if (disposed || !conversing || typeof value !== "string" || !value.trim() || value.length > 1000) return false;
+      // The panel retains the full answer; the world bubble stays readable on mobile.
+      const line = value.replace(/\s+/g, " ").trim(); conversationLine = line.length > 160 ? line.slice(0, 157) + "…" : line; return true;
+    };
     // Route using a small prebuilt DSB visibility graph, then sweep every actual step.
     const route = (gx, gz) => {
       if (segment(p.x, p.z, gx, gz)) { tx = gx; tz = gz; return true; }
@@ -46792,6 +46990,10 @@ window.BL.dsbAudioData.music = "SUQzBAAAAAABAFRYWFgAAAASAAADbWFqb3JfYnJhbmQAZGFz
       if (disposed) return;
       now = time; sense.name = perception.name; sense.x = perception.x; sense.y = perception.y; sense.z = perception.z; sense.food = perception.food; sense.active = perception.active;
       if (!sense.active) { if (state.intent === "follow") setIntent("sit"); return; }
+      if (conversing && conversationLine && now >= sayAt + 3) {
+        const result = request({ visit, id: lastRequest + 1, at: now, type: "say", text: conversationLine });
+        if (result === "accepted") conversationLine = "";
+      }
       const distance = Math.hypot(p.x - sense.x, p.z - sense.z);
       state.foodInterest = Math.max(0, state.foodInterest - dt * 0.025);
       if (now >= sampleAt) {
@@ -46835,7 +47037,7 @@ window.BL.dsbAudioData.music = "SUQzBAAAAAABAFRYWFgAAAASAAADbWFqb3JfYnJhbmQAZGFz
     };
     const draw = (ctx, project, drawSpeech) => { if (disposed || !sense.active || now >= textUntil) return; const screen = project(p.x, 1.7, p.z); if (screen) drawSpeech(ctx, "Zuzu: " + text, screen.x, screen.y, Math.min(1, (textUntil - now) * 2)); };
     const dispose = () => { disposed = true; brain.dispose(); for (const node of targets) input.remove(node); targets.length = 0; removeChild(parent, cat.root); text = ""; count = seq = 0; };
-    return { root: cat.root, update, draw, event, tomato, projectile, talk, request, snapshot, dispose, get dialogue() { return text; }, get disposed() { return disposed; } };
+    return { root: cat.root, update, draw, event, tomato, projectile, talk, request, snapshot, setConversation, conversationContext, sayConversation, fallbackReply: () => brain.reply(snapshot()), dispose, get dialogue() { return text; }, get disposed() { return disposed; } };
   };
   BL.dsbAgent = { create };
 })();
@@ -46857,7 +47059,7 @@ window.BL.dsbAudioData.music = "SUQzBAAAAAABAFRYWFgAAAASAAADbWFqb3JfYnJhbmQAZGFz
   let rideYaw = 0, ridePitch = 0, proximity, lastContext = "", bananas = 0;
   const RENDER = { clear: [0.025, 0.014, 0.06], horizon: [0.11, 0.04, 0.19], zenith: [0.008, 0.006, 0.025], sky: [0.52, 0.43, 0.7], ground: [0.26, 0.17, 0.32], sun: [0.8, 0.7, 0.9], light: { x: -0.4, y: 0.8, z: 0.4 }, stars: 1, shadowCenter: { x: 0, y: 0, z: 0 }, shadowExtent: 48, bloomStrength: 0.5, lights: new Float32Array(80), lightCount: 2 };
   const DARK = { clear: [0, 0, 0], sky: [0.12, 0.1, 0.16], ground: [0.04, 0.03, 0.06], sun: [0.18, 0.16, 0.22], bloomStrength: 0.15 };
-  let root, camera, input, pilot, hud, renderer, world, game, go, land, portal, audio, data, tv, panel, readout, bag, prompt, overlayCanvas, overlayCtx, avatar, crew, fx, playerWorld, zuzu;
+  let root, camera, input, pilot, hud, renderer, world, game, go, land, portal, audio, data, tv, panel, readout, bag, prompt, overlayCanvas, overlayCtx, avatar, crew, fx, playerWorld, zuzu, conversation;
   let exiting = false;
   let phase = "entrance", progress = 0, elapsed = 0, flash = 0, boatAngle = 0, rideAngle = 0, priceTimer = 0, tokens = 20, bread = 0, tomatoes = 0, throwAt = -1, fedUntil = 0, disposed = false, oldSheetHidden = false, oldSheetOpen = "true";
   let arrivalTime = 0, glanceTime = 3, lastCue = -1, glance = 0, gait = 0, avatarView = true;
@@ -46904,7 +47106,7 @@ window.BL.dsbAudioData.music = "SUQzBAAAAAABAFRYWFgAAAASAAADbWFqb3JfYnJhbmQAZGFz
     savedRevision = state.revision;
   };
   const location = () => phase === "land" && avatarView ? avatar.root.position : pilot.orbit.target;
-  const cameraEnabled = () => phase === "land" && !exiting && !tv.isOpen && document.getElementById("dsb-shop").hidden;
+  const cameraEnabled = () => phase === "land" && !exiting && !tv.isOpen && !conversation?.isOpen && document.getElementById("dsb-shop").hidden;
   const playerEnabled = () => avatarView && cameraEnabled();
   const syncPlayer = () => pilot.setActive(cameraEnabled());
   const clearAt = (x, z, radius = 0.35) => Math.hypot(x, z) < 35 - radius
@@ -47010,7 +47212,7 @@ window.BL.dsbAudioData.music = "SUQzBAAAAAABAFRYWFgAAAASAAADbWFqb3JfYnJhbmQAZGFz
   const returnHub = () => { if (phase === "entrance" || phase === "land" && inCave()) { exiting = true; syncPlayer(); go("hub"); } else toast("Enter the stone cave to return to Ooga Booga Land."); };
   const contextAction = () => {
     if (phase === "boat" || phase === "coaster") return "ride";
-    if (phase !== "land" || tv.isOpen) return "";
+    if (phase !== "land" || tv.isOpen || conversation.isOpen) return "";
     if (inCave()) return "exit";
     if (atDock()) return boatTrip.wait > 0 ? "boat" : "boat-wait";
     if (atStation()) return trainTrip.wait > 0 ? "coaster" : "coaster-wait";
@@ -47071,7 +47273,7 @@ window.BL.dsbAudioData.music = "SUQzBAAAAAABAFRYWFgAAAASAAADbWFqb3JfYnJhbmQAZGFz
     else if (atStation()) board("coaster");
     else if (near(-10, 16, 6)) openTv();
     else if (near(-20, 16, 7)) openShop();
-    else if (nearZuzu()) zuzu.talk();
+    else if (nearZuzu()) conversation.open();
     else if (near(-18, -10, 7)) perform();
     else if (inCave()) returnHub();
     else throwTomato();
@@ -47080,7 +47282,7 @@ window.BL.dsbAudioData.music = "SUQzBAAAAAABAFRYWFgAAAASAAADbWFqb3JfYnJhbmQAZGFz
   const onTap = (hit) => {
     if (!playerEnabled() || pilot.aiming || !hit) return;
     const owner = hit.owner;
-    if (owner.kind === "dsb-agent") { if (nearZuzu()) zuzu.talk(); else toast("Walk closer to talk to Zuzu."); }
+    if (owner.kind === "dsb-agent") { if (nearZuzu()) conversation.open(); else toast("Walk closer to talk to Zuzu."); }
     else if (owner.kind === "visitor") { if (tomatoes) throwTomato(owner.cave); else toast("Grab tomatoes at the meme stand, then tap an Ooga."); }
     else if (owner.kind === "tv") openTv();
     else if (owner.kind === "shop") openShop();
@@ -47117,6 +47319,7 @@ window.BL.dsbAudioData.music = "SUQzBAAAAAABAFRYWFgAAAASAAADbWFqb3JfYnJhbmQAZGFz
     return false;
   };
   const onKey = (event) => {
+    if (conversation.isOpen) return;
     if (playerEnabled()) {
       if (event.key === "1" || event.key === "2") { pilot.weaponMode(Number(event.key)); return; }
       if (event.key.toLowerCase() === "g") { pilot.weaponAction("weapon-toggle"); return; }
@@ -47158,7 +47361,7 @@ window.BL.dsbAudioData.music = "SUQzBAAAAAABAFRYWFgAAAASAAADbWFqb3JfYnJhbmQAZGFz
       avatar.root.visible = true;
       if (cameraEnabled()) { pilot.readInput(dt); if (avatarView) crew.update(dt, time); pilot.update(dt); }
     } else avatar.root.visible = phase === "arrival";
-    agentPerception.name = avatar.traits.name; agentPerception.x = avatar.root.position.x; agentPerception.y = avatar.root.position.y - avatar.baseY; agentPerception.z = avatar.root.position.z; agentPerception.food = bananas + bread; agentPerception.active = playerEnabled();
+    agentPerception.name = avatar.traits.name; agentPerception.x = avatar.root.position.x; agentPerception.y = avatar.root.position.y - avatar.baseY; agentPerception.z = avatar.root.position.z; agentPerception.food = bananas + bread; agentPerception.active = playerEnabled() || conversation.isOpen && phase === "land" && !exiting;
     zuzu.update(dt, time, agentPerception);
     advanceTrip(boatTrip, dt); boatAngle = boatTrip.angle;
     for (let i = 0; i < land.boats.length; i++) {
@@ -47251,6 +47454,7 @@ window.BL.dsbAudioData.music = "SUQzBAAAAAABAFRYWFgAAAASAAADbWFqb3JfYnJhbmQAZGFz
     hud.onAction(action); hud.onPreset((name) => { if (phase === "land") pilot.goPreset(name); });
     data = BL.dsbData.create(); data.start(); audio = BL.dsbAudio.create();
     tv = BL.dsbTv.create(land.tvScreen, renderer);
+    conversation = BL.dsbConversation.create({ agent: zuzu, onChange: () => { syncPlayer(); syncContext(); } });
     for (let i = 0; i < N; i++) {
       for (let side = 0; side < 2; side++) rails.push(M.block(land.root, "#55e49b", 0, 0, 0, 0.13, 0.14, 1, 0.5));
       ties.push(M.block(land.root, M.C.stone, 0, 0, 0, 1.65, 0.12, 0.2));
@@ -47272,18 +47476,19 @@ window.BL.dsbAudioData.music = "SUQzBAAAAAABAFRYWFgAAAASAAADbWFqb3JfYnJhbmQAZGFz
     document.getElementById("dsb-shop").hidden = true; document.getElementById("dsb-live").setAttribute("aria-pressed", "true"); soundUi();
     document.body.classList.add("dsb-active", "dsb-entry"); document.addEventListener("visibilitychange", onVisibility); bagText();
     dsbScene.renderOpts = DARK;
-    Object.assign(dsbScene, { root, camera, input, debug: { camera, pilot, crew, controls: pilot.controls, hud, audio, dsb: { zuzu, get phase() { return phase; }, get arrivalTime() { return arrivalTime; }, get glance() { return glance; }, avatar, get progress() { return progress; }, get inventory() { return { tokens, bread, bananas, tomatoes }; }, get shots() { return shots.filter((s) => s.life > 0).length; }, land, visitors, data, tv, openTv, boatTrip, trainTrip, get rideLook() { return { yaw: rideYaw, pitch: ridePitch }; }, railY, board, buy, eat, throwTomato, stopRide, get fired() { return Array.from(audio.fired); } } } });
+    Object.assign(dsbScene, { root, camera, input, debug: { camera, pilot, crew, controls: pilot.controls, hud, audio, dsb: { zuzu, conversation, get phase() { return phase; }, get arrivalTime() { return arrivalTime; }, get glance() { return glance; }, avatar, get progress() { return progress; }, get inventory() { return { tokens, bread, bananas, tomatoes }; }, get shots() { return shots.filter((s) => s.life > 0).length; }, land, visitors, data, tv, openTv, boatTrip, trainTrip, get rideLook() { return { yaw: rideYaw, pitch: ridePitch }; }, railY, board, buy, eat, throwTomato, stopRide, get fired() { return Array.from(audio.fired); } } } });
     syncContext(); update(0, 0);
   };
   const leave = () => {
     disposed = true; document.removeEventListener("visibilitychange", onVisibility);
+    exiting = true; conversation.dispose();
     proximity.hidden = true; tv.dispose(); audio.dispose(); data.dispose(); pilot.dispose(); crew.dispose(); zuzu.dispose(); fx.dispose();
     for (const node of targets) input.remove(node); targets.length = 0;
     const count = input.targetCount; input.dispose(); hud.el.sheet.hidden = oldSheetHidden; hud.el.sheet.dataset.open = oldSheetOpen; hud.dispose();
     while (root.children.length) removeChild(root, root.children[root.children.length - 1]);
     visitors.length = shots.length = rails.length = ties.length = candles.length = 0;
     document.body.classList.remove("dsb-active", "dsb-entry", "dsb-arrival");
-    crew = fx = playerWorld = zuzu = null;
+    crew = fx = playerWorld = zuzu = conversation = null;
     avatar = land = portal = camera = input = pilot = hud = renderer = world = game = go = audio = data = tv = panel = readout = bag = prompt = overlayCanvas = overlayCtx = proximity = null;
     dsbScene.input = dsbScene.debug = null; return { targets: count };
   };

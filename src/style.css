@@ -3871,3 +3871,28 @@ body.orbit-dragging #tooltip {
 
 #dsb-tv-menu[hidden] { display: none; }
 .dsb-panel[data-folded="true"] #dsb-shop { display: none; }
+
+/* Zuzu's compact, native-input conversation stays beside the physical world. */
+#zuzu-conversation { position: fixed; inset: auto 16px calc(16px + var(--zuzu-keyboard, 0px)) auto; margin: 0; width: min(380px, calc(100vw - 32px)); max-height: min(440px, calc(var(--zuzu-viewport, 100dvh) - 24px)); padding: 16px; border: 1px solid #b68a43; border-radius: 14px; background: #21192ff5; color: #f5edf9; box-shadow: 0 8px 36px #0008; pointer-events: auto; overflow: auto; }
+#zuzu-conversation[open] { display: flex; flex-direction: column; gap: 10px; }
+#zuzu-conversation::backdrop { background: #08051222; }
+#zuzu-conversation header { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+#zuzu-conversation h2 { margin: 0; color: #ffd267; font-size: 22px; }
+#zuzu-conversation p { margin: 0; font-size: 11px; line-height: 1.5; }
+#zuzu-mode, #zuzu-status { color: #cebdd7; }
+#zuzu-history { margin: 0; padding: 0; list-style: none; overflow: auto; min-height: 0; max-height: 180px; overscroll-behavior: contain; }
+#zuzu-history li { padding: 8px 0; border-bottom: 1px solid #ffffff18; }
+#zuzu-history strong { display: block; font-size: 11px; color: #e9c17a; }
+#zuzu-history span { display: block; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 13px; line-height: 1.5; }
+#zuzu-form { flex-shrink: 0; }
+#zuzu-form label { display: block; font-size: 12px; margin-bottom: 6px; }
+#zuzu-form > div { display: flex; gap: 8px; }
+#zuzu-message { flex: 1; min-width: 0; width: 100%; resize: none; padding: 10px; border: 1px solid #9874ad; border-radius: 8px; color: #fff; background: #110e1b; font: 16px/1.35 system-ui, sans-serif; touch-action: auto; user-select: text; -webkit-user-select: text; }
+#zuzu-conversation button { min-height: 44px; padding: 8px 12px; border: 1px solid #b68a43; border-radius: 8px; color: #ffdc85; background: #382641; font: inherit; cursor: pointer; }
+#zuzu-conversation button:disabled { opacity: 0.5; cursor: default; }
+#zuzu-conversation button:focus-visible, #zuzu-message:focus-visible { outline: 2px solid #49ddd9; outline-offset: 2px; }
+.dsb-talking .dsb-panel, .dsb-talking #dsb-context, .dsb-talking #joy-move, .dsb-talking #joy-look, .dsb-talking #act { visibility: hidden; }
+@media (max-width: 720px) {
+  #zuzu-conversation { right: max(8px, var(--safe-right)); bottom: calc(8px + var(--safe-bottom) + var(--zuzu-keyboard, 0px)); width: calc(100vw - 16px - var(--safe-left) - var(--safe-right)); padding: 12px; max-height: min(360px, calc(var(--zuzu-viewport, 100dvh) - 24px)); }
+  #zuzu-history { max-height: 120px; }
+}
