@@ -60,13 +60,21 @@
     if (changed.size) for (const notify of listeners) notify();
     return changed.size;
   };
-  // Oogatron schema 1, one snapshot or an array of project snapshots. generated_at
-  // describes the snapshot, never the contributor's most recent activity.
+  // Oogatron snapshots, one or an array: schema 2 (org-wide, what the baked
+  // jumbotron payload is) or legacy schema 1 project snapshots keyed by
+  // meta.repo. generated_at describes the snapshot, never the contributor's
+  // most recent activity. Contributor identity is org-wide in schema 2, so
+  // last_seen_at lands on the lab's repo key: the wake/sleep state is
+  // org-wide by construction (stateFor takes the max across repos) and the
+  // lab work sites keep animating for whoever the org last saw active.
   const applySnapshot = (snapshots, at = Date.now()) => {
     const rows = [];
     for (const snapshot of Array.isArray(snapshots) ? snapshots : [snapshots]) {
-      if (!snapshot || !snapshot.meta || snapshot.meta.schema_version !== 1 || !Array.isArray(snapshot.contributors)) continue;
-      const repo = repositoryOf(snapshot.meta.repo);
+      if (!snapshot || !snapshot.meta || !Array.isArray(snapshot.contributors)) continue;
+      const version = snapshot.meta.schema_version;
+      const repo = version === 2
+        ? (typeof snapshot.meta.org === "string" && snapshot.meta.org.toLowerCase() === "oogaboogax" ? ENTROPY : null)
+        : version === 1 ? repositoryOf(snapshot.meta.repo) : null;
       if (!repo) continue;
       const firstSnapshot = !snapshotRepos.has(repo), accepted = [];
       for (const contributor of snapshot.contributors) {

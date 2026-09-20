@@ -2,7 +2,7 @@
 
 A small WebGL2 floating island whose cliff caves are projects. The open cave is a lab where donated bananas feed voxel cavemen who stand in for the contributors of [EntropyLab](https://github.com/OogaBoogaX/entropylab). Working Oogas load banana ammunition at the pile, run to their project's cave and shoot into it from outside, then return to reload. Visitors can poke the crew, roll the dice and watch donated bananas rain onto the shared pile.
 
-Everything is plain JavaScript with no dependencies, no build requirement and one network connection: a websocket to mempool.space that makes the island's weather. Every transaction the Bitcoin mempool accepts rains on the hub, with bigger drops for heavier transactions, every mined block strikes lightning and rolls thunder, and the fee for the next block sets the weather, from sunny and dry to a full grey storm; the mapping is in [Weather](#weather). The time of day stays the island's real clock. Nothing is sent but the subscription. Payments are a simulator for now, and all visitor state stays in the visitor's own browser.
+Everything is plain JavaScript with no dependencies, no build requirement and two network connections: a websocket to mempool.space that makes the island's weather, and a once-a-minute poll of the oogatron stats worker that keeps the rim jumbotron's OogaBoogaX numbers live and launches fireworks from the board when a fresh contribution lands. Every transaction the Bitcoin mempool accepts rains on the hub, with bigger drops for heavier transactions, every mined block strikes lightning and rolls thunder, and the fee for the next block sets the weather, from sunny and dry to a full grey storm; the mapping is in [Weather](#weather). The time of day stays the island's real clock. Nothing is sent but the subscription. Payments are a simulator for now, and all visitor state stays in the visitor's own browser.
 
 ## Run it
 
@@ -61,7 +61,7 @@ Double-click the Agent to play it, exactly as you take an Ooga; double-click it 
 
 **B** adds 100 test bananas, **L** a legendary tip, **P** fills the pile, **1** to **9** force a contributor to eat, **Shift+R** resets and **Shift+A** plays the Agent anywhere. The Konami code (up, up, down, down, left, right, left, right, B, A) opens a panel showing the live mempool.space socket: its state, message counts, the chain tip and next-block fee, the island's overcast and the last events.
 
-`?scene=lab`, `race`, `drop` or `orbit` opens that scene, `?nosim=1` silences simulated tips and the mempool feed, `?mempool=0` only the feed, `?canvas2d=1` forces the Canvas 2D fallback, and `?debug=1` exposes `window.__ooga`. AGENTS.md lists every debug flag: the clock, the starting view, character, weapon and ammunition fixtures, and the pile level.
+`?scene=lab`, `race`, `drop` or `orbit` opens that scene, `?nosim=1` silences simulated tips and both live feeds, `?mempool=0` only the weather feed, `?oogatron=0` only the stats poll, `?canvas2d=1` forces the Canvas 2D fallback, and `?debug=1` exposes `window.__ooga`. AGENTS.md lists every debug flag: the clock, the starting view, character, weapon and ammunition fixtures, and the pile level.
 
 ## Weather
 
@@ -120,7 +120,7 @@ GitHub Pages deploys through `.github/workflows/pages.yml` on pushes to `rock`, 
 
 ## Privacy
 
-No analytics, no personal data, and one external connection: the mempool.space websocket, which receives public chain data and sends nothing about the visitor. The roster lists public contributor handles only. The donation handle and message a visitor types are stored in their own localStorage and nowhere else.
+No analytics, no personal data, and two external connections: the mempool.space websocket, which receives public chain data, and the oogatron stats worker, which serves public org activity numbers; neither sends anything about the visitor. The roster lists public contributor handles only. The donation handle and message a visitor types are stored in their own localStorage and nowhere else.
 
 ## License
 

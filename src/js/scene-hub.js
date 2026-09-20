@@ -1,7 +1,7 @@
 (() => {
   "use strict";
   const BL = window.BL = window.BL || {};
-  const { math, models, contributors, donations, qr, terrain, hubModels, headquartersModels, dropModels, rocketModels, rocketParts, caves, daylight, game: gameMod, hud: hudMod, interact: interactMod, pilot: pilotMod, fx: fxMod, crew: crewMod, pile: pileMod, crates: cratesMod, critters: crittersMod, storm: stormMod, mempool } = BL;
+  const { math, models, contributors, donations, qr, terrain, hubModels, headquartersModels, dropModels, rocketModels, rocketParts, caves, daylight, game: gameMod, hud: hudMod, interact: interactMod, pilot: pilotMod, fx: fxMod, crew: crewMod, pile: pileMod, crates: cratesMod, critters: crittersMod, storm: stormMod, mempool, oogatronLive } = BL;
   const { clamp, lerp, ease, fnv1a, mulberry32 } = math;
   const { createNode, addChild, removeChild, createCamera, addTween, stepTweens, tweenCount, traverseVisible } = BL.scene;
   const { JET_SPEED, JET_RISE, JET_FUEL_SECONDS, JET_MOVE_SECONDS } = crewMod;
@@ -144,7 +144,7 @@
   const WANDER_COUNT = 36, WANDER_INNER = 5.5;
   const ALTAR_HEIGHT = 0.34, ALTAR_BLOCK_WIDTH = 0.2, ALTAR_BLOCK_ARC = 0.3, ALTAR_RING_GAP = 0.02, ALTAR_MAX_BLOCKS = 512;
   const RIPEN = 25, TREE_CHANCE = 0.5, BUSH_CHANCE = 0.25;
-  const PROP_TIPS = { tree: "Tree · shake it", bush: "Bush · rustle it", rock: "Rock · hit to break", crate: "Box · hit to break", barrel: "Barrel · hit to break", flower: "Flowers", torch: "Torch · warm", firepit: "Fire pit", bedroll: "Somebody's bed", ladder: "Ladder · wobbly", dock: "Dock · creaky", jetpack: "Jetpack · jump to collect", magazine: "Spare magazine · walk into it to collect", plane: "Ooga Drop · tap to fly", sign: "Ooga Drop · the plane flies from here", launchpad: "Ooga Orbit · tap to build a rocket", rocket: "Ooga Orbit · tap to fly", tower: "Launch tower · steady", orbitsign: "Ooga Orbit · the pad past the bridge", bridge: "Rope bridge · to the launch pad", windsock: "Windsock · a fair wind", jumbotron: "Jumbotron · EntropyLab on the big screen · tap for the next board", gate: null };
+  const PROP_TIPS = { tree: "Tree · shake it", bush: "Bush · rustle it", rock: "Rock · hit to break", crate: "Box · hit to break", barrel: "Barrel · hit to break", flower: "Flowers", torch: "Torch · warm", firepit: "Fire pit", bedroll: "Somebody's bed", ladder: "Ladder · wobbly", dock: "Dock · creaky", jetpack: "Jetpack · jump to collect", magazine: "Spare magazine · walk into it to collect", plane: "Ooga Drop · tap to fly", sign: "Ooga Drop · the plane flies from here", launchpad: "Ooga Orbit · tap to build a rocket", rocket: "Ooga Orbit · tap to fly", tower: "Launch tower · steady", orbitsign: "Ooga Orbit · the pad past the bridge", bridge: "Rope bridge · to the launch pad", windsock: "Windsock · a fair wind", jumbotron: "Jumbotron · OogaBoogaX on the big screen · tap for the next board", gate: null };
   const MATRIX_LIVING_PROPS = new Set(["tree"]);
   const SOLID_PROPS = new Set(["tree", "rock", "crate", "barrel", "firepit", "jumbotron", "launchpad", "rocket", "tower", "bridge", "orbitsign"]);
   const BUSH_WORDS = ["Something rustles.", "A beetle. Ooga leaves it.", "Just a bush."];
@@ -153,6 +153,8 @@
   const CHIP = models.particleGeometry("#6b625a", 0.1, 0);
   const SPARK = models.particleGeometry("#ffb13b", 0.08, 1);
   const DUST = models.particleGeometry("#a3874f", 0.1, 0);
+  // Fireworks reuse the board's own stat colors, fully emissive so they read at night.
+  const FIREWORK = ["#46ff70", "#3fd1c5", "#6f9fca", "#f5c542", "#e04a3a"].map((c) => models.particleGeometry(c, 0.11, 1));
   const WALK_IN = { x: 0, z: -(MEADOW + 0.5) };
   const TICKER_AT = { x: 0, y: 0, z: -(RADIUS - 2) };
   const setVec = (v, x, y, z) => {
@@ -167,7 +169,7 @@
   };
 
   // One visit's state: created in enter, dropped in leave.
-  let renderer, game, world, go, lootEnabled, testBananas, root, camera, island, pathNode, altar, hud, hooks, input, pilot, fx, cameraCover, bananaCover, solids, rockGuides, objectGuides, sightGuides, bananaGuides, pileGuides, platformGuides, mirrorGuides, pile, crew, crates, critters, clock, presets, entering, jetpack, jetpackState, jetpackCarrier, jetpackWearer, lastJetpackCloud, mirrorCave, matrixCave, matrixControl, gateRain, fire, headquarters, jumbotron, positionDebug, agent, agentPlay, flyby;
+  let jumbotronSpot, oogatronUnsub, renderer, game, world, go, lootEnabled, testBananas, root, camera, island, pathNode, altar, hud, hooks, input, pilot, fx, cameraCover, bananaCover, solids, rockGuides, objectGuides, sightGuides, bananaGuides, pileGuides, platformGuides, mirrorGuides, pile, crew, crates, critters, clock, presets, entering, jetpack, jetpackState, jetpackCarrier, jetpackWearer, lastJetpackCloud, mirrorCave, matrixCave, matrixControl, gateRain, fire, headquarters, jumbotron, positionDebug, agent, agentPlay, flyby;
   let magazine, magazineState, breakables;
   const JETPACK_HUD_STATE = { owned: false, equipped: false, fuel: 1, blocked: false };
   let enteringTween = null;
@@ -3097,7 +3099,6 @@
     switch (o.kind) {
       case "caveman":
         crew.pokeCave(o.cave);
-        if (jumbotron) jumbotron.showContributor(o.cave.traits.name);
         break;
       case "crate":
         crates.openCrate(o.crate);
@@ -4132,6 +4133,41 @@
     if (first) hud.setSubtitle("an island of caves");
     if (!first) hud.toast(PHASE_TOASTS[next]);
   };
+  // Contribution fireworks: shells rise from the jumbotron and burst in the
+  // board's stat colors. Queued with absolute scene-clock times and stepped in
+  // update(), so a waiting shell costs nothing per frame.
+  const fireworksShells = [];
+  const launchFireworks = (strength = 1) => {
+    if (!jumbotronSpot || !fx) return 0;
+    const shells = Math.min(6, 2 + Math.min(4, strength | 0));
+    for (let i = 0; i < shells; i++) {
+      fireworksShells.push({
+        at: now + i * 0.38 + Math.random() * 0.2,
+        phase: "launch",
+        x: jumbotronSpot.x + (Math.random() - 0.5) * 2.6,
+        y: jumbotronSpot.y,
+        z: jumbotronSpot.z + (Math.random() - 0.5) * 1.4,
+        rise: 2.2 + Math.random() * 1.4
+      });
+    }
+    return shells;
+  };
+  const updateFireworks = () => {
+    for (let i = fireworksShells.length - 1; i >= 0; i--) {
+      const shell = fireworksShells[i];
+      if (now < shell.at) continue;
+      if (shell.phase === "launch") {
+        // The rising shell: a fast spark streak with lift instead of drop.
+        fx.spawnParticle(SPARK, shell.x, shell.y, shell.z, 0, shell.rise * 2.4, 0, 0.5, 10, -1.5, 0.03);
+        shell.phase = "burst";
+        shell.at = now + 0.5;
+      } else {
+        fx.burst(shell.x, shell.y + shell.rise, shell.z, 26, FIREWORK, 3.4);
+        fx.burst(shell.x, shell.y + shell.rise, shell.z, 8, [SPARK], 1.6);
+        fireworksShells.splice(i, 1);
+      }
+    }
+  };
   const update = (dt, elapsed) => {
     now = elapsed;
     hour = clock.read();
@@ -4140,6 +4176,7 @@
     storm.update(dt, RENDER_OPTS);
     updateLamps(dt, elapsed, phase !== null);
     if (jumbotron) jumbotron.update(elapsed, renderer);
+    if (fireworksShells.length) updateFireworks();
     const next = daylight.phaseAt(hour);
     if (next !== phase) setPhase(next);
     if (DEBUG) syncDaylightDebug(hour);
@@ -4624,6 +4661,13 @@
       addChild(root, jumbotron.node);
       placed.push(jumbotron.node);
       addProp("jumbotron", jumbotron.node, jx, jz, 3.4);
+      // Shells launch from just above the cabinet's top rail.
+      jumbotronSpot = { x: jx, y: jumbotron.node.position.y + 0.7 * jScale, z: jz };
+      // Live stats land on the board; a rise in org activity earns fireworks.
+      oogatronUnsub = oogatronLive.subscribe((event) => {
+        if (event.type === "stats" && jumbotron) jumbotron.refreshData(event.stats);
+        else if (event.type === "contribution") launchFireworks(event.delta);
+      });
     }
     scatter();
     reflowScenery();
@@ -4931,7 +4975,7 @@
         get shown() {
           return pile.shown;
         },
-        island, mouths: island.mouths, labels, launchers, camera, storm, cameraPose: POSITION_POSE, crew, controls: pilot.controls, props, altar, path: island.path.debug, headquarters, jumbotron, agent: agent.debug, flyby,
+        island, mouths: island.mouths, labels, launchers, camera, storm, cameraPose: POSITION_POSE, crew, controls: pilot.controls, props, altar, path: island.path.debug, headquarters, jumbotron, fireworks: launchFireworks, get fireworksPending() { return fireworksShells.length; }, agent: agent.debug, flyby,
         scenery: {
           get candidateCount() { return scenery.length; },
           get visibleCount() { return sceneryVisible; },
@@ -5200,6 +5244,12 @@
     mirrorCave.ripples.dispose();
     mirrorCave.body.dispose();
     pilot.dispose();
+    if (oogatronUnsub) {
+      oogatronUnsub();
+      oogatronUnsub = null;
+    }
+    fireworksShells.length = 0;
+    jumbotronSpot = null;
     if (jumbotron) {
       jumbotron.dispose(renderer);
       jumbotron = null;

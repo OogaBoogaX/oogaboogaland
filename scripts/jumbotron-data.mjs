@@ -1,5 +1,6 @@
 // Regenerates src/js/jumbotron-data.js: node scripts/jumbotron-data.mjs <path-or-url-to-stats.json>.
-// Build/refresh time only - the page stays network-free.
+// Build/refresh time only - the page's first paint comes from this bake; oogatron-live.js
+// refreshes the board at runtime.
 import { readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -15,27 +16,30 @@ const text = /^https?:/.test(source)
   ? await (await fetch(source)).text()
   : readFileSync(source, "utf8");
 const stats = JSON.parse(text);
-if (stats?.meta?.schema_version !== 1) {
+if (stats?.meta?.schema_version !== 2) {
   console.error(`unexpected schema_version: ${stats?.meta?.schema_version}`);
   process.exit(1);
 }
 
 // Ship public handles and activity only, never profile names or metadata.
-const counts = ({ commits, prs, reviews, comments }) => ({
-  commits, prs, reviews,
-  comments: { issue: comments.issue, review: comments.review, commit: comments.commit, all: comments.all }
-});
+const counts = ({ commits, prs, reviews }) => ({ commits, prs, reviews });
+const weekly = (rows) => rows.map(({ week, commits, prs, reviews }) => ({ week, commits, prs, reviews }));
 const snapshot = {
-  meta: { generated_at: stats.meta.generated_at, repo: stats.meta.repo, schema_version: stats.meta.schema_version },
+  meta: { generated_at: stats.meta.generated_at, org: stats.meta.org, schema_version: stats.meta.schema_version },
   totals: { contributors: stats.totals.contributors, ...counts(stats.totals) },
-  leaderboards: Object.fromEntries(["commits", "prs", "reviews", "comments"].map((kind) => [kind,
+  leaderboards: Object.fromEntries(["commits", "prs", "reviews"].map((kind) => [kind,
     stats.leaderboards[kind].map(({ login, count }) => ({ login, count }))
   ])),
+  repos: stats.repos.map((r) => ({
+    name: r.name,
+    totals: { contributors: r.totals.contributors, ...counts(r.totals) },
+    weekly: weekly(r.weekly)
+  })),
+  // The jumbotron needs logins for leaderboard labels; the caveman roster
+  // needs last_seen_at for sleep states. Nothing else ships.
   contributors: stats.contributors.map((c) => ({
     login: c.login,
-    last_seen_at: c.last_seen_at,
-    counts: counts(c.counts),
-    weekly: c.weekly.map(({ week, commits, prs, reviews, comments }) => ({ week, commits, prs, reviews, comments }))
+    last_seen_at: c.last_seen_at
   }))
 };
 
@@ -51,4 +55,4 @@ writeFileSync(
 })();
 `,
 );
-console.log(`wrote ${out} (${stats.contributors.length} contributors, generated_at ${stats.meta.generated_at})`);
+console.log(`wrote ${out} (${stats.repos.length} repos, ${stats.contributors.length} contributors, generated_at ${stats.meta.generated_at})`);

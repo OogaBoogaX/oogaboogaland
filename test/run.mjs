@@ -12208,8 +12208,8 @@ const { headCameraProbe } = (() => {
 
 // ---- jumbotron.mjs ----
 const { jumbotronProbe } = (() => {
-  // Rim jumbotron: baked EntropyLab stats on a native voxel board.
-  // Placement, parsing, view switching, the poke-an-Ooga hook and quad meshing must hold in both renderers.
+  // Rim jumbotron: baked OogaBoogaX org stats (oogatron schema 2) on a native voxel board.
+  // Placement, parsing, view switching, live refreshData and quad meshing must hold in both renderers.
   const jumbotronProbe = async () => {
     const B = window.__ooga, BL = window.BL;
     const frames = (n) => new Promise((resolve) => {
@@ -12247,38 +12247,58 @@ const { jumbotronProbe } = (() => {
           && parsed.contributors.every((c) => privateFields.every((key) => !(key in c)));
         const activityTimes = BL.jumbotronData.contributors.every((c) => typeof c.last_seen_at === "string"
           && Number.isFinite(Date.parse(c.last_seen_at)));
-        const anonymous = BL.jumbotron.parseStats({ ...BL.jumbotronData,
-          contributors: [{ ...BL.jumbotronData.contributors.find((c) => c.login.startsWith("email:")), display_name: "private-profile-label" }]
-        });
-        const anonymousLabel = anonymous.tickerText.includes("ANONYMOUS:")
-          && !anonymous.tickerText.includes("PRIVATE-PROFILE-LABEL") && !anonymous.tickerText.includes("EMAIL:");
-        return { contributors: parsed.contributors.length, schemaGuard: false, noPersonalMetadata, activityTimes, anonymousLabel };
+        // The parsed model carries logins only, so there is nothing personal to leak.
+        const loginOnly = parsed.contributors.every((c) => Object.keys(c).length === 1 && typeof c.login === "string");
+        const orgSums = ["commits", "prs", "reviews"].every((key) =>
+          parsed.repos.reduce((sum, r) => sum + r.totals[key], 0) === parsed.totals[key]);
+        return { contributors: parsed.contributors.length, repos: parsed.repos.length, org: parsed.org,
+          schemaGuard: false, noPersonalMetadata, activityTimes, loginOnly, orgSums };
       } catch {
-        return { contributors: 0, schemaGuard: false };
+        return { contributors: 0, repos: 0, schemaGuard: false };
       }
     })();
+    let futureGuard = false, legacyGuard = false;
     try {
       BL.jumbotron.parseStats({ meta: { schema_version: 99 } });
     } catch {
-      data.schemaGuard = true;
+      futureGuard = true;
     }
+    try {
+      BL.jumbotron.parseStats({ meta: { schema_version: 1, repo: "OogaBoogaX/entropylab" }, totals: {}, leaderboards: {}, contributors: [] });
+    } catch {
+      legacyGuard = true;
+    }
+    data.schemaGuard = futureGuard && legacyGuard;
     const initial = { view: j.view.name, cabinetFaces: facesOf(j.node), screenFaces: facesOf(screen), print: fingerprint(screen) };
     j.setView("leaderboard", { type: "commits" });
     await frames(3);
-    const leaderboard = { view: j.view.name, screenFaces: facesOf(screen), changed: fingerprint(screen) !== initial.print };
-    const pokeKnown = j.showContributor("portlandhodl");
+    const leaderboard = { view: j.view.name, screenFaces: facesOf(screen), changed: fingerprint(screen) !== initial.print, print: fingerprint(screen) };
+    const repoName = BL.jumbotronData.repos[0] && BL.jumbotronData.repos[0].name;
+    j.setView("repo", { name: repoName });
     await frames(3);
-    const poked = { accepted: pokeKnown, view: j.view.name, login: j.view.params && j.view.params.login };
-    const pokeAlias = j.showContributor("bc1gui"); // public roster alias -> stats login
+    const repoView = { view: j.view.name, name: j.view.params && j.view.params.name, changed: fingerprint(screen) !== leaderboard.print };
+    j.setView("repo", { name: "no-such-repo-falls-back" });
     await frames(3);
-    const alias = { accepted: pokeAlias, login: j.view.params && j.view.params.login,
-      caseInsensitive: j.showContributor("BC1GUI") && j.view.params.login === "ottoz0r" };
-    const pokeUnknown = j.showContributor("no-such-ooga");
+    const fallback = { drew: facesOf(screen) > 50 };
+    // Live refresh: a bumped payload repaints; garbage is refused and leaves the board alone.
+    j.setView("totals");
+    await frames(3);
+    const beforeRefresh = fingerprint(screen);
+    const bumped = JSON.parse(JSON.stringify(BL.jumbotronData));
+    bumped.totals.commits += 111;
+    const refreshAccepted = j.refreshData(bumped);
+    await frames(3);
+    const refreshed = { accepted: refreshAccepted === true, changed: fingerprint(screen) !== beforeRefresh };
+    const goodPrint = fingerprint(screen);
+    const refused = j.refreshData({ meta: { schema_version: 3 } }) === false;
+    await frames(3);
+    const rejected = { refused, unchanged: fingerprint(screen) === goodPrint };
+    const restored = j.refreshData(BL.jumbotronData) === true;
     const before = facesOf(screen);
     j.nextView();
     await frames(3);
     const advanced = { view: j.view.name, screenFaces: facesOf(screen), drew: facesOf(screen) > 50 && before > 50 };
-    return { exists: true, placement, data, initial, leaderboard, poked, alias, pokeUnknown, advanced };
+    return { exists: true, placement, data, initial, leaderboard, repoView, fallback, refreshed, rejected, restored, advanced };
   };
   return { jumbotronProbe };
 })();
@@ -14757,6 +14777,11 @@ const { contributorActivityProbe } = (() => {
         hasRecentActivity(second, "oogaboogax/another-project", at) && !hasRecentActivity(second, "oogaboogax/entropylab", at) &&
         stateFor(second, at) === "working" && !hasRecentActivity(second, "oogaboogax/another-project", at + 4 * HOUR);
       const otherRepo = applySnapshot(snapshot("another-org/entropylab", first.name, 0), at) === 0;
+      const orgSnapshot = (org, login, age) => ({ meta: { org, schema_version: 2, generated_at: new Date(at).toISOString() },
+        contributors: [{ login, last_seen_at: new Date(at - age).toISOString() }] });
+      const orgWide = applySnapshot(orgSnapshot("OogaBoogaX", second.name, 60000), at) === 1 &&
+        second.lastCommitAt === at - 60000 && hasRecentActivity(second, "oogaboogax/entropylab", at) && stateFor(second, at) === "working";
+      const wrongOrg = applySnapshot(orgSnapshot("SomeoneElse", second.name, 0), at) === 0;
       const absentTime = snapshot("OogaBoogaX/entropylab", first.name, 0);
       delete absentTime.contributors[0].last_seen_at;
       const noSyntheticActivity = applySnapshot(absentTime, at) === 0 && first.lastCommitAt === firstAt;
@@ -14771,7 +14796,7 @@ const { contributorActivityProbe } = (() => {
       applyActivity(Array.from({ length: 70 }, (_, i) => ({ name: first.name, repo: `OogaBoogaX/project-${i}`, lastCommitAt: at })), at);
       const boundedProjects = first.activity.size === 64 && hasRecentActivity(first, "oogaboogax/project-62", at) &&
         !hasRecentActivity(first, "oogaboogax/project-63", at);
-      return { boundaries, invalidStates, labels, update, invalid, expires, projects, otherRepo, noSyntheticActivity, strictTimestamp,
+      return { boundaries, invalidStates, labels, update, invalid, expires, projects, otherRepo, orgWide, wrongOrg, noSyntheticActivity, strictTimestamp,
         unsubscribed, debugFixture, boundedProjects, rosterUnchanged: roster.length === saved.length };
     } finally {
       unsubscribe();
@@ -25543,8 +25568,8 @@ for (const level of [0, 1000, 1000000, 10000000]) task(`solid pile spawn ${level
 }));
 for (const backend of BACKENDS) task(`jumbotron ${backend}`, () => withPage(`jumbotron ${backend}`, hubPage(src, backend === "canvas2d" ? "canvas2d=1" : ""), async (b) => {
   const r = await b.evaluate(`(${jumbotronProbe.toString()})()`);
-  record(`jumbotron ${backend}: the board is solid on the north rim, facing the meadow with public timestamped stats parsed and guarded`, r.exists && r.placement.onNorthRim && r.placement.aboveGround && r.placement.facesCenter && r.placement.scale > 1 && r.placement.solid && r.data.contributors > 0 && r.data.schemaGuard && r.data.noPersonalMetadata && r.data.activityTimes && r.data.anonymousLabel, JSON.stringify({ placement: r.placement, data: r.data }));
-  record(`jumbotron ${backend}: view changes rebuild the screen quads and pokes select contributors by handle or roster alias`, r.initial.view === "totals" && r.initial.screenFaces > 200 && r.initial.cabinetFaces === 108 && r.leaderboard.view === "leaderboard" && r.leaderboard.changed && r.poked.accepted && r.poked.view === "contributor" && r.poked.login === "portlandhodl" && r.alias.accepted && r.alias.login === "ottoz0r" && r.alias.caseInsensitive && r.pokeUnknown === false && r.advanced.drew, JSON.stringify({ initial: r.initial, leaderboard: r.leaderboard, poked: r.poked, alias: r.alias, advanced: r.advanced }));
+  record(`jumbotron ${backend}: the board is solid on the north rim, facing the meadow with public timestamped org stats parsed and guarded`, r.exists && r.placement.onNorthRim && r.placement.aboveGround && r.placement.facesCenter && r.placement.scale > 1 && r.placement.solid && r.data.contributors > 0 && r.data.repos > 0 && r.data.org === "OogaBoogaX" && r.data.orgSums && r.data.schemaGuard && r.data.noPersonalMetadata && r.data.activityTimes && r.data.loginOnly, JSON.stringify({ placement: r.placement, data: r.data }));
+  record(`jumbotron ${backend}: view changes rebuild the screen quads and live payloads refresh the board`, r.initial.view === "totals" && r.initial.screenFaces > 200 && r.initial.cabinetFaces === 108 && r.leaderboard.view === "leaderboard" && r.leaderboard.changed && r.repoView.view === "repo" && r.repoView.changed && r.fallback.drew && r.refreshed.accepted && r.refreshed.changed && r.rejected.refused && r.rejected.unchanged && r.restored && r.advanced.drew, JSON.stringify({ initial: r.initial, leaderboard: r.leaderboard, repoView: r.repoView, refreshed: r.refreshed, rejected: r.rejected, advanced: r.advanced }));
   // The board stands above the default framing; walk the camera up to it
   // the way a visitor would before tapping.
   await b.evaluate(`window.__ooga.pilot.navigate({ position: { x: -7, y: 8.3, z: -27 }, target: { x: -7, y: 8.3, z: -27 }, yaw: -0.25, pitch: 0.05, dist: 14 })`);
@@ -25555,8 +25580,8 @@ for (const backend of BACKENDS) task(`jumbotron ${backend}`, () => withPage(`jum
     await untilPage(b, `JSON.stringify(B.jumbotron.view) !== ${JSON.stringify(tap.view)}`);
   }
   record(`jumbotron ${backend}: tapping the board advances the view`, !!tap && (await b.evaluate("JSON.stringify(window.__ooga.jumbotron.view)")) !== tap.view, JSON.stringify(tap));
-  const ticker = await b.evaluate(`(() => { const B = window.__ooga, j = B.jumbotron, scene = window.BL.scenes.hub; j.autoRotate(0); j.setView("ticker"); j.update(0, B.renderer); B.renderer.render(scene.root, scene.camera, B.renderOpts); const before = B.renderer.stats.records; let maximum = before, changed = false, previous = j.node.children.map((c) => c.geometry); for (let i = 1; i <= 12; i++) { j.update(i * 0.25, B.renderer); changed ||= j.node.children.some((c, n) => c.geometry !== previous[n]); previous = j.node.children.map((c) => c.geometry); B.renderer.render(scene.root, scene.camera, B.renderOpts); maximum = Math.max(maximum, B.renderer.stats.records); } window.__jumbotronLeaving = j.node; return { before, maximum, changed }; })()`);
-  record(`jumbotron ${backend}: scrolling replaces its screen without retaining GPU records`, ticker.changed && ticker.maximum === ticker.before, JSON.stringify(ticker));
+  const fireworks = await b.evaluate(`(() => { const B = window.__ooga, j = B.jumbotron; const queued = B.fireworks(3); const pending = B.fireworksPending; B.advance(4); window.__jumbotronLeaving = j.node; return { queued, pending, drained: B.fireworksPending }; })()`);
+  record(`jumbotron ${backend}: contribution fireworks queue shells at the board and the update loop drains them`, fireworks.queued >= 3 && fireworks.pending > 0 && fireworks.drained === 0, JSON.stringify(fireworks));
   await b.evaluate('window.__ooga.go("lab")');
   const left = await untilPage(b, 'B.scene === "lab" && !B.transitioning');
   const disposed = await b.evaluate('(() => { const node = window.__jumbotronLeaving; const cleared = !node.parent && node.geometry === null && node.children[0].geometry === null && !window.__ooga.jumbotron; delete window.__jumbotronLeaving; return cleared; })()');
