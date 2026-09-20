@@ -16,7 +16,7 @@
     cameraHidden: false,
     parent: null,
     children: [],
-    // World cull sphere, written once per frame by the renderer's collect pass
+    // World cull sphere, written once per frame by the renderer's collect pass.
     cullX: 0,
     cullY: 0,
     cullZ: 0,
@@ -41,11 +41,10 @@
   };
   const updateWorld = (node, parentWorld) => {
     if (!node.visible) return;
-    // A node carrying a quaternion turns by it instead of its Euler rotation
     if (node.quaternion) mat4.fromTQS(node.local, node.position, node.quaternion, node.scale);
     else mat4.fromTRS(node.local, node.position, node.rotation, node.scale);
-    // A body pose turns both the part and its pivot in the parent's frame,
-    // without changing its authored gait or the character's facing direction.
+    // A body pose turns both the part and its pivot in the parent's frame.
+    // It must not change the authored gait or the character's facing direction.
     if (node.poseYaw) {
       const m = node.local, c = Math.cos(node.poseYaw), s = Math.sin(node.poseYaw);
       for (let i = 0; i < 16; i += 4) {
@@ -69,14 +68,13 @@
     position: { x: 0, y: 3, z: 8 },
     target: { x: 0, y: 1, z: 0 }
   });
-  // Attributes a node inherits from its ancestors. Both renderers ask the same
-  // questions of the same graph, so the walks live here rather than in each.
+  // Ancestor-inherited node attributes; both renderers walk the same graph, so the walks live here, not in each.
   const matrixModeOf = (node) => {
     let partial = 0;
     while (node) {
       if (node.matrixLiving) return 2;
       if (node.matrixCloud) return 4;
-      if (node.matrixEmissiveLiving) partial = 3;
+      if (node.matrixEmissiveLiving || node.matrixSignLiving) partial = 3;
       node = node.parent;
     }
     return partial;
@@ -115,10 +113,8 @@
     tweens.push(tw);
     return tw;
   };
-  // Reverse iteration keeps the splice indices valid, and a tween added by a
-  // done callback lands past the initial length so it first steps next frame.
-  // Never call clearTweens from an update or done callback: it truncates the
-  // array this loop is walking.
+  // Reverse iteration keeps splice indices valid.
+  // Never call clearTweens from an update/done callback: it truncates this loop's array.
   const stepTweens = (dt) => {
     for (let i = tweens.length - 1; i >= 0; i--) {
       const tw = tweens[i];

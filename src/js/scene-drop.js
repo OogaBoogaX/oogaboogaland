@@ -1,4 +1,4 @@
-// Ooga Drop: the skydiving scene launched from the plane on the rally cave roof
+// Ooga Drop: the skydiving scene launched from the plane on the rally cave roof.
 (() => {
   "use strict";
   const BL = window.BL = window.BL || {};
@@ -18,22 +18,21 @@
   const SEED = 1;
   const METER_CAPACITY = 60;
   const FIXED = 1 / 120, MAX_SUBSTEPS = 4;
-  // The climb: a roll along the roof, then a helix round the island up to jump height, blended from the straight run
+  // Climb: a roll along the roof, then a helix round the island up to jump height, blended from the straight run.
   const JUMP_ALT = 360, HELIX_R = 40, PLANE_SPEED = 20, HELIX_W = PLANE_SPEED / HELIX_R, ROLL_T = 1.3, CLIMB_T = 17, BLEND_T = 4, SKIP_SCALE = 4;
-  // The jump window opens once a lap when the plane passes the course start, and stays open a moment once it has
-  // The calls on the way round to the mark, in radians before it
+  // Jump window opens once a lap as the plane passes the course start and stays open JUMP_GRACE seconds after.
+  // JUMP_WINDOW, JUMP_GET_READY and JUMP_SOON are radians before the mark.
   const JUMP_WINDOW = 0.42, JUMP_GRACE = 1.6, JUMP_GET_READY = 3, JUMP_SOON = 1.4;
   const NEXT_RING_PULSE = 0.1;
-  // The course: rings from the top altitude down, radii shrinking, laid on the path of a diver steering for the target at
-  // half stick, so the course is flyable by construction, with a little wander to keep the player honest
+  // Rings lie on the fall of a diver steering for the target at half stick, so the course is flyable by build.
   const RING_COUNT = 8, RING_TOP = 300, RING_BOTTOM = 118, RING_STEP = (RING_TOP - RING_BOTTOM) / (RING_COUNT - 1), RING_R0 = 8, RING_R1 = 5, RING_WANDER = 3, TARGET_R = 11, AUTOPILOT = { pitch: 0.5, yaw: 1.5, settle: 30, dogleg: 24, doglegFrom: 250, doglegTo: 170 };
-  // Off the island the fall is lost as soon as it drops past the rim; crashes and landings hold before the results
+  // Off the island the fall is lost once it drops past LOST_Y; crashes and landings hold before the results.
   const PULL_ALT = 90, LOST_Y = -8, LANDED_T = 1.9, LOST_T = 1.1;
   const SCORE = { ring: 100, land: 500, landRadius: 10, stand: 200, stumble: 50, banana: 300 };
   const STREAKS = 160, STREAK_BOX = 18, STREAK_MIN = 9;
   const CLOUD_HIGH = 36, CLOUD_LOW = 14;
-  // Camera distances, default elevations in radians and look-ahead per phase
-  // On the final approach to the mark the plane's eye rises and looks down ahead so the rings show below
+  // Camera distances, default elevations in radians and look-ahead per phase.
+  // On the final approach to the mark the plane's eye rises and looks down ahead so the rings show below.
   const CHASE = { climbDist: 12, climbElevation: 0.3, climbAhead: 7, markDist: 3, markLift: 0.35, markAhead: 5, markDrop: 8, freeDist: 6.5, freeElevation: 1.05, freeAhead: 4, canopyDist: 8.5, canopyElevation: 0.5, canopyAhead: 2.5, eyeRate: 7, targetRate: 12 };
   const FOV_BASE = 50 * Math.PI / 180, FOV_FAST = 72 * Math.PI / 180;
   const TICKER_AT = { x: 0, y: 14, z: 0 };
@@ -41,7 +40,7 @@
   const DIRT = models.particleGeometry("#3a2a18", 0.12, 0);
   const BANANA_BIT = models.particleGeometry("#f5c542", 0.08, 0.5);
   const CLOUD_PUFF = models.particleGeometry("#eef3f7", 0.14, 0.2);
-  // Sky, light and haze, resampled from the island's clock every frame
+  // Sky, light and haze; daylight.sample rewrites these from the island's clock every frame.
   const RENDER_OPTS = {
     clear: new Float32Array(3), horizon: new Float32Array(3), zenith: new Float32Array(3), sky: new Float32Array(3), ground: new Float32Array(3), sun: new Float32Array(3), direct: new Float32Array(3),
     light: { x: 0.55, y: 0.78, z: -0.25 }, sunDirection: { x: 0, y: 1, z: 0 }, moon: { x: 0, y: 1, z: 0 }, starMatrix: new Float32Array(9),
@@ -65,10 +64,10 @@
     performance.clearMarks(`ooga:${name}`);
     performance.mark(`ooga:${name}`);
   };
-  // The board remembers the last pick for the page's life
-  const selection = { racer: contributors.roster[0].name };
+  // Module scope, so the board keeps the last pick for the page's life across visits.
+  const selection = { racer: contributors.activeRoster[0]?.name || null };
 
-  // One visit's state, made in enter and dropped in leave
+  // One visit's state: made in enter, dropped in leave.
   let renderer, game, world, go, lootEnabled, testBananas, root, camera, island, hud, dhud, hooks, input, fx, controls, audio, clock, diver, plane, streaks, mound, hole;
   let phase = "board", jumpOpenUntil = 0, callStage = 0, markNear = 0, accumulator = 0, sceneTime = 0, flightTime = 0, landedAt = 0, score = 0, ringsHit = 0, pulled = false, jumpOpen = false, result = null;
   let meterTimer = 0, stateTimer = 0, hintTimer = 0;
@@ -77,11 +76,11 @@
   const rings = [];
   const roof = { x: 0, y: 0, z: 0, ry: 0, ax: 0, az: 1 };
   const landingSpot = { x: 0, z: 0, y: 0 };
-  // A drag swings the eye any distance round the subject; left alone for a moment in flight it eases back behind
+  // A drag swings the eye any distance round the subject; in flight it eases back behind after CAM_RETURN_AFTER.
   const CAM_RETURN_AFTER = 1.5, CAM_RETURN_RATE = 4;
   const cam = { x: 0, y: 0, z: 0, tx: 0, ty: 0, tz: 0, warm: false, offset: 0, tilt: 0, dragAt: -9, boardYaw: 0, boardLift: 0, shake: 0 };
   const EYE = { x: 0, y: 0, z: 0 };
-  // Where the diver's head points across the ground, kept through a head-down dive so the view never swings
+  // Where the diver's head points across the ground, kept through a head-down dive so the view never swings.
   const HEAD = { x: 0, z: 1 };
   const ctrl = { pitch: 0, roll: 0, yaw: 0, flare: false };
   const NO_INPUT = { pitch: 0, roll: 0, yaw: 0, flare: false };
@@ -97,8 +96,7 @@
     }
   };
 
-  // ---------- the plane's path ----------
-  // Position along the climb at time t, written into out
+  // Position along the climb at time t, written into out.
   const pathAt = (t, out) => {
     const roll = Math.min(t, ROLL_T), accel = PLANE_SPEED / ROLL_T;
     let along = 0.5 * accel * roll * roll;
@@ -146,7 +144,6 @@
     setVec(plane.node.position, roof.x, roof.y, roof.z);
     quat.fromEuler(plane.node.quaternion, s.pitch, roof.ry, 0);
   };
-  // The diver rides in the seat while the plane flies
   const seatDiver = () => {
     const seat = plane.seat;
     quat.rotateVec(SEAT, plane.node.quaternion, seat.x, seat.y + 0.12, seat.z);
@@ -154,25 +151,22 @@
     quat.copy(diver.state.q, plane.node.quaternion);
   };
 
-  // ---------- the course ----------
-  // Rings hang along the fall a hands-off diver would make from the jump, bending toward the target
   const layCourse = () => {
     const rand = mulberry32(SEED + 41);
     jumpAngle = planeAngle(jumpT);
     pathAt(jumpT, PATH);
     pathAt(jumpT + 0.02, PATH_AHEAD);
     const vx = (PATH_AHEAD.x - PATH.x) / 0.02, vy = (PATH_AHEAD.y - PATH.y) / 0.02, vz = (PATH_AHEAD.z - PATH.z) / 0.02;
-    // The target sits on the meadow on the jump's side of the island
+    // The target sits on the meadow on the jump's side of the island.
     setVec(landingSpot, Math.sin(jumpAngle) * TARGET_R, 0, -Math.cos(jumpAngle) * TARGET_R);
     landingSpot.y = island.surfaceAt(landingSpot.x, landingSpot.z);
-    // Fly the reference fall without frames: the diver turns its head toward the target and tracks at half stick,
-    // easing off as it arrives over it; each ring sits on that path at its height
+    // Flies the reference fall without frames, tracking the target at half stick and easing off overhead.
+    // Each ring lands on that path at its height; this drives the real diver, so it ends with diver.hide().
     diver.place(PATH.x, PATH.y, PATH.z, Math.atan2(vx, vz));
     diver.jump(vx, vy, vz, Math.atan2(vx, vz));
     const s = diver.state;
     let head = Math.atan2(vx, vz);
-    // High up the reference aims beside the target and slides its aim onto it through a band of altitude, so the
-    // course doglegs gently before it lines up
+    // High up the reference aims AUTOPILOT.dogleg beside the target, sliding on between doglegFrom and doglegTo.
     const legX = landingSpot.x + Math.cos(jumpAngle) * AUTOPILOT.dogleg, legZ = landingSpot.z + Math.sin(jumpAngle) * AUTOPILOT.dogleg;
     for (let i = 0, guard = 0; i < RING_COUNT && guard < 6000; guard++) {
       const k = smooth((AUTOPILOT.doglegFrom - s.p.y) / (AUTOPILOT.doglegFrom - AUTOPILOT.doglegTo));
@@ -223,7 +217,7 @@
       }
     });
   };
-  // A substep's segment crossing a ring's plane inside its radius counts
+  // A substep's segment crossing a ring's plane inside its radius counts as a hit.
   const checkRings = () => {
     const s = diver.state, p = s.p, pp = s.pp;
     while (ringIndex < RING_COUNT && rings[ringIndex].y > pp.y) ringIndex++;
@@ -240,8 +234,7 @@
     }
   };
 
-  // ---------- ground ----------
-  // The island's walkable surface, the mound of bananas at its middle, nothing off the edge
+  // The island's walkable surface plus the banana mound at its middle; -Infinity off the edge.
   const groundAt = (x, z) => {
     if (!island.onLand(x, z)) return -Infinity;
     const r = Math.hypot(x, z);
@@ -251,12 +244,13 @@
   };
   const onBanana = (x, z) => Math.hypot(x, z) < mound.radius;
 
-  // ---------- flow ----------
   const toBoard = () => {
     phase = "board";
     parkPlane();
-    diver.place(roof.x, roof.y, roof.z, roof.ry);
-    seatDiver();
+    if (diver) {
+      diver.place(roof.x, roof.y, roof.z, roof.ry);
+      seatDiver();
+    }
     resetRings();
     ringIndex = 0;
     score = ringsHit = 0;
@@ -277,6 +271,7 @@
     boardView();
   };
   const startFlight = () => {
+    if (!diver) return false;
     toBoard();
     phase = "climb";
     dhud.show("flight");
@@ -330,6 +325,7 @@
   const CRASHES = { tumble: "Ooga rolled to a stop. The ground won.", hole: "Ooga went through the meadow. Ooga is a hole now.", pancake: "Ooga is a pancake now." };
   const crashed = (landing) => landing === "tumble" || landing === "hole" || landing === "pancake";
   const finish = (landing, dist) => {
+    if (!diver) return;
     phase = "results";
     const accuracy = landing === "lost" || crashed(landing) ? 0 : Math.round(SCORE.land * clamp(1 - dist / SCORE.landRadius, 0, 1));
     const soft = landing === "stand" ? SCORE.stand : landing === "stumble" ? SCORE.stumble : 0;
@@ -375,7 +371,6 @@
     fx.say(diver.cave, "Where island go?", 2);
     hud.el.act.hidden = true;
   };
-  // Space or the act button, by phase
   const act = () => {
     if (phase === "board") {
       startFlight();
@@ -394,7 +389,6 @@
     return false;
   };
 
-  // ---------- per frame ----------
   const readInput = () => {
     const a = controls.read();
     ctrl.pitch = clamp(a.y - (COARSE ? 0 : a.pitch), -1, 1);
@@ -416,7 +410,7 @@
       else if (p.y < LOST_Y && ground === -Infinity) lost();
     }
   };
-  // Air rushing past: lines fixed in the world inside a box round the diver, reseeded ahead as they fall behind
+  // Streaks are fixed in the world inside a box round the diver, reseeded ahead as they fall behind.
   const updateStreaks = () => {
     const s = diver.state, v = s.v, speed = s.speed, node = streaks.node;
     if (phase !== "air" || speed < STREAK_MIN) {
@@ -426,7 +420,7 @@
     }
     const p = s.p, data = node.instanceData;
     const dx = v.x / speed, dy = v.y / speed, dz = v.z / speed;
-    // A perpendicular pair for the line's cross section
+    // A perpendicular pair for the line's cross section; the axis flips near vertical to avoid a degenerate cross.
     const ax = Math.abs(dy) < 0.9 ? 0 : 1, ay = Math.abs(dy) < 0.9 ? 1 : 0;
     let px = ay * dz, py = -ax * dz, pz = ax * dy - ay * dx;
     const pl = Math.hypot(px, py, pz) || 1;
@@ -437,7 +431,6 @@
     const len = clamp(speed * 0.09, 0.4, 3.2);
     for (let i = 0; i < STREAKS; i++) {
       let x = streaks.x[i] - p.x, y = streaks.y[i] - p.y, z = streaks.z[i] - p.z;
-      // Behind the diver, or outside the box, the streak reappears ahead
       if (x * dx + y * dy + z * dz < -4 || Math.abs(x) > STREAK_BOX || Math.abs(y) > STREAK_BOX || Math.abs(z) > STREAK_BOX) {
         const ahead = 4 + Math.random() * (STREAK_BOX - 4), a = Math.random() * Math.PI * 2, r = Math.random() * 12;
         x = dx * ahead + (px * Math.cos(a) + qx * Math.sin(a)) * r;
@@ -458,7 +451,6 @@
     node.visible = true;
     node.instanceVersion++;
   };
-  // The board view stands off the roof looking at the plane; a drag swings it round
   const boardView = () => {
     const c = Math.cos(roof.ry + cam.boardYaw), s = Math.sin(roof.ry + cam.boardYaw);
     cam.tx = roof.x;
@@ -471,7 +463,7 @@
     setVec(camera.target, cam.tx, cam.ty, cam.tz);
     camera.fov = FOV_BASE;
   };
-  // The eye sits behind the subject's heading at a distance and elevation; a drag swings it round both ways, 0 puts it back
+  // Eye sits behind the heading at dist and elevation; a drag offsets it both ways, key 0 resets cam.offset/tilt.
   const orbitEye = (px, py, pz, fx, fz, dist, elevation) => {
     const yaw = Math.atan2(fx, fz) + Math.PI + cam.offset;
     const el = clamp(elevation + cam.tilt, -1.2, 1.5);
@@ -497,7 +489,6 @@
       ty = pp.y + 0.6 - near * CHASE.markDrop;
       tz = pp.z + fz0 * ahead;
     } else if (phase === "air" && s.phase === "free") {
-      // Behind the head and above; the head's ground direction steers the view, a slide only moves it
       const speed = Math.max(1, s.speed), hl = Math.hypot(s.up[0], s.up[2]);
       if (hl > 0.25) {
         HEAD.x = damp(HEAD.x, s.up[0] / hl, 6, dt);
@@ -515,7 +506,6 @@
       ty = p.y - 0.6;
       tz = p.z + hz * CHASE.canopyAhead;
     } else {
-      // Down or on the results the eye stays put and only watches
       EYE.x = cam.x;
       EYE.y = cam.y;
       EYE.z = cam.z;
@@ -548,12 +538,11 @@
     camera.fov = damp(camera.fov, lerp(FOV_BASE, FOV_FAST, fast), 5, dt);
   };
   const updateLighting = () => {
-    const p = diver.state.p;
-    const low = phase !== "board" && p.y < 60;
+    const p = diver ? diver.state.p : plane.node.position;
+    const low = !!diver && phase !== "board" && p.y < 60;
     setVec(RENDER_OPTS.shadowCenter, low ? p.x : 0, low ? Math.max(0, p.y - 4) : 0, low ? p.z : 0);
     RENDER_OPTS.time = sceneTime;
   };
-  // The engine follows the plane and fades as it flies off; the wind follows the diver; everything is quiet on the boards
   let flaringWas = false;
   const updateAudio = (dt) => {
     if (phase === "board" || phase === "results") {
@@ -586,18 +575,17 @@
     daylight.sample(hour, RENDER_OPTS, clock.dayOfYear, islandLatitude, clock.continuousDay);
     const a = readInput();
     if (phase === "climb") {
-      // Holding Space hurries the climb, never the circling at height
+      // Holding Space hurries the climb only, never the circling at height.
       const s = planeState;
       flyPlane(dt * (a.up > 0 && s.alt < JUMP_ALT - 1 && callStage === 0 ? SKIP_SCALE : 1));
       seatDiver();
       const toMark = wrap(jumpAngle - s.angle);
-      // Radians left to the next mark: the first lap is still climbing to it, after that it is a lap round
+      // Radians left to the next mark: the first lap is still climbing to it, after that it is a lap round.
       const left = s.t < jumpT ? (jumpT - s.t) * HELIX_W : (toMark + Math.PI * 2) % (Math.PI * 2);
       markNear = damp(markNear, left < JUMP_GET_READY ? 1 : 0, 1.5, dt);
       const atMark = s.alt >= JUMP_ALT - 1 && Math.abs(toMark) < JUMP_WINDOW;
       if (atMark && !jumpOpen) jumpOpenUntil = sceneTime + JUMP_GRACE;
       const open = atMark || sceneTime < jumpOpenUntil;
-      // Two calls as the mark comes round, the call at the mark, and the way home when it passes
       if (!open && left > JUMP_WINDOW) {
         if (callStage < 1 && left < JUMP_GET_READY) {
           callStage = 1;
@@ -622,7 +610,7 @@
         dhud.notice("Flying back around, wait for the mark", 3000);
       }
       jumpOpen = open;
-      // A Space still held from the hurry means go
+      // A Space still held from hurrying the climb counts as the jump press.
       if (jumpOpen && a.up > 0) jump();
     } else if (phase === "air") {
       simulate(dt);
@@ -645,12 +633,12 @@
     }
     if (phase === "board") plane.prop.rotation.z += dt * 3;
     if (phase !== "climb" && phase !== "board" && planeState.t > 0) flyPlane(dt);
-    diver.pose(dt, elapsed, ctrl);
+    if (diver) diver.pose(dt, elapsed, ctrl);
     if (phase === "air" && diver.state.phase === "free" && ringIndex < RING_COUNT && !rings[ringIndex].hit) {
       const ring = rings[ringIndex], k = ring.r * (1 + NEXT_RING_PULSE * (0.5 + 0.5 * Math.sin(sceneTime * 5)));
       setVec(ring.node.scale, k, k, k);
     }
-    updateStreaks();
+    if (diver) updateStreaks();
     for (let i = 0; i < clouds.length; i++) {
       const c = clouds[i], p = c.node.position;
       p.x += c.speed * dt;
@@ -682,7 +670,6 @@
   const NO_EXTRA = () => { };
   const overlay = (dt) => fx.drawOverlay(dt, NO_EXTRA);
 
-  // ---------- donations ----------
   const onDonation = (donation) => {
     game.recordDonation(donation);
     const bananas = gameMod.bananasFor(donation.sats);
@@ -691,8 +678,10 @@
     const loot = lootEnabled ? game.lootFor(donation) : null;
     hud.toast(`+${gameMod.formatLarge(donation.sats)} sats · ${bananas} banana${bananas > 1 ? "s" : ""} · ${who}${loot ? ` · ${loot.tier} ${loot.item.name}` : ""}`);
     fx.showTicker(`THANKS ${donation.handle ? "@" + donation.handle.toUpperCase() : "ANON"} · ${bananas} BANANAS`, 4.5);
-    const p = diver.state.p;
-    if (diver.body.visible) fx.burst(p.x, p.y + 1.2, p.z, 20, CONFETTI, 2.2);
+    if (diver && diver.body.visible) {
+      const p = diver.state.p;
+      fx.burst(p.x, p.y + 1.2, p.z, 20, CONFETTI, 2.2);
+    }
     if (loot) {
       game.addItem({ item: loot.item, tier: loot.tier, donationId: donation.id });
       renderLocker();
@@ -702,7 +691,6 @@
   };
   const renderLocker = () => hud.renderInventory(game.state.inventory, game.assignedTo, () => null);
 
-  // ---------- actions and keys ----------
   const onLootCleared = () => {
     if (!lootEnabled) return;
     renderLocker();
@@ -723,34 +711,34 @@
     }
     if (e.key === "l" || e.key === "L") demoTip(120000);
   };
-  const tooltipFor = (hit) => hit.owner.kind === "diver" ? `${diver.cave.traits.name} · ${phase === "board" ? "ready to fly" : phase === "air" ? "falling" : "your Ooga"}` : "";
+  const tooltipFor = (hit) => hit.owner.kind === "diver" ? diver.cave.traits.name : "";
   const pickDiver = (name) => {
     selection.racer = name;
     buildDiver();
     toBoard();
   };
-  // The diver is rebuilt for the picked contributor; its heads are the geometry kept live off the graph
+  // Rebuilt per pick; the diver's heads live off the graph, so liveGeometry must keep reporting them.
   const buildDiver = () => {
     if (diver) {
       for (const key of ["torso", "head"]) input.remove(diver.cave.parts[key]);
       diver.dispose();
     }
+    diver = null;
+    if (!selection.racer) return;
     diver = skydiver.create({ root, traits: contributors.traitsFor(selection.racer) });
     for (const key of ["torso", "head"]) input.add(diver.cave.parts[key], { kind: "diver", priority: 1 });
   };
 
-  // ---------- scene contract ----------
   const enter = (ctx) => {
     ({ renderer, game, world, go, lootEnabled, testBananas } = ctx);
     camera = createCamera({ fov: 50, near: 0.4, far: 820 });
     root = createNode();
     clock = daylight.createClock({ hour: hourParam, daylen: daylenParam, day: dayParam, time: timeParam, now: new Date() });
     island = terrain.island({ seed: SEED });
-    hud = hudMod.create({ roster: contributors.roster, catalog: models.SWAG, tierColors: models.TIER_COLORS, renderIcon: hudMod.renderIcon, lootEnabled });
+    hud = hudMod.create({ roster: contributors.activeRoster, catalog: models.SWAG, tierColors: models.TIER_COLORS, renderIcon: hudMod.renderIcon, lootEnabled });
     hooks = {};
     input = interactMod.create({ canvas: ctx.canvas, renderer, camera, hooks });
-    fx = fxMod.create({ root, renderer, overlay: ctx.overlay, tickerAt: TICKER_AT });
-    // The island itself, resident from the hub, and the mound of bananas at its middle
+    fx = fxMod.create({ root, renderer, camera, hud, overlay: ctx.overlay, tickerAt: TICKER_AT });
     const place = (node) => {
       addChild(root, node);
       placed.push(node);
@@ -762,9 +750,8 @@
     const core = place(createNode({ position: { x: 0, y: 0.36, z: 0 }, scale: { x: footprint, y: 0.48 * growth, z: footprint }, geometry: models.bananaPileCoreGeometry(0.45 * 6, 0.48 * 6, 0.45), visible: level > 0 }));
     const slab = place(createNode({ geometry: hubModels.altarSlab(), depthBias: 0.15 }));
     setVec(slab.scale, footprint + 0.3, 0.34, footprint + 0.3);
-    // Small piles still count a landing on the dais as a banana landing
+    // Small piles still count a landing on the dais as a banana landing.
     mound = { node: core, radius: Math.max(2.4, footprint + 0.2), height: 0.48 * growth * 0.88, y: 0.36 };
-    // Clouds above the island and a floor of them far below
     const rand = mulberry32(SEED + 77);
     for (let i = 0; i < CLOUD_HIGH + CLOUD_LOW; i++) {
       const low = i >= CLOUD_HIGH;
@@ -775,7 +762,7 @@
       place(node);
       clouds.push({ node, speed: 0.3 + rand() * 0.5, wrap: wrapAt });
     }
-    // The roof spot from the hub's own mouth, the plane parked on it, the windsock beside it
+    // The roof spot comes from the hub's own cave mouth c9; the plane parks on it, the windsock beside it.
     const mouth = island.mouths.find((m) => m.id === "c9");
     dropModels.roofSpot(island, mouth, roof);
     plane = dropModels.plane();
@@ -784,7 +771,6 @@
     place(createNode({ position: { x: roof.x + Math.cos(roof.ry) * 3.2 + roof.ax * 0.6, y: roof.y, z: roof.z - Math.sin(roof.ry) * 3.2 + roof.az * 0.6 }, geometry: dropModels.windsock() }));
     const signX = mouth.x + roof.ax * dropModels.SIGN_AT.z + Math.cos(roof.ry) * dropModels.SIGN_AT.x, signZ = mouth.z + roof.az * dropModels.SIGN_AT.z - Math.sin(roof.ry) * dropModels.SIGN_AT.x;
     place(createNode({ position: { x: signX, y: island.surfaceAt(signX, signZ), z: signZ }, rotation: { x: 0, y: roof.ry, z: 0 }, geometry: dropModels.roofSign() }));
-    // The course: ten hoops sharing one geometry, and the target on the meadow
     for (let i = 0; i < RING_COUNT; i++) {
       const node = place(createNode({ geometry: dropModels.hoop() }));
       rings.push({ node, x: 0, y: 0, z: 0, r: 1, hit: false });
@@ -793,20 +779,24 @@
     hole = place(createNode({ geometry: dropModels.hole(), visible: false }));
     streaks = { node: place(createNode({ geometry: dropModels.streak(), instanceData: new Float32Array(STREAKS * 20), instanceCount: 0, instanceVersion: 0, fixedInstanceCapacity: true, visible: false })), x: new Float32Array(STREAKS), y: new Float32Array(STREAKS), z: new Float32Array(STREAKS) };
     mark("drop world");
-    // An Ooga walked or tapped into the plane flies it
+    // world.pilot: an Ooga walked or tapped into the plane flies it here, and is consumed on the way in.
     if (world.pilot) {
-      selection.racer = world.pilot;
+      if (contributors.activeRoster.some((c) => c.name === world.pilot)) selection.racer = world.pilot;
       world.pilot = null;
     }
     buildDiver();
-    layCourse();
+    if (diver) layCourse();
+    else {
+      for (const ring of rings) ring.node.visible = false;
+      targetNode.visible = false;
+    }
     setVec(targetNode.position, landingSpot.x, landingSpot.y + 0.02, landingSpot.z);
-    dhud = dropHud.create({ roster: contributors.roster, best: () => game.state.drop.best, onPick: pickDiver });
+    dhud = dropHud.create({ roster: contributors.activeRoster, best: () => game.state.drop.best, onPick: pickDiver });
     dhud.selection.racer = selection.racer;
-    dhud.buildBoard((name) => contributors.stateFor(contributors.roster.find((c) => c.name === name)));
+    dhud.buildBoard((name) => contributors.stateFor(contributors.activeRoster.find((c) => c.name === name)));
     controls = controlsMod.create({ move: document.getElementById("joy-move"), look: document.getElementById("joy-look"), boost: hud.el.act, chord: ctx.canvas, onAction: act });
     audio = dropAudio.create();
-    // Cleared per visit: a flare held at leave would suppress the next cue
+    // Cleared per visit: a flare held at leave would suppress the next cue.
     flaringWas = false;
     dhud.el.mute.setAttribute("aria-pressed", String(audio.muted));
     window.addEventListener("pointerdown", onGesture);
@@ -828,10 +818,10 @@
     });
     Object.assign(hooks, {
       onHover: (hit, p) => {
-        if (hit) hud.tooltip.show(tooltipFor(hit), p.x, p.y);
+        if (hit) hud.tooltip.show(tooltipFor(hit), p.x, p.y, hit.owner.kind === "diver" ? diver.cave : null);
         else hud.tooltip.hide();
       },
-      onHoverMove: (hit, p) => hud.tooltip.show(tooltipFor(hit), p.x, p.y),
+      onHoverMove: (hit, p) => hud.tooltip.show(tooltipFor(hit), p.x, p.y, hit.owner.kind === "diver" ? diver.cave : null),
       onTap: (hit) => {
         if (hit && hit.owner.kind === "diver" && phase !== "board") fx.say(diver.cave, phase === "air" ? "Ooga busy falling!" : "Ooga!", 1.2);
       },
@@ -863,14 +853,17 @@
         location.reload();
       }
     });
-    for (const c of contributors.roster) hud.setRosterRow(c.name, contributors.stateFor(c), contributors.ageLabel(c));
+    for (const c of contributors.activeRoster) hud.setRosterRow(c.name, contributors.stateFor(c), contributors.ageLabel(c));
     if (lootEnabled) renderLocker();
     hud.setStats(game.state);
     hud.el.sheet.dataset.open = "false";
     dhud.el.help.textContent = COARSE ? "Left stick pitches and rolls · right stick turns · the button jumps, pulls and flares" : "W S pitch · A D roll · Q E turn · Space jumps, pulls the chute · S flares · drag to look";
     meterTimer = 0;
     toBoard();
-    stateTimer = window.setInterval(() => fx.trimPool(), 6e4);
+    stateTimer = window.setInterval(() => {
+      for (const c of contributors.activeRoster) hud.setRosterRow(c.name, contributors.stateFor(c), contributors.ageLabel(c));
+      fx.trimPool();
+    }, 6e4);
     hintTimer = window.setTimeout(() => hud.hint(COARSE ? "Pick an Ooga, then Fly!" : "Pick an Ooga, then Fly! (Enter)"), 1200);
     Object.assign(dropScene, {
       root, camera, input,
@@ -917,8 +910,9 @@
             return streaks.node.instanceCount;
           },
           selection, start: startFlight, toBoard, jump, deploy, finish,
-          // Run the clock forward without frames: the climb, then substeps in the air
+          // Runs the clock forward without frames: the climb, then substeps in the air.
           simulate: (seconds) => {
+            if (!diver) return;
             for (let t = 0; t < seconds; t += FIXED) {
               sceneTime += FIXED;
               if (phase === "climb") {
@@ -941,8 +935,8 @@
             ctrl.yaw = yaw;
             ctrl.flare = !!flare;
           },
-          // Jump straight from the plane's course start, as the prompt would
           jumpNow: () => {
+            if (!diver) return false;
             if (phase !== "climb") startFlight();
             planeState.t = ROLL_T + CLIMB_T;
             flyPlane(0.001);
@@ -960,8 +954,10 @@
     window.removeEventListener("pointerdown", onGesture);
     window.removeEventListener("keydown", onGesture);
     audio.dispose();
-    for (const key of ["torso", "head"]) input.remove(diver.cave.parts[key]);
-    diver.dispose();
+    if (diver) {
+      for (const key of ["torso", "head"]) input.remove(diver.cave.parts[key]);
+      diver.dispose();
+    }
     fx.dispose();
     controls.dispose();
     hud.el.act.hidden = true;
@@ -978,7 +974,7 @@
     return { targets: count };
   };
   const liveGeometry = (set) => {
-    set.add(diver.cave.headOpen).add(diver.cave.headClosed);
+    if (diver) set.add(diver.cave.headOpen).add(diver.cave.headClosed);
   };
   const stats = () => {
     let nodes = 0;

@@ -22,7 +22,7 @@
         samples.push(sample); sampleBounds[axis] = Math.min(sampleBounds[axis], sample); sampleBounds[axis + 3] = Math.max(sampleBounds[axis + 3], sample);
       }
     };
-    // Match the cell-center cut and two shallow steps used to carve the shaft.
+    // Mirrors the shaft carve in terrain.js: cell-center cut plus two shallow steps.
     // The final unit of inner lip ends here; the deep shaft is not a wall cue.
     const topAt = (x, z) => {
       const radius = Math.hypot(x - hole.x, z - hole.z);

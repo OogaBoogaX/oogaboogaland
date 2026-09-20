@@ -56,7 +56,7 @@
     0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2
   ]);
   const rotate = (x, n) => x >>> n | x << (32 - n);
-  // Synchronous SHA-256 keeps room construction synchronous even for file:// loads.
+  // Synchronous SHA-256 keeps room construction synchronous, including file:// loads.
   const sha256 = (input) => {
     const length = Math.ceil((input.length + 9) / 64) * 64, bytes = new Uint8Array(length);
     bytes.set(input); bytes[input.length] = 128;
@@ -86,7 +86,7 @@
   const mix = (a, b, t) => [clamp(a[0] * (1 - t) + b[0] * t), clamp(a[1] * (1 - t) + b[1] * t), clamp(a[2] * (1 - t) + b[2] * t)];
   const BLACK = [0, 0, 0], WHITE = [1, 1, 1];
   const SPECTRUM = [[0, 168, 222], [41, 60, 130], [210, 59, 130], [217, 63, 53], [244, 228, 81], [0, 158, 84], [0, 168, 222]].map((c) => c.map((v) => v / 255));
-  // The reference uses fmodf and float luminance. Preserve its rounding at palette boundaries.
+  // Reference uses fmodf and float luminance: Math.fround preserves its rounding at palette boundaries.
   const mod1 = (v) => Math.fround(Math.fround(v) % 1 + 1) % 1;
   const luminance = (c) => {
     const r = Math.fround(0.299 * c[0]), g = Math.fround(0.587 * c[1]), b = Math.fround(0.114 * c[2]);
@@ -138,7 +138,7 @@
     let cells = new Uint8Array(256), next = new Uint8Array(256), generations = 0;
     const history = new Uint8Array(150 * 32), packed = new Uint8Array(32), lastAlive = new Uint8Array(256);
     for (let i = 0; i < 256; i++) cells[i] = initial[i >>> 3] >>> (7 - (i & 7)) & 1;
-    // Exact packed-state comparison detects cycles without hashing every generation.
+    // Exact packed-state compare detects cycles without hashing every generation.
     generation: for (; generations < 150; generations++) {
       packed.fill(0);
       for (let i = 0; i < 256; i++) packed[i >>> 3] |= cells[i] << (7 - (i & 7));

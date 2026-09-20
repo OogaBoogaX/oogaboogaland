@@ -1,5 +1,5 @@
-// Procedural drop sound: one context made on the first gesture, a fixed voice pool gated by gain, one noise loop
-// behind the engine drone, the wind and the canopy flutter
+// Procedural drop sound: one AudioContext made on the first gesture, fixed voice pool gated by gain.
+// One noise loop behind the engine drone, the wind and the canopy flutter.
 (() => {
   "use strict";
   const BL = window.BL = window.BL || {};
@@ -7,7 +7,7 @@
   const VOICES = 8;
   const NOISE_SECONDS = 2;
   const MASTER = 0.55;
-  // Shared with the rally, so one mute covers both caves
+  // STORAGE_KEY is shared with the rally, so one mute covers both caves.
   const STORAGE_KEY = "oogaboogaland.audio";
   const NOTE = (semis) => 220 * Math.pow(2, semis / 12);
   const create = () => {
@@ -15,13 +15,11 @@
     try {
       muted = localStorage.getItem(STORAGE_KEY) === "off";
     } catch {
-      // Storage may be unavailable
     }
     const voices = [];
     let voiceNext = 0;
-    // Continuous layers, all started once and shaped by gain
+    // Layers are started once and only ever shaped by gain; never restart them.
     const layers = { engine: null, engineSub: null, engineLow: null, engineGain: null, wind: null, windFilter: null, flutter: null, flutterLfo: null, rush: null };
-    // What the scene tells us each frame: the plane's speed and distance, the diver's speed, the phase
     const state = { planeSpeed: 0, planeDistance: 0, speed: 0, falling: 0, canopy: 0, flaring: 0 };
     const init = () => {
       if (ctx || typeof AudioContext === "undefined") return;
@@ -57,12 +55,10 @@
       noise = ctx.createBufferSource();
       noise.buffer = buffer;
       noise.loop = true;
-      // Wind: a band of noise that climbs with speed
       const wind = filter("bandpass", 500, 0.5);
       layers.windFilter = wind;
       layers.wind = gain(0, master);
       wind.connect(layers.wind);
-      // Canopy flutter: a higher band chopped by a slow wobble
       const flutter = filter("bandpass", 1100, 2.2);
       layers.flutter = gain(0, master);
       flutter.connect(layers.flutter);
@@ -75,7 +71,6 @@
       lfoGain.connect(layers.flutter.gain);
       lfo.start();
       layers.flutterLfo = lfo;
-      // Rush: a low whoosh for the jump and the chute opening
       const rush = filter("lowpass", 900, 0.8);
       layers.rush = gain(0, master);
       rush.connect(layers.rush);
@@ -83,7 +78,6 @@
       noise.connect(flutter);
       noise.connect(rush);
       noise.start();
-      // The plane: a sawtooth and a square an octave under it, a low-pass that opens with the revs
       const engineLow = filter("lowpass", 600, 1.4);
       layers.engineLow = engineLow;
       layers.engineGain = gain(0, master);
@@ -101,7 +95,7 @@
       layers.engineSub.start();
       ready = true;
     };
-    // The browser only lets sound start from a gesture; the first one opens the context
+    // Browsers only start sound from a gesture; the first one opens the context.
     const unlock = () => {
       if (navigator.userActivation && !navigator.userActivation.hasBeenActive) return;
       init();
@@ -121,7 +115,6 @@
       voiceNext = (voiceNext + 1) % VOICES;
       return pick;
     };
-    // One shaped note: type, start and end pitch, attack, hold, release, level, and a delay before it
     const blip = (type, f0, f1, attack, hold, release, level, delay = 0) => {
       if (!ready) return;
       const now = ctx.currentTime + delay, v = voice();
@@ -136,7 +129,6 @@
       v.gain.gain.linearRampToValueAtTime(0, now + attack + hold + release);
       v.until = now + attack + hold + release + 0.02;
     };
-    // A whoosh of the rush layer: level and length
     const whoosh = (level, dur) => {
       if (!ready) return;
       const now = ctx.currentTime, g = layers.rush.gain;
@@ -189,8 +181,6 @@
         blip("sawtooth", NOTE(12), NOTE(12), 0.01, 0.5, 0.4, 0.18, 0.55);
       }
     };
-    // Per frame: the engine follows the plane's speed and fades with its distance, the wind with the diver's speed,
-    // the flutter under the canopy
     const update = (dt) => {
       if (!ready) return;
       const now = ctx.currentTime;
@@ -221,10 +211,8 @@
       try {
         localStorage.setItem(STORAGE_KEY, muted ? "off" : "on");
       } catch {
-        // Storage may be unavailable
       }
     };
-    // The scene is leaving: silence everything and close the context
     const dispose = () => {
       if (!ctx) return;
       quiet();

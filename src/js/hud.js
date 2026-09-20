@@ -4,14 +4,16 @@
   const { canvasRenderer } = BL;
   const { formatLarge } = BL.game;
   const { createNode, addChild, createCamera, boundsOf } = BL.scene;
-  const STATE_LABELS = { working: "EATING", sleeping: "ZZZ", away: "AWAY" };
+  const STATE_LABELS = { working: "clankin", chilling: "chillin", sleeping: "sleepin", away: "chillin", online: "online" };
+  // Tooltip dots retain their human-presence color without changing NPC activity.
+  const statusFor = (cave) => cave.humanControlled ? "online" : cave.state === "away" ? "chilling" : cave.state;
   const $ = (id) => document.getElementById(id);
   const TIER_RANK = { legendary: 0, epic: 1, rare: 2, common: 3 };
   const BANANA_COUNT = new Intl.NumberFormat("en-US", { maximumFractionDigits: 0 });
   const MESSAGE_FADE_MS = 300;
-  // Headings in the cave-sign lettering: one path of pixels per element, scaled by its CSS height
+  // Sign headings: one pixel path per element, scaled by that element's CSS height.
   const SIGN_NS = "http://www.w3.org/2000/svg";
-  // Markup may wrap a sign across lines; the lettering wants one run of words
+  // Collapse whitespace: markup may wrap a sign across lines but the lettering needs one run of words.
   const signText = (raw) => raw.replace(/\s+/g, " ").trim();
   const signLettering = (raw) => {
     const { SIGN_GLYPHS } = BL.hubModels;
@@ -48,10 +50,10 @@
     el.setAttribute("aria-label", text);
     el.replaceChildren(signLettering(text));
   }
-  // The panel shows itself once on load, then folds away unless the visitor is using it
+  // Panel shows itself once on load (INTRO_MS), then folds away unless the visitor is using it.
   const INTRO_MS = 5000;
   let introTimer = 0;
-  // Swag icons drawn once into an offscreen canvas
+  // Icons are rasterized once into an offscreen canvas.
   const ICON_PX = 48;
   const renderIcon = (item) => {
     const canvas = document.createElement("canvas");
@@ -88,10 +90,26 @@
       subtitle: $("subtitle"),
       actions: [...document.querySelectorAll("[data-action]")],
       act: $("act"),
+      weapon: $("weapon-hud"),
+      weaponToggle: $("weapon-hud"),
+      weaponReadout: $("weapon-readout"),
+      weaponLabel: $("weapon-ammo-label"),
+      weaponAmmo: $("weapon-ammo-count"),
+      weaponCompact: $("weapon-ammo-compact"),
+      weaponMagazine: $("weapon-magazine"),
+      weaponBananas: [...$("weapon-magazine").querySelectorAll(".weapon-banana")],
+      magazine: $("magazine-hud"),
+      magazineIcon: $("magazine-hud").querySelector(".magazine-icon"),
+      magazineFront: $("magazine-front"),
+      magazineAmmo: $("magazine-ammo"),
+      magazineBananas: [...$("magazine-front").querySelectorAll(".magazine-banana")],
+      magazineLowAmmo: $("magazine-ammo-low"),
+      magazineRearBananas: [...$("magazine-back").querySelectorAll(".magazine-banana")],
       jetpack: $("jetpack-hud"),
       jetpackFuel: $("jetpack-fuel"),
       jetpackFuelFill: $("jetpack-fuel-fill"),
       jetpackFuelValue: $("jetpack-fuel-value"),
+      jetpackCompact: $("jetpack-fuel-compact"),
       messageStack: $("message-stack"),
       toast: $("toast"),
       tooltip: $("tooltip"),
@@ -113,6 +131,8 @@
     el.lootTab.hidden = !lootEnabled;
     el.crateHelp.hidden = !lootEnabled;
     el.worldLootHint.hidden = !lootEnabled;
+    el.weapon.hidden = true;
+    el.magazine.hidden = true;
     el.jetpack.hidden = true;
     const listeners = [];
     const on = (target, type, fn, opts) => {
@@ -121,28 +141,60 @@
     };
     let toastTimer = 0, toastHideTimer = 0, hintTimer = 0, hintHideTimer = 0;
     const rosterRows = new Map();
-    for (const contributor of roster) {
+    const orderedRoster = [...roster].sort((a, b) => b.lastCommitAt - a.lastCommitAt);
+    for (let rosterIndex = 0; rosterIndex < orderedRoster.length; rosterIndex++) {
+      const contributor = orderedRoster[rosterIndex];
       const li = document.createElement("li");
       li.dataset.name = contributor.name;
+      const presence = document.createElement("span");
+      presence.className = "roster-presence";
+      presence.dataset.online = "false";
+      presence.setAttribute("role", "img");
+      presence.setAttribute("aria-label", "Offline");
+      presence.title = "Offline";
       const name = document.createElement("span");
       name.className = "roster-name";
       name.textContent = contributor.name;
       const age = document.createElement("span");
       age.className = "roster-age";
+      age.append("");
       const state = document.createElement("span");
       state.className = "roster-state";
-      li.append(name, age, state);
+      state.append("");
+      li.append(presence, name, age, state);
       el.roster.append(li);
-      rosterRows.set(contributor.name, { li, state, age });
+      rosterRows.set(contributor.name, { li, presence, state, age, contributor, rosterIndex, online: false });
     }
-    const setRosterRow = (name, stateKey, ageText) => {
+    const placeRosterRow = (row) => {
+      let before = null;
+      for (const sibling of el.roster.children) {
+        if (sibling === row.li) continue;
+        const other = rosterRows.get(sibling.dataset.name);
+        if (other.contributor.lastCommitAt < row.contributor.lastCommitAt ||
+          other.contributor.lastCommitAt === row.contributor.lastCommitAt && other.rosterIndex > row.rosterIndex) { before = sibling; break; }
+      }
+      if (before) {
+        if (row.li.nextElementSibling !== before) el.roster.insertBefore(row.li, before);
+      } else if (el.roster.lastElementChild !== row.li) el.roster.append(row.li);
+    };
+    const setRosterRow = (name, stateKey, ageText, online = false) => {
       const row = rosterRows.get(name);
       if (!row) return;
-      row.state.dataset.state = stateKey;
-      row.state.textContent = STATE_LABELS[stateKey] || stateKey;
-      if (ageText != null) row.age.textContent = ageText;
+      const activity = stateKey === "away" ? "chilling" : stateKey;
+      if (row.state.dataset.state !== activity) {
+        row.state.dataset.state = activity;
+        row.state.firstChild.data = STATE_LABELS[activity] || activity;
+      }
+      if (ageText != null && row.age.firstChild.data !== ageText) row.age.firstChild.data = ageText;
+      if (row.online !== online) {
+        row.online = online;
+        row.presence.dataset.online = online ? "true" : "false";
+        row.presence.title = online ? "Online" : "Offline";
+        row.presence.setAttribute("aria-label", row.presence.title);
+      }
+      placeRosterRow(row);
     };
-    // Mutate the text nodes so updates make no DOM
+    // Seed empty text nodes so later updates only mutate text, never the DOM.
     for (const node of [el.meterCount, el.meterForecast, el.worldBananaCount]) if (!node.firstChild) node.append("");
     let shownBananas = -1, shownWidth = "", shownBand = "", shownForecast = null;
     const setMeter = (level, capacity, forecastText) => {
@@ -168,8 +220,156 @@
       el.statDonations.textContent = String(donations);
       el.statSats.textContent = formatLarge(totalSats);
     };
+    let actLabel = el.act.textContent;
     const setAct = (label) => {
+      if (label === actLabel) return;
+      actLabel = label;
       el.act.textContent = label;
+    };
+    let weaponShown = false, weaponEquipped = false, weaponAmmo = -1, weaponDisplayAmmo = -1, weaponReloading = false, weaponCanReload = false, weaponUnlimited = false;
+    let magazineCount = 0, magazineHigh = -1, magazineLow = -1, magazineCanSwap = false;
+    let magazineHighReloading = false, magazineLowReloading = false;
+    let weaponTotal = -1, weaponLabelAmmo = -1, weaponLabelEquipped = false;
+    const refreshWeaponSummary = () => {
+      const total = weaponUnlimited ? Infinity : Math.max(0, weaponAmmo) + (magazineCount ? Math.max(0, magazineHigh) : 0) + (magazineCount > 1 ? Math.max(0, magazineLow) : 0);
+      const shown = weaponShown && weaponEquipped && magazineCount > 0;
+      if (el.magazine.hidden === shown) el.magazine.hidden = !shown;
+      const disabled = !shown || !magazineCanSwap;
+      if (el.magazine.disabled !== disabled) el.magazine.disabled = disabled;
+      if (total !== weaponTotal) {
+        weaponTotal = total;
+        el.weaponCompact.firstChild.data = weaponUnlimited ? "∞" : String(total);
+        el.weaponCompact.dataset.level = total === 0 ? "empty" : total <= 5 ? "low" : "ok";
+      }
+      const labelAmmo = weaponEquipped ? weaponDisplayAmmo : total;
+      if (labelAmmo !== weaponLabelAmmo || weaponEquipped !== weaponLabelEquipped) {
+        weaponLabelAmmo = labelAmmo; weaponLabelEquipped = weaponEquipped;
+        el.weaponToggle.setAttribute("aria-label", weaponUnlimited ? `${weaponEquipped ? "Stow" : "Equip"} AK-47; unlimited ammunition` : weaponEquipped ? `Stow AK-47; ammo ${labelAmmo} of 30 rounds` : `Equip AK-47; ${total} rounds total`);
+      }
+    };
+    const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
+    const showWeaponAmmo = (ammo) => {
+      if (ammo === weaponDisplayAmmo) return;
+      weaponDisplayAmmo = ammo;
+      el.weaponAmmo.firstChild.data = weaponUnlimited ? "∞" : `${ammo} / 30`;
+      el.weaponMagazine.setAttribute("aria-valuenow", String(ammo));
+      el.weaponMagazine.setAttribute("aria-valuetext", weaponUnlimited ? "Unlimited ammunition" : `${ammo} of 30 rounds`);
+      el.weaponMagazine.dataset.level = weaponUnlimited ? "ok" : ammo === 0 ? "empty" : ammo <= 5 ? "low" : "ok";
+      refreshWeaponSummary();
+    };
+    const clearWeaponLoad = () => {
+      for (const banana of el.weaponBananas) {
+        banana.classList.remove("weapon-banana--loading");
+        banana.style.removeProperty("animation-delay");
+      }
+    };
+    on(el.weaponMagazine, "animationstart", (event) => {
+      if (event.animationName !== "weapon-banana-load" || !weaponShown || !weaponEquipped) return;
+      const banana = event.target.closest(".weapon-banana");
+      if (!banana.classList.contains("weapon-banana--loading") || banana.dataset.filled !== "true") return;
+      // A banana credits three rounds at once; the readout follows each
+      // already-loaded slot as its staggered fill actually appears.
+      showWeaponAmmo(Math.min(weaponAmmo, Math.max(weaponDisplayAmmo, el.weaponBananas.indexOf(banana) + 1)));
+    });
+    on(el.weaponMagazine, "animationend", (event) => {
+      if (event.animationName !== "weapon-banana-load") return;
+      const banana = event.target.closest(".weapon-banana");
+      banana.classList.remove("weapon-banana--loading");
+      banana.style.removeProperty("animation-delay");
+    });
+    on(reducedMotion, "change", () => {
+      if (!reducedMotion.matches) return;
+      clearWeaponLoad();
+      showWeaponAmmo(weaponAmmo);
+    });
+    const setWeapon = (available, equipped, ammo, reloading = false, canReload = false, unlimited = false) => {
+      const modeChanged = weaponUnlimited !== unlimited;
+      if (modeChanged) {
+        weaponUnlimited = unlimited;
+        weaponDisplayAmmo = weaponTotal = weaponLabelAmmo = -1;
+      }
+      ammo = Math.max(0, Math.min(30, Math.floor(ammo)));
+      const animateReload = !unlimited && available && weaponShown && equipped && weaponEquipped && weaponAmmo >= 0
+        && ammo > weaponAmmo && ammo <= weaponAmmo + 3 && (reloading || weaponReloading) && !reducedMotion.matches;
+      if (modeChanged || (!available && weaponShown) || (!equipped && weaponEquipped) || ammo !== weaponAmmo && !animateReload) clearWeaponLoad();
+      if (available !== weaponShown) {
+        weaponShown = available;
+        el.weapon.hidden = !available;
+      }
+      if (equipped !== weaponEquipped) {
+        weaponEquipped = equipped;
+        el.weapon.dataset.equipped = String(equipped);
+        el.weaponToggle.setAttribute("aria-pressed", String(equipped));
+        el.weaponToggle.setAttribute("aria-expanded", String(equipped));
+        el.weaponToggle.title = equipped ? "Stow AK-47 (G)" : "Equip AK-47 (G)";
+        el.weaponReadout.setAttribute("aria-hidden", String(!equipped));
+      }
+      if (modeChanged || reloading !== weaponReloading || canReload !== weaponCanReload) {
+        weaponReloading = reloading;
+        weaponCanReload = canReload;
+        el.weapon.dataset.reloading = String(reloading);
+        el.weapon.dataset.canReload = String(canReload);
+        el.weaponLabel.firstChild.data = reloading ? "Reloading" : "Ammo";
+        el.weaponMagazine.title = unlimited ? "Unlimited ammunition; firing does not consume rounds" : reloading ? "Stay near the pile to keep reloading; leave its range to stop" : canReload ? "Press Space to reload; two bananas load 6 rounds" : "Each slot is 1 round. Press Space beside the pile to reload.";
+      }
+      if (ammo === weaponAmmo) {
+        if (modeChanged || !available || !equipped || reducedMotion.matches) showWeaponAmmo(ammo);
+        refreshWeaponSummary(); return;
+      }
+      const from = Math.max(0, Math.min(ammo, weaponAmmo)), to = weaponAmmo < 0 ? 30 : Math.max(ammo, weaponAmmo);
+      weaponAmmo = ammo;
+      if (!animateReload) showWeaponAmmo(ammo);
+      for (let i = from; i < to; i++) {
+        const banana = el.weaponBananas[i];
+        banana.dataset.filled = String(i < ammo);
+        banana.classList.toggle("weapon-banana--loading", animateReload);
+        if (animateReload) banana.style.animationDelay = `${(i - from) * 70}ms`;
+        else banana.style.removeProperty("animation-delay");
+      }
+      refreshWeaponSummary();
+    };
+    const setMagazine = (count, firstAmmo, secondAmmo, canSwap, reloadingIndex = -1) => {
+      const button = el.magazine;
+      firstAmmo = Math.max(0, Math.min(30, Math.floor(firstAmmo)));
+      secondAmmo = Math.max(0, Math.min(30, Math.floor(secondAmmo)));
+      const front = count > 1 && secondAmmo > firstAmmo ? 1 : 0;
+      const high = count ? front ? secondAmmo : firstAmmo : 0, low = count > 1 ? front ? firstAmmo : secondAmmo : 0;
+      const highReloading = count > 0 && reloadingIndex === front, lowReloading = count > 1 && reloadingIndex === 1 - front;
+      canSwap = count > 0 && canSwap && reloadingIndex < 0;
+      if (count === magazineCount && high === magazineHigh && low === magazineLow && canSwap === magazineCanSwap
+        && highReloading === magazineHighReloading && lowReloading === magazineLowReloading) return;
+      if (count !== magazineCount) {
+        magazineCount = count;
+        button.dataset.count = String(count);
+        button.dataset.owned = String(count > 0);
+        el.magazineIcon.setAttribute("viewBox", count === 2 ? "0 0 32 32" : "2 0 32 32");
+        el.magazineFront.setAttribute("transform", count === 2
+          ? "translate(11.15 16) scale(0.86) rotate(20) scale(-1 1) translate(-12 -17)"
+          : "translate(16 16) scale(0.94) rotate(20) scale(-1 1) translate(-12 -17)");
+      }
+      magazineCanSwap = canSwap;
+      magazineHighReloading = highReloading; magazineLowReloading = lowReloading;
+      button.dataset.reloading = String(highReloading);
+      el.magazineLowAmmo.dataset.reloading = String(lowReloading);
+      button.title = reloadingIndex >= 0 ? "Loading spare magazines; stay near the banana pile"
+        : canSwap ? "Click or press R to use the fullest spare. Each banana is 6 rounds."
+        : "Equip the AK-47 to swap magazines";
+      button.setAttribute("aria-label", `${count} spare magazine${count === 1 ? "" : "s"}; ${high} of 30 rounds${count > 1 ? ` fullest, ${low} of 30 rounds lowest` : ""}${reloadingIndex >= 0 ? "; reloading" : canSwap ? "; click to use the fullest spare" : ""}`);
+      if (high !== magazineHigh) {
+        const filled = Math.floor(high / 6), previous = Math.floor(magazineHigh / 6);
+        for (let i = 0; i < el.magazineBananas.length; i++) if (magazineHigh < 0 || (i < filled) !== (i < previous)) el.magazineBananas[i].dataset.filled = String(i < filled);
+        magazineHigh = high;
+        el.magazineAmmo.firstChild.data = String(high);
+        button.dataset.level = high === 0 ? "empty" : high <= 5 ? "low" : "ok";
+      }
+      if (low !== magazineLow) {
+        const filled = Math.floor(low / 6), previous = Math.floor(magazineLow / 6);
+        for (let i = 0; i < el.magazineRearBananas.length; i++) if (magazineLow < 0 || (i < filled) !== (i < previous)) el.magazineRearBananas[i].dataset.filled = String(i < filled);
+        magazineLow = low;
+        el.magazineLowAmmo.firstChild.data = String(low);
+        el.magazineLowAmmo.dataset.level = low === 0 ? "empty" : low <= 5 ? "low" : "ok";
+      }
+      refreshWeaponSummary();
     };
     let jetpackShown = false, jetpackEquipped = false, jetpackBlocked = false, jetpackPercent = -1;
     const setJetpack = (owned, equipped, fuel, blocked = false) => {
@@ -194,6 +394,7 @@
       el.jetpackFuel.setAttribute("aria-valuenow", String(percent));
       el.jetpackFuel.dataset.level = percent <= 20 ? "low" : "ok";
       el.jetpackFuelValue.firstChild.data = `${percent}%`;
+      el.jetpackCompact.firstChild.data = `${percent}%`;
     };
     const setSubtitle = (text) => {
       el.subtitle.textContent = text;
@@ -202,7 +403,6 @@
     const onAction = (fn) => {
       actionHandler = fn;
     };
-    // Open and close the feed dialog
     const openFeed = () => {
       if (!el.feed.open) el.feed.showModal();
     };
@@ -234,24 +434,81 @@
         }, MESSAGE_FADE_MS);
       }, 2800);
     };
-    let tipText = "", tipW = 0, tipH = 0;
+    let tipText = "", tipState = "", tipW = 0, tipH = 0, tipCave = null, tipName = false, tipLeft = NaN, tipTop = NaN;
+    let tipVisibility = null, tipSpeechTop = Infinity;
+    const tipScreen = { x: 0, y: 0, depth: 0 };
+    const placeTooltip = (left, top) => {
+      left = Math.round(left); top = Math.round(top);
+      if (left === tipLeft && top === tipTop) return;
+      tipLeft = left; tipTop = top;
+      el.tooltip.style.transform = `translate(${left}px, ${top}px)`;
+    };
     const tooltip = {
-      show: (text, x, y) => {
+      show: (text, x, y, cave = null) => {
+        if (cave !== tipCave) tipSpeechTop = Infinity;
+        tipCave = cave;
+        const name = !!cave, changed = text !== tipText || name !== tipName;
+        if (name !== tipName) {
+          tipName = name;
+          el.tooltip.classList.toggle("tooltip--name", name);
+          if (!name) {
+            tipState = "";
+            delete el.tooltip.dataset.state;
+            el.tooltip.removeAttribute("aria-label");
+          }
+        }
         el.tooltip.hidden = false;
-        if (text !== tipText) {
+        if (changed) {
           tipText = text;
+          tipState = "";
           el.tooltip.textContent = text;
           tipW = el.tooltip.offsetWidth;
           tipH = el.tooltip.offsetHeight;
         }
+        if (cave) {
+          tooltip.update();
+          return;
+        }
         const w = tipW, h = tipH;
         const left = Math.min(window.innerWidth - w - 8, x + 14);
         const top = y + 18 + h > window.innerHeight ? y - h - 10 : y + 18;
-        el.tooltip.style.transform = `translate(${Math.round(left)}px, ${Math.round(top)}px)`;
+        placeTooltip(left, top);
+      },
+      setVisibility: (visibility) => {
+        tipVisibility = visibility;
+        if (!visibility) tooltip.hide();
+      },
+      beginFrame: () => {
+        tipSpeechTop = Infinity;
+        tooltip.update(false);
+      },
+      update: (place = true) => {
+        if (!tipCave) return;
+        const state = statusFor(tipCave);
+        if (state !== tipState) {
+          tipState = state;
+          el.tooltip.dataset.state = state;
+          el.tooltip.setAttribute("aria-label", `${tipText}, ${STATE_LABELS[state]}`);
+        }
+        el.tooltip.hidden = !tipVisibility.anchor(tipCave, tipScreen);
+        if (el.tooltip.hidden || !place) return;
+        const top = Math.min(tipScreen.y - 8, tipSpeechTop - 6) - tipH;
+        placeTooltip(Math.max(8, Math.min(window.innerWidth - tipW - 8, tipScreen.x - tipW / 2)), Math.max(8, top));
+      },
+      // The name sits above speech; reserve room for both near the top edge.
+      speechSpace: (cave) => cave && cave === tipCave && !el.tooltip.hidden ? tipH + 6 : 0,
+      aboveSpeech: (cave, top) => {
+        if (cave && cave === tipCave) tipSpeechTop = Math.min(tipSpeechTop, top);
       },
       hide: () => {
+        tipCave = null;
+        tipSpeechTop = Infinity;
         el.tooltip.hidden = true;
-        tipText = "";
+        el.tooltip.classList.remove("tooltip--name");
+        delete el.tooltip.dataset.state;
+        el.tooltip.removeAttribute("aria-label");
+        tipName = false;
+        tipText = tipState = "";
       }
     };
     const hint = (text, ms = 4200) => {
@@ -280,7 +537,7 @@
         else selectTab(t.dataset.tab);
       });
     }
-    // Each pull tab opens straight onto its panel, and folds the sheet when that panel is already showing
+    // A pull tab opens its own panel, and folds the sheet when that panel is already showing.
     const pull = (name) => {
       window.clearTimeout(introTimer);
       const showing = el.sheet.dataset.open === "true" && el.tabs.some((t) => t.dataset.tab === name && t.getAttribute("aria-selected") === "true");
@@ -430,7 +687,7 @@
         el.inventory.append(li);
       }
     };
-    // Remove the rows and timers this instance added
+    // dispose removes only the rows and timers this instance added.
     const dispose = () => {
       window.clearTimeout(toastTimer);
       window.clearTimeout(toastHideTimer);
@@ -444,10 +701,12 @@
       el.hint.classList.remove("show");
       el.hint.hidden = true;
       tooltip.hide();
+      setWeapon(false, false, 0);
+      setMagazine(0, 0, 0, false);
       setJetpack(false, false, 0);
       closeFeed();
     };
-    return { el, openFeed, closeFeed, setRosterRow, setMeter, setStats, setAct, setJetpack, setSubtitle, onAction, toast, tooltip, hint, selectTab, onPreset, onIdentityChange, setIdentity, setDonationUrl, onAssign, onUnassign, renderInventory, dispose };
+    return { el, openFeed, closeFeed, setRosterRow, setMeter, setStats, setAct, setWeapon, setMagazine, setJetpack, setSubtitle, onAction, toast, tooltip, hint, selectTab, onPreset, onIdentityChange, setIdentity, setDonationUrl, onAssign, onUnassign, renderInventory, dispose };
   };
-  BL.hud = { create, renderIcon, signLettering, STATE_LABELS };
+  BL.hud = { create, renderIcon, signLettering, STATE_LABELS, statusFor };
 })();

@@ -9,8 +9,7 @@
     n = Math.imul(n ^ n >>> 15, -2073254261);
     return ((n ^ n >>> 16) >>> 0) / 4294967296;
   };
-  // Neighbouring texels share lattice cells. The hash is pure, so each cell's
-  // eight corners are kept per octave (field) instead of rehashed per texel.
+  // Neighbouring texels share lattice cells; the hash is pure, so each cell's 8 corners are cached per octave.
   const GRAIN_SLOTS = 256, grainKeys = new Float64Array(GRAIN_SLOTS * 4).fill(NaN), grainCorners = new Float64Array(GRAIN_SLOTS * 8);
   const grain = (x, y, z, field) => {
     const ix = Math.floor(x), iy = Math.floor(y), iz = Math.floor(z);
@@ -33,8 +32,7 @@
     if (glyphAtlas) return;
     glyphAtlas = new Float32Array(GLYPH_SIZE * 8);
     const scratch = new Float32Array(GLYPH_SIZE), kernel = [1, 4, 7, 10, 13, 10, 7, 4, 1];
-    // Flatten the real cave glyph pixels once, then soften their edges in the
-    // small atlas. Rendering only samples it; no blur canvas or live filters.
+    // Flatten the cave glyph pixels once and soften edges into the atlas; rendering only samples it, no live blur.
     for (let variant = 0; variant < 8; variant++) {
       const geometry = BL.hubModels.matrixGlyph(variant), v = geometry.verts;
       const front = BL.scene.boundsOf(geometry).max[2], offset = variant * GLYPH_SIZE;
@@ -70,10 +68,8 @@
     return lerp(lerp(glyphAtlas[offset + iy * GLYPH_W + ix], glyphAtlas[offset + iy * GLYPH_W + nx], x - ix),
       lerp(glyphAtlas[offset + ny * GLYPH_W + ix], glyphAtlas[offset + ny * GLYPH_W + nx], x - ix), y - iy);
   };
-  // The island is a solid volume, but its surface mesh has no interior faces.
-  // Cap its solid intersection with the near plane, keeping the driven Ooga's
-  // silhouette visible. A crossing surface covers only its part of the view.
-  // This shared overlay uses the same world transforms in both renderers.
+  // The island is solid but its surface mesh has no interior faces: cap the solid/near-plane intersection.
+  // Keeps the driven Ooga's silhouette; shared overlay uses the same world transforms in both renderers.
   const create = (overlay, interiorTextureAt = null) => {
     const ctx = overlay.getContext("2d");
     const mask = document.createElement("canvas"), rim = document.createElement("canvas"), stone = document.createElement("canvas");
@@ -89,6 +85,17 @@
     const view = mat4.create(), triangle = new Float64Array(9), clipped = new Float64Array(12);
     let actorDepth = new Float32Array(0), clipActor = false, actorMinX = 0, actorMinY = 0, actorMaxX = -1, actorMaxY = -1;
     let actorColumns = new Int32Array(0);
+    // Search the small silhouette band nearest-first. Stable distance order
+    // keeps the same row/column tie break as scanning the complete square.
+    // Buffer scale <= 1, spread <= 1.5 and contrast <= 1 bound its pad at 5.
+    const actorNeighbors = new Int8Array(242);
+    for (let y = -5, count = 0; y <= 5; y++) for (let x = -5; x <= 5; x++) {
+      let at = count++ * 2;
+      while (at && actorNeighbors[at - 2] ** 2 + actorNeighbors[at - 1] ** 2 > x * x + y * y) {
+        actorNeighbors[at] = actorNeighbors[at - 2]; actorNeighbors[at + 1] = actorNeighbors[at - 1]; at -= 2;
+      }
+      actorNeighbors[at] = x; actorNeighbors[at + 1] = y;
+    }
     const apertureView = new Float64Array(36), apertureClip = new Float64Array(39);
     let structurePhases = new Float32Array(0), structureTargets = new Uint8Array(0), structureSeen = new Uint8Array(0), structureLines = new Float32Array(0);
     const ROCK_GRID = 32, rockSamples = new Uint8Array((ROCK_GRID + 1) ** 2), rockTriangle = new Float64Array(9);
@@ -117,7 +124,7 @@
         }
         if (aIn === bIn) continue;
         let lo = 0, hi = 1;
-        // Refine actual rock boundaries, rather than exposing square mask tiles.
+        // 8-step bisection refines the real rock boundary instead of exposing square mask tiles.
         for (let n = 0; n < 8; n++) {
           const t = (lo + hi) / 2;
           if (+sampleRock(rockTriangle[a] + (rockTriangle[b] - rockTriangle[a]) * t, rockTriangle[a + 1] + (rockTriangle[b + 1] - rockTriangle[a + 1]) * t) === aIn) lo = t;
@@ -140,9 +147,7 @@
       if (!changed) { state.glyphInterior = textureGlyph; return; }
       textureTransform.set(textureNext); textureMaterial = glyphMaterial; textureRevision = revision; textureInteriorRevision = interiorRevision; textureUniformGlyph = uniformGlyph;
       let minimum = 1, maximum = 0;
-      // Sample the real section exposed by the near-plane cut. Grain is a
-      // stationary 3D field; moving or turning reveals different stone, while
-      // a stationary view never animates or slides a screen-space wallpaper.
+      // Sample the real near-plane section; grain is a stationary 3D field, not a sliding screen-space wallpaper.
       for (let n = 0; n < TEXTURE_SIZE; n++) {
         const right = (n + 0.5) / TEXTURE_SIZE - 0.5, up = 0.5 - (n + 0.5) / TEXTURE_SIZE;
         textureColumns[n * 3] = textureNext[3] * right; textureColumns[n * 3 + 1] = textureNext[4] * right; textureColumns[n * 3 + 2] = textureNext[5] * right;
@@ -153,8 +158,7 @@
         const wy = planeY + textureColumns[x * 3 + 1] + textureRows[y * 3 + 1];
         const wz = planeZ + textureColumns[x * 3 + 2] + textureRows[y * 3 + 2];
         const i = (y * TEXTURE_SIZE + x) * 4;
-        // Each texel follows the same advancing/receding world wave as its
-        // stone surface. Outline contrast must not recolor unreached rock.
+        // Each texel follows its stone surface's world wave; outline contrast must not recolor unreached rock.
         const amount = glyphMaterial ? glyphMaterial.coverageAt(wx, wy, wz) : uniformGlyph ? 1 : 0;
         minimum = Math.min(minimum, amount); maximum = Math.max(maximum, amount);
         let red = 0, green = 0, blue = 0;
@@ -170,9 +174,8 @@
         }
         if (amount > 0) {
           prepareGlyphAtlas();
-          // Two fixed world-space directions keep the blurred code anchored
-          // while the camera turns or crosses a floor. Only world Y drifts,
-          // slowly downward at a bounded cadence, against nearly black rock.
+          // Two fixed world-space directions keep the blurred code anchored as the camera turns or crosses a floor.
+          // Only world Y drifts, slowly downward at a bounded cadence.
           const a = glyphField(wx * 7 + wz * 3.13, wy * 6 + (wx - wz) * 0.25 + drift, 0);
           const b = glyphField(wz * 8 - wx * 2.61, wy * 6 + (wz + wx) * 0.19 + drift, 1);
           const glow = Math.max(a * 0.85, b * 0.65);
@@ -208,7 +211,7 @@
       ctx.beginPath();
       if (state.insideRock) ctx.rect(0, 0, screenW, screenH);
       else if (state.partialRock) {
-        // One combined path prevents seams between neighboring mask triangles.
+        // One combined path prevents seams between neighbouring mask triangles.
         for (let y = 0; y < rows; y++) for (let x = 0; x < cols; x++) {
           const i = y * stride + x, a = rockSamples[i], b = rockSamples[i + 1], c = rockSamples[i + stride + 1], d = rockSamples[i + stride];
           if (a && b && c && d) { ctx.rect(x * dx, y * dy, dx, dy); continue; }
@@ -265,8 +268,7 @@
         const a = corner * 3, b = ((corner + 1) % corners) * 3;
         area += apertureClip[a] * apertureClip[b + 1] - apertureClip[a + 1] * apertureClip[b];
       }
-      // A face touching the frame plane can clip to a line. Stroking that
-      // zero-area contact would put a spurious strip back into the opening.
+      // A face on the frame plane clips to a line; stroking that zero-area contact puts a strip back in the opening.
       if (Math.abs(area) < 1e-5) return false;
       const reverse = area < 0;
       for (let corner = 0; corner < corners; corner++) {
@@ -286,8 +288,7 @@
     };
     const drawCueRim = (target, source, opacity, w, h, visibleMask = null, fade = 1) => {
       if (cueContrast > 0) {
-        // Reuse the aperture scratch after its window cuts. The keyline stays
-        // beside the existing rim; it never fills the body or darkens the view.
+        // Reuse the aperture scratch after its window cuts; the keyline sits beside the rim, never filling body or view.
         apertureCtx.clearRect(0, 0, width, height);
         apertureCtx.globalCompositeOperation = "source-over";
         const spread = Math.max(0.75, scale);
@@ -364,8 +365,7 @@
         for (let at = 0; at < structure.surfaceCount * 9; at += 9) {
           const group = structure.surfaceGroups[at / 9];
           const whole = structure.surfaceWholePhases ? structure.surfaceWholePhases[group] : structure.surfacePhases[group];
-          // In a rock cut, the cap is the camera occluder. A clear sample
-          // elsewhere on this wall must not remove the cap-covered portion.
+          // In a rock cut the cap is the camera occluder: a clear sample elsewhere on the wall must not remove it.
           const phase = rockOnly ? whole * (structure.surfaceSections ? structure.surfaceSections[group] : 1) : structure.surfacePhases[group];
           if (whole <= 0) continue;
           for (let n = 0; n < 3; n++) {
@@ -393,9 +393,8 @@
             minX = Math.min(minX, x); maxX = Math.max(maxX, x); minY = Math.min(minY, y); maxY = Math.max(maxY, y);
           }
           if (maxX < -4 || minX > width + 4 || maxY < -4 || minY > height + 4) continue;
-          // Equal winding preserves the union where opposing slab faces
-          // overlap. Keep each rasterized path small: a single huge path
-          // makes the canvas resolve thousands of overlapping contours.
+          // Equal winding preserves the union where opposing slab faces overlap.
+          // Keep each rasterized path small; one huge path makes the canvas resolve thousands of overlapping contours.
           const reverse = (clipped[3] - clipped[0]) * (clipped[7] - clipped[1]) - (clipped[4] - clipped[1]) * (clipped[6] - clipped[0]) < 0;
           const corners = count / 3, start = wallFaces * 8, cameraVisible = !rockOnly && structure.surfaceHidden && !structure.surfaceHidden[group];
           for (let corner = 0; corner < corners; corner++) {
@@ -411,9 +410,8 @@
             if (++visibleBatch === 16) { visibleCtx.fill(); visibleCtx.stroke(); visibleCtx.beginPath(); visibleBatch = 0; }
           }
           if (phase > 0) {
-            // One alpha unit is below the final overlay's 8-bit opacity.
-            // Reusable buckets preserve smooth fades without a path or a
-            // canvas allocation for every triangle in every frame.
+            // One alpha unit is below the overlay's 8-bit opacity.
+            // Reusable buckets keep fades smooth without a path or canvas allocation per triangle per frame.
             const level = Math.max(1, Math.min(255, Math.round(phase * 255)));
             surfaceCorners[wallFaces] = corners; surfaceNext[wallFaces] = phaseHeads[level]; phaseHeads[level] = wallFaces++;
           }
@@ -421,13 +419,11 @@
       }
       if (opaqueBatch) { maskCtx.fill(); maskCtx.stroke(); }
       if (visibleBatch) { visibleCtx.fill(); visibleCtx.stroke(); }
-      // Each opening gets its own mask, so a blocked part of one window
-      // cannot erase a clear part of another. Real foreground stone cuts the
-      // mask at its rendered edges, including the flared frame and ceiling.
+      // Per-opening masks: a blocked part of one window must not erase a clear part of another.
+      // Foreground stone cuts the mask at its rendered edges, including the flared frame and ceiling.
       apertureCtx.fillStyle = apertureCtx.strokeStyle = "#ffffff";
       apertureCtx.lineWidth = 0.6;
-      // Jagged flare fragments can end in very acute triangles. A mitered
-      // seam stroke would extend their tips well into otherwise clear pixels.
+      // Jagged flare fragments end in acute triangles; a mitered seam stroke would push their tips into clear pixels.
       apertureCtx.lineJoin = "round";
       for (let item = 0; !rockOnly && item < size; item++) {
         const structure = structures ? structures[item] : guides.structure;
@@ -441,7 +437,7 @@
             if (cut.count) appendApertureMask(cut.points, cut.count);
           }
           if (apertureBatch) { apertureCtx.fill(); apertureCtx.stroke(); }
-          // An opening that received no wall face leaves a transparent mask
+          // An opening with no wall face would leave a transparent mask.
           if (!apertureFaces) continue;
           apertureCtx.globalCompositeOperation = "destination-out";
           apertureCtx.beginPath(); apertureBatch = 0;
@@ -467,16 +463,14 @@
         if (batch) concealedCtx.fill();
       }
       concealedCtx.globalAlpha = 1;
-      // Visible front faces win over hidden rear faces projected onto the
-      // same pixels. Otherwise a thick slab would outline its visible side.
+      // Visible front faces beat hidden rear faces on the same pixels, else a thick slab outlines its visible side.
       concealedCtx.globalCompositeOperation = "destination-out";
       concealedCtx.drawImage(visible, 0, 0);
       concealedCtx.globalCompositeOperation = "source-over";
       state.structureFaces = wallFaces;
       if (!wallFaces) return;
-      // The full wall supplies its silhouette; only afterward does camera
-      // visibility mask its fill and rim. Patch boundaries cannot become
-      // false wall edges, including the steps of a jagged stone surface.
+      // The full wall supplies the silhouette; camera visibility masks fill and rim only afterward.
+      // Keeps patch boundaries from becoming false wall edges on a jagged stone surface.
       wallCtx.globalAlpha = 0.12;
       wallCtx.drawImage(concealed, 0, 0);
       rimCtx.clearRect(0, 0, width, height);
@@ -541,8 +535,7 @@
       const lines = guides.lines, focal = screenH / 2 / Math.tan(camera.fov / 2), near = camera.near;
       state.guideKind = guides.kind; state.guideIndex = guides.index; state.guideBasement = guides.basement;
       if (guides.structures) {
-        // Complete walls already have a continuous rim. Retaining the former
-        // section lines would put panel seams back on top of that silhouette.
+        // Complete walls already have a continuous rim; keeping the old section lines re-adds panel seams on it.
         structurePhases.fill(0);
         for (let n = 0; n < guides.count * 6; n += 6) if (guides.kinds && guides.kinds[n / 6]) drawGuideLine(lines, n, true, guides.alphas ? guides.alphas[n / 6] : 1, guides.observer, guides.radius || 12, focal, near);
         return;
@@ -572,9 +565,8 @@
       }
       for (let source = 0; source < sourceCount; source++) if (!structureSeen[source] && structurePhases[source] > 0) drawGuideLine(structureLines, source * 6, false, structurePhases[source], guides.observer, guides.radius || 12, focal, near);
     };
-    // Only the exterior-ramp exception needs a partial character cue. Keep
-    // its nearest surface depth in the existing mask's pixel coordinates;
-    // no canvas readback or per-frame image allocation is needed.
+    // Only the exterior-ramp exception needs a partial character cue.
+    // Keep nearest surface depth in the mask's pixel coords; no canvas readback or per-frame image alloc.
     const rasterActorEdge = (ax, ay, ad, bx, by, bd) => {
       const dx = bx - ax, dy = by - ay;
       let lo = 0, hi = 1;
@@ -602,16 +594,33 @@
         const y0 = Math.max(0, Math.floor(Math.min(ay, by, cy))), y1 = Math.min(height - 1, Math.ceil(Math.max(ay, by, cy)));
         actorMinX = Math.min(actorMinX, x0); actorMaxX = Math.max(actorMaxX, x1);
         actorMinY = Math.min(actorMinY, y0); actorMaxY = Math.max(actorMaxY, y1);
-        // Canvas also covers subpixel edges that miss every pixel center.
-        // Preserve their depth so small hair/accessory tips can be clipped.
+        // Canvas covers subpixel edges that miss every pixel center; keep their depth so hair/accessory tips clip.
         rasterActorEdge(ax, ay, ad, bx, by, bd); rasterActorEdge(bx, by, bd, cx, cy, cd); rasterActorEdge(cx, cy, cd, ax, ay, ad);
         if (Math.abs(area) < 1e-9) continue;
-        for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) {
-          const aWeight = ((by - cy) * (x + 0.5 - cx) + (cx - bx) * (y + 0.5 - cy)) / area;
-          const bWeight = ((cy - ay) * (x + 0.5 - cx) + (ax - cx) * (y + 0.5 - cy)) / area, cWeight = 1 - aWeight - bWeight;
-          if (aWeight < -1e-7 || bWeight < -1e-7 || cWeight < -1e-7) continue;
-          const at = y * width + x, depth = aWeight * ad + bWeight * bd + cWeight * cd;
-          if (depth > actorDepth[at]) actorDepth[at] = depth;
+        const aStep = (by - cy) / area, bStep = (cy - ay) / area, cStep = -aStep - bStep;
+        for (let y = y0; y <= y1; y++) {
+          const aStart = ((by - cy) * (x0 + 0.5 - cx) + (cx - bx) * (y + 0.5 - cy)) / area;
+          const bStart = ((cy - ay) * (x0 + 0.5 - cx) + (ax - cx) * (y + 0.5 - cy)) / area, cStart = 1 - aStart - bStart;
+          let first = x0, last = x1;
+          // Conservative scanline bounds skip the empty half of a triangle's
+          // rectangle. Keep an extra pixel at each boundary, then use the
+          // original barycentric test and depth calculation without rounding.
+          if (aStep > 0) first = Math.max(first, Math.ceil(x0 + (-1e-7 - aStart) / aStep) - 1);
+          else if (aStep < 0) last = Math.min(last, Math.floor(x0 + (-1e-7 - aStart) / aStep) + 1);
+          else if (aStart < -1e-7) continue;
+          if (bStep > 0) first = Math.max(first, Math.ceil(x0 + (-1e-7 - bStart) / bStep) - 1);
+          else if (bStep < 0) last = Math.min(last, Math.floor(x0 + (-1e-7 - bStart) / bStep) + 1);
+          else if (bStart < -1e-7) continue;
+          if (cStep > 0) first = Math.max(first, Math.ceil(x0 + (-1e-7 - cStart) / cStep) - 1);
+          else if (cStep < 0) last = Math.min(last, Math.floor(x0 + (-1e-7 - cStart) / cStep) + 1);
+          else if (cStart < -1e-7) continue;
+          for (let x = first; x <= last; x++) {
+            const aWeight = ((by - cy) * (x + 0.5 - cx) + (cx - bx) * (y + 0.5 - cy)) / area;
+            const bWeight = ((cy - ay) * (x + 0.5 - cx) + (ax - cx) * (y + 0.5 - cy)) / area, cWeight = 1 - aWeight - bWeight;
+            if (aWeight < -1e-7 || bWeight < -1e-7 || cWeight < -1e-7) continue;
+            const at = y * width + x, depth = aWeight * ad + bWeight * bd + cWeight * cd;
+            if (depth > actorDepth[at]) actorDepth[at] = depth;
+          }
         }
       }
     };
@@ -622,8 +631,7 @@
       const x0 = Math.max(0, actorMinX - pad), x1 = Math.min(width - 1, actorMaxX + pad);
       const y0 = Math.max(0, actorMinY - pad), y1 = Math.min(height - 1, actorMaxY + pad), p = camera.position;
       const firstX = Math.max(0, x0 - pad), lastX = Math.min(width - 1, x1 + pad), area = (2 * pad + 1) ** 2;
-      // Sliding coverage counts reject filled interiors and empty space in
-      // constant time. Only the narrow silhouette band needs depth searches.
+      // Sliding coverage counts reject filled interiors and empty space in O(1); only the rim band searches depth.
       actorColumns.fill(0);
       for (let y = Math.max(0, y0 - pad); y <= Math.min(height - 1, y0 + pad); y++) for (let x = firstX; x <= lastX; x++) {
         if (actorDepth[y * width + x]) actorColumns[x]++;
@@ -634,15 +642,16 @@
         for (let x = x0; x <= x1 + 1; x++) {
           let clear = false;
           if (x <= x1 && coverage && coverage < area) {
-            let depth = actorDepth[y * width + x], nearest = Infinity;
-            if (!depth) for (let dy = -pad; dy <= pad; dy++) for (let dx = -pad; dx <= pad; dx++) {
-              const xx = x + dx, yy = y + dy, d = xx < 0 || xx >= width || yy < 0 || yy >= height ? 0 : actorDepth[yy * width + xx];
-              if (d && dx * dx + dy * dy < nearest) { nearest = dx * dx + dy * dy; depth = d; }
+            let depth = actorDepth[y * width + x];
+            if (!depth) for (let n = 0; n < actorNeighbors.length; n += 2) {
+              const dx = actorNeighbors[n], dy = actorNeighbors[n + 1], xx = x + dx, yy = y + dy;
+              if (Math.abs(dx) > pad || Math.abs(dy) > pad || xx < 0 || xx >= width || yy < 0 || yy >= height) continue;
+              depth = actorDepth[yy * width + xx];
+              if (depth) break;
             }
             if (depth) {
-              // Extend the nearest body depth into its small rim band. Test
-              // each rim pixel itself, so a window border cannot erase extra
-              // hidden outline pixels on the other side of the border.
+              // Extend the nearest body depth into its rim band.
+              // Test each rim pixel itself, so a window border cannot erase hidden outline pixels on its other side.
               const z = 1 / depth, vx = (x + 0.5 - width / 2) * z / focal, vy = (height / 2 - y - 0.5) * z / focal;
               clear = visibleAt(p.x + view[0] * vx + view[1] * vy - view[2] * z,
                 p.y + view[4] * vx + view[5] * vy - view[6] * z, p.z + view[8] * vx + view[9] * vy - view[10] * z);
@@ -663,7 +672,7 @@
       if (!node.visible || node.cameraHidden) return;
       const geometry = node.geometry, world = node.world;
       if (geometry) for (const face of geometry.faces) {
-        // Triangles clip to at most four corners, so scratch space stays fixed.
+        // Triangles clip to at most four corners, so the scratch space stays fixed.
         for (let fan = 1; fan + 1 < face.i.length; fan++) {
           for (let n = 0; n < 3; n++) {
             const i = face.i[n === 0 ? 0 : fan + n - 1] * 3, v = geometry.verts;
@@ -716,9 +725,8 @@
       state.structureFaces = 0;
       state.structureFilled = false;
       state.guideKind = null; state.guideIndex = -1; state.guideBasement = false;
-      // The selected-character visibility gate is absolute. Clear remembered
-      // structural fades before the early return so a newly hidden wall eases
-      // back in instead of restoring its former opacity in one frame.
+      // The selected-character visibility gate is absolute.
+      // Clear structurePhases before the early return so a newly hidden wall eases back in instead of snapping.
       if (guides?.objectsEnabled === false) structurePhases.fill(0);
       const hasStructures = guides?.objectsEnabled !== false && (guides?.structures ? guides.structures.length : guides?.structure?.surfaceActive);
       if (!touchesRock && !occluded && !guides?.count && !guides?.providerCount && !hasStructures) return;
@@ -731,20 +739,16 @@
       if (touchesRock) drawRock(camera, solidAt, materialAt);
       const rockOnly = guides?.rockOnly === true;
       const drawCues = !rockOnly || state.insideRock || state.partialRock;
-      // When a visible selected character would normally suppress every cue,
-      // a near-plane rock intersection enables them only within that exact
-      // rock cut. The clear portion of a partially covered view stays clean.
+      // A near-plane rock cut re-enables cues only inside that cut; the clear part of the view stays clean.
       if (rockOnly && drawCues) { ctx.save(); ctx.clip(); }
       if (guides && drawCues) drawStructure(camera, guides, w, h);
-      // Occlusion is evaluated against the camera for each guide segment.
-      // It applies in open air too, independently of the near-plane rock cap.
+      // Guide occlusion is tested per segment against the camera, in open air too, independent of the rock cap.
       if (guides && drawCues && guides.objectsEnabled !== false) drawGuides(camera, guides, dt);
       if (guides?.providerCount && drawCues && guides.objectsEnabled !== false) for (let i = 0; i < guides.ownerCount; i++) {
         const provider = guides.ownerProviders[i];
         if (provider && guides.ownerViews[i] && guides.ownerStates[i] & 2 && guides.ownerAlphas[i] > 0) provider.draw(camera, ctx, guides.ownerAlphas[i], w, h, cueContrast, guides);
       }
-      // Fruit can hide the body beyond the near-plane cap too. Its body mask
-      // handles that separately; contextual guides remain clipped to the cap.
+      // Fruit can hide the body past the near-plane cap; its body mask handles that, guides stay clipped to the cap.
       if (rockOnly && drawCues && actorOutsideCover) ctx.restore();
       if (actor && occluded && (actorOutsideCover || drawCues && guides?.objectsEnabled !== false)) {
         ensureBuffers(w, h);

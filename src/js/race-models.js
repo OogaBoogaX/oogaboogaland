@@ -1,4 +1,4 @@
-// Race props: mounts, gantry, pickups, spectators and themed decor, one cached geometry per builder
+// Race props: mounts, gantry, pickups, spectators, themed decor; one cached geometry per builder.
 (() => {
   "use strict";
   const BL = window.BL = window.BL || {};
@@ -13,7 +13,7 @@
       return value;
     };
   };
-  // Cyclic axis swap y -> x, a proper rotation, so winding holds
+  // Cyclic axis swap y -> x is a proper rotation, so the winding holds without reversing faces.
   const yToX = (geo) => {
     const p = geo.verts;
     for (let i = 0; i < p.length; i += 3) {
@@ -65,15 +65,13 @@
     geo.castShadow = false;
     return geo;
   };
-  // A jet of fire pointing down -z, shown behind a boosting racer
+  // Boost flame points down -z, drawn behind a boosting racer.
   const boostFlame = cached(() => noShadow(yToZ(merge(
     lathe({ profile: [[0.22, 0], [0.3, -0.35], [0.16, -0.9], [0, -1.4]], segments: 7, color: (t) => t < 0.4 ? "#ffb13b" : "#ff6a1e", emissive: 1 }),
     lathe({ profile: [[0.1, 0.02], [0.14, -0.3], [0.06, -0.7], [0, -0.95]], segments: 6, color: "#fff0b0", emissive: 1 })
   ))));
   const WOOD = "#8a6236", WOOD_DK = "#5c4425", PLANK = "#a9773f", STONE = ["#7a716a", "#6b625a", "#57504a"];
 
-  // ---------- mounts ----------
-  // A log chassis on stone wheels, the seat a hollow in the log, a stick to steer by
   const KART = { length: 1.7, width: 1.1, wheelR: 0.3, wheelX: 0.58, wheelZ: 0.58, seatY: 0.42 };
   const kartChassis = cached(() => merge(
     box({ w: 0.78, h: 0.42, d: KART.length, color: WOOD, offset: { y: 0.42 } }),
@@ -88,7 +86,6 @@
     box({ w: 0.06, h: 0.42, d: 0.06, color: "#3a2a18", offset: { y: 0.82, z: 0.32 } }),
     box({ w: 0.3, h: 0.06, d: 0.06, color: "#3a2a18", offset: { y: 1.03, z: 0.32 } }),
     box({ w: 0.7, h: 0.16, d: 0.3, color: "#7a5630", offset: { y: 0.68, z: 0.66 } }),
-    // Rope bindings round the log, a stone engine block up front with a hot vent, twin bone exhausts behind
     ...[-0.5, 0.1, 0.45].map((z) => box({ w: 0.84, h: 0.08, d: 0.1, color: "#3a2a18", offset: { y: 0.42, z } })),
     box({ w: 0.5, h: 0.3, d: 0.34, color: "#6b625a", offset: { y: 0.78, z: 0.62 } }),
     box({ w: 0.16, h: 0.08, d: 0.16, color: "#ff8a2a", emissive: 0.8, offset: { y: 0.95, z: 0.62 } }),
@@ -98,7 +95,6 @@
     lathe({ profile: [[0, -0.11], [0.2, -0.11], [KART.wheelR, -0.09], [KART.wheelR, 0.09], [0.2, 0.11], [0, 0.11]], segments: 10, color: (t) => t < 0.2 || t > 0.8 ? "#5b544d" : "#7a716a" }),
     lathe({ profile: [[0, -0.125], [0.08, -0.125], [0.08, 0.125], [0, 0.125]], segments: 6, color: "#3a2a18" })
   )));
-  // A pennant on a pole behind the seat, in the rider's colour
   const kartPennant = keyed((color) => merge(
     box({ w: 0.04, h: 1.3, d: 0.04, color: "#3a2a18", offset: { x: -0.36, y: 0.65, z: -0.7 } }),
     box({ w: 0.02, h: 0.28, d: 0.42, color, emissive: 0.15, offset: { x: -0.36, y: 1.16, z: -0.5 } }),
@@ -117,16 +113,14 @@
     addChild(node, chassis, pennant);
     return { node, wheels, seatY: KART.seatY, seatZ: -0.15 };
   };
-  // A raptor: body, swinging tail, bobbing neck and head, two striding legs, a saddle
   const DINO_UNIT = 0.085;
-  // Three hides shared across the field, so every dino part is one instanced draw per hide
+  // Three hides shared across the field: every dino part stays one instanced draw per hide.
   const DINO_HIDES = [["#4f8a3d", "#3d6b2f", "#a8d27a"], ["#d1762e", "#a35a22", "#f2c27a"], ["#4a78b8", "#365a8c", "#a7c4ec"]];
   const dinoParts = keyed((hide) => {
     const [base, dark, belly] = DINO_HIDES[hide % DINO_HIDES.length];
     const rand = mulberry32(400 + hide);
     const P = [base, dark, belly, "#f2efe4", "#141414", "#5c4425", "#8a6236", "#e8e2d2"];
     const skin = () => rand() < 0.2 ? 1 : 0;
-    // Body: a deep chest, a pale belly, hips wide enough to meet the thighs, a ridge of plates
     const body = vox();
     body.fill(-3, 3, 0, 6, -5, 5, skin);
     body.fill(-4, 4, 1, 4, -3, 1, skin);
@@ -135,19 +129,16 @@
     body.fill(-2, 2, 7, 7, 6, 8, skin);
     body.fill(-2, 2, 6, 6, 6, 8, 2);
     for (const z of [-5, -3, 4]) body.fill(0, 0, 7, 8, z, z, 1);
-    // Saddle, girth and a horn to hold
     body.fill(-3, 3, 7, 7, -2, 2, 5);
     body.fill(-4, 4, 7, 7, -1, 1, 5);
     body.fill(-4, 4, 3, 6, 0, 0, 6);
     body.fill(0, 0, 8, 9, 2, 2, 5);
-    // Tail: thick at the hips, tapering and drooping to a tip
     const tail = vox();
     tail.fill(-2, 2, 0, 3, -3, 0, skin);
     tail.fill(-1, 1, 1, 3, -6, -4, skin);
     tail.fill(-1, 1, 1, 2, -9, -7, skin);
     tail.fill(0, 0, 0, 1, -12, -10, skin);
     tail.set(0, 0, -13, 1);
-    // Neck and head: a jaw, eye whites with pupils, teeth, nostrils
     const neck = vox();
     neck.fill(-1, 1, 0, 5, -1, 1, skin);
     neck.fill(-2, 2, 5, 9, -2, 4, skin);
@@ -164,7 +155,7 @@
     neck.set(1, 7, 6, 4);
     neck.set(0, 10, -1, 1);
     neck.set(0, 10, 0, 1);
-    // Leg: thigh at the hip, shin, a clawed foot; the origin is the hip so a swing keeps it attached
+    // Leg origin is the hip, so swinging its node keeps the leg attached.
     const leg = vox();
     leg.fill(-1, 1, -4, 0, -1, 2, skin);
     leg.fill(-1, 1, -3, -1, -2, -2, 1);
@@ -191,7 +182,6 @@
     const body = createNode({ geometry: g.body });
     const tail = createNode({ position: { x: 0, y: 2 * u, z: -5 * u }, geometry: g.tail });
     const neck = createNode({ position: { x: 0, y: 5 * u, z: 7 * u }, rotation: { x: -0.35, y: 0, z: 0 }, geometry: g.neck });
-    // Legs hang from the hips inside the body's width, feet on the ground
     const legL = createNode({ position: { x: -2.5 * u, y: 8 * u, z: -0.5 * u }, geometry: g.leg });
     const legR = createNode({ position: { x: 2.5 * u, y: 8 * u, z: -0.5 * u }, geometry: g.leg });
     const armL = createNode({ position: { x: -3 * u, y: 3 * u, z: 5 * u }, rotation: { x: 0.6, y: 0, z: 0 }, geometry: g.arm });
@@ -201,8 +191,6 @@
     return { node, hips, tail, neck, legL, legR, seatY: 17 * u, seatZ: 0 };
   };
 
-  // ---------- track furniture ----------
-  // Two stone pillars carrying a wooden beam, three lamps under it for the countdown
   const GANTRY = { span: 16, height: 5 };
   const gantry = cached(() => {
     const rand = mulberry32(77);
@@ -214,7 +202,6 @@
     }
     parts.push(box({ w: GANTRY.span + 1.4, h: 0.5, d: 0.5, color: WOOD_DK, offset: { y: GANTRY.height + 0.55 } }));
     parts.push(box({ w: GANTRY.span - 1, h: 0.14, d: 0.6, color: PLANK, offset: { y: GANTRY.height + 0.87 } }));
-    // A row of pennants under the beam
     const colors = ["#f5c542", "#e04a3a", "#22c55e", "#f3efe4"];
     for (let x = -GANTRY.span / 2 + 0.9; x < GANTRY.span / 2 - 0.6; x += 0.62) {
       parts.push(box({ w: 0.4, h: 0.32, d: 0.03, color: colors[Math.floor(rand() * colors.length)], emissive: 0.1, offset: { x, y: GANTRY.height + 0.14, z: 0.32 } }));
@@ -227,7 +214,7 @@
     box({ w: 0.26, h: 0.3, d: 0.26, color: "#ffb13b", emissive: 1, offset: { y: -0.27 } })
   ));
   const gantryLampY = GANTRY.height + 0.3;
-  // A flat plank with a chevron of emissive stripes pointing along +z
+  // Boost pad chevron points along +z.
   const boostPad = cached(() => noShadow(merge(
     box({ w: 2.2, h: 0.06, d: 2.6, color: "#2b2521", offset: { y: 0.03 } }),
     ...[-0.8, 0, 0.8].map((z) => merge(
@@ -250,7 +237,6 @@
     for (let x = -2; x <= 2; x++) for (let y = -2; y <= 2; y++) for (let z = -2; z <= 2; z++) if (x * x + y * y + z * z <= 5.5 && rand() > 0.12) v.set(x, y, z, rand() < 0.3 ? 1 : 0);
     return voxGeo(v, { unit: 0.09, palette: ["#6b625a", "#57504a"], origin: { x: -0.045, y: -0.045, z: -0.045 } });
   });
-  // A dropped peel, four petals flat on the road
   const peel = cached(() => noShadow(merge(
     box({ w: 0.24, h: 0.06, d: 0.24, color: "#e0b53a", offset: { y: 0.04 } }),
     ...[0, 1, 2, 3].map((i) => turn(box({ w: 0.2, h: 0.04, d: 0.5, color: "#f5c542", offset: { y: 0.05, z: 0.32 } }), i * Math.PI / 2 + 0.4))
@@ -261,7 +247,6 @@
     for (let x = -5; x <= 5; x++) for (let y = -5; y <= 5; y++) for (let z = -5; z <= 5; z++) if (x * x + y * y + z * z <= 28 && !(x * x + y * y + z * z > 22 && rand() < 0.3)) v.set(x, y, z, rand() < 0.25 ? 1 : 0);
     return voxGeo(v, { unit: 0.16, palette: ["#5e5449", "#45403a"], origin: { x: -0.08, y: -0.08, z: -0.08 } });
   });
-  // A stand full of oogas, each instance one small figure with its arms up
   const spectator = variants((i) => {
     const skins = ["#c98a5b", "#a9744c", "#d9a06b"], furs = ["#d98a2e", "#c98936", "#e09a40"];
     const v = vox();
@@ -291,8 +276,6 @@
   });
   const torchFlame = cached(() => noShadow(box({ w: 0.28, h: 0.3, d: 0.28, color: "#ffb13b", emissive: 1 })));
 
-  // ---------- themed decor ----------
-  // A leaning trunk of stacked rings under six drooping fronds
   const palm = variants((i) => {
     const rand = mulberry32(500 + i);
     const parts = [];
@@ -304,7 +287,6 @@
       parts.push(box({ w: 0.42 - t * 0.14, h: h / rings + 0.04, d: 0.42 - t * 0.14, color: n % 2 ? "#7a5a3a" : "#6a4c2e", offset: { x, y: (n + 0.5) * (h / rings), z } }));
     }
     const top = { x: x + Math.sin(lean) * 0.2, y: h + 0.1, z };
-    // A drooping outer ring of long fronds, a raised inner ring, and a tuft on top
     for (let f = 0; f < 7; f++) {
       const a = f / 7 * Math.PI * 2 + rand() * 0.4;
       for (let s = 0; s < 5; s++) {
@@ -334,7 +316,6 @@
     }
     return voxGeo(v, { unit: 0.3, palette: ["#8d857b", "#6f6860"], origin: { x: -0.15, y: 0, z: -0.15 } });
   });
-  // Black rock with glowing seams, the gorge's boulders and spikes
   const lavaRock = variants((i) => {
     const rand = mulberry32(700 + i);
     const v = vox();
@@ -358,7 +339,6 @@
     turn(box({ w: 0.16, h: 0.16, d: 1.3, color: "#d9d2c0", offset: { x: 0.5, y: 0.08, z: 0.3 } }), -0.8),
     shift(lathe({ profile: [[0, 0], [0.42, 0.05], [0.5, 0.4], [0.3, 0.72], [0, 0.78]], segments: 8, color: "#e8e2d2" }), -0.6, 0, -0.5)
   ));
-  // A snowy pine: a dark trunk under three tiers of green with white caps
   const pine = variants((i) => {
     const rand = mulberry32(800 + i);
     const h = 3.6 + rand() * 1.8, parts = [box({ w: 0.36, h: h * 0.4, d: 0.36, color: "#4e361f", offset: { y: h * 0.2 } })];
@@ -396,7 +376,6 @@
     }
     return voxGeo(v, { unit: 0.32, palette: ["#6f7c87", "#586470", "#eef3f7"], origin: { x: -0.16, y: 0, z: -0.16 } });
   });
-  // Hangs from a cave ceiling, tip down
   const stalactite = variants((i) => {
     const h = 2 + i * 1.3;
     return merge(
@@ -404,10 +383,9 @@
       shift(turn(lathe({ profile: [[0.3, 0.2], [0.22, -h * 0.25], [0, -h * 0.55]], segments: 5, color: "#2b2724" }), i * 1.6), 0.45, 0, 0.3)
     );
   });
-  // Weather: a rain streak and a snowflake, instanced around the camera
   const rainDrop = cached(() => noShadow(box({ w: 0.025, h: 0.7, d: 0.025, color: "#c9d6e2", emissive: 0.35 })));
   const snowFlake = cached(() => noShadow(box({ w: 0.09, h: 0.09, d: 0.09, color: "#f6f9fb", emissive: 0.25 })));
-  // A plank walkway module, one unit long along z
+  // Walkway module is one unit long along z, for tiling.
   const planks = cached(() => merge(
     ...Array.from({ length: 4 }, (_, n) => box({ w: 1, h: 0.12, d: 0.24, color: n % 2 ? "#8f6538" : "#9c7040", offset: { y: -0.06, z: -0.375 + n * 0.25 } }))
   ));
@@ -416,7 +394,6 @@
     box({ w: 0.08, h: 0.7, d: 0.08, color: "#3a2a18", offset: { y: 0.95 } }),
     box({ w: 0.18, h: 0.18, d: 0.18, color: "#ffd27a", emissive: 1, offset: { y: 1.35 } })
   ));
-  // A tiny racing line marker: the lap checkpoint post pair
   const post = cached(() => merge(
     box({ w: 0.18, h: 1.4, d: 0.18, color: "#3a2a18", offset: { y: 0.7 } }),
     box({ w: 0.3, h: 0.3, d: 0.3, color: "#e04a3a", offset: { y: 1.5 } })

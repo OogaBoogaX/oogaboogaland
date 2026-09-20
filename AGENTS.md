@@ -23,7 +23,7 @@ do not add network code before it exists. Visitor-facing controls are in the REA
 - Never run git commands. The maintainer commits. No branches, stashes, or `.gitignore`
   changes unless asked.
 - Vanilla JavaScript only: no frameworks, TypeScript, bundler, npm dependencies,
-  external scripts or fonts. `package.json` exists only for `npm test` and `npm run build`.
+  external scripts or fonts. `package.json` exists only for the build and test scripts.
 - Keep the content policy strict. `src/index.html` allows `self` scripts and styles and
   nothing else; the build pins inline blocks by hash. Never add `unsafe-inline`,
   `unsafe-eval`, or a remote origin.
@@ -76,28 +76,50 @@ every scene has registered on `BL.scenes`.
 | `gl-renderer.js` | `BL.glRenderer` | WebGL2: instancing, frustum culling, shadow map, sky pass with sun, moon and stars, ten bounded point lights, bloom, MSAA, quality tiers, pixel budget |
 | `canvas-renderer.js` | `BL.canvasRenderer` | Canvas 2D fallback, same API; also draws locker icons |
 | `models.js` | `BL.models` | procedural geometry: room, cavemen, props, crates, `SWAG` catalog |
+| `convex.js` | `BL.convex` | `sweptCylinder`: GJK against the convex hull of a body cylinder at both ends of its sweep, on one shared non-reentrant simplex; `terrain.js` asks it whether a rock piece blocks a move |
 | `terrain.js` | `BL.terrain` | voxel grid, greedy meshing, the island: `heightAt`, `surfaceAt`, `onLand`, `isPath`, mouths |
 | `hub-models.js` | `BL.hubModels` | cached hub props: cave rim, gate, shelves, sign, lantern, trees, bushes, grass, rocks, barrels, torches, fire pit, clouds, dock, critter bodies |
+| `lifehash.js` | `BL.lifehash` | LifeHash v2 adapted from Blockchain Commons (BSD-2-Clause-Patent; keep the header notice): `make(seed)` returns a 32x32 colour grid and its hash. The jumbotron seeds it with a contributor login, an HQ bed with its room's coordinates |
 | `jumbotron-data.js`, `jumbotron.js` | `BL.jumbotronData`, `BL.jumbotron` | baked contributor statistics and the hub board: cached cabinet, bitmap views, bounded screen geometry replaced and released on refresh; no runtime requests |
-| `caves.js` | `BL.caves` | the seven cave slots (clock position, status, scene, name) and the gate |
-| `contributors.js` | `BL.contributors` | roster snapshot, state by commit age, hashed traits, `LIKENESS` |
+| `headquarters-models.js` | `BL.headquartersModels` | cached geometry for the underground HQ and basement: `room`, `entranceRamp`, `roomEntrance`, `rampEntrance`, `mattress` (blanket plus a pillow carrying the same LifeHash a quarter turn round), `roomSign` (the first eight hex of that hash), `MATTRESS`, `ROOM_RADIUS`; eleven HQ and eight basement slots reuse their geometry across visits |
+| `headquarters-sleep.js` | `BL.headquartersSleep` | the validated waypoint graph from the meadow down to the HQ and basement beds, memoised per island and remapped onto each visit's beds: `route`, `clearSegment` (continuous floor plus architectural clearance, the shortcut test the crew reuses), `points`, `radius`, `height`, node and edge counts |
+| `hole-guides.js` | `BL.holeGuides` | the basement shaft's finite stone rim as one wall context for the outline pass; the rim's cell-centre cut and two shallow steps only, never the deep shaft |
+| `wall-apertures.js` | `BL.wallApertures` | camera cones through window frames over a terrain face tree shared per geometry: `update`, `overlaps`, `clip`, `blockers`, so a camera-visible portion is cut out of a wall cue without dropping the surrounding mesh's whole patch |
+| `slope-guides.js` | `BL.slopeGuides` | `classify`: connected sky-exposed slope sides and narrow terrace treads, labelled once per island from the smoothed terrain columns into eight aspect sectors and flood-filled into sides; cached in a `WeakMap` on the island |
+| `cave-guides.js` | `BL.caveGuides` | upper cave boundaries clipped per voxel cell out of the island geometry and grouped into the three authored walls of a mouth, plus the solid stone slabs sealing dark entrances |
+| `rock-guides.js` | `BL.rockGuides` | the wall cue for views through island stone: builds its contexts once per island (creating `slopeGuides`, `caveGuides`, `holeGuides` and `wallApertures` itself) over one never-written build, and gives each visit its own fade and camera state; `select`, `updateSurface`, `updateSurfaces`, `resetSurface`, `contexts`, `all`, `stats` |
+| `object-guides.js` | `BL.objectGuides` | the registry behind object outlines: camera silhouettes baked once per vertex array and never written again, exact local-space visibility, proximity, occlusion and actor tests; `register`, `collect`, `refresh`, `cameraClear`, `perceptionClear`, `perceived`, `concealed`, `distance`, `inView`, `actorVisible`, `ownerBoundaryAt`. Providers (the pile, the platform, the mirror) join the same registry |
+| `sight-guides.js` | `BL.sightGuides` | the outline pass itself: the surfaces and objects the Ooga can see in any direction while the camera cannot, as fading lines tagged with their owners; `update`, `reserve`, `state`. The hub creates two, one per camera view |
+| `caves.js` | `BL.caves` | the eight cave slots (clock position, status, scene, name, repository) and the gate |
+| `contributors.js` | `BL.contributors` | ten-member roster, bounded repository activity snapshots, working/chilling/sleeping state, active solo roster, hashed traits, `LIKENESS` |
 | `donations.js` | `BL.donations` | donation request, simulator, event contract, `sanitize` |
+| `weapon-targets.js` | `BL.weaponTargets` | cached stable-sort triangle BVHs, exact weapon rays and swept melee contacts; nearest contact is independent of BVH traversal order |
+| `character-visibility.js` | `BL.characterVisibility` | shared geometry bakes and per-frame visibility/anchor scratch for partly visible characters |
+| `cursor.js` | `BL.cursor` | virtual cursor, pointer-lock handoff and smooth aim-entry cursor motion |
+| `mirror-ripples.js`, `mirror-body.js`, `mirror-damage.js` | `BL.mirrorRipples`, `BL.mirrorBody`, `BL.mirrorDamage` | bounded impact waves and tracked-object contact atlas; initial cracks, per-panel health, shared-reflection falling panels and two-phase healing; full shattering lasts for the session; remaining glass is shared by rendering and weapon queries |
+| `breakables.js` | `BL.breakables` | capped destructible prop registry, reusable loot pickups, delayed safe respawns and disposal |
 | `interact.js` | `BL.interact` | pointer gestures, ray picking, drag, long-press, double tap |
 | `controls.js` | `BL.controls` | held keys, two on-screen sticks, a hold button and the both-mouse-buttons chord on the canvas, folded into one axes object per frame |
 | `pilot.js` | `BL.pilot` | the visitor's view of any scene: orbit camera and presets, free flight, third person over a caveman, act button and Space (the jetpack throttle while one is worn) |
 | `game.js` | `BL.game` | loot tiers, deterministic loot, inventory, localStorage, `formatLarge` |
 | `hud.js` | `BL.hud` | DOM panel: roster, meter, feed dialog, locker, toasts, tooltip, `renderIcon` |
 | `fx.js` | `BL.fx` | particle pool and bursts, speech bubbles, zzz marks, ticker, overlay drawing |
-| `crew.js` | `BL.crew` | cavemen from the roster: states, fan slots, walk / eat / sleep / cheer / build, strolls, the rush to fresh bananas, the driven caveman and jetpack flight, swag, pokes |
+| `camera-cover.js` | `BL.cameraCover` | the stone the camera sits inside or crosses, drawn on the overlay with hashed grain and colour taken from that actual section of rock; `draw`, `state` |
+| `crew.js` | `BL.crew` | cavemen from the roster: activity and presence, repository work trips, weapons and magazines, pile reloading, sleep, grounded cheers, strolls, possession and jetpack flight, swag, pokes |
+| `npc-paths.js` | `BL.npcPaths` | the surface path graph walkers follow: 4096 nodes of fixed capacity in typed arrays with a binary heap, rebuilt when the island's `path.version` changes; `createState`, `target`, `route`, `xAt`, `zAt`, `buffers` |
 | `pile.js` | `BL.pile` | inflating yellow-backed surface layer through 302, then the layered banana shell over a growing mound; drop-in, hatch, `MAX_BANANAS`; level on the shared `world` |
+| `pile-guides.js` | `BL.pileGuides` | wall-style cues for the pile's inner fruit shell and, separately, its stone platform, each an object-guide provider with its own silhouette and soft fill; `draw`, `cameraVisibility`, `boxClear`, `perceived`, `inView`, `version` |
+| `banana-cover.js` | `BL.bananaCover` | the passable banana interior over a solid platform, sharing one rock-cut and actor-silhouette renderer between WebGL2 and Canvas 2D; `prepare`, `draw`, `contains`, `heightAt`, `intersectsBody`, `segmentClear` |
+| `mirror-guides.js` | `BL.mirrorGuides` | the mirror entrance as one continuous silhouette plus the small plane-bound hint of code behind the reflection; contributes no geometry of its own to the visibility queries: `draw`, `update`, `updateDoorway`, `doorwayNodes` |
 | `crates.js` | `BL.crates` | loot crates: landing ring, spawn, open, remove |
 | `critters.js` | `BL.critters` | instanced butterflies by day, fireflies and embers by night, populations by phase and tier, bursts |
+| `solid-props.js` | `BL.solidProps` | props whose render mesh is also their collision shell, over one local-space tree per geometry, so arches, branches and wings keep their openings without voxelising each placed copy or retriangulating when it moves; `add`, `remove`, `sync`, `segmentClear`, `clearAt`, `supportAt`, `ceilingAt`, `shoulderAt`, `isActive` |
 | `scene-hub.js` | `BL.scenes.hub` | the island scene: the clock samples the sky and lamps each frame; registers first so it is the landing scene |
 | `scene-lab.js` | `BL.scenes.lab` | the lab scene; Escape and Leave cave return to the hub |
 | `drop-models.js` | `BL.dropModels` | cached drop props: the roof plane (body, propeller node, shared kart wheels), the windsock, the unit hoop, the canopy with its lines, the pack, the target, the wind streak; `roofSpot` places the plane over a mouth's room |
 | `race-models.js` | `BL.raceModels` | cached rally props: Rock Kart and Dino mounts, gantry and lamps, boost pad, item crate, rock, peel, boulder, spectators, banners, torch stands, and the themed decor (palms, lagoon rocks, lava rocks, obsidian, bones, pines, crystals, ice spikes, snow rocks, buoys) |
 | `race-track.js` | `BL.raceTrack` | `TRACKS` and `THEMES`; `build` turns a closed Catmull-Rom spline into a road ribbon with curbs, walls and lips before gaps, a terrain skirt in chunks, decor baked per sector, spectators, torches, checkpoints, the grid, item spawns and the minimap; `nearest`, `project`, `heightAt`, `surfaceAt`, `roadY` |
-| `racers.js` | `BL.racers` | the seven contributors as racers on a mount (`MOUNTS`): a fixed-step arcade controller (throttle, steer, drift charge and tiered boost, hop, launches and landings, walls, falls, hazards, respawn), racer pushes, checkpoints, laps, ranks, rubber band, the AI driver, mount animation |
+| `racers.js` | `BL.racers` | the active contributors as racers on a mount (`MOUNTS`): a fixed-step arcade controller (throttle, steer, drift charge and tiered boost, hop, launches and landings, walls, falls, hazards, respawn), racer pushes, checkpoints, laps, ranks, rubber band, the AI driver, mount animation |
 | `race-items.js` | `BL.raceItems` | fixed pools: banana pickups and the turbo meter, item crates, boost pads, thrown rocks, dropped peels, boulders, skid marks in a ring buffer; `use` |
 | `race-hud.js` | `BL.raceHud` | the garage board, the in-race strip, countdown and notices, results, pause, minimap and speed lines on the overlay |
 | `race-audio.js` | `BL.raceAudio` | procedural sound: one `AudioContext` opened on the first real gesture, a fixed pool of eight pre-started oscillator voices gated by gain envelopes, one looped noise buffer behind wind, drift scrub and crowd filters, a three-speed engine (first gear pulls from idle, later gears drop in at half revs and wind to a limiter, two cruise shifts drop the note flat out, a held throttle blips it in place during the countdown) or a growl pitched by speed, footfalls on foot; `cues`, `update`, `quiet`, `setMuted`, `dispose` |
@@ -105,12 +127,37 @@ every scene has registered on `BL.scenes`.
 | `skydiver.js` | `BL.skydiver` | one contributor body on a quaternion: `place`, `jump`, `deploy`, `land` (under the canopy every touchdown stands; without one the impact picks `hole`, `tumble` or `pancake` from the spine angle and the ground speed); the fixed-step flat-plate model (gravity, plate pressure along the belly normal, skin drag, player rates, a weathervane the stick cannot outmuscle), the canopy flight (bloom, sink, forward, toggles, flare reserve), `pose` by phase |
 | `drop-audio.js` | `BL.dropAudio` | the drop's procedural sound on the rally's pattern: one context from an activated gesture, eight pooled voices, one noise loop behind the plane's engine drone (pitched by its speed, fading with its distance), the wind (band and level by the diver's speed) and the canopy flutter; cues for the mark, jump, rings, misses, pull, flare, the landings and crashes, lost and a medal; the same mute key as the rally |
 | `drop-hud.js` | `BL.dropHud` | the launch board, the flight strip (altitude, sink, rings, time, chute), centre calls and notices, the results rows; text nodes mutate only on change |
+| `rocket-parts.js` | `BL.rocketParts` | Ooga Orbit's part catalog (`PARTS`: pods, shields, tanks, engines, the Vine Knot, fins, with height, radius, dry mass, fuel, thrust, exhaust speed, shield and hull ratings and a banana price), `PRESETS`, `stagesOf` (the stack cut at its knots), `check` (problems stop a launch, warnings only say), `stats` (mass, speed per stage, lift-off push, bill), `sanitize`; loads before `game.js`, which validates the saved build with it |
+| `rocket.js` | `BL.rocket` | the flight on the 1/120 s step: the attached stack as one body over a round world (`R`, `SEA`, `CY`, `GM`), air thinning by `SCALE_H`, thrust and fuel by stage, a planar lean (`psi`) in the launch plane on the way up with fins against flipping, stress from dynamic pressure and lean, heat from density times speed cubed on the pod's hull and shield, `homeward` (everything that can come off comes off and the pod turns freely on three axes with lift and a weathervane), the sky hook (`hold`, `stand`), air that ends at 150, ground only near the top of the world (`NEAR_GROUND`), the steerable leaf chute, touchdowns on land and water, `orbitOf`, `setCircle`, and `onDrop` for every stage that comes off |
+| `rocket-models.js` | `BL.rocketModels` | cached geometry for every part, `assemble(stack)` (a group at the stack's bottom, a flame under each engine), flame, smoke puff, fireball, plasma streak, splash, heat shell; the launch site (`SITE`, `siteSpot`, `site`, `siteGroundAt`: a voxel islet, the pad, the tower, the sagging rope bridge and the sign, shared by the hub and the scene) and the world sphere with continents kept away from home (`planet`, `onContinent`) |
 | `scene-drop.js` | `BL.scenes.drop` | Ooga Drop: phases `board`, `climb`, `air`, `down`, `lost`, `results`; the plane's roll, helix climb and jump mark, the course laid on a hands-off reference fall, ring crossings, the streak batch, clouds, the two-axis orbit camera (unbounded yaw in flight, easing back behind the subject 1.5 s after the last drag), the island's clock, donations, `leave` |
+| `rocket-hud.js` | `BL.rocketHud` | the builder (a tab per part kind over tiles of each part drawn once per page by `hud.renderIcon`, the readiness gauges for speed to spend and lift-off push, fact chips, the stack grouped by stage with move and remove by one delegated listener, problems, presets, pilot, Launch; drag and drop on pointer events alone: tiles onto the rocket (`slots` from the scene projects its part boundaries) or into the list, rows to reorder or off to remove, a long press to pick up on touch), the flight strip (height, speed, stage, fuel, push, heat, shield, stress and orbit bars, apsides), the clamp gauge, centre calls and notices, the flight log; text and bars change only with their value |
+| `rocket-audio.js` | `BL.rocketAudio` | the orbit's procedural sound on the drop's pattern: engine roar and rumble, wind, plasma hiss, cues for the count, clamps, stages, space, orbit, the mark, the chute, splash, thud and boom |
+| `scene-orbit.js` | `BL.scenes.orbit` | Ooga Orbit: phases `build`, `count`, `ignite`, `ascent`, `orbit`, `eva`, `descent`, `down`, `boom`, `results`; the pad builder, the side camera on the way up (downrange to the right), the camera-relative pod turn with rim air puffs and the attitude ball, the Sky Top goal (`TOP` = `rocket.ORBIT_ALT`, 500: reaching it with anything still rising hands the flight to the sky hook, which reels it over the pad and holds it still there with `flight.hold`, then after the spacewalk lets go with `flight.stand` and a downward throw) with the height meter, the climb autopilot (`leanTarget` by height, an arc capped at 40°, flown whenever A and D are left alone, G toggles it) with its yellow aim line, the reason a flight missed orbit in the log, the mission checklist (seven steps, the one in hand lit with a live detail, skipped and failed ones struck), the spacewalk (phase `eva`: a suited copy of the pilot flying on a tether in the pod's own frame to the space rock, measuring it and climbing back in), falling stages, a fixed ring of smoke puffs and plasma streaks in instanced batches, the sky darkening with height, donations, `leave` |
 | `director.js` | `window.__ooga` (debug only) | the app: renderer, frame loop, governor, housekeeping, keys, donations, routing, transitions |
 
 The rally and drop modules load after both scenes so the hub stays the landing scene, and
 before `director.js`; `drop-models.js` loads before `scene-hub.js` because the hub parks the
-plane on the rally roof.
+plane on the rally roof. `rocket.js` and `rocket-models.js` load before `scene-hub.js` too, which
+builds the launch islet, the bridge and the last rocket flown off the south rim.
+
+The visibility stack is the hub's, and it is the largest thing in the repository after the
+scenes themselves. `rock-guides.js` owns the stone the camera looks through and builds
+`slopeGuides`, `caveGuides`, `holeGuides` and `wallApertures` itself, so those four load
+before it and are never created anywhere else. `object-guides.js` is the registry every
+outline goes through, with `pileGuides` and `mirrorGuides` joining it as providers;
+`sight-guides.js` is the pass that draws the result, and `camera-cover.js` and
+`banana-cover.js` paint the interiors the camera ends up inside. Each one's geometry is
+built once per island and memoised, while fade and camera state belong to the visit, so a
+change on the build side has to hold for every later visit and a change on the state side
+must come back to base in `leave`. `solid-props.js` loads last of the systems, after the
+prop geometry it collides against and before `scene-hub.js` registers them.
+`rockGuides` is a fifth of the boot, so `ensureRockGuides` memoises the build and `enter`
+calls it there. Deferring it past the first paint was tried and reverted: the build holds the
+main thread for about half a second with nothing painted, so the curtain jumps and the camera
+loses that much easing. Reading `headquarters.rockGuides` builds it too, and `resetSurface`
+and `dispose` stay guarded, so anything new that reads it must guard as well, or call
+`ensureRockGuides()`.
 
 Both renderers implement the same surface: `render(root, camera, opts)` returning
 whether a frame was drawn, `project(x, y, z, out)`, `ray(px, py, camera, out)`,
@@ -129,9 +176,26 @@ pause, `game`, `world`, the donation subscription, `BL.scenes`, `?scene=` routin
 transitions, the `[data-scene]` HUD sections, `__ooga`, and `destroy` on pagehide. A
 scene builds its root, camera, input, HUD and systems in `enter` and drops them in `leave`.
 
-`world` is `{ level, pilot, jetpack }`: the shared banana level, the handle of the
+The quality auto-tier steps down and never up. `autoTier` judges on the interval between
+delivered frames, never on the cost of issuing one: GL calls return long before the GPU has
+drawn, so a GPU-bound machine reports cheap frames and would never step down on cost alone.
+A window closes at 45 frames or 900ms, whichever comes first, so eight frames a second
+costs a tier in about two seconds rather than the fifteen a frame count alone would take,
+and two consecutive slow windows have to agree before it steps, because one slow window can
+be another program and the step lasts the session. Unfocused frames and transitions are not
+evidence, and the debug `advance` never tiers, because a stepped frame carries no real
+interval. `tierFromBoot` seeds the opening tier before any of that exists: how long the
+first scene took to build is the one device signal Safari cannot mask, so a build past
+`BOOT_MEDIUM` or `BOOT_LOW` starts the page a tier or two down. Those thresholds are
+measured against the hub, the most expensive scene by far, so anything that makes it slower
+to build has to be checked against them.
+
+`world` starts with `{ level, pilot, jetpack, magazine, mirrorBroken }`: the shared banana level, the handle of the
 Ooga driven into a launcher (the drop reads and clears it in `enter`), and jetpack ownership
-and fuel. The delivery system can also attach `delivery`. Keep the reset in the suite's
+and fuel. `mirrorBroken` preserves a shattered mirror across scene visits until page reload.
+`magazine` holds the pending debug grant and carrier; `crew` attaches a
+`weapons` Map with per-contributor ammo, up to two spares and selected weapon. The
+delivery system can also attach `delivery`. Keep the reset in the suite's
 `reenterHub` synchronized with every persistent field. With `game` it is the
 only gameplay state that crosses a transition.
 
@@ -171,19 +235,26 @@ measure exactly that.
 `hud`, `applyAllSwag`, `renderLocker`, `demoTip`, `refreshStates`, `trimPool`, `shown`,
 `island`, `mouths`, `camera`, `crew`, `controls`, `pilot`, `renderOpts`, `lamps`, `fireSeats`,
 `critters`, `daylight`, `setHour`, `track`, `racers`, `items`, `race`, `launchers`, `drop`,
-`diver`, `plane`, `course` and `jumbotron`; a scene fills in what it has.
+`diver`, `plane`, `course`, `jumbotron`, `orbit`, `flight` and `site`; a scene fills in what it has.
+The hub also exposes `headquarters`, `cameraCave`, `props`, `altar`, `path`, `scenery`,
+`jetpack`, `magazine`, `mirrorCave`, `matrixCave`, `matrixGate`, `entranceLights` and
+`lighting`. Per-character weapon and spare state is on `crew.cavemen` entries;
+`magazine` is the visit's pickup facade, not a shared character inventory.
 
 ## Engine patterns to keep
 
 - **Allocation-free frame loop.** Nothing in `frame`, `updateCaveman`, `drawOverlay`, or
   the renderers allocates per frame. Hoist literals, write into scratch objects
   (`setVec`, `SCREEN`, `MUZZLE`), reuse arrays.
+  Put director simulation, input and overlay work in `step`, shared by `frame` and
+  debug `advance`, so fixed-step checks exercise the displayed-frame behavior.
 - **Pool and cap.** Particles, bullets, bubbles, sleep marks, crates, inventory and the
   pile have fixed capacities. Anything spawned repeatedly needs a pool or a cap; prove it
   with the soak pattern if in doubt.
 - **Instance by geometry.** Nodes sharing a geometry object are one draw call. Reuse
   geometry; cache builders with `cached()` or a `Map` keyed by parameters, as `models.js`
-  does.
+  does. Cached character clones share immutable geometry but own their nodes,
+  mutable quaternions and arrays of parts; remap every array member to the clone.
 - **Shared builders and index sorts.** Use `BL.models.makeVox`, `voxCoords` and
   `voxelGeometry` for voxel props. Bounding-volume indexes use `BL.math.sortByKey`
   with one `sortScratch` allocation during construction, rather than comparator sorts.
@@ -213,8 +284,8 @@ measure exactly that.
 - **The clock is the hub's.** `daylight.sample` writes the hub's `RENDER_OPTS` in place every
   frame; phases (dawn, morning, noon, dusk, night, midnight) drive lamps, critters, quotes
   and toasts. The lab is inside the rock and passes no sky. The drop samples the same clock
-  parameters so its sky matches the island it left. The roster's sleep and eat states
-  come from commit age, never from the clock.
+  parameters so its sky matches the island it left. The roster's working, chilling
+  and sleeping states come from contribution age, never from the solar clock.
 - **Free rotation is a quaternion.** Bodies that turn about all three axes (the plane, the
   diver) carry `node.quaternion` and integrate a world-frame angular velocity with
   `quat.integrate`; Euler `rotation` stays for everything that only yaws or swings. The
@@ -248,8 +319,11 @@ so a full item never appears as a crate, and `addItem` refuses the tenth.
 
 **A caveman behaviour.** Add state to the `cave` object created in `crew.js`, drive it in
 `updateCaveman`, reset it in `resetPose` if it changes limbs. One-off arm animations must
-settle back; see cheer and catch. A working day is `cave.act.kind`: `eat` or `rush` at
-the fan slot, `wander` to a spot, `idle` there, `player` under the visitor. Strolls run
+settle back; see cheer and catch. Repository workers use `cave.work.phase`:
+`outbound`, `station`, `shoot`, `return`, then `reload` at the pile. `act.kind` still
+tracks legacy meals/builds, wandering, idling and player control. A donation pauses
+worker movement, bursts and reload timers while the free hand cheers; keep its work
+phase, ammunition and rifle grip intact so work resumes afterward. Strolls run
 only when the scene passes `wanderSpot` (the lab does not); `walkToSlot` leaves a
 stroller alone unless forced, which `rush` does. Walkers stand on `groundAt`, so a scene
 with terrain passes its `heightAt`. The hub supplies `bedRoute` and `bedRouteClear`
@@ -296,7 +370,7 @@ point pushed onto `launchers`, a `presets.drop` view and `enterLaunch` (the cave
 another view, then `go("drop")`). A tap, Space in reach and a driven Ooga within
 `LAUNCH_REACH` at roof height all enter. Claim its footprint so the scatter keeps off it.
 
-**A cave.** The seven mouths exist in the terrain, one per slot in `caves.js`. Opening
+**A cave.** The eight cave mouths exist in the terrain, one per slot in `caves.js`. Opening
 one is one line there (`scene`, `status: "open"`, `name`) plus a scene module registering
 `BL.scenes.<scene>`. An open mouth gets shelves, torches, a label, a camera preset and a
 tap that dollies in and calls `go(slot.scene)`; `"sleeping"` gets a bedroll and zzz;
@@ -335,7 +409,15 @@ desktop and docks to the bottom under 720px.
 
 ## Debug keys and flags
 
-Keys: B add 100 test bananas, L legendary tip, P fill the pile, 1 to 9 force a contributor to eating,
+Keys: B add 100 test bananas, L legendary tip, P fill the pile. While controlling an Ooga,
+1 selects the primary melee weapon and 2 selects the AK; neither changes the view.
+Scroll steps between carry, shoulder and first person; right-click enters shoulder view
+from carry or focuses aim in shooter view. Left-click attacks only with the cursor locked
+(the first click with a visible cursor captures it). R swaps to the fullest spare magazine,
+even at equal ammo. Space starts pile loading in range, then jumps or powers the jetpack
+while loading continues within horizontal and vertical reach. G toggles the AK and V attacks.
+Other number keys retain the debug contributor action when not consumed by weapon selection.
+
 Shift+Delete clear the locker (loot on), Shift+R reset everything. Keys are ignored while typing in
 a text field and on auto-repeat. The hub hides one jetpack under a random meadow prop each
 load; its `highlight` pulses after `HINT_AFTER` seconds of scene time, and a driven
@@ -349,6 +431,16 @@ points a race, shows standings on each podium and saves the best cup medal throu
 `game.recordCup`. `__ooga.race` also exposes `startCup`, `nextRace` and `cup`. `__ooga.race` exposes `phase`, `selection`,
 `startRace`, `toGarage`, `pause`, `finishRace`, `cam` and `simulate(seconds)`, which runs
 substeps without frames; `__ooga.racers.autopilot = true` lets the AI drive the visitor.
+
+In the orbit: tap parts to stack them, Enter launches, Space lets go of the clamps in the green and
+stages; W S push and the climb autopilot leans the arc (A D steer, G flies by hand); at the Sky Top
+Space takes the next mission step (drop the rest, go outside, and after the spacewalk leave orbit); V also spacewalks (W A S D fly where you look, Q E down and up, drag looks, Space measures at the
+rock, after which the tether reels the Ooga back and in); falling home W A S D push the shield across the attitude ball and
+Q E spin the pod, Space pulls the chute and A D steer it; 0 resets the camera, M mutes, Escape
+returns to the builder. `__ooga.orbit` exposes `phase`, `stack`, `score`, `result`, `gauge`, `eva`,
+`setStack`, `launch`, `releaseClamps`, `dropRest`, `letGo`, `pullChute`, `startEva`, `evaAct`,
+`toOrbit`, `slots` (the rocket's part boundaries on screen), `rock` (the space rock's place in the pod's frame and its reach), `setInput` and `simulate(seconds)`; `__ooga.flight` is the flight and `__ooga.site` the
+launch site. The loading curtain shows one saying from `SAYINGS` in `director.js` per load.
 
 In the drop: Enter flies, Space jumps at the mark (held, it hurries the climb and jumps when
 the mark comes), then pulls; W S A D Q E turn the body, S or a held Space flares, 0 resets
@@ -369,6 +461,55 @@ pinned hour when both are given). `__ooga.daylight` exposes the bounded celestia
 `critters` and `pilot` expose the rest. Counts clamp to
 `pile.MAX_BANANAS` (ten million). Loot ships off behind `LOOT_DEFAULT` in `director.js`;
 `?debug=1&loot=1` turns it on for a page, which is how the loot checks run.
+
+Debug equipment and fixtures: `&mag=1` or `&mag=2` grants full spare magazines on
+first control; falling off the island removes spares. `&solo=1&character=<handle>`
+constructs only that Ooga, and solo without a valid handle constructs none, including
+across scenes. `&weapon=1|2` holds the primary or secondary on hub/direct-lab startup,
+selecting a default actor when `character` is omitted. `&ammo=N` initializes only that
+actor's magazine (integer, clamped 0–30); `&ammo=unlimited` preserves finite magazine
+and spare counts while bypassing firing consumption and empty-magazine stops. The HUD
+shows infinity, swaps still conserve physical rounds, and catch-up shots remain capped.
+Both flags apply only at startup; existing per-character weapon state survives visits.
+The hub position readout is on by default with debug; `&pos=0` hides it. Clicking copies
+a `pose=` URL with exact character/camera transforms, mode and equipment state,
+held until movement/look/zoom/action input. Manual setup accepts `pos`, `body` and
+`head` as three comma-separated values (rotation angles in radians), plus `camera`,
+`look` and `mode=carry|shoulder|first-person|orbit|eye-level`. The readout, manual pose
+flags and copied replay are hub-only; weapon/ammo flags also support direct lab startup. `&character=`,
+`&firstperson=1`, `&jetpack=1` and `&view=` are startup fixtures.
+
+Combat uses one damage unit for a default melee swing, 1.5 for a full hold charge and
+0.5 per AK banana. Boxes/barrels/rocks have 1/2.25/4.25 health; vegetation is excluded
+from weapon targets. The mirror's first 20 damage forms all cracks without holes;
+each of its 48 fixed panels then has one health point.
+The derived compatibility maximum is 68, not a shared panel-health pool. AK damage
+of 0.5 takes two hits to break a full panel; default melee damage of 1 breaks it, and
+overflow carries to the nearest next panel. Panel health spans 0–1 and recovers in
+proportion to restored glass area, so center-out geometry scales by the square root
+of health. Each panel heals independently at `2 / 48` health per second, taking 24
+seconds from empty; damaged but unbroken panels heal too. Hits detach glass
+locally, with a capped reflective debris pool that settles flat above its support.
+After three quiet seconds, each missing panel grows from its center to its original
+cracked edges.
+Only after all panels return do cracks seal over the final 1.5 seconds. Crack-only
+damage skips the panel phase. Interrupted repair preserves unhit panels' growth and
+crack contours and clips debris to glass present before the hit. Repair state and
+caches remain bounded and reused.
+Until the mirror is fully shattered, its whole plane keeps the actor's head geometry, first-person
+eye and near-plane corners outside even over missing panels; weapon contacts still work.
+Complete shattering removes that barrier, lasts for the session and releases the outside gate.
+Broken glass must also disable the empty doorway glyph hint and its animation work.
+The room button explicitly opens
+the mirror bars even before full shattering; pressing it out closes them. Outside with
+the button off, living geometry changes material at the physical mirror plane.
+Occupancy or the latched button enables full character glyphs and the island-wide wave.
+Static mirror-room floor, ceiling, wall and path-tile faces are permanently glyphed
+behind that same finite plane, including crossing terrain/rim faces; exterior fragments and other caves
+retain their normal materials when the world wave is off.
+New event geometry and pickup nodes must stay capped and participate in liveGeometry
+and scene disposal. Contributor activity is local snapshot data (`docs/activity-contract.md`);
+working, chilling and sleeping are separate from human control presence.
 
 ## Testing
 
@@ -400,6 +541,8 @@ guaranteed even when nothing is wrong. A session that hits a driver error (`Chro
 failed runs once more on a fresh Chrome and prints `RETRY`; only a second failure is
 recorded, and assertion failures are never retried. A targeted run has none of that
 noise, which is exactly why it is the better signal about your change.
+Catch only expected page conditions inside checks; rethrow every error tagged
+`driver` so the session retry can replace a failed Chrome.
 
 **Frame-rate dependence is a real failure mode.** The page is vsync-locked, so a check that
 counts rendered frames is measuring the host display. One movement check asserted easing
@@ -424,7 +567,8 @@ another hour) and asserts on real interaction: drags at projected positions, cli
 Lab checks add `scene=lab`, rally checks `scene=race` (they drive the physics through
 `race.simulate` and `racers.setInput`, isolating the visitor with the `isolate` helper),
 drop checks `scene=drop` (`drop.jumpNow`, `drop.setInput` and `drop.simulate`, the diver
-parked high in still air by `isolateDiver`);
+parked high in still air by `isolateDiver`), orbit checks `scene=orbit` (`orbit.simulate` from one tick,
+`orbit.toOrbit` to skip the climb, `orbit.slots` for drops onto the rocket);
 hub checks open the page without it and hold keys through `hold`. New behaviour needs a check. Follow the existing shape: one `withPage` block,
 `record(name, ok, detail)` per assertion, no fixed sleeps where waiting on
 `renderedFrames` is possible. A loop over fixtures on a plain hub URL starts each one with
@@ -432,6 +576,9 @@ hub checks open the page without it and hold keys through `hold`. New behaviour 
 against ~2.4 s for a page build. Diff the loop's records against page builds before
 switching; a probe whose results then differ keeps its page builds. A failure prints `FAIL` with its detail, so
 `npm test 2>&1 | grep -E '^FAIL|checks passed'` is enough to read a result.
+Share pages with `fold` only for read-only probes, naming the fold `a + b + c` so
+each case stays discoverable with `ONLY`. Frame-rate tasks use `serial: true` in
+the perf lane and run without other browser loads.
 Use crew state overrides and `refreshStates` to isolate other actors in movement
 fixtures. Sleeping-pose fitting requires visible body geometry.
 Walking speed checks exclude motion inherited from a confirmed standing support while
@@ -447,8 +594,8 @@ target, tween, DOM, listener and GPU record counts identical and the heap within
 GPU residency: each scene after visiting the other holds only its own geometry.
 Donations, per scene: sixty tips over fifteen simulated seconds (`__ooga.advance`) with every crate opened end with
 crates, particles and tweens at zero, nodes and targets back to base plus the trimmed
-pool and what the crew built, GPU records bounded, heap within 15%. The rally and the drop
-have their own turns: six hub round trips each, sixty tips mid-race and mid-fall. Anything a scene creates per visit
+pool and what the crew built, GPU records bounded, heap within 15%. The rally, the drop and
+the orbit have their own turns: six hub round trips each, sixty tips mid-race, mid-fall and mid-climb. Anything a scene creates per visit
 must come back to base there.
 
 Profile before optimizing. Boot phases are `performance.mark`s readable from

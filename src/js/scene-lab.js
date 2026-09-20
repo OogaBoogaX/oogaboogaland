@@ -4,13 +4,15 @@
   const { math, models, contributors, donations, qr, game: gameMod, hud: hudMod, interact: interactMod, pilot: pilotMod, fx: fxMod, crew: crewMod, pile: pileMod, crates: cratesMod } = BL;
   const { clamp, lerp, ease, fnv1a, randomInt } = math;
   const { createNode, addChild, removeChild, createCamera, addTween, stepTweens, tweenCount, traverseVisible } = BL.scene;
-  const { EAT_RATE } = crewMod;
   const { DROP_HEIGHT } = pileMod;
   const { CONFETTI } = fxMod;
   const params = new URLSearchParams(location.search);
+  const DEBUG = params.has("debug"), preloadedWeapon = DEBUG ? Number(params.get("weapon")) : 0;
+  const preloadedAmmo = DEBUG ? params.get("ammo") : null;
+  const preloadedEquipment = preloadedWeapon === 1 || preloadedWeapon === 2 || preloadedAmmo === "unlimited"
+    || preloadedAmmo !== null && preloadedAmmo.trim() !== "" && Number.isFinite(Number(preloadedAmmo));
   const METER_CAPACITY = 60;
   const ROOM_HALF = 10;
-  // Orbit, follow and flight limits
   const PITCH = [0.12, 1.1], DIST = [4.5, 9.2];
   const FOLLOW = { y: 0.9, min: 3, max: 7, pitch: [0.25, 0.8] };
   const FLY = { speed: 4, perDist: 0.4, climb: 3, yMax: 3.5 };
@@ -24,7 +26,6 @@
     bench: { yaw: -1.5, pitch: 0.3, dist: 6, target: { x: 6.5, y: 1, z: 1.5 } }
   };
   const RENDER_OPTS = { shadowCenter: { x: 0, y: 1.5, z: 0 }, shadowExtent: 13.5 };
-  // Where the crew builds equipment
   const BUILD_SPOTS = [
     { x: 5.4, z: -9.3, ry: 0 }, { x: 6.7, z: -9.3, ry: 0 }, { x: 8, z: -9.3, ry: 0 },
     { x: -5.1, z: -9.3, ry: 0 }, { x: -9.1, z: -9.3, ry: 0 },
@@ -32,11 +33,8 @@
     { x: 9.4, z: 4.6, ry: -Math.PI / 2 }, { x: 9.4, z: 6.4, ry: -Math.PI / 2 },
     { x: -9.4, z: 5, ry: Math.PI / 2 }, { x: -9.4, z: 6.6, ry: Math.PI / 2 }, { x: -9.4, z: 8.2, ry: Math.PI / 2 }
   ];
-  // Where eaters walk in from
   const WALK_IN = { x: 0.6, z: 7 };
-  // Where the thank-you ticker hangs
   const TICKER_AT = { x: 0, y: 3.3, z: -ROOM_HALF + 0.3 };
-  // Keep a dragged banana inside the room
   const clampDrag = (p) => {
     p.x = clamp(p.x, -ROOM_HALF + 0.5, ROOM_HALF - 0.5);
     p.z = clamp(p.z, -ROOM_HALF + 0.5, ROOM_HALF - 0.5);
@@ -47,17 +45,16 @@
     performance.mark(`ooga:${name}`);
   };
   const ledGrey = models.box({ w: 0.07, h: 0.05, d: 0.02, color: "#5a5a5e", emissive: 0.25 });
-  const STATE_LED = { working: 0, sleeping: 1, away: 3 };
+  const STATE_LED = { working: 0, chilling: 3, sleeping: 1 };
 
-  // One visit's state, made in enter and dropped in leave
+  // One visit's state: made in enter(), dropped in leave().
   let renderer, game, world, go, lootEnabled, testBananas, root, camera, lab, hud, hooks, input, pilot, fx, pile, crew, crates, pulseNodes;
-  let stateTimer = 0, hintTimer = 0, meterTimer = 0;
+  let stateTimer = 0, hintTimer = 0, meterTimer = 0, unsubscribeActivity = null;
   const propTargets = [];
   const addProp = (node, owner, opts) => {
     input.add(node, owner, opts);
     propTargets.push(node);
   };
-  // A driven step stays inside the walls
   const walkable = (fromX, fromZ, toX, toZ) => Math.abs(toX) < WALL && Math.abs(toZ) < WALL && Math.hypot(toX, toZ) > pile.pileEdge() + 0.4;
   const clampTarget = (t) => {
     t.x = clamp(t.x, -WALL, WALL);
@@ -69,7 +66,6 @@
     p.y = clamp(p.y, 0.5, 4.3);
   };
 
-  // ---------- donations ----------
   const celebrate = (donation, bananas) => {
     for (const cave of crew.workingCavemen()) {
       if (cave.build) continue;
@@ -91,11 +87,10 @@
     hud.setStats(game.state);
   };
 
-  // ---------- props ----------
   const rackInfo = (rack) => {
     if (rack.index === 0) {
       const counts = crew.stateCounts();
-      return `Contributor rack · ${counts.working} eating · ${counts.sleeping} zzz · ${counts.away} away`;
+      return `Contributor rack · ${counts.working} working · ${counts.chilling} chilling · ${counts.sleeping} sleeping`;
     }
     return rack.index === 1 ? "Entropy rack · hashing quietly" : "Cold storage · do not touch";
   };
@@ -153,18 +148,15 @@
         return;
       }
       const cave = crew.cavemen.get(contributor.name);
-      const idx = STATE_LED[cave.state];
+      const idx = cave ? STATE_LED[cave.state] : 3;
       led.geometry = idx === 3 ? ledGrey : led.ledGeos[idx];
     });
   };
   const tooltipFor = (hit) => {
     const o = hit.owner;
     switch (o.kind) {
-      case "caveman": {
-        const c = o.cave;
-        const worn = crew.wornBy(c.traits.name);
-        return `${c.traits.name} · ${hudMod.STATE_LABELS[c.state]} · last commit ${contributors.ageLabel(c.contributor)}${worn ? ` · ${worn}` : ""}${c === pilot.player ? " · yours" : c.state === "working" ? " · double-tap to drive" : ""}`;
-      }
+      case "caveman":
+        return o.cave.traits.name;
       case "rack":
         return rackInfo(o.rack);
       case "flask":
@@ -219,10 +211,10 @@
     }
   };
 
-  // ---------- per frame ----------
   const updateMeter = () => {
-    const seconds = game.forecast(world.level, crew.workingCavemen().length, EAT_RATE);
-    hud.setMeter(world.level, METER_CAPACITY, Number.isFinite(seconds) ? `≈ ${game.formatDuration(seconds)} left` : "stable");
+    let reloading = 0;
+    for (let i = 0; i < crew.list.length; i++) if (crew.list[i].weapon.reloading) reloading++;
+    hud.setMeter(world.level, METER_CAPACITY, reloading ? `${reloading} reloading · 6 shots per banana` : world.level < 1 ? "Waiting for bananas" : "Ready for reloads");
   };
   const update = (dt, elapsed) => {
     pilot.readInput(dt);
@@ -261,7 +253,6 @@
   };
   const overlay = (dt) => fx.drawOverlay(dt, crew.drawQuotes);
 
-  // ---------- actions and keys ----------
   const onLootCleared = () => {
     if (!lootEnabled) return;
     crew.applyAllSwag();
@@ -282,11 +273,14 @@
     location.reload();
   };
   const onKey = (e) => {
+    if (e.key === "0") return;
+    if ((e.key === "1" || e.key === "2") && pilot.weaponMode(Number(e.key))) return;
     if (e.key === "Escape") {
       if (pilot.player) pilot.release();
       else go("hub");
     }
-    if (e.key === "0") pilot.goPreset("pile");
+    if (e.key === "g" || e.key === "G") pilot.weaponAction("weapon-toggle");
+    if (e.key === "v" || e.key === "V") pilot.weaponAction("weapon-fire");
     if (e.key === "b" || e.key === "B") addTestBananas(testBananas);
     if (e.key === "l" || e.key === "L") demoTip(120000);
     if (e.key === "p" || e.key === "P") {
@@ -305,7 +299,6 @@
     }
   };
 
-  // ---------- scene contract ----------
   const enter = (ctx) => {
     ({ renderer, game, world, go, lootEnabled, testBananas } = ctx);
     camera = createCamera({ fov: 48, near: 0.25, far: 60 });
@@ -313,13 +306,29 @@
     lab = models.labRoom({ half: ROOM_HALF });
     addChild(root, lab.room);
     mark("room");
-    hud = hudMod.create({ roster: contributors.roster, catalog: models.SWAG, tierColors: models.TIER_COLORS, renderIcon: hudMod.renderIcon, lootEnabled });
+    hud = hudMod.create({ roster: contributors.activeRoster, catalog: models.SWAG, tierColors: models.TIER_COLORS, renderIcon: hudMod.renderIcon, lootEnabled });
     hooks = {};
     input = interactMod.create({ canvas: ctx.canvas, renderer, camera, hooks });
-    pilot = pilotMod.create({ renderer, canvas: ctx.canvas, camera, hud, presets: PRESETS, landing: "pile", pitch: PITCH, dist: DIST, follow: FOLLOW, fly: FLY, clampTarget, clampCamera, coarse: COARSE });
+    pilot = pilotMod.create({ renderer, canvas: ctx.canvas, camera, hud, presets: PRESETS, landing: "pile", pitch: PITCH, dist: DIST, follow: FOLLOW, fly: FLY, clampTarget, clampCamera, ceilingAt: () => 4.3, coarse: COARSE, close: { eyeHeight: 1.1, eyeRatio: 0.95, eyeForward: 0.16, pitch: [-1.35, 1.35], trailingDist: 4, orbitDist: 5, maxStep: 0.6, groundAt: () => 0 } });
     const shared = { root, input, hooks, hud, game, world, renderer, camera, overlay: ctx.overlay, tickerAt: TICKER_AT, buildSpots: BUILD_SPOTS.slice(), walkIn: WALK_IN, clampDrag, viewYaw: PRESETS.pile.yaw, bedrolls: lab.bedrolls, pileScale: 0.45, onShown: (shown) => { lab.equipment.abacus.setValue(shown); meterTimer = 0; }, walkable };
+    shared.fireReachable = (x, y, z, toX, toY, toZ) => Math.abs(toX) < ROOM_HALF && Math.abs(toZ) < ROOM_HALF && toY > 0 && toY < 4.5;
     fx = shared.fx = fxMod.create(shared);
     pile = shared.pile = pileMod.create(shared);
+    shared.workSites = [{
+      repo: "oogaboogax/entropylab",
+      route: [{ x: 3.5, z: 2.5 }, { x: 3.5, z: -2.5 }],
+      position: (cave, out) => {
+        out.x = -2.4 + cave.index % 4 * 1.6;
+        out.y = 0;
+        out.z = -4 - Math.floor(cave.index / 4) * 1.1;
+      },
+      target: (cave, out) => {
+        const rounds = 30 - cave.weapon.ammo;
+        out.x = Math.sin(rounds * 1.7 + cave.index) * 4;
+        out.y = 0.8 + rounds % 4 * 0.45;
+        out.z = -8.6;
+      }
+    }];
     mark("pile");
     crew = shared.crew = crewMod.create(shared);
     mark("cavemen");
@@ -355,10 +364,10 @@
 
     Object.assign(hooks, {
       onHover: (hit, p) => {
-        if (hit) hud.tooltip.show(tooltipFor(hit), p.x, p.y);
+        if (hit) hud.tooltip.show(tooltipFor(hit), p.x, p.y, hit.owner.cave);
         else hud.tooltip.hide();
       },
-      onHoverMove: (hit, p) => hud.tooltip.show(tooltipFor(hit), p.x, p.y),
+      onHoverMove: (hit, p) => hud.tooltip.show(tooltipFor(hit), p.x, p.y, hit.owner.cave),
       onTap,
       ...pilot.hooks
     });
@@ -379,6 +388,7 @@
       else if (action === "clear-loot") clearLoot();
       else if (action === "reset") resetDemo();
       else if (action === "act") pilot.action();
+      else if (action.startsWith("weapon-") || action === "magazine-swap") pilot.weaponAction(action);
       else if (action === "reset-view") pilot.goPreset("pile");
       else if (action === "leave") go("hub");
     });
@@ -386,7 +396,18 @@
     meterTimer = 0;
     crew.refreshStates(true);
     syncRackLeds();
-    // Once a minute, refresh states, LEDs and the pool
+    if (ctx.from === null && preloadedEquipment) {
+      const name = params.get("character")?.trim().toLowerCase();
+      const contributor = params.has("character") ? contributors.activeRoster.find(entry => entry.name.toLowerCase() === name)
+        : contributors.activeRoster.find(entry => crew.stateOf(crew.cavemen.get(entry.name)) === "working") || contributors.activeRoster[0];
+      const cave = contributor && crew.cavemen.get(contributor.name);
+      if (cave) {
+        if (crew.stateOf(cave) !== "working") { cave.override = "working"; crew.refreshStates(true); }
+        pilot.possess(cave);
+        crew.configureWeapon(cave, preloadedWeapon, preloadedAmmo);
+      }
+    }
+    unsubscribeActivity = contributors.subscribe(() => { crew.refreshStates(); syncRackLeds(); });
     stateTimer = window.setInterval(() => {
       crew.refreshStates();
       syncRackLeds();
@@ -409,12 +430,18 @@
         get shown() {
           return pile.shown;
         },
-        camera, crew, controls: pilot.controls
+        camera, crew, pilot, controls: pilot.controls
       }
     });
+    pilot.update(0);
+    mark("visibility-start");
+    fx.warmVisibility(crew);
+    mark("visibility");
   };
   const leave = () => {
     window.clearInterval(stateTimer);
+    unsubscribeActivity();
+    unsubscribeActivity = null;
     window.clearTimeout(hintTimer);
     crates.dispose();
     pile.dispose();
@@ -427,7 +454,6 @@
     const targets = input.targetCount;
     input.dispose();
     hud.dispose();
-    // Drop the room and every system
     lab = hud = hooks = input = pilot = fx = pile = crew = crates = pulseNodes = null;
     labScene.input = labScene.debug = null;
     return { targets };

@@ -1,7 +1,6 @@
 (() => {
   "use strict";
   const BL = window.BL = window.BL || {};
-  // Event shape a backend must emit
   const config = {
     serverUrl: "https://btcpay.example.org",
     storeId: "REPLACE_WITH_STORE_ID",
@@ -28,7 +27,7 @@
     if (cleanMessage) url.searchParams.set("message", cleanMessage);
     return { id, url: url.toString(), handle: cleanHandle, message: cleanMessage };
   };
-  // About half cross the 1,000 sat crate threshold
+  // Weights tuned so about half the draws cross the 1,000 sat crate threshold.
   const SIM_AMOUNTS = [300, 500, 800, 1200, 2500, 6000, 25000, 120000];
   const SIM_WEIGHTS = [3, 3, 2.5, 3, 2.5, 1.5, 0.6, 0.2];
   const pickAmount = () => {

@@ -5,24 +5,28 @@
   const TAP_PX = 7;
   const TAP_MS = 420;
   const LONG_PRESS_MS = 320;
-  // Double-tap window on one target
   const DOUBLE_MS = 380;
   const DOUBLE_PX = 24;
+  const WHEEL_GAP_MS = 220;
   const create = ({ canvas, renderer, camera, hooks = {} }) => {
     const targets = [];
+    const weaponTargets = BL.weaponTargets.create(targets);
     const pointers = new Map();
     const ray = { ox: 0, oy: 0, oz: 0, dx: 0, dy: 0, dz: 0 };
     const C = new Float32Array(3);
+    const aimView = BL.math.mat4.create(), aimInverse = BL.math.mat4.create(), aimUp = { x: 0, y: 1, z: 0 };
     let hoverX = -1, hoverY = -1, hoverDirty = false, hovered = null;
     let gesture = null;
     let pinchDist = 0;
+    let zoomGesture = 0, wheelAt = -Infinity, wheelDirection = 0;
     let longPressTimer = 0;
     const lastTap = { at: -Infinity, node: null, owner: null, x: 0, y: 0 };
-    // Every body part of one caveman is the same target, so a poke hop cannot break a double tap
+    // Every body part of one caveman is the same target, so a poke hop cannot break a double tap.
     const sameTarget = (hit) => hit ? hit.node === lastTap.node || (!!hit.owner.cave && !!lastTap.owner && hit.owner.cave === lastTap.owner.cave) : lastTap.node === null;
     const call = (name, a, b, c, d) => hooks[name] ? hooks[name](a, b, c, d) : undefined;
     const add = (node, owner, { radius = 0 } = {}) => {
       targets.push({ node, owner, radius, geometry: null, bounds: null });
+      weaponTargets.register(node);
     };
     const remove = (node) => {
       const i = targets.findIndex((t) => t.node === node);
@@ -41,13 +45,16 @@
       m[0] * m[0] + m[1] * m[1] + m[2] * m[2],
       m[4] * m[4] + m[5] * m[5] + m[6] * m[6],
       m[8] * m[8] + m[9] * m[9] + m[10] * m[10]));
-    const pick = (px, py) => {
-      renderer.ray(px, py, camera, ray);
+    const pick = (px, py, ignoreCave = null, currentView = false) => {
+      if (currentView) {
+        BL.math.mat4.lookAt(aimView, camera.position, camera.target, camera.up || aimUp);
+        BL.math.mat4.rayFromView(ray, aimView, renderer.size.width, renderer.size.height, camera.fov, camera.position, px, py);
+      } else renderer.ray(px, py, camera, ray);
       let best = null, bestT = Infinity, bestPriority = -Infinity;
       for (const t of targets) {
         const { node } = t;
-        if (!node.geometry || !nodeShown(node)) continue;
-        // A caveman swaps its head geometry, so key the memo on the geometry
+        if (!node.geometry || !nodeShown(node) || ignoreCave && t.owner.cave === ignoreCave) continue;
+        // A caveman swaps its head geometry, so key the bounds memo on the geometry, not the node.
         if (t.geometry !== node.geometry) {
           t.geometry = node.geometry;
           t.bounds = boundsOf(node.geometry);
@@ -72,6 +79,53 @@
       }
       return best ? { node: best.node, owner: best.owner, t: bestT } : null;
     };
+    const aimPoint = (px, py, out, ignoreCave = null) => {
+      // A one-off aim entry must use the current eye, not the renderer's
+      // previous frame. Refine only the same target the pointer would select.
+      const hit = pick(px, py, ignoreCave, true);
+      if (!hit) return false;
+      const node = hit.node, geometry = node.geometry, verts = geometry.verts;
+      BL.math.mat4.invert(aimInverse, node.world);
+      BL.math.mat4.transformPoint(C, aimInverse, ray.ox, ray.oy, ray.oz);
+      const ox = C[0], oy = C[1], oz = C[2], m = aimInverse;
+      // Leave the local direction unnormalized so t remains world distance,
+      // including geometry with nonuniform scale.
+      const dx = m[0] * ray.dx + m[4] * ray.dy + m[8] * ray.dz;
+      const dy = m[1] * ray.dx + m[5] * ray.dy + m[9] * ray.dz;
+      const dz = m[2] * ray.dx + m[6] * ray.dy + m[10] * ray.dz;
+      let nearest = Infinity;
+      for (const face of geometry.faces) {
+        const indices = face.i, a = indices[0] * 3;
+        for (let i = 1; i + 1 < indices.length; i++) {
+          const b = indices[i] * 3, c = indices[i + 1] * 3;
+          const e1x = verts[b] - verts[a], e1y = verts[b + 1] - verts[a + 1], e1z = verts[b + 2] - verts[a + 2];
+          const e2x = verts[c] - verts[a], e2y = verts[c + 1] - verts[a + 1], e2z = verts[c + 2] - verts[a + 2];
+          const px = dy * e2z - dz * e2y, py = dz * e2x - dx * e2z, pz = dx * e2y - dy * e2x;
+          const determinant = e1x * px + e1y * py + e1z * pz;
+          if (Math.abs(determinant) < 1e-10) continue;
+          const tx = ox - verts[a], ty = oy - verts[a + 1], tz = oz - verts[a + 2];
+          const u = (tx * px + ty * py + tz * pz) / determinant;
+          if (u < 0 || u > 1) continue;
+          const qx = ty * e1z - tz * e1y, qy = tz * e1x - tx * e1z, qz = tx * e1y - ty * e1x;
+          const v = (dx * qx + dy * qy + dz * qz) / determinant;
+          if (v < 0 || u + v > 1) continue;
+          const t = (e2x * qx + e2y * qy + e2z * qz) / determinant;
+          if (t >= 0 && t < nearest) nearest = t;
+        }
+      }
+      if (nearest < Infinity) {
+        out.x = ray.ox + ray.dx * nearest;
+        out.y = ray.oy + ray.dy * nearest;
+        out.z = ray.oz + ray.dz * nearest;
+      } else {
+        // Generous hover spheres also select the gaps around an object. In
+        // those gaps, focus that object's center instead of the wall behind it.
+        const center = boundsOf(geometry).center;
+        BL.math.mat4.transformPoint(C, node.world, center[0], center[1], center[2]);
+        out.x = C[0]; out.y = C[1]; out.z = C[2];
+      }
+      return true;
+    };
     const groundPoint = (px, py, planeY, out) => {
       renderer.ray(px, py, camera, ray);
       if (Math.abs(ray.dy) < 1e-5) return null;
@@ -82,15 +136,18 @@
       out.z = ray.oz + ray.dz * t;
       return out;
     };
-    // The two live pointers, without materialising the map's values
-    const PINCH = { d: 0 };
+    // The two live pointers, without materialising the map's values.
+    const PINCH = { d: 0, x: 0, y: 0 };
     const pinchSpan = (out) => {
       let ax = 0, ay = 0, n = 0;
       for (const q of pointers.values()) {
         if (n === 0) {
           ax = q.x;
           ay = q.y;
-        } else if (n === 1) out.d = Math.hypot(ax - q.x, ay - q.y);
+        } else if (n === 1) {
+          out.d = Math.hypot(ax - q.x, ay - q.y);
+          out.x = (ax + q.x) * 0.5; out.y = (ay + q.y) * 0.5;
+        }
         n++;
       }
       return out;
@@ -115,7 +172,7 @@
     const onPointerDown = (e) => {
       const p = local(e);
       pointers.set(e.pointerId, p);
-      canvas.setPointerCapture(e.pointerId);
+      if (document.pointerLockElement !== canvas) canvas.setPointerCapture(e.pointerId);
       if (pointers.size === 2) {
         clearLongPress();
         if (gesture && gesture.mode === "grab") {
@@ -124,6 +181,7 @@
         }
         pinchSpan(PINCH);
         pinchDist = PINCH.d;
+        zoomGesture++;
         gesture = { mode: "pinch" };
         return;
       }
@@ -147,13 +205,13 @@
         hoverY = p.y;
         hoverDirty = true;
       }
-      // Both mouse buttons make a walk that drags to turn: no tap on release, no grab in hand. Pressed
-      // together they arrive as one move with no pointerdown at all, so the chord registers its own pointer
+      // Both mouse buttons = a walk that drags to turn: no tap on release, no grab in hand.
+      // Pressed together they arrive as one move with no pointerdown, so the chord registers its own pointer.
       if (e.pointerType === "mouse" && (e.buttons & 3) === 3 && (!gesture || (gesture.pointerId === e.pointerId && gesture.mode !== "chord"))) {
         clearLongPress();
         if (gesture && gesture.mode === "grab") call("onGrabEnd", gesture.hit, p, null, true);
         pointers.set(e.pointerId, p);
-        canvas.setPointerCapture(e.pointerId);
+        if (document.pointerLockElement !== canvas) canvas.setPointerCapture(e.pointerId);
         gesture = { mode: "chord", start: p, last: p, at: performance.now(), hit: null, pointerId: e.pointerId, moved: true };
         canvas.style.cursor = "grabbing";
         return;
@@ -164,7 +222,7 @@
       if (gesture.mode === "pinch" && pointers.size === 2) {
         pinchSpan(PINCH);
         const d = PINCH.d || 1;
-        call("onZoom", pinchDist / d);
+        call("onZoom", pinchDist / d, zoomGesture, PINCH.x, PINCH.y);
         pinchDist = d;
         return;
       }
@@ -230,7 +288,18 @@
     };
     const onWheel = (e) => {
       e.preventDefault();
-      call("onZoom", 1 + Math.max(-60, Math.min(60, e.deltaY)) * 2.5e-3);
+      if (!e.deltaY) return;
+      const direction = Math.sign(e.deltaY);
+      // Momentum is part of the same scroll. A pause or reversal starts a
+      // fresh gesture, so a long swipe can stop at a camera-mode boundary.
+      if (e.timeStamp - wheelAt > WHEEL_GAP_MS || direction !== wheelDirection) zoomGesture++;
+      wheelAt = e.timeStamp;
+      wheelDirection = direction;
+      // Keep a large swipe's distance instead of reducing every event to one
+      // notch. The camera damps the resulting target distance independently.
+      const delta = e.deltaY * (e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? canvas.clientHeight : 1);
+      const p = local(e);
+      call("onZoom", Math.exp(Math.max(-1200, Math.min(1200, delta)) * 2.5e-3), zoomGesture, p.x, p.y);
     };
     const onContextMenu = (e) => e.preventDefault();
     canvas.addEventListener("pointerdown", onPointerDown);
@@ -254,8 +323,23 @@
         call("onHoverMove", hit, { x: hoverX, y: hoverY });
       }
     };
-    const dispose = () => {
+    const reset = () => {
       clearLongPress();
+      if (gesture && gesture.mode === "grab") call("onGrabEnd", gesture.hit, gesture.last, null, true);
+      gesture = null;
+      for (const pointerId of pointers.keys()) if (canvas.hasPointerCapture(pointerId)) canvas.releasePointerCapture(pointerId);
+      pointers.clear();
+      pinchDist = 0;
+      lastTap.at = -Infinity;
+      lastTap.node = lastTap.owner = null;
+      hoverX = hoverY = -1;
+      hoverDirty = false;
+      if (hovered) call("onHover", null, { x: -1, y: -1 });
+      hovered = null;
+      canvas.style.cursor = "grab";
+    };
+    const dispose = () => {
+      reset();
       canvas.removeEventListener("pointerdown", onPointerDown);
       canvas.removeEventListener("pointermove", onPointerMove);
       canvas.removeEventListener("pointerup", onPointerUp);
@@ -264,14 +348,12 @@
       canvas.removeEventListener("wheel", onWheel);
       canvas.removeEventListener("contextmenu", onContextMenu);
       targets.length = 0;
-      pointers.clear();
-      lastTap.node = null;
     };
     return {
-      add, remove, pick, groundPoint, update, dispose, get targetCount() {
+      add, remove, pick, aimPoint, weaponTargets, groundPoint, update, reset, dispose, get targetCount() {
         return targets.length;
       },
-      // A drag is still held, even if it has paused
+      // A drag is still held, even if it has paused.
       get orbiting() {
         return !!gesture && (gesture.mode === "orbit" || gesture.mode === "chord");
       }

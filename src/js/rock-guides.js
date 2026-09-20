@@ -1,21 +1,20 @@
-// Perceived wall sections and the basement rim for views through island stone.
+// Perceived wall sections and the basement rim, for views through island stone.
 (() => {
   "use strict";
   const BL = window.BL = window.BL || {};
   const LIMIT = 96, EPS = 1e-5, RADIUS = 12, FADE_START = 10.5, FADE_SECONDS = 0.25, SURFACE_PATCH = 0.6;
   const OUTDOOR_CHUNK = 6, OUTDOOR_PATCH = 1.5;
-  // Wall geometry is a pure function of the memoised island. Each visit gets
-  // fresh fade and camera state over one shared, never-written build.
+  // Wall geometry is a pure function of the memoised island: one shared build, never written.
+  // Fade and camera state are per visit.
   const BUILDS = new WeakMap(), round = (n) => Math.round(n / EPS);
-  // Room, ramp and common walls in station order, keyed by the shared sample order
+  // STATION_ORDERS: room, ramp and common walls in station order, keyed by the shared sample order.
   const STATION_ORDERS = new WeakMap();
   const build = (island) => {
     const H = island.headquarters, contexts = [], windowOwners = new Map();
     const slopes = BL.slopeGuides.create({ island }), slopeSample = { side: 0, sector: 0 };
     const probe = { distance: Infinity, floor: 0, side: 0, station: 0 };
-    // These routes are immutable. Floor clipping revisits their grid vertices
-    // many times, so keep each segment's exact measures instead of rebuilding
-    // them for every point query. Bounds only reject strictly farther spans.
+    // Ramp routes are immutable: keep each segment's exact measures instead of rebuilding per point query.
+    // Floor clipping revisits these grid vertices many times; block bounds only reject strictly farther spans.
     const rampSegments = new Map(), rampBlocks = new Map();
     for (const ramp of [...H.ramps, ...H.basement.ramps]) {
       const segments = new Float64Array((ramp.samples.length - 1) * 13 + 1), blocks = new Float64Array(Math.ceil((ramp.samples.length - 1) / 8) * 4);
@@ -213,8 +212,7 @@
           return y >= -margin && Math.abs(dx * front.tangent.x + dz * front.tangent.z) <= front.halfLength + margin
             && Math.abs(dx * -front.tangent.z + dz * front.tangent.x) <= front.halfWidth + margin;
         };
-        // Each entrance has two long walls and an end wall. Their jagged
-        // panels share perception and fading as a complete section.
+        // Each entrance is three sections (two long walls, one end wall); their jagged panels perceive and fade as one.
         context.walls.length = 0;
         for (let section = 0; section < 3; section++) context.walls.push({ ...wall, key: section, bounds: new Float32Array(wall.bounds) });
       }
@@ -264,9 +262,8 @@
         });
         return;
       }
-      // Greedy faces can cross a corridor corner or mix its wall with a
-      // hillside. Ownership comes from the actual flattened air columns,
-      // before sky clipping, not a padded box around the finished mesh.
+      // Greedy faces can cross a corridor corner or mix its wall with a hillside.
+      // Take ownership from the actual flattened air columns before sky clipping, not a padded box round the mesh.
       const axis = Math.abs(nx) > Math.abs(nz) ? 2 : 0, origin = island.sightGrid[axis === 0 ? 1 : 3];
       let min = Infinity, max = -Infinity, top = -Infinity, x = 0, z = 0;
       for (const p of points) { min = Math.min(min, p[axis]); max = Math.max(max, p[axis]); top = Math.max(top, p[1]); x += p[0]; z += p[2]; }
@@ -309,8 +306,7 @@
       let low = false;
       for (const p of points) if (p[1] < floorAt(context, p[0], p[2]) + island.unit) low = true;
       if (!low) return [points];
-      // Vertical voxel panels need only split along their horizontal axis;
-      // each resulting lower edge matches one actual floor grid edge.
+      // Vertical voxel panels split only along their horizontal axis; each lower edge matches one floor grid edge.
       if (Math.abs(ny) > 0.5) return [];
       const axis = Math.abs(nx) > Math.abs(nz) ? 2 : 0, origin = island.sightGrid[axis === 0 ? 1 : 3], unit = island.unit;
       let min = Infinity, max = -Infinity, bottom = Infinity;
@@ -318,8 +314,7 @@
       const faces = [];
       for (let cell = Math.floor((min - origin) / unit); cell < Math.ceil((max - origin) / unit); cell++) {
         const part = clipFace(clipFace(points, axis, origin + cell * unit, 1), axis, origin + (cell + 1) * unit, -1), output = [];
-        // A cut voxel can start just above the physical slope. Join that
-        // last fraction of a cell to the floor instead of leaving a notch.
+        // A cut voxel can start just above the slope: snap that last fraction of a cell to the floor or a notch is left.
         for (let n = 0; n < part.length; n++) {
           const p = part[n], floor = floorAt(context, p[0], p[2]);
           if (Math.abs(p[1] - bottom) < EPS && p[1] > floor && p[1] - floor < unit) part[n] = [p[0], floor, p[2]];
@@ -360,12 +355,10 @@
       const inset = island.unit * 0.65, source = context.source;
       if (ny < -0.5) return false;
       if (context.kind === "ramp") return Math.abs(ny) <= 0.2;
-      // A window extends navigation through the shell, but must not extend
-      // the wall mask. Its original voxel faces are not tagged as reveals;
-      // accepting the aperture here turns them into floating sill fragments.
+      // A window extends navigation through the shell but must not extend the wall mask.
+      // Its voxel faces are not tagged as reveals; accepting the aperture here makes floating sill fragments.
       if (!context.contains(x, y, z, island.unit * 0.65, false)) return false;
-      // Include the little ledges connecting jagged wall faces, while keeping
-      // the open floor and ceiling out of the wall silhouette.
+      // Keep the little ledges joining jagged wall faces; open floor and ceiling stay out of the wall silhouette.
       if (y <= context.floor + EPS || y >= context.ceiling - EPS) return false;
       if (Math.abs(ny) <= 0.82) return true;
       if (context.kind === "common") return Math.hypot(x - source.x, z - source.z) >= source.radius - inset;
@@ -401,13 +394,13 @@
       if (context.kind === "ramp") {
         polygon = clipFace(polygon, 1, rampColumn.ceiling, -1);
         const air = island.frontageColumnAt(tx + nx * direction, tz + nz * direction), solid = island.frontageColumnAt(tx - nx * direction, tz - nz * direction);
-        // The entrance facade owns this shared strip above ground. Let the
-        // ramp continue it only below the corridor floor, with one fade each.
+        // The entrance facade owns this shared strip above ground.
+        // Let the ramp continue it only below the corridor floor, with one fade each.
         if (air && air !== solid) polygon = clipFace(polygon, 1, 0, -1);
         if (polygon.length < 3) return false;
       }
-      // Clipping at a floor/ceiling can collapse a triangle to a line. The
-      // outline mask strokes its polygons, so such remnants must be omitted.
+      // Clipping at a floor or ceiling can collapse a triangle to a line.
+      // The outline mask strokes its polygons, so such zero-area remnants must be omitted.
       if (!faceHasArea(polygon)) return false;
       const wall = wallAt(context, tx, tz), bounds = context.walls[wall].bounds;
       for (const point of polygon) for (let axis = 0; axis < 3; axis++) {
@@ -421,8 +414,8 @@
           cx += point[0]; cy += point[1]; cz += point[2];
         }
         cx /= 3; cy /= 3; cz /= 3;
-        // Opposite faces must keep separate exposed-air samples. A sample
-        // retreated toward the actor can be buried on a self-hidden facet.
+        // Opposite faces must keep separate exposed-air samples.
+        // A sample retreated toward the actor can be buried on a self-hidden facet.
         const key = `${wall}:${Math.round(nx * 4)},${Math.round(ny * 4)},${Math.round(nz * 4)}:${Math.floor(cx / SURFACE_PATCH)},${Math.floor(cy / SURFACE_PATCH)},${Math.floor(cz / SURFACE_PATCH)}`;
         let group = context.surfaceGroupMap.get(key);
         if (group === undefined) {
@@ -455,9 +448,8 @@
     let tested = 0, creases = 0, windowReveals = 0;
     for (const face of island.geometry.faces) {
       if (face.i.length < 3) continue;
-      // Window reveal polygons are authored explicitly after the voxel shell
-      // is carved. Exclude them by identity before spatial classification;
-      // plane matching alone can miss clipped fragments at frustum joins.
+      // Window reveals are authored after the voxel shell is carved: exclude them by identity, before classification.
+      // Plane matching alone can miss clipped fragments at frustum joins.
       if (face.headquartersWindowReveal) { windowReveals++; continue; }
       const windowOwner = face.windowIndex === undefined ? null : windowOwners.get(face.windowIndex);
       let minX = Infinity, minY = Infinity, minZ = Infinity, maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity, nearby = 0;
@@ -478,14 +470,13 @@
       cx /= face.i.length; cy /= face.i.length; cz /= face.i.length;
       let windowCap = false;
       for (const window of H.windows) {
-        // The four reveal planes identify side panels, sills and soffits even
-        // on steep flares that a normal-angle cutoff would misclassify.
+        // The four reveal planes identify side panels, sills and soffits.
+        // A normal-angle cutoff would misclassify them on steep flares.
         for (const frustum of window.flare.frusta) {
           if (boxOutside(frustum.planes, minX, minY, minZ, maxX, maxY, maxZ)) continue;
           let inside = true;
           for (const plane of frustum.planes) if (plane[0] * cx + plane[1] * cy + plane[2] * cz > plane[3] + EPS * 8) { inside = false; break; }
-          // A quad can straddle the opening even when its center lies outside;
-          // one triangulated half still belongs to the sill at that boundary.
+          // A quad can straddle the opening with its center outside; one triangulated half still belongs to the sill.
           if (!inside) for (const index of face.i) {
             const at = index * 3;
             inside = true;
@@ -533,16 +524,15 @@
           let owners = 0;
           for (let j = 0; j < nearby; j++) { const priority = relevant(contexts[faceContexts[j]], x, y, z, vertical, windowOwner); candidates[j] = priority; owners += priority; }
           if (!owners) continue;
-          // Across a tessellation edge the same plane still separates air and
-          // rock. A true floor/wall/window corner changes that physical pair.
+          // Across a tessellation edge the same plane still separates air and rock.
+          // A true floor/wall/window corner changes that physical pair.
           const ox = x - ix * 0.02, oy = y - iy * 0.02, oz = z - iz * 0.02;
           tested++;
           const front = island.clearAt(ox + nx * 0.012, oy + ny * 0.012, oz + nz * 0.012, 0, 0);
           const back = island.clearAt(ox - nx * 0.012, oy - ny * 0.012, oz - nz * 0.012, 0, 0);
           if (front && !back) continue;
-          // Union carving can leave a buried source face. Its edge is not a
-          // room boundary unless the face side still has exposed air above
-          // solid stone. Concave corners may be solid on the other side.
+          // Union carving can leave a buried source face: its edge bounds a room only if that side has air over stone.
+          // Concave corners may be solid on the other side.
           const fx = x + ix * 0.02, fy = y + iy * 0.02, fz = z + iz * 0.02;
           if (!island.clearAt(fx + nx * 0.012, fy + ny * 0.012, fz + nz * 0.012, 0, 0) || island.clearAt(fx - nx * 0.012, fy - ny * 0.012, fz - nz * 0.012, 0, 0)) continue;
           if (!boundaryAt(Math.fround(x), Math.fround(y), Math.fround(z))) continue;
@@ -555,8 +545,8 @@
         }
       }
     }
-    // Keep each connected hillside aspect together, including its short
-    // stair treads. Opposing aspects stop at the crest and qualify separately.
+    // Keep each connected hillside aspect together, including its short stair treads.
+    // Opposing aspects stop at the crest and qualify separately.
     for (const face of island.geometry.faces) {
       if (face.i.length < 3 || face.headquartersWindowReveal || face.windowIndex !== undefined) continue;
       const ia = face.i[0] * 3, ib = face.i[1] * 3, ic = face.i[2] * 3;
@@ -610,8 +600,8 @@
         emit();
       }
       merged.sort((a, b) => b.priority - a.priority || b.hi - b.lo - (a.hi - a.lo));
-      // Reserve most of the budget for the room itself: the many clipped
-      // polygons around a flared mouth must not crowd out its floor and roof.
+      // Cap windows at 32 to reserve most of the budget for the room itself.
+      // The many clipped polygons around a flared mouth must not crowd out its floor and roof.
       let windows = 0, accepted = 0;
       for (const line of merged) {
         if (line.priority === 6 && windows++ >= 32) continue;
@@ -639,7 +629,7 @@
         else if (context.kind === "surface" || context.kind === "front" || context.kind === "cave" || context.kind === "sealed") context.surfaceStations[group] = 0;
         else context.surfaceStations[group] = wall.key === 2 || wall.key === 3 ? (x - owner.x) * -context.sz + (z - owner.z) * context.sx : (x - owner.x) * context.sx + (z - owner.z) * context.sz;
       }
-      // Per-visit fields keep their places; arm() fills them for each visit.
+      // Per-visit fields keep their places here; arm() fills them for each visit.
       context.surfacePhases = null; context.surfaceWholePhases = null; context.surfacePerceived = null; context.surfaceSections = null; context.surfaceTerrainSeen = null; context.surfaceTargets = null;
       context.surfaceEye = null; context.surfacePosition = null; context.surfaceActor = null; context.surfaceOcclusion = -1; context.surfaceCamera = null; context.surfaceView = null; context.surfaceHidden = null; context.surfaceAperture = null;
       context.surfaceGroupBounds = new Float32Array(context.surfaceGroupCount * 6);
@@ -652,8 +642,8 @@
       }
       context.apertures = null;
       context.surfaceActive = context.surfaceWholeActive = context.surfaceVersion = 0;
-      // A long curved wall rarely fits behind one solid cross-section. Split
-      // its fixed air samples spatially so smaller branches can share a proof.
+      // A long curved wall rarely fits behind one solid cross-section.
+      // Split its fixed air samples spatially so smaller branches can share a proof.
       for (let wallIndex = 0; wallIndex < context.walls.length; wallIndex++) {
         const wall = context.walls[wallIndex], order = [], samples = context.surfaceSamples;
         for (let group = 0; group < context.surfaceGroupCount; group++) if (context.surfaceWallGroups[group] === wallIndex) order.push(group);
@@ -748,9 +738,12 @@
       arm(context, island);
     }
     contexts.push(BL.holeGuides.create({ island }));
-    for (const context of contexts) for (const wall of context.walls) wall.cameraReady = false;
-    // The observer can see through a doorway into a second space. Keep one
-    // deduplicated world set for sight filtering, independent of the orbit eye.
+    for (const context of contexts) {
+      context.surfacePerception = -1;
+      for (const wall of context.walls) wall.cameraReady = false;
+    }
+    // The observer can see through a doorway into a second space.
+    // Keep one deduplicated world set for sight filtering, independent of the orbit eye.
     const unique = new Map();
     for (const context of contexts) for (let i = 0; i < context.lines.length; i += 6) {
       const v = context.lines, a = `${round(v[i])},${round(v[i + 1])},${round(v[i + 2])}`, b = `${round(v[i + 3])},${round(v[i + 4])},${round(v[i + 5])}`;
@@ -803,8 +796,8 @@
         if (score < best && context.count) { best = score; selected = context; }
       }
       if (selected) return selected;
-      // A nearby exterior eye may still look through its actor's window, but
-      // a distant sky view never selects an unrelated underground wireframe.
+      // A nearby exterior eye may still look through its actor's window.
+      // A distant sky view never selects an unrelated underground wireframe.
       for (const context of contexts) if (context.count && context.kind === "room" && ey >= context.floor - 0.5 && ey <= context.ceiling + 0.5) {
         const room = context.source, d = (ex - room.x) ** 2 + (ez - room.z) ** 2;
         if (d < 64 && d < best) { selected = context; best = d; }
@@ -817,8 +810,8 @@
       if (context.surfaceTerrainSeen[group] === 2) context.surfaceTerrainSeen[group] = island.sightClearAt(ex, ey, ez, x, y, z) ? 1 : 0;
       return context.surfaceTerrainSeen[group] && (!objectClear || objectClear(ex, ey, ez, x, y, z, actor, null));
     };
-    // Every eye ray to a sample inside a branch crosses this scaled, padded
-    // cross-section; solid rock there proves the whole branch unseen.
+    // Every eye ray to a sample inside a branch crosses this scaled, padded cross-section.
+    // Solid rock there proves the whole branch unseen.
     const perceiveBranch = (context, wall, node, ex, ey, ez) => {
       const b = node.bounds;
       for (let n = 1; n <= 7; n++) {
@@ -834,19 +827,20 @@
         perceiveBranch(context, wall, node.right, ex, ey, ez);
       }
     };
-    const updateSurface = (context, ex, ey, ez, camera, dt, actor = null, objectClear = null, occlusion = 0) => {
+    const updateSurface = (context, ex, ey, ez, camera, dt, actor = null, objectClear = null, occlusion = 0, perception = occlusion) => {
       if (!context) return null;
       surfacesActive = true;
       const center = actor ? actor.root.position : null, px = center ? center.x : ex, py = center ? center.y : ey, pz = center ? center.z : ez;
       const eye = context.surfaceEye, position = context.surfacePosition, eyeMoved = context.surfaceActor !== actor || !Number.isFinite(eye[0])
         || Math.hypot(ex - eye[0], ey - eye[1], ez - eye[2]) > 0.025 || Math.hypot(px - position[0], py - position[1], pz - position[2]) > 0.025;
-      const moved = eyeMoved || context.surfaceOcclusion !== occlusion;
+      const occlusionChanged = context.surfaceOcclusion !== occlusion, moved = eyeMoved || context.surfacePerception !== perception;
+      context.surfaceOcclusion = occlusion;
       const walls = context.walls, centers = context.surfaceCenters, wallGroups = context.surfaceWallGroups, outdoor = context.kind === "surface" && context.source.slopeSide === undefined;
       const wholeSection = !outdoor && (context.kind === "surface" || context.kind === "front" || context.kind === "cave" || context.kind === "sealed" || context.kind === "hole");
       if (moved) {
-        context.surfaceActor = actor; context.surfaceOcclusion = occlusion;
-        // Whole sections need one reachable witness. Mark untested samples
-        // separately so a later prop movement can safely search past it.
+        context.surfaceActor = actor; context.surfacePerception = perception;
+        // Whole sections need one reachable witness.
+        // Mark untested samples separately so a later prop movement can safely search past it.
         if (eyeMoved) {
           eye[0] = ex; eye[1] = ey; eye[2] = ez;
           position[0] = px; position[1] = py; position[2] = pz;
@@ -859,8 +853,7 @@
           wall.distance = Math.min(wall.distance, distance);
         }
         if (eyeMoved) for (const wall of walls) if (wall.distance <= RADIUS) perceiveBranch(context, wall, wall.surfaceTree, ex, ey, ez);
-        // Stations only matter at a wall's first and last perceived sample.
-        // Scan inward from both ends instead of tracing every sample.
+        // Stations matter only at a wall's first and last perceived sample: scan inward from both ends, never trace all.
         if (context.kind === "room" || context.kind === "ramp" || context.kind === "common") for (const wall of walls) {
           if (!(wall.distance <= RADIUS)) continue;
           const order = STATION_ORDERS.get(wall.surfaceOrder), stations = context.surfaceStations;
@@ -909,7 +902,9 @@
       }
       const p = camera.position, target = camera.target, cameraEye = context.surfaceCamera, view = context.surfaceView;
       const length = Math.hypot(target.x - p.x, target.y - p.y, target.z - p.z), fx = (target.x - p.x) / length, fy = (target.y - p.y) / length, fz = (target.z - p.z) / length;
-      const cameraMoved = moved && (context.kind === "cave" || context.kind === "sealed") || !Number.isFinite(cameraEye[0]) || Math.hypot(p.x - cameraEye[0], p.y - cameraEye[1], p.z - cameraEye[2]) > 0.025
+      // Passing bodies affect the camera's cave rays, but never the actor's
+      // perception of a wall. Keep those invalidation epochs independent.
+      const cameraMoved = (eyeMoved || occlusionChanged) && (context.kind === "cave" || context.kind === "sealed") || !Number.isFinite(cameraEye[0]) || Math.hypot(p.x - cameraEye[0], p.y - cameraEye[1], p.z - cameraEye[2]) > 0.025
         || context.windows?.length && (p.x !== cameraEye[0] || p.y !== cameraEye[1] || p.z !== cameraEye[2])
         || Math.abs(fx - view[0]) + Math.abs(fy - view[1]) + Math.abs(fz - view[2]) > 0.001 || view[3] !== camera.near;
       if (cameraMoved) {
@@ -918,8 +913,8 @@
         context.surfaceHidden.fill(0);
         for (const wall of walls) wall.cameraReady = false;
       }
-      // A fixed camera's terrain rays survive actor/NPC motion. Newly
-      // perceived walls still need their first camera query immediately.
+      // A fixed camera's terrain rays survive actor/NPC motion.
+      // Newly perceived walls still need their first camera query immediately.
       for (const wall of walls) if ((wall.target || wall.phase) && !wall.cameraReady) {
         updateSurfaceBranch(context, wall, wall.surfaceTree, p, fx, fy, fz, camera.near, objectClear, actor);
         wall.cameraReady = true;
@@ -932,8 +927,8 @@
             const portal = context.apertures.overlaps(context.surfaceGroupBounds, group * 6);
             context.surfaceAperture[group] = portal ? 2 : 0;
           }
-          // Bounds can overlap a window while all of a patch's actual
-          // triangles miss it. Those patches retain normal visibility.
+          // Bounds can overlap a window while all of a patch's actual triangles miss it.
+          // Those patches retain normal visibility.
           if (context.apertures.count) for (let at = 0; at < context.surface.length; at += 9) {
             const group = context.surfaceGroups[at / 9];
             if (context.surfaceAperture[group] !== 2) continue;
@@ -944,8 +939,8 @@
           }
         }
       }
-      // Retain the full patch. The overlay cuts only the visible window
-      // polygon, including when a new wall uses the cached camera aperture.
+      // Retain the full patch: the overlay cuts only the visible window polygon.
+      // That holds when a new wall uses the cached camera aperture too.
       if (context.apertures && context.apertures.count) for (let group = 0; group < context.surfaceGroupCount; group++) if (context.surfaceAperture[group]) context.surfaceHidden[group] = 1;
       const step = Math.max(0, dt) / FADE_SECONDS;
       for (const wall of walls) wall.phase = wall.phase < wall.target ? Math.min(wall.target, wall.phase + step) : Math.max(wall.target, wall.phase - step);
@@ -973,9 +968,8 @@
         context.surfacePerceived[group] = wall.target;
         if (Math.abs(context.surfaceWholePhases[group] - whole) > 1e-7) changed = true;
         context.surfaceWholePhases[group] = whole;
-        // Join the first and last visible stations into one solid wall run.
-        // Its jagged faces cannot punch independent holes, while the ends
-        // taper over one patch and old coverage fades as the Ooga moves.
+        // Join the first and last visible stations into one solid run; its jagged faces cannot punch separate holes.
+        // The ends taper over one patch and old coverage fades as the Ooga moves.
         const station = context.surfaceStations[group], edge = Math.min(station - wall.visibleMin, wall.visibleMax - station);
         const section = context.kind === "hole" || context.kind === "front" || context.kind === "surface" || context.kind === "cave" || context.kind === "sealed" ? 1 : Math.max(0, Math.min(1, (edge + SURFACE_PATCH / 2) / SURFACE_PATCH));
         const easedSection = section * section * (3 - 2 * section);
@@ -994,18 +988,17 @@
       if (changed) context.surfaceVersion++;
       return context;
     };
-    const updateSurfaces = (ex, ey, ez, camera, dt, actor = null, objectClear = null, occlusion = 0) => {
+    const updateSurfaces = (ex, ey, ez, camera, dt, actor = null, objectClear = null, occlusion = 0, perception = occlusion) => {
       stats.surfaceRays = stats.surfaceCertificates = 0;
       const center = actor ? actor.root.position : null, px = center ? center.x : ex, py = center ? center.y : ey, pz = center ? center.z : ez;
-      // Fixed authored registry; broad-phase rejection prevents the nearby
-      // view from turning into a whole-island visibility pass.
+      // Fixed authored registry; broad-phase rejection keeps the nearby view from becoming a whole-island pass.
       for (const context of contexts) {
         let nearby = context.surfaceWholeActive > 0;
         if (!nearby) for (const wall of context.walls) {
           const b = wall.bounds, dx = Math.max(b[0] - px, 0, px - b[3]), dy = Math.max(b[1] - py, 0, py - b[4]), dz = Math.max(b[2] - pz, 0, pz - b[5]);
           if (dx * dx + dy * dy + dz * dz < RADIUS * RADIUS) { nearby = true; break; }
         }
-        if (nearby) updateSurface(context, ex, ey, ez, camera, dt, actor, objectClear, occlusion);
+        if (nearby) updateSurface(context, ex, ey, ez, camera, dt, actor, objectClear, occlusion, perception);
       }
       return contexts;
     };
@@ -1017,6 +1010,7 @@
         context.surfacePhases.fill(0); context.surfaceWholePhases.fill(0); context.surfaceTargets.fill(0); context.surfacePerceived.fill(0);
         context.surfaceActive = context.surfaceWholeActive = 0;
         context.surfaceEye.fill(NaN); context.surfaceCamera.fill(NaN);
+        context.surfaceOcclusion = context.surfacePerception = -1;
         for (const wall of context.walls) wall.phase = wall.target = 0;
       }
     };

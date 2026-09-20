@@ -1,4 +1,4 @@
-// Builds one self-contained page, ordered by src/index.html
+// Builds one self-contained page; module order comes from src/index.html.
 import { createHash } from "node:crypto";
 import { gzipSync } from "node:zlib";
 import { readFileSync, writeFileSync } from "node:fs";
@@ -20,7 +20,7 @@ html = html.replace(cssTag, `<style>\n${css}\n</style>`);
 const scriptTag = /^[ \t]*<script src="([^"]+)"><\/script>\r?\n/gm;
 const sources = [...html.matchAll(scriptTag)].map((m) => m[1]);
 if (!sources.length) throw new Error("index.html: no script tags found");
-// A literal closing tag would end the block early
+// Escape </script inside inlined JS: a literal closing tag would end the block early.
 const js = sources.map((src) => `// ---- ${src} ----\n${read(src).trim().replace(/\r\n/g, "\n")}`).join("\n\n").replace(/<\/script/gi, "<\\/script");
 let first = true;
 html = html.replace(scriptTag, () => {
@@ -29,7 +29,7 @@ html = html.replace(scriptTag, () => {
   return `<script>\n${js}\n</script>\n`;
 });
 
-// Allow exactly these inline blocks by hash
+// CSP allows inline blocks only by sha256 hash; new inline code must have its hash added here.
 const csp = /content="(default-src 'none'; script-src [^"]*)"/;
 if (!csp.test(html)) throw new Error("index.html: CSP meta not found");
 html = html.replace(csp, (_, policy) => {
@@ -39,7 +39,7 @@ html = html.replace(csp, (_, policy) => {
   return `content="${updated}"`;
 });
 
-// Fail loudly rather than deploying a page that silently lost a module or its styles
+// Throw rather than deploy a page that silently lost a module or its styles.
 if (/<script\s+src=/i.test(html)) throw new Error("index.html: a script tag was not inlined");
 if (!/script-src 'sha256-/.test(html)) throw new Error("index.html: the script hash was not applied");
 if (!/style-src 'sha256-/.test(html)) throw new Error("index.html: the style hash was not applied");
@@ -49,7 +49,7 @@ if (/<\/style/i.test(css)) throw new Error("style.css: a literal </style would e
 const out = join(root, "oogaboogaland.html");
 writeFileSync(out, html);
 const kb = (n) => `${(n / 1024).toFixed(0)} KB`;
-// Per-module sizes make a payload regression visible instead of a 4-digit total
+// Per-module sizes make a payload regression visible instead of one 4-digit total.
 const sizes = sources.map((src) => [src, read(src).trim().length]).sort((a, b) => b[1] - a[1]);
 for (const [src, bytes] of sizes.slice(0, 8)) console.log(`  ${kb(bytes).padStart(9)}  ${src}`);
 console.log(`built ${out} (${kb(html.length)}, gzip ${kb(gzipSync(html).length)}, ${sources.length} scripts, js ${kb(js.length)}, css ${kb(css.length)})`);

@@ -1,4 +1,3 @@
-// The inner fruit shell and stone platform each receive a wall-style cue.
 (() => {
   "use strict";
   const BL = window.BL = window.BL || {}, { mat4 } = BL.math;
@@ -6,8 +5,8 @@
   const create = ({ pile, altar, platform = false, cameraClear = null, cameraBoundsState = null, occlusionVersion = null }) => {
     const partialOcclusion = !platform && !!cameraClear;
     const owner = platform ? altar.node : pile.core, roots = platform ? [owner] : [owner, pile.shell], ordinary = [platform ? altar.slab : pile.core];
-    // Keep decorative fruit under the mound owner, but only register its
-    // continuous shell. The platform has independent visibility and fading.
+    // Keep decorative fruit under the mound owner but register only its continuous shell.
+    // The platform has independent visibility and fading.
     if (!platform) for (const slot of pile.slots) roots.push(slot.node);
     const includes = (node) => node === ordinary[0];
     const geometryCache = new Map(), ordinaryWorld = new Float64Array(ordinary.length * 16), ordinaryVisible = new Uint8Array(ordinary.length);
@@ -64,8 +63,8 @@
       return visible(owner);
     };
     const distance = (x, y, z) => live ? Math.hypot(Math.max(0, bounds[0] - x, x - bounds[3]), Math.max(0, bounds[1] - y, y - bounds[4]), Math.max(0, bounds[2] - z, z - bounds[5])) : Infinity;
-    // Provider hooks supplement ordinary registered meshes. There are no
-    // additional instanced surfaces: only the registered shell counts.
+    // Provider hooks supplement ordinary registered meshes.
+    // There are no additional instanced surfaces: only the registered shell counts.
     const perceived = () => false, cameraVisibility = () => 0, boxClear = () => true, inView = () => false;
     const rasterEdge = (ax, ay, ad, bx, by, bd) => {
       const dx = bx - ax, dy = by - ay;
@@ -115,7 +114,7 @@
         }
       }
     };
-    const mesh = (g, m, depthOnly = false) => {
+    const mesh = (g, m, depthOnly = false, withDepth = depthOnly) => {
       const v = g.source.verts, transformed = g.transformed, indices = g.indices;
       for (let a = 0; a < v.length; a += 3) {
         const x = m[0] * v[a] + m[4] * v[a + 1] + m[8] * v[a + 2] + m[12], y = m[1] * v[a] + m[5] * v[a + 1] + m[9] * v[a + 2] + m[13], z = m[2] * v[a] + m[6] * v[a + 1] + m[10] * v[a + 2] + m[14];
@@ -134,26 +133,26 @@
         for (let a = 0; a < count; a++) {
           screen[a * 2] = width / 2 - clipped[a * 3] * focal / clipped[a * 3 + 2]; screen[a * 2 + 1] = height / 2 + clipped[a * 3 + 1] * focal / clipped[a * 3 + 2];
         }
-        if (depthOnly) { rasterDepth(count); continue; }
+        if (withDepth) rasterDepth(count);
+        if (depthOnly) continue;
         const reverse = (screen[2] - screen[0]) * (screen[5] - screen[1]) - (screen[3] - screen[1]) * (screen[4] - screen[0]) < 0;
         maskCtx.moveTo(screen[0], screen[1]);
         for (let a = 1; a < count; a++) { const j = (reverse ? count - a : a) * 2; maskCtx.lineTo(screen[j], screen[j + 1]); }
-        // Explicitly return to the first vertex. Closing thousands of tiny
-        // subpaths makes Canvas repeatedly revisit the growing path; fill
-        // already closes each polygon and this also seals its seam stroke.
+        // Return to the first vertex explicitly; closing tiny subpaths makes Canvas revisit the growing path.
+        // fill already closes each polygon, and this also seals the seam stroke.
         maskCtx.lineTo(screen[0], screen[1]); state.faces++;
       }
       if (!depthOnly) { maskCtx.fill(); maskCtx.stroke(); }
     };
-    // Resolve mixed visibility only on the shell's nearest surface. Whole
-    // patches use exact volume certificates; only uncertain boundary pixels
-    // need rays. Decorative bananas never participate in this bounded pass.
+    // Resolve mixed visibility only on the shell's nearest surface; whole patches use exact volume certificates.
+    // Only uncertain boundary pixels need rays; decorative bananas never join this bounded pass.
     const classifyTile = (x0, y0, x1, y1) => {
-      let minDepth = Infinity, maxDepth = 0;
+      let minInverse = Infinity, maxInverse = 0;
       for (let y = y0; y < y1; y++) for (let x = x0; x < x1; x++) {
         const d = expanded[y * depthWidth + x];
-        if (d > 0) { minDepth = Math.min(minDepth, 1 / d); maxDepth = Math.max(maxDepth, 1 / d); }
+        if (d > 0) { minInverse = Math.min(minInverse, d); maxInverse = Math.max(maxInverse, d); }
       }
+      const minDepth = 1 / maxInverse, maxDepth = 1 / minInverse;
       if (!maxDepth) return;
       state.occlusionTiles++;
       let classification = 0;
@@ -166,8 +165,7 @@
           minX = Math.min(minX, wx); minY = Math.min(minY, wy); minZ = Math.min(minZ, wz);
           maxX = Math.max(maxX, wx); maxY = Math.max(maxY, wy); maxZ = Math.max(maxZ, wz);
         }
-        // Certify empty ray bounds as well as solid prop coverage. Most of
-        // a large exposed shell is clear; only mixed boundaries need pixels.
+        // Certify empty ray bounds as well as solid prop coverage; only mixed boundaries need pixels.
         // Exhaustive rock-plane searches remain a whole-shell operation.
         classification = cameraBoundsState(minX, minY, minZ, maxX, maxY, maxZ, true);
       }
@@ -188,7 +186,7 @@
       state.occlusionRays++;
       if (!cameraClear(cameraX + dx * start, cameraY + dy * start, cameraZ + dz * start, cameraX + dx * end, cameraY + dy * end, cameraZ + dz * end)) hiddenCtx.fillRect(x0, y0, 1, 1);
     };
-    const updateHidden = (camera) => {
+    const updateHidden = (camera, withMask = false) => {
       const revision = occlusionVersion ? occlusionVersion() : 0;
       if (clippedUpdate === state.updates && clippedRevision === revision) return;
       clippedUpdate = state.updates; clippedRevision = revision;
@@ -200,11 +198,13 @@
         depthWidth = Math.max(1, Math.ceil(width * scale)); depthHeight = Math.max(1, Math.ceil(height * scale));
         depthScaleX = depthWidth / width; depthScaleY = depthHeight / height; depth.fill(0); expanded.fill(0);
         depthMinX = depthWidth; depthMinY = depthHeight; depthMaxX = depthMaxY = -1;
-        for (let i = 0; i < ordinary.length; i++) if (ordinaryVisible[i]) mesh(geometryOf(ordinary[i].geometry), ordinary[i].world, true);
-        // Carry nearest surface depth into the existing outer rim. This does
-        // not grow the silhouette or draw a new rim along an occluder edge.
+        // A changed view needs both outputs from these identical projected triangles. Emit the silhouette here
+        // instead of walking them twice.
+        for (let i = 0; i < ordinary.length; i++) if (ordinaryVisible[i]) mesh(geometryOf(ordinary[i].geometry), ordinary[i].world, !withMask, true);
+        // Carry nearest surface depth into the existing outer rim.
+        // This does not grow the silhouette or draw a new rim along an occluder edge.
         const pad = Math.max(2, Math.ceil(5 * Math.max(depthScaleX, depthScaleY)));
-        // Outside the rasterised bounds every neighbourhood is empty and stays 0
+        // Outside the rasterised bounds every neighbourhood is empty and stays 0.
         for (let y = Math.max(0, depthMinY - pad); y <= Math.min(depthHeight - 1, depthMaxY + pad); y++) for (let x = Math.max(0, depthMinX - pad); x <= Math.min(depthWidth - 1, depthMaxX + pad); x++) {
           const at = y * depthWidth + x;
           let d = depth[at];
@@ -217,6 +217,7 @@
       hiddenCtx.clearRect(0, 0, depthWidth, depthHeight); hiddenCtx.fillStyle = "#ffffff";
       cameraX = camera.position.x; cameraY = camera.position.y; cameraZ = camera.position.z;
       classifyTile(0, 0, depthWidth, depthHeight);
+      return withMask;
     };
     const buildContrast = (scale) => {
       if (!dark) {
@@ -244,6 +245,7 @@
     const draw = (camera, ctx, alpha, screenWidth, screenHeight, contrast = 0, guides = null) => {
       if (!live || alpha <= 0) return;
       const scale = Math.min(1, SIZE / Math.max(screenWidth, screenHeight)), w = Math.max(1, Math.ceil(screenWidth * scale)), h = Math.max(1, Math.ceil(screenHeight * scale));
+      const clipHidden = partialOcclusion && !guides?.rockOnly;
       mat4.lookAt(view, camera.position, camera.target, camera.up || UP);
       let changed = version !== renderedVersion || w !== width || h !== height || lastView[16] !== camera.fov || lastView[17] !== camera.near || lastView[18] !== camera.far;
       for (let i = 0; i < 16; i++) if (lastView[i] !== view[i]) changed = true;
@@ -253,21 +255,24 @@
         lastView.set(view); lastView[16] = camera.fov; lastView[17] = camera.near; lastView[18] = camera.far; renderedVersion = version;
         focal = height / 2 / Math.tan(camera.fov / 2); near = camera.near;
         maskCtx.clearRect(0, 0, width, height); maskCtx.fillStyle = maskCtx.strokeStyle = "#ffffff"; maskCtx.lineWidth = 0.6; maskCtx.lineJoin = "round";
-        state.faces = 0;
-        for (let i = 0; i < ordinary.length; i++) if (ordinaryVisible[i]) mesh(geometryOf(ordinary[i].geometry), ordinary[i].world);
+        state.faces = 0; state.updates++;
+        if (!clipHidden || !updateHidden(camera, true)) {
+          for (let i = 0; i < ordinary.length; i++) if (ordinaryVisible[i]) mesh(geometryOf(ordinary[i].geometry), ordinary[i].world);
+        }
         rimCtx.clearRect(0, 0, width, height); rimCtx.globalCompositeOperation = "source-over";
         const spread = Math.max(1.5, 2.25 * scale);
         for (let y = -1; y <= 1; y++) for (let x = -1; x <= 1; x++) if (x || y) rimCtx.drawImage(mask, x * spread, y * spread);
-        rimCtx.globalCompositeOperation = "destination-out"; rimCtx.drawImage(mask, 0, 0); contrastReady = false; state.updates++;
+        rimCtx.globalCompositeOperation = "destination-out"; rimCtx.drawImage(mask, 0, 0); contrastReady = false;
       }
       contrast = Math.max(0, Math.min(1, contrast));
-      if (contrast > 0 && !contrastReady) buildContrast(scale);
       // A near-plane material cap already clips its own covered pixels.
       // Normal hidden-character views instead clip the shell by actual depth.
-      if (!partialOcclusion || guides?.rockOnly) { paint(ctx, alpha, screenWidth, screenHeight, contrast); return; }
-      updateHidden(camera);
-      if (covered === 1) return;
-      if (covered === 2) { paint(ctx, alpha, screenWidth, screenHeight, contrast); return; }
+      if (clipHidden) {
+        if (!changed) updateHidden(camera);
+        if (covered === 1) return;
+      }
+      if (contrast > 0 && !contrastReady) buildContrast(scale);
+      if (!clipHidden || covered === 2) { paint(ctx, alpha, screenWidth, screenHeight, contrast); return; }
       if (layerUpdate !== state.occlusionUpdates || layerContrast !== contrast) {
         if (layer.width !== width || layer.height !== height) { layer.width = width; layer.height = height; }
         layerCtx.clearRect(0, 0, width, height); paint(layerCtx, 1, width, height, contrast);

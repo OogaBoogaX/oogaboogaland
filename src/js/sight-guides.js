@@ -1,4 +1,4 @@
-// Nearby surfaces the Ooga can see in any direction, hidden from the camera.
+// Nearby surfaces the Ooga can see in any direction but the camera cannot.
 (() => {
   "use strict";
   const BL = window.BL = window.BL || {};
@@ -33,8 +33,7 @@
     const reserve = (source, structure) => {
       const edges = source ? source.capacity || source.count : 0;
       output.structureSourceCount = structure ? structure.count : 0;
-      // Reserve from the scene's geometry, not a competition between visible
-      // objects. Retain the high-water buffers across camera/character motion.
+      // Reserve from scene geometry, not from visible objects; keep high-water buffers across camera/actor motion.
       reserveLines(edges * 4 + (structure ? structure.count * 8 : 0));
       reserveOwners(source ? source.ownerCapacity || source.nearCount || source.count : 0);
       if (edges > ownerSlots.length) { ownerSlots = grow(ownerSlots, edges); output.bufferGrowths++; }
@@ -49,8 +48,8 @@
       const hx = x - eye.x, hy = y - eye.y, hz = z - eye.z, span = Math.hypot(hx, hy, hz);
       const end = Math.max(0, 1 - 0.018 / Math.max(span, 1e-9));
       output.actorRays++;
-      // Perception has no facing cone, but nearby walls, ceilings and objects
-      // still block it. Stop on this side of the surface being identified.
+      // Perception has no facing cone, but nearby walls, ceilings and objects still block it; stop short of the
+      // surface being identified.
       return segmentClear(eye.x, eye.y, eye.z, eye.x + hx * end, eye.y + hy * end, eye.z + hz * end)
         && actorClear(eye.x, eye.y, eye.z, eye.x + hx * end, eye.y + hy * end, eye.z + hz * end, actor, targetOwner);
     };
@@ -59,18 +58,16 @@
       const depth = dx * observer[9] + dy * observer[10] + dz * observer[11], start = observer[17] / depth;
       const right = dx * observer[3] + dy * observer[4] + dz * observer[5], up = dx * observer[6] + dy * observer[7] + dz * observer[8];
       if (depth < observer[17] || depth > observer[18] || Math.abs(right) > depth * tanX || Math.abs(up) > depth * tanY) return false;
-      // Stop just in front of a surface, so the edge's own solid face is not
-      // mistaken for a wall blocking it. Intervening geometry still occludes.
+      // Stop 0.018 short of the surface so its own solid face is not read as a blocker.
+      // Intervening geometry still occludes.
       const k = Math.max(0, 1 - 0.018 / distance);
       if (start >= k) return false;
       x = ox + dx * k; y = oy + dy * k; z = oz + dz * k;
       output.rays++;
-      // Geometry clipped off behind the near plane cannot hide a rendered
-      // item. The selected body is excluded from these contextual cues.
+      // Geometry clipped behind the near plane cannot hide a rendered item; the selected body is excluded.
       const ax = ox + dx * start, ay = oy + dy * start, az = oz + dz * start;
       const blocked = !segmentClear(ax, ay, az, x, y, z) || !objectClear(ax, ay, az, x, y, z, actor, targetOwner);
-      // A rear or buried surface already covered by this same object cannot
-      // make its unobstructed exterior count as hidden from the camera.
+      // A rear or buried surface of the same object must not make its unobstructed exterior count as hidden.
       return blocked && (!targetOwner || !ownerClear || ownerClear(targetOwner, ax, ay, az, x, y, z));
     };
     const eligible = (x, y, z, targetOwner, edgeX, edgeY, edgeZ, object) => {
@@ -82,8 +79,7 @@
     };
     const pruneOwners = (source) => {
       const registry = source && source.nearOwners, count = source ? registry ? source.nearCount : source.count : 0;
-      // Remove truly absent owners first. Camera frustum/contour changes do
-      // not remove owners from the character's nearby registry.
+      // Remove only truly absent owners: camera frustum/contour changes never drop owners from the near registry.
       for (let slot = 0; slot < output.ownerCount; slot++) {
         const owner = owners[slot];
         if (!owner) continue;
@@ -114,13 +110,8 @@
           const oldHidden = ownerStates[slot] & 2;
           ownerViews[slot] = !ownerInView || ownerInView(owner) ? 1 : 0;
           ownerStates[slot] = ownerPerceived && ownerPerceived(owner, actor, eye.x, eye.y, eye.z, segmentClear) ? 1 : 0;
-          // Remember an offscreen object's hidden state and fade phase. On
-          // return only its camera occlusion is re-evaluated, not recognition.
-          // The rock cap hides pixels even when the rest of an owner is in
-          // clear view. Keep its contour here; the cap clips those pixels at
-          // draw time instead of dropping the whole split object.
-          // Shell providers clip their covered pixels themselves. Seeing a
-          // part of the mound must not discard its still-hidden remainder.
+          // Remember an offscreen owner's hidden state and fade phase; on return only camera occlusion is re-evaluated.
+          // rockOnly and partialOcclusion providers clip their own pixels, so keep the still-hidden remainder.
           if (output.rockOnly || ownerProviders[slot]?.partialOcclusion) ownerStates[slot] |= 2;
           else if (!ownerViews[slot]) ownerStates[slot] |= oldHidden;
           else if ((!ownerPerceived || ownerStates[slot] & 1 || ownerPhases[slot] > 0) && ownerConcealed && ownerConcealed(owner, actor, segmentClear)) ownerStates[slot] |= 2;
@@ -144,8 +135,7 @@
         const steps = Math.max(1, Math.ceil(Math.hypot(dx, dy, dz) / EDGE_STEP));
         for (let i = 0; i <= steps && ownerStates[slot] !== 3; i++) {
           const t = i / steps, x = ax + dx * t, y = ay + dy * t, z = az + dz * t;
-          // Production recognition is authoritative and camera-independent.
-          // Plain line fixtures without an owner query can still use samples.
+          // Production recognition is authoritative and camera-independent; ownerless line fixtures may use samples.
           if (!ownerPerceived && !(ownerStates[slot] & 1) && (x - observer[0]) ** 2 + (y - observer[1]) ** 2 + (z - observer[2]) ** 2 <= RADIUS * RADIUS && actorSees(x, y, z, owner)) ownerStates[slot] |= 1;
           if (!ownerConcealed && !(ownerStates[slot] & 2) && cameraHides(x, y, z, owner)) ownerStates[slot] |= 2;
         }
@@ -170,8 +160,8 @@
         if (phase > 0 && ownerProviders[slot] && ownerViews[slot] && ownerStates[slot] & 2) output.providerCount++;
       }
       for (let i = output.retainedCount; i < oldRetained; i++) retainedOwners[i] = null;
-      // Geometry stays world-anchored and cached while only opacity changes.
-      // Drop a completed fade without repeating perception or edge queries.
+      // Geometry stays world-anchored and cached while only opacity changes; drop a finished fade without redoing
+      // perception or edge queries.
       let kept = 0;
       output.objectCount = output.structureCount = 0;
       for (let n = 0; n < output.count; n++) {
@@ -215,17 +205,15 @@
         if (lo >= hi || !plane(cz - observer[17], ez - observer[17]) || !plane(observer[18] - cz, observer[18] - ez)
           || !plane(cz * tanX + cx, ez * tanX + ex) || !plane(cz * tanX - cx, ez * tanX - ex)
           || !plane(cz * tanY + cy, ez * tanY + ey) || !plane(cz * tanY - cy, ez * tanY - ey)) continue;
-        // Structure is clipped by perception. A recognized object retains its
-        // whole contour; only overlaps between its own parts remove edges.
+        // Structure is clipped by perception; a recognized object keeps its full contour, only self-overlaps cut edges.
         const start = lo, end = hi, length = Math.hypot(dx, dy, dz) * (end - start);
         const za = cz + (ez - cz) * start, zb = cz + (ez - cz) * end;
         const pixelLength = OBSERVER_PIXELS / (2 * tanX) * Math.hypot((cx + (ex - cx) * end) / zb - (cx + (ex - cx) * start) / za, (cy + (ey - cy) * end) / zb - (cy + (ey - cy) * start) / za);
         let t0 = start, wasHidden = eligible(ax + dx * t0, ay + dy * t0, az + dz * t0, targetOwner, dx, dy, dz, kind), run = wasHidden ? t0 : -1;
         let q = 0;
         while (q < 1) {
-          // Bound every interval in both world space and the camera's projected
-          // view, including pairs whose endpoint visibility happens to agree.
-          // Perspective-correct spacing catches thin blockers and narrow slits.
+          // Bound every interval in world space and in the camera's projection, even when endpoint visibility agrees;
+          // perspective-correct spacing catches thin blockers and narrow slits.
           const s = q * zb / (za * (1 - q) + q * zb), nextS = Math.min(1, s + 1 / Math.max(1, pixelLength));
           const projectedQ = nextS * za / (zb * (1 - nextS) + nextS * za);
           q = Math.min(1, q + EDGE_STEP / Math.max(length, 1e-9), projectedQ);
@@ -271,8 +259,7 @@
       output.index = structure ? structure.index : -1; output.basement = !!(structure && structure.basement);
       if (objectsEnabled) { perceiveObjects(objects); advanceFades(dt); }
       else {
-        // Any visible part of the Ooga, or first person, hides every cue
-        // immediately. Keep remembered owners without doing outline work.
+        // Any visible part of the Ooga, or first person, hides every cue; keep remembered owners, skip outline work.
         pruneOwners(objects);
         for (let n = 0; n < output.retainedCount; n++) retainedOwners[n] = null;
         output.retainedCount = output.providerCount = output.fading = 0;

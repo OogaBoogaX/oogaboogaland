@@ -1,4 +1,4 @@
-// Upper cave boundaries and the solid stone slabs sealing unopened entrances.
+// Upper cave boundaries plus the solid stone slabs sealing unopened entrances.
 (() => {
   "use strict";
   const BL = window.BL = window.BL || {}, EPS = 1e-5;
@@ -45,7 +45,7 @@
     };
     for (let index = 0; index < island.mouths.length; index++) {
       const mouth = island.mouths[index], slot = slots.find((entry) => entry.id === mouth.id);
-      // These openings continue into the existing HQ ramp contexts.
+      // Headquarters, c730 and c5 mouths are skipped here: they continue into the existing HQ ramp contexts.
       if (!slot || slot.status === "headquarters" || slot.id === "c730" || slot.id === "c5") continue;
       if (slot.status === "dark") continue;
       byCave.set(index + 1, descriptor("cave", slot, mouth, index + 1)); stats.caves++;
@@ -74,8 +74,7 @@
         const direction = positive ? 1 : -1, ax = nx * direction, az = nz * direction, caveIndex = context.source.caveIndex;
         if (!island.cavityAt(x + ax * 0.025, z + az * 0.025, column, caveIndex, y) || column.caveIndex !== caveIndex) continue;
         const floor = column.floor, ceiling = column.ceiling;
-        // The entrance is lower than the room. Its vertical ceiling step
-        // has this cave on both horizontal sides and is not a side wall.
+        // Skip ceiling risers: entrance below the room, same cave air on both horizontal sides, not a side wall.
         if (island.cavityAt(x - ax * 0.025, z - az * 0.025, column, caveIndex, y) && column.caveIndex === caveIndex) { stats.ceilingRisers++; continue; }
         polygon = clip(clip(polygon, 1, floor, 1), 1, ceiling, -1);
         if (!positive) polygon.reverse();
@@ -89,9 +88,8 @@
         const dx = point[0] - mouth.x, dz = point[2] - mouth.z, x = dx * cr - dz * sr, z = dx * sr + dz * cr;
         minX = Math.min(minX, x); maxX = Math.max(maxX, x); back = Math.min(back, z);
       }
-      // The stair-stepped voxel facets still describe three authored walls.
-      // Group their entry shoulders with the adjoining side, not by each
-      // individual X/Z face normal in the rotated voxel grid.
+      // Stair-stepped voxel facets still describe three authored walls.
+      // Group entry shoulders with the adjoining side, not by each X/Z face normal in the rotated voxel grid.
       for (const face of context.faces) {
         let x = 0, z = 0;
         for (const point of face.points) { x += point[0] - mouth.x; z += point[2] - mouth.z; }
@@ -100,9 +98,8 @@
         face.wall = Math.abs(along - back) < Math.min(Math.abs(across - minX), Math.abs(across - maxX)) ? 2 : across < 0 ? 0 : 1;
       }
     }
-    // The joined stone core fills the rim's opening through its full depth.
-    // Outline its six outer surfaces as one wall; the painted voxel seams
-    // and thin moss dressing do not introduce extra structural contours.
+    // Sealed core fills the rim's opening through its full depth: outline its six outer surfaces as one wall.
+    // Painted voxel seams and thin moss dressing add no structural contours.
     const { mat4 } = BL.math, world = mat4.create(), local = mat4.create(), chain = [];
     for (const seal of sealed) {
       const mouth = seal.mouth, slot = slots.find((entry) => entry.id === mouth.id);

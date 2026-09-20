@@ -7,7 +7,7 @@
   const SEED = 9137;
   const BUTTERFLY_CAP = 24, FIREFLY_CAP = 48, EMBER_CAP = 16;
   const FRACTION = { high: 1, medium: 0.5, low: 0.25 };
-  // Seconds between one individual appearing or leaving
+  // FADE_STEP: seconds between one individual appearing or leaving.
   const FADE_STEP = 0.12;
   const BURST_MAX = 8;
   const BURST_DAMP = 2;
@@ -15,7 +15,7 @@
     const node = createNode({ geometry, instanceData: new Float32Array(cap * 20), instanceCount: 0, instanceVersion: 0, matrixLiving });
     return { node, cap, shown: 0, fade: 0, matrixLiving, hx: new Float32Array(cap), hz: new Float32Array(cap), hy: new Float32Array(cap), phase: new Float32Array(cap), speed: new Float32Array(cap) };
   };
-  // Yaw a about y, x-scale sx, translation, glow
+  // writeInstance args: yaw a about y, x-scale sx, translation, glow.
   const writeInstance = (data, o, a, sx, x, y, z, glow, matrixLiving) => {
     const c = Math.cos(a), s = Math.sin(a);
     data[o] = c * sx;
@@ -49,7 +49,6 @@
     batch.fade = 0;
     batch.shown += batch.shown < target ? 1 : -1;
   };
-  // Butterflies, fireflies and embers for one scene
   const create = ({ root, renderer, flowers, fire, secondaryFire = null, meadowRadius, heightAt }) => {
     const rand = mulberry32(SEED);
     const butterflies = [makeBatch(hubModels.butterfly(0), BUTTERFLY_CAP, true), makeBatch(hubModels.butterfly(1), BUTTERFLY_CAP, true)];
@@ -162,7 +161,7 @@
       finish(embers);
       if (secondaryEmbers) finish(secondaryEmbers);
     };
-    // Re-home a few fireflies to a shaken tree and scatter them outward
+    // Re-homes a few existing fireflies to the shaken tree and scatters them outward; spawns none.
     const burst = (x, z) => {
       const count = Math.min(BURST_MAX, fireflies.shown);
       const y = heightAt(x, z);

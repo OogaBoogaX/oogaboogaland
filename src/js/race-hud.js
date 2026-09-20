@@ -1,4 +1,3 @@
-// Race HUD: the garage board, the in-race strip, countdown, results, pause, minimap and speed lines
 (() => {
   "use strict";
   const BL = window.BL = window.BL || {};
@@ -34,7 +33,8 @@
       listeners.push(() => target.removeEventListener(type, fn));
     };
     for (const node of [el.rank, el.lap, el.time, el.speed, el.center, el.notice, el.itemName]) if (!node.firstChild) node.append("");
-    const selection = { racer: roster[0].name, mount: "kart", track: tracks[0].id };
+    const selection = { racer: roster[0]?.name || null, mount: "kart", track: tracks[0].id };
+    for (const button of el.race.querySelectorAll('[data-action="race-start"], [data-action="cup-start"], [data-action="race-again"]')) button.disabled = !roster.length;
     const buttons = { racer: new Map(), mount: new Map(), track: new Map() };
     const mark = (kind) => {
       for (const [key, b] of buttons[kind]) b.setAttribute("aria-pressed", String(key === selection[kind]));
@@ -84,7 +84,7 @@
         const state = document.createElement("span");
         state.className = "roster-state";
         state.dataset.state = stateOf(c.name);
-        state.textContent = { working: "EATING", sleeping: "ZZZ", away: "AWAY" }[state.dataset.state];
+        state.textContent = BL.hud.STATE_LABELS[state.dataset.state];
         b.append(name, state);
       })));
       el.mounts.replaceChildren(...mounts.map((m) => row("mount", m.id, (b) => {
@@ -118,7 +118,7 @@
         r.note.textContent = b ? `best ${formatTime(b.race)} · lap ${formatTime(b.lap)} · ${t.laps} laps` : `${t.laps} laps · gold under ${formatTime(t.targets.gold)}`;
       }
     };
-    // On touch layouts the minimap sits under the left readout, clear of the stick; measured when the strip shows
+    // On touch the minimap sits under the left readout, clear of the stick; mapTop is measured when the strip shows.
     let mapTop = 0;
     const coarse = window.matchMedia("(pointer: coarse)").matches;
     const measure = () => {
@@ -206,7 +206,7 @@
       li.append(name, value);
       return li;
     };
-    // rows: this race; standings: cup points so far; next: label for the next-race button, or null
+    // rows: this race; standings: cup points so far; next: label for the next-race button, or null.
     const results = (rows, summary, { note = "", standings = null, next = null } = {}) => {
       el.podium.replaceChildren(...rows.map((r) => podiumRow(r, r.finished ? `${r.estimated ? "≈ " : ""}${formatTime(r.time)}` : "DNF")));
       el.cupNote.textContent = note;
@@ -226,7 +226,6 @@
         el.garageCup.textContent = `${cup.medal.toUpperCase()} CUP · ${cup.points} pts`;
       }
     };
-    // Minimap in the top-left, racers as dots, the visitor as a ring
     const minimap = (ctx, track, list, player, w, h) => {
       const size = Math.min(coarse ? 100 : MAP_SIZE, w * 0.28), x0 = MAP_PAD + 8, y0 = coarse ? mapTop : h - size - 30, pts = track.mapPts;
       ctx.save();
@@ -262,7 +261,6 @@
       }
       ctx.restore();
     };
-    // Streaks from the edges when the racer is boosting or flat out
     const speedLines = (ctx, k, w, h, elapsed) => {
       if (k <= 0) return;
       ctx.save();

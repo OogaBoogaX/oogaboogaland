@@ -1,10 +1,5 @@
-// The jumbotron: a wooden stadium board on the north rim that shows
-// EntropyLab contributor stats. Ported from rules-without-rulers/oogatron
-// (its jumbotron/data.js + views.js) into the BL namespace. Data is baked in
-// at build time as BL.jumbotronData (scripts/jumbotron-data.mjs); the page
-// never fetches. The board renders onto a small offscreen 2D canvas, then
-// becomes run-merged emissive quads — the same technique the HQ bed linens
-// use for LifeHash prints — so nothing here needs a texture path.
+// Jumbotron board, ported from rules-without-rulers/oogatron (its jumbotron/data.js + views.js).
+// Data baked in as BL.jumbotronData by scripts/jumbotron-data.mjs; the page never fetches.
 (() => {
   "use strict";
   const BL = window.BL = window.BL || {};
@@ -26,12 +21,12 @@
     woodDark: "#5c4425",
     screenBezel: "#1d2326",
     standDark: "#4a3319",
-    nail: "#3a2a18"
+    nail: "#3a2a18",
+    woodJoint: "#42301a"
   };
 
   const BOARD_W = 192, BOARD_H = 108;
 
-  // ---------- 5x7 bitmap font (deterministic, chunky) ----------
   const FONT = {
     A: [0b01110, 0b10001, 0b10001, 0b11111, 0b10001, 0b10001, 0b10001],
     B: [0b11110, 0b10001, 0b11110, 0b10001, 0b10001, 0b10001, 0b11110],
@@ -107,7 +102,6 @@
     return text.length <= maxChars ? text : text.slice(0, maxChars);
   };
 
-  // ---------- stats model (oogatron data.js, schema_version 1) ----------
   const normalizeComments = (c) => ({
     issue: (c && c.issue || 0) | 0, review: (c && c.review || 0) | 0,
     commit: (c && c.commit || 0) | 0, all: (c && c.all || 0) | 0
@@ -177,7 +171,6 @@
     return parts.join("   ***   ");
   };
 
-  // ---------- views (oogatron views.js; identicon upgraded to lifehash) ----
   const lifehashCache = new Map();
   const lifehashFor = (login) => {
     let img = lifehashCache.get(login);
@@ -309,20 +302,23 @@
   };
 
   const TICKER_SPEED = 30;
-  const renderTicker = (ctx, model, _params, t) => {
-    clearBoard(ctx);
-    header(ctx, "LIVE WIRE", model.latestWeek || "");
-    const digest = [
-      ["COMMITS", model.totals.commits, PALETTE.commits],
-      ["PRS", model.totals.prs, PALETTE.prs],
-      ["REVIEWS", model.totals.reviews, PALETTE.reviews],
-      ["COMMENTS", model.totals.comments.all, PALETTE.comments]
-    ];
-    let x = 6;
-    for (const [label, value, color] of digest) {
-      drawText(ctx, String(label), x, 26, PALETTE.dim, 1);
-      drawText(ctx, String(value), x, 36, color, 2);
-      x += 46;
+  // bandOnly repaints just the scrolling strip: the header and digest are the same pixels for the whole view.
+  const renderTicker = (ctx, model, _params, t, bandOnly) => {
+    if (!bandOnly) {
+      clearBoard(ctx);
+      header(ctx, "LIVE WIRE", model.latestWeek || "");
+      const digest = [
+        ["COMMITS", model.totals.commits, PALETTE.commits],
+        ["PRS", model.totals.prs, PALETTE.prs],
+        ["REVIEWS", model.totals.reviews, PALETTE.reviews],
+        ["COMMENTS", model.totals.comments.all, PALETTE.comments]
+      ];
+      let x = 6;
+      for (const [label, value, color] of digest) {
+        drawText(ctx, String(label), x, 26, PALETTE.dim, 1);
+        drawText(ctx, String(value), x, 36, color, 2);
+        x += 46;
+      }
     }
     const text = model.tickerText || "NO DATA";
     const tw = measureText(text, 1) + BOARD_W;
@@ -336,34 +332,47 @@
 
   const VIEWS = { totals: renderTotals, leaderboard: renderLeaderboard, contributor: renderContributor, ticker: renderTicker };
 
-  // ---------- cabinet: plank sign + dark frame + legs, native boxes -------
-  const SW = 16 / 9, SH = 1, BORDER = 0.1, DEPTH = 0.14;
+  const SW = 16 / 9, SH = 1, BORDER = 0.16, DEPTH = 0.14;
+  // Wide thick frame: lit pixels keep a wood margin and sit back of the rails, so edge-on views show wood.
+  const RAIL = (SH + 2 * BORDER) / 7.5;
+  // DROP = how far the stand reaches below the cabinet's middle, so the hub seats it without copying numbers.
+  const LEG_H = 0.34, FOOT_H = 0.06;
+  const DROP = (SH + 2 * BORDER) / 2 + LEG_H + FOOT_H / 2;
+  const OPEN_X = (SW + 2 * BORDER) / 2 - RAIL, OPEN_Y = (SH + 2 * BORDER) / 2 - RAIL;
+  const MARGIN = 0.05;
+  const FIT = Math.min(2 * (OPEN_X - MARGIN) / SW, 2 * (OPEN_Y - MARGIN) / SH);
+  const FX = FIT, FY = FIT;
   const cabinetGeometry = cached(() => {
     const outerW = SW + 2 * BORDER, outerH = SH + 2 * BORDER;
-    const t = outerH / 9, zr = DEPTH / 2 - 0.02;
+    const t = RAIL;
+    // Rails sit forward of the backing, never flush: coplanar faces make the board sparkle from either side.
     const parts = [
-      box({ w: outerW, h: outerH, d: DEPTH, color: PALETTE.plank }),
-      box({ w: outerW, h: t, d: 0.05, color: PALETTE.woodDark, offset: { y: outerH / 2 - t / 2, z: zr } }),
-      box({ w: outerW, h: t, d: 0.05, color: PALETTE.woodDark, offset: { y: -(outerH / 2 - t / 2), z: zr } }),
-      box({ w: t, h: outerH, d: 0.05, color: PALETTE.woodDark, offset: { x: outerW / 2 - t / 2, z: zr } }),
-      box({ w: t, h: outerH, d: 0.05, color: PALETTE.woodDark, offset: { x: -(outerW / 2 - t / 2), z: zr } }),
-      box({ w: SW + 0.05, h: SH + 0.05, d: 0.018, color: PALETTE.screenBezel, offset: { z: DEPTH / 2 + 0.005 } })
+      // Backing is 0.024 narrower than the rails (0.012 a side): matching their extent flickers coplanar seams.
+      box({ w: outerW - 0.024, h: outerH - 0.024, d: 0.06, color: PALETTE.plank, offset: { z: -0.04 } }),
+      box({ w: outerW - 0.008, h: t, d: DEPTH, color: PALETTE.woodDark, offset: { y: outerH / 2 - t / 2, z: 0.02 } }),
+      box({ w: outerW - 0.008, h: t, d: DEPTH, color: PALETTE.woodDark, offset: { y: -(outerH / 2 - t / 2), z: 0.02 } }),
+      box({ w: t, h: outerH - 0.008, d: DEPTH - 0.008, color: PALETTE.woodDark, offset: { x: outerW / 2 - t / 2, z: 0.02 } }),
+      box({ w: t, h: outerH - 0.008, d: DEPTH - 0.008, color: PALETTE.woodDark, offset: { x: -(outerW / 2 - t / 2), z: 0.02 } }),
+      box({ w: 2 * OPEN_X + 0.04, h: 2 * OPEN_Y + 0.04, d: 0.06, color: PALETTE.screenBezel, offset: { z: 0.01 } })
     ];
+    // No thin strips: edge-on they fall below a pixel and sparkle against the screen. Depth comes from chunky parts.
     const nx = outerW / 2 - t / 2, ny = outerH / 2 - t / 2;
     for (const [px, py] of [[-nx, ny], [nx, ny], [-nx, -ny], [nx, -ny]]) {
-      parts.push(box({ w: 0.07, h: 0.07, d: 0.028, color: PALETTE.nail, offset: { x: px, y: py, z: DEPTH / 2 + 0.032 } }));
+      parts.push(box({ w: 0.1, h: 0.1, d: 0.014, color: PALETTE.woodJoint, offset: { x: px, y: py, z: DEPTH / 2 + 0.025 } }));
+      parts.push(box({ w: 0.07, h: 0.07, d: 0.028, color: PALETTE.nail, offset: { x: px, y: py, z: DEPTH / 2 + 0.042 } }));
     }
-    const legX = SW / 2 - 0.18, legH = 0.6, bottom = -outerH / 2;
+    const legX = SW / 2 - 0.18, legH = LEG_H, bottom = -outerH / 2;
     for (const sx of [-legX, legX]) {
-      parts.push(box({ w: 0.12, h: legH, d: 0.12, color: PALETTE.woodDark, offset: { x: sx, y: bottom - legH / 2 } }));
-      parts.push(box({ w: 0.3, h: 0.06, d: 0.3, color: PALETTE.standDark, offset: { x: sx, y: bottom - legH - 0.03 } }));
+      // Legs run up into the frame rather than butting flush against its underside.
+      parts.push(box({ w: 0.12, h: legH, d: 0.12, color: PALETTE.woodDark, offset: { x: sx, y: bottom - legH / 2 + 0.015 } }));
+      parts.push(box({ w: 0.3, h: FOOT_H, d: 0.3, color: PALETTE.standDark, offset: { x: sx, y: bottom - legH } }));
     }
     return merge(...parts);
   });
 
-  // ---------- board pixels -> run-merged emissive quads -------------------
-  const SCREEN_Z = DEPTH / 2 + 0.02;
-  const CONTENT_Z = DEPTH / 2 + 0.026;
+  // SCREEN_Z sits back of the rails' faces, just clear of the backing behind it.
+  const SCREEN_Z = 0.046;
+  const CONTENT_Z = 0.053;
   const PX_W = SW / BOARD_W, PX_H = SH / BOARD_H;
 
   const pushQuad = (geo, x0, x1, y0, y1, z, color, emissive) => {
@@ -372,25 +381,27 @@
     geo.faces.push({ i: [base, base + 1, base + 2, base + 3], color, emissive });
   };
 
-  const screenGeometryFrom = (ctx) => {
+  // Only BAND_TOP..BOARD_H scrolls; the header and digest hold still, so the two are built and rebuilt apart.
+  const BAND_TOP = BOARD_H - 26;
+  const screenGeometryFrom = (ctx, y0 = 0, y1 = BOARD_H, withPanel = true) => {
     const geo = { verts: [], faces: [], lines: [] };
-    // Base panel: the dark screen ground; content pixels sit just proud.
-    // Face colors are 0-255, like models.js hexToRgb — the renderer
-    // normalizes at upload.
-    pushQuad(geo, -SW / 2, SW / 2, -SH / 2, SH / 2, SCREEN_Z, [10, 12, 10], 0.35);
-    const data = ctx.getImageData(0, 0, BOARD_W, BOARD_H).data;
-    // Skip background and the scanline tint (it would shimmer at distance).
+    // Face colors are 0-255 like models.js hexToRgb; the renderer normalizes at upload.
+    if (withPanel) pushQuad(geo, -SW / 2, SW / 2, -SH / 2, SH / 2, SCREEN_Z, [10, 12, 10], 0.35);
+    // Read back only the rows being rebuilt, not the whole board.
+    const data = ctx.getImageData(0, y0, BOARD_W, y1 - y0).data;
+    // Skip background (10,12,10) and the scanline tint (19,25,18): it would shimmer at distance.
     const skip = (r, g, b) => (r === 10 && g === 12 && b === 10) || (r === 19 && g === 25 && b === 18);
-    for (let y = 0; y < BOARD_H; y++) {
+    for (let y = y0; y < y1; y++) {
       const wy0 = SH / 2 - (y + 1) * PX_H, wy1 = SH / 2 - y * PX_H;
+      const row = (y - y0) * BOARD_W;
       let x = 0;
       while (x < BOARD_W) {
-        const i = (y * BOARD_W + x) * 4;
+        const i = (row + x) * 4;
         const r = data[i], g = data[i + 1], b = data[i + 2];
         if (skip(r, g, b)) { x++; continue; }
         let run = x + 1;
         while (run < BOARD_W) {
-          const j = (y * BOARD_W + run) * 4;
+          const j = (row + run) * 4;
           if (data[j] !== r || data[j + 1] !== g || data[j + 2] !== b) break;
           run++;
         }
@@ -398,28 +409,22 @@
         x = run;
       }
     }
-    geo.castShadow = false; // thousands of tiny quads have no business in the shadow pass
+    geo.castShadow = false; // Thousands of tiny quads have no business in the shadow pass.
     return geo;
   };
 
-  // ---------- public API --------------------------------------------------
-  // BL.jumbotron.create({ data, position, ry, scale }) ->
-  //   { node, update(elapsed, renderer), setView, nextView, autoRotate,
-  //     showContributor, view, dispose(renderer) }
   const create = ({ data, position = { x: 0, y: 0, z: 0 }, ry = 0, scale = 1 } = {}) => {
     const canvas = document.createElement("canvas");
     canvas.width = BOARD_W;
     canvas.height = BOARD_H;
-    // willReadFrequently: every refresh reads the board back for meshing;
-    // without it Chrome warns after a few readbacks and the console-clean
-    // suite checks would trip on every hub page.
+    // willReadFrequently: each refresh reads the board back; without it Chrome warns and console-clean checks trip.
     const ctx = canvas.getContext("2d", { alpha: false, willReadFrequently: true });
 
     let model = null;
     try {
       model = parseStats(data);
     } catch (e) {
-      model = null; // board shows the awaiting screen; the island must not break on bad data
+      model = null; // Bad data leaves model null (awaiting screen); the island must not break.
     }
 
     let view = { name: "totals", params: undefined };
@@ -429,6 +434,7 @@
     let suspendUntil = 0;
     let lastTickerAt = 0;
     let dirty = true;
+    let bandDirty = false;
     let animated = false;
 
     const cycle = (() => {
@@ -444,14 +450,14 @@
       return c;
     })();
 
-    const renderBoard = (t) => {
+    const renderBoard = (t, bandOnly) => {
       if (!model) {
         clearBoard(ctx);
         drawText(ctx, "OOGATRON", 62, 44, PALETTE.accent, 2);
         drawText(ctx, "AWAITING DATA", 57, 60, PALETTE.dim, 1);
         return false;
       }
-      return !!(VIEWS[view.name] || VIEWS.totals)(ctx, model, view.params, t);
+      return !!(VIEWS[view.name] || VIEWS.totals)(ctx, model, view.params, t, bandOnly);
     };
 
     const node = createNode({
@@ -460,15 +466,31 @@
       scale: { x: scale, y: scale, z: scale },
       geometry: cabinetGeometry()
     });
-    const screenNode = createNode({ geometry: null });
+    // Drawn at board size then scaled in to clear the rails; z is left alone.
+    const screenNode = createNode({ geometry: null, scale: { x: FX, y: FY, z: 1 } });
     addChild(node, screenNode);
+    // The moving part, kept off the still part so a scroll never rebuilds it.
+    const bandNode = createNode({ geometry: null, scale: { x: FX, y: FY, z: 1 } });
+    addChild(node, bandNode);
 
-    const refresh = (t, renderer) => {
-      animated = renderBoard(t);
-      const old = screenNode.geometry;
-      screenNode.geometry = screenGeometryFrom(ctx);
+    const swapGeometry = (target, geometry, renderer) => {
+      const old = target.geometry;
+      if (old === geometry) return;
+      target.geometry = geometry;
       if (old && renderer && renderer.releaseGeometry) renderer.releaseGeometry(old);
-      dirty = false;
+    };
+    const refresh = (t, renderer, wantBand = false) => {
+      // Decided before painting, so the canvas and the geometry always agree.
+      const band = wantBand && view.name === "ticker" && !!screenNode.geometry;
+      animated = renderBoard(t, band);
+      const scrolling = animated && view.name === "ticker";
+      if (band) {
+        swapGeometry(bandNode, screenGeometryFrom(ctx, BAND_TOP, BOARD_H, false), renderer);
+      } else {
+        swapGeometry(screenNode, screenGeometryFrom(ctx, 0, scrolling ? BAND_TOP : BOARD_H, true), renderer);
+        swapGeometry(bandNode, scrolling ? screenGeometryFrom(ctx, BAND_TOP, BOARD_H, false) : null, renderer);
+      }
+      dirty = bandDirty = false;
     };
 
     const api = {
@@ -487,14 +509,14 @@
       autoRotate(seconds) {
         rotateEvery = seconds > 0 ? seconds : 0;
       },
-      // Poke an Ooga -> their stats on the big screen, using public handles.
+      // Poke an Ooga -> their stats on the big screen, keyed by public handles/aliases.
       showContributor(name) {
         if (!model) return false;
         const login = model.byLogin.has(name) ? name : CONTRIBUTOR_ALIASES[String(name).toLowerCase()];
         if (!model.byLogin.has(login)) return false;
         view = { name: "contributor", params: { login } };
         dirty = true;
-        suspendUntil = lastSwitchAt = -1; // resolved on next update from elapsed
+        suspendUntil = lastSwitchAt = -1; // -1 sentinel: resolved on the next update from elapsed.
         api._suspend = 14;
         return true;
       },
@@ -508,24 +530,27 @@
           lastSwitchAt = elapsed;
           api.nextView();
         }
-        // The ticker scrolls; step it gently instead of every frame.
+        // Step the ticker every 0.25s, not every frame; when only the text moved rebuild the band, not the screen.
         if (animated && view.name === "ticker" && elapsed - lastTickerAt >= 0.25) {
           lastTickerAt = elapsed;
-          dirty = true;
+          bandDirty = true;
         }
         if (dirty) refresh(elapsed, renderer);
+        else if (bandDirty) refresh(elapsed, renderer, true);
       },
       dispose(renderer) {
         if (renderer && renderer.releaseGeometry) {
           if (screenNode.geometry) renderer.releaseGeometry(screenNode.geometry);
+          if (bandNode.geometry) renderer.releaseGeometry(bandNode.geometry);
           if (node.geometry) renderer.releaseGeometry(node.geometry);
         }
         screenNode.geometry = null;
+        bandNode.geometry = null;
         node.geometry = null;
       }
     };
     return api;
   };
 
-  BL.jumbotron = { create, parseStats, PALETTE };
+  BL.jumbotron = { create, parseStats, PALETTE, DROP };
 })();

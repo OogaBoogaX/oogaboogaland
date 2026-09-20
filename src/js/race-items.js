@@ -1,4 +1,4 @@
-// Race items: pickups, crates, boost pads, thrown rocks, dropped peels, boulders and skid marks, every one a fixed pool
+// Pickups, crates, boost pads, thrown rocks, peels, boulders, skid marks - every one a fixed pool.
 (() => {
   "use strict";
   const BL = window.BL = window.BL || {};
@@ -11,7 +11,7 @@
   const ROCK_SPEED = 26, ROCK_LIFE = 2.6, PEEL_LIFE = 25, BOOST_PAD = 0.9, TURBO = 1.3, SHOUT_RADIUS = 7;
   const ITEMS = { rock: "Rock", peel: "Peel", turbo: "Turbo", shout: "Shout" };
   const ITEM_NAMES = ["rock", "peel", "turbo", "shout"];
-  // Leaders draw defensive items, the tail draws catch-up ones
+  // ODDS rows by place: leaders draw defensive items, the tail draws catch-up ones.
   const ODDS = [[0.55, 0.45, 0, 0], [0.35, 0.3, 0.35, 0], [0.25, 0.15, 0.4, 0.2]];
   const SKID_GEO = (() => {
     const geo = models.box({ w: 0.22, h: 0.01, d: 0.7, color: "#2b2521" });
@@ -168,7 +168,7 @@
       fx.say(racer.cave, "OOGA BOOGA!", 1.4);
       return hit;
     };
-    // Space with an item throws it; with a full banana meter it spends the meter on a turbo
+    // Space with an item throws it; with a full banana meter it spends the meter on a turbo.
     const use = (racer) => {
       if (racer.respawn > 0 || racer.spin > 0) return false;
       if (racer.item) {
@@ -333,7 +333,6 @@
           }
         }
       }
-      // Skid marks under drifting wheels
       for (let k = 0; k < list.length; k++) {
         const r = list[k];
         if (!r.drift.active || r.airborne || r.respawn > 0 || r.mount.id === "run") continue;

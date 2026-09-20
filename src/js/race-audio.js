@@ -1,4 +1,5 @@
-// Procedural race sound: one context made on the first gesture, a fixed voice pool gated by gain, one noise loop
+// Procedural race sound: one AudioContext made on the first gesture, fixed voice pool gated by gain.
+// One noise loop serves wind, drift scrub and crowd.
 (() => {
   "use strict";
   const BL = window.BL = window.BL || {};
@@ -8,22 +9,21 @@
   const MASTER = 0.55;
   const STORAGE_KEY = "oogaboogaland.audio";
   const NOTE = (semis) => 220 * Math.pow(2, semis / 12);
-  // Gearbox: the top of each gear as a share of top speed; first gear pulls from idle, every later gear
-  // drops in at DROP_IN revs and winds to the limiter, then the cruise shifts take over flat out
+  // GEARS holds each gear's top as a share of top speed; first gear pulls from idle.
+  // Later gears drop in at DROP_IN revs and wind to the limiter; cruise shifts take over flat out.
   const GEARS = [0.42, 0.78, 1.05];
   const SHIFT_DOWN = 0.05, DROP_IN = 0.55, SHIFT_HOLD = 0.09;
-  // Flat out, the engine settles through two cruise shifts, each lower and quieter, so it never drones
+  // Flat out the engine settles through two cruise shifts, each lower and quieter, so it never drones.
   const CRUISE_AFTER = [1.4, 2.2], CRUISE_PITCH = [1, 0.82, 0.68], CRUISE_LEVEL = [1, 0.78, 0.62];
   const create = () => {
     let ctx = null, master = null, noise = null, ready = false, muted = false;
     try {
       muted = localStorage.getItem(STORAGE_KEY) === "off";
     } catch {
-      // Storage may be unavailable
     }
     const voices = [];
     let voiceNext = 0;
-    // Continuous layers, all started once and shaped by gain
+    // Layers are started once and only ever shaped by gain; never restart them.
     const layers = { engine: null, engineSub: null, engineLow: null, engineGain: null, pop: null, growl: null, growlGain: null, wind: null, drift: null, crowd: null, crowdLfo: null, rain: null, screech: null, screechFilter: null };
     const state = { speed: 0, top: 24, mount: "kart", throttle: 0, drifting: 0, boosting: 0, offroad: 0, crowd: 0, rain: 0, strideT: 0, gear: 0, rpm: 0, cruise: 0, cruiseT: 0, wasOpen: false, popAt: -9, shiftAt: -9 };
     const init = () => {
@@ -45,7 +45,7 @@
         g.connect(to);
         return g;
       };
-      // Voice pool: an oscillator each, silent until an envelope opens its gain
+      // Voice pool: one oscillator each, running silent until an envelope opens its gain.
       for (let i = 0; i < VOICES; i++) {
         const g = gain(0, master);
         const osc = ctx.createOscillator();
@@ -55,7 +55,6 @@
         osc.start();
         voices.push({ osc, gain: g, until: 0 });
       }
-      // White noise loop for wind, drift scrub and the crowd
       const buffer = ctx.createBuffer(1, Math.floor(ctx.sampleRate * NOISE_SECONDS), ctx.sampleRate);
       const data = buffer.getChannelData(0);
       for (let i = 0; i < data.length; i++) data[i] = Math.random() * 2 - 1;
@@ -83,12 +82,10 @@
       const rain = filter("lowpass", 2200, 0.5);
       layers.rain = gain(0, master);
       rain.connect(layers.rain);
-      // Exhaust pops: low thumps of noise on a lift at high revs
       const popLow = filter("lowpass", 320, 1.2);
       layers.pop = gain(0, master);
       popLow.connect(layers.pop);
       noise.connect(popLow);
-      // Tyre screech: a sharp band of noise swept down while its gain rings out
       const screech = filter("bandpass", 1100, 7);
       layers.screech = gain(0, master);
       layers.screechFilter = screech;
@@ -99,7 +96,6 @@
       noise.connect(crowd);
       noise.connect(rain);
       noise.start();
-      // Engine: a sawtooth and a square an octave under it through one low-pass that opens with the revs
       const engineLow = filter("lowpass", 500, 1.6);
       layers.engineLow = engineLow;
       layers.engineGain = gain(0, master);
@@ -125,7 +121,7 @@
       layers.growl.start();
       ready = true;
     };
-    // The browser only lets sound start from a gesture; the first one opens the context
+    // Browsers only start sound from a gesture; the first one opens the context.
     const unlock = () => {
       if (navigator.userActivation && !navigator.userActivation.hasBeenActive) return;
       init();
@@ -145,7 +141,6 @@
       voiceNext = (voiceNext + 1) % VOICES;
       return pick;
     };
-    // One shaped note: type, start and end pitch, attack, hold, release, level, and a delay before it
     const blip = (type, f0, f1, attack, hold, release, level, delay = 0) => {
       if (!ready) return;
       const now = ctx.currentTime + delay, v = voice();
@@ -160,7 +155,6 @@
       v.gain.gain.linearRampToValueAtTime(0, now + attack + hold + release);
       v.until = now + attack + hold + release + 0.02;
     };
-    // A peel-out: level and length scale with how hard the tyres bite
     const screech = (level = 0.14, dur = 0.4) => {
       if (!ready) return;
       const now = ctx.currentTime, g = layers.screech.gain, f = layers.screechFilter.frequency;
@@ -211,7 +205,6 @@
         blip("sawtooth", NOTE(12), NOTE(12), 0.01, 0.5, 0.4, 0.18, 0.55);
       },
     };
-    // Per frame: pitch the engine to speed, open wind with speed, scrub while drifting, murmur near the crowd
     const update = (dt) => {
       if (!ready) return;
       const now = ctx.currentTime;
@@ -220,7 +213,6 @@
       if (running) {
         layers.engineGain.gain.setTargetAtTime(0, now, 0.05);
         layers.growlGain.gain.setTargetAtTime(0, now, 0.05);
-        // Footfalls: a soft thump each stride
         state.strideT += dt * (2 + k * 5);
         if (state.strideT >= 1 && k > 0.1) {
           state.strideT = 0;
@@ -232,16 +224,13 @@
         layers.growlGain.gain.setTargetAtTime(0.05 + k * 0.14, now, 0.08);
       } else {
         layers.growlGain.gain.setTargetAtTime(0, now, 0.05);
-        // Pick the gear with a little hysteresis, then place the revs inside it
         let gear = state.gear;
         while (gear < GEARS.length - 1 && k > GEARS[gear]) gear++;
         while (gear > 0 && k < GEARS[gear - 1] - SHIFT_DOWN) gear--;
         const lo = gear ? GEARS[gear - 1] : 0, hi = GEARS[gear];
         const open = state.throttle > 0.1 || state.boosting;
-        // Revving at the line blips the engine up and down before the wheels turn
         const sweep = clamp((k - lo) / (hi - lo), 0, 1);
         const rpm = k < 0.04 && state.throttle > 0.5 ? 0.45 + 0.5 * Math.abs(Math.sin(now * 4.2)) : gear ? DROP_IN + sweep * (1 - DROP_IN) : sweep;
-        // Flat out in top gear the cruise shifts count up on a timer; any lift or slowdown resets them
         const flat = gear === GEARS.length - 1 && k > 0.9 && open;
         state.cruiseT = flat ? state.cruiseT + dt : 0;
         let cruise = flat ? state.cruise : 0;
@@ -250,7 +239,6 @@
           state.cruiseT = 0;
         }
         if (gear !== state.gear || cruise !== state.cruise) {
-          // A shift: the clutch dips the note and the engine catches its breath before it pulls again
           state.gear = gear;
           state.cruise = cruise;
           const g = layers.engineGain.gain;
@@ -259,7 +247,6 @@
           state.shiftAt = now;
         }
         state.rpm = rpm;
-        // Lifting off near the redline pops the exhaust, twice
         if (state.wasOpen && !open && rpm > 0.7 && now - state.popAt > 1.2) {
           state.popAt = now;
           const g = layers.pop.gain;
@@ -270,10 +257,8 @@
           g.linearRampToValueAtTime(0, now + 0.15);
         }
         state.wasOpen = open;
-        // A lumpy idle at the bottom and a limiter stutter when a gear is wrung out
         const lump = Math.sin(now * 9) * 4 * (1 - rpm);
         const limiter = rpm > 0.96 && gear < GEARS.length - 1 && open ? 0.55 + 0.45 * (Math.sin(now * 95) > 0 ? 1 : 0) : 1;
-        // Loud off the line: low gears carry the most level, and it eases as the box climbs
         const freq = (44 + rpm * 96 + gear * 4 + state.boosting * 30 + lump) * CRUISE_PITCH[cruise];
         const level = ((0.055 + rpm * 0.1) * (1.1 - gear * 0.08) * (open ? 1 : 0.6) + state.boosting * 0.035) * CRUISE_LEVEL[cruise] * limiter;
         layers.engine.frequency.setTargetAtTime(freq, now, 0.035);
@@ -306,10 +291,8 @@
       try {
         localStorage.setItem(STORAGE_KEY, muted ? "off" : "on");
       } catch {
-        // Storage may be unavailable
       }
     };
-    // The scene is leaving: silence everything and close the context
     const dispose = () => {
       if (!ctx) return;
       quiet();

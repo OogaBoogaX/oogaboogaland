@@ -1,23 +1,22 @@
-// The skydiver: one contributor body turning freely on a quaternion, air pushing on it like a flat plate, then a canopy
+// One contributor body turning freely on a quaternion, air pushing on it like a flat plate, then a canopy.
 (() => {
   "use strict";
   const BL = window.BL = window.BL || {};
   const { models, dropModels } = BL;
   const { lerp, damp, quat } = BL.math;
   const { createNode, addChild, removeChild } = BL.scene;
-  // Gravity and the two freefall terminal speeds: belly to the wind, and head down; the drag follows from them
+  // Terminal speeds belly-to-wind 24 and head-down 45; K_SKIN and K_PLATE are derived from them and G.
   const G = 9.8, TERMINAL_FLAT = 24, TERMINAL_DIVE = 45;
   const K_SKIN = G / (TERMINAL_DIVE * TERMINAL_DIVE);
   const K_PLATE = G / (TERMINAL_FLAT * TERMINAL_FLAT) - K_SKIN;
-  // Arms and legs steer harder than a bare plate would: the plate force's horizontal part is scaled, the vertical is not
+  // Arms and legs steer harder than a bare plate: TRACK scales the plate force's horizontal part, not vertical.
   const TRACK = 3.4;
-  // The weathervane outmuscles the stick, so a held input settles at an angle (about sixty-five degrees) and a released one comes back flat
+  // The weathervane outmuscles the stick: a held input settles near 65 degrees, a released one comes back flat.
   const RATE = { pitch: 3, roll: 3, yaw: 2.2 }, RESPONSE = 6, WEATHERVANE = 3.3;
-  // Canopy: the bloom, the trimmed, dived and flared speeds, the flare reserve, the turn and the crab
+  // Canopy constants in order: bloom, trimmed/dived/flared speeds, flare reserve, turn and crab.
   const OPEN_T = 0.7, FORWARD = 6.5, DIVE_FORWARD = 10.5, FLARE_FORWARD = 3, SINK = 5, DIVE_SINK = 8.5, FLARE_SINK = 2.2, FLARE_MAX = 2, TURN = 1.3, CRAB = 3;
-  // How far the body's centre sits above the feet
+  // How far the body's centre sits above the feet, in body heights.
   const FOOT = 0.55;
-  // Under the canopy every touchdown is a landing; without one the impact chooses a crash
   const LANDING = { tumbleSpeed: 6, spine: 0.6 };
   const setVec = (v, x, y, z) => {
     v.x = x;
@@ -29,7 +28,7 @@
     const cave = models.caveman(traits);
     const h = traits.height, legY = cave.root.position.y;
     const body = createNode({ quaternion: quat.create() });
-    // The body's origin is the belly, so the diver turns about its middle
+    // The body's origin is the belly, so the diver turns about its middle.
     cave.root.position.y = legY - FOOT * h;
     const pack = createNode({ position: { x: 0, y: 0.06 * h, z: -0.18 * h }, scale: { x: h, y: h, z: h }, geometry: dropModels.pack() });
     const canopy = createNode({ position: { x: 0, y: 0.45 * h, z: 0 }, scale: { x: 0.01, y: 0.01, z: 0.01 }, geometry: dropModels.canopy(), visible: false });
@@ -48,7 +47,6 @@
       quat.rotateVec(s.up, s.q, 0, 1, 0);
       quat.rotateVec(s.front, s.q, 0, 0, 1);
     };
-    // Sit in the plane, or stand on the roof
     const place = (x, y, z, heading) => {
       setVec(s.p, x, y, z);
       setVec(s.pp, x, y, z);
@@ -69,7 +67,7 @@
       body.visible = true;
       resetLimbs();
     };
-    // Leave the plane belly down with its speed, the head along the flight
+    // Leave the plane belly down with its speed, the head along the flight.
     const jump = (vx, vy, vz, heading) => {
       setVec(s.v, vx, vy - 1.5, vz);
       setVec(s.w, 0, 0, 0);
@@ -89,20 +87,20 @@
       canopy.visible = true;
       return true;
     };
-    // Input: pitch, roll and yaw in -1..1, flare held
+    // Input: pitch, roll and yaw in -1..1, flare held.
     const freefall = (dt, input) => {
       const v = s.v, w = s.w;
       axes();
       const speed = Math.hypot(v.x, v.y, v.z), F = s.front, R = s.right, U = s.up;
       s.speed = speed;
-      // Gravity, the plate pressure along the belly normal, skin drag along the flow
+      // Gravity, plate pressure along the belly normal (s.front), skin drag along the flow.
       const vn = v.x * F[0] + v.y * F[1] + v.z * F[2];
       const plate = -K_PLATE * vn * speed, skin = -K_SKIN * speed;
       v.x += (plate * F[0] * TRACK + skin * v.x) * dt;
       v.y += (-G + plate * F[1] + skin * v.y) * dt;
       v.z += (plate * F[2] * TRACK + skin * v.z) * dt;
-      // The player's rates on the body axes, plus the wind turning the belly to face it
-      // Roll right dips the right side, yaw left turns the head left, seen from behind the head
+      // The player's rates on the body axes, plus the wind turning the belly to face it.
+      // Roll right dips the right side, yaw left turns the head left, seen from behind the head.
       const pr = input.pitch * RATE.pitch, rr = input.roll * RATE.roll, yr = -input.yaw * RATE.yaw;
       let tx = R[0] * pr + U[0] * rr + F[0] * yr, ty = R[1] * pr + U[1] * rr + F[1] * yr, tz = R[2] * pr + U[2] * rr + F[2] * yr;
       if (speed > 1) {
@@ -117,8 +115,7 @@
       w.z = damp(w.z, tz, RESPONSE, dt);
       quat.integrate(s.q, s.q, w.x, w.y, w.z, dt);
     };
-    // Under the canopy the body hangs upright and the same stick flies it: pitch dives or flares, roll banks and
-    // crabs, yaw turns
+    // Under the canopy the body hangs upright on the same stick: pitch dives or flares, roll banks, yaw turns.
     const canopyFlight = (dt, input) => {
       const v = s.v;
       if (s.phase === "open") {
@@ -129,7 +126,7 @@
         if (k >= 1) s.phase = "canopy";
       }
       s.steer = input.roll;
-      // Roll is positive to the right, yaw positive to the left: both turn the way they lean
+      // Roll is positive to the right, yaw positive to the left: both turn the way they lean.
       s.heading -= (s.steer - input.yaw) * TURN * dt;
       const wantFlare = Math.max(input.flare ? 1 : 0, -input.pitch);
       const flare = s.flare > 0 ? wantFlare : 0;
@@ -159,8 +156,8 @@
       p.y += s.v.y * dt;
       p.z += s.v.z * dt;
     };
-    // Touch the ground: under the canopy the diver stands it up; without one, spine first punches a hole, flat and
-    // fast tumbles, flat and slow flattens
+    // Under the canopy every touchdown stands up; without one, spine first punches a hole, flat and fast tumbles,
+    // flat and slow flattens.
     const land = (groundY) => {
       const chute = s.phase === "canopy" || s.phase === "open", h2 = Math.hypot(s.v.x, s.v.z);
       axes();
@@ -176,7 +173,7 @@
       setVec(s.v, 0, 0, 0);
       setVec(s.w, 0, 0, 0);
       if (s.landing === "hole") {
-        // Head first leaves the legs kicking out of the ground, feet first buries him to the belly
+        // Head first leaves the legs kicking out of the ground, feet first buries him to the belly.
         quat.fromEuler(s.q, 0, s.heading, headFirst ? Math.PI : 0);
         s.p.y = groundY + (headFirst ? -0.25 : 0.12) * h;
         canopy.visible = false;
@@ -201,11 +198,10 @@
       parts.snack.visible = false;
       parts.gun.visible = false;
     };
-    // Limbs by phase, once a frame
+    // Limbs by phase; call once a frame, not per substep.
     const pose = (dt, elapsed, input) => {
       const parts = cave.parts;
       if (s.phase === "idle") {
-        // Seated in the plane, hands on the stick
         parts.legL.rotation.x = parts.legR.rotation.x = -1.45;
         parts.armL.rotation.x = parts.armR.rotation.x = -1.05;
         parts.armL.rotation.z = -0.25;
@@ -214,7 +210,6 @@
         return;
       }
       if (s.phase === "free") {
-        // Spread eagle, the arms and legs following the inputs, the head up into the wind
         const flap = Math.sin(elapsed * 9) * 0.05;
         parts.armL.rotation.x = damp(parts.armL.rotation.x, -1.15 - input.pitch * 0.4 + input.roll * 0.3, 8, dt);
         parts.armR.rotation.x = damp(parts.armR.rotation.x, -1.15 - input.pitch * 0.4 - input.roll * 0.3, 8, dt);
@@ -229,7 +224,6 @@
         return;
       }
       if (s.phase === "open" || s.phase === "canopy") {
-        // Hanging in the harness, arms up on the toggles, the legs dangling
         parts.armL.rotation.x = damp(parts.armL.rotation.x, -2.7 + (s.steer < 0 ? 0.5 : 0), 6, dt);
         parts.armR.rotation.x = damp(parts.armR.rotation.x, -2.7 + (s.steer > 0 ? 0.5 : 0), 6, dt);
         parts.armL.rotation.z = damp(parts.armL.rotation.z, -0.25, 6, dt);
@@ -247,7 +241,6 @@
         s.landT += dt;
         const t = s.landT;
         if (s.landing === "hole") {
-          // Stuck, the free end waving
           const k = Math.min(1, t / 0.5);
           const kick = Math.sin(t * 9) * 0.5 * (1 - k);
           parts.legL.rotation.x = 0.3 + kick;
@@ -256,7 +249,6 @@
           return;
         }
         if (s.landing === "pancake") {
-          // Flattened, limbs splayed
           const k = Math.min(1, t / 0.25);
           parts.torso.scale.y = 1 - 0.75 * k;
           parts.torso.scale.x = parts.torso.scale.z = 1 + 0.5 * k;
@@ -269,7 +261,6 @@
           return;
         }
         if (s.landing === "tumble") {
-          // Over and out, sliding to a stop and ending flat on the back
           const decay = Math.exp(-3 * dt);
           s.p.x += s.slideX * dt;
           s.p.z += s.slideZ * dt;
@@ -284,7 +275,6 @@
           canopy.visible = false;
           return;
         }
-        // A squat that stands back up; the stumble dips deeper and lurches forward
         const deep = s.landing === "stumble" ? 0.32 : 0.14;
         const squat = Math.sin(Math.min(1, t / 0.7) * Math.PI) * deep;
         parts.torso.scale.y = 1 - squat;
@@ -296,7 +286,6 @@
         parts.armL.rotation.z = damp(parts.armL.rotation.z, -0.12, 6, dt);
         parts.armR.rotation.z = damp(parts.armR.rotation.z, 0.12, 6, dt);
         parts.head.rotation.x = damp(parts.head.rotation.x, 0, 6, dt);
-        // The canopy settles onto the ground behind the diver
         if (canopy.visible) {
           canopy.scale.y = Math.max(0.05, canopy.scale.y - dt * 1.4);
           canopy.position.z = damp(canopy.position.z, -1.4, 3, dt);

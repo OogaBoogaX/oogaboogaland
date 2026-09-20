@@ -65,9 +65,8 @@
       return out;
     },
     fromTRS: (out, p, r, s) => {
-      // cos(+-0) is exactly 1 and sin(+-0) is the angle itself, so passing the
-      // angle through keeps the sign of zero and every product below identical.
-      // Most of the graph never rotates, and most scenery only yaws.
+      // cos(+-0) is exactly 1 and sin(+-0) is the angle itself, so the shortcut keeps signed zero and every product.
+      // Worth it because most of the graph never rotates and most scenery only yaws.
       const zx = r.x === 0, zy = r.y === 0, zz = r.z === 0;
       const cx = zx ? 1 : Math.cos(r.x), sx = zx ? r.x : Math.sin(r.x);
       const cy = zy ? 1 : Math.cos(r.y), sy = zy ? r.y : Math.sin(r.y);
@@ -178,7 +177,6 @@
       out[15] = (a20 * b03 - a21 * b01 + a22 * b00) * d;
       return out;
     },
-    // Camera ray through a screen pixel
     rayFromView: (out, view, width, height, fov, eye, px, py) => {
       const tanHalf = Math.tan(fov / 2);
       const nx = (px / width * 2 - 1) * tanHalf * (width / height);
@@ -202,7 +200,7 @@
       out[3] = m[3] * x + m[7] * y + m[11] * z + m[15];
       return out;
     },
-    // Translation, unit quaternion and scale, the quaternion twin of fromTRS
+    // Quaternion twin of fromTRS; q must be a unit quaternion.
     fromTQS: (out, p, q, s) => {
       const x = q[0], y = q[1], z = q[2], w = q[3];
       const xx = x * x, yy = y * y, zz = z * z, xy = x * y, xz = x * z, yz = y * z, wx = w * x, wy = w * y, wz = w * z;
@@ -225,7 +223,7 @@
       return out;
     }
   };
-  // Unit quaternions as Float32Array(4) [x, y, z, w], every operation in place
+  // Unit quaternions as Float32Array(4) [x, y, z, w]; every operation writes in place.
   const QUAT_TEMP = new Float32Array(4);
   const quat = {
     create: () => {
@@ -253,7 +251,7 @@
       out[3] = Math.cos(angle / 2);
       return out;
     },
-    // Yaw about y, then pitch about x, then roll about z, matching fromTRS's YXZ order
+    // Yaw about y, then pitch about x, then roll about z, matching fromTRS's YXZ order.
     fromEuler: (out, x, y, z) => {
       const cx = Math.cos(x / 2), sx = Math.sin(x / 2), cy = Math.cos(y / 2), sy = Math.sin(y / 2), cz = Math.cos(z / 2), sz = Math.sin(z / 2);
       out[0] = sx * cy * cz + cx * sy * sz;
@@ -262,7 +260,7 @@
       out[3] = cx * cy * cz + sx * sy * sz;
       return out;
     },
-    // out = a ⊗ b: rotating a vector by out applies b first, then a
+    // out = a (x) b: rotating a vector by out applies b first, then a.
     multiply: (out, a, b) => {
       const t = QUAT_TEMP;
       t[0] = a[3] * b[0] + a[0] * b[3] + a[1] * b[2] - a[2] * b[1];
@@ -280,7 +278,7 @@
       out[3] /= len;
       return out;
     },
-    // Advance by a world-frame angular velocity over dt
+    // Advance by a world-frame (not body-frame) angular velocity over dt.
     integrate: (out, q, wx, wy, wz, dt) => {
       const hx = wx * dt / 2, hy = wy * dt / 2, hz = wz * dt / 2;
       const x = q[0], y = q[1], z = q[2], w = q[3];
@@ -290,7 +288,7 @@
       out[3] = w - hx * x - hy * y - hz * z;
       return quat.normalize(out);
     },
-    // Rotate a vector, written into out as x, y, z
+    // Rotates a vector; out receives x, y, z, not a quaternion.
     rotateVec: (out, q, x, y, z) => {
       const qx = q[0], qy = q[1], qz = q[2], qw = q[3];
       const ix = qw * x + qy * z - qz * y, iy = qw * y + qz * x - qx * z, iz = qw * z + qx * y - qy * x, iw = -qx * x - qy * y - qz * z;
@@ -299,12 +297,10 @@
       out[2] = iz * qw + iw * -qz + ix * -qy - iy * -qx;
       return out;
     },
-    // Ease toward another rotation by a fraction, renormalised
     slerpTo: (out, target, t) => {
       let d = out[0] * target[0] + out[1] * target[1] + out[2] * target[2] + out[3] * target[3];
       const sign = d < 0 ? -1 : 1;
       d = Math.abs(d);
-      // Nearly parallel rotations lerp; the rest slerp
       let ka = 1 - t, kb = t;
       if (d < 0.9995) {
         const theta = Math.acos(Math.min(1, d)), s = Math.sin(theta);
@@ -318,12 +314,8 @@
       return quat.normalize(out);
     }
   };
-  // Stable in-place sort of ids[start, end) by keys[id * stride + axis], the
-  // order a stable Array#sort gives for (a, b) => key(a) - key(b). The keys
-  // are gathered once so comparisons read memory in order, runs of 16 are
-  // insertion-sorted, then merged between the two halves of a caller-owned
-  // scratch from sortScratch(n); nothing is called per comparison, which
-  // matters because the bounding-volume builds re-sort at every tree level.
+  // Stable in-place sort of ids[start,end) by keys[id*stride+axis]; same order as Array#sort by key(a)-key(b).
+  // Runs of 16 insertion-sorted, merged in a caller-owned sortScratch(n); no calls per comparison (BVH re-sorts).
   const RUN = 16;
   const sortScratch = (n) => ({ ids: new Uint32Array(n * 2), keys: new Float64Array(n * 2) });
   const sortByKey = (ids, start, end, keys, stride, axis, scratch) => {

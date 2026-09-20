@@ -1,4 +1,3 @@
-// Subterranean headquarters room, ramps and personal quarters
 (() => {
   "use strict";
   const BL = window.BL = window.BL || {};
@@ -15,8 +14,8 @@
   const MOSS = ["#6f7d3e", "#7b8945", "#65733a"];
   const ROOM_RADIUS = 14;
   const MATTRESS = { width: 1.45, depth: 2.45, height: 0.345, wallInset: 0.65, surface: 0.245, pillowTop: 0.345, pillowZ: -0.82 };
-  // Room indices occupy eleven HQ slots and eight basement slots. Reuse their
-  // static geometry across visits without retaining a departed room or scene.
+  // 19 room slots: eleven HQ plus eight basement.
+  // Static geometry is reused across visits without retaining a departed room or scene.
   const mattressCache = new Array(19);
   const roomSignCache = new Array(19);
   const fabric = (pattern, width, depth, top, bottom, centerZ, kind) => {
@@ -29,8 +28,7 @@
       geo.faces.push({ i: [i, i + 1, i + 2, i + 3], color: [color >>> 16, color >>> 8 & 255, color & 255], emissive: 0, mattressFabric: kind });
     };
     const xAt = (x) => (x / size - 0.5) * width, zAt = (z) => (z / size - 0.5) * depth + centerZ;
-    // Merge equal-color rectangles, preserving every LifeHash pixel while
-    // keeping the two renderers' face count small.
+    // Merge equal-colour rectangles: every LifeHash pixel is kept, face count stays small in both renderers.
     for (let z = 0; z < size; z++) for (let x = 0; x < size; x++) {
       const start = z * size + x, color = cells[start];
       if (used[start]) continue;
@@ -44,8 +42,7 @@
       const x0 = xAt(x), x1 = xAt(x + w), z0 = zAt(z), z1 = zAt(z + h);
       quad([x0, top, z0], [x0, top, z1], [x1, top, z1], [x1, top, z0], color);
     }
-    // The edge pixels continue down the case and sheet, so their sides carry
-    // the same fabric rather than exposing an unprinted block underneath.
+    // Edge pixels continue down the case and sheet so the sides carry the same fabric, not an unprinted block.
     for (let edge = 0; edge < 4; edge++) for (let i = 0; i < size;) {
       const pixel = (n) => edge < 2 ? (edge ? size - 1 : 0) * size + n : n * size + (edge === 3 ? size - 1 : 0);
       const color = cells[pixel(i)];
@@ -70,8 +67,7 @@
     if (cached && cached.mattress.roomKey === roomKey) return cached;
     const sheet = { seed: `room:${roomKey}:sheet` };
     sheet.pattern = BL.lifehash.make(sheet.seed);
-    // The wide pillow carries the same LifeHash turned a quarter turn, so
-    // its pattern follows the bedding's long axis instead of stretching across it.
+    // The pillow carries the same LifeHash rotated a quarter turn, following the bedding's long axis.
     const pattern = sheet.pattern, colors = new Uint8Array(pattern.colors.length), size = pattern.width;
     for (let y = 0; y < size; y++) for (let x = 0; x < size; x++) {
       const from = ((size - 1 - x) * size + y) * 3, to = (y * size + x) * 3;
@@ -79,8 +75,7 @@
     }
     const pillow = { seed: sheet.seed, pattern: { width: size, height: size, colors, hash: pattern.hash } };
     const base = box({ w: MATTRESS.width - 0.02, h: 0.035, d: MATTRESS.depth - 0.02, color: "#c6b997", offset: { y: 0.0175 } });
-    // The blanket is the top surface. A second buried top can sort in front
-    // of its smaller printed faces in the Canvas painter.
+    // The blanket is the top surface; a second buried top can sort in front of it in the Canvas painter.
     base.faces.splice(4, 1);
     const geo = merge(
       base,
@@ -108,17 +103,15 @@
         if (glyph[row][col] !== "1") { col++; continue; }
         const start = col++;
         while (col < 3 && glyph[row][col] === "1") col++;
-        // Merge each horizontal ink stroke into one face. The inscription
-        // is static geometry shared across visits in both renderers.
+        // Merge each horizontal ink stroke into one face; the inscription is static geometry shared across visits.
         const x0 = -(text.length * 4 - 1) * cell / 2 + (ch * 4 + start) * cell + (cell - pixel) / 2;
         const x1 = x0 + (col - start - 1) * cell + pixel, y = (2 - row) * cell;
         const at = geo.verts.length / 3;
         geo.verts.push(x0, y - pixel / 2, 0.054, x1, y - pixel / 2, 0.054, x1, y + pixel / 2, 0.054, x0, y + pixel / 2, 0.054);
-        geo.faces.push({ i: [at, at + 1, at + 2, at + 3], color: [211, 193, 155], emissive: 0, roomSignInk: true });
+        geo.faces.push({ i: [at, at + 1, at + 2, at + 3], color: [211, 193, 155], emissive: 0.2, roomSignInk: true });
       }
     }
-    // The hanging point is the origin, so impacts rotate the whole sign
-    // around its cords rather than around the middle of the board.
+    // The hanging point is the origin, so impacts rotate the sign about its cords, not the board's middle.
     const size = 0.56;
     for (let i = 0; i < geo.verts.length; i += 3) {
       geo.verts[i] *= size;
@@ -143,7 +136,7 @@
     parts.push(box({ w: 0.85, h: 0.17, d: 0.18, color: "#51402d", offset: { y: 0.1, z: -0.15 } }), box({ w: 0.18, h: 0.14, d: 0.92, color: "#63472f", offset: { x: 0.15, y: 0.23 } }));
     return merge(...parts);
   });
-  // Rough cairns sit outside the clear entrance; the slope begins between them.
+  // Rough cairns sit outside the clear entrance at x = +/-2.3; the slope begins between them.
   const entranceRamp = cached(() => {
     const parts = [];
     for (const x of [-2.3, 2.3]) {

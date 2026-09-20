@@ -22,7 +22,7 @@
       const i = x * depth + z, cx = ox + (x + 0.5) * unit, cz = oz + (z + 0.5) * unit;
       heights[i] = Math.max(0, island.surfaceAt(cx, cz)); fronts[i] = island.frontageColumnAt(cx, cz);
     }
-    // Average across several steps before taking the downhill direction.
+    // Average the height over several steps before taking the downhill direction.
     // Alternating X/Z voxel faces then share the diagonal hillside's aspect.
     for (let x = 0; x < width; x++) for (let z = 0; z < depth; z++) {
       let total = 0;
@@ -40,11 +40,8 @@
     const sectorAt = (i, nx, nz) => {
       let x = gx[i], z = gz[i];
       const length = Math.hypot(x, z);
-      // Use the same high-column aspect as its tread. Averaging each face
-      // with a different low neighbor splits the two sides of one step near
-      // sector boundaries. Small perpendicular notches belong to that step
-      // too; only a genuinely opposite face or a canceled crest needs its
-      // own outward aspect.
+      // A riser takes its tread's high-column aspect; averaging with a low neighbour splits one step in two.
+      // Small perpendicular notches belong to that step; only an opposite face or canceled crest gets its own aspect.
       if (length <= EPS || x * nx + z * nz < -length * 0.5) { x = nx; z = nz; }
       return (Math.round(Math.atan2(z, x) * 4 / Math.PI) + 8) % 8;
     };
@@ -77,9 +74,8 @@
           else if (heights[n] > height + EPS) higher = step * stride;
         }
       }
-      // Measure the complete flat strip, rather than limiting each half from
-      // this cell: every point on a short terrace must meet the same width
-      // rule, including the cells touching its upper and lower risers.
+      // Measure the complete flat strip, not each half from this cell.
+      // Every point on a short terrace must meet the same width rule, including cells touching its risers.
       if (lower && higher && lower + higher - stride <= TREAD_WIDTH + EPS) { masks[i] |= 1 << sector; treads[i] = sector; treadCount++; }
     }
     let sideCount = 0;
@@ -94,8 +90,7 @@
           const sx = x + dx, sz = z + dz;
           if ((!dx && !dz) || sx < 0 || sx >= width || sz < 0 || sz >= depth) continue;
           const next = sx * depth + sz;
-          // Fixed aspect labels prevent a chain of small turns from joining
-          // the near side to the opposite side around a hill's circumference.
+          // Fixed aspect labels stop a chain of small turns joining the near side to the opposite side round a hill.
           if (!(masks[next] & bit) || sides[next * 8 + sector] >= 0) continue;
           sides[next * 8 + sector] = sideCount; queue[count++] = next;
         }

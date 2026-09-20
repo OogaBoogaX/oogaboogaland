@@ -1,11 +1,11 @@
-// Camera cones through window frames, used to cut visible portions out of a
-// wall cue without dropping the surrounding mesh's whole visibility patch.
+// Camera cones through window frames cut visible portions out of a wall cue,
+// without dropping the surrounding mesh's whole visibility patch.
 (() => {
   "use strict";
   const BL = window.BL = window.BL || {};
   const trees = new WeakMap();
-  // Share the immutable terrain index across every room/window. Faces retain
-  // their rendered geometry, including the convex fragments of a flared sill.
+  // Share the immutable terrain index across every room/window.
+  // Faces retain their rendered geometry, including the convex fragments of a flared sill.
   const terrainTree = (geometry) => {
     if (!geometry) return null;
     if (trees.has(geometry)) return trees.get(geometry);
@@ -20,13 +20,13 @@
       }
       order.push(face);
     }
-    // Centroid sort keys, computed once: every level of the tree re-sorts, and
-    // summing inside the comparator measured 181 ms of a 2.2 s boot
+    // Precompute centroid sort keys: every level of the tree re-sorts.
+    // Summing inside the comparator measured 181 ms of a 2.2 s boot.
     const keys = new Float64Array(geometry.faces.length * 3);
     for (const face of order) for (let axis = 0; axis < 3; axis++) keys[face * 3 + axis] = bounds[face * 6 + axis] + bounds[face * 6 + axis + 3];
     const ids = Uint32Array.from(order), scratch = BL.math.sortScratch(ids.length);
-    // Nodes live in flat arrays in build (preorder) order: the island's tens
-    // of thousands of branches stay out of the object heap for the page.
+    // Nodes live in flat arrays in build (preorder) order.
+    // Keeps the island's tens of thousands of branches off the page's object heap.
     const nodeBounds = [], nodeStart = [], nodeEnd = [], nodeLeft = [], nodeRight = [];
     const build = (start, end) => {
       const box = [Infinity, Infinity, Infinity, -Infinity, -Infinity, -Infinity];
@@ -50,7 +50,11 @@
     trees.set(geometry, tree); return tree;
   };
   const create = ({ windows, island }) => {
-    const entries = [], terrain = terrainTree(island.geometry);
+    // Only a cone that actually reaches a frame consults the index, which most visits never do.
+    // The first such query builds it, rather than every boot.
+    const entries = [];
+    let terrain;
+    const terrainOf = () => terrain !== undefined ? terrain : (terrain = terrainTree(island.geometry));
     for (const window of windows) for (const frustum of window.flare.frusta) if (!frustum.inner) {
       const sx = Math.sin(frustum.angle), sz = -Math.cos(frustum.angle), tx = -sz, tz = sx, r = frustum.start;
       const corners = new Float64Array(12);
@@ -145,12 +149,11 @@
         }
       }
     };
-    // The cone is only the candidate opening. Subtract real stone between
-    // the camera and its frame, rather than promoting one clear ray into an
-    // entirely clear window. Rear wall faces remain part of the cue.
+    // The cone is only the candidate opening: subtract real stone between camera and frame.
+    // Never promote one clear ray into an entirely clear window. Rear wall faces stay part of the cue.
     const blockers = (index, append) => {
       const entry = entries[index];
-      if (terrain && entry.active) visitBlockers(terrain.root, entry, append);
+      if (entry.active && terrainOf()) visitBlockers(terrain.root, entry, append);
     };
     return { update, overlaps, clip, blockers, get count() { return active ? entries.length : 0; } };
   };

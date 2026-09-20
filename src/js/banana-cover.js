@@ -1,5 +1,5 @@
-// A passable banana heap has a soft interior, while its stone platform stays
-// solid. Share the rock cut/actor silhouette renderer in WebGL and Canvas 2D.
+// Heap interior is passable, its stone platform solid.
+// Rock-cut/actor silhouette renderer is shared by the WebGL and Canvas 2D paths.
 (() => {
   "use strict";
   const BL = window.BL = window.BL || {};
@@ -12,8 +12,7 @@
     shadowCache.fill(NaN);
     lighting.fill(1);
     let lightingX = 0, lightingZ = 0, lightingSpan = 1;
-    // Average the real banana skin, weighted by face area so its small brown
-    // tips do not dominate the blurred interior's color.
+    // Weight the banana skin average by face area so the small brown tips do not dominate the interior color.
     const skin = pile.shell?.geometry || BL.models.bananaTileGeometry(), skinVerts = skin.verts;
     let skinArea = 0;
     for (const face of skin.faces) for (let n = 1; n < face.i.length - 1; n++) {
@@ -26,8 +25,8 @@
     }
     for (let channel = 0; channel < 3; channel++) albedo[channel] /= skinArea;
     const bananaTextureAt = (x, y, z, pixels, at) => {
-      // Broad, softly mixed fruit colors stay anchored in the world. A tiny
-      // lighting grid follows the same local surface as the exterior heap.
+      // Grain is world-anchored, not screen-space.
+      // The lighting grid follows the same local surface as the exterior heap.
       const grain = 0.5 + Math.sin(x * 7.3 + y * 4.7 + Math.sin(z * 5.1)) * 0.2
         + Math.sin(z * 8.1 - y * 5.3 + Math.cos(x * 4.1)) * 0.14;
       const gx = Math.max(0, Math.min(2, (x - lightingX) / lightingSpan * 2)), gz = Math.max(0, Math.min(2, (z - lightingZ) / lightingSpan * 2));
@@ -44,8 +43,8 @@
     const cover = BL.cameraCover.create(overlay, bananaTextureAt);
     const forward = new Float64Array(3), view = BL.math.mat4.create(), stack = new Array(64);
     const bounds = BL.scene.boundsOf(geometry), faceBounds = new Float64Array(geometry.faces.length * 6), order = [];
-    // The height query uses the real ring vertices; this index is only for
-    // silhouette rays. Both remain immutable when a donation scales the heap.
+    // Height queries use the real ring vertices; this index serves silhouette rays only.
+    // Both stay immutable when a donation scales the heap.
     for (let i = 0; i < geometry.faces.length; i++) {
       const at = i * 6;
       faceBounds.fill(Infinity, at, at + 3); faceBounds.fill(-Infinity, at + 3, at + 6);
@@ -56,7 +55,7 @@
       }
       order.push(i);
     }
-    // Centroid sort keys, computed once; the tree re-sorts at every level
+    // Centroid sort keys computed once; the tree re-sorts at every level.
     const keys = new Float64Array(geometry.faces.length * 3), scratch = BL.math.sortScratch(order.length);
     for (let i = 0; i < geometry.faces.length; i++) for (let axis = 0; axis < 3; axis++) keys[i * 3 + axis] = faceBounds[i * 6 + axis] + faceBounds[i * 6 + axis + 3];
     const build = (start, end) => {
@@ -76,7 +75,9 @@
       }
       return node;
     };
-    const tree = build(0, order.length);
+    // Lazy: only silhouette rays walk this index and its faces never move, so the first ray pays, not boot.
+    let tree = null;
+    const treeOf = () => tree || (tree = build(0, order.length));
     const ringRadius = (ring, sector, ux, uz) => {
       const a = (ring * segments + sector) * 3, b = (ring * segments + (sector + 1) % segments) * 3;
       return (verts[a] * verts[b + 2] - verts[a + 2] * verts[b])
@@ -121,10 +122,8 @@
       const canvas = renderer?.kind === "canvas2d", ambient = renderOpts.ambientFloor, diffuseFloor = renderOpts.diffuseFloor;
       const skyLuma = sky[0] * 0.2126 + sky[1] * 0.7152 + sky[2] * 0.0722;
       const groundLuma = ground[0] * 0.2126 + ground[1] * 0.7152 + ground[2] * 0.0722;
-      // The Canvas path shades one grey value where WebGL shades three, so its
-      // direct term is the luminance of the same direct colour. A fixed factor
-      // here tracks the sun but not the dimmer, differently weighted moon: it
-      // read dusk darker than midnight, inverting the daylight order.
+      // Canvas shades one grey where WebGL shades three; its direct term is that direct colour's luminance.
+      // Fixed factor tracks the sun, not the dimmer moon: it read dusk darker than midnight, inverting the order.
       const directLuma = direct[0] * 0.2126 + direct[1] * 0.7152 + direct[2] * 0.0722;
       const lights = renderOpts.lights, lightCount = canvas || !lights ? 0 : Math.min(10, renderOpts.lightCount);
       lightingX = p.x - reach; lightingZ = p.z - reach; lightingSpan = Math.max(1e-5, reach * 2);
@@ -160,8 +159,7 @@
             const distance = Math.hypot(px, py, pz), falloff = Math.max(0, 1 - distance / lights[i + 3]);
             value += lights[i + 4 + channel] * falloff * falloff * Math.max(0, nx * px + ny * py + nz * pz) / Math.max(distance, 0.0001);
           }
-          // Changes smaller than a quarter of a color step cannot be seen.
-          // Larger changes must invalidate even an entirely stationary view.
+          // 1/1024 quantization: sub-quarter-color-step changes are invisible; larger ones must invalidate a still view.
           value = Math.round(value * 1024) / 1024;
           const at = (z * 3 + x) * 3 + channel;
           if (lighting[at] !== value) { lighting[at] = value; changed = true; }
@@ -202,7 +200,7 @@
       if (contains(ax, ay, az) || contains(bx, by, bz)) return false;
       const x = (ax - core.position.x) / core.scale.x, y = (ay - core.position.y) / core.scale.y, z = (az - core.position.z) / core.scale.z;
       const dx = (bx - ax) / core.scale.x, dy = (by - ay) / core.scale.y, dz = (bz - az) / core.scale.z;
-      let count = 1; stack[0] = tree;
+      let count = 1; stack[0] = treeOf();
       while (count) {
         const node = stack[--count];
         if (!boxHit(node.box, x, y, z, dx, dy, dz)) continue;
@@ -237,9 +235,8 @@
         state.actorInPile = intersectsBody(a.x, feet, a.z, actor.bodyHeight);
       }
       state.cameraInPile = contains(p.x, p.y, p.z);
-      // An outside eye can still cut the fruit with a corner of its near
-      // plane. Confirm the same sample grid used by the cover before taking
-      // over the actor; merely being inside the heap's bounds is not enough.
+      // An outside eye can still cut the fruit with a near-plane corner.
+      // Confirm the cover's own sample grid before taking over the actor; heap bounds alone are not enough.
       if (!state.cameraInPile && state.touchesPile) {
         BL.math.mat4.lookAt(view, camera.position, camera.target, camera.up || UP);
         const width = overlay.clientWidth, height = overlay.clientHeight;
@@ -258,7 +255,7 @@
     const draw = (camera, actor, dt = 1 / 60, actorVisibleAt = null, guides = null, glyphMaterial = null) => {
       sceneVisibleAt = actorVisibleAt;
       cover.state.opacity = state.touchesPile ? 0.65 : 0.22;
-      // A dark keyline keeps the pale body rim legible against yellow fruit.
+      // Dark keyline keeps the pale body rim legible against yellow fruit.
       cover.draw(camera, actor?.root, state.touchesPile, !!actor && ownsActor, contains, null, guides, dt, 1, glyphMaterial, visibleAt, true);
       state.outlined = cover.state.outlined; state.coverage = cover.state.rockCoverage;
       state.guideLines = cover.state.guideLines;

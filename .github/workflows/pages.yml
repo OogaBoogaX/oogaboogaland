@@ -3,6 +3,8 @@ name: Deploy GitHub Pages
 on:
   push:
     branches: [rock]
+  schedule:
+    - cron: '*/10 * * * *'
   workflow_dispatch:
 
 permissions:
@@ -29,6 +31,10 @@ jobs:
           node-version: '22'
           package-manager-cache: false
       - uses: actions/configure-pages@v5
+      - name: Refresh Oogatron activity snapshot
+        run: node scripts/jumbotron-data.mjs "$OOGATRON_STATS_URL"
+        env:
+          OOGATRON_STATS_URL: https://oogatron.sterlingbreck.workers.dev/v1/stats
       - name: Build and stage site
         run: |
           npm run build

@@ -17,7 +17,7 @@
     const found = LOOT_TIERS.find((t) => sats >= t.minSats);
     return found ? found.tier : null;
   };
-  // Same donation id always yields the same item
+  // Same donation id always yields the same item.
   const lootFor = (donation, catalog) => {
     const tier = tierFor(donation.sats);
     if (!tier) return null;
@@ -27,7 +27,6 @@
   };
   const bananasFor = (sats) => Math.max(1, Math.min(12, Math.round(sats / SATS_PER_BANANA)));
   const LARGE_UNITS = [[1e12, "T"], [1e9, "B"], [1e6, "M"], [1e3, "K"]];
-  // Big counts as 1.2K, 139K, 2.1M, up to T
   const formatLarge = (n) => {
     const unit = LARGE_UNITS.find(([size]) => n >= size);
     if (!unit) return String(n);
@@ -36,8 +35,9 @@
   };
   const isString = (v, max) => typeof v === "string" && v.length <= max;
   const isEntry = (e, catalog) => e && typeof e === "object" && isString(e.id, 40) && catalog.some((c) => c.id === e.itemId) && LOOT_TIERS.some((t) => t.tier === e.tier) && isString(e.donationId, 64) && Number.isFinite(e.at);
-  const defaults = () => ({ inventory: [], assignments: {}, handle: "", message: "", handFed: 0, totalSats: 0, donations: 0, race: { best: {}, cup: null }, drop: { best: null } });
+  const defaults = () => ({ inventory: [], assignments: {}, handle: "", message: "", handFed: 0, totalSats: 0, donations: 0, race: { best: {}, cup: null }, drop: { best: null }, orbit: { best: null, build: null } });
   const LANDINGS = ["stand", "stumble", "tumble", "hole", "pancake", "lost"];
+  const ORBIT_LANDINGS = ["pad", "islet", "island", "land", "sea", "overpressure", "stuck", "heat", "breakup", "burnup", "splat", "crash", "wreck", "debris"];
   const CUP_MEDALS = ["gold", "silver", "bronze"];
   const isTime = (v) => Number.isFinite(v) && v > 0 && v < 36e5;
   const load = (catalog) => {
@@ -69,6 +69,12 @@
       if (d && Number.isFinite(d.score) && d.score >= 0 && d.score < 1e6 && Number.isFinite(d.rings) && d.rings >= 0 && Number.isFinite(d.ringTotal) && d.ringTotal >= d.rings && d.ringTotal <= 99 && LANDINGS.includes(d.landing)) {
         state.drop.best = { score: Math.floor(d.score), rings: Math.floor(d.rings), ringTotal: Math.floor(d.ringTotal), landing: d.landing };
       }
+      const o = parsed.orbit;
+      if (o && o.best && Number.isFinite(o.best.score) && o.best.score >= 0 && o.best.score < 1e6 && typeof o.best.orbit === "boolean" && ORBIT_LANDINGS.includes(o.best.landing)) {
+        state.orbit.best = { score: Math.floor(o.best.score), orbit: o.best.orbit, landing: o.best.landing };
+      }
+      const build = o && BL.rocketParts.sanitize(o.build);
+      if (build && build.length) state.orbit.build = build;
     } catch {
       return defaults();
     }
@@ -78,14 +84,14 @@
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
     } catch {
-      // Storage may be unavailable, so keep going in memory
+      // Storage may be unavailable; keep going in memory.
     }
   };
   const create = ({ catalog }) => {
     const state = load(catalog);
     let seq = state.inventory.length;
     const countOf = (itemId) => state.inventory.reduce((n, e) => n + (e.itemId === itemId), 0);
-    // Full stacks never roll, so a crate only carries an item the locker still has room for
+    // Full stacks never roll: a crate only carries an item the locker still has room for.
     const lootForVisitor = (donation) => lootFor(donation, catalog.filter((item) => countOf(item.id) < STACK_MAX));
     const addItem = ({ item, tier, donationId }) => {
       if (countOf(item.id) >= STACK_MAX) return null;
@@ -100,7 +106,7 @@
     };
     const assign = (entryId, name) => {
       if (!state.inventory.some((e) => e.id === entryId)) return false;
-      // One item per caveman, so drop the previous wearer
+      // One item per caveman, so drop the previous wearer.
       for (const [other, id] of Object.entries(state.assignments)) if (id === entryId) delete state.assignments[other];
       state.assignments[name] = entryId;
       save(state);
@@ -128,7 +134,7 @@
       try {
         localStorage.removeItem(STORAGE_KEY);
       } catch {
-        // Storage unavailable, but the reload still resets
+        // Storage unavailable, but the reload still resets.
       }
     };
     const clearLoot = () => {
@@ -136,7 +142,6 @@
       for (const name of Object.keys(state.assignments)) delete state.assignments[name];
       save(state);
     };
-    // Keep the fastest lap and race per track
     const recordRace = (track, lap, race) => {
       const b = state.race.best[track];
       const entry = { lap: Math.floor(b && b.lap < lap ? b.lap : lap), race: Math.floor(b && b.race < race ? b.race : race) };
@@ -145,7 +150,7 @@
       save(state);
       return improved;
     };
-    // The best cup finish: a higher medal, or the same medal with more points
+    // Best cup finish = a higher medal, or the same medal with more points.
     const recordCup = (place, points) => {
       const medal = CUP_MEDALS[place - 1];
       if (!medal) return false;
@@ -157,13 +162,23 @@
       }
       return better;
     };
-    // The best drop by score
     const recordDrop = ({ score, rings, ringTotal, landing }) => {
       const b = state.drop.best;
       if (b && b.score >= score) return false;
       state.drop.best = { score: Math.floor(score), rings, ringTotal, landing };
       save(state);
       return true;
+    };
+    const recordOrbit = ({ score, orbit, landing }) => {
+      const b = state.orbit.best;
+      if (b && b.score >= score) return false;
+      state.orbit.best = { score: Math.floor(score), orbit, landing };
+      save(state);
+      return true;
+    };
+    const setOrbitBuild = (stack) => {
+      state.orbit.build = stack.slice();
+      save(state);
     };
     const setIdentity = ({ handle, message }) => {
       state.handle = handle;
@@ -181,7 +196,7 @@
       if (seconds < 5400) return `${Math.round(seconds / 60)}m`;
       return `${(seconds / 3600).toFixed(1)}h`;
     };
-    return { state, countOf, lootFor: lootForVisitor, addItem, assign, unassign, itemOf, assignedTo, clearLoot, resetAll, recordDonation, recordHandFed, recordRace, recordCup, recordDrop, setIdentity, forecast, formatDuration };
+    return { state, countOf, lootFor: lootForVisitor, addItem, assign, unassign, itemOf, assignedTo, clearLoot, resetAll, recordDonation, recordHandFed, recordRace, recordCup, recordDrop, recordOrbit, setOrbitBuild, setIdentity, forecast, formatDuration };
   };
   BL.game = { create, LOOT_TIERS, STACK_MAX, SATS_PER_BANANA, tierFor, lootFor, bananasFor, formatLarge };
 })();

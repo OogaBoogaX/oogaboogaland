@@ -3,8 +3,8 @@
   "use strict";
   const BL = window.BL = window.BL || {};
   const RADIUS = 0.3, HEIGHT = 2, STEP = 0.6, SAMPLE = 0.125;
-  // The validated waypoint graph depends only on the island's architecture;
-  // later visits reuse it and map their fresh bed objects onto its nodes.
+  // The validated waypoint graph depends only on the island's architecture; later visits reuse it and map
+  // fresh bed objects onto its nodes.
   const graphs = new WeakMap();
   const create = ({ island, beds, walkable = null, surfaceRoute = null }) => {
     const cached = graphs.get(island), reuse = !!cached && cached.bedIds.length === beds.length;
@@ -93,8 +93,8 @@
         const incoming = Math.hypot(ax, az), outgoing = Math.hypot(bx, bz);
         if (incoming < 1e-6 || outgoing < 1e-6 || (ax * bx + az * bz) / (incoming * outgoing) > 0.999) { result.push(corner); continue; }
         let curve = null, reach = Math.min(0.9, incoming * 0.4, outgoing * 0.4);
-        // Round turns only as far as the real floor, walls and headroom allow.
-        // Construct and validate once when a route is chosen, never per frame.
+        // Round turns only as far as the real floor, walls and headroom allow; build and validate once per chosen
+        // route, never per frame.
         for (let attempt = 0; attempt < 4 && !curve; attempt++, reach *= 0.5) {
           const a = { x: corner.x - ax * reach / incoming, y: corner.y + (before.y - corner.y) * reach / incoming, z: corner.z - az * reach / incoming };
           const b = { x: corner.x + bx * reach / outgoing, y: corner.y + (after.y - corner.y) * reach / outgoing, z: corner.z + bz * reach / outgoing };
@@ -167,8 +167,8 @@
         simplified.push(p);
         while (simplified.length >= 3) {
           const n = simplified.length, a = simplified[n - 3], b = simplified[n - 2];
-          // Preserve the authored slope centerline. Only shorten circulation
-          // and room approaches on the same flat floor, away from ramp bends.
+          // Preserve the authored slope centerline: only shorten circulation and room approaches on the same flat
+          // floor, away from ramp bends.
           if (a.y >= -0.05 || Math.abs(a.y - b.y) > 1e-7 || Math.abs(a.y - p.y) > 1e-7 || !segment(a, p, false, 0.3)) break;
           simplified.splice(n - 2, 1);
         }

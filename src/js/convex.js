@@ -1,8 +1,7 @@
 (() => {
   "use strict";
   const BL = window.BL = window.BL || {};
-  // GJK intersects a rock piece with the convex hull of a vertical cylinder at
-  // both ends of its sweep. All queries share this bounded, non-reentrant work.
+  // GJK vs the convex hull of a vertical cylinder at both sweep ends; shared module scratch, so non-reentrant.
   const simplex = new Float64Array(12);
   const CONTACT = 1e-7, POINT_CONTACT = 1e-9, TOLERANCE = 1e-12;
   let fromX, fromY, fromZ, endX, endY, endZ, bodyRadius, bodyHeight;
@@ -26,9 +25,7 @@
     closest2 = distance; closestX = x; closestY = y; closestZ = z; closestMask = mask;
   };
   const closest = () => {
-    // Search every Voronoi region, including old vertices and the opposite
-    // tetrahedron face. Keeping only regions incident to the newest support
-    // can cycle when a cylinder grazes a shallow window ceiling.
+    // Search every Voronoi region, old vertices included: keeping only the newest support's can cycle on a graze.
     if (size === 4) {
       const ax = simplex[0], ay = simplex[1], az = simplex[2];
       const bx = simplex[3] - ax, by = simplex[4] - ay, bz = simplex[5] - az;
@@ -71,8 +68,7 @@
       simplex[count * 3] = simplex[i * 3]; simplex[count * 3 + 1] = simplex[i * 3 + 1]; simplex[count * 3 + 2] = simplex[i * 3 + 2]; count++;
     }
     size = count;
-    // This is a distance vector, not a cross product whose magnitude vanishes
-    // merely because two support points converge along a rounded edge.
+    // A distance vector, not a cross product whose magnitude vanishes when supports converge on a rounded edge.
     dx = -closestX; dy = -closestY; dz = -closestZ;
     return false;
   };
@@ -87,8 +83,7 @@
     }
     const count = piece.length / 3;
     centerX /= count; centerY /= count; centerZ /= count;
-    // A much smaller piece margin also makes degenerate point/flat queries
-    // treat exact boundary contact as clear instead of counting it as solid.
+    // A smaller piece margin makes degenerate point/flat queries count exact boundary contact as clear, not solid.
     scale = 1 - Math.min(0.5, POINT_CONTACT / Math.max(highX - lowX, highY - lowY, highZ - lowZ));
     const cap = Math.min(CONTACT, height / 2);
     fromX = x; fromY = y + cap; fromZ = z; endX = toX; endY = toY + cap; endZ = toZ;
@@ -102,8 +97,7 @@
     for (let iteration = 0; iteration < 96; iteration++) {
       const length = Math.hypot(dx, dy, dz);
       if (length <= TOLERANCE) return true;
-      // Normalization keeps skinny voxel fragments from scaling the contact
-      // tolerance or overflowing the repeated cross products.
+      // Normalize: skinny voxel fragments would otherwise scale the contact tolerance or overflow the cross products.
       dx /= length; dy /= length; dz /= length;
       support(piece);
       if (px * dx + py * dy + pz * dz <= TOLERANCE) return false;
@@ -115,7 +109,7 @@
       simplex[0] = px; simplex[1] = py; simplex[2] = pz; size++;
       if (closest()) return true;
     }
-    // Without a separating support plane, an unresolved sliver is solid.
+    // Without a separating support plane, an unresolved sliver counts as solid.
     return true;
   };
   BL.convex = { sweptCylinder };

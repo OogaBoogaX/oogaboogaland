@@ -10,13 +10,13 @@
   const DISK_BANANAS = 302;
   const MAX_BANANAS = 10000000;
   const BASE_HEIGHT = 0.48;
-  // Extra height plus the fuller profile represents air between loosely settled fruit
-  // without widening the pile into the bounded outer meadow at very large levels.
+  // PACKING_HEIGHT 1.2 plus the fuller profile stands for air between loosely settled fruit, without widening
+  // the pile into the bounded outer meadow at very large levels.
   const PACKING_HEIGHT = 1.2;
   const SHELL_EDGE = 0.28;
   const CORE_FACE_SIZE = 0.16;
   const GOLDEN_ANGLE = Math.PI * (3 - Math.sqrt(5));
-  // The large-pile shell keeps its established layered spacing and orientation.
+  // Established layered-shell spacing and orientation for the large pile; keep these values.
   const BANANA_LENGTH_SPACE = 0.3;
   const BANANA_ROW_SPACE = 0.1;
   const BANANA_YAW_SPREAD = 0.5;
@@ -43,7 +43,7 @@
     return footprintFor(count, scale) + BANANA_SCALE * SHELL_EDGE * mix;
   };
   const heightGrowthFor = (count) => footprintFor(count, 1) * PACKING_HEIGHT;
-  // The mound core never changes shape, only its node scale: one per page per size
+  // The mound core never changes shape, only its node scale: one geometry per page per size.
   const coreGeometries = new Map();
   const setVec = (v, x, y, z) => {
     v.x = x;
@@ -66,14 +66,13 @@
     out.slope = 0;
     return out;
   };
-  // The banana pile of one scene
   const create = (ctx) => {
     const { root, world, pileScale: SCALE = 0.45, pileY: BASE_Y = 0.02 } = ctx;
     const matrixLiving = !!ctx.matrixLivingPile;
     const pileSlots = [];
     const coreFaceSize = ctx.renderer.kind === "canvas2d" ? CORE_FACE_SIZE * 1.75 : CORE_FACE_SIZE;
-    // The supporting dome stays an ordinary Matrix receiver so code runs down
-    // between the bright bananas instead of turning the entire pile into a glow.
+    // The supporting dome stays an ordinary Matrix receiver so code runs down between the bright bananas instead
+    // of turning the entire pile into a glow.
     const coreKey = `${SCALE}/${coreFaceSize}`;
     let coreGeometry = coreGeometries.get(coreKey);
     if (!coreGeometry) coreGeometries.set(coreKey, coreGeometry = models.bananaPileCoreGeometry(SCALE * 6, BASE_HEIGHT * 6, coreFaceSize));
@@ -132,7 +131,7 @@
       }
       for (let i = 0; i < bases.length; i++) {
         const base = bases[i];
-        // The same bounded pool becomes deterministic shell reference points at 303.
+        // The same bounded pool (DISK_BANANAS = 302) becomes deterministic shell reference points at 303.
         const surfaceRadius = Math.sqrt((i + 0.5) / DISK_BANANAS) * 0.985;
         const surfaceAngle = i * GOLDEN_ANGLE + (surfaceRand() - 0.5) * 0.08;
         const profile = domeSurface(surfaceRadius, surfaceSample);
@@ -185,10 +184,8 @@
       });
       addChild(root, node);
     }
-    // Cosmetic fruit shares the regular banana mesh, but never enters the
-    // logical delivery pool, collision registry or object-outline queries.
-    // A batch needs its own geometry identity: the renderer groups ordinary
-    // bananas by geometry too. Only the immutable mesh arrays are shared.
+    // Cosmetic fruit shares the banana mesh but never the delivery pool, collision registry or outline queries;
+    // the batch needs its own geometry identity (the renderer groups by geometry); only mesh arrays are shared.
     const spillNode = createNode({ geometry: { ...bananaGeometry }, instanceData: new Float32Array(SPILL_POOL_SIZE * 20), instanceCount: 0, instanceVersion: 0, fixedInstanceCapacity: true, matrixLiving, sightHidden: true, visible: false });
     const spillSlots = [];
     for (let i = 0; i < SPILL_POOL_SIZE; i++) spillSlots.push({ age: 0, life: 0, position: { x: 0, y: 0, z: 0 }, velocity: { x: 0, y: 0, z: 0 }, rotation: { x: 0, y: 0, z: 0 }, spin: { x: 0, y: 0, z: 0 } });
@@ -213,8 +210,7 @@
       spillNode.instanceVersion++;
     };
     const spill = (x, y, z, vx, vy, vz, height = 0.3) => {
-      // Cap inherited speed so a very fast flight does not scatter fruit far
-      // beyond the character. Cosmetic random variation needs no new objects.
+      // Cap inherited speed so a very fast flight does not scatter fruit far beyond the character.
       const speed = Math.hypot(vx, vy, vz), inherit = speed > 8 ? 4 / speed : 0.5;
       const horizontal = Math.hypot(vx, vz), dx = horizontal > 0.001 ? vx / horizontal : 1, dz = horizontal > 0.001 ? vz / horizontal : 0;
       let emitted = 0;
@@ -222,8 +218,8 @@
         const slot = spillSlots[i];
         if (slot.life) continue;
         const side = (Math.random() - 0.5) * 0.7, ahead = Math.random() * 0.18;
-        // Stratify the burst so even a small emission includes fruit near
-        // the feet, torso and head wherever those meet the mound.
+        // Stratify the burst so even a small emission includes fruit near the feet, torso and head where they meet
+        // the mound.
         const lift = height * (emitted % 3 + Math.random() * 0.25) / 2.25;
         setVec(slot.position, x + dx * ahead - dz * side, y + lift, z + dz * ahead + dx * side);
         setVec(slot.velocity, vx * inherit - dz * side * 2 + dx * 0.4, vy * inherit + 1.4 + Math.random() * 0.7, vz * inherit + dx * side * 2 + dz * 0.4);
@@ -243,12 +239,14 @@
         slot.age += dt;
         if (slot.age >= slot.life) { slot.life = 0; continue; }
         const p = slot.position, v = slot.velocity, r = slot.rotation, spin = slot.spin;
+        const x = p.x, y = p.y, z = p.z;
         p.x += v.x * dt; p.y += v.y * dt - SPILL_GRAVITY * dt * dt * 0.5; p.z += v.z * dt;
         v.y -= SPILL_GRAVITY * dt;
         r.x += spin.x * dt; r.y += spin.y * dt; r.z += spin.z * dt;
-        // Settle onto the pile platform before shrinking, rather than
-        // leaving a second pile of physical fruit or falling through it.
+        // Settle onto the pile platform before shrinking, rather than leaving a second pile of physical fruit or
+        // falling through it.
         if (p.y < BASE_Y + 0.04) { p.y = BASE_Y + 0.04; setVec(v, 0, 0, 0); slot.age = Math.max(slot.age, slot.life - SPILL_FADE_TIME); }
+        if (ctx.onProjectileMove) ctx.onProjectileMove(x, y, z, p.x, p.y, p.z, dt);
       }
       writeSpills();
     };
@@ -273,14 +271,13 @@
     });
     let hatchOpen = 0, hatchTarget = 0;
     const pileEdge = () => footprint;
-    // Park a banana at its resting spot
     const restSlot = (slot) => {
       Object.assign(slot.node.position, slot.base.pos);
       Object.assign(slot.node.rotation, slot.base.rot);
       setVec(slot.node.scale, slot.restScale, slot.restScale, slot.restScale);
     };
-    // Write one flat banana on the mound surface at (angle, normalizedRadius), turned by yaw about the normal.
-    // seed is stable across relays, so a banana keeps its look while the mound grows under it.
+    // Writes one flat banana on the mound at (angle, normalizedRadius), yawed about the normal; seed is stable
+    // across relays so a banana keeps its look while the mound grows under it.
     const writeTile = (data, instance, seed, angle, normalizedRadius, yaw, sink, growth, coreFootprint, radialScale, edgeBand) => {
       const profile = domeSurface(normalizedRadius, surfaceSample);
       const radialNormal = -profile.slope * radialScale;
@@ -327,8 +324,8 @@
       data[offset + 18] = matrixLiving ? 2 : 0;
       data[offset + 19] = 0;
     };
-    // Preserve the established layered shell: bands run from rim to apex, with a
-    // slightly sunken second layer filling gaps while keeping visible 3D depth.
+    // Preserve the layered shell: bands run rim to apex, a slightly sunken second layer fills gaps while keeping
+    // visible 3D depth.
     const rebuildSurface = (target, growth, coreFootprint) => {
       const building = target <= DISK_BANANAS;
       if (!target) {
@@ -344,8 +341,8 @@
       const extraAt = (normalizedRadius, spacing) => Math.PI * 2 - bandCountAt(normalizedRadius, spacing) * stepAt(normalizedRadius, spacing) > stepAt(normalizedRadius, spacing) * 0.5 ? 1 : 0;
       let spacing = 1, fullWanted;
       for (;;) {
-        // The platform-contact ring never inherits adaptive shell thinning. Its
-        // complete circumference is the visual seal over the core's foot.
+        // The platform-contact ring never inherits adaptive shell thinning; its full circumference seals the core's
+        // foot.
         fullWanted = bandCountAt(SURFACE_OUTER_RADIUS, 1);
         for (let normalizedRadius = SURFACE_OUTER_RADIUS - rowStep(SURFACE_OUTER_RADIUS, spacing); normalizedRadius > 0; normalizedRadius -= rowStep(normalizedRadius, spacing)) fullWanted += bandCountAt(normalizedRadius, spacing) * 2 + extraAt(normalizedRadius, spacing);
         if (fullWanted <= maxTiles) break;
@@ -363,15 +360,15 @@
       const data = shell.instanceData;
       let instance = 0, candidate = 0, band = 0;
       const all = wanted === fullWanted;
-      // Start at the true foot of the profile. An inset that is imperceptible on a
-      // small pile scales into an exposed skirt at million-banana sizes.
+      // Start at the true foot of the profile: an inset imperceptible on a small pile scales into an exposed skirt
+      // at million-banana sizes.
       for (let normalizedRadius = SURFACE_OUTER_RADIUS; normalizedRadius > 0; normalizedRadius -= rowStep(normalizedRadius, spacing), band++) {
         const edgeBand = band === 0;
         const bandSpacing = edgeBand ? 1 : spacing;
         const bandCount = bandCountAt(normalizedRadius, bandSpacing);
         const phase = (band * GOLDEN_ANGLE) % (Math.PI * 2);
-        // Close the contact ring with equal angular spacing; carrying the ordinary
-        // row remainder into its final gap can expose the backing at large radii.
+        // Close the contact ring with equal angular spacing; carrying the ordinary row remainder into its final gap
+        // can expose the backing at large radii.
         const step = edgeBand ? Math.PI * 2 / bandCount : stepAt(normalizedRadius, bandSpacing);
         const last = bandCount - 1 + (edgeBand ? 0 : extraAt(normalizedRadius, bandSpacing));
         const underRadius = Math.max(0, normalizedRadius - rowStep(normalizedRadius, bandSpacing) * 0.5);
@@ -404,8 +401,8 @@
       setVec(core.scale, coreFootprint, BASE_HEIGHT * growth, coreFootprint);
       rebuildSurface(target, growth, coreFootprint);
       if (ctx.onLayout) ctx.onLayout(footprint, target);
-      // Every level re-spreads the bases: they are the pile's measured shape,
-      // not just chooseLanding's input, so they cannot be skipped above 302.
+      // Every level re-spreads the bases: they are the pile's measured shape, not just chooseLanding's input, so
+      // they cannot be skipped above 302.
       for (let i = 0; i < pileSlots.length; i++) {
         const slot = pileSlots[i], surface = slot.surface;
         const lift = BANANA_SCALE * 0.07;
@@ -478,6 +475,7 @@
       slot.note = null;
       slot.moving = true;
       slot.bananaValue = bananaValue;
+      if (ctx.trackMirrorObject) ctx.trackMirrorObject(slot.node, 1);
       delivery.airborneValue += bananaValue;
       delivery.airborneCount++;
       delivery.visualDropsStarted++;
@@ -501,6 +499,7 @@
           delivery.totalLandedValue += slot.bananaValue;
           slot.moving = false;
           slot.node.visible = false;
+          if (ctx.untrackMirrorObject) ctx.untrackMirrorObject(slot.node);
           slot.tween = null;
           world.level += slot.bananaValue;
           slot.bananaValue = 0;
@@ -538,6 +537,7 @@
           delivery.visualDropsCanceled++;
         }
         if (slot.tween) slot.tween.alive = false;
+        if (slot.moving && ctx.untrackMirrorObject) ctx.untrackMirrorObject(slot.node);
         slot.token++;
         slot.moving = false;
         slot.node.visible = false;
@@ -586,7 +586,7 @@
       if (additions) hatchTarget = 1;
       if (ctx.onShown) ctx.onShown(target);
       ctx.crew.updateFan();
-      // A delivery brings the crew running, one banana does not
+      // A delivery (>= 2 additions) brings the crew running; one banana does not.
       if (additions >= 2) ctx.crew.rush();
     };
     const deliverBananas = (amount) => {
@@ -613,9 +613,8 @@
         shell.geometry = shellGeometry;
         return;
       }
-      // Measure from the nearest possible surface, not the mound's centre: a
-      // camera beside even the largest pile must retain the original bananas.
-      // The box includes the warped dome and the full reach of its shell fruit.
+      // Measure from the nearest possible surface, not the mound's centre, so a camera beside even the largest pile
+      // keeps the original bananas; the box covers the warped dome and its shell fruit's full reach.
       const eye = ctx.camera.position, radius = core.scale.x * 1.05 + shellReach;
       const dx = Math.max(0, Math.abs(eye.x) - radius), dz = Math.max(0, Math.abs(eye.z) - radius);
       const dy = Math.max(0, BASE_Y - shellReach - eye.y, eye.y - BASE_Y - core.scale.y - shellReach);
@@ -641,8 +640,8 @@
       for (const slot of dropSlots) removeChild(root, slot.node);
       removeChild(root, core);
       removeChild(root, shell);
-      // Both detail levels cache this visit's instance matrices. End their GPU
-      // lifetime here so another scene's pile cannot reuse a matching version.
+      // Both detail levels cache this visit's instance matrices; end their GPU lifetime here so another scene's
+      // pile cannot reuse a matching version.
       ctx.renderer.releaseGeometry(shellGeometry);
       ctx.renderer.releaseGeometry(distantShellGeometry);
       removeChild(root, spillNode);
@@ -700,8 +699,8 @@
       syncPile(true);
     };
     const liveGeometry = (set) => set.add(shellGeometry).add(distantShellGeometry);
-    // Crew slots are assigned immediately after construction. Publish the
-    // loaded pile's real footprint before the crew exists or starts walking.
+    // Crew slots are assigned immediately after construction: publish the loaded pile's real footprint before the
+    // crew exists or starts walking.
     reflow(Math.max(0, Math.min(MAX_BANANAS, Math.floor(world.level))));
     return {
       slots: pileSlots, drops: dropSlots, core, shell, syncPile, deliverBananas, pileEdge, eatFromPile, update, dispose, stats, setLevel, liveGeometry, delivery: deliveryDebug, spill, spillEffect,

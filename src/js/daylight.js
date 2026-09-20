@@ -14,7 +14,7 @@
   const NIGHT_CLEAR = [0.08, 0.10, 0.18];
   const NIGHT_HORIZON = [0.18, 0.21, 0.37];
   const NIGHT_ZENITH = [0.07, 0.09, 0.18];
-  // Keep the backdrop dark, but lift hemispheric fill so silhouettes retain readable faces.
+  // Backdrop stays dark, but hemispheric fill is lifted so silhouettes keep readable faces.
   const NIGHT_SKY = [0.33, 0.37, 0.50];
   const NIGHT_GROUND = [0.27, 0.28, 0.35];
   const NIGHT_SUN = [0.22, 0.26, 0.40];
@@ -54,7 +54,7 @@
     out[1] = lerp(out[1], color[1], amount);
     out[2] = lerp(out[2], color[2], amount);
   };
-  // Equatorial declination/hour angle into east, up, south. The gate is north (-Z).
+  // Equatorial declination/hour angle -> east, up, south. The gate is north (-Z).
   const horizonDirection = (out, declination, hourAngle, latitude) => {
     const cd = Math.cos(declination), sd = Math.sin(declination);
     const ch = Math.cos(hourAngle), sh = Math.sin(hourAngle);
@@ -91,7 +91,7 @@
     horizonDirection(sunDirection, declination, hourAngle, latitude);
     sunAngles(sunDirection, out);
 
-    // A bounded low-cost lunar orbit: ecliptic longitude and latitude converted to equatorial space.
+    // Low-cost bounded lunar orbit: ecliptic longitude/latitude converted into equatorial space.
     const moonLongitude = wrap(TAU * (continuousDay - 4.867) / 27.321661, TAU);
     const moonLatitude = 5.145 * DEG * Math.sin(TAU * (continuousDay - 1.2) / 27.212221);
     const ce = Math.cos(AXIAL_TILT_DEG * DEG), se = Math.sin(AXIAL_TILT_DEG * DEG);
@@ -203,8 +203,7 @@
     };
     return state;
   };
-  // A low haze bank surrounds the island. Climbing above its eight-unit rim
-  // lowers its apparent horizon without changing any celestial direction.
+  // A haze bank rings the island: above its 8-unit rim the apparent horizon drops, not any celestial direction.
   const hazeDropAt = (eyeHeight) => {
     const rise = Math.max(0, eyeHeight - 8);
     return rise / Math.hypot(110, rise);

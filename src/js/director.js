@@ -1,10 +1,14 @@
 (() => {
   "use strict";
   const { scene, models, donations, glRenderer, canvasRenderer, game: gameMod, pile: pileMod, scenes } = window.BL;
+  // The optional build-time Oogatron snapshot loads before the director.
+  // Activity uses each contributor's timestamp, never the snapshot build time.
+  if (window.BL.jumbotronData) window.BL.contributors.applySnapshot(window.BL.jumbotronData);
   const { clearTweens, tweenCount } = scene;
   const params = new URLSearchParams(location.search);
   const DEBUG = params.has("debug");
-  // Donation loot crates, the locker tab and worn swag; the suite turns them on with ?debug=1&loot=1
+  if (DEBUG) window.BL.contributors.seedDebugActivity();
+  // Loot crates, locker tab and worn swag; the suite turns them on with ?debug=1&loot=1
   const LOOT_DEFAULT = false;
   const LOOT_ENABLED = DEBUG && params.has("loot") ? params.get("loot") === "1" : LOOT_DEFAULT;
   const requestedBananas = Number(params.get("bananas"));
@@ -25,6 +29,13 @@
   const overlayCtx = overlayCanvas.getContext("2d");
   const qualityLabel = $("quality");
   const curtain = $("curtain");
+  const SAYINGS = [
+    "growing the island…", "counting the bananas…", "waking the Oogas…", "polishing the rocks…", "herding the clouds…",
+    "lighting the torches…", "packing the leaf chutes…", "lashing sticks into a rocket…", "filling barrels with banana mash…",
+    "warming up the Fire Pot…", "sweeping the rope bridge…", "feeding the fireflies…", "teaching cavemen to drive…",
+    "hiding the jetpack…", "tightening the Vine Knots…", "fluffing the leaf beds…"
+  ];
+  $("curtain-saying").textContent = SAYINGS[Math.floor(Math.random() * SAYINGS.length)];
   const worldClock = $("world-clock");
   let renderer = null;
   if (!params.has("canvas2d")) {
@@ -32,7 +43,7 @@
       renderer = glRenderer.createRenderer(sceneCanvas, { quality: COARSE ? "medium" : "high" });
     } catch (err) {
       console.warn("WebGL2 renderer failed, using Canvas 2D fallback", err);
-      // A WebGL canvas cannot become 2D, so swap it
+      // A canvas that has held a WebGL context can never return a 2D one: replace the element.
       const fresh = sceneCanvas.cloneNode(false);
       sceneCanvas.replaceWith(fresh);
       sceneCanvas = fresh;
@@ -45,12 +56,11 @@
   };
   showQuality();
   const game = gameMod.create({ catalog: models.SWAG });
-  // The banana level, visitor-owned jetpack, and Ooga handed from the hub to a
-  // launched scene persist while scenes exchange their own temporary systems.
-  const world = { level: START_BANANAS, pilot: null, jetpack: { owned: false, fuel: 1 } };
+  // world survives scene swaps: banana level, equipment ownership, and the Ooga handed from hub to scene.
+  const world = { level: START_BANANAS, pilot: null, jetpack: { owned: false, fuel: 1 }, mirrorBroken: false };
+  const debugMagazines = DEBUG ? (params.get("mag") === "2" ? 2 : params.get("mag") === "1" ? 1 : 0) : 0;
+  world.magazine = { owned: debugMagazines > 0, count: debugMagazines, ammo: debugMagazines ? 30 : 0, carrier: null };
 
-  // ---------- scenes ----------
-  // One active scene owns its root, camera and systems
   let active = null;
   let sceneTime = 0;
   let transition = null;
@@ -118,7 +128,6 @@
     transition = { next, out: true, t: 0 };
   };
   const ctx = { renderer, canvas: sceneCanvas, overlay: overlayCanvas, game, world, go, lootEnabled: LOOT_ENABLED, testBananas: TEST_BANANAS, from: null };
-  // data-scene sections show only with their scene
   const sceneSections = [...document.querySelectorAll("[data-scene]")];
   const enter = (next) => {
     ctx.from = active ? active.id : null;
@@ -138,7 +147,6 @@
     active.liveGeometry(live);
     return live;
   };
-  // Swap scenes at full black
   const swap = (next) => {
     const leaving = active;
     const left = leaving.leave();
@@ -163,7 +171,7 @@
     fade = 1 - Math.min(1, transition.t / FADE);
     if (fade === 0) transition = null;
   };
-  // Drawn over the overlay in CSS pixels
+  // Fills in CSS pixels (clientWidth/clientHeight), not backing-store pixels.
   const drawFade = () => {
     overlayCtx.globalAlpha = fade;
     overlayCtx.fillStyle = "#000000";
@@ -171,33 +179,52 @@
     overlayCtx.globalAlpha = 1;
   };
 
-  // ---------- quality auto-tier ----------
-  const perf = { frames: 0, total: 0, checked: 0 };
+  // Sampled from delivered frame intervals, never from the cost of issuing a frame.
+  // GL calls return long before the GPU draws, so a GPU-bound machine reports cheap frames and never steps down.
+  const perf = { frames: 0, total: 0, since: 0, bad: 0 };
   const QUALITY_ORDER = ["high", "medium", "low"];
-  const autoTier = (frameMs) => {
-    if (renderer.kind !== "webgl2" || perf.checked >= 2) return;
+  // Window ends on frames or ms, whichever comes first: at 8 fps that steps down in about a second.
+  const TIER_FRAMES = 45, TIER_MS = 900, TIER_INTERVAL = 19, TIER_WARMUP = 12;
+  const autoTier = (intervalMs, now) => {
+    if (renderer.kind !== "webgl2" || renderedFrames <= TIER_WARMUP) return;
+    const idx = QUALITY_ORDER.indexOf(renderer.quality);
+    // Stepping is one-way and stops at the bottom tier, so quality cannot oscillate.
+    if (idx < 0 || idx >= QUALITY_ORDER.length - 1) return;
+    // An unfocused tab and a transition building the next scene are not evidence that the tier is too expensive.
+    if (!document.hasFocus() || transition) { perf.frames = perf.total = 0; perf.since = 0; return; }
+    if (!perf.since) perf.since = now;
     perf.frames++;
-    perf.total += frameMs;
-    if (perf.frames < 120) return;
+    perf.total += intervalMs;
+    if (perf.frames < TIER_FRAMES && now - perf.since < TIER_MS) return;
     const avg = perf.total / perf.frames;
     perf.frames = 0;
     perf.total = 0;
-    perf.checked++;
-    const idx = QUALITY_ORDER.indexOf(renderer.quality);
-    if (avg > 19 && idx < QUALITY_ORDER.length - 1) {
-      renderer.setQuality(QUALITY_ORDER[idx + 1]);
-      showQuality();
-    }
+    perf.since = now;
+    // Two bad windows required: one slow window can be another program, and a step down lasts the session.
+    // A genuinely slow machine still drops a tier inside two seconds.
+    if (avg <= TIER_INTERVAL) { perf.bad = 0; return; }
+    if (++perf.bad < 2) return;
+    perf.bad = 0;
+    renderer.setQuality(QUALITY_ORDER[idx + 1]);
+    showQuality();
+  };
+  // Boot time is a device probe no browser can refuse: Safari masks GPU strings, where thresholds matter most.
+  // BOOT_MEDIUM 2200 / BOOT_LOW 3400 measure building the first scene.
+  const BOOT_MEDIUM = 2200, BOOT_LOW = 3400;
+  const tierFromBoot = (ms) => {
+    if (renderer.kind !== "webgl2") return;
+    const wanted = ms > BOOT_LOW ? "low" : ms > BOOT_MEDIUM ? "medium" : null;
+    if (!wanted || QUALITY_ORDER.indexOf(wanted) <= QUALITY_ORDER.indexOf(renderer.quality)) return;
+    renderer.setQuality(wanted);
+    showQuality();
   };
 
-  // ---------- frame governor ----------
-  // Full rate when focused, 30fps behind another window
+  // Full rate while focused; 30 fps only when another window is in front.
   const WARMUP = 8;
   const UNFOCUSED_INTERVAL = 1000 / 30;
   let lastRender = 0;
   let renderedFrames = 0;
   let firstDraw = false;
-  // Part the curtain on the first drawn frame
   const openCurtain = () => {
     curtain.addEventListener("transitionend", (e) => {
       if (e.propertyName === "transform") curtain.remove();
@@ -206,17 +233,13 @@
   };
   const frameInterval = () => (elapsed > WARMUP && !document.hasFocus() && !active.inMotion ? UNFOCUSED_INTERVAL : 0);
 
-  // ---------- housekeeping ----------
-  // Release GPU buffers the scene no longer references
   const housekeep = () => renderer.releaseUnused(liveGeometry());
 
-  // ---------- main loop ----------
   let elapsed = 0;
   let lastTime = performance.now();
   let raf = 0;
-  // One frame of simulation and drawing, shared by the display loop and the
-  // debug `advance`, so a stepped frame is exactly a displayed one
-  const step = (dt, now, t0) => {
+  // Shared by the display loop and the debug `advance`, so a stepped frame is exactly a displayed one.
+  const step = (dt, now) => {
     elapsed += dt;
     if (transition) stepTransition(dt);
     sceneTime += dt;
@@ -234,26 +257,26 @@
       location.replace(`${location.pathname}?${params}`);
       return;
     }
-    active.overlay(dt);
     active.input.update();
+    active.overlay(dt);
     if (fade > 0) drawFade();
-    if (perf.checked < 2) autoTier(performance.now() - t0);
   };
   const frame = (now) => {
     raf = window.requestAnimationFrame(frame);
     const interval = frameInterval();
     if (interval && now - lastRender < interval - 1) return;
+    const delivered = now - lastRender;
     lastRender = now;
     renderedFrames++;
     if (renderedFrames <= 3) mark(`frame${renderedFrames}`);
-    const t0 = performance.now();
     // A queued RAF may predate debug advance(); simulation time must never rewind.
     const dt = Math.max(0, Math.min(0.1, (now - lastTime) / 1e3));
     lastTime = now;
-    step(dt, now, t0);
+    step(dt, now);
+    // Only a displayed frame carries a real interval; `advance` must not tier.
+    if (!interval) autoTier(delivered, now);
   };
 
-  // ---------- lifecycle ----------
   const onKeyDown = (e) => {
     if (e.repeat) return;
     const typing = e.target && (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA");
@@ -286,14 +309,14 @@
   if (params.has("nosim")) donations.config.simulate = false;
   const unsubscribeDonations = donations.subscribe((donation) => active.onDonation(donation), { identity: () => game.state });
   const housekeepTimer = window.setInterval(housekeep, 6e4);
-  // Only a registered id picks the scene
   const sceneId = params.get("scene");
-  // Building the first scene holds the main thread, and nothing has been
-  // painted yet: run it from a task after the first frame so the leaf curtain
-  // is on screen while the island is built, instead of the previous page.
+  // Building the first scene holds the main thread with nothing painted yet.
+  // Run boot from a task after the first frame so the leaf curtain is on screen, not the previous page.
   const boot = () => {
+    const built = performance.now();
     enter(Object.hasOwn(scenes, sceneId) ? scenes[sceneId] : scenes[Object.keys(scenes)[0]]);
     mark("ready");
+    tierFromBoot(performance.now() - built);
     raf = window.requestAnimationFrame(frame);
   };
   window.requestAnimationFrame(() => window.setTimeout(boot, 0));
@@ -307,13 +330,11 @@
       project: renderer.project,
       housekeep,
       go,
-      // Whole frames at a fixed step, without waiting on the display: a check
-      // can run seconds of simulated play in far less wall time
+      // Whole frames at a fixed step without waiting on the display: a check runs seconds of play in little wall time.
       advance: (seconds, dt = 1 / 60) => {
         for (let n = Math.round(seconds / dt); n > 0; n--) {
           renderedFrames++;
-          const t0 = performance.now();
-          step(dt, t0, t0);
+          step(dt, performance.now());
         }
         lastTime = performance.now();
       },
@@ -343,7 +364,7 @@
         return world.level;
       }
     };
-    for (const key of ["slots", "drops", "core", "shell", "delivery", "spillEffect", "cavemen", "crates", "lab", "headquarters", "hud", "applyAllSwag", "renderLocker", "demoTip", "setPileLevel", "refreshStates", "trimPool", "shown", "island", "mouths", "labels", "camera", "cameraCave", "crew", "controls", "props", "altar", "path", "scenery", "jetpack", "mirrorCave", "matrixCave", "matrixGate", "pilot", "renderOpts", "lamps", "entranceLights", "lighting", "fireSeats", "critters", "daylight", "setHour", "track", "racers", "items", "race", "audio", "weather", "launchers", "drop", "diver", "plane", "course", "jumbotron", "dsb"]) {
+    for (const key of ["slots", "drops", "core", "shell", "delivery", "spillEffect", "cavemen", "crates", "lab", "headquarters", "hud", "applyAllSwag", "renderLocker", "demoTip", "setPileLevel", "refreshStates", "trimPool", "shown", "island", "mouths", "labels", "camera", "cameraCave", "crew", "controls", "props", "altar", "path", "scenery", "jetpack", "magazine", "mirrorCave", "matrixCave", "matrixGate", "pilot", "renderOpts", "lamps", "entranceLights", "lighting", "fireSeats", "critters", "daylight", "setHour", "track", "racers", "items", "race", "audio", "weather", "launchers", "drop", "diver", "plane", "course", "jumbotron", "orbit", "flight", "site", "dsb"]) {
       Object.defineProperty(ooga, key, { get: () => active.debug && active.debug[key], enumerable: true });
     }
     window.__ooga = ooga;

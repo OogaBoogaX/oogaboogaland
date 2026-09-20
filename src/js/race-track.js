@@ -1,4 +1,4 @@
-// Race tracks: a closed spline becomes a road ribbon, terrain skirt, walls and baked decor in culled sectors
+// Race tracks: a closed spline becomes a road ribbon, terrain skirt, walls and baked decor in culled sectors.
 (() => {
   "use strict";
   const BL = window.BL = window.BL || {};
@@ -6,12 +6,12 @@
   const { createNode, addChild, removeChild } = BL.scene;
   const { hubModels, raceModels, daylight } = BL;
   const SURF = { road: 0, sand: 1, board: 2, gap: 3, ice: 4, lava: 5, snow: 6, crystal: 7, ash: 8 };
-  // Speed and grip per surface, off-road ones under 1
+  // SURFACE_GRIP/SURFACE_SLIP are indexed by SURF; off-road grips sit under 1.
   const SURFACE_GRIP = [1, 0.55, 1, 0, 0.5, 1, 0.6, 1, 0.6];
   const SURFACE_SLIP = [0, 0, 0, 0, 1, 0, 0.35, 0, 0];
   const STEP = 1.5;
   const SHOULDER = 1.6, CURB_W = 0.55, WALL_H = 1.3, FALL = 7;
-  // The slab rides above the skirt with a crown and raised rumble curbs
+  // The road slab rides above the terrain skirt, with a crown and raised rumble curbs.
   const ROAD_LIFT = 0.26, SLAB_DEPTH = 0.22, CROWN = 0.05, CURB_H = 0.11;
   const CELL = 3, MARGIN = 48, CHUNK = 20;
   const SECTOR_LENGTH = 42;
@@ -19,7 +19,7 @@
   const LIP = 1.7, LIP_SAMPLES = 5, RUNWAY = 45;
   const LOD_FAR = 95;
   const GRID_GAP = 4.6;
-  // One instanced batch: the whole crowd is a single draw however large
+  // SPECTATOR_CAP: the whole crowd is one instanced batch, a single draw however large.
   const SPECTATOR_CAP = 320;
   const LATTICE = 64;
   const valueNoise = (rand) => {
@@ -50,7 +50,6 @@
     geo.verts.push(x, y, z);
     return geo.verts.length / 3 - 1;
   };
-  // Append a geometry turned about y and scaled, into a sector's merged mesh
   const bake = (out, geo, x, y, z, yaw, s = 1) => {
     const base = out.verts.length / 3, v = geo.verts, c = Math.cos(yaw), sn = Math.sin(yaw);
     for (let i = 0; i < v.length; i += 3) {
@@ -68,7 +67,6 @@
     data[o + 16] = glow; data[o + 17] = 0; data[o + 18] = 0; data[o + 19] = 0;
   };
 
-  // ---------- themes ----------
   const skyOpts = (hour) => {
     const opts = {
       clear: new Float32Array(3), horizon: new Float32Array(3), zenith: new Float32Array(3), sky: new Float32Array(3), ground: new Float32Array(3), sun: new Float32Array(3), direct: new Float32Array(3),
@@ -76,7 +74,7 @@
       lights: new Float32Array(80), lightCount: 0, shadowCenter: { x: 0, y: 0, z: 0 }, shadowExtent: 38, bloomStrength: 0.55
     };
     daylight.sample(hour, opts, 172, 20);
-    // Fog fades into the horizon colour the sky pass paints
+    // Fog colour is the horizon colour the sky pass paints, so fog fades into the sky.
     opts.fog = opts.horizon;
     opts.fogNear = hour > 18 ? 60 : 110;
     opts.fogFar = hour > 18 ? 230 : 320;
@@ -150,8 +148,8 @@
     }
   };
 
-  // ---------- track definitions ----------
-  // x, z, y, options: w width, bank radians (right edge up), surface, wall 1 left 2 right 3 both, curb
+  // Track point P(x, z, y, opts): w width, bank in radians (right edge up), surface from SURF.
+  // wall is a bitmask, 1 left / 2 right / 3 both; curb is a flag.
   const P = (x, z, y = 0, o = {}) => ({ x, z, y, w: 11, bank: 0, surface: SURF.road, wall: 0, curb: 1, pad: 0, ...o });
   const TRACKS = [
     {
@@ -191,12 +189,11 @@
   ];
   const trackById = (id) => TRACKS.find((t) => t.id === id) || TRACKS[0];
 
-  // ---------- spline ----------
   const catmull = (p0, p1, p2, p3, t) => {
     const t2 = t * t, t3 = t2 * t;
     return 0.5 * (2 * p1 + (-p0 + p2) * t + (2 * p0 - 5 * p1 + 4 * p2 - p3) * t2 + (-p0 + 3 * p1 - 3 * p2 + p3) * t3);
   };
-  // Resample the closed spline at STEP along its arc into structure-of-arrays samples
+  // Resamples the closed spline every STEP of arc length into structure-of-arrays samples.
   const sampleSpline = (points) => {
     const n = points.length;
     const fine = [];
@@ -230,7 +227,7 @@
       out.y[i] = lerp(p.y, q.y, k);
       out.z[i] = lerp(p.z, q.z, k);
       out.dist[i] = target;
-      // Per-point attributes follow the nearer control point of the segment
+      // Per-point attributes (surface, wall, curb, pad) take the nearer control point, not an interpolation.
       const s = p.seg, t = p.t + k / 12;
       const b = points[s], c = points[(s + 1) % n];
       const near = t < 0.5 ? b : c;
@@ -241,7 +238,7 @@
       out.curb[i] = near.curb;
       out.pad[i] = near.pad ? 1 : 0;
     }
-    // The road rises into a lip over the last samples before a gap, so a fast racer launches clear
+    // The road rises into a LIP over the LIP_SAMPLES before a gap, so a fast racer launches clear.
     for (let i = 0; i < count; i++) {
       if (out.surface[i] !== SURF.gap || out.surface[(i - 1 + count) % count] === SURF.gap) continue;
       for (let k = 1; k <= LIP_SAMPLES; k++) {
@@ -256,7 +253,7 @@
       out.tx[i] = tx / len;
       out.tz[i] = tz / len;
     }
-    // Signed curvature from the heading change per unit length, then a smoothed racing line offset
+    // Signed curvature is the heading change per unit length; the racing line is a smoothed offset from it.
     for (let i = 0; i < count; i++) {
       const p = (i - 1 + count) % count, q = (i + 1) % count;
       const cross = out.tx[p] * out.tz[q] - out.tz[p] * out.tx[q];
@@ -270,10 +267,9 @@
     return out;
   };
 
-  // ---------- build ----------
-  const build = (def, { renderer, detail = 1, rain = false }) => {
+  const build = (def, { renderer, detail = 1, rain = false, spectators: showSpectators = true }) => {
     const theme = THEMES[def.theme];
-    // Weather: rain on the outdoor tracks, snow on the peak, never in the gorge
+    // Rain on outdoor tracks, snow on the peak, never under a ceiling (the gorge).
     const wet = rain && !theme.ceiling;
     const precipitation = wet ? (def.theme === "peak" ? "snow" : "rain") : null;
     const rand = mulberry32(def.seed);
@@ -294,7 +290,7 @@
       maxZ = Math.max(maxZ, S.z[i]);
     }
     const bounds = { minX: minX - MARGIN, maxX: maxX + MARGIN, minZ: minZ - MARGIN, maxZ: maxZ + MARGIN };
-    // Coarse grid of sample indices for cold lookups
+    // Coarse GRID of sample indices, for cold nearest lookups.
     const GRID = 8;
     const gw = Math.ceil((bounds.maxX - bounds.minX) / GRID), gh = Math.ceil((bounds.maxZ - bounds.minZ) / GRID);
     const cellOf = (x, z) => clamp(Math.floor((x - bounds.minX) / GRID), 0, gw - 1) * gh + clamp(Math.floor((z - bounds.minZ) / GRID), 0, gh - 1);
@@ -327,7 +323,7 @@
       }
       return best < 0 ? 0 : best;
     };
-    // Walk from a hint while the distance falls; the hint is the caller's last answer
+    // Walk from the hint while the distance falls; the hint is the caller's last answer.
     const nearest = (x, z, hint = -1) => {
       if (hint < 0) return nearestCold(x, z);
       let i = hint, d = d2(i, x, z);
@@ -346,7 +342,7 @@
       return i;
     };
     const rightX = (i) => -S.tz[i], rightZ = (i) => S.tx[i];
-    // Signed lateral distance and along-fraction to the next sample, written into out
+    // Writes the signed lateral distance and the along-fraction to the next sample into out.
     const project = (x, z, i, out) => {
       const q = (i + 1) % n;
       const dx = x - S.x[i], dz = z - S.z[i];
@@ -356,7 +352,7 @@
       out.next = q;
       return out;
     };
-    // Interpolate toward whichever neighbour the point lies between, so the height never steps at a sample
+    // Interpolate toward whichever neighbour the point lies between, so the height never steps at a sample.
     const roadY = (i, along, lateral) => {
       const back = along < 0;
       const a = back ? (i - 1 + n) % n : i, b = back ? i : (i + 1) % n;
@@ -364,9 +360,8 @@
       return lerp(S.y[a], S.y[b], k) + lateral * Math.tan(lerp(S.bank[a], S.bank[b], k));
     };
     const halfAt = (i) => S.w[i] * 0.5;
-    // The driving surface: the slab top with its crown
+    // slabY is the driving surface: roadY plus ROAD_LIFT and the crown (no crown on board).
     const slabY = (i, along, lateral) => roadY(i, along, lateral) + ROAD_LIFT + (S.surface[i] === SURF.board ? 0 : CROWN * (1 - Math.min(1, Math.abs(lateral) / halfAt(i))));
-    // Terrain heightfield
     const nx = Math.ceil((bounds.maxX - bounds.minX) / CELL) + 1, nz = Math.ceil((bounds.maxZ - bounds.minZ) / CELL) + 1;
     const heights = new Float32Array(nx * nz);
     const water = new Uint8Array(nx * nz);
@@ -383,7 +378,7 @@
         const gap = S.surface[i] === SURF.gap, bridge = S.surface[i] === SURF.board;
         let h = theme.height(noise(wx / 26 + 40, wz / 26 + 40), d);
         const road = roadY(i, 0, clamp(lat, -half, half)) - SLAB_DEPTH - 0.1;
-        // Bridges cross whatever lies below; elsewhere the skirt meets the road
+        // Over a gap or bridge the skirt drops below whatever crosses it; elsewhere it lerps up to meet the road.
         if (gap) h = Math.min(h, floor.level - 1.2);
         else if (bridge) h = Math.min(h, road - 1.6, floor.level + 0.6 * smooth((d - half - 3) / 8) + (h - floor.level) * smooth((d - half - 3) / 8));
         else h = lerp(road, h + (noise(wx / 4 + 900, wz / 4 + 900) - 0.5) * 0.5, smooth((d - half - SHOULDER - 1) / 7));
@@ -405,7 +400,7 @@
       return water[gx * nz + gz] === 1;
     };
     const SAMPLE = { lateral: 0, along: 0, index: 0, next: 0 };
-    // Height under a point: the ribbon on the road, the skirt off it, the hazard floor over a gap
+    // Height under a point: the ribbon on the road, the skirt off it, the hazard floor over a gap.
     const heightAt = (x, z, hint = -1, out = null) => {
       const i = nearest(x, z, hint);
       const s = out ? project(x, z, i, out) : project(x, z, i, SAMPLE);
@@ -423,18 +418,17 @@
       return waterAt(x, z) ? SURF.gap : theme.offroad;
     };
 
-    // ---------- sectors ----------
     const sectorCount = Math.max(6, Math.round(S.length / SECTOR_LENGTH));
     const perSector = Math.ceil(n / sectorCount);
     const sectors = [];
     const roadColors = theme.road, boardColors = theme.board;
-    // Lane columns across the slab, outer lanes a shade darker where tyres never run
+    // LANES: lateral lane edges across the slab; the outer lanes shade darker where tyres never run.
     const LANES = [-1, -0.62, -0.06, 0.06, 0.62, 1];
     const edgeAt = (k, side, extra = 0) => {
       const off = side * (halfAt(k) + extra);
       return { x: S.x[k] + rightX(k) * off, z: S.z[k] + rightZ(k) * off, y: roadY(k, 0, off) };
     };
-    // A block with a top and four sides, its base open, turned to the road's tangent
+    // Block with a top and four sides, base left open, turned to the road tangent at sample k.
     const block = (geo, cx, cy, cz, w, h, d, k, color, emissive = 0, bottom = false) => {
       const tx = S.tx[k], tz = S.tz[k], rx = rightX(k), rz = rightZ(k);
       const at = (u, v, y) => vert(geo, cx + rx * u + tx * v, y, cz + rz * u + tz * v);
@@ -469,7 +463,6 @@
         const c = wet ? mix(shadeRgb(dry, 0.74), rgb("#6d7a8a"), 0.18) : dry;
         const worn = shadeRgb(c, 0.9);
         if (board) {
-          // Two planks a segment, each a slab with seams between, on cross beams and piles
           const width = halfAt(k) * 2 + 0.16;
           for (let pk = 0; pk < 2; pk++) {
             const along = (pk + 0.5) * (STEP / 2);
@@ -491,7 +484,6 @@
           const outer = l === 0 || l === LANES.length - 2;
           quad(road, r0[l + 1], r1[l + 1], r1[l], r0[l], stripe ? theme.line : outer && !board ? worn : c, ice || crystal ? 0.12 : 0);
         }
-        // Cracks on ice, glowing seams on lava rock, an odd darker plank on a boardwalk
         if (ice && (i * 7) % 5 === 0) {
           const lat = (tone - 0.5) * halfAt(k) * 1.4;
           const o = { x: S.x[k] + rightX(k) * lat, z: S.z[k] + rightZ(k) * lat };
@@ -509,7 +501,6 @@
           const v2 = vert(road, o.x + dx + rightX(k) * 0.04, y, o.z + dz + rightZ(k) * 0.04), v3 = vert(road, o.x + dx - rightX(k) * 0.04, y, o.z + dz - rightZ(k) * 0.04);
           quad(road, v0, v3, v2, v1, theme.seams, 0.9);
         }
-        // Slab sides down to the skirt, then a shoulder out to the terrain
         for (const side of [-1, 1]) {
           const e0 = edgeAt(k, side), e1 = edgeAt(q, side);
           const top0 = e0.y + ROAD_LIFT, top1 = e1.y + ROAD_LIFT, bottom0 = e0.y - SLAB_DEPTH, bottom1 = e1.y - SLAB_DEPTH;
@@ -518,7 +509,6 @@
           if (side > 0) quad(road, t0, t1, b1, b0, sideColor);
           else quad(road, t0, b0, b1, t1, sideColor);
           if (S.curb[k]) {
-            // A raised rumble strip, alternating colours, its inner face rising from the slab
             const inner0 = edgeAt(k, side, 0.02), inner1 = edgeAt(q, side, 0.02), outer0 = edgeAt(k, side, CURB_W), outer1 = edgeAt(q, side, CURB_W);
             const color = theme.curb[(i >> 1) % 2];
             const ci0 = vert(road, inner0.x, inner0.y + ROAD_LIFT, inner0.z), ci1 = vert(road, inner1.x, inner1.y + ROAD_LIFT, inner1.z);
@@ -544,7 +534,6 @@
             if (side > 0) quad(road, p0, p1, p2, p3, shoulderColor);
             else quad(road, p0, p3, p2, p1, shoulderColor);
           }
-          // Walls: rock blocks, or a wooden railing along a boardwalk
           if (!(S.wall[k] & (side < 0 ? 1 : 2))) continue;
           const w0 = edgeAt(k, side, CURB_W + 0.55);
           const wy = w0.y + ROAD_LIFT;
@@ -563,7 +552,6 @@
           }
         }
       }
-      // A checkered start line across the slab
       if (from === 0) {
         const k = 0, half = halfAt(k), cells = Math.max(6, Math.round(half * 2 / 0.7));
         for (let row = 0; row < 2; row++) {
@@ -577,7 +565,6 @@
           }
         }
       }
-      // Decor scattered off the road, baked into the sector
       for (let i = from; i < to; i += 2) {
         const k = i % n;
         if (S.surface[k] === SURF.gap) continue;
@@ -607,7 +594,6 @@
           }
         }
       }
-      // Banners on alternate sectors
       if (s % 2 === 1) {
         for (const side of [-1, 1]) {
           const k = (from + 2) % n;
@@ -632,7 +618,6 @@
       addChild(root, node);
       sectors.push({ node, nodes, from, to, cx, cy, cz });
     }
-    // Terrain chunks under everything, no shadow casting
     const terrainNodes = [];
     for (let cx = 0; cx < nx - 1; cx += CHUNK) {
       for (let cz = 0; cz < nz - 1; cz += CHUNK) {
@@ -646,7 +631,7 @@
             const i = nearestCold(wx + CELL / 2, wz + CELL / 2);
             const dx = wx + CELL / 2 - S.x[i], dz = wz + CELL / 2 - S.z[i];
             const lat = Math.abs(dx * rightX(i) + dz * rightZ(i));
-            // Cells fully under the ribbon add nothing
+            // Skip terrain cells fully under the road ribbon: they add nothing.
             if (S.surface[i] !== SURF.gap && S.surface[i] !== SURF.board && lat + CELL * 0.71 < halfAt(i) + CURB_W && Math.hypot(dx, dz) < halfAt(i) + CELL) continue;
             const wet = water[k] && water[k + nz] && water[k + 1] && water[k + nz + 1];
             const tone = noise(wx / 7 + 90, wz / 7 + 90);
@@ -661,7 +646,6 @@
         terrainNodes.push(node);
       }
     }
-    // A cavern roof over the gorge: a noisy sheet facing down, stalactites where the road is not
     if (theme.ceiling) {
       const c = theme.ceiling;
       for (let cx = 0; cx < nx - 1; cx += CHUNK) {
@@ -687,7 +671,7 @@
         }
       }
     }
-    // Start gantry at sample 0 facing the grid, finish arch shares it
+    // Gantry stands at sample 0 facing the grid; the finish arch shares it.
     const gx0 = S.x[0], gz0 = S.z[0], gy0 = S.y[0] + ROAD_LIFT;
     const gantryYaw = Math.atan2(S.tx[0], S.tz[0]);
     const gantryNode = createNode({ position: { x: gx0, y: gy0, z: gz0 }, rotation: { x: 0, y: gantryYaw + Math.PI, z: 0 }, geometry: raceModels.gantry() });
@@ -699,7 +683,7 @@
     }
     addChild(root, gantryNode, sign, ...lamps);
     geometries.push(gantryNode.geometry, sign.geometry, raceModels.gantryLamp());
-    // Torches along the road on cave tracks, each a point light candidate
+    // Torches only on cave tracks; each one is a point-light candidate.
     const torches = [];
     if (theme.torches) {
       const every = Math.max(1, Math.floor(n / (theme.torches * 4)));
@@ -716,12 +700,11 @@
       }
       geometries.push(raceModels.torchStand(), raceModels.torchFlame());
     }
-    // Spectators: instanced figures in stands beside the first straight and at three corners
     const spectators = { node: null, x: new Float32Array(SPECTATOR_CAP), y: new Float32Array(SPECTATOR_CAP), z: new Float32Array(SPECTATOR_CAP), yaw: new Float32Array(SPECTATOR_CAP), phase: new Float32Array(SPECTATOR_CAP), count: 0 };
     const standsGeo = geometry();
     if (theme.spectators) {
       const spots = [];
-      // A stand: rows of figures on stepped plank tiers, cols figures long, two to a sample
+      // stand(): rows of figures on stepped plank tiers, cols long, two figures per sample.
       const stand = (i, side, rows, cols) => {
         for (let r = 0; r < rows; r++) {
           const mid = (i + cols - 1) % n;
@@ -730,6 +713,7 @@
             const px = S.x[mid] + rightX(mid) * off, pz = S.z[mid] + rightZ(mid) * off;
             if (!waterAt(px, pz)) block(standsGeo, px, groundAt(px, pz) - 0.3, pz, 1.1, 0.3 + r * 0.25, cols * 2 * STEP + 0.5, mid, r % 2 ? rgb("#8f6538") : rgb("#9c7040"));
           }
+          if (!showSpectators) continue;
           for (let c = 0; c < cols; c++) {
             for (let half = 0; half < 2; half++) {
               const k = (i + c * 2) % n;
@@ -756,11 +740,13 @@
         spectators.phase[i] = rand() * Math.PI * 2;
       }
       spectators.count = count;
-      spectators.node = createNode({ geometry: raceModels.spectator(def.seed % 3), instanceData: new Float32Array(SPECTATOR_CAP * 20), instanceCount: count, instanceVersion: 0, fixedInstanceCapacity: true });
-      addChild(root, spectators.node, createNode({ geometry: keep(standsGeo) }));
-      geometries.push(spectators.node.geometry);
+      if (count) {
+        spectators.node = createNode({ geometry: raceModels.spectator(def.seed % 3), instanceData: new Float32Array(SPECTATOR_CAP * 20), instanceCount: count, instanceVersion: 0, fixedInstanceCapacity: true });
+        addChild(root, spectators.node);
+        geometries.push(spectators.node.geometry);
+      }
+      addChild(root, createNode({ geometry: keep(standsGeo) }));
     }
-    // Checkpoints, grid, spawn points
     const checkpoints = new Int32Array(CHECKPOINTS);
     const runway = Math.ceil(RUNWAY / STEP);
     const gapAhead = (i) => {
@@ -788,14 +774,13 @@
       if (k % 5 === 4) spawns.crates.push(at(lane), at(-lane || halfAt(i) * 0.45));
       else spawns.bananas.push(at(lane), at(lane + (lane > 0 ? -1.3 : 1.3)));
     }
-    // Boost pads on the straightest samples, well apart
     const straights = [];
     for (let i = 12; i < n - 12; i++) {
       let bend = 0;
       for (let k = -10; k <= 10; k++) bend += Math.abs(S.curvature[(i + k + n) % n]);
       if (S.surface[i] !== SURF.gap && bend < 0.12 && (!straights.length || i - straights[straights.length - 1] > n / 6)) straights.push(i);
     }
-    // A flagged pad sits at the end of its run, right before the lip it feeds
+    // A pad spawn is the last sample of a pad run, right before the lip it feeds.
     for (let i = 0; i < n; i++) {
       if (!S.pad[i] || S.pad[(i + 1) % n] || S.surface[i] === SURF.gap) continue;
       spawns.pads.push({ x: S.x[i], y: slabY(i, 0, 0), z: S.z[i], heading: Math.atan2(S.tx[i], S.tz[i]), index: i });
@@ -808,7 +793,7 @@
     if (def.hazard === "lava") {
       for (const i of [Math.floor(n * 0.32), Math.floor(n * 0.71)]) spawns.boulders.push({ index: i, x: S.x[i], z: S.z[i], y: slabY(i, 0, 0), heading: Math.atan2(S.tx[i], S.tz[i]), half: halfAt(i) });
     }
-    // Minimap polyline, normalised to a unit square
+    // Minimap polyline, normalised to a unit square.
     const mapPts = [];
     const spanX = maxX - minX, spanZ = maxZ - minZ, span = Math.max(spanX, spanZ);
     for (let i = 0; i < n; i += 3) mapPts.push((S.x[i] - minX - (spanX - span) / 2) / span, (S.z[i] - minZ - (spanZ - span) / 2) / span);
@@ -833,7 +818,7 @@
       renderOpts.fogFar = 170;
     }
     const slipAt = (surface) => Math.min(1, SURFACE_SLIP[surface] + (wet && (surface === SURF.road || surface === SURF.board) ? 0.42 : 0));
-    // Per frame: spectators bob, torches flicker, far sectors drop their small decor
+    // Per frame: spectators bob, torches flicker, far sectors drop their small decor.
     const update = (elapsed, camX, camZ) => {
       if (spectators.node) {
         const data = spectators.node.instanceData;

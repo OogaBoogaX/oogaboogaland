@@ -1,4 +1,4 @@
-// Racers: contributors on foot, in a Rock Kart or on a Dino, one arcade controller and an AI driver
+// Racers: contributors on foot, in a Rock Kart or on a Dino; one arcade controller and an AI driver.
 (() => {
   "use strict";
   const BL = window.BL = window.BL || {};
@@ -6,7 +6,6 @@
   const { clamp, lerp, damp, fnv1a, mulberry32 } = BL.math;
   const { createNode, addChild, removeChild } = BL.scene;
   const { SURF, SURFACE_GRIP, STEP, SHOULDER, CURB_W, FALL } = raceTrack;
-  // Handling per mount: top speed, acceleration, braking, turn rate, drift turn, mass, hop, off-road factor, body radius
   const MOUNTS = [
     { id: "run", name: "On foot", top: 21, accel: 12.5, brake: 15, turn: 2.9, driftTurn: 1.55, mass: 0.8, hop: 5.6, offroad: 0.85, radius: 0.55, bars: [3, 4, 5] },
     { id: "kart", name: "Rock Kart", top: 24.5, accel: 8, brake: 16, turn: 1.95, driftTurn: 1.8, mass: 1.35, hop: 4.6, offroad: 0.55, radius: 0.8, bars: [5, 2, 3] },
@@ -20,7 +19,7 @@
   const RANK_EVERY = 0.2;
   const NAMES = ["1st", "2nd", "3rd", "4th", "5th", "6th", "7th", "8th"];
   const P = { lateral: 0, along: 0, index: 0, next: 0 };
-  // Effects near the camera only, from the shared particle pool
+  // Effects only for racers near the camera (EFFECT_RANGE is a squared distance), from the shared particle pool.
   const EFFECT_RANGE = 48 * 48;
   const SPARKS = [[models.particleGeometry("#ffb13b", 0.05, 1)], [models.particleGeometry("#ffb13b", 0.05, 1), models.particleGeometry("#79d8ff", 0.055, 1)], [models.particleGeometry("#c99bff", 0.06, 1), models.particleGeometry("#79d8ff", 0.055, 1)]];
   const DUST = [models.particleGeometry("#a3874f", 0.07, 0)];
@@ -40,7 +39,7 @@
     const order = [];
     let player = null, laps = 3, rankTimer = 0, elapsed = 0, raceTime = 0, running = false, autopilot = false;
     const events = { onLap: null, onFinish: null, onRespawn: null, onDrift: null, onLand: null, onWrongWay: null, onWall: null, onBump: null, onHop: null };
-    contributors.roster.forEach((contributor, i) => {
+    contributors.activeRoster.forEach((contributor, i) => {
       const traits = contributors.traitsFor(contributor.name);
       const cave = models.caveman(traits);
       const node = createNode({ visible: false });
@@ -92,7 +91,6 @@
       parts.armR.rotation.z = 0.25;
       addChild(racer.body, cave.root);
     };
-    // Give every racer a mount and a grid slot on the track
     const setup = ({ track: nextTrack, playerName, playerMount, lapCount }) => {
       track = nextTrack;
       laps = lapCount;
@@ -100,9 +98,10 @@
       raceTime = 0;
       player = null;
       const grid = track.grid;
-      // The visitor starts last on the grid, the AI ahead by roster order
+      // The visitor starts last on the grid, the AI ahead by roster order.
       const lineup = racers.filter((r) => r.name !== playerName);
       const chosen = racers.find((r) => r.name === playerName) || racers[0];
+      if (!chosen) return;
       lineup.push(chosen);
       lineup.forEach((racer, slot) => {
         const g = grid[Math.min(grid.length - 1, slot)];
@@ -155,7 +154,6 @@
       racer.driftIn = !!drift;
       racer.itemIn = !!item;
     };
-    // ---------- AI ----------
     const drive = (r, dt) => {
       const S = track.samples, n = track.count, m = r.mount, ai = r.ai;
       const la = Math.max(3, Math.round(5 + r.speed * 0.45 * ai.skill));
@@ -165,7 +163,7 @@
       const lat = clamp(S.line[ti] * (half - 1.3) * (0.55 + ai.skill * 0.45) + ai.offset * half * 0.6 + Math.sin(ai.wobble) * 0.6, -(half - 1), half - 1);
       const tx = S.x[ti] + track.rightX(ti) * lat, tz = S.z[ti] + track.rightZ(ti) * lat;
       let err = wrap(Math.atan2(tx - r.x, tz - r.z) - r.heading);
-      // Give way to whoever is right ahead
+      // The AI gives way to whoever is right ahead.
       for (let i = 0; i < racers.length; i++) {
         const o = racers[i];
         if (o === r || o.respawn > 0) continue;
@@ -212,7 +210,6 @@
       }
       return false;
     };
-    // ---------- physics ----------
     const respawnAt = (r, why) => {
       const i = track.checkpoints[r.started ? (r.checkpoint - 1 + track.checkpoints.length) % track.checkpoints.length : 0];
       const S = track.samples;
@@ -258,7 +255,6 @@
         r.driftIn = false;
         if (r.spin <= 0) r.spinRot = 0;
       }
-      // Surface under the racer
       r.idx = track.nearest(r.x, r.z, r.idx);
       track.project(r.x, r.z, r.idx, P);
       r.lateral = P.lateral;
@@ -269,7 +265,6 @@
       const grip = gap ? 1 : SURFACE_GRIP[r.surface];
       const slippery = gap ? 0 : track.slipAt(r.surface);
       r.offroad = !gap && Math.abs(r.lateral) > half + CURB_W;
-      // Speed
       const boosting = r.boost > 0;
       if (boosting) r.boost -= dt;
       let top = m.top * (boosting ? BOOST_MUL : 1) * (r.offroad ? m.offroad : grip < 1 && !slippery ? grip : 1);
@@ -284,7 +279,6 @@
         r.speed = damp(r.speed, 0, 0.8, dt);
         if (r.speed > top) r.speed = damp(r.speed, top, 4, dt);
       }
-      // Drift
       const d = r.drift;
       const pressed = r.driftIn && !r.driftHeld;
       r.driftHeld = r.driftIn;
@@ -313,25 +307,23 @@
           d.tier = 0;
         }
       }
-      // Heading
       const speedK = clamp(Math.abs(r.speed) / 6, 0, 1) * (r.airborne ? 0.35 : 1);
       let turn;
       if (d.active) turn = m.driftTurn * (d.dir * 0.55 + r.steer * 0.5);
       else turn = m.turn * r.steer * (1 - 0.35 * Math.min(1, Math.abs(r.speed) / m.top));
       r.heading -= turn * speedK * dt * (r.speed < 0 ? -1 : 1);
-      // The motion direction trails the heading while drifting or on ice
+      // The motion direction trails the heading while drifting or on ice.
       const wanted = r.heading + (d.active ? d.dir * DRIFT_ANGLE : 0);
       const settle = d.active ? 9 : lerp(14, 2.2, slippery);
       r.motionHeading = wrap(r.heading + damp(wrap(r.motionHeading - r.heading), wrap(wanted - r.heading), settle, dt));
       r.x += Math.sin(r.motionHeading) * r.speed * dt;
       r.z += Math.cos(r.motionHeading) * r.speed * dt;
-      // Ground, launches, landings
       r.idx = track.nearest(r.x, r.z, r.idx);
       const prevGround = r.ground;
       r.ground = track.heightAt(r.x, r.z, r.idx, P);
       r.lateral = P.lateral;
       r.along = P.along;
-      // Launches read the centreline profile, so curbs and the crown never throw a racer
+      // Launches read the centreline profile, so curbs and the crown never throw a racer.
       const centre = track.roadY(r.idx, r.along, 0);
       const gv = (centre - r.centre) / dt;
       r.centre = centre;
@@ -359,14 +351,12 @@
           if (events.onLand) events.onLand(r, hard);
         }
       }
-      // Off the edge and into the floor
       const floorLevel = track.renderOpts && track.floorLevel;
       const surfaceNow = track.surfaceAt(r.x, r.z, r.idx, r.lateral);
       if ((surfaceNow === SURF.gap && r.y < floorLevel + 0.1) || Math.abs(r.lateral) > half + CURB_W + SHOULDER + FALL) {
         respawnAt(r, surfaceNow === SURF.gap ? track.hazard : "fell");
         return;
       }
-      // Walls hold the racer on the ribbon
       const side = r.lateral < 0 ? 1 : 2;
       const limit = half + CURB_W - m.radius * 0.6;
       if ((S.wall[r.idx] & side) && Math.abs(r.lateral) > limit) {
@@ -377,7 +367,7 @@
         const tangent = Math.atan2(S.tx[r.idx], S.tz[r.idx]);
         const into = -wrap(r.motionHeading - tangent) * Math.sign(r.lateral);
         if (into > 0.05) {
-          // One knock on contact, then a scrape drag while the racer keeps leaning on the wall
+          // One knock on contact, then a scrape drag while the racer keeps leaning on the wall.
           if (r.wallHit <= 0) {
             r.speed *= Math.max(0.55, 1 - into * 0.7);
             r.heading = wrap(tangent + wrap(r.heading - tangent) * 0.4);
@@ -390,7 +380,6 @@
         }
       }
       if (r.wallHit > 0) r.wallHit -= dt;
-      // Progress, checkpoints in order, laps at the line, wrong way
       r.progress = S.dist[r.idx] + r.along * STEP;
       const checks = track.checkpoints, count = checks.length;
       const c = checks[r.checkpoint];
@@ -431,7 +420,7 @@
         }
       }
     };
-    // Bodies push apart, the heavier one moves less
+    // Bodies push apart, the heavier one moves less.
     const collide = () => {
       for (let i = 0; i < racers.length; i++) {
         const a = racers[i];
@@ -448,7 +437,7 @@
           a.z -= nz * overlap * (b.mount.mass / total);
           b.x += nx * overlap * (a.mount.mass / total);
           b.z += nz * overlap * (a.mount.mass / total);
-          // Relative approach along the contact trades a little speed
+          // Relative approach along the contact trades a little speed.
           const va = a.speed * (Math.sin(a.motionHeading) * nx + Math.cos(a.motionHeading) * nz);
           const vb = b.speed * (Math.sin(b.motionHeading) * nx + Math.cos(b.motionHeading) * nz);
           const rel = va - vb;
@@ -462,7 +451,7 @@
       }
     };
     const rankAll = () => {
-      // Insertion sort on a small fixed array, by finish then laps then checkpoints then progress
+      // Insertion sort on a small fixed array, by finish then laps then checkpoints then progress.
       const key = (r) => r.finished ? 1e9 - r.finishTime : r.started ? (r.lap * 100 + (r.checkpoint || 100)) * 1e5 + r.progress : r.progress - track.length;
       for (let i = 1; i < order.length; i++) {
         const r = order[i], k = key(r);
@@ -474,7 +463,7 @@
         order[j + 1] = r;
       }
       for (let i = 0; i < order.length; i++) order[i].rank = i + 1;
-      // Rubber band: the AI behind the visitor push a little, the AI ahead ease off
+      // Rubber band: the AI behind the visitor push a little, the AI ahead ease off.
       if (player) {
         for (const r of racers) {
           if (r === player) continue;
@@ -504,7 +493,6 @@
         rankAll();
       }
     };
-    // ---------- animation ----------
     let frame = 0;
     const pose = (dt, camX = 0, camZ = 0) => {
       const S = track.samples, n = track.count;
@@ -513,7 +501,6 @@
       for (let i = 0; i < racers.length; i++) {
         const r = racers[i], a = r.anim, m = r.mount, parts = r.cave.parts;
         if (!m) continue;
-        // Boost fire, and sparks and dust for racers near the camera
         const boosting = r.boost > 0 && r.respawn <= 0;
         r.flame.visible = boosting;
         if (boosting) {

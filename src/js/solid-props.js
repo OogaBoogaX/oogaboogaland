@@ -3,10 +3,10 @@
   const BL = window.BL = window.BL || {};
   const { mat4 } = BL.math;
   const EPS = 1e-7, geometries = new WeakMap();
-  // The render mesh is also the collision shell. A shared local-space tree
-  // preserves openings in arches, branches and aircraft without voxelizing
-  // each placed copy or rebuilding its triangles when a prop moves.
+  // Props use their render mesh or an explicit collision shell; a shared local-space tree preserves openings in
+  // arches, branches and aircraft without voxelizing each placed copy or rebuilding triangles when a prop moves.
   const geometryOf = (geometry) => {
+    geometry = geometry.collisionGeometry || geometry;
     let cached = geometries.get(geometry);
     if (cached) return cached;
     const vertices = geometry.verts, triangles = [], bounds = [], order = [];
@@ -51,8 +51,8 @@
     let shoulderPolygons = new Float64Array(0), shoulderAcross = new Float64Array(0), shoulderSeen = new Uint8Array(0), shoulderQueue = new Int32Array(0);
     const stats = { nodes: 0, active: 0, transforms: 0, triangles: 0, queries: 0, triangleTests: 0 };
     let generation = 0;
-    // Refresh only registered meshes and their ancestors, once per sync.
-    // The scene's normal render traversal handles every unrelated node.
+    // Refresh only registered meshes and their ancestors, once per sync; the scene's normal render traversal
+    // handles every unrelated node.
     const refreshWorld = (node) => {
       const stamp = transforms.get(node);
       if (stamp === generation) return true;
@@ -109,7 +109,7 @@
         for (let i = 0; i < 16 && !changed; i++) changed = world[i] !== entry.world[i];
         if (changed) {
           const determinant = world[0] * (world[5] * world[10] - world[6] * world[9]) - world[4] * (world[1] * world[10] - world[2] * world[9]) + world[8] * (world[1] * world[6] - world[2] * world[5]);
-          // Opening crates can collapse their scale to zero before removal.
+          // Opening crates can collapse their scale to zero before removal (|determinant| < 1e-12).
           if (Math.abs(determinant) < 1e-12) { entry.active = false; continue; }
           entry.orientation = determinant < 0 ? -1 : 1;
           entry.world.set(world); mat4.invert(entry.inverse, world); entry.initialized = true;
@@ -144,8 +144,8 @@
       }
       stats.triangleTests++;
     };
-    // Maximum height of a triangle over a circular footprint, including
-    // contacts along its edges and the steepest point inside the disk.
+    // Maximum height of a triangle over a circular footprint, including contacts along its edges and the
+    // steepest point inside the disk.
     const triangleTop = (x, z, radius, direction) => {
       const ax = triangle[0], ay = triangle[1] * direction, az = triangle[2];
       const bx = triangle[3] - ax, by = triangle[4] * direction - ay, bz = triangle[5] - az, cx = triangle[6] - ax, cy = triangle[7] * direction - ay, cz = triangle[8] - az;
@@ -191,8 +191,8 @@
       }
       return best * direction;
     };
-    // A half-open edge convention counts shared diagonals only once. Signed
-    // crossings also handle overlapping closed parts of a merged model.
+    // A half-open edge convention counts shared diagonals only once; signed crossings also handle overlapping
+    // closed parts of a merged model.
     const inside = (entry, x, y, z) => {
       if (!overlaps(entry.box, x, y, z, x, y, z)) return false;
       localQuery(entry, x, y, z, x, entry.box[4] + EPS, z);
@@ -258,8 +258,8 @@
       }
       return written;
     };
-    // A clipped triangle has at most five vertices. Its horizontal projection
-    // is convex, including the line segments made by vertical mesh faces.
+    // A clipped triangle has at most five vertices; its horizontal projection is convex, including the segments
+    // made by vertical mesh faces.
     const shoulderSeparate = (a, b, dx, dz) => {
       const data = shoulderPolygons;
       let lowA = Infinity, highA = -Infinity, lowB = Infinity, highB = -Infinity;
@@ -322,11 +322,8 @@
         data[start + 3] = Math.min(data[start + 3], across); data[start + 4] = Math.max(data[start + 4], across);
       }
     };
-    // y/height describe the blocking slice above a walker's climbable step.
-    // Return the first connected surface in its forward/right coordinate frame;
-    // a canopy or a separate arch post must not enlarge the contacted trunk.
-    // bottomY includes its lower tiers only after that blocking contact exists;
-    // contactAcross retains the blocking slice for the shoulder's twist strength.
+    // shoulderAt: y/height are the blocking slice above a walker's climbable step; out is the first connected
+    // surface in forward/right frame; bottomY adds lower tiers only after contact; contactAcross keeps that slice.
     const shoulderAt = (x, y, z, fx, fz, radius, height, reach, out, bottomY = y) => {
       stats.queries++;
       out.node = null;

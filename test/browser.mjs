@@ -1,4 +1,4 @@
-// Minimal headless-Chrome driver over the DevTools protocol
+// Minimal headless-Chrome driver over the DevTools protocol.
 import { spawn } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -6,20 +6,19 @@ import { join } from "node:path";
 
 const CHROME = process.env.CHROME || "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-// An error the driver raises itself means the check could not run, not that it failed: the runner retries those once
+// driverError means the check could not run, not that it failed; the runner retries those once.
 export const driverError = (message) => Object.assign(new Error(message), { driver: true });
 const COMMAND_MS = 90000;
-// A pooled Chrome is probed before reuse: a wedged one must be replaced in seconds, not in a minute and a half
+// PROBE_MS 2000: a pooled Chrome is probed before reuse so a wedged one is replaced in seconds, not 90 s.
 const PROBE_MS = 2000;
-// A fresh Chrome answers its setup commands in milliseconds. One that has not
-// replied in 10 s is wedged (seen several times a full run as a 90 s stall per
-// lane), and the runner retries the session on a new one sooner.
+// SETUP_MS 10000: fresh Chrome answers setup in ms; no reply in 10 s means wedged (seen as 90 s lane stalls),
+// so the runner retries the session on a new Chrome.
 const SETUP_MS = 10000;
-// Idle Chromes each hold a WebGL context and a few hundred MB, so the pool keeps only a lane's worth
+// Each idle Chrome holds a WebGL context and a few hundred MB, so the pool keeps only a lane's worth.
 const MAX_IDLE = Number(process.env.POOL_IDLE) || 6;
 
-// Flags every launch gets. The tail (quiet startup, no keychain, no component updates) only removes
-// first-run work Chrome would do before the page loads; nothing here touches rendering or timing.
+// Flags every launch gets; the tail only removes Chrome's first-run work and touches neither rendering nor
+// timing.
 const BASE_FLAGS = [
   "--headless=new",
   "--hide-scrollbars",
@@ -42,16 +41,12 @@ const BASE_FLAGS = [
   "--password-store=basic",
   "--use-mock-keychain"
 ];
-// Speed mode (the default): the page is vsync-locked at exactly 60 fps, and every check that waits on
-// drawn frames waits on that clock. Unlocking the compositor measured 418 fps on this app - a 7x
-// speedup of the whole suite - and window size barely moved it, so the suite is frame-gated, not raster-bound.
-// Perf mode (`launch({ perf: true })`) leaves both flags off: the frame-rate blocks (core, governor,
-// mirror cave, dynamic paths, hub pile, daylight night, day cycle) assert a real ~60 fps floor, and
-// with the limiter off they would read ~418 fps and stop catching regressions.
+// Speed mode (default) vsync-locks the page at 60 fps; unlocking the compositor measured 418 fps, a 7x suite
+// speedup. launch({ perf: true }) drops both flags so frame-rate blocks assert a real ~60 fps floor.
 const SPEED_FLAGS = ["--disable-gpu-vsync", "--disable-frame-rate-limit"];
 
-// Chrome can still hold files in the profile when we unlink it (EACCES/ENOTEMPTY on macOS when it has
-// not fully exited). Cleanup is best effort and must never fail a run.
+// Chrome may still hold profile files after unlink (EACCES/ENOTEMPTY on macOS); cleanup is best effort and
+// must never fail a run.
 const removeProfile = (profile, attempt = 0) => {
   try {
     rmSync(profile, { recursive: true, force: true });
@@ -61,16 +56,16 @@ const removeProfile = (profile, attempt = 0) => {
   }
 };
 
-// Pool bookkeeping lives outside the browser object, so the public surface stays exactly what it was
+// Pool bookkeeping lives outside the browser object so the public surface stays unchanged.
 const internals = new WeakMap();
 const live = new Set();
 const idle = [];
 const keyOf = ({ w = 1440, h = 900, mobile = false, perf = false, motion = false } = {}) => `${w}x${h}:${mobile ? "mobile" : "desktop"}:${perf ? "perf" : "fast"}:${motion ? "motion" : "still"}`;
 
 export const launch = async ({ w = 1440, h = 900, mobile = false, perf = false, motion = false } = {}) => {
-  // Fresh profile per launch, so storage never leaks
+  // Fresh profile per launch, so storage never leaks between runs.
   const profile = mkdtempSync(join(tmpdir(), "ooga-test-"));
-  // Chrome picks a free port and writes it into the profile, so concurrent launches never collide
+  // Chrome picks a free port and writes it into the profile, so concurrent launches never collide.
   const args = [
     ...BASE_FLAGS,
     `--window-size=${w},${h}`,
@@ -101,10 +96,8 @@ export const launch = async ({ w = 1440, h = 900, mobile = false, perf = false, 
     throw driverError(`Chrome did not start at ${CHROME}`);
   }
   const page = targets.find((t) => t.type === "page");
-  // Chrome can refuse or drop the first socket while it is still starting up: retry, and never wait on a socket that failed
-  // A socket that neither opens nor errors would hang this promise forever, and
-  // a lane cannot tell a wedged launch from a slow one: one such task sat for
-  // 26 minutes and became the whole run's critical path. Bound every attempt.
+  // Chrome can refuse or drop the first socket while starting: retry, and never wait on a failed socket.
+  // CONNECT_MS bounds every attempt; an unbounded one once sat 26 minutes as the run's critical path.
   const CONNECT_MS = 5000;
   const connect = () => new Promise((resolve, reject) => {
     const socket = new WebSocket(page.webSocketDebuggerUrl);
@@ -112,7 +105,6 @@ export const launch = async ({ w = 1440, h = 900, mobile = false, perf = false, 
       try {
         socket.close();
       } catch {
-        // already gone
       }
       reject(driverError("DevTools socket did not open"));
     }, CONNECT_MS);
@@ -153,13 +145,13 @@ export const launch = async ({ w = 1440, h = 900, mobile = false, perf = false, 
     if (m.method === "Runtime.exceptionThrown") logs.push(`[exception] ${m.params.exceptionDetails.text} ${m.params.exceptionDetails.exception?.description ?? ""}`);
     if (m.method === "Log.entryAdded") logs.push(`[log.${m.params.entry.level}] ${m.params.entry.text}`);
   };
-  // A crashed Chrome takes its socket with it: fail the waiting commands now instead of after the timeout
+  // A crashed Chrome takes its socket with it: fail waiting commands on close instead of at the timeout.
   ws.onclose = () => {
     state.alive = false;
     for (const reply of pending.values()) reply.fail(driverError("DevTools socket closed: Chrome is gone"));
     pending.clear();
   };
-  // A reply that never comes (Chrome's DevTools channel can die silently) fails the case instead of freezing the run
+  // A reply that never comes (DevTools channel can die silently) fails the case instead of freezing the run.
   const send = (method, params = {}, timeoutMs = COMMAND_MS) => new Promise((resolve, reject) => {
     if (!state.alive) return reject(driverError(`${method} cannot run: Chrome is gone`));
     const i = ++id;
@@ -179,19 +171,16 @@ export const launch = async ({ w = 1440, h = 900, mobile = false, perf = false, 
     });
     ws.send(JSON.stringify({ id: i, method, params }));
   });
-  // Raw protocol events, null to stop listening
+  // Raw protocol events; pass null to stop listening.
   const on = (method, fn) => listeners.set(method, fn);
-  // The only overrides the driver itself owns, so a pooled reset can put them back exactly as a fresh launch has them
+  // The only overrides the driver owns, so a pooled reset restores exactly what a fresh launch has.
   const applyOverrides = async () => {
     if (!mobile) return;
     await send("Emulation.setDeviceMetricsOverride", { width: w, height: h, deviceScaleFactor: 2, mobile: true });
     await send("Emulation.setTouchEmulationEnabled", { enabled: true, maxTouchPoints: 5 });
   };
-  // The leaf curtain is a 0.9 s CSS transition and untilReady waits for it to
-  // leave the DOM: measured as 937 ms of a 2955 ms hub boot, on every page
-  // build. The stylesheet already shortens it to 0.2 s under reduced motion.
-  // That query also drops the toast, hint and meter-fill transitions, so a
-  // check asserting on those passes { motion: true } to opt out.
+  // Reduced motion cuts the 0.9 s leaf curtain untilReady waits on (937 ms of a 2955 ms hub boot) to 0.2 s;
+  // it also drops toast, hint and meter-fill transitions, so checks on those pass { motion: true }.
   const applyMedia = async () => {
     if (motion) return;
     await send("Emulation.setEmulatedMedia", { features: [{ name: "prefers-reduced-motion", value: "reduce" }] });
@@ -203,7 +192,7 @@ export const launch = async ({ w = 1440, h = 900, mobile = false, perf = false, 
     await applyOverrides();
     await applyMedia();
   } catch (err) {
-    // This Chrome is not in `live` yet, so nothing else would ever reap it
+    // This Chrome is not in `live` yet, so nothing else would ever reap it.
     state.alive = false;
     ws.close();
     chrome.kill("SIGKILL");
@@ -249,40 +238,38 @@ export const launch = async ({ w = 1440, h = 900, mobile = false, perf = false, 
     try {
       ws.close();
     } catch {
-      // The socket is already gone
     }
-    // A wedged Chrome ignores SIGTERM, and a survivor silently steals CPU from
-    // every later task: one such leak made a frame-rate lane read 20 fps.
+    // A wedged Chrome ignores SIGTERM and a survivor steals CPU from later tasks: one leak made a frame-rate
+    // lane read 20 fps.
     chrome.kill();
     chrome.kill("SIGKILL");
     if (now) removeProfile(profile);
     else setTimeout(() => removeProfile(profile), 500).unref();
   };
-  // Undo everything a task can leave behind, so the next task on this Chrome starts where a fresh
-  // launch would. A stale override is the real hazard: leaked focus emulation would silently throttle
-  // the next task to 30 fps, and leaked device metrics would render it at the wrong viewport.
+  // reset() must undo everything a task leaves behind: leaked focus emulation silently throttles the next task
+  // to 30 fps and leaked device metrics render it at the wrong viewport.
   const reset = async () => {
-    // Storage first, while the task's own document - and its file:// origin - is still loaded
+    // Storage first, while the task's own document and its file:// origin are still loaded.
     await evaluate("(() => { try { localStorage.clear(); sessionStorage.clear(); } catch {} })()").catch(() => {});
     await send("Page.setWebLifecycleState", { state: "active" }).catch(() => {});
     await send("Emulation.clearDeviceMetricsOverride").catch(() => {});
     await send("Emulation.setTouchEmulationEnabled", { enabled: false }).catch(() => {});
     await send("Emulation.setFocusEmulationEnabled", { enabled: false }).catch(() => {});
     await send("HeapProfiler.disable").catch(() => {});
-    // about:blank drops the old page's timers, animation loop and WebGL context, so an idle Chrome
-    // costs nothing and no leftover frame callback can touch the next task
+    // about:blank drops the old page's timers, animation loop and WebGL context, so an idle Chrome costs nothing
+    // and no leftover frame callback can touch the next task.
     await send("Page.navigate", { url: "about:blank" });
     for (let i = 0; i < 40; i++) {
       if (await evaluate("location.href === 'about:blank' && document.readyState === 'complete'").catch(() => false)) break;
       await sleep(25);
     }
-    // Late console and log events from the old document have landed by now, so clear the buffers last
+    // Clear log buffers last: late console and log events from the old document have landed by now.
     await send("Log.clear").catch(() => {});
     await send("Runtime.discardConsoleEntries").catch(() => {});
     await applyOverrides();
     await applyMedia();
     listeners.clear();
-    logs.length = 0; // in place: the runner holds this same array
+    logs.length = 0; // Clear in place: the runner holds this same array.
   };
   const close = () => {
     if (state.pooled) release(api);
@@ -295,9 +282,8 @@ export const launch = async ({ w = 1440, h = 900, mobile = false, perf = false, 
   return api;
 };
 
-// A pooled Chrome must look unused, not just idle: reset() has cleared storage, the console buffers and
-// every override, and the page is back on about:blank. The profile itself is still the one fresh profile
-// this Chrome was launched with, and only tasks of the same shape (size, mobile, perf) ever see it.
+// A pooled Chrome must look unused: reset() cleared storage, console buffers and overrides and the page is on
+// about:blank; only tasks of the same shape (size, mobile, perf) ever reuse it.
 const usable = async (entry) => {
   try {
     await entry.resetting;
@@ -309,14 +295,14 @@ const usable = async (entry) => {
   }
 };
 
-// One Chrome per launch shape, handed from task to task, so a lane pays the 0.8 s launch once instead
-// of once per task. Returns a browser with the same surface as launch(); its close() releases it back.
+// One Chrome per launch shape, handed task to task, so a lane pays the 0.8 s launch once; same surface as
+// launch(), and close() releases it back to the pool.
 export const acquire = async (opts = {}) => {
   const key = keyOf(opts);
   for (let i = idle.length - 1; i >= 0; i--) {
-    // Another lane can evict while this loop awaits, so re-check the slot every time
+    // Another lane can evict while this loop awaits, so re-check the slot every iteration.
     if (!idle[i] || idle[i].state.key !== key) continue;
-    // Taken out of the pool synchronously, so two lanes can never claim the same Chrome
+    // Spliced out of the pool synchronously, so two lanes can never claim the same Chrome.
     const entry = idle.splice(i, 1)[0];
     if (await usable(entry)) {
       entry.resetting = null;
@@ -333,7 +319,7 @@ export const release = (browser) => {
   const entry = internals.get(browser);
   if (!entry) return;
   if (!entry.state.pooled || !entry.state.alive) return entry.destroy();
-  // The runner does not await close(), so the reset runs on its own and acquire() waits on it
+  // The runner does not await close(), so the reset runs on its own and acquire() waits on entry.resetting.
   entry.resetting = entry.reset().catch(() => {
     entry.state.alive = false;
   });
@@ -341,14 +327,13 @@ export const release = (browser) => {
   while (idle.length > MAX_IDLE) idle.shift().destroy();
 };
 
-// Tear the pool down at the end of a run
 export const dispose = async () => {
   for (const entry of idle.splice(0)) entry.destroy();
 };
 export const closeAll = dispose;
 
-// process.exit() does not reap spawned children, so kill whatever is still up (profiles are removed
-// synchronously here because deferred timers never run during exit)
+// process.exit() does not reap spawned children: kill survivors here, removing profiles synchronously since
+// deferred timers never run during exit.
 process.once("exit", () => {
   idle.length = 0;
   for (const entry of [...live]) entry.destroy(true);
