@@ -40,6 +40,16 @@ jobs:
           npm run build
           mkdir -p _site
           cp oogaboogaland.html _site/index.html
+      - name: Stage pull request previews
+        # The preview workflow keeps each open pull request's built page on the generated
+        # `previews` branch as `<number>/index.html`; they are served under `pr/`.
+        run: |
+          if git fetch --depth=1 origin previews; then
+            mkdir -p _site/pr
+            git archive FETCH_HEAD | tar -x -C _site/pr
+          else
+            echo "No previews branch; nothing to stage."
+          fi
       - name: Upload the built page for the artifact job
         uses: actions/upload-artifact@v4
         with:
