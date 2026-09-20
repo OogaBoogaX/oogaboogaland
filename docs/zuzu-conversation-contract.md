@@ -1,6 +1,7 @@
 # Zuzu conversation boundary, version 1
 
-V2 ships with a clearly labelled **local mock**, no fetch/AI provider, no keys, and no backend.
+The game still ships with a clearly labelled **local mock**, no AI provider and no keys.
+V3 adds an inactive same-origin HTTP transport and a separate [backend foundation](../server/zuzu/README.md).
 The mock accepts free-form messages but does not understand or answer them using AI.
 The deterministic world brain remains responsible for local behavior and fallback dialogue.
 Conversation history is separate from the 64-entry world-event log; both reset on scene exit.
@@ -74,13 +75,15 @@ request. The UI labels fallback replies as local replies and remains closable th
 ## Adapter seam
 
 `BL.dsbAgentRemote.create()` is mock-only by default. Future integration explicitly supplies
-`create({ mode: "remote", transport })`. The transport receives `(jsonBody, { signal })`
+`create({ mode: "remote" })` to use the fixed `/api/zuzu/chat` transport. Tests can override
+`transport`. It receives `(jsonBody, { signal })`
 and returns a Promise of raw JSON response text. It must honor cancellation, reject non-2xx
 responses and enforce the byte cap **while reading** the response. The adapter independently
 validates JSON, schema, text, size and timeouts before the UI sees a response.
 
 No URL parameter or player-supplied endpoint enables networking. The scene must deliberately
-wire the future transport after the protected service is ready. Current CSP is unchanged;
+enable the transport after the protected service is ready. Fetch omits credentials, rejects
+redirects and disables caching. Current CSP is unchanged;
 its connect-src does not yet permit this new endpoint. Integrating a same-origin proxy or
 approved separate service will require an explicit, narrow CSP update.
 

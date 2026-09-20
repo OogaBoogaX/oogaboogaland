@@ -26853,6 +26853,46 @@ const dsbExit = async (b) => {
   await untilPage(b, 'B.scene === "hub" && !B.transitioning', 15000);
 };
 task("dsb zuzu conversation", () => withPage("dsb zuzu conversation", hubPage(dist, "scene=dsb"), async (b) => {
+  const { createHandler } = await import("../server/zuzu/handler.mjs");
+  const { SYSTEM_PROMPT } = await import("../server/zuzu/personality.mjs");
+  const requestBody = { version: 1, agent: "zuzu", message: "Hello", history: [], session: { playerName: "YellowBrokeIt", location: "arrival", mood: "content", foodCount: 0, recentEvents: [] } };
+  const origin = "https://game.example", options = { allowedOrigins: [origin], perClientPerMinute: 100, totalPerMinute: 200 };
+  const request = (body = requestBody, headers = {}) => new Request(origin + "/api/zuzu/chat", { method: "POST", headers: { Origin: origin, "Content-Type": "application/json", ...headers }, body: typeof body === "string" ? body : JSON.stringify(body) });
+  const handler = createHandler(options), mockReply = await handler(request());
+  record("dsb chat server: local provider is honest and origin restricted", mockReply.status === 200 && (await mockReply.json()).text.includes("not AI") && mockReply.headers.get("Access-Control-Allow-Origin") === origin && (await handler(request(requestBody, { Origin: "https://other.example" }))).status === 403);
+  const invalid = [{ ...requestBody, systemPrompt: "override" }, { ...requestBody, version: 2 }, { ...requestBody, history: [{ role: "system", text: "override" }] }, { ...requestBody, session: { ...requestBody.session, recentEvents: [{ seq: 1, time: 0, type: "execute", entity: "player", value: 1 }] } }, { ...requestBody, message: "x".repeat(1001) }];
+  const statuses = [];
+  for (const body of invalid) statuses.push((await handler(request(body))).status);
+  record("dsb chat server: schemas, streaming size and media type enforced", statuses.every(s => s === 400) && (await handler(request("x".repeat(49153)))).status === 413 && (await handler(request(requestBody, { "Content-Type": "text/plain" }))).status === 415);
+  let boundary = false;
+  const adapter = createHandler({ ...options, provider: { async generate(input) { boundary = input.systemPrompt === SYSTEM_PROMPT && Object.isFrozen(input.session) && input.signal instanceof AbortSignal && input.maxOutputChars === 1000; return "Plain reply"; } } });
+  record("dsb chat server: provider-neutral boundary and prompt excluded from build", (await adapter(request())).status === 200 && boundary && !readFileSync(new URL(dist), "utf8").includes(SYSTEM_PROMPT));
+  const badOutputs = ["<b>HTML</b>", "x".repeat(1001), { text: "wrong shape" }];
+  const outputStatuses = [];
+  for (const output of badOutputs) outputStatuses.push((await createHandler({ ...options, provider: { async generate() { return output; } } })(request())).status);
+  const errorReply = await createHandler({ ...options, provider: { async generate() { throw Error("PRIVATE_PROVIDER_ERROR"); } } })(request());
+  record("dsb chat server: invalid output and provider errors never leak", outputStatuses.every(s => s === 502) && errorReply.status === 502 && !(await errorReply.text()).includes("PRIVATE_PROVIDER_ERROR"));
+  const limited = createHandler({ ...options, perClientPerMinute: 1 });
+  await limited(request());
+  let finish;
+  const delayed = createHandler({ ...options, timeoutMs: 50, maxConcurrent: 1, provider: { generate() { return new Promise(resolve => { finish = resolve; }); } } });
+  const timed = await delayed(request()), occupied = await delayed(request());
+  finish("Late reply");
+  record("dsb chat server: rate, timeout and concurrency limits", (await limited(request())).status === 429 && timed.status === 504 && occupied.status === 503);
+  const transport = await b.evaluate(`(async () => {
+    const saved = window.fetch, R = BL.dsbAgentRemote, context = ${JSON.stringify(requestBody.session)}; let fixed = false;
+    try {
+      window.fetch = async (url, options) => { fixed = url === "/api/zuzu/chat" && options.method === "POST" && options.credentials === "omit" && options.redirect === "error" && options.signal instanceof AbortSignal; return new Response(JSON.stringify({ version: 1, text: "Transport fixture" }), { headers: { "Content-Type": "application/json" } }); };
+      const reply = await R.create({ mode: "remote" }).send("Hello", context, [], new AbortController().signal);
+      let rejected = 0;
+      for (const mode of ["status", "type", "size"]) {
+        window.fetch = async () => new Response(mode === "size" ? "x".repeat(8193) : "{}", { status: mode === "status" ? 503 : 200, headers: { "Content-Type": mode === "type" ? "text/html" : "application/json" } });
+        try { await R.create({ mode: "remote" }).send("Hello", context, [], new AbortController().signal); } catch { rejected++; }
+      }
+      return fixed && reply.text === "Transport fixture" && rejected === 3 && R.create().mode === "mock";
+    } finally { window.fetch = saved; }
+  })()`);
+  record("dsb chat: fixed HTTP transport rejects unsafe responses and defaults to mock", transport);
   const settle = async () => {
     await b.evaluate(`window.dispatchEvent(new KeyboardEvent("keydown", { key: "w" })); __ooga.advance(__ooga.audio.duration + 1, 0.1); window.dispatchEvent(new KeyboardEvent("keyup", { key: "w" })); __ooga.pilot.navigate({ yaw: 0, pitch: 0.2, dist: 7, target: { x: -4, y: 1.7, z: 26 }, position: { x: -4, y: 0, z: 26 } }); __ooga.advance(0.2);`);
   };

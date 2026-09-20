@@ -1,4 +1,4 @@
-// Provider-independent conversation boundary. No network transport is installed in V2.
+// Provider-independent conversation boundary. Mock remains the shipping default.
 (() => {
   "use strict";
   const BL = window.BL = window.BL || {};
@@ -33,9 +33,28 @@
     return Object.freeze({ version: 1, text });
   };
   const mock = async () => JSON.stringify({ version: 1, text: "You've got my attention. Briefly. This is a local mock reply; my AI isn't connected yet. We can still discuss the alarming lack of snacks." });
-  // A future transport receives bounded JSON plus AbortSignal and returns bounded JSON text.
-  // It must enforce the response byte cap while reading, not only after buffering it.
-  const create = ({ mode = "mock", transport = null, timeoutMs = LIMITS.timeoutMs } = {}) => {
+  // Fixed same-origin endpoint only: provider identity and credentials stay on the server.
+  const httpTransport = async (body, { signal }) => {
+    const response = await fetch("/api/zuzu/chat", { method: "POST", headers: { "Content-Type": "application/json", Accept: "application/json" }, body, signal, credentials: "omit", redirect: "error", cache: "no-store" });
+    if (!response.ok || !/^application\/json(?:\s*;\s*charset=utf-8)?$/i.test(response.headers.get("content-type") || "") || Number(response.headers.get("content-length")) > LIMITS.responseBytes || !response.body) {
+      if (response.body) response.body.cancel().catch(() => {});
+      throw new Error("service_unavailable");
+    }
+    const reader = response.body.getReader(), bytes = new Uint8Array(LIMITS.responseBytes);
+    let count = 0, complete = false;
+    try {
+      for (;;) {
+        signal.throwIfAborted();
+        const { done, value } = await reader.read();
+        if (done) { complete = true; break; }
+        if (count + value.byteLength > bytes.length) throw new Error("response_too_large");
+        bytes.set(value, count); count += value.byteLength;
+      }
+      signal.throwIfAborted();
+      return new TextDecoder("utf-8", { fatal: true }).decode(bytes.subarray(0, count));
+    } finally { if (!complete) reader.cancel().catch(() => {}); reader.releaseLock(); }
+  };
+  const create = ({ mode = "mock", transport = httpTransport, timeoutMs = LIMITS.timeoutMs } = {}) => {
     if (mode !== "mock" && mode !== "remote" || mode === "remote" && typeof transport !== "function" || !Number.isFinite(timeoutMs) || timeoutMs < 50 || timeoutMs > 15000) throw new Error("invalid_adapter");
     const send = async (message, context, history, signal) => {
       const body = JSON.stringify(makeRequest(message, context, history));
@@ -56,5 +75,5 @@
     };
     return { mode, send };
   };
-  BL.dsbAgentRemote = { create, makeRequest, validateResponse, cleanText, LIMITS, endpoint: "/api/zuzu/chat" };
+  BL.dsbAgentRemote = { create, httpTransport, makeRequest, validateResponse, cleanText, LIMITS, endpoint: "/api/zuzu/chat" };
 })();
