@@ -430,6 +430,11 @@ select {
   text-decoration: line-through;
 }
 
+.presets [data-action="flyby"][aria-pressed="true"] {
+  color: var(--accent);
+  background: linear-gradient(#b8844a, var(--plank));
+}
+
 .presets .leave:hover,
 .presets .leave.virtual-hover,
 .presets .leave:focus-visible {

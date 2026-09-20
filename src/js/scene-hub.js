@@ -167,7 +167,7 @@
   };
 
   // One visit's state: created in enter, dropped in leave.
-  let renderer, game, world, go, lootEnabled, testBananas, root, camera, island, pathNode, altar, hud, hooks, input, pilot, fx, cameraCover, bananaCover, solids, rockGuides, objectGuides, sightGuides, bananaGuides, pileGuides, platformGuides, mirrorGuides, pile, crew, crates, critters, clock, presets, entering, jetpack, jetpackState, jetpackCarrier, jetpackWearer, lastJetpackCloud, mirrorCave, matrixCave, matrixControl, gateRain, fire, headquarters, jumbotron, positionDebug, agent, agentPlay;
+  let renderer, game, world, go, lootEnabled, testBananas, root, camera, island, pathNode, altar, hud, hooks, input, pilot, fx, cameraCover, bananaCover, solids, rockGuides, objectGuides, sightGuides, bananaGuides, pileGuides, platformGuides, mirrorGuides, pile, crew, crates, critters, clock, presets, entering, jetpack, jetpackState, jetpackCarrier, jetpackWearer, lastJetpackCloud, mirrorCave, matrixCave, matrixControl, gateRain, fire, headquarters, jumbotron, positionDebug, agent, agentPlay, flyby;
   let magazine, magazineState, breakables;
   const JETPACK_HUD_STATE = { owned: false, equipped: false, fuel: 1, blocked: false };
   let enteringTween = null;
@@ -2962,6 +2962,7 @@
   const enterScene = (view, id) => {
     if (entering) return;
     entering = true;
+    stopFlyby();
     pilot.release(true);
     hud.tooltip.hide();
     const orbit = pilot.orbit;
@@ -2986,6 +2987,77 @@
     if (entering) return;
     world.pilot = pilot.player ? pilot.player.traits.name : null;
     enterScene(presets[id], id);
+  };
+  // The flyby tours every named place once, clockwise from the gate, and ends over the pile.
+  const clockAngle = (x, z) => {
+    const angle = Math.atan2(x, -z);
+    return angle < 0 ? angle + Math.PI * 2 : angle;
+  };
+  const FLYBY_HQ_VIEW = { yaw: 0, pitch: 0.1, dist: 5, target: { x: 0, y: 0, z: 0 } }, FLYBY_BASEMENT_VIEW = { yaw: 0, pitch: 0.1, dist: 5, target: { x: 0, y: 0, z: 0 } }, FLYBY_UNDER_HOVER = 1.6;
+  const lookingAt = (view, point) => { view.yaw = Math.atan2(-(point.x - view.target.x), -(point.z - view.target.z)); };
+  // The headquarters and the basement are two chained underground stops: down the first ramp
+  // clockwise, through the room, down the nearer basement ramp, back up the other one and out
+  // through the second headquarters ramp. Each view looks toward the ramp it leaves by.
+  const flybyUnderground = (name, key) => {
+    const H = island.headquarters;
+    const ramps = H.ramps.map((ramp) => ({ ramp, m: island.mouths.find((mouth) => mouth.id === ramp.id) })).sort((a, b) => key(a.m) - key(b.m));
+    const [enter, exit] = ramps, entered = enter.ramp.to;
+    const lower = H.basement.ramps.slice().sort((a, b) => Math.hypot(a.samples[0].x - entered.x, a.samples[0].z - entered.z) - Math.hypot(b.samples[0].x - entered.x, b.samples[0].z - entered.z));
+    const [down, up] = lower, downSamples = down.samples, upSamples = up.samples, exitSamples = exit.ramp.samples;
+    const basementRoute = [], surfaceRoute = [];
+    for (let i = upSamples.length - 1; i >= 0; i--) basementRoute.push(upSamples[i]);
+    for (let i = exitSamples.length - 1; i >= 0; i--) basementRoute.push(exitSamples[i]);
+    FLYBY_HQ_VIEW.target.y = H.floor + 0.8;
+    FLYBY_BASEMENT_VIEW.target.y = H.basement.floor + 0.8;
+    lookingAt(FLYBY_HQ_VIEW, downSamples[0]);
+    lookingAt(FLYBY_BASEMENT_VIEW, upSamples[upSamples.length - 1]);
+    const headquartersStop = { name, view: FLYBY_HQ_VIEW, at: exit.m, hover: FLYBY_UNDER_HOVER, entry: enter.ramp.samples[0], entryRoute: enter.ramp.samples, exit: downSamples[downSamples.length - 1], exitRoute: downSamples };
+    const basementStop = { name: "Basement", view: FLYBY_BASEMENT_VIEW, hover: FLYBY_UNDER_HOVER, entry: headquartersStop.exit, entryRoute: surfaceRoute, exit: exitSamples[0], exitRoute: basementRoute };
+    surfaceRoute.push(headquartersStop.exit);
+    return [headquartersStop, basementStop];
+  };
+  // The plane stands on the rally roof: the leg to it leaves the trail in front of the mouth,
+  // climbs there and comes in over the rim, and the leg down reverses that.
+  const flybyRoof = (name, view, m) => {
+    const out = { x: m.apron.x + (m.apron.x - m.x), y: m.floorY, z: m.apron.z + (m.apron.z - m.z) };
+    const climb = { x: out.x, y: view.target.y + 3, z: out.z };
+    return { name, view, entry: out, entryRoute: [out, climb], exit: out, exitRoute: [climb, out] };
+  };
+  const buildFlybyStops = () => {
+    const gateAngle = clockAngle(GATE_VIEW.target.x, GATE_VIEW.target.z);
+    const key = (spot) => (clockAngle(spot.x, spot.z) - gateAngle + Math.PI * 2) % (Math.PI * 2);
+    const stops = [{ name: caves.gate.name, view: GATE_VIEW }];
+    let underground = null;
+    for (const slot of caves.slots) {
+      if (!slot.name) continue;
+      if (slot.status === "headquarters") { underground = underground || flybyUnderground(slot.name, key); continue; }
+      const m = island.mouths.find((mouth) => mouth.id === slot.id);
+      stops.push({ name: slot.name, view: slot.scene ? presets[slot.scene] : mouthView(m) });
+    }
+    if (underground) stops.push(underground[0]);
+    const rally = openMouths.find((entry) => entry.slot.scene === "race");
+    if (presets.drop && rally) stops.push(flybyRoof("Ooga Drop", presets.drop, rally.m));
+    if (presets.orbit) stops.push({ name: "Ooga Orbit", view: presets.orbit });
+    const order = (stop) => key(stop.at || stop.view.target);
+    stops.sort((a, b) => order(a) - order(b) || a.name.localeCompare(b.name));
+    if (underground) stops.splice(stops.indexOf(underground[0]) + 1, 0, underground[1]);
+    stops.push({ name: "The pile", view: PILE_VIEW });
+    return stops;
+  };
+  const stopFlyby = () => {
+    if (!flyby || !flyby.active) return;
+    flyby.stop();
+    hud.setFlyby(false);
+  };
+  const toggleFlyby = () => {
+    if (flyby.active) { stopFlyby(); return; }
+    if (entering) return;
+    // Leave any driven Ooga or close view the way the PILE button does, then take the orbit from where it is.
+    pilot.goPreset("pile");
+    hud.tooltip.hide();
+    flyby.start(pilot.orbit, buildFlybyStops(), (stop) => hud.toast(stop.name));
+    hud.setFlyby(true);
+    hud.hint("Flying over the island · drag, scroll, a key or FLYBY again takes the camera back");
   };
   // The Agent answers taps like an Ooga: a double-click plays it, a double-click
   // anywhere else lets it go; a third quick tap toggles its Matrix model.
@@ -3441,6 +3513,7 @@
     return true;
   };
   const navigate = (name) => {
+    stopFlyby();
     const destination = NAVIGATION, p = destination.position, target = destination.target;
     const player = pilot.player, close = pilot.closeWanted, basement = name === "basement", underground = name === "underground" || basement;
     let x = 0, z = 0, yaw = 0, pitch = 0.18, dist = player ? 6 : 8;
@@ -4064,6 +4137,14 @@
     solids.sync();
     updateSleepingSolids();
     pilot.readInput(dt);
+    if (flyby.active) {
+      // Anything else moving the orbit since the last write was the visitor: the tour yields at once.
+      if (flyby.disturbed(pilot.orbit)) stopFlyby();
+      else {
+        flyby.update(dt, pilot.orbit);
+        if (!flyby.active) hud.setFlyby(false);
+      }
+    }
     mirrorCave.damage.update(dt);
     syncMirrorDamage();
     mirrorCave.ripples.update(dt, elapsed);
@@ -4383,7 +4464,7 @@
   const onKey = (e) => {
     if (e.key === "0") return;
     if ((e.key === "1" || e.key === "2") && pilot.weaponMode(Number(e.key))) return;
-    if (e.key === "Escape") pilot.release();
+    if (e.key === "Escape") { stopFlyby(); pilot.release(); }
     if (e.key === "b" || e.key === "B") addTestBananas(testBananas);
     if (e.key === "l" || e.key === "L") demoTip(120000);
     if (e.key === "p" || e.key === "P") {
@@ -4619,6 +4700,8 @@
     shared.npcPaths = headquarters.npcPaths = BL.npcPaths.create({ island, walkable: npcWalkable, pointAllowed: (x, z) => !npcClosedCaveAt(x, z),
       surfaceAt: (x, z, y) => island.supportAt(x, z, y, 1e-6, null, PLAYER_RADIUS) });
     const sleepNavigation = headquarters.sleepNavigation = BL.headquartersSleep.create({ island, beds: bedrolls, walkable: sleepRouteClear, surfaceRoute: shared.npcPaths.route });
+    flyby = BL.flyby.create({ paths: shared.npcPaths, island });
+    hud.setFlyby(false);
     const sleepRouteFrom = { x: 0, y: 0, z: 0 };
     shared.bedRoute = (cave, bed, toBed) => sleepNavigation.route(cave.root.position.x, cave.root.position.y - cave.baseY, cave.root.position.z, bed, toBed, cave.slot?.x, cave.slot?.z);
     shared.bedRouteClear = (cave, to) => {
@@ -4769,6 +4852,7 @@
       else if (action === "reset") resetDemo();
       else if (action === "act") pilot.action();
       else if (action === "jetpack-toggle") toggleJetpack();
+      else if (action === "flyby") toggleFlyby();
       else if (action.startsWith("weapon-") || action === "magazine-swap") pilot.weaponAction(action);
       else if (action === "reset-view") pilot.goPreset("pile");
     });
@@ -4833,7 +4917,7 @@
         get shown() {
           return pile.shown;
         },
-        island, mouths: island.mouths, labels, launchers, camera, cameraPose: POSITION_POSE, crew, controls: pilot.controls, props, altar, path: island.path.debug, headquarters, jumbotron, agent: agent.debug,
+        island, mouths: island.mouths, labels, launchers, camera, cameraPose: POSITION_POSE, crew, controls: pilot.controls, props, altar, path: island.path.debug, headquarters, jumbotron, agent: agent.debug, flyby,
         scenery: {
           get candidateCount() { return scenery.length; },
           get visibleCount() { return sceneryVisible; },
@@ -5063,6 +5147,7 @@
   };
   const leave = () => {
     uiGuideObjects = null; uiGuidesReady = false;
+    stopFlyby();
     if (enteringTween) enteringTween.alive = false;
     enteringTween = null;
     window.clearInterval(stateTimer);
@@ -5133,7 +5218,7 @@
     input.dispose();
     hud.dispose();
     // Drop every per-visit ref but the cached island.
-    pathNode = altar = hud = hooks = input = pilot = fx = cameraCover = bananaCover = solids = rockGuides = objectGuides = sightGuides = bananaGuides = pileGuides = platformGuides = mirrorGuides = pile = crew = crates = critters = clock = presets = jetpack = jetpackState = jetpackCarrier = jetpackWearer = lastJetpackCloud = mirrorCave = matrixCave = matrixControl = gateRain = fire = headquarters = positionDebug = agent = agentPlay = null;
+    pathNode = altar = hud = hooks = input = pilot = fx = cameraCover = bananaCover = solids = rockGuides = objectGuides = sightGuides = bananaGuides = pileGuides = platformGuides = mirrorGuides = pile = crew = crates = critters = clock = presets = jetpack = jetpackState = jetpackCarrier = jetpackWearer = lastJetpackCloud = mirrorCave = matrixCave = matrixControl = gateRain = fire = headquarters = positionDebug = agent = agentPlay = flyby = null;
     magazine = magazineState = breakables = null;
     hubScene.input = hubScene.debug = hubScene.agent = hubScene.agentView = hubScene.agentControls = hubScene.agentHandoff = null;
     return { targets: count };

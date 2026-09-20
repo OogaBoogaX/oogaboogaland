@@ -90,6 +90,7 @@
       subtitle: $("subtitle"),
       actions: [...document.querySelectorAll("[data-action]")],
       act: $("act"),
+      flyby: $("flyby"),
       weapon: $("weapon-hud"),
       weaponToggle: $("weapon-hud"),
       weaponReadout: $("weapon-readout"),
@@ -564,6 +565,10 @@
     const onPreset = (fn) => {
       presetHandler = fn;
     };
+    const setFlyby = (active) => {
+      const pressed = active ? "true" : "false";
+      if (el.flyby.getAttribute("aria-pressed") !== pressed) el.flyby.setAttribute("aria-pressed", pressed);
+    };
     let identityHandler = null;
     const onIdentityChange = (fn) => {
       identityHandler = fn;
@@ -706,7 +711,7 @@
       setJetpack(false, false, 0);
       closeFeed();
     };
-    return { el, openFeed, closeFeed, setRosterRow, setMeter, setStats, setAct, setWeapon, setMagazine, setJetpack, setSubtitle, onAction, toast, tooltip, hint, selectTab, onPreset, onIdentityChange, setIdentity, setDonationUrl, onAssign, onUnassign, renderInventory, dispose };
+    return { el, openFeed, closeFeed, setRosterRow, setMeter, setStats, setAct, setWeapon, setMagazine, setJetpack, setSubtitle, setFlyby, onAction, toast, tooltip, hint, selectTab, onPreset, onIdentityChange, setIdentity, setDonationUrl, onAssign, onUnassign, renderInventory, dispose };
   };
   BL.hud = { create, renderIcon, signLettering, STATE_LABELS, statusFor };
 })();

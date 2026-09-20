@@ -26476,6 +26476,85 @@ const runTasks = async () => {
   await Promise.all(Array.from({ length: LANES }, lane));
   await dispose();
 };
+// The FLYBY button tours every named place over the walkers' trail graph and yields to any input.
+const flybyTourProbe = ({ dt }) => {
+  const B = window.__ooga, F = B.flyby, orbit = B.pilot.orbit, camera = B.camera, island = B.island, paths = B.headquarters.npcPaths;
+  const button = document.querySelector('nav[data-scene="hub"] [data-action="flyby"]');
+  const rect = button.getBoundingClientRect();
+  const placement = { top: +rect.top.toFixed(1), rightGap: +(innerWidth - rect.right).toFixed(1), width: +rect.width.toFixed(1), hidden: button.hidden || rect.width === 0 };
+  const key = (type, value) => window.dispatchEvent(new KeyboardEvent(type, { key: value }));
+  const angle = (a, b) => Math.abs(Math.atan2(Math.sin(a - b), Math.cos(a - b)));
+  const nearestPath = (x, z) => { let best = Infinity; for (let i = 0; i < paths.nodes; i++) best = Math.min(best, Math.hypot(paths.xAt(i) - x, paths.zAt(i) - z)); return best; };
+  button.click();
+  const started = { pressed: button.getAttribute("aria-pressed"), active: F.active, stops: F.stops.map((s) => s.name) };
+  const views = F.stops.map((s) => s.view.target);
+  // A view target can sit inside a mouth, under the terrain roof: the ground test covers the flight between places.
+  const authored = (x, z) => views.some((v) => Math.hypot(v.x - x, v.z - z) < 6);
+  let frames = 0, lastIndex = -1, leg = null, minY = Infinity, wasUnder = false;
+  const underground = { enterAt: null, exitAt: null, frames: 0, inRock: 0 };
+  let px = camera.position.x, py = camera.position.y, pz = camera.position.z, pyaw = orbit.yaw, tx = orbit.tx, ty = orbit.ty, tz = orbit.tz, ox = NaN, oy = NaN, oz = NaN;
+  const legs = [], seen = [];
+  while (F.active && frames < 240 / dt) {
+    B.advance(dt, dt); frames++;
+    if (F.active && F.index !== lastIndex) { lastIndex = F.index; legs.push(leg = { name: F.at.name, samples: F.samples, length: +F.length.toFixed(1), flown: 0, far: 0, below: 0, maxStep: 0, maxTurn: 0, maxTargetStep: 0, maxOrbitStep: 0, maxClamp: 0 }); }
+    const p = camera.position, cp = Math.cos(orbit.pitch);
+    // The unclamped eye from the orbit alone tells a collision push apart from the tour's own motion.
+    const ex = orbit.tx + Math.sin(orbit.yaw) * cp * orbit.dist, ey = orbit.ty + Math.sin(orbit.pitch) * orbit.dist, ez = orbit.tz + Math.cos(orbit.yaw) * cp * orbit.dist;
+    if (Number.isFinite(ox)) leg.maxOrbitStep = Math.max(leg.maxOrbitStep, Math.hypot(ex - ox, ey - oy, ez - oz));
+    ox = ex; oy = ey; oz = ez;
+    leg.maxClamp = Math.max(leg.maxClamp, Math.hypot(p.x - ex, p.y - ey, p.z - ez));
+    leg.maxStep = Math.max(leg.maxStep, Math.hypot(p.x - px, p.y - py, p.z - pz)); px = p.x; py = p.y; pz = p.z;
+    leg.maxTurn = Math.max(leg.maxTurn, angle(orbit.yaw, pyaw)); pyaw = orbit.yaw;
+    leg.maxTargetStep = Math.max(leg.maxTargetStep, Math.hypot(orbit.tx - tx, orbit.ty - ty, orbit.tz - tz)); tx = orbit.tx; ty = orbit.ty; tz = orbit.tz;
+    if (F.travelling) {
+      leg.flown++;
+      const t = orbit.target;
+      // Under the terrain surface the focus is in a ramp or a mouth and must be in clear air; the deep
+      // passage below the meadow is the headquarters, entered and left through different mouths.
+      const land = island.onLand(t.x, t.z), tunnel = land && t.y < island.surfaceAt(t.x, t.z) - 1, deep = t.y < -1;
+      minY = Math.min(minY, t.y);
+      if (deep !== wasUnder) { underground[deep ? "enterAt" : "exitAt"] = [+t.x.toFixed(1), +t.z.toFixed(1)]; wasUnder = deep; }
+      if (tunnel || deep) {
+        underground.frames++;
+        if (!island.clearAt(t.x, t.y - 0.3, t.z, 0.3, 0.6)) underground.inRock++;
+      } else if (!authored(t.x, t.z)) {
+        if (land && t.y < island.surfaceAt(t.x, t.z) + 0.5) leg.below++;
+        if (nearestPath(t.x, t.z) > 3) leg.far++;
+      }
+    } else if (F.active && seen[seen.length - 1] !== F.at.name) seen.push(F.at.name);
+  }
+  for (const row of legs) for (const k of ["maxStep", "maxTurn", "maxTargetStep", "maxOrbitStep", "maxClamp"]) row[k] = +row[k].toFixed(4);
+  const sum = (k) => legs.reduce((n, row) => n + row[k], 0), max = (k) => Math.max(...legs.map((row) => row[k]));
+  const ended = { active: F.active, pressed: button.getAttribute("aria-pressed"), seconds: +(frames * dt).toFixed(1), routed: F.routed, legs: F.legs, target: [orbit.tx, orbit.ty, orbit.tz].map((v) => +v.toFixed(2)), yaw: +orbit.yaw.toFixed(3), dist: +orbit.dist.toFixed(2) };
+  button.click(); B.advance(1, dt);
+  const dragBefore = F.active;
+  B.pilot.hooks.onOrbit(24, 0); B.advance(dt, dt);
+  const drag = { before: dragBefore, after: F.active, pressed: button.getAttribute("aria-pressed") };
+  button.click(); B.advance(1, dt);
+  const keyBefore = F.active;
+  key("keydown", "w"); B.advance(dt, dt); key("keyup", "w");
+  const keys = { before: keyBefore, after: F.active, pressed: button.getAttribute("aria-pressed") };
+  button.click(); B.advance(0.5, dt);
+  const againBefore = F.active;
+  button.click(); B.advance(dt, dt);
+  const again = { before: againBefore, after: F.active, pressed: button.getAttribute("aria-pressed") };
+  underground.minY = +minY.toFixed(2); underground.floor = island.headquarters.basement.floor;
+  underground.apart = underground.enterAt && underground.exitAt ? +Math.hypot(underground.enterAt[0] - underground.exitAt[0], underground.enterAt[1] - underground.exitAt[1]).toFixed(1) : 0;
+  return { placement, started, legs, seen, underground, flown: sum("flown"), below: sum("below"), far: sum("far"), maxStep: max("maxStep"), maxTurn: max("maxTurn"), maxTargetStep: max("maxTargetStep"), maxOrbitStep: max("maxOrbitStep"), maxClamp: max("maxClamp"), ended, drag, keys, again };
+};
+hubTask("flyby tour", async (b) => {
+  for (const dt of [1 / 60, ...RATES]) {
+    const r = await b.evaluate(`(${flybyTourProbe.toString()})(${JSON.stringify({ dt })})`);
+    const named = ["The old gate", "EntropyLab", "Ooga Rally", "Ooga Drop", "Ooga Orbit", "Ooga Booga Land", "Headquarters", "Basement", "The pile"];
+    record(`flyby tour: ${1 / dt}Hz the FLYBY button sits in the top-right bar and starts a tour from the gate round to the pile`, !r.placement.hidden && r.placement.top < 80 && r.placement.rightGap < 200 && r.started.active && r.started.pressed === "true" && r.started.stops[0] === "The old gate" && r.started.stops[r.started.stops.length - 1] === "The pile" && named.every((name) => r.started.stops.includes(name)), JSON.stringify({ placement: r.placement, started: r.started }));
+    record(`flyby tour: ${1 / dt}Hz every stop is visited over the trail graph, above ground, and the tour ends released over the pile`, !r.ended.active && r.ended.pressed === "false" && r.seen.join() === r.started.stops.join() && r.started.stops.filter((name) => name === "Headquarters").length === 1 && r.started.stops[r.started.stops.indexOf("Headquarters") + 1] === "Basement" && r.ended.routed >= r.ended.legs - 2 && r.below === 0 && r.far < r.flown * 0.2 && Math.hypot(r.ended.target[0], r.ended.target[2]) < 0.01 && Math.abs(r.ended.target[1] - 0.6) < 0.01 && r.ended.dist === 24, JSON.stringify({ legs: r.legs, seen: r.seen, flown: r.flown, below: r.below, far: r.far, ended: r.ended }));
+    const u = r.underground;
+    record(`flyby tour: ${1 / dt}Hz the headquarters and the basement are reached down one ramp and left up the others, in clear air the whole way`, u.frames > 0 && u.inRock === 0 && u.minY < u.floor + 2 && u.minY > u.floor && !!u.enterAt && !!u.exitAt && u.apart > 10, JSON.stringify(u));
+    // The focus peaks at twice the cruise, the view pans at most a radian a second and the eye follows without a collision push.
+    record(`flyby tour: ${1 / dt}Hz the camera moves smoothly between stops at any frame rate`, r.maxTargetStep <= 20 * dt + 1e-4 && r.maxTurn <= 1 * dt + 1e-4 && r.maxStep <= 40 * dt + 1e-4 && r.maxClamp < 0.5, JSON.stringify({ maxStep: r.maxStep, maxTurn: r.maxTurn, maxTargetStep: r.maxTargetStep, maxOrbitStep: r.maxOrbitStep, maxClamp: r.maxClamp, legs: r.legs }));
+    record(`flyby tour: ${1 / dt}Hz a drag, a held key or a second press ends the tour and releases the button`, r.drag.before && !r.drag.after && r.drag.pressed === "false" && r.keys.before && !r.keys.after && r.keys.pressed === "false" && r.again.before && !r.again.after && r.again.pressed === "false", JSON.stringify({ drag: r.drag, keys: r.keys, again: r.again }));
+  }
+});
 // The shim installs browser globals in this process, so it runs after the browser lanes finish with Chrome.
 registerHubFolds();
 if (LANE !== "unit") await runTasks();

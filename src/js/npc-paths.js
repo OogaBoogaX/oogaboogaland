@@ -104,7 +104,7 @@
       }
       return result;
     };
-    const plan = (state, x, z, tx, tz) => {
+    const plan = (state, x, z, tx, tz, limit = true) => {
       if (version !== path.version) rebuild();
       state.tx = tx; state.tz = tz; state.version = version; state.count = state.index = 0; state.plans++;
       const start = nearest(x, z), end = nearest(tx, tz);
@@ -122,7 +122,7 @@
       }
       if (parents[start] < 0) return;
       const length = Math.hypot(xs[start] - x, zs[start] - z) + distances[start] + Math.hypot(xs[end] - tx, zs[end] - tz);
-      if (length > Math.hypot(tx - x, tz - z) * 2.5 + 3) return;
+      if (limit && length > Math.hypot(tx - x, tz - z) * 2.5 + 3) return;
       for (let i = start; ; i = parents[i]) {
         state.route[state.count++] = i;
         if (i === end) break;
@@ -241,8 +241,9 @@
     const routeState = createState();
     // Bed journeys allocate their authored route only at departure.
     // They share the same surface centerlines before and after the underground portion.
-    const route = (from, to) => {
-      plan(routeState, from.x, from.z, to.x, to.z);
+    // A walker gives up on a long detour; the flyby's camera takes any route the trails offer.
+    const route = (from, to, limit = true) => {
+      plan(routeState, from.x, from.z, to.x, to.z, limit);
       const result = [from];
       for (let n = 0; n < routeState.count; n++) {
         const i = routeState.route[n];
