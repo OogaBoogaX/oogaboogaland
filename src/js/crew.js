@@ -559,7 +559,7 @@
       removeChild(rest, parts.gun); addChild(cave.root, parts.gun);
       parts.club.quaternion = null;
       setVec(parts.club.position, 0, -0.62 * cave.traits.height, 0.08 * cave.traits.height);
-      setVec(parts.club.rotation, cave.traits.energyCan ? 0 : cave.traits.anunnaki || cave.traits.newspaper ? 0.2 : cave.traits.stoneAxe ? 0.24 : 0.95, 0, cave.traits.newspaper ? 0.1 : 0);
+      setVec(parts.club.rotation, cave.clubRest.x, 0, cave.clubRest.z);
       rest.visible = false;
       if (ctx.refreshMirrorObject) ctx.refreshMirrorObject(cave.root);
     };
@@ -1400,8 +1400,8 @@
         setVec(parts.club.rotation, -0.035, 0, 0.04);
       } else {
         setVec(parts.club.position, slungClub ? -0.25 * h : 0, (slungClub ? 0.25 : primaryReady ? -0.625 : -0.62) * h, (slungClub ? -0.3 : primaryReady ? 0.15 : 0.08) * h);
-        setVec(parts.club.rotation, slungClub ? cave.traits.stoneAxe ? 0 : CLUB_SLING_TILT : primaryReady ? 0 : cave.traits.energyCan ? 0 : cave.traits.anunnaki || cave.traits.newspaper ? 0.2 : 0.95,
-          0, slungClub ? CLUB_SLING_ANGLE : primaryReady ? Math.PI / 2 : cave.traits.newspaper ? 0.1 : 0);
+        setVec(parts.club.rotation, slungClub ? cave.traits.stoneAxe ? 0 : CLUB_SLING_TILT : primaryReady ? 0 : cave.clubCarry.x,
+          0, slungClub ? CLUB_SLING_ANGLE : primaryReady ? Math.PI / 2 : cave.clubCarry.z);
       }
       parts.club.poseYaw = slungClub ? parts.torso.poseYaw : 0;
       if (slungClub) {
@@ -3941,7 +3941,7 @@
       const forwardLength = Math.hypot(m[8], m[9], m[10]);
       const first = (cave.breathTotal - cave.breathPuffs) * MASK_PORTS.length;
       for (let i = 0; i < MASK_PORTS.length; i++) {
-        // Matches the centre hole and six surrounding holes in gasMaskGeometry.
+        // Matches the centre hole and six surrounding holes in MrHodlX's gas mask (src/characters/MrHodlX.js).
         const port = MASK_PORTS[i];
         math.mat4.transformPoint(MUZZLE, m, (port[0] + (Math.random() - 0.5) * 0.006) * h, (0.1 + port[1] + (Math.random() - 0.5) * 0.006) * h, (0.49 + Math.random() * 0.004) * h);
         const k = ((cave.breathHuge ? 1.35 : 0.16) + walking * 1.15) * (0.8 + Math.random() * 0.4) / forwardLength;

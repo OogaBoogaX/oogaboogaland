@@ -111,7 +111,6 @@
     reviews: (counts && counts.reviews || 0) | 0, comments: normalizeComments(counts && counts.comments)
   });
   const normalizeBoard = (b) => Array.isArray(b) ? b.map((e) => ({ login: String(e.login), count: e.count | 0 })) : [];
-  const CONTRIBUTOR_ALIASES = { bc1gui: "ottoz0r" };
   const displayLabel = (c) => c.login.startsWith("email:") ? "anonymous" : c.login;
 
   const parseStats = (json) => {
@@ -512,7 +511,7 @@
       // Poke an Ooga -> their stats on the big screen, keyed by public handles/aliases.
       showContributor(name) {
         if (!model) return false;
-        const login = model.byLogin.has(name) ? name : CONTRIBUTOR_ALIASES[String(name).toLowerCase()];
+        const login = model.byLogin.has(name) ? name : BL.characters.get(name)?.github;
         if (!model.byLogin.has(login)) return false;
         view = { name: "contributor", params: { login } };
         dirty = true;

@@ -5,18 +5,9 @@
   const ENTROPY = "oogaboogax/entropylab", MAX_REPOS = 64;
   const ISO_TIME = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/;
   // Historical EntropyLab activity; a backend can refresh it with applyActivity.
-  const roster = [
-    ["portlandhodl", 1788159681],
-    ["w-s-bitcoin", 1788178261],
-    ["dplusplus1024", 1788153655],
-    ["bc1gui", 1788190400],
-    ["RandyMcMillan", 1788210011],
-    ["MrHodlX", 1788200000],
-    ["timechainb", 1788171200],
-    ["YellowBrokeIt", 1788225311],
-    ["DrNeski", 1788219000],
-    ["genXbtc", 1788215311]
-  ].map(([name, unixSeconds]) => ({ name, lastCommitAt: unixSeconds * 1e3, activity: new Map([[ENTROPY, unixSeconds * 1e3]]) }));
+  // One entry per file in src/characters/, in join order.
+  const characters = BL.characters.all();
+  const roster = characters.map(({ handle, lastCommit }) => ({ name: handle, lastCommitAt: lastCommit * 1e3, activity: new Map([[ENTROPY, lastCommit * 1e3]]) }));
   // Filter construction, not visibility: solo worlds do no work for absent Oogas.
   // Keep the canonical roster intact for activity, likenesses and stable indices.
   const params = new URLSearchParams(location.search);
@@ -24,7 +15,7 @@
   const character = params.get("character")?.trim().toLowerCase();
   const activeRoster = solo ? roster.filter((entry) => entry.name.toLowerCase() === character) : roster;
   const byName = new Map(roster.map((contributor) => [contributor.name.toLowerCase(), contributor]));
-  byName.set("ottoz0r", byName.get("bc1gui"));
+  characters.forEach((c, i) => { if (c.github) byName.set(c.github.toLowerCase(), roster[i]); });
   const listeners = new Set(), snapshotRepos = new Set();
   const repositoryOf = (repo) => {
     if (typeof repo !== "string") return null;
@@ -116,74 +107,35 @@
     for (const notify of listeners) notify();
   };
   const { fnv1a, mulberry32 } = BL.math;
-  const LIKENESS = {
-    portlandhodl: { bald: true },
-    "w-s-bitcoin": { apple: true, symmetricTusks: true, stoneAxe: true },
-    MrHodlX: { gasMask: true },
-    dplusplus1024: { build: "slim", hair: "#b9dcaa" },
-    bc1gui: { skater: true, skin: "#f2a33c", hair: "#e4561f", fur: "#8f4f17" },
-    RandyMcMillan: { bee: true, skin: "#f3b52a", hair: "#151515" },
-    timechainb: { anunnaki: true, skin: "#b8703c", hair: "#33200f" },
-    YellowBrokeIt: { bald: true, cleanShaven: true, wideEyes: true, yellowFace: true, cigarette: true, energyCan: true, orangeChest: true, skin: "#ffe36a", hair: "#21160e", fur: "#ed9b24" },
-    DrNeski: { laserEyes: true, headband: true, stethoscope: true, newspaper: true, hair: "#f2ece0" },
-    genXbtc: { topHat: true, skeleton: true, pumpkin: true, bald: true, cleanShaven: true, skin: "#cfc8b4", hair: "#151515", fur: "#141414", height: 1.16 }
-  };
-  // Per-handle voices: poke is a signature line; idle lines are mixed with the tribe's.
-  const VOICES = {
-    DrNeski: {
-      poke: "You've got 10 seconds!",
-      idle: ["You are fired!", "Where is Kortik??", "Go rebalance your Node!", "Get laid on the 1st date", "What's your question for DrNeski?", "I sold my neighbor ex's cat for sats"]
-    },
-    genXbtc: {
-      poke: "POWER OVERWHELMING",
-      idle: ["Shut up you larp", "Rules Without Rulers"]
-    }
-  };
-  const voiceFor = (name) => VOICES[name] || null;
+  const voiceFor = (name) => BL.characters.get(name)?.voice || null;
   const SKINS = ["#c98a5b", "#a9744c", "#8a5a3a", "#d9a06b", "#b58057"];
   const HAIRS = ["#2b1b10", "#4a2c14", "#151312", "#5c4425", "#7a2e12"];
   const HAIRS_SLIM = ["#ece5d3", "#e0dac6", "#f2eee2", "#b9dcaa", "#a3d19a"];
   const FURS = ["#d98a2e", "#cc7f28", "#c98936", "#e09a40", "#c27a24", "#d4913a"];
+  // A character's look overrides the hashed skin, hair and fur and carries its
+  // flags into the traits; its dress hooks go to models.buildCaveman.
   const traitsFor = (name) => {
-    const likeness = LIKENESS[name] || {};
-    const slim = likeness.build === "slim";
+    const character = BL.characters.get(name);
+    const look = character?.look || {};
+    const slim = look.build === "slim";
     const rand = mulberry32(fnv1a(name));
     const skin = SKINS[Math.floor(rand() * SKINS.length)];
     const hashedHair = (slim ? HAIRS_SLIM : HAIRS)[Math.floor(rand() * HAIRS.length)];
     const traits = {
+      ...look,
       name,
       slim,
-      bald: !!likeness.bald,
-      cleanShaven: !!likeness.cleanShaven,
-      apple: !!likeness.apple,
-      gasMask: !!likeness.gasMask,
-      symmetricTusks: !!likeness.symmetricTusks,
-      stoneAxe: !!likeness.stoneAxe,
-      skater: !!likeness.skater,
-      anunnaki: !!likeness.anunnaki,
-      bee: !!likeness.bee,
-      wideEyes: !!likeness.wideEyes,
-      cigarette: !!likeness.cigarette,
-      energyCan: !!likeness.energyCan,
-      yellowFace: !!likeness.yellowFace,
-      orangeChest: !!likeness.orangeChest,
-      laserEyes: !!likeness.laserEyes,
-      headband: !!likeness.headband,
-      stethoscope: !!likeness.stethoscope,
-      newspaper: !!likeness.newspaper,
-      topHat: !!likeness.topHat,
-      skeleton: !!likeness.skeleton,
-      pumpkin: !!likeness.pumpkin,
-      skin: likeness.skin || skin,
-      hair: likeness.hair || hashedHair,
-      fur: likeness.fur || FURS[Math.floor(rand() * FURS.length)],
+      skin: look.skin || skin,
+      hair: look.hair || hashedHair,
+      fur: look.fur || FURS[Math.floor(rand() * FURS.length)],
       height: 0.92 + rand() * 0.24,
       belly: (0.9 + rand() * 0.35) * (slim ? 0.8 : 1),
-      rand: mulberry32(fnv1a(name + "/body"))
+      rand: mulberry32(fnv1a(name + "/body")),
+      dress: character?.dress
     };
     // An explicit stature replaces the hashed one after every draw, so the
     // other hashed traits keep their sequence.
-    if (likeness.height) traits.height = likeness.height;
+    if (look.height) traits.height = look.height;
     return traits;
   };
   BL.contributors = { roster, activeRoster, solo, stateFor, ageLabel, traitsFor, voiceFor, hasRecentActivity, applyActivity, applySnapshot, subscribe, seedDebugActivity };

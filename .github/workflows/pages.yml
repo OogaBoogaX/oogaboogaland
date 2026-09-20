@@ -40,9 +40,40 @@ jobs:
           npm run build
           mkdir -p _site
           cp oogaboogaland.html _site/index.html
+      - name: Upload the built page for the artifact job
+        uses: actions/upload-artifact@v4
+        with:
+          name: oogaboogaland-page
+          path: oogaboogaland.html
       - uses: actions/upload-pages-artifact@v4
         with:
           path: _site
       - name: Deploy
         id: deployment
         uses: actions/deploy-pages@v4
+
+  artifact:
+    name: Artifact · commit the built page after merge
+    if: github.ref == 'refs/heads/rock' && github.event_name == 'push'
+    needs: [deploy]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v6
+      - name: Download the page that was deployed
+        uses: actions/download-artifact@v4
+        with:
+          name: oogaboogaland-page
+      - name: Commit the built page
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -f oogaboogaland.html
+          if git diff --cached --quiet; then
+            echo "Built page is unchanged; nothing to commit."
+            exit 0
+          fi
+          git commit -m "Rebuild site artifact [skip ci]"
+          git push

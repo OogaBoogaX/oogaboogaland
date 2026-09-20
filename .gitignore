@@ -12,5 +12,9 @@ npm-debug.log*
 # Local planning and scratch
 untracked/
 
+# Build output: CI commits it back after merges to rock (the artifact job)
+/oogaboogaland.html
+/src/js/characters.gen.js
+
 # Test artifacts (screenshots written by test/ scripts)
 test/*.png

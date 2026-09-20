@@ -127,7 +127,8 @@
     if (transition) return;
     transition = { next, out: true, t: 0 };
   };
-  const ctx = { renderer, canvas: sceneCanvas, overlay: overlayCanvas, game, world, go, lootEnabled: LOOT_ENABLED, testBananas: TEST_BANANAS, from: null };
+  const agentPlay = BL.agent.createPlay();
+  const ctx = { renderer, canvas: sceneCanvas, overlay: overlayCanvas, game, world, go, lootEnabled: LOOT_ENABLED, testBananas: TEST_BANANAS, agentPlay, from: null };
   const sceneSections = [...document.querySelectorAll("[data-scene]")];
   const enter = (next) => {
     ctx.from = active ? active.id : null;
@@ -149,6 +150,7 @@
   };
   const swap = (next) => {
     const leaving = active;
+    agentPlay.stop(true);
     const left = leaving.leave();
     if (DEBUG && leaving.root.children.length) throw new Error(`${leaving.id}.leave left ${leaving.root.children.length} nodes in its root`);
     if (DEBUG && left.targets) throw new Error(`${leaving.id}.leave left ${left.targets} input targets`);
@@ -244,6 +246,7 @@
     if (transition) stepTransition(dt);
     sceneTime += dt;
     active.update(dt, sceneTime);
+    agentPlay.update(dt);
     updateWorldClock(now);
     const drawn = renderer.render(active.root, active.camera, active.renderOpts);
     if (drawn && !firstDraw) {
@@ -285,6 +288,13 @@
       e.preventDefault();
       game.clearLoot();
       active.onLootCleared();
+      return;
+    }
+    // Shift+A: play the scene's Agent, or let it go
+    if (e.shiftKey && !e.metaKey && !e.ctrlKey && (e.key === "A" || e.key === "a")) {
+      e.preventDefault();
+      if (agentPlay.active) agentPlay.stop();
+      else if (!transition) agentPlay.start(active);
       return;
     }
     if (e.shiftKey && !e.metaKey && !e.ctrlKey && (e.key === "R" || e.key === "r")) {
@@ -364,7 +374,7 @@
         return world.level;
       }
     };
-    for (const key of ["slots", "drops", "core", "shell", "delivery", "spillEffect", "cavemen", "crates", "lab", "headquarters", "hud", "applyAllSwag", "renderLocker", "demoTip", "setPileLevel", "refreshStates", "trimPool", "shown", "island", "mouths", "labels", "camera", "cameraCave", "crew", "controls", "props", "altar", "path", "scenery", "jetpack", "magazine", "mirrorCave", "matrixCave", "matrixGate", "pilot", "renderOpts", "lamps", "entranceLights", "lighting", "fireSeats", "critters", "daylight", "setHour", "track", "racers", "items", "race", "audio", "weather", "launchers", "drop", "diver", "plane", "course", "jumbotron", "orbit", "flight", "site", "dsb"]) {
+    for (const key of ["slots", "drops", "core", "shell", "delivery", "spillEffect", "cavemen", "crates", "lab", "headquarters", "hud", "applyAllSwag", "renderLocker", "demoTip", "setPileLevel", "refreshStates", "trimPool", "shown", "island", "mouths", "labels", "camera", "cameraCave", "crew", "controls", "props", "altar", "path", "scenery", "jetpack", "magazine", "mirrorCave", "matrixCave", "matrixGate", "pilot", "renderOpts", "lamps", "entranceLights", "lighting", "fireSeats", "critters", "daylight", "setHour", "track", "racers", "items", "race", "audio", "weather", "launchers", "drop", "diver", "plane", "course", "jumbotron", "orbit", "flight", "site", "agent", "dsb"]) {
       Object.defineProperty(ooga, key, { get: () => active.debug && active.debug[key], enumerable: true });
     }
     window.__ooga = ooga;

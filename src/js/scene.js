@@ -72,6 +72,8 @@
   const matrixModeOf = (node) => {
     let partial = 0;
     while (node) {
+      // 5: drawn in its own palette inside the Matrix (the Agent)
+      if (node.matrixNative) return 5;
       if (node.matrixLiving) return 2;
       if (node.matrixCloud) return 4;
       if (node.matrixEmissiveLiving || node.matrixSignLiving) partial = 3;

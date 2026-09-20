@@ -68,7 +68,7 @@
   const selection = { racer: contributors.activeRoster[0]?.name || null };
 
   // One visit's state: made in enter, dropped in leave.
-  let renderer, game, world, go, lootEnabled, testBananas, root, camera, island, hud, dhud, hooks, input, fx, controls, audio, clock, diver, plane, streaks, mound, hole;
+  let renderer, game, world, go, lootEnabled, testBananas, root, camera, island, hud, dhud, hooks, input, fx, controls, audio, clock, diver, plane, streaks, mound, hole, agent;
   let phase = "board", jumpOpenUntil = 0, callStage = 0, markNear = 0, accumulator = 0, sceneTime = 0, flightTime = 0, landedAt = 0, score = 0, ringsHit = 0, pulled = false, jumpOpen = false, result = null;
   let meterTimer = 0, stateTimer = 0, hintTimer = 0;
   const placed = [];
@@ -90,7 +90,7 @@
   let jumpAngle = 0;
   const jumpT = ROLL_T + CLIMB_T;
   const dropScene = {
-    id: "drop", renderOpts: RENDER_OPTS, root: null, camera: null, input: null, debug: null,
+    id: "drop", renderOpts: RENDER_OPTS, root: null, camera: null, input: null, debug: null, agent: null, agentControls: null,
     get inMotion() {
       return phase === "climb" || phase === "air" || phase === "down" || phase === "lost" || fx.inMotion;
     }
@@ -573,6 +573,7 @@
     sceneTime = elapsed;
     const hour = clock.read();
     daylight.sample(hour, RENDER_OPTS, clock.dayOfYear, islandLatitude, clock.continuousDay);
+    agent.update(dt);
     const a = readInput();
     if (phase === "climb") {
       // Holding Space hurries the climb only, never the circling at height.
@@ -790,11 +791,17 @@
       for (const ring of rings) ring.node.visible = false;
       targetNode.visible = false;
     }
+    // The Agent waits beside the landing target.
+    const agentX = landingSpot.x + Math.cos(jumpAngle) * 4.5, agentZ = landingSpot.z + Math.sin(jumpAngle) * 4.5;
+    agent = dropScene.agent = BL.agent.create({ groundAt, form: "code", x: agentX, z: agentZ, heading: Math.atan2(-agentX, -agentZ) });
+    agent.pace(agentX, agentZ, 1.5);
+    place(agent.root);
     setVec(targetNode.position, landingSpot.x, landingSpot.y + 0.02, landingSpot.z);
     dhud = dropHud.create({ roster: contributors.activeRoster, best: () => game.state.drop.best, onPick: pickDiver });
     dhud.selection.racer = selection.racer;
     dhud.buildBoard((name) => contributors.stateFor(contributors.activeRoster.find((c) => c.name === name)));
     controls = controlsMod.create({ move: document.getElementById("joy-move"), look: document.getElementById("joy-look"), boost: hud.el.act, chord: ctx.canvas, onAction: act });
+    dropScene.agentControls = controls;
     audio = dropAudio.create();
     // Cleared per visit: a flare held at leave would suppress the next cue.
     flaringWas = false;
@@ -868,7 +875,7 @@
     Object.assign(dropScene, {
       root, camera, input,
       debug: {
-        hud, demoTip, trimPool: fx.trimPool, camera, controls, island, cavemen: null, crates: null,
+        hud, demoTip, trimPool: fx.trimPool, camera, controls, island, cavemen: null, crates: null, agent: agent.debug,
         get audio() {
           return audio;
         },
@@ -964,16 +971,18 @@
     hud.setAct("Ooga!");
     for (const node of placed) removeChild(root, node);
     placed.length = clouds.length = rings.length = 0;
+    agent.dispose();
     const count = input.targetCount;
     input.dispose();
     dhud.dispose();
     hud.dispose();
     phase = "board";
-    diver = plane = streaks = mound = hole = hud = dhud = hooks = input = fx = controls = audio = clock = island = null;
-    dropScene.input = dropScene.debug = null;
+    diver = plane = streaks = mound = hole = agent = hud = dhud = hooks = input = fx = controls = audio = clock = island = null;
+    dropScene.input = dropScene.debug = dropScene.agent = dropScene.agentControls = null;
     return { targets: count };
   };
   const liveGeometry = (set) => {
+    agent.liveGeometry(set);
     if (diver) set.add(diver.cave.headOpen).add(diver.cave.headClosed);
   };
   const stats = () => {

@@ -4,11 +4,13 @@ import { gzipSync } from "node:zlib";
 import { readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { writeCharacters } from "./characters.mjs";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const read = (path) => readFileSync(join(root, "src", path), "utf8");
 const sha256 = (text) => `'sha256-${createHash("sha256").update(text, "utf8").digest("base64")}'`;
 
+writeCharacters();
 let html = read("index.html");
 
 const cssTag = /<link rel="stylesheet" href="([^"]+)">/;

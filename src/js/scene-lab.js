@@ -48,7 +48,7 @@
   const STATE_LED = { working: 0, chilling: 3, sleeping: 1 };
 
   // One visit's state: made in enter(), dropped in leave().
-  let renderer, game, world, go, lootEnabled, testBananas, root, camera, lab, hud, hooks, input, pilot, fx, pile, crew, crates, pulseNodes;
+  let renderer, game, world, go, lootEnabled, testBananas, root, camera, lab, hud, hooks, input, pilot, fx, pile, crew, crates, pulseNodes, agent, agentPlay;
   let stateTimer = 0, hintTimer = 0, meterTimer = 0, unsubscribeActivity = null;
   const propTargets = [];
   const addProp = (node, owner, opts) => {
@@ -157,6 +157,8 @@
     switch (o.kind) {
       case "caveman":
         return o.cave.traits.name;
+      case "agent":
+        return o.agent.driven ? "The Agent · you" : "The Agent · double-click to play · triple-click for its code";
       case "rack":
         return rackInfo(o.rack);
       case "flask":
@@ -177,12 +179,45 @@
         return "";
     }
   };
+  // As in the hub: a double-click plays the Agent, a double-click elsewhere lets it
+  // go, and a third quick tap shows its true colours for a while.
+  const agentDoubleTap = (hit, p) => {
+    if (hit && hit.owner.kind === "agent") {
+      // The second click of a double only arrives here; it still counts toward a triple.
+      if (agentPlay.active) agentPlay.stop();
+      else agentPlay.start(labScene, false);
+      return;
+    }
+    if (agentPlay.active) agentPlay.stop();
+    pilot.hooks.onDoubleTap(hit, p);
+  };
+  // As in the hub: a third click of a burst shows its code instead of driving it.
+  const summonAgent = () => {
+    if (agent) return agent;
+    agent = labScene.agent = BL.agent.create({ groundAt: () => 0, walkable: (x, z) => Math.abs(x) < WALL - 0.6 && Math.abs(z) < WALL - 0.6 && Math.hypot(x, z) > pile.pileEdge() + 0.6, x: WALL - 1.5, z: WALL - 1.5 });
+    addChild(root, agent.root);
+    // One owner for every part, so a tap on any limb is a tap on the Agent
+    const agentOwner = { kind: "agent", agent };
+    for (const name of ["torso", "head", "armL", "armR", "legL", "legR"]) addProp(agent.parts[name], agentOwner);
+    return agent;
+  };
+  const agentTripleClick = () => {
+    if (!agentPlay.active || performance.now() - agentPlay.startedAt > BL.agent.TRIPLE_MS) return false;
+    agent.reveal();
+    agentPlay.stop(true);
+    hud.toast("The Agent's true nature");
+    return true;
+  };
   const onTap = (hit) => {
+    if (agentTripleClick()) return;
     if (!hit) return;
     const o = hit.owner;
     switch (o.kind) {
       case "caveman":
         crew.pokeCave(o.cave);
+        break;
+      case "agent":
+        if (!o.agent.driven) o.agent.poke();
         break;
       case "flask":
         flaskStir(o.node);
@@ -219,6 +254,10 @@
   const update = (dt, elapsed) => {
     pilot.readInput(dt);
     crew.update(dt, elapsed);
+    if (agent) {
+      agent.setForm(agent.revealed ? "code" : "ape");
+      agent.update(dt);
+    }
     pile.update(dt);
     lab.hatch.set(pile.hatchOpen);
     lab.equipment.abacus.update(dt);
@@ -300,7 +339,7 @@
   };
 
   const enter = (ctx) => {
-    ({ renderer, game, world, go, lootEnabled, testBananas } = ctx);
+    ({ renderer, game, world, go, lootEnabled, testBananas, agentPlay } = ctx);
     camera = createCamera({ fov: 48, near: 0.25, far: 60 });
     root = createNode();
     lab = models.labRoom({ half: ROOM_HALF });
@@ -369,7 +408,8 @@
       },
       onHoverMove: (hit, p) => hud.tooltip.show(tooltipFor(hit), p.x, p.y, hit.owner.cave),
       onTap,
-      ...pilot.hooks
+      ...pilot.hooks,
+      onDoubleTap: agentDoubleTap
     });
     {
       const eq = lab.equipment;
@@ -423,6 +463,9 @@
     updateMeter();
     if (window.matchMedia("(max-width: 720px), (max-height: 500px)").matches) hud.el.sheet.dataset.open = "false";
     hintTimer = window.setTimeout(() => hud.hint(COARSE ? "Drag to look · pinch to zoom · sticks to fly" : "Drag to orbit · scroll to zoom · WASD to fly"), 1200);
+    // The lab has no Agent until Shift+A calls one in, so a lab visit holds no
+    // Agent geometry of its own.
+    Object.assign(labScene, { agentView: pilot.orbit, agentControls: pilot.controls, agentHandoff: () => pilot.release(true), summonAgent });
     Object.assign(labScene, {
       root, camera, input,
       debug: {
@@ -430,7 +473,7 @@
         get shown() {
           return pile.shown;
         },
-        camera, crew, pilot, controls: pilot.controls
+        camera, crew, pilot, controls: pilot.controls, get agent() { return agent && agent.debug; }
       }
     });
     pilot.update(0);
@@ -446,6 +489,7 @@
     crates.dispose();
     pile.dispose();
     crew.dispose();
+    if (agent) agent.dispose();
     fx.dispose();
     pilot.dispose();
     for (const node of propTargets) input.remove(node);
@@ -454,12 +498,13 @@
     const targets = input.targetCount;
     input.dispose();
     hud.dispose();
-    lab = hud = hooks = input = pilot = fx = pile = crew = crates = pulseNodes = null;
-    labScene.input = labScene.debug = null;
+    lab = hud = hooks = input = pilot = fx = pile = crew = crates = pulseNodes = agent = agentPlay = null;
+    labScene.input = labScene.debug = labScene.agent = labScene.agentView = labScene.agentControls = labScene.agentHandoff = labScene.summonAgent = null;
     return { targets };
   };
   const liveGeometry = (set) => {
     pile.liveGeometry(set);
+    if (agent) agent.liveGeometry(set);
     for (const cave of crew.cavemen.values()) set.add(cave.headOpen).add(cave.headClosed);
   };
   const stats = () => {
@@ -470,7 +515,7 @@
   };
   const labScene = {
     id: "lab", enter, update, overlay, onDonation, onKey, onLootCleared, renderOpts: RENDER_OPTS, leave, stats, liveGeometry,
-    root: null, camera: null, input: null, debug: null,
+    root: null, camera: null, input: null, debug: null, agent: null, agentView: null, agentControls: null, agentHandoff: null, summonAgent: null,
     get inMotion() {
       return pile.inMotion || fx.inMotion;
     }

@@ -21,8 +21,9 @@
     let zoomGesture = 0, wheelAt = -Infinity, wheelDirection = 0;
     let longPressTimer = 0;
     const lastTap = { at: -Infinity, node: null, owner: null, x: 0, y: 0 };
-    // Every body part of one caveman is the same target, so a poke hop cannot break a double tap.
-    const sameTarget = (hit) => hit ? hit.node === lastTap.node || (!!hit.owner.cave && !!lastTap.owner && hit.owner.cave === lastTap.owner.cave) : lastTap.node === null;
+    // Every body part of one actor is the same target, so a poke hop cannot break a double
+    // tap: a caveman by its cave, anything else (the Agent) by one shared owner object.
+    const sameTarget = (hit) => hit ? hit.node === lastTap.node || hit.owner === lastTap.owner || (!!hit.owner.cave && !!lastTap.owner && hit.owner.cave === lastTap.owner.cave) : lastTap.node === null;
     const call = (name, a, b, c, d) => hooks[name] ? hooks[name](a, b, c, d) : undefined;
     const add = (node, owner, { radius = 0 } = {}) => {
       targets.push({ node, owner, radius, geometry: null, bounds: null });

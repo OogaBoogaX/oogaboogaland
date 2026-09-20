@@ -79,7 +79,7 @@
 
   // One visit's state: made in enter, dropped in leave.
   let renderer, game, world, go, lootEnabled, testBananas, root, camera, island, hud, rhud, hooks, input, fx, controls, audio, clock, spot, site, planet, flight, view, passenger, canopy, heatShell, smoke, plasma, splashNode;
-  let astro, astroStick, astroLight, rockNode, tetherNode;
+  let astro, astroStick, astroLight, rockNode, tetherNode, agent;
   const eva = { measured: false, back: false, reeling: false, measuring: 0, reading: 0, drift: 0, tumble: 0, spin: 0, e: 0, u: 0, f: 0, ve: 0, vu: 0, vf: 0, yaw: 0, pitch: 0, near: "", puff: 0 };
   let phase = "build", stack = [], selected = -1, sceneTime = 0, flightTime = 0, accumulator = 0, phaseT = 0, countShown = 0, gauge = 0, release = null, igniteIn = 0;
   let puffClock = 0, reelT = 0;
@@ -108,7 +108,7 @@
   const ctrl = { throttle: 0, lean: 0, pitch: 0, roll: 0, yaw: 0 };
   let inputLocked = false;
   const orbitScene = {
-    id: "orbit", renderOpts: RENDER_OPTS, root: null, camera: null, input: null, debug: null,
+    id: "orbit", renderOpts: RENDER_OPTS, root: null, camera: null, input: null, debug: null, agent: null, agentControls: null,
     get inMotion() {
       return (phase !== "build" && phase !== "results") || fx.inMotion || smoke.count > 0;
     }
@@ -1473,6 +1473,7 @@
   const update = (dt, elapsed) => {
     sceneTime = elapsed;
     phaseT += dt;
+    agent.update(dt);
     const hour = clock.read();
     daylight.sample(hour, RENDER_OPTS, clock.dayOfYear, islandLatitude, clock.continuousDay);
     const a = readInput();
@@ -1797,6 +1798,11 @@
     setVec(slab.scale, footprint + 0.3, 0.34, footprint + 0.3);
     site = rocketModels.site(spot);
     place(site.node);
+    // The Agent paces the islet beside the pad, across from the tower.
+    const agentX = spot.x - 5.2, agentZ = spot.z + 1;
+    agent = orbitScene.agent = BL.agent.create({ groundAt, form: "code", x: agentX, z: agentZ, heading: Math.PI / 2 });
+    agent.pace(agentX, agentZ, 0.8);
+    place(agent.root);
     planet = place(createNode({ position: { x: 0, y: CY, z: 0 }, geometry: rocketModels.planet() }));
     const rand = mulberry32(SEED + 505);
     for (let i = 0; i < CLOUDS; i++) {
@@ -1835,6 +1841,7 @@
     rhud.setPilot(selection.pilot);
     rhud.refreshBest();
     controls = controlsMod.create({ move: document.getElementById("joy-move"), look: document.getElementById("joy-look"), boost: hud.el.act, chord: ctx.canvas, onAction: act });
+    orbitScene.agentControls = controls;
     audio = rocketAudio.create();
     rhud.el.mute.setAttribute("aria-pressed", String(audio.muted));
     window.addEventListener("pointerdown", onGesture);
@@ -1921,7 +1928,7 @@
     Object.assign(orbitScene, {
       root, camera, input,
       debug: {
-        hud, demoTip, trimPool: fx.trimPool, camera, controls, island, cavemen: null, crates: null,
+        hud, demoTip, trimPool: fx.trimPool, camera, controls, island, cavemen: null, crates: null, agent: agent.debug,
         get audio() {
           return audio;
         },
@@ -2004,18 +2011,20 @@
     removeChild(root, astro.root);
     for (const node of placed) removeChild(root, node);
     placed.length = fireballs.length = 0;
+    agent.dispose();
     const count = input.targetCount;
     input.dispose();
     rhud.dispose();
     hud.dispose();
     phase = "build";
     inputLocked = false;
-    astro = astroStick = astroLight = rockNode = tetherNode = null;
+    astro = astroStick = astroLight = rockNode = tetherNode = agent = null;
     flight = view = passenger = canopy = heatShell = smoke = plasma = splashNode = site = planet = spot = hud = rhud = hooks = input = fx = controls = audio = clock = island = null;
-    orbitScene.input = orbitScene.debug = null;
+    orbitScene.input = orbitScene.debug = orbitScene.agent = orbitScene.agentControls = null;
     return { targets: count };
   };
   const liveGeometry = (set) => {
+    agent.liveGeometry(set);
     set.add(passenger.headOpen).add(passenger.headClosed).add(astro.headOpen).add(astro.headClosed);
   };
   const stats = () => {

@@ -46,7 +46,7 @@
   const selection = { racer: contributors.activeRoster[0]?.name || null, mount: "kart", track: "bay" };
 
   // These are one visit's state: created in enter, dropped in leave.
-  let renderer, game, world, go, lootEnabled, testBananas, root, camera, hud, rhud, hooks, input, fx, controls, track, racers, items, audio, weather;
+  let renderer, game, world, go, lootEnabled, testBananas, root, camera, hud, rhud, hooks, input, fx, controls, track, racers, items, audio, weather, agent;
   let phase = "garage", countdown = 0, accumulator = 0, sceneTime = 0, finishedAt = 0;
   let meterTimer = 0, stateTimer = 0, hintTimer = 0;
   const cam = { yaw: 0, offset: 0, dist: CHASE.dist, shake: 0, lookBack: false, x: 0, y: 0, z: 0, tx: 0, ty: 0, tz: 0, warm: false, garageYaw: 0, garageLift: 0 };
@@ -54,7 +54,7 @@
   const cup = { active: false, round: 0, done: false, points: new Float32Array(contributors.activeRoster.length) };
   const nearestTorches = new Float32Array(LIGHT_CAPACITY * 2);
   const raceScene = {
-    id: "race", renderOpts: null, root: null, camera: null, input: null, debug: null,
+    id: "race", renderOpts: null, root: null, camera: null, input: null, debug: null, agent: null, agentControls: null,
     get inMotion() {
       return phase === "countdown" || phase === "racing" || fx.inMotion;
     }
@@ -75,7 +75,21 @@
     const g = track.grid[0];
     setVec(TICKER_AT, g.x, g.y + 8.5, g.z);
     if (items) items.setTrack(track);
+    if (agent) placeAgent();
     mark("track");
+  };
+  // The Agent watches from beside the grid, pacing on whichever side is dry land.
+  const AGENT_SAMPLE = 4, AGENT_SIDE = 5;
+  // Heights follow the nearest sample from the last one, so a driven Agent can walk the whole course.
+  let agentHint = AGENT_SAMPLE;
+  const agentGround = (x, z) => track.heightAt(x, z, agentHint = track.nearest(x, z, agentHint));
+  const placeAgent = () => {
+    const S = track.samples, i = agentHint = AGENT_SAMPLE, off = track.halfAt(i) + AGENT_SIDE;
+    let side = 1;
+    if (track.waterAt(S.x[i] + track.rightX(i) * off, S.z[i] + track.rightZ(i) * off)) side = -1;
+    const x = S.x[i] + track.rightX(i) * off * side, z = S.z[i] + track.rightZ(i) * off * side;
+    agent.place(x, z, Math.atan2(-track.rightX(i) * side, -track.rightZ(i) * side));
+    agent.pace(x, z, 1.5);
   };
   const buildWeather = () => {
     if (weather) {
@@ -578,6 +592,7 @@
     }
     racers.pose(dt, camera.position.x, camera.position.z);
     track.update(elapsed, camera.position.x, camera.position.z);
+    agent.update(dt);
     updateWeather(dt);
     if (phase === "garage") {
       camera.position.x = cam.x;
@@ -659,12 +674,16 @@
     Object.assign(rhud.selection, selection);
     rhud.buildGarage((name) => contributors.stateFor(contributors.activeRoster.find((c) => c.name === name)));
     buildTrack(selection.track);
+    agent = raceScene.agent = BL.agent.create({ groundAt: agentGround, form: "code" });
+    addChild(root, agent.root);
+    placeAgent();
     racers = racersMod.create({ root, input, fx, game, track });
     mark("racers");
     items = raceItems.create({ root, racers, fx, track });
     items.setTrack(track);
     wireEvents();
     controls = controlsMod.create({ move: document.getElementById("joy-move"), look: null, boost: hud.el.act, chord: ctx.canvas });
+    raceScene.agentControls = controls;
     audio = raceAudio.create();
     // sceneTime restarts at 0 on every enter, so reset these marks or stale future marks silence the cues.
     screechAt = crewScreechAt = -9;
@@ -750,7 +769,7 @@
     Object.assign(raceScene, {
       root, camera, input,
       debug: {
-        hud, demoTip, trimPool: fx.trimPool, camera, controls, cavemen: null, crates: null,
+        hud, demoTip, trimPool: fx.trimPool, camera, controls, cavemen: null, crates: null, agent: agent.debug,
         get audio() {
           return audio;
         },
@@ -806,6 +825,7 @@
     rhud.el.joyLook.hidden = false;
     if (weather) removeChild(root, weather.node);
     weather = null;
+    agent.dispose();
     removeChild(root, track.root);
     track.dispose();
     for (const node of targets) input.remove(node);
@@ -815,11 +835,12 @@
     rhud.dispose();
     hud.dispose();
     raceScene.renderOpts = null;
-    track = racers = items = hud = rhud = hooks = input = fx = controls = audio = null;
-    raceScene.input = raceScene.debug = null;
+    track = racers = items = hud = rhud = hooks = input = fx = controls = audio = agent = null;
+    raceScene.input = raceScene.debug = raceScene.agent = raceScene.agentControls = null;
     return { targets: count };
   };
   const liveGeometry = (set) => {
+    agent.liveGeometry(set);
     for (const r of racers.racers) set.add(r.cave.headOpen).add(r.cave.headClosed);
   };
   const stats = () => {

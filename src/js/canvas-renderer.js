@@ -193,7 +193,7 @@
     const matrixFront = (travel) => matrixActive * (1 - smooth((travel - matrixRadius + 1.5) / 1.5));
     const matrixPlaneDistance = (x, y, z) => matrixPermanentPlane ? matrixPermanentPlane[0] * x + matrixPermanentPlane[1] * y + matrixPermanentPlane[2] * z + matrixPermanentPlane[3] : 0;
     const matrixPermanentAt = (x, y, z, cave) => {
-      if (!cave || cave !== matrixPermanentCave) return false;
+      if (!cave || cave !== matrixPermanentCave || !matrixCaves || !matrixCaveBounds) return false;
       const depth = -matrixPlaneDistance(x, y, z), at = (cave - 1) * 4;
       const across = matrixCaves[at + 1] * (x - matrixCaveBounds[at]) - matrixCaves[at] * (z - matrixCaveBounds[at + 2]);
       const reach = matrixAperture[3] || 0.5 * (Math.abs(matrixCaves[at]) + Math.abs(matrixCaves[at + 1])), room = depth > matrixAperture[2] + 2.5 - reach, throat = depth <= matrixAperture[2];
@@ -289,15 +289,17 @@
           centerX /= count;
           centerY /= count;
           centerZ /= count;
-          const matrixCloud = matrixMode > 3.5;
+          // Mode 5 keeps its own palette in the Matrix; clouds are mode 4.
+          const matrixNative = matrixMode > 4.5;
+          const matrixCloud = matrixMode > 3.5 && !matrixNative;
           const matrixLiving = matrixMode > 1.5 && matrixMode < 3.5 && (matrixMode < 2.5 || face.emissive > 0);
           const permanentFallback = !matrixLiving && !!face.matrixPermanentFallback && !!matrixPermanentCave;
           const flow = matrixLiving || permanentFallback ? Math.hypot(centerX - matrixOriginX, centerZ - matrixOriginZ) : 0;
           const staticCave = face.matrixCave || node.geometry.matrixCave || 0;
           const dynamicCave = !staticCave && (matrixPermanentCave || matrixActive && matrixRadius >= matrixCaveNear) && (matrixLiving || permanentFallback) && matrixCaveBounds && flow >= matrixCaveNear;
           const cave = staticCave || (dynamicCave ? matrixLivingCave(centerX, centerY, centerZ, permanentFallback) : 0);
-          let permanent = matrixPermanentAt(centerX, centerY, centerZ, cave), permanentPossible = permanent, permanentClipNeeded = false;
-          if (matrixPermanentCave && (staticCave === matrixPermanentCave || dynamicCave)) {
+          let permanent = !matrixNative && matrixPermanentAt(centerX, centerY, centerZ, cave), permanentPossible = permanent, permanentClipNeeded = false;
+          if (!matrixNative && matrixPermanentCave && matrixCaves && matrixCaveBounds && (staticCave === matrixPermanentCave || dynamicCave)) {
             let minPlane = Infinity, maxPlane = -Infinity, radius2 = 0;
             for (let k = 0; k < count; k++) {
               const p = V[k], d = matrixPlaneDistance(p[0], p[1], p[2]);
@@ -325,7 +327,7 @@
           const ownedGlyph = localMatrixGlyph && cave && matrixCaves;
           const reachedGlyph = localMatrixGlyph && node.matrixFullCave && node.matrixFullCave === cave;
           let minimumFront = permanent || reachedGlyph || localMatrixGlyph && !ownedGlyph ? 1 : 0, maximumFront = permanentPossible ? 1 : minimumFront;
-          if (!permanent && !reachedGlyph && matrixActive && (!matrixLiving || matrixLivingGlobal) && (!localMatrixGlyph || ownedGlyph)) {
+          if (!matrixNative && !permanent && !reachedGlyph && matrixActive && (!matrixLiving || matrixLivingGlobal) && (!localMatrixGlyph || ownedGlyph)) {
             let radiusSquared = 0;
             for (let k = 0; k < count; k++) radiusSquared = Math.max(radiusSquared, (V[k][0] - centerX) ** 2 + (V[k][2] - centerZ) ** 2);
             const distance = matrixCloud ? Math.min(matrixTravel(centerX, centerZ, cave), 36) : matrixTravel(centerX, centerZ, cave), margin = Math.sqrt(radiusSquared) * (cave && matrixCaves ? Math.SQRT2 : 1);

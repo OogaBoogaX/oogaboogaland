@@ -336,9 +336,11 @@ void main() {
   }
   vec3 n = normalize(vNormal);
   vec3 base = vColor.rgb;
-  float cloud = step(3.5, vParams.z);
+  // Mode 5 keeps its own palette in the Matrix; clouds are mode 4.
+  float nativeMode = step(4.5, vParams.z);
+  float cloud = step(3.5, vParams.z) * (1.0 - nativeMode);
   float wholeLiving = step(1.5, vParams.z) * (1.0 - step(2.5, vParams.z));
-  float emissiveLiving = step(2.5, vParams.z) * (1.0 - cloud) * step(0.001, vColor.a);
+  float emissiveLiving = step(2.5, vParams.z) * (1.0 - cloud) * (1.0 - nativeMode) * step(0.001, vColor.a);
   float living = max(wholeLiving, emissiveLiving);
   float caveIndex = max(vMatrixCave, uMatrixCave);
   float flow = uMatrixParams.x > 0.0 ? matrixTravel(vWorld.xz, caveIndex) : 0.0;
@@ -371,7 +373,7 @@ void main() {
   float permanentDepth = -dot(uMatrixPermanentPlane, vec4(vWorld, 1.0));
   float permanentFootprint = 0.5 * (abs(dFdx(permanentDepth)) + abs(dFdy(permanentDepth)));
   if (living < 0.5 && uMatrixGlyph < 0.5 && permanentDepth < permanentFootprint + 0.000001) permanent = 0.0;
-  float front = max(permanent, mix(1.0, uMatrixLivingGlobal, living) * uMatrixParams.x * (1.0 - smoothstep(uMatrixParams.y - 1.5, uMatrixParams.y, flow)));
+  float front = max(permanent, mix(1.0, uMatrixLivingGlobal, living) * uMatrixParams.x * (1.0 - smoothstep(uMatrixParams.y - 1.5, uMatrixParams.y, flow))) * (1.0 - nativeMode);
   if (uMatrixGlyph > 2.5) {
     if (front <= 0.0) discard;
     float fog = smoothstep(uFogRange.x, uFogRange.y, distance(vWorld, uEye));
