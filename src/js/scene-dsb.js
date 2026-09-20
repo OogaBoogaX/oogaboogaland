@@ -14,7 +14,8 @@
   let rideYaw = 0, ridePitch = 0, proximity, lastContext = "", bananas = 0;
   const RENDER = { clear: [0.025, 0.014, 0.06], horizon: [0.11, 0.04, 0.19], zenith: [0.008, 0.006, 0.025], sky: [0.52, 0.43, 0.7], ground: [0.26, 0.17, 0.32], sun: [0.8, 0.7, 0.9], light: { x: -0.4, y: 0.8, z: 0.4 }, stars: 1, shadowCenter: { x: 0, y: 0, z: 0 }, shadowExtent: 48, bloomStrength: 0.5, lights: new Float32Array(80), lightCount: 2 };
   const DARK = { clear: [0, 0, 0], sky: [0.12, 0.1, 0.16], ground: [0.04, 0.03, 0.06], sun: [0.18, 0.16, 0.22], bloomStrength: 0.15 };
-  let root, camera, input, pilot, hud, renderer, world, game, go, land, portal, audio, data, tv, panel, readout, bag, prompt, overlayCanvas, overlayCtx, avatar;
+  let root, camera, input, pilot, hud, renderer, world, game, go, land, portal, audio, data, tv, panel, readout, bag, prompt, overlayCanvas, overlayCtx, avatar, crew, fx, playerWorld;
+  let exiting = false;
   let phase = "entrance", progress = 0, elapsed = 0, flash = 0, boatAngle = 0, rideAngle = 0, priceTimer = 0, tokens = 20, bread = 0, tomatoes = 0, throwAt = -1, fedUntil = 0, disposed = false, oldSheetHidden = false, oldSheetOpen = "true";
   let arrivalTime = 0, glanceTime = 3, lastCue = -1, glance = 0, gait = 0, avatarView = true;
   let lastPrice = "", lastBag = "", lastPrompt = "", savedRevision = -1, lastHeight = 0, skyPulse = 0;
@@ -58,11 +59,29 @@
     }
     savedRevision = state.revision;
   };
-  const location = () => pilot.orbit.target;
+  const location = () => phase === "land" && avatarView ? avatar.root.position : pilot.orbit.target;
+  const cameraEnabled = () => phase === "land" && !exiting && !tv.isOpen && document.getElementById("dsb-shop").hidden;
+  const playerEnabled = () => avatarView && cameraEnabled();
+  const syncPlayer = () => pilot.setActive(cameraEnabled());
+  const clearAt = (x, z, radius = 0.35) => Math.hypot(x, z) < 35 - radius
+    && !(Math.abs(x) < 8.6 + radius && Math.abs(z) < 2.6 + radius
+      || Math.abs(x + 10) < 4.4 + radius && Math.abs(z - 13) < 1.9 + radius
+      || Math.abs(x + 20) < 4 + radius && Math.abs(z - 13) < 2 + radius
+      || Math.abs(x + 18) < 7.5 + radius && z > -20.5 - radius && z < -11.5 + radius
+      || z > 28.5 - radius && z < 33 + radius && (Math.abs(x + 7) > 2.25 - radius && Math.abs(x + 7) < 3.8 + radius || z > 32.1 - radius && Math.abs(x + 7) < 3.8 + radius));
+  const walkable = (ax, az, bx, bz, y, height, actor) => {
+    const steps = Math.max(1, Math.ceil(Math.hypot(bx - ax, bz - az) / 0.2));
+    for (let i = 1; i <= steps; i++) if (!clearAt(ax + (bx - ax) * i / steps, az + (bz - az) * i / steps, actor.bodyRadius)) return false;
+    return true;
+  };
+  const weaponImpact = (source, hit) => {
+    if (hit.owner && hit.owner.kind === "visitor") { hit.owner.cave.hit = 1; toast("Ooga! Watch the banana shots!"); }
+  };
+  const reloadPolicy = { near: () => playerEnabled(), available: () => true, consume: () => {} };
   const near = (x, z, radius = 5) => { const p = location(); return Math.hypot(p.x - x, p.z - z) < radius; };
   const clampTarget = (p) => {
     const radius = Math.hypot(p.x, p.z);
-    if (avatarView) p.y = 1.7;
+    if (avatarView && !pilot?.player) p.y = 1.7;
     if (radius > 35) { p.x *= 35 / radius; p.z *= 35 / radius; }
     // Solid landmark footprints; each attempted step keeps its last clear position.
     if (Math.abs(p.x) < 8.6 && Math.abs(p.z) < 2.6 || Math.abs(p.x + 10) < 4.4 && Math.abs(p.z - 13) < 1.9 || Math.abs(p.x + 20) < 4 && Math.abs(p.z - 13) < 2 || Math.abs(p.x + 18) < 7.5 && p.z > -20.5 && p.z < -11.5) { p.x = previous.x; p.z = previous.z; }
@@ -93,7 +112,7 @@
   const finishArrival = () => {
     if (phase !== "arrival") return;
     phase = "land"; panel.dataset.phase = phase; document.body.classList.remove("dsb-arrival");
-    previous.x = 0; previous.z = 26; pilot.navigate(VIEW); pilot.update(0);
+    previous.x = 0; previous.z = 26; pilot.possess(avatar); pilot.navigate(VIEW); syncPlayer(); pilot.update(0);
     avatarView = true; hud.setAct("USE"); hud.el.act.hidden = false;
   };
   const arrivalCamera = () => {
@@ -120,7 +139,7 @@
   };
   const stopRide = () => {
     const arrival = phase === "boat" ? DOCK : STATION;
-    phase = "land"; rideYaw = ridePitch = 0; panel.dataset.phase = phase; previous.x = arrival.position.x; previous.z = arrival.position.z; pilot.navigate(arrival);
+    phase = "land"; rideYaw = ridePitch = 0; panel.dataset.phase = phase; previous.x = arrival.position.x; previous.z = arrival.position.z; pilot.navigate(arrival); syncPlayer();
   };
   const advanceTrip = (trip, dt) => {
     if (trip.wait > 0) { const used = Math.min(dt, trip.wait); trip.wait -= used; dt -= used; }
@@ -138,10 +157,10 @@
     if (!(kind === "boat" ? atDock() : atStation())) { toast("Walk to the marked " + (kind === "boat" ? "boat" : "coaster") + " station."); return; }
     if (trip.wait <= 0) { toast("The next ride is on its way. Wait at the station."); return; }
     trip.wait = Math.max(2, trip.wait); phase = kind; rideYaw = ridePitch = 0; panel.dataset.phase = phase;
-    document.getElementById("dsb-shop").hidden = true;
+    document.getElementById("dsb-shop").hidden = true; syncPlayer();
     toast("Drag to look around. Leave ride returns you to the station.");
   };
-  const returnHub = () => { if (phase === "entrance" || phase === "land" && inCave()) go("hub"); else toast("Enter the stone cave to return to Ooga Booga Land."); };
+  const returnHub = () => { if (phase === "entrance" || phase === "land" && inCave()) { exiting = true; syncPlayer(); go("hub"); } else toast("Enter the stone cave to return to Ooga Booga Land."); };
   const contextAction = () => {
     if (phase === "boat" || phase === "coaster") return "ride";
     if (phase !== "land" || tv.isOpen) return "";
@@ -166,11 +185,11 @@
   };
   const openTv = () => {
     if (phase !== "land" || !near(-10, 16, 6) || location().y > 6) { toast("Walk up to the TV beside the meme stand to open it."); return; }
-    tv.open();
+    tv.open(); syncPlayer();
   };
   const openShop = () => {
     if (!near(-20, 16, 7)) { toast("Visit the meme stand beside the purple canopy."); return; }
-    panel.dataset.folded = "false"; document.getElementById("dsb-toggle").textContent = "Hide DSB menu"; document.getElementById("dsb-toggle").setAttribute("aria-expanded", "true"); document.getElementById("dsb-shop").hidden = false;
+    panel.dataset.folded = "false"; document.getElementById("dsb-toggle").textContent = "Hide DSB menu"; document.getElementById("dsb-toggle").setAttribute("aria-expanded", "true"); document.getElementById("dsb-shop").hidden = false; syncPlayer();
   };
   const buy = (kind) => {
     if (phase !== "land" || !near(-20, 16, 7)) { toast("Purchases happen at the meme stand."); return; }
@@ -184,11 +203,11 @@
     if (bread) bread--; else bananas--; fedUntil = elapsed + 1.5; bagText(); toast("Warm banana bread. Ooga approved.");
   };
   const throwTomato = (target = null) => {
-    if (phase !== "land" || elapsed - throwAt < 0.3) return;
+    if (!playerEnabled() || elapsed - throwAt < 0.3) return;
     if (!tomatoes) { toast("Pick up tomatoes at the meme shop first."); return; }
     const shot = shots.find((s) => s.life <= 0); if (!shot) return;
     const p = location(), yaw = pilot.orbit.yaw;
-    shot.node.position.x = p.x; shot.node.position.y = Math.max(1.2, p.y - 0.25); shot.node.position.z = p.z;
+    shot.node.position.x = p.x; shot.node.position.y = avatar.root.position.y - avatar.baseY + 1.45; shot.node.position.z = p.z;
     let dx = -Math.sin(yaw), dz = -Math.cos(yaw);
     if (target) { dx = target.root.position.x - p.x; dz = target.root.position.z - p.z; const d = Math.hypot(dx, dz); dx /= Math.max(d, 0.001); dz /= Math.max(d, 0.001); }
     shot.vx = dx * 14; shot.vz = dz * 14; shot.vy = 2; shot.life = 2; shot.node.visible = true; shot.splat = false;
@@ -210,7 +229,7 @@
     return true;
   };
   const onTap = (hit) => {
-    if (phase !== "land" || !hit) return;
+    if (!playerEnabled() || pilot.aiming || !hit) return;
     const owner = hit.owner;
     if (owner.kind === "visitor") { if (tomatoes) throwTomato(owner.cave); else toast("Grab tomatoes at the meme stand, then tap an Ooga."); }
     else if (owner.kind === "tv") openTv();
@@ -235,13 +254,25 @@
     else if (name === "dsb-tomato") buy("tomato");
     else if (name === "dsb-eat") eat();
     else if (name === "dsb-throw") throwTomato();
-    else if (name === "dsb-close-shop") document.getElementById("dsb-shop").hidden = true;
+    else if (name === "dsb-close-shop") { document.getElementById("dsb-shop").hidden = true; syncPlayer(); }
     else if (name === "dsb-stop" && (phase === "boat" || phase === "coaster")) stopRide();
-    else if (name === "act") act();
-    else if (name === "reset-view" && phase === "land") { avatarView = true; previous.x = 0; previous.z = 26; pilot.enterClose(); pilot.navigate(VIEW); }
-    else if (name === "dsb-lookout" && phase === "land") { avatarView = false; pilot.goPreset("lookout"); }
+    else if (name === "act") pilot.action();
+    else if (playerEnabled() && (name.startsWith("weapon-") || name === "magazine-swap")) pilot.weaponAction(name);
+    else if (name === "reset-view" && phase === "land") { avatarView = true; previous.x = 0; previous.z = 26; if (!pilot.player) pilot.possess(avatar); syncPlayer(); pilot.enterClose(); pilot.navigate(VIEW); }
+    else if (name === "dsb-lookout" && phase === "land") { avatarView = false; syncPlayer(); pilot.goPreset("lookout"); }
+  };
+  const playerAction = () => {
+    if (!playerEnabled()) { if (phase === "boat" || phase === "coaster") act(); return true; }
+    if (contextAction() || near(-18, -10, 7)) { act(); return true; }
+    return false;
   };
   const onKey = (event) => {
+    if (playerEnabled()) {
+      if (event.key === "1" || event.key === "2") { pilot.weaponMode(Number(event.key)); return; }
+      if (event.key.toLowerCase() === "g") { pilot.weaponAction("weapon-toggle"); return; }
+      if (event.key.toLowerCase() === "v") { pilot.weaponAction("weapon-fire"); return; }
+      if (event.key.toLowerCase() === "r") { event.preventDefault(); event.stopPropagation(); pilot.weaponAction("weapon-reload"); return; }
+    }
     if (phase === "arrival" && (event.key === "Escape" || event.key === " " || event.key === "Enter")) { finishArrival(); return; }
     if (event.key === "Escape") {
       if (!document.getElementById("dsb-shop").hidden) document.getElementById("dsb-shop").hidden = true;
@@ -256,6 +287,7 @@
     // A queued RAF can predate a debug advance; never rewind a camera sequence.
     dt = Math.max(0, dt);
     elapsed = time;
+    syncPlayer();
     if (phase === "entrance") {
       const axes = pilot.controls.read(), previousProgress = progress;
       document.getElementById("dsb-start-audio").hidden = audio.ready || !window.AudioContext;
@@ -272,11 +304,8 @@
     audio.update(1, elapsed); flash = Math.max(0, flash - dt * 1.5);
     if (phase === "arrival") { arrivalTime += dt; arrivalCamera(); if (arrivalTime >= 13) finishArrival(); }
     if (phase === "land") {
-      const px = pilot.orbit.target.x, pz = pilot.orbit.target.z;
-      if (!tv.isOpen) { pilot.readInput(dt); pilot.update(dt); }
-      const p = pilot.orbit.target, dx = p.x - px, dz = p.z - pz, moving = !tv.isOpen && (pilot.controls.read().x !== 0 || pilot.controls.read().y !== 0) && Math.hypot(dx, dz) > 0.0001;
-      if (avatarView) { avatar.root.position.x = p.x; avatar.root.position.z = p.z; if (moving) avatar.root.rotation.y = Math.atan2(dx, dz); }
-      avatar.root.visible = pilot.closeMix < 0.95; poseAvatar(moving && avatarView, dt);
+      avatar.root.visible = true;
+      if (cameraEnabled()) { pilot.readInput(dt); if (avatarView) crew.update(dt, time); pilot.update(dt); }
     } else avatar.root.visible = phase === "arrival";
     advanceTrip(boatTrip, dt); boatAngle = boatTrip.angle;
     for (let i = 0; i < land.boats.length; i++) {
@@ -297,6 +326,7 @@
       car.rotation.y = a + Math.PI / 2; car.rotation.x = -Math.atan2(railAhead.y - railPoint.y, Math.hypot(railAhead.x - railPoint.x, railAhead.z - railPoint.z));
     }
     syncContext();
+    fx.update(dt);
     audio.environment(camera, land.boats[0].position, dt);
     for (let i = 0; i < land.falls.length; i++) { const f = land.falls[i]; f.glow = 0.55 + 0.2 * Math.sin(time * 3 + i * 0.4); f.scale.y = 7.5 + 0.5 * Math.sin(time * 1.7 + i); land.spray[i].position.y = -0.5 - (time * 4 + i * 0.71) % 11; }
     if (data.state.height !== lastHeight) { if (lastHeight) skyPulse = 1; lastHeight = data.state.height; }
@@ -326,15 +356,16 @@
       if (s.live && s.lastTickAt && Date.now() - s.lastTickAt > 30000) s.priceStatus = "Price feed delayed · last data retained";
       const text = `${s.priceStatus}: $${s.price.toFixed(2)}\n${s.skyStatus}${s.height ? ` · block ${s.height} · ${s.fee} sat/vB` : ""}`;
       if (lastPrice !== text) { readout.textContent = text; lastPrice = text; }
-      const hint = lastContext ? CONTEXT_LABELS[lastContext] : "WASD: move | drag: look | T: throw tomato | B: eat snack";
+      const hint = lastContext ? CONTEXT_LABELS[lastContext] : "WASD: move | 1/2: weapon | right-click: aim | V: fire | R: reload | T: tomato | B: snack";
       if (lastPrompt !== hint) { prompt.textContent = hint; lastPrompt = hint; }
     }
   };
-  const overlay = () => {
+  const drawExtra = () => {};
+  const overlay = (dt) => {
     const dpr = Math.min(window.devicePixelRatio || 1, 2), width = overlayCanvas.clientWidth, height = overlayCanvas.clientHeight;
     const w = Math.max(1, Math.round(width * dpr)), h = Math.max(1, Math.round(height * dpr));
     if (overlayCanvas.width !== w || overlayCanvas.height !== h) { overlayCanvas.width = w; overlayCanvas.height = h; }
-    overlayCtx.setTransform(dpr, 0, 0, dpr, 0, 0); overlayCtx.clearRect(0, 0, width, height);
+    overlayCtx.setTransform(dpr, 0, 0, dpr, 0, 0); fx.drawOverlay(dt, drawExtra);
     if (flash > 0) { overlayCtx.globalAlpha = flash; overlayCtx.fillStyle = "#fff"; overlayCtx.fillRect(0, 0, overlayCanvas.clientWidth, overlayCanvas.clientHeight); overlayCtx.globalAlpha = 1; }
     if (fedUntil > elapsed) {
       const w = overlayCanvas.clientWidth, h = overlayCanvas.clientHeight, t = (fedUntil - elapsed) / 1.5;
@@ -343,20 +374,23 @@
     }
   };
   const enter = (ctx) => {
-    ({ renderer, game, world, go } = ctx); disposed = false; arrivalTime = gait = glance = 0; glanceTime = 3; lastCue = -1; avatarView = true; phase = "entrance"; progress = elapsed = flash = boatAngle = rideAngle = 0;
+    ({ renderer, game, world, go } = ctx); disposed = false; exiting = false; arrivalTime = gait = glance = 0; glanceTime = 3; lastCue = -1; avatarView = true; phase = "entrance"; progress = elapsed = flash = boatAngle = rideAngle = 0;
     tokens = 20; bread = tomatoes = bananas = 0; boatTrip.angle = 0; trainTrip.angle = START; boatTrip.wait = trainTrip.wait = WAIT; rideYaw = ridePitch = 0; lastContext = "init"; throwAt = -1; fedUntil = 0; priceTimer = 0; savedRevision = -1; lastHeight = skyPulse = 0; lastPrice = lastBag = lastPrompt = "";
     root = createNode(); camera = createCamera({ fov: 55, near: 0.1, far: 220 }); land = M.build(); land.root.visible = false; addChild(root, land.root);
     portal = createNode({ geometry: M.portalGeometry(), position: { x: 0, y: 1.6, z: 0 } }); addChild(root, portal);
-    avatar = BL.models.caveman(BL.contributors.traitsFor(world.pilot || "YellowBrokeIt"));
-    world.pilot = avatar.traits.name;
-    avatar.baseY = avatar.root.position.y;
-    avatar.root.rotation.y = Math.PI; addChild(root, avatar.root);
+    const playerName = world.pilot || "YellowBrokeIt";
+    world.pilot = playerName;
+    playerWorld = { level: 0, weapons: new Map(), magazine: { owned: false, count: 0, ammo: 0, carrier: null } };
     overlayCanvas = ctx.overlay; overlayCtx = overlayCanvas.getContext("2d");
     hud = BL.hud.create({ roster: BL.contributors.roster, catalog: BL.models.SWAG, tierColors: BL.models.TIER_COLORS, renderIcon: BL.hud.renderIcon, lootEnabled: false });
     oldSheetHidden = hud.el.sheet.hidden; oldSheetOpen = hud.el.sheet.dataset.open; hud.el.sheet.hidden = true; hud.el.sheet.dataset.open = "false"; hud.setJetpack(false, false, 1); hud.el.act.hidden = true;
     const hooks = {}; input = BL.interact.create({ canvas: ctx.canvas, renderer, camera, hooks });
-    pilot = BL.pilot.create({ renderer, canvas: ctx.canvas, camera, hud, presets: { home: VIEW, lookout: { yaw: 0.38, pitch: 0.18, dist: 95, target: { x: 0, y: -4, z: 0 } } }, landing: "home", pitch: [-0.5, 1.2], dist: [3, 95], follow: { y: 1, min: 3, max: 8, pitch: [0.1, 0.8] }, fly: { speed: 5, perDist: 0.1, climb: 4, yMax: 50 }, clampTarget, clampCamera, coarse: matchMedia("(pointer: coarse)").matches, onFreeAction: act, close: { eyeHeight: 1.7, eyeRatio: 0.8, eyeForward: 0, maxStep: 0.6, pitch: [-1.2, 1.2], orbitDist: 12, trailingDist: 5, groundAt: () => 0 } });
-    for (const key of Object.keys(pilot.hooks)) { const hook = pilot.hooks[key]; hooks[key] = (...args) => { if (phase === "land" && !tv.isOpen) return hook(...args);
+    pilot = BL.pilot.create({ renderer, canvas: ctx.canvas, camera, hud, presets: { home: VIEW, lookout: { yaw: 0.38, pitch: 0.18, dist: 95, target: { x: 0, y: -4, z: 0 } } }, landing: "home", pitch: [-0.5, 1.2], dist: [3, 95], follow: { y: 1, min: 3, max: 8, pitch: [0.1, 0.8] }, fly: { speed: 5, perDist: 0.1, climb: 4, yMax: 50 }, clampTarget, clampCamera, coarse: matchMedia("(pointer: coarse)").matches, onFreeAction: act, onPlayerAction: playerAction, reloadAnywhere: true, close: { eyeHeight: 1.7, eyeRatio: 0.8, eyeForward: 0, maxStep: 0.6, pitch: [-1.2, 1.2], orbitDist: 12, trailingDist: 5, groundAt: () => 0 } });
+    fx = BL.fx.create({ root, renderer, camera, overlay: ctx.overlay, hud, tickerAt: { x: 0, y: 2, z: 26 } });
+    const shared = { root, input, hud, game, world: playerWorld, playerName, fx, viewYaw: 0, groundAt: () => 0, walkable, reloadPolicy, onWeaponImpact: weaponImpact };
+    crew = BL.crew.create(shared); shared.crew = crew; pilot.bind(shared);
+    avatar = crew.cavemen.get(playerName); crew.collectMagazine(avatar); avatar.root.rotation.y = Math.PI;
+    for (const key of Object.keys(pilot.hooks)) { const hook = pilot.hooks[key]; hooks[key] = (...args) => { if (cameraEnabled() && key !== "onDoubleTap") return hook(...args);
       if ((phase === "boat" || phase === "coaster") && key === "onOrbit") { rideYaw = clamp(rideYaw - args[0] * 0.004, -0.65, 0.65); ridePitch = clamp(ridePitch - args[1] * 0.0035, -0.3, 0.3); } }; }
     Object.assign(hooks, { onTap, onHover: (hit, p) => { if (phase === "land" && hit) hud.tooltip.show(hit.owner.label, p.x, p.y); else hud.tooltip.hide(); } });
     hud.onAction(action); hud.onPreset((name) => { if (phase === "land") pilot.goPreset(name); });
@@ -372,6 +406,7 @@
       const contributor = BL.contributors.roster[i % BL.contributors.roster.length], cave = BL.models.caveman(BL.contributors.traitsFor(contributor.name));
       cave.baseY = cave.root.position.y; cave.floorY = i === 5 ? 1.1 : 0; cave.root.position.x = i === 5 ? -18 : -24 + i * 2.2; cave.root.position.z = i === 5 ? -15.6 : -6; cave.heading = i === 5 ? 0 : Math.PI; cave.root.rotation.y = cave.heading; cave.hit = 0;
       addChild(land.root, cave.root); visitors.push(cave); input.add(cave.root, { kind: "visitor", cave, label: `${contributor.name} · tomato target` }, { radius: 1 }); targets.push(cave.root);
+      for (const key of ["head", "torso", "armL", "armR", "legL", "legR"]) { const node = cave.parts[key]; input.add(node, { kind: "visitor", cave, label: `${contributor.name} · tomato target` }); targets.push(node); }
     }
     for (let i = 0; i < 12; i++) { const node = M.block(land.root, "#ef4256", 0, 0, 0, 0.28, 0.28, 0.28); node.visible = false; shots.push({ node, life: 0, vx: 0, vy: 0, vz: 0, splat: false }); }
     register(land.tv, "tv", "DSB TV - walk closer to open");
@@ -382,17 +417,18 @@
     document.getElementById("dsb-shop").hidden = true; document.getElementById("dsb-live").setAttribute("aria-pressed", "true"); soundUi();
     document.body.classList.add("dsb-active", "dsb-entry"); document.addEventListener("visibilitychange", onVisibility); bagText();
     dsbScene.renderOpts = DARK;
-    Object.assign(dsbScene, { root, camera, input, debug: { camera, pilot, controls: pilot.controls, hud, audio, dsb: { get phase() { return phase; }, get arrivalTime() { return arrivalTime; }, get glance() { return glance; }, avatar, get progress() { return progress; }, get inventory() { return { tokens, bread, bananas, tomatoes }; }, get shots() { return shots.filter((s) => s.life > 0).length; }, land, visitors, data, tv, openTv, boatTrip, trainTrip, get rideLook() { return { yaw: rideYaw, pitch: ridePitch }; }, railY, board, buy, eat, throwTomato, stopRide, get fired() { return Array.from(audio.fired); } } } });
+    Object.assign(dsbScene, { root, camera, input, debug: { camera, pilot, crew, controls: pilot.controls, hud, audio, dsb: { get phase() { return phase; }, get arrivalTime() { return arrivalTime; }, get glance() { return glance; }, avatar, get progress() { return progress; }, get inventory() { return { tokens, bread, bananas, tomatoes }; }, get shots() { return shots.filter((s) => s.life > 0).length; }, land, visitors, data, tv, openTv, boatTrip, trainTrip, get rideLook() { return { yaw: rideYaw, pitch: ridePitch }; }, railY, board, buy, eat, throwTomato, stopRide, get fired() { return Array.from(audio.fired); } } } });
     syncContext(); update(0, 0);
   };
   const leave = () => {
     disposed = true; document.removeEventListener("visibilitychange", onVisibility);
-    proximity.hidden = true; tv.dispose(); audio.dispose(); data.dispose(); pilot.dispose();
+    proximity.hidden = true; tv.dispose(); audio.dispose(); data.dispose(); pilot.dispose(); crew.dispose(); fx.dispose();
     for (const node of targets) input.remove(node); targets.length = 0;
     const count = input.targetCount; input.dispose(); hud.el.sheet.hidden = oldSheetHidden; hud.el.sheet.dataset.open = oldSheetOpen; hud.dispose();
     while (root.children.length) removeChild(root, root.children[root.children.length - 1]);
     visitors.length = shots.length = rails.length = ties.length = candles.length = 0;
     document.body.classList.remove("dsb-active", "dsb-entry", "dsb-arrival");
+    crew = fx = playerWorld = null;
     avatar = land = portal = camera = input = pilot = hud = renderer = world = game = go = audio = data = tv = panel = readout = bag = prompt = overlayCanvas = overlayCtx = proximity = null;
     dsbScene.input = dsbScene.debug = null; return { targets: count };
   };

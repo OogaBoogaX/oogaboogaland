@@ -27139,6 +27139,67 @@ task("dsb ambience", () => withPage("dsb ambience", hubPage(dist, "scene=dsb"), 
   } finally { await b.evaluate(`AudioContext.prototype.createBufferSource = __ambientProbe.buffer; AudioContext.prototype.createOscillator = __ambientProbe.oscillator; delete window.__ambientProbe;`); }
 }));
 
+task("dsb shared player", () => withPage("dsb shared player", hubPage(dist), async (b) => {
+  await b.send("Emulation.setEmulatedMedia", { features: [{ name: "prefers-reduced-motion", value: "reduce" }] });
+  await b.evaluate(`(() => {
+    const B = __ooga, c = B.cavemen.get("genXbtc"), m = B.mouths.find(m => m.id === "c10");
+    B.pilot.goPreset("dsb"); B.advance(1.2); c.override = "working"; B.crew.refreshStates(true); B.pilot.possess(c);
+    B.crew.configureWeapon(c, 2, 7); B.crew.collectMagazine(c); c.weapon.spareAmmo[0] = 11;
+    window.__hubAmmo = { ammo: c.weapon.ammo, spare: c.weapon.spareAmmo.join(), level: B.level };
+    B.crew.relocatePlayer({ x: m.x + Math.sin(m.ry) * 1.5, y: m.floorY, z: m.z + Math.cos(m.ry) * 1.5 }, m.ry + Math.PI);
+    B.pilot.orbit.yaw = B.pilot.orbit.tYaw = m.ry; B.pilot.orbit.pitch = B.pilot.orbit.tPitch = 0; B.advance(0.2);
+  })()`);
+  await b.send("Input.dispatchKeyEvent", { type: "keyDown", key: "w", code: "KeyW" });
+  let entryTimeout;
+  const entered = await Promise.race([untilPage(b, 'B.scene === "dsb" && !B.transitioning', 15000), new Promise((_, reject) => { entryTimeout = setTimeout(() => reject(Error("DSB entry: " + b.logs.join(" | "))), 18000); })]).finally(() => clearTimeout(entryTimeout));
+  await b.send("Input.dispatchKeyEvent", { type: "keyUp", key: "w", code: "KeyW" });
+  if (!entered) throw Error("DSB entry failed");
+  await b.key("m"); await untilPage(b, 'B.audio.ready', 10000);
+  await b.evaluate(`window.dispatchEvent(new KeyboardEvent("keydown", { key: "w" })); __ooga.advance(__ooga.audio.duration + 2, 0.1); window.dispatchEvent(new KeyboardEvent("keyup", { key: "w" }));`);
+  if (!await untilPage(b, 'B.dsb.phase === "land"', 5000)) throw Error("DSB passage did not finish");
+  record("dsb shared player: canonical selected actor is possessed with independent ammunition", await b.evaluate(`__ooga.dsb.phase === "land" && __ooga.pilot.player === __ooga.dsb.avatar && __ooga.pilot.player.traits.name === "genXbtc" && __ooga.pilot.player.weapon.ammo === BL.crew.AMMO_MAX && __ooga.pilot.player.headOpen === BL.models.caveman(BL.contributors.traitsFor("genXbtc")).headOpen`));
+  const move = await b.evaluate(`(() => { const c = __ooga.pilot.player, z = c.root.position.z; window.dispatchEvent(new KeyboardEvent("keydown", { key: "w" })); __ooga.advance(0.3); window.dispatchEvent(new KeyboardEvent("keyup", { key: "w" })); return Math.abs(c.root.position.z - z); })()`);
+  record("dsb shared player: shared walking moves the actor", move > 0.2, String(move));
+  await b.key("2"); await b.evaluate("__ooga.pilot.enterClose(); __ooga.advance(0.4)"); await b.key("v");
+  const fired = await b.evaluate(`(() => { const c = __ooga.pilot.player; __ooga.advance(0.12); return { equipped: c.weapon.equipped, shots: c.weapon.shotsFired, ammo: c.weapon.ammo, gun: c.parts.gun.visible, aiming: __ooga.pilot.aiming, recoil: c.weapon.recoil }; })()`);
+  record("dsb shared player: AK fires with shared gun pose and ammunition", fired.equipped && fired.shots > 0 && fired.ammo < 30 && fired.gun && fired.aiming && fired.recoil > 0, JSON.stringify(fired));
+  await b.key("r"); await b.evaluate('__ooga.advance(3)');
+  record("dsb shared player: local reload restores ammunition", await b.evaluate('__ooga.pilot.player.weapon.ammo === BL.crew.AMMO_MAX'));
+  await b.key(" ");
+  record("dsb shared player: Space jumps away from interactions", await b.evaluate('__ooga.advance(0.1); __ooga.pilot.player.hop > 0'));
+  await b.evaluate('__ooga.advance(1)');
+  const place = (x, z) => b.evaluate(`__ooga.pilot.navigate({ yaw: 0, pitch: 0.2, dist: 7, target: { x: ${x}, y: 1.7, z: ${z} }, position: { x: ${x}, y: 0, z: ${z} } }); __ooga.advance(0.1);`);
+  await place(-20, 17);
+  await b.evaluate('__ooga.dsb.buy("tomato"); __ooga.dsb.buy("banana")');
+  await b.key("t"); await b.key("b");
+  record("dsb shared player: tomatoes and snacks remain separate", await b.evaluate('__ooga.dsb.inventory.tomatoes === 0 && __ooga.dsb.inventory.bananas === 0 && __ooga.dsb.shots === 1'));
+  await b.evaluate(`document.querySelector('[data-action="dsb-context"]').click()`);
+  await b.key("v");
+  record("dsb shared player: shop suspends weapons", await b.evaluate('!document.getElementById("dsb-shop").hidden && !__ooga.dsb.avatar.weapon.triggerHeld'));
+  await b.evaluate(`document.querySelector('[data-action="dsb-close-shop"]').click()`);
+  await place(0, 33);
+  await b.evaluate('__ooga.crew.setWeaponTrigger(true); __ooga.dsb.boatTrip.wait = 8; __ooga.dsb.board("boat")');
+  const ride = await b.evaluate(`(() => { const w = __ooga.dsb.avatar.weapon, shots = w.shotsFired; __ooga.advance(0.5); return __ooga.dsb.phase === "boat" && !w.triggerHeld && !w.burstRemaining && w.shotsFired === shots; })()`);
+  record("dsb shared player: boarding suspends firing", ride);
+  await b.evaluate('__ooga.dsb.stopRide()');
+  await place(7, 24);
+  await b.evaluate('__ooga.dsb.trainTrip.wait = 8; __ooga.dsb.board("coaster"); __ooga.advance(0.2)');
+  record("dsb shared player: coaster keeps its passenger camera", await b.evaluate('__ooga.dsb.phase === "coaster" && !__ooga.dsb.avatar.weapon.triggerHeld'));
+  await b.evaluate('__ooga.dsb.stopRide()');
+  await b.evaluate(`document.querySelector('[data-action="dsb-lookout"]').click(); __ooga.advance(0.4)`);
+  record("dsb shared player: lookout remains a free camera", await b.evaluate('__ooga.pilot.player === null && __ooga.camera.position.y > 5'));
+  await b.evaluate(`document.querySelector('[data-scene="dsb"] [data-action="reset-view"]').click(); __ooga.advance(0.4)`);
+  record("dsb shared player: leaving lookout restores the same playable actor", await b.evaluate('__ooga.pilot.player === __ooga.dsb.avatar'));
+  await place(-10, 17); await b.evaluate('__ooga.dsb.openTv()');
+  await b.key("v");
+  record("dsb shared player: TV opens with weapons suspended", await b.evaluate('__ooga.dsb.tv.isOpen && !__ooga.dsb.avatar.weapon.triggerHeld'));
+  await b.evaluate('document.getElementById("dsb-tv-close").click(); __ooga.advance(0.1)');
+  await place(-7, 30.5); await b.evaluate('document.getElementById("dsb-context").click()');
+  await untilPage(b, 'B.scene === "hub" && !B.transitioning', 15000);
+  const back = await b.evaluate(`({ name: __ooga.pilot.player?.traits.name, ammo: __ooga.pilot.player?.weapon.ammo, spare: __ooga.pilot.player?.weapon.spareAmmo.join(), original: __hubAmmo })`);
+  record("dsb shared player: return restores identity and leaves hub ammunition untouched", back.name === "genXbtc" && back.ammo === back.original.ammo && back.spare === back.original.spare, JSON.stringify(back));
+}));
+
 task("dsb character continuity", () => withPage("dsb character continuity", hubPage(dist), async (b) => {
   for (const name of ["YellowBrokeIt", "genXbtc"]) {
     await b.evaluate('__ooga.pilot.goPreset("dsb"); __ooga.advance(1.2)');

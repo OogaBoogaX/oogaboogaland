@@ -44,6 +44,7 @@
     el.addEventListener("pointermove", onMove);
     el.addEventListener("pointerup", onUp);
     el.addEventListener("pointercancel", onUp);
+    s.reset = () => onUp({ pointerId: s.id });
     s.dispose = () => {
       el.removeEventListener("pointerdown", onDown);
       el.removeEventListener("pointermove", onMove);
@@ -158,7 +159,8 @@
       boostPointer = null;
       boostClick = false;
     };
-    return { read, axes, clearPointer, dispose };
+    const reset = () => { onBlur(); if (moveStick) moveStick.reset(); if (lookStick) lookStick.reset(); };
+    return { read, axes, clearPointer, reset, dispose };
   };
   BL.controls = { create };
 })();
