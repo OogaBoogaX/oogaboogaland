@@ -26852,6 +26852,52 @@ const dsbExit = async (b) => {
   await b.evaluate(`__ooga.pilot.navigate({ yaw: 0, pitch: 0, dist: 6, target: { x: -7, y: 1.7, z: 30.5 }, position: { x: -7, y: 0, z: 30.5 } }); __ooga.advance(0.1); document.getElementById("dsb-context").click();`);
   await untilPage(b, 'B.scene === "hub" && !B.transitioning', 15000);
 };
+task("dsb entrance audio independence", async () => {
+  for (const ready of [false, true]) await withPage("dsb entrance " + (ready ? "audio enabled" : "audio blocked"), hubPage(dist, "scene=dsb"), async (b) => {
+    await b.send("Emulation.setEmulatedMedia", { features: [{ name: "prefers-reduced-motion", value: "reduce" }] });
+    if (ready) {
+      const p = await b.evaluate(`(() => { const r = document.getElementById("dsb-start-audio").getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; })()`);
+      await b.click(p.x, p.y);
+      record("dsb entrance: Enter with sound decodes audio", await untilPage(b, "B.audio.ready && B.audio.musicDuration > 0", 10000));
+    } else {
+      // Fault injection: decoding never becomes ready and playback never finishes.
+      await b.evaluate(`Object.defineProperty(__ooga.audio, "ready", { get: () => false });`);
+    }
+    const moved = await b.evaluate(`(() => {
+      const B = __ooga, before = B.dsb.progress;
+      window.dispatchEvent(new KeyboardEvent("keydown", { key: "w" }));
+      B.advance(B.audio.duration * 0.35, 0.05);
+      window.dispatchEvent(new KeyboardEvent("keyup", { key: "w" }));
+      return { before, after: B.dsb.progress, ready: B.audio.ready, cue: B.audio.cue };
+    })()`);
+    record("dsb entrance: forward movement with audio ready=" + ready, moved.after > moved.before + 0.3 && moved.ready === ready, JSON.stringify(moved));
+    if (ready) {
+      record("dsb entrance: normal voice playback starts", moved.cue >= 0);
+      await b.key("m"); record("dsb entrance: mute still works", await b.evaluate("__ooga.audio.muted"));
+      await b.key("m"); record("dsb entrance: unmute still works", await b.evaluate("!__ooga.audio.muted"));
+      await b.send("Emulation.setTouchEmulationEnabled", { enabled: true });
+      const p = await b.evaluate(`(() => { const el = document.getElementById("joy-move"); el.style.display = "block"; el.addEventListener("pointerdown", e => { window.__dsbStickPointer = e.pointerId; }, { once: true }); const r = el.getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + 8 }; })()`);
+      await b.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ x: p.x, y: p.y }] });
+      await b.send("Input.dispatchTouchEvent", { type: "touchMove", touchPoints: [{ x: p.x, y: p.y + 1 }] });
+      record("dsb entrance: touch stick feeds forward movement", await b.evaluate(`(() => { const B = __ooga, before = B.dsb.progress, y = B.controls.read().y; B.advance(0.2); return y > 0.5 && B.dsb.progress > before; })()`));
+      await b.evaluate(`document.getElementById("joy-move").dispatchEvent(new PointerEvent("lostpointercapture", { pointerId: 999 }));`);
+      record("dsb entrance: unrelated capture loss preserves active stick", await b.evaluate("__ooga.controls.read().y > 0.5"));
+      await b.evaluate(`document.getElementById("joy-move").releasePointerCapture(__dsbStickPointer);`);
+      await b.send("Input.dispatchTouchEvent", { type: "touchMove", touchPoints: [{ x: p.x, y: p.y + 2 }] });
+      record("dsb entrance: lost capture clears stick", await b.evaluate("__ooga.controls.read().y === 0"));
+      await b.send("Input.dispatchTouchEvent", { type: "touchCancel", touchPoints: [] });
+    }
+    const finished = await b.evaluate(`(() => {
+      const B = __ooga;
+      Object.defineProperty(B.audio, "pending", { get: () => true });
+      window.dispatchEvent(new KeyboardEvent("keydown", { key: "w" }));
+      B.advance(B.audio.duration + 1, 0.1);
+      window.dispatchEvent(new KeyboardEvent("keyup", { key: "w" }));
+      return { phase: B.dsb.phase, progress: B.dsb.progress, pending: B.audio.pending };
+    })()`);
+    record("dsb entrance: completes despite pending audio, ready=" + ready, finished.phase === "land" && finished.progress === 1 && finished.pending, JSON.stringify(finished));
+  });
+});
 for (const fallback of [false, true]) task("dsb gameplay " + (fallback ? "canvas2d" : "webgl2"), () => withPage("dsb gameplay " + (fallback ? "canvas2d" : "webgl2"), hubPage(dist, "scene=dsb" + (fallback ? "&canvas2d=1" : "")), async (b) => {
   const click = async (selector) => { const p = await b.evaluate(`(() => { const e = document.querySelector(${JSON.stringify(selector)}); e.scrollIntoView({ block: "center" }); const r = e.getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2, hits: e.contains(document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2)) }; })()`); if (!p.hits) throw Error("Blocked pointer: " + selector); await b.click(p.x, p.y); };
   const walkTo = async (x, z) => b.evaluate(`__ooga.pilot.navigate({ yaw: 0, pitch: 0.2, dist: 7, target: { x: ${x}, y: 1.7, z: ${z} }, position: { x: ${x}, y: 0, z: ${z} } }); __ooga.advance(0.15);`);

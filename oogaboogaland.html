@@ -5,7 +5,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta http-equiv="Content-Security-Policy"
-    content="default-src 'none'; script-src 'sha256-z8AnKkwipyhGiOgJ3TzVB+FJwnfwqiiQPzyQsp2Oxg8='; style-src 'sha256-Zkj+ZnWTvPYbxz7o43Qe0zv3Donf0NQWSCiWzvohWBI='; img-src 'self' data:; media-src https://stream.noderunnersradio.com; connect-src https://noderunnersradio.com https://mempool.space https://api.exchange.coinbase.com wss://ws-feed.exchange.coinbase.com; base-uri 'none'; form-action 'none'">
+    content="default-src 'none'; script-src 'sha256-IixIKBQkYNJqUr+/K9kY3tI3A/xqs72xRzp0j3RYx/Y='; style-src 'sha256-Zkj+ZnWTvPYbxz7o43Qe0zv3Donf0NQWSCiWzvohWBI='; img-src 'self' data:; media-src https://stream.noderunnersradio.com; connect-src https://noderunnersradio.com https://mempool.space https://api.exchange.coinbase.com wss://ws-feed.exchange.coinbase.com; base-uri 'none'; form-action 'none'">
   <meta name="referrer" content="no-referrer">
   <meta name="color-scheme" content="dark">
   <meta name="theme-color" content="#0a0a0b">
@@ -19868,12 +19868,14 @@ void main() {
     el.addEventListener("pointermove", onMove);
     el.addEventListener("pointerup", onUp);
     el.addEventListener("pointercancel", onUp);
+    el.addEventListener("lostpointercapture", onUp);
     s.reset = () => onUp({ pointerId: s.id });
     s.dispose = () => {
       el.removeEventListener("pointerdown", onDown);
       el.removeEventListener("pointermove", onMove);
       el.removeEventListener("pointerup", onUp);
       el.removeEventListener("pointercancel", onUp);
+      el.removeEventListener("lostpointercapture", onUp);
       onUp({ pointerId: s.id });
     };
     return s;
@@ -46425,6 +46427,8 @@ window.BL.dsbAudioData.music = "SUQzBAAAAAABAFRYWFgAAAASAAADbWFqb3JfYnJhbmQAZGFz
       }
     };
     window.addEventListener("pointerdown", gesture); window.addEventListener("keydown", gesture);
+    // Touch activation can arrive on release; ensure reuses the same audio graph.
+    window.addEventListener("pointerup", gesture); window.addEventListener("touchend", gesture);
     // A click through the hub has already activated audio; direct visits wait for input.
     ensure();
     return { update, gesture, fired, get radioVolume() { return radioVolume; }, environment: (camera, boat, dt = 1 / 60) => {
@@ -46439,6 +46443,7 @@ window.BL.dsbAudioData.music = "SUQzBAAAAAABAFRYWFgAAAASAAADbWFqb3JfYnJhbmQAZGFz
       syncRadio(); return muted;
     }, dispose: () => {
       disposed = true; stopRadio(); radio = null; window.removeEventListener("pointerdown", gesture); window.removeEventListener("keydown", gesture);
+      window.removeEventListener("pointerup", gesture); window.removeEventListener("touchend", gesture);
       if (voice) { voice.onended = null; voice.stop(); voice.disconnect(); } if (music) { music.stop(); music.disconnect(); }
       if (foot) { foot.stop(); foot.disconnect(); footGain.disconnect(); }
       if (ambience) { ambience.dispose(); ambience = null; }
@@ -46876,14 +46881,15 @@ window.BL.dsbAudioData.music = "SUQzBAAAAAABAFRYWFgAAAASAAADbWFqb3JfYnJhbmQAZGFz
     if (phase === "entrance") {
       const axes = pilot.controls.read(), previousProgress = progress;
       document.getElementById("dsb-start-audio").hidden = audio.ready || !window.AudioContext;
-      if (audio.ready || !window.AudioContext) progress = clamp(progress + axes.y * dt / audio.duration, 0, 1);
+      // Audio supplies the pacing, never permission to walk or finish the passage.
+      progress = clamp(progress + axes.y * dt / audio.duration, 0, 1);
       audio.update(progress, elapsed, progress !== previousProgress);
       if (audio.cue !== lastCue) { lastCue = audio.cue; glanceTime = 0; }
       glanceTime += dt; glance = (lastCue % 2 ? 1 : -1) * Math.sin(Math.PI * clamp(glanceTime / 2.2, 0, 1)) * 0.16;
       avatar.root.position.z = 25 - progress * 24.2; poseAvatar(progress !== previousProgress, dt);
       camera.position.x = Math.sin(glance) * 4; camera.position.y = 2.8; camera.position.z = avatar.root.position.z + Math.cos(glance) * 4;
       camera.target.x = -Math.sin(glance) * 2; camera.target.y = 1.4; camera.target.z = avatar.root.position.z - 4;
-      if (progress >= 1 && !audio.pending) reveal();
+      if (progress >= 1) reveal();
       return;
     }
     audio.update(1, elapsed); flash = Math.max(0, flash - dt * 1.5);

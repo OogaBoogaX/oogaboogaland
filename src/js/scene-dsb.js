@@ -291,14 +291,15 @@
     if (phase === "entrance") {
       const axes = pilot.controls.read(), previousProgress = progress;
       document.getElementById("dsb-start-audio").hidden = audio.ready || !window.AudioContext;
-      if (audio.ready || !window.AudioContext) progress = clamp(progress + axes.y * dt / audio.duration, 0, 1);
+      // Audio supplies the pacing, never permission to walk or finish the passage.
+      progress = clamp(progress + axes.y * dt / audio.duration, 0, 1);
       audio.update(progress, elapsed, progress !== previousProgress);
       if (audio.cue !== lastCue) { lastCue = audio.cue; glanceTime = 0; }
       glanceTime += dt; glance = (lastCue % 2 ? 1 : -1) * Math.sin(Math.PI * clamp(glanceTime / 2.2, 0, 1)) * 0.16;
       avatar.root.position.z = 25 - progress * 24.2; poseAvatar(progress !== previousProgress, dt);
       camera.position.x = Math.sin(glance) * 4; camera.position.y = 2.8; camera.position.z = avatar.root.position.z + Math.cos(glance) * 4;
       camera.target.x = -Math.sin(glance) * 2; camera.target.y = 1.4; camera.target.z = avatar.root.position.z - 4;
-      if (progress >= 1 && !audio.pending) reveal();
+      if (progress >= 1) reveal();
       return;
     }
     audio.update(1, elapsed); flash = Math.max(0, flash - dt * 1.5);

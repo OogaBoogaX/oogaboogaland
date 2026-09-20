@@ -176,6 +176,8 @@
       }
     };
     window.addEventListener("pointerdown", gesture); window.addEventListener("keydown", gesture);
+    // Touch activation can arrive on release; ensure reuses the same audio graph.
+    window.addEventListener("pointerup", gesture); window.addEventListener("touchend", gesture);
     // A click through the hub has already activated audio; direct visits wait for input.
     ensure();
     return { update, gesture, fired, get radioVolume() { return radioVolume; }, environment: (camera, boat, dt = 1 / 60) => {
@@ -190,6 +192,7 @@
       syncRadio(); return muted;
     }, dispose: () => {
       disposed = true; stopRadio(); radio = null; window.removeEventListener("pointerdown", gesture); window.removeEventListener("keydown", gesture);
+      window.removeEventListener("pointerup", gesture); window.removeEventListener("touchend", gesture);
       if (voice) { voice.onended = null; voice.stop(); voice.disconnect(); } if (music) { music.stop(); music.disconnect(); }
       if (foot) { foot.stop(); foot.disconnect(); footGain.disconnect(); }
       if (ambience) { ambience.dispose(); ambience = null; }
