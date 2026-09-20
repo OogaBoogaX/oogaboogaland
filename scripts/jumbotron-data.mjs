@@ -16,9 +16,13 @@ const text = /^https?:/.test(source)
   ? await (await fetch(source)).text()
   : readFileSync(source, "utf8");
 const stats = JSON.parse(text);
-if (stats?.meta?.schema_version !== 2) {
-  console.error(`unexpected schema_version: ${stats?.meta?.schema_version}`);
-  process.exit(1);
+// Only an org-wide v2 snapshot carries what this bake needs. While the worker
+// still answers with a v1 single-repo payload, keep the committed bake instead
+// of failing the deploy: the page paints from that file and oogatron-live.js
+// refreshes the board at runtime.
+if (stats?.meta?.schema_version !== 2 || typeof stats.meta.org !== "string" || !Array.isArray(stats.repos)) {
+  console.warn(`keeping the committed bake: expected an org-wide v2 snapshot, got schema_version ${stats?.meta?.schema_version}`);
+  process.exit(0);
 }
 
 // Ship public handles and activity only, never profile names or metadata.

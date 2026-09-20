@@ -5,7 +5,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta http-equiv="Content-Security-Policy"
-    content="default-src 'none'; script-src 'sha256-b7OHjKSl5K6dzgZVpc2Puv0pQoKWB28GOazkURR3YfU='; style-src 'sha256-xywsk3K6PHIC63pNc3iDIeJG+DX3gaGAWMnt8NGcnak='; img-src 'self' data:; connect-src https: wss:; base-uri 'none'; form-action 'none'">
+    content="default-src 'none'; script-src 'sha256-FBnf+l3q/MPoTmJEU+yb6ai0fYgjP/mBBFWM2ilt3d8='; style-src 'sha256-bclWwM2tAxbulAie13gw3rEoe/R/HSL3G4MpUtj7asQ='; img-src 'self' data:; connect-src https: wss:; base-uri 'none'; form-action 'none'">
   <meta name="referrer" content="no-referrer">
   <meta name="color-scheme" content="dark">
   <meta name="theme-color" content="#0a0a0b">
@@ -442,11 +442,6 @@ select {
 .presets [data-action="mute"][aria-pressed="true"] {
   color: var(--muted);
   text-decoration: line-through;
-}
-
-.presets [data-action="flyby"][aria-pressed="true"] {
-  color: var(--accent);
-  background: linear-gradient(#b8844a, var(--plank));
 }
 
 .presets .leave:hover,
@@ -1892,6 +1887,32 @@ select {
   color: var(--paper);
   font-size: 11px;
   text-shadow: 0 1px 0 rgba(0, 0, 0, 0.6);
+}
+
+/* The prompt is read and copied, so it takes the width a desktop can spare. */
+#recipe {
+  width: min(620px, calc(100vw - 32px));
+}
+
+.recipe {
+  max-height: min(46vh, 420px);
+  margin: 10px 0 0;
+  padding: 10px 12px;
+  overflow: auto;
+  background: var(--tablet);
+  border: 2px solid var(--stone-dk);
+  border-radius: 9px 7px 10px 8px;
+  box-shadow: var(--tablet-shadow);
+  color: var(--paper);
+  font-family: ui-monospace, Menlo, Consolas, monospace;
+  font-size: 10.5px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  overscroll-behavior: contain;
+}
+
+.recipe-actions {
+  grid-template-columns: 1fr;
 }
 
 .race-results .actions {
@@ -4022,7 +4043,6 @@ body.orbit-dragging #tooltip {
         <button type="button" data-preset="mirror">MIRROR</button>
         <button type="button" data-preset="underground">HQ</button>
         <button type="button" data-preset="basement">BSMT</button>
-        <button type="button" data-action="flyby" id="flyby" aria-pressed="false" title="Fly over the island">FLYBY</button>
       </nav>
       <nav class="presets" aria-label="Camera views" data-scene="lab" hidden>
         <button type="button" data-preset="pile">PILE</button>
@@ -4473,6 +4493,25 @@ body.orbit-dragging #tooltip {
       </div>
       <p class="help">Payments are simulated in this build.<span id="crate-help" hidden> Crates drop at 1K, 5K, 21K and
           100K sats.</span></p>
+    </dialog>
+    <dialog class="modal" id="recipe" aria-label="Add an Ooga">
+      <div class="panel-head">
+        <h2><span data-sign>Add an Ooga</span></h2>
+        <button type="button" class="link" data-action="recipe-close">Close</button>
+      </div>
+      <p class="help">2140data hands you the prompt. Paste it to your coding agent.</p>
+      <pre class="recipe" id="recipe-text">Add an Ooga to Ooga Booga Land. Create one new file, src/characters/&lt;handle&gt;.js, and change nothing else.
+
+It is a plain IIFE (const BL = window.BL;) calling BL.characters.add({ handle, joined, lastCommit, github, look, voice, dress }). joined and lastCommit are Unix seconds; joined orders the roster.
+
+look overrides the hashed skin, hair, fur and height and carries the flags build:"slim", bald, hairless, cleanShaven, noBrow, wideEyes, noPupils, face:"nose"|"smirk"|"beard"|"none", eyeColor with eyeGlow, and hatY in sixteenths of height. voice is { poke, idle: [...] }.
+
+dress hooks build the voxels, each called with the kit k (h, u, rand, P, color(hex), jit, vg, root, parts, eyeCells): torso(k, v), club(k), gear(k), skull(k, v), crown(k, v), eyes(k, v), mark(k, v), hatY(k), headgear(k), extras(k). The head is a 7x6x6 block with the eyes at z=5 and the brow at y=4. Keep accessory builders and their caches in the file, and draw from k.rand in build order.
+
+Then run npm run build and ONLY=characters node test/run.mjs.</pre>
+      <div class="actions recipe-actions">
+        <button type="button" data-action="recipe-copy">Copy prompt</button>
+      </div>
     </dialog>
     <div class="bottom-hud">
       <button type="button" class="act" id="act" data-action="act" hidden>JUMP!</button>
@@ -10950,6 +10989,8 @@ void main() {
   //   crown(k, v)  hats and hair over the head    eyes(k, v)   replaces the eyes
   //   mark(k, v)   face paint after the pupils    hatY(k)      where swag hats sit
   //   headgear(k)  nodes on the head              extras(k)    nodes on the root, last
+  //   tint(k, palette)  a second colourway: return an alternate palette and every
+  //                     voxel part is baked again under it, paired in `tint`
   // `look` flags read here: slim, bald, cleanShaven, wideEyes, hairless, noBrow, noPupils,
   // face ("nose" | "smirk" | "beard" | "none"), eyeColor, eyeGlow, hatY.
   const buildCaveman = (traits) => {
@@ -10996,7 +11037,14 @@ void main() {
         if (v.get(nx, y, z) === P.fur) v.set(nx, y, z, P.spot);
       }
     };
-    const vg = (v, origin, emissive) => voxelGeometry(v, { unit: u, palette, origin, emissive });
+    // Each voxel map is kept with what it was baked from, so a second colourway
+    // can bake the same maps again under another palette.
+    const bakes = [];
+    const vg = (v, origin, emissive) => {
+      const geo = voxelGeometry(v, { unit: u, palette, origin, emissive });
+      bakes.push({ v, origin, emissive, geo });
+      return geo;
+    };
     const parts = {};
     const legH = 5 * u;
     const root = createNode({ position: { x: 0, y: legH, z: 0 } });
@@ -11174,7 +11222,25 @@ void main() {
     if (dress.headgear) dress.headgear(k);
     addChild(root, parts.legL, parts.legR, parts.torso, parts.armL, parts.armR, parts.head);
     if (dress.extras) dress.extras(k);
-    return { root, parts, traits, headOffset: 1.1 * h, headOpen, headClosed, skins, clubRest, clubCarry, gunHeadBounds: BL.scene.boundsOf(headOpen) };
+    // A second colourway bakes every voxel part still in use under the alternate
+    // palette and pairs each geometry with its twin both ways, so swapping a
+    // clone's geometry twice returns it to the colour it was built in.
+    let tint = null;
+    if (dress.tint) {
+      const alt = dress.tint(k, palette), live = new Set([headClosed]);
+      const visit = (node) => {
+        if (node.geometry) live.add(node.geometry);
+        for (const child of node.children) visit(child);
+      };
+      visit(root);
+      tint = new Map();
+      for (const bake of bakes) {
+        if (!live.has(bake.geo) || tint.has(bake.geo)) continue;
+        const twin = voxelGeometry(bake.v, { unit: u, palette: alt, origin: bake.origin, emissive: bake.emissive });
+        tint.set(bake.geo, twin).set(twin, bake.geo);
+      }
+    }
+    return { root, parts, traits, headOffset: 1.1 * h, headOpen, headClosed, skins, clubRest, clubCarry, tint, gunHeadBounds: BL.scene.boundsOf(headOpen) };
   };
   // Traits hash from the handle, so one handle always builds the same voxels.
   // Callers get fresh nodes over shared geometry: one build per contributor, GPU records survive a scene swap.
@@ -11195,7 +11261,7 @@ void main() {
       parts[key] = Array.isArray(part) ? part.map((node) => copies.get(node)) : copies.get(part);
     }
     const skins = { club: { ...template.skins.club }, gun: { ...template.skins.gun } };
-    return { root, parts, traits, headOffset: template.headOffset, headOpen: template.headOpen, headClosed: template.headClosed, skins, clubRest: template.clubRest, clubCarry: template.clubCarry, gunHeadBounds: template.gunHeadBounds };
+    return { root, parts, traits, headOffset: template.headOffset, headOpen: template.headOpen, headClosed: template.headClosed, skins, clubRest: template.clubRest, clubCarry: template.clubCarry, tint: template.tint, gunHeadBounds: template.gunHeadBounds };
   };
   // A real die: opposite faces sum to seven.
   const die = ({ size = 0.3 } = {}) => {
@@ -18297,9 +18363,9 @@ void main() {
   const slots = [
     slot("c11", 11, "lab", "open", "EntropyLab", "oogaboogax/entropylab"),
     slot("c10", 10),
-    slot("c9", 9, "race", "open", "Ooga Rally"),
+    slot("c9", 9, "race", "open", "Ooga Rally", "oogaboogax/oogaboogaland"),
     slot("c730", 7.5, null, "headquarters", "Headquarters"),
-    slot("c1", 1, null, "mirror", "Ooga Booga Land"),
+    slot("c1", 1, null, "mirror", "Ooga Booga Land", "oogaboogax/oogaboogaland"),
     slot("c2", 2),
     slot("c3", 3),
     slot("c5", 5, null, "headquarters", "Headquarters")
@@ -18332,6 +18398,262 @@ void main() {
 
 // ---- js/characters.gen.js ----
 // Generated by scripts/characters.mjs from src/characters/; do not edit.
+// ---- characters/2140data.js ----
+(() => {
+  "use strict";
+  const BL = window.BL;
+  const { makeVox, voxelGeometry } = BL.models;
+  const { createNode, addChild } = BL.scene;
+  const { hexToRgb } = BL.math;
+  // An android in plating with code running over its shell. Every plate colour is
+  // registered as a pair, red now and green later: tint() hands models.js the
+  // second palette and crew.js changes the whole body between the two.
+  const twins = new Map();
+  let slots = null;
+  const colors = (k) => {
+    if (slots) return slots;
+    const pair = (red, green) => {
+      const slot = k.color(red);
+      twins.set(slot, green);
+      return slot;
+    };
+    return slots = {
+      plate: pair("#d2382c", "#1f9a48"),
+      light: pair("#f2694f", "#3ad46e"),
+      dark: pair("#6e1811", "#0d5227"),
+      shell: pair("#c03429", "#1d8a45"),
+      glyph: pair("#dd6f57", "#3fb463"),
+      glyphDk: pair("#651610", "#0a3f1c"),
+      core: pair("#ffe6c8", "#d8ffe0"),
+      // The hardware stays the same colour in both states, and so do the eyes.
+      joint: k.color("#191b1e"),
+      // Hands, boots, neckpiece and spine are their own black and dark grey,
+      // the same in both colourways.
+      grip: k.color("#0f1013"),
+      gripLt: k.color("#3a3e45"),
+      wire: k.color("#f2b81c"),
+      laser: k.color("#ff2a1e")
+    };
+  };
+  const glowOf = (C) => ({ [C.core]: 1, [C.glyph]: 0.22, [C.laser]: 1, [C.light]: 0.2 });
+  // Code runs over the shell as it does on the Agent: every third column carries
+  // it, and inside a column each cell is lit, dark or a gap, so it breaks into
+  // symbols rather than stripes and reads differently from every side.
+  const code = (v, C) => {
+    for (const [key, c] of v.map) {
+      if (c !== C.shell) continue;
+      const [x, y, z] = key.split(",").map(Number);
+      if ((Math.imul(x + 64, 73856093) ^ Math.imul(z + 64, 19349663)) % 3) continue;
+      const cell = (Math.imul(x + 31, 83492791) ^ Math.imul(y + 17, 19349663) ^ Math.imul(z + 7, 73856093)) >>> 0;
+      if (cell % 4 === 3) continue;
+      v.map.set(key, cell % 4 ? C.glyph : C.glyphDk);
+    }
+  };
+  // Android limbs: a plate over each long bone, a dark joint at every hinge, a
+  // black hand or boot at the end and one lamp where the plating opens.
+  const legVox = (C, side) => {
+    const v = makeVox();
+    v.fill(0, 3, 4, 4, 0, 3, C.plate);
+    v.fill(0, 3, 3, 3, 0, 3, C.dark);
+    v.fill(0, 3, 2, 2, 1, 2, C.joint);
+    v.fill(0, 3, 0, 1, 0, 5, C.gripLt);
+    v.fill(0, 3, 0, 0, 0, 5, C.grip);
+    v.fill(0, 3, 1, 1, 4, 5, C.grip);
+    v.set(side < 0 ? 0 : 3, 4, 4, C.core);
+    return v;
+  };
+  const armVox = (C) => {
+    const v = makeVox();
+    v.fill(-1, 3, 9, 10, -1, 3, C.plate);
+    v.fill(-1, 3, 10, 10, -1, 3, C.light);
+    v.fill(-1, 3, 8, 8, -1, 3, C.joint);
+    v.fill(0, 2, 5, 7, 0, 2, C.plate);
+    v.fill(0, 2, 4, 4, 0, 2, C.joint);
+    v.fill(0, 2, 2, 3, 0, 2, C.plate);
+    v.fill(0, 2, 2, 3, 2, 2, C.dark);
+    v.fill(-1, 3, 0, 1, -1, 3, C.gripLt);
+    v.fill(-1, 3, 0, 0, -1, 3, C.grip);
+    v.set(1, 6, 2, C.core);
+    return v;
+  };
+  // A chest plate over an open waist: the machinery between them is the tell that
+  // this Ooga is a machine, and the core sits where a heart would.
+  const torsoVox = (C) => {
+    const v = makeVox();
+    v.fill(0, 8, 0, 7, 0, 5, C.plate);
+    v.fill(0, 8, 7, 7, 0, 5, C.gripLt);
+    v.fill(0, 8, 6, 6, 0, 5, C.light);
+    // The waist pinches in and shows its wiring front and back.
+    for (const y of [2, 3]) {
+      for (let z = 0; z <= 5; z++) {
+        v.del(0, y, z);
+        v.del(8, y, z);
+      }
+      v.fill(1, 7, y, y, 0, 5, C.joint);
+    }
+    for (const x of [2, 4, 6]) {
+      v.set(x, 2, 5, C.wire);
+      v.set(x, 3, 0, C.wire);
+    }
+    // Chest: a lit ring with the core at its centre, seams down the side plates.
+    v.fill(3, 5, 4, 5, 5, 5, C.light);
+    v.set(4, 5, 5, C.core);
+    v.set(4, 4, 5, C.dark);
+    v.fill(1, 1, 4, 5, 5, 5, C.dark);
+    v.fill(7, 7, 4, 5, 5, 5, C.dark);
+    // Pelvis under the waist: its top row carries the machinery on down, so the
+    // dark band reads taller than the pinch itself.
+    v.fill(0, 8, 1, 1, 0, 5, C.joint);
+    v.fill(3, 5, 4, 5, 0, 0, C.gripLt);
+    v.fill(1, 2, 4, 5, 0, 0, C.dark);
+    v.fill(6, 7, 4, 5, 0, 0, C.dark);
+    v.set(4, 6, 0, C.core);
+    return v;
+  };
+  const fingerVox = (C) => {
+    const v = makeVox();
+    v.set(0, 1, 4, C.grip);
+    v.set(2, 1, 4, C.grip);
+    return v;
+  };
+  // A bald human skull in plating: rounded crown, brow shelf, nose ridge and a
+  // narrow jaw, code over all of it, and the emitters set deep in shadow.
+  const skullVox = (v, C) => {
+    v.fill(0, 6, 0, 6, 0, 5, C.shell);
+    // A high cranium domed at the top, and a jaw narrowed under the cheekbones.
+    for (const x of [0, 6]) {
+      for (let z = 0; z <= 5; z++) {
+        v.del(x, 6, z);
+        v.del(x, 0, z);
+      }
+      for (const z of [0, 5]) v.del(x, 5, z);
+    }
+    for (const x of [1, 5]) {
+      v.del(x, 6, 0);
+      v.del(x, 6, 5);
+    }
+    for (const x of [1, 5]) {
+      v.del(x, 0, 0);
+      v.del(x, 0, 5);
+    }
+    // A brow shelf over the sockets, a nose ridge under it, cheekbones beside.
+    v.fill(1, 5, 4, 4, 6, 6, C.shell);
+    v.fill(3, 3, 2, 3, 6, 6, C.shell);
+    v.set(1, 2, 6, C.shell);
+    v.set(5, 2, 6, C.shell);
+    code(v, C);
+    // The features keep their own colour, so the code never swallows the face.
+    v.fill(0, 6, 3, 3, 5, 5, C.dark);
+    v.fill(2, 4, 1, 1, 5, 5, C.dark);
+    v.set(3, 1, 6, C.dark);
+    v.fill(1, 5, 6, 6, 2, 2, C.dark);
+    v.fill(2, 4, 4, 4, 6, 6, C.joint);
+  };
+  // Nunchaku: two matte sticks on a short chain, their own palette so the gold
+  // skin and the body's two colourways never fight over them.
+  const CHUK_PALETTE = [hexToRgb("#17181b"), hexToRgb("#767c85"), hexToRgb("#3b3f45")];
+  const GOLD_CHUK_PALETTE = [hexToRgb("#c79a2f"), hexToRgb("#e8c669"), hexToRgb("#8a6a18")];
+  const STICK = 0, COLLAR = 1, CHAIN = 2;
+  // The handle carries the chain stub, so the gap stays filled at every angle.
+  const handleVox = () => {
+    const v = makeVox();
+    v.fill(0, 1, 0, 6, 0, 1, STICK);
+    v.fill(0, 1, 1, 1, 0, 1, COLLAR);
+    v.fill(0, 1, 6, 6, 0, 1, COLLAR);
+    v.fill(0, 1, 7, 7, 0, 0, CHAIN);
+    v.fill(0, 1, 8, 8, 1, 1, CHAIN);
+    return v;
+  };
+  const freeVox = () => {
+    const v = makeVox();
+    v.fill(0, 1, 0, 4, 0, 1, STICK);
+    v.fill(0, 1, 0, 0, 0, 1, COLLAR);
+    return v;
+  };
+  // The pivot sits at the top of the handle's chain, in the club's own space.
+  const CHAIN_Y = 8;
+  // No pack on his back: the thrust comes out of his soles. One node at the
+  // feet holds both plumes, so crew.js lights and stretches them as it does any
+  // jetpack flame, and they keep their own colours through both colourways.
+  const FLAME_PALETTE = [hexToRgb("#ffb13b"), hexToRgb("#ffe9a8")];
+  const FLAME_GLOW = { 0: 1, 1: 1 };
+  const flameVox = () => {
+    const v = makeVox();
+    for (const x of [1, 6]) {
+      v.fill(x, x + 1, -2, -1, 0, 1, 1);
+      v.fill(x, x + 1, -3, -3, 0, 1, 0);
+      v.set(x, -4, 0, 0);
+      v.set(x + 1, -4, 1, 0);
+    }
+    return v;
+  };
+  BL.characters.add({
+    handle: "2140data",
+    joined: 1789933421,
+    lastCommit: 1789890221,
+    // nunchaku swings the free stick in crew.js, recipe answers a poke with the
+    // prompt for adding an Ooga, and the tint hook below drives the colourway.
+    // He co-built this island and keeps every project on it, so `maintainer`
+    // works him at all of them until the backend reports his commits.
+    look: {
+      maintainer: true, nunchaku: true, recipe: true,
+      bald: true, hairless: true, cleanShaven: true, noBrow: true, noPupils: true,
+      face: "none", hatY: 12, height: 1.12,
+      skin: "#c03429", hair: "#191b1e", fur: "#6e1811"
+    },
+    voice: {
+      poke: "Take the prompt. Build your own.",
+      idle: ["Blocks do not lie.", "Ooga, in binary.", "Twenty one million.", "I index the chain.", "I hunt Agents.", "The year is 2140."]
+    },
+    dress: {
+      // The whole body is plating, so every voxel part is rebuilt here rather
+      // than painted over the caveman underneath. k.vg keeps them in the tint.
+      gear(k) {
+        const C = colors(k), u = k.u, glow = glowOf(C);
+        k.parts.legL.geometry = k.vg(legVox(C, -1), { x: -2 * u, y: -5 * u, z: -2.5 * u }, glow);
+        k.parts.legR.geometry = k.vg(legVox(C, 1), { x: -2 * u, y: -5 * u, z: -2.5 * u }, glow);
+        k.parts.torso.geometry = k.vg(torsoVox(C), { x: -4.5 * u, y: 0, z: -3 * u }, glow);
+        const arm = k.vg(armVox(C), { x: -1.5 * u, y: -11 * u, z: -1.5 * u }, glow);
+        k.parts.armL.geometry = k.parts.armR.geometry = arm;
+        const fingers = k.vg(fingerVox(C), { x: -1.5 * u, y: -u, z: -1.5 * u });
+        k.parts.fingersL.geometry = k.parts.fingersR.geometry = fingers;
+      },
+      club: (k) => ({ voxels: handleVox(), palette: CHUK_PALETTE, goldPalette: GOLD_CHUK_PALETTE, rest: { x: 0.24, z: 0 }, carry: { x: 0.95, z: 0 } }),
+      skull(k, v) {
+        skullVox(v, colors(k));
+        return true;
+      },
+      eyes(k, v) {
+        const C = colors(k);
+        // One burning point each side, deep in its socket: the flare does the work.
+        for (const x of [1, 5]) {
+          v.set(x, 3, 5, C.laser);
+          v.set(x, 3, 6, C.laser);
+          k.eyeCells.push([x, 3]);
+        }
+        k.lid = C.joint;
+        k.headEmissive = glowOf(C);
+        return true;
+      },
+      // The second colourway: the same palette with every registered plate green.
+      tint: (k, palette) => palette.map((rgb, i) => twins.has(i) ? hexToRgb(twins.get(i)) : rgb),
+      extras(k) {
+        const u = k.u, origin = { x: -u, y: 0, z: -u };
+        const geometry = voxelGeometry(freeVox(), { unit: u, palette: CHUK_PALETTE, origin });
+        const gold = voxelGeometry(freeVox(), { unit: u, palette: GOLD_CHUK_PALETTE, origin });
+        k.parts.chuk = createNode({ position: { x: 0, y: CHAIN_Y * u, z: 0 }, geometry, skins: { default: geometry, gold } });
+        addChild(k.parts.club, k.parts.chuk);
+        // crew.js flies him exactly as it flies the world jetpack, and nothing
+        // takes his thrusters off. The mount sits on the sole plane, under both feet.
+        k.parts.jetpack = createNode({ position: { x: 0, y: -5 * u, z: 0 } });
+        k.parts.jetFlame = createNode({ geometry: voxelGeometry(flameVox(), { unit: u, palette: FLAME_PALETTE, origin: { x: -4.5 * u, y: 0, z: -u }, emissive: FLAME_GLOW }), visible: false });
+        addChild(k.parts.jetpack, k.parts.jetFlame);
+        addChild(k.root, k.parts.jetpack);
+      }
+    }
+  });
+})();
+
 // ---- characters/DrNeski.js ----
 (() => {
   "use strict";
@@ -18931,7 +19253,11 @@ void main() {
   // Historical EntropyLab activity; a backend can refresh it with applyActivity.
   // One entry per file in src/characters/, in join order.
   const characters = BL.characters.all();
-  const roster = characters.map(({ handle, lastCommit }) => ({ name: handle, lastCommitAt: lastCommit * 1e3, activity: new Map([[ENTROPY, lastCommit * 1e3]]) }));
+  // `look.maintainer` marks someone who keeps every project on the island: until
+  // the backend reports their commits they are busy in all of them, whatever the
+  // clock or the debug fixture says. Delete the flag from the character file once
+  // real activity arrives and the dates take over again.
+  const roster = characters.map(({ handle, lastCommit, look }) => ({ name: handle, lastCommitAt: lastCommit * 1e3, activity: new Map([[ENTROPY, lastCommit * 1e3]]), maintainer: !!(look && look.maintainer) }));
   // Filter construction, not visibility: solo worlds do no work for absent Oogas.
   // Keep the canonical roster intact for activity, likenesses and stable indices.
   const params = new URLSearchParams(location.search);
@@ -18949,16 +19275,19 @@ void main() {
   };
   // Callers use the canonical lowercase repository key, keeping frame queries allocation-free.
   const hasRecentActivity = (contributor, repo, at = Date.now()) => {
+    if (contributor.maintainer) return true;
     const seen = contributor.activity.get(repo);
     return seen > 0 && seen <= at && at - seen < WORK_WINDOW;
   };
   const stateFor = (contributor, at = Date.now()) => {
+    if (contributor.maintainer) return "working";
     const age = at - contributor.lastCommitAt;
     if (!Number.isFinite(age) || contributor.lastCommitAt <= 0 || age < 0) return "sleeping";
     if (age < WORK_WINDOW) return "working";
     return age < CHILL_WINDOW ? "chilling" : "sleeping";
   };
   const ageLabel = (contributor, at = Date.now()) => {
+    if (contributor.maintainer) return "building";
     if (!Number.isFinite(contributor.lastCommitAt) || contributor.lastCommitAt <= 0) return "no activity";
     const minutes = Math.max(0, Math.floor((at - contributor.lastCommitAt) / MINUTE));
     if (minutes < 60) return `${minutes}m ago`;
@@ -20057,7 +20386,7 @@ void main() {
       }
     };
   };
-  BL.interact = { create };
+  BL.interact = { create, DOUBLE_MS };
 })();
 
 // ---- js/controls.js ----
@@ -22753,7 +23082,6 @@ void main() {
       subtitle: $("subtitle"),
       actions: [...document.querySelectorAll("[data-action]")],
       act: $("act"),
-      flyby: $("flyby"),
       weapon: $("weapon-hud"),
       weaponToggle: $("weapon-hud"),
       weaponReadout: $("weapon-readout"),
@@ -22790,7 +23118,9 @@ void main() {
       message: $("message"),
       qr: $("qr"),
       qrUrl: $("qr-url"),
-      feed: $("feed")
+      feed: $("feed"),
+      recipe: $("recipe"),
+      recipeText: $("recipe-text")
     };
     el.lootTab.hidden = !lootEnabled;
     el.crateHelp.hidden = !lootEnabled;
@@ -22803,7 +23133,7 @@ void main() {
       target.addEventListener(type, fn, opts);
       listeners.push(() => target.removeEventListener(type, fn, opts));
     };
-    let toastTimer = 0, toastHideTimer = 0, hintTimer = 0, hintHideTimer = 0;
+    let toastTimer = 0, toastHideTimer = 0, hintTimer = 0, hintHideTimer = 0, copyTimer = 0;
     const rosterRows = new Map();
     const orderedRoster = [...roster].sort((a, b) => b.lastCommitAt - a.lastCommitAt);
     for (let rosterIndex = 0; rosterIndex < orderedRoster.length; rosterIndex++) {
@@ -23078,10 +23408,40 @@ void main() {
       e.preventDefault();
       closeFeed();
     });
+    const openRecipe = () => {
+      if (!el.recipe.open) el.recipe.showModal();
+    };
+    const closeRecipe = () => {
+      if (el.recipe.open) el.recipe.close();
+    };
+    on(el.recipe, "keydown", (e) => {
+      if (e.key !== "Escape") return;
+      e.preventDefault();
+      closeRecipe();
+    });
+    // The prompt is written to be pasted, so it leaves in one click.
+    const copyRecipe = (button) => {
+      const text = el.recipeText.textContent;
+      if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text).catch(() => {});
+      else {
+        const field = document.createElement("textarea");
+        field.value = text;
+        document.body.append(field);
+        field.select();
+        document.execCommand("copy");
+        field.remove();
+      }
+      // A toast would sit behind the modal's backdrop, so the button answers.
+      window.clearTimeout(copyTimer);
+      button.textContent = "Copied";
+      copyTimer = window.setTimeout(() => { button.textContent = "Copy prompt"; }, 1600);
+    };
     for (const b of el.actions) on(b, "click", () => {
       b.blur();
       if (b.dataset.action === "feed") openFeed();
       else if (b.dataset.action === "feed-close") closeFeed();
+      else if (b.dataset.action === "recipe-close") closeRecipe();
+      else if (b.dataset.action === "recipe-copy") copyRecipe(b);
       else actionHandler && actionHandler(b.dataset.action);
     });
     const toast = (text) => {
@@ -23228,10 +23588,6 @@ void main() {
     const onPreset = (fn) => {
       presetHandler = fn;
     };
-    const setFlyby = (active) => {
-      const pressed = active ? "true" : "false";
-      if (el.flyby.getAttribute("aria-pressed") !== pressed) el.flyby.setAttribute("aria-pressed", pressed);
-    };
     let identityHandler = null;
     const onIdentityChange = (fn) => {
       identityHandler = fn;
@@ -23361,6 +23717,7 @@ void main() {
       window.clearTimeout(toastHideTimer);
       window.clearTimeout(hintTimer);
       window.clearTimeout(hintHideTimer);
+      window.clearTimeout(copyTimer);
       for (const off of listeners) off();
       el.roster.replaceChildren();
       el.inventory.replaceChildren();
@@ -23373,8 +23730,9 @@ void main() {
       setMagazine(0, 0, 0, false);
       setJetpack(false, false, 0);
       closeFeed();
+      closeRecipe();
     };
-    return { el, openFeed, closeFeed, setRosterRow, setMeter, setStats, setAct, setWeapon, setMagazine, setJetpack, setSubtitle, setFlyby, onAction, toast, tooltip, hint, selectTab, onPreset, onIdentityChange, setIdentity, setDonationUrl, onAssign, onUnassign, renderInventory, dispose };
+    return { el, openFeed, closeFeed, openRecipe, closeRecipe, setRosterRow, setMeter, setStats, setAct, setWeapon, setMagazine, setJetpack, setSubtitle, onAction, toast, tooltip, hint, selectTab, onPreset, onIdentityChange, setIdentity, setDonationUrl, onAssign, onUnassign, renderInventory, dispose };
   };
   BL.hud = { create, renderIcon, signLettering, STATE_LABELS, statusFor };
 })();
@@ -24452,6 +24810,20 @@ void main() {
   const MELEE_CHARGE_TIME = 1;
   const meleeWindAngle = (w) => -1.1 * ease.inOutQuad(clamp((MELEE_TIME - w.meleeTime) / MELEE_WIND, 0, 1)) - 0.55 * w.meleeCharge;
   const AXE_STICK_DELAY = 1, AXE_STICK_BLEND = 0.3, AXE_STICK_ARM = -1.5;
+  // A body built with a second colourway changes between the two on its own,
+  // never sooner than TINT_MIN and never later than TINT_MAX.
+  // A maintainer runs the whole island's circuit, so it stands at the pile for a
+  // while between trips instead of scurrying from one cave straight to the next.
+  const WORK_REST_MIN = 7, WORK_REST_SPREAD = 16;
+  // How long a character carries one weapon before swapping to the other.
+  const SWAP_MIN = 20, SWAP_SPREAD = 40;
+  const swapWait = () => SWAP_MIN + Math.random() * SWAP_SPREAD;
+  const TINT_MIN = 360, TINT_MAX = 900;
+  const tintWait = () => TINT_MIN + Math.random() * (TINT_MAX - TINT_MIN);
+  // The free stick folds against the handle, trails as the swing winds up, then
+  // whips a whole turn through the strike and lands folded again.
+  const TAU = Math.PI * 2;
+  const CHUK_FOLD = 2.4, CHUK_TRAIL = 1.15, CHUK_FLICK = 0.55, CHUK_SPIN = 7.5;
   const GUN_HOLD = 0.24, GUN_KICK = 0.045, GUN_FLASH_TIME = 0.035;
   const MAGAZINE_SWAP_TIME = 0.44;
   const RELOAD_HANDOFF_TIME = 0.32, RELOAD_FULL_HOLD = 0.24;
@@ -24788,6 +25160,7 @@ void main() {
     const crewList = [];
     if (!world.weapons) world.weapons = new Map();
     const legacyMagazine = world.magazine || (world.magazine = { owned: false, count: 0, ammo: 0, carrier: null });
+    let recipeTimer = 0;
     const claimLegacyMagazines = (weapon) => {
       const count = legacyMagazine.count === 2 ? 2 : 1;
       for (let i = 0; i < count && weapon.spareAmmo.length < 2; i++) weapon.spareAmmo.push(legacyMagazine.ammo);
@@ -24835,6 +25208,10 @@ void main() {
       weapon.meleeStrikeFrom = -1.1;
       Object.assign(cave, {
         weapon,
+        tintTime: cave.tint ? tintWait() : 0,
+        chukAngle: CHUK_FOLD,
+        meleeOut: Math.random() < 0.5,
+        meleeSwap: swapWait(),
         axeRotation: math.quat.create(),
         gunHandRotation: math.quat.create(),
         gunSupportRotation: math.quat.create(),
@@ -24842,7 +25219,7 @@ void main() {
         meleePoints: meleeExtremes(cave.parts.club.geometry),
         clubSlingProfile: clubSlingProfile(cave.parts.club.geometry),
         clubTorsoBounds: BL.scene.boundsOf(cave.parts.torso.geometry),
-        work: { phase: "", site: 0, index: 0, gait: 0, timer: i * 0.137, emptyTime: 0, reloadSlot: false, direct: false, position: { x: 0, y: 0, z: 0 }, target: { x: 0, y: 0, z: 0 } },
+        work: { phase: "", site: 0, index: 0, gait: 0, timer: i * 0.137, emptyTime: 0, rest: 0, reloadSlot: false, direct: false, position: { x: 0, y: 0, z: 0 }, target: { x: 0, y: 0, z: 0 } },
         slot: null,
         pileApproach: false,
         index: i,
@@ -24901,6 +25278,9 @@ void main() {
         act: { kind: "eat", until: 0, trips: 0, sayAt: 0, said: true, phase: 0, spot: { x: 0, z: 0, ry: NaN } },
         swagNodes: []
       });
+      // A character built with its own pack wears it from the first frame: the
+      // same flight, fuel and recovery as the world jetpack, minus the pickup.
+      if (cave.parts.jetpack) cave.jet = { node: cave.parts.jetpack, flame: cave.parts.jetFlame, thrust: false, spending: false, power: 0, puff: 0 };
       cave.root.visible = false;
       addChild(root, cave.root);
       addChild(root, cave.sleepWeapons);
@@ -25756,6 +26136,27 @@ void main() {
       && (cave === player ? !cave.weapon.equipped : cave.state === "chilling")
       && !cave.weapon.aiming && cave.weapon.meleeTime <= 0 && !cave.weapon.reloading && !cave.weapon.reloadHandoff
       && !cave.build && !cave.bedTravel.mode && !cave.camp.seat && !cave.camp.burning && !cave.camp.rolling && !cave.camp.panic.active;
+    // The whip is written straight from the swing's own phase, so it reads the
+    // same at any frame rate; only the settle back to the fold is damped.
+    const poseNunchaku = (cave, dt) => {
+      const w = cave.weapon, chuk = cave.parts.chuk;
+      const release = w.meleeStrikeTime + MELEE_RECOVER;
+      if (w.primaryEquipped && (w.meleeHeld || w.meleeTime > release)) {
+        cave.chukAngle = CHUK_FOLD + CHUK_TRAIL * ease.inOutQuad(clamp((MELEE_TIME - w.meleeTime) / MELEE_WIND, 0, 1)) + 0.5 * w.meleeCharge;
+      } else if (w.primaryEquipped && w.meleeTime > 0) {
+        const from = CHUK_FOLD + CHUK_TRAIL + 0.5 * w.meleeCharge;
+        cave.chukAngle = from + (CHUK_FOLD + TAU - from) * ease.inOutQuad(1 - w.meleeTime / release);
+      } else {
+        const ready = cave.root.visible && (w.primaryEquipped && w.aiming || meleeDrawn(cave));
+        cave.chukAngle = damp(cave.chukAngle % TAU, CHUK_FOLD + (ready ? CHUK_FLICK * Math.sin(elapsed * CHUK_SPIN) : 0), 14, dt);
+      }
+      chuk.rotation.x = cave.chukAngle;
+    };
+    // An Ooga with its own melee weapon swaps hands now and then: the rifle rides
+    // its back while the melee weapon is out, and comes back for the shooting.
+    const meleeDrawn = (cave) => cave.traits.nunchaku && cave.meleeOut && cave !== player
+      && cave.work.phase !== "station" && cave.work.phase !== "shoot"
+      && !cave.weapon.reloading && !cave.weapon.reloadHandoff && !cave.build;
     const poseFingers = (arm, fingers, held, side) => {
       fingers.highlight = arm.highlight;
       // Select a square side with an exact quarter turn about the palm. The
@@ -25795,7 +26196,7 @@ void main() {
       const working = cave !== player && cave.state === "working";
       const celebrating = working && cave.cheer > 0;
       const spareLoading = ready && reloadingSpare(cave) && !celebrating;
-      const drawn = ready && !spareLoading && (working || cave === player && w.equipped || !w.reloading && (!!cave.build || w.recoil > 0));
+      const drawn = ready && !spareLoading && !meleeDrawn(cave) && (working || cave === player && w.equipped || !w.reloading && (!!cave.build || w.recoil > 0));
       parts.gunFlash.visible = drawn && w.recoil > GUN_HOLD - GUN_FLASH_TIME;
       gun.visible = ready;
       const slungClub = (drawn || spareLoading) && (cave === player || working);
@@ -25804,7 +26205,8 @@ void main() {
       // The axe's ordinary stance is independent of combat selection, both
       // before possession and when moving in the initial navigation view.
       const primaryCarry = !slungClub && carryingStoneAxe(cave);
-      const axeSideSling = slungClub && cave.traits.stoneAxe && !!cave.jet;
+      // A pack takes the centre of the back, and the nunchaku rides the hip either way.
+      const sideSling = slungClub && (cave.traits.nunchaku || cave.traits.stoneAxe && !!cave.jet);
       const clubParent = slungClub ? cave.root : parts.armL;
       if (parts.club.parent !== clubParent) {
         removeChild(parts.club.parent, parts.club);
@@ -25829,11 +26231,17 @@ void main() {
         setVec(parts.club.position, gripX - MUZZLE[0], -0.625 * h - MUZZLE[1], 0.15 * h - MUZZLE[2]);
         setVec(parts.club.rotation, 0, 0, 0);
         parts.club.quaternion = cave.axeRotation;
-      } else if (axeSideSling) {
-        // A jetpack takes the centre of the back. The axe hangs tight against
-        // its anatomical left side (+X), with the stone above the tanks.
-        setVec(parts.club.position, 0.36 * h, 0.04 * h + cave.viewLift, -0.255 * h);
-        setVec(parts.club.rotation, -0.035, 0, 0.04);
+      } else if (sideSling) {
+        // The axe hangs against the anatomical left side (+X) with its stone above
+        // the tanks; the shorter nunchaku rides the drawing hand's hip, head down.
+        if (cave.traits.nunchaku) {
+          // Tucked at the drawing hand's hip, sticks up, clear of the thigh.
+          setVec(parts.club.position, -0.34 * h, -0.05 * h + cave.viewLift, -0.02 * h);
+          setVec(parts.club.rotation, 0.18, 0, -0.16);
+        } else {
+          setVec(parts.club.position, 0.36 * h, 0.04 * h + cave.viewLift, -0.255 * h);
+          setVec(parts.club.rotation, -0.035, 0, 0.04);
+        }
       } else {
         setVec(parts.club.position, slungClub ? -0.25 * h : 0, (slungClub ? 0.25 : primaryReady ? -0.625 : -0.62) * h, (slungClub ? -0.3 : primaryReady ? 0.15 : 0.08) * h);
         setVec(parts.club.rotation, slungClub ? cave.traits.stoneAxe ? 0 : CLUB_SLING_TILT : primaryReady ? 0 : cave.clubCarry.x,
@@ -25843,7 +26251,7 @@ void main() {
       if (slungClub) {
         clubSlingAxes(parts.club);
         const contact = Math.min(clubRearContact(cave, parts.head, cave.gunHeadBounds),
-          axeSideSling ? parts.club.position.z : clubRearContact(cave, parts.torso, cave.clubTorsoBounds));
+          sideSling ? parts.club.position.z : clubRearContact(cave, parts.torso, cave.clubTorsoBounds));
         if (contact !== Infinity) parts.club.position.z = contact;
       }
       parts.club.visible = slungClub || !drawn;
@@ -27423,6 +27831,7 @@ void main() {
         if (site.position) site.position(cave, cave.work.position);
         else setVec(cave.work.position, site.route[site.route.length - 1].x, 0, site.route[site.route.length - 1].z);
         cave.work.phase = "outbound";
+        cave.work.rest = cave.traits.maintainer ? WORK_REST_MIN + Math.random() * WORK_REST_SPREAD : 0;
         cave.work.reloadSlot = cave.work.direct = cave.pileApproach = false;
         cave.act.kind = "work";
         cave.weapon.equipped = true;
@@ -27535,7 +27944,13 @@ void main() {
         standPose(cave);
         cave.root.rotation.y = Math.atan2(-cave.root.position.x, -cave.root.position.z);
         if (!nearReload(cave)) { work.phase = "return"; work.index = -1; return; }
-        if (!reloadMissing(cave)) { if (!weapon.reloadHandoff) selectWorkSite(cave); return; }
+        if (!reloadMissing(cave)) {
+          if (weapon.reloadHandoff) return;
+          // Loaded and in no hurry: stand at the pile before the next trip.
+          if (work.rest > 0) { work.rest -= dt; return; }
+          selectWorkSite(cave);
+          return;
+        }
         if (!weapon.reloading) startReload(cave);
         runReload(cave, dt);
       }
@@ -27746,6 +28161,27 @@ void main() {
         cave.parts.head.rotation.x = -k * 0.2;
       } else cave.parts.head.rotation.x = 0;
     };
+    // Every voxel part is paired with its twin both ways, so one pass over the
+    // body changes the colourway and a second pass changes it back.
+    const swapTint = (cave) => {
+      const tint = cave.tint;
+      const visit = (node) => {
+        const twin = node.geometry && tint.get(node.geometry);
+        if (twin) node.geometry = twin;
+        for (let i = 0; i < node.children.length; i++) visit(node.children[i]);
+      };
+      visit(cave.root);
+      cave.headOpen = tint.get(cave.headOpen) || cave.headOpen;
+      cave.headClosed = tint.get(cave.headClosed) || cave.headClosed;
+      cave.parts.head.geometry = cave.state === "sleeping" ? cave.headClosed : cave.headOpen;
+    };
+    // A hand toggle restarts the timer too, so it does not flip again seconds later.
+    const toggleTint = (cave) => {
+      if (!cave || !cave.tint) return false;
+      swapTint(cave);
+      cave.tintTime = tintWait();
+      return true;
+    };
     const updateCaveman = (cave, dt) => {
       clearHeadLook(cave);
       const parts = cave.parts;
@@ -27760,6 +28196,14 @@ void main() {
       for (let i = 0; i < BODY_PARTS.length; i++) parts[BODY_PARTS[i]].highlight = cave.highlight;
       // A carved head breathes its candlelight from dim to bright
       if (cave.traits.pumpkin) parts.head.glow = 0.62 + 0.38 * Math.sin(elapsed * 2.1 + cave.phase);
+      if (cave.traits.nunchaku && (cave.meleeSwap -= dt) <= 0) {
+        cave.meleeOut = !cave.meleeOut;
+        cave.meleeSwap = swapWait();
+      }
+      if (cave.tint && (cave.tintTime -= dt) <= 0) {
+        swapTint(cave);
+        cave.tintTime = tintWait();
+      }
       if (cave.hopV > 0 || cave.hop > 0) {
         cave.hopV -= WALK.gravity * dt;
         // Fruit halves vertical travel without changing ballistic momentum; leaving restores normal movement at once.
@@ -27910,8 +28354,17 @@ void main() {
       if (cave.jetFuel < JET_LAUNCH_FUEL && grounded(cave)) cave.jetRecovering = true;
       return node;
     };
+    const builtInJetpack = (cave) => !!cave.parts.jetpack;
+    const cutJet = (cave) => {
+      const jet = cave.jet;
+      jet.thrust = jet.spending = false;
+      jet.power = jet.puff = 0;
+      jet.flame.visible = false;
+    };
     const removeJetpack = (cave) => {
       if (!cave.jet) return false;
+      // Built in: it cannot come off, so a scene asking for it back only stops it burning.
+      if (builtInJetpack(cave)) { cutJet(cave); return false; }
       removeChild(cave.root, cave.jet.node);
       cave.jet = null;
       if (ctx.refreshMirrorObject) ctx.refreshMirrorObject(cave.root);
@@ -28228,6 +28681,7 @@ void main() {
       }
       cave.swagNodes.length = 0;
       cave.parts.club.geometry = cave.skins.club.default;
+      if (cave.parts.chuk) cave.parts.chuk.geometry = cave.parts.chuk.skins.default;
       cave.parts.gunBody.geometry = cave.skins.gun.default;
       const entryId = game.state.assignments[cave.traits.name];
       const item = entryId ? game.itemOf(entryId) : null;
@@ -28235,6 +28689,8 @@ void main() {
       if (item.skin) {
         const target = item.skin === "club" ? cave.parts.club : cave.parts.gunBody;
         target.geometry = cave.skins[item.skin].gold;
+        // A weapon that carries a second stick takes the same skin.
+        if (item.skin === "club" && cave.parts.chuk) cave.parts.chuk.geometry = cave.parts.chuk.skins.gold;
         return;
       }
       const anchor = item.slot === "face" ? cave.parts.face : cave.parts.hat;
@@ -28259,7 +28715,19 @@ void main() {
       return item ? item.name : null;
     };
     const renderLocker = () => hud.renderInventory(game.state.inventory, game.assignedTo, wornBy);
+    // The first tap of a double-tap takes an Ooga, so the prompt waits out that
+    // window: a modal opening under the second tap would swallow it.
+    const openRecipeSoon = (cave) => {
+      window.clearTimeout(recipeTimer);
+      recipeTimer = window.setTimeout(() => {
+        recipeTimer = 0;
+        if (player !== cave) hud.openRecipe();
+      }, BL.interact.DOUBLE_MS + 40);
+    };
     const pokeCave = (cave) => {
+      // One Ooga answers a poke with the prompt for building another one. It is
+      // a machine: it answers asleep as well as awake.
+      if (cave.traits.recipe) openRecipeSoon(cave);
       if (cave.state === "sleeping") {
         ctx.fx.say(cave, SLEEP_POKES[randomInt(SLEEP_POKES.length)], 1.8);
         const travel = cave.bedTravel;
@@ -28457,6 +28925,7 @@ void main() {
         || cave.cheer > 0 || cave.catchT > 0 || cave.yawn > 0;
       w.axeIdle = carryingStoneAxe(cave) && !axeMoving ? Math.min(AXE_STICK_DELAY + AXE_STICK_BLEND, w.axeIdle + dt) : 0;
       poseShoulder(cave, dt);
+      if (cave.parts.chuk) poseNunchaku(cave, dt);
       poseWeapon(cave);
       if (striking && w.meleeTime > 0 && club.visible && club.parent === cave.parts.armL && !cave.camp.burning && !cave.camp.rolling && !cave.bedTravel.mode) {
         BL.scene.updateWorld(cave.root);
@@ -28577,6 +29046,8 @@ void main() {
       for (let i = 0; i < crewList.length; i++) crewList[i].riding.support = null;
     };
     const dispose = () => {
+      window.clearTimeout(recipeTimer);
+      recipeTimer = 0;
       player = null;
       for (let caveIndex = 0; caveIndex < crewList.length; caveIndex++) {
         const cave = crewList[caveIndex];
@@ -28604,7 +29075,7 @@ void main() {
     return {
       cavemen, list: crewList, fanSlots, stateOf, stateCounts, workingCavemen, eatingCavemen, workingCount, eatingCount, feedableCavemen, refreshStates, refreshRosterRow, updateFan, rush, headWorldOf, applyAllSwag, wornBy, renderLocker, pokeCave, idleSay, drawQuotes,
       control, release, relocatePlayer, sleepPlayer, wakePlayer, sitPlayer, standPlayer, ignite, dropRoll, steer: steerPlayer, look: lookPlayer, elevate: elevatePlayer, playerAction, jumpPlayer, poseWeapon, wearJetpack, removeJetpack, thrust, update, dispose, stats,
-      toggleWeapon, selectWeapon, configureWeapon, swingWeapon, releaseSwing, fireWeapon, setWeaponTrigger, canFire, weaponOrigin, meleeReach, nearReload, canReload, startReload, stopReload, stopBurst, canSwapMagazine, swapMagazine, collectMagazine, collectAmmo, removeMagazines, hasMagazine, magazineCount, magazineAmmo, totalAmmo, workSites,
+      builtInJetpack, toggleTint, toggleWeapon, selectWeapon, configureWeapon, swingWeapon, releaseSwing, fireWeapon, setWeaponTrigger, canFire, weaponOrigin, meleeReach, nearReload, canReload, startReload, stopReload, stopBurst, canSwapMagazine, swapMagazine, collectMagazine, collectAmmo, removeMagazines, hasMagazine, magazineCount, magazineAmmo, totalAmmo, workSites,
       get sleeping() { return !!(player && player.bedTravel.manual && player.state === "sleeping"); },
       get player() {
         return player;
@@ -28721,7 +29192,7 @@ void main() {
       }
       return result;
     };
-    const plan = (state, x, z, tx, tz, limit = true) => {
+    const plan = (state, x, z, tx, tz) => {
       if (version !== path.version) rebuild();
       state.tx = tx; state.tz = tz; state.version = version; state.count = state.index = 0; state.plans++;
       const start = nearest(x, z), end = nearest(tx, tz);
@@ -28739,7 +29210,7 @@ void main() {
       }
       if (parents[start] < 0) return;
       const length = Math.hypot(xs[start] - x, zs[start] - z) + distances[start] + Math.hypot(xs[end] - tx, zs[end] - tz);
-      if (limit && length > Math.hypot(tx - x, tz - z) * 2.5 + 3) return;
+      if (length > Math.hypot(tx - x, tz - z) * 2.5 + 3) return;
       for (let i = start; ; i = parents[i]) {
         state.route[state.count++] = i;
         if (i === end) break;
@@ -28858,9 +29329,8 @@ void main() {
     const routeState = createState();
     // Bed journeys allocate their authored route only at departure.
     // They share the same surface centerlines before and after the underground portion.
-    // A walker gives up on a long detour; the flyby's camera takes any route the trails offer.
-    const route = (from, to, limit = true) => {
-      plan(routeState, from.x, from.z, to.x, to.z, limit);
+    const route = (from, to) => {
+      plan(routeState, from.x, from.z, to.x, to.z);
       const result = [from];
       for (let n = 0; n < routeState.count; n++) {
         const i = routeState.route[n];
@@ -28872,202 +29342,6 @@ void main() {
     return { createState, target, route, xAt, zAt, capacity: size, get nodes() { return count; }, buffers: xs.byteLength + zs.byteLength + centerX.byteLength + centerZ.byteLength + groups.byteLength + heads.byteLength + edges.byteLength + next.byteLength + costs.byteLength + parents.byteLength + distances.byteLength + heap.byteLength + heapIndex.byteLength + routeState.route.byteLength + routeState.laneX.byteLength + routeState.laneZ.byteLength };
   };
   BL.npcPaths = { create };
-})();
-
-// ---- js/flyby.js ----
-// The island flyby: a camera tour that flies the walkers' own trail graph between
-// views. Each leg is routed at departure, resampled and smoothed into fixed arrays,
-// then flown at an eased cruise while the view turns toward its heading and settles
-// into the next stop's angle. A stop off the trails names the surface point where
-// its own approach begins (`entry`, with `entryRoute` from there to its view) and
-// where its way out ends (`exit`, with `exitRoute` from its view to there), and the
-// leg chains the previous stop's way out, the trail route and the next stop's
-// approach; two stops sharing one point chain directly, which is how the tour goes
-// down one headquarters ramp into the basement and up the others. Such a stop may
-// lower `hover` under its ceiling. It writes the pilot's orbit every frame and reads
-// it back: any value it did not write means the visitor took the camera, and it ends.
-(() => {
-  "use strict";
-  const BL = window.BL = window.BL || {};
-  const { lerp, ease } = BL.math;
-  const CAPACITY = 4096, SPACING = 0.5, SMOOTH = 6, PASSES = 2, HOVER = 2.4, CRUISE = 9, MIN_LEG = 1.6, AUTHORED = 8;
-  const DWELL = 2.2, TURN_RATE = 1.6, TURN_MAX = 1, SWOOP = 5, HEADING_SPAN = 8, LOOK_AHEAD = 3, BLEND_MIN = 4;
-  const TWO_PI = Math.PI * 2;
-  const turn = (from, to) => Math.atan2(Math.sin(to - from), Math.cos(to - from));
-  const smoothstep = (t) => t <= 0 ? 0 : t >= 1 ? 1 : t * t * (3 - 2 * t);
-  const create = ({ paths, island, hover = HOVER }) => {
-    const sx = new Float64Array(CAPACITY), sy = new Float64Array(CAPACITY), sz = new Float64Array(CAPACITY), gy = new Float64Array(CAPACITY);
-    const px = new Float64Array(CAPACITY), py = new Float64Array(CAPACITY), pz = new Float64Array(CAPACITY), pl = new Float64Array(CAPACITY);
-    const target = { x: 0, y: 0, z: 0 };
-    let stops = null, arrive = null, leg = -1, count = 0, length = 0, duration = 0, time = 0, dwell = 0, cursor = 0, active = false;
-    let holdS = 0, reachS = 0, swoop = 0;
-    let yaw = 0, pitch = 0, dist = 0, fromYaw = 0, fromPitch = 0, fromDist = 0, toYaw = 0, toPitch = 0, toDist = 0;
-    let lastYaw = NaN, lastPitch = NaN, lastDist = NaN, legs = 0, routed = 0;
-    const smooth = (input, output, radius) => {
-      for (let i = 0; i < count; i++) {
-        let sum = 0;
-        for (let k = -radius; k <= radius; k++) sum += input[Math.max(0, Math.min(count - 1, i + k))];
-        output[i] = sum / (radius * 2 + 1);
-      }
-    };
-    // The route is a polyline of the trail nodes between two views, its nodes lifted off
-    // the ground; the flown curve is that polyline resampled and box-smoothed, its ends
-    // pinned to the exact views. A leg longer than the arrays widens its spacing.
-    const lay = (from, to, previous, stop) => {
-      const a = previous && previous.exit ? previous : null, b = stop.entry ? stop : null;
-      const lift = Math.min(a && a.hover !== undefined ? a.hover : hover, b && b.hover !== undefined ? b.hover : hover);
-      const route = [from];
-      if (a) for (const point of a.exitRoute) route.push(point);
-      const off = a ? a.exit : from, on = b ? b.entry : to, exitAt = route.length - 1;
-      if (off !== on) {
-        const surface = paths.route(off, on, false);
-        for (let i = 1; i < surface.length - 1; i++) route.push(surface[i]);
-        if (b) route.push(on);
-      }
-      const entryAt = route.length - 1;
-      if (b) for (let i = 1; i < b.entryRoute.length; i++) route.push(b.entryRoute[i]);
-      route.push(to);
-      legs++;
-      if (route.length > 2) routed++;
-      let total = 0, exitS = 0, entryS = 0;
-      for (let i = 1; i < route.length; i++) {
-        total += Math.hypot(route[i].x - route[i - 1].x, route[i].z - route[i - 1].z);
-        if (i === exitAt) exitS = total;
-        if (i === entryAt) entryS = total;
-      }
-      // The view holds its angle and boom along a way out and has the next stop's by its entry,
-      // so nothing trails into rock; a plain trail leg swoops up and out in the middle.
-      holdS = a ? exitS : 0;
-      reachS = b ? entryS : total;
-      if (reachS - holdS < BLEND_MIN) holdS = Math.max(0, reachS - BLEND_MIN);
-      if (reachS - holdS < BLEND_MIN) reachS = Math.min(total, holdS + BLEND_MIN);
-      swoop = a || b ? 0 : SWOOP;
-      count = Math.min(CAPACITY, Math.ceil(total / SPACING) + 1);
-      let segment = 1, start = 0, span = Math.hypot(route[1].x - route[0].x, route[1].z - route[0].z);
-      for (let i = 0; i < count; i++) {
-        const s = count > 1 ? total * i / (count - 1) : 0;
-        while (segment < route.length - 1 && s > start + span) {
-          start += span;
-          segment++;
-          span = Math.hypot(route[segment].x - route[segment - 1].x, route[segment].z - route[segment - 1].z);
-        }
-        const a = route[segment - 1], b = route[segment], t = span > 0 ? Math.min(1, (s - start) / span) : 1;
-        const ay = segment === 1 ? a.y : a.y + lift, by = segment === route.length - 1 ? b.y : b.y + lift;
-        sx[i] = lerp(a.x, b.x, t); sy[i] = gy[i] = lerp(ay, by, t); sz[i] = lerp(a.z, b.z, t);
-      }
-      for (let pass = 0; pass < PASSES; pass++) {
-        smooth(sx, px, SMOOTH); smooth(sy, py, SMOOTH); smooth(sz, pz, SMOOTH);
-        if (pass + 1 < PASSES) { sx.set(px.subarray(0, count)); sy.set(py.subarray(0, count)); sz.set(pz.subarray(0, count)); }
-      }
-      px[0] = from.x; py[0] = from.y; pz[0] = from.z;
-      px[count - 1] = to.x; py[count - 1] = to.y; pz[count - 1] = to.z;
-      // Smoothing can cut a corner through a rise; keep the middle of the curve above the
-      // ground where the route itself was above it. Below it the route is a ramp under the
-      // terrain, and the approaches are authored views, some inside a mouth under its roof.
-      for (let i = AUTHORED; i < count - AUTHORED; i++) {
-        if (!island.onLand(px[i], pz[i])) continue;
-        const ground = island.surfaceAt(px[i], pz[i]);
-        if (gy[i] >= ground) py[i] = Math.max(py[i], ground + lift * 0.5);
-      }
-      pl[0] = 0;
-      for (let i = 1; i < count; i++) pl[i] = pl[i - 1] + Math.hypot(px[i] - px[i - 1], py[i] - py[i - 1], pz[i] - pz[i - 1]);
-      length = pl[count - 1];
-      if (total > 0) { holdS *= length / total; reachS *= length / total; }
-      duration = Math.max(MIN_LEG, length / CRUISE);
-      time = 0;
-      cursor = 0;
-    };
-    // The cursor only moves forward within a leg, so the search is amortised constant.
-    const at = (s, out) => {
-      while (cursor < count - 2 && pl[cursor + 1] < s) cursor++;
-      let i = cursor;
-      while (i > 0 && pl[i] > s) i--;
-      if (i >= count - 1) { out.x = px[count - 1]; out.y = py[count - 1]; out.z = pz[count - 1]; return; }
-      const span = pl[i + 1] - pl[i], t = span > 0 ? Math.max(0, Math.min(1, (s - pl[i]) / span)) : 0;
-      out.x = lerp(px[i], px[i + 1], t); out.y = lerp(py[i], py[i + 1], t); out.z = lerp(pz[i], pz[i + 1], t);
-    };
-    const AHEAD = { x: 0, y: 0, z: 0 };
-    const write = (orbit) => {
-      orbit.target = target;
-      orbit.tx = target.x; orbit.ty = target.y; orbit.tz = target.z;
-      orbit.yaw = orbit.tYaw = lastYaw = yaw;
-      orbit.pitch = orbit.tPitch = lastPitch = pitch;
-      orbit.dist = orbit.tDist = lastDist = dist;
-    };
-    const depart = (from) => {
-      const stop = stops[leg], view = stop.view;
-      fromYaw = yaw; fromPitch = pitch; fromDist = dist;
-      toYaw = view.yaw; toPitch = view.pitch; toDist = view.dist;
-      lay(from, view.target, leg ? stops[leg - 1] : null, stop);
-    };
-    const start = (orbit, list, onArrive = null) => {
-      stops = list; arrive = onArrive;
-      active = true;
-      legs = routed = 0;
-      leg = 0; dwell = 0;
-      yaw = orbit.yaw; pitch = orbit.pitch; dist = orbit.dist;
-      target.x = orbit.tx; target.y = orbit.ty; target.z = orbit.tz;
-      depart(target);
-      write(orbit);
-    };
-    const stop = () => {
-      active = false;
-      stops = null; arrive = null;
-      leg = -1; count = 0; dwell = 0;
-      lastYaw = lastPitch = lastDist = NaN;
-    };
-    const disturbed = (orbit) => active && (orbit.target !== target || orbit.tYaw !== lastYaw || orbit.tPitch !== lastPitch || orbit.tDist !== lastDist);
-    // A damped turn, capped so a hairpin in the trail reads as a pan rather than a whip.
-    const steer = (desired, dt) => {
-      const delta = turn(yaw, desired) * (1 - Math.exp(-TURN_RATE * dt)), limit = TURN_MAX * dt;
-      yaw += Math.max(-limit, Math.min(limit, delta));
-      yaw = ((yaw + Math.PI) % TWO_PI + TWO_PI) % TWO_PI - Math.PI;
-    };
-    const update = (dt, orbit) => {
-      if (!active) return;
-      if (dwell > 0) {
-        // The view keeps settling on the stop's angle through the dwell; nothing snaps.
-        dwell -= dt;
-        steer(toYaw, dt);
-        if (dwell <= 0) {
-          if (leg + 1 >= stops.length) { stop(); return; }
-          leg++;
-          depart(target);
-        }
-        write(orbit);
-        return;
-      }
-      time += dt;
-      const k = ease.inOutQuad(Math.min(1, time / duration)), s = k * length;
-      at(s, target);
-      // The view leaves the last stop's angle, follows the heading between the ends, and
-      // arrives on the next stop's; a leg shorter than two spans blends straight across.
-      let desired = fromYaw + turn(fromYaw, toYaw) * smoothstep(k);
-      if (length > LOOK_AHEAD) {
-        at(Math.min(length, s + LOOK_AHEAD), AHEAD);
-        const dx = AHEAD.x - target.x, dz = AHEAD.z - target.z;
-        if (dx * dx + dz * dz > 1e-6) {
-          const heading = Math.atan2(-dx, -dz);
-          const w = Math.min(smoothstep(s / HEADING_SPAN), smoothstep((length - s) / HEADING_SPAN));
-          desired = desired + turn(desired, heading) * w;
-        }
-      }
-      steer(desired, dt);
-      const q = smoothstep((s - holdS) / Math.max(1e-6, reachS - holdS));
-      pitch = lerp(fromPitch, toPitch, q);
-      dist = lerp(fromDist, toDist, q) + swoop * Math.sin(Math.PI * k);
-      if (time >= duration) {
-        target.x = px[count - 1]; target.y = py[count - 1]; target.z = pz[count - 1];
-        pitch = toPitch; dist = toDist;
-        dwell = DWELL;
-        if (arrive) arrive(stops[leg], leg);
-      }
-      write(orbit);
-    };
-    return { start, stop, update, disturbed, target, get active() { return active; }, get index() { return leg; }, get travelling() { return active && dwell <= 0; },
-      get at() { return stops ? stops[leg] : null; }, get stops() { return stops; }, get legs() { return legs; }, get routed() { return routed; }, get samples() { return count; }, get length() { return length; }, capacity: CAPACITY };
-  };
-  BL.flyby = { create, DWELL, CRUISE, HOVER };
 })();
 
 // ---- js/pile.js ----
@@ -33882,7 +34156,7 @@ void main() {
   };
 
   // One visit's state: created in enter, dropped in leave.
-  let jumbotronSpot, oogatronUnsub, renderer, game, world, go, lootEnabled, testBananas, root, camera, island, pathNode, altar, hud, hooks, input, pilot, fx, cameraCover, bananaCover, solids, rockGuides, objectGuides, sightGuides, bananaGuides, pileGuides, platformGuides, mirrorGuides, pile, crew, crates, critters, clock, presets, entering, jetpack, jetpackState, jetpackCarrier, jetpackWearer, lastJetpackCloud, mirrorCave, matrixCave, matrixControl, gateRain, fire, headquarters, jumbotron, positionDebug, agent, agentPlay, flyby;
+  let jumbotronSpot, oogatronUnsub, renderer, game, world, go, lootEnabled, testBananas, root, camera, island, pathNode, altar, hud, hooks, input, pilot, fx, cameraCover, bananaCover, solids, rockGuides, objectGuides, sightGuides, bananaGuides, pileGuides, platformGuides, mirrorGuides, pile, crew, crates, critters, clock, presets, entering, jetpack, jetpackState, jetpackCarrier, jetpackWearer, lastJetpackCloud, mirrorCave, matrixCave, matrixControl, gateRain, fire, headquarters, jumbotron, positionDebug, agent, agentPlay;
   let magazine, magazineState, breakables;
   const JETPACK_HUD_STATE = { owned: false, equipped: false, fuel: 1, blocked: false };
   let enteringTween = null;
@@ -35417,9 +35691,11 @@ void main() {
     if (i >= 0) list.splice(i, 1);
   };
   const jetpackHudStatus = (cave) => {
-    JETPACK_HUD_STATE.owned = !!jetpackState && jetpackState.owned;
+    // A built-in pack owns itself: its gauge is the wearer's own fuel.
+    const builtIn = !!(cave && crew.builtInJetpack(cave));
+    JETPACK_HUD_STATE.owned = builtIn || !!jetpackState && jetpackState.owned;
     JETPACK_HUD_STATE.equipped = !!(cave && cave.jet);
-    JETPACK_HUD_STATE.fuel = cave && jetpackCarrier === cave ? cave.jetFuel : jetpackState ? jetpackState.fuel : 1;
+    JETPACK_HUD_STATE.fuel = cave && (builtIn || jetpackCarrier === cave) ? cave.jetFuel : jetpackState ? jetpackState.fuel : 1;
     JETPACK_HUD_STATE.blocked = JETPACK_HUD_STATE.owned && (cave ? !jetpackAllowed(cave) : cameraCaveIndex !== 0);
     return JETPACK_HUD_STATE;
   };
@@ -35427,6 +35703,7 @@ void main() {
     if (jetpackState && jetpackState.owned && jetpackCarrier) jetpackState.fuel = jetpackCarrier.jetFuel;
   };
   const equipJetpack = (cave) => {
+    if (crew.builtInJetpack(cave)) return true;
     if (!jetpackState.owned) return false;
     if (jetpackWearer && jetpackWearer !== cave) crew.removeJetpack(jetpackWearer);
     if (jetpackCarrier !== cave) {
@@ -35457,7 +35734,8 @@ void main() {
     refreshObjectGuides();
   };
   const collectJetpack = (cave) => {
-    if (!jetpack || jetpack.falling) return false;
+    // Leave the world's pack on its cloud for someone who needs one.
+    if (!jetpack || jetpack.falling || crew.builtInJetpack(cave)) return false;
     removeJetpackPickup();
     jetpackState.owned = true;
     jetpackState.fuel = cave.jetFuel = 1;
@@ -35479,6 +35757,10 @@ void main() {
   };
   const toggleJetpack = () => {
     const cave = crew.player;
+    if (cave && crew.builtInJetpack(cave)) {
+      hud.toast("Built in. It never comes off.");
+      return false;
+    }
     if (!jetpackState.owned) {
       hud.toast("Find the jetpack on a distant cloud");
       return false;
@@ -36687,7 +36969,6 @@ void main() {
   const enterScene = (view, id) => {
     if (entering) return;
     entering = true;
-    stopFlyby();
     pilot.release(true);
     hud.tooltip.hide();
     const orbit = pilot.orbit;
@@ -36712,77 +36993,6 @@ void main() {
     if (entering) return;
     world.pilot = pilot.player ? pilot.player.traits.name : null;
     enterScene(presets[id], id);
-  };
-  // The flyby tours every named place once, clockwise from the gate, and ends over the pile.
-  const clockAngle = (x, z) => {
-    const angle = Math.atan2(x, -z);
-    return angle < 0 ? angle + Math.PI * 2 : angle;
-  };
-  const FLYBY_HQ_VIEW = { yaw: 0, pitch: 0.1, dist: 5, target: { x: 0, y: 0, z: 0 } }, FLYBY_BASEMENT_VIEW = { yaw: 0, pitch: 0.1, dist: 5, target: { x: 0, y: 0, z: 0 } }, FLYBY_UNDER_HOVER = 1.6;
-  const lookingAt = (view, point) => { view.yaw = Math.atan2(-(point.x - view.target.x), -(point.z - view.target.z)); };
-  // The headquarters and the basement are two chained underground stops: down the first ramp
-  // clockwise, through the room, down the nearer basement ramp, back up the other one and out
-  // through the second headquarters ramp. Each view looks toward the ramp it leaves by.
-  const flybyUnderground = (name, key) => {
-    const H = island.headquarters;
-    const ramps = H.ramps.map((ramp) => ({ ramp, m: island.mouths.find((mouth) => mouth.id === ramp.id) })).sort((a, b) => key(a.m) - key(b.m));
-    const [enter, exit] = ramps, entered = enter.ramp.to;
-    const lower = H.basement.ramps.slice().sort((a, b) => Math.hypot(a.samples[0].x - entered.x, a.samples[0].z - entered.z) - Math.hypot(b.samples[0].x - entered.x, b.samples[0].z - entered.z));
-    const [down, up] = lower, downSamples = down.samples, upSamples = up.samples, exitSamples = exit.ramp.samples;
-    const basementRoute = [], surfaceRoute = [];
-    for (let i = upSamples.length - 1; i >= 0; i--) basementRoute.push(upSamples[i]);
-    for (let i = exitSamples.length - 1; i >= 0; i--) basementRoute.push(exitSamples[i]);
-    FLYBY_HQ_VIEW.target.y = H.floor + 0.8;
-    FLYBY_BASEMENT_VIEW.target.y = H.basement.floor + 0.8;
-    lookingAt(FLYBY_HQ_VIEW, downSamples[0]);
-    lookingAt(FLYBY_BASEMENT_VIEW, upSamples[upSamples.length - 1]);
-    const headquartersStop = { name, view: FLYBY_HQ_VIEW, at: exit.m, hover: FLYBY_UNDER_HOVER, entry: enter.ramp.samples[0], entryRoute: enter.ramp.samples, exit: downSamples[downSamples.length - 1], exitRoute: downSamples };
-    const basementStop = { name: "Basement", view: FLYBY_BASEMENT_VIEW, hover: FLYBY_UNDER_HOVER, entry: headquartersStop.exit, entryRoute: surfaceRoute, exit: exitSamples[0], exitRoute: basementRoute };
-    surfaceRoute.push(headquartersStop.exit);
-    return [headquartersStop, basementStop];
-  };
-  // The plane stands on the rally roof: the leg to it leaves the trail in front of the mouth,
-  // climbs there and comes in over the rim, and the leg down reverses that.
-  const flybyRoof = (name, view, m) => {
-    const out = { x: m.apron.x + (m.apron.x - m.x), y: m.floorY, z: m.apron.z + (m.apron.z - m.z) };
-    const climb = { x: out.x, y: view.target.y + 3, z: out.z };
-    return { name, view, entry: out, entryRoute: [out, climb], exit: out, exitRoute: [climb, out] };
-  };
-  const buildFlybyStops = () => {
-    const gateAngle = clockAngle(GATE_VIEW.target.x, GATE_VIEW.target.z);
-    const key = (spot) => (clockAngle(spot.x, spot.z) - gateAngle + Math.PI * 2) % (Math.PI * 2);
-    const stops = [{ name: caves.gate.name, view: GATE_VIEW }];
-    let underground = null;
-    for (const slot of caves.slots) {
-      if (!slot.name) continue;
-      if (slot.status === "headquarters") { underground = underground || flybyUnderground(slot.name, key); continue; }
-      const m = island.mouths.find((mouth) => mouth.id === slot.id);
-      stops.push({ name: slot.name, view: slot.scene ? presets[slot.scene] : mouthView(m) });
-    }
-    if (underground) stops.push(underground[0]);
-    const rally = openMouths.find((entry) => entry.slot.scene === "race");
-    if (presets.drop && rally) stops.push(flybyRoof("Ooga Drop", presets.drop, rally.m));
-    if (presets.orbit) stops.push({ name: "Ooga Orbit", view: presets.orbit });
-    const order = (stop) => key(stop.at || stop.view.target);
-    stops.sort((a, b) => order(a) - order(b) || a.name.localeCompare(b.name));
-    if (underground) stops.splice(stops.indexOf(underground[0]) + 1, 0, underground[1]);
-    stops.push({ name: "The pile", view: PILE_VIEW });
-    return stops;
-  };
-  const stopFlyby = () => {
-    if (!flyby || !flyby.active) return;
-    flyby.stop();
-    hud.setFlyby(false);
-  };
-  const toggleFlyby = () => {
-    if (flyby.active) { stopFlyby(); return; }
-    if (entering) return;
-    // Leave any driven Ooga or close view the way the PILE button does, then take the orbit from where it is.
-    pilot.goPreset("pile");
-    hud.tooltip.hide();
-    flyby.start(pilot.orbit, buildFlybyStops(), (stop) => hud.toast(stop.name));
-    hud.setFlyby(true);
-    hud.hint("Flying over the island · drag, scroll, a key or FLYBY again takes the camera back");
   };
   // The Agent answers taps like an Ooga: a double-click plays it, a double-click
   // anywhere else lets it go; a third quick tap toggles its Matrix model.
@@ -37237,7 +37447,6 @@ void main() {
     return true;
   };
   const navigate = (name) => {
-    stopFlyby();
     const destination = NAVIGATION, p = destination.position, target = destination.target;
     const player = pilot.player, close = pilot.closeWanted, basement = name === "basement", underground = name === "underground" || basement;
     let x = 0, z = 0, yaw = 0, pitch = 0.18, dist = player ? 6 : 8;
@@ -37898,14 +38107,6 @@ void main() {
     solids.sync();
     updateSleepingSolids();
     pilot.readInput(dt);
-    if (flyby.active) {
-      // Anything else moving the orbit since the last write was the visitor: the tour yields at once.
-      if (flyby.disturbed(pilot.orbit)) stopFlyby();
-      else {
-        flyby.update(dt, pilot.orbit);
-        if (!flyby.active) hud.setFlyby(false);
-      }
-    }
     mirrorCave.damage.update(dt);
     syncMirrorDamage();
     mirrorCave.ripples.update(dt, elapsed);
@@ -38225,7 +38426,7 @@ void main() {
   const onKey = (e) => {
     if (e.key === "0") return;
     if ((e.key === "1" || e.key === "2") && pilot.weaponMode(Number(e.key))) return;
-    if (e.key === "Escape") { stopFlyby(); pilot.release(); }
+    if (e.key === "Escape") pilot.release();
     if (e.key === "b" || e.key === "B") addTestBananas(testBananas);
     if (e.key === "l" || e.key === "L") demoTip(120000);
     if (e.key === "p" || e.key === "P") {
@@ -38234,6 +38435,8 @@ void main() {
     }
     // J mirrors the carried jetpack button without changing its fuel.
     if ((e.key === "j" || e.key === "J") && !e.repeat) toggleJetpack();
+    // C changes the colourway of a driven Ooga that was built with two.
+    if ((e.key === "c" || e.key === "C") && !e.repeat && crew.toggleTint(crew.player)) return;
     if (e.key === "g" || e.key === "G") pilot.weaponAction("weapon-toggle");
     if (e.key === "v" || e.key === "V") pilot.weaponAction("weapon-fire");
     const digit = parseInt(e.key, 10);
@@ -38471,8 +38674,6 @@ void main() {
     shared.npcPaths = headquarters.npcPaths = BL.npcPaths.create({ island, walkable: npcWalkable, pointAllowed: (x, z) => !npcClosedCaveAt(x, z),
       surfaceAt: (x, z, y) => island.supportAt(x, z, y, 1e-6, null, PLAYER_RADIUS) });
     const sleepNavigation = headquarters.sleepNavigation = BL.headquartersSleep.create({ island, beds: bedrolls, walkable: sleepRouteClear, surfaceRoute: shared.npcPaths.route });
-    flyby = BL.flyby.create({ paths: shared.npcPaths, island });
-    hud.setFlyby(false);
     const sleepRouteFrom = { x: 0, y: 0, z: 0 };
     shared.bedRoute = (cave, bed, toBed) => sleepNavigation.route(cave.root.position.x, cave.root.position.y - cave.baseY, cave.root.position.z, bed, toBed, cave.slot?.x, cave.slot?.z);
     shared.bedRouteClear = (cave, to) => {
@@ -38480,7 +38681,9 @@ void main() {
       sleepRouteFrom.x = p.x; sleepRouteFrom.y = p.y - cave.baseY; sleepRouteFrom.z = p.z;
       return sleepNavigation.clearSegment(sleepRouteFrom, to, false, 0.3);
     };
-    shared.workSites = caves.slots.filter((slot) => slot.repo && slot.status === "open").map((slot) => {
+    // Any dressed mouth with a repository is a work site: the lab, the games cave
+    // and the island's own cave, which is the mirror.
+    shared.workSites = caves.slots.filter((slot) => slot.repo && (slot.status === "open" || slot.status === "mirror")).map((slot) => {
       const mouth = island.mouths.find((entry) => entry.id === slot.id), sr = Math.sin(mouth.ry), cr = Math.cos(mouth.ry);
       workZones.push({ x: mouth.x, z: mouth.z, floor: mouth.floorY, sr, cr, active: false, half: 3.4, front: 5.8 });
       const aimX = mouth.x + sr * 5.8, aimZ = mouth.z + cr * 5.8, approach = { x: aimX, z: aimZ };
@@ -38623,7 +38826,6 @@ void main() {
       else if (action === "reset") resetDemo();
       else if (action === "act") pilot.action();
       else if (action === "jetpack-toggle") toggleJetpack();
-      else if (action === "flyby") toggleFlyby();
       else if (action.startsWith("weapon-") || action === "magazine-swap") pilot.weaponAction(action);
       else if (action === "reset-view") pilot.goPreset("pile");
     });
@@ -38688,7 +38890,7 @@ void main() {
         get shown() {
           return pile.shown;
         },
-        island, mouths: island.mouths, labels, launchers, camera, storm, cameraPose: POSITION_POSE, crew, controls: pilot.controls, props, altar, path: island.path.debug, headquarters, jumbotron, fireworks: launchFireworks, get fireworksPending() { return fireworksShells.length; }, agent: agent.debug, flyby,
+        island, mouths: island.mouths, labels, launchers, camera, storm, cameraPose: POSITION_POSE, crew, controls: pilot.controls, props, altar, path: island.path.debug, headquarters, jumbotron, fireworks: launchFireworks, get fireworksPending() { return fireworksShells.length; }, agent: agent.debug,
         scenery: {
           get candidateCount() { return scenery.length; },
           get visibleCount() { return sceneryVisible; },
@@ -38918,7 +39120,6 @@ void main() {
   };
   const leave = () => {
     uiGuideObjects = null; uiGuidesReady = false;
-    stopFlyby();
     if (enteringTween) enteringTween.alive = false;
     enteringTween = null;
     window.clearInterval(stateTimer);
@@ -38999,7 +39200,7 @@ void main() {
     hud.dispose();
     // Drop every per-visit ref but the cached island.
     pathNode = altar = hud = hooks = input = pilot = fx = cameraCover = bananaCover = solids = rockGuides = objectGuides = sightGuides = bananaGuides = pileGuides = platformGuides = mirrorGuides = pile = crew = crates = critters = clock = presets = jetpack = jetpackState = jetpackCarrier = jetpackWearer = lastJetpackCloud = mirrorCave = matrixCave = matrixControl = gateRain = fire = headquarters = positionDebug = agent = agentPlay = null;
-    magazine = magazineState = breakables = storm = flyby = null;
+    magazine = magazineState = breakables = storm = null;
     hubScene.input = hubScene.debug = hubScene.agent = hubScene.agentView = hubScene.agentControls = hubScene.agentHandoff = null;
     return { targets: count };
   };
@@ -39351,6 +39552,8 @@ void main() {
       if (pilot.player) pilot.release();
       else go("hub");
     }
+    // C changes the colourway of a driven Ooga that was built with two.
+    if ((e.key === "c" || e.key === "C") && !e.repeat && crew.toggleTint(crew.player)) return;
     if (e.key === "g" || e.key === "G") pilot.weaponAction("weapon-toggle");
     if (e.key === "v" || e.key === "V") pilot.weaponAction("weapon-fire");
     if (e.key === "b" || e.key === "B") addTestBananas(testBananas);
@@ -47852,7 +48055,7 @@ void main() {
         return world.level;
       }
     };
-    for (const key of ["slots", "drops", "core", "shell", "delivery", "spillEffect", "cavemen", "crates", "lab", "headquarters", "hud", "applyAllSwag", "renderLocker", "demoTip", "setPileLevel", "refreshStates", "trimPool", "shown", "island", "mouths", "labels", "camera", "cameraCave", "crew", "controls", "props", "altar", "path", "scenery", "jetpack", "magazine", "mirrorCave", "matrixCave", "matrixGate", "pilot", "renderOpts", "lamps", "entranceLights", "lighting", "fireSeats", "critters", "storm", "daylight", "setHour", "track", "racers", "items", "race", "audio", "weather", "launchers", "drop", "diver", "plane", "course", "jumbotron", "fireworks", "fireworksPending", "orbit", "flight", "site", "agent", "flyby"]) {
+    for (const key of ["slots", "drops", "core", "shell", "delivery", "spillEffect", "cavemen", "crates", "lab", "headquarters", "hud", "applyAllSwag", "renderLocker", "demoTip", "setPileLevel", "refreshStates", "trimPool", "shown", "island", "mouths", "labels", "camera", "cameraCave", "crew", "controls", "props", "altar", "path", "scenery", "jetpack", "magazine", "mirrorCave", "matrixCave", "matrixGate", "pilot", "renderOpts", "lamps", "entranceLights", "lighting", "fireSeats", "critters", "storm", "daylight", "setHour", "track", "racers", "items", "race", "audio", "weather", "launchers", "drop", "diver", "plane", "course", "jumbotron", "fireworks", "fireworksPending", "orbit", "flight", "site", "agent"]) {
       Object.defineProperty(ooga, key, { get: () => active.debug && active.debug[key], enumerable: true });
     }
     window.__ooga = ooga;
