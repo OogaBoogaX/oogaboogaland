@@ -26852,6 +26852,61 @@ const dsbExit = async (b) => {
   await b.evaluate(`__ooga.pilot.navigate({ yaw: 0, pitch: 0, dist: 6, target: { x: -7, y: 1.7, z: 30.5 }, position: { x: -7, y: 0, z: 30.5 } }); __ooga.advance(0.1); document.getElementById("dsb-context").click();`);
   await untilPage(b, 'B.scene === "hub" && !B.transitioning', 15000);
 };
+task("dsb zuzu agent", () => withPage("dsb zuzu agent", hubPage(dist, "scene=dsb"), async (b) => {
+  await b.send("Emulation.setEmulatedMedia", { features: [{ name: "prefers-reduced-motion", value: "reduce" }] });
+  await b.evaluate(`window.dispatchEvent(new KeyboardEvent("keydown", { key: "w" })); __ooga.advance(8, 0.1); window.dispatchEvent(new KeyboardEvent("keyup", { key: "w" })); __ooga.advance(2);`);
+  const first = await b.evaluate(`__ooga.dsb.zuzu.snapshot()`);
+  record("dsb zuzu: physical cat greets after arrival", first.self.name === "Zuzu" && first.self.pronouns === "she/her" && first.self.greeted && first.player.name === "YellowBrokeIt" && first.events.some(e => e.type === "player_seen"), JSON.stringify(first.self));
+  if (process.env.DSB_ZUZU_CAPTURE) {
+    await b.evaluate(`window.__zuzuUpdate = BL.scenes.dsb.update; BL.scenes.dsb.update = () => { Object.assign(__ooga.camera.position, { x: -2, y: 2, z: 26 }); Object.assign(__ooga.camera.target, { x: -4, y: 0.7, z: 23 }); }; __ooga.advance(0.1);`);
+    try { await b.screenshot(process.env.DSB_ZUZU_CAPTURE); }
+    finally { await b.evaluate(`BL.scenes.dsb.update = __zuzuUpdate; delete window.__zuzuUpdate;`); }
+  }
+  const place = (x, z) => b.evaluate(`__ooga.pilot.navigate({ yaw: 0, pitch: 0.2, dist: 7, target: { x: ${x}, y: 1.7, z: ${z} }, position: { x: ${x}, y: 0, z: ${z} } }); __ooga.advance(0.1);`);
+  await place(-20, 19);
+  await b.evaluate(`__ooga.dsb.buy("tomato"); __ooga.dsb.buy("tomato");`);
+  await place(-4, 14.5);
+  const hit = await b.evaluate(`(() => { const B = __ooga, z = B.dsb.zuzu; B.dsb.throwTomato(z); B.advance(0.8, 1 / 120); const a = z.snapshot(); B.advance(3.5); const c = z.snapshot(); return { hits: c.self.tomatoHits, intent: a.self.intent, moved: Math.hypot(c.self.x + 4, c.self.z - 23), events: c.events.map(e => e.type), dialogue: z.dialogue }; })()`);
+  record("dsb zuzu: real tomato collision records a hit and flees", hit.hits === 1 && hit.intent === "flee" && hit.moved > 0.5 && hit.events.includes("tomato_hit") && hit.dialogue.includes("salad weather"), JSON.stringify(hit));
+  // Finish her flight before testing real shared weapon contacts.
+  await b.evaluate(`__ooga.advance(7);`);
+  const cat = await b.evaluate(`__ooga.dsb.zuzu.snapshot().self`);
+  await place(cat.x, cat.z + 3);
+  const weapon = await b.evaluate(`(() => { const B = __ooga, z = B.dsb.zuzu, p = z.root.position; B.crew.selectWeapon(2); const fired = B.crew.fireWeapon(B.dsb.avatar, { x: p.x, y: 0.65, z: p.z }, 1); B.advance(0.3, 1 / 120); return { fired, ...z.snapshot().self }; })()`);
+  record("dsb zuzu: shared weapon reports nearby fire and confirmed hit without killing her", weapon.fired && weapon.nearbyShots > 0 && weapon.weaponHits > 0 && weapon.intent === "flee", JSON.stringify(weapon));
+  await b.evaluate(`__ooga.advance(18);`);
+  await place(-20, 19);
+  await b.evaluate(`__ooga.dsb.buy("banana");`);
+  const hungryCat = await b.evaluate(`__ooga.dsb.zuzu.snapshot().self`);
+  await place(hungryCat.x + 3, hungryCat.z);
+  const food = await b.evaluate(`(() => { const B = __ooga, z = B.dsb.zuzu; B.advance(1); B.dsb.eat(); B.advance(13); const s = z.snapshot(); return { ...s.self, events: s.events.map(e => e.type), food: B.dsb.inventory.bananas }; })()`);
+  record("dsb zuzu: food observations lead to interest and following without taking inventory", food.food === 0 && food.events.includes("food_seen") && food.events.includes("food_activity") && food.events.includes("follow_started"), JSON.stringify(food));
+  await b.evaluate(`__ooga.advance(4);`);
+  const chat = await b.evaluate(`(() => { const B = __ooga, z = B.dsb.zuzu; const before = z.snapshot(); const p = z.root.position; B.pilot.navigate({ yaw: 0, pitch: 0.2, dist: 7, target: { x: p.x, y: 1.7, z: p.z + 2.5 }, position: { x: p.x, y: 0, z: p.z + 2.5 } }); B.advance(0.2); const talked = z.talk(); return { talked, text: z.dialogue, count: before.self.tomatoHits }; })()`);
+  record("dsb zuzu: Talk remembers the tomato", chat.talked && chat.count === 1 && chat.text.includes("tomato"), JSON.stringify(chat));
+  await b.evaluate(`__ooga.advance(4);`);
+  const secure = await b.evaluate(`(() => {
+    const z = __ooga.dsb.zuzu, s = z.snapshot(); let id = 10000;
+    const ask = (type, extra = {}) => z.request({ visit: s.visit, id: ++id, at: s.time, type, ...extra });
+    const bad = [ask("eval", { text: "alert(1)" }), ask("walk_to", { destination: "hub" }), ask("look_at", { entity: "window" }), ask("say", { text: "hi", code: "x" }), ask("say", { text: "x".repeat(161) }), ask("say", { text: "old", at: s.time - 4 }), ask("say", { text: "old visit", visit: s.visit - 1 })];
+    const valid = ask("say", { text: "A perfectly ordinary future model sentence." });
+    const replay = z.request({ visit: s.visit, id, at: s.time, type: "stop_following" });
+    const movement = [ask("stop_following"), ask("walk_to", { destination: "arrival" })];
+    const burst = []; for (let i = 0; i < 12; i++) burst.push(ask("look_at", { entity: "player" }));
+    return { bad, valid, replay, movement, limited: burst.includes("rate_limited") };
+  })()`);
+  record("dsb zuzu: strict action validation rejects unsafe, stale, duplicate and excessive requests", secure.valid === "accepted" && secure.bad.every(v => v !== "accepted") && secure.replay === "stale" && secure.limited && secure.movement.every(v => v === "accepted"), JSON.stringify(secure));
+  const path = await b.evaluate(`(() => { const B = __ooga, z = B.dsb.zuzu; let safe = true; for (let i = 0; i < 600; i++) { B.advance(0.05); const p = z.root.position; safe = safe && Math.hypot(p.x, p.z) <= 29.01 && p.z >= 6 && p.z <= 26; } return { safe, ...z.snapshot().self }; })()`);
+  record("dsb zuzu: waypoint walk reaches arrival inside safe bounds", path.safe && Math.hypot(path.x + 4, path.z - 23) < 0.3, JSON.stringify(path));
+  await place(-4, 26);
+
+  const memory = await b.evaluate(`(() => { const z = __ooga.dsb.zuzu; for (let i = 0; i < 80; i++) z.event("tomato_hit"); const s = z.snapshot(); return { count: s.events.length, hits: s.self.tomatoHits, ordered: s.events.every((e, i, a) => !i || e.seq === a[i - 1].seq + 1), frozen: Object.isFrozen(s) && Object.isFrozen(s.events[0]) }; })()`);
+  record("dsb zuzu: memory is bounded, ordered and read-only to brains", memory.count === 64 && memory.hits === 81 && memory.ordered && memory.frozen, JSON.stringify(memory));
+  await b.evaluate(`window.__oldZuzu = __ooga.dsb.zuzu; __ooga.go("hub");`);
+  record("dsb zuzu: exit disposes agent and hub has no agent", await untilPage(b, 'B.scene === "hub" && !B.transitioning && __oldZuzu.disposed && !B.dsb', 20000));
+  await b.evaluate(`__ooga.go("dsb");`);
+  record("dsb zuzu: new visit resets session memory", await untilPage(b, 'B.scene === "dsb" && !B.transitioning && B.dsb.zuzu.snapshot().events.length === 0 && B.dsb.zuzu.snapshot().self.tomatoHits === 0', 10000));
+}));
 task("dsb entrance audio independence", async () => {
   for (const ready of [false, true]) await withPage("dsb entrance " + (ready ? "audio enabled" : "audio blocked"), hubPage(dist, "scene=dsb"), async (b) => {
     await b.send("Emulation.setEmulatedMedia", { features: [{ name: "prefers-reduced-motion", value: "reduce" }] });

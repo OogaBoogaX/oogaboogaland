@@ -14,13 +14,14 @@
   let rideYaw = 0, ridePitch = 0, proximity, lastContext = "", bananas = 0;
   const RENDER = { clear: [0.025, 0.014, 0.06], horizon: [0.11, 0.04, 0.19], zenith: [0.008, 0.006, 0.025], sky: [0.52, 0.43, 0.7], ground: [0.26, 0.17, 0.32], sun: [0.8, 0.7, 0.9], light: { x: -0.4, y: 0.8, z: 0.4 }, stars: 1, shadowCenter: { x: 0, y: 0, z: 0 }, shadowExtent: 48, bloomStrength: 0.5, lights: new Float32Array(80), lightCount: 2 };
   const DARK = { clear: [0, 0, 0], sky: [0.12, 0.1, 0.16], ground: [0.04, 0.03, 0.06], sun: [0.18, 0.16, 0.22], bloomStrength: 0.15 };
-  let root, camera, input, pilot, hud, renderer, world, game, go, land, portal, audio, data, tv, panel, readout, bag, prompt, overlayCanvas, overlayCtx, avatar, crew, fx, playerWorld;
+  let root, camera, input, pilot, hud, renderer, world, game, go, land, portal, audio, data, tv, panel, readout, bag, prompt, overlayCanvas, overlayCtx, avatar, crew, fx, playerWorld, zuzu;
   let exiting = false;
   let phase = "entrance", progress = 0, elapsed = 0, flash = 0, boatAngle = 0, rideAngle = 0, priceTimer = 0, tokens = 20, bread = 0, tomatoes = 0, throwAt = -1, fedUntil = 0, disposed = false, oldSheetHidden = false, oldSheetOpen = "true";
   let arrivalTime = 0, glanceTime = 3, lastCue = -1, glance = 0, gait = 0, avatarView = true;
   let lastPrice = "", lastBag = "", lastPrompt = "", savedRevision = -1, lastHeight = 0, skyPulse = 0;
   const targets = [], visitors = [], shots = [], rails = [], ties = [], candles = [], railY = new Float64Array(N), railColor = new Uint8Array(N);
   const railPoint = { x: 0, y: 0, z: 0 }, railAhead = { x: 0, y: 0, z: 0 }, previous = { x: 0, z: 26 };
+  const agentPerception = { name: "", x: 0, y: 0, z: 0, food: 0, active: false };
   const feedback = ["Ooga! Tough crowd!", "That one was ripe!", "Save some for the sandwich!", "Encore! But fewer tomatoes!"];
   const jokes = ["I bought the dip. Nobody brought chips.", "My wallet is cold. My banana bread is warm.", "A turtle walks into a bar. Eventually.", "Proof of work? I carried this microphone."];
   const dsbScene = { id: "dsb", root: null, camera: null, input: null, debug: null, renderOpts: DARK, get inMotion() { return true; } };
@@ -75,8 +76,11 @@
     return true;
   };
   const weaponImpact = (source, hit) => {
+    if (hit.owner && hit.owner.kind === "dsb-agent") zuzu.event("weapon_hit");
     if (hit.owner && hit.owner.kind === "visitor") { hit.owner.cave.hit = 1; toast("Ooga! Watch the banana shots!"); }
   };
+  const projectileMove = (ax, ay, az, bx, by, bz) => zuzu.projectile(ax, ay, az, bx, by, bz);
+  const nearZuzu = () => playerEnabled() && Math.hypot(avatar.root.position.x - zuzu.root.position.x, avatar.root.position.z - zuzu.root.position.z) < 3.5;
   const reloadPolicy = { near: () => playerEnabled(), available: () => true, consume: () => {} };
   const near = (x, z, radius = 5) => { const p = location(); return Math.hypot(p.x - x, p.z - z) < radius; };
   const clampTarget = (p) => {
@@ -169,9 +173,10 @@
     if (atStation()) return trainTrip.wait > 0 ? "coaster" : "coaster-wait";
     if (near(-10, 16, 6)) return "tv";
     if (near(-20, 16, 6)) return "shop";
+    if (nearZuzu()) return "zuzu";
     return "";
   };
-  const CONTEXT_LABELS = { ride: "Leave ride", exit: "Return to Ooga Booga Land", boat: "Take a ride - boat", coaster: "Take a ride - coaster", "boat-wait": "Boat arriving soon", "coaster-wait": "Coaster arriving soon", tv: "Use TV", shop: "Visit meme shop" };
+  const CONTEXT_LABELS = { zuzu: "Talk to Zuzu", ride: "Leave ride", exit: "Return to Ooga Booga Land", boat: "Take a ride - boat", coaster: "Take a ride - coaster", "boat-wait": "Boat arriving soon", "coaster-wait": "Coaster arriving soon", tv: "Use TV", shop: "Visit meme shop" };
   const syncContext = () => {
     const kind = contextAction();
     if (kind === lastContext) return;
@@ -200,7 +205,7 @@
   };
   const eat = () => {
     if (phase === "entrance" || phase === "arrival" || !bread && !bananas) { toast("Pick up bananas or banana bread at the meme stand first."); return; }
-    if (bread) bread--; else bananas--; fedUntil = elapsed + 1.5; bagText(); toast("Warm banana bread. Ooga approved.");
+    if (bread) bread--; else bananas--; fedUntil = elapsed + 1.5; bagText(); toast("Warm banana bread. Ooga approved."); zuzu.event("food_activity");
   };
   const throwTomato = (target = null) => {
     if (!playerEnabled() || elapsed - throwAt < 0.3) return;
@@ -223,6 +228,7 @@
     else if (atStation()) board("coaster");
     else if (near(-10, 16, 6)) openTv();
     else if (near(-20, 16, 7)) openShop();
+    else if (nearZuzu()) zuzu.talk();
     else if (near(-18, -10, 7)) perform();
     else if (inCave()) returnHub();
     else throwTomato();
@@ -231,7 +237,8 @@
   const onTap = (hit) => {
     if (!playerEnabled() || pilot.aiming || !hit) return;
     const owner = hit.owner;
-    if (owner.kind === "visitor") { if (tomatoes) throwTomato(owner.cave); else toast("Grab tomatoes at the meme stand, then tap an Ooga."); }
+    if (owner.kind === "dsb-agent") { if (nearZuzu()) zuzu.talk(); else toast("Walk closer to talk to Zuzu."); }
+    else if (owner.kind === "visitor") { if (tomatoes) throwTomato(owner.cave); else toast("Grab tomatoes at the meme stand, then tap an Ooga."); }
     else if (owner.kind === "tv") openTv();
     else if (owner.kind === "shop") openShop();
     else if (owner.kind === "boat" || owner.kind === "coaster") board(owner.kind);
@@ -308,6 +315,8 @@
       avatar.root.visible = true;
       if (cameraEnabled()) { pilot.readInput(dt); if (avatarView) crew.update(dt, time); pilot.update(dt); }
     } else avatar.root.visible = phase === "arrival";
+    agentPerception.name = avatar.traits.name; agentPerception.x = avatar.root.position.x; agentPerception.y = avatar.root.position.y - avatar.baseY; agentPerception.z = avatar.root.position.z; agentPerception.food = bananas + bread; agentPerception.active = playerEnabled();
+    zuzu.update(dt, time, agentPerception);
     advanceTrip(boatTrip, dt); boatAngle = boatTrip.angle;
     for (let i = 0; i < land.boats.length; i++) {
       const a = boatAngle - i * 0.13, b = land.boats[i];
@@ -343,7 +352,8 @@
       shot.life -= dt;
       if (shot.life <= 0) { shot.node.visible = false; continue; }
       if (shot.splat) continue;
-      const p = shot.node.position; p.x += shot.vx * dt; p.z += shot.vz * dt; shot.vy -= dt * 9.8; p.y += shot.vy * dt;
+      const p = shot.node.position, ax = p.x, ay = p.y, az = p.z; p.x += shot.vx * dt; p.z += shot.vz * dt; shot.vy -= dt * 9.8; p.y += shot.vy * dt;
+      if (zuzu.tomato(ax, ay, az, p.x, p.y, p.z)) { shot.life = 0; shot.node.visible = false; continue; }
       for (let i = 0; i < visitors.length; i++) {
         const visitor = visitors[i], v = visitor.root.position;
         if (Math.hypot(p.x - v.x, p.z - v.z) < 0.85 && p.y < visitor.floorY + 2.6 && p.y > visitor.floorY) { visitor.hit = 1; shot.life = 0; shot.node.visible = false; toast(feedback[i % feedback.length]); break; }
@@ -361,7 +371,7 @@
       if (lastPrompt !== hint) { prompt.textContent = hint; lastPrompt = hint; }
     }
   };
-  const drawExtra = () => {};
+  const drawExtra = (ctx, project, drawSpeech) => zuzu.draw(ctx, project, drawSpeech);
   const overlay = (dt) => {
     const dpr = Math.min(window.devicePixelRatio || 1, 2), width = overlayCanvas.clientWidth, height = overlayCanvas.clientHeight;
     const w = Math.max(1, Math.round(width * dpr)), h = Math.max(1, Math.round(height * dpr));
@@ -388,8 +398,9 @@
     const hooks = {}; input = BL.interact.create({ canvas: ctx.canvas, renderer, camera, hooks });
     pilot = BL.pilot.create({ renderer, canvas: ctx.canvas, camera, hud, presets: { home: VIEW, lookout: { yaw: 0.38, pitch: 0.18, dist: 95, target: { x: 0, y: -4, z: 0 } } }, landing: "home", pitch: [-0.5, 1.2], dist: [3, 95], follow: { y: 1, min: 3, max: 8, pitch: [0.1, 0.8] }, fly: { speed: 5, perDist: 0.1, climb: 4, yMax: 50 }, clampTarget, clampCamera, coarse: matchMedia("(pointer: coarse)").matches, onFreeAction: act, onPlayerAction: playerAction, reloadAnywhere: true, close: { eyeHeight: 1.7, eyeRatio: 0.8, eyeForward: 0, maxStep: 0.6, pitch: [-1.2, 1.2], orbitDist: 12, trailingDist: 5, groundAt: () => 0 } });
     fx = BL.fx.create({ root, renderer, camera, overlay: ctx.overlay, hud, tickerAt: { x: 0, y: 2, z: 26 } });
-    const shared = { root, input, hud, game, world: playerWorld, playerName, fx, viewYaw: 0, groundAt: () => 0, walkable, reloadPolicy, onWeaponImpact: weaponImpact };
+    const shared = { root, input, hud, game, world: playerWorld, playerName, fx, viewYaw: 0, groundAt: () => 0, walkable, reloadPolicy, onWeaponImpact: weaponImpact, onProjectileMove: projectileMove };
     crew = BL.crew.create(shared); shared.crew = crew; pilot.bind(shared);
+    zuzu = BL.dsbAgent.create({ parent: land.root, input, clearAt });
     avatar = crew.cavemen.get(playerName); crew.collectMagazine(avatar); avatar.root.rotation.y = Math.PI;
     for (const key of Object.keys(pilot.hooks)) { const hook = pilot.hooks[key]; hooks[key] = (...args) => { if (cameraEnabled() && key !== "onDoubleTap") return hook(...args);
       if ((phase === "boat" || phase === "coaster") && key === "onOrbit") { rideYaw = clamp(rideYaw - args[0] * 0.004, -0.65, 0.65); ridePitch = clamp(ridePitch - args[1] * 0.0035, -0.3, 0.3); } }; }
@@ -418,18 +429,18 @@
     document.getElementById("dsb-shop").hidden = true; document.getElementById("dsb-live").setAttribute("aria-pressed", "true"); soundUi();
     document.body.classList.add("dsb-active", "dsb-entry"); document.addEventListener("visibilitychange", onVisibility); bagText();
     dsbScene.renderOpts = DARK;
-    Object.assign(dsbScene, { root, camera, input, debug: { camera, pilot, crew, controls: pilot.controls, hud, audio, dsb: { get phase() { return phase; }, get arrivalTime() { return arrivalTime; }, get glance() { return glance; }, avatar, get progress() { return progress; }, get inventory() { return { tokens, bread, bananas, tomatoes }; }, get shots() { return shots.filter((s) => s.life > 0).length; }, land, visitors, data, tv, openTv, boatTrip, trainTrip, get rideLook() { return { yaw: rideYaw, pitch: ridePitch }; }, railY, board, buy, eat, throwTomato, stopRide, get fired() { return Array.from(audio.fired); } } } });
+    Object.assign(dsbScene, { root, camera, input, debug: { camera, pilot, crew, controls: pilot.controls, hud, audio, dsb: { zuzu, get phase() { return phase; }, get arrivalTime() { return arrivalTime; }, get glance() { return glance; }, avatar, get progress() { return progress; }, get inventory() { return { tokens, bread, bananas, tomatoes }; }, get shots() { return shots.filter((s) => s.life > 0).length; }, land, visitors, data, tv, openTv, boatTrip, trainTrip, get rideLook() { return { yaw: rideYaw, pitch: ridePitch }; }, railY, board, buy, eat, throwTomato, stopRide, get fired() { return Array.from(audio.fired); } } } });
     syncContext(); update(0, 0);
   };
   const leave = () => {
     disposed = true; document.removeEventListener("visibilitychange", onVisibility);
-    proximity.hidden = true; tv.dispose(); audio.dispose(); data.dispose(); pilot.dispose(); crew.dispose(); fx.dispose();
+    proximity.hidden = true; tv.dispose(); audio.dispose(); data.dispose(); pilot.dispose(); crew.dispose(); zuzu.dispose(); fx.dispose();
     for (const node of targets) input.remove(node); targets.length = 0;
     const count = input.targetCount; input.dispose(); hud.el.sheet.hidden = oldSheetHidden; hud.el.sheet.dataset.open = oldSheetOpen; hud.dispose();
     while (root.children.length) removeChild(root, root.children[root.children.length - 1]);
     visitors.length = shots.length = rails.length = ties.length = candles.length = 0;
     document.body.classList.remove("dsb-active", "dsb-entry", "dsb-arrival");
-    crew = fx = playerWorld = null;
+    crew = fx = playerWorld = zuzu = null;
     avatar = land = portal = camera = input = pilot = hud = renderer = world = game = go = audio = data = tv = panel = readout = bag = prompt = overlayCanvas = overlayCtx = proximity = null;
     dsbScene.input = dsbScene.debug = null; return { targets: count };
   };
