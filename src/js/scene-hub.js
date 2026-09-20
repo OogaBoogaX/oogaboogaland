@@ -2392,6 +2392,7 @@
   const enterScene = (view, id) => {
     if (entering) return;
     entering = true;
+    if (id === "dsb") world.pilot = pilot.player ? pilot.player.traits.name : null;
     pilot.release(true);
     hud.tooltip.hide();
     const orbit = pilot.orbit;
@@ -3984,8 +3985,10 @@
     crew.refreshStates(true);
     let initialCharacter = ctx.from === null && preloadedCharacter ? contributors.roster.find((entry) => entry.name.toLowerCase() === preloadedCharacter) : null;
     if (ctx.from === null && preloadedJetpackWear && !params.has("character")) initialCharacter = contributors.roster.find((entry) => crew.stateOf(crew.cavemen.get(entry.name)) === "working") || contributors.roster[0];
-    if (initialCharacter) {
-      const cave = crew.cavemen.get(initialCharacter.name);
+    const returningCharacter = ctx.from === "dsb" ? world.pilot : null;
+    if (ctx.from === "dsb") world.pilot = null;
+    if (initialCharacter || returningCharacter) {
+      const cave = crew.cavemen.get(returningCharacter || initialCharacter.name);
       if (crew.stateOf(cave) !== "working") {
         cave.override = "working";
         crew.refreshStates(true);
@@ -3994,7 +3997,8 @@
     }
     const initialFirstPerson = ctx.from === null && preloadedFirstPerson;
     if (initialFirstPerson) pilot.enterClose();
-    if (preloadedView || initialCharacter || initialFirstPerson) navigate(preloadedView || "pile");
+    if (returningCharacter) navigate("pile");
+    else if (preloadedView || initialCharacter || initialFirstPerson) navigate(preloadedView || "pile");
     if (initialCharacter && preloadedJetpack) {
       grantJetpack(pilot.player, preloadedJetpackWear);
     }

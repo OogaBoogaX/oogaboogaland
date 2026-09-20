@@ -17957,6 +17957,35 @@ task("dsb ambience", () => withPage("dsb ambience", hubPage(dist, "scene=dsb"), 
   } finally { await b.evaluate(`AudioContext.prototype.createBufferSource = __ambientProbe.buffer; AudioContext.prototype.createOscillator = __ambientProbe.oscillator; delete window.__ambientProbe;`); }
 }));
 
+task("dsb character continuity", () => withPage("dsb character continuity", hubPage(dist), async (b) => {
+  for (const name of ["YellowBrokeIt", "portlandhodl"]) {
+    await b.evaluate('__ooga.pilot.goPreset("dsb"); __ooga.advance(1.2)');
+    await b.evaluate(`(() => {
+      const B = __ooga, cave = B.cavemen.get(${JSON.stringify(name)}), m = B.mouths.find(m => m.id === "c10");
+      cave.override = "working"; B.crew.refreshStates(true); B.pilot.possess(cave);
+      window.__dsbPreviousRoot = cave.root;
+      B.crew.relocatePlayer({ x: m.x + Math.sin(m.ry) * 1.5, y: m.floorY, z: m.z + Math.cos(m.ry) * 1.5 }, m.ry + Math.PI);
+      B.pilot.orbit.yaw = B.pilot.orbit.tYaw = m.ry;
+      B.pilot.orbit.pitch = B.pilot.orbit.tPitch = 0;
+      B.advance(0.2);
+    })()`);
+    await b.send("Input.dispatchKeyEvent", { type: "keyDown", key: "w", code: "KeyW" });
+    const entered = await untilPage(b, 'B.scene === "dsb" && !B.transitioning', 15000);
+    await b.send("Input.dispatchKeyEvent", { type: "keyUp", key: "w", code: "KeyW" });
+    if (!entered) throw Error("Character did not reach DSB through the rear wall");
+    const avatar = await b.evaluate(`(() => {
+      const a = __ooga.dsb.avatar, canonical = BL.models.caveman(BL.contributors.traitsFor(${JSON.stringify(name)}));
+      return { name: a.traits.name, rebuilt: a.root !== __dsbPreviousRoot, canonical: a.headOpen === canonical.headOpen };
+    })()`);
+    record("dsb character: " + name + " enters with the canonical model", avatar.name === name && avatar.rebuilt && avatar.canonical, JSON.stringify(avatar));
+    await b.key("Escape");
+    await untilPage(b, 'B.scene === "hub" && !B.transitioning', 15000);
+    const returned = await b.evaluate(`({ name: __ooga.pilot.player?.traits.name, rebuilt: __ooga.pilot.player?.root !== __dsbPreviousRoot })`);
+    record("dsb character: " + name + " returns possessed", returned.name === name && returned.rebuilt, JSON.stringify(returned));
+    await b.evaluate('delete window.__dsbPreviousRoot');
+  }
+}));
+
 task("dsb hub entrance", () => withPage("dsb hub entrance", hubPage(src), async (b) => {
   await b.evaluate(`__ooga.pilot.goPreset("dsb"); __ooga.advance(1.2)`);
   const hit = await b.evaluate(`(() => { const B = __ooga, m = B.mouths.find((m) => m.id === "c10"), p = B.project(m.x, m.floorY + 1.5, m.z), hit = B.input.pick(p.x, p.y); return { x: p.x, y: p.y, slot: hit?.owner.slot?.id }; })()`);

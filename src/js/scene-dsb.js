@@ -347,7 +347,8 @@
     tokens = 20; bread = tomatoes = bananas = 0; boatTrip.angle = 0; trainTrip.angle = START; boatTrip.wait = trainTrip.wait = WAIT; rideYaw = ridePitch = 0; lastContext = "init"; throwAt = -1; fedUntil = 0; priceTimer = 0; savedRevision = -1; lastHeight = skyPulse = 0; lastPrice = lastBag = lastPrompt = "";
     root = createNode(); camera = createCamera({ fov: 55, near: 0.1, far: 220 }); land = M.build(); land.root.visible = false; addChild(root, land.root);
     portal = createNode({ geometry: M.portalGeometry(), position: { x: 0, y: 1.6, z: 0 } }); addChild(root, portal);
-    avatar = BL.models.caveman(BL.contributors.traitsFor("YellowBrokeIt"));
+    avatar = BL.models.caveman(BL.contributors.traitsFor(world.pilot || "YellowBrokeIt"));
+    world.pilot = avatar.traits.name;
     avatar.baseY = avatar.root.position.y;
     avatar.root.rotation.y = Math.PI; addChild(root, avatar.root);
     overlayCanvas = ctx.overlay; overlayCtx = overlayCanvas.getContext("2d");
