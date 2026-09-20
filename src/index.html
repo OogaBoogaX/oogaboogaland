@@ -5,7 +5,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta http-equiv="Content-Security-Policy"
-    content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'none'; base-uri 'none'; form-action 'none'">
+    content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src wss://mempool.space; base-uri 'none'; form-action 'none'">
   <meta name="referrer" content="no-referrer">
   <meta name="color-scheme" content="dark">
   <meta name="theme-color" content="#0a0a0b">
@@ -631,6 +631,14 @@
     </div>
     <button type="button" class="position-debug" id="position-debug"
       aria-label="Debug character and camera state. Click to copy an exact replay URL." hidden></button>
+    <section class="feed-debug" id="feed-debug" aria-label="mempool.space feed" hidden>
+      <header class="feed-debug-head">
+        <span>mempool.space · wss://mempool.space/api/v1/ws</span>
+        <button type="button" class="feed-debug-close" id="feed-debug-close" aria-label="Close the feed panel">×</button>
+      </header>
+      <pre class="feed-debug-state" id="feed-debug-state"></pre>
+      <pre class="feed-debug-log" id="feed-debug-log"></pre>
+    </section>
     <div class="tooltip" id="tooltip" role="tooltip" hidden></div>
     <div id="carry-cursor" class="carry-cursor" aria-hidden="true" hidden>
       <svg viewBox="0 0 16 22" focusable="false">
@@ -671,6 +679,7 @@
   <script src="js/characters.gen.js"></script>
   <script src="js/contributors.js"></script>
   <script src="js/donations.js"></script>
+  <script src="js/mempool.js"></script>
   <script src="js/weapon-targets.js"></script>
   <script src="js/interact.js"></script>
   <script src="js/controls.js"></script>
@@ -690,6 +699,7 @@
   <script src="js/mirror-guides.js"></script>
   <script src="js/crates.js"></script>
   <script src="js/critters.js"></script>
+  <script src="js/storm.js"></script>
   <script src="js/race-models.js"></script>
   <script src="js/drop-models.js"></script>
   <script src="js/rocket.js"></script>

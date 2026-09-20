@@ -5,7 +5,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta http-equiv="Content-Security-Policy"
-    content="default-src 'none'; script-src 'sha256-g7Ntm0RX9KgFVkUKC55x205LewhziuvO1squ5GlpuAw='; style-src 'sha256-GP+iYJOjddCaXd9GOfDjBzHNbu2PStMtHq1mQnqJRVo='; img-src 'self' data:; connect-src 'none'; base-uri 'none'; form-action 'none'">
+    content="default-src 'none'; script-src 'sha256-IhkC7ERY+tIFDxAC3a10pFEtEeZH1Cx4jblo8h6Gl44='; style-src 'sha256-lv68KslPaBp0nzY6tFVa23cmEjIWG7lFrPlQ8lqGzSA='; img-src 'self' data:; connect-src wss://mempool.space; base-uri 'none'; form-action 'none'">
   <meta name="referrer" content="no-referrer">
   <meta name="color-scheme" content="dark">
   <meta name="theme-color" content="#0a0a0b">
@@ -442,11 +442,6 @@ select {
 .presets [data-action="mute"][aria-pressed="true"] {
   color: var(--muted);
   text-decoration: line-through;
-}
-
-.presets [data-action="flyby"][aria-pressed="true"] {
-  color: var(--accent);
-  background: linear-gradient(#b8844a, var(--plank));
 }
 
 .presets .leave:hover,
@@ -1044,6 +1039,70 @@ select {
   cursor: copy;
   user-select: text;
   overflow-x: auto;
+}
+
+/* The feed panel: the Konami code toggles it, page-wide, over any scene. */
+.feed-debug {
+  position: fixed;
+  right: calc(16px + var(--safe-right));
+  bottom: calc(16px + var(--safe-bottom));
+  z-index: 12;
+  width: min(380px, calc(100vw - 32px - var(--safe-left) - var(--safe-right)));
+  max-height: calc(60vh - var(--safe-bottom));
+  display: flex;
+  flex-direction: column;
+  padding: 8px 10px;
+  color: #bfe0ff;
+  background: rgba(8, 14, 22, 0.92);
+  border: 1px solid rgba(96, 170, 255, 0.6);
+  border-radius: 4px;
+  font-family: var(--mono);
+  font-size: 10px;
+  line-height: 1.45;
+  user-select: text;
+}
+
+.feed-debug[hidden] {
+  display: none;
+}
+
+.feed-debug-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  color: #e6f2ff;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.feed-debug-close {
+  flex: none;
+  padding: 0 6px;
+  color: inherit;
+  background: none;
+  border: 1px solid rgba(96, 170, 255, 0.4);
+  border-radius: 3px;
+  font: inherit;
+  font-size: 12px;
+  line-height: 1.3;
+  cursor: pointer;
+}
+
+.feed-debug-state,
+.feed-debug-log {
+  margin: 6px 0 0;
+  font: inherit;
+  white-space: pre;
+  overflow-x: auto;
+}
+
+.feed-debug-log {
+  color: #8fb8e8;
+  border-top: 1px solid rgba(96, 170, 255, 0.25);
+  padding-top: 6px;
+  overflow-y: auto;
 }
 
 .position-debug[data-copied="true"] {
@@ -3958,7 +4017,6 @@ body.orbit-dragging #tooltip {
         <button type="button" data-preset="mirror">MIRROR</button>
         <button type="button" data-preset="underground">HQ</button>
         <button type="button" data-preset="basement">BSMT</button>
-        <button type="button" data-action="flyby" id="flyby" aria-pressed="false" title="Fly over the island">FLYBY</button>
       </nav>
       <nav class="presets" aria-label="Camera views" data-scene="lab" hidden>
         <button type="button" data-preset="pile">PILE</button>
@@ -4419,6 +4477,14 @@ body.orbit-dragging #tooltip {
     </div>
     <button type="button" class="position-debug" id="position-debug"
       aria-label="Debug character and camera state. Click to copy an exact replay URL." hidden></button>
+    <section class="feed-debug" id="feed-debug" aria-label="mempool.space feed" hidden>
+      <header class="feed-debug-head">
+        <span>mempool.space · wss://mempool.space/api/v1/ws</span>
+        <button type="button" class="feed-debug-close" id="feed-debug-close" aria-label="Close the feed panel">×</button>
+      </header>
+      <pre class="feed-debug-state" id="feed-debug-state"></pre>
+      <pre class="feed-debug-log" id="feed-debug-log"></pre>
+    </section>
     <div class="tooltip" id="tooltip" role="tooltip" hidden></div>
     <div id="carry-cursor" class="carry-cursor" aria-hidden="true" hidden>
       <svg viewBox="0 0 16 22" focusable="false">
@@ -14261,7 +14327,7 @@ void main() {
 (() => {
   "use strict";
   const BL = window.BL = window.BL || {};
-  BL.jumbotronData = {"meta":{"generated_at":"2026-09-19T17:37:57.782Z","repo":"OogaBoogaX/entropylab","schema_version":1},"totals":{"contributors":41,"commits":916,"prs":348,"reviews":40,"comments":{"issue":282,"review":29,"commit":0,"all":311}},"leaderboards":{"commits":[{"login":"portlandhodl","count":386},{"login":"w-s-bitcoin","count":204},{"login":"MrHodlX","count":66},{"login":"timechainb","count":61},{"login":"dplusplus1024","count":44},{"login":"ottoz0r","count":24},{"login":"pdubl22","count":23},{"login":"J25dunn","count":13},{"login":"RandyMcMillan","count":12},{"login":"itme-brain","count":11},{"login":"2140data","count":9},{"login":"Hero-Gamer","count":8},{"login":"MHODL","count":7},{"login":"Rob1Ham","count":7},{"login":"claude","count":6},{"login":"Jdelg718","count":5},{"login":"email:0ca1dda35e422a0f","count":4},{"login":"email:bdb4923572c8ac13","count":4},{"login":"BTCMcBoatface","count":3},{"login":"email:bed3af55053c78f6","count":3},{"login":"SaniExp","count":2},{"login":"dani69654","count":2},{"login":"hotpixelgroup","count":2},{"login":"rules-without-rulers","count":2},{"login":"FNBIP","count":1},{"login":"HodlDee","count":1},{"login":"csuwildcat","count":1},{"login":"doggyballs","count":1},{"login":"email:56537ddd43347582","count":1},{"login":"email:78da113009979a72","count":1},{"login":"kaloudis","count":1},{"login":"zmeyer44","count":1}],"prs":[{"login":"portlandhodl","count":81},{"login":"MrHodlX","count":72},{"login":"w-s-bitcoin","count":32},{"login":"timechainb","count":26},{"login":"ottoz0r","count":18},{"login":"J25dunn","count":16},{"login":"dplusplus1024","count":13},{"login":"Hero-Gamer","count":12},{"login":"Rob1Ham","count":11},{"login":"itme-brain","count":11},{"login":"2140data","count":10},{"login":"Jdelg718","count":5},{"login":"RandyMcMillan","count":4},{"login":"hotpixelgroup","count":4},{"login":"FNBIP","count":3},{"login":"MiguelMedeiros","count":3},{"login":"SaniExp","count":3},{"login":"dani69654","count":3},{"login":"tmmmemcee","count":3},{"login":"BTCMcBoatface","count":2},{"login":"HodlDee","count":2},{"login":"csuwildcat","count":2},{"login":"pdubl22","count":2},{"login":"rules-without-rulers","count":2},{"login":"zmeyer44","count":2},{"login":"Korg1970","count":1},{"login":"Shitnobi","count":1},{"login":"doggyballs","count":1},{"login":"kaloudis","count":1},{"login":"mikeinspace","count":1},{"login":"unclejim7","count":1}],"reviews":[{"login":"MrHodlX","count":21},{"login":"J25dunn","count":14},{"login":"portlandhodl","count":4},{"login":"Hero-Gamer","count":1}],"comments":[{"login":"portlandhodl","count":84},{"login":"Hero-Gamer","count":53},{"login":"w-s-bitcoin","count":46},{"login":"MrHodlX","count":21},{"login":"RandyMcMillan","count":19},{"login":"J25dunn","count":18},{"login":"BTCMcBoatface","count":14},{"login":"dplusplus1024","count":11},{"login":"itme-brain","count":9},{"login":"dani69654","count":7},{"login":"ottoz0r","count":6},{"login":"hotpixelgroup","count":4},{"login":"timechainb","count":4},{"login":"tmmmemcee","count":3},{"login":"HodlDee","count":2},{"login":"Jdelg718","count":2},{"login":"rules-without-rulers","count":2},{"login":"100megasats","count":1},{"login":"2140data","count":1},{"login":"Bitcoin-Bill","count":1},{"login":"csuwildcat","count":1},{"login":"remcoros","count":1},{"login":"unclejim7","count":1}]},"contributors":[{"login":"portlandhodl","last_seen_at":"2026-09-19T16:10:41Z","counts":{"commits":386,"prs":81,"reviews":4,"comments":{"issue":81,"review":3,"commit":0,"all":84}},"weekly":[{"week":"2026-W35","commits":111,"prs":34,"reviews":0,"comments":17},{"week":"2026-W36","commits":229,"prs":40,"reviews":2,"comments":58},{"week":"2026-W37","commits":21,"prs":2,"reviews":0,"comments":1},{"week":"2026-W38","commits":25,"prs":5,"reviews":2,"comments":8}]},{"login":"w-s-bitcoin","last_seen_at":"2026-09-17T16:19:10Z","counts":{"commits":204,"prs":32,"reviews":0,"comments":{"issue":46,"review":0,"commit":0,"all":46}},"weekly":[{"week":"2026-W35","commits":113,"prs":13,"reviews":0,"comments":9},{"week":"2026-W36","commits":51,"prs":13,"reviews":0,"comments":1},{"week":"2026-W37","commits":35,"prs":5,"reviews":0,"comments":31},{"week":"2026-W38","commits":5,"prs":1,"reviews":0,"comments":5}]},{"login":"MrHodlX","last_seen_at":"2026-09-19T17:24:42Z","counts":{"commits":66,"prs":72,"reviews":21,"comments":{"issue":21,"review":0,"commit":0,"all":21}},"weekly":[{"week":"2026-W35","commits":11,"prs":19,"reviews":0,"comments":1},{"week":"2026-W36","commits":10,"prs":20,"reviews":13,"comments":4},{"week":"2026-W37","commits":6,"prs":9,"reviews":7,"comments":5},{"week":"2026-W38","commits":39,"prs":24,"reviews":1,"comments":11}]},{"login":"timechainb","last_seen_at":"2026-09-19T03:17:05Z","counts":{"commits":61,"prs":26,"reviews":0,"comments":{"issue":4,"review":0,"commit":0,"all":4}},"weekly":[{"week":"2026-W35","commits":12,"prs":7,"reviews":0,"comments":0},{"week":"2026-W36","commits":12,"prs":7,"reviews":0,"comments":0},{"week":"2026-W37","commits":7,"prs":4,"reviews":0,"comments":1},{"week":"2026-W38","commits":30,"prs":8,"reviews":0,"comments":3}]},{"login":"Hero-Gamer","last_seen_at":"2026-09-16T21:26:04Z","counts":{"commits":8,"prs":12,"reviews":1,"comments":{"issue":48,"review":5,"commit":0,"all":53}},"weekly":[{"week":"2026-W35","commits":0,"prs":0,"reviews":0,"comments":1},{"week":"2026-W36","commits":2,"prs":6,"reviews":0,"comments":31},{"week":"2026-W37","commits":6,"prs":4,"reviews":1,"comments":19},{"week":"2026-W38","commits":0,"prs":2,"reviews":0,"comments":2}]},{"login":"dplusplus1024","last_seen_at":"2026-09-04T16:46:04Z","counts":{"commits":44,"prs":13,"reviews":0,"comments":{"issue":11,"review":0,"commit":0,"all":11}},"weekly":[{"week":"2026-W35","commits":16,"prs":6,"reviews":0,"comments":2},{"week":"2026-W36","commits":28,"prs":7,"reviews":0,"comments":9}]},{"login":"J25dunn","last_seen_at":"2026-09-14T12:31:24Z","counts":{"commits":13,"prs":16,"reviews":14,"comments":{"issue":7,"review":11,"commit":0,"all":18}},"weekly":[{"week":"2026-W35","commits":1,"prs":3,"reviews":2,"comments":3},{"week":"2026-W36","commits":7,"prs":7,"reviews":1,"comments":2},{"week":"2026-W37","commits":3,"prs":6,"reviews":10,"comments":11},{"week":"2026-W38","commits":2,"prs":0,"reviews":1,"comments":2}]},{"login":"ottoz0r","last_seen_at":"2026-09-02T02:19:20Z","counts":{"commits":24,"prs":18,"reviews":0,"comments":{"issue":6,"review":0,"commit":0,"all":6}},"weekly":[{"week":"2026-W35","commits":16,"prs":11,"reviews":0,"comments":5},{"week":"2026-W36","commits":8,"prs":7,"reviews":0,"comments":1}]},{"login":"RandyMcMillan","last_seen_at":"2026-08-31T09:57:39Z","counts":{"commits":12,"prs":4,"reviews":0,"comments":{"issue":10,"review":9,"commit":0,"all":19}},"weekly":[{"week":"2026-W35","commits":9,"prs":3,"reviews":0,"comments":16},{"week":"2026-W36","commits":3,"prs":1,"reviews":0,"comments":3}]},{"login":"itme-brain","last_seen_at":"2026-09-05T00:24:12Z","counts":{"commits":11,"prs":11,"reviews":0,"comments":{"issue":9,"review":0,"commit":0,"all":9}},"weekly":[{"week":"2026-W35","commits":10,"prs":9,"reviews":0,"comments":6},{"week":"2026-W36","commits":1,"prs":2,"reviews":0,"comments":3}]},{"login":"pdubl22","last_seen_at":"2026-09-02T04:06:43Z","counts":{"commits":23,"prs":2,"reviews":0,"comments":{"issue":0,"review":0,"commit":0,"all":0}},"weekly":[{"week":"2026-W36","commits":23,"prs":2,"reviews":0,"comments":0}]},{"login":"2140data","last_seen_at":"2026-08-31T04:54:04Z","counts":{"commits":9,"prs":10,"reviews":0,"comments":{"issue":1,"review":0,"commit":0,"all":1}},"weekly":[{"week":"2026-W35","commits":8,"prs":9,"reviews":0,"comments":1},{"week":"2026-W36","commits":1,"prs":1,"reviews":0,"comments":0}]},{"login":"BTCMcBoatface","last_seen_at":"2026-09-12T22:51:09Z","counts":{"commits":3,"prs":2,"reviews":0,"comments":{"issue":14,"review":0,"commit":0,"all":14}},"weekly":[{"week":"2026-W35","commits":2,"prs":1,"reviews":0,"comments":4},{"week":"2026-W36","commits":0,"prs":0,"reviews":0,"comments":6},{"week":"2026-W37","commits":1,"prs":1,"reviews":0,"comments":4}]},{"login":"Rob1Ham","last_seen_at":"2026-09-05T04:49:37Z","counts":{"commits":7,"prs":11,"reviews":0,"comments":{"issue":0,"review":0,"commit":0,"all":0}},"weekly":[{"week":"2026-W36","commits":7,"prs":11,"reviews":0,"comments":0}]},{"login":"Jdelg718","last_seen_at":"2026-08-31T15:06:08Z","counts":{"commits":5,"prs":5,"reviews":0,"comments":{"issue":2,"review":0,"commit":0,"all":2}},"weekly":[{"week":"2026-W35","commits":3,"prs":5,"reviews":0,"comments":1},{"week":"2026-W36","commits":2,"prs":0,"reviews":0,"comments":1}]},{"login":"dani69654","last_seen_at":"2026-09-09T10:02:14Z","counts":{"commits":2,"prs":3,"reviews":0,"comments":{"issue":7,"review":0,"commit":0,"all":7}},"weekly":[{"week":"2026-W35","commits":1,"prs":1,"reviews":0,"comments":1},{"week":"2026-W36","commits":1,"prs":2,"reviews":0,"comments":5},{"week":"2026-W37","commits":0,"prs":0,"reviews":0,"comments":1}]},{"login":"hotpixelgroup","last_seen_at":"2026-09-17T16:15:09Z","counts":{"commits":2,"prs":4,"reviews":0,"comments":{"issue":4,"review":0,"commit":0,"all":4}},"weekly":[{"week":"2026-W36","commits":0,"prs":2,"reviews":0,"comments":2},{"week":"2026-W37","commits":1,"prs":2,"reviews":0,"comments":0},{"week":"2026-W38","commits":1,"prs":0,"reviews":0,"comments":2}]},{"login":"MHODL","last_seen_at":"2026-08-30T19:00:46Z","counts":{"commits":7,"prs":0,"reviews":0,"comments":{"issue":0,"review":0,"commit":0,"all":0}},"weekly":[{"week":"2026-W35","commits":7,"prs":0,"reviews":0,"comments":0}]},{"login":"claude","last_seen_at":"2026-09-19T11:34:34Z","counts":{"commits":6,"prs":0,"reviews":0,"comments":{"issue":0,"review":0,"commit":0,"all":0}},"weekly":[{"week":"2026-W38","commits":6,"prs":0,"reviews":0,"comments":0}]},{"login":"rules-without-rulers","last_seen_at":"2026-09-12T17:11:11Z","counts":{"commits":2,"prs":2,"reviews":0,"comments":{"issue":2,"review":0,"commit":0,"all":2}},"weekly":[{"week":"2026-W35","commits":2,"prs":2,"reviews":0,"comments":0},{"week":"2026-W37","commits":0,"prs":0,"reviews":0,"comments":2}]},{"login":"tmmmemcee","last_seen_at":"2026-09-17T00:58:54Z","counts":{"commits":0,"prs":3,"reviews":0,"comments":{"issue":3,"review":0,"commit":0,"all":3}},"weekly":[{"week":"2026-W35","commits":0,"prs":1,"reviews":0,"comments":0},{"week":"2026-W38","commits":0,"prs":2,"reviews":0,"comments":3}]},{"login":"HodlDee","last_seen_at":"2026-09-02T15:19:10Z","counts":{"commits":1,"prs":2,"reviews":0,"comments":{"issue":2,"review":0,"commit":0,"all":2}},"weekly":[{"week":"2026-W36","commits":1,"prs":2,"reviews":0,"comments":2}]},{"login":"SaniExp","last_seen_at":"2026-09-02T16:47:02Z","counts":{"commits":2,"prs":3,"reviews":0,"comments":{"issue":0,"review":0,"commit":0,"all":0}},"weekly":[{"week":"2026-W35","commits":0,"prs":2,"reviews":0,"comments":0},{"week":"2026-W36","commits":2,"prs":1,"reviews":0,"comments":0}]},{"login":"FNBIP","last_seen_at":"2026-09-02T00:55:23Z","counts":{"commits":1,"prs":3,"reviews":0,"comments":{"issue":0,"review":0,"commit":0,"all":0}},"weekly":[{"week":"2026-W35","commits":0,"prs":2,"reviews":0,"comments":0},{"week":"2026-W36","commits":1,"prs":1,"reviews":0,"comments":0}]},{"login":"csuwildcat","last_seen_at":"2026-08-30T19:53:33Z","counts":{"commits":1,"prs":2,"reviews":0,"comments":{"issue":1,"review":0,"commit":0,"all":1}},"weekly":[{"week":"2026-W35","commits":1,"prs":2,"reviews":0,"comments":1}]},{"login":"email:0ca1dda35e422a0f","last_seen_at":"2026-09-05T16:17:09Z","counts":{"commits":4,"prs":0,"reviews":0,"comments":{"issue":0,"review":0,"commit":0,"all":0}},"weekly":[{"week":"2026-W36","commits":4,"prs":0,"reviews":0,"comments":0}]},{"login":"email:bdb4923572c8ac13","last_seen_at":"2026-08-29T03:53:33Z","counts":{"commits":4,"prs":0,"reviews":0,"comments":{"issue":0,"review":0,"commit":0,"all":0}},"weekly":[{"week":"2026-W35","commits":4,"prs":0,"reviews":0,"comments":0}]},{"login":"MiguelMedeiros","last_seen_at":"2026-08-27T21:47:11Z","counts":{"commits":0,"prs":3,"reviews":0,"comments":{"issue":0,"review":0,"commit":0,"all":0}},"weekly":[{"week":"2026-W35","commits":0,"prs":3,"reviews":0,"comments":0}]},{"login":"email:bed3af55053c78f6","last_seen_at":"2026-09-10T22:41:09Z","counts":{"commits":3,"prs":0,"reviews":0,"comments":{"issue":0,"review":0,"commit":0,"all":0}},"weekly":[{"week":"2026-W36","commits":2,"prs":0,"reviews":0,"comments":0},{"week":"2026-W37","commits":1,"prs":0,"reviews":0,"comments":0}]},{"login":"zmeyer44","last_seen_at":"2026-08-31T14:06:04Z","counts":{"commits":1,"prs":2,"reviews":0,"comments":{"issue":0,"review":0,"commit":0,"all":0}},"weekly":[{"week":"2026-W36","commits":1,"prs":2,"reviews":0,"comments":0}]},{"login":"doggyballs","last_seen_at":"2026-09-01T18:55:14Z","counts":{"commits":1,"prs":1,"reviews":0,"comments":{"issue":0,"review":0,"commit":0,"all":0}},"weekly":[{"week":"2026-W36","commits":1,"prs":1,"reviews":0,"comments":0}]},{"login":"kaloudis","last_seen_at":"2026-09-11T03:10:01Z","counts":{"commits":1,"prs":1,"reviews":0,"comments":{"issue":0,"review":0,"commit":0,"all":0}},"weekly":[{"week":"2026-W37","commits":1,"prs":1,"reviews":0,"comments":0}]},{"login":"unclejim7","last_seen_at":"2026-09-05T04:37:51Z","counts":{"commits":0,"prs":1,"reviews":0,"comments":{"issue":1,"review":0,"commit":0,"all":1}},"weekly":[{"week":"2026-W36","commits":0,"prs":1,"reviews":0,"comments":1}]},{"login":"100megasats","last_seen_at":"2026-08-30T20:53:53Z","counts":{"commits":0,"prs":0,"reviews":0,"comments":{"issue":1,"review":0,"commit":0,"all":1}},"weekly":[{"week":"2026-W35","commits":0,"prs":0,"reviews":0,"comments":1}]},{"login":"Bitcoin-Bill","last_seen_at":"2026-09-02T01:00:57Z","counts":{"commits":0,"prs":0,"reviews":0,"comments":{"issue":1,"review":0,"commit":0,"all":1}},"weekly":[{"week":"2026-W36","commits":0,"prs":0,"reviews":0,"comments":1}]},{"login":"Korg1970","last_seen_at":"2026-09-12T17:42:58Z","counts":{"commits":0,"prs":1,"reviews":0,"comments":{"issue":0,"review":0,"commit":0,"all":0}},"weekly":[{"week":"2026-W37","commits":0,"prs":1,"reviews":0,"comments":0}]},{"login":"Shitnobi","last_seen_at":"2026-08-26T23:09:24Z","counts":{"commits":0,"prs":1,"reviews":0,"comments":{"issue":0,"review":0,"commit":0,"all":0}},"weekly":[{"week":"2026-W35","commits":0,"prs":1,"reviews":0,"comments":0}]},{"login":"email:56537ddd43347582","last_seen_at":"2026-08-25T19:35:57Z","counts":{"commits":1,"prs":0,"reviews":0,"comments":{"issue":0,"review":0,"commit":0,"all":0}},"weekly":[{"week":"2026-W35","commits":1,"prs":0,"reviews":0,"comments":0}]},{"login":"email:78da113009979a72","last_seen_at":"2026-08-30T03:08:17Z","counts":{"commits":1,"prs":0,"reviews":0,"comments":{"issue":0,"review":0,"commit":0,"all":0}},"weekly":[{"week":"2026-W35","commits":1,"prs":0,"reviews":0,"comments":0}]},{"login":"mikeinspace","last_seen_at":"2026-09-10T05:25:42Z","counts":{"commits":0,"prs":1,"reviews":0,"comments":{"issue":0,"review":0,"commit":0,"all":0}},"weekly":[{"week":"2026-W37","commits":0,"prs":1,"reviews":0,"comments":0}]},{"login":"remcoros","last_seen_at":"2026-09-12T15:11:21Z","counts":{"commits":0,"prs":0,"reviews":0,"comments":{"issue":0,"review":1,"commit":0,"all":1}},"weekly":[{"week":"2026-W37","commits":0,"prs":0,"reviews":0,"comments":1}]}]};
+  BL.jumbotronData = {"meta":{"generated_at":"2026-09-20T20:32:50.008Z","repo":"OogaBoogaX/entropylab","schema_version":1},"totals":{"contributors":44,"commits":929,"prs":357,"reviews":41,"comments":{"issue":285,"review":29,"commit":0,"all":314}},"leaderboards":{"commits":[{"login":"portlandhodl","count":386},{"login":"w-s-bitcoin","count":204},{"login":"MrHodlX","count":72},{"login":"timechainb","count":61},{"login":"dplusplus1024","count":44},{"login":"ottoz0r","count":24},{"login":"pdubl22","count":23},{"login":"J25dunn","count":13},{"login":"RandyMcMillan","count":12},{"login":"itme-brain","count":11},{"login":"claude","count":10},{"login":"2140data","count":9},{"login":"Hero-Gamer","count":8},{"login":"MHODL","count":7},{"login":"Rob1Ham","count":7},{"login":"Jdelg718","count":5},{"login":"email:0ca1dda35e422a0f","count":4},{"login":"email:bdb4923572c8ac13","count":4},{"login":"BTCMcBoatface","count":3},{"login":"email:bed3af55053c78f6","count":3},{"login":"SaniExp","count":2},{"login":"codex","count":2},{"login":"dani69654","count":2},{"login":"hotpixelgroup","count":2},{"login":"rules-without-rulers","count":2},{"login":"FNBIP","count":1},{"login":"HodlDee","count":1},{"login":"csuwildcat","count":1},{"login":"doggyballs","count":1},{"login":"email:56537ddd43347582","count":1},{"login":"email:78da113009979a72","count":1},{"login":"email:93964419ae80c511","count":1},{"login":"kaloudis","count":1},{"login":"zmeyer44","count":1}],"prs":[{"login":"portlandhodl","count":81},{"login":"MrHodlX","count":80},{"login":"w-s-bitcoin","count":32},{"login":"timechainb","count":26},{"login":"ottoz0r","count":18},{"login":"J25dunn","count":16},{"login":"dplusplus1024","count":13},{"login":"Hero-Gamer","count":12},{"login":"Rob1Ham","count":11},{"login":"itme-brain","count":11},{"login":"2140data","count":10},{"login":"Jdelg718","count":5},{"login":"RandyMcMillan","count":4},{"login":"hotpixelgroup","count":4},{"login":"FNBIP","count":3},{"login":"MiguelMedeiros","count":3},{"login":"SaniExp","count":3},{"login":"dani69654","count":3},{"login":"tmmmemcee","count":3},{"login":"BTCMcBoatface","count":2},{"login":"HodlDee","count":2},{"login":"csuwildcat","count":2},{"login":"pdubl22","count":2},{"login":"rules-without-rulers","count":2},{"login":"zmeyer44","count":2},{"login":"CypherBoxLLC","count":1},{"login":"Korg1970","count":1},{"login":"Shitnobi","count":1},{"login":"doggyballs","count":1},{"login":"kaloudis","count":1},{"login":"mikeinspace","count":1},{"login":"unclejim7","count":1}],"reviews":[{"login":"MrHodlX","count":22},{"login":"J25dunn","count":14},{"login":"portlandhodl","count":4},{"login":"Hero-Gamer","count":1}],"comments":[{"login":"portlandhodl","count":84},{"login":"Hero-Gamer","count":53},{"login":"w-s-bitcoin","count":46},{"login":"MrHodlX","count":23},{"login":"RandyMcMillan","count":19},{"login":"J25dunn","count":18},{"login":"BTCMcBoatface","count":14},{"login":"dplusplus1024","count":11},{"login":"itme-brain","count":9},{"login":"dani69654","count":7},{"login":"ottoz0r","count":6},{"login":"timechainb","count":5},{"login":"hotpixelgroup","count":4},{"login":"tmmmemcee","count":3},{"login":"HodlDee","count":2},{"login":"Jdelg718","count":2},{"login":"rules-without-rulers","count":2},{"login":"100megasats","count":1},{"login":"2140data","count":1},{"login":"Bitcoin-Bill","count":1},{"login":"csuwildcat","count":1},{"login":"remcoros","count":1},{"login":"unclejim7","count":1}]},"contributors":[{"login":"portlandhodl","last_seen_at":"2026-09-19T16:10:41Z","counts":{"commits":386,"prs":81,"reviews":4,"comments":{"issue":81,"review":3,"commit":0,"all":84}},"weekly":[{"week":"2026-W35","commits":111,"prs":34,"reviews":0,"comments":17},{"week":"2026-W36","commits":229,"prs":40,"reviews":2,"comments":58},{"week":"2026-W37","commits":21,"prs":2,"reviews":0,"comments":1},{"week":"2026-W38","commits":25,"prs":5,"reviews":2,"comments":8}]},{"login":"w-s-bitcoin","last_seen_at":"2026-09-17T16:19:10Z","counts":{"commits":204,"prs":32,"reviews":0,"comments":{"issue":46,"review":0,"commit":0,"all":46}},"weekly":[{"week":"2026-W35","commits":113,"prs":13,"reviews":0,"comments":9},{"week":"2026-W36","commits":51,"prs":13,"reviews":0,"comments":1},{"week":"2026-W37","commits":35,"prs":5,"reviews":0,"comments":31},{"week":"2026-W38","commits":5,"prs":1,"reviews":0,"comments":5}]},{"login":"MrHodlX","last_seen_at":"2026-09-20T17:55:40Z","counts":{"commits":72,"prs":80,"reviews":22,"comments":{"issue":23,"review":0,"commit":0,"all":23}},"weekly":[{"week":"2026-W35","commits":11,"prs":19,"reviews":0,"comments":1},{"week":"2026-W36","commits":10,"prs":20,"reviews":13,"comments":4},{"week":"2026-W37","commits":6,"prs":9,"reviews":7,"comments":5},{"week":"2026-W38","commits":45,"prs":32,"reviews":2,"comments":13}]},{"login":"timechainb","last_seen_at":"2026-09-19T20:58:17Z","counts":{"commits":61,"prs":26,"reviews":0,"comments":{"issue":5,"review":0,"commit":0,"all":5}},"weekly":[{"week":"2026-W35","commits":12,"prs":7,"reviews":0,"comments":0},{"week":"2026-W36","commits":12,"prs":7,"reviews":0,"comments":0},{"week":"2026-W37","commits":7,"prs":4,"reviews":0,"comments":1},{"week":"2026-W38","commits":30,"prs":8,"reviews":0,"comments":4}]},{"login":"Hero-Gamer","last_seen_at":"2026-09-16T21:26:04Z","counts":{"commits":8,"prs":12,"reviews":1,"comments":{"issue":48,"review":5,"commit":0,"all":53}},"weekly":[{"week":"2026-W35","commits":0,"prs":0,"reviews":0,"comments":1},{"week":"2026-W36","commits":2,"prs":6,"reviews":0,"comments":31},{"week":"2026-W37","commits":6,"prs":4,"reviews":1,"comments":19},{"week":"2026-W38","commits":0,"prs":2,"reviews":0,"comments":2}]},{"login":"dplusplus1024","last_seen_at":"2026-09-04T16:46:04Z","counts":{"commits":44,"prs":13,"reviews":0,"comments":{"issue":11,"review":0,"commit":0,"all":11}},"weekly":[{"week":"2026-W35","commits":16,"prs":6,"reviews":0,"comments":2},{"week":"2026-W36","commits":28,"prs":7,"reviews":0,"comments":9}]},{"login":"J25dunn","last_seen_at":"2026-09-14T12:31:24Z","counts":{"commits":13,"prs":16,"reviews":14,"comments":{"issue":7,"review":11,"commit":0,"all":18}},"weekly":[{"week":"2026-W35","commits":1,"prs":3,"reviews":2,"comments":3},{"week":"2026-W36","commits":7,"prs":7,"reviews":1,"comments":2},{"week":"2026-W37","commits":3,"prs":6,"reviews":10,"comments":11},{"week":"2026-W38","commits":2,"prs":0,"reviews":1,"comments":2}]},{"login":"ottoz0r","last_seen_at":"2026-09-02T02:19:20Z","counts":{"commits":24,"prs":18,"reviews":0,"comments":{"issue":6,"review":0,"commit":0,"all":6}},"weekly":[{"week":"2026-W35","commits":16,"prs":11,"reviews":0,"comments":5},{"week":"2026-W36","commits":8,"prs":7,"reviews":0,"comments":1}]},{"login":"RandyMcMillan","last_seen_at":"2026-08-31T09:57:39Z","counts":{"commits":12,"prs":4,"reviews":0,"comments":{"issue":10,"review":9,"commit":0,"all":19}},"weekly":[{"week":"2026-W35","commits":9,"prs":3,"reviews":0,"comments":16},{"week":"2026-W36","commits":3,"prs":1,"reviews":0,"comments":3}]},{"login":"itme-brain","last_seen_at":"2026-09-05T00:24:12Z","counts":{"commits":11,"prs":11,"reviews":0,"comments":{"issue":9,"review":0,"commit":0,"all":9}},"weekly":[{"week":"2026-W35","commits":10,"prs":9,"reviews":0,"comments":6},{"week":"2026-W36","commits":1,"prs":2,"reviews":0,"comments":3}]},{"login":"pdubl22","last_seen_at":"2026-09-02T04:06:43Z","counts":{"commits":23,"prs":2,"reviews":0,"comments":{"issue":0,"review":0,"commit":0,"all":0}},"weekly":[{"week":"2026-W36","commits":23,"prs":2,"reviews":0,"comments":0}]},{"login":"2140data","last_seen_at":"2026-08-31T04:54:04Z","counts":{"commits":9,"prs":10,"reviews":0,"comments":{"issue":1,"review":0,"commit":0,"all":1}},"weekly":[{"week":"2026-W35","commits":8,"prs":9,"reviews":0,"comments":1},{"week":"2026-W36","commits":1,"prs":1,"reviews":0,"comments":0}]},{"login":"BTCMcBoatface","last_seen_at":"2026-09-12T22:51:09Z","counts":{"commits":3,"prs":2,"reviews":0,"comments":{"issue":14,"review":0,"commit":0,"all":14}},"weekly":[{"week":"2026-W35","commits":2,"prs":1,"reviews":0,"comments":4},{"week":"2026-W36","commits":0,"prs":0,"reviews":0,"comments":6},{"week":"2026-W37","commits":1,"prs":1,"reviews":0,"comments":4}]},{"login":"Rob1Ham","last_seen_at":"2026-09-05T04:49:37Z","counts":{"commits":7,"prs":11,"reviews":0,"comments":{"issue":0,"review":0,"commit":0,"all":0}},"weekly":[{"week":"2026-W36","commits":7,"prs":11,"reviews":0,"comments":0}]},{"login":"Jdelg718","last_seen_at":"2026-08-31T15:06:08Z","counts":{"commits":5,"prs":5,"reviews":0,"comments":{"issue":2,"review":0,"commit":0,"all":2}},"weekly":[{"week":"2026-W35","commits":3,"prs":5,"reviews":0,"comments":1},{"week":"2026-W36","commits":2,"prs":0,"reviews":0,"comments":1}]},{"login":"dani69654","last_seen_at":"2026-09-09T10:02:14Z","counts":{"commits":2,"prs":3,"reviews":0,"comments":{"issue":7,"review":0,"commit":0,"all":7}},"weekly":[{"week":"2026-W35","commits":1,"prs":1,"reviews":0,"comments":1},{"week":"2026-W36","commits":1,"prs":2,"reviews":0,"comments":5},{"week":"2026-W37","commits":0,"prs":0,"reviews":0,"comments":1}]},{"login":"claude","last_seen_at":"2026-09-20T10:26:38Z","counts":{"commits":10,"prs":0,"reviews":0,"comments":{"issue":0,"review":0,"commit":0,"all":0}},"weekly":[{"week":"2026-W38","commits":10,"prs":0,"reviews":0,"comments":0}]},{"login":"hotpixelgroup","last_seen_at":"2026-09-17T16:15:09Z","counts":{"commits":2,"prs":4,"reviews":0,"comments":{"issue":4,"review":0,"commit":0,"all":4}},"weekly":[{"week":"2026-W36","commits":0,"prs":2,"reviews":0,"comments":2},{"week":"2026-W37","commits":1,"prs":2,"reviews":0,"comments":0},{"week":"2026-W38","commits":1,"prs":0,"reviews":0,"comments":2}]},{"login":"MHODL","last_seen_at":"2026-08-30T19:00:46Z","counts":{"commits":7,"prs":0,"reviews":0,"comments":{"issue":0,"review":0,"commit":0,"all":0}},"weekly":[{"week":"2026-W35","commits":7,"prs":0,"reviews":0,"comments":0}]},{"login":"rules-without-rulers","last_seen_at":"2026-09-12T17:11:11Z","counts":{"commits":2,"prs":2,"reviews":0,"comments":{"issue":2,"review":0,"commit":0,"all":2}},"weekly":[{"week":"2026-W35","commits":2,"prs":2,"reviews":0,"comments":0},{"week":"2026-W37","commits":0,"prs":0,"reviews":0,"comments":2}]},{"login":"tmmmemcee","last_seen_at":"2026-09-17T00:58:54Z","counts":{"commits":0,"prs":3,"reviews":0,"comments":{"issue":3,"review":0,"commit":0,"all":3}},"weekly":[{"week":"2026-W35","commits":0,"prs":1,"reviews":0,"comments":0},{"week":"2026-W38","commits":0,"prs":2,"reviews":0,"comments":3}]},{"login":"HodlDee","last_seen_at":"2026-09-02T15:19:10Z","counts":{"commits":1,"prs":2,"reviews":0,"comments":{"issue":2,"review":0,"commit":0,"all":2}},"weekly":[{"week":"2026-W36","commits":1,"prs":2,"reviews":0,"comments":2}]},{"login":"SaniExp","last_seen_at":"2026-09-02T16:47:02Z","counts":{"commits":2,"prs":3,"reviews":0,"comments":{"issue":0,"review":0,"commit":0,"all":0}},"weekly":[{"week":"2026-W35","commits":0,"prs":2,"reviews":0,"comments":0},{"week":"2026-W36","commits":2,"prs":1,"reviews":0,"comments":0}]},{"login":"FNBIP","last_seen_at":"2026-09-02T00:55:23Z","counts":{"commits":1,"prs":3,"reviews":0,"comments":{"issue":0,"review":0,"commit":0,"all":0}},"weekly":[{"week":"2026-W35","commits":0,"prs":2,"reviews":0,"comments":0},{"week":"2026-W36","commits":1,"prs":1,"reviews":0,"comments":0}]},{"login":"csuwildcat","last_seen_at":"2026-08-30T19:53:33Z","counts":{"commits":1,"prs":2,"reviews":0,"comments":{"issue":1,"review":0,"commit":0,"all":1}},"weekly":[{"week":"2026-W35","commits":1,"prs":2,"reviews":0,"comments":1}]},{"login":"email:0ca1dda35e422a0f","last_seen_at":"2026-09-05T16:17:09Z","counts":{"commits":4,"prs":0,"reviews":0,"comments":{"issue":0,"review":0,"commit":0,"all":0}},"weekly":[{"week":"2026-W36","commits":4,"prs":0,"reviews":0,"comments":0}]},{"login":"email:bdb4923572c8ac13","last_seen_at":"2026-08-29T03:53:33Z","counts":{"commits":4,"prs":0,"reviews":0,"comments":{"issue":0,"review":0,"commit":0,"all":0}},"weekly":[{"week":"2026-W35","commits":4,"prs":0,"reviews":0,"comments":0}]},{"login":"MiguelMedeiros","last_seen_at":"2026-08-27T21:47:11Z","counts":{"commits":0,"prs":3,"reviews":0,"comments":{"issue":0,"review":0,"commit":0,"all":0}},"weekly":[{"week":"2026-W35","commits":0,"prs":3,"reviews":0,"comments":0}]},{"login":"email:bed3af55053c78f6","last_seen_at":"2026-09-10T22:41:09Z","counts":{"commits":3,"prs":0,"reviews":0,"comments":{"issue":0,"review":0,"commit":0,"all":0}},"weekly":[{"week":"2026-W36","commits":2,"prs":0,"reviews":0,"comments":0},{"week":"2026-W37","commits":1,"prs":0,"reviews":0,"comments":0}]},{"login":"zmeyer44","last_seen_at":"2026-08-31T14:06:04Z","counts":{"commits":1,"prs":2,"reviews":0,"comments":{"issue":0,"review":0,"commit":0,"all":0}},"weekly":[{"week":"2026-W36","commits":1,"prs":2,"reviews":0,"comments":0}]},{"login":"codex","last_seen_at":"2026-09-20T12:27:29Z","counts":{"commits":2,"prs":0,"reviews":0,"comments":{"issue":0,"review":0,"commit":0,"all":0}},"weekly":[{"week":"2026-W38","commits":2,"prs":0,"reviews":0,"comments":0}]},{"login":"doggyballs","last_seen_at":"2026-09-01T18:55:14Z","counts":{"commits":1,"prs":1,"reviews":0,"comments":{"issue":0,"review":0,"commit":0,"all":0}},"weekly":[{"week":"2026-W36","commits":1,"prs":1,"reviews":0,"comments":0}]},{"login":"kaloudis","last_seen_at":"2026-09-11T03:10:01Z","counts":{"commits":1,"prs":1,"reviews":0,"comments":{"issue":0,"review":0,"commit":0,"all":0}},"weekly":[{"week":"2026-W37","commits":1,"prs":1,"reviews":0,"comments":0}]},{"login":"unclejim7","last_seen_at":"2026-09-05T04:37:51Z","counts":{"commits":0,"prs":1,"reviews":0,"comments":{"issue":1,"review":0,"commit":0,"all":1}},"weekly":[{"week":"2026-W36","commits":0,"prs":1,"reviews":0,"comments":1}]},{"login":"100megasats","last_seen_at":"2026-08-30T20:53:53Z","counts":{"commits":0,"prs":0,"reviews":0,"comments":{"issue":1,"review":0,"commit":0,"all":1}},"weekly":[{"week":"2026-W35","commits":0,"prs":0,"reviews":0,"comments":1}]},{"login":"Bitcoin-Bill","last_seen_at":"2026-09-02T01:00:57Z","counts":{"commits":0,"prs":0,"reviews":0,"comments":{"issue":1,"review":0,"commit":0,"all":1}},"weekly":[{"week":"2026-W36","commits":0,"prs":0,"reviews":0,"comments":1}]},{"login":"CypherBoxLLC","last_seen_at":"2026-09-19T22:44:16Z","counts":{"commits":0,"prs":1,"reviews":0,"comments":{"issue":0,"review":0,"commit":0,"all":0}},"weekly":[{"week":"2026-W38","commits":0,"prs":1,"reviews":0,"comments":0}]},{"login":"Korg1970","last_seen_at":"2026-09-12T17:42:58Z","counts":{"commits":0,"prs":1,"reviews":0,"comments":{"issue":0,"review":0,"commit":0,"all":0}},"weekly":[{"week":"2026-W37","commits":0,"prs":1,"reviews":0,"comments":0}]},{"login":"Shitnobi","last_seen_at":"2026-08-26T23:09:24Z","counts":{"commits":0,"prs":1,"reviews":0,"comments":{"issue":0,"review":0,"commit":0,"all":0}},"weekly":[{"week":"2026-W35","commits":0,"prs":1,"reviews":0,"comments":0}]},{"login":"email:56537ddd43347582","last_seen_at":"2026-08-25T19:35:57Z","counts":{"commits":1,"prs":0,"reviews":0,"comments":{"issue":0,"review":0,"commit":0,"all":0}},"weekly":[{"week":"2026-W35","commits":1,"prs":0,"reviews":0,"comments":0}]},{"login":"email:78da113009979a72","last_seen_at":"2026-08-30T03:08:17Z","counts":{"commits":1,"prs":0,"reviews":0,"comments":{"issue":0,"review":0,"commit":0,"all":0}},"weekly":[{"week":"2026-W35","commits":1,"prs":0,"reviews":0,"comments":0}]},{"login":"email:93964419ae80c511","last_seen_at":"2026-09-20T10:42:49Z","counts":{"commits":1,"prs":0,"reviews":0,"comments":{"issue":0,"review":0,"commit":0,"all":0}},"weekly":[{"week":"2026-W38","commits":1,"prs":0,"reviews":0,"comments":0}]},{"login":"mikeinspace","last_seen_at":"2026-09-10T05:25:42Z","counts":{"commits":0,"prs":1,"reviews":0,"comments":{"issue":0,"review":0,"commit":0,"all":0}},"weekly":[{"week":"2026-W37","commits":0,"prs":1,"reviews":0,"comments":0}]},{"login":"remcoros","last_seen_at":"2026-09-12T15:11:21Z","counts":{"commits":0,"prs":0,"reviews":0,"comments":{"issue":0,"review":1,"commit":0,"all":1}},"weekly":[{"week":"2026-W37","commits":0,"prs":0,"reviews":0,"comments":1}]}]};
 })();
 
 // ---- js/jumbotron.js ----
@@ -19178,6 +19244,124 @@ void main() {
   BL.donations = { config, createRequest, subscribe, sanitize, HANDLE_MAX, MESSAGE_MAX };
 })();
 
+// ---- js/mempool.js ----
+// Live Bitcoin feed from mempool.space: one socket for the page life, reconnecting with backoff.
+// Subscribers get plain events, { type: "tx", vsize, weight, fee } for each transaction the
+// mempool accepts, { type: "block", height, txCount } for each block mined after connect and
+// { type: "fees", nextFee, blocks } whenever the projected next block's median fee moves.
+// The only network code on the page; the content policy allows exactly this origin.
+(() => {
+  "use strict";
+  const BL = window.BL = window.BL || {};
+  const ENDPOINT = "wss://mempool.space/api/v1/ws";
+  const BACKOFF_MIN = 2000, BACKOFF_MAX = 60000;
+  const subscribers = new Set();
+  const state = { enabled: false, connected: false, attempts: 0, transactions: 0, blocks: 0, height: 0, nextFee: 0, projectedBlocks: 0, messages: 0, bytes: 0, lastKeys: "", lastAt: 0 };
+  let socket = null, timer = 0, backoff = BACKOFF_MIN;
+
+  const emit = (event) => {
+    if (event.type === "tx") state.transactions++;
+    else if (event.type === "block") state.blocks++;
+    for (const fn of subscribers) fn(event);
+  };
+  const block = (b) => {
+    if (!b || !(b.height > state.height)) return;
+    state.height = b.height;
+    emit({ type: "block", height: b.height, txCount: b.tx_count || 0 });
+  };
+  const onMessage = (text) => {
+    state.messages++;
+    state.bytes += text.length;
+    state.lastAt = Date.now();
+    let data;
+    try {
+      data = JSON.parse(text);
+    } catch {
+      return;
+    }
+    if (!data || typeof data !== "object" || Array.isArray(data)) return;
+    state.lastKeys = Object.keys(data).join(", ");
+    // The tip list arrives once per connection and only seeds the height; a later, taller one is news.
+    if (Array.isArray(data.blocks)) {
+      let top = 0;
+      for (const b of data.blocks) if (b && b.height > top) top = b.height;
+      if (state.height === 0) state.height = top;
+      else if (top > state.height) block({ height: top });
+    }
+    if (data.block) block(data.block);
+    // The projection is the fee pressure: the next block's median sat/vB, zero for an empty mempool.
+    const projected = data["mempool-blocks"];
+    if (Array.isArray(projected)) {
+      const first = projected[0];
+      state.nextFee = first && first.medianFee > 0 ? first.medianFee : 0;
+      state.projectedBlocks = projected.length;
+      emit({ type: "fees", nextFee: state.nextFee, blocks: projected.length });
+    }
+    const txs = data["mempool-transactions"];
+    if (txs && Array.isArray(txs.added)) {
+      for (const tx of txs.added) {
+        if (!tx || !(tx.vsize > 0)) continue;
+        emit({ type: "tx", vsize: tx.vsize, weight: tx.weight || tx.vsize * 4, fee: tx.fee || 0 });
+      }
+    }
+  };
+  const retry = () => {
+    if (state.enabled && !timer) {
+      timer = window.setTimeout(connect, backoff);
+      backoff = Math.min(BACKOFF_MAX, backoff * 2);
+    }
+  };
+  const connect = () => {
+    timer = 0;
+    if (!state.enabled || socket) return;
+    state.attempts++;
+    let ws;
+    try {
+      ws = new WebSocket(ENDPOINT);
+    } catch {
+      retry();
+      return;
+    }
+    socket = ws;
+    ws.onopen = () => {
+      state.connected = true;
+      backoff = BACKOFF_MIN;
+      ws.send(JSON.stringify({ action: "want", data: ["blocks", "mempool-blocks"] }));
+      ws.send(JSON.stringify({ "track-mempool": true }));
+    };
+    ws.onmessage = (e) => onMessage(e.data);
+    ws.onclose = () => {
+      if (socket === ws) socket = null;
+      state.connected = false;
+      retry();
+    };
+    ws.onerror = () => {};
+  };
+  const start = () => {
+    if (state.enabled || typeof WebSocket === "undefined") return;
+    state.enabled = true;
+    connect();
+  };
+  const subscribe = (fn) => {
+    subscribers.add(fn);
+    return () => subscribers.delete(fn);
+  };
+  const dispose = () => {
+    state.enabled = false;
+    window.clearTimeout(timer);
+    timer = 0;
+    if (socket) {
+      const ws = socket;
+      socket = null;
+      ws.onclose = null;
+      ws.close();
+    }
+    state.connected = false;
+    subscribers.clear();
+  };
+  BL.mempool = { ENDPOINT, state, start, subscribe, dispose, emit, parse: onMessage };
+})();
+
 // ---- js/weapon-targets.js ----
 // Precise weapon contacts share the interactive targets, without hover padding.
 (() => {
@@ -22588,7 +22772,6 @@ void main() {
       subtitle: $("subtitle"),
       actions: [...document.querySelectorAll("[data-action]")],
       act: $("act"),
-      flyby: $("flyby"),
       weapon: $("weapon-hud"),
       weaponToggle: $("weapon-hud"),
       weaponReadout: $("weapon-readout"),
@@ -23063,10 +23246,6 @@ void main() {
     const onPreset = (fn) => {
       presetHandler = fn;
     };
-    const setFlyby = (active) => {
-      const pressed = active ? "true" : "false";
-      if (el.flyby.getAttribute("aria-pressed") !== pressed) el.flyby.setAttribute("aria-pressed", pressed);
-    };
     let identityHandler = null;
     const onIdentityChange = (fn) => {
       identityHandler = fn;
@@ -23209,7 +23388,7 @@ void main() {
       setJetpack(false, false, 0);
       closeFeed();
     };
-    return { el, openFeed, closeFeed, setRosterRow, setMeter, setStats, setAct, setWeapon, setMagazine, setJetpack, setSubtitle, setFlyby, onAction, toast, tooltip, hint, selectTab, onPreset, onIdentityChange, setIdentity, setDonationUrl, onAssign, onUnassign, renderInventory, dispose };
+    return { el, openFeed, closeFeed, setRosterRow, setMeter, setStats, setAct, setWeapon, setMagazine, setJetpack, setSubtitle, onAction, toast, tooltip, hint, selectTab, onPreset, onIdentityChange, setIdentity, setDonationUrl, onAssign, onUnassign, renderInventory, dispose };
   };
   BL.hud = { create, renderIcon, signLettering, STATE_LABELS, statusFor };
 })();
@@ -28556,7 +28735,7 @@ void main() {
       }
       return result;
     };
-    const plan = (state, x, z, tx, tz, limit = true) => {
+    const plan = (state, x, z, tx, tz) => {
       if (version !== path.version) rebuild();
       state.tx = tx; state.tz = tz; state.version = version; state.count = state.index = 0; state.plans++;
       const start = nearest(x, z), end = nearest(tx, tz);
@@ -28574,7 +28753,7 @@ void main() {
       }
       if (parents[start] < 0) return;
       const length = Math.hypot(xs[start] - x, zs[start] - z) + distances[start] + Math.hypot(xs[end] - tx, zs[end] - tz);
-      if (limit && length > Math.hypot(tx - x, tz - z) * 2.5 + 3) return;
+      if (length > Math.hypot(tx - x, tz - z) * 2.5 + 3) return;
       for (let i = start; ; i = parents[i]) {
         state.route[state.count++] = i;
         if (i === end) break;
@@ -28693,9 +28872,8 @@ void main() {
     const routeState = createState();
     // Bed journeys allocate their authored route only at departure.
     // They share the same surface centerlines before and after the underground portion.
-    // A walker gives up on a long detour; the flyby's camera takes any route the trails offer.
-    const route = (from, to, limit = true) => {
-      plan(routeState, from.x, from.z, to.x, to.z, limit);
+    const route = (from, to) => {
+      plan(routeState, from.x, from.z, to.x, to.z);
       const result = [from];
       for (let n = 0; n < routeState.count; n++) {
         const i = routeState.route[n];
@@ -28707,202 +28885,6 @@ void main() {
     return { createState, target, route, xAt, zAt, capacity: size, get nodes() { return count; }, buffers: xs.byteLength + zs.byteLength + centerX.byteLength + centerZ.byteLength + groups.byteLength + heads.byteLength + edges.byteLength + next.byteLength + costs.byteLength + parents.byteLength + distances.byteLength + heap.byteLength + heapIndex.byteLength + routeState.route.byteLength + routeState.laneX.byteLength + routeState.laneZ.byteLength };
   };
   BL.npcPaths = { create };
-})();
-
-// ---- js/flyby.js ----
-// The island flyby: a camera tour that flies the walkers' own trail graph between
-// views. Each leg is routed at departure, resampled and smoothed into fixed arrays,
-// then flown at an eased cruise while the view turns toward its heading and settles
-// into the next stop's angle. A stop off the trails names the surface point where
-// its own approach begins (`entry`, with `entryRoute` from there to its view) and
-// where its way out ends (`exit`, with `exitRoute` from its view to there), and the
-// leg chains the previous stop's way out, the trail route and the next stop's
-// approach; two stops sharing one point chain directly, which is how the tour goes
-// down one headquarters ramp into the basement and up the others. Such a stop may
-// lower `hover` under its ceiling. It writes the pilot's orbit every frame and reads
-// it back: any value it did not write means the visitor took the camera, and it ends.
-(() => {
-  "use strict";
-  const BL = window.BL = window.BL || {};
-  const { lerp, ease } = BL.math;
-  const CAPACITY = 4096, SPACING = 0.5, SMOOTH = 6, PASSES = 2, HOVER = 2.4, CRUISE = 9, MIN_LEG = 1.6, AUTHORED = 8;
-  const DWELL = 2.2, TURN_RATE = 1.6, TURN_MAX = 1, SWOOP = 5, HEADING_SPAN = 8, LOOK_AHEAD = 3, BLEND_MIN = 4;
-  const TWO_PI = Math.PI * 2;
-  const turn = (from, to) => Math.atan2(Math.sin(to - from), Math.cos(to - from));
-  const smoothstep = (t) => t <= 0 ? 0 : t >= 1 ? 1 : t * t * (3 - 2 * t);
-  const create = ({ paths, island, hover = HOVER }) => {
-    const sx = new Float64Array(CAPACITY), sy = new Float64Array(CAPACITY), sz = new Float64Array(CAPACITY), gy = new Float64Array(CAPACITY);
-    const px = new Float64Array(CAPACITY), py = new Float64Array(CAPACITY), pz = new Float64Array(CAPACITY), pl = new Float64Array(CAPACITY);
-    const target = { x: 0, y: 0, z: 0 };
-    let stops = null, arrive = null, leg = -1, count = 0, length = 0, duration = 0, time = 0, dwell = 0, cursor = 0, active = false;
-    let holdS = 0, reachS = 0, swoop = 0;
-    let yaw = 0, pitch = 0, dist = 0, fromYaw = 0, fromPitch = 0, fromDist = 0, toYaw = 0, toPitch = 0, toDist = 0;
-    let lastYaw = NaN, lastPitch = NaN, lastDist = NaN, legs = 0, routed = 0;
-    const smooth = (input, output, radius) => {
-      for (let i = 0; i < count; i++) {
-        let sum = 0;
-        for (let k = -radius; k <= radius; k++) sum += input[Math.max(0, Math.min(count - 1, i + k))];
-        output[i] = sum / (radius * 2 + 1);
-      }
-    };
-    // The route is a polyline of the trail nodes between two views, its nodes lifted off
-    // the ground; the flown curve is that polyline resampled and box-smoothed, its ends
-    // pinned to the exact views. A leg longer than the arrays widens its spacing.
-    const lay = (from, to, previous, stop) => {
-      const a = previous && previous.exit ? previous : null, b = stop.entry ? stop : null;
-      const lift = Math.min(a && a.hover !== undefined ? a.hover : hover, b && b.hover !== undefined ? b.hover : hover);
-      const route = [from];
-      if (a) for (const point of a.exitRoute) route.push(point);
-      const off = a ? a.exit : from, on = b ? b.entry : to, exitAt = route.length - 1;
-      if (off !== on) {
-        const surface = paths.route(off, on, false);
-        for (let i = 1; i < surface.length - 1; i++) route.push(surface[i]);
-        if (b) route.push(on);
-      }
-      const entryAt = route.length - 1;
-      if (b) for (let i = 1; i < b.entryRoute.length; i++) route.push(b.entryRoute[i]);
-      route.push(to);
-      legs++;
-      if (route.length > 2) routed++;
-      let total = 0, exitS = 0, entryS = 0;
-      for (let i = 1; i < route.length; i++) {
-        total += Math.hypot(route[i].x - route[i - 1].x, route[i].z - route[i - 1].z);
-        if (i === exitAt) exitS = total;
-        if (i === entryAt) entryS = total;
-      }
-      // The view holds its angle and boom along a way out and has the next stop's by its entry,
-      // so nothing trails into rock; a plain trail leg swoops up and out in the middle.
-      holdS = a ? exitS : 0;
-      reachS = b ? entryS : total;
-      if (reachS - holdS < BLEND_MIN) holdS = Math.max(0, reachS - BLEND_MIN);
-      if (reachS - holdS < BLEND_MIN) reachS = Math.min(total, holdS + BLEND_MIN);
-      swoop = a || b ? 0 : SWOOP;
-      count = Math.min(CAPACITY, Math.ceil(total / SPACING) + 1);
-      let segment = 1, start = 0, span = Math.hypot(route[1].x - route[0].x, route[1].z - route[0].z);
-      for (let i = 0; i < count; i++) {
-        const s = count > 1 ? total * i / (count - 1) : 0;
-        while (segment < route.length - 1 && s > start + span) {
-          start += span;
-          segment++;
-          span = Math.hypot(route[segment].x - route[segment - 1].x, route[segment].z - route[segment - 1].z);
-        }
-        const a = route[segment - 1], b = route[segment], t = span > 0 ? Math.min(1, (s - start) / span) : 1;
-        const ay = segment === 1 ? a.y : a.y + lift, by = segment === route.length - 1 ? b.y : b.y + lift;
-        sx[i] = lerp(a.x, b.x, t); sy[i] = gy[i] = lerp(ay, by, t); sz[i] = lerp(a.z, b.z, t);
-      }
-      for (let pass = 0; pass < PASSES; pass++) {
-        smooth(sx, px, SMOOTH); smooth(sy, py, SMOOTH); smooth(sz, pz, SMOOTH);
-        if (pass + 1 < PASSES) { sx.set(px.subarray(0, count)); sy.set(py.subarray(0, count)); sz.set(pz.subarray(0, count)); }
-      }
-      px[0] = from.x; py[0] = from.y; pz[0] = from.z;
-      px[count - 1] = to.x; py[count - 1] = to.y; pz[count - 1] = to.z;
-      // Smoothing can cut a corner through a rise; keep the middle of the curve above the
-      // ground where the route itself was above it. Below it the route is a ramp under the
-      // terrain, and the approaches are authored views, some inside a mouth under its roof.
-      for (let i = AUTHORED; i < count - AUTHORED; i++) {
-        if (!island.onLand(px[i], pz[i])) continue;
-        const ground = island.surfaceAt(px[i], pz[i]);
-        if (gy[i] >= ground) py[i] = Math.max(py[i], ground + lift * 0.5);
-      }
-      pl[0] = 0;
-      for (let i = 1; i < count; i++) pl[i] = pl[i - 1] + Math.hypot(px[i] - px[i - 1], py[i] - py[i - 1], pz[i] - pz[i - 1]);
-      length = pl[count - 1];
-      if (total > 0) { holdS *= length / total; reachS *= length / total; }
-      duration = Math.max(MIN_LEG, length / CRUISE);
-      time = 0;
-      cursor = 0;
-    };
-    // The cursor only moves forward within a leg, so the search is amortised constant.
-    const at = (s, out) => {
-      while (cursor < count - 2 && pl[cursor + 1] < s) cursor++;
-      let i = cursor;
-      while (i > 0 && pl[i] > s) i--;
-      if (i >= count - 1) { out.x = px[count - 1]; out.y = py[count - 1]; out.z = pz[count - 1]; return; }
-      const span = pl[i + 1] - pl[i], t = span > 0 ? Math.max(0, Math.min(1, (s - pl[i]) / span)) : 0;
-      out.x = lerp(px[i], px[i + 1], t); out.y = lerp(py[i], py[i + 1], t); out.z = lerp(pz[i], pz[i + 1], t);
-    };
-    const AHEAD = { x: 0, y: 0, z: 0 };
-    const write = (orbit) => {
-      orbit.target = target;
-      orbit.tx = target.x; orbit.ty = target.y; orbit.tz = target.z;
-      orbit.yaw = orbit.tYaw = lastYaw = yaw;
-      orbit.pitch = orbit.tPitch = lastPitch = pitch;
-      orbit.dist = orbit.tDist = lastDist = dist;
-    };
-    const depart = (from) => {
-      const stop = stops[leg], view = stop.view;
-      fromYaw = yaw; fromPitch = pitch; fromDist = dist;
-      toYaw = view.yaw; toPitch = view.pitch; toDist = view.dist;
-      lay(from, view.target, leg ? stops[leg - 1] : null, stop);
-    };
-    const start = (orbit, list, onArrive = null) => {
-      stops = list; arrive = onArrive;
-      active = true;
-      legs = routed = 0;
-      leg = 0; dwell = 0;
-      yaw = orbit.yaw; pitch = orbit.pitch; dist = orbit.dist;
-      target.x = orbit.tx; target.y = orbit.ty; target.z = orbit.tz;
-      depart(target);
-      write(orbit);
-    };
-    const stop = () => {
-      active = false;
-      stops = null; arrive = null;
-      leg = -1; count = 0; dwell = 0;
-      lastYaw = lastPitch = lastDist = NaN;
-    };
-    const disturbed = (orbit) => active && (orbit.target !== target || orbit.tYaw !== lastYaw || orbit.tPitch !== lastPitch || orbit.tDist !== lastDist);
-    // A damped turn, capped so a hairpin in the trail reads as a pan rather than a whip.
-    const steer = (desired, dt) => {
-      const delta = turn(yaw, desired) * (1 - Math.exp(-TURN_RATE * dt)), limit = TURN_MAX * dt;
-      yaw += Math.max(-limit, Math.min(limit, delta));
-      yaw = ((yaw + Math.PI) % TWO_PI + TWO_PI) % TWO_PI - Math.PI;
-    };
-    const update = (dt, orbit) => {
-      if (!active) return;
-      if (dwell > 0) {
-        // The view keeps settling on the stop's angle through the dwell; nothing snaps.
-        dwell -= dt;
-        steer(toYaw, dt);
-        if (dwell <= 0) {
-          if (leg + 1 >= stops.length) { stop(); return; }
-          leg++;
-          depart(target);
-        }
-        write(orbit);
-        return;
-      }
-      time += dt;
-      const k = ease.inOutQuad(Math.min(1, time / duration)), s = k * length;
-      at(s, target);
-      // The view leaves the last stop's angle, follows the heading between the ends, and
-      // arrives on the next stop's; a leg shorter than two spans blends straight across.
-      let desired = fromYaw + turn(fromYaw, toYaw) * smoothstep(k);
-      if (length > LOOK_AHEAD) {
-        at(Math.min(length, s + LOOK_AHEAD), AHEAD);
-        const dx = AHEAD.x - target.x, dz = AHEAD.z - target.z;
-        if (dx * dx + dz * dz > 1e-6) {
-          const heading = Math.atan2(-dx, -dz);
-          const w = Math.min(smoothstep(s / HEADING_SPAN), smoothstep((length - s) / HEADING_SPAN));
-          desired = desired + turn(desired, heading) * w;
-        }
-      }
-      steer(desired, dt);
-      const q = smoothstep((s - holdS) / Math.max(1e-6, reachS - holdS));
-      pitch = lerp(fromPitch, toPitch, q);
-      dist = lerp(fromDist, toDist, q) + swoop * Math.sin(Math.PI * k);
-      if (time >= duration) {
-        target.x = px[count - 1]; target.y = py[count - 1]; target.z = pz[count - 1];
-        pitch = toPitch; dist = toDist;
-        dwell = DWELL;
-        if (arrive) arrive(stops[leg], leg);
-      }
-      write(orbit);
-    };
-    return { start, stop, update, disturbed, target, get active() { return active; }, get index() { return leg; }, get travelling() { return active && dwell <= 0; },
-      get at() { return stops ? stops[leg] : null; }, get stops() { return stops; }, get legs() { return legs; }, get routed() { return routed; }, get samples() { return count; }, get length() { return length; }, capacity: CAPACITY };
-  };
-  BL.flyby = { create, DWELL, CRUISE, HOVER };
 })();
 
 // ---- js/pile.js ----
@@ -30872,6 +30854,288 @@ void main() {
     return { update, burst, dispose, stats };
   };
   BL.critters = { create };
+})();
+
+// ---- js/storm.js ----
+// Weather driven by the Bitcoin feed: each transaction rains drops sized by its weight,
+// each block strikes lightning and rolls thunder, and the next block's median fee sets the
+// overcast, sunny at a cheap block and a full storm at an expensive one. One fixed-capacity
+// instanced batch for the drops, one polyline bolt, a sky flash and an overcast tint written
+// over the clock's colours after it samples (the clock itself, its sun, moon, phases and
+// factors are never touched, and sunny leaves every sampled value as it was), and a small
+// procedural rumble on the rally's audio pattern.
+(() => {
+  "use strict";
+  const BL = window.BL = window.BL || {};
+  const { models, math } = BL;
+  const { createNode, addChild, removeChild } = BL.scene;
+  const { clamp, lerp } = math;
+  const RAIN_CAP = 480, RAIN_CAP_CANVAS = 120, RAIN_RANGE = 14, RAIN_HEIGHT = 16, RAIN_SPREAD = 6;
+  const DROP_MIN = 0.7, DROP_MAX = 4, DROP_BASE_VSIZE = 140, DROPS_MIN = 2, DROPS_MAX = 8;
+  const FALL_BASE = 10, FALL_PER_SIZE = 3, SPLASH_SIZE = 1.4;
+  const FLASH_MAX = 0.85, FLASH_TAU = 0.12, BOLT_SHOW = 0.25, BOLT_RANGE = 18, BOLT_HEIGHT = 26;
+  const THUNDER_DELAY_MIN = 0.5, THUNDER_DELAY_SPREAD = 1, STORAGE_KEY = "oogaboogaland.audio", MASTER = 0.6, NOISE_SECONDS = 2;
+  // Overcast from fee pressure on a log scale: an empty mempool or SUNNY_FEE sat/vB and under is clear, STORM_FEE and
+  // over is the full storm. Relay floors sit near 0.1 sat/vB, so a quiet night at 0.3 already reads as light cloud.
+  const SUNNY_FEE = 0.1, STORM_FEE = 20, OVERCAST_EASE = 1.5, OVERCAST_STEP = 0.05, OVERCAST_MIX = 0.7, OVERCAST_DARKEN = 0.22, OVERCAST_DIM = 0.45;
+  const OVERCAST_TINT = [0.9, 0.93, 1], FOG_NEAR = 40, FOG_FAR = 150, FOG_OFF_NEAR = 400, FOG_OFF_FAR = 600;
+  // The sky stays clear until the overcast passes a band, wider by day, so the island is sunny more often and
+  // the rain can drizzle under a clear sky; the band reads the clock's day factor and never writes it.
+  const CLEAR_NIGHT = 0.25, CLEAR_DAY = 0.55;
+  const overcastFor = (fee) => clamp(Math.log(Math.max(SUNNY_FEE, fee) / SUNNY_FEE) / Math.log(STORM_FEE / SUNNY_FEE), 0, 1);
+  const cloudFor = (overcast, day) => {
+    const band = lerp(CLEAR_NIGHT, CLEAR_DAY, clamp(day, 0, 1));
+    return clamp((overcast - band) / (1 - band), 0, 1);
+  };
+  // Desaturate toward a cool grey of the colour's own brightness, so day stays bright and night stays dark.
+  const greyen = (c, k) => {
+    if (!c) return;
+    const grey = (c[0] * 0.299 + c[1] * 0.587 + c[2] * 0.114) * (1 - OVERCAST_DARKEN * k);
+    c[0] += (grey * OVERCAST_TINT[0] - c[0]) * k;
+    c[1] += (grey * OVERCAST_TINT[1] - c[1]) * k;
+    c[2] += (grey * OVERCAST_TINT[2] - c[2]) * k;
+  };
+  const rainDrop = models.cached(() => models.noShadow(models.box({ w: 0.05, h: 0.6, d: 0.05, color: "#c6dbee", emissive: 0.45 })));
+  const SPLASH = [models.particleGeometry("#d8e8f4", 0.07, 0.6)];
+  // One jagged trunk with two branches, unit height, built once for every strike.
+  const bolt = models.cached(() => {
+    const rand = math.mulberry32(7);
+    const jag = (x0, z0, y0, y1, steps, spread) => {
+      const points = [];
+      for (let i = 0; i <= steps; i++) {
+        const t = i / steps;
+        points.push({ x: x0 + (rand() - 0.5) * spread * (i && i < steps ? 1 : 0.3), y: lerp(y0, y1, t), z: z0 + (rand() - 0.5) * spread * (i && i < steps ? 1 : 0.3) });
+      }
+      return points;
+    };
+    const trunk = jag(0, 0, 1, 0, 9, 0.16);
+    const b1 = trunk[3], b2 = trunk[6];
+    return models.merge(
+      models.polyline({ points: trunk, color: "#eef5ff", emissive: 1 }),
+      models.polyline({ points: [b1, ...jag(b1.x + 0.12, b1.z, b1.y, b1.y - 0.3, 4, 0.12).slice(1)], color: "#dbe9ff", emissive: 1 }),
+      models.polyline({ points: [b2, ...jag(b2.x - 0.1, b2.z + 0.05, b2.y, b2.y - 0.22, 3, 0.1).slice(1)], color: "#dbe9ff", emissive: 1 })
+    );
+  });
+  const brighten = (c, k) => {
+    if (!c) return;
+    c[0] += (1 - c[0]) * k;
+    c[1] += (1 - c[1]) * k;
+    c[2] += (1 - c[2]) * k;
+  };
+  // The flash strobes twice, then decays: full, dip, second bright, tail.
+  const flashAt = (t) => t < 0.08 ? 1 : t < 0.14 ? 0.25 : t < 0.22 ? 0.85 : 0.85 * Math.exp(-(t - 0.22) / FLASH_TAU);
+
+  const create = ({ root, renderer, camera, heightAt, fx = null }) => {
+    const cap = renderer.kind === "canvas2d" ? RAIN_CAP_CANVAS : RAIN_CAP;
+    const node = createNode({ geometry: rainDrop(), instanceData: new Float32Array(cap * 20), instanceCount: 0, drawInstanceCount: 0, instanceVersion: 0, fixedInstanceCapacity: true });
+    const x = new Float32Array(cap), y = new Float32Array(cap), z = new Float32Array(cap), w = new Float32Array(cap), h = new Float32Array(cap), vy = new Float32Array(cap);
+    let count = 0, transactions = 0, strikes = 0, flash = 0, flashT = -1, boltT = -1, thunderAt = -1;
+    // Sunny until the feed projects a fee, so an offline page keeps the clock's frame; the first projection snaps, later ones ease.
+    let overcast = 0, overcastTarget = 0, projected = false, nextFee = 0, cloud = 0;
+    const fog = new Float32Array(3);
+    const boltNode = createNode({ geometry: bolt(), visible: false });
+    addChild(root, node);
+    addChild(root, boltNode);
+    // Sound: the context opens only after a real gesture, so a strike on a fresh page stays silent and warns nothing.
+    let ctx = null, master = null, noise = null, rainGain = null, muted = false;
+    try {
+      muted = localStorage.getItem(STORAGE_KEY) === "off";
+    } catch {
+    }
+    const initAudio = () => {
+      if (ctx || typeof AudioContext === "undefined" || navigator.userActivation && !navigator.userActivation.hasBeenActive) return false;
+      ctx = new AudioContext();
+      master = ctx.createGain();
+      master.gain.value = muted ? 0 : MASTER;
+      master.connect(ctx.destination);
+      const buffer = ctx.createBuffer(1, Math.floor(ctx.sampleRate * NOISE_SECONDS), ctx.sampleRate);
+      const data = buffer.getChannelData(0);
+      for (let i = 0; i < data.length; i++) data[i] = Math.random() * 2 - 1;
+      noise = ctx.createBufferSource();
+      noise.buffer = buffer;
+      noise.loop = true;
+      const hiss = ctx.createBiquadFilter();
+      hiss.type = "bandpass";
+      hiss.frequency.value = 2600;
+      hiss.Q.value = 0.5;
+      rainGain = ctx.createGain();
+      rainGain.gain.value = 0;
+      noise.connect(hiss);
+      hiss.connect(rainGain);
+      rainGain.connect(master);
+      noise.start();
+      if (ctx.state === "suspended") ctx.resume();
+      return true;
+    };
+    const rumble = () => {
+      if (!initAudio() && !ctx) return;
+      const t = ctx.currentTime;
+      const low = ctx.createBiquadFilter();
+      low.type = "lowpass";
+      low.frequency.setValueAtTime(420, t);
+      low.frequency.exponentialRampToValueAtTime(90, t + 2.8);
+      low.Q.value = 1.2;
+      const g = ctx.createGain();
+      g.gain.setValueAtTime(0.0001, t);
+      g.gain.exponentialRampToValueAtTime(0.9, t + 0.06);
+      g.gain.exponentialRampToValueAtTime(0.35, t + 0.5);
+      g.gain.exponentialRampToValueAtTime(0.7, t + 0.9);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + 3.2);
+      noise.connect(low);
+      low.connect(g);
+      g.connect(master);
+      window.setTimeout(() => {
+        low.disconnect();
+        g.disconnect();
+      }, 3400);
+    };
+    const weather = (fee) => {
+      nextFee = fee;
+      const target = overcastFor(fee);
+      if (!projected) {
+        projected = true;
+        overcast = overcastTarget = target;
+      } else if (target === 0 || target === 1 || Math.abs(target - overcastTarget) >= OVERCAST_STEP) overcastTarget = target;
+    };
+    const rain = (vsize) => {
+      transactions++;
+      const size = clamp(DROP_MIN + Math.log2(Math.max(1, vsize / DROP_BASE_VSIZE)) * 0.5, DROP_MIN, DROP_MAX);
+      // Any overcast rains at least one drop a transaction; the full count comes with the full storm.
+      const drops = overcast > 0 ? Math.max(1, Math.round(Math.min(DROPS_MAX, DROPS_MIN + Math.floor(vsize / 200)) * overcast)) : 0;
+      const t = camera.target;
+      for (let n = 0; n < drops && count < cap; n++, count++) {
+        const a = Math.random() * Math.PI * 2, r = Math.sqrt(Math.random()) * RAIN_RANGE;
+        x[count] = t.x + Math.cos(a) * r;
+        z[count] = t.z + Math.sin(a) * r;
+        y[count] = t.y + RAIN_HEIGHT + Math.random() * RAIN_SPREAD;
+        w[count] = size;
+        h[count] = 0.8 + size * 0.35;
+        vy[count] = FALL_BASE + FALL_PER_SIZE * size;
+      }
+    };
+    const strike = () => {
+      strikes++;
+      flashT = 0;
+      boltT = 0;
+      thunderAt = THUNDER_DELAY_MIN + Math.random() * THUNDER_DELAY_SPREAD;
+      const a = Math.random() * Math.PI * 2, r = 6 + Math.random() * (BOLT_RANGE - 6), t = camera.target;
+      const bx = t.x + Math.cos(a) * r, bz = t.z + Math.sin(a) * r;
+      const ground = heightAt(bx, bz);
+      boltNode.position.x = bx;
+      boltNode.position.z = bz;
+      boltNode.position.y = ground;
+      boltNode.rotation.y = Math.random() * Math.PI * 2;
+      boltNode.scale.x = boltNode.scale.z = 4 + Math.random() * 3;
+      boltNode.scale.y = t.y + RAIN_HEIGHT + BOLT_HEIGHT - ground;
+      boltNode.visible = true;
+    };
+    const update = (dt, opts) => {
+      const previousCount = node.instanceCount;
+      // A steady walk, OVERCAST_EASE seconds across the whole range, so the target is reached exactly.
+      if (overcast !== overcastTarget) {
+        const step = dt / OVERCAST_EASE;
+        overcast = overcast > overcastTarget ? Math.max(overcastTarget, overcast - step) : Math.min(overcastTarget, overcast + step);
+      }
+      const data = node.instanceData;
+      for (let i = 0; i < count; i++) {
+        y[i] -= vy[i] * dt;
+        if (y[i] <= heightAt(x[i], z[i])) {
+          if (fx && w[i] >= SPLASH_SIZE) fx.burst(x[i], y[i] + 0.05, z[i], 2, SPLASH, 0.9);
+          count--;
+          x[i] = x[count]; y[i] = y[count]; z[i] = z[count]; w[i] = w[count]; h[i] = h[count]; vy[i] = vy[count];
+          i--;
+          continue;
+        }
+        const o = i * 20, s = w[i] * 0.5 + 0.5;
+        data[o] = s; data[o + 1] = 0; data[o + 2] = 0; data[o + 3] = 0;
+        data[o + 4] = 0; data[o + 5] = h[i]; data[o + 6] = 0; data[o + 7] = 0;
+        data[o + 8] = 0; data[o + 9] = 0; data[o + 10] = s; data[o + 11] = 0;
+        data[o + 12] = x[i]; data[o + 13] = y[i]; data[o + 14] = z[i]; data[o + 15] = 1;
+        data[o + 16] = 1; data[o + 17] = 0; data[o + 18] = 0; data[o + 19] = 0;
+      }
+      node.instanceCount = node.drawInstanceCount = count;
+      if (count || previousCount) node.instanceVersion++;
+      if (rainGain) rainGain.gain.setTargetAtTime(Math.min(1, count / 120) * 0.14, ctx.currentTime, 0.2);
+      if (boltT >= 0) {
+        boltT += dt;
+        if (boltT > BOLT_SHOW) {
+          boltT = -1;
+          boltNode.visible = false;
+        }
+      }
+      if (thunderAt >= 0) {
+        thunderAt -= dt;
+        if (thunderAt < 0) {
+          thunderAt = -1;
+          rumble();
+        }
+      }
+      flash = 0;
+      if (flashT >= 0) {
+        flashT += dt;
+        flash = flashAt(flashT);
+        if (flash < 0.01) {
+          flash = 0;
+          flashT = -1;
+        }
+      }
+      if (opts) {
+        // A clear sky leaves the clock's colours, light and fog exactly as sampled.
+        cloud = cloudFor(overcast, opts.day);
+        if (cloud > 0.02) {
+          const k = cloud * OVERCAST_MIX;
+          greyen(opts.clear, k); greyen(opts.horizon, k); greyen(opts.zenith, k);
+          greyen(opts.sky, k); greyen(opts.ground, k); greyen(opts.direct, k);
+          opts.directStrength *= 1 - cloud * (1 - OVERCAST_DIM);
+          fog[0] = opts.horizon[0]; fog[1] = opts.horizon[1]; fog[2] = opts.horizon[2];
+          opts.fog = fog;
+          opts.fogNear = lerp(FOG_OFF_NEAR, FOG_NEAR, cloud);
+          opts.fogFar = lerp(FOG_OFF_FAR, FOG_FAR, cloud);
+        } else opts.fog = null;
+      }
+      if (flash > 0 && opts) {
+        const k = flash * FLASH_MAX;
+        brighten(opts.clear, k); brighten(opts.horizon, k); brighten(opts.zenith, k);
+        brighten(opts.sky, k); brighten(opts.ground, k); brighten(opts.direct, k);
+        opts.ambientFloor = lerp(opts.ambientFloor, 0.9, k);
+        opts.directStrength *= 1 + k;
+      }
+    };
+    const setMuted = (on) => {
+      muted = !!on;
+      if (master) master.gain.setTargetAtTime(muted ? 0 : MASTER, ctx.currentTime, 0.05);
+    };
+    const dispose = () => {
+      removeChild(root, node);
+      removeChild(root, boltNode);
+      count = 0;
+      if (ctx) ctx.close();
+      ctx = master = noise = rainGain = null;
+    };
+    const state = {
+      get drops() { return count; },
+      get capacity() { return cap; },
+      get flash() { return flash; },
+      get bolt() { return boltT >= 0; },
+      get thunderPending() { return thunderAt >= 0; },
+      get strikes() { return strikes; },
+      get overcast() { return overcast; },
+      get overcastTarget() { return overcastTarget; },
+      get cloud() { return cloud; },
+      get nextFee() { return nextFee; },
+      get projected() { return projected; },
+      get transactions() { return transactions; },
+      get audio() { return !!ctx; },
+      get muted() { return muted; },
+      drop: (i) => i < count ? { x: x[i], y: y[i], z: z[i], size: w[i], fall: vy[i] } : null
+    };
+    return {
+      rain, strike, weather, update, setMuted, dispose, state,
+      get active() { return count > 0 || flashT >= 0 || boltT >= 0 || thunderAt >= 0; },
+      stats: () => ({ rainDrops: count, strikes })
+    };
+  };
+  BL.storm = { RAIN_CAP, SUNNY_FEE, STORM_FEE, CLEAR_NIGHT, CLEAR_DAY, overcastFor, cloudFor, create };
 })();
 
 // ---- js/race-models.js ----
@@ -33267,7 +33531,7 @@ void main() {
 (() => {
   "use strict";
   const BL = window.BL = window.BL || {};
-  const { math, models, contributors, donations, qr, terrain, hubModels, headquartersModels, dropModels, rocketModels, rocketParts, caves, daylight, game: gameMod, hud: hudMod, interact: interactMod, pilot: pilotMod, fx: fxMod, crew: crewMod, pile: pileMod, crates: cratesMod, critters: crittersMod } = BL;
+  const { math, models, contributors, donations, qr, terrain, hubModels, headquartersModels, dropModels, rocketModels, rocketParts, caves, daylight, game: gameMod, hud: hudMod, interact: interactMod, pilot: pilotMod, fx: fxMod, crew: crewMod, pile: pileMod, crates: cratesMod, critters: crittersMod, storm: stormMod, mempool } = BL;
   const { clamp, lerp, ease, fnv1a, mulberry32 } = math;
   const { createNode, addChild, removeChild, createCamera, addTween, stepTweens, tweenCount, traverseVisible } = BL.scene;
   const { JET_SPEED, JET_RISE, JET_FUEL_SECONDS, JET_MOVE_SECONDS } = crewMod;
@@ -33433,11 +33697,12 @@ void main() {
   };
 
   // One visit's state: created in enter, dropped in leave.
-  let renderer, game, world, go, lootEnabled, testBananas, root, camera, island, pathNode, altar, hud, hooks, input, pilot, fx, cameraCover, bananaCover, solids, rockGuides, objectGuides, sightGuides, bananaGuides, pileGuides, platformGuides, mirrorGuides, pile, crew, crates, critters, clock, presets, entering, jetpack, jetpackState, jetpackCarrier, jetpackWearer, lastJetpackCloud, mirrorCave, matrixCave, matrixControl, gateRain, fire, headquarters, jumbotron, positionDebug, agent, agentPlay, flyby;
+  let renderer, game, world, go, lootEnabled, testBananas, root, camera, island, pathNode, altar, hud, hooks, input, pilot, fx, cameraCover, bananaCover, solids, rockGuides, objectGuides, sightGuides, bananaGuides, pileGuides, platformGuides, mirrorGuides, pile, crew, crates, critters, clock, presets, entering, jetpack, jetpackState, jetpackCarrier, jetpackWearer, lastJetpackCloud, mirrorCave, matrixCave, matrixControl, gateRain, fire, headquarters, jumbotron, positionDebug, agent, agentPlay;
   let magazine, magazineState, breakables;
   const JETPACK_HUD_STATE = { owned: false, equipped: false, fuel: 1, blocked: false };
   let enteringTween = null;
   let stateTimer = 0, hintTimer = 0, meterTimer = 0, now = 0, hour = 12, unsubscribeActivity = null;
+  let storm = null, unsubscribeMempool = null;
   let positionDebugNext = 0, positionDebugJSON = "";
   function createPositionPose() {
     return { version: 1, character: "", mode: "orbit", position: [0, 0, 0], target: [0, 0, -1], direction: [0, 0, -1], up: [0, 1, 0], fov: 48 * Math.PI / 180,
@@ -36006,6 +36271,15 @@ void main() {
     fx.burst(0, DROP_HEIGHT - 0.2, 0, 26, CONFETTI, 2.2);
     fx.showTicker(`THANKS ${donation.handle ? "@" + donation.handle.toUpperCase() : "ANON"} · ${bananas} BANANAS`, 4.5);
   };
+  // The Bitcoin feed: a transaction rains drops sized by its weight, a block strikes and thunders.
+  const onMempool = (event) => {
+    if (event.type === "tx") storm.rain(event.vsize);
+    else if (event.type === "fees") storm.weather(event.nextFee);
+    else if (event.type === "block") {
+      storm.strike();
+      hud.toast(`Block ${event.height} mined${event.txCount ? ` · ${event.txCount} transactions` : ""}`);
+    }
+  };
   const onDonation = (donation) => {
     game.recordDonation(donation);
     const bananas = gameMod.bananasFor(donation.sats);
@@ -36228,7 +36502,6 @@ void main() {
   const enterScene = (view, id) => {
     if (entering) return;
     entering = true;
-    stopFlyby();
     pilot.release(true);
     hud.tooltip.hide();
     const orbit = pilot.orbit;
@@ -36253,77 +36526,6 @@ void main() {
     if (entering) return;
     world.pilot = pilot.player ? pilot.player.traits.name : null;
     enterScene(presets[id], id);
-  };
-  // The flyby tours every named place once, clockwise from the gate, and ends over the pile.
-  const clockAngle = (x, z) => {
-    const angle = Math.atan2(x, -z);
-    return angle < 0 ? angle + Math.PI * 2 : angle;
-  };
-  const FLYBY_HQ_VIEW = { yaw: 0, pitch: 0.1, dist: 5, target: { x: 0, y: 0, z: 0 } }, FLYBY_BASEMENT_VIEW = { yaw: 0, pitch: 0.1, dist: 5, target: { x: 0, y: 0, z: 0 } }, FLYBY_UNDER_HOVER = 1.6;
-  const lookingAt = (view, point) => { view.yaw = Math.atan2(-(point.x - view.target.x), -(point.z - view.target.z)); };
-  // The headquarters and the basement are two chained underground stops: down the first ramp
-  // clockwise, through the room, down the nearer basement ramp, back up the other one and out
-  // through the second headquarters ramp. Each view looks toward the ramp it leaves by.
-  const flybyUnderground = (name, key) => {
-    const H = island.headquarters;
-    const ramps = H.ramps.map((ramp) => ({ ramp, m: island.mouths.find((mouth) => mouth.id === ramp.id) })).sort((a, b) => key(a.m) - key(b.m));
-    const [enter, exit] = ramps, entered = enter.ramp.to;
-    const lower = H.basement.ramps.slice().sort((a, b) => Math.hypot(a.samples[0].x - entered.x, a.samples[0].z - entered.z) - Math.hypot(b.samples[0].x - entered.x, b.samples[0].z - entered.z));
-    const [down, up] = lower, downSamples = down.samples, upSamples = up.samples, exitSamples = exit.ramp.samples;
-    const basementRoute = [], surfaceRoute = [];
-    for (let i = upSamples.length - 1; i >= 0; i--) basementRoute.push(upSamples[i]);
-    for (let i = exitSamples.length - 1; i >= 0; i--) basementRoute.push(exitSamples[i]);
-    FLYBY_HQ_VIEW.target.y = H.floor + 0.8;
-    FLYBY_BASEMENT_VIEW.target.y = H.basement.floor + 0.8;
-    lookingAt(FLYBY_HQ_VIEW, downSamples[0]);
-    lookingAt(FLYBY_BASEMENT_VIEW, upSamples[upSamples.length - 1]);
-    const headquartersStop = { name, view: FLYBY_HQ_VIEW, at: exit.m, hover: FLYBY_UNDER_HOVER, entry: enter.ramp.samples[0], entryRoute: enter.ramp.samples, exit: downSamples[downSamples.length - 1], exitRoute: downSamples };
-    const basementStop = { name: "Basement", view: FLYBY_BASEMENT_VIEW, hover: FLYBY_UNDER_HOVER, entry: headquartersStop.exit, entryRoute: surfaceRoute, exit: exitSamples[0], exitRoute: basementRoute };
-    surfaceRoute.push(headquartersStop.exit);
-    return [headquartersStop, basementStop];
-  };
-  // The plane stands on the rally roof: the leg to it leaves the trail in front of the mouth,
-  // climbs there and comes in over the rim, and the leg down reverses that.
-  const flybyRoof = (name, view, m) => {
-    const out = { x: m.apron.x + (m.apron.x - m.x), y: m.floorY, z: m.apron.z + (m.apron.z - m.z) };
-    const climb = { x: out.x, y: view.target.y + 3, z: out.z };
-    return { name, view, entry: out, entryRoute: [out, climb], exit: out, exitRoute: [climb, out] };
-  };
-  const buildFlybyStops = () => {
-    const gateAngle = clockAngle(GATE_VIEW.target.x, GATE_VIEW.target.z);
-    const key = (spot) => (clockAngle(spot.x, spot.z) - gateAngle + Math.PI * 2) % (Math.PI * 2);
-    const stops = [{ name: caves.gate.name, view: GATE_VIEW }];
-    let underground = null;
-    for (const slot of caves.slots) {
-      if (!slot.name) continue;
-      if (slot.status === "headquarters") { underground = underground || flybyUnderground(slot.name, key); continue; }
-      const m = island.mouths.find((mouth) => mouth.id === slot.id);
-      stops.push({ name: slot.name, view: slot.scene ? presets[slot.scene] : mouthView(m) });
-    }
-    if (underground) stops.push(underground[0]);
-    const rally = openMouths.find((entry) => entry.slot.scene === "race");
-    if (presets.drop && rally) stops.push(flybyRoof("Ooga Drop", presets.drop, rally.m));
-    if (presets.orbit) stops.push({ name: "Ooga Orbit", view: presets.orbit });
-    const order = (stop) => key(stop.at || stop.view.target);
-    stops.sort((a, b) => order(a) - order(b) || a.name.localeCompare(b.name));
-    if (underground) stops.splice(stops.indexOf(underground[0]) + 1, 0, underground[1]);
-    stops.push({ name: "The pile", view: PILE_VIEW });
-    return stops;
-  };
-  const stopFlyby = () => {
-    if (!flyby || !flyby.active) return;
-    flyby.stop();
-    hud.setFlyby(false);
-  };
-  const toggleFlyby = () => {
-    if (flyby.active) { stopFlyby(); return; }
-    if (entering) return;
-    // Leave any driven Ooga or close view the way the PILE button does, then take the orbit from where it is.
-    pilot.goPreset("pile");
-    hud.tooltip.hide();
-    flyby.start(pilot.orbit, buildFlybyStops(), (stop) => hud.toast(stop.name));
-    hud.setFlyby(true);
-    hud.hint("Flying over the island · drag, scroll, a key or FLYBY again takes the camera back");
   };
   // The Agent answers taps like an Ooga: a double-click plays it, a double-click
   // anywhere else lets it go; a third quick tap toggles its Matrix model.
@@ -36779,7 +36981,6 @@ void main() {
     return true;
   };
   const navigate = (name) => {
-    stopFlyby();
     const destination = NAVIGATION, p = destination.position, target = destination.target;
     const player = pilot.player, close = pilot.closeWanted, basement = name === "basement", underground = name === "underground" || basement;
     let x = 0, z = 0, yaw = 0, pitch = 0.18, dist = player ? 6 : 8;
@@ -37393,6 +37594,7 @@ void main() {
     hour = clock.read();
     daylight.sample(hour, RENDER_OPTS, clock.dayOfYear, islandLatitude, clock.continuousDay);
     RENDER_OPTS.time = elapsed;
+    storm.update(dt, RENDER_OPTS);
     updateLamps(dt, elapsed, phase !== null);
     if (jumbotron) jumbotron.update(elapsed, renderer);
     const next = daylight.phaseAt(hour);
@@ -37403,14 +37605,6 @@ void main() {
     solids.sync();
     updateSleepingSolids();
     pilot.readInput(dt);
-    if (flyby.active) {
-      // Anything else moving the orbit since the last write was the visitor: the tour yields at once.
-      if (flyby.disturbed(pilot.orbit)) stopFlyby();
-      else {
-        flyby.update(dt, pilot.orbit);
-        if (!flyby.active) hud.setFlyby(false);
-      }
-    }
     mirrorCave.damage.update(dt);
     syncMirrorDamage();
     mirrorCave.ripples.update(dt, elapsed);
@@ -37730,7 +37924,7 @@ void main() {
   const onKey = (e) => {
     if (e.key === "0") return;
     if ((e.key === "1" || e.key === "2") && pilot.weaponMode(Number(e.key))) return;
-    if (e.key === "Escape") { stopFlyby(); pilot.release(); }
+    if (e.key === "Escape") pilot.release();
     if (e.key === "b" || e.key === "B") addTestBananas(testBananas);
     if (e.key === "l" || e.key === "L") demoTip(120000);
     if (e.key === "p" || e.key === "P") {
@@ -37894,6 +38088,9 @@ void main() {
     shared.onAbyssRespawn = loseMagazine;
     shared.characterOccluded = characterUiOccluded;
     fx = shared.fx = fxMod.create(shared);
+    storm = stormMod.create({ root, renderer, camera, heightAt: island.surfaceAt, fx });
+    if (mempool.state.projectedBlocks) storm.weather(mempool.state.nextFee);
+    unsubscribeMempool = mempool.subscribe(onMempool);
     shared.characterSupportAt = characterSupportAt;
     shared.carryCharacter = carryCharacter;
     shared.npcWalkable = npcWalkable;
@@ -37966,8 +38163,6 @@ void main() {
     shared.npcPaths = headquarters.npcPaths = BL.npcPaths.create({ island, walkable: npcWalkable, pointAllowed: (x, z) => !npcClosedCaveAt(x, z),
       surfaceAt: (x, z, y) => island.supportAt(x, z, y, 1e-6, null, PLAYER_RADIUS) });
     const sleepNavigation = headquarters.sleepNavigation = BL.headquartersSleep.create({ island, beds: bedrolls, walkable: sleepRouteClear, surfaceRoute: shared.npcPaths.route });
-    flyby = BL.flyby.create({ paths: shared.npcPaths, island });
-    hud.setFlyby(false);
     const sleepRouteFrom = { x: 0, y: 0, z: 0 };
     shared.bedRoute = (cave, bed, toBed) => sleepNavigation.route(cave.root.position.x, cave.root.position.y - cave.baseY, cave.root.position.z, bed, toBed, cave.slot?.x, cave.slot?.z);
     shared.bedRouteClear = (cave, to) => {
@@ -38118,7 +38313,6 @@ void main() {
       else if (action === "reset") resetDemo();
       else if (action === "act") pilot.action();
       else if (action === "jetpack-toggle") toggleJetpack();
-      else if (action === "flyby") toggleFlyby();
       else if (action.startsWith("weapon-") || action === "magazine-swap") pilot.weaponAction(action);
       else if (action === "reset-view") pilot.goPreset("pile");
     });
@@ -38183,7 +38377,7 @@ void main() {
         get shown() {
           return pile.shown;
         },
-        island, mouths: island.mouths, labels, launchers, camera, cameraPose: POSITION_POSE, crew, controls: pilot.controls, props, altar, path: island.path.debug, headquarters, jumbotron, agent: agent.debug, flyby,
+        island, mouths: island.mouths, labels, launchers, camera, storm, cameraPose: POSITION_POSE, crew, controls: pilot.controls, props, altar, path: island.path.debug, headquarters, jumbotron, agent: agent.debug,
         scenery: {
           get candidateCount() { return scenery.length; },
           get visibleCount() { return sceneryVisible; },
@@ -38413,12 +38607,14 @@ void main() {
   };
   const leave = () => {
     uiGuideObjects = null; uiGuidesReady = false;
-    stopFlyby();
     if (enteringTween) enteringTween.alive = false;
     enteringTween = null;
     window.clearInterval(stateTimer);
     unsubscribeActivity();
     unsubscribeActivity = null;
+    unsubscribeMempool();
+    unsubscribeMempool = null;
+    storm.dispose();
     window.clearTimeout(hintTimer);
     if (positionDebug) {
       positionDebug.removeEventListener("click", copyPositionDebug);
@@ -38484,8 +38680,8 @@ void main() {
     input.dispose();
     hud.dispose();
     // Drop every per-visit ref but the cached island.
-    pathNode = altar = hud = hooks = input = pilot = fx = cameraCover = bananaCover = solids = rockGuides = objectGuides = sightGuides = bananaGuides = pileGuides = platformGuides = mirrorGuides = pile = crew = crates = critters = clock = presets = jetpack = jetpackState = jetpackCarrier = jetpackWearer = lastJetpackCloud = mirrorCave = matrixCave = matrixControl = gateRain = fire = headquarters = positionDebug = agent = agentPlay = flyby = null;
-    magazine = magazineState = breakables = null;
+    pathNode = altar = hud = hooks = input = pilot = fx = cameraCover = bananaCover = solids = rockGuides = objectGuides = sightGuides = bananaGuides = pileGuides = platformGuides = mirrorGuides = pile = crew = crates = critters = clock = presets = jetpack = jetpackState = jetpackCarrier = jetpackWearer = lastJetpackCloud = mirrorCave = matrixCave = matrixControl = gateRain = fire = headquarters = positionDebug = agent = agentPlay = null;
+    magazine = magazineState = breakables = storm = null;
     hubScene.input = hubScene.debug = hubScene.agent = hubScene.agentView = hubScene.agentControls = hubScene.agentHandoff = null;
     return { targets: count };
   };
@@ -38500,13 +38696,13 @@ void main() {
     let nodes = 0;
     traverseVisible(root, () => nodes++);
     const all = (n) => 1 + n.children.reduce((sum, c) => sum + all(c), 0);
-    return { visibleNodes: nodes, allNodes: all(root), tweens: tweenCount(), targets: input.targetCount, ...fx.stats(), ...crates.stats(), ...crew.stats(), ...pile.stats(), ...critters.stats(), ...breakables.stats() };
+    return { visibleNodes: nodes, allNodes: all(root), tweens: tweenCount(), targets: input.targetCount, ...fx.stats(), ...crates.stats(), ...crew.stats(), ...pile.stats(), ...critters.stats(), ...breakables.stats(), ...storm.stats() };
   };
   const hubScene = {
     id: "hub", enter, update, overlay, onDonation, onKey, onLootCleared, renderOpts: RENDER_OPTS, leave, stats, liveGeometry,
     root: null, camera: null, input: null, debug: null, agent: null, agentView: null, agentControls: null, agentHandoff: null,
     get inMotion() {
-      if (pile.inMotion || fx.inMotion || breakables.inMotion || jetpack || magazine && magazine.revealed || MATRIX_WORLD.active || mirrorGuides.state.doorway || mirrorCave.damage.active || mirrorCave.ripples.active || mirrorCave.body.active) return true;
+      if (pile.inMotion || fx.inMotion || breakables.inMotion || storm.active || jetpack || magazine && magazine.revealed || MATRIX_WORLD.active || mirrorGuides.state.doorway || mirrorCave.damage.active || mirrorCave.ripples.active || mirrorCave.body.active) return true;
       for (const sign of headquarters.roomSigns) if (sign.velocity || sign.node.rotation.x) return true;
       for (let i = 0; i < matrixGates.length; i++) if (matrixCave && (matrixGates[i].raising || matrixCave.unlocked && matrixGates[i].node.position.y !== MATRIX_GATE_HIDDEN_Y)) return true;
       return false;
@@ -47185,6 +47381,12 @@ void main() {
     if (e.repeat) return;
     const typing = e.target && (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA");
     if (typing || (e.target && e.target.closest && e.target.closest("dialog"))) return;
+    const key = e.key.length === 1 ? e.key.toLowerCase() : e.key;
+    konamiAt = key === KONAMI[konamiAt] ? konamiAt + 1 : key === KONAMI[0] ? 1 : 0;
+    if (konamiAt === KONAMI.length) {
+      konamiAt = 0;
+      feedPanel.toggle();
+    }
     if (LOOT_ENABLED && e.shiftKey && (e.key === "Delete" || e.key === "Backspace")) {
       e.preventDefault();
       game.clearLoot();
@@ -47218,7 +47420,60 @@ void main() {
   window.addEventListener("keydown", onKeyDown);
   document.addEventListener("visibilitychange", onVisibility);
   if (params.has("nosim")) donations.config.simulate = false;
+  // The live feed stays off under nosim (the suite) and mempool=0; checks drive the hub's storm through emit.
+  const mempool = window.BL.mempool;
+  if (!params.has("nosim") && params.get("mempool") !== "0") mempool.start();
   const unsubscribeDonations = donations.subscribe((donation) => active.onDonation(donation), { identity: () => game.state });
+  // The feed panel: the Konami code toggles a page-wide readout of the socket, its counters and its last events.
+  // It subscribes and ticks only while open, and its text nodes change only with their value.
+  const KONAMI = ["ArrowUp", "ArrowUp", "ArrowDown", "ArrowDown", "ArrowLeft", "ArrowRight", "ArrowLeft", "ArrowRight", "b", "a"];
+  const FEED_LOG = 24, FEED_TICK = 250;
+  let konamiAt = 0;
+  const feedPanel = (() => {
+    const el = document.getElementById("feed-debug"), stateEl = document.getElementById("feed-debug-state"), logEl = document.getElementById("feed-debug-log");
+    const log = new Array(FEED_LOG).fill("");
+    let logNext = 0, logCount = 0, timer = 0, unsubscribe = null, dirty = false;
+    const stamp = () => new Date().toTimeString().slice(0, 8);
+    const push = (line) => {
+      log[logNext] = `${stamp()}  ${line}`;
+      logNext = (logNext + 1) % FEED_LOG;
+      if (logCount < FEED_LOG) logCount++;
+      dirty = true;
+    };
+    const describe = (e) => e.type === "tx" ? `tx     ${e.vsize} vB · ${(e.fee / e.vsize).toFixed(1)} sat/vB · fee ${e.fee}`
+      : e.type === "block" ? `block  ${e.height} · ${e.txCount} tx`
+      : e.type === "fees" ? `fees   next block ${e.nextFee.toFixed(2)} sat/vB · ${e.blocks} projected`
+      : `${e.type}`;
+    const render = () => {
+      const s = mempool.state, storm = active && active.debug && active.debug.storm;
+      const link = !s.enabled ? "off (nosim or mempool=0)" : s.connected ? `connected · attempt ${s.attempts}` : `reconnecting · attempt ${s.attempts}`;
+      const age = s.lastAt ? `${((Date.now() - s.lastAt) / 1000).toFixed(1)} s ago` : "none yet";
+      const text = `socket    ${link}\nlast msg  ${age}${s.lastKeys ? ` · ${s.lastKeys}` : ""}\nmessages  ${s.messages} · ${(s.bytes / 1024).toFixed(0)} KB\nchain     height ${s.height} · next block ${s.nextFee.toFixed(2)} sat/vB · ${s.projectedBlocks} projected\nevents    ${s.transactions} tx · ${s.blocks} blocks\nweather   ${storm ? `overcast ${storm.state.overcast.toFixed(2)} → ${storm.state.overcastTarget.toFixed(2)} · cloud ${storm.state.cloud.toFixed(2)} · ${storm.state.drops} drops · ${storm.state.strikes} strikes` : "no storm in this scene"}`;
+      if (stateEl.textContent !== text) stateEl.textContent = text;
+      if (!dirty) return;
+      dirty = false;
+      let lines = "";
+      for (let i = 0; i < logCount; i++) lines += `${log[(logNext - logCount + i + FEED_LOG) % FEED_LOG]}\n`;
+      logEl.textContent = lines || "no events yet";
+    };
+    const open = () => {
+      el.hidden = false;
+      dirty = true;
+      render();
+      unsubscribe = mempool.subscribe((e) => push(describe(e)));
+      timer = window.setInterval(render, FEED_TICK);
+    };
+    const close = () => {
+      el.hidden = true;
+      window.clearInterval(timer);
+      timer = 0;
+      if (unsubscribe) unsubscribe();
+      unsubscribe = null;
+    };
+    const toggle = () => (el.hidden ? open() : close());
+    document.getElementById("feed-debug-close").addEventListener("click", close);
+    return { toggle, close, get open() { return !el.hidden; }, get logged() { return logCount; } };
+  })();
   const housekeepTimer = window.setInterval(housekeep, 6e4);
   const sceneId = params.get("scene");
   // Building the first scene holds the main thread with nothing painted yet.
@@ -47241,6 +47496,8 @@ void main() {
       project: renderer.project,
       housekeep,
       go,
+      mempool,
+      feedPanel,
       // Whole frames at a fixed step without waiting on the display: a check runs seconds of play in little wall time.
       advance: (seconds, dt = 1 / 60) => {
         for (let n = Math.round(seconds / dt); n > 0; n--) {
@@ -47275,7 +47532,7 @@ void main() {
         return world.level;
       }
     };
-    for (const key of ["slots", "drops", "core", "shell", "delivery", "spillEffect", "cavemen", "crates", "lab", "headquarters", "hud", "applyAllSwag", "renderLocker", "demoTip", "setPileLevel", "refreshStates", "trimPool", "shown", "island", "mouths", "labels", "camera", "cameraCave", "crew", "controls", "props", "altar", "path", "scenery", "jetpack", "magazine", "mirrorCave", "matrixCave", "matrixGate", "pilot", "renderOpts", "lamps", "entranceLights", "lighting", "fireSeats", "critters", "daylight", "setHour", "track", "racers", "items", "race", "audio", "weather", "launchers", "drop", "diver", "plane", "course", "jumbotron", "orbit", "flight", "site", "agent", "flyby"]) {
+    for (const key of ["slots", "drops", "core", "shell", "delivery", "spillEffect", "cavemen", "crates", "lab", "headquarters", "hud", "applyAllSwag", "renderLocker", "demoTip", "setPileLevel", "refreshStates", "trimPool", "shown", "island", "mouths", "labels", "camera", "cameraCave", "crew", "controls", "props", "altar", "path", "scenery", "jetpack", "magazine", "mirrorCave", "matrixCave", "matrixGate", "pilot", "renderOpts", "lamps", "entranceLights", "lighting", "fireSeats", "critters", "storm", "daylight", "setHour", "track", "racers", "items", "race", "audio", "weather", "launchers", "drop", "diver", "plane", "course", "jumbotron", "orbit", "flight", "site", "agent"]) {
       Object.defineProperty(ooga, key, { get: () => active.debug && active.debug[key], enumerable: true });
     }
     window.__ooga = ooga;
@@ -47284,6 +47541,8 @@ void main() {
     window.cancelAnimationFrame(raf);
     window.clearInterval(housekeepTimer);
     unsubscribeDonations();
+    feedPanel.close();
+    mempool.dispose();
     window.removeEventListener("keydown", onKeyDown);
     document.removeEventListener("visibilitychange", onVisibility);
     active.leave();
