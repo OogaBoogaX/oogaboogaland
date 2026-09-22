@@ -1257,9 +1257,9 @@
     const possess = (cave) => {
       restoredPose = null;
       if (!crew.control(cave)) return;
-      shoulderView = false;
+      shoulderView = !crew.sleeping;
       carryExitMode = carryFocusRemaining = 0;
-      cave.weapon.aiming = false;
+      cave.weapon.aiming = !crew.sleeping;
       hud.setWeapon(false, false, 0);
       eyeMotionValid = false;
       dollyTime = DOLLY_HANDOFF;
@@ -1277,6 +1277,8 @@
       }
       hud.el.act.hidden = false;
       showAct();
+      syncAim();
+      syncWeaponHud();
       hud.tooltip.hide();
       fx.say(cave, crew.sleeping ? "zzz..." : "Ooga? Me?", 1.6);
       if (crew.sleeping) hud.hint(coarse ? "Tap WAKE UP! to get up" : cave.bedroll.sleep ? "Space wakes up · WASD changes sleeping pose" : "Space wakes up · Escape leaves them sleeping");
@@ -1610,11 +1612,15 @@
         if (Math.abs(closeMix - target) < CLOSE_SNAP) closeMix = target;
         closeVelocity = 0;
       }
-      const entryDecay = Math.exp(-AIM_ENTRY_RATE * dt);
-      delta = aimMix - 1; impulse = (aimVelocity + AIM_ENTRY_RATE * delta) * dt;
+      // Releasing a shoulder target can restart this spring while zooming in.
+      // Finish its eye/aim handoff at the close-view rate so first person
+      // cannot retain a slower shoulder offset after the zoom has settled.
+      const entryRate = closeWanted ? CLOSE_RATE : AIM_ENTRY_RATE;
+      const entryDecay = Math.exp(-entryRate * dt);
+      delta = aimMix - 1; impulse = (aimVelocity + entryRate * delta) * dt;
       aimMix = 1 + (delta + impulse) * entryDecay;
-      aimVelocity = (aimVelocity - AIM_ENTRY_RATE * impulse) * entryDecay;
-      if (1 - aimMix < CLOSE_SNAP && Math.abs(aimVelocity) < CLOSE_SNAP * AIM_ENTRY_RATE) { aimMix = 1; aimVelocity = 0; }
+      aimVelocity = (aimVelocity - entryRate * impulse) * entryDecay;
+      if (1 - aimMix < CLOSE_SNAP && Math.abs(aimVelocity) < CLOSE_SNAP * entryRate) { aimMix = 1; aimVelocity = 0; }
       poseAim();
       shoulderSide = damp(shoulderSide, shoulderSideTarget, SHOULDER_SWAP_RATE, dt);
       if (Math.abs(shoulderSide - shoulderSideTarget) < 1e-4) shoulderSide = shoulderSideTarget;
