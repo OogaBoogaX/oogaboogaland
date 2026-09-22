@@ -3810,7 +3810,20 @@
     if (!matrixCave) return;
     // A controlled Ooga owns the portal in both camera modes.
     // The first-person eye follows head-look and must not open/close the mirror while the body is still.
-    setMatrixInside((player ? playerCaveIndex : cameraCaveIndex) === matrixCave.caveIndex);
+    if (player) {
+      setMatrixInside(playerCaveIndex === matrixCave.caveIndex);
+      return;
+    }
+    // The detached camera can keep a cave admission while orbiting above or
+    // outside its mouth. Only its actual eye inside the room can start the wave.
+    const eye = camera.position, m = matrixCave.mouth;
+    const along = (eye.x - m.x) * matrixCave.sr + (eye.z - m.z) * matrixCave.cr;
+    setMatrixInside(cameraCaveIndex === matrixCave.caveIndex && along < PORTAL_Z
+      && eye.y < m.floorY + PORTAL_MAX_Y
+      && island.cavityAt(eye.x, eye.z, MATRIX_CAMERA_COLUMN, matrixCave.caveIndex, eye.y)
+      && MATRIX_CAMERA_COLUMN.caveIndex === matrixCave.caveIndex
+      && eye.y >= MATRIX_CAMERA_COLUMN.floor && eye.y < MATRIX_CAMERA_COLUMN.ceiling
+      && island.clearAt(eye.x, eye.y, eye.z, 1e-5, 2e-5));
   };
   const setCameraCave = (index) => {
     if (cameraCaveIndex === index) return;
