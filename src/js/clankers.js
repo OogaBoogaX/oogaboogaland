@@ -906,6 +906,29 @@
       c.length += distance; c.lengths[i] = c.length; c.count++;
       return true;
     };
+    const plannedTurnMotion = { climb: 1, climbBlend: 1, mantle: 0, climbStride: 0 };
+    const plannedTurnClear = ctx.climbTransitionClear ? (e, x, y, z, nx, ny, nz, radius, height, actors, riders, toRadius, toHeight) =>
+      ctx.climbTransitionClear(e, x, y, z, nx, ny, nz, radius, height, false, false, toRadius, toHeight) : null;
+    const bottomTurnClear = (e, x, y, z, heading) => {
+      // A safe upright footfall can still leave the lowered shoulders inside a
+      // diagonal rock corner. Reserve the complete grounded turn before using
+      // that footfall as the end of a descent, not after the gorilla reaches it.
+      for (let i = 0; i <= 16; i++) {
+        const turn = i / 16;
+        let blend = 1 - turn * turn * (3 - 2 * turn), clear = false;
+        // Match the controller's hand release: stay taller while rotating past
+        // a projecting corner, then lower the knuckles on the clear way out.
+        for (;;) {
+          plannedTurnMotion.climbBlend = blend; plannedTurnMotion.mantle = 1 - blend;
+          if (e.gorilla.climbPoseClear(2, x, y, z, heading + Math.PI * turn, plannedTurnMotion,
+            ctx.solidAt, plannedTurnClear, e, 0, true)) { clear = true; break; }
+          if (blend >= 1 || i === 16) break;
+          blend = Math.min(1, blend + 0.12);
+        }
+        if (!clear) return false;
+      }
+      return true;
+    };
     const buildClimb = (e, lx, ly, lz, ux, uy, uz, heading, descending, lowerExit = true) => {
       const c = e.climb, sx = Math.sin(heading), sz = Math.cos(heading), p = e.root.position;
       const topHeading = descending ? e.heading : heading;
@@ -988,8 +1011,10 @@
         // Plant the last footfall outside the close wall grip. That small
         // outward transfer happens during the descent, leaving room to turn
         // onto all fours without sweeping the shoulders through the rock.
-        for (let retreat = i ? 0 : 0.4; retreat <= (i ? 0.72 : 1.12); retreat += 0.12) {
-          if (appendClimbPoint(e, x - sx * retreat, y, z - sz * retreat)) { x -= sx * retreat; z -= sz * retreat; placed = true; break; }
+        for (let retreat = i ? 0 : 0.4; retreat <= (i ? 0.72 : 1.6); retreat += 0.12) {
+          const nx = x - sx * retreat, nz = z - sz * retreat;
+          if (!i && lowerExit && !bottomTurnClear(e, nx, y, nz, heading)) continue;
+          if (appendClimbPoint(e, nx, y, nz)) { x = nx; z = nz; placed = true; break; }
         }
         if (!placed) return false;
         if (!i) c.lowerGroundDistance = c.length;
@@ -1420,8 +1445,9 @@
         e.steerFor = e.steerClear = e.steerSide = 0; e.steerHeading = e.heading;
       }
       e.steerFor = Math.max(0, e.steerFor - dt);
+      const fullStride = e.phase === "work" || e.route === "enter" || e.route === "exit";
       let chosen = NaN, chosenFacing = e.heading, chosenMode = initialMode, chosenCompact = initialCompact;
-      let best = -Infinity, chosenY = p.y, directAhead = false, chosenAhead = false;
+      let best = -Infinity, chosenY = p.y, chosenStep = 0, directAhead = false, chosenAhead = false;
       for (let i = 0; i < STEERING.length; i++) {
         const heading = desired + STEERING[i] * e.turn, sx = Math.sin(heading), sz = Math.cos(heading);
         const turn = Math.atan2(Math.sin(heading - e.heading), Math.cos(heading - e.heading));
@@ -1440,7 +1466,11 @@
           : (e.mode === "working" || e.phase === "leave" || e.exitFootprint || e.phase === "chill" && (!e.lounge || Math.abs(e.speed) > 0.1))
             && (e.footprintMode === "pound" ? e.gorilla.poundCompact : e.gorilla.compact);
         labEnvelope(e);
-        const x = p.x + sx * step, z = p.z + sz * step, y = groundAt(x, z, p.y);
+        // Turning slows the feet, but not the torso's yaw. Test that exact
+        // shorter translation: scaling a cleared move afterward can swing
+        // the leading knuckles into the very prop the full step avoided.
+        const stride = step * (fullStride ? 1 : Math.max(0.18, Math.cos(turn)));
+        const x = p.x + sx * stride, z = p.z + sz * stride, y = groundAt(x, z, p.y);
         if (!Number.isFinite(y) || y > p.y + STEP || y < p.y - 0.7 || !landing(x, y, z, e.foot)
           || e.phase === "work" && !e.lab.yielding && caveAt(x, y, z) !== e.site
           || e.parked && caveAt(x, y, z) < 0) continue;
@@ -1464,7 +1494,7 @@
         const score = Math.cos(heading - desired) * 2 + Math.cos(heading - e.steerHeading) * 0.5
           + (goodAhead ? 3 : 0) + commitment - i * 0.008;
         if (score > best) {
-          best = score; chosen = heading; chosenFacing = facing; chosenY = y;
+          best = score; chosen = heading; chosenFacing = facing; chosenY = y; chosenStep = stride;
           chosenAhead = goodAhead;
           chosenMode = e.footprintMode; chosenCompact = e.compact;
         }
@@ -1484,20 +1514,17 @@
         // Keep the tested evasive step when easing would still cross the prop.
         const delta = Math.atan2(Math.sin(chosen - e.steerHeading), Math.cos(chosen - e.steerHeading));
         const smooth = e.steerHeading + clamp(delta, -dt * 3.2, dt * 3.2);
-        const sx = p.x + Math.sin(smooth) * step, sz = p.z + Math.cos(smooth) * step, sy = groundAt(sx, sz, p.y);
+        const smoothStep = step * (fullStride ? 1 : Math.max(0.18, Math.cos(smooth - e.heading)));
+        const sx = p.x + Math.sin(smooth) * smoothStep, sz = p.z + Math.cos(smooth) * smoothStep, sy = groundAt(sx, sz, p.y);
         if (Number.isFinite(sy) && sy <= p.y + STEP && sy >= p.y - 0.7 && landing(sx, sy, sz)
           && (e.phase !== "work" || e.lab.yielding || caveAt(sx, sy, sz) === e.site) && (!e.parked || caveAt(sx, sy, sz) >= 0)
           && !occupied(e, sx, sy, sz, true, chosenFacing) && staticClear(e, p.x, p.y, p.z, sx, sy, sz, e.heading, chosenFacing)) {
-          chosen = smooth; chosenY = sy;
+          chosen = smooth; chosenY = sy; chosenStep = smoothStep;
         }
         e.steerHeading = chosen;
-        const turn = Math.atan2(Math.sin(chosen - e.heading), Math.cos(chosen - e.heading));
         e.heading = chosenFacing;
-        const gain = e.phase === "work" || e.route === "enter" || e.route === "exit" ? 1 : Math.max(0.18, Math.cos(turn));
-        const nx = p.x + Math.sin(chosen) * step * gain, nz = p.z + Math.cos(chosen) * step * gain;
-        const ny = gain < 1 ? groundAt(nx, nz, p.y) : chosenY;
-        p.x = nx; p.y = ny; p.z = nz;
-        e.speed = step * gain / dt * (Math.cos(chosen - e.heading) < 0 ? -1 : 1);
+        p.x += Math.sin(chosen) * chosenStep; p.y = chosenY; p.z += Math.cos(chosen) * chosenStep;
+        e.speed = chosenStep / dt * (Math.cos(chosen - e.heading) < 0 ? -1 : 1);
         e.blocked = Math.cos(chosen - desired) > 0.3 ? Math.max(0, e.blocked - dt * 2) : e.blocked + dt;
       } else {
         e.speed = damp(e.speed, 0, 16, dt); e.blocked += dt;
