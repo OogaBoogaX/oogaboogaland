@@ -27,7 +27,8 @@ Repository activity is tracked separately for each character and project. After 
 magazine and a refill, workers visit their next recently active repository's open
 cave in turn. Workers fan out on either side of the entrance, forming staggered
 rows when the front row fills. They keep their rifles selected throughout the work cycle
-and aim successive shots across their own gorilla's moving body, leaving the central path open.
+and leave the central path open. Firing places have a clear view through the doorway;
+workers reposition if cover blocks their muzzle rather than spending ammunition on the wall.
 After the last shot they briefly hold their empty rifle aimed, then lower it across
 the body for the return to the pile. A worker with ammunition in their spare swaps it
 in and empties it at the cave first, then returns to fill the AK and spare before the next trip.

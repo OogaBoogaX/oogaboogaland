@@ -5862,27 +5862,44 @@
         fallback: slot.id === "c1",
         route: [approach],
         approachDistance: 2.5,
-        position: (cave, out) => {
+        position: (cave, out, retry = false) => {
           // Reserve the first free place in the fan. Leave the central path
           // open for reload traffic and stagger each extra row behind it.
-          for (let place = 0; place < crew.cavemen.size; place++) {
+          const count = crew.cavemen.size * 4 + 16;
+          for (let attempt = 0; attempt < count; attempt++) {
+            const place = (attempt + (retry ? cave.work.place + 1 : 0)) % count;
             const row = Math.floor(place / 4), side = place & 1 ? 1 : -1;
             // Leave a full-arm companion lane between the inner shooters.
             const x = side * (2.2 + Math.floor(place % 4 / 2) * 1.35 + (row & 1) * 0.6);
-            const z = 2.8 + row * 1.35 + Math.abs(x) * 0.16;
-            out.x = mouth.x + cr * x + sr * z;
-            out.z = mouth.z - sr * x + cr * z;
+            // A wide fan too close to the rim fires diagonally into its stone
+            // jambs. Back each row away enough to see across the opening.
+            const z = 4.8 + row * 1.35 + Math.abs(x) * 0.32;
+            const px = mouth.x + cr * x + sr * z, pz = mouth.z - sr * x + cr * z;
             let occupied = false;
             for (let i = 0; i < crew.list.length; i++) {
               const other = crew.list[i];
               if (other === cave || other === crew.player || other.state !== "working"
                 || other.work.phase !== "outbound" && other.work.phase !== "station" && other.work.phase !== "shoot"
                 || shared.workSites[other.work.site]?.repo !== slot.repo) continue;
-              if (Math.hypot(other.work.position.x - out.x, other.work.position.z - out.z) < 0.5) { occupied = true; break; }
+              if (Math.hypot(other.work.position.x - px, other.work.position.z - pz) < 0.9) { occupied = true; break; }
             }
-            if (!occupied) break;
+            if (occupied || Math.abs(island.supportAt(px, pz, mouth.floorY, 0.05, ABYSS_FLOOR, PLAYER_RADIUS) - mouth.floorY) > 0.05
+              || !island.clearAt(px, mouth.floorY + 0.03, pz, PLAYER_RADIUS, cave.traits.height)
+              || !solids.segmentClear(px, mouth.floorY + 0.03, pz, px, mouth.floorY + 0.03, pz, PLAYER_RADIUS, cave.traits.height)) continue;
+            let clear = true;
+            // Cover either gun shoulder and both sides of the usable doorway,
+            // not just a center-to-center ray that misses an obstructed muzzle.
+            for (let shoulder = -1; shoulder <= 1 && clear; shoulder += 2) for (let edge = -1; edge <= 1; edge++) {
+              const ax = px + cr * shoulder * 0.65 - sr, az = pz - sr * shoulder * 0.65 - cr;
+              const bx = mouth.x + cr * edge * 1.65 + sr * 0.5, bz = mouth.z - sr * edge * 1.65 + cr * 0.5;
+              if (!shared.workShotClear(ax, mouth.floorY + 1.25, az, bx, mouth.floorY + 1.5, bz)) { clear = false; break; }
+            }
+            if (!clear) continue;
+            out.x = px; out.y = mouth.floorY; out.z = pz;
+            cave.work.place = place;
+            return true;
           }
-          out.y = mouth.floorY;
+          return false;
         }
       };
     });

@@ -511,7 +511,7 @@
         meleePoints: meleeExtremes(cave.parts.club.geometry),
         clubSlingProfile: clubSlingProfile(cave.parts.club.geometry),
         clubTorsoBounds: BL.scene.boundsOf(cave.parts.torso.geometry),
-        work: { phase: "", site: 0, plannedSite: -1, targetReady: false, aimSample: i, index: 0, gait: 0, timer: i * 0.137, emptyTime: 0, rest: 0, reloadSlot: false, direct: false, position: { x: 0, y: 0, z: 0 }, target: { x: 0, y: 0, z: 0 } },
+        work: { phase: "", site: 0, plannedSite: -1, targetReady: false, aimSample: i, index: 0, place: -1, blocked: false, blockedTime: 0, gait: 0, timer: i * 0.137, emptyTime: 0, rest: 0, reloadSlot: false, direct: false, position: { x: 0, y: 0, z: 0 }, target: { x: 0, y: 0, z: 0 } },
         slot: null,
         pileApproach: false,
         index: i,
@@ -2124,6 +2124,12 @@
         }
         w.aimPitch = -Math.atan2(spot.y - p.y - cave.traits.height * 0.45, Math.hypot(spot.x - p.x, spot.z - p.z));
       }
+      if (w.burstWork && ctx.workShotClear) {
+        poseWeapon(cave);
+        weaponOrigin(weaponStart, cave);
+        cave.work.blocked = !ctx.workShotClear(weaponStart.x, weaponStart.y, weaponStart.z, spot.x, spot.y, spot.z);
+        if (cave.work.blocked) return false;
+      }
       if (!w.unlimited) w.ammo--;
       w.shotsFired++; w.recoil = GUN_HOLD;
       poseWeapon(cave);
@@ -3603,10 +3609,11 @@
       const work = cave.work, site = workSites[index];
       work.site = cave.weapon.workSite = index;
       work.index = 0;
-      if (site.position) site.position(cave, work.position);
+      if (site.position) { if (site.position(cave, work.position) === false) return false; }
       else setVec(work.position, site.route[site.route.length - 1].x, 0, site.route[site.route.length - 1].z);
       work.phase = "outbound";
       work.targetReady = false;
+      work.blocked = false; work.blockedTime = 0;
       work.rest = cave.traits.maintainer ? WORK_REST_MIN + Math.random() * WORK_REST_SPREAD : 0;
       work.reloadSlot = work.direct = cave.pileApproach = false;
       cave.act.kind = "work";
@@ -3688,6 +3695,18 @@
           aimWork(cave, site);
         }
       } else if (work.phase === "shoot") {
+        if (site.approachDistance && Math.hypot(cave.root.position.x - work.position.x, cave.root.position.z - work.position.z) > 0.45) {
+          stopBurst(cave); work.phase = "station"; cave.avoidance.tx = NaN;
+          return;
+        }
+        work.blockedTime = work.blocked ? work.blockedTime + dt : 0;
+        if (work.blockedTime >= 0.6 && site.position) {
+          work.blockedTime = 0;
+          if (site.position(cave, work.position, true) !== false) {
+            stopBurst(cave); work.blocked = false; work.phase = "station"; cave.avoidance.tx = NaN;
+            return;
+          }
+        }
         standPose(cave);
         cave.act.kind = "work";
         const targetReady = aimWork(cave, site);
@@ -3695,6 +3714,7 @@
         else work.timer = Math.max(0.2, work.timer);
         if (targetReady && work.timer <= 0 && weapon.ammo > 0 && !weapon.burstRemaining && weapon.cooldown <= 0) {
           if (fireWeapon(cave, work.target)) work.timer = 0.22 + (cave.index % 3) * 0.045;
+          else if (work.blocked) work.timer = 0.15;
         }
         if (!weapon.ammo && !weapon.swapTime) {
           // Let the last banana land while the visibly empty rifle remains
