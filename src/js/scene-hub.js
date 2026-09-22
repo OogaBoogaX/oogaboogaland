@@ -5016,7 +5016,8 @@
       || !island.voxelSegmentClearAt(x, floor, z, toX, toFloor, toZ, radius, body)
       || !solids.segmentClear(x, floor, z, toX, toFloor, toZ, radius, body, ignore)
       || !matrixGateSegmentClear(x, floor, z, toX, toFloor, toZ, radius, body, true)
-      || !cylinderSegmentClear(x, floor, z, toX, toFloor, toZ, radius, body, 0, 0, 0, ALTAR_HEIGHT, altar.platformRadius)) return false;
+      || !cylinderSegmentClear(x, floor, z, toX, toFloor, toZ, radius, body, 0, 0, 0, 64,
+        Math.max(altar.platformRadius, island.path.debug.ringOuterRadius) + 0.4)) return false;
     for (let i = 0; i < fireHazards.length && !(entry && (entry.controlled || entry.fire.burning)); i++) {
       const fire = fireHazards[i];
       if (fire.pit.visible && !cylinderSegmentClear(x, floor, z, toX, toFloor, toZ, radius, body,

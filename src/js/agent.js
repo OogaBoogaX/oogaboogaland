@@ -88,6 +88,66 @@
     }
     return false;
   };
+  // An expanded pose can leave two conservative capsules overlapping even when
+  // their meshes are apart. Allow an escape only when every overlapping pair
+  // separates throughout the move and no other pair is entered. Test the limb
+  // centres, including their turning arcs, rather than just the two roots.
+  const separatingPair = (x, z, vx, vz, heading, turn, offset, ox, oz, radius) => {
+    const sx = x + Math.sin(heading) * offset - ox, sz = z + Math.cos(heading) * offset - oz;
+    const ex = x + vx + Math.sin(heading + turn) * offset - ox, ez = z + vz + Math.cos(heading + turn) * offset - oz;
+    const start2 = sx * sx + sz * sz, r2 = radius * radius, overlap = start2 < r2;
+    if (overlap && ex * ex + ez * ez <= start2 + 1e-9) return false;
+    if (Math.abs(turn * offset) < 1e-9) {
+      const dot = sx * vx + sz * vz;
+      if (overlap) return dot >= -1e-9;
+      const length2 = vx * vx + vz * vz, t = length2 ? clamp(-dot / length2, 0, 1) : 0;
+      return (sx + vx * t) ** 2 + (sz + vz * t) ** 2 >= r2 - 1e-9;
+    }
+    const steps = Math.max(1, Math.ceil(Math.abs(turn) / 0.06)), half = 0.5 / steps;
+    const speed = Math.hypot(vx, vz) + Math.abs(offset * turn), acceleration = Math.abs(offset) * turn * turn;
+    for (let i = 0; i < steps; i++) {
+      const a = i / steps, b = (i + 1) / steps, mid = (a + b) * 0.5;
+      if (overlap) {
+        const angle = heading + turn * mid, sine = Math.sin(angle), cosine = Math.cos(angle);
+        const rx = x + vx * mid + sine * offset - ox, rz = z + vz * mid + cosine * offset - oz;
+        const derivative = rx * (vx + cosine * offset * turn) + rz * (vz - sine * offset * turn);
+        const bound = speed * speed + (Math.hypot(rx, rz) + speed * half) * acceleration;
+        // This bounds the derivative of squared distance across the interval,
+        // including the curved part between the two sampled headings.
+        if (derivative - bound * half < -1e-9) return false;
+      } else {
+        const ax = x + vx * a + Math.sin(heading + turn * a) * offset - ox;
+        const az = z + vz * a + Math.cos(heading + turn * a) * offset - oz;
+        const dx = x + vx * b + Math.sin(heading + turn * b) * offset - ox - ax;
+        const dz = z + vz * b + Math.cos(heading + turn * b) * offset - oz - az;
+        const length2 = dx * dx + dz * dz, t = length2 ? clamp(-(ax * dx + az * dz) / length2, 0, 1) : 0;
+        const reach = radius + Math.abs(offset) * (1 - Math.cos(turn / steps * 0.5));
+        if ((ax + dx * t) ** 2 + (az + dz * t) ** 2 < reach * reach - 1e-9) return false;
+      }
+    }
+    return true;
+  };
+  const footprintSeparates = (a, ax, ay, az, ah, nx, ny, nz, nh, b, bx, by, bz, bh, margin = 0) => {
+    if (Math.min(ay, ny) >= by + b.height || Math.max(ay, ny) + a.height <= by) return true;
+    // A new vertical contact is not an escape from an existing overlap.
+    if (ay >= by + b.height || ay + a.height <= by) return false;
+    const turn = Math.atan2(Math.sin(nh - ah), Math.cos(nh - ah));
+    const radius = footprintRadius(a) + footprintRadius(b) + margin, bs = Math.sin(bh), bc = Math.cos(bh);
+    for (let i = 0; i < footprintCount(a); i++) for (let j = 0; j < footprintCount(b); j++) {
+      const bo = footprintOffset(b, j);
+      if (!separatingPair(ax, az, nx - ax, nz - az, ah, turn, footprintOffset(a, i), bx + bs * bo, bz + bc * bo, radius)) return false;
+    }
+    return true;
+  };
+  const footprintCircleSeparates = (entry, x, y, z, heading, nx, ny, nz, nh, ox, oy, oz, radius, height, margin = 0) => {
+    if (Math.min(y, ny) >= oy + height || Math.max(y, ny) + entry.height <= oy) return true;
+    if (y >= oy + height || y + entry.height <= oy) return false;
+    const turn = Math.atan2(Math.sin(nh - heading), Math.cos(nh - heading)), reach = footprintRadius(entry) + radius + margin;
+    for (let i = 0; i < footprintCount(entry); i++) {
+      if (!separatingPair(x, z, nx - x, nz - z, heading, turn, footprintOffset(entry, i), ox, oz, reach)) return false;
+    }
+    return true;
+  };
   const footprintSweep = (entry, x, y, z, toX, toY, toZ, radius, height, fromHeading, toHeading, test, ignore) => {
     if (!entry || !footprintProfile(entry)) return test(x, y, z, toX, toY, toZ, radius, height, entry, ignore);
     const turn = Math.atan2(Math.sin(toHeading - fromHeading), Math.cos(toHeading - fromHeading));
@@ -104,7 +164,8 @@
     return true;
   };
   const footprint = { count: footprintCount, radius: footprintRadius, offset: footprintOffset,
-    overlaps: footprintOverlaps, circleOverlaps: footprintCircleOverlaps, sweep: footprintSweep };
+    overlaps: footprintOverlaps, circleOverlaps: footprintCircleOverlaps, separates: footprintSeparates,
+    circleSeparates: footprintCircleSeparates, sweep: footprintSweep };
 
   const jitter = (rand, base, dark, p) => () => rand() < p ? dark : base;
   // Columns of lit code run down the fur: every fourth column, two cells on, one off.

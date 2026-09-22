@@ -112,11 +112,14 @@
     // Include the complete arm envelope, and reserve airborne destinations so
     // another clanker cannot stand under a leap that is already in progress.
     const occupied = (e, x, y, z, destinations = true, heading = e.heading) => {
+      const start = e.root.position;
       for (let i = 0; i < list.length; i++) {
         const other = list[i];
         if (other === e || !other.active) continue;
         const p = other.root.position, radius = e.radius + other.radius + SPACE;
-        if (footprint.overlaps(e, x, y, z, heading, other, p.x, p.y, p.z, other.heading, SPACE)) return true;
+        if (footprint.overlaps(e, x, y, z, heading, other, p.x, p.y, p.z, other.heading, SPACE)
+          && !footprint.separates(e, start.x, start.y, start.z, e.heading, x, y, z, heading,
+            other, p.x, p.y, p.z, other.heading, SPACE)) return true;
         if (destinations && other.jump.active) {
           const jump = other.jump, dx = jump.toX - jump.fromX, dz = jump.toZ - jump.fromZ, length2 = dx * dx + dz * dz;
           const t = length2 ? clamp(((x - jump.fromX) * dx + (z - jump.fromZ) * dz) / length2, 0, 1) : 0;
@@ -129,7 +132,9 @@
         const other = crew.list[i];
         if (!other.root.visible || other.state === "away" || other.state === "sleeping" || other.clankerRide?.entry === e) continue;
         const p = other.root.position, feet = p.y - other.baseY;
-        if (footprint.circleOverlaps(e, x, y, z, heading, p.x, feet, p.z, 0.38, other.bodyHeight || other.traits.height, SPACE)) return true;
+        if (footprint.circleOverlaps(e, x, y, z, heading, p.x, feet, p.z, 0.38, other.bodyHeight || other.traits.height, SPACE)
+          && !footprint.circleSeparates(e, start.x, start.y, start.z, e.heading, x, y, z, heading,
+            p.x, feet, p.z, 0.38, other.bodyHeight || other.traits.height, SPACE)) return true;
       }
       return false;
     };
@@ -486,6 +491,7 @@
         hasSlot: false, slotIndex: -1, slotX: 0, slotY: 0, slotZ: 0, goalX: 0, goalY: 0, goalZ: 0,
         random: mulberry32(fnv1a(`clanker/${owner.id || owner.traits.name || i}`)),
         heading: i * 2.39996323, speed: 0, blocked: 0, retry: 0, rest: 0, yieldFor: 0, turn: 1, portalWait: false,
+        steerHeading: NaN, steerSide: 0, steerFor: 0, steerClear: 0, steerGoalX: NaN, steerGoalZ: NaN,
         sampleTime: 0, sampleX: 0, sampleZ: 0, stuckTime: 0, portalSince: 0, portalRetry: 0,
         overflow: false, activity: 0, hits: 0, pounds: 0, pound: 0, poundHit: false, poundPower: 2,
         drag: { cave: null, time: 0 },
@@ -702,8 +708,13 @@
         if (tryJump(e, desired)) { e.heading = desired; return; }
       }
       const initialMode = e.footprintMode, initialCompact = e.compact;
+      if (e.steerGoalX !== e.goalX || e.steerGoalZ !== e.goalZ) {
+        e.steerGoalX = e.goalX; e.steerGoalZ = e.goalZ;
+        e.steerFor = e.steerClear = e.steerSide = 0; e.steerHeading = e.heading;
+      }
+      e.steerFor = Math.max(0, e.steerFor - dt);
       let chosen = NaN, chosenFacing = e.heading, chosenMode = initialMode, chosenCompact = initialCompact;
-      let best = -Infinity, chosenY = p.y, pushed = false;
+      let best = -Infinity, chosenY = p.y, directAhead = false;
       for (let i = 0; i < STEERING.length; i++) {
         const heading = desired + STEERING[i] * e.turn, sx = Math.sin(heading), sz = Math.cos(heading);
         const turn = Math.atan2(Math.sin(heading - e.heading), Math.cos(heading - e.heading));
@@ -721,26 +732,49 @@
         const x = p.x + sx * step, z = p.z + sz * step, y = groundAt(x, z, p.y);
         if (!Number.isFinite(y) || y > p.y + STEP || y < p.y - 0.7 || !landing(x, y, z, e.foot)
           || e.phase === "work" && caveAt(x, y, z) !== e.site
-          || e.parked && caveAt(x, y, z) < 0
-          || (e.phase === "wait" || e.phase === "chill") && !trafficAt(p.x, p.y, p.z) && trafficAt(x, y, z)) continue;
+          || e.parked && caveAt(x, y, z) < 0) continue;
         if (occupied(e, x, y, z, true, facing)) continue;
-        if (!staticClear(e, p.x, p.y, p.z, x, y, z, e.heading, facing)) {
-          if (!i && ctx.push) { ctx.push(e, sx, sz, dt); pushed = true; }
-          continue;
+        if (!staticClear(e, p.x, p.y, p.z, x, y, z, e.heading, facing)) continue;
+        // Reserve the approaching arm chain before it reaches a prop, including
+        // the turn it will make along that approach. Shorten the horizon on
+        // stairs; their individual risers still use the ordinary step checks.
+        let ahead = Math.min(distance, 0.8 + speed * 0.7), ax = p.x + sx * ahead, az = p.z + sz * ahead;
+        let ay = groundAt(ax, az, p.y);
+        if (Math.abs(ay - p.y) > STEP) {
+          ahead = Math.min(0.45, distance); ax = p.x + sx * ahead; az = p.z + sz * ahead; ay = groundAt(ax, az, p.y);
         }
-        // Look ahead far enough to turn before the long arms touch a prop.
-        const ahead = Math.min(0.5, distance), ax = p.x + sx * ahead, az = p.z + sz * ahead, ay = groundAt(ax, az, p.y);
+        const aheadTurn = Math.min(Math.PI, ahead / Math.max(0.1, speed) * 5);
+        const aheadFacing = e.heading + clamp(facingTurn, -aheadTurn, aheadTurn);
         const goodAhead = Number.isFinite(ay) && Math.abs(ay - p.y) <= STEP && landing(ax, ay, az, e.foot)
-          && !occupied(e, ax, ay, az, true, facing) && staticClear(e, p.x, p.y, p.z, ax, ay, az, e.heading, facing);
-        const score = Math.cos(heading - desired) * 2 + Math.cos(heading - e.heading) * 0.3 + (goodAhead ? 1 : 0) - i * 0.008;
+          && !occupied(e, ax, ay, az, true, aheadFacing) && staticClear(e, p.x, p.y, p.z, ax, ay, az, e.heading, aheadFacing);
+        if (!i) directAhead = goodAhead;
+        const side = Math.sign(STEERING[i] * e.turn);
+        const commitment = e.steerFor > 0 && side && e.steerSide ? side === e.steerSide ? 0.45 : -1.25 : 0;
+        const score = Math.cos(heading - desired) * 2 + Math.cos(heading - e.steerHeading) * 0.5
+          + (goodAhead ? 3 : 0) + commitment - i * 0.008;
         if (score > best) {
           best = score; chosen = heading; chosenFacing = facing; chosenY = y;
           chosenMode = e.footprintMode; chosenCompact = e.compact;
         }
-        if (!i && goodAhead) break;
+        if (!i && goodAhead && (!e.steerSide || e.steerClear >= 0.25)) break;
       }
       e.footprintMode = chosenMode; e.compact = chosenCompact;
+      e.steerClear = directAhead ? e.steerClear + dt : 0;
+      if (e.steerClear >= 0.25) { e.steerSide = 0; e.steerFor = 0; }
       if (Number.isFinite(chosen)) {
+        const side = Math.sign(Math.sin(chosen - desired));
+        if (!directAhead && side && (e.steerFor <= 0 || side !== e.steerSide)) { e.steerSide = side; e.steerFor = 1.2; }
+        // Ease the actual travel direction too, not just the visual body yaw.
+        // Keep the tested evasive step when easing would still cross the prop.
+        const delta = Math.atan2(Math.sin(chosen - e.steerHeading), Math.cos(chosen - e.steerHeading));
+        const smooth = e.steerHeading + clamp(delta, -dt * 3.2, dt * 3.2);
+        const sx = p.x + Math.sin(smooth) * step, sz = p.z + Math.cos(smooth) * step, sy = groundAt(sx, sz, p.y);
+        if (Number.isFinite(sy) && sy <= p.y + STEP && sy >= p.y - 0.7 && landing(sx, sy, sz)
+          && (e.phase !== "work" || caveAt(sx, sy, sz) === e.site) && (!e.parked || caveAt(sx, sy, sz) >= 0)
+          && !occupied(e, sx, sy, sz, true, chosenFacing) && staticClear(e, p.x, p.y, p.z, sx, sy, sz, e.heading, chosenFacing)) {
+          chosen = smooth; chosenY = sy;
+        }
+        e.steerHeading = chosen;
         const turn = Math.atan2(Math.sin(chosen - e.heading), Math.cos(chosen - e.heading));
         e.heading = chosenFacing;
         const gain = e.phase === "work" || e.route === "enter" || e.route === "exit" ? 1 : Math.max(0.18, Math.cos(turn));
@@ -751,11 +785,11 @@
         e.blocked = Math.cos(chosen - desired) > 0.3 ? Math.max(0, e.blocked - dt * 2) : e.blocked + dt;
       } else {
         e.speed = damp(e.speed, 0, 16, dt); e.blocked += dt;
-        if (!pushed && ctx.push) ctx.push(e, Math.sin(desired), Math.cos(desired), dt);
+        if (ctx.push) ctx.push(e, Math.sin(desired), Math.cos(desired), dt);
         if (!e.parked && !doorway && e.retry <= 0 && e.blocked > 0.3) {
           e.retry = 0.6;
           if (tryJump(e, desired)) { e.heading = desired; return; }
-          e.turn = -e.turn;
+          if (e.steerFor <= 0) { e.turn = -e.turn; e.steerSide = 0; }
         }
         if (e.blocked > 1.5) {
           e.blocked = 0;
