@@ -5,7 +5,7 @@
   const SHOULDER_DISTANCE = 3.8, POUND_CHARGE_TIME = 1;
   const create = ({ canvas, camera, pilot, hud, clankers, input = null, constrainCamera = null }) => {
     const orbit = pilot.orbit, target = { x: 0, y: 0, z: 0 };
-    const command = { x: 0, z: 0, heading: NaN, jumpHeld: false, jumpPressed: false, run: false };
+    const command = { x: 0, z: 0, climbAxis: 0, heading: NaN, jumpHeld: false, jumpPressed: false, run: false };
     const listeners = [];
     let player = null, view = "orbit", battle = false, disposed = false, jumpKey = false, jumpTap = false, run = false;
     let actPointer = -1, smashPointer = -1, smashCharge = 0, shownCharge = -1, mouseButtons = 0, blockedButtons = 0, shoulder = 0;
@@ -89,11 +89,11 @@
     const showAct = () => {
       if (!player) return;
       if (hud.el.act.hidden) hud.el.act.hidden = false;
-      const mode = player.fire.rolling ? 3 : player.fire.burning ? 2 : jumpKey || actPointer >= 0 || jumpTap ? 1 : 0;
+      const mode = player.climb.active ? 4 : player.fire.rolling ? 3 : player.fire.burning ? 2 : jumpKey || actPointer >= 0 || jumpTap ? 1 : 0;
       const power = mode === 1 ? Math.round(player.motion.charge * 100) : -1;
       if (mode === actMode && power === actPower) return;
       actMode = mode; actPower = power;
-      hud.setAct(mode === 3 ? "ROLLING!" : mode === 2 ? "DROP & ROLL" : mode === 1 ? `RELEASE ${power}%` : "HOLD TO JUMP");
+      hud.setAct(mode === 4 ? "W ↑ · S ↓" : mode === 3 ? "ROLLING!" : mode === 2 ? "DROP & ROLL" : mode === 1 ? `RELEASE ${power}%` : "HOLD TO JUMP");
     };
     const beginJump = () => {
       if (player.fire.burning) {
@@ -298,6 +298,7 @@
       command.x = axes.x * cy - axes.y * sy;
       command.z = -axes.x * sy - axes.y * cy;
       command.heading = battle ? orbit.yaw + Math.PI : Math.hypot(command.x, command.z) > 0.01 ? Math.atan2(command.x, command.z) : NaN;
+      command.climbAxis = axes.y;
       command.jumpHeld = jumpKey || actPointer >= 0 || jumpTap;
       command.jumpPressed = jumpTap;
       command.run = run;

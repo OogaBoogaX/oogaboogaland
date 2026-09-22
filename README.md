@@ -41,7 +41,9 @@ When the next cave changes, it runs ahead on all fours and waits inside that cav
 Gorillas take direct routes across grass and paths, without the Oogas' path
 restrictions. The banana pile and the circular path around it stay off limits.
 They look ahead with their full body and arm clearance and follow a consistent
-side around obstacles. They run through entrances rather than jumping at the doorway.
+side around obstacles. Under low tree crowns they stay on all fours and back out
+without turning when the passage is too tight. They run through entrances rather
+than jumping at the doorway.
 Chilling companions favor the unused cave roofs, occasionally climbing down to
 rest on the outer grass away from the banana pile. They sit, lie on their backs or
 either side, and sometimes sit together to pick bugs from a companion's back.
@@ -52,13 +54,23 @@ Shift runs. In carry mode, move the cursor to select things or drag to turn the 
 ordinary clicks do not attack. **X** or the gorilla's face button toggles combat/carry
 without changing the camera view. Scroll between orbit and shoulder views. Combat
 hides the cursor, mouse movement turns the view, and the gorilla faces forward.
-Left-click smashes both arms down; right-click beats its chest. Both attack icon
-buttons work in either mode. Escape or Tab frees the combat cursor; the next click
+Hold left-click or the smash button to charge a ground pound; release to bring
+both fists down. Right-click beats its chest, and the drag button grabs a nearby
+Ooga by the foot for two seconds. The action buttons work in either mode.
+Escape or Tab frees the combat cursor; the next click
 on the island recaptures it without attacking. Hold Space or the jump button
 to crouch and charge, then release to leap. A full charge reaches three times an
 Ooga's single-jump height; gorillas cannot jump again in midair. Gorillas can land on
-solid props, and Oogas can jump onto a gorilla and ride its moving body. Hold the face button,
-or press Escape with the cursor already free, to return the gorilla to its owner's routine. Gorillas catch fire
+solid props, and Oogas can jump onto a gorilla and ride its moving body. Walk toward
+a rock wall to climb; on the wall **W** climbs up and **S** climbs down (the move
+stick's forward/back directions do the same). The torso stays close to the wall,
+with spread hands and legs extending down. At the top it folds over the lip onto
+all fours; at the bottom it lowers and turns away before walking off. Walking over
+a ledge turns the gorilla toward the wall to descend; release forward, then press **S** to continue.
+The edge grab also works when there is no known landing below: the gorilla stays
+attached to the cliff instead of walking into freefall. An intentional charged
+jump still leaps. Hold the face button, or press Escape with the cursor already
+free, to return the gorilla to its owner's routine. Gorillas catch fire
 on contact with flames: Space or the jump button becomes drop-and-roll until
 the fire is out, leaving soot that fades. Uncontrolled gorillas roll automatically.
 Walkers favor their right side of each curved path and leave room for one another.

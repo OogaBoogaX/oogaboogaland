@@ -223,12 +223,13 @@
       }
       return winding > 0;
     };
-    const segmentClear = (x, y, z, toX, toY, toZ, radius, height, ignore = null) => {
+    const segmentClear = (x, y, z, toX, toY, toZ, radius, height, ignore = null, toRadius = radius, toHeight = height) => {
       stats.queries++;
-      const x0 = Math.min(x, toX) - radius, x1 = Math.max(x, toX) + radius, y0 = Math.min(y, toY), y1 = Math.max(y, toY) + height, z0 = Math.min(z, toZ) - radius, z1 = Math.max(z, toZ) + radius;
+      const x0 = Math.min(x - radius, toX - toRadius), x1 = Math.max(x + radius, toX + toRadius), y0 = Math.min(y, toY), y1 = Math.max(y + height, toY + toHeight),
+        z0 = Math.min(z - radius, toZ - toRadius), z1 = Math.max(z + radius, toZ + toRadius);
       for (const entry of entries) {
         if (!entry.active || entry.shoulderOnly || !overlaps(entry.box, x0, y0, z0, x1, y1, z1) || ignore && belongs(entry.node, ignore)) continue;
-        if (inside(entry, x, y + height / 2, z) || inside(entry, toX, toY + height / 2, toZ)) return false;
+        if (inside(entry, x, y + height / 2, z) || inside(entry, toX, toY + toHeight / 2, toZ)) return false;
         localQuery(entry, x0, y0, z0, x1, y1, z1);
         let size = 1; stack[0] = 0;
         while (size) {
@@ -238,7 +239,7 @@
           for (let i = node.from; i < node.to; i++) {
             transformTriangle(entry, entry.geometry.order[i]);
             if (Math.max(triangle[1], triangle[4], triangle[7]) <= y0 + EPS || Math.min(triangle[1], triangle[4], triangle[7]) >= y1 - EPS) continue;
-            if (BL.convex.sweptCylinder(triangle, x, y, z, toX, toY, toZ, radius, height)) return false;
+            if (BL.convex.sweptCylinder(triangle, x, y, z, toX, toY, toZ, radius, height, toRadius, toHeight)) return false;
           }
         }
       }

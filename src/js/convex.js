@@ -1,10 +1,10 @@
 (() => {
   "use strict";
   const BL = window.BL = window.BL || {};
-  // GJK vs the convex hull of a vertical cylinder at both sweep ends; shared module scratch, so non-reentrant.
+  // GJK vs the convex hull of vertical cylinders at both sweep ends; shared module scratch, so non-reentrant.
   const simplex = new Float64Array(12);
   const CONTACT = 1e-7, POINT_CONTACT = 1e-9, TOLERANCE = 1e-12;
-  let fromX, fromY, fromZ, endX, endY, endZ, bodyRadius, bodyHeight;
+  let fromX, fromY, fromZ, endX, endY, endZ, bodyRadius, bodyHeight, endRadius, endHeight;
   let centerX, centerY, centerZ, scale, size, dx, dy, dz, px, py, pz;
   let closest2, closestX, closestY, closestZ, closestMask;
   const support = (vertices) => {
@@ -13,10 +13,14 @@
       const dot = vertices[i] * dx + vertices[i + 1] * dy + vertices[i + 2] * dz;
       if (dot > best) { best = dot; at = i; }
     }
-    const last = (endX - fromX) * dx + (endY - fromY) * dy + (endZ - fromZ) * dz < 0;
-    const horizontal = Math.hypot(dx, dz), radius = horizontal ? bodyRadius / horizontal : 0;
+    const horizontal = Math.hypot(dx, dz);
+    // Animated body slices can change size as they turn. Include each end's
+    // dimensions in the support choice instead of inflating the whole sweep.
+    const last = (endX - fromX) * dx + (endY - fromY) * dy + (endZ - fromZ) * dz
+      - (endRadius - bodyRadius) * horizontal + (dy < 0 ? (endHeight - bodyHeight) * dy : 0) < 0;
+    const radius = horizontal ? (last ? endRadius : bodyRadius) / horizontal : 0;
     px = centerX + (vertices[at] - centerX) * scale - (last ? endX : fromX) + dx * radius;
-    py = centerY + (vertices[at + 1] - centerY) * scale - (last ? endY : fromY) - (dy < 0 ? bodyHeight : 0);
+    py = centerY + (vertices[at + 1] - centerY) * scale - (last ? endY : fromY) - (dy < 0 ? last ? endHeight : bodyHeight : 0);
     pz = centerZ + (vertices[at + 2] - centerZ) * scale - (last ? endZ : fromZ) + dz * radius;
   };
   const consider = (x, y, z, mask) => {
@@ -72,7 +76,7 @@
     dx = -closestX; dy = -closestY; dz = -closestZ;
     return false;
   };
-  const sweptCylinder = (piece, x, y, z, toX, toY, toZ, radius, height) => {
+  const sweptCylinder = (piece, x, y, z, toX, toY, toZ, radius, height, toRadius = radius, toHeight = height) => {
     centerX = centerY = centerZ = 0;
     let lowX = Infinity, lowY = Infinity, lowZ = Infinity, highX = -Infinity, highY = -Infinity, highZ = -Infinity;
     for (let i = 0; i < piece.length; i += 3) {
@@ -85,10 +89,11 @@
     centerX /= count; centerY /= count; centerZ /= count;
     // A smaller piece margin makes degenerate point/flat queries count exact boundary contact as clear, not solid.
     scale = 1 - Math.min(0.5, POINT_CONTACT / Math.max(highX - lowX, highY - lowY, highZ - lowZ));
-    const cap = Math.min(CONTACT, height / 2);
-    fromX = x; fromY = y + cap; fromZ = z; endX = toX; endY = toY + cap; endZ = toZ;
+    const cap = Math.min(CONTACT, height / 2), toCap = Math.min(CONTACT, toHeight / 2);
+    fromX = x; fromY = y + cap; fromZ = z; endX = toX; endY = toY + toCap; endZ = toZ;
     bodyRadius = Math.max(0, radius - CONTACT); bodyHeight = height - cap * 2;
-    dx = centerX - (x + toX) / 2; dy = centerY - (y + toY + height) / 2; dz = centerZ - (z + toZ) / 2;
+    endRadius = Math.max(0, toRadius - CONTACT); endHeight = toHeight - toCap * 2;
+    dx = centerX - (x + toX) / 2; dy = centerY - (y + toY) / 2 - (height + toHeight) / 4; dz = centerZ - (z + toZ) / 2;
     if (dx * dx + dy * dy + dz * dz < TOLERANCE * TOLERANCE) dx = 1;
     support(piece);
     if (px * dx + py * dy + pz * dz <= TOLERANCE * Math.hypot(dx, dy, dz)) return false;

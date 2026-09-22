@@ -268,6 +268,21 @@
     };
   });
   const PART_NAMES = ["legL", "legR", "torso", "armL", "armR", "head"];
+  const CLIMB_VERTICES = new WeakMap();
+  const climbVertices = (geometry) => {
+    let samples = CLIMB_VERTICES.get(geometry);
+    if (samples) return samples;
+    const seen = new Set(), values = [], v = geometry.verts, b = boundsOf(geometry);
+    const cx = (b.min[0] + b.max[0]) * 0.0025, cy = (b.min[1] + b.max[1]) * 0.0025, cz = (b.min[2] + b.max[2]) * 0.0025;
+    for (let i = 0; i < v.length; i += 3) {
+      const key = `${v[i]},${v[i + 1]},${v[i + 2]}`;
+      if (seen.has(key)) continue;
+      seen.add(key); values.push(v[i] * 0.995 + cx, v[i + 1] * 0.995 + cy, v[i + 2] * 0.995 + cz);
+    }
+    samples = new Float32Array(values); CLIMB_VERTICES.set(geometry, samples);
+    return samples;
+  };
+
 
   // A step may climb at most STEP_UP and drop at most STEP_DOWN, so walls and
   // cliff edges stop the Agent instead of lifting it or dropping it off the island.
@@ -308,9 +323,9 @@
       route: null, routeIndex: 0, idleFor: 1 + Math.random() * 2, gaitFor: 0, beat: 0,
       pace: null, driven: false, walkStyle: "knuckle", inX: 0, inZ: 0, inRun: false,
       vy: 0, air: false, revealFor: 0, pound: 0, chewing: 0, biped: false, lounge: "", hipHeight: HIP,
-      charge: 0, takeoff: 0, landing: 0, crouch: 0, roll: 0, rollBlend: 0, rollAngle: 0, rollTarget: 0,
+      charge: 0, poundCharge: 0, dragging: false, takeoff: 0, landing: 0, crouch: 0, roll: 0, rollBlend: 0, rollAngle: 0, rollTarget: 0,
       smash: false, hipOffsetZ: 0, sideAngle: 0,
-      climb: 0, climbBlend: 0, climbStride: 0, climbDirection: 0, mantle: 0,
+      climb: 0, climbBlend: 0, climbPose: NaN, climbStride: 0, climbDirection: 0, mantle: 0,
       groom: 0, groomBlend: 0, groomSide: 1, groomTime: 0
     };
     const rollQuaternion = managed ? new Float32Array([0, 0, 0, 1]) : null;
@@ -469,7 +484,7 @@
         state.rollBlend = damp(state.rollBlend, state.roll, 9, dt);
         state.rollAngle = damp(state.rollAngle, state.rollTarget * state.rollBlend, 18, dt);
         state.sideAngle = damp(state.sideAngle, onSide ? (lounge === "left" ? 1 : -1) * Math.PI / 2 : 0, 5, dt);
-        state.climbBlend = damp(state.climbBlend, state.climb * (1 - state.mantle), 10, dt);
+        state.climbBlend = damp(state.climbBlend, Number.isFinite(state.climbPose) ? state.climbPose : state.climb * (1 - state.mantle), Number.isFinite(state.climbPose) ? 20 : 10, dt);
         state.groomBlend = damp(state.groomBlend, state.groom, 8, dt);
         state.groomTime += dt;
       }
@@ -503,8 +518,8 @@
       if (crouch > 0) { pitch += (1.12 - pitch) * crouch; bob *= 1 - crouch; }
       if (jumping) { pitch += (0.82 - pitch) * takeoff; bob = 0; }
       if (rolling > 0) { pitch *= 1 - rolling; bob *= 1 - rolling; }
-      if (climbing > 0) { pitch += (0.04 - pitch) * climbing; bob *= 1 - climbing; }
-      state.pitch = damp(state.pitch, pitch, 6, dt);
+      if (climbing > 0) { pitch += (0.18 - pitch) * climbing; bob *= 1 - climbing; }
+      state.pitch = managed && Number.isFinite(state.climbPose) ? pitch : damp(state.pitch, pitch, 6, dt);
       chest.rotation.x = state.pitch;
       const o = OFFSETS[state.gait];
       // Arms hang straight down in the world whatever the chest's lean; the swing reaches forward and back.
@@ -514,15 +529,18 @@
         // another adult pass. Meshes and model scale stay exactly the same.
         const climbStroke = wave(climbPhase, l.side < 0 ? 0 : 0.5), leg = parts[l.leg];
         if (managed) {
-          arm.position.x = damp(arm.position.x, l.side * ((squeeze ? 0.4 : SHOULDER_X) * (1 - climbing) + 0.44 * climbing), 12, dt);
-          arm.position.z = damp(arm.position.z, 0.5 * U - climbing * 0.13, 12, dt);
+          arm.position.x = damp(arm.position.x, l.side * ((squeeze ? 0.4 : SHOULDER_X) * (1 - climbing) + 0.38 * climbing), 12, dt);
+          // Counter the torso's tilt during each lift so the hands and toes
+          // move along the wall instead of pumping away from its surface.
+          arm.position.z = damp(arm.position.z, 0.5 * U - climbing * (0.036 + climbStroke * 0.055), 20, dt);
+          arm.position.y = damp(arm.position.y, SHOULDER_Y + climbStroke * 0.115 * climbing, 20, dt);
           leg.position.y = damp(leg.position.y, Math.max(0, -climbStroke) * 0.09 * climbing, 18, dt);
-          leg.position.z = damp(leg.position.z, -0.1 * climbing, 12, dt);
+          leg.position.z = damp(leg.position.z, (0.424 + climbStroke * 0.034) * climbing, 20, dt);
         }
         let legAngle = lounge ? onSide ? -0.42 : reclining ? 0.1 : -1.28 : jumping ? 0.7 - takeoff * 0.85 : o ? -(squeeze ? 0.1 : g.legs) * moving * wave(state.phase, o[l.leg]) : 0;
         legAngle += (-1.2 - legAngle) * crouch;
         legAngle += (-0.6 - legAngle) * rolling;
-        legAngle += (-0.38 + 0.12 * climbStroke - legAngle) * climbing;
+        legAngle += (-0.28 + 0.06 * climbStroke - legAngle) * climbing;
         limb(leg, legAngle, dt, managed && state.landing > 0 ? 32 : 18);
         if (rolling > 0.001) {
           limb(arm, -state.pitch - 0.7 * rolling, dt);
@@ -565,9 +583,9 @@
           // The controller advances the phase by actual signed wall travel, so
           // stopping freezes the grip and descending reverses the same gait.
           if (climbing > 0.001) {
-            const raised = -2.82 + 0.12 * climbStroke;
+            const raised = -2.8 + 0.035 * climbStroke;
             arm.rotation.x += (raised - arm.rotation.x) * climbing;
-            arm.rotation.z *= 1 - climbing;
+            arm.rotation.z += (l.side * 0.14 - arm.rotation.z) * climbing;
           }
         }
       }
@@ -586,7 +604,7 @@
         const hipHeight = (lounge ? reclining ? 0 : 0.12 : HIP - 0.17 * crouch + 0.08 * takeoff) * (1 - rolling);
         state.hipHeight = damp(state.hipHeight, hipHeight, crouch > 0 || jumping ? 14 : 6, dt);
         hips.rotation.x = damp(hips.rotation.x, reclining ? -Math.PI / 2 : -Math.PI / 2 * rolling, rolling > 0.0001 ? 9 : 6, dt);
-        state.hipOffsetZ = damp(state.hipOffsetZ, reclining ? 0.5 : 0.45 * rolling, 6, dt);
+        state.hipOffsetZ = damp(state.hipOffsetZ, reclining ? 0.5 : 0.45 * rolling - 0.12 * climbing, 6, dt);
         hips.position.z = state.hipOffsetZ;
         hips.position.y = state.hipHeight + bob;
         // Roll around the body's long axis after lying back. Euler YXZ would
@@ -710,7 +728,7 @@
       return out;
     };
     // Managed motion adds climb (0..1 wall grip), signed climbStride in metres,
-    // climbDirection (-1/0/1 gaze) and mantle (0..1 return over the top edge).
+    // climbDirection (-1/0/1 travel) and mantle (0..1 return over the top edge).
     // Seated grooming uses groom (0..1), groomSide (-1 left/+1 right), and an
     // optional groomPhase in seconds. All transitions reuse the existing rig.
     const poseManaged = (dt, px, py, pz, facing, speed, airborne = false, biped = false, lounge = "", motion = null) => {
@@ -727,6 +745,7 @@
       state.roll = motion ? clamp(motion.roll || 0, 0, 1) : 0;
       state.rollTarget = motion && Number.isFinite(motion.rollAngle) ? motion.rollAngle : 0;
       state.climb = motion && !airborne && !state.roll ? clamp(motion.climb || 0, 0, 1) : 0;
+      state.climbPose = state.climb && motion && Number.isFinite(motion.climbBlend) ? clamp(motion.climbBlend, 0, 1) : NaN;
       state.climbStride = motion ? motion.climbStride || 0 : 0;
       state.climbDirection = motion ? clamp(motion.climbDirection || 0, -1, 1) : 0;
       state.mantle = motion ? clamp(motion.mantle || 0, 0, 1) : 0;
@@ -755,6 +774,110 @@
     };
     // These matrices come from the current pose, including the floor adjustment
     // and reclining hips, so projectiles never chase the previous render frame.
+    const previewNodes = managed ? [root, hips, ...envelopeParts] : null;
+    const previewTransforms = managed ? new Float64Array(previewNodes.length * 10) : null;
+    const previewQuaternions = managed ? new Array(previewNodes.length) : null;
+    const previewKeys = managed ? Object.keys(state) : null;
+    const previewState = managed ? new Array(previewKeys.length) : null;
+    const previewVertices = managed ? envelopeParts.map(part => climbVertices(part.geometry)) : null;
+    const previewFrom = managed ? new Float64Array(envelopeParts.length * 20) : null;
+    const previewTo = managed ? new Float64Array(envelopeParts.length * 20) : null;
+    const previewMatrices = managed ? new Float64Array(envelopeParts.length * 16) : null;
+    const previewCorners = managed ? new Float64Array(24) : null;
+    const previewBounds = (out) => {
+      const sine = Math.sin(root.rotation.y), cosine = Math.cos(root.rotation.y), p = root.position;
+      for (let i = 0; i < envelopeParts.length; i++) {
+        const part = envelopeParts[i], b = envelopeBounds[i];
+        let m;
+        if (part === chest) m = envelopeChest;
+        else if (part === parts.head) m = envelopeHead;
+        else {
+          updateLocal(part);
+          mat4.multiply(envelopePart, part.parent === hips ? hips.local : part.parent === chest ? envelopeChest : envelopeHead, part.local);
+          m = envelopePart;
+        }
+        for (let k = 0; k < 16; k++) previewMatrices[i * 16 + k] = m[k];
+        let minY = Infinity, maxY = -Infinity;
+        for (let corner = 0; corner < 8; corner++) {
+          const x = b[corner & 1 ? "max" : "min"][0], y = b[corner & 2 ? "max" : "min"][1], z = b[corner & 4 ? "max" : "min"][2];
+          const lx = (m[0] * x + m[4] * y + m[8] * z + m[12]) * scale;
+          const ly = (m[1] * x + m[5] * y + m[9] * z + m[13]) * scale;
+          const lz = (m[2] * x + m[6] * y + m[10] * z + m[14]) * scale;
+          const at = corner * 3;
+          previewCorners[at] = p.x + cosine * lx + sine * lz;
+          previewCorners[at + 1] = p.y + ly; previewCorners[at + 2] = p.z - sine * lx + cosine * lz;
+          minY = Math.min(minY, previewCorners[at + 1]); maxY = Math.max(maxY, previewCorners[at + 1]);
+        }
+        // A tilted arm's fingertips must not reserve their farthest extent all
+        // the way down to its elbow. Slice the oriented box into short cylinders.
+        for (let slice = 0; slice < 4; slice++) {
+          const low = minY + (maxY - minY) * slice / 4, high = minY + (maxY - minY) * (slice + 1) / 4;
+          let minX = Infinity, minZ = Infinity, maxX = -Infinity, maxZ = -Infinity;
+          for (let corner = 0; corner < 8; corner++) {
+            const at = corner * 3, x = previewCorners[at], y = previewCorners[at + 1], z = previewCorners[at + 2];
+            if (y >= low && y <= high) { minX = Math.min(minX, x); maxX = Math.max(maxX, x); minZ = Math.min(minZ, z); maxZ = Math.max(maxZ, z); }
+            for (let axis = 1; axis <= 4; axis *= 2) {
+              if (corner & axis) continue;
+              const to = (corner | axis) * 3, dy = previewCorners[to + 1] - y;
+              if (Math.abs(dy) < 1e-9) continue;
+              for (let edge = 0; edge < 2; edge++) {
+                const k = ((edge ? high : low) - y) / dy;
+                if (k < 0 || k > 1) continue;
+                const px = x + (previewCorners[to] - x) * k, pz = z + (previewCorners[to + 2] - z) * k;
+                minX = Math.min(minX, px); maxX = Math.max(maxX, px); minZ = Math.min(minZ, pz); maxZ = Math.max(maxZ, pz);
+              }
+            }
+          }
+          const at = (i * 4 + slice) * 5;
+          out[at] = (minX + maxX) * 0.5; out[at + 1] = low; out[at + 2] = (minZ + maxZ) * 0.5;
+          out[at + 3] = Math.hypot(maxX - minX, maxZ - minZ) * 0.5; out[at + 4] = high - low;
+        }
+      }
+    };
+    const climbPoseClear = (dt, px, py, pz, facing, motion, solidAt, clearAt = null, entry = null, speed = 0) => {
+      if (!managed || !solidAt) return true;
+      for (let i = 0; i < previewKeys.length; i++) previewState[i] = state[previewKeys[i]];
+      for (let i = 0; i < previewNodes.length; i++) {
+        const n = previewNodes[i], at = i * 10, q = n.quaternion;
+        previewTransforms[at] = n.position.x; previewTransforms[at + 1] = n.position.y; previewTransforms[at + 2] = n.position.z;
+        previewTransforms[at + 3] = n.rotation.x; previewTransforms[at + 4] = n.rotation.y; previewTransforms[at + 5] = n.rotation.z;
+        previewQuaternions[i] = q;
+        if (q) for (let j = 0; j < 4; j++) previewTransforms[at + 6 + j] = q[j];
+      }
+      if (clearAt) previewBounds(previewFrom);
+      poseManaged(dt, px, py, pz, facing, speed, false, false, "", motion);
+      previewBounds(previewTo);
+      const sine = Math.sin(facing), cosine = Math.cos(facing);
+      let clear = true;
+      for (let i = 0; i < envelopeParts.length && clear; i++) {
+        const vertices = previewVertices[i], offset = i * 16, m = previewMatrices;
+        if (clearAt) for (let slice = 0; slice < 4; slice++) {
+          const at = (i * 4 + slice) * 5;
+          if (!clearAt(entry, previewFrom[at], previewFrom[at + 1], previewFrom[at + 2],
+            previewTo[at], previewTo[at + 1], previewTo[at + 2], previewFrom[at + 3],
+            previewFrom[at + 4], true, false, previewTo[at + 3], previewTo[at + 4])) { clear = false; break; }
+        }
+        if (!clear) break;
+        for (let v = 0; v < vertices.length; v += 3) {
+          const x = vertices[v], y = vertices[v + 1], z = vertices[v + 2];
+          const lx = (m[offset] * x + m[offset + 4] * y + m[offset + 8] * z + m[offset + 12]) * scale;
+          const ly = (m[offset + 1] * x + m[offset + 5] * y + m[offset + 9] * z + m[offset + 13]) * scale;
+          const lz = (m[offset + 2] * x + m[offset + 6] * y + m[offset + 10] * z + m[offset + 14]) * scale;
+          if (solidAt(px + cosine * lx + sine * lz, py + ly, pz - sine * lx + cosine * lz)) { clear = false; break; }
+        }
+      }
+      for (let i = 0; i < previewKeys.length; i++) state[previewKeys[i]] = previewState[i];
+      for (let i = 0; i < previewNodes.length; i++) {
+        const n = previewNodes[i], at = i * 10, q = previewQuaternions[i];
+        n.position.x = previewTransforms[at]; n.position.y = previewTransforms[at + 1]; n.position.z = previewTransforms[at + 2];
+        n.rotation.x = previewTransforms[at + 3]; n.rotation.y = previewTransforms[at + 4]; n.rotation.z = previewTransforms[at + 5];
+        n.quaternion = q;
+        if (q) for (let j = 0; j < 4; j++) q[j] = previewTransforms[at + 6 + j];
+        updateLocal(n);
+      }
+      measureBody();
+      return clear;
+    };
     const mouth = (out) => {
       if (managed) return pointToWorld(envelopeHead, 0, 0.7 * U, 6.05 * U, out);
       const head = parts.head, hc = Math.cos(head.rotation.x), hs = Math.sin(head.rotation.x);
@@ -797,7 +920,7 @@
     };
     const agent = {
       root, parts, hips, chest, update, setForm, setGait, walk, pace, place, poke, jump, reveal, setDriven, drive, toggleStyle, liveGeometry, dispose,
-      managed, poseManaged, mouth, bodyTarget, envelope, feed, pound, beat,
+      managed, poseManaged, climbPoseClear, mouth, bodyTarget, envelope, feed, pound, beat,
       get bodyRadius() { return body.radius; },
       get bodyHeight() { return body.maxY; },
       get bodyMinY() { return body.minY; },

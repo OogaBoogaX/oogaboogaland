@@ -3931,8 +3931,10 @@
       const p = clankerPlay.player.root.position, m = matrixCave.mouth;
       const dx = p.x - m.x, dz = p.z - m.z;
       const along = dx * matrixCave.sr + dz * matrixCave.cr;
-      setMatrixInside(along < PORTAL_Z && island.cavityAt(p.x, p.z, CLANKER_CAVITY, matrixCave.caveIndex, p.y + 0.4)
-        && CLANKER_CAVITY.caveIndex === matrixCave.caveIndex);
+      setMatrixInside(along < PORTAL_Z && p.y + 0.4 < m.floorY + PORTAL_MAX_Y
+        && island.cavityAt(p.x, p.z, CLANKER_CAVITY, matrixCave.caveIndex, p.y + 0.4)
+        && CLANKER_CAVITY.caveIndex === matrixCave.caveIndex
+        && p.y + 0.4 >= CLANKER_CAVITY.floor && p.y + 0.4 < CLANKER_CAVITY.ceiling);
       return;
     }
     // A controlled Ooga owns the portal in both camera modes.
@@ -5009,12 +5011,14 @@
   };
   // Companions use the full animated arm envelope, not the Ooga's shoulder
   // radius. Their feet are on the floor; only the mirror's own gate is exempt.
-  const clankerCylinderClear = (x, y, z, toX, toY, toZ, radius, height, entry = null, ignore = null) => {
+  const clankerCylinderClear = (x, y, z, toX, toY, toZ, radius, height, entry = null, ignore = null, climbing = false, actors = true, checkTerrain = true, toRadius = radius, toHeight = height) => {
+    const fromRadius = radius, fromHeight = height;
+    radius = Math.max(radius, toRadius); height = Math.max(height, toHeight);
     const floor = y + 0.002, toFloor = toY + 0.002, body = height - 0.002;
-    if (!island.onLand(toX, toZ) || crossesSealedCave(x, z, toX, toZ, y)
-      || !island.clearAt(toX, toFloor, toZ, radius, body)
-      || !island.voxelSegmentClearAt(x, floor, z, toX, toFloor, toZ, radius, body)
-      || !solids.segmentClear(x, floor, z, toX, toFloor, toZ, radius, body, ignore)
+    if (!climbing && !island.onLand(toX, toZ) || crossesSealedCave(x, z, toX, toZ, y)
+      || checkTerrain && (!island.clearAt(toX, toFloor, toZ, radius, body)
+        || !island.voxelSegmentClearAt(x, floor, z, toX, toFloor, toZ, radius, body))
+      || !solids.segmentClear(x, floor, z, toX, toFloor, toZ, fromRadius, fromHeight - 0.002, ignore, toRadius, toHeight - 0.002)
       || !matrixGateSegmentClear(x, floor, z, toX, toFloor, toZ, radius, body, true)
       || !cylinderSegmentClear(x, floor, z, toX, toFloor, toZ, radius, body, 0, 0, 0, 64,
         Math.max(altar.platformRadius, island.path.debug.ringOuterRadius) + 0.4)) return false;
@@ -5023,6 +5027,7 @@
       if (fire.pit.visible && !cylinderSegmentClear(x, floor, z, toX, toFloor, toZ, radius, body,
         fire.x, fire.z, fire.y, fire.y + FIRE_TOP, fire.avoidRadius - PLAYER_RADIUS)) return false;
     }
+    if (!actors) return true;
     for (let i = 0; i < crew.list.length; i++) {
       const other = crew.list[i], p = other.root.position;
       if (!other.root.visible || entry && (other.clankerRide?.entry === entry || entry.drag.cave === other)) continue;
@@ -5048,6 +5053,31 @@
     return BL.agent.footprint.sweep(entry, x, y, z, toX, toY, toZ, radius, height,
       fromHeading, toHeading, clankerCylinderClear, ignore);
   };
+  const clankerUnderCanopy = (entry) => {
+    const p = entry.root.position, shape = BL.agent.footprint;
+    const sine = Math.sin(entry.heading), cosine = Math.cos(entry.heading);
+    const radius = shape.radius(entry) + (entry.lowCover ? 0.25 : 0.08);
+    for (let i = 0; i < props.length; i++) {
+      const prop = props[i], node = prop.node, geometry = node.geometry;
+      if (prop.prop !== "tree" || !node.visible) continue;
+      const q = node.position, floor = q.y + geometry.treeCanopyFloor * node.scale.y;
+      if (p.y + 3.2 < floor || p.y >= q.y + BL.scene.boundsOf(geometry).max[1] * node.scale.y - 0.02) continue;
+      const reach = geometry.treeRadius * Math.max(node.scale.x, node.scale.z) + radius;
+      for (let part = 0; part < shape.count(entry); part++) {
+        const offset = shape.offset(entry, part);
+        if ((p.x + sine * offset - q.x) ** 2 + (p.z + cosine * offset - q.z) ** 2 < reach * reach) return true;
+      }
+    }
+    return false;
+  };
+  const clankerClimbClear = (entry, x, y, z, nx, ny, nz, radius, height, riders = true, actors = true) =>
+    (!riders || clankerRidersClear(entry, x, y, z, nx, ny, nz, entry.heading, entry.heading))
+    && clankerCylinderClear(x, y, z, nx, ny, nz, radius, height, entry, null, true, actors);
+  // At a lip the bent rig fits where a tall cylinder cannot. The controller
+  // checks that exact terrain pose; scenery, other bodies and riders stay solid.
+  const clankerClimbTransitionClear = (entry, x, y, z, nx, ny, nz, radius, height, actors = true, riders = true, toRadius = radius, toHeight = height) =>
+    (!riders || clankerRidersClear(entry, x, y, z, nx, ny, nz, entry.heading, entry.heading))
+    && clankerCylinderClear(x, y, z, nx, ny, nz, radius, height, entry, null, true, actors, false, toRadius, toHeight);
   const clankerGroomClear = (entry, partner) => {
     const p = entry.root.position, sine = Math.sin(entry.heading), cosine = Math.cos(entry.heading), side = entry.motion.groomSide;
     const x = p.x + cosine * side * 0.7 + sine * 0.3, z = p.z - sine * side * 0.7 + cosine * 0.3;
@@ -5831,9 +5861,11 @@
       const y = island.surfaceAt(x, z);
       if (Number.isFinite(y)) loungeRoofs.push({ x, y, z, angle: mouth.ry });
     }
-    clankers = BL.clankers.create({ root, crew, sites: shared.workSites, loungeRoofs, groomClear: clankerGroomClear,
+    clankers = BL.clankers.create({ root, crew, sites: shared.workSites, loungeRoofs,
+      solidAt: island.solidAt, climbClear: clankerClimbClear, climbTransitionClear: clankerClimbTransitionClear,
+      climbRidersClear: clankerRidersClear, groomClear: clankerGroomClear, underCanopy: clankerUnderCanopy,
       groundAt: (x, z, y) => island.supportAt(x, z, y, 0.52), surfaceAt: island.surfaceAt,
-      isPath: island.isPath, isGrass: island.isGrassAt, onLand: island.onLand,
+      isGrass: island.isGrassAt, onLand: island.onLand,
       roamRadius: island.radius, meadowRadius: island.meadowRadius,
       clear: clankerClear, push: pushClankerProp, onPound: poundClankerEquipment, onGrab: grabClankerOoga, onReleaseDrag: releaseClankerDrag,
       fireContact: clankerFireContact, canSmash: canClankerSmash, supportAt: clankerSupportAt,
