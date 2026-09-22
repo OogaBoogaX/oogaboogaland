@@ -130,6 +130,8 @@
   const agentPlay = BL.agent.createPlay();
   const ctx = { renderer, canvas: sceneCanvas, overlay: overlayCanvas, game, world, go, lootEnabled: LOOT_ENABLED, testBananas: TEST_BANANAS, agentPlay, from: null };
   const sceneSections = [...document.querySelectorAll("[data-scene]")];
+  const controlsDialog = $("controls-help");
+  $("controls-help-button").addEventListener("click", () => controlsDialog.showModal());
   const enter = (next) => {
     ctx.from = active ? active.id : null;
     for (const el of sceneSections) el.hidden = el.classList.contains("hub-presets") || el.dataset.scene !== next.id;

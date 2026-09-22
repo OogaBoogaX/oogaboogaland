@@ -265,6 +265,8 @@
       </section>
       <footer class="sheet-foot">
         <span class="quality" id="quality" aria-live="polite"></span>
+        <button type="button" class="link controls-help-button" id="controls-help-button" data-scene="hub"
+          aria-label="Controls" title="Controls" hidden>?</button>
         <button type="button" class="link" data-action="reset">Reset demo</button>
       </footer>
     </aside>
@@ -681,6 +683,31 @@ dress hooks build the voxels, each called with the kit k (h, u, rand, P, color(h
 Then run npm run build and ONLY=characters node test/run.mjs.</pre>
       <div class="actions recipe-actions">
         <button type="button" data-action="recipe-copy">Copy prompt</button>
+      </div>
+    </dialog>
+    <dialog class="modal" id="controls-help" aria-label="Hub controls">
+      <div class="panel-head">
+        <h2><span data-sign>Controls</span></h2>
+        <form method="dialog">
+          <button type="submit" class="modal-close" aria-label="Close controls">&times;</button>
+        </form>
+      </div>
+      <div class="controls-list">
+        <h3>Free camera</h3>
+        <div><b>WASD / arrows</b><span>Move</span></div>
+        <div><b>Q E</b><span>Turn</span></div>
+        <div><b>R F</b><span>Tilt</span></div>
+        <div><b>Z / Space · X</b><span>Up · down</span></div>
+        <div><b>Drag · scroll</b><span>Orbit · zoom</span></div>
+        <div><b>Double-click Ooga</b><span>Take control</span></div>
+        <h3>Controlling an Ooga</h3>
+        <div><b>WASD</b><span>Walk / move</span></div>
+        <div><b>Space</b><span>Jump · use · reload at pile</span></div>
+        <div><b>1 / 2 · G</b><span>Select weapons · toggle rifle</span></div>
+        <div><b>V / left-click</b><span>Attack</span></div>
+        <div><b>R</b><span>Swap magazine</span></div>
+        <div><b>J</b><span>Jetpack</span></div>
+        <div><b>Escape</b><span>Let go</span></div>
       </div>
     </dialog>
     <dialog class="modal" id="weather-key" aria-label="Reading the weather">

@@ -690,6 +690,53 @@ select {
   margin-bottom: 12px;
 }
 
+.controls-help-button {
+  min-width: 20px;
+  color: var(--paper);
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.controls-list {
+  margin-top: 8px;
+  padding: 10px 12px;
+  background: rgba(0, 0, 0, 0.38);
+  border: 1px solid rgba(243, 239, 228, 0.18);
+  color: var(--paper);
+  font-size: 10.5px;
+}
+
+.controls-list h3 {
+  margin: 10px 0 4px;
+  color: var(--paper);
+  font-size: 9.5px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.controls-list h3:first-child {
+  margin-top: 0;
+}
+
+.controls-list > div {
+  display: grid;
+  grid-template-columns: minmax(96px, auto) 1fr;
+  gap: 12px;
+  padding: 4px 0;
+  line-height: 1.35;
+}
+
+.controls-list b {
+  color: var(--paper);
+  white-space: nowrap;
+}
+
+.controls-list span {
+  color: var(--paper);
+  opacity: 0.9;
+}
+
 .help.empty {
   margin: 6px 0 0;
   padding: 14px;
