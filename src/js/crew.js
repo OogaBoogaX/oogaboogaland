@@ -398,13 +398,14 @@
     const npcDestinationBlocked = ctx.npcDestinationBlocked || inBananas;
     const flyable = ctx.flyable || walkable;
     const workSites = ctx.workSites?.length ? ctx.workSites : ctx.workRoute ? [{ repo: "oogaboogax/entropylab", route: ctx.workRoute, position: ctx.workPosition, target: ctx.workTarget }] : null;
+    const workBodyTarget = ctx.workSites?.length ? ctx.workTarget : null;
     // A site is eligible when the worker is fresh in its repo, or when it is
     // the fallback (namesake) cave and the worker's fresh repo has no cave of
-    // its own. Override and maintainer flow through hasRecentActivity as before.
+    // its own. An override or maintainer may visit every work cave.
     const siteRepos = new Set();
     if (workSites) for (const site of workSites) siteRepos.add(site.repo);
     const siteActive = (cave, site) => {
-      if (cave.override === "working" || !contributors.hasRecentActivity) return true;
+      if (cave.override === "working" || cave.traits.maintainer || !contributors.hasRecentActivity) return true;
       if (contributors.hasRecentActivity(cave.contributor, site.repo)) return true;
       if (!site.fallback) return false;
       for (const repo of cave.contributor.activity.keys()) {
@@ -510,7 +511,7 @@
         meleePoints: meleeExtremes(cave.parts.club.geometry),
         clubSlingProfile: clubSlingProfile(cave.parts.club.geometry),
         clubTorsoBounds: BL.scene.boundsOf(cave.parts.torso.geometry),
-        work: { phase: "", site: 0, index: 0, gait: 0, timer: i * 0.137, emptyTime: 0, rest: 0, reloadSlot: false, direct: false, position: { x: 0, y: 0, z: 0 }, target: { x: 0, y: 0, z: 0 } },
+        work: { phase: "", site: 0, plannedSite: -1, targetReady: false, aimSample: i, index: 0, gait: 0, timer: i * 0.137, emptyTime: 0, rest: 0, reloadSlot: false, direct: false, position: { x: 0, y: 0, z: 0 }, target: { x: 0, y: 0, z: 0 } },
         slot: null,
         pileApproach: false,
         index: i,
@@ -976,6 +977,7 @@
       removeJetpack(cave);
       stopReload(cave);
       cave.work.phase = "";
+      cave.work.plannedSite = -1; cave.work.targetReady = false;
       cave.state = "sleeping";
       cave.parts.head.geometry = cave.headOpen;
       r.visible = true;
@@ -1012,6 +1014,7 @@
       cave.walk = null;
       stopReload(cave);
       cave.work.phase = "";
+      cave.work.plannedSite = -1; cave.work.targetReady = false;
       cave.parts.head.geometry = state === "sleeping" ? cave.headClosed : cave.headOpen;
       resetPose(cave);
       releaseBuild(cave);
@@ -1055,6 +1058,7 @@
       if (cave.bedTravel.mode) standFromBed(cave);
       cave.state = state;
       cave.work.phase = "";
+      cave.work.plannedSite = -1; cave.work.targetReady = false;
       releaseBedroll(cave);
       cave.parts.head.geometry = cave.headOpen;
       cave.walk = { tx: cave.slot.x, tz: cave.slot.z, speed: 2, phase: 0, heading: Math.atan2(cave.slot.x - from.x, cave.slot.z - from.z), to: "slot" };
@@ -1328,10 +1332,12 @@
       }
       return false;
     };
-    const bulletPool = Array.from({ length: 32 }, () => {
+    // Three in-flight rounds per worker keep a synchronized cave volley from
+    // recycling another worker's projectile. The visit's roster fixes the cap.
+    const bulletPool = Array.from({ length: Math.max(32, workBodyTarget ? crewList.length * BURST_ROUNDS : 0) }, () => {
       const node = createNode({ geometry: models.bananaGeometry(), scale: { x: models.BANANA_AMMO_SCALE, y: models.BANANA_AMMO_SCALE, z: models.BANANA_AMMO_SCALE }, visible: false, matrixLiving: !!ctx.matrixLivingPile });
       addChild(root, node);
-      return { node, life: 0, source: null, feedback: false, from: { x: 0, y: 0, z: 0 }, to: { x: 0, y: 0, z: 0 } };
+      return { node, life: 0, source: null, feedback: false, workShot: false, site: -1, aimSample: 0, from: { x: 0, y: 0, z: 0 }, to: { x: 0, y: 0, z: 0 } };
     });
     let bulletIdx = 0;
     const fireBullet = (cave, spot) => {
@@ -1341,7 +1347,11 @@
       math.mat4.transformPoint(MUZZLE, cave.parts.gun.world, 0, -0.03 * h, 0.66 * h);
       const from = setVec(bullet.from, MUZZLE[0], MUZZLE[1], MUZZLE[2]);
       const to = setVec(bullet.to, spot.x, spot.y === undefined ? groundAt(spot.x, spot.z) + 0.75 : spot.y, spot.z);
-      if (ctx.continueShot) ctx.continueShot(from, to);
+      bullet.workShot = cave !== player && !!workBodyTarget && cave.weapon.burstWork;
+      bullet.site = cave.work.site;
+      bullet.aimSample = cave.work.aimSample;
+      const shotClear = bullet.workShot && ctx.workShotClear || ctx.fireReachable;
+      if (!bullet.workShot && ctx.continueShot) ctx.continueShot(from, to);
       let surfaceHit = false;
       if (cave === player && input.weaponTargets) {
         const dx = to.x - from.x, dy = to.y - from.y, dz = to.z - from.z, distance = Math.hypot(dx, dy, dz);
@@ -1352,11 +1362,12 @@
           && !weaponHit.node.mirror && weaponContactClear(from, weaponHit);
         if (surfaceHit) setVec(to, weaponHit.x, weaponHit.y, weaponHit.z);
       }
-      if (!surfaceHit && ctx.fireReachable && !ctx.fireReachable(from.x, from.y, from.z, to.x, to.y, to.z)) {
+      if (!surfaceHit && shotClear && !shotClear(from.x, from.y, from.z, to.x, to.y, to.z)) {
+        bullet.workShot = false;
         let lo = 0, hi = 1;
         for (let i = 0; i < 12; i++) {
           const mid = (lo + hi) * 0.5;
-          if (ctx.fireReachable(from.x, from.y, from.z, lerp(from.x, to.x, mid), lerp(from.y, to.y, mid), lerp(from.z, to.z, mid))) lo = mid;
+          if (shotClear(from.x, from.y, from.z, lerp(from.x, to.x, mid), lerp(from.y, to.y, mid), lerp(from.z, to.z, mid))) lo = mid;
           else hi = mid;
         }
         to.x = lerp(from.x, to.x, lo); to.y = lerp(from.y, to.y, lo); to.z = lerp(from.z, to.z, lo);
@@ -1372,10 +1383,23 @@
       for (let i = 0; i < bulletPool.length; i++) {
         const bullet = bulletPool[i];
         if (bullet.life <= 0) continue;
-        const step = Math.min(dt, bullet.life), p = bullet.node.position, x = p.x, y = p.y, z = p.z;
+        const remaining = bullet.life, step = Math.min(dt, remaining), p = bullet.node.position, x = p.x, y = p.y, z = p.z;
         bullet.life = Math.max(0, bullet.life - dt);
         const k = 1 - bullet.life / 0.22, from = bullet.from, to = bullet.to;
-        setVec(p, lerp(from.x, to.x, k), lerp(from.y, to.y, k), lerp(from.z, to.z, k));
+        if (bullet.workShot) {
+          // Each round follows its own body anchor as the gorilla runs. Later
+          // shots may aim at a different limb without redirecting this one.
+          // Interrupted/blocked rounds never count as body impacts.
+          if (bullet.source.work.site !== bullet.site || !workBodyTarget(bullet.source, to, bullet.aimSample)) {
+            bullet.life = 0; bullet.workShot = false;
+          } else {
+            const portion = step / remaining;
+            const nx = lerp(x, to.x, portion), ny = lerp(y, to.y, portion), nz = lerp(z, to.z, portion);
+            const shotClear = ctx.workShotClear || ctx.fireReachable;
+            if (shotClear && !shotClear(x, y, z, nx, ny, nz)) { bullet.life = 0; bullet.workShot = false; }
+            else setVec(p, nx, ny, nz);
+          }
+        } else setVec(p, lerp(from.x, to.x, k), lerp(from.y, to.y, k), lerp(from.z, to.z, k));
         let impacted = false, dx = 0, dy = 0, dz = 0, distance = 0;
         if (!bullet.feedback && bullet.source === player && input.weaponTargets) {
           dx = p.x - x; dy = p.y - y; dz = p.z - z; distance = Math.hypot(dx, dy, dz);
@@ -1397,6 +1421,8 @@
         }
         bullet.node.rotation.x += dt * 24;
         if (!bullet.life) {
+          if (bullet.workShot && ctx.workHit) ctx.workHit(bullet.source);
+          bullet.workShot = false;
           bullet.node.visible = false;
         }
       }
@@ -1635,6 +1661,30 @@
       poseFingers(parts.armR, parts.fingersR, rightHeld, -1);
     };
     const reloadHandoffBlend = (w) => ease.inOutQuad(1 - Math.abs(1 - 2 * Math.min(RELOAD_HANDOFF_TIME, w.reloadHandoffTime) / RELOAD_HANDOFF_TIME));
+    const poseWorkAim = (cave) => {
+      const arm = cave.parts.armL, gun = cave.parts.gun, p = cave.root.position, target = cave.work.target, h = cave.traits.height;
+      const turn = cave.root.rotation.y + arm.poseYaw, sr = Math.sin(turn), cr = Math.cos(turn);
+      const wx = target.x - p.x, wz = target.z - p.z;
+      const dx = cr * wx - sr * wz - arm.position.x, dy = target.y - p.y - arm.position.y, dz = sr * wx + cr * wz - arm.position.z;
+      // The muzzle sits 0.15h sideways and 0.11h above the shoulder's aim
+      // axis after the wrist roll and grip offset. Solve those offsets too:
+      // simply pitching toward the head-height target misses moving body parts.
+      const across = Math.hypot(dx, dz), side = 0.15 * h, lift = 0.11 * h;
+      const yaw = Math.atan2(dx, dz) - Math.asin(clamp(side / Math.max(side, across), -1, 1));
+      const forward = Math.sqrt(Math.max(0, across * across - side * side));
+      const pitch = Math.asin(clamp(lift / Math.max(lift, Math.hypot(dy, forward)), -1, 1)) - Math.atan2(dy, forward);
+      math.quat.fromEuler(gun.quaternion, pitch, yaw, 0);
+      math.quat.fromEuler(GUN_GRIP, -Math.PI / 2, 0, 0);
+      math.quat.multiply(GUN_ARM, gun.quaternion, GUN_GRIP);
+      math.quat.fromEuler(GUN_GRIP, 0, Math.PI / 2, 0);
+      math.quat.multiply(cave.gunHandRotation, GUN_ARM, GUN_GRIP);
+      arm.quaternion = cave.gunHandRotation;
+      math.quat.rotateVec(MUZZLE, arm.quaternion, 0, -0.625 * h, 0.15 * h);
+      const px = arm.position.x + MUZZLE[0], py = arm.position.y + MUZZLE[1], pz = arm.position.z + MUZZLE[2];
+      math.quat.rotateVec(MUZZLE, gun.quaternion, 0, -0.14 * h, -0.184 * h);
+      setVec(gun.position, px - MUZZLE[0], py - MUZZLE[1], pz - MUZZLE[2]);
+      cave.weapon.aimPitch = pitch;
+    };
     const poseWeapon = (cave) => {
       if (cave.health.stunned) return;
       const w = cave.weapon, parts = cave.parts, gun = parts.gun, h = cave.traits.height;
@@ -2014,6 +2064,8 @@
         }
       }
       if (w.swapTime > 0) { syncMagazine(cave); leftSupportsGun = true; }
+      if (working && workBodyTarget && cave.work.phase === "shoot" && cave.work.targetReady && drawn && !celebrating
+        && !w.reloading && !w.reloadHandoff && !w.swapTime) poseWorkAim(cave);
       if (cave === player) { posePeek(cave, 0); aimPeek(cave); }
       poseHands(cave, leftSupportsGun);
     };
@@ -2050,6 +2102,10 @@
     };
     const emitWeaponShot = (cave) => {
       const w = cave.weapon, p = cave.root.position, spot = w.burstTarget;
+      if (w.burstWork && workBodyTarget) {
+        if (!aimWork(cave, workSites[cave.work.site])) return false;
+        setVec(spot, cave.work.target.x, cave.work.target.y, cave.work.target.z);
+      }
       const spread = w.burstPlayerAim && cave === player && w.aiming;
       if (w.burstPlayerAim && cave === player && ctx.aimTarget) ctx.aimTarget(spot, spread);
       else if (w.burstPlayerAim) {
@@ -2068,6 +2124,7 @@
       w.shotsFired++; w.recoil = GUN_HOLD;
       poseWeapon(cave);
       fireBullet(cave, spot);
+      return true;
     };
     const interruptReloadToFire = (cave) => {
       if (cave !== player || !cave || !cave.root.visible || !cave.weapon.equipped || !cave.weapon.unlimited && cave.weapon.ammo <= 0 || cave.weapon.swapTime
@@ -2092,7 +2149,7 @@
       w.burstRemaining = (w.unlimited ? rounds : Math.min(rounds, w.ammo)) - 1;
       w.burstTimer = BURST_STEP;
       w.cooldown = rounds === 1 ? BURST_STEP : SHOT_PERIOD;
-      emitWeaponShot(cave);
+      if (!emitWeaponShot(cave)) { stopBurst(cave); w.cooldown = 0; return false; }
       if (!w.unlimited && !w.ammo) w.triggerHeld = false;
       return true;
     };
@@ -2194,7 +2251,7 @@
       // Keep the normal magazine-sized catch-up bound in unlimited debug mode.
       let shots = 0;
       while ((w.burstRemaining || w.triggerHeld) && (w.unlimited || w.ammo > 0) && w.burstTimer <= 1e-9 && shots++ < AMMO_MAX) {
-        emitWeaponShot(cave);
+        if (!emitWeaponShot(cave)) { stopBurst(cave); break; }
         if (w.burstRemaining) w.burstRemaining--;
         w.burstTimer += BURST_STEP;
         if (w.triggerHeld) w.cooldown = Math.max(0, w.burstTimer);
@@ -3519,25 +3576,39 @@
       // The gait belongs to the limbs; the physical feet stay on the support.
       p.y = groundY(cave);
     };
-    const selectWorkSite = (cave, resume = false) => {
+    const planWorkSite = (cave, resume = false, announceTrip = false) => {
       const previous = cave.weapon.workSite === undefined ? -1 : cave.weapon.workSite;
       const first = resume && previous >= 0 ? 0 : 1;
+      let selected = -1;
       for (let offset = first; offset < first + workSites.length; offset++) {
         const index = (previous + offset) % workSites.length, site = workSites[index];
         if (!siteActive(cave, site)) continue;
-        cave.work.site = cave.weapon.workSite = index;
-        cave.work.index = 0;
-        if (site.position) site.position(cave, cave.work.position);
-        else setVec(cave.work.position, site.route[site.route.length - 1].x, 0, site.route[site.route.length - 1].z);
-        cave.work.phase = "outbound";
-        cave.work.rest = cave.traits.maintainer ? WORK_REST_MIN + Math.random() * WORK_REST_SPREAD : 0;
-        cave.work.reloadSlot = cave.work.direct = cave.pileApproach = false;
-        cave.act.kind = "work";
-        cave.weapon.equipped = true;
-        cave.avoidance.tx = NaN;
-        return true;
+        selected = index;
+        break;
       }
-      return false;
+      if (cave.work.plannedSite !== selected || announceTrip) {
+        cave.work.plannedSite = selected;
+        if (ctx.workPlanned) ctx.workPlanned(cave, selected);
+      }
+      return selected;
+    };
+    const selectWorkSite = (cave, resume = false) => {
+      let index = cave.work.plannedSite;
+      if (resume || index < 0 || !siteActive(cave, workSites[index])) index = planWorkSite(cave, resume);
+      if (index < 0) return false;
+      const work = cave.work, site = workSites[index];
+      work.site = cave.weapon.workSite = index;
+      work.index = 0;
+      if (site.position) site.position(cave, work.position);
+      else setVec(work.position, site.route[site.route.length - 1].x, 0, site.route[site.route.length - 1].z);
+      work.phase = "outbound";
+      work.targetReady = false;
+      work.rest = cave.traits.maintainer ? WORK_REST_MIN + Math.random() * WORK_REST_SPREAD : 0;
+      work.reloadSlot = work.direct = cave.pileApproach = false;
+      cave.act.kind = "work";
+      cave.weapon.equipped = true;
+      cave.avoidance.tx = NaN;
+      return true;
     };
     const walkWorkTo = (cave, target, dt, followPath = true) => {
       const p = cave.root.position, work = cave.work, paths = followPath && !work.direct && ctx.npcPaths;
@@ -3562,10 +3633,20 @@
     };
     const aimWork = (cave, site) => {
       const work = cave.work, p = cave.root.position;
-      if (site.target) site.target(cave, work.target);
+      work.targetReady = false;
+      if (workBodyTarget) {
+        work.aimSample = cave.weapon.shotsFired + cave.index;
+        if (!workBodyTarget(cave, work.target, work.aimSample)) return false;
+        work.targetReady = true;
+      } else if (site.target) site.target(cave, work.target);
       else setVec(work.target, work.position.x + Math.sin(elapsed + cave.phase) * 2, p.y + 0.8, work.position.z - 3);
       cave.root.rotation.y = Math.atan2(work.target.x - p.x, work.target.z - p.z);
       cave.weapon.aimPitch = -Math.atan2(work.target.y - p.y - cave.traits.height * 0.45, Math.hypot(work.target.x - p.x, work.target.z - p.z));
+      if (workBodyTarget) {
+        cave.parts.head.rotation.x = -Math.atan2(work.target.y - p.y - cave.parts.head.position.y, Math.hypot(work.target.x - p.x, work.target.z - p.z));
+        cave.parts.head.rotation.y = 0;
+      }
+      return true;
     };
     const runWork = (cave, dt) => {
       const work = cave.work, weapon = cave.weapon;
@@ -3576,13 +3657,16 @@
           work.site = Math.min(workSites.length - 1, weapon.workSite || 0);
           work.phase = nearReload(cave) ? "reload" : "return";
           work.index = workSites[work.site].route.length - 1;
+          planWorkSite(cave);
         }
       }
       const site = workSites[work.site], route = site.route;
       if ((work.phase === "outbound" || work.phase === "station" || work.phase === "shoot") && !siteActive(cave, site)) {
         work.index = work.phase === "outbound" ? Math.min(work.index, route.length - 1) : route.length - 1;
         work.phase = "return"; cave.act.kind = "reload-return"; cave.avoidance.tx = NaN;
+        planWorkSite(cave);
       }
+      if ((work.phase === "return" || work.phase === "reload") && (work.plannedSite < 0 || !siteActive(cave, workSites[work.plannedSite]))) planWorkSite(cave);
       if (work.phase === "outbound") {
         const approach = route[route.length - 1], p = cave.root.position;
         if (work.index === route.length - 1 && site.approachDistance && Math.hypot(approach.x - p.x, approach.z - p.z) <= site.approachDistance) {
@@ -3602,9 +3686,10 @@
       } else if (work.phase === "shoot") {
         standPose(cave);
         cave.act.kind = "work";
-        work.timer -= dt;
-        if (work.timer <= 0 && weapon.ammo > 0 && !weapon.burstRemaining && weapon.cooldown <= 0) {
-          aimWork(cave, site);
+        const targetReady = aimWork(cave, site);
+        if (targetReady) work.timer -= dt;
+        else work.timer = Math.max(0.2, work.timer);
+        if (targetReady && work.timer <= 0 && weapon.ammo > 0 && !weapon.burstRemaining && weapon.cooldown <= 0) {
           if (fireWeapon(cave, work.target)) work.timer = 0.22 + (cave.index % 3) * 0.045;
         }
         if (!weapon.ammo && !weapon.swapTime) {
@@ -3617,6 +3702,9 @@
             } else {
               work.phase = "return"; work.index = route.length - 1;
               cave.act.kind = "reload-return"; cave.avoidance.tx = NaN;
+              // Plan the next cave before returning. A gorilla assigned to
+              // this same repository stays inside while its owner reloads.
+              planWorkSite(cave, false, true);
             }
           }
         }
@@ -4421,6 +4509,7 @@
       stopBurst(cave);
       stopReload(cave);
       cave.work.phase = "";
+      cave.work.plannedSite = -1; cave.work.targetReady = false;
       cave.weapon.primaryEquipped = false;
       cave.weapon.meleeTime = cave.weapon.meleeCooldown = 0;
       cave.weapon.meleeHeld = false;
@@ -4488,6 +4577,7 @@
           cave.work.phase = "return"; cave.work.index = -1; cave.work.direct = true;
           cave.work.reloadSlot = !!slot; cave.pileApproach = false;
           cave.act.kind = "reload-return";
+          planWorkSite(cave);
         }
       }
     };
@@ -4861,6 +4951,11 @@
       if (riding.support) updateMember(riding.support, dt);
       const p = cave.root.position, x = p.x, y = p.y, z = p.z;
       if (updateHealth(cave, dt)) {
+        riding.continuous = false;
+        riding.updated = true;
+        return;
+      }
+      if (cave.clankerDragged) {
         riding.continuous = false;
         riding.updated = true;
         return;

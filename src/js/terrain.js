@@ -1501,6 +1501,13 @@
       const i = pathColumn(x, z);
       return i >= 0 && paths[i] === 1;
     };
+    const isGrassAt = (x, z, y = surfaceAt(x, z)) => {
+      const i = column(x, z);
+      if (i < 0 || !land[i] || isPath(x, z) || Math.abs(y - surfaceAt(x, z)) > UNIT + 1e-7) return false;
+      const gy = Math.round((surface[i] - ORIGIN.y) / UNIT) - 1;
+      const material = data[(Math.floor(i / SZ) * SY + gy) * SZ + i % SZ];
+      return material === P.grass || material === P.grassLight || material === P.grassDark;
+    };
     const onLand = (x, z) => {
       const i = column(x, z);
       return i >= 0 && land[i] === 1;
@@ -2015,6 +2022,7 @@
       sightBytes: rampSight.byteLength + windowSightPlanes.byteLength + windowSightRefs.byteLength,
       windowPiecesAt: (x, z) => windowColumns[column(x, z)],
       isPath,
+      isGrassAt,
       onLand,
       mouths,
       headquarters: { caveIndex: HEADQUARTERS_CAVE, floor: HEADQUARTERS_FLOOR, ceiling: HEADQUARTERS_CEILING, rockCover: HEADQUARTERS_ROCK, room: HEADQUARTERS_ROOM, rooms: headquartersRooms, windows: headquartersWindows, windowFragments: windowFragmentCount, windowFaces: windowGeometry.faces.length, gallery: headquartersGallery, balconies: headquartersBalconies, ramps: headquartersRamps, fronts: headquartersFronts, basement },

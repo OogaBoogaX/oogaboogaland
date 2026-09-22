@@ -165,8 +165,9 @@
       }
       return top;
     };
-    const surfaceAt = (x, z, y, maxStep, radius, ignore, direction) => {
+    const surfaceAt = (x, z, y, maxStep, radius, ignore, direction, out = null) => {
       stats.queries++;
+      if (out) out.node = null;
       let best = -Infinity;
       const limit = y * direction + maxStep;
       for (const entry of entries) {
@@ -185,7 +186,10 @@
             const ny = ((triangle[5] - triangle[2]) * (triangle[6] - triangle[0]) - (triangle[3] - triangle[0]) * (triangle[8] - triangle[2])) * entry.orientation;
             if (ny * direction <= 1e-10) continue;
             const top = triangleTop(x, z, radius, direction);
-            if (top <= limit + EPS && top > best) best = top;
+            if (top <= limit + EPS && top > best) {
+              best = top;
+              if (out) out.node = entry.node;
+            }
           }
         }
       }
@@ -385,7 +389,7 @@
       add, remove, sync, segmentClear, shoulderAt, stats,
       isActive: (node) => !!registered.get(node)?.active,
       clearAt: (x, y, z, radius, height, ignore = null) => segmentClear(x, y, z, x, y, z, radius, height, ignore),
-      supportAt: (x, z, y, maxStep = 0, radius = 0, ignore = null) => surfaceAt(x, z, y, maxStep, radius, ignore, 1),
+      supportAt: (x, z, y, maxStep = 0, radius = 0, ignore = null, out = null) => surfaceAt(x, z, y, maxStep, radius, ignore, 1, out),
       ceilingAt: (x, z, y, radius = 0, ignore = null) => surfaceAt(x, z, y, 0, radius, ignore, -1),
       dispose() { entries.length = 0; registered.clear(); stats.nodes = stats.active = stats.transforms = stats.triangles = 0; }
     };
