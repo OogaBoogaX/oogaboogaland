@@ -48,22 +48,23 @@
   const POUND_RADIUS = 0.875, POUND_CENTERS = [0.05, 0.8, 1.6];
   const STAND_RADIUS = 0.825, STAND_CENTER = 0.19;
   const PARK_RADIUS = 0.72, PARK_CENTER = 0.06;
+  const SIT_RADIUS = 0.9, SIT_CENTERS = [-0.12, 0.55];
   // Three overlapping longitudinal cylinders enclose the complete quadruped,
   // including its knuckles, without reserving a four-metre-wide turning circle
   // while it walks straight. Each smaller pose profile is used only once the
   // current rig actually fits; transitions retain the complete radial envelope.
-  const footprintProfile = (entry) => !entry.compact ? 0 : entry.footprintMode === "park" ? entry.gorilla.parkCompact ? 4 : 0
+  const footprintProfile = (entry) => !entry.compact ? 0 : entry.footprintMode === "sit" ? entry.gorilla.sitCompact ? 5 : 0 : entry.footprintMode === "park" ? entry.gorilla.parkCompact ? 4 : 0
     : entry.footprintMode === "stand" ? entry.gorilla.standCompact ? 3 : 0
     : entry.footprintMode === "pound" ? entry.gorilla.poundCompact ? 2 : 0 : entry.gorilla.compact ? 1 : 0;
-  const footprintCount = (entry) => { const profile = footprintProfile(entry); return profile === 1 || profile === 2 ? 3 : 1; };
+  const footprintCount = (entry) => { const profile = footprintProfile(entry); return profile === 5 ? 2 : profile === 1 || profile === 2 ? 3 : 1; };
   const footprintRadius = (entry) => {
     const profile = footprintProfile(entry);
-    return profile ? (profile === 4 ? PARK_RADIUS : profile === 3 ? STAND_RADIUS : profile === 2 ? POUND_RADIUS : QUAD_RADIUS) * entry.root.scale.x
+    return profile ? (profile === 5 ? SIT_RADIUS : profile === 4 ? PARK_RADIUS : profile === 3 ? STAND_RADIUS : profile === 2 ? POUND_RADIUS : QUAD_RADIUS) * entry.root.scale.x
       : Math.max(entry.radius, entry.gorilla.bodyRadius);
   };
   const footprintOffset = (entry, index) => {
     const profile = footprintProfile(entry);
-    return profile ? (profile === 4 ? PARK_CENTER : profile === 3 ? STAND_CENTER : (profile === 2 ? POUND_CENTERS : QUAD_CENTERS)[index]) * entry.root.scale.x : 0;
+    return profile ? (profile === 5 ? SIT_CENTERS[index] : profile === 4 ? PARK_CENTER : profile === 3 ? STAND_CENTER : (profile === 2 ? POUND_CENTERS : QUAD_CENTERS)[index]) * entry.root.scale.x : 0;
   };
   const footprintOverlaps = (a, ax, ay, az, ah, b, bx, by, bz, bh, margin = 0) => {
     if (ay >= by + b.height || ay + a.height <= by) return false;
@@ -474,8 +475,8 @@
           const pick = Math.sin(state.groomTime * 10.5), reach = -1.36 + pick * 0.055;
           const rest = onSide ? lower ? -2.3 : -1.08 : reclining ? -0.08 : -0.7;
           limb(arm, rest + (reach - rest) * groomArm, dt);
-          const restSide = onSide ? lower ? l.side * 0.12 : -l.side * 0.55 : l.side * 0.18;
-          arm.rotation.z = damp(arm.rotation.z, restSide + (-l.side * 0.5 - restSide) * groomArm, 12, dt);
+          const restSide = onSide ? lower ? l.side * 0.12 : -l.side * 0.55 : reclining ? l.side * 0.18 : 0;
+          arm.rotation.z = damp(arm.rotation.z, restSide + (l.side * 0.6 - restSide) * groomArm, 12, dt);
         } else if (managed && (state.pound > 0 || poundLift > 0)) {
           limb(arm, -state.pitch - (state.smash ? 2.7 : 1.65) * poundLift, dt);
           arm.rotation.z = damp(arm.rotation.z, 0, 18, dt);
@@ -498,7 +499,7 @@
         }
         if (managed) {
           const groomArm = lounge === "sit" && l.side === state.groomSide ? grooming : 0;
-          arm.rotation.y = damp(arm.rotation.y, l.side * 0.42 * groomArm, 12, dt);
+          arm.rotation.y = damp(arm.rotation.y, l.side * 0.5 * groomArm, 12, dt);
           // Reach high with one hand as the opposite foot takes its next hold.
           // The controller advances the phase by actual signed wall travel, so
           // stopping freezes the grip and descending reverses the same gait.
@@ -581,7 +582,7 @@
       mat4.multiply(envelopeHead, envelopeChest, parts.head.local);
       body.minX = body.minY = body.minZ = Infinity;
       body.maxX = body.maxY = body.maxZ = -Infinity;
-      let radius2 = 0, compactRadius2 = 0, poundRadius2 = 0, standRadius2 = 0, parkRadius2 = 0;
+      let radius2 = 0, compactRadius2 = 0, poundRadius2 = 0, standRadius2 = 0, parkRadius2 = 0, sitRadius2 = 0, sitWidth = 0;
       for (let i = 0; i < envelopeParts.length; i++) {
         const part = envelopeParts[i], b = envelopeBounds[i];
         let m;
@@ -607,6 +608,14 @@
           poundRadius2 = Math.max(poundRadius2, px * px + poundNearest * poundNearest);
           standRadius2 = Math.max(standRadius2, px * px + (pz - STAND_CENTER * scale) ** 2);
           parkRadius2 = Math.max(parkRadius2, px * px + (pz - PARK_CENTER * scale) ** 2);
+          // Grooming intentionally touches the seated partner with one hand.
+          // Only that arm leaves the seated-neighbour footprint; the complete
+          // body envelope above continues to include it for scenery clearance.
+          if (!(state.groomBlend > 0.001 && part === (state.groomSide < 0 ? parts.armL : parts.armR))) {
+            const sitNearest = Math.min(Math.abs(pz - SIT_CENTERS[0] * scale), Math.abs(pz - SIT_CENTERS[1] * scale));
+            sitRadius2 = Math.max(sitRadius2, px * px + sitNearest * sitNearest);
+            sitWidth = Math.max(sitWidth, Math.abs(px));
+          }
         }
       }
       // Stop animated knuckles dipping below the supporting floor without moving
@@ -629,6 +638,8 @@
         && Math.max(-body.minX, body.maxX) <= Math.sqrt(POUND_RADIUS ** 2 - 0.4 ** 2) * scale;
       body.standCompact = standRadius2 <= (STAND_RADIUS * scale) ** 2;
       body.parkCompact = parkRadius2 <= (PARK_RADIUS * scale) ** 2;
+      body.sitCompact = state.lounge === "sit" && sitRadius2 <= (SIT_RADIUS * scale) ** 2
+        && sitWidth <= Math.sqrt(SIT_RADIUS ** 2 - 0.335 ** 2) * scale;
     };
     const envelope = (out) => {
       out.minX = body.minX; out.maxX = body.maxX;
@@ -733,6 +744,7 @@
       get poundCompact() { return !!body.poundCompact; },
       get standCompact() { return !!body.standCompact; },
       get parkCompact() { return !!body.parkCompact; },
+      get sitCompact() { return !!body.sitCompact; },
       get pounding() { return state.pound > 0; },
       get beating() { return state.beat > 0; },
       get chewing() { return state.chewing > 0; },

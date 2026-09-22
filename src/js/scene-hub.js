@@ -5032,7 +5032,7 @@
     }
     if (clankers) for (let i = 0; i < clankers.list.length; i++) {
       const other = clankers.list[i];
-      if (other !== entry && other.active && !clankerBodySegmentClear(other, x, floor, z, toX, toFloor, toZ, radius, body)) return false;
+      if (other !== entry && other !== ignore && other.active && !clankerBodySegmentClear(other, x, floor, z, toX, toFloor, toZ, radius, body)) return false;
     }
     return true;
   };
@@ -5046,6 +5046,12 @@
     if (!clankerRidersClear(entry, x, y, z, toX, toY, toZ, fromHeading, toHeading)) return false;
     return BL.agent.footprint.sweep(entry, x, y, z, toX, toY, toZ, radius, height,
       fromHeading, toHeading, clankerCylinderClear, ignore);
+  };
+  const clankerGroomClear = (entry, partner) => {
+    const p = entry.root.position, sine = Math.sin(entry.heading), cosine = Math.cos(entry.heading), side = entry.motion.groomSide;
+    const x = p.x + cosine * side * 0.7 + sine * 0.3, z = p.z - sine * side * 0.7 + cosine * 0.3;
+    const nx = p.x + cosine * side * 1.55 + sine * 0.55, nz = p.z - sine * side * 1.55 + cosine * 0.55;
+    return clankerCylinderClear(x, p.y + 1.1, z, nx, p.y + 1.1, nz, 0.22, 0.5, entry, partner);
   };
   const clankerFireContact = (entry, fromX, fromY, fromZ) => {
     if (entry.fire.burning || entry.fire.cooldown > 0) return false;
@@ -5817,7 +5823,14 @@
       carrierX: 0, carrierY: 0, carrierZ: 0, heading: 0, localX: 0, localY: 0, localZ: 0 };
     for (const cave of crew.list) cave.clankerDragged = false;
     headquarters.solids.companions = clankerMeshes;
-    clankers = BL.clankers.create({ root, crew, sites: shared.workSites,
+    const loungeRoofs = [];
+    for (const mouth of island.mouths) {
+      if (caves.slots.find(slot => slot.id === mouth.id)?.status !== "dark") continue;
+      const x = mouth.x - Math.sin(mouth.ry) * 4.8, z = mouth.z - Math.cos(mouth.ry) * 4.8;
+      const y = island.surfaceAt(x, z);
+      if (Number.isFinite(y)) loungeRoofs.push({ x, y, z, angle: mouth.ry });
+    }
+    clankers = BL.clankers.create({ root, crew, sites: shared.workSites, loungeRoofs, groomClear: clankerGroomClear,
       groundAt: (x, z, y) => island.supportAt(x, z, y, 0.52), surfaceAt: island.surfaceAt,
       isPath: island.isPath, isGrass: island.isGrassAt, onLand: island.onLand,
       roamRadius: island.radius, meadowRadius: island.meadowRadius,

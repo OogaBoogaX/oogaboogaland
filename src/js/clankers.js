@@ -22,7 +22,7 @@
     const list = [], byOwner = new Map(), portals = new Array(sites.length).fill(null);
     const roamRadius = ctx.roamRadius || 28, ringRadius = Math.min(roamRadius - 6, (ctx.meadowRadius || 22) - 6);
     const POINT = { x: 0, y: 0, z: 0 };
-    const loungeSpots = new Float64Array(320 * 3), loungeBlocked = new Uint8Array(320);
+    const loungeSpots = new Float64Array(320 * 3);
     let loungeCount = 0, roofCount = 0, loungeReady = false;
     let disposed = false, elapsed = 0, player = null;
     const alive = (cave) => cave.state === "working" || cave.state === "chilling";
@@ -83,10 +83,29 @@
       }
       return -1;
     };
+    const unusedRoof = (x, y, z, foot) => {
+      const roofs = ctx.loungeRoofs;
+      if (!roofs || !ctx.surfaceAt || Math.abs(ctx.surfaceAt(x, z) - y) > 0.05) return false;
+      let patch = false;
+      for (let i = 0; i < roofs.length; i++) {
+        const roof = roofs[i];
+        if (y >= roof.y - 0.55 && (roof.x - x) ** 2 + (roof.z - z) ** 2 < 4.5 ** 2) { patch = true; break; }
+      }
+      if (!patch) return false;
+      // Unused cave tops contain exposed stone as well as grass. All four
+      // sides still need a nearby supporting top; the full rig clearance
+      // rejects higher rock before a resting place is accepted.
+      for (let side = 0; side < 4; side++) {
+        const sx = x + (side < 2 ? (side ? 1 : -1) * foot : 0);
+        const sz = z + (side >= 2 ? (side === 3 ? 1 : -1) * foot : 0);
+        if (ctx.onLand && !ctx.onLand(sx, sz) || Math.abs(ctx.surfaceAt(sx, sz) - y) > 0.5) return false;
+      }
+      return true;
+    };
     const grass = (x, y, z, foot = FOOT) => Number.isFinite(y) && Math.hypot(x, z) < roamRadius
       && (!ctx.onLand || ctx.onLand(x, z)) && (!ctx.isGrass || ctx.isGrass(x, z, y)
         && ctx.isGrass(x - foot, z, y) && ctx.isGrass(x + foot, z, y)
-        && ctx.isGrass(x, z - foot, y) && ctx.isGrass(x, z + foot, y));
+        && ctx.isGrass(x, z - foot, y) && ctx.isGrass(x, z + foot, y) || unusedRoof(x, y, z, foot));
     const landing = (x, y, z) => Number.isFinite(y) && Math.hypot(x, z) < roamRadius && (!ctx.onLand || ctx.onLand(x, z));
     const staticClear = (e, x, y, z, nx = x, ny = y, nz = z, fromHeading = e.heading, toHeading = fromHeading) =>
       clear(x, y, z, nx, ny, nz, e.radius, e.height, e, null, fromHeading, toHeading);
@@ -170,77 +189,207 @@
       }
       e.heading = previousHeading; return false;
     };
+    const leaveLounge = (e) => {
+      e.groomTime = 0; e.motion.groom = 0;
+      if (e.lounge === "sit" && e.gorilla.sitCompact) {
+        // Retract the visiting hand before standing. The walking capsules then
+        // reserve the complete rise, keeping a seated neighbour's back clear.
+        e.loungeDepart = true;
+      } else { e.lounge = ""; e.recover = 0.65; }
+    };
     const setGoal = (e, x, y, z) => {
-      if (e.lounge && Math.hypot(x - e.root.position.x, z - e.root.position.z) > 0.18) {
-        e.lounge = ""; e.recover = 0.65;
-      }
+      if (e.lounge && Math.hypot(x - e.root.position.x, z - e.root.position.z) > 0.18) leaveLounge(e);
       e.goalX = x; e.goalY = y; e.goalZ = z;
     };
-    const chooseChill = (e, spawn = false) => {
-      const p = e.root.position, compact = e.compact;
-      // Lounge destinations need the whole relaxed body, even when the
-      // departing worker is still using its narrow cave footprint.
-      e.compact = false;
-      const outer = spawn || Math.hypot(p.x, p.z) < (ctx.meadowRadius || 22) * 0.82;
-      for (let i = 0; i < 40; i++) {
-        const roof = e.mode !== "working" && !!ctx.surfaceAt && i < 20 && (spawn || e.random() < 0.5);
-        // The flat roof patches are narrow between the stair cuts and trees.
-        // Cover the authored cave sectors before falling back to meadow grass;
-        // a single random-radius ring repeatedly missed every usable roof.
-        const angle = roof ? (e.index + i) * TAU / 16 : e.random() * TAU;
-        const meadow = ctx.meadowRadius || 22, inner = meadow * 0.82, edge = meadow - WALK_RADIUS - 0.25;
-        const distance = outer ? inner + e.random() * Math.max(0, edge - inner) : 2 + e.random() * 4;
-        const roofRadius = meadow + 1.5 + Math.floor(i / 16) * 0.5;
-        const x = roof ? Math.sin(angle) * roofRadius : (outer ? 0 : p.x) + Math.sin(angle) * distance;
-        const z = roof ? Math.cos(angle) * roofRadius : (outer ? 0 : p.z) + Math.cos(angle) * distance;
-        const y = roof ? ctx.surfaceAt(x, z) : groundAt(x, z, spawn ? 0 : p.y);
-        if (Math.hypot(x, z) < (ctx.meadowRadius || 22) * 0.82 || !grass(x, y, z, e.foot) || trafficAt(x, y, z) || caveAt(x, y, z) >= 0 || occupied(e, x, y, z) || !staticClear(e, x, y, z)) continue;
-        if (roof && !clear(x, y, z, x, y, z, Math.max(e.radius, 2.12), Math.max(e.height, 2.7), e)) continue;
-        if (e.root.visible && roof && Math.abs(y - p.y) > 1.6) continue;
-        setGoal(e, x, y, z);
-        e.rest = 12 + e.random() * 18; e.lounge = ""; e.phase = "chill";
-        e.compact = compact; return true;
-      }
-      e.compact = compact; return false;
+    const loungePose = (e) => {
+      const choice = e.random();
+      return choice < 0.5 ? "sit" : choice < 0.68 ? "back" : choice < 0.84 ? "left" : "right";
     };
-    const spawnLounge = (e) => {
-      // Enumerate the outer meadow and authored roof sectors once. Random
-      // per-character attempts used to miss valid patches and defer visible
-      // companions to later one-second retries.
-      if (!loungeReady) {
-        loungeReady = true;
-        const meadow = ctx.meadowRadius || 22, inner = meadow * 0.82;
-        const edge = meadow - WALK_RADIUS - 0.25;
-        for (let i = 0; i < 320; i++) {
-          const roof = i < 32, index = roof ? i : i - 32;
-          if (roof && !ctx.surfaceAt) continue;
-          const angle = (index % (roof ? 16 : 96)) * TAU / (roof ? 16 : 96);
-          const distance = roof ? meadow + 1.5 + Math.floor(index / 16) * 0.5
-            : inner + (edge - inner) * (Math.floor(index / 96) / 2);
-          const x = Math.sin(angle) * distance, z = Math.cos(angle) * distance;
-          const y = roof ? ctx.surfaceAt(x, z) : groundAt(x, z, 0);
-          if (!grass(x, y, z) || trafficAt(x, y, z) || caveAt(x, y, z) >= 0) continue;
-          const n = loungeCount++ * 3;
-          loungeSpots[n] = x; loungeSpots[n + 1] = y; loungeSpots[n + 2] = z;
-          if (roof) roofCount++;
+    const prepareLounges = (e) => {
+      if (loungeReady) return;
+      loungeReady = true;
+      const roofs = ctx.loungeRoofs, meadow = ctx.meadowRadius || 22;
+      const compact = e.compact, radius = e.radius, height = e.height;
+      e.compact = false; e.radius = Math.max(radius, 2.12); e.height = Math.max(height, 2.7);
+      // Search the complete unused roof patch, including exposed stone. The
+      // first small ring often lands on trees or higher voxels; a bounded half-
+      // metre grid finds the actual clearings without moving props or rock.
+      if (roofs && ctx.surfaceAt) for (let i = 0; i < roofs.length && loungeCount < 80; i++) {
+        const roof = roofs[i], start = loungeCount;
+        for (let n = 0; n < 298 && loungeCount < 80; n++) {
+          if (n >= 9 && loungeCount - start >= 9) break;
+          const angle = roof.angle + (n - 1) * TAU / 8, spread = n ? 1.35 : 0;
+          const dx = n < 9 ? Math.sin(angle) * spread : ((n - 9) % 17 - 8) * 0.5;
+          const dz = n < 9 ? Math.cos(angle) * spread : (Math.floor((n - 9) / 17) - 8) * 0.5;
+          if (dx * dx + dz * dz >= 4.5 ** 2) continue;
+          const x = roof.x + dx, z = roof.z + dz, y = ctx.surfaceAt(x, z);
+          if (y < roof.y - 0.55 || !grass(x, y, z) || trafficAt(x, y, z) || caveAt(x, y, z) >= 0
+            || !staticClear(e, x, y, z)) continue;
+          const at = loungeCount++ * 3;
+          loungeSpots[at] = x; loungeSpots[at + 1] = y; loungeSpots[at + 2] = z;
+          roofCount++;
         }
       }
-      const compact = e.compact, radius = e.radius, height = e.height;
-      e.compact = false; e.height = Math.max(height, 2.7);
-      for (let i = 0; i < loungeCount; i++) {
-        const roof = i < roofCount, count = roof ? roofCount : loungeCount - roofCount;
-        const index = roof ? (e.index + i) % count : roofCount + (e.index * 23 + i - roofCount) % count;
-        if (loungeBlocked[index]) continue;
-        e.radius = roof ? Math.max(radius, 2.12) : radius;
-        const n = index * 3, x = loungeSpots[n], y = loungeSpots[n + 1], z = loungeSpots[n + 2];
-        if (occupied(e, x, y, z)) continue;
-        if (!staticClear(e, x, y, z)) { loungeBlocked[index] = 1; continue; }
-        setGoal(e, x, y, z); e.rest = 12 + e.random() * 18;
-        e.lounge = e.random() < 0.5 ? "sit" : "back"; e.phase = "chill";
-        e.compact = compact; e.radius = radius; e.height = height;
-        return true;
-      }
       e.compact = compact; e.radius = radius; e.height = height;
+      const inner = meadow * 0.82, edge = meadow - WALK_RADIUS - 0.25;
+      for (let i = 0; i < 288 && loungeCount < 320; i++) {
+        const angle = i % 96 * TAU / 96, distance = inner + (edge - inner) * Math.floor(i / 96) / 2;
+        const x = Math.sin(angle) * distance, z = Math.cos(angle) * distance, y = groundAt(x, z, 0);
+        if (!grass(x, y, z) || trafficAt(x, y, z) || caveAt(x, y, z) >= 0) continue;
+        const at = loungeCount++ * 3;
+        loungeSpots[at] = x; loungeSpots[at + 1] = y; loungeSpots[at + 2] = z;
+      }
+    };
+    const loungeReserved = (e, x, y, z, radius = WALK_RADIUS) => {
+      for (let i = 0; i < list.length; i++) {
+        const other = list[i];
+        if (other === e || !other.active || other.phase !== "chill" || other.loungePartner === e || Math.abs(other.goalY - y) > 1.5) continue;
+        if (Math.hypot(other.goalX - other.root.position.x, other.goalZ - other.root.position.z) < 0.18) continue;
+        const space = radius + (other.loungePartner ? 1.25 : WALK_RADIUS) + SPACE;
+        if ((other.goalX - x) ** 2 + (other.goalZ - z) ** 2 < space * space) return true;
+      }
+      return false;
+    };
+    const loungeGoal = (e, x, y, z, roof, partner = null, heading = NaN) => {
+      setGoal(e, x, y, z);
+      e.rest = (roof ? 24 : 16) + e.random() * 22;
+      e.loungeRoof = roof; e.loungePartner = partner; e.loungeHeading = heading;
+      e.loungeCycle = roof ? e.loungeCycle + 1 : 0;
+      e.groomTime = 0; e.groomWait = 2 + e.random() * 6;
+      if (!e.loungeDepart) e.lounge = "";
+      e.phase = "chill"; e.motion.groom = 0;
+    };
+    const loungeSeatSpace = (e, x, y, z, heading) => {
+      const sine = Math.sin(heading), cosine = Math.cos(heading);
+      for (let part = 0; part < 2; part++) {
+        const offset = part ? 0.55 : -0.12, px = x + sine * offset, pz = z + cosine * offset;
+        if (!clear(px, y, pz, px, y, pz, 0.9, 2.7, e)) return false;
+        for (let i = 0; i < list.length; i++) {
+          const other = list[i];
+          if (other === e || !other.active) continue;
+          const p = other.root.position;
+          if (footprint.circleOverlaps(other, p.x, p.y, p.z, other.heading, px, y, pz, 0.9, 2.7, SPACE)) return false;
+        }
+      }
+      return !loungeReserved(e, x, y, z, 1.25);
+    };
+    const nearbyLounge = (e, roof, spawn) => {
+      const first = Math.floor(e.random() * Math.max(1, list.length));
+      for (let i = 0; i < list.length; i++) {
+        const other = list[(first + i) % list.length];
+        if (other === e || !other.active || other.controlled || other.mode !== "chilling" || other.phase !== "chill" || other.loungePartner
+          || other.lounge !== "sit" || !other.gorilla.sitCompact || other.loungeRoof !== roof || other.rest < 7) continue;
+        // Sit just behind one shoulder, facing the same direction. Keeping the
+        // torsos separate leaves a hand free to reach the neighbour's back.
+        const q = other.root.position, heading = other.heading, sine = Math.sin(heading), cosine = Math.cos(heading);
+        const firstSide = e.random() < 0.5 ? -1 : 1;
+        for (let n = 0; n < 2; n++) {
+          const side = n ? -firstSide : firstSide;
+          const x = q.x - cosine * side * 1.9 - sine, z = q.z + sine * side * 1.9 - cosine;
+          const y = roof && ctx.surfaceAt ? ctx.surfaceAt(x, z) : groundAt(x, z, q.y);
+          if (!spawn && Math.hypot(x - e.root.position.x, z - e.root.position.z) < 2) continue;
+          if (Math.abs(y - q.y) > 0.15 || !grass(x, y, z, 0.9) || trafficAt(x, y, z)
+            || caveAt(x, y, z) >= 0 || !loungeSeatSpace(e, x, y, z, heading)) continue;
+          loungeGoal(e, x, y, z, roof, other, heading);
+          e.motion.groomSide = side;
+          if (spawn) { e.heading = heading; e.lounge = "sit"; }
+          return true;
+        }
+      }
+      return false;
+    };
+    const chooseChill = (e, spawn = false) => {
+      // Cave exits also request a fresh distant destination. Only a companion
+      // still hidden during activation may already be seated at that goal.
+      spawn = spawn && !e.root.visible;
+      prepareLounges(e);
+      const p = e.root.position, compact = e.compact, radius = e.radius, height = e.height;
+      const wantsRoof = e.mode !== "working" && roofCount > 0 && e.loungeCycle < 2 && e.random() < 0.7;
+      e.compact = false; e.height = Math.max(height, 2.7);
+      // Prefer a small group on some visits; a crowded group always falls back
+      // to another empty resting spot instead of blocking a walk indefinitely.
+      if (e.random() < 0.5 && nearbyLounge(e, wantsRoof, spawn)) {
+        e.compact = compact; e.radius = radius; e.height = height; return true;
+      }
+      for (let pass = 0; pass < 2; pass++) {
+        const roof = pass ? !wantsRoof : wantsRoof;
+        const count = roof ? roofCount : loungeCount - roofCount, from = roof ? 0 : roofCount;
+        if (!count) continue;
+        const first = Math.floor(e.random() * count);
+        e.radius = roof ? Math.max(radius, 2.12) : radius;
+        for (let i = 0; i < count; i++) {
+          const index = from + (first + i) % count;
+          const n = index * 3, x = loungeSpots[n], y = loungeSpots[n + 1], z = loungeSpots[n + 2];
+          if (!spawn && Math.hypot(x - p.x, z - p.z) < 2 || occupied(e, x, y, z) || loungeReserved(e, x, y, z, e.radius)) continue;
+          if (!staticClear(e, x, y, z)) continue;
+          loungeGoal(e, x, y, z, roof);
+          if (spawn) e.lounge = loungePose(e);
+          e.compact = compact; e.radius = radius; e.height = height; return true;
+        }
+      }
+      e.compact = compact; e.radius = radius; e.height = height; return false;
+    };
+    const spawnLounge = (e) => chooseChill(e, true);
+    const groomLounge = (e, dt) => {
+      const partner = e.loungePartner, p = e.root.position;
+      const seated = e.lounge === "sit" && Math.abs(e.speed) < 0.05 && !e.fire.burning;
+      let near = false;
+      if (seated && partner && partner.active && !partner.controlled && partner.lounge === "sit"
+        && partner.phase === "chill" && !partner.fire.burning) {
+        const q = partner.root.position, dx = q.x - p.x, dz = q.z - p.z;
+        const side = dx * Math.cos(e.heading) - dz * Math.sin(e.heading);
+        const forward = dx * Math.sin(e.heading) + dz * Math.cos(e.heading);
+        near = Math.abs(q.y - p.y) < 0.2 && Math.abs(side) > 1.6 && Math.abs(side) < 2.25 && forward > 0.65 && forward < 1.35;
+        if (near) {
+          e.motion.groomSide = side < 0 ? -1 : 1;
+          near = !ctx.groomClear || ctx.groomClear(e, partner);
+        }
+      }
+      if (e.loungeDepart) near = false;
+      if (!near) e.groomTime = 0;
+      else if (e.groomTime > 0) e.groomTime = Math.max(0, e.groomTime - dt);
+      else if ((e.groomWait -= dt) <= 0) {
+        e.groomTime = 2.2 + e.random() * 2.4;
+        e.groomWait = 7 + e.random() * 10;
+      }
+      e.motion.groom = damp(e.motion.groom, near && e.groomTime > 0 ? 1 : 0, 6, dt);
+      e.motion.groomPhase += dt;
+    };
+    const departLounge = (e, dt) => {
+      e.speed = 0; e.motion.groom = 0;
+      const p = e.root.position;
+      if (!e.gorilla.compact) return;
+      e.footprintMode = "walk"; e.compact = true;
+      if (!occupied(e, p.x, p.y, p.z) && staticClear(e, p.x, p.y, p.z)) {
+        e.loungeDepart = false; e.lounge = ""; e.recover = 0.65;
+        return;
+      }
+      // If a neighbour arrived close in front, scoot back while still seated
+      // until the entire walking pose fits. Never stand through another body.
+      e.footprintMode = "sit"; e.compact = e.gorilla.sitCompact;
+      const sine = Math.sin(e.heading), cosine = Math.cos(e.heading);
+      for (let side = 0; side < 3; side++) {
+        const across = side ? (side === 1 ? -1 : 1) * dt * 0.3 : 0;
+        const x = p.x - sine * dt * 0.35 + cosine * across, z = p.z - cosine * dt * 0.35 - sine * across;
+        const y = groundAt(x, z, p.y);
+        if (Math.abs(y - p.y) > 0.12 || !grass(x, y, z, 0.9) || !loungeSeatSpace(e, x, y, z, e.heading)
+          || !staticClear(e, p.x, p.y, p.z, x, y, z)) continue;
+        p.x = x; p.y = y; p.z = z;
+        break;
+      }
+    };
+    const alignLounge = (e, dt) => {
+      if (!Number.isFinite(e.loungeHeading)) return true;
+      const p = e.root.position, delta = Math.atan2(Math.sin(e.loungeHeading - e.heading), Math.cos(e.loungeHeading - e.heading));
+      if (Math.abs(delta) < 0.015) return true;
+      const heading = e.heading + delta * (1 - Math.exp(-8 * dt));
+      if (occupied(e, p.x, p.y, p.z, true, heading) || !staticClear(e, p.x, p.y, p.z, p.x, p.y, p.z, e.heading, heading)) {
+        // A companion may have moved since this spot was chosen. Leave the
+        // seating plan rather than twisting the arm chain through its body.
+        e.rest = Math.min(e.rest, 1);
+        return false;
+      }
+      e.heading = heading;
       return false;
     };
     const waitSpot = (e) => {
@@ -297,13 +446,13 @@
       d.x = d.z = d.charge = d.vx = d.vy = d.vz = d.motionRecover = 0;
       d.jumpHeld = d.jumpDown = d.jumpArmed = d.airborne = d.resume = d.motionEnvelope = false; d.grounded = true;
       f.burning = f.rolling = f.requested = f.escaping = false; f.retry = f.escapeRetry = 0; f.age = f.heat = f.soot = f.cooldown = f.rollRecover = 0;
-      m.charge = m.takeoff = m.landing = m.roll = m.rollAngle = 0;
+      m.charge = m.takeoff = m.landing = m.roll = m.rollAngle = m.groom = 0;
       e.actionControlled = e.motion.smash = false;
       e.mode = e.owner.state; e.site = e.owner.work.plannedSite >= 0 ? e.owner.work.plannedSite : e.owner.work.site;
       e.parked = e.mode === "working"; e.parkFor = 0; e.exitFootprint = false;
       e.biped = e.parked ? "squeeze" : false;
       e.radius = WALK_RADIUS; e.foot = FOOT;
-      e.pound = e.beat = e.stand = e.recover = 0; e.lounge = ""; e.footprintMode = e.parked ? "park" : "walk";
+      e.pound = e.beat = e.stand = e.recover = 0; e.lounge = ""; e.loungeDepart = false; e.footprintMode = e.parked ? "park" : "walk";
       e.gorilla.poseManaged(2, e.root.position.x, e.root.position.y, e.root.position.z, e.heading, 0, false, e.biped);
       e.compact = e.parked ? e.gorilla.parkCompact : false;
       e.active = true; e.root.visible = false; e.hasSlot = false; e.jump.active = false; e.overflow = false;
@@ -323,6 +472,7 @@
         } else { e.active = false; e.retry = 1; return; }
       }
       e.gorilla.poseManaged(e.lounge ? 2 : 1 / 60, e.root.position.x, e.root.position.y, e.root.position.z, e.heading, 0, false, e.biped, e.lounge);
+      if (e.lounge === "sit" && e.gorilla.sitCompact) { e.footprintMode = "sit"; e.compact = true; }
       e.root.visible = true;
       if (ctx.track && !e.tracked) { ctx.track(e); e.tracked = true; }
     };
@@ -340,10 +490,12 @@
         overflow: false, activity: 0, hits: 0, pounds: 0, pound: 0, poundHit: false, poundPower: 2,
         drag: { cave: null, time: 0 },
         beat: 0, beats: 0, stand: 0, parked: false, parkFor: 0, exitFootprint: false, workCycle: 0, recover: 0, lounge: "", jumps: 0,
+        loungePartner: null, loungeHeading: NaN, loungeCycle: 0, loungeRoof: false, loungeDepart: false, groomTime: 0, groomWait: 0,
         controlled: false, pendingSite: -1, actionControlled: false,
         drive: { x: 0, z: 0, heading: NaN, run: false, jumpHeld: false, jumpDown: false, jumpArmed: false,
           cancelled: false, charge: 0, vx: 0, vy: 0, vz: 0, airborne: false, grounded: true, resume: false, motionRecover: 0, motionEnvelope: false },
-        motion: { charge: 0, poundCharge: 0, takeoff: 0, landing: 0, roll: 0, rollAngle: 0, smash: false, dragging: false },
+        motion: { charge: 0, poundCharge: 0, takeoff: 0, landing: 0, roll: 0, rollAngle: 0, smash: false, dragging: false,
+          groom: 0, groomSide: 1, groomPhase: 0 },
         fire: { burning: false, age: 0, heat: 0, rolling: false, rollTime: 0, soot: 0, cooldown: 0,
           reaction: 0, rollRecover: 0, x: 0, z: 0, heading: 0, requested: false, retry: 0,
           escaping: false, escapeRetry: 0, escapeX: 0, escapeY: 0, escapeZ: 0 },
@@ -938,16 +1090,23 @@
     const poseEntry = (e, dt, beforeX, beforeY, beforeZ) => {
       const p = e.root.position;
       if (e.lounge && Math.abs(e.speed) <= 0.1) {
-        // A seated or reclining body is wider than its walking limb chain.
-        // Claim that space before changing pose; otherwise a neighbor can be
-        // admitted beside the narrow shape and both appear stuck apart.
-        const compact = e.compact;
-        e.compact = false;
-        if (occupied(e, p.x, p.y, p.z) || !staticClear(e, p.x, p.y, p.z)) {
-          e.compact = compact; e.lounge = ""; e.rest = 0;
+        const compact = e.compact, mode = e.footprintMode;
+        // The sitting body has its own measured capsules. Its rise and settling
+        // fit the walking chain; reclining still reserves the wider full body.
+        if (e.lounge === "sit") {
+          if (!loungeSeatSpace(e, p.x, p.y, p.z, e.heading)) { leaveLounge(e); e.rest = 0; }
+          if (e.gorilla.sitCompact) { e.footprintMode = "sit"; e.compact = true; }
+          else { e.footprintMode = "walk"; e.compact = e.gorilla.compact; }
+        } else {
+          e.compact = false;
+          if (occupied(e, p.x, p.y, p.z) || !staticClear(e, p.x, p.y, p.z)) {
+            e.compact = compact; e.footprintMode = mode; e.lounge = ""; e.rest = 0;
+          }
         }
       }
       e.gorilla.poseManaged(dt, p.x, p.y, p.z, e.heading, e.speed, e.jump.active || e.drive.airborne, e.biped, e.lounge, e.motion);
+      if (e.lounge === "sit" && e.gorilla.sitCompact) { e.footprintMode = "sit"; e.compact = true; }
+      else if (e.footprintMode === "sit") { e.footprintMode = "walk"; e.compact = e.gorilla.compact; }
       if (e.actionControlled || e.motion.smash || e.gorilla.smashActive) {
         e.footprintMode = "pound"; e.compact = e.gorilla.poundCompact;
         e.radius = Math.max(BL.agent.MANAGED_SMASH_RADIUS, e.gorilla.bodyRadius + 0.1);
@@ -968,6 +1127,8 @@
       e.motion.takeoff = Math.max(0, e.motion.takeoff - dt * 5);
       e.motion.landing = Math.max(0, e.motion.landing - dt * 5);
       e.retry = Math.max(0, e.retry - dt);
+      if (e.controlled || e.mode !== "chilling" || e.fire.burning) e.motion.groom = 0;
+      if (e.controlled || e.fire.burning) e.loungeDepart = false;
       e.yieldFor = Math.max(0, e.yieldFor - dt);
       e.parkFor = Math.max(0, e.parkFor - dt);
       if (!alive(e.owner) && !e.controlled && !e.drive.airborne && !e.fire.rolling) {
@@ -989,7 +1150,7 @@
       if (e.fire.rolling || escapeForRoll(e, dt)) { poseEntry(e, dt, beforeX, beforeY, beforeZ); return; }
       if (e.mode !== e.owner.state) {
         releasePortal(e);
-        if (e.lounge) { e.lounge = ""; e.recover = 0.65; }
+        if (e.lounge) leaveLounge(e);
         e.mode = e.owner.state; e.hasSlot = false;
         if (e.mode === "working") beginTravel(e, e.owner.work.plannedSite >= 0 ? e.owner.work.plannedSite : e.owner.work.site);
         else {
@@ -1025,10 +1186,13 @@
       if (e.parked && e.gorilla.parkCompact) e.footprintMode = "park";
       else if (!e.parked && e.footprintMode === "park" && e.gorilla.compact) e.footprintMode = "walk";
       e.drive.motionRecover = Math.max(0, e.drive.motionRecover - dt);
-      e.compact = (e.mode === "working" || e.phase === "leave" || e.parked || e.exitFootprint || e.phase === "chill" && (!e.lounge || Math.abs(e.speed) > 0.1))
+      const seated = e.lounge === "sit" && e.gorilla.sitCompact && Math.abs(e.speed) <= 0.1;
+      if (seated) e.footprintMode = "sit";
+      else if (e.footprintMode === "sit") e.footprintMode = "walk";
+      e.compact = (seated || e.mode === "working" || e.phase === "leave" || e.parked || e.exitFootprint || e.phase === "chill" && (!e.lounge || e.lounge === "sit" || Math.abs(e.speed) > 0.1))
         && !e.jump.active && !e.gorilla.motionActive
         && !e.fire.rollRecover && !e.drive.motionRecover && !(e.drive.motionEnvelope && e.gorilla.motionActive)
-        && (e.footprintMode === "park" ? e.gorilla.parkCompact : e.footprintMode === "pound" ? e.gorilla.poundCompact : e.gorilla.compact);
+        && (seated || (e.footprintMode === "park" ? e.gorilla.parkCompact : e.footprintMode === "pound" ? e.gorilla.poundCompact : e.gorilla.compact));
       const gestureRadius = (e.fire.rollRecover > 0 || e.drive.motionRecover > 0 || e.drive.motionEnvelope && e.gorilla.motionActive) ? MOTION_RADIUS : e.pound > 0 ? 2.25 : e.jump.active ? AIR_RADIUS : WALK_RADIUS;
       e.radius = Math.max(gestureRadius, e.gorilla.bodyRadius + 0.1);
       const gestureHeight = (e.fire.rollRecover > 0 || e.drive.motionRecover > 0 || e.drive.motionEnvelope && e.gorilla.motionActive) ? MOTION_HEIGHT : e.mode === "chilling" || e.lounge || e.recover > 0 ? 2.7
@@ -1036,6 +1200,7 @@
       e.height = Math.max(gestureHeight, e.gorilla.bodyHeight + 0.08);
       e.foot = FOOT;
       if (e.jump.active) updateJump(e, dt);
+      else if (e.loungeDepart) departLounge(e, dt);
       else if (e.recover > 0) {
         e.recover = Math.max(0, e.recover - dt); e.speed = 0;
         if (!e.recover) e.actionControlled = e.motion.smash = false;
@@ -1117,14 +1282,16 @@
         }
       } else {
         yieldSpace(e);
-        if (Math.hypot(e.goalX - p.x, e.goalZ - p.z) > 0.18) move(e, dt, CHILL_SPEED);
+        if (Math.hypot(e.goalX - p.x, e.goalZ - p.z) > 0.18 || Math.abs(e.goalY - p.y) > 0.55) move(e, dt, CHILL_SPEED);
         else {
           e.speed = damp(e.speed, 0, 12, dt); e.rest -= dt;
-          if (!e.exitFootprint && !e.lounge && Math.hypot(p.x, p.z) >= (ctx.meadowRadius || 22) * 0.82 && grass(p.x, p.y, p.z, FOOT)) {
-            e.speed = 0; e.lounge = e.random() < 0.5 ? "sit" : "back";
+          if (!e.exitFootprint && !e.lounge && Math.hypot(p.x, p.z) >= (ctx.meadowRadius || 22) * 0.82
+            && grass(p.x, p.y, p.z, e.loungePartner ? 0.9 : FOOT) && alignLounge(e, dt)) {
+            e.speed = 0; e.lounge = e.loungePartner ? "sit" : loungePose(e);
           }
           if (e.rest <= 0) { e.rest = 6; chooseChill(e); }
         }
+        groomLounge(e, dt);
       }
       poseEntry(e, dt, beforeX, beforeY, beforeZ);
     };
