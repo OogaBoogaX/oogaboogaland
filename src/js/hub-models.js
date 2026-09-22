@@ -300,6 +300,82 @@
     box({ w: 0.24, h: 0.3, d: 0.24, color: "#d8892b", offset: { x: 0.2, y: 0.25, z: 0.06 } }),
     box({ w: 0.24, h: 0.2, d: 0.24, color: "#6f9fca", offset: { x: 0.65, y: 0.2, z: 0.02 } })
   ));
+  const labDesk = cached(() => {
+    const parts = [
+      box({ w: 1.8, h: 0.12, d: 0.4, color: "#626f70", offset: { y: 1.08 } }),
+      box({ w: 1.7, h: 0.1, d: 0.1, color: "#273437", offset: { y: 0.28, z: -0.14 } }),
+      box({ w: 0.12, h: 0.35, d: 0.12, color: "#273437", offset: { y: 1.3, z: -0.18 } }),
+      box({ w: 1.26, h: 0.78, d: 0.13, color: "#16272b", offset: { y: 1.78, z: -0.2 } }),
+      box({ w: 1.12, h: 0.64, d: 0.025, color: "#164751", emissive: 0.5, offset: { y: 1.78, z: -0.12 } }),
+      box({ w: 0.85, h: 0.055, d: 0.23, color: "#202c2f", offset: { y: 1.17, z: 0.1 } }),
+      box({ w: 0.32, h: 0.68, d: 0.34, color: "#273437", offset: { x: 0.64, y: 0.39 } }),
+      box({ w: 0.16, h: 0.035, d: 0.025, color: "#5de7c7", emissive: 1, offset: { x: 0.64, y: 0.62, z: 0.185 } })
+    ];
+    for (const x of [-0.79, 0.79]) for (const z of [-0.14, 0.14]) parts.push(box({ w: 0.1, h: 1.02, d: 0.1, color: "#344446", offset: { x, y: 0.51, z } }));
+    for (let i = 0; i < 5; i++) parts.push(box({ w: 0.32 + (i % 3) * 0.18, h: 0.035, d: 0.012, color: i % 2 ? "#78d9f2" : "#72efb0", emissive: 0.9, offset: { x: -0.14 + i % 2 * 0.12, y: 1.98 - i * 0.105, z: -0.099 } }));
+    for (let row = 0; row < 3; row++) for (let col = 0; col < 9; col++) parts.push(box({ w: 0.064, h: 0.012, d: 0.035, color: "#b8c6bd", offset: { x: (col - 4) * 0.083, y: 1.204, z: 0.03 + row * 0.06 } }));
+    return merge(...parts);
+  });
+  const labBench = cached(() => {
+    const parts = [box({ w: 2.6, h: 0.14, d: 0.8, color: "#c1c6b7", offset: { y: 1.06 } }),
+      box({ w: 2.45, h: 0.9, d: 0.68, color: "#425451", offset: { y: 0.45 } })];
+    for (const x of [-0.8, 0, 0.8]) {
+      parts.push(box({ w: 0.7, h: 0.67, d: 0.025, color: "#657671", offset: { x, y: 0.47, z: 0.355 } }));
+      parts.push(box({ w: 0.19, h: 0.035, d: 0.035, color: "#c7d5cc", offset: { x, y: 0.65, z: 0.387 } }));
+    }
+    return merge(...parts);
+  });
+  const labBeaker = cached(() => merge(
+    lathe({ profile: [[0, 0], [0.14, 0], [0.15, 0.015], [0.15, 0.345], [0.162, 0.355], [0.17, 0.37],
+      [0.165, 0.385], [0.15, 0.39], [0.13, 0.385], [0.12, 0.37], [0.12, 0.1]],
+      segments: 32, color: "#efb348", emissive: 0.2 }),
+    box({ w: 0.16, h: 0.1, d: 0.015, color: "#e0e6d5", offset: { y: 0.16, z: 0.145 } })
+  ));
+  const labTouchscreen = cached(() => {
+    const parts = [box({ w: 1.55, h: 0.98, d: 0.12, color: "#283b40", offset: { y: 2.27 } }),
+      box({ w: 1.39, h: 0.81, d: 0.025, color: "#255263", emissive: 0.65, offset: { y: 2.27, z: 0.075 } })];
+    for (const x of [-0.55, 0.55]) parts.push(box({ w: 0.09, h: 0.1, d: 0.49, color: "#344446", offset: { x, y: 2.26, z: -0.28 } }));
+    for (let i = 0; i < 4; i++) {
+      parts.push(box({ w: 0.42, h: 0.055, d: 0.012, color: "#93dfdf", emissive: 1, offset: { x: -0.34, y: 2.53 - i * 0.16, z: 0.096 } }));
+      parts.push(box({ w: 0.1, h: 0.12 + i * 0.1, d: 0.012, color: i % 2 ? "#efbc64" : "#70e2ac", emissive: 1, offset: { x: 0.07 + i * 0.15, y: 2.02 + i * 0.05, z: 0.096 } }));
+    }
+    return merge(...parts);
+  });
+  // Cached furniture geometry; each visit owns its graph, solid registrations
+  // and local work destinations. The center stays open from the original arch.
+  const entropyLab = (room) => {
+    const { createNode, addChild } = BL.scene, node = createNode(), solids = [], stations = [], equipment = [];
+    const half = room.w / 2, back = -room.to + 0.28, rearWork = back + 1.60;
+    const place = (geometry, x, z, heading = 0) => {
+      const item = createNode({ geometry, position: { x, y: 0, z }, rotation: { x: 0, y: heading, z: 0 } });
+      addChild(node, item); solids.push(item); return item;
+    };
+    for (const x of [-half + 1.17, 0, half - 1.17]) {
+      place(labDesk(), x, back);
+      stations.push({ x, y: 0, z: rearWork, heading: Math.PI, kind: "type" });
+    }
+    const sideZ = -Math.max(room.from + 1.4, 2.17);
+    for (const side of [-1, 1]) {
+      const facing = -side * Math.PI / 2;
+      const bench = place(labBench(), side * (half - 0.47), sideZ, facing);
+      place(labTouchscreen(), side * (half - 0.56), -3.1, facing);
+      for (let i = 0; i < 3; i++) {
+        const offset = (i - 1) * 0.9, front = -0.03;
+        const home = { x: bench.position.x + Math.cos(facing) * offset + Math.sin(facing) * front,
+          y: 1.14, z: i === 2 ? -1.08 : -2.3 - i * 0.8 };
+        const geometry = i === 1 ? labBeaker() : BL.agent.labFlaskGeometry();
+        if (i === 1) geometry.labGripY = 0.3;
+        const item = createNode({ geometry, position: { ...home }, rotation: { x: 0, y: facing, z: 0 } });
+        addChild(node, item);
+        equipment.push({ node: item, parent: node, home, homeRotation: { x: 0, y: facing, z: 0 }, homeScale: { x: 1, y: 1, z: 1 },
+          station: i === 2 ? side < 0 ? 5 : 6 : stations.length, kind: i === 1 ? "beaker" : "flask",
+          pickup: { x: home.x, y: home.y + geometry.labGripY, z: home.z } });
+      }
+      stations.push({ x: side * (half - 2.06), y: 0, z: -3.1, heading: side * Math.PI / 2, kind: "touch", side });
+    }
+    for (const side of [-1, 1]) stations.push({ x: side * (half - 0.44 - 1.213094), y: 0, z: -1.08 + side * 0.272893, heading: side * Math.PI / 2, kind: "carry", side });
+    return { node, solids, stations, equipment };
+  };
   // Jetpack tanks and backplate only; the flame is a separate geometry.
   const JET_UNIT = 0.075;
   const JET_ORIGIN = { x: -3 * JET_UNIT, y: 0, z: -2 * JET_UNIT };
@@ -567,5 +643,5 @@
       ...[-0.8, 0.8].map(brace)
     );
   });
-  BL.hubModels = { SIGN_GLYPHS, jetpack, jetFlame, caveMouthRim, mirrorPanel, matrixPrisonBars, sealedCaveFace, matrixButtonStand, matrixButton, matrixGlyph, caveSign, CAVE_SIGN_WIDTH, CAVE_SIGN_HEIGHT, gate, caveShelves, bedroll, tree, bush, rock, altarSlab, altarBlock, woodCrate, barrel, flowerTuft, torch, grass, lantern, firepit, fireFlame, butterfly, firefly, ember, vine, cloud, ladder, dock, TREE_HEIGHT };
+  BL.hubModels = { SIGN_GLYPHS, jetpack, jetFlame, caveMouthRim, mirrorPanel, matrixPrisonBars, sealedCaveFace, matrixButtonStand, matrixButton, matrixGlyph, caveSign, CAVE_SIGN_WIDTH, CAVE_SIGN_HEIGHT, gate, caveShelves, entropyLab, bedroll, tree, bush, rock, altarSlab, altarBlock, woodCrate, barrel, flowerTuft, torch, grass, lantern, firepit, fireFlame, butterfly, firefly, ember, vine, cloud, ladder, dock, TREE_HEIGHT };
 })();

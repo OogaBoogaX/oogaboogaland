@@ -1362,6 +1362,8 @@
           && !weaponHit.node.mirror && weaponContactClear(from, weaponHit);
         if (surfaceHit) setVec(to, weaponHit.x, weaponHit.y, weaponHit.z);
       }
+      // A phase doorway consumes the round before scenery or workers behind it.
+      if (ctx.clipProjectileTarget && ctx.clipProjectileTarget(from, to)) surfaceHit = false;
       if (!surfaceHit && shotClear && !shotClear(from.x, from.y, from.z, to.x, to.y, to.z)) {
         bullet.workShot = false;
         let lo = 0, hi = 1;
@@ -1400,8 +1402,10 @@
             else setVec(p, nx, ny, nz);
           }
         } else setVec(p, lerp(from.x, to.x, k), lerp(from.y, to.y, k), lerp(from.z, to.z, k));
+        const absorbed = ctx.absorbProjectile && ctx.absorbProjectile(x, y, z, p, step);
+        if (absorbed) bullet.life = 0;
         let impacted = false, dx = 0, dy = 0, dz = 0, distance = 0;
-        if (!bullet.feedback && bullet.source === player && input.weaponTargets) {
+        if (!absorbed && !bullet.feedback && bullet.source === player && input.weaponTargets) {
           dx = p.x - x; dy = p.y - y; dz = p.z - z; distance = Math.hypot(dx, dy, dz);
           if (distance > 1e-6 && input.weaponTargets.ray(weaponHit, x, y, z, dx / distance, dy / distance, dz / distance, distance + 1e-5, player)) {
             setVec(weaponStart, x, y, z);

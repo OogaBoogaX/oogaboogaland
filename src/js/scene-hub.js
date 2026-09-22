@@ -183,7 +183,7 @@
 
   // One visit's state: created in enter, dropped in leave.
   let jumbotronSpot, oogatronUnsub, renderer, game, world, go, lootEnabled, testBananas, root, camera, overlayCanvas, island, pathNode, altar, hud, hooks, input, pilot, fx, cameraCover, bananaCover, solids, rockGuides, objectGuides, sightGuides, bananaGuides, pileGuides, platformGuides, mirrorGuides, pile, crew, crates, critters, clock, presets, entering, jetpack, jetpackState, jetpackCarrier, jetpackWearer, lastJetpackCloud, mirrorCave, matrixCave, matrixControl, gateRain, fire, headquarters, dockStairs, jumbotron, positionDebug, agent, agentPlay, pitGate;
-  let magazine, magazineState, breakables, clankers, clankerPlay, clankerMeshes, clankerPartOwners;
+  let magazine, magazineState, breakables, clankers, clankerPlay, clankerMeshes, clankerPartOwners, entropyLab;
   const clankerEquipment = [];
   const CLANKER_FIRE = [models.particleGeometry("#ff8a2a", 0.18, 1), models.particleGeometry("#ffc148", 0.16, 1)];
   const CLANKER_SMOKE = models.particleGeometry("#70685f", 0.2, 0);
@@ -1311,6 +1311,20 @@
       addChild(group, createNode({ geometry: BL.mineModels.hubTrack() }), cart, rack);
       solids.add(cart);
       solids.add(rack);
+    } else if (slot.status === "open" && slot.scene === "lab") {
+      const lab = hubModels.entropyLab(m.room);
+      addChild(group, lab.node);
+      for (const node of lab.solids) solids.add(node);
+      const sr = Math.sin(m.ry), cr = Math.cos(m.ry);
+      const stations = lab.stations.map((station) => ({ ...station,
+        x: m.x + cr * station.x + sr * station.z, y: m.floorY + (station.y || 0),
+        z: m.z - sr * station.x + cr * station.z, heading: m.ry + station.heading }));
+      for (const item of lab.equipment) {
+        const p = item.pickup, x = p.x, z = p.z;
+        p.x = m.x + cr * x + sr * z; p.y += m.floorY; p.z = m.z - sr * x + cr * z;
+        item.holder = null;
+      }
+      entropyLab = { ...lab, group, mouth: m, opening: rim.geometry.openingBounds, stations, phase: null };
     } else if (slot.status === "open") {
       const geometry = hubModels.caveShelves(), back = -6.5 - BL.scene.boundsOf(geometry).min[2];
       for (const x of [-1.3, 1.3]) {
@@ -4813,6 +4827,7 @@
     mirrorCave.damage.update(dt);
     syncMirrorDamage();
     mirrorCave.ripples.update(dt, elapsed);
+    entropyLab.phase.update(dt, elapsed);
     prepareClankerRiders();
     prepareClankerStrike();
     clankers.update(dt);
@@ -5050,6 +5065,19 @@
       return clankerCylinderClear(x, y, z, toX, toY, toZ, radius, height, entry, ignore);
     }
     if (!clankerRidersClear(entry, x, y, z, toX, toY, toZ, fromHeading, toHeading)) return false;
+    const labPose = entry.planningLab || entropyLab.phase.inside(toX, toY, toZ)
+      && !entry.gorilla.motionActive && !entry.pound && !entry.beat && !entry.climb.active;
+    if (labPose) return entry.gorilla.labPoseClear(entry.planningLab ? 2 : entry.motion.labDt || 1 / 60,
+      toX, toY, toZ, toHeading, entry.speed, entry.planningLab ? entry.planningLabWork : entry.motion.labWork,
+      entry.motion.labPhase, entry.planningLab ? entry.planningLabSide : entry.motion.labSide,
+      island.solidAt, clankerClimbTransitionClear, entry, entry.planningLab || !entry.motion.lab);
+    // Crossing the entrance changes the rig immediately. Reserve the outside
+    // quadruped before leaving, while the current upright body is still narrow.
+    if (entry.motion.lab && !entry.gorilla.motionActive && !entry.climb.active) {
+      clankerExitBodyPending = true;
+      if (!entry.gorilla.labPoseClear(2, toX, toY, toZ, toHeading, entry.speed, "", 0, 1,
+        island.solidAt, clankerExitTransitionClear, entry, true, false)) return false;
+    }
     return BL.agent.footprint.sweep(entry, x, y, z, toX, toY, toZ, radius, height,
       fromHeading, toHeading, clankerCylinderClear, ignore);
   };
@@ -5078,6 +5106,26 @@
   const clankerClimbTransitionClear = (entry, x, y, z, nx, ny, nz, radius, height, actors = true, riders = true, toRadius = radius, toHeight = height) =>
     (!riders || clankerRidersClear(entry, x, y, z, nx, ny, nz, entry.heading, entry.heading))
     && clankerCylinderClear(x, y, z, nx, ny, nz, radius, height, entry, null, true, actors, false, toRadius, toHeight);
+  let clankerExitBodyPending = false;
+  const clankerExitTransitionClear = (entry, x, y, z, nx, ny, nz, radius, height, actors, riders, toRadius, toHeight) => {
+    if (clankerExitBodyPending) {
+      clankerExitBodyPending = false;
+      const mode = entry.footprintMode, compact = entry.compact, p = entry.root.position;
+      // The rig is temporarily in its real future pose here. Reserve the same
+      // walking envelope the controller will use immediately outside the lab.
+      entry.footprintMode = "pound"; entry.compact = entry.gorilla.poundCompact;
+      let clear = true;
+      for (const other of clankers.list) {
+        if (other === entry || !other.active) continue;
+        const q = other.root.position;
+        if (BL.agent.footprint.overlaps(entry, p.x, p.y, p.z, entry.root.rotation.y,
+          other, q.x, q.y, q.z, other.heading, 0.03)) { clear = false; break; }
+      }
+      entry.footprintMode = mode; entry.compact = compact;
+      if (!clear) return false;
+    }
+    return clankerClimbTransitionClear(entry, x, y, z, nx, ny, nz, radius, height, actors, riders, toRadius, toHeight);
+  };
   const clankerGroomClear = (entry, partner) => {
     const p = entry.root.position, sine = Math.sin(entry.heading), cosine = Math.cos(entry.heading), side = entry.motion.groomSide;
     const x = p.x + cosine * side * 0.7 + sine * 0.3, z = p.z - sine * side * 0.7 + cosine * 0.3;
@@ -5105,6 +5153,11 @@
     return clankerCylinderClear(p.x, p.y, p.z, p.x, p.y, p.z, 0.8, 2.7, entry);
   };
   const clankerSupportAt = (entry, x, z, y, step, heading = entry.heading) => {
+    // Upright scientists stand on their feet. An arm reaching a keyboard is
+    // not a foot landing on that desk, even though it belongs to the body sweep.
+    if (entry.motion.lab && !entry.drive.airborne && !entry.gorilla.motionActive) {
+      return Math.max(island.supportAt(x, z, y, step, ABYSS_FLOOR, 0.45), solids.supportAt(x, z, y, step, 0.45));
+    }
     // The landing surface must cover the same body footprint as the sweep.
     // A leading arm can reach a prop before the torso is directly above it.
     const shape = BL.agent.footprint, radius = shape.radius(entry);
@@ -5116,6 +5169,28 @@
         solids.supportAt(px, pz, y, step, radius));
     }
     return floor;
+  };
+  const returnLabEquipment = (entry) => {
+    for (const item of entropyLab.equipment) {
+      if (item.holder !== entry) continue;
+      entry.gorilla.releaseLabItem();
+      addChild(item.parent, item.node);
+      setVec(item.node.position, item.home.x, item.home.y, item.home.z);
+      setVec(item.node.rotation, item.homeRotation.x, item.homeRotation.y, item.homeRotation.z);
+      setVec(item.node.scale, item.homeScale.x, item.homeScale.y, item.homeScale.z);
+      item.node.quaternion = null; item.node.visible = true; item.holder = null;
+      return true;
+    }
+    return false;
+  };
+  const pickUpLabEquipment = (entry, index) => {
+    const item = entropyLab.equipment[index], p = entry.root.position;
+    if (!item || item.holder || entry.gorilla.labItem || !entry.motion.lab
+      || Math.hypot(p.x - item.pickup.x, p.z - item.pickup.z) > 2.1
+      || Math.abs(p.y - entropyLab.mouth.floorY) > 0.2) return false;
+    entry.gorilla.holdLabItem(item.node);
+    item.holder = entry;
+    return true;
   };
   const clankerCameraClear = (x, y, z, toX, toY, toZ) =>
     island.voxelSegmentClearAt(x, y, z, toX, toY, toZ, 0.1, 0.15)
@@ -5248,6 +5323,7 @@
   const createClankerEquipment = (sites) => {
     for (let site = 0; site < sites.length; site++) for (let side = 0; side < 2; side++) {
       const place = sites[site];
+      if (place.mouth === entropyLab.mouth) continue;
       const geometry = models.buildableGeos[(site + side) % models.buildableGeos.length]();
       const bounds = BL.scene.boundsOf(geometry);
       const radius = Math.hypot(Math.max(Math.abs(bounds.min[0]), Math.abs(bounds.max[0])), Math.max(Math.abs(bounds.min[2]), Math.abs(bounds.max[2]))) * 0.65;
@@ -5715,6 +5791,10 @@
     mirrorCave.damageVersion = mirrorCave.damage.version;
     mirrorCave.shattered = false;
     mirrorCave.ripples = BL.mirrorRipples.create(mirrorCave.node);
+    entropyLab.phase = BL.labPhase.create(entropyLab.group, entropyLab.mouth, entropyLab.opening);
+    headquarters.entropyLab = entropyLab;
+    shared.clipProjectileTarget = entropyLab.phase.clipTarget;
+    shared.absorbProjectile = entropyLab.phase.absorb;
     shared.onProjectileMove = mirrorCave.ripples.cross;
     shared.onWeaponImpact = weaponImpact;
     shared.onMeleeStrike = mirrorCave.ripples.strike;
@@ -5862,6 +5942,9 @@
       if (Number.isFinite(y)) loungeRoofs.push({ x, y, z, angle: mouth.ry });
     }
     clankers = BL.clankers.create({ root, crew, sites: shared.workSites, loungeRoofs,
+      labSite: shared.workSites.findIndex(site => site.mouth === entropyLab.mouth),
+      labInside: entropyLab.phase.inside, labStations: entropyLab.stations,
+      labEquipment: entropyLab.equipment, labPickup: pickUpLabEquipment, labReturn: returnLabEquipment,
       solidAt: island.solidAt, climbClear: clankerClimbClear, climbTransitionClear: clankerClimbTransitionClear,
       climbRidersClear: clankerRidersClear, groomClear: clankerGroomClear, underCanopy: clankerUnderCanopy,
       groundAt: (x, z, y) => island.supportAt(x, z, y, 0.52), surfaceAt: island.surfaceAt,
@@ -6277,6 +6360,7 @@
     breakables.dispose();
     crates.dispose();
     pile.dispose();
+    for (const entry of clankers.list) returnLabEquipment(entry);
     clankers.dispose();
     clankerMeshes.dispose();
     CLANKER_SUPPORT.node = null;
@@ -6301,6 +6385,8 @@
     mirrorGuides.dispose();
     mirrorCave.damage.dispose();
     mirrorCave.ripples.dispose();
+    entropyLab.phase.dispose();
+    entropyLab = null;
     mirrorCave.body.dispose();
     pilot.dispose();
     if (oogatronUnsub) {
@@ -6355,6 +6441,7 @@
     breakables.liveGeometry(set);
     mirrorCave.damage.liveGeometry(set);
     clankers.liveGeometry(set);
+    entropyLab.phase.liveGeometry(set);
     for (const item of clankerEquipment) set.add(item.node.geometry);
     for (const cave of crew.cavemen.values()) set.add(cave.headOpen).add(cave.headClosed);
   };
@@ -6368,7 +6455,7 @@
     id: "hub", enter, update, overlay, onDonation, onKey, onLootCleared, renderOpts: RENDER_OPTS, leave, stats, liveGeometry,
     root: null, camera: null, input: null, debug: null,
     get inMotion() {
-      if (pile.inMotion || fx.inMotion || breakables.inMotion || weather.active || jetpack || magazine && magazine.revealed || MATRIX_WORLD.active || mirrorGuides.state.doorway || mirrorCave.damage.active || mirrorCave.ripples.active || mirrorCave.body.active) return true;
+      if (pile.inMotion || fx.inMotion || breakables.inMotion || weather.active || jetpack || magazine && magazine.revealed || MATRIX_WORLD.active || mirrorGuides.state.doorway || mirrorCave.damage.active || mirrorCave.ripples.active || mirrorCave.body.active || entropyLab.phase.ripples.active) return true;
       for (const sign of headquarters.roomSigns) if (sign.velocity || sign.node.rotation.x) return true;
       for (let i = 0; i < matrixGates.length; i++) if (matrixCave && (matrixGates[i].raising || matrixCave.unlocked && matrixGates[i].node.position.y !== MATRIX_GATE_HIDDEN_Y)) return true;
       return false;

@@ -33,9 +33,13 @@ the body for the return to the pile. A worker with ammunition in their spare swa
 in and empties it at the cave first, then returns to fill the AK and spare before the next trip.
 The rifle stays held while filling its own magazine and goes on the back while filling the spare.
 Each clank or chill Ooga has a full-sized gorilla companion. Working gorillas run on
-all fours, taking banana hits across their bodies without eating them. Inside their
-owner's cave they can also stand, beat their chests, jump, and pound the floor to
-build the original lab equipment. They tuck their arms in and take turns moving
+all fours outside. Crossing EntropyLab's entrance instantly gives them an upright
+posture and lab coat. They rotate between coding at desks, using wall touchscreens,
+and taking glassware from the benches to inspect and swirl before returning it.
+Incoming bananas disappear at the entrance with glyph ripples.
+The lab has a larger, full-height interior with solid rock around it. In other work
+caves, gorillas take banana hits across their bodies, stand, beat their chests, jump,
+and pound the floor to build equipment. They tuck their arms in and take turns moving
 through crowded interiors. A gorilla stays inside when its Ooga reloads for the same cave.
 When the next cave changes, it runs ahead on all fours and waits inside that cave.
 Gorillas take direct routes across grass and paths, without the Oogas' path

@@ -491,8 +491,30 @@
       const ceilingCell = Number.isFinite(ceiling) ? Math.round(ceiling / UNIT) + offset : 63;
       return caveIndex | (floorCell << 4) | (ceilingCell << 10);
     };
+    // Fit one full-height lab chamber inside the existing mountain. Check the
+    // same quarter-unit columns the carve removes, including their outer corners;
+    // never raise the roof or create shallow side pockets to gain floor space.
+    const labFrame = frames.find((f) => f.id === "c11"), labColumns = [];
+    for (let gx = 0; gx < SX; gx++) for (let gz = 0; gz < SZ; gz++) {
+      const x = (gx + 0.5) * UNIT + ORIGIN.x, z = (gz + 0.5) * UNIT + ORIGIN.z;
+      const dx = x - labFrame.x, dz = z - labFrame.z;
+      const along = dx * labFrame.ox + dz * labFrame.oz, across = Math.abs(dz * labFrame.ox - dx * labFrame.oz);
+      if (along < 0.5 - labFrame.e || along > 6.75 + labFrame.e || across > 3.625 + labFrame.e) continue;
+      let wallTop = Infinity;
+      for (let ix = -2; ix <= 2; ix++) for (let iz = -2; iz <= 2; iz++) wallTop = Math.min(wallTop, tops[(gx + ix) * SZ + gz + iz]);
+      labColumns.push({ along, across, top: tops[gx * SZ + gz], wallTop, skin: RADIUS - Math.hypot(Math.abs(x) + UNIT / 2, Math.abs(z) + UNIT / 2) });
+    }
+    let labArea = 0;
+    for (let w = 6; w <= 7.25; w += UNIT) for (let from = 0.5; from <= 2.5; from += UNIT) for (let to = 6.5; to <= 6.75; to += UNIT) {
+      const area = w * (to - from);
+      if (area <= labArea) continue;
+      let safe = true;
+      for (const column of labColumns) if (column.along > from - labFrame.e && column.along < to + labFrame.e && column.across < w / 2 + labFrame.e
+        && (column.top < ROOM.h + 0.5 || column.wallTop < ROOM.h || column.skin < 0.5)) { safe = false; break; }
+      if (safe) { labFrame.room = { w, h: ROOM.h, from, to }; labArea = area; }
+    }
     const carve = (f, caveIndex) => {
-      const e = f.e;
+      const e = f.e, chamber = f.room || ROOM;
       const cx = f.x + f.ox * 4, cz = f.z + f.oz * 4;
       const gx0 = Math.max(0, Math.floor((cx - 7 - ORIGIN.x) / UNIT)), gx1 = Math.min(SX - 1, Math.ceil((cx + 7 - ORIGIN.x) / UNIT));
       const gz0 = Math.max(0, Math.floor((cz - 7 - ORIGIN.z) / UNIT)), gz1 = Math.min(SZ - 1, Math.ceil((cz + 7 - ORIGIN.z) / UNIT));
@@ -503,9 +525,9 @@
           const wz = (gz + 0.5) * UNIT + ORIGIN.z;
           const dx = wx - f.x, dz = wz - f.z;
           const along = dx * f.ox + dz * f.oz, across = Math.abs(dz * f.ox - dx * f.oz);
-          const room = along > ROOM.from - e && along < ROOM.to + e && across < ROOM.w / 2 + e;
+          const room = along > chamber.from - e && along < chamber.to + e && across < chamber.w / 2 + e;
           if (!room && !(along > -0.5 && along < MOUTH.depth + e && across < MOUTH.w / 2 + e)) continue;
-          const gyTop = SURFACE - 1 + Math.round((room ? ROOM.h : MOUTH.h) / UNIT);
+          const gyTop = SURFACE - 1 + Math.round((room ? chamber.h : MOUTH.h) / UNIT);
           for (let gy = SURFACE; gy <= gyTop; gy++) {
             grid.set(gx, gy, gz, 0);
             // The opening lies at local z=.5; the exterior rim stays in global coordinates.
@@ -1730,8 +1752,11 @@
         get reflowCount() { return pathReflows; }
       }
     };
-    const inside = (ROOM.from + ROOM.to) / 2;
-    const mouths = frames.map((f) => ({ id: f.id, clock: f.clock, angle: f.angle, x: f.x, z: f.z, ry: facing(f.axis), floorY: 0, inside: { x: f.x + f.ox * inside, z: f.z + f.oz * inside }, apron: { x: f.x - f.ox * 1.6, z: f.z - f.oz * 1.6 } }));
+    const mouths = frames.map((f) => {
+      const room = f.room || ROOM, inside = (room.from + room.to) / 2;
+      return { id: f.id, clock: f.clock, angle: f.angle, x: f.x, z: f.z, ry: facing(f.axis), floorY: 0, room,
+        inside: { x: f.x + f.ox * inside, z: f.z + f.oz * inside }, apron: { x: f.x - f.ox * 1.6, z: f.z - f.oz * 1.6 } };
+    });
     const geometry = gridGeometry(grid, { unit: UNIT, palette: PALETTE, origin: ORIGIN, matrixCaves, floorRooms: [...headquartersRooms, ...basement.rooms] });
     const rampOffset = geometry.verts.length / 3;
     const rampFaceOffset = geometry.faces.length;
