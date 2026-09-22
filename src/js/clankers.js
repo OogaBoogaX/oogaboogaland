@@ -521,7 +521,7 @@
           reaction: 0, rollRecover: 0, x: 0, z: 0, heading: 0, requested: false, retry: 0,
           escaping: false, escapeRetry: 0, escapeX: 0, escapeY: 0, escapeZ: 0 },
         fireFX: { next: 0 },
-        jump: { active: false, progress: 0, reverse: false, duration: 0, fromX: 0, fromY: 0, fromZ: 0,
+        jump: { active: false, progress: 0, reverse: false, blocked: 0, duration: 0, fromX: 0, fromY: 0, fromZ: 0,
           toX: 0, toY: 0, toZ: 0, lift: 0,
           points: new Float64Array((JUMP_SAMPLES + 1) * 3) }
       };
@@ -555,11 +555,12 @@
       const p = e.root.position, jump = e.jump, distance = Math.hypot(x - p.x, z - p.z);
       if (distance > MAX_JUMP || y > p.y + 1.7 || y < p.y - 7.5 || !landing(x, y, z)
         || e.phase === "work" && caveAt(x, y, z, AIR_RADIUS) !== e.site) return false;
-      const previousRadius = e.radius, previousCompact = e.compact;
+      const previousRadius = e.radius, previousHeight = e.height, previousCompact = e.compact;
       e.compact = false;
-      e.radius = Math.max(AIR_RADIUS, previousRadius);
+      // Use the same measured envelope that poseEntry retains throughout flight.
+      e.radius = Math.max(MOTION_RADIUS, previousRadius); e.height = Math.max(MOTION_HEIGHT, previousHeight);
       if (occupied(e, p.x, p.y, p.z) || !staticClear(e, p.x, p.y, p.z) || occupied(e, x, y, z)) {
-        e.radius = previousRadius; e.compact = previousCompact; return false;
+        e.radius = previousRadius; e.height = previousHeight; e.compact = previousCompact; return false;
       }
       jump.fromX = p.x; jump.fromY = p.y; jump.fromZ = p.z;
       jump.toX = x; jump.toY = y; jump.toZ = z;
@@ -575,10 +576,10 @@
         jumpPoint(jump, i / JUMP_SAMPLES, POINT);
         const j = i * 3;
         if (!staticClear(e, points[j - 3], points[j - 2], points[j - 1], POINT.x, POINT.y, POINT.z)
-          || occupied(e, POINT.x, POINT.y, POINT.z)) { e.radius = previousRadius; e.compact = previousCompact; return false; }
+          || occupied(e, POINT.x, POINT.y, POINT.z)) { e.radius = previousRadius; e.height = previousHeight; e.compact = previousCompact; return false; }
         points[j] = POINT.x; points[j + 1] = POINT.y; points[j + 2] = POINT.z;
       }
-      jump.active = true; jump.progress = 0; jump.reverse = false; e.jumps++;
+      jump.active = true; jump.progress = 0; jump.reverse = false; jump.blocked = 0; e.jumps++;
       return true;
     };
     const tryJump = (e, heading) => {
@@ -606,7 +607,21 @@
         // directions, so a blocked retreat can resume a now-clear landing.
         jump.reverse = !jump.reverse;
       }
-      if (!moved) { e.speed = 0; return; }
+      if (!moved) {
+        e.speed = 0; jump.blocked += dt;
+        if (jump.blocked >= 0.4) {
+          // A moving neighbour can close both directions of an authored arc.
+          // Release that arc into the same swept gravity/landing controller as
+          // a player jump instead of suspending the clanker in midair forever.
+          const d = e.drive;
+          d.vx = d.vz = 0;
+          d.vy = Math.min(0, ((jump.toY - jump.fromY) + jump.lift * 4 * (1 - jump.progress * 2)) / jump.duration);
+          d.airborne = d.resume = d.motionEnvelope = true; d.grounded = false; d.motionRecover = 0.6;
+          jump.active = false; e.motion.takeoff = 0;
+        }
+        return;
+      }
+      jump.blocked = 0;
       p.x = POINT.x; p.y = POINT.y; p.z = POINT.z; jump.progress = next;
       e.speed = Math.hypot(jump.toX - jump.fromX, jump.toZ - jump.fromZ) / jump.duration;
       if (next === 1 || next === 0 && jump.reverse) {
