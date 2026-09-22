@@ -6,7 +6,7 @@
   // A bake reads only verts and each face's index list and is never written after build; shared vertex arrays
   // reuse one bake per page instead of per registry.
   const bakes = new WeakMap();
-  const create = ({ roots, crew, exclude = [], providers = [], propsBlockActor = true, perceptionThrough = null }) => {
+  const create = ({ roots, crew, actorRoots = [], exclude = [], providers = [], propsBlockActor = true, perceptionThrough = null }) => {
     const excluded = new Set(exclude), geometries = new Map(), registered = [], seen = new Set(), entries = new Map(), ownerEntries = new Map(), ownerGroups = [];
     const aliases = new Map(), providerOwners = new Map();
     for (const provider of providers) {
@@ -361,6 +361,11 @@
       characterRoots.set(cave.root, characterIndex);
       if (cave.sleepWeapons) registerNode(cave.sleepWeapons, cave.root, characterIndex);
       registerNode(cave.root, cave.root, characterIndex++); reserveHead(cave);
+    }
+    // Non-crew actors share the same camera occlusion and perception-cache rules.
+    for (const node of actorRoots) {
+      if (!characterRoots.has(node)) characterRoots.set(node, characterIndex++);
+      registerNode(node, node, characterRoots.get(node));
     }
     for (const node of roots) registerNode(node);
     for (const cave of crew.cavemen.values()) reserveHead(cave);
@@ -1098,14 +1103,15 @@
     let cameraPropEntry = null, cameraPropSource = null, cameraPropFace = -1, cameraPropStamp = -1, cameraPropAll = false, cameraPropCount = 0;
     let cameraPropClip = -Infinity, cameraPropMin = -Infinity, cameraPropMax = Infinity;
     const cameraPropFaceBlocked = (e, faceIndex, dx, dy, dz, hx, hy, hz, ex, ey, ez, allProps) => {
-      const g = e.node.geometry, v = g.verts, m = e.inverse;
-      const face = g.faces[e.geometry.coverFaces[faceIndex]], a = face.i[0] * 3, b = face.i[1] * 3, c = face.i[2] * 3;
+      const g = e.node.geometry;
       const cached = cameraPropEntry === e && cameraPropSource === g && cameraPropFace === faceIndex && cameraPropStamp === collectStamp && cameraPropAll === allProps
         && cameraPropClip === e.clipMinY && cameraPropMin === e.worldMinY && cameraPropMax === e.worldMaxY;
-      let nx = 0, ny = 0, nz = 0, front, wx, wy, wz, retreat;
+      let nx = 0, ny = 0, nz = 0, front, wx, wy, wz, retreat, v, m, face;
       if (cached) {
         wx = cameraPropPlanes[0]; wy = cameraPropPlanes[1]; wz = cameraPropPlanes[2]; front = cameraPropPlanes[3]; retreat = cameraPropPlanes[4];
       } else {
+        v = g.verts; m = e.inverse; face = g.faces[e.geometry.coverFaces[faceIndex]];
+        const a = face.i[0] * 3, b = face.i[1] * 3, c = face.i[2] * 3;
         const ux = v[b] - v[a], uy = v[b + 1] - v[a + 1], uz = v[b + 2] - v[a + 2], vx = v[c] - v[a], vy = v[c + 1] - v[a + 1], vz = v[c + 2] - v[a + 2];
         nx = uy * vz - uz * vy; ny = uz * vx - ux * vz; nz = ux * vy - uy * vx;
         const facing = nx * (ex - v[a]) + ny * (ey - v[a + 1]) + nz * (ez - v[a + 2]);
@@ -1402,6 +1408,7 @@
       if (w < -tolerance || u + w > magnitude + tolerance) return false;
       const depth = v[at + 9] / det;
       if (depth <= near + span * 1e-5 || depth >= endDepth - span * 1e-5) return false;
+      if (entry.clipMinY === -Infinity && entry.worldMinY === -Infinity && entry.worldMaxY === Infinity) return true;
       const ray = entry.boundaryRay, y = ray[1] + (ray[4] * sx + ray[7] * sy + ray[10]) * depth;
       const worldY = cameraY + (cameraView[4] * sx + cameraView[5] * sy - cameraView[6]) * depth;
       return y >= entry.clipMinY && worldY >= entry.worldMinY && worldY <= entry.worldMaxY;
