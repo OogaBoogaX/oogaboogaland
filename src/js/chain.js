@@ -56,6 +56,10 @@
 
   const snapshot = {
     source: "mempool.space", at: 0, polls: 0, errors: 0, degraded: false, backoff: 0,
+    // Validated field observations, epoch milliseconds; zero means not observed this session.
+    // feesAt covers all five recommended tiers, never the independent next-block projection.
+    // Legacy readers can replace missing/invalid fields with defaults; those have unknown freshness.
+    backlogAt: 0, feesAt: 0, heightAt: 0, priceAt: 0,
     // Mempool backlog
     count: 0, vsize: 0, totalFee: 0, deep: 0, floor: 0, ladder, ladderRate,
     // The paying backlog (MvB at 1 sat/vB or more) and its ten-minute average, stamped when last read
@@ -72,6 +76,7 @@
     // Derived weather axes, 0..1
     soak: 0, gale: 0
   };
+  const observedNumber = (v) => (typeof v === "number" || typeof v === "string" && v.trim() !== "") && Number.isFinite(Number(v)) && Number(v) >= 0;
   const socketFresh = () => snapshot.socketAt > 0 && Date.now() - snapshot.socketAt < FRESH_MS;
   // Read, never stored: `derive` only runs after a reading lands, so a stored flag on a feed that has
   // stopped entirely would sit there claiming to be live for the rest of the visit.
@@ -213,6 +218,7 @@
     // Shape, never value: a drained mempool really does report zero, so only a missing field is bad.
     if (typeof data.count !== "number" || typeof data.vsize !== "number") return false;
     if (!histogramOnly) {
+      snapshot.backlogAt = Number.isFinite(data.vsize) && data.vsize >= 0 ? Date.now() : 0;
       snapshot.count = data.count | 0;
       snapshot.vsize = Number(data.vsize) || 0;
       snapshot.totalFee = Number(data.total_fee) || 0;
@@ -227,6 +233,7 @@
     if (!Array.isArray(blocks) || !blocks.length) return false;
     const tip = blocks[0];
     if (tip && tip.height > 0) {
+      snapshot.heightAt = Number.isInteger(Number(tip.height)) ? Date.now() : 0;
       snapshot.height = tip.height | 0;
       snapshot.lastTxCount = tip.tx_count | 0;
       snapshot.lastWeight = tip.weight | 0;
@@ -248,6 +255,7 @@
   };
   const readRecommended = (fees) => {
     if (!fees || typeof fees !== "object") return;
+    snapshot.feesAt = observedNumber(fees.fastestFee) && observedNumber(fees.halfHourFee) && observedNumber(fees.hourFee) && observedNumber(fees.economyFee) && observedNumber(fees.minimumFee) ? Date.now() : 0;
     snapshot.fastestFee = Number(fees.fastestFee) || 0;
     snapshot.halfHourFee = Number(fees.halfHourFee) || 0;
     snapshot.hourFee = Number(fees.hourFee) || 0;
@@ -257,6 +265,7 @@
   // Esplora's estimates are a confirmation-target map, not tiers; the same five readings come out of it.
   const readEstimates = (est) => {
     if (!est || typeof est !== "object") return;
+    snapshot.feesAt = observedNumber(est[1]) && observedNumber(est[3]) && observedNumber(est[6]) && observedNumber(est[144]) && observedNumber(est[1008]) ? Date.now() : 0;
     const at = (t) => Number(est[t]) || 0;
     snapshot.fastestFee = at(1);
     snapshot.halfHourFee = at(3);
@@ -289,6 +298,7 @@
         const data = await getUrl(source.url);
         const value = source.read(data);
         if (!priced && value > 0) {
+          snapshot.priceAt = Number.isFinite(value) ? Date.now() : 0;
           snapshot.priceUsd = value;
           snapshot.priceSource = source.name;
           priced = true;
@@ -410,6 +420,7 @@
   };
   const onFeedEvent = (event) => {
     if (event.type === "stats") {
+      snapshot.backlogAt = observedNumber(event.vsize) ? Date.now() : 0;
       snapshot.count = event.count | 0;
       snapshot.vsize = Number(event.vsize) || 0;
       snapshot.totalFee = Number(event.totalFee) || 0;
@@ -423,6 +434,7 @@
       return;
     }
     if (event.type === "block") {
+      snapshot.heightAt = Number.isInteger(Number(event.height)) && Number(event.height) > 0 ? Date.now() : 0;
       snapshot.height = event.height | 0;
       snapshot.lastTxCount = event.txCount | 0;
       snapshot.lastBlockAt = Date.now();
@@ -478,6 +490,8 @@
     if (!held || !held.values || !(held.at > 0) || Date.now() - held.at > CACHE_MAX) return false;
     for (const key of CACHED) if (typeof held.values[key] === "number") snapshot[key] = held.values[key];
     if (Array.isArray(held.ladder) && held.ladder.length === LADDER) ladder.set(held.ladder);
+    // Cache values have no per-field observation proof; do not inherit freshness on restore.
+    snapshot.backlogAt = snapshot.feesAt = snapshot.heightAt = snapshot.priceAt = 0;
     snapshot.at = held.at;
     derive();
     return true;
@@ -497,6 +511,7 @@
     if (open > 0) snapshot.priceOpenUsd = open;
     snapshot.priceSource = "coinbase live";
     priceAt = Date.now();
+    snapshot.priceAt = Number.isFinite(price) ? priceAt : 0;
     return true;
   };
   const dropPrice = () => {

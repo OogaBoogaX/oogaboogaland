@@ -2550,6 +2550,103 @@ const chainSnapshotChecks = async () => {
     JSON.stringify({ staleBefore, socket, histogramOnly, halfGale, staleGale }));
   record("chain snapshot: the Coinbase ticker_batch reader takes BTC-USD's price and 24-hour open from their strings and ignores other products and control messages", priced, JSON.stringify({ ticker, price: s.priceUsd, open: s.priceOpenUsd }));
   record("chain snapshot: a pinned provider starts on it without throwing (regression: an assignment to a constant killed the page)", pinned, JSON.stringify({ pinnedStarts, base: pinnedContext.window.BL.chain.base }));
+  await chainFreshnessChecks(source, math);
+};
+// Rule: retained field values must never become fresh because another feed announced a change.
+// Real readers/pollers run with a controlled clock and transports; no provider or Chrome is contacted.
+const chainFreshnessChecks = async (source, math) => {
+  const fields = ["backlogAt", "feesAt", "heightAt", "priceAt"];
+  const fixture = (cached = null) => {
+    let now = 1000000, id = 0, stored = cached, mode = "ok";
+    const timers = new Map(), requests = [], notices = [];
+    const tiers = { fastestFee: 3, halfHourFee: 2, hourFee: 1, economyFee: 0, minimumFee: 0 };
+    const payload = (url) => {
+      if (url.endsWith("/mempool")) return { count: 2, vsize: 100, total_fee: 10, fee_histogram: [[2, 100]] };
+      if (url.endsWith("/blocks")) return [{ height: 900000, timestamp: 900 }];
+      if (url.endsWith("/fees/recommended")) return tiers;
+      if (url.endsWith("/fees/mempool-blocks")) return [{ medianFee: 7 }];
+      if (url.endsWith("/fee-estimates")) return { 1: 3, 3: 2, 6: 1, 144: 0, 1008: 0 };
+      if (url.includes("/products/BTC-USD/stats")) return { last: "60000", open: "59000" };
+      if (url.includes("kraken.com")) return { result: { XXBTZUSD: { c: ["60000"], o: "59000" } } };
+      return {};
+    };
+    const context = {
+      Date: class extends Date { static now() { return now; } }, AbortController,
+      window: { setTimeout(fn, ms) { timers.set(++id, { fn, ms }); return id; }, clearTimeout(key) { timers.delete(key); } },
+      document: { visibilityState: "visible" },
+      sessionStorage: { getItem: () => stored, setItem(key, value) { stored = value; } },
+      fetch: async (url) => {
+        requests.push(url);
+        if (mode === "pending") return new Promise(() => {});
+        const fail = mode === "fail" || mode === "fallback" && url.includes("coinbase.com") || mode === "fees" && (url.includes("/fees/") || url.endsWith("/fee-estimates"));
+        return { ok: !fail, status: fail ? 503 : 200, headers: { get: () => "7" }, json: async () => payload(url) };
+      }
+    };
+    runInNewContext(math, context); runInNewContext(source, context);
+    const c = context.window.BL.chain, s = c.snapshot;
+    const unsubscribe = c.subscribe(value => notices.push({ same: value === s, times: fields.map(k => value[k]) }));
+    const flush = async () => { for (let i = 0; i < 60; i++) await Promise.resolve(); };
+    const fire = async (ms) => {
+      for (const [key, timer] of [...timers]) if (timer.ms === ms) { timers.delete(key); timer.fn(); }
+      await flush();
+    };
+    return { c, s, tiers, requests, notices, unsubscribe, flush, fire, timers, context,
+      times: () => fields.map(k => s[k]).join(), advance: () => now += 100000,
+      get now() { return now; }, get stored() { return stored; }, set mode(value) { mode = value; } };
+  };
+  const f = fixture(), { c, s } = f;
+  record("chain freshness: all four fields start unknown and module loading starts no network or timers", f.times() === "0,0,0,0" && !f.requests.length && !f.timers.size, f.times());
+  c.readBacklog({ count: 0, vsize: 0 });
+  const backlog = s.backlogAt === f.now && s.vsize === 0 && !s.feesAt && !s.heightAt && !s.priceAt;
+  f.advance(); c.readEstimates({ 1: 3, 3: 2, 6: 1, 144: 0, 1008: 0 });
+  const fees = s.feesAt === f.now && s.fastestFee === 3 && s.economyFee === 0;
+  f.advance(); c.readBlocks([{ height: 900000, timestamp: 900 }]);
+  const height = s.heightAt === f.now && s.lastBlockAt === 900000;
+  const held = f.times();
+  f.advance(); c.readFees([{ medianFee: 9 }]); c.readDifficulty({ progressPercent: 50 }); c.derive();
+  c.readBacklog({ count: 2, vsize: 100 }, true);
+  c.readBacklog(null); c.readBlocks([]); c.readEstimates(null);
+  record("chain freshness: accepted backlog, recommended fees and tip stamp independently; histogram, projection, difficulty and missing payloads do not refresh them", backlog && fees && height && held === f.times() && s.nextFee === 9, f.times());
+  const ticker = { type: "ticker", product_id: "BTC-USD", price: "60000", open_24h: "59000" };
+  c.readTicker(ticker); const firstPriceAt = s.priceAt;
+  f.advance(); c.readTicker(ticker);
+  const unchanged = s.priceAt === f.now && s.priceAt > firstPriceAt && s.priceUsd === 60000 && s.priceSource === "coinbase live";
+  const wsTimes = f.times();
+  f.advance(); c.readTicker({ ...ticker, price: "bad" }); c.readTicker({ ...ticker, product_id: "ETH-USD" });
+  record("chain freshness: unchanged valid WS prices refresh only priceAt; rejected prices retain value and observation", unchanged && wsTimes === f.times(), f.times());
+  c.ingest({ type: "stats", count: 2, vsize: 100, fees: f.tiers });
+  const stats = s.backlogAt === f.now && s.feesAt === f.now && s.priceAt === firstPriceAt + 100000;
+  const statsTimes = f.times();
+  f.advance(); c.ingest({ type: "fees", nextFee: 5 }); await f.fire(0);
+  const delivered = f.notices.length === 1 && f.notices[0].same && statsTimes === f.times();
+  f.unsubscribe(); c.ingest({ type: "fees", nextFee: 6 }); await f.fire(0);
+  const unsubscribed = f.notices.length === 1;
+  c.ingest({ type: "block", height: 900001, txCount: 3 });
+  record("chain freshness: socket stats and blocks stamp their own fields; coalesced notifications preserve snapshot identity and unsubscribe", stats && delivered && unsubscribed && s.heightAt === f.now && s.priceAt === firstPriceAt + 100000, f.times());
+  f.advance(); c.ingest({ type: "stats", count: 1, vsize: 1 });
+  const missingFeesHeld = s.feesAt === Number(statsTimes.split(",")[1]);
+  c.ingest({ type: "stats", count: 1, vsize: NaN, fees: { fastestFee: 2 } });
+  record("chain freshness: missing tiers retain their age; partial or invalid replacements are unknown rather than falsely fresh", missingFeesHeld && s.backlogAt === 0 && s.feesAt === 0 && s.vsize === 0 && s.hourFee === 0, f.times());
+  c.dispose();
+
+  const r = fixture(); r.c.start(); await r.flush();
+  const initial = fields.every(k => r.s[k] === r.now) && r.s.priceSource === "coinbase";
+  const chainTimes = r.times().split(",").slice(0, 3).join();
+  r.advance(); r.mode = "fallback"; await r.c.pollPrice();
+  const fallback = r.s.priceAt === r.now && r.s.priceSource === "kraken" && r.s.priceUsd === 60000 && chainTimes === r.times().split(",").slice(0, 3).join();
+  r.advance(); r.mode = "ok"; await r.fire(60000);
+  // A REST observation must not suppress the next REST price poll through the private WS timer.
+  const restIndependent = r.s.priceAt === r.now && r.s.priceSource === "coinbase";
+  record("chain freshness: REST and fallback stamp accepted unchanged prices without changing other fields or suppressing the REST cycle", initial && fallback && restIndependent, r.times());
+  const beforeFailure = r.times(), values = [r.s.vsize, r.s.fastestFee, r.s.height, r.s.priceUsd].join();
+  r.advance(); r.mode = "fail"; await r.fire(30000); await r.fire(60000);
+  record("chain freshness: failed polls retain values and all observation times while Retry-After still controls backoff", beforeFailure === r.times() && values === [r.s.vsize, r.s.fastestFee, r.s.height, r.s.priceUsd].join() && r.c.backoff === 7000, JSON.stringify({ times: r.times(), backoff: r.c.backoff }));
+  const feesAt = r.s.feesAt;
+  r.advance(); r.mode = "fees"; await r.fire(37000);
+  record("chain freshness: successful backlog cannot freshen recommended fees when fee requests fail", r.s.backlogAt === r.now && r.s.feesAt === feesAt && r.s.fastestFee === 3, r.times());
+  const cached = fixture(r.stored); cached.mode = "pending"; cached.c.start();
+  record("chain freshness: restored values carry no fabricated per-field freshness", cached.s.priceUsd === 60000 && cached.s.height === 900000 && cached.times() === "0,0,0,0", cached.times());
+  cached.c.dispose(); r.c.dispose();
 };
 // The six rain steps in Node: soak alone picks them, a step holds against a hover on its boundary, and
 // the amount that falls is continuous through them.
