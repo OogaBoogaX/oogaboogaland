@@ -2424,9 +2424,18 @@
   };
   const clankerBodySegmentClear = (other, x, y, z, toX, toY, toZ, radius, height) => {
     const shape = BL.agent.footprint, p = other.root.position;
-    const sine = Math.sin(other.heading), cosine = Math.cos(other.heading), size = shape.radius(other);
-    for (let part = 0; part < shape.count(other); part++) {
-      const offset = shape.offset(other, part);
+    if (Math.min(y, toY) > p.y + other.height || Math.max(y, toY) + height < p.y) return true;
+    const count = shape.count(other), size = shape.radius(other), first = shape.offset(other, 0);
+    const last = count > 1 ? shape.offset(other, count - 1) : first;
+    // The ordered capsule centres all lie between the first and last offsets.
+    // Reject a distant sweep before evaluating each capsule, retaining the exact
+    // overlap/escape tests whenever the enclosing boxes can touch.
+    const reach = radius + size + Math.max(Math.abs(first), Math.abs(last)) + 1e-7;
+    if (Math.min(x, toX) > p.x + reach || Math.max(x, toX) < p.x - reach
+      || Math.min(z, toZ) > p.z + reach || Math.max(z, toZ) < p.z - reach) return true;
+    const sine = Math.sin(other.heading), cosine = Math.cos(other.heading);
+    for (let part = 0; part < count; part++) {
+      const offset = part === 0 ? first : part === count - 1 ? last : shape.offset(other, part);
       if (!cylinderSegmentClear(x, y, z, toX, toY, toZ, radius, height,
         p.x + sine * offset, p.z + cosine * offset, p.y, p.y + other.height, size)) return false;
     }

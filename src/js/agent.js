@@ -74,9 +74,10 @@
     if (ay >= by + b.height || ay + a.height <= by) return false;
     const radius = footprintRadius(a) + footprintRadius(b) + margin, r2 = radius * radius;
     const as = Math.sin(ah), ac = Math.cos(ah), bs = Math.sin(bh), bc = Math.cos(bh);
-    for (let i = 0; i < footprintCount(a); i++) {
+    const aCount = footprintCount(a), bCount = footprintCount(b);
+    for (let i = 0; i < aCount; i++) {
       const ao = footprintOffset(a, i);
-      for (let j = 0; j < footprintCount(b); j++) {
+      for (let j = 0; j < bCount; j++) {
         const bo = footprintOffset(b, j), dx = ax + as * ao - bx - bs * bo, dz = az + ac * ao - bz - bc * bo;
         if (dx * dx + dz * dz < r2) return true;
       }
@@ -137,7 +138,8 @@
     if (ay >= by + b.height || ay + a.height <= by) return false;
     const turn = Math.atan2(Math.sin(nh - ah), Math.cos(nh - ah));
     const radius = footprintRadius(a) + footprintRadius(b) + margin, bs = Math.sin(bh), bc = Math.cos(bh);
-    for (let i = 0; i < footprintCount(a); i++) for (let j = 0; j < footprintCount(b); j++) {
+    const aCount = footprintCount(a), bCount = footprintCount(b);
+    for (let i = 0; i < aCount; i++) for (let j = 0; j < bCount; j++) {
       const bo = footprintOffset(b, j);
       if (!separatingPair(ax, az, nx - ax, nz - az, ah, turn, footprintOffset(a, i), bx + bs * bo, bz + bc * bo, radius)) return false;
     }
