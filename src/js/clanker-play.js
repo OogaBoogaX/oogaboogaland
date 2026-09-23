@@ -3,6 +3,7 @@
   const BL = window.BL = window.BL || {};
   const { clamp, damp } = BL.math;
   const SHOULDER_DISTANCE = 3.8, POUND_CHARGE_TIME = 1;
+  const CONTROL_ENABLED = false;
   const create = ({ canvas, camera, pilot, hud, clankers, input = null, constrainCamera = null }) => {
     const orbit = pilot.orbit, target = { x: 0, y: 0, z: 0 };
     const command = { x: 0, z: 0, climbAxis: 0, heading: NaN, jumpHeld: false, jumpPressed: false, run: false };
@@ -125,7 +126,7 @@
       return true;
     };
     const possess = (entry) => {
-      if (disposed || !entry || !entry.active || !entry.root.visible) return false;
+      if (!CONTROL_ENABLED || disposed || !entry || !entry.active || !entry.root.visible) return false;
       if (entry === player) return true;
       if (player) blurCombat();
       if (!clankers.possess(entry)) return false;

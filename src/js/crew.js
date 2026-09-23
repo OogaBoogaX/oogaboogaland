@@ -1422,7 +1422,7 @@
             }
           }
         }
-        if (ctx.onProjectileMove) ctx.onProjectileMove(x, y, z, p.x, p.y, p.z, step);
+        if (ctx.onProjectileMove) ctx.onProjectileMove(x, y, z, p.x, p.y, p.z, step, bullet.source, bullet.workShot);
         // Emit the crossing while the struck glass still exists.
         if (impacted) {
           const power = SHOT_POWER * (weaponHit.owner.hitRegion === "head" ? 2 : 1);

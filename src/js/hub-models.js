@@ -476,7 +476,7 @@
         if (i === 1) geometry.labGripY = 0.3;
         const item = createNode({ geometry, position: { ...home }, rotation: { x: 0, y: facing, z: 0 } });
         addChild(node, item);
-        equipment.push({ node: item, parent: node, home, homeRotation: { x: 0, y: facing, z: 0 }, homeScale: { x: 1, y: 1, z: 1 },
+        equipment.push({ node: item, parent: node, bench, home, homeRotation: { x: 0, y: facing, z: 0 }, homeScale: { x: 1, y: 1, z: 1 },
           station: i === 2 ? side < 0 ? 5 : 6 : stations.length, kind, rolling: false,
           roll: { time: 0, age: 0, cx: 0, cy: 0, cz: 0, vx: 0, vy: 0, vz: 0,
             wx: 0, wy: 0, wz: 0, tx: 0, ty: 0, tz: 0, bounces: 0 },

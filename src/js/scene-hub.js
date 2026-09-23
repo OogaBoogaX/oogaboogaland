@@ -1315,6 +1315,9 @@
       const lab = hubModels.entropyLab(m.room, m.floorY);
       addChild(group, lab.node);
       for (const node of lab.solids) solids.add(node);
+      for (const display of lab.displays) if (display.node.geometry.imageSurface) {
+        addTarget(display.node, { kind: "lab-link", priority: 2, weaponType: "none" });
+      }
       const sr = Math.sin(m.ry), cr = Math.cos(m.ry);
       const stations = lab.stations.map((station) => ({ ...station,
         x: m.x + cr * station.x + sr * station.z, y: m.floorY + (station.y || 0),
@@ -3339,7 +3342,7 @@
       case "caveman":
         return o.cave.traits.display;
       case "clanker":
-        return `${o.entry.owner.traits.display}'s gorilla · double-tap to control`;
+        return `${o.entry.owner.traits.display}'s gorilla`;
       case "crate":
         return `${o.crate.loot.tier} crate · tap to open`;
       case "cave":
@@ -3352,6 +3355,8 @@
         return "Glyph gate · tap or press Space nearby to open";
       case "room-sign":
         return "Room sign";
+      case "lab-link":
+        return "EntropyLab · open website in a new tab";
       case "prop":
         return PROP_TIPS[o.prop] || "";
       default:
@@ -3668,6 +3673,9 @@
         break;
       case "matrix-button":
         toggleMatrixControl(true);
+        break;
+      case "lab-link":
+        window.open("https://entropylab.online", "_blank", "noopener,noreferrer");
         break;
       case "matrix-gate": {
         const player = pilot.player;
@@ -5043,11 +5051,24 @@
       break;
     }
   };
-  // Full limbs remain solid against scenery. Cave peers reserve their torsos
+  // Full limbs remain solid against scenery. Gorilla peers reserve their torsos
   // once per complete rig sweep; arm slices may then overlap those same peers.
-  let clankerPassingEntry = null, clankerPassingSite = -1;
-  const clankerPassingPeer = (entry, other) => entry === clankerPassingEntry && clankerPassingSite >= 0
-    && clankers.contactAt(other.root.position.x, other.root.position.y, other.root.position.z) === clankerPassingSite;
+  let clankerPassingEntry = null;
+  const clankerPassingPeer = (entry, other) => !!entry && entry === clankerPassingEntry && other !== entry;
+  const clankerPeersClear = (entry, x, y, z, toX, toY, toZ, fromHeading, toHeading, strictEnd = false) => {
+    if (!clankers) return true;
+    for (const other of clankers.list) {
+      if (other === entry || !other.active) continue;
+      const p = other.root.position, shape = BL.agent.torso;
+      // A pose preview has already installed the destination trunk. Do not
+      // mistake its expansion into a neighbour for escaping an old overlap.
+      if (strictEnd && shape.overlaps(entry, toX, toY, toZ, toHeading,
+        other, p.x, p.y, p.z, other.heading, 0.03)) return false;
+      if (!shape.separates(entry, x, y, z, fromHeading, toX, toY, toZ, toHeading,
+        other, p.x, p.y, p.z, other.heading, 0.03)) return false;
+    }
+    return true;
+  };
   const clankerCylinderClear = (x, y, z, toX, toY, toZ, radius, height, entry = null, ignore = null, climbing = false, actors = true, checkTerrain = true, toRadius = radius, toHeight = height) => {
     const fromRadius = radius, fromHeight = height;
     radius = Math.max(radius, toRadius); height = Math.max(height, toHeight);
@@ -5106,26 +5127,19 @@
   };
   const clankerClear = (x, y, z, toX, toY, toZ, radius, height, entry = null, ignore = null,
     fromHeading = entry ? entry.heading : 0, toHeading = fromHeading) => {
-    const previousEntry = clankerPassingEntry, previousSite = clankerPassingSite;
-    clankerPassingEntry = entry; clankerPassingSite = -1;
+    const previousEntry = clankerPassingEntry;
+    clankerPassingEntry = null;
     try {
       if (entry && !ignore && clankers && radius === entry.radius && height === entry.height && !entry.climb.active) {
-        clankerPassingSite = clankers.contactAt(x, y, z);
-        if (clankerPassingSite < 0) clankerPassingSite = clankers.contactAt(toX, toY, toZ);
-        // The lab planner checks peer torsos against their timed routes. World
-        // geometry still uses the full rig here; live movement checks both.
-        if (clankerPassingSite >= 0 && !entry.planningLabTraffic) for (const other of clankers.list) {
-          if (other === entry || !other.active || !clankerPassingPeer(entry, other)) continue;
-          const p = other.root.position;
-          // separates also checks the complete turning/translation sweep when
-          // initially apart, and only permits monotonic escape from overlap.
-          if (!BL.agent.torso.separates(entry, x, y, z, fromHeading, toX, toY, toZ, toHeading,
-            other, p.x, p.y, p.z, other.heading, 0.03)) return false;
-        }
+        clankerPassingEntry = entry;
+        // Retained route planning handles moving peers separately. Terrain,
+        // furniture, humans and riders still receive their complete checks.
+        if (!entry.planningLabTraffic && !entry.planningRoam
+          && !clankerPeersClear(entry, x, y, z, toX, toY, toZ, fromHeading, toHeading)) return false;
       }
       return clankerRigClear(x, y, z, toX, toY, toZ, radius, height, entry, ignore, fromHeading, toHeading);
     } finally {
-      clankerPassingEntry = previousEntry; clankerPassingSite = previousSite;
+      clankerPassingEntry = previousEntry;
     }
   };
   const clankerUnderCanopy = (entry) => {
@@ -5145,14 +5159,49 @@
     }
     return false;
   };
-  const clankerClimbClear = (entry, x, y, z, nx, ny, nz, radius, height, riders = true, actors = true) =>
-    (!riders || clankerRidersClear(entry, x, y, z, nx, ny, nz, entry.heading, entry.heading))
-    && clankerCylinderClear(x, y, z, nx, ny, nz, radius, height, entry, null, true, actors);
+  const clankerClimbClear = (entry, x, y, z, nx, ny, nz, radius, height, riders = true, actors = true, peers = true) => {
+    const previous = clankerPassingEntry;
+    if (!peers) clankerPassingEntry = entry;
+    try {
+      return (!riders || clankerRidersClear(entry, x, y, z, nx, ny, nz, entry.heading, entry.heading))
+        && clankerCylinderClear(x, y, z, nx, ny, nz, radius, height, entry, null, true, actors);
+    } finally { clankerPassingEntry = previous; }
+  };
   // At a lip the bent rig fits where a tall cylinder cannot. The controller
   // checks that exact terrain pose; scenery, other bodies and riders stay solid.
-  const clankerClimbTransitionClear = (entry, x, y, z, nx, ny, nz, radius, height, actors = true, riders = true, toRadius = radius, toHeight = height) =>
-    (!riders || clankerRidersClear(entry, x, y, z, nx, ny, nz, entry.heading, entry.heading))
-    && clankerCylinderClear(x, y, z, nx, ny, nz, radius, height, entry, null, true, actors, false, toRadius, toHeight);
+  const clankerClimbTransitionClear = (entry, x, y, z, nx, ny, nz, radius, height, actors = true, riders = true, toRadius = radius, toHeight = height, peers = true, part = null) => {
+    const previous = clankerPassingEntry;
+    if (!peers) clankerPassingEntry = entry;
+    const bench = entry.motion.lab && part === entry.gorilla.parts.armR ? entry.gorilla.labPickupBench : null;
+    try {
+      return (!riders || clankerRidersClear(entry, x, y, z, nx, ny, nz, entry.heading, entry.heading))
+        && clankerCylinderClear(x, y, z, nx, ny, nz, radius, height, entry, bench, true, actors, false, toRadius, toHeight);
+    } finally { clankerPassingEntry = previous; }
+  };
+  const clankerRestTransitionClear = (entry, x, y, z, nx, ny, nz, radius, height, actors, riders, toRadius, toHeight) => {
+    const c = entry.climb;
+    if (c.peerCheck) {
+      c.peerCheck = false;
+      const p = entry.root.position;
+      if (!clankerPeersClear(entry, c.peerX, c.peerY, c.peerZ, p.x, p.y, p.z,
+        c.peerHeading, entry.root.rotation.y, true)) return false;
+    }
+    return clankerClimbTransitionClear(entry, x, y, z, nx, ny, nz,
+      radius, height, actors, riders, toRadius, toHeight, false);
+  };
+  const clankerRestPoseClear = (entry, dt, lounge, staticPose = false,
+    x = entry.root.position.x, y = entry.root.position.y, z = entry.root.position.z, heading = entry.heading, fromLounge = null, sequenceStep = 0) => {
+    const p = entry.root.position, c = entry.climb;
+    const sx = staticPose ? x : p.x, sy = staticPose ? y : p.y, sz = staticPose ? z : p.z;
+    const fromHeading = staticPose ? heading : entry.heading;
+    if (!clankerRidersClear(entry, sx, sy, sz, x, y, z, fromHeading, heading)) return false;
+    c.peerX = sx; c.peerY = sy; c.peerZ = sz; c.peerHeading = fromHeading; c.peerCheck = true;
+    try {
+      return entry.gorilla.climbPoseClear(dt, x, y, z, heading, entry.motion,
+        island.solidAt, clankerRestTransitionClear, entry, 0, staticPose, lounge, fromLounge, sequenceStep);
+    } finally { c.peerCheck = false; }
+  };
+  clankerRestTransitionClear.beginPose = entry => { entry.climb.peerCheck = true; };
   let clankerExitBodyPending = false;
   const clankerExitTransitionClear = (entry, x, y, z, nx, ny, nz, radius, height, actors, riders, toRadius, toHeight) => {
     if (clankerExitBodyPending) {
@@ -5203,11 +5252,12 @@
     // target. Their swept mesh supplies the hit instead of a radial damage area.
     return clankerCylinderClear(p.x, p.y, p.z, p.x, p.y, p.z, 0.8, 2.7, entry);
   };
-  const clankerSupportAt = (entry, x, z, y, step, heading = entry.heading) => {
+  const clankerSupportAt = (entry, x, z, y, step, heading = entry.heading, props = true) => {
     // Upright scientists stand on their feet. An arm reaching a keyboard is
     // not a foot landing on that desk, even though it belongs to the body sweep.
     if (entry.motion.lab && !entry.drive.airborne && !entry.gorilla.motionActive) {
-      return Math.max(island.supportAt(x, z, y, step, ABYSS_FLOOR, 0.45), solids.supportAt(x, z, y, step, 0.45));
+      const floor = island.supportAt(x, z, y, step, ABYSS_FLOOR, 0.45);
+      return props ? Math.max(floor, solids.supportAt(x, z, y, step, 0.45)) : floor;
     }
     // The landing surface must cover the same body footprint as the sweep.
     // A leading arm can reach a prop before the torso is directly above it.
@@ -5216,11 +5266,15 @@
     let floor = ABYSS_FLOOR;
     for (let part = 0; part < shape.count(entry); part++) {
       const offset = shape.offset(entry, part), px = x + sine * offset, pz = z + cosine * offset;
-      floor = Math.max(floor, island.supportAt(px, pz, y, step, ABYSS_FLOOR, radius),
-        solids.supportAt(px, pz, y, step, radius));
+      floor = Math.max(floor, island.supportAt(px, pz, y, step, ABYSS_FLOOR, radius));
+      if (props) floor = Math.max(floor, solids.supportAt(px, pz, y, step, radius));
     }
     return floor;
   };
+  // Compare support using the same footprint so a terrain tread beneath a
+  // leading limb cannot be mistaken for standing on a raised prop.
+  const clankerTerrainSupportAt = (entry, x, z, y, step, heading = entry.heading) =>
+    clankerSupportAt(entry, x, z, y, step, heading, false);
   // Grip planning needs the same props that can support a gorilla's feet.
   // A tiny mesh query preserves gaps between branches and furniture pieces.
   const clankerClimbSolidAt = (x, y, z) => island.solidAt(x, y, z)
@@ -5939,7 +5993,15 @@
     entropyLab.updateEquipment = updateLabEquipment;
     shared.clipProjectileTarget = entropyLab.phase.clipTarget;
     shared.absorbProjectile = entropyLab.phase.absorb;
-    shared.onProjectileMove = mirrorCave.ripples.cross;
+    shared.onProjectileMove = (ax, ay, az, bx, by, bz, dt, source, workShot) => {
+      const crossed = mirrorCave.ripples.cross(ax, ay, az, bx, by, bz, dt);
+      if (!crossed || !workShot || !source || !shared.workSites[source.work.site]?.mirrorRoom || mirrorCave.damage.broken) return;
+      const plane = MATRIX_WORLD.permanentPlane;
+      const from = plane[0] * ax + plane[1] * ay + plane[2] * az + plane[3];
+      const to = plane[0] * bx + plane[1] * by + plane[2] * bz + plane[3];
+      const t = from / (from - to);
+      if (mirrorCave.damage.hit(1, lerp(ax, bx, t), lerp(ay, by, t), lerp(az, bz, t))) syncMirrorDamage();
+    };
     shared.onWeaponImpact = weaponImpact;
     shared.onMeleeStrike = mirrorCave.ripples.strike;
     shared.aimSurface = mirrorCave.ripples.aimAt;
@@ -6002,6 +6064,7 @@
       return {
         repo: slot.repo,
         mouth, sr, cr,
+        mirrorRoom: slot.status === "mirror",
         // The namesake cave adopts fresh contributors whose repo has no cave.
         fallback: slot.id === "c1",
         route: [approach],
@@ -6109,13 +6172,14 @@
       labInside: entropyLab.phase.inside, labStations: entropyLab.stations,
       labEquipment: entropyLab.equipment, labPickup: pickUpLabEquipment, labReturn: returnLabEquipment, labRoll: rollLabEquipment,
       solidAt: island.solidAt, climbSolidAt: clankerClimbSolidAt, climbSurfaceAt: clankerClimbSurfaceAt,
-      climbClear: clankerClimbClear, climbTransitionClear: clankerClimbTransitionClear,
-      climbRidersClear: clankerRidersClear, groomClear: clankerGroomClear, underCanopy: clankerUnderCanopy,
+      climbClear: clankerClimbClear, climbTransitionClear: clankerClimbTransitionClear, climbPeersClear: clankerPeersClear,
+      climbRidersClear: clankerRidersClear, restPoseClear: clankerRestPoseClear,
+      groomClear: clankerGroomClear, underCanopy: clankerUnderCanopy,
       groundAt: (x, z, y) => island.supportAt(x, z, y, 0.52), surfaceAt: island.surfaceAt,
       isGrass: island.isGrassAt, onLand: island.onLand,
       roamRadius: island.radius, meadowRadius: island.meadowRadius,
       clear: clankerClear, push: pushClankerProp, onPound: poundClankerEquipment, onGrab: grabClankerOoga, onReleaseDrag: releaseClankerDrag,
-      fireContact: clankerFireContact, canSmash: canClankerSmash, supportAt: clankerSupportAt,
+      fireContact: clankerFireContact, canSmash: canClankerSmash, supportAt: clankerSupportAt, terrainSupportAt: clankerTerrainSupportAt,
       track: (entry) => trackMirrorObject(entry.root, 3.6, 4248), untrack: (entry) => untrackMirrorObject(entry.root) });
     for (const entry of clankers.list) registerClanker(entry);
     clankerPlay = BL.clankerPlay.create({ canvas: ctx.canvas, camera, pilot, hud, clankers, input, constrainCamera: constrainClankerCamera });
@@ -6169,7 +6233,7 @@
       },
       onDoubleTap: (hit, p) => {
         if (pitArrival) return;
-        if (hit && hit.owner.kind === "clanker") clankerPlay.possess(hit.owner.entry);
+        if (hit && hit.owner.kind === "clanker") return;
         else {
           if (clankerPlay.active) clankerPlay.release();
           agentDoubleTap(hit, p);
