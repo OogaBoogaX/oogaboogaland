@@ -23,7 +23,7 @@
     const sr = Math.sin(mouth.ry), cr = Math.cos(mouth.ry), plane = 0.5;
     const minX = opening.minX, maxX = opening.maxX, minY = opening.floorY, maxY = opening.ceilingY;
     const geometry = { verts: [minX, minY, 0, maxX, maxY, 0], faces: [], lines: [], castShadow: false };
-    const node = createNode({ geometry, position: { x: 0, y: 0, z: plane }, matrixNative: true });
+    const node = createNode({ geometry, position: { x: 0, y: 0, z: plane }, matrixNative: true, sightHidden: true });
     addChild(group, node);
     const ripples = BL.mirrorRipples.create(node), glyphs = new Array(CAPACITY * PER_WAVE);
     for (let i = 0; i < glyphs.length; i++) {

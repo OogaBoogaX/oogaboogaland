@@ -360,7 +360,7 @@
       parts.armL.rotation.x = parts.armR.rotation.x = -QUAD;
       parts.head.rotation.x = -QUAD * 0.85;
     }
-    const labPlaceholder = managed ? createNode({ geometry: geos.labFlask, visible: false }) : null;
+    const labPlaceholder = managed ? createNode({ geometry: geos.labFlask, visible: false, sightHidden: true }) : null;
     let labFlask = labPlaceholder, labGripY = geos.labFlask.labGripY;
     const labItemRotation = managed ? new Float32Array([0, 0, 0, 1]) : null;
     const labArmRotation = managed ? new Float32Array(4) : null, labUprightRotation = managed ? new Float32Array(4) : null;
@@ -956,6 +956,21 @@
     const previewTo = managed ? new Float64Array(envelopeParts.length * 80) : null;
     const previewMatrices = managed ? new Float64Array(envelopeParts.length * 16) : null;
     const previewCorners = managed ? new Float64Array(24) : null;
+    const previewEnvelope = managed ? new Float64Array(10) : null;
+    const enclosePreviewPart = (bounds, part, at) => {
+      const start = part * 80;
+      let x = 0, z = 0, minY = Infinity, maxY = -Infinity;
+      for (let i = start; i < start + 80; i += 5) {
+        x += bounds[i]; z += bounds[i + 2];
+        minY = Math.min(minY, bounds[i + 1]); maxY = Math.max(maxY, bounds[i + 1] + bounds[i + 4]);
+      }
+      x /= 16; z /= 16;
+      let radius = 0;
+      for (let i = start; i < start + 80; i += 5) radius = Math.max(radius,
+        Math.hypot(bounds[i] - x, bounds[i + 2] - z) + bounds[i + 3]);
+      previewEnvelope[at] = x; previewEnvelope[at + 1] = minY - 1e-7; previewEnvelope[at + 2] = z;
+      previewEnvelope[at + 3] = radius + 1e-7; previewEnvelope[at + 4] = maxY - minY + 2e-7;
+    };
     const previewBounds = (out, lab = false) => {
       const sine = Math.sin(root.rotation.y), cosine = Math.cos(root.rotation.y), p = root.position;
       for (let i = 0; i < envelopeParts.length; i++) {
@@ -1021,7 +1036,7 @@
         if (q) for (let j = 0; j < 4; j++) previewTransforms[at + 6 + j] = q[j];
       }
       const lab = !!(motion && motion.lab);
-      if (clearAt) previewBounds(previewFrom, lab);
+      if (clearAt && !staticPose) previewBounds(previewFrom, lab);
       poseManaged(dt, px, py, pz, facing, speed, false, false, "", motion);
       previewBounds(previewTo, lab);
       const sine = Math.sin(facing), cosine = Math.cos(facing);
@@ -1029,9 +1044,20 @@
       for (let i = 0; i < envelopeParts.length && clear; i++) {
         if (!envelopeParts[i].visible) continue;
         const vertices = previewVertices[i], offset = i * 16, m = previewMatrices;
-        if (clearAt) for (let slice = 0; slice < 4 * (lab ? 4 : 1); slice++) {
+        const from = !staticPose && previewVisible[i + 2] ? previewFrom : previewTo;
+        let enclosed = false;
+        if (lab && clearAt) {
+          // Most stationary parts are far from a desk or neighbour. One sweep
+          // enclosing all sixteen small cylinders proves them clear together;
+          // contact falls back to the original precise slices, without caching
+          // either moving props or animated bodies. Terrain stays vertex-exact.
+          enclosePreviewPart(from, i, 0); enclosePreviewPart(previewTo, i, 5);
+          enclosed = clearAt(entry, previewEnvelope[0], previewEnvelope[1], previewEnvelope[2],
+            previewEnvelope[5], previewEnvelope[6], previewEnvelope[7], previewEnvelope[3],
+            previewEnvelope[4], true, false, previewEnvelope[8], previewEnvelope[9]);
+        }
+        if (clearAt && !enclosed) for (let slice = 0; slice < 4 * (lab ? 4 : 1); slice++) {
           const at = lab ? (i * 16 + slice) * 5 : (i * 16 + slice * 4) * 5;
-          const from = !staticPose && previewVisible[i + 2] ? previewFrom : previewTo;
           if (!clearAt(entry, from[at], from[at + 1], from[at + 2],
             previewTo[at], previewTo[at + 1], previewTo[at + 2], from[at + 3],
             from[at + 4], true, false, previewTo[at + 3], previewTo[at + 4])) { clear = false; break; }
