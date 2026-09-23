@@ -237,7 +237,7 @@
     };
     const shadeNode = (node) => {
       if (node.smokeOpacity === 0) return;
-      if (node.mirrorRippleOnly && !node.mirrorRipples?.active) return;
+      if (node.mirrorRippleOnly && !node.mirrorRipples?.active && !node.mirrorBody?.contacts && !node.mirrorBody?.active) return;
       const { verts, faces, lines } = node.geometry;
       const w = node.world;
       const f = lastF;
@@ -969,8 +969,10 @@
     const drawMirrorBody = (node, rec) => {
       const body = node.mirrorBody;
       if (!body || !body.contacts && !body.active) return;
-      mirrorDebug.bodyContacts = body.contacts;
-      mirrorDebug.bodyWaves = body.active;
+      if (!node.mirrorRippleOnly) {
+        mirrorDebug.bodyContacts = body.contacts;
+        mirrorDebug.bodyWaves = body.active;
+      }
       const bounds = BL.scene.boundsOf(node.geometry), minX = bounds.min[0], minY = bounds.min[1];
       const dx = (bounds.max[0] - minX) / body.width, dy = (bounds.max[1] - minY) / body.height;
       mat4.multiply(rippleView, view, node.world);
@@ -1361,7 +1363,7 @@
             if (!rec.portal && !node.mirrorShard) {
               drawMirrorRipples(node, rec);
               drawMirrorBody(node, rec);
-              if (node.mirrorRippleOnly) { rippleSurfaces++; rippleWaves += node.mirrorRipples.active; }
+              if (node.mirrorRippleOnly) { rippleSurfaces++; rippleWaves += node.mirrorRipples ? node.mirrorRipples.active : 0; }
             }
             ctx.restore();
             rec.mirrorNode = null;
@@ -1405,7 +1407,7 @@
         return "low";
       },
       get stats() {
-        return { records: 0, active: 0, mirrorResources: mirrorDebug.resources, imageTextures: 0, shadowResources: 0, shadowSize: 0, shadowPassCount: 0, shadowFinite: true, culled: matrixCulled, drawn: 0, suppressed, rippleSurfaces, rippleWaves, matrixSurfaces, matrixLivingSurfaces, matrixSamples, matrixSampleStep, matrixSampleBudget: MATRIX_SAMPLE_BUDGET, matrixTileBytes: matrixPixels.byteLength };
+        return { records: 0, active: 0, mirrorResources: mirrorDebug.resources, imageTextures: 0, rippleBodyTextures: 0, shadowResources: 0, shadowSize: 0, shadowPassCount: 0, shadowFinite: true, culled: matrixCulled, drawn: 0, suppressed, rippleSurfaces, rippleWaves, matrixSurfaces, matrixLivingSurfaces, matrixSamples, matrixSampleStep, matrixSampleBudget: MATRIX_SAMPLE_BUDGET, matrixTileBytes: matrixPixels.byteLength };
       },
       get mirror() {
         return mirrorDebug;

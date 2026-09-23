@@ -4952,6 +4952,8 @@
     updateMatrixWorld(dt, elapsed);
     updateMatrixControl(dt, player);
     mirrorCave.body.update(dt);
+    entropyLab.phase.body.update(dt);
+    entropyLab.phase.body.time = entropyLab.phase.ripples.time;
     meterTimer -= dt;
     if (meterTimer <= 0) {
       meterTimer = 0.25;
@@ -5022,10 +5024,17 @@
   // The build blocks the main thread ~0.5 s with no paint: the curtain jumps and camera easing loses that time.
   const ensureRockGuides = () => rockGuides
     || (rockGuides = BL.rockGuides.create({ island, sealed: sealedCaves }));
-  const trackMirrorObject = (node, radius, vertexCapacity) => mirrorCave?.body?.track(node, radius, vertexCapacity);
-  const untrackMirrorObject = (node) => mirrorCave?.body?.untrack(node);
+  const trackMirrorObject = (node, radius, vertexCapacity) => {
+    entropyLab?.phase?.body?.track(node, radius, vertexCapacity);
+    return mirrorCave?.body?.track(node, radius, vertexCapacity);
+  };
+  const untrackMirrorObject = (node) => {
+    entropyLab?.phase?.body?.untrack(node);
+    return mirrorCave?.body?.untrack(node);
+  };
   const refreshMirrorObject = (node) => {
     mirrorCave?.body?.refresh(node);
+    entropyLab?.phase?.body?.refresh(node);
     if (crew) for (let i = 0; i < crew.list.length; i++) {
       const actor = crew.list[i];
       if (actor.root !== node) continue;
@@ -5251,6 +5260,7 @@
     const m = LAB_ITEM_LOCAL;
     r.cx = m[12] + m[4] * 0.13; r.cy = m[13] + m[5] * 0.13; r.cz = m[14] + m[6] * 0.13;
     entry.gorilla.releaseLabItem(); addChild(item.parent, n);
+    refreshMirrorObject(entry.root);
     setVec(n.scale, 1, 1, 1);
     setVec(n.rotation, Math.asin(clamp(-m[9], -1, 1)), Math.atan2(m[8], m[10]), Math.atan2(m[1], m[5]));
     r.time = 0; r.bounces = 0;
@@ -5299,6 +5309,7 @@
       }
       entry.gorilla.releaseLabItem();
       addChild(item.parent, item.node);
+      refreshMirrorObject(entry.root);
       setVec(item.node.position, item.home.x, item.home.y, item.home.z);
       setVec(item.node.rotation, item.homeRotation.x, item.homeRotation.y, item.homeRotation.z);
       setVec(item.node.scale, item.homeScale.x, item.homeScale.y, item.homeScale.z);
@@ -5313,6 +5324,7 @@
       || Math.hypot(p.x - item.pickup.x, p.z - item.pickup.z) > 2.1
       || Math.abs(p.y - entropyLab.mouth.floorY) > 0.2) return false;
     entry.gorilla.holdLabItem(item.node);
+    refreshMirrorObject(entry.root);
     item.holder = entry;
     return true;
   };
@@ -6045,6 +6057,8 @@
       }
     }
     mirrorCave.body = BL.mirrorBody.create(mirrorCave.node, crew.cavemen);
+    for (const cave of crew.list) entropyLab.phase.body.track(cave.root, cave.traits.height * 2,
+      Math.max(cave.headOpen.verts.length, cave.headClosed.verts.length));
     if (jetpack) trackMirrorObject(jetpack.node, 2);
     if (magazine) trackMirrorObject(magazine.node, 1);
     for (let caveIndex = 0; caveIndex < crew.list.length; caveIndex++) {
@@ -6597,7 +6611,7 @@
     id: "hub", enter, update, overlay, onDonation, onKey, onLootCleared, renderOpts: RENDER_OPTS, leave, stats, liveGeometry,
     root: null, camera: null, input: null, debug: null,
     get inMotion() {
-      if (pile.inMotion || fx.inMotion || breakables.inMotion || weather.active || jetpack || magazine && magazine.revealed || MATRIX_WORLD.active || mirrorGuides.state.doorway || mirrorCave.damage.active || mirrorCave.ripples.active || mirrorCave.body.active || entropyLab.phase.ripples.active) return true;
+      if (pile.inMotion || fx.inMotion || breakables.inMotion || weather.active || jetpack || magazine && magazine.revealed || MATRIX_WORLD.active || mirrorGuides.state.doorway || mirrorCave.damage.active || mirrorCave.ripples.active || mirrorCave.body.active || entropyLab.phase.ripples.active || entropyLab.phase.body.contacts || entropyLab.phase.body.active) return true;
       for (const sign of headquarters.roomSigns) if (sign.velocity || sign.node.rotation.x) return true;
       for (let i = 0; i < matrixGates.length; i++) if (matrixCave && (matrixGates[i].raising || matrixCave.unlocked && matrixGates[i].node.position.y !== MATRIX_GATE_HIDDEN_Y)) return true;
       return false;

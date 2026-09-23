@@ -15,6 +15,10 @@
     const node = createNode({ geometry, position: { x: 0, y: 0, z: plane }, mirrorRippleOnly: true, matrixNative: true, sightHidden: true });
     addChild(group, node);
     const ripples = BL.mirrorRipples.create(node);
+    // The same mesh-section atlas as the mirror outlines any registered body
+    // crossing in either direction. The scene registers its existing actors
+    // and samples after their final poses, without another scene traversal.
+    const body = BL.mirrorBody.create(node, new Map());
     let contactX = 0, contactY = 0;
     const intersection = (ax, ay, az, bx, by, bz) => {
       const dx = ax - mouth.x, dz = az - mouth.z, ex = bx - mouth.x, ez = bz - mouth.z;
@@ -51,9 +55,9 @@
       return y >= mouth.floorY - 0.12 && y < mouth.floorY + room.h - 0.1
         && along <= plane && along >= -room.to && Math.abs(across) <= half;
     };
-    return { node, ripples, clipTarget, absorb, update, inside,
+    return { node, ripples, body, clipTarget, absorb, update, inside,
       liveGeometry(set) { set.add(geometry); },
-      dispose() { ripples.dispose(); node.visible = false; removeChild(group, node); }
+      dispose() { ripples.dispose(); body.dispose(); node.visible = false; removeChild(group, node); }
     };
   };
   BL.labPhase = { create };

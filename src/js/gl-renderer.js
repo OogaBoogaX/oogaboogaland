@@ -1259,6 +1259,8 @@ void main() {
       }
       gl.deleteBuffer(rec.ibo);
       if (rec.imageTexture) { gl.deleteTexture(rec.imageTexture); imageTextures--; rec.imageTexture = null; }
+      if (rec.rippleBodyTexture) { gl.deleteTexture(rec.rippleBodyTexture); rippleBodyTextures--; rec.rippleBodyTexture = null; }
+      rec.rippleBodyState = null;
       rec.nodes.length = 0;
       rec.batch = null;
       rec.data = null;
@@ -1369,7 +1371,7 @@ void main() {
       let rec = records.get(geometry);
       if (!rec) {
         const ibo = gl.createBuffer();
-        rec = { geometry, ibo, capacity: 0, mesh: buildMeshPart(geometry, ibo), line: buildLinePart(geometry, ibo), nodes: [], count: 0, drawCount: 0, cameraHiddenCount: 0, active: false, data: null, batch: null, batchVersion: -1, lightVisible: true, mirrorVisible: true, imageTexture: null };
+        rec = { geometry, ibo, capacity: 0, mesh: buildMeshPart(geometry, ibo), line: buildLinePart(geometry, ibo), nodes: [], count: 0, drawCount: 0, cameraHiddenCount: 0, active: false, data: null, batch: null, batchVersion: -1, lightVisible: true, mirrorVisible: true, imageTexture: null, rippleBodyTexture: null, rippleBodyState: null, rippleBodyVersion: -1 };
         records.set(geometry, rec);
       }
       return rec;
@@ -1706,8 +1708,8 @@ void main() {
     const onLost = (e) => {
       e.preventDefault();
       lost = true;
-      imageTextures = 0;
-      for (const rec of records.values()) rec.imageTexture = null;
+      imageTextures = rippleBodyTextures = 0;
+      for (const rec of records.values()) { rec.imageTexture = rec.rippleBodyTexture = rec.rippleBodyState = null; }
       forgetMirror();
     };
     const onRestored = () => {
@@ -1721,7 +1723,7 @@ void main() {
     };
     canvas.addEventListener("webglcontextlost", onLost);
     canvas.addEventListener("webglcontextrestored", onRestored);
-    let imageTextures = 0;
+    let imageTextures = 0, rippleBodyTextures = 0;
     const drawImageSurface = (rec, count, cameraPass) => {
       const surface = rec.geometry.imageSurface, image = surface.asset.load(), p = res.programs.image;
       gl.activeTexture(gl.TEXTURE6);
@@ -1965,8 +1967,9 @@ void main() {
       let started = false;
       for (const rec of activeRecords) {
         if (!rec.geometry.mirrorRippleOnly || !rec.mesh || !rec.drawCount || rec.offscreen) continue;
-        const node = rec.nodes[0], ripples = node.mirrorRipples;
-        if (!ripples || !ripples.active) continue;
+        const node = rec.nodes[0], ripples = node.mirrorRipples, body = node.mirrorBody;
+        const bodyActive = body && (body.contacts || body.active);
+        if (!ripples?.active && !bodyActive) continue;
         if (!started) {
           if (!ensureMirrorProgram()) return;
           const pg = mirror.program;
@@ -1977,28 +1980,44 @@ void main() {
           gl.uniform1f(pg.u.uPortal, 0);
           gl.uniform1f(pg.u.uReveal, 0);
           gl.uniform1f(pg.u.uRippleOnly, 1);
-          gl.uniform1i(pg.u.uBodyContacts, 0);
-          gl.uniform1i(pg.u.uBodyActive, 0);
           bindMatrixTexture(pg);
           // The shared program's inactive samplers still need complete
           // bindings; this does not allocate or capture any reflection.
           gl.activeTexture(gl.TEXTURE2);
           gl.bindTexture(gl.TEXTURE_2D, res.matrixTexture);
           gl.uniform1i(pg.u.uReflection, 2);
-          gl.uniform1i(pg.u.uBodyField, 2);
+          gl.uniform1i(pg.u.uBodyField, 4);
           gl.enable(gl.BLEND);
           gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
           gl.depthMask(false);
           started = true;
         }
         const pg = mirror.program;
+        gl.activeTexture(gl.TEXTURE4);
+        if (bodyActive) {
+          if (!rec.rippleBodyTexture) {
+            rec.rippleBodyTexture = createTexture(body.width, body.height * body.layers, gl.RGBA8, gl.LINEAR);
+            rippleBodyTextures++;
+          }
+          gl.bindTexture(gl.TEXTURE_2D, rec.rippleBodyTexture);
+          if (rec.rippleBodyState !== body || rec.rippleBodyVersion !== body.version) {
+            gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, body.width, body.height * body.layers, gl.RGBA, gl.UNSIGNED_BYTE, body.pixels);
+            rec.rippleBodyState = body; rec.rippleBodyVersion = body.version;
+          }
+          const bounds = boundsOf(node.geometry);
+          gl.uniform4f(pg.u.uBodyBounds, bounds.min[0], bounds.min[1], bounds.max[0] - bounds.min[0], bounds.max[1] - bounds.min[1]);
+          gl.uniform2f(pg.u.uBodyTexel, 1 / body.width, 1 / body.height);
+        } else gl.bindTexture(gl.TEXTURE_2D, res.matrixTexture);
+        gl.uniform1i(pg.u.uBodyContacts, bodyActive ? body.contacts : 0);
+        gl.uniform1i(pg.u.uBodyActive, bodyActive ? body.active : 0);
+        gl.uniform4fv(pg.u.uBodyWaves, body ? body.waves : NO_MIRROR_BODY_WAVES);
         gl.uniformMatrix4fv(pg.u.uMirrorWorld, false, node.world);
-        gl.uniform1i(pg.u.uRippleActive, ripples.active);
-        gl.uniform1f(pg.u.uRippleTime, ripples.time);
-        gl.uniform4fv(pg.u.uRipples, ripples.waves);
+        gl.uniform1i(pg.u.uRippleActive, ripples ? ripples.active : 0);
+        gl.uniform1f(pg.u.uRippleTime, bodyActive ? body.time : ripples ? ripples.time : 0);
+        gl.uniform4fv(pg.u.uRipples, ripples ? ripples.waves : NO_MIRROR_RIPPLES);
         gl.bindVertexArray(rec.mesh.vao);
         gl.drawArraysInstanced(gl.TRIANGLES, 0, rec.mesh.count, rec.drawCount);
-        rippleSurfaces += rec.drawCount; rippleWaves += ripples.active;
+        rippleSurfaces += rec.drawCount; rippleWaves += ripples ? ripples.active : 0;
       }
       if (started) {
         gl.depthMask(true);
@@ -2308,7 +2327,7 @@ void main() {
       get stats() {
         let shadowFinite = true;
         for (let i = 0; i < 16; i++) if (!Number.isFinite(lightViewProj[i])) shadowFinite = false;
-        return { records: records.size, active: activeRecords.length, mirrorResources: mirrorDebug.resources, imageTextures, shadowResources: res.shadow ? 2 : 0, shadowSize: res.shadow ? res.shadow.size : 0, shadowPassCount, shadowFinite, culled, drawn, suppressed, rippleSurfaces, rippleWaves };
+        return { records: records.size, active: activeRecords.length, mirrorResources: mirrorDebug.resources, imageTextures, rippleBodyTextures, shadowResources: res.shadow ? 2 : 0, shadowSize: res.shadow ? res.shadow.size : 0, shadowPassCount, shadowFinite, culled, drawn, suppressed, rippleSurfaces, rippleWaves };
       },
       get mirror() {
         return mirrorDebug;
