@@ -331,6 +331,13 @@
       segments: 32, color: "#efb348", emissive: 0.2 }),
     box({ w: 0.16, h: 0.1, d: 0.015, color: "#e0e6d5", offset: { y: 0.16, z: 0.145 } })
   ));
+  const labDie = cached(() => {
+    const geometry = BL.models.die({ size: 0.26 });
+    // Bench items share a base-at-zero origin and an explicit hand grip.
+    for (let i = 1; i < geometry.verts.length; i += 3) geometry.verts[i] += 0.13;
+    geometry.labGripY = 0.26;
+    return geometry;
+  });
   const labTouchscreen = cached(() => {
     const parts = [box({ w: 1.55, h: 0.98, d: 0.12, color: "#283b40", offset: { y: 2.27 } }),
       box({ w: 1.39, h: 0.81, d: 0.025, color: "#255263", emissive: 0.65, offset: { y: 2.27, z: 0.075 } })];
@@ -341,40 +348,136 @@
     }
     return merge(...parts);
   });
+  const LAB_CODE_COLORS = ["#102b33", "#47616a", "#b996eb", "#7ad8ec", "#b3d7cb", "#eac679", "#81d4a1"].map(hexToRgb);
+  const LAB_CODE_SIGNS = {
+    "=": ["000", "111", "000", "111", "000"], "(": ["010", "100", "100", "100", "010"],
+    ")": ["010", "001", "001", "001", "010"], "{": ["011", "010", "100", "010", "011"],
+    "}": ["110", "010", "001", "010", "110"], ";": ["000", "010", "000", "010", "100"],
+    ",": ["000", "000", "000", "010", "100"], '"': ["101", "101", "000", "000", "000"]
+  };
+  const labScreenRect = (geometry, x, y, w, h, z, color, emissive = 0.8) => {
+    const i = geometry.verts.length / 3;
+    geometry.verts.push(x, y, z, x + w, y, z, x + w, y + h, z, x, y + h, z);
+    geometry.faces.push({ i: [i, i + 1, i + 2, i + 3], color: LAB_CODE_COLORS[color], emissive });
+  };
+  const labScreenText = (geometry, text, x, y, z, cell, color) => {
+    for (let i = 0; i < text.length; i++) {
+      const ch = text[i], glyph = LAB_CODE_SIGNS[ch] || SIGN_GLYPHS[ch.toUpperCase()];
+      if (glyph) for (let row = 0; row < 5; row++) for (let col = 0; col < 3;) {
+        if (glyph[row][col] !== "1") { col++; continue; }
+        const start = col;
+        while (col < 3 && glyph[row][col] === "1") col++;
+        labScreenRect(geometry, x + i * cell * 4 + start * cell, y - (row + 1) * cell,
+          (col - start) * cell * 0.88, cell * 0.88, z, color);
+      }
+    }
+  };
+  // Pixel code is baked once into flat quads. Decorative graphics never join
+  // the furniture's collision shell or its object-outline registrations.
+  const labScreenContent = variants((kind) => {
+    const geometry = { verts: [], faces: [], lines: [], castShadow: false };
+    const touch = kind === 1, z = touch ? 0.104 : -0.091, cell = touch ? 0.0075 : 0.009;
+    labScreenRect(geometry, touch ? -0.69 : -0.55, touch ? 1.87 : 1.47, touch ? 1.38 : 1.1,
+      touch ? 0.8 : 0.62, z - 0.001, 0, 0.35);
+    const lines = touch ? ["const run = {", '  mode: "lab",', "  ready: true", "};", "run.test();", "run.sync();"]
+      : ["const lab = {", '  task: "build",', "  ready: true", "};", "if (lab.ready)", "  lab.run();"];
+    const left = touch ? -0.63 : -0.49, top = touch ? 2.575 : 2.02, spacing = touch ? 0.087 : 0.088;
+    for (let row = 0; row < lines.length; row++) {
+      labScreenText(geometry, String(row + 1), left, top - row * spacing, z, cell * 0.78, 1);
+      const line = lines[row], start = left + cell * 5;
+      for (let i = 0; i < line.length; i++) {
+        const color = row === 0 && i < 5 || row === 4 && !touch && i < 2 ? 2
+          : row === 1 && i >= 8 ? 5 : row === 2 && i >= 9 ? 6 : /[{}();:.=]/.test(line[i]) ? 4 : 3;
+        labScreenText(geometry, line[i], start + i * cell * 4, top - row * spacing, z, cell, color);
+      }
+    }
+    if (touch) {
+      labScreenText(geometry, "SYS", 0.18, 2.58, z, 0.01, 4);
+      labScreenText(geometry, "CPU", 0.17, 1.965, z, 0.007, 1);
+      for (let row = 0; row < 4; row++) labScreenRect(geometry, 0.13, 2.0 + row * 0.12, 0.5, 0.006, z, 1, 0.25);
+    } else labScreenText(geometry, "ENTROPY LAB", 0.12, 1.51, z, 0.006, 1);
+    return geometry;
+  });
+  const labScreenMarker = variants((color) => {
+    const geometry = { verts: [], faces: [], lines: [], castShadow: false };
+    labScreenRect(geometry, 0, 0, 1, 1, 0, color, 1);
+    return geometry;
+  });
+  const createLabScreen = (parent, station, kind) => {
+    const { createNode, addChild } = BL.scene;
+    const node = createNode({ geometry: labScreenContent(kind), position: { ...parent.position },
+      rotation: { ...parent.rotation }, sightHidden: true });
+    const markers = [], touch = kind === 1, z = touch ? 0.105 : -0.09;
+    const marker = (x, y, w, h, color) => {
+      const part = createNode({ geometry: labScreenMarker(color), position: { x, y, z }, scale: { x: w, y: h, z: 1 } });
+      addChild(node, part); markers.push(part);
+    };
+    marker(touch ? -0.254 : -0.049, touch ? 2.1 : 1.532, 0.009, touch ? 0.031 : 0.038, 5);
+    if (touch) for (let i = 0; i < 3; i++) marker(0.16 + i * 0.165, 2.0, 0.09, 0.15 + i * 0.085, i === 1 ? 5 : 6);
+    else marker(-0.49, 1.49, 0.16, 0.008, 6);
+    return { station, node, markers, kind, clock: 0, phase: -1 };
+  };
   // Cached furniture geometry; each visit owns its graph, solid registrations
   // and local work destinations. The center stays open from the original arch.
   const entropyLab = (room) => {
-    const { createNode, addChild } = BL.scene, node = createNode(), solids = [], stations = [], equipment = [];
+    const { createNode, addChild } = BL.scene, node = createNode(), solids = [], stations = [], equipment = [], displays = [];
     const half = room.w / 2, back = -room.to + 0.28, rearWork = back + 1.60;
     const place = (geometry, x, z, heading = 0) => {
       const item = createNode({ geometry, position: { x, y: 0, z }, rotation: { x: 0, y: heading, z: 0 } });
       addChild(node, item); solids.push(item); return item;
     };
     for (const x of [-half + 1.17, 0, half - 1.17]) {
-      place(labDesk(), x, back);
+      const desk = place(labDesk(), x, back), display = createLabScreen(desk, stations.length, 0);
+      addChild(node, display.node); displays.push(display);
       stations.push({ x, y: 0, z: rearWork, heading: Math.PI, kind: "type" });
     }
     const sideZ = -Math.max(room.from + 1.4, 2.17);
     for (const side of [-1, 1]) {
       const facing = -side * Math.PI / 2;
       const bench = place(labBench(), side * (half - 0.47), sideZ, facing);
-      place(labTouchscreen(), side * (half - 0.56), -3.1, facing);
+      const screen = place(labTouchscreen(), side * (half - 0.56), -3.1, facing), display = createLabScreen(screen, stations.length, 1);
+      addChild(node, display.node); displays.push(display);
       for (let i = 0; i < 3; i++) {
         const offset = (i - 1) * 0.9, front = -0.03;
         const home = { x: bench.position.x + Math.cos(facing) * offset + Math.sin(facing) * front,
-          y: 1.14, z: i === 2 ? -1.08 : -2.3 - i * 0.8 };
-        const geometry = i === 1 ? labBeaker() : BL.agent.labFlaskGeometry();
+          y: 1.14, z: i === 2 ? -1.08 : side < 0 ? -2.3 - i * 0.8 : -2.5 - i * 0.68 };
+        const kind = side > 0 && i === 2 ? "die" : i === 1 ? "beaker" : "flask";
+        const geometry = kind === "die" ? labDie() : kind === "beaker" ? labBeaker() : BL.agent.labFlaskGeometry();
         if (i === 1) geometry.labGripY = 0.3;
         const item = createNode({ geometry, position: { ...home }, rotation: { x: 0, y: facing, z: 0 } });
         addChild(node, item);
         equipment.push({ node: item, parent: node, home, homeRotation: { x: 0, y: facing, z: 0 }, homeScale: { x: 1, y: 1, z: 1 },
-          station: i === 2 ? side < 0 ? 5 : 6 : stations.length, kind: i === 1 ? "beaker" : "flask",
+          station: i === 2 ? side < 0 ? 5 : 6 : stations.length, kind, rolling: false,
+          roll: { time: 0, age: 0, cx: 0, cy: 0, cz: 0, vx: 0, vy: 0, vz: 0,
+            wx: 0, wy: 0, wz: 0, tx: 0, ty: 0, tz: 0, bounces: 0 },
+          // Keep every roll in the front play area, away from the glassware
+          // and the touchscreen worker farther along this same bench.
+          table: { minX: bench.position.x - 0.4, maxX: bench.position.x + 0.4,
+            minZ: kind === "die" ? -1.5 : sideZ - 1.3, maxZ: sideZ + 1.3, y: 1.13 },
           pickup: { x: home.x, y: home.y + geometry.labGripY, z: home.z } });
       }
       stations.push({ x: side * (half - 2.06), y: 0, z: -3.1, heading: side * Math.PI / 2, kind: "touch", side });
     }
     for (const side of [-1, 1]) stations.push({ x: side * (half - 0.44 - 1.213094), y: 0, z: -1.08 + side * 0.272893, heading: side * Math.PI / 2, kind: "carry", side });
-    return { node, solids, stations, equipment };
+    const updateScreens = (dt, activeMask) => {
+      if (!activeMask || !(dt > 0)) return false;
+      let changed = false;
+      for (let i = 0; i < displays.length; i++) {
+        const display = displays[i];
+        if (!(activeMask & (1 << display.station))) continue;
+        display.clock = (display.clock + dt) % (8 / 6);
+        const phase = Math.floor(display.clock * 6) & 7;
+        if (phase === display.phase) continue;
+        display.phase = phase; changed = true;
+        const markers = display.markers;
+        markers[0].visible = phase < 4;
+        if (display.kind === 1) for (let bar = 1; bar < 4; bar++) {
+          markers[bar].scale.y = 0.15 + (bar - 1) * 0.085 + (((phase + bar * 2) & 7) - 3.5) * 0.006;
+        } else markers[1].scale.x = 0.16 + (phase & 3) * 0.012;
+      }
+      return changed;
+    };
+    return { node, solids, stations, equipment, displays, updateScreens };
   };
   // Jetpack tanks and backplate only; the flame is a separate geometry.
   const JET_UNIT = 0.075;

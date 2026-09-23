@@ -51,13 +51,15 @@
   const SIT_RADIUS = 0.9, SIT_CENTERS = [-0.12, 0.55];
   const LAB_RADIUS = 0.82, LAB_CENTERS = [0, 0.8], LAB_HEIGHT = 2.7;
   const LAB_IDLE_RADIUS = 0.85;
-  const LAB_WALK_RADIUS = 0.92;
+  const LAB_WALK_RADIUS = 1.06;
   const LAB_SQUEEZE_RADIUS = 0.77;
   // Three overlapping longitudinal cylinders enclose the complete quadruped,
   // including its knuckles, without reserving a four-metre-wide turning circle
   // while it walks straight. Each smaller pose profile is used only once the
   // current rig actually fits; transitions retain the complete radial envelope.
-  const footprintProfile = (entry) => !entry.compact ? 0 : entry.footprintMode === "lab" ? entry.planningLab ? entry.planningLabWork === "" ? entry.motion && entry.motion.labSqueeze && !entry.gorilla.labItem ? 9 : 8 : 6 : entry.gorilla.labSqueezeCompact ? 9 : entry.gorilla.labIdleCompact ? 7 : entry.gorilla.labWalkCompact ? 8 : entry.gorilla.labCompact ? 6 : 0 : entry.footprintMode === "sit" ? entry.gorilla.sitCompact ? 5 : 0 : entry.footprintMode === "park" ? entry.gorilla.parkCompact ? 4 : 0
+  // When both lab envelopes fit, keep the requested route's shape: walking
+  // reserves its circle, while retracting work arms keep their forward capsules.
+  const footprintProfile = (entry) => !entry.compact ? 0 : entry.footprintMode === "lab" ? entry.planningLab ? entry.planningLabWork === "" ? entry.motion && entry.motion.labSqueeze && !entry.gorilla.labItem ? 9 : 8 : 6 : entry.gorilla.labSqueezeCompact ? 9 : entry.gorilla.labIdleCompact ? 7 : entry.gorilla.labWalkCompact && entry.motion && !entry.motion.labSqueeze && !entry.motion.labWork ? 8 : entry.gorilla.labCompact ? 6 : entry.gorilla.labWalkCompact ? 8 : 0 : entry.footprintMode === "sit" ? entry.gorilla.sitCompact ? 5 : 0 : entry.footprintMode === "park" ? entry.gorilla.parkCompact ? 4 : 0
     : entry.footprintMode === "stand" ? entry.gorilla.standCompact ? 3 : 0
     : entry.footprintMode === "pound" ? entry.gorilla.poundCompact ? 2 : 0 : entry.gorilla.compact ? 1 : 0;
   const footprintCount = (entry) => { const profile = footprintProfile(entry); return profile === 5 || profile === 6 ? 2 : profile === 1 || profile === 2 ? 3 : 1; };
@@ -379,17 +381,18 @@
       smash: false, hipOffsetZ: 0, sideAngle: 0,
       climb: 0, climbBlend: 0, climbPose: NaN, climbStride: 0, climbDirection: 0, mantle: 0,
       groom: 0, groomBlend: 0, groomSide: 1, groomTime: 0,
-      lab: false, labWork: "", labPhase: 0, labSide: 1, labReach: 0, labReachGrip: geos.labFlask.labGripY, labPreviewItem: false, labSqueeze: false
+      lab: false, labWork: "", labPhase: 0, labSide: 1, labReach: 0, labReachGrip: geos.labFlask.labGripY, labPreviewItem: false, labSqueeze: false, labDie: false, labRoll: 0
     };
     const positionLabItem = () => {
       if (!managed || labFlask === labPlaceholder && !state.labPreviewItem) return;
-      const arm = parts.armR, inspect = state.labWork === "carry" ? 1 - state.labReach : 0;
+      const arm = parts.armR, inspect = state.labWork === "carry" ? 1 - Math.max(state.labReach, state.labRoll) : 0;
       quat.fromEuler(labArmRotation, arm.rotation.x, arm.rotation.y, arm.rotation.z);
       quat.fromEuler(labUprightRotation, state.pitch, 0, 0);
       quat.multiply(labArmRotation, labUprightRotation, labArmRotation);
       labArmRotation[0] *= -1; labArmRotation[1] *= -1; labArmRotation[2] *= -1;
-      quat.fromEuler(labUprightRotation, Math.sin(state.labPhase * 2.1) * 0.055 * inspect,
-        Math.sin(state.labPhase * 1.7) * 0.16 * inspect, Math.cos(state.labPhase * 2.1) * 0.055 * inspect);
+      const shake = state.labDie ? 7.5 : 2.1, tilt = state.labDie ? 0.14 : 0.055;
+      quat.fromEuler(labUprightRotation, Math.sin(state.labPhase * shake) * tilt * inspect,
+        Math.sin(state.labPhase * (state.labDie ? 6.3 : 1.7)) * 0.16 * inspect, Math.cos(state.labPhase * shake) * tilt * inspect);
       quat.multiply(labItemRotation, labArmRotation, labUprightRotation);
       quat.rotateVec(labGripOffset, labItemRotation, 0, labGripY / scale, 0);
       labFlask.position.x = -labGripOffset[0];
@@ -548,7 +551,9 @@
       const stride = (state.driven ? g.driveStride : g.stride) * scale;
       if (!managed) state.speed = damp(state.speed, top, 6, dt);
       state.phase = (state.phase + dt * state.speed / stride * (managed && state.backwards ? -1 : 1)) % 1;
-      const moving = top > 0 ? clamp(state.speed / top, 0, 1) : 0;
+      // Arrival damping leaves tiny nonzero speeds. Scientists must settle
+      // their feet instead of keeping a full stride (speed / itself) at a desk.
+      const moving = top > 0 ? clamp(state.speed / (managed && state.lab ? GAITS.upright.speed : top), 0, 1) : 0;
       const lounge = managed ? state.lounge : "", onSide = lounge === "left" || lounge === "right", reclining = lounge === "back" || onSide;
       if (managed) {
         state.crouch = damp(state.crouch, state.air ? 0 : Math.max(state.charge, Math.min(1, state.landing * 2)), state.air ? 24 : 20, dt);
@@ -565,6 +570,7 @@
       const laboratory = managed && state.lab && !lounge && !jumping && !rolling && !climbing && state.pound <= 0 && !state.poundCharge && !state.charge;
       const labWork = laboratory ? state.labWork : "";
       const labSqueeze = laboratory && state.labSqueeze && !labWork && labFlask === labPlaceholder;
+      const labWalking = laboratory && !labWork && !labSqueeze && state.speed > 0.1;
       const squeeze = managed && state.biped === "squeeze" && !lounge && !state.air && state.pound <= 0 && state.beat <= 0;
       let pitch = squeeze || labSqueeze ? 0 : laboratory ? 0.08 : g.pitch, bob = 0;
       if (state.gait === "gallop") {
@@ -603,7 +609,9 @@
         // another adult pass. Meshes and model scale stay exactly the same.
         const climbStroke = wave(climbPhase, l.side < 0 ? 0 : 0.5), leg = parts[l.leg];
         if (managed) {
-          arm.position.x = damp(arm.position.x, l.side * ((labSqueeze ? 0.22 : laboratory ? 0.36 : squeeze ? 0.4 : SHOULDER_X) * (1 - climbing) + 0.38 * climbing), 12, dt);
+          // Ordinary lab steps leave room between the coat and forearms. Only
+          // an actual narrow passage requests the separately measured tuck.
+          arm.position.x = damp(arm.position.x, l.side * ((labSqueeze ? 0.22 : labWalking ? 0.66 : laboratory ? 0.36 : squeeze ? 0.4 : SHOULDER_X) * (1 - climbing) + 0.38 * climbing), 12, dt);
           // Counter the torso's tilt during each lift so the hands and toes
           // move along the wall instead of pumping away from its surface.
           arm.position.z = damp(arm.position.z, 0.5 * U - climbing * (0.036 + climbStroke * 0.055), 20, dt);
@@ -633,13 +641,13 @@
         } else if (labWork) {
           const stroke = Math.sin(state.labPhase * (labWork === "type" ? 11 : 2.7) + i * Math.PI);
           const working = labWork === "type" || labWork === "touch" && l.side === state.labSide || labWork === "carry" && l.side > 0;
-          const inspect = -1.83 + Math.sin(state.labPhase * 1.1) * 0.1;
+          const inspect = -1.83 + Math.sin(state.labPhase * (state.labDie ? 7.5 : 1.1)) * 0.1;
           const shoulderY = HIP + Math.cos(state.pitch) * SHOULDER_Y - Math.sin(state.pitch) * 0.5 * U;
           const handY = (1.14 + state.labReachGrip) / scale - shoulderY;
           const reachBench = Math.atan2(0.14, 1.09 * Math.cos(0.08))
             - Math.acos(clamp(-handY / Math.hypot(1.09 * Math.cos(0.08), 0.14), -1, 1)) - state.pitch;
           const reach = labWork === "type" ? -1.25 + stroke * 0.055 : labWork === "touch" ? -1.95 + stroke * 0.1
-            : inspect + (reachBench - inspect) * state.labReach;
+            : inspect + (reachBench - inspect) * Math.max(state.labReach, state.labRoll);
           limb(arm, working ? reach : -state.pitch - g.arms * moving * wave(state.phase, i * 0.5), dt);
           arm.rotation.z = damp(arm.rotation.z, working ? -l.side * 0.08 : 0, 12, dt);
         } else if (managed && (state.pound > 0 || poundLift > 0)) {
@@ -657,7 +665,7 @@
           arm.rotation.x = damp(arm.rotation.x, -state.pitch - (1.25 + 0.3 * Math.sin((beatTime - state.beat) * 16 + (l.side < 0 ? 0 : Math.PI))) * k, 18, dt);
           arm.rotation.z = damp(arm.rotation.z, -l.side * 0.45 * k, 12, dt);
         } else {
-          let armAngle = -state.pitch - (jumping ? state.biped ? 0.2 : 0.7 - takeoff * 0.85 : o && !squeeze ? (labSqueeze ? 0.08 : g.arms) * moving * wave(state.phase, o[l.arm]) : 0);
+          let armAngle = -state.pitch - (jumping ? state.biped ? 0.2 : 0.7 - takeoff * 0.85 : o && !squeeze ? (labSqueeze ? 0.08 : labWalking ? 0.1 : g.arms) * moving * wave(state.phase, o[l.arm]) : 0);
           armAngle += (-state.pitch - 1 - armAngle) * crouch;
           limb(arm, armAngle, dt, managed && state.landing > 0 ? 32 : 18);
           arm.rotation.z = damp(arm.rotation.z, state.gait === "hunch" ? l.side * 0.12 : 0, 8, dt);
@@ -681,7 +689,7 @@
         parts.head.rotation.x += (-0.04 - state.climbDirection * 0.16 - parts.head.rotation.x) * climbing;
         parts.head.rotation.y = damp(parts.head.rotation.y, state.groomSide * 0.36 * grooming, 8, dt);
         if (labWork) {
-          parts.head.rotation.x = labWork === "type" ? 0.22 : labWork === "carry" ? 0.08 : -0.08;
+          parts.head.rotation.x = labWork === "type" || labWork === "roll" ? 0.22 : labWork === "carry" ? 0.08 : -0.08;
           parts.head.rotation.y = labWork === "touch" ? state.labSide * 0.12 : Math.sin(state.labPhase * 0.7) * 0.05;
         }
         positionLabItem();
@@ -873,12 +881,17 @@
           parts.armL.rotation.x = parts.armR.rotation.x = -state.pitch;
         }
       }
-      state.labWork = motion && (motion.labWork === "type" || motion.labWork === "touch" || motion.labWork === "carry") ? motion.labWork : "";
+      state.labWork = motion && (motion.labWork === "type" || motion.labWork === "touch" || motion.labWork === "carry" || motion.labWork === "roll") ? motion.labWork : "";
       state.labPhase = motion && Number.isFinite(motion.labPhase) ? motion.labPhase : state.labPhase + dt;
       state.labSide = motion && motion.labSide < 0 ? -1 : 1;
-      state.labReach = motion ? clamp(motion.labReach || 0, 0, 1) : 0;
+      // A short die is picked up much lower than a tall flask. Ease the reach
+      // target too, so the first inspection step lifts it off the table instead
+      // of immediately pulling the hand towards the high inspection pose.
+      state.labReach = damp(state.labReach, motion ? clamp(motion.labReach || 0, 0, 1) : 0, 12, dt);
       state.labReachGrip = motion && Number.isFinite(motion.labGripY) ? motion.labGripY : labGripY;
       state.labSqueeze = !!(motion && motion.labSqueeze);
+      state.labDie = !!(motion && motion.labDie);
+      state.labRoll = state.labDie && motion ? clamp(motion.labRoll || 0, 0, 1) : 0;
       state.biped = lab || biped;
       state.charge = motion ? clamp(motion.charge || 0, 0, 1) : 0;
       state.poundCharge = motion ? clamp(motion.poundCharge || 0, 0, 1) : 0;
@@ -1086,13 +1099,15 @@
       refreshGeometry(); measureBody();
       return clear;
     };
-    const labPreviewMotion = { lab: true, labWork: "", labPhase: 0, labSide: 1, labReach: 0, labGripY: geos.labFlask.labGripY, labSqueeze: false };
+    const labPreviewMotion = { lab: true, labWork: "", labPhase: 0, labSide: 1, labReach: 0, labGripY: geos.labFlask.labGripY, labSqueeze: false, labDie: false, labRoll: 0 };
     const labPoseClear = (dt, x, y, z, heading, speed, work, phase, side, solidAt, clearAt, entry, staticPose = false, laboratory = true) => {
       labPreviewMotion.lab = laboratory;
       labPreviewMotion.labWork = laboratory ? work : ""; labPreviewMotion.labPhase = phase; labPreviewMotion.labSide = side;
       labPreviewMotion.labReach = laboratory && entry ? entry.motion.labReach || 0 : 0;
       labPreviewMotion.labGripY = laboratory && entry && Number.isFinite(entry.motion.labGripY) ? entry.motion.labGripY : labGripY;
       labPreviewMotion.labSqueeze = !!(laboratory && entry && entry.motion.labSqueeze);
+      labPreviewMotion.labDie = !!(laboratory && entry && entry.motion.labDie);
+      labPreviewMotion.labRoll = laboratory && entry ? entry.motion.labRoll || 0 : 0;
       const pound = state.pound, beat = state.beat;
       if (staticPose) state.pound = state.beat = 0;
       const itemPreview = managed && staticPose && laboratory && work === "carry" && labFlask === labPlaceholder;

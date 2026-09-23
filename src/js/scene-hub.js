@@ -4840,6 +4840,7 @@
     prepareClankerRiders();
     prepareClankerStrike();
     clankers.update(dt);
+    updateLabEquipment(dt);
     clankerMeshes.sync();
     carryClankerRiders();
     updateClankerEffects(dt);
@@ -5179,15 +5180,99 @@
     }
     return floor;
   };
+  const LAB_ITEM_INVERSE = math.mat4.create(), LAB_ITEM_LOCAL = math.mat4.create();
+  const placeLabDie = (item) => {
+    const n = item.node, r = item.roll;
+    BL.scene.updateLocal(n);
+    // The original die geometry has its base at zero. Rotate around its centre
+    // so tipping onto another face never drives a corner through the table.
+    const m = n.local, rx = 0.13 * (Math.abs(m[0]) + Math.abs(m[4]) + Math.abs(m[8]));
+    const ry = 0.13 * (Math.abs(m[1]) + Math.abs(m[5]) + Math.abs(m[9]));
+    const rz = 0.13 * (Math.abs(m[2]) + Math.abs(m[6]) + Math.abs(m[10]));
+    const table = item.table;
+    if (r.cx < table.minX + rx || r.cx > table.maxX - rx) { r.cx = clamp(r.cx, table.minX + rx, table.maxX - rx); r.vx *= -0.35; }
+    if (r.cz < table.minZ + rz || r.cz > table.maxZ - rz) { r.cz = clamp(r.cz, table.minZ + rz, table.maxZ - rz); r.vz *= -0.35; }
+    if (r.cy < table.y + ry + 0.001) {
+      r.cy = table.y + ry + 0.001;
+      if (r.vy < -0.2) { r.bounces++; r.vy *= -0.32; r.vx *= 0.72; r.vz *= 0.72; r.wx *= 0.58; r.wy *= 0.58; r.wz *= 0.58; }
+      else r.vy = 0;
+    }
+    setVec(n.position, r.cx - m[4] * 0.13, r.cy - m[5] * 0.13, r.cz - m[6] * 0.13);
+  };
+  const settleLabDie = (item) => {
+    const n = item.node, r = item.roll;
+    setVec(n.rotation, r.tx, r.ty, r.tz);
+    r.cy = item.table.y + 0.131; r.vx = r.vy = r.vz = 0;
+    placeLabDie(item);
+    setVec(item.home, n.position.x, n.position.y, n.position.z);
+    setVec(item.homeRotation, n.rotation.x, n.rotation.y, n.rotation.z);
+    const m = item.parent.world, y = r.cy + 0.13;
+    setVec(item.pickup, m[0] * r.cx + m[4] * y + m[8] * r.cz + m[12],
+      m[1] * r.cx + m[5] * y + m[9] * r.cz + m[13], m[2] * r.cx + m[6] * y + m[10] * r.cz + m[14]);
+    item.rolling = false;
+  };
+  const rollLabEquipment = (entry, index) => {
+    const item = entropyLab.equipment[index];
+    if (!item || item.kind !== "die" || item.holder !== entry || entry.gorilla.labItem !== item.node) return false;
+    const n = item.node, r = item.roll;
+    BL.scene.updateWorld(entry.root, entry.root.parent.world);
+    math.mat4.invert(LAB_ITEM_INVERSE, item.parent.world);
+    math.mat4.multiply(LAB_ITEM_LOCAL, LAB_ITEM_INVERSE, n.world);
+    const m = LAB_ITEM_LOCAL;
+    r.cx = m[12] + m[4] * 0.13; r.cy = m[13] + m[5] * 0.13; r.cz = m[14] + m[6] * 0.13;
+    entry.gorilla.releaseLabItem(); addChild(item.parent, n);
+    setVec(n.scale, 1, 1, 1);
+    setVec(n.rotation, Math.asin(clamp(-m[9], -1, 1)), Math.atan2(m[8], m[10]), Math.atan2(m[1], m[5]));
+    r.time = 0; r.bounces = 0;
+    r.vx = (entry.random() - 0.5) * 0.22; r.vy = 0.9 + entry.random() * 0.4;
+    r.vz = -0.22 - entry.random() * 0.2;
+    r.wx = 5 + entry.random() * 4; r.wy = 4 + entry.random() * 3; r.wz = 3 + entry.random() * 5;
+    // Land on one of the original die's six faces; the object stays where it
+    // settled, becoming the next pickup point instead of snapping back home.
+    const face = Math.floor(entry.random() * 6), quarter = Math.PI / 2;
+    r.tx = (face < 4 ? face : 0) * quarter; r.tz = face < 4 ? 0 : (face === 4 ? 1 : -1) * quarter;
+    r.ty = Math.floor(entry.random() * 4) * quarter;
+    item.rolling = true;
+    return true;
+  };
+  const updateLabEquipment = (dt) => {
+    let screens = 0;
+    for (const e of clankers.list) if (e.active && e.motion.lab && (e.motion.labWork === "type" || e.motion.labWork === "touch")) screens |= 1 << e.lab.station;
+    entropyLab.updateScreens(dt, screens);
+    for (const item of entropyLab.equipment) {
+      if (!item.rolling) continue;
+      const r = item.roll, rotation = item.node.rotation;
+      let remaining = Math.min(dt, 0.25);
+      while (remaining > 1e-8) {
+        const step = Math.min(remaining, 1 / 120); remaining -= step; r.time += step;
+        r.vy -= 7 * step; r.cx += r.vx * step; r.cy += r.vy * step; r.cz += r.vz * step;
+        if (r.time < 0.9) { rotation.x += r.wx * step; rotation.y += r.wy * step; rotation.z += r.wz * step; }
+        else {
+          const blend = 1 - Math.exp(-12 * step), drag = Math.exp(-8 * step);
+          rotation.x += Math.atan2(Math.sin(r.tx - rotation.x), Math.cos(r.tx - rotation.x)) * blend;
+          rotation.y += Math.atan2(Math.sin(r.ty - rotation.y), Math.cos(r.ty - rotation.y)) * blend;
+          rotation.z += Math.atan2(Math.sin(r.tz - rotation.z), Math.cos(r.tz - rotation.z)) * blend;
+          r.vx *= drag; r.vz *= drag;
+        }
+        placeLabDie(item);
+      }
+      if (r.time >= 1.8) settleLabDie(item);
+    }
+  };
   const returnLabEquipment = (entry) => {
     for (const item of entropyLab.equipment) {
       if (item.holder !== entry) continue;
+      if (item.kind === "die" && item.node.parent === item.parent) {
+        if (item.rolling) settleLabDie(item);
+        item.holder = null;
+        return true;
+      }
       entry.gorilla.releaseLabItem();
       addChild(item.parent, item.node);
       setVec(item.node.position, item.home.x, item.home.y, item.home.z);
       setVec(item.node.rotation, item.homeRotation.x, item.homeRotation.y, item.homeRotation.z);
       setVec(item.node.scale, item.homeScale.x, item.homeScale.y, item.homeScale.z);
-      item.node.quaternion = null; item.node.visible = true; item.holder = null;
+      item.node.quaternion = null; item.node.visible = true; item.holder = null; item.rolling = false;
       return true;
     }
     return false;
@@ -5802,6 +5887,7 @@
     mirrorCave.ripples = BL.mirrorRipples.create(mirrorCave.node);
     entropyLab.phase = BL.labPhase.create(entropyLab.group, entropyLab.mouth, entropyLab.opening);
     headquarters.entropyLab = entropyLab;
+    entropyLab.updateEquipment = updateLabEquipment;
     shared.clipProjectileTarget = entropyLab.phase.clipTarget;
     shared.absorbProjectile = entropyLab.phase.absorb;
     shared.onProjectileMove = mirrorCave.ripples.cross;
@@ -5970,7 +6056,7 @@
     clankers = BL.clankers.create({ root, crew, sites: shared.workSites, loungeRoofs,
       labSite: shared.workSites.findIndex(site => site.mouth === entropyLab.mouth),
       labInside: entropyLab.phase.inside, labStations: entropyLab.stations,
-      labEquipment: entropyLab.equipment, labPickup: pickUpLabEquipment, labReturn: returnLabEquipment,
+      labEquipment: entropyLab.equipment, labPickup: pickUpLabEquipment, labReturn: returnLabEquipment, labRoll: rollLabEquipment,
       solidAt: island.solidAt, climbClear: clankerClimbClear, climbTransitionClear: clankerClimbTransitionClear,
       climbRidersClear: clankerRidersClear, groomClear: clankerGroomClear, underCanopy: clankerUnderCanopy,
       groundAt: (x, z, y) => island.supportAt(x, z, y, 0.52), surfaceAt: island.surfaceAt,

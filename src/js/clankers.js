@@ -181,8 +181,9 @@
     const releaseLab = (e) => {
       if (e.lab.item >= 0 && ctx.labReturn) ctx.labReturn(e);
       e.lab.item = e.lab.pickup = -1; e.lab.stage = ""; e.lab.station = -1; e.lab.time = 0; e.lab.arrived = false;
-      e.lab.yielding = 0; e.lab.yieldFor = null; e.lab.pathPending = false;
+      e.lab.yielding = 0; e.lab.yieldFor = null; e.lab.pathPending = false; e.lab.squeezeUntil = 0;
       e.lab.pathCount = e.lab.pathIndex = 0; e.motion.labWork = ""; e.motion.labReach = 0; e.motion.labSqueeze = false;
+      e.motion.labDie = false; e.motion.labRoll = 0;
     };
     const syncLab = (e) => {
       const p = e.root.position, inside = insideLab(p.x, p.y, p.z), wasInside = e.motion.lab;
@@ -223,8 +224,8 @@
       labRouteBudget--; e.lab.pathPending = false; labRouteNext = (e.index + 1) % list.length;
       const p = e.root.position, job = e.lab, site = sites[labSite];
       const radius = e.radius, height = e.height, compact = e.compact, mode = e.footprintMode;
-      const planning = e.planningLab, work = e.planningLabWork;
-      e.radius = e.motion.labSqueeze ? BL.agent.LAB_SQUEEZE_RADIUS : BL.agent.LAB_WALK_RADIUS; e.height = BL.agent.LAB_HEIGHT;
+      const planning = e.planningLab, work = e.planningLabWork, squeeze = e.motion.labSqueeze, speed = e.speed;
+      e.radius = BL.agent.LAB_WALK_RADIUS; e.height = BL.agent.LAB_HEIGHT; e.speed = 1.1;
       e.compact = e.planningLab = true; e.footprintMode = "lab"; e.planningLabWork = "";
       labNodes[0] = p.x; labNodes[1] = p.y; labNodes[2] = p.z;
       labNodes[3] = tx; labNodes[4] = ty; labNodes[5] = tz;
@@ -233,20 +234,27 @@
         const at = count++ * 3;
         sitePoint(site, x, z, POINT); labNodes[at] = POINT.x; labNodes[at + 1] = POINT.y; labNodes[at + 2] = POINT.z;
       }
-      labPrevious.fill(-1); labPrevious[0] = 0; labQueue[0] = 0;
-      let head = 0, tail = 1;
-      while (head < tail && labPrevious[1] < 0) {
-        const from = labQueue[head++], a = from * 3;
-        for (let next = 1; next < count; next++) {
-          if (labPrevious[next] >= 0) continue;
-          const b = next * 3, facing = next === 1 ? heading : Math.atan2(labNodes[b] - labNodes[a], labNodes[b + 2] - labNodes[a + 2]);
-          if (!labSegment(e, labNodes[a], labNodes[a + 1], labNodes[a + 2], labNodes[b], labNodes[b + 1], labNodes[b + 2], facing)) continue;
-          labPrevious[next] = from; labQueue[tail++] = next;
-          if (next === 1) break;
+      // Prefer a route with room for the natural arm swing. Only search the
+      // tucked footprint when no complete ordinary walking route is available.
+      for (let pass = 0; pass < 2; pass++) {
+        e.motion.labSqueeze = pass === 1;
+        e.radius = pass ? BL.agent.LAB_SQUEEZE_RADIUS : BL.agent.LAB_WALK_RADIUS;
+        labPrevious.fill(-1); labPrevious[0] = 0; labQueue[0] = 0;
+        let head = 0, tail = 1;
+        while (head < tail && labPrevious[1] < 0) {
+          const from = labQueue[head++], a = from * 3;
+          for (let next = 1; next < count; next++) {
+            if (labPrevious[next] >= 0) continue;
+            const b = next * 3, facing = next === 1 ? heading : Math.atan2(labNodes[b] - labNodes[a], labNodes[b + 2] - labNodes[a + 2]);
+            if (!labSegment(e, labNodes[a], labNodes[a + 1], labNodes[a + 2], labNodes[b], labNodes[b + 1], labNodes[b + 2], facing)) continue;
+            labPrevious[next] = from; labQueue[tail++] = next;
+            if (next === 1) break;
+          }
         }
+        if (labPrevious[1] >= 0) break;
       }
       e.radius = radius; e.height = height; e.compact = compact; e.footprintMode = mode;
-      e.planningLab = planning; e.planningLabWork = work;
+      e.planningLab = planning; e.planningLabWork = work; e.motion.labSqueeze = squeeze; e.speed = speed;
       job.pathCount = job.pathIndex = 0; job.pathAt = elapsed + 0.65;
       job.targetX = tx; job.targetY = ty; job.targetZ = tz;
       if (labPrevious[1] < 0) return false;
@@ -270,16 +278,34 @@
       if (e.blocked > 0.4) { job.pathCount = job.pathIndex = 0; job.pathAt = elapsed + 0.2; }
       return true;
     };
+    const ordinaryLabStep = (e, x, y, z, heading, speed) => {
+      const p = e.root.position, radius = e.radius, height = e.height, compact = e.compact, mode = e.footprintMode;
+      const planning = e.planningLab, work = e.planningLabWork, squeeze = e.motion.labSqueeze, previousSpeed = e.speed;
+      e.radius = BL.agent.LAB_WALK_RADIUS; e.height = BL.agent.LAB_HEIGHT;
+      e.compact = e.planningLab = true; e.footprintMode = "lab"; e.planningLabWork = "";
+      e.motion.labSqueeze = false; e.speed = speed;
+      // Check the wider pose at both ends before opening the shoulders. An
+      // already-tucked body must not expand into a neighbour beside the aisle.
+      const fits = !occupied(e, p.x, p.y, p.z) && !occupied(e, x, y, z, true, heading)
+        && staticClear(e, p.x, p.y, p.z) && staticClear(e, p.x, p.y, p.z, x, y, z, e.heading, heading);
+      e.radius = radius; e.height = height; e.compact = compact; e.footprintMode = mode;
+      e.planningLab = planning; e.planningLabWork = work; e.motion.labSqueeze = squeeze; e.speed = previousSpeed;
+      return fits;
+    };
     const moveLab = (e, dt, speed = 1.1) => {
       const p = e.root.position, dx = e.goalX - p.x, dz = e.goalZ - p.z, distance = Math.hypot(dx, dz);
-      e.motion.labSqueeze = true; e.motion.labWork = "";
-      if (!distance || !e.gorilla.labSqueezeCompact) { e.speed = 0; return; }
+      e.motion.labWork = "";
+      if (!distance) { e.speed = 0; return; }
       const step = Math.min(distance, speed * dt), x = p.x + dx / distance * step, z = p.z + dz / distance * step;
       const station = labStations[e.lab.station];
       const desired = !e.lab.yielding && station && distance < 0.8 && e.lab.pathIndex + 1 >= e.lab.pathCount
         ? station.heading : Math.atan2(dx, dz);
       const turn = Math.atan2(Math.sin(desired - e.heading), Math.cos(desired - e.heading));
       const heading = e.heading + clamp(turn, -dt * 3, dt * 3);
+      const ordinary = !e.lab.yielding && elapsed >= e.lab.squeezeUntil && ordinaryLabStep(e, x, p.y, z, heading, speed);
+      if (!ordinary && !e.motion.labSqueeze) e.lab.squeezeUntil = elapsed + 0.4;
+      e.motion.labSqueeze = !ordinary;
+      if (ordinary ? !e.gorilla.labWalkCompact : !e.gorilla.labSqueezeCompact) { e.speed = 0; return; }
       labEnvelope(e);
       if (occupied(e, x, p.y, z, true, heading) || !staticClear(e, p.x, p.y, p.z, x, p.y, z, e.heading, heading)) {
         e.speed = 0; e.blocked += dt; return;
@@ -730,13 +756,14 @@
         planningLab: false, planningLabWork: "", planningLabSide: 1, lab: { station: -1, time: 0, arrived: false, cycles: 0,
           item: -1, pickup: -1, bench: -1, pickupPoint: { x: 0, y: 0, z: 0, heading: 0, side: 1 },
           stage: "", reach: 0, yielding: 0, yieldStation: -1, yieldSide: 1, yieldUntil: 0, yieldFor: null, yieldDX: 0, yieldDZ: 0, yieldPoint: { x: 0, y: 0, z: 0 },
-          path: new Float64Array(16 * 3), pathPending: false, pathCount: 0, pathIndex: 0, pathAt: 0, targetX: NaN, targetY: NaN, targetZ: NaN },
+          squeezeUntil: 0, path: new Float64Array(16 * 3), pathPending: false, pathCount: 0, pathIndex: 0, pathAt: 0, targetX: NaN, targetY: NaN, targetZ: NaN },
         drive: { x: 0, z: 0, climbAxis: 0, heading: NaN, climbExitHeading: NaN, climbExitLook: NaN,
           run: false, jumpHeld: false, jumpDown: false, jumpArmed: false,
           cancelled: false, charge: 0, vx: 0, vy: 0, vz: 0, airborne: false, grounded: true, resume: false, motionRecover: 0, motionEnvelope: false },
         motion: { charge: 0, poundCharge: 0, takeoff: 0, landing: 0, roll: 0, rollAngle: 0, smash: false, dragging: false,
           climb: 0, climbBlend: NaN, climbStride: 0, climbDirection: 0, mantle: 0, groom: 0, groomSide: 1, groomPhase: 0,
-          lab: false, labWork: "", labPhase: i * 0.71, labSide: 1, labDt: 1 / 30, labReach: 0, labGripY: 0.53105, labSqueeze: false },
+          lab: false, labWork: "", labPhase: i * 0.71, labSide: 1, labDt: 1 / 30, labReach: 0, labGripY: 0.53105, labSqueeze: false,
+          labDie: false, labRoll: 0 },
         climb: { active: false, descending: false, progress: 0, length: 0, lowerY: 0, upperY: 0, climbs: 0,
           count: 0, index: 0, heading: 0, topHeading: 0, exitHeading: 0, fromTop: false, basePrepEnd: 0, lowerGroundDistance: 0, bottomTurn: 0, mount: 0, finish: 0, retry: 0, blocked: 0, mantleStart: 0, mantleRiseEnd: 0, autoTo: -1, waitRelease: false, lowerExit: true, minimum: 0, attempts: 0, failure: "", blockX: 0, blockY: 0, blockZ: 0,
           searchPending: false, searchDeferred: false, searchCursor: 0, searchIndex: 0, searchBudget: 0,
@@ -1299,7 +1326,6 @@
       }
     };
     const travelGoal = (e, dt) => {
-      e.motion.labSqueeze = e.motion.lab;
       const p = e.root.position, site = sites[e.site];
       if (!site && e.phase !== "leave") return false;
       if (e.route === "exit") {
@@ -1932,9 +1958,33 @@
       if (ctx.fireContact && ctx.fireContact(e, beforeX, beforeY, beforeZ)) ignite(e);
       if (ctx.onMove && (beforeX !== p.x || beforeY !== p.y || beforeZ !== p.z)) ctx.onMove(e, beforeX, beforeY, beforeZ, dt);
     };
+    const finishLabItem = (e) => {
+      const job = e.lab;
+      job.item = -1; job.stage = ""; job.reach = 0; job.time = 0;
+      job.arrived = false;
+      if (job.yielding) { job.stage = "fetch"; return; }
+      if (e.mode !== e.owner.state || e.pendingSite >= 0 && e.pendingSite !== e.site) return;
+      if (reserve(e, true)) { job.cycles++; e.workCycle++; setGoal(e, e.slotX, e.slotY, e.slotZ); }
+      else job.stage = "fetch";
+    };
     const workLab = (e, dt) => {
       const p = e.root.position, job = e.lab, station = labStations[job.station];
-      e.motion.labWork = ""; e.motion.labReach = 0; e.motion.labSqueeze = job.item < 0;
+      const wasWorking = !!e.motion.labWork;
+      e.motion.labWork = ""; e.motion.labReach = 0;
+      if (job.item >= 0) e.motion.labSqueeze = false;
+      e.motion.labDie = false; e.motion.labRoll = 0;
+      if (job.stage === "roll") {
+        e.speed = damp(e.speed, 0, 12, dt);
+        e.motion.labWork = "roll";
+        job.time -= dt;
+        const item = labEquipment[job.item];
+        // Keep the scientist and its claim at the bench while the real die
+        // tumbles. A requested exit/yield changes this to the normal return.
+        if (item && item.rolling || job.time > 0) return;
+        if (ctx.labReturn && !ctx.labReturn(e)) return;
+        finishLabItem(e);
+        return;
+      }
       if (station && station.kind === "carry" && job.item < 0 && !job.stage) job.stage = "fetch";
       let destination = station;
       if (job.stage === "fetch" || job.stage === "inspect" || job.stage === "return") {
@@ -1959,6 +2009,7 @@
           point.heading = bench.heading; point.side = bench.side;
           destination = point;
           e.motion.labGripY = equipment.node.geometry.labGripY || BL.scene.boundsOf(equipment.node.geometry).max[1] * 0.85;
+          e.motion.labDie = equipment.kind === "die";
         } else destination = null;
       }
       if (!destination) { e.speed = 0; return; }
@@ -1972,6 +2023,12 @@
         return;
       }
       e.speed = damp(e.speed, 0, 12, dt);
+      // Finish retracting the wider walking shoulders before raising the hands.
+      // Doing both together sweeps the elbows outside either final footprint.
+      if (job.item < 0 && !wasWorking) {
+        e.motion.labSqueeze = true;
+        if (!e.gorilla.labSqueezeCompact) { e.speed = 0; return; }
+      }
       const turn = Math.atan2(Math.sin(destination.heading - e.heading), Math.cos(destination.heading - e.heading));
       {
         const heading = e.heading + clamp(turn, -dt * 3, dt * 3);
@@ -1996,12 +2053,7 @@
         if (job.reach < 0.8) return;
         if (job.stage === "return") {
           if (ctx.labReturn && !ctx.labReturn(e)) return;
-          job.item = -1; job.stage = ""; job.reach = 0; job.time = 0;
-          job.arrived = false;
-          if (job.yielding) { job.stage = "fetch"; return; }
-          if (e.mode !== e.owner.state || e.pendingSite >= 0 && e.pendingSite !== e.site) return;
-          if (reserve(e, true)) { job.cycles++; e.workCycle++; setGoal(e, e.slotX, e.slotY, e.slotZ); }
-          else job.stage = "fetch";
+          finishLabItem(e);
           return;
         } else {
           const chosen = job.pickup;
@@ -2014,10 +2066,16 @@
       e.motion.labWork = station.kind === "carry" ? job.item >= 0 ? "carry" : "" : station.kind;
       if (!job.arrived) {
         job.arrived = true;
-        job.time = 8 + e.random() * 5;
+        job.time = e.motion.labDie ? 1.1 + e.random() * 0.6 : 8 + e.random() * 5;
       }
       job.time -= dt;
+      if (e.motion.labDie) e.motion.labRoll = clamp(1 - job.time / 0.45, 0, 1);
       if (job.time <= 0) {
+        if (e.motion.labDie && job.item >= 0 && ctx.labRoll) {
+          if (!ctx.labRoll(e, job.item)) return;
+          job.stage = "roll"; job.time = 2.5 + e.random() * 1.5;
+          return;
+        }
         if (job.item >= 0) { job.stage = "return"; job.arrived = false; job.reach = 0; job.pathCount = 0; return; }
         // A workstation stays occupied until its scientist has a real, clear
         // next job. Failed reservations keep the hands working, not idling.
