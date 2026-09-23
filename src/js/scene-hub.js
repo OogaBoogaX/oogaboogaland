@@ -6114,6 +6114,8 @@
       roamRadius: island.radius, meadowRadius: island.meadowRadius,
       clear: clankerClear, push: pushClankerProp, onPound: poundClankerEquipment, onGrab: grabClankerOoga, onReleaseDrag: releaseClankerDrag,
       fireContact: clankerFireContact, canSmash: canClankerSmash, supportAt: clankerSupportAt,
+      onRecovery: (entry, relocated) => fx.sayAt(entry.root.position.x, entry.root.position.y + entry.height + 0.25,
+        entry.root.position.z, relocated ? "BACK AT IT!" : "COMING THROUGH!", 2),
       track: (entry) => trackMirrorObject(entry.root, 3.6, 4248), untrack: (entry) => untrackMirrorObject(entry.root) });
     for (const entry of clankers.list) registerClanker(entry);
     clankerPlay = BL.clankerPlay.create({ canvas: ctx.canvas, camera, pilot, hud, clankers, input, constrainCamera: constrainClankerCamera });
