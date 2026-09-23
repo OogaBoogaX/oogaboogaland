@@ -413,24 +413,17 @@
   const labIdentityScreen = cached(() => {
     const geometry = { verts: [], faces: [], lines: [], castShadow: false };
     labScreenRect(geometry, -0.55, 1.47, 1.1, 0.62, -0.092, 0, 0.35);
-    geometry.faces[0].color = [10, 12, 12];
-    // The existing EntropyLab beaker/die/sprout mark, sampled into 48x72
-    // palette spans. One cached mesh works in both renderers without an image
-    // decoder, runtime download, new texture pass or per-frame geometry.
-    const palette = [[0, 0, 0], [3, 158, 78], [255, 255, 255], [250, 141, 0]];
-    const runs = atob("AiQBAQMgBQEEHgcBBRwJAQYbCQEHGgoBCBkLAQkYBAEJHQYBChgDAQodBQELGAIBCxwGAQwXAwEMGwUBDRcDAQ0bBAEOFwIBDhsCAQ8XAgEQFwIBERcCARIEBgESCggCEhIBARIXAgESHgYBEiQGAhIqAQETAhECExcCARMdEQIUAgECFBcCARQtAQIVAQICFRcCARUtAgIWAQICFhcCARYtAgIXAgICFxcCARcsAgIYAgMCGBcCARgrAwIZAwICGRcCARkrAgIaBAICGhcCARoqAgIbBAICGxcCARsqAgIcBAICHBcCARwqAgIdBAICHQgEAx0XAgEdKgICHgQCAh4IBwMeFwIBHioCAh8EAgIfCAgDHxcCAR8qAgIgBAICIAgJAyAXAgEgKgICIQQCAiEICgMhFwIBISoCAiIEAgIiCAwDIhcCASIqAgIjBAICIwgNAyMYAQEjKgICJAQCAiQIDgMkKgICJQQCAiUIEAMlJgIDJSoCAiYEAgImCBEDJiQEAyYqAgInBAICJwgVAychBwMnKgICKAQCAigIIAMoKgICKQQCAikIIAMpKgICKgQCAioIDgMqGg4DKioCAisEAgIrCAwDKxwMAysqAgIsBAICLAgKAywWBAMsHQsDLCoCAi0EAgItCAkDLRQIAy0fCQMtKgICLgQCAi4IBwMuEgUDLhkFAy4hBwMuKgICLwQCAi8IBgMvEQYDLxkGAy8iBgMvKgICMAQCAjAIBgMwEwoDMCIGAzAqAgIxBAICMQgGAzEQAgMxFQYDMR4CAzEiBgMxKgICMgQCAjIIBgMyEAQDMhcCAzIcBAMyIgYDMioCAjMEAgIzCAYDMxIEAzMaBgMzIgYDMyoCAjQEAgI0CAYDNBABAzQSBQM0GQcDNCIGAzQqAgI1BAICNQgGAzUQBAM1FgEDNRkBAzUcBAM1IgYDNSoCAjYEAgI2CAYDNhAEAzYWAQM2GQEDNhsFAzYiBgM2KgICNwQCAjcIBgM3EAEDNxIFAzcZBQM3HwEDNyIGAzcqAgI4BAICOAgGAzgSBQM4GQQDOB8BAzgiBgM4KgICOQQCAjkIBgM5EAEDORIFAzkZBAM5HwEDOSIGAzkqAgI6BAICOggGAzoQBAM6FgEDOhkHAzoiBgM6KgICOwQCAjsIBwM7EgMDOxYBAzsZBQM7IQcDOyoCAjwEAgI8CAkDPBQDAzwZAwM8HwkDPCoCAj0FAQI9CQoDPRYBAz0ZAQM9HQoDPSoBAj4FAgI+CQwDPhsMAz4pAgI/BgECPwoMAz8ZDQM/KQECQAYCAkALGgNAKAICQQcCAkEMFwNBJwICQggCAkImAgJDCQMCQyQDAkQKHAJFDRYC");
-    const cell = 0.0075;
-    for (let i = 0; i < runs.length; i += 4) {
-      labScreenRect(geometry, -0.18 + runs.charCodeAt(i + 1) * cell,
-        2.05 - (runs.charCodeAt(i) + 1) * cell, runs.charCodeAt(i + 2) * cell, cell, -0.091, 0);
-      geometry.faces[geometry.faces.length - 1].color = palette[runs.charCodeAt(i + 3)];
-    }
+    geometry.faces[0].color = [0, 0, 0];
+    // Preserve the supplied JPEG and its aspect ratio; the narrow side bars
+    // remain black. Both renderers share one lazily decoded source image.
+    const width = 0.62 * BL.labWallpaper.width / BL.labWallpaper.height;
+    geometry.imageSurface = { asset: BL.labWallpaper, rect: [-width / 2, 1.47, width, 0.62] };
     return geometry;
   });
   const createLabScreen = (parent, station, kind, codeGeometry) => {
     const { createNode, addChild } = BL.scene;
     const node = createNode({ geometry: codeGeometry ? labScreenContent(kind) : labIdentityScreen(), position: { ...parent.position },
-      rotation: { ...parent.rotation }, sightHidden: true });
+      rotation: { ...parent.rotation }, sightHidden: true, matrixNative: !codeGeometry });
     const markers = [], strips = [], touch = kind === 1, z = touch ? 0.105 : -0.09;
     const span = LAB_CODE.length * 0.088, clock = station * 3.37 * 0.088 / LAB_SCROLL_SPEED;
     if (codeGeometry) for (let i = 0; i < 2; i++) {

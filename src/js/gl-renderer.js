@@ -532,6 +532,33 @@ void main() {
   oColor = vec4(col, 1.0);
   oBright = vec4(base * glow, 1.0);
 }`;
+  const IMAGE_VS = `#version 300 es
+precision highp float;
+layout(location=0) in vec3 aPos;
+layout(location=3) in vec4 aM0;
+layout(location=4) in vec4 aM1;
+layout(location=5) in vec4 aM2;
+layout(location=6) in vec4 aM3;
+uniform mat4 uViewProj;
+uniform vec4 uRect;
+out vec2 vUv;
+void main() {
+  vUv = (aPos.xy - uRect.xy) / uRect.zw;
+  vUv.y = 1.0 - vUv.y;
+  gl_Position = uViewProj * mat4(aM0, aM1, aM2, aM3) * vec4(aPos, 1.0);
+}`;
+  const IMAGE_FS = `#version 300 es
+precision highp float;
+in vec2 vUv;
+uniform sampler2D uImage;
+uniform bool uReady;
+layout(location=0) out vec4 oColor;
+layout(location=1) out vec4 oBright;
+void main() {
+  bool inside = all(greaterThanEqual(vUv, vec2(0.0))) && all(lessThanEqual(vUv, vec2(1.0)));
+  oColor = vec4(uReady && inside ? texture(uImage, vUv).rgb : vec3(0.0), 1.0);
+  oBright = vec4(0.0);
+}`;
   const MIRROR_VS = `#version 300 es
 precision highp float;
 layout(location=0) in vec3 aPos;
@@ -945,6 +972,7 @@ void main() {
       const matrixSampling = gl.getExtension("OES_shader_multisample_interpolation");
       const meshFragment = matrixSampling ? MESH_FS.replace("#version 300 es", "#version 300 es\n#extension GL_OES_shader_multisample_interpolation : require\n#define MATRIX_SAMPLE_INTERPOLATION") : MESH_FS;
       res.programs = {
+        image: compile(IMAGE_VS, IMAGE_FS, ["uViewProj", "uRect", "uImage", "uReady"]),
         mesh: compile(MESH_VS, meshFragment, ["uViewProj", "uLightViewProj", "uEye", "uLightDir", "uSky", "uGround", "uSun", "uDirectStrength", "uAmbientFloor", "uDiffuseFloor", "uShadowStrength", "uShadowFloor", "uShadowBias", "uShadow", "uShadowTexel", "uLights", "uLightCount", "uFog", "uFogRange", "uMatrixParams", "uMatrixOrigin", "uMatrixGlyph", "uMatrixCave", "uMatrixCaves", "uMatrixCaveBounds", "uMatrixCaveNear", "uMatrixPermanentCave", "uMatrixPermanentPlane", "uMatrixPermanentAperture", "uMatrixLivingGlobal", "uMatrixGlyphTex", "uMatrixSamples", "uClipMinY", "uClipMaxY", "uMatrixGlyphOpacity"]),
         shadow: compile(SHADOW_VS, SHADOW_FS, ["uLightViewProj", "uClipMinY", "uClipMaxY"]),
         line: compile(LINE_VS, LINE_FS, ["uViewProj", "uViewport", "uWidth"]),
@@ -1230,6 +1258,7 @@ void main() {
         gl.deleteBuffer(rec.line.vbo);
       }
       gl.deleteBuffer(rec.ibo);
+      if (rec.imageTexture) { gl.deleteTexture(rec.imageTexture); imageTextures--; rec.imageTexture = null; }
       rec.nodes.length = 0;
       rec.batch = null;
       rec.data = null;
@@ -1340,7 +1369,7 @@ void main() {
       let rec = records.get(geometry);
       if (!rec) {
         const ibo = gl.createBuffer();
-        rec = { geometry, ibo, capacity: 0, mesh: buildMeshPart(geometry, ibo), line: buildLinePart(geometry, ibo), nodes: [], count: 0, drawCount: 0, cameraHiddenCount: 0, active: false, data: null, batch: null, batchVersion: -1, lightVisible: true, mirrorVisible: true };
+        rec = { geometry, ibo, capacity: 0, mesh: buildMeshPart(geometry, ibo), line: buildLinePart(geometry, ibo), nodes: [], count: 0, drawCount: 0, cameraHiddenCount: 0, active: false, data: null, batch: null, batchVersion: -1, lightVisible: true, mirrorVisible: true, imageTexture: null };
         records.set(geometry, rec);
       }
       return rec;
@@ -1677,6 +1706,8 @@ void main() {
     const onLost = (e) => {
       e.preventDefault();
       lost = true;
+      imageTextures = 0;
+      for (const rec of records.values()) rec.imageTexture = null;
       forgetMirror();
     };
     const onRestored = () => {
@@ -1690,6 +1721,30 @@ void main() {
     };
     canvas.addEventListener("webglcontextlost", onLost);
     canvas.addEventListener("webglcontextrestored", onRestored);
+    let imageTextures = 0;
+    const drawImageSurface = (rec, count, cameraPass) => {
+      const surface = rec.geometry.imageSurface, image = surface.asset.load(), p = res.programs.image;
+      gl.activeTexture(gl.TEXTURE6);
+      if (!rec.imageTexture && image.complete && image.naturalWidth) {
+        rec.imageTexture = gl.createTexture();
+        imageTextures++;
+        gl.bindTexture(gl.TEXTURE_2D, rec.imageTexture);
+        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, image);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+      } else gl.bindTexture(gl.TEXTURE_2D, rec.imageTexture || res.matrixTexture);
+      gl.useProgram(p.prog);
+      gl.uniformMatrix4fv(p.u.uViewProj, false, cameraPass ? viewProj : mirrorViewProj);
+      gl.uniform4fv(p.u.uRect, surface.rect);
+      gl.uniform1i(p.u.uImage, 6);
+      gl.uniform1i(p.u.uReady, rec.imageTexture ? 1 : 0);
+      gl.bindVertexArray(rec.mesh.vao);
+      gl.drawArraysInstanced(gl.TRIANGLES, 0, rec.mesh.count, count);
+      gl.activeTexture(gl.TEXTURE0);
+      gl.useProgram(res.programs.mesh.prog);
+    };
     // The camera pass draws only the in-frustum front of each record; shadow and mirror draw all.
     const drawParts = (kind, useProgram, excludeMirror = false, cull = false, matrixStage = 0) => {
       for (const rec of activeRecords) {
@@ -1703,6 +1758,7 @@ void main() {
         if (kind === "mesh" && useProgram === "mesh") {
           const stage = rec.geometry.matrixRevealBacking ? 1 : rec.geometry.matrixGlyph ? 2 : 0;
           if (stage !== matrixStage) continue;
+          if (rec.geometry.imageSurface) { drawImageSurface(rec, n, cull); continue; }
           gl.uniform1f(res.programs.mesh.u.uMatrixGlyph, stage === 1 ? 3 : stage === 2 ? 1 : rec.geometry.matrixLocalGlyphSurface ? 2 : 0);
           if (stage === 2) gl.uniform1f(res.programs.mesh.u.uMatrixGlyphOpacity, rec.geometry.matrixGlyphOpacity ?? 1);
           gl.uniform1f(res.programs.mesh.u.uMatrixCave, rec.geometry.matrixCave || 0);
@@ -2252,7 +2308,7 @@ void main() {
       get stats() {
         let shadowFinite = true;
         for (let i = 0; i < 16; i++) if (!Number.isFinite(lightViewProj[i])) shadowFinite = false;
-        return { records: records.size, active: activeRecords.length, mirrorResources: mirrorDebug.resources, shadowResources: res.shadow ? 2 : 0, shadowSize: res.shadow ? res.shadow.size : 0, shadowPassCount, shadowFinite, culled, drawn, suppressed, rippleSurfaces, rippleWaves };
+        return { records: records.size, active: activeRecords.length, mirrorResources: mirrorDebug.resources, imageTextures, shadowResources: res.shadow ? 2 : 0, shadowSize: res.shadow ? res.shadow.size : 0, shadowPassCount, shadowFinite, culled, drawn, suppressed, rippleSurfaces, rippleWaves };
       },
       get mirror() {
         return mirrorDebug;
