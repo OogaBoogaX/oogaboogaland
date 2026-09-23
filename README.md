@@ -37,21 +37,25 @@ Each clank or chill Ooga has a full-sized gorilla companion. Working gorillas ru
 all fours outside. Crossing EntropyLab's entrance instantly gives them an upright
 posture and lab coat. They rotate between coding at desks, using wall touchscreens,
 and taking glassware from the benches to inspect and swirl before returning it.
-Incoming bananas disappear at the entrance with glyph ripples.
+Incoming bananas disappear at the entrance with the mirror's glyph ripples;
+crossing bodies leave the same shaped glyph outline on that plane. The center
+monitor shows the supplied EntropyLab wallpaper and is never a workstation.
 The lab has a larger, full-height interior with solid rock around it. In other work
 caves, gorillas take banana hits across their bodies, stand, beat their chests, jump,
-and pound the floor to build equipment. They tuck their arms in and take turns moving
-through crowded interiors. A gorilla stays inside when its Ooga reloads for the same cave.
+and pound the floor to build equipment. Inside caves, arms and shoulders may pass
+through other gorillas while torsos avoid each other and full bodies avoid scenery.
+A gorilla stays inside when its Ooga reloads for the same cave.
 When the next cave changes, it runs ahead on all fours and waits inside that cave.
-Gorillas take direct routes across grass and paths, without the Oogas' path
-restrictions. The banana pile and the circular path around it stay off limits.
+Gorillas take direct routes across grass and paths. The banana pile and the circular
+path around it stay off limits.
 They look ahead with their full body and arm clearance and follow a consistent
 side around obstacles. Under low tree crowns they stay on all fours and back out
 without turning when the passage is too tight. They run through entrances rather
 than jumping at the doorway.
 Chilling companions favor the unused cave roofs, occasionally climbing down to
 rest on the outer grass away from the banana pile. They sit, lie on their backs or
-either side, and sometimes sit together to pick bugs from a companion's back.
+either side, lean back on one or both arms, and sometimes sit together to pick bugs
+from a companion's back. Occasional slow glances and arm adjustments break up their rest.
 They are already in place when the world appears. Gorillas can cross the mirror
 with its normal contact ripples.
 Double-tap a companion gorilla to control it. WASD or the move stick walks it;
@@ -66,27 +70,35 @@ Escape or Tab frees the combat cursor; the next click
 on the island recaptures it without attacking. Hold Space or the jump button
 to crouch and charge, then release to leap. A full charge reaches three times an
 Ooga's single-jump height; gorillas cannot jump again in midair. Gorillas can land on
-solid props, and Oogas can jump onto a gorilla and ride its moving body. Walk toward
-a rock wall to climb; on the wall **W** climbs up and **S** climbs down (the move
+solid props and walk off them again, and Oogas can jump onto a gorilla and ride its
+moving body. Near a wall or ledge, Space and the action button offer **CLIMB UP**
+or **CLIMB DOWN** instead of charging a jump. On the wall **W** climbs up and **S** climbs down (the move
 stick's forward/back directions do the same). The torso stays close to the wall,
 with spread hands and legs extending down. At the top it folds over the lip onto
 all fours; at the bottom it lowers and turns away before walking off. Walking over
 a ledge turns the gorilla toward the wall to descend; release forward, then press **S** to continue.
 The edge grab also works when there is no known landing below: the gorilla stays
-attached to the cliff instead of walking into freefall. An intentional charged
-jump still leaps. Hold the face button, or press Escape with the cursor already
+attached to the cliff instead of walking into freefall. Away from climbable edges,
+holding and releasing Space still charges a jump. Hold the face button, or press Escape with the cursor already
 free, to return the gorilla to its owner's routine. Gorillas catch fire
 on contact with flames: Space or the jump button becomes drop-and-roll until
 the fire is out, leaving soot that fades. Uncontrolled gorillas roll automatically.
-Walkers favor their right side of each curved path and leave room for one another.
+Working Oogas favor their right side of each curved path and leave room for one another.
 Returning workers peel off near the pile for the closest open reload slot;
 chilling Oogas and those heading to sleep go around active firing areas.
-Chilling Oogas rest for a staggered 30–90 seconds between strolls, while still
+Chilling Oogas take direct routes across grass and paths and do not eat or reload
+automatically. They rest for a staggered 30–90 seconds between strolls, while still
 moving promptly out of active work areas and responding to control or new activity.
 Chilling walkers wait before crossing an approaching worker's route, then continue
 once the worker has passed. Releasing a working Ooga sends them straight back to
 their cave if they have ammunition, or to a free pile slot if empty, avoiding
 obstacles on the way. Normal path-following resumes after that trip.
+NPC movement has an independent progress check: a blocked walker starts backing
+up or sidestepping within about a second, clearing stale routes and waiting
+claims. Lab gorillas take turns making room with short, collision-checked moves.
+A checked clear position is the fallback after eight seconds of failed recovery.
+A brief speech bubble marks recovery; intentional rest, active lab work and
+player control are left alone.
 EntropyLab is the first registered work cave; adding a repository to
 an open cave's `repo` field includes it in this rotation. See
 [the activity data contract](docs/activity-contract.md) for the Oogatron snapshot
