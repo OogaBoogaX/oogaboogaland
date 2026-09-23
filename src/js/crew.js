@@ -536,6 +536,8 @@
         walk: null,
         pathing: ctx.npcPaths ? ctx.npcPaths.createState() : null,
         traffic: { moving: false, waiting: false, leader: null, crossing: null, tx: 0, tz: 0, fx: 0, fz: 1, distance: 0, speed: 0 },
+        progress: { x: NaN, z: NaN, stalled: 0, motionless: 0, retry: 0, replanned: false, navigationHop: false, escaped: false,
+          backoff: 0, backX: 0, backZ: 0, detours: 0, replans: 0, resets: 0 },
         avoidance: { active: false, side: i & 1 ? 1 : -1, stalled: 0, best: Infinity, tx: NaN, tz: NaN,
           detour: { site: -1, phase: 0, side: 1, entryX: 0, goalX: NaN, goalZ: NaN, x: 0, z: 0 },
           navigation: { mode: 0, x: 0, z: 0, count: 0, index: 0, searches: 0, expansions: 0,
@@ -655,7 +657,7 @@
       return n;
     };
     const eatingCavemen = () => [...cavemen.values()].filter((c) => c.state === "working" && !c.walk && !c.build && atPile(c));
-    const feedableCavemen = () => [...cavemen.values()].filter((c) => c.root.visible);
+    const feedableCavemen = () => [...cavemen.values()].filter((c) => c.root.visible && (c.state === "working" || c === player));
     const releaseBuild = (cave) => {
       if (!cave.build) return;
       if (!cave.build.built) buildSpots.push(cave.build.spot);
@@ -938,7 +940,7 @@
     const startBedRoute = (cave, bed, toBed) => {
       const travel = cave.bedTravel;
       cave.avoidance.tx = NaN;
-      if (!toBed) {
+      if (!toBed && cave.state === "working") {
         const slot = closestSlot(cave);
         if (slot) cave.slot = slot;
       }
@@ -1012,6 +1014,8 @@
       if (ctx.bedRoute || cave.bedTravel.mode) { standFromBed(cave); cave.bedTravel.bed = null; }
       cave.state = state;
       cave.walk = null;
+      cave.pileApproach = false;
+      if (cave.pathing) { cave.pathing.tx = NaN; cave.pathing.index = cave.pathing.count; }
       stopReload(cave);
       cave.work.phase = "";
       cave.work.plannedSite = -1; cave.work.targetReady = false;
@@ -1070,8 +1074,9 @@
       r.visible = true;
       Object.assign(r.position, { x: from.x, y: cave.baseY + groundAt(from.x, from.z, Infinity, Infinity, cave), z: from.z });
       r.rotation.y = cave.walk.heading;
-      walkToSlot(cave, true);
-      cave.walk.speed = 2;
+      if (state === "working") { walkToSlot(cave, true); cave.walk.speed = 2; }
+      else if (wanderSpot) startWander(cave);
+      else { cave.walk = null; startMeal(cave); }
       if (fresh) popNode(r);
       refreshRosterRow(cave);
     };
@@ -1138,12 +1143,13 @@
     };
     let elapsed = 0;
     const startMeal = (cave) => {
-      cave.act.kind = "eat";
-      cave.act.until = elapsed + EAT_MIN + Math.random() * EAT_SPREAD;
+      cave.act.kind = cave.state === "working" ? "eat" : "idle";
+      cave.act.until = elapsed + (cave.state === "working" ? EAT_MIN + Math.random() * EAT_SPREAD : chillPause(cave));
       cave.act.trips = 0;
+      cave.parts.snack.visible = false;
     };
     const walkToSlot = (cave, force = false) => {
-      if (cave.state !== "working" && cave.state !== "chilling" || cave.build) return;
+      if (cave.state !== "working" || cave.build) return;
       if (cave.bedTravel.mode) return;
       if (!force && !atPile(cave)) return;
       const slot = closestSlot(cave);
@@ -1488,7 +1494,7 @@
       return Math.min(AMMO_PER_BANANA, cave.weapon.ammo < AMMO_MAX ? AMMO_MAX - cave.weapon.ammo : index >= 0 ? AMMO_MAX - cave.weapon.spareAmmo[index] : 0);
     };
     const canReload = (cave = player) => {
-      if (!cave || cave.weapon.swapTime > 0 || cave.weapon.reloadHandoff < 0) return false;
+      if (!cave || cave !== player && cave.state !== "working" || cave.weapon.swapTime > 0 || cave.weapon.reloadHandoff < 0) return false;
       const missing = reloadMissing(cave);
       return missing > 0 && (ctx.reloadPolicy ? ctx.reloadPolicy.available(cave, reloadBite(cave)) : world.level >= reloadBite(cave) / AMMO_PER_BANANA) && nearReload(cave);
     };
@@ -2969,7 +2975,7 @@
       const detour = cave.avoidance.detour;
       if (detour.site >= 0 && detour.goalX === traffic.tx && detour.goalZ === traffic.tz) {
         dx = detour.x - p.x; dz = detour.z - p.z;
-      } else if (path && path.tx === traffic.tx && path.tz === traffic.tz && path.index < path.count) {
+      } else if (cave.state === "working" && path && path.tx === traffic.tx && path.tz === traffic.tz && path.index < path.count) {
         dx = path.targetX - p.x; dz = path.targetZ - p.z;
       }
       const length = Math.hypot(dx, dz);
@@ -3209,6 +3215,92 @@
       if (!outsideClear(p.x, p.z, x, z, feet, cave.bodyHeight)) return false;
       return npcWalkable(p.x, p.z, x, z, feet, cave.bodyHeight, cave) && groundAt(x, z, feet, feet, cave) >= feet - STEP - 1e-7;
     };
+    const resetWalkerRoute = (cave) => {
+      const a = cave.avoidance;
+      a.active = false; a.tx = NaN; a.stalled = 0; a.best = Infinity;
+      a.navigation.mode = 0; a.detour.site = -1;
+      cave.traffic.waiting = false; cave.traffic.leader = cave.traffic.crossing = null;
+      cave.pileApproach = false;
+      if (cave.pathing) { cave.pathing.tx = NaN; cave.pathing.index = cave.pathing.count = 0; }
+      clearShoulder(cave);
+    };
+    // Independent of changing path hints and traffic waits: a failed route may
+    // otherwise restart its local recovery forever without moving the Ooga.
+    const watchWalker = (cave, dt, fromX, fromZ) => {
+      const progress = cave.progress, p = cave.root.position, travel = cave.bedTravel, work = cave.work;
+      const airborne = cave.hop > 0 || cave.hopV > 0;
+      // Retain the navigation intent through its landing frame, when the
+      // ordinary traffic snapshot is still paused and mode 4 has just ended.
+      const navigationHop = cave.avoidance.navigation.mode === 4 || progress.navigationHop;
+      const attempting = cave.walk || travel.mode === "walk" || cave.state === "working" && workSites
+        && (work.phase === "outbound" || work.phase === "return" || work.phase === "station");
+      if (dt <= 0 || !attempting || !navigationHop && (!cave.traffic.moving || cave.traffic.distance < 0.15) || cave === player || !cave.root.visible
+        || cave.health.stunned || cave.clankerDragged || cave.camp.seat || cave.camp.burning || cave.camp.rolling || cave.cheer > 0
+        || airborne && !navigationHop || cave.root.quaternion) {
+        progress.x = p.x; progress.z = p.z; progress.stalled = progress.motionless = progress.retry = progress.backoff = 0;
+        progress.replanned = progress.navigationHop = progress.escaped = false; return;
+      }
+      progress.navigationHop = navigationHop && airborne;
+      if (!Number.isFinite(progress.x) || Math.hypot(p.x - progress.x, p.z - progress.z) >= 0.45) {
+        progress.x = p.x; progress.z = p.z; progress.stalled = progress.motionless = progress.retry = 0; progress.replanned = progress.escaped = false; return;
+      }
+      const leader = cave.traffic.leader || cave.traffic.crossing;
+      if (cave.traffic.waiting && leader && Math.hypot(leader.shoulder.motionX, leader.shoulder.motionZ) > 0.08) {
+        progress.stalled = progress.motionless = 0; progress.replanned = progress.escaped = false; return;
+      }
+      progress.stalled += dt;
+      progress.motionless = Math.hypot(p.x - fromX, p.z - fromZ) > 1e-5 ? 0 : progress.motionless + dt;
+      // Failed recovery jumps count as stalled travel, but neither replanning
+      // nor relocation may interrupt the collision-checked airborne motion.
+      if (airborne) return;
+      if (!progress.escaped && progress.motionless >= 0.8) {
+        progress.escaped = true;
+        const heading = Math.atan2(cave.traffic.tx - p.x, cave.traffic.tz - p.z);
+        for (let side = 0; side < 5; side++) {
+          const angle = heading + (side === 4 ? Math.PI : (side & 1 ? -1 : 1) * (Math.PI / 2 + (side >> 1) * Math.PI / 4));
+          const dx = Math.sin(angle), dz = Math.cos(angle), x = p.x + dx * 0.4, z = p.z + dz * 0.4;
+          if (!walkerClear(cave, x, z) || !shoulderClear(cave, x, z)) continue;
+          resetWalkerRoute(cave);
+          progress.backX = dx; progress.backZ = dz; progress.backoff = 0.4; progress.detours++;
+          break;
+        }
+      }
+      if (!progress.replanned && progress.stalled >= 1 && progress.motionless >= 0.8 && !progress.backoff) {
+        resetWalkerRoute(cave); progress.replanned = true; progress.replans++;
+        ctx.fx.say(cave, "COMING THROUGH!", 1.8);
+        if (travel.mode === "walk" && ctx.bedRoute) startBedRoute(cave, travel.toBed ? cave.bedroll : travel.bed, travel.toBed);
+      }
+      if (progress.stalled < 8) return;
+      progress.retry -= dt;
+      if (progress.retry > 0) return;
+      progress.retry = 4;
+      const feet = p.y - cave.baseY, heading = Math.atan2(cave.traffic.tx - p.x, cave.traffic.tz - p.z);
+      for (let ring = 0; ring < 3; ring++) for (let side = 0; side < 8; side++) {
+        const angle = heading + side * Math.PI / 4, radius = 0.9 + ring * 0.75;
+        const x = p.x + Math.sin(angle) * radius, z = p.z + Math.cos(angle) * radius;
+        const y = groundAt(x, z, feet, feet, cave);
+        if (!Number.isFinite(y) || Math.abs(y - feet) > STEP || ctx.abyssAt && ctx.abyssAt(x, z, y, cave)
+          || ctx.npcLandingAllowed && !ctx.npcLandingAllowed(x, y, z, cave.bodyHeight, cave)
+          || !npcWalkable(x, z, x, z, y, cave.bodyHeight, cave) || !outsideClear(x, z, x, z, y, cave.bodyHeight)) continue;
+        let occupied = false;
+        for (let i = 0; i < crewList.length; i++) {
+          const other = crewList[i], q = other.root.position, floor = q.y - other.baseY;
+          if (other !== cave && other.root.visible && y < floor + other.bodyHeight && y + cave.bodyHeight > floor
+            && Math.hypot(x - q.x, z - q.z) < Math.max(SHOULDER_GAP, cave.bodyRadius + other.bodyRadius)) { occupied = true; break; }
+        }
+        if (occupied) continue;
+        // Last resort only: preserve activity and possessions, and place the
+        // feet on nearby verified support, never another floor or body.
+        setVec(p, x, cave.baseY + y, z); cave.cloudSupport = null;
+        cave.hop = cave.hopV = cave.jumps = 0; cave.leap.vx = cave.leap.vz = cave.leap.land = 0;
+        resetWalkerRoute(cave);
+        if (travel.mode === "walk" && ctx.bedRoute) startBedRoute(cave, travel.toBed ? cave.bedroll : travel.bed, travel.toBed);
+        progress.x = x; progress.z = z; progress.stalled = progress.motionless = progress.retry = progress.backoff = 0;
+        progress.replanned = progress.escaped = false; progress.resets++;
+        ctx.fx.say(cave, "BACK AT IT!", 1.8);
+        return;
+      }
+    };
     const recoverWalker = (cave, tx, tz, dt) => {
       const a = cave.avoidance, nav = a.navigation, p = cave.root.position, distance = Math.hypot(tx - p.x, tz - p.z);
       if (cave.traffic.waiting) { a.stalled = 0; a.best = Infinity; nav.mode = 0; return; }
@@ -3328,6 +3420,15 @@
       }
     };
     const walkToward = (cave, tx, tz, distance) => {
+      const progress = cave.progress;
+      if (progress.backoff > 0) {
+        const p = cave.root.position, step = Math.min(distance, progress.backoff, PLAYER_STEP);
+        const x = p.x + progress.backX * step, z = p.z + progress.backZ * step;
+        if (!walkerClear(cave, x, z) || !shoulderClear(cave, x, z)) { progress.backoff = 0; return 0; }
+        p.x = x; p.z = z; p.y = groundY(cave);
+        progress.backoff = Math.max(0, progress.backoff - step);
+        return step;
+      }
       if (cave.traffic.waiting) return 0;
       const nav = cave.avoidance.navigation;
       if (nav.mode === 1) { searchWalker(cave, tx, tz, Math.min(distance, PLAYER_STEP)); return 0; }
@@ -3402,10 +3503,12 @@
       }
       if (travel.mode === "walk") {
         if (cave.hop > 0 || cave.hopV > 0) { runPlayer(cave, dt, false); return; }
-        // The architectural route ends at the meadow; pick the final eating slot live so an occupied one can't block.
+        // The architectural route ends at the meadow. Only workers continue to a live eating slot.
         if (!travel.toBed && travel.index >= travel.route.length - 1) {
           travel.mode = ""; travel.route = null; travel.bed = null;
-          cave.act.kind = "eat"; walkToSlot(cave, true);
+          if (cave.state === "working") { startMeal(cave); walkToSlot(cave, true); }
+          else if (wanderSpot) startWander(cave);
+          else startMeal(cave);
           return;
         }
         let remaining = dt * 2 * (inBananas(cave) ? 0.5 : 1), recoveryChecked = false;
@@ -3552,8 +3655,14 @@
         cave.slot = slot; w.tx = slot.x; w.tz = slot.z;
         cave.avoidance.active = cave.pileApproach = false;
       }
+      // Painted trails guide work trips. Resting Oogas roam freely, retaining
+      // the same swept scenery checks and bounded local obstacle avoidance.
+      if (cave.state !== "working" && cave.pathing) {
+        cave.pathing.tx = NaN; cave.pathing.index = cave.pathing.count;
+        cave.pathing.targetX = w.tx; cave.pathing.targetZ = w.tz;
+      }
       const detour = ctx.npcDetour && ctx.npcDetour(cave, w.tx, w.tz), diversion = cave.avoidance.detour;
-      const direct = w.to === "slot" && approachPile(cave), paths = !direct && !detour && ctx.npcPaths;
+      const direct = w.to === "slot" && approachPile(cave), paths = cave.state === "working" && !direct && !detour && ctx.npcPaths;
       if (direct) {
         w.tx = cave.slot.x; w.tz = cave.slot.z;
         if (cave.pathing) { cave.pathing.tx = NaN; cave.pathing.index = cave.pathing.count; cave.pathing.targetX = w.tx; cave.pathing.targetZ = w.tz; }
@@ -5020,6 +5129,7 @@
       cave.weapon.meleeCooldown = Math.max(0, cave.weapon.meleeCooldown - meleeStep);
       if (!runCamp(cave, dt)) updateCaveman(cave, dt);
       else stopReload(cave);
+      watchWalker(cave, dt, x, z);
       const axeMoving = Math.hypot(p.x - x, p.z - z) > 1e-5 || cave.hop > 1e-4 || Math.abs(cave.hopV) > 1e-4
         || cave.catchT > 0 || cave.yawn > 0;
       w.axeIdle = carryingStoneAxe(cave) && !axeMoving ? Math.min(AXE_STICK_DELAY + AXE_STICK_BLEND, w.axeIdle + dt) : 0;
