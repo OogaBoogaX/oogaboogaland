@@ -76,7 +76,51 @@
     dx = -closestX; dy = -closestY; dz = -closestZ;
     return false;
   };
+  const stationaryA = new Float64Array(15), stationaryB = new Float64Array(15);
+  const clipStationary = (from, count, to, plane, direction) => {
+    let written = 0, previous = (count - 1) * 3;
+    for (let i = 0; i < count; i++) {
+      const at = i * 3, a = (from[previous + 1] - plane) * direction, b = (from[at + 1] - plane) * direction;
+      if (a < 0 && b > 0 || a > 0 && b < 0) {
+        const k = a / (a - b), out = written++ * 3;
+        to[out] = from[previous] + (from[at] - from[previous]) * k;
+        to[out + 1] = plane;
+        to[out + 2] = from[previous + 2] + (from[at + 2] - from[previous + 2]) * k;
+      }
+      if (b >= 0) {
+        const out = written++ * 3;
+        to[out] = from[at]; to[out + 1] = from[at + 1]; to[out + 2] = from[at + 2];
+      }
+      previous = at;
+    }
+    return written;
+  };
+  const stationarySeparated = (piece, x, y, z, radius, height) => {
+    // A stationary cylinder misses a triangle if the triangle's height-clipped
+    // projection misses its circle. Expand both boundaries beyond GJK's contact
+    // margin: uncertain edges and actual contacts still use the exact simplex.
+    let count = clipStationary(piece, 3, stationaryA, y - CONTACT, 1);
+    if (!count) return true;
+    count = clipStationary(stationaryA, count, stationaryB, y + height + CONTACT, -1);
+    if (!count) return true;
+    const reach2 = (radius + CONTACT) ** 2;
+    let positive = false, negative = false, previous = (count - 1) * 3;
+    for (let i = 0; i < count; i++) {
+      const at = i * 3, ax = stationaryB[previous] - x, az = stationaryB[previous + 2] - z;
+      const bx = stationaryB[at] - x, bz = stationaryB[at + 2] - z;
+      const dx = bx - ax, dz = bz - az, length2 = dx * dx + dz * dz;
+      const k = length2 ? Math.max(0, Math.min(1, -(ax * dx + az * dz) / length2)) : 0;
+      if ((ax + dx * k) ** 2 + (az + dz * k) ** 2 <= reach2) return false;
+      const cross = ax * bz - az * bx;
+      if (cross > 0) positive = true;
+      if (cross < 0) negative = true;
+      previous = at;
+    }
+    return positive && negative;
+  };
   const sweptCylinder = (piece, x, y, z, toX, toY, toZ, radius, height, toRadius = radius, toHeight = height) => {
+    if (piece.length === 9 && x === toX && y === toY && z === toZ
+      && stationarySeparated(piece, x, y, z, Math.max(radius, toRadius), Math.max(height, toHeight))) return false;
     centerX = centerY = centerZ = 0;
     let lowX = Infinity, lowY = Infinity, lowZ = Infinity, highX = -Infinity, highY = -Infinity, highZ = -Infinity;
     for (let i = 0; i < piece.length; i += 3) {

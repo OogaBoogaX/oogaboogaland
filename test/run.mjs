@@ -4726,6 +4726,39 @@ const unitChecks = async () => {
     record("convex collision: oblique fragments and tetrahedron interiors preserve exact contact boundaries", r.rotated === 10000 && r.tetrahedra === 5000 && r.failures.length === 0, JSON.stringify(r));
     record("convex collision: tilted ceilings clear grazing bodies and block penetrations and crossing sweeps", r.tilted === 10000 && r.ceiling === 4 && r.failures.length === 0, JSON.stringify(r));
   }
+
+  {
+    const hit = BL.convex.sweptCylinder, random = BL.math.mulberry32(8147), triangle = new Float64Array(9), repeated = new Float64Array(18);
+    let samples = 0, differences = 0, contacts = 0, boundaries = 0;
+    const compare = (...args) => {
+      // Repeating every vertex preserves this convex hull and its centroid but
+      // bypasses the triangle-only shortcut, exercising the original GJK path.
+      repeated.set(triangle); repeated.set(triangle, 9);
+      const expected = hit(repeated, ...args), actual = hit(triangle, ...args);
+      differences += +(actual !== expected); contacts += +expected; samples++;
+    };
+    for (let i = 0; i < 50000; i++) {
+      const scale = i % 9 === 0 ? 1 / 65536 : i % 9 === 1 ? 1024 : 1;
+      const value = () => (Math.floor(random() * 2048) - 1024) * scale / 256;
+      for (let j = 0; j < triangle.length; j++) triangle[j] = value();
+      if (i % 7 === 0) triangle[1] = triangle[4] = triangle[7] = value();
+      if (i % 13 === 0) for (let j = 0; j < 3; j++) triangle[6 + j] = triangle[j];
+      const x = value(), y = value(), z = value(), moving = i % 4 === 0;
+      const radius = Math.abs(value()), height = Math.abs(value());
+      compare(x, y, z, moving ? value() : x, moving ? value() : y, moving ? value() : z,
+        radius, height, Math.abs(value()), Math.abs(value()));
+    }
+    for (const gap of [-2e-7, -1e-7, 0, 1e-7, 2e-7]) {
+      triangle.set([0, -2, -2, 0, 3, 2, 0, 3, -2]);
+      compare(1 + gap, 0, 0, 1 + gap, 0, 0, 1, 1); boundaries++;
+      triangle.set([-2, 0, -2, 0, 0, 2, 2, 0, -2]);
+      compare(0, gap, 0, 0, gap, 0, 0.5, 1); boundaries++;
+      compare(0, -1 + gap, 0, 0, -1 + gap, 0, 0.5, 1); boundaries++;
+    }
+    record("convex collision: stationary triangle rejection agrees with unchanged GJK for varied sizes, degeneracies, moving sweeps and cap/edge contacts",
+      samples === 50015 && boundaries === 15 && contacts > 10000 && differences === 0,
+      JSON.stringify({ samples, boundaries, contacts, differences }));
+  }
   {
     const r = await lifehashProbe();
     record("room LifeHash: exact v2 images match independent reference vectors, including UTF-8 and coordinate domains", r.vectors === 14 && r.referenceMatches === 14 && r.shapeMatches === 14 && r.repeatMatches === 14 && r.unique === 14 && r.failures.length === 0, JSON.stringify(r));
