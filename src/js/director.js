@@ -324,7 +324,7 @@
     }
     // Game scenes can expose a dedicated Agent. Hub companions are selected
     // directly; Shift+A never creates another gorilla there.
-    if (active.agent && e.shiftKey && !e.metaKey && !e.ctrlKey && (e.key === "A" || e.key === "a")) {
+    if ((active.agent || active.summonAgent) && e.shiftKey && !e.metaKey && !e.ctrlKey && (e.key === "A" || e.key === "a")) {
       e.preventDefault();
       if (transition) return;
       if (agentPlay.active) agentPlay.stop();

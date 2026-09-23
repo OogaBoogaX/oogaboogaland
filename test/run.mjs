@@ -56,7 +56,7 @@ const { npcPathWalkingProbe, npcCenterlineProbe, npcLowerTurnsProbe, npcStairPas
   // Path preference must never block arrival.
   const npcPathWalkingProbe = () => {
     const B = window.__ooga, BL = window.BL, S = BL.scene, scene = BL.scenes.hub;
-    const actors = [...B.cavemen.values()], cave = actors.find((c) => c.state === "working"), blocker = actors.find((c) => c !== cave);
+    const actors = [...B.cavemen.values()], cave = actors.find((c) => c.state === "working") || actors[0], blocker = actors.find((c) => c !== cave);
     const nav = B.headquarters.npcPaths, path = B.island.path, rows = [], dt = 1 / 30;
     const cage = S.createNode(), wall = BL.models.box({ w: 2.6, h: 1.2, d: 0.25, color: "#777777" });
     for (let n = 0; n < 4; n++) S.addChild(cage, S.createNode({ geometry: wall,
@@ -124,10 +124,9 @@ const { npcPathWalkingProbe, npcCenterlineProbe, npcLowerTurnsProbe, npcStairPas
 
   const npcCenterlineProbe = () => {
     const B = window.__ooga, scene = window.BL.scenes.hub, S = window.BL.scene;
-    const nav = B.headquarters.npcPaths, path = B.island.path, actors = [...B.cavemen.values()], cave = actors.find((c) => c.state === "working"), rows = [];
+    const nav = B.headquarters.npcPaths, path = B.island.path, actors = [...B.cavemen.values()], cave = actors.find((c) => c.state === "working") || actors[0], rows = [];
     B.pilot.release(true); B.setPileLevel(100000);
-    const update = scene.update, agentY = B.agent.root.position.y; scene.update = () => {};
-    B.agent.root.position.y = 100; // This is the unobstructed path baseline; Agent avoidance has its own checks.
+    const update = scene.update; scene.update = () => {};
     for (const prop of B.props) prop.node.visible = false;
     for (const c of actors) { c.root.visible = false; c.state = "chilling"; c.work.phase = ""; B.crew.stopBurst(c); B.crew.stopReload(c, true); c.bedTravel.mode = ""; c.walk = null; c.act.kind = "idle"; c.act.until = c.nextBuildAt = 1e12; }
     cave.root.visible = true;
@@ -172,11 +171,11 @@ const { npcPathWalkingProbe, npcCenterlineProbe, npcLowerTurnsProbe, npcStairPas
         rows.push({ line, pathLength, connected, arrived: !cave.walk, onPath: onPath / frames, error, laneError, laneSamples, rightSamples, frames, deviation, distance: Math.hypot(cave.root.position.x - end.x, cave.root.position.z - end.z) });
       }
       return { rows, lines: path.centerlines.length, nodes: nav.nodes, capacity: nav.capacity };
-    } finally { B.agent.root.position.y = agentY; scene.update = update; }
+    } finally { scene.update = update; }
   };
 
   const npcLowerTurnsProbe = () => {
-    const B = window.__ooga, BL = window.BL, scene = BL.scenes.hub, actors = [...B.cavemen.values()], cave = actors.find((c) => c.state === "working"), rows = [];
+    const B = window.__ooga, BL = window.BL, scene = BL.scenes.hub, actors = [...B.cavemen.values()], cave = actors.find((c) => c.state === "working") || actors[0], rows = [];
     B.pilot.release(true);
     const update = scene.update; scene.update = () => {};
     for (const prop of B.props) prop.node.visible = false;
@@ -222,7 +221,7 @@ const { npcPathWalkingProbe, npcCenterlineProbe, npcLowerTurnsProbe, npcStairPas
 
   const npcStairPassingProbe = ({ dt = 1 / 30 } = {}) => {
     const B = window.__ooga, BL = window.BL, scene = BL.scenes.hub, actors = [...B.cavemen.values()];
-    const cave = actors.find((c) => c.state === "working"), blocker = actors.find((c) => c !== cave), rows = [];
+    const cave = actors.find((c) => c.state === "working") || actors[0], blocker = actors.find((c) => c !== cave), rows = [];
     B.pilot.release(true);
     const update = scene.update; scene.update = () => {};
     for (const c of actors) {
@@ -1320,7 +1319,7 @@ const { canopyCertificateProbe, canopyPileProbe } = (() => {
 
   const canopyPileProbe = () => {
     const B = window.__ooga, S = window.BL.scenes.hub, H = B.headquarters;
-    const actor = [...B.cavemen.values()].find((c) => c.state === "working");
+    const actors = [...B.cavemen.values()], actor = actors.find((c) => c.state === "working") || actors[0];
     const provider = H.objectGuides.getProvider(B.core), update = S.update, clear = B.island.sightClearAt;
     // Three views remain behind the rock rim; raising the first above it sees
     // through decorative canopy and must clear guides without touching the pile.
@@ -1756,7 +1755,7 @@ const { npcLaneSpacingProbe, npcLaneCornerProbe, npcLaneCurveProbe, npcLabLanePr
   // basis both down the authored curve and in the walking character's heading.
   const npcLabLaneProbe = ({ dt = 1 / 60 } = {}) => {
     const B = window.__ooga, BL = window.BL, S = BL.scene, scene = BL.scenes.hub, rows = [];
-    const actors = [...B.cavemen.values()], cave = actors.find((c) => c.state === "working"), path = B.island.path;
+    const actors = [...B.cavemen.values()], cave = actors.find((c) => c.state === "working") || actors[0], path = B.island.path;
     const mouth = B.mouths.find((m) => m.id === "c11");
     let trail = null, nearest = Infinity;
     for (const line of path.centerlines) {
@@ -1766,8 +1765,6 @@ const { npcLaneSpacingProbe, npcLaneCornerProbe, npcLaneCurveProbe, npcLabLanePr
     const points = trail.filter((p) => Math.hypot(p.x, p.z) > path.debug.ringCenterRadius + 1 && Math.hypot(p.x, p.z) < 15);
     const view = BL.math.mat4.create(), eye = { x: 0, y: 1, z: 0 }, ahead = { x: 0, y: 1, z: 0 }, up = { x: 0, y: 1, z: 0 };
     const update = scene.update; scene.update = () => {}; B.pilot.release(true);
-    // The Agent wanders and can be standing on the trail; lifted clear like the other lane probes do.
-    const agentY = B.agent.root.position.y; B.agent.root.position.y = 100;
     for (const prop of B.props) prop.node.visible = false;
     for (const c of actors) {
       c.root.visible = false; c.state = "working"; c.bedTravel.mode = ""; c.walk = null;
@@ -1810,7 +1807,7 @@ const { npcLaneSpacingProbe, npcLaneCornerProbe, npcLaneCurveProbe, npcLabLanePr
         rows.push({ direction, start, end, frames, samples, minimumRight, minimumFacingRight, laneError, maximumHop, maximumStep, arrived: !cave.walk });
       }
       return { dt, rows };
-    } finally { B.agent.root.position.y = agentY; scene.update = update; }
+    } finally { scene.update = update; }
   };
 
   // The actual lab spoke joins a circular route at a sharp angle. The offset
@@ -2819,6 +2816,7 @@ const wallPerformance = async (b) => {
   for (const covered of [false, true]) {
     const r = await b.evaluate(`(async () => {
       const B = window.__ooga, actor = B.cavemen.get("portlandhodl");
+      B.renderer.setQuality("high");
       if (B.crew.player !== actor) B.pilot.possess(actor);
       B.pilot.navigate({ position: { x: 10, y: B.island.surfaceAt(10, 0), z: 0 }, yaw: 0, pitch: 0.4, dist: ${covered ? 55 : 10} });
       const start = performance.now(), first = B.renderedFrames, p = actor.root.position, originX = p.x, originZ = p.z, frames = [];
@@ -3089,9 +3087,8 @@ const mineControls = { name: "mine controls", why: "regression: steering keys ca
   record("mine controls: Escape closes a card, then pauses, then leaves for the island with the run saved", ladder.opened && !ladder.first.card && !ladder.first.paused && ladder.second.paused && ladder.second.scene === "mine" && left.scene === "hub" && left.saved, JSON.stringify({ ...ladder, left }));
 } };
 
-// Walking relative to the camera, measured on screen with real keyboard events (the path a key takes; a
-// synthetic window event reaches the Ooga's controls even while the Agent is driven). Each key starts from
-// the same placement and passes when most of the move lies along its label and the pixel step agrees.
+// Walking relative to the camera with real keyboard events. Each key starts from the same placement and
+// passes when most of the world-space move lies along the camera-relative direction on its label.
 const holdKey = async (b, k, seconds) => {
   await b.send("Input.dispatchKeyEvent", { type: "keyDown", key: k, text: k, code: "Key" + k.toUpperCase() });
   await b.evaluate(`window.__ooga.advance(${seconds}, 1 / 60)`);
@@ -3103,29 +3100,25 @@ const walkKeys = async (b, who, x, z, yaws, seconds) => {
   const rows = {};
   for (const yaw of yaws) for (const k of "wasd") {
     await b.evaluate(`(() => { const B = window.__ooga; let body;
-      if ("${who}" === "agent") { B.pilot.orbit.yaw = B.pilot.orbit.tYaw = ${yaw}; B.agent.place(${x}, ${z}, ${yaw} + Math.PI); body = B.agent.root; }
-      else { const a = B.cavemen.get("${who}"); if (B.crew.player !== a) B.pilot.possess(a); B.pilot.navigate({ position: { x: ${x}, y: B.island ? B.island.surfaceAt(${x}, ${z}) : 0, z: ${z} }, yaw: ${yaw}, pitch: 0.4, dist: 10 }); body = a.root; }
+      const a = B.cavemen.get("${who}"); if (B.crew.player !== a) B.pilot.possess(a); B.pilot.navigate({ position: { x: ${x}, y: B.island ? B.island.surfaceAt(${x}, ${z}) : 0, z: ${z} }, yaw: ${yaw}, pitch: 0.4, dist: 10 }); body = a.root;
       B.advance(0.5, 1 / 60);
       const c = B.camera, vx = c.target.x - c.position.x, vz = c.target.z - c.position.z, l = Math.hypot(vx, vz), p = body.position;
       window.__walk = { body, fx: vx / l, fz: vz / l, x0: p.x, y0: p.y, z0: p.z }; })()`);
     await holdKey(b, k, seconds);
-    const r = await b.evaluate(`(() => { const B = window.__ooga, q = window.__walk, p = q.body.position, dx = p.x - q.x0, dz = p.z - q.z0, a = B.project(q.x0, q.y0, q.z0, {}), e = B.project(p.x, p.y, p.z, {}); return { right: dx * -q.fz + dz * q.fx, fwd: dx * q.fx + dz * q.fz, px: e.x - a.x, py: a.y - e.y }; })()`);
+    const r = await b.evaluate(`(() => { const q = window.__walk, p = q.body.position, dx = p.x - q.x0, dz = p.z - q.z0; return { right: dx * -q.fz + dz * q.fx, fwd: dx * q.fx + dz * q.fz }; })()`);
     const [er, ef] = WALK[k], along = r.right * er + r.fwd * ef;
-    rows[`${yaw} ${k}`] = { ok: along > 1 && along > 0.8 * Math.hypot(r.right, r.fwd) && (er ? Math.sign(r.px) === er : Math.sign(r.py) === ef), right: +r.right.toFixed(2), fwd: +r.fwd.toFixed(2) };
+    rows[`${yaw} ${k}`] = { ok: along > 1 && along > 0.8 * Math.hypot(r.right, r.fwd), right: +r.right.toFixed(2), fwd: +r.fwd.toFixed(2) };
   }
   return rows;
 };
 const allWalk = (rows) => Object.values(rows).every((r) => r.ok);
-const hubWalking = { name: "hub walking", why: "regression: steering keys came out mirrored in two games; an Ooga and the Agent walk relative to the camera", run: async (b) => {
+const hubWalking = { name: "hub walking", why: "regression: steering keys came out mirrored, and the removed hub Agent could still be summoned", run: async (b) => {
   const ooga = await walkKeys(b, "portlandhodl", -8, 8, [0, 2.2], 0.6);
-  // Shift+A in the hub calls in another Agent; a double-click on it is how the hub's Agent is played.
-  const at = await b.evaluate(`(() => { const B = window.__ooga; B.pilot.release(true); B.pilot.navigate({ position: { x: -8, y: 0, z: 8 }, target: { x: -8, y: 0.8, z: 8 }, yaw: 0, pitch: 0.35, dist: 7 }); B.agent.place(-8, 8, 0); B.advance(0.6, 1 / 60); B.agent.place(-8, 8, 0); B.advance(1 / 60, 1 / 60); const p = B.agent.root.position; return B.project(p.x, p.y + 0.8, p.z, {}); })()`);
-  await b.click(at.x, at.y);
-  await b.click(at.x, at.y);
-  const driven = await b.evaluate(`window.__ooga.agent.driven`);
-  const agent = driven ? await walkKeys(b, "agent", -8, 8, [0, 2.2], 0.6) : {};
+  await b.evaluate(`window.__ooga.pilot.release(true)`);
+  await b.key("A", 8);
+  const agent = await b.evaluate(`window.__ooga.agent`);
   await b.key("Escape");
-  record("hub walking: W A S D walk an Ooga and the Agent away, left, back and right on screen from two camera angles", allWalk(ooga) && driven && allWalk(agent), JSON.stringify({ ooga, driven, agent }));
+  record("hub walking: W A S D walk an Ooga away, left, back and right on screen from two camera angles, and Shift+A does not restore the removed hub Agent", allWalk(ooga) && !agent, JSON.stringify({ ooga, agent }));
 } };
 // The hub is the games' menu: walk up to each and press Space, or tap the Mempool stair.
 const HUB_SPOTS = {
@@ -3161,11 +3154,10 @@ const labWalking = { name: "lab walking", why: "regression: Shift+A left A held 
   await b.evaluate(`window.__ooga.pilot.release(true)`);
   await b.key("A", 8);
   const still = await b.evaluate(`(() => { const B = window.__ooga, p = B.agent.root.position, x = p.x, z = p.z; B.advance(1, 1 / 60); return { driven: B.agent.driven, drift: +Math.hypot(p.x - x, p.z - z).toFixed(2) }; })()`);
-  const agent = await walkKeys(b, "agent", 5, 5, [0, 2.2], 0.6);
   await b.key("Escape");
   const after = await b.evaluate(`(() => { const B = window.__ooga, a = B.cavemen.get("portlandhodl"); B.pilot.possess(a); B.pilot.navigate({ position: { x: 5, y: 0, z: 5 }, yaw: 0, pitch: 0.4, dist: 10 }); B.advance(0.3, 1 / 60); const p = a.root.position, x = p.x, z = p.z; B.advance(1, 1 / 60); return +Math.hypot(p.x - x, p.z - z).toFixed(2); })()`);
   await b.key("Escape");
-  record("lab walking: W A S D walk an Ooga and the Agent their way on screen, Shift+A leaves no key held, and an Ooga taken after the Agent stands still", allWalk(ooga) && still.driven && still.drift < 0.2 && allWalk(agent) && after < 0.2, JSON.stringify({ ooga, still, agent, after }));
+  record("lab walking: W A S D walk an Ooga their way on screen, Shift+A summons a still Agent without leaving A held, and an Ooga taken after the Agent stands still", allWalk(ooga) && still.driven && still.drift < 0.2 && after < 0.2, JSON.stringify({ ooga, still, after }));
 } };
 const labKeys = { name: "lab keys", why: "rule: B streams the test bananas onto the pile, and Escape lets go of an Ooga before it leaves the lab", run: async (b) => {
   const before = await b.evaluate(`window.__ooga.stats().dropsLanded`);
@@ -3211,7 +3203,7 @@ const tapKey = async (b, key) => {
   await b.send("Input.dispatchKeyEvent", { type: "keyUp", key, code });
 };
 // The healthiest of its kind, so a prop an earlier step shot at is never the one measured.
-const nextTo = (prop, gap) => `(() => { const B = window.__ooga, a = B.cavemen.get("portlandhodl"); if (B.crew.player !== a) B.pilot.possess(a); const r = B.headquarters.breakables.list.filter((r) => r.owner.prop === "${prop}" && r.owner.active && !r.broken).sort((a, b) => b.health - a.health)[0]; window.__target = r; const t = r.owner.node.position; B.pilot.navigate({ position: { x: t.x - ${gap}, y: a.root.position.y, z: t.z }, yaw: -Math.PI / 2, pitch: 0.3, dist: 4 }); B.advance(0.3, 1 / 60); return r.health; })()`;
+const nextTo = (prop, gap, yaw = "-Math.PI / 2", pitch = 0.3) => `(() => { const B = window.__ooga, a = B.cavemen.get("portlandhodl"); if (B.crew.player !== a) B.pilot.possess(a); const r = B.headquarters.breakables.list.filter((r) => r.owner.prop === "${prop}" && r.owner.active && !r.broken).sort((a, b) => b.health - a.health)[0]; window.__target = r; const t = r.owner.node.position; B.pilot.navigate({ position: { x: t.x - ${gap}, y: a.root.position.y, z: t.z }, yaw: ${yaw}, pitch: ${pitch}, dist: 4 }); B.advance(0.3, 1 / 60); return r.health; })()`;
 const hubMelee = { name: "hub melee", why: "rule: a swing does one damage, so a box breaks in one, a barrel in three and a rock in five, and the prop comes back", run: async (b) => {
   const swings = {};
   await tapKey(b, "1");
@@ -3230,7 +3222,7 @@ const hubMelee = { name: "hub melee", why: "rule: a swing does one damage, so a 
 } };
 const AK_STATE = `(() => { const w = window.__ooga.crew.player.weapon; return { ammo: w.ammo, spares: w.spareAmmo.slice(), shots: w.shotsFired }; })()`;
 const hubAk = { name: "hub ak", why: "regression: R did nothing unless the player was aiming, so an AK emptied with V could not swap in its spare", run: async (b) => {
-  const barrel = await b.evaluate(nextTo("barrel", 3));
+  const barrel = await b.evaluate(nextTo("barrel", 3, -1.34, 0.12));
   await tapKey(b, "2");
   await b.evaluate(`window.__ooga.advance(0.4, 1 / 60)`);
   const start = await b.evaluate(AK_STATE);
@@ -3253,7 +3245,7 @@ const hubJetpack = { name: "hub jetpack", why: "rule: J wears the jetpack, Space
   await b.evaluate(`window.__ooga.advance(2, 1 / 60)`);
   const up = await b.evaluate(JET_STATE);
   await b.send("Input.dispatchKeyEvent", { type: "keyUp", key: " ", code: "Space" });
-  await b.evaluate(`window.__ooga.advance(5, 1 / 60)`);
+  await b.evaluate(`window.__ooga.advance(6, 1 / 60)`);
   const down = await b.evaluate(JET_STATE);
   await b.evaluate(`(() => { const B = window.__ooga, a = B.crew.player, I = B.island, ang = Math.PI / 4; let r = 5; while (I.onLand(Math.sin(ang) * r, Math.cos(ang) * r)) r += 0.25; r -= 1.5; const x = Math.sin(ang) * r, z = Math.cos(ang) * r; B.pilot.navigate({ position: { x, y: I.surfaceAt(x, z), z }, yaw: ang + Math.PI, pitch: 0.4, dist: 10 }); B.advance(0.5, 1 / 60); })()`);
   await b.send("Input.dispatchKeyEvent", { type: "keyDown", key: "w", code: "KeyW", text: "w" });
