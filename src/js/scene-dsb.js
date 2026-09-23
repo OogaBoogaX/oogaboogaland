@@ -22,6 +22,7 @@
   const targets = [], visitors = [], shots = [], rails = [], ties = [], candles = [], railY = new Float64Array(N), railColor = new Uint8Array(N);
   const railPoint = { x: 0, y: 0, z: 0 }, railAhead = { x: 0, y: 0, z: 0 }, previous = { x: 0, z: 26 };
   const transitPrevious = { x: 0, y: 0, z: 25 }, transitCurrent = { x: 0, y: 0, z: 25 };
+  const radioSource = { x: 0, y: 0, z: 0 };
   const agentPerception = { name: "", x: 0, y: 0, z: 0, food: 0, active: false };
   const feedback = ["Ooga! Tough crowd!", "That one was ripe!", "Save some for the sandwich!", "Encore! But fewer tomatoes!"];
   const jokes = ["I bought the dip. Nobody brought chips.", "My wallet is cold. My banana bread is warm.", "A turtle walks into a bar. Eventually.", "Proof of work? I carried this microphone."];
@@ -67,9 +68,8 @@
   const syncPlayer = () => pilot.setActive(cameraEnabled());
   const clearAt = (x, z, radius = 0.35) => Math.hypot(x, z) < 35 - radius
     && !(land && Math.hypot(x - transitGate.dialer.position.x, z - transitGate.dialer.position.z) < 0.55 + radius)
+    && (!land || land.landmarks.shop.clearAt(x, z, radius) && land.landmarks.tv.clearAt(x, z, radius))
     && !(Math.abs(x) < 8.6 + radius && Math.abs(z) < 2.6 + radius
-      || Math.abs(x + 10) < 4.4 + radius && Math.abs(z - 13) < 1.9 + radius
-      || Math.abs(x + 20) < 4 + radius && Math.abs(z - 13) < 2 + radius
       || Math.abs(x + 18) < 7.5 + radius && z > -20.5 - radius && z < -11.5 + radius
       || z > 28.5 - radius && z < 33 + radius && (Math.abs(x + 7) > 2.25 - radius && Math.abs(x + 7) < 3.8 + radius || z > 32.1 - radius && Math.abs(x + 7) < 3.8 + radius));
   const walkable = (ax, az, bx, bz, y, height, actor) => {
@@ -85,12 +85,13 @@
   const nearZuzu = () => playerEnabled() && Math.hypot(avatar.root.position.x - zuzu.root.position.x, avatar.root.position.z - zuzu.root.position.z) < 3.5;
   const reloadPolicy = { near: () => playerEnabled(), available: () => true, consume: () => {} };
   const near = (x, z, radius = 5) => { const p = location(); return Math.hypot(p.x - x, p.z - z) < radius; };
+  const nearLandmark = name => !!land && land.landmarks[name].near(location());
   const clampTarget = (p) => {
     const radius = Math.hypot(p.x, p.z);
     if (avatarView && !pilot?.player) p.y = 1.7;
     if (radius > 35) { p.x *= 35 / radius; p.z *= 35 / radius; }
     // Solid landmark footprints; each attempted step keeps its last clear position.
-    if (Math.abs(p.x) < 8.6 && Math.abs(p.z) < 2.6 || Math.abs(p.x + 10) < 4.4 && Math.abs(p.z - 13) < 1.9 || Math.abs(p.x + 20) < 4 && Math.abs(p.z - 13) < 2 || Math.abs(p.x + 18) < 7.5 && p.z > -20.5 && p.z < -11.5) { p.x = previous.x; p.z = previous.z; }
+    if (Math.abs(p.x) < 8.6 && Math.abs(p.z) < 2.6 || land && (!land.landmarks.shop.clearAt(p.x, p.z) || !land.landmarks.tv.clearAt(p.x, p.z)) || Math.abs(p.x + 18) < 7.5 && p.z > -20.5 && p.z < -11.5) { p.x = previous.x; p.z = previous.z; }
     // Cave walls are solid; its central passage remains walkable.
     if (p.z > 28.5 && p.z < 33 && (Math.abs(p.x + 7) > 2.25 && Math.abs(p.x + 7) < 3.8 || p.z > 32.1 && Math.abs(p.x + 7) < 3.8)) { p.x = previous.x; p.z = previous.z; }
     previous.x = p.x; previous.z = p.z;
@@ -185,8 +186,8 @@
     if (inCave()) return "exit";
     if (atDock()) return boatTrip.wait > 0 ? "boat" : "boat-wait";
     if (atStation()) return trainTrip.wait > 0 ? "coaster" : "coaster-wait";
-    if (near(-10, 16, 6)) return "tv";
-    if (near(-20, 16, 6)) return "shop";
+    if (nearLandmark("tv")) return "tv";
+    if (nearLandmark("shop")) return "shop";
     if (nearZuzu()) return "zuzu";
     return "";
   };
@@ -203,15 +204,15 @@
     camera.target.x = camera.position.x + Math.sin(yaw) * cp * 10; camera.target.y = camera.position.y + Math.sin(pitch) * 10; camera.target.z = camera.position.z + Math.cos(yaw) * cp * 10;
   };
   const openTv = () => {
-    if (phase !== "land" || !near(-10, 16, 6) || location().y > 6) { toast("Walk up to the TV beside the meme stand to open it."); return; }
+    if (phase !== "land" || !nearLandmark("tv") || location().y > 6) { toast("Walk up to the screen facing the Stargate plaza to open it."); return; }
     tv.open(); syncPlayer();
   };
   const openShop = () => {
-    if (phase !== "land" || !near(-20, 16, 7)) { toast("Visit the meme stand beside the purple canopy."); return; }
+    if (phase !== "land" || !nearLandmark("shop")) { toast("Visit the meme stand facing the Stargate plaza."); return; }
     panel.dataset.folded = "false"; document.getElementById("dsb-toggle").textContent = "Hide DSB menu"; document.getElementById("dsb-toggle").setAttribute("aria-expanded", "true"); document.getElementById("dsb-shop").hidden = false; syncPlayer();
   };
   const buy = (kind) => {
-    if (phase !== "land" || !near(-20, 16, 7)) { toast("Purchases happen at the meme stand."); return; }
+    if (phase !== "land" || !nearLandmark("shop")) { toast("Purchases happen at the meme stand."); return; }
     const price = kind === "bread" ? 3 : 1;
     if (tokens < price) { toast("No demo tokens left this visit."); return; }
     if ((kind === "bread" ? bread : kind === "banana" ? bananas : tomatoes) >= 9) { toast("Your bag holds nine of each item."); return; }
@@ -241,8 +242,8 @@
     else if (inCave()) returnHub();
     else if (atDock()) board("boat");
     else if (atStation()) board("coaster");
-    else if (near(-10, 16, 6)) openTv();
-    else if (near(-20, 16, 7)) openShop();
+    else if (nearLandmark("tv")) openTv();
+    else if (nearLandmark("shop")) openShop();
     else if (nearZuzu()) conversation.open();
     else if (near(-18, -10, 7)) perform();
     else if (inCave()) returnHub();
@@ -370,7 +371,8 @@
     }
     syncContext();
     fx.update(dt);
-    audio.environment(camera, land.boats[0].position, dt);
+    land.landmarks.tv.point(-0.55, 3.3, 1.63, radioSource);
+    audio.environment(camera, land.boats[0].position, dt, radioSource);
     for (let i = 0; i < land.falls.length; i++) { const f = land.falls[i]; f.glow = 0.55 + 0.2 * Math.sin(time * 3 + i * 0.4); f.scale.y = 7.5 + 0.5 * Math.sin(time * 1.7 + i); land.spray[i].position.y = -0.5 - (time * 4 + i * 0.71) % 11; }
     if (data.state.height !== lastHeight) { if (lastHeight) skyPulse = 1; lastHeight = data.state.height; }
     skyPulse = Math.max(0, skyPulse - dt * 0.25);
@@ -425,7 +427,7 @@
     transitGate.dialer.rotation.y = Math.PI;
     addChild(land.root, transitGate.dialer); register(transitGate.dialer, "stargate-dialer", "Stargate dialer · OogaBoogaLand");
     transitGate.enableDialer([{ id: "hub", label: "OogaBoogaLand", enabled: true }, ...Array.from({ length: 4 }, (_, i) => ({ id: "quarantine-" + i, label: "Quarantined - Replicator Infestation - Clean Up In Progress", enabled: false }))]);
-    zuzu = BL.dsbAgent.create({ parent: land.root, input, clearAt });
+    zuzu = BL.dsbAgent.create({ parent: land.root, input, clearAt, landmarks: land.landmarks });
     if (!RAIL_GEOMETRY) {
       RAIL_GEOMETRY = [M.cube("#f05278", 0.5), M.cube("#55e49b", 0.5)];
       SUPPORT_GEOMETRY = [M.cube("#80314d"), M.cube("#287958")];
@@ -484,7 +486,7 @@
     document.getElementById("dsb-shop").hidden = true; document.getElementById("dsb-live").setAttribute("aria-pressed", "true"); soundUi();
     document.body.classList.add("dsb-active", "dsb-entry"); document.addEventListener("visibilitychange", onVisibility); bagText();
     dsbScene.renderOpts = DARK;
-    Object.assign(dsbScene, { root, camera, input, debug: { camera, pilot, crew, controls: pilot.controls, hud, audio, dsb: { get zuzu() { return zuzu; }, get conversation() { return conversation; }, get gate() { return transitGate; }, get resources() { return { land: !!land, rides: rails.length, tomatoes: shots.length, shop: !!land, tv: !!tv, zuzu: !!zuzu, conversation: !!conversation, data: !!data, visitors: visitors.length, ambience: !!audio.ambience }; }, get phase() { return phase; }, get arrivalTime() { return arrivalTime; }, get glance() { return glance; }, avatar, get progress() { return progress; }, get inventory() { return { tokens, bread, bananas, tomatoes }; }, get shots() { return shots.filter((s) => s.life > 0).length; }, get land() { return land; }, visitors, get data() { return data; }, get tv() { return tv; }, openTv, boatTrip, trainTrip, get rideLook() { return { yaw: rideYaw, pitch: ridePitch }; }, railY, board, buy, eat, throwTomato, stopRide, get fired() { return Array.from(audio.fired); } } } });
+    Object.assign(dsbScene, { root, camera, input, debug: { camera, pilot, crew, controls: pilot.controls, hud, audio, dsb: { clearAt, get zuzu() { return zuzu; }, get conversation() { return conversation; }, get gate() { return transitGate; }, get resources() { return { land: !!land, rides: rails.length, tomatoes: shots.length, shop: !!land, tv: !!tv, zuzu: !!zuzu, conversation: !!conversation, data: !!data, visitors: visitors.length, ambience: !!audio.ambience }; }, get phase() { return phase; }, get arrivalTime() { return arrivalTime; }, get glance() { return glance; }, avatar, get progress() { return progress; }, get inventory() { return { tokens, bread, bananas, tomatoes }; }, get shots() { return shots.filter((s) => s.life > 0).length; }, get land() { return land; }, visitors, get data() { return data; }, get tv() { return tv; }, openTv, boatTrip, trainTrip, get rideLook() { return { yaw: rideYaw, pitch: ridePitch }; }, railY, board, buy, eat, throwTomato, stopRide, get fired() { return Array.from(audio.fired); } } } });
     syncContext(); update(0, 0);
   };
   const leave = () => {

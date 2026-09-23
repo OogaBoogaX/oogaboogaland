@@ -5,12 +5,12 @@
   const { createNode, addChild, removeChild, traverseVisible } = BL.scene;
   const { clamp } = BL.math, M = BL.dsbModels;
   const HOME = 0, RADIUS = 0.42, CAPACITY = 64;
-  const POINTS = Object.freeze([
+  const pointsFor = landmarks => Object.freeze([
     Object.freeze({ id: "arrival", x: -4, z: 23 }), Object.freeze({ id: "perch", x: -11, z: 23 }),
-    Object.freeze({ id: "snack_watch", x: -19, z: 23 }), Object.freeze({ id: "west", x: -25, z: 14 }),
-    Object.freeze({ id: "west_lane", x: -26, z: 7 }), Object.freeze({ id: "shop_lane", x: -16, z: 7 }),
+    Object.freeze({ id: "snack_watch", ...landmarks.shop.point(0, 0, 4) }), Object.freeze({ id: "west", x: -25, z: 14 }),
+    Object.freeze({ id: "west_lane", x: -26, z: 7 }), Object.freeze({ id: "shop_lane", ...landmarks.shop.point(5.5, 0, 4) }),
     Object.freeze({ id: "courtyard", x: -4, z: 7 }), Object.freeze({ id: "east_lane", x: 5, z: 7 }),
-    Object.freeze({ id: "garden", x: 14, z: 7 }), Object.freeze({ id: "east", x: 15, z: 17 }),
+    Object.freeze({ id: "garden", x: 14, z: 7 }), Object.freeze({ id: "east", ...landmarks.tv.point(0, 0, 4) }),
     Object.freeze({ id: "watch", x: 0, z: 18 })
   ]);
   const FIELDS = Object.freeze({ say: "text", walk_to: "destination", follow_player: "", stop_following: "", look_at: "entity", approach: "entity", flee: "", gesture: "name" });
@@ -52,7 +52,8 @@
     round(tail, 0, 0.66, 0.06, 0.12, 0.14, 0.25);
     return { root, head, body, legs, tail };
   };
-  const create = ({ parent, input, clearAt, brain = BL.dsbAgentBrain.create() }) => {
+  const create = ({ parent, input, clearAt, landmarks, brain = BL.dsbAgentBrain.create() }) => {
+    const POINTS = pointsFor(landmarks);
     const cat = model(), p = cat.root.position, visit = ++visitSerial;
     p.x = POINTS[HOME].x; p.z = POINTS[HOME].z;
     addChild(parent, cat.root);

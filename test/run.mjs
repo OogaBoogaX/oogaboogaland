@@ -3210,6 +3210,10 @@ const dsbEnter = async (b) => {
     B.pilot.release(true); B.go("dsb"); B.advance(0.6);
   })()`);
 };
+const dsbApproach = async (b, name) => b.evaluate(`(() => {
+  const B = __ooga, landmark = B.dsb.land.landmarks[${JSON.stringify(name)}], p = landmark.point();
+  B.pilot.navigate({ yaw: landmark.node.rotation.y, pitch: 0.2, dist: 7, position: p, target: { x: p.x, y: 1.7, z: p.z } }); B.advance(0.1);
+})()`);
 const dsbExit = async (b) => {
   await b.evaluate(`__ooga.pilot.navigate({ yaw: 0, pitch: 0, dist: 6, target: { x: -7, y: 1.7, z: 30.5 }, position: { x: -7, y: 0, z: 30.5 } }); __ooga.advance(0.1); document.getElementById("dsb-context").click();`);
   await untilPage(b, 'B.scene === "hub" && !B.transitioning', 15000);
@@ -3334,6 +3338,47 @@ for (const mobile of [false, true]) scene("hub", { label: "stargate dsb travel "
   await b.evaluate(`window.__landGate = __ooga.dsb.gate; window.__landRoot = BL.scenes.dsb.root; window.__landZuzu = __ooga.dsb.zuzu; __ooga.go("hub")`);
   if (!await untilPage(b, 'B.scene === "hub" && !B.transitioning', 20000)) throw Error("Land disposal did not return");
   check("land exit disposes agents, gate, nodes and sockets; Mine remains c10", await b.evaluate(`__landGate.disposed && __landZuzu.disposed && __landRoot.children.length === 0 && __dsbFeedFixture.sockets === __dsbFeedFixture.closed && !__ooga.dsb && BL.caves.slots.find(s => s.id === "c10").scene === "mine" && !BL.caves.slots.some(s => s.scene === "dsb")`));
+} }] });
+
+// Placement contract exercises the moved landmarks without changing travel fixtures.
+for (const mobile of [false, true]) scene("dsb", { label: "stargate dsb plaza " + (mobile ? "canvas2d" : "webgl2"), url: hubPage(dist, "scene=dsb&wip=mine" + (mobile ? "&canvas2d=1" : "")), opts: mobile ? { ...PHONE_SIZE, motion: false } : { motion: true }, steps: [{ name: "stargate dsb plaza " + (mobile ? "canvas2d" : "webgl2"), why: "regression: moved Shop and TV keep collision, interactions, radio and cat navigation attached to their fronts", run: async b => {
+  const check = (name, ok, detail = "") => record("DSB plaza " + (mobile ? "canvas2d: " : "webgl2: ") + name, ok, detail);
+  const press = async selector => {
+    const p = await b.evaluate(`(() => { const e = document.querySelector(${JSON.stringify(selector)}); e.scrollIntoView({ block: "nearest" }); const r = e.getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; })()`);
+    if (mobile) { await b.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [p] }); await b.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] }); }
+    else await b.click(p.x, p.y);
+  };
+  check("landmark geometry and services absent during transit", await b.evaluate(`!__ooga.dsb.land && !__ooga.dsb.resources.shop && !__ooga.dsb.resources.tv && __gateDormancy.land === 0 && __gateDormancy.tv === 0 && __gateDormancy.radio === 0 && __gateDormancy.fetch === 0`));
+  await b.evaluate(`window.dispatchEvent(new KeyboardEvent("keydown", { key: "w" })); BL.scenes.dsb.update(__ooga.audio.duration + 1, 1); window.dispatchEvent(new KeyboardEvent("keyup", { key: "w" })); document.querySelector('[data-action="dsb-skip"]').click();`);
+  const placement = await b.evaluate(`(() => { const d = __ooga.dsb, a = d.land.landmarks, centre = { x: 0, z: 18 }; return { shop: a.shop.node.position, tv: a.tv.node.position, shopYaw: a.shop.node.rotation.y, tvYaw: a.tv.node.rotation.y, gate: d.gate.root.position, dialer: d.gate.dialer.position, land: __gateDormancy.land, tvCount: __gateDormancy.tv, inward: Object.values(a).every(l => { const p = l.point(); return Math.hypot(p.x-centre.x,p.z-centre.z) < Math.hypot(l.node.position.x-centre.x,l.node.position.z-centre.z); }) }; })()`);
+  check("opposite inward fronts preserve gate and Dialer transforms", placement.shop.x === -14 && placement.tv.x === 14 && placement.shop.z === 18 && placement.tv.z === 18 && placement.shopYaw === Math.PI / 2 && placement.tvYaw === -Math.PI / 2 && placement.inward && placement.gate.x === 0 && placement.gate.y === 2 && placement.gate.z === 28 && placement.dialer.x === 3.7 && placement.dialer.z === 27 && placement.land === 1 && placement.tvCount === 1, JSON.stringify(placement));
+  const lanes = await b.evaluate(`(() => {
+    const B = __ooga, d = B.dsb, S = BL.scene, noop = () => {}, crew = BL.crew.create({ root: S.createNode(), world: { level: 0 }, input: { add: noop, remove: noop }, hud: { setRosterRow: noop }, game: { state: { assignments: {}, inventory: [] } }, pile: { footprintEdge: 1, pileEdge: () => 1 }, viewYaw: 0, buildSpots: [], walkIn: { x: 0, z: 3 }, groundAt: () => 0, walkable: () => true, bedrolls: BL.contributors.roster.map((_, i) => ({ x: 30+i*2, y: 0, z: 30, hidden: true })), fx: { say: noop, zzzAt: noop, burst: noop, puff: noop, spawnParticle: noop } });
+    const routes = [[[0,7],[0,26]],[[0,29],[0,26]],[[0,26],[0,33]],[[0,26],[3.7,25.6]],[[0,21],[7,24]],[[0,18],[-10.5,18]],[[0,18],[10.5,18]]], rows = [];
+    for (const actor of crew.cavemen.values()) { let clear = true; for (const [a,c] of routes) for (let i=0;i<=128;i++) clear &&= d.clearAt(a[0]+(c[0]-a[0])*i/128,a[1]+(c[1]-a[1])*i/128,actor.bodyRadius); rows.push({ name: actor.traits.name, clear }); }
+    crew.dispose(); return rows;
+  })()`);
+  check("all characters retain plaza, arrival, return, Dialer and ride lanes", lanes.length === CAST && lanes.every(r => r.clear), JSON.stringify(lanes));
+  const old = await b.evaluate(`(() => { const B = __ooga, d = B.dsb, out = []; for (const x of [-20,-10]) { B.pilot.navigate({ position: { x,y:0,z:13 }, target: { x,y:1.7,z:13 }, yaw:0,pitch:0.3,dist:5 }); BL.scenes.dsb.update(0,2); const tokens=d.inventory.tokens; d.buy("bread"); d.openTv(); out.push(d.clearAt(x,13,d.avatar.bodyRadius) && d.inventory.tokens===tokens && !d.tv.isOpen && !["Visit meme shop","Use TV"].includes(document.getElementById("dsb-context").textContent)); } return out; })()`);
+  check("old positions have no collision or Shop/TV interaction", old.every(Boolean), JSON.stringify(old));
+  for (const name of ["shop", "tv"]) {
+    await dsbApproach(b, name);
+    check(name + " prompt follows transformed front", await b.evaluate(`document.getElementById("dsb-context").textContent === ${JSON.stringify(name === "shop" ? "Visit meme shop" : "Use TV")}`));
+    await press("#dsb-context");
+    if (name === "shop") { await press('[data-action="dsb-bread"]'); check("Shop purchases still work", await b.evaluate(`!document.getElementById("dsb-shop").hidden && __ooga.dsb.inventory.bread === 1 && __ooga.dsb.inventory.tokens === 17`)); await press('[data-action="dsb-close-shop"]'); }
+    else { check("TV opens through native interaction", await b.evaluate(`__ooga.dsb.tv.isOpen`)); await press("#dsb-tv-close"); }
+  }
+  const audio = await b.evaluate(`(() => { const B=__ooga, d=B.dsb, source=d.land.landmarks.tv.point(-0.55,3.3,1.63), boat=d.land.boats[0].position; B.audio.environment({...B.camera,position:source},boat,5,source); const near=B.audio.radioVolume; B.audio.environment({...B.camera,position:{x:-10,y:3.3,z:14.6}},boat,5,source); const old=B.audio.radioVolume; BL.scene.updateWorld(d.land.root); const w=d.land.tvScreen.world; return { near,old,source,matches:Math.hypot(source.x-w[12],source.y-w[13],source.z-w[14])<1e-5 }; })()`);
+  check("radio source follows rendered TV screen, not old position", audio.matches && audio.near > audio.old * 2, JSON.stringify(audio));
+  const cat = await b.evaluate(`(() => {
+    const d=__ooga.dsb, noop=()=>{}, z=BL.dsbAgent.create({parent:BL.scene.createNode(),input:{add:noop,remove:noop},clearAt:d.clearAt,landmarks:d.land.landmarks,brain:{observe:noop,dispose:noop,reply:()=>""}}), sense={name:"YellowBrokeIt",x:0,y:0,z:7,food:0,active:true}, rows=[]; let time=0;
+    for (const id of ["snack_watch","shop_lane","west_lane","west","perch","east","arrival"]) {
+      z.update(0,time,sense);const s=z.snapshot(), accepted=z.request({visit:s.visit,id:s.nextRequestId,at:time,type:"walk_to",destination:id}); let clear=true;
+      for(let i=0;i<1200 && z.snapshot().self.intent === "walk";i++){time+=0.05;z.update(0.05,time,sense);clear &&= d.clearAt(z.root.position.x,z.root.position.z,0.42);}
+      rows.push({id,accepted,clear,done:z.snapshot().self.intent!=="walk",x:z.root.position.x,z:z.root.position.z});
+    }z.dispose();return rows;
+  })()`);
+  check("Zuzu routes around both moved structures to landmark-derived destinations", cat.every(r=>r.accepted==="accepted" && r.clear && r.done), JSON.stringify(cat));
 } }] });
 
 // Return-only integration: the outbound playthrough remains separately ledger-controlled.
@@ -3525,7 +3570,7 @@ scene("dsb", { label: "dsb zuzu agent", url: hubPage(dist, "scene=dsb"), steps: 
     finally { await b.evaluate(`BL.scenes.dsb.update = __zuzuUpdate; delete window.__zuzuUpdate;`); }
   }
   const place = (x, z) => b.evaluate(`__ooga.pilot.navigate({ yaw: 0, pitch: 0.2, dist: 7, target: { x: ${x}, y: 1.7, z: ${z} }, position: { x: ${x}, y: 0, z: ${z} } }); __ooga.advance(0.1);`);
-  await place(-20, 19);
+  await dsbApproach(b, "shop");
   await b.evaluate(`__ooga.dsb.buy("tomato"); __ooga.dsb.buy("tomato");`);
   await place(-4, 14.5);
   const hit = await b.evaluate(`(() => { const B = __ooga, z = B.dsb.zuzu; B.dsb.throwTomato(z); B.advance(0.8, 1 / 120); const a = z.snapshot(); B.advance(3.5); const c = z.snapshot(); return { hits: c.self.tomatoHits, intent: a.self.intent, moved: Math.hypot(c.self.x + 4, c.self.z - 23), events: c.events.map(e => e.type), dialogue: z.dialogue }; })()`);
@@ -3537,7 +3582,7 @@ scene("dsb", { label: "dsb zuzu agent", url: hubPage(dist, "scene=dsb"), steps: 
   const weapon = await b.evaluate(`(() => { const B = __ooga, z = B.dsb.zuzu, p = z.root.position; B.crew.selectWeapon(2); const fired = B.crew.fireWeapon(B.dsb.avatar, { x: p.x, y: 0.65, z: p.z }, 1); B.advance(0.3, 1 / 120); return { fired, ...z.snapshot().self }; })()`);
   record("dsb zuzu: shared weapon reports nearby fire and confirmed hit without killing her", weapon.fired && weapon.nearbyShots > 0 && weapon.weaponHits > 0 && weapon.intent === "flee", JSON.stringify(weapon));
   await b.evaluate(`__ooga.advance(18);`);
-  await place(-20, 19);
+  await dsbApproach(b, "shop");
   await b.evaluate(`__ooga.dsb.buy("banana");`);
   const hungryCat = await b.evaluate(`__ooga.dsb.zuzu.snapshot().self`);
   await place(hungryCat.x + 3, hungryCat.z);
@@ -3633,7 +3678,7 @@ for (const fallback of [false, true]) scene("dsb", { label: "dsb gameplay " + (f
   await walkTo(12, 12);
   const facing = await b.evaluate(`(() => { const rows = []; for (const key of ["w", "s"]) { window.dispatchEvent(new KeyboardEvent("keydown", { key })); __ooga.advance(0.3); const before = __ooga.dsb.avatar.root.rotation.y; window.dispatchEvent(new KeyboardEvent("keyup", { key })); __ooga.advance(0.8); rows.push({ before, after: __ooga.dsb.avatar.root.rotation.y }); } return rows; })()`);
   record("dsb walking: forward and backward stops preserve facing", facing.every(r => Math.abs(r.before - r.after) < 0.001) && Math.cos(facing[0].before - facing[1].before) < -0.9, JSON.stringify(facing));
-  await walkTo(-10, 17);
+  await dsbApproach(b, "tv");
   if (process.env.DSB_CAPTURE && !fallback) await b.screenshot(join(root, "untracked", "dsb-standing-yellow.png"));
   record("dsb gameplay: Use TV appears nearby", await b.evaluate(`!document.getElementById("dsb-context").hidden && document.getElementById("dsb-context").textContent === "Use TV"`));
   await click("#dsb-context"); await click("#dsb-tv-channel");
@@ -3647,7 +3692,7 @@ for (const fallback of [false, true]) scene("dsb", { label: "dsb gameplay " + (f
   record("dsb gameplay: song selection creates one invoice QR and wallet link", await b.evaluate(`__dsbTvFixture.invoices === 1 && document.getElementById("dsb-tv-invoice-qr").width > 200 && document.getElementById("dsb-tv-wallet").href.startsWith("lightning:lnbc") && document.getElementById("dsb-tv-price").textContent.includes("21 sats")`));
   record("dsb gameplay: station payment confirmation is shown", await untilPage(b, 'document.getElementById("dsb-tv-payment-status").textContent.includes("confirmed")', 10000));
   if (process.env.DSB_CAPTURE && !fallback) await b.screenshot(join(root, "untracked", "dsb-jukebox.png"));
-  await click("#dsb-tv-close"); await walkTo(-20, 17); await click("#dsb-context"); await click('[data-action="dsb-banana"]'); await click('[data-action="dsb-tomato"]');
+  await click("#dsb-tv-close"); await dsbApproach(b, "shop"); await click("#dsb-context"); await click('[data-action="dsb-banana"]'); await click('[data-action="dsb-tomato"]');
   const bought = await b.evaluate(`__ooga.dsb.inventory`); record("dsb gameplay: real shop clicks add a banana and tomato", bought.bananas === 1 && bought.tomatoes === 1 && bought.tokens === 18, JSON.stringify(bought));
   await click('[data-action="dsb-close-shop"]'); await click('[data-action="dsb-throw"]');
   const projectile = await b.evaluate(`(() => {
@@ -3707,7 +3752,7 @@ for (const fallback of [false, true]) scene("dsb", { label: "dsb television " + 
   const result = await b.evaluate(`(() => {
     const d = __ooga.dsb, p = __ooga.pilot;
     d.openTv(); const farClosed = !d.tv.isOpen;
-    p.navigate({ yaw: 0, pitch: 0.1, dist: 7, target: { x: -10, y: 1.7, z: 17 }, position: { x: -10, y: 0, z: 17 } }); p.update(0); d.openTv();
+    const landmark = d.land.landmarks.tv, anchor = landmark.point(); p.navigate({ yaw: landmark.node.rotation.y, pitch: 0.1, dist: 7, target: { x: anchor.x, y: 1.7, z: anchor.z }, position: anchor }); p.update(0); d.openTv();
     const opened = d.tv.isOpen, count = document.querySelectorAll("#dsb-tv-menu button").length, disabled = document.querySelectorAll("#dsb-tv-menu button:disabled").length;
     document.getElementById("dsb-tv-channel").click();
     const song = document.getElementById("dsb-tv-song").textContent, queue = document.getElementById("dsb-tv-queue").textContent, history = document.getElementById("dsb-tv-history").textContent;
@@ -3722,8 +3767,8 @@ for (const fallback of [false, true]) scene("dsb", { label: "dsb television " + 
   await b.key(" ");
   record("dsb TV: Space opens the nearby TV through the normal player controls", await b.evaluate(`__ooga.dsb.tv.isOpen`));
   await b.evaluate(`document.getElementById("dsb-tv-close").click()`);
-  if (process.env.DSB_CAPTURE && !fallback) { await b.evaluate(`__ooga.pilot.navigate({ yaw: 0.15, pitch: 0.1, dist: 17, target: { x: -14, y: 2.5, z: 13 }, position: { x: -14, y: 0, z: 20 } }); __ooga.advance(0.5)`); await b.screenshot(join(root, "untracked", "dsb-tv-world.png")); }
-  const volume = await b.evaluate(`(() => { const a = __ooga.audio, boat = __ooga.dsb.land.boats[0].position; a.environment({ position: { x: -10, y: 3.3, z: 14.6 } }, boat, 5); const near = a.radioVolume; a.environment({ position: { x: 35, y: 2, z: -20 } }, boat, 5); return { near, far: a.radioVolume }; })()`);
+  if (process.env.DSB_CAPTURE && !fallback) { await b.evaluate(`__ooga.pilot.navigate({ yaw: -Math.PI / 2, pitch: 0.1, dist: 17, target: { x: 14, y: 2.5, z: 18 }, position: { x: 8, y: 0, z: 18 } }); __ooga.advance(0.5)`); await b.screenshot(join(root, "untracked", "dsb-tv-world.png")); }
+  const volume = await b.evaluate(`(() => { const a = __ooga.audio, boat = __ooga.dsb.land.boats[0].position; const source = __ooga.dsb.land.landmarks.tv.point(-0.55, 3.3, 1.63); a.environment({ ...__ooga.camera, position: source }, boat, 5, source); const near = a.radioVolume; a.environment({ ...__ooga.camera, position: { x: 35, y: 2, z: -20 } }, boat, 5, source); return { near, far: a.radioVolume }; })()`);
   record("dsb TV: broadcast is louder nearby but remains audible across the island", volume.near > volume.far * 2 && volume.far >= 0.04, JSON.stringify(volume));
   await dsbExit(b);
   record("dsb TV: leaving closes and clears the menu", await b.evaluate(`!document.getElementById("dsb-tv").open && !document.getElementById("dsb-tv-queue").children.length`));
@@ -3940,7 +3985,7 @@ scene("dsb", { label: "dsb shared player", url: hubPage(dist), steps: [{ name: "
   record("dsb shared player: Space jumps away from interactions", await b.evaluate('__ooga.advance(0.1); __ooga.pilot.player.hop > 0'));
   await b.evaluate('__ooga.advance(1)');
   const place = (x, z) => b.evaluate(`__ooga.pilot.navigate({ yaw: 0, pitch: 0.2, dist: 7, target: { x: ${x}, y: 1.7, z: ${z} }, position: { x: ${x}, y: 0, z: ${z} } }); __ooga.advance(0.1);`);
-  await place(-20, 17);
+  await dsbApproach(b, "shop");
   await b.evaluate('__ooga.dsb.buy("tomato"); __ooga.dsb.buy("banana")');
   await b.key("t"); await b.key("b");
   record("dsb shared player: tomatoes and snacks remain separate", await b.evaluate('__ooga.dsb.inventory.tomatoes === 0 && __ooga.dsb.inventory.bananas === 0 && __ooga.dsb.shots === 1'));
@@ -3961,7 +4006,7 @@ scene("dsb", { label: "dsb shared player", url: hubPage(dist), steps: [{ name: "
   record("dsb shared player: lookout remains a free camera", await b.evaluate('__ooga.pilot.player === null && __ooga.camera.position.y > 5'));
   await b.evaluate(`document.querySelector('[data-scene="dsb"] [data-action="reset-view"]').click(); __ooga.advance(0.4)`);
   record("dsb shared player: leaving lookout restores the same playable actor", await b.evaluate('__ooga.pilot.player === __ooga.dsb.avatar'));
-  await place(-10, 17); await b.evaluate('__ooga.dsb.openTv()');
+  await dsbApproach(b, "tv"); await b.evaluate('__ooga.dsb.openTv()');
   await b.key("v");
   record("dsb shared player: TV opens with weapons suspended", await b.evaluate('__ooga.dsb.tv.isOpen && !__ooga.dsb.avatar.weapon.triggerHeld'));
   await b.evaluate('document.getElementById("dsb-tv-close").click(); __ooga.advance(0.1)');
@@ -4050,7 +4095,7 @@ for (const backend of ["webgl2", "canvas2d"]) scene("dsb", { label: `dsb land ${
     await b.screenshot(join(root, "untracked", "dsb-turtle.png"));
     await b.evaluate(`document.querySelector('[data-scene="dsb"] [data-action="reset-view"]').click(); __ooga.advance(0.3)`);
   }
-  const shop = await b.evaluate(`(() => { const B = __ooga; B.pilot.navigate({ yaw: 0, pitch: 0, dist: 12, position: { x: -20, y: 0, z: 17 }, target: { x: -20, y: 1.7, z: 17 } }); B.dsb.buy("bread"); B.dsb.buy("tomato"); const bought = B.dsb.inventory; B.dsb.eat(); B.dsb.throwTomato(); const used = B.dsb.inventory; return { bought, used, shots: B.dsb.shots, clock: window.__dsbClockProbe }; })()`);
+  const shop = await b.evaluate(`(() => { const B = __ooga; const landmark = B.dsb.land.landmarks.shop, anchor = landmark.point(); B.pilot.navigate({ yaw: landmark.node.rotation.y, pitch: 0, dist: 12, position: anchor, target: { x: anchor.x, y: 1.7, z: anchor.z } }); B.dsb.buy("bread"); B.dsb.buy("tomato"); const bought = B.dsb.inventory; B.dsb.eat(); B.dsb.throwTomato(); const used = B.dsb.inventory; return { bought, used, shots: B.dsb.shots, clock: window.__dsbClockProbe }; })()`);
   record("dsb shop: simulated purchases charge once and consume inventory", shop.bought.tokens === 16 && shop.bought.bread === 1 && shop.bought.tomatoes === 1 && shop.used.bread === 0 && shop.used.tomatoes === 0 && shop.shots === 1 && shop.clock.min >= 0, JSON.stringify(shop));
   const ride = await b.evaluate(`(() => { const B = __ooga; B.pilot.navigate({ yaw: 0, pitch: 0, dist: 12, position: { x: 0, y: 0, z: 33 }, target: { x: 0, y: 1.7, z: 33 } }); B.dsb.boatTrip.wait = 8; B.dsb.boatTrip.angle = 0; B.dsb.board("boat"); B.advance(0.2); const boat = B.dsb.phase; B.dsb.stopRide(); const landed = B.dsb.phase; B.pilot.navigate({ yaw: 0, pitch: 0, dist: 12, position: { x: 7, y: 0, z: 24 }, target: { x: 7, y: 1.7, z: 24 } }); B.dsb.trainTrip.wait = 8; B.dsb.trainTrip.angle = B.dsb.trainTrip.start; B.dsb.board("coaster"); B.advance(0.2); const coaster = B.dsb.phase, y = B.camera.position.y; B.dsb.stopRide(); return { boat, landed, coaster, y, stopped: B.dsb.phase }; })()`);
   record("dsb rides: board, move and disembark on dry ground", ride.boat === "boat" && ride.landed === "land" && ride.coaster === "coaster" && ride.y > 3 && ride.stopped === "land", JSON.stringify(ride));
@@ -4242,6 +4287,30 @@ const unitChecks = async () => {
     }
     document.getElementById = get; window.addEventListener = listen; window.removeEventListener = unlisten;
     record("Stargate transit regression: all canonical bodies retain one-way backside aperture and finish OFF", apertures.length === CAST && apertures.every(row => row.pass), JSON.stringify(apertures));
+    const land = BL.dsbModels.build(), landmarks = Object.values(land.landmarks), routes = [
+      [[0, 7], [0, 26]], [[0, 26], [0, 33]], [[0, 26], [3.7, 25.6]], [[0, 21], [7, 24]],
+      [[0, 18], [-10.5, 18]], [[0, 18], [10.5, 18]]
+    ];
+    const layout = [];
+    S.updateWorld(land.root);
+    for (const actor of crew.cavemen.values()) {
+      let clear = true;
+      for (const [a, b] of routes) for (let i = 0; i <= 128; i++) {
+        const x = a[0] + (b[0] - a[0]) * i / 128, z = a[1] + (b[1] - a[1]) * i / 128;
+        clear &&= landmarks.every(l => l.clearAt(x, z, actor.bodyRadius));
+      }
+      for (const l of landmarks) {
+        const p = l.point(); clear &&= l.clearAt(p.x, p.z, actor.bodyRadius) && l.near(p);
+        clear &&= !l.clearAt(l.node.position.x, l.node.position.z, actor.bodyRadius);
+        clear &&= l.clearAt(-20, 13, actor.bodyRadius) && l.clearAt(-10, 13, actor.bodyRadius) && !l.near({ x: -20, z: 13 }) && !l.near({ x: -10, z: 13 });
+        // Independent scene matrices verify the helper uses the rendered orientation.
+        const w = l.node.world; clear &&= Math.hypot(p.x - (w[8] * 3.5 + w[12]), p.z - (w[10] * 3.5 + w[14])) < 1e-5;
+        const edge = l.point(l.width + actor.bodyRadius + 0.1, 0, 0), inside = l.point(l.width - 0.1, 0, 0);
+        clear &&= l.clearAt(edge.x, edge.z, actor.bodyRadius) && !l.clearAt(inside.x, inside.z, actor.bodyRadius);
+      }
+      layout.push({ name: actor.traits.name, clear });
+    }
+    record("DSB plaza: all canonical bodies clear transformed fronts and travel lanes with old footprints removed", layout.length === CAST && layout.every(row => row.clear), JSON.stringify(layout));
     crew.dispose();
   }
   const rockGuides = BL.rockGuides.create({ island, sealed: [] });

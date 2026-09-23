@@ -180,8 +180,8 @@
     window.addEventListener("pointerup", gesture); window.addEventListener("touchend", gesture);
     // A click through the hub has already activated audio; direct visits wait for input.
     ensure();
-    return { update, gesture, fired, get radioVolume() { return radioVolume; }, environment: (camera, boat, dt = 1 / 60) => {
-      const p = camera.position, distance = Math.hypot(p.x + 10, p.y - 3.3, p.z - 14.6);
+    return { update, gesture, fired, get radioVolume() { return radioVolume; }, environment: (camera, boat, dt = 1 / 60, source = null) => {
+      const p = camera.position, distance = source ? Math.hypot(p.x - source.x, p.y - source.y, p.z - source.z) : Infinity;
       const volume = 0.04 + 0.16 / (1 + (distance / 12) ** 2);
       radioVolume += (volume - radioVolume) * (1 - Math.exp(-Math.max(0, dt) * 4));
       if (radio) radio.volume = radioVolume;

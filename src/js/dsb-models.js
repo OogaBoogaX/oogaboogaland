@@ -54,6 +54,25 @@
     for (let i = 0; i < 27; i++) geo.faces.push({ i: [0, i + 1, (i + 1) % 27 + 1], color: [255, 249, 211], emissive: 0.65 });
     return geo;
   });
+  // The Shop/TV roots own placement. Their local +Z is the usable front.
+  const landmark = (node, width, depth) => ({
+    node, width, depth,
+    point(x = 0, y = 0, z = 3.5, out = {}) {
+      const c = Math.cos(node.rotation.y), s = Math.sin(node.rotation.y), p = node.position;
+      out.x = p.x + c * x + s * z; out.y = p.y + y; out.z = p.z - s * x + c * z; return out;
+    },
+    clearAt(x, z, radius = 0) {
+      const c = Math.cos(node.rotation.y), s = Math.sin(node.rotation.y), dx = x - node.position.x, dz = z - node.position.z;
+      const lx = Math.abs(c * dx - s * dz), lz = Math.abs(s * dx + c * dz);
+      if (lx < width && lz < depth) return false;
+      return Math.hypot(Math.max(0, lx - width), Math.max(0, lz - depth)) >= radius;
+    },
+    near(p, range = 4) {
+      const c = Math.cos(node.rotation.y), s = Math.sin(node.rotation.y), dx = p.x - node.position.x, dz = p.z - node.position.z;
+      const x = c * dx - s * dz, z = s * dx + c * dz;
+      return z >= depth && Math.hypot(x, z - 3.5) < range;
+    }
+  });
   const build = () => {
     const root = createNode(), terrain = createNode({ geometry: disc(36, 2.5, C.ground) });
     addChild(root, terrain);
@@ -117,7 +136,7 @@
     block(stage, C.stone, 0, 6.2, -2, 13, 0.3, 0.3);
     for (let row = 0; row < 3; row++) for (const x of [-22, -18, -14]) block(root, "#766049", x, 0.5, -8 + row * 2.8, 3, 1, 0.8);
     // Meme stand and an inviting dock on the south shore.
-    const shop = createNode({ position: { x: -20, y: 0, z: 13 } }); addChild(root, shop);
+    const shop = createNode({ position: { x: -14, y: 0, z: 18 }, rotation: { x: 0, y: Math.PI / 2, z: 0 } }); addChild(root, shop);
     block(shop, C.stone, 0, 1, 0, 7, 2, 3);
     for (const x of [-3.4, 3.4]) block(shop, C.purple, x, 2.4, 0, 0.3, 4.8, 0.3);
     block(shop, C.yellow, 0, 4.4, 0, 7.8, 0.4, 4.5);
@@ -125,8 +144,8 @@
     block(shop, "#bc8644", -1.6, 2.2, 0.9, 1.6, 0.45, 0.8);
     const banana = BL.models.banana(); banana.position.x = 0; banana.position.y = 2.12; banana.position.z = 0.9; addChild(shop, banana);
     block(shop, "#f14b68", 1.5, 2.3, 0.9, 0.6, 0.6, 0.6);
-    // A freestanding walnut CRT beside the meme shop, facing the southern path.
-    const tv = createNode({ position: { x: -10, y: 0, z: 13 } }); addChild(root, tv);
+    // The walnut CRT faces the Shop across the open Stargate plaza.
+    const tv = createNode({ position: { x: 14, y: 0, z: 18 }, rotation: { x: 0, y: -Math.PI / 2, z: 0 } }); addChild(root, tv);
     for (const x of [-2.7, 2.7]) block(tv, "#78543b", x, 0.7, 0, 0.45, 1.4, 1.5);
     block(tv, "#78543b", 0, 3.2, 0, 8, 4.4, 2.8);
     block(tv, C.yellow, 0, 3.2, 1.42, 7.7, 4.1, 0.12);
@@ -164,7 +183,7 @@
       const star = block(root, i % 3 ? C.cyan : C.yellow, Math.sin(a) * (45 + i % 7 * 3), 20 + i % 9 * 3, Math.cos(a) * (45 + i % 7 * 3), 0.35, 0.35, 0.35, 0.9);
       stars.push(star);
     }
-    return { root, terrain, turtle, water, falls, spray, stage, mic, shop, tv, tvScreen, dock, boats, cart, carts, stars, exit, station };
+    return { landmarks: { shop: landmark(shop, 4, 2), tv: landmark(tv, 4.4, 1.9) }, root, terrain, turtle, water, falls, spray, stage, mic, shop, tv, tvScreen, dock, boats, cart, carts, stars, exit, station };
   };
   BL.dsbModels = { C, cube, block, text, sign, boat, portalGeometry, build };
 })();
