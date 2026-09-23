@@ -312,7 +312,8 @@
       box({ w: 0.16, h: 0.035, d: 0.025, color: "#5de7c7", emissive: 1, offset: { x: 0.64, y: 0.62, z: 0.185 } })
     ];
     for (const x of [-0.79, 0.79]) for (const z of [-0.14, 0.14]) parts.push(box({ w: 0.1, h: 1.02, d: 0.1, color: "#344446", offset: { x, y: 0.51, z } }));
-    for (let i = 0; i < 5; i++) parts.push(box({ w: 0.32 + (i % 3) * 0.18, h: 0.035, d: 0.012, color: i % 2 ? "#78d9f2" : "#72efb0", emissive: 0.9, offset: { x: -0.14 + i % 2 * 0.12, y: 1.98 - i * 0.105, z: -0.099 } }));
+    // Display content belongs to createLabScreen. Baked code bars here sat
+    // only 0.001 behind that surface and fought its depth at distant views.
     for (let row = 0; row < 3; row++) for (let col = 0; col < 9; col++) parts.push(box({ w: 0.064, h: 0.012, d: 0.035, color: "#b8c6bd", offset: { x: (col - 4) * 0.083, y: 1.204, z: 0.03 + row * 0.06 } }));
     return merge(...parts);
   });
