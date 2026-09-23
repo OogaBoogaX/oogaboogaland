@@ -72,15 +72,15 @@
     const profile = footprintProfile(entry);
     return profile ? (profile >= 7 ? 0 : profile === 6 ? LAB_CENTERS[index] : profile === 5 ? SIT_CENTERS[index] : profile === 4 ? PARK_CENTER : profile === 3 ? STAND_CENTER : (profile === 2 ? POUND_CENTERS : QUAD_CENTERS)[index]) * entry.root.scale.x : 0;
   };
-  const footprintOverlaps = (a, ax, ay, az, ah, b, bx, by, bz, bh, margin = 0) => {
+  const footprintOverlaps = (a, ax, ay, az, ah, b, bx, by, bz, bh, margin = 0, shape = footprint) => {
     if (ay >= by + b.height || ay + a.height <= by) return false;
-    const radius = footprintRadius(a) + footprintRadius(b) + margin, r2 = radius * radius;
+    const radius = shape.radius(a) + shape.radius(b) + margin, r2 = radius * radius;
     const as = Math.sin(ah), ac = Math.cos(ah), bs = Math.sin(bh), bc = Math.cos(bh);
-    const aCount = footprintCount(a), bCount = footprintCount(b);
+    const aCount = shape.count(a), bCount = shape.count(b);
     for (let i = 0; i < aCount; i++) {
-      const ao = footprintOffset(a, i);
+      const ao = shape.offset(a, i);
       for (let j = 0; j < bCount; j++) {
-        const bo = footprintOffset(b, j), dx = ax + as * ao - bx - bs * bo, dz = az + ac * ao - bz - bc * bo;
+        const bo = shape.offset(b, j), dx = ax + as * ao - bx - bs * bo, dz = az + ac * ao - bz - bc * bo;
         if (dx * dx + dz * dz < r2) return true;
       }
     }
@@ -134,16 +134,16 @@
     }
     return true;
   };
-  const footprintSeparates = (a, ax, ay, az, ah, nx, ny, nz, nh, b, bx, by, bz, bh, margin = 0) => {
+  const footprintSeparates = (a, ax, ay, az, ah, nx, ny, nz, nh, b, bx, by, bz, bh, margin = 0, shape = footprint) => {
     if (Math.min(ay, ny) >= by + b.height || Math.max(ay, ny) + a.height <= by) return true;
     // A new vertical contact is not an escape from an existing overlap.
     if (ay >= by + b.height || ay + a.height <= by) return false;
     const turn = Math.atan2(Math.sin(nh - ah), Math.cos(nh - ah));
-    const radius = footprintRadius(a) + footprintRadius(b) + margin, bs = Math.sin(bh), bc = Math.cos(bh);
-    const aCount = footprintCount(a), bCount = footprintCount(b);
+    const radius = shape.radius(a) + shape.radius(b) + margin, bs = Math.sin(bh), bc = Math.cos(bh);
+    const aCount = shape.count(a), bCount = shape.count(b);
     for (let i = 0; i < aCount; i++) for (let j = 0; j < bCount; j++) {
-      const bo = footprintOffset(b, j);
-      if (!separatingPair(ax, az, nx - ax, nz - az, ah, turn, footprintOffset(a, i), bx + bs * bo, bz + bc * bo, radius)) return false;
+      const bo = shape.offset(b, j);
+      if (!separatingPair(ax, az, nx - ax, nz - az, ah, turn, shape.offset(a, i), bx + bs * bo, bz + bc * bo, radius)) return false;
     }
     return true;
   };
@@ -156,17 +156,17 @@
     }
     return true;
   };
-  const footprintSweep = (entry, x, y, z, toX, toY, toZ, radius, height, fromHeading, toHeading, test, ignore) => {
-    if (!entry || !footprintProfile(entry)) return test(x, y, z, toX, toY, toZ, radius, height, entry, ignore);
+  const footprintSweep = (entry, x, y, z, toX, toY, toZ, radius, height, fromHeading, toHeading, test, ignore, shape = footprint) => {
+    if (!entry || shape === footprint && !footprintProfile(entry)) return test(x, y, z, toX, toY, toZ, radius, height, entry, ignore);
     const turn = Math.atan2(Math.sin(toHeading - fromHeading), Math.cos(toHeading - fromHeading));
     const steps = Math.max(1, Math.ceil(Math.abs(turn) / 0.12)), angle = turn / steps;
     for (let step = 0; step < steps; step++) {
       const a = step / steps, b = (step + 1) / steps, first = fromHeading + turn * a, last = fromHeading + turn * b;
-      for (let i = 0; i < footprintCount(entry); i++) {
-        const offset = footprintOffset(entry, i), arc = Math.abs(offset) * (1 - Math.cos(angle * 0.5));
+      for (let i = 0; i < shape.count(entry); i++) {
+        const offset = shape.offset(entry, i), arc = Math.abs(offset) * (1 - Math.cos(angle * 0.5));
         if (!test(x + (toX - x) * a + Math.sin(first) * offset, y + (toY - y) * a, z + (toZ - z) * a + Math.cos(first) * offset,
           x + (toX - x) * b + Math.sin(last) * offset, y + (toY - y) * b, z + (toZ - z) * b + Math.cos(last) * offset,
-          footprintRadius(entry) + arc, height, entry, ignore)) return false;
+          shape.radius(entry) + arc, height, entry, ignore)) return false;
       }
     }
     return true;
@@ -174,6 +174,38 @@
   const footprint = { count: footprintCount, radius: footprintRadius, offset: footprintOffset,
     overlaps: footprintOverlaps, circleOverlaps: footprintCircleOverlaps, separates: footprintSeparates,
     circleSeparates: footprintCircleSeparates, sweep: footprintSweep };
+  // Cave peer contacts reserve the central trunk, excluding arms and shoulder
+  // mounds. Scenery continues to use the complete animated body above.
+  const torsoProfile = e => e.planningLab || e.gorilla.torsoLabCompact ? 1 : e.gorilla.torsoStandCompact ? 2 : e.gorilla.torsoQuadCompact ? 3 : 0;
+  const torso = {
+    count: e => torsoProfile(e) === 3 ? 2 : 1,
+    radius: e => torsoProfile(e) ? (torsoProfile(e) === 1 ? 0.58 : 0.6) * e.root.scale.x : e.gorilla.torsoRadius,
+    offset: (e, i) => (torsoProfile(e) === 1 ? 0.04 : torsoProfile(e) === 2 ? 0.105 : torsoProfile(e) === 3 ? i ? 0.65 : 0.05 : 0) * e.root.scale.x,
+    overlaps: (a, ax, ay, az, ah, b, bx, by, bz, bh, margin = 0) => footprintOverlaps(a, ax, ay, az, ah, b, bx, by, bz, bh, margin, torso),
+    separates: (a, ax, ay, az, ah, nx, ny, nz, nh, b, bx, by, bz, bh, margin = 0) => footprintSeparates(a, ax, ay, az, ah, nx, ny, nz, nh, b, bx, by, bz, bh, margin, torso),
+    sweep: (e, x, y, z, nx, ny, nz, radius, height, fromHeading, toHeading, test, ignore) => footprintSweep(e, x, y, z, nx, ny, nz, radius, height, fromHeading, toHeading, test, ignore, torso)
+  };
+  const torsoRows = new WeakMap();
+  const torsoCorners = (geometry) => {
+    let corners = torsoRows.get(geometry);
+    if (corners) return corners;
+    const rows = new Map(), vertices = geometry.verts;
+    for (let i = 0; i < vertices.length; i += 3) {
+      const x = vertices[i], y = vertices[i + 1], z = vertices[i + 2];
+      if (Math.abs(x) > 5 * U + 1e-6) continue;
+      let row = rows.get(y);
+      if (!row) { row = [x, x, z, z]; rows.set(y, row); }
+      row[0] = Math.min(row[0], x); row[1] = Math.max(row[1], x);
+      row[2] = Math.min(row[2], z); row[3] = Math.max(row[3], z);
+    }
+    corners = new Float64Array(rows.size * 12);
+    let at = 0;
+    for (const [y, row] of rows) for (let i = 0; i < 4; i++) {
+      corners[at++] = row[i & 1]; corners[at++] = y; corners[at++] = row[2 + (i >> 1)];
+    }
+    torsoRows.set(geometry, corners);
+    return corners;
+  };
 
   const jitter = (rand, base, dark, p) => () => rand() < p ? dark : base;
   // Columns of lit code run down the fur: every fourth column, two cells on, one off.
@@ -767,6 +799,7 @@
     // full envelope instead of colliding only the narrower torso.
     const envelopeParts = managed ? [parts.legL, parts.legR, chest, parts.armL, parts.armR, parts.head, parts.jaw, labFlask] : null;
     const envelopeBounds = managed ? envelopeParts.map((part) => boundsOf(part.geometry)) : null;
+    const trunkCorners = managed ? torsoCorners(chest.geometry) : null;
     const envelopeChest = managed ? mat4.create() : null, envelopeHead = managed ? mat4.create() : null, envelopePart = managed ? mat4.create() : null, envelopeArm = managed ? mat4.create() : null;
     const supportRows = managed ? new Float64Array(envelopeParts.length * 4).fill(NaN) : null;
     const supportMinima = managed ? new Float64Array(envelopeParts.length) : null;
@@ -848,6 +881,24 @@
       }
       body.radius = Math.sqrt(radius2);
       body.height = body.maxY - body.minY;
+      const tm = envelopeChest;
+      let trunkRadius2 = 0, trunkLab2 = 0, trunkStand2 = 0, trunkQuad2 = 0, trunkWidth = 0;
+      for (let i = 0; i < trunkCorners.length; i += 3) {
+        const x = trunkCorners[i], y = trunkCorners[i + 1], z = trunkCorners[i + 2];
+        const px = (tm[0] * x + tm[4] * y + tm[8] * z + tm[12]) * scale;
+        const pz = (tm[2] * x + tm[6] * y + tm[10] * z + tm[14]) * scale;
+        trunkRadius2 = Math.max(trunkRadius2, px * px + pz * pz);
+        trunkWidth = Math.max(trunkWidth, Math.abs(px));
+        trunkLab2 = Math.max(trunkLab2, px * px + (pz - 0.04 * scale) ** 2);
+        trunkStand2 = Math.max(trunkStand2, px * px + (pz - 0.105 * scale) ** 2);
+        const dz = Math.min(Math.abs(pz - 0.05 * scale), Math.abs(pz - 0.65 * scale));
+        trunkQuad2 = Math.max(trunkQuad2, px * px + dz * dz);
+      }
+      body.torsoRadius = Math.sqrt(trunkRadius2) + 0.01 * scale;
+      body.torsoLabCompact = trunkLab2 <= (0.58 * scale) ** 2;
+      body.torsoStandCompact = trunkStand2 <= (0.6 * scale) ** 2;
+      body.torsoQuadCompact = trunkQuad2 <= (0.6 * scale) ** 2
+        && trunkWidth <= Math.sqrt(0.6 ** 2 - 0.3 ** 2) * scale;
       // At the circles' bisectors their union still covers the entire width,
       // so faces between the tested box corners cannot escape between circles.
       body.compact = compactRadius2 <= (QUAD_RADIUS * scale) ** 2
@@ -1190,6 +1241,10 @@
       get labIdleCompact() { return !!body.labIdleCompact; },
       get labWalkCompact() { return !!body.labWalkCompact; },
       get labSqueezeCompact() { return !!body.labSqueezeCompact; },
+      get torsoRadius() { return body.torsoRadius; },
+      get torsoLabCompact() { return !!body.torsoLabCompact; },
+      get torsoStandCompact() { return !!body.torsoStandCompact; },
+      get torsoQuadCompact() { return !!body.torsoQuadCompact; },
       get pounding() { return state.pound > 0; },
       get beating() { return state.beat > 0; },
       get chewing() { return state.chewing > 0; },
@@ -1339,6 +1394,6 @@
     };
     return { start, stop, update, get active() { return !!agent; }, get agent() { return agent; }, get startedAt() { return startedAt; } };
   };
-  BL.agent = { create, createPlay, GAITS, TRIPLE_MS, QUAD, HUNCH, BODY, POUND_TIME, MANAGED_BEAT_TIME, MANAGED_MOTION_RADIUS, MANAGED_MOTION_HEIGHT, MANAGED_SMASH_RADIUS, LAB_RADIUS, LAB_HEIGHT, LAB_CENTERS, LAB_IDLE_RADIUS, LAB_WALK_RADIUS, LAB_SQUEEZE_RADIUS, footprint,
+  BL.agent = { create, createPlay, GAITS, TRIPLE_MS, QUAD, HUNCH, BODY, POUND_TIME, MANAGED_BEAT_TIME, MANAGED_MOTION_RADIUS, MANAGED_MOTION_HEIGHT, MANAGED_SMASH_RADIUS, LAB_RADIUS, LAB_HEIGHT, LAB_CENTERS, LAB_IDLE_RADIUS, LAB_WALK_RADIUS, LAB_SQUEEZE_RADIUS, footprint, torso,
     labFlaskGeometry: () => geometries().labFlask };
 })();

@@ -5034,8 +5034,11 @@
       break;
     }
   };
-  // Companions use the full animated arm envelope, not the Ooga's shoulder
-  // radius. Their feet are on the floor; only the mirror's own gate is exempt.
+  // Full limbs remain solid against scenery. Cave peers reserve their torsos
+  // once per complete rig sweep; arm slices may then overlap those same peers.
+  let clankerPassingEntry = null, clankerPassingSite = -1;
+  const clankerPassingPeer = (entry, other) => entry === clankerPassingEntry && clankerPassingSite >= 0
+    && clankers.contactAt(other.root.position.x, other.root.position.y, other.root.position.z) === clankerPassingSite;
   const clankerCylinderClear = (x, y, z, toX, toY, toZ, radius, height, entry = null, ignore = null, climbing = false, actors = true, checkTerrain = true, toRadius = radius, toHeight = height) => {
     const fromRadius = radius, fromHeight = height;
     radius = Math.max(radius, toRadius); height = Math.max(height, toHeight);
@@ -5063,11 +5066,12 @@
     }
     if (clankers) for (let i = 0; i < clankers.list.length; i++) {
       const other = clankers.list[i];
-      if (other !== entry && other !== ignore && other.active && !clankerBodySegmentClear(other, x, floor, z, toX, toFloor, toZ, radius, body)) return false;
+      if (other !== entry && other !== ignore && other.active && !clankerPassingPeer(entry, other)
+        && !clankerBodySegmentClear(other, x, floor, z, toX, toFloor, toZ, radius, body)) return false;
     }
     return true;
   };
-  const clankerClear = (x, y, z, toX, toY, toZ, radius, height, entry = null, ignore = null,
+  const clankerRigClear = (x, y, z, toX, toY, toZ, radius, height, entry = null, ignore = null,
     fromHeading = entry ? entry.heading : 0, toHeading = fromHeading) => {
     // Prop nudges also use this callback with a gorilla to ignore. Their own
     // smaller cylinder remains a prop; only a complete companion uses its rig.
@@ -5090,6 +5094,28 @@
     }
     return BL.agent.footprint.sweep(entry, x, y, z, toX, toY, toZ, radius, height,
       fromHeading, toHeading, clankerCylinderClear, ignore);
+  };
+  const clankerClear = (x, y, z, toX, toY, toZ, radius, height, entry = null, ignore = null,
+    fromHeading = entry ? entry.heading : 0, toHeading = fromHeading) => {
+    const previousEntry = clankerPassingEntry, previousSite = clankerPassingSite;
+    clankerPassingEntry = entry; clankerPassingSite = -1;
+    try {
+      if (entry && !ignore && clankers && radius === entry.radius && height === entry.height && !entry.climb.active) {
+        clankerPassingSite = clankers.contactAt(x, y, z);
+        if (clankerPassingSite < 0) clankerPassingSite = clankers.contactAt(toX, toY, toZ);
+        if (clankerPassingSite >= 0) for (const other of clankers.list) {
+          if (other === entry || !other.active || !clankerPassingPeer(entry, other)) continue;
+          const p = other.root.position;
+          // separates also checks the complete turning/translation sweep when
+          // initially apart, and only permits monotonic escape from overlap.
+          if (!BL.agent.torso.separates(entry, x, y, z, fromHeading, toX, toY, toZ, toHeading,
+            other, p.x, p.y, p.z, other.heading, 0.03)) return false;
+        }
+      }
+      return clankerRigClear(x, y, z, toX, toY, toZ, radius, height, entry, ignore, fromHeading, toHeading);
+    } finally {
+      clankerPassingEntry = previousEntry; clankerPassingSite = previousSite;
+    }
   };
   const clankerUnderCanopy = (entry) => {
     const p = entry.root.position, shape = BL.agent.footprint;
@@ -5130,7 +5156,8 @@
       for (const other of clankers.list) {
         if (other === entry || !other.active) continue;
         const q = other.root.position;
-        if (BL.agent.footprint.overlaps(entry, p.x, p.y, p.z, entry.root.rotation.y,
+        const shape = clankerPassingPeer(entry, other) ? BL.agent.torso : BL.agent.footprint;
+        if (shape.overlaps(entry, p.x, p.y, p.z, entry.root.rotation.y,
           other, q.x, q.y, q.z, other.heading, 0.03)) { clear = false; break; }
       }
       entry.footprintMode = mode; entry.compact = compact;
