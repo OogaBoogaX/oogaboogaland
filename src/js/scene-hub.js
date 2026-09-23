@@ -5120,10 +5120,12 @@
   const clankerExitTransitionClear = (entry, x, y, z, nx, ny, nz, radius, height, actors, riders, toRadius, toHeight) => {
     if (clankerExitBodyPending) {
       clankerExitBodyPending = false;
-      const mode = entry.footprintMode, compact = entry.compact, p = entry.root.position;
+      const mode = entry.footprintMode, compact = entry.compact, previousRadius = entry.radius, previousHeight = entry.height, p = entry.root.position;
       // The rig is temporarily in its real future pose here. Reserve the same
       // walking envelope the controller will use immediately outside the lab.
       entry.footprintMode = "pound"; entry.compact = entry.gorilla.poundCompact;
+      entry.radius = Math.max(BL.clankers.WALK_RADIUS, entry.gorilla.bodyRadius + 0.1);
+      entry.height = Math.max(BL.clankers.WALK_HEIGHT, entry.gorilla.bodyHeight + 0.04);
       let clear = true;
       for (const other of clankers.list) {
         if (other === entry || !other.active) continue;
@@ -5132,6 +5134,7 @@
           other, q.x, q.y, q.z, other.heading, 0.03)) { clear = false; break; }
       }
       entry.footprintMode = mode; entry.compact = compact;
+      entry.radius = previousRadius; entry.height = previousHeight;
       if (!clear) return false;
     }
     return clankerClimbTransitionClear(entry, x, y, z, nx, ny, nz, radius, height, actors, riders, toRadius, toHeight);

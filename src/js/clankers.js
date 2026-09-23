@@ -24,10 +24,10 @@
     const footprint = BL.agent.footprint;
     const list = [], byOwner = new Map(), portals = new Array(sites.length).fill(null);
     // Stations are authored once in world space: { x, y, z, heading, kind,
-    // side }. labInside owns the entrance plane, independently of assignment.
+    // side, enabled? }. labInside owns the entrance plane, independently of assignment.
     const labSite = Number.isInteger(ctx.labSite) ? ctx.labSite : -1, labStations = ctx.labStations || [], labEquipment = ctx.labEquipment || [];
     const labNodes = new Float64Array(16 * 3), labPrevious = new Int8Array(16), labQueue = new Uint8Array(16);
-    let labPassAt = 0, labRouteBudget = 1, labRouteTurn = -1, labRouteNext = 0;
+    let labPassAt = 0, labRouteBudget = 1, labRouteTurn = -1, labRouteNext = 0, labWaitSerial = 0;
     const roamRadius = ctx.roamRadius || 28, ringRadius = Math.min(roamRadius - 6, (ctx.meadowRadius || 22) - 6);
     const POINT = { x: 0, y: 0, z: 0 };
     const loungeSpots = new Float64Array(320 * 3);
@@ -180,8 +180,9 @@
     const insideLab = (x, y, z) => labSite >= 0 && (ctx.labInside ? ctx.labInside(x, y, z) : caveAt(x, y, z) === labSite);
     const releaseLab = (e) => {
       if (e.lab.item >= 0 && ctx.labReturn) ctx.labReturn(e);
-      e.lab.item = e.lab.pickup = -1; e.lab.stage = ""; e.lab.station = -1; e.lab.time = 0; e.lab.arrived = false;
-      e.lab.yielding = 0; e.lab.yieldFor = null; e.lab.pathPending = false; e.lab.squeezeUntil = 0;
+      e.lab.item = e.lab.pickup = -1; e.lab.stage = ""; e.lab.station = -1; e.lab.time = e.lab.reach = 0; e.lab.arrived = false;
+      e.lab.yielding = 0; e.lab.yieldFor = null; e.lab.yieldReady = false; e.lab.pathPending = false; e.lab.squeezeUntil = 0;
+      e.lab.waitOrder = 0;
       e.lab.pathCount = e.lab.pathIndex = 0; e.motion.labWork = ""; e.motion.labReach = 0; e.motion.labSqueeze = false;
       e.motion.labDie = false; e.motion.labRoll = 0;
     };
@@ -225,8 +226,9 @@
       const p = e.root.position, job = e.lab, site = sites[labSite];
       const radius = e.radius, height = e.height, compact = e.compact, mode = e.footprintMode;
       const planning = e.planningLab, work = e.planningLabWork, squeeze = e.motion.labSqueeze, speed = e.speed;
-      e.radius = BL.agent.LAB_WALK_RADIUS; e.height = BL.agent.LAB_HEIGHT; e.speed = 1.1;
-      e.compact = e.planningLab = true; e.footprintMode = "lab"; e.planningLabWork = "";
+      const carrying = !!e.gorilla.labItem;
+      e.radius = carrying ? BL.agent.LAB_RADIUS : BL.agent.LAB_WALK_RADIUS; e.height = BL.agent.LAB_HEIGHT; e.speed = 1.1;
+      e.compact = e.planningLab = true; e.footprintMode = "lab"; e.planningLabWork = carrying ? "carry" : "";
       labNodes[0] = p.x; labNodes[1] = p.y; labNodes[2] = p.z;
       labNodes[3] = tx; labNodes[4] = ty; labNodes[5] = tz;
       let count = 2;
@@ -236,9 +238,9 @@
       }
       // Prefer a route with room for the natural arm swing. Only search the
       // tucked footprint when no complete ordinary walking route is available.
-      for (let pass = 0; pass < 2; pass++) {
+      for (let pass = !carrying && e.lab.yielding ? 1 : 0; pass < (carrying ? 1 : 2); pass++) {
         e.motion.labSqueeze = pass === 1;
-        e.radius = pass ? BL.agent.LAB_SQUEEZE_RADIUS : BL.agent.LAB_WALK_RADIUS;
+        e.radius = carrying ? BL.agent.LAB_RADIUS : pass ? BL.agent.LAB_SQUEEZE_RADIUS : BL.agent.LAB_WALK_RADIUS;
         labPrevious.fill(-1); labPrevious[0] = 0; labQueue[0] = 0;
         let head = 0, tail = 1;
         while (head < tail && labPrevious[1] < 0) {
@@ -294,21 +296,37 @@
     };
     const moveLab = (e, dt, speed = 1.1) => {
       const p = e.root.position, dx = e.goalX - p.x, dz = e.goalZ - p.z, distance = Math.hypot(dx, dz);
-      e.motion.labWork = "";
+      const carrying = !!e.gorilla.labItem;
+      e.motion.labWork = carrying ? "carry" : "";
+      if (!carrying) e.motion.labReach = 0;
       if (!distance) { e.speed = 0; return; }
       const step = Math.min(distance, speed * dt), x = p.x + dx / distance * step, z = p.z + dz / distance * step;
       const station = labStations[e.lab.station];
-      const desired = !e.lab.yielding && station && distance < 0.8 && e.lab.pathIndex + 1 >= e.lab.pathCount
+      const desired = !e.lab.yielding && e.route !== "exit" && station && distance < 0.8 && e.lab.pathIndex + 1 >= e.lab.pathCount
         ? station.heading : Math.atan2(dx, dz);
       const turn = Math.atan2(Math.sin(desired - e.heading), Math.cos(desired - e.heading));
       const heading = e.heading + clamp(turn, -dt * 3, dt * 3);
-      const ordinary = !e.lab.yielding && elapsed >= e.lab.squeezeUntil && ordinaryLabStep(e, x, p.y, z, heading, speed);
-      if (!ordinary && !e.motion.labSqueeze) e.lab.squeezeUntil = elapsed + 0.4;
-      e.motion.labSqueeze = !ordinary;
-      if (ordinary ? !e.gorilla.labWalkCompact : !e.gorilla.labSqueezeCompact) { e.speed = 0; return; }
+      if (carrying) {
+        // A displaced inspector must reach its bench before yielding. The real
+        // held vessel cannot fit the empty-handed shuffle; retain its full pose.
+        e.motion.labSqueeze = false;
+        if (!e.gorilla.labCompact) { e.speed = 0; return; }
+      } else {
+        const exitSite = e.route === "exit" && e.fromSite === labSite ? sites[labSite] : null;
+        const exiting = exitSite && (p.x - exitSite.mouth.x) * exitSite.sr + (p.z - exitSite.mouth.z) * exitSite.cr > -1.25;
+        const ordinary = !e.lab.yielding && !exiting && elapsed >= e.lab.squeezeUntil && ordinaryLabStep(e, x, p.y, z, heading, speed);
+        if (!ordinary && !e.motion.labSqueeze) e.lab.squeezeUntil = elapsed + 0.4;
+        e.motion.labSqueeze = !ordinary;
+        if (ordinary ? !e.gorilla.labWalkCompact : !e.gorilla.labSqueezeCompact) { e.speed = 0; return; }
+      }
       labEnvelope(e);
       if (occupied(e, x, p.y, z, true, heading) || !staticClear(e, p.x, p.y, p.z, x, p.y, z, e.heading, heading)) {
-        e.speed = 0; e.blocked += dt; return;
+        // A bench can block the translating arc while leaving room to turn
+        // into the final approach. Validate that stationary turn separately.
+        e.speed = 0;
+        if (heading !== e.heading && !occupied(e, p.x, p.y, p.z, true, heading)
+          && staticClear(e, p.x, p.y, p.z, p.x, p.y, p.z, e.heading, heading)) e.heading = heading;
+        e.blocked += dt; return;
       }
       p.x = x; p.z = z; e.heading = heading;
       e.speed = step / dt * (dx * Math.sin(heading) + dz * Math.cos(heading) < 0 ? -1 : 1); e.blocked = 0;
@@ -331,16 +349,63 @@
       const job = blocker.lab, site = sites[labSite], p0 = blocker.root.position;
       const across = (p0.x - site.mouth.x) * site.cr - (p0.z - site.mouth.z) * site.sr;
       const along = (p0.x - site.mouth.x) * site.sr + (p0.z - site.mouth.z) * site.cr;
-      // Retract both arms and step into the side of the same workstation row.
-      // The measured shuffle leaves a real center aisle without sending a
-      // scientist outside or moving glassware away from its bench.
+      // Retract before selecting a real, reachable retreat. A fixed side point
+      // can be inside the bench or still cover the requester's final approach.
       const side = across < 0 ? -1 : 1;
-      sitePoint(site, side * 1.69, along, job.yieldPoint);
       job.yielding = 1; job.yieldFor = requester; job.yieldUntil = elapsed + 1;
       const length = Math.sqrt(length2) || 1; job.yieldDX = dx / length; job.yieldDZ = dz / length;
+      job.yieldAlong = along; job.yieldChoice = 0; job.yieldReady = false;
+      job.yieldTargetX = tx; job.yieldTargetZ = tz;
+      job.yieldProgressX = p.x; job.yieldProgressZ = p.z; job.yieldProgressAt = elapsed;
       job.yieldSide = side; job.pathCount = job.pathIndex = 0; job.pathAt = 0;
       blocker.motion.labSqueeze = job.item < 0;
       if (job.item >= 0) { job.stage = "return"; job.reach = 0; }
+      return true;
+    };
+    const planLabYield = (e) => {
+      const job = e.lab, p = e.root.position, point = job.yieldPoint, home = labStations[job.station];
+      if (elapsed < job.pathAt) return false;
+      const other = job.yieldFor, q = other && other.root.position;
+      const radius = e.radius, height = e.height, compact = e.compact, mode = e.footprintMode;
+      const planning = e.planningLab, work = e.planningLabWork, speed = e.speed;
+      e.radius = BL.agent.LAB_SQUEEZE_RADIUS; e.height = BL.agent.LAB_HEIGHT;
+      e.compact = e.planningLab = true; e.footprintMode = "lab"; e.planningLabWork = ""; e.speed = 0.65;
+      let found = false;
+      for (let n = 0; n < 8; n++) {
+        const choice = job.yieldChoice % 8;
+        if (choice === 0 && home) {
+          point.x = home.x; point.y = home.y; point.z = home.z;
+        } else {
+          const shift = choice === 2 ? -0.8 : choice === 3 ? 0.8 : choice === 4 ? -0.8 : choice === 5 ? -1.6 : choice === 6 ? 1.6 : 0;
+          const across = choice === 4 ? 0 : (choice === 7 ? -job.yieldSide : job.yieldSide) * 1.69;
+          sitePoint(sites[labSite], across, job.yieldAlong + shift, point);
+        }
+        point.heading = Math.atan2(point.x - p.x, point.z - p.z);
+        let blocks = false;
+        if (q) {
+          const dx = job.yieldTargetX - q.x, dz = job.yieldTargetZ - q.z, length2 = dx * dx + dz * dz;
+          const reach = BL.agent.LAB_SQUEEZE_RADIUS + footprint.radius(other) + 0.03;
+          for (let i = 0; i < footprint.count(other); i++) {
+            const offset = footprint.offset(other, i), x = q.x + Math.sin(other.heading) * offset, z = q.z + Math.cos(other.heading) * offset;
+            const k = length2 ? clamp(((point.x - x) * dx + (point.z - z) * dz) / length2, 0, 1) : 0;
+            if ((point.x - x - dx * k) ** 2 + (point.z - z - dz * k) ** 2 < reach * reach) { blocks = true; break; }
+          }
+        }
+        if (Math.hypot(point.x - p.x, point.z - p.z) < 0.08 || blocks || !insideLab(point.x, point.y, point.z)
+          || occupied(e, point.x, point.y, point.z, true, point.heading)
+          || !staticClear(e, point.x, point.y, point.z, point.x, point.y, point.z, point.heading, point.heading)) {
+          job.yieldChoice++; continue;
+        }
+        found = true; break;
+      }
+      e.radius = radius; e.height = height; e.compact = compact; e.footprintMode = mode;
+      e.planningLab = planning; e.planningLabWork = work; e.speed = speed;
+      if (!found) { job.pathAt = elapsed + 0.5; return false; }
+      if (!planLabPath(e, point.x, point.y, point.z, point.heading)) {
+        if (!job.pathPending) job.yieldChoice++;
+        return false;
+      }
+      job.yieldReady = true; e.blocked = 0;
       return true;
     };
     const yieldLab = (e, dt) => {
@@ -348,28 +413,46 @@
       if (job.item >= 0) { workLab(e, dt); return; }
       e.motion.labWork = ""; e.motion.labReach = 0; e.motion.labSqueeze = true;
       if (!e.gorilla.labSqueezeCompact) { e.speed = 0; return; }
+      const other = job.yieldFor, q = other && other.root.position;
+      if (elapsed >= job.yieldUntil) {
+        const distance = q ? Math.hypot(q.x - p.x, q.z - p.z) : Infinity;
+        const passed = q && (q.x - p.x) * job.yieldDX + (q.z - p.z) * job.yieldDZ > 1.65;
+        const withdrew = other && other.controlled && other.drive.x * job.yieldDX + other.drive.z * job.yieldDZ < -0.2 && distance > 2.1;
+        if (!other || !other.active || passed || withdrew || distance >= 4.5 || other.lab.arrived && other.phase === "work") {
+          const home = labStations[job.station];
+          if (home && (elapsed < job.pathAt || !planLabPath(e, home.x, home.y, home.z, home.heading))) return;
+          job.yielding = 0; job.yieldFor = null; job.yieldReady = false; job.arrived = false;
+          return;
+        }
+      }
+      if (q && Math.hypot(q.x - job.yieldProgressX, q.z - job.yieldProgressZ) > 0.15) {
+        job.yieldProgressX = q.x; job.yieldProgressZ = q.z; job.yieldProgressAt = elapsed;
+      }
+      if (job.yieldReady && (e.blocked > 0.5 || elapsed - job.yieldProgressAt > 2.5 && Math.hypot(p.x - point.x, p.z - point.z) < 0.08)) {
+        job.yieldReady = false; job.yieldChoice++; job.pathCount = job.pathIndex = 0; job.pathAt = 0;
+        job.yieldProgressAt = elapsed;
+      }
+      if (!job.yieldReady && !planLabYield(e)) { e.speed = 0; return; }
       const distance = Math.hypot(p.x - point.x, p.z - point.z);
       if (distance > 0.003) {
-        setGoal(e, point.x, point.y, point.z); moveLab(e, dt, 0.65);
+        if (labGoal(e, point.x, point.y, point.z, point.heading)) moveLab(e, dt, 0.65);
+        else e.speed = 0;
       } else e.speed = damp(e.speed, 0, 12, dt);
-      const other = job.yieldFor, q = other && other.root.position;
-      if (elapsed < job.yieldUntil) return;
-      if (other && other.active && q) {
-        const distance = Math.hypot(q.x - p.x, q.z - p.z);
-        const passed = (q.x - p.x) * job.yieldDX + (q.z - p.z) * job.yieldDZ > 1.65;
-        const withdrew = other.controlled && other.drive.x * job.yieldDX + other.drive.z * job.yieldDZ < -0.2 && distance > 2.1;
-        if (!passed && !withdrew && distance < 4.5 && !(other.lab.arrived && other.phase === "work")) return;
-      }
-      const home = labStations[job.station];
-      if (home && (elapsed < job.pathAt || !planLabPath(e, home.x, home.y, home.z, home.heading))) return;
-      job.yielding = 0; job.yieldFor = null; job.arrived = false;
     };
     const reserveLab = (e, moving) => {
       if (!labStations.length) return false;
+      if (!moving) {
+        if (!e.lab.waitOrder) e.lab.waitOrder = ++labWaitSerial;
+        for (const other of list) {
+          if (other !== e && other.active && other.mode === "working" && other.site === labSite && !other.hasSlot
+            && other.lab.waitOrder > 0 && other.lab.waitOrder < e.lab.waitOrder) return false;
+        }
+      }
       if (moving) {
         const mouth = sites[labSite].mouth;
         for (const other of list) {
           if (other === e || !other.active) continue;
+          if (other.site === labSite && other.mode === "working" && other.lab.waitOrder > 0) return false;
           if (other.phase === "travel" && other.site === labSite || other.route === "exit" && other.fromSite === labSite) return false;
           if (other.controlled && Math.hypot(other.drive.x, other.drive.z) > 0.05
             && Math.hypot(other.root.position.x - mouth.x, other.root.position.z - mouth.z) < 8) return false;
@@ -400,9 +483,27 @@
       e.radius = radius; e.height = height; e.compact = compact; e.footprintMode = mode; e.planningLab = false; e.planningLabWork = "";
       if (chosen < 0) return false;
       const station = labStations[chosen];
-      e.lab.station = chosen; e.lab.arrived = false; e.lab.time = 0;
+      e.lab.waitOrder = 0;
+      e.lab.station = chosen; e.lab.arrived = false; e.lab.time = e.lab.reach = 0;
       e.lab.stage = station.kind === "carry" ? "fetch" : ""; e.lab.bench = e.lab.pickup = -1;
       e.slotIndex = chosen; e.slotX = station.x; e.slotY = station.y; e.slotZ = station.z; e.hasSlot = true;
+      return true;
+    };
+    const yieldLabStation = (e) => {
+      let waiting = false;
+      for (const other of list) {
+        if (other === e || !other.active || other.site !== labSite) continue;
+        // Keep one complete exit/entry exchange in flight through the arch.
+        if (other.phase === "travel" || other.phase === "leave") return false;
+        if (other.mode === "working" && other.phase === "wait" && other.lab.waitOrder > 0) waiting = true;
+      }
+      if (!waiting || e.lab.item >= 0 || e.lab.yielding) return false;
+      releasePortal(e); releaseLab(e);
+      e.motion.labSqueeze = true;
+      e.lab.waitOrder = ++labWaitSerial;
+      e.hasSlot = false; e.slotIndex = -1; e.overflow = true;
+      e.phase = "travel"; e.route = "exit"; e.fromSite = labSite;
+      e.blocked = e.retry = 0;
       return true;
     };
     const trafficAt = (x, y, z) => {
@@ -768,8 +869,10 @@
         controlled: false, pendingSite: -1, actionControlled: false,
         planningLab: false, planningLabWork: "", planningLabSide: 1, lab: { station: -1, time: 0, arrived: false, cycles: 0,
           item: -1, pickup: -1, bench: -1, pickupPoint: { x: 0, y: 0, z: 0, heading: 0, side: 1 },
-          stage: "", reach: 0, yielding: 0, yieldStation: -1, yieldSide: 1, yieldUntil: 0, yieldFor: null, yieldDX: 0, yieldDZ: 0, yieldPoint: { x: 0, y: 0, z: 0 },
-          squeezeUntil: 0, path: new Float64Array(16 * 3), pathPending: false, pathCount: 0, pathIndex: 0, pathAt: 0, targetX: NaN, targetY: NaN, targetZ: NaN },
+          stage: "", reach: 0, yielding: 0, yieldStation: -1, yieldSide: 1, yieldUntil: 0, yieldFor: null, yieldDX: 0, yieldDZ: 0,
+          yieldAlong: 0, yieldChoice: 0, yieldReady: false, yieldTargetX: 0, yieldTargetZ: 0,
+          yieldProgressX: 0, yieldProgressZ: 0, yieldProgressAt: 0, yieldPoint: { x: 0, y: 0, z: 0, heading: 0 },
+          squeezeUntil: 0, waitOrder: 0, path: new Float64Array(16 * 3), pathPending: false, pathCount: 0, pathIndex: 0, pathAt: 0, targetX: NaN, targetY: NaN, targetZ: NaN },
         drive: { x: 0, z: 0, climbAxis: 0, heading: NaN, climbExitHeading: NaN, climbExitLook: NaN,
           run: false, jumpHeld: false, jumpDown: false, jumpArmed: false,
           cancelled: false, charge: 0, vx: 0, vy: 0, vz: 0, airborne: false, grounded: true, resume: false, motionRecover: 0, motionEnvelope: false },
@@ -1354,7 +1457,26 @@
         const from = e.fromSite >= 0 ? sites[e.fromSite] : null;
         const along = from ? (p.x - from.mouth.x) * from.sr + (p.z - from.mouth.z) * from.cr : Infinity;
         if (from && along < 0.5 + e.radius && p.y < from.mouth.floorY + 2.7) {
+          if (e.fromSite === labSite && e.motion.lab) {
+            // Queued departures must also retract their workstation pose, or
+            // their hands can cover the aisle needed by the portal holder.
+            e.motion.labWork = ""; e.motion.labReach = 0; e.motion.labSqueeze = true;
+          }
           if (!claimPortal(e, e.fromSite)) return false;
+          if (e.fromSite === labSite && e.motion.lab) {
+            const across = (p.x - from.mouth.x) * from.cr - (p.z - from.mouth.z) * from.sr;
+            if (along < -0.6 || Math.abs(across) > 0.3) {
+              sitePoint(from, 0, -0.45, POINT);
+              if (!labGoal(e, POINT.x, POINT.y, POINT.z, from.mouth.ry)) {
+                requestLabPass(e, POINT.x, POINT.z);
+                // A rear worker may have claimed before the front workers'
+                // state changed this frame. Let the nearest leaver go first.
+                releasePortal(e); return false;
+              }
+              if (e.blocked > 0.3) requestLabPass(e, POINT.x, POINT.z);
+              return true;
+            }
+          }
           sitePoint(from, 0, 0.7 + e.radius, POINT);
           if (e.fromSite === labSite && e.blocked > 0.3) requestLabPass(e, POINT.x, POINT.z);
           setGoal(e, POINT.x, POINT.y, POINT.z);
@@ -1402,7 +1524,14 @@
       }
       if (e.route === "enter") {
         if (!claimPortal(e, e.site)) return false;
-        if (!e.hasSlot && !reserve(e)) { e.overflow = true; return false; }
+        if (!e.hasSlot && !reserve(e)) {
+          e.overflow = true;
+          if (e.site === labSite) {
+            releasePortal(e); e.phase = "wait"; e.route = ""; e.retry = 1;
+            waitSpot(e); return true;
+          }
+          return false;
+        }
         e.overflow = false;
         if (e.motion.lab) e.entryTurn = true;
         if (!e.entryTurn) {
@@ -1990,11 +2119,15 @@
       job.arrived = false;
       if (job.yielding) { job.stage = "fetch"; return; }
       if (e.mode !== e.owner.state || e.pendingSite >= 0 && e.pendingSite !== e.site) return;
+      if (yieldLabStation(e)) return;
       if (reserve(e, true)) { job.cycles++; e.workCycle++; setGoal(e, e.slotX, e.slotY, e.slotZ); }
       else job.stage = "fetch";
     };
     const workLab = (e, dt) => {
       const p = e.root.position, job = e.lab, station = labStations[job.station];
+      if (station && station.enabled === false) {
+        releaseLab(e); e.hasSlot = false; beginTravel(e, labSite); return;
+      }
       const wasWorking = !!e.motion.labWork;
       e.motion.labWork = ""; e.motion.labReach = 0;
       if (job.item >= 0) e.motion.labSqueeze = false;
@@ -2043,6 +2176,7 @@
       if (distance > 0.003) {
         job.arrived = false;
         job.reach = 0;
+        if (e.gorilla.labItem) { e.motion.labWork = "carry"; e.motion.labReach = 1; e.motion.labSqueeze = false; }
         if (labGoal(e, destination.x, destination.y, destination.z, destination.heading)) moveLab(e, dt, 1.1);
         else { e.speed = damp(e.speed, 0, 12, dt); requestLabPass(e, destination.x, destination.z); }
         if (e.blocked > 0.35) requestLabPass(e, destination.x, destination.z);
@@ -2103,6 +2237,7 @@
           return;
         }
         if (job.item >= 0) { job.stage = "return"; job.arrived = false; job.reach = 0; job.pathCount = 0; return; }
+        if (yieldLabStation(e)) return;
         // A workstation stays occupied until its scientist has a real, clear
         // next job. Failed reservations keep the hands working, not idling.
         if (reserve(e, true)) {
@@ -2153,6 +2288,7 @@
       }
       if (e.mode !== e.owner.state) {
         releasePortal(e);
+        e.lab.yielding = 0; e.lab.yieldFor = null; e.lab.yieldReady = false;
         if (e.lounge) leaveLounge(e);
         e.mode = e.owner.state; e.hasSlot = false;
         if (e.mode === "working") beginTravel(e, e.owner.work.plannedSite >= 0 ? e.owner.work.plannedSite : e.owner.work.site);
@@ -2242,7 +2378,7 @@
             setGoal(e, POINT.x, POINT.y, POINT.z);
             move(e, dt, 0.6);
           }
-        } else if (travelGoal(e, dt)) { if (!e.jump.active) { if (e.motion.lab && e.site === labSite && (e.route === "enter" || e.phase === "work")) moveLab(e, dt); else move(e, dt, SPEED); } }
+        } else if (travelGoal(e, dt)) { if (!e.jump.active) { if (e.motion.lab && (e.fromSite === labSite && e.route === "exit" || e.site === labSite && (e.route === "enter" || e.phase === "work"))) moveLab(e, dt); else move(e, dt, SPEED); } }
         else { e.speed = damp(e.speed, 0, 12, dt); }
       } else if (e.phase === "wait") {
         yieldSpace(e);
@@ -2250,7 +2386,7 @@
         if (!e.retry) {
           e.retry = 1.5 + e.index * 0.07;
           if (Math.hypot(p.x, p.z) > ringRadius * 0.8) waitSpot(e);
-          if (e.owner.work.phase !== "return" && e.owner.work.phase !== "reload" && reserve(e)) {
+          if ((e.site === labSite || e.owner.work.phase !== "return" && e.owner.work.phase !== "reload") && reserve(e)) {
             e.overflow = false; e.phase = "travel"; e.route = "exit";
             e.fromSite = caveAt(p.x, p.y, p.z);
           }
@@ -2384,5 +2520,5 @@
     return { list, sync, update, target, hit, plan, stats, liveGeometry, dispose,
       possess, release, control, cancelInput, smash, grab, chestBeat, ignite, dropRoll, get player() { return player; } };
   };
-  BL.clankers = { create };
+  BL.clankers = { create, WALK_RADIUS, WALK_HEIGHT };
 })();
