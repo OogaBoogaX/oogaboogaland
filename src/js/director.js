@@ -8,6 +8,12 @@
   const params = new URLSearchParams(location.search);
   const DEBUG = params.has("debug");
   if (DEBUG) window.BL.contributors.seedDebugActivity();
+  // A game still being built sets `wip: true` on its scene and stays unregistered, so nothing can enter it
+  // and its cave seals, unless the page opts in: ?wip=<scene id> opens that game and lands in it, wip=1 opens
+  // every one. No debug needed, so anyone can play a shared link. Its saves are left alone for the day it opens.
+  const WIP = params.get("wip");
+  for (const id of Object.keys(scenes)) if (scenes[id].wip && WIP !== "1" && WIP !== id) delete scenes[id];
+  for (const slot of window.BL.caves.slots) if (slot.scene && !scenes[slot.scene]) Object.assign(slot, { scene: null, status: "dark" });
   // Loot crates, locker tab and worn swag; the suite turns them on with ?debug=1&loot=1
   const LOOT_DEFAULT = false;
   const LOOT_ENABLED = DEBUG && params.has("loot") ? params.get("loot") === "1" : LOOT_DEFAULT;
@@ -130,9 +136,18 @@
   const agentPlay = BL.agent.createPlay();
   const ctx = { renderer, canvas: sceneCanvas, overlay: overlayCanvas, game, world, go, lootEnabled: LOOT_ENABLED, testBananas: TEST_BANANAS, agentPlay, from: null };
   const sceneSections = [...document.querySelectorAll("[data-scene]")];
+  // The title cards of the games that have no phase of their own for one: shown on every arrival,
+  // closed by their button, Enter, Space or Escape, and nothing else reaches the scene while one shows.
+  const intros = [...document.querySelectorAll("[data-intro]")];
+  const coarse = window.matchMedia("(pointer: coarse)").matches;
+  if (coarse) for (const n of document.querySelectorAll("[data-intro] [data-coarse]")) n.textContent = n.dataset.coarse;
+  const openIntro = () => intros.find((el) => !el.hidden) || null;
   const enter = (next) => {
     ctx.from = active ? active.id : null;
     for (const el of sceneSections) el.hidden = el.classList.contains("hub-presets") || el.dataset.scene !== next.id;
+    for (const el of intros) el.hidden = el.dataset.intro !== next.id;
+    // The page styles by scene too: the games hide the island's sheet, see style.css.
+    document.body.dataset.activeScene = next.id;
     next.enter(ctx);
     active = next;
     sceneTime = 0;
@@ -272,7 +287,8 @@
     lastRender = now;
     renderedFrames++;
     if (renderedFrames <= 3) mark(`frame${renderedFrames}`);
-    // A queued RAF may predate debug advance(); simulation time must never rewind.
+    // A frame's timestamp is when it began, which can come before the `performance.now()` that the debug
+    // `advance` just wrote into lastTime: a negative step would run the scene backwards.
     const dt = Math.max(0, Math.min(0.1, (now - lastTime) / 1e3));
     lastTime = now;
     step(dt, now);
@@ -284,6 +300,16 @@
     if (e.repeat) return;
     const typing = e.target && (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA");
     if (typing || (e.target && e.target.closest && e.target.closest("dialog"))) return;
+    const intro = openIntro();
+    if (intro) {
+      // Registered at boot, before any scene's controls, so this keeps the key from them too.
+      e.stopImmediatePropagation();
+      if (e.key === "Enter" || e.key === " " || e.key === "Escape") {
+        e.preventDefault();
+        intro.hidden = true;
+      }
+      return;
+    }
     const key = e.key.length === 1 ? e.key.toLowerCase() : e.key;
     konamiAt = key === KONAMI[konamiAt] ? konamiAt + 1 : key === KONAMI[0] ? 1 : 0;
     if (konamiAt === KONAMI.length) {
@@ -315,6 +341,9 @@
     active.onKey(e);
   };
   const onVisibility = () => {
+    // A hidden tab holds no sockets; the chain's REST polls already skip themselves while hidden.
+    mempool.setHidden(document.hidden);
+    chain.setHidden(document.hidden);
     if (document.hidden) {
       window.cancelAnimationFrame(raf);
       raf = 0;
@@ -335,6 +364,11 @@
   // `?chain=esplora` or `?chain=https://host/api` pins the provider; otherwise mempool.space leads
   // and three consecutive failures hand the session to Esplora on its own.
   if (!params.has("nosim") && params.get("chain") !== "0") chain.start({ source: params.get("chain") });
+  // A tab opened in the background waits for its first look before it holds any socket.
+  if (document.hidden) {
+    mempool.setHidden(true);
+    chain.setHidden(true);
+  }
   const unsubscribeDonations = donations.subscribe((donation) => active.onDonation(donation), { identity: () => game.state });
   // The feed panel: the Konami code toggles a page-wide readout of the socket, its counters and its last events.
   // It subscribes and ticks only while open, and its text nodes change only with their value.
@@ -352,7 +386,7 @@
       if (logCount < FEED_LOG) logCount++;
       dirty = true;
     };
-    const describe = (e) => e.type === "tx" ? `tx     ${e.vsize} vB · ${(e.fee / e.vsize).toFixed(1)} sat/vB · fee ${e.fee}`
+    const describe = (e) => e.type === "stats" ? `stats  ${e.count} tx · ${e.vsize} vB · inflow ${e.inflow} vB/s`
       : e.type === "block" ? `block  ${e.height} · ${e.txCount} tx`
       : e.type === "fees" ? `fees   next block ${e.nextFee.toFixed(2)} sat/vB · ${e.blocks} projected`
       : `${e.type}`;
@@ -361,7 +395,7 @@
       const d = active && active.debug && active.debug.weather, w = d && d.state ? d : null, s = mempool.state, c = chain.snapshot;
       const link = !s.enabled ? "off (nosim or mempool=0)" : s.connected ? `connected · attempt ${s.attempts}` : `reconnecting · attempt ${s.attempts}`;
       const age = s.lastAt ? `${((Date.now() - s.lastAt) / 1000).toFixed(1)} s ago` : "none yet";
-      const text = `socket    ${link}\nlast msg  ${age}${s.lastKeys ? ` · ${s.lastKeys}` : ""}\nmessages  ${s.messages} · ${(s.bytes / 1024).toFixed(0)} KB\nchain     height ${s.height} · next block ${s.nextFee.toFixed(2)} sat/vB · ${s.projectedBlocks} projected\nevents    ${s.transactions} tx · ${s.blocks} blocks\npool      ${c.count} tx · ${c.deep.toFixed(1)} blocks deep · floor ${c.floor.toFixed(2)} sat/vB · via ${c.source}${c.degraded ? " (fallback)" : ""}\naxes      soak ${c.soak.toFixed(2)} · chill ${c.chill.toFixed(2)} · gale ${c.gale.toFixed(2)} · pace ${(c.pace / 60).toFixed(1)} min\nweather   ${w ? `${w.state.name} · ${w.state.drops}/${w.state.capacity} ${w.state.form} · wind ${w.state.wind.toFixed(1)} · cloud ${w.state.cloud.toFixed(2)} · ${w.state.strikes} strikes` : "no weather in this scene"}`;
+      const text = `socket    ${link}\nlast msg  ${age}${s.lastKeys ? ` · ${s.lastKeys}` : ""}\nmessages  ${s.messages} · ${(s.bytes / 1024).toFixed(0)} KB\nchain     height ${s.height} · next block ${s.nextFee.toFixed(2)} sat/vB · ${s.projectedBlocks} projected\nevents    ${s.stats} stats · ${s.blocks} blocks · inflow ${s.inflow} vB/s\npool      ${c.count} tx · ${c.deep.toFixed(1)} blocks deep · paying ${c.paying.toFixed(2)} MvB (avg ${c.payEma.toFixed(2)}) · floor ${c.floor.toFixed(2)} sat/vB · via ${c.source}${c.degraded ? " (fallback)" : ""}\nprice     ${c.priceUsd ? c.priceUsd.toFixed(2) : "-"} · via ${c.priceSource || "-"}\naxes      soak ${c.soak.toFixed(2)} · gale ${c.gale.toFixed(2)} · pace ${(c.pace / 60).toFixed(1)} min\nweather   ${w ? `${w.state.name} · ${w.state.drops}/${w.state.capacity} drops · wind ${w.state.wind.toFixed(1)} · cloud ${w.state.cloud.toFixed(2)} · ${w.state.strikes} strikes` : "no weather in this scene"}`;
       if (stateEl.textContent !== text) stateEl.textContent = text;
       if (!dirty) return;
       dirty = false;
@@ -388,7 +422,7 @@
     return { toggle, close, get open() { return !el.hidden; }, get logged() { return logCount; } };
   })();
   const housekeepTimer = window.setInterval(housekeep, 6e4);
-  const sceneId = params.get("scene");
+  const sceneId = params.get("scene") || (WIP !== "1" ? WIP : null);
   // Building the first scene holds the main thread with nothing painted yet.
   // Run boot from a task after the first frame so the leaf curtain is on screen, not the previous page.
   const boot = () => {
@@ -445,7 +479,7 @@
         return world.level;
       }
     };
-    for (const key of ["slots", "drops", "core", "shell", "delivery", "spillEffect", "cavemen", "crates", "lab", "headquarters", "hud", "applyAllSwag", "renderLocker", "demoTip", "setPileLevel", "refreshStates", "trimPool", "shown", "island", "mouths", "labels", "camera", "cameraCave", "crew", "fx", "controls", "props", "altar", "path", "scenery", "jetpack", "magazine", "mirrorCave", "matrixCave", "matrixGate", "pilot", "renderOpts", "lamps", "entranceLights", "lighting", "fireSeats", "critters", "storm", "daylight", "setHour", "track", "racers", "items", "race", "audio", "weather", "launchers", "drop", "diver", "plane", "course", "jumbotron", "fireworks", "fireworksPending", "orbit", "flight", "site", "agent", "poolIsland", "dsb"]) {
+    for (const key of ["slots", "drops", "core", "shell", "delivery", "spillEffect", "cavemen", "crates", "lab", "headquarters", "hud", "applyAllSwag", "renderLocker", "demoTip", "setPileLevel", "refreshStates", "trimPool", "shown", "island", "mouths", "labels", "camera", "cameraCave", "crew", "fx", "controls", "props", "altar", "path", "scenery", "jetpack", "magazine", "mirrorCave", "matrixCave", "matrixGate", "pilot", "renderOpts", "lamps", "entranceLights", "lighting", "fireSeats", "critters", "storm", "daylight", "setHour", "track", "racers", "items", "race", "audio", "weather", "launchers", "drop", "diver", "plane", "course", "jumbotron", "fireworks", "fireworksPending", "orbit", "flight", "site", "agent", "poolIsland", "mine", "dsb"]) {
       Object.defineProperty(ooga, key, { get: () => active.debug && active.debug[key], enumerable: true });
     }
     window.__ooga = ooga;

@@ -31,6 +31,15 @@
   const swapWait = (melee) => melee ? TWIRL_MIN + Math.random() * TWIRL_SPREAD : SWAP_MIN + Math.random() * SWAP_SPREAD;
   const TINT_MIN = 360, TINT_MAX = 900;
   const tintWait = () => TINT_MIN + Math.random() * (TINT_MAX - TINT_MIN);
+  // A tinted character wears its second colourway while the coin is up on the day (the chain's price
+  // against the day's open), the first while it is down; without a reading it changes on the timer.
+  // A poke's toggle holds for TINT_HOLD seconds before the price has its say again.
+  const TINT_HOLD = 8;
+  const tintWanted = () => {
+    const c = BL.chain && BL.chain.snapshot;
+    if (!c || !(c.priceOpenUsd > 0) || !(c.priceUsd > 0)) return -1;
+    return c.priceUsd >= c.priceOpenUsd ? 1 : 0;
+  };
   // The free stick folds against the handle when the weapon is stowed and flies
   // out in line with it in the hand, where the wrist spins it at the hip.
   const TAU = Math.PI * 2;
@@ -479,7 +488,7 @@
       weapon.meleeStrikeFrom = -1.1;
       Object.assign(cave, {
         weapon,
-        tintTime: cave.tint ? tintWait() : 0,
+        tintTime: cave.tint ? tintWait() : 0, tintState: 0, tintHold: 0,
         chukAngle: CHUK_FOLD,
         meleeOut: false,
         meleeSwap: swapWait(false),
@@ -3874,7 +3883,9 @@
     const toggleTint = (cave) => {
       if (!cave || !cave.tint) return false;
       swapTint(cave);
+      cave.tintState ^= 1;
       cave.tintTime = tintWait();
+      cave.tintHold = TINT_HOLD;
       return true;
     };
     const updateCaveman = (cave, dt) => {
@@ -3900,9 +3911,20 @@
         cave.twirlHand = cave.twirlHand ? 0 : 1;
         cave.twirlFlipAt = Infinity;
       }
-      if (cave.tint && (cave.tintTime -= dt) <= 0) {
-        swapTint(cave);
-        cave.tintTime = tintWait();
+      if (cave.tint) {
+        if (cave.tintHold > 0) cave.tintHold -= dt;
+        const want = cave.tintHold > 0 ? -1 : tintWanted();
+        if (want >= 0) {
+          if (want !== cave.tintState) {
+            swapTint(cave);
+            cave.tintState = want;
+          }
+          cave.tintTime = tintWait();
+        } else if ((cave.tintTime -= dt) <= 0) {
+          swapTint(cave);
+          cave.tintState ^= 1;
+          cave.tintTime = tintWait();
+        }
       }
       if (cave.hopV > 0 || cave.hop > 0) {
         cave.hopV -= WALK.gravity * dt;
@@ -4679,17 +4701,18 @@
       ctx2d.font = "bold 13px ui-monospace, monospace";
       ctx2d.textAlign = "center";
       ctx2d.textBaseline = "bottom";
+      // A stroked outline reads like the old shadow and costs nothing; a blur on the overlay does not.
       ctx2d.fillStyle = "#ffe291";
-      ctx2d.shadowColor = "#17130b";
-      ctx2d.shadowBlur = 4;
-      ctx2d.shadowOffsetY = 1;
+      ctx2d.strokeStyle = "#17130b";
+      ctx2d.lineWidth = 3;
+      ctx2d.lineJoin = "round";
       for (let caveIndex = 0; caveIndex < crewList.length; caveIndex++) {
         const drops = crewList[caveIndex].stunGear.drops;
         for (let dropIndex = 0; dropIndex < drops.length; dropIndex++) {
           const drop = drops[dropIndex];
           if (!drop.active || drop.kind !== "ammo") continue;
           const p = drop.node.position, pos = project(p.x, p.y + 0.4, p.z);
-          if (pos) ctx2d.fillText(drop.label, pos.x, pos.y);
+          if (pos) { ctx2d.strokeText(drop.label, pos.x, pos.y + 1); ctx2d.fillText(drop.label, pos.x, pos.y); }
         }
       }
       ctx2d.restore();

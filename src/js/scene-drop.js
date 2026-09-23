@@ -19,16 +19,20 @@
   const METER_CAPACITY = 60;
   const FIXED = 1 / 120, MAX_SUBSTEPS = 4;
   // Climb: a roll along the roof, then a helix round the island up to jump height, blended from the straight run.
-  const JUMP_ALT = 360, HELIX_R = 40, PLANE_SPEED = 20, HELIX_W = PLANE_SPEED / HELIX_R, ROLL_T = 1.3, CLIMB_T = 17, BLEND_T = 4, SKIP_SCALE = 4;
+  // The jump sits well above the first ring, so there is time in the air to line up on the column.
+  const JUMP_ALT = 430, HELIX_R = 40, PLANE_SPEED = 20, HELIX_W = PLANE_SPEED / HELIX_R, ROLL_T = 1.3, CLIMB_T = 17, BLEND_T = 4, SKIP_SCALE = 4;
   // Jump window opens once a lap as the plane passes the course start and stays open JUMP_GRACE seconds after.
-  // JUMP_WINDOW, JUMP_GET_READY and JUMP_SOON are radians before the mark.
-  const JUMP_WINDOW = 0.42, JUMP_GRACE = 1.6, JUMP_GET_READY = 3, JUMP_SOON = 1.4;
+  // JUMP_WINDOW and JUMP_GET_READY are radians before the mark; the count runs 3, 2, 1 in the last COUNT_SECONDS.
+  const JUMP_WINDOW = 0.42, JUMP_GRACE = 1.6, JUMP_GET_READY = 3, COUNT_SECONDS = 3;
   const NEXT_RING_PULSE = 0.1;
   // Rings lie on the fall of a diver steering for the target at half stick, so the course is flyable by build.
-  const RING_COUNT = 8, RING_TOP = 300, RING_BOTTOM = 118, RING_STEP = (RING_TOP - RING_BOTTOM) / (RING_COUNT - 1), RING_R0 = 8, RING_R1 = 5, RING_WANDER = 3, TARGET_R = 11, AUTOPILOT = { pitch: 0.5, yaw: 1.5, settle: 30, dogleg: 24, doglegFrom: 250, doglegTo: 170 };
+  // The dogleg's size, side and the pitch of the reference fall are drawn per jump, so every course has its own shape.
+  const RING_COUNT = 8, RING_TOP = 300, RING_BOTTOM = 118, RING_STEP = (RING_TOP - RING_BOTTOM) / (RING_COUNT - 1), RING_R0 = 8, RING_R1 = 5, RING_WANDER = 3, TARGET_R = 11, AUTOPILOT = { pitch: [0.4, 0.6], yaw: 1.5, settle: 30, dogleg: [10, 24], doglegFrom: 250, doglegTo: 170 };
   // Off the island the fall is lost once it drops past LOST_Y; crashes and landings hold before the results.
-  const PULL_ALT = 90, LOST_Y = -8, LANDED_T = 1.9, LOST_T = 1.1;
-  const SCORE = { ring: 100, land: 500, landRadius: 10, stand: 200, stumble: 50, banana: 300 };
+  const PULL_ALT = 90, LOST_Y = -8, LANDED_T = 1.9, LOST_T = 1.8;
+  // BULL is the share of a ring's radius that counts as its middle; SOFT_SINK the sink under the canopy that lands softly; LOW_PULL the altitude a late pull is paid under.
+  const SCORE = { ring: 100, bullseye: 150, sweep: 200, land: 500, landRadius: 10, stand: 200, stumble: 50, soft: 100, lowPull: 100, banana: 300 };
+  const BULL = 0.4, SOFT_SINK = 3.5, LOW_PULL = 60, NEAR_MISS = 3;
   const STREAKS = 160, STREAK_BOX = 18, STREAK_MIN = 9;
   const CLOUD_HIGH = 36, CLOUD_LOW = 14;
   // Camera distances, default elevations in radians and look-ahead per phase.
@@ -40,6 +44,8 @@
   const DIRT = models.particleGeometry("#3a2a18", 0.12, 0);
   const BANANA_BIT = models.particleGeometry("#f5c542", 0.08, 0.5);
   const CLOUD_PUFF = models.particleGeometry("#eef3f7", 0.14, 0.2);
+  const DUST_BITS = [DUST], DIRT_BITS = [DIRT], BANANA_BITS = [BANANA_BIT], CLOUD_BITS = [CLOUD_PUFF];
+  const MARKER_SCALE = 0.6;
   // Sky, light and haze; daylight.sample rewrites these from the island's clock every frame.
   const RENDER_OPTS = {
     clear: new Float32Array(3), horizon: new Float32Array(3), zenith: new Float32Array(3), sky: new Float32Array(3), ground: new Float32Array(3), sun: new Float32Array(3), direct: new Float32Array(3),
@@ -68,8 +74,10 @@
   const selection = { racer: contributors.activeRoster[0]?.name || null };
 
   // One visit's state: made in enter, dropped in leave.
-  let renderer, game, world, go, lootEnabled, testBananas, root, camera, island, hud, dhud, hooks, input, fx, controls, audio, clock, diver, plane, streaks, mound, hole, agent;
+  let renderer, game, world, go, lootEnabled, testBananas, root, camera, island, hud, dhud, hooks, input, fx, controls, audio, clock, diver, plane, streaks, mound, hole, agent, marker;
   let phase = "board", jumpOpenUntil = 0, callStage = 0, markNear = 0, accumulator = 0, sceneTime = 0, flightTime = 0, landedAt = 0, score = 0, ringsHit = 0, pulled = false, jumpOpen = false, result = null;
+  // The pull altitude and the sink at touchdown, for the bonuses they earn.
+  let pullAlt = 0, landSink = 0;
   let meterTimer = 0, stateTimer = 0, hintTimer = 0;
   const placed = [];
   const clouds = [];
@@ -151,8 +159,11 @@
     quat.copy(diver.state.q, plane.node.quaternion);
   };
 
-  const layCourse = () => {
-    const rand = mulberry32(SEED + 41);
+  // The course for jump number `jump`: the same reference fall, its dogleg drawn from that jump's dice.
+  const layCourse = (jump) => {
+    const rand = mulberry32(SEED + 41 + jump * 17);
+    const dogleg = lerp(AUTOPILOT.dogleg[0], AUTOPILOT.dogleg[1], rand()) * (rand() < 0.5 ? -1 : 1);
+    const pitch = lerp(AUTOPILOT.pitch[0], AUTOPILOT.pitch[1], rand());
     jumpAngle = planeAngle(jumpT);
     pathAt(jumpT, PATH);
     pathAt(jumpT + 0.02, PATH_AHEAD);
@@ -167,14 +178,14 @@
     const s = diver.state;
     let head = Math.atan2(vx, vz);
     // High up the reference aims AUTOPILOT.dogleg beside the target, sliding on between doglegFrom and doglegTo.
-    const legX = landingSpot.x + Math.cos(jumpAngle) * AUTOPILOT.dogleg, legZ = landingSpot.z + Math.sin(jumpAngle) * AUTOPILOT.dogleg;
+    const legX = landingSpot.x + Math.cos(jumpAngle) * dogleg, legZ = landingSpot.z + Math.sin(jumpAngle) * dogleg;
     for (let i = 0, guard = 0; i < RING_COUNT && guard < 6000; guard++) {
       const k = smooth((AUTOPILOT.doglegFrom - s.p.y) / (AUTOPILOT.doglegFrom - AUTOPILOT.doglegTo));
       const dx = lerp(legX, landingSpot.x, k) - s.p.x, dz = lerp(legZ, landingSpot.z, k) - s.p.z, dist = Math.hypot(dx, dz);
       if (Math.hypot(s.up[0], s.up[2]) > 0.3) head = Math.atan2(s.up[0], s.up[2]);
       const diff = wrap(Math.atan2(dx, dz) - head);
       AUTO.yaw = clamp(diff * AUTOPILOT.yaw, -1, 1);
-      AUTO.pitch = Math.abs(diff) < 0.6 ? AUTOPILOT.pitch * Math.min(1, dist / AUTOPILOT.settle) : 0;
+      AUTO.pitch = Math.abs(diff) < 0.6 ? pitch * Math.min(1, dist / AUTOPILOT.settle) : 0;
       diver.substep(FIXED, AUTO);
       const y = RING_TOP - i * RING_STEP;
       if (s.p.y > y) continue;
@@ -200,16 +211,21 @@
     }
   };
   let ringIndex = 0;
-  const hitRing = (ring, i) => {
+  // Through the middle is a bullseye; all eight is a clean sweep on top.
+  const hitRing = (ring, i, d2) => {
     ring.hit = true;
     ring.node.glow = 0.2;
     ringsHit++;
-    score += SCORE.ring;
-    fx.burst(ring.x, ring.y, ring.z, 14, CONFETTI, 3);
+    const bull = d2 < ring.r * ring.r * BULL * BULL;
+    score += bull ? SCORE.bullseye : SCORE.ring;
+    fx.burst(ring.x, ring.y, ring.z, bull ? 22 : 14, CONFETTI, bull ? 3.6 : 3);
     audio.cues.ring();
-    dhud.center(`+${SCORE.ring}`, 700);
-    dhud.notice(i === RING_COUNT - 1 ? "last ring!" : `ring ${ringsHit}`, 1200);
-    cam.shake = Math.max(cam.shake, 0.25);
+    dhud.center(bull ? "BULLSEYE" : `+${SCORE.ring}`, 700);
+    if (ringsHit === RING_COUNT) {
+      score += SCORE.sweep;
+      dhud.notice(`clean sweep · +${SCORE.sweep}`, 1600);
+    } else dhud.notice(i === RING_COUNT - 1 ? "last ring!" : bull ? `bullseye · +${SCORE.bullseye}` : `ring ${ringsHit}`, 1200);
+    cam.shake = Math.max(cam.shake, bull ? 0.35 : 0.25);
     addTween({
       dur: 0.5, ease: math.ease.outBack, update: (k) => {
         const s = ring.r * (1 + 0.18 * Math.sin(k * Math.PI));
@@ -225,10 +241,13 @@
       const ring = rings[ringIndex];
       const t = (pp.y - ring.y) / Math.max(1e-6, pp.y - p.y);
       const qx = pp.x + (p.x - pp.x) * t, qz = pp.z + (p.z - pp.z) * t;
-      if ((qx - ring.x) ** 2 + (qz - ring.z) ** 2 < ring.r * ring.r) hitRing(ring, ringIndex);
+      const d2 = (qx - ring.x) ** 2 + (qz - ring.z) ** 2;
+      if (d2 < ring.r * ring.r) hitRing(ring, ringIndex, d2);
       else {
         audio.cues.miss();
         setVec(ring.node.scale, ring.r, ring.r, ring.r);
+        const by = Math.sqrt(d2) - ring.r;
+        if (by < NEAR_MISS) dhud.notice(`missed by ${by.toFixed(1)}`, 1200);
       }
       ringIndex++;
     }
@@ -262,6 +281,8 @@
     streaks.node.instanceCount = 0;
     streaks.node.visible = false;
     hole.visible = false;
+    marker.visible = false;
+    pullAlt = landSink = 0;
     cam.boardYaw = cam.boardLift = 0;
     cam.offset = cam.tilt = 0;
     cam.warm = false;
@@ -272,6 +293,8 @@
   };
   const startFlight = () => {
     if (!diver) return false;
+    // A new course for every jump; the diver is put back on the roof after it is laid.
+    layCourse(game.recordJump());
     toBoard();
     phase = "climb";
     dhud.show("flight");
@@ -283,7 +306,7 @@
     hud.setSubtitle("Ooga Drop · climbing");
     window.clearTimeout(hintTimer);
     hud.hint("", 0);
-    dhud.notice("hold Space to hurry the climb", 2600);
+    dhud.notice(COARSE ? "hold Jump! to hurry the climb" : "hold Space to hurry the climb", 2600);
     fx.say(diver.cave, "Ooga fly!", 1.6);
   };
   const jump = () => {
@@ -309,6 +332,8 @@
   };
   const deploy = () => {
     if (phase !== "air" || !diver.deploy()) return false;
+    const g = groundAt(diver.state.p.x, diver.state.p.z);
+    pullAlt = diver.state.p.y - (g === -Infinity ? 0 : Math.max(0, g));
     dhud.setChute("canopy");
     hud.setAct("Flare");
     hud.setSubtitle("Ooga Drop · under canopy");
@@ -318,43 +343,65 @@
     audio.cues.pull();
     audio.cues.open();
     cam.shake = Math.max(cam.shake, 0.4);
-    fx.burst(diver.state.p.x, diver.state.p.y + 1.5, diver.state.p.z, 8, [CLOUD_PUFF], 2);
+    fx.burst(diver.state.p.x, diver.state.p.y + 1.5, diver.state.p.z, 8, CLOUD_BITS, 2);
     return true;
   };
   const landingLabel = { stand: "Stood it up", stumble: "Stumbled", tumble: "Tumbled", hole: "Went through the ground", pancake: "Flattened", lost: "Lost in the clouds" };
   const CRASHES = { tumble: "Ooga rolled to a stop. The ground won.", hole: "Ooga went through the meadow. Ooga is a hole now.", pancake: "Ooga is a pancake now." };
   const crashed = (landing) => landing === "tumble" || landing === "hole" || landing === "pancake";
+  // Accuracy is to whichever is nearer, the meadow target or the pile's middle: the card says land on the
+  // pile, so the pile pays.
   const finish = (landing, dist) => {
     if (!diver) return;
     phase = "results";
-    const accuracy = landing === "lost" || crashed(landing) ? 0 : Math.round(SCORE.land * clamp(1 - dist / SCORE.landRadius, 0, 1));
-    const soft = landing === "stand" ? SCORE.stand : landing === "stumble" ? SCORE.stumble : 0;
-    const banana = landing !== "lost" && !crashed(landing) && onBanana(diver.state.p.x, diver.state.p.z) ? SCORE.banana : 0;
-    score += accuracy + soft + banana;
+    const p = diver.state.p, pileDist = Math.hypot(p.x, p.z), near = Math.min(dist, pileDist);
+    const accuracy = landing === "lost" || crashed(landing) ? 0 : Math.round(SCORE.land * clamp(1 - near / SCORE.landRadius, 0, 1));
+    const stood = landing === "stand" ? SCORE.stand : landing === "stumble" ? SCORE.stumble : 0;
+    const soft = landing === "stand" && landSink <= SOFT_SINK ? SCORE.soft : 0;
+    const low = pulled && pullAlt > 0 && pullAlt < LOW_PULL && landing !== "lost" && !crashed(landing) ? SCORE.lowPull : 0;
+    const banana = landing !== "lost" && !crashed(landing) && onBanana(p.x, p.z) ? SCORE.banana : 0;
+    score += accuracy + stood + soft + low + banana;
     const medal = dhud.medalFor(score);
     const improved = game.recordDrop({ score, rings: ringsHit, ringTotal: RING_COUNT, landing });
-    result = { landing, dist, accuracy, soft, banana, score, medal, improved };
-    const rows = [["Rings", `${ringsHit} × ${SCORE.ring} = ${ringsHit * SCORE.ring}`], ["Landing", landing === "lost" ? landingLabel.lost : `${landingLabel[landing]} · ${dist.toFixed(1)} from the target · ${accuracy}`], ["Touchdown", `${soft}`]];
+    result = { landing, dist, accuracy, soft: stood + soft, low, banana, score, medal, improved };
+    const rows = [["Rings", `${ringsHit} of ${RING_COUNT} · ${score - accuracy - stood - soft - low - banana}`], ["Landing", landing === "lost" ? landingLabel.lost : `${landingLabel[landing]} · ${near.toFixed(1)} from the ${pileDist < dist ? "pile" : "target"} · ${accuracy}`]];
+    if (landing !== "lost") rows.push(["Touchdown", `${stood}${soft ? ` · soft ${soft}` : ""}`]);
+    if (low) rows.push(["Low pull", `${Math.round(pullAlt)} up · ${low}`]);
     if (banana) rows.push(["Banana landing", `${banana}`]);
-    rows.push(["Time", dhud.formatTime(flightTime * 1000)], ["Score", `${score}${medal ? ` · ${medal.toUpperCase()}` : ""}`]);
+    const M = dropHud.MEDALS, nextMedal = score < M.bronze ? "bronze" : score < M.silver ? "silver" : score < M.gold ? "gold" : null;
+    rows.push(["Time", dhud.formatTime(flightTime * 1000)], ["Score", `${score}${medal ? ` · ${medal.toUpperCase()}` : ""}${nextMedal ? ` · ${M[nextMedal] - score} short of ${nextMedal}` : ""}`], ["Jump", `#${game.state.drop.jumps}`]);
     dhud.results(rows, crashed(landing) ? CRASHES[landing] : landing === "lost" ? "The island went by. Try aiming at it." : `${medal ? `${medal.toUpperCase()} drop` : "A drop"}${improved ? " · new best" : ""}`);
+    hud.letterSign(dhud.el.results.querySelector("[data-sign]"), crashed(landing) ? "Crashed" : landing === "lost" ? "Lost" : "Landed");
     hud.el.act.hidden = true;
-    hud.setSubtitle("Ooga Drop · landed");
+    hud.setSubtitle(`Ooga Drop · ${crashed(landing) ? "crashed" : landing === "lost" ? "lost" : "landed"}`);
     if (medal) audio.cues.finish();
     if (medal === "gold") fx.say(diver.cave, "OOGA CHAMPION!", 3);
     else if (landing === "stand") fx.say(diver.cave, "Ooga land good.", 2);
   };
   const touchdown = (groundY) => {
+    landSink = -diver.state.v.y;
     const landing = diver.land(groundY);
     phase = "down";
     landedAt = sceneTime;
     const p = diver.state.p, crash = crashed(landing);
-    fx.burst(p.x, groundY + 0.1, p.z, crash ? 14 : 6, [landing === "hole" ? DIRT : DUST], crash ? 2.4 : 1.2);
+    fx.burst(p.x, groundY + 0.1, p.z, crash ? 14 : 6, landing === "hole" ? DIRT_BITS : DUST_BITS, crash ? 2.4 : 1.2);
     if (landing === "hole") {
       setVec(hole.position, p.x, groundY + 0.01, p.z);
       hole.visible = true;
     }
-    if (onBanana(p.x, p.z)) fx.burst(p.x, groundY + 0.3, p.z, 10, [BANANA_BIT], 2);
+    marker.visible = false;
+    // The eye cuts low and to the side so the landing, good or bad, is seen.
+    cam.warm = false;
+    if (onBanana(p.x, p.z)) {
+      fx.burst(p.x, groundY + 0.3, p.z, 10, BANANA_BITS, 2);
+      // The pile takes the hit and springs back.
+      const base = mound.scaleY;
+      addTween({
+        dur: 0.6, update: (k) => {
+          mound.node.scale.y = base * (1 - 0.15 * Math.sin(k * Math.PI));
+        }
+      });
+    }
     dhud.center(landing === "stand" ? (onBanana(p.x, p.z) ? "GREAT" : "NICE") : landing === "hole" ? "THUD" : landing === "pancake" ? "SPLAT" : "CRASH", 1400);
     dhud.setChute("down");
     cam.shake = Math.max(cam.shake, crash ? 0.9 : 0.3);
@@ -505,6 +552,15 @@
       tx = p.x + hx * CHASE.canopyAhead;
       ty = p.y - 0.6;
       tz = p.z + hz * CHASE.canopyAhead;
+    } else if (phase === "down") {
+      // Low and off to the side of where he came down, looking at him.
+      const hx = Math.sin(s.heading), hz = Math.cos(s.heading);
+      EYE.x = p.x + hz * 5.5 + hx * 1.5;
+      EYE.y = p.y + 0.9;
+      EYE.z = p.z - hx * 5.5 + hz * 1.5;
+      tx = p.x;
+      ty = p.y + 0.2;
+      tz = p.z;
     } else {
       EYE.x = cam.x;
       EYE.y = cam.y;
@@ -576,9 +632,9 @@
     agent.update(dt);
     const a = readInput();
     if (phase === "climb") {
-      // Holding Space hurries the climb only, never the circling at height.
+      // Holding Space hurries the plane, up and round again, until the count starts.
       const s = planeState;
-      flyPlane(dt * (a.up > 0 && s.alt < JUMP_ALT - 1 && callStage === 0 ? SKIP_SCALE : 1));
+      flyPlane(dt * (a.up > 0 && callStage === 0 ? SKIP_SCALE : 1));
       seatDiver();
       const toMark = wrap(jumpAngle - s.angle);
       // Radians left to the next mark: the first lap is still climbing to it, after that it is a lap round.
@@ -587,28 +643,28 @@
       const atMark = s.alt >= JUMP_ALT - 1 && Math.abs(toMark) < JUMP_WINDOW;
       if (atMark && !jumpOpen) jumpOpenUntil = sceneTime + JUMP_GRACE;
       const open = atMark || sceneTime < jumpOpenUntil;
+      // 3, 2, 1 in the last seconds before the mark, then JUMP.
       if (!open && left > JUMP_WINDOW) {
-        if (callStage < 1 && left < JUMP_GET_READY) {
-          callStage = 1;
-          dhud.center("GET READY!", 1300);
-          dhud.notice("the mark is coming round", 0);
-          fx.say(diver.cave, "Ooga ready!", 1.4);
-        }
-        if (callStage < 2 && left < JUMP_SOON) {
-          callStage = 2;
-          dhud.center("JUMP SOON!", 1300);
-          dhud.notice("Be ready to jump soon! Almost at the mark!", 0);
+        const secs = left / HELIX_W, n = secs <= 1 ? 1 : secs <= 2 ? 2 : secs <= COUNT_SECONDS ? 3 : 0;
+        if (n && n !== callStage) {
+          if (callStage === 0) {
+            dhud.notice("", 1);
+            fx.say(diver.cave, "Ooga ready!", 1.4);
+          }
+          callStage = n;
+          dhud.center(String(n), 0);
+          audio.cues.count();
         }
       }
       if (open && !jumpOpen) {
         dhud.center("JUMP", 0);
-        dhud.notice("Space · jump", 0);
+        dhud.notice(COARSE ? "Jump!" : "Space · jump", 0);
         audio.cues.mark();
         fx.say(diver.cave, "Now! Ooga now!", 1.4);
       } else if (!open && jumpOpen) {
         callStage = 0;
         dhud.center("", 0);
-        dhud.notice("Flying back around, wait for the mark", 3000);
+        dhud.notice(COARSE ? "Round again · hold Jump! to hurry" : "Round again · hold Space to hurry", 3000);
       }
       jumpOpen = open;
       // A Space still held from hurrying the climb counts as the jump press.
@@ -619,7 +675,7 @@
       if (!pulled && s.phase === "free" && s.p.y < PULL_ALT) {
         pulled = true;
         dhud.center("PULL", 0);
-        dhud.notice("Space · chute", 0);
+        dhud.notice(COARSE ? "tap Pull!" : "Space · chute", 0);
       }
       if (s.phase === "canopy") dhud.setChute(s.flaring ? "flare" : "canopy");
     } else if (phase === "down" || phase === "lost") {
@@ -635,10 +691,21 @@
     if (phase === "board") plane.prop.rotation.z += dt * 3;
     if (phase !== "climb" && phase !== "board" && planeState.t > 0) flyPlane(dt);
     if (diver) diver.pose(dt, elapsed, ctrl);
-    if (phase === "air" && diver.state.phase === "free" && ringIndex < RING_COUNT && !rings[ringIndex].hit) {
-      const ring = rings[ringIndex], k = ring.r * (1 + NEXT_RING_PULSE * (0.5 + 0.5 * Math.sin(sceneTime * 5)));
-      setVec(ring.node.scale, k, k, k);
-    }
+    // The next ring pulses, the two ahead are lit and the rest wait dim, and a marker on the next ring's
+    // plane shows where the fall is going: what the stick does, seen before the ring says so.
+    if (phase === "air" && diver.state.phase === "free" && ringIndex < RING_COUNT) {
+      const s = diver.state, ring = rings[ringIndex];
+      if (!ring.hit) {
+        const k = ring.r * (1 + NEXT_RING_PULSE * (0.5 + 0.5 * Math.sin(sceneTime * 5)));
+        setVec(ring.node.scale, k, k, k);
+      }
+      for (let i = 0; i < RING_COUNT; i++) if (!rings[i].hit) rings[i].node.glow = i <= ringIndex + 1 ? 1 : 0.45;
+      if (s.v.y < -0.5) {
+        const t = (s.p.y - ring.y) / -s.v.y;
+        setVec(marker.position, s.p.x + s.v.x * t, ring.y + 0.05, s.p.z + s.v.z * t);
+        marker.visible = true;
+      } else marker.visible = false;
+    } else marker.visible = false;
     if (diver) updateStreaks();
     for (let i = 0; i < clouds.length; i++) {
       const c = clouds[i], p = c.node.position;
@@ -712,7 +779,7 @@
     }
     if (e.key === "l" || e.key === "L") demoTip(120000);
   };
-  const tooltipFor = (hit) => hit.owner.kind === "diver" ? diver.cave.traits.name : "";
+  const tooltipFor = (hit) => hit.owner.kind === "diver" ? diver.cave.traits.display : "";
   const pickDiver = (name) => {
     selection.racer = name;
     buildDiver();
@@ -752,7 +819,7 @@
     const slab = place(createNode({ geometry: hubModels.altarSlab(), depthBias: 0.15 }));
     setVec(slab.scale, footprint + 0.3, 0.34, footprint + 0.3);
     // Small piles still count a landing on the dais as a banana landing.
-    mound = { node: core, radius: Math.max(2.4, footprint + 0.2), height: 0.48 * growth * 0.88, y: 0.36 };
+    mound = { node: core, radius: Math.max(2.4, footprint + 0.2), height: 0.48 * growth * 0.88, y: 0.36, scaleY: core.scale.y };
     const rand = mulberry32(SEED + 77);
     for (let i = 0; i < CLOUD_HIGH + CLOUD_LOW; i++) {
       const low = i >= CLOUD_HIGH;
@@ -777,6 +844,7 @@
       rings.push({ node, x: 0, y: 0, z: 0, r: 1, hit: false });
     }
     const targetNode = place(createNode({ geometry: dropModels.target() }));
+    marker = place(createNode({ geometry: dropModels.hoop(), scale: { x: MARKER_SCALE, y: MARKER_SCALE, z: MARKER_SCALE }, glow: 1.8, visible: false }));
     hole = place(createNode({ geometry: dropModels.hole(), visible: false }));
     streaks = { node: place(createNode({ geometry: dropModels.streak(), instanceData: new Float32Array(STREAKS * 20), instanceCount: 0, instanceVersion: 0, fixedInstanceCapacity: true, visible: false })), x: new Float32Array(STREAKS), y: new Float32Array(STREAKS), z: new Float32Array(STREAKS) };
     mark("drop world");
@@ -786,7 +854,7 @@
       world.pilot = null;
     }
     buildDiver();
-    if (diver) layCourse();
+    if (diver) layCourse(game.state.drop.jumps);
     else {
       for (const ring of rings) ring.node.visible = false;
       targetNode.visible = false;
@@ -977,7 +1045,7 @@
     dhud.dispose();
     hud.dispose();
     phase = "board";
-    diver = plane = streaks = mound = hole = agent = hud = dhud = hooks = input = fx = controls = audio = clock = island = null;
+    diver = plane = streaks = mound = hole = marker = agent = hud = dhud = hooks = input = fx = controls = audio = clock = island = null;
     dropScene.input = dropScene.debug = dropScene.agent = dropScene.agentControls = null;
     return { targets: count };
   };

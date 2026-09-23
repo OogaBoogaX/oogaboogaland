@@ -156,7 +156,7 @@
     const o = hit.owner;
     switch (o.kind) {
       case "caveman":
-        return o.cave.traits.name;
+        return o.cave.traits.display;
       case "agent":
         return o.agent.driven ? "The Agent · you" : "The Agent · double-click to play · triple-click for its code";
       case "rack":

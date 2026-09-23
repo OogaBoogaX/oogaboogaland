@@ -13,7 +13,7 @@
   // the backend reports their commits they are busy in all of them, whatever the
   // clock or the debug fixture says. Delete the flag from the character file once
   // real activity arrives and the dates take over again.
-  const roster = characters.map(({ handle, lastCommit, look }) => ({ name: handle, lastCommitAt: lastCommit * 1e3, activity: new Map([[ENTROPY, lastCommit * 1e3]]), maintainer: !!(look && look.maintainer) }));
+  const roster = characters.map(({ handle, display, lastCommit, look }) => ({ name: handle, display: display || handle, lastCommitAt: lastCommit * 1e3, activity: new Map([[ENTROPY, lastCommit * 1e3]]), maintainer: !!(look && look.maintainer) }));
   // Filter construction, not visibility: solo worlds do no work for absent Oogas.
   // Keep the canonical roster intact for activity, likenesses and stable indices.
   const params = new URLSearchParams(location.search);
@@ -166,6 +166,7 @@
     const traits = {
       ...look,
       name,
+      display: character?.display || name,
       slim,
       skin: look.skin || skin,
       hair: look.hair || hashedHair,

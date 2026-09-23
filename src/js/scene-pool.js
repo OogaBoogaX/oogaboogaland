@@ -256,6 +256,8 @@
     addChild(root, stations.ladderNode, stations.tiersNode, stations.chainNode, stations.epochNode);
 
     hud = hudMod.create({ roster: contributors.activeRoster, catalog: models.SWAG, tierColors: models.TIER_COLORS, renderIcon: hudMod.renderIcon, lootEnabled: ctx.lootEnabled });
+    // As in the hub and the lab: on a phone the sheet starts folded, or it hides both sticks.
+    if (window.matchMedia("(max-width: 720px), (max-height: 500px)").matches) hud.el.sheet.dataset.open = "false";
     hooks = {};
     input = interactMod.create({ canvas: ctx.canvas, renderer, camera, hooks });
     // The wall domes in, so how far out the eye may go depends on how high it is: one curve, read by

@@ -50,7 +50,7 @@
       onPilot();
     });
     const setPilot = (name) => {
-      el.pilotName.firstChild.data = name;
+      el.pilotName.firstChild.data = BL.characters.displayOf(name);
     };
     const button = (text, className, fn) => {
       const b = document.createElement("button");
@@ -122,7 +122,7 @@
       presetCards.length = 0;
       el.presets.replaceChildren(...rocketParts.PRESETS.map((preset) => {
         const st = rocketParts.stats(preset.stack), b = button("", "orbit-preset", () => onPreset(preset.name));
-        b.append(span(preset.name, "orbit-preset-name"), span(`${st.stages.filter((x) => x.dv > 0).length} stage${st.stages.filter((x) => x.dv > 0).length > 1 ? "s" : ""} · ${Math.round(st.dv)} to spend`, "orbit-preset-note"));
+        b.append(span(preset.name, "orbit-preset-name"), span(`${st.stages.filter((x) => x.dv > 0).length} stage${st.stages.filter((x) => x.dv > 0).length > 1 ? "s" : ""}\n${Math.round(st.dv)} to spend`, "orbit-preset-note"));
         presetCards.push({ b, stack: preset.stack.join(",") });
         return b;
       }));
@@ -147,10 +147,21 @@
       else if (op === "down") onMove(i, -1);
       else if (op === "remove") onRemove(i);
     });
+    // A row's facts are dot-separated; each fact is one unbreakable span carrying its own dot, so a
+    // wrapped row breaks between facts and never opens a line with a dot. Reads back as the same text.
+    const facts = (value) => {
+      const holder = span("", "");
+      const parts = value.split(" · ");
+      parts.forEach((part, i) => {
+        holder.append(span(i < parts.length - 1 ? `${part} ·` : part, "fact"));
+        if (i < parts.length - 1) holder.append(" ");
+      });
+      return holder;
+    };
     const row = (label, value, warn) => {
       const li = document.createElement("li");
       if (warn) li.dataset.warn = warn;
-      li.append(span(label, ""), span(value, ""));
+      li.append(span(label, ""), facts(value));
       return li;
     };
     const STAGE_HUES = ["#ff9a2a", "#7fe0ff", "#b58cff", "#8fdc6a"];
@@ -165,7 +176,10 @@
           const st = stages[si], head = document.createElement("li");
           head.className = "orbit-stage-head";
           head.style.setProperty("--hue", STAGE_HUES[si % STAGE_HUES.length]);
-          head.textContent = st.engine ? `Stage ${si + 1} · ${Math.round(stats.stages[si].dv)} to spend · ${Math.round(stats.stages[si].burn)}s burn` : si === stages.length - 1 ? "Pod section · comes home" : `Stage ${si + 1} · no engine`;
+          // The name and the fact are two nodes: one line on a desktop, the fact under the name on a phone.
+          const pod = !st.engine && si === stages.length - 1;
+          const fact = st.engine ? `${Math.round(stats.stages[si].dv)} to spend · ${Math.round(stats.stages[si].burn)}s burn` : pod ? "comes home" : "no engine";
+          head.append(Object.assign(document.createElement("b"), { textContent: pod ? "Pod section" : `Stage ${si + 1}` }), Object.assign(document.createElement("small"), { textContent: fact }));
           rows.push(head);
         }
         const li = document.createElement("li");
@@ -226,7 +240,7 @@
       if (!check.problems.length && stack.length) {
         const li = document.createElement("li");
         li.dataset.warn = "ok";
-        li.textContent = "The bill is only for show. Ready to fly.";
+        li.textContent = `Ready to fly. A cheaper rocket that still makes it scores thrift.`;
         el.problems.append(li);
       }
       el.launch.disabled = !check.ok;
@@ -302,6 +316,17 @@
     const setEva = (on) => {
       if (el.evaBtn.hidden === !on) return;
       el.evaBtn.hidden = !on;
+    };
+    // The meters that can move in each leg: fuel, push and stress on the way up; heat and shield coming home.
+    let meterMode = "";
+    const setMeters = (mode) => {
+      if (mode === meterMode) return;
+      meterMode = mode;
+      const up = mode === "ascent";
+      for (const [node, show] of [[el.fuel, up], [el.push, up], [el.stress, up], [el.heat, !up], [el.shield, !up]]) {
+        const row = node.closest(".orbit-meter") || node.parentNode;
+        row.hidden = !show;
+      }
     };
     const bars = new Map();
     // Bar state is one of '' (plain), 'warn', 'bad', 'ok'.
@@ -467,6 +492,11 @@
       drag.y0 = e.clientY;
       drag.pointer = e.pointerId;
       drag.touch = e.pointerType === "touch";
+      // The pointer is captured by the tile so a release anywhere, even off the window, ends the drag.
+      try {
+        node.setPointerCapture(e.pointerId);
+      } catch {
+      }
       window.clearTimeout(drag.timer);
       if (drag.touch) drag.timer = window.setTimeout(() => {
         if (!drag.armed) return;
@@ -475,6 +505,12 @@
         aim(drag.x0, drag.y0);
       }, LONG_PRESS);
     };
+    // A capture lost without a release (a tab switch, a browser gesture) is a cancelled drag.
+    const lost = (e) => {
+      if (e.pointerId === drag.pointer) finish(false);
+    };
+    on(el.palette, "lostpointercapture", lost);
+    on(el.stack, "lostpointercapture", lost);
     on(el.palette, "pointerdown", (e) => {
       const tile = e.target.closest(".orbit-tile");
       if (tile) press(e, "tile", tile);
@@ -542,7 +578,7 @@
       show(null);
       el.buildBtn.hidden = true;
     };
-    return { el, MISSION, buildPalette, buildMission, setStep, renderStack, refreshBest, setPilot, setEva, setAltimeter, show, setAlt, setSpeed, setStage, setBar, setGauge, center, notice, results, medalFor, dispose };
+    return { el, MISSION, buildPalette, buildMission, setStep, renderStack, refreshBest, setPilot, setEva, setMeters, setAltimeter, show, setAlt, setSpeed, setStage, setBar, setGauge, center, notice, results, medalFor, dispose };
   };
   BL.rocketHud = { create, medalFor, MEDALS };
 })();

@@ -1,7 +1,8 @@
 // The chain snapshot: one bounded view of the Bitcoin mempool, blocks and mining, assembled from
-// whichever provider answers. The mempool.space websocket in mempool.js stays the live transport for
-// transactions and blocks; this module adds the standing numbers the socket never sends (the backlog,
-// the fee ladder, difficulty, hashrate, price) by polling REST while the tab is visible.
+// whichever source answers. The mempool.space websocket in mempool.js is the live transport for the
+// backlog, fee tiers, difficulty, inflow and blocks; this module polls REST for what the socket never
+// sends (the fee histogram behind the ladder and the rain, block pace, hashrate) and for everything
+// while the socket is down, and holds its own Coinbase socket for the price, with REST behind it.
 //
 // Two providers, one code path. `/mempool`, `/mempool/recent`, `/blocks` and `/blocks/tip/height`
 // return the same shapes from mempool.space and from any Esplora instance, so the fallback is a base
@@ -12,26 +13,38 @@
 // completion, every failure widening the gap, and Retry-After obeyed when a provider sends one.
 //
 // Nothing here allocates per frame: the snapshot is one object mutated in place and the fee ladder is
-// a fixed typed array. Weather reads the three derived axes at the foot of the snapshot.
+// a fixed typed array. Weather reads the two derived axes at the foot of the snapshot.
 (() => {
   "use strict";
   const BL = window.BL = window.BL || {};
   const { clamp } = BL.math;
   const MEMPOOL = "https://mempool.space/api", ESPLORA = "https://blockstream.info/api";
   // The backlog drives the weather, so it is polled hardest; the epoch numbers move once a block at most.
-  const BACKLOG_MS = 30000, BLOCKS_MS = 60000, SLOW_MS = 600000;
+  const BACKLOG_MS = 30000, BLOCKS_MS = 60000, PRICE_MS = 60000, SLOW_MS = 600000;
   const TIMEOUT_MS = 12000, FAIL_LIMIT = 3;
   const BACKOFF_MIN = 15000, BACKOFF_MAX = 300000, EXTENDED_RETRY = 600000, PREFER_RETRY = 900000;
   const LADDER = 24, LADDER_MAX = 200;
-  const PACE_BLOCKS = 6, PACE_WARM = 540, PACE_COLD = 240, TARGET_BLOCK = 600;
-  const RATE_WINDOW = 20000, RATE_FULL = 12;
-  const SUNNY_FEE = 0.1, STORM_FEE = 20, DEEP_FULL = 60;
-  const BACKLOG_MIX = 0.6;
+  const PACE_BLOCKS = 6, TARGET_BLOCK = 600;
+  // Socket readings count as live for as long as a REST backlog poll would.
+  const FRESH_MS = BACKLOG_MS * 3;
+  // Soak is the backlog that pays: vB waiting at 1 sat/vB or more, in MvB, smoothed over ten minutes
+  // so the block-by-block sawtooth does not flick the rain between steps, on a log scale from dry to
+  // downpour. The sub-sat pool beneath it sat at ~40 MvB for months and says nothing about pressure.
+  const PAY_DRY = 0.3, PAY_FULL = 4, PAY_TAU = 600000;
+  // Gale is the socket's inflow in vB/s, calm below the first and full at the second.
+  const INFLOW_CALM = 1000, INFLOW_FULL = 3500;
+  // Coinbase Exchange pushes `ticker_batch` every five seconds while the price moves and nothing while
+  // it is flat, so only a long silence means a dead socket; the REST walk covers the gap.
+  const PRICE_WS = "wss://ws-feed.exchange.coinbase.com", PRICE_STALL = 60000, PRICE_BACKOFF_MIN = 2000, PRICE_BACKOFF_MAX = 60000;
   // Price rides its own providers, not the chain's: the Esplora fallback has no prices endpoint, and
   // tying the two would lose the ticker exactly when the chain source degraded. First one to answer wins.
+  // Providers in order of measured speed, the two that carry the day's open first (`open`: Coinbase
+  // Exchange's is a rolling 24-hour open, Kraken's `o` today's UTC open), so the up-or-down-today reading
+  // normally costs one request; the price-only tickers are the fallbacks.
   const PRICE_SOURCES = [
-    { name: "coinbase", url: "https://api.coinbase.com/v2/prices/BTC-USD/spot", read: (d) => Number(d && d.data && d.data.amount) },
-    { name: "kraken", url: "https://api.kraken.com/0/public/Ticker?pair=XBTUSD", read: (d) => Number(d && d.result && d.result.XXBTZUSD && d.result.XXBTZUSD.c && d.result.XXBTZUSD.c[0]) },
+    { name: "coinbase", url: "https://api.exchange.coinbase.com/products/BTC-USD/stats", read: (d) => Number(d && d.last), open: (d) => Number(d && d.open) },
+    { name: "kraken", url: "https://api.kraken.com/0/public/Ticker?pair=XBTUSD", read: (d) => Number(d && d.result && d.result.XXBTZUSD && d.result.XXBTZUSD.c && d.result.XXBTZUSD.c[0]), open: (d) => Number(d && d.result && d.result.XXBTZUSD && d.result.XXBTZUSD.o) },
+    { name: "coinbase spot", url: "https://api.coinbase.com/v2/prices/BTC-USD/spot", read: (d) => Number(d && d.data && d.data.amount) },
     { name: "mempool.space", url: "https://mempool.space/api/v1/prices", read: (d) => Number(d && d.USD) }
   ];
 
@@ -45,21 +58,26 @@
     source: "mempool.space", at: 0, polls: 0, errors: 0, degraded: false, backoff: 0,
     // Mempool backlog
     count: 0, vsize: 0, totalFee: 0, deep: 0, floor: 0, ladder, ladderRate,
+    // The paying backlog (MvB at 1 sat/vB or more) and its ten-minute average, stamped when last read
+    paying: 0, payEma: 0, payAt: 0,
+    // The socket's inflow in vB/s, and when the socket last delivered the backlog
+    inflow: 0, socketAt: 0,
     // Fees
     nextFee: 0, fastestFee: 0, halfHourFee: 0, hourFee: 0, economyFee: 0, minimumFee: 0,
     // Chain
     height: 0, lastTxCount: 0, lastWeight: 0, lastSize: 0, lastBlockAt: 0, pace: TARGET_BLOCK,
     // Mining and market
     progressPercent: 0, difficultyChange: 0, remainingBlocks: 0, remainingTime: 0,
-    hashrate: 0, difficulty: 0, priceUsd: 0, priceSource: null,
+    hashrate: 0, difficulty: 0, priceUsd: 0, priceOpenUsd: 0, priceSource: null,
     // Derived weather axes, 0..1
-    soak: 0, chill: 0, gale: 0
+    soak: 0, gale: 0
   };
-  // Read, never stored: `derive` only runs after a poll lands, so a stored flag on a feed that has
+  const socketFresh = () => snapshot.socketAt > 0 && Date.now() - snapshot.socketAt < FRESH_MS;
+  // Read, never stored: `derive` only runs after a reading lands, so a stored flag on a feed that has
   // stopped entirely would sit there claiming to be live for the rest of the visit.
   Object.defineProperty(snapshot, "live", {
     enumerable: true,
-    get: () => snapshot.at > 0 && Date.now() - snapshot.at < BACKLOG_MS * 3
+    get: () => socketFresh() || snapshot.at > 0 && Date.now() - snapshot.at < FRESH_MS
   });
 
   const subscribers = new Set();
@@ -72,12 +90,9 @@
   const dropExtended = () => {
     extendedUntil = Date.now() + EXTENDED_RETRY;
   };
-  const timers = { backlog: 0, blocks: 0, slow: 0, block: 0 };
-  let started = false;
+  const timers = { backlog: 0, blocks: 0, price: 0, slow: 0, block: 0, emit: 0, priceSocket: 0, priceWatch: 0 };
+  let started = false, hidden = false;
   let unsubscribeFeed = null;
-  // Transaction arrivals in a rolling window, as a ring of timestamps: fixed size, never grows.
-  const arrivals = new Float64Array(256);
-  let arrivalHead = 0, arrivalCount = 0;
 
   // Announces a change. It does not stamp freshness: a failover or a recovery is news, but it is not
   // data, and `snapshot.at` only ever moves when a poll actually lands (see `succeeded`).
@@ -168,6 +183,7 @@
   // vsize at or above each rung, from [feerate, vsize] buckets in descending feerate order.
   const readHistogram = (histogram) => {
     ladder.fill(0);
+    snapshot.paying = 0;
     if (!Array.isArray(histogram) || !histogram.length) return;
     let lowest = Infinity, peak = 0;
     for (const bucket of histogram) {
@@ -178,23 +194,35 @@
       for (let i = 0; i < LADDER; i++) if (rate >= ladderRate[i]) ladder[i] += size;
     }
     for (let i = 0; i < LADDER; i++) if (ladder[i] > peak) peak = ladder[i];
+    // The first rung is exactly 1 sat/vB, so before normalizing it holds the paying backlog.
+    snapshot.paying = ladder[0] / 1e6;
     if (peak > 0) for (let i = 0; i < LADDER; i++) ladder[i] /= peak;
     snapshot.floor = Number.isFinite(lowest) ? lowest : 0;
   };
 
-  const readBacklog = (data) => {
+  // The ten-minute average of the paying backlog, by the time actually elapsed; the first reading seeds it.
+  const smoothPaying = (now) => {
+    const k = snapshot.payAt > 0 ? 1 - Math.exp(-Math.max(0, now - snapshot.payAt) / PAY_TAU) : 1;
+    snapshot.payEma += (snapshot.paying - snapshot.payEma) * k;
+    snapshot.payAt = now;
+  };
+  // While the socket is delivering, REST (which lags it by a few seconds) only adds the histogram and
+  // leaves the count, size and fees the socket already holds.
+  const readBacklog = (data, histogramOnly = false) => {
     if (!data || typeof data !== "object") return false;
     // Shape, never value: a drained mempool really does report zero, so only a missing field is bad.
     if (typeof data.count !== "number" || typeof data.vsize !== "number") return false;
-    snapshot.count = data.count | 0;
-    snapshot.vsize = Number(data.vsize) || 0;
-    snapshot.totalFee = Number(data.total_fee) || 0;
-    snapshot.deep = snapshot.vsize / 1e6;
+    if (!histogramOnly) {
+      snapshot.count = data.count | 0;
+      snapshot.vsize = Number(data.vsize) || 0;
+      snapshot.totalFee = Number(data.total_fee) || 0;
+      snapshot.deep = snapshot.vsize / 1e6;
+    }
     readHistogram(data.fee_histogram);
+    smoothPaying(Date.now());
     return true;
   };
-  // Block pace over the recent tip, the one "temperature" both providers can answer. Poisson spacing
-  // swings this around well past the ten-minute target, which is what gives the island its seasons.
+  // Block pace over the recent tip, which both providers can answer.
   const readBlocks = (blocks) => {
     if (!Array.isArray(blocks) || !blocks.length) return false;
     const tip = blocks[0];
@@ -251,44 +279,47 @@
   };
   // Walk the price providers in order and keep the first sane answer; a total outage holds the last
   // price rather than blanking the tablet, and nothing about the visitor is ever sent.
+  // The day's open comes from the first provider that carries one, so the walk goes on past a price
+  // already found until the open is known too.
   const pollPrice = async () => {
+    let priced = false, opened = false;
     for (const source of PRICE_SOURCES) {
+      if (priced && (opened || !source.open)) continue;
       try {
-        const value = source.read(await getUrl(source.url));
-        if (!(value > 0)) continue;
-        snapshot.priceUsd = value;
-        snapshot.priceSource = source.name;
-        return true;
+        const data = await getUrl(source.url);
+        const value = source.read(data);
+        if (!priced && value > 0) {
+          snapshot.priceUsd = value;
+          snapshot.priceSource = source.name;
+          priced = true;
+        }
+        if (source.open) {
+          const open = source.open(data);
+          if (open > 0) {
+            snapshot.priceOpenUsd = open;
+            opened = true;
+          }
+        }
+        if (priced && opened) return true;
       } catch {
         // Try the next one; a dead ticker must never take the chain poll down with it.
       }
     }
-    return false;
+    return priced;
   };
 
-  // Fee pressure and backlog depth both on log scales, mixed; the backlog leads because a deep pool
-  // of cheap transactions is still a storm coming.
-  const feePressure = (fee) => clamp(Math.log(Math.max(SUNNY_FEE, fee) / SUNNY_FEE) / Math.log(STORM_FEE / SUNNY_FEE), 0, 1);
-  const deepPressure = (deep) => clamp(Math.log(Math.max(1, deep)) / Math.log(DEEP_FULL), 0, 1);
-  const arrivalRate = (now) => {
-    let n = 0;
-    for (let i = 0; i < arrivalCount; i++) if (now - arrivals[i] <= RATE_WINDOW) n++;
-    return n / (RATE_WINDOW / 1000);
-  };
+  // The paying backlog in MvB on a log scale, dry at PAY_DRY and a downpour by PAY_FULL.
+  const paySoak = (pay) => clamp(Math.log(Math.max(PAY_DRY, pay) / PAY_DRY) / Math.log(PAY_FULL / PAY_DRY), 0, 1);
+  // Only the socket measures inflow, so without it the wind drops rather than holding a stale gale.
   const derive = () => {
-    const now = Date.now();
-    snapshot.soak = clamp(BACKLOG_MIX * deepPressure(snapshot.deep) + (1 - BACKLOG_MIX) * feePressure(snapshot.nextFee), 0, 1);
-    // Slow blocks are a cold snap; a negative retarget says the epoch ran slow overall and leans the same way.
-    const pace = clamp((snapshot.pace - PACE_WARM) / PACE_COLD, 0, 1);
-    const epoch = extended() ? clamp(-snapshot.difficultyChange / 8, -0.2, 0.2) : 0;
-    snapshot.chill = clamp(pace + epoch, 0, 1);
-    snapshot.gale = clamp(arrivalRate(now) / RATE_FULL, 0, 1);
+    snapshot.soak = paySoak(snapshot.payEma);
+    snapshot.gale = socketFresh() ? clamp((snapshot.inflow - INFLOW_CALM) / (INFLOW_FULL - INFLOW_CALM), 0, 1) : 0;
   };
 
   // One poll of a kind at a time. Each takes several requests in sequence and the slowest can outrun
   // its own interval, so without this a slow provider would have requests stacked on it exactly when
   // it is least able to answer them — the shape that gets a client rate limited.
-  const busy = { backlog: false, blocks: false, slow: false };
+  const busy = { backlog: false, blocks: false, price: false, slow: false };
   const guard = (key, body) => async () => {
     if (busy[key]) return;
     busy[key] = true;
@@ -301,8 +332,10 @@
 
   const pollBacklog = guard("backlog", async () => {
     try {
-      if (!readBacklog(await get("/mempool"))) throw new Error("no backlog in the response");
-      if (extended()) {
+      // The socket already carries the count, the projection and the fee tiers; REST adds the histogram.
+      const socket = socketFresh();
+      if (!readBacklog(await get("/mempool"), socket)) throw new Error("no backlog in the response");
+      if (!socket && extended()) {
         try {
           readFees(await get("/v1/fees/mempool-blocks"));
           readRecommended(await get("/v1/fees/recommended"));
@@ -310,7 +343,7 @@
           dropExtended();
         }
       }
-      if (!extended()) readEstimates(await get("/fee-estimates"));
+      if (!socket && !extended()) readEstimates(await get("/fee-estimates"));
       succeeded();
       derive();
       emit();
@@ -331,18 +364,17 @@
       failed(error);
     }
   });
+  // Price is its own minute cycle, whatever the chain provider is doing, so a fallback session keeps
+  // its ticker and Ooga Mine's candles move with the real coin; it stands down while the socket prices.
+  const pollTicker = guard("price", async () => {
+    if (priceFresh() || !(await pollPrice())) return;
+    emit();
+    save();
+  });
   const pollSlow = guard("slow", async () => {
-    // Price is polled whatever the chain provider is doing, so a fallback session keeps its ticker.
-    const priced = await pollPrice();
-    if (!extended()) {
-      if (priced) {
-        emit();
-        save();
-      }
-      return;
-    }
+    if (!extended()) return;
     try {
-      readDifficulty(await get("/v1/difficulty-adjustment"));
+      if (!socketFresh()) readDifficulty(await get("/v1/difficulty-adjustment"));
       readHashrate(await get("/v1/mining/hashrate/3d"));
       succeeded();
       derive();
@@ -350,7 +382,6 @@
       save();
     } catch {
       dropExtended();
-      if (priced) emit();
     }
   });
 
@@ -366,11 +397,29 @@
     timers[key] = window.setTimeout(tick, ms);
   };
 
+  // One socket message carries both the projection and the stats, so the two readings are announced
+  // once, a tick later, rather than twice in the same breath.
+  const announce = () => {
+    if (timers.emit) return;
+    timers.emit = window.setTimeout(() => {
+      timers.emit = 0;
+      derive();
+      emit();
+      save();
+    }, 0);
+  };
   const onFeedEvent = (event) => {
-    if (event.type === "tx") {
-      arrivals[arrivalHead] = Date.now();
-      arrivalHead = (arrivalHead + 1) % arrivals.length;
-      if (arrivalCount < arrivals.length) arrivalCount++;
+    if (event.type === "stats") {
+      snapshot.count = event.count | 0;
+      snapshot.vsize = Number(event.vsize) || 0;
+      snapshot.totalFee = Number(event.totalFee) || 0;
+      snapshot.deep = snapshot.vsize / 1e6;
+      snapshot.inflow = Number(event.inflow) || 0;
+      readRecommended(event.fees);
+      readDifficulty(event.da);
+      // Freshness only: the REST provider's failures, backoff and Retry-After are its own business.
+      snapshot.socketAt = Date.now();
+      announce();
       return;
     }
     if (event.type === "block") {
@@ -394,8 +443,7 @@
     }
     if (event.type === "fees") {
       snapshot.nextFee = Number(event.nextFee) || 0;
-      derive();
-      emit();
+      announce();
     }
   };
 
@@ -409,7 +457,7 @@
     "count", "vsize", "totalFee", "deep", "floor", "nextFee", "fastestFee", "halfHourFee", "hourFee",
     "economyFee", "minimumFee", "height", "lastTxCount", "lastWeight", "lastSize", "lastBlockAt",
     "pace", "progressPercent", "difficultyChange", "remainingBlocks", "remainingTime", "hashrate",
-    "difficulty", "priceUsd"
+    "difficulty", "priceUsd", "priceOpenUsd", "paying", "payEma", "payAt"
   ];
   const save = () => {
     try {
@@ -435,18 +483,116 @@
     return true;
   };
 
+  // The live price: Coinbase Exchange's public `ticker_batch` on one socket while the tab is visible.
+  // It subscribes in `onopen`, since the feed drops a socket that has not subscribed within five
+  // seconds; a refused subscription leaves the socket open, so an error or an empty channel list is
+  // what closes it. Messages carry `type: "ticker"` and their numbers as strings.
+  let priceSocket = null, priceBackoff = PRICE_BACKOFF_MIN, priceAt = 0, priceHeardAt = 0;
+  const priceFresh = () => priceAt > 0 && Date.now() - priceAt < PRICE_STALL;
+  const readTicker = (data) => {
+    if (!data || data.type !== "ticker" || data.product_id !== "BTC-USD") return false;
+    const price = Number(data.price), open = Number(data.open_24h);
+    if (!(price > 0)) return false;
+    snapshot.priceUsd = price;
+    if (open > 0) snapshot.priceOpenUsd = open;
+    snapshot.priceSource = "coinbase live";
+    priceAt = Date.now();
+    return true;
+  };
+  const dropPrice = () => {
+    window.clearTimeout(timers.priceWatch);
+    timers.priceWatch = 0;
+    if (!priceSocket) return;
+    const ws = priceSocket;
+    priceSocket = null;
+    ws.onopen = ws.onmessage = ws.onclose = ws.onerror = null;
+    ws.close();
+  };
+  const retryPrice = () => {
+    if (!started || hidden || timers.priceSocket) return;
+    timers.priceSocket = window.setTimeout(connectPrice, priceBackoff);
+    priceBackoff = Math.min(PRICE_BACKOFF_MAX, priceBackoff * 2);
+  };
+  const onPrice = (text) => {
+    priceHeardAt = Date.now();
+    let data;
+    try {
+      data = JSON.parse(text);
+    } catch {
+      return;
+    }
+    if (!data || typeof data !== "object") return;
+    if (data.type === "error" || data.type === "subscriptions" && !(Array.isArray(data.channels) && data.channels.length)) {
+      dropPrice();
+      retryPrice();
+    } else if (readTicker(data)) {
+      priceBackoff = PRICE_BACKOFF_MIN;
+      announce();
+    }
+  };
+  const watchPrice = () => {
+    timers.priceWatch = 0;
+    if (!priceSocket) return;
+    if (Date.now() - priceHeardAt > PRICE_STALL) {
+      dropPrice();
+      retryPrice();
+    } else timers.priceWatch = window.setTimeout(watchPrice, PRICE_STALL / 2);
+  };
+  const connectPrice = () => {
+    timers.priceSocket = 0;
+    if (!started || hidden || priceSocket || typeof WebSocket === "undefined") return;
+    let ws;
+    try {
+      ws = new WebSocket(PRICE_WS);
+    } catch {
+      retryPrice();
+      return;
+    }
+    priceSocket = ws;
+    ws.onopen = () => {
+      priceHeardAt = Date.now();
+      ws.send(JSON.stringify({ type: "subscribe", product_ids: ["BTC-USD"], channels: ["ticker_batch"] }));
+      timers.priceWatch = window.setTimeout(watchPrice, PRICE_STALL / 2);
+    };
+    ws.onmessage = (e) => onPrice(e.data);
+    ws.onclose = () => {
+      if (priceSocket === ws) priceSocket = null;
+      window.clearTimeout(timers.priceWatch);
+      timers.priceWatch = 0;
+      retryPrice();
+    };
+    ws.onerror = () => {};
+  };
+  // The director's visibility pause: a hidden tab holds no price socket (REST already skips its polls).
+  const setHidden = (value) => {
+    if (hidden === !!value) return;
+    hidden = !!value;
+    if (!started) return;
+    window.clearTimeout(timers.priceSocket);
+    timers.priceSocket = 0;
+    if (hidden) dropPrice();
+    else {
+      priceBackoff = PRICE_BACKOFF_MIN;
+      connectPrice();
+    }
+  };
+
   const start = (options = {}) => {
     if (started || typeof fetch === "undefined") return;
     started = true;
-    if (options.source === "esplora") { base = ESPLORA; extended = false; pinned = true; snapshot.source = "esplora"; }
-    else if (typeof options.source === "string" && options.source.startsWith("https://")) { base = options.source; extended = false; pinned = true; snapshot.source = options.source; }
+    // A pinned source is never mempool.space itself, so `extended()` already reads false for it.
+    if (options.source === "esplora") { base = ESPLORA; pinned = true; snapshot.source = "esplora"; }
+    else if (typeof options.source === "string" && options.source.startsWith("https://")) { base = options.source; pinned = true; snapshot.source = options.source; }
     if (BL.mempool) unsubscribeFeed = BL.mempool.subscribe(onFeedEvent);
     if (restore()) emit();
+    connectPrice();
     pollBacklog();
     pollBlocks();
+    pollTicker();
     pollSlow();
     cycle("backlog", pollBacklog, BACKLOG_MS);
     cycle("blocks", pollBlocks, BLOCKS_MS);
+    cycle("price", pollTicker, PRICE_MS);
     cycle("slow", pollSlow, SLOW_MS);
   };
   const subscribe = (fn) => {
@@ -459,14 +605,15 @@
       window.clearTimeout(timers[key]);
       timers[key] = 0;
     }
+    dropPrice();
     if (unsubscribeFeed) unsubscribeFeed();
     unsubscribeFeed = null;
     subscribers.clear();
   };
 
   BL.chain = {
-    MEMPOOL, ESPLORA, LADDER, TARGET_BLOCK, snapshot, start, subscribe, dispose, derive,
-    feePressure, deepPressure, readBacklog, readBlocks, readFees, readEstimates, readDifficulty,
+    MEMPOOL, ESPLORA, LADDER, TARGET_BLOCK, PAY_DRY, PAY_FULL, snapshot, start, setHidden, subscribe, dispose, derive,
+    paySoak, readBacklog, readBlocks, readFees, readEstimates, readDifficulty, readTicker,
     get extended() { return extended(); }, get backoff() { return backoff; }, get base() { return base; }, recover,
     PRICE_SOURCES, pollPrice, ingest: onFeedEvent
   };

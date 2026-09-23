@@ -1,19 +1,24 @@
-// Live Bitcoin feed from mempool.space: one socket for the page life, reconnecting with backoff.
-// Subscribers get plain events, { type: "tx", vsize, weight, fee } for each transaction the
-// mempool accepts, { type: "block", height, txCount } for each block mined after connect and
-// { type: "fees", nextFee, blocks } whenever the projected next block's median fee moves.
-// One of the page's two live feeds (the other polls the oogatron worker in oogatron-live.js).
+// Live Bitcoin feed from mempool.space: one socket while the tab is visible, reconnecting with backoff.
+// Subscribers get plain events, { type: "block", height, txCount } for each block mined after connect,
+// { type: "fees", nextFee, blocks } whenever the projected next block's median fee moves and
+// { type: "stats", count, vsize, totalFee, inflow, fees, da } with each mempool push (about once a
+// second): the transaction count, the backlog in vB, its fees in sats, the inflow in vB/s, the
+// recommended fee tiers and the difficulty epoch, in the shapes the REST endpoints serve them.
+// One of the page's live feeds (chain.js polls REST and the price, oogatron-live.js the org stats).
 (() => {
   "use strict";
   const BL = window.BL = window.BL || {};
   const ENDPOINT = "wss://mempool.space/api/v1/ws";
   const BACKOFF_MIN = 2000, BACKOFF_MAX = 60000;
+  // The socket pushes about once a second and never goes quiet for long, even round a block; a link
+  // that has said nothing for this long is half-open and is dropped rather than trusted.
+  const STALL_MS = 20000;
   const subscribers = new Set();
-  const state = { enabled: false, connected: false, attempts: 0, transactions: 0, blocks: 0, height: 0, nextFee: 0, projectedBlocks: 0, messages: 0, bytes: 0, lastKeys: "", lastAt: 0 };
-  let socket = null, timer = 0, backoff = BACKOFF_MIN;
+  const state = { enabled: false, hidden: false, connected: false, attempts: 0, stats: 0, blocks: 0, height: 0, nextFee: 0, projectedBlocks: 0, inflow: 0, messages: 0, bytes: 0, lastKeys: "", lastAt: 0 };
+  let socket = null, timer = 0, watch = 0, backoff = BACKOFF_MIN;
 
   const emit = (event) => {
-    if (event.type === "tx") state.transactions++;
+    if (event.type === "stats") state.stats++;
     else if (event.type === "block") state.blocks++;
     for (const fn of subscribers) fn(event);
   };
@@ -33,6 +38,9 @@
       return;
     }
     if (!data || typeof data !== "object" || Array.isArray(data)) return;
+    // A server that accepts and then drops the link must not be redialled every two seconds, so the
+    // backoff only resets once the socket has actually said something.
+    backoff = BACKOFF_MIN;
     state.lastKeys = Object.keys(data).join(", ");
     // The tip list arrives once per connection and only seeds the height; a later, taller one is news.
     if (Array.isArray(data.blocks)) {
@@ -50,23 +58,45 @@
       state.projectedBlocks = projected.length;
       emit({ type: "fees", nextFee: state.nextFee, blocks: projected.length });
     }
-    const txs = data["mempool-transactions"];
-    if (txs && Array.isArray(txs.added)) {
-      for (const tx of txs.added) {
-        if (!tx || !(tx.vsize > 0)) continue;
-        emit({ type: "tx", vsize: tx.vsize, weight: tx.weight || tx.vsize * 4, fee: tx.fee || 0 });
-      }
+    // The socket's `total_fee` is in BTC where REST `/mempool` gives sats; `bytes` is the vsize.
+    const info = data.mempoolInfo;
+    if (info && typeof info.size === "number" && typeof info.bytes === "number") {
+      const inflow = Number(data.vBytesPerSecond);
+      state.inflow = inflow >= 0 ? inflow : 0;
+      emit({
+        type: "stats", count: info.size, vsize: info.bytes, totalFee: Math.round((Number(info.total_fee) || 0) * 1e8),
+        inflow: state.inflow, fees: data.fees && typeof data.fees === "object" ? data.fees : null, da: data.da && typeof data.da === "object" ? data.da : null
+      });
     }
   };
   const retry = () => {
-    if (state.enabled && !timer) {
+    if (state.enabled && !state.hidden && !timer) {
       timer = window.setTimeout(connect, backoff);
       backoff = Math.min(BACKOFF_MAX, backoff * 2);
     }
   };
+  // Detaches before closing, so a deliberate close never reaches onclose and its retry.
+  const drop = () => {
+    window.clearTimeout(watch);
+    watch = 0;
+    if (!socket) return;
+    const ws = socket;
+    socket = null;
+    ws.onopen = ws.onmessage = ws.onclose = ws.onerror = null;
+    ws.close();
+    state.connected = false;
+  };
+  const check = () => {
+    watch = 0;
+    if (!socket) return;
+    if (Date.now() - state.lastAt > STALL_MS) {
+      drop();
+      retry();
+    } else watch = window.setTimeout(check, STALL_MS / 2);
+  };
   const connect = () => {
     timer = 0;
-    if (!state.enabled || socket) return;
+    if (!state.enabled || state.hidden || socket) return;
     state.attempts++;
     let ws;
     try {
@@ -78,13 +108,15 @@
     socket = ws;
     ws.onopen = () => {
       state.connected = true;
-      backoff = BACKOFF_MIN;
-      ws.send(JSON.stringify({ action: "want", data: ["blocks", "mempool-blocks"] }));
-      ws.send(JSON.stringify({ "track-mempool": true }));
+      state.lastAt = Date.now();
+      ws.send(JSON.stringify({ action: "want", data: ["blocks", "stats", "mempool-blocks"] }));
+      watch = window.setTimeout(check, STALL_MS / 2);
     };
     ws.onmessage = (e) => onMessage(e.data);
     ws.onclose = () => {
       if (socket === ws) socket = null;
+      window.clearTimeout(watch);
+      watch = 0;
       state.connected = false;
       retry();
     };
@@ -95,6 +127,23 @@
     state.enabled = true;
     connect();
   };
+  // The director's visibility pause: a hidden tab holds no socket. The height is forgotten so the tip
+  // list on the way back seeds it silently; blocks mined while away are not news, and must not strike,
+  // toast or pay the mine as if they had just been found.
+  const setHidden = (hidden) => {
+    if (state.hidden === !!hidden) return;
+    state.hidden = !!hidden;
+    if (!state.enabled) return;
+    window.clearTimeout(timer);
+    timer = 0;
+    if (state.hidden) {
+      drop();
+      return;
+    }
+    state.height = 0;
+    backoff = BACKOFF_MIN;
+    connect();
+  };
   const subscribe = (fn) => {
     subscribers.add(fn);
     return () => subscribers.delete(fn);
@@ -103,14 +152,8 @@
     state.enabled = false;
     window.clearTimeout(timer);
     timer = 0;
-    if (socket) {
-      const ws = socket;
-      socket = null;
-      ws.onclose = null;
-      ws.close();
-    }
-    state.connected = false;
+    drop();
     subscribers.clear();
   };
-  BL.mempool = { ENDPOINT, state, start, subscribe, dispose, emit, parse: onMessage };
+  BL.mempool = { ENDPOINT, state, start, setHidden, subscribe, dispose, emit, parse: onMessage };
 })();

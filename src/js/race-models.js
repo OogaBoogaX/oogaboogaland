@@ -247,6 +247,13 @@
     for (let x = -5; x <= 5; x++) for (let y = -5; y <= 5; y++) for (let z = -5; z <= 5; z++) if (x * x + y * y + z * z <= 28 && !(x * x + y * y + z * z > 22 && rand() < 0.3)) v.set(x, y, z, rand() < 0.25 ? 1 : 0);
     return voxGeo(v, { unit: 0.16, palette: ["#5e5449", "#45403a"], origin: { x: -0.08, y: -0.08, z: -0.08 } });
   });
+  // The same rolling hazard packed from snow, for the peak's ice.
+  const snowball = cached(() => {
+    const rand = mulberry32(313);
+    const v = vox();
+    for (let x = -5; x <= 5; x++) for (let y = -5; y <= 5; y++) for (let z = -5; z <= 5; z++) if (x * x + y * y + z * z <= 28 && !(x * x + y * y + z * z > 22 && rand() < 0.3)) v.set(x, y, z, rand() < 0.3 ? 1 : 0);
+    return voxGeo(v, { unit: 0.16, palette: ["#f2f6f9", "#cfdde8"], origin: { x: -0.08, y: -0.08, z: -0.08 } });
+  });
   const spectator = variants((i) => {
     const skins = ["#c98a5b", "#a9744c", "#d9a06b"], furs = ["#d98a2e", "#c98936", "#e09a40"];
     const v = vox();
@@ -399,5 +406,5 @@
     box({ w: 0.3, h: 0.3, d: 0.3, color: "#e04a3a", offset: { y: 1.5 } })
   ));
 
-  BL.raceModels = { KART, GANTRY, gantryLampY, DINO_HIDES, kart, kartWheel, dino, gantry, gantryLamp, boostFlame, stalactite, rainDrop, snowFlake, boostPad, itemCrate, rockShot, peel, boulder, spectator, banner, torchStand, torchFlame, palm, lagoonRock, lavaRock, obsidianSpike, bones, pine, crystal, iceSpike, snowRock, planks, buoy, post, turn, shift, yToX, yToZ };
+  BL.raceModels = { KART, GANTRY, gantryLampY, DINO_HIDES, kart, kartWheel, dino, gantry, gantryLamp, boostFlame, stalactite, rainDrop, snowFlake, boostPad, itemCrate, rockShot, peel, boulder, snowball, spectator, banner, torchStand, torchFlame, palm, lagoonRock, lavaRock, obsidianSpike, bones, pine, crystal, iceSpike, snowRock, planks, buoy, post, turn, shift, yToX, yToZ };
 })();

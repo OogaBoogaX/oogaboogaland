@@ -19,6 +19,10 @@
   const LIP = 1.7, LIP_SAMPLES = 5, RUNWAY = 45;
   const LOD_FAR = 95;
   const GRID_GAP = 4.6;
+  // The road's flat apron past the shoulder before the skirt climbs into hills, and how far the climb runs.
+  const APRON = 4, APRON_RISE = 12;
+  // Trackside props a racer can hit: one flat table per track, indexed by sector.
+  const PROP_CAP = 1024;
   // SPECTATOR_CAP: the whole crowd is one instanced batch, a single draw however large.
   const SPECTATOR_CAP = 320;
   const LATTICE = 64;
@@ -80,15 +84,19 @@
     opts.fogFar = hour > 18 ? 230 : 320;
     return opts;
   };
-  const caveOpts = (clear, sky, ground, sun, light) => ({
+  const caveOpts = (clear, sky, ground, sun, light, bloom = 0.85) => ({
     clear: new Float32Array(clear), sky: new Float32Array(sky), ground: new Float32Array(ground), sun: new Float32Array(sun), direct: new Float32Array(sun),
     light, directStrength: 0.9, ambientFloor: 0.26, diffuseFloor: 0.1, shadowStrength: 0.75, shadowFloor: 0.45, shadowBias: 0.003,
-    lights: new Float32Array(80), lightCount: 0, shadowCenter: { x: 0, y: 0, z: 0 }, shadowExtent: 38, bloomStrength: 0.85,
+    lights: new Float32Array(80), lightCount: 0, shadowCenter: { x: 0, y: 0, z: 0 }, shadowExtent: 38, bloomStrength: bloom,
     fog: new Float32Array(clear), fogNear: 28, fogFar: 125
   });
+  // Solid decor: the radius at scale 1 a racer bounces off. Bushes, grass and bones are soft.
+  const SOLID = { palm: 0.55, lagoonRock: 1.4, lavaRock: 1.3, obsidian: 0.7, pine: 0.55, snowRock: 1.3 };
   const THEMES = {
     bay: {
-      renderOpts: () => skyOpts(9.5),
+      // The bay rolls its hour per load: dawn, morning, noon or late afternoon.
+      renderOpts: (hour = 9.5) => skyOpts(hour),
+      hours: [7.5, 9.5, 12.5, 17.5],
       road: [rgb("#b9a27a"), rgb("#ad9670"), rgb("#c2ab82")], line: rgb("#e9dcb8"), board: [rgb("#9c7040"), rgb("#8f6538")],
       curb: [rgb("#e04a3a"), rgb("#f3efe4")], wall: rgb("#8d857b"), wallTop: rgb("#a39a8f"), slab: rgb("#8c7a5a"), shoulder: rgb("#d8c48e"), seams: null,
       offroad: SURF.sand,
@@ -96,8 +104,8 @@
       height: (n, d) => n * 5 - 1.6,
       ground: (h, n) => h < 0.4 ? mix(rgb("#e0cf9c"), rgb("#d2bf8a"), n) : h < 1.6 ? mix(rgb("#8fb04a"), rgb("#7a9a3c"), n) : mix(rgb("#6f8f3a"), rgb("#5f7a30"), n),
       decor: [
-        { build: (i) => raceModels.palm(i % 3), p: 0.22, near: [3, 16], scale: [0.85, 1.3], big: true },
-        { build: (i) => raceModels.lagoonRock(i % 2), p: 0.05, near: [6, 22], scale: [0.7, 1.1], big: true },
+        { build: (i) => raceModels.palm(i % 3), p: 0.22, near: [3, 16], scale: [0.85, 1.3], big: true, solid: SOLID.palm },
+        { build: (i) => raceModels.lagoonRock(i % 2), p: 0.05, near: [6, 22], scale: [0.7, 1.1], big: true, solid: SOLID.lagoonRock },
         { build: (i) => hubModels.bush(i % 3), p: 0.3, near: [2.5, 14], scale: [0.9, 1.4], big: true },
         { build: () => hubModels.grass(), p: 0.9, near: [1.5, 18], scale: [1.2, 2], big: false },
         { build: () => hubModels.flowerTuft(), p: 0.35, near: [2, 12], scale: [1, 1.5], big: false }
@@ -108,16 +116,17 @@
       banners: [rgb("#f5c542"), rgb("#22c55e")]
     },
     gorge: {
-      renderOpts: () => caveOpts([0.09, 0.03, 0.02], [0.55, 0.32, 0.24], [0.62, 0.24, 0.1], [0.95, 0.6, 0.4], { x: 0.3, y: 0.9, z: -0.2 }),
+      // Fiery, not searing: the lava glows under half bloom and the bounce light is a deep amber.
+      renderOpts: () => caveOpts([0.07, 0.025, 0.02], [0.42, 0.26, 0.2], [0.42, 0.18, 0.09], [0.9, 0.58, 0.4], { x: 0.3, y: 0.9, z: -0.2 }, 0.5),
       road: [rgb("#5a524d"), rgb("#4e4743"), rgb("#635a55")], line: rgb("#8d7d70"), board: [rgb("#5c5048"), rgb("#4f453e")],
-      curb: [rgb("#ff6a1e"), rgb("#3a3330")], wall: rgb("#4a413a"), wallTop: rgb("#6a5f57"), slab: rgb("#2b2724"), shoulder: rgb("#3a3330"), seams: rgb("#ff6a1e"),
+      curb: [rgb("#d9551c"), rgb("#3a3330")], wall: rgb("#4a413a"), wallTop: rgb("#6a5f57"), slab: rgb("#2b2724"), shoulder: rgb("#3a3330"), seams: rgb("#d9551c"), seamGlow: 0.45,
       offroad: SURF.ash,
-      floor: { level: 0.3, color: rgb("#ff5a12"), emissive: 1, deep: rgb("#ffa02a") },
+      floor: { level: 0.3, color: rgb("#d9480f"), emissive: 0.5, deep: rgb("#e0842a") },
       height: (n, d) => n * 12 - 5.4,
       ground: (h, n) => h < 1 ? mix(rgb("#3a3330"), rgb("#2b2724"), n) : h < 3.5 ? mix(rgb("#4a413a"), rgb("#3a3330"), n) : mix(rgb("#5e5449"), rgb("#4a413a"), n),
       decor: [
-        { build: (i) => raceModels.lavaRock(i % 3), p: 0.16, near: [3, 16], scale: [0.8, 1.3], big: true },
-        { build: (i) => raceModels.obsidianSpike(i % 3), p: 0.14, near: [3, 14], scale: [0.8, 1.4], big: true },
+        { build: (i) => raceModels.lavaRock(i % 3), p: 0.16, near: [3, 16], scale: [0.8, 1.3], big: true, solid: SOLID.lavaRock },
+        { build: (i) => raceModels.obsidianSpike(i % 3), p: 0.14, near: [3, 14], scale: [0.8, 1.4], big: true, solid: SOLID.obsidian },
         { build: () => raceModels.bones(), p: 0.12, near: [2, 10], scale: [0.9, 1.3], big: false },
         { build: (i) => hubModels.rock(i % 2), p: 0.2, near: [2, 12], scale: [0.7, 1.2], big: false }
       ],
@@ -136,8 +145,8 @@
       height: (n, d) => n * 14 - 3,
       ground: (h, n) => h < 1 ? mix(rgb("#dfe9f0"), rgb("#cfdde8"), n) : h < 6 ? mix(rgb("#eef3f7"), rgb("#dfe9f0"), n) : mix(rgb("#f6f9fb"), rgb("#eef3f7"), n),
       decor: [
-        { build: (i) => raceModels.pine(i % 3), p: 0.24, near: [3, 18], scale: [0.9, 1.4], big: true },
-        { build: (i) => raceModels.snowRock(i % 2), p: 0.08, near: [4, 20], scale: [0.7, 1.2], big: true },
+        { build: (i) => raceModels.pine(i % 3), p: 0.24, near: [3, 18], scale: [0.9, 1.4], big: true, solid: SOLID.pine },
+        { build: (i) => raceModels.snowRock(i % 2), p: 0.08, near: [4, 20], scale: [0.7, 1.2], big: true, solid: SOLID.snowRock },
         { build: (i) => raceModels.iceSpike(i % 3), p: 0.14, near: [2.5, 12], scale: [0.8, 1.3], big: false },
         { build: (i) => raceModels.crystal(i % 3), p: 0.1, near: [2.5, 10], scale: [0.8, 1.4], big: false, surface: SURF.crystal }
       ],
@@ -188,6 +197,8 @@
     }
   ];
   const trackById = (id) => TRACKS.find((t) => t.id === id) || TRACKS[0];
+  // The same track in the mirror: x and the banks flip, the wall bits swap sides, every gap still runs downhill.
+  const mirrored = (points) => points.map((p) => ({ ...p, x: -p.x, bank: -p.bank, wall: ((p.wall & 1) << 1) | ((p.wall & 2) >> 1) }));
 
   const catmull = (p0, p1, p2, p3, t) => {
     const t2 = t * t, t3 = t2 * t;
@@ -267,14 +278,17 @@
     return out;
   };
 
-  const build = (def, { renderer, detail = 1, rain = false, spectators: showSpectators = true }) => {
+  const build = (def, { renderer, detail = 1, rain = false, spectators: showSpectators = true, slots = 8, hour = null, mirror = false }) => {
     const theme = THEMES[def.theme];
     // Rain on outdoor tracks, snow on the peak, never under a ceiling (the gorge).
     const wet = rain && !theme.ceiling;
     const precipitation = wet ? (def.theme === "peak" ? "snow" : "rain") : null;
     const rand = mulberry32(def.seed);
     const noise = valueNoise(mulberry32(def.seed + 1));
-    const S = sampleSpline(def.points);
+    const S = sampleSpline(mirror ? mirrored(def.points) : def.points);
+    // Every trackside prop a racer can hit, in bake order, so each sector owns one run of the table.
+    const props = { x: new Float32Array(PROP_CAP), z: new Float32Array(PROP_CAP), r: new Float32Array(PROP_CAP), count: 0 };
+    const sectorProps = [];
     const n = S.count;
     const root = createNode();
     const geometries = [];
@@ -381,7 +395,8 @@
         // Over a gap or bridge the skirt drops below whatever crosses it; elsewhere it lerps up to meet the road.
         if (gap) h = Math.min(h, floor.level - 1.2);
         else if (bridge) h = Math.min(h, road - 1.6, floor.level + 0.6 * smooth((d - half - 3) / 8) + (h - floor.level) * smooth((d - half - 3) / 8));
-        else h = lerp(road, h + (noise(wx / 4 + 900, wz / 4 + 900) - 0.5) * 0.5, smooth((d - half - SHOULDER - 1) / 7));
+        // A flat apron past the shoulder, then the skirt climbs into the hills over APRON_RISE: no ledge at the road's edge.
+        else h = lerp(road, h + (noise(wx / 4 + 900, wz / 4 + 900) - 0.5) * 0.5, smooth((d - half - SHOULDER - APRON) / APRON_RISE));
         const k = gx * nz + gz;
         if (h < floor.level) {
           heights[k] = floor.level;
@@ -499,7 +514,7 @@
           const y = roadY(k, 0, lat) + ROAD_LIFT + CROWN + 0.006;
           const v0 = vert(road, o.x - rightX(k) * 0.04, y, o.z - rightZ(k) * 0.04), v1 = vert(road, o.x + rightX(k) * 0.04, y, o.z + rightZ(k) * 0.04);
           const v2 = vert(road, o.x + dx + rightX(k) * 0.04, y, o.z + dz + rightZ(k) * 0.04), v3 = vert(road, o.x + dx - rightX(k) * 0.04, y, o.z + dz - rightZ(k) * 0.04);
-          quad(road, v0, v3, v2, v1, theme.seams, 0.9);
+          quad(road, v0, v3, v2, v1, theme.seams, theme.seamGlow || 0.9);
         }
         for (const side of [-1, 1]) {
           const e0 = edgeAt(k, side), e1 = edgeAt(q, side);
@@ -565,6 +580,7 @@
           }
         }
       }
+      const propFrom = props.count;
       for (let i = from; i < to; i += 2) {
         const k = i % n;
         if (S.surface[k] === SURF.gap) continue;
@@ -574,14 +590,22 @@
           for (const side of [-1, 1]) {
             if (rand() > kind.p * detail) continue;
             if (S.wall[k] & (side < 0 ? 1 : 2) && kind.near[0] < 2.5) continue;
+            const scale = lerp(kind.scale[0], kind.scale[1], rand()), solid = (kind.solid || 0) * scale;
             const off = side * (halfAt(k) + CURB_W + SHOULDER * 0.5 + lerp(kind.near[0], kind.near[1], rand()));
             const x = S.x[k] + rightX(k) * off + (rand() - 0.5) * STEP, z = S.z[k] + rightZ(k) * off + (rand() - 0.5) * STEP;
             const j = nearest(x, z, k);
             const dx = x - S.x[j], dz = z - S.z[j];
-            if (Math.abs(dx * rightX(j) + dz * rightZ(j)) < halfAt(j) + CURB_W + SHOULDER * 0.5 + kind.near[0] * 0.5 && Math.hypot(dx, dz) < halfAt(j) + CURB_W + kind.near[0] * 0.5) continue;
+            // Nothing solid stands on the road, its curbs or its shoulder, whichever sample it is nearest.
+            if (Math.abs(dx * rightX(j) + dz * rightZ(j)) < halfAt(j) + CURB_W + SHOULDER * 0.5 + kind.near[0] * 0.5 + solid && Math.hypot(dx, dz) < halfAt(j) + CURB_W + kind.near[0] * 0.5 + solid) continue;
             if (waterAt(x, z)) continue;
             const y = groundAt(x, z) - 0.08;
-            bake(kind.big ? big : small, kind.build(Math.floor(rand() * 3)), x, y, z, rand() * Math.PI * 2, lerp(kind.scale[0], kind.scale[1], rand()));
+            bake(kind.big ? big : small, kind.build(Math.floor(rand() * 3)), x, y, z, rand() * Math.PI * 2, scale);
+            if (solid > 0 && props.count < PROP_CAP) {
+              props.x[props.count] = x;
+              props.z[props.count] = z;
+              props.r[props.count] = solid;
+              props.count++;
+            }
           }
         }
         if (theme.water && (i & 3) === 0) {
@@ -616,8 +640,11 @@
       const nodes = { road: createNode({ geometry: keep(road) }), big: createNode({ geometry: keep(big) }), small: createNode({ geometry: keep(small) }) };
       addChild(node, nodes.road, nodes.big, nodes.small);
       addChild(root, node);
-      sectors.push({ node, nodes, from, to, cx, cy, cz });
+      sectors.push({ node, nodes, from, to, cx, cy, cz, propFrom, propTo: props.count });
+      sectorProps.push(propFrom);
     }
+    sectorProps.push(props.count);
+    const sectorOf = (i) => Math.min(sectors.length - 1, Math.floor(((i % n) + n) % n / perSector));
     const terrainNodes = [];
     for (let cx = 0; cx < nx - 1; cx += CHUNK) {
       for (let cz = 0; cz < nz - 1; cz += CHUNK) {
@@ -758,16 +785,17 @@
       if (c > 0) for (let tries = 0; tries < n && (gapAhead(i) || S.surface[i] === SURF.gap); tries++) i = (i - 1 + n) % n;
       checkpoints[c] = i;
     }
+    // A grid slot for every racer, two abreast down the start straight.
     const grid = [];
-    for (let slot = 0; slot < 8; slot++) {
+    for (let slot = 0; slot < Math.max(8, slots); slot++) {
       const row = Math.floor(slot / 2), col = slot % 2 ? 1 : -1;
       const i = (n - 3 - Math.round(row * GRID_GAP / STEP) + n) % n;
       const lat = col * halfAt(i) * 0.42;
       grid.push({ x: S.x[i] + rightX(i) * lat, y: slabY(i, 0, lat), z: S.z[i] + rightZ(i) * lat, heading: Math.atan2(S.tx[i], S.tz[i]), index: i });
     }
     const spawns = { bananas: [], crates: [], pads: [], boulders: [] };
-    const every = Math.floor(n / 30);
-    for (let i = every, k = 0; i < n - 4; i += every, k++) {
+    const every = Math.floor(n / 30), gridBack = grid[grid.length - 1].index - 3;
+    for (let i = every, k = 0; i < gridBack; i += every, k++) {
       if (S.surface[i] === SURF.gap || S.surface[(i + 2) % n] === SURF.gap) continue;
       const lane = ((k % 3) - 1) * halfAt(i) * 0.45;
       const at = (lat) => ({ x: S.x[i] + rightX(i) * lat, y: slabY(i, 0, lat), z: S.z[i] + rightZ(i) * lat, heading: Math.atan2(S.tx[i], S.tz[i]), index: i });
@@ -792,6 +820,17 @@
     }
     if (def.hazard === "lava") {
       for (const i of [Math.floor(n * 0.32), Math.floor(n * 0.71)]) spawns.boulders.push({ index: i, x: S.x[i], z: S.z[i], y: slabY(i, 0, 0), heading: Math.atan2(S.tx[i], S.tz[i]), half: halfAt(i) });
+    } else if (def.hazard === "void") {
+      // Snowballs roll across the peak's ice, a third and two thirds of the way along it.
+      let first = -1, last = -1;
+      for (let i = 0; i < n; i++) if (S.surface[i] === SURF.ice) {
+        if (first < 0) first = i;
+        last = i;
+      }
+      if (first >= 0) for (const f of [0.33, 0.66]) {
+        const i = first + Math.floor((last - first) * f);
+        spawns.boulders.push({ index: i, x: S.x[i], z: S.z[i], y: slabY(i, 0, 0), heading: Math.atan2(S.tx[i], S.tz[i]), half: halfAt(i) });
+      }
     }
     // Minimap polyline, normalised to a unit square.
     const mapPts = [];
@@ -802,7 +841,7 @@
       out.y = (z - minZ - (spanZ - span) / 2) / span;
       return out;
     };
-    const renderOpts = theme.renderOpts();
+    const renderOpts = theme.renderOpts(hour === null ? undefined : hour);
     if (wet) {
       const grey = precipitation === "snow" ? [0.42, 0.46, 0.54] : [0.5, 0.53, 0.58];
       for (const key of ["horizon", "zenith", "clear", "sky"]) if (renderOpts[key]) for (let i = 0; i < 3; i++) renderOpts[key][i] = renderOpts[key][i] * 0.35 + grey[i] * 0.65;
@@ -818,9 +857,9 @@
       renderOpts.fogFar = 170;
     }
     const slipAt = (surface) => Math.min(1, SURFACE_SLIP[surface] + (wet && (surface === SURF.road || surface === SURF.board) ? 0.42 : 0));
-    // Per frame: spectators bob, torches flicker, far sectors drop their small decor.
+    // Per frame: spectators bob (only while the grid is in range), torches flicker, far sectors drop their small decor.
     const update = (elapsed, camX, camZ) => {
-      if (spectators.node) {
+      if (spectators.node && (S.x[0] - camX) ** 2 + (S.z[0] - camZ) ** 2 < LOD_FAR * LOD_FAR * 2.5) {
         const data = spectators.node.instanceData;
         for (let i = 0; i < spectators.count; i++) {
           const hop = Math.max(0, Math.sin(elapsed * 6 + spectators.phase[i])) * 0.18;
@@ -844,13 +883,13 @@
     };
     return {
       floorLevel: floor.level,
-      id: def.id, name: def.name, laps: def.laps, targets: def.targets, hazard: def.hazard, theme: def.theme,
-      root, samples: S, count: n, length: S.length, sectors, terrainNodes, checkpoints, grid, spawns, torches, lamps, spectators, renderOpts,
+      id: def.id, name: def.name, laps: def.laps, targets: def.targets, hazard: def.hazard, theme: def.theme, mirror,
+      root, samples: S, count: n, length: S.length, sectors, terrainNodes, checkpoints, grid, spawns, torches, lamps, spectators, renderOpts, props, sectorProps, sectorOf,
       nearest, project, heightAt, surfaceAt, groundAt, waterAt, roadY, slabY, halfAt, slipAt, wet, precipitation, rightX, rightZ, mapPts, mapPoint, bounds, update, dispose,
       get geometryCount() {
         return geometries.length;
       }
     };
   };
-  BL.raceTrack = { TRACKS, THEMES, SURF, SURFACE_GRIP, SURFACE_SLIP, STEP, SHOULDER, CURB_W, FALL, LOD_FAR, build, trackById, writeInstance };
+  BL.raceTrack = { TRACKS, THEMES, SURF, SURFACE_GRIP, SURFACE_SLIP, STEP, SHOULDER, CURB_W, FALL, LOD_FAR, PROP_CAP, build, trackById, mirrored, writeInstance };
 })();

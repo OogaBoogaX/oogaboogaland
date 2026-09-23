@@ -232,7 +232,10 @@
         if (run >= 0) append(ax, ay, az, dx, dy, dz, run, t0, kind, n / 6);
       }
     };
-    const update = (cave, structure, objects, camera, aspect, dt = 0, objectsEnabled = true, rockOnly = false) => {
+    let sinceCompute = Infinity;
+    // `recomputeHz` throttles motion-driven recomputes to that many a second of game time; 0 (the default,
+    // and what every direct caller gets) recomputes on every change, as the checks expect.
+    const update = (cave, structure, objects, camera, aspect, dt = 0, objectsEnabled = true, rockOnly = false, recomputeHz = 0) => {
       actor = cave;
       output.objectsEnabled = objectsEnabled;
       output.rockOnly = rockOnly;
@@ -251,9 +254,18 @@
       observer[12] = tanX = Math.tan(camera.fov / 2) * aspect; observer[13] = tanY = Math.tan(camera.fov / 2);
       observer[14] = ox; observer[15] = oy; observer[16] = oz; observer[17] = camera.near; observer[18] = camera.far;
       observer[19] = eye.x; observer[20] = eye.y; observer[21] = eye.z;
-      let changed = cave !== lastActor || structure !== lastStructure || objects.version !== lastObjects || objects.occlusionVersion !== lastOcclusion || objects.nearVersion !== lastNear || objectsEnabled !== lastEnabled || rockOnly !== lastRockOnly;
+      // An actor, structure or mode change recomputes at once; registry versions tick as the player walks and
+      // are throttled with motion.
+      const versionChanged = cave !== lastActor || structure !== lastStructure || objectsEnabled !== lastEnabled || rockOnly !== lastRockOnly;
+      const registryChanged = objects.version !== lastObjects || objects.occlusionVersion !== lastOcclusion || objects.nearVersion !== lastNear;
+      let changed = versionChanged || registryChanged;
       for (let i = 0; i < observer.length && !changed; i++) if (Math.abs(observer[i] - previous[i]) > 1e-5 || !Number.isFinite(previous[i])) changed = true;
+      // Perception and edge clipping are the frame's dearest work, and the lines are world-anchored, so a
+      // move alone recomputes them at most RECOMPUTE_HZ times a second of game time; anything else at once.
+      sinceCompute += Math.max(0, dt);
+      if (changed && !versionChanged && recomputeHz > 0 && sinceCompute < 1 / recomputeHz) changed = false;
       if (!changed) { if (objectsEnabled && output.fading) advanceFades(dt); return output; }
+      sinceCompute = 0;
       previous.set(observer); lastActor = cave; lastStructure = structure; lastObjects = objects.version; lastOcclusion = objects.occlusionVersion; lastNear = objects.nearVersion; lastEnabled = objectsEnabled; lastRockOnly = rockOnly;
       output.count = output.structureCount = output.objectCount = output.rays = output.actorRays = 0;
       output.index = structure ? structure.index : -1; output.basement = !!(structure && structure.basement);

@@ -6,13 +6,19 @@
   const { clamp, lerp, damp, fnv1a, mulberry32 } = BL.math;
   const { createNode, addChild, removeChild } = BL.scene;
   const { SURF, SURFACE_GRIP, STEP, SHOULDER, CURB_W, FALL } = raceTrack;
+  // Each mount has one lever of its own: the kart's top speed, the dino's quick drift charge, the runner's
+  // big boost and quick recovery from a spin.
   const MOUNTS = [
-    { id: "run", name: "On foot", top: 21, accel: 12.5, brake: 15, turn: 2.9, driftTurn: 1.55, mass: 0.8, hop: 5.6, offroad: 0.85, radius: 0.55, bars: [3, 4, 5] },
-    { id: "kart", name: "Rock Kart", top: 24.5, accel: 8, brake: 16, turn: 1.95, driftTurn: 1.8, mass: 1.35, hop: 4.6, offroad: 0.55, radius: 0.8, bars: [5, 2, 3] },
-    { id: "dino", name: "Dino", top: 22.5, accel: 11, brake: 15, turn: 2.3, driftTurn: 1.65, mass: 1.1, hop: 6.6, offroad: 0.72, radius: 0.7, bars: [4, 4, 4] }
+    { id: "run", name: "On foot", top: 21, accel: 12.5, brake: 15, turn: 2.9, driftTurn: 1.55, mass: 0.8, hop: 5.6, offroad: 0.85, radius: 0.55, charge: 1, boostMul: 1.45, recover: 0.7, bars: [3, 4, 5] },
+    { id: "kart", name: "Rock Kart", top: 24.5, accel: 8, brake: 16, turn: 1.95, driftTurn: 1.8, mass: 1.35, hop: 4.6, offroad: 0.55, radius: 0.8, charge: 1, boostMul: 1.32, recover: 1, bars: [5, 2, 3] },
+    { id: "dino", name: "Dino", top: 22.5, accel: 11, brake: 15, turn: 2.3, driftTurn: 1.65, mass: 1.1, hop: 6.6, offroad: 0.72, radius: 0.7, charge: 1.3, boostMul: 1.32, recover: 0.85, bars: [4, 4, 4] }
   ];
   const mountById = (id) => MOUNTS.find((m) => m.id === id) || MOUNTS[1];
+  // The AI field: two karts and two dinos to every runner, so the back of the pack is not all on foot.
+  const AI_MOUNTS = [MOUNTS[1], MOUNTS[2], MOUNTS[1], MOUNTS[2], MOUNTS[0]];
   const BOOST_MUL = 1.32, BOOST_TIERS = [0, 0.55, 0.95, 1.5], DRIFT_ANGLE = 0.5;
+  // The start: a throttle held from inside the last count boosts off the line, held from earlier it spins the wheels.
+  const START_BOOST = 0.7, START_SPIN = 0.6, START_SPIN_TOP = 0.4, AI_START_BOOST = 0.55, AI_START_SKILL = 0.75;
   const GRAVITY = 24, HOP_V = 3.2, LAUNCH_MIN = 2.6, DROP = 0.12;
   const SPIN_TIME = 1.1, RESPAWN_TIME = 1.2, INVULN = 1.6, WRONG_WAY_AFTER = 0.9;
   const CHECK_WINDOW = 4;
@@ -51,7 +57,7 @@
       const racer = {
         index: i, name: contributor.name, traits, cave, node, body, flame, mount: null, ride: null, baseY: cave.root.position.y,
         x: 0, y: 0, z: 0, heading: 0, motionHeading: 0, speed: 0, vy: 0, airborne: false, ground: 0, centre: 0, groundV: 0, groundVPrev: 0,
-        steer: 0, throttle: 0, driftIn: false, itemIn: false, driftHeld: false,
+        steer: 0, throttle: 0, driftIn: false, itemIn: false, driftHeld: false, wheelspin: 0,
         drift: { active: false, dir: 0, charge: 0, tier: 0 }, boost: 0, spin: 0, spinRot: 0, respawn: 0, invuln: 0, wrongWay: 0, wrong: false,
         idx: -1, lateral: 0, along: 0, progress: 0, lap: 1, checkpoint: 0, started: false, rank: i + 1, lapStart: 0, lapTime: 0, bestLap: 0, finishTime: 0, finished: false,
         surface: 0, offroad: false, wallHit: 0, item: null, bananas: 0, meterFull: false,
@@ -106,7 +112,7 @@
       lineup.forEach((racer, slot) => {
         const g = grid[Math.min(grid.length - 1, slot)];
         const isPlayer = racer === chosen;
-        racer.mount = isPlayer ? mountById(playerMount) : MOUNTS[(slot + 1) % MOUNTS.length];
+        racer.mount = isPlayer ? mountById(playerMount) : AI_MOUNTS[slot % AI_MOUNTS.length];
         seat(racer);
         racer.x = g.x;
         racer.z = g.z;
@@ -121,7 +127,7 @@
         racer.groundV = racer.groundVPrev = 0;
         racer.drift.active = false;
         racer.drift.charge = 0;
-        racer.boost = racer.spin = racer.spinRot = racer.respawn = racer.invuln = racer.wrongWay = 0;
+        racer.boost = racer.spin = racer.spinRot = racer.respawn = racer.invuln = racer.wrongWay = racer.wheelspin = 0;
         racer.wrong = false;
         racer.lap = 1;
         racer.checkpoint = 0;
@@ -143,10 +149,18 @@
       });
       pose(0);
     };
-    const start = () => {
+    // `playerStart` is "boost" for a throttle held from inside the last count, "spin" for one held from
+    // earlier, else nothing; the sharper AI get their own jump off the line.
+    const start = (playerStart = "") => {
       running = true;
       raceTime = 0;
-      for (const r of racers) r.lapStart = 0;
+      for (const r of racers) {
+        r.lapStart = 0;
+        if (r === player) {
+          if (playerStart === "boost") r.boost = START_BOOST;
+          else if (playerStart === "spin") r.wheelspin = START_SPIN;
+        } else if (r.ai.skill > AI_START_SKILL) r.boost = AI_START_BOOST;
+      }
     };
     const setInput = (racer, steer, throttle, drift, item) => {
       racer.steer = clamp(steer, -1, 1);
@@ -233,7 +247,7 @@
     };
     const spinOut = (r, strength = 1) => {
       if (r.invuln > 0 || r.spin > 0) return false;
-      r.spin = SPIN_TIME * strength;
+      r.spin = SPIN_TIME * strength * r.mount.recover;
       r.speed *= 0.35;
       r.drift.active = false;
       r.drift.charge = 0;
@@ -267,8 +281,12 @@
       r.offroad = !gap && Math.abs(r.lateral) > half + CURB_W;
       const boosting = r.boost > 0;
       if (boosting) r.boost -= dt;
-      let top = m.top * (boosting ? BOOST_MUL : 1) * (r.offroad ? m.offroad : grip < 1 && !slippery ? grip : 1);
+      let top = m.top * (boosting ? m.boostMul : 1) * (r.offroad ? m.offroad : grip < 1 && !slippery ? grip : 1);
       if (r.ai && r !== player) top *= r.aiTopMul || 1;
+      if (r.wheelspin > 0) {
+        r.wheelspin -= dt;
+        top = Math.min(top, m.top * START_SPIN_TOP);
+      }
       if (r.throttle > 0) {
         if (r.speed < top) r.speed = Math.min(top, r.speed + m.accel * r.throttle * dt * (boosting ? 1.6 : 1));
         else r.speed = damp(r.speed, top, boosting ? 2 : 5, dt);
@@ -295,7 +313,7 @@
         if (events.onHop) events.onHop(r);
       }
       if (d.active) {
-        d.charge += dt * (r.steer * d.dir > 0.2 ? 1.3 : 0.8);
+        d.charge += dt * (r.steer * d.dir > 0.2 ? 1.3 : 0.8) * m.charge;
         d.tier = d.charge > 2.2 ? 3 : d.charge > 1.25 ? 2 : d.charge > 0.55 ? 1 : 0;
         if (!r.driftIn || r.speed < m.top * 0.28 || r.spin > 0) {
           d.active = false;
@@ -379,6 +397,28 @@
           r.wallHit = 0.25;
         }
       }
+      // Trackside props in this sector and its neighbours: a solid one stops the racer where it stands.
+      const secs = track.sectorProps, sec = track.sectorOf(r.idx), last = secs.length - 1, px = track.props.x, pz = track.props.z, pr = track.props.r;
+      for (let k = -1; k <= 1; k++) {
+        const si = (sec + k + last) % last;
+        for (let q = secs[si]; q < secs[si + 1]; q++) {
+          const dx = r.x - px[q], dz = r.z - pz[q], min = pr[q] + m.radius * 0.7, d2 = dx * dx + dz * dz;
+          if (d2 >= min * min || d2 < 1e-6) continue;
+          const dist = Math.sqrt(d2), nx = dx / dist, nz = dz / dist;
+          r.x = px[q] + nx * min;
+          r.z = pz[q] + nz * min;
+          const into = -(Math.sin(r.motionHeading) * nx + Math.cos(r.motionHeading) * nz);
+          if (into > 0.05) {
+            if (r.wallHit <= 0) {
+              r.speed *= Math.max(0.3, 1 - into * 0.8);
+              d.active = false;
+              d.charge = 0;
+              if (events.onWall) events.onWall(r, into);
+            } else r.speed -= r.speed * into * 1.5 * dt;
+            r.wallHit = 0.25;
+          }
+        }
+      }
       if (r.wallHit > 0) r.wallHit -= dt;
       r.progress = S.dist[r.idx] + r.along * STEP;
       const checks = track.checkpoints, count = checks.length;
@@ -443,7 +483,7 @@
           const rel = va - vb;
           if (rel > 0) {
             a.speed = Math.max(-a.mount.top * 0.3, a.speed - rel * 0.35 * (b.mount.mass / total));
-            b.speed = Math.min(b.mount.top * BOOST_MUL, b.speed + rel * 0.35 * (a.mount.mass / total));
+            b.speed = Math.min(b.mount.top * b.mount.boostMul, b.speed + rel * 0.35 * (a.mount.mass / total));
             if (rel > 3 && events.onBump) events.onBump(a, b, rel);
             if (rel > 9 && a.boost > 0) spinOut(b, 0.6);
           }
@@ -599,5 +639,5 @@
       }
     };
   };
-  BL.racers = { create, MOUNTS, mountById, BOOST_MUL, BOOST_TIERS };
+  BL.racers = { create, MOUNTS, mountById, BOOST_MUL, BOOST_TIERS, START_BOOST, START_SPIN };
 })();

@@ -126,7 +126,7 @@
       const cave = hit && hit.owner && hit.owner.kind === "caveman" ? hit.owner.cave : null;
       if (cave === battleTooltipCave) return;
       battleTooltipCave = cave;
-      if (cave) hud.tooltip.show(cave.traits.name, 0, 0, cave);
+      if (cave) hud.tooltip.show(cave.traits.display, 0, 0, cave);
       else hud.tooltip.hide();
     };
     const clearFeedback = () => {
@@ -753,6 +753,14 @@
     };
     const aimKey = (e) => {
       if (e.metaKey || e.ctrlKey || e.altKey || e.target.closest && e.target.closest("input, textarea, dialog")) return;
+      // R swaps magazines whenever the AK is drawn, aimed or not: V fires it unaimed, so it empties unaimed.
+      // Otherwise R stays the free camera's pitch.
+      const cave = player();
+      if (e.key.toLowerCase() === "r" && !e.shiftKey && cave && cave.weapon.equipped) {
+        e.preventDefault(); e.stopImmediatePropagation();
+        if (!e.repeat) weaponAction(ctx.reloadAnywhere ? "weapon-reload" : "magazine-swap");
+        return;
+      }
       if (!armed()) {
         if (carryCursor.active && (e.key === "Escape" || e.key === "Tab") || e.key === "Escape" && performance.now() - cursorUnlockedAt < 100) {
           e.preventDefault(); e.stopImmediatePropagation(); unlockAim();
@@ -761,9 +769,6 @@
       }
       if (e.key === "Escape" && (document.pointerLockElement === canvas || performance.now() - unlockedAt < 100) || e.key === "Tab") {
         e.preventDefault(); e.stopImmediatePropagation(); unlockAim();
-      } else if (e.key.toLowerCase() === "r" && !e.shiftKey && player().weapon.equipped) {
-        e.preventDefault(); e.stopImmediatePropagation();
-        if (!e.repeat) weaponAction(ctx.reloadAnywhere ? "weapon-reload" : "magazine-swap");
       }
     };
     const releaseAimAttack = (e) => {
@@ -1326,7 +1331,7 @@
       syncJetpackHud();
       syncWeaponHud();
       syncModeHud();
-      if (!quiet) hud.toast(`${cave.traits.name} ${cave.state === "sleeping" ? "keeps sleeping" : "wanders off"}`);
+      if (!quiet) hud.toast(`${cave.traits.display} ${cave.state === "sleeping" ? "keeps sleeping" : "wanders off"}`);
     };
     // Nearby actions consume a press; a ready jetpack leaves Space as throttle.
     const action = () => {

@@ -119,7 +119,8 @@
     commits: normalizeBoard(lb && lb.commits), prs: normalizeBoard(lb && lb.prs),
     reviews: normalizeBoard(lb && lb.reviews), comments: normalizeBoard(lb && lb.comments)
   });
-  const displayLabel = (c) => c.login.startsWith("email:") ? "anonymous" : c.login;
+  // Board rows carry GitHub logins; a character maps its login to the in-game name.
+  const displayLabel = (c) => c.login.startsWith("email:") ? "anonymous" : BL.characters.displayOf(c.login);
 
   // Oogatron schema 3 (/v2/stats): org-wide totals/leaderboards, a per-repo
   // breakdown with its own leaderboards and last activity, plus the recent
@@ -274,7 +275,7 @@
     let y = 15;
     for (const e of model.recent.slice(0, 11)) {
       const color = PALETTE[TYPE_COLOR[e.type]] || PALETTE.accent;
-      drawText(ctx, fitText(e.login.toUpperCase(), 60, 1), 4, y, PALETTE.text, 1);
+      drawText(ctx, fitText(displayLabel(e).toUpperCase(), 60, 1), 4, y, PALETTE.text, 1);
       drawText(ctx, fitText(e.repo.toUpperCase(), 54, 1), 68, y, PALETTE.dim, 1);
       drawText(ctx, fitText(e.type.toUpperCase(), 42, 1), 126, y, color, 1);
       const age = recentAge(e.occurredAt);
@@ -491,10 +492,13 @@
       target.geometry = geometry;
       if (old && renderer && renderer.releaseGeometry) renderer.releaseGeometry(old);
     };
+    // Counts every repaint of the board, so a copy of it (the hub's close-up) knows when to redraw.
+    let version = 0;
     const refresh = (renderer) => {
       renderBoard();
       swapGeometry(screenNode, screenGeometryFrom(ctx), renderer);
       dirty = false;
+      version++;
     };
     const refreshChrome = (renderer) => {
       const count = cycle().length;
@@ -531,9 +535,17 @@
       return { bx, by, lx, ly };
     };
 
+    // The slide's name for a caption: the view and, for a repository or a leaderboard, whose.
+    const captionOf = (v) => v.name === "recent" ? "Recent activity" : v.name === "totals" ? "Org totals"
+      : v.name === "repo" ? v.params.name : `${v.params.repo} · ${v.params.type}`;
     const api = {
       node,
+      canvas,
       get view() { return view; },
+      get version() { return version; },
+      get index() { return cycleIndex % cycle().length; },
+      get count() { return cycle().length; },
+      get caption() { return captionOf(view); },
       setView(name, params) {
         if (!VIEWS[name]) return;
         view = { name, params };
@@ -568,10 +580,9 @@
         );
         return { x: out[0], y: out[1], z: out[2] };
       },
-      // A tap resolved onto the cabinet: the side-rail arrows page, the
-      // bottom-rail dots jump to their slide, and the screen (or the top
-      // rail, or a miss into thin air) advances, as tapping the board always
-      // has. Returns what it did, for checks.
+      // A tap resolved onto the cabinet: the side-rail arrows page, the bottom-rail dots jump to
+      // their slide, the top rail or a miss into thin air advances, and the screen itself is left
+      // to the caller ("screen": the hub opens its close-up). Returns what it did, for checks.
       tapAt(ray) {
         const hit = boardAt(ray);
         if (!hit) {
@@ -593,6 +604,7 @@
           api.goToView(index);
           return `dot:${index}`;
         }
+        if (hit.by >= 0) return "screen";
         api.nextView();
         return "next";
       },

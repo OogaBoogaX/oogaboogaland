@@ -11,8 +11,9 @@
   const ROCK_SPEED = 26, ROCK_LIFE = 2.6, PEEL_LIFE = 25, BOOST_PAD = 0.9, TURBO = 1.3, SHOUT_RADIUS = 7;
   const ITEMS = { rock: "Rock", peel: "Peel", turbo: "Turbo", shout: "Shout" };
   const ITEM_NAMES = ["rock", "peel", "turbo", "shout"];
-  // ODDS rows by place: leaders draw defensive items, the tail draws catch-up ones.
-  const ODDS = [[0.55, 0.45, 0, 0], [0.35, 0.3, 0.35, 0], [0.25, 0.15, 0.4, 0.2]];
+  // ODDS rows by place: the leaders draw defensive items, the back third catch-up ones, last place the best.
+  const ODDS = [[0.55, 0.45, 0, 0], [0.35, 0.3, 0.35, 0], [0.25, 0.15, 0.4, 0.2], [0.1, 0.1, 0.45, 0.35]];
+  const ROCK_BITS = [models.particleGeometry("#6b625a", 0.09, 0)];
   const SKID_GEO = (() => {
     const geo = models.box({ w: 0.22, h: 0.01, d: 0.7, color: "#2b2521" });
     geo.castShadow = false;
@@ -24,7 +25,6 @@
     v.z = z;
     return v;
   };
-  const ROCK_BITS = [models.particleGeometry("#6b625a", 0.09, 0)];
   const create = (ctx) => {
     const { root, racers, fx } = ctx;
     let track = ctx.track;
@@ -74,6 +74,7 @@
         b.live = !!s;
         b.node.visible = b.live;
         if (!s) continue;
+        b.node.geometry = track.hazard === "void" ? raceModels.snowball() : raceModels.boulder();
         b.index = s.index;
         b.x = s.x;
         b.z = s.z;
@@ -107,7 +108,7 @@
     };
     const rollItem = (racer, seed) => {
       const field = racers.racers.length;
-      const tier = racer.rank <= 2 ? 0 : racer.rank >= field - 1 ? 2 : 1;
+      const tier = racer.rank <= 2 ? 0 : racer.rank >= field ? 3 : racer.rank > field * 0.7 ? 2 : 1;
       const odds = ODDS[tier];
       let r = (fnv1a(`${seed}/item`) % 1000) / 1000;
       for (let i = 0; i < odds.length; i++) {
@@ -123,14 +124,15 @@
         break;
       }
       if (!rock) rock = rocks[0];
-      const dir = racer.heading;
+      // Braking throws it backward at whoever is on the tail.
+      const back = racer.throttle < -0.4, dir = racer.heading + (back ? Math.PI : 0);
       rock.live = true;
       rock.owner = racer;
       rock.x = racer.x + Math.sin(dir) * 1.4;
       rock.z = racer.z + Math.cos(dir) * 1.4;
       rock.y = racer.y + 0.9;
-      rock.vx = Math.sin(dir) * (ROCK_SPEED + Math.max(0, racer.speed));
-      rock.vz = Math.cos(dir) * (ROCK_SPEED + Math.max(0, racer.speed));
+      rock.vx = Math.sin(dir) * (ROCK_SPEED + (back ? 0 : Math.max(0, racer.speed)));
+      rock.vz = Math.cos(dir) * (ROCK_SPEED + (back ? 0 : Math.max(0, racer.speed)));
       rock.vy = 2.5;
       rock.life = ROCK_LIFE;
       rock.idx = racer.idx;
@@ -151,8 +153,10 @@
       }
       peel.live = true;
       peel.owner = racer;
-      peel.x = racer.x - Math.sin(racer.heading) * 1.6;
-      peel.z = racer.z - Math.cos(racer.heading) * 1.6;
+      // Braking lays it ahead instead, in the path of whoever is about to pass.
+      const ahead = racer.throttle < -0.4 ? 3 : -1.6;
+      peel.x = racer.x + Math.sin(racer.heading) * ahead;
+      peel.z = racer.z + Math.cos(racer.heading) * ahead;
       peel.y = track.heightAt(peel.x, peel.z, racer.idx);
       peel.life = PEEL_LIFE;
       setVec(peel.node.position, peel.x, peel.y + 0.02, peel.z);
@@ -198,7 +202,8 @@
       skids.node.visible = true;
       skids.node.instanceVersion++;
     };
-    const update = (dt, elapsed) => {
+    // `first` marks the first substep of a frame: skid marks are laid once a frame, not once a substep.
+    const update = (dt, elapsed, first = true) => {
       spinT += dt;
       const list = racers.racers;
       for (let i = 0; i < bananas.length; i++) {
@@ -252,7 +257,8 @@
           if (r.respawn > 0 || r.airborne || Math.abs(r.y - p.y) > 1) continue;
           const dx = r.x - p.x, dz = r.z - p.z;
           const along = dx * Math.sin(p.heading) + dz * Math.cos(p.heading), across = dx * Math.cos(p.heading) - dz * Math.sin(p.heading);
-          if (Math.abs(along) < 1.3 && Math.abs(across) < 1.1 && r.boost < BOOST_PAD * 0.5) {
+          // A pad tops a boost up rather than replacing it, so a drift boost is never lost on one.
+          if (Math.abs(along) < 1.3 && Math.abs(across) < 1.1 && r.boost < BOOST_PAD) {
             r.boost = BOOST_PAD;
             if (events.onPad) events.onPad(r);
           }
@@ -333,15 +339,14 @@
           }
         }
       }
-      for (let k = 0; k < list.length; k++) {
+      if (first && ((elapsed * 30) | 0) % 2 === 0) for (let k = 0; k < list.length; k++) {
         const r = list[k];
-        if (!r.drift.active || r.airborne || r.respawn > 0 || r.mount.id === "run") continue;
+        // Rubber marks tarmac, not grass or ice: nothing is laid off the road or on a slippery surface.
+        if (!r.drift.active || r.airborne || r.respawn > 0 || r.offroad || r.mount.id === "run") continue;
         const sx = Math.cos(r.heading) * 0.45, sz = -Math.sin(r.heading) * 0.45;
         const yaw = r.motionHeading;
-        if (((elapsed * 30) | 0) % 2 === 0) {
-          writeSkid(r.x + sx, r.y, r.z + sz, yaw);
-          writeSkid(r.x - sx, r.y, r.z - sz, yaw);
-        }
+        writeSkid(r.x + sx, r.y, r.z + sz, yaw);
+        writeSkid(r.x - sx, r.y, r.z - sz, yaw);
       }
     };
     const dispose = () => {

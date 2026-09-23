@@ -60,6 +60,8 @@
   };
   BL.characters.add({
     handle: "DrNeski",
+    // GitHub login behind the handle, for activity and the jumbotron
+    github: "itsneski",
     joined: 1789692980,
     lastCommit: 1788219000,
     // Laser eyes: lit orange, open or closed, with no pupils

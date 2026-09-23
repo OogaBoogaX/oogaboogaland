@@ -38,6 +38,7 @@ const iso = (seconds) => new Date(seconds * 1e3).toISOString();
 export const characterRows = () => readCharacters().map((c) => ({
   handle: c.handle,
   github_login: c.github || c.handle,
+  display: c.display || null,
   joined_at: iso(c.joined),
   last_commit_at: iso(c.lastCommit),
   look: c.look || {},

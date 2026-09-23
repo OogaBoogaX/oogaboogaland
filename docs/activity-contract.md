@@ -38,26 +38,29 @@ BL.contributors.applySnapshot({
 ```
 
 Oogatron returns `last_seen_at`: the latest event time for a contributor's commits,
-pull requests, reviews, merges, and comments. `scripts/jumbotron-data.mjs`
-preserves that field alongside `login`:
+pull requests, reviews, merges, issue creations, and comments (on issues, pull
+request conversations, reviews, and commits alike) — so commenting on a PR or an
+issue counts as activity and wakes the character to clanking exactly as a commit
+does. `scripts/jumbotron-data.mjs` preserves that field alongside `login`:
 
 ```js
 last_seen_at: c.last_seen_at,
 ```
 
 Weekly counts and the snapshot's `generated_at` cannot establish whether someone
-contributed within the past four hours, so the adapter ignores rows without a valid
+contributed within the past hour, so the adapter ignores rows without a valid
 activity timestamp. Profile names, email addresses, and avatars are not imported.
 
-The activity adapter is event-type agnostic, so a merge timestamp will use the same
-four-hour and 48-hour windows when Oogatron includes merges in `last_seen_at`.
+The activity adapter is event-type agnostic, so every event type shares the same
+one-hour clanking and 24-hour chilling windows through `last_seen_at`.
 Oogatron currently stores `mergedAt` in a pull request event's payload but timestamps
 that event with the pull request's creation time; an older pull request merged today
 therefore still needs an Oogatron-side event/timestamp update to count as activity today.
 
 Repository names normalize to lowercase. Any `OogaBoogaX/<repo>` is accepted, with
 `w-s-bitcoin/entropylab` as the historical alias. GitHub handles match without case;
-the existing public alias `ottoz0r` maps to the `bc1gui` character. Unknown handles
+the public aliases `ottoz0r` and `itsneski` map to the `bc1gui` and `DrNeski`
+characters (each declared as `github` in its character file). Unknown handles
 do not create new characters. Each character stores at most 64 repositories.
 Malformed, future, repeated, and older timestamps do not replace newer activity.
 

@@ -392,7 +392,7 @@
   };
   // Shift+A in any scene, or a double-click on the Agent in the hub and the lab: the
   // director hands the active scene's Agent to the player until Escape, Shift+A or a
-  // double-click on the ground, and it wanders off again. Keys are taken in the
+  // double-click on the ground, and it wanders off again. Key-downs are taken in the
   // capture phase, so the scene's own controls never see them meanwhile. A scene may
   // provide agentView (the pilot's orbit, so drag and scroll work as with an Ooga),
   // agentControls (its sticks) and agentHandoff (release a controlled Ooga first).
@@ -419,11 +419,11 @@
       e.preventDefault();
       e.stopImmediatePropagation();
     };
+    // Key-ups pass on: the scene's controls saw the A of Shift+A go down before play began, and a
+    // swallowed key-up left it held there, walking the next driven Ooga left on its own.
     const onKeyUp = (e) => {
       const name = PLAY_KEYS[e.key.toLowerCase()];
-      if (!name) return;
-      held[name] = 0;
-      e.stopImmediatePropagation();
+      if (name) held[name] = 0;
     };
     const onBlur = () => {
       for (const name in held) held[name] = 0;

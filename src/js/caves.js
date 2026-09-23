@@ -5,7 +5,9 @@
   const slot = (id, clock, scene = null, status = "dark", name = null, repo = null) => ({ id, clock, scene, status, name, repo });
   const slots = [
     slot("c11", 11, "lab", "open", "EntropyLab", "oogaboogax/entropylab"),
-    slot("c10", 10, "dsb", "open", "DSB Land"),
+    // The hub's ten point lights are spoken for by the other open mouths and the fire pit, so the mine's
+    // torches and lantern glow without casting light of their own.
+    { ...slot("c10", 10, "mine", "open", "Ooga Mine"), glowOnly: true },
     slot("c9", 9, "race", "open", "Ooga Rally", "oogaboogax/oogaboogaland"),
     slot("c730", 7.25, null, "headquarters", "Headquarters"),
     slot("c1", 1, null, "mirror", "Ooga Booga Land", "oogaboogax/oogaboogaland"),

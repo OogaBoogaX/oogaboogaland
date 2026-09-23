@@ -35,7 +35,7 @@
         b.dataset.racer = c.name;
         const name = document.createElement("span");
         name.className = "garage-name";
-        name.textContent = c.name;
+        name.textContent = c.display;
         const state = document.createElement("span");
         state.className = "roster-state";
         state.dataset.state = stateOf(c.name);

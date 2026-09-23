@@ -14,7 +14,7 @@
   // The weathervane outmuscles the stick: a held input settles near 65 degrees, a released one comes back flat.
   const RATE = { pitch: 3, roll: 3, yaw: 2.2 }, RESPONSE = 6, WEATHERVANE = 3.3;
   // Canopy constants in order: bloom, trimmed/dived/flared speeds, flare reserve, turn and crab.
-  const OPEN_T = 0.7, FORWARD = 6.5, DIVE_FORWARD = 10.5, FLARE_FORWARD = 3, SINK = 5, DIVE_SINK = 8.5, FLARE_SINK = 2.2, FLARE_MAX = 2, TURN = 1.3, CRAB = 3;
+  const OPEN_T = 0.7, FORWARD = 8, DIVE_FORWARD = 12.5, FLARE_FORWARD = 3, SINK = 6, DIVE_SINK = 10.5, FLARE_SINK = 2.2, FLARE_MAX = 2, TURN = 1.3, CRAB = 3;
   // How far the body's centre sits above the feet, in body heights.
   const FOOT = 0.55;
   const LANDING = { tumbleSpeed: 6, spine: 0.6 };

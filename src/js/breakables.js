@@ -185,14 +185,16 @@
       overlay.font = "bold 13px ui-monospace, monospace";
       overlay.textAlign = "center";
       overlay.textBaseline = "bottom";
+      // A stroked outline reads like the old shadow and costs nothing; a blur on the overlay does not.
       overlay.fillStyle = "#ffe291";
-      overlay.shadowColor = "#17130b";
-      overlay.shadowBlur = 4;
-      overlay.shadowOffsetY = 1;
+      overlay.strokeStyle = "#17130b";
+      overlay.lineWidth = 3;
+      overlay.lineJoin = "round";
       for (const record of records) {
         if (!record.reward || !record.reward.label) continue;
         const p = record.node.position;
         if (!renderer.project(p.x, p.y + 0.4, p.z, screen) || screen.x < -20 || screen.x > size.width + 20 || screen.y < -20 || screen.y > size.height + 20) continue;
+        overlay.strokeText(record.reward.label, screen.x, screen.y + 1);
         overlay.fillText(record.reward.label, screen.x, screen.y);
       }
       overlay.restore();

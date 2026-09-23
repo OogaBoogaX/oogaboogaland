@@ -156,8 +156,27 @@
       zzz.push({ x, y, z, cave, t: 0 });
       if (zzz.length > 40) zzz.shift();
     };
+    // The ticker's glow is baked once into a small canvas: a shadow blur on the full overlay costs
+    // twenty to forty milliseconds a frame at a 4K backing store, and the text never changes.
+    const TICKER_PAD = 18, TICKER_ASCENT = 10;
+    const renderTicker = (text, dpr) => {
+      const ctx = overlayCtx;
+      ctx.font = "bold 13px ui-monospace, monospace";
+      const w = Math.ceil(ctx.measureText(text).width) + TICKER_PAD * 2, h = 13 + TICKER_PAD * 2;
+      const canvas = document.createElement("canvas"), c = canvas.getContext("2d");
+      canvas.width = Math.round(w * dpr);
+      canvas.height = Math.round(h * dpr);
+      c.setTransform(dpr, 0, 0, dpr, 0, 0);
+      c.font = "bold 13px ui-monospace, monospace";
+      c.textAlign = "center";
+      c.fillStyle = "#ffd27a";
+      c.shadowColor = "#d8892b";
+      c.shadowBlur = 12;
+      c.fillText(text, w / 2, TICKER_PAD + TICKER_ASCENT);
+      return { canvas, w, h };
+    };
     const showTicker = (text, dur) => {
-      ticker = { text, t: 0, dur };
+      ticker = { text, t: 0, dur, image: null, dpr: 0 };
     };
     let overlayW = 0, overlayH = 0, overlayDpr = 1;
     const projectRaw = (x, y, z) => renderer.project(x, y, z, SCREEN);
@@ -222,16 +241,10 @@
         else {
           const pos = projectRaw(tickerAt.x, tickerAt.y, tickerAt.z);
           if (pos) {
-            const fade = Math.min(1, ticker.t / 0.3, (ticker.dur - ticker.t) / 0.5);
+            if (!ticker.image || ticker.dpr !== dpr) { ticker.image = renderTicker(ticker.text, dpr); ticker.dpr = dpr; }
+            const fade = Math.min(1, ticker.t / 0.3, (ticker.dur - ticker.t) / 0.5), img = ticker.image;
             ctx.globalAlpha = fade;
-            ctx.font = "bold 13px ui-monospace, monospace";
-            ctx.textAlign = "center";
-            ctx.fillStyle = "#ffd27a";
-            ctx.shadowColor = "#d8892b";
-            ctx.shadowBlur = 12;
-            ctx.fillText(ticker.text, pos.x, pos.y);
-            ctx.shadowBlur = 0;
-            ctx.textAlign = "left";
+            ctx.drawImage(img.canvas, pos.x - img.w / 2, pos.y - TICKER_PAD - TICKER_ASCENT, img.w, img.h);
             ctx.globalAlpha = 1;
           }
         }

@@ -19,6 +19,8 @@
   const PUMPKIN = "#e8862a", PUMPKIN_DK = "#cf6f1c", PUMPKIN_GLOW = "#ffc14d";
   BL.characters.add({
     handle: "rules-without-rulers",
+    // In-game name; activity still joins on the handle (the GitHub login)
+    display: "genXbtc",
     joined: 1789801750,
     lastCommit: 1789954043,
     // pumpkin also flickers the head's glow in crew.js

@@ -11,10 +11,9 @@
     "watch": "node scripts/serve.mjs --watch",
     "characters": "node scripts/characters.mjs --list",
     "characters:json": "node scripts/characters.mjs --json",
-    "test:unit": "LANE=unit node test/run.mjs",
-    "test": "node scripts/build.mjs && LANE=fast node test/run.mjs",
-    "test:canvas": "node scripts/build.mjs && LANE=canvas node test/run.mjs",
-    "test:perf": "node scripts/build.mjs && LANE=perf LANES=1 node test/run.mjs",
-    "test:full": "node scripts/build.mjs && LANE=full node test/run.mjs"
+    "test:unit": "node test/run.mjs unit",
+    "test": "node scripts/build.mjs && node test/run.mjs",
+    "test:perf": "node scripts/build.mjs && node test/run.mjs perf",
+    "test:full": "node scripts/build.mjs && node test/run.mjs full"
   }
 }

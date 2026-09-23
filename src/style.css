@@ -6,6 +6,7 @@
   --faint: #6f6f6c;
   --border: rgba(255, 255, 255, 0.09);
   --accent: #d8892b;
+  --accent-text: #ffd9a0;
   --ok: #22c55e;
   --warn: #c9a44a;
   --danger: #e5533d;
@@ -54,6 +55,20 @@ input,
 select {
   font: inherit;
   color: inherit;
+}
+
+/* A carved title stays hidden until hud.js swaps its text for lettering (and labels it), so the
+   fallback font never flashes while the page's scripts load. If the scripts never run, the plain
+   text shows after a few seconds rather than never. */
+[data-sign]:not([aria-label]) {
+  visibility: hidden;
+  animation: sign-fallback 0s 4s forwards;
+}
+
+@keyframes sign-fallback {
+  to {
+    visibility: visible;
+  }
 }
 
 .sign {
@@ -323,7 +338,7 @@ select {
 }
 
 .meter-label {
-  color: var(--accent);
+  color: var(--accent-text);
   font-size: 10.5px;
   letter-spacing: 0.14em;
   text-transform: uppercase;
@@ -423,7 +438,7 @@ select {
 }
 
 .presets .leave {
-  color: var(--accent);
+  color: var(--paper);
 }
 
 .presets [data-action="mute"][aria-pressed="true"] {
@@ -457,6 +472,183 @@ select {
 
 .sheet[data-open="false"] {
   transform: translateX(calc(100% + 16px + var(--safe-right)));
+}
+
+/* Scrolling game panels keep a thin wooden scrollbar instead of the platform's grey one. */
+.garage,
+.orbit-parts,
+.orbit-stack {
+  scrollbar-width: thin;
+  scrollbar-color: var(--wood-edge) rgba(0, 0, 0, 0.25);
+}
+
+.garage::-webkit-scrollbar,
+.orbit-parts::-webkit-scrollbar,
+.orbit-stack::-webkit-scrollbar {
+  width: 8px;
+}
+
+.garage::-webkit-scrollbar-thumb,
+.orbit-parts::-webkit-scrollbar-thumb,
+.orbit-stack::-webkit-scrollbar-thumb {
+  border-radius: 4px;
+  background: var(--wood-edge);
+}
+
+/* The one thing a new player should press next glows until they press it. */
+[data-hint="yes"] {
+  animation: panel-hint 1.2s ease-in-out infinite alternate;
+}
+
+@keyframes panel-hint {
+  from {
+    box-shadow: 0 2px 0 var(--nail), 0 0 0 0 rgba(245, 197, 66, 0);
+  }
+
+  to {
+    box-shadow: 0 2px 0 var(--nail), 0 0 14px 3px rgba(245, 197, 66, 0.75);
+  }
+}
+
+/* A game's side panels fold away with their fold button and come back from a wooden tab on the
+   screen's edge. The tab is the panel's next sibling and shows only while the panel is folded. */
+.fold-panel {
+  transition: transform 0.25s ease;
+}
+
+.fold-left[data-folded="true"] {
+  transform: translateX(calc(-100% - 24px - var(--safe-left)));
+}
+
+.fold-right[data-folded="true"] {
+  transform: translateX(calc(100% + 90px + var(--safe-right)));
+}
+
+.panel-fold {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 2px solid var(--wood-edge);
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.3);
+  color: var(--paper);
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.panel-fold:hover,
+.panel-fold:focus-visible {
+  border-color: var(--accent);
+  outline: none;
+}
+
+.panel-fold-inline {
+  position: static;
+  flex: none;
+}
+
+.orbit-head,
+.panel-head {
+  position: relative;
+}
+
+.orbit-head .panel-fold ~ h2 {
+  padding-right: 32px;
+}
+
+.panel-head {
+  min-height: 26px;
+}
+
+/* A panel's title: paper, larger, spaced. A section heading inside a panel is the smaller muted label
+   with a rule under it (see .section-head), so the two never read as the same thing. */
+.panel-head h3 {
+  margin: 4px 0 0;
+  color: var(--paper);
+  font-size: 13px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  text-shadow: 0 2px 0 rgba(0, 0, 0, 0.5);
+}
+
+.section-head {
+  margin: 0 0 6px;
+  padding-bottom: 3px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.14);
+  color: var(--muted);
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+}
+
+.panel-edge {
+  position: absolute;
+  top: calc(96px + var(--safe-top));
+  padding: 14px 6px;
+  border: 3px solid var(--wood-edge);
+  background: var(--planks);
+  color: var(--paper);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  writing-mode: vertical-rl;
+  box-shadow: 0 4px 0 rgba(0, 0, 0, 0.35);
+  cursor: pointer;
+}
+
+.panel-edge-left {
+  left: calc(0px + var(--safe-left));
+  border-left: 0;
+  border-radius: 0 8px 8px 0;
+}
+
+.panel-edge-right {
+  right: calc(0px + var(--safe-right));
+  border-right: 0;
+  border-radius: 8px 0 0 8px;
+}
+
+.fold-panel:not([data-folded="true"]) + .panel-edge,
+.fold-panel[hidden] + .panel-edge {
+  display: none;
+}
+
+@media (max-width: 720px) {
+  .fold-left[data-folded="true"],
+  .fold-right[data-folded="true"] {
+    transform: translateY(calc(100% + 24px));
+  }
+
+  .panel-edge {
+    top: auto;
+    bottom: calc(0px + var(--safe-bottom));
+    padding: 6px 14px;
+    writing-mode: horizontal-tb;
+    border: 3px solid var(--wood-edge);
+    border-bottom: 0;
+    border-radius: 8px 8px 0 0;
+  }
+}
+
+/* The games own the whole screen: the island's roster and banana sheet, pull tabs and all, and its
+   banana-pile count stay on the island and in the lab. The mine borrows the island's camera, so it
+   also hides the island's view-mode compass. */
+body[data-active-scene="race"] .sheet,
+body[data-active-scene="drop"] .sheet,
+body[data-active-scene="orbit"] .sheet,
+body[data-active-scene="mine"] .sheet,
+body[data-active-scene="race"] .world-bananas,
+body[data-active-scene="drop"] .world-bananas,
+body[data-active-scene="orbit"] .world-bananas,
+body[data-active-scene="mine"] .world-bananas,
+body[data-active-scene="mine"] .mode-hud {
+  display: none;
 }
 
 .sheet-toggle {
@@ -773,9 +965,8 @@ select {
 }
 
 .roster-name {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .roster-age {
@@ -811,7 +1002,7 @@ select {
 
 .roster-state[data-state="chilling"],
 .roster-state[data-state="away"] {
-  color: var(--accent);
+  color: var(--accent-text);
   border-color: rgba(216, 137, 43, 0.4);
   background: rgba(216, 137, 43, 0.08);
 }
@@ -829,9 +1020,7 @@ select {
   margin: 0 0 12px;
   font-size: 9px;
   color: var(--faint);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
   text-align: center;
 }
 
@@ -946,10 +1135,9 @@ select {
 }
 
 .loot-name {
+  min-width: 0;
   font-weight: 600;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
 }
 
 .loot-tier {
@@ -1101,9 +1289,8 @@ select {
   justify-content: space-between;
   gap: 8px;
   color: #e6f2ff;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .feed-debug-close {
@@ -1153,10 +1340,9 @@ select {
   opacity: 0;
   transition: opacity 0.3s ease, transform 0.3s ease;
   pointer-events: none;
-  white-space: nowrap;
-  max-width: calc(100vw - 32px);
-  overflow: hidden;
-  text-overflow: ellipsis;
+  max-width: min(620px, calc(100vw - 32px));
+  text-align: center;
+  line-height: 1.4;
 }
 
 .toast {
@@ -1191,10 +1377,8 @@ select {
   font-size: 11px;
   letter-spacing: 0.03em;
   pointer-events: none;
-  white-space: nowrap;
   max-width: 280px;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  line-height: 1.35;
 }
 
 .tooltip--name {
@@ -1474,7 +1658,7 @@ select {
   left: 50%;
   min-width: 78px;
   transform: translateX(-50%);
-  color: var(--accent);
+  color: var(--accent-text);
   font-size: 10px;
   letter-spacing: 0.08em;
   text-align: center;
@@ -1685,7 +1869,7 @@ select {
 
 .magazine-hud[data-reloading="true"] .magazine-ammo,
 .magazine-ammo-low[data-reloading="true"] {
-  color: var(--accent);
+  color: var(--accent-text);
 }
 
 .weapon-toggle {
@@ -1792,7 +1976,7 @@ select {
 }
 
 .weapon-hud[data-reloading="true"] .weapon-label {
-  color: var(--accent);
+  color: var(--accent-text);
 }
 
 .weapon-readout,
@@ -1998,10 +2182,6 @@ select {
 
 .garage-col h3 {
   margin: 0 0 6px;
-  color: var(--accent);
-  font-size: 10.5px;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
 }
 
 .garage-list {
@@ -2086,10 +2266,10 @@ select {
 }
 
 .garage-name {
+  min-width: 0;
   font-weight: 600;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  line-height: 1.2;
+  overflow-wrap: anywhere;
 }
 
 .garage-note {
@@ -2160,7 +2340,7 @@ select {
 
 .race-note {
   margin: 8px 0 0;
-  color: var(--accent);
+  color: var(--accent-text);
   font-size: 10.5px;
   letter-spacing: 0.14em;
   text-transform: uppercase;
@@ -2168,10 +2348,6 @@ select {
 
 .race-standings-head {
   margin: 12px 0 0;
-  color: var(--accent);
-  font-size: 10.5px;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
 }
 
 .race-standings li {
@@ -2231,6 +2407,57 @@ select {
 
 .weather-key > div + div {
   margin-top: 10px;
+}
+
+/* The jumbotron's close-up: the board's own pixels, blown up, with the frame's paging under it. */
+.jumbotron-modal {
+  width: 440px;
+}
+
+.jumbotron-screen {
+  display: block;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  margin: 10px 0 8px;
+  border: 3px solid #1a1612;
+  border-radius: 6px;
+  background: #000;
+  image-rendering: pixelated;
+  box-shadow: 0 0 0 2px var(--stone-dk), 0 0 18px rgba(255, 216, 74, 0.18);
+}
+
+.jumbotron-nav {
+  display: grid;
+  grid-template-columns: 36px 1fr 36px;
+  align-items: center;
+  gap: 8px;
+}
+
+.jumbotron-page {
+  height: 32px;
+  border: 2px solid var(--wood-edge);
+  border-radius: 6px;
+  background: var(--wood-edge);
+  color: var(--paper);
+  font-size: 22px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.jumbotron-caption {
+  display: grid;
+  text-align: center;
+}
+
+.jumbotron-caption b {
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.jumbotron-caption small {
+  color: var(--muted);
+  font-size: 10px;
 }
 
 .weather-key dt {
@@ -2321,12 +2548,12 @@ select {
 .race-rank b {
   font-size: 30px;
   line-height: 1;
-  color: var(--accent);
+  color: var(--accent-text);
 }
 
 .race-rank span {
   font-size: 12px;
-  color: var(--accent);
+  color: var(--accent-text);
 }
 
 .race-rank small,
@@ -2403,6 +2630,92 @@ select {
 
 .race-boost-fill.full {
   background: linear-gradient(90deg, #79d8ff, #fff);
+}
+
+/* The drift bar wears its tier's spark colour: orange, blue, purple. */
+.race-boost-fill[data-tier="1"] {
+  background: linear-gradient(90deg, #f5c542, #ffb13b);
+}
+
+.race-boost-fill[data-tier="2"] {
+  background: linear-gradient(90deg, #79d8ff, #b9ecff);
+}
+
+.race-boost-fill[data-tier="3"] {
+  background: linear-gradient(90deg, #c99bff, #ffffff);
+}
+
+.race-meter {
+  display: grid;
+  gap: 4px;
+}
+
+/* Ten banana pips under the bar, lit one at a time, gold when the turbo is ready. */
+.race-pips {
+  display: grid;
+  grid-template-columns: repeat(10, 1fr);
+  gap: 2px;
+  width: 90px;
+}
+
+.race-pips i {
+  display: block;
+  height: 5px;
+  border-radius: 2px;
+  background: rgba(0, 0, 0, 0.45);
+}
+
+.race-pips i[data-on="yes"] {
+  background: #f5c542;
+}
+
+.race-pips i[data-on="full"] {
+  background: #fff;
+  box-shadow: 0 0 6px rgba(121, 216, 255, 0.9);
+}
+
+/* The item box shows the item itself, as its pixel icon, over a small name. */
+.race-item {
+  background-repeat: no-repeat;
+  background-position: center 5px;
+  background-size: 22px 22px;
+  image-rendering: pixelated;
+  align-content: end;
+  padding-bottom: 3px;
+}
+
+.race-item[data-item="rock"] {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 9 9' shape-rendering='crispEdges'%3E%3Cpath fill='%239aa3ad' d='M1 1h5v1H1zM0 2h1v1H0zM6 2h1v1H6z'/%3E%3Cpath fill='%238a5a32' d='M3 2h1v1H3zM4 3h1v1H4zM5 4h1v1H5zM6 5h1v1H6zM7 6h1v2H7z'/%3E%3C/svg%3E");
+}
+
+.race-item[data-item="peel"] {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 9 9' shape-rendering='crispEdges'%3E%3Cpath fill='%23211b14' d='M0 0h1v5H0zM2 0h1v2H2zM3 2h1v2H3zM4 4h1v1H4zM1 5h1v2H1zM5 5h1v1H5zM6 6h1v1H6zM2 7h2v1H2zM7 7h1v1H7zM4 8h4v1H4z'/%3E%3Cpath fill='%23ffd84a' d='M1 2h2v2H1zM1 4h3v1H1zM2 5h3v1H2zM2 6h4v1H2zM4 7h3v1H4z'/%3E%3C/svg%3E");
+}
+
+.race-item[data-item="turbo"] {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 9 9' shape-rendering='crispEdges'%3E%3Cpath fill='%233a2a0a' d='M4 0h4v1H4zM3 1h1v2H3zM2 3h1v1H2zM1 4h1v1H1zM5 5h1v1H5zM4 6h1v1H4zM3 7h1v2H3z'/%3E%3Cpath fill='%23ffd84a' d='M4 1h3v1H4zM4 2h2v1H4zM3 3h4v1H3zM2 4h5v1H2zM4 5h1v1H4zM3 6h1v1H3z'/%3E%3C/svg%3E");
+}
+
+.race-item[data-item="shout"] {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 9 9' shape-rendering='crispEdges'%3E%3Cpath fill='%23ff8a73' d='M1 3h2v3H1zM3 2h1v5H3zM4 1h1v7H4z'/%3E%3Cpath fill='%23f3efe4' d='M6 2h1v1H6zM7 1h1v1H7zM6 4h2v1H6zM6 6h1v1H6zM7 7h1v1H7z'/%3E%3C/svg%3E");
+}
+
+.race-mirror {
+  padding: 6px 10px;
+  border: 2px solid var(--wood-edge);
+  border-radius: 6px;
+  background: var(--wood-edge);
+  color: var(--paper);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.race-mirror[aria-pressed="true"] {
+  background: linear-gradient(#f0b05a, var(--accent));
+  color: var(--ink);
 }
 
 .race-speed {
@@ -2497,7 +2810,7 @@ select {
 .race-podium li::before {
   counter-increment: place;
   content: counter(place);
-  color: var(--accent);
+  color: var(--accent-text);
   font-weight: 700;
 }
 
@@ -2521,7 +2834,7 @@ select {
 
 .drop-rows li {
   display: grid;
-  grid-template-columns: 1fr auto;
+  grid-template-columns: auto 1fr;
   gap: 10px;
   padding: 7px 0;
   border-bottom: 1px solid rgba(0, 0, 0, 0.35);
@@ -2538,9 +2851,19 @@ select {
   content: none;
 }
 
-.drop-rows li span:last-child {
-  color: var(--accent);
+.drop-rows li > span:first-child {
+  white-space: nowrap;
+}
+
+.drop-rows li > span:last-child {
+  min-width: 0;
+  color: var(--accent-text);
   font-weight: 600;
+  text-align: right;
+}
+
+.drop-rows .fact {
+  white-space: nowrap;
 }
 
 .orbit-final {
@@ -2566,7 +2889,7 @@ select {
   font-size: 44px;
   line-height: 1;
   font-weight: 800;
-  color: var(--accent);
+  color: var(--accent-text);
   font-variant-numeric: tabular-nums;
   text-shadow: 0 2px 0 rgba(0, 0, 0, 0.45);
 }
@@ -2652,7 +2975,7 @@ select {
   padding: 5px 8px;
   border: 2px solid var(--wood-edge);
   border-radius: 6px;
-  background: rgba(0, 0, 0, 0.3);
+  background: var(--wood-edge);
   color: var(--paper);
   font-size: 11px;
   font-weight: 700;
@@ -2722,9 +3045,14 @@ select {
   line-height: 1.2;
 }
 
+/* A tile's note is one or two short lines, split on purpose with a newline. Nothing in a tile truncates. */
 .orbit-tile-stat {
+  max-width: 100%;
   color: var(--muted);
   font-size: 10px;
+  line-height: 1.25;
+  text-align: center;
+  white-space: pre-line;
 }
 
 .orbit-tile .orbit-price {
@@ -2745,6 +3073,7 @@ select {
 
 .orbit-keys {
   margin: 8px 0 0;
+  white-space: pre-line;
   color: var(--paper);
   font-size: 10.5px;
   text-shadow: 0 1px 0 rgba(0, 0, 0, 0.7);
@@ -2759,10 +3088,12 @@ select {
 
 .orbit-rocket-head h3 {
   margin: 0;
-  color: var(--accent);
-  font-size: 11px;
-  letter-spacing: 0.14em;
+  white-space: nowrap;
+  color: var(--paper);
+  font-size: 13px;
+  letter-spacing: 0.12em;
   text-transform: uppercase;
+  text-shadow: 0 2px 0 rgba(0, 0, 0, 0.5);
 }
 
 .orbit-rocket-head small {
@@ -2978,11 +3309,7 @@ select {
   display: flex;
   align-items: baseline;
   justify-content: space-between;
-  margin: 0 0 5px;
-  color: var(--accent);
-  font-size: 10.5px;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
+  margin-bottom: 5px;
 }
 
 .orbit-clear {
@@ -3049,6 +3376,7 @@ select {
 
 .orbit-preset-note {
   font-size: 9.5px;
+  white-space: pre-line;
   opacity: 0.75;
 }
 
@@ -3173,11 +3501,6 @@ body.orbit-dragging #tooltip {
 }
 
 .orbit-card-panel h3 {
-  margin: 0 0 6px;
-  color: var(--accent);
-  font-size: 10.5px;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
   text-shadow: 0 1px 0 rgba(0, 0, 0, 0.6);
 }
 
@@ -3549,6 +3872,16 @@ body.orbit-dragging #tooltip {
   .joysticks {
     display: block;
   }
+
+  .mine-mini,
+  .mine-card-close,
+  .mine-ops-tabs .orbit-tab {
+    min-height: 32px;
+  }
+
+  .mine-card-close {
+    width: 32px;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -3809,7 +4142,7 @@ body.orbit-dragging #tooltip {
   }
 
   .garage-list button {
-    min-height: 34px;
+    min-height: 44px;
     margin: 2px 0;
     padding: 4px 8px;
   }
@@ -3826,9 +4159,27 @@ body.orbit-dragging #tooltip {
     right: calc(10px + var(--safe-right));
   }
 
-  .race-speed,
-  .race-time {
+  .race-speed {
     display: none;
+  }
+
+  .race-hud-right {
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    max-width: 170px;
+  }
+
+  /* Drift beside Throw, both under the right thumb; the stick keeps the left. Throw carries .act too, so
+     this names Drift alone, or Throw lands exactly under it. */
+  body[data-active-scene="race"] #act {
+    left: auto;
+    right: calc(126px + var(--safe-right));
+    transform: none;
+  }
+
+  #garage-racers {
+    display: grid;
+    grid-template-columns: 1fr;
   }
 
   .race-center {
@@ -4081,10 +4432,9 @@ body.orbit-dragging #tooltip {
 
   .orbit-stack .orbit-row-name {
     min-width: 0;
-    overflow: hidden;
-    font-size: 11px;
-    white-space: nowrap;
-    text-overflow: ellipsis;
+    font-size: 10.5px;
+    line-height: 1.15;
+    overflow-wrap: anywhere;
   }
 
   .orbit-launch {
@@ -4391,4 +4741,1228 @@ body.orbit-dragging #tooltip {
 @media (max-width: 720px) {
   #zuzu-conversation { right: max(8px, var(--safe-right)); bottom: calc(8px + var(--safe-bottom) + var(--zuzu-keyboard, 0px)); width: calc(100vw - 16px - var(--safe-left) - var(--safe-right)); padding: 12px; max-height: min(360px, calc(var(--zuzu-viewport, 100dvh) - 24px)); }
   #zuzu-history { max-height: 120px; }
+}
+
+/* Ooga Mine: the gear palette on the left, the operation on the right, and a card for whatever was
+   tapped in the cave. Everything else reuses the orbit and race panels. */
+.mine-tabs {
+  grid-template-columns: repeat(4, 1fr);
+}
+
+.mine-tile[data-afford="no"] .orbit-price {
+  background: rgba(229, 83, 61, 0.18);
+  color: #ff9a86;
+}
+
+.mine-tile[data-locked="true"] {
+  opacity: 0.45;
+  filter: grayscale(0.6);
+}
+
+.mine-tile[data-owned]:not([data-owned="0"])::after {
+  content: attr(data-owned);
+  position: absolute;
+  top: 5px;
+  left: 6px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.45);
+  color: var(--paper);
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.mine-tile-real {
+  color: var(--accent-text);
+  font-size: 9.5px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.mine-ops {
+  bottom: auto;
+  max-height: calc(100% - 90px - var(--safe-top) - var(--safe-bottom));
+  overflow: auto;
+}
+
+.game-goal {
+  display: grid;
+  grid-template-columns: auto auto auto 1fr auto;
+  align-items: baseline;
+  gap: 2px 6px;
+  padding: 8px 10px;
+  background: var(--tablet);
+  border: 2px solid var(--stone-dk);
+  border-radius: 9px 7px 10px 8px;
+  box-shadow: var(--tablet-shadow);
+}
+
+.game-goal > span:first-child,
+.mine-row > span:first-child,
+.mine-alert > span:first-child {
+  color: var(--muted);
+  font-size: 9.5px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.game-goal b {
+  color: #f5c542;
+  font-size: 26px;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+
+.game-goal small {
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.game-goal .mine-score {
+  color: var(--accent-text);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.game-goal b[data-flash="a"] {
+  animation: mine-flash-a 0.9s ease-out;
+}
+
+.game-goal b[data-flash="b"] {
+  animation: mine-flash-b 0.9s ease-out;
+}
+
+.mine-clock {
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+}
+
+.mine-clock[data-state="warn"] {
+  color: #ffb13b;
+}
+
+.mine-resources {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1.1fr;
+  gap: 4px;
+}
+
+.mine-res {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  grid-template-rows: auto auto;
+  align-items: center;
+  gap: 1px 5px;
+  padding: 5px 7px;
+  border-radius: 7px;
+  border: 2px solid var(--stone-dk);
+  background: var(--tablet);
+  box-shadow: var(--tablet-shadow);
+}
+
+.mine-res .mine-icon {
+  grid-row: span 2;
+}
+
+.mine-res b {
+  font-size: 15px;
+  line-height: 1.1;
+  font-variant-numeric: tabular-nums;
+}
+
+.mine-res small {
+  color: var(--muted);
+  font-size: 9px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.mine-res-bananas b {
+  color: #ffd84a;
+}
+
+.mine-res-coin b {
+  color: #f7a53a;
+}
+
+.mine-res .race-boost {
+  width: 100%;
+  height: 8px;
+}
+
+.mine-res .mine-mini {
+  padding: 1px 6px;
+  font-size: 9.5px;
+}
+
+.mine-row .mine-unit {
+  width: 11px;
+  height: 11px;
+  margin-left: 3px;
+  vertical-align: -1px;
+}
+
+.mine-icon {
+  width: 22px;
+  height: 22px;
+  image-rendering: pixelated;
+}
+
+/* A value that just jumped up flashes once; the attribute alternates so the animation restarts. */
+.mine-res b[data-flash="a"] {
+  animation: mine-flash-a 0.9s ease-out;
+}
+
+.mine-res b[data-flash="b"] {
+  animation: mine-flash-b 0.9s ease-out;
+}
+
+@keyframes mine-flash-a {
+  from {
+    color: #b8f0c8;
+    text-shadow: 0 0 10px rgba(34, 197, 94, 0.9);
+  }
+}
+
+@keyframes mine-flash-b {
+  from {
+    color: #b8f0c8;
+    text-shadow: 0 0 10px rgba(34, 197, 94, 0.9);
+  }
+}
+
+.mine-event {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* The countdown ring: a conic sweep the HUD shortens as the event runs out. */
+.mine-ring {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: conic-gradient(currentColor calc(var(--p, 1) * 360deg), rgba(255, 255, 255, 0.15) 0);
+  -webkit-mask: radial-gradient(circle, transparent 4px, #000 5px);
+  mask: radial-gradient(circle, transparent 4px, #000 5px);
+}
+
+.mine-event[data-good="yes"] .mine-ring {
+  color: #22c55e;
+}
+
+.mine-event[data-good="no"] .mine-ring {
+  color: #ff8a73;
+}
+
+.mine-step {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 6px 10px;
+  border: 2px dashed rgba(245, 197, 66, 0.55);
+  border-radius: 7px;
+  background: rgba(0, 0, 0, 0.35);
+  font-size: 11px;
+  text-shadow: 0 1px 0 rgba(0, 0, 0, 0.6);
+}
+
+.mine-step b {
+  min-width: 0;
+  line-height: 1.25;
+}
+
+.mine-step span {
+  color: #f5c542;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.mine-pnl {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1.3fr;
+  gap: 4px;
+}
+
+.mine-pnl > div {
+  display: grid;
+  padding: 5px 7px;
+  border-radius: 7px;
+  background: var(--tablet);
+  border: 2px solid var(--stone-dk);
+}
+
+.mine-pnl span {
+  color: var(--muted);
+  font-size: 9px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.mine-pnl b {
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
+}
+
+.mine-pnl small {
+  color: var(--muted);
+  font-size: 9px;
+}
+
+.mine-pnl b[data-state="good"] {
+  color: #7ee29a;
+}
+
+.mine-pnl b[data-state="bad"] {
+  color: #ff8a73;
+}
+
+.mine-profit[data-state="bad"] {
+  border-color: var(--danger);
+  animation: mine-pulse 0.8s ease-in-out infinite alternate;
+}
+
+.mine-offer {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  border: 2px solid #22c55e;
+  border-radius: 7px;
+  background: rgba(34, 197, 94, 0.16);
+  font-size: 11px;
+}
+
+.mine-ops-tabs {
+  grid-template-columns: repeat(3, 1fr);
+  margin-top: 0;
+}
+
+.mine-row small[data-state="good"] {
+  color: #7ee29a;
+}
+
+.mine-row small[data-state="bad"],
+.mine-row b[data-state="bad"] {
+  color: #ff8a73;
+}
+
+.mine-chamber {
+  display: grid;
+  grid-template-columns: 70px 1fr;
+  gap: 2px 8px;
+  align-items: center;
+  font-size: 11px;
+}
+
+.mine-chamber small {
+  grid-column: 1 / -1;
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.mine-chamber[data-state="bad"] small {
+  color: #ff8a73;
+}
+
+.mine-bars {
+  display: grid;
+  gap: 3px;
+}
+
+.mine-bars .race-boost {
+  width: 100%;
+  height: 7px;
+}
+
+.mine-hint {
+  margin: 2px 0 0;
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.mine-tile-profit {
+  max-width: 100%;
+  font-size: 10px;
+  line-height: 1.25;
+  text-align: center;
+  white-space: pre-line;
+}
+
+.mine-tile-profit[data-state="good"] {
+  color: #7ee29a;
+}
+
+.mine-tile-profit[data-state="bad"] {
+  color: #ff8a73;
+}
+
+.mine-tablet {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 7px 10px;
+  padding: 8px 10px;
+  background: var(--tablet);
+  border: 2px solid var(--stone-dk);
+  border-radius: 9px 7px 10px 8px;
+  box-shadow: var(--tablet-shadow);
+}
+
+/* A stat is a stack: label over value over note, two to a row in the tablet. A note may take a second
+   line on purpose; nothing in a stat truncates. Chamber rows and hints span both columns. */
+.mine-row {
+  display: grid;
+  grid-template-columns: 1fr;
+  align-content: start;
+  gap: 1px;
+  min-width: 0;
+  font-size: 11px;
+}
+
+.mine-tablet > .mine-chamber,
+.mine-tablet > .mine-hint,
+.mine-tablet > .mine-meter {
+  grid-column: 1 / -1;
+}
+
+.mine-row > span:first-child {
+  font-size: 8.5px;
+  letter-spacing: 0.1em;
+}
+
+.mine-row b {
+  min-width: 0;
+  font-size: 15px;
+  line-height: 1.15;
+  font-variant-numeric: tabular-nums;
+}
+
+.mine-row small {
+  min-width: 0;
+  color: var(--muted);
+  font-size: 9.5px;
+  line-height: 1.25;
+  white-space: pre-line;
+}
+
+.mine-row .mine-mini {
+  justify-self: start;
+}
+
+.mine-meter {
+  grid-template-columns: 62px 1fr auto;
+}
+
+.mine-meter .race-boost {
+  width: 100%;
+  height: 8px;
+}
+
+.mine-mini {
+  padding: 2px 8px;
+  border: 2px solid var(--wood-edge);
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.3);
+  color: var(--paper);
+  font-size: 10.5px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.mine-mini small {
+  color: var(--muted);
+  font-weight: 400;
+}
+
+.mine-mini:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.mine-mode[aria-pressed="false"] {
+  background: linear-gradient(#f0b05a, var(--accent));
+  color: var(--ink);
+}
+
+.mine-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+}
+
+.mine-act.mine-quiet {
+  background: var(--wood-edge);
+  color: var(--paper);
+}
+
+/* Every dug chamber's heat as a thin bar under the profit line, always in view. */
+.mine-heat-strip {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: 1fr;
+  gap: 4px;
+  height: 4px;
+}
+
+.mine-heat-strip span {
+  display: block;
+  height: 4px;
+  border-radius: 2px;
+  background: rgba(0, 0, 0, 0.45);
+  overflow: hidden;
+}
+
+.mine-heat-strip i {
+  display: block;
+  width: 0;
+  height: 100%;
+  background: #7ee29a;
+}
+
+.mine-heat-strip i[data-state="warn"] {
+  background: #ffb13b;
+}
+
+.mine-heat-strip i[data-state="bad"] {
+  background: #ff6a2a;
+}
+
+/* The ticker: the last four things the log said, each line fading out on its own. */
+.mine-ticker {
+  position: absolute;
+  left: 50%;
+  top: calc(96px + var(--safe-top));
+  transform: translateX(-50%);
+  display: grid;
+  gap: 3px;
+  width: min(460px, calc(100vw - 32px));
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  pointer-events: none;
+  z-index: 8;
+}
+
+.mine-ticker li {
+  padding: 3px 9px;
+  border-radius: 6px;
+  background: rgba(10, 8, 6, 0.62);
+  color: var(--paper);
+  font-size: 11px;
+  text-align: center;
+  text-shadow: 0 1px 0 rgba(0, 0, 0, 0.6);
+  opacity: 0;
+}
+
+.mine-ticker li[data-live="yes"] {
+  animation: mine-ticker-fade 7s ease-out both;
+}
+
+.mine-ticker li[data-kind="bad"] {
+  color: #ffb8a6;
+}
+
+.mine-ticker li[data-kind="good"] {
+  color: #b8f0c8;
+}
+
+@keyframes mine-ticker-fade {
+  0% { opacity: 0; transform: translateY(-4px); }
+  6% { opacity: 1; transform: translateY(0); }
+  75% { opacity: 1; }
+  100% { opacity: 0; }
+}
+
+/* The strip that stays when both panels are folded on a phone: mined, profit, clock, jobs. Its class is
+   its own: .mine-mini is the small button. */
+.mine-strip {
+  display: none;
+  position: absolute;
+  left: 50%;
+  /* Below the View, Pause and Sound row (to 62px on a phone), so it never takes their taps. */
+  top: calc(68px + var(--safe-top));
+  transform: translateX(-50%);
+  gap: 10px;
+  align-items: baseline;
+  padding: 4px 10px;
+  border: 2px solid var(--stone-dk);
+  border-radius: 8px;
+  background: var(--tablet);
+  color: var(--paper);
+  font-size: 11px;
+  white-space: nowrap;
+  z-index: 9;
+}
+
+.mine-strip b {
+  color: #f5c542;
+  font-variant-numeric: tabular-nums;
+}
+
+.mine-strip [data-state="bad"] {
+  color: #ff8a73;
+}
+
+.mine-strip [data-state="good"] {
+  color: #7ee29a;
+}
+
+#mine-shop[data-folded="true"] ~ #mine-ops[data-folded="true"] ~ .mine-strip:not([hidden]) {
+  display: flex;
+}
+
+/* The palette's best buy: the machine that pays itself back soonest and has a spot. */
+.mine-tile[data-best="yes"] {
+  box-shadow: 0 0 0 2px #7ee29a, 0 0 12px rgba(126, 226, 154, 0.55);
+}
+
+.mine-tile[data-best="yes"]::before {
+  content: "best buy";
+  position: absolute;
+  top: -8px;
+  left: 6px;
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: #7ee29a;
+  color: var(--ink);
+  font-size: 8px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.mine-row small[data-state="good"] {
+  color: #7ee29a;
+}
+
+.mine-act {
+  display: grid;
+  justify-items: start;
+  gap: 1px;
+  padding: 6px 8px;
+  border: 2px solid var(--wood-edge);
+  border-radius: 7px;
+  background: linear-gradient(#f0b05a, var(--accent));
+  color: var(--ink);
+  font-size: 11.5px;
+  font-weight: 700;
+  text-align: left;
+  cursor: pointer;
+  box-shadow: 0 2px 0 var(--nail);
+}
+
+.mine-act b {
+  font-variant-numeric: tabular-nums;
+}
+
+.mine-act small {
+  color: var(--ink-muted);
+  font-size: 9.5px;
+  font-weight: 600;
+}
+
+.mine-act:disabled {
+  filter: grayscale(0.8) brightness(0.8);
+  cursor: not-allowed;
+}
+
+.mine-act[data-state="due"] {
+  background: linear-gradient(#ff8a6a, var(--danger));
+}
+
+.mine-urgent {
+  grid-column: 1 / -1;
+  background: linear-gradient(#ff8a6a, var(--danger));
+  animation: mine-pulse 0.8s ease-in-out infinite alternate;
+}
+
+@keyframes mine-pulse {
+  to {
+    filter: brightness(1.25);
+  }
+}
+
+.mine-alert {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 4px;
+  padding: 6px 8px;
+  border: 2px solid var(--danger);
+  border-radius: 7px;
+  background: rgba(229, 83, 61, 0.2);
+}
+
+.mine-alert b {
+  color: #ff9a86;
+  font-variant-numeric: tabular-nums;
+}
+
+.mine-jobs-head {
+  margin: 2px 0 0;
+}
+
+.mine-faults {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.mine-faults li {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 6px;
+  border-radius: 4px;
+  cursor: pointer;
+  background: rgba(196, 86, 47, 0.16);
+  font-size: 11px;
+}
+
+.mine-faults li[data-kind="fire"] {
+  background: rgba(214, 96, 40, 0.34);
+}
+
+.mine-faults li b {
+  margin-left: auto;
+  color: var(--muted);
+  font-weight: 500;
+}
+
+.mine-clear {
+  margin: 0;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.mine-event[data-good="yes"] {
+  border-color: #22c55e;
+}
+
+.mine-event[data-good="no"] {
+  border-color: var(--danger);
+}
+
+.mine-center {
+  font-size: 34px;
+  text-align: center;
+  white-space: nowrap;
+}
+
+.mine-card {
+  position: absolute;
+  left: 50%;
+  bottom: calc(74px + var(--safe-bottom));
+  transform: translateX(-50%);
+  width: min(390px, calc(100vw - 32px));
+  max-height: calc(100vh - 90px - var(--safe-bottom) - var(--safe-top));
+  overflow: auto;
+  padding: 10px 12px 12px;
+  border: 3px solid var(--wood-edge);
+  border-radius: var(--radius);
+  background: var(--planks);
+  box-shadow: 0 6px 0 rgba(0, 0, 0, 0.35), 0 10px 30px rgba(0, 0, 0, 0.35);
+  color: var(--paper);
+}
+
+.mine-card h3 {
+  margin: 0;
+  padding-right: 20px;
+  font-size: 15px;
+  text-shadow: 0 2px 0 rgba(0, 0, 0, 0.5);
+}
+
+.mine-card p {
+  margin: 3px 0 6px;
+  font-size: 11px;
+  text-shadow: 0 1px 0 rgba(0, 0, 0, 0.6);
+}
+
+.mine-card-close {
+  position: absolute;
+  top: 6px;
+  right: 8px;
+  border: 0;
+  background: none;
+  color: var(--paper);
+  font-size: 18px;
+  cursor: pointer;
+}
+
+.mine-card-facts {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 2px 10px;
+  margin: 0 0 8px;
+  padding: 6px 8px;
+  list-style: none;
+  background: var(--tablet);
+  border: 2px solid var(--stone-dk);
+  border-radius: 8px;
+  font-size: 10.5px;
+}
+
+.mine-card-facts li {
+  display: flex;
+  justify-content: space-between;
+  gap: 6px;
+}
+
+.mine-card-facts li span:first-child {
+  color: var(--muted);
+}
+
+.mine-card-facts li[data-warn="bad"] span:last-child {
+  color: #ff9a86;
+}
+
+.mine-card-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 5px;
+}
+
+.mine-card-actions .mine-act {
+  font-size: 11px;
+}
+
+.mine-card-actions .mine-act[aria-pressed="true"] {
+  background: linear-gradient(#b8f0c8, #22c55e);
+}
+
+.game-intro {
+  width: min(620px, calc(100vw - 32px));
+  text-align: center;
+  /* The cave dims behind the title card. */
+  box-shadow: 0 6px 0 rgba(0, 0, 0, 0.35), 0 10px 30px rgba(0, 0, 0, 0.35), 0 0 0 100vmax rgba(8, 6, 4, 0.55);
+  animation: game-intro-in 0.45s cubic-bezier(0.2, 0.9, 0.3, 1.2) both;
+}
+
+.game-intro > :not(.game-intro-glow) {
+  position: relative;
+}
+
+/* While a game's title card is up its board and panels wait behind it, and come back when it closes. */
+.race:has(> [data-intro]:not([hidden])) .garage,
+.race:has(> [data-intro]:not([hidden])) .panel-edge {
+  visibility: hidden;
+}
+
+/* The rays are clipped by their own layer, so the card itself never has to be a scroll box. */
+.game-intro-glow {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  border-radius: inherit;
+  pointer-events: none;
+}
+
+/* Slow light rays behind the coin; one transformed layer, nothing repaints. */
+.game-intro-rays {
+  position: absolute;
+  left: 50%;
+  top: 118px;
+  width: 520px;
+  height: 520px;
+  margin: -260px 0 0 -260px;
+  border-radius: 50%;
+  background: repeating-conic-gradient(rgba(255, 216, 74, 0.13) 0deg 9deg, transparent 9deg 24deg);
+  mask-image: radial-gradient(circle, #000 20%, transparent 62%);
+  animation: game-rays 28s linear infinite;
+  pointer-events: none;
+}
+
+.game-intro-kicker {
+  margin: 0 0 6px;
+  color: var(--accent-text);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.3em;
+  text-transform: uppercase;
+}
+
+.game-intro .game-intro-title {
+  color: #f5c542;
+  font-size: 40px;
+  filter: drop-shadow(0 3px 0 #7a3f0c) drop-shadow(0 0 14px rgba(255, 200, 60, 0.45));
+}
+
+.game-intro-coin {
+  display: block;
+  width: 58px;
+  height: 58px;
+  margin: 12px auto 8px;
+  image-rendering: pixelated;
+  filter: drop-shadow(0 0 12px rgba(247, 147, 26, 0.7));
+  animation: game-coin 2.6s ease-in-out infinite;
+}
+
+.game-intro-goal {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 700;
+  text-shadow: 0 1px 0 rgba(0, 0, 0, 0.6);
+}
+
+.game-intro-goal b {
+  color: #f5c542;
+}
+
+.game-intro-who {
+  margin: 4px 0 12px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.game-rules {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+  margin: 0 0 14px;
+  padding: 0;
+  list-style: none;
+  text-align: left;
+}
+
+.game-rules li {
+  display: grid;
+  grid-template-columns: 26px 1fr;
+  column-gap: 8px;
+  align-items: center;
+  padding: 7px 9px;
+  background: var(--tablet);
+  border: 2px solid var(--stone-dk);
+  border-radius: 9px 7px 10px 8px;
+  box-shadow: var(--tablet-shadow);
+  animation: game-rule-in 0.4s ease-out both;
+}
+
+.game-rules li:nth-child(2) { animation-delay: 0.08s; }
+.game-rules li:nth-child(3) { animation-delay: 0.16s; }
+.game-rules li:nth-child(4) { animation-delay: 0.24s; }
+.game-rules li:nth-child(5) { animation-delay: 0.32s; }
+.game-rules li:nth-child(6) { animation-delay: 0.4s; }
+
+.game-rule-icon {
+  grid-row: span 2;
+  width: 24px;
+  height: 24px;
+  image-rendering: pixelated;
+}
+
+.game-rules b {
+  font-size: 11.5px;
+  white-space: nowrap;
+}
+
+.game-rules small {
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.3;
+}
+
+.game-intro .actions {
+  justify-content: center;
+}
+
+.game-intro-go {
+  animation: game-go 1.6s ease-in-out 0.8s infinite;
+}
+
+@keyframes game-intro-in {
+  from { opacity: 0; transform: translate(-50%, -46%) scale(0.94); }
+  to { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+}
+
+@keyframes game-rays {
+  to { transform: rotate(360deg); }
+}
+
+@keyframes game-coin {
+  0%, 100% { transform: translateY(0) rotateY(0deg); }
+  50% { transform: translateY(-5px) rotateY(180deg); }
+}
+
+@keyframes game-rule-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: none; }
+}
+
+@keyframes game-go {
+  0%, 100% { box-shadow: 0 2px 0 var(--nail), 0 0 0 rgba(255, 216, 74, 0); }
+  50% { box-shadow: 0 2px 0 var(--nail), 0 0 18px rgba(255, 216, 74, 0.75); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .game-intro,
+  .game-intro-rays,
+  .game-intro-coin,
+  .game-rules li,
+  .game-intro-go {
+    animation: none;
+  }
+}
+
+/* Only a window too short for the card scrolls it. */
+@media (max-height: 700px) {
+  .game-intro {
+    max-height: calc(100% - 24px);
+    overflow-y: auto;
+  }
+}
+
+@media (max-width: 520px) {
+  .game-rules {
+    grid-template-columns: 1fr;
+  }
+
+  .game-intro .game-intro-title {
+    font-size: 30px;
+  }
+}
+
+body.mine-dragging,
+body.mine-dragging * {
+  cursor: grabbing !important;
+  user-select: none;
+}
+
+body.mine-dragging #tooltip {
+  display: none;
+}
+
+@media (max-width: 720px) {
+  .mine-tabs {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .game-goal b {
+    font-size: 18px;
+  }
+
+  .mine-tablet {
+    grid-template-columns: 1fr;
+  }
+
+  .mine-row {
+    font-size: 10px;
+  }
+
+  .mine-pnl {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .mine-profit {
+    grid-column: 1 / -1;
+  }
+
+  .mine-res b {
+    font-size: 13px;
+  }
+
+  /* With a panel open, the act button rides above it rather than under it. */
+  body[data-active-scene="mine"]:has(#mine-shop:not([data-folded="true"]), #mine-ops:not([data-folded="true"])) .act {
+    bottom: calc(46vh + 24px + var(--safe-bottom));
+  }
+
+  .mine-resources {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .mine-res-power {
+    grid-column: 1 / -1;
+  }
+
+  .mine-meter {
+    grid-template-columns: 48px 1fr auto;
+  }
+
+  .mine-row b {
+    font-size: 13px;
+  }
+
+  .mine-actions {
+    grid-template-columns: 1fr;
+  }
+
+  .mine-jobs-head,
+  .mine-clear,
+  .mine-tile-real {
+    display: none;
+  }
+
+  .mine-card {
+    bottom: calc(46vh + 16px + var(--safe-bottom));
+    max-height: calc(54vh - 32px - var(--safe-top));
+  }
+
+}
+
+/* The mine's goal header: what is mined, big, with the target beside it, the clock and the live score on
+   the right, the progress track under both. */
+.mine-goal {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: end;
+  gap: 4px 10px;
+  padding: 8px 10px;
+  background: var(--tablet);
+  border: 2px solid var(--stone-dk);
+  border-radius: 9px 7px 10px 8px;
+  box-shadow: var(--tablet-shadow);
+}
+
+.mine-goal-main {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 6px;
+  min-width: 0;
+}
+
+.mine-goal-main > span {
+  color: var(--muted);
+  font-size: 9px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.mine-goal b {
+  color: #f5c542;
+  font-size: 24px;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+
+.mine-goal small {
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.mine-goal-side {
+  display: grid;
+  justify-items: end;
+  gap: 1px;
+}
+
+.mine-goal .mine-clock {
+  font-size: 15px;
+}
+
+.mine-goal .mine-score {
+  color: var(--accent-text);
+  font-size: 10px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.mine-goal .orbit-track {
+  grid-column: 1 / -1;
+  width: 100%;
+}
+
+.mine-goal b[data-flash="a"] {
+  animation: mine-flash-a 0.9s ease-out;
+}
+
+.mine-goal b[data-flash="b"] {
+  animation: mine-flash-b 0.9s ease-out;
+}
+
+.mine-pnl > div,
+.mine-res {
+  min-width: 0;
+}
+
+/* Between two side panels the toast keeps to the lane between them. */
+@media (min-width: 721px) {
+  body[data-active-scene="mine"] .toast,
+  body[data-active-scene="orbit"] .toast {
+    max-width: max(240px, calc(100vw - 2 * 400px));
+  }
+}
+
+@media (max-width: 720px) {
+  /* The mine's operation panel docks at the bottom like every game panel on a phone, so folding it
+     takes it off the screen rather than to the middle of it. */
+  .mine-ops {
+    top: auto;
+    bottom: calc(8px + var(--safe-bottom));
+    height: 46vh;
+    max-height: 46vh;
+  }
+
+  /* The rocket panel's head: the pilot chip takes its own line under the title. */
+  .orbit-rocket-head {
+    flex-wrap: wrap;
+  }
+
+  .orbit-rocket-head .orbit-pilot {
+    flex: 1 1 100%;
+    text-align: left;
+  }
+}
+
+/* A stage head is a name and a fact: one line on a desktop, the fact under the name on a phone. */
+.orbit-stage-head b {
+  font-weight: inherit;
+}
+
+.orbit-stage-head small {
+  font-size: inherit;
+}
+
+.orbit-stage-head small::before {
+  content: " · ";
+}
+
+@media (max-width: 720px) {
+  /* The long form of a label lives in a .wide span; a phone shows the short word. */
+  .wide {
+    display: none;
+  }
+
+  .orbit-stage-head small {
+    display: block;
+    letter-spacing: 0.04em;
+  }
+
+  .orbit-stage-head small::before {
+    content: none;
+  }
+
+  /* One scroll region: the stack scrolls with the panel and clears the sticky Launch button. */
+  .orbit-stack {
+    max-height: none;
+    overflow: visible;
+    padding-bottom: 10px;
+  }
+}
+
+@media (max-width: 720px) {
+  /* The race notice sits under the readouts and above the thumb controls, never over either. */
+  .race-notice {
+    top: auto;
+    bottom: calc(184px + var(--safe-bottom));
+    max-width: calc(100vw - 32px);
+    font-size: 11px;
+    text-align: center;
+  }
+}
+
+@media (max-width: 720px) {
+  /* The ticker sits under the hint stack on a phone, never on top of it. */
+  .mine-ticker {
+    top: calc(184px + var(--safe-top));
+  }
+}
+
+@media (max-width: 720px) {
+  /* While a card is up (an intro or a results sheet), the hint stack stays out of its way. */
+  body:has(.race-results:not([hidden])) .message-stack {
+    visibility: hidden;
+  }
 }

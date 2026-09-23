@@ -35,10 +35,12 @@
   };
   const isString = (v, max) => typeof v === "string" && v.length <= max;
   const isEntry = (e, catalog) => e && typeof e === "object" && isString(e.id, 40) && catalog.some((c) => c.id === e.itemId) && LOOT_TIERS.some((t) => t.tier === e.tier) && isString(e.donationId, 64) && Number.isFinite(e.at);
-  const defaults = () => ({ inventory: [], assignments: {}, handle: "", message: "", handFed: 0, totalSats: 0, donations: 0, race: { best: {}, cup: null }, drop: { best: null }, orbit: { best: null, build: null } });
-  const LANDINGS = ["stand", "stumble", "tumble", "hole", "pancake", "lost"];
+  const defaults = () => ({ inventory: [], assignments: {}, handle: "", message: "", handFed: 0, totalSats: 0, donations: 0, race: { best: {}, cup: null }, drop: { best: null, jumps: 0 }, orbit: { best: null, build: null }, mine: { best: null } });
+  // A drop best is a landing on your feet: a crash keeps its ring points on the card but is never a best.
+  const LANDINGS = ["stand", "stumble"];
   const ORBIT_LANDINGS = ["pad", "islet", "island", "land", "sea", "overpressure", "stuck", "heat", "breakup", "burnup", "splat", "crash", "wreck", "debris"];
   const CUP_MEDALS = ["gold", "silver", "bronze"];
+  const MINE_ENDINGS = ["goal", "time", "broke", "wrecked", "seized", "left"];
   const isTime = (v) => Number.isFinite(v) && v > 0 && v < 36e5;
   const load = (catalog) => {
     const state = defaults();
@@ -59,12 +61,14 @@
       }
       if (parsed.race && parsed.race.best && typeof parsed.race.best === "object") {
         for (const [track, b] of Object.entries(parsed.race.best)) {
-          if (isString(track, 16) && b && isTime(b.lap) && isTime(b.race)) state.race.best[track] = { lap: Math.floor(b.lap), race: Math.floor(b.race) };
+          if (isString(track, 16) && b && isTime(b.lap) && isTime(b.race)) state.race.best[track] = { lap: Math.floor(b.lap), race: Math.floor(b.race), medal: CUP_MEDALS.includes(b.medal) ? b.medal : null };
         }
       }
       if (parsed.race && parsed.race.cup && CUP_MEDALS.includes(parsed.race.cup.medal) && Number.isFinite(parsed.race.cup.points) && parsed.race.cup.points >= 0) {
         state.race.cup = { medal: parsed.race.cup.medal, points: Math.floor(parsed.race.cup.points) };
       }
+      const jumps = parsed.drop && parsed.drop.jumps;
+      if (Number.isFinite(jumps) && jumps >= 0 && jumps < 1e7) state.drop.jumps = Math.floor(jumps);
       const d = parsed.drop && parsed.drop.best;
       if (d && Number.isFinite(d.score) && d.score >= 0 && d.score < 1e6 && Number.isFinite(d.rings) && d.rings >= 0 && Number.isFinite(d.ringTotal) && d.ringTotal >= d.rings && d.ringTotal <= 99 && LANDINGS.includes(d.landing)) {
         state.drop.best = { score: Math.floor(d.score), rings: Math.floor(d.rings), ringTotal: Math.floor(d.ringTotal), landing: d.landing };
@@ -75,6 +79,11 @@
       }
       const build = o && BL.rocketParts.sanitize(o.build);
       if (build && build.length) state.orbit.build = build;
+      const m = parsed.mine && parsed.mine.best;
+      if (m && Number.isFinite(m.sats) && m.sats >= 0 && m.sats < 1e15 && Number.isFinite(m.seconds) && m.seconds > 0 && m.seconds <= BL.mineRigs.RUN_SECONDS
+        && MINE_ENDINGS.includes(m.ending) && typeof m.won === "boolean" && Number.isFinite(m.score) && m.score >= 0 && m.score < 1e7) {
+        state.mine.best = { sats: Math.floor(m.sats), seconds: Math.floor(m.seconds), ending: m.ending, won: m.won, score: Math.floor(m.score), continued: m.continued === true };
+      }
     } catch {
       return defaults();
     }
@@ -131,6 +140,7 @@
       save(state);
     };
     const resetAll = () => {
+      if (BL.mineSim) BL.mineSim.clear();
       try {
         localStorage.removeItem(STORAGE_KEY);
       } catch {
@@ -142,10 +152,13 @@
       for (const name of Object.keys(state.assignments)) delete state.assignments[name];
       save(state);
     };
-    const recordRace = (track, lap, race) => {
-      const b = state.race.best[track];
-      const entry = { lap: Math.floor(b && b.lap < lap ? b.lap : lap), race: Math.floor(b && b.race < race ? b.race : race) };
-      const improved = !b || entry.race < b.race || entry.lap < b.lap;
+    // A track's best keeps its best medal too: the medal is earned by place as well as time, so it is
+    // not something the times alone can say.
+    const recordRace = (track, lap, race, medal = null) => {
+      const b = state.race.best[track], rank = (m) => CUP_MEDALS.indexOf(m);
+      const bestMedal = b && b.medal && (!medal || rank(b.medal) < rank(medal)) ? b.medal : medal || (b && b.medal) || null;
+      const entry = { lap: Math.floor(b && b.lap < lap ? b.lap : lap), race: Math.floor(b && b.race < race ? b.race : race), medal: bestMedal };
+      const improved = !b || entry.race < b.race || entry.lap < b.lap || (!!medal && (!b.medal || rank(medal) < rank(b.medal)));
       state.race.best[track] = entry;
       save(state);
       return improved;
@@ -162,9 +175,16 @@
       }
       return better;
     };
+    // Every flight counts as a jump; the count seeds the course's shape and numbers the results.
+    const recordJump = () => {
+      state.drop.jumps = (state.drop.jumps | 0) + 1;
+      save(state);
+      return state.drop.jumps;
+    };
     const recordDrop = ({ score, rings, ringTotal, landing }) => {
       const b = state.drop.best;
-      if (b && b.score >= score) return false;
+      // A lost first jump is not a best.
+      if (score <= 0 || !LANDINGS.includes(landing) || (b && b.score >= score)) return false;
       state.drop.best = { score: Math.floor(score), rings, ringTotal, landing };
       save(state);
       return true;
@@ -173,6 +193,16 @@
       const b = state.orbit.best;
       if (b && b.score >= score) return false;
       state.orbit.best = { score: Math.floor(score), orbit, landing };
+      save(state);
+      return true;
+    };
+    // A mine run is best by its score: coin mined plus the speed bonus a finished run earns, so a
+    // faster win beats a slower one and any win beats a run that ran out of hour. `continued` marks a
+    // run that came back from a loss: it can be the best, but it wears no medal.
+    const recordMine = ({ sats, seconds, ending, won, score, continued }) => {
+      const b = state.mine.best;
+      if (b && score <= b.score) return false;
+      state.mine.best = { sats: Math.floor(sats), seconds: Math.floor(seconds), ending, won: !!won, score: Math.floor(score), continued: !!continued };
       save(state);
       return true;
     };
@@ -196,7 +226,7 @@
       if (seconds < 5400) return `${Math.round(seconds / 60)}m`;
       return `${(seconds / 3600).toFixed(1)}h`;
     };
-    return { state, countOf, lootFor: lootForVisitor, addItem, assign, unassign, itemOf, assignedTo, clearLoot, resetAll, recordDonation, recordHandFed, recordRace, recordCup, recordDrop, recordOrbit, setOrbitBuild, setIdentity, forecast, formatDuration };
+    return { state, countOf, lootFor: lootForVisitor, addItem, assign, unassign, itemOf, assignedTo, clearLoot, resetAll, recordDonation, recordHandFed, recordRace, recordCup, recordJump, recordDrop, recordOrbit, recordMine, setOrbitBuild, setIdentity, forecast, formatDuration };
   };
   BL.game = { create, LOOT_TIERS, STACK_MAX, SATS_PER_BANANA, tierFor, lootFor, bananasFor, formatLarge };
 })();

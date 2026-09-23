@@ -138,6 +138,7 @@
       g.linearRampToValueAtTime(0, now + dur);
     };
     const cues = {
+      count: () => blip("square", NOTE(3), NOTE(3), 0.01, 0.07, 0.06, 0.16),
       mark: () => {
         blip("square", NOTE(7), NOTE(7), 0.01, 0.08, 0.06, 0.2);
         blip("square", NOTE(12), NOTE(12), 0.01, 0.14, 0.1, 0.22, 0.14);

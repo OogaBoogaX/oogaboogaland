@@ -144,7 +144,7 @@
   const WANDER_COUNT = 36, WANDER_INNER = 5.5;
   const ALTAR_HEIGHT = 0.34, ALTAR_BLOCK_WIDTH = 0.2, ALTAR_BLOCK_ARC = 0.3, ALTAR_RING_GAP = 0.02, ALTAR_MAX_BLOCKS = 512;
   const RIPEN = 25, TREE_CHANCE = 0.5, BUSH_CHANCE = 0.25;
-  const PROP_TIPS = { tree: "Tree · shake it", bush: "Bush · rustle it", rock: "Rock · hit to break", crate: "Box · hit to break", barrel: "Barrel · hit to break", flower: "Flowers", torch: "Torch · warm", firepit: "Fire pit", bedroll: "Somebody's bed", ladder: "Ladder · wobbly", dock: "Dock · creaky", jetpack: "Jetpack · jump to collect", magazine: "Spare magazine · walk into it to collect", plane: "Ooga Drop · tap to fly", sign: "Ooga Drop · the plane flies from here", launchpad: "Ooga Orbit · tap to build a rocket", rocket: "Ooga Orbit · tap to fly", tower: "Launch tower · steady", orbitsign: "Ooga Orbit · the pad past the bridge", bridge: "Rope bridge · to the launch pad", poolbridge: "Vine bridge · to the Mempool island", poolstair: "The Mempool · tap to climb down", poolsign: "The Mempool · the cave reads the chain", chainsign: "The chain, at a glance", weathersign: "Reading the weather · tap for the key", poolrock: "Mossy rock", poolfern: "Fern · rustle it", poollog: "Fallen log · something lives in it", jaguar: "Jaguar · do not poke", monkey: "Monkey · it watches you", toucan: "Toucan · big beak", canopy: "Rainforest tree · shake it", windsock: "Windsock · a fair wind", jumbotron: "Jumbotron · OogaBoogaX on the big screen · frame arrows and dots to flip boards", gate: null };
+  const PROP_TIPS = { tree: "Tree · shake it", bush: "Bush · rustle it", rock: "Rock · hit to break", crate: "Box · hit to break", barrel: "Barrel · hit to break", flower: "Flowers", torch: "Torch · warm", firepit: "Fire pit", bedroll: "Somebody's bed", ladder: "Ladder · wobbly", dock: "Dock · creaky", jetpack: "Jetpack · jump to collect", magazine: "Spare magazine · walk into it to collect", plane: "Ooga Drop · tap to fly", sign: "Ooga Drop · the plane flies from here", launchpad: "Ooga Orbit · tap to build a rocket", rocket: "Ooga Orbit · tap to fly", tower: "Launch tower · steady", orbitsign: "Ooga Orbit · the pad past the bridge", bridge: "Rope bridge · to the launch pad", poolbridge: "Vine bridge · to the Mempool island", poolstair: "The Mempool · tap to climb down", poolsign: "The Mempool · the cave reads the chain", chainsign: "The chain, at a glance", weathersign: "Reading the weather · tap for the key", poolrock: "Mossy rock", poolfern: "Fern · rustle it", poollog: "Fallen log · something lives in it", jaguar: "Jaguar · do not poke", monkey: "Monkey · it watches you", toucan: "Toucan · big beak", canopy: "Rainforest tree · shake it", windsock: "Windsock · a fair wind", jumbotron: "Jumbotron · OogaBoogaX on the big screen · tap the screen for a close-up", gate: null };
   const MATRIX_LIVING_PROPS = new Set(["tree"]);
   const SOLID_PROPS = new Set(["tree", "rock", "crate", "barrel", "firepit", "dock", "jumbotron", "launchpad", "rocket", "tower", "bridge", "orbitsign", "poolbridge", "poolstair", "poolrock", "canopy"]);
   const BUSH_WORDS = ["Something rustles.", "A beetle. Ooga leaves it.", "Just a bush."];
@@ -1123,9 +1123,10 @@
     const lights = RENDER_OPTS.lights;
     const webgl = renderer.kind === "webgl2";
     const limit = webgl ? LIGHT_CAPACITY : 0;
-    let count = 0, approximated = 0;
+    let count = 0, approximated = 0, registered = 0;
     for (let i = 0; i < lamps.length; i++) {
       const l = lamps[i], node = l.node;
+      if (l.light) registered++;
       const k = l.always ? 1 : Math.min(1, Math.max(0, (RENDER_OPTS.torch - l.order * LAMP_STAGGER) / LAMP_RAMP));
       const lit = k > 0.05;
       if (lit && !l.lit && spark) fx.burst(l.x, l.y, l.z, 5, [SPARK], 1.3);
@@ -1170,7 +1171,7 @@
     for (let i = count; i < LIGHT_CAPACITY; i++) LIGHTING_DEBUG.selectedIds[i] = null;
     for (let i = approximated; i < LIGHT_CAPACITY; i++) LIGHTING_DEBUG.approximatedIds[i] = null;
     RENDER_OPTS.lightCount = count;
-    LIGHTING_DEBUG.registeredLampCount = lamps.length;
+    LIGHTING_DEBUG.registeredLampCount = registered;
     LIGHTING_DEBUG.activeFullLightCount = count;
     LIGHTING_DEBUG.approximatedLightCount = approximated;
     LIGHTING_DEBUG.configuredLightCapacity = limit;
@@ -1294,7 +1295,14 @@
       launchers.push(roof);
     } else if (slot.status === "headquarters") {
       addChild(group, createNode({ position: { x: 0, y: 0, z: 0 }, geometry: headquartersModels.entranceRamp(), depthBias: 0.25 }));
-    } else if (slot.status === "open" && slot.scene !== "dsb") {
+    } else if (slot.status === "open" && slot.scene === "mine") {
+      // Ooga Mine's mouth: a track out of the dark, a cart of glowing ore, timbers and a rack blinking inside.
+      const cart = createNode({ position: { x: 0, y: 0, z: -1.9 }, rotation: { x: 0, y: 0.05, z: 0 }, geometry: BL.mineModels.hubCart() });
+      const rack = createNode({ position: { x: 1.3, y: 0, z: -4.6 }, rotation: { x: 0, y: -0.5, z: 0 }, geometry: BL.mineModels.hubRack() });
+      addChild(group, createNode({ geometry: BL.mineModels.hubTrack() }), cart, rack);
+      solids.add(cart);
+      solids.add(rack);
+    } else if (slot.status === "open") {
       for (const x of [-1.3, 1.3]) addChild(group, createNode({ position: { x, y: 0, z: -3.5 }, geometry: hubModels.caveShelves() }));
     } else if (slot.status === "mirror") {
       // Sit inside the rim so the cave floor ends behind the reflection.
@@ -1327,8 +1335,8 @@
         const ty = m.floorY + torchGeometry.flameY;
         const tz = m.z + az * torchZ - Math.sin(m.ry) * localX;
         const id = `${slot.id}:torch:${side}`;
-        const lamp = addLamp(torch, LAMP.torch, tx, ty, tz, true, i, id);
-        const debug = { id, caveId: slot.id, kind: "torch", side, localPosition: [localX, torchGeometry.flameY, torchZ], worldPosition: [tx, ty, tz], registered: true, factor: 0, lit: false, selected: false, approximated: false, rimFront: rim.position.z + rim.geometry.frontZ, fixtureBack: torchZ + torchGeometry.backZ, gap: CAVE_TORCH_GAP };
+        const lamp = addLamp(torch, LAMP.torch, tx, ty, tz, !slot.glowOnly, i, id);
+        const debug = { id, caveId: slot.id, kind: "torch", side, localPosition: [localX, torchGeometry.flameY, torchZ], worldPosition: [tx, ty, tz], registered: !slot.glowOnly, factor: 0, lit: false, selected: false, approximated: false, rimFront: rim.position.z + rim.geometry.frontZ, fixtureBack: torchZ + torchGeometry.backZ, gap: CAVE_TORCH_GAP };
         lamp.debug = debug;
         entranceLights.push(debug);
         claim(tx, tz, 0.5);
@@ -1356,8 +1364,8 @@
       const wy = m.floorY + ly;
       const wz = m.z - Math.sin(m.ry) * lx + az * lz;
       const id = `${slot.id}:lantern:right`;
-      const lamp = addLamp(lantern, LAMP.lantern, wx, wy, wz, true, 2, id);
-      const debug = { id, caveId: slot.id, kind: "lantern", side: "right", localPosition: [lx, ly, lz], worldPosition: [wx, wy, wz], registered: true, factor: 0, lit: false, selected: false, approximated: false, rimFront: null, fixtureBack: null, gap: null };
+      const lamp = addLamp(lantern, LAMP.lantern, wx, wy, wz, !slot.glowOnly, 2, id);
+      const debug = { id, caveId: slot.id, kind: "lantern", side: "right", localPosition: [lx, ly, lz], worldPosition: [wx, wy, wz], registered: !slot.glowOnly, factor: 0, lit: false, selected: false, approximated: false, rimFront: null, fixtureBack: null, gap: null };
       lamp.debug = debug;
       entranceLights.push(debug);
     }
@@ -3055,10 +3063,9 @@
     fx.burst(0, DROP_HEIGHT - 0.2, 0, 26, CONFETTI, 2.2);
     fx.showTicker(`THANKS ${donation.handle ? "@" + donation.handle.toUpperCase() : "ANON"} · ${bananas} BANANAS`, 4.5);
   };
-  // The Bitcoin feed: a transaction gusts the weather, a block strikes lightning over the island.
+  // The Bitcoin feed: a block strikes lightning over the island.
   const onMempool = (event) => {
-    if (event.type === "tx") weather.rain(event.vsize);
-    else if (event.type === "block") {
+    if (event.type === "block") {
       // Every block mined while the page is open strikes, whatever the weather is doing.
       weather.strike();
       hud.toast(`Block ${event.height} mined${event.txCount ? ` · ${event.txCount} transactions` : ""}`);
@@ -3120,7 +3127,7 @@
     const o = hit.owner;
     switch (o.kind) {
       case "caveman":
-        return o.cave.traits.name;
+        return o.cave.traits.display;
       case "crate":
         return `${o.crate.loot.tier} crate · tap to open`;
       case "cave":
@@ -3187,13 +3194,13 @@
         hud.toast("Solid rock. Ow.");
         break;
       case "jumbotron":
-        // Resolve the tap onto the screen: corner arrows and the dot strip
-        // navigate; the rest of the board advances as before.
+        // Resolve the tap onto the cabinet: the side arrows and the dot strip page the board where
+        // it stands, and the screen itself opens the close-up, readable from anywhere on the island.
         if (jumbotron) {
           if (p) {
             renderer.ray(p.x, p.y, camera, TAP_RAY);
-            jumbotron.tapAt(TAP_RAY);
-          } else jumbotron.nextView();
+            if (jumbotron.tapAt(TAP_RAY) === "screen") openJumbotron();
+          } else openJumbotron();
         }
         break;
       case "crate":
@@ -3343,6 +3350,7 @@
     }
     for (let i = 0; i < launchers.length; i++) {
       const launcher = launchers[i];
+      if (!BL.scenes[launcher.scene || "drop"]) continue;
       if (actionWithinReach(x, y, z, launcher.x, launcher.y + 1.1, launcher.z, LAUNCH_REACH)) return launcher;
     }
     return null;
@@ -3375,6 +3383,8 @@
   };
   const enterScene = (view, id) => {
     if (entering) return;
+    // A game still being built is unregistered unless the page opted in (director.js, `wip`).
+    if (!BL.scenes[id]) return hud.toast("Not open yet. Ooga still building it.");
     entering = true;
     if (id === "dsb") world.pilot = pilot.player ? pilot.player.traits.name : null;
     pilot.release(true);
@@ -3396,7 +3406,13 @@
       }, done: () => { enteringTween = null; go(id); }
     });
   };
-  const enterCave = (slot) => enterScene(presets[slot.scene], slot.scene);
+  // Whoever the visitor is playing goes in with them, as world.pilot; a scene that has a use for it
+  // takes it on the way in.
+  const enterCave = (slot) => {
+    if (entering) return;
+    world.pilot = pilot.player ? pilot.player.traits.name : null;
+    enterScene(presets[slot.scene], slot.scene);
+  };
   const enterLaunch = (id = "drop") => {
     if (entering) return;
     world.pilot = pilot.player ? pilot.player.traits.name : null;
@@ -3438,8 +3454,7 @@
         if (!o.agent.driven) o.agent.poke();
         break;
       case "cave":
-        if (o.slot.scene === "dsb") hud.toast("Walk to the back wall to enter DSB Land.");
-        else if (o.slot.status === "open") enterCave(o.slot);
+        if (o.slot.status === "open") enterCave(o.slot);
         else hud.toast(tooltipFor(hit));
         break;
       case "gate":
@@ -4484,6 +4499,21 @@
     if (first) hud.setSubtitle("an island of caves");
     if (!first) hud.toast(PHASE_TOASTS[next]);
   };
+  // The jumbotron's close-up: the board's own canvas painted into the dialog's, and its caption,
+  // whenever the board repaints while the dialog is open.
+  let jumbotronShown = -1;
+  const paintJumbotron = () => {
+    jumbotronShown = jumbotron.version;
+    const screen = hud.el.jumbotronScreen;
+    screen.getContext("2d").drawImage(jumbotron.canvas, 0, 0);
+    hud.el.jumbotronCaption.textContent = jumbotron.caption;
+    hud.el.jumbotronIndex.textContent = `${jumbotron.index + 1} of ${jumbotron.count}`;
+  };
+  const openJumbotron = () => {
+    jumbotronShown = -1;
+    hud.openJumbotron({ prev: () => jumbotron.prevView(), next: () => jumbotron.nextView() });
+    paintJumbotron();
+  };
   // Contribution fireworks: shells rise from the jumbotron and burst in the
   // board's stat colors. Queued with absolute scene-clock times and stepped in
   // update(), so a waiting shell costs nothing per frame.
@@ -4526,7 +4556,10 @@
     RENDER_OPTS.time = elapsed;
     weather.update(dt, RENDER_OPTS);
     updateLamps(dt, elapsed, phase !== null);
-    if (jumbotron) jumbotron.update(elapsed, renderer);
+    if (jumbotron) {
+      jumbotron.update(elapsed, renderer);
+      if (hud.el.jumbotron.open && jumbotron.version !== jumbotronShown) paintJumbotron();
+    }
     if (fireworksShells.length) updateFireworks();
     const next = daylight.phaseAt(hour);
     if (next !== phase) setPhase(next);
@@ -4565,8 +4598,11 @@
     }
     syncJetpackFuel();
     if (player && !pilot.poseHeld && player.root.position.y - player.baseY < ABYSS_RESPAWN_Y && abyssAt(player.root.position.x, player.root.position.z, player.root.position.y - player.baseY)) {
+      // One notice for one fall: losing both says so, rather than the second toast hiding the first.
+      const hadJetpack = jetpackState.owned && jetpackState.owner === player.traits.name, hadMagazine = crew.hasMagazine(player);
       loseJetpack(player);
       loseMagazine();
+      if (hadJetpack && hadMagazine) hud.toast("Jetpack and spare magazines lost to the abyss");
       respawnAtPile();
     }
     else if (!player && !pilot.poseHeld && pilot.freeFalling && camera.position.y - CLOSE_VIEW.eyeHeight < ABYSS_RESPAWN_Y && abyssAt(camera.position.x, camera.position.z, camera.position.y - CLOSE_VIEW.eyeHeight)) respawnAtPile();
@@ -4614,7 +4650,7 @@
         }
       }
     }
-    // DSB opens at the rear wall; the lab opens on entry. Rally waits for an action.
+    // The lab still opens on entry; game launchers wait for a nearby action.
     if (player && !entering && player.hop < 1) {
       const p = player.root.position;
       const y = p.y - player.baseY;
@@ -4624,14 +4660,7 @@
         for (let i = 0; i < openMouths.length; i++) {
           const { slot, m } = openMouths[i];
           if (slot.scene === "race") continue;
-          if (m !== playerOpening.mouth || Math.abs(y - m.floorY) >= 1) continue;
-          if (slot.scene === "dsb") {
-            // The room ends 6.5 units behind the mouth. Leave room for the body radius.
-            const dx = p.x - m.x, dz = p.z - m.z;
-            const along = dx * Math.sin(m.ry) + dz * Math.cos(m.ry);
-            const across = dx * Math.cos(m.ry) - dz * Math.sin(m.ry);
-            if (along < -5.8 && Math.abs(across) < 2.5) enterCave(slot);
-          } else if (!overhead && Math.hypot(p.x - m.inside.x, p.z - m.inside.z) < TUNNEL_REACH) enterCave(slot);
+          if (!overhead && m === playerOpening.mouth && Math.abs(y - m.floorY) < 1 && Math.hypot(p.x - m.inside.x, p.z - m.inside.z) < TUNNEL_REACH) enterCave(slot);
         }
       }
     }
@@ -4829,6 +4858,11 @@
     }
     context.restore();
   };
+  // Where the overlay's frame goes, a section at a time, for the profiler under ?debug=1 (`debug.overlayProfile`).
+  const OVERLAY_PROFILE = { prepare: 0, fx: 0, collect: 0, sight: 0, rock: 0, cover: 0, banana: 0 };
+  // Walking recomputes the sight guides at most this often in game time; the lines are world-anchored, so a
+  // frame of lag never shows, and it is the difference between 42 and 59 fps behind cave rock at 4K.
+  const SIGHT_RECOMPUTE_HZ = 30;
   const overlay = (dt) => {
     sleepSightFrame++;
     if (CAMERA_GLYPHS.radius !== MATRIX_WORLD.radius || CAMERA_GLYPHS.active !== MATRIX_WORLD.active || CAMERA_GLYPHS.permanentCave !== MATRIX_WORLD.permanentCave) {
@@ -4839,9 +4873,13 @@
     const player = crew.player;
     const insideMirror = !!player && playerCaveIndex === matrixCave.caveIndex;
     mirrorGuides.update(insideMirror, MATRIX_WORLD.time, MATRIX_WORLD.density);
+    let tick = performance.now();
+    const lap = (key) => { const now = performance.now(); OVERLAY_PROFILE[key] = now - tick; tick = now; };
     const bananaActor = bananaCover.prepare(camera, player);
+    lap("prepare");
     uiGuideObjects = null; uiGuidesReady = true;
     try { fx.drawOverlay(dt, drawExtra); } finally { uiGuidesReady = false; }
+    lap("fx");
     let touchesRock = false, occluded = false, guides = null, exteriorRamp = false;
     if (pilot.closeMix < 1) {
       const eye = camera.position, tangent = Math.tan(camera.fov / 2), aspect = renderer.size.width / Math.max(1, renderer.size.height);
@@ -4863,13 +4901,16 @@
       const objectsEnabled = viewEligible && (exteriorRamp || rockSection || !actorVisible);
       const bananaEnabled = bananaCover.state.cameraInPile;
       occluded = objectsEnabled;
-      guides = sightGuides.update(player, null, objects, camera, aspect, dt, objectsEnabled, rockSection);
+      lap("collect");
+      guides = sightGuides.update(player, null, objects, camera, aspect, dt, objectsEnabled, rockSection, SIGHT_RECOMPUTE_HZ);
+      lap("sight");
       // Keep a separate cap pass so split objects stay legible in fruit.
       // It must not change the visibility rules in the clear part of the view.
       const fruitGuides = bananaGuides.update(bananaEnabled ? player : null, null, objects, camera, aspect, dt, bananaEnabled, true);
       if (objectsEnabled || bananaEnabled) {
         const structure = ensureRockGuides().select(p.x, p.y - player.baseY, p.z, camera.position.x, camera.position.y, camera.position.z), observer = guides.observer;
         const surfaces = rockGuides.updateSurfaces(observer[19], observer[20], observer[21], camera, dt, player, objectGuides.perceptionClear, objects.occlusionVersion, objects.perceptionVersion);
+        lap("rock");
         guides.structures = objectsEnabled ? surfaces : null; guides.structure = objectsEnabled ? structure : null;
         fruitGuides.structures = bananaEnabled ? surfaces : null; fruitGuides.structure = bananaEnabled ? structure : null;
       } else { guides.structure = fruitGuides.structure = null; guides.structures = fruitGuides.structures = null; if (rockGuides) rockGuides.resetSurface(); }
@@ -4887,8 +4928,10 @@
     }
     cameraCover.state.opacity = 0.22 * (1 - pilot.closeMix);
     cameraCover.draw(camera, bananaActor ? null : player?.root, touchesRock, occluded, cameraRockAt, cameraRockMaterialAt, guides, dt, MATRIX_WORLD.active ? 1 : 0, CAMERA_GLYPHS, exteriorRamp ? guideActorVisibleAt : null);
+    lap("cover");
     bananaCover.draw(camera, player, dt, guideActorVisibleAt, bananaGuides.state, CAMERA_GLYPHS);
     drawFirstPersonFire(player);
+    lap("banana");
   };
 
   const onLootCleared = () => {
@@ -5703,6 +5746,7 @@
       }
     });
     Object.defineProperty(hubScene.debug.matrixCave, "caves", { value: matrixInteriors });
+    hubScene.debug.overlayProfile = OVERLAY_PROFILE;
     if (world.mirrorBroken) {
       mirrorCave.damage.restore();
       syncMirrorDamage(true);
