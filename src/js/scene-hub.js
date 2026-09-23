@@ -5219,6 +5219,11 @@
     }
     return floor;
   };
+  // Grip planning needs the same props that can support a gorilla's feet.
+  // A tiny mesh query preserves gaps between branches and furniture pieces.
+  const clankerClimbSolidAt = (x, y, z) => island.solidAt(x, y, z)
+    || !solids.clearAt(x, y - 0.002, z, 0.002, 0.004);
+  const clankerClimbSurfaceAt = (x, z) => Math.max(island.surfaceAt(x, z), solids.supportAt(x, z, 1e6));
   const LAB_ITEM_INVERSE = math.mat4.create(), LAB_ITEM_LOCAL = math.mat4.create();
   const placeLabDie = (item) => {
     const n = item.node, r = item.roll;
@@ -6101,7 +6106,8 @@
       labSite: shared.workSites.findIndex(site => site.mouth === entropyLab.mouth),
       labInside: entropyLab.phase.inside, labStations: entropyLab.stations,
       labEquipment: entropyLab.equipment, labPickup: pickUpLabEquipment, labReturn: returnLabEquipment, labRoll: rollLabEquipment,
-      solidAt: island.solidAt, climbClear: clankerClimbClear, climbTransitionClear: clankerClimbTransitionClear,
+      solidAt: island.solidAt, climbSolidAt: clankerClimbSolidAt, climbSurfaceAt: clankerClimbSurfaceAt,
+      climbClear: clankerClimbClear, climbTransitionClear: clankerClimbTransitionClear,
       climbRidersClear: clankerRidersClear, groomClear: clankerGroomClear, underCanopy: clankerUnderCanopy,
       groundAt: (x, z, y) => island.supportAt(x, z, y, 0.52), surfaceAt: island.surfaceAt,
       isGrass: island.isGrassAt, onLand: island.onLand,

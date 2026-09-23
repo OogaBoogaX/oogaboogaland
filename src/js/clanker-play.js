@@ -10,7 +10,7 @@
     let player = null, view = "orbit", battle = false, disposed = false, jumpKey = false, jumpTap = false, run = false;
     let actPointer = -1, smashPointer = -1, smashCharge = 0, shownCharge = -1, mouseButtons = 0, blockedButtons = 0, shoulder = 0;
     let focused = false, lockPending = false, wasLocked = false, unlockedAt = -Infinity, focusVersion = 0;
-    let actMode = -1, actPower = -1;
+    let actMode = -1, actPower = -1, climbPress = false;
     const on = (node, type, callback, options) => {
       node.addEventListener(type, callback, options);
       listeners.push(() => node.removeEventListener(type, callback, options));
@@ -35,7 +35,7 @@
       camera.up = null;
     };
     const cancelInput = () => {
-      jumpKey = jumpTap = run = false;
+      jumpKey = jumpTap = run = climbPress = false;
       mouseButtons = 0;
       blockedButtons = 0;
       const pointer = actPointer;
@@ -89,17 +89,23 @@
     const showAct = () => {
       if (!player) return;
       if (hud.el.act.hidden) hud.el.act.hidden = false;
-      const mode = player.climb.active ? 4 : player.fire.rolling ? 3 : player.fire.burning ? 2 : jumpKey || actPointer >= 0 || jumpTap ? 1 : 0;
+      const climb = clankers.climbAction(player);
+      const mode = player.climb.active ? 4 : player.fire.rolling ? 3 : player.fire.burning ? 2
+        : climb > 0 ? 5 : climb < 0 ? 6 : !climbPress && (jumpKey || actPointer >= 0 || jumpTap) ? 1 : 0;
       const power = mode === 1 ? Math.round(player.motion.charge * 100) : -1;
       if (mode === actMode && power === actPower) return;
       actMode = mode; actPower = power;
-      hud.setAct(mode === 4 ? "W ↑ · S ↓" : mode === 3 ? "ROLLING!" : mode === 2 ? "DROP & ROLL" : mode === 1 ? `RELEASE ${power}%` : "HOLD TO JUMP");
+      hud.setAct(mode === 6 ? "CLIMB DOWN" : mode === 5 ? "CLIMB UP" : mode === 4 ? "W ↑ · S ↓" : mode === 3 ? "ROLLING!" : mode === 2 ? "DROP & ROLL" : mode === 1 ? `RELEASE ${power}%` : "HOLD TO JUMP");
     };
     const beginJump = () => {
       if (player.fire.burning) {
         jumpTap = false;
         clankers.cancelInput();
         clankers.dropRoll();
+      } else if (player.climb.active || clankers.startClimb(player)) {
+        // This whole press belongs to the climb, even if the mantle finishes
+        // before Space/the touch button is released. Never charge a jump then.
+        jumpTap = false; climbPress = true;
       } else {
         // Preserve a down/up pair that both arrive before the next simulation
         // frame: it becomes one held frame followed by a release.
@@ -299,8 +305,9 @@
       command.z = -axes.x * sy - axes.y * cy;
       command.heading = battle ? orbit.yaw + Math.PI : Math.hypot(command.x, command.z) > 0.01 ? Math.atan2(command.x, command.z) : NaN;
       command.climbAxis = axes.y;
-      command.jumpHeld = jumpKey || actPointer >= 0 || jumpTap;
-      command.jumpPressed = jumpTap;
+      if (!jumpKey && actPointer < 0) climbPress = false;
+      command.jumpHeld = !climbPress && (jumpKey || actPointer >= 0 || jumpTap);
+      command.jumpPressed = !climbPress && jumpTap;
       command.run = run;
       clankers.control(command);
       jumpTap = false;
