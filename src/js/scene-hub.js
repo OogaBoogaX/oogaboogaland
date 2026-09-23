@@ -1312,7 +1312,7 @@
       solids.add(cart);
       solids.add(rack);
     } else if (slot.status === "open" && slot.scene === "lab") {
-      const lab = hubModels.entropyLab(m.room);
+      const lab = hubModels.entropyLab(m.room, m.floorY);
       addChild(group, lab.node);
       for (const node of lab.solids) solids.add(node);
       const sr = Math.sin(m.ry), cr = Math.cos(m.ry);

@@ -383,6 +383,7 @@
       let chosen = -1;
       for (let i = 0; i < labStations.length; i++) {
         const index = (start + i) % labStations.length, station = labStations[index];
+        if (station.enabled === false) continue;
         if (moving && (index === previous || Math.hypot(station.x - p.x, station.z - p.z) < 0.65)) continue;
         let claimed = false;
         for (let j = 0; j < list.length; j++) {
@@ -418,10 +419,7 @@
     const reserve = (e, move = false) => {
       const site = sites[e.site];
       if (!site) return false;
-      if (e.site === labSite) {
-        if (reserveLab(e, move)) return true;
-        if (move && e.lab.station >= 0) return false;
-      }
+      if (e.site === labSite) return reserveLab(e, move);
       const p = e.root.position, previousHeading = e.heading;
       e.heading = site.mouth.ry;
       // Fill the sides before the centre, keeping a route through the mouth
@@ -436,7 +434,6 @@
         if (occupied(e, POINT.x, POINT.y, POINT.z) || reserved(e, POINT.x, POINT.z)
           || !staticClear(e, POINT.x, POINT.y, POINT.z)) continue;
         e.slotIndex = index; e.slotX = POINT.x; e.slotY = POINT.y; e.slotZ = POINT.z; e.hasSlot = true;
-        if (e.site === labSite) releaseLab(e);
         e.heading = previousHeading; return true;
       }
       e.heading = previousHeading; return false;

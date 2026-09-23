@@ -353,7 +353,8 @@
     "=": ["000", "111", "000", "111", "000"], "(": ["010", "100", "100", "100", "010"],
     ")": ["010", "001", "001", "001", "010"], "{": ["011", "010", "100", "010", "011"],
     "}": ["110", "010", "001", "010", "110"], ";": ["000", "010", "000", "010", "100"],
-    ",": ["000", "000", "000", "010", "100"], '"': ["101", "101", "000", "000", "000"]
+    ",": ["000", "000", "000", "010", "100"], ".": ["000", "000", "000", "000", "010"],
+    '"': ["101", "101", "000", "000", "000"]
   };
   const labScreenRect = (geometry, x, y, w, h, z, color, emissive = 0.8) => {
     const i = geometry.verts.length / 3;
@@ -376,21 +377,9 @@
   // the furniture's collision shell or its object-outline registrations.
   const labScreenContent = variants((kind) => {
     const geometry = { verts: [], faces: [], lines: [], castShadow: false };
-    const touch = kind === 1, z = touch ? 0.104 : -0.091, cell = touch ? 0.0075 : 0.009;
+    const touch = kind === 1, z = touch ? 0.104 : -0.091;
     labScreenRect(geometry, touch ? -0.69 : -0.55, touch ? 1.87 : 1.47, touch ? 1.38 : 1.1,
       touch ? 0.8 : 0.62, z - 0.001, 0, 0.35);
-    const lines = touch ? ["const run = {", '  mode: "lab",', "  ready: true", "};", "run.test();", "run.sync();"]
-      : ["const lab = {", '  task: "build",', "  ready: true", "};", "if (lab.ready)", "  lab.run();"];
-    const left = touch ? -0.63 : -0.49, top = touch ? 2.575 : 2.02, spacing = touch ? 0.087 : 0.088;
-    for (let row = 0; row < lines.length; row++) {
-      labScreenText(geometry, String(row + 1), left, top - row * spacing, z, cell * 0.78, 1);
-      const line = lines[row], start = left + cell * 5;
-      for (let i = 0; i < line.length; i++) {
-        const color = row === 0 && i < 5 || row === 4 && !touch && i < 2 ? 2
-          : row === 1 && i >= 8 ? 5 : row === 2 && i >= 9 ? 6 : /[{}();:.=]/.test(line[i]) ? 4 : 3;
-        labScreenText(geometry, line[i], start + i * cell * 4, top - row * spacing, z, cell, color);
-      }
-    }
     if (touch) {
       labScreenText(geometry, "SYS", 0.18, 2.58, z, 0.01, 4);
       labScreenText(geometry, "CPU", 0.17, 1.965, z, 0.007, 1);
@@ -398,44 +387,91 @@
     } else labScreenText(geometry, "ENTROPY LAB", 0.12, 1.51, z, 0.006, 1);
     return geometry;
   });
+  const LAB_CODE = ["const lab = {", '  task: "build",', "  ready: true", "};", "if (lab.ready)", "  lab.run();",
+    "const seed =", "  dice.roll();", "lab.test(seed);", "lab.sync();", "const stats =", "  lab.read();",
+    "if (stats.ok)", '  log("pass");', "lab.save();", "lab.next();"];
+  const LAB_SCROLL_SPEED = 0.06;
+  const labCodeStrip = variants((kind) => {
+    const geometry = { verts: [], faces: [], lines: [], castShadow: false };
+    const touch = kind === 1, cell = touch ? 0.0075 : 0.009, left = touch ? -0.63 : -0.49;
+    for (let row = 0; row < LAB_CODE.length; row++) {
+      const y = -row * 0.088, line = LAB_CODE[row];
+      labScreenText(geometry, String(row + 1), left, y, 0, cell * 0.65, 1);
+      for (let i = 0; i < line.length; i++) {
+        const color = line.startsWith("const") && i < 5 || line.startsWith("if") && i < 2 ? 2
+          : line.includes('"') && i >= line.indexOf('"') ? 5 : /[{}();:.=]/.test(line[i]) ? 4 : 3;
+        labScreenText(geometry, line[i], left + cell * (7 + i * 4), y, 0, cell, color);
+      }
+    }
+    return geometry;
+  });
   const labScreenMarker = variants((color) => {
     const geometry = { verts: [], faces: [], lines: [], castShadow: false };
     labScreenRect(geometry, 0, 0, 1, 1, 0, color, 1);
     return geometry;
   });
-  const createLabScreen = (parent, station, kind) => {
+  const labIdentityScreen = cached(() => {
+    const geometry = { verts: [], faces: [], lines: [], castShadow: false };
+    labScreenRect(geometry, -0.55, 1.47, 1.1, 0.62, -0.092, 0, 0.35);
+    geometry.faces[0].color = [10, 12, 12];
+    // The existing EntropyLab beaker/die/sprout mark, sampled into 48x72
+    // palette spans. One cached mesh works in both renderers without an image
+    // decoder, runtime download, new texture pass or per-frame geometry.
+    const palette = [[0, 0, 0], [3, 158, 78], [255, 255, 255], [250, 141, 0]];
+    const runs = atob("AiQBAQMgBQEEHgcBBRwJAQYbCQEHGgoBCBkLAQkYBAEJHQYBChgDAQodBQELGAIBCxwGAQwXAwEMGwUBDRcDAQ0bBAEOFwIBDhsCAQ8XAgEQFwIBERcCARIEBgESCggCEhIBARIXAgESHgYBEiQGAhIqAQETAhECExcCARMdEQIUAgECFBcCARQtAQIVAQICFRcCARUtAgIWAQICFhcCARYtAgIXAgICFxcCARcsAgIYAgMCGBcCARgrAwIZAwICGRcCARkrAgIaBAICGhcCARoqAgIbBAICGxcCARsqAgIcBAICHBcCARwqAgIdBAICHQgEAx0XAgEdKgICHgQCAh4IBwMeFwIBHioCAh8EAgIfCAgDHxcCAR8qAgIgBAICIAgJAyAXAgEgKgICIQQCAiEICgMhFwIBISoCAiIEAgIiCAwDIhcCASIqAgIjBAICIwgNAyMYAQEjKgICJAQCAiQIDgMkKgICJQQCAiUIEAMlJgIDJSoCAiYEAgImCBEDJiQEAyYqAgInBAICJwgVAychBwMnKgICKAQCAigIIAMoKgICKQQCAikIIAMpKgICKgQCAioIDgMqGg4DKioCAisEAgIrCAwDKxwMAysqAgIsBAICLAgKAywWBAMsHQsDLCoCAi0EAgItCAkDLRQIAy0fCQMtKgICLgQCAi4IBwMuEgUDLhkFAy4hBwMuKgICLwQCAi8IBgMvEQYDLxkGAy8iBgMvKgICMAQCAjAIBgMwEwoDMCIGAzAqAgIxBAICMQgGAzEQAgMxFQYDMR4CAzEiBgMxKgICMgQCAjIIBgMyEAQDMhcCAzIcBAMyIgYDMioCAjMEAgIzCAYDMxIEAzMaBgMzIgYDMyoCAjQEAgI0CAYDNBABAzQSBQM0GQcDNCIGAzQqAgI1BAICNQgGAzUQBAM1FgEDNRkBAzUcBAM1IgYDNSoCAjYEAgI2CAYDNhAEAzYWAQM2GQEDNhsFAzYiBgM2KgICNwQCAjcIBgM3EAEDNxIFAzcZBQM3HwEDNyIGAzcqAgI4BAICOAgGAzgSBQM4GQQDOB8BAzgiBgM4KgICOQQCAjkIBgM5EAEDORIFAzkZBAM5HwEDOSIGAzkqAgI6BAICOggGAzoQBAM6FgEDOhkHAzoiBgM6KgICOwQCAjsIBwM7EgMDOxYBAzsZBQM7IQcDOyoCAjwEAgI8CAkDPBQDAzwZAwM8HwkDPCoCAj0FAQI9CQoDPRYBAz0ZAQM9HQoDPSoBAj4FAgI+CQwDPhsMAz4pAgI/BgECPwoMAz8ZDQM/KQECQAYCAkALGgNAKAICQQcCAkEMFwNBJwICQggCAkImAgJDCQMCQyQDAkQKHAJFDRYC");
+    const cell = 0.0075;
+    for (let i = 0; i < runs.length; i += 4) {
+      labScreenRect(geometry, -0.18 + runs.charCodeAt(i + 1) * cell,
+        2.05 - (runs.charCodeAt(i) + 1) * cell, runs.charCodeAt(i + 2) * cell, cell, -0.091, 0);
+      geometry.faces[geometry.faces.length - 1].color = palette[runs.charCodeAt(i + 3)];
+    }
+    return geometry;
+  });
+  const createLabScreen = (parent, station, kind, codeGeometry) => {
     const { createNode, addChild } = BL.scene;
-    const node = createNode({ geometry: labScreenContent(kind), position: { ...parent.position },
+    const node = createNode({ geometry: codeGeometry ? labScreenContent(kind) : labIdentityScreen(), position: { ...parent.position },
       rotation: { ...parent.rotation }, sightHidden: true });
-    const markers = [], touch = kind === 1, z = touch ? 0.105 : -0.09;
+    const markers = [], strips = [], touch = kind === 1, z = touch ? 0.105 : -0.09;
+    const span = LAB_CODE.length * 0.088, clock = station * 3.37 * 0.088 / LAB_SCROLL_SPEED;
+    if (codeGeometry) for (let i = 0; i < 2; i++) {
+      const strip = createNode({ geometry: codeGeometry, position: { x: 0,
+        y: (touch ? 2.59 : 2.04) + clock * LAB_SCROLL_SPEED % span - i * span, z } });
+      addChild(node, strip); strips.push(strip);
+    }
     const marker = (x, y, w, h, color) => {
       const part = createNode({ geometry: labScreenMarker(color), position: { x, y, z }, scale: { x: w, y: h, z: 1 } });
       addChild(node, part); markers.push(part);
     };
-    marker(touch ? -0.254 : -0.049, touch ? 2.1 : 1.532, 0.009, touch ? 0.031 : 0.038, 5);
-    if (touch) for (let i = 0; i < 3; i++) marker(0.16 + i * 0.165, 2.0, 0.09, 0.15 + i * 0.085, i === 1 ? 5 : 6);
-    else marker(-0.49, 1.49, 0.16, 0.008, 6);
-    return { station, node, markers, kind, clock: 0, phase: -1 };
+    if (codeGeometry) {
+      marker(touch ? -0.254 : -0.049, touch ? 2.0 : 1.532, 0.009, touch ? 0.031 : 0.038, 5);
+      if (touch) for (let i = 0; i < 3; i++) marker(0.16 + i * 0.165, 2.0, 0.09, 0.15 + i * 0.085, i === 1 ? 5 : 6);
+      else marker(-0.49, 1.49, 0.16, 0.008, 6);
+    }
+    return { station, node, markers, strips, kind, clock, phase: -1 };
   };
   // Cached furniture geometry; each visit owns its graph, solid registrations
   // and local work destinations. The center stays open from the original arch.
-  const entropyLab = (room) => {
+  const entropyLab = (room, floorY = 0) => {
     const { createNode, addChild } = BL.scene, node = createNode(), solids = [], stations = [], equipment = [], displays = [];
     const half = room.w / 2, back = -room.to + 0.28, rearWork = back + 1.60;
+    // Both renderers already clip geometry by world height. Two shared strips
+    // slide through each fixed screen aperture; wrapping never rebuilds text.
+    const codeGeometry = [0, 1].map(kind => ({ ...labCodeStrip(kind),
+      clipMinY: floorY + (kind ? 2.04 : 1.56), clipMaxY: floorY + (kind ? 2.59 : 2.04) }));
     const place = (geometry, x, z, heading = 0) => {
       const item = createNode({ geometry, position: { x, y: 0, z }, rotation: { x: 0, y: heading, z: 0 } });
       addChild(node, item); solids.push(item); return item;
     };
     for (const x of [-half + 1.17, 0, half - 1.17]) {
-      const desk = place(labDesk(), x, back), display = createLabScreen(desk, stations.length, 0);
+      const desk = place(labDesk(), x, back), display = createLabScreen(desk, stations.length, 0, x ? codeGeometry[0] : null);
       addChild(node, display.node); displays.push(display);
-      stations.push({ x, y: 0, z: rearWork, heading: Math.PI, kind: "type" });
+      stations.push({ x, y: 0, z: rearWork, heading: Math.PI, kind: "type", enabled: x !== 0 });
     }
     const sideZ = -Math.max(room.from + 1.4, 2.17);
     for (const side of [-1, 1]) {
       const facing = -side * Math.PI / 2;
       const bench = place(labBench(), side * (half - 0.47), sideZ, facing);
-      const screen = place(labTouchscreen(), side * (half - 0.56), -3.1, facing), display = createLabScreen(screen, stations.length, 1);
+      const screen = place(labTouchscreen(), side * (half - 0.56), -3.1, facing), display = createLabScreen(screen, stations.length, 1, codeGeometry[1]);
       addChild(node, display.node); displays.push(display);
       for (let i = 0; i < 3; i++) {
         const offset = (i - 1) * 0.9, front = -0.03;
@@ -464,8 +500,13 @@
       let changed = false;
       for (let i = 0; i < displays.length; i++) {
         const display = displays[i];
-        if (!(activeMask & (1 << display.station))) continue;
-        display.clock = (display.clock + dt) % (8 / 6);
+        if (!display.strips.length || !(activeMask & (1 << display.station))) continue;
+        const span = LAB_CODE.length * 0.088;
+        display.clock = (display.clock + dt) % (span / LAB_SCROLL_SPEED);
+        const top = (display.kind ? 2.59 : 2.04) + display.clock * LAB_SCROLL_SPEED;
+        display.strips[0].position.y = top;
+        display.strips[1].position.y = top - span;
+        changed = true;
         const phase = Math.floor(display.clock * 6) & 7;
         if (phase === display.phase) continue;
         display.phase = phase; changed = true;
