@@ -942,6 +942,14 @@ Then run npm run build and ONLY=characters node test/run.mjs.</pre>
       </div>
       <p class="help">OogaBoogaX on the big screen. Arrow keys flip the boards.</p>
     </dialog>
+    <dialog class="modal" id="stargate-menu" aria-labelledby="stargate-title" aria-describedby="stargate-status">
+      <div class="panel-head">
+        <h2 id="stargate-title">STARGATE DIALER</h2>
+        <button type="button" class="modal-close" aria-label="Close Stargate dialer">&times;</button>
+      </div>
+      <ol aria-label="Destinations"></ol>
+      <p class="help" id="stargate-status" role="status"></p>
+    </dialog>
     <dialog class="modal" id="weather-key" aria-label="Reading the weather">
       <div class="panel-head">
         <h2><span data-sign>Reading the weather</span></h2>
@@ -1051,6 +1059,8 @@ Then run npm run build and ONLY=characters node test/run.mjs.</pre>
   <script src="js/solid-props.js"></script>
   <script src="js/breakables.js"></script>
   <script src="js/agent.js"></script>
+  <script src="js/stargate-models.js"></script>
+  <script src="js/stargate.js"></script>
   <script src="js/scene-hub.js"></script>
   <script src="js/scene-lab.js"></script>
     <script src="js/scene-pool.js"></script>

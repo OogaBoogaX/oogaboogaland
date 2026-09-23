@@ -5,7 +5,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta http-equiv="Content-Security-Policy"
-    content="default-src 'none'; script-src 'sha256-ZF8G6mvtYxGV724xruHS5vQcFUImfkg2rweaPcwLdOc='; style-src 'sha256-HrWUytWcEUZK8AYy5QmbV07p0qqmBenOiCSiyRHY+GA='; img-src 'self' data:; media-src https://stream.noderunnersradio.com; connect-src https: wss:; base-uri 'none'; form-action 'none'">
+    content="default-src 'none'; script-src 'sha256-G5Qv4Qdx1CPBKzFlUizO8dJzyM+8dMnbEHmqocWnra8='; style-src 'sha256-qItkbrkTUN12qdeUsnf5xHs9fLKmtyePMsdpCD3As/A='; img-src 'self' data:; media-src https://stream.noderunnersradio.com; connect-src https: wss:; base-uri 'none'; form-action 'none'">
   <meta name="referrer" content="no-referrer">
   <meta name="color-scheme" content="dark">
   <meta name="theme-color" content="#0a0a0b">
@@ -5981,6 +5981,13 @@ body.mine-dragging #tooltip {
     visibility: hidden;
   }
 }
+
+/* Native gate dialog shares the stone tablet style and stays inside mobile viewports. */
+#stargate-menu { width: min(28rem, calc(100vw - 2rem)); max-height: calc(var(--gate-height, 100dvh) - 2rem); overflow: auto; }
+#stargate-menu ol { list-style: none; padding: 0; display: grid; gap: 0.6rem; }
+#stargate-menu ol button { width: 100%; min-height: 48px; text-align: left; white-space: normal; }
+#stargate-menu ol button:disabled { opacity: 0.65; cursor: not-allowed; }
+#stargate-menu button:focus-visible { outline: 3px solid #83e0ed; outline-offset: 2px; }
 </style>
 </head>
 
@@ -6910,6 +6917,14 @@ Then run npm run build and ONLY=characters node test/run.mjs.</pre>
         <button type="button" class="jumbotron-page" data-action="jumbotron-next" aria-label="Next board">&rsaquo;</button>
       </div>
       <p class="help">OogaBoogaX on the big screen. Arrow keys flip the boards.</p>
+    </dialog>
+    <dialog class="modal" id="stargate-menu" aria-labelledby="stargate-title" aria-describedby="stargate-status">
+      <div class="panel-head">
+        <h2 id="stargate-title">STARGATE DIALER</h2>
+        <button type="button" class="modal-close" aria-label="Close Stargate dialer">&times;</button>
+      </div>
+      <ol aria-label="Destinations"></ol>
+      <p class="help" id="stargate-status" role="status"></p>
     </dialog>
     <dialog class="modal" id="weather-key" aria-label="Reading the weather">
       <div class="panel-head">
@@ -40592,6 +40607,142 @@ void main() {
   BL.agent = { create, createPlay, GAITS, TRIPLE_MS, QUAD, HUNCH, BODY };
 })();
 
+// ---- js/stargate-models.js ----
+// Cached, renderer-neutral gate geometry. Local +Y is the front of the horizon.
+(() => {
+  "use strict";
+  const BL = window.BL = window.BL || {}, M = BL.models, S = BL.scene;
+  const rings = new Map();
+  let disc, wave, surge, pedestal;
+  const build = (radius, outerRadius) => {
+    const key = radius + ":" + outerRadius;
+    if (!rings.has(key)) rings.set(key, M.lathe({ profile: [[radius, -0.08], [outerRadius, -0.08], [outerRadius, 0.08], [radius, 0.08], [radius, -0.08]], segments: 32, color: "#41596c" }));
+    if (!disc) {
+      // Both faces are authored: the aperture reads from above/below and front/back in both renderers.
+      disc = M.lathe({ profile: [[0, 0], [1, 0], [0, 0]], segments: 32, color: "#287cae", emissive: 0.7 });
+      wave = M.ring({ r: 1, thickness: 0.015, segments: 32, color: "#83e0ed", emissive: 0.9 });
+      surge = M.lathe({ profile: [[0, 0], [0.65, 0], [0.8, 0.2], [0.45, 0.8], [0.1, 1], [0, 1]], segments: 16, color: "#55bfdc", emissive: 0.8 });
+      pedestal = M.merge(M.box({ w: 0.7, h: 0.18, d: 0.7, color: "#485565", offset: { y: 0.09 } }),
+        M.box({ w: 0.38, h: 0.8, d: 0.38, color: "#687782", offset: { y: 0.55 } }),
+        M.box({ w: 0.8, h: 0.2, d: 0.65, color: "#45687c", offset: { y: 1.0 } }),
+        M.box({ w: 0.3, h: 0.04, d: 0.3, color: "#8ae9ee", emissive: 0.8, offset: { y: 1.12 } }));
+    }
+    const root = S.createNode(), ring = S.createNode({ geometry: rings.get(key) });
+    const horizon = S.createNode({ geometry: disc, visible: false, sightHidden: true, scale: { x: radius, y: 1, z: radius } });
+    const kawoosh = S.createNode({ geometry: surge, visible: false, sightHidden: true });
+    const ripples = Array.from({ length: 3 }, () => S.createNode({ geometry: wave, visible: false, sightHidden: true }));
+    S.addChild(root, ring, horizon, kawoosh, ...ripples);
+    return { root, horizon, kawoosh, ripples, dialer: S.createNode({ geometry: pedestal }) };
+  };
+  BL.stargateModels = { build };
+})();
+
+// ---- js/stargate.js ----
+// Scene-owned gate; no destination scene, networking or character ownership lives here.
+(() => {
+  "use strict";
+  const BL = window.BL = window.BL || {}, S = BL.scene;
+  const ACTIVATION_MS = 2000, ACTIVE_MS = 10000, SHUTDOWN_MS = 450;
+  const create = ({ radius, outerRadius, position, rotation = { x: 0, y: 0, z: 0 }, destinations,
+    onMenu = () => {}, onTraverse = null, now = () => performance.now(), reducedMotion = matchMedia("(prefers-reduced-motion: reduce)").matches }) => {
+    const model = BL.stargateModels.build(radius, outerRadius);
+    Object.assign(model.root.position, position); Object.assign(model.root.rotation, rotation);
+    const inverse = BL.math.mat4.create();
+    let state = "OFF", started = 0, destination = null, disposed = false, crossed = false, opened = false, focus = null, focusFrame = 0;
+    const dialog = document.getElementById("stargate-menu"), list = dialog.querySelector("ol"), closeButton = dialog.querySelector(".modal-close"), status = dialog.querySelector("[role=status]");
+    const viewport = window.visualViewport;
+    const buttons = destinations.map((entry, index) => {
+      const li = document.createElement("li"), button = document.createElement("button");
+      button.type = "button"; button.textContent = `${index + 1}. ${entry.label}`; button.disabled = !entry.enabled;
+      button.dataset.destination = String(index); li.appendChild(button); return { li, button };
+    });
+    const fit = () => { if (opened) dialog.style.setProperty("--gate-height", (viewport ? viewport.height : innerHeight) + "px"); };
+    const finishClose = () => {
+      if (!opened) return;
+      opened = false; cancelAnimationFrame(focusFrame); focusFrame = 0; onMenu(false);
+      if (focus && focus.isConnected) focus.focus({ preventScroll: true });
+      focus = null;
+    };
+    const close = () => { if (opened && dialog.open) dialog.close(); finishClose(); };
+    const update = () => {
+      if (disposed) return;
+      const elapsed = Math.max(0, now() - started);
+      if (state !== "OFF") {
+        state = elapsed < ACTIVATION_MS ? "ACTIVATING" : elapsed < ACTIVATION_MS + ACTIVE_MS ? "ACTIVE" : elapsed < ACTIVATION_MS + ACTIVE_MS + SHUTDOWN_MS ? "SHUTDOWN" : "OFF";
+      }
+      const k = state === "ACTIVATING" ? elapsed / ACTIVATION_MS : state === "SHUTDOWN" ? 1 - (elapsed - ACTIVATION_MS - ACTIVE_MS) / SHUTDOWN_MS : state === "ACTIVE" ? 1 : 0;
+      model.horizon.visible = k > 0;
+      model.horizon.scale.x = model.horizon.scale.z = radius * Math.max(0.001, k);
+      model.horizon.glow = 0.3 + 0.7 * k;
+      const burst = state === "ACTIVATING" && !reducedMotion ? Math.sin(Math.PI * k) : 0;
+      model.kawoosh.visible = burst > 0.01;
+      model.kawoosh.scale.x = model.kawoosh.scale.z = radius * 0.65 * burst;
+      model.kawoosh.scale.y = Math.min(radius * 0.6, 2.4) * burst;
+      for (let i = 0; i < model.ripples.length; i++) {
+        const node = model.ripples[i], size = radius * k * (reducedMotion ? (i + 1) / 4 : ((elapsed / 1800 + i / 3) % 1));
+        node.visible = k > 0 && size > 0.02; node.scale.x = node.scale.z = Math.max(0.001, size); node.position.y = 0.025 + i * 0.006;
+      }
+    };
+    const activate = index => {
+      update();
+      const entry = destinations[index];
+      if (disposed || state !== "OFF" || !entry || !entry.enabled) return false;
+      destination = entry.id; started = now(); crossed = false; state = "ACTIVATING"; update(); return true;
+    };
+    const choose = event => {
+      const button = event.target.closest("button[data-destination]");
+      if (!button || button.disabled || !opened) return;
+      if (activate(Number(button.dataset.destination))) close();
+      else status.textContent = "The Stargate is already cycling. Wait for it to close.";
+    };
+    const cancel = event => { event.preventDefault(); close(); };
+    const key = event => { event.stopPropagation(); if (event.key === "Escape") { event.preventDefault(); close(); } };
+    const focusDialog = event => {
+      // A touch that opened the modal may end over its backdrop/container.
+      if (opened && event.target === dialog) (buttons.find(row => !row.button.disabled)?.button || closeButton).focus({ preventScroll: true });
+    };
+    const closed = () => { if (!dialog.open) finishClose(); };
+    const open = () => {
+      if (disposed || opened || dialog.open) return false;
+      focus = document.activeElement; opened = true;
+      list.replaceChildren(...buttons.map(row => row.li)); status.textContent = "Travel connection pending. The Pit remains open.";
+      onMenu(true); dialog.showModal(); fit();
+      const first = buttons.find(row => !row.button.disabled)?.button || closeButton;
+      first.focus({ preventScroll: true });
+      // Touch action opens on pointerdown, before the browser's default focus step.
+      focusFrame = requestAnimationFrame(() => { focusFrame = 0; if (opened) first.focus({ preventScroll: true }); });
+      return true;
+    };
+    // Explicit opt-in only. The hub does NOT call this in Phase 1. Signed local +Y -> -Y is front entry.
+    const traverse = (from, to, bodyRadius = 0, direction = 1) => {
+      update();
+      if (!onTraverse || state !== "ACTIVE" || crossed || disposed || !Number.isFinite(bodyRadius) || bodyRadius < 0 || bodyRadius >= radius || (direction !== 1 && direction !== -1)) return false;
+      S.updateWorld(model.root, model.root.parent ? model.root.parent.world : undefined); BL.math.mat4.invert(inverse, model.root.world);
+      const ay = inverse[1] * from.x + inverse[5] * from.y + inverse[9] * from.z + inverse[13];
+      const by = inverse[1] * to.x + inverse[5] * to.y + inverse[9] * to.z + inverse[13];
+      if (!(ay * direction > 0 && by * direction <= 0)) return false;
+      const t = ay / (ay - by), x = from.x + (to.x - from.x) * t, y = from.y + (to.y - from.y) * t, z = from.z + (to.z - from.z) * t;
+      const lx = inverse[0] * x + inverse[4] * y + inverse[8] * z + inverse[12], lz = inverse[2] * x + inverse[6] * y + inverse[10] * z + inverse[14];
+      if (!Number.isFinite(lx + lz) || Math.hypot(lx, lz) > radius - bodyRadius) return false;
+      crossed = true; onTraverse(destination); return true;
+    };
+    dialog.addEventListener("click", choose); closeButton.addEventListener("click", close); dialog.addEventListener("cancel", cancel); dialog.addEventListener("close", closed); dialog.addEventListener("keydown", key); dialog.addEventListener("focusin", focusDialog);
+    window.addEventListener("resize", fit); if (viewport) viewport.addEventListener("resize", fit);
+    const dispose = () => {
+      if (disposed) return;
+      close(); disposed = true; state = "OFF";
+      dialog.removeEventListener("click", choose); closeButton.removeEventListener("click", close); dialog.removeEventListener("cancel", cancel); dialog.removeEventListener("close", closed); dialog.removeEventListener("keydown", key); dialog.removeEventListener("focusin", focusDialog);
+      window.removeEventListener("resize", fit); if (viewport) viewport.removeEventListener("resize", fit);
+      list.replaceChildren(); model.horizon.visible = model.kawoosh.visible = false;
+      for (const node of model.ripples) node.visible = false;
+      for (const node of [model.root, model.dialer]) if (node.parent) S.removeChild(node.parent, node);
+    };
+    return { ...model, radius, outerRadius, open, close, activate, update, traverse, dispose, reducedMotion,
+      get state() { return state; }, get isOpen() { return opened; }, get disposed() { return disposed; } };
+  };
+  BL.stargate = { create, ACTIVATION_MS, ACTIVE_MS, SHUTDOWN_MS };
+})();
+
 // ---- js/scene-hub.js ----
 (() => {
   "use strict";
@@ -40776,7 +40927,7 @@ void main() {
   };
 
   // One visit's state: created in enter, dropped in leave.
-  let jumbotronSpot, oogatronUnsub, renderer, game, world, go, lootEnabled, testBananas, root, camera, overlayCanvas, island, pathNode, altar, hud, hooks, input, pilot, fx, cameraCover, bananaCover, solids, rockGuides, objectGuides, sightGuides, bananaGuides, pileGuides, platformGuides, mirrorGuides, pile, crew, crates, critters, clock, presets, entering, jetpack, jetpackState, jetpackCarrier, jetpackWearer, lastJetpackCloud, mirrorCave, matrixCave, matrixControl, gateRain, fire, headquarters, dockStairs, jumbotron, positionDebug, agent, agentPlay;
+  let jumbotronSpot, oogatronUnsub, renderer, game, world, go, lootEnabled, testBananas, root, camera, overlayCanvas, island, pathNode, altar, hud, hooks, input, pilot, fx, cameraCover, bananaCover, solids, rockGuides, objectGuides, sightGuides, bananaGuides, pileGuides, platformGuides, mirrorGuides, pile, crew, crates, critters, clock, presets, entering, jetpack, jetpackState, jetpackCarrier, jetpackWearer, lastJetpackCloud, mirrorCave, matrixCave, matrixControl, gateRain, fire, headquarters, dockStairs, jumbotron, positionDebug, agent, agentPlay, pitGate;
   let magazine, magazineState, breakables;
   const JETPACK_HUD_STATE = { owned: false, equipped: false, fuel: 1, blocked: false };
   let enteringTween = null;
@@ -41999,6 +42150,43 @@ void main() {
       }
     }
     return rim;
+  };
+  const buildPitGate = () => {
+    const basement = island.headquarters.basement, hole = basement.hole;
+    const distance = (hole.mouthRadius + basement.room.radius) / 2;
+    // Find the clearest bearing between authored room approaches and ramp paths.
+    // Keep the dialer on the flat annulus, not on the lip or a circulation route.
+    let best = -Infinity, x = 0, z = 0;
+    const segmentDistance = (px, pz, ax, az, bx, bz) => {
+      const dx = bx - ax, dz = bz - az, t = Math.max(0, Math.min(1, ((px - ax) * dx + (pz - az) * dz) / (dx * dx + dz * dz || 1)));
+      return Math.hypot(px - ax - dx * t, pz - az - dz * t);
+    };
+    for (let i = 0; i < 64; i++) {
+      const angle = i * Math.PI / 32, px = hole.x + Math.sin(angle) * distance, pz = hole.z + Math.cos(angle) * distance;
+      let clearance = Infinity;
+      for (const room of basement.rooms) {
+        const length = Math.hypot(room.approach.x - hole.x, room.approach.z - hole.z);
+        const ax = hole.x + (room.approach.x - hole.x) / length * hole.mouthRadius, az = hole.z + (room.approach.z - hole.z) / length * hole.mouthRadius;
+        clearance = Math.min(clearance, segmentDistance(px, pz, ax, az, room.approach.x, room.approach.z) - room.corridorWidth / 2);
+      }
+      for (const ramp of basement.ramps) for (let j = 1; j < ramp.samples.length; j++) {
+        const a = ramp.samples[j - 1], b = ramp.samples[j];
+        clearance = Math.min(clearance, segmentDistance(px, pz, a.x, a.z, b.x, b.z) - ramp.width / 2);
+      }
+      if (clearance > best) { best = clearance; x = px; z = pz; }
+    }
+    if (best < 0.8) throw new Error("No clear basement Stargate dialer placement");
+    pitGate = BL.stargate.create({ radius: hole.radius, outerRadius: hole.mouthRadius,
+      position: { x: hole.x, y: hole.floor + 0.03, z: hole.z },
+      destinations: [{ id: "dsb", label: "DSB Land", enabled: true }, ...Array.from({ length: 4 }, (_, i) => ({ id: "quarantine-" + i, label: "Quarantined - Replicator Infestation - Clean Up In Progress", enabled: false }))],
+      onMenu: open => { pilot.setActive(!open); pilot.controls.reset(); input.reset(); hud.tooltip.hide(); }
+    });
+    Object.assign(pitGate.dialer.position, { x, y: basement.floor, z });
+    pitGate.dialer.rotation.y = Math.atan2(hole.x - x, hole.z - z);
+    pitGate.placement = { x, y: basement.floor, z, clearance: best };
+    addChild(root, pitGate.root, pitGate.dialer);
+    solids.add(pitGate.dialer); // Only the pedestal is solid. The Pit remains the same open shaft.
+    addTarget(pitGate.dialer, { kind: "stargate-dialer" }, { radius: 0.65 });
   };
   const buildHeadquarters = () => {
     const floor = island.headquarters.floor, basement = island.headquarters.basement;
@@ -43721,6 +43909,8 @@ void main() {
   const tooltipFor = (hit) => {
     const o = hit.owner;
     switch (o.kind) {
+      case "stargate-dialer":
+        return "Stargate dialer · use nearby";
       case "caveman":
         return o.cave.traits.display;
       case "crate":
@@ -43909,6 +44099,7 @@ void main() {
     if (!o.active) return;
     reactProp(o, p);
   };
+  const STARGATE_ACTION = { kind: "stargate-dialer" };
   const WAKE_ACTION = { kind: "wake" }, ROLL_ACTION = { kind: "roll" }, STAND_ACTION = { kind: "stand" };
   const TAP_RAY = { ox: 0, oy: 0, oz: 0, dx: 0, dy: 0, dz: 0 };
   const nearbyAction = (x, y, z, reach) => {
@@ -43917,6 +44108,10 @@ void main() {
     if (player && player.camp.seat) return STAND_ACTION;
     if (player && crew.sleeping) return WAKE_ACTION;
     if (player && pilot.moving) return null;
+    if (pitGate && !pitGate.isOpen) {
+      const p = pitGate.dialer.position;
+      if (actionWithinReach(x, y, z, p.x, p.y + 1.1, p.z, Math.min(reach, 2))) return STARGATE_ACTION;
+    }
     if (player && player.hop < 0.03 && player.hopV <= 0 && headquarters) {
       const feet = player.root.position.y - player.baseY;
       const floor = bedSupportAt(x, z, feet + 0.04, 0, PLAYER_RADIUS);
@@ -43951,7 +44146,8 @@ void main() {
     return null;
   };
   const useNearbyAction = (action) => {
-    if (action === WAKE_ACTION) crew.wakePlayer();
+    if (action === STARGATE_ACTION) pitGate.open();
+    else if (action === WAKE_ACTION) crew.wakePlayer();
     else if (action === ROLL_ACTION) crew.dropRoll();
     else if (action === STAND_ACTION) crew.standPlayer();
     else if (action.kind === "bench") crew.sitPlayer(action);
@@ -44035,10 +44231,17 @@ void main() {
     pilot.hooks.onDoubleTap(hit, p);
   };
   const onTap = (hit, p) => {
+    if (pitGate?.isOpen) return;
     if (agentTripleClick()) return;
     if (!hit) return;
     const o = hit.owner;
     switch (o.kind) {
+      case "stargate-dialer": {
+        const player = pilot.player, at = player ? player.root.position : camera.position;
+        if (nearbyAction(at.x, at.y + (player ? 1.1 - player.baseY : 0), at.z, 2) === STARGATE_ACTION) pitGate.open();
+        else hud.toast("Move closer to the Stargate dialer.");
+        break;
+      }
       case "caveman":
         crew.pokeCave(o.cave);
         break;
@@ -44305,7 +44508,10 @@ void main() {
     matrixControl.promptRecovering = recovering;
     matrixControl.promptPressed = matrixControl.pressed;
     if (action) {
-      if (action === WAKE_ACTION) {
+      if (action === STARGATE_ACTION) {
+        hud.hint(COARSE ? "Tap DIAL to open the Stargate dialer" : "Press Space to open the Stargate dialer");
+        hud.setAct("DIAL");
+      } else if (action === WAKE_ACTION) {
         hud.hint(COARSE ? "Tap WAKE UP! to get up" : "Space wakes up · WASD changes sleeping pose");
         hud.setAct("WAKE UP!");
       } else if (action === ROLL_ACTION) {
@@ -45146,6 +45352,7 @@ void main() {
   };
   const update = (dt, elapsed) => {
     now = elapsed;
+    pitGate.update();
     hour = clock.read();
     daylight.sample(hour, RENDER_OPTS, clock.dayOfYear, islandLatitude, clock.continuousDay);
     RENDER_OPTS.time = elapsed;
@@ -45668,6 +45875,7 @@ void main() {
     TICKER_AT.y = gate.position.y + 6;
     GATE_VIEW.target.y = gate.position.y + 2.5;
     headquarters = buildHeadquarters();
+    buildPitGate();
     const bedrolls = headquarters.mattresses;
     headquarters.sleepAnchors = bedrolls;
     for (const slot of caves.slots) {
@@ -46049,6 +46257,7 @@ void main() {
     hud.onPreset(navigate);
     hud.setDetachedView("pile");
     hud.onAction((action, value) => {
+      if (pitGate.isOpen) return;
       if (action === "tip") demoTip(1200);
       else if (action === "tip-legendary") demoTip(120000);
       else if (action === "clear-loot") clearLoot();
@@ -46127,7 +46336,7 @@ void main() {
         get shown() {
           return pile.shown;
         },
-        island, mouths: island.mouths, labels, launchers, camera, weather, chain, beasts, pokeBeast, useProp, refreshChainSign, get chainSign() { return chainSign; }, get poolIsland() { return mempoolIsland; }, cameraPose: POSITION_POSE, crew, fx, controls: pilot.controls, props, altar, path: island.path.debug, headquarters, jumbotron, fireworks: launchFireworks, get fireworksPending() { return fireworksShells.length; }, agent: agent.debug,
+        stargate: pitGate, island, mouths: island.mouths, labels, launchers, camera, weather, chain, beasts, pokeBeast, useProp, refreshChainSign, get chainSign() { return chainSign; }, get poolIsland() { return mempoolIsland; }, cameraPose: POSITION_POSE, crew, fx, controls: pilot.controls, props, altar, path: island.path.debug, headquarters, jumbotron, fireworks: launchFireworks, get fireworksPending() { return fireworksShells.length; }, agent: agent.debug,
         scenery: {
           get candidateCount() { return scenery.length; },
           get visibleCount() { return sceneryVisible; },
@@ -46358,6 +46567,8 @@ void main() {
     mark("covered-view");
   };
   const leave = () => {
+    pitGate.dispose();
+    pitGate = null;
     uiGuideObjects = null; uiGuidesReady = false;
     if (enteringTween) enteringTween.alive = false;
     enteringTween = null;

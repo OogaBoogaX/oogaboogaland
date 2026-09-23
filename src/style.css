@@ -5966,3 +5966,10 @@ body.mine-dragging #tooltip {
     visibility: hidden;
   }
 }
+
+/* Native gate dialog shares the stone tablet style and stays inside mobile viewports. */
+#stargate-menu { width: min(28rem, calc(100vw - 2rem)); max-height: calc(var(--gate-height, 100dvh) - 2rem); overflow: auto; }
+#stargate-menu ol { list-style: none; padding: 0; display: grid; gap: 0.6rem; }
+#stargate-menu ol button { width: 100%; min-height: 48px; text-align: left; white-space: normal; }
+#stargate-menu ol button:disabled { opacity: 0.65; cursor: not-allowed; }
+#stargate-menu button:focus-visible { outline: 3px solid #83e0ed; outline-offset: 2px; }

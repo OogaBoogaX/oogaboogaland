@@ -2058,6 +2058,33 @@ const session = (url, steps, opts, final) => output.run({ lines: [], results: []
     // Watchdog kills Chrome so a wedged session never holds its lane; the longest healthy session is ~20 s.
     const browser = b;
     watchdog = setTimeout(() => { overran = true; browser.close(); }, SESSION_MS);
+    // Install before scripts/boot: observe every DSB runtime factory and prohibit live requests.
+    if (steps.some(([name]) => name.startsWith("stargate"))) await b.send("Page.addScriptToEvaluateOnNewDocument", { source: `(() => {
+      const counts = window.__gateDormancy = { enter: 0, land: 0, zuzu: 0, data: 0, tv: 0, audio: 0, chat: 0, fetch: 0, socket: 0, radio: 0 };
+      const watch = (object, key, method, counter) => {
+        let value;
+        Object.defineProperty(object, key, { configurable: true, get: () => value, set: next => {
+          value = next;
+          if (next && next[method]) { const original = next[method]; next[method] = function(...args) { counts[counter]++; return original.apply(this, args); }; }
+        } });
+      };
+      let namespace;
+      Object.defineProperty(window, "BL", { configurable: true, get: () => namespace, set: value => {
+        if (namespace) { namespace = value; return; }
+        namespace = value;
+        // Clock injection exercises elapsed deadlines without depending on this VM's frame rate.
+        window.__gateClock = 0; let gate;
+        Object.defineProperty(value, "stargate", { configurable: true, get: () => gate, set: next => {
+          gate = next; const create = next.create;
+          next.create = options => create({ ...options, now: options.now || (() => window.__gateClock) });
+        } });
+        for (const [key, method, counter] of [["dsbModels", "build", "land"], ["dsbAgent", "create", "zuzu"], ["dsbData", "create", "data"], ["dsbTv", "create", "tv"], ["dsbAudio", "create", "audio"], ["dsbConversation", "create", "chat"]]) watch(value, key, method, counter);
+        const scenes = {}; watch(scenes, "dsb", "enter", "enter"); value.scenes = scenes;
+      } });
+      window.fetch = () => { counts.fetch++; return Promise.reject(new Error("Unexpected network during gate test")); };
+      window.WebSocket = class { constructor() { counts.socket++; throw new Error("Unexpected socket during gate test"); } };
+      window.Audio = function() { counts.radio++; return document.createElement("audio"); };
+    })()` });
     // DSB exercises the real automatic startup against deterministic public-feed fixtures.
     if (steps.some(([name]) => name.includes("dsb"))) await b.send("Page.addScriptToEvaluateOnNewDocument", { source: `(() => {
       window.__dsbRadioFixture = { plays: 0, pauses: 0, element: null };
@@ -2224,6 +2251,7 @@ const SCENES = ["hub", "lab", "race", "drop", "orbit", "mine", "pool", "dsb"];
 const LANES = Number(process.env.LANES) || 8;
 const ARGS = process.argv.slice(2);
 for (const a of ARGS) if (!SCENES.includes(a) && !["unit", "perf", "full"].includes(a)) throw new Error(`Unknown argument "${a}" (unit | perf | full | ${SCENES.join(" | ")})`);
+const ONLY = process.env.ONLY || ""; // Optional substring within the requested scenes; defaults are unchanged.
 const FULL = ARGS.includes("full");
 const PICKED = FULL ? SCENES : SCENES.filter((s) => ARGS.includes(s));
 const PERF = FULL || ARGS.includes("perf");
@@ -2234,9 +2262,11 @@ const SCENE_BUDGET_S = 25;
 const tasks = [];
 const scene = (id, { query = "", steps, perf = false, opts = {}, label = "", url = null }) => {
   for (const s of steps) if (!WHY.test(s.why || "")) throw new Error(`${id}: step "${s.name}" must say why it exists: "regression: …", "playthrough: …", "rule: …" or "contract: …"`);
+  const chosen = !ONLY || (label && label.includes(ONLY)) ? steps : steps.filter(s => s.name.includes(ONLY));
+  if (!chosen.length) return;
   tasks.push({ name: perf ? `${id} perf` : opts.mobile ? `${id} phone` : label ? `${id} ${label}` : id, scene: id, perf, run: async () => {
     const t0 = Date.now();
-    await fold(url || sceneUrl(id, query), steps.map((s) => [s.name, s.run, s.open]), opts);
+    await fold(url || sceneUrl(id, query), chosen.map((s) => [s.name, s.run, s.open]), opts);
     const took = (Date.now() - t0) / 1000;
     if (took > SCENE_BUDGET_S) console.log(`SLOW ${id} took ${took.toFixed(1)} s against a ${SCENE_BUDGET_S} s budget`);
   } });
@@ -3183,6 +3213,76 @@ const dsbExit = async (b) => {
   await b.evaluate(`__ooga.pilot.navigate({ yaw: 0, pitch: 0, dist: 6, target: { x: -7, y: 1.7, z: 30.5 }, position: { x: -7, y: 0, z: 30.5 } }); __ooga.advance(0.1); document.getElementById("dsb-context").click();`);
   await untilPage(b, 'B.scene === "hub" && !B.transitioning', 15000);
 };
+// The gate is deliberately disconnected from scene travel in Phase 1.
+for (const mobile of [false, true]) scene("hub", { label: "stargate " + (mobile ? "canvas2d" : "webgl2"), query: "scene=hub&pos=0&wip=mine" + (mobile ? "&canvas2d=1" : ""), opts: mobile ? { ...PHONE_SIZE, motion: false } : { motion: true }, steps: [{ name: "stargate foundation " + (mobile ? "canvas2d" : "webgl2"), why: "rule: dialing must leave DSB dormant and preserve the Pit until traversal is implemented", run: async b => {
+  const check = (name, ok, detail = "") => record(name + (mobile ? " canvas2d" : " webgl2"), ok, detail);
+  const dormant = async stage => {
+    const counts = await b.evaluate(`window.__gateDormancy`);
+    check("stargate: no DSB runtime or network at " + stage, Object.values(counts).every(v => v === 0), JSON.stringify(counts));
+  };
+  const press = async selector => {
+    const p = await b.evaluate(`(() => { const e = document.querySelector(${JSON.stringify(selector)}); e.scrollIntoView({ block: "nearest" }); const r = e.getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; })()`);
+    if (mobile) { await b.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [p] }); await b.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] }); }
+    else await b.click(p.x, p.y);
+  };
+  await dormant("hub startup");
+  const setup = await b.evaluate(`(() => {
+    const B = __ooga, G = BL.scenes.hub.debug.stargate, h = B.island.headquarters.basement.hole, p = G.placement;
+    window.__oldGate = G;
+    B.pilot.possess(B.cavemen.get("YellowBrokeIt"));
+    B.pilot.navigate({ position: { x: p.x, y: p.y, z: p.z + 1.3 }, yaw: 0, pitch: 0.45, dist: 5 }); B.advance(0.2);
+    return { state: G.state, mine: BL.caves.slots.find(s => s.id === "c10").scene, dsbSlot: BL.caves.slots.some(s => s.scene === "dsb"), placement: p, radius: G.radius, outer: G.outerRadius, hole: { x: h.x, z: h.z, floor: h.floor }, act: document.getElementById("act").textContent, renderer: B.renderer.kind };
+  })()`);
+  check("stargate: dormant Pit installation keeps Mine c10, no DSB cave, and native DIAL", setup.state === "OFF" && setup.mine === "mine" && !setup.dsbSlot && setup.act.includes("DIAL") && setup.radius === 4 && setup.outer === 4.5 && setup.placement.y === setup.hole.floor && setup.placement.clearance >= 0.8 && setup.renderer === (mobile ? "canvas2d" : "webgl2"), JSON.stringify(setup));
+  if (mobile) await press("#act"); else await tapKey(b, " ");
+  const menu = await b.evaluate(`(() => { const d = document.getElementById("stargate-menu"), b = [...d.querySelectorAll("ol button")], r = d.getBoundingClientRect(); return { open: d.open, disabled: b.map(e => e.disabled), focus: document.activeElement === b[0], focused: document.activeElement.outerHTML.slice(0, 180), fits: r.left >= 0 && r.right <= innerWidth && r.top >= 0 && r.bottom <= innerHeight }; })()`);
+  check("stargate: native menu has five accessible destinations on desktop/touch", menu.open && menu.disabled.join() === "false,true,true,true,true" && menu.focus && menu.fits, JSON.stringify(menu));
+  await dormant("menu opening");
+  const blocked = await b.evaluate(`(() => { const B = __ooga, p = B.crew.player.root.position, old = { x: p.x, z: p.z }, ammo = B.crew.player.weapon.ammo; document.activeElement.dispatchEvent(new KeyboardEvent("keydown", { key: "w", bubbles: true })); document.activeElement.dispatchEvent(new KeyboardEvent("keydown", { key: " ", bubbles: true })); B.advance(0.3); return old.x === p.x && old.z === p.z && ammo === B.crew.player.weapon.ammo && BL.scenes.hub.debug.stargate.state === "OFF"; })()`);
+  check("stargate: dialog owns movement/action input", blocked);
+  if (mobile) await press("#stargate-menu .modal-close"); else await b.key("Escape");
+  const cancelled = await b.evaluate(`({ open: document.getElementById("stargate-menu").open, axes: { ...__ooga.controls.read() }, focus: document.activeElement.tagName })`);
+  check("stargate: cancel closes and clears held movement", !cancelled.open && cancelled.axes.y === 0, JSON.stringify(cancelled));
+  await press("#act");
+  await press('#stargate-menu [data-destination="0"]');
+  check("stargate: selection begins activation without duplicate activation", await b.evaluate(`__oldGate.state === "ACTIVATING" && !__oldGate.activate(0) && !document.getElementById("stargate-menu").open`));
+  await dormant("selection");
+  await b.evaluate(`__gateClock = 700; __oldGate.update()`);
+  check("stargate: activation paints bounded upward geometry or reduced-motion horizon", await b.evaluate(`__oldGate.state === "ACTIVATING" && __oldGate.horizon.visible && (__oldGate.reducedMotion ? !__oldGate.kawoosh.visible : __oldGate.kawoosh.visible && __oldGate.kawoosh.scale.y <= 2.4)`));
+  await b.evaluate(`__gateClock = 2000; __oldGate.update()`);
+  check("stargate: active horizon appears after activation", await b.evaluate(`__oldGate.state === "ACTIVE" && __oldGate.horizon.visible && !__oldGate.kawoosh.visible`));
+  await dormant("active window");
+  // A controllable clock exercises exact boundaries and a long gap with no update (hidden tab).
+  const timing = await b.evaluate(`(() => {
+    let time = 0, crossings = 0; const g = BL.stargate.create({ radius: 2, outerRadius: 2.3, position: { x: 0, y: 0, z: 0 }, destinations: [{ id: "test", enabled: true, label: "Test" }], now: () => time, onTraverse: () => crossings++ });
+    const states = []; g.activate(0); for (const at of [1999, 2000, 11999, 12000, 12450]) { time = at; g.update(); states.push(g.state); }
+    const repeat = g.activate(0); time += 2000; g.update(); const wrong = g.traverse({ x: 0, y: -1, z: 0 }, { x: 0, y: 1, z: 0 }); const outside = g.traverse({ x: 3, y: 1, z: 0 }, { x: 3, y: -1, z: 0 }); const hit = g.traverse({ x: 0, y: 1, z: 0 }, { x: 0, y: -1, z: 0 }); const twice = g.traverse({ x: 0, y: 1, z: 0 }, { x: 0, y: -1, z: 0 });
+    time += 60000; g.update(); const expired = g.state; g.dispose(); return { states, repeat, wrong, outside, hit, twice, crossings, expired, disposed: g.disposed };
+  })()`);
+  check("stargate: exact 2s/10s boundaries, expiry without frames, reuse and opt-in directional crossing", timing.states.join() === "ACTIVATING,ACTIVE,ACTIVE,SHUTDOWN,OFF" && timing.repeat && !timing.wrong && !timing.outside && timing.hit && !timing.twice && timing.crossings === 1 && timing.expired === "OFF" && timing.disposed, JSON.stringify(timing));
+  await b.evaluate(`__gateClock = 12450; __oldGate.update()`);
+  check("stargate: elapsed deadline shuts the gate down unused", await b.evaluate(`__oldGate.state === "OFF" && !__oldGate.horizon.visible`));
+  await dormant("shutdown");
+  const falls = await b.evaluate(`(async () => {
+    const B = __ooga, g = __oldGate, hole = B.island.headquarters.basement.hole, results = [];
+    for (const active of [false, true]) {
+      if (active) { g.activate(0); __gateClock += 2000; g.update(); }
+      // Position inside the open shaft, then let the real crew fall and abyss handler run.
+      B.pilot.navigate({ position: { x: hole.x, y: hole.floor - 1, z: hole.z }, yaw: 0, pitch: 0.3, dist: 4 });
+      B.advance(0.15, 1 / 30); const fell = B.crew.player.root.position.y - B.crew.player.baseY < hole.floor - 1;
+      B.pilot.navigate({ position: { x: hole.x, y: -60.1, z: hole.z }, yaw: 0, pitch: 0.3, dist: 4 }); B.advance(0.1, 1 / 30); results.push({ scene: B.scene, fell, active: g.state, feet: B.crew.player.root.position.y - B.crew.player.baseY });
+    }
+    return results;
+  })()`);
+  check("stargate: both dormant and active Pit retain abyss respawn without DSB", falls.every(r => r.scene === "hub" && r.fell && r.feet > -10) && falls[1].active === "ACTIVE", JSON.stringify(falls));
+  await dormant("Pit falls");
+  await b.evaluate(`__ooga.go("lab")`); await untilPage(b, 'B.scene === "lab" && !B.transitioning');
+  check("stargate: leaving disposes effects, root and menu ownership", await b.evaluate(`__oldGate.disposed && !__oldGate.root.parent && !__oldGate.dialer.parent && !__oldGate.horizon.visible && !__oldGate.open() && !__oldGate.activate(0) && !document.getElementById("stargate-menu").open`));
+  await b.evaluate(`__ooga.go("hub")`); await untilPage(b, 'B.scene === "hub" && !B.transitioning', 15000);
+  check("stargate: return creates one fresh OFF controller", await b.evaluate(`BL.scenes.hub.debug.stargate !== __oldGate && BL.scenes.hub.debug.stargate.state === "OFF"`));
+  await dormant("round trip");
+} }] });
+
 scene("dsb", { label: "dsb zuzu conversation", url: hubPage(dist), steps: [{ name: "dsb zuzu conversation", why: "contract: preserve DSB scene behavior independently of the hub entrance", run: async (b) => {
   record("dsb compatibility: built CSP preserves exactly the weather and DSB network permissions", await b.evaluate(`(() => {
     const policy = document.querySelector('meta[http-equiv="Content-Security-Policy"]').content;
@@ -4329,6 +4429,7 @@ const unitChecks = async () => {
 
 const runTasks = async () => {
   const picked = tasks.filter((t) => (t.perf ? PERF : PICKED.includes(t.scene)));
+  if (ONLY && (PICKED.length || PERF) && !picked.length) throw new Error(`No requested scene checks match ONLY=${ONLY}`);
   // The perf floor runs first and alone, so no other Chrome skews its frame timing.
   realTimeTask = true;
   for (const t of picked.filter((t) => t.perf)) await t.run();

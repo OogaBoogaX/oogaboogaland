@@ -181,7 +181,7 @@
   };
 
   // One visit's state: created in enter, dropped in leave.
-  let jumbotronSpot, oogatronUnsub, renderer, game, world, go, lootEnabled, testBananas, root, camera, overlayCanvas, island, pathNode, altar, hud, hooks, input, pilot, fx, cameraCover, bananaCover, solids, rockGuides, objectGuides, sightGuides, bananaGuides, pileGuides, platformGuides, mirrorGuides, pile, crew, crates, critters, clock, presets, entering, jetpack, jetpackState, jetpackCarrier, jetpackWearer, lastJetpackCloud, mirrorCave, matrixCave, matrixControl, gateRain, fire, headquarters, dockStairs, jumbotron, positionDebug, agent, agentPlay;
+  let jumbotronSpot, oogatronUnsub, renderer, game, world, go, lootEnabled, testBananas, root, camera, overlayCanvas, island, pathNode, altar, hud, hooks, input, pilot, fx, cameraCover, bananaCover, solids, rockGuides, objectGuides, sightGuides, bananaGuides, pileGuides, platformGuides, mirrorGuides, pile, crew, crates, critters, clock, presets, entering, jetpack, jetpackState, jetpackCarrier, jetpackWearer, lastJetpackCloud, mirrorCave, matrixCave, matrixControl, gateRain, fire, headquarters, dockStairs, jumbotron, positionDebug, agent, agentPlay, pitGate;
   let magazine, magazineState, breakables;
   const JETPACK_HUD_STATE = { owned: false, equipped: false, fuel: 1, blocked: false };
   let enteringTween = null;
@@ -1404,6 +1404,43 @@
       }
     }
     return rim;
+  };
+  const buildPitGate = () => {
+    const basement = island.headquarters.basement, hole = basement.hole;
+    const distance = (hole.mouthRadius + basement.room.radius) / 2;
+    // Find the clearest bearing between authored room approaches and ramp paths.
+    // Keep the dialer on the flat annulus, not on the lip or a circulation route.
+    let best = -Infinity, x = 0, z = 0;
+    const segmentDistance = (px, pz, ax, az, bx, bz) => {
+      const dx = bx - ax, dz = bz - az, t = Math.max(0, Math.min(1, ((px - ax) * dx + (pz - az) * dz) / (dx * dx + dz * dz || 1)));
+      return Math.hypot(px - ax - dx * t, pz - az - dz * t);
+    };
+    for (let i = 0; i < 64; i++) {
+      const angle = i * Math.PI / 32, px = hole.x + Math.sin(angle) * distance, pz = hole.z + Math.cos(angle) * distance;
+      let clearance = Infinity;
+      for (const room of basement.rooms) {
+        const length = Math.hypot(room.approach.x - hole.x, room.approach.z - hole.z);
+        const ax = hole.x + (room.approach.x - hole.x) / length * hole.mouthRadius, az = hole.z + (room.approach.z - hole.z) / length * hole.mouthRadius;
+        clearance = Math.min(clearance, segmentDistance(px, pz, ax, az, room.approach.x, room.approach.z) - room.corridorWidth / 2);
+      }
+      for (const ramp of basement.ramps) for (let j = 1; j < ramp.samples.length; j++) {
+        const a = ramp.samples[j - 1], b = ramp.samples[j];
+        clearance = Math.min(clearance, segmentDistance(px, pz, a.x, a.z, b.x, b.z) - ramp.width / 2);
+      }
+      if (clearance > best) { best = clearance; x = px; z = pz; }
+    }
+    if (best < 0.8) throw new Error("No clear basement Stargate dialer placement");
+    pitGate = BL.stargate.create({ radius: hole.radius, outerRadius: hole.mouthRadius,
+      position: { x: hole.x, y: hole.floor + 0.03, z: hole.z },
+      destinations: [{ id: "dsb", label: "DSB Land", enabled: true }, ...Array.from({ length: 4 }, (_, i) => ({ id: "quarantine-" + i, label: "Quarantined - Replicator Infestation - Clean Up In Progress", enabled: false }))],
+      onMenu: open => { pilot.setActive(!open); pilot.controls.reset(); input.reset(); hud.tooltip.hide(); }
+    });
+    Object.assign(pitGate.dialer.position, { x, y: basement.floor, z });
+    pitGate.dialer.rotation.y = Math.atan2(hole.x - x, hole.z - z);
+    pitGate.placement = { x, y: basement.floor, z, clearance: best };
+    addChild(root, pitGate.root, pitGate.dialer);
+    solids.add(pitGate.dialer); // Only the pedestal is solid. The Pit remains the same open shaft.
+    addTarget(pitGate.dialer, { kind: "stargate-dialer" }, { radius: 0.65 });
   };
   const buildHeadquarters = () => {
     const floor = island.headquarters.floor, basement = island.headquarters.basement;
@@ -3126,6 +3163,8 @@
   const tooltipFor = (hit) => {
     const o = hit.owner;
     switch (o.kind) {
+      case "stargate-dialer":
+        return "Stargate dialer · use nearby";
       case "caveman":
         return o.cave.traits.display;
       case "crate":
@@ -3314,6 +3353,7 @@
     if (!o.active) return;
     reactProp(o, p);
   };
+  const STARGATE_ACTION = { kind: "stargate-dialer" };
   const WAKE_ACTION = { kind: "wake" }, ROLL_ACTION = { kind: "roll" }, STAND_ACTION = { kind: "stand" };
   const TAP_RAY = { ox: 0, oy: 0, oz: 0, dx: 0, dy: 0, dz: 0 };
   const nearbyAction = (x, y, z, reach) => {
@@ -3322,6 +3362,10 @@
     if (player && player.camp.seat) return STAND_ACTION;
     if (player && crew.sleeping) return WAKE_ACTION;
     if (player && pilot.moving) return null;
+    if (pitGate && !pitGate.isOpen) {
+      const p = pitGate.dialer.position;
+      if (actionWithinReach(x, y, z, p.x, p.y + 1.1, p.z, Math.min(reach, 2))) return STARGATE_ACTION;
+    }
     if (player && player.hop < 0.03 && player.hopV <= 0 && headquarters) {
       const feet = player.root.position.y - player.baseY;
       const floor = bedSupportAt(x, z, feet + 0.04, 0, PLAYER_RADIUS);
@@ -3356,7 +3400,8 @@
     return null;
   };
   const useNearbyAction = (action) => {
-    if (action === WAKE_ACTION) crew.wakePlayer();
+    if (action === STARGATE_ACTION) pitGate.open();
+    else if (action === WAKE_ACTION) crew.wakePlayer();
     else if (action === ROLL_ACTION) crew.dropRoll();
     else if (action === STAND_ACTION) crew.standPlayer();
     else if (action.kind === "bench") crew.sitPlayer(action);
@@ -3440,10 +3485,17 @@
     pilot.hooks.onDoubleTap(hit, p);
   };
   const onTap = (hit, p) => {
+    if (pitGate?.isOpen) return;
     if (agentTripleClick()) return;
     if (!hit) return;
     const o = hit.owner;
     switch (o.kind) {
+      case "stargate-dialer": {
+        const player = pilot.player, at = player ? player.root.position : camera.position;
+        if (nearbyAction(at.x, at.y + (player ? 1.1 - player.baseY : 0), at.z, 2) === STARGATE_ACTION) pitGate.open();
+        else hud.toast("Move closer to the Stargate dialer.");
+        break;
+      }
       case "caveman":
         crew.pokeCave(o.cave);
         break;
@@ -3710,7 +3762,10 @@
     matrixControl.promptRecovering = recovering;
     matrixControl.promptPressed = matrixControl.pressed;
     if (action) {
-      if (action === WAKE_ACTION) {
+      if (action === STARGATE_ACTION) {
+        hud.hint(COARSE ? "Tap DIAL to open the Stargate dialer" : "Press Space to open the Stargate dialer");
+        hud.setAct("DIAL");
+      } else if (action === WAKE_ACTION) {
         hud.hint(COARSE ? "Tap WAKE UP! to get up" : "Space wakes up · WASD changes sleeping pose");
         hud.setAct("WAKE UP!");
       } else if (action === ROLL_ACTION) {
@@ -4551,6 +4606,7 @@
   };
   const update = (dt, elapsed) => {
     now = elapsed;
+    pitGate.update();
     hour = clock.read();
     daylight.sample(hour, RENDER_OPTS, clock.dayOfYear, islandLatitude, clock.continuousDay);
     RENDER_OPTS.time = elapsed;
@@ -5073,6 +5129,7 @@
     TICKER_AT.y = gate.position.y + 6;
     GATE_VIEW.target.y = gate.position.y + 2.5;
     headquarters = buildHeadquarters();
+    buildPitGate();
     const bedrolls = headquarters.mattresses;
     headquarters.sleepAnchors = bedrolls;
     for (const slot of caves.slots) {
@@ -5454,6 +5511,7 @@
     hud.onPreset(navigate);
     hud.setDetachedView("pile");
     hud.onAction((action, value) => {
+      if (pitGate.isOpen) return;
       if (action === "tip") demoTip(1200);
       else if (action === "tip-legendary") demoTip(120000);
       else if (action === "clear-loot") clearLoot();
@@ -5532,7 +5590,7 @@
         get shown() {
           return pile.shown;
         },
-        island, mouths: island.mouths, labels, launchers, camera, weather, chain, beasts, pokeBeast, useProp, refreshChainSign, get chainSign() { return chainSign; }, get poolIsland() { return mempoolIsland; }, cameraPose: POSITION_POSE, crew, fx, controls: pilot.controls, props, altar, path: island.path.debug, headquarters, jumbotron, fireworks: launchFireworks, get fireworksPending() { return fireworksShells.length; }, agent: agent.debug,
+        stargate: pitGate, island, mouths: island.mouths, labels, launchers, camera, weather, chain, beasts, pokeBeast, useProp, refreshChainSign, get chainSign() { return chainSign; }, get poolIsland() { return mempoolIsland; }, cameraPose: POSITION_POSE, crew, fx, controls: pilot.controls, props, altar, path: island.path.debug, headquarters, jumbotron, fireworks: launchFireworks, get fireworksPending() { return fireworksShells.length; }, agent: agent.debug,
         scenery: {
           get candidateCount() { return scenery.length; },
           get visibleCount() { return sceneryVisible; },
@@ -5763,6 +5821,8 @@
     mark("covered-view");
   };
   const leave = () => {
+    pitGate.dispose();
+    pitGate = null;
     uiGuideObjects = null; uiGuidesReady = false;
     if (enteringTween) enteringTween.alive = false;
     enteringTween = null;
