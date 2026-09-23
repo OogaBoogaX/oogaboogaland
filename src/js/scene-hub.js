@@ -184,7 +184,8 @@
   let jumbotronSpot, oogatronUnsub, renderer, game, world, go, lootEnabled, testBananas, root, camera, overlayCanvas, island, pathNode, altar, hud, hooks, input, pilot, fx, cameraCover, bananaCover, solids, rockGuides, objectGuides, sightGuides, bananaGuides, pileGuides, platformGuides, mirrorGuides, pile, crew, crates, critters, clock, presets, entering, jetpack, jetpackState, jetpackCarrier, jetpackWearer, lastJetpackCloud, mirrorCave, matrixCave, matrixControl, gateRain, fire, headquarters, dockStairs, jumbotron, positionDebug, agent, agentPlay, pitGate;
   let magazine, magazineState, breakables;
   const JETPACK_HUD_STATE = { owned: false, equipped: false, fuel: 1, blocked: false };
-  let enteringTween = null;
+  let enteringTween = null, pitDeparting = false;
+  const pitPrevious = { x: 0, y: 0, z: 0 };
   let stateTimer = 0, hintTimer = 0, meterTimer = 0, now = 0, hour = 12, unsubscribeActivity = null;
   let weather = null, unsubscribeMempool = null, unsubscribeChain = null, mempoolIsland = null;
   // The two boards across the hole from the vine bridge, one reading the chain and one reading the
@@ -1433,6 +1434,13 @@
     pitGate = BL.stargate.create({ radius: hole.radius, outerRadius: hole.mouthRadius,
       position: { x: hole.x, y: hole.floor + 0.03, z: hole.z },
       destinations: [{ id: "dsb", label: "DSB Land", enabled: true }, ...Array.from({ length: 4 }, (_, i) => ({ id: "quarantine-" + i, label: "Quarantined - Replicator Infestation - Clean Up In Progress", enabled: false }))],
+      onTraverse: id => {
+        if (entering || !pilot.player || id !== "dsb") return;
+        entering = pitDeparting = true;
+        releaseForScene(id);
+        pilot.controls.reset(); input.reset(); pilot.setActive(false);
+        go(id);
+      },
       onMenu: open => { pilot.setActive(!open); pilot.controls.reset(); input.reset(); hud.tooltip.hide(); }
     });
     Object.assign(pitGate.dialer.position, { x, y: basement.floor, z });
@@ -3426,14 +3434,17 @@
     useNearbyAction(action);
     return true;
   };
+  const releaseForScene = id => {
+    if (id === "dsb") world.pilot = pilot.player ? pilot.player.traits.name : null;
+    pilot.release(true);
+    hud.tooltip.hide();
+  };
   const enterScene = (view, id) => {
     if (entering) return;
     // A game still being built is unregistered unless the page opted in (director.js, `wip`).
     if (!BL.scenes[id]) return hud.toast("Not open yet. Ooga still building it.");
     entering = true;
-    if (id === "dsb") world.pilot = pilot.player ? pilot.player.traits.name : null;
-    pilot.release(true);
-    hud.tooltip.hide();
+    releaseForScene(id);
     const orbit = pilot.orbit;
     const from = { x: orbit.tx, y: orbit.ty, z: orbit.tz, dist: orbit.dist, yaw: orbit.yaw };
     const turn = Math.atan2(Math.sin(view.yaw - from.yaw), Math.cos(view.yaw - from.yaw));
@@ -4607,6 +4618,7 @@
   const update = (dt, elapsed) => {
     now = elapsed;
     pitGate.update();
+    if (pitDeparting) return; // The accepted fall stays frozen through the director fade.
     hour = clock.read();
     daylight.sample(hour, RENDER_OPTS, clock.dayOfYear, islandLatitude, clock.continuousDay);
     RENDER_OPTS.time = elapsed;
@@ -4628,7 +4640,12 @@
     mirrorCave.damage.update(dt);
     syncMirrorDamage();
     mirrorCave.ripples.update(dt, elapsed);
+    const fallingPlayer = pilot.player;
+    if (fallingPlayer) Object.assign(pitPrevious, fallingPlayer.root.position);
     crew.update(dt, elapsed);
+    // Sweep before any abyss equipment loss or respawn, including a whole-shaft fall in one step.
+    if (!entering && !pilot.poseHeld && fallingPlayer && fallingPlayer === pilot.player
+      && pitGate.traverse(pitPrevious, fallingPlayer.root.position, fallingPlayer.bodyRadius)) return;
     agent.setForm(agent.revealed || matrixCoverage(agent.root.position.x, agent.root.position.z) > 0.5 ? "code" : "ape");
     agent.update(dt);
     // The called-in Agents live their ten seconds, then leave nothing behind.
@@ -5039,6 +5056,7 @@
 
   const enter = (ctx) => {
     ({ renderer, game, world, go, lootEnabled, testBananas, agentPlay } = ctx);
+    pitDeparting = false;
     overlayCanvas = ctx.overlay;
     jetpackState = world.jetpack || (world.jetpack = { owned: false, owner: null, fuel: 1 });
     magazineState = {

@@ -3,12 +3,12 @@
   "use strict";
   const BL = window.BL = window.BL || {}, S = BL.scene;
   const ACTIVATION_MS = 2000, ACTIVE_MS = 10000, SHUTDOWN_MS = 450;
-  const create = ({ radius, outerRadius, position, rotation = { x: 0, y: 0, z: 0 }, destinations,
+  const create = ({ radius, outerRadius, position, rotation = { x: 0, y: 0, z: 0 }, destinations = [], receiving = false,
     onMenu = () => {}, onTraverse = null, now = () => performance.now(), reducedMotion = matchMedia("(prefers-reduced-motion: reduce)").matches }) => {
     const model = BL.stargateModels.build(radius, outerRadius);
     Object.assign(model.root.position, position); Object.assign(model.root.rotation, rotation);
     const inverse = BL.math.mat4.create();
-    let state = "OFF", started = 0, destination = null, disposed = false, crossed = false, opened = false, focus = null, focusFrame = 0;
+    let state = receiving ? "ACTIVE" : "OFF", started = 0, destination = null, disposed = false, crossed = false, opened = false, focus = null, focusFrame = 0;
     const dialog = document.getElementById("stargate-menu"), list = dialog.querySelector("ol"), closeButton = dialog.querySelector(".modal-close"), status = dialog.querySelector("[role=status]");
     const viewport = window.visualViewport;
     const buttons = destinations.map((entry, index) => {
@@ -27,7 +27,7 @@
     const update = () => {
       if (disposed) return;
       const elapsed = Math.max(0, now() - started);
-      if (state !== "OFF") {
+      if (!receiving && state !== "OFF") {
         state = elapsed < ACTIVATION_MS ? "ACTIVATING" : elapsed < ACTIVATION_MS + ACTIVE_MS ? "ACTIVE" : elapsed < ACTIVATION_MS + ACTIVE_MS + SHUTDOWN_MS ? "SHUTDOWN" : "OFF";
       }
       const k = state === "ACTIVATING" ? elapsed / ACTIVATION_MS : state === "SHUTDOWN" ? 1 - (elapsed - ACTIVATION_MS - ACTIVE_MS) / SHUTDOWN_MS : state === "ACTIVE" ? 1 : 0;
@@ -46,7 +46,7 @@
     const activate = index => {
       update();
       const entry = destinations[index];
-      if (disposed || state !== "OFF" || !entry || !entry.enabled) return false;
+      if (receiving || disposed || state !== "OFF" || !entry || !entry.enabled) return false;
       destination = entry.id; started = now(); crossed = false; state = "ACTIVATING"; update(); return true;
     };
     const choose = event => {
@@ -63,9 +63,9 @@
     };
     const closed = () => { if (!dialog.open) finishClose(); };
     const open = () => {
-      if (disposed || opened || dialog.open) return false;
+      if (receiving || disposed || opened || dialog.open) return false;
       focus = document.activeElement; opened = true;
-      list.replaceChildren(...buttons.map(row => row.li)); status.textContent = "Travel connection pending. The Pit remains open.";
+      list.replaceChildren(...buttons.map(row => row.li)); status.textContent = "Enter the active Pit horizon to travel. An inactive Pit is still an abyss.";
       onMenu(true); dialog.showModal(); fit();
       const first = buttons.find(row => !row.button.disabled)?.button || closeButton;
       first.focus({ preventScroll: true });
@@ -73,7 +73,7 @@
       focusFrame = requestAnimationFrame(() => { focusFrame = 0; if (opened) first.focus({ preventScroll: true }); });
       return true;
     };
-    // Explicit opt-in only. The hub does NOT call this in Phase 1. Signed local +Y -> -Y is front entry.
+    // Signed local +Y -> -Y is front entry; receiving scenes explicitly choose the back.
     const traverse = (from, to, bodyRadius = 0, direction = 1) => {
       update();
       if (!onTraverse || state !== "ACTIVE" || crossed || disposed || !Number.isFinite(bodyRadius) || bodyRadius < 0 || bodyRadius >= radius || (direction !== 1 && direction !== -1)) return false;
@@ -86,18 +86,22 @@
       if (!Number.isFinite(lx + lz) || Math.hypot(lx, lz) > radius - bodyRadius) return false;
       crossed = true; onTraverse(destination); return true;
     };
-    dialog.addEventListener("click", choose); closeButton.addEventListener("click", close); dialog.addEventListener("cancel", cancel); dialog.addEventListener("close", closed); dialog.addEventListener("keydown", key); dialog.addEventListener("focusin", focusDialog);
-    window.addEventListener("resize", fit); if (viewport) viewport.addEventListener("resize", fit);
+    if (!receiving) {
+      dialog.addEventListener("click", choose); closeButton.addEventListener("click", close); dialog.addEventListener("cancel", cancel); dialog.addEventListener("close", closed); dialog.addEventListener("keydown", key); dialog.addEventListener("focusin", focusDialog);
+      window.addEventListener("resize", fit); if (viewport) viewport.addEventListener("resize", fit);
+    }
+    // Receiving gates stay lit for the passage, independently of the outgoing dial window.
+    const finishReceiving = () => { if (receiving) { state = "OFF"; update(); } };
     const dispose = () => {
       if (disposed) return;
       close(); disposed = true; state = "OFF";
       dialog.removeEventListener("click", choose); closeButton.removeEventListener("click", close); dialog.removeEventListener("cancel", cancel); dialog.removeEventListener("close", closed); dialog.removeEventListener("keydown", key); dialog.removeEventListener("focusin", focusDialog);
       window.removeEventListener("resize", fit); if (viewport) viewport.removeEventListener("resize", fit);
-      list.replaceChildren(); model.horizon.visible = model.kawoosh.visible = false;
+      if (!receiving) list.replaceChildren(); model.horizon.visible = model.kawoosh.visible = false;
       for (const node of model.ripples) node.visible = false;
       for (const node of [model.root, model.dialer]) if (node.parent) S.removeChild(node.parent, node);
     };
-    return { ...model, radius, outerRadius, open, close, activate, update, traverse, dispose, reducedMotion,
+    return { ...model, radius, outerRadius, open, close, activate, update, traverse, finishReceiving, dispose, reducedMotion,
       get state() { return state; }, get isOpen() { return opened; }, get disposed() { return disposed; } };
   };
   BL.stargate = { create, ACTIVATION_MS, ACTIVE_MS, SHUTDOWN_MS };

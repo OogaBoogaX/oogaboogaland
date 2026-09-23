@@ -2089,7 +2089,7 @@ const session = (url, steps, opts, final) => output.run({ lines: [], results: []
     if (steps.some(([name]) => name.includes("dsb"))) await b.send("Page.addScriptToEvaluateOnNewDocument", { source: `(() => {
       window.__dsbRadioFixture = { plays: 0, pauses: 0, element: null };
       if (${process.env.DSB_RADIO_LIVE !== "1"}) window.Audio = class {
-        constructor() { this.src = ""; __dsbRadioFixture.element = this; }
+        constructor() { if (window.__gateDormancy) __gateDormancy.radio++; this.src = ""; __dsbRadioFixture.element = this; }
         play() { __dsbRadioFixture.plays++; queueMicrotask(() => { if (this.src && this.onplaying) this.onplaying(); }); return Promise.resolve(); }
         pause() { __dsbRadioFixture.pauses++; }
         load() {}
@@ -2098,6 +2098,7 @@ const session = (url, steps, opts, final) => output.run({ lines: [], results: []
       const originalFetch = window.fetch;
       window.__dsbFeedFixture = { requests: 0, sockets: 0, closed: 0 };
       window.fetch = async (url, options) => {
+        if (window.__gateDormancy) __gateDormancy.fetch++;
         if (String(url).startsWith("https://noderunnersradio.com/")) {
           window.__dsbTvFixture = window.__dsbTvFixture || { invoices: 0, searches: 0 }; let value;
           if (url.includes("/api/search")) { __dsbTvFixture.searches++; value = { results: [{ title: "Banana Beats", artist: "Ooga", source: "library", sats: 21 }] }; }
@@ -2112,7 +2113,7 @@ const session = (url, steps, opts, final) => output.run({ lines: [], results: []
         return { ok: true, json: async () => url.includes("candles") ? [[minute - 120, 59900, 60200, 60000, 60100], [minute - 60, 60000, 60400, 60100, 60300], [minute, 60200, 60500, 60300, 60400]] : url.endsWith("/height") ? 900000 : url.includes("recommended") ? { fastestFee: 8 } : { vsize: 20000000 } };
       };
       window.WebSocket = class {
-        constructor() { __dsbFeedFixture.sockets++; this.closed = false; queueMicrotask(() => { if (!this.closed) { if (this.onopen) this.onopen(); if (this.onmessage) this.onmessage({ data: JSON.stringify({ type: "ticker", product_id: "BTC-USD", price: "60400", time: new Date().toISOString() }) }); } }); }
+        constructor() { if (window.__gateDormancy) __gateDormancy.socket++; __dsbFeedFixture.sockets++; this.closed = false; queueMicrotask(() => { if (!this.closed) { if (this.onopen) this.onopen(); if (this.onmessage) this.onmessage({ data: JSON.stringify({ type: "ticker", product_id: "BTC-USD", price: "60400", time: new Date().toISOString() }) }); } }); }
         send() {}
         close() { if (!this.closed) { this.closed = true; __dsbFeedFixture.closed++; } }
       };
@@ -3213,8 +3214,8 @@ const dsbExit = async (b) => {
   await b.evaluate(`__ooga.pilot.navigate({ yaw: 0, pitch: 0, dist: 6, target: { x: -7, y: 1.7, z: 30.5 }, position: { x: -7, y: 0, z: 30.5 } }); __ooga.advance(0.1); document.getElementById("dsb-context").click();`);
   await untilPage(b, 'B.scene === "hub" && !B.transitioning', 15000);
 };
-// The gate is deliberately disconnected from scene travel in Phase 1.
-for (const mobile of [false, true]) scene("hub", { label: "stargate " + (mobile ? "canvas2d" : "webgl2"), query: "scene=hub&pos=0&wip=mine" + (mobile ? "&canvas2d=1" : ""), opts: mobile ? { ...PHONE_SIZE, motion: false } : { motion: true }, steps: [{ name: "stargate foundation " + (mobile ? "canvas2d" : "webgl2"), why: "rule: dialing must leave DSB dormant and preserve the Pit until traversal is implemented", run: async b => {
+// Dialing and unused gates remain completely independent of destination construction.
+for (const mobile of [false, true]) scene("hub", { label: "stargate " + (mobile ? "canvas2d" : "webgl2"), query: "scene=hub&pos=0&wip=mine" + (mobile ? "&canvas2d=1" : ""), opts: mobile ? { ...PHONE_SIZE, motion: false } : { motion: true }, steps: [{ name: "stargate foundation " + (mobile ? "canvas2d" : "webgl2"), why: "rule: dialing must leave DSB dormant and preserve ordinary abyss falls", run: async b => {
   const check = (name, ok, detail = "") => record(name + (mobile ? " canvas2d" : " webgl2"), ok, detail);
   const dormant = async stage => {
     const counts = await b.evaluate(`window.__gateDormancy`);
@@ -3265,8 +3266,10 @@ for (const mobile of [false, true]) scene("hub", { label: "stargate " + (mobile 
   await dormant("shutdown");
   const falls = await b.evaluate(`(async () => {
     const B = __ooga, g = __oldGate, hole = B.island.headquarters.basement.hole, results = [];
-    for (const active of [false, true]) {
-      if (active) { g.activate(0); __gateClock += 2000; g.update(); }
+    for (const state of ["OFF", "ACTIVATING", "SHUTDOWN", "expired"]) {
+      if (state === "ACTIVATING") g.activate(0);
+      if (state === "SHUTDOWN") { __gateClock += 12000; g.update(); }
+      if (state === "expired") { __gateClock += 1000; g.update(); }
       // Position inside the open shaft, then let the real crew fall and abyss handler run.
       B.pilot.navigate({ position: { x: hole.x, y: hole.floor - 1, z: hole.z }, yaw: 0, pitch: 0.3, dist: 4 });
       B.advance(0.15, 1 / 30); const fell = B.crew.player.root.position.y - B.crew.player.baseY < hole.floor - 1;
@@ -3274,13 +3277,63 @@ for (const mobile of [false, true]) scene("hub", { label: "stargate " + (mobile 
     }
     return results;
   })()`);
-  check("stargate: both dormant and active Pit retain abyss respawn without DSB", falls.every(r => r.scene === "hub" && r.fell && r.feet > -10) && falls[1].active === "ACTIVE", JSON.stringify(falls));
+  check("stargate: inactive, activating, shutdown and expired Pit retain abyss respawn", falls.every(r => r.scene === "hub" && r.fell && r.feet > -10) && falls.map(r => r.active).join() === "OFF,ACTIVATING,SHUTDOWN,OFF", JSON.stringify(falls));
   await dormant("Pit falls");
   await b.evaluate(`__ooga.go("lab")`); await untilPage(b, 'B.scene === "lab" && !B.transitioning');
   check("stargate: leaving disposes effects, root and menu ownership", await b.evaluate(`__oldGate.disposed && !__oldGate.root.parent && !__oldGate.dialer.parent && !__oldGate.horizon.visible && !__oldGate.open() && !__oldGate.activate(0) && !document.getElementById("stargate-menu").open`));
   await b.evaluate(`__ooga.go("hub")`); await untilPage(b, 'B.scene === "hub" && !B.transitioning', 15000);
   check("stargate: return creates one fresh OFF controller", await b.evaluate(`BL.scenes.hub.debug.stargate !== __oldGate && BL.scenes.hub.debug.stargate.state === "OFF"`));
   await dormant("round trip");
+} }] });
+
+// Real hub movement consumes the Pit; factory counters distinguish transit from hidden land.
+for (const mobile of [false, true]) scene("hub", { label: "stargate dsb travel " + (mobile ? "canvas2d" : "webgl2"), query: "scene=hub&pos=0&wip=mine" + (mobile ? "&canvas2d=1" : ""), opts: mobile ? { ...PHONE_SIZE, motion: false } : { motion: true }, steps: [{ name: "stargate dsb travel " + (mobile ? "canvas2d" : "webgl2"), why: "playthrough: only a swept Pit crossing enters transit and only its backside crossing constructs DSB Land", run: async b => {
+  const check = (name, ok, detail = "") => record("stargate travel " + (mobile ? "canvas2d: " : "webgl2: ") + name, ok, detail);
+  const snapshot = () => b.evaluate(`({ ...__gateDormancy, resources: __ooga.dsb?.resources, phase: __ooga.dsb?.phase, requests: __dsbFeedFixture.requests, sockets: __dsbFeedFixture.sockets, plays: __dsbRadioFixture.plays })`);
+  const before = await snapshot();
+  check("A hub has no DSB resources", before.enter === 0 && before.land === 0 && before.audio === 0 && before.fetch === 0 && before.socket === 0, JSON.stringify(before));
+  const fall = async () => b.evaluate(`(() => {
+    const B = __ooga, G = BL.scenes.hub.debug.stargate, hole = B.island.headquarters.basement.hole;
+    const actor = B.cavemen.get("rules-without-rulers"); actor.override = "working"; B.crew.refreshStates(true); B.pilot.possess(actor);
+    window.__travelActor = actor; window.__travelGate = G;
+    G.activate(0); __gateClock += 2000; G.update();
+    const wrong = G.traverse({ x: hole.x, y: hole.floor - 2, z: hole.z }, { x: hole.x, y: hole.floor + 2, z: hole.z }, actor.bodyRadius);
+    const outside = G.traverse({ x: hole.x + G.radius, y: hole.floor + 2, z: hole.z }, { x: hole.x + G.radius, y: hole.floor - 90, z: hole.z }, actor.bodyRadius);
+    const active = { ...__gateDormancy };
+    B.crew.collectMagazine(actor); window.__travelCrew = B.crew;
+    B.pilot.navigate({ position: { x: hole.x, y: hole.floor + 1, z: hole.z }, yaw: 0, pitch: 0.3, dist: 4 });
+    actor.hopV = -1800;
+    BL.scenes.hub.update(0.05, 1);
+    const intercepted = !B.pilot.player && B.transitioning && actor.root.position.y - actor.baseY < -60 && B.crew.hasMagazine(actor);
+    const twice = G.traverse({ x: hole.x, y: hole.floor + 2, z: hole.z }, { x: hole.x, y: hole.floor - 90, z: hole.z }, actor.bodyRadius);
+    return { wrong, outside, twice, intercepted, active };
+  })()`);
+  const swept = await fall();
+  check("B active gate still dormant; rejects upward/outside and sweeps fast fall before abyss loss exactly once", !swept.wrong && !swept.outside && !swept.twice && swept.intercepted && swept.active.land === 0 && swept.active.enter === 0, JSON.stringify(swept));
+  if (!await untilPage(b, 'B.scene === "dsb" && !B.transitioning', 15000)) throw Error("Pit did not enter transit");
+  const transit = await snapshot();
+  check("C transit owns only entrance audio, no land factories/feeds/radio", transit.enter === 1 && transit.audio === 1 && [transit.land, transit.zuzu, transit.data, transit.tv, transit.chat, transit.fetch, transit.socket, transit.radio].every(v => v === 0) && Object.values(transit.resources).every(v => !v), JSON.stringify(transit));
+  check("canonical selected actor rebuilt and upright back has no menu", await b.evaluate(`(() => { const d = __ooga.dsb, model = BL.models.caveman(BL.contributors.traitsFor("rules-without-rulers")); return d.avatar.traits.name === "rules-without-rulers" && d.avatar.root !== __travelActor.root && d.avatar.headOpen === model.headOpen && d.gate.root.rotation.x === -Math.PI / 2 && d.gate.state === "ACTIVE" && !d.gate.open() && __ooga.crew.cavemen.size === 1; })()`));
+  await b.evaluate(`window.__transitGate = __ooga.dsb.gate; window.__transitRoot = BL.scenes.dsb.root; __ooga.go("hub")`);
+  if (!await untilPage(b, 'B.scene === "hub" && !B.transitioning', 20000)) throw Error("Transit disposal did not return");
+  check("leaving transit disposes gate/root without ever constructing land", await b.evaluate(`__transitGate.disposed && !__transitGate.root.parent && __transitRoot.children.length === 0 && __gateDormancy.land === 0 && __gateDormancy.fetch === 0 && __ooga.pilot.player.traits.name === "rules-without-rulers"`));
+  const again = await fall(); check("fresh journey accepts another real swept crossing", again.intercepted && !again.twice, JSON.stringify(again));
+  if (!await untilPage(b, 'B.scene === "dsb" && !B.transitioning', 15000)) throw Error("Second Pit trip did not enter");
+  const walked = await b.evaluate(`(() => { const B = __ooga; Object.defineProperty(B.audio, "ready", { get: () => false }); Object.defineProperty(B.audio, "pending", { get: () => true }); window.dispatchEvent(new KeyboardEvent("keydown", { key: "w" })); BL.scenes.dsb.update(B.audio.duration * 0.5, 2); window.dispatchEvent(new KeyboardEvent("keyup", { key: "w" })); return { progress: B.dsb.progress, z: B.dsb.avatar.root.position.z, land: __gateDormancy.land, resources: B.dsb.resources }; })()`);
+  check("forward movement works with blocked audio and still no land halfway", walked.progress >= 0.5 && walked.z > 0 && walked.land === 0 && Object.values(walked.resources).every(v => !v), JSON.stringify(walked));
+  await b.evaluate(`window.dispatchEvent(new KeyboardEvent("keydown", { key: "w" })); BL.scenes.dsb.update(__ooga.audio.duration, 3); window.dispatchEvent(new KeyboardEvent("keyup", { key: "w" }));`);
+  const arrived = await snapshot();
+  check("D backside initializes each land system once despite pending audio", arrived.land === 1 && arrived.zuzu === 1 && arrived.data === 1 && arrived.tv === 1 && arrived.chat === 1 && arrived.resources.rides === 384 && arrived.resources.tomatoes === 12 && arrived.resources.visitors === 6 && arrived.requests === 4 && arrived.sockets === 1 && arrived.phase === (mobile ? "land" : "arrival"), JSON.stringify(arrived));
+  check("back crossing cannot initialize twice and front return remains disconnected", await b.evaluate(`(() => { const G = __ooga.dsb.gate; return !G.traverse({ x: 0, y: 1, z: 29 }, { x: 0, y: 1, z: 27 }, 0.35, -1) && !G.open() && __gateDormancy.land === 1; })()`));
+  if (!mobile) {
+    const emergence = await b.evaluate(`(() => { BL.scenes.dsb.update(0.6, 4); const d = __ooga.dsb; return { phase: d.phase, z: d.avatar.root.position.z, y: d.avatar.root.position.y - d.avatar.baseY, time: d.arrivalTime, gate: d.gate.root.position.z }; })()`);
+    check("scripted emergence clears inward into supported arrival lane", emergence.phase === "arrival" && emergence.z === 26 && emergence.y === 0 && emergence.gate === 28 && emergence.time >= 0.6, JSON.stringify(emergence));
+    await b.evaluate(`document.querySelector('[data-action="dsb-skip"]').click()`);
+  }
+  check("skip/reduced motion restores player with no fall velocity", await b.evaluate(`__ooga.dsb.phase === "land" && __ooga.pilot.player === __ooga.dsb.avatar && __ooga.dsb.avatar.hopV === 0 && __ooga.dsb.avatar.root.position.z === 26 && __ooga.dsb.gate.state === "OFF"`));
+  await b.evaluate(`window.__landGate = __ooga.dsb.gate; window.__landRoot = BL.scenes.dsb.root; window.__landZuzu = __ooga.dsb.zuzu; __ooga.go("hub")`);
+  if (!await untilPage(b, 'B.scene === "hub" && !B.transitioning', 20000)) throw Error("Land disposal did not return");
+  check("land exit disposes agents, gate, nodes and sockets; Mine remains c10", await b.evaluate(`__landGate.disposed && __landZuzu.disposed && __landRoot.children.length === 0 && __dsbFeedFixture.sockets === __dsbFeedFixture.closed && !__ooga.dsb && BL.caves.slots.find(s => s.id === "c10").scene === "mine" && !BL.caves.slots.some(s => s.scene === "dsb")`));
 } }] });
 
 scene("dsb", { label: "dsb zuzu conversation", url: hubPage(dist), steps: [{ name: "dsb zuzu conversation", why: "contract: preserve DSB scene behavior independently of the hub entrance", run: async (b) => {
@@ -3302,7 +3355,7 @@ scene("dsb", { label: "dsb zuzu conversation", url: hubPage(dist), steps: [{ nam
   const entered = await untilPage(b, 'B.scene === "dsb" && !B.transitioning', 15000);
   await b.send("Input.dispatchKeyEvent", { type: "keyUp", key: "w", code: "KeyW" });
   if (!entered) throw Error("DSB scene handoff did not complete");
-  record("dsb compatibility: scene handoff rebuilds selected canonical Ooga and creates Zuzu", await b.evaluate(`(() => { const a = __ooga.dsb.avatar, model = BL.models.caveman(BL.contributors.traitsFor("rules-without-rulers")); return a.traits.name === "rules-without-rulers" && a.root !== __dsbPreviousRoot && a.headOpen === model.headOpen && !!__ooga.dsb.zuzu && Object.hasOwn(__ooga, "agent") && Object.hasOwn(__ooga, "dsb"); })()`));
+  record("dsb compatibility: scene handoff rebuilds selected canonical Ooga without starting Zuzu", await b.evaluate(`(() => { const a = __ooga.dsb.avatar, model = BL.models.caveman(BL.contributors.traitsFor("rules-without-rulers")); return a.traits.name === "rules-without-rulers" && a.root !== __dsbPreviousRoot && a.headOpen === model.headOpen && !__ooga.dsb.zuzu && Object.hasOwn(__ooga, "agent") && Object.hasOwn(__ooga, "dsb"); })()`));
   const { createHandler } = await import("../server/zuzu/handler.mjs");
   const { SYSTEM_PROMPT } = await import("../server/zuzu/personality.mjs");
   const requestBody = { version: 1, agent: "zuzu", message: "Hello", history: [], session: { playerName: "YellowBrokeIt", location: "arrival", mood: "content", foodCount: 0, recentEvents: [] } };
@@ -3462,7 +3515,10 @@ scene("dsb", { label: "dsb zuzu agent", url: hubPage(dist, "scene=dsb"), steps: 
   await b.evaluate(`window.__oldZuzu = __ooga.dsb.zuzu; __ooga.go("hub");`);
   record("dsb zuzu: exit disposes agent and hub has no agent", await untilPage(b, 'B.scene === "hub" && !B.transitioning && __oldZuzu.disposed && !B.dsb', 20000));
   await b.evaluate(`__ooga.go("dsb");`);
-  record("dsb zuzu: new visit resets session memory", await untilPage(b, 'B.scene === "dsb" && !B.transitioning && B.dsb.zuzu.snapshot().events.length === 0 && B.dsb.zuzu.snapshot().self.tomatoHits === 0', 10000));
+  if (!await untilPage(b, 'B.scene === "dsb" && !B.transitioning', 10000)) throw Error("DSB reentry failed");
+  record("dsb zuzu: transit reentry has no agent", await b.evaluate("!__ooga.dsb.zuzu"));
+  await b.evaluate(`window.dispatchEvent(new KeyboardEvent("keydown", { key: "w" })); BL.scenes.dsb.update(__ooga.audio.duration + 1, 0); window.dispatchEvent(new KeyboardEvent("keyup", { key: "w" }));`);
+  record("dsb zuzu: new visit resets session memory", await b.evaluate("__ooga.dsb.zuzu.snapshot().events.length === 0 && __ooga.dsb.zuzu.snapshot().self.tomatoHits === 0"));
 } }] });
 for (const ready of [false, true]) scene("dsb", { label: "entrance audio " + ready, url: hubPage(dist, "scene=dsb"), steps: [{ name: "dsb entrance " + (ready ? "audio enabled" : "audio blocked"), why: "regression: blocked audio must not block entrance movement", run: async (b) => {
     await b.send("Emulation.setEmulatedMedia", { features: [{ name: "prefers-reduced-motion", value: "reduce" }] });
@@ -3646,8 +3702,11 @@ scene("dsb", { label: "dsb radio controls", url: hubPage(dist, "scene=dsb"), ste
 } }] });
 
 scene("dsb", { label: "dsb automatic feeds", url: hubPage(dist, "scene=dsb"), steps: [{ name: "dsb automatic feeds", why: "contract: preserve DSB scene behavior independently of the hub entrance", run: async (b) => {
+  record("dsb automatic feeds: transit has no client or polling", await b.evaluate(`!__ooga.dsb.data && __dsbFeedFixture.requests === 0 && __dsbFeedFixture.sockets === 0`));
+  await b.send("Emulation.setEmulatedMedia", { features: [{ name: "prefers-reduced-motion", value: "reduce" }] });
+  await b.evaluate(`window.dispatchEvent(new KeyboardEvent("keydown", { key: "w" })); BL.scenes.dsb.update(__ooga.audio.duration + 1, 0); window.dispatchEvent(new KeyboardEvent("keyup", { key: "w" }));`);
   const initial = await b.evaluate(`({ live: __ooga.dsb.data.state.live, price: __ooga.dsb.data.state.priceStatus, sky: __ooga.dsb.data.state.skyStatus, requests: __dsbFeedFixture.requests, sockets: __dsbFeedFixture.sockets, pressed: document.getElementById("dsb-live").getAttribute("aria-pressed") })`);
-  record("dsb automatic feeds: entering connects both providers without a button press", initial.live && initial.price.startsWith("Live") && initial.sky.startsWith("Live") && initial.requests === 4 && initial.sockets === 1 && initial.pressed === "true", JSON.stringify(initial));
+  record("dsb automatic feeds: land arrival connects both providers without a button press", initial.live && initial.price.startsWith("Live") && initial.sky.startsWith("Live") && initial.requests === 4 && initial.sockets === 1 && initial.pressed === "true", JSON.stringify(initial));
   const outage = await b.evaluate(`(async () => {
     const fetch = window.fetch, timeout = window.setTimeout, clear = window.clearTimeout, pending = new Map(); let id = 50000;
     window.setTimeout = (fn, ms) => { const key = ++id; pending.set(key, { fn, ms }); return key; }; window.clearTimeout = (key) => { if (!pending.delete(key)) clear(key); };
@@ -3665,7 +3724,7 @@ scene("dsb", { label: "dsb automatic feeds", url: hubPage(dist, "scene=dsb"), st
   })()`);
   record("dsb automatic feeds: initial failure labels demo data and retries to recover", outage.offline.price.includes("demo prices") && outage.offline.sky.includes("demo sky") && outage.offline.retries.includes(15000) && outage.offline.retries.includes(30000) && outage.recovered.startsWith("Live"), JSON.stringify(outage));
   record("dsb automatic feeds: outages retain real prices and disposal cancels retries", outage.retained.price === outage.price && outage.retained.status.includes("last prices retained") && outage.pending === 0, JSON.stringify(outage));
-  await b.key("Escape"); await untilPage(b, 'B.scene === "hub" && !B.transitioning', 15000);
+  await dsbExit(b);
   record("dsb automatic feeds: leaving closes all price connections", await b.evaluate(`__dsbFeedFixture.sockets === __dsbFeedFixture.closed`));
 } }] });
 
@@ -3772,7 +3831,7 @@ scene("dsb", { label: "dsb ambience", url: hubPage(dist, "scene=dsb"), steps: [{
   try {
     await b.key("w"); await untilPage(b, "B.audio.ready", 10000);
     const tunnel = await b.evaluate(`__ooga.audio.ambience`);
-    record("dsb ambience: outdoor graph remains silent throughout the entrance", !tunnel.enabled && tunnel.gain === 0 && tunnel.sources === 4, JSON.stringify(tunnel));
+    record("dsb ambience: outdoor graph is not constructed during entrance", tunnel === null, JSON.stringify(tunnel));
     const spatial = await b.evaluate(`(() => {
       const a = __ooga.audio, camera = { position: { x: 0, y: 1.7, z: 0 }, target: { x: 0, y: 1.7, z: -1 } }, boat = { x: 0, y: 0, z: 40 };
       a.arrive(); a.environment(camera, boat); const center = a.ambience;
@@ -3909,8 +3968,8 @@ scene("dsb", { label: "dsb phone", url: hubPage(dist, "scene=dsb"), opts: { w: 3
 for (const backend of ["webgl2", "canvas2d"]) scene("dsb", { label: `dsb land ${backend}`, url: hubPage(src, `scene=dsb${backend === "canvas2d" ? "&canvas2d=1" : ""}`), steps: [{ name: `dsb land ${backend}`, why: "contract: preserve DSB scene behavior independently of the hub entrance", run: async (b) => {
   await b.send("Emulation.setEmulatedMedia", { features: [{ name: "prefers-reduced-motion", value: "no-preference" }] });
   await b.evaluate(`(() => { const scene = BL.scenes.dsb, update = scene.update; window.__dsbClockProbe = { time: 0, min: 0 }; scene.update = (dt, time) => { __dsbClockProbe.time = time; __dsbClockProbe.min = Math.min(__dsbClockProbe.min, time); update(dt, time); }; })()`);
-  const initial = await b.evaluate(`({ phase: __ooga.dsb.phase, progress: __ooga.dsb.progress, live: __ooga.dsb.data.state.live, nodes: __ooga.stats().allNodes })`);
-  record("dsb entrance: starts dark and connects live feeds automatically", initial.phase === "entrance" && initial.progress === 0 && initial.live, JSON.stringify(initial));
+  const initial = await b.evaluate(`({ phase: __ooga.dsb.phase, progress: __ooga.dsb.progress, live: !!__ooga.dsb.data, nodes: __ooga.stats().allNodes })`);
+  record("dsb entrance: starts dark without constructing live feeds", initial.phase === "entrance" && initial.progress === 0 && !initial.live, JSON.stringify(initial));
   await b.key("m");
   await untilPage(b, "B.audio.ready", 10000);
   await b.send("Input.dispatchKeyEvent", { type: "keyDown", key: "w" });
