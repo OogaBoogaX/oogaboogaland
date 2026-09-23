@@ -397,10 +397,9 @@
     }
     priceTimer -= dt;
     if (priceTimer <= 0) {
-      priceTimer = 0.4; const s = data.state;
+      priceTimer = 0.4; data.refresh(); const s = data.state;
       const radioLabel = document.getElementById("dsb-radio-status"); if (radioLabel.textContent !== audio.radioStatus) radioLabel.textContent = audio.radioStatus;
-      if (s.live && s.lastTickAt && Date.now() - s.lastTickAt > 30000) s.priceStatus = "Price feed delayed · last data retained";
-      const text = `${s.priceStatus}: $${s.price.toFixed(2)}\n${s.skyStatus}${s.height ? ` · block ${s.height} · ${s.fee} sat/vB` : ""}`;
+      const text = `${s.priceStatus}: $${s.price.toFixed(2)}\n${s.skyStatus}${s.height ? ` · block ${s.height} · ${s.fee} sat/vB` : ""}\n${s.historyStatus}`;
       if (lastPrice !== text) { readout.textContent = text; lastPrice = text; }
       const hint = lastContext ? CONTEXT_LABELS[lastContext] : "WASD: move | 1/2: weapon | right-click: aim | V: fire | R: reload | T: tomato | B: snack";
       if (lastPrompt !== hint) { prompt.textContent = hint; lastPrompt = hint; }

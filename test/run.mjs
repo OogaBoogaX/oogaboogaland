@@ -2648,6 +2648,63 @@ const chainFreshnessChecks = async (source, math) => {
   record("chain freshness: restored values carry no fabricated per-field freshness", cached.s.priceUsd === 60000 && cached.s.height === 900000 && cached.times() === "0,0,0,0", cached.times());
   cached.c.dispose(); r.c.dispose();
 };
+// Rule: DSB consumes observed chain fields without taking ownership of shared transports.
+const dsbSharedDataChecks = async () => {
+  let now = 1800000000000, id = 0, sockets = 0, lifecycle = 0, mode = "ok", finish = null;
+  const listeners = new Set(), timers = new Map(), requests = [];
+  const snapshot = { vsize: 20000000, fastestFee: 8, nextFee: 999, height: 900000, priceUsd: 60400, priceSource: "fixture", backlogAt: now, feesAt: now, heightAt: now, priceAt: now };
+  const rows = () => { const minute = Math.floor(now / 60000) * 60; return [[minute-60,59900,60500,60000,60300],[minute,60200,60600,60300,60400]]; };
+  const chain = { snapshot, subscribe(fn) { listeners.add(fn); return () => listeners.delete(fn); }, start() { lifecycle++; }, stop() { lifecycle++; }, dispose() { lifecycle++; } };
+  const context = { window: { BL: { chain } }, Date: class extends Date { static now() { return now; } }, AbortController,
+    setTimeout(fn, ms) { timers.set(++id, { fn, ms }); return id; }, clearTimeout(key) { timers.delete(key); },
+    WebSocket: class { constructor() { sockets++; } },
+    fetch: async (url, options) => {
+      requests.push({ url, signal: options.signal });
+      if (mode === "fail") throw new Error("offline");
+      if (mode === "bad") return { ok: true, json: async () => [[1,-1,1,0,0]] };
+      if (mode === "pending") return new Promise(resolve => { finish = resolve; });
+      return { ok: true, json: async () => rows() };
+    }
+  };
+  runInNewContext(await readFile(new URL("../src/js/dsb-data.js", import.meta.url), "utf8"), context);
+  const create = context.window.BL.dsbData.create, d = create(), s = d.state;
+  const emit = () => { for (const fn of listeners) fn(snapshot); };
+  record("dsb shared data: creation is dormant before land starts it", !requests.length && !listeners.size && !sockets && !timers.size);
+  const original = JSON.stringify(snapshot); await d.start(); await d.start();
+  record("dsb shared data: one subscription immediately maps shared fields and keeps recommended fees distinct from nextFee", listeners.size === 1 && s.backlog === 0.2 && s.fee === 8 && s.height === 900000 && s.price === 60400 && s.priceFresh && s.backlogFresh && s.feesFresh && s.heightFresh && JSON.stringify(snapshot) === original);
+  record("dsb shared data: only the real minute history is requested once, with no live socket or recurring timers", requests.length === 1 && requests[0].url === "https://api.exchange.coinbase.com/products/BTC-USD/candles?granularity=60" && !sockets && !timers.size && s.count === 2 && s.candles[1] === 59900 && s.historyStatus.startsWith("Recent"));
+  const priceAt = s.priceAt, revision = s.revision;
+  now += 100000; snapshot.heightAt = now; snapshot.height++; emit();
+  record("dsb shared data: fresh height cannot refresh stale backlog, fees or price, or fabricate candle ticks", s.heightFresh && !s.backlogFresh && !s.feesFresh && !s.priceFresh && s.priceAt === priceAt && s.lastTickAt === priceAt && s.revision === revision);
+  snapshot.priceAt = now; snapshot.priceUsd = 60700; emit();
+  const priceFreshOnly = s.priceFresh && !s.feesFresh && !s.backlogFresh && s.price === 60700 && s.revision === revision + 1;
+  snapshot.backlogAt = now; snapshot.vsize = 200000000; emit();
+  const backlogIndependent = s.backlog === 1 && s.backlogFresh && !s.feesFresh;
+  snapshot.feesAt = now; snapshot.fastestFee = 0; emit();
+  record("dsb shared data: price, backlog and fee observations propagate independently, including capped backlog and zero fees", priceFreshOnly && backlogIndependent && s.fee === 0 && s.feesFresh);
+  now += 180000; d.refresh();
+  record("dsb shared data: idle feeds age at the HUD read without a subscription event or any network polling", !s.backlogFresh && !s.feesFresh && !s.heightFresh && !s.priceFresh && requests.length === 1 && s.priceStatus.includes("delayed"));
+  snapshot.backlogAt = snapshot.feesAt = snapshot.heightAt = snapshot.priceAt = 0; emit();
+  record("dsb shared data: unknown timestamps retain safe presentation values without claiming freshness", s.backlog === 1 && s.price === 60700 && s.height === 900001 && s.priceAt === 0 && s.lastTickAt === 0 && s.priceStatus.includes("unknown") && s.skyStatus.includes("unknown"));
+  const frozen = s.price; d.dispose(); snapshot.priceAt = now; snapshot.priceUsd = 61000; emit();
+  record("dsb shared data: leaving unsubscribes without touching shared lifecycle or receiving later prices", !listeners.size && lifecycle === 0 && s.price === frozen);
+  let visits = true;
+  for (let i = 0; i < 3; i++) { const next = create(); await next.start(); await next.start(); visits &&= listeners.size === 1; next.stop(); visits &&= listeners.size === 0; next.dispose(); }
+  record("dsb shared data: repeated visits have one listener each and no accumulated sockets, polling or shared lifecycle calls", visits && !listeners.size && !sockets && !timers.size && !lifecycle && requests.length === 4);
+  mode = "fail"; const offline = create(); await offline.start();
+  record("dsb shared data: history outage retains the shared price, labels demo candles and does not start background retries", offline.state.price === 61000 && offline.state.priceFresh && offline.state.historyStatus.includes("demo candles") && !timers.size);
+  offline.dispose(); mode = "bad"; const malformed = create(); await malformed.start();
+  record("dsb shared data: malformed OHLC retains bounded demo history without claiming real historical data", malformed.state.historyStatus.includes("demo candles") && malformed.state.count === 48 && malformed.state.candles.length === 240);
+  malformed.dispose(); mode = "pending"; const late = create(), waiting = late.start(), signal = requests.at(-1).signal, before = late.state.revision;
+  late.dispose(); const cancelled = signal.aborted && !timers.size && !listeners.size;
+  finish({ ok: true, json: async () => rows() }); await waiting;
+  record("dsb shared data: disposal aborts pending history, clears its timeout and ignores late completion", cancelled && late.state.revision === before);
+  // A nosim page has no observed shared values. DSB must not start the service to compensate.
+  snapshot.backlogAt = snapshot.feesAt = snapshot.heightAt = snapshot.priceAt = 0;
+  mode = "fail"; const unknown = create(); await unknown.start();
+  record("dsb shared data: unobserved shared state keeps demo defaults and never enables disabled providers", unknown.state.backlog === 0.35 && unknown.state.fee === 4 && unknown.state.height === 0 && !unknown.state.priceFresh && !lifecycle && !sockets);
+  unknown.dispose();
+};
 // The six rain steps in Node: soak alone picks them, a step holds against a hover on its boundary, and
 // the amount that falls is continuous through them.
 const weatherStepChecks = async () => {
@@ -3897,52 +3954,47 @@ scene("dsb", { label: "dsb radio controls", url: hubPage(dist, "scene=dsb"), ste
 
 scene("dsb", { label: "dsb automatic feeds", url: hubPage(dist, "scene=dsb"), steps: [{ name: "dsb automatic feeds", why: "contract: preserve DSB scene behavior independently of the hub entrance", run: async (b) => {
   record("dsb automatic feeds: transit has no client or polling", await b.evaluate(`!__ooga.dsb.data && __dsbFeedFixture.requests === 0 && __dsbFeedFixture.sockets === 0`));
+  await b.evaluate(`(() => {
+    const c = BL.chain, subscribe = c.subscribe, start = c.start, dispose = c.dispose;
+    window.__sharedOwnership = { active: 0, total: 0, starts: 0, disposes: 0 };
+    c.subscribe = fn => { const dsb = fn === __ooga.dsb?.data?.refresh; if (dsb) { __sharedOwnership.active++; __sharedOwnership.total++; } const off = subscribe(fn); let done = false; return () => { if (!done) { done = true; if (dsb) __sharedOwnership.active--; off(); } }; };
+    c.start = (...args) => { __sharedOwnership.starts++; return start(...args); };
+    c.dispose = (...args) => { __sharedOwnership.disposes++; return dispose(...args); };
+    const now = Date.now(); Object.assign(c.snapshot, { vsize: 20000000, fastestFee: 8, nextFee: 999, height: 900000, priceUsd: 60400, priceSource: "fixture", backlogAt: now, feesAt: now, heightAt: now, priceAt: now });
+  })()`);
   await b.send("Emulation.setEmulatedMedia", { features: [{ name: "prefers-reduced-motion", value: "reduce" }] });
   await b.evaluate(`window.dispatchEvent(new KeyboardEvent("keydown", { key: "w" })); BL.scenes.dsb.update(__ooga.audio.duration + 1, 0); window.dispatchEvent(new KeyboardEvent("keyup", { key: "w" }));`);
   const initial = await b.evaluate(`({ live: __ooga.dsb.data.state.live, price: __ooga.dsb.data.state.priceStatus, sky: __ooga.dsb.data.state.skyStatus, requests: __dsbFeedFixture.requests, sockets: __dsbFeedFixture.sockets, pressed: document.getElementById("dsb-live").getAttribute("aria-pressed") })`);
-  record("dsb automatic feeds: land arrival connects both providers without a button press", initial.live && initial.price.startsWith("Live") && initial.sky.startsWith("Live") && initial.requests === 4 && initial.sockets === 1 && initial.pressed === "true", JSON.stringify(initial));
-  const outage = await b.evaluate(`(async () => {
-    const fetch = window.fetch, timeout = window.setTimeout, clear = window.clearTimeout, pending = new Map(); let id = 50000;
-    window.setTimeout = (fn, ms) => { const key = ++id; pending.set(key, { fn, ms }); return key; }; window.clearTimeout = (key) => { if (!pending.delete(key)) clear(key); };
-    const d = BL.dsbData.create();
-    try {
-      window.fetch = async () => { throw Error("offline fixture"); }; await d.start(); await Promise.resolve();
-      const offline = { price: d.state.priceStatus, sky: d.state.skyStatus, retries: [...pending.values()].map((v) => v.ms).sort() };
-      window.fetch = fetch;
-      const retry = [...pending.entries()].find(([,v]) => v.ms === 15000); pending.delete(retry[0]); await retry[1].fn(); await Promise.resolve();
-      const recovered = d.state.priceStatus, price = d.state.price;
-      window.fetch = async () => { throw Error("offline fixture"); }; await d.start();
-      const retained = { price: d.state.price, status: d.state.priceStatus };
-      d.dispose(); return { offline, recovered, price, retained, pending: pending.size };
-    } finally { d.dispose(); window.fetch = fetch; window.setTimeout = timeout; window.clearTimeout = clear; }
-  })()`);
-  record("dsb automatic feeds: initial failure labels demo data and retries to recover", outage.offline.price.includes("demo prices") && outage.offline.sky.includes("demo sky") && outage.offline.retries.includes(15000) && outage.offline.retries.includes(30000) && outage.recovered.startsWith("Live"), JSON.stringify(outage));
-  record("dsb automatic feeds: outages retain real prices and disposal cancels retries", outage.retained.price === outage.price && outage.retained.status.includes("last prices retained") && outage.pending === 0, JSON.stringify(outage));
-  await dsbExit(b);
-  record("dsb automatic feeds: leaving closes all price connections", await b.evaluate(`__dsbFeedFixture.sockets === __dsbFeedFixture.closed`));
+  record("dsb automatic feeds: land arrival reads shared data and fetches only minute history", initial.live && initial.price.startsWith("Live") && initial.sky.startsWith("Live") && initial.requests === 1 && initial.sockets === 0 && initial.pressed === "true", JSON.stringify(initial));
+  await b.evaluate(`__ooga.go("hub")`); await untilPage(b, 'B.scene === "hub" && !B.transitioning', 15000);
+  record("dsb automatic feeds: exit removes only the DSB subscription", await b.evaluate(`__sharedOwnership.active === 0 && __sharedOwnership.starts === 0 && __sharedOwnership.disposes === 0 && __dsbFeedFixture.sockets === 0`));
+  await b.evaluate(`__ooga.go("dsb")`); await untilPage(b, 'B.scene === "dsb" && !B.transitioning', 15000);
+  record("dsb automatic feeds: returning transit still has no subscriber", await b.evaluate(`__sharedOwnership.active === 0 && !__ooga.dsb.data && __dsbFeedFixture.requests === 1`));
+  await b.evaluate(`window.dispatchEvent(new KeyboardEvent("keydown", { key: "w" })); BL.scenes.dsb.update(__ooga.audio.duration + 1, 0); window.dispatchEvent(new KeyboardEvent("keyup", { key: "w" }));`);
+  record("dsb automatic feeds: another land visit adds exactly one listener and one history request", await b.evaluate(`__sharedOwnership.active === 1 && __sharedOwnership.total === 2 && __dsbFeedFixture.requests === 2 && __dsbFeedFixture.sockets === 0`));
+  await b.evaluate(`__ooga.go("hub")`); await untilPage(b, 'B.scene === "hub" && !B.transitioning', 15000);
+  record("dsb automatic feeds: shared chain still delivers after both DSB exits", await b.evaluate(`(async () => { let delivered = 0; const off = BL.chain.subscribe(() => delivered++); BL.chain.ingest({ type: "fees", nextFee: 2 }); await new Promise(resolve => setTimeout(resolve, 0)); off(); return delivered === 1 && __sharedOwnership.active === 0 && __sharedOwnership.starts === 0 && __sharedOwnership.disposes === 0; })()`));
 } }] });
 
 scene("dsb", { label: "dsb feeds and audio", url: hubPage(src, "scene=dsb"), steps: [{ name: "dsb feeds and audio", why: "contract: preserve DSB scene behavior independently of the hub entrance", run: async (b) => {
   const feed = await b.evaluate(`(async () => {
-    const fetchOriginal = window.fetch, socketOriginal = window.WebSocket, sockets = [];
-    class Socket { constructor() { sockets.push(this); } send() {} close() { this.closed = true; } }
+    const fetchOriginal = window.fetch, originalChain = BL.chain; let sockets = 0, stopped = 0, listener;
+    const socketOriginal = window.WebSocket, now = Date.now();
+    window.WebSocket = class { constructor() { sockets++; } };
+    BL.chain = { snapshot: { vsize: 20000000, fastestFee: 8, height: 900000, priceUsd: 107, backlogAt: now, feesAt: now, heightAt: now, priceAt: now }, subscribe(fn) { listener = fn; return () => { stopped++; listener = null; }; } };
     const rows = [[120, 98, 105, 100, 103], [60, 95, 104, 99, 100]];
-    window.WebSocket = Socket;
-    window.fetch = async (url) => ({ ok: true, json: async () => url.includes("candles") ? rows : url.endsWith("/height") ? 900000 : url.includes("recommended") ? { fastestFee: 8 } : { vsize: 20000000 } });
+    window.fetch = async () => ({ ok: true, json: async () => rows });
     const d = BL.dsbData.create();
     try {
-      await d.start(); await Promise.resolve(); await Promise.resolve();
-      sockets[0].onopen(); sockets[0].onmessage({ data: JSON.stringify({ type: "ticker", product_id: "BTC-USD", price: "107", time: "1970-01-01T00:03:05Z" }) });
+      await d.start();
       const connected = { price: d.state.price, height: d.state.height, backlog: d.state.backlog, status: d.state.priceStatus };
-      d.stop(); const stopped = !d.state.live && sockets[0].closed;
-      let finish;
-      window.fetch = () => new Promise((resolve) => { finish = resolve; });
-      const waiting = d.start(); d.dispose();
-      finish({ ok: true, json: async () => rows }); await waiting;
-      return { connected, stopped, sockets: sockets.length };
-    } finally { d.dispose(); window.fetch = fetchOriginal; window.WebSocket = socketOriginal; }
+      d.stop(); const off = !d.state.live && !listener;
+      let finish; window.fetch = () => new Promise(resolve => { finish = resolve; });
+      const waiting = d.start(); d.dispose(); finish({ ok: true, json: async () => rows }); await waiting;
+      return { connected, off, sockets, stopped };
+    } finally { d.dispose(); window.fetch = fetchOriginal; window.WebSocket = socketOriginal; BL.chain = originalChain; }
   })()`);
-  record("dsb feeds: public responses drive the world and exit cancels late connections", feed.connected.price === 107 && feed.connected.height === 900000 && feed.connected.backlog === 0.2 && feed.connected.status.startsWith("Live") && feed.stopped && feed.sockets === 1, JSON.stringify(feed));
+  record("dsb feeds: shared readings drive the world and exit cancels late history", feed.connected.price === 107 && feed.connected.height === 900000 && feed.connected.backlog === 0.2 && feed.connected.status.startsWith("Live") && feed.off && feed.sockets === 0 && feed.stopped === 2, JSON.stringify(feed));
   await b.evaluate(`(() => {
     const original = AudioContext.prototype.createBufferSource;
     window.__dsbSoundProbe = { original, starts: [], loops: [], context: null };
@@ -4322,7 +4374,7 @@ const unitChecks = async () => {
     let rejected = false; try { BL.qr.encode("q".repeat(2332)); } catch (error) { rejected = error instanceof RangeError; }
     record("QR invoices: matrices match independent reference at short and long capacities", rows.every(r => r.pass) && rejected, JSON.stringify(rows));
   }
-  await characterChecks(); await contributorActivityChecks(); await mempoolFeedChecks(); await debugActivityStatusChecks(); await soloDebugChecks(); await adaptiveQualityChecks(); await chainSnapshotChecks(); await weatherStepChecks(); await gameRulesChecks();
+  await characterChecks(); await contributorActivityChecks(); await mempoolFeedChecks(); await debugActivityStatusChecks(); await soloDebugChecks(); await adaptiveQualityChecks(); await chainSnapshotChecks(); await dsbSharedDataChecks(); await weatherStepChecks(); await gameRulesChecks();
 
   // Scene state built directly instead of booted; seed 1 matches scene-hub.js.
   // Sealed cave guides need the hub's seal nodes, so probes reading them stay in the browser tier.
