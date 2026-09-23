@@ -5112,7 +5112,9 @@
       if (entry && !ignore && clankers && radius === entry.radius && height === entry.height && !entry.climb.active) {
         clankerPassingSite = clankers.contactAt(x, y, z);
         if (clankerPassingSite < 0) clankerPassingSite = clankers.contactAt(toX, toY, toZ);
-        if (clankerPassingSite >= 0) for (const other of clankers.list) {
+        // The lab planner checks peer torsos against their timed routes. World
+        // geometry still uses the full rig here; live movement checks both.
+        if (clankerPassingSite >= 0 && !entry.planningLabTraffic) for (const other of clankers.list) {
           if (other === entry || !other.active || !clankerPassingPeer(entry, other)) continue;
           const p = other.root.position;
           // separates also checks the complete turning/translation sweep when
@@ -6114,8 +6116,6 @@
       roamRadius: island.radius, meadowRadius: island.meadowRadius,
       clear: clankerClear, push: pushClankerProp, onPound: poundClankerEquipment, onGrab: grabClankerOoga, onReleaseDrag: releaseClankerDrag,
       fireContact: clankerFireContact, canSmash: canClankerSmash, supportAt: clankerSupportAt,
-      onRecovery: (entry, relocated) => fx.sayAt(entry.root.position.x, entry.root.position.y + entry.height + 0.25,
-        entry.root.position.z, relocated ? "BACK AT IT!" : "COMING THROUGH!", 2),
       track: (entry) => trackMirrorObject(entry.root, 3.6, 4248), untrack: (entry) => untrackMirrorObject(entry.root) });
     for (const entry of clankers.list) registerClanker(entry);
     clankerPlay = BL.clankerPlay.create({ canvas: ctx.canvas, camera, pilot, hud, clankers, input, constrainCamera: constrainClankerCamera });

@@ -413,7 +413,9 @@
       smash: false, hipOffsetZ: 0, sideAngle: 0,
       climb: 0, climbBlend: 0, climbPose: NaN, climbStride: 0, climbDirection: 0, mantle: 0,
       groom: 0, groomBlend: 0, groomSide: 1, groomTime: 0,
-      lab: false, labWork: "", labPhase: 0, labSide: 1, labReach: 0, labReachGrip: geos.labFlask.labGripY, labPreviewItem: false, labSqueeze: false, labDie: false, labRoll: 0
+      lab: false, labWork: "", labPhase: 0, labSide: 1, labReach: 0, labReachGrip: geos.labFlask.labGripY, labPreviewItem: false, labSqueeze: false, labDie: false, labRoll: 0,
+      labPalmLift: 0, labBenchArm: false, labBenchSide: 1, labBenchStage: 0, labTouchArm: false, labTouchSide: 1,
+      labArmOffsetX: 0, labArmOffsetY: 0, labArmOffsetZ: 0
     };
     const positionLabItem = () => {
       if (!managed || labFlask === labPlaceholder && !state.labPreviewItem) return;
@@ -429,7 +431,7 @@
       quat.rotateVec(labGripOffset, labItemRotation, 0, labGripY / scale, 0);
       labFlask.position.x = -labGripOffset[0];
       labFlask.position.y = -1.09 - labGripOffset[1];
-      labFlask.position.z = 0.14 - labGripOffset[2];
+      labFlask.position.z = 0.14 - state.labPalmLift - labGripOffset[2];
     };
     let refreshGeometry = null;
     const rollQuaternion = managed ? new Float32Array([0, 0, 0, 1]) : null;
@@ -641,9 +643,21 @@
       state.pitch = laboratory || managed && Number.isFinite(state.climbPose) ? pitch : damp(state.pitch, pitch, 6, dt);
       chest.rotation.x = state.pitch;
       const o = OFFSETS[state.gait];
+      if (managed) {
+        if (laboratory && labWork === "carry") {
+          if (!state.labBenchArm || state.labBenchStage >= 2) state.labBenchStage = dt > 0.25 || labFlask !== labPlaceholder ? 0 : 1;
+          state.labBenchArm = true; state.labBenchSide = state.labSide;
+        } else if (!laboratory || labWork === "type" || labWork === "touch" || dt > 0.25) {
+          state.labBenchArm = false; state.labBenchStage = 0;
+        } else if (state.labBenchArm && state.labBenchStage === 0) state.labBenchStage = 2;
+      }
       // Arms hang straight down in the world whatever the chest's lean; the swing reaches forward and back.
       for (let i = 0; i < LIMBS.length; i++) {
-        const l = LIMBS[i], arm = parts[l.arm];
+        const l = LIMBS[i], arm = parts[l.arm], previousAngle = arm.rotation.x;
+        if (managed && l.side > 0) {
+          arm.position.x -= state.labArmOffsetX; arm.position.y -= state.labArmOffsetY; arm.position.z -= state.labArmOffsetZ;
+          state.labArmOffsetX = state.labArmOffsetY = state.labArmOffsetZ = 0;
+        }
         // A standing neighbour tucks its shoulders and takes short steps to let
         // another adult pass. Meshes and model scale stay exactly the same.
         const climbStroke = wave(climbPhase, l.side < 0 ? 0 : 0.5), leg = parts[l.leg];
@@ -713,6 +727,7 @@
           arm.rotation.z = damp(arm.rotation.z, state.gait === "hunch" ? l.side * 0.12 : 0, 8, dt);
         }
         if (managed) {
+          if (laboratory && l.side > 0 && (state.labBenchStage === 1 || state.labBenchStage === 2)) arm.rotation.x = damp(previousAngle, -2.6, 18, dt);
           const groomArm = lounge === "sit" && l.side === state.groomSide ? grooming : 0;
           arm.rotation.y = damp(arm.rotation.y, l.side * 0.5 * groomArm, 12, dt);
           // Reach high with one hand as the opposite foot takes its next hold.
@@ -723,6 +738,33 @@
             arm.rotation.x += (raised - arm.rotation.x) * climbing;
             arm.rotation.z += (l.side * 0.14 - arm.rotation.z) * climbing;
           }
+        }
+      }
+      if (managed) {
+        const arm = parts.armR, angle = arm.rotation.x;
+        const palm = labWork === "carry" ? 0.1 + 0.17 * clamp((1.32 + angle) / 0.12, 0, 1) : 0;
+        state.labPalmLift = damp(state.labPalmLift, palm, 24, dt);
+        const lift = laboratory ? state.labPalmLift : 0;
+        // Raise beside the bench, then reach down from above its top. Returning
+        // follows the reverse order, keeping the wide knuckles inside the narrow
+        // stone doorway as well as clear of the desk. Walking stays unchanged.
+        const reach = clamp((-angle - 0.08) / 2.5, 0, 1);
+        if (state.labBenchArm) arm.rotation.y = state.labBenchStage === 1 || state.labBenchStage === 3
+          ? -state.labBenchSide * 2 * Math.sin(Math.PI * reach) : 0;
+        if ((state.labBenchStage === 1 || state.labBenchStage === 2) && angle < -2.585) state.labBenchStage = state.labBenchStage === 1 ? 0 : 3;
+        if (state.labBenchStage === 3 && Math.abs(angle + state.pitch) < 0.03) { state.labBenchArm = false; state.labBenchStage = 0; }
+        // Put the low cube in the palm instead of its forward edge. Moving the
+        // shoulder by the same local offset preserves the exact item contact.
+        state.labArmOffsetX = Math.sin(arm.rotation.y) * Math.cos(angle) * lift;
+        state.labArmOffsetY = -Math.sin(angle) * lift - (state.labBenchArm ? 0.17 * clamp((-angle - 2) / 0.5, 0, 1) : 0);
+        state.labArmOffsetZ = Math.cos(arm.rotation.y) * Math.cos(angle) * lift;
+        arm.position.x += state.labArmOffsetX; arm.position.y += state.labArmOffsetY; arm.position.z += state.labArmOffsetZ;
+        if (laboratory && labWork === "touch") { state.labTouchArm = true; state.labTouchSide = state.labSide; }
+        const touchArm = state.labTouchSide < 0 ? parts.armL : parts.armR;
+        if (!laboratory || labWork === "carry" || labWork === "type" || Math.abs(touchArm.rotation.x + state.pitch) < 0.03) state.labTouchArm = false;
+        if (state.labTouchArm) {
+          const reach = clamp((-touchArm.rotation.x - 0.08) / 1.48, 0, 1);
+          touchArm.rotation.y = -state.labTouchSide * 1.7 * Math.sin(Math.PI * reach);
         }
       }
       // The head keeps the face forward, looking up when it rears
