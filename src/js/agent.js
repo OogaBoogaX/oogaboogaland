@@ -555,6 +555,8 @@
       // their feet instead of keeping a full stride (speed / itself) at a desk.
       const moving = top > 0 ? clamp(state.speed / (managed && state.lab ? GAITS.upright.speed : top), 0, 1) : 0;
       const lounge = managed ? state.lounge : "", onSide = lounge === "left" || lounge === "right", reclining = lounge === "back" || onSide;
+      const leaning = lounge === "lean-left" || lounge === "lean-right" || lounge === "lean-back";
+      const leanSide = lounge === "lean-left" ? -1 : lounge === "lean-right" ? 1 : 0;
       if (managed) {
         state.crouch = damp(state.crouch, state.air ? 0 : Math.max(state.charge, Math.min(1, state.landing * 2)), state.air ? 24 : 20, dt);
         state.rollBlend = damp(state.rollBlend, state.roll, 9, dt);
@@ -566,6 +568,11 @@
       }
       const crouch = managed ? state.crouch : 0, rolling = managed ? state.rollBlend : 0, climbing = managed ? state.climbBlend : 0;
       const grooming = managed ? state.groomBlend : 0, climbPhase = managed ? state.climbStride / 1.2 : 0;
+      // Long still intervals with a small, slow glance or free-hand adjustment.
+      // Spatial phase keeps neighbours from moving together; support arms stay planted.
+      const restTime = state.groomTime + root.position.x * 0.61 + root.position.z * 0.37;
+      const restCycle = ((restTime % 27) + 27) % 27;
+      const restMotion = lounge && restCycle > 20 ? Math.sin((restCycle - 20) * Math.PI / 7) ** 2 * (1 - grooming) : 0;
       const jumping = managed && state.air, takeoff = managed ? state.takeoff : 0;
       const laboratory = managed && state.lab && !lounge && !jumping && !rolling && !climbing && state.pound <= 0 && !state.poundCharge && !state.charge;
       const labWork = laboratory ? state.labWork : "";
@@ -592,7 +599,7 @@
         pitch = state.smash ? 1.02 - 0.86 * poundLift : 1.02 - 0.36 * poundLift;
         state.pound = Math.max(0, state.pound - dt);
       }
-      if (lounge) { pitch = reclining ? 0 : -0.18 + grooming * 0.12; bob = 0; }
+      if (lounge) { pitch = reclining ? 0 : leaning ? -0.46 : -0.18 + grooming * 0.12; bob = 0; }
       // A loaded crouch compresses both pairs of limbs, then the takeoff extends
       // them before the airborne tuck. Landing absorbs the impact the same way.
       if (crouch > 0) { pitch += (1.12 - pitch) * crouch; bob *= 1 - crouch; }
@@ -615,11 +622,12 @@
           // Counter the torso's tilt during each lift so the hands and toes
           // move along the wall instead of pumping away from its surface.
           arm.position.z = damp(arm.position.z, 0.5 * U - climbing * (0.036 + climbStroke * 0.055), 20, dt);
-          arm.position.y = damp(arm.position.y, SHOULDER_Y + climbStroke * 0.115 * climbing + (labWork === "type" ? 0.06 : 0), 20, dt);
+          arm.position.y = damp(arm.position.y, SHOULDER_Y + climbStroke * 0.115 * climbing + (labWork === "type" ? 0.06 : 0)
+            - (leaning && (!leanSide || l.side === leanSide) ? 0.077 : 0), 20, dt);
           leg.position.y = damp(leg.position.y, Math.max(0, -climbStroke) * 0.09 * climbing, 18, dt);
           leg.position.z = damp(leg.position.z, (0.424 + climbStroke * 0.034) * climbing, 20, dt);
         }
-        let legAngle = lounge ? onSide ? -0.42 : reclining ? 0.1 : -1.28 : jumping ? 0.7 - takeoff * 0.85 : o ? -(squeeze ? 0.1 : labSqueeze ? 0.16 : g.legs) * moving * wave(state.phase, o[l.leg]) : 0;
+        let legAngle = lounge ? onSide ? -0.42 : reclining ? 0.1 : leaning ? -1.14 : -1.28 : jumping ? 0.7 - takeoff * 0.85 : o ? -(squeeze ? 0.1 : labSqueeze ? 0.16 : g.legs) * moving * wave(state.phase, o[l.leg]) : 0;
         legAngle += (-1.2 - legAngle) * crouch;
         legAngle += (-0.6 - legAngle) * rolling;
         legAngle += (-0.28 + 0.06 * climbStroke - legAngle) * climbing;
@@ -632,11 +640,13 @@
           // across the chest. A seated neighbour picks with one hand while the
           // other stays planted beside its hip.
           const lower = onSide && (lounge === "left" ? l.side < 0 : l.side > 0);
+          const supporting = leaning && (!leanSide || l.side === leanSide) || lower;
           const groomArm = l.side === state.groomSide ? grooming : 0;
           const pick = Math.sin(state.groomTime * 10.5), reach = -1.36 + pick * 0.055;
-          const rest = onSide ? lower ? -2.3 : -1.08 : reclining ? -0.08 : -0.7;
+          const rest = (leaning ? supporting ? 0.36 : -1.02 : onSide ? lower ? -2.3 : -1.08 : reclining ? -0.08 : -0.7)
+            + (supporting ? 0 : Math.sin(restTime * 0.8 + i) * 0.045 * restMotion);
           limb(arm, rest + (reach - rest) * groomArm, dt);
-          const restSide = onSide ? lower ? l.side * 0.12 : -l.side * 0.55 : reclining ? l.side * 0.18 : 0;
+          const restSide = leaning ? supporting ? l.side * 0.18 : -l.side * 0.12 : onSide ? lower ? l.side * 0.12 : -l.side * 0.55 : reclining ? l.side * 0.18 : 0;
           arm.rotation.z = damp(arm.rotation.z, restSide + (l.side * 0.6 - restSide) * groomArm, 12, dt);
         } else if (labWork) {
           const stroke = Math.sin(state.labPhase * (labWork === "type" ? 11 : 2.7) + i * Math.PI);
@@ -687,7 +697,8 @@
       parts.head.rotation.x = -state.pitch * (state.gait === "beat" ? 1.15 : 0.85);
       if (managed) {
         parts.head.rotation.x += (-0.04 - state.climbDirection * 0.16 - parts.head.rotation.x) * climbing;
-        parts.head.rotation.y = damp(parts.head.rotation.y, state.groomSide * 0.36 * grooming, 8, dt);
+        parts.head.rotation.x += Math.sin(restTime * 0.65) * 0.055 * restMotion;
+        parts.head.rotation.y = damp(parts.head.rotation.y, state.groomSide * 0.36 * grooming + Math.sin(restTime * 0.5) * 0.16 * restMotion, 8, dt);
         if (labWork) {
           parts.head.rotation.x = labWork === "type" || labWork === "roll" ? 0.22 : labWork === "carry" ? 0.08 : -0.08;
           parts.head.rotation.y = labWork === "touch" ? state.labSide * 0.12 : Math.sin(state.labPhase * 0.7) * 0.05;
@@ -790,7 +801,7 @@
       body.minX = body.minY = body.minZ = Infinity;
       body.maxX = body.maxY = body.maxZ = -Infinity;
       let radius2 = 0, compactRadius2 = 0, poundRadius2 = 0, standRadius2 = 0, parkRadius2 = 0, sitRadius2 = 0, sitWidth = 0, labRadius2 = 0;
-      const exactRest = Math.abs(state.sideAngle) > 0.001;
+      const exactRest = Math.abs(state.sideAngle) > 0.001 || state.lounge === "lean-left" || state.lounge === "lean-right" || state.lounge === "lean-back";
       let supportY = Infinity;
       for (let i = 0; i < envelopeParts.length; i++) {
         const part = envelopeParts[i], b = envelopeBounds[i];
@@ -909,7 +920,8 @@
       if (motion && Number.isFinite(motion.groomPhase)) state.groomTime = motion.groomPhase;
       state.smash = !!(motion && motion.smash && !airborne && !state.roll && !state.charge);
       state.dragging = !!(motion && motion.dragging && !airborne && !state.roll);
-      state.lounge = !airborne && state.speed <= 0.1 && (lounge === "sit" || lounge === "back" || lounge === "left" || lounge === "right") ? lounge : "";
+      state.lounge = !airborne && state.speed <= 0.1 && (lounge === "sit" || lounge === "back" || lounge === "left" || lounge === "right"
+        || lounge === "lean-left" || lounge === "lean-right" || lounge === "lean-back") ? lounge : "";
       if (state.roll > 0 || state.charge > 0 || airborne || state.climb > 0) state.lounge = "";
       if (state.lounge || state.roll > 0 || state.charge > 0 || airborne || state.climb > 0) state.pound = state.beat = state.chewing = 0;
       if (state.speed > 0.1 || airborne) state.beat = 0;

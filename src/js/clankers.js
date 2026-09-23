@@ -553,7 +553,8 @@
     };
     const loungePose = (e) => {
       const choice = e.random();
-      return choice < 0.5 ? "sit" : choice < 0.68 ? "back" : choice < 0.84 ? "left" : "right";
+      return choice < 0.35 ? "sit" : choice < 0.48 ? "back" : choice < 0.61 ? "left" : choice < 0.74 ? "right"
+        : choice < 0.83 ? "lean-left" : choice < 0.92 ? "lean-right" : "lean-back";
     };
     const prepareLounges = (e) => {
       if (loungeReady) return;
