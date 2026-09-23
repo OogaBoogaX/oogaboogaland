@@ -1,10 +1,12 @@
 // Jumbotron board, ported from rules-without-rulers/oogatron (its jumbotron/data.js + views.js).
-// Data baked in as BL.jumbotronData by scripts/jumbotron-data.mjs; the page never fetches.
+// Data baked in as BL.jumbotronData by scripts/jumbotron-data.mjs for the first paint;
+// oogatron-live.js may push fresher payloads in through refreshData at runtime.
 (() => {
   "use strict";
   const BL = window.BL = window.BL || {};
   const { box, merge, cached } = BL.models;
   const { createNode, addChild } = BL.scene;
+  const { mat4 } = BL.math;
 
   // Palette extracted from this world's own materials (see oogatron Phase 4).
   const PALETTE = {
@@ -17,6 +19,7 @@
     prs: "#3fd1c5",
     reviews: "#6f9fca",
     comments: "#f5c542",
+    issues: "#e5533d",
     plank: "#a9773f",
     woodDark: "#5c4425",
     screenBezel: "#1d2326",
@@ -74,7 +77,8 @@
     "+": [0, 0b00100, 0b00100, 0b11111, 0b00100, 0b00100, 0],
     "*": [0, 0b10101, 0b01110, 0b11111, 0b01110, 0b10101, 0],
     "'": [0b00100, 0b00100, 0, 0, 0, 0, 0],
-    "!": [0b00100, 0b00100, 0b00100, 0b00100, 0b00100, 0, 0b00100]
+    "!": [0b00100, 0b00100, 0b00100, 0b00100, 0b00100, 0, 0b00100],
+    $: [0b00100, 0b01111, 0b10100, 0b01110, 0b00101, 0b11110, 0b00100]
   };
   const FALLBACK_GLYPH = [0b11111, 0b10001, 0b10001, 0b10001, 0b10001, 0b10001, 0b11111];
   const GLYPH_W = 5, GLYPH_H = 7, TRACKING = 1;
@@ -102,92 +106,62 @@
     return text.length <= maxChars ? text : text.slice(0, maxChars);
   };
 
-  const normalizeComments = (c) => ({
-    issue: (c && c.issue || 0) | 0, review: (c && c.review || 0) | 0,
-    commit: (c && c.commit || 0) | 0, all: (c && c.all || 0) | 0
-  });
   const normalizeCounts = (counts) => ({
     commits: (counts && counts.commits || 0) | 0, prs: (counts && counts.prs || 0) | 0,
-    reviews: (counts && counts.reviews || 0) | 0, comments: normalizeComments(counts && counts.comments)
+    reviews: (counts && counts.reviews || 0) | 0, issues: (counts && counts.issues || 0) | 0,
+    comments: (counts && counts.comments || 0) | 0
   });
+  const normalizeWeekly = (weekly) => Array.isArray(weekly)
+    ? weekly.map((w) => ({ week: String(w.week), commits: w.commits | 0, prs: w.prs | 0, reviews: w.reviews | 0, issues: w.issues | 0, comments: w.comments | 0 })).sort((a, b) => a.week < b.week ? -1 : 1)
+    : [];
   const normalizeBoard = (b) => Array.isArray(b) ? b.map((e) => ({ login: String(e.login), count: e.count | 0 })) : [];
+  const normalizeBoards = (lb) => ({
+    commits: normalizeBoard(lb && lb.commits), prs: normalizeBoard(lb && lb.prs),
+    reviews: normalizeBoard(lb && lb.reviews), comments: normalizeBoard(lb && lb.comments)
+  });
   const displayLabel = (c) => c.login.startsWith("email:") ? "anonymous" : c.login;
 
+  // Oogatron schema 3 (/v2/stats): org-wide totals/leaderboards, a per-repo
+  // breakdown with its own leaderboards and last activity, plus the recent
+  // contributions feed.
   const parseStats = (json) => {
     if (typeof json !== "object" || json === null) throw new Error("stats payload is not an object");
-    if (!json.meta || json.meta.schema_version !== 1) throw new Error("unsupported stats schema_version");
+    if (!json.meta || json.meta.schema_version !== 3) throw new Error("unsupported stats schema_version");
+    if (!Array.isArray(json.repos)) throw new Error("stats repos is not an array");
     if (!Array.isArray(json.contributors)) throw new Error("stats contributors is not an array");
-    const contributors = json.contributors.map((c) => ({
-      login: String(c.login),
-      counts: normalizeCounts(c.counts),
-      weekly: Array.isArray(c.weekly)
-        ? c.weekly.map((w) => ({ week: String(w.week), commits: w.commits | 0, prs: w.prs | 0, reviews: w.reviews | 0, comments: w.comments | 0 })).sort((a, b) => a.week < b.week ? -1 : 1)
-        : []
-    }));
+    const contributors = json.contributors.map((c) => ({ login: String(c.login) }));
     const byLogin = new Map(contributors.map((c) => [c.login, c]));
+    const repos = json.repos.map((r) => {
+      const weekly = normalizeWeekly(r.weekly);
+      return {
+        name: String(r.name),
+        totals: { contributors: (r.totals && r.totals.contributors || 0) | 0, ...normalizeCounts(r.totals) },
+        lastActivityAt: typeof r.last_activity_at === "string" ? r.last_activity_at : null,
+        leaderboards: normalizeBoards(r.leaderboards),
+        weeklyTotals: weekly.map((w) => ({ week: w.week, total: w.commits + w.prs + w.reviews + w.issues + w.comments }))
+      };
+    });
+    const recent = (Array.isArray(json.recent) ? json.recent : []).map((e) => ({
+      login: String(e.login), repo: String(e.repo), type: String(e.type), occurredAt: String(e.occurred_at)
+    }));
+    // Org-wide weekly series: the repos' weeks summed.
     const weeklyMap = new Map();
-    for (const c of contributors) {
-      for (const w of c.weekly) {
+    for (const r of repos) {
+      for (const w of r.weeklyTotals) {
         let agg = weeklyMap.get(w.week);
         if (!agg) { agg = { week: w.week, total: 0 }; weeklyMap.set(w.week, agg); }
-        agg.total += w.commits + w.prs + w.reviews + w.comments;
+        agg.total += w.total;
       }
     }
     const weeklyTotals = [...weeklyMap.values()].sort((a, b) => a.week < b.week ? -1 : 1);
-    const model = {
-      repo: String(json.meta.repo || ""),
-      totals: { contributors: json.totals.contributors | 0, commits: json.totals.commits | 0, prs: json.totals.prs | 0, reviews: json.totals.reviews | 0, comments: normalizeComments(json.totals.comments) },
-      leaderboards: {
-        commits: normalizeBoard(json.leaderboards.commits), prs: normalizeBoard(json.leaderboards.prs),
-        reviews: normalizeBoard(json.leaderboards.reviews), comments: normalizeBoard(json.leaderboards.comments)
-      },
-      contributors, byLogin, weeklyTotals,
-      latestWeek: weeklyTotals.length ? weeklyTotals[weeklyTotals.length - 1].week : null,
-      tickerText: ""
+    return {
+      org: String(json.meta.org || ""),
+      generatedAt: String(json.meta.generated_at || ""),
+      totals: { contributors: json.totals.contributors | 0, ...normalizeCounts(json.totals) },
+      leaderboards: normalizeBoards(json.leaderboards),
+      repos, recent, contributors, byLogin, weeklyTotals,
+      latestWeek: weeklyTotals.length ? weeklyTotals[weeklyTotals.length - 1].week : null
     };
-    model.tickerText = deriveTicker(model);
-    return model;
-  };
-
-  const deriveTicker = (model) => {
-    const t = model.totals, parts = [];
-    parts.push(`${model.repo}  ${t.contributors} CONTRIBUTORS  ${t.commits} COMMITS  ${t.prs} PRS  ${t.reviews} REVIEWS  ${t.comments.all} COMMENTS`);
-    if (model.latestWeek) {
-      const active = model.contributors
-        .map((c) => ({ c, w: c.weekly.find((w) => w.week === model.latestWeek) }))
-        .filter((e) => e.w && e.w.commits + e.w.prs + e.w.reviews + e.w.comments > 0)
-        .sort((a, b) => b.w.commits + b.w.prs + b.w.reviews + b.w.comments - (a.w.commits + a.w.prs + a.w.reviews + a.w.comments));
-      parts.push(`WEEK ${model.latestWeek}:`);
-      for (const { c, w } of active) {
-        const bits = [];
-        if (w.commits) bits.push(`${w.commits} COMMIT${w.commits === 1 ? "" : "S"}`);
-        if (w.prs) bits.push(`${w.prs} PR${w.prs === 1 ? "" : "S"}`);
-        if (w.reviews) bits.push(`${w.reviews} REVIEW${w.reviews === 1 ? "" : "S"}`);
-        if (w.comments) bits.push(`${w.comments} COMMENT${w.comments === 1 ? "" : "S"}`);
-        parts.push(`${displayLabel(c).toUpperCase()}: ${bits.join(" + ")}`);
-      }
-    }
-    return parts.join("   ***   ");
-  };
-
-  const lifehashCache = new Map();
-  const lifehashFor = (login) => {
-    let img = lifehashCache.get(login);
-    if (!img) {
-      img = BL.lifehash.make(`contributor:${login}`);
-      lifehashCache.set(login, img);
-    }
-    return img;
-  };
-  const drawIdenticon = (ctx, login, x, y) => {
-    const { width, height, colors } = lifehashFor(login);
-    for (let r = 0; r < height; r++) {
-      for (let c = 0; c < width; c++) {
-        const i = (r * width + c) * 3;
-        ctx.fillStyle = `rgb(${colors[i]},${colors[i + 1]},${colors[i + 2]})`;
-        ctx.fillRect(x + c, y + r, 1, 1);
-      }
-    }
   };
 
   const clearBoard = (ctx) => {
@@ -195,32 +169,37 @@
     ctx.fillRect(0, 0, BOARD_W, BOARD_H);
   };
   const header = (ctx, title, right) => {
-    drawText(ctx, title, 3, 3, PALETTE.accent, 1);
+    // Repo names can outrun the board (25 glyphs > 192px beside the week label),
+    // so every header title truncates to the room the right label leaves.
+    const roomForTitle = BOARD_W - 6 - (right ? measureText(right, 1) + 4 : 0);
+    drawText(ctx, fitText(title, roomForTitle, 1), 3, 3, PALETTE.accent, 1);
     if (right) drawText(ctx, right, BOARD_W - 3 - measureText(right, 1), 3, PALETTE.dim, 1);
     ctx.fillStyle = PALETTE.dim;
     ctx.fillRect(0, 12, BOARD_W, 1);
   };
-  const countTotal = (c) => c.commits + c.prs + c.reviews + c.comments.all;
 
-  const renderTotals = (ctx, model) => {
+  // Shared body for the org (Live Wire) and per-repo totals boards:
+  // headline counts left, weekly activity sparkline right.
+  const renderTotalsBoard = (ctx, title, right, totals, weeklyTotals) => {
     clearBoard(ctx);
-    header(ctx, "ENTROPYLAB TOTALS", model.latestWeek || "");
-    const t = model.totals;
+    header(ctx, title, right);
     const rows = [
-      ["CONTRIBUTORS", t.contributors, PALETTE.accent],
-      ["COMMITS", t.commits, PALETTE.commits],
-      ["PRS", t.prs, PALETTE.prs],
-      ["REVIEWS", t.reviews, PALETTE.reviews],
-      ["COMMENTS", t.comments.all, PALETTE.comments]
+      ["CONTRIBUTORS", totals.contributors, PALETTE.accent],
+      ["COMMITS", totals.commits, PALETTE.commits],
+      ["PRS", totals.prs, PALETTE.prs],
+      ["REVIEWS", totals.reviews, PALETTE.reviews],
+      ["ISSUES", totals.issues, PALETTE.issues],
+      ["COMMENTS", totals.comments, PALETTE.comments]
     ];
-    let y = 17;
+    // Six rows: y=14 step 13 keeps the last scale-2 numeral clear of the nav strip.
+    let y = 14;
     for (const [label, value, color] of rows) {
       drawText(ctx, String(label), 6, y + 3, PALETTE.dim, 1);
       const v = String(value);
       drawText(ctx, v, BOARD_W - 66 - measureText(v, 2), y, color, 2);
-      y += 15;
+      y += 13;
     }
-    const spark = model.weeklyTotals.slice(-14);
+    const spark = weeklyTotals.slice(-14);
     if (spark.length > 0) {
       const maxV = Math.max(...spark.map((w) => w.total), 1);
       const bw = 4, bx = BOARD_W - 6 - spark.length * bw, baseY = BOARD_H - 12, maxH = 56;
@@ -229,18 +208,31 @@
         ctx.fillStyle = i === spark.length - 1 ? PALETTE.accent : PALETTE.commits;
         ctx.fillRect(bx + i * bw, baseY - h, bw - 1, h);
       });
-      const label = `${spark.length} WEEKS`;
-      drawText(ctx, label, BOARD_W - 6 - measureText(label), baseY + 3, PALETTE.dim, 1);
     }
     return false;
   };
 
+  const renderTotals = (ctx, model) =>
+    renderTotalsBoard(ctx, `${(model.org || "OOGABOOGAX").toUpperCase()} TOTALS`, model.latestWeek || "", model.totals, model.weeklyTotals);
+
+  const renderRepo = (ctx, model, params) => {
+    const repo = model.repos.find((r) => r.name === (params && params.name)) || model.repos[0];
+    if (!repo) {
+      clearBoard(ctx);
+      drawText(ctx, "NO REPOS", 58, 48, PALETTE.dim, 1);
+      return false;
+    }
+    return renderTotalsBoard(ctx, repo.name.toUpperCase(), model.latestWeek || "", repo.totals, repo.weeklyTotals);
+  };
+
   const renderLeaderboard = (ctx, model, params) => {
     const type = params && params.type || "commits";
-    const board = model.leaderboards[type] || [];
+    // Leaderboards are per repo; without a repo param the org boards show.
+    const repo = params && params.repo ? model.repos.find((r) => r.name === params.repo) : null;
+    const board = (repo ? repo.leaderboards : model.leaderboards)[type] || [];
     const color = PALETTE[type] || PALETTE.accent;
     clearBoard(ctx);
-    header(ctx, `TOP ${type.toUpperCase()}`, model.latestWeek || "");
+    header(ctx, `${repo ? repo.name.toUpperCase() + " " : ""}TOP ${type.toUpperCase()}`, model.latestWeek || "");
     const top = board.slice(0, 7);
     const maxV = Math.max(...top.map((e) => e.count), 1);
     let y = 16;
@@ -259,77 +251,43 @@
     return false;
   };
 
-  const renderContributor = (ctx, model, params) => {
-    const login = params && params.login;
-    const c = login && model.byLogin.get(login) || model.contributors[0];
+  const TYPE_COLOR = { commit: "commits", pr: "prs", review: "reviews", merge: "accent", issue: "issues", comment: "comments" };
+  // Short relative age for the recent feed, against wall-clock now.
+  const recentAge = (iso, nowMs = Date.now()) => {
+    const ms = nowMs - Date.parse(iso);
+    if (!Number.isFinite(ms) || ms < 0) return "NOW";
+    const minutes = Math.floor(ms / 60000);
+    if (minutes < 60) return `${minutes}M`;
+    const hours = Math.floor(minutes / 60);
+    if (hours < 24) return `${hours}H`;
+    return `${Math.floor(hours / 24)}D`;
+  };
+
+  // The opening board: who did what where, newest first.
+  const renderRecent = (ctx, model) => {
     clearBoard(ctx);
-    if (!c) {
-      drawText(ctx, "NO CONTRIBUTORS", 40, 48, PALETTE.dim, 1);
+    header(ctx, "RECENT", model.latestWeek || "");
+    if (!model.recent.length) {
+      drawText(ctx, "NO ACTIVITY", 52, 48, PALETTE.dim, 1);
       return false;
     }
-    header(ctx, "CONTRIBUTOR", model.latestWeek || "");
-    drawIdenticon(ctx, c.login, 6, 17);
-    const name = fitText(displayLabel(c).toUpperCase(), BOARD_W - 50, 1);
-    drawText(ctx, name, 44, 20, PALETTE.text, 1);
-    const counts = [
-      ["CM", c.counts.commits, PALETTE.commits],
-      ["PR", c.counts.prs, PALETTE.prs],
-      ["RV", c.counts.reviews, PALETTE.reviews],
-      ["MSG", c.counts.comments.all, PALETTE.comments]
-    ];
-    let x = 44;
-    for (const [label, value, color] of counts) {
-      drawText(ctx, String(label), x, 42, PALETTE.dim, 1);
-      drawText(ctx, String(value), x, 50, color, 1);
-      x += 36;
-    }
-    const weeks = c.weekly.slice(-26);
-    if (weeks.length > 0) {
-      const maxV = Math.max(...weeks.map((w) => w.commits + w.prs + w.reviews + w.comments), 1);
-      const bw = 5, bx = 6, baseY = BOARD_H - 12, maxH = 28;
-      weeks.forEach((w, i) => {
-        const total = w.commits + w.prs + w.reviews + w.comments;
-        const h = Math.max(total > 0 ? 1 : 0, Math.round(total / maxV * maxH));
-        if (h > 0) {
-          ctx.fillStyle = i === weeks.length - 1 ? PALETTE.accent : PALETTE.prs;
-          ctx.fillRect(bx + i * bw, baseY - h, bw - 1, h);
-        }
-      });
-      drawText(ctx, `${weeks.length} WEEKS`, bx, baseY + 3, PALETTE.dim, 1);
+    let y = 15;
+    for (const e of model.recent.slice(0, 11)) {
+      const color = PALETTE[TYPE_COLOR[e.type]] || PALETTE.accent;
+      drawText(ctx, fitText(e.login.toUpperCase(), 60, 1), 4, y, PALETTE.text, 1);
+      drawText(ctx, fitText(e.repo.toUpperCase(), 54, 1), 68, y, PALETTE.dim, 1);
+      drawText(ctx, fitText(e.type.toUpperCase(), 42, 1), 126, y, color, 1);
+      const age = recentAge(e.occurredAt);
+      drawText(ctx, age, BOARD_W - 4 - measureText(age, 1), y, PALETTE.dim, 1);
+      y += 8;
     }
     return false;
   };
 
-  const TICKER_SPEED = 30;
-  // bandOnly repaints just the scrolling strip: the header and digest are the same pixels for the whole view.
-  const renderTicker = (ctx, model, _params, t, bandOnly) => {
-    if (!bandOnly) {
-      clearBoard(ctx);
-      header(ctx, "LIVE WIRE", model.latestWeek || "");
-      const digest = [
-        ["COMMITS", model.totals.commits, PALETTE.commits],
-        ["PRS", model.totals.prs, PALETTE.prs],
-        ["REVIEWS", model.totals.reviews, PALETTE.reviews],
-        ["COMMENTS", model.totals.comments.all, PALETTE.comments]
-      ];
-      let x = 6;
-      for (const [label, value, color] of digest) {
-        drawText(ctx, String(label), x, 26, PALETTE.dim, 1);
-        drawText(ctx, String(value), x, 36, color, 2);
-        x += 46;
-      }
-    }
-    const text = model.tickerText || "NO DATA";
-    const tw = measureText(text, 1) + BOARD_W;
-    const offset = (t || 0) * TICKER_SPEED % tw;
-    const y = BOARD_H - 20;
-    ctx.fillStyle = PALETTE.grid;
-    ctx.fillRect(0, y - 4, BOARD_W, 15);
-    drawText(ctx, text, BOARD_W - offset, y, PALETTE.accent, 1);
-    return true;
-  };
-
-  const VIEWS = { totals: renderTotals, leaderboard: renderLeaderboard, contributor: renderContributor, ticker: renderTicker };
+  const VIEWS = { recent: renderRecent, totals: renderTotals, repo: renderRepo, leaderboard: renderLeaderboard };
+  // Active-repo boards are capped so the rotation stays bounded as the org grows.
+  const MAX_REPO_BOARDS = 6;
+  const ACTIVE_WINDOW_MS = 7 * 24 * 3600 * 1000;
 
   const SW = 16 / 9, SH = 1, BORDER = 0.16, DEPTH = 0.14;
   // Wide thick frame: lit pixels keep a wood margin and sit back of the rails, so edge-on views show wood.
@@ -380,19 +338,16 @@
     geo.faces.push({ i: [base, base + 1, base + 2, base + 3], color, emissive });
   };
 
-  // Only BAND_TOP..BOARD_H scrolls; the header and digest hold still, so the two are built and rebuilt apart.
-  const BAND_TOP = BOARD_H - 26;
-  const screenGeometryFrom = (ctx, y0 = 0, y1 = BOARD_H, withPanel = true) => {
+  const screenGeometryFrom = (ctx) => {
     const geo = { verts: [], faces: [], lines: [] };
     // Face colors are 0-255 like models.js hexToRgb; the renderer normalizes at upload.
-    if (withPanel) pushQuad(geo, -SW / 2, SW / 2, -SH / 2, SH / 2, SCREEN_Z, [10, 12, 10], 0.35);
-    // Read back only the rows being rebuilt, not the whole board.
-    const data = ctx.getImageData(0, y0, BOARD_W, y1 - y0).data;
+    pushQuad(geo, -SW / 2, SW / 2, -SH / 2, SH / 2, SCREEN_Z, [10, 12, 10], 0.35);
+    const data = ctx.getImageData(0, 0, BOARD_W, BOARD_H).data;
     // Skip background (10,12,10) and the scanline tint (19,25,18): it would shimmer at distance.
     const skip = (r, g, b) => (r === 10 && g === 12 && b === 10) || (r === 19 && g === 25 && b === 18);
-    for (let y = y0; y < y1; y++) {
+    for (let y = 0; y < BOARD_H; y++) {
       const wy0 = SH / 2 - (y + 1) * PX_H, wy1 = SH / 2 - y * PX_H;
-      const row = (y - y0) * BOARD_W;
+      const row = y * BOARD_W;
       let x = 0;
       while (x < BOARD_W) {
         const i = (row + x) * 4;
@@ -412,6 +367,52 @@
     return geo;
   };
 
+  // ---- Frame-mounted navigation chrome -------------------------------------
+  // Arrows on the side rails and one indicator block per slide on the bottom
+  // rail, in the cave sign's paper-white blocks (#f3efe4, gentle emissive) so
+  // the cabinet reads like the island's other signage. Blocks sit proud of
+  // the rail faces (0.086/0.09) — coplanar faces sparkle.
+  const CHROME_WHITE = [243, 239, 228];
+  const CHROME_DIM = [166, 166, 162];
+  const OUTER_W = SW + 2 * BORDER, OUTER_H = SH + 2 * BORDER;
+  const CHROME_CELL = 0.036, CHROME_PIXEL = 0.03;
+  const ARROW_Z = 0.096, DOT_Z = 0.1, DOT_SIZE = 0.05;
+  const RAIL_X = OUTER_W / 2 - RAIL / 2, RAIL_Y = OUTER_H / 2 - RAIL / 2;
+  // 4x7 chevrons, rows top-first; mirrored for the right rail.
+  const ARROW_LEFT = ["0001", "0010", "0100", "1000", "0100", "0010", "0001"];
+  const ARROW_RIGHT = ARROW_LEFT.map((row) => [...row].reverse().join(""));
+  const pushBlock = (geo, cx, cy, size, z, color, emissive) => {
+    pushQuad(geo, cx - size / 2, cx + size / 2, cy - size / 2, cy + size / 2, z, color, emissive);
+  };
+  const pushArrow = (geo, rows, cx) => {
+    for (let r = 0; r < rows.length; r++) {
+      for (let c = 0; c < rows[r].length; c++) {
+        if (rows[r][c] !== "1") continue;
+        const x = cx + (c - (rows[r].length - 1) / 2) * CHROME_CELL;
+        const y = ((rows.length - 1) / 2 - r) * CHROME_CELL;
+        pushBlock(geo, x, y, CHROME_PIXEL, ARROW_Z, CHROME_WHITE, 0.25);
+      }
+    }
+  };
+  // The dot row's geometry and hit-test share this layout; pitch shrinks so
+  // the row stays clear of the corner joint plates however long the cycle.
+  const dotLayout = (n) => {
+    const pitch = Math.max(0.07, Math.min(0.11, (OUTER_W - 0.8) / Math.max(1, n)));
+    return { pitch, x0: -((n - 1) * pitch) / 2 };
+  };
+  const chromeGeometryFrom = (count, current) => {
+    const geo = { verts: [], faces: [], lines: [] };
+    pushArrow(geo, ARROW_LEFT, -RAIL_X);
+    pushArrow(geo, ARROW_RIGHT, RAIL_X);
+    const { pitch, x0 } = dotLayout(count);
+    for (let i = 0; i < count; i++) {
+      const lit = i === current;
+      pushBlock(geo, x0 + i * pitch, -RAIL_Y, DOT_SIZE, DOT_Z, lit ? CHROME_WHITE : CHROME_DIM, lit ? 0.9 : 0.12);
+    }
+    geo.castShadow = false;
+    return geo;
+  };
+
   const create = ({ data, position = { x: 0, y: 0, z: 0 }, ry = 0, scale = 1 } = {}) => {
     const canvas = document.createElement("canvas");
     canvas.width = BOARD_W;
@@ -426,37 +427,48 @@
       model = null; // Bad data leaves model null (awaiting screen); the island must not break.
     }
 
-    let view = { name: "totals", params: undefined };
+    let view = { name: "recent", params: undefined };
     let cycleIndex = 0;
     let rotateEvery = 8;
     let lastSwitchAt = 0;
-    let suspendUntil = 0;
-    let lastTickerAt = 0;
+    let resetRotation = false;
     let dirty = true;
-    let bandDirty = false;
-    let animated = false;
+    // World->local for board taps, cached: the cabinet never moves once placed.
+    const tapInverse = new Float32Array(16);
+    let tapInverseValid = false;
+    const TAP_P = [0, 0, 0], TAP_D = [0, 0, 0];
 
-    const cycle = (() => {
-      const c = [
-        { name: "totals" },
-        { name: "leaderboard", params: { type: "commits" } },
-        { name: "leaderboard", params: { type: "prs" } },
-        { name: "leaderboard", params: { type: "reviews" } },
-        { name: "leaderboard", params: { type: "comments" } }
-      ];
-      if (model) for (const entry of model.contributors.slice(0, 3)) c.push({ name: "contributor", params: { login: entry.login } });
-      c.push({ name: "ticker" });
+    // Repos idle for a week disappear from the rotation entirely; the clock
+    // reference is the payload's own generated_at so the bake is deterministic.
+    const activeRepos = () => {
+      if (!model) return [];
+      const ref = Date.parse(model.generatedAt) || Date.now();
+      return model.repos
+        .filter((r) => r.lastActivityAt && ref - Date.parse(r.lastActivityAt) <= ACTIVE_WINDOW_MS)
+        .slice(0, MAX_REPO_BOARDS);
+    };
+
+    // Rebuilt per model: recent feed, org totals, then each active repo's
+    // summary followed by its four leaderboards.
+    const cycle = () => {
+      const c = [{ name: "recent" }, { name: "totals" }];
+      for (const repo of activeRepos()) {
+        c.push({ name: "repo", params: { name: repo.name } });
+        for (const type of ["commits", "prs", "reviews", "comments"]) {
+          c.push({ name: "leaderboard", params: { type, repo: repo.name } });
+        }
+      }
       return c;
-    })();
+    };
 
-    const renderBoard = (t, bandOnly) => {
+    const renderBoard = () => {
       if (!model) {
         clearBoard(ctx);
         drawText(ctx, "OOGATRON", 62, 44, PALETTE.accent, 2);
         drawText(ctx, "AWAITING DATA", 57, 60, PALETTE.dim, 1);
-        return false;
+        return;
       }
-      return !!(VIEWS[view.name] || VIEWS.totals)(ctx, model, view.params, t, bandOnly);
+      (VIEWS[view.name] || VIEWS.totals)(ctx, model, view.params);
     };
 
     const node = createNode({
@@ -468,9 +480,10 @@
     // Drawn at board size then scaled in to clear the rails; z is left alone.
     const screenNode = createNode({ geometry: null, scale: { x: FX, y: FY, z: 1 } });
     addChild(node, screenNode);
-    // The moving part, kept off the still part so a scroll never rebuilds it.
-    const bandNode = createNode({ geometry: null, scale: { x: FX, y: FY, z: 1 } });
-    addChild(node, bandNode);
+    // The navigation chrome lives on the wood frame, unscaled cabinet space.
+    const chromeNode = createNode({ geometry: null });
+    addChild(node, chromeNode);
+    let chromeKey = "";
 
     const swapGeometry = (target, geometry, renderer) => {
       const old = target.geometry;
@@ -478,18 +491,44 @@
       target.geometry = geometry;
       if (old && renderer && renderer.releaseGeometry) renderer.releaseGeometry(old);
     };
-    const refresh = (t, renderer, wantBand = false) => {
-      // Decided before painting, so the canvas and the geometry always agree.
-      const band = wantBand && view.name === "ticker" && !!screenNode.geometry;
-      animated = renderBoard(t, band);
-      const scrolling = animated && view.name === "ticker";
-      if (band) {
-        swapGeometry(bandNode, screenGeometryFrom(ctx, BAND_TOP, BOARD_H, false), renderer);
-      } else {
-        swapGeometry(screenNode, screenGeometryFrom(ctx, 0, scrolling ? BAND_TOP : BOARD_H, true), renderer);
-        swapGeometry(bandNode, scrolling ? screenGeometryFrom(ctx, BAND_TOP, BOARD_H, false) : null, renderer);
+    const refresh = (renderer) => {
+      renderBoard();
+      swapGeometry(screenNode, screenGeometryFrom(ctx), renderer);
+      dirty = false;
+    };
+    const refreshChrome = (renderer) => {
+      const count = cycle().length;
+      const current = cycleIndex % count;
+      const key = `${count}:${current}`;
+      if (key === chromeKey) return;
+      chromeKey = key;
+      swapGeometry(chromeNode, chromeGeometryFrom(count, current), renderer);
+    };
+
+    // A world ray -> board pixel, or null off the screen: invert the cabinet's
+    // world matrix (the mirror-ripples pattern), intersect the screen plane in
+    // local space, then map through the screen fit back to raster coordinates.
+    const boardAt = (ray) => {
+      if (!tapInverseValid) {
+        mat4.invert(tapInverse, node.world);
+        tapInverseValid = true;
       }
-      dirty = bandDirty = false;
+      mat4.transformPoint(TAP_P, tapInverse, ray.ox, ray.oy, ray.oz);
+      TAP_D[0] = tapInverse[0] * ray.dx + tapInverse[4] * ray.dy + tapInverse[8] * ray.dz;
+      TAP_D[1] = tapInverse[1] * ray.dx + tapInverse[5] * ray.dy + tapInverse[9] * ray.dz;
+      TAP_D[2] = tapInverse[2] * ray.dx + tapInverse[6] * ray.dy + tapInverse[10] * ray.dz;
+      if (!TAP_D[2]) return null;
+      const t = (SCREEN_Z - TAP_P[2]) / TAP_D[2];
+      if (t < 0) return null;
+      const lx = TAP_P[0] + TAP_D[0] * t, ly = TAP_P[1] + TAP_D[1] * t;
+      // Anywhere on the cabinet face counts; the linear mapping lets rail
+      // taps land outside the 0..BOARD range and regionize naturally. The
+      // shared SCREEN_Z plane under-corrects rail parallax by a few board
+      // pixels at steep angles — the rail zones are generous enough.
+      if (Math.abs(lx) > OUTER_W / 2 + 0.05 || Math.abs(ly) > OUTER_H / 2 + 0.05) return null;
+      const bx = (lx / (SW * FX) + 0.5) * BOARD_W;
+      const by = (0.5 - ly / (SH * FY)) * BOARD_H;
+      return { bx, by, lx, ly };
     };
 
     const api = {
@@ -498,58 +537,111 @@
       setView(name, params) {
         if (!VIEWS[name]) return;
         view = { name, params };
-        dirty = true;
+        resetRotation = dirty = true;
       },
       nextView() {
-        cycleIndex = (cycleIndex + 1) % cycle.length;
-        view = cycle[cycleIndex];
-        dirty = true;
+        const c = cycle();
+        cycleIndex = (cycleIndex + 1) % c.length;
+        view = c[cycleIndex];
+        resetRotation = dirty = true;
+      },
+      prevView() {
+        const c = cycle();
+        cycleIndex = (cycleIndex - 1 + c.length) % c.length;
+        view = c[cycleIndex];
+        resetRotation = dirty = true;
+      },
+      goToView(index) {
+        const c = cycle();
+        if (!Number.isInteger(index) || index < 0 || index >= c.length) return;
+        cycleIndex = index;
+        view = c[cycleIndex];
+        resetRotation = dirty = true;
+      },
+      boardToWorld(bx, by) {
+        const out = [0, 0, 0];
+        mat4.transformPoint(
+          out, node.world,
+          (bx / BOARD_W - 0.5) * SW * FX,
+          (0.5 - by / BOARD_H) * SH * FY,
+          SCREEN_Z
+        );
+        return { x: out[0], y: out[1], z: out[2] };
+      },
+      // A tap resolved onto the cabinet: the side-rail arrows page, the
+      // bottom-rail dots jump to their slide, and the screen (or the top
+      // rail, or a miss into thin air) advances, as tapping the board always
+      // has. Returns what it did, for checks.
+      tapAt(ray) {
+        const hit = boardAt(ray);
+        if (!hit) {
+          api.nextView();
+          return "next";
+        }
+        if (hit.bx < 0) {
+          api.prevView();
+          return "prev";
+        }
+        if (hit.bx > BOARD_W) {
+          api.nextView();
+          return "next";
+        }
+        if (hit.by > BOARD_H) {
+          const c = cycle();
+          const { pitch, x0 } = dotLayout(c.length);
+          const index = Math.max(0, Math.min(c.length - 1, Math.round((hit.lx - x0) / pitch)));
+          api.goToView(index);
+          return `dot:${index}`;
+        }
+        api.nextView();
+        return "next";
       },
       autoRotate(seconds) {
         rotateEvery = seconds > 0 ? seconds : 0;
       },
-      // Poke an Ooga -> their stats on the big screen, keyed by public handles/aliases.
-      showContributor(name) {
-        if (!model) return false;
-        const login = model.byLogin.has(name) ? name : BL.characters.get(name)?.github;
-        if (!model.byLogin.has(login)) return false;
-        view = { name: "contributor", params: { login } };
+      // A fresh /v1/stats payload from the live poller; invalid data is
+      // ignored so a worker hiccup can never blank the board.
+      refreshData(json) {
+        let next;
+        try {
+          next = parseStats(json);
+        } catch (e) {
+          return false;
+        }
+        model = next;
+        // A repo view whose repo vanished falls back inside renderRepo.
         dirty = true;
-        suspendUntil = lastSwitchAt = -1; // -1 sentinel: resolved on the next update from elapsed.
-        api._suspend = 14;
         return true;
       },
       update(elapsed, renderer) {
-        if (api._suspend) {
-          suspendUntil = elapsed + api._suspend;
+        // Any manual slide change restarts the auto-rotate countdown.
+        if (resetRotation) {
           lastSwitchAt = elapsed;
-          api._suspend = 0;
+          resetRotation = false;
         }
-        if (rotateEvery > 0 && elapsed >= suspendUntil && elapsed - lastSwitchAt >= rotateEvery) {
+        if (rotateEvery > 0 && elapsed - lastSwitchAt >= rotateEvery) {
           lastSwitchAt = elapsed;
           api.nextView();
+          resetRotation = false;
         }
-        // Step the ticker every 0.25s, not every frame; when only the text moved rebuild the band, not the screen.
-        if (animated && view.name === "ticker" && elapsed - lastTickerAt >= 0.25) {
-          lastTickerAt = elapsed;
-          bandDirty = true;
-        }
-        if (dirty) refresh(elapsed, renderer);
-        else if (bandDirty) refresh(elapsed, renderer, true);
+        if (dirty) refresh(renderer);
+        refreshChrome(renderer);
       },
       dispose(renderer) {
         if (renderer && renderer.releaseGeometry) {
           if (screenNode.geometry) renderer.releaseGeometry(screenNode.geometry);
-          if (bandNode.geometry) renderer.releaseGeometry(bandNode.geometry);
+          if (chromeNode.geometry) renderer.releaseGeometry(chromeNode.geometry);
           if (node.geometry) renderer.releaseGeometry(node.geometry);
         }
         screenNode.geometry = null;
-        bandNode.geometry = null;
+        chromeNode.geometry = null;
         node.geometry = null;
       }
     };
     return api;
   };
 
-  BL.jumbotron = { create, parseStats, PALETTE, DROP };
+  // The 5x7 bitmap font and its helpers are the island's only readable type; the Mempool cave
+  // carves its wall panels with the same glyphs so both boards read alike.
+  BL.jumbotron = { create, parseStats, PALETTE, DROP, text: { FONT, GLYPH_W, GLYPH_H, TRACKING, glyphOf, measureText, drawText, fitText } };
 })();

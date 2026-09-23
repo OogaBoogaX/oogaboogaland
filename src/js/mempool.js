@@ -2,7 +2,7 @@
 // Subscribers get plain events, { type: "tx", vsize, weight, fee } for each transaction the
 // mempool accepts, { type: "block", height, txCount } for each block mined after connect and
 // { type: "fees", nextFee, blocks } whenever the projected next block's median fee moves.
-// The only network code on the page; the content policy allows exactly this origin.
+// One of the page's two live feeds (the other polls the oogatron worker in oogatron-live.js).
 (() => {
   "use strict";
   const BL = window.BL = window.BL || {};

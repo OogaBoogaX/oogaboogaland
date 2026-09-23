@@ -142,7 +142,11 @@ export const launch = async ({ w = 1440, h = 900, mobile = false, perf = false, 
     }
     listeners.get(m.method)?.(m.params);
     if (m.method === "Runtime.consoleAPICalled") logs.push(`[console.${m.params.type}] ${m.params.args.map((a) => a.value ?? a.description ?? "").join(" ")}`);
-    if (m.method === "Runtime.exceptionThrown") logs.push(`[exception] ${m.params.exceptionDetails.text} ${m.params.exceptionDetails.exception?.description ?? ""}`);
+    if (m.method === "Runtime.exceptionThrown") {
+      const detail = m.params.exceptionDetails;
+      const frames = detail.stackTrace?.callFrames.map(f => `${f.functionName || "anonymous"} (${f.url}:${f.lineNumber + 1}:${f.columnNumber + 1})`).join(" <- ") || "";
+      logs.push(`[exception] ${detail.text} ${detail.exception?.description ?? ""} ${frames}`);
+    }
     if (m.method === "Log.entryAdded") logs.push(`[log.${m.params.entry.level}] ${m.params.entry.text}`);
   };
   // A crashed Chrome takes its socket with it: fail waiting commands on close instead of at the timeout.

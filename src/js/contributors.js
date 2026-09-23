@@ -1,17 +1,25 @@
 (() => {
   "use strict";
   const BL = window.BL = window.BL || {};
-  const MINUTE = 60 * 1e3, HOUR = 60 * MINUTE, WORK_WINDOW = 4 * HOUR, CHILL_WINDOW = 48 * HOUR;
+  // Clanking (working) within the hour, chillin until a day has passed,
+  // asleep after that. The 60s hub interval re-samples these thresholds.
+  const MINUTE = 60 * 1e3, HOUR = 60 * MINUTE, WORK_WINDOW = 1 * HOUR, CHILL_WINDOW = 24 * HOUR;
   const ENTROPY = "oogaboogax/entropylab", MAX_REPOS = 64;
   const ISO_TIME = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/;
   // Historical EntropyLab activity; a backend can refresh it with applyActivity.
   // One entry per file in src/characters/, in join order.
   const characters = BL.characters.all();
-  const roster = characters.map(({ handle, lastCommit }) => ({ name: handle, lastCommitAt: lastCommit * 1e3, activity: new Map([[ENTROPY, lastCommit * 1e3]]) }));
+  // `look.maintainer` marks someone who keeps every project on the island: until
+  // the backend reports their commits they are busy in all of them, whatever the
+  // clock or the debug fixture says. Delete the flag from the character file once
+  // real activity arrives and the dates take over again.
+  const roster = characters.map(({ handle, lastCommit, look }) => ({ name: handle, lastCommitAt: lastCommit * 1e3, activity: new Map([[ENTROPY, lastCommit * 1e3]]), maintainer: !!(look && look.maintainer) }));
   // Filter construction, not visibility: solo worlds do no work for absent Oogas.
   // Keep the canonical roster intact for activity, likenesses and stable indices.
   const params = new URLSearchParams(location.search);
   const solo = params.has("debug") && (params.get("solo") === "1" || params.get("solo") === "");
+  const requestedStatus = params.has("debug") ? params.get("status") : null;
+  const debugState = requestedStatus === "clankin" ? "working" : requestedStatus === "chillin" ? "chilling" : requestedStatus === "sleepin" ? "sleeping" : null;
   const character = params.get("character")?.trim().toLowerCase();
   const activeRoster = solo ? roster.filter((entry) => entry.name.toLowerCase() === character) : roster;
   const byName = new Map(roster.map((contributor) => [contributor.name.toLowerCase(), contributor]));
@@ -25,21 +33,26 @@
   };
   // Callers use the canonical lowercase repository key, keeping frame queries allocation-free.
   const hasRecentActivity = (contributor, repo, at = Date.now()) => {
+    if (debugState === "working" && repo === ENTROPY) return true;
+    if (contributor.maintainer) return true;
     const seen = contributor.activity.get(repo);
     return seen > 0 && seen <= at && at - seen < WORK_WINDOW;
   };
   const stateFor = (contributor, at = Date.now()) => {
+    if (debugState) return debugState;
+    if (contributor.maintainer) return "working";
     const age = at - contributor.lastCommitAt;
     if (!Number.isFinite(age) || contributor.lastCommitAt <= 0 || age < 0) return "sleeping";
     if (age < WORK_WINDOW) return "working";
     return age < CHILL_WINDOW ? "chilling" : "sleeping";
   };
   const ageLabel = (contributor, at = Date.now()) => {
+    if (contributor.maintainer) return "building";
     if (!Number.isFinite(contributor.lastCommitAt) || contributor.lastCommitAt <= 0) return "no activity";
     const minutes = Math.max(0, Math.floor((at - contributor.lastCommitAt) / MINUTE));
     if (minutes < 60) return `${minutes}m ago`;
     const hours = Math.floor(minutes / 60);
-    if (hours < 48) return `${hours}h ago`;
+    if (hours < 24) return `${hours}h ago`;
     return `${Math.floor(hours / 24)}d ago`;
   };
   // Rows: { name: GitHub handle, lastCommitAt: Unix milliseconds, repo? }.
@@ -60,16 +73,45 @@
     if (changed.size) for (const notify of listeners) notify();
     return changed.size;
   };
-  // Oogatron schema 1, one snapshot or an array of project snapshots. generated_at
-  // describes the snapshot, never the contributor's most recent activity.
+  // Oogatron snapshots, one or an array: schema 2 or 3 (org-wide — the baked
+  // jumbotron payload and the live /v2/stats poll) or legacy schema 1 project
+  // snapshots keyed by meta.repo. generated_at describes the snapshot, never
+  // the contributor's most recent activity. A schema-3 snapshot whose repos
+  // carry per-contributor last_seen_at fans out onto each repository key —
+  // that is what routes a clanking Ooga to the cave of the repo they actually
+  // contributed to. Without that field, org-wide last_seen_at lands on the
+  // lab's key as before; either way stateFor (max across repos) gives the
+  // same org-wide wake/sleep state.
   const applySnapshot = (snapshots, at = Date.now()) => {
     const rows = [];
+    // One sub-snapshot per repository key, so the per-key first-snapshot
+    // bookkeeping below stays uniform across all three intake shapes.
+    const intakes = [];
     for (const snapshot of Array.isArray(snapshots) ? snapshots : [snapshots]) {
-      if (!snapshot || !snapshot.meta || snapshot.meta.schema_version !== 1 || !Array.isArray(snapshot.contributors)) continue;
-      const repo = repositoryOf(snapshot.meta.repo);
-      if (!repo) continue;
+      if (!snapshot || !snapshot.meta) continue;
+      const version = snapshot.meta.schema_version;
+      if (version === 1) {
+        const repo = repositoryOf(snapshot.meta.repo);
+        if (repo && Array.isArray(snapshot.contributors)) intakes.push({ repo, contributors: snapshot.contributors });
+        continue;
+      }
+      if (version !== 2 && version !== 3) continue;
+      if (typeof snapshot.meta.org !== "string" || snapshot.meta.org.toLowerCase() !== "oogaboogax") continue;
+      const perRepo = version === 3 && Array.isArray(snapshot.repos)
+        ? snapshot.repos.filter((r) => r && typeof r.name === "string" && Array.isArray(r.contributors))
+        : [];
+      if (perRepo.length) {
+        for (const r of perRepo) {
+          const repo = repositoryOf(`oogaboogax/${r.name}`);
+          if (repo) intakes.push({ repo, contributors: r.contributors });
+        }
+      } else if (Array.isArray(snapshot.contributors)) {
+        intakes.push({ repo: ENTROPY, contributors: snapshot.contributors });
+      }
+    }
+    for (const { repo, contributors: list } of intakes) {
       const firstSnapshot = !snapshotRepos.has(repo), accepted = [];
-      for (const contributor of snapshot.contributors) {
+      for (const contributor of list) {
         if (!contributor || typeof contributor.login !== "string" || typeof contributor.last_seen_at !== "string" || !ISO_TIME.test(contributor.last_seen_at)) continue;
         const lastCommitAt = Date.parse(contributor.last_seen_at);
         const entry = byName.get(contributor.login.toLowerCase());
@@ -138,5 +180,5 @@
     if (look.height) traits.height = look.height;
     return traits;
   };
-  BL.contributors = { roster, activeRoster, solo, stateFor, ageLabel, traitsFor, voiceFor, hasRecentActivity, applyActivity, applySnapshot, subscribe, seedDebugActivity };
+  BL.contributors = { roster, activeRoster, solo, debugState, stateFor, ageLabel, traitsFor, voiceFor, hasRecentActivity, applyActivity, applySnapshot, subscribe, seedDebugActivity };
 })();

@@ -47,6 +47,8 @@
     return geo;
   };
   const VOX = 0.5;
+  // The cell a cloud's flat base sits on, and how many cells it rounds up by at the rim.
+  const CLOUD_BASE = -2, CLOUD_ROUND = 2;
   const QUARTER = 0.25;
   const QHALF = { x: -QUARTER / 2, y: 0, z: -QUARTER / 2 };
   const STONE = ["#3a3734", "#2d2b28", "#45413d"];
@@ -96,6 +98,17 @@
     T: ["111", "010", "010", "010", "010"],
     W: ["101", "101", "101", "111", "101"],
     X: ["101", "101", "010", "101", "101"],
+    G: ["011", "100", "101", "101", "011"],
+    I: ["111", "010", "010", "010", "111"],
+    J: ["001", "001", "001", "101", "010"],
+    K: ["101", "101", "110", "101", "101"],
+    N: ["101", "111", "101", "101", "101"],
+    Q: ["111", "101", "101", "111", "011"],
+    U: ["101", "101", "101", "101", "111"],
+    V: ["101", "101", "101", "101", "010"],
+    Y: ["101", "101", "010", "010", "010"],
+    Z: ["111", "001", "010", "100", "111"],
+    "/": ["001", "001", "010", "100", "100"],
     0: ["111", "101", "101", "101", "111"],
     1: ["010", "110", "010", "010", "111"],
     2: ["111", "001", "111", "100", "111"],
@@ -348,8 +361,9 @@
       canopyFloor = Math.min(canopyFloor, y); canopyTop = Math.max(canopyTop, y + 1);
     }
     // Keep the upper crown standable; lower leaves and branch tips let
-    // walkers through. Roots and the main trunk remain solid throughout.
-    const solid = vox(), middle = Math.ceil((canopyFloor + canopyTop) / 2);
+    // walkers through, including tall helmets on quarter-unit uphill ledges.
+    // Roots and the main trunk remain solid throughout.
+    const solid = vox(), middle = Math.max(11, Math.ceil((canopyFloor + canopyTop) / 2));
     for (const [key, color] of v.map) {
       voxCoords(key, CELL);
       const x = CELL[0], y = CELL[1], z = CELL[2];
@@ -502,6 +516,26 @@
     const puffs = CLOUD_PUFFS[i];
     const mid = (puffs[0][0] + puffs[puffs.length - 1][0]) / 2;
     for (const [cx, rx, rz] of puffs) blob(v, { cx: cx - mid + 0.5, cy: 1, cz: 0.5, rx, ry: 1.6, rz, chip: 0.3, rand, color: (x, y) => y > 0 ? 0 : 1 });
+    // A flat base under the puffs, the way a cumulus sits on the air, grown straight down from the
+    // cells already there: every cell added sits under another, so the cloud gains body without a
+    // single new top face (the render mesh is the surface an Ooga lands on). The base rounds up toward
+    // the rim so the cloud does not end in a slab, and it is set by each puff's ellipse rather than
+    // by the column heights, which the chipping makes ragged.
+    const lows = new Map();
+    for (const [k] of v.map) {
+      voxCoords(k, CELL);
+      const key = CELL[0] * 4096 + CELL[2], low = lows.get(key);
+      if (low === undefined || CELL[1] < low.min) lows.set(key, { x: CELL[0], z: CELL[2], min: CELL[1] });
+    }
+    for (const { x, z, min } of lows.values()) {
+      let inner = 0;
+      for (const [cx, rx, rz] of puffs) {
+        const dx = (x + 0.5 - (cx - mid + 0.5)) / rx, dz = (z + 0.5 - 0.5) / rz;
+        inner = Math.max(inner, 1 - dx * dx - dz * dz);
+      }
+      const bottom = CLOUD_BASE + Math.round(CLOUD_ROUND * (1 - Math.sqrt(Math.max(0, inner))));
+      for (let y = min - 1; y >= bottom; y--) v.set(x, y, z, 1);
+    }
     const geo = voxGeo(v, { unit: VOX, palette: ["#f7f9fb", "#dfe6ee"], origin: { x: -VOX / 2, y: -VOX, z: -VOX / 2 } });
     geo.castShadow = false;
     return geo;
@@ -511,11 +545,27 @@
     box({ w: 0.1, h: 4, d: 0.1, color: WOOD, offset: { x: 0.4, y: 2 } }),
     ...Array.from({ length: 9 }, (_, n) => box({ w: 0.9, h: 0.08, d: 0.08, color: "#7a5630", offset: { y: 0.35 + n * 0.42 } }))
   ));
-  const dock = cached(() => merge(
-    ...Array.from({ length: 8 }, (_, n) => box({ w: 0.46, h: 0.1, d: 2, color: n % 2 ? "#8f6538" : "#9c7040", offset: { x: 0.25 + n * 0.5, y: -0.05 } })),
-    box({ w: 4, h: 0.14, d: 0.16, color: WOOD_DK, offset: { x: 2, y: -0.17, z: -0.92 } }),
-    box({ w: 4, h: 0.14, d: 0.16, color: WOOD_DK, offset: { x: 2, y: -0.17, z: 0.92 } }),
-    ...[[0.5, -0.8], [0.5, 0.8], [3.5, -0.8], [3.5, 0.8]].map(([x, z]) => box({ w: 0.2, h: 2.2, d: 0.2, color: "#6b4a2b", offset: { x, y: -1.2, z } }))
-  ));
+  const dock = cached(() => {
+    // Two braces carry the outer edge back into the cliff. Keeping their
+    // upper ends at the old outer posts preserves the dock's silhouette while
+    // removing the redundant pair beside the island.
+    const innerX = 0.35, innerY = -2.2, outerX = 3.88, outerY = -0.17;
+    const dx = outerX - innerX, dy = outerY - innerY, length = Math.hypot(dx, dy);
+    const brace = (z) => {
+      const geo = turn(box({ w: 0.2, h: length, d: 0.2, color: "#6b4a2b" }), 0, -Math.atan2(dx, dy));
+      for (let i = 0; i < geo.verts.length; i += 3) {
+        geo.verts[i] += (innerX + outerX) / 2;
+        geo.verts[i + 1] += (innerY + outerY) / 2;
+        geo.verts[i + 2] += z;
+      }
+      return geo;
+    };
+    return merge(
+      ...Array.from({ length: 8 }, (_, n) => box({ w: 0.46, h: 0.1, d: 2, color: n % 2 ? "#8f6538" : "#9c7040", offset: { x: 0.25 + n * 0.5, y: -0.05 } })),
+      box({ w: 4, h: 0.14, d: 0.16, color: WOOD_DK, offset: { x: 2, y: -0.17, z: -0.92 } }),
+      box({ w: 4, h: 0.14, d: 0.16, color: WOOD_DK, offset: { x: 2, y: -0.17, z: 0.92 } }),
+      ...[-0.8, 0.8].map(brace)
+    );
+  });
   BL.hubModels = { SIGN_GLYPHS, jetpack, jetFlame, caveMouthRim, mirrorPanel, matrixPrisonBars, sealedCaveFace, matrixButtonStand, matrixButton, matrixGlyph, caveSign, CAVE_SIGN_WIDTH, CAVE_SIGN_HEIGHT, gate, caveShelves, bedroll, tree, bush, rock, altarSlab, altarBlock, woodCrate, barrel, flowerTuft, torch, grass, lantern, firepit, fireFlame, butterfly, firefly, ember, vine, cloud, ladder, dock, TREE_HEIGHT };
 })();

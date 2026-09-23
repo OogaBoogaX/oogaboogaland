@@ -18,11 +18,11 @@
   });
   const PUMPKIN = "#e8862a", PUMPKIN_DK = "#cf6f1c", PUMPKIN_GLOW = "#ffc14d";
   BL.characters.add({
-    handle: "genXbtc",
+    handle: "rules-without-rulers",
     joined: 1789801750,
-    lastCommit: 1788215311,
+    lastCommit: 1789954043,
     // pumpkin also flickers the head's glow in crew.js
-    look: { pumpkin: true, bald: true, cleanShaven: true, noBrow: true, noPupils: true, face: "none", hatY: 15, skin: "#cfc8b4", hair: "#151515", fur: "#141414", height: 1.16 },
+    look: { portrait: { min: [-1, -2, 0], max: [7, 7, 8] }, pumpkin: true, bald: true, cleanShaven: true, noBrow: true, noPupils: true, face: "none", hatY: 15, skin: "#cfc8b4", hair: "#151515", fur: "#141414", height: 1.16 },
     voice: {
       poke: "POWER OVERWHELMING",
       idle: ["Shut up you larp", "Rules Without Rulers"]
@@ -75,7 +75,7 @@
       },
       headgear(k) {
         const h = k.h, u = k.u;
-        addChild(k.parts.head, createNode({ position: { x: 0, y: 7.5 * u, z: 0 }, rotation: { x: 0, y: 0, z: 0.06 }, scale: { x: h, y: h, z: h }, geometry: topHatGeometry() }));
+        addChild(k.parts.head, createNode({ position: { x: 0, y: 7.5 * u, z: 0 }, rotation: { x: 0, y: 0, z: 0.06 }, scale: { x: h, y: h, z: h }, geometry: topHatGeometry(), portraitHidden: true }));
       }
     }
   });

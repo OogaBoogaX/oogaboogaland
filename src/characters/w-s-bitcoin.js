@@ -76,7 +76,7 @@
     joined: 1788800916,
     lastCommit: 1788178261,
     // stoneAxe also drives the axe stance in crew.js
-    look: { stoneAxe: true, hairless: true, hatY: 8 },
+    look: { portrait: { min: [-1, -2, 0], max: [7, 7, 8] }, stoneAxe: true, hairless: true, hatY: 8 },
     dress: {
       // An apple for a head: red with a wooden stalk and a leaf
       skull(k, v) {

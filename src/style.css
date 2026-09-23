@@ -86,7 +86,8 @@ select {
   user-select: none;
 }
 
-.carry-cursor-active #scene {
+.carry-cursor-active #scene,
+.aim-cursor-focused #scene {
   cursor: none !important;
 }
 
@@ -442,7 +443,8 @@ select {
   right: calc(16px + var(--safe-right));
   height: 520px;
   max-height: calc(100% - 90px - var(--safe-top) - var(--safe-bottom));
-  width: 330px;
+  width: 380px;
+  max-width: calc(100vw - 32px - var(--safe-left) - var(--safe-right));
   display: flex;
   flex-direction: column;
   background: var(--planks);
@@ -565,6 +567,25 @@ select {
   scrollbar-color: rgba(0, 0, 0, 0.35) transparent;
 }
 
+/* The roster scrolls; its call to action does not scroll away with it. A long cast used to push
+   Feed the Ooga Boogas past the bottom of the sheet, where it could only be reached by scrolling. */
+.panel[data-panel="roster"] {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.panel[data-panel="roster"] > .roster {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+
+.panel[data-panel="roster"] > .feed-open {
+  margin-top: auto;
+}
+
 .panel h2 {
   margin: 0 0 10px;
   font-size: 14px;
@@ -630,6 +651,28 @@ select {
   box-shadow: 0 6px 0 rgba(0, 0, 0, 0.35), 0 10px 30px rgba(0, 0, 0, 0.35);
   color: var(--paper);
   font: inherit;
+}
+
+/* Every modal closes with the same X, sized as a target rather than a word. */
+.modal-close {
+  flex: none;
+  width: 28px;
+  height: 28px;
+  margin: -4px -4px 0 0;
+  padding: 0;
+  color: var(--paper);
+  background: rgba(0, 0, 0, 0.22);
+  border: 2px solid var(--wood-edge);
+  border-radius: 6px;
+  font: inherit;
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.modal-close:hover,
+.modal-close:focus-visible {
+  background: rgba(0, 0, 0, 0.38);
 }
 
 .modal::backdrop {
@@ -1155,7 +1198,8 @@ select {
 }
 
 .tooltip--name {
-  display: flex;
+  display: grid;
+  grid-template-columns: 8px auto;
   align-items: center;
   gap: 6px;
   padding: 3px 5px;
@@ -1179,6 +1223,25 @@ select {
   border-radius: 50%;
   background: var(--muted);
   box-shadow: 0 0 0 1px #171714, 0 1px 3px #000;
+}
+
+.tooltip-health {
+  grid-column: 1 / -1;
+  width: 72px;
+  height: 4px;
+  margin: -2px auto 1px;
+  overflow: hidden;
+  border-radius: 2px;
+  background: rgba(25, 20, 15, 0.78);
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.8);
+}
+
+.tooltip-health > span {
+  display: block;
+  width: 100%;
+  height: 100%;
+  background: var(--accent);
+  transform-origin: left center;
 }
 
 .tooltip--name[data-state="working"]::before {
@@ -1216,6 +1279,8 @@ select {
   display: none;
 }
 
+.mode-hud,
+.primary-hud,
 .weapon-hud,
 .magazine-hud,
 .jetpack-hud {
@@ -1238,6 +1303,12 @@ select {
   transition: width 0.2s ease, background 0.15s ease, transform 0.15s ease;
 }
 
+.mode-hud:hover,
+.mode-hud.virtual-hover,
+.mode-hud:focus-visible,
+.primary-hud:hover,
+.primary-hud.virtual-hover,
+.primary-hud:focus-visible,
 .weapon-hud:hover,
 .weapon-hud.virtual-hover,
 .weapon-hud:focus-visible,
@@ -1251,12 +1322,16 @@ select {
   outline: none;
 }
 
+.mode-hud:active,
+.primary-hud:active,
 .weapon-hud:active,
 .magazine-hud:active:not(:disabled),
 .jetpack-hud:active:not(:disabled) {
   transform: translateY(1px);
 }
 
+.mode-hud:focus-visible,
+.primary-hud:focus-visible,
 .weapon-hud:focus-visible,
 .magazine-hud:focus-visible {
   outline: 2px solid var(--accent);
@@ -1268,8 +1343,159 @@ select {
   cursor: not-allowed;
 }
 
+.mode-hud {
+  flex: none;
+  justify-content: center;
+  padding: 0;
+  cursor: pointer;
+  touch-action: none;
+  user-select: none;
+  overflow: visible;
+}
+
+.mode-hud[data-holding="true"] {
+  background: linear-gradient(160deg, #615645, #50483c 55%, #3e3932);
+}
+
+.mode-hud::after {
+  content: "";
+  position: absolute;
+  z-index: 2;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 3px;
+  background: var(--accent);
+  opacity: 0;
+  transform: scaleX(0);
+  transform-origin: left center;
+  pointer-events: none;
+}
+
+.mode-hud[data-selected="true"][data-holding="true"]::after {
+  opacity: 1;
+  animation: mode-release-progress 650ms linear forwards;
+}
+
+@keyframes mode-release-progress {
+  to { transform: scaleX(1); }
+}
+
+.freeroam-icon,
+.mode-face-icon {
+  width: 44px;
+  height: 44px;
+  flex: none;
+  filter: drop-shadow(0 2px 0 rgba(0, 0, 0, 0.45));
+}
+
+.mode-face-icon {
+  position: absolute;
+  left: 5px;
+  top: 4px;
+}
+
+.mode-health {
+  display: block;
+  position: absolute;
+  left: 54px;
+  top: 10px;
+  width: 10px;
+  height: 32px;
+  overflow: hidden;
+  border-radius: 2px;
+  background: rgba(0, 0, 0, 0.45);
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.6);
+}
+
+.mode-health::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: rgba(0, 0, 0, 0.45);
+}
+
+.mode-health > span {
+  display: block;
+  width: 100%;
+  height: 100%;
+  background: var(--accent);
+  transform-origin: bottom;
+}
+
+.mode-hud[data-selected="true"] .freeroam-icon,
+.mode-hud[data-selected="false"] .mode-face-icon {
+  display: none !important;
+}
+
+.mode-hud[data-selected="false"] .freeroam-icon {
+  position: absolute;
+  left: 50%;
+  top: 4px;
+  width: 28px;
+  height: 28px;
+  transform: translateX(-50%);
+}
+
+.detached-destinations {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 38px;
+  display: flex;
+  justify-content: center;
+  gap: 5px;
+  pointer-events: auto;
+}
+
+.mode-hud[data-selected="true"] .detached-destinations,
+.mode-hud[data-selected="true"] .detached-destination-name {
+  display: none;
+}
+
+.detached-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #77736d;
+  box-shadow: 0 1px 0 rgba(0, 0, 0, 0.65);
+}
+
+.detached-dot[data-current="true"] {
+  background: var(--accent);
+}
+
+.detached-destination-name {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 50%;
+  min-width: 78px;
+  transform: translateX(-50%);
+  color: var(--accent);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-align: center;
+  text-transform: uppercase;
+  text-shadow: 0 1px 2px #000, 0 0 5px #000;
+  opacity: 0;
+  pointer-events: none;
+  white-space: nowrap;
+}
+
+.detached-destination-name.show {
+  animation: detached-destination-name 1.15s ease-out forwards;
+}
+
+@keyframes detached-destination-name {
+  0%, 58% { opacity: 1; }
+  100% { opacity: 0; }
+}
+
 .jetpack-hud[data-equipped="true"] {
-  width: 158px;
+  width: 164px;
 }
 
 .jetpack-hud {
@@ -1279,6 +1505,7 @@ select {
 }
 
 .weapon-hud {
+  flex: none;
   gap: 6px;
   padding: 0;
   pointer-events: auto;
@@ -1287,6 +1514,83 @@ select {
 
 .weapon-hud[data-equipped="true"] {
   width: 218px;
+}
+
+.primary-hud {
+  flex: none;
+  padding: 0;
+  cursor: pointer;
+  touch-action: none;
+  user-select: none;
+}
+
+.primary-hud[data-equipped="true"],
+.weapon-hud[data-equipped="true"],
+.jetpack-hud[data-equipped="true"] {
+  border-bottom-color: var(--accent);
+}
+
+.primary-strength {
+  display: block;
+  position: relative;
+  width: 10px;
+  height: 32px;
+  margin: 0 auto;
+  overflow: hidden;
+  border-radius: 2px;
+  background: rgba(0, 0, 0, 0.45);
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.6);
+}
+
+.primary-strength::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: rgba(0, 0, 0, 0.45);
+}
+
+.primary-strength-fill {
+  display: block;
+  width: 100%;
+  height: 100%;
+  background: #ffd84a;
+  transform: scaleY(0.25);
+  transform-origin: bottom;
+}
+
+.jetpack-compact-fuel {
+  display: block;
+  position: relative;
+  width: 10px;
+  height: 32px;
+  margin: 0 auto;
+  overflow: hidden;
+  border-radius: 2px;
+  background: rgba(0, 0, 0, 0.45);
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.6);
+}
+
+.jetpack-compact-fuel-fill {
+  display: block;
+  width: 100%;
+  height: 100%;
+  background: #ffd84a;
+  transform-origin: bottom;
+}
+
+.jetpack-compact-fuel[data-level="low"] .jetpack-compact-fuel-fill {
+  background: var(--danger);
+}
+
+.primary-hud:not([data-equipped="true"]) .primary-strength-fill {
+  opacity: 0.45;
+}
+
+.primary-hud[data-charging="true"] .primary-strength-fill {
+  background: #ffd84a;
 }
 
 .magazine-hud {
@@ -1398,6 +1702,7 @@ select {
   cursor: pointer;
 }
 
+.primary-icon,
 .weapon-icon,
 .jetpack-icon {
   width: 40px;
@@ -1410,6 +1715,11 @@ select {
   width: 44px;
   height: 44px;
   transform: translate(-2px, -1px);
+}
+
+.primary-icon {
+  width: 44px;
+  height: 44px;
 }
 
 .weapon-readout {
@@ -1535,9 +1845,14 @@ select {
   background: var(--danger);
 }
 
+.jetpack-hud[data-equipped="true"] .jetpack-fuel-fill {
+  background: #ffd84a;
+}
+
 @media (max-width: 360px) {
   .equipment-hud { left: calc(8px + var(--safe-left)); }
   .weapon-equipment-row { gap: 4px; }
+  .jetpack-hud[data-equipped="true"] { width: 160px; }
 }
 .joysticks {
   display: none;
@@ -1599,6 +1914,7 @@ select {
 
 .act {
   position: absolute;
+  z-index: 13;
   left: 50%;
   bottom: calc(64px + var(--safe-bottom));
   transform: translateX(-50%);
@@ -1873,6 +2189,83 @@ select {
   color: var(--paper);
   font-size: 11px;
   text-shadow: 0 1px 0 rgba(0, 0, 0, 0.6);
+}
+
+/* The prompt is read and copied, so it takes the width a desktop can spare. */
+#recipe {
+  width: min(620px, calc(100vw - 32px));
+}
+
+.recipe {
+  max-height: min(46vh, 420px);
+  margin: 10px 0 0;
+  padding: 10px 12px;
+  overflow: auto;
+  background: var(--tablet);
+  border: 2px solid var(--stone-dk);
+  border-radius: 9px 7px 10px 8px;
+  box-shadow: var(--tablet-shadow);
+  color: var(--paper);
+  font-family: ui-monospace, Menlo, Consolas, monospace;
+  font-size: 10.5px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  overscroll-behavior: contain;
+}
+
+/* The weather key: one tablet of terms, matching the recipe's slab rather than a bare browser list. */
+.weather-key {
+  max-height: min(46vh, 420px);
+  margin: 10px 0 0;
+  padding: 10px 12px;
+  overflow: auto;
+  background: var(--tablet);
+  border: 2px solid var(--stone-dk);
+  border-radius: 9px 7px 10px 8px;
+  box-shadow: var(--tablet-shadow);
+  color: var(--paper);
+  font-size: 11.5px;
+  line-height: 1.55;
+  overscroll-behavior: contain;
+}
+
+.weather-key > div + div {
+  margin-top: 10px;
+}
+
+.weather-key dt {
+  margin: 0 0 2px;
+  color: var(--warn);
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.weather-key dd {
+  margin: 0;
+  opacity: 0.88;
+}
+
+/* A phone reads one column down the page; anything with room reads two, so the key is a card rather
+   than a scroll. The dialog widens with it, since 340px would only reflow the same column twice. */
+@media (min-width: 720px) {
+  #weather-key {
+    width: 640px;
+  }
+
+  #weather-key .weather-key {
+    max-height: none;
+    columns: 2;
+    column-gap: 22px;
+  }
+
+  #weather-key .weather-key div {
+    break-inside: avoid;
+  }
+}
+
+.recipe-actions {
+  grid-template-columns: 1fr;
 }
 
 .race-results .actions {
@@ -3361,7 +3754,7 @@ body.orbit-dragging #tooltip {
   }
 
   #equipment-hud:has(.weapon-hud:not([hidden]), .magazine-hud:not([hidden])):has(.jetpack-hud:not([hidden]))~.bottom-hud>.message-stack {
-    --equipment-height: 116px;
+    --equipment-height: 176px;
   }
 
   .message-stack>.toast.show,
@@ -3447,9 +3840,38 @@ body.orbit-dragging #tooltip {
   }
 }
 
+/* Keep full-size weapon readouts on phones; spares move onto their own row. */
+@media (max-width: 430px) {
+  .weapon-equipment-row {
+    flex-wrap: wrap;
+    width: calc(100vw - 24px - var(--safe-left) - var(--safe-right));
+  }
+
+  .weapon-equipment-row .magazine-hud {
+    margin-right: calc(100% - 78px);
+  }
+
+  #equipment-hud:has(.magazine-hud:not([hidden]))~.bottom-hud>.message-stack {
+    --equipment-height: 116px;
+  }
+
+  #equipment-hud:has(.magazine-hud:not([hidden])):has(.jetpack-hud:not([hidden]))~.bottom-hud>.message-stack {
+    --equipment-height: 236px;
+  }
+}
+
+@media (max-width: 360px) {
+  .equipment-hud { left: calc(8px + var(--safe-left)); }
+  .weapon-equipment-row { width: calc(100vw - 16px - var(--safe-left) - var(--safe-right)); }
+}
+
 @media (max-height: 500px) and (orientation: landscape) {
   .equipment-hud {
     top: calc(74px + var(--safe-top));
+  }
+
+  #equipment-hud:has(.weapon-hud:not([hidden]), .magazine-hud:not([hidden])):has(.jetpack-hud:not([hidden]))~.bottom-hud>.message-stack {
+    --equipment-height: 116px;
   }
 
   .sheet {
@@ -3522,6 +3944,7 @@ body.orbit-dragging #tooltip {
     left: auto;
     right: calc(440px + var(--safe-right));
     bottom: calc(96px + var(--safe-bottom));
+    z-index: 13;
     transform: none;
   }
 
@@ -3809,6 +4232,12 @@ body.orbit-dragging #tooltip {
   stroke-width: 1.5px;
   stroke-linecap: round;
 }
+.weapon-reticle[data-close="true"] > svg {
+  visibility: hidden;
+}
+.weapon-reticle[data-occluded="true"] {
+  visibility: hidden;
+}
 .weapon-reticle > span {
   position: absolute;
   left: 50%;
@@ -3828,6 +4257,9 @@ body.orbit-dragging #tooltip {
   width: 4px;
   height: 4px;
   background: var(--reticle-target);
+}
+.weapon-reticle[data-target="out-of-range"] > span {
+  visibility: hidden;
 }
 .weapon-reticle[data-hit="friendly"] { --reticle-hit-color: #65e879; }
 .weapon-reticle[data-hit="enemy"] { --reticle-hit-color: #ff6464; }

@@ -1,7 +1,7 @@
 # Contributor activity
 
-Character status uses real contribution times: **working** for less than four hours,
-**chilling** from four to 48 hours, then **sleeping**. Activity in any tracked
+Character status uses real contribution times: **working** ("clanking") for less
+than one hour, **chilling** from one to 24 hours, then **sleeping**. Activity in any tracked
 OogaBoogaX repository can make an Ooga work; each project keeps its own timestamp so
 work routes can choose the corresponding cave. The existing static roster remains a
 historical fallback and does not pretend that its old commits just happened.
@@ -18,12 +18,19 @@ A future global presence adapter can update the same flag and call
 `crew.refreshRosterRow(cave)`; tooltip status follows it each frame. Presence does
 not replace the character's activity state or contribution timestamps.
 
-The Oogatron integration exports `BL.jumbotronData`, an Oogatron schema 1 snapshot.
-The activity adapter accepts that snapshot or an array of snapshots:
+The Oogatron integration exports `BL.jumbotronData`, an Oogatron schema 3
+snapshot (baked from `/v2/stats`), and the live poller pushes the same shape
+through `applySnapshot` once a minute, so a sleeper whose contribution lands
+wakes and walks out within minutes. A schema-3 snapshot's `repos[].contributors`
+rows fan out onto per-repository keys — that is what routes each working Ooga
+to the cave of the repo they actually contributed to (a fresh repo with no
+cave falls back to the Ooga Booga Land cave). The adapter accepts org-wide
+schema 2/3 snapshots, legacy schema 1 project snapshots, or an array of
+either:
 
 ```js
 BL.contributors.applySnapshot({
-  meta: { schema_version: 1, repo: "OogaBoogaX/entropylab" },
+  meta: { schema_version: 3, org: "OogaBoogaX", generated_at: "2026-09-21T00:00:00Z" },
   contributors: [
     { login: "public-handle", last_seen_at: "2026-09-17T12:34:56Z" }
   ]
@@ -31,8 +38,8 @@ BL.contributors.applySnapshot({
 ```
 
 Oogatron returns `last_seen_at`: the latest event time for a contributor's commits,
-pull requests, reviews, and comments. `scripts/jumbotron-data.mjs` preserves that
-field alongside `login`, `counts`, and `weekly`:
+pull requests, reviews, merges, and comments. `scripts/jumbotron-data.mjs`
+preserves that field alongside `login`:
 
 ```js
 last_seen_at: c.last_seen_at,

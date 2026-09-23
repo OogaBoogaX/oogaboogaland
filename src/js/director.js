@@ -132,7 +132,7 @@
   const sceneSections = [...document.querySelectorAll("[data-scene]")];
   const enter = (next) => {
     ctx.from = active ? active.id : null;
-    for (const el of sceneSections) el.hidden = el.dataset.scene !== next.id;
+    for (const el of sceneSections) el.hidden = el.classList.contains("hub-presets") || el.dataset.scene !== next.id;
     next.enter(ctx);
     active = next;
     sceneTime = 0;
@@ -296,11 +296,14 @@
       active.onLootCleared();
       return;
     }
-    // Shift+A: play the scene's Agent, or let it go
+    // Shift+A: call in another Agent where the scene can hold one, otherwise play
+    // the scene's own. A double-click on an Agent plays it either way.
     if (e.shiftKey && !e.metaKey && !e.ctrlKey && (e.key === "A" || e.key === "a")) {
       e.preventDefault();
-      if (agentPlay.active) agentPlay.stop();
-      else if (!transition) agentPlay.start(active);
+      if (transition) return;
+      if (active.spawnAgent) active.spawnAgent();
+      else if (agentPlay.active) agentPlay.stop();
+      else agentPlay.start(active);
       return;
     }
     if (e.shiftKey && !e.metaKey && !e.ctrlKey && (e.key === "R" || e.key === "r")) {
@@ -323,9 +326,15 @@
   window.addEventListener("keydown", onKeyDown);
   document.addEventListener("visibilitychange", onVisibility);
   if (params.has("nosim")) donations.config.simulate = false;
-  // The live feed stays off under nosim (the suite) and mempool=0; checks drive the hub's storm through emit.
+  // The live feeds stay off under nosim (the suite) and mempool=0 / oogatron=0 / chain=0;
+  // checks drive the hub's weather through emit and apply, and the jumbotron through refreshData.
   const mempool = window.BL.mempool;
+  const chain = window.BL.chain;
   if (!params.has("nosim") && params.get("mempool") !== "0") mempool.start();
+  if (!params.has("nosim") && params.get("oogatron") !== "0") window.BL.oogatronLive.start();
+  // `?chain=esplora` or `?chain=https://host/api` pins the provider; otherwise mempool.space leads
+  // and three consecutive failures hand the session to Esplora on its own.
+  if (!params.has("nosim") && params.get("chain") !== "0") chain.start({ source: params.get("chain") });
   const unsubscribeDonations = donations.subscribe((donation) => active.onDonation(donation), { identity: () => game.state });
   // The feed panel: the Konami code toggles a page-wide readout of the socket, its counters and its last events.
   // It subscribes and ticks only while open, and its text nodes change only with their value.
@@ -348,10 +357,11 @@
       : e.type === "fees" ? `fees   next block ${e.nextFee.toFixed(2)} sat/vB · ${e.blocks} projected`
       : `${e.type}`;
     const render = () => {
-      const s = mempool.state, storm = active && active.debug && active.debug.storm;
+      // The rally exposes a `weather` of its own with no `state`; only the hub's answers this panel.
+      const d = active && active.debug && active.debug.weather, w = d && d.state ? d : null, s = mempool.state, c = chain.snapshot;
       const link = !s.enabled ? "off (nosim or mempool=0)" : s.connected ? `connected · attempt ${s.attempts}` : `reconnecting · attempt ${s.attempts}`;
       const age = s.lastAt ? `${((Date.now() - s.lastAt) / 1000).toFixed(1)} s ago` : "none yet";
-      const text = `socket    ${link}\nlast msg  ${age}${s.lastKeys ? ` · ${s.lastKeys}` : ""}\nmessages  ${s.messages} · ${(s.bytes / 1024).toFixed(0)} KB\nchain     height ${s.height} · next block ${s.nextFee.toFixed(2)} sat/vB · ${s.projectedBlocks} projected\nevents    ${s.transactions} tx · ${s.blocks} blocks\nweather   ${storm ? `overcast ${storm.state.overcast.toFixed(2)} → ${storm.state.overcastTarget.toFixed(2)} · cloud ${storm.state.cloud.toFixed(2)} · ${storm.state.drops} drops · ${storm.state.strikes} strikes` : "no storm in this scene"}`;
+      const text = `socket    ${link}\nlast msg  ${age}${s.lastKeys ? ` · ${s.lastKeys}` : ""}\nmessages  ${s.messages} · ${(s.bytes / 1024).toFixed(0)} KB\nchain     height ${s.height} · next block ${s.nextFee.toFixed(2)} sat/vB · ${s.projectedBlocks} projected\nevents    ${s.transactions} tx · ${s.blocks} blocks\npool      ${c.count} tx · ${c.deep.toFixed(1)} blocks deep · floor ${c.floor.toFixed(2)} sat/vB · via ${c.source}${c.degraded ? " (fallback)" : ""}\naxes      soak ${c.soak.toFixed(2)} · chill ${c.chill.toFixed(2)} · gale ${c.gale.toFixed(2)} · pace ${(c.pace / 60).toFixed(1)} min\nweather   ${w ? `${w.state.name} · ${w.state.drops}/${w.state.capacity} ${w.state.form} · wind ${w.state.wind.toFixed(1)} · cloud ${w.state.cloud.toFixed(2)} · ${w.state.strikes} strikes` : "no weather in this scene"}`;
       if (stateEl.textContent !== text) stateEl.textContent = text;
       if (!dirty) return;
       dirty = false;
@@ -435,7 +445,7 @@
         return world.level;
       }
     };
-    for (const key of ["slots", "drops", "core", "shell", "delivery", "spillEffect", "cavemen", "crates", "lab", "headquarters", "hud", "applyAllSwag", "renderLocker", "demoTip", "setPileLevel", "refreshStates", "trimPool", "shown", "island", "mouths", "labels", "camera", "cameraCave", "crew", "controls", "props", "altar", "path", "scenery", "jetpack", "magazine", "mirrorCave", "matrixCave", "matrixGate", "pilot", "renderOpts", "lamps", "entranceLights", "lighting", "fireSeats", "critters", "storm", "daylight", "setHour", "track", "racers", "items", "race", "audio", "weather", "launchers", "drop", "diver", "plane", "course", "jumbotron", "orbit", "flight", "site", "agent", "dsb"]) {
+    for (const key of ["slots", "drops", "core", "shell", "delivery", "spillEffect", "cavemen", "crates", "lab", "headquarters", "hud", "applyAllSwag", "renderLocker", "demoTip", "setPileLevel", "refreshStates", "trimPool", "shown", "island", "mouths", "labels", "camera", "cameraCave", "crew", "fx", "controls", "props", "altar", "path", "scenery", "jetpack", "magazine", "mirrorCave", "matrixCave", "matrixGate", "pilot", "renderOpts", "lamps", "entranceLights", "lighting", "fireSeats", "critters", "storm", "daylight", "setHour", "track", "racers", "items", "race", "audio", "weather", "launchers", "drop", "diver", "plane", "course", "jumbotron", "fireworks", "fireworksPending", "orbit", "flight", "site", "agent", "poolIsland", "dsb"]) {
       Object.defineProperty(ooga, key, { get: () => active.debug && active.debug[key], enumerable: true });
     }
     window.__ooga = ooga;
@@ -446,6 +456,8 @@
     unsubscribeDonations();
     feedPanel.close();
     mempool.dispose();
+    chain.dispose();
+    window.BL.oogatronLive.dispose();
     window.removeEventListener("keydown", onKeyDown);
     document.removeEventListener("visibilitychange", onVisibility);
     active.leave();

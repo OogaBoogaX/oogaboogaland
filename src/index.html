@@ -5,7 +5,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta http-equiv="Content-Security-Policy"
-    content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; media-src https://stream.noderunnersradio.com; connect-src wss://mempool.space https://noderunnersradio.com https://mempool.space https://api.exchange.coinbase.com wss://ws-feed.exchange.coinbase.com; base-uri 'none'; form-action 'none'">
+    content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; media-src https://stream.noderunnersradio.com; connect-src https: wss:; base-uri 'none'; form-action 'none'">
   <meta name="referrer" content="no-referrer">
   <meta name="color-scheme" content="dark">
   <meta name="theme-color" content="#0a0a0b">
@@ -154,6 +154,7 @@
         <h1><span data-sign>Ooga Booga Land</span></h1>
         <p data-scene="hub" id="subtitle">an island of caves</p>
         <p data-scene="lab" hidden>EntropyLab cave</p>
+        <p data-scene="pool" hidden>Mempool cave</p>
       </div>
       <time class="world-clock" id="world-clock" aria-label="Local time"></time>
       <button type="button" class="world-bananas" id="world-bananas">
@@ -164,7 +165,7 @@
         </svg>
         <span id="world-banana-count">1000</span><span class="world-banana-label"> bananas in pile</span>
       </button>
-      <nav class="presets" aria-label="Island destinations" data-scene="hub">
+      <nav class="presets hub-presets" aria-label="Island destinations" data-scene="hub" hidden>
         <button type="button" data-preset="pile">PILE</button>
         <button type="button" data-preset="lab">LAB</button><button type="button" data-preset="dsb">DSB</button>
         <button type="button" data-preset="mirror">MIRROR</button>
@@ -177,6 +178,13 @@
         <button type="button" data-preset="bunks">Bunks</button>
         <button type="button" data-preset="bench">Bench</button>
         <button type="button" class="leave" data-action="leave" data-scene="lab" hidden>Leave<span> cave</span></button>
+      </nav>
+      <nav class="presets" aria-label="Mempool cave" data-scene="pool" hidden>
+        <button type="button" data-preset="ladder">Ladder</button>
+        <button type="button" data-preset="tiers">Tiers</button>
+        <button type="button" data-preset="chain">Chain</button>
+        <button type="button" data-preset="epoch">Epoch</button>
+        <button type="button" class="leave" data-action="leave">Leave<span> cave</span></button>
       </nav>
       <nav class="presets" aria-label="Race" data-scene="race" hidden>
         <button type="button" data-action="garage" id="race-garage-btn">Garage</button>
@@ -274,8 +282,37 @@
 
     <div class="equipment-hud" id="equipment-hud">
       <div class="weapon-equipment-row">
-      <button type="button" class="weapon-hud" id="weapon-hud" data-action="weapon-toggle" data-equipped="false" data-reloading="false"
-        aria-label="Equip AK-47" aria-pressed="false" aria-expanded="false" aria-controls="weapon-readout" title="Equip AK-47 (G)" hidden>
+      <button type="button" class="mode-hud" id="mode-hud" data-action="mode-toggle" data-selected="false" data-shooter="false"
+        aria-label="Free roam. Select an Ooga Booga to take control" title="Free roam" hidden>
+        <svg class="freeroam-icon" id="freeroam-icon" viewBox="0 0 32 32" shape-rendering="crispEdges" aria-hidden="true">
+          <path fill="#7dba69" d="M14 3h4v5h-4zM14 24h4v5h-4zM3 14h5v4H3zM24 14h5v4h-5z" />
+          <path fill="#b8d8aa" d="M10 6h4v3h-2v3H9V10H6V8h4zM18 6h4v2h4v2h-3v2h-3V9h-2zM6 22v-4h3v2h3v3h2v3h-4v-2H6zM20 20h3v-2h3v4h-4v4h-4v-3h2z" />
+          <path fill="#323b35" d="M13 12h6v2h2v6h-2v2h-6v-2h-2v-6h2z" />
+          <path fill="#ffd84a" d="M15 14h2v6h-2zM13 16h6v2h-6z" />
+        </svg>
+        <canvas class="mode-face-icon" id="mode-face-icon" width="48" height="48" aria-hidden="true" hidden></canvas>
+        <span class="mode-health" id="mode-health" role="progressbar" aria-label="Health" aria-valuemin="0" aria-valuemax="25" aria-valuenow="25" hidden><span id="mode-health-fill"></span></span>
+        <span class="detached-destinations" id="detached-destinations" aria-label="Detached camera destinations">
+          <span class="detached-dot" data-detached-preset="pile" title="Pile"></span>
+          <span class="detached-dot" data-detached-preset="lab" title="Lab"></span>
+          <span class="detached-dot" data-detached-preset="mirror" title="Mirror"></span>
+          <span class="detached-dot" data-detached-preset="underground" title="HQ"></span>
+          <span class="detached-dot" data-detached-preset="basement" title="Basement"></span>
+        </span>
+        <span class="detached-destination-name" id="detached-destination-name" aria-live="polite"></span>
+      </button>
+      <button type="button" class="primary-hud" id="primary-hud" data-action="weapon-primary" data-equipped="false" data-charging="false"
+        aria-label="Equip primary melee weapon" aria-pressed="false" title="Equip primary melee weapon (1)" hidden>
+        <span class="weapon-toggle"><canvas class="primary-icon" id="primary-icon" width="48" height="48" aria-hidden="true"></canvas></span>
+        <span class="equipment-compact primary-readout">
+          <span class="primary-strength" id="primary-strength" role="meter" aria-label="Melee hit strength"
+            aria-valuemin="50" aria-valuemax="200" aria-valuenow="50" aria-valuetext="50% of normal swing damage">
+            <span class="primary-strength-fill" id="primary-strength-fill"></span>
+          </span>
+        </span>
+      </button>
+      <button type="button" class="weapon-hud" id="weapon-hud" data-action="weapon-secondary" data-equipped="false" data-reloading="false"
+        aria-label="Equip AK-47" aria-pressed="false" aria-expanded="false" aria-controls="weapon-readout" title="Equip AK-47 (2)" hidden>
         <span class="weapon-toggle" id="weapon-toggle">
           <svg class="weapon-icon" viewBox="0 0 32 32" shape-rendering="crispEdges" aria-hidden="true">
             <defs>
@@ -395,7 +432,12 @@
           <path fill="#ffb13b" d="M1 11h3v1H1zM8 11h3v1H8z" />
           <path fill="#ffe9a8" d="M2 12h1v1H2zM9 12h1v1H9z" />
         </svg>
-        <span class="equipment-compact jetpack-compact" id="jetpack-fuel-compact" aria-hidden="true">100%</span>
+        <span class="equipment-compact jetpack-compact">
+          <span class="jetpack-compact-fuel" id="jetpack-fuel-compact" role="meter" aria-label="Jetpack fuel"
+            aria-valuemin="0" aria-valuemax="100" aria-valuenow="100">
+            <span class="jetpack-compact-fuel-fill" id="jetpack-fuel-compact-fill"></span>
+          </span>
+        </span>
         <div class="jetpack-readout">
           <div class="jetpack-label"><span>Fuel</span><span id="jetpack-fuel-value" aria-hidden="true">100%</span></div>
           <div class="jetpack-fuel" id="jetpack-fuel" role="progressbar" aria-label="Jetpack fuel"
@@ -664,7 +706,7 @@
     <dialog class="modal" id="feed" aria-label="Feed the Ooga Boogas">
       <div class="panel-head">
         <h2><span data-sign>Feed the Ooga Boogas</span></h2>
-        <button type="button" class="link" data-action="feed-close">Close</button>
+        <button type="button" class="modal-close" data-action="feed-close" aria-label="Close the feed">&times;</button>
       </div>
       <canvas id="qr" width="0" height="0" aria-label="Donation QR code"></canvas>
       <p class="qr-url" id="qr-url"></p>
@@ -678,6 +720,50 @@
       </div>
       <p class="help">Payments are simulated in this build.<span id="crate-help" hidden> Crates drop at 1K, 5K, 21K and
           100K sats.</span></p>
+    </dialog>
+    <dialog class="modal" id="recipe" aria-label="Add an Ooga">
+      <div class="panel-head">
+        <h2><span data-sign>Add an Ooga</span></h2>
+        <button type="button" class="modal-close" data-action="recipe-close" aria-label="Close">&times;</button>
+      </div>
+      <p class="help">2140data hands you the prompt. Paste it to your coding agent.</p>
+      <pre class="recipe" id="recipe-text">Add an Ooga to Ooga Booga Land. Create one new file, src/characters/&lt;handle&gt;.js, and change nothing else.
+
+It is a plain IIFE (const BL = window.BL;) calling BL.characters.add({ handle, joined, lastCommit, github, look, voice, dress }). joined and lastCommit are Unix seconds; joined orders the roster.
+
+look overrides the hashed skin, hair, fur and height and carries the flags build:"slim", bald, hairless, cleanShaven, noBrow, wideEyes, noPupils, face:"nose"|"smirk"|"beard"|"none", eyeColor with eyeGlow, and hatY in sixteenths of height. voice is { poke, idle: [...] }.
+
+dress hooks build the voxels, each called with the kit k (h, u, rand, P, color(hex), jit, vg, root, parts, eyeCells): torso(k, v), club(k), gear(k), skull(k, v), crown(k, v), eyes(k, v), mark(k, v), hatY(k), headgear(k), extras(k). The head is a 7x6x6 block with the eyes at z=5 and the brow at y=4. Keep accessory builders and their caches in the file, and draw from k.rand in build order.
+
+Then run npm run build and ONLY=characters node test/run.mjs.</pre>
+      <div class="actions recipe-actions">
+        <button type="button" data-action="recipe-copy">Copy prompt</button>
+      </div>
+    </dialog>
+    <dialog class="modal" id="weather-key" aria-label="Reading the weather">
+      <div class="panel-head">
+        <h2><span data-sign>Reading the weather</span></h2>
+        <button type="button" class="modal-close" data-action="weather-close" aria-label="Close">&times;</button>
+      </div>
+      <p class="help">The weather runs on live Bitcoin data. Here's what each part means.</p>
+      <dl class="weather-key">
+        <div>
+          <dt>Rain</dt>
+          <dd>The backlog. The more that is waiting to be mined, the harder it falls, and it keeps falling until the pool drains. Empty mempool, clear sky. Expensive fees make it heavier.</dd>
+        </div>
+        <div>
+          <dt>Snow</dt>
+          <dd>Cold means slow blocks. Once they start landing well past the ten minute mark the rain turns to snow. If the whole epoch has been running late, that pushes it colder too.</dd>
+        </div>
+        <div>
+          <dt>Wind</dt>
+          <dd>Transactions turning up. The busier it gets, the further the rain leans over and the more the snow drifts about. Rain always slants the way the wind is going, never into it.</dd>
+        </div>
+        <div>
+          <dt>Lightning</dt>
+          <dd>Somebody found a block. Every one of them throws a bolt over the island, whatever the weather is doing. Storms throw extra on their own.</dd>
+        </div>
+      </dl>
     </dialog>
     <div class="bottom-hud">
       <button type="button" class="act" id="act" data-action="act" hidden>JUMP!</button>
@@ -696,7 +782,7 @@
       <pre class="feed-debug-state" id="feed-debug-state"></pre>
       <pre class="feed-debug-log" id="feed-debug-log"></pre>
     </section>
-    <div class="tooltip" id="tooltip" role="tooltip" hidden></div>
+    <div class="tooltip" id="tooltip" role="tooltip" hidden><span id="tooltip-text"></span><span class="tooltip-health" id="tooltip-health" role="progressbar" aria-label="Health" aria-valuemin="0" aria-valuemax="25" aria-valuenow="25" hidden><span id="tooltip-health-fill"></span></span></div>
     <div id="carry-cursor" class="carry-cursor" aria-hidden="true" hidden>
       <svg viewBox="0 0 16 22" focusable="false">
         <path fill="#141414" d="M0 0v19l4.8-4.3 3.8 7.3 3.9-2-3.8-7.2 6.6-.5z" />
@@ -737,6 +823,8 @@
   <script src="js/contributors.js"></script>
   <script src="js/donations.js"></script>
   <script src="js/mempool.js"></script>
+  <script src="js/oogatron-live.js"></script>
+    <script src="js/chain.js"></script>
   <script src="js/weapon-targets.js"></script>
   <script src="js/interact.js"></script>
   <script src="js/controls.js"></script>
@@ -755,16 +843,18 @@
   <script src="js/mirror-guides.js"></script>
   <script src="js/crates.js"></script>
   <script src="js/critters.js"></script>
-  <script src="js/storm.js"></script>
+  <script src="js/weather.js"></script>
   <script src="js/race-models.js"></script>
   <script src="js/drop-models.js"></script>
   <script src="js/rocket.js"></script>
   <script src="js/rocket-models.js"></script>
+    <script src="js/pool-models.js"></script>
   <script src="js/solid-props.js"></script>
   <script src="js/breakables.js"></script>
   <script src="js/agent.js"></script>
   <script src="js/scene-hub.js"></script>
   <script src="js/scene-lab.js"></script>
+    <script src="js/scene-pool.js"></script>
   <script src="js/race-track.js"></script>
   <script src="js/racers.js"></script>
   <script src="js/race-items.js"></script>

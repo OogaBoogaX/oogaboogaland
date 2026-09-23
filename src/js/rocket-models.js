@@ -174,7 +174,7 @@
 
   // The bridge leaves the south rim for `span`, sagging to its middle; the islet's middle sits past its end.
   // `from` is where the search for the rim's edge starts.
-  const SITE = { from: 27.4, span: 13.5, sag: 0.45, width: 2.1, isletR: 7.2, isletDepth: 13, padR: 4.2, padH: 0.45, towerX: 5.4 };
+  const SITE = { from: 27.4, span: 13.5, sag: 0.45, width: 2.1, isletR: 7.2, isletDepth: 13, padR: 4.2, padH: 0.45, towerX: 5.1 };
   // The bridge head sits where the ground under it runs out, at that ground's height, so planks meet the grass.
   // That height sets both ends of the site.
   const siteSpot = (island, out = {}) => {
@@ -237,18 +237,19 @@
       const z = (i + 0.5) * SITE.span / count;
       geos.push(box({ w: w + (i % 3 ? 0 : 0.14), h: 0.1, d: 0.42, color: i % 2 ? "#8f6538" : "#9c7040", offset: { x: 0, y: deckY(z) - 0.05, z } }));
     }
-    const rail = 1.05, posts = [0, SITE.span];
+    const rail = 1.05, posts = [0, SITE.span], lantern = [];
     for (const z of posts) for (const x of [-w / 2 - 0.08, w / 2 + 0.08]) geos.push(box({ w: 0.24, h: 1.9, d: 0.24, color: WOOD_DK, offset: { x, y: 0.45, z } }));
     const steps = 12;
     for (const x of [-w / 2 - 0.05, w / 2 + 0.05]) {
       for (let i = 0; i < steps; i++) {
         const z0 = i / steps * SITE.span, z1 = (i + 1) / steps * SITE.span;
-        geos.push(beam(x, deckY(z0) * 1.3 + rail, z0, deckY(z1) * 1.3 + rail, z1, 0.07, 0.07, ROPE));
-        geos.push(beam(x, deckY(z0) - 0.14, z0, deckY(z1) - 0.14, z1, 0.09, 0.09, ROPE));
+        // The ropes are what hold the crossing up, so they are cord you could grip, not string.
+        geos.push(beam(x, deckY(z0) * 1.3 + rail, z0, deckY(z1) * 1.3 + rail, z1, 0.12, 0.12, ROPE));
+        geos.push(beam(x, deckY(z0) - 0.14, z0, deckY(z1) - 0.14, z1, 0.15, 0.15, ROPE));
       }
       for (let i = 1; i < steps; i++) {
         const z = i / steps * SITE.span;
-        geos.push(box({ w: 0.04, h: rail + deckY(z) * 0.3, d: 0.04, color: ROPE, offset: { x, y: deckY(z) + (rail + deckY(z) * 0.3) / 2, z } }));
+        geos.push(box({ w: 0.075, h: rail + deckY(z) * 0.3, d: 0.075, color: ROPE, offset: { x, y: deckY(z) + (rail + deckY(z) * 0.3) / 2, z } }));
       }
     }
     return merge(...geos);
@@ -266,16 +267,6 @@
     return merge(board, ...[-half, half].map((x) => box({ w: 0.07, h: PEG_H + 0.2, d: 0.07, color: WOOD_DK, offset: { x, y: (PEG_H + 0.2) * 0.5 - 0.1 } })));
   });
   // Nodes under one group placed at the islet's middle; the bridge head is `spot.bridgeZ`.
-  const site = (spot) => {
-    const node = createNode({ position: { x: spot.x, y: spot.y, z: spot.z } });
-    const isletNode = createNode({ geometry: islet() });
-    const padNode = createNode({ geometry: pad() });
-    const towerNode = createNode({ position: { x: SITE.towerX, y: SITE.padH, z: 0 }, geometry: tower() });
-    const bridgeNode = createNode({ position: { x: 0, y: 0, z: spot.bridgeZ - spot.z }, geometry: bridge() });
-    const signNode = createNode({ position: { x: 1.9, y: 0, z: -SITE.isletR + 2.2 }, rotation: { x: 0, y: Math.PI, z: 0 }, geometry: siteSign() });
-    addChild(node, isletNode, padNode, towerNode, bridgeNode, signNode);
-    return { node, islet: isletNode, pad: padNode, tower: towerNode, bridge: bridgeNode, sign: signNode };
-  };
   // Ground under a site point in world space, or -Infinity: the pad, the islet's top, the bridge deck.
   const siteGroundAt = (spot, x, z) => {
     const dx = x - spot.x, dz = z - spot.z, r = Math.hypot(dx, dz);
@@ -284,6 +275,19 @@
     const along = z - spot.bridgeZ;
     if (Math.abs(x - spot.x) < SITE.width / 2 && along >= 0 && along <= SITE.span) return spot.y + deckY(along);
     return -Infinity;
+  };
+
+  const site = (spot) => {
+    const node = createNode({ position: { x: spot.x, y: spot.y, z: spot.z } });
+    const isletNode = createNode({ geometry: islet() });
+    const padNode = createNode({ geometry: pad() });
+    // The tower stands past the pad's edge, so it foots on the islet's own top, not the pad's surface;
+    // towerX puts its service arms against the widest part of a stack rather than short of it.
+    const towerNode = createNode({ position: { x: SITE.towerX, y: siteGroundAt(spot, spot.x + SITE.towerX, spot.z) - spot.y, z: 0 }, geometry: tower() });
+    const bridgeNode = createNode({ position: { x: 0, y: 0, z: spot.bridgeZ - spot.z }, geometry: bridge() });
+    const signNode = createNode({ position: { x: 1.9, y: 0, z: -SITE.isletR + 2.2 }, rotation: { x: 0, y: Math.PI, z: 0 }, geometry: siteSign() });
+    addChild(node, isletNode, padNode, towerNode, bridgeNode, signNode);
+    return { node, islet: isletNode, pad: padNode, tower: towerNode, bridge: bridgeNode, sign: signNode };
   };
 
   // Sphere centred at the origin, radius rocket.R; rings close together near the islands and wider away.

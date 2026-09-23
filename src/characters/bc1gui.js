@@ -16,7 +16,7 @@
     joined: 1788800918,
     lastCommit: 1788190400,
     // skater also moves the drawn gun to the side in crew.js (the board takes the back)
-    look: { skater: true, hairless: true, noBrow: true, face: "smirk", hatY: 13, skin: "#f2a33c", hair: "#e4561f", fur: "#8f4f17" },
+    look: { portrait: { min: [-3, -2, -1], max: [7, 13, 8] }, skater: true, hairless: true, noBrow: true, face: "smirk", hatY: 13, skin: "#f2a33c", hair: "#e4561f", fur: "#8f4f17" },
     dress: {
       // A slouched green beanie over dreads, shades in front of the eyes
       crown(k, v) {

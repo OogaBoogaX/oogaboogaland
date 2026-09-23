@@ -8,7 +8,7 @@
   const { makeVox, voxelGeometry, cached } = BL.models;
   const { createNode, addChild, removeChild } = BL.scene;
   const { damp, clamp, mulberry32, fnv1a } = BL.math;
-  const U = 0.075;
+  const U = 0.086;
   // Hip height, torso length, the shoulder on the chest, and the arm: the knuckles
   // reach the ground when the chest leans QUAD forward (8 + 11 cos 1.0 = 13.9 ≈ 14).
   const HIP = 8 * U, SHOULDER_Y = 11 * U, SHOULDER_X = 6 * U, NECK_Y = 10.5 * U;
@@ -125,14 +125,16 @@
   });
   const PART_NAMES = ["legL", "legR", "torso", "armL", "armR", "head"];
 
-  // A driven step may climb at most STEP_UP and drop at most STEP_DOWN, so walls
-  // and cliff edges stop the Agent instead of lifting it or dropping it off the island.
-  const STEP_UP = 0.6, STEP_DOWN = 1.2;
+  // A step may climb at most STEP_UP and drop at most STEP_DOWN, so walls and
+  // cliff edges stop the Agent instead of lifting it or dropping it off the island.
+  // BODY is what it needs overhead, so it is barred by the same rock and props an Ooga is.
+  const STEP_UP = 0.6, STEP_DOWN = 1.2, BODY = 13 * U;
   const GRAVITY = 9.8, JUMP_SPEED = 4.4, REVEAL_TIME = 9;
   // A click this soon after taking the Agent was the third of a triple: a look, not a drive.
   const TRIPLE_MS = 500;
-  // groundAt(x, z) is the walking surface; walkable(x, z), when given, bounds a
-  // driven Agent (a room's walls). A walk is a list of { x, z } waypoints.
+  // groundAt(x, z) is the walking surface; walkable(fromX, fromZ, toX, toZ, y, height),
+  // when given, is the scene's own swept test, the one its Oogas walk by, and bounds
+  // every step the Agent takes. A walk is a list of { x, z } waypoints.
   const create = ({ groundAt, walkable = null, form = "ape", x = 0, z = 0, heading = 0 }) => {
     const geos = geometries();
     const root = createNode({ position: { x, y: groundAt(x, z), z }, rotation: { x: 0, y: heading, z: 0 } });
@@ -213,6 +215,21 @@
     const toggleStyle = () => {
       state.walkStyle = state.walkStyle === "knuckle" ? "hunch" : "knuckle";
     };
+    // A step has to clear the ground limits and the scene's own sweep, so the
+    // Agent stops at what stops an Ooga instead of walking through it.
+    const stepTo = (nx, nz) => {
+      const p = root.position, ground = groundAt(p.x, p.z), ny = groundAt(nx, nz);
+      if (ny <= ground - STEP_DOWN || ny >= p.y + STEP_UP) return false;
+      if (walkable && !walkable(p.x, p.z, nx, nz, p.y, BODY)) return false;
+      p.x = nx;
+      p.z = nz;
+      return true;
+    };
+    // Blocked head on, try each axis alone, the way a walking Ooga slides along a wall.
+    const slideTo = (nx, nz) => {
+      const p = root.position;
+      return stepTo(nx, nz) || nx !== p.x && stepTo(nx, p.z) || nz !== p.z && stepTo(p.x, nz);
+    };
     const driven = (dt) => {
       const m = Math.hypot(state.inX, state.inZ);
       if (m < 0.1) {
@@ -223,12 +240,7 @@
       const want = Math.atan2(state.inX, state.inZ), turn = Math.atan2(Math.sin(want - state.heading), Math.cos(want - state.heading));
       state.heading += turn * (1 - Math.exp(-8 * dt));
       const p = root.position, step = state.speed * dt * Math.min(1, m) * Math.max(0, Math.cos(turn));
-      const nx = p.x + Math.sin(state.heading) * step, nz = p.z + Math.cos(state.heading) * step, ny = groundAt(nx, nz);
-      // Mid-jump the body is higher, so a jump clears a step it could not walk up
-      if (ny > groundAt(p.x, p.z) - STEP_DOWN && ny < p.y + STEP_UP && (!walkable || walkable(nx, nz))) {
-        p.x = nx;
-        p.z = nz;
-      }
+      slideTo(p.x + Math.sin(state.heading) * step, p.z + Math.cos(state.heading) * step);
     };
     const jump = () => {
       if (state.air) return;
@@ -267,8 +279,12 @@
       }
       // Slow while facing away, so it turns before it runs on
       const step = Math.min(distance, state.speed * dt * Math.max(0, Math.cos(turn)));
-      p.x += Math.sin(state.heading) * step;
-      p.z += Math.cos(state.heading) * step;
+      // Walled in: drop the route and idle, and onIdle picks somewhere else to go.
+      if (!slideTo(p.x + Math.sin(state.heading) * step, p.z + Math.cos(state.heading) * step)) {
+        state.route = null;
+        state.gait = "idle";
+        state.idleFor = 0.4 + Math.random() * 0.8;
+      }
     };
     const limb = (node, angle, dt) => {
       node.rotation.x = damp(node.rotation.x, angle, 18, dt);
@@ -482,5 +498,5 @@
     };
     return { start, stop, update, get active() { return !!agent; }, get agent() { return agent; }, get startedAt() { return startedAt; } };
   };
-  BL.agent = { create, createPlay, GAITS, TRIPLE_MS, QUAD, HUNCH };
+  BL.agent = { create, createPlay, GAITS, TRIPLE_MS, QUAD, HUNCH, BODY };
 })();

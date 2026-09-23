@@ -167,9 +167,13 @@
         simplified.push(p);
         while (simplified.length >= 3) {
           const n = simplified.length, a = simplified[n - 3], b = simplified[n - 2];
-          // Preserve the authored slope centerline: only shorten circulation and room approaches on the same flat
-          // floor, away from ramp bends.
-          if (a.y >= -0.05 || Math.abs(a.y - b.y) > 1e-7 || Math.abs(a.y - p.y) > 1e-7 || !segment(a, p, false, 0.3)) break;
+          const ax = b.x - a.x, az = b.z - a.z, bx = p.x - b.x, bz = p.z - b.z;
+          const almostFlat = Math.max(a.y, b.y, p.y) - Math.min(a.y, b.y, p.y) < 0.04;
+          const straight = ax * bx + az * bz > Math.hypot(ax, az) * Math.hypot(bx, bz) * 0.99;
+          // Keep slope bends, but let their nearly straight, shallow tails merge into the landing. Otherwise the
+          // last tiny height change restricts the next corner's rounding to a few centimetres.
+          const flat = Math.abs(a.y - b.y) <= 1e-7 && Math.abs(a.y - p.y) <= 1e-7;
+          if (a.y >= -0.05 || !(flat || almostFlat && straight) || !segment(a, p, false, 0.3)) break;
           simplified.splice(n - 2, 1);
         }
       }

@@ -56,16 +56,21 @@
     };
     return s;
   };
-  const create = ({ move = null, look = null, boost = null, chord = null, onAction = null, pressActions = false, shooter = () => false } = {}) => {
+  // Joystick bases, a hold-to-climb button, a canvas whose mouse chord walks, and a Space handler
+  const create = ({ move = null, look = null, boost = null, chord = null, onAction = null, pressActions = false, shooter = () => false, canDescend = () => true } = {}) => {
     const held = { forward: 0, back: 0, left: 0, right: 0, yawLeft: 0, yawRight: 0, pitchDown: 0, pitchUp: 0, up: 0, space: 0, down: 0, boost: 0, chord: 0, sprint: 0 };
-    const axes = { x: 0, y: 0, up: 0, yaw: 0, pitch: 0, sprint: 0 };
-    let spaceDown = false, boostPointer = null, boostClick = false;
+    const axes = { x: 0, y: 0, up: 0, yaw: 0, pitch: 0, sprint: 0, shiftTap: 0 };
+    let spaceDown = false, boostPointer = null, boostClick = false, shiftAt = 0, shiftUsed = false, shiftTap = 0;
     const typing = (e) => e.target && (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA" || (e.target.closest && e.target.closest("dialog")));
     const onKeyDown = (e) => {
       if (e.metaKey || e.ctrlKey || e.altKey || typing(e)) return;
       const name = pressActions && e.key === " " ? "space" : KEYS[e.key.toLowerCase()];
       if (!name) return;
       if (e.key === " " || e.key.startsWith("Arrow")) e.preventDefault();
+      if (name === "sprint" && !held.sprint) {
+        shiftAt = e.timeStamp;
+        shiftUsed = !!(held.left || held.right);
+      } else if ((name === "left" || name === "right") && held.sprint) shiftUsed = true;
       if (pressActions && e.key === " ") {
         if (spaceDown || e.repeat) return;
         spaceDown = true;
@@ -75,6 +80,7 @@
     };
     const onKeyUp = (e) => {
       const name = pressActions && e.key === " " ? "space" : KEYS[e.key.toLowerCase()];
+      if (name === "sprint" && held.sprint && !shiftUsed && e.timeStamp - shiftAt <= 300) shiftTap = 1;
       if (name) held[name] = 0;
       if (e.key === " ") spaceDown = false;
     };
@@ -83,6 +89,8 @@
       spaceDown = false;
       boostPointer = null;
       boostClick = false;
+      shiftAt = shiftTap = 0;
+      shiftUsed = false;
     };
     window.addEventListener("keydown", onKeyDown);
     window.addEventListener("keyup", onKeyUp);
@@ -129,10 +137,12 @@
     const read = () => {
       axes.x = clamp(held.right - held.left + (moveStick ? moveStick.x : 0), -1, 1);
       axes.y = clamp(held.forward - held.back + (shooter() ? 0 : held.chord) + (moveStick ? moveStick.y : 0), -1, 1);
-      axes.up = clamp(held.up + held.space + held.boost - held.down, -1, 1);
+      axes.up = clamp(held.up + held.space + held.boost - (canDescend() ? held.down : 0), -1, 1);
       axes.yaw = clamp((shooter() ? 0 : held.yawLeft - held.yawRight) - (lookStick ? lookStick.x : 0), -1, 1);
       axes.pitch = clamp((shooter() ? 0 : held.pitchDown - held.pitchUp) - (lookStick ? lookStick.y : 0), -1, 1);
       axes.sprint = shooter() ? held.sprint : 0;
+      axes.shiftTap = shiftTap;
+      shiftTap = 0;
       return axes;
     };
     const dispose = () => {

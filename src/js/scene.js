@@ -6,6 +6,8 @@
     position: { x: 0, y: 0, z: 0 },
     rotation: { x: 0, y: 0, z: 0 },
     poseYaw: 0,
+    poseLean: 0,
+    poseLeanY: 0,
     scale: { x: 1, y: 1, z: 1 },
     geometry: null,
     glow: 1,
@@ -39,8 +41,8 @@
       child.parent = null;
     }
   };
-  const updateWorld = (node, parentWorld) => {
-    if (!node.visible) return;
+  const updateLocal = (node) => {
+    // A node carrying a quaternion turns by it instead of its Euler rotation
     if (node.quaternion) mat4.fromTQS(node.local, node.position, node.quaternion, node.scale);
     else mat4.fromTRS(node.local, node.position, node.rotation, node.scale);
     // A body pose turns both the part and its pivot in the parent's frame.
@@ -52,6 +54,21 @@
         m[i] = c * x + s * z; m[i + 2] = c * z - s * x;
       }
     }
+    // A planted peek rolls upper-body parts around one shared hip height.
+    // Each part remains a root child, so the same transform makes the torso,
+    // head, arms and equipment move as one without disturbing either foot.
+    if (node.poseLean) {
+      const m = node.local, c = Math.cos(node.poseLean), s = Math.sin(node.poseLean), pivot = node.poseLeanY;
+      for (let i = 0; i < 16; i += 4) {
+        const x = m[i], y = m[i + 1] - (i === 12 ? pivot : 0);
+        m[i] = c * x - s * y;
+        m[i + 1] = s * x + c * y + (i === 12 ? pivot : 0);
+      }
+    }
+  };
+  const updateWorld = (node, parentWorld) => {
+    if (!node.visible) return;
+    updateLocal(node);
     if (parentWorld) mat4.multiply(node.world, parentWorld, node.local);
     else node.world.set(node.local);
     for (const child of node.children) updateWorld(child, node.world);
@@ -143,5 +160,5 @@
     for (const tw of tweens) tw.alive = false;
     tweens.length = 0;
   };
-  BL.scene = { createNode, addChild, removeChild, updateWorld, traverseVisible, createCamera, boundsOf, matrixModeOf, hiddenFromCamera, addTween, stepTweens, tweenCount, clearTweens };
+  BL.scene = { createNode, addChild, removeChild, updateLocal, updateWorld, traverseVisible, createCamera, boundsOf, matrixModeOf, hiddenFromCamera, addTween, stepTweens, tweenCount, clearTweens };
 })();
