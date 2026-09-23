@@ -1,36 +1,21 @@
 // The lab doorway consumes incoming bananas without a reflective surface.
-// Its bounded glyph crests use the mirror's wave timing and rune alphabet.
+// Render the mirror's own glyph crests on a transparent, non-reflective plane.
 (() => {
   "use strict";
   const BL = window.BL = window.BL || {};
   const { createNode, addChild, removeChild } = BL.scene;
-  const { CAPACITY, START_RADIUS, SPEED, LIFETIME } = BL.mirrorRipples;
-  const MASKS = [630678, 497559, 988959, 495513, 1009263, 288049, 456438, 616809];
-  const PER_WAVE = 24, GEOMETRIES = [];
-  const glyphGeometry = (index) => {
-    if (GEOMETRIES[index]) return GEOMETRIES[index];
-    const verts = [], faces = [], mask = MASKS[index & 7];
-    const color = BL.math.hexToRgb(index >= 8 ? "#d6ffe3" : "#46ff70");
-    for (let bit = 0; bit < 24; bit++) {
-      if (!(mask & (1 << bit))) continue;
-      const x = ((bit & 3) - 1.5) * 0.025, y = (2.5 - (bit >> 2)) * 0.025, at = verts.length / 3;
-      verts.push(x - 0.01, y - 0.01, 0, x + 0.01, y - 0.01, 0, x + 0.01, y + 0.01, 0, x - 0.01, y + 0.01, 0);
-      faces.push({ i: [at, at + 1, at + 2, at + 3], color, emissive: 1 }, { i: [at + 3, at + 2, at + 1, at], color, emissive: 1 });
-    }
-    return GEOMETRIES[index] = { verts, faces, lines: [], castShadow: false };
-  };
   const create = (group, mouth, opening) => {
     const sr = Math.sin(mouth.ry), cr = Math.cos(mouth.ry), plane = 0.5;
     const minX = opening.minX, maxX = opening.maxX, minY = opening.floorY, maxY = opening.ceilingY;
-    const geometry = { verts: [minX, minY, 0, maxX, maxY, 0], faces: [], lines: [], castShadow: false };
-    const node = createNode({ geometry, position: { x: 0, y: 0, z: plane }, matrixNative: true, sightHidden: true });
+    const color = [0, 0, 0], geometry = {
+      verts: [minX, minY, 0, maxX, minY, 0, maxX, maxY, 0, minX, maxY, 0],
+      faces: [{ i: [0, 1, 2, 3], color }, { i: [3, 2, 1, 0], color }],
+      lines: [], castShadow: false, mirrorRippleOnly: true
+    };
+    const node = createNode({ geometry, position: { x: 0, y: 0, z: plane }, mirrorRippleOnly: true, matrixNative: true, sightHidden: true });
     addChild(group, node);
-    const ripples = BL.mirrorRipples.create(node), glyphs = new Array(CAPACITY * PER_WAVE);
-    for (let i = 0; i < glyphs.length; i++) {
-      glyphs[i] = createNode({ geometry: glyphGeometry(i & 15), visible: false, smokeOpacity: 0 });
-      addChild(node, glyphs[i]);
-    }
-    let contactX = 0, contactY = 0, activeGlyphs = 0;
+    const ripples = BL.mirrorRipples.create(node);
+    let contactX = 0, contactY = 0;
     const intersection = (ax, ay, az, bx, by, bz) => {
       const dx = ax - mouth.x, dz = az - mouth.z, ex = bx - mouth.x, ez = bz - mouth.z;
       const from = dx * sr + dz * cr - plane, to = ex * sr + ez * cr - plane;
@@ -59,29 +44,7 @@
       ripples.pulse(contactX, contactY, (1 - t) * dt);
       return true;
     };
-    const update = (dt, time) => {
-      ripples.update(dt, time);
-      activeGlyphs = 0;
-      for (let wave = 0; wave < CAPACITY; wave++) {
-        const at = wave * 4, strength = ripples.waves[at + 3], age = ripples.waves[at + 2];
-        const radius = START_RADIUS + age * SPEED, fade = Math.min(1, strength * 2.5);
-        for (let n = 0; n < PER_WAVE; n++) {
-          const glyph = glyphs[wave * PER_WAVE + n];
-          if (!strength) { glyph.visible = false; continue; }
-          const angle = n * Math.PI * 2 / PER_WAVE;
-          const x = ripples.waves[at] + Math.cos(angle) * radius, y = ripples.waves[at + 1] + Math.sin(angle) * radius;
-          // Clip complete runes inside the stone frame; no spill around its edge.
-          glyph.visible = x - 0.055 >= minX && x + 0.055 <= maxX && y - 0.08 >= minY && y + 0.08 <= maxY;
-          if (!glyph.visible) continue;
-          const rune = (n * 73 + Math.floor(time * 20)) & 7;
-          glyph.geometry = glyphGeometry(rune + (n % 5 === 0 ? 8 : 0));
-          glyph.position.x = x; glyph.position.y = y;
-          glyph.scale.x = glyph.scale.y = Math.min(1, 0.45 + age / LIFETIME);
-          glyph.smokeOpacity = fade;
-          activeGlyphs++;
-        }
-      }
-    };
+    const update = (dt, time) => ripples.update(dt, time);
     const inside = (x, y, z) => {
       const dx = x - mouth.x, dz = z - mouth.z, across = dx * cr - dz * sr, along = dx * sr + dz * cr;
       const room = mouth.room, half = along < -room.from ? room.w / 2 : 2.5;
@@ -89,9 +52,8 @@
         && along <= plane && along >= -room.to && Math.abs(across) <= half;
     };
     return { node, ripples, clipTarget, absorb, update, inside,
-      get activeGlyphs() { return activeGlyphs; },
-      liveGeometry(set) { for (let i = 0; i < 16; i++) set.add(glyphGeometry(i)); },
-      dispose() { ripples.dispose(); for (const glyph of glyphs) glyph.visible = false; removeChild(group, node); glyphs.length = 0; }
+      liveGeometry(set) { set.add(geometry); },
+      dispose() { ripples.dispose(); node.visible = false; removeChild(group, node); }
     };
   };
   BL.labPhase = { create };

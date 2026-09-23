@@ -33,7 +33,7 @@
     const UP = { x: 0, y: 1, z: 0 };
     const view = mat4.create();
     const pool = [];
-    let poolUsed = 0, suppressed = 0;
+    let poolUsed = 0, suppressed = 0, rippleSurfaces = 0, rippleWaves = 0;
     let matrixActive = 0, matrixRadius = 0, matrixTime = 0, matrixDensity = 0, matrixOriginX = 0, matrixOriginZ = 0, matrixSurfaces = 0, matrixLivingSurfaces = 0, matrixArea = 0, matrixSamples = 0, matrixSampleStep = 1, matrixCulled = 0;
     let matrixCaves = null, matrixCaveBounds = null, matrixCaveNear = Infinity, matrixPermanentCave = 0, matrixPermanentPlane = null, matrixAperture = DEFAULT_MATRIX_APERTURE, matrixLivingGlobal = 1, matrixPointX = 0, matrixPointY = 0;
     const MATRIX_MASKS = new Int32Array([630678, 497559, 988959, 495513, 1009263, 288049, 456438, 616809]);
@@ -236,12 +236,13 @@
     };
     const shadeNode = (node) => {
       if (node.smokeOpacity === 0) return;
+      if (node.mirrorRippleOnly && !node.mirrorRipples?.active) return;
       const { verts, faces, lines } = node.geometry;
       const w = node.world;
       const f = lastF;
       const ember = Math.min(1, node.ember || 0), scorch = 1 - Math.min(1, node.scorch || 0) * 0.88;
       const materialGlow = ember > 0 ? 0 : node.glow;
-      const mirrorFace = !!(node.mirror || node.mirrorPortal || node.mirrorShard);
+      const mirrorFace = !!(node.mirror || node.mirrorPortal || node.mirrorShard || node.mirrorRippleOnly);
       const portalFace = !!node.mirrorPortal || !!node.mirrorWalkThrough && mirrorDebug.portal;
       const localMatrixGlyph = !!node.geometry.matrixGlyph;
       // Every voxel face in a glyph shares this instance plane and basis.
@@ -1171,7 +1172,7 @@
       skyLuma = sky[0] * 0.2126 + sky[1] * 0.7152 + sky[2] * 0.0722;
       groundLuma = ground[0] * 0.2126 + ground[1] * 0.7152 + ground[2] * 0.0722;
       poolUsed = 0;
-      suppressed = 0;
+      suppressed = rippleSurfaces = rippleWaves = 0;
       mirrorDebug.active = false;
       mirrorDebug.portal = false;
       mirrorDebug.reveal = 0;
@@ -1181,7 +1182,7 @@
       let mirrorNode = null;
       updateWorld(root, null);
       traverseVisible(root, (node) => {
-        if (environmentCapture && (node.mirror || node.mirrorPortal || node.mirrorShard)) return;
+        if (environmentCapture && (node.mirror || node.mirrorPortal || node.mirrorShard || node.mirrorRippleOnly)) return;
         if (node.mirror || node.mirrorPortal) {
           if (mirrorDebug.active) throw new Error("A scene may contain at most one mirror node");
           mirrorNode = node;
@@ -1280,7 +1281,7 @@
         } else {
           for (let k = 1; k < rec.n; k++) ctx.lineTo(rec.pts[k * 2], rec.pts[k * 2 + 1]);
           ctx.closePath();
-          if ((!rec.matrixBacking || !rec.matrixPartial) && !(rec.mirrorNode && rec.mirrorNode.mirrorShard && environment.valid === 63)) {
+          if ((!rec.matrixBacking || !rec.matrixPartial) && !(rec.mirrorNode && (rec.mirrorNode.mirrorRippleOnly || rec.mirrorNode.mirrorShard && environment.valid === 63))) {
             if (rec.smokeOpacity !== 1) ctx.globalAlpha = rec.smokeOpacity;
             ctx.fillStyle = rec.style;
             ctx.fill();
@@ -1289,10 +1290,10 @@
             ctx.stroke();
             if (rec.smokeOpacity !== 1) ctx.globalAlpha = 1;
           }
-          if (rec.matrix && (matrixDensity > 0 || rec.matrixPartial)) drawMatrix(rec);
+          if (rec.matrix && (matrixDensity > 0 || rec.matrixPartial) && !rec.mirrorNode?.mirrorRippleOnly) drawMatrix(rec);
           if (rec.mirror) {
             const node = rec.mirrorNode;
-            if (!node.mirrorShard) mirrorDebug.surfaceDrawn = true;
+            if (!node.mirrorShard && !node.mirrorRippleOnly) mirrorDebug.surfaceDrawn = true;
             let minX = rec.pts[0], maxX = rec.pts[0], minY = rec.pts[1], maxY = rec.pts[1];
             for (let k = 1; k < rec.n; k++) {
               minX = Math.min(minX, rec.pts[k * 2]);
@@ -1314,10 +1315,11 @@
               }
             }
             if (node.mirrorShard) drawShardEnvironment(node, rec.smokeOpacity, minX, minY, maxX, maxY);
-            else drawMirrorSheen(node, rec.smokeOpacity, maxY - minY);
+            else if (!node.mirrorRippleOnly) drawMirrorSheen(node, rec.smokeOpacity, maxY - minY);
             if (!rec.portal && !node.mirrorShard) {
               drawMirrorRipples(node, rec);
               drawMirrorBody(node, rec);
+              if (node.mirrorRippleOnly) { rippleSurfaces++; rippleWaves += node.mirrorRipples.active; }
             }
             ctx.restore();
             rec.mirrorNode = null;
@@ -1361,7 +1363,7 @@
         return "low";
       },
       get stats() {
-        return { records: 0, active: 0, mirrorResources: mirrorDebug.resources, shadowResources: 0, shadowSize: 0, shadowPassCount: 0, shadowFinite: true, culled: matrixCulled, drawn: 0, suppressed, matrixSurfaces, matrixLivingSurfaces, matrixSamples, matrixSampleStep, matrixSampleBudget: MATRIX_SAMPLE_BUDGET, matrixTileBytes: matrixPixels.byteLength };
+        return { records: 0, active: 0, mirrorResources: mirrorDebug.resources, shadowResources: 0, shadowSize: 0, shadowPassCount: 0, shadowFinite: true, culled: matrixCulled, drawn: 0, suppressed, rippleSurfaces, rippleWaves, matrixSurfaces, matrixLivingSurfaces, matrixSamples, matrixSampleStep, matrixSampleBudget: MATRIX_SAMPLE_BUDGET, matrixTileBytes: matrixPixels.byteLength };
       },
       get mirror() {
         return mirrorDebug;
