@@ -62,10 +62,11 @@
     savedRevision = state.revision;
   };
   const location = () => phase === "land" && avatarView ? avatar.root.position : pilot.orbit.target;
-  const cameraEnabled = () => phase === "land" && !exiting && !tv.isOpen && !conversation?.isOpen && document.getElementById("dsb-shop").hidden;
+  const cameraEnabled = () => phase === "land" && !exiting && !transitGate.isOpen && !tv.isOpen && !conversation?.isOpen && document.getElementById("dsb-shop").hidden;
   const playerEnabled = () => avatarView && cameraEnabled();
   const syncPlayer = () => pilot.setActive(cameraEnabled());
   const clearAt = (x, z, radius = 0.35) => Math.hypot(x, z) < 35 - radius
+    && !(land && Math.hypot(x - transitGate.dialer.position.x, z - transitGate.dialer.position.z) < 0.55 + radius)
     && !(Math.abs(x) < 8.6 + radius && Math.abs(z) < 2.6 + radius
       || Math.abs(x + 10) < 4.4 + radius && Math.abs(z - 13) < 1.9 + radius
       || Math.abs(x + 20) < 4 + radius && Math.abs(z - 13) < 2 + radius
@@ -169,10 +170,18 @@
     document.getElementById("dsb-shop").hidden = true; syncPlayer();
     toast("Drag to look around. Leave ride returns you to the station.");
   };
+  const nearDialer = () => phase === "land" && avatarView && Math.hypot(avatar.root.position.x - transitGate.dialer.position.x, avatar.root.position.z - transitGate.dialer.position.z) < 2;
+  const departGate = () => {
+    if (phase !== "land" || exiting) return;
+    world.pilot = avatar.traits.name;
+    world.stargateTravel = { from: "dsb", to: "hub", arrival: "pit", name: world.pilot };
+    exiting = true; syncPlayer(); pilot.controls.reset(); input.reset(); go("hub");
+  };
   const returnHub = () => { if (phase === "entrance" || phase === "land" && inCave()) { exiting = true; syncPlayer(); go("hub"); } else toast("Enter the stone cave to return to Ooga Booga Land."); };
   const contextAction = () => {
     if (phase === "boat" || phase === "coaster") return "ride";
-    if (phase !== "land" || tv.isOpen || conversation.isOpen) return "";
+    if (phase !== "land" || exiting || transitGate.isOpen || tv.isOpen || conversation.isOpen) return "";
+    if (nearDialer()) return "dialer";
     if (inCave()) return "exit";
     if (atDock()) return boatTrip.wait > 0 ? "boat" : "boat-wait";
     if (atStation()) return trainTrip.wait > 0 ? "coaster" : "coaster-wait";
@@ -181,7 +190,7 @@
     if (nearZuzu()) return "zuzu";
     return "";
   };
-  const CONTEXT_LABELS = { zuzu: "Talk to Zuzu", ride: "Leave ride", exit: "Return to Ooga Booga Land", boat: "Take a ride - boat", coaster: "Take a ride - coaster", "boat-wait": "Boat arriving soon", "coaster-wait": "Coaster arriving soon", tv: "Use TV", shop: "Visit meme shop" };
+  const CONTEXT_LABELS = { dialer: "DIAL", zuzu: "Talk to Zuzu", ride: "Leave ride", exit: "Return to Ooga Booga Land", boat: "Take a ride - boat", coaster: "Take a ride - coaster", "boat-wait": "Boat arriving soon", "coaster-wait": "Coaster arriving soon", tv: "Use TV", shop: "Visit meme shop" };
   const syncContext = () => {
     const kind = contextAction();
     if (kind === lastContext) return;
@@ -228,7 +237,8 @@
   const act = () => {
     if (phase === "boat" || phase === "coaster") { stopRide(); return true; }
     if (phase !== "land") return true;
-    if (inCave()) returnHub();
+    if (nearDialer()) transitGate.open();
+    else if (inCave()) returnHub();
     else if (atDock()) board("boat");
     else if (atStation()) board("coaster");
     else if (near(-10, 16, 6)) openTv();
@@ -242,7 +252,8 @@
   const onTap = (hit) => {
     if (!playerEnabled() || pilot.aiming || !hit) return;
     const owner = hit.owner;
-    if (owner.kind === "dsb-agent") { if (nearZuzu()) conversation.open(); else toast("Walk closer to talk to Zuzu."); }
+    if (owner.kind === "stargate-dialer") { if (nearDialer()) transitGate.open(); else toast("Move closer to the Stargate dialer."); }
+    else if (owner.kind === "dsb-agent") { if (nearZuzu()) conversation.open(); else toast("Walk closer to talk to Zuzu."); }
     else if (owner.kind === "visitor") { if (tomatoes) throwTomato(owner.cave); else toast("Grab tomatoes at the meme stand, then tap an Ooga."); }
     else if (owner.kind === "tv") openTv();
     else if (owner.kind === "shop") openShop();
@@ -251,6 +262,7 @@
     else if (owner.kind === "exit") returnHub();
   };
   const action = (name) => {
+    if (exiting || transitGate.isOpen) return;
     if (name === "leave") returnHub();
     else if (name === "dsb-context") act();
     else if (name === "dsb-banana") buy("banana");
@@ -279,7 +291,7 @@
     return false;
   };
   const onKey = (event) => {
-    if (conversation?.isOpen) return;
+    if (exiting || transitGate.isOpen || conversation?.isOpen) return;
     if (playerEnabled()) {
       if (event.key === "1" || event.key === "2") { pilot.weaponMode(Number(event.key)); return; }
       if (event.key.toLowerCase() === "g") { pilot.weaponAction("weapon-toggle"); return; }
@@ -298,6 +310,7 @@
   const onVisibility = () => audio.visibility(document.hidden);
   const update = (dt, time) => {
     // A queued RAF can predate a debug advance; never rewind a camera sequence.
+    if (exiting) return;
     dt = Math.max(0, dt);
     elapsed = time;
     syncPlayer();
@@ -324,7 +337,16 @@
     if (phase === "arrival") { arrivalTime += dt; avatar.root.position.z = 28 - 2 * smooth(arrivalTime / 0.6); poseAvatar(arrivalTime < 0.6, dt); arrivalCamera(); if (arrivalTime >= 13) finishArrival(); }
     if (phase === "land") {
       avatar.root.visible = true;
-      if (cameraEnabled()) { pilot.readInput(dt); if (avatarView) crew.update(dt, time); pilot.update(dt); }
+      if (cameraEnabled()) {
+        pilot.readInput(dt);
+        if (avatarView) {
+          Object.assign(transitPrevious, avatar.root.position); transitPrevious.y += avatar.bodyHeight / 2 - avatar.baseY;
+          crew.update(dt, time);
+          Object.assign(transitCurrent, avatar.root.position); transitCurrent.y += avatar.bodyHeight / 2 - avatar.baseY;
+          if (transitGate.traverse(transitPrevious, transitCurrent, avatar.bodyRadius, 1)) return;
+        }
+        pilot.update(dt);
+      }
     } else avatar.root.visible = phase === "arrival";
     agentPerception.name = avatar.traits.name; agentPerception.x = avatar.root.position.x; agentPerception.y = avatar.root.position.y - avatar.baseY; agentPerception.z = avatar.root.position.z; agentPerception.food = bananas + bread; agentPerception.active = playerEnabled() || conversation.isOpen && phase === "land" && !exiting;
     zuzu.update(dt, time, agentPerception);
@@ -398,6 +420,11 @@
   const buildLand = () => {
     if (land) return;
     land = M.build(); addChild(root, land.root);
+    // Reuse the arrival gate and its existing pedestal, outside the central crossing lane.
+    Object.assign(transitGate.dialer.position, { x: transitGate.root.position.x + transitGate.outerRadius + 1.2, y: 0, z: VIEW.position.z + 1 });
+    transitGate.dialer.rotation.y = Math.PI;
+    addChild(land.root, transitGate.dialer); register(transitGate.dialer, "stargate-dialer", "Stargate dialer · OogaBoogaLand");
+    transitGate.enableDialer([{ id: "hub", label: "OogaBoogaLand", enabled: true }, ...Array.from({ length: 4 }, (_, i) => ({ id: "quarantine-" + i, label: "Quarantined - Replicator Infestation - Clean Up In Progress", enabled: false }))]);
     zuzu = BL.dsbAgent.create({ parent: land.root, input, clearAt });
     if (!RAIL_GEOMETRY) {
       RAIL_GEOMETRY = [M.cube("#f05278", 0.5), M.cube("#55e49b", 0.5)];
@@ -430,7 +457,10 @@
     land = data = tv = zuzu = conversation = null;
     // Local +Y faces inward (-Z); the passage approaches the back from +Z.
     // Seat the lower ring in the floor so standing body centres clear the aperture.
-    transitGate = BL.stargate.create({ radius: 2.2, outerRadius: 2.5, position: { x: 0, y: 2.0, z: 0 }, rotation: { x: -Math.PI / 2, y: 0, z: 0 }, receiving: true, onTraverse: reveal });
+    transitGate = BL.stargate.create({ radius: 2.2, outerRadius: 2.5, position: { x: 0, y: 2.0, z: 0 }, rotation: { x: -Math.PI / 2, y: 0, z: 0 }, receiving: true,
+      menuHint: "Cross the active Stargate from DSB Land to return to OogaBoogaLand.",
+      onMenu: () => { syncPlayer(); pilot.controls.reset(); input.reset(); hud.tooltip.hide(); },
+      onTraverse: id => { if (phase === "entrance") reveal(); else if (id === "hub") departGate(); } });
     addChild(root, transitGate.root);
     const playerName = world.pilot || "YellowBrokeIt";
     world.pilot = playerName;

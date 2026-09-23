@@ -5,7 +5,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta http-equiv="Content-Security-Policy"
-    content="default-src 'none'; script-src 'sha256-kACOkhxABUpJ8eaWYtHxMyB1tO5xrR//XvC1PlIATq8='; style-src 'sha256-qItkbrkTUN12qdeUsnf5xHs9fLKmtyePMsdpCD3As/A='; img-src 'self' data:; media-src https://stream.noderunnersradio.com; connect-src https: wss:; base-uri 'none'; form-action 'none'">
+    content="default-src 'none'; script-src 'sha256-n7zm7j9M4YOwuPgdjsdVqvMPiIZUZwYFhnsG2lhK9qE='; style-src 'sha256-qItkbrkTUN12qdeUsnf5xHs9fLKmtyePMsdpCD3As/A='; img-src 'self' data:; media-src https://stream.noderunnersradio.com; connect-src https: wss:; base-uri 'none'; form-action 'none'">
   <meta name="referrer" content="no-referrer">
   <meta name="color-scheme" content="dark">
   <meta name="theme-color" content="#0a0a0b">
@@ -40644,18 +40644,19 @@ void main() {
   const BL = window.BL = window.BL || {}, S = BL.scene;
   const ACTIVATION_MS = 2000, ACTIVE_MS = 10000, SHUTDOWN_MS = 450;
   const create = ({ radius, outerRadius, position, rotation = { x: 0, y: 0, z: 0 }, destinations = [], receiving = false,
-    onMenu = () => {}, onTraverse = null, now = () => performance.now(), reducedMotion = matchMedia("(prefers-reduced-motion: reduce)").matches }) => {
+    onMenu = () => {}, onTraverse = null, menuHint = "Enter the active Pit horizon to travel. An inactive Pit is still an abyss.", now = () => performance.now(), reducedMotion = matchMedia("(prefers-reduced-motion: reduce)").matches }) => {
     const model = BL.stargateModels.build(radius, outerRadius);
     Object.assign(model.root.position, position); Object.assign(model.root.rotation, rotation);
     const inverse = BL.math.mat4.create();
-    let state = receiving ? "ACTIVE" : "OFF", started = 0, destination = null, disposed = false, crossed = false, opened = false, focus = null, focusFrame = 0;
+    let state = receiving ? "ACTIVE" : "OFF", started = 0, destination = null, disposed = false, crossed = false, opened = false, focus = null, focusFrame = 0, menuOwned = false;
     const dialog = document.getElementById("stargate-menu"), list = dialog.querySelector("ol"), closeButton = dialog.querySelector(".modal-close"), status = dialog.querySelector("[role=status]");
     const viewport = window.visualViewport;
-    const buttons = destinations.map((entry, index) => {
+    const rows = entries => entries.map((entry, index) => {
       const li = document.createElement("li"), button = document.createElement("button");
       button.type = "button"; button.textContent = `${index + 1}. ${entry.label}`; button.disabled = !entry.enabled;
       button.dataset.destination = String(index); li.appendChild(button); return { li, button };
     });
+    let buttons = rows(destinations);
     const fit = () => { if (opened) dialog.style.setProperty("--gate-height", (viewport ? viewport.height : innerHeight) + "px"); };
     const finishClose = () => {
       if (!opened) return;
@@ -40703,9 +40704,9 @@ void main() {
     };
     const closed = () => { if (!dialog.open) finishClose(); };
     const open = () => {
-      if (receiving || disposed || opened || dialog.open) return false;
+      if (!menuOwned || receiving || disposed || opened || dialog.open) return false;
       focus = document.activeElement; opened = true;
-      list.replaceChildren(...buttons.map(row => row.li)); status.textContent = "Enter the active Pit horizon to travel. An inactive Pit is still an abyss.";
+      list.replaceChildren(...buttons.map(row => row.li)); status.textContent = menuHint;
       onMenu(true); dialog.showModal(); fit();
       const first = buttons.find(row => !row.button.disabled)?.button || closeButton;
       first.focus({ preventScroll: true });
@@ -40726,25 +40727,74 @@ void main() {
       if (!Number.isFinite(lx + lz) || Math.hypot(lx, lz) > radius - bodyRadius) return false;
       crossed = true; onTraverse(destination); return true;
     };
-    if (!receiving) {
+    const enableDialer = entries => {
+      if (disposed) return;
+      destinations = entries; buttons = rows(entries);
+      if (menuOwned) return;
+      menuOwned = true;
       dialog.addEventListener("click", choose); closeButton.addEventListener("click", close); dialog.addEventListener("cancel", cancel); dialog.addEventListener("close", closed); dialog.addEventListener("keydown", key); dialog.addEventListener("focusin", focusDialog);
       window.addEventListener("resize", fit); if (viewport) viewport.addEventListener("resize", fit);
-    }
-    // Receiving gates stay lit for the passage, independently of the outgoing dial window.
-    const finishReceiving = () => { if (receiving) { state = "OFF"; update(); } };
+    };
+    if (!receiving) enableDialer(destinations);
+    // The receiving host owns arrival duration; no outbound dial deadline runs here.
+    const receive = () => { if (disposed) return; close(); receiving = true; state = "ACTIVE"; started = now(); crossed = false; update(); };
+    const finishReceiving = (animate = false) => {
+      if (!receiving || disposed) return;
+      receiving = false; state = animate ? "SHUTDOWN" : "OFF";
+      started = now() - ACTIVATION_MS - ACTIVE_MS; update();
+    };
     const dispose = () => {
       if (disposed) return;
       close(); disposed = true; state = "OFF";
       dialog.removeEventListener("click", choose); closeButton.removeEventListener("click", close); dialog.removeEventListener("cancel", cancel); dialog.removeEventListener("close", closed); dialog.removeEventListener("keydown", key); dialog.removeEventListener("focusin", focusDialog);
       window.removeEventListener("resize", fit); if (viewport) viewport.removeEventListener("resize", fit);
-      if (!receiving) list.replaceChildren(); model.horizon.visible = model.kawoosh.visible = false;
+      if (menuOwned) list.replaceChildren(); model.horizon.visible = model.kawoosh.visible = false;
       for (const node of model.ripples) node.visible = false;
       for (const node of [model.root, model.dialer]) if (node.parent) S.removeChild(node.parent, node);
     };
-    return { ...model, radius, outerRadius, open, close, activate, update, traverse, finishReceiving, dispose, reducedMotion,
-      get state() { return state; }, get isOpen() { return opened; }, get disposed() { return disposed; } };
+    return { ...model, radius, outerRadius, open, close, activate, update, traverse, enableDialer, receive, finishReceiving, dispose, reducedMotion,
+      get receiving() { return receiving; }, get state() { return state; }, get isOpen() { return opened; }, get disposed() { return disposed; } };
   };
   BL.stargate = { create, ACTIVATION_MS, ACTIVE_MS, SHUTDOWN_MS };
+})();
+
+// ---- js/stargate-arrival.js ----
+// A checked, scene-owned receiving trajectory; positions are feet, never actor roots.
+(() => {
+  "use strict";
+  const BL = window.BL = window.BL || {};
+  const RISE = 1.1, OUT = 1.1, LAND = 0.5, DURATION = RISE + OUT + LAND;
+  const smooth = t => { t = Math.max(0, Math.min(1, t)); return t * t * (3 - 2 * t); };
+  const sample = (plan, time, out) => {
+    const rise = smooth(time / RISE), move = smooth((time - RISE) / OUT), land = smooth((time - RISE - OUT) / LAND);
+    out.x = plan.start.x + (plan.landing.x - plan.start.x) * move;
+    out.z = plan.start.z + (plan.landing.z - plan.start.z) * move;
+    out.y = plan.start.y + (plan.high - plan.start.y) * rise + (plan.landing.y - plan.high) * land;
+    return out;
+  };
+  const plan = ({ hole, dialer, radius, height, supportAt, clearAt }) => {
+    const distance = Math.hypot(dialer.x - hole.x, dialer.z - hole.z);
+    const bearing = Math.atan2(dialer.x - hole.x, dialer.z - hole.z);
+    // Offset around the supported annulus, away from the pedestal's own footprint.
+    const turn = 2 * Math.asin(Math.min(1, (radius + 0.55 + 0.4) / (2 * distance)));
+    const start = { x: hole.x, y: hole.floor - height - 0.2, z: hole.z }, probe = { x: 0, y: 0, z: 0 };
+    if (distance <= hole.mouthRadius + radius + 0.2 || radius >= hole.radius) return null;
+    for (const offset of [turn, -turn, turn * 1.5, -turn * 1.5]) {
+      const angle = bearing + offset, landing = { x: hole.x + Math.sin(angle) * distance, y: hole.floor, z: hole.z + Math.cos(angle) * distance };
+      const floor = supportAt(landing.x, landing.z, hole.floor);
+      if (!Number.isFinite(floor) || Math.abs(floor - hole.floor) > 1e-5) continue;
+      const route = { start, landing, high: hole.floor + hole.rimDepth + 0.1, heading: angle, duration: DURATION };
+      let clear = true;
+      // Sample the entire short path at <0.1-unit spacing, including vertical headroom.
+      for (let i = 0; i <= 256; i++) {
+        sample(route, DURATION * i / 256, probe);
+        if (!clearAt(probe.x, probe.y + 1e-5, probe.z, radius + 0.05, height + 0.05)) { clear = false; break; }
+      }
+      if (clear) return route;
+    }
+    return null;
+  };
+  BL.stargateArrival = { plan, sample, DURATION };
 })();
 
 // ---- js/scene-hub.js ----
@@ -40934,7 +40984,8 @@ void main() {
   let jumbotronSpot, oogatronUnsub, renderer, game, world, go, lootEnabled, testBananas, root, camera, overlayCanvas, island, pathNode, altar, hud, hooks, input, pilot, fx, cameraCover, bananaCover, solids, rockGuides, objectGuides, sightGuides, bananaGuides, pileGuides, platformGuides, mirrorGuides, pile, crew, crates, critters, clock, presets, entering, jetpack, jetpackState, jetpackCarrier, jetpackWearer, lastJetpackCloud, mirrorCave, matrixCave, matrixControl, gateRain, fire, headquarters, dockStairs, jumbotron, positionDebug, agent, agentPlay, pitGate;
   let magazine, magazineState, breakables;
   const JETPACK_HUD_STATE = { owned: false, equipped: false, fuel: 1, blocked: false };
-  let enteringTween = null, pitDeparting = false;
+  let enteringTween = null, pitDeparting = false, pitArrival = null;
+  const pitArrivalPoint = { x: 0, y: 0, z: 0 };
   const pitPrevious = { x: 0, y: 0, z: 0 };
   let stateTimer = 0, hintTimer = 0, meterTimer = 0, now = 0, hour = 12, unsubscribeActivity = null;
   let weather = null, unsubscribeMempool = null, unsubscribeChain = null, mempoolIsland = null;
@@ -42185,7 +42236,7 @@ void main() {
       position: { x: hole.x, y: hole.floor + 0.03, z: hole.z },
       destinations: [{ id: "dsb", label: "DSB Land", enabled: true }, ...Array.from({ length: 4 }, (_, i) => ({ id: "quarantine-" + i, label: "Quarantined - Replicator Infestation - Clean Up In Progress", enabled: false }))],
       onTraverse: id => {
-        if (entering || !pilot.player || id !== "dsb") return;
+        if (entering || pitArrival || !pilot.player || id !== "dsb") return;
         entering = pitDeparting = true;
         releaseForScene(id);
         pilot.controls.reset(); input.reset(); pilot.setActive(false);
@@ -44246,7 +44297,7 @@ void main() {
     pilot.hooks.onDoubleTap(hit, p);
   };
   const onTap = (hit, p) => {
-    if (pitGate?.isOpen) return;
+    if (pitArrival || pitGate?.isOpen) return;
     if (agentTripleClick()) return;
     if (!hit) return;
     const o = hit.owner;
@@ -45365,10 +45416,39 @@ void main() {
       }
     }
   };
+  const beginPitArrival = () => {
+    const actor = pilot.player, hole = island.headquarters.basement.hole;
+    BL.scene.updateWorld(root); solids.sync();
+    const plan = BL.stargateArrival.plan({ hole, dialer: pitGate.dialer.position, radius: actor.bodyRadius, height: actor.bodyHeight,
+      supportAt: (x, z, y) => playerSupportAt(x, z, y, y, actor),
+      clearAt: (x, y, z, radius, height) => physicalClearAt(x, y, z, radius, height, actor) });
+    if (!plan) throw new Error("No safe Stargate arrival beside the Pit");
+    pitArrival = { plan, time: 0, landed: false };
+    pitGate.receive(); pilot.setActive(false); pilot.controls.reset(); input.reset(); hud.tooltip.hide();
+    crew.relocatePlayer(plan.start, plan.heading); updatePitArrival(0);
+  };
+  const updatePitArrival = dt => {
+    const arrival = pitArrival, plan = arrival.plan, actor = pilot.player;
+    arrival.time = Math.min(plan.duration, arrival.time + Math.max(0, dt));
+    BL.stargateArrival.sample(plan, arrival.time, pitArrivalPoint);
+    crew.relocatePlayer(pitArrivalPoint, plan.heading);
+    // A stable basement-side camera keeps the rise and outward flight visible.
+    camera.position.x = plan.landing.x + Math.sin(plan.heading) * 1.2 + Math.cos(plan.heading);
+    camera.position.z = plan.landing.z + Math.cos(plan.heading) * 1.2 - Math.sin(plan.heading);
+    camera.position.y = plan.landing.y + 2.8;
+    camera.target.x = pitArrivalPoint.x; camera.target.y = pitArrivalPoint.y + actor.bodyHeight / 2; camera.target.z = pitArrivalPoint.z;
+    updatePlayerCave(actor);
+    if (arrival.time >= plan.duration && !arrival.landed) { arrival.landed = true; pitGate.finishReceiving(true); }
+    if (arrival.landed && pitGate.state === "OFF") {
+      pilot.navigate({ position: plan.landing, target: { x: plan.landing.x, y: plan.landing.y + 1, z: plan.landing.z }, yaw: plan.heading - Math.PI, pitch: 0.3, dist: 4 });
+      pitArrival = null; input.reset(); pilot.controls.reset(); pilot.setActive(true); pilot.update(0);
+    }
+  };
   const update = (dt, elapsed) => {
     now = elapsed;
     pitGate.update();
     if (pitDeparting) return; // The accepted fall stays frozen through the director fade.
+    if (pitArrival) { updatePitArrival(dt); return; }
     hour = clock.read();
     daylight.sample(hour, RENDER_OPTS, clock.dayOfYear, islandLatitude, clock.continuousDay);
     RENDER_OPTS.time = elapsed;
@@ -45777,6 +45857,7 @@ void main() {
     location.reload();
   };
   const onKey = (e) => {
+    if (pitArrival) return;
     if ((e.key === "x" || e.key === "X") && !e.repeat && pilot.modeAction("mode-toggle")) return;
     if ((e.key === "1" || e.key === "2") && pilot.weaponMode(Number(e.key))) return;
     if (e.key === "Escape") pilot.release();
@@ -45806,7 +45887,10 @@ void main() {
 
   const enter = (ctx) => {
     ({ renderer, game, world, go, lootEnabled, testBananas, agentPlay } = ctx);
-    pitDeparting = false;
+    pitDeparting = false; pitArrival = null;
+    const travel = world.stargateTravel;
+    const pitReturn = ctx.from === "dsb" && travel?.from === "dsb" && travel.to === "hub" && travel.arrival === "pit" && travel.name === world.pilot;
+    delete world.stargateTravel; // Consume once; ordinary scene visits cannot inherit this route.
     overlayCanvas = ctx.overlay;
     jetpackState = world.jetpack || (world.jetpack = { owned: false, owner: null, fuel: 1 });
     magazineState = {
@@ -46271,15 +46355,15 @@ void main() {
       onHoverMove: (hit, p) => hud.tooltip.show(tooltipFor(hit), p.x, p.y, hit.owner.cave),
       onTap,
       ...pilot.hooks,
-      onDoubleTap: agentDoubleTap
+      onDoubleTap: (hit, p) => { if (!pitArrival) agentDoubleTap(hit, p); }
     });
     entering = false;
     enteringTween = null;
     now = 0;
-    hud.onPreset(navigate);
+    hud.onPreset(name => { if (!pitArrival) navigate(name); });
     hud.setDetachedView("pile");
     hud.onAction((action, value) => {
-      if (pitGate.isOpen) return;
+      if (pitArrival || pitGate.isOpen) return;
       if (action === "tip") demoTip(1200);
       else if (action === "tip-legendary") demoTip(120000);
       else if (action === "clear-loot") clearLoot();
@@ -46309,7 +46393,7 @@ void main() {
     }
     const initialFirstPerson = ctx.from === null && preloadedFirstPerson;
     if (initialFirstPerson) pilot.enterClose(true);
-    if (returningCharacter) navigate("pile");
+    if (returningCharacter && !pitReturn) navigate("pile");
     else if (!crew.sleeping && (preloadedView || initialCharacter || initialFirstPerson)) navigate(preloadedView || "pile");
     if (initialCharacter && preloadedJetpack) {
       grantJetpack(pilot.player, preloadedJetpackWear);
@@ -46358,7 +46442,7 @@ void main() {
         get shown() {
           return pile.shown;
         },
-        stargate: pitGate, island, mouths: island.mouths, labels, launchers, camera, weather, chain, beasts, pokeBeast, useProp, refreshChainSign, get chainSign() { return chainSign; }, get poolIsland() { return mempoolIsland; }, cameraPose: POSITION_POSE, crew, fx, controls: pilot.controls, props, altar, path: island.path.debug, headquarters, jumbotron, fireworks: launchFireworks, get fireworksPending() { return fireworksShells.length; }, agent: agent.debug,
+        stargate: pitGate, get stargateArrival() { return pitArrival; }, island, mouths: island.mouths, labels, launchers, camera, weather, chain, beasts, pokeBeast, useProp, refreshChainSign, get chainSign() { return chainSign; }, get poolIsland() { return mempoolIsland; }, cameraPose: POSITION_POSE, crew, fx, controls: pilot.controls, props, altar, path: island.path.debug, headquarters, jumbotron, fireworks: launchFireworks, get fireworksPending() { return fireworksShells.length; }, agent: agent.debug,
         scenery: {
           get candidateCount() { return scenery.length; },
           get visibleCount() { return sceneryVisible; },
@@ -46577,7 +46661,8 @@ void main() {
       mirrorCave.damage.restore();
       syncMirrorDamage(true);
     }
-    pilot.update(0);
+    if (pitReturn && pilot.player) beginPitArrival();
+    if (!pitArrival) pilot.update(0);
     if (ctx.from === null) restorePositionDebug();
     if (ctx.from === null && pilot.mode === "first-person") pilot.focusAim();
     if (POSITION_DEBUG) updatePositionDebug(true);
@@ -46589,6 +46674,7 @@ void main() {
     mark("covered-view");
   };
   const leave = () => {
+    pitArrival = null;
     pitGate.dispose();
     pitGate = null;
     uiGuideObjects = null; uiGuidesReady = false;
@@ -62874,10 +62960,11 @@ window.BL.dsbAudioData.music = "SUQzBAAAAAABAFRYWFgAAAASAAADbWFqb3JfYnJhbmQAZGFz
     savedRevision = state.revision;
   };
   const location = () => phase === "land" && avatarView ? avatar.root.position : pilot.orbit.target;
-  const cameraEnabled = () => phase === "land" && !exiting && !tv.isOpen && !conversation?.isOpen && document.getElementById("dsb-shop").hidden;
+  const cameraEnabled = () => phase === "land" && !exiting && !transitGate.isOpen && !tv.isOpen && !conversation?.isOpen && document.getElementById("dsb-shop").hidden;
   const playerEnabled = () => avatarView && cameraEnabled();
   const syncPlayer = () => pilot.setActive(cameraEnabled());
   const clearAt = (x, z, radius = 0.35) => Math.hypot(x, z) < 35 - radius
+    && !(land && Math.hypot(x - transitGate.dialer.position.x, z - transitGate.dialer.position.z) < 0.55 + radius)
     && !(Math.abs(x) < 8.6 + radius && Math.abs(z) < 2.6 + radius
       || Math.abs(x + 10) < 4.4 + radius && Math.abs(z - 13) < 1.9 + radius
       || Math.abs(x + 20) < 4 + radius && Math.abs(z - 13) < 2 + radius
@@ -62981,10 +63068,18 @@ window.BL.dsbAudioData.music = "SUQzBAAAAAABAFRYWFgAAAASAAADbWFqb3JfYnJhbmQAZGFz
     document.getElementById("dsb-shop").hidden = true; syncPlayer();
     toast("Drag to look around. Leave ride returns you to the station.");
   };
+  const nearDialer = () => phase === "land" && avatarView && Math.hypot(avatar.root.position.x - transitGate.dialer.position.x, avatar.root.position.z - transitGate.dialer.position.z) < 2;
+  const departGate = () => {
+    if (phase !== "land" || exiting) return;
+    world.pilot = avatar.traits.name;
+    world.stargateTravel = { from: "dsb", to: "hub", arrival: "pit", name: world.pilot };
+    exiting = true; syncPlayer(); pilot.controls.reset(); input.reset(); go("hub");
+  };
   const returnHub = () => { if (phase === "entrance" || phase === "land" && inCave()) { exiting = true; syncPlayer(); go("hub"); } else toast("Enter the stone cave to return to Ooga Booga Land."); };
   const contextAction = () => {
     if (phase === "boat" || phase === "coaster") return "ride";
-    if (phase !== "land" || tv.isOpen || conversation.isOpen) return "";
+    if (phase !== "land" || exiting || transitGate.isOpen || tv.isOpen || conversation.isOpen) return "";
+    if (nearDialer()) return "dialer";
     if (inCave()) return "exit";
     if (atDock()) return boatTrip.wait > 0 ? "boat" : "boat-wait";
     if (atStation()) return trainTrip.wait > 0 ? "coaster" : "coaster-wait";
@@ -62993,7 +63088,7 @@ window.BL.dsbAudioData.music = "SUQzBAAAAAABAFRYWFgAAAASAAADbWFqb3JfYnJhbmQAZGFz
     if (nearZuzu()) return "zuzu";
     return "";
   };
-  const CONTEXT_LABELS = { zuzu: "Talk to Zuzu", ride: "Leave ride", exit: "Return to Ooga Booga Land", boat: "Take a ride - boat", coaster: "Take a ride - coaster", "boat-wait": "Boat arriving soon", "coaster-wait": "Coaster arriving soon", tv: "Use TV", shop: "Visit meme shop" };
+  const CONTEXT_LABELS = { dialer: "DIAL", zuzu: "Talk to Zuzu", ride: "Leave ride", exit: "Return to Ooga Booga Land", boat: "Take a ride - boat", coaster: "Take a ride - coaster", "boat-wait": "Boat arriving soon", "coaster-wait": "Coaster arriving soon", tv: "Use TV", shop: "Visit meme shop" };
   const syncContext = () => {
     const kind = contextAction();
     if (kind === lastContext) return;
@@ -63040,7 +63135,8 @@ window.BL.dsbAudioData.music = "SUQzBAAAAAABAFRYWFgAAAASAAADbWFqb3JfYnJhbmQAZGFz
   const act = () => {
     if (phase === "boat" || phase === "coaster") { stopRide(); return true; }
     if (phase !== "land") return true;
-    if (inCave()) returnHub();
+    if (nearDialer()) transitGate.open();
+    else if (inCave()) returnHub();
     else if (atDock()) board("boat");
     else if (atStation()) board("coaster");
     else if (near(-10, 16, 6)) openTv();
@@ -63054,7 +63150,8 @@ window.BL.dsbAudioData.music = "SUQzBAAAAAABAFRYWFgAAAASAAADbWFqb3JfYnJhbmQAZGFz
   const onTap = (hit) => {
     if (!playerEnabled() || pilot.aiming || !hit) return;
     const owner = hit.owner;
-    if (owner.kind === "dsb-agent") { if (nearZuzu()) conversation.open(); else toast("Walk closer to talk to Zuzu."); }
+    if (owner.kind === "stargate-dialer") { if (nearDialer()) transitGate.open(); else toast("Move closer to the Stargate dialer."); }
+    else if (owner.kind === "dsb-agent") { if (nearZuzu()) conversation.open(); else toast("Walk closer to talk to Zuzu."); }
     else if (owner.kind === "visitor") { if (tomatoes) throwTomato(owner.cave); else toast("Grab tomatoes at the meme stand, then tap an Ooga."); }
     else if (owner.kind === "tv") openTv();
     else if (owner.kind === "shop") openShop();
@@ -63063,6 +63160,7 @@ window.BL.dsbAudioData.music = "SUQzBAAAAAABAFRYWFgAAAASAAADbWFqb3JfYnJhbmQAZGFz
     else if (owner.kind === "exit") returnHub();
   };
   const action = (name) => {
+    if (exiting || transitGate.isOpen) return;
     if (name === "leave") returnHub();
     else if (name === "dsb-context") act();
     else if (name === "dsb-banana") buy("banana");
@@ -63091,7 +63189,7 @@ window.BL.dsbAudioData.music = "SUQzBAAAAAABAFRYWFgAAAASAAADbWFqb3JfYnJhbmQAZGFz
     return false;
   };
   const onKey = (event) => {
-    if (conversation?.isOpen) return;
+    if (exiting || transitGate.isOpen || conversation?.isOpen) return;
     if (playerEnabled()) {
       if (event.key === "1" || event.key === "2") { pilot.weaponMode(Number(event.key)); return; }
       if (event.key.toLowerCase() === "g") { pilot.weaponAction("weapon-toggle"); return; }
@@ -63110,6 +63208,7 @@ window.BL.dsbAudioData.music = "SUQzBAAAAAABAFRYWFgAAAASAAADbWFqb3JfYnJhbmQAZGFz
   const onVisibility = () => audio.visibility(document.hidden);
   const update = (dt, time) => {
     // A queued RAF can predate a debug advance; never rewind a camera sequence.
+    if (exiting) return;
     dt = Math.max(0, dt);
     elapsed = time;
     syncPlayer();
@@ -63136,7 +63235,16 @@ window.BL.dsbAudioData.music = "SUQzBAAAAAABAFRYWFgAAAASAAADbWFqb3JfYnJhbmQAZGFz
     if (phase === "arrival") { arrivalTime += dt; avatar.root.position.z = 28 - 2 * smooth(arrivalTime / 0.6); poseAvatar(arrivalTime < 0.6, dt); arrivalCamera(); if (arrivalTime >= 13) finishArrival(); }
     if (phase === "land") {
       avatar.root.visible = true;
-      if (cameraEnabled()) { pilot.readInput(dt); if (avatarView) crew.update(dt, time); pilot.update(dt); }
+      if (cameraEnabled()) {
+        pilot.readInput(dt);
+        if (avatarView) {
+          Object.assign(transitPrevious, avatar.root.position); transitPrevious.y += avatar.bodyHeight / 2 - avatar.baseY;
+          crew.update(dt, time);
+          Object.assign(transitCurrent, avatar.root.position); transitCurrent.y += avatar.bodyHeight / 2 - avatar.baseY;
+          if (transitGate.traverse(transitPrevious, transitCurrent, avatar.bodyRadius, 1)) return;
+        }
+        pilot.update(dt);
+      }
     } else avatar.root.visible = phase === "arrival";
     agentPerception.name = avatar.traits.name; agentPerception.x = avatar.root.position.x; agentPerception.y = avatar.root.position.y - avatar.baseY; agentPerception.z = avatar.root.position.z; agentPerception.food = bananas + bread; agentPerception.active = playerEnabled() || conversation.isOpen && phase === "land" && !exiting;
     zuzu.update(dt, time, agentPerception);
@@ -63210,6 +63318,11 @@ window.BL.dsbAudioData.music = "SUQzBAAAAAABAFRYWFgAAAASAAADbWFqb3JfYnJhbmQAZGFz
   const buildLand = () => {
     if (land) return;
     land = M.build(); addChild(root, land.root);
+    // Reuse the arrival gate and its existing pedestal, outside the central crossing lane.
+    Object.assign(transitGate.dialer.position, { x: transitGate.root.position.x + transitGate.outerRadius + 1.2, y: 0, z: VIEW.position.z + 1 });
+    transitGate.dialer.rotation.y = Math.PI;
+    addChild(land.root, transitGate.dialer); register(transitGate.dialer, "stargate-dialer", "Stargate dialer · OogaBoogaLand");
+    transitGate.enableDialer([{ id: "hub", label: "OogaBoogaLand", enabled: true }, ...Array.from({ length: 4 }, (_, i) => ({ id: "quarantine-" + i, label: "Quarantined - Replicator Infestation - Clean Up In Progress", enabled: false }))]);
     zuzu = BL.dsbAgent.create({ parent: land.root, input, clearAt });
     if (!RAIL_GEOMETRY) {
       RAIL_GEOMETRY = [M.cube("#f05278", 0.5), M.cube("#55e49b", 0.5)];
@@ -63242,7 +63355,10 @@ window.BL.dsbAudioData.music = "SUQzBAAAAAABAFRYWFgAAAASAAADbWFqb3JfYnJhbmQAZGFz
     land = data = tv = zuzu = conversation = null;
     // Local +Y faces inward (-Z); the passage approaches the back from +Z.
     // Seat the lower ring in the floor so standing body centres clear the aperture.
-    transitGate = BL.stargate.create({ radius: 2.2, outerRadius: 2.5, position: { x: 0, y: 2.0, z: 0 }, rotation: { x: -Math.PI / 2, y: 0, z: 0 }, receiving: true, onTraverse: reveal });
+    transitGate = BL.stargate.create({ radius: 2.2, outerRadius: 2.5, position: { x: 0, y: 2.0, z: 0 }, rotation: { x: -Math.PI / 2, y: 0, z: 0 }, receiving: true,
+      menuHint: "Cross the active Stargate from DSB Land to return to OogaBoogaLand.",
+      onMenu: () => { syncPlayer(); pilot.controls.reset(); input.reset(); hud.tooltip.hide(); },
+      onTraverse: id => { if (phase === "entrance") reveal(); else if (id === "hub") departGate(); } });
     addChild(root, transitGate.root);
     const playerName = world.pilot || "YellowBrokeIt";
     world.pilot = playerName;

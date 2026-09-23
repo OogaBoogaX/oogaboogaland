@@ -184,7 +184,8 @@
   let jumbotronSpot, oogatronUnsub, renderer, game, world, go, lootEnabled, testBananas, root, camera, overlayCanvas, island, pathNode, altar, hud, hooks, input, pilot, fx, cameraCover, bananaCover, solids, rockGuides, objectGuides, sightGuides, bananaGuides, pileGuides, platformGuides, mirrorGuides, pile, crew, crates, critters, clock, presets, entering, jetpack, jetpackState, jetpackCarrier, jetpackWearer, lastJetpackCloud, mirrorCave, matrixCave, matrixControl, gateRain, fire, headquarters, dockStairs, jumbotron, positionDebug, agent, agentPlay, pitGate;
   let magazine, magazineState, breakables;
   const JETPACK_HUD_STATE = { owned: false, equipped: false, fuel: 1, blocked: false };
-  let enteringTween = null, pitDeparting = false;
+  let enteringTween = null, pitDeparting = false, pitArrival = null;
+  const pitArrivalPoint = { x: 0, y: 0, z: 0 };
   const pitPrevious = { x: 0, y: 0, z: 0 };
   let stateTimer = 0, hintTimer = 0, meterTimer = 0, now = 0, hour = 12, unsubscribeActivity = null;
   let weather = null, unsubscribeMempool = null, unsubscribeChain = null, mempoolIsland = null;
@@ -1435,7 +1436,7 @@
       position: { x: hole.x, y: hole.floor + 0.03, z: hole.z },
       destinations: [{ id: "dsb", label: "DSB Land", enabled: true }, ...Array.from({ length: 4 }, (_, i) => ({ id: "quarantine-" + i, label: "Quarantined - Replicator Infestation - Clean Up In Progress", enabled: false }))],
       onTraverse: id => {
-        if (entering || !pilot.player || id !== "dsb") return;
+        if (entering || pitArrival || !pilot.player || id !== "dsb") return;
         entering = pitDeparting = true;
         releaseForScene(id);
         pilot.controls.reset(); input.reset(); pilot.setActive(false);
@@ -3496,7 +3497,7 @@
     pilot.hooks.onDoubleTap(hit, p);
   };
   const onTap = (hit, p) => {
-    if (pitGate?.isOpen) return;
+    if (pitArrival || pitGate?.isOpen) return;
     if (agentTripleClick()) return;
     if (!hit) return;
     const o = hit.owner;
@@ -4615,10 +4616,39 @@
       }
     }
   };
+  const beginPitArrival = () => {
+    const actor = pilot.player, hole = island.headquarters.basement.hole;
+    BL.scene.updateWorld(root); solids.sync();
+    const plan = BL.stargateArrival.plan({ hole, dialer: pitGate.dialer.position, radius: actor.bodyRadius, height: actor.bodyHeight,
+      supportAt: (x, z, y) => playerSupportAt(x, z, y, y, actor),
+      clearAt: (x, y, z, radius, height) => physicalClearAt(x, y, z, radius, height, actor) });
+    if (!plan) throw new Error("No safe Stargate arrival beside the Pit");
+    pitArrival = { plan, time: 0, landed: false };
+    pitGate.receive(); pilot.setActive(false); pilot.controls.reset(); input.reset(); hud.tooltip.hide();
+    crew.relocatePlayer(plan.start, plan.heading); updatePitArrival(0);
+  };
+  const updatePitArrival = dt => {
+    const arrival = pitArrival, plan = arrival.plan, actor = pilot.player;
+    arrival.time = Math.min(plan.duration, arrival.time + Math.max(0, dt));
+    BL.stargateArrival.sample(plan, arrival.time, pitArrivalPoint);
+    crew.relocatePlayer(pitArrivalPoint, plan.heading);
+    // A stable basement-side camera keeps the rise and outward flight visible.
+    camera.position.x = plan.landing.x + Math.sin(plan.heading) * 1.2 + Math.cos(plan.heading);
+    camera.position.z = plan.landing.z + Math.cos(plan.heading) * 1.2 - Math.sin(plan.heading);
+    camera.position.y = plan.landing.y + 2.8;
+    camera.target.x = pitArrivalPoint.x; camera.target.y = pitArrivalPoint.y + actor.bodyHeight / 2; camera.target.z = pitArrivalPoint.z;
+    updatePlayerCave(actor);
+    if (arrival.time >= plan.duration && !arrival.landed) { arrival.landed = true; pitGate.finishReceiving(true); }
+    if (arrival.landed && pitGate.state === "OFF") {
+      pilot.navigate({ position: plan.landing, target: { x: plan.landing.x, y: plan.landing.y + 1, z: plan.landing.z }, yaw: plan.heading - Math.PI, pitch: 0.3, dist: 4 });
+      pitArrival = null; input.reset(); pilot.controls.reset(); pilot.setActive(true); pilot.update(0);
+    }
+  };
   const update = (dt, elapsed) => {
     now = elapsed;
     pitGate.update();
     if (pitDeparting) return; // The accepted fall stays frozen through the director fade.
+    if (pitArrival) { updatePitArrival(dt); return; }
     hour = clock.read();
     daylight.sample(hour, RENDER_OPTS, clock.dayOfYear, islandLatitude, clock.continuousDay);
     RENDER_OPTS.time = elapsed;
@@ -5027,6 +5057,7 @@
     location.reload();
   };
   const onKey = (e) => {
+    if (pitArrival) return;
     if ((e.key === "x" || e.key === "X") && !e.repeat && pilot.modeAction("mode-toggle")) return;
     if ((e.key === "1" || e.key === "2") && pilot.weaponMode(Number(e.key))) return;
     if (e.key === "Escape") pilot.release();
@@ -5056,7 +5087,10 @@
 
   const enter = (ctx) => {
     ({ renderer, game, world, go, lootEnabled, testBananas, agentPlay } = ctx);
-    pitDeparting = false;
+    pitDeparting = false; pitArrival = null;
+    const travel = world.stargateTravel;
+    const pitReturn = ctx.from === "dsb" && travel?.from === "dsb" && travel.to === "hub" && travel.arrival === "pit" && travel.name === world.pilot;
+    delete world.stargateTravel; // Consume once; ordinary scene visits cannot inherit this route.
     overlayCanvas = ctx.overlay;
     jetpackState = world.jetpack || (world.jetpack = { owned: false, owner: null, fuel: 1 });
     magazineState = {
@@ -5521,15 +5555,15 @@
       onHoverMove: (hit, p) => hud.tooltip.show(tooltipFor(hit), p.x, p.y, hit.owner.cave),
       onTap,
       ...pilot.hooks,
-      onDoubleTap: agentDoubleTap
+      onDoubleTap: (hit, p) => { if (!pitArrival) agentDoubleTap(hit, p); }
     });
     entering = false;
     enteringTween = null;
     now = 0;
-    hud.onPreset(navigate);
+    hud.onPreset(name => { if (!pitArrival) navigate(name); });
     hud.setDetachedView("pile");
     hud.onAction((action, value) => {
-      if (pitGate.isOpen) return;
+      if (pitArrival || pitGate.isOpen) return;
       if (action === "tip") demoTip(1200);
       else if (action === "tip-legendary") demoTip(120000);
       else if (action === "clear-loot") clearLoot();
@@ -5559,7 +5593,7 @@
     }
     const initialFirstPerson = ctx.from === null && preloadedFirstPerson;
     if (initialFirstPerson) pilot.enterClose(true);
-    if (returningCharacter) navigate("pile");
+    if (returningCharacter && !pitReturn) navigate("pile");
     else if (!crew.sleeping && (preloadedView || initialCharacter || initialFirstPerson)) navigate(preloadedView || "pile");
     if (initialCharacter && preloadedJetpack) {
       grantJetpack(pilot.player, preloadedJetpackWear);
@@ -5608,7 +5642,7 @@
         get shown() {
           return pile.shown;
         },
-        stargate: pitGate, island, mouths: island.mouths, labels, launchers, camera, weather, chain, beasts, pokeBeast, useProp, refreshChainSign, get chainSign() { return chainSign; }, get poolIsland() { return mempoolIsland; }, cameraPose: POSITION_POSE, crew, fx, controls: pilot.controls, props, altar, path: island.path.debug, headquarters, jumbotron, fireworks: launchFireworks, get fireworksPending() { return fireworksShells.length; }, agent: agent.debug,
+        stargate: pitGate, get stargateArrival() { return pitArrival; }, island, mouths: island.mouths, labels, launchers, camera, weather, chain, beasts, pokeBeast, useProp, refreshChainSign, get chainSign() { return chainSign; }, get poolIsland() { return mempoolIsland; }, cameraPose: POSITION_POSE, crew, fx, controls: pilot.controls, props, altar, path: island.path.debug, headquarters, jumbotron, fireworks: launchFireworks, get fireworksPending() { return fireworksShells.length; }, agent: agent.debug,
         scenery: {
           get candidateCount() { return scenery.length; },
           get visibleCount() { return sceneryVisible; },
@@ -5827,7 +5861,8 @@
       mirrorCave.damage.restore();
       syncMirrorDamage(true);
     }
-    pilot.update(0);
+    if (pitReturn && pilot.player) beginPitArrival();
+    if (!pitArrival) pilot.update(0);
     if (ctx.from === null) restorePositionDebug();
     if (ctx.from === null && pilot.mode === "first-person") pilot.focusAim();
     if (POSITION_DEBUG) updatePositionDebug(true);
@@ -5839,6 +5874,7 @@
     mark("covered-view");
   };
   const leave = () => {
+    pitArrival = null;
     pitGate.dispose();
     pitGate = null;
     uiGuideObjects = null; uiGuidesReady = false;

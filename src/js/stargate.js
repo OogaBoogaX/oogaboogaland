@@ -4,18 +4,19 @@
   const BL = window.BL = window.BL || {}, S = BL.scene;
   const ACTIVATION_MS = 2000, ACTIVE_MS = 10000, SHUTDOWN_MS = 450;
   const create = ({ radius, outerRadius, position, rotation = { x: 0, y: 0, z: 0 }, destinations = [], receiving = false,
-    onMenu = () => {}, onTraverse = null, now = () => performance.now(), reducedMotion = matchMedia("(prefers-reduced-motion: reduce)").matches }) => {
+    onMenu = () => {}, onTraverse = null, menuHint = "Enter the active Pit horizon to travel. An inactive Pit is still an abyss.", now = () => performance.now(), reducedMotion = matchMedia("(prefers-reduced-motion: reduce)").matches }) => {
     const model = BL.stargateModels.build(radius, outerRadius);
     Object.assign(model.root.position, position); Object.assign(model.root.rotation, rotation);
     const inverse = BL.math.mat4.create();
-    let state = receiving ? "ACTIVE" : "OFF", started = 0, destination = null, disposed = false, crossed = false, opened = false, focus = null, focusFrame = 0;
+    let state = receiving ? "ACTIVE" : "OFF", started = 0, destination = null, disposed = false, crossed = false, opened = false, focus = null, focusFrame = 0, menuOwned = false;
     const dialog = document.getElementById("stargate-menu"), list = dialog.querySelector("ol"), closeButton = dialog.querySelector(".modal-close"), status = dialog.querySelector("[role=status]");
     const viewport = window.visualViewport;
-    const buttons = destinations.map((entry, index) => {
+    const rows = entries => entries.map((entry, index) => {
       const li = document.createElement("li"), button = document.createElement("button");
       button.type = "button"; button.textContent = `${index + 1}. ${entry.label}`; button.disabled = !entry.enabled;
       button.dataset.destination = String(index); li.appendChild(button); return { li, button };
     });
+    let buttons = rows(destinations);
     const fit = () => { if (opened) dialog.style.setProperty("--gate-height", (viewport ? viewport.height : innerHeight) + "px"); };
     const finishClose = () => {
       if (!opened) return;
@@ -63,9 +64,9 @@
     };
     const closed = () => { if (!dialog.open) finishClose(); };
     const open = () => {
-      if (receiving || disposed || opened || dialog.open) return false;
+      if (!menuOwned || receiving || disposed || opened || dialog.open) return false;
       focus = document.activeElement; opened = true;
-      list.replaceChildren(...buttons.map(row => row.li)); status.textContent = "Enter the active Pit horizon to travel. An inactive Pit is still an abyss.";
+      list.replaceChildren(...buttons.map(row => row.li)); status.textContent = menuHint;
       onMenu(true); dialog.showModal(); fit();
       const first = buttons.find(row => !row.button.disabled)?.button || closeButton;
       first.focus({ preventScroll: true });
@@ -86,23 +87,33 @@
       if (!Number.isFinite(lx + lz) || Math.hypot(lx, lz) > radius - bodyRadius) return false;
       crossed = true; onTraverse(destination); return true;
     };
-    if (!receiving) {
+    const enableDialer = entries => {
+      if (disposed) return;
+      destinations = entries; buttons = rows(entries);
+      if (menuOwned) return;
+      menuOwned = true;
       dialog.addEventListener("click", choose); closeButton.addEventListener("click", close); dialog.addEventListener("cancel", cancel); dialog.addEventListener("close", closed); dialog.addEventListener("keydown", key); dialog.addEventListener("focusin", focusDialog);
       window.addEventListener("resize", fit); if (viewport) viewport.addEventListener("resize", fit);
-    }
-    // Receiving gates stay lit for the passage, independently of the outgoing dial window.
-    const finishReceiving = () => { if (receiving) { state = "OFF"; update(); } };
+    };
+    if (!receiving) enableDialer(destinations);
+    // The receiving host owns arrival duration; no outbound dial deadline runs here.
+    const receive = () => { if (disposed) return; close(); receiving = true; state = "ACTIVE"; started = now(); crossed = false; update(); };
+    const finishReceiving = (animate = false) => {
+      if (!receiving || disposed) return;
+      receiving = false; state = animate ? "SHUTDOWN" : "OFF";
+      started = now() - ACTIVATION_MS - ACTIVE_MS; update();
+    };
     const dispose = () => {
       if (disposed) return;
       close(); disposed = true; state = "OFF";
       dialog.removeEventListener("click", choose); closeButton.removeEventListener("click", close); dialog.removeEventListener("cancel", cancel); dialog.removeEventListener("close", closed); dialog.removeEventListener("keydown", key); dialog.removeEventListener("focusin", focusDialog);
       window.removeEventListener("resize", fit); if (viewport) viewport.removeEventListener("resize", fit);
-      if (!receiving) list.replaceChildren(); model.horizon.visible = model.kawoosh.visible = false;
+      if (menuOwned) list.replaceChildren(); model.horizon.visible = model.kawoosh.visible = false;
       for (const node of model.ripples) node.visible = false;
       for (const node of [model.root, model.dialer]) if (node.parent) S.removeChild(node.parent, node);
     };
-    return { ...model, radius, outerRadius, open, close, activate, update, traverse, finishReceiving, dispose, reducedMotion,
-      get state() { return state; }, get isOpen() { return opened; }, get disposed() { return disposed; } };
+    return { ...model, radius, outerRadius, open, close, activate, update, traverse, enableDialer, receive, finishReceiving, dispose, reducedMotion,
+      get receiving() { return receiving; }, get state() { return state; }, get isOpen() { return opened; }, get disposed() { return disposed; } };
   };
   BL.stargate = { create, ACTIVATION_MS, ACTIVE_MS, SHUTDOWN_MS };
 })();

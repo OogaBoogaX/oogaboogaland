@@ -3324,7 +3324,7 @@ for (const mobile of [false, true]) scene("hub", { label: "stargate dsb travel "
   await b.evaluate(`window.dispatchEvent(new KeyboardEvent("keydown", { key: "w" })); BL.scenes.dsb.update(__ooga.audio.duration, 3); window.dispatchEvent(new KeyboardEvent("keyup", { key: "w" }));`);
   const arrived = await snapshot();
   check("D backside initializes each land system once despite pending audio", arrived.land === 1 && arrived.zuzu === 1 && arrived.data === 1 && arrived.tv === 1 && arrived.chat === 1 && arrived.resources.rides === 384 && arrived.resources.tomatoes === 12 && arrived.resources.visitors === 6 && arrived.requests === 4 && arrived.sockets === 1 && arrived.phase === (mobile ? "land" : "arrival"), JSON.stringify(arrived));
-  check("back crossing cannot initialize twice and front return remains disconnected", await b.evaluate(`(() => { const G = __ooga.dsb.gate; return !G.traverse({ x: 0, y: 1, z: 29 }, { x: 0, y: 1, z: 27 }, 0.35, -1) && !G.open() && __gateDormancy.land === 1; })()`));
+  check("back crossing cannot initialize twice and receiving menu stays closed", await b.evaluate(`(() => { const G = __ooga.dsb.gate; return !G.traverse({ x: 0, y: 1, z: 29 }, { x: 0, y: 1, z: 27 }, 0.35, -1) && (G.receiving ? !G.open() : G.state === "OFF") && __gateDormancy.land === 1; })()`));
   if (!mobile) {
     const emergence = await b.evaluate(`(() => { BL.scenes.dsb.update(0.6, 4); const d = __ooga.dsb; return { phase: d.phase, z: d.avatar.root.position.z, y: d.avatar.root.position.y - d.avatar.baseY, time: d.arrivalTime, gate: d.gate.root.position.z }; })()`);
     check("scripted emergence clears inward into supported arrival lane", emergence.phase === "arrival" && emergence.z === 26 && emergence.y === 0 && emergence.gate === 28 && emergence.time >= 0.6, JSON.stringify(emergence));
@@ -3334,6 +3334,58 @@ for (const mobile of [false, true]) scene("hub", { label: "stargate dsb travel "
   await b.evaluate(`window.__landGate = __ooga.dsb.gate; window.__landRoot = BL.scenes.dsb.root; window.__landZuzu = __ooga.dsb.zuzu; __ooga.go("hub")`);
   if (!await untilPage(b, 'B.scene === "hub" && !B.transitioning', 20000)) throw Error("Land disposal did not return");
   check("land exit disposes agents, gate, nodes and sockets; Mine remains c10", await b.evaluate(`__landGate.disposed && __landZuzu.disposed && __landRoot.children.length === 0 && __dsbFeedFixture.sockets === __dsbFeedFixture.closed && !__ooga.dsb && BL.caves.slots.find(s => s.id === "c10").scene === "mine" && !BL.caves.slots.some(s => s.scene === "dsb")`));
+} }] });
+
+// Return-only integration: the outbound playthrough remains separately ledger-controlled.
+for (const mobile of [false, true]) scene("dsb", { label: "stargate dsb return " + (mobile ? "canvas2d" : "webgl2"), query: "pos=0&wip=mine" + (mobile ? "&canvas2d=1" : ""), opts: mobile ? { ...PHONE_SIZE, motion: false } : { motion: true }, steps: [{ name: "stargate dsb return " + (mobile ? "canvas2d" : "webgl2"), why: "playthrough: front return reaches a receiving Pit, lands safely and restores control without re-entering transit", run: async b => {
+  const check = (name, ok, detail = "") => record("stargate return " + (mobile ? "canvas2d: " : "webgl2: ") + name, ok, detail);
+  const press = async selector => {
+    const p = await b.evaluate(`(() => { const e = document.querySelector(${JSON.stringify(selector)}); e.scrollIntoView({ block: "nearest" }); const r = e.getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; })()`);
+    if (mobile) { await b.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [p] }); await b.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] }); }
+    else await b.click(p.x, p.y);
+  };
+  await b.evaluate(`(() => {
+    window.__returnHubEntries = 0; const H = BL.scenes.hub, enter = H.enter, update = H.update;
+    H.enter = ctx => { __returnHubEntries++; window.__returnWorld = ctx.world; enter(ctx); window.__returnStart = { state: H.debug.stargate.state, receiving: H.debug.stargate.receiving, y: __ooga.pilot?.player?.root.position.y }; H.update = () => {}; };
+    window.__returnHubUpdate = update;
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "w" })); BL.scenes.dsb.update(__ooga.audio.duration + 1, 1); window.dispatchEvent(new KeyboardEvent("keyup", { key: "w" }));
+    document.querySelector('[data-action="dsb-skip"]').click();
+    const B = __ooga, d = B.dsb, g = d.gate, p = g.dialer.position;
+    window.__returnOld = { gate: g, root: BL.scenes.dsb.root, zuzu: d.zuzu, avatar: d.avatar, enter: __gateDormancy.enter, audio: __gateDormancy.audio };
+    B.pilot.navigate({ position: { x: p.x, y: 0, z: p.z - 1.4 }, yaw: Math.PI, pitch: 0.3, dist: 4 }); BL.scenes.dsb.update(0, 2);
+  })()`);
+  const setup = await b.evaluate(`({ phase: __ooga.dsb.phase, gate: __ooga.dsb.gate.root.position, dialer: __ooga.dsb.gate.dialer.position, label: document.getElementById("dsb-context").textContent, entries: __returnHubEntries })`);
+  check("existing gate and native nearby DIAL", setup.phase === "land" && setup.gate.x === 0 && setup.gate.y === 2 && setup.gate.z === 28 && setup.dialer.x === 3.7 && setup.dialer.z === 27 && setup.label === "DIAL" && setup.entries === 0, JSON.stringify(setup));
+  await press("#dsb-context");
+  const menu = await b.evaluate(`(() => { const d = document.getElementById("stargate-menu"), buttons = [...d.querySelectorAll("ol button")], p = __ooga.dsb.avatar.root.position, before = { ...p }; document.activeElement.dispatchEvent(new KeyboardEvent("keydown", { key: "w", bubbles: true })); BL.scenes.dsb.update(0.2, 3); return { open: d.open, disabled: buttons.map(b => b.disabled).join(), focus: document.activeElement === buttons[0], label: buttons[0].textContent, stopped: p.x === before.x && p.z === before.z }; })()`);
+  check("accessible five-destination modal suspends movement", menu.open && menu.disabled === "false,true,true,true,true" && menu.focus && menu.label.includes("OogaBoogaLand") && menu.stopped, JSON.stringify(menu));
+  if (mobile) await press("#stargate-menu .modal-close"); else await b.key("Escape");
+  check("cancel clears held inputs", await b.evaluate(`!__ooga.dsb.gate.isOpen && __ooga.controls.read().y === 0`));
+  await press("#dsb-context"); await press('#stargate-menu [data-destination="0"]');
+  check("dialing and expiry create no hub", await b.evaluate(`(() => { const g = __ooga.dsb.gate; const warming = g.state === "ACTIVATING" && !g.activate(0); __gateClock += 2000; g.update(); const active = g.state === "ACTIVE"; __gateClock += 10450; g.update(); return warming && active && g.state === "OFF" && __ooga.scene === "dsb" && __returnHubEntries === 0; })()`));
+  await b.evaluate(`(() => {
+    const B = __ooga, G = B.dsb.gate; G.activate(0); __gateClock += 2000; G.update();
+    B.pilot.navigate({ position: { x: 0, y: 0, z: 27.9 }, yaw: Math.PI, pitch: 0.3, dist: 4 });
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "w" }));
+    for (let i = 0; i < 20 && !B.transitioning; i++) BL.scenes.dsb.update(0.05, 4 + i * 0.05);
+    window.dispatchEvent(new KeyboardEvent("keyup", { key: "w" }));
+  })()`);
+  if (!await untilPage(b, 'B.scene === "hub" && !B.transitioning', 20000)) throw Error("Front crossing did not return directly to hub");
+  const arrival = await b.evaluate(`(() => {
+    const B = __ooga, H = BL.scenes.hub, G = H.debug.stargate, a = B.pilot.player, route = H.debug.stargateArrival, samples = [];
+    const start = { y: a.root.position.y - a.baseY, x: a.root.position.x, z: a.root.position.z };
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "w" }));
+    for (let i = 0; i < 6; i++) { __returnHubUpdate(0.45, 10 + i); samples.push({ x: a.root.position.x, y: a.root.position.y - a.baseY, z: a.root.position.z }); }
+    window.dispatchEvent(new KeyboardEvent("keyup", { key: "w" }));
+    const shutdown = G.state; __gateClock += 450; G.update(); __returnHubUpdate(0, 17); H.update = __returnHubUpdate;
+    return { receiving: __returnStart.state === "ACTIVE" && __returnStart.receiving, start, samples, shutdown, state: G.state, cleared: !H.debug.stargateArrival && !__returnWorld.stargateTravel && !__returnWorld.pilot, landing: route?.plan.landing, name: a.traits.name, sameRoot: a.root === __returnOld.avatar.root, velocity: a.hopV, entries: __returnHubEntries, enter: __gateDormancy.enter, audio: __gateDormancy.audio, originalEnter: __returnOld.enter, originalAudio: __returnOld.audio, level: __returnWorld.level, support: B.island.supportAt(a.root.position.x, a.root.position.z, a.root.position.y - a.baseY) };
+  })()`);
+  check("direct return never starts transit/audio again and preserves canonical identity", arrival.enter === arrival.originalEnter && arrival.audio === arrival.originalAudio && arrival.entries === 1 && arrival.name === "YellowBrokeIt" && !arrival.sameRoot, JSON.stringify(arrival));
+  check("receiving Pit rises vertically then moves outward to supported floor", arrival.receiving && arrival.start.y < -12.5 && arrival.start.x === 0 && arrival.start.z === 0 && arrival.samples[0].x === 0 && arrival.samples[1].y > arrival.samples[0].y && Math.hypot(arrival.samples[5].x, arrival.samples[5].z) > 6 && Math.abs(arrival.samples[5].y + 12.5) < 1e-6 && arrival.support === -12.5, JSON.stringify(arrival));
+  check("receiving guard clears after shutdown with no fall velocity or reverse travel", arrival.shutdown === "SHUTDOWN" && arrival.state === "OFF" && arrival.cleared && arrival.velocity === 0 && arrival.entries === 1, JSON.stringify(arrival));
+  const cleanup = await b.evaluate(`__returnOld.gate.disposed && __returnOld.zuzu.disposed && __returnOld.root.children.length === 0 && __dsbFeedFixture.sockets === __dsbFeedFixture.closed && !document.body.classList.contains("dsb-active") && BL.caves.slots.find(s => s.id === "c10").scene === "mine" && !BL.caves.slots.some(s => s.scene === "dsb")`);
+  check("DSB runtime disposed and Mine keeps c10", cleanup);
+  check("normal movement restored after landing", await b.evaluate(`(() => { const a = __ooga.pilot.player, p = { ...a.root.position }; window.dispatchEvent(new KeyboardEvent("keydown", { key: "w" })); BL.scenes.hub.update(0.1, 18); window.dispatchEvent(new KeyboardEvent("keyup", { key: "w" })); return Math.hypot(a.root.position.x - p.x, a.root.position.z - p.z) > 0.01 && __ooga.scene === "hub" && !__ooga.transitioning; })()`));
 } }] });
 
 scene("dsb", { label: "dsb zuzu conversation", url: hubPage(dist), steps: [{ name: "dsb zuzu conversation", why: "contract: preserve DSB scene behavior independently of the hub entrance", run: async (b) => {
@@ -4133,6 +4185,65 @@ const unitChecks = async () => {
   // Scene state built directly instead of booted; seed 1 matches scene-hub.js.
   // Sealed cave guides need the hub's seal nodes, so probes reading them stay in the browser tier.
   const island = BL.terrain.island({ seed: 1 });
+  {
+    // Contract: both directions use the production swept aperture and wall-clock cycle.
+    const get = document.getElementById, listen = window.addEventListener, unlisten = window.removeEventListener;
+    document.getElementById = () => { const node = el(); node.querySelector = () => el(); return node; };
+    window.addEventListener = window.removeEventListener = () => {};
+    let time = 0, crossings = 0;
+    const gate = BL.stargate.create({ radius: 2.2, outerRadius: 2.5, position: { x: 0, y: 2, z: 28 }, rotation: { x: -Math.PI / 2, y: 0, z: 0 }, now: () => time, destinations: [{ id: "hub", enabled: true }], onTraverse: () => crossings++ });
+    const from = { x: 0, y: 1, z: 20 }, to = { x: 0, y: 1, z: 60 };
+    const off = !gate.traverse(from, to, 0.8), activated = gate.activate(0), duplicate = !gate.activate(0), warming = !gate.traverse(from, to, 0.8);
+    time = 1999; gate.update(); const activation = gate.state === "ACTIVATING";
+    time = 2000; gate.update(); const active = gate.state === "ACTIVE";
+    const wrong = !gate.traverse(to, from, 0.8), outside = !gate.traverse({ ...from, x: 3 }, { ...to, x: 3 }, 0.8);
+    const swept = gate.traverse(from, to, 0.8), once = !gate.traverse(from, to, 0.8);
+    time = 11999; gate.update(); const fullWindow = gate.state === "ACTIVE";
+    time = 12000; gate.update(); const shutdown = gate.state === "SHUTDOWN" && !gate.traverse(from, to, 0.8);
+    time = 12450; gate.update(); const expired = gate.state === "OFF" && !gate.traverse(from, to, 0.8);
+    record("Stargate return: directional swept front crossing, exact deadlines and one-use cycle", off && activated && duplicate && warming && activation && active && wrong && outside && swept && once && fullWindow && shutdown && expired && crossings === 1);
+    gate.receive(); time += 60000; gate.update(); const receiving = gate.receiving && gate.state === "ACTIVE" && !gate.activate(0);
+    gate.finishReceiving(true); const fading = gate.state === "SHUTDOWN";
+    time += 450; gate.update();
+    record("Stargate receiving: host owns duration then restores reusable outbound cycle", receiving && fading && !gate.receiving && gate.state === "OFF" && gate.activate(0));
+    gate.dispose(); document.getElementById = get; globalThis.addEventListener = listen; globalThis.removeEventListener = unlisten;
+  }
+  {
+    // Regression: all canonical physical bodies clear the actual Pit terrain and Dialer mesh.
+    const S = BL.scene, root = S.createNode(), noop = () => {}, solids = BL.solidProps.create();
+    const dialer = BL.stargateModels.build(4, 4.5).dialer;
+    Object.assign(dialer.position, { x: -6.4593472661924105, y: -12.5, z: 1.9594215714676189 });
+    dialer.rotation.y = Math.atan2(-dialer.position.x, -dialer.position.z); S.addChild(root, dialer); S.updateWorld(root); solids.add(dialer); solids.sync();
+    const crew = BL.crew.create({ root, world: { level: 0 }, input: { add: noop, remove: noop }, hud: { setRosterRow: noop }, game: { state: { assignments: {}, inventory: [] } }, pile: { footprintEdge: 1, pileEdge: () => 1 }, viewYaw: 0, buildSpots: [], walkIn: { x: 0, z: 3 }, groundAt: () => 0, walkable: () => true, bedrolls: BL.contributors.roster.map((_, i) => ({ x: 30 + i * 2, y: 0, z: 30, hidden: true })), fx: { say: noop, zzzAt: noop, burst: noop, puff: noop, spawnParticle: noop } });
+    const hole = island.headquarters.basement.hole, rows = [], point = {};
+    for (const actor of crew.cavemen.values()) {
+      const options = { hole, dialer: dialer.position, radius: actor.bodyRadius, height: actor.bodyHeight, supportAt: (x, z, y) => island.supportAt(x, z, y), clearAt: (x, y, z, r, h) => island.clearAt(x, y, z, r, h) && solids.clearAt(x, y, z, r, h) };
+      const route = BL.stargateArrival.plan(options);
+      let safe = !!route;
+      if (route) {
+        for (let i = 0; i <= 1024; i++) { BL.stargateArrival.sample(route, route.duration * i / 1024, point); safe &&= options.clearAt(point.x, point.y + 1e-5, point.z, actor.bodyRadius, actor.bodyHeight); }
+        safe &&= options.supportAt(point.x, point.z, point.y) === hole.floor && Math.hypot(point.x - hole.x, point.z - hole.z) - actor.bodyRadius > hole.mouthRadius;
+      }
+      rows.push({ name: actor.traits.name, safe, landing: route?.landing });
+    }
+    record("Stargate arrival: every canonical character clears shaft, rim, ceiling and Dialer onto supported floor", rows.length === CAST && rows.every(row => row.safe), JSON.stringify(rows));
+    const get = document.getElementById, listen = window.addEventListener, unlisten = window.removeEventListener;
+    document.getElementById = () => { const node = el(); node.querySelector = () => el(); return node; };
+    window.addEventListener = window.removeEventListener = () => {};
+    const apertures = [];
+    for (const actor of crew.cavemen.values()) {
+      let count = 0;
+      const gate = BL.stargate.create({ radius: 2.2, outerRadius: 2.5, position: { x: 0, y: 2, z: 0 }, rotation: { x: -Math.PI / 2, y: 0, z: 0 }, receiving: true, onTraverse: () => count++ });
+      const back = { x: 0, y: actor.bodyHeight / 2, z: 25 }, front = { x: 0, y: actor.bodyHeight / 2, z: -0.1 };
+      const wrong = !gate.traverse(front, back, actor.bodyRadius, -1), outside = !gate.traverse({ ...back, x: 3 }, { ...front, x: 3 }, actor.bodyRadius, -1);
+      const accepted = gate.traverse(back, front, actor.bodyRadius, -1), once = !gate.traverse(back, front, actor.bodyRadius, -1);
+      gate.finishReceiving(); const closed = gate.state === "OFF"; gate.dispose();
+      apertures.push({ name: actor.traits.name, pass: wrong && outside && accepted && once && closed && count === 1 });
+    }
+    document.getElementById = get; window.addEventListener = listen; window.removeEventListener = unlisten;
+    record("Stargate transit regression: all canonical bodies retain one-way backside aperture and finish OFF", apertures.length === CAST && apertures.every(row => row.pass), JSON.stringify(apertures));
+    crew.dispose();
+  }
   const rockGuides = BL.rockGuides.create({ island, sealed: [] });
   globalThis.__ooga = { island, headquarters: { rockGuides } };
 
