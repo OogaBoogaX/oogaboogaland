@@ -85,6 +85,8 @@ To add your Ooga, add one file to `src/characters/` named after your GitHub hand
 
 No analytics and no personal data. Read-only requests, nothing about the visitor sent: the mempool.space websocket and REST API (falling back to blockstream.info's Esplora), Coinbase Exchange's websocket feed for the live price and the day's open (falling back to Coinbase Exchange, Kraken, Coinbase spot and mempool.space over REST), and the oogatron stats worker. The roster lists public contributor handles only; the donation handle and message stay in localStorage.
 
+DSB Land additionally contacts public Bitcoin feeds and radio/media services. Radio song requests and invoice monitoring contact the station; payment remains an explicit action in the visitor's wallet. Zuzu uses local mock replies and deterministic fallback and sends no conversations to an AI provider. Its provider-neutral backend is prepared but not deployed.
+
 ## License
 
 Public domain under [The Ooga Booga License](LICENSE), a caveman-speak dedication with the meaning of The Unlicense.
@@ -92,3 +94,85 @@ Public domain under [The Ooga Booga License](LICENSE), a caveman-speak dedicatio
 ## Contributing
 
 Read [AGENTS.md](AGENTS.md) first: the module layout, the engine patterns, how to add things, and the checks every change must pass.
+
+## DSB Land
+
+**DSB Land has no cave slot. Ooga Mine owns c10.** To visit DSB, control an
+Ooga and use the chest-height Dialer beside the basement Pit Stargate. Destination
+1 is DSB Land; destinations 2–5 are disabled: “Quarantined - Replicator Infestation -
+Clean Up In Progress”. Activation takes approximately two seconds, followed by a
+ten-second ACTIVE traversal window. Physically cross downward through the active
+Pit to travel. An inactive Pit retains its ordinary abyss behavior.
+
+Outbound travel uses the one-way white-light transit cave. Hold W / Up or push the
+left touch stick forward, then cross the **back** of the upright Stargate. Only
+that crossing constructs DSB Land. Ordinary hub play, opening the Dialer, dialing,
+activation and waiting construct no DSB Land; transit has no land rides, shops,
+TV, Zuzu, land data subscription or outdoor radio. Four recordings accompany the
+passage when audio is available; audio never blocks movement or completion.
+The selected Ooga is rebuilt with its current canonical model. Safe emergence
+leads into the skippable 13-second, 360-degree arrival tour; reduced motion skips it.
+
+To return, use the DSB Dialer beside the same upright gate. Destination 1 is
+OogaBoogaLand; 2–5 remain quarantined. After the same two-second activation, cross
+the **front** during its ten-second ACTIVE window. Return goes directly to the hub,
+without the transit cave. The receiving Pit is active while the Ooga rises through
+it, moves outward and lands safely beside the Dialer. Controls resume and the gate
+shuts down without an immediate reverse transition. Escape can cancel an unfinished
+transit; it does not bypass the return Stargate from DSB Land.
+
+The upright Stargate is at (0, 2, 28), with its Dialer at (3.7, 0, 27). The Meme Shop
+at (-14, 0, 18), facing +90°, and NodeRunner TV at (14, 0, 18), facing -90°, face the
+central plaza. Their collision, interactions, radio source and Zuzu destinations
+follow their landmark transforms.
+
+WASD moves, dragging looks around, and the mouse wheel adjusts the shared camera.
+**Turtle view** shows the whole world; **Walk** restores the player view. The river
+is the outer ring, with a southern boat dock and a marked **Bitcoin coaster**
+station. Both rides stop for eight seconds at their stations. Approach and use
+**Take a ride** while a vehicle waits. Both have a forward first-person view with
+limited mouse dragging; **Leave ride** disembarks at the station.
+
+Walk near the meme stand and choose **Visit meme shop**. Each visit starts with 20 demo
+tokens: bananas and tomatoes cost one, banana bread costs three, with nine of each
+allowed. **Eat snack** / B eats bread or a banana; **Throw tomato** / T throws a tomato,
+and tapping a local Ooga aims at them. Shop purchases are simulated; characters are local.
+
+The nearby **Use TV** button opens a centered five-channel menu. Channel 1 is Noderunners
+Radio; 2-5 say **Soon added**. The station supplies current song, queue and recent history,
+refreshed every 15 seconds with outages labelled. Search for a song inside channel 1,
+select it to request the station's Lightning invoice, then scan its QR, copy it or open
+a Lightning wallet. Payment remains an explicit action in the visitor's wallet; the TV
+polls the station for payment and queue confirmation. Closing an invoice stops local
+monitoring; it does not cancel an invoice at the station. An official jukebox link and
+QR remain available. Audio buffering can delay playback behind the displayed metadata.
+
+Closing the TV keeps its broadcast audible across DSB Land, louder nearby and quieter
+farther away. **Music** and **Ambient** are independent; **Mute** silences everything.
+The Journey track plays only in the tunnel. Radio outages retry while ambient sound
+continues. **Play radio** resumes playback if the browser requires a gesture. Procedural
+river, waterfalls, boat motor, crowd and wildlife sounds follow nearby sources.
+
+The Bitcoin sky and current BTC/USD price consume the existing page-owned chain
+service: vsize (mapped as `Math.min(1, vsize / 1e8)`), recommended `fastestFee`, tip
+height and price. DSB opens no duplicate Mempool polling or live Coinbase socket.
+Freshness uses separate observation timestamps: 90 seconds for backlog, fees and
+price, 180 seconds for height; zero means unknown. Stale values are labelled and
+retained, with demo defaults where no usable observation exists.
+
+The ride retains its DSB-owned real Coinbase one-minute OHLC request: once per
+live-data activation, bounded to 48 candles with a ten-second timeout and cancelled
+on exit. Shared price observations update the current candle after history loads.
+Each lap uses a stable snapshot of completed candles, replaced at the station;
+prices are scaled and clamped for safe clearance. History failures are labelled,
+with no background retry loop; toggle **Live data on / off** to request it again.
+The toggle controls DSB consumption, not the shared service. Leaving DSB removes
+its subscription and visit resources without stopping page-owned feeds. NodeRunner
+metadata, song requests, payment monitoring and radio remain DSB-owned. Automated
+feed checks use fixtures and do not establish live-provider availability.
+
+A direct visit is `?scene=dsb`; `?debug=1&scene=dsb` exposes `__ooga.dsb`.
+
+### Zuzu
+
+Zuzu is DSB Land's physical black cat. Approach her and choose **Talk to Zuzu** for a compact free-form conversation panel. Replies are currently clearly labelled local mocks, with deterministic fallback; no real AI provider is connected. Conversation history resets when leaving DSB. The provider-neutral backend foundation is documented in [server/zuzu/README.md](server/zuzu/README.md); it is not deployed or bundled into the game.

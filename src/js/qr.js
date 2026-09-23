@@ -58,13 +58,25 @@
     9: [6, 26, 46],
     10: [6, 28, 50]
   };
+  // Standard ECC-M block counts (versions 11-40) let Lightning invoices use
+  // the same local encoder as short links. Existing versions remain unchanged.
+  const extraEcc = [30,22,22,24,24,28,28,26,26,26,26,28,28,28,28,28,28,28,28,28,28,28,28,28,28,28,28,28,28,28];
+  const extraBlocks = [5,8,9,9,10,10,11,13,14,16,17,17,18,20,21,23,25,26,28,29,31,33,35,37,38,40,43,45,47,49];
+  for (let v = 11; v <= 40; v++) {
+    const align = Math.floor(v / 7) + 2, raw = Math.floor(((16 * v + 128) * v + 64 - ((25 * align - 10) * align - 55) - 36) / 8);
+    const ecc = extraEcc[v - 11], count = extraBlocks[v - 11], long = raw % count, short = count - long, length = Math.floor(raw / count) - ecc;
+    BLOCKS[v] = [ecc, [short, length]]; if (long) BLOCKS[v].push([long, length + 1]);
+    const step = v === 32 ? 26 : Math.ceil((v * 4 + 4) / (align * 2 - 2)) * 2, positions = [6];
+    for (let i = align - 2; i >= 0; i--) positions.push(v * 4 + 10 - i * step);
+    ALIGN[v] = positions;
+  }
   const dataCodewords = (version) => BLOCKS[version].slice(1).reduce((sum, [count, len]) => sum + count * len, 0);
   const chooseVersion = (byteLength) => {
-    for (let v = 1; v <= 10; v++) {
+    for (let v = 1; v <= 40; v++) {
       const capacityBits = dataCodewords(v) * 8 - 4 - (v <= 9 ? 8 : 16);
       if (byteLength * 8 <= capacityBits) return v;
     }
-    throw new RangeError("QR payload too long (max 213 bytes at ECC M)");
+    throw new RangeError("QR payload too long (max 2331 bytes at ECC M)");
   };
   const buildCodewords = (bytes, version) => {
     const bits = [];

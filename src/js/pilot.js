@@ -55,7 +55,7 @@
   };
   const create = (ctx) => {
     const { renderer, canvas, camera, hud, presets, dist: [DIST_MIN, DIST_MAX], follow, fly, clampTarget, clampCamera, coarse, close = null, ceilingAt = null } = ctx;
-    let crew = null, fx = null, input = null;
+    let crew = null, fx = null, input = null, active = true;
     let restoredPose = null;
     const freeTarget = { x: 0, y: 0, z: 0 };
     const followTarget = { x: 0, y: 0, z: 0 };
@@ -173,7 +173,7 @@
     };
     let lockPending = false, aimLocked = false, softAimFocused = false, unlockedAt = -Infinity, cursorUnlockedAt = -Infinity;
     let savedPitch = 0, savedDist = 0, savedNear = camera.near, sightClear = null, cursorClear = null, aimSurface = null;
-    const weaponViewReady = (cave) => !!cave && !cave.health.stunned && !crew.sleeping && (closeWanted || !cave.camp.seat && !cave.bedTravel.mode);
+    const weaponViewReady = (cave) => active && !!cave && !cave.health.stunned && !crew.sleeping && (closeWanted || !cave.camp.seat && !cave.bedTravel.mode);
     const shoulderBoomPitch = (pitch) => Math.max(pitch, Math.min(0, pitch + 0.22));
     const shoulderDistance = (cave, pitch) => {
       // Keep the feet above the bottom 5% while the head stays near the
@@ -686,6 +686,7 @@
     const releasePrimary = (cave, focused = null) => crew.releaseSwing(cave, false, focused,
       !!cave && cave.weapon.meleeHeldTime < BL.crew.MELEE_TAP_TIME);
     const aimPointer = (e) => {
+      if (!active) return;
       if (e.pointerType !== "mouse") return;
       if (!armed()) {
         if (!weaponViewReady(player()) || e.button !== 2 || !(e.type === "pointerdown" || e.type === "pointermove" && (e.buttons & 2))) return;
@@ -757,7 +758,7 @@
       const cave = player();
       if (e.key.toLowerCase() === "r" && !e.shiftKey && cave && cave.weapon.equipped) {
         e.preventDefault(); e.stopImmediatePropagation();
-        if (!e.repeat) weaponAction("magazine-swap");
+        if (!e.repeat) weaponAction(ctx.reloadAnywhere ? "weapon-reload" : "magazine-swap");
         return;
       }
       if (!armed()) {
@@ -1070,7 +1071,7 @@
         return true;
       }
       const cave = player();
-      if (!cave || crew.sleeping) return false;
+      if (!active || !cave || crew.sleeping) return false;
       resumePose();
       if (action === "weapon-primary" || action === "weapon-primary-down") {
         const alreadyHeld = !cave.weapon.equipped;
@@ -1117,13 +1118,17 @@
       } else if (action === "weapon-fire") {
         if (cave.weapon.primaryEquipped) crew.swingWeapon(cave, false, ads);
         else if (!(held ? crew.setWeaponTrigger(true, ads) : crew.fireWeapon(cave, null, ads ? 1 : undefined)) && cave.weapon.equipped && !cave.weapon.unlimited && !cave.weapon.ammo) hud.hint("Empty magazine · press Space within reach of the pile to reload");
+      } else if (action === "weapon-reload") {
+        crew.startReload(cave);
       } else if (action === "magazine-swap" || action === "weapon-magazine") {
         if (!crew.swapMagazine(cave) && !crew.hasMagazine(cave)) hud.hint("Find a spare magazine · Space reloads the AK and both spares beside the pile");
       } else return false;
       syncWeaponHud();
+      if (ctx.reloadAnywhere) hud.hint("1 melee · 2 AK · right-click to aim · V fire · R reload · Space use / reload / jump");
       return true;
     };
     const weaponMode = (slot) => {
+      if (!active) return false;
       const cave = player();
       if (!cave) return false;
       if (slot === 0) return true;
@@ -1134,6 +1139,7 @@
       if (armed()) lockAim();
       syncWeaponHud();
       hud.hint(armed() ? slot === 1 ? "Hold left-click to raise the club · release to strike · right-click focuses a harder swing · 2 AK · scroll out for navigation" : "Left-click bursts · hold right-click for single-shot aim · 1 melee · scroll out for navigation · Space reloads beside the pile" : "1 melee · 2 AK · right-click or scroll in to aim · Space reloads beside the pile or jumps / jetpacks");
+      if (ctx.reloadAnywhere) hud.hint("1 melee · 2 AK · right-click to aim · V fire · R reload · Space use / reload / jump");
       return true;
     };
     const shooterView = (active, px = null, py = null, battle = null) => {
@@ -1329,6 +1335,8 @@
     };
     // Nearby actions consume a press; a ready jetpack leaves Space as throttle.
     const action = () => {
+      if (ctx.onPlayerAction && ctx.onPlayerAction()) return true;
+      if (!active) return true;
       resumePose();
       const cave = player();
       return cave ? crew.playerAction() : !!ctx.onFreeAction && ctx.onFreeAction();
@@ -1469,6 +1477,7 @@
     };
     // Call before the crew moves: reads keys and sticks for this frame.
     const readInput = (dt) => {
+      if (!active) return;
       syncAim();
       const a = controls.read();
       const cave = player();
@@ -2219,6 +2228,18 @@
       }
       resetGroundView();
     };
+    const setActive = (value) => {
+      if (active === value) return;
+      active = value;
+      controls.reset();
+      unlockAim();
+      carryCursor.endAim();
+      if (crew && player()) {
+        crew.stopBurst(player()); crew.stopReload(player(), true); crew.releaseSwing(player(), true);
+        crew.steer(0, 0, 0, 0, 0);
+      }
+      reticle.hidden = !value || !armed();
+    };
     const dispose = () => {
       restoredPose = null;
       disposed = true;
@@ -2247,7 +2268,7 @@
       controls.dispose();
       crew = fx = input = null;
     };
-    return { orbit, hooks, controls, cursor: carryCursor, capturePose, restorePose, focusAim, get poseHeld() { return !!restoredPose; }, get aiming() { return armed(); }, bind, readInput, update, goPreset, navigate, enterClose, possess, release, action, modeAction, weaponAction, weaponMode, showAct, dispose, get player() {
+    return { orbit, hooks, controls, cursor: carryCursor, capturePose, restorePose, focusAim, get poseHeld() { return !!restoredPose; }, get aiming() { return armed(); }, bind, setActive, readInput, update, goPreset, navigate, enterClose, possess, release, action, modeAction, weaponAction, weaponMode, showAct, dispose, get player() {
       return player();
     }, get assistedTarget() {
       if (orbitBattle() && orbitTargetActive) return orbitTargetHit;

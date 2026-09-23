@@ -389,6 +389,7 @@
   };
   const create = (ctx) => {
     const { root, input, hud, game, world, bedrolls, viewYaw, buildSpots, walkIn, wanderSpot } = ctx;
+    // playerName creates one playable actor without roster scheduling, beds or a pile.
     // groundAt takes the caveman's current height: support is layered, so the answer depends on where he is.
     const groundAt = ctx.groundAt || (() => 0);
     const walkable = ctx.walkable || (() => true);
@@ -424,7 +425,7 @@
       legacyMagazine.owned = false; legacyMagazine.count = legacyMagazine.ammo = 0; legacyMagazine.carrier = null;
     };
     contributors.roster.forEach((contributor, i) => {
-      if (!contributors.activeRoster.includes(contributor)) return;
+      if (ctx.playerName ? contributor.name !== ctx.playerName : !contributors.activeRoster.includes(contributor)) return;
       const cave = models.caveman(contributors.traitsFor(contributor.name));
       const h = cave.traits.height;
       let health = world.health.get(contributor.name);
@@ -1073,7 +1074,7 @@
     // FAN_CENTER faces away from viewYaw so eaters gather on the far side of the view.
     const FAN_CENTER = Math.atan2(Math.cos(viewYaw), Math.sin(viewYaw)) + Math.PI;
     const wantedFanRadius = () => Math.max(ctx.pile.footprintEdge, ctx.pile.pileEdge()) + FAN_STANDOFF;
-    let fanRadius = wantedFanRadius();
+    let fanRadius = ctx.playerName ? 0 : wantedFanRadius();
     const fanSlots = [];
     const assignFanSlots = (entries, isWorking) => {
       const farSide = FAN_CENTER;
@@ -1168,6 +1169,7 @@
       for (const cave of entries) walkToSlot(cave);
     };
     const refreshStates = (settle = false) => {
+      if (ctx.playerName) return;
       const entries = [...cavemen.values()];
       const next = new Map(entries.map((cave) => [cave, stateOf(cave)]));
       fanRadius = wantedFanRadius();
@@ -1436,6 +1438,7 @@
     const reloadRadius = ctx.reloadRadius || (() => Math.max(ctx.pile.footprintEdge, ctx.pile.pileEdge()) + FAN_STANDOFF + 0.55);
     const reloadHeight = ctx.reloadHeight || 0;
     const nearReload = (cave = player) => {
+      if (ctx.reloadPolicy) return !!cave && ctx.reloadPolicy.near(cave);
       if (!cave || !cave.weapon.secondaryOwned || !cave.root.visible || cave.health.stunned || cave.state === "sleeping" || cave.camp.burning || cave.camp.rolling || cave.bedTravel.mode || cave.camp.seat) return false;
       const p = cave.root.position, feet = p.y - cave.baseY, reach = reloadRadius() + cave.bodyRadius;
       return p.x * p.x + p.z * p.z <= reach * reach && feet <= reloadHeight + 1.2 && feet + cave.bodyHeight >= reloadHeight - 0.2;
@@ -1457,7 +1460,7 @@
     const canReload = (cave = player) => {
       if (!cave || cave.weapon.swapTime > 0 || cave.weapon.reloadHandoff < 0) return false;
       const missing = reloadMissing(cave);
-      return missing > 0 && world.level >= reloadBite(cave) / AMMO_PER_BANANA && nearReload(cave);
+      return missing > 0 && (ctx.reloadPolicy ? ctx.reloadPolicy.available(cave, reloadBite(cave)) : world.level >= reloadBite(cave) / AMMO_PER_BANANA) && nearReload(cave);
     };
     const startReload = (cave = player) => {
       if (!canReload(cave) || cave.weapon.reloadHandoff) return false;
@@ -2211,16 +2214,17 @@
       let missing = reloadMissing(cave);
       while (w.reloadTime >= RELOAD_PERIOD / 2 && missing > 0) {
         const rounds = reloadBite(cave), cost = rounds / AMMO_PER_BANANA;
-        if (world.level < cost) break;
+        if (ctx.reloadPolicy ? !ctx.reloadPolicy.available(cave, rounds) : world.level < cost) break;
         w.reloadTime -= RELOAD_PERIOD / 2;
         w.reloadStep = 1 - w.reloadStep;
         if (w.reloadSpare) w.spareAmmo[w.reloadMagazine] += rounds;
         else w.ammo += rounds;
-        world.level = Math.max(0, world.level - cost);
+        if (ctx.reloadPolicy) ctx.reloadPolicy.consume(cave, rounds);
+        else world.level = Math.max(0, world.level - cost);
         missing -= rounds;
         if (missing && (w.reloadSpare ? w.spareAmmo[w.reloadMagazine] === AMMO_MAX : w.ammo === AMMO_MAX)) { handoffToSpare(cave); return true; }
       }
-      if (!missing || world.level < reloadBite(cave) / AMMO_PER_BANANA) { stopReload(cave); return true; }
+      if (!missing || (ctx.reloadPolicy ? !ctx.reloadPolicy.available(cave, reloadBite(cave)) : world.level < reloadBite(cave) / AMMO_PER_BANANA)) { stopReload(cave); return true; }
       const chew = w.reloadTime / RELOAD_PERIOD + w.reloadStep * 0.5;
       parts.armR.rotation.x = chew < 0.55 ? lerp(-0.2, -2.3, chew / 0.55) : lerp(-2.3, -0.2, (chew - 0.55) / 0.45);
       parts.head.rotation.x = Math.sin(chew * Math.PI) * 0.15;
@@ -3965,6 +3969,7 @@
         }
         return;
       }
+      if (ctx.playerName && cave !== player) { standPose(cave); poseWeapon(cave); return; }
       if (cave === player) {
         runPlayer(cave, dt);
         runReload(cave, dt);
@@ -4464,6 +4469,7 @@
       cave.act.trips = 0;
       if (!cave.camp.burning && ctx.bedRoute && cave.root.position.y - cave.baseY < -0.5 && (!ctx.abyssAt || !ctx.abyssAt(cave.root.position.x, cave.root.position.z, cave.root.position.y - cave.baseY, cave))) startBedRoute(cave, null, false);
       cave.override = cave.controlOverride;
+      if (ctx.playerName) return;
       applyState(cave, stateOf(cave));
       if (workSites && cave.state === "working" && !cave.camp.burning && !cave.camp.rolling) {
         // Resume useful work from the visitor's actual location. Only this
@@ -5061,6 +5067,13 @@
       for (const node of dismantling) removeChild(root, node);
       dismantling.length = 0;
     };
+    if (ctx.playerName) {
+      const cave = cavemen.get(ctx.playerName);
+      cave.override = cave.state = "working";
+      cave.root.visible = true;
+      cave.act.kind = "idle";
+      standPose(cave);
+    }
     const stats = () => ({ built: builtEquipment.length });
     return {
       cavemen, list: crewList, fanSlots, stateOf, stateCounts, workingCavemen, eatingCavemen, workingCount, eatingCount, feedableCavemen, refreshStates, refreshRosterRow, updateFan, rush, headWorldOf, applyAllSwag, wornBy, renderLocker, pokeCave, idleSay, drawQuotes,
