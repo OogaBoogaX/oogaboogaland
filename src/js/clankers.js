@@ -504,7 +504,7 @@
     };
     const loungeGoal = (e, x, y, z, roof, partner = null, heading = NaN) => {
       setGoal(e, x, y, z);
-      e.rest = (roof ? 24 : 16) + e.random() * 22;
+      e.rest = (roof ? 45 : 30) + e.random() * (roof ? 35 : 30);
       e.loungeRoof = roof; e.loungePartner = partner; e.loungeHeading = heading;
       e.loungeCycle = roof ? e.loungeCycle + 1 : 0;
       e.groomTime = 0; e.groomWait = 2 + e.random() * 6;
@@ -525,7 +525,7 @@
       }
       return !loungeReserved(e, x, y, z, 1.25);
     };
-    const nearbyLounge = (e, roof, spawn) => {
+    const nearbyLounge = (e, roof, spawn, stayLevel = false) => {
       const first = Math.floor(e.random() * Math.max(1, list.length));
       for (let i = 0; i < list.length; i++) {
         const other = list[(first + i) % list.length];
@@ -534,6 +534,8 @@
         // Sit just behind one shoulder, facing the same direction. Keeping the
         // torsos separate leaves a hand free to reach the neighbour's back.
         const q = other.root.position, heading = other.heading, sine = Math.sin(heading), cosine = Math.cos(heading);
+        if (stayLevel && (Math.abs(q.y - e.root.position.y) > 0.55
+          || Math.hypot(q.x - e.root.position.x, q.z - e.root.position.z) > 12)) continue;
         const firstSide = e.random() < 0.5 ? -1 : 1;
         for (let n = 0; n < 2; n++) {
           const side = n ? -firstSide : firstSide;
@@ -550,17 +552,17 @@
       }
       return false;
     };
-    const chooseChill = (e, spawn = false) => {
+    const chooseChill = (e, spawn = false, stayLevel = false) => {
       // Cave exits also request a fresh distant destination. Only a companion
       // still hidden during activation may already be seated at that goal.
       spawn = spawn && !e.root.visible;
       prepareLounges(e);
       const p = e.root.position, compact = e.compact, radius = e.radius, height = e.height;
-      const wantsRoof = e.mode !== "working" && roofCount > 0 && e.loungeCycle < 2 && e.random() < 0.7;
+      const wantsRoof = stayLevel ? unusedRoof(p.x, p.y, p.z, 0) : e.mode !== "working" && roofCount > 0 && e.loungeCycle < 2 && e.random() < 0.7;
       e.compact = false; e.height = Math.max(height, 2.7);
       // Prefer a small group on some visits; a crowded group always falls back
       // to another empty resting spot instead of blocking a walk indefinitely.
-      if (e.random() < 0.5 && nearbyLounge(e, wantsRoof, spawn)) {
+      if (e.random() < 0.5 && nearbyLounge(e, wantsRoof, spawn, stayLevel)) {
         e.compact = compact; e.radius = radius; e.height = height; return true;
       }
       for (let pass = 0; pass < 2; pass++) {
@@ -572,6 +574,7 @@
         for (let i = 0; i < count; i++) {
           const index = from + (first + i) % count;
           const n = index * 3, x = loungeSpots[n], y = loungeSpots[n + 1], z = loungeSpots[n + 2];
+          if (stayLevel && (Math.abs(y - p.y) > 0.55 || Math.hypot(x - p.x, z - p.z) > 12)) continue;
           if (!spawn && Math.hypot(x - p.x, z - p.z) < 2 || occupied(e, x, y, z) || loungeReserved(e, x, y, z, e.radius)) continue;
           if (!staticClear(e, x, y, z)) continue;
           loungeGoal(e, x, y, z, roof);
@@ -580,6 +583,19 @@
         }
       }
       e.compact = compact; e.radius = radius; e.height = height; return false;
+    };
+    const restAfterClimb = (e) => {
+      // Returning from a blocked or bottomless route invalidates that stroll.
+      // A supported nearby rest replaces its unreachable goal, so the same
+      // wall is not retried as soon as the short grip cooldown expires.
+      e.loungePartner = null; e.loungeHeading = NaN; e.motion.groom = 0;
+      if (chooseChill(e, false, true)) return;
+      const p = e.root.position;
+      setGoal(e, p.x, p.y, p.z); e.rest = 12 + e.random() * 8;
+      e.speed = 0; e.lounge = ""; e.phase = "chill";
+      // At a narrow lip the full resting body may not fit yet. Preserve the
+      // walking footprint until the ordinary safe-expansion check permits it.
+      e.exitFootprint = true;
     };
     const spawnLounge = (e) => chooseChill(e, true);
     const groomLounge = (e, dt) => {
@@ -1198,7 +1214,15 @@
         if (c.searchDeferred) return false;
       }
       if (descending && ctx.solidAt && ctx.surfaceAt) {
-        // Descending does not require a known floor. Reserve the longest
+        // Autonomous walks need a supported destination. A bottomless wall
+        // is an exploration choice for the player, not a useful chill route.
+        if (!e.controlled) {
+          c.searchPending = false;
+          if (climbTurn === e.index) climbTurn = -1;
+          if (e.phase === "chill") { restAfterClimb(e); return true; }
+          return false;
+        }
+        // The player may descend without a known floor. Reserve the longest
         // available section of wall and retain a grip at its lower end.
         const sx = Math.sin(heading), sz = Math.cos(heading);
         for (let edge = 0.35; edge <= 3.1; edge += 0.25) {
@@ -1323,6 +1347,7 @@
         e.recover = e.blocked = 0;
         if (axis < 0) d.climbExitHeading = e.heading;
         if (!e.controlled && (d.resume || e.pendingSite >= 0)) resumeEntry(e);
+        if (!e.controlled && e.mode === "chilling" && e.phase === "chill" && (axis > 0) === c.fromTop) restAfterClimb(e);
       }
     };
     const travelGoal = (e, dt) => {
@@ -1438,7 +1463,10 @@
       const doorway = e.lab.yielding || e.route === "exit" && e.fromSite >= 0 || e.route === "enter" || e.route === "apron";
       if (!e.lowCover && !inCave && !doorway && !e.climb.retry) {
         const drop = ctx.surfaceAt && ctx.surfaceAt(p.x + Math.sin(desired) * 3.1, p.z + Math.cos(desired) * 3.1) < p.y - 0.8;
-        if (tryClimb(e, desired, !!drop)) return;
+        // A meadow stroll should steer around a cave instead of climbing it
+        // and immediately descending again to chase its unchanged floor goal.
+        if ((e.phase !== "chill" || (drop ? e.goalY < p.y - 0.55 : e.goalY > p.y + 0.55))
+          && tryClimb(e, desired, !!drop)) return;
       }
       if (holdClimbSearch(e)) return;
       e.sampleTime += dt;
@@ -1457,7 +1485,8 @@
         }
       }
       const aheadY = groundAt(p.x + Math.sin(desired) * (e.radius + 0.4), p.z + Math.cos(desired) * (e.radius + 0.4), p.y);
-      if (!e.parked && !doorway && !inCave && aheadY < p.y - 0.7 && e.retry <= 0) {
+      if (!e.parked && !doorway && !inCave && aheadY < p.y - 0.7 && e.retry <= 0
+        && (e.phase !== "chill" || e.goalY < p.y - 0.55)) {
         e.retry = 0.65;
         if (tryClimb(e, desired, true)) return;
       }
