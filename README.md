@@ -97,23 +97,41 @@ Read [AGENTS.md](AGENTS.md) first: the module layout, the engine patterns, how t
 
 ## DSB Land
 
-**DSB Land** remains available directly at `?scene=dsb`. Its former hub cave
-entrance has been removed; Ooga Mine now occupies that slot. Within DSB, walk
-toward the arched, pale-yellow light with W / Up or the left touch stick. Four recordings play once per visit, in order,
-with the Journey kazoo cover quiet beneath them and footsteps following movement.
-The scene preserves an incoming selected Ooga through its character handoff, using the current canonical model, and glances gently with
-each voice. A skippable 13-second arrival tour shows the plain and supporting turtle;
-reduced-motion preferences skip the tour automatically.
+**DSB Land has no cave slot. Ooga Mine owns c10.** To visit DSB, control an
+Ooga and use the chest-height Dialer beside the basement Pit Stargate. Destination
+1 is DSB Land; destinations 2–5 are disabled: “Quarantined - Replicator Infestation -
+Clean Up In Progress”. Activation takes approximately two seconds, followed by a
+ten-second ACTIVE traversal window. Physically cross downward through the active
+Pit to travel. An inactive Pit retains its ordinary abyss behavior.
 
-WASD moves, dragging looks around, and the mouse wheel adjusts the shared hub camera.
-**Turtle view** shows the whole world; **Walk** returns to the entrance area.
-The river is the outer ring. Beside the southern dock are the stone return cave and
-marked **Bitcoin coaster** station. The raised coaster circles the plain inside the
-river, clear of the cave and dock roofs. Both vehicles run continuously and stop for
-eight seconds at their stations. Walk near a station and use **Take a ride** when the
-vehicle is waiting; an unavailable button announces its next arrival. Both rides have
-a forward first-person view with limited mouse dragging. **Leave ride** disembarks at
-the station. Enter the stone cave to reveal **Return to Ooga Booga Land**.
+Outbound travel uses the one-way white-light transit cave. Hold W / Up or push the
+left touch stick forward, then cross the **back** of the upright Stargate. Only
+that crossing constructs DSB Land. Ordinary hub play, opening the Dialer, dialing,
+activation and waiting construct no DSB Land; transit has no land rides, shops,
+TV, Zuzu, land data subscription or outdoor radio. Four recordings accompany the
+passage when audio is available; audio never blocks movement or completion.
+The selected Ooga is rebuilt with its current canonical model. Safe emergence
+leads into the skippable 13-second, 360-degree arrival tour; reduced motion skips it.
+
+To return, use the DSB Dialer beside the same upright gate. Destination 1 is
+OogaBoogaLand; 2–5 remain quarantined. After the same two-second activation, cross
+the **front** during its ten-second ACTIVE window. Return goes directly to the hub,
+without the transit cave. The receiving Pit is active while the Ooga rises through
+it, moves outward and lands safely beside the Dialer. Controls resume and the gate
+shuts down without an immediate reverse transition. Escape can cancel an unfinished
+transit; it does not bypass the return Stargate from DSB Land.
+
+The upright Stargate is at (0, 2, 28), with its Dialer at (3.7, 0, 27). The Meme Shop
+at (-14, 0, 18), facing +90°, and NodeRunner TV at (14, 0, 18), facing -90°, face the
+central plaza. Their collision, interactions, radio source and Zuzu destinations
+follow their landmark transforms.
+
+WASD moves, dragging looks around, and the mouse wheel adjusts the shared camera.
+**Turtle view** shows the whole world; **Walk** restores the player view. The river
+is the outer ring, with a southern boat dock and a marked **Bitcoin coaster**
+station. Both rides stop for eight seconds at their stations. Approach and use
+**Take a ride** while a vehicle waits. Both have a forward first-person view with
+limited mouse dragging; **Leave ride** disembarks at the station.
 
 Walk near the meme stand and choose **Visit meme shop**. Each visit starts with 20 demo
 tokens: bananas and tomatoes cost one, banana bread costs three, with nine of each
@@ -135,12 +153,23 @@ The Journey track plays only in the tunnel. Radio outages retry while ambient so
 continues. **Play radio** resumes playback if the browser requires a gesture. Procedural
 river, waterfalls, boat motor, crowd and wildlife sounds follow nearby sources.
 
-The Bitcoin sky and coaster connect automatically. mempool.space supplies backlog,
-fees and block height; Coinbase Exchange supplies BTC-USD one-minute candles and ticker
-updates. Each coaster lap uses a stable snapshot of completed candles, replaced at the
-station. Prices are scaled and clamped for safe track clearance. Feed outages retain
-last received data; unavailable initial data is explicitly labelled demo. **Live data
-on / off** pauses or resumes these feeds. All connections and visit resources close on exit.
+The Bitcoin sky and current BTC/USD price consume the existing page-owned chain
+service: vsize (mapped as `Math.min(1, vsize / 1e8)`), recommended `fastestFee`, tip
+height and price. DSB opens no duplicate Mempool polling or live Coinbase socket.
+Freshness uses separate observation timestamps: 90 seconds for backlog, fees and
+price, 180 seconds for height; zero means unknown. Stale values are labelled and
+retained, with demo defaults where no usable observation exists.
+
+The ride retains its DSB-owned real Coinbase one-minute OHLC request: once per
+live-data activation, bounded to 48 candles with a ten-second timeout and cancelled
+on exit. Shared price observations update the current candle after history loads.
+Each lap uses a stable snapshot of completed candles, replaced at the station;
+prices are scaled and clamped for safe clearance. History failures are labelled,
+with no background retry loop; toggle **Live data on / off** to request it again.
+The toggle controls DSB consumption, not the shared service. Leaving DSB removes
+its subscription and visit resources without stopping page-owned feeds. NodeRunner
+metadata, song requests, payment monitoring and radio remain DSB-owned. Automated
+feed checks use fixtures and do not establish live-provider availability.
 
 A direct visit is `?scene=dsb`; `?debug=1&scene=dsb` exposes `__ooga.dsb`.
 

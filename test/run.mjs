@@ -3369,7 +3369,9 @@ const dsbApproach = async (b, name) => b.evaluate(`(() => {
   B.pilot.navigate({ yaw: landmark.node.rotation.y, pitch: 0.2, dist: 7, position: p, target: { x: p.x, y: 1.7, z: p.z } }); B.advance(0.1);
 })()`);
 const dsbExit = async (b) => {
-  await b.evaluate(`__ooga.pilot.navigate({ yaw: 0, pitch: 0, dist: 6, target: { x: -7, y: 1.7, z: 30.5 }, position: { x: -7, y: 0, z: 30.5 } }); __ooga.advance(0.1); document.getElementById("dsb-context").click();`);
+  await b.evaluate(`__ooga.dsb.gate.activate(0); if (typeof __gateClock === "number") { __gateClock += 2000; __ooga.dsb.gate.update(); }`);
+  await untilPage(b, 'B.dsb.gate.state === "ACTIVE"', 5000);
+  await b.evaluate(`(() => { const B = __ooga; B.pilot.navigate({ position: { x: 0, y: 0, z: 27.9 }, yaw: Math.PI, pitch: 0.3, dist: 4 }); window.dispatchEvent(new KeyboardEvent("keydown", { key: "w" })); for (let i = 0; i < 20 && !B.transitioning; i++) BL.scenes.dsb.update(0.05, 4 + i * 0.05); window.dispatchEvent(new KeyboardEvent("keyup", { key: "w" })); })()`);
   await untilPage(b, 'B.scene === "hub" && !B.transitioning', 15000);
 };
 // Dialing and unused gates remain completely independent of destination construction.
@@ -3561,7 +3563,18 @@ for (const mobile of [false, true]) scene("dsb", { label: "stargate dsb return "
   if (mobile) await press("#stargate-menu .modal-close"); else await b.key("Escape");
   check("cancel clears held inputs", await b.evaluate(`!__ooga.dsb.gate.isOpen && __ooga.controls.read().y === 0`));
   await press("#dsb-context"); await press('#stargate-menu [data-destination="0"]');
-  check("dialing and expiry create no hub", await b.evaluate(`(() => { const g = __ooga.dsb.gate; const warming = g.state === "ACTIVATING" && !g.activate(0); __gateClock += 2000; g.update(); const active = g.state === "ACTIVE"; __gateClock += 10450; g.update(); return warming && active && g.state === "OFF" && __ooga.scene === "dsb" && __returnHubEntries === 0; })()`));
+  const cycle = await b.evaluate(`(() => {
+    const g = __ooga.dsb.gate, initial = g.state;
+    // Preserve the original short circuit: never activate an unexpectedly idle gate here.
+    const duplicateAccepted = initial === "ACTIVATING" ? g.activate(0) : null;
+    const warming = initial === "ACTIVATING" && !duplicateAccepted;
+    __gateClock += 2000; g.update(); const activeState = g.state, active = activeState === "ACTIVE";
+    __gateClock += 10450; g.update();
+    return { initial, duplicateAccepted, warming, activeState, active, state: g.state, scene: __ooga.scene, entries: __returnHubEntries, clock: __gateClock };
+  })()`);
+  const cycleConditions = { activatingAndDuplicateRejected: cycle.warming, activeAfter2000ms: cycle.active, offAfter12450ms: cycle.state === "OFF", remainsDsb: cycle.scene === "dsb", zeroHubEntries: cycle.entries === 0 };
+  check("dialing and expiry create no hub", cycle.warming && cycle.active && cycle.state === "OFF" && cycle.scene === "dsb" && cycle.entries === 0,
+    JSON.stringify({ ...cycle, conditions: cycleConditions, failed: Object.keys(cycleConditions).filter(name => !cycleConditions[name]) }));
   await b.evaluate(`(() => {
     const B = __ooga, G = B.dsb.gate; G.activate(0); __gateClock += 2000; G.update();
     B.pilot.navigate({ position: { x: 0, y: 0, z: 27.9 }, yaw: Math.PI, pitch: 0.3, dist: 4 });
@@ -3824,7 +3837,7 @@ for (const fallback of [false, true]) scene("dsb", { label: "dsb gameplay " + (f
   if (process.env.DSB_CAPTURE && !fallback) await b.screenshot(join(root, "untracked", "dsb-round-tunnel.png"));
   await b.evaluate(`window.dispatchEvent(new KeyboardEvent("keydown", { key: "w" })); __ooga.advance(__ooga.audio.duration + 1, 0.1); window.dispatchEvent(new KeyboardEvent("keyup", { key: "w" }));`);
   const bodies = await b.evaluate(`({ phase: __ooga.dsb.phase, name: __ooga.dsb.avatar.traits.name, canonical: __ooga.dsb.avatar.headOpen === BL.models.caveman(BL.contributors.traitsFor("YellowBrokeIt")).headOpen, feet: __ooga.dsb.avatar.root.position.y - __ooga.dsb.avatar.baseY, npcFeet: __ooga.dsb.visitors.every(v => Math.abs(v.root.position.y - v.baseY - v.floorY) < 0.001), railMin: Math.min(...__ooga.dsb.railY), radius: Math.hypot(__ooga.dsb.land.cart.position.x, __ooga.dsb.land.cart.position.z) })`);
-  record("dsb gameplay: canonical Yellow stands on the floor; perimeter track clears the cave", bodies.phase === "land" && bodies.name === "YellowBrokeIt" && bodies.canonical && Math.abs(bodies.feet) < 0.001 && bodies.npcFeet && bodies.railMin >= 7.5 && Math.abs(bodies.radius - 31) < 0.01, JSON.stringify(bodies));
+  record("dsb gameplay: canonical Yellow stands on the floor; perimeter track retains safe clearance", bodies.phase === "land" && bodies.name === "YellowBrokeIt" && bodies.canonical && Math.abs(bodies.feet) < 0.001 && bodies.npcFeet && bodies.railMin >= 7.5 && Math.abs(bodies.radius - 31) < 0.01, JSON.stringify(bodies));
   await click("#dsb-toggle");
   record("dsb menu: hide leaves a show button", await b.evaluate(`document.getElementById("dsb-toggle").textContent === "Show DSB menu" && getComputedStyle(document.getElementById("dsb-bag")).display === "none"`));
   await click("#dsb-toggle");
@@ -3875,14 +3888,11 @@ for (const fallback of [false, true]) scene("dsb", { label: "dsb gameplay " + (f
     if (process.env.DSB_CAPTURE && !fallback) await b.screenshot(join(root, "untracked", "dsb-" + kind + "-ride.png"));
     await click("#dsb-context");
   }
-  await b.key("Escape"); record("dsb gameplay: Escape outside cave stays in DSB", await b.evaluate(`__ooga.scene === "dsb"`));
-  await walkTo(-7, 30.5); record("dsb gameplay: return appears inside cave", await b.evaluate(`document.getElementById("dsb-context").textContent === "Return to Ooga Booga Land"`));
-  if (process.env.DSB_CAPTURE && !fallback) { await walkTo(0, 23); await b.evaluate(`__ooga.pilot.navigate({ yaw: Math.PI, pitch: 0.28, dist: 24, target: { x: 0, y: 2, z: 29 }, position: { x: 0, y: 0, z: 23 } }); __ooga.advance(0.2)`); await b.screenshot(join(root,"untracked","dsb-stations.png")); await walkTo(-7,30.5); }
-  await click("#dsb-context");
-  // Verify the route and fade with the director's fixed step, not the host's hub rendering speed.
-  await b.evaluate('__ooga.advance(0.6)');
-  const returned = await untilPage(b, 'B.scene === "hub" && !B.transitioning', 15000);
-  record("dsb gameplay: cave button returns to hub", returned, JSON.stringify(await b.evaluate(`({ scene: __ooga.scene, transitioning: __ooga.transitioning, frames: __ooga.renderedFrames, player: __ooga.pilot.player?.traits.name })`)));
+  await b.key("Escape"); record("dsb gameplay: Escape on land requires the return Stargate", await b.evaluate(`__ooga.scene === "dsb"`));
+  await walkTo(-7, 30.5);
+  record("dsb gameplay: former return cave has no geometry, collision or exit action", await b.evaluate(`!__ooga.dsb.land.exit && __ooga.dsb.clearAt(-10,30.5) && __ooga.dsb.clearAt(-7,32.5) && document.getElementById("dsb-context").textContent !== "Return to Ooga Booga Land"`));
+  await dsbExit(b);
+  record("dsb gameplay: front Stargate crossing returns to hub", await b.evaluate(`__ooga.scene === "hub" && !__ooga.transitioning`));
 } }] });
 if (process.env.DSB_RADIO_LIVE === "1") scene("dsb", { label: "dsb radio live", url: hubPage(dist, "scene=dsb"), steps: [{ name: "dsb radio live", why: "contract: preserve DSB scene behavior independently of the hub entrance", run: async (b) => {
   await b.key("w"); await untilPage(b, "B.audio.ready", 10000);
@@ -4008,8 +4018,8 @@ scene("dsb", { label: "dsb feeds and audio", url: hubPage(src, "scene=dsb"), ste
   try {
     await b.key("m");
     await untilPage(b, "B.audio.ready", 10000);
-    const fixed = await b.evaluate(`(() => { const g = BL.dsbModels.portalGeometry(); return { uploads: document.querySelectorAll("[data-dsb-audio]").length, canReplace: typeof __ooga.audio.load === "function", corners: g.verts.slice(3, 9), top: Math.max(...g.verts.filter((v, i) => i % 3 === 1)), faces: g.faces.length }; })()`);
-    record("dsb entrance: fixed sounds and flat-bottom arched light", fixed.uploads === 0 && !fixed.canReplace && fixed.corners.join(",") === "-1.5,-1.5,0,1.5,-1.5,0" && fixed.top === 1.5 && fixed.faces === 27, JSON.stringify(fixed));
+    const fixed = await b.evaluate(`({ uploads: document.querySelectorAll("[data-dsb-audio]").length, canReplace: typeof __ooga.audio.load === "function" })`);
+    record("dsb entrance: fixed supplied sounds", fixed.uploads === 0 && !fixed.canReplace, JSON.stringify(fixed));
     const supplied = await b.evaluate(`({ durations: __ooga.audio.durations, passage: __ooga.audio.duration, failure: __ooga.audio.failure })`);
     record("dsb audio: all four supplied MP3s decode and determine the passage length", supplied.durations.length === 4 && supplied.durations.every((d) => d > 1 && d < 60) && supplied.passage >= supplied.durations.reduce((sum, d) => sum + d, 0) + 6.99 && !supplied.failure, JSON.stringify(supplied));
     const music = await b.evaluate(`({ duration: __ooga.audio.musicDuration, loops: __dsbSoundProbe.loops.filter((duration) => duration > 30), levels: __ooga.audio.levels })`);

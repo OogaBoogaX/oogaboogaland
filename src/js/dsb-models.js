@@ -46,14 +46,6 @@
     for (const x of [-1, 1]) { block(root, C.yellow, x, 0.75, 0, 0.14, 0.7, 3.5); for (const z of [-1.2, 1.2]) block(root, C.stone, x, -0.12, z, 0.3, 0.45, 0.45); }
     return root;
   };
-  const portalGeometry = () => cached("dsb-arched-portal", () => {
-    const geo = { verts: [0, 0, 0], faces: [], lines: [] };
-    // Flat threshold, vertical jambs and a semicircular crown.
-    geo.verts.push(-1.5, -1.5, 0, 1.5, -1.5, 0);
-    for (let i = 0; i <= 24; i++) { const a = i * Math.PI / 24; geo.verts.push(Math.cos(a) * 1.5, Math.sin(a) * 1.5, 0); }
-    for (let i = 0; i < 27; i++) geo.faces.push({ i: [0, i + 1, (i + 1) % 27 + 1], color: [255, 249, 211], emissive: 0.65 });
-    return geo;
-  });
   // The Shop/TV roots own placement. Their local +Z is the usable front.
   const landmark = (node, width, depth) => ({
     node, width, depth,
@@ -160,13 +152,6 @@
     for (const x of [-2.6, 2.6]) block(root, C.purple, x, 1.7, 35, 0.25, 3.4, 0.25);
     block(root, C.yellow, 0, 3.8, 35, 6, 0.2, 2);
     const boats = [boat(), boat(), boat()]; for (const b of boats) addChild(root, b);
-    const exit = createNode({ position: { x: -7, y: 0, z: 29 }, rotation: { x: 0, y: Math.PI, z: 0 } }); addChild(root, exit);
-    addChild(exit, createNode({ geometry: BL.hubModels.caveMouthRim() }));
-    for (const side of [-1, 1]) block(exit, "#51465b", side * 3, 1.8, -1.6, 1.2, 3.6, 4);
-    block(exit, "#51465b", 0, 3.5, -1.6, 7.2, 1, 4);
-    block(exit, "#100d19", 0, 1.5, -3.5, 5, 3, 0.25);
-    sign(exit, "Ooga Booga Land", 0, 4.15, 0.4, 0.65, C.cyan);
-    for (const x of [-2.7, 2.7]) block(exit, C.yellow, x, 1.7, 0.6, 0.18, 0.5, 0.18, 0.9);
     const station = createNode({ position: { x: 7, y: 0, z: 26 } }); addChild(root, station);
     block(station, C.stone, 0, -0.1, 0, 5, 0.2, 5);
     for (const x of [-2.3, 2.3]) { block(station, C.purple, x, 4.6, 0, 0.4, 9.2, 0.4); block(station, C.yellow, x, 2, -2.4, 0.25, 4, 0.25); }
@@ -183,7 +168,7 @@
       const star = block(root, i % 3 ? C.cyan : C.yellow, Math.sin(a) * (45 + i % 7 * 3), 20 + i % 9 * 3, Math.cos(a) * (45 + i % 7 * 3), 0.35, 0.35, 0.35, 0.9);
       stars.push(star);
     }
-    return { landmarks: { shop: landmark(shop, 4, 2), tv: landmark(tv, 4.4, 1.9) }, root, terrain, turtle, water, falls, spray, stage, mic, shop, tv, tvScreen, dock, boats, cart, carts, stars, exit, station };
+    return { landmarks: { shop: landmark(shop, 4, 2), tv: landmark(tv, 4.4, 1.9) }, root, terrain, turtle, water, falls, spray, stage, mic, shop, tv, tvScreen, dock, boats, cart, carts, stars, station };
   };
-  BL.dsbModels = { C, cube, block, text, sign, boat, portalGeometry, build };
+  BL.dsbModels = { C, cube, block, text, sign, boat, build };
 })();

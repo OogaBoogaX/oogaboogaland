@@ -70,8 +70,7 @@
     && !(land && Math.hypot(x - transitGate.dialer.position.x, z - transitGate.dialer.position.z) < 0.55 + radius)
     && (!land || land.landmarks.shop.clearAt(x, z, radius) && land.landmarks.tv.clearAt(x, z, radius))
     && !(Math.abs(x) < 8.6 + radius && Math.abs(z) < 2.6 + radius
-      || Math.abs(x + 18) < 7.5 + radius && z > -20.5 - radius && z < -11.5 + radius
-      || z > 28.5 - radius && z < 33 + radius && (Math.abs(x + 7) > 2.25 - radius && Math.abs(x + 7) < 3.8 + radius || z > 32.1 - radius && Math.abs(x + 7) < 3.8 + radius));
+      || Math.abs(x + 18) < 7.5 + radius && z > -20.5 - radius && z < -11.5 + radius);
   const walkable = (ax, az, bx, bz, y, height, actor) => {
     const steps = Math.max(1, Math.ceil(Math.hypot(bx - ax, bz - az) / 0.2));
     for (let i = 1; i <= steps; i++) if (!clearAt(ax + (bx - ax) * i / steps, az + (bz - az) * i / steps, actor.bodyRadius)) return false;
@@ -92,8 +91,6 @@
     if (radius > 35) { p.x *= 35 / radius; p.z *= 35 / radius; }
     // Solid landmark footprints; each attempted step keeps its last clear position.
     if (Math.abs(p.x) < 8.6 && Math.abs(p.z) < 2.6 || land && (!land.landmarks.shop.clearAt(p.x, p.z) || !land.landmarks.tv.clearAt(p.x, p.z)) || Math.abs(p.x + 18) < 7.5 && p.z > -20.5 && p.z < -11.5) { p.x = previous.x; p.z = previous.z; }
-    // Cave walls are solid; its central passage remains walkable.
-    if (p.z > 28.5 && p.z < 33 && (Math.abs(p.x + 7) > 2.25 && Math.abs(p.x + 7) < 3.8 || p.z > 32.1 && Math.abs(p.x + 7) < 3.8)) { p.x = previous.x; p.z = previous.z; }
     previous.x = p.x; previous.z = p.z;
   };
   const clampCamera = (p) => { p.y = clamp(p.y, 0.5, 75); };
@@ -161,7 +158,6 @@
   };
   const atDock = () => near(0, 34, 4.5);
   const atStation = () => near(7, 24, 4.5);
-  const inCave = () => { const p = location(); return Math.abs(p.x + 7) < 2.2 && p.z > 29 && p.z < 32.3; };
   const board = (kind) => {
     if (phase !== "land") return;
     const trip = kind === "boat" ? boatTrip : trainTrip;
@@ -178,12 +174,11 @@
     world.stargateTravel = { from: "dsb", to: "hub", arrival: "pit", name: world.pilot };
     exiting = true; syncPlayer(); pilot.controls.reset(); input.reset(); go("hub");
   };
-  const returnHub = () => { if (phase === "entrance" || phase === "land" && inCave()) { exiting = true; syncPlayer(); go("hub"); } else toast("Enter the stone cave to return to Ooga Booga Land."); };
+  const returnHub = () => { if (phase === "entrance") { exiting = true; syncPlayer(); go("hub"); } else toast("Use the Stargate Dialer, then cross the active gate to return to OogaBoogaLand."); };
   const contextAction = () => {
     if (phase === "boat" || phase === "coaster") return "ride";
     if (phase !== "land" || exiting || transitGate.isOpen || tv.isOpen || conversation.isOpen) return "";
     if (nearDialer()) return "dialer";
-    if (inCave()) return "exit";
     if (atDock()) return boatTrip.wait > 0 ? "boat" : "boat-wait";
     if (atStation()) return trainTrip.wait > 0 ? "coaster" : "coaster-wait";
     if (nearLandmark("tv")) return "tv";
@@ -191,7 +186,7 @@
     if (nearZuzu()) return "zuzu";
     return "";
   };
-  const CONTEXT_LABELS = { dialer: "DIAL", zuzu: "Talk to Zuzu", ride: "Leave ride", exit: "Return to Ooga Booga Land", boat: "Take a ride - boat", coaster: "Take a ride - coaster", "boat-wait": "Boat arriving soon", "coaster-wait": "Coaster arriving soon", tv: "Use TV", shop: "Visit meme shop" };
+  const CONTEXT_LABELS = { dialer: "DIAL", zuzu: "Talk to Zuzu", ride: "Leave ride", boat: "Take a ride - boat", coaster: "Take a ride - coaster", "boat-wait": "Boat arriving soon", "coaster-wait": "Coaster arriving soon", tv: "Use TV", shop: "Visit meme shop" };
   const syncContext = () => {
     const kind = contextAction();
     if (kind === lastContext) return;
@@ -239,14 +234,12 @@
     if (phase === "boat" || phase === "coaster") { stopRide(); return true; }
     if (phase !== "land") return true;
     if (nearDialer()) transitGate.open();
-    else if (inCave()) returnHub();
     else if (atDock()) board("boat");
     else if (atStation()) board("coaster");
     else if (nearLandmark("tv")) openTv();
     else if (nearLandmark("shop")) openShop();
     else if (nearZuzu()) conversation.open();
     else if (near(-18, -10, 7)) perform();
-    else if (inCave()) returnHub();
     else throwTomato();
     return true;
   };
@@ -260,7 +253,6 @@
     else if (owner.kind === "shop") openShop();
     else if (owner.kind === "boat" || owner.kind === "coaster") board(owner.kind);
     else if (owner.kind === "stage") perform();
-    else if (owner.kind === "exit") returnHub();
   };
   const action = (name) => {
     if (exiting || transitGate.isOpen) return;
@@ -448,7 +440,7 @@
     }
     for (let i = 0; i < 12; i++) { const node = M.block(land.root, "#ef4256", 0, 0, 0, 0.28, 0.28, 0.28); node.visible = false; shots.push({ node, life: 0, vx: 0, vy: 0, vz: 0, splat: false }); }
     register(land.tv, "tv", "DSB TV - walk closer to open");
-    register(land.shop, "shop", "DSB meme stand · bread and tomatoes"); register(land.dock, "boat", "River train · board at the dock"); register(land.station, "coaster", "Bitcoin ride · board by its sign"); register(land.mic, "stage", "Open mic · Ooga comedy"); register(land.exit, "exit", "Return to Ooga Booga Land");
+    register(land.shop, "shop", "DSB meme stand · bread and tomatoes"); register(land.dock, "boat", "River train · board at the dock"); register(land.station, "coaster", "Bitcoin ride · board by its sign"); register(land.mic, "stage", "Open mic · Ooga comedy");
     RENDER.lights.set([-24, 5, -15, 14, 0.8, 0.25, 1, 0, -12, 5, -15, 14, 1, 0.8, 0.2, 0]);
   };
   const enter = (ctx) => {
