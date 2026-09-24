@@ -3292,6 +3292,163 @@ const hubJetpack = { name: "hub jetpack", why: "rule: J wears the jetpack, Space
   record("hub jetpack: J takes it off and on, Space climbs on fuel, it refills on the ground, and falling off the island loses it to a cloud and the spares with one notice", !off.worn && on.worn && up.feet > 5 && up.fuel < 0.9 && down.feet < 0.5 && down.fuel === 1 && fell < -50 && !lost.owned && lost.pickup && spares === 0 && lost.toast === "Jetpack and spare magazines lost to the abyss", JSON.stringify({ off, on, up, down, fell, lost, spares }));
 } };
 
+const hubBirdsEye = { name: "birds-eye combat camera", why: "rule: combat zoom is overhead at every level, the pointer turns the Ooga rather than the camera, and view handoffs stay continuous", run: async (b) => {
+  const entry = await b.evaluate(`(() => {
+    const B = __ooga, P = B.pilot, C = B.camera, a = P.player;
+    P.navigate({ position: { x: -8, y: 0, z: 8 }, yaw: 0, pitch: 0.3, dist: 4 }); B.advance(1, 1 / 60);
+    window.__birdsSnapshot = () => ({ mode: P.mode, combat: P.aiming, overhead: P.birdsEye, mix: P.birdsEyeMix, height: P.birdsEyeHeight,
+      altitude: C.position.y - (a.root.position.y - a.baseY), horizontal: Math.hypot(C.position.x - a.root.position.x, C.position.z - a.root.position.z),
+      down: (C.position.y - C.target.y) / Math.hypot(C.target.x - C.position.x, C.target.y - C.position.y, C.target.z - C.position.z),
+      yaw: a.root.rotation.y, x: C.position.x, y: C.position.y, z: C.position.z,
+      up: C.up ? [C.up.x, C.up.y, C.up.z] : [0, 1, 0], cutoff: B.renderOpts.cutawayMaxY });
+    const before = __birdsSnapshot(); P.hooks.onZoom(1.2);
+    const immediate = Math.hypot(C.position.x - before.x, C.position.y - before.y, C.position.z - before.z);
+    let maxStep = 0, finite = true, last = [C.position.x, C.position.y, C.position.z];
+    for (let i = 0; i < 90; i++) { B.advance(1 / 60, 1 / 60); const p = C.position;
+      maxStep = Math.max(maxStep, Math.hypot(p.x - last[0], p.y - last[1], p.z - last[2]));
+      finite = finite && [p.x, p.y, p.z, C.target.x, C.target.y, C.target.z].every(Number.isFinite); last = [p.x, p.y, p.z]; }
+    return { before, immediate, maxStep, finite, after: __birdsSnapshot() };
+  })()`);
+  record("birds-eye combat: shoulder zoom enters directly overhead with a continuous finite camera path", entry.before.mode === "shoulder" && entry.after.mode === "birds-eye" && entry.after.overhead && entry.after.combat && entry.after.mix === 1 && entry.after.horizontal < 1e-6 && entry.after.down > 0.999999 && entry.immediate < 1e-6 && entry.maxStep < 3 && entry.finite, JSON.stringify(entry));
+  const size = await b.evaluate(`(() => { const r = document.getElementById("scene").getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2, w: r.width, h: r.height }; })()`);
+  await b.mouse("mouseMoved", size.x, size.y, { button: "none" });
+  await b.evaluate(`__ooga.pilot.focusAim()`);
+  await b.mouse("mouseMoved", size.x + size.w * 0.22, size.y + size.h * 0.14, { button: "none" });
+  await b.evaluate(`__ooga.advance(0.5, 1 / 60)`);
+  const aim = await b.evaluate(`__birdsSnapshot()`);
+  const turn = Math.abs(Math.atan2(Math.sin(aim.yaw - entry.after.yaw), Math.cos(aim.yaw - entry.after.yaw)));
+  record("birds-eye combat: real mouse movement changes character facing without orbiting the overhead camera", turn > 0.15 && aim.horizontal < 1e-6 && aim.down > 0.999999 && aim.up.every((n, i) => Math.abs(n - entry.after.up[i]) < 1e-6), JSON.stringify({ before: entry.after, aim, turn }));
+  const zoom = await b.evaluate(`(() => {
+    const B = __ooga, P = B.pilot; P.hooks.onZoom(100); B.advance(1.5, 1 / 60); const max = __birdsSnapshot();
+    P.hooks.onZoom(100); B.advance(0.5, 1 / 60); const clamped = __birdsSnapshot();
+    P.hooks.onZoom(0.75); B.advance(1, 1 / 60); const lowered = __birdsSnapshot();
+    const C = B.camera, before = [C.position.x, C.position.y, C.position.z]; P.hooks.onZoom(0.001);
+    const immediate = Math.hypot(C.position.x - before[0], C.position.y - before[1], C.position.z - before[2]);
+    let last = before, maxStep = 0;
+    for (let i = 0; i < 90; i++) { B.advance(1 / 60, 1 / 60); const p = C.position;
+      maxStep = Math.max(maxStep, Math.hypot(p.x - last[0], p.y - last[1], p.z - last[2])); last = [p.x, p.y, p.z]; }
+    const shoulder = __birdsSnapshot(); P.hooks.onZoom(0.8); B.advance(1.5, 1 / 60); const first = __birdsSnapshot();
+    P.hooks.onZoom(1.2); B.advance(1.5, 1 / 60); const back = __birdsSnapshot();
+    P.hooks.onZoom(1.2); B.advance(1, 1 / 60); return { max, clamped, lowered, immediate, maxStep, shoulder, first, back };
+  })()`);
+  record("birds-eye combat: initial height is half maximum, zoom clamps and stays overhead until a continuous shoulder handoff, and first-person remains reachable", Math.abs(entry.after.height * 2 - zoom.max.height) < 0.01 && Math.abs(zoom.max.height - zoom.clamped.height) < 0.01 && zoom.lowered.height < zoom.max.height && zoom.lowered.horizontal < 1e-6 && zoom.lowered.mode === "birds-eye" && zoom.immediate < 1e-6 && zoom.maxStep < 3 && zoom.shoulder.mode === "shoulder" && zoom.first.mode === "first-person" && zoom.back.mode === "shoulder", JSON.stringify(zoom));
+  await tapKey(b, "x");
+  await b.evaluate(`__ooga.advance(1, 1 / 60)`);
+  const carry = await b.evaluate(`(() => { const P = __ooga.pilot, before = P.orbit.tYaw; P.hooks.onOrbit(40, 15); __ooga.advance(0.5, 1 / 60); return { mode: P.mode, combat: P.aiming, changed: Math.abs(P.orbit.tYaw - before), cutoff: __ooga.renderOpts.cutawayMaxY }; })()`);
+  await tapKey(b, "x");
+  await b.evaluate(`__ooga.advance(1, 1 / 60)`);
+  const restored = await b.evaluate(`__birdsSnapshot()`);
+  record("birds-eye combat: X restores free carry orbit and turning combat back on restores overhead visibility", carry.mode === "orbit" && !carry.combat && carry.changed > 0.1 && carry.cutoff >= 1e5 && restored.mode === "birds-eye" && restored.down > 0.999999, JSON.stringify({ carry, restored }));
+} };
+
+const hubBirdsEyeFloors = { name: "birds-eye lower floors", why: "rule: overhead combat reveals the current cave or floor without changing physical collision or terrain meshes", run: async (b) => {
+  const rows = await b.evaluate(`(() => {
+    const B = __ooga, P = B.pilot, I = B.island, a = P.player, H = I.headquarters, room = H.rooms[0], lower = H.basement.rooms[0];
+    const lab = B.mouths.find(m => BL.caves.slots.find(s => s.id === m.id)?.scene === "lab"), places = [
+      { name: "cave", x: lab.x - Math.sin(lab.ry) * 3, z: lab.z - Math.cos(lab.ry) * 3, floor: lab.floorY },
+      { name: "HQ", x: room.x, z: room.z, floor: H.floor }, { name: "basement", x: lower.x, z: lower.z, floor: H.basement.floor }];
+    const geometry = I.geometry, verts = geometry.verts, rows = [];
+    for (const q of places) {
+      const support = I.supportAt(q.x, q.z, q.floor + 1, 0.35), clearance = I.clearAt(q.x, q.floor + 0.1, q.z, 0.2, 1.2);
+      P.navigate({ position: { x: q.x, y: q.floor, z: q.z }, yaw: 0, pitch: 0.3, dist: 8 }); B.advance(1, 1 / 60);
+      rows.push({ name: q.name, mode: P.mode, overhead: P.birdsEye, horizontal: Math.hypot(B.camera.position.x - a.root.position.x, B.camera.position.z - a.root.position.z),
+        floor: a.root.position.y - a.baseY, requestedFloor: q.floor, ceiling: P.birdsEyeCeiling, cutoff: B.renderOpts.cutawayMaxY,
+        unchanged: I.geometry === geometry && I.geometry.verts === verts && I.supportAt(q.x, q.z, q.floor + 1, 0.35) === support && I.clearAt(q.x, q.floor + 0.1, q.z, 0.2, 1.2) === clearance });
+    }
+    return rows;
+  })()`);
+  record("birds-eye combat: cave, HQ and basement use their own visible level while support and collision remain unchanged", rows.length === 3 && rows.every(r => r.mode === "birds-eye" && r.overhead && r.horizontal < 1e-6 && Math.abs(r.floor - r.requestedFloor) < 0.2 && r.cutoff > r.floor + 1.3 && r.cutoff < r.floor + 5 && Math.abs(r.cutoff - r.ceiling) < 0.01 && r.unchanged), JSON.stringify(rows));
+  const rendering = await b.evaluate(`(() => {
+    const B = __ooga, S = BL.scene, root = S.createNode(), floor = BL.models.box({ w: 12, h: 0.2, d: 12, color: "#00ff00" }), roof = BL.models.box({ w: 12, h: 0.2, d: 12, color: "#ff0000" });
+    S.addChild(root, S.createNode({ geometry: floor })); S.addChild(root, S.createNode({ geometry: roof, position: { x: 0, y: 5, z: 0 } }));
+    const camera = S.createCamera({ far: 40 }); Object.assign(camera.position, { x: 0, y: 15, z: 0 }); Object.assign(camera.target, { x: 0, y: 0, z: 0 }); camera.up = { x: 0, y: 0, z: -1 };
+    const canvas = document.createElement("canvas"); canvas.getContext("2d", { willReadFrequently: true });
+    const fallback = BL.canvasRenderer.createRenderer(canvas, { width: 96, height: 96 }), rows = [];
+    try {
+      for (const [renderer, element] of [[B.renderer, document.getElementById("scene")], [fallback, canvas]]) {
+        const read = cutoff => { renderer.render(root, camera, { cutawayMaxY: cutoff, bloomStrength: 0, shadowStrength: 0, ambientFloor: 1, directStrength: 0 });
+          if (renderer.kind !== "webgl2") return Array.from(element.getContext("2d").getImageData(element.width >> 1, element.height >> 1, 1, 1).data);
+          const gl = element.getContext("webgl2"), pixel = new Uint8Array(4); gl.bindFramebuffer(gl.FRAMEBUFFER, null); gl.readPixels(element.width >> 1, element.height >> 1, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, pixel); return Array.from(pixel); };
+        rows.push({ kind: renderer.kind, covered: read(1e6), revealed: read(2), restored: read(1e6), visible: root.children.every(n => n.visible) });
+      }
+    } finally { fallback.dispose(); B.renderer.releaseGeometry(floor); B.renderer.releaseGeometry(roof); B.renderer.render(BL.scenes.hub.root, B.camera, B.renderOpts); }
+    return rows;
+  })()`);
+  record("birds-eye combat: WebGL2 and Canvas cut away an opaque roof, reveal the floor, and restore it without hiding nodes", rendering.every(r => r.covered[0] > r.covered[1] + 40 && r.revealed[1] > r.revealed[0] + 40 && r.restored[0] > r.restored[1] + 40 && r.visible), JSON.stringify(rendering));
+} };
+
+const hubCombatReplay = { name: "birds-eye combat replay", why: "contract: legacy combat orbit pose links migrate while new replay and HUD state expose combat and birds-eye", run: async (b) => {
+  const legacy = await b.evaluate(`(() => { const pose = JSON.parse(document.getElementById("position-debug").dataset.pose); __ooga.pilot.capturePose(pose); pose.mode = "orbit"; pose.battle = pose.combat; delete pose.combat; return pose; })()`);
+  await b.open(hubPage(src, `solo=1&character=portlandhodl&pose=${encodeURIComponent(JSON.stringify(legacy))}`));
+  await untilReady(b);
+  const replay = await b.evaluate(`(() => { const B = __ooga, pose = JSON.parse(document.getElementById("position-debug").dataset.pose), el = B.hud.el.mode; return { mode: B.pilot.mode, combat: B.pilot.aiming, poseMode: pose.mode, poseCombat: pose.combat, legacyField: Object.hasOwn(pose, "battle"), attribute: el.dataset.combat, legacyAttribute: el.hasAttribute("data-battle"), label: el.getAttribute("aria-label") }; })()`);
+  record("birds-eye combat: old pose links migrate once, and new pose and HUD state use only combat terminology", replay.mode === "birds-eye" && replay.combat && replay.poseMode === "birds-eye" && replay.poseCombat && !replay.legacyField && replay.attribute === "true" && !replay.legacyAttribute && replay.label.includes("combat") && !replay.label.includes("battle"), JSON.stringify(replay));
+} };
+
+const hubBirdsEyeTargets = { name: "birds-eye lower-floor targets", why: "rule: hidden upstairs targets cannot steal downstairs aim, and the orange melee dot and secondary shots identify the object that actually receives damage", run: async (b) => {
+  const result = await b.evaluate(`(() => {
+    const B = __ooga, P = B.pilot, S = BL.scene, root = BL.scenes.hub.root, a = P.player, H = B.island.headquarters;
+    const lowerGeometry = BL.models.box({ w: 0.8, h: 1, d: 0.8, color: "#527545" });
+    const upperGeometry = BL.models.box({ w: 3, h: 1, d: 3, color: "#aa5555" });
+    // Two real weapon-query targets share a footprint on separate floors. High
+    // health avoids loot/respawn randomness while retaining the real damage path.
+    const type = B.headquarters.breakables.list[0].type;
+    const make = (geometry, y) => {
+      const node = S.createNode({ geometry, position: { x: 6, y: y + 0.5, z: 0 } });
+      const owner = { kind: "prop", prop: "rock", node, active: true };
+      owner.breakable = { owner, type, health: 100, broken: false };
+      S.addChild(root, node); B.input.add(node, owner); return owner;
+    };
+    const lower = make(lowerGeometry, H.basement.floor), upper = make(upperGeometry, H.floor);
+    const pointAtLower = () => {
+      S.updateWorld(root); B.renderer.render(root, B.camera, B.renderOpts);
+      const p = B.renderer.project(lower.node.position.x, lower.node.position.y, lower.node.position.z, {});
+      P.hooks.onOrbit(-1e6, -1e6); P.hooks.onOrbit(p.x, p.y);
+    };
+    const aim = () => {
+      pointAtLower(); B.advance(0.4, 1 / 60);
+      const target = P.assistedTarget, reticle = document.getElementById("weapon-reticle"), dot = getComputedStyle(reticle.querySelector("span"));
+      return { target: target?.owner === lower ? "lower" : target?.owner === upper ? "upper" : "other", feedback: reticle.dataset.target,
+        dot: dot.backgroundColor, visibility: dot.visibility, x: target?.x, y: target?.y, z: target?.z, ceiling: P.birdsEyeCeiling };
+    };
+    try {
+      P.navigate({ position: { x: 6, y: H.basement.floor, z: -3 }, yaw: 0, pitch: 0.3, dist: 8 }); B.advance(0.7, 1 / 60);
+      P.weaponAction("weapon-primary"); B.advance(0.5, 1 / 60); const far = aim();
+      P.navigate({ position: { x: 6, y: H.basement.floor, z: -0.95 }, yaw: 0, pitch: 0.3, dist: 8 }); B.advance(0.7, 1 / 60);
+      const near = aim(), beforeMelee = lower.breakable.health;
+      P.weaponAction("weapon-fire"); B.advance(0.65, 1 / 60); const afterMelee = lower.breakable.health;
+      const jump = { peak: 0, peakTarget: false, orangeFrames: 0 }; B.crew.jumpPlayer();
+      for (let i = 0; i < 60; i++) {
+        B.advance(1 / 60, 1 / 60);
+        if (a.hop > jump.peak) { jump.peak = a.hop; jump.peakTarget = P.assistedTarget?.owner === lower; }
+        if (a.hop > 0.1 && document.getElementById("weapon-reticle").dataset.target === "object") jump.orangeFrames++;
+      }
+      P.weaponAction("weapon-secondary"); B.advance(0.4, 1 / 60); const firearm = aim(), shotsBefore = a.weapon.shotsFired;
+      P.weaponAction("weapon-secondary"); B.advance(0.7, 1 / 60);
+      const afterShot = lower.breakable.health, shots = a.weapon.shotsFired - shotsBefore, mode = P.mode;
+      P.navigate({ position: { x: 6, y: H.basement.floor, z: -2 }, yaw: 0, pitch: 0.3, dist: 8 }); B.advance(0.5, 1 / 60); aim();
+      P.hooks.onZoom(0.001);
+      for (let i = 0; i < 120 && P.mode === "birds-eye"; i++) { pointAtLower(); B.advance(1 / 60, 1 / 60); }
+      B.advance(0.06, 1 / 60);
+      const reticle = document.getElementById("weapon-reticle"), handoff = { mode: P.mode, mix: P.birdsEyeMix,
+        offset: Math.hypot(parseFloat(reticle.style.left) - B.renderer.size.width / 2, parseFloat(reticle.style.top) - B.renderer.size.height / 2),
+        before: lower.breakable.health, shotsBefore: a.weapon.shotsFired };
+      P.weaponAction("weapon-fire"); B.advance(0.3, 1 / 60);
+      handoff.after = lower.breakable.health; handoff.shots = a.weapon.shotsFired - handoff.shotsBefore;
+      B.advance(1, 1 / 60); P.hooks.onZoom(1.2); B.advance(1, 1 / 60);
+      return { far, near, firearm, jump, handoff, floor: H.basement.floor, beforeMelee, afterMelee, afterShot,
+        upperHealth: upper.breakable.health, shots, mode };
+    } finally {
+      B.crew.stopBurst(a); B.crew.selectWeapon(1, a);
+      for (const owner of [lower, upper]) { B.input.remove(owner.node); S.removeChild(root, owner.node); B.renderer.releaseGeometry(owner.node.geometry); }
+      B.advance(0.2, 1 / 60);
+    }
+  })()`);
+  record("birds-eye combat: basement aim ignores upstairs geometry, hides the distant melee dot and shows orange in range, then melee and secondary fire damage that same target", result.mode === "birds-eye" && result.far.target === "lower" && result.far.feedback === "out-of-range" && result.far.visibility === "hidden" && result.near.target === "lower" && result.near.feedback === "object" && result.near.dot === "rgb(255, 157, 66)" && result.near.visibility === "visible" && Math.abs(result.near.y - result.floor - 0.5) < 1e-5 && result.afterMelee < result.beforeMelee && result.firearm.target === "lower" && result.shots > 0 && result.afterShot < result.afterMelee && result.upperHealth === 100, JSON.stringify(result));
+  record("birds-eye combat: a jump retains same-floor targeting through its apex and orange feedback while melee remains within reach", result.jump.peak > 0.9 && result.jump.peakTarget && result.jump.orangeFrames > 2, JSON.stringify(result.jump));
+  record("birds-eye combat: firing during the shoulder swoop hits the retained off-center target", result.handoff.mode === "shoulder" && result.handoff.mix > 0 && result.handoff.mix < 1 && result.handoff.offset > 20 && result.handoff.shots > 0 && result.handoff.after < result.handoff.before, JSON.stringify(result.handoff));
+} };
+
 // ---- Phones ----
 // Each scene again at 390x844 with touch, as a phone player meets it. PHONE lists what a player would feel:
 // ellipsis or clipped text, a button or heading wrapped by accident, text past the screen edge, and a
@@ -3444,6 +3601,7 @@ scene("orbit", { steps: [{ name: "orbit flow", why: "regression: the spacewalk a
 scene("mine", { query: "wip=mine", steps: [mineResume, trip("mine"), mineControls, wipGate] });
 scene("pool", { steps: [poolLeave, trip("pool")] });
 scene("hub", { label: "weapons", query: "character=portlandhodl&weapon=2&mag=1&ammo=6&jetpack=1", steps: [hubAk, hubMelee, hubJetpack] });
+scene("hub", { label: "birds-eye combat", query: "solo=1&character=portlandhodl&weapon=1&mode=shoulder&combat=1", steps: [hubBirdsEye, hubBirdsEyeFloors, hubBirdsEyeTargets, hubCombatReplay] });
 scene("hub", { label: "mirror", steps: [hubJumbotron, hubMatrix, hubMirror] });
 scene("hub", { label: "canvas2d", query: "canvas2d=1&wip=mine", steps: [canvasTour] });
 scene("hub", { query: "pos=0", opts: PHONE_SIZE, steps: [phone("hub", { required: ["#joy-move", "#joy-look", "#sheet-toggle", "#sheet-bananas"], sheet: true })] });

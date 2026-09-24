@@ -78,7 +78,7 @@
     clear: new Float32Array(3), horizon: new Float32Array(3), zenith: new Float32Array(3), sky: new Float32Array(3), ground: new Float32Array(3), sun: new Float32Array(3), direct: new Float32Array(3),
     light: { x: 0.55, y: 0.78, z: -0.25 }, sunDirection: { x: 0, y: 1, z: 0 }, moon: { x: 0, y: 1, z: 0 }, celestialPole: { x: 0, y: Math.sin(20 * DEG), z: -Math.cos(20 * DEG) }, starMatrix: new Float32Array(9),
     stars: 0, torch: 0, day: 1, twilight: 0, lampFactor: 0, directStrength: 1, directionalLightStrength: 1, sunStrength: 1, moonStrength: 0, ambientFloor: 0.18, diffuseFloor: 0, shadowStrength: 1, shadowFloor: 0, shadowBias: 0.002, outdoorDarkestSurfaceEstimate: 0.34, activeLightSource: "sun", latitude: 20, dayOfYear: 172, continuousDay: 171.5, solarDeclination: 0, siderealAngle: 0, sunAltitude: 90, sunAzimuth: 180, moonAltitude: -90, moonAzimuth: 0, sunriseHour: 6, sunsetHour: 18,
-    time: 0, bloomStrength: 0.5, lights: new Float32Array(80), lightCount: 0, shadowCenter: { x: 0, y: 0, z: 0 }, shadowExtent: 34, matrix: MATRIX_WORLD
+    time: 0, bloomStrength: 0.5, lights: new Float32Array(80), lightCount: 0, shadowCenter: { x: 0, y: 0, z: 0 }, shadowExtent: 34, matrix: MATRIX_WORLD, cutawayMaxY: 1e6
   };
   RENDER_OPTS.starMatrix[0] = RENDER_OPTS.starMatrix[4] = RENDER_OPTS.starMatrix[8] = 1;
   const DAYLIGHT_DEBUG = {
@@ -211,7 +211,7 @@
   };
   let positionDebugNext = 0, positionDebugJSON = "";
   function createPositionPose() {
-    return { version: 1, character: "", mode: "detached", closeWanted: false, battle: false, position: [0, 0, 0], target: [0, 0, -1], direction: [0, 0, -1], up: [0, 1, 0], fov: 48 * Math.PI / 180,
+    return { version: 1, character: "", mode: "detached", closeWanted: false, combat: false, position: [0, 0, 0], target: [0, 0, -1], direction: [0, 0, -1], up: [0, 1, 0], fov: 48 * Math.PI / 180,
       actor: [0, 0, 0], body: [0, 0, 0], head: [0, 0, 0], bodyQuaternion: [0, 0, 0, 1], headQuaternion: [0, 0, 0, 1], bodyRolled: false, headRolled: false,
       orbit: [0, 0.62, 6, 0, 0, 0], headOffset: [0, 0, 0], headOrbit: false, shoulderSide: 0.6, closeMix: 0, ads: 0,
       selectedSlot: 1, ammo: 30, unlimited: false, magazines: [0, 0], magazineCount: 0, aimYaw: 0, aimPitch: 0, jetpack: false, fuel: 1, hop: 0, hopV: 0, lift: 0 };
@@ -220,9 +220,10 @@
     if (!value || value.length > 8192) return null;
     let data;
     try { data = JSON.parse(value); } catch { return null; }
-    if (!data || data.version !== 1 || !["carry", "shoulder", "first-person", "orbit", "detached", "eye-level"].includes(data.mode)) return null;
+    if (!data || data.version !== 1 || !["carry", "shoulder", "first-person", "orbit", "birds-eye", "detached", "eye-level"].includes(data.mode)) return null;
     if (data.closeWanted === undefined) data.closeWanted = data.mode === "first-person" || data.mode === "eye-level" || data.mode === "detached" && data.closeMix >= 0.5;
-    if (data.battle === undefined) data.battle = data.mode === "shoulder" || data.mode === "first-person";
+    // Replay URLs written before combat/birds-eye remain readable at this boundary.
+    if (data.combat === undefined) data.combat = data.battle ?? (data.mode === "shoulder" || data.mode === "first-person" || data.mode === "birds-eye");
     const pose = createPositionPose();
     for (const key of Object.keys(pose)) {
       const supplied = data[key], target = pose[key];
@@ -264,7 +265,7 @@
     positionDebug.dataset.pose = json;
     positionDebug.dataset.copied = "false";
     const pose = POSITION_POSE, first = pose.mode === "first-person";
-    positionDebug.textContent = `${pose.character || "free camera"} · mode=${pose.mode}${pose.character ? ` · ${pose.battle ? "battle" : "carry"} · weapon=${pose.selectedSlot} ammo=${pose.unlimited ? "unlimited" : pose.ammo}` : ""}`
+    positionDebug.textContent = `${pose.character || "free camera"} · mode=${pose.mode}${pose.character ? ` · ${pose.combat ? "combat" : "carry"} · weapon=${pose.selectedSlot} ammo=${pose.unlimited ? "unlimited" : pose.ammo}` : ""}`
       + (pose.character ? `\npos=${positionText(pose.actor)}\nbody=${positionText(pose.body)}  head=${positionText(pose.head)} (rad)` : "")
       + (first ? "" : `\ncamera=${positionText(pose.position)}`)
       + `\nlook=${positionText(pose.target)}  dir=${positionText(pose.direction)}`
@@ -273,7 +274,7 @@
   const copyPositionDebug = () => {
     updatePositionDebug(true);
     const url = new URL(location.href);
-    for (const key of ["pos", "body", "head", "camera", "look", "mode", "firstperson", "weapon", "ammo", "view", "jetpack", "mag"]) url.searchParams.delete(key);
+    for (const key of ["pos", "body", "head", "camera", "look", "mode", "combat", "battle", "firstperson", "weapon", "ammo", "view", "jetpack", "mag"]) url.searchParams.delete(key);
     url.searchParams.set("debug", "1");
     if (POSITION_POSE.character) url.searchParams.set("character", POSITION_POSE.character);
     else url.searchParams.delete("character");
@@ -303,9 +304,11 @@
     };
     const position = vector("pos"), body = vector("body"), head = vector("head");
     let eye = vector("camera"), look = vector("look");
-    const mode = ["carry", "shoulder", "first-person", "orbit", "detached", "eye-level"].includes(preloadedMode) ? preloadedMode : null;
-    if (!preloadedPose && !position && !body && !head && !eye && !look && !mode) return;
+    const mode = ["carry", "shoulder", "first-person", "orbit", "birds-eye", "detached", "eye-level"].includes(preloadedMode) ? preloadedMode : null;
+    if (!preloadedPose && !position && !body && !head && !eye && !look && !mode && !params.has("combat") && !params.has("battle")) return;
     const pose = preloadedPose || pilot.capturePose(createPositionPose()), cave = pilot.player;
+    const combatParam = params.get("combat") ?? params.get("battle");
+    if (combatParam !== null) pose.combat = combatParam !== "0" && combatParam !== "false";
     if (preloadedPose && cave) {
       crew.configureWeapon(cave, pose.selectedSlot, pose.ammo, pose.unlimited);
       crew.removeMagazines(cave);
@@ -330,8 +333,12 @@
     if (mode) {
       pose.mode = mode;
       if (params.has("mode")) pose.closeWanted = mode === "first-person" || mode === "eye-level";
+      if (mode === "birds-eye") {
+        pose.combat = true;
+        if (!preloadedPose && !eye && !look) pose.orbit[2] = DIST_MAX * 0.5;
+      }
     }
-    if (!cave && (pose.mode === "carry" || pose.mode === "shoulder" || pose.mode === "first-person")) pose.mode = pose.mode === "first-person" ? "eye-level" : "orbit";
+    if (!cave && (pose.mode === "carry" || pose.mode === "shoulder" || pose.mode === "first-person" || pose.mode === "birds-eye")) pose.mode = pose.mode === "first-person" ? "eye-level" : "detached";
     if (!preloadedPose) {
       pose.closeMix = pose.closeWanted ? 1 : 0;
       if (eye || look) {
@@ -975,6 +982,7 @@
     return !!matrixCave && matrixCave.portal.inside;
   };
   const matrixOverlayVisible = (x, y, z) => {
+    if (pilot?.birdsEyeMix > 0) return y <= RENDER_OPTS.cutawayMaxY;
     if (!matrixCave || !matrixCave.portal.inside) return true;
     const m = matrixCave.mouth;
     const cdx = camera.position.x - m.x, cdz = camera.position.z - m.z;
@@ -2819,6 +2827,21 @@
     }
     return ceiling;
   };
+  const birdsEyeCeiling = (cave) => {
+    const p = cave.root.position, feet = p.y - cave.baseY;
+    // Clip architectural roofs, not the floor the actor is standing on. Outdoors
+    // the taller cut also preserves nearby gorillas and carried equipment.
+    const roof = Math.min(island.ceilingAt(p.x, feet + 0.02, p.z, PLAYER_RADIUS), entranceCeilingAt(p.x, p.z, feet + 0.02, PLAYER_RADIUS));
+    return Math.min(feet + Math.max(4, cave.bodyHeight + 0.35), roof - 0.06);
+  };
+  const updateBirdsEyeCutaway = () => {
+    const player = pilot.player, mix = pilot.birdsEyeMix;
+    if (!player || !(mix > 0)) { RENDER_OPTS.cutawayMaxY = 1e6; return; }
+    // Keep the roof removed throughout the transition: sweeping the cutoff
+    // can restore it before the camera has descended back underneath it.
+    // This is render-only; the same solids still stop bodies and weapons.
+    RENDER_OPTS.cutawayMaxY = birdsEyeCeiling(player);
+  };
   const crossesSealedCave = (fromX, fromZ, toX, toZ, y = 0) => {
     for (let i = 0; i < sealedCaves.length; i++) {
       const sealed = sealedCaves[i], m = sealed.mouth, sr = sealed.sr, cr = sealed.cr;
@@ -4489,7 +4512,7 @@
   const clampCamera = (p, closeMix = 0, closeClearance = CLEARANCE, smoothStep = false, dt = 0, resetSmooth = false, directView = false, freeMove = false, preserveExitAngle = false) => {
     const requestedX = p.x, requestedY = p.y, requestedZ = p.z;
     const player = pilot && pilot.player;
-    if (cameraUnrestricted && player && closeMix > 0 && !preserveExitAngle) {
+    if (cameraUnrestricted && player && closeMix > 0 && !preserveExitAngle && !(pilot.birdsEyeMix > 0)) {
       cameraHeadAt(CAMERA_VOLUME_FROM, player);
       cameraReentering = !cameraClearAt(CAMERA_PREVIOUS.x, CAMERA_PREVIOUS.y, CAMERA_PREVIOUS.z) || !cameraSegmentClear(CAMERA_PREVIOUS.x, CAMERA_PREVIOUS.y, CAMERA_PREVIOUS.z, CAMERA_VOLUME_FROM.x, CAMERA_VOLUME_FROM.y, CAMERA_VOLUME_FROM.z);
       cameraUnrestricted = false;
@@ -4498,8 +4521,8 @@
     }
     // Orbit views retain their chosen pose everywhere.
     // A close-view dolly starting in rock keeps its authored path to the final head position.
-    if (preserveExitAngle || closeMix === 0 || cameraReentering && closeMix < 1) {
-      if (preserveExitAngle || closeMix === 0) { cameraUnrestricted = true; cameraReentering = false; }
+    if (pilot?.birdsEyeMix > 0 || preserveExitAngle || closeMix === 0 || cameraReentering && closeMix < 1) {
+      if (pilot?.birdsEyeMix > 0 || preserveExitAngle || closeMix === 0) { cameraUnrestricted = true; cameraReentering = false; }
       cameraManualContact = false;
       let index = 0;
       const owner = player ? playerCaveIndex : cameraCaveIndex;
@@ -4970,6 +4993,7 @@
     stepTweens(dt);
     if (clankerPlay.active) clankerPlay.update(dt);
     else pilot.update(dt);
+    updateBirdsEyeCutaway();
     if (POSITION_DEBUG && elapsed >= positionDebugNext) {
       positionDebugNext = elapsed + 0.1;
       updatePositionDebug();
@@ -5571,6 +5595,7 @@
     return objectGuides.collect(player, p.x, p.y, p.z, camera, renderer.size.width / Math.max(1, renderer.size.height), sightGuides.state.retainedOwners, sightGuides.state.retainedCount);
   };
   const characterUiOccluded = (cave) => {
+    if (pilot.birdsEyeMix > 0) return cave.root.position.y - cave.baseY >= RENDER_OPTS.cutawayMaxY;
     // Input-time tooltips may run before this frame's transforms are rendered.
     // Use rock certificates only during the overlay, after updating providers;
     // all other callers keep the exact visibility query.
@@ -5659,6 +5684,19 @@
     }
     CAMERA_GLYPHS.time = MATRIX_WORLD.time;
     const player = crew.player;
+    if (pilot.birdsEyeMix > 0) {
+      // The actual scene is visible through its roof cut. Rock silhouettes and
+      // near-camera caps would cover it again using the unchanged solid world.
+      uiGuideObjects = null; uiGuidesReady = true;
+      try { fx.drawOverlay(dt, drawExtra); } finally { uiGuidesReady = false; }
+      sightGuides.update(null, null, null, camera, 1, dt);
+      bananaGuides.update(null, null, null, camera, 1, dt, false, true);
+      sightGuides.state.structure = sightGuides.state.structures = null;
+      bananaGuides.state.structure = bananaGuides.state.structures = null;
+      if (rockGuides) rockGuides.resetSurface();
+      cameraCover.draw(camera, null, false, false, cameraRockAt, cameraRockMaterialAt, null, dt);
+      return;
+    }
     const insideMirror = !!player && playerCaveIndex === matrixCave.caveIndex;
     mirrorGuides.update(insideMirror, MATRIX_WORLD.time, MATRIX_WORLD.density);
     let tick = performance.now();
@@ -5846,7 +5884,7 @@
     hooks = {};
     input = interactMod.create({ canvas: ctx.canvas, renderer, camera, hooks });
     presets = { pile: PILE_VIEW, gate: GATE_VIEW };
-    pilot = pilotMod.create({ renderer, canvas: ctx.canvas, camera, hud, presets, landing: "pile", pitch: [PITCH_MIN, PITCH_MAX], dist: [DIST_MIN, DIST_MAX], follow: FOLLOW, fly: FLY, clampTarget, clampCamera, ceilingAt, releaseView: releaseCameraView, enterFreeView: enterFreeCameraView, coarse: COARSE, onFreeAction: freeAction, jetpackStatus: jetpackHudStatus, close: { ...CLOSE_VIEW, maxStep: STEP_MAX, groundAt: playerSupportAt, visualGroundAt: visualSupportAt, sleepEyeFloorAt, cloudAt, zone: () => playerCaveIndex } });
+    pilot = pilotMod.create({ renderer, canvas: ctx.canvas, camera, hud, presets, landing: "pile", pitch: [PITCH_MIN, PITCH_MAX], dist: [DIST_MIN, DIST_MAX], follow: FOLLOW, fly: FLY, clampTarget, clampCamera, ceilingAt, birdsEyeCeiling, releaseView: releaseCameraView, enterFreeView: enterFreeCameraView, coarse: COARSE, onFreeAction: freeAction, jetpackStatus: jetpackHudStatus, close: { ...CLOSE_VIEW, maxStep: STEP_MAX, groundAt: playerSupportAt, visualGroundAt: visualSupportAt, sleepEyeFloorAt, cloudAt, zone: () => playerCaveIndex } });
     place(island.geometry, 0, 0, 0, 0);
     const pathGeometry = { ...island.path.geometry, faces: island.path.geometry.faces.map(face => ({ ...face, matrixPermanentFallback: true })) };
     pathNode = createNode({ geometry: pathGeometry, instanceData: island.path.instanceData, instanceCount: 0, instanceVersion: 0, depthBias: 0.05 });
@@ -6670,6 +6708,7 @@
     closedCaveZones.length = 0;
     cloudHit = null;
     RENDER_OPTS.lightCount = 0;
+    RENDER_OPTS.cutawayMaxY = 1e6;
     MATRIX_WORLD.active = MATRIX_WORLD.direction = MATRIX_WORLD.radius = MATRIX_WORLD.permanentCave = 0;
     cameraCaveIndex = 0;
     cameraEntranceIndex = 0;

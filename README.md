@@ -17,6 +17,16 @@ npm run watch   # the same, rebuilding on every change under src/
 
 The page lands on the hub. Fly with **W A S D**, **Q E** to turn, **Z**/**Space** up and **X** down; drag to orbit, scroll to zoom. On a phone the left stick moves and the right stick looks. Double-tap an Ooga to walk in their boots: **Space** (or **JUMP!**) jumps, twice for a double jump, and uses the control, bench or launcher beside you. **Escape** lets go.
 
+With an Ooga selected, **X** or the face button switches between combat and carry.
+Combat has **first-person**, **shoulder**, and **birds-eye** views. Scroll outward
+from shoulder to move directly overhead, initially halfway to the maximum height;
+scroll farther out to rise, or inward to descend and smoothly return to shoulder.
+In birds-eye, the mouse points the Ooga toward the world position under the cursor;
+it does not rotate the camera. Roofs and upper floors blocking the current level
+are cut away for this view, including inside caves, HQ, and the basement, and aiming
+uses that visible level. Carry mode retains its freely angled orbit camera. Debug links accept
+`mode=birds-eye` and `combat=1|0`; copied pose links use the same combat terminology.
+
 The island keeps your local time from dawn to midnight. Roster labels show yellow for clank (a contribution within the hour), orange for chill (24 hours) and gray for sleep; commits, pull requests, reviews, merges and comments across every OogaBoogaX repository count, and a fresh contribution wakes its sleeper. Working Oogas load banana ammunition at the pile, run to their project's cave and shoot into it. Tap the jumbotron's screen for a close-up you can page through.
 
 The 11 o'clock cave is **EntropyLab**, the 9 o'clock cave **Ooga Rally**, the plane on the rally roof **Ooga Drop**, and the rope bridge off the south rim leads to **Ooga Orbit**. A vine bridge at 4 o'clock reaches the **Mempool island**, whose cave reads the chain out in stone. Every game opens on a title card; **Enter** or its button starts it, **Escape** or **Leave** brings you back.
@@ -58,7 +68,7 @@ either side, lean back on one or both arms, and sometimes sit together to pick b
 from a companion's back. Occasional slow glances and arm adjustments break up their rest.
 They are already in place when the world appears. Gorillas can cross the mirror
 with its normal contact ripples.
-Double-tap a companion gorilla to control it. WASD or the move stick walks it;
+Gorilla control is temporarily disabled. When enabled, double-tap a companion to control it. WASD or the move stick walks it;
 Shift runs. In carry mode, move the cursor to select things or drag to turn the camera;
 ordinary clicks do not attack. **X** or the gorilla's face button toggles combat/carry
 without changing the camera view. Scroll between orbit and shoulder views. Combat

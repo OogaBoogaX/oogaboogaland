@@ -8,7 +8,7 @@
     const orbit = pilot.orbit, target = { x: 0, y: 0, z: 0 };
     const command = { x: 0, z: 0, climbAxis: 0, heading: NaN, jumpHeld: false, jumpPressed: false, run: false };
     const listeners = [];
-    let player = null, view = "orbit", battle = false, disposed = false, jumpKey = false, jumpTap = false, run = false;
+    let player = null, view = "orbit", combat = false, disposed = false, jumpKey = false, jumpTap = false, run = false;
     let actPointer = -1, smashPointer = -1, smashCharge = 0, shownCharge = -1, mouseButtons = 0, blockedButtons = 0, shoulder = 0;
     let focused = false, lockPending = false, wasLocked = false, unlockedAt = -Infinity, focusVersion = 0;
     let actMode = -1, actPower = -1, climbPress = false;
@@ -60,7 +60,7 @@
       cancelInput();
     };
     const focusCombat = () => {
-      if (!player || !battle || disposed) return;
+      if (!player || !combat || disposed) return;
       focused = true;
       document.body.classList.add("aim-cursor-focused");
       canvas.focus({ preventScroll: true });
@@ -72,7 +72,7 @@
         const request = canvas.requestPointerLock();
         if (request && request.then) request.then(() => {
           if (version === focusVersion) lockPending = false;
-          if (player && (!battle || !focused) && document.pointerLockElement === canvas) document.exitPointerLock();
+          if (player && (!combat || !focused) && document.pointerLockElement === canvas) document.exitPointerLock();
         }, failed);
       } catch (_) { failed(); }
     };
@@ -82,7 +82,7 @@
       wasLocked = locked;
       if (locked) {
         lockPending = false;
-        if (!battle || !focused) document.exitPointerLock();
+        if (!combat || !focused) document.exitPointerLock();
       } else if (lost) blurCombat();
     };
     on(document, "pointerlockchange", lockChanged);
@@ -118,7 +118,7 @@
       if (!player) return false;
       blurCombat();
       clankers.release();
-      player = null; battle = false; wasLocked = false;
+      player = null; combat = false; wasLocked = false;
       pilot.setExternalControl(false);
       rebasePilot();
       hud.setGorilla(null);
@@ -134,14 +134,14 @@
       rebasePilot();
       player = entry;
       pilot.setExternalControl(true);
-      battle = true; focused = wasLocked = false;
+      combat = true; focused = wasLocked = false;
       view = "shoulder"; shoulder = 0; actMode = actPower = -1;
       cancelInput();
       const p = player.root.position;
       target.x = orbit.tx = p.x; target.y = orbit.ty = p.y + 1.25; target.z = orbit.tz = p.z;
       orbit.tPitch = clamp(orbit.pitch, -0.25, 1.15);
       orbit.tDist = SHOULDER_DISTANCE;
-      hud.setGorilla(player, view, battle);
+      hud.setGorilla(player, view, combat);
       hud.tooltip.hide();
       showAct();
       focusCombat();
@@ -154,10 +154,10 @@
       else if (name === "gorilla-beat") clankers.chestBeat();
       else if (name === "mode-release") release();
       else if (name === "mode-toggle") {
-        battle = !battle;
-        if (battle) { cancelInput(); focusCombat(); }
+        combat = !combat;
+        if (combat) { cancelInput(); focusCombat(); }
         else blurCombat();
-        hud.setGorilla(player, view, battle);
+        hud.setGorilla(player, view, combat);
       } else if (name === "act") beginJump();
       else return false;
       return true;
@@ -205,7 +205,7 @@
         smashPointer = event.pointerId;
         smashCharge = 0;
         if (event.isTrusted) hud.el.gorillaSmash.setPointerCapture(event.pointerId);
-      } else if (event.target === canvas && battle && event.pointerType !== "touch") {
+      } else if (event.target === canvas && combat && event.pointerType !== "touch") {
         consume(event);
         mouseButtons = event.buttons;
         if (!focused) { blockedButtons |= event.buttons; focusCombat(); return; }
@@ -223,11 +223,11 @@
       if (!player) return false;
       orbit.tDist = clamp(orbit.tDist * factor, 3.8, 32);
       const next = orbit.tDist <= 5 ? "shoulder" : "orbit";
-      if (view !== next) { view = next; hud.setGorilla(player, view, battle); }
+      if (view !== next) { view = next; hud.setGorilla(player, view, combat); }
       return true;
     };
     const onMove = (event) => {
-      if (!player || !battle || !focused || event.target !== canvas || event.pointerType === "touch") return;
+      if (!player || !combat || !focused || event.target !== canvas || event.pointerType === "touch") return;
       consume(event);
       const pressed = event.buttons & ~mouseButtons & ~blockedButtons;
       if (pressed & 1) clankers.smash();
@@ -250,7 +250,7 @@
         if (hud.el.gorillaSmash.hasPointerCapture(event.pointerId)) hud.el.gorillaSmash.releasePointerCapture(event.pointerId);
         hud.el.gorillaSmash.blur();
         clankers.smash(charge);
-      } else if (event.target === canvas && battle && event.pointerType !== "touch") {
+      } else if (event.target === canvas && combat && event.pointerType !== "touch") {
         consume(event);
         mouseButtons = event.buttons;
         blockedButtons &= event.buttons;
@@ -260,13 +260,13 @@
     on(window, "pointermove", onMove, true);
     on(window, "pointerup", onUp, true);
     on(window, "mousemove", (event) => {
-      if (player && battle && focused && (event.target === canvas || document.pointerLockElement === canvas)) {
+      if (player && combat && focused && (event.target === canvas || document.pointerLockElement === canvas)) {
         consume(event);
         moveView(event.movementX || 0, event.movementY || 0);
       }
     }, true);
     const cancelPointer = (event) => {
-      if (player && (event.pointerId === actPointer || event.pointerId === smashPointer || battle && event.target === canvas)) {
+      if (player && (event.pointerId === actPointer || event.pointerId === smashPointer || combat && event.target === canvas)) {
         consume(event);
         const blocked = blockedButtons | mouseButtons;
         cancelInput();
@@ -278,7 +278,7 @@
     on(hud.el.act, "lostpointercapture", cancelPointer);
     on(hud.el.gorillaSmash, "lostpointercapture", cancelPointer);
     on(window, "click", (event) => {
-      if (player && (battle && event.target === canvas || event.target === hud.el.act && event.detail > 0
+      if (player && (combat && event.target === canvas || event.target === hud.el.act && event.detail > 0
         || (event.target === hud.el.gorillaSmash || hud.el.gorillaSmash.contains(event.target)) && event.detail > 0)) consume(event);
     }, true);
     on(canvas, "contextmenu", (event) => { if (player) consume(event); }, true);
@@ -304,7 +304,7 @@
       const sy = Math.sin(orbit.yaw), cy = Math.cos(orbit.yaw);
       command.x = axes.x * cy - axes.y * sy;
       command.z = -axes.x * sy - axes.y * cy;
-      command.heading = battle ? orbit.yaw + Math.PI : Math.hypot(command.x, command.z) > 0.01 ? Math.atan2(command.x, command.z) : NaN;
+      command.heading = combat ? orbit.yaw + Math.PI : Math.hypot(command.x, command.z) > 0.01 ? Math.atan2(command.x, command.z) : NaN;
       command.climbAxis = axes.y;
       if (!jumpKey && actPointer < 0) climbPress = false;
       command.jumpHeld = !climbPress && (jumpKey || actPointer >= 0 || jumpTap);
@@ -334,7 +334,7 @@
       camera.position.z = camera.target.z + cy * cp * orbit.dist;
       camera.up = null;
       if (constrainCamera) constrainCamera(player, camera);
-      hud.setGorilla(player, view, battle);
+      hud.setGorilla(player, view, combat);
       showAct();
     };
     const dispose = () => {
@@ -344,7 +344,7 @@
     };
     return { possess, release, readInput, update, action, orbit: moveView, zoom, cancelInput, dispose,
       get active() { return !!player; }, get player() { return player; }, get view() { return view; },
-      get battle() { return battle; }, get focused() { return focused; } };
+      get combat() { return combat; }, get focused() { return focused; } };
   };
   BL.clankerPlay = { create };
 })();

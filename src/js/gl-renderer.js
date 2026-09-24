@@ -489,12 +489,20 @@ layout(location=8) in vec4 aColor;
 uniform mat4 uViewProj;
 uniform vec2 uViewport;
 uniform float uWidth;
+uniform float uClipMaxY;
 out vec4 vColor;
 out vec4 vParams;
 void main() {
-  mat4 m = uViewProj * mat4(aM0, aM1, aM2, aM3);
-  vec4 ca = m * vec4(aA, 1.0);
-  vec4 cb = m * vec4(aB, 1.0);
+  mat4 m = mat4(aM0, aM1, aM2, aM3);
+  vec4 wa = m * vec4(aA, 1.0), wb = m * vec4(aB, 1.0);
+  if (wa.y > uClipMaxY && wb.y > uClipMaxY) {
+    gl_Position = vec4(2.0, 2.0, 2.0, 1.0);
+    return;
+  }
+  if (wa.y > uClipMaxY) wa = mix(wa, wb, (uClipMaxY - wa.y) / (wb.y - wa.y));
+  if (wb.y > uClipMaxY) wb = mix(wb, wa, (uClipMaxY - wb.y) / (wa.y - wb.y));
+  vec4 ca = uViewProj * wa;
+  vec4 cb = uViewProj * wb;
   vColor = aColor;
   vParams = aParams;
   vColor.rgb *= 1.0 - clamp(-aParams.y, 0.0, 1.0) * 0.88;
@@ -542,19 +550,25 @@ layout(location=6) in vec4 aM3;
 uniform mat4 uViewProj;
 uniform vec4 uRect;
 out vec2 vUv;
+out float vWorldY;
 void main() {
   vUv = (aPos.xy - uRect.xy) / uRect.zw;
   vUv.y = 1.0 - vUv.y;
-  gl_Position = uViewProj * mat4(aM0, aM1, aM2, aM3) * vec4(aPos, 1.0);
+  vec4 world = mat4(aM0, aM1, aM2, aM3) * vec4(aPos, 1.0);
+  vWorldY = world.y;
+  gl_Position = uViewProj * world;
 }`;
   const IMAGE_FS = `#version 300 es
 precision highp float;
 in vec2 vUv;
+in float vWorldY;
 uniform sampler2D uImage;
 uniform bool uReady;
+uniform float uClipMaxY;
 layout(location=0) out vec4 oColor;
 layout(location=1) out vec4 oBright;
 void main() {
+  if (vWorldY > uClipMaxY) discard;
   bool inside = all(greaterThanEqual(vUv, vec2(0.0))) && all(lessThanEqual(vUv, vec2(1.0)));
   oColor = vec4(uReady && inside ? texture(uImage, vUv).rgb : vec3(0.0), 1.0);
   oBright = vec4(0.0);
@@ -620,6 +634,7 @@ uniform vec3 uTint;
 uniform float uPortal;
 uniform float uReveal;
 uniform float uRippleOnly;
+uniform float uClipMaxY;
 uniform int uRippleActive;
 uniform float uRippleTime;
 uniform vec4 uRipples[${BL.mirrorRipples.CAPACITY}];
@@ -645,6 +660,7 @@ vec4 bodyField(vec2 uv, int layer) {
   return texture(uBodyField, vec2(uv.x, (uv.y + float(layer)) / ${BL.mirrorBody.CAPACITY + 1}.0));
 }
 void main() {
+  if (vWorld.y > uClipMaxY) discard;
   // The ratio cancels perspective interpolation, recovering the original
   // planar depth. Glass inside the near plane still closes the cave entrance.
   gl_FragDepth = clamp(0.5 * vClipDepth.x / vClipDepth.y + 0.5, 0.0, 1.0);
@@ -764,9 +780,11 @@ flat in float vOpacity;
 uniform samplerCube uEnvironment;
 uniform vec3 uEye;
 uniform vec3 uTint;
+uniform float uClipMaxY;
 layout(location=0) out vec4 oColor;
 layout(location=1) out vec4 oBright;
 void main() {
+  if (vWorld.y > uClipMaxY) discard;
   if (vOpacity < 1.0) {
     ivec2 pixel = ivec2(gl_FragCoord.xy) & 3;
     int rank = ((pixel.x & 1) ^ (pixel.y & 1)) * 8 + (pixel.y & 1) * 4
@@ -921,7 +939,7 @@ void main() {
     };
     // Compiles without blocking; ready flips once linked.
     let parallel = null;
-    let ready = false;
+    let ready = false, cutawayMaxY = 1e6;
     let failure = null;
     const compile = (vs, fs, uniforms) => {
       const make = (type, src) => {
@@ -957,7 +975,7 @@ void main() {
     };
     const ensureMirrorProgram = () => {
       if (!mirror.program) {
-        mirror.program = compile(MIRROR_VS, MIRROR_FS, ["uViewProj", "uReflectionViewProj", "uMirrorWorld", "uShard", "uReflection", "uReflectionScale", "uTint", "uPortal", "uReveal", "uRippleOnly", "uMatrixGlyphTex", "uRippleActive", "uRippleTime", "uRipples", "uBodyField", "uBodyBounds", "uBodyTexel", "uBodyContacts", "uBodyActive", "uBodyWaves"]);
+        mirror.program = compile(MIRROR_VS, MIRROR_FS, ["uViewProj", "uReflectionViewProj", "uMirrorWorld", "uShard", "uReflection", "uReflectionScale", "uTint", "uPortal", "uReveal", "uRippleOnly", "uMatrixGlyphTex", "uRippleActive", "uRippleTime", "uRipples", "uBodyField", "uBodyBounds", "uBodyTexel", "uBodyContacts", "uBodyActive", "uBodyWaves", "uClipMaxY"]);
         mirrorDebug.resources++;
       }
       if (mirror.programReady) return true;
@@ -972,10 +990,10 @@ void main() {
       const matrixSampling = gl.getExtension("OES_shader_multisample_interpolation");
       const meshFragment = matrixSampling ? MESH_FS.replace("#version 300 es", "#version 300 es\n#extension GL_OES_shader_multisample_interpolation : require\n#define MATRIX_SAMPLE_INTERPOLATION") : MESH_FS;
       res.programs = {
-        image: compile(IMAGE_VS, IMAGE_FS, ["uViewProj", "uRect", "uImage", "uReady"]),
+        image: compile(IMAGE_VS, IMAGE_FS, ["uViewProj", "uRect", "uImage", "uReady", "uClipMaxY"]),
         mesh: compile(MESH_VS, meshFragment, ["uViewProj", "uLightViewProj", "uEye", "uLightDir", "uSky", "uGround", "uSun", "uDirectStrength", "uAmbientFloor", "uDiffuseFloor", "uShadowStrength", "uShadowFloor", "uShadowBias", "uShadow", "uShadowTexel", "uLights", "uLightCount", "uFog", "uFogRange", "uMatrixParams", "uMatrixOrigin", "uMatrixGlyph", "uMatrixCave", "uMatrixCaves", "uMatrixCaveBounds", "uMatrixCaveNear", "uMatrixPermanentCave", "uMatrixPermanentPlane", "uMatrixPermanentAperture", "uMatrixLivingGlobal", "uMatrixGlyphTex", "uMatrixSamples", "uClipMinY", "uClipMaxY", "uMatrixGlyphOpacity"]),
         shadow: compile(SHADOW_VS, SHADOW_FS, ["uLightViewProj", "uClipMinY", "uClipMaxY"]),
-        line: compile(LINE_VS, LINE_FS, ["uViewProj", "uViewport", "uWidth"]),
+        line: compile(LINE_VS, LINE_FS, ["uViewProj", "uViewport", "uWidth", "uClipMaxY"]),
         sky: compile(QUAD_VS, SKY_FS, ["uInvViewProj", "uHorizon", "uZenith", "uSun", "uSunDir", "uMoonDir", "uStarMatrix", "uStars", "uTime", "uHazeDrop"]),
         blur: compile(QUAD_VS, BLUR_FS, ["uTex", "uDir"]),
         composite: compile(QUAD_VS, COMPOSITE_FS, ["uScene", "uBloom", "uBloomStrength"])
@@ -1672,7 +1690,7 @@ void main() {
     };
     const ensureShardProgram = () => {
       if (!environment.program) {
-        environment.program = compile(MIRROR_VS, SHARD_FS, ["uViewProj", "uShard", "uEnvironment", "uEye", "uTint"]);
+        environment.program = compile(MIRROR_VS, SHARD_FS, ["uViewProj", "uShard", "uEnvironment", "uEye", "uTint", "uClipMaxY"]);
         mirrorDebug.resources++;
       }
       if (environment.ready) return true;
@@ -1742,6 +1760,7 @@ void main() {
       gl.uniform4fv(p.u.uRect, surface.rect);
       gl.uniform1i(p.u.uImage, 6);
       gl.uniform1i(p.u.uReady, rec.imageTexture ? 1 : 0);
+      gl.uniform1f(p.u.uClipMaxY, Math.min(cutawayMaxY, rec.geometry.clipMaxY ?? 1e6));
       gl.bindVertexArray(rec.mesh.vao);
       gl.drawArraysInstanced(gl.TRIANGLES, 0, rec.mesh.count, count);
       gl.activeTexture(gl.TEXTURE0);
@@ -1749,6 +1768,7 @@ void main() {
     };
     // The camera pass draws only the in-frustum front of each record; shadow and mirror draw all.
     const drawParts = (kind, useProgram, excludeMirror = false, cull = false, matrixStage = 0) => {
+      if (kind === "line") gl.uniform1f(res.programs.line.u.uClipMaxY, cutawayMaxY);
       for (const rec of activeRecords) {
         if (rec.geometry.mirrorRippleOnly) continue;
         if (excludeMirror && (rec === mirror.record || rec.geometry.mirrorSource)) continue;
@@ -1766,7 +1786,7 @@ void main() {
           gl.uniform1f(res.programs.mesh.u.uMatrixCave, rec.geometry.matrixCave || 0);
         }
         if (kind === "mesh") {
-          const program = res.programs[useProgram], minimumY = rec.geometry.clipMinY ?? -1e6, maximumY = rec.geometry.clipMaxY ?? 1e6;
+          const program = res.programs[useProgram], minimumY = rec.geometry.clipMinY ?? -1e6, maximumY = Math.min(cutawayMaxY, rec.geometry.clipMaxY ?? 1e6);
           if (minimumY !== program.clipMinY) {
             gl.uniform1f(program.u.uClipMinY, minimumY);
             program.clipMinY = minimumY;
@@ -1895,6 +1915,7 @@ void main() {
       if (!mirror.node) return;
       if (pane) {
         gl.useProgram(pg.prog);
+        gl.uniform1f(pg.u.uClipMaxY, cutawayMaxY);
         gl.uniformMatrix4fv(pg.u.uViewProj, false, viewProj);
         gl.uniformMatrix4fv(pg.u.uReflectionViewProj, false, mirrorCapturedViewProj);
         gl.uniformMatrix4fv(pg.u.uMirrorWorld, false, mirror.node.world);
@@ -1947,6 +1968,7 @@ void main() {
       if (mirror.shards && environment.ready && environment.tex) {
         const shardProgram = environment.program;
         gl.useProgram(shardProgram.prog);
+        gl.uniform1f(shardProgram.u.uClipMaxY, cutawayMaxY);
         gl.uniformMatrix4fv(shardProgram.u.uViewProj, false, viewProj);
         gl.uniform1f(shardProgram.u.uShard, 1);
         gl.uniform3f(shardProgram.u.uEye, camera.position.x, camera.position.y, camera.position.z);
@@ -1974,6 +1996,7 @@ void main() {
           if (!ensureMirrorProgram()) return;
           const pg = mirror.program;
           gl.useProgram(pg.prog);
+          gl.uniform1f(pg.u.uClipMaxY, cutawayMaxY);
           gl.uniformMatrix4fv(pg.u.uViewProj, false, viewProj);
           gl.uniformMatrix4fv(pg.u.uReflectionViewProj, false, viewProj);
           gl.uniform1f(pg.u.uShard, 0);
@@ -2045,6 +2068,7 @@ void main() {
     };
     const render = (root, camera, opts = {}) => {
       if (lost || !pollPrograms()) return false;
+      cutawayMaxY = opts.cutawayMaxY ?? 1e6;
       const {
         light = DEFAULT_LIGHT,
         sky = DEFAULT_SKY,

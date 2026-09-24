@@ -173,7 +173,7 @@
       }
       return out;
     };
-    let eye = { x: 0, y: 0, z: 0 }, near = 0.2;
+    let eye = { x: 0, y: 0, z: 0 }, near = 0.2, cutawayMaxY = Infinity;
     const lightDir = new Float32Array([0, 1, 0]);
     let directStrength = 1, ambientFloor = 0.3, diffuseFloor = 0, skyLuma = 0.5, groundLuma = 0.2;
     // Fog toward a colour; fogNear/fogFar start at 1e8/1e8+1 so it stays off until a frame sets one.
@@ -261,7 +261,7 @@
         const high = w[13] + Math.max(w[1] * min[0], w[1] * max[0]) + Math.max(w[5] * min[1], w[5] * max[1]) + Math.max(w[9] * min[2], w[9] * max[2]);
         mirrorMinimumY = lerp(low, high, mirrorReveal);
       }
-      const clipMinimumY = node.geometry.clipMinY ?? -Infinity, clipMaximumY = node.geometry.clipMaxY ?? Infinity;
+      const clipMinimumY = node.geometry.clipMinY ?? -Infinity, clipMaximumY = Math.min(cutawayMaxY, node.geometry.clipMaxY ?? Infinity);
       let shardDrawn = false;
       if (faces) {
         for (const face of faces) {
@@ -274,6 +274,13 @@
             centerX += V[k][0];
             centerY += V[k][1];
             centerZ += V[k][2];
+          }
+          let maximumY = clipMaximumY;
+          if (maximumY < Infinity) {
+            let below = 0;
+            for (let k = 0; k < count; k++) if (V[k][1] <= maximumY) below++;
+            if (!below) continue;
+            if (below === count) maximumY = Infinity;
           }
           let nx = 0, ny = 0, nz = 0;
           for (let k = 0; k < count; k++) {
@@ -377,7 +384,7 @@
             }
             const minimumY = Math.max(clipMinimumY, mirrorMinimumY);
             // Only clipped geometry needs its face copied into the clip buffers.
-            if (!surface && (minimumY > -Infinity || clipMaximumY < Infinity)) {
+            if (!surface && (minimumY > -Infinity || maximumY < Infinity)) {
               surface = MIRROR_CLIP_IN;
               for (let k = 0; k < count; k++) {
                 surface[k * 3] = V[k][0]; surface[k * 3 + 1] = V[k][1]; surface[k * 3 + 2] = V[k][2];
@@ -389,9 +396,9 @@
               surface = destination;
               if (surfaceCount < 3) continue;
             }
-            if (clipMaximumY < Infinity) {
+            if (maximumY < Infinity) {
               const destination = surface === MIRROR_CLIP_IN ? MIRROR_CLIP_OUT : MIRROR_CLIP_IN;
-              surfaceCount = clipHeight(surface, surfaceCount, clipMaximumY, destination, false);
+              surfaceCount = clipHeight(surface, surfaceCount, maximumY, destination, false);
               surface = destination;
               if (surfaceCount < 3) continue;
             }
@@ -519,6 +526,12 @@
           const a = line.i[0] * 3, b = line.i[1] * 3;
           mat4.transformPoint(V[0], w, verts[a], verts[a + 1], verts[a + 2]);
           mat4.transformPoint(V[1], w, verts[b], verts[b + 1], verts[b + 2]);
+          if (V[0][1] > clipMaximumY && V[1][1] > clipMaximumY) continue;
+          if (V[0][1] > clipMaximumY || V[1][1] > clipMaximumY) {
+            const end = V[V[0][1] > clipMaximumY ? 0 : 1], other = V[V[0][1] > clipMaximumY ? 1 : 0];
+            const amount = (clipMaximumY - end[1]) / (other[1] - end[1]);
+            end[0] = lerp(end[0], other[0], amount); end[2] = lerp(end[2], other[2], amount); end[1] = clipMaximumY;
+          }
           mat4.transformPoint(V[0], view, V[0][0], V[0][1], V[0][2]);
           mat4.transformPoint(V[1], view, V[1][0], V[1][1], V[1][2]);
           CLIP_IN.set(V[0], 0);
@@ -1160,6 +1173,7 @@
       ctx.restore();
     };
     const render = (root, camera, opts = {}) => {
+      cutawayMaxY = opts.cutawayMaxY < 1e6 ? opts.cutawayMaxY : Infinity;
       const { light = DEFAULT_LIGHT, directStrength: strength = 1, ambientFloor: ambient = 0.3, diffuseFloor: diffuse = 0, clear = null, sky = DEFAULT_SKY, ground = DEFAULT_GROUND, horizon = null, zenith = null, fog = null, fogNear: near0 = 0, fogFar: far0 = 0, matrix = null } = opts;
       matrixActive = matrix ? matrix.active : 0;
       matrixRadius = matrix ? matrix.radius : 0;

@@ -323,14 +323,14 @@
       detachedNameTimer = window.setTimeout(() => el.modeDestinationName.classList.remove("show"), 1200);
     };
     const nextDetachedView = () => DETACHED_PRESETS[(DETACHED_PRESETS.indexOf(detachedPreset) + 1) % DETACHED_PRESETS.length];
-    let gorillaEntry = null, gorillaView = "orbit", gorillaBattle = false;
-    let modeName = "", modeGeometry = null, modeSelected = false, modeBattle = false, modeView = "detached", modeHealth = -1, modeGorilla = false;
-    const setMode = (cave, battle = false, view = cave ? "orbit" : "detached", visible = true) => {
+    let gorillaEntry = null, gorillaView = "orbit", gorillaCombat = false;
+    let modeName = "", modeGeometry = null, modeSelected = false, modeCombat = false, modeView = "detached", modeHealth = -1, modeGorilla = false;
+    const setMode = (cave, combat = false, view = cave ? "orbit" : "detached", visible = true) => {
       const gorilla = gorillaEntry ? gorillaEntry.gorilla : null;
-      if (gorilla) { cave = gorillaEntry.owner; battle = gorillaBattle; view = gorillaView; visible = true; }
+      if (gorilla) { cave = gorillaEntry.owner; combat = gorillaCombat; view = gorillaView; visible = true; }
       const selected = !!cave, name = selected ? cave.traits.name : "", shown = selected ? cave.traits.display : "";
       const identityChanged = selected !== modeSelected || selected && name !== modeName || !!gorilla !== modeGorilla;
-      const stateChanged = battle !== modeBattle || view !== modeView;
+      const stateChanged = combat !== modeCombat || view !== modeView;
       if (el.mode.hidden === visible) el.mode.hidden = !visible;
       const geometry = selected ? (gorilla ? gorilla.parts.head.geometry : cave.parts.head.geometry) : null;
       if (selected && (identityChanged || geometry !== modeGeometry)) {
@@ -354,18 +354,18 @@
         el.modeHealthFill.style.transform = `scaleY(${health / 25})`;
         el.modeHealth.setAttribute("aria-valuenow", String(Math.ceil(health)));
       }
-      if (stateChanged) { modeBattle = battle; modeView = view; }
+      if (stateChanged) { modeCombat = combat; modeView = view; }
       if (identityChanged || stateChanged) {
-        el.mode.dataset.shooter = String(selected && battle);
-        el.mode.dataset.battle = String(selected && battle);
+        el.mode.dataset.shooter = String(selected && combat);
+        el.mode.dataset.combat = String(selected && combat);
         el.mode.dataset.view = selected ? view : "detached";
-        el.mode.setAttribute("aria-pressed", String(selected && battle));
+        el.mode.setAttribute("aria-pressed", String(selected && combat));
         el.mode.setAttribute("aria-label", gorilla
-          ? `${shown}'s gorilla; ${view} view; ${battle ? "battle" : "carry"} mode. Press to switch battle or carry mode; hold to detach`
+          ? `${shown}'s gorilla; ${view} view; ${combat ? "combat" : "carry"} mode. Press to switch combat or carry mode; hold to detach`
           : selected
-          ? `${shown}; ${view} view; ${battle ? "battle" : "carry"} mode. Press to switch battle or carry mode; hold to detach`
+          ? `${shown}; ${view} view; ${combat ? "combat" : "carry"} mode. Press to switch combat or carry mode; hold to detach`
           : `${DETACHED_NAMES[detachedPreset]} detached view. Press to cycle destinations`);
-        el.mode.title = gorilla ? `${shown}'s gorilla · ${view} · ${battle ? "battle" : "carry"} · hold to detach` : selected ? `${shown} · ${view} · ${battle ? "battle" : "carry"} · hold to detach` : `${DETACHED_NAMES[detachedPreset]} · detached`;
+        el.mode.title = gorilla ? `${shown}'s gorilla · ${view} · ${combat ? "combat" : "carry"} · hold to detach` : selected ? `${shown} · ${view} · ${combat ? "combat" : "carry"} · hold to detach` : `${DETACHED_NAMES[detachedPreset]} · detached`;
       }
     };
     setDetachedView(detachedPreset);
@@ -579,12 +579,12 @@
       el.jetpackCompactFuel.dataset.level = percent <= 20 ? "low" : "ok";
       el.jetpackFuelValue.firstChild.data = `${percent}%`;
     };
-    const setGorilla = (entry, view = "orbit", battle = false) => {
-      if (entry === gorillaEntry && view === gorillaView && battle === gorillaBattle) return;
+    const setGorilla = (entry, view = "orbit", combat = false) => {
+      if (entry === gorillaEntry && view === gorillaView && combat === gorillaCombat) return;
       if (entry !== gorillaEntry) finishPrimary(true);
       gorillaEntry = entry;
       gorillaView = view;
-      gorillaBattle = battle;
+      gorillaCombat = combat;
       el.gorillaSmash.hidden = el.gorillaDrag.hidden = !entry;
       el.primary.hidden = !primaryShown || !!entry;
       el.weapon.hidden = !weaponShown || !!entry;
