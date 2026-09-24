@@ -1464,6 +1464,7 @@ body[data-active-scene="mine"] .mode-hud {
 }
 
 .mode-hud,
+.gorilla-hud,
 .primary-hud,
 .weapon-hud,
 .magazine-hud,
@@ -1490,6 +1491,9 @@ body[data-active-scene="mine"] .mode-hud {
 .mode-hud:hover,
 .mode-hud.virtual-hover,
 .mode-hud:focus-visible,
+.gorilla-hud:hover,
+.gorilla-hud.virtual-hover,
+.gorilla-hud:focus-visible,
 .primary-hud:hover,
 .primary-hud.virtual-hover,
 .primary-hud:focus-visible,
@@ -1507,6 +1511,7 @@ body[data-active-scene="mine"] .mode-hud {
 }
 
 .mode-hud:active,
+.gorilla-hud:active,
 .primary-hud:active,
 .weapon-hud:active,
 .magazine-hud:active:not(:disabled),
@@ -1515,6 +1520,7 @@ body[data-active-scene="mine"] .mode-hud {
 }
 
 .mode-hud:focus-visible,
+.gorilla-hud:focus-visible,
 .primary-hud:focus-visible,
 .weapon-hud:focus-visible,
 .magazine-hud:focus-visible {
@@ -1577,6 +1583,39 @@ body[data-active-scene="mine"] .mode-hud {
   position: absolute;
   left: 5px;
   top: 4px;
+}
+
+.mode-hud[data-gorilla="true"] .mode-face-icon {
+  left: 50%;
+  transform: translateX(-50%);
+}
+
+.gorilla-hud {
+  flex: none;
+  justify-content: center;
+  padding: 0;
+  cursor: pointer;
+  touch-action: manipulation;
+  user-select: none;
+}
+
+.gorilla-action-icon {
+  width: 40px;
+  height: 40px;
+  filter: drop-shadow(0 2px 0 rgba(0, 0, 0, 0.45));
+}
+
+#gorilla-smash-hud::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  height: 4px;
+  width: 100%;
+  background: #ffd84a;
+  transform: scaleX(var(--pound-charge, 0));
+  transform-origin: left;
+  pointer-events: none;
 }
 
 .mode-health {
@@ -4081,7 +4120,7 @@ body.orbit-dragging #tooltip {
     top: calc(94px + var(--safe-top));
   }
 
-  #equipment-hud:has(.weapon-hud:not([hidden]), .magazine-hud:not([hidden]), .jetpack-hud:not([hidden]))~.bottom-hud>.message-stack {
+  #equipment-hud:has(.weapon-hud:not([hidden]), .magazine-hud:not([hidden]), .jetpack-hud:not([hidden]), .gorilla-hud:not([hidden]))~.bottom-hud>.message-stack {
     --equipment-height: 56px;
     top: calc(98px + var(--equipment-height) + var(--safe-top));
   }

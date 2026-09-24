@@ -27,13 +27,14 @@
     const mirrorInts = new Int32Array(3);
     const environment = { renderer: null, canvas: null, faces: [], contexts: [], source: null, next: 0, valid: 0, frame: 0, camera: null };
     const environmentVertices = new Float64Array((ENVIRONMENT_GRID + 1) ** 2 * 5), environmentClip = new Float64Array(40), environmentClipped = new Float64Array(40);
+    const imageVertices = new Float64Array(13 * 9 * 5), imageView = mat4.create();
     const active = [];
     let sortCapacity = 0, sortIds = new Uint32Array(0), sortKeys = new Float64Array(0), sortWork = sortScratch(0);
     const DEFAULT_LIGHT = { x: 0.45, y: 0.85, z: 0.3 };
     const UP = { x: 0, y: 1, z: 0 };
     const view = mat4.create();
     const pool = [];
-    let poolUsed = 0, suppressed = 0;
+    let poolUsed = 0, suppressed = 0, rippleSurfaces = 0, rippleWaves = 0;
     let matrixActive = 0, matrixRadius = 0, matrixTime = 0, matrixDensity = 0, matrixOriginX = 0, matrixOriginZ = 0, matrixSurfaces = 0, matrixLivingSurfaces = 0, matrixArea = 0, matrixSamples = 0, matrixSampleStep = 1, matrixCulled = 0;
     let matrixCaves = null, matrixCaveBounds = null, matrixCaveNear = Infinity, matrixPermanentCave = 0, matrixPermanentPlane = null, matrixAperture = DEFAULT_MATRIX_APERTURE, matrixLivingGlobal = 1, matrixPointX = 0, matrixPointY = 0;
     const MATRIX_MASKS = new Int32Array([630678, 497559, 988959, 495513, 1009263, 288049, 456438, 616809]);
@@ -71,7 +72,7 @@
     }
     const acquire = () => {
       if (poolUsed === pool.length) {
-        pool.push({ pts: new Float32Array(32), n: 0, depth: 0, style: "", coreStyle: "", line: false, lineGlow: 0, smokeOpacity: 1, mirror: false, mirrorNode: null, mirrorMinX: 0, mirrorMaxX: 0, mirrorMinY: 0, mirrorMaxY: 0, portal: false, matrix: 0, matrixGlyph: false, matrixGlyphOpacity: 1, matrixWall: 0, matrixNx: 0, matrixNy: 0, matrixNz: 0, matrixPlane: 0, matrixCenterDepth: 0, matrixMinX: 0, matrixMaxX: 0, matrixMinY: 0, matrixMaxY: 0, matrixRed: 0, matrixGreen: 0, matrixBlue: 0, matrixCave: 0, matrixLocal: false, matrixLiving: false, matrixDynamic: false, matrixPermanentOnly: false, matrixPartial: false, matrixBacking: false, matrixFaceNx: 0, matrixFaceNy: 0, matrixFaceNz: 0, matrixFacePlane: 0 });
+        pool.push({ pts: new Float32Array(32), n: 0, depth: 0, style: "", coreStyle: "", line: false, lineGlow: 0, smokeOpacity: 1, mirror: false, mirrorNode: null, imageNode: null, mirrorMinX: 0, mirrorMaxX: 0, mirrorMinY: 0, mirrorMaxY: 0, portal: false, matrix: 0, matrixGlyph: false, matrixGlyphOpacity: 1, matrixWall: 0, matrixNx: 0, matrixNy: 0, matrixNz: 0, matrixPlane: 0, matrixCenterDepth: 0, matrixMinX: 0, matrixMaxX: 0, matrixMinY: 0, matrixMaxY: 0, matrixRed: 0, matrixGreen: 0, matrixBlue: 0, matrixCave: 0, matrixLocal: false, matrixLiving: false, matrixDynamic: false, matrixPermanentOnly: false, matrixPartial: false, matrixBacking: false, matrixFaceNx: 0, matrixFaceNy: 0, matrixFaceNz: 0, matrixFacePlane: 0 });
       }
       return pool[poolUsed++];
     };
@@ -236,12 +237,13 @@
     };
     const shadeNode = (node) => {
       if (node.smokeOpacity === 0) return;
+      if (node.mirrorRippleOnly && !node.mirrorRipples?.active && !node.mirrorBody?.contacts && !node.mirrorBody?.active) return;
       const { verts, faces, lines } = node.geometry;
       const w = node.world;
       const f = lastF;
       const ember = Math.min(1, node.ember || 0), scorch = 1 - Math.min(1, node.scorch || 0) * 0.88;
       const materialGlow = ember > 0 ? 0 : node.glow;
-      const mirrorFace = !!(node.mirror || node.mirrorPortal || node.mirrorShard);
+      const mirrorFace = !!(node.mirror || node.mirrorPortal || node.mirrorShard || node.mirrorRippleOnly);
       const portalFace = !!node.mirrorPortal || !!node.mirrorWalkThrough && mirrorDebug.portal;
       const localMatrixGlyph = !!node.geometry.matrixGlyph;
       // Every voxel face in a glyph shares this instance plane and basis.
@@ -419,6 +421,7 @@
             rec.smokeOpacity = node.smokeOpacity === undefined ? 1 : node.smokeOpacity;
             rec.mirror = mirrorFace;
             rec.mirrorNode = mirrorFace ? node : null;
+            rec.imageNode = node.geometry.imageSurface ? node : null;
             if (mirrorFace) {
               rec.mirrorMinX = rec.mirrorMinY = Infinity;
               rec.mirrorMaxX = rec.mirrorMaxY = -Infinity;
@@ -450,7 +453,7 @@
               else matrixSurfaces++;
             }
             // Offscreen receivers still register plane depth for visible glyphs; skip only shading and the draw record.
-            if (maxX < -2 || minX > width + 2 || maxY < -2 || minY > height + 2) { rec.mirrorNode = null; poolUsed--; continue; }
+            if (maxX < -2 || minX > width + 2 || maxY < -2 || minY > height + 2) { rec.mirrorNode = rec.imageNode = null; poolUsed--; continue; }
             if (node.mirrorShard && !shardDrawn) { mirrorDebug.shardsDrawn++; shardDrawn = true; }
             const emissive = Math.max((face.emissive || 0) * materialGlow, ember * 0.9);
             rec.matrixLiving = matrixLiving;
@@ -532,6 +535,7 @@
           rec.n = 2;
           rec.depth = (CLIP_OUT[2] + CLIP_OUT[5]) / 2 - (node.depthBias || 0);
           rec.line = true;
+          rec.imageNode = null;
           rec.mirror = false;
           rec.mirrorNode = null;
           rec.portal = false;
@@ -965,8 +969,10 @@
     const drawMirrorBody = (node, rec) => {
       const body = node.mirrorBody;
       if (!body || !body.contacts && !body.active) return;
-      mirrorDebug.bodyContacts = body.contacts;
-      mirrorDebug.bodyWaves = body.active;
+      if (!node.mirrorRippleOnly) {
+        mirrorDebug.bodyContacts = body.contacts;
+        mirrorDebug.bodyWaves = body.active;
+      }
       const bounds = BL.scene.boundsOf(node.geometry), minX = bounds.min[0], minY = bounds.min[1];
       const dx = (bounds.max[0] - minX) / body.width, dy = (bounds.max[1] - minY) / body.height;
       mat4.multiply(rippleView, view, node.world);
@@ -1057,8 +1063,11 @@
       mirrorDebug.environmentFaces = environment.valid;
       mirrorDebug.environmentPassCount++;
     };
-    const drawEnvironmentTriangle = (face, a, b, c, minX, minY, maxX, maxY) => {
-      const input = environmentClip, output = environmentClipped, vertices = environmentVertices;
+    // Both image screens and shard captures use the same clipped affine
+    // triangles. A bounded grid supplies perspective without resampling or
+    // quantizing the source image into generated geometry.
+    const drawImageTriangle = (image, vertices, a, b, c, minX, minY, maxX, maxY) => {
+      const input = environmentClip, output = environmentClipped;
       for (let k = 0; k < 5; k++) { input[k] = vertices[a + k]; input[5 + k] = vertices[b + k]; input[10 + k] = vertices[c + k]; }
       let count = 0;
       for (let i = 0; i < 3; i++) {
@@ -1087,7 +1096,7 @@
           (y0 * (u2 - u1) + y1 * (u0 - u2) + y2 * (u1 - u0)) / det,
           (x0 * (u1 * v2 - u2 * v1) + x1 * (u2 * v0 - u0 * v2) + x2 * (u0 * v1 - u1 * v0)) / det,
           (y0 * (u1 * v2 - u2 * v1) + y1 * (u2 * v0 - u0 * v2) + y2 * (u0 * v1 - u1 * v0)) / det);
-        ctx.drawImage(environment.faces[face], 0, 0); ctx.restore();
+        ctx.drawImage(image, 0, 0); ctx.restore();
       }
     };
     const drawShardEnvironment = (node, opacity, minX, minY, maxX, maxY) => {
@@ -1109,11 +1118,46 @@
         }
         for (let y = 0; y < ENVIRONMENT_GRID; y++) for (let x = 0; x < ENVIRONMENT_GRID; x++) {
           const a = (y * (ENVIRONMENT_GRID + 1) + x) * 5, b = a + 5, c = a + (ENVIRONMENT_GRID + 1) * 5, d = c + 5;
-          drawEnvironmentTriangle(face, a, b, d, minX, minY, maxX, maxY);
-          drawEnvironmentTriangle(face, a, d, c, minX, minY, maxX, maxY);
+          drawImageTriangle(environment.faces[face], environmentVertices, a, b, d, minX, minY, maxX, maxY);
+          drawImageTriangle(environment.faces[face], environmentVertices, a, d, c, minX, minY, maxX, maxY);
         }
       }
       ctx.globalAlpha = 1;
+    };
+    const drawImageSurface = (node) => {
+      const surface = node.geometry.imageSurface, asset = surface.asset, image = asset.load();
+      if (!image.complete || !image.naturalWidth) return;
+      mat4.multiply(imageView, view, node.world);
+      const rect = surface.rect, z = node.geometry.verts[2], m = imageView;
+      // Front-on screens are exactly affine; oblique screens use at most
+      // 192 triangles, including near-plane clipping of each image tile.
+      const oblique = Math.abs(m[2] * rect[2]) + Math.abs(m[6] * rect[3]) > 0.0001;
+      const columns = oblique ? 12 : 1, rows = oblique ? 8 : 1;
+      for (let y = 0; y <= rows; y++) for (let x = 0; x <= columns; x++) {
+        const px = rect[0] + rect[2] * x / columns, py = rect[1] + rect[3] * (1 - y / rows), at = (y * (columns + 1) + x) * 5;
+        imageVertices[at] = m[0] * px + m[4] * py + m[8] * z + m[12];
+        imageVertices[at + 1] = m[1] * px + m[5] * py + m[9] * z + m[13];
+        imageVertices[at + 2] = m[2] * px + m[6] * py + m[10] * z + m[14];
+        imageVertices[at + 3] = asset.width * x / columns;
+        imageVertices[at + 4] = asset.height * y / rows;
+      }
+      ctx.save(); ctx.clip();
+      if (!oblique && imageVertices[2] < -near) {
+        const scale = lastF / -imageVertices[2], x = width / 2 + imageVertices[0] * scale, y = height / 2 - imageVertices[1] * scale;
+        ctx.transform((imageVertices[5] - imageVertices[0]) * scale / asset.width,
+          -(imageVertices[6] - imageVertices[1]) * scale / asset.width,
+          (imageVertices[10] - imageVertices[0]) * scale / asset.height,
+          -(imageVertices[11] - imageVertices[1]) * scale / asset.height, x, y);
+        ctx.drawImage(image, 0, 0);
+        ctx.restore();
+        return;
+      }
+      for (let y = 0; y < rows; y++) for (let x = 0; x < columns; x++) {
+        const a = (y * (columns + 1) + x) * 5, b = a + 5, c = a + (columns + 1) * 5, d = c + 5;
+        drawImageTriangle(image, imageVertices, a, b, d, 0, 0, width, height);
+        drawImageTriangle(image, imageVertices, a, d, c, 0, 0, width, height);
+      }
+      ctx.restore();
     };
     const render = (root, camera, opts = {}) => {
       const { light = DEFAULT_LIGHT, directStrength: strength = 1, ambientFloor: ambient = 0.3, diffuseFloor: diffuse = 0, clear = null, sky = DEFAULT_SKY, ground = DEFAULT_GROUND, horizon = null, zenith = null, fog = null, fogNear: near0 = 0, fogFar: far0 = 0, matrix = null } = opts;
@@ -1171,7 +1215,7 @@
       skyLuma = sky[0] * 0.2126 + sky[1] * 0.7152 + sky[2] * 0.0722;
       groundLuma = ground[0] * 0.2126 + ground[1] * 0.7152 + ground[2] * 0.0722;
       poolUsed = 0;
-      suppressed = 0;
+      suppressed = rippleSurfaces = rippleWaves = 0;
       mirrorDebug.active = false;
       mirrorDebug.portal = false;
       mirrorDebug.reveal = 0;
@@ -1181,7 +1225,7 @@
       let mirrorNode = null;
       updateWorld(root, null);
       traverseVisible(root, (node) => {
-        if (environmentCapture && (node.mirror || node.mirrorPortal || node.mirrorShard)) return;
+        if (environmentCapture && (node.mirror || node.mirrorPortal || node.mirrorShard || node.mirrorRippleOnly)) return;
         if (node.mirror || node.mirrorPortal) {
           if (mirrorDebug.active) throw new Error("A scene may contain at most one mirror node");
           mirrorNode = node;
@@ -1280,7 +1324,7 @@
         } else {
           for (let k = 1; k < rec.n; k++) ctx.lineTo(rec.pts[k * 2], rec.pts[k * 2 + 1]);
           ctx.closePath();
-          if ((!rec.matrixBacking || !rec.matrixPartial) && !(rec.mirrorNode && rec.mirrorNode.mirrorShard && environment.valid === 63)) {
+          if ((!rec.matrixBacking || !rec.matrixPartial) && !(rec.mirrorNode && (rec.mirrorNode.mirrorRippleOnly || rec.mirrorNode.mirrorShard && environment.valid === 63))) {
             if (rec.smokeOpacity !== 1) ctx.globalAlpha = rec.smokeOpacity;
             ctx.fillStyle = rec.style;
             ctx.fill();
@@ -1289,10 +1333,11 @@
             ctx.stroke();
             if (rec.smokeOpacity !== 1) ctx.globalAlpha = 1;
           }
-          if (rec.matrix && (matrixDensity > 0 || rec.matrixPartial)) drawMatrix(rec);
+          if (rec.imageNode) { drawImageSurface(rec.imageNode); rec.imageNode = null; }
+          if (rec.matrix && (matrixDensity > 0 || rec.matrixPartial) && !rec.mirrorNode?.mirrorRippleOnly) drawMatrix(rec);
           if (rec.mirror) {
             const node = rec.mirrorNode;
-            if (!node.mirrorShard) mirrorDebug.surfaceDrawn = true;
+            if (!node.mirrorShard && !node.mirrorRippleOnly) mirrorDebug.surfaceDrawn = true;
             let minX = rec.pts[0], maxX = rec.pts[0], minY = rec.pts[1], maxY = rec.pts[1];
             for (let k = 1; k < rec.n; k++) {
               minX = Math.min(minX, rec.pts[k * 2]);
@@ -1314,10 +1359,11 @@
               }
             }
             if (node.mirrorShard) drawShardEnvironment(node, rec.smokeOpacity, minX, minY, maxX, maxY);
-            else drawMirrorSheen(node, rec.smokeOpacity, maxY - minY);
+            else if (!node.mirrorRippleOnly) drawMirrorSheen(node, rec.smokeOpacity, maxY - minY);
             if (!rec.portal && !node.mirrorShard) {
               drawMirrorRipples(node, rec);
               drawMirrorBody(node, rec);
+              if (node.mirrorRippleOnly) { rippleSurfaces++; rippleWaves += node.mirrorRipples ? node.mirrorRipples.active : 0; }
             }
             ctx.restore();
             rec.mirrorNode = null;
@@ -1355,13 +1401,13 @@
         mirrorDebug.surfaceDrawn = false;
         mirrorDebug.bodyContacts = mirrorDebug.bodyWaves = 0;
         mirrorDebug.shardsDrawn = 0;
-        for (const rec of pool) rec.mirrorNode = null;
+        for (const rec of pool) { rec.mirrorNode = null; rec.imageNode = null; }
       },
       get quality() {
         return "low";
       },
       get stats() {
-        return { records: 0, active: 0, mirrorResources: mirrorDebug.resources, shadowResources: 0, shadowSize: 0, shadowPassCount: 0, shadowFinite: true, culled: matrixCulled, drawn: 0, suppressed, matrixSurfaces, matrixLivingSurfaces, matrixSamples, matrixSampleStep, matrixSampleBudget: MATRIX_SAMPLE_BUDGET, matrixTileBytes: matrixPixels.byteLength };
+        return { records: 0, active: 0, mirrorResources: mirrorDebug.resources, imageTextures: 0, rippleBodyTextures: 0, shadowResources: 0, shadowSize: 0, shadowPassCount: 0, shadowFinite: true, culled: matrixCulled, drawn: 0, suppressed, rippleSurfaces, rippleWaves, matrixSurfaces, matrixLivingSurfaces, matrixSamples, matrixSampleStep, matrixSampleBudget: MATRIX_SAMPLE_BUDGET, matrixTileBytes: matrixPixels.byteLength };
       },
       get mirror() {
         return mirrorDebug;

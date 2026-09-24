@@ -398,13 +398,14 @@
     const npcDestinationBlocked = ctx.npcDestinationBlocked || inBananas;
     const flyable = ctx.flyable || walkable;
     const workSites = ctx.workSites?.length ? ctx.workSites : ctx.workRoute ? [{ repo: "oogaboogax/entropylab", route: ctx.workRoute, position: ctx.workPosition, target: ctx.workTarget }] : null;
+    const workBodyTarget = ctx.workSites?.length ? ctx.workTarget : null;
     // A site is eligible when the worker is fresh in its repo, or when it is
     // the fallback (namesake) cave and the worker's fresh repo has no cave of
-    // its own. Override and maintainer flow through hasRecentActivity as before.
+    // its own. An override or maintainer may visit every work cave.
     const siteRepos = new Set();
     if (workSites) for (const site of workSites) siteRepos.add(site.repo);
     const siteActive = (cave, site) => {
-      if (cave.override === "working" || !contributors.hasRecentActivity) return true;
+      if (cave.override === "working" || cave.traits.maintainer || !contributors.hasRecentActivity) return true;
       if (contributors.hasRecentActivity(cave.contributor, site.repo)) return true;
       if (!site.fallback) return false;
       for (const repo of cave.contributor.activity.keys()) {
@@ -510,7 +511,7 @@
         meleePoints: meleeExtremes(cave.parts.club.geometry),
         clubSlingProfile: clubSlingProfile(cave.parts.club.geometry),
         clubTorsoBounds: BL.scene.boundsOf(cave.parts.torso.geometry),
-        work: { phase: "", site: 0, index: 0, gait: 0, timer: i * 0.137, emptyTime: 0, rest: 0, reloadSlot: false, direct: false, position: { x: 0, y: 0, z: 0 }, target: { x: 0, y: 0, z: 0 } },
+        work: { phase: "", site: 0, plannedSite: -1, targetReady: false, aimSample: i, index: 0, place: -1, blocked: false, blockedTime: 0, gait: 0, timer: i * 0.137, emptyTime: 0, rest: 0, reloadSlot: false, direct: false, position: { x: 0, y: 0, z: 0 }, target: { x: 0, y: 0, z: 0 } },
         slot: null,
         pileApproach: false,
         index: i,
@@ -535,6 +536,8 @@
         walk: null,
         pathing: ctx.npcPaths ? ctx.npcPaths.createState() : null,
         traffic: { moving: false, waiting: false, leader: null, crossing: null, tx: 0, tz: 0, fx: 0, fz: 1, distance: 0, speed: 0 },
+        progress: { x: NaN, z: NaN, stalled: 0, motionless: 0, retry: 0, replanned: false, navigationHop: false, escaped: false,
+          backoff: 0, backX: 0, backZ: 0, detours: 0, replans: 0, resets: 0 },
         avoidance: { active: false, side: i & 1 ? 1 : -1, stalled: 0, best: Infinity, tx: NaN, tz: NaN,
           detour: { site: -1, phase: 0, side: 1, entryX: 0, goalX: NaN, goalZ: NaN, x: 0, z: 0 },
           navigation: { mode: 0, x: 0, z: 0, count: 0, index: 0, searches: 0, expansions: 0,
@@ -654,7 +657,7 @@
       return n;
     };
     const eatingCavemen = () => [...cavemen.values()].filter((c) => c.state === "working" && !c.walk && !c.build && atPile(c));
-    const feedableCavemen = () => [...cavemen.values()].filter((c) => c.root.visible);
+    const feedableCavemen = () => [...cavemen.values()].filter((c) => c.root.visible && (c.state === "working" || c === player));
     const releaseBuild = (cave) => {
       if (!cave.build) return;
       if (!cave.build.built) buildSpots.push(cave.build.spot);
@@ -937,7 +940,7 @@
     const startBedRoute = (cave, bed, toBed) => {
       const travel = cave.bedTravel;
       cave.avoidance.tx = NaN;
-      if (!toBed) {
+      if (!toBed && cave.state === "working") {
         const slot = closestSlot(cave);
         if (slot) cave.slot = slot;
       }
@@ -976,6 +979,7 @@
       removeJetpack(cave);
       stopReload(cave);
       cave.work.phase = "";
+      cave.work.plannedSite = -1; cave.work.targetReady = false;
       cave.state = "sleeping";
       cave.parts.head.geometry = cave.headOpen;
       r.visible = true;
@@ -1010,8 +1014,11 @@
       if (ctx.bedRoute || cave.bedTravel.mode) { standFromBed(cave); cave.bedTravel.bed = null; }
       cave.state = state;
       cave.walk = null;
+      cave.pileApproach = false;
+      if (cave.pathing) { cave.pathing.tx = NaN; cave.pathing.index = cave.pathing.count; }
       stopReload(cave);
       cave.work.phase = "";
+      cave.work.plannedSite = -1; cave.work.targetReady = false;
       cave.parts.head.geometry = state === "sleeping" ? cave.headClosed : cave.headOpen;
       resetPose(cave);
       releaseBuild(cave);
@@ -1020,10 +1027,18 @@
       const r = cave.root;
       if (state === "working" || state === "chilling") {
         r.visible = true;
-        if (!wasAwake) standAtSlot(cave);
+        if (!wasAwake && state === "working") standAtSlot(cave);
         else r.position.y = groundY(cave) + cave.hop;
         if (state === "working") startMeal(cave);
-        else { cave.act.kind = "idle"; cave.act.until = elapsed + chillPause(cave); }
+        else if (wanderSpot) {
+          if (settle && wanderSpot(cave.act.spot, cave) !== false) {
+            const spot = cave.act.spot;
+            setVec(r.position, spot.x, cave.baseY + groundAt(spot.x, spot.z, Infinity, Infinity, cave), spot.z);
+            if (!Number.isNaN(spot.ry)) r.rotation.y = spot.ry;
+            cave.act.kind = "idle";
+            cave.act.until = elapsed + chillPause(cave);
+          } else startWander(cave);
+        } else { cave.act.kind = "idle"; cave.act.until = elapsed + chillPause(cave); }
         if (!wasAwake) popNode(r);
       } else if (state === "sleeping") {
         r.visible = !cave.bedroll.hidden;
@@ -1055,6 +1070,7 @@
       if (cave.bedTravel.mode) standFromBed(cave);
       cave.state = state;
       cave.work.phase = "";
+      cave.work.plannedSite = -1; cave.work.targetReady = false;
       releaseBedroll(cave);
       cave.parts.head.geometry = cave.headOpen;
       cave.walk = { tx: cave.slot.x, tz: cave.slot.z, speed: 2, phase: 0, heading: Math.atan2(cave.slot.x - from.x, cave.slot.z - from.z), to: "slot" };
@@ -1066,8 +1082,9 @@
       r.visible = true;
       Object.assign(r.position, { x: from.x, y: cave.baseY + groundAt(from.x, from.z, Infinity, Infinity, cave), z: from.z });
       r.rotation.y = cave.walk.heading;
-      walkToSlot(cave, true);
-      cave.walk.speed = 2;
+      if (state === "working") { walkToSlot(cave, true); cave.walk.speed = 2; }
+      else if (wanderSpot) startWander(cave);
+      else { cave.walk = null; startMeal(cave); }
       if (fresh) popNode(r);
       refreshRosterRow(cave);
     };
@@ -1134,12 +1151,13 @@
     };
     let elapsed = 0;
     const startMeal = (cave) => {
-      cave.act.kind = "eat";
-      cave.act.until = elapsed + EAT_MIN + Math.random() * EAT_SPREAD;
+      cave.act.kind = cave.state === "working" ? "eat" : "idle";
+      cave.act.until = elapsed + (cave.state === "working" ? EAT_MIN + Math.random() * EAT_SPREAD : chillPause(cave));
       cave.act.trips = 0;
+      cave.parts.snack.visible = false;
     };
     const walkToSlot = (cave, force = false) => {
-      if (cave.state !== "working" && cave.state !== "chilling" || cave.build) return;
+      if (cave.state !== "working" || cave.build) return;
       if (cave.bedTravel.mode) return;
       if (!force && !atPile(cave)) return;
       const slot = closestSlot(cave);
@@ -1165,7 +1183,7 @@
       if (Math.abs(wanted - fanRadius) < 0.08) return;
       fanRadius = wanted;
       const entries = [...cavemen.values()];
-      assignFanSlots(entries, (cave) => cave.state === "working" || cave.state === "chilling");
+      assignFanSlots(entries, (cave) => cave.state === "working");
       for (const cave of entries) walkToSlot(cave);
     };
     const refreshStates = (settle = false) => {
@@ -1173,7 +1191,7 @@
       const entries = [...cavemen.values()];
       const next = new Map(entries.map((cave) => [cave, stateOf(cave)]));
       fanRadius = wantedFanRadius();
-      assignFanSlots(entries, (cave) => next.get(cave) === "working" || next.get(cave) === "chilling");
+      assignFanSlots(entries, (cave) => next.get(cave) === "working");
       for (const cave of entries) {
         const target = next.get(cave);
         if (cave === player) {
@@ -1204,7 +1222,12 @@
     };
     const startWander = (cave) => {
       const spot = cave.act.spot;
-      wanderSpot(spot, cave);
+      if (wanderSpot(spot, cave) === false) {
+        cave.walk = null;
+        cave.act.kind = "idle";
+        cave.act.until = elapsed + chillPause(cave);
+        return;
+      }
       cave.act.kind = "wander";
       cave.act.trips++;
       cave.walk = { tx: spot.x, tz: spot.z, speed: WANDER_SPEED + Math.random() * 0.5, phase: 0, heading: cave.root.rotation.y, to: "spot" };
@@ -1328,10 +1351,12 @@
       }
       return false;
     };
-    const bulletPool = Array.from({ length: 32 }, () => {
+    // Three in-flight rounds per worker keep a synchronized cave volley from
+    // recycling another worker's projectile. The visit's roster fixes the cap.
+    const bulletPool = Array.from({ length: Math.max(32, workBodyTarget ? crewList.length * BURST_ROUNDS : 0) }, () => {
       const node = createNode({ geometry: models.bananaGeometry(), scale: { x: models.BANANA_AMMO_SCALE, y: models.BANANA_AMMO_SCALE, z: models.BANANA_AMMO_SCALE }, visible: false, matrixLiving: !!ctx.matrixLivingPile });
       addChild(root, node);
-      return { node, life: 0, source: null, feedback: false, from: { x: 0, y: 0, z: 0 }, to: { x: 0, y: 0, z: 0 } };
+      return { node, life: 0, source: null, feedback: false, workShot: false, site: -1, aimSample: 0, from: { x: 0, y: 0, z: 0 }, to: { x: 0, y: 0, z: 0 } };
     });
     let bulletIdx = 0;
     const fireBullet = (cave, spot) => {
@@ -1341,7 +1366,11 @@
       math.mat4.transformPoint(MUZZLE, cave.parts.gun.world, 0, -0.03 * h, 0.66 * h);
       const from = setVec(bullet.from, MUZZLE[0], MUZZLE[1], MUZZLE[2]);
       const to = setVec(bullet.to, spot.x, spot.y === undefined ? groundAt(spot.x, spot.z) + 0.75 : spot.y, spot.z);
-      if (ctx.continueShot) ctx.continueShot(from, to);
+      bullet.workShot = cave !== player && !!workBodyTarget && cave.weapon.burstWork;
+      bullet.site = cave.work.site;
+      bullet.aimSample = cave.work.aimSample;
+      const shotClear = bullet.workShot && ctx.workShotClear || ctx.fireReachable;
+      if (!bullet.workShot && ctx.continueShot) ctx.continueShot(from, to);
       let surfaceHit = false;
       if (cave === player && input.weaponTargets) {
         const dx = to.x - from.x, dy = to.y - from.y, dz = to.z - from.z, distance = Math.hypot(dx, dy, dz);
@@ -1352,11 +1381,14 @@
           && !weaponHit.node.mirror && weaponContactClear(from, weaponHit);
         if (surfaceHit) setVec(to, weaponHit.x, weaponHit.y, weaponHit.z);
       }
-      if (!surfaceHit && ctx.fireReachable && !ctx.fireReachable(from.x, from.y, from.z, to.x, to.y, to.z)) {
+      // A phase doorway consumes the round before scenery or workers behind it.
+      if (ctx.clipProjectileTarget && ctx.clipProjectileTarget(from, to)) surfaceHit = false;
+      if (!surfaceHit && shotClear && !shotClear(from.x, from.y, from.z, to.x, to.y, to.z)) {
+        bullet.workShot = false;
         let lo = 0, hi = 1;
         for (let i = 0; i < 12; i++) {
           const mid = (lo + hi) * 0.5;
-          if (ctx.fireReachable(from.x, from.y, from.z, lerp(from.x, to.x, mid), lerp(from.y, to.y, mid), lerp(from.z, to.z, mid))) lo = mid;
+          if (shotClear(from.x, from.y, from.z, lerp(from.x, to.x, mid), lerp(from.y, to.y, mid), lerp(from.z, to.z, mid))) lo = mid;
           else hi = mid;
         }
         to.x = lerp(from.x, to.x, lo); to.y = lerp(from.y, to.y, lo); to.z = lerp(from.z, to.z, lo);
@@ -1372,12 +1404,27 @@
       for (let i = 0; i < bulletPool.length; i++) {
         const bullet = bulletPool[i];
         if (bullet.life <= 0) continue;
-        const step = Math.min(dt, bullet.life), p = bullet.node.position, x = p.x, y = p.y, z = p.z;
+        const remaining = bullet.life, step = Math.min(dt, remaining), p = bullet.node.position, x = p.x, y = p.y, z = p.z;
         bullet.life = Math.max(0, bullet.life - dt);
         const k = 1 - bullet.life / 0.22, from = bullet.from, to = bullet.to;
-        setVec(p, lerp(from.x, to.x, k), lerp(from.y, to.y, k), lerp(from.z, to.z, k));
+        if (bullet.workShot) {
+          // Each round follows its own body anchor as the gorilla runs. Later
+          // shots may aim at a different limb without redirecting this one.
+          // Interrupted/blocked rounds never count as body impacts.
+          if (bullet.source.work.site !== bullet.site || !workBodyTarget(bullet.source, to, bullet.aimSample)) {
+            bullet.life = 0; bullet.workShot = false;
+          } else {
+            const portion = step / remaining;
+            const nx = lerp(x, to.x, portion), ny = lerp(y, to.y, portion), nz = lerp(z, to.z, portion);
+            const shotClear = ctx.workShotClear || ctx.fireReachable;
+            if (shotClear && !shotClear(x, y, z, nx, ny, nz)) { bullet.life = 0; bullet.workShot = false; }
+            else setVec(p, nx, ny, nz);
+          }
+        } else setVec(p, lerp(from.x, to.x, k), lerp(from.y, to.y, k), lerp(from.z, to.z, k));
+        const absorbed = ctx.absorbProjectile && ctx.absorbProjectile(x, y, z, p, step);
+        if (absorbed) bullet.life = 0;
         let impacted = false, dx = 0, dy = 0, dz = 0, distance = 0;
-        if (!bullet.feedback && bullet.source === player && input.weaponTargets) {
+        if (!absorbed && !bullet.feedback && bullet.source === player && input.weaponTargets) {
           dx = p.x - x; dy = p.y - y; dz = p.z - z; distance = Math.hypot(dx, dy, dz);
           if (distance > 1e-6 && input.weaponTargets.ray(weaponHit, x, y, z, dx / distance, dy / distance, dz / distance, distance + 1e-5, player)) {
             setVec(weaponStart, x, y, z);
@@ -1388,7 +1435,7 @@
             }
           }
         }
-        if (ctx.onProjectileMove) ctx.onProjectileMove(x, y, z, p.x, p.y, p.z, step);
+        if (ctx.onProjectileMove) ctx.onProjectileMove(x, y, z, p.x, p.y, p.z, step, bullet.source, bullet.workShot);
         // Emit the crossing while the struck glass still exists.
         if (impacted) {
           const power = SHOT_POWER * (weaponHit.owner.hitRegion === "head" ? 2 : 1);
@@ -1397,6 +1444,8 @@
         }
         bullet.node.rotation.x += dt * 24;
         if (!bullet.life) {
+          if (bullet.workShot && ctx.workHit) ctx.workHit(bullet.source);
+          bullet.workShot = false;
           bullet.node.visible = false;
         }
       }
@@ -1458,7 +1507,7 @@
       return Math.min(AMMO_PER_BANANA, cave.weapon.ammo < AMMO_MAX ? AMMO_MAX - cave.weapon.ammo : index >= 0 ? AMMO_MAX - cave.weapon.spareAmmo[index] : 0);
     };
     const canReload = (cave = player) => {
-      if (!cave || cave.weapon.swapTime > 0 || cave.weapon.reloadHandoff < 0) return false;
+      if (!cave || cave !== player && cave.state !== "working" || cave.weapon.swapTime > 0 || cave.weapon.reloadHandoff < 0) return false;
       const missing = reloadMissing(cave);
       return missing > 0 && (ctx.reloadPolicy ? ctx.reloadPolicy.available(cave, reloadBite(cave)) : world.level >= reloadBite(cave) / AMMO_PER_BANANA) && nearReload(cave);
     };
@@ -1635,6 +1684,30 @@
       poseFingers(parts.armR, parts.fingersR, rightHeld, -1);
     };
     const reloadHandoffBlend = (w) => ease.inOutQuad(1 - Math.abs(1 - 2 * Math.min(RELOAD_HANDOFF_TIME, w.reloadHandoffTime) / RELOAD_HANDOFF_TIME));
+    const poseWorkAim = (cave) => {
+      const arm = cave.parts.armL, gun = cave.parts.gun, p = cave.root.position, target = cave.work.target, h = cave.traits.height;
+      const turn = cave.root.rotation.y + arm.poseYaw, sr = Math.sin(turn), cr = Math.cos(turn);
+      const wx = target.x - p.x, wz = target.z - p.z;
+      const dx = cr * wx - sr * wz - arm.position.x, dy = target.y - p.y - arm.position.y, dz = sr * wx + cr * wz - arm.position.z;
+      // The muzzle sits 0.15h sideways and 0.11h above the shoulder's aim
+      // axis after the wrist roll and grip offset. Solve those offsets too:
+      // simply pitching toward the head-height target misses moving body parts.
+      const across = Math.hypot(dx, dz), side = 0.15 * h, lift = 0.11 * h;
+      const yaw = Math.atan2(dx, dz) - Math.asin(clamp(side / Math.max(side, across), -1, 1));
+      const forward = Math.sqrt(Math.max(0, across * across - side * side));
+      const pitch = Math.asin(clamp(lift / Math.max(lift, Math.hypot(dy, forward)), -1, 1)) - Math.atan2(dy, forward);
+      math.quat.fromEuler(gun.quaternion, pitch, yaw, 0);
+      math.quat.fromEuler(GUN_GRIP, -Math.PI / 2, 0, 0);
+      math.quat.multiply(GUN_ARM, gun.quaternion, GUN_GRIP);
+      math.quat.fromEuler(GUN_GRIP, 0, Math.PI / 2, 0);
+      math.quat.multiply(cave.gunHandRotation, GUN_ARM, GUN_GRIP);
+      arm.quaternion = cave.gunHandRotation;
+      math.quat.rotateVec(MUZZLE, arm.quaternion, 0, -0.625 * h, 0.15 * h);
+      const px = arm.position.x + MUZZLE[0], py = arm.position.y + MUZZLE[1], pz = arm.position.z + MUZZLE[2];
+      math.quat.rotateVec(MUZZLE, gun.quaternion, 0, -0.14 * h, -0.184 * h);
+      setVec(gun.position, px - MUZZLE[0], py - MUZZLE[1], pz - MUZZLE[2]);
+      cave.weapon.aimPitch = pitch;
+    };
     const poseWeapon = (cave) => {
       if (cave.health.stunned) return;
       const w = cave.weapon, parts = cave.parts, gun = parts.gun, h = cave.traits.height;
@@ -1676,7 +1749,7 @@
       const primaryCarry = !slungClub && carryingStoneAxe(cave);
       // A pack takes the centre of the back, and the nunchaku rides the hip either way.
       const sideSling = slungClub && (cave.traits.nunchaku || cave.traits.stoneAxe && backPack(cave));
-      const twirling = !slungClub && !primaryReady && cave.traits.nunchaku;
+      const twirling = !slungClub && !primaryReady && cave.traits.nunchaku && meleeDrawn(cave);
       const clubParent = slungClub ? cave.root : twirling && cave.twirlHand ? parts.armR : parts.armL;
       if (parts.club.parent !== clubParent) {
         removeChild(parts.club.parent, parts.club);
@@ -2014,6 +2087,8 @@
         }
       }
       if (w.swapTime > 0) { syncMagazine(cave); leftSupportsGun = true; }
+      if (working && workBodyTarget && cave.work.phase === "shoot" && cave.work.targetReady && drawn && !celebrating
+        && !w.reloading && !w.reloadHandoff && !w.swapTime) poseWorkAim(cave);
       if (cave === player) { posePeek(cave, 0); aimPeek(cave); }
       poseHands(cave, leftSupportsGun);
     };
@@ -2050,6 +2125,10 @@
     };
     const emitWeaponShot = (cave) => {
       const w = cave.weapon, p = cave.root.position, spot = w.burstTarget;
+      if (w.burstWork && workBodyTarget) {
+        if (!aimWork(cave, workSites[cave.work.site])) return false;
+        setVec(spot, cave.work.target.x, cave.work.target.y, cave.work.target.z);
+      }
       const spread = w.burstPlayerAim && cave === player && w.aiming;
       if (w.burstPlayerAim && cave === player && ctx.aimTarget) ctx.aimTarget(spot, spread);
       else if (w.burstPlayerAim) {
@@ -2064,10 +2143,17 @@
         }
         w.aimPitch = -Math.atan2(spot.y - p.y - cave.traits.height * 0.45, Math.hypot(spot.x - p.x, spot.z - p.z));
       }
+      if (w.burstWork && ctx.workShotClear) {
+        poseWeapon(cave);
+        weaponOrigin(weaponStart, cave);
+        cave.work.blocked = !ctx.workShotClear(weaponStart.x, weaponStart.y, weaponStart.z, spot.x, spot.y, spot.z);
+        if (cave.work.blocked) return false;
+      }
       if (!w.unlimited) w.ammo--;
       w.shotsFired++; w.recoil = GUN_HOLD;
       poseWeapon(cave);
       fireBullet(cave, spot);
+      return true;
     };
     const interruptReloadToFire = (cave) => {
       if (cave !== player || !cave || !cave.root.visible || !cave.weapon.equipped || !cave.weapon.unlimited && cave.weapon.ammo <= 0 || cave.weapon.swapTime
@@ -2092,7 +2178,7 @@
       w.burstRemaining = (w.unlimited ? rounds : Math.min(rounds, w.ammo)) - 1;
       w.burstTimer = BURST_STEP;
       w.cooldown = rounds === 1 ? BURST_STEP : SHOT_PERIOD;
-      emitWeaponShot(cave);
+      if (!emitWeaponShot(cave)) { stopBurst(cave); w.cooldown = 0; return false; }
       if (!w.unlimited && !w.ammo) w.triggerHeld = false;
       return true;
     };
@@ -2194,7 +2280,7 @@
       // Keep the normal magazine-sized catch-up bound in unlimited debug mode.
       let shots = 0;
       while ((w.burstRemaining || w.triggerHeld) && (w.unlimited || w.ammo > 0) && w.burstTimer <= 1e-9 && shots++ < AMMO_MAX) {
-        emitWeaponShot(cave);
+        if (!emitWeaponShot(cave)) { stopBurst(cave); break; }
         if (w.burstRemaining) w.burstRemaining--;
         w.burstTimer += BURST_STEP;
         if (w.triggerHeld) w.cooldown = Math.max(0, w.burstTimer);
@@ -2398,7 +2484,7 @@
         if (cave === player) cave.override = cave.state;
         cave.parts.head.geometry = cave.headOpen;
         if (sleepingPose) cave.root.position.y = groundY(cave);
-        assignFanSlots([...cavemen.values()], (entry) => entry.state === "working" || entry.state === "chilling");
+        assignFanSlots([...cavemen.values()], (entry) => entry.state === "working");
         refreshRosterRow(cave);
       }
       releaseBuild(cave);
@@ -2902,7 +2988,7 @@
       const detour = cave.avoidance.detour;
       if (detour.site >= 0 && detour.goalX === traffic.tx && detour.goalZ === traffic.tz) {
         dx = detour.x - p.x; dz = detour.z - p.z;
-      } else if (path && path.tx === traffic.tx && path.tz === traffic.tz && path.index < path.count) {
+      } else if (cave.state === "working" && path && path.tx === traffic.tx && path.tz === traffic.tz && path.index < path.count) {
         dx = path.targetX - p.x; dz = path.targetZ - p.z;
       }
       const length = Math.hypot(dx, dz);
@@ -3142,6 +3228,92 @@
       if (!outsideClear(p.x, p.z, x, z, feet, cave.bodyHeight)) return false;
       return npcWalkable(p.x, p.z, x, z, feet, cave.bodyHeight, cave) && groundAt(x, z, feet, feet, cave) >= feet - STEP - 1e-7;
     };
+    const resetWalkerRoute = (cave) => {
+      const a = cave.avoidance;
+      a.active = false; a.tx = NaN; a.stalled = 0; a.best = Infinity;
+      a.navigation.mode = 0; a.detour.site = -1;
+      cave.traffic.waiting = false; cave.traffic.leader = cave.traffic.crossing = null;
+      cave.pileApproach = false;
+      if (cave.pathing) { cave.pathing.tx = NaN; cave.pathing.index = cave.pathing.count = 0; }
+      clearShoulder(cave);
+    };
+    // Independent of changing path hints and traffic waits: a failed route may
+    // otherwise restart its local recovery forever without moving the Ooga.
+    const watchWalker = (cave, dt, fromX, fromZ) => {
+      const progress = cave.progress, p = cave.root.position, travel = cave.bedTravel, work = cave.work;
+      const airborne = cave.hop > 0 || cave.hopV > 0;
+      // Retain the navigation intent through its landing frame, when the
+      // ordinary traffic snapshot is still paused and mode 4 has just ended.
+      const navigationHop = cave.avoidance.navigation.mode === 4 || progress.navigationHop;
+      const attempting = cave.walk || travel.mode === "walk" || cave.state === "working" && workSites
+        && (work.phase === "outbound" || work.phase === "return" || work.phase === "station");
+      if (dt <= 0 || !attempting || !navigationHop && (!cave.traffic.moving || cave.traffic.distance < 0.15) || cave === player || !cave.root.visible
+        || cave.health.stunned || cave.clankerDragged || cave.camp.seat || cave.camp.burning || cave.camp.rolling || cave.cheer > 0
+        || airborne && !navigationHop || cave.root.quaternion) {
+        progress.x = p.x; progress.z = p.z; progress.stalled = progress.motionless = progress.retry = progress.backoff = 0;
+        progress.replanned = progress.navigationHop = progress.escaped = false; return;
+      }
+      progress.navigationHop = navigationHop && airborne;
+      if (!Number.isFinite(progress.x) || Math.hypot(p.x - progress.x, p.z - progress.z) >= 0.45) {
+        progress.x = p.x; progress.z = p.z; progress.stalled = progress.motionless = progress.retry = 0; progress.replanned = progress.escaped = false; return;
+      }
+      const leader = cave.traffic.leader || cave.traffic.crossing;
+      if (cave.traffic.waiting && leader && Math.hypot(leader.shoulder.motionX, leader.shoulder.motionZ) > 0.08) {
+        progress.stalled = progress.motionless = 0; progress.replanned = progress.escaped = false; return;
+      }
+      progress.stalled += dt;
+      progress.motionless = Math.hypot(p.x - fromX, p.z - fromZ) > 1e-5 ? 0 : progress.motionless + dt;
+      // Failed recovery jumps count as stalled travel, but neither replanning
+      // nor relocation may interrupt the collision-checked airborne motion.
+      if (airborne) return;
+      if (!progress.escaped && progress.motionless >= 0.8) {
+        progress.escaped = true;
+        const heading = Math.atan2(cave.traffic.tx - p.x, cave.traffic.tz - p.z);
+        for (let side = 0; side < 5; side++) {
+          const angle = heading + (side === 4 ? Math.PI : (side & 1 ? -1 : 1) * (Math.PI / 2 + (side >> 1) * Math.PI / 4));
+          const dx = Math.sin(angle), dz = Math.cos(angle), x = p.x + dx * 0.4, z = p.z + dz * 0.4;
+          if (!walkerClear(cave, x, z) || !shoulderClear(cave, x, z)) continue;
+          resetWalkerRoute(cave);
+          progress.backX = dx; progress.backZ = dz; progress.backoff = 0.4; progress.detours++;
+          break;
+        }
+      }
+      if (!progress.replanned && progress.stalled >= 1 && progress.motionless >= 0.8 && !progress.backoff) {
+        resetWalkerRoute(cave); progress.replanned = true; progress.replans++;
+        ctx.fx.say(cave, "COMING THROUGH!", 1.8);
+        if (travel.mode === "walk" && ctx.bedRoute) startBedRoute(cave, travel.toBed ? cave.bedroll : travel.bed, travel.toBed);
+      }
+      if (progress.stalled < 8) return;
+      progress.retry -= dt;
+      if (progress.retry > 0) return;
+      progress.retry = 4;
+      const feet = p.y - cave.baseY, heading = Math.atan2(cave.traffic.tx - p.x, cave.traffic.tz - p.z);
+      for (let ring = 0; ring < 3; ring++) for (let side = 0; side < 8; side++) {
+        const angle = heading + side * Math.PI / 4, radius = 0.9 + ring * 0.75;
+        const x = p.x + Math.sin(angle) * radius, z = p.z + Math.cos(angle) * radius;
+        const y = groundAt(x, z, feet, feet, cave);
+        if (!Number.isFinite(y) || Math.abs(y - feet) > STEP || ctx.abyssAt && ctx.abyssAt(x, z, y, cave)
+          || ctx.npcLandingAllowed && !ctx.npcLandingAllowed(x, y, z, cave.bodyHeight, cave)
+          || !npcWalkable(x, z, x, z, y, cave.bodyHeight, cave) || !outsideClear(x, z, x, z, y, cave.bodyHeight)) continue;
+        let occupied = false;
+        for (let i = 0; i < crewList.length; i++) {
+          const other = crewList[i], q = other.root.position, floor = q.y - other.baseY;
+          if (other !== cave && other.root.visible && y < floor + other.bodyHeight && y + cave.bodyHeight > floor
+            && Math.hypot(x - q.x, z - q.z) < Math.max(SHOULDER_GAP, cave.bodyRadius + other.bodyRadius)) { occupied = true; break; }
+        }
+        if (occupied) continue;
+        // Last resort only: preserve activity and possessions, and place the
+        // feet on nearby verified support, never another floor or body.
+        setVec(p, x, cave.baseY + y, z); cave.cloudSupport = null;
+        cave.hop = cave.hopV = cave.jumps = 0; cave.leap.vx = cave.leap.vz = cave.leap.land = 0;
+        resetWalkerRoute(cave);
+        if (travel.mode === "walk" && ctx.bedRoute) startBedRoute(cave, travel.toBed ? cave.bedroll : travel.bed, travel.toBed);
+        progress.x = x; progress.z = z; progress.stalled = progress.motionless = progress.retry = progress.backoff = 0;
+        progress.replanned = progress.escaped = false; progress.resets++;
+        ctx.fx.say(cave, "BACK AT IT!", 1.8);
+        return;
+      }
+    };
     const recoverWalker = (cave, tx, tz, dt) => {
       const a = cave.avoidance, nav = a.navigation, p = cave.root.position, distance = Math.hypot(tx - p.x, tz - p.z);
       if (cave.traffic.waiting) { a.stalled = 0; a.best = Infinity; nav.mode = 0; return; }
@@ -3261,6 +3433,15 @@
       }
     };
     const walkToward = (cave, tx, tz, distance) => {
+      const progress = cave.progress;
+      if (progress.backoff > 0) {
+        const p = cave.root.position, step = Math.min(distance, progress.backoff, PLAYER_STEP);
+        const x = p.x + progress.backX * step, z = p.z + progress.backZ * step;
+        if (!walkerClear(cave, x, z) || !shoulderClear(cave, x, z)) { progress.backoff = 0; return 0; }
+        p.x = x; p.z = z; p.y = groundY(cave);
+        progress.backoff = Math.max(0, progress.backoff - step);
+        return step;
+      }
       if (cave.traffic.waiting) return 0;
       const nav = cave.avoidance.navigation;
       if (nav.mode === 1) { searchWalker(cave, tx, tz, Math.min(distance, PLAYER_STEP)); return 0; }
@@ -3335,10 +3516,12 @@
       }
       if (travel.mode === "walk") {
         if (cave.hop > 0 || cave.hopV > 0) { runPlayer(cave, dt, false); return; }
-        // The architectural route ends at the meadow; pick the final eating slot live so an occupied one can't block.
+        // The architectural route ends at the meadow. Only workers continue to a live eating slot.
         if (!travel.toBed && travel.index >= travel.route.length - 1) {
           travel.mode = ""; travel.route = null; travel.bed = null;
-          cave.act.kind = "eat"; walkToSlot(cave, true);
+          if (cave.state === "working") { startMeal(cave); walkToSlot(cave, true); }
+          else if (wanderSpot) startWander(cave);
+          else startMeal(cave);
           return;
         }
         let remaining = dt * 2 * (inBananas(cave) ? 0.5 : 1), recoveryChecked = false;
@@ -3485,8 +3668,14 @@
         cave.slot = slot; w.tx = slot.x; w.tz = slot.z;
         cave.avoidance.active = cave.pileApproach = false;
       }
+      // Painted trails guide work trips. Resting Oogas roam freely, retaining
+      // the same swept scenery checks and bounded local obstacle avoidance.
+      if (cave.state !== "working" && cave.pathing) {
+        cave.pathing.tx = NaN; cave.pathing.index = cave.pathing.count;
+        cave.pathing.targetX = w.tx; cave.pathing.targetZ = w.tz;
+      }
       const detour = ctx.npcDetour && ctx.npcDetour(cave, w.tx, w.tz), diversion = cave.avoidance.detour;
-      const direct = w.to === "slot" && approachPile(cave), paths = !direct && !detour && ctx.npcPaths;
+      const direct = w.to === "slot" && approachPile(cave), paths = cave.state === "working" && !direct && !detour && ctx.npcPaths;
       if (direct) {
         w.tx = cave.slot.x; w.tz = cave.slot.z;
         if (cave.pathing) { cave.pathing.tx = NaN; cave.pathing.index = cave.pathing.count; cave.pathing.targetX = w.tx; cave.pathing.targetZ = w.tz; }
@@ -3519,25 +3708,40 @@
       // The gait belongs to the limbs; the physical feet stay on the support.
       p.y = groundY(cave);
     };
-    const selectWorkSite = (cave, resume = false) => {
+    const planWorkSite = (cave, resume = false, announceTrip = false) => {
       const previous = cave.weapon.workSite === undefined ? -1 : cave.weapon.workSite;
       const first = resume && previous >= 0 ? 0 : 1;
+      let selected = -1;
       for (let offset = first; offset < first + workSites.length; offset++) {
         const index = (previous + offset) % workSites.length, site = workSites[index];
         if (!siteActive(cave, site)) continue;
-        cave.work.site = cave.weapon.workSite = index;
-        cave.work.index = 0;
-        if (site.position) site.position(cave, cave.work.position);
-        else setVec(cave.work.position, site.route[site.route.length - 1].x, 0, site.route[site.route.length - 1].z);
-        cave.work.phase = "outbound";
-        cave.work.rest = cave.traits.maintainer ? WORK_REST_MIN + Math.random() * WORK_REST_SPREAD : 0;
-        cave.work.reloadSlot = cave.work.direct = cave.pileApproach = false;
-        cave.act.kind = "work";
-        cave.weapon.equipped = true;
-        cave.avoidance.tx = NaN;
-        return true;
+        selected = index;
+        break;
       }
-      return false;
+      if (cave.work.plannedSite !== selected || announceTrip) {
+        cave.work.plannedSite = selected;
+        if (ctx.workPlanned) ctx.workPlanned(cave, selected);
+      }
+      return selected;
+    };
+    const selectWorkSite = (cave, resume = false) => {
+      let index = cave.work.plannedSite;
+      if (resume || index < 0 || !siteActive(cave, workSites[index])) index = planWorkSite(cave, resume);
+      if (index < 0) return false;
+      const work = cave.work, site = workSites[index];
+      work.site = cave.weapon.workSite = index;
+      work.index = 0;
+      if (site.position) { if (site.position(cave, work.position) === false) return false; }
+      else setVec(work.position, site.route[site.route.length - 1].x, 0, site.route[site.route.length - 1].z);
+      work.phase = "outbound";
+      work.targetReady = false;
+      work.blocked = false; work.blockedTime = 0;
+      work.rest = cave.traits.maintainer ? WORK_REST_MIN + Math.random() * WORK_REST_SPREAD : 0;
+      work.reloadSlot = work.direct = cave.pileApproach = false;
+      cave.act.kind = "work";
+      cave.weapon.equipped = true;
+      cave.avoidance.tx = NaN;
+      return true;
     };
     const walkWorkTo = (cave, target, dt, followPath = true) => {
       const p = cave.root.position, work = cave.work, paths = followPath && !work.direct && ctx.npcPaths;
@@ -3562,10 +3766,20 @@
     };
     const aimWork = (cave, site) => {
       const work = cave.work, p = cave.root.position;
-      if (site.target) site.target(cave, work.target);
+      work.targetReady = false;
+      if (workBodyTarget) {
+        work.aimSample = cave.weapon.shotsFired + cave.index;
+        if (!workBodyTarget(cave, work.target, work.aimSample)) return false;
+        work.targetReady = true;
+      } else if (site.target) site.target(cave, work.target);
       else setVec(work.target, work.position.x + Math.sin(elapsed + cave.phase) * 2, p.y + 0.8, work.position.z - 3);
       cave.root.rotation.y = Math.atan2(work.target.x - p.x, work.target.z - p.z);
       cave.weapon.aimPitch = -Math.atan2(work.target.y - p.y - cave.traits.height * 0.45, Math.hypot(work.target.x - p.x, work.target.z - p.z));
+      if (workBodyTarget) {
+        cave.parts.head.rotation.x = -Math.atan2(work.target.y - p.y - cave.parts.head.position.y, Math.hypot(work.target.x - p.x, work.target.z - p.z));
+        cave.parts.head.rotation.y = 0;
+      }
+      return true;
     };
     const runWork = (cave, dt) => {
       const work = cave.work, weapon = cave.weapon;
@@ -3576,13 +3790,16 @@
           work.site = Math.min(workSites.length - 1, weapon.workSite || 0);
           work.phase = nearReload(cave) ? "reload" : "return";
           work.index = workSites[work.site].route.length - 1;
+          planWorkSite(cave);
         }
       }
       const site = workSites[work.site], route = site.route;
       if ((work.phase === "outbound" || work.phase === "station" || work.phase === "shoot") && !siteActive(cave, site)) {
         work.index = work.phase === "outbound" ? Math.min(work.index, route.length - 1) : route.length - 1;
         work.phase = "return"; cave.act.kind = "reload-return"; cave.avoidance.tx = NaN;
+        planWorkSite(cave);
       }
+      if ((work.phase === "return" || work.phase === "reload") && (work.plannedSite < 0 || !siteActive(cave, workSites[work.plannedSite]))) planWorkSite(cave);
       if (work.phase === "outbound") {
         const approach = route[route.length - 1], p = cave.root.position;
         if (work.index === route.length - 1 && site.approachDistance && Math.hypot(approach.x - p.x, approach.z - p.z) <= site.approachDistance) {
@@ -3600,12 +3817,26 @@
           aimWork(cave, site);
         }
       } else if (work.phase === "shoot") {
+        if (site.approachDistance && Math.hypot(cave.root.position.x - work.position.x, cave.root.position.z - work.position.z) > 0.45) {
+          stopBurst(cave); work.phase = "station"; cave.avoidance.tx = NaN;
+          return;
+        }
+        work.blockedTime = work.blocked ? work.blockedTime + dt : 0;
+        if (work.blockedTime >= 0.6 && site.position) {
+          work.blockedTime = 0;
+          if (site.position(cave, work.position, true) !== false) {
+            stopBurst(cave); work.blocked = false; work.phase = "station"; cave.avoidance.tx = NaN;
+            return;
+          }
+        }
         standPose(cave);
         cave.act.kind = "work";
-        work.timer -= dt;
-        if (work.timer <= 0 && weapon.ammo > 0 && !weapon.burstRemaining && weapon.cooldown <= 0) {
-          aimWork(cave, site);
+        const targetReady = aimWork(cave, site);
+        if (targetReady) work.timer -= dt;
+        else work.timer = Math.max(0.2, work.timer);
+        if (targetReady && work.timer <= 0 && weapon.ammo > 0 && !weapon.burstRemaining && weapon.cooldown <= 0) {
           if (fireWeapon(cave, work.target)) work.timer = 0.22 + (cave.index % 3) * 0.045;
+          else if (work.blocked) work.timer = 0.15;
         }
         if (!weapon.ammo && !weapon.swapTime) {
           // Let the last banana land while the visibly empty rifle remains
@@ -3617,6 +3848,9 @@
             } else {
               work.phase = "return"; work.index = route.length - 1;
               cave.act.kind = "reload-return"; cave.avoidance.tx = NaN;
+              // Plan the next cave before returning. A gorilla assigned to
+              // this same repository stays inside while its owner reloads.
+              planWorkSite(cave, false, true);
             }
           }
         }
@@ -4384,7 +4618,7 @@
         releaseBedroll(cave);
         cave.override = cave.state = (cave.controlOverride || contributors.stateFor(cave.contributor)) === "working" ? "working" : "chilling";
         cave.parts.head.geometry = cave.headOpen;
-        assignFanSlots([...cavemen.values()], (entry) => entry.state === "working" || entry.state === "chilling");
+        assignFanSlots([...cavemen.values()], (entry) => entry.state === "working");
         refreshRosterRow(cave);
       }
       player = cave;
@@ -4421,6 +4655,7 @@
       stopBurst(cave);
       stopReload(cave);
       cave.work.phase = "";
+      cave.work.plannedSite = -1; cave.work.targetReady = false;
       cave.weapon.primaryEquipped = false;
       cave.weapon.meleeTime = cave.weapon.meleeCooldown = 0;
       cave.weapon.meleeHeld = false;
@@ -4488,6 +4723,7 @@
           cave.work.phase = "return"; cave.work.index = -1; cave.work.direct = true;
           cave.work.reloadSlot = !!slot; cave.pileApproach = false;
           cave.act.kind = "reload-return";
+          planWorkSite(cave);
         }
       }
     };
@@ -4865,6 +5101,11 @@
         riding.updated = true;
         return;
       }
+      if (cave.clankerDragged) {
+        riding.continuous = false;
+        riding.updated = true;
+        return;
+      }
       // Test both endpoints against the same current heap. A resize or a
       // relocation between frames must not masquerade as an exit.
       const wasInBananas = cave.root.visible && (cave.state === "working" || cave.state === "chilling") && inBananas(cave);
@@ -4901,6 +5142,7 @@
       cave.weapon.meleeCooldown = Math.max(0, cave.weapon.meleeCooldown - meleeStep);
       if (!runCamp(cave, dt)) updateCaveman(cave, dt);
       else stopReload(cave);
+      watchWalker(cave, dt, x, z);
       const axeMoving = Math.hypot(p.x - x, p.z - z) > 1e-5 || cave.hop > 1e-4 || Math.abs(cave.hopV) > 1e-4
         || cave.catchT > 0 || cave.yawn > 0;
       w.axeIdle = carryingStoneAxe(cave) && !axeMoving ? Math.min(AXE_STICK_DELAY + AXE_STICK_BLEND, w.axeIdle + dt) : 0;

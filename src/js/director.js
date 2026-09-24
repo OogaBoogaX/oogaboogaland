@@ -322,13 +322,12 @@
       active.onLootCleared();
       return;
     }
-    // Shift+A: call in another Agent where the scene can hold one, otherwise play
-    // the scene's own. A double-click on an Agent plays it either way.
-    if (e.shiftKey && !e.metaKey && !e.ctrlKey && (e.key === "A" || e.key === "a")) {
+    // Game scenes can expose a dedicated Agent. Hub companions are selected
+    // directly; Shift+A never creates another gorilla there.
+    if ((active.agent || active.summonAgent) && e.shiftKey && !e.metaKey && !e.ctrlKey && (e.key === "A" || e.key === "a")) {
       e.preventDefault();
       if (transition) return;
-      if (active.spawnAgent) active.spawnAgent();
-      else if (agentPlay.active) agentPlay.stop();
+      if (agentPlay.active) agentPlay.stop();
       else agentPlay.start(active);
       return;
     }
@@ -422,7 +421,9 @@
     return { toggle, close, get open() { return !el.hidden; }, get logged() { return logCount; } };
   })();
   const housekeepTimer = window.setInterval(housekeep, 6e4);
-  const sceneId = params.get("scene") || (WIP !== "1" ? WIP : null);
+  // EntropyLab currently lives in its island cave; retain the isolated scene for debug checks only.
+  const requestedScene = params.get("scene") || (WIP !== "1" ? WIP : null);
+  const sceneId = requestedScene === "lab" && !DEBUG ? null : requestedScene;
   // Building the first scene holds the main thread with nothing painted yet.
   // Run boot from a task after the first frame so the leaf curtain is on screen, not the previous page.
   const boot = () => {
@@ -479,7 +480,7 @@
         return world.level;
       }
     };
-    for (const key of ["slots", "drops", "core", "shell", "delivery", "spillEffect", "cavemen", "crates", "lab", "headquarters", "hud", "applyAllSwag", "renderLocker", "demoTip", "setPileLevel", "refreshStates", "trimPool", "shown", "island", "mouths", "labels", "camera", "cameraCave", "crew", "fx", "controls", "props", "altar", "path", "scenery", "jetpack", "magazine", "mirrorCave", "matrixCave", "matrixGate", "pilot", "renderOpts", "lamps", "entranceLights", "lighting", "fireSeats", "critters", "storm", "daylight", "setHour", "track", "racers", "items", "race", "audio", "weather", "launchers", "drop", "diver", "plane", "course", "jumbotron", "fireworks", "fireworksPending", "orbit", "flight", "site", "agent", "poolIsland", "mine", "dsb"]) {
+    for (const key of ["slots", "drops", "core", "shell", "delivery", "spillEffect", "cavemen", "crates", "lab", "headquarters", "hud", "applyAllSwag", "renderLocker", "demoTip", "setPileLevel", "refreshStates", "trimPool", "shown", "island", "mouths", "labels", "camera", "cameraCave", "crew", "fx", "controls", "props", "altar", "path", "scenery", "jetpack", "magazine", "mirrorCave", "matrixCave", "matrixGate", "pilot", "renderOpts", "lamps", "entranceLights", "lighting", "fireSeats", "critters", "storm", "daylight", "setHour", "track", "racers", "items", "race", "audio", "weather", "launchers", "drop", "diver", "plane", "course", "jumbotron", "fireworks", "fireworksPending", "orbit", "flight", "site", "agent", "poolIsland", "mine", "dsb", "clankers", "clankerPlay"]) {
       Object.defineProperty(ooga, key, { get: () => active.debug && active.debug[key], enumerable: true });
     }
     window.__ooga = ooga;

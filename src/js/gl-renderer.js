@@ -532,6 +532,33 @@ void main() {
   oColor = vec4(col, 1.0);
   oBright = vec4(base * glow, 1.0);
 }`;
+  const IMAGE_VS = `#version 300 es
+precision highp float;
+layout(location=0) in vec3 aPos;
+layout(location=3) in vec4 aM0;
+layout(location=4) in vec4 aM1;
+layout(location=5) in vec4 aM2;
+layout(location=6) in vec4 aM3;
+uniform mat4 uViewProj;
+uniform vec4 uRect;
+out vec2 vUv;
+void main() {
+  vUv = (aPos.xy - uRect.xy) / uRect.zw;
+  vUv.y = 1.0 - vUv.y;
+  gl_Position = uViewProj * mat4(aM0, aM1, aM2, aM3) * vec4(aPos, 1.0);
+}`;
+  const IMAGE_FS = `#version 300 es
+precision highp float;
+in vec2 vUv;
+uniform sampler2D uImage;
+uniform bool uReady;
+layout(location=0) out vec4 oColor;
+layout(location=1) out vec4 oBright;
+void main() {
+  bool inside = all(greaterThanEqual(vUv, vec2(0.0))) && all(lessThanEqual(vUv, vec2(1.0)));
+  oColor = vec4(uReady && inside ? texture(uImage, vUv).rgb : vec3(0.0), 1.0);
+  oBright = vec4(0.0);
+}`;
   const MIRROR_VS = `#version 300 es
 precision highp float;
 layout(location=0) in vec3 aPos;
@@ -592,6 +619,7 @@ uniform sampler2D uMatrixGlyphTex;
 uniform vec3 uTint;
 uniform float uPortal;
 uniform float uReveal;
+uniform float uRippleOnly;
 uniform int uRippleActive;
 uniform float uRippleTime;
 uniform vec4 uRipples[${BL.mirrorRipples.CAPACITY}];
@@ -620,7 +648,7 @@ void main() {
   // The ratio cancels perspective interpolation, recovering the original
   // planar depth. Glass inside the near plane still closes the cave entrance.
   gl_FragDepth = clamp(0.5 * vClipDepth.x / vClipDepth.y + 0.5, 0.0, 1.0);
-  if (vPortalUv.y > 1.0 - uReveal) discard;
+  if (uRippleOnly < 0.5 && vPortalUv.y > 1.0 - uReveal) discard;
   if (vOpacity < 1.0) {
     ivec2 pixel = ivec2(gl_FragCoord.xy) & 3;
     int rank = ((pixel.x & 1) ^ (pixel.y & 1)) * 8 + (pixel.y & 1) * 4
@@ -678,12 +706,16 @@ void main() {
   displacement *= min(1.0, 0.035 / max(length(displacement), 0.0001));
   // Perturb in the mirror's own plane, then project. A fixed screen-space
   // offset would slide the water rings when the camera moves or looks obliquely.
-  vec4 rippled = vReflection + vReflectionX * displacement.x + vReflectionY * displacement.y;
-  vec2 projectedUv = (rippled.xy / rippled.w * 0.5 + 0.5) * uReflectionScale;
-  vec2 uv = mix(projectedUv, vPortalUv, uPortal);
-  vec3 reflected = texture(uReflection, uv).rgb;
-  float sheen = pow(max(0.0, 1.0 - abs(fract((vWorld.x + vWorld.y) * 0.22) - 0.5) * 7.0), 5.0) * 0.08;
-  vec3 color = mix(reflected, uTint, 0.1) + sheen + ringLight;
+  vec3 color = vec3(max(0.0, ringLight));
+  float effectAlpha = 0.0;
+  if (uRippleOnly < 0.5) {
+    vec4 rippled = vReflection + vReflectionX * displacement.x + vReflectionY * displacement.y;
+    vec2 projectedUv = (rippled.xy / rippled.w * 0.5 + 0.5) * uReflectionScale;
+    vec2 uv = mix(projectedUv, vPortalUv, uPortal);
+    vec3 reflected = texture(uReflection, uv).rgb;
+    float sheen = pow(max(0.0, 1.0 - abs(fract((vWorld.x + vWorld.y) * 0.22) - 0.5) * 7.0), 5.0) * 0.08;
+    color = mix(reflected, uTint, 0.1) + sheen + ringLight;
+  }
   if (glyphCrest > 0.0) {
     // The crest briefly reveals the same falling green streams as the cave,
     // including their moving cells, changing runes and bright leading tips.
@@ -710,11 +742,17 @@ void main() {
         float tip = position == train - 1 ? 1.0 : position == train - 2 ? 0.55 : 0.0;
         vec3 base = (glyph & 1) == 0 ? vec3(24.0, 220.0, 74.0) : vec3(70.0, 255.0, 112.0);
         vec3 green = mix(base / 255.0 * mix(0.78, 1.15, glow), vec3(0.84, 1.0, 0.89), tip * 0.88);
-        color = mix(color, green, alpha);
+        if (uRippleOnly > 0.5) {
+          // Premultiplied glyphs reveal the actual scene behind this plane;
+          // the faint crest adds light without an opaque reflection or tint.
+          color = color * (1.0 - alpha) + green * alpha;
+          effectAlpha = alpha;
+        } else color = mix(color, green, alpha);
       }
     }
   }
-  oColor = vec4(color, 1.0);
+  if (uRippleOnly > 0.5 && max(max(color.r, color.g), color.b) < 0.0001) discard;
+  oColor = vec4(color, uRippleOnly > 0.5 ? effectAlpha : 1.0);
   oBright = vec4(0.0);
 }`;
   const SHARD_FS = `#version 300 es
@@ -868,7 +906,7 @@ void main() {
     const mirrorInvViewProj = mat4.create();
     const FRUSTUM = new Float32Array(24), LIGHT_FRUSTUM = new Float32Array(24), MIRROR_FRUSTUM = new Float32Array(24);
     const CENTER = new Float32Array(3);
-    let culled = 0, drawn = 0, suppressed = 0, shadowPassCount = 0;
+    let culled = 0, drawn = 0, suppressed = 0, shadowPassCount = 0, rippleSurfaces = 0, rippleWaves = 0;
     const mirrorEye = { x: 0, y: 0, z: 0 };
     const mirrorTarget = { x: 0, y: 0, z: 0 };
     const mirrorUp = { x: 0, y: 1, z: 0 };
@@ -919,7 +957,7 @@ void main() {
     };
     const ensureMirrorProgram = () => {
       if (!mirror.program) {
-        mirror.program = compile(MIRROR_VS, MIRROR_FS, ["uViewProj", "uReflectionViewProj", "uMirrorWorld", "uShard", "uReflection", "uReflectionScale", "uTint", "uPortal", "uReveal", "uMatrixGlyphTex", "uRippleActive", "uRippleTime", "uRipples", "uBodyField", "uBodyBounds", "uBodyTexel", "uBodyContacts", "uBodyActive", "uBodyWaves"]);
+        mirror.program = compile(MIRROR_VS, MIRROR_FS, ["uViewProj", "uReflectionViewProj", "uMirrorWorld", "uShard", "uReflection", "uReflectionScale", "uTint", "uPortal", "uReveal", "uRippleOnly", "uMatrixGlyphTex", "uRippleActive", "uRippleTime", "uRipples", "uBodyField", "uBodyBounds", "uBodyTexel", "uBodyContacts", "uBodyActive", "uBodyWaves"]);
         mirrorDebug.resources++;
       }
       if (mirror.programReady) return true;
@@ -934,6 +972,7 @@ void main() {
       const matrixSampling = gl.getExtension("OES_shader_multisample_interpolation");
       const meshFragment = matrixSampling ? MESH_FS.replace("#version 300 es", "#version 300 es\n#extension GL_OES_shader_multisample_interpolation : require\n#define MATRIX_SAMPLE_INTERPOLATION") : MESH_FS;
       res.programs = {
+        image: compile(IMAGE_VS, IMAGE_FS, ["uViewProj", "uRect", "uImage", "uReady"]),
         mesh: compile(MESH_VS, meshFragment, ["uViewProj", "uLightViewProj", "uEye", "uLightDir", "uSky", "uGround", "uSun", "uDirectStrength", "uAmbientFloor", "uDiffuseFloor", "uShadowStrength", "uShadowFloor", "uShadowBias", "uShadow", "uShadowTexel", "uLights", "uLightCount", "uFog", "uFogRange", "uMatrixParams", "uMatrixOrigin", "uMatrixGlyph", "uMatrixCave", "uMatrixCaves", "uMatrixCaveBounds", "uMatrixCaveNear", "uMatrixPermanentCave", "uMatrixPermanentPlane", "uMatrixPermanentAperture", "uMatrixLivingGlobal", "uMatrixGlyphTex", "uMatrixSamples", "uClipMinY", "uClipMaxY", "uMatrixGlyphOpacity"]),
         shadow: compile(SHADOW_VS, SHADOW_FS, ["uLightViewProj", "uClipMinY", "uClipMaxY"]),
         line: compile(LINE_VS, LINE_FS, ["uViewProj", "uViewport", "uWidth"]),
@@ -1219,6 +1258,9 @@ void main() {
         gl.deleteBuffer(rec.line.vbo);
       }
       gl.deleteBuffer(rec.ibo);
+      if (rec.imageTexture) { gl.deleteTexture(rec.imageTexture); imageTextures--; rec.imageTexture = null; }
+      if (rec.rippleBodyTexture) { gl.deleteTexture(rec.rippleBodyTexture); rippleBodyTextures--; rec.rippleBodyTexture = null; }
+      rec.rippleBodyState = null;
       rec.nodes.length = 0;
       rec.batch = null;
       rec.data = null;
@@ -1329,7 +1371,7 @@ void main() {
       let rec = records.get(geometry);
       if (!rec) {
         const ibo = gl.createBuffer();
-        rec = { geometry, ibo, capacity: 0, mesh: buildMeshPart(geometry, ibo), line: buildLinePart(geometry, ibo), nodes: [], count: 0, drawCount: 0, cameraHiddenCount: 0, active: false, data: null, batch: null, batchVersion: -1, lightVisible: true, mirrorVisible: true };
+        rec = { geometry, ibo, capacity: 0, mesh: buildMeshPart(geometry, ibo), line: buildLinePart(geometry, ibo), nodes: [], count: 0, drawCount: 0, cameraHiddenCount: 0, active: false, data: null, batch: null, batchVersion: -1, lightVisible: true, mirrorVisible: true, imageTexture: null, rippleBodyTexture: null, rippleBodyState: null, rippleBodyVersion: -1 };
         records.set(geometry, rec);
       }
       return rec;
@@ -1666,6 +1708,8 @@ void main() {
     const onLost = (e) => {
       e.preventDefault();
       lost = true;
+      imageTextures = rippleBodyTextures = 0;
+      for (const rec of records.values()) { rec.imageTexture = rec.rippleBodyTexture = rec.rippleBodyState = null; }
       forgetMirror();
     };
     const onRestored = () => {
@@ -1679,9 +1723,34 @@ void main() {
     };
     canvas.addEventListener("webglcontextlost", onLost);
     canvas.addEventListener("webglcontextrestored", onRestored);
+    let imageTextures = 0, rippleBodyTextures = 0;
+    const drawImageSurface = (rec, count, cameraPass) => {
+      const surface = rec.geometry.imageSurface, image = surface.asset.load(), p = res.programs.image;
+      gl.activeTexture(gl.TEXTURE6);
+      if (!rec.imageTexture && image.complete && image.naturalWidth) {
+        rec.imageTexture = gl.createTexture();
+        imageTextures++;
+        gl.bindTexture(gl.TEXTURE_2D, rec.imageTexture);
+        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, image);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+      } else gl.bindTexture(gl.TEXTURE_2D, rec.imageTexture || res.matrixTexture);
+      gl.useProgram(p.prog);
+      gl.uniformMatrix4fv(p.u.uViewProj, false, cameraPass ? viewProj : mirrorViewProj);
+      gl.uniform4fv(p.u.uRect, surface.rect);
+      gl.uniform1i(p.u.uImage, 6);
+      gl.uniform1i(p.u.uReady, rec.imageTexture ? 1 : 0);
+      gl.bindVertexArray(rec.mesh.vao);
+      gl.drawArraysInstanced(gl.TRIANGLES, 0, rec.mesh.count, count);
+      gl.activeTexture(gl.TEXTURE0);
+      gl.useProgram(res.programs.mesh.prog);
+    };
     // The camera pass draws only the in-frustum front of each record; shadow and mirror draw all.
     const drawParts = (kind, useProgram, excludeMirror = false, cull = false, matrixStage = 0) => {
       for (const rec of activeRecords) {
+        if (rec.geometry.mirrorRippleOnly) continue;
         if (excludeMirror && (rec === mirror.record || rec.geometry.mirrorSource)) continue;
         const part = rec[kind], n = rec.batch && rec.batch.drawInstanceCount !== undefined ? rec.drawCount : cull ? rec.drawCount : rec.count;
         if (!part || !n) continue;
@@ -1691,6 +1760,7 @@ void main() {
         if (kind === "mesh" && useProgram === "mesh") {
           const stage = rec.geometry.matrixRevealBacking ? 1 : rec.geometry.matrixGlyph ? 2 : 0;
           if (stage !== matrixStage) continue;
+          if (rec.geometry.imageSurface) { drawImageSurface(rec, n, cull); continue; }
           gl.uniform1f(res.programs.mesh.u.uMatrixGlyph, stage === 1 ? 3 : stage === 2 ? 1 : rec.geometry.matrixLocalGlyphSurface ? 2 : 0);
           if (stage === 2) gl.uniform1f(res.programs.mesh.u.uMatrixGlyphOpacity, rec.geometry.matrixGlyphOpacity ?? 1);
           gl.uniform1f(res.programs.mesh.u.uMatrixCave, rec.geometry.matrixCave || 0);
@@ -1833,6 +1903,7 @@ void main() {
         gl.uniform3f(pg.u.uTint, 0.56, 0.62, 0.67);
         gl.uniform1f(pg.u.uPortal, mirror.portal ? 1 : 0);
         gl.uniform1f(pg.u.uReveal, mirror.reveal);
+        gl.uniform1f(pg.u.uRippleOnly, 0);
         const ripples = mirror.node.mirrorRipples, body = mirror.node.mirrorBody;
         mirrorDebug.ripples = ripples ? ripples.active : 0;
         gl.uniform1i(pg.u.uRippleActive, mirrorDebug.ripples);
@@ -1891,6 +1962,68 @@ void main() {
         }
       }
       gl.activeTexture(gl.TEXTURE0);
+    };
+    const drawRippleSurfaces = () => {
+      let started = false;
+      for (const rec of activeRecords) {
+        if (!rec.geometry.mirrorRippleOnly || !rec.mesh || !rec.drawCount || rec.offscreen) continue;
+        const node = rec.nodes[0], ripples = node.mirrorRipples, body = node.mirrorBody;
+        const bodyActive = body && (body.contacts || body.active);
+        if (!ripples?.active && !bodyActive) continue;
+        if (!started) {
+          if (!ensureMirrorProgram()) return;
+          const pg = mirror.program;
+          gl.useProgram(pg.prog);
+          gl.uniformMatrix4fv(pg.u.uViewProj, false, viewProj);
+          gl.uniformMatrix4fv(pg.u.uReflectionViewProj, false, viewProj);
+          gl.uniform1f(pg.u.uShard, 0);
+          gl.uniform1f(pg.u.uPortal, 0);
+          gl.uniform1f(pg.u.uReveal, 0);
+          gl.uniform1f(pg.u.uRippleOnly, 1);
+          bindMatrixTexture(pg);
+          // The shared program's inactive samplers still need complete
+          // bindings; this does not allocate or capture any reflection.
+          gl.activeTexture(gl.TEXTURE2);
+          gl.bindTexture(gl.TEXTURE_2D, res.matrixTexture);
+          gl.uniform1i(pg.u.uReflection, 2);
+          gl.uniform1i(pg.u.uBodyField, 4);
+          gl.enable(gl.BLEND);
+          gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
+          gl.depthMask(false);
+          started = true;
+        }
+        const pg = mirror.program;
+        gl.activeTexture(gl.TEXTURE4);
+        if (bodyActive) {
+          if (!rec.rippleBodyTexture) {
+            rec.rippleBodyTexture = createTexture(body.width, body.height * body.layers, gl.RGBA8, gl.LINEAR);
+            rippleBodyTextures++;
+          }
+          gl.bindTexture(gl.TEXTURE_2D, rec.rippleBodyTexture);
+          if (rec.rippleBodyState !== body || rec.rippleBodyVersion !== body.version) {
+            gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, body.width, body.height * body.layers, gl.RGBA, gl.UNSIGNED_BYTE, body.pixels);
+            rec.rippleBodyState = body; rec.rippleBodyVersion = body.version;
+          }
+          const bounds = boundsOf(node.geometry);
+          gl.uniform4f(pg.u.uBodyBounds, bounds.min[0], bounds.min[1], bounds.max[0] - bounds.min[0], bounds.max[1] - bounds.min[1]);
+          gl.uniform2f(pg.u.uBodyTexel, 1 / body.width, 1 / body.height);
+        } else gl.bindTexture(gl.TEXTURE_2D, res.matrixTexture);
+        gl.uniform1i(pg.u.uBodyContacts, bodyActive ? body.contacts : 0);
+        gl.uniform1i(pg.u.uBodyActive, bodyActive ? body.active : 0);
+        gl.uniform4fv(pg.u.uBodyWaves, body ? body.waves : NO_MIRROR_BODY_WAVES);
+        gl.uniformMatrix4fv(pg.u.uMirrorWorld, false, node.world);
+        gl.uniform1i(pg.u.uRippleActive, ripples ? ripples.active : 0);
+        gl.uniform1f(pg.u.uRippleTime, bodyActive ? body.time : ripples ? ripples.time : 0);
+        gl.uniform4fv(pg.u.uRipples, ripples ? ripples.waves : NO_MIRROR_RIPPLES);
+        gl.bindVertexArray(rec.mesh.vao);
+        gl.drawArraysInstanced(gl.TRIANGLES, 0, rec.mesh.count, rec.drawCount);
+        rippleSurfaces += rec.drawCount; rippleWaves += ripples ? ripples.active : 0;
+      }
+      if (started) {
+        gl.depthMask(true);
+        gl.disable(gl.BLEND);
+        gl.activeTexture(gl.TEXTURE0);
+      }
     };
     const blit = (f) => {
       gl.bindFramebuffer(gl.READ_FRAMEBUFFER, f.scene);
@@ -1998,7 +2131,7 @@ void main() {
       mirrorDebug.ripples = 0;
       mirrorDebug.bodyContacts = mirrorDebug.bodyWaves = 0;
       mirror.shards = mirrorDebug.shardsDrawn = 0;
-      culled = drawn = suppressed = 0;
+      culled = drawn = suppressed = rippleSurfaces = rippleWaves = 0;
       updateWorld(root, null);
       traverseVisible(root, collect);
       for (const rec of activeRecords) {
@@ -2085,6 +2218,7 @@ void main() {
       drawParts("mesh", "mesh", true, true, 1);
       drawParts("mesh", "mesh", true, true, 2);
       gl.disable(gl.BLEND);
+      drawRippleSurfaces();
       gl.useProgram(pg.line.prog);
       gl.uniformMatrix4fv(pg.line.u.uViewProj, false, viewProj);
       gl.uniform2f(pg.line.u.uViewport, pw, ph);
@@ -2158,6 +2292,11 @@ void main() {
     const releaseUnused = (live) => {
       let released = 0;
       if (mirror.geometry && !live.has(mirror.geometry)) destroyMirror();
+      else if (!mirror.geometry && mirror.program) {
+        let rippleLive = false;
+        for (const geometry of live) if (geometry.mirrorRippleOnly) { rippleLive = true; break; }
+        if (!rippleLive) destroyMirrorProgram();
+      }
       for (const geometry of records.keys()) {
         if (live.has(geometry)) continue;
         releaseGeometry(geometry);
@@ -2188,7 +2327,7 @@ void main() {
       get stats() {
         let shadowFinite = true;
         for (let i = 0; i < 16; i++) if (!Number.isFinite(lightViewProj[i])) shadowFinite = false;
-        return { records: records.size, active: activeRecords.length, mirrorResources: mirrorDebug.resources, shadowResources: res.shadow ? 2 : 0, shadowSize: res.shadow ? res.shadow.size : 0, shadowPassCount, shadowFinite, culled, drawn, suppressed };
+        return { records: records.size, active: activeRecords.length, mirrorResources: mirrorDebug.resources, imageTextures, rippleBodyTextures, shadowResources: res.shadow ? 2 : 0, shadowSize: res.shadow ? res.shadow.size : 0, shadowPassCount, shadowFinite, culled, drawn, suppressed, rippleSurfaces, rippleWaves };
       },
       get mirror() {
         return mirrorDebug;

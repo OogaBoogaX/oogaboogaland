@@ -201,10 +201,8 @@
     lastCommit: 1789890221,
     // nunchaku swings the free stick in crew.js, recipe answers a poke with the
     // prompt for adding an Ooga, and the tint hook below drives the colourway.
-    // He co-built this island and keeps every project on it, so `maintainer`
-    // works him at all of them until the backend reports his commits.
     look: {
-      maintainer: true, nunchaku: true, recipe: true, jetTank: 0.3,
+      nunchaku: true, recipe: true, jetTank: 0.3,
       bald: true, hairless: true, cleanShaven: true, noBrow: true, noPupils: true,
       face: "none", hatY: 12, height: 1.12,
       skin: "#c03429", hair: "#191b1e", fur: "#6e1811"

@@ -14,7 +14,7 @@
     BL.scene.updateWorld(root);
     mat4.invert(inverse, node.world);
     let next = 0;
-    const state = { waves, active: 0, hits: 0, time: 0, cross, strike, aimAt, continueShot, update, dispose };
+    const state = { waves, active: 0, hits: 0, time: 0, cross, strike, aimAt, continueShot, pulse, update, dispose };
     const onGlass = (x, y) => x >= bounds.min[0] && x <= bounds.max[0]
       && y >= bounds.min[1] + (bounds.max[1] - bounds.min[1]) * (node.mirrorReveal || 0) && y <= bounds.max[1]
       && (!node.mirrorDamage || node.mirrorDamage.contains(x, y));
@@ -61,6 +61,9 @@
       waves[at] = x; waves[at + 1] = y; waves[at + 2] = age; waves[at + 3] = strengthAt(age);
       state.hits++;
       return true;
+    }
+    function pulse(x, y, age = 0) {
+      return onGlass(x, y) && emit(x, y, age);
     }
     // Clip a face's section through the mirror plane to the remaining glass.
     // Scratch output avoids allocating contacts during a swing.

@@ -308,6 +308,25 @@
         </span>
         <span class="detached-destination-name" id="detached-destination-name" aria-live="polite"></span>
       </button>
+      <button type="button" class="gorilla-hud" id="gorilla-smash-hud" data-action="gorilla-smash"
+        aria-label="Smash the ground with both arms" title="Two-arm ground smash" hidden>
+        <svg class="gorilla-action-icon" viewBox="0 0 32 32" shape-rendering="crispEdges" aria-hidden="true">
+          <path fill="#1d1a18" d="M3 3h9v9h2v10H2V12h1zM20 3h9v9h1v10H18V12h2z" />
+          <path fill="#56504b" d="M5 4h5v10H5zM22 4h5v10h-5zM3 14h10v6H3zM19 14h10v6H19z" />
+          <path fill="#8b8681" d="M4 14h2v4H4zM8 14h2v4H8zM20 14h2v4h-2zM24 14h2v4h-2z" />
+          <path fill="#da922f" d="M2 24h10v2H2zM20 24h10v2H20zM15 20h2v5h-2zM10 27h3v3h-3zM19 27h3v3h-3z" />
+          <path fill="#ffd84a" d="M14 26h4v4h-4zM5 27h2v2H5zM25 27h2v2h-2z" />
+        </svg>
+      </button>
+      <button type="button" class="gorilla-hud" id="gorilla-drag-hud" data-action="gorilla-drag"
+        aria-label="Grab a nearby Ooga Booga by the foot and drag for two seconds" title="Grab and drag (2)" hidden>
+        <svg class="gorilla-action-icon" viewBox="0 0 32 32" shape-rendering="crispEdges" aria-hidden="true">
+          <path fill="#8b8681" d="M2 2h9v5H8v7H3V7H2zM10 8h5v4h-2v4h-5v-5h2z" />
+          <path fill="#302d2a" d="M14 13h5v4h-5zM18 16h6v4h-6z" />
+          <path fill="#b8906a" d="M23 18h6v5h-6zM18 21h10v4H18zM8 24h13v4H8z" />
+          <path fill="#f1cf95" d="M24 15h5v3h-5zM3 27h5v3H3z" />
+        </svg>
+      </button>
       <button type="button" class="primary-hud" id="primary-hud" data-action="weapon-primary" data-equipped="false" data-charging="false"
         aria-label="Equip primary melee weapon" aria-pressed="false" title="Equip primary melee weapon (1)" hidden>
         <span class="weapon-toggle"><canvas class="primary-icon" id="primary-icon" width="48" height="48" aria-hidden="true"></canvas></span>
@@ -1010,6 +1029,7 @@ Then run npm run build and ONLY=characters node test/run.mjs.</pre>
   <script src="js/models.js"></script>
   <script src="js/convex.js"></script>
   <script src="js/terrain.js"></script>
+  <script src="js/lab-wallpaper.js"></script>
   <script src="js/hub-models.js"></script>
   <script src="js/lifehash.js"></script>
   <script src="js/jumbotron-data.js"></script>
@@ -1062,6 +1082,9 @@ Then run npm run build and ONLY=characters node test/run.mjs.</pre>
   <script src="js/stargate-models.js"></script>
   <script src="js/stargate.js"></script>
   <script src="js/stargate-arrival.js"></script>
+  <script src="js/lab-phase.js"></script>
+  <script src="js/clankers.js"></script>
+  <script src="js/clanker-play.js"></script>
   <script src="js/scene-hub.js"></script>
   <script src="js/scene-lab.js"></script>
     <script src="js/scene-pool.js"></script>

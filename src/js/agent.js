@@ -6,8 +6,8 @@
   "use strict";
   const BL = window.BL = window.BL || {};
   const { makeVox, voxelGeometry, cached } = BL.models;
-  const { createNode, addChild, removeChild } = BL.scene;
-  const { damp, clamp, mulberry32, fnv1a } = BL.math;
+  const { createNode, addChild, removeChild, updateLocal, boundsOf } = BL.scene;
+  const { damp, clamp, mulberry32, fnv1a, mat4, quat } = BL.math;
   const U = 0.086;
   // Hip height, torso length, the shoulder on the chest, and the arm: the knuckles
   // reach the ground when the chest leans QUAD forward (8 + 11 cos 1.0 = 13.9 ≈ 14).
@@ -27,17 +27,189 @@
     knuckle: { pitch: QUAD, speed: 0.9, stride: 0.9, drive: WALK_SPEED, driveStride: 2.4, legs: 0.45, arms: 0.4 },
     gallop: { pitch: 0.95, speed: 3.4, stride: 1.6, drive: WALK_SPEED * 1.5, driveStride: 3.6, legs: 0.75, arms: 0.7 },
     hunch: { pitch: HUNCH, speed: 0.75, stride: 0.7, drive: WALK_SPEED, driveStride: 2.2, legs: 0.5, arms: 0.35 },
+    upright: { pitch: 0.16, speed: 0.9, stride: 1.2, drive: WALK_SPEED, driveStride: 2.4, legs: 0.48, arms: 0.24 },
     beat: { pitch: REAR, speed: 0, stride: 1, drive: 0, driveStride: 1, legs: 0, arms: 0 }
   };
   // Cycle offsets: a four-beat walk, a bound (pairs half a cycle apart), a biped walk
   const OFFSETS = {
     knuckle: { legL: 0, armL: 0.25, legR: 0.5, armR: 0.75 },
     gallop: { legL: 0, legR: 0.08, armL: 0.5, armR: 0.58 },
-    hunch: { legL: 0, armR: 0, legR: 0.5, armL: 0.5 }
+    hunch: { legL: 0, armR: 0, legR: 0.5, armL: 0.5 },
+    upright: { legL: 0, armR: 0, legR: 0.5, armL: 0.5 }
   };
   const LIMBS = [{ leg: "legL", arm: "armL", side: -1 }, { leg: "legR", arm: "armR", side: 1 }];
   const BEAT_TIME = 1.6;
+  const POUND_TIME = 0.64, CHEW_TIME = 0.44, MANAGED_BEAT_TIME = 1.2;
+  const MANAGED_MOTION_RADIUS = 2.25, MANAGED_MOTION_HEIGHT = 2.8;
+  const MANAGED_SMASH_RADIUS = 2.9;
   const TAU = Math.PI * 2;
+  const wave = (phase, offset) => Math.sin(TAU * (phase + offset));
+  const QUAD_RADIUS = 0.85, QUAD_CENTERS = [0.05, 0.7, 1.35];
+  const POUND_RADIUS = 0.875, POUND_CENTERS = [0.05, 0.8, 1.6];
+  const STAND_RADIUS = 0.825, STAND_CENTER = 0.19;
+  const PARK_RADIUS = 0.72, PARK_CENTER = 0.06;
+  const SIT_RADIUS = 0.9, SIT_CENTERS = [-0.12, 0.55];
+  const LAB_RADIUS = 0.82, LAB_CENTERS = [0, 0.8], LAB_HEIGHT = 2.7;
+  const LAB_IDLE_RADIUS = 0.85;
+  const LAB_WALK_RADIUS = 1.06;
+  const LAB_SQUEEZE_RADIUS = 0.77;
+  // Three overlapping longitudinal cylinders enclose the complete quadruped,
+  // including its knuckles, without reserving a four-metre-wide turning circle
+  // while it walks straight. Each smaller pose profile is used only once the
+  // current rig actually fits; transitions retain the complete radial envelope.
+  // When both lab envelopes fit, keep the requested route's shape: walking
+  // reserves its circle, while retracting work arms keep their forward capsules.
+  const footprintProfile = (entry) => !entry.compact ? 0 : entry.planningSeat ? 5 : entry.planningRoam ? 1 : entry.footprintMode === "lab" ? entry.planningLab ? entry.planningLabWork === "" ? entry.motion && entry.motion.labSqueeze && !entry.gorilla.labItem ? 9 : 8 : 6 : entry.gorilla.labSqueezeCompact ? 9 : entry.gorilla.labIdleCompact ? 7 : entry.gorilla.labWalkCompact && entry.motion && !entry.motion.labSqueeze && !entry.motion.labWork ? 8 : entry.gorilla.labCompact ? 6 : entry.gorilla.labWalkCompact ? 8 : 0 : entry.footprintMode === "sit" ? entry.gorilla.sitCompact ? 5 : 0 : entry.footprintMode === "park" ? entry.gorilla.parkCompact ? 4 : 0
+    : entry.footprintMode === "stand" ? entry.gorilla.standCompact ? 3 : 0
+    : entry.footprintMode === "pound" ? entry.gorilla.poundCompact ? 2 : 0 : entry.gorilla.compact ? 1 : 0;
+  const footprintCount = (entry) => { const profile = footprintProfile(entry); return profile === 5 || profile === 6 ? 2 : profile === 1 || profile === 2 ? 3 : 1; };
+  const footprintRadius = (entry) => {
+    const profile = footprintProfile(entry);
+    return profile ? (profile === 9 ? LAB_SQUEEZE_RADIUS : profile === 8 ? LAB_WALK_RADIUS : profile === 7 ? LAB_IDLE_RADIUS : profile === 6 ? LAB_RADIUS : profile === 5 ? SIT_RADIUS : profile === 4 ? PARK_RADIUS : profile === 3 ? STAND_RADIUS : profile === 2 ? POUND_RADIUS : QUAD_RADIUS) * entry.root.scale.x
+      : Math.max(entry.radius, entry.gorilla.bodyRadius);
+  };
+  const footprintOffset = (entry, index) => {
+    const profile = footprintProfile(entry);
+    return profile ? (profile >= 7 ? 0 : profile === 6 ? LAB_CENTERS[index] : profile === 5 ? SIT_CENTERS[index] : profile === 4 ? PARK_CENTER : profile === 3 ? STAND_CENTER : (profile === 2 ? POUND_CENTERS : QUAD_CENTERS)[index]) * entry.root.scale.x : 0;
+  };
+  const footprintOverlaps = (a, ax, ay, az, ah, b, bx, by, bz, bh, margin = 0, shape = footprint) => {
+    if (ay >= by + b.height || ay + a.height <= by) return false;
+    const radius = shape.radius(a) + shape.radius(b) + margin, r2 = radius * radius;
+    const as = Math.sin(ah), ac = Math.cos(ah), bs = Math.sin(bh), bc = Math.cos(bh);
+    const aCount = shape.count(a), bCount = shape.count(b);
+    for (let i = 0; i < aCount; i++) {
+      const ao = shape.offset(a, i);
+      for (let j = 0; j < bCount; j++) {
+        const bo = shape.offset(b, j), dx = ax + as * ao - bx - bs * bo, dz = az + ac * ao - bz - bc * bo;
+        if (dx * dx + dz * dz < r2) return true;
+      }
+    }
+    return false;
+  };
+  const footprintCircleOverlaps = (entry, x, y, z, heading, ox, oy, oz, radius, height, margin = 0, shape = footprint) => {
+    if (y >= oy + height || y + entry.height <= oy) return false;
+    const r = shape.radius(entry) + radius + margin, sine = Math.sin(heading), cosine = Math.cos(heading);
+    for (let i = 0; i < shape.count(entry); i++) {
+      const offset = shape.offset(entry, i), dx = x + sine * offset - ox, dz = z + cosine * offset - oz;
+      if (dx * dx + dz * dz < r * r) return true;
+    }
+    return false;
+  };
+  // An expanded pose can leave two conservative capsules overlapping even when
+  // their meshes are apart. Allow an escape only when every overlapping pair
+  // separates throughout the move and no other pair is entered. Test the limb
+  // centres, including their turning arcs, rather than just the two roots.
+  const separatingPair = (x, z, vx, vz, heading, turn, offset, ox, oz, radius, existingContact = true) => {
+    const sx = x + Math.sin(heading) * offset - ox, sz = z + Math.cos(heading) * offset - oz;
+    const ex = x + vx + Math.sin(heading + turn) * offset - ox, ez = z + vz + Math.cos(heading + turn) * offset - oz;
+    const start2 = sx * sx + sz * sz, r2 = radius * radius, overlap = start2 < r2;
+    if (overlap && (!existingContact || ex * ex + ez * ez <= start2 + 1e-9)) return false;
+    if (Math.abs(turn * offset) < 1e-9) {
+      const dot = sx * vx + sz * vz;
+      if (overlap) return dot >= -1e-9;
+      const length2 = vx * vx + vz * vz, t = length2 ? clamp(-dot / length2, 0, 1) : 0;
+      return (sx + vx * t) ** 2 + (sz + vz * t) ** 2 >= r2 - 1e-9;
+    }
+    const steps = Math.max(1, Math.ceil(Math.abs(turn) / 0.06)), half = 0.5 / steps;
+    const speed = Math.hypot(vx, vz) + Math.abs(offset * turn), acceleration = Math.abs(offset) * turn * turn;
+    for (let i = 0; i < steps; i++) {
+      const a = i / steps, b = (i + 1) / steps, mid = (a + b) * 0.5;
+      if (overlap) {
+        const angle = heading + turn * mid, sine = Math.sin(angle), cosine = Math.cos(angle);
+        const rx = x + vx * mid + sine * offset - ox, rz = z + vz * mid + cosine * offset - oz;
+        const derivative = rx * (vx + cosine * offset * turn) + rz * (vz - sine * offset * turn);
+        const bound = speed * speed + (Math.hypot(rx, rz) + speed * half) * acceleration;
+        // This bounds the derivative of squared distance across the interval,
+        // including the curved part between the two sampled headings.
+        if (derivative - bound * half < -1e-9) return false;
+      } else {
+        const ax = x + vx * a + Math.sin(heading + turn * a) * offset - ox;
+        const az = z + vz * a + Math.cos(heading + turn * a) * offset - oz;
+        const dx = x + vx * b + Math.sin(heading + turn * b) * offset - ox - ax;
+        const dz = z + vz * b + Math.cos(heading + turn * b) * offset - oz - az;
+        const length2 = dx * dx + dz * dz, t = length2 ? clamp(-(ax * dx + az * dz) / length2, 0, 1) : 0;
+        const reach = radius + Math.abs(offset) * (1 - Math.cos(turn / steps * 0.5));
+        if ((ax + dx * t) ** 2 + (az + dz * t) ** 2 < reach * reach - 1e-9) return false;
+      }
+    }
+    return true;
+  };
+  const footprintSeparates = (a, ax, ay, az, ah, nx, ny, nz, nh, b, bx, by, bz, bh, margin = 0, shape = footprint) => {
+    if (Math.min(ay, ny) >= by + b.height || Math.max(ay, ny) + a.height <= by) return true;
+    // Height bands alone cannot collide across the island. A newly entered
+    // band disallows existing-overlap escape only for a horizontal contact.
+    const existingContact = ay < by + b.height && ay + a.height > by;
+    const turn = Math.atan2(Math.sin(nh - ah), Math.cos(nh - ah));
+    const radius = shape.radius(a) + shape.radius(b) + margin, bs = Math.sin(bh), bc = Math.cos(bh);
+    const aCount = shape.count(a), bCount = shape.count(b);
+    for (let i = 0; i < aCount; i++) for (let j = 0; j < bCount; j++) {
+      const bo = shape.offset(b, j);
+      if (!separatingPair(ax, az, nx - ax, nz - az, ah, turn, shape.offset(a, i), bx + bs * bo, bz + bc * bo, radius, existingContact)) return false;
+    }
+    return true;
+  };
+  const footprintCircleSeparates = (entry, x, y, z, heading, nx, ny, nz, nh, ox, oy, oz, radius, height, margin = 0) => {
+    if (Math.min(y, ny) >= oy + height || Math.max(y, ny) + entry.height <= oy) return true;
+    const existingContact = y < oy + height && y + entry.height > oy;
+    const turn = Math.atan2(Math.sin(nh - heading), Math.cos(nh - heading)), reach = footprintRadius(entry) + radius + margin;
+    for (let i = 0; i < footprintCount(entry); i++) {
+      if (!separatingPair(x, z, nx - x, nz - z, heading, turn, footprintOffset(entry, i), ox, oz, reach, existingContact)) return false;
+    }
+    return true;
+  };
+  const footprintSweep = (entry, x, y, z, toX, toY, toZ, radius, height, fromHeading, toHeading, test, ignore, shape = footprint) => {
+    if (!entry || shape === footprint && !footprintProfile(entry)) return test(x, y, z, toX, toY, toZ, radius, height, entry, ignore);
+    const turn = Math.atan2(Math.sin(toHeading - fromHeading), Math.cos(toHeading - fromHeading));
+    const steps = Math.max(1, Math.ceil(Math.abs(turn) / 0.12)), angle = turn / steps;
+    for (let step = 0; step < steps; step++) {
+      const a = step / steps, b = (step + 1) / steps, first = fromHeading + turn * a, last = fromHeading + turn * b;
+      for (let i = 0; i < shape.count(entry); i++) {
+        const offset = shape.offset(entry, i), arc = Math.abs(offset) * (1 - Math.cos(angle * 0.5));
+        if (!test(x + (toX - x) * a + Math.sin(first) * offset, y + (toY - y) * a, z + (toZ - z) * a + Math.cos(first) * offset,
+          x + (toX - x) * b + Math.sin(last) * offset, y + (toY - y) * b, z + (toZ - z) * b + Math.cos(last) * offset,
+          shape.radius(entry) + arc, height, entry, ignore)) return false;
+      }
+    }
+    return true;
+  };
+  const footprint = { count: footprintCount, radius: footprintRadius, offset: footprintOffset,
+    overlaps: footprintOverlaps, circleOverlaps: footprintCircleOverlaps, separates: footprintSeparates,
+    circleSeparates: footprintCircleSeparates, sweep: footprintSweep };
+  // Peer contacts reserve the central trunk, excluding arms and shoulder
+  // mounds. Scenery continues to use the complete animated body above.
+  // Sitting leans behind the root; other transitions use the measured trunk.
+  const torsoProfile = e => e.planningSeat ? 4 : e.planningRoam ? 3 : e.planningLab ? 1
+    : e.gorilla.torsoSitCompact ? 4 : e.gorilla.torsoLabCompact ? 1 : e.gorilla.torsoStandCompact ? 2 : e.gorilla.torsoQuadCompact ? 3 : 0;
+  const torso = {
+    count: e => torsoProfile(e) === 3 ? 2 : 1,
+    radius: e => torsoProfile(e) ? (torsoProfile(e) === 1 ? 0.58 : 0.6) * e.root.scale.x : e.gorilla.torsoRadius,
+    offset: (e, i) => (torsoProfile(e) === 4 ? -0.1 : torsoProfile(e) === 1 ? 0.04 : torsoProfile(e) === 2 ? 0.105 : torsoProfile(e) === 3 ? i ? 0.65 : 0.05 : 0) * e.root.scale.x,
+    circleOverlaps: (e, x, y, z, h, ox, oy, oz, r, height, margin = 0) => footprintCircleOverlaps(e, x, y, z, h, ox, oy, oz, r, height, margin, torso),
+    overlaps: (a, ax, ay, az, ah, b, bx, by, bz, bh, margin = 0) => footprintOverlaps(a, ax, ay, az, ah, b, bx, by, bz, bh, margin, torso),
+    separates: (a, ax, ay, az, ah, nx, ny, nz, nh, b, bx, by, bz, bh, margin = 0) => footprintSeparates(a, ax, ay, az, ah, nx, ny, nz, nh, b, bx, by, bz, bh, margin, torso),
+    sweep: (e, x, y, z, nx, ny, nz, radius, height, fromHeading, toHeading, test, ignore) => footprintSweep(e, x, y, z, nx, ny, nz, radius, height, fromHeading, toHeading, test, ignore, torso)
+  };
+  const torsoRows = new WeakMap();
+  const torsoCorners = (geometry) => {
+    let corners = torsoRows.get(geometry);
+    if (corners) return corners;
+    const rows = new Map(), vertices = geometry.verts;
+    for (let i = 0; i < vertices.length; i += 3) {
+      const x = vertices[i], y = vertices[i + 1], z = vertices[i + 2];
+      if (Math.abs(x) > 5 * U + 1e-6) continue;
+      let row = rows.get(y);
+      if (!row) { row = [x, x, z, z]; rows.set(y, row); }
+      row[0] = Math.min(row[0], x); row[1] = Math.max(row[1], x);
+      row[2] = Math.min(row[2], z); row[3] = Math.max(row[3], z);
+    }
+    corners = new Float64Array(rows.size * 12);
+    let at = 0;
+    for (const [y, row] of rows) for (let i = 0; i < 4; i++) {
+      corners[at++] = row[i & 1]; corners[at++] = y; corners[at++] = row[2 + (i >> 1)];
+    }
+    torsoRows.set(geometry, corners);
+    return corners;
+  };
 
   const jitter = (rand, base, dark, p) => () => rand() < p ? dark : base;
   // Columns of lit code run down the fur: every fourth column, two cells on, one off.
@@ -105,6 +277,54 @@
     v.set(6, 3, 5, C.shades);
     return v;
   };
+  const feedingHeadVox = (rand) => {
+    const v = headVox(rand);
+    // The separate jaw fills this recess at rest. Articulating it never deforms
+    // or rebuilds the shared head geometry, and walking leaves the mouth shut.
+    for (let x = 1; x <= 5; x++) for (let y = 0; y <= 1; y++) for (let z = 6; z <= 7; z++) v.map.delete(`${x},${y},${z}`);
+    v.fill(1, 5, 0, 1, 5, 5, C.nostril);
+    return v;
+  };
+  const jawVox = () => {
+    const v = makeVox();
+    v.fill(0, 4, 0, 1, 0, 1, C.hide);
+    v.fill(0, 4, 0, 0, 1, 1, C.hideDk);
+    return v;
+  };
+  const LAB_PALETTE = APE.concat(["#f3f1df", "#c5ccd0", "#658392"]);
+  const labTorsoVox = (rand) => {
+    const v = torsoVox(rand);
+    for (const [key] of v.map) {
+      const [x, y, z] = key.split(",").map(Number);
+      if (!(z >= 5 && x >= 3 && x <= 6)) v.map.set(key, z < 1 ? 13 : 12);
+    }
+    // The open coat, folded collar, blue pocket and dark buttons remain
+    // part of the cached torso mesh, so they follow every bend of the body.
+    v.fill(0, 9, -1, 0, 0, 3, 13);
+    for (let y = 6; y <= 10; y++) {
+      const x = y > 8 ? 2 : 3;
+      v.set(x, y, 6, 13); v.set(9 - x, y, 6, 13);
+    }
+    v.fill(1, 2, 4, 5, 7, 7, 14);
+    v.set(6, 3, 7, 14); v.set(6, 1, 7, 14);
+    return v;
+  };
+  const labArmVox = (rand) => {
+    const v = armVox(rand);
+    for (const [key] of v.map) if (+key.split(",")[1] >= 3) v.map.set(key, +key.split(",")[1] === 3 ? 13 : 12);
+    return v;
+  };
+  const labFlaskGeometry = () => {
+    // Smooth circular glass keeps the same physical bounds and neck grip as
+    // the original vessel. The rolled rim turns inward into its open neck.
+    const profile = [[0, 0], [0.177, 0], [0.19, 0.005], [0.19565, 0.016], [0.19565, 0.042],
+      [0.19, 0.061], [0.12, 0.255], [0.055, 0.445], [0.047, 0.474], [0.045, 0.501],
+      [0.045, 0.626], [0.048, 0.643], [0.069, 0.648], [0.074, 0.655], [0.074, 0.663],
+      [0.067, 0.6708], [0.048, 0.6708], [0.041, 0.664], [0.039, 0.655], [0.035, 0.642],
+      [0.035, 0.501], [0.037, 0.477], [0.045, 0.451], [0.176, 0.065], [0, 0.045]];
+    return BL.models.lathe({ profile, segments: 32, emissive: 0.15,
+      color: t => profile[Math.round(t * (profile.length - 1))][1] < 0.26 ? "#57c6a0" : "#9de3dc" });
+  };
   // One voxel map per part, two palettes: ape and code.
   const geometries = cached(() => {
     const part = (name, build, origin) => {
@@ -114,16 +334,39 @@
         code: voxelGeometry(v, { unit: U, palette: CODE, origin, emissive: CODE_GLOW })
       };
     };
+    const lab = (build, origin, unit = U) => voxelGeometry(build(mulberry32(fnv1a("agent/lab"))), { unit, palette: LAB_PALETTE, origin });
+    const flask = labFlaskGeometry();
+    flask.labGripY = 9.5 * U * 0.65;
     return {
       legL: part("legL", legVox, { x: -2 * U, y: -8 * U, z: -2 * U }),
       legR: part("legR", legVox, { x: -2 * U, y: -8 * U, z: -2 * U }),
       armL: part("armL", armVox, { x: -2 * U, y: -14 * U, z: -2 * U }),
       armR: part("armR", armVox, { x: -2 * U, y: -14 * U, z: -2 * U }),
       torso: part("torso", torsoVox, { x: -5 * U, y: 0, z: -3.5 * U }),
-      head: part("head", headVox, { x: -3.5 * U, y: 0, z: -2 * U })
+      head: part("head", headVox, { x: -3.5 * U, y: 0, z: -2 * U }),
+      feedingHead: part("head", feedingHeadVox, { x: -3.5 * U, y: 0, z: -2 * U }),
+      jaw: part("jaw", jawVox, { x: -2.5 * U, y: -U, z: 0 }),
+      labTorso: lab(labTorsoVox, { x: -5 * U, y: 0, z: -3.5 * U }),
+      labArm: lab(labArmVox, { x: -2 * U, y: -14 * U, z: -2 * U }),
+      labFlask: flask
     };
   });
   const PART_NAMES = ["legL", "legR", "torso", "armL", "armR", "head"];
+  const CLIMB_VERTICES = new WeakMap();
+  const climbVertices = (geometry) => {
+    let samples = CLIMB_VERTICES.get(geometry);
+    if (samples) return samples;
+    const seen = new Set(), values = [], v = geometry.verts, b = boundsOf(geometry);
+    const cx = (b.min[0] + b.max[0]) * 0.0025, cy = (b.min[1] + b.max[1]) * 0.0025, cz = (b.min[2] + b.max[2]) * 0.0025;
+    for (let i = 0; i < v.length; i += 3) {
+      const key = `${v[i]},${v[i + 1]},${v[i + 2]}`;
+      if (seen.has(key)) continue;
+      seen.add(key); values.push(v[i] * 0.995 + cx, v[i + 1] * 0.995 + cy, v[i + 2] * 0.995 + cz);
+    }
+    samples = new Float32Array(values); CLIMB_VERTICES.set(geometry, samples);
+    return samples;
+  };
+
 
   // A step may climb at most STEP_UP and drop at most STEP_DOWN, so walls and
   // cliff edges stop the Agent instead of lifting it or dropping it off the island.
@@ -135,9 +378,9 @@
   // groundAt(x, z) is the walking surface; walkable(fromX, fromZ, toX, toZ, y, height),
   // when given, is the scene's own swept test, the one its Oogas walk by, and bounds
   // every step the Agent takes. A walk is a list of { x, z } waypoints.
-  const create = ({ groundAt, walkable = null, form = "ape", x = 0, z = 0, heading = 0 }) => {
+  const create = ({ groundAt, walkable = null, form = "ape", x = 0, z = 0, heading = 0, managed = false, scale = 1 }) => {
     const geos = geometries();
-    const root = createNode({ position: { x, y: groundAt(x, z), z }, rotation: { x: 0, y: heading, z: 0 } });
+    const root = createNode({ position: { x, y: groundAt(x, z), z }, rotation: { x: 0, y: heading, z: 0 }, scale: { x: scale, y: scale, z: scale } });
     // The renderers draw the Agent's own palette inside the Matrix instead of repainting it.
     root.matrixNative = true;
     const hips = createNode({ position: { x: 0, y: HIP, z: 0 } });
@@ -151,18 +394,58 @@
       head: createNode({ position: { x: 0, y: NECK_Y, z: 1.5 * U } })
     };
     addChild(chest, parts.armL, parts.armR, parts.head);
+    if (managed) {
+      parts.jaw = createNode({ position: { x: 0, y: U, z: 4 * U } });
+      addChild(parts.head, parts.jaw);
+      parts.armL.rotation.x = parts.armR.rotation.x = -QUAD;
+      parts.head.rotation.x = -QUAD * 0.85;
+    }
+    const labPlaceholder = managed ? createNode({ geometry: geos.labFlask, visible: false, sightHidden: true }) : null;
+    let labFlask = labPlaceholder, labGripY = geos.labFlask.labGripY;
+    const labItemRotation = managed ? new Float32Array([0, 0, 0, 1]) : null;
+    const labArmRotation = managed ? new Float32Array(4) : null, labUprightRotation = managed ? new Float32Array(4) : null;
+    const labGripOffset = managed ? new Float32Array(3) : null;
+    if (labFlask) addChild(parts.armR, labFlask);
     addChild(hips, parts.legL, parts.legR, chest);
     addChild(root, hips);
     const state = {
-      form: null, gait: "idle", walkGait: "knuckle", phase: 0, speed: 0, pitch: QUAD, heading,
+      form: null, gait: "idle", walkGait: "knuckle", phase: 0, speed: 0, backwards: false, pitch: QUAD, heading,
       route: null, routeIndex: 0, idleFor: 1 + Math.random() * 2, gaitFor: 0, beat: 0,
       pace: null, driven: false, walkStyle: "knuckle", inX: 0, inZ: 0, inRun: false,
-      vy: 0, air: false, revealFor: 0
+      vy: 0, air: false, revealFor: 0, pound: 0, chewing: 0, biped: false, lounge: "", hipHeight: HIP,
+      charge: 0, poundCharge: 0, dragging: false, takeoff: 0, landing: 0, crouch: 0, roll: 0, rollBlend: 0, rollAngle: 0, rollTarget: 0,
+      smash: false, hipOffsetZ: 0, sideAngle: 0,
+      climb: 0, climbBlend: 0, climbPose: NaN, climbStride: 0, climbDirection: 0, mantle: 0,
+      groom: 0, groomBlend: 0, groomSide: 1, groomTime: 0,
+      lab: false, labWork: "", labPhase: 0, labSide: 1, labReach: 0, labReachGrip: geos.labFlask.labGripY, labPreviewItem: false, labSqueeze: false, labDie: false, labRoll: 0,
+      labPalmLift: 0, labBench: null, labTouchArm: false, labTouchSide: 1,
+      labArmOffsetX: 0, labArmOffsetY: 0, labArmOffsetZ: 0
     };
-    const setForm = (next) => {
-      if (state.form === next) return;
+    const positionLabItem = () => {
+      if (!managed || labFlask === labPlaceholder && !state.labPreviewItem) return;
+      const arm = parts.armR, inspect = state.labWork === "carry" ? 1 - Math.max(state.labReach, state.labRoll) : 0;
+      quat.fromEuler(labArmRotation, arm.rotation.x, arm.rotation.y, arm.rotation.z);
+      quat.fromEuler(labUprightRotation, state.pitch, 0, 0);
+      quat.multiply(labArmRotation, labUprightRotation, labArmRotation);
+      labArmRotation[0] *= -1; labArmRotation[1] *= -1; labArmRotation[2] *= -1;
+      const shake = state.labDie ? 7.5 : 2.1, tilt = state.labDie ? 0.14 : 0.055;
+      quat.fromEuler(labUprightRotation, Math.sin(state.labPhase * shake) * tilt * inspect,
+        Math.sin(state.labPhase * (state.labDie ? 6.3 : 1.7)) * 0.16 * inspect, Math.cos(state.labPhase * shake) * tilt * inspect);
+      quat.multiply(labItemRotation, labArmRotation, labUprightRotation);
+      quat.rotateVec(labGripOffset, labItemRotation, 0, labGripY / scale, 0);
+      labFlask.position.x = -labGripOffset[0];
+      labFlask.position.y = -1.09 - labGripOffset[1];
+      labFlask.position.z = 0.14 - state.labPalmLift - labGripOffset[2];
+    };
+    let refreshGeometry = null;
+    const rollQuaternion = managed ? new Float32Array([0, 0, 0, 1]) : null;
+    const setForm = (next, force = false) => {
+      if (state.form === next && !force) return;
       state.form = next;
-      for (const name of PART_NAMES) parts[name].geometry = geos[name][next];
+      for (const name of PART_NAMES) parts[name].geometry = state.lab && name === "torso" ? geos.labTorso
+        : state.lab && (name === "armL" || name === "armR") ? geos.labArm : geos[managed && name === "head" ? "feedingHead" : name][next];
+      if (managed) parts.jaw.geometry = geos.jaw[next];
+      if (refreshGeometry) refreshGeometry();
     };
     setForm(form);
     const setGait = (gait) => {
@@ -252,8 +535,20 @@
       state.revealFor = REVEAL_TIME;
     };
     const poke = () => {
+      if (managed) return beat();
       state.beat = BEAT_TIME;
       state.gait = "beat";
+    };
+    const feed = () => { state.chewing = CHEW_TIME; };
+    const beat = () => {
+      if (!managed || state.pound > 0 || state.beat > 0 || state.speed > 0.1 || state.air || state.charge > 0 || state.crouch > 0.01 || state.rollBlend > 0.001 || state.roll > 0 || state.climb > 0 || state.climbBlend > 0.001) return false;
+      state.beat = MANAGED_BEAT_TIME;
+      return true;
+    };
+    const pound = () => {
+      if (!managed || state.pound > 0 || state.beat > 0 || state.air || state.charge > 0 || state.crouch > 0.01 || state.rollBlend > 0.001 || state.roll > 0 || state.climb > 0 || state.climbBlend > 0.001) return false;
+      state.pound = POUND_TIME;
+      return true;
     };
     // Called with no route while idle; returns once a new walk is wanted.
     let onIdle = null;
@@ -286,13 +581,240 @@
         state.idleFor = 0.4 + Math.random() * 0.8;
       }
     };
-    const limb = (node, angle, dt) => {
-      node.rotation.x = damp(node.rotation.x, angle, 18, dt);
+    const limb = (node, angle, dt, rate = 18) => {
+      node.rotation.x = damp(node.rotation.x, angle, rate, dt);
+    };
+    const pose = (dt) => {
+      const g = GAITS[state.gait], top = managed ? state.speed : state.driven ? g.drive : g.speed;
+      const stride = (state.driven ? g.driveStride : g.stride) * scale;
+      if (!managed) state.speed = damp(state.speed, top, 6, dt);
+      state.phase = (state.phase + dt * state.speed / stride * (managed && state.backwards ? -1 : 1)) % 1;
+      // Arrival damping leaves tiny nonzero speeds. Scientists must settle
+      // their feet instead of keeping a full stride (speed / itself) at a desk.
+      const moving = top > 0 ? clamp(state.speed / (managed && state.lab ? GAITS.upright.speed : top), 0, 1) : 0;
+      const lounge = managed ? state.lounge : "", onSide = lounge === "left" || lounge === "right", reclining = lounge === "back" || onSide;
+      const leaning = lounge === "lean-left" || lounge === "lean-right" || lounge === "lean-back";
+      const leanSide = lounge === "lean-left" ? -1 : lounge === "lean-right" ? 1 : 0;
+      if (managed) {
+        state.crouch = damp(state.crouch, state.air ? 0 : Math.max(state.charge, Math.min(1, state.landing * 2)), state.air ? 24 : 20, dt);
+        state.rollBlend = damp(state.rollBlend, state.roll, 9, dt);
+        state.rollAngle = damp(state.rollAngle, state.rollTarget * state.rollBlend, 18, dt);
+        state.sideAngle = damp(state.sideAngle, onSide ? (lounge === "left" ? 1 : -1) * 1.32 : 0, 5, dt);
+        state.climbBlend = damp(state.climbBlend, Number.isFinite(state.climbPose) ? state.climbPose : state.climb * (1 - state.mantle), Number.isFinite(state.climbPose) ? 20 : 10, dt);
+        state.groomBlend = damp(state.groomBlend, state.groom, 8, dt);
+        state.groomTime += dt;
+      }
+      const crouch = managed ? state.crouch : 0, rolling = managed ? state.rollBlend : 0, climbing = managed ? state.climbBlend : 0;
+      const grooming = lounge === "sit" ? state.groomBlend : 0, climbPhase = managed ? state.climbStride / 1.2 : 0;
+      // Long still intervals with a small, slow glance or free-hand adjustment.
+      // Spatial phase keeps neighbours from moving together; support arms stay planted.
+      const restTime = state.groomTime + root.position.x * 0.61 + root.position.z * 0.37;
+      const restCycle = ((restTime % 27) + 27) % 27;
+      const restMotion = lounge && restCycle > 20 ? Math.sin((restCycle - 20) * Math.PI / 7) ** 2 * (1 - grooming) : 0;
+      const jumping = managed && state.air, takeoff = managed ? state.takeoff : 0;
+      const laboratory = managed && state.lab && !lounge && !jumping && !rolling && !climbing && state.pound <= 0 && !state.poundCharge && !state.charge;
+      const labWork = laboratory ? state.labWork : "";
+      const labSqueeze = laboratory && state.labSqueeze && !labWork && labFlask === labPlaceholder;
+      const labWalking = laboratory && !labWork && !labSqueeze && state.speed > 0.1;
+      const squeeze = managed && state.biped === "squeeze" && !lounge && !state.air && state.pound <= 0 && state.beat <= 0;
+      let pitch = squeeze || labSqueeze ? 0 : laboratory ? 0.08 : g.pitch, bob = 0;
+      if (state.gait === "gallop") {
+        pitch += 0.12 * wave(state.phase, 0.25) * moving;
+        bob = 0.08 * Math.max(0, wave(state.phase, 0.25)) * moving;
+      } else if (moving > 0) bob = 0.02 * Math.abs(wave(state.phase, 0)) * moving;
+      let poundLift = 0;
+      if (managed && state.poundCharge > 0 && state.pound <= 0) {
+        poundLift = state.poundCharge * 0.8;
+        pitch = 1.02 - 0.45 * poundLift;
+      }
+      if (managed && state.pound > 0) {
+        const t = 1 - state.pound / POUND_TIME;
+        // A controlled smash plants the feet, rears up with both fists overhead,
+        // then folds at the shoulders as the fists strike the floor. Workers keep
+        // their shorter equipment-pounding gesture.
+        poundLift = state.smash ? t < 0.34 ? t / 0.34 : t < 0.46 ? 1 : t < 0.66 ? 1 - (t - 0.46) / 0.2 : 0
+          : t < 0.28 ? t / 0.28 : t < 0.58 ? 1 - (t - 0.28) / 0.3 : 0;
+        pitch = state.smash ? 1.02 - 0.86 * poundLift : 1.02 - 0.36 * poundLift;
+        state.pound = Math.max(0, state.pound - dt);
+      }
+      if (lounge) { pitch = reclining ? 0 : leaning ? -0.46 : -0.18 + grooming * 0.12; bob = 0; }
+      // A loaded crouch compresses both pairs of limbs, then the takeoff extends
+      // them before the airborne tuck. Landing absorbs the impact the same way.
+      if (crouch > 0) { pitch += (1.12 - pitch) * crouch; bob *= 1 - crouch; }
+      if (jumping) { pitch += (0.82 - pitch) * takeoff; bob = 0; }
+      if (rolling > 0) { pitch *= 1 - rolling; bob *= 1 - rolling; }
+      if (climbing > 0) { pitch += (0.18 - pitch) * climbing; bob *= 1 - climbing; }
+      state.pitch = laboratory || managed && Number.isFinite(state.climbPose) ? pitch : damp(state.pitch, pitch, 6, dt);
+      chest.rotation.x = state.pitch;
+      if (managed) {
+        // Settle the pelvis between the bent thighs instead of holding the
+        // whole torso above them on straight arms. A one-hand lean also moves
+        // its weight toward that hand; the other hand stays near the lap.
+        chest.position.y = damp(chest.position.y, lounge === "sit" ? -0.324 : leaning ? -0.35 : 0, 6, dt);
+        chest.rotation.z = damp(chest.rotation.z, leaning ? -leanSide * 0.08 : 0, 6, dt);
+      }
+      const o = OFFSETS[state.gait];
+      // Arms hang straight down in the world whatever the chest's lean; the swing reaches forward and back.
+      for (let i = 0; i < LIMBS.length; i++) {
+        const l = LIMBS[i], arm = parts[l.arm];
+        if (managed && l.side > 0) {
+          arm.position.x -= state.labArmOffsetX; arm.position.y -= state.labArmOffsetY; arm.position.z -= state.labArmOffsetZ;
+          state.labArmOffsetX = state.labArmOffsetY = state.labArmOffsetZ = 0;
+        }
+        // A standing neighbour tucks its shoulders and takes short steps to let
+        // another adult pass. Meshes and model scale stay exactly the same.
+        const climbStroke = wave(climbPhase, l.side < 0 ? 0 : 0.5), leg = parts[l.leg];
+        if (managed) {
+          // Ordinary lab steps leave room between the coat and forearms. Only
+          // an actual narrow passage requests the separately measured tuck.
+          arm.position.x = damp(arm.position.x, l.side * ((labSqueeze ? 0.22 : labWalking ? 0.66 : laboratory ? 0.36 : squeeze ? 0.4 : SHOULDER_X) * (1 - climbing) + 0.38 * climbing), 12, dt);
+          // Counter the torso's tilt during each lift so the hands and toes
+          // move along the wall instead of pumping away from its surface.
+          arm.position.z = damp(arm.position.z, 0.5 * U - climbing * (0.036 + climbStroke * 0.055), 20, dt);
+          arm.position.y = damp(arm.position.y, SHOULDER_Y + climbStroke * 0.115 * climbing + (labWork === "type" ? 0.06 : 0)
+            - (leaning && (!leanSide || l.side === leanSide) ? 0.077 : 0), 20, dt);
+          leg.position.y = damp(leg.position.y, Math.max(0, -climbStroke) * 0.09 * climbing, 18, dt);
+          leg.position.z = damp(leg.position.z, (0.424 + climbStroke * 0.034) * climbing, 20, dt);
+        }
+        let legAngle = lounge ? onSide ? -0.42 : reclining ? 0.1 : leaning ? leanSide ? -1.1 : -1.14 : -1.28 : jumping ? 0.7 - takeoff * 0.85 : o ? -(squeeze ? 0.1 : labSqueeze ? 0.16 : g.legs) * moving * wave(state.phase, o[l.leg]) : 0;
+        legAngle += (-1.2 - legAngle) * crouch;
+        legAngle += (-0.6 - legAngle) * rolling;
+        legAngle += (-0.28 + 0.06 * climbStroke - legAngle) * climbing;
+        limb(leg, legAngle, dt, managed && state.landing > 0 ? 32 : 18);
+        if (rolling > 0.001) {
+          limb(arm, -state.pitch - 0.7 * rolling, dt);
+          arm.rotation.z = damp(arm.rotation.z, -l.side * 0.22 * rolling, 12, dt);
+        } else if (lounge) {
+          // The lower arm cushions the head on its side; the upper hand rests
+          // across the chest. A seated neighbour picks with one hand while the
+          // other stays planted beside its hip.
+          const lower = onSide && (lounge === "left" ? l.side < 0 : l.side > 0);
+          const supporting = leaning && (!leanSide || l.side === leanSide) || lower || lounge === "sit";
+          const groomArm = l.side === state.groomSide ? grooming : 0;
+          // Reach the neighbour's mid-back; the higher, straighter reach drove
+          // the knuckles through its shoulder during the picking cycle.
+          const pick = Math.sin(state.groomTime * 10.5), reach = -0.9 + pick * 0.055;
+          // The free hand rests near the bent knee. Matching its old angle to
+          // the reclined chest left it pointing almost horizontally in midair.
+          const rest = (leaning ? supporting ? -state.pitch + 1 : -0.55 : onSide ? lower ? -2.3 : -1.08 : reclining ? -0.08 : -state.pitch - 0.801)
+            + (supporting ? 0 : Math.sin(restTime * 0.8 + i) * 0.045 * restMotion);
+          limb(arm, rest + (reach - rest) * groomArm, dt);
+          const restSide = leaning ? supporting ? l.side * 0.18 : -l.side * 0.12 : onSide ? lower ? -l.side * 0.2 : -l.side * 0.55 : reclining ? l.side * 0.18 : -l.side * 0.12;
+          arm.rotation.z = damp(arm.rotation.z, restSide + (l.side * 0.6 - restSide) * groomArm, 12, dt);
+        } else if (labWork) {
+          const stroke = Math.sin(state.labPhase * (labWork === "type" ? 11 : 2.7) + i * Math.PI);
+          const working = labWork === "type" || labWork === "touch" && l.side === state.labSide || labWork === "carry" && l.side > 0;
+          const inspect = -1.83 + Math.sin(state.labPhase * (state.labDie ? 7.5 : 1.1)) * 0.1;
+          const shoulderY = HIP + Math.cos(state.pitch) * SHOULDER_Y - Math.sin(state.pitch) * 0.5 * U;
+          const handY = (1.14 + state.labReachGrip) / scale - shoulderY;
+          const reachBench = Math.atan2(0.14, 1.09 * Math.cos(0.08))
+            - Math.acos(clamp(-handY / Math.hypot(1.09 * Math.cos(0.08), 0.14), -1, 1)) - state.pitch;
+          const reach = labWork === "type" ? -1.25 + stroke * 0.055 : labWork === "touch" ? -1.95 + stroke * 0.1
+            : inspect + (reachBench - inspect) * Math.max(state.labReach, state.labRoll);
+          limb(arm, working ? reach : -state.pitch - g.arms * moving * wave(state.phase, i * 0.5), dt);
+          arm.rotation.z = damp(arm.rotation.z, working ? -l.side * 0.08 : 0, 12, dt);
+        } else if (managed && (state.pound > 0 || poundLift > 0)) {
+          limb(arm, -state.pitch - (state.smash ? 2.7 : 1.65) * poundLift, dt);
+          arm.rotation.z = damp(arm.rotation.z, 0, 18, dt);
+        } else if (managed && state.dragging && l.side > 0) {
+          // Keep one knuckle around the Ooga's trailing ankle while the free
+          // arm can still counter-swing through the walk.
+          limb(arm, -state.pitch + 0.72, dt);
+          arm.rotation.z = damp(arm.rotation.z, -0.2, 18, dt);
+        } else if (state.gait === "beat") {
+          // Alternate fists on the chest, easing in and out of the pose
+          const beatTime = managed ? MANAGED_BEAT_TIME : BEAT_TIME;
+          const k = Math.min(1, (beatTime - state.beat) * 4) * Math.min(1, state.beat * 4);
+          arm.rotation.x = damp(arm.rotation.x, -state.pitch - (1.25 + 0.3 * Math.sin((beatTime - state.beat) * 16 + (l.side < 0 ? 0 : Math.PI))) * k, 18, dt);
+          arm.rotation.z = damp(arm.rotation.z, -l.side * 0.45 * k, 12, dt);
+        } else {
+          let armAngle = -state.pitch - (jumping ? state.biped ? 0.2 : 0.7 - takeoff * 0.85 : o && !squeeze ? (labSqueeze ? 0.08 : labWalking ? 0.1 : g.arms) * moving * wave(state.phase, o[l.arm]) : 0);
+          armAngle += (-state.pitch - 1 - armAngle) * crouch;
+          limb(arm, armAngle, dt, managed && state.landing > 0 ? 32 : 18);
+          arm.rotation.z = damp(arm.rotation.z, state.gait === "hunch" ? l.side * 0.12 : 0, 8, dt);
+        }
+        if (managed) {
+          const groomArm = lounge === "sit" && l.side === state.groomSide ? grooming : 0;
+          arm.rotation.y = damp(arm.rotation.y, l.side * 0.67 * groomArm, 12, dt);
+          // Reach high with one hand as the opposite foot takes its next hold.
+          // The controller advances the phase by actual signed wall travel, so
+          // stopping freezes the grip and descending reverses the same gait.
+          if (climbing > 0.001) {
+            const raised = -2.8 + 0.035 * climbStroke;
+            arm.rotation.x += (raised - arm.rotation.x) * climbing;
+            arm.rotation.z += (l.side * 0.14 - arm.rotation.z) * climbing;
+          }
+        }
+      }
+      if (managed) {
+        const arm = parts.armR, angle = arm.rotation.x;
+        const palm = labWork === "carry" ? 0.1 + 0.17 * clamp((1.32 + angle) / 0.12, 0, 1) : 0;
+        state.labPalmLift = damp(state.labPalmLift, palm, 24, dt);
+        const lift = laboratory ? state.labPalmLift : 0;
+        // Reach straight forward and withdraw along the same arc. Only this
+        // hand's own pickup bench permits contact while the arm passes its top.
+        if (!laboratory || labWork === "type" || labWork === "touch"
+          || labWork !== "carry" && Math.abs(angle + state.pitch) < 0.03) state.labBench = null;
+        // Put the low cube in the palm instead of its forward edge. Moving the
+        // shoulder by the same local offset preserves the exact item contact.
+        state.labArmOffsetX = Math.sin(arm.rotation.y) * Math.cos(angle) * lift;
+        state.labArmOffsetY = -Math.sin(angle) * lift;
+        state.labArmOffsetZ = Math.cos(arm.rotation.y) * Math.cos(angle) * lift;
+        arm.position.x += state.labArmOffsetX; arm.position.y += state.labArmOffsetY; arm.position.z += state.labArmOffsetZ;
+        if (laboratory && labWork === "touch") { state.labTouchArm = true; state.labTouchSide = state.labSide; }
+        const touchArm = state.labTouchSide < 0 ? parts.armL : parts.armR;
+        if (!laboratory || labWork === "carry" || labWork === "type" || Math.abs(touchArm.rotation.x + state.pitch) < 0.03) state.labTouchArm = false;
+        if (state.labTouchArm) {
+          const reach = clamp((-touchArm.rotation.x - 0.08) / 1.48, 0, 1);
+          touchArm.rotation.y = -state.labTouchSide * 1.7 * Math.sin(Math.PI * reach);
+        }
+      }
+      // The head keeps the face forward, looking up when it rears
+      parts.head.rotation.x = -state.pitch * (state.gait === "beat" ? 1.15 : 0.85);
+      if (managed) {
+        parts.head.rotation.x += (-0.04 - state.climbDirection * 0.16 - parts.head.rotation.x) * climbing;
+        parts.head.rotation.x += Math.sin(restTime * 0.65) * 0.055 * restMotion;
+        parts.head.rotation.y = damp(parts.head.rotation.y, state.groomSide * 0.36 * grooming + Math.sin(restTime * 0.5) * 0.16 * restMotion, 8, dt);
+        if (labWork) {
+          parts.head.rotation.x = labWork === "type" || labWork === "roll" ? 0.22 : labWork === "carry" ? 0.08 : -0.08;
+          parts.head.rotation.y = labWork === "touch" ? state.labSide * 0.12 : Math.sin(state.labPhase * 0.7) * 0.05;
+        }
+        positionLabItem();
+        state.beat = Math.max(0, state.beat - dt);
+        state.chewing = Math.max(0, state.chewing - dt);
+        const chew = state.chewing > 0 ? Math.abs(Math.sin((CHEW_TIME - state.chewing) * 29)) : 0;
+        parts.jaw.position.y = (1 - chew * 0.65) * U;
+        parts.jaw.rotation.x = chew * 0.16;
+      }
+      if (managed) {
+        const hipHeight = (lounge ? reclining ? 0 : 0.12 : HIP - 0.17 * crouch + 0.08 * takeoff) * (1 - rolling);
+        state.hipHeight = damp(state.hipHeight, hipHeight, crouch > 0 || jumping ? 14 : 6, dt);
+        hips.rotation.x = damp(hips.rotation.x, reclining ? -Math.PI / 2 : -Math.PI / 2 * rolling, rolling > 0.0001 ? 9 : 6, dt);
+        state.hipOffsetZ = damp(state.hipOffsetZ, reclining ? 0.5 : 0.45 * rolling - 0.12 * climbing, 6, dt);
+        hips.position.z = state.hipOffsetZ;
+        hips.position.y = state.hipHeight + bob;
+        // Roll around the body's long axis after lying back. Euler YXZ would
+        // roll the standing spine first, which sweeps the head through the floor.
+        if (rolling > 0.0001 || Math.abs(state.rollAngle) > 0.0001 || Math.abs(state.sideAngle) > 0.0001) {
+          const sx = Math.sin(hips.rotation.x * 0.5), cx = Math.cos(hips.rotation.x * 0.5);
+          const angle = state.rollAngle + state.sideAngle, sz = Math.sin(angle * 0.5), cz = Math.cos(angle * 0.5);
+          rollQuaternion[0] = cz * sx; rollQuaternion[1] = sz * sx;
+          rollQuaternion[2] = sz * cx; rollQuaternion[3] = cz * cx;
+          // A slight slope plants the lower foot alongside the hip and forearm.
+          // A steeper tilt leaves the torso suspended between those extremities.
+          const tilt = 0.1 * Math.abs(Math.sin(state.sideAngle)), st = Math.sin(tilt * 0.5), ct = Math.cos(tilt * 0.5);
+          const qx = rollQuaternion[0], qy = rollQuaternion[1], qz = rollQuaternion[2], qw = rollQuaternion[3];
+          rollQuaternion[0] = ct * qx + st * qw; rollQuaternion[1] = ct * qy - st * qz;
+          rollQuaternion[2] = ct * qz + st * qy; rollQuaternion[3] = ct * qw - st * qx;
+          hips.quaternion = rollQuaternion;
+        } else hips.quaternion = null;
+      } else hips.position.y = HIP + bob;
+      root.rotation.y = state.heading;
     };
     const update = (dt) => {
-      // The first displayed frame after a debug advance can carry a negative
-      // interval; a fast damp would amplify it instead of settling.
-      if (!(dt > 0)) return;
+      // Managed companions belong to their shared collision controller. A scene's
+      // ordinary Agent update must never move or animate them a second time.
+      if (managed || !(dt > 0)) return;
       if (state.revealFor > 0) state.revealFor -= dt;
       if (state.beat > 0) {
         state.beat -= dt;
@@ -304,37 +826,7 @@
         else if (onIdle) onIdle();
         else state.idleFor = 2;
       }
-      const g = GAITS[state.gait], top = state.driven ? g.drive : g.speed, stride = state.driven ? g.driveStride : g.stride;
-      state.speed = damp(state.speed, top, 6, dt);
-      state.phase = (state.phase + dt * state.speed / stride) % 1;
-      const moving = top > 0 ? clamp(state.speed / top, 0, 1) : 0;
-      const wave = (o) => Math.sin(TAU * (state.phase + o));
-      let pitch = g.pitch, bob = 0;
-      if (state.gait === "gallop") {
-        pitch += 0.12 * wave(0.25) * moving;
-        bob = 0.08 * Math.max(0, wave(0.25)) * moving;
-      } else if (moving > 0) bob = 0.02 * Math.abs(wave(0)) * moving;
-      state.pitch = damp(state.pitch, pitch, 6, dt);
-      chest.rotation.x = state.pitch;
-      const o = OFFSETS[state.gait];
-      // Arms hang straight down in the world whatever the chest's lean; the swing reaches forward and back.
-      for (let i = 0; i < LIMBS.length; i++) {
-        const l = LIMBS[i], arm = parts[l.arm];
-        limb(parts[l.leg], o ? -g.legs * moving * wave(o[l.leg]) : 0, dt);
-        if (state.gait === "beat") {
-          // Alternate fists on the chest, easing in and out of the pose
-          const k = Math.min(1, (BEAT_TIME - state.beat) * 4) * Math.min(1, state.beat * 4);
-          arm.rotation.x = damp(arm.rotation.x, -state.pitch - (1.25 + 0.3 * Math.sin((BEAT_TIME - state.beat) * 16 + (l.side < 0 ? 0 : Math.PI))) * k, 18, dt);
-          arm.rotation.z = damp(arm.rotation.z, -l.side * 0.45 * k, 12, dt);
-        } else {
-          limb(arm, -state.pitch - (o ? g.arms * moving * wave(o[l.arm]) : 0), dt);
-          arm.rotation.z = damp(arm.rotation.z, state.gait === "hunch" ? l.side * 0.12 : 0, 8, dt);
-        }
-      }
-      // The head keeps the face forward, looking up when it rears
-      parts.head.rotation.x = -state.pitch * (state.gait === "beat" ? 1.15 : 0.85);
-      hips.position.y = HIP + bob;
-      root.rotation.y = state.heading;
+      pose(dt);
       const ground = groundAt(root.position.x, root.position.z);
       if (state.air) {
         state.vy -= GRAVITY * dt;
@@ -346,10 +838,460 @@
         }
       } else root.position.y = ground;
     };
+    // Geometry bounds are cached once; seven tiny matrix products cover every arm,
+    // foot and jaw through the current animation. The controller can reserve the
+    // full envelope instead of colliding only the narrower torso.
+    const envelopeParts = managed ? [parts.legL, parts.legR, chest, parts.armL, parts.armR, parts.head, parts.jaw, labFlask] : null;
+    const envelopeBounds = managed ? envelopeParts.map((part) => boundsOf(part.geometry)) : null;
+    const trunkCorners = managed ? torsoCorners(chest.geometry) : null;
+    const envelopeChest = managed ? mat4.create() : null, envelopeHead = managed ? mat4.create() : null, envelopePart = managed ? mat4.create() : null, envelopeArm = managed ? mat4.create() : null;
+    const supportRows = managed ? new Float64Array(envelopeParts.length * 4).fill(NaN) : null;
+    const supportMinima = managed ? new Float64Array(envelopeParts.length) : null;
+    const supportMinimum = (index, matrix) => {
+      const at = index * 4;
+      if (matrix[1] === supportRows[at] && matrix[5] === supportRows[at + 1] && matrix[9] === supportRows[at + 2] && matrix[13] === supportRows[at + 3]) return supportMinima[index];
+      supportRows[at] = matrix[1]; supportRows[at + 1] = matrix[5]; supportRows[at + 2] = matrix[9]; supportRows[at + 3] = matrix[13];
+      const geometry = envelopeParts[index].geometry, vertices = climbVertices(geometry), b = envelopeBounds[index];
+      const cx = (b.min[0] + b.max[0]) * 0.0025, cy = (b.min[1] + b.max[1]) * 0.0025, cz = (b.min[2] + b.max[2]) * 0.0025;
+      let low = Infinity;
+      for (let i = 0; i < vertices.length; i += 3) low = Math.min(low,
+        (matrix[1] * (vertices[i] - cx) + matrix[5] * (vertices[i + 1] - cy) + matrix[9] * (vertices[i + 2] - cz)) / 0.995 + matrix[13]);
+      return supportMinima[index] = low * scale;
+    };
+    const partMatrix = (part) => {
+      if (part === chest) return envelopeChest;
+      if (part === parts.head) return envelopeHead;
+      updateLocal(part);
+      if (part === labFlask) {
+        updateLocal(parts.armR); mat4.multiply(envelopeArm, envelopeChest, parts.armR.local);
+        mat4.multiply(envelopePart, envelopeArm, part.local);
+      } else mat4.multiply(envelopePart, part.parent === hips ? hips.local : part.parent === chest ? envelopeChest : envelopeHead, part.local);
+      return envelopePart;
+    };
+    const body = { minX: 0, maxX: 0, minY: 0, maxY: BODY * scale, minZ: 0, maxZ: 0, radius: 0.75 * scale, height: BODY * scale };
+    const measureBody = () => {
+      updateLocal(hips);
+      updateLocal(chest);
+      updateLocal(parts.head);
+      mat4.multiply(envelopeChest, hips.local, chest.local);
+      mat4.multiply(envelopeHead, envelopeChest, parts.head.local);
+      body.minX = body.minY = body.minZ = Infinity;
+      body.maxX = body.maxY = body.maxZ = -Infinity;
+      let radius2 = 0, compactRadius2 = 0, poundRadius2 = 0, standRadius2 = 0, parkRadius2 = 0, sitRadius2 = 0, sitWidth = 0, labRadius2 = 0;
+      const exactRest = !!state.lounge || Math.abs(state.sideAngle) > 0.001;
+      let supportY = Infinity;
+      for (let i = 0; i < envelopeParts.length; i++) {
+        const part = envelopeParts[i], b = envelopeBounds[i];
+        if (!part.visible) continue;
+        const m = partMatrix(part);
+        if (exactRest) supportY = Math.min(supportY, supportMinimum(i, m));
+        for (let corner = 0; corner < 8; corner++) {
+          const x = b[corner & 1 ? "max" : "min"][0], y = b[corner & 2 ? "max" : "min"][1], z = b[corner & 4 ? "max" : "min"][2];
+          const px = (m[0] * x + m[4] * y + m[8] * z + m[12]) * scale;
+          const py = (m[1] * x + m[5] * y + m[9] * z + m[13]) * scale;
+          const pz = (m[2] * x + m[6] * y + m[10] * z + m[14]) * scale;
+          body.minX = Math.min(body.minX, px); body.maxX = Math.max(body.maxX, px);
+          body.minY = Math.min(body.minY, py); body.maxY = Math.max(body.maxY, py);
+          body.minZ = Math.min(body.minZ, pz); body.maxZ = Math.max(body.maxZ, pz);
+          radius2 = Math.max(radius2, px * px + pz * pz);
+          const nearest = Math.min(Math.abs(pz - QUAD_CENTERS[0] * scale), Math.abs(pz - QUAD_CENTERS[1] * scale), Math.abs(pz - QUAD_CENTERS[2] * scale));
+          compactRadius2 = Math.max(compactRadius2, px * px + nearest * nearest);
+          const poundNearest = Math.min(Math.abs(pz - POUND_CENTERS[0] * scale), Math.abs(pz - POUND_CENTERS[1] * scale), Math.abs(pz - POUND_CENTERS[2] * scale));
+          poundRadius2 = Math.max(poundRadius2, px * px + poundNearest * poundNearest);
+          standRadius2 = Math.max(standRadius2, px * px + (pz - STAND_CENTER * scale) ** 2);
+          parkRadius2 = Math.max(parkRadius2, px * px + (pz - PARK_CENTER * scale) ** 2);
+          const labNearest = Math.min(Math.abs(pz - LAB_CENTERS[0] * scale), Math.abs(pz - LAB_CENTERS[1] * scale));
+          labRadius2 = Math.max(labRadius2, px * px + labNearest * labNearest);
+          // Grooming intentionally touches the seated partner with one hand.
+          // Only that arm leaves the seated-neighbour footprint; the complete
+          // body envelope above continues to include it for scenery clearance.
+          if (!(state.lounge === "sit" && state.groomBlend > 0.001 && part === (state.groomSide < 0 ? parts.armL : parts.armR))) {
+            const sitNearest = Math.min(Math.abs(pz - SIT_CENTERS[0] * scale), Math.abs(pz - SIT_CENTERS[1] * scale));
+            sitRadius2 = Math.max(sitRadius2, px * px + sitNearest * sitNearest);
+            sitWidth = Math.max(sitWidth, Math.abs(px));
+          }
+        }
+      }
+      // Stop animated knuckles dipping below the supporting floor without moving
+      // the controller's root or interfering with its airborne height.
+      const floor = exactRest ? supportY : Math.min(0, body.minY);
+      if (floor) {
+        const lift = -floor / scale;
+        hips.position.y += lift;
+        updateLocal(hips);
+        envelopeChest[13] += lift; envelopeHead[13] += lift;
+        body.maxY -= floor;
+        body.minY = 0;
+      }
+      body.radius = Math.sqrt(radius2);
+      body.height = body.maxY - body.minY;
+      const tm = envelopeChest;
+      let trunkRadius2 = 0, trunkLab2 = 0, trunkStand2 = 0, trunkQuad2 = 0, trunkSit2 = 0, trunkWidth = 0;
+      for (let i = 0; i < trunkCorners.length; i += 3) {
+        const x = trunkCorners[i], y = trunkCorners[i + 1], z = trunkCorners[i + 2];
+        const px = (tm[0] * x + tm[4] * y + tm[8] * z + tm[12]) * scale;
+        const pz = (tm[2] * x + tm[6] * y + tm[10] * z + tm[14]) * scale;
+        trunkRadius2 = Math.max(trunkRadius2, px * px + pz * pz);
+        trunkWidth = Math.max(trunkWidth, Math.abs(px));
+        trunkLab2 = Math.max(trunkLab2, px * px + (pz - 0.04 * scale) ** 2);
+        trunkStand2 = Math.max(trunkStand2, px * px + (pz - 0.105 * scale) ** 2);
+        trunkSit2 = Math.max(trunkSit2, px * px + (pz + 0.1 * scale) ** 2);
+        const dz = Math.min(Math.abs(pz - 0.05 * scale), Math.abs(pz - 0.65 * scale));
+        trunkQuad2 = Math.max(trunkQuad2, px * px + dz * dz);
+      }
+      body.torsoRadius = Math.sqrt(trunkRadius2) + 0.01 * scale;
+      body.torsoLabCompact = trunkLab2 <= (0.58 * scale) ** 2;
+      body.torsoStandCompact = trunkStand2 <= (0.6 * scale) ** 2;
+      body.torsoSitCompact = state.lounge === "sit" && trunkSit2 <= (0.6 * scale) ** 2;
+      body.torsoQuadCompact = trunkQuad2 <= (0.6 * scale) ** 2
+        && trunkWidth <= Math.sqrt(0.6 ** 2 - 0.3 ** 2) * scale;
+      // At the circles' bisectors their union still covers the entire width,
+      // so faces between the tested box corners cannot escape between circles.
+      body.compact = compactRadius2 <= (QUAD_RADIUS * scale) ** 2
+        && Math.max(-body.minX, body.maxX) <= Math.sqrt(QUAD_RADIUS ** 2 - 0.325 ** 2) * scale;
+      body.poundCompact = poundRadius2 <= (POUND_RADIUS * scale) ** 2
+        && Math.max(-body.minX, body.maxX) <= Math.sqrt(POUND_RADIUS ** 2 - 0.4 ** 2) * scale;
+      body.standCompact = standRadius2 <= (STAND_RADIUS * scale) ** 2;
+      body.parkCompact = parkRadius2 <= (PARK_RADIUS * scale) ** 2;
+      body.sitCompact = state.lounge === "sit" && sitRadius2 <= (SIT_RADIUS * scale) ** 2
+        && sitWidth <= Math.sqrt(SIT_RADIUS ** 2 - 0.335 ** 2) * scale;
+      body.labCompact = state.lab && labRadius2 <= (LAB_RADIUS * scale) ** 2
+        && Math.max(-body.minX, body.maxX) <= Math.sqrt(LAB_RADIUS ** 2 - 0.4 ** 2) * scale;
+      body.labIdleCompact = state.lab && !state.labWork && state.speed <= 0.1
+        && radius2 <= (LAB_IDLE_RADIUS * scale) ** 2 && body.height <= LAB_HEIGHT * scale;
+      body.labWalkCompact = state.lab && !state.labWork
+        && radius2 <= (LAB_WALK_RADIUS * scale) ** 2 && body.height <= LAB_HEIGHT * scale;
+      body.labSqueezeCompact = state.lab && state.labSqueeze && !state.labWork && labFlask === labPlaceholder
+        && radius2 <= (LAB_SQUEEZE_RADIUS * scale) ** 2 && body.height <= LAB_HEIGHT * scale;
+    };
+    const envelope = (out) => {
+      out.minX = body.minX; out.maxX = body.maxX;
+      out.minY = body.minY; out.maxY = body.maxY;
+      out.minZ = body.minZ; out.maxZ = body.maxZ;
+      out.radius = body.radius; out.height = body.height;
+      return out;
+    };
+    // Managed motion adds climb (0..1 wall grip), signed climbStride in metres,
+    // climbDirection (-1/0/1 travel) and mantle (0..1 return over the top edge).
+    // Seated grooming uses groom (0..1), groomSide (-1 left/+1 right), and an
+    // optional groomPhase in seconds. All transitions reuse the existing rig.
+    const poseManaged = (dt, px, py, pz, facing, speed, airborne = false, biped = false, lounge = "", motion = null) => {
+      root.position.x = px; root.position.y = py; root.position.z = pz;
+      state.heading = facing;
+      state.backwards = speed < 0;
+      state.speed = Math.abs(speed);
+      state.air = airborne;
+      const lab = !!(motion && motion.lab);
+      if (state.lab !== lab) {
+        state.lab = lab; setForm(state.form, true);
+        if (!airborne && !state.roll && !state.climb) {
+          state.pitch = lab ? 0.08 : QUAD; chest.rotation.x = state.pitch;
+          parts.armL.rotation.x = parts.armR.rotation.x = -state.pitch;
+        }
+      }
+      state.labWork = motion && (motion.labWork === "type" || motion.labWork === "touch" || motion.labWork === "carry" || motion.labWork === "roll") ? motion.labWork : "";
+      state.labPhase = motion && Number.isFinite(motion.labPhase) ? motion.labPhase : state.labPhase + dt;
+      state.labSide = motion && motion.labSide < 0 ? -1 : 1;
+      // A short die is picked up much lower than a tall flask. Ease the reach
+      // target too, so the first inspection step lifts it off the table instead
+      // of immediately pulling the hand towards the high inspection pose.
+      state.labReach = damp(state.labReach, motion ? clamp(motion.labReach || 0, 0, 1) : 0, 12, dt);
+      state.labReachGrip = motion && Number.isFinite(motion.labGripY) ? motion.labGripY : labGripY;
+      if (motion && motion.lab && motion.labWork === "carry") state.labBench = motion.labBench || null;
+      state.labSqueeze = !!(motion && motion.labSqueeze);
+      state.labDie = !!(motion && motion.labDie);
+      state.labRoll = state.labDie && motion ? clamp(motion.labRoll || 0, 0, 1) : 0;
+      state.biped = lab || biped;
+      state.charge = motion ? clamp(motion.charge || 0, 0, 1) : 0;
+      state.poundCharge = motion ? clamp(motion.poundCharge || 0, 0, 1) : 0;
+      state.takeoff = motion ? clamp(motion.takeoff || 0, 0, 1) : 0;
+      state.landing = motion ? clamp(motion.landing || 0, 0, 1) : 0;
+      state.roll = motion ? clamp(motion.roll || 0, 0, 1) : 0;
+      state.rollTarget = motion && Number.isFinite(motion.rollAngle) ? motion.rollAngle : 0;
+      state.climb = motion && !airborne && !state.roll ? clamp(motion.climb || 0, 0, 1) : 0;
+      state.climbPose = state.climb && motion && Number.isFinite(motion.climbBlend) ? clamp(motion.climbBlend, 0, 1) : NaN;
+      state.climbStride = motion ? motion.climbStride || 0 : 0;
+      state.climbDirection = motion ? clamp(motion.climbDirection || 0, -1, 1) : 0;
+      state.mantle = motion ? clamp(motion.mantle || 0, 0, 1) : 0;
+      state.groom = motion && lounge === "sit" && state.speed <= 0.1 && !airborne && !state.roll && !state.climb ? clamp(motion.groom || 0, 0, 1) : 0;
+      const groomSide = motion && motion.groomSide < 0 ? -1 : 1;
+      if (groomSide !== state.groomSide) {
+        // A neighbour changing sides first releases the old hand. Switching the
+        // side while its blend was high transferred the reach to the other arm.
+        const arm = state.groomSide < 0 ? parts.armL : parts.armR;
+        const restRoll = lounge === "sit" ? -state.groomSide * 0.12 : 0;
+        if (state.groomBlend > 0.005 || Math.abs(arm.rotation.y) > 0.01 || Math.abs(arm.rotation.z - restRoll) > 0.01) state.groom = 0;
+        else state.groomSide = groomSide;
+      }
+      if (motion && Number.isFinite(motion.groomPhase)) state.groomTime = motion.groomPhase;
+      state.smash = !!(motion && motion.smash && !airborne && !state.roll && !state.charge);
+      state.dragging = !!(motion && motion.dragging && !airborne && !state.roll);
+      state.lounge = !airborne && state.speed <= 0.1 && (lounge === "sit" || lounge === "back" || lounge === "left" || lounge === "right"
+        || lounge === "lean-left" || lounge === "lean-right" || lounge === "lean-back") ? lounge : "";
+      if (state.roll > 0 || state.charge > 0 || airborne || state.climb > 0) state.lounge = "";
+      if (state.lounge || state.roll > 0 || state.charge > 0 || airborne || state.climb > 0) state.pound = state.beat = state.chewing = 0;
+      if (state.speed > 0.1 || airborne) state.beat = 0;
+      state.gait = state.beat > 0 ? "beat" : state.biped ? "upright" : state.speed > 1.7 ? "gallop" : state.speed > 0.01 ? "knuckle" : "idle";
+      pose(Math.max(0, dt));
+      measureBody();
+    };
+    const pointToWorld = (matrix, x, y, z, out) => {
+      const px = (matrix[0] * x + matrix[4] * y + matrix[8] * z + matrix[12]) * scale;
+      const py = (matrix[1] * x + matrix[5] * y + matrix[9] * z + matrix[13]) * scale;
+      const pz = (matrix[2] * x + matrix[6] * y + matrix[10] * z + matrix[14]) * scale;
+      const sine = Math.sin(root.rotation.y), cosine = Math.cos(root.rotation.y);
+      out.x = root.position.x + cosine * px + sine * pz;
+      out.y = root.position.y + py;
+      out.z = root.position.z - sine * px + cosine * pz;
+      return out;
+    };
+    // These matrices come from the current pose, including the floor adjustment
+    // and reclining hips, so projectiles never chase the previous render frame.
+    const previewNodes = managed ? [root, hips, ...envelopeParts] : null;
+    const previewTransforms = managed ? new Float64Array(previewNodes.length * 10) : null;
+    const previewQuaternions = managed ? new Array(previewNodes.length) : null;
+    const previewGeometries = managed ? new Array(previewNodes.length) : null;
+    const previewVisible = managed ? new Uint8Array(previewNodes.length) : null;
+    const previewKeys = managed ? Object.keys(state) : null;
+    const previewState = managed ? new Array(previewKeys.length) : null;
+    const previewVertices = managed ? envelopeParts.map(part => climbVertices(part.geometry)) : null;
+    if (managed) refreshGeometry = () => {
+      for (let i = 0; i < envelopeParts.length; i++) {
+        envelopeBounds[i] = boundsOf(envelopeParts[i].geometry);
+        previewVertices[i] = climbVertices(envelopeParts[i].geometry);
+      }
+      supportRows.fill(NaN);
+    };
+    // The bench and the hand share one vessel node. Swapping this fixed eighth
+    // part keeps the held glass in the same exact body and collision previews.
+    const holdLabItem = (node) => {
+      if (!managed || !node || !node.geometry || labFlask !== labPlaceholder) return false;
+      if (node.parent) removeChild(node.parent, node);
+      removeChild(parts.armR, labPlaceholder);
+      labFlask = node; envelopeParts[7] = previewNodes[9] = node;
+      const bounds = boundsOf(node.geometry);
+      labGripY = Number.isFinite(node.geometry.labGripY) ? node.geometry.labGripY : bounds.max[1] * 0.85;
+      node.scale.x = node.scale.y = node.scale.z = 1 / scale;
+      node.quaternion = labItemRotation; node.visible = true;
+      addChild(parts.armR, node); positionLabItem(); refreshGeometry(); measureBody();
+      return true;
+    };
+    const releaseLabItem = () => {
+      if (!managed || labFlask === labPlaceholder) return null;
+      const node = labFlask;
+      removeChild(parts.armR, node); node.quaternion = null;
+      labFlask = labPlaceholder; envelopeParts[7] = previewNodes[9] = labPlaceholder;
+      labGripY = geos.labFlask.labGripY;
+      addChild(parts.armR, labPlaceholder); refreshGeometry(); measureBody();
+      return node;
+    };
+    const previewFrom = managed ? new Float64Array(envelopeParts.length * 80) : null;
+    const previewTo = managed ? new Float64Array(envelopeParts.length * 80) : null;
+    const previewMatrices = managed ? new Float64Array(envelopeParts.length * 16) : null;
+    const previewCorners = managed ? new Float64Array(24) : null;
+    const previewEnvelope = managed ? new Float64Array(10) : null;
+    const enclosePreviewPart = (bounds, part, at) => {
+      const start = part * 80;
+      let x = 0, z = 0, minY = Infinity, maxY = -Infinity;
+      for (let i = start; i < start + 80; i += 5) {
+        x += bounds[i]; z += bounds[i + 2];
+        minY = Math.min(minY, bounds[i + 1]); maxY = Math.max(maxY, bounds[i + 1] + bounds[i + 4]);
+      }
+      x /= 16; z /= 16;
+      let radius = 0;
+      for (let i = start; i < start + 80; i += 5) radius = Math.max(radius,
+        Math.hypot(bounds[i] - x, bounds[i + 2] - z) + bounds[i + 3]);
+      previewEnvelope[at] = x; previewEnvelope[at + 1] = minY - 1e-7; previewEnvelope[at + 2] = z;
+      previewEnvelope[at + 3] = radius + 1e-7; previewEnvelope[at + 4] = maxY - minY + 2e-7;
+    };
+    const previewBounds = (out, lab = false) => {
+      const sine = Math.sin(root.rotation.y), cosine = Math.cos(root.rotation.y), p = root.position;
+      for (let i = 0; i < envelopeParts.length; i++) {
+        const part = envelopeParts[i], b = envelopeBounds[i];
+        if (!part.visible) continue;
+        const m = partMatrix(part);
+        for (let k = 0; k < 16; k++) previewMatrices[i * 16 + k] = m[k];
+        let minY = Infinity, maxY = -Infinity;
+        for (let corner = 0; corner < 8; corner++) {
+          const x = b[corner & 1 ? "max" : "min"][0], y = b[corner & 2 ? "max" : "min"][1], z = b[corner & 4 ? "max" : "min"][2];
+          const lx = (m[0] * x + m[4] * y + m[8] * z + m[12]) * scale;
+          const ly = (m[1] * x + m[5] * y + m[9] * z + m[13]) * scale;
+          const lz = (m[2] * x + m[6] * y + m[10] * z + m[14]) * scale;
+          const at = corner * 3;
+          previewCorners[at] = lx;
+          previewCorners[at + 1] = p.y + ly; previewCorners[at + 2] = lz;
+          minY = Math.min(minY, previewCorners[at + 1]); maxY = Math.max(maxY, previewCorners[at + 1]);
+        }
+        // A tilted arm's fingertips must not reserve their farthest extent all
+        // the way down to its elbow. Slice the oriented box into short cylinders
+        // in the actor's frame; world-axis bounds grow spuriously on diagonal yaws.
+        for (let slice = 0; slice < 4; slice++) {
+          const low = minY + (maxY - minY) * slice / 4, high = minY + (maxY - minY) * (slice + 1) / 4;
+          let minX = Infinity, minZ = Infinity, maxX = -Infinity, maxZ = -Infinity;
+          for (let corner = 0; corner < 8; corner++) {
+            const at = corner * 3, x = previewCorners[at], y = previewCorners[at + 1], z = previewCorners[at + 2];
+            if (y >= low && y <= high) { minX = Math.min(minX, x); maxX = Math.max(maxX, x); minZ = Math.min(minZ, z); maxZ = Math.max(maxZ, z); }
+            for (let axis = 1; axis <= 4; axis *= 2) {
+              if (corner & axis) continue;
+              const to = (corner | axis) * 3, dy = previewCorners[to + 1] - y;
+              if (Math.abs(dy) < 1e-9) continue;
+              for (let edge = 0; edge < 2; edge++) {
+                const k = ((edge ? high : low) - y) / dy;
+                if (k < 0 || k > 1) continue;
+                const px = x + (previewCorners[to] - x) * k, pz = z + (previewCorners[to + 2] - z) * k;
+                minX = Math.min(minX, px); maxX = Math.max(maxX, px); minZ = Math.min(minZ, pz); maxZ = Math.max(maxZ, pz);
+              }
+            }
+          }
+          // Near a desktop, a single circle around the forearm's wide box would
+          // extend its low elbow beyond the real fingertips. Four smaller cells
+          // preserve the whole box while keeping that corner padding bounded.
+          const divisions = lab ? 2 : 1, width = (maxX - minX) / divisions, depth = (maxZ - minZ) / divisions;
+          for (let cell = 0; cell < divisions * divisions; cell++) {
+            const at = ((i * 4 + slice) * 4 + cell) * 5;
+            const cx = minX + ((cell % divisions) + 0.5) * width, cz = minZ + (Math.floor(cell / divisions) + 0.5) * depth;
+            out[at] = p.x + cosine * cx + sine * cz; out[at + 1] = low;
+            out[at + 2] = p.z - sine * cx + cosine * cz;
+            out[at + 3] = Math.hypot(width, depth) * 0.5; out[at + 4] = high - low;
+          }
+        }
+      }
+    };
+    // The optional starting rest pose proves a future seat can also be left.
+    // Both temporary poses share the snapshot, leaving the live rig untouched.
+    const climbPoseClear = (dt, px, py, pz, facing, motion, solidAt, clearAt = null, entry = null, speed = 0, staticPose = false, lounge = "", fromLounge = null, sequenceStep = 0) => {
+      if (!managed || !solidAt) return true;
+      for (let i = 0; i < previewKeys.length; i++) previewState[i] = state[previewKeys[i]];
+      for (let i = 0; i < previewNodes.length; i++) {
+        const n = previewNodes[i], at = i * 10, q = n.quaternion;
+        previewTransforms[at] = n.position.x; previewTransforms[at + 1] = n.position.y; previewTransforms[at + 2] = n.position.z;
+        previewTransforms[at + 3] = n.rotation.x; previewTransforms[at + 4] = n.rotation.y; previewTransforms[at + 5] = n.rotation.z;
+        previewQuaternions[i] = q;
+        previewGeometries[i] = n.geometry; previewVisible[i] = +n.visible;
+        if (q) for (let j = 0; j < 4; j++) previewTransforms[at + 6 + j] = q[j];
+      }
+      const lab = !!(motion && motion.lab);
+      if (fromLounge !== null) poseManaged(2, px, py, pz, facing, 0, false, false, fromLounge, motion);
+      let fromVisible = 0;
+      if (clearAt && (!staticPose || fromLounge !== null)) {
+        for (let i = 0; i < envelopeParts.length; i++) if (envelopeParts[i].visible) fromVisible |= 1 << i;
+        previewBounds(previewFrom, lab);
+      }
+      const sine = Math.sin(facing), cosine = Math.cos(facing);
+      // Departure admission follows the same small steps as live animation.
+      // Independent large-dt samples miss intermediate arm/support changes.
+      let remaining = sequenceStep > 0 ? Math.min(dt, 1.2) : dt;
+      const tick = sequenceStep > 0 ? Math.max(1 / 120, sequenceStep) : dt;
+      let clear = true;
+      do {
+        const step = Math.min(tick, remaining); remaining -= step;
+        poseManaged(step, px, py, pz, facing, speed, false, false, lounge, motion);
+        previewBounds(previewTo, lab);
+        if (sequenceStep > 0 && clearAt && clearAt.beginPose) clearAt.beginPose(entry);
+        for (let i = 0; i < envelopeParts.length && clear; i++) {
+          if (!envelopeParts[i].visible) continue;
+          const vertices = previewVertices[i], offset = i * 16, m = previewMatrices;
+          const from = (fromVisible & (1 << i)) ? previewFrom : previewTo;
+          let enclosed = false;
+          if (lab && clearAt) {
+            // Most stationary parts are far from a desk or neighbour. One sweep
+            // enclosing all sixteen small cylinders proves them clear together;
+            // contact falls back to the original precise slices, without caching
+            // either moving props or animated bodies. Terrain stays vertex-exact.
+            enclosePreviewPart(from, i, 0); enclosePreviewPart(previewTo, i, 5);
+            enclosed = clearAt(entry, previewEnvelope[0], previewEnvelope[1], previewEnvelope[2],
+              previewEnvelope[5], previewEnvelope[6], previewEnvelope[7], previewEnvelope[3],
+              previewEnvelope[4], true, false, previewEnvelope[8], previewEnvelope[9], true, envelopeParts[i]);
+          }
+          if (clearAt && !enclosed) for (let slice = 0; slice < 4 * (lab ? 4 : 1); slice++) {
+            const at = lab ? (i * 16 + slice) * 5 : (i * 16 + slice * 4) * 5;
+            if (!clearAt(entry, from[at], from[at + 1], from[at + 2],
+              previewTo[at], previewTo[at + 1], previewTo[at + 2], from[at + 3],
+              from[at + 4], true, false, previewTo[at + 3], previewTo[at + 4], true, lab ? envelopeParts[i] : null)) { clear = false; break; }
+          }
+          if (!clear) break;
+          for (let v = 0; v < vertices.length; v += 3) {
+            const x = vertices[v], y = vertices[v + 1], z = vertices[v + 2];
+            const lx = (m[offset] * x + m[offset + 4] * y + m[offset + 8] * z + m[offset + 12]) * scale;
+            const ly = (m[offset + 1] * x + m[offset + 5] * y + m[offset + 9] * z + m[offset + 13]) * scale;
+            const lz = (m[offset + 2] * x + m[offset + 6] * y + m[offset + 10] * z + m[offset + 14]) * scale;
+            if (solidAt(px + cosine * lx + sine * lz, py + ly, pz - sine * lx + cosine * lz)) { clear = false; break; }
+          }
+        }
+        if (clear && remaining > 1e-8 && clearAt) {
+          previewFrom.set(previewTo); fromVisible = 0;
+          for (let i = 0; i < envelopeParts.length; i++) if (envelopeParts[i].visible) fromVisible |= 1 << i;
+        }
+      } while (clear && remaining > 1e-8);
+      for (let i = 0; i < previewKeys.length; i++) state[previewKeys[i]] = previewState[i];
+      for (let i = 0; i < previewNodes.length; i++) {
+        const n = previewNodes[i], at = i * 10, q = previewQuaternions[i];
+        n.position.x = previewTransforms[at]; n.position.y = previewTransforms[at + 1]; n.position.z = previewTransforms[at + 2];
+        n.rotation.x = previewTransforms[at + 3]; n.rotation.y = previewTransforms[at + 4]; n.rotation.z = previewTransforms[at + 5];
+        n.quaternion = q;
+        n.geometry = previewGeometries[i]; n.visible = !!previewVisible[i];
+        if (q) for (let j = 0; j < 4; j++) q[j] = previewTransforms[at + 6 + j];
+        updateLocal(n);
+      }
+      refreshGeometry(); measureBody();
+      return clear;
+    };
+    const labPreviewMotion = { lab: true, labWork: "", labPhase: 0, labSide: 1, labReach: 0, labGripY: geos.labFlask.labGripY, labSqueeze: false, labDie: false, labRoll: 0, labBench: null };
+    const labPoseClear = (dt, x, y, z, heading, speed, work, phase, side, solidAt, clearAt, entry, staticPose = false, laboratory = true) => {
+      labPreviewMotion.lab = laboratory;
+      labPreviewMotion.labWork = laboratory ? work : ""; labPreviewMotion.labPhase = phase; labPreviewMotion.labSide = side;
+      labPreviewMotion.labReach = laboratory && entry ? entry.motion.labReach || 0 : 0;
+      labPreviewMotion.labGripY = laboratory && entry && Number.isFinite(entry.motion.labGripY) ? entry.motion.labGripY : labGripY;
+      labPreviewMotion.labSqueeze = !!(laboratory && entry && entry.motion.labSqueeze);
+      labPreviewMotion.labDie = !!(laboratory && entry && entry.motion.labDie);
+      labPreviewMotion.labRoll = laboratory && entry ? entry.motion.labRoll || 0 : 0;
+      labPreviewMotion.labBench = laboratory && entry ? entry.motion.labBench || null : null;
+      const pound = state.pound, beat = state.beat;
+      if (staticPose) state.pound = state.beat = 0;
+      const itemPreview = managed && staticPose && laboratory && work === "carry" && labFlask === labPlaceholder;
+      if (itemPreview) {
+        state.labPreviewItem = true; labPlaceholder.visible = true; labPlaceholder.quaternion = labItemRotation;
+        labPlaceholder.scale.x = labPlaceholder.scale.y = labPlaceholder.scale.z = 1 / scale;
+      }
+      const clear = climbPoseClear(dt, x, y, z, heading, labPreviewMotion, solidAt, clearAt, entry, speed, staticPose);
+      if (itemPreview) { state.labPreviewItem = false; labPlaceholder.visible = false; measureBody(); }
+      state.pound = pound; state.beat = beat;
+      return clear;
+    };
+    const mouth = (out) => {
+      if (managed) return pointToWorld(envelopeHead, 0, 0.7 * U, 6.05 * U, out);
+      const head = parts.head, hc = Math.cos(head.rotation.x), hs = Math.sin(head.rotation.x);
+      const cy = Math.cos(chest.rotation.x), sy = Math.sin(chest.rotation.x);
+      const hy = head.position.y + hc * 0.7 * U - hs * 6.05 * U;
+      const hz = head.position.z + hs * 0.7 * U + hc * 6.05 * U;
+      const y = (hips.position.y + cy * hy - sy * hz) * scale, z = (sy * hy + cy * hz) * scale;
+      out.x = root.position.x + Math.sin(root.rotation.y) * z;
+      out.y = root.position.y + y;
+      out.z = root.position.z + Math.cos(root.rotation.y) * z;
+      return out;
+    };
+    const targetParts = [2, 5, 3, 4, 0, 1];
+    const bodyTarget = (out, sample = 0) => {
+      if (!managed) { out.x = root.position.x; out.y = root.position.y + BODY * 0.5; out.z = root.position.z; return out; }
+      const index = targetParts[Math.abs(sample | 0) % targetParts.length], part = envelopeParts[index], bounds = envelopeBounds[index];
+      let matrix;
+      if (part === chest) matrix = envelopeChest;
+      else if (part === parts.head) matrix = envelopeHead;
+      else {
+        updateLocal(part);
+        mat4.multiply(envelopePart, part.parent === hips ? hips.local : envelopeChest, part.local);
+        matrix = envelopePart;
+      }
+      return pointToWorld(matrix, (bounds.min[0] + bounds.max[0]) * 0.5, (bounds.min[1] + bounds.max[1]) * 0.5,
+        (bounds.min[2] + bounds.max[2]) * 0.5, out);
+    };
+    if (managed) measureBody();
     // Only the form on show: the other set is released, so no scene keeps another
     // scene's Agent geometry resident. A swap re-uploads six small voxel parts.
     const liveGeometry = (set) => {
-      for (const name of PART_NAMES) set.add(geos[name][state.form]);
+      for (const name of PART_NAMES) set.add(parts[name].geometry);
+      if (managed) set.add(parts.jaw.geometry);
+      if (managed) set.add(labFlask.geometry);
     };
     const dispose = () => {
       if (root.parent) removeChild(root.parent, root);
@@ -359,6 +1301,32 @@
     };
     const agent = {
       root, parts, hips, chest, update, setForm, setGait, walk, pace, place, poke, jump, reveal, setDriven, drive, toggleStyle, liveGeometry, dispose,
+      managed, poseManaged, climbPoseClear, labPoseClear, mouth, bodyTarget, envelope, feed, pound, beat, holdLabItem, releaseLabItem,
+      get labFlask() { return labFlask; },
+      get labItem() { return labFlask === labPlaceholder ? null : labFlask; },
+      get labPickupBench() { return state.labBench; },
+      get bodyRadius() { return body.radius; },
+      get bodyHeight() { return body.maxY; },
+      get bodyMinY() { return body.minY; },
+      get compact() { return !!body.compact; },
+      get poundCompact() { return !!body.poundCompact; },
+      get standCompact() { return !!body.standCompact; },
+      get parkCompact() { return !!body.parkCompact; },
+      get sitCompact() { return !!body.sitCompact; },
+      get labCompact() { return !!body.labCompact; },
+      get labIdleCompact() { return !!body.labIdleCompact; },
+      get labWalkCompact() { return !!body.labWalkCompact; },
+      get labSqueezeCompact() { return !!body.labSqueezeCompact; },
+      get torsoRadius() { return body.torsoRadius; },
+      get torsoLabCompact() { return !!body.torsoLabCompact; },
+      get torsoStandCompact() { return !!body.torsoStandCompact; },
+      get torsoSitCompact() { return !!body.torsoSitCompact; },
+      get torsoQuadCompact() { return !!body.torsoQuadCompact; },
+      get pounding() { return state.pound > 0; },
+      get beating() { return state.beat > 0; },
+      get chewing() { return state.chewing > 0; },
+      get motionActive() { return managed && (state.air || state.charge > 0 || state.crouch > 0.001 || state.takeoff > 0 || state.rollBlend > 0.001 || Math.abs(state.rollAngle) > 0.001 || state.climb > 0 || state.climbBlend > 0.001); },
+      get smashActive() { return managed && state.smash && state.pound > 0; },
       get revealed() { return state.revealFor > 0; },
       get airborne() { return state.air; },
       groundAt,
@@ -377,6 +1345,11 @@
         get walkStyle() { return state.walkStyle; },
         get revealed() { return state.revealFor > 0; },
         get airborne() { return state.air; },
+        get climbing() { return state.climbBlend; },
+        get lounge() { return state.lounge; },
+        get grooming() { return state.groomBlend; },
+        get lab() { return state.lab; },
+        get labWork() { return state.labWork; },
         jump,
         reveal,
         setGait,
@@ -498,5 +1471,6 @@
     };
     return { start, stop, update, get active() { return !!agent; }, get agent() { return agent; }, get startedAt() { return startedAt; } };
   };
-  BL.agent = { create, createPlay, GAITS, TRIPLE_MS, QUAD, HUNCH, BODY };
+  BL.agent = { create, createPlay, GAITS, TRIPLE_MS, QUAD, HUNCH, BODY, POUND_TIME, MANAGED_BEAT_TIME, MANAGED_MOTION_RADIUS, MANAGED_MOTION_HEIGHT, MANAGED_SMASH_RADIUS, LAB_RADIUS, LAB_HEIGHT, LAB_CENTERS, LAB_IDLE_RADIUS, LAB_WALK_RADIUS, LAB_SQUEEZE_RADIUS, footprint, torso,
+    labFlaskGeometry: () => geometries().labFlask };
 })();

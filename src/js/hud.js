@@ -103,10 +103,11 @@
     for (const child of source.children) if (child.visible && !child.portraitHidden) addChild(copy, copyPortraitNode(child, portraitRoot, portraitGeometry));
     return copy;
   };
-  const renderFaceIcon = (canvas, cave) => {
+  const renderFaceIcon = (canvas, cave, gorilla = null) => {
     const renderer = canvasRenderer.createRenderer(canvas, { width: ICON_PX, height: ICON_PX, transparent: true });
-    const root = createNode(), head = copyPortraitNode(cave.parts.head, cave.parts.head, cave.portraitHead);
-    const bounds = boundsOf(cave.portraitHead), fit = (cave.traits.gasMask ? 0.68 : 0.78) / Math.max(bounds.radius, 0.05);
+    const source = gorilla ? gorilla.parts.head : cave.parts.head, geometry = gorilla ? source.geometry : cave.portraitHead;
+    const root = createNode(), head = copyPortraitNode(source, source, geometry);
+    const bounds = boundsOf(geometry), fit = (!gorilla && cave.traits.gasMask ? 0.68 : 0.78) / Math.max(bounds.radius, 0.05);
     head.position.x = head.position.y = head.position.z = 0;
     head.rotation.x = head.rotation.y = head.rotation.z = 0;
     head.scale.x = head.scale.y = head.scale.z = fit;
@@ -154,6 +155,8 @@
       primaryIcon: $("primary-icon"),
       primaryStrength: $("primary-strength"),
       primaryStrengthFill: $("primary-strength-fill"),
+      gorillaSmash: $("gorilla-smash-hud"),
+      gorillaDrag: $("gorilla-drag-hud"),
       weapon: $("weapon-hud"),
       weaponToggle: $("weapon-hud"),
       weaponReadout: $("weapon-readout"),
@@ -203,6 +206,7 @@
     el.crateHelp.hidden = !lootEnabled;
     el.worldLootHint.hidden = !lootEnabled;
     el.primary.hidden = true;
+    el.gorillaSmash.hidden = el.gorillaDrag.hidden = true;
     el.mode.hidden = true;
     el.weapon.hidden = true;
     el.magazine.hidden = true;
@@ -316,25 +320,31 @@
       detachedNameTimer = window.setTimeout(() => el.modeDestinationName.classList.remove("show"), 1200);
     };
     const nextDetachedView = () => DETACHED_PRESETS[(DETACHED_PRESETS.indexOf(detachedPreset) + 1) % DETACHED_PRESETS.length];
-    let modeName = "", modeGeometry = null, modeSelected = false, modeBattle = false, modeView = "detached", modeHealth = -1;
+    let gorillaEntry = null, gorillaView = "orbit", gorillaBattle = false;
+    let modeName = "", modeGeometry = null, modeSelected = false, modeBattle = false, modeView = "detached", modeHealth = -1, modeGorilla = false;
     const setMode = (cave, battle = false, view = cave ? "orbit" : "detached", visible = true) => {
+      const gorilla = gorillaEntry ? gorillaEntry.gorilla : null;
+      if (gorilla) { cave = gorillaEntry.owner; battle = gorillaBattle; view = gorillaView; visible = true; }
       const selected = !!cave, name = selected ? cave.traits.name : "", shown = selected ? cave.traits.display : "";
-      const identityChanged = selected !== modeSelected || selected && name !== modeName;
+      const identityChanged = selected !== modeSelected || selected && name !== modeName || !!gorilla !== modeGorilla;
       const stateChanged = battle !== modeBattle || view !== modeView;
       if (el.mode.hidden === visible) el.mode.hidden = !visible;
-      if (selected && (name !== modeName || cave.parts.head.geometry !== modeGeometry)) {
-        renderFaceIcon(el.modeFace, cave);
-        el.mode.dataset.portrait = "face-crop";
+      const geometry = selected ? (gorilla ? gorilla.parts.head.geometry : cave.parts.head.geometry) : null;
+      if (selected && (identityChanged || geometry !== modeGeometry)) {
+        renderFaceIcon(el.modeFace, cave, gorilla);
+        el.mode.dataset.portrait = gorilla ? "gorilla" : "face-crop";
         modeName = name;
-        modeGeometry = cave.parts.head.geometry;
+        modeGeometry = geometry;
       }
+      if (!!gorilla !== modeGorilla) { modeGorilla = !!gorilla; el.mode.dataset.gorilla = String(modeGorilla); }
       if (selected !== modeSelected) {
         modeSelected = selected;
         el.mode.dataset.selected = String(selected);
       }
       if (el.modeFree.hidden !== selected) el.modeFree.hidden = selected;
       if (el.modeFace.hidden === selected) el.modeFace.hidden = !selected;
-      if (el.modeHealth.hidden === selected) el.modeHealth.hidden = !selected;
+      const showHealth = selected && !gorilla;
+      if (el.modeHealth.hidden === showHealth) el.modeHealth.hidden = !showHealth;
       const health = selected && cave.health ? Math.max(0, Math.min(25, cave.health.value)) : 25;
       if (health !== modeHealth) {
         modeHealth = health;
@@ -347,10 +357,12 @@
         el.mode.dataset.battle = String(selected && battle);
         el.mode.dataset.view = selected ? view : "detached";
         el.mode.setAttribute("aria-pressed", String(selected && battle));
-        el.mode.setAttribute("aria-label", selected
+        el.mode.setAttribute("aria-label", gorilla
+          ? `${shown}'s gorilla; ${view} view; ${battle ? "battle" : "carry"} mode. Press to switch battle or carry mode; hold to detach`
+          : selected
           ? `${shown}; ${view} view; ${battle ? "battle" : "carry"} mode. Press to switch battle or carry mode; hold to detach`
           : `${DETACHED_NAMES[detachedPreset]} detached view. Press to cycle destinations`);
-        el.mode.title = selected ? `${shown} · ${view} · ${battle ? "battle" : "carry"} · hold to detach` : `${DETACHED_NAMES[detachedPreset]} · detached`;
+        el.mode.title = gorilla ? `${shown}'s gorilla · ${view} · ${battle ? "battle" : "carry"} · hold to detach` : selected ? `${shown} · ${view} · ${battle ? "battle" : "carry"} · hold to detach` : `${DETACHED_NAMES[detachedPreset]} · detached`;
       }
     };
     setDetachedView(detachedPreset);
@@ -367,8 +379,8 @@
       if (!available || !selected && primarySelected || geometry !== primaryGeometry) finishPrimary(true);
       if (available !== primaryShown) {
         primaryShown = available;
-        el.primary.hidden = !available;
       }
+      if (el.primary.hidden !== (!available || !!gorillaEntry)) el.primary.hidden = !available || !!gorillaEntry;
       if (available && geometry !== primaryGeometry) {
         renderPrimaryIcon(el.primaryIcon, geometry);
         primaryGeometry = geometry;
@@ -398,7 +410,7 @@
     let weaponTotal = -1, weaponLabelAmmo = -1, weaponLabelEquipped = false;
     const refreshWeaponSummary = () => {
       const total = weaponUnlimited ? Infinity : Math.max(0, weaponAmmo) + (magazineCount ? Math.max(0, magazineHigh) : 0) + (magazineCount > 1 ? Math.max(0, magazineLow) : 0);
-      const shown = weaponShown && weaponEquipped && magazineCount > 0;
+      const shown = !gorillaEntry && weaponShown && weaponEquipped && magazineCount > 0;
       if (el.magazine.hidden === shown) el.magazine.hidden = !shown;
       const disabled = !shown || !magazineCanSwap;
       if (el.magazine.disabled !== disabled) el.magazine.disabled = disabled;
@@ -460,8 +472,8 @@
       if (modeChanged || (!available && weaponShown) || (!equipped && weaponEquipped) || ammo !== weaponAmmo && !animateReload) clearWeaponLoad();
       if (available !== weaponShown) {
         weaponShown = available;
-        el.weapon.hidden = !available;
       }
+      if (el.weapon.hidden !== (!available || !!gorillaEntry)) el.weapon.hidden = !available || !!gorillaEntry;
       if (equipped !== weaponEquipped) {
         weaponEquipped = equipped;
         el.weapon.dataset.equipped = String(equipped);
@@ -541,8 +553,8 @@
     const setJetpack = (owned, equipped, fuel, blocked = false) => {
       if (owned !== jetpackShown) {
         jetpackShown = owned;
-        el.jetpack.hidden = !owned;
       }
+      if (el.jetpack.hidden !== (!owned || !!gorillaEntry)) el.jetpack.hidden = !owned || !!gorillaEntry;
       if (equipped !== jetpackEquipped || blocked !== jetpackBlocked) {
         jetpackEquipped = equipped;
         jetpackBlocked = blocked;
@@ -563,6 +575,19 @@
       el.jetpackCompactFuel.setAttribute("aria-valuenow", String(percent));
       el.jetpackCompactFuel.dataset.level = percent <= 20 ? "low" : "ok";
       el.jetpackFuelValue.firstChild.data = `${percent}%`;
+    };
+    const setGorilla = (entry, view = "orbit", battle = false) => {
+      if (entry === gorillaEntry && view === gorillaView && battle === gorillaBattle) return;
+      if (entry !== gorillaEntry) finishPrimary(true);
+      gorillaEntry = entry;
+      gorillaView = view;
+      gorillaBattle = battle;
+      el.gorillaSmash.hidden = el.gorillaDrag.hidden = !entry;
+      el.primary.hidden = !primaryShown || !!entry;
+      el.weapon.hidden = !weaponShown || !!entry;
+      el.jetpack.hidden = !jetpackShown || !!entry;
+      refreshWeaponSummary();
+      setMode(null);
     };
     const setSubtitle = (text) => {
       el.subtitle.textContent = text;
@@ -1072,6 +1097,7 @@
       tooltip.hide();
       clearModeHold();
       modePointer = -1;
+      setGorilla(null);
       setMode(null, false, "detached", false);
       setPrimary(false, false, null);
       primaryGeometry = null;
@@ -1084,7 +1110,7 @@
       closeWeatherKey();
       closeJumbotron();
     };
-    return { el, openFeed, closeFeed, openRecipe, closeRecipe, dismissOutside, openJumbotron, closeJumbotron, setRosterRow, setMeter, setStats, setAct, setMode, setDetachedView, setPrimary, setWeapon, setMagazine, setJetpack, setSubtitle, onAction, toast, tooltip, hint, hideHint, letterSign, selectTab, onPreset, onIdentityChange, setIdentity, setDonationUrl, onAssign, onUnassign, renderInventory, dispose, openWeatherKey, closeWeatherKey };
+    return { el, openFeed, closeFeed, openRecipe, closeRecipe, dismissOutside, openJumbotron, closeJumbotron, setRosterRow, setMeter, setStats, setAct, setMode, setGorilla, setDetachedView, setPrimary, setWeapon, setMagazine, setJetpack, setSubtitle, onAction, toast, tooltip, hint, hideHint, letterSign, selectTab, onPreset, onIdentityChange, setIdentity, setDonationUrl, onAssign, onUnassign, renderInventory, dispose, openWeatherKey, closeWeatherKey };
   };
   BL.hud = { create, renderIcon, signLettering, STATE_LABELS, statusFor };
 })();
