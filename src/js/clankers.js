@@ -15,7 +15,7 @@
   const WALK_HEIGHT = 2.2;
   const JUMP_SAMPLES = 20, MAX_JUMP = 8.5;
   const CLIMB_POINTS = 128, CLIMB_RADIUS = 1.05, CLIMB_HEIGHT = 3.1, CLIMB_STANDOFF = 0.87;
-  const CLIMB_SPEED = 2.1, CLIMB_APPROACH_SPEED = 3.15, CLIMB_CREST_SPEED = 2.75, CLIMB_TURN_TIME = 0.42;
+  const CLIMB_SPEED = 2.1, CLIMB_APPROACH_SPEED = 3.15, CLIMB_CREST_SPEED = 2.75, CLIMB_TURN_TIME = 0.42, CLIMB_MOUNT_DISTANCE = 0.75;
   const JUMP_CHARGE = 0.65, ROLL_SECONDS = 3, SOOT_SECONDS = 10, MOTION_RADIUS = BL.agent.MANAGED_MOTION_RADIUS, MOTION_HEIGHT = BL.agent.MANAGED_MOTION_HEIGHT;
   const GRAVITY = BL.pilot.WALK.gravity, NORMAL_JUMP = BL.crew.JUMP_SPEED;
   const STEERING = [0, 0.45, -0.45, 0.9, -0.9, 1.4, -1.4, 1.95, -1.95, 2.5, -2.5, Math.PI];
@@ -2313,13 +2313,16 @@
       if (ground) {
         if (axis < 0) { facing = c.heading + Math.PI * c.bottomTurn; blend = 1 - c.bottomTurn * c.bottomTurn * (3 - 2 * c.bottomTurn); }
         else {
-          const start = Math.max(c.basePrepEnd || 0, c.lowerGroundDistance - 2.4);
+          const start = Math.max(c.basePrepEnd || 0, c.lowerGroundDistance - CLIMB_MOUNT_DISTANCE);
           const approach = clamp((next - start) / Math.max(0.01, c.lowerGroundDistance - start), 0, 1);
           blend = approach * approach * (3 - 2 * approach);
         }
       }
       const oldBlend = m.climbBlend, oldMantle = m.mantle, oldStride = m.climbStride;
-      let speed = ground && blend < 0.01 ? Math.hypot(POINT.x - p.x, POINT.z - p.z) / dt : 0;
+      // Keep the knuckle-walk gait alive while the body rises into its first
+      // grips. Zeroing it at the start of this blend translated a rigid pose
+      // across the last stretch of ground and made the mount look like a float.
+      let speed = ground ? Math.hypot(POINT.x - p.x, POINT.z - p.z) / dt : 0;
       if ((POINT.x - p.x) * Math.sin(facing) + (POINT.z - p.z) * Math.cos(facing) < 0) speed = -speed;
       m.climbBlend = blend; m.mantle = top;
       m.climbStride += POINT.y - p.y; m.climbDirection = Math.sign(axis);
