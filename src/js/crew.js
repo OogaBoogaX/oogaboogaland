@@ -1027,10 +1027,18 @@
       const r = cave.root;
       if (state === "working" || state === "chilling") {
         r.visible = true;
-        if (!wasAwake) standAtSlot(cave);
+        if (!wasAwake && state === "working") standAtSlot(cave);
         else r.position.y = groundY(cave) + cave.hop;
         if (state === "working") startMeal(cave);
-        else { cave.act.kind = "idle"; cave.act.until = elapsed + chillPause(cave); }
+        else if (wanderSpot) {
+          if (settle && wanderSpot(cave.act.spot, cave) !== false) {
+            const spot = cave.act.spot;
+            setVec(r.position, spot.x, cave.baseY + groundAt(spot.x, spot.z, Infinity, Infinity, cave), spot.z);
+            if (!Number.isNaN(spot.ry)) r.rotation.y = spot.ry;
+            cave.act.kind = "idle";
+            cave.act.until = elapsed + chillPause(cave);
+          } else startWander(cave);
+        } else { cave.act.kind = "idle"; cave.act.until = elapsed + chillPause(cave); }
         if (!wasAwake) popNode(r);
       } else if (state === "sleeping") {
         r.visible = !cave.bedroll.hidden;
@@ -1175,7 +1183,7 @@
       if (Math.abs(wanted - fanRadius) < 0.08) return;
       fanRadius = wanted;
       const entries = [...cavemen.values()];
-      assignFanSlots(entries, (cave) => cave.state === "working" || cave.state === "chilling");
+      assignFanSlots(entries, (cave) => cave.state === "working");
       for (const cave of entries) walkToSlot(cave);
     };
     const refreshStates = (settle = false) => {
@@ -1183,7 +1191,7 @@
       const entries = [...cavemen.values()];
       const next = new Map(entries.map((cave) => [cave, stateOf(cave)]));
       fanRadius = wantedFanRadius();
-      assignFanSlots(entries, (cave) => next.get(cave) === "working" || next.get(cave) === "chilling");
+      assignFanSlots(entries, (cave) => next.get(cave) === "working");
       for (const cave of entries) {
         const target = next.get(cave);
         if (cave === player) {
@@ -1214,7 +1222,12 @@
     };
     const startWander = (cave) => {
       const spot = cave.act.spot;
-      wanderSpot(spot, cave);
+      if (wanderSpot(spot, cave) === false) {
+        cave.walk = null;
+        cave.act.kind = "idle";
+        cave.act.until = elapsed + chillPause(cave);
+        return;
+      }
       cave.act.kind = "wander";
       cave.act.trips++;
       cave.walk = { tx: spot.x, tz: spot.z, speed: WANDER_SPEED + Math.random() * 0.5, phase: 0, heading: cave.root.rotation.y, to: "spot" };
@@ -1736,7 +1749,7 @@
       const primaryCarry = !slungClub && carryingStoneAxe(cave);
       // A pack takes the centre of the back, and the nunchaku rides the hip either way.
       const sideSling = slungClub && (cave.traits.nunchaku || cave.traits.stoneAxe && backPack(cave));
-      const twirling = !slungClub && !primaryReady && cave.traits.nunchaku;
+      const twirling = !slungClub && !primaryReady && cave.traits.nunchaku && meleeDrawn(cave);
       const clubParent = slungClub ? cave.root : twirling && cave.twirlHand ? parts.armR : parts.armL;
       if (parts.club.parent !== clubParent) {
         removeChild(parts.club.parent, parts.club);
@@ -2471,7 +2484,7 @@
         if (cave === player) cave.override = cave.state;
         cave.parts.head.geometry = cave.headOpen;
         if (sleepingPose) cave.root.position.y = groundY(cave);
-        assignFanSlots([...cavemen.values()], (entry) => entry.state === "working" || entry.state === "chilling");
+        assignFanSlots([...cavemen.values()], (entry) => entry.state === "working");
         refreshRosterRow(cave);
       }
       releaseBuild(cave);
@@ -4605,7 +4618,7 @@
         releaseBedroll(cave);
         cave.override = cave.state = (cave.controlOverride || contributors.stateFor(cave.contributor)) === "working" ? "working" : "chilling";
         cave.parts.head.geometry = cave.headOpen;
-        assignFanSlots([...cavemen.values()], (entry) => entry.state === "working" || entry.state === "chilling");
+        assignFanSlots([...cavemen.values()], (entry) => entry.state === "working");
         refreshRosterRow(cave);
       }
       player = cave;

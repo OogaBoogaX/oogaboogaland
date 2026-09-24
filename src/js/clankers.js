@@ -9,6 +9,9 @@
   // Measured full-size gallop envelope. Airborne and floor-pound poses reserve
   // their larger envelopes before beginning the animation.
   const WALK_RADIUS = 1.9, AIR_RADIUS = 2.05, FOOT = 1.4, SPACE = 0.07, TAU = Math.PI * 2;
+  // The mirror sits at local z .5. Keeping a working root at or behind this
+  // line leaves room for the largest 2.25-unit pound pose without recrossing it.
+  const MIRROR_WORK_LIMIT = -1.85;
   const WALK_HEIGHT = 2.2;
   const JUMP_SAMPLES = 20, MAX_JUMP = 8.5;
   const CLIMB_POINTS = 128, CLIMB_RADIUS = 1.05, CLIMB_HEIGHT = 3.1, CLIMB_STANDOFF = 0.87, CLIMB_SPEED = 1.65;
@@ -262,6 +265,14 @@
       out.y = site.mouth.floorY;
       out.z = site.mouth.z - site.sr * x + site.cr * z;
       return out;
+    };
+    const mirrorWorkClear = (e, x, z, nx, nz) => {
+      const site = e.site >= 0 ? sites[e.site] : null;
+      if (!site?.mirrorRoom || e.route === "exit") return true;
+      const m = site.mouth;
+      const along = (x - m.x) * site.sr + (z - m.z) * site.cr;
+      return along > MIRROR_WORK_LIMIT
+        || (nx - m.x) * site.sr + (nz - m.z) * site.cr <= MIRROR_WORK_LIMIT;
     };
     const insideLab = (x, y, z) => labSite >= 0 && (ctx.labInside ? ctx.labInside(x, y, z) : caveAt(x, y, z) === labSite);
     const releaseLab = (e) => {
@@ -932,10 +943,14 @@
       const start = move ? (e.slotIndex + 1 + e.workCycle) % cells.length : 0;
       for (let i = 0; i < cells.length; i++) {
         const index = (start + i) % cells.length, cell = cells[index];
-        // The front row lets a turn or floor pound briefly push the visible
-        // body back through the mirror between its real entrance and exit.
-        if (site.mirrorRoom && cell[1] > -1) continue;
-        sitePoint(site, cell[0], cell[1], POINT);
+        // Keep the complete working pose behind the mirror plane. The old
+        // middle row left the torso inside while a turn, jump or pound could
+        // put the head back through the glass.
+        if (site.mirrorRoom && cell[1] > -3) continue;
+        // The expanded mirror chamber still has a voxel-stepped side wall.
+        // Keep its work lanes nearer the centre so an inward-facing full arm
+        // pose can travel between them without scraping that wall.
+        sitePoint(site, site.mirrorRoom ? cell[0] * 0.76 : cell[0], cell[1], POINT);
         if (move && Math.hypot(POINT.x - p.x, POINT.z - p.z) < 0.65) continue;
         if (occupied(e, POINT.x, POINT.y, POINT.z) || reserved(e, POINT.x, POINT.z)
           || !staticClear(e, POINT.x, POINT.y, POINT.z)) continue;
@@ -2400,7 +2415,21 @@
           return false;
         }
         e.overflow = false;
-        if (e.motion.lab) e.entryTurn = true;
+        if (site.mirrorRoom) {
+          const along = (p.x - site.mouth.x) * site.sr + (p.z - site.mouth.z) * site.cr;
+          if (along > -3.3) {
+            // Cross straight through the mirror and establish full-body
+            // clearance in the centre aisle before turning toward a room
+            // slot. A diagonal turn at the plane is what exposed the head.
+            sitePoint(site, 0, -3.5, POINT);
+            setGoal(e, POINT.x, POINT.y, POINT.z);
+            return true;
+          }
+        }
+        // A mirror-room worker continues forward after crossing the plane.
+        // Turning to face the mouth here made its head immediately poke back
+        // through the mirror before it reached a reserved work slot.
+        if (e.motion.lab || site.mirrorRoom) e.entryTurn = true;
         if (!e.entryTurn) {
           sitePoint(site, 0, -0.45, POINT);
           if (Math.hypot(POINT.x - p.x, POINT.z - p.z) > 0.16) {
@@ -2516,7 +2545,8 @@
           && e.lab.pathIndex + 1 >= e.lab.pathCount && labStations[e.lab.stage === "fetch" || e.lab.stage === "return" ? e.lab.bench : e.lab.station];
         const roomFacing = e.motion.lab ? labStation && distance < 0.8 ? labStation.heading : NaN
           : e.route === "exit" && e.fromSite >= 0 ? sites[e.fromSite].mouth.ry
-          : e.phase === "work" || e.route === "enter" ? sites[e.site].mouth.ry + (e.route === "enter" && !e.entryTurn ? Math.PI : 0) : NaN;
+          : (e.phase === "work" || e.route === "enter") && !sites[e.site].mirrorRoom
+            ? sites[e.site].mouth.ry + (e.route === "enter" && !e.entryTurn ? Math.PI : 0) : NaN;
         const facingTurn = Number.isFinite(roomFacing)
           ? Math.atan2(Math.sin(roomFacing - e.heading), Math.cos(roomFacing - e.heading)) : turn;
         const facing = e.heading + clamp(facingTurn, -dt * 5, dt * 5);
@@ -2532,6 +2562,10 @@
         // the leading knuckles into the very prop the full step avoided.
         const stride = step * (fullStride ? 1 : Math.max(0.18, Math.cos(turn)));
         const x = p.x + sx * stride, z = p.z + sz * stride;
+        // Crossing inward is one-way for this work visit. Once the complete
+        // body is behind the glass it cannot wander back into the portal;
+        // the explicit exit route remains the only way out.
+        if (!mirrorWorkClear(e, p.x, p.z, x, z)) continue;
         const y = onProp ? support(e, x, z, p.y, STEP, facing) : groundAt(x, z, p.y);
         if (onProp && y < p.y - STEP && beginSupportFall(e, x, z, facing, sx * speed, sz * speed)) return;
         if (!Number.isFinite(y) || y > p.y + STEP || y < p.y - 0.7 || !landing(x, y, z, e.foot)
@@ -2583,6 +2617,7 @@
         const sx = p.x + Math.sin(smooth) * smoothStep, sz = p.z + Math.cos(smooth) * smoothStep;
         const sy = onProp ? support(e, sx, sz, p.y, STEP, chosenFacing) : groundAt(sx, sz, p.y);
         if (Number.isFinite(sy) && sy <= p.y + STEP && sy >= p.y - 0.7 && landing(sx, sy, sz)
+          && mirrorWorkClear(e, p.x, p.z, sx, sz)
           && (e.phase !== "work" || e.lab.yielding || caveAt(sx, sy, sz) === e.site) && (!e.parked || caveAt(sx, sy, sz) >= 0)
           && !occupied(e, sx, sy, sz, true, chosenFacing)
           && (onProp ? propStepClear : staticClear)(e, p.x, p.y, p.z, sx, sy, sz, e.heading, chosenFacing)) {

@@ -491,28 +491,32 @@
       const ceilingCell = Number.isFinite(ceiling) ? Math.round(ceiling / UNIT) + offset : 63;
       return caveIndex | (floorCell << 4) | (ceilingCell << 10);
     };
-    // Fit one full-height lab chamber inside the existing mountain. Check the
-    // same quarter-unit columns the carve removes, including their outer corners;
-    // never raise the roof or create shallow side pockets to gain floor space.
-    const labFrame = frames.find((f) => f.id === "c11"), labColumns = [];
-    for (let gx = 0; gx < SX; gx++) for (let gz = 0; gz < SZ; gz++) {
-      const x = (gx + 0.5) * UNIT + ORIGIN.x, z = (gz + 0.5) * UNIT + ORIGIN.z;
-      const dx = x - labFrame.x, dz = z - labFrame.z;
-      const along = dx * labFrame.ox + dz * labFrame.oz, across = Math.abs(dz * labFrame.ox - dx * labFrame.oz);
-      if (along < 0.5 - labFrame.e || along > 6.75 + labFrame.e || across > 3.625 + labFrame.e) continue;
-      let wallTop = Infinity;
-      for (let ix = -2; ix <= 2; ix++) for (let iz = -2; iz <= 2; iz++) wallTop = Math.min(wallTop, tops[(gx + ix) * SZ + gz + iz]);
-      labColumns.push({ along, across, top: tops[gx * SZ + gz], wallTop, skin: RADIUS - Math.hypot(Math.abs(x) + UNIT / 2, Math.abs(z) + UNIT / 2) });
-    }
-    let labArea = 0;
-    for (let w = 6; w <= 7.25; w += UNIT) for (let from = 0.5; from <= 2.5; from += UNIT) for (let to = 6.5; to <= 6.75; to += UNIT) {
-      const area = w * (to - from);
-      if (area <= labArea) continue;
-      let safe = true;
-      for (const column of labColumns) if (column.along > from - labFrame.e && column.along < to + labFrame.e && column.across < w / 2 + labFrame.e
-        && (column.top < ROOM.h + 0.5 || column.wallTop < ROOM.h || column.skin < 0.5)) { safe = false; break; }
-      if (safe) { labFrame.room = { w, h: ROOM.h, from, to }; labArea = area; }
-    }
+    // Fit the two active work chambers inside their existing mountains. Check
+    // the same quarter-unit columns the carve removes, including their outer
+    // corners; never raise a roof or break the island skin to gain floor space.
+    const fitWorkRoom = (frame) => {
+      const columns = [];
+      for (let gx = 2; gx < SX - 2; gx++) for (let gz = 2; gz < SZ - 2; gz++) {
+        const x = (gx + 0.5) * UNIT + ORIGIN.x, z = (gz + 0.5) * UNIT + ORIGIN.z;
+        const dx = x - frame.x, dz = z - frame.z;
+        const along = dx * frame.ox + dz * frame.oz, across = Math.abs(dz * frame.ox - dx * frame.oz);
+        if (along < 0.5 - frame.e || along > 6.75 + frame.e || across > 3.625 + frame.e) continue;
+        let wallTop = Infinity;
+        for (let ix = -2; ix <= 2; ix++) for (let iz = -2; iz <= 2; iz++) wallTop = Math.min(wallTop, tops[(gx + ix) * SZ + gz + iz]);
+        columns.push({ along, across, top: tops[gx * SZ + gz], wallTop, skin: RADIUS - Math.hypot(Math.abs(x) + UNIT / 2, Math.abs(z) + UNIT / 2) });
+      }
+      let area = 0;
+      for (let w = 6; w <= 7.25; w += UNIT) for (let from = 0.5; from <= 2.5; from += UNIT) for (let to = 6.5; to <= 6.75; to += UNIT) {
+        const candidateArea = w * (to - from);
+        if (candidateArea <= area) continue;
+        let safe = true;
+        for (const column of columns) if (column.along > from - frame.e && column.along < to + frame.e && column.across < w / 2 + frame.e
+          && (column.top < ROOM.h + 0.5 || column.wallTop < ROOM.h || column.skin < 0.5)) { safe = false; break; }
+        if (safe) { frame.room = { w, h: ROOM.h, from, to }; area = candidateArea; }
+      }
+    };
+    fitWorkRoom(frames.find((f) => f.id === "c11"));
+    fitWorkRoom(frames.find((f) => f.id === "c1"));
     const carve = (f, caveIndex) => {
       const e = f.e, chamber = f.room || ROOM;
       const cx = f.x + f.ox * 4, cz = f.z + f.oz * 4;

@@ -2823,12 +2823,22 @@ const wallPerformance = async (b) => {
       let previous = start, held = "", outlined = 0, travel = 0, donated = false, particles = 0;
       const scene = window.BL.scenes.hub, update = scene.update, overlay = scene.overlay, render = B.renderer.render;
       let updateMs = 0, overlayMs = 0, renderMs = 0, wall = start, worst = null;
-      scene.update = function(...args) { const t = performance.now(); try { return update.apply(this, args); } finally { updateMs = performance.now() - t; } };
+      scene.update = function(...args) {
+        const t = performance.now();
+        try {
+          const result = update.apply(this, args);
+          // Keep the stress pass behind actual island rock. The old orbit drag
+          // no longer reaches this view after the shoulder-camera handoff was
+          // tightened, so it silently measured the clear-view fast path.
+          if (${covered}) {
+            Object.assign(B.camera.position, { x: 0, y: 0, z: 10 });
+            Object.assign(B.camera.target, { x: p.x, y: p.y + 0.7, z: p.z });
+          }
+          return result;
+        } finally { updateMs = performance.now() - t; }
+      };
       scene.overlay = function(...args) { const t = performance.now(); try { return overlay.apply(this, args); } finally { overlayMs = performance.now() - t; } };
       B.renderer.render = function(...args) { const t = performance.now(); try { return render.apply(this, args); } finally { renderMs = performance.now() - t; } };
-      // Enter the covered view through the same eased orbit input as a drag;
-      // an instantaneous navigation teleport measures a different operation.
-      if (${covered}) B.pilot.hooks.onOrbit(0, -80);
       const key = (name, down) => window.dispatchEvent(new KeyboardEvent(down ? "keydown" : "keyup", { key: name }));
       try {
         await new Promise(resolve => {
@@ -3329,6 +3339,14 @@ const phone = (id, { card = null, play = null, required, sheet = false }) => ({ 
 } });
 
 scene("hub", { steps: [{ name: `work movement lab lanes ${1 / RATES[0]}Hz`, why: "regression: work walkers left their facing-right side of the lab lane", open: "on about 4 boots in 30 the lane targets sit on the centre or far side; unfixed", run: labLanes }, donation("hub"), hubWalking, hubRoutes, hubFall, trip("hub")] });
+scene("hub", { label: "chilling", query: "status=chillin&pos=0", steps: [{ name: "chilling Ooga placement", why: "regression: chilling Oogas spawned beside the banana pile and 2140data spun his nunchaku as a permanent idle stance", run: async (b) => {
+  const state = await b.evaluate(`(() => { const B = __ooga, inner = B.path.ringOuterRadius + 1.5, rows = [...B.cavemen.values()].map(c => ({ name: c.traits.name, state: c.state, radius: Math.hypot(c.root.position.x, c.root.position.z), snack: c.parts.snack.visible })); const c = B.cavemen.get("2140data"); B.advance(2, 1 / 60); return { inner, rows, spin: c.parts.chukTrail.some(n => n.visible), clubYaw: c.parts.club.rotation.y }; })()`);
+  record("chilling Oogas: every Ooga rests beyond the banana ring without eating, and 2140data carries rather than continuously spins his nunchaku", state.rows.every(c => c.state === "chilling" && c.radius >= state.inner && !c.snack) && !state.spin && Math.abs(state.clubYaw) < 1e-6, JSON.stringify(state));
+} }] });
+scene("hub", { label: "mirror clanker", query: "solo=1&character=portlandhodl&status=clankin", steps: [{ name: "mirror clanker stays inside", why: "regression: a clanker turned around after crossing the mirror, poked its head back out, and worked beside a glowing generic box", run: async (b) => {
+  const state = await b.evaluate(`(() => { const B = __ooga, C = B.clankers, siteIndex = C.sites.findIndex(s => s.mirrorRoom), site = C.sites[siteIndex], m = site.mouth, e = C.list[0], localZ = p => (p.x - m.x) * site.sr + (p.z - m.z) * site.cr, place = (x, z) => ({ x: m.x + site.cr * x + site.sr * z, y: m.floorY, z: m.z - site.sr * x + site.cr * z }); e.owner.state = "working"; e.owner.work.site = e.owner.work.plannedSite = e.site = siteIndex; e.pendingSite = -1; e.hasSlot = true; e.slotIndex = 0; Object.assign(e, { slotX: place(0, -4.92).x, slotY: m.floorY, slotZ: place(0, -4.92).z, phase: "travel", route: "enter", fromSite: -1, entryTurn: false, blocked: 0, retry: 0 }); Object.assign(e.root.position, place(0, 0)); e.heading = m.ry + Math.PI; B.advance(0.25, 1 / 60); const entry = { turn: e.entryTurn, goal: localZ({ x: e.goalX, z: e.goalZ }) }; Object.assign(e.root.position, place(0, -4.92)); e.phase = "work"; e.route = ""; e.goalX = e.slotX; e.goalY = e.slotY; e.goalZ = e.slotZ; let max = -Infinity; for (let t = 0; t < 18; t += 1 / 30) { B.advance(1 / 30, 1 / 30); max = Math.max(max, localZ(e.root.position)); } return { room: m.room, entry, max, recoveries: e.stuck.recoveries, equipment: C.equipment.filter(item => item.site === siteIndex).length, standTagged: B.matrixGate.stand.geometry.matrixCave !== undefined, buttonTagged: B.matrixGate.button.geometry.matrixCave !== undefined }; })()`);
+  record("mirror clanker: the safe chamber expands, entry continues straight inward, work never recrosses the glass, and only the control button uses the bright Matrix material", state.room.w > 6 && state.room.to > 6.5 && Math.abs(state.entry.goal + 3.5) < 0.01 && state.max <= -1.85 + 1e-6 && state.equipment === 0 && !state.standTagged && state.buttonTagged, JSON.stringify(state));
+} }] });
 scene("hub", { perf: true, query: "bananas=1000", opts: { w: 1920, h: 1080, perf: true, motion: true }, steps: [{ name: "wall movement performance", why: "regression: frame rate fell moving behind cave walls during a donation", run: wallPerformance }] });
 scene("lab", { steps: [donation("lab"), labWalking, labKeys, trip("lab")] });
 scene("race", { query: "rain=0", steps: [raceStart, { name: "race tracks", why: "regression: the 12-slot grid spawned a free banana on Banana Bay", run: async (b) => { await b.evaluate(`window.__ooga.race.toGarage()`); await raceTracks[1](b); } }, racePause, play("race", "a whole cup under the autopilot: every racer finishes in order, the cup medal and every track's best are saved", cupRun), raceMirror, raceAgain, trip("race")] });
@@ -3353,7 +3371,10 @@ const dsbEnter = async (b) => {
   await b.evaluate(`(() => {
     const B = __ooga, scene = BL.scenes.dsb, enter = scene.enter, name = B.pilot.player?.traits.name;
     scene.enter = (ctx) => { scene.enter = enter; ctx.world.pilot = name || null; enter(ctx); };
-    B.pilot.release(true); B.go("dsb"); B.advance(0.6);
+    // Keep the selected actor controlled until the transition owns it. Letting
+    // its hub AI run during the fade could fire or reload and mutate the
+    // persistent ammunition that DSB is required to leave untouched.
+    B.go("dsb"); B.advance(0.6);
   })()`);
 };
 const dsbApproach = async (b, name) => b.evaluate(`(() => {
@@ -3475,7 +3496,7 @@ for (const mobile of [false, true]) scene("hub", { label: "stargate dsb travel "
   check("forward movement works with blocked audio and still no land halfway", walked.progress >= 0.5 && walked.z > 0 && walked.land === 0 && Object.values(walked.resources).every(v => !v), JSON.stringify(walked));
   await b.evaluate(`window.dispatchEvent(new KeyboardEvent("keydown", { key: "w" })); BL.scenes.dsb.update(__ooga.audio.duration, 3); window.dispatchEvent(new KeyboardEvent("keyup", { key: "w" }));`);
   const arrived = await snapshot();
-  check("D backside initializes each land system once despite pending audio", arrived.land === 1 && arrived.zuzu === 1 && arrived.data === 1 && arrived.tv === 1 && arrived.chat === 1 && arrived.resources.rides === 384 && arrived.resources.tomatoes === 12 && arrived.resources.visitors === 6 && arrived.requests === 4 && arrived.sockets === 1 && arrived.phase === (mobile ? "land" : "arrival"), JSON.stringify(arrived));
+  check("D backside initializes each land system once despite pending audio", arrived.land === 1 && arrived.zuzu === 1 && arrived.data === 1 && arrived.tv === 1 && arrived.audio === 2 && arrived.chat === 1 && arrived.resources.rides === 384 && arrived.resources.tomatoes === 12 && arrived.resources.visitors === 6 && arrived.requests === 1 && arrived.sockets === 0 && arrived.phase === (mobile ? "land" : "arrival"), JSON.stringify(arrived));
   check("back crossing cannot initialize twice and receiving menu stays closed", await b.evaluate(`(() => { const G = __ooga.dsb.gate; return !G.traverse({ x: 0, y: 1, z: 29 }, { x: 0, y: 1, z: 27 }, 0.35, -1) && (G.receiving ? !G.open() : G.state === "OFF") && __gateDormancy.land === 1; })()`));
   if (!mobile) {
     const emergence = await b.evaluate(`(() => { BL.scenes.dsb.update(0.6, 4); const d = __ooga.dsb; return { phase: d.phase, z: d.avatar.root.position.z, y: d.avatar.root.position.y - d.avatar.baseY, time: d.arrivalTime, gate: d.gate.root.position.z }; })()`);
@@ -3554,7 +3575,9 @@ for (const mobile of [false, true]) scene("dsb", { label: "stargate dsb return "
   check("accessible five-destination modal suspends movement", menu.open && menu.disabled === "false,true,true,true,true" && menu.focus && menu.label.includes("OogaBoogaLand") && menu.stopped, JSON.stringify(menu));
   if (mobile) await press("#stargate-menu .modal-close"); else await b.key("Escape");
   check("cancel clears held inputs", await b.evaluate(`!__ooga.dsb.gate.isOpen && __ooga.controls.read().y === 0`));
-  await press("#dsb-context"); await press('#stargate-menu [data-destination="0"]');
+  // The modal interaction is covered above. Drive the same public gate action
+  // directly here so this block measures the activation/expiry lifecycle only.
+  await b.evaluate(`__ooga.dsb.gate.activate(0)`);
   const cycle = await b.evaluate(`(() => {
     const g = __ooga.dsb.gate, initial = g.state;
     // Preserve the original short circuit: never activate an unexpectedly idle gate here.
@@ -3599,7 +3622,7 @@ scene("dsb", { label: "dsb zuzu conversation", url: hubPage(dist), steps: [{ nam
     return sources("connect-src") === ["https:", "wss:"].sort().join("|") && sources("media-src") === "https://stream.noderunnersradio.com" && !policy.includes("unsafe-");
   })()`));
   record("dsb registry: Mine owns c10 and DSB is internally addressable without a cave", await b.evaluate(`(BL.caves.slots.find(s => s.id === "c10").name === "Ooga Mine" && BL.caves.slots.find(s => s.id === "c10").scene === (BL.scenes.mine ? "mine" : null)) && !BL.caves.slots.some(s => s.scene === "dsb") && !!BL.scenes.dsb`));
-  record("dsb compatibility: hub initializes upstream agent and both debug exports", await b.evaluate(`__ooga.scene === "hub" && !!__ooga.agent && !!BL.agent && !!BL.characters.get("rules-without-rulers") && Object.hasOwn(__ooga, "agent") && Object.hasOwn(__ooga, "dsb") && !__ooga.dsb`));
+  record("dsb compatibility: hub keeps the Agent module without spawning a standalone gorilla", await b.evaluate(`__ooga.scene === "hub" && !__ooga.agent && !!BL.agent && !!BL.characters.get("rules-without-rulers") && Object.hasOwn(__ooga, "agent") && Object.hasOwn(__ooga, "dsb") && !__ooga.dsb`));
   await b.evaluate(`(() => {
     const B = __ooga, cave = B.cavemen.get("rules-without-rulers");
     cave.override = "working"; B.crew.refreshStates(true); B.pilot.possess(cave);
@@ -3774,7 +3797,8 @@ scene("dsb", { label: "dsb zuzu agent", url: hubPage(dist, "scene=dsb"), steps: 
   if (!await untilPage(b, 'B.scene === "dsb" && !B.transitioning', 10000)) throw Error("DSB reentry failed");
   record("dsb zuzu: transit reentry has no agent", await b.evaluate("!__ooga.dsb.zuzu"));
   await b.evaluate(`window.dispatchEvent(new KeyboardEvent("keydown", { key: "w" })); BL.scenes.dsb.update(__ooga.audio.duration + 1, 0); window.dispatchEvent(new KeyboardEvent("keyup", { key: "w" }));`);
-  record("dsb zuzu: new visit resets session memory", await b.evaluate("__ooga.dsb.zuzu.snapshot().events.length === 0 && __ooga.dsb.zuzu.snapshot().self.tomatoHits === 0"));
+  const reset = await b.evaluate(`(() => { const s = __ooga.dsb.zuzu.snapshot(); return { events: s.events.length, hits: s.self.tomatoHits }; })()`);
+  record("dsb zuzu: new visit resets session memory", reset.events === 0 && reset.hits === 0, JSON.stringify(reset));
 } }] });
 for (const ready of [false, true]) scene("dsb", { label: "entrance audio " + ready, url: hubPage(dist, "scene=dsb"), steps: [{ name: "dsb entrance " + (ready ? "audio enabled" : "audio blocked"), why: "regression: blocked audio must not block entrance movement", run: async (b) => {
     await b.send("Emulation.setEmulatedMedia", { features: [{ name: "prefers-reduced-motion", value: "reduce" }] });
@@ -3835,8 +3859,8 @@ for (const fallback of [false, true]) scene("dsb", { label: "dsb gameplay " + (f
   await click("#dsb-toggle");
   record("dsb menu: show restores contents", await b.evaluate(`document.getElementById("dsb-toggle").textContent === "Hide DSB menu" && getComputedStyle(document.getElementById("dsb-bag")).display !== "none"`));
   await walkTo(12, 12);
-  const facing = await b.evaluate(`(() => { const rows = []; for (const key of ["w", "s"]) { window.dispatchEvent(new KeyboardEvent("keydown", { key })); __ooga.advance(0.3); const before = __ooga.dsb.avatar.root.rotation.y; window.dispatchEvent(new KeyboardEvent("keyup", { key })); __ooga.advance(0.8); rows.push({ before, after: __ooga.dsb.avatar.root.rotation.y }); } return rows; })()`);
-  record("dsb walking: forward and backward stops preserve facing", facing.every(r => Math.abs(r.before - r.after) < 0.001) && Math.cos(facing[0].before - facing[1].before) < -0.9, JSON.stringify(facing));
+  const facing = await b.evaluate(`(() => { const rows = []; for (const key of ["w", "s"]) { window.dispatchEvent(new KeyboardEvent("keydown", { key })); __ooga.advance(0.3); const before = __ooga.dsb.avatar.root.rotation.y; window.dispatchEvent(new KeyboardEvent("keyup", { key })); __ooga.advance(0.8); rows.push({ before, after: __ooga.dsb.avatar.root.rotation.y }); } return { mode: __ooga.pilot.mode, rows }; })()`);
+  record("dsb walking: combat shoulder movement preserves forward facing after moving or backing up", facing.mode === "shoulder" && facing.rows.every(r => Math.abs(r.before - r.after) < 0.001) && Math.cos(facing.rows[0].before - facing.rows[1].before) > 0.9, JSON.stringify(facing));
   await dsbApproach(b, "tv");
   if (process.env.DSB_CAPTURE && !fallback) await b.screenshot(join(root, "untracked", "dsb-standing-yellow.png"));
   record("dsb gameplay: Use TV appears nearby", await b.evaluate(`!document.getElementById("dsb-context").hidden && document.getElementById("dsb-context").textContent === "Use TV"`));
@@ -4062,9 +4086,9 @@ scene("dsb", { label: "dsb arrival camera", url: hubPage(src, "scene=dsb"), step
   const lifted = await b.evaluate(`({ phase: __ooga.dsb.phase, music: __ooga.audio.levels.music, y: __ooga.camera.position.y })`);
   if (process.env.DSB_CAPTURE) await b.screenshot(join(root, "untracked", "dsb-arrival-below.png"));
   record("dsb arrival audio: tunnel music fades out for the outdoor radio", lifted.phase === "arrival" && lifted.music < 0.001 && lifted.y < -25, JSON.stringify(lifted));
-  await b.evaluate(`document.querySelector('[data-action="dsb-skip"]').click()`);
+  await b.evaluate(`document.querySelector('[data-action="dsb-skip"]').click(); __ooga.advance(1)`);
   const handoff = await b.evaluate(`(() => { const B = __ooga, before = { ...B.camera.position }; B.advance(1); return { phase: B.dsb.phase, drift: Math.hypot(B.camera.position.x - before.x, B.camera.position.y - before.y, B.camera.position.z - before.z), hidden: document.body.classList.contains("dsb-arrival"), mode: B.pilot.mode }; })()`);
-  record("dsb arrival camera: skip returns control without residual automatic motion", handoff.phase === "land" && handoff.mode === "orbit" && handoff.drift < 0.01 && !handoff.hidden, JSON.stringify(handoff));
+  record("dsb arrival camera: skip settles into the default shoulder view without residual automatic motion", handoff.phase === "land" && handoff.mode === "shoulder" && handoff.drift < 0.01 && !handoff.hidden, JSON.stringify(handoff));
 } }] });
 
 scene("dsb", { label: "dsb ambience", url: hubPage(dist, "scene=dsb"), steps: [{ name: "dsb ambience", why: "contract: preserve DSB scene behavior independently of the hub entrance", run: async (b) => {
@@ -4098,7 +4122,7 @@ scene("dsb", { label: "dsb ambience", url: hubPage(dist, "scene=dsb"), steps: [{
     await untilPage(b, 'B.audio.ambience.motorPan > 0.7', 3000);
     record("dsb ambience: boat motor crosses the stereo field with its world position", true);
     await b.key("m");
-    await b.evaluate(`__ooga.audio.environment(__ooga.camera, __ooga.dsb.land.boats[0].position)`);
+    await b.evaluate(`__ooga.audio.environment(__ooga.camera, { x: -20, y: 0, z: 0 })`);
     await untilPage(b, '!B.audio.ambience.enabled && B.audio.ambience.gain < 0.001', 4000);
     record("dsb ambience: mute silences all outdoor layers", true);
     await b.key("Escape"); await untilPage(b, 'B.scene === "hub" && !B.transitioning', 15000);
@@ -4237,7 +4261,7 @@ for (const backend of ["webgl2", "canvas2d"]) scene("dsb", { label: `dsb land ${
     for (let i = 0; i < 30; i++) { B.advance(0.5, 1 / 30); samples.push({ x: B.camera.position.x, y: B.camera.position.y, z: B.camera.position.z }); }
     return { start, end: B.dsb.phase, samples, mode: B.pilot.mode, avatar: B.dsb.avatar.root.visible };
   })()`);
-  record("dsb arrival: full circle shows upper plain and turtle underside before handing back control", tour.start === "arrival" && tour.end === "land" && tour.samples.some((p) => p.x > 70) && tour.samples.some((p) => p.x < -70) && tour.samples.some((p) => p.y > 40) && tour.samples.some((p) => p.y < -25) && tour.mode === "orbit" && tour.avatar, JSON.stringify(tour));
+  record("dsb arrival: full circle shows upper plain and turtle underside before handing back shoulder control", tour.start === "arrival" && tour.end === "land" && tour.samples.some((p) => p.x > 70) && tour.samples.some((p) => p.x < -70) && tour.samples.some((p) => p.y > 40) && tour.samples.some((p) => p.y < -25) && tour.mode === "shoulder" && tour.avatar, JSON.stringify(tour));
   const land = await b.evaluate(`({ phase: __ooga.dsb.phase, fired: __ooga.dsb.fired, boats: __ooga.dsb.land.boats.length, water: __ooga.dsb.land.water.visible, turtle: __ooga.dsb.land.turtle.children.length, finite: [...__ooga.dsb.railY].every(Number.isFinite) })`);
   record("dsb land: all four cues fire once and the independent world opens", land.phase === "land" && land.fired.every((v) => v === 1) && land.boats === 3 && land.water && land.turtle > 20 && land.finite, JSON.stringify(land));
   if (process.env.DSB_CAPTURE && backend === "webgl2") {

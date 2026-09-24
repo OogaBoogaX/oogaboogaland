@@ -184,7 +184,7 @@
   };
 
   // One visit's state: created in enter, dropped in leave.
-  let jumbotronSpot, oogatronUnsub, renderer, game, world, go, lootEnabled, testBananas, root, camera, overlayCanvas, island, pathNode, altar, hud, hooks, input, pilot, fx, cameraCover, bananaCover, solids, rockGuides, objectGuides, sightGuides, bananaGuides, pileGuides, platformGuides, mirrorGuides, pile, crew, crates, critters, clock, presets, entering, jetpack, jetpackState, jetpackCarrier, jetpackWearer, lastJetpackCloud, mirrorCave, matrixCave, matrixControl, gateRain, fire, headquarters, dockStairs, jumbotron, positionDebug, agent, agentPlay, pitGate;
+  let jumbotronSpot, oogatronUnsub, renderer, game, world, go, lootEnabled, testBananas, root, camera, overlayCanvas, island, pathNode, altar, hud, hooks, input, pilot, fx, cameraCover, bananaCover, solids, rockGuides, objectGuides, sightGuides, bananaGuides, pileGuides, platformGuides, mirrorGuides, pile, crew, crates, critters, clock, presets, entering, jetpack, jetpackState, jetpackCarrier, jetpackWearer, lastJetpackCloud, mirrorCave, matrixCave, matrixControl, gateRain, fire, headquarters, dockStairs, jumbotron, positionDebug, pitGate;
   let magazine, magazineState, breakables, clankers, clankerPlay, clankerMeshes, clankerPartOwners, entropyLab;
   const clankerEquipment = [];
   const CLANKER_FIRE = [models.particleGeometry("#ff8a2a", 0.18, 1), models.particleGeometry("#ffc148", 0.16, 1)];
@@ -1342,7 +1342,10 @@
       addChild(group, node);
       mirrorCave = { slot, mouth: m, group, rim, node, sign: null };
       addTarget(node, { kind: "cave", slot, priority: 1 });
-      const stand = createNode({ position: { x: 0, y: 0, z: -5.15 }, geometry: { ...hubModels.matrixButtonStand(), matrixCave: caveIndex }, matrixExterior: true });
+      // The pedestal is a physical control, not a Matrix glyph surface. Giving
+      // its complete geometry a cave tag turns it into the bright white box
+      // visible at the back of the room; keep only the button in the effect.
+      const stand = createNode({ position: { x: 0, y: 0, z: -5.15 }, geometry: hubModels.matrixButtonStand(), matrixExterior: true });
       const button = createNode({ position: { x: 0, y: 1.12, z: 0 }, geometry: { ...hubModels.matrixButton(), matrixCave: caveIndex }, matrixExterior: true, matrixLiving: false, glow: 0.25 });
       addChild(stand, button);
       addChild(group, stand);
@@ -2290,20 +2293,25 @@
     return !npcClosedCaveAt(s.x, s.z, feet, height) && !npcPileAt(s.x, feet, s.z, height) && !npcWorkZoneAt(cave, s.x, feet, s.z) && npcFireClear(s.x, feet, s.z, s.x, feet, s.z, height) && walkable(s.x, s.z, s.x, s.z, feet, height, cave);
   };
   const wanderSpot = (out, cave = null) => {
-    let s = RENDER_OPTS.stars > NIGHT && Math.random() < FIRE_SEAT_CHANCE ? freeSeat() : null;
+    const chilling = cave?.state === "chilling";
+    let s = (chilling && Math.random() < 0.35 || RENDER_OPTS.stars > NIGHT && Math.random() < FIRE_SEAT_CHANCE) ? freeSeat() : null;
     if (s && !npcWanderPointClear(s, cave)) s = null;
     if (!s) {
       const start = Math.floor(Math.random() * spots.length);
       for (let i = 0; i < spots.length; i++) {
         const candidate = spots[(start + i) % spots.length];
-        if (candidate.x === out.x && candidate.z === out.z || !npcWanderPointClear(candidate, cave)) continue;
+        if (candidate.x === out.x && candidate.z === out.z
+          || seatTaken(candidate)
+          || chilling && Math.hypot(candidate.x, candidate.z) < island.path.debug.ringOuterRadius + 1.5
+          || !npcWanderPointClear(candidate, cave)) continue;
         s = candidate; break;
       }
     }
-    if (!s) return;
+    if (!s) return false;
     out.x = s.x;
     out.z = s.z;
     out.ry = s.ry;
+    return true;
   };
   // Surface caves and the headquarters can share a column below the same roof.
   const supportAt = (x, z, y = Infinity) => island.supportAt(x, z, y, STEP_MAX);
@@ -3647,7 +3655,6 @@
   };
   const onTap = (hit, p) => {
     if (pitArrival || pitGate?.isOpen) return;
-    if (agentTripleClick()) return;
     if (!hit) return;
     const o = hit.owner;
     switch (o.kind) {
@@ -4860,20 +4867,6 @@
     // Sweep before any abyss equipment loss or respawn, including a whole-shaft fall in one step.
     if (!entering && !pilot.poseHeld && fallingPlayer && fallingPlayer === pilot.player
       && pitGate.traverse(pitPrevious, fallingPlayer.root.position, fallingPlayer.bodyRadius)) return;
-    agent.setForm(agent.revealed || matrixCoverage(agent.root.position.x, agent.root.position.z) > 0.5 ? "code" : "ape");
-    agent.update(dt);
-    // The called-in Agents live their ten seconds, then leave nothing behind.
-    for (let i = extraAgents.length - 1; i >= 0; i--) {
-      const extra = extraAgents[i];
-      extra.setForm(matrixCoverage(extra.root.position.x, extra.root.position.z) > 0.5 ? "code" : "ape");
-      extra.update(dt);
-      if ((extraLives[i] -= dt) > 0) continue;
-      removeChild(root, extra.root);
-      extra.dispose();
-      extraAgents.splice(i, 1);
-      extraLives.splice(i, 1);
-      agentBodies.splice(agentBodies.indexOf(extra.root.position), 1);
-    }
     updateClankerDrags(dt);
     dockStairs.update(dt, pilot.player);
     updateRoomSigns(dt);
@@ -5522,7 +5515,10 @@
   const createClankerEquipment = (sites) => {
     for (let site = 0; site < sites.length; site++) for (let side = 0; side < 2; side++) {
       const place = sites[site];
-      if (place.mouth === entropyLab.mouth) continue;
+      // EntropyLab supplies authored equipment and the mirror room is meant to
+      // stay open for its running clanker. Generic build props in either room
+      // become unexplained bright blocks under their local effects.
+      if (place.mouth === entropyLab.mouth || place.mirrorRoom) continue;
       const geometry = models.buildableGeos[(site + side) % models.buildableGeos.length]();
       const bounds = BL.scene.boundsOf(geometry);
       const radius = Math.hypot(Math.max(Math.abs(bounds.min[0]), Math.abs(bounds.max[0])), Math.max(Math.abs(bounds.min[2]), Math.abs(bounds.max[2]))) * 0.65;
@@ -5754,7 +5750,7 @@
   };
 
   const enter = (ctx) => {
-    ({ renderer, game, world, go, lootEnabled, testBananas, agentPlay } = ctx);
+    ({ renderer, game, world, go, lootEnabled, testBananas } = ctx);
     pitDeparting = false; pitArrival = null;
     const travel = world.stargateTravel;
     const pitReturn = ctx.from === "dsb" && travel?.from === "dsb" && travel.to === "hub" && travel.arrival === "pit" && travel.name === world.pilot;
@@ -5959,7 +5955,8 @@
     shared.npcWalkable = npcWalkable;
     shared.prepareNpcRoutes = refreshWorkZones;
     shared.npcDetour = npcWorkDetour;
-    shared.npcRouteBlocked = (cave, x, y, z) => npcClosedCaveAt(x, z, y, cave.bodyHeight) || npcWorkZoneAt(cave, x, y, z);
+    shared.npcRouteBlocked = (cave, x, y, z) => npcClosedCaveAt(x, z, y, cave.bodyHeight) || npcWorkZoneAt(cave, x, y, z)
+      || cave.state === "chilling" && Math.hypot(x, z) < island.path.debug.ringOuterRadius + 1.5;
     shared.shoulderObstacleActive = solids.isActive;
     shared.shoulderObstacle = (cave, fx, fz, reach, out) => {
       const p = cave.root.position;
@@ -6238,7 +6235,7 @@
         if (hit && hit.owner.kind === "clanker") return;
         else {
           if (clankerPlay.active) clankerPlay.release();
-          agentDoubleTap(hit, p);
+          pilot.hooks.onDoubleTap(hit, p);
         }
       }
     });
@@ -6330,7 +6327,7 @@
         get shown() {
           return pile.shown;
         },
-        stargate: pitGate, get stargateArrival() { return pitArrival; }, island, mouths: island.mouths, labels, launchers, camera, weather, chain, beasts, pokeBeast, useProp, refreshChainSign, get chainSign() { return chainSign; }, get poolIsland() { return mempoolIsland; }, cameraPose: POSITION_POSE, crew, fx, controls: pilot.controls, props, altar, path: island.path.debug, headquarters, jumbotron, fireworks: launchFireworks, get fireworksPending() { return fireworksShells.length; }, agent: agent.debug, clankers, clankerPlay,
+        stargate: pitGate, get stargateArrival() { return pitArrival; }, island, mouths: island.mouths, labels, launchers, camera, weather, chain, beasts, pokeBeast, useProp, refreshChainSign, get chainSign() { return chainSign; }, get poolIsland() { return mempoolIsland; }, cameraPose: POSITION_POSE, crew, fx, controls: pilot.controls, props, altar, path: island.path.debug, headquarters, jumbotron, fireworks: launchFireworks, get fireworksPending() { return fireworksShells.length; }, clankers, clankerPlay,
         scenery: {
           get candidateCount() { return scenery.length; },
           get visibleCount() { return sceneryVisible; },
