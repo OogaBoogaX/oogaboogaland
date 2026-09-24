@@ -20,6 +20,23 @@
       has: (x, y, z) => inside(x, y, z) && data[index(x, y, z)] !== 0
     };
   };
+  // A compact read-only rendering source for cached sparse islets. Material 0
+  // remains air; sparse voxel palettes start at 0, so their indices shift by one.
+  const cutawaySourceFromVox = (vox, { unit, palette, origin = { x: 0, y: 0, z: 0 } }) => {
+    const cell = [0, 0, 0], min = [Infinity, Infinity, Infinity], max = [-Infinity, -Infinity, -Infinity];
+    for (const key of vox.map.keys()) {
+      BL.models.voxCoords(key, cell);
+      for (let axis = 0; axis < 3; axis++) { min[axis] = Math.min(min[axis], cell[axis]); max[axis] = Math.max(max[axis], cell[axis]); }
+    }
+    if (!vox.map.size) return null;
+    const sx = max[0] - min[0] + 1, sy = max[1] - min[1] + 1, sz = max[2] - min[2] + 1;
+    const data = new Uint8Array(sx * sy * sz);
+    for (const [key, material] of vox.map) {
+      BL.models.voxCoords(key, cell);
+      data[((cell[0] - min[0]) * sy + cell[1] - min[1]) * sz + cell[2] - min[2]] = material + 1;
+    }
+    return { data, sx, sy, sz, unit, origin: { x: origin.x + min[0] * unit, y: origin.y + min[1] * unit, z: origin.z + min[2] * unit }, palette: [null, ...palette.map((c) => typeof c === "string" ? hexToRgb(c) : c)] };
+  };
   // Exposed grid faces, greedy-meshed one slice at a time.
   const DIR_BIT = 0x100, FLOOR_DETAIL_BIT = 0x4000;
   const gridGeometry = (grid, { unit, palette, origin = { x: 0, y: 0, z: 0 }, matrixCaves = null, floorRooms = [] }) => {
@@ -2028,6 +2045,10 @@
     };
     const built = {
       geometry,
+      // Shared construction data is read-only to rendering. The cap builder
+      // fills only actual solid cells and the continuous window/ramp remnants.
+      cutawaySource: { data, sx: SX, sy: SY, sz: SZ, unit: UNIT, origin: ORIGIN, palette: PALETTE, windows: windowColumns,
+        rampGeometry: geometry, rampFaceOffset, rampLayers: [{ ranges: rampCollision, cavities: lowerCavities, offset: 32 }, { ranges: basementCollision, cavities: basementCavities, offset: 64 }] },
       path,
       heightAt,
       surfaceAt,
@@ -2067,5 +2088,5 @@
     ISLANDS.set(seed, built);
     return built;
   };
-  BL.terrain = { makeGrid, gridGeometry, island, segmentBoxClear, PALETTE, MAX_HEIGHT };
+  BL.terrain = { makeGrid, gridGeometry, island, segmentBoxClear, cutawaySourceFromVox, PALETTE, MAX_HEIGHT };
 })();

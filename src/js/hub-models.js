@@ -752,6 +752,7 @@
     }
     const geo = voxGeo(v, { unit: VOX, palette: ["#f7f9fb", "#dfe6ee"], origin: { x: -VOX / 2, y: -VOX, z: -VOX / 2 } });
     geo.castShadow = false;
+    geo.cutawayPreserve = true;
     return geo;
   });
   const ladder = cached(() => merge(

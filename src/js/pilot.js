@@ -120,7 +120,7 @@
     const overheadEntry = { x: 0, y: 0, z: 0 }, overheadAim = { x: 0, y: 0, z: 0 };
     const overheadRotation = quat.create(), overheadStartRotation = quat.create(), overheadViewRotation = quat.create();
     const aimCorrection = quat.create(), aimScreenRay = new Float64Array(3);
-    let overheadFov = BASE_FOV;
+    let overheadFov = BASE_FOV, overheadStartOrtho = 0;
     const reticle = document.getElementById("weapon-reticle");
     const targetHit = { node: null, owner: null, x: 0, y: 0, z: 0, distance: 0, type: "object" };
     const assistedTargetHit = { node: null, owner: null, x: 0, y: 0, z: 0, distance: 0, type: "object" };
@@ -159,7 +159,7 @@
     const aimEntryRotation = quat.create(), aimLookRotation = quat.create(), aimPanRotation = quat.create();
     const aimForward = new Float64Array(3);
     let aimEntryRadius = 0, aimEntryYaw = 0, aimEntryHeight = 0, aimBodyYaw = 0, aimBodyPitch = 0, aimBodyHeadYaw = 0, aimAtCursor = false, aimPreserveFacing = false;
-    let aimScreenX = 0, aimScreenY = 0;
+    let aimScreenX = 0, aimScreenY = 0, aimEntryOrtho = 0;
     const aimPoint = { x: 0, y: 0, z: 0 };
     const cursorItem = { x: 0, y: 0, z: 0 };
     const cursorPoint = { x: 0, y: 0, z: 0 }, cursorRay = { ox: 0, oy: 0, oz: 0, dx: 0, dy: 0, dz: 0 };
@@ -291,6 +291,7 @@
       aimLocked = false;
       unlockedAt = cursorUnlockedAt = -Infinity;
       if (!externalControl) return;
+      camera.orthoMix = 0;
       setSoftAimFocus(false);
       ads = false;
       primaryButtonCave = null;
@@ -328,6 +329,7 @@
     };
     const captureAimEntry = (cave) => {
       const p = cave.root.position, up = camera.up || cursorUp;
+      aimEntryOrtho = camera.orthoMix || 0;
       aimEntry.x = camera.position.x; aimEntry.y = camera.position.y; aimEntry.z = camera.position.z;
       aimEntryBody.x = p.x; aimEntryBody.y = p.y; aimEntryBody.z = p.z;
       viewRotation(aimEntryRotation, camera.target.x - aimEntry.x, camera.target.y - aimEntry.y, camera.target.z - aimEntry.z, up.x, up.y, up.z, orbit.yaw);
@@ -446,7 +448,7 @@
         // approaches the reticle. Camera translation and pan share this aim.
         mat4.lookAt(cursorView, camera.position, camera.target, camera.up || cursorUp);
         const rx = cursorPoint.x - camera.position.x, ry = cursorPoint.y - camera.position.y, rz = cursorPoint.z - camera.position.z;
-        const depth = -(cursorView[2] * rx + cursorView[6] * ry + cursorView[10] * rz);
+        const depth = mat4.projectionDepth(-(cursorView[2] * rx + cursorView[6] * ry + cursorView[10] * rz), camera.fov, camera.orthoMix, camera.orthoHeight);
         const tangent = Math.tan(camera.fov * 0.5);
         aimScreenX = (cursorView[0] * rx + cursorView[4] * ry + cursorView[8] * rz) / depth / tangent / (renderer.size.width / renderer.size.height);
         aimScreenY = (cursorView[1] * rx + cursorView[5] * ry + cursorView[9] * rz) / depth / tangent;
@@ -545,7 +547,7 @@
         const angle = Math.random() * Math.PI * 2;
         mat4.lookAt(cursorView, camera.position, camera.target, camera.up || cursorUp);
         mat4.rayFromView(cursorRay, cursorView, renderer.size.width, renderer.size.height, camera.fov, camera.position,
-          renderer.size.width / 2 + Math.cos(angle) * radius, renderer.size.height / 2 + Math.sin(angle) * radius);
+          renderer.size.width / 2 + Math.cos(angle) * radius, renderer.size.height / 2 + Math.sin(angle) * radius, camera.orthoMix, camera.orthoHeight);
         if (!targetAlongAim(out, cursorRay.ox, cursorRay.oy, cursorRay.oz, cursorRay.dx, cursorRay.dy, cursorRay.dz)) {
           pointAlongAim(out, cursorRay.ox, cursorRay.oy, cursorRay.oz, cursorRay.dx, cursorRay.dy, cursorRay.dz);
         }
@@ -664,8 +666,8 @@
     const projectAim = (point) => {
       mat4.lookAt(cursorView, camera.position, camera.target, camera.up || cursorUp);
       mat4.transformPoint(aimProjection, cursorView, point.x, point.y, point.z);
-      const depth = -aimProjection[2], focal = renderer.size.height / (2 * Math.tan(camera.fov / 2));
-      if (depth <= 0.01) return false;
+      if (-aimProjection[2] <= 0.01) return false;
+      const depth = mat4.projectionDepth(-aimProjection[2], camera.fov, camera.orthoMix, camera.orthoHeight), focal = renderer.size.height / (2 * Math.tan(camera.fov / 2));
       assistedTargetScreen.x = renderer.size.width / 2 + aimProjection[0] * focal / depth;
       assistedTargetScreen.y = renderer.size.height / 2 - aimProjection[1] * focal / depth;
       return true;
@@ -683,6 +685,7 @@
       overheadVelocity = 0;
       overheadTime = overheadMix = overheadExit = 0;
       overheadFov = camera.fov;
+      overheadStartOrtho = camera.orthoMix || 0;
       overheadPointerMoved = false;
       overheadX = renderer.size.width / 2; overheadY = renderer.size.height / 2;
       const dx = camera.target.x - camera.position.x, dy = camera.target.y - camera.position.y, dz = camera.target.z - camera.position.z;
@@ -712,7 +715,7 @@
         overheadX = assistedTargetScreen.x; overheadY = assistedTargetScreen.y;
       }
       mat4.lookAt(cursorView, camera.position, camera.target, camera.up || cursorUp);
-      mat4.rayFromView(cursorRay, cursorView, renderer.size.width, renderer.size.height, camera.fov, camera.position, overheadX, overheadY);
+      mat4.rayFromView(cursorRay, cursorView, renderer.size.width, renderer.size.height, camera.fov, camera.position, overheadX, overheadY, camera.orthoMix, camera.orthoHeight);
       if (overheadPointerMoved && cursorRay.dy < -1e-5) {
         const distance = Math.max(0, (feet - cursorRay.oy) / cursorRay.dy);
         overheadAim.x = cursorRay.ox + cursorRay.dx * distance;
@@ -771,6 +774,14 @@
       }
       updateFeedback(cave, dt);
     };
+    const setOverheadProjection = (cave, mix) => {
+      const p = cave.root.position, feet = p.y - cave.baseY - cave.hop;
+      camera.orthoMix = mix;
+      // Match perspective scale at the followed floor throughout the swoop.
+      // Once overhead, this is exactly the camera's height above that floor.
+      camera.orthoHeight = 2 * Math.tan(camera.fov / 2) * Math.max(camera.near,
+        Math.hypot(camera.position.x - p.x, camera.position.y - feet, camera.position.z - p.z));
+    };
     const updateOverhead = (cave, dt) => {
       syncJetpackHud(); syncWeaponHud();
       crew.elevate(0);
@@ -799,6 +810,7 @@
       camera.up = sleepCameraUp;
       camera.fov = overheadFov + (BASE_FOV - overheadFov) * overheadMix;
       camera.near = savedNear;
+      setOverheadProjection(cave, overheadStartOrtho + (1 - overheadStartOrtho) * overheadMix);
       orbit.tx = p.x; orbit.ty = p.y - cave.baseY; orbit.tz = p.z;
       updateBirdsEyeAim(cave, dt);
       eyeMotionValid = false;
@@ -1301,7 +1313,7 @@
         cursorAim = true;
       } else if (active && px !== null && py !== null && !closeWanted) {
         mat4.lookAt(cursorView, camera.position, camera.target, camera.up || cursorUp);
-        mat4.rayFromView(cursorRay, cursorView, renderer.size.width, renderer.size.height, camera.fov, camera.position, px, py);
+        mat4.rayFromView(cursorRay, cursorView, renderer.size.width, renderer.size.height, camera.fov, camera.position, px, py, camera.orthoMix, camera.orthoHeight);
         // Navigation can place the eye farther away than a weapon's range.
         // Reach across the island from that eye, not just sixty units into
         // the air above the floor, then retain that world point throughout.
@@ -1802,6 +1814,7 @@
         camera.target.y = headEye[1] + rollingForward[1] * CLOSE_LOOK_DIST;
         camera.target.z = headEye[2] + rollingForward[2] * CLOSE_LOOK_DIST;
         camera.up = sleepCameraUp;
+        camera.orthoMix = 0;
         camera.fov = Math.min(MAX_FOV, Math.max(BASE_FOV, 2 * Math.atan(Math.tan(MIN_HFOV / 2) / (renderer.size.width / Math.max(1, renderer.size.height))))) * (1 - 0.2 * adsMix);
         cave.weapon.aimYaw = lyingYaw;
         cave.weapon.aimPitch = lyingPitch;
@@ -1846,6 +1859,7 @@
       // the handoff instead of dropping physical clearance only at mix zero.
       clampCamera(camera.position, closeMix, eyeClearance, false, dt, false, true, false, !closeWanted);
       camera.fov = Math.min(MAX_FOV, Math.max(BASE_FOV, 2 * Math.atan(Math.tan(MIN_HFOV / 2) / (renderer.size.width / Math.max(1, renderer.size.height))))) * (1 - 0.2 * adsMix);
+      setOverheadProjection(cave, aimEntryOrtho * (1 - aimMix));
       if (aimAtCursor && !overheadExit) {
         // Solve a world-up view that puts the selected point under the gliding
         // cursor. Interpolating an unrelated camera rotation lets it drift off
@@ -1865,11 +1879,22 @@
           // Rotate the interpolated screen ray onto that world point, carrying
           // its roll continuously rather than solving a world-up Euler view.
           const tangent = Math.tan(camera.fov * 0.5), remaining = 1 - aimMix;
-          const sx = aimScreenX * remaining * tangent * renderer.size.width / renderer.size.height;
-          const sy = aimScreenY * remaining * tangent, rayLength = Math.hypot(sx, sy, 1);
-          quat.rotateVec(aimScreenRay, aimPanRotation, sx / rayLength, sy / rayLength, -1 / rayLength);
           const dx = cursorPoint.x - camera.position.x, dy = cursorPoint.y - camera.position.y, dz = cursorPoint.z - camera.position.z;
           const length = Math.hypot(dx, dy, dz), x = dx / length, y = dy / length, z = dz / length;
+          let sx = aimScreenX * remaining * tangent * renderer.size.width / renderer.size.height, sy = aimScreenY * remaining * tangent;
+          const perspective = 1 - camera.orthoMix, offset = camera.orthoMix * camera.orthoHeight / (2 * tangent);
+          let across = sx * sx + sy * sy;
+          // A hybrid ray has a displaced origin. Solve its positive view
+          // depth, then rotate that full camera-to-point vector onto the aim.
+          // This keeps an off-centre target under the same gliding reticle.
+          if (across * offset * offset >= length * length && across > 0) {
+            const scale = length * 0.999 / (Math.sqrt(across) * offset);
+            sx *= scale; sy *= scale; across = sx * sx + sy * sy;
+          }
+          const a = 1 + across * perspective * perspective;
+          const depth = (-across * perspective * offset + Math.sqrt(Math.max(0, length * length * a - across * offset * offset))) / a;
+          const w = perspective * depth + offset;
+          quat.rotateVec(aimScreenRay, aimPanRotation, sx * w / length, sy * w / length, -depth / length);
           aimCorrection[0] = aimScreenRay[1] * z - aimScreenRay[2] * y;
           aimCorrection[1] = aimScreenRay[2] * x - aimScreenRay[0] * z;
           aimCorrection[2] = aimScreenRay[0] * y - aimScreenRay[1] * x;
@@ -1943,6 +1968,7 @@
       // height must not turn its later zoom into a vertical, singular orbit.
       if (carryExitMode && !weaponViewReady(cave)) stopCarryExit();
       if (aimView()) { updateAim(cave, dt); return; }
+      camera.orthoMix = 0;
       const sleeping = !!(cave && crew.sleeping && cave.root.quaternion);
       const rolling = !!(cave && cave.camp.rolling && cave.root.quaternion);
       const lying = syncLyingView(cave);
@@ -2339,6 +2365,7 @@
       copyVector(out.position, camera.position); copyVector(out.target, camera.target);
       const up = camera.up || cursorUp;
       copyVector(out.up, up); out.fov = camera.fov;
+      out.orthoMix = camera.orthoMix || 0; out.orthoHeight = camera.orthoHeight || 0;
       out.mode = viewMode();
       out.closeWanted = closeWanted;
       out.combat = armed();
@@ -2383,6 +2410,8 @@
       }
       readVector(camera.position, pose.position); readVector(camera.target, pose.target);
       readVector(sleepCameraUp, pose.up); camera.up = sleepCameraUp; camera.fov = pose.fov;
+      camera.orthoMix = pose.orthoMix ?? (pose.mode === "birds-eye" && pose.combat ? 1 : 0);
+      camera.orthoHeight = pose.orthoHeight ?? 2 * Math.tan(camera.fov / 2) * pose.orbit[2];
     };
     const restorePose = (pose, exactCamera = true) => {
       const cave = player();
@@ -2461,6 +2490,7 @@
       clearFeedback();
       reticle.hidden = true;
       camera.near = savedNear;
+      camera.orthoMix = camera.orthoHeight = 0;
       window.removeEventListener("mousemove", aimMouseMove);
       window.removeEventListener("pointerup", aimMouseUp);
       window.removeEventListener("keydown", aimKey, true);

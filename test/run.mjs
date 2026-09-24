@@ -3342,39 +3342,232 @@ const hubBirdsEye = { name: "birds-eye combat camera", why: "rule: combat zoom i
 } };
 
 const hubBirdsEyeFloors = { name: "birds-eye lower floors", why: "rule: overhead combat reveals the current cave or floor without changing physical collision or terrain meshes", run: async (b) => {
-  const rows = await b.evaluate(`(() => {
-    const B = __ooga, P = B.pilot, I = B.island, a = P.player, H = I.headquarters, room = H.rooms[0], lower = H.basement.rooms[0];
+  const state = await b.evaluate(`(() => {
+    const B = __ooga, P = B.pilot, I = B.island, a = P.player, H = I.headquarters, room = H.rooms[0], lower = H.basement.rooms[0], D = BL.scenes.hub.debug;
+    if (!P.birdsEye) { P.hooks.onZoom(1.2); B.advance(1.5, 1 / 60); }
+    let hill = null;
+    for (let x = -24; x <= 24 && !hill; x += 2) for (let z = -24; z <= 24; z += 2) {
+      const floor = I.surfaceAt(x, z);
+      if (floor >= 4 && I.clearAt(x, floor + 0.05, z, 0.35, 2) && B.headquarters.solids.props.clearAt(x, floor + 0.05, z, 0.35, 2)) { hill = { name: "hill", x, z, floor }; break; }
+    }
     const lab = B.mouths.find(m => BL.caves.slots.find(s => s.id === m.id)?.scene === "lab"), places = [
+      { name: "surface", x: -8, z: 8, floor: 0 }, ...(hill ? [hill] : []),
       { name: "cave", x: lab.x - Math.sin(lab.ry) * 3, z: lab.z - Math.cos(lab.ry) * 3, floor: lab.floorY },
       { name: "HQ", x: room.x, z: room.z, floor: H.floor }, { name: "basement", x: lower.x, z: lower.z, floor: H.basement.floor }];
-    const geometry = I.geometry, verts = geometry.verts, rows = [];
+    const geometry = I.geometry, verts = geometry.verts, originalVerts = Array.from(verts), source = I.cutawaySource, data = source.data, originalData = data.slice(), rows = [];
+    const entries = [...D.terrainSections, ...D.caveSections], regions = B.renderOpts.cutawayRegions;
+    const sections = () => D.terrainSections.map(e => ({ visible: e.cap.node.visible, worldY: e.worldY,
+      y: e.cap.node.world[13], faces: e.cap.stats.faces, cache: e.cap.stats.cacheEntries }));
+    const builds = () => entries.map(e => [e.cap.stats.solidBuilds, e.cap.stats.detailBuilds]);
     for (const q of places) {
       const support = I.supportAt(q.x, q.z, q.floor + 1, 0.35), clearance = I.clearAt(q.x, q.floor + 0.1, q.z, 0.2, 1.2);
-      P.navigate({ position: { x: q.x, y: q.floor, z: q.z }, yaw: 0, pitch: 0.3, dist: 8 }); B.advance(1, 1 / 60);
+      P.navigate({ position: { x: q.x, y: q.floor, z: q.z }, yaw: 0, pitch: 0.3, dist: 8 }); B.advance(2, 1 / 60);
+      BL.scene.updateWorld(BL.scenes.hub.root);
+      const before = { cutoff: B.renderOpts.cutawayMaxY, regions: regions.slice(0, B.renderOpts.cutawayRegionCount).map(r => ({ ...r })), builds: builds(), height: P.birdsEyeHeight };
+      P.hooks.onZoom(1.2); B.advance(0.6, 1 / 60);
+      const zoomHeight = P.birdsEyeHeight;
+      P.hooks.onZoom(1 / 1.2); B.advance(0.6, 1 / 60);
+      const zoomStable = before.cutoff === B.renderOpts.cutawayMaxY && JSON.stringify(before.regions) === JSON.stringify(regions.slice(0, B.renderOpts.cutawayRegionCount)) && JSON.stringify(before.builds) === JSON.stringify(builds());
+      BL.scene.updateWorld(BL.scenes.hub.root);
+      B.renderer.render(BL.scenes.hub.root, B.camera, B.renderOpts);
+      const centers = [0, H.floor, H.basement.floor].map(y => B.renderer.project(0, y, 0, {}));
+      const centerError = centers.every(Boolean) ? Math.max(...centers.map(p => Math.hypot(p.x - centers[0].x, p.y - centers[0].y))) : Infinity;
       rows.push({ name: q.name, mode: P.mode, overhead: P.birdsEye, horizontal: Math.hypot(B.camera.position.x - a.root.position.x, B.camera.position.z - a.root.position.z),
         floor: a.root.position.y - a.baseY, requestedFloor: q.floor, ceiling: P.birdsEyeCeiling, cutoff: B.renderOpts.cutawayMaxY,
+        regions: before.regions, caps: sections(), caveCaps: D.caveSections.filter(e => e.cap.node.visible).length, zoomStable, zoomMoved: Math.abs(zoomHeight - before.height) > 0.1, centerError, orthoMix: B.camera.orthoMix,
         unchanged: I.geometry === geometry && I.geometry.verts === verts && I.supportAt(q.x, q.z, q.floor + 1, 0.35) === support && I.clearAt(q.x, q.floor + 0.1, q.z, 0.2, 1.2) === clearance });
     }
-    return rows;
+    const landmarks = [B.altar.node.position, B.headquarters.firepit.position, H.basement.hole].map(p => [p.x, p.z]);
+    const clouds = [], weather = [];
+    const visit = n => { if (n.geometry?.cutawayPreserve) clouds.push(n); if (n.geometry?.cutawayHide) weather.push(n); for (const child of n.children) visit(child); };
+    visit(BL.scenes.hub.root);
+    const immutable = I.geometry === geometry && I.geometry.verts === verts && verts.every((v, i) => v === originalVerts[i]) && source.data === data && data.every((v, i) => v === originalData[i]);
+    const cache = entries.map(e => ({ ...e.cap.stats }));
+    return { rows, immutable, landmarks, cache, regionStorage: regions === B.renderOpts.cutawayRegions, sections: D.terrainSections.length, caves: D.caveSections.length, clouds: clouds.length, weather: weather.length };
   })()`);
-  record("birds-eye combat: cave, HQ and basement use their own visible level while support and collision remain unchanged", rows.length === 3 && rows.every(r => r.mode === "birds-eye" && r.overhead && r.horizontal < 1e-6 && Math.abs(r.floor - r.requestedFloor) < 0.2 && r.cutoff > r.floor + 1.3 && r.cutoff < r.floor + 5 && Math.abs(r.cutoff - r.ceiling) < 0.01 && r.unchanged), JSON.stringify(rows));
+  const rows = state.rows, underground = rows.filter(r => r.requestedFloor < -0.15), surface = rows.filter(r => r.requestedFloor >= -0.15);
+  record("birds-eye combat: surface and hills retain their terrain, caves use local roof cuts, and HQ and basement use the current floor's global section", rows.length === 5 && rows.every(r => r.mode === "birds-eye" && r.overhead && r.horizontal < 1e-6 && Math.abs(r.floor - r.requestedFloor) < 0.2 && r.unchanged)
+    && underground.length === 2 && underground.every(r => r.cutoff > r.floor + 1.3 && r.cutoff < r.floor + 5 && Math.abs(r.cutoff - r.ceiling) < 0.01 && !r.regions.length && !r.caveCaps && r.caps[0].visible && r.caps[0].faces > 0)
+    && surface.every(r => r.cutoff >= 1e5 && r.caps.every(c => !c.visible) && r.regions.every(region => Math.abs(region.y - 2.85) < 1e-6))
+    && surface.find(r => r.name === "cave").regions.length > 0 && surface.find(r => r.name === "hill").regions.length === 0, JSON.stringify(rows));
+  record("birds-eye combat: zoom leaves section meshes cached, translated islands share the exact world cut height, and terrain and centered landmarks stay unchanged", state.immutable && state.regionStorage && state.sections >= 3 && state.caves > 0 && state.caves <= 8
+    && rows.every(r => r.zoomStable && r.zoomMoved && r.caps.every(c => !c.visible || Math.abs(c.y + 0.002 - r.cutoff) < 1e-5))
+    && underground.some(r => r.caps.slice(1).some(c => c.visible && c.faces > 0))
+    && state.cache.every(c => c.cacheEntries <= 16) && state.cache.some(c => c.cacheEntries === 16)
+    && state.landmarks.length === 3 && state.landmarks.every(p => p[0] === 0 && p[1] === 0) && state.clouds > 0 && state.weather > 0, JSON.stringify({ ...state, rows: rows.map(r => ({ name: r.name, zoomStable: r.zoomStable, zoomMoved: r.zoomMoved, caps: r.caps })) }));
+  record("birds-eye combat: the pile, HQ hearth and basement center align on screen at every selected floor despite their different elevations", rows.every(r => r.orthoMix === 1 && r.centerError < 0.001), JSON.stringify(rows.map(({ name, centerError, orthoMix }) => ({ name, centerError, orthoMix }))));
   const rendering = await b.evaluate(`(() => {
-    const B = __ooga, S = BL.scene, root = S.createNode(), floor = BL.models.box({ w: 12, h: 0.2, d: 12, color: "#00ff00" }), roof = BL.models.box({ w: 12, h: 0.2, d: 12, color: "#ff0000" });
-    S.addChild(root, S.createNode({ geometry: floor })); S.addChild(root, S.createNode({ geometry: roof, position: { x: 0, y: 5, z: 0 } }));
-    const camera = S.createCamera({ far: 40 }); Object.assign(camera.position, { x: 0, y: 15, z: 0 }); Object.assign(camera.target, { x: 0, y: 0, z: 0 }); camera.up = { x: 0, y: 0, z: -1 };
+    const B = __ooga, S = BL.scene, root = S.createNode(), floor = BL.models.box({ w: 40, h: 0.2, d: 40, color: "#00ff00" });
+    // One greedy-meshed roof face crosses all four cut edges. Whole-face culling
+    // and clipping only the rectangle's original vertices both fail this case.
+    const roof = { verts: [-6, 0, -6, -6, 0, 6, 6, 0, 6, 6, 0, -6], faces: [{ i: [0, 1, 2, 3], color: [255, 0, 0] }], lines: [] };
+    const top = S.createNode({ geometry: roof, position: { x: 0, y: 5, z: 0 } });
+    const ground = S.createNode({ geometry: floor }); S.addChild(root, ground); S.addChild(root, top);
+    const camera = S.createCamera({ far: 60 }); Object.assign(camera.position, { x: 0, y: 20, z: 0 }); Object.assign(camera.target, { x: 0, y: 0, z: 0 }); camera.up = { x: 0, y: 0, z: -1 };
     const canvas = document.createElement("canvas"); canvas.getContext("2d", { willReadFrequently: true });
-    const fallback = BL.canvasRenderer.createRenderer(canvas, { width: 96, height: 96 }), rows = [];
+    const fallback = BL.canvasRenderer.createRenderer(canvas, { width: 256, height: 256 }), rows = [];
+    const region = { x: 0, z: 0, cos: Math.cos(Math.PI / 6), sin: Math.sin(Math.PI / 6), halfWidth: 1.5, halfDepth: 3, y: 2 };
+    const second = { x: -3, z: 0, cos: Math.cos(-Math.PI / 5), sin: Math.sin(-Math.PI / 5), halfWidth: 1.2, halfDepth: 2, y: 2 };
+    const regions = [region, second], original = JSON.stringify(roof), cloud = BL.hubModels.cloud(0);
+    const points = [[0, 5, 0], [region.cos * 1.2 + region.sin * 2.4, 5, -region.sin * 1.2 + region.cos * 2.4], [1.4, 5, -2.8], [4.5, 5, 0], [-3, 5, 0]];
+    const hidden = { ...roof, cutawayHide: true }, base = { bloomStrength: 0, shadowStrength: 0, ambientFloor: 1, directStrength: 0 };
+    let cloudPoint = null, cloudDistance = Infinity;
+    for (const face of cloud.faces) {
+      const a = face.i[0] * 3, b = face.i[1] * 3, c = face.i[2] * 3, v = cloud.verts;
+      const ny = (v[b + 2] - v[a + 2]) * (v[c] - v[a]) - (v[b] - v[a]) * (v[c + 2] - v[a + 2]);
+      if (ny <= 0) continue;
+      let x = 0, y = 0, z = 0;
+      for (const i of face.i) { x += v[i * 3]; y += v[i * 3 + 1]; z += v[i * 3 + 2]; }
+      x /= face.i.length; y /= face.i.length; z /= face.i.length;
+      if (x * x + z * z < cloudDistance) { cloudDistance = x * x + z * z; cloudPoint = [x, y + 8, z]; }
+    }
     try {
       for (const [renderer, element] of [[B.renderer, document.getElementById("scene")], [fallback, canvas]]) {
-        const read = cutoff => { renderer.render(root, camera, { cutawayMaxY: cutoff, bloomStrength: 0, shadowStrength: 0, ambientFloor: 1, directStrength: 0 });
-          if (renderer.kind !== "webgl2") return Array.from(element.getContext("2d").getImageData(element.width >> 1, element.height >> 1, 1, 1).data);
-          const gl = element.getContext("webgl2"), pixel = new Uint8Array(4); gl.bindFramebuffer(gl.FRAMEBUFFER, null); gl.readPixels(element.width >> 1, element.height >> 1, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, pixel); return Array.from(pixel); };
-        rows.push({ kind: renderer.kind, covered: read(1e6), revealed: read(2), restored: read(1e6), visible: root.children.every(n => n.visible) });
+        const read = (opts, samples = points) => {
+          renderer.render(root, camera, { ...base, ...opts });
+          return samples.map(point => {
+            const projected = renderer.project(...point, {}), x = Math.floor(projected.x * element.width / renderer.size.width), y = Math.floor(projected.y * element.height / renderer.size.height);
+            if (renderer.kind !== "webgl2") return Array.from(element.getContext("2d").getImageData(x, y, 1, 1).data);
+            const gl = element.getContext("webgl2"), pixel = new Uint8Array(4); gl.bindFramebuffer(gl.FRAMEBUFFER, null); gl.readPixels(x, element.height - 1 - y, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, pixel); return Array.from(pixel);
+          });
+        };
+        const covered = read({}), revealed = read({ cutawayMaxY: 2 }), restored = read({});
+        const selective = read({ cutawayRegions: regions, cutawayRegionCount: 1 }), both = read({ cutawayRegions: regions, cutawayRegionCount: 2 });
+        region.y = 5; const coplanar = read({ cutawayRegions: regions, cutawayRegionCount: 1 }); region.y = 2;
+        roof.cutawayPreserve = true;
+        const preserved = read({ cutawayMaxY: 2, cutawayRegions: regions, cutawayRegionCount: 2 });
+        roof.clipMaxY = 4; const ownMaximum = read({ cutawayMaxY: 2, cutawayRegions: regions, cutawayRegionCount: 2 }); delete roof.clipMaxY;
+        roof.clipMinY = 6; const ownMinimum = read({ cutawayMaxY: 2, cutawayRegions: regions, cutawayRegionCount: 2 }); delete roof.clipMinY; delete roof.cutawayPreserve;
+        top.geometry = hidden;
+        const weatherBefore = read({}), weatherHidden = read({ birdsEyeCutaway: true }), weatherAfter = read({});
+        const weatherUnchanged = top.visible && top.geometry === hidden && top.position.y === 5;
+        top.geometry = cloud; top.position.y = 8;
+        const cloudBefore = read({}, [cloudPoint])[0], cloudCut = read({ cutawayMaxY: 2, cutawayRegions: regions, cutawayRegionCount: 2, birdsEyeCutaway: true }, [cloudPoint])[0];
+        const cloudWorld = Array.from(top.world), cloudPosition = { ...top.position };
+        top.matrixCloud = true; ground.visible = false;
+        camera.position.y = 4; camera.target.y = -5;
+        const loweredPoint = [cloudPoint[0], cloudPoint[1] - 8, cloudPoint[2]];
+        const cloudLowered = read({ cutawayCloudY: 0, cutawayCloudMix: 1 }, [loweredPoint])[0];
+        const cloudWorldUnchanged = top.world.every((v, i) => v === cloudWorld[i]) && Object.keys(cloudPosition).every(k => top.position[k] === cloudPosition[k]);
+        top.matrixCloud = false; top.position.y = 0;
+        const cloudReference = read({}, [loweredPoint])[0];
+        top.position.y = 8; top.matrixCloud = true; camera.position.y = 12;
+        const middlePoint = [cloudPoint[0], cloudPoint[1] - 4, cloudPoint[2]];
+        const cloudMiddle = read({ cutawayCloudY: 0, cutawayCloudMix: 0.5 }, [middlePoint])[0];
+        top.matrixCloud = false; top.position.y = 4;
+        const cloudMiddleReference = read({}, [middlePoint])[0];
+        ground.visible = true; camera.position.y = 20; camera.target.y = 0;
+        top.geometry = roof; top.position.y = 5;
+        rows.push({ kind: renderer.kind, covered, revealed, restored, selective, both, coplanar, preserved, ownMaximum, ownMinimum,
+          weatherBefore, weatherHidden, weatherAfter, weatherUnchanged, cloudBefore, cloudCut, cloudPreserved: cloud.cutawayPreserve,
+          cloudLowered, cloudReference, cloudMiddle, cloudMiddleReference, cloudWorldUnchanged,
+          visible: root.children.every(n => n.visible), immutable: JSON.stringify(roof) === original });
       }
-    } finally { fallback.dispose(); B.renderer.releaseGeometry(floor); B.renderer.releaseGeometry(roof); B.renderer.render(BL.scenes.hub.root, B.camera, B.renderOpts); }
+    } finally { fallback.dispose(); for (const geometry of [floor, roof, hidden]) B.renderer.releaseGeometry(geometry); B.renderer.render(BL.scenes.hub.root, B.camera, B.renderOpts); }
     return rows;
   })()`);
-  record("birds-eye combat: WebGL2 and Canvas cut away an opaque roof, reveal the floor, and restore it without hiding nodes", rendering.every(r => r.covered[0] > r.covered[1] + 40 && r.revealed[1] > r.revealed[0] + 40 && r.restored[0] > r.restored[1] + 40 && r.visible), JSON.stringify(rendering));
+  const red = p => p[0] > p[1] + 40, green = p => p[1] > p[0] + 40;
+  record("birds-eye combat: WebGL2 and Canvas cut a large roof only inside rotated regions, retain both outside portions and coplanar faces, and restore the original mesh", rendering.length === 2 && rendering.some(r => r.kind === "webgl2") && rendering.some(r => r.kind === "canvas2d") && rendering.every(r => r.covered.every(red) && r.revealed.every(green) && r.restored.every(red)
+    && r.selective.slice(0, 2).every(green) && r.selective.slice(2).every(red) && green(r.both[4]) && red(r.both[2]) && red(r.both[3]) && r.coplanar.every(red) && r.visible && r.immutable), JSON.stringify(rendering));
+  record("birds-eye combat: preserved clouds survive local and global cuts, authored height limits still apply, and weather hides only during the render pass", rendering.every(r => r.preserved.every(red) && r.ownMaximum.every(green) && r.ownMinimum.every(green)
+    && r.weatherBefore.every(red) && r.weatherHidden.every(green) && r.weatherAfter.every(red) && r.weatherUnchanged && r.cloudPreserved
+    && r.cloudBefore[0] > 40 && r.cloudBefore[2] > 40 && r.cloudBefore.every((v, i) => Math.abs(v - r.cloudCut[i]) <= 1)), JSON.stringify(rendering.map(({ kind, preserved, ownMaximum, ownMinimum, weatherHidden, weatherUnchanged, cloudBefore, cloudCut }) => ({ kind, preserved, ownMaximum, ownMinimum, weatherHidden, weatherUnchanged, cloudBefore, cloudCut }))));
+  record("birds-eye combat: low-floor clouds render below the camera with a continuous visual offset while their world transforms and physical positions remain unchanged", rendering.every(r => r.cloudWorldUnchanged && r.cloudLowered[0] > 40 && r.cloudLowered[2] > 40
+    && r.cloudLowered.every((v, i) => Math.abs(v - r.cloudReference[i]) <= 1) && r.cloudMiddle.every((v, i) => Math.abs(v - r.cloudMiddleReference[i]) <= 1)), JSON.stringify(rendering.map(({ kind, cloudLowered, cloudReference, cloudMiddle, cloudMiddleReference, cloudWorldUnchanged }) => ({ kind, cloudLowered, cloudReference, cloudMiddle, cloudMiddleReference, cloudWorldUnchanged }))));
+} };
+
+const hubBirdsEyeProjection = { name: "birds-eye projection", why: "rule: overhead projection keeps vertical landmarks aligned and picking rays agree with rendered geometry throughout the perspective transition", run: async (b) => {
+  const state = await b.evaluate(`(() => {
+    const B = __ooga, S = BL.scene, root = S.createNode(), rows = [], camera = S.createCamera({ near: 0.1, far: 80 });
+    Object.assign(camera.position, { x: 3, y: 20, z: 5 }); Object.assign(camera.target, { x: 3, y: 0, z: 5 }); camera.up = { x: 0, y: 0, z: -1 }; camera.orthoHeight = 20;
+    const red = BL.models.box({ w: 0.8, h: 0.8, d: 0.8, color: "#ff0000" }), blue = BL.models.box({ w: 0.8, h: 0.8, d: 0.8, color: "#0000ff" });
+    const pink = BL.models.box({ w: 0.5, h: 0.5, d: 0.5, color: "#ff00ff" }), poses = [[-1, 4, 2], [7, -8, 8], [9, 18, 5]];
+    for (let i = 0; i < 2; i++) S.addChild(root, S.createNode({ geometry: i ? blue : red, position: { x: poses[i][0], y: poses[i][1], z: poses[i][2] } }));
+    const data = new Float32Array(20); data[0] = data[5] = data[10] = data[15] = data[16] = 1; data.set(poses[2], 12);
+    // Near the eye, this batch lies outside a perspective cone but inside the
+    // orthographic footprint; stale perspective culling would erase it.
+    S.addChild(root, S.createNode({ geometry: pink, instanceData: data, instanceCount: 1, cullSphere: [9, 18, 5, 0.5] }));
+    const canvas = document.createElement("canvas"); canvas.getContext("2d", { willReadFrequently: true });
+    const fallback = BL.canvasRenderer.createRenderer(canvas, { width: 256, height: 256 });
+    const points = [[0, -12, 0], [0, -5, 0], [0, 0, 0], [0, 5, 0], ...poses], opts = { bloomStrength: 0, shadowStrength: 0, ambientFloor: 1, directStrength: 0 };
+    try {
+      for (const [renderer, element] of [[B.renderer, document.getElementById("scene")], [fallback, canvas]]) {
+        for (const mix of [0, 0.25, 0.5, 0.75, 1]) {
+          camera.orthoMix = mix; renderer.render(root, camera, opts);
+          const width = renderer.size.width, height = renderer.size.height, tan = Math.tan(camera.fov / 2), f = height / (2 * tan);
+          let projectError = 0, rayError = 0, rayForward = true;
+          const projected = [], rays = [];
+          for (const [x, y, z] of points) {
+            const depth = 20 - y, w = (1 - mix) * depth + mix * camera.orthoHeight / (2 * tan), p = renderer.project(x, y, z, {});
+            if (!p) { projectError = Infinity; continue; }
+            projectError = Math.max(projectError, Math.hypot(p.x - width / 2 - (x - 3) * f / w, p.y - height / 2 - (z - 5) * f / w));
+            const ray = renderer.ray(p.x, p.y, camera, {}), dx = x - ray.ox, dy = y - ray.oy, dz = z - ray.oz;
+            const t = dx * ray.dx + dy * ray.dy + dz * ray.dz;
+            rayError = Math.max(rayError, Math.hypot(dx - ray.dx * t, dy - ray.dy * t, dz - ray.dz * t)); rayForward &&= t > 0;
+            projected.push(p); rays.push(ray);
+          }
+          const pixels = poses.map(([x, y, z]) => {
+            const p = renderer.project(x, y, z, {}), px = Math.floor(p.x * element.width / width), py = Math.floor(p.y * element.height / height);
+            if (px < 2 || py < 2 || px >= element.width - 2 || py >= element.height - 2) return null;
+            if (renderer.kind !== "webgl2") return Array.from(element.getContext("2d").getImageData(px, py, 1, 1).data);
+            const gl = element.getContext("webgl2"), pixel = new Uint8Array(4); gl.bindFramebuffer(gl.FRAMEBUFFER, null); gl.readPixels(px, element.height - 1 - py, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, pixel); return Array.from(pixel);
+          });
+          const aligned = Math.max(...projected.slice(0, 4).map(p => Math.hypot(p.x - projected[0].x, p.y - projected[0].y)));
+          const parallel = Math.max(...rays.map(r => Math.hypot(r.dx - rays[0].dx, r.dy - rays[0].dy, r.dz - rays[0].dz)));
+          rows.push({ kind: renderer.kind, mix, projectError, rayError, rayForward, aligned, parallel, pixels });
+        }
+        // A stale mix without a valid orthographic height must remain the
+        // ordinary perspective projection, including its picking contract.
+        camera.orthoHeight = 0; camera.orthoMix = 1; renderer.render(root, camera, opts);
+        const p = renderer.project(...poses[0], {}), f = renderer.size.height / (2 * Math.tan(camera.fov / 2));
+        rows.push({ kind: renderer.kind, fallback: true, error: Math.hypot(p.x - renderer.size.width / 2 + 4 * f / 16, p.y - renderer.size.height / 2 + 3 * f / 16) });
+        camera.orthoHeight = 20;
+      }
+      return rows;
+    } finally { fallback.dispose(); for (const geometry of [red, blue, pink]) B.renderer.releaseGeometry(geometry); B.renderer.render(BL.scenes.hub.root, B.camera, B.renderOpts); }
+  })()`);
+  const samples = state.filter(r => !r.fallback), settled = samples.filter(r => r.mix === 1);
+  record("birds-eye projection: WebGL2 and Canvas match the continuous projection formula and their rays hit the same world points at every transition sample", samples.length === 10 && samples.every(r => r.projectError < 0.002 && r.rayError < 1e-4 && r.rayForward)
+    && state.filter(r => r.fallback).every(r => r.error < 0.002) && settled.every(r => r.aligned < 0.001 && r.parallel < 1e-6), JSON.stringify(state));
+  record("birds-eye projection: rendered near and far objects follow projected positions, including a batch outside the old perspective frustum", samples.every(r => r.pixels[0]?.[0] > r.pixels[0]?.[1] + 40 && r.pixels[1]?.[2] > r.pixels[1]?.[1] + 40
+    && (!r.pixels[2] || r.pixels[2][0] > r.pixels[2][1] + 40 && r.pixels[2][2] > r.pixels[2][1] + 40)) && settled.every(r => r.pixels[2]), JSON.stringify(samples.map(({ kind, mix, pixels }) => ({ kind, mix, pixels }))));
+  const anchors = await b.evaluate(`(() => {
+    const B = __ooga, S = BL.scene, root = S.createNode(), actor = S.createNode({ position: { x: 4, y: 0, z: 0 } });
+    const bodyGeometry = BL.models.box({ w: 1, h: 2, d: 1, color: "#999999" }), headGeometry = BL.models.box({ w: 1, h: 1, d: 1, color: "#ffffff" });
+    const body = S.createNode({ geometry: bodyGeometry, position: { x: 0, y: 1, z: 0 } }), head = S.createNode({ geometry: headGeometry, position: { x: 0, y: 2.5, z: 0 } });
+    S.addChild(actor, body, head); S.addChild(root, actor);
+    const roofGeometry = BL.models.box({ w: 16, h: 0.2, d: 16, color: "#777777" }), roof = S.createNode({ geometry: roofGeometry, position: { x: 0, y: 6, z: 0 } }); S.addChild(root, roof);
+    const camera = S.createCamera({ far: 80, orthoHeight: 20 }); Object.assign(camera.position, { x: 0, y: 20, z: 0 }); Object.assign(camera.target, { x: 0, y: 0, z: 0 }); camera.up = { x: 0, y: 0, z: -1 };
+    const opts = { cutawayMaxY: 1e6, cutawayRegionCount: 0, cutawayRegions: [], birdsEyeCutaway: true, bloomStrength: 0, shadowStrength: 0 };
+    const visibility = BL.characterVisibility.create({ root, renderer: B.renderer, camera, renderOpts: opts }), cave = { root: actor, parts: { head } }, rows = [];
+    const sample = name => {
+      B.renderer.render(root, camera, opts); visibility.begin();
+      const out = {}, visible = visibility.anchor(cave, out), projected = [];
+      for (let x = -0.5; x <= 0.5; x++) for (let y = 2; y <= 3; y++) for (let z = -0.5; z <= 0.5; z++) projected.push(B.renderer.project(4 + x, y, z, {}));
+      const left = Math.min(...projected.map(p => p.x)), right = Math.max(...projected.map(p => p.x)), top = Math.min(...projected.map(p => p.y));
+      return { name, mix: camera.orthoMix, visible, error: visible ? Math.hypot(out.x - (left + right) / 2, out.y - top) : null };
+    };
+    try {
+      for (const mix of [0, 0.5, 1]) {
+        camera.orthoMix = mix; roof.visible = false; rows.push(sample("uncovered"));
+        roof.visible = true; rows.push(sample("covered"));
+        opts.cutawayMaxY = 4; rows.push(sample("global cut")); opts.cutawayMaxY = 1e6;
+      }
+      opts.cutawayRegions[0] = { x: 4, z: 0, cos: 1, sin: 0, halfWidth: 1, halfDepth: 1, y: 4 }; opts.cutawayRegionCount = 1;
+      rows.push(sample("local cut"));
+      opts.cutawayRegions[0].x = 4.65; opts.cutawayRegions[0].halfWidth = 0.25;
+      rows.push(sample("visible sliver"));
+      roofGeometry.cutawayPreserve = true; rows.push(sample("preserved roof")); delete roofGeometry.cutawayPreserve;
+      roofGeometry.cutawayHide = true; rows.push(sample("hidden weather")); delete roofGeometry.cutawayHide;
+      roof.matrixCloud = true; roofGeometry.cutawayPreserve = true; opts.cutawayCloudY = -4; opts.cutawayCloudMix = 1;
+      rows.push({ ...sample("lowered cloud"), physicalY: roof.position.y, worldY: roof.world[13] });
+      return rows;
+    } finally { visibility.dispose(); for (const geometry of [bodyGeometry, headGeometry, roofGeometry]) B.renderer.releaseGeometry(geometry); B.renderer.render(BL.scenes.hub.root, B.camera, B.renderOpts); }
+  })()`);
+  record("birds-eye projection: speech anchors follow the rendered head through the transition, ignore cut roofs and weather, and retain a sliver exposed through a local cut", anchors.length === 14 && anchors.every(r => {
+    const expected = r.name !== "covered" && r.name !== "preserved roof";
+    return r.visible === expected && (!expected || r.error < 0.002) && (r.name !== "lowered cloud" || r.physicalY === 6 && r.worldY === 6);
+  }), JSON.stringify(anchors));
 } };
 
 const hubCombatReplay = { name: "birds-eye combat replay", why: "contract: legacy combat orbit pose links migrate while new replay and HUD state expose combat and birds-eye", run: async (b) => {
@@ -3601,7 +3794,7 @@ scene("orbit", { steps: [{ name: "orbit flow", why: "regression: the spacewalk a
 scene("mine", { query: "wip=mine", steps: [mineResume, trip("mine"), mineControls, wipGate] });
 scene("pool", { steps: [poolLeave, trip("pool")] });
 scene("hub", { label: "weapons", query: "character=portlandhodl&weapon=2&mag=1&ammo=6&jetpack=1", steps: [hubAk, hubMelee, hubJetpack] });
-scene("hub", { label: "birds-eye combat", query: "solo=1&character=portlandhodl&weapon=1&mode=shoulder&combat=1", steps: [hubBirdsEye, hubBirdsEyeFloors, hubBirdsEyeTargets, hubCombatReplay] });
+scene("hub", { label: "birds-eye combat", query: "solo=1&character=portlandhodl&weapon=1&mode=shoulder&combat=1", steps: [hubBirdsEye, hubBirdsEyeFloors, hubBirdsEyeProjection, hubBirdsEyeTargets, hubCombatReplay] });
 scene("hub", { label: "mirror", steps: [hubJumbotron, hubMatrix, hubMirror] });
 scene("hub", { label: "canvas2d", query: "canvas2d=1&wip=mine", steps: [canvasTour] });
 scene("hub", { query: "pos=0", opts: PHONE_SIZE, steps: [phone("hub", { required: ["#joy-move", "#joy-look", "#sheet-toggle", "#sheet-bananas"], sheet: true })] });

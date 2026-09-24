@@ -201,7 +201,10 @@
         for (let y = 1; y <= depth; y++) v.set(x, -y, z, y === 1 ? (rand() < 0.3 ? 1 : 0) : y <= 3 ? 2 : (rand() < 0.3 ? 4 : 3));
       }
     }
-    return voxelGeometry(v, { unit: ISLET_UNIT, palette: ["#5b8a3a", "#4f7d33", "#6b4a2b", STONE, STONE_DK], origin: { x: 0, y: 0, z: 0 } });
+    const options = { unit: ISLET_UNIT, palette: ["#5b8a3a", "#4f7d33", "#6b4a2b", STONE, STONE_DK], origin: { x: 0, y: 0, z: 0 } };
+    const geometry = voxelGeometry(v, options);
+    geometry.cutawaySource = BL.terrain.cutawaySourceFromVox(v, options);
+    return geometry;
   });
   // Stone disc, painted ring, charred trench and four fire posts; its top sits at SITE.padH.
   const pad = cached(() => merge(

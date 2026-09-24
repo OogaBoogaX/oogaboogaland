@@ -21,6 +21,8 @@
   const createRenderer = (canvas, { width: fixedW = 0, height: fixedH = 0, transparent = false, environmentCapture = false } = {}) => {
     const ctx = canvas.getContext("2d");
     let width = 0, height = 0, dpr = 1, backdrop = null, skyGradient = null, lastF = 1;
+    let perspectiveWeight = 1, orthographicDepth = 0;
+    const projectedDepth = depth => perspectiveWeight * depth + orthographicDepth;
     let clearRef = null, clearStyle = "", mirrorStyle = "#71808a";
     const size = { width: 0, height: 0 };
     const skyInts = new Int32Array(6);
@@ -32,7 +34,8 @@
     let sortCapacity = 0, sortIds = new Uint32Array(0), sortKeys = new Float64Array(0), sortWork = sortScratch(0);
     const DEFAULT_LIGHT = { x: 0.45, y: 0.85, z: 0.3 };
     const UP = { x: 0, y: 1, z: 0 };
-    const view = mat4.create();
+    const view = mat4.create(), cutawayCloudWorld = mat4.create();
+    let cutawayCloudY = 0, cutawayCloudMix = 0;
     const pool = [];
     let poolUsed = 0, suppressed = 0, rippleSurfaces = 0, rippleWaves = 0;
     let matrixActive = 0, matrixRadius = 0, matrixTime = 0, matrixDensity = 0, matrixOriginX = 0, matrixOriginZ = 0, matrixSurfaces = 0, matrixLivingSurfaces = 0, matrixArea = 0, matrixSamples = 0, matrixSampleStep = 1, matrixCulled = 0;
@@ -70,18 +73,29 @@
       matrixStreams[offset + 4] = matrixHash(stream + 73) * sequence * 0.13;
       matrixStreams[offset + 5] = 0.58 + matrixHash(stream + 101) * 0.36;
     }
-    const acquire = () => {
+    const acquire = (vertices = 16) => {
       if (poolUsed === pool.length) {
         pool.push({ pts: new Float32Array(32), n: 0, depth: 0, style: "", coreStyle: "", line: false, lineGlow: 0, smokeOpacity: 1, mirror: false, mirrorNode: null, imageNode: null, mirrorMinX: 0, mirrorMaxX: 0, mirrorMinY: 0, mirrorMaxY: 0, portal: false, matrix: 0, matrixGlyph: false, matrixGlyphOpacity: 1, matrixWall: 0, matrixNx: 0, matrixNy: 0, matrixNz: 0, matrixPlane: 0, matrixCenterDepth: 0, matrixMinX: 0, matrixMaxX: 0, matrixMinY: 0, matrixMaxY: 0, matrixRed: 0, matrixGreen: 0, matrixBlue: 0, matrixCave: 0, matrixLocal: false, matrixLiving: false, matrixDynamic: false, matrixPermanentOnly: false, matrixPartial: false, matrixBacking: false, matrixFaceNx: 0, matrixFaceNy: 0, matrixFaceNz: 0, matrixFacePlane: 0 });
       }
-      return pool[poolUsed++];
+      const rec = pool[poolUsed++];
+      if (rec.pts.length < vertices * 2) rec.pts = new Float32Array(CLIP_VERTICES * 2);
+      return rec;
     };
-    const V = Array.from({ length: 16 }, () => new Float32Array(3));
-    const CLIP_IN = new Float32Array(48);
-    const CLIP_OUT = new Float32Array(48);
-    const MIRROR_CLIP_IN = new Float32Array(48);
-    const MIRROR_CLIP_OUT = new Float32Array(48);
-    const permanentFace = new Float32Array(48);
+    // Six cave planes, height limits, eight five-plane cut prisms and the
+    // near plane can add at most 49 vertices to an original 16-vertex face.
+    const CLIP_VERTICES = 72, CUTAWAY_REGIONS = 8;
+    const V = Array.from({ length: CLIP_VERTICES }, () => new Float32Array(3));
+    const CLIP_IN = new Float32Array(CLIP_VERTICES * 3);
+    const CLIP_OUT = new Float32Array(CLIP_VERTICES * 3);
+    const MIRROR_CLIP_IN = new Float32Array(CLIP_VERTICES * 3);
+    const MIRROR_CLIP_OUT = new Float32Array(CLIP_VERTICES * 3);
+    const permanentFace = new Float32Array(CLIP_VERTICES * 3);
+    const cutawayPlanes = new Float64Array(CUTAWAY_REGIONS * 20);
+    const cutawayStack = Array.from({ length: CUTAWAY_REGIONS * 4 + 1 }, () => new Float32Array(CLIP_VERTICES * 3));
+    const cutawayCounts = new Uint8Array(cutawayStack.length), cutawayNext = new Uint8Array(cutawayStack.length);
+    const cutawayA = new Float32Array(CLIP_VERTICES * 3), cutawayB = new Float32Array(CLIP_VERTICES * 3);
+    const lineWorld = new Float32Array(6), lineRanges = new Float64Array((CUTAWAY_REGIONS + 1) * 2);
+    let cutawayUsed = 0, cutawayCount = 0, cutawaySurface = null, cutawayRegionCount = 0, lineRangeCount = 0, birdsEyeCutaway = false;
     const rippleView = mat4.create();
     const rippleCircle = new Float32Array(98);
     for (let i = 0; i <= 48; i++) {
@@ -173,6 +187,81 @@
       }
       return out;
     };
+    const beginCutaway = (surface, count) => {
+      const target = cutawayStack[0];
+      for (let i = 0; i < count * 3; i++) target[i] = surface ? surface[i] : V[Math.floor(i / 3)][i % 3];
+      cutawayCounts[0] = count; cutawayNext[0] = 0; cutawayUsed = 1;
+    };
+    const nextCutaway = () => {
+      while (cutawayUsed) {
+        const index = --cutawayUsed, region = cutawayNext[index];
+        let count = cutawayCounts[index];
+        if (region === cutawayRegionCount) {
+          cutawayCount = count; cutawaySurface = cutawayStack[index]; return true;
+        }
+        let surface = cutawayA;
+        for (let i = 0; i < count * 3; i++) surface[i] = cutawayStack[index][i];
+        // Subtract one convex prism as disjoint outside pieces. Each piece
+        // visits only later regions; depth-first traversal needs at most 33
+        // stack slots even when a large terrain face spans all eight cuts.
+        for (let side = 0; side < 5; side++) {
+          const at = region * 20 + side * 4, nx = cutawayPlanes[at], ny = cutawayPlanes[at + 1];
+          const nz = cutawayPlanes[at + 2], offset = cutawayPlanes[at + 3];
+          let outside = 0, above = false;
+          for (let i = 0; i < count; i++) {
+            const d = nx * surface[i * 3] + ny * surface[i * 3 + 1] + nz * surface[i * 3 + 2] + offset;
+            if (d > 0) outside++;
+            if (d < 0) above = true;
+          }
+          // The cut removes only points strictly above its height. A face
+          // lying on that plane belongs to the retained lower surface.
+          if (outside === count || side === 0 && !above) {
+            const target = cutawayStack[cutawayUsed];
+            for (let i = 0; i < count * 3; i++) target[i] = surface[i];
+            cutawayCounts[cutawayUsed] = count; cutawayNext[cutawayUsed++] = region + 1;
+            break;
+          }
+          if (!outside) continue;
+          const retained = clipPlane(surface, count, -nx, -ny, -nz, -offset, cutawayStack[cutawayUsed]);
+          if (retained >= 3) { cutawayCounts[cutawayUsed] = retained; cutawayNext[cutawayUsed++] = region + 1; }
+          const destination = surface === cutawayA ? cutawayB : cutawayA;
+          count = clipPlane(surface, count, nx, ny, nz, offset, destination); surface = destination;
+          if (count < 3) break;
+        }
+      }
+      return false;
+    };
+    const cutawayLine = (regions) => {
+      lineRanges[0] = 0; lineRanges[1] = 1; lineRangeCount = 1;
+      for (let region = 0; region < regions && lineRangeCount; region++) {
+        let start = 0, end = 1;
+        for (let side = 0; side < 5; side++) {
+          const at = region * 20 + side * 4, nx = cutawayPlanes[at], ny = cutawayPlanes[at + 1];
+          const nz = cutawayPlanes[at + 2], offset = cutawayPlanes[at + 3];
+          const a = nx * lineWorld[0] + ny * lineWorld[1] + nz * lineWorld[2] + offset;
+          const b = nx * lineWorld[3] + ny * lineWorld[4] + nz * lineWorld[5] + offset;
+          if (a > 0 && b > 0 || side === 0 && a >= 0 && b >= 0) { end = -1; break; }
+          if ((a > 0) !== (b > 0)) {
+            const t = a / (a - b);
+            if (a > 0) start = Math.max(start, t); else end = Math.min(end, t);
+          }
+        }
+        if (end <= start) continue;
+        for (let i = lineRangeCount - 1; i >= 0; i--) {
+          const at = i * 2, low = lineRanges[at], high = lineRanges[at + 1];
+          if (start >= high || end <= low) continue;
+          if (start > low && end < high) {
+            lineRanges[lineRangeCount * 2] = end; lineRanges[lineRangeCount++ * 2 + 1] = high;
+            lineRanges[at + 1] = start;
+          } else if (start > low) lineRanges[at + 1] = start;
+          else if (end < high) lineRanges[at] = end;
+          else {
+            lineRangeCount--;
+            lineRanges[at] = lineRanges[lineRangeCount * 2]; lineRanges[at + 1] = lineRanges[lineRangeCount * 2 + 1];
+          }
+        }
+      }
+    };
     let eye = { x: 0, y: 0, z: 0 }, near = 0.2, cutawayMaxY = Infinity;
     const lightDir = new Float32Array([0, 1, 0]);
     let directStrength = 1, ambientFloor = 0.3, diffuseFloor = 0, skyLuma = 0.5, groundLuma = 0.2;
@@ -237,9 +326,15 @@
     };
     const shadeNode = (node) => {
       if (node.smokeOpacity === 0) return;
+      if (birdsEyeCutaway && node.geometry.cutawayHide) return;
       if (node.mirrorRippleOnly && !node.mirrorRipples?.active && !node.mirrorBody?.contacts && !node.mirrorBody?.active) return;
       const { verts, faces, lines } = node.geometry;
-      const w = node.world;
+      let w = node.world;
+      if (node.matrixCloud && cutawayCloudMix > 0) {
+        cutawayCloudWorld.set(w);
+        cutawayCloudWorld[13] += Math.min(0, cutawayCloudY - w[13]) * cutawayCloudMix;
+        w = cutawayCloudWorld;
+      }
       const f = lastF;
       const ember = Math.min(1, node.ember || 0), scorch = 1 - Math.min(1, node.scorch || 0) * 0.88;
       const materialGlow = ember > 0 ? 0 : node.glow;
@@ -261,7 +356,9 @@
         const high = w[13] + Math.max(w[1] * min[0], w[1] * max[0]) + Math.max(w[5] * min[1], w[5] * max[1]) + Math.max(w[9] * min[2], w[9] * max[2]);
         mirrorMinimumY = lerp(low, high, mirrorReveal);
       }
-      const clipMinimumY = node.geometry.clipMinY ?? -Infinity, clipMaximumY = Math.min(cutawayMaxY, node.geometry.clipMaxY ?? Infinity);
+      const preserved = !!node.geometry.cutawayPreserve, selective = !preserved && cutawayRegionCount > 0;
+      const clipMinimumY = node.geometry.clipMinY ?? -Infinity;
+      const clipMaximumY = Math.min(preserved ? Infinity : cutawayMaxY, node.geometry.clipMaxY ?? Infinity);
       let shardDrawn = false;
       if (faces) {
         for (const face of faces) {
@@ -294,7 +391,7 @@
           nx /= nlen;
           ny /= nlen;
           nz /= nlen;
-          if (!portalFace && nx * (V[0][0] - eye.x) + ny * (V[0][1] - eye.y) + nz * (V[0][2] - eye.z) >= 0) continue;
+          if (!portalFace && perspectiveWeight * (nx * (V[0][0] - eye.x) + ny * (V[0][1] - eye.y) + nz * (V[0][2] - eye.z)) - orthographicDepth * (nx * view[2] + ny * view[6] + nz * view[10]) >= 0) continue;
           centerX /= count;
           centerY /= count;
           centerZ /= count;
@@ -402,120 +499,125 @@
               surface = destination;
               if (surfaceCount < 3) continue;
             }
-            for (let k = 0; k < surfaceCount; k++) {
-              if (surface) mat4.transformPoint(V[k], view, surface[k * 3], surface[k * 3 + 1], surface[k * 3 + 2]);
-              else mat4.transformPoint(V[k], view, V[k][0], V[k][1], V[k][2]);
-              CLIP_IN[k * 3] = V[k][0];
-              CLIP_IN[k * 3 + 1] = V[k][1];
-              CLIP_IN[k * 3 + 2] = V[k][2];
-            }
-            // A just-closed doorway must cover the view inside the near plane: mirrorFace clips at 1e-7, real depth kept.
-            const clipped = clipNear(CLIP_IN, surfaceCount, mirrorFace ? 1e-7 : near, CLIP_OUT);
-            if (clipped < 3) continue;
-            const rec = acquire();
-            let zsum = 0, minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-            for (let k = 0; k < clipped; k++) {
-              const cz = CLIP_OUT[k * 3 + 2];
-              rec.pts[k * 2] = width / 2 + CLIP_OUT[k * 3] * f / -cz;
-              rec.pts[k * 2 + 1] = height / 2 - CLIP_OUT[k * 3 + 1] * f / -cz;
-              minX = Math.min(minX, rec.pts[k * 2]); maxX = Math.max(maxX, rec.pts[k * 2]);
-              minY = Math.min(minY, rec.pts[k * 2 + 1]); maxY = Math.max(maxY, rec.pts[k * 2 + 1]);
-              zsum += cz;
-            }
-            rec.n = clipped;
-            rec.depth = zsum / clipped - (node.depthBias || 0);
-            rec.line = false;
-            rec.smokeOpacity = node.smokeOpacity === undefined ? 1 : node.smokeOpacity;
-            rec.mirror = mirrorFace;
-            rec.mirrorNode = mirrorFace ? node : null;
-            rec.imageNode = node.geometry.imageSurface ? node : null;
-            if (mirrorFace) {
-              rec.mirrorMinX = rec.mirrorMinY = Infinity;
-              rec.mirrorMaxX = rec.mirrorMaxY = -Infinity;
-              for (let k = 0; k < count; k++) {
-                const at = idx[k] * 3;
-                rec.mirrorMinX = Math.min(rec.mirrorMinX, verts[at]); rec.mirrorMaxX = Math.max(rec.mirrorMaxX, verts[at]);
-                rec.mirrorMinY = Math.min(rec.mirrorMinY, verts[at + 1]); rec.mirrorMaxY = Math.max(rec.mirrorMaxY, verts[at + 1]);
+            if (selective) beginCutaway(surface, surfaceCount);
+            for (let piece = 0; selective ? nextCutaway() : piece < 1; piece++) {
+              if (selective) { surface = cutawaySurface; surfaceCount = cutawayCount; }
+              for (let k = 0; k < surfaceCount; k++) {
+                if (surface) mat4.transformPoint(V[k], view, surface[k * 3], surface[k * 3 + 1], surface[k * 3 + 2]);
+                else mat4.transformPoint(V[k], view, V[k][0], V[k][1], V[k][2]);
+                CLIP_IN[k * 3] = V[k][0];
+                CLIP_IN[k * 3 + 1] = V[k][1];
+                CLIP_IN[k * 3 + 2] = V[k][2];
               }
-            }
-            rec.portal = portalFace;
-            rec.matrixGlyph = localMatrixGlyph;
-            rec.matrixGlyphOpacity = node.geometry.matrixGlyphOpacity ?? 1;
-            rec.matrixCave = cave;
-            // Keep cave travel for any owned or crossing face; distant static
-            // fallbacks need only the ordinary radial wave sample.
-            rec.matrixDynamic = dynamicCave && (matrixLiving || cave || permanentPossible);
-            rec.matrixPermanentOnly = permanentFallback;
-            rec.matrixLocal = localGlyphSurface;
-            rec.matrixPartial = partial;
-            rec.matrixBacking = revealBacking;
-            if (localMatrixGlyph) {
-              rec.matrixNx = glyphNx; rec.matrixNy = glyphNy; rec.matrixNz = glyphNz;
-              rec.matrixPlane = glyphPlane; rec.matrixCenterDepth = glyphDepth;
-              rec.matrixFaceNx = nx; rec.matrixFaceNy = ny; rec.matrixFaceNz = nz;
-              rec.matrixFacePlane = nx * (centerX - eye.x) + ny * (centerY - eye.y) + nz * (centerZ - eye.z);
-            } else if (maximumFront && localGlyphSurface) matrixPlaneSlot(nx, ny, nz, nx * centerX + ny * centerY + nz * centerZ, true, rec.depth);
-            if (maximumFront && !localMatrixGlyph) {
-              if (matrixLiving) matrixLivingSurfaces++;
-              else matrixSurfaces++;
-            }
-            // Offscreen receivers still register plane depth for visible glyphs; skip only shading and the draw record.
-            if (maxX < -2 || minX > width + 2 || maxY < -2 || minY > height + 2) { rec.mirrorNode = rec.imageNode = null; poolUsed--; continue; }
-            if (node.mirrorShard && !shardDrawn) { mirrorDebug.shardsDrawn++; shardDrawn = true; }
-            const emissive = Math.max((face.emissive || 0) * materialGlow, ember * 0.9);
-            rec.matrixLiving = matrixLiving;
-            let k, glyphDistance = 0;
-            if (localMatrixGlyph) {
-              const side = 1 - smooth((Math.abs(nx * w[8] + ny * w[9] + nz * w[10]) / glyphLength - 0.45) / 0.45);
-              const vx = eye.x - centerX, vy = eye.y - centerY, vz = eye.z - centerZ, vlen = glyphDistance = Math.hypot(vx, vy, vz);
-              const sideShade = 0.7 + Math.max(0, nx * lightDir[0] + ny * lightDir[1] + nz * lightDir[2]) * 0.22 + Math.max(0, (nx * vx + ny * vy + nz * vz) / vlen) * 0.08;
-              k = lerp(0.78, 1.15, Math.min(1, emissive)) * lerp(1, sideShade, side);
-            } else {
-              const diffuse = Math.max(diffuseFloor, nx * lightDir[0] + ny * lightDir[1] + nz * lightDir[2]);
-              const hemi = Math.max(ambientFloor, lerp(groundLuma, skyLuma, ny * 0.5 + 0.5));
-              k = lerp(Math.min(1, hemi + diffuse * 0.7 * directStrength), 1.1, Math.min(1, emissive));
-            }
-            k = lerp(k, 1.3, node.scorch > 0 ? 0 : node.highlight * 0.4);
-            const c = face.color;
-            const detail = 0.72 + (c[0] * 0.2126 + c[1] * 0.7152 + c[2] * 0.0722) / 255 * scorch * 0.28;
-            const heat = 255 * detail;
-            const cr = lerp(c[0] * scorch, heat, ember * 0.9);
-            const cg = lerp(c[1] * scorch, heat * (0.12 + ember * 0.85), ember * 0.9);
-            const cb = lerp(c[2] * scorch, heat * (0.01 + ember * ember * ember * 0.74), ember * 0.9);
-            const tip = node.tip > 1.5 ? 0 : node.tip || 0;
-            const fog = localMatrixGlyph ? smooth((glyphDistance - fogNear) / (fogFar - fogNear)) : Math.min(1, Math.max(0, (-rec.depth - fogNear) / (fogFar - fogNear)));
-            let red = lerp(lerp(cr * k, 214, tip * 0.88), fogRgb[0], fog);
-            let green = lerp(lerp(cg * k, 255, tip * 0.88), fogRgb[1], fog);
-            let blue = lerp(lerp(cb * k, 227, tip * 0.88), fogRgb[2], fog);
-            if (maximumFront && !localMatrixGlyph) {
-              const pulse = matrixLiving ? 0.88 + Math.sin(matrixTime * 2.2 - flow * 0.5) * 0.08 : 0;
-              const matrixFog = smooth((Math.hypot(centerX - eye.x, centerY - eye.y, centerZ - eye.z) - fogNear) / (fogFar - fogNear));
-              const mr = matrixLiving ? 214 * pulse : fogRgb[0] * matrixFog;
-              const mg = matrixLiving ? 255 * pulse : fogRgb[1] * matrixFog;
-              const mb = matrixLiving ? 227 * pulse : fogRgb[2] * matrixFog;
-              rec.matrixRed = mr; rec.matrixGreen = mg; rec.matrixBlue = mb;
-              red = lerp(red, mr, matrixAmount);
-              green = lerp(green, mg, matrixAmount);
-              blue = lerp(blue, mb, matrixAmount);
-            }
-            if (!localMatrixGlyph) rec.style = rec.mirror ? mirrorStyle : `rgb(${Math.min(255, Math.round(red))},${Math.min(255, Math.round(green))},${Math.min(255, Math.round(blue))})`;
-            rec.matrix = 0;
-            if (localMatrixGlyph || maximumFront && (partial || !matrixLiving && !localGlyphSurface)) {
-              rec.matrixMinX = Math.max(0, Math.floor(Math.min(width, minX))); rec.matrixMaxX = Math.min(width, Math.ceil(Math.max(0, maxX)));
-              rec.matrixMinY = Math.max(0, Math.floor(Math.min(height, minY))); rec.matrixMaxY = Math.min(height, Math.ceil(Math.max(0, maxY)));
-              if (rec.matrixMaxX > rec.matrixMinX && rec.matrixMaxY > rec.matrixMinY) {
-                if (localMatrixGlyph) {
-                  rec.matrixRed = Math.max(0, red - fogRgb[0] * fog);
-                  rec.matrixGreen = Math.max(0, green - fogRgb[1] * fog);
-                  rec.matrixBlue = Math.max(0, blue - fogRgb[2] * fog);
-                  rec.style = `rgb(${Math.min(255, Math.round(rec.matrixRed))},${Math.min(255, Math.round(rec.matrixGreen))},${Math.min(255, Math.round(rec.matrixBlue))})`;
-                } else {
-                  rec.matrix = maximumFront;
-                  rec.matrixWall = Math.abs(ny) >= Math.max(Math.abs(nx), Math.abs(nz)) ? 0 : Math.abs(nx) >= Math.abs(nz) ? 1 : 2;
-                  rec.matrixNx = nx; rec.matrixNy = ny; rec.matrixNz = nz;
-                  rec.matrixPlane = nx * (centerX - eye.x) + ny * (centerY - eye.y) + nz * (centerZ - eye.z);
+              // A just-closed doorway must cover the view inside the near plane: mirrorFace clips at 1e-7, real depth kept.
+              const clipped = clipNear(CLIP_IN, surfaceCount, mirrorFace ? 1e-7 : near, CLIP_OUT);
+              if (clipped < 3) continue;
+              const rec = acquire(clipped);
+              let zsum = 0, minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+              for (let k = 0; k < clipped; k++) {
+                const cz = CLIP_OUT[k * 3 + 2];
+                const scale = f / projectedDepth(-cz);
+                rec.pts[k * 2] = width / 2 + CLIP_OUT[k * 3] * scale;
+                rec.pts[k * 2 + 1] = height / 2 - CLIP_OUT[k * 3 + 1] * scale;
+                minX = Math.min(minX, rec.pts[k * 2]); maxX = Math.max(maxX, rec.pts[k * 2]);
+                minY = Math.min(minY, rec.pts[k * 2 + 1]); maxY = Math.max(maxY, rec.pts[k * 2 + 1]);
+                zsum += cz;
+              }
+              rec.n = clipped;
+              rec.depth = zsum / clipped - (node.depthBias || 0);
+              rec.line = false;
+              rec.smokeOpacity = node.smokeOpacity === undefined ? 1 : node.smokeOpacity;
+              rec.mirror = mirrorFace;
+              rec.mirrorNode = mirrorFace ? node : null;
+              rec.imageNode = node.geometry.imageSurface ? node : null;
+              if (mirrorFace) {
+                rec.mirrorMinX = rec.mirrorMinY = Infinity;
+                rec.mirrorMaxX = rec.mirrorMaxY = -Infinity;
+                for (let k = 0; k < count; k++) {
+                  const at = idx[k] * 3;
+                  rec.mirrorMinX = Math.min(rec.mirrorMinX, verts[at]); rec.mirrorMaxX = Math.max(rec.mirrorMaxX, verts[at]);
+                  rec.mirrorMinY = Math.min(rec.mirrorMinY, verts[at + 1]); rec.mirrorMaxY = Math.max(rec.mirrorMaxY, verts[at + 1]);
                 }
-                matrixArea += (rec.matrixMaxX - rec.matrixMinX) * (rec.matrixMaxY - rec.matrixMinY);
+              }
+              rec.portal = portalFace;
+              rec.matrixGlyph = localMatrixGlyph;
+              rec.matrixGlyphOpacity = node.geometry.matrixGlyphOpacity ?? 1;
+              rec.matrixCave = cave;
+              // Keep cave travel for any owned or crossing face; distant static
+              // fallbacks need only the ordinary radial wave sample.
+              rec.matrixDynamic = dynamicCave && (matrixLiving || cave || permanentPossible);
+              rec.matrixPermanentOnly = permanentFallback;
+              rec.matrixLocal = localGlyphSurface;
+              rec.matrixPartial = partial;
+              rec.matrixBacking = revealBacking;
+              if (localMatrixGlyph) {
+                rec.matrixNx = glyphNx; rec.matrixNy = glyphNy; rec.matrixNz = glyphNz;
+                rec.matrixPlane = glyphPlane; rec.matrixCenterDepth = glyphDepth;
+                rec.matrixFaceNx = nx; rec.matrixFaceNy = ny; rec.matrixFaceNz = nz;
+                rec.matrixFacePlane = nx * (centerX - eye.x) + ny * (centerY - eye.y) + nz * (centerZ - eye.z);
+              } else if (maximumFront && localGlyphSurface) matrixPlaneSlot(nx, ny, nz, nx * centerX + ny * centerY + nz * centerZ, true, rec.depth);
+              if (maximumFront && !localMatrixGlyph) {
+                if (matrixLiving) matrixLivingSurfaces++;
+                else matrixSurfaces++;
+              }
+              // Offscreen receivers still register plane depth for visible glyphs; skip only shading and the draw record.
+              if (maxX < -2 || minX > width + 2 || maxY < -2 || minY > height + 2) { rec.mirrorNode = rec.imageNode = null; poolUsed--; continue; }
+              if (node.mirrorShard && !shardDrawn) { mirrorDebug.shardsDrawn++; shardDrawn = true; }
+              const emissive = Math.max((face.emissive || 0) * materialGlow, ember * 0.9);
+              rec.matrixLiving = matrixLiving;
+              let k, glyphDistance = 0;
+              if (localMatrixGlyph) {
+                const side = 1 - smooth((Math.abs(nx * w[8] + ny * w[9] + nz * w[10]) / glyphLength - 0.45) / 0.45);
+                const vx = eye.x - centerX, vy = eye.y - centerY, vz = eye.z - centerZ, vlen = glyphDistance = Math.hypot(vx, vy, vz);
+                const sideShade = 0.7 + Math.max(0, nx * lightDir[0] + ny * lightDir[1] + nz * lightDir[2]) * 0.22 + Math.max(0, (nx * vx + ny * vy + nz * vz) / vlen) * 0.08;
+                k = lerp(0.78, 1.15, Math.min(1, emissive)) * lerp(1, sideShade, side);
+              } else {
+                const diffuse = Math.max(diffuseFloor, nx * lightDir[0] + ny * lightDir[1] + nz * lightDir[2]);
+                const hemi = Math.max(ambientFloor, lerp(groundLuma, skyLuma, ny * 0.5 + 0.5));
+                k = lerp(Math.min(1, hemi + diffuse * 0.7 * directStrength), 1.1, Math.min(1, emissive));
+              }
+              k = lerp(k, 1.3, node.scorch > 0 ? 0 : node.highlight * 0.4);
+              const c = face.color;
+              const detail = 0.72 + (c[0] * 0.2126 + c[1] * 0.7152 + c[2] * 0.0722) / 255 * scorch * 0.28;
+              const heat = 255 * detail;
+              const cr = lerp(c[0] * scorch, heat, ember * 0.9);
+              const cg = lerp(c[1] * scorch, heat * (0.12 + ember * 0.85), ember * 0.9);
+              const cb = lerp(c[2] * scorch, heat * (0.01 + ember * ember * ember * 0.74), ember * 0.9);
+              const tip = node.tip > 1.5 ? 0 : node.tip || 0;
+              const fog = localMatrixGlyph ? smooth((glyphDistance - fogNear) / (fogFar - fogNear)) : Math.min(1, Math.max(0, (-rec.depth - fogNear) / (fogFar - fogNear)));
+              let red = lerp(lerp(cr * k, 214, tip * 0.88), fogRgb[0], fog);
+              let green = lerp(lerp(cg * k, 255, tip * 0.88), fogRgb[1], fog);
+              let blue = lerp(lerp(cb * k, 227, tip * 0.88), fogRgb[2], fog);
+              if (maximumFront && !localMatrixGlyph) {
+                const pulse = matrixLiving ? 0.88 + Math.sin(matrixTime * 2.2 - flow * 0.5) * 0.08 : 0;
+                const matrixFog = smooth((Math.hypot(centerX - eye.x, centerY - eye.y, centerZ - eye.z) - fogNear) / (fogFar - fogNear));
+                const mr = matrixLiving ? 214 * pulse : fogRgb[0] * matrixFog;
+                const mg = matrixLiving ? 255 * pulse : fogRgb[1] * matrixFog;
+                const mb = matrixLiving ? 227 * pulse : fogRgb[2] * matrixFog;
+                rec.matrixRed = mr; rec.matrixGreen = mg; rec.matrixBlue = mb;
+                red = lerp(red, mr, matrixAmount);
+                green = lerp(green, mg, matrixAmount);
+                blue = lerp(blue, mb, matrixAmount);
+              }
+              if (!localMatrixGlyph) rec.style = rec.mirror ? mirrorStyle : `rgb(${Math.min(255, Math.round(red))},${Math.min(255, Math.round(green))},${Math.min(255, Math.round(blue))})`;
+              rec.matrix = 0;
+              if (localMatrixGlyph || maximumFront && (partial || !matrixLiving && !localGlyphSurface)) {
+                rec.matrixMinX = Math.max(0, Math.floor(Math.min(width, minX))); rec.matrixMaxX = Math.min(width, Math.ceil(Math.max(0, maxX)));
+                rec.matrixMinY = Math.max(0, Math.floor(Math.min(height, minY))); rec.matrixMaxY = Math.min(height, Math.ceil(Math.max(0, maxY)));
+                if (rec.matrixMaxX > rec.matrixMinX && rec.matrixMaxY > rec.matrixMinY) {
+                  if (localMatrixGlyph) {
+                    rec.matrixRed = Math.max(0, red - fogRgb[0] * fog);
+                    rec.matrixGreen = Math.max(0, green - fogRgb[1] * fog);
+                    rec.matrixBlue = Math.max(0, blue - fogRgb[2] * fog);
+                    rec.style = `rgb(${Math.min(255, Math.round(rec.matrixRed))},${Math.min(255, Math.round(rec.matrixGreen))},${Math.min(255, Math.round(rec.matrixBlue))})`;
+                  } else {
+                    rec.matrix = maximumFront;
+                    rec.matrixWall = Math.abs(ny) >= Math.max(Math.abs(nx), Math.abs(nz)) ? 0 : Math.abs(nx) >= Math.abs(nz) ? 1 : 2;
+                    rec.matrixNx = nx; rec.matrixNy = ny; rec.matrixNz = nz;
+                    rec.matrixPlane = nx * (centerX - eye.x) + ny * (centerY - eye.y) + nz * (centerZ - eye.z);
+                  }
+                  matrixArea += (rec.matrixMaxX - rec.matrixMinX) * (rec.matrixMaxY - rec.matrixMinY);
+                }
               }
             }
           }
@@ -526,48 +628,63 @@
           const a = line.i[0] * 3, b = line.i[1] * 3;
           mat4.transformPoint(V[0], w, verts[a], verts[a + 1], verts[a + 2]);
           mat4.transformPoint(V[1], w, verts[b], verts[b + 1], verts[b + 2]);
+          if (V[0][1] < clipMinimumY && V[1][1] < clipMinimumY) continue;
+          if (V[0][1] < clipMinimumY || V[1][1] < clipMinimumY) {
+            const end = V[V[0][1] < clipMinimumY ? 0 : 1], other = V[V[0][1] < clipMinimumY ? 1 : 0];
+            const amount = (clipMinimumY - end[1]) / (other[1] - end[1]);
+            end[0] = lerp(end[0], other[0], amount); end[2] = lerp(end[2], other[2], amount); end[1] = clipMinimumY;
+          }
           if (V[0][1] > clipMaximumY && V[1][1] > clipMaximumY) continue;
           if (V[0][1] > clipMaximumY || V[1][1] > clipMaximumY) {
             const end = V[V[0][1] > clipMaximumY ? 0 : 1], other = V[V[0][1] > clipMaximumY ? 1 : 0];
             const amount = (clipMaximumY - end[1]) / (other[1] - end[1]);
             end[0] = lerp(end[0], other[0], amount); end[2] = lerp(end[2], other[2], amount); end[1] = clipMaximumY;
           }
-          mat4.transformPoint(V[0], view, V[0][0], V[0][1], V[0][2]);
-          mat4.transformPoint(V[1], view, V[1][0], V[1][1], V[1][2]);
-          CLIP_IN.set(V[0], 0);
-          CLIP_IN.set(V[1], 3);
-          const clipped = clipNear(CLIP_IN, 2, near, CLIP_OUT);
-          if (clipped < 2) continue;
-          const rec = acquire();
-          for (let k = 0; k < 2; k++) {
-            const cz = CLIP_OUT[k * 3 + 2];
-            rec.pts[k * 2] = width / 2 + CLIP_OUT[k * 3] * f / -cz;
-            rec.pts[k * 2 + 1] = height / 2 - CLIP_OUT[k * 3 + 1] * f / -cz;
+          lineWorld.set(V[0], 0); lineWorld.set(V[1], 3);
+          cutawayLine(selective ? cutawayRegionCount : 0);
+          for (let interval = 0; interval < lineRangeCount; interval++) {
+            for (let k = 0; k < 2; k++) {
+              const t = lineRanges[interval * 2 + k];
+              mat4.transformPoint(V[k], view, lerp(lineWorld[0], lineWorld[3], t),
+                lerp(lineWorld[1], lineWorld[4], t), lerp(lineWorld[2], lineWorld[5], t));
+            }
+            CLIP_IN.set(V[0], 0);
+            CLIP_IN.set(V[1], 3);
+            const clipped = clipNear(CLIP_IN, 2, near, CLIP_OUT);
+            if (clipped < 2) continue;
+            const rec = acquire();
+            for (let k = 0; k < 2; k++) {
+              const cz = CLIP_OUT[k * 3 + 2];
+              const scale = f / projectedDepth(-cz);
+              rec.pts[k * 2] = width / 2 + CLIP_OUT[k * 3] * scale;
+              rec.pts[k * 2 + 1] = height / 2 - CLIP_OUT[k * 3 + 1] * scale;
+            }
+            if (Math.max(rec.pts[0], rec.pts[2]) < -7 || Math.min(rec.pts[0], rec.pts[2]) > width + 7 || Math.max(rec.pts[1], rec.pts[3]) < -7 || Math.min(rec.pts[1], rec.pts[3]) > height + 7) { poolUsed--; continue; }
+            rec.n = 2;
+            rec.depth = (CLIP_OUT[2] + CLIP_OUT[5]) / 2 - (node.depthBias || 0);
+            rec.line = true;
+            rec.imageNode = null;
+            rec.mirror = false;
+            rec.mirrorNode = null;
+            rec.portal = false;
+            rec.lineGlow = Math.max((line.emissive || 0) * materialGlow, ember * 0.9);
+            const c = line.color;
+            const heat = 255 * (0.72 + (c[0] * 0.2126 + c[1] * 0.7152 + c[2] * 0.0722) / 255 * scorch * 0.28);
+            const red = lerp(c[0] * scorch, heat, ember * 0.9);
+            const green = lerp(c[1] * scorch, heat * (0.12 + ember * 0.85), ember * 0.9);
+            const blue = lerp(c[2] * scorch, heat * (0.01 + ember * ember * ember * 0.74), ember * 0.9);
+            rec.style = `rgb(${Math.round(red)},${Math.round(green)},${Math.round(blue)})`;
+            rec.coreStyle = rec.lineGlow > 0.5 ? `rgb(${Math.round(red + (255 - red) * 0.55)},${Math.round(green + (255 - green) * 0.55)},${Math.round(blue + (255 - blue) * 0.55)})` : "";
           }
-          if (Math.max(rec.pts[0], rec.pts[2]) < -7 || Math.min(rec.pts[0], rec.pts[2]) > width + 7 || Math.max(rec.pts[1], rec.pts[3]) < -7 || Math.min(rec.pts[1], rec.pts[3]) > height + 7) { poolUsed--; continue; }
-          rec.n = 2;
-          rec.depth = (CLIP_OUT[2] + CLIP_OUT[5]) / 2 - (node.depthBias || 0);
-          rec.line = true;
-          rec.imageNode = null;
-          rec.mirror = false;
-          rec.mirrorNode = null;
-          rec.portal = false;
-          rec.lineGlow = Math.max((line.emissive || 0) * materialGlow, ember * 0.9);
-          const c = line.color;
-          const heat = 255 * (0.72 + (c[0] * 0.2126 + c[1] * 0.7152 + c[2] * 0.0722) / 255 * scorch * 0.28);
-          const red = lerp(c[0] * scorch, heat, ember * 0.9);
-          const green = lerp(c[1] * scorch, heat * (0.12 + ember * 0.85), ember * 0.9);
-          const blue = lerp(c[2] * scorch, heat * (0.01 + ember * ember * ember * 0.74), ember * 0.9);
-          rec.style = `rgb(${Math.round(red)},${Math.round(green)},${Math.round(blue)})`;
-          rec.coreStyle = rec.lineGlow > 0.5 ? `rgb(${Math.round(red + (255 - red) * 0.55)},${Math.round(green + (255 - green) * 0.55)},${Math.round(blue + (255 - blue) * 0.55)})` : "";
         }
       }
     };
     const shadeBatch = (node) => {
+      if (birdsEyeCutaway && node.geometry.cutawayHide) return;
       const data = node.instanceData;
       const glyphs = !!node.geometry.matrixGlyph;
       const tanX = width * 0.5 / lastF, tanY = height * 0.5 / lastF;
-      const sideX = Math.sqrt(1 + tanX * tanX), sideY = Math.sqrt(1 + tanY * tanY);
+      const sideX = Math.sqrt(1 + perspectiveWeight * perspectiveWeight * tanX * tanX), sideY = Math.sqrt(1 + perspectiveWeight * perspectiveWeight * tanY * tanY);
       BATCH_NODE.geometry = node.geometry;
       BATCH_NODE.depthBias = node.depthBias || 0;
       BATCH_NODE.matrixLiving = !!node.matrixLiving;
@@ -580,12 +697,15 @@
         const cx = view[0] * x + view[4] * y + view[8] * z + view[12];
         const cy = view[1] * x + view[5] * y + view[9] * z + view[13];
         const depth = -(view[2] * x + view[6] * y + view[10] * z + view[14]);
-        if (depth + r < near || Math.abs(cx) > depth * tanX + r * sideX || Math.abs(cy) > depth * tanY + r * sideY) { matrixCulled += count; return; }
+        const span = projectedDepth(depth);
+        if (depth + r < near || Math.abs(cx) > span * tanX + r * sideX || Math.abs(cy) > span * tanY + r * sideY) { matrixCulled += count; return; }
       }
       for (let instance = 0; instance < count; instance++) {
         const offset = instance * 20;
         const facing = data[offset + 19];
-        if (facing && (data[offset + 8] * facing * (eye.x - data[offset + 12]) + data[offset + 9] * facing * (eye.y - data[offset + 13]) + data[offset + 10] * facing * (eye.z - data[offset + 14])) <= 0) continue;
+        if (facing && facing * (data[offset + 8] * (perspectiveWeight * (eye.x - data[offset + 12]) + orthographicDepth * view[2])
+          + data[offset + 9] * (perspectiveWeight * (eye.y - data[offset + 13]) + orthographicDepth * view[6])
+          + data[offset + 10] * (perspectiveWeight * (eye.z - data[offset + 14]) + orthographicDepth * view[10])) <= 0) continue;
         BATCH_NODE.matrixFullCave = 0;
         if (glyphs) {
           const x = data[offset + 12], y = data[offset + 13], z = data[offset + 14];
@@ -597,7 +717,8 @@
             data[offset] ** 2 + data[offset + 1] ** 2 + data[offset + 2] ** 2,
             data[offset + 4] ** 2 + data[offset + 5] ** 2 + data[offset + 6] ** 2,
             data[offset + 8] ** 2 + data[offset + 9] ** 2 + data[offset + 10] ** 2));
-          if (depth + radius < near || Math.abs(cx) > depth * tanX + radius * sideX || Math.abs(cy) > depth * tanY + radius * sideY) { matrixCulled++; continue; }
+          const span = projectedDepth(depth);
+          if (depth + radius < near || Math.abs(cx) > span * tanX + radius * sideX || Math.abs(cy) > span * tanY + radius * sideY) { matrixCulled++; continue; }
           const cave = node.geometry.matrixCave;
           if (matrixCaves && cave && cave !== matrixPermanentCave) {
             const travel = matrixTravel(x, z, cave);
@@ -744,16 +865,18 @@
             const py = ty + (iy + 0.5) * step - height * 0.5;
             for (let ix = 0; ix < cols; ix++) {
               const px = tx + (ix + 0.5) * step - width * 0.5;
-              const dx = rx * px + ux * py - view[2], dy = ry * px + uy * py - view[6], dz = rz * px + uz * py - view[10];
-              const denominator = nx * dx + ny * dy + nz * dz, depth = plane / denominator;
+              const vx = rx * px + ux * py, vy = ry * px + uy * py, vz = rz * px + uz * py;
+              const dx = perspectiveWeight * vx - view[2], dy = perspectiveWeight * vy - view[6], dz = perspectiveWeight * vz - view[10];
+              const denominator = nx * dx + ny * dy + nz * dz;
+              const depth = (plane - orthographicDepth * (nx * vx + ny * vy + nz * vz)) / denominator;
               const i = (iy * MATRIX_TILE_SIZE + ix) * 4;
               matrixPixels[i + 3] = 0;
               matrixSamples++;
               if (depth < near || !Number.isFinite(depth)) continue;
-              const ddx = -depth * ndx / denominator, ddy = -depth * ndy / denominator;
-              sampleMatrix(rec, eye.x + dx * depth, eye.y + dy * depth, eye.z + dz * depth,
-                rx * depth + dx * ddx, ry * depth + dy * ddx, rz * depth + dz * ddx,
-                ux * depth + dx * ddy, uy * depth + dy * ddy, uz * depth + dz * ddy);
+              const span = projectedDepth(depth), ddx = -span * ndx / denominator, ddy = -span * ndy / denominator;
+              sampleMatrix(rec, eye.x + vx * span - view[2] * depth, eye.y + vy * span - view[6] * depth, eye.z + vz * span - view[10] * depth,
+                rx * span + dx * ddx, ry * span + dy * ddx, rz * span + dz * ddx,
+                ux * span + dx * ddy, uy * span + dy * ddy, uz * span + dz * ddy);
               if (!matrixSample[3]) continue;
               matrixPixels[i] = matrixSample[0]; matrixPixels[i + 1] = matrixSample[1]; matrixPixels[i + 2] = matrixSample[2]; matrixPixels[i + 3] = matrixSample[3];
               painted = true;
@@ -822,9 +945,11 @@
         if (!coverage) continue;
         if (rec.matrixPartial) {
           const px = (matrixPointX - width * 0.5) / lastF, py = (height * 0.5 - matrixPointY) / lastF;
-          const dx = view[0] * px + view[1] * py - view[2], dy = view[4] * px + view[5] * py - view[6], dz = view[8] * px + view[9] * py - view[10];
-          const depth = rec.matrixFacePlane / (rec.matrixFaceNx * dx + rec.matrixFaceNy * dy + rec.matrixFaceNz * dz);
-          const wx = eye.x + dx * depth, wy = eye.y + dy * depth, wz = eye.z + dz * depth;
+          const vx = view[0] * px + view[1] * py, vy = view[4] * px + view[5] * py, vz = view[8] * px + view[9] * py;
+          const dx = perspectiveWeight * vx - view[2], dy = perspectiveWeight * vy - view[6], dz = perspectiveWeight * vz - view[10];
+          const nx = rec.matrixFaceNx, ny = rec.matrixFaceNy, nz = rec.matrixFaceNz;
+          const depth = (rec.matrixFacePlane - orthographicDepth * (nx * vx + ny * vy + nz * vz)) / (nx * dx + ny * dy + nz * dz), span = projectedDepth(depth);
+          const wx = eye.x + vx * span - view[2] * depth, wy = eye.y + vy * span - view[6] * depth, wz = eye.z + vz * span - view[10] * depth;
           coverage *= matrixPermanentAt(wx, wy, wz, rec.matrixCave) ? 1 : matrixFront(matrixTravel(wx, wz, rec.matrixCave));
           if (!coverage) continue;
         }
@@ -840,8 +965,9 @@
         const px = x + rippleCircle[i * 2] * radius, py = y + rippleCircle[i * 2 + 1] * radius;
         const depth = -(m[2] * px + m[6] * py + m[14]);
         if (depth <= 1e-7) { connected = false; continue; }
-        const sx = width * 0.5 + (m[0] * px + m[4] * py + m[12]) * lastF / depth;
-        const sy = height * 0.5 - (m[1] * px + m[5] * py + m[13]) * lastF / depth;
+        const scale = lastF / projectedDepth(depth);
+        const sx = width * 0.5 + (m[0] * px + m[4] * py + m[12]) * scale;
+        const sy = height * 0.5 - (m[1] * px + m[5] * py + m[13]) * scale;
         if (connected) ctx.lineTo(sx, sy);
         else ctx.moveTo(sx, sy);
         connected = true;
@@ -861,7 +987,8 @@
       ctx.beginPath();
       for (let i = 0; i < count; i++) {
         const depth = -CLIP_OUT[i * 3 + 2];
-        const sx = width * 0.5 + CLIP_OUT[i * 3] * lastF / depth, sy = height * 0.5 - CLIP_OUT[i * 3 + 1] * lastF / depth;
+        const scale = lastF / projectedDepth(depth);
+        const sx = width * 0.5 + CLIP_OUT[i * 3] * scale, sy = height * 0.5 - CLIP_OUT[i * 3 + 1] * scale;
         if (i) ctx.lineTo(sx, sy);
         else ctx.moveTo(sx, sy);
       }
@@ -883,7 +1010,7 @@
         const reach = radius + WIDTH * 2;
         if (x + reach < rec.mirrorMinX || x - reach > rec.mirrorMaxX || y + reach < rec.mirrorMinY || y - reach > rec.mirrorMaxY) continue;
         const depth = Math.max(1e-7, -(m[2] * x + m[6] * y + m[14]));
-        ctx.lineWidth = Math.max(0.7, Math.min(4, 0.012 * scale * lastF / depth));
+        ctx.lineWidth = Math.max(0.7, Math.min(4, 0.012 * scale * lastF / projectedDepth(depth)));
         ctx.strokeStyle = "#21313b"; ctx.globalAlpha = strength * 0.18;
         rippleRing(x, y, radius + WIDTH * 0.5);
         ctx.strokeStyle = "#ebf5fa"; ctx.globalAlpha = strength * 0.34;
@@ -944,7 +1071,8 @@
       ctx.beginPath();
       for (let i = 0; i < 2; i++) {
         const at = i * 3, depth = -CLIP_OUT[at + 2];
-        const x = width * 0.5 + CLIP_OUT[at] * lastF / depth, y = height * 0.5 - CLIP_OUT[at + 1] * lastF / depth;
+        const scale = lastF / projectedDepth(depth);
+        const x = width * 0.5 + CLIP_OUT[at] * scale, y = height * 0.5 - CLIP_OUT[at + 1] * scale;
         if (i) ctx.lineTo(x, y); else ctx.moveTo(x, y);
       }
       ctx.stroke(); ctx.globalAlpha = 1;
@@ -1079,7 +1207,7 @@
     // Both image screens and shard captures use the same clipped affine
     // triangles. A bounded grid supplies perspective without resampling or
     // quantizing the source image into generated geometry.
-    const drawImageTriangle = (image, vertices, a, b, c, minX, minY, maxX, maxY) => {
+    const drawImageTriangle = (image, vertices, a, b, c, minX, minY, maxX, maxY, direction = false) => {
       const input = environmentClip, output = environmentClipped;
       for (let k = 0; k < 5; k++) { input[k] = vertices[a + k]; input[5 + k] = vertices[b + k]; input[10 + k] = vertices[c + k]; }
       let count = 0;
@@ -1093,7 +1221,10 @@
         }
       }
       for (let i = 0; i < count; i++) {
-        const at = i * 5, scale = lastF / -output[at + 2];
+        // Environment coordinates are directions at infinity. Their angular
+        // spread tends to zero as the rays become parallel in an overhead view.
+        const at = i * 5, depth = -output[at + 2];
+        const scale = lastF / (direction ? Math.max(1e-6, perspectiveWeight) * depth : projectedDepth(depth));
         output[at] = width * 0.5 + output[at] * scale; output[at + 1] = height * 0.5 - output[at + 1] * scale;
       }
       for (let i = 1; i + 1 < count; i++) {
@@ -1131,8 +1262,8 @@
         }
         for (let y = 0; y < ENVIRONMENT_GRID; y++) for (let x = 0; x < ENVIRONMENT_GRID; x++) {
           const a = (y * (ENVIRONMENT_GRID + 1) + x) * 5, b = a + 5, c = a + (ENVIRONMENT_GRID + 1) * 5, d = c + 5;
-          drawImageTriangle(environment.faces[face], environmentVertices, a, b, d, minX, minY, maxX, maxY);
-          drawImageTriangle(environment.faces[face], environmentVertices, a, d, c, minX, minY, maxX, maxY);
+          drawImageTriangle(environment.faces[face], environmentVertices, a, b, d, minX, minY, maxX, maxY, true);
+          drawImageTriangle(environment.faces[face], environmentVertices, a, d, c, minX, minY, maxX, maxY, true);
         }
       }
       ctx.globalAlpha = 1;
@@ -1144,7 +1275,7 @@
       const rect = surface.rect, z = node.geometry.verts[2], m = imageView;
       // Front-on screens are exactly affine; oblique screens use at most
       // 192 triangles, including near-plane clipping of each image tile.
-      const oblique = Math.abs(m[2] * rect[2]) + Math.abs(m[6] * rect[3]) > 0.0001;
+      const oblique = perspectiveWeight * (Math.abs(m[2] * rect[2]) + Math.abs(m[6] * rect[3])) > 0.0001;
       const columns = oblique ? 12 : 1, rows = oblique ? 8 : 1;
       for (let y = 0; y <= rows; y++) for (let x = 0; x <= columns; x++) {
         const px = rect[0] + rect[2] * x / columns, py = rect[1] + rect[3] * (1 - y / rows), at = (y * (columns + 1) + x) * 5;
@@ -1155,8 +1286,8 @@
         imageVertices[at + 4] = asset.height * y / rows;
       }
       ctx.save(); ctx.clip();
-      if (!oblique && imageVertices[2] < -near) {
-        const scale = lastF / -imageVertices[2], x = width / 2 + imageVertices[0] * scale, y = height / 2 - imageVertices[1] * scale;
+      if (!oblique && imageVertices[2] < -near && imageVertices[7] < -near && imageVertices[12] < -near && imageVertices[17] < -near) {
+        const scale = lastF / projectedDepth(-imageVertices[2]), x = width / 2 + imageVertices[0] * scale, y = height / 2 - imageVertices[1] * scale;
         ctx.transform((imageVertices[5] - imageVertices[0]) * scale / asset.width,
           -(imageVertices[6] - imageVertices[1]) * scale / asset.width,
           (imageVertices[10] - imageVertices[0]) * scale / asset.height,
@@ -1174,6 +1305,23 @@
     };
     const render = (root, camera, opts = {}) => {
       cutawayMaxY = opts.cutawayMaxY < 1e6 ? opts.cutawayMaxY : Infinity;
+      birdsEyeCutaway = !!opts.birdsEyeCutaway;
+      cutawayCloudY = opts.cutawayCloudY || 0;
+      cutawayCloudMix = Math.max(0, Math.min(1, opts.cutawayCloudMix || 0));
+      const regions = opts.cutawayRegions;
+      cutawayRegionCount = Math.max(0, Math.min(CUTAWAY_REGIONS, regions?.length || 0, opts.cutawayRegionCount | 0));
+      for (let i = 0; i < cutawayRegionCount; i++) {
+        const region = regions[i], at = i * 20, c = region.cos, s = region.sin, x = region.x, z = region.z;
+        cutawayPlanes[at] = 0; cutawayPlanes[at + 1] = -1; cutawayPlanes[at + 2] = 0; cutawayPlanes[at + 3] = region.y;
+        cutawayPlanes[at + 4] = c; cutawayPlanes[at + 5] = 0; cutawayPlanes[at + 6] = -s;
+        cutawayPlanes[at + 7] = -c * x + s * z - region.halfWidth;
+        cutawayPlanes[at + 8] = -c; cutawayPlanes[at + 9] = 0; cutawayPlanes[at + 10] = s;
+        cutawayPlanes[at + 11] = c * x - s * z - region.halfWidth;
+        cutawayPlanes[at + 12] = s; cutawayPlanes[at + 13] = 0; cutawayPlanes[at + 14] = c;
+        cutawayPlanes[at + 15] = -s * x - c * z - region.halfDepth;
+        cutawayPlanes[at + 16] = -s; cutawayPlanes[at + 17] = 0; cutawayPlanes[at + 18] = -c;
+        cutawayPlanes[at + 19] = s * x + c * z - region.halfDepth;
+      }
       const { light = DEFAULT_LIGHT, directStrength: strength = 1, ambientFloor: ambient = 0.3, diffuseFloor: diffuse = 0, clear = null, sky = DEFAULT_SKY, ground = DEFAULT_GROUND, horizon = null, zenith = null, fog = null, fogNear: near0 = 0, fogFar: far0 = 0, matrix = null } = opts;
       matrixActive = matrix ? matrix.active : 0;
       matrixRadius = matrix ? matrix.radius : 0;
@@ -1216,6 +1364,9 @@
         mirrorStyle = `rgb(${mr},${mg},${mb})`;
       }
       lastF = height / 2 / Math.tan(camera.fov / 2);
+      const orthoMix = camera.orthoHeight > 0 ? Math.max(0, Math.min(1, camera.orthoMix || 0)) : 0;
+      perspectiveWeight = 1 - orthoMix;
+      orthographicDepth = orthoMix * Math.max(0, camera.orthoHeight || 0) / (2 * Math.tan(camera.fov / 2));
       near = camera.near;
       eye = camera.position;
       mat4.lookAt(view, camera.position, camera.target, camera.up || UP);
@@ -1390,13 +1541,15 @@
     const P = new Float32Array(3);
     const project = (x, y, z, out = {}) => {
       mat4.transformPoint(P, view, x, y, z);
-      if (P[2] > -0.01) return null;
-      out.x = width / 2 + P[0] * lastF / -P[2];
-      out.y = height / 2 - P[1] * lastF / -P[2];
+      const depth = projectedDepth(-P[2]);
+      if (depth <= 0.01) return null;
+      const scale = lastF / depth;
+      out.x = width / 2 + P[0] * scale;
+      out.y = height / 2 - P[1] * scale;
       out.depth = P[2];
       return out;
     };
-    const ray = (px, py, camera, out) => mat4.rayFromView(out, view, width, height, camera.fov, camera.position, px, py);
+    const ray = (px, py, camera, out) => mat4.rayFromView(out, view, width, height, camera.fov, camera.position, px, py, camera.orthoMix, camera.orthoHeight);
     resize();
     return {
       kind: "canvas2d",

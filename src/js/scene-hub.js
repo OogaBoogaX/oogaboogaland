@@ -78,7 +78,7 @@
     clear: new Float32Array(3), horizon: new Float32Array(3), zenith: new Float32Array(3), sky: new Float32Array(3), ground: new Float32Array(3), sun: new Float32Array(3), direct: new Float32Array(3),
     light: { x: 0.55, y: 0.78, z: -0.25 }, sunDirection: { x: 0, y: 1, z: 0 }, moon: { x: 0, y: 1, z: 0 }, celestialPole: { x: 0, y: Math.sin(20 * DEG), z: -Math.cos(20 * DEG) }, starMatrix: new Float32Array(9),
     stars: 0, torch: 0, day: 1, twilight: 0, lampFactor: 0, directStrength: 1, directionalLightStrength: 1, sunStrength: 1, moonStrength: 0, ambientFloor: 0.18, diffuseFloor: 0, shadowStrength: 1, shadowFloor: 0, shadowBias: 0.002, outdoorDarkestSurfaceEstimate: 0.34, activeLightSource: "sun", latitude: 20, dayOfYear: 172, continuousDay: 171.5, solarDeclination: 0, siderealAngle: 0, sunAltitude: 90, sunAzimuth: 180, moonAltitude: -90, moonAzimuth: 0, sunriseHour: 6, sunsetHour: 18,
-    time: 0, bloomStrength: 0.5, lights: new Float32Array(80), lightCount: 0, shadowCenter: { x: 0, y: 0, z: 0 }, shadowExtent: 34, matrix: MATRIX_WORLD, cutawayMaxY: 1e6
+    time: 0, bloomStrength: 0.5, lights: new Float32Array(80), lightCount: 0, shadowCenter: { x: 0, y: 0, z: 0 }, shadowExtent: 34, matrix: MATRIX_WORLD, cutawayMaxY: 1e6, birdsEyeCutaway: false, cutawayRegions: [], cutawayRegionCount: 0, cutawayCloudY: 0, cutawayCloudMix: 0
   };
   RENDER_OPTS.starMatrix[0] = RENDER_OPTS.starMatrix[4] = RENDER_OPTS.starMatrix[8] = 1;
   const DAYLIGHT_DEBUG = {
@@ -187,6 +187,23 @@
   let jumbotronSpot, oogatronUnsub, renderer, game, world, go, lootEnabled, testBananas, root, camera, overlayCanvas, island, pathNode, altar, hud, hooks, input, pilot, fx, cameraCover, bananaCover, solids, rockGuides, objectGuides, sightGuides, bananaGuides, pileGuides, platformGuides, mirrorGuides, pile, crew, crates, critters, clock, presets, entering, jetpack, jetpackState, jetpackCarrier, jetpackWearer, lastJetpackCloud, mirrorCave, matrixCave, matrixControl, gateRain, fire, headquarters, dockStairs, jumbotron, positionDebug, pitGate;
   let magazine, magazineState, breakables, clankers, clankerPlay, clankerMeshes, clankerPartOwners, entropyLab;
   const clankerEquipment = [];
+  const terrainSections = [], caveSections = [];
+  let cutawayHeight = NaN;
+  const addTerrainSection = (source, parent, worldY = 0, region = null) => {
+    const cap = BL.terrainCutaway.create(source, renderer.releaseGeometry);
+    addChild(parent, cap.node);
+    const entry = { cap, worldY, region };
+    (region ? caveSections : terrainSections).push(entry);
+    return entry;
+  };
+  const cutawayHeightAt = (x, z) => {
+    let y = RENDER_OPTS.cutawayMaxY;
+    for (let i = 0; i < RENDER_OPTS.cutawayRegionCount; i++) {
+      const r = RENDER_OPTS.cutawayRegions[i], dx = x - r.x, dz = z - r.z;
+      if (Math.abs(dx * r.cos - dz * r.sin) < r.halfWidth && Math.abs(dx * r.sin + dz * r.cos) < r.halfDepth) y = Math.min(y, r.y);
+    }
+    return y;
+  };
   const CLANKER_FIRE = [models.particleGeometry("#ff8a2a", 0.18, 1), models.particleGeometry("#ffc148", 0.16, 1)];
   const CLANKER_SMOKE = models.particleGeometry("#70685f", 0.2, 0);
   const CLANKER_HIT = { node: null, owner: null, type: "none", distance: Infinity, x: 0, y: 0, z: 0 };
@@ -235,6 +252,15 @@
         pose[key] = supplied;
       } else if (typeof supplied !== typeof target) return null;
       else pose[key] = supplied;
+    }
+    // Projection fields are optional for older replay URLs.
+    if (data.orthoMix !== undefined) {
+      if (!Number.isFinite(data.orthoMix)) return null;
+      pose.orthoMix = clamp(data.orthoMix, 0, 1);
+    }
+    if (data.orthoHeight !== undefined) {
+      if (!Number.isFinite(data.orthoHeight) || data.orthoHeight < 0 || data.orthoHeight > 1000) return null;
+      pose.orthoHeight = data.orthoHeight;
     }
     if (pose.character.length > 80 || pose.fov <= 0.05 || pose.fov >= Math.PI || pose.orbit[2] <= 0 || pose.orbit[2] > 200) return null;
     if (Math.hypot(...pose.up) < 0.001 || Math.hypot(...pose.bodyQuaternion) < 0.001 || Math.hypot(...pose.headQuaternion) < 0.001) return null;
@@ -350,6 +376,10 @@
         pose.orbit[0] = pose.body[1] + pose.head[1] + Math.PI;
         if (pose.mode === "first-person" || pose.mode === "shoulder") pose.orbit[1] = pose.head[0];
       }
+    }
+    if (!preloadedPose || params.has("mode")) {
+      pose.orthoMix = (pose.mode === "birds-eye" || pose.mode === "orbit" && pose.combat) ? 1 : 0;
+      pose.orthoHeight = 2 * Math.tan(pose.fov / 2) * pose.orbit[2];
     }
     pilot.restorePose(pose, !!preloadedPose || !!eye || !!look);
     updatePositionDebug(true);
@@ -982,7 +1012,7 @@
     return !!matrixCave && matrixCave.portal.inside;
   };
   const matrixOverlayVisible = (x, y, z) => {
-    if (pilot?.birdsEyeMix > 0) return y <= RENDER_OPTS.cutawayMaxY;
+    if (pilot?.birdsEyeMix > 0) return y <= cutawayHeightAt(x, z);
     if (!matrixCave || !matrixCave.portal.inside) return true;
     const m = matrixCave.mouth;
     const cdx = camera.position.x - m.x, cdz = camera.position.z - m.z;
@@ -1569,6 +1599,7 @@
     const site = rocketModels.site(spot);
     addChild(root, site.node);
     placed.push(site.node);
+    addTerrainSection(site.islet.geometry.cutawaySource, site.node, spot.y);
     solids.add(site.islet);
     addProp("launchpad", site.pad, spot.x, spot.z, SITE.padR);
     addProp("tower", site.tower, spot.x + SITE.towerX, spot.z, 1.4);
@@ -1717,6 +1748,7 @@
     const atNode = (kind, node, radius) => addProp(kind, node, worldX(node.position.x, node.position.z), worldZ(node.position.x, node.position.z), radius);
     addChild(root, site.node);
     placed.push(site.node);
+    addTerrainSection(site.ground.geometry.cutawaySource, site.node, place.y);
     solids.add(site.ground);
     addProp("poolbridge", site.bridge, worldX(0, place.bridgeLocalZ + S.span / 2), worldZ(0, place.bridgeLocalZ + S.span / 2), S.width);
     atNode("poolstair", site.stair, SITE_SHAFT_REACH);
@@ -2828,19 +2860,47 @@
     return ceiling;
   };
   const birdsEyeCeiling = (cave) => {
-    const p = cave.root.position, feet = p.y - cave.baseY;
+    const p = cave.root.position, feet = p.y - cave.baseY - Math.max(0, cave.hop);
     // Clip architectural roofs, not the floor the actor is standing on. Outdoors
     // the taller cut also preserves nearby gorillas and carried equipment.
     const roof = Math.min(island.ceilingAt(p.x, feet + 0.02, p.z, PLAYER_RADIUS), entranceCeilingAt(p.x, p.z, feet + 0.02, PLAYER_RADIUS));
     return Math.min(feet + Math.max(4, cave.bodyHeight + 0.35), roof - 0.06);
   };
-  const updateBirdsEyeCutaway = () => {
-    const player = pilot.player, mix = pilot.birdsEyeMix;
-    if (!player || !(mix > 0)) { RENDER_OPTS.cutawayMaxY = 1e6; return; }
-    // Keep the roof removed throughout the transition: sweeping the cutoff
-    // can restore it before the camera has descended back underneath it.
-    // This is render-only; the same solids still stop bodies and weapons.
-    RENDER_OPTS.cutawayMaxY = birdsEyeCeiling(player);
+  const updateBirdsEyeCutaway = (dt) => {
+    const player = pilot.player, active = !!player && pilot.birdsEyeMix > 0;
+    RENDER_OPTS.birdsEyeCutaway = active;
+    RENDER_OPTS.cutawayCloudMix = active ? pilot.birdsEyeMix : 0;
+    RENDER_OPTS.cutawayRegionCount = 0;
+    if (!active) {
+      RENDER_OPTS.cutawayMaxY = 1e6; cutawayHeight = NaN;
+      for (const entry of terrainSections) entry.cap.node.visible = false;
+      for (const entry of caveSections) entry.cap.node.visible = false;
+      return;
+    }
+    const feet = player.root.position.y - player.baseY - Math.max(0, player.hop);
+    RENDER_OPTS.cutawayCloudY = feet - 2;
+    const underground = feet < -0.15;
+    // Camera zoom never selects a floor. Only walking vertically moves this
+    // section; its filled slab passes continuously between successive rooms.
+    const target = underground ? birdsEyeCeiling(player) : 16;
+    if (!Number.isFinite(cutawayHeight)) cutawayHeight = target;
+    else cutawayHeight += clamp(target - cutawayHeight, -28 * dt, 28 * dt);
+    const slicing = underground || cutawayHeight < 15.99;
+    RENDER_OPTS.cutawayMaxY = slicing ? cutawayHeight : 1e6;
+    for (const entry of terrainSections) {
+      if (slicing) entry.cap.update(cutawayHeight - entry.worldY);
+      else entry.cap.node.visible = false;
+    }
+    for (const entry of caveSections) {
+      const r = entry.region;
+      // A character standing on a roof keeps that supporting top visible.
+      const reveal = !underground && feet < r.y;
+      entry.cap.node.visible = reveal;
+      if (reveal) {
+        RENDER_OPTS.cutawayRegions[RENDER_OPTS.cutawayRegionCount++] = r;
+        entry.cap.update(r.y, r);
+      }
+    }
   };
   const crossesSealedCave = (fromX, fromZ, toX, toZ, y = 0) => {
     for (let i = 0; i < sealedCaves.length; i++) {
@@ -4993,7 +5053,7 @@
     stepTweens(dt);
     if (clankerPlay.active) clankerPlay.update(dt);
     else pilot.update(dt);
-    updateBirdsEyeCutaway();
+    updateBirdsEyeCutaway(dt);
     if (POSITION_DEBUG && elapsed >= positionDebugNext) {
       positionDebugNext = elapsed + 0.1;
       updatePositionDebug();
@@ -5595,7 +5655,7 @@
     return objectGuides.collect(player, p.x, p.y, p.z, camera, renderer.size.width / Math.max(1, renderer.size.height), sightGuides.state.retainedOwners, sightGuides.state.retainedCount);
   };
   const characterUiOccluded = (cave) => {
-    if (pilot.birdsEyeMix > 0) return cave.root.position.y - cave.baseY >= RENDER_OPTS.cutawayMaxY;
+    if (pilot.birdsEyeMix > 0) return cave.root.position.y - cave.baseY >= cutawayHeightAt(cave.root.position.x, cave.root.position.z);
     // Input-time tooltips may run before this frame's transforms are rendered.
     // Use rock certificates only during the overlay, after updating providers;
     // all other callers keep the exact visibility query.
@@ -5886,6 +5946,18 @@
     presets = { pile: PILE_VIEW, gate: GATE_VIEW };
     pilot = pilotMod.create({ renderer, canvas: ctx.canvas, camera, hud, presets, landing: "pile", pitch: [PITCH_MIN, PITCH_MAX], dist: [DIST_MIN, DIST_MAX], follow: FOLLOW, fly: FLY, clampTarget, clampCamera, ceilingAt, birdsEyeCeiling, releaseView: releaseCameraView, enterFreeView: enterFreeCameraView, coarse: COARSE, onFreeAction: freeAction, jetpackStatus: jetpackHudStatus, close: { ...CLOSE_VIEW, maxStep: STEP_MAX, groundAt: playerSupportAt, visualGroundAt: visualSupportAt, sleepEyeFloorAt, cloudAt, zone: () => playerCaveIndex } });
     place(island.geometry, 0, 0, 0, 0);
+    addTerrainSection(island.cutawaySource, root);
+    for (const mouth of island.mouths) {
+      const slot = caves.slots.find(candidate => candidate.id === mouth.id);
+      if (slot.status !== "open" && slot.status !== "mirror") continue;
+      const cos = Math.cos(mouth.ry), sin = Math.sin(mouth.ry), room = mouth.room;
+      // Cave local -z points into the mountain. Include the entrance lintel
+      // and a wall thickness around the authored room, leaving adjacent hills.
+      const back = -room.to - 0.45, front = 1.15, center = (back + front) / 2;
+      const region = { id: mouth.id, x: mouth.x + sin * center, z: mouth.z + cos * center, cos, sin,
+        halfWidth: Math.max(room.w / 2, 2.5) + 0.45, halfDepth: (front - back) / 2, y: mouth.floorY + 2.85 };
+      addTerrainSection(island.cutawaySource, root, 0, region);
+    }
     const pathGeometry = { ...island.path.geometry, faces: island.path.geometry.faces.map(face => ({ ...face, matrixPermanentFallback: true })) };
     pathNode = createNode({ geometry: pathGeometry, instanceData: island.path.instanceData, instanceCount: 0, instanceVersion: 0, depthBias: 0.05 });
     addChild(root, pathNode);
@@ -6006,6 +6078,7 @@
     shared.reloadHeight = ALTAR_HEIGHT;
     shared.onAbyssRespawn = loseMagazine;
     shared.characterOccluded = characterUiOccluded;
+    shared.renderOpts = RENDER_OPTS;
     fx = shared.fx = fxMod.create(shared);
     weather = weatherMod.create({ root, renderer, camera, heightAt: mempoolIsland.groundAt, fx, centre: mempoolIsland.centre });
     // The snapshot outlives the visit, so a re-entered hub opens in the weather it left.
@@ -6402,7 +6475,7 @@
         get shown() {
           return pile.shown;
         },
-        stargate: pitGate, get stargateArrival() { return pitArrival; }, island, mouths: island.mouths, labels, launchers, camera, weather, chain, beasts, pokeBeast, useProp, refreshChainSign, get chainSign() { return chainSign; }, get poolIsland() { return mempoolIsland; }, cameraPose: POSITION_POSE, crew, fx, controls: pilot.controls, props, altar, path: island.path.debug, headquarters, jumbotron, fireworks: launchFireworks, get fireworksPending() { return fireworksShells.length; }, clankers, clankerPlay,
+        terrainSections, caveSections, stargate: pitGate, get stargateArrival() { return pitArrival; }, island, mouths: island.mouths, labels, launchers, camera, weather, chain, beasts, pokeBeast, useProp, refreshChainSign, get chainSign() { return chainSign; }, get poolIsland() { return mempoolIsland; }, cameraPose: POSITION_POSE, crew, fx, controls: pilot.controls, props, altar, path: island.path.debug, headquarters, jumbotron, fireworks: launchFireworks, get fireworksPending() { return fireworksShells.length; }, clankers, clankerPlay,
         scenery: {
           get candidateCount() { return scenery.length; },
           get visibleCount() { return sceneryVisible; },
@@ -6649,6 +6722,13 @@
     if (chainSign && chainSign.node.geometry) renderer.releaseGeometry(chainSign.node.geometry);
     chainSign = null;
     weather.dispose();
+    for (const entry of terrainSections) { entry.cap.dispose(); removeChild(entry.cap.node.parent, entry.cap.node); }
+    for (const entry of caveSections) { entry.cap.dispose(); removeChild(entry.cap.node.parent, entry.cap.node); }
+    terrainSections.length = caveSections.length = 0;
+    RENDER_OPTS.cutawayRegionCount = 0;
+    RENDER_OPTS.cutawayRegions.length = 0;
+    RENDER_OPTS.birdsEyeCutaway = false;
+    cutawayHeight = NaN;
     window.clearTimeout(hintTimer);
     if (positionDebug) {
       positionDebug.removeEventListener("click", copyPositionDebug);

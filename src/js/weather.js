@@ -118,7 +118,9 @@
       const w = 2.6 + rand() * 3.2, h = 1.9 + rand() * 1.4;
       geos.push(models.box({ w, h, d: w * (0.7 + rand() * 0.4), color: i % 2 ? tone[0] : tone[1], emissive: tone[2], offset: { x: Math.cos(a) * r, y: rand() * 0.7, z: Math.sin(a) * r } }));
     }
-    return models.noShadow(models.merge(...geos));
+    const geometry = models.noShadow(models.merge(...geos));
+    geometry.cutawayHide = true;
+    return geometry;
   });
   const CLOUD_FAIR = puff(3301, ["#f2f5f8", "#dfe6ee", 0.12]);
   const CLOUD_GREY = puff(3301, ["#6d737c", "#565c66", 0.05]);
