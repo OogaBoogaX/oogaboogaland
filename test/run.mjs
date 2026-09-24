@@ -3343,6 +3343,62 @@ scene("hub", { label: "chilling", query: "status=chillin&pos=0", steps: [{ name:
   const state = await b.evaluate(`(() => { const B = __ooga, inner = B.path.ringOuterRadius + 1.5, rows = [...B.cavemen.values()].map(c => ({ name: c.traits.name, state: c.state, radius: Math.hypot(c.root.position.x, c.root.position.z), snack: c.parts.snack.visible })); const c = B.cavemen.get("2140data"); B.advance(2, 1 / 60); return { inner, rows, spin: c.parts.chukTrail.some(n => n.visible), clubYaw: c.parts.club.rotation.y }; })()`);
   record("chilling Oogas: every Ooga rests beyond the banana ring without eating, and 2140data carries rather than continuously spins his nunchaku", state.rows.every(c => c.state === "chilling" && c.radius >= state.inner && !c.snack) && !state.spin && Math.abs(state.clubYaw) < 1e-6, JSON.stringify(state));
 } }] });
+scene("hub", { label: "gorilla traversal", query: "status=chillin", steps: [{ name: "gorilla traversal", why: "regression: low props interrupted the gallop, jump charging took too long, and a stale motion envelope trapped gorillas beneath trees", run: async (b) => {
+  const state = await b.evaluate(`(() => {
+    const B = __ooga, S = BL.scene, root = BL.scenes.hub.root, C = B.clankers, e = C.list[0], solids = B.headquarters.solids.props;
+    B.pilot.release(true);
+    for (const other of C.list) if (other !== e) { other.active = false; other.root.visible = false; }
+    for (const cave of B.cavemen.values()) cave.root.visible = false;
+    for (const prop of B.props) prop.node.visible = false;
+    const setup = (x, z, heading = Math.PI / 2) => {
+      C.release();
+      Object.assign(e.root.position, { x, y: B.island.supportAt(x, z, 50, 10), z });
+      Object.assign(e, { active: true, controlled: false, recover: 0, lounge: "", parked: false, biped: false, heading, speed: 0, lowCover: false });
+      Object.assign(e.drive, { airborne: false, passiveFall: false, grounded: true, jumpHeld: false, jumpDown: false, jumpArmed: false, charge: 0, vx: 0, vy: 0, vz: 0, motionRecover: 0, motionEnvelope: false });
+      e.fire.burning = e.fire.rolling = false; e.fire.rollRecover = 0; e.actionControlled = e.motion.smash = e.climb.active = e.jump.active = false;
+      e.root.visible = true; C.possess(e); B.advance(0.2, 1 / 60);
+    };
+    const advance = (input, seconds, sample = null) => {
+      const dt = 1 / 60;
+      for (let t = 0; t < seconds; t += dt) { C.control(input); B.advance(dt, dt); if (sample) sample(); }
+    };
+    const traversals = [];
+    for (const [kind, geometry] of [["crate", BL.hubModels.woodCrate()], ["barrel", BL.hubModels.barrel()], ["rock", BL.hubModels.rock(0)]]) {
+      const node = S.createNode({ geometry, position: { x: 12, y: B.island.surfaceAt(12, 0), z: 0 } });
+      S.addChild(root, node); solids.add(node); S.updateWorld(root); solids.sync(); setup(7, 0);
+      let maxY = e.root.position.y, airborne = 0, stopped = 0, previousX = e.root.position.x, maxVisibleStep = 0;
+      const hips = e.gorilla.root.children[0]; let previousVisibleY = e.root.position.y + hips.position.y;
+      advance({ x: 1, z: 0, heading: Math.PI / 2, run: true, jumpHeld: false }, 2.2, () => {
+        const visibleY = e.root.position.y + hips.position.y;
+        maxY = Math.max(maxY, e.root.position.y); maxVisibleStep = Math.max(maxVisibleStep, Math.abs(visibleY - previousVisibleY)); previousVisibleY = visibleY;
+        if (e.drive.airborne || e.jump.active) airborne++;
+        if (e.root.position.x > 9 && e.root.position.x < 15.5 && e.root.position.x - previousX < 1e-5) stopped++;
+        previousX = e.root.position.x;
+      });
+      traversals.push({ kind, x: e.root.position.x, maxY, airborne, stopped, maxVisibleStep });
+      solids.remove(node); S.removeChild(root, node); solids.sync();
+    }
+    setup(7, 2);
+    C.control({ x: 1, z: 0, heading: Math.PI / 2, run: true, jumpHeld: true, jumpPressed: true }); B.advance(1 / 60, 1 / 60);
+    advance({ x: 1, z: 0, heading: Math.PI / 2, run: true, jumpHeld: true }, 0.64);
+    const charged = e.drive.charge, releaseX = e.root.position.x;
+    advance({ x: 1, z: 0, heading: Math.PI / 2, run: true, jumpHeld: false }, 0.18);
+    const jump = { charged, airborne: e.drive.airborne, vx: e.drive.vx, moved: e.root.position.x - releaseX };
+    const tree = B.props.find(prop => prop.prop === "tree"); tree.node.visible = true; S.updateWorld(root); solids.sync();
+    const q = tree.node.position; setup(q.x - 2.8, q.z, Math.PI / 2);
+    let lowFrames = 0, bipedFrames = 0, movingFrames = 0, previous = e.root.position.x;
+    advance({ x: -1, z: 0, heading: Math.PI / 2, run: false, jumpHeld: false }, 1.2, () => {
+      if (e.lowCover) lowFrames++; if (e.biped) bipedFrames++;
+      if (Math.abs(e.root.position.x - previous) > 1e-5) movingFrames++;
+      previous = e.root.position.x;
+    });
+    return { traversals, jump, canopy: { startX: q.x - 2.8, endX: e.root.position.x, lowFrames, bipedFrames, movingFrames } };
+  })()`);
+  const props = state.traversals.every(row => row.x > 16 && row.maxY >= 0.75 && row.maxY <= 1.05 && !row.airborne && !row.stopped && row.maxVisibleStep < 0.25);
+  const jump = state.jump.charged > 0.99 && state.jump.airborne && state.jump.vx > 5 && state.jump.moved > 0.5;
+  const canopy = state.canopy.lowFrames > 0 && !state.canopy.bipedFrames && state.canopy.movingFrames > 10 && state.canopy.endX < state.canopy.startX - 1;
+  record("gorilla traversal: crates, barrels and rocks keep a continuous grounded gallop, a running jump reaches full charge in 0.65 seconds without losing momentum, and low cover permits an all-fours retreat", props && jump && canopy, JSON.stringify(state));
+} }] });
 scene("hub", { label: "mirror clanker", query: "solo=1&character=portlandhodl&status=clankin", steps: [{ name: "mirror clanker stays inside", why: "regression: a clanker turned around after crossing the mirror, poked its head back out, and worked beside a glowing generic box", run: async (b) => {
   const state = await b.evaluate(`(() => { const B = __ooga, C = B.clankers, siteIndex = C.sites.findIndex(s => s.mirrorRoom), site = C.sites[siteIndex], m = site.mouth, e = C.list[0], localZ = p => (p.x - m.x) * site.sr + (p.z - m.z) * site.cr, place = (x, z) => ({ x: m.x + site.cr * x + site.sr * z, y: m.floorY, z: m.z - site.sr * x + site.cr * z }); e.owner.state = "working"; e.owner.work.site = e.owner.work.plannedSite = e.site = siteIndex; e.pendingSite = -1; e.hasSlot = true; e.slotIndex = 0; Object.assign(e, { slotX: place(0, -4.92).x, slotY: m.floorY, slotZ: place(0, -4.92).z, phase: "travel", route: "enter", fromSite: -1, entryTurn: false, blocked: 0, retry: 0 }); Object.assign(e.root.position, place(0, 0)); e.heading = m.ry + Math.PI; B.advance(0.25, 1 / 60); const entry = { turn: e.entryTurn, goal: localZ({ x: e.goalX, z: e.goalZ }) }; Object.assign(e.root.position, place(0, -4.92)); e.phase = "work"; e.route = ""; e.goalX = e.slotX; e.goalY = e.slotY; e.goalZ = e.slotZ; let max = -Infinity; for (let t = 0; t < 18; t += 1 / 30) { B.advance(1 / 30, 1 / 30); max = Math.max(max, localZ(e.root.position)); } return { room: m.room, entry, max, recoveries: e.stuck.recoveries, equipment: C.equipment.filter(item => item.site === siteIndex).length, standTagged: B.matrixGate.stand.geometry.matrixCave !== undefined, buttonTagged: B.matrixGate.button.geometry.matrixCave !== undefined }; })()`);
   record("mirror clanker: the safe chamber expands, entry continues straight inward, work never recrosses the glass, and only the control button uses the bright Matrix material", state.room.w > 6 && state.room.to > 6.5 && Math.abs(state.entry.goal + 3.5) < 0.01 && state.max <= -1.85 + 1e-6 && state.equipment === 0 && !state.standTagged && state.buttonTagged, JSON.stringify(state));
