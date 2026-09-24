@@ -3352,7 +3352,7 @@
       case "caveman":
         return o.cave.traits.display;
       case "clanker":
-        return `${o.entry.owner.traits.display}'s gorilla`;
+        return `${o.entry.owner.traits.display} 🦍`;
       case "crate":
         return `${o.crate.loot.tier} crate · tap to open`;
       case "cave":
@@ -5251,7 +5251,7 @@
     // Upright scientists stand on their feet. An arm reaching a keyboard is
     // not a foot landing on that desk, even though it belongs to the body sweep.
     if (entry.motion.lab && !entry.drive.airborne && !entry.gorilla.motionActive) {
-      const floor = island.supportAt(x, z, y, step, ABYSS_FLOOR, 0.45);
+      const floor = island.supportAt(x, z, y, Math.min(step, STEP_MAX), ABYSS_FLOOR, 0.45);
       return props ? Math.max(floor, solids.supportAt(x, z, y, step, 0.45)) : floor;
     }
     // The landing surface must cover the same body footprint as the sweep.
@@ -5261,7 +5261,7 @@
     let floor = ABYSS_FLOOR;
     for (let part = 0; part < shape.count(entry); part++) {
       const offset = shape.offset(entry, part), px = x + sine * offset, pz = z + cosine * offset;
-      floor = Math.max(floor, island.supportAt(px, pz, y, step, ABYSS_FLOOR, radius));
+      floor = Math.max(floor, island.supportAt(px, pz, y, Math.min(step, STEP_MAX), ABYSS_FLOOR, radius));
       if (props) floor = Math.max(floor, solids.supportAt(px, pz, y, step, radius));
     }
     return floor;
@@ -5468,7 +5468,7 @@
   const registerClanker = (entry) => {
     entry.renderParts = [];
     entry.combat = { left: math.mat4.create(), right: math.mat4.create(), hit: false, groundChecked: false };
-    const owner = { kind: "clanker", entry, priority: 2, weaponType: "none" };
+    const owner = { kind: "clanker", entry, cave: entry, priority: 2, weaponType: "none" };
     const visit = (node) => {
       if (node.geometry) { entry.renderParts.push(node); addTarget(node, owner); clankerPartOwners.set(node, entry); }
       for (const child of node.children) visit(child);

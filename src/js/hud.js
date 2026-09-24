@@ -6,7 +6,10 @@
   const { createNode, addChild, createCamera, boundsOf } = BL.scene;
   const STATE_LABELS = { working: "clank", chilling: "chill", sleeping: "sleep", away: "chill", online: "online" };
   // Tooltip dots retain their human-presence color without changing NPC activity.
-  const statusFor = (cave) => cave.humanControlled ? "online" : cave.state === "away" ? "chilling" : cave.state;
+  const statusFor = (cave) => {
+    const actor = cave.tooltipOwner || cave;
+    return actor.humanControlled ? "online" : actor.state === "away" ? "chilling" : actor.state;
+  };
   const $ = (id) => document.getElementById(id);
   const TIER_RANK = { legendary: 0, epic: 1, rare: 2, common: 3 };
   const BANANA_COUNT = new Intl.NumberFormat("en-US", { maximumFractionDigits: 0 });
@@ -804,7 +807,7 @@
         }, MESSAGE_FADE_MS);
       }, 2800);
     };
-    let tipText = "", tipState = "", tipHealth = -1, tipW = 0, tipH = 0, tipCave = null, tipName = false, tipLeft = NaN, tipTop = NaN;
+    let tipText = "", tipState = "", tipHealth = -1, tipHealthMax = -1, tipW = 0, tipH = 0, tipCave = null, tipName = false, tipLeft = NaN, tipTop = NaN;
     let tipVisibility = null, tipSpeechTop = Infinity;
     const tipScreen = { x: 0, y: 0, depth: 0 };
     const placeTooltip = (left, top) => {
@@ -824,7 +827,7 @@
           el.tooltipHealth.hidden = !name;
           if (!name) {
             tipState = "";
-            tipHealth = -1;
+            tipHealth = tipHealthMax = -1;
             delete el.tooltip.dataset.state;
             el.tooltip.removeAttribute("aria-label");
           }
@@ -857,18 +860,20 @@
       update: (place = true) => {
         if (!tipCave) return;
         const state = statusFor(tipCave);
-        const health = tipCave.health ? Math.max(0, Math.min(25, tipCave.health.value)) : 25;
+        const healthMax = tipCave.health && tipCave.health.max || 25;
+        const health = tipCave.health ? Math.max(0, Math.min(healthMax, tipCave.health.value)) : healthMax;
         const shownHealth = Math.ceil(health);
-        const healthChanged = health !== tipHealth;
+        const healthChanged = health !== tipHealth || healthMax !== tipHealthMax;
         if (healthChanged) {
-          tipHealth = health;
-          el.tooltipHealthFill.style.transform = `scaleX(${health / 25})`;
+          tipHealth = health; tipHealthMax = healthMax;
+          el.tooltipHealthFill.style.transform = `scaleX(${health / healthMax})`;
+          el.tooltipHealth.setAttribute("aria-valuemax", String(healthMax));
           el.tooltipHealth.setAttribute("aria-valuenow", String(shownHealth));
         }
         if (state !== tipState || healthChanged) {
           tipState = state;
           el.tooltip.dataset.state = state;
-          el.tooltip.setAttribute("aria-label", `${tipText}, ${STATE_LABELS[state]}, ${shownHealth} of 25 health`);
+          el.tooltip.setAttribute("aria-label", `${tipText}, ${STATE_LABELS[state]}, ${shownHealth} of ${healthMax} health`);
         }
         el.tooltip.hidden = !tipVisibility.anchor(tipCave, tipScreen);
         if (el.tooltip.hidden || !place) return;
@@ -890,7 +895,7 @@
         el.tooltip.removeAttribute("aria-label");
         tipName = false;
         tipText = tipState = "";
-        tipHealth = -1;
+        tipHealth = tipHealthMax = -1;
       }
     };
     const hint = (text, ms = 4200) => {

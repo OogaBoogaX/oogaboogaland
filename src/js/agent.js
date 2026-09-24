@@ -605,6 +605,7 @@
         state.groomTime += dt;
       }
       const crouch = managed ? state.crouch : 0, rolling = managed ? state.rollBlend : 0, climbing = managed ? state.climbBlend : 0;
+      const cresting = managed && state.climb ? 4 * state.mantle * (1 - state.mantle) : 0;
       const grooming = lounge === "sit" ? state.groomBlend : 0, climbPhase = managed ? state.climbStride / 1.2 : 0;
       // Long still intervals with a small, slow glance or free-hand adjustment.
       // Spatial phase keeps neighbours from moving together; support arms stay planted.
@@ -650,7 +651,7 @@
         // Settle the pelvis between the bent thighs instead of holding the
         // whole torso above them on straight arms. A one-hand lean also moves
         // its weight toward that hand; the other hand stays near the lap.
-        chest.position.y = damp(chest.position.y, lounge === "sit" ? -0.324 : leaning ? -0.35 : 0, 6, dt);
+        chest.position.y = damp(chest.position.y, lounge === "sit" ? -0.324 : leaning ? -0.35 : -0.08 * cresting, cresting ? 16 : 6, dt);
         chest.rotation.z = damp(chest.rotation.z, leaning ? -leanSide * 0.08 : 0, 6, dt);
       }
       const o = OFFSETS[state.gait];
@@ -790,7 +791,8 @@
         const hipHeight = (lounge ? reclining ? 0 : 0.12 : HIP - 0.17 * crouch + 0.08 * takeoff) * (1 - rolling);
         state.hipHeight = damp(state.hipHeight, hipHeight, crouch > 0 || jumping ? 14 : 6, dt);
         hips.rotation.x = damp(hips.rotation.x, reclining ? -Math.PI / 2 : -Math.PI / 2 * rolling, rolling > 0.0001 ? 9 : 6, dt);
-        state.hipOffsetZ = damp(state.hipOffsetZ, reclining ? 0.5 : 0.45 * rolling - 0.12 * climbing, 6, dt);
+        state.hipOffsetZ = damp(state.hipOffsetZ, reclining ? 0.5 : 0.45 * rolling - 0.12 * climbing
+          + 0.18 * cresting * state.climbDirection, cresting ? 18 : 6, dt);
         hips.position.z = state.hipOffsetZ;
         hips.position.y = state.hipHeight + bob;
         // Roll around the body's long axis after lying back. Euler YXZ would
@@ -1034,6 +1036,9 @@
       state.gait = state.beat > 0 ? "beat" : state.biped ? "upright" : state.speed > 1.7 ? "gallop" : state.speed > 0.01 ? "knuckle" : "idle";
       pose(Math.max(0, dt));
       measureBody();
+      // Support changes immediately for collision, while the visible rig
+      // eases onto and off low props without changing its running pose.
+      if (motion && Number.isFinite(motion.supportOffset)) hips.position.y += motion.supportOffset / scale;
     };
     const pointToWorld = (matrix, x, y, z, out) => {
       const px = (matrix[0] * x + matrix[4] * y + matrix[8] * z + matrix[12]) * scale;
