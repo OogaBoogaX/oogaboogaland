@@ -1342,18 +1342,16 @@
       addChild(group, node);
       mirrorCave = { slot, mouth: m, group, rim, node, sign: null };
       addTarget(node, { kind: "cave", slot, priority: 1 });
-      // The pedestal is a physical control, not a Matrix glyph surface. Giving
-      // its complete geometry a cave tag turns it into the bright white box
-      // visible at the back of the room; keep only the button in the effect.
-      const stand = createNode({ position: { x: 0, y: 0, z: -5.15 }, geometry: hubModels.matrixButtonStand(), matrixExterior: true });
-      const button = createNode({ position: { x: 0, y: 1.12, z: 0 }, geometry: { ...hubModels.matrixButton(), matrixCave: caveIndex }, matrixExterior: true, matrixLiving: false, glow: 0.25 });
-      addChild(stand, button);
-      addChild(group, stand);
+      // Keep the chamber floor clear: the control is a large wall button at
+      // eye level, with its shallow axis pointing out from the rear wall.
+      const buttonZ = -m.room.to + 0.04;
+      const button = createNode({ position: { x: 0, y: 1.65, z: buttonZ }, rotation: { x: Math.PI / 2, y: 0, z: 0 }, scale: { x: 1.7, y: 1.7, z: 1.7 }, geometry: { ...hubModels.matrixButton(), matrixCave: caveIndex }, matrixExterior: true, matrixLiving: false, glow: 0.25 });
+      addChild(group, button);
       matrixControl = {
-        stand, button, x: m.x + ax * stand.position.z, z: m.z + az * stand.position.z,
+        button, restZ: buttonZ, x: m.x + ax * buttonZ, z: m.z + az * buttonZ,
         pressed: false, near: false, promptPressed: false, promptPlayer: null, promptAction: null, promptJet: false, promptRecovering: false
       };
-      addTarget(button, { kind: "matrix-button", priority: 2 }, { radius: 0.55 });
+      addTarget(button, { kind: "matrix-button", priority: 2 }, { radius: 0.8 });
     } else if (slot.status === "sleeping") {
       // Bedrolls lie along +x, as the sleep pose assumes.
       addChild(group, createNode({ position: { x: 0, y: 0.05, z: -4.5 }, rotation: { x: 0, y: -m.ry, z: 0 }, geometry: hubModels.bedroll(), depthBias: 0.3 }));
@@ -2645,6 +2643,30 @@
     const direction = Math.abs(localZ) > 1e-6 ? -Math.sign(localZ) : hitZ >= 0 ? 1 : -1;
     swingRoomSign(sign, direction, 3.5, true);
   };
+  const legacyCopy = (value) => {
+    const field = document.createElement("textarea");
+    field.value = value;
+    field.setAttribute("readonly", "");
+    field.style.position = "fixed"; field.style.opacity = "0";
+    document.body.appendChild(field);
+    field.select();
+    let copied = false;
+    try { copied = document.execCommand("copy"); } catch (_) {}
+    field.remove();
+    return copied;
+  };
+  const tapRoomSign = (sign) => {
+    if (!sign || !sign.node.visible) return;
+    const meta = sign.node.geometry.roomLifehashSign;
+    const dx = camera.position.x - sign.node.position.x, dz = camera.position.z - sign.node.position.z;
+    const localZ = dx * sign.sr + dz * sign.cr;
+    const direction = Math.abs(localZ) > 1e-6 ? -Math.sign(localZ) : sign.hits & 1 ? -1 : 1;
+    swingRoomSign(sign, direction, 3.5, true);
+    const copied = () => { if (hud) hud.toast(`Room hash ${meta.lines[0]} copied to clipboard`); };
+    const fallback = () => legacyCopy(meta.lines[0]) ? copied() : hud && hud.toast("Could not copy the room hash");
+    if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(meta.lines[0]).then(copied, fallback);
+    else fallback();
+  };
   const moveCampBody = (cave, x, y, z, dt) => {
     moveRoomSigns(cave, x, y, z, dt);
     if (cave.camp.burning || cave.camp.rolling || cave.camp.cooldown > 0) return;
@@ -3364,7 +3386,7 @@
       case "matrix-gate":
         return "Glyph gate · tap or press Space nearby to open";
       case "room-sign":
-        return "Room sign";
+        return "Room sign · tap to copy hash";
       case "lab-link":
         return "EntropyLab · open website in a new tab";
       case "prop":
@@ -3683,6 +3705,9 @@
       case "matrix-button":
         toggleMatrixControl(true);
         break;
+      case "room-sign":
+        tapRoomSign(o.roomSign);
+        break;
       case "lab-link":
         window.open("https://entropylab.online", "_blank", "noopener,noreferrer");
         break;
@@ -3918,8 +3943,8 @@
       // Their stored overhead sections are clipped in every render pass, including shadows.
       gate.node.visible = gate.node.position.y + gate.bottom < gate.ceiling && gate.node.position.y + gate.top > gate.floor;
     }
-    const buttonY = matrixControl.pressed ? 1.04 : 1.12;
-    matrixControl.button.position.y = matrixControl.button.position.y < buttonY ? Math.min(buttonY, matrixControl.button.position.y + dt * 0.5) : Math.max(buttonY, matrixControl.button.position.y - dt * 0.5);
+    const buttonZ = matrixControl.restZ - (matrixControl.pressed ? 0.08 : 0);
+    matrixControl.button.position.z = matrixControl.button.position.z < buttonZ ? Math.min(buttonZ, matrixControl.button.position.z + dt * 0.5) : Math.max(buttonZ, matrixControl.button.position.z - dt * 0.5);
     const subject = player ? player.root.position : camera.position;
     const action = nearbyAction(subject.x, subject.y + (player ? 1.1 - player.baseY : 0), subject.z, player ? MATRIX_BUTTON_USE_REACH : MATRIX_BUTTON_REACH);
     const equipped = !!(player && player.jet);
@@ -5991,7 +6016,9 @@
     headquarters.entropyLab = entropyLab;
     entropyLab.updateEquipment = updateLabEquipment;
     shared.clipProjectileTarget = entropyLab.phase.clipTarget;
-    shared.absorbProjectile = entropyLab.phase.absorb;
+    shared.absorbProjectile = (ax, ay, az, point, dt, source, workShot) => entropyLab.phase.absorb(ax, ay, az, point, dt)
+      || !!(workShot && source && shared.workSites[source.work.site]?.mirrorRoom && !mirrorCave.damage.broken
+        && mirrorCave.ripples.absorb(ax, ay, az, point));
     shared.onProjectileMove = (ax, ay, az, bx, by, bz, dt, source, workShot) => {
       const crossed = mirrorCave.ripples.cross(ax, ay, az, bx, by, bz, dt);
       if (!crossed || !workShot || !source || !shared.workSites[source.work.site]?.mirrorRoom || mirrorCave.damage.broken) return;
@@ -6109,7 +6136,17 @@
         }
       };
     });
-    shared.workTarget = (cave, out, sample) => clankers ? clankers.target(cave, out, sample) : false;
+    shared.workTarget = (cave, out, sample) => {
+      if (!clankers || !clankers.target(cave, out, sample)) return false;
+      // Until the OBL mirror is completely gone, preserve the moving body aim
+      // pattern but land every round on the nearest panel that still exists.
+      // This hook is also called for rounds already in flight, so a newly made
+      // hole cannot pull the rest of a burst through empty space.
+      if (shared.workSites[cave.work.site]?.mirrorRoom && !mirrorCave.damage.broken) {
+        mirrorCave.damage.aimCenter(out, out.x, out.y, out.z);
+      }
+      return true;
+    };
     shared.workHit = (cave) => clankers && clankers.hit(cave);
     shared.workPlanned = (cave, site) => clankers && clankers.plan(cave, site);
     mark("pile");
@@ -6303,7 +6340,7 @@
       occlusionVersion: () => objectGuides.result.occlusionVersion
     });
     platformGuides = headquarters.platformGuides = BL.pileGuides.create({ pile, altar, platform: true });
-    mirrorGuides = mirrorCave.guides = BL.mirrorGuides.create({ mirror: mirrorCave, stand: matrixControl.stand });
+    mirrorGuides = mirrorCave.guides = BL.mirrorGuides.create({ mirror: mirrorCave, stand: matrixControl.button });
     // Scenery may receive outlines, but only island rock activates the hidden character view.
     // Banana interiors keep their separate covered-view pass.
     objectGuides = headquarters.objectGuides = BL.objectGuides.create({ roots: root.children, crew, actorRoots: clankers.list.map((entry) => entry.root), exclude: [island.geometry, pathNode.geometry], providers: [pileGuides, platformGuides, mirrorGuides], propsBlockActor: false, perceptionThrough: (actor) => inBananas(actor) ? pile.core : null });
@@ -6345,7 +6382,6 @@
           get pressed() { return matrixControl.pressed; },
           get near() { return matrixControl.near; },
           get button() { return matrixControl.button; },
-          get stand() { return matrixControl.stand; },
           get x() { return matrixControl.x; },
           get z() { return matrixControl.z; },
           get visibleHeight() { return 0; },

@@ -1421,7 +1421,7 @@
             else setVec(p, nx, ny, nz);
           }
         } else setVec(p, lerp(from.x, to.x, k), lerp(from.y, to.y, k), lerp(from.z, to.z, k));
-        const absorbed = ctx.absorbProjectile && ctx.absorbProjectile(x, y, z, p, step);
+        const absorbed = ctx.absorbProjectile && ctx.absorbProjectile(x, y, z, p, step, bullet.source, bullet.workShot);
         if (absorbed) bullet.life = 0;
         let impacted = false, dx = 0, dy = 0, dz = 0, distance = 0;
         if (!absorbed && !bullet.feedback && bullet.source === player && input.weaponTargets) {

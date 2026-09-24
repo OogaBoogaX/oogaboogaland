@@ -3618,6 +3618,19 @@
         }
       } else if (e.phase === "work") {
         if (e.motion.lab) workLab(e, dt);
+        else if (sites[e.site].mirrorRoom) {
+          // Mirror-room clankers are moving targets. Keep each run inside the
+          // glass and reserve its next lane before leaving the current one.
+          if (Math.hypot(e.goalX - p.x, e.goalZ - p.z) > 0.18) move(e, dt, SPEED * 1.08);
+          else {
+            e.speed = damp(e.speed, 0, 12, dt); e.rest -= dt;
+            if (e.rest <= 0) {
+              e.workCycle++;
+              if (reserve(e, true)) { setGoal(e, e.slotX, e.slotY, e.slotZ); e.rest = 0.12 + e.random() * 0.18; }
+              else e.rest = 0.25;
+            }
+          }
+        }
         else if (e.parked) {
           e.speed = 0; e.rest -= dt;
           if (!e.parkFor && e.rest <= 0) {
