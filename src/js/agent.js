@@ -296,17 +296,25 @@
     const v = torsoVox(rand);
     for (const [key] of v.map) {
       const [x, y, z] = key.split(",").map(Number);
-      if (!(z >= 5 && x >= 3 && x <= 6)) v.map.set(key, z < 1 ? 13 : 12);
+      if (!(z >= 5 && x >= 3 && x <= 6)) v.map.set(key, 12);
     }
-    // The open coat, folded collar, blue pocket and dark buttons remain
-    // part of the cached torso mesh, so they follow every bend of the body.
-    v.fill(0, 9, -1, 0, 0, 3, 13);
+    // A tapered wraparound hem joins the white back, sides and front panels
+    // into one coat while leaving the center open over the chest.
+    for (let y = -2; y <= 1; y++) {
+      const inset = y === -2 ? 1 : 0, left = inset, right = 9 - inset;
+      for (let x = left; x <= right; x++) for (let z = 0; z <= 6; z++) {
+        if (z === 6 && x >= 3 && x <= 6) continue;
+        if ((x === left || x === right) && (z === 0 || z === 6)) continue;
+        v.set(x, y, z, 12);
+      }
+    }
+    // The open coat, folded collar and blue pocket remain part of the cached
+    // torso mesh, so they follow every bend of the body.
     for (let y = 6; y <= 10; y++) {
       const x = y > 8 ? 2 : 3;
-      v.set(x, y, 6, 13); v.set(9 - x, y, 6, 13);
+      v.set(x, y, 6, 12); v.set(9 - x, y, 6, 12);
     }
     v.fill(1, 2, 4, 5, 7, 7, 14);
-    v.set(6, 3, 7, 14); v.set(6, 1, 7, 14);
     return v;
   };
   const labArmVox = (rand) => {
