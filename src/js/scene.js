@@ -78,13 +78,16 @@
     fn(node);
     for (const child of node.children) traverseVisible(child, fn);
   };
-  const createCamera = ({ fov = 50, near = 0.2, far = 60 } = {}) => ({
+  const createCamera = ({ fov = 50, near = 0.2, far = 60, orthoMix = 0, orthoHeight = 0 } = {}) => ({
     fov: fov * Math.PI / 180,
     near,
     far,
+    orthoMix,
+    orthoHeight,
     position: { x: 0, y: 3, z: 8 },
     target: { x: 0, y: 1, z: 0 }
   });
+  const cameraProjection = (out, camera, aspect, near = camera.near) => mat4.perspective(out, camera.fov, aspect, near, camera.far, camera.orthoMix || 0, camera.orthoHeight || 0);
   // Ancestor-inherited node attributes; both renderers walk the same graph, so the walks live here, not in each.
   const matrixModeOf = (node) => {
     let partial = 0;
@@ -100,6 +103,10 @@
   };
   const hiddenFromCamera = (node) => {
     for (let n = node; n; n = n.parent) if (n.cameraHidden) return true;
+    return false;
+  };
+  const hiddenFromCutaway = (node) => {
+    for (let n = node; n; n = n.parent) if (n.cutawayWholeHidden) return true;
     return false;
   };
   const boundsCache = new WeakMap();
@@ -160,5 +167,5 @@
     for (const tw of tweens) tw.alive = false;
     tweens.length = 0;
   };
-  BL.scene = { createNode, addChild, removeChild, updateLocal, updateWorld, traverseVisible, createCamera, boundsOf, matrixModeOf, hiddenFromCamera, addTween, stepTweens, tweenCount, clearTweens };
+  BL.scene = { createNode, addChild, removeChild, updateLocal, updateWorld, traverseVisible, createCamera, cameraProjection, boundsOf, matrixModeOf, hiddenFromCamera, hiddenFromCutaway, addTween, stepTweens, tweenCount, clearTweens };
 })();

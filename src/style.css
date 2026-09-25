@@ -263,11 +263,13 @@ select {
 .world-clock {
   position: absolute;
   top: calc(10px + var(--safe-top));
-  left: 50%;
+  right: 0;
+  left: 0;
   width: 5em;
   height: 1em;
-  transform: translateX(-50%);
+  margin: 0 auto;
   color: var(--paper);
+  text-align: center;
   font-size: 22px;
   line-height: 1;
   filter: drop-shadow(0 2px 0 rgba(0, 0, 0, 0.6));
@@ -281,47 +283,22 @@ select {
   vertical-align: 0;
 }
 
-.world-bananas {
+.world-block {
   position: absolute;
   top: calc(37px + var(--safe-top));
-  left: 50%;
+  right: 0;
+  left: 0;
   display: flex;
   align-items: center;
+  justify-content: center;
   gap: 4px;
-  transform: translateX(-50%);
-  color: var(--paper);
+  color: var(--faint);
   font-size: 12px;
   line-height: 1;
   letter-spacing: 0.08em;
+  text-transform: uppercase;
   white-space: nowrap;
-  padding: 0;
-  border: 0;
-  background: none;
-  cursor: pointer;
-  transition: color 0.12s ease;
-}
-
-.world-bananas:hover,
-.world-bananas.virtual-hover,
-.world-bananas:focus-visible {
-  color: #ffd84a;
-}
-
-.world-bananas .banana-icon {
-  width: 9px;
-  height: 9px;
-  flex: 0 0 auto;
-  transform: translateY(-1px);
-  filter: drop-shadow(0 1px 0 rgba(0, 0, 0, 0.5));
-}
-
-.world-banana-label {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  overflow: hidden;
-  clip-path: inset(50%);
-  white-space: nowrap;
+  pointer-events: none;
 }
 
 .meter {
@@ -637,16 +614,16 @@ select {
 }
 
 /* The games own the whole screen: the island's roster and banana sheet, pull tabs and all, and its
-   banana-pile count stay on the island and in the lab. The mine borrows the island's camera, so it
+   chain height stay on the island and in the lab. The mine borrows the island's camera, so it
    also hides the island's view-mode compass. */
 body[data-active-scene="race"] .sheet,
 body[data-active-scene="drop"] .sheet,
 body[data-active-scene="orbit"] .sheet,
 body[data-active-scene="mine"] .sheet,
-body[data-active-scene="race"] .world-bananas,
-body[data-active-scene="drop"] .world-bananas,
-body[data-active-scene="orbit"] .world-bananas,
-body[data-active-scene="mine"] .world-bananas,
+body[data-active-scene="race"] .world-block,
+body[data-active-scene="drop"] .world-block,
+body[data-active-scene="orbit"] .world-block,
+body[data-active-scene="mine"] .world-block,
 body[data-active-scene="mine"] .mode-hud {
   display: none;
 }
@@ -1440,7 +1417,7 @@ body[data-active-scene="mine"] .mode-hud {
   background: var(--accent);
 }
 
-/* Carried equipment expands in place, with the rifle above the jetpack. */
+/* Carried equipment expands in place; the jetpack stays beside the character control. */
 .equipment-hud {
   position: absolute;
   top: calc(74px + var(--safe-top));
@@ -1582,7 +1559,7 @@ body[data-active-scene="mine"] .mode-hud {
 .mode-face-icon {
   position: absolute;
   left: 5px;
-  top: 4px;
+  top: 2px;
 }
 
 .mode-hud[data-gorilla="true"] .mode-face-icon {
@@ -1622,7 +1599,7 @@ body[data-active-scene="mine"] .mode-hud {
   display: block;
   position: absolute;
   left: 54px;
-  top: 10px;
+  top: 8px;
   width: 10px;
   height: 32px;
   overflow: hidden;
@@ -3963,15 +3940,15 @@ body.orbit-dragging #tooltip {
     top: calc(10px + var(--safe-top));
     right: calc(12px + var(--safe-right));
     left: auto;
-    transform: none;
+    margin: 0;
     font-size: 13px;
   }
 
-  .world-bananas {
+  .world-block {
     top: calc(27px + var(--safe-top));
     right: calc(12px + var(--safe-right));
     left: auto;
-    transform: none;
+    justify-content: flex-start;
     font-size: 10.5px;
   }
 
@@ -4126,7 +4103,7 @@ body.orbit-dragging #tooltip {
   }
 
   #equipment-hud:has(.weapon-hud:not([hidden]), .magazine-hud:not([hidden])):has(.jetpack-hud:not([hidden]))~.bottom-hud>.message-stack {
-    --equipment-height: 176px;
+    --equipment-height: 56px;
   }
 
   .message-stack>.toast.show,
@@ -4246,7 +4223,7 @@ body.orbit-dragging #tooltip {
   }
 
   #equipment-hud:has(.magazine-hud:not([hidden])):has(.jetpack-hud:not([hidden]))~.bottom-hud>.message-stack {
-    --equipment-height: 236px;
+    --equipment-height: 116px;
   }
 }
 
@@ -4608,7 +4585,7 @@ body.orbit-dragging #tooltip {
   height: calc(var(--reticle-radius, 14px) * 2);
   transform: translate(-50%, -50%);
   pointer-events: none;
-  z-index: 5;
+  z-index: 30;
   filter: drop-shadow(0 1px 1px #000) drop-shadow(0 0 2px #000);
 }
 .weapon-reticle > svg {
@@ -4623,6 +4600,9 @@ body.orbit-dragging #tooltip {
 }
 .weapon-reticle[data-close="true"] > svg {
   visibility: hidden;
+}
+.weapon-reticle[data-sight="true"] > svg {
+  clip-path: inset(0 0 50% 0);
 }
 .weapon-reticle[data-occluded="true"] {
   visibility: hidden;
@@ -4646,6 +4626,9 @@ body.orbit-dragging #tooltip {
   width: 4px;
   height: 4px;
   background: var(--reticle-target);
+}
+.weapon-reticle[data-sight="true"] > span {
+  background: linear-gradient(to bottom, var(--reticle-target, #fff9dc) 50%, transparent 50%);
 }
 .weapon-reticle[data-target="out-of-range"] > span {
   visibility: hidden;
@@ -4697,7 +4680,7 @@ body.orbit-dragging #tooltip {
   .dsb-active .brand { display: none; }
 }
 .dsb-toggle { display: block; }
-.dsb-active .world-bananas { display: none; }
+.dsb-active .world-block { display: none; }
 
   .dsb-panel[data-folded="true"]:not([data-phase="entrance"]) { width: auto; padding: 3px 8px; }
   .dsb-panel[data-folded="true"] .dsb-world > :not(.dsb-toggle),
@@ -6007,8 +5990,8 @@ body.mine-dragging #tooltip {
 }
 
 /* Native gate dialog shares the stone tablet style and stays inside mobile viewports. */
-#stargate-menu { width: min(28rem, calc(100vw - 2rem)); max-height: calc(var(--gate-height, 100dvh) - 2rem); overflow: auto; }
-#stargate-menu ol { list-style: none; padding: 0; display: grid; gap: 0.6rem; }
-#stargate-menu ol button { width: 100%; min-height: 48px; text-align: left; white-space: normal; }
-#stargate-menu ol button:disabled { opacity: 0.65; cursor: not-allowed; }
-#stargate-menu button:focus-visible { outline: 3px solid #83e0ed; outline-offset: 2px; }
+#ooga-portal-menu { width: min(28rem, calc(100vw - 2rem)); max-height: calc(var(--gate-height, 100dvh) - 2rem); overflow: auto; }
+#ooga-portal-menu ol { list-style: none; padding: 0; display: grid; gap: 0.6rem; }
+#ooga-portal-menu ol button { width: 100%; min-height: 48px; text-align: left; white-space: normal; }
+#ooga-portal-menu ol button:disabled { opacity: 0.65; cursor: not-allowed; }
+#ooga-portal-menu button:focus-visible { outline: 3px solid #83e0ed; outline-offset: 2px; }

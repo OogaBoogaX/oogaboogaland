@@ -1,22 +1,21 @@
 (() => {
   "use strict";
   const BL = window.BL = window.BL || {};
-  const { models, hubModels } = BL;
+  const { models } = BL;
   const { randomInt, mat4, ease } = BL.math;
   const { createNode, addChild, removeChild, updateWorld, traverseVisible } = BL.scene;
   const MAX_PROPS = 26;
   const TYPES = {
-    crate: { health: 1, weights: [60, 24, 9, 4, 2, 1], debris: [models.particleGeometry("#805432", 0.07, 0)] },
-    barrel: { health: 2.25, weights: [45, 28, 14, 7, 4, 2], debris: [models.particleGeometry("#67462d", 0.07, 0)] },
-    rock: { health: 4.25, weights: [30, 30, 20, 11, 6, 3], debris: [models.particleGeometry("#88847a", 0.07, 0)] }
+    crate: { health: 1, weights: [60, 24, 9, 4, 2], debris: [models.particleGeometry("#805432", 0.07, 0)] },
+    barrel: { health: 2.25, weights: [45, 28, 14, 7, 4], debris: [models.particleGeometry("#67462d", 0.07, 0)] },
+    rock: { health: 4.25, weights: [30, 30, 20, 11, 6], debris: [models.particleGeometry("#88847a", 0.07, 0)] }
   };
   const REWARDS = [
     null,
     { kind: "banana", amount: 10, label: "+10", scale: 0.75 },
     { kind: "banana", amount: 20, label: "+20", scale: 0.75 },
     { kind: "banana", amount: 30, label: "+30", scale: 0.75 },
-    { kind: "magazine", amount: 30, label: "", scale: 2.4 },
-    { kind: "jetpack", amount: 1, label: "", scale: 1.2 }
+    { kind: "magazine", amount: 30, label: "+1 MAG", scale: 2.4 }
   ];
   const magazineGeometries = new Array(31);
   const magazineGeometry = (rounds = 30) => {
@@ -42,7 +41,7 @@
   const create = (ctx) => {
     const { root, renderer, fx, crew } = ctx;
     const records = [];
-    const rewardGeometry = { banana: models.bananaGeometry(), magazine: magazineGeometry(), jetpack: hubModels.jetpack() };
+    const rewardGeometry = { banana: models.bananaGeometry(), magazine: magazineGeometry() };
     const screen = { x: 0, y: 0, depth: 0 };
     let time = 0, brokenCount = 0, rewardCount = 0, revealingCount = 0;
     const register = (owner) => {
@@ -202,7 +201,6 @@
     const liveGeometry = (set) => {
       set.add(rewardGeometry.banana);
       set.add(rewardGeometry.magazine);
-      set.add(rewardGeometry.jetpack);
       for (const type of Object.values(TYPES)) for (const geometry of type.debris) set.add(geometry);
     };
     const dispose = () => {

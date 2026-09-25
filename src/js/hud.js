@@ -14,6 +14,16 @@
   const TIER_RANK = { legendary: 0, epic: 1, rare: 2, common: 3 };
   const BANANA_COUNT = new Intl.NumberFormat("en-US", { maximumFractionDigits: 0 });
   const MESSAGE_FADE_MS = 300;
+  const SHEET_STATE_KEY = "oogaboogaland.sheet.v1";
+  const readSheetState = () => {
+    try {
+      const state = JSON.parse(localStorage.getItem(SHEET_STATE_KEY));
+      return state && typeof state.open === "boolean" && ["bananas", "roster", "loot"].includes(state.tab) ? state : null;
+    } catch { return null; }
+  };
+  const writeSheetState = (open, tab) => {
+    try { localStorage.setItem(SHEET_STATE_KEY, JSON.stringify({ open, tab })); } catch { /* Storage may be unavailable. */ }
+  };
   // Sign headings: one pixel path per element, scaled by that element's CSS height.
   const SIGN_NS = "http://www.w3.org/2000/svg";
   // Collapse whitespace: markup may wrap a sign across lines but the lettering needs one run of words.
@@ -55,9 +65,6 @@
     el.replaceChildren(signLettering(text));
   };
   for (const el of document.querySelectorAll("[data-sign]")) letterSign(el);
-  // Panel shows itself once on load (INTRO_MS), then folds away unless the visitor is using it.
-  const INTRO_MS = 5000;
-  let introTimer = 0;
   // Icons are rasterized once into an offscreen canvas.
   const ICON_PX = 48;
   const renderIcon = (item) => {
@@ -132,8 +139,6 @@
       meterFill: $("meter-fill"),
       meterCount: $("meter-count"),
       meterForecast: $("meter-forecast"),
-      worldBananas: $("world-bananas"),
-      worldBananaCount: $("world-banana-count"),
       roster: $("roster"),
       statDonations: $("stat-donations"),
       statSats: $("stat-sats"),
@@ -208,6 +213,11 @@
     el.lootTab.hidden = !lootEnabled;
     el.crateHelp.hidden = !lootEnabled;
     el.worldLootHint.hidden = !lootEnabled;
+    const savedSheet = readSheetState();
+    const sheetTab = savedSheet && (savedSheet.tab !== "loot" || lootEnabled) ? savedSheet.tab : "roster";
+    for (const tab of el.tabs) tab.setAttribute("aria-selected", String(tab.dataset.tab === sheetTab));
+    for (const panel of el.panels) panel.hidden = panel.dataset.panel !== sheetTab;
+    el.sheet.dataset.open = String(!!savedSheet?.open);
     el.primary.hidden = true;
     el.gorillaSmash.hidden = el.gorillaDrag.hidden = true;
     el.mode.hidden = true;
@@ -275,7 +285,7 @@
       placeRosterRow(row);
     };
     // Seed empty text nodes so later updates only mutate text, never the DOM.
-    for (const node of [el.meterCount, el.meterForecast, el.worldBananaCount]) if (!node.firstChild) node.append("");
+    for (const node of [el.meterCount, el.meterForecast]) if (!node.firstChild) node.append("");
     let shownBananas = -1, shownWidth = "", shownBand = "", shownForecast = null;
     const setMeter = (level, capacity, forecastText) => {
       const percent = Math.min(100, Math.max(0, level / capacity * 100));
@@ -292,7 +302,6 @@
         shownBananas = bananas;
         const count = BANANA_COUNT.format(bananas);
         el.meterCount.firstChild.data = count;
-        el.worldBananaCount.firstChild.data = count;
       }
       if (forecastText !== shownForecast) el.meterForecast.firstChild.data = shownForecast = forecastText;
     };
@@ -323,14 +332,14 @@
       detachedNameTimer = window.setTimeout(() => el.modeDestinationName.classList.remove("show"), 1200);
     };
     const nextDetachedView = () => DETACHED_PRESETS[(DETACHED_PRESETS.indexOf(detachedPreset) + 1) % DETACHED_PRESETS.length];
-    let gorillaEntry = null, gorillaView = "orbit", gorillaBattle = false;
-    let modeName = "", modeGeometry = null, modeSelected = false, modeBattle = false, modeView = "detached", modeHealth = -1, modeGorilla = false;
-    const setMode = (cave, battle = false, view = cave ? "orbit" : "detached", visible = true) => {
+    let gorillaEntry = null, gorillaView = "orbit", gorillaCombat = false;
+    let modeName = "", modeGeometry = null, modeSelected = false, modeCombat = false, modeView = "detached", modeHealth = -1, modeGorilla = false;
+    const setMode = (cave, combat = false, view = cave ? "orbit" : "detached", visible = true) => {
       const gorilla = gorillaEntry ? gorillaEntry.gorilla : null;
-      if (gorilla) { cave = gorillaEntry.owner; battle = gorillaBattle; view = gorillaView; visible = true; }
+      if (gorilla) { cave = gorillaEntry.owner; combat = gorillaCombat; view = gorillaView; visible = true; }
       const selected = !!cave, name = selected ? cave.traits.name : "", shown = selected ? cave.traits.display : "";
       const identityChanged = selected !== modeSelected || selected && name !== modeName || !!gorilla !== modeGorilla;
-      const stateChanged = battle !== modeBattle || view !== modeView;
+      const stateChanged = combat !== modeCombat || view !== modeView;
       if (el.mode.hidden === visible) el.mode.hidden = !visible;
       const geometry = selected ? (gorilla ? gorilla.parts.head.geometry : cave.parts.head.geometry) : null;
       if (selected && (identityChanged || geometry !== modeGeometry)) {
@@ -354,18 +363,18 @@
         el.modeHealthFill.style.transform = `scaleY(${health / 25})`;
         el.modeHealth.setAttribute("aria-valuenow", String(Math.ceil(health)));
       }
-      if (stateChanged) { modeBattle = battle; modeView = view; }
+      if (stateChanged) { modeCombat = combat; modeView = view; }
       if (identityChanged || stateChanged) {
-        el.mode.dataset.shooter = String(selected && battle);
-        el.mode.dataset.battle = String(selected && battle);
+        el.mode.dataset.shooter = String(selected && combat);
+        el.mode.dataset.combat = String(selected && combat);
         el.mode.dataset.view = selected ? view : "detached";
-        el.mode.setAttribute("aria-pressed", String(selected && battle));
+        el.mode.setAttribute("aria-pressed", String(selected && combat));
         el.mode.setAttribute("aria-label", gorilla
-          ? `${shown}'s gorilla; ${view} view; ${battle ? "battle" : "carry"} mode. Press to switch battle or carry mode; hold to detach`
+          ? `${shown}'s gorilla; ${view} view; ${combat ? "combat" : "carry"} mode. Press to switch combat or carry mode; hold to detach`
           : selected
-          ? `${shown}; ${view} view; ${battle ? "battle" : "carry"} mode. Press to switch battle or carry mode; hold to detach`
+          ? `${shown}; ${view} view; ${combat ? "combat" : "carry"} mode. Press to switch combat or carry mode; hold to detach`
           : `${DETACHED_NAMES[detachedPreset]} detached view. Press to cycle destinations`);
-        el.mode.title = gorilla ? `${shown}'s gorilla · ${view} · ${battle ? "battle" : "carry"} · hold to detach` : selected ? `${shown} · ${view} · ${battle ? "battle" : "carry"} · hold to detach` : `${DETACHED_NAMES[detachedPreset]} · detached`;
+        el.mode.title = gorilla ? `${shown}'s gorilla · ${view} · ${combat ? "combat" : "carry"} · hold to detach` : selected ? `${shown} · ${view} · ${combat ? "combat" : "carry"} · hold to detach` : `${DETACHED_NAMES[detachedPreset]} · detached`;
       }
     };
     setDetachedView(detachedPreset);
@@ -579,12 +588,12 @@
       el.jetpackCompactFuel.dataset.level = percent <= 20 ? "low" : "ok";
       el.jetpackFuelValue.firstChild.data = `${percent}%`;
     };
-    const setGorilla = (entry, view = "orbit", battle = false) => {
-      if (entry === gorillaEntry && view === gorillaView && battle === gorillaBattle) return;
+    const setGorilla = (entry, view = "orbit", combat = false) => {
+      if (entry === gorillaEntry && view === gorillaView && combat === gorillaCombat) return;
       if (entry !== gorillaEntry) finishPrimary(true);
       gorillaEntry = entry;
       gorillaView = view;
-      gorillaBattle = battle;
+      gorillaCombat = combat;
       el.gorillaSmash.hidden = el.gorillaDrag.hidden = !entry;
       el.primary.hidden = !primaryShown || !!entry;
       el.weapon.hidden = !weaponShown || !!entry;
@@ -922,37 +931,31 @@
         if (!el.hint.classList.contains("show")) el.hint.hidden = true;
       }, MESSAGE_FADE_MS);
     };
+    const selectedSheetTab = () => el.tabs.find((tab) => tab.getAttribute("aria-selected") === "true")?.dataset.tab || "roster";
+    const setSheetOpen = (open) => {
+      el.sheet.dataset.open = String(open);
+      writeSheetState(open, selectedSheetTab());
+    };
     const selectTab = (name) => {
       for (const t of el.tabs) t.setAttribute("aria-selected", String(t.dataset.tab === name));
       for (const p of el.panels) p.hidden = p.dataset.panel !== name;
-      el.sheet.dataset.open = "true";
+      setSheetOpen(true);
     };
     for (const t of el.tabs) {
       on(t, "click", () => {
         const already = t.getAttribute("aria-selected") === "true" && el.sheet.dataset.open === "true";
-        if (already && window.matchMedia("(max-width: 720px)").matches) el.sheet.dataset.open = "false";
+        if (already && window.matchMedia("(max-width: 720px)").matches) setSheetOpen(false);
         else selectTab(t.dataset.tab);
       });
     }
     // A pull tab opens its own panel, and folds the sheet when that panel is already showing.
     const pull = (name) => {
-      window.clearTimeout(introTimer);
       const showing = el.sheet.dataset.open === "true" && el.tabs.some((t) => t.dataset.tab === name && t.getAttribute("aria-selected") === "true");
-      if (showing) el.sheet.dataset.open = "false";
+      if (showing) setSheetOpen(false);
       else selectTab(name);
     };
     on(el.sheetToggle, "click", () => pull("roster"));
     on(el.sheetBananas, "click", () => pull("bananas"));
-    on(el.worldBananas, "click", () => {
-      window.clearTimeout(introTimer);
-      const showing = el.sheet.dataset.open === "true" && el.tabs.some((t) => t.dataset.tab === "bananas" && t.getAttribute("aria-selected") === "true");
-      if (!showing) selectTab("bananas");
-      el.worldBananas.blur();
-    });
-    on(el.sheet, "pointerdown", () => window.clearTimeout(introTimer));
-    if (introTimer === 0) introTimer = window.setTimeout(() => {
-      el.sheet.dataset.open = "false";
-    }, INTRO_MS);
     let presetHandler = null;
     for (const b of el.presets) on(b, "click", () => {
       b.blur();

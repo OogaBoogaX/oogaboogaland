@@ -120,15 +120,24 @@
       out[15] = 1;
       return out;
     },
-    perspective: (out, fov, aspect, near, far) => {
+    // A homogeneous blend preserves the scale at the reference depth while
+    // continuously removing perspective. At mix 1 equal x/z positions align
+    // at every elevation in an overhead view.
+    perspective: (out, fov, aspect, near, far, orthoMix = 0, orthoHeight = 0) => {
       const f = 1 / Math.tan(fov / 2);
+      const mix = orthoHeight > 0 ? clamp(orthoMix, 0, 1) : 0, perspective = 1 - mix, offset = mix * orthoHeight * f * 0.5;
       out.fill(0);
       out[0] = f / aspect;
       out[5] = f;
-      out[10] = (far + near) / (near - far);
-      out[11] = -1;
-      out[14] = 2 * far * near / (near - far);
+      out[10] = (perspective * (far + near) + 2 * offset) / (near - far);
+      out[11] = -perspective;
+      out[14] = (perspective * 2 * far * near + offset * (far + near)) / (near - far);
+      out[15] = offset;
       return out;
+    },
+    projectionDepth: (depth, fov, orthoMix = 0, orthoHeight = 0) => {
+      const mix = orthoHeight > 0 ? clamp(orthoMix, 0, 1) : 0;
+      return depth * (1 - mix) + mix * orthoHeight / (2 * Math.tan(fov / 2));
     },
     ortho: (out, l, r, b, t, n, f) => {
       out.fill(0);
@@ -177,17 +186,19 @@
       out[15] = (a20 * b03 - a21 * b01 + a22 * b00) * d;
       return out;
     },
-    rayFromView: (out, view, width, height, fov, eye, px, py) => {
+    rayFromView: (out, view, width, height, fov, eye, px, py, orthoMix = 0, orthoHeight = 0) => {
       const tanHalf = Math.tan(fov / 2);
       const nx = (px / width * 2 - 1) * tanHalf * (width / height);
       const ny = (1 - py / height * 2) * tanHalf;
-      const dx = view[0] * nx + view[1] * ny - view[2];
-      const dy = view[4] * nx + view[5] * ny - view[6];
-      const dz = view[8] * nx + view[9] * ny - view[10];
+      const mix = orthoHeight > 0 ? clamp(orthoMix, 0, 1) : 0, perspective = 1 - mix, offset = mix * orthoHeight / (2 * tanHalf);
+      const rightX = view[0] * nx + view[1] * ny, rightY = view[4] * nx + view[5] * ny, rightZ = view[8] * nx + view[9] * ny;
+      const dx = rightX * perspective - view[2];
+      const dy = rightY * perspective - view[6];
+      const dz = rightZ * perspective - view[10];
       const len = Math.hypot(dx, dy, dz) || 1;
-      out.ox = eye.x;
-      out.oy = eye.y;
-      out.oz = eye.z;
+      out.ox = eye.x + rightX * offset;
+      out.oy = eye.y + rightY * offset;
+      out.oz = eye.z + rightZ * offset;
       out.dx = dx / len;
       out.dy = dy / len;
       out.dz = dz / len;

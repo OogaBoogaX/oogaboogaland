@@ -84,7 +84,12 @@
         }
       }
     }
-    return voxelGeometry(v, { unit: UNIT, palette: [LEAF, LEAF_DK, "#5a4530", STONE, STONE_DK], origin: { x: 0, y: 0, z: 0 } });
+    const options = { unit: UNIT, palette: [LEAF, LEAF_DK, "#5a4530", STONE, STONE_DK], origin: { x: 0, y: 0, z: 0 } };
+    const geometry = voxelGeometry(v, options);
+    // Keep one compact material grid for render-only floor sections. The
+    // temporary sparse voxel map and collision geometry remain independent.
+    geometry.cutawaySource = BL.terrain.cutawaySourceFromVox(v, options);
+    return geometry;
   });
 
   // Planks on two slung vines, sagging to the middle. Built in its own frame: z = 0 to z = SITE.span.

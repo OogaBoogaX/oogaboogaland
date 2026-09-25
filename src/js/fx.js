@@ -46,9 +46,9 @@
     ctx.globalAlpha = 1;
     return by;
   };
-  const create = ({ root, renderer, camera, overlay, tickerAt, hud = null, overlayVisible = null, zzzVisible = null, characterOccluded = null }) => {
+  const create = ({ root, renderer, camera, overlay, tickerAt, hud = null, overlayVisible = null, zzzVisible = null, characterOccluded = null, renderOpts = null }) => {
     const overlayCtx = overlay.getContext("2d");
-    const visibility = BL.characterVisibility.create({ root, renderer, camera, occluded: characterOccluded });
+    const visibility = BL.characterVisibility.create({ root, renderer, camera, occluded: characterOccluded, renderOpts });
     const speechScreen = { x: 0, y: 0 };
     if (hud) hud.tooltip.setVisibility(visibility);
     // Prepare only the current celebrants' exact sight queries while the scene

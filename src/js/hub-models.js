@@ -174,14 +174,14 @@
     SIGN_CACHE.set(text, geo);
     return geo;
   };
-  const caveMouthRim = cached(() => {
+  const caveMouthRim = variants((openTop) => {
     const rand = mulberry32(31);
     const v = vox();
     const stone = pick(rand, 0, 1, 0.3);
     const light = pick(rand, 2, 0, 0.5);
     v.fill(-6, -6, 0, 5, 0, 1, stone);
     v.fill(5, 5, 0, 5, 0, 1, stone);
-    v.fill(-5, 4, 6, 6, 0, 1, light);
+    if (!openTop) v.fill(-5, 4, 6, 6, 0, 1, light);
     const geo = voxGeo(v, { unit: VOX, palette: CLIFF, origin: { x: 0, y: 0, z: -VOX } });
     geo.jambCenterX = 2.75;
     geo.frontZ = 0.5;
@@ -242,12 +242,39 @@
     geo.sealBounds = { minX: -2.5, maxX: 2.5, minY: 0, maxY: 3, minZ: backZ, maxZ: stoneFront };
     return geo;
   });
-  const matrixButtonStand = cached(() => merge(
-    box({ w: 0.9, h: 0.16, d: 0.9, color: "#171c19", offset: { y: 0.08 } }),
-    box({ w: 0.62, h: 0.88, d: 0.62, color: "#222a25", offset: { y: 0.58 } }),
-    box({ w: 0.78, h: 0.18, d: 0.78, color: "#111713", offset: { y: 1.05 } })
+  const matrixLeverPlate = cached(() => merge(
+    box({ w: 0.92, h: 1.22, d: 0.12, color: "#17201b", offset: { z: 0.06 } }),
+    box({ w: 0.76, h: 1.06, d: 0.08, color: "#d69e19", emissive: 0.35, offset: { z: 0.15 } }),
+    box({ w: 0.58, h: 0.88, d: 0.06, color: "#29352d", offset: { z: 0.22 } }),
+    ...[-1, 1].flatMap((x) => [-1, 1].map((y) => box({ w: 0.1, h: 0.1, d: 0.09, color: "#8c6930", offset: { x: x * 0.33, y: y * 0.48, z: 0.225 } })))
   ));
-  const matrixButton = cached(() => box({ w: 0.48, h: 0.16, d: 0.48, color: "#182b1d", offset: { y: 0.08 } }));
+  const matrixLeverLights = cached(() => merge(
+    // Inset into the border: its front is z=0.19, just behind the lit face.
+    ...[-1, 1].map((side) => box({ w: 0.09, h: 0.92, d: 0.035, color: "#18dc4a", emissive: 1, offset: { x: side * 0.335, z: 0.1775 } }))
+  ));
+  const matrixLeverHub = cached(() => lathe({
+    profile: [[0, 0], [0.23, 0], [0.25, 0.06], [0.25, 0.15], [0.21, 0.19], [0, 0.19]],
+    segments: 12, color: "#f2bd35", emissive: 0.45
+  }));
+  const matrixLeverArm = cached(() => box({ w: 0.13, h: 0.68, d: 0.13, color: "#d9e2d8", emissive: 0.15, offset: { y: 0.34 } }));
+  const matrixLeverGrip = cached(() => merge(
+    box({ w: 0.24, h: 0.21, d: 0.21, color: "#18dc4a", emissive: 1, offset: { y: 0.755 } }),
+    box({ w: 0.16, h: 0.055, d: 0.225, color: "#46ff70", emissive: 1, offset: { y: 0.846 } })
+  ));
+  const matrixLeverLabels = cached(() => {
+    const parts = [], cell = 0.022;
+    for (const [text, y] of [["ON", 0.37], ["OFF", -0.37]]) {
+      const width = (text.length * 4 - 1) * cell;
+      for (let i = 0; i < text.length; i++) {
+        const glyph = SIGN_GLYPHS[text[i]];
+        for (let row = 0; row < 5; row++) for (let col = 0; col < 3; col++) if (glyph[row][col] === "1") {
+          parts.push(box({ w: cell * 0.85, h: cell * 0.85, d: 0.006, color: "#e8efdf", emissive: 0.8,
+            offset: { x: -width / 2 + (i * 4 + col + 0.5) * cell, y: y + (2 - row) * cell, z: 0.255 } }));
+        }
+      }
+    }
+    return merge(...parts);
+  });
   const MATRIX_GLYPHS = [
     ["0110", "1001", "1111", "1001", "1001", "0000"],
     ["1110", "1001", "1110", "1001", "1110", "0000"],
@@ -752,6 +779,7 @@
     }
     const geo = voxGeo(v, { unit: VOX, palette: ["#f7f9fb", "#dfe6ee"], origin: { x: -VOX / 2, y: -VOX, z: -VOX / 2 } });
     geo.castShadow = false;
+    geo.cutawayPreserve = true;
     return geo;
   });
   const ladder = cached(() => merge(
@@ -781,5 +809,5 @@
       ...[-0.8, 0.8].map(brace)
     );
   });
-  BL.hubModels = { SIGN_GLYPHS, jetpack, jetFlame, caveMouthRim, mirrorPanel, matrixPrisonBars, sealedCaveFace, matrixButtonStand, matrixButton, matrixGlyph, caveSign, CAVE_SIGN_WIDTH, CAVE_SIGN_HEIGHT, gate, caveShelves, entropyLab, bedroll, tree, bush, rock, altarSlab, altarBlock, woodCrate, barrel, flowerTuft, torch, grass, lantern, firepit, fireFlame, butterfly, firefly, ember, vine, cloud, ladder, dock, TREE_HEIGHT };
+  BL.hubModels = { SIGN_GLYPHS, jetpack, jetFlame, caveMouthRim, mirrorPanel, matrixPrisonBars, sealedCaveFace, matrixLeverPlate, matrixLeverLights, matrixLeverHub, matrixLeverArm, matrixLeverGrip, matrixLeverLabels, matrixGlyph, caveSign, CAVE_SIGN_WIDTH, CAVE_SIGN_HEIGHT, gate, caveShelves, entropyLab, bedroll, tree, bush, rock, altarSlab, altarBlock, woodCrate, barrel, flowerTuft, torch, grass, lantern, firepit, fireFlame, butterfly, firefly, ember, vine, cloud, ladder, dock, TREE_HEIGHT };
 })();

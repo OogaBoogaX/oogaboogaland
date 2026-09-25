@@ -3,13 +3,14 @@
   "use strict";
   const BL = window.BL = window.BL || {}, S = BL.scene;
   const ACTIVATION_MS = 2000, ACTIVE_MS = 10000, SHUTDOWN_MS = 450;
-  const create = ({ radius, outerRadius, position, rotation = { x: 0, y: 0, z: 0 }, destinations = [], receiving = false,
+  const create = ({ radius, outerRadius, position, rotation = { x: 0, y: 0, z: 0 }, destinations = [], receiving = false, manual = false, floorMounted = false, onDestination = () => {},
     onMenu = () => {}, onTraverse = null, menuHint = "Enter the active Pit horizon to travel. An inactive Pit is still an abyss.", now = () => performance.now(), reducedMotion = matchMedia("(prefers-reduced-motion: reduce)").matches }) => {
-    const model = BL.stargateModels.build(radius, outerRadius);
+    const model = BL.oogaPortalModels.build(radius, outerRadius, floorMounted);
     Object.assign(model.root.position, position); Object.assign(model.root.rotation, rotation);
     const inverse = BL.math.mat4.create();
     let state = receiving ? "ACTIVE" : "OFF", started = 0, destination = null, disposed = false, crossed = false, opened = false, focus = null, focusFrame = 0, menuOwned = false;
-    const dialog = document.getElementById("stargate-menu"), list = dialog.querySelector("ol"), closeButton = dialog.querySelector(".modal-close"), status = dialog.querySelector("[role=status]");
+    let selectedIndex = destinations.findIndex(entry => entry.enabled), closingScale = 1;
+    const dialog = document.getElementById("ooga-portal-menu"), list = dialog.querySelector("ol"), closeButton = dialog.querySelector(".modal-close"), status = dialog.querySelector("[role=status]");
     const viewport = window.visualViewport;
     const rows = entries => entries.map((entry, index) => {
       const li = document.createElement("li"), button = document.createElement("button");
@@ -27,34 +28,53 @@
     const close = () => { if (opened && dialog.open) dialog.close(); finishClose(); };
     const update = () => {
       if (disposed) return;
-      const elapsed = Math.max(0, now() - started);
+      const clock = now(), elapsed = Math.max(0, clock - started);
       if (!receiving && state !== "OFF") {
-        state = elapsed < ACTIVATION_MS ? "ACTIVATING" : elapsed < ACTIVATION_MS + ACTIVE_MS ? "ACTIVE" : elapsed < ACTIVATION_MS + ACTIVE_MS + SHUTDOWN_MS ? "SHUTDOWN" : "OFF";
+        if (manual && state !== "SHUTDOWN") state = elapsed < ACTIVATION_MS ? "ACTIVATING" : "ACTIVE";
+        else state = elapsed < ACTIVATION_MS ? "ACTIVATING" : elapsed < ACTIVATION_MS + ACTIVE_MS ? "ACTIVE" : elapsed < ACTIVATION_MS + ACTIVE_MS + SHUTDOWN_MS ? "SHUTDOWN" : "OFF";
       }
-      const k = state === "ACTIVATING" ? elapsed / ACTIVATION_MS : state === "SHUTDOWN" ? 1 - (elapsed - ACTIVATION_MS - ACTIVE_MS) / SHUTDOWN_MS : state === "ACTIVE" ? 1 : 0;
+      const opening = state === "ACTIVATING" ? elapsed / ACTIVATION_MS : 1;
+      // Smooth ignition accelerates from a small seed, then settles at the rim.
+      const k = state === "ACTIVATING" ? opening * opening * (3 - 2 * opening)
+        : state === "SHUTDOWN" ? closingScale * Math.max(0, 1 - (elapsed - ACTIVATION_MS - ACTIVE_MS) / SHUTDOWN_MS) : state === "ACTIVE" ? 1 : 0;
+      model.setRingActive(state === "ACTIVATING" || state === "ACTIVE");
       model.horizon.visible = k > 0;
-      model.horizon.scale.x = model.horizon.scale.z = radius * Math.max(0.001, k);
-      model.horizon.glow = 0.3 + 0.7 * k;
-      const burst = state === "ACTIVATING" && !reducedMotion ? Math.sin(Math.PI * k) : 0;
+      // Reveal a region of the full-size liquid instead of scaling its waves.
+      model.horizon.portalReveal = k;
+      model.horizon.glow = 0.9;
+      model.horizon.portalTime = reducedMotion ? 1.2 : clock * 0.001;
+      const burst = state === "ACTIVATING" && !reducedMotion ? Math.sin(Math.PI * opening) ** 2 : 0;
+      model.horizon.portalSurge = burst;
+      // A rolling lip surrounds the forming funnel, collapsing into the membrane.
       model.kawoosh.visible = burst > 0.01;
-      model.kawoosh.scale.x = model.kawoosh.scale.z = radius * 0.65 * burst;
-      model.kawoosh.scale.y = Math.min(radius * 0.6, 2.4) * burst;
-      for (let i = 0; i < model.ripples.length; i++) {
-        const node = model.ripples[i], size = radius * k * (reducedMotion ? (i + 1) / 4 : ((elapsed / 1800 + i / 3) % 1));
-        node.visible = k > 0 && size > 0.02; node.scale.x = node.scale.z = Math.max(0.001, size); node.position.y = 0.025 + i * 0.006;
-      }
+      model.kawoosh.scale.x = model.kawoosh.scale.z = radius * Math.max(0.001, k);
+      model.kawoosh.scale.y = burst * Math.min(radius * 0.6, 2.4);
+      model.kawoosh.position.y = model.surfaceY - burst * 0.32 * (1 - k * k) ** 2;
+      model.kawoosh.glow = 0.4 + burst * 1.2;
     };
-    const activate = index => {
+    const select = index => {
+      const entry = destinations[index];
+      if (receiving || disposed || !entry || !entry.enabled) return false;
+      selectedIndex = index; destination = entry.id; onDestination(entry); return true;
+    };
+    const activate = (index = selectedIndex) => {
       update();
       const entry = destinations[index];
-      if (receiving || disposed || state !== "OFF" || !entry || !entry.enabled) return false;
-      destination = entry.id; started = now(); crossed = false; state = "ACTIVATING"; update(); return true;
+      if (receiving || disposed || state !== "OFF" && !(manual && state === "SHUTDOWN") || !entry || !entry.enabled) return false;
+      select(index); started = now(); closingScale = 1; crossed = false; state = "ACTIVATING"; update(); return true;
     };
+    const deactivate = () => {
+      update();
+      if (receiving || disposed || state === "OFF" || state === "SHUTDOWN") return false;
+      closingScale = model.horizon.portalReveal;
+      state = "SHUTDOWN"; started = now() - ACTIVATION_MS - ACTIVE_MS; update(); return true;
+    };
+    const toggle = () => { update(); return state === "OFF" || state === "SHUTDOWN" ? activate() : deactivate(); };
     const choose = event => {
       const button = event.target.closest("button[data-destination]");
       if (!button || button.disabled || !opened) return;
-      if (activate(Number(button.dataset.destination))) close();
-      else status.textContent = "The Stargate is already cycling. Wait for it to close.";
+      if ((manual ? select : activate)(Number(button.dataset.destination))) close();
+      else status.textContent = "The Ooga Portal is already cycling. Wait for it to close.";
     };
     const cancel = event => { event.preventDefault(); close(); };
     const key = event => { event.stopPropagation(); if (event.key === "Escape") { event.preventDefault(); close(); } };
@@ -79,8 +99,8 @@
       update();
       if (!onTraverse || state !== "ACTIVE" || crossed || disposed || !Number.isFinite(bodyRadius) || bodyRadius < 0 || bodyRadius >= radius || (direction !== 1 && direction !== -1)) return false;
       S.updateWorld(model.root, model.root.parent ? model.root.parent.world : undefined); BL.math.mat4.invert(inverse, model.root.world);
-      const ay = inverse[1] * from.x + inverse[5] * from.y + inverse[9] * from.z + inverse[13];
-      const by = inverse[1] * to.x + inverse[5] * to.y + inverse[9] * to.z + inverse[13];
+      const ay = inverse[1] * from.x + inverse[5] * from.y + inverse[9] * from.z + inverse[13] - model.surfaceY;
+      const by = inverse[1] * to.x + inverse[5] * to.y + inverse[9] * to.z + inverse[13] - model.surfaceY;
       if (!(ay * direction > 0 && by * direction <= 0)) return false;
       const t = ay / (ay - by), x = from.x + (to.x - from.x) * t, y = from.y + (to.y - from.y) * t, z = from.z + (to.z - from.z) * t;
       const lx = inverse[0] * x + inverse[4] * y + inverse[8] * z + inverse[12], lz = inverse[2] * x + inverse[6] * y + inverse[10] * z + inverse[14];
@@ -90,6 +110,8 @@
     const enableDialer = entries => {
       if (disposed) return;
       destinations = entries; buttons = rows(entries);
+      selectedIndex = entries.findIndex(entry => entry.id === destination && entry.enabled);
+      if (selectedIndex < 0) selectedIndex = entries.findIndex(entry => entry.enabled);
       if (menuOwned) return;
       menuOwned = true;
       dialog.addEventListener("click", choose); closeButton.addEventListener("click", close); dialog.addEventListener("cancel", cancel); dialog.addEventListener("close", closed); dialog.addEventListener("keydown", key); dialog.addEventListener("focusin", focusDialog);
@@ -101,7 +123,7 @@
     const finishReceiving = (animate = false) => {
       if (!receiving || disposed) return;
       receiving = false; state = animate ? "SHUTDOWN" : "OFF";
-      started = now() - ACTIVATION_MS - ACTIVE_MS; update();
+      closingScale = 1; started = now() - ACTIVATION_MS - ACTIVE_MS; update();
     };
     const dispose = () => {
       if (disposed) return;
@@ -112,8 +134,9 @@
       for (const node of model.ripples) node.visible = false;
       for (const node of [model.root, model.dialer]) if (node.parent) S.removeChild(node.parent, node);
     };
-    return { ...model, radius, outerRadius, open, close, activate, update, traverse, enableDialer, receive, finishReceiving, dispose, reducedMotion,
+    return { ...model, radius, outerRadius, open, close, select, activate, deactivate, toggle, update, traverse, enableDialer, receive, finishReceiving, dispose, reducedMotion,
+      get selected() { return destinations[selectedIndex] || null; }, get on() { return state === "ACTIVATING" || state === "ACTIVE"; },
       get receiving() { return receiving; }, get state() { return state; }, get isOpen() { return opened; }, get disposed() { return disposed; } };
   };
-  BL.stargate = { create, ACTIVATION_MS, ACTIVE_MS, SHUTDOWN_MS };
+  BL.oogaPortal = { create, ACTIVATION_MS, ACTIVE_MS, SHUTDOWN_MS };
 })();

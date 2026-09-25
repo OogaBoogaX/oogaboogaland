@@ -3,7 +3,7 @@
   const BL = window.BL = window.BL || {};
   const { math, models, contributors, donations, qr, terrain, hubModels, headquartersModels, dropModels, rocketModels, rocketParts, poolModels, caves, daylight, game: gameMod, hud: hudMod, interact: interactMod, pilot: pilotMod, fx: fxMod, crew: crewMod, pile: pileMod, crates: cratesMod, critters: crittersMod, weather: weatherMod, chain, mempool, oogatronLive } = BL;
   const { clamp, lerp, ease, fnv1a, mulberry32 } = math;
-  const { createNode, addChild, removeChild, createCamera, addTween, stepTweens, tweenCount, traverseVisible } = BL.scene;
+  const { createNode, addChild, removeChild, updateWorld, createCamera, addTween, stepTweens, tweenCount, traverseVisible } = BL.scene;
   const { JET_SPEED, JET_RISE, JET_FUEL_SECONDS, JET_MOVE_SECONDS } = crewMod;
   const { DROP_HEIGHT } = pileMod;
   const { CONFETTI } = fxMod;
@@ -36,7 +36,7 @@
   const islandLatitude = Number.isFinite(latitudeParam) ? Math.max(-66, Math.min(66, latitudeParam)) : daylight.ISLAND_LATITUDE_DEG;
   // MEADOW/RADIUS are island measures owned by terrain.js; keep them in sync.
   const MEADOW = 22, RADIUS = 30;
-  const PITCH_MIN = 0.2, PITCH_MAX = 1.25, DIST_MIN = 3.5, DIST_MAX = 64;
+  const PITCH_MIN = 0.2, PITCH_MAX = 1.25, DIST_MIN = 3.5, DIST_MAX = 64, BIRDS_EYE_MIN = 21;
   const CLEARANCE = 1.5;
   const PILE_VIEW = { yaw: Number.isFinite(yawParam) ? yawParam : 0, pitch: 0.62, dist: 24, target: { x: 0, y: 0.6, z: 0 } };
   // GATE_VIEW.target.y is a placeholder; the real height is set at enter.
@@ -53,9 +53,7 @@
   // Looking down then clears the hidden head. Portal ownership stays with the Ooga, not this offset.
   const CLOSE_VIEW = { eyeHeight: 1.1, eyeRatio: 0.95, eyeForward: 0.16, pitch: [-1.35, 1.35], trailingDist: 6, orbitDist: 6 };
   const STEP_MAX = pilotMod.WALK.step;
-  const JETPACK_HOVER = 0.5, JETPACK_REACH = 1.35, JETPACK_FAR = 44;
   const MAGAZINE_REACH = 0.7, MAGAZINE_SCALE = 2.4;
-  const JETPACK_FALL_GRAVITY = 9.8, JETPACK_RESPAWN_Y = -60;
   // LAUNCH_REACH/RALLY_REACH include room around the kart plinth and the plane's wings.
   const RALLY_REACH = 3.2, LAUNCH_REACH = 4, RALLY_KART_Z = -3.6;
   const MATRIX_TYPES = 8;
@@ -71,14 +69,29 @@
   // Breaking the mirror enables a local release; its gate starts locked down.
   const MIRROR_GATE_CLOSED = true;
   const MATRIX_WORLD = { active: 0, direction: 0, radius: 0, time: 0, density: 1, speed: MATRIX_WORLD_SPEED, retreatSpeed: MATRIX_WORLD_SPEED, maxRadius: MATRIX_WORLD_MAX, permanentCave: 0, permanentPlane: new Float32Array(4), permanentAperture: new Float32Array(4), livingGlobal: 0, origin: new Float32Array([0, 0, 0]), caves: new Float32Array(8 * 4), caveBounds: new Float32Array(8 * 4), caveNear: 0 };
-  const MATRIX_DENSITY = { high: 8, medium: 5, low: 3, canvas2d: 1 };
+  // WebGL quality may reduce effects and resolution, but it must not remove whole Matrix lanes:
+  // the black backing turns adjacent omitted lanes into conspicuous missing wall panels.
+  const MATRIX_DENSITY = { high: 8, medium: 8, low: 8, canvas2d: 1 };
   const PORTAL_Z = 0.5, PORTAL_MIN_X = -2.48, PORTAL_MAX_X = 2.48, PORTAL_MIN_Y = 0, PORTAL_MAX_Y = 2.98;
   // RENDER_OPTS sky, light and lamp values are resampled from the clock every frame.
   const RENDER_OPTS = {
     clear: new Float32Array(3), horizon: new Float32Array(3), zenith: new Float32Array(3), sky: new Float32Array(3), ground: new Float32Array(3), sun: new Float32Array(3), direct: new Float32Array(3),
     light: { x: 0.55, y: 0.78, z: -0.25 }, sunDirection: { x: 0, y: 1, z: 0 }, moon: { x: 0, y: 1, z: 0 }, celestialPole: { x: 0, y: Math.sin(20 * DEG), z: -Math.cos(20 * DEG) }, starMatrix: new Float32Array(9),
     stars: 0, torch: 0, day: 1, twilight: 0, lampFactor: 0, directStrength: 1, directionalLightStrength: 1, sunStrength: 1, moonStrength: 0, ambientFloor: 0.18, diffuseFloor: 0, shadowStrength: 1, shadowFloor: 0, shadowBias: 0.002, outdoorDarkestSurfaceEstimate: 0.34, activeLightSource: "sun", latitude: 20, dayOfYear: 172, continuousDay: 171.5, solarDeclination: 0, siderealAngle: 0, sunAltitude: 90, sunAzimuth: 180, moonAltitude: -90, moonAzimuth: 0, sunriseHour: 6, sunsetHour: 18,
-    time: 0, bloomStrength: 0.5, lights: new Float32Array(80), lightCount: 0, shadowCenter: { x: 0, y: 0, z: 0 }, shadowExtent: 34, matrix: MATRIX_WORLD
+    time: 0, bloomStrength: 0.5, lights: new Float32Array(80), lightCount: 0, shadowCenter: { x: 0, y: 0, z: 0 }, shadowExtent: 34, matrix: MATRIX_WORLD, cutawayMaxY: 1e6, birdsEyeCutaway: false, cutawayFade: 0, cutawayRockMix: 0, cutawayRegions: [], cutawayRegionCount: 0, cutawayCloudY: 0, cutawayCloudMix: 0
+  };
+  let viewPoseActor = null;
+  RENDER_OPTS.beforeView = () => {
+    const cave = pilot?.player;
+    if (!cave || !crew || !cave.weapon.equipped || !cave.weapon.aiming || cave.gunSightMix <= 0) return null;
+    viewPoseActor = cave;
+    crew.poseWeapon(cave, camera, cave.gunSightMix);
+    return cave;
+  };
+  RENDER_OPTS.afterView = () => {
+    if (!viewPoseActor) return;
+    crew.poseWeapon(viewPoseActor);
+    viewPoseActor = null;
   };
   RENDER_OPTS.starMatrix[0] = RENDER_OPTS.starMatrix[4] = RENDER_OPTS.starMatrix[8] = 1;
   const DAYLIGHT_DEBUG = {
@@ -135,7 +148,6 @@
   const BUILD_DEGREES = [12, 40, 66, 80, 102, 165, 195, 212, 282, 297, 312, 340];
   const BUILD_RADIUS = 13;
   const NUDGES = [0, -2, 2, -4, 4, -6, 6, -8, 8];
-  const VINES = ["c5"];
   const PILE_SCALE = 0.45;
   const SCENERY_CLEARANCE = 0.25;
   const OBL_REPO = "oogaboogax/oogaboogaland";
@@ -145,7 +157,7 @@
   const WANDER_COUNT = 36, WANDER_INNER = 5.5;
   const ALTAR_HEIGHT = 0.34, ALTAR_BLOCK_WIDTH = 0.2, ALTAR_BLOCK_ARC = 0.3, ALTAR_RING_GAP = 0.02, ALTAR_MAX_BLOCKS = 512;
   const RIPEN = 25, TREE_CHANCE = 0.5, BUSH_CHANCE = 0.25;
-  const PROP_TIPS = { tree: "Tree · shake it", bush: "Bush · rustle it", rock: "Rock · hit to break", crate: "Box · hit to break", barrel: "Barrel · hit to break", flower: "Flowers", torch: "Torch · warm", firepit: "Fire pit", bedroll: "Somebody's bed", ladder: "Ladder · wobbly", dock: "Dock · creaky", jetpack: "Jetpack · jump to collect", magazine: "Spare magazine · walk into it to collect", plane: "Ooga Drop · tap to fly", sign: "Ooga Drop · the plane flies from here", launchpad: "Ooga Orbit · tap to build a rocket", rocket: "Ooga Orbit · tap to fly", tower: "Launch tower · steady", orbitsign: "Ooga Orbit · the pad past the bridge", bridge: "Rope bridge · to the launch pad", poolbridge: "Vine bridge · to the Mempool island", poolstair: "The Mempool · tap to climb down", poolsign: "The Mempool · the cave reads the chain", chainsign: "The chain, at a glance", weathersign: "Reading the weather · tap for the key", poolrock: "Mossy rock", poolfern: "Fern · rustle it", poollog: "Fallen log · something lives in it", jaguar: "Jaguar · do not poke", monkey: "Monkey · it watches you", toucan: "Toucan · big beak", canopy: "Rainforest tree · shake it", windsock: "Windsock · a fair wind", jumbotron: "Jumbotron · OogaBoogaX on the big screen · tap the screen for a close-up", gate: null };
+  const PROP_TIPS = { tree: "Tree · shake it", bush: "Bush · rustle it", rock: "Rock · hit to break", crate: "Box · hit to break", barrel: "Barrel · hit to break", flower: "Flowers", torch: "Torch · warm", firepit: "Fire pit", bedroll: "Somebody's bed", ladder: "Ladder · wobbly", dock: "Dock · creaky", magazine: "Spare magazine · walk into it to collect", plane: "Ooga Drop · tap to fly", sign: "Ooga Drop · the plane flies from here", launchpad: "Ooga Orbit · tap to build a rocket", rocket: "Ooga Orbit · tap to fly", tower: "Launch tower · steady", orbitsign: "Ooga Orbit · the pad past the bridge", bridge: "Rope bridge · to the launch pad", poolbridge: "Vine bridge · to the Mempool island", poolstair: "The Mempool · tap to climb down", poolsign: "The Mempool · the cave reads the chain", chainsign: "The chain, at a glance", weathersign: "Reading the weather · tap for the key", poolrock: "Mossy rock", poolfern: "Fern · rustle it", poollog: "Fallen log · something lives in it", jaguar: "Jaguar · do not poke", monkey: "Monkey · it watches you", toucan: "Toucan · big beak", canopy: "Rainforest tree · shake it", windsock: "Windsock · a fair wind", jumbotron: "Jumbotron · OogaBoogaX on the big screen · tap the screen for a close-up", gate: null };
   const workCave = (slot) => slot.repo && (slot.status === "open" || slot.status === "mirror")
     && (slot.repo !== OBL_REPO || slot.status === "mirror");
   const MATRIX_LIVING_PROPS = new Set(["tree"]);
@@ -184,9 +196,131 @@
   };
 
   // One visit's state: created in enter, dropped in leave.
-  let jumbotronSpot, oogatronUnsub, renderer, game, world, go, lootEnabled, testBananas, root, camera, overlayCanvas, island, pathNode, altar, hud, hooks, input, pilot, fx, cameraCover, bananaCover, solids, rockGuides, objectGuides, sightGuides, bananaGuides, pileGuides, platformGuides, mirrorGuides, pile, crew, crates, critters, clock, presets, entering, jetpack, jetpackState, jetpackCarrier, jetpackWearer, lastJetpackCloud, mirrorCave, matrixCave, matrixControl, gateRain, fire, headquarters, dockStairs, jumbotron, positionDebug, pitGate;
+  let jumbotronSpot, oogatronUnsub, renderer, game, world, go, lootEnabled, testBananas, root, camera, overlayCanvas, island, terrainRampRoof, pathNode, altar, hud, hooks, input, pilot, fx, cameraCover, bananaCover, solids, rockGuides, objectGuides, sightGuides, bananaGuides, pileGuides, platformGuides, mirrorGuides, pile, crew, crates, critters, clock, presets, entering, mirrorCave, matrixCave, matrixControl, gateRain, fire, headquarters, dockStairs, jumbotron, positionDebug, pitGate;
   let magazine, magazineState, breakables, clankers, clankerPlay, clankerMeshes, clankerPartOwners, entropyLab;
   const clankerEquipment = [];
+  const terrainSections = [], caveSections = [];
+  // Above the island and its cave roofs; never interpolate from the renderer's
+  // infinite/no-cut sentinel or the scan would happen only in its last frame.
+  const CUTAWAY_TOP = 16, CUTAWAY_RESTORE_TIME = 0.65, CUTAWAY_REGION_CAP = 8;
+  const CUTAWAY_RAMP_START = 0.12, CUTAWAY_RAMP_END = 0.88;
+  const CUTAWAY_FLOOR_RATE = 56, CUTAWAY_FLOOR_DEADBAND = 0.015;
+  let cutawayHeight = NaN, cutawayFeet = 0, cutawayPlayer = null, cutawayCameraMix = 0, cutawayCarryActive = false;
+  let cutawayX = 0, cutawayZ = 0, cutawayHeadY = 0, cutawayHill = false;
+  let cutawayProgress = NaN, cutawayLevel = 0, cutawayHillMix = 0;
+  let cutawayRestoreMix = 0, cutawayRestoreTime = CUTAWAY_RESTORE_TIME;
+  let cutawayTravelRamp = null, cutawayTravelChannel = -1, cutawayTravelStation = 0;
+  const CUTAWAY_PATH_STATE = { lo: new Uint16Array(4), hi: new Uint16Array(4), mix: new Float32Array(4), windowMix: new Float32Array(2), active: 0, version: 1 };
+  const cutawayHiddenNodes = [];
+  const addTerrainSection = (source, parent, worldY = 0, region = null, sections = region ? caveSections : terrainSections) => {
+    const cap = BL.terrainCutaway.create(source, renderer.releaseGeometry);
+    addChild(parent, cap.node);
+    const entry = { cap, worldY, region, targetY: region ? region.y : 0, paths: !region && !!source.cutawayPaths };
+    sections.push(entry);
+    return entry;
+  };
+  const cutawayHeightAt = (x, z) => {
+    let y = RENDER_OPTS.cutawayMaxY;
+    for (let i = 0; i < Math.min(CUTAWAY_REGION_CAP, RENDER_OPTS.cutawayRegionCount); i++) {
+      const r = RENDER_OPTS.cutawayRegions[i], dx = x - r.x, dz = z - r.z;
+      if (Math.abs(dx * r.cos - dz * r.sin) < r.halfWidth && Math.abs(dx * r.sin + dz * r.cos) < r.halfDepth) y = Math.min(y, r.y);
+    }
+    const paths = island?.cutawayPaths;
+    if (paths) {
+      const gx = Math.floor((x - paths.origin.x) / paths.unit), gz = Math.floor((z - paths.origin.z) / paths.unit);
+      if (gx >= 0 && gz >= 0 && gx < paths.width && gz < paths.height) {
+        const cell = gx * paths.height + gz, key = paths.keys[cell];
+        for (let channel = 0; channel < 4; channel++) {
+          const station = key >>> (channel * 8) & 255, mix = CUTAWAY_PATH_STATE.mix[channel];
+          if (station && mix > 0 && station >= CUTAWAY_PATH_STATE.lo[channel] && station <= CUTAWAY_PATH_STATE.hi[channel]) {
+            y = Math.min(y, lerp(CUTAWAY_TOP, paths.bottoms[cell], mix));
+          }
+        }
+      }
+    }
+    return y;
+  };
+  const cutawayPathsActive = () => CUTAWAY_PATH_STATE.mix[0] > 0 || CUTAWAY_PATH_STATE.mix[1] > 0
+    || CUTAWAY_PATH_STATE.mix[2] > 0 || CUTAWAY_PATH_STATE.mix[3] > 0;
+  const cutawayActorY = (region, y) => {
+    const dx = cutawayX - region.x, dz = cutawayZ - region.z;
+    return Math.abs(dx * region.cos - dz * region.sin) < region.halfWidth + PLAYER_RADIUS && Math.abs(dx * region.sin + dz * region.cos) < region.halfDepth + PLAYER_RADIUS
+      ? Math.max(y, cutawayHeadY) : y;
+  };
+  const clearCutawayHidden = () => {
+    for (let i = 0; i < cutawayHiddenNodes.length; i++) {
+      const node = cutawayHiddenNodes[i];
+      node.cameraHidden = node.cutawayCameraHidden;
+      node.cutawayWholeHidden = false;
+    }
+    cutawayHiddenNodes.length = 0;
+  };
+  const hideForCutaway = (node) => {
+    if (node.cutawayWholeHidden) return;
+    node.cutawayCameraHidden = node.cameraHidden;
+    node.cutawayWholeHidden = true;
+    node.cameraHidden = true;
+    cutawayHiddenNodes.push(node);
+  };
+  const nodeCrossesCutaway = (node) => {
+    if (!node.visible) return false;
+    const geometry = node.geometry, w = node.world;
+    if (geometry && !geometry.cutawayPreserve) {
+      const bounds = BL.scene.boundsOf(geometry), low = bounds.min, high = bounds.max;
+      const lx = (low[0] + high[0]) * 0.5, ly = (low[1] + high[1]) * 0.5, lz = (low[2] + high[2]) * 0.5;
+      const hx = (high[0] - low[0]) * 0.5, hy = (high[1] - low[1]) * 0.5, hz = (high[2] - low[2]) * 0.5;
+      const cx = w[0] * lx + w[4] * ly + w[8] * lz + w[12], cz = w[2] * lx + w[6] * ly + w[10] * lz + w[14];
+      const rx = Math.abs(w[0]) * hx + Math.abs(w[4]) * hy + Math.abs(w[8]) * hz;
+      const rz = Math.abs(w[2]) * hx + Math.abs(w[6]) * hy + Math.abs(w[10]) * hz;
+      const cy = w[1] * lx + w[5] * ly + w[9] * lz + w[13];
+      const ry = Math.abs(w[1]) * hx + Math.abs(w[5]) * hy + Math.abs(w[9]) * hz;
+      let mayCross = cutawayPathsActive() || cy + ry > RENDER_OPTS.cutawayMaxY + 1e-6;
+      for (let i = 0; !mayCross && i < Math.min(CUTAWAY_REGION_CAP, RENDER_OPTS.cutawayRegionCount); i++) {
+        const r = RENDER_OPTS.cutawayRegions[i], dx = cx - r.x, dz = cz - r.z;
+        const across = dx * r.cos - dz * r.sin, along = dx * r.sin + dz * r.cos;
+        const acrossReach = Math.abs(r.cos) * rx + Math.abs(r.sin) * rz;
+        const alongReach = Math.abs(r.sin) * rx + Math.abs(r.cos) * rz;
+        mayCross = cy + ry > r.y + 1e-6 && Math.abs(across) < r.halfWidth + acrossReach && Math.abs(along) < r.halfDepth + alongReach;
+      }
+      if (!mayCross) {
+        for (let i = 0; i < node.children.length; i++) if (nodeCrossesCutaway(node.children[i])) return true;
+        return false;
+      }
+      const vertices = geometry.verts;
+      for (let i = 0; i < vertices.length; i += 3) {
+        const x = w[0] * vertices[i] + w[4] * vertices[i + 1] + w[8] * vertices[i + 2] + w[12];
+        const y = w[1] * vertices[i] + w[5] * vertices[i + 1] + w[9] * vertices[i + 2] + w[13];
+        const z = w[2] * vertices[i] + w[6] * vertices[i + 1] + w[10] * vertices[i + 2] + w[14];
+        if (y > cutawayHeightAt(x, z) + 1e-6) return true;
+      }
+    }
+    for (let i = 0; i < node.children.length; i++) if (nodeCrossesCutaway(node.children[i])) return true;
+    return false;
+  };
+  const hideNodeIfCut = (node) => {
+    updateWorld(node, node.parent?.world || null);
+    if (nodeCrossesCutaway(node)) hideForCutaway(node);
+  };
+  const updateCutawayWholeVisibility = () => {
+    // Props and actors disappear as one object on the first frame that either
+    // the global floor scan or a local aperture would remove their top.
+    if (!RENDER_OPTS.birdsEyeCutaway || RENDER_OPTS.cutawayMaxY >= 1e5 && !RENDER_OPTS.cutawayRegionCount && !cutawayPathsActive()) return;
+    for (let i = 0; i < crew.list.length; i++) hideNodeIfCut(crew.list[i].root);
+    for (let i = 0; i < props.length; i++) hideNodeIfCut(props[i].node);
+    for (let i = 0; i < crates.list.length; i++) hideNodeIfCut(crates.list[i].node);
+    for (let i = 0; i < clankers.list.length; i++) hideNodeIfCut(clankers.list[i].root);
+    for (let i = 0; i < clankerEquipment.length; i++) hideNodeIfCut(clankerEquipment[i].node);
+    for (let i = 0; i < headquarters.mattresses.length; i++) hideNodeIfCut(headquarters.mattresses[i].node);
+    for (let i = 0; i < headquarters.roomSigns.length; i++) hideNodeIfCut(headquarters.roomSigns[i].node);
+    hideNodeIfCut(headquarters.firepit);
+    if (pitGate) for (const control of pitGate.controls) hideNodeIfCut(control.root);
+    if (matrixControl?.button) hideNodeIfCut(matrixControl.button);
+    for (let i = 0; i < crew.list.length; i++) {
+      const drops = crew.list[i].stunGear.drops;
+      for (let j = 0; j < drops.length; j++) if (drops[j].active && drops[j].node) hideNodeIfCut(drops[j].node);
+    }
+    if (magazine?.node) hideNodeIfCut(magazine.node);
+  };
   const CLANKER_FIRE = [models.particleGeometry("#ff8a2a", 0.18, 1), models.particleGeometry("#ffc148", 0.16, 1)];
   const CLANKER_SMOKE = models.particleGeometry("#70685f", 0.2, 0);
   const CLANKER_HIT = { node: null, owner: null, type: "none", distance: Infinity, x: 0, y: 0, z: 0 };
@@ -211,7 +345,7 @@
   };
   let positionDebugNext = 0, positionDebugJSON = "";
   function createPositionPose() {
-    return { version: 1, character: "", mode: "detached", closeWanted: false, battle: false, position: [0, 0, 0], target: [0, 0, -1], direction: [0, 0, -1], up: [0, 1, 0], fov: 48 * Math.PI / 180,
+    return { version: 1, character: "", mode: "detached", closeWanted: false, combat: false, birdsEyeNorthUp: false, position: [0, 0, 0], target: [0, 0, -1], direction: [0, 0, -1], up: [0, 1, 0], fov: 48 * Math.PI / 180,
       actor: [0, 0, 0], body: [0, 0, 0], head: [0, 0, 0], bodyQuaternion: [0, 0, 0, 1], headQuaternion: [0, 0, 0, 1], bodyRolled: false, headRolled: false,
       orbit: [0, 0.62, 6, 0, 0, 0], headOffset: [0, 0, 0], headOrbit: false, shoulderSide: 0.6, closeMix: 0, ads: 0,
       selectedSlot: 1, ammo: 30, unlimited: false, magazines: [0, 0], magazineCount: 0, aimYaw: 0, aimPitch: 0, jetpack: false, fuel: 1, hop: 0, hopV: 0, lift: 0 };
@@ -220,9 +354,11 @@
     if (!value || value.length > 8192) return null;
     let data;
     try { data = JSON.parse(value); } catch { return null; }
-    if (!data || data.version !== 1 || !["carry", "shoulder", "first-person", "orbit", "detached", "eye-level"].includes(data.mode)) return null;
+    if (!data || data.version !== 1 || !["carry", "shoulder", "first-person", "orbit", "birds-eye", "detached", "eye-level"].includes(data.mode)) return null;
     if (data.closeWanted === undefined) data.closeWanted = data.mode === "first-person" || data.mode === "eye-level" || data.mode === "detached" && data.closeMix >= 0.5;
-    if (data.battle === undefined) data.battle = data.mode === "shoulder" || data.mode === "first-person";
+    // Replay URLs written before combat/birds-eye remain readable at this boundary.
+    if (data.combat === undefined) data.combat = data.battle ?? (data.mode === "shoulder" || data.mode === "first-person" || data.mode === "birds-eye");
+    if (data.birdsEyeNorthUp === undefined) data.birdsEyeNorthUp = false;
     const pose = createPositionPose();
     for (const key of Object.keys(pose)) {
       const supplied = data[key], target = pose[key];
@@ -234,6 +370,15 @@
         pose[key] = supplied;
       } else if (typeof supplied !== typeof target) return null;
       else pose[key] = supplied;
+    }
+    // Projection fields are optional for older replay URLs.
+    if (data.orthoMix !== undefined) {
+      if (!Number.isFinite(data.orthoMix)) return null;
+      pose.orthoMix = clamp(data.orthoMix, 0, 1);
+    }
+    if (data.orthoHeight !== undefined) {
+      if (!Number.isFinite(data.orthoHeight) || data.orthoHeight < 0 || data.orthoHeight > 1000) return null;
+      pose.orthoHeight = data.orthoHeight;
     }
     if (pose.character.length > 80 || pose.fov <= 0.05 || pose.fov >= Math.PI || pose.orbit[2] <= 0 || pose.orbit[2] > 200) return null;
     if (Math.hypot(...pose.up) < 0.001 || Math.hypot(...pose.bodyQuaternion) < 0.001 || Math.hypot(...pose.headQuaternion) < 0.001) return null;
@@ -264,7 +409,7 @@
     positionDebug.dataset.pose = json;
     positionDebug.dataset.copied = "false";
     const pose = POSITION_POSE, first = pose.mode === "first-person";
-    positionDebug.textContent = `${pose.character || "free camera"} · mode=${pose.mode}${pose.character ? ` · ${pose.battle ? "battle" : "carry"} · weapon=${pose.selectedSlot} ammo=${pose.unlimited ? "unlimited" : pose.ammo}` : ""}`
+    positionDebug.textContent = `${pose.character || "free camera"} · mode=${pose.mode}${pose.character ? ` · ${pose.combat ? "combat" : "carry"} · weapon=${pose.selectedSlot} ammo=${pose.unlimited ? "unlimited" : pose.ammo}` : ""}`
       + (pose.character ? `\npos=${positionText(pose.actor)}\nbody=${positionText(pose.body)}  head=${positionText(pose.head)} (rad)` : "")
       + (first ? "" : `\ncamera=${positionText(pose.position)}`)
       + `\nlook=${positionText(pose.target)}  dir=${positionText(pose.direction)}`
@@ -273,7 +418,7 @@
   const copyPositionDebug = () => {
     updatePositionDebug(true);
     const url = new URL(location.href);
-    for (const key of ["pos", "body", "head", "camera", "look", "mode", "firstperson", "weapon", "ammo", "view", "jetpack", "mag"]) url.searchParams.delete(key);
+    for (const key of ["pos", "body", "head", "camera", "look", "mode", "combat", "battle", "firstperson", "weapon", "ammo", "view", "jetpack", "mag"]) url.searchParams.delete(key);
     url.searchParams.set("debug", "1");
     if (POSITION_POSE.character) url.searchParams.set("character", POSITION_POSE.character);
     else url.searchParams.delete("character");
@@ -303,9 +448,11 @@
     };
     const position = vector("pos"), body = vector("body"), head = vector("head");
     let eye = vector("camera"), look = vector("look");
-    const mode = ["carry", "shoulder", "first-person", "orbit", "detached", "eye-level"].includes(preloadedMode) ? preloadedMode : null;
-    if (!preloadedPose && !position && !body && !head && !eye && !look && !mode) return;
+    const mode = ["carry", "shoulder", "first-person", "orbit", "birds-eye", "detached", "eye-level"].includes(preloadedMode) ? preloadedMode : null;
+    if (!preloadedPose && !position && !body && !head && !eye && !look && !mode && !params.has("combat") && !params.has("battle")) return;
     const pose = preloadedPose || pilot.capturePose(createPositionPose()), cave = pilot.player;
+    const combatParam = params.get("combat") ?? params.get("battle");
+    if (combatParam !== null) pose.combat = combatParam !== "0" && combatParam !== "false";
     if (preloadedPose && cave) {
       crew.configureWeapon(cave, pose.selectedSlot, pose.ammo, pose.unlimited);
       crew.removeMagazines(cave);
@@ -330,8 +477,12 @@
     if (mode) {
       pose.mode = mode;
       if (params.has("mode")) pose.closeWanted = mode === "first-person" || mode === "eye-level";
+      if (mode === "birds-eye") {
+        pose.combat = true;
+        if (!preloadedPose && !eye && !look) pose.orbit[2] = BIRDS_EYE_MIN;
+      }
     }
-    if (!cave && (pose.mode === "carry" || pose.mode === "shoulder" || pose.mode === "first-person")) pose.mode = pose.mode === "first-person" ? "eye-level" : "orbit";
+    if (!cave && (pose.mode === "carry" || pose.mode === "shoulder" || pose.mode === "first-person" || pose.mode === "birds-eye")) pose.mode = pose.mode === "first-person" ? "eye-level" : "detached";
     if (!preloadedPose) {
       pose.closeMix = pose.closeWanted ? 1 : 0;
       if (eye || look) {
@@ -343,6 +494,10 @@
         pose.orbit[0] = pose.body[1] + pose.head[1] + Math.PI;
         if (pose.mode === "first-person" || pose.mode === "shoulder") pose.orbit[1] = pose.head[0];
       }
+    }
+    if (!preloadedPose || params.has("mode")) {
+      pose.orthoMix = (pose.mode === "birds-eye" || pose.mode === "orbit" && pose.combat) ? 1 : 0;
+      pose.orthoHeight = 2 * Math.tan(pose.fov / 2) * pose.orbit[2];
     }
     pilot.restorePose(pose, !!preloadedPose || !!eye || !!look);
     updatePositionDebug(true);
@@ -975,6 +1130,7 @@
     return !!matrixCave && matrixCave.portal.inside;
   };
   const matrixOverlayVisible = (x, y, z) => {
+    if (RENDER_OPTS.birdsEyeCutaway) return y <= cutawayHeightAt(x, z);
     if (!matrixCave || !matrixCave.portal.inside) return true;
     const m = matrixCave.mouth;
     const cdx = camera.position.x - m.x, cdz = camera.position.z - m.z;
@@ -1253,7 +1409,7 @@
     const ax = Math.sin(m.ry), az = Math.cos(m.ry);
     const caveIndex = island.mouths.indexOf(m) + 1;
     const group = createNode({ position: { x: m.x, y: m.floorY, z: m.z }, rotation: { x: 0, y: m.ry, z: 0 } });
-    const rim = createNode({ position: { x: 0, y: 0, z: 0.5 }, geometry: hubModels.caveMouthRim(), sightSolid: true });
+    const rim = createNode({ position: { x: 0, y: 0, z: 0.5 }, geometry: hubModels.caveMouthRim(slot.status === "headquarters" ? 1 : 0), sightSolid: true });
     addChild(group, rim);
     solids.add(rim);
     if (slot.status === "dark") {
@@ -1342,18 +1498,23 @@
       addChild(group, node);
       mirrorCave = { slot, mouth: m, group, rim, node, sign: null };
       addTarget(node, { kind: "cave", slot, priority: 1 });
-      // The pedestal is a physical control, not a Matrix glyph surface. Giving
-      // its complete geometry a cave tag turns it into the bright white box
-      // visible at the back of the room; keep only the button in the effect.
-      const stand = createNode({ position: { x: 0, y: 0, z: -5.15 }, geometry: hubModels.matrixButtonStand(), matrixExterior: true });
-      const button = createNode({ position: { x: 0, y: 1.12, z: 0 }, geometry: { ...hubModels.matrixButton(), matrixCave: caveIndex }, matrixExterior: true, matrixLiving: false, glow: 0.25 });
-      addChild(stand, button);
-      addChild(group, stand);
+      // Keep the chamber floor clear. The compact control belongs to the cave's
+      // glyph field; the labels stay living, with the grip and rails lit when latched.
+      const buttonZ = -m.room.to + 0.04;
+      const button = createNode({ position: { x: 0, y: 1.2, z: buttonZ }, scale: { x: 0.82, y: 0.82, z: 0.82 }, geometry: { ...hubModels.matrixLeverPlate(), matrixCave: caveIndex }, matrixExterior: true, glow: 0.45 });
+      const lights = createNode({ geometry: { ...hubModels.matrixLeverLights(), matrixCave: caveIndex }, glow: 0.25 });
+      const hub = createNode({ position: { x: 0, y: 0, z: 0.27 }, rotation: { x: Math.PI / 2, y: 0, z: 0 }, geometry: { ...hubModels.matrixLeverHub(), matrixCave: caveIndex } });
+      const lever = createNode({ position: { x: 0, y: 0, z: 0.48 }, rotation: { x: Math.PI - 0.42, y: 0, z: 0 }, geometry: { ...hubModels.matrixLeverArm(), matrixCave: caveIndex }, glow: 0.45 });
+      const grip = createNode({ geometry: { ...hubModels.matrixLeverGrip(), matrixCave: caveIndex }, glow: 0.25 });
+      const labels = createNode({ geometry: { ...hubModels.matrixLeverLabels(), matrixCave: caveIndex }, matrixLiving: true, glow: 0.5 });
+      addChild(lever, grip);
+      addChild(button, lights, hub, lever, labels);
+      addChild(group, button);
       matrixControl = {
-        stand, button, x: m.x + ax * stand.position.z, z: m.z + az * stand.position.z,
+        button, lights, lever, grip, x: m.x + ax * buttonZ, z: m.z + az * buttonZ,
         pressed: false, near: false, promptPressed: false, promptPlayer: null, promptAction: null, promptJet: false, promptRecovering: false
       };
-      addTarget(button, { kind: "matrix-button", priority: 2 }, { radius: 0.55 });
+      addTarget(button, { kind: "matrix-button", priority: 2 }, { radius: 0.72 });
     } else if (slot.status === "sleeping") {
       // Bedrolls lie along +x, as the sleep pose assumes.
       addChild(group, createNode({ position: { x: 0, y: 0.05, z: -4.5 }, rotation: { x: 0, y: -m.ry, z: 0 }, geometry: hubModels.bedroll(), depthBias: 0.3 }));
@@ -1404,7 +1565,6 @@
       lamp.debug = debug;
       entranceLights.push(debug);
     }
-    if (VINES.includes(slot.id)) for (const x of [-1.1, 1.1]) addChild(group, createNode({ position: { x, y: 3.45, z: 0.95 }, geometry: hubModels.vine() }));
     addChild(root, group);
     placed.push(group);
     const glyphs = buildCaveGlyphs(slot, m, group);
@@ -1444,7 +1604,7 @@
     const basement = island.headquarters.basement, hole = basement.hole;
     const distance = (hole.mouthRadius + basement.room.radius) / 2;
     // Find the clearest bearing between authored room approaches and ramp paths.
-    // Keep the dialer on the flat annulus, not on the lip or a circulation route.
+    // Keep the return landing on the flat annulus, away from the lip and circulation routes.
     let best = -Infinity, x = 0, z = 0;
     const segmentDistance = (px, pz, ax, az, bx, bz) => {
       const dx = bx - ax, dz = bz - az, t = Math.max(0, Math.min(1, ((px - ax) * dx + (pz - az) * dz) / (dx * dx + dz * dz || 1)));
@@ -1464,9 +1624,12 @@
       }
       if (clearance > best) { best = clearance; x = px; z = pz; }
     }
-    if (best < 0.8) throw new Error("No clear basement Stargate dialer placement");
-    pitGate = BL.stargate.create({ radius: hole.radius, outerRadius: hole.mouthRadius,
-      position: { x: hole.x, y: hole.floor + 0.03, z: hole.z },
+    if (best < 0.8) throw new Error("No clear basement Ooga Portal arrival placement");
+    const controls = [];
+    pitGate = BL.oogaPortal.create({ radius: hole.radius, outerRadius: hole.mouthRadius,
+      position: { x: hole.x, y: hole.floor, z: hole.z }, floorMounted: true,
+      manual: true, menuHint: "Choose a destination, then use either wall lever to switch the Ooga Portal on or off.",
+      onDestination: entry => { for (const control of controls) control.label.geometry = BL.oogaPortalModels.destinationLabel(entry.label); },
       destinations: [{ id: "dsb", label: "DSB Land", enabled: true }, ...Array.from({ length: 4 }, (_, i) => ({ id: "quarantine-" + i, label: "Quarantined - Replicator Infestation - Clean Up In Progress", enabled: false }))],
       onTraverse: id => {
         if (entering || pitArrival || !pilot.player || id !== "dsb") return;
@@ -1477,12 +1640,36 @@
       },
       onMenu: open => { pilot.setActive(!open); pilot.controls.reset(); input.reset(); hud.tooltip.hide(); }
     });
-    Object.assign(pitGate.dialer.position, { x, y: basement.floor, z });
-    pitGate.dialer.rotation.y = Math.atan2(hole.x - x, hole.z - z);
-    pitGate.placement = { x, y: basement.floor, z, clearance: best };
-    addChild(root, pitGate.root, pitGate.dialer);
-    solids.add(pitGate.dialer); // Only the pedestal is solid. The Pit remains the same open shaft.
-    addTarget(pitGate.dialer, { kind: "stargate-dialer" }, { radius: 0.65 });
+    pitGate.arrivalAnchor = { x, y: basement.floor, z, clearance: best };
+    pitGate.controls = controls;
+    addChild(root, pitGate.root);
+    // Centre each assembly on the stone between a side balcony and the southern bed corridors.
+    for (const side of [1, -1]) {
+      const balcony = basement.balconies.find(entry => entry.side === side);
+      const edge = side > 0 ? balcony.endAngle : balcony.startAngle;
+      const room = basement.rooms[side > 0 ? 6 : 9];
+      const roomAngle = room.angle - (side < 0 ? Math.PI * 2 : 0) - side * Math.asin(room.corridorWidth / 2 / basement.room.radius);
+      const angle = (edge + roomAngle) / 2, sx = Math.sin(angle), sz = -Math.cos(angle);
+      const control = BL.oogaPortalModels.wallControl(), radius = basement.room.radius - 0.75;
+      if (side < 0) {
+        control.button.position.x = -control.button.position.x;
+        control.screen.position.x = -control.screen.position.x;
+      }
+      Object.assign(control.root.position, { x: hole.x + sx * radius, y: basement.floor + 1.35, z: hole.z + sz * radius });
+      control.root.rotation.y = Math.atan2(-sx, -sz);
+      // Interaction is at the lever face, safely in front of the voxel wall.
+      const cr = Math.cos(control.root.rotation.y), sr = Math.sin(control.root.rotation.y);
+      control.x = control.root.position.x + cr * control.button.position.x + sr * 0.48;
+      control.y = control.root.position.y;
+      control.z = control.root.position.z - sr * control.button.position.x + cr * 0.48;
+      control.screenPoint = { x: control.root.position.x + cr * control.screen.position.x + sr * 0.225, y: control.root.position.y, z: control.root.position.z - sr * control.screen.position.x + cr * 0.225 };
+      control.approach = { x: control.x - sx, y: basement.floor, z: control.z - sz };
+      controls.push(control); placed.push(control.root); addChild(root, control.root);
+      solids.add(control.root);
+      control.label.geometry = BL.oogaPortalModels.destinationLabel(pitGate.selected.label);
+      addTarget(control.button, { kind: "ooga-portal-lever", control, priority: 2 }, { radius: 0.72 });
+      addTarget(control.screen, { kind: "ooga-portal-screen", control, priority: 2 });
+    }
   };
   const buildHeadquarters = () => {
     const floor = island.headquarters.floor, basement = island.headquarters.basement;
@@ -1492,7 +1679,7 @@
     solids.add(room);
     const benches = [];
     for (const x of [-2.6, 2.6]) for (const z of [-0.55, 0.55]) benches.push({ kind: "bench", x, y: floor + 0.58, z, floor, ry: Math.atan2(-x, -z), sitter: null, walkAt: { x: x - Math.sign(x) * 0.85, z } });
-    const entrances = [], lights = [], mattresses = [], roomSigns = [];
+    const entrances = [], lights = [], mattresses = [], roomSigns = [], rampMarkers = [];
     FLY.yMin = basement.floor - 1;
     const addEntrance = (node, roomIndex, lower, ramp = false) => {
       node.sightSolid = true;
@@ -1538,6 +1725,38 @@
       const entrance = createNode({ position: { x: p.x, y: p.y, z: p.z }, rotation: { x: 0, y: -ramp.angle, z: 0 }, scale: { x: (ramp.width + island.unit * Math.SQRT2) / 3.86, y: 1, z: 1 }, geometry: headquartersModels.rampEntrance(ramp.index) });
       addEntrance(entrance, ramp.index, false, true);
     }
+    const addRampMarker = (ramp, label, floor, channel) => {
+      const first = ramp.samples[0], ahead = ramp.samples[Math.min(3, ramp.samples.length - 1)];
+      const dx = ahead.x - first.x, dz = ahead.z - first.z, length = Math.hypot(dx, dz) || 1;
+      const direction = { x: dx / length, z: dz / length };
+      const at = (distance) => {
+        let i = 1; while (i < ramp.samples.length - 1 && ramp.samples[i].s < distance) i++;
+        const from = ramp.samples[i - 1], to = ramp.samples[i], k = (distance - from.s) / (to.s - from.s);
+        return { x: from.x + (to.x - from.x) * k, y: from.y + (to.y - from.y) * k, z: from.z + (to.z - from.z) * k };
+      };
+      // Both smaller marks sit inside the opening and follow the real ramp
+      // pitch. The label comes first; its arrow continues farther downhill.
+      const fitted = (distance, geometry) => {
+        const half = Math.min(0.35, distance * 0.3), point = at(distance), from = at(distance - half), to = at(distance + half);
+        const tx = to.x - from.x, ty = to.y - from.y, tz = to.z - from.z, horizontal = Math.hypot(tx, tz) || 1;
+        return { point, node: createNode({ position: { x: point.x, y: point.y + 0.035, z: point.z }, rotation: { x: Math.atan2(-ty, horizontal), y: Math.atan2(tx, tz), z: 0 },
+          scale: { x: 0.72, y: 0.72, z: 0.72 }, geometry, visible: false, depthBias: 0.35 }) };
+      };
+      const labelDistance = Math.min(0.85, ramp.length * 0.12), arrowDistance = Math.min(1.85, ramp.length * 0.24);
+      const labelMark = fitted(labelDistance, null);
+      const arrowMark = fitted(arrowDistance, headquartersModels.rampMarkerArrow());
+      const frame = labelMark.node, arrow = arrowMark.node, labelPoint = labelMark.point, arrowPoint = arrowMark.point;
+      const node = createNode({ geometry: headquartersModels.rampMarkerLabel(label), depthBias: 0.35 });
+      const yaw = frame.rotation.y, pitch = frame.rotation.x;
+      const across = { x: Math.cos(yaw), y: 0, z: -Math.sin(yaw) };
+      const downhill = { x: Math.sin(yaw) * Math.cos(pitch), y: -Math.sin(pitch), z: Math.cos(yaw) * Math.cos(pitch) };
+      addChild(frame, node);
+      addChild(root, frame, arrow);
+      placed.push(frame, arrow);
+      rampMarkers.push({ node, frame, arrow, label, across, downhill, channel, ramp, direction, labelDistance, arrowDistance, labelPoint, arrowPoint });
+    };
+    for (let i = 0; i < island.headquarters.ramps.length; i++) addRampMarker(island.headquarters.ramps[i], "HQ", 0, i);
+    for (let i = 0; i < basement.ramps.length; i++) addRampMarker(basement.ramps[i], "B1", floor, i + 2);
     for (const ramp of island.headquarters.ramps) {
       const p = ramp.samples[30], angle = Math.atan2(p.x, -p.z), radius = Math.hypot(p.x, p.z) - 1.6;
       torchAt(Math.sin(angle) * radius, p.y + 0.6, -Math.cos(angle) * radius);
@@ -1554,7 +1773,7 @@
     // The hearth is the only shared HQ point light.
     // Windows and ramp torches stay physical/emissive; no camera-proximity light spills into an unclaimed room.
     const sources = [hearth];
-    return { node: room, entrances, mattresses, roomSigns, benches, fireHazards, lights, sources, hearth, firepit, rooms: island.headquarters.rooms, windows: island.headquarters.windows, ramps: island.headquarters.ramps, openFloor: island.headquarters.room, basement, sleepMarksVisible };
+    return { node: room, entrances, mattresses, roomSigns, rampMarkers, benches, fireHazards, lights, sources, hearth, firepit, rooms: island.headquarters.rooms, windows: island.headquarters.windows, ramps: island.headquarters.ramps, openFloor: island.headquarters.room, basement, sleepMarksVisible };
   };
   // The launch islet (bridge, pad, tower, sign) is all solid, so an Ooga walks over the bridge onto the pad.
   const buildLaunchSite = () => {
@@ -1563,6 +1782,7 @@
     const site = rocketModels.site(spot);
     addChild(root, site.node);
     placed.push(site.node);
+    addTerrainSection(site.islet.geometry.cutawaySource, site.node, spot.y);
     solids.add(site.islet);
     addProp("launchpad", site.pad, spot.x, spot.z, SITE.padR);
     addProp("tower", site.tower, spot.x + SITE.towerX, spot.z, 1.4);
@@ -1711,6 +1931,7 @@
     const atNode = (kind, node, radius) => addProp(kind, node, worldX(node.position.x, node.position.z), worldZ(node.position.x, node.position.z), radius);
     addChild(root, site.node);
     placed.push(site.node);
+    addTerrainSection(site.ground.geometry.cutawaySource, site.node, place.y);
     solids.add(site.ground);
     addProp("poolbridge", site.bridge, worldX(0, place.bridgeLocalZ + S.span / 2), worldZ(0, place.bridgeLocalZ + S.span / 2), S.width);
     atNode("poolstair", site.stair, SITE_SHAFT_REACH);
@@ -2004,7 +2225,6 @@
         const other = breakables.list[i];
         if (other.reward && Math.hypot(other.node.position.x - x, other.node.position.z - z) < radius + 0.6) clear = false;
       }
-      if (jetpack && jetpack.node.position.y < height + 0.5 && Math.hypot(jetpack.x - x, jetpack.z - z) < radius + 0.6) clear = false;
       if (magazine && Math.hypot(magazine.node.position.x - x, magazine.node.position.z - z) < radius + 0.4) clear = false;
       if (!clear) continue;
       owner.x = owner.node.position.x = owner.reservation.x = x;
@@ -2032,21 +2252,7 @@
       hud.toast("Full magazine collected · 30 rounds");
       return true;
     }
-    if (crew.builtInJetpack(cave)) return false;
-    syncJetpackFuel();
-    if (jetpackState.owned && jetpackState.owner === cave.traits.name) {
-      if (jetpackState.fuel >= 1) return false;
-      jetpackState.fuel = 1;
-      cave.jetFuel = 1;
-      hud.toast("Jetpack refueled");
-    } else if (jetpackState.owned) {
-      return false;
-    } else {
-      grantJetpack(cave);
-      hud.toast("Jetpack collected!");
-    }
-    pilot.showAct();
-    return true;
+    return false;
   };
   const syncMirrorDamage = (quiet = false) => {
     const damage = mirrorCave.damage;
@@ -2085,23 +2291,16 @@
     if (i >= 0) list.splice(i, 1);
   };
   const jetpackHudStatus = (cave) => {
-    // A built-in pack owns itself: its gauge is the wearer's own fuel.
-    const builtIn = !!(cave && crew.builtInJetpack(cave));
-    JETPACK_HUD_STATE.owned = builtIn || !!(cave && jetpackState && jetpackState.owned && jetpackState.owner === cave.traits.name);
+    JETPACK_HUD_STATE.owned = !!(cave && cave.jetpackOwned);
     JETPACK_HUD_STATE.equipped = !!(cave && cave.jet);
     JETPACK_HUD_STATE.fuel = JETPACK_HUD_STATE.owned ? cave.jetFuel : 1;
     JETPACK_HUD_STATE.blocked = JETPACK_HUD_STATE.owned && (cave ? !jetpackAllowed(cave) : cameraCaveIndex !== 0);
     return JETPACK_HUD_STATE;
   };
-  const syncJetpackFuel = () => {
-    if (jetpackState && jetpackState.owned && jetpackCarrier) jetpackState.fuel = jetpackCarrier.jetFuel;
-  };
   const equipJetpack = (cave) => {
-    if (crew.builtInJetpack(cave)) return true;
-    if (!jetpackState.owned || jetpackState.owner !== cave.traits.name) return false;
-    if (jetpackWearer && jetpackWearer !== cave) crew.removeJetpack(jetpackWearer);
+    if (!cave || !cave.jetpackOwned) return false;
+    if (cave.jet) return true;
     if (!crew.wearJetpack(cave, hubModels.jetpack(), hubModels.jetFlame())) return false;
-    jetpackWearer = cave;
     pilot.showAct();
     const p = cave.root.position;
     fx.burst(p.x, p.y + 0.7, p.z, 14, [SPARK, DUST], 2.2);
@@ -2110,64 +2309,20 @@
     hud.hint(cave.jetRecovering ? "Fuel recovering · jump until the gauge is above 20%" : COARSE ? "Hold Blast off to climb · stick to fly" : "Hold Space to climb · WASD to fly", 5000);
     return true;
   };
-  const removeJetpackPickup = () => {
-    if (!jetpack) return;
-    const { node, owner } = jetpack;
-    untrackMirrorObject(node);
-    input.remove(node);
-    removeChild(root, node);
-    drop(targets, node);
-    drop(placed, node);
-    drop(props, owner);
-    jetpack = null;
-    refreshObjectGuides();
-  };
-  const collectJetpack = (cave) => {
-    // Leave the world's pack on its cloud for someone who needs one.
-    if (!jetpack || jetpack.falling || crew.builtInJetpack(cave)) return false;
-    removeJetpackPickup();
-    jetpackState.owned = true;
-    jetpackState.owner = cave.traits.name;
-    jetpackState.fuel = cave.jetFuel = 1;
-    jetpackCarrier = cave;
-    crew.setJetpackOwnership(cave, true, hubModels.jetpack(), hubModels.jetFlame());
-    pilot.showAct();
-    fx.burst(cave.root.position.x, cave.root.position.y + 0.7, cave.root.position.z, 14, [SPARK, DUST], 2.2);
-    fx.say(cave, "OOGA PACK!", 2);
-    hud.toast("Jetpack collected!");
-    hud.hint(COARSE ? "Tap the jetpack icon to put it on." : "Click the jetpack icon or press J to put it on.", 5000);
-    return true;
-  };
   const grantJetpack = (cave, wear = false) => {
-    if (crew.builtInJetpack(cave)) return true;
-    removeJetpackPickup();
-    if (jetpackCarrier && jetpackCarrier !== cave) crew.setJetpackOwnership(jetpackCarrier, false);
-    jetpackState.owned = true;
-    jetpackState.owner = cave.traits.name;
-    jetpackState.fuel = cave.jetFuel = 1;
-    jetpackCarrier = cave;
+    if (!cave) return false;
     crew.setJetpackOwnership(cave, true, hubModels.jetpack(), hubModels.jetFlame());
     pilot.showAct();
     return !wear || equipJetpack(cave);
   };
   const toggleJetpack = () => {
     const cave = crew.player;
-    if (cave && crew.builtInJetpack(cave)) {
-      hud.toast("Built in. It never comes off.");
-      return false;
-    }
     if (!cave) {
       hud.toast("Double-tap an Ooga Booga first");
       return false;
     }
-    if (!jetpackState.owned || jetpackState.owner !== cave.traits.name) {
-      hud.toast("This Ooga Booga does not have a jetpack");
-      return false;
-    }
     if (cave.jet) {
-      syncJetpackFuel();
       crew.removeJetpack(cave);
-      jetpackWearer = null;
       pilot.showAct();
       hud.toast("Jetpack off");
       return true;
@@ -2177,19 +2332,6 @@
       return false;
     }
     return equipJetpack(cave);
-  };
-  const loseJetpack = (cave) => {
-    if (!jetpackState.owned || !cave || jetpackState.owner !== cave.traits.name) return;
-    if (cave && cave.jet) crew.removeJetpack(cave);
-    crew.setJetpackOwnership(cave, false);
-    jetpackWearer = jetpackCarrier = null;
-    jetpackState.owned = false;
-    jetpackState.owner = null;
-    jetpackState.fuel = 1;
-    if (cave) cave.jetFuel = 1;
-    spawnJetpackPickup(lastJetpackCloud);
-    pilot.showAct();
-    hud.toast("Jetpack lost to the abyss");
   };
   const attachMagazineHost = () => {
     let host = null, best = Infinity;
@@ -2249,12 +2391,21 @@
     pilot.showAct();
     return added;
   };
-  const loseMagazine = (cave = pilot.player) => {
-    if (!crew.hasMagazine(cave)) return;
-    crew.removeMagazines(cave);
-    spawnMagazinePickup();
+  const loseAbyssAmmo = (cave = pilot.player) => {
+    if (!cave) return false;
+    const hadMagazines = crew.hasMagazine(cave), hadAmmo = cave.weapon.ammo > 0;
+    if (!hadMagazines && !hadAmmo) return false;
+    crew.stopBurst(cave);
+    crew.stopReload(cave, true);
+    if (hadMagazines) {
+      crew.removeMagazines(cave);
+      spawnMagazinePickup();
+    }
+    cave.weapon.ammo = 0;
     pilot.showAct();
-    hud.toast("Spare magazines lost to the abyss");
+    hud.toast(hadMagazines && hadAmmo ? "Spare magazines and loaded AK-47 ammo lost to the abyss"
+      : hadMagazines ? "Spare magazines lost to the abyss" : "Loaded AK-47 ammo lost to the abyss");
+    return true;
   };
   const buildSpots = () => {
     spots.push({ x: 0, z: -(MEADOW + 2.5), ry: Math.PI });
@@ -2645,6 +2796,30 @@
     const direction = Math.abs(localZ) > 1e-6 ? -Math.sign(localZ) : hitZ >= 0 ? 1 : -1;
     swingRoomSign(sign, direction, 3.5, true);
   };
+  const legacyCopy = (value) => {
+    const field = document.createElement("textarea");
+    field.value = value;
+    field.setAttribute("readonly", "");
+    field.style.position = "fixed"; field.style.opacity = "0";
+    document.body.appendChild(field);
+    field.select();
+    let copied = false;
+    try { copied = document.execCommand("copy"); } catch (_) {}
+    field.remove();
+    return copied;
+  };
+  const tapRoomSign = (sign) => {
+    if (!sign || !sign.node.visible) return;
+    const meta = sign.node.geometry.roomLifehashSign;
+    const dx = camera.position.x - sign.node.position.x, dz = camera.position.z - sign.node.position.z;
+    const localZ = dx * sign.sr + dz * sign.cr;
+    const direction = Math.abs(localZ) > 1e-6 ? -Math.sign(localZ) : sign.hits & 1 ? -1 : 1;
+    swingRoomSign(sign, direction, 3.5, true);
+    const copied = () => { if (hud) hud.toast(`Room hash ${meta.lines[0]} copied to clipboard`); };
+    const fallback = () => legacyCopy(meta.lines[0]) ? copied() : hud && hud.toast("Could not copy the room hash");
+    if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(meta.lines[0]).then(copied, fallback);
+    else fallback();
+  };
   const moveCampBody = (cave, x, y, z, dt) => {
     moveRoomSigns(cave, x, y, z, dt);
     if (cave.camp.burning || cave.camp.rolling || cave.camp.cooldown > 0) return;
@@ -2796,6 +2971,226 @@
       ceiling = Math.min(ceiling, roof - offset - rider.bodyHeight - Math.max(0, rider.viewLift) + actor.bodyHeight + Math.max(0, actor.viewLift));
     }
     return ceiling;
+  };
+  const birdsEyeCeiling = (cave) => {
+    const p = cave.root.position, feet = p.y - cave.baseY;
+    // Clip architectural roofs, not the floor the actor is standing on. Outdoors
+    // the taller cut also preserves nearby gorillas and carried equipment.
+    const roof = Math.min(island.ceilingAt(p.x, feet + 0.02, p.z, PLAYER_RADIUS), entranceCeilingAt(p.x, p.z, feet + 0.02, PLAYER_RADIUS));
+    return Math.max(feet + cave.bodyHeight + Math.max(0, cave.viewLift) + 0.08,
+      Math.min(feet + Math.max(4, cave.bodyHeight + 0.35), roof - 0.06));
+  };
+  const cutawayBlend = (progress, from, to) => {
+    const t = clamp((progress - from) / (to - from), 0, 1);
+    return t * t * (3 - 2 * t);
+  };
+  const cutawayLinear = (progress, from, to) => clamp((progress - from) / (to - from), 0, 1);
+  const updateCutawayTravelRamp = () => {
+    let bestRamp = null, bestChannel = -1, bestDistance = Infinity, bestStation = 0;
+    const ramps = island.cutawayPaths.ramps;
+    for (let channel = 0; channel < ramps.length; channel++) {
+      const ramp = ramps[channel], samples = ramp.samples;
+      for (let i = 1; i < samples.length; i++) {
+        const a = samples[i - 1], b = samples[i], dx = b.x - a.x, dz = b.z - a.z;
+        const length2 = dx * dx + dz * dz, t = clamp(((cutawayX - a.x) * dx + (cutawayZ - a.z) * dz) / (length2 || 1), 0, 1);
+        const x = a.x + dx * t, y = a.y + (b.y - a.y) * t, z = a.z + dz * t;
+        const ox = cutawayX - x, oz = cutawayZ - z, distance = ox * ox + oz * oz;
+        const reach = ramp.width / 2 + PLAYER_RADIUS + 0.18;
+        if (distance <= reach * reach && Math.abs(cutawayFeet - y) <= STEP_MAX + 0.4 && distance < bestDistance) {
+          bestRamp = ramp; bestChannel = channel; bestDistance = distance;
+          bestStation = a.s + (b.s - a.s) * t;
+        }
+      }
+    }
+    cutawayTravelRamp = bestRamp;
+    cutawayTravelChannel = bestChannel;
+    cutawayTravelStation = bestStation;
+    return bestChannel >= 0;
+  };
+  const resetCutawayPaths = () => {
+    let changed = CUTAWAY_PATH_STATE.active !== 0;
+    CUTAWAY_PATH_STATE.active = 0;
+    for (let channel = 0; channel < 4; channel++) {
+      if (CUTAWAY_PATH_STATE.mix[channel] > 0) changed = true;
+      CUTAWAY_PATH_STATE.mix[channel] = 0;
+    }
+    CUTAWAY_PATH_STATE.windowMix.fill(0);
+    if (changed) CUTAWAY_PATH_STATE.version++;
+    terrainRampRoof?.update(CUTAWAY_PATH_STATE);
+  };
+  const updateCutawayPaths = (sliceY, slicing, rockMix) => {
+    const paths = island.cutawayPaths;
+    updateCutawayTravelRamp();
+    // The initial basement entrances open as the scan reaches HQ; travel and
+    // floor progress extend those openings farther down the routes.
+    const lowerLevelMix = Number.isFinite(cutawayProgress) ? cutawayLinear(cutawayProgress - 1, CUTAWAY_RAMP_START, CUTAWAY_RAMP_END) : 0;
+    const lowerCoverDepth = (island.headquarters.ceiling - 0.06) - sliceY;
+    const lowerCoverMix = slicing ? cutawayLinear(lowerCoverDepth, paths.unit, paths.unit * 2) : 0;
+    const lowerEntranceMix = slicing ? cutawayLinear(lowerCoverDepth, -paths.unit, 0) : 0;
+    const terrainMix = 1 - cutawayBlend(cutawayHillMix, 0, 1);
+    let changed = CUTAWAY_PATH_STATE.active !== 1;
+    CUTAWAY_PATH_STATE.active = 1;
+    CUTAWAY_PATH_STATE.windowMix[0] = rockMix * terrainMix * cutawayBlend(cutawayProgress, CUTAWAY_RAMP_START, CUTAWAY_RAMP_END);
+    CUTAWAY_PATH_STATE.windowMix[1] = rockMix * terrainMix * cutawayBlend(cutawayProgress - 1, CUTAWAY_RAMP_START, CUTAWAY_RAMP_END);
+    for (let channel = 0; channel < 4; channel++) {
+      let lo = 1;
+      if (slicing) for (let station = 1; station <= 255; station++) {
+        const bottom = paths.bottomByStation[channel * 256 + station];
+        if (Number.isFinite(bottom) && bottom >= sliceY - 0.01) lo = station + 1;
+      }
+      const initial = paths.initial[channel];
+      // Once a floor transition has consumed part of a ramp, leaving its
+      // narrow travel corridor must not put that roof back. Height progress is
+      // the stable baseline; proximity may only reveal farther ahead.
+      const levelProgress = clamp(cutawayProgress - (channel >= 2 ? 1 : 0), 0, 1);
+      let hi = Math.max(initial, 1 + Math.round(levelProgress * 254));
+      if (channel === cutawayTravelChannel && lo <= 255) {
+        const station = 1 + Math.round(clamp(cutawayTravelStation / paths.lengths[channel], 0, 1) * 254);
+        // The globally scanned prefix remains visibly open behind the player.
+        // Match that full distance ahead, while the authored entrance length is
+        // a hard minimum, so stepping onto a ramp can never make it contract.
+        hi = Math.min(255, Math.max(hi, station + Math.max(0, station - 1)));
+      }
+      let lowerPathMix = Math.max(lowerEntranceMix, lowerLevelMix * lowerCoverMix);
+      if (channel >= 2 && channel === cutawayTravelChannel && lo <= 255) {
+        // The globally scanned prefix has no roof left over the actor. Fade the
+        // active lower route completely before their leading edge reaches the
+        // first roof cell below the settled HQ cut. The fixed boundary also
+        // prevents the roof from returning midway down as the global scan
+        // consumes progressively deeper cells.
+        let firstCoveredStation = 1;
+        while (firstCoveredStation <= 255 && paths.bottomByStation[channel * 256 + firstCoveredStation] >= island.headquarters.ceiling - 0.07) firstCoveredStation++;
+        const firstCovered = (firstCoveredStation - 1) / 254 * paths.lengths[channel];
+        const clearBy = Math.max(paths.unit, firstCovered - PLAYER_RADIUS - paths.unit);
+        lowerPathMix = Math.max(lowerPathMix, cutawayBlend(cutawayTravelStation, 0, clearBy));
+      }
+      const nextMix = rockMix * terrainMix * (channel < 2 ? 1 : lowerPathMix);
+      if (CUTAWAY_PATH_STATE.lo[channel] !== lo || CUTAWAY_PATH_STATE.hi[channel] !== hi
+        || (CUTAWAY_PATH_STATE.mix[channel] > 0) !== (nextMix > 0)) changed = true;
+      CUTAWAY_PATH_STATE.lo[channel] = lo;
+      CUTAWAY_PATH_STATE.hi[channel] = hi;
+      CUTAWAY_PATH_STATE.mix[channel] = nextMix;
+    }
+    if (changed) CUTAWAY_PATH_STATE.version++;
+    terrainRampRoof.update(CUTAWAY_PATH_STATE);
+  };
+  const updateBirdsEyeCutaway = (dt) => {
+    clearCutawayHidden();
+    const player = pilot.player, overheadMix = player ? pilot.birdsEyeMix : 0;
+    const carryCutaway = !!player && !pilot.aiming && !pilot.closeWanted && player.root.position.y - player.baseY < -0.5
+      && (pilot.mode === "orbit" || pilot.mode === "shoulder" && pilot.shoulderEntryMix < 1);
+    // Keep the already-open floor through a carry-to-combat overhead handoff;
+    // the overhead spring starts at zero even though the roof is already gone.
+    const carryBridge = cutawayCarryActive && pilot.birdsEye && overheadMix < 1;
+    const cameraMix = Math.max(overheadMix, carryCutaway || carryBridge ? 1 : 0);
+    const showRampMarkers = overheadMix > 0.5;
+    for (const marker of headquarters.rampMarkers) {
+      marker.node.visible = marker.frame.visible = marker.arrow.visible = showRampMarkers;
+      if (!showRampMarkers) continue;
+      // Turn the whole inscription in its fitted floor plane. Its baseline
+      // stays horizontal on screen, with +x reading right and -z reading up;
+      // the separate arrow remains fixed to the downhill route.
+      const up = camera.up, across = marker.across, downhill = marker.downhill;
+      const x = up.x * across.x + up.y * across.y + up.z * across.z;
+      const z = up.x * downhill.x + up.y * downhill.y + up.z * downhill.z;
+      marker.node.rotation.y = Math.atan2(-x, -z);
+    }
+    // Losing the actor or its upright view has no camera dolly to follow.
+    // Restore the last displayed section independently on just those exits.
+    const interrupted = !player || player !== cutawayPlayer || player.health.stunned || crew.sleeping
+      || player.camp.seat || player.bedTravel.mode || clankerPlay.active;
+    if (!cameraMix && cutawayCameraMix > 0 && (interrupted || cutawayCarryActive)) {
+      cutawayRestoreMix = RENDER_OPTS.cutawayFade;
+      cutawayRestoreTime = 0;
+    }
+    cutawayCameraMix = cameraMix;
+    cutawayCarryActive = carryCutaway || carryBridge;
+    cutawayRestoreTime = Math.min(CUTAWAY_RESTORE_TIME, cutawayRestoreTime + dt);
+    const t = cutawayRestoreTime / CUTAWAY_RESTORE_TIME;
+    const restoring = cutawayRestoreMix * (1 - t * t * (3 - 2 * t));
+    // Re-enter from the still-visible cut, not from an uncut ceiling. The
+    // ordinary camera-controlled entry/exit is unchanged when no tail exists.
+    const mix = cameraMix + (1 - cameraMix) * restoring, active = mix > 0;
+    // Scan through the full camera blend in both directions, including reversals.
+    const rockMix = mix;
+    RENDER_OPTS.birdsEyeCutaway = active;
+    RENDER_OPTS.cutawayFade = RENDER_OPTS.cutawayCloudMix = mix;
+    RENDER_OPTS.cutawayRockMix = rockMix;
+    RENDER_OPTS.cutawayRegionCount = 0;
+    if (!active) {
+      RENDER_OPTS.cutawayMaxY = 1e6; cutawayHeight = cutawayProgress = NaN;
+      cutawayTravelRamp = null; cutawayTravelChannel = -1; cutawayTravelStation = 0;
+      resetCutawayPaths();
+      for (const entry of terrainSections) entry.cap.node.visible = false;
+      for (const entry of caveSections) entry.cap.node.visible = false;
+      return;
+    }
+    const hq = island.headquarters;
+    if (cameraMix > 0) {
+      const p = player.root.position, fresh = player !== cutawayPlayer || !Number.isFinite(cutawayProgress);
+      // Hop is relative to the next supporting floor, including the abyss
+      // sentinel. Only world-space feet describe the level actually on screen.
+      cutawayFeet = p.y - player.baseY;
+      cutawayX = p.x; cutawayZ = p.z;
+      cutawayHeadY = cutawayFeet + player.bodyHeight + Math.max(0, player.viewLift) + 0.08;
+      const surface = island.surfaceAt(p.x, p.z);
+      const elevation = cutawayFeet - Math.max(STEP_MAX, surface - STEP_MAX);
+      cutawayHill = elevation > (fresh ? 0 : cutawayHill ? -0.12 : 0.12);
+      if (fresh) cutawayHillMix = cutawayHill ? 1 : 0;
+      else cutawayHillMix += clamp((cutawayHill ? 1 : 0) - cutawayHillMix, -dt / 0.3, dt / 0.3);
+      // Progress uses actual height between floors, not the support underneath
+      // a jump or the long flat tail at the end of a ramp. A small deadband
+      // retains the approach direction through stops and tiny reversals.
+      const progress = cutawayFeet >= hq.floor ? clamp(cutawayFeet / hq.floor, 0, 1)
+        : 1 + clamp((hq.floor - cutawayFeet) / (hq.floor - hq.basement.floor), 0, 1);
+      // Settle exactly on authored floors. The motion deadband belongs only to
+      // a ramp reversal; retaining its last in-band value at a landing left a
+      // few terminal roof cells dependent on the actor's lateral position.
+      cutawayProgress = fresh || Math.abs(progress - Math.round(progress)) < 1e-6
+        ? progress : clamp(cutawayProgress, progress - CUTAWAY_FLOOR_DEADBAND, progress + CUTAWAY_FLOOR_DEADBAND);
+      cutawayLevel = cutawayBlend(cutawayProgress, CUTAWAY_RAMP_START, CUTAWAY_RAMP_END)
+        + cutawayBlend(cutawayProgress - 1, CUTAWAY_RAMP_START, CUTAWAY_RAMP_END);
+      cutawayPlayer = player;
+    }
+    const feet = cutawayFeet;
+    RENDER_OPTS.cutawayCloudY = feet - 2;
+    // Scan between floor ceilings across the ramp's travel so upper levels
+    // peel away progressively instead of switching in a narrow midpoint band.
+    // Head clearance remains authoritative during a jump, jet flight or fall.
+    if (cameraMix > 0) {
+      let target = cutawayLevel <= 1 ? lerp(CUTAWAY_TOP, hq.ceiling - 0.06, cutawayLevel)
+        : lerp(hq.ceiling - 0.06, hq.basement.ceiling - 0.06, cutawayLevel - 1);
+      if (feet < hq.basement.floor - STEP_MAX) target = Math.min(target, birdsEyeCeiling(player));
+      if (!Number.isFinite(cutawayHeight)) cutawayHeight = target;
+      else cutawayHeight += clamp(target - cutawayHeight, -CUTAWAY_FLOOR_RATE * dt, CUTAWAY_FLOOR_RATE * dt);
+      cutawayHeight = Math.max(cutawayHeight, cutawayHeadY);
+    }
+    const slicing = cutawayHeight < CUTAWAY_TOP - 0.01;
+    const sliceY = Math.max(cutawayHeadY, lerp(CUTAWAY_TOP, cutawayHeight, rockMix));
+    RENDER_OPTS.cutawayMaxY = slicing ? sliceY : 1e6;
+    updateCutawayPaths(sliceY, slicing, rockMix);
+    for (const entry of terrainSections) {
+      if (slicing) entry.cap.update(sliceY - entry.worldY, null, entry.paths ? CUTAWAY_PATH_STATE : null);
+      else entry.cap.node.visible = false;
+    }
+    const caveRoofMix = 1 - cutawayBlend(cutawayHillMix, 0, 1);
+    for (const entry of caveSections) {
+      const r = entry.region;
+      r.y = cutawayActorY(r, lerp(CUTAWAY_TOP, entry.targetY, rockMix));
+      r.mix = caveRoofMix;
+      // Hills and jet flight restore cave roofs at the same character-relative
+      // height as ramp cover. Keep the aperture alive through the fade, then
+      // drop it only after the roof is fully opaque again.
+      const reveal = caveRoofMix > 0 && (!slicing || r.y < sliceY);
+      entry.cap.node.visible = reveal;
+      if (reveal) {
+        RENDER_OPTS.cutawayRegions[RENDER_OPTS.cutawayRegionCount++] = r;
+        entry.cap.update(r.y, r);
+        for (let i = 0; i < entry.cap.node.children.length; i++) entry.cap.node.children[i].smokeOpacity = caveRoofMix;
+      }
+    }
+    RENDER_OPTS.cutawayRegionCount = Math.min(CUTAWAY_REGION_CAP, RENDER_OPTS.cutawayRegionCount);
+    updateCutawayWholeVisibility();
   };
   const crossesSealedCave = (fromX, fromZ, toX, toZ, y = 0) => {
     for (let i = 0; i < sealedCaves.length; i++) {
@@ -3160,48 +3555,6 @@
       clouds.push({ node, speed: 0.4 + rand() * 0.4, beside, tops: surface.tops, bounds: surface.bounds, centerTop: surface.centerTop, dx: 0, dz: 0, wrapped: false });
     }
   };
-  const chooseJetpackCloud = (exclude) => {
-    let chosen = null, nearest = Infinity;
-    for (let i = 0; i < clouds.length; i++) {
-      const cloud = clouds[i], p = cloud.node.position, radius = Math.hypot(p.x, p.z);
-      if (cloud === exclude || !Number.isFinite(cloud.centerTop) || radius < JETPACK_FAR || radius >= nearest) continue;
-      chosen = cloud;
-      nearest = radius;
-    }
-    if (chosen) return chosen;
-    for (let i = 0; i < clouds.length; i++) {
-      const cloud = clouds[i], p = cloud.node.position, radius = Math.hypot(p.x, p.z);
-      if (cloud !== exclude && Number.isFinite(cloud.centerTop) && radius < nearest) { chosen = cloud; nearest = radius; }
-    }
-    if (!chosen) throw new Error("No cloud can support the jetpack");
-    return chosen;
-  };
-  const attachJetpackToCloud = (exclude = null) => {
-    const host = chooseJetpackCloud(exclude), p = host.node.position;
-    lastJetpackCloud = host;
-    jetpack.host = host;
-    jetpack.falling = false;
-    jetpack.vy = 0;
-    jetpack.x = jetpack.owner.x = jetpack.node.position.x = p.x;
-    jetpack.z = jetpack.owner.z = jetpack.node.position.z = p.z;
-    jetpack.node.position.y = p.y + host.centerTop + JETPACK_HOVER;
-  };
-  const spawnJetpackPickup = (exclude = null) => {
-    if (jetpackState.owned || jetpack) return;
-    const node = place(hubModels.jetpack(), 0, 0, 0, 0, "jetpack", 1);
-    jetpack = { node, owner: props[props.length - 1], host: null, x: 0, z: 0, vy: 0, falling: false };
-    attachJetpackToCloud(exclude);
-    trackMirrorObject(node, 2);
-    refreshObjectGuides();
-  };
-  const dropJetpackFromCloud = (cloud, x, z) => {
-    if (!jetpack || jetpack.host !== cloud) return;
-    jetpack.host = null;
-    jetpack.falling = true;
-    jetpack.vy = 0;
-    jetpack.x = jetpack.owner.x = jetpack.node.position.x = x;
-    jetpack.z = jetpack.owner.z = jetpack.node.position.z = z;
-  };
   const updateClouds = (dt) => {
     for (let i = 0; i < clouds.length; i++) {
       const cloud = clouds[i], p = cloud.node.position;
@@ -3210,7 +3563,6 @@
       p.x += cloud.dx; p.z += cloud.dz;
       cloud.wrapped = cloud.beside ? p.z > CLOUD_WRAP : p.x > CLOUD_WRAP;
       if (cloud.wrapped) {
-        dropJetpackFromCloud(cloud, p.x, p.z);
         if (cloud.beside) p.z -= CLOUD_WRAP * 2;
         else p.x -= CLOUD_WRAP * 2;
       }
@@ -3347,8 +3699,10 @@
   const tooltipFor = (hit) => {
     const o = hit.owner;
     switch (o.kind) {
-      case "stargate-dialer":
-        return "Stargate dialer · use nearby";
+      case "ooga-portal-lever":
+        return "Ooga Portal · switch " + (pitGate.on ? "off" : "on");
+      case "ooga-portal-screen":
+        return pitGate.selected.label + " · tap to change destination";
       case "caveman":
         return o.cave.traits.display;
       case "clanker":
@@ -3360,11 +3714,11 @@
       case "gate":
         return `${caves.gate.name} · leads nowhere yet`;
       case "matrix-button":
-        return matrixCave.unlocked ? "Matrix gate control · press out" : "Matrix gate control · press in";
+        return matrixCave.unlocked ? "Matrix gate lever · pull down" : "Matrix gate lever · push up";
       case "matrix-gate":
         return "Glyph gate · tap or press Space nearby to open";
       case "room-sign":
-        return "Room sign";
+        return "Room sign · tap to copy hash";
       case "lab-link":
         return "EntropyLab · open website in a new tab";
       case "prop":
@@ -3464,9 +3818,6 @@
       case "dock":
         hud.toast("The planks creak over the drop.");
         break;
-      case "jetpack":
-        hud.toast(pilot.player ? "Jump into it to collect it." : "Double-tap an Ooga, then jump into it.");
-        break;
       case "magazine":
         hud.toast(pilot.player ? "Walk into it to collect it." : "Double-tap an Ooga, then walk into it.");
         break;
@@ -3539,7 +3890,8 @@
     if (!o.active) return;
     reactProp(o, p);
   };
-  const STARGATE_ACTION = { kind: "stargate-dialer" };
+  const OOGA_PORTAL_ACTION = { kind: "ooga-portal-lever" };
+  const OOGA_PORTAL_MENU_ACTION = { kind: "ooga-portal-screen" };
   const WAKE_ACTION = { kind: "wake" }, ROLL_ACTION = { kind: "roll" }, STAND_ACTION = { kind: "stand" };
   const TAP_RAY = { ox: 0, oy: 0, oz: 0, dx: 0, dy: 0, dz: 0 };
   const nearbyAction = (x, y, z, reach) => {
@@ -3548,9 +3900,19 @@
     if (player && player.camp.seat) return STAND_ACTION;
     if (player && crew.sleeping) return WAKE_ACTION;
     if (player && pilot.moving) return null;
-    if (pitGate && !pitGate.isOpen) {
-      const p = pitGate.dialer.position;
-      if (actionWithinReach(x, y, z, p.x, p.y + 1.1, p.z, Math.min(reach, 2))) return STARGATE_ACTION;
+    if (pitGate && !pitGate.receiving && !pitGate.isOpen) {
+      let nearest = null, distance = Math.min(reach, 2) ** 2;
+      for (const control of pitGate.controls) {
+        const leverDistance = (control.x - x) ** 2 + (control.y - y) ** 2 + (control.z - z) ** 2;
+        if (leverDistance < distance && actionReachable(x, y, z, control.x, control.y, control.z)) {
+          nearest = OOGA_PORTAL_ACTION; distance = leverDistance;
+        }
+        const p = control.screenPoint, screenDistance = (p.x - x) ** 2 + (p.y - y) ** 2 + (p.z - z) ** 2;
+        if (screenDistance < distance && actionReachable(x, y, z, p.x, p.y, p.z)) {
+          nearest = OOGA_PORTAL_MENU_ACTION; distance = screenDistance;
+        }
+      }
+      if (nearest) return nearest;
     }
     if (player && player.hop < 0.03 && player.hopV <= 0 && headquarters) {
       const feet = player.root.position.y - player.baseY;
@@ -3586,7 +3948,8 @@
     return null;
   };
   const useNearbyAction = (action) => {
-    if (action === STARGATE_ACTION) pitGate.open();
+    if (action === OOGA_PORTAL_ACTION) pitGate.toggle();
+    else if (action === OOGA_PORTAL_MENU_ACTION) pitGate.open();
     else if (action === WAKE_ACTION) crew.wakePlayer();
     else if (action === ROLL_ACTION) crew.dropRoll();
     else if (action === STAND_ACTION) crew.standPlayer();
@@ -3653,15 +4016,24 @@
     world.pilot = pilot.player ? pilot.player.traits.name : null;
     enterScene(presets[id], id);
   };
+  const portalTapReachable = (control, screen) => {
+    const player = pilot.player, at = player ? player.root.position : camera.position;
+    const point = screen ? control.screenPoint : control;
+    return !pitGate.receiving && !(player && pilot.moving)
+      && actionWithinReach(at.x, at.y + (player ? 1.1 - player.baseY : 0), at.z, point.x, point.y, point.z, 2);
+  };
   const onTap = (hit, p) => {
     if (pitArrival || pitGate?.isOpen) return;
     if (!hit) return;
     const o = hit.owner;
     switch (o.kind) {
-      case "stargate-dialer": {
-        const player = pilot.player, at = player ? player.root.position : camera.position;
-        if (nearbyAction(at.x, at.y + (player ? 1.1 - player.baseY : 0), at.z, 2) === STARGATE_ACTION) pitGate.open();
-        else hud.toast("Move closer to the Stargate dialer.");
+      case "ooga-portal-screen":
+        if (portalTapReachable(o.control, true)) pitGate.open();
+        else hud.toast("Move closer to an Ooga Portal screen.");
+        break;
+      case "ooga-portal-lever": {
+        if (portalTapReachable(o.control, false)) pitGate.toggle();
+        else hud.toast("Move closer to an Ooga Portal lever.");
         break;
       }
       case "caveman":
@@ -3682,6 +4054,9 @@
         break;
       case "matrix-button":
         toggleMatrixControl(true);
+        break;
+      case "room-sign":
+        tapRoomSign(o.roomSign);
         break;
       case "lab-link":
         window.open("https://entropylab.online", "_blank", "noopener,noreferrer");
@@ -3816,9 +4191,13 @@
     matrixCave.unlocked = unlocked;
     MATRIX_WORLD.livingGlobal = unlocked || matrixCave.portal.inside ? 1 : 0;
     matrixControl.pressed = unlocked;
-    matrixControl.button.matrixLiving = unlocked;
-    matrixControl.button.glow = unlocked ? 1 : 0.25;
-    matrixControl.button.highlight = unlocked ? 0.8 : 0;
+    matrixControl.button.glow = unlocked ? 0.65 : 0.45;
+    matrixControl.button.highlight = 0;
+    matrixControl.lights.matrixLiving = unlocked;
+    matrixControl.lights.glow = unlocked ? 1.35 : 0.25;
+    matrixControl.lever.glow = unlocked ? 0.65 : 0.45;
+    matrixControl.grip.matrixLiving = unlocked;
+    matrixControl.grip.glow = unlocked ? 1.4 : 0.25;
     for (let i = 0; i < matrixGates.length; i++) {
       const gate = matrixGates[i];
       // The inside switch explicitly raises the mirror bars even while glass
@@ -3918,13 +4297,13 @@
       // Their stored overhead sections are clipped in every render pass, including shadows.
       gate.node.visible = gate.node.position.y + gate.bottom < gate.ceiling && gate.node.position.y + gate.top > gate.floor;
     }
-    const buttonY = matrixControl.pressed ? 1.04 : 1.12;
-    matrixControl.button.position.y = matrixControl.button.position.y < buttonY ? Math.min(buttonY, matrixControl.button.position.y + dt * 0.5) : Math.max(buttonY, matrixControl.button.position.y - dt * 0.5);
+    const leverAngle = matrixControl.pressed ? 0.42 : Math.PI - 0.42;
+    matrixControl.lever.rotation.x += (leverAngle - matrixControl.lever.rotation.x) * (1 - Math.exp(-8 * dt));
     const subject = player ? player.root.position : camera.position;
     const action = nearbyAction(subject.x, subject.y + (player ? 1.1 - player.baseY : 0), subject.z, player ? MATRIX_BUTTON_USE_REACH : MATRIX_BUTTON_REACH);
     const equipped = !!(player && player.jet);
     const recovering = !!(player && player.jetRecovering);
-    if (action === matrixControl.promptAction && player === matrixControl.promptPlayer && equipped === matrixControl.promptJet && recovering === matrixControl.promptRecovering && matrixControl.pressed === matrixControl.promptPressed) return;
+    if (action === matrixControl.promptAction && player === matrixControl.promptPlayer && equipped === matrixControl.promptJet && recovering === matrixControl.promptRecovering && matrixControl.pressed === matrixControl.promptPressed && pitGate.on === matrixControl.promptGateOn) return;
     const hadPlayerPrompt = matrixControl.promptAction && matrixControl.promptPlayer;
     matrixControl.near = action === matrixControl;
     matrixControl.promptAction = action;
@@ -3932,10 +4311,14 @@
     matrixControl.promptJet = equipped;
     matrixControl.promptRecovering = recovering;
     matrixControl.promptPressed = matrixControl.pressed;
+    matrixControl.promptGateOn = pitGate.on;
     if (action) {
-      if (action === STARGATE_ACTION) {
-        hud.hint(COARSE ? "Tap DIAL to open the Stargate dialer" : "Press Space to open the Stargate dialer");
-        hud.setAct("DIAL");
+      if (action === OOGA_PORTAL_ACTION) {
+        hud.hint(COARSE ? "Tap to switch the Ooga Portal " + (pitGate.on ? "off" : "on") : "Press Space to switch the Ooga Portal " + (pitGate.on ? "off" : "on"));
+        hud.setAct(pitGate.on ? "TURN OFF" : "TURN ON");
+      } else if (action === OOGA_PORTAL_MENU_ACTION) {
+        hud.hint(COARSE ? "Tap DESTINATION to choose where the Ooga Portal leads" : "Press Space to choose the Ooga Portal destination");
+        hud.setAct("DESTINATION");
       } else if (action === WAKE_ACTION) {
         hud.hint(COARSE ? "Tap WAKE UP! to get up" : "Space wakes up · WASD changes sleeping pose");
         hud.setAct("WAKE UP!");
@@ -3955,9 +4338,9 @@
         hud.hint(COARSE ? "Tap OPEN GATE! to open this gate" : "Press Space to open this gate");
         hud.setAct("OPEN GATE!");
       } else if (action === matrixControl) {
-        const label = matrixControl.pressed ? "press it out" : "press it in";
-        hud.hint(COARSE ? `Tap the glyph control to ${label}` : `Press Space or tap the control to ${label}`);
-        if (player) hud.setAct(matrixControl.pressed ? "PRESS OUT" : "PRESS IN");
+        const label = matrixControl.pressed ? "pull the lever down" : "push the lever up";
+        hud.hint(COARSE ? `Tap to ${label}` : `Press Space or tap to ${label}`);
+        if (player) hud.setAct(matrixControl.pressed ? "PULL DOWN" : "PUSH UP");
       } else {
         const label = action.slot ? "START RALLY" : action.scene === "orbit" ? "BUILD ROCKET" : "FLY PLANE";
         hud.hint(COARSE ? `Tap ${label} to play` : `Press Space to ${action.slot ? "start Ooga Rally" : action.scene === "orbit" ? "build for Ooga Orbit" : "fly Ooga Drop"}`);
@@ -4016,13 +4399,13 @@
     // A window can continue below an upper ramp after its room metadata ends.
     // A solid roof between the eye and that ramp makes it a different volume.
     if (opening.headquarters && y < CAMERA_COLUMN.floor && island.ceilingAt(x, y, z) <= CAMERA_COLUMN.floor) return false;
-    // The stone frame has its own soffit even where the carved voxel column is open sky.
-    // Use the model's real bounds, not the cliff top.
+    // Ordinary cave frames have a soffit even where the carved voxel column
+    // is open sky. HQ ramp mouths deliberately keep only their side jambs.
     const rim = opening.rim;
     if (along >= rim.minZ + PORTAL_Z && along <= rim.maxZ + PORTAL_Z && (!opening.headquarters || CAMERA_COLUMN.ceiling > opening.mouth.floorY)) {
       if (across < rim.minX || across > rim.maxX) return false;
       if (!opening.headquarters || along >= opening.planeZ) CAMERA_COLUMN.floor = Math.max(CAMERA_COLUMN.floor, opening.mouth.floorY + rim.floorY);
-      CAMERA_COLUMN.ceiling = Math.min(CAMERA_COLUMN.ceiling, opening.mouth.floorY + rim.ceilingY);
+      if (!opening.headquarters) CAMERA_COLUMN.ceiling = Math.min(CAMERA_COLUMN.ceiling, opening.mouth.floorY + rim.ceilingY);
     }
     CAMERA_COLUMN.caveIndex = opening.caveIndex;
     return true;
@@ -4200,9 +4583,7 @@
     setVec(PLAYER_POSITION, p.x, p.y, p.z);
     pilot.navigate(destination);
     if (player && player.jet && !jetpackAllowed(player)) {
-      syncJetpackFuel();
       crew.removeJetpack(player);
-      jetpackWearer = null;
       pilot.showAct();
     }
     syncMatrixInside(player);
@@ -4464,7 +4845,7 @@
   const clampCamera = (p, closeMix = 0, closeClearance = CLEARANCE, smoothStep = false, dt = 0, resetSmooth = false, directView = false, freeMove = false, preserveExitAngle = false) => {
     const requestedX = p.x, requestedY = p.y, requestedZ = p.z;
     const player = pilot && pilot.player;
-    if (cameraUnrestricted && player && closeMix > 0 && !preserveExitAngle) {
+    if (cameraUnrestricted && player && closeMix > 0 && !preserveExitAngle && !(pilot.birdsEyeMix > 0)) {
       cameraHeadAt(CAMERA_VOLUME_FROM, player);
       cameraReentering = !cameraClearAt(CAMERA_PREVIOUS.x, CAMERA_PREVIOUS.y, CAMERA_PREVIOUS.z) || !cameraSegmentClear(CAMERA_PREVIOUS.x, CAMERA_PREVIOUS.y, CAMERA_PREVIOUS.z, CAMERA_VOLUME_FROM.x, CAMERA_VOLUME_FROM.y, CAMERA_VOLUME_FROM.z);
       cameraUnrestricted = false;
@@ -4473,8 +4854,8 @@
     }
     // Orbit views retain their chosen pose everywhere.
     // A close-view dolly starting in rock keeps its authored path to the final head position.
-    if (preserveExitAngle || closeMix === 0 || cameraReentering && closeMix < 1) {
-      if (preserveExitAngle || closeMix === 0) { cameraUnrestricted = true; cameraReentering = false; }
+    if (pilot?.birdsEyeMix > 0 || preserveExitAngle || closeMix === 0 || cameraReentering && closeMix < 1) {
+      if (pilot?.birdsEyeMix > 0 || preserveExitAngle || closeMix === 0) { cameraUnrestricted = true; cameraReentering = false; }
       cameraManualContact = false;
       let index = 0;
       const owner = player ? playerCaveIndex : cameraCaveIndex;
@@ -4801,10 +5182,10 @@
   const beginPitArrival = () => {
     const actor = pilot.player, hole = island.headquarters.basement.hole;
     BL.scene.updateWorld(root); solids.sync();
-    const plan = BL.stargateArrival.plan({ hole, dialer: pitGate.dialer.position, radius: actor.bodyRadius, height: actor.bodyHeight,
+    const plan = BL.oogaPortalArrival.plan({ hole, dialer: pitGate.arrivalAnchor, radius: actor.bodyRadius, height: actor.bodyHeight,
       supportAt: (x, z, y) => playerSupportAt(x, z, y, y, actor),
       clearAt: (x, y, z, radius, height) => physicalClearAt(x, y, z, radius, height, actor) });
-    if (!plan) throw new Error("No safe Stargate arrival beside the Pit");
+    if (!plan) throw new Error("No safe Ooga Portal arrival beside the Pit");
     pitArrival = { plan, time: 0, landed: false };
     pitGate.receive(); pilot.setActive(false); pilot.controls.reset(); input.reset(); hud.tooltip.hide();
     crew.relocatePlayer(plan.start, plan.heading); updatePitArrival(0);
@@ -4812,7 +5193,7 @@
   const updatePitArrival = dt => {
     const arrival = pitArrival, plan = arrival.plan, actor = pilot.player;
     arrival.time = Math.min(plan.duration, arrival.time + Math.max(0, dt));
-    BL.stargateArrival.sample(plan, arrival.time, pitArrivalPoint);
+    BL.oogaPortalArrival.sample(plan, arrival.time, pitArrivalPoint);
     crew.relocatePlayer(pitArrivalPoint, plan.heading);
     // A stable basement-side camera keeps the rise and outward flight visible.
     camera.position.x = plan.landing.x + Math.sin(plan.heading) * 1.2 + Math.cos(plan.heading);
@@ -4829,6 +5210,11 @@
   const update = (dt, elapsed) => {
     now = elapsed;
     pitGate.update();
+    for (const control of pitGate.controls) {
+      const angle = pitGate.on ? 0.42 : Math.PI - 0.42;
+      control.lever.rotation.x += (angle - control.lever.rotation.x) * (1 - Math.exp(-8 * dt));
+      control.setActive(pitGate.on);
+    }
     if (pitDeparting) return; // The accepted fall stays frozen through the director fade.
     if (pitArrival) { updatePitArrival(dt); return; }
     hour = clock.read();
@@ -4872,47 +5258,16 @@
     updateRoomSigns(dt);
     pile.update(dt);
     const player = pilot.player;
-    if (jetpackWearer && jetpackWearer !== player) {
-      syncJetpackFuel();
-      crew.removeJetpack(jetpackWearer);
-      jetpackWearer = null;
-    }
-    syncJetpackFuel();
     if (player && !pilot.poseHeld && player.root.position.y - player.baseY < ABYSS_RESPAWN_Y && abyssAt(player.root.position.x, player.root.position.z, player.root.position.y - player.baseY)) {
-      // One notice for one fall: losing both says so, rather than the second toast hiding the first.
-      const hadJetpack = jetpackState.owned && jetpackState.owner === player.traits.name, hadMagazine = crew.hasMagazine(player);
-      loseJetpack(player);
-      loseMagazine();
-      if (hadJetpack && hadMagazine) hud.toast("Jetpack and spare magazines lost to the abyss");
+      loseAbyssAmmo(player);
       respawnAtPile();
     }
     else if (!player && !pilot.poseHeld && pilot.freeFalling && camera.position.y - CLOSE_VIEW.eyeHeight < ABYSS_RESPAWN_Y && abyssAt(camera.position.x, camera.position.z, camera.position.y - CLOSE_VIEW.eyeHeight)) respawnAtPile();
     updatePlayerCave(player);
     if (player && player.jet && !jetpackAllowed(player)) {
-      syncJetpackFuel();
       crew.removeJetpack(player);
-      jetpackWearer = null;
       pilot.showAct();
       hud.toast("No jetpacks under ground");
-    }
-    // Turn the pickup above its moving support.
-    // If that cloud wraps out of the sky, let the pack fall visibly before placing it on another far cloud.
-    if (jetpack) {
-      jetpack.node.rotation.y += dt * 0.9;
-      if (jetpack.host) {
-        const host = jetpack.host, p = host.node.position;
-        jetpack.x = jetpack.owner.x = jetpack.node.position.x = p.x;
-        jetpack.z = jetpack.owner.z = jetpack.node.position.z = p.z;
-        jetpack.node.position.y = p.y + host.centerTop + JETPACK_HOVER + Math.sin(elapsed * 2) * 0.09;
-      } else {
-        jetpack.vy -= JETPACK_FALL_GRAVITY * dt;
-        jetpack.node.position.y += jetpack.vy * dt;
-        if (jetpack.node.position.y < JETPACK_RESPAWN_Y) attachJetpackToCloud(lastJetpackCloud);
-      }
-      if (player && !jetpack.falling) {
-        const p = player.root.position, py = p.y - player.baseY + 0.75;
-        if (Math.hypot(p.x - jetpack.x, py - jetpack.node.position.y, p.z - jetpack.z) < JETPACK_REACH) collectJetpack(player);
-      }
     }
     if (magazine && magazine.revealed) {
       const node = magazine.node;
@@ -4944,7 +5299,10 @@
     fx.update(dt);
     stepTweens(dt);
     if (clankerPlay.active) clankerPlay.update(dt);
-    else pilot.update(dt);
+    // An inactive pilot would leave shoulder aim and orbit behind the modal.
+    // Suspend camera updates until the destination menu returns input control.
+    else if (!pitGate.isOpen) pilot.update(dt);
+    updateBirdsEyeCutaway(dt);
     if (POSITION_DEBUG && elapsed >= positionDebugNext) {
       positionDebugNext = elapsed + 0.1;
       updatePositionDebug();
@@ -5167,7 +5525,7 @@
   const clankerClimbTransitionClear = (entry, x, y, z, nx, ny, nz, radius, height, actors = true, riders = true, toRadius = radius, toHeight = height, peers = true, part = null) => {
     const previous = clankerPassingEntry;
     if (!peers) clankerPassingEntry = entry;
-    const bench = entry.motion.lab && part === entry.gorilla.parts.armR ? entry.gorilla.labPickupBench : null;
+    const bench = (entry.motion.lab || entry.planningLab) && part === entry.gorilla.parts.armR ? entry.gorilla.labPickupBench : null;
     try {
       return (!riders || clankerRidersClear(entry, x, y, z, nx, ny, nz, entry.heading, entry.heading))
         && clankerCylinderClear(x, y, z, nx, ny, nz, radius, height, entry, bench, true, actors, false, toRadius, toHeight);
@@ -5270,11 +5628,11 @@
   // leading limb cannot be mistaken for standing on a raised prop.
   const clankerTerrainSupportAt = (entry, x, z, y, step, heading = entry.heading) =>
     clankerSupportAt(entry, x, z, y, step, heading, false);
-  // Grip planning needs the same props that can support a gorilla's feet.
-  // A tiny mesh query preserves gaps between branches and furniture pieces.
-  const clankerClimbSolidAt = (x, y, z) => island.solidAt(x, y, z)
-    || !solids.clearAt(x, y - 0.002, z, 0.002, 0.004);
-  const clankerClimbSurfaceAt = (x, z) => Math.max(island.surfaceAt(x, z), solids.supportAt(x, z, 1e6));
+  // Props remain live blockers throughout a climb, but never become a cached
+  // wall-route endpoint. A spawned rock beneath a dismount therefore blocks or
+  // reverses that route; destroying it reopens the terrain landing immediately.
+  const clankerClimbSolidAt = (x, y, z) => island.solidAt(x, y, z);
+  const clankerClimbSurfaceAt = (x, z) => island.surfaceAt(x, z);
   const LAB_ITEM_INVERSE = math.mat4.create(), LAB_ITEM_LOCAL = math.mat4.create();
   const placeLabDie = (item) => {
     const n = item.node, r = item.roll;
@@ -5546,6 +5904,8 @@
     return objectGuides.collect(player, p.x, p.y, p.z, camera, renderer.size.width / Math.max(1, renderer.size.height), sightGuides.state.retainedOwners, sightGuides.state.retainedCount);
   };
   const characterUiOccluded = (cave) => {
+    if (cave.root.cameraHidden) return true;
+    if (RENDER_OPTS.birdsEyeCutaway) return cave.root.position.y - cave.baseY >= cutawayHeightAt(cave.root.position.x, cave.root.position.z);
     // Input-time tooltips may run before this frame's transforms are rendered.
     // Use rock certificates only during the overlay, after updating providers;
     // all other callers keep the exact visibility query.
@@ -5634,6 +5994,22 @@
     }
     CAMERA_GLYPHS.time = MATRIX_WORLD.time;
     const player = crew.player;
+    const combatBirdsEye = !!player && pilot.aiming && pilot.birdsEye;
+    if (combatBirdsEye || RENDER_OPTS.birdsEyeCutaway) {
+      // The actual scene is visible through its roof cut. Rock silhouettes and
+      // near-camera caps would cover it again using the unchanged solid world.
+      // Gate combat bird's-eye directly as well as by cutaway mix so no wall
+      // outline can flash on its first or last camera-transition frame.
+      uiGuideObjects = null; uiGuidesReady = true;
+      try { fx.drawOverlay(dt, drawExtra); } finally { uiGuidesReady = false; }
+      sightGuides.update(null, null, null, camera, 1, dt);
+      bananaGuides.update(null, null, null, camera, 1, dt, false, true);
+      sightGuides.state.structure = sightGuides.state.structures = null;
+      bananaGuides.state.structure = bananaGuides.state.structures = null;
+      if (rockGuides) rockGuides.resetSurface();
+      cameraCover.draw(camera, null, false, false, cameraRockAt, cameraRockMaterialAt, null, dt);
+      return;
+    }
     const insideMirror = !!player && playerCaveIndex === matrixCave.caveIndex;
     mirrorGuides.update(insideMirror, MATRIX_WORLD.time, MATRIX_WORLD.density);
     let tick = performance.now();
@@ -5752,11 +6128,10 @@
   const enter = (ctx) => {
     ({ renderer, game, world, go, lootEnabled, testBananas } = ctx);
     pitDeparting = false; pitArrival = null;
-    const travel = world.stargateTravel;
+    const travel = world.oogaPortalTravel;
     const pitReturn = ctx.from === "dsb" && travel?.from === "dsb" && travel.to === "hub" && travel.arrival === "pit" && travel.name === world.pilot;
-    delete world.stargateTravel; // Consume once; ordinary scene visits cannot inherit this route.
+    delete world.oogaPortalTravel; // Consume once; ordinary scene visits cannot inherit this route.
     overlayCanvas = ctx.overlay;
-    jetpackState = world.jetpack || (world.jetpack = { owned: false, owner: null, fuel: 1 });
     magazineState = {
       get owned() { return !!crew && crew.hasMagazine(crew.player); },
       get ammo() { return crew ? crew.magazineAmmo(crew.player) : 0; },
@@ -5764,12 +6139,6 @@
       get carrier() { return crew && crew.hasMagazine(crew.player) ? crew.player.traits.name : null; }
     };
     magazine = null;
-    jetpackState.fuel = Math.max(0, Math.min(1, Number.isFinite(jetpackState.fuel) ? jetpackState.fuel : 1));
-    if (!jetpackState.owned) jetpackState.owner = null;
-    // Underground starts carry the requested pack without equipping it or
-    // automatically selecting an Ooga. Ownership survives the trip outside.
-    if (ctx.from === null && preloadedJetpack && !preloadedJetpackWear) jetpackState.owned = true;
-    jetpackCarrier = jetpackWearer = lastJetpackCloud = null;
     MATRIX_WORLD.active = MATRIX_WORLD.direction = MATRIX_WORLD.radius = MATRIX_WORLD.time = MATRIX_WORLD.permanentCave = 0;
     MATRIX_WORLD.livingGlobal = 0;
     MATRIX_WORLD.density = renderer.kind === "canvas2d" ? MATRIX_DENSITY.canvas2d / MATRIX_DENSITY.high : MATRIX_DENSITY[renderer.quality] / MATRIX_DENSITY.high;
@@ -5821,8 +6190,23 @@
     hooks = {};
     input = interactMod.create({ canvas: ctx.canvas, renderer, camera, hooks });
     presets = { pile: PILE_VIEW, gate: GATE_VIEW };
-    pilot = pilotMod.create({ renderer, canvas: ctx.canvas, camera, hud, presets, landing: "pile", pitch: [PITCH_MIN, PITCH_MAX], dist: [DIST_MIN, DIST_MAX], follow: FOLLOW, fly: FLY, clampTarget, clampCamera, ceilingAt, releaseView: releaseCameraView, enterFreeView: enterFreeCameraView, coarse: COARSE, onFreeAction: freeAction, jetpackStatus: jetpackHudStatus, close: { ...CLOSE_VIEW, maxStep: STEP_MAX, groundAt: playerSupportAt, visualGroundAt: visualSupportAt, sleepEyeFloorAt, cloudAt, zone: () => playerCaveIndex } });
-    place(island.geometry, 0, 0, 0, 0);
+    pilot = pilotMod.create({ renderer, canvas: ctx.canvas, camera, hud, presets, landing: "pile", pitch: [PITCH_MIN, PITCH_MAX], dist: [DIST_MIN, DIST_MAX], follow: FOLLOW, fly: FLY, clampTarget, clampCamera, observeOrbit: position => clampCamera(position, 0), ceilingAt, birdsEyeMin: BIRDS_EYE_MIN, birdsEyeCeiling, releaseView: releaseCameraView, enterFreeView: enterFreeCameraView, coarse: COARSE, onFreeAction: freeAction, jetpackStatus: jetpackHudStatus, close: { ...CLOSE_VIEW, maxStep: STEP_MAX, groundAt: playerSupportAt, visualGroundAt: visualSupportAt, sleepEyeFloorAt, cloudAt, zone: () => playerCaveIndex } });
+    terrainRampRoof = BL.terrainCutaway.createRampRoof(island.cutawaySource, island.geometry, renderer.releaseGeometry);
+    place(terrainRampRoof.baseGeometry, 0, 0, 0, 0);
+    addChild(root, terrainRampRoof.node);
+    placed.push(terrainRampRoof.node);
+    addTerrainSection(island.cutawaySource, root);
+    for (const mouth of island.mouths) {
+      const slot = caves.slots.find(candidate => candidate.id === mouth.id);
+      if (slot.status !== "open" && slot.status !== "mirror") continue;
+      const cos = Math.cos(mouth.ry), sin = Math.sin(mouth.ry), room = mouth.room;
+      // Cave local -z points into the mountain. Include the entrance lintel
+      // and a wall thickness around the authored room, leaving adjacent hills.
+      const back = -room.to - 0.45, front = 1.15, center = (back + front) / 2;
+      const region = { id: mouth.id, x: mouth.x + sin * center, z: mouth.z + cos * center, cos, sin,
+        halfWidth: Math.max(room.w / 2, 2.5) + 0.45, halfDepth: (front - back) / 2, y: mouth.floorY + 2.85 };
+      addTerrainSection(island.cutawaySource, root, 0, region);
+    }
     const pathGeometry = { ...island.path.geometry, faces: island.path.geometry.faces.map(face => ({ ...face, matrixPermanentFallback: true })) };
     pathNode = createNode({ geometry: pathGeometry, instanceData: island.path.instanceData, instanceCount: 0, instanceVersion: 0, depthBias: 0.05 });
     addChild(root, pathNode);
@@ -5906,43 +6290,15 @@
     reflowScenery();
     buildSpots();
     buildClouds();
-    if (!jetpackState.owned) spawnJetpackPickup();
     spawnMagazinePickup();
     critters = crittersMod.create({ root, renderer, flowers: scenery.filter((o) => o.prop === "flower" && o.active), fire: firePos, secondaryFire: { x: 0, y: island.headquarters.floor, z: 0 }, meadowRadius: MEADOW, heightAt: island.surfaceAt });
     mark("props");
     const shared = { root, input, hooks, hud, game, world, renderer, camera, overlay: ctx.overlay, overlayVisible: matrixOverlayVisible, zzzVisible: sleepMarksVisible, tickerAt: TICKER_AT, buildSpots: buildSpotsList, walkIn: WALK_IN, clampDrag, viewYaw: PILE_VIEW.yaw, bedrolls, pileScale: PILE_SCALE, pileY: ALTAR_HEIGHT + 0.02, matrixLivingPile: true, onLayout: layoutPile, onShown: () => { meterTimer = 0; }, crateRadius: () => Math.max(4.4, altar.platformRadius + 0.8), groundAt: playerSupportAt, prepareCloudSupport, cloudAt, ceilingAt, wanderSpot, walkable, flyable, glideJetCeiling, useNear, abyssAt, abyssRespawnY: ABYSS_RESPAWN_Y, jetpackAllowed, phase: () => phase };
-    shared.dropStunJetpack = (cave) => {
-      if (crew.builtInJetpack(cave) || !jetpackState.owned || jetpackState.owner !== cave.traits.name) return null;
-      syncJetpackFuel();
-      const fuel = cave.jetFuel, equipped = !!cave.jet;
-      if (cave.jet) crew.removeJetpack(cave);
-      crew.setJetpackOwnership(cave, false);
-      if (jetpackWearer === cave) jetpackWearer = null;
-      jetpackCarrier = null;
-      jetpackState.owned = false;
-      jetpackState.owner = null;
-      jetpackState.fuel = fuel;
-      if (pilot) pilot.showAct();
-      return { geometry: hubModels.jetpack(), fuel, equipped };
-    };
-    shared.collectStunJetpack = (cave, fuel, equip) => {
-      if (crew.builtInJetpack(cave) || jetpackState.owned) return false;
-      jetpackState.owned = true;
-      jetpackState.owner = cave.traits.name;
-      jetpackState.fuel = cave.jetFuel = Math.max(0, Math.min(1, fuel));
-      jetpackCarrier = cave;
-      crew.setJetpackOwnership(cave, true, hubModels.jetpack(), hubModels.jetFlame());
-      if (equip && jetpackAllowed(cave)) {
-        crew.wearJetpack(cave, hubModels.jetpack(), hubModels.jetFlame());
-        jetpackWearer = cave;
-      }
-      if (pilot) pilot.showAct();
-      return true;
-    };
     shared.reloadRadius = () => island.path.debug.ringOuterRadius;
     shared.reloadHeight = ALTAR_HEIGHT;
-    shared.onAbyssRespawn = loseMagazine;
+    shared.onAbyssRespawn = loseAbyssAmmo;
     shared.characterOccluded = characterUiOccluded;
+    shared.renderOpts = RENDER_OPTS;
     fx = shared.fx = fxMod.create(shared);
     weather = weatherMod.create({ root, renderer, camera, heightAt: mempoolIsland.groundAt, fx, centre: mempoolIsland.centre });
     // The snapshot outlives the visit, so a re-entered hub opens in the weather it left.
@@ -5991,7 +6347,9 @@
     headquarters.entropyLab = entropyLab;
     entropyLab.updateEquipment = updateLabEquipment;
     shared.clipProjectileTarget = entropyLab.phase.clipTarget;
-    shared.absorbProjectile = entropyLab.phase.absorb;
+    shared.absorbProjectile = (ax, ay, az, point, dt, source, workShot) => entropyLab.phase.absorb(ax, ay, az, point, dt)
+      || !!(workShot && source && shared.workSites[source.work.site]?.mirrorRoom && !mirrorCave.damage.broken
+        && mirrorCave.ripples.absorb(ax, ay, az, point));
     shared.onProjectileMove = (ax, ay, az, bx, by, bz, dt, source, workShot) => {
       const crossed = mirrorCave.ripples.cross(ax, ay, az, bx, by, bz, dt);
       if (!crossed || !workShot || !source || !shared.workSites[source.work.site]?.mirrorRoom || mirrorCave.damage.broken) return;
@@ -6109,26 +6467,25 @@
         }
       };
     });
-    shared.workTarget = (cave, out, sample) => clankers ? clankers.target(cave, out, sample) : false;
+    shared.workTarget = (cave, out, sample) => {
+      if (!clankers || !clankers.target(cave, out, sample)) return false;
+      // Until the OBL mirror is completely gone, preserve the moving body aim
+      // pattern but land every round on the nearest panel that still exists.
+      // This hook is also called for rounds already in flight, so a newly made
+      // hole cannot pull the rest of a burst through empty space.
+      if (shared.workSites[cave.work.site]?.mirrorRoom && !mirrorCave.damage.broken) {
+        mirrorCave.damage.aimCenter(out, out.x, out.y, out.z);
+      }
+      return true;
+    };
     shared.workHit = (cave) => clankers && clankers.hit(cave);
     shared.workPlanned = (cave, site) => clankers && clankers.plan(cave, site);
     mark("pile");
     crew = shared.crew = crewMod.create(shared);
-    if (jetpackState.owned && jetpackState.owner) {
-      jetpackCarrier = crew.cavemen.get(jetpackState.owner) || null;
-      if (jetpackCarrier) {
-        jetpackCarrier.jetFuel = jetpackState.fuel;
-        crew.setJetpackOwnership(jetpackCarrier, true, hubModels.jetpack(), hubModels.jetFlame());
-      } else {
-        jetpackState.owned = false;
-        jetpackState.owner = null;
-        spawnJetpackPickup();
-      }
-    }
+    for (const cave of crew.list) crew.setJetpackOwnership(cave, true, hubModels.jetpack(), hubModels.jetFlame());
     mirrorCave.body = BL.mirrorBody.create(mirrorCave.node, crew.cavemen);
     for (const cave of crew.list) entropyLab.phase.body.track(cave.root, cave.traits.height * 2,
       Math.max(cave.headOpen.verts.length, cave.headClosed.verts.length));
-    if (jetpack) trackMirrorObject(jetpack.node, 2);
     if (magazine) trackMirrorObject(magazine.node, 1);
     for (let caveIndex = 0; caveIndex < crew.list.length; caveIndex++) {
       const cave = crew.list[caveIndex];
@@ -6280,9 +6637,6 @@
     else if (!crew.sleeping && (preloadedView || initialCharacter || initialFirstPerson)) navigate(preloadedView || "pile");
     if (initialCharacter && preloadedJetpack) {
       grantJetpack(pilot.player, preloadedJetpackWear);
-    } else if (ctx.from === null && preloadedJetpack && jetpackState.owned && !jetpackState.owner) {
-      const entry = contributors.activeRoster.find((candidate) => crew.stateOf(crew.cavemen.get(candidate.name)) === "working") || contributors.activeRoster[0];
-      grantJetpack(crew.cavemen.get(entry.name), false);
     }
     clankers.sync();
     clankerMeshes.sync();
@@ -6303,10 +6657,10 @@
       occlusionVersion: () => objectGuides.result.occlusionVersion
     });
     platformGuides = headquarters.platformGuides = BL.pileGuides.create({ pile, altar, platform: true });
-    mirrorGuides = mirrorCave.guides = BL.mirrorGuides.create({ mirror: mirrorCave, stand: matrixControl.stand });
+    mirrorGuides = mirrorCave.guides = BL.mirrorGuides.create({ mirror: mirrorCave, stand: matrixControl.button });
     // Scenery may receive outlines, but only island rock activates the hidden character view.
     // Banana interiors keep their separate covered-view pass.
-    objectGuides = headquarters.objectGuides = BL.objectGuides.create({ roots: root.children, crew, actorRoots: clankers.list.map((entry) => entry.root), exclude: [island.geometry, pathNode.geometry], providers: [pileGuides, platformGuides, mirrorGuides], propsBlockActor: false, perceptionThrough: (actor) => inBananas(actor) ? pile.core : null });
+    objectGuides = headquarters.objectGuides = BL.objectGuides.create({ roots: root.children, crew, actorRoots: clankers.list.map((entry) => entry.root), exclude: [...terrainRampRoof.geometries, pathNode.geometry], providers: [pileGuides, platformGuides, mirrorGuides], propsBlockActor: false, perceptionThrough: (actor) => inBananas(actor) ? pile.core : null });
     const guideOptions = { segmentClear: guideSegmentClear, objectClear: objectGuides.cameraClear, actorClear: objectGuides.perceptionClear, eyeAt: guideEyeAt, ownerBoundary: objectGuides.ownerBoundaryAt, ownerPerceived: objectGuides.perceived, ownerConcealed: objectGuides.concealed, ownerDistance: objectGuides.distance, ownerInView: objectGuides.inView, ownerClear: objectGuides.ownerClear, getProvider: objectGuides.getProvider };
     sightGuides = BL.sightGuides.create(guideOptions);
     bananaGuides = BL.sightGuides.create(guideOptions);
@@ -6327,7 +6681,7 @@
         get shown() {
           return pile.shown;
         },
-        stargate: pitGate, get stargateArrival() { return pitArrival; }, island, mouths: island.mouths, labels, launchers, camera, weather, chain, beasts, pokeBeast, useProp, refreshChainSign, get chainSign() { return chainSign; }, get poolIsland() { return mempoolIsland; }, cameraPose: POSITION_POSE, crew, fx, controls: pilot.controls, props, altar, path: island.path.debug, headquarters, jumbotron, fireworks: launchFireworks, get fireworksPending() { return fireworksShells.length; }, clankers, clankerPlay,
+        terrainSections, caveSections, cutawayPaths: CUTAWAY_PATH_STATE, terrainRampRoof, get cutawayTravelRamp() { return cutawayTravelRamp; }, get cutawayTravelChannel() { return cutawayTravelChannel; }, get cutawayTravelStation() { return cutawayTravelStation; }, oogaPortal: pitGate, get oogaPortalArrival() { return pitArrival; }, island, mouths: island.mouths, labels, launchers, camera, weather, chain, beasts, pokeBeast, useProp, refreshChainSign, get chainSign() { return chainSign; }, get poolIsland() { return mempoolIsland; }, cameraPose: POSITION_POSE, crew, fx, controls: pilot.controls, props, altar, path: island.path.debug, headquarters, jumbotron, fireworks: launchFireworks, get fireworksPending() { return fireworksShells.length; }, clankers, clankerPlay,
         scenery: {
           get candidateCount() { return scenery.length; },
           get visibleCount() { return sceneryVisible; },
@@ -6345,7 +6699,9 @@
           get pressed() { return matrixControl.pressed; },
           get near() { return matrixControl.near; },
           get button() { return matrixControl.button; },
-          get stand() { return matrixControl.stand; },
+          get lights() { return matrixControl.lights; },
+          get lever() { return matrixControl.lever; },
+          get grip() { return matrixControl.grip; },
           get x() { return matrixControl.x; },
           get z() { return matrixControl.z; },
           get visibleHeight() { return 0; },
@@ -6521,21 +6877,15 @@
         magazine: { state: magazineState, get pickup() { return magazine; }, reveal: revealMagazine, grant: grantMagazine },
         get jetpack() {
           return {
-            pickup: jetpack,
-            state: jetpackState,
-            get owned() { return jetpackState.owned; },
-            get carrier() { return jetpackCarrier; },
-            get wearer() { return jetpackWearer; },
+            pickup: null,
+            state: null,
+            get owned() { return crew.list.length > 0 && crew.list.every(cave => cave.jetpackOwned); },
+            get carrier() { return crew.player; },
+            get wearer() { return crew.player?.jet ? crew.player : null; },
             grant: (cave = crew.player, wear = false) => cave ? grantJetpack(cave, wear) : false,
             toggle: toggleJetpack,
-            dropHost: () => jetpack && jetpack.host ? dropJetpackFromCloud(jetpack.host, jetpack.node.position.x, jetpack.node.position.z) : false,
-            forceHostWrap: () => {
-              if (!jetpack || !jetpack.host) return false;
-              const cloud = jetpack.host;
-              if (cloud.beside) cloud.node.position.z = CLOUD_WRAP + 0.01;
-              else cloud.node.position.x = CLOUD_WRAP + 0.01;
-              return true;
-            }
+            dropHost: () => false,
+            forceHostWrap: () => false
           };
         }
       }
@@ -6559,6 +6909,7 @@
     mark("covered-view");
   };
   const leave = () => {
+    clearCutawayHidden();
     pitArrival = null;
     pitGate.dispose();
     pitGate = null;
@@ -6575,6 +6926,25 @@
     if (chainSign && chainSign.node.geometry) renderer.releaseGeometry(chainSign.node.geometry);
     chainSign = null;
     weather.dispose();
+    for (const entry of terrainSections) { entry.cap.dispose(); removeChild(entry.cap.node.parent, entry.cap.node); }
+    for (const entry of caveSections) { entry.cap.dispose(); removeChild(entry.cap.node.parent, entry.cap.node); }
+    terrainSections.length = caveSections.length = 0;
+    terrainRampRoof.dispose();
+    RENDER_OPTS.cutawayRegionCount = 0;
+    RENDER_OPTS.cutawayRegions.length = 0;
+    RENDER_OPTS.birdsEyeCutaway = false;
+    RENDER_OPTS.cutawayFade = RENDER_OPTS.cutawayCloudMix = RENDER_OPTS.cutawayRockMix = 0;
+    cutawayHeight = NaN;
+    cutawayProgress = NaN;
+    cutawayLevel = cutawayHillMix = 0;
+    cutawayFeet = cutawayCameraMix = cutawayRestoreMix = 0;
+    cutawayCarryActive = false;
+    cutawayX = cutawayZ = cutawayHeadY = 0;
+    cutawayHill = false;
+    cutawayPlayer = null;
+    cutawayTravelRamp = null; cutawayTravelChannel = -1; cutawayTravelStation = 0;
+    CUTAWAY_PATH_STATE.lo.fill(0); CUTAWAY_PATH_STATE.hi.fill(0); CUTAWAY_PATH_STATE.mix.fill(0); CUTAWAY_PATH_STATE.windowMix.fill(0); CUTAWAY_PATH_STATE.active = 0; CUTAWAY_PATH_STATE.version++;
+    cutawayRestoreTime = CUTAWAY_RESTORE_TIME;
     window.clearTimeout(hintTimer);
     if (positionDebug) {
       positionDebug.removeEventListener("click", copyPositionDebug);
@@ -6582,7 +6952,6 @@
       positionDebug.removeAttribute("data-pose");
       positionDebug.removeAttribute("data-copied");
     }
-    syncJetpackFuel();
     clankerPlay.dispose();
     breakables.dispose();
     crates.dispose();
@@ -6634,6 +7003,7 @@
     closedCaveZones.length = 0;
     cloudHit = null;
     RENDER_OPTS.lightCount = 0;
+    RENDER_OPTS.cutawayMaxY = 1e6;
     MATRIX_WORLD.active = MATRIX_WORLD.direction = MATRIX_WORLD.radius = MATRIX_WORLD.permanentCave = 0;
     cameraCaveIndex = 0;
     cameraEntranceIndex = 0;
@@ -6657,7 +7027,7 @@
     input.dispose();
     hud.dispose();
     // Drop every per-visit ref but the cached island.
-    pathNode = altar = hud = hooks = input = pilot = fx = cameraCover = bananaCover = solids = rockGuides = objectGuides = sightGuides = bananaGuides = pileGuides = platformGuides = mirrorGuides = pile = crew = crates = critters = clock = presets = jetpack = jetpackState = jetpackCarrier = jetpackWearer = lastJetpackCloud = mirrorCave = matrixCave = matrixControl = gateRain = fire = headquarters = positionDebug = dockStairs = overlayCanvas = null;
+    terrainRampRoof = pathNode = altar = hud = hooks = input = pilot = fx = cameraCover = bananaCover = solids = rockGuides = objectGuides = sightGuides = bananaGuides = pileGuides = platformGuides = mirrorGuides = pile = crew = crates = critters = clock = presets = mirrorCave = matrixCave = matrixControl = gateRain = fire = headquarters = positionDebug = dockStairs = overlayCanvas = null;
     beasts.clear();
     magazine = magazineState = breakables = weather = mempoolIsland = clankers = clankerPlay = null;
     hubScene.input = hubScene.debug = null;
@@ -6682,7 +7052,8 @@
     id: "hub", enter, update, overlay, onDonation, onKey, onLootCleared, renderOpts: RENDER_OPTS, leave, stats, liveGeometry,
     root: null, camera: null, input: null, debug: null,
     get inMotion() {
-      if (pile.inMotion || fx.inMotion || breakables.inMotion || weather.active || jetpack || magazine && magazine.revealed || MATRIX_WORLD.active || mirrorGuides.state.doorway || mirrorCave.damage.active || mirrorCave.ripples.active || mirrorCave.body.active || entropyLab.phase.ripples.active || entropyLab.phase.body.contacts || entropyLab.phase.body.active) return true;
+      if (cutawayRestoreTime < CUTAWAY_RESTORE_TIME) return true;
+      if (pile.inMotion || fx.inMotion || breakables.inMotion || weather.active || magazine && magazine.revealed || MATRIX_WORLD.active || mirrorGuides.state.doorway || mirrorCave.damage.active || mirrorCave.ripples.active || mirrorCave.body.active || entropyLab.phase.ripples.active || entropyLab.phase.body.contacts || entropyLab.phase.body.active) return true;
       for (const sign of headquarters.roomSigns) if (sign.velocity || sign.node.rotation.x) return true;
       for (let i = 0; i < matrixGates.length; i++) if (matrixCave && (matrixGates[i].raising || matrixCave.unlocked && matrixGates[i].node.position.y !== MATRIX_GATE_HIDDEN_Y)) return true;
       return false;

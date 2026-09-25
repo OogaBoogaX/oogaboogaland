@@ -2056,7 +2056,7 @@ const session = (url, steps, opts, final) => output.run({ lines: [], results: []
     const browser = b;
     watchdog = setTimeout(() => { overran = true; browser.close(); }, SESSION_MS);
     // Install before scripts/boot: observe every DSB runtime factory and prohibit live requests.
-    if (steps.some(([name]) => name.startsWith("stargate"))) await b.send("Page.addScriptToEvaluateOnNewDocument", { source: `(() => {
+    if (steps.some(([name]) => name.startsWith("Ooga Portal"))) await b.send("Page.addScriptToEvaluateOnNewDocument", { source: `(() => {
       const counts = window.__gateDormancy = { enter: 0, land: 0, zuzu: 0, data: 0, tv: 0, audio: 0, chat: 0, fetch: 0, socket: 0, radio: 0 };
       const watch = (object, key, method, counter) => {
         let value;
@@ -2071,7 +2071,7 @@ const session = (url, steps, opts, final) => output.run({ lines: [], results: []
         namespace = value;
         // Clock injection exercises elapsed deadlines without depending on this VM's frame rate.
         window.__gateClock = 0; let gate;
-        Object.defineProperty(value, "stargate", { configurable: true, get: () => gate, set: next => {
+        Object.defineProperty(value, "oogaPortal", { configurable: true, get: () => gate, set: next => {
           gate = next; const create = next.create;
           next.create = options => create({ ...options, now: options.now || (() => window.__gateClock) });
         } });
@@ -3122,6 +3122,34 @@ const walkKeys = async (b, who, x, z, yaws, seconds) => {
   return rows;
 };
 const allWalk = (rows) => Object.values(rows).every((r) => r.ok);
+const hubSheetPersistence = { name: "side panel persistence", why: "rule: a first visit starts folded, while later visits restore both the folded state and selected tab", run: async (b) => {
+  const url = hubPage(src, "pos=0");
+  await b.evaluate(`localStorage.removeItem("oogaboogaland.sheet.v1")`);
+  await b.open(url);
+  await untilReady(b);
+  const read = `(() => { const sheet = document.getElementById("sheet"), tab = document.querySelector("[data-tab][aria-selected='true']").dataset.tab, saved = localStorage.getItem("oogaboogaland.sheet.v1"); return { open: sheet.dataset.open, tab, panel: !document.querySelector('[data-panel="' + tab + '"]').hidden, saved: saved && JSON.parse(saved) }; })()`;
+  const first = await b.evaluate(read);
+  await b.evaluate(`document.getElementById("sheet-bananas").click()`);
+  const opened = await b.evaluate(read);
+  await b.open(url);
+  await untilReady(b);
+  const restored = await b.evaluate(read);
+  await b.evaluate(`document.getElementById("sheet-bananas").click()`);
+  await b.open(url);
+  await untilReady(b);
+  const closed = await b.evaluate(read);
+  await b.evaluate(`localStorage.removeItem("oogaboogaland.sheet.v1")`);
+  record("side panel: first load is closed and reloads restore its open state and selected tab", first.open === "false" && first.tab === "roster" && first.panel && first.saved === null
+    && opened.open === "true" && opened.tab === "bananas" && opened.saved?.open && opened.saved.tab === "bananas"
+    && restored.open === "true" && restored.tab === "bananas" && restored.panel
+    && closed.open === "false" && closed.tab === "bananas" && !closed.saved.open && closed.saved.tab === "bananas", JSON.stringify({ first, opened, restored, closed }));
+} };
+const hubBlockHeight = { name: "header clock and block height", why: "rule: the single-digit clock is centered from its visible glyphs with a time zone, and the shared chain reading is shown beneath it", run: async (b) => {
+  const before = await b.evaluate(`(() => { const clock = document.getElementById("world-clock"), label = clock.getAttribute("aria-label"), text = label.replace(/^Ooga Booga time /, ""), cells = [...text].reduce((sum, ch) => sum + (ch === " " ? 2 : 4), -1), zone = (new Intl.DateTimeFormat("en-US", { timeZoneName: "short" }).formatToParts(new Date()).find(part => part.type === "timeZoneName")?.value || "UTC").toUpperCase().replaceAll("−", "-"); return { height: document.getElementById("world-block-height").textContent, bananas: !!document.getElementById("world-banana-count"), label, text, zone, cells, viewWidth: clock.querySelector("svg").viewBox.baseVal.width, cssWidth: parseFloat(clock.style.width) }; })()`);
+  await b.evaluate(`BL.mempool.emit({ type: "block", height: 900123, txCount: 3210 })`);
+  const after = await b.evaluate(`(() => { const B = __ooga, height = document.getElementById("world-block-height"), block = document.getElementById("world-block"); const shown = height.textContent; B.hud.setMeter(42, 60, "Ready"); return { shown, afterMeter: height.textContent, label: block.getAttribute("aria-label"), bananas: !!document.getElementById("world-banana-count"), icon: !!block.querySelector(".banana-icon") }; })()`);
+  record("header: a single-digit clock is centered from its displayed time and local zone, while the chain feed paints block height below it and banana-meter updates cannot overwrite it", before.height === "\u2014" && !before.bananas && before.text === `9:00 AM ${before.zone}` && before.viewWidth === before.cells && Math.abs(before.cssWidth - before.cells / 6) < 1e-6 && after.shown === "900,123" && after.afterMeter === after.shown && after.label === "Bitcoin block height 900123" && !after.bananas && !after.icon, JSON.stringify({ before, after }));
+} };
 const hubWalking = { name: "hub walking", why: "regression: steering keys came out mirrored, and the removed hub Agent could still be summoned", run: async (b) => {
   const ooga = await walkKeys(b, "portlandhodl", -8, 8, [0, 2.2], 0.6);
   await b.evaluate(`window.__ooga.pilot.release(true)`);
@@ -3189,9 +3217,20 @@ const poolLeave = { name: "pool leave", why: "rule: Escape takes the player from
 } };
 
 // The Matrix room and the mirror, each inside one evaluate so no real frame falls between the steps.
-const hubMatrix = { name: "hub matrix", why: "rule: the room button raises the mirror's bars and turns the glyph wave on, and pressed out puts both back", run: async (b) => {
-  const r = await b.evaluate(`(() => { const B = window.__ooga, G = B.matrixGate, M = B.mirrorCave, W = B.renderOpts.matrix, m = M.mouth, g = M.gate, a = B.cavemen.get("portlandhodl"); if (B.crew.player !== a) B.pilot.possess(a); B.pilot.navigate({ position: { x: G.x + Math.sin(m.ry) * 0.8, y: m.floorY, z: G.z + Math.cos(m.ry) * 0.8 }, yaw: m.ry, pitch: 0.3, dist: 3 }); B.advance(0.5, 1 / 60); const snap = () => ({ pressed: G.pressed, bars: +g.node.position.y.toFixed(2), wave: W.active, radius: +W.radius.toFixed(1), glyphs: W.livingGlobal }); const before = { near: G.near, ...snap() }; const pressedIn = G.press(); B.advance(3, 1 / 60); const on = snap(); const pressedOut = G.press(); B.advance(6, 1 / 60); return { before, pressedIn, on, pressedOut, off: snap() }; })()`);
-  record("hub matrix: the room button raises the mirror's bars and spreads the glyph wave, and pressed again lowers them and ends it", r.before.near && !r.before.wave && r.before.bars === 0 && r.pressedIn && r.on.pressed && r.on.bars > 3 && r.on.wave && r.on.radius > 30 && r.on.glyphs && r.pressedOut && !r.off.pressed && r.off.bars === 0 && !r.off.wave && !r.off.glyphs, JSON.stringify(r));
+const hubMatrix = { name: "hub matrix", why: "rule: the room lever raises the mirror's bars and turns the glyph wave on, and pulling it back down puts both back", run: async (b) => {
+  const r = await b.evaluate(`(() => { const B = window.__ooga, G = B.matrixGate, M = B.mirrorCave, W = B.renderOpts.matrix, D = BL.scenes.hub.debug.matrixCave, m = M.mouth, g = M.gate, a = B.cavemen.get("portlandhodl"); if (B.crew.player !== a) B.pilot.possess(a); B.pilot.navigate({ position: { x: G.x + Math.sin(m.ry) * 0.8, y: m.floorY, z: G.z + Math.cos(m.ry) * 0.8 }, yaw: m.ry, pitch: 0.3, dist: 3 }); B.advance(0.5, 1 / 60); const snap = () => ({ pressed: G.pressed, lever: +G.lever.rotation.x.toFixed(2), bars: +g.node.position.y.toFixed(2), wave: W.active, radius: +W.radius.toFixed(1), glyphs: W.livingGlobal, lights: G.lights.matrixLiving, grip: G.grip.matrixLiving, frame: !!G.button.matrixLiving, arm: !!G.lever.matrixLiving }); const before = { near: G.near, ...snap() }; const pressedIn = G.press(); B.advance(3, 1 / 60); const on = snap(), originalQuality = B.renderer.quality, tiers = []; for (const quality of ["high", "medium", "low"]) { B.renderer.setQuality(quality); B.advance(1 / 60, 1 / 60); tiers.push({ quality: D.quality, density: D.qualityDensity, coverage: D.drawnGlyphCount / D.surfaceGlyphCount }); } B.renderer.setQuality(originalQuality); B.advance(1 / 60, 1 / 60); const pressedOut = G.press(); B.advance(6, 1 / 60); return { before, pressedIn, on, tiers, pressedOut, off: snap() }; })()`);
+  record("hub matrix: pushing the glyphed room lever up lights its green accents, raises the mirror's bars and spreads the glyph wave; pulling it down reverses each change", r.before.near && r.before.lever > 2.5 && !r.before.wave && !r.before.lights && !r.before.grip && !r.before.frame && !r.before.arm && r.before.bars === 0 && r.pressedIn && r.on.pressed && r.on.lever < 0.5 && r.on.lights && r.on.grip && !r.on.frame && !r.on.arm && r.on.bars > 3 && r.on.wave && r.on.radius > 30 && r.on.glyphs && r.pressedOut && !r.off.pressed && r.off.lever > 2.5 && !r.off.lights && !r.off.grip && r.off.bars === 0 && !r.off.wave && !r.off.glyphs, JSON.stringify(r));
+  record("hub matrix: high, medium and low WebGL quality retain all glyph lanes instead of exposing black backing panels", r.tiers.every((tier, i) => tier.quality === ["high", "medium", "low"][i] && tier.density === 1 && tier.coverage > 0.55), JSON.stringify(r.tiers));
+  const carved = await b.evaluate(`(() => { const B = __ooga, D = BL.scenes.hub.debug, skip = new Set(["c730", "c5"]), rooms = new Map(B.mouths.map(mouth => [mouth.id, mouth.room])); return {
+    caves: D.matrixCave.caves.filter(cave => !skip.has(cave.id)).map(cave => ({ id: cave.id, terrain: cave.terrainFaces, counts: { ...cave.surfaceCounts } })),
+    regions: D.caveSections.map(entry => { const room = rooms.get(entry.region.id); return { id: entry.region.id, width: entry.region.halfWidth, depth: entry.region.halfDepth, expectedWidth: room.w / 2 + 0.45, expectedDepth: (room.to + 1.6) / 2 }; }),
+    sealed: B.matrixGate.sealed.map(entry => ({ id: entry.mouth.id, visible: entry.node.visible, stop: entry.stopZ }))
+  }; })()`);
+  record("hub caves: every ordinary carved chamber feeds complete Matrix surfaces, fitted bird's-eye roof regions and the two dormant cave seals", carved.caves.length === 6 && [...new Set(carved.caves.map(cave => cave.id))].sort().join() === "c1,c10,c11,c2,c3,c9"
+    && carved.caves.every(cave => cave.terrain > 0 && cave.counts.floor > 0 && cave.counts.ceiling > 0 && cave.counts.wall > 0)
+    && carved.regions.length === 4 && carved.regions.map(region => region.id).sort().join() === "c1,c10,c11,c9"
+    && carved.regions.every(region => Math.abs(region.width - region.expectedWidth) < 1e-7 && Math.abs(region.depth - region.expectedDepth) < 1e-7)
+    && carved.sealed.length === 2 && carved.sealed.map(entry => entry.id).sort().join() === "c2,c3" && carved.sealed.every(entry => entry.visible && Number.isFinite(entry.stop)), JSON.stringify(carved));
 } };
 const hubMirror = { name: "hub mirror", why: "rule: 68 damage shatters the mirror, which unlocks its gate, ends the glyph hint and stays broken for the visit", run: async (b) => {
   const r = await b.evaluate(`(() => { const B = window.__ooga, M = B.mirrorCave, g = M.gate, w = M.node.world, G = B.matrixGate, m = M.mouth; B.pilot.navigate({ position: { x: G.x + Math.sin(m.ry) * 0.8, y: m.floorY, z: G.z + Math.cos(m.ry) * 0.8 }, yaw: m.ry, pitch: 0.3, dist: 3 }); B.advance(0.5, 1 / 60); const before = { broken: M.damage.broken, locked: g.locked, hint: M.guides.state.doorway }; M.damage.hit(67.5, w[12], w[13], w[14]); B.advance(1 / 60, 1 / 60); const whole = { broken: M.damage.broken, locked: g.locked }; M.damage.hit(0.5, w[12], w[13], w[14]); B.advance(1 / 60, 1 / 60); const u0 = M.guides.state.doorwayUpdates; B.advance(1, 1 / 60); const after = { broken: M.damage.broken, shattered: M.shattered, locked: g.locked, reveal: M.node.mirrorReveal, hint: M.guides.state.doorway, frozen: M.guides.state.doorwayUpdates === u0 }; B.go("pool"); let n = 0; while ((B.transitioning || B.scene !== "pool") && n++ < 600) B.advance(1 / 30, 1 / 30); B.go("hub"); n = 0; while ((B.transitioning || B.scene !== "hub") && n++ < 600) B.advance(1 / 30, 1 / 30); B.advance(0.5, 1 / 60); const N = B.mirrorCave; return { before, whole, after, back: { broken: N.damage.broken, shattered: N.shattered, locked: N.gate.locked, reveal: N.node.mirrorReveal, hint: N.guides.state.doorway } }; })()`);
@@ -3206,7 +3245,7 @@ const canvasTour = { name: "canvas2d tour", why: "contract: the Canvas 2D fallba
 
 // Weapons and the jetpack, through real keys with time driven by advance: melee breaks each prop in its
 // share of hits and it comes back, the AK spends and swaps magazines, the jetpack climbs, burns, refills,
-// and a fall into the abyss costs both with one notice.
+// and a fall into the abyss keeps the permanent pack while emptying loaded and spare magazines.
 const tapKey = async (b, key) => {
   const code = key === " " ? "Space" : /^[0-9]$/.test(key) ? "Digit" + key : "Key" + key.toUpperCase();
   await b.send("Input.dispatchKeyEvent", { type: "keyDown", key, code, text: key });
@@ -3271,7 +3310,7 @@ const hubAk = { name: "hub ak", why: "regression: R did nothing unless the playe
   record("hub ak: V fires a burst of three from the magazine, an empty magazine fires nothing, the bananas hit, and R swaps in the full spare without aiming", start.ammo === 6 && one.ammo === 3 && two.ammo === 0 && dry.shots === two.shots && hit && swapped.ammo === 30 && swapped.spares.every((n) => n === 0), JSON.stringify({ start, one, two, dry, hit, swapped }));
 } };
 const JET_STATE = `(() => { const c = window.__ooga.crew.player, J = window.__ooga.jetpack; return { worn: !!c.jet, owned: J.owned, fuel: +c.jetFuel.toFixed(3), feet: +(c.root.position.y - c.baseY).toFixed(2), pickup: !!(J.pickup && J.pickup.host), toast: (document.getElementById("toast") || {}).textContent }; })()`;
-const hubJetpack = { name: "hub jetpack", why: "rule: J wears the jetpack, Space climbs on fuel that refills on the ground, and the abyss takes it back to a cloud with one notice", run: async (b) => {
+const hubJetpack = { name: "hub jetpack", why: "rule: every Ooga permanently owns a J-toggleable jetpack, while abyss respawns remove only loaded and spare AK ammo", run: async (b) => {
   await b.evaluate(`(() => { const B = window.__ooga; B.pilot.navigate({ position: { x: -8, y: B.crew.player.root.position.y, z: 16 }, yaw: -Math.PI / 2, pitch: 0.3, dist: 5 }); B.advance(0.4, 1 / 60); })()`);
   await tapKey(b, "j");
   const off = await b.evaluate(JET_STATE);
@@ -3288,8 +3327,1244 @@ const hubJetpack = { name: "hub jetpack", why: "rule: J wears the jetpack, Space
   const fell = await b.evaluate(`(() => { const B = window.__ooga, a = B.crew.player, p = a.root.position; let low = Infinity; for (let i = 0; i < 20 * 30; i++) { B.advance(1 / 30, 1 / 30); low = Math.min(low, p.y - a.baseY); if (low < -50 && Math.hypot(p.x, p.z) < 12) break; } return low; })()`);
   await b.send("Input.dispatchKeyEvent", { type: "keyUp", key: "w", code: "KeyW" });
   const lost = await b.evaluate(JET_STATE);
-  const spares = await b.evaluate(`window.__ooga.crew.player.weapon.spareAmmo.length`);
-  record("hub jetpack: J takes it off and on, Space climbs on fuel, it refills on the ground, and falling off the island loses it to a cloud and the spares with one notice", !off.worn && on.worn && up.feet > 5 && up.fuel < 0.9 && down.feet < 0.5 && down.fuel === 1 && fell < -50 && !lost.owned && lost.pickup && spares === 0 && lost.toast === "Jetpack and spare magazines lost to the abyss", JSON.stringify({ off, on, up, down, fell, lost, spares }));
+  const permanent = await b.evaluate(`(() => {
+    const B = __ooga, a = B.crew.player, geometry = new Set();
+    B.headquarters.breakables.liveGeometry(geometry);
+    const rewardHasJetpack = geometry.has(BL.hubModels.jetpack());
+    const ammo = a.weapon.ammo, spares = a.weapon.spareAmmo.length, everyOwned = B.crew.list.every(cave => cave.jetpackOwned);
+    B.crew.collectMagazine(a); B.crew.damage(a, 25); B.advance(1 / 60, 1 / 60);
+    const drops = a.stunGear.drops.filter(drop => drop.active).map(drop => ({ kind: drop.kind, label: drop.label }));
+    return { ammo, spares, everyOwned, rewardHasJetpack, drops, wornAfterStun: !!a.jet };
+  })()`);
+  record("hub jetpack: J takes the permanent pack off and on, Space climbs, fuel refills, and an abyss respawn keeps it while emptying loaded and spare AK magazines", !off.worn && on.worn && up.feet > 5 && up.fuel < 0.9 && down.feet < 0.5 && down.fuel === 1 && fell < -50
+    && lost.owned && lost.worn && !lost.pickup && permanent.ammo === 0 && permanent.spares === 0 && permanent.everyOwned
+    && lost.toast === "Spare magazines and loaded AK-47 ammo lost to the abyss", JSON.stringify({ off, on, up, down, fell, lost, permanent }));
+  record("hub jetpack: breakables and clouds contain no jetpack pickup, stun keeps the pack, and dropped magazines carry a +1 MAG tag", !permanent.rewardHasJetpack && permanent.wornAfterStun
+    && permanent.drops.length === 1 && permanent.drops[0].kind === "magazine" && permanent.drops[0].label === "+1 MAG", JSON.stringify(permanent));
+} };
+
+const hubBirdsEye = { name: "birds-eye combat camera", why: "regression: centered zoom retains its world target at the screen edge, keys rotate smoothly, and carry handoffs preserve the cursor and camera distance", run: async (b) => {
+  const focusPoint = await b.evaluate(`(() => { const B = __ooga, a = B.pilot.player; B.pilot.release(true); B.advance(0.1, 1 / 60); return B.project(a.root.position.x, a.root.position.y - a.baseY + a.bodyHeight * 0.55, a.root.position.z, {}); })()`);
+  await b.click(focusPoint.x, focusPoint.y);
+  await b.click(focusPoint.x, focusPoint.y);
+  const focused = await b.evaluate(`(() => { const P = __ooga.pilot, canvas = document.getElementById("scene"), out = { mode: P.mode, combat: P.aiming, focused: document.activeElement === canvas || document.pointerLockElement === canvas }; if (document.pointerLockElement === canvas) document.exitPointerLock(); return out; })()`);
+  record("birds-eye combat: double-clicking an Ooga enters shoulder combat with mouse-look already focused", focused.mode === "shoulder" && focused.combat && focused.focused, JSON.stringify(focused));
+  const selectionModes = await b.evaluate(`(() => {
+    const B = __ooga, P = B.pilot, C = B.camera, a = P.player, rows = [];
+    P.navigate({ position: { x: -8, y: 0, z: 8 }, yaw: 0, pitch: 0.3, dist: 4 }); B.advance(1, 1 / 60);
+    const selectFrom = clearance => {
+      P.release(true);
+      const p = a.root.position, headY = p.y - a.baseY + a.headOffset + a.viewLift;
+      Object.assign(C.position, { x: p.x + 4, y: headY + clearance, z: p.z + 3 });
+      Object.assign(C.target, { x: p.x, y: headY, z: p.z }); C.up = null;
+      const before = { ...C.position };
+      P.hooks.onDoubleTap({ owner: { kind: "caveman", cave: a } });
+      const immediate = Math.hypot(C.position.x - before.x, C.position.y - before.y, C.position.z - before.z);
+      B.advance(1, 1 / 60);
+      rows.push({ clearance, selected: P.player === a, mode: P.mode, combat: P.aiming, immediate, heightError: Math.abs(C.position.y - before.y),
+        offset: Math.hypot(C.position.x - a.root.position.x, C.position.z - a.root.position.z) });
+    };
+    if (!P.aiming) P.modeAction("mode-toggle");
+    selectFrom(30);
+    P.modeAction("mode-toggle"); selectFrom(30);
+    selectFrom(20.9);
+    P.modeAction("mode-toggle"); selectFrom(5);
+    P.navigate({ position: { x: 6, y: B.island.headquarters.basement.floor, z: 0 }, yaw: 0, pitch: 0.3, dist: 4 }); B.advance(1, 1 / 60);
+    selectFrom(21); selectFrom(5);
+    return rows;
+  })()`);
+  record("possession: high free-roam double-click preserves altitude and each character's carry/combat choice, including below ground",
+    selectionModes.length === 6 && selectionModes.every(row => row.selected && row.immediate < 1e-6)
+    && selectionModes[0].mode === "birds-eye" && selectionModes[0].combat && selectionModes[0].heightError < 0.01 && selectionModes[0].offset < 0.01
+    && selectionModes[1].mode === "orbit" && !selectionModes[1].combat && selectionModes[1].heightError < 0.01
+    && selectionModes[2].mode === "shoulder" && !selectionModes[2].combat
+    && selectionModes[3].mode === "shoulder" && selectionModes[3].combat
+    && selectionModes[4].mode === "birds-eye" && selectionModes[4].combat && selectionModes[4].heightError < 0.01
+    && selectionModes[5].mode === "shoulder" && selectionModes[5].combat, JSON.stringify(selectionModes));
+  const rightViews = await b.evaluate(`(() => {
+    const B = __ooga, P = B.pilot, C = B.camera, a = P.player, canvas = document.getElementById("scene"), rows = [];
+    const pointer = type => canvas.dispatchEvent(new PointerEvent(type, {
+        bubbles: true, cancelable: true, pointerType: "mouse", pointerId: 92, isPrimary: true, button: 2,
+        buttons: type === "pointerdown" ? 2 : 0, clientX: B.renderer.size.width / 2, clientY: B.renderer.size.height / 2
+      }));
+    const click = (release = true) => { pointer("pointerdown"); if (release) pointer("pointerup"); };
+    const sample = () => ({ mode: P.mode, combat: P.aiming, distance: P.orbit.dist, wanted: P.orbit.tDist,
+      height: P.birdsEyeHeight, y: C.position.y, horizontal: Math.hypot(C.position.x - a.root.position.x, C.position.z - a.root.position.z) });
+    for (const floor of [0, B.island.headquarters.basement.floor]) {
+      P.navigate({ position: { x: -8, y: floor, z: 8 }, yaw: 0, pitch: 0.3, dist: 4 });
+      if (P.aiming) P.modeAction("mode-toggle");
+      B.advance(1, 1 / 60);
+      const before = sample(); click(); const single = sample(); click(false); const immediate = sample();
+      B.advance(2, 1 / 60); const out = sample();
+      click(); B.advance(1, 1 / 60); const back = sample();
+      P.hooks.onZoom(1.2); B.advance(2, 1 / 60); const wheelOut = sample();
+      P.hooks.onZoom(0.99); B.advance(1, 1 / 60); const wheelBack = sample();
+      rows.push({ floor, before, single, immediate, out, back, wheelOut, wheelBack });
+    }
+    P.hooks.onZoom(0.8); B.advance(1, 1 / 60); const carryFirst = sample();
+    P.hooks.onZoom(1.2); B.advance(1, 1 / 60); const carryScrollBack = sample();
+    P.hooks.onZoom(0.8); B.advance(1, 1 / 60);
+    click(); click(false); B.advance(1, 1 / 60); const carryFirstOut = sample();
+    click(); B.advance(1, 1 / 60); const carryFirstBack = sample();
+    P.hooks.onZoom(1.2); B.advance(1, 1 / 60);
+    P.modeAction("mode-toggle"); B.advance(1, 1 / 60);
+    click(); click(false); B.advance(1, 1 / 60); const combatOut = sample();
+    click(); B.advance(1, 1 / 60); const combatBack = sample();
+    P.hooks.onZoom(0.8); B.advance(1, 1 / 60); const combatFirst = sample();
+    click(); click(false); B.advance(1, 1 / 60); const combatFirstOut = sample();
+    click(); B.advance(1, 1 / 60); const combatFirstBack = sample();
+    return { rows, carryFirst, carryScrollBack, carryFirstOut, carryFirstBack, combatOut, combatBack,
+      combatFirst, combatFirstOut, combatFirstBack };
+  })()`);
+  record("view gestures: right-click returns from orbit to the prior shoulder or first-person view, and first-person scroll exits to shoulder",
+    rightViews.rows.every(r => r.single.mode === "shoulder" && !r.single.combat && Math.abs(r.immediate.y - r.before.y) < 1e-6
+      && [r.out, r.wheelOut].every(s => s.mode === "orbit" && !s.combat && Math.abs(s.distance - 6) < 0.01 && s.wanted === 6)
+      && [r.back, r.wheelBack].every(s => s.mode === "shoulder" && !s.combat))
+    && rightViews.rows[0].out.horizontal < 0.01
+    && Math.abs(rightViews.rows[1].out.y - rightViews.rows[1].before.y) < 0.01
+    && rightViews.carryFirst.mode === "first-person" && !rightViews.carryFirst.combat
+    && rightViews.carryScrollBack.mode === "shoulder" && !rightViews.carryScrollBack.combat
+    && rightViews.carryFirstOut.mode === "orbit" && !rightViews.carryFirstOut.combat
+    && rightViews.carryFirstBack.mode === "first-person" && !rightViews.carryFirstBack.combat
+    && rightViews.combatOut.mode === "birds-eye" && rightViews.combatOut.combat && rightViews.combatOut.height === 21
+    && rightViews.combatBack.mode === "shoulder" && rightViews.combatBack.combat
+    && rightViews.combatFirst.mode === "first-person" && rightViews.combatFirst.combat
+    && rightViews.combatFirstOut.mode === "birds-eye" && rightViews.combatFirstOut.combat
+    && rightViews.combatFirstBack.mode === "first-person" && rightViews.combatFirstBack.combat, JSON.stringify(rightViews));
+  const shoulderFraming = await b.evaluate(`(() => {
+    const B = __ooga, P = B.pilot, a = P.player, rows = [];
+    const sample = () => {
+      const C = B.camera, p = a.root.position, dx = C.position.x - C.target.x, dz = C.position.z - C.target.z, length = Math.hypot(dx, dz);
+      const side = ((C.position.x - p.x) * dz - (C.position.z - p.z) * dx) / length / a.traits.height;
+      BL.scene.updateWorld(a.root); const w = a.parts.head.world, head = B.project(w[12], w[13], w[14], {});
+      return { mode: P.mode, side, headOffset: B.renderer.size.width / 2 - head.x };
+    };
+    for (const location of [{ x: -8, y: 0, z: 8 }, { x: 6, y: B.island.headquarters.basement.floor, z: 0 }]) {
+      P.navigate({ position: location, yaw: 0, pitch: 0.3, dist: 4 }); B.advance(1, 1 / 60);
+      const baseline = sample();
+      for (const offset of [0, 0.4]) {
+        P.hooks.onZoom(1.2); B.advance(1, 1 / 60);
+        const point = B.project(a.root.position.x + offset, location.y + 0.01, a.root.position.z, {});
+        P.hooks.onOrbit(-1e6, -1e6); P.hooks.onOrbit(point.x, point.y); B.advance(0.2, 1 / 60);
+        P.hooks.onZoom(0.001); B.advance(2, 1 / 60); const settled = sample();
+        P.hooks.onOrbit(12, 0); B.advance(0.7, 1 / 60);
+        rows.push({ floor: location.y, offset, baseline, settled, looking: sample() });
+      }
+    }
+    return rows;
+  })()`);
+  record("shoulder combat: zooming toward the feet keeps the normal head-side framing above and below ground, including after mouse-look", shoulderFraming.length === 4 && shoulderFraming.every(row => row.baseline.side > 0.5 && [row.settled, row.looking].every(s => s.mode === "shoulder" && Math.abs(s.side - row.baseline.side) < 0.001 && s.headOffset > 0)), JSON.stringify(shoulderFraming));
+  const entry = await b.evaluate(`(() => {
+    const B = __ooga, P = B.pilot, C = B.camera, a = P.player;
+    P.navigate({ position: { x: -8, y: 0, z: 8 }, yaw: 0, pitch: 0.3, dist: 4 }); B.advance(1, 1 / 60);
+    const view = BL.math.mat4.create();
+    window.__birdsSnapshot = () => { const rect = document.getElementById("scene").getBoundingClientRect(), reticle = document.getElementById("weapon-reticle"), screen = B.project(a.root.position.x, a.root.position.y, a.root.position.z, {});
+      BL.math.mat4.lookAt(view, C.position, C.target, C.up || { x: 0, y: 1, z: 0 });
+      return { mode: P.mode, combat: P.aiming, overhead: P.birdsEye, mix: P.birdsEyeMix, height: P.birdsEyeHeight,
+      altitude: C.position.y - (a.root.position.y - a.baseY), horizontal: Math.hypot(C.position.x - a.root.position.x, C.position.z - a.root.position.z),
+      down: (C.position.y - C.target.y) / Math.hypot(C.target.x - C.position.x, C.target.y - C.position.y, C.target.z - C.position.z),
+      yaw: a.root.rotation.y, x: C.position.x, y: C.position.y, z: C.position.z,
+      distance: Math.hypot(C.position.x - a.root.position.x, C.position.y - a.root.position.y, C.position.z - a.root.position.z),
+      center: screen ? Math.hypot(screen.x - B.renderer.size.width / 2, screen.y - B.renderer.size.height / 2) : Infinity,
+      pointer: P.cursor.active ? [P.cursor.x, P.cursor.y] : [rect.left + parseFloat(reticle.style.left), rect.top + parseFloat(reticle.style.top)],
+      forward: [-view[2], -view[6], -view[10]], screenUp: [view[1], view[5], view[9]], orthoMix: C.orthoMix || 0, fov: C.fov,
+      up: C.up ? [C.up.x, C.up.y, C.up.z] : [0, 1, 0], cutoff: B.renderOpts.cutawayMaxY }; };
+    const weaponDirection = () => { BL.scene.updateWorld(a.root); const w = a.parts.gun.world, length = Math.hypot(w[8], w[9], w[10]); return [w[8] / length, w[9] / length, w[10] / length]; };
+    const weaponBefore = weaponDirection(), before = __birdsSnapshot(); P.hooks.onZoom(1.2); P.update(0);
+    const weaponAfter = weaponDirection(), weaponSnap = Math.hypot(...weaponAfter.map((value, i) => value - weaponBefore[i]));
+    const immediate = Math.hypot(C.position.x - before.x, C.position.y - before.y, C.position.z - before.z);
+    let maxStep = 0, finite = true, last = [C.position.x, C.position.y, C.position.z];
+    for (let i = 0; i < 90; i++) { B.advance(1 / 60, 1 / 60); const p = C.position;
+      maxStep = Math.max(maxStep, Math.hypot(p.x - last[0], p.y - last[1], p.z - last[2]));
+      finite = finite && [p.x, p.y, p.z, C.target.x, C.target.y, C.target.z].every(Number.isFinite); last = [p.x, p.y, p.z]; }
+    return { before, immediate, weaponSnap, maxStep, finite, after: __birdsSnapshot() };
+  })()`);
+  record("birds-eye combat: shoulder zoom enters directly overhead with a continuous finite camera path", entry.before.mode === "shoulder" && entry.after.mode === "birds-eye" && entry.after.overhead && entry.after.combat && entry.after.mix === 1 && entry.after.horizontal < 1e-6 && entry.after.down > 0.999999 && entry.immediate < 1e-6 && entry.weaponSnap < 1e-5 && entry.maxStep < 3 && entry.finite, JSON.stringify(entry));
+  const outlines = await b.evaluate(`(() => { const B = __ooga, H = B.headquarters; B.advance(0.1, 1 / 60); return {
+    mode: B.pilot.mode, combat: B.pilot.aiming, wallLines: H.sightGuides.structureCount, objectLines: H.sightGuides.objectCount,
+    wall: !!H.sightGuides.structure || !!H.sightGuides.structures, bananaWall: !!H.bananaGuides.structure || !!H.bananaGuides.structures,
+    guideLines: H.cameraCover.guideLines, outlined: H.cameraCover.outlined
+  }; })()`);
+  record("birds-eye combat: wall and object outline passes stay disabled", outlines.mode === "birds-eye" && outlines.combat && !outlines.wallLines && !outlines.objectLines
+    && !outlines.wall && !outlines.bananaWall && !outlines.guideLines && !outlines.outlined, JSON.stringify(outlines));
+  const size = await b.evaluate(`(() => { const r = document.getElementById("scene").getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2, w: r.width, h: r.height }; })()`);
+  await b.mouse("mouseMoved", size.x, size.y, { button: "none" });
+  await b.evaluate(`__ooga.pilot.focusAim()`);
+  await b.mouse("mouseMoved", size.x + size.w * 0.22, size.y + size.h * 0.14, { button: "none" });
+  await b.evaluate(`__ooga.advance(0.5, 1 / 60)`);
+  const aim = await b.evaluate(`__birdsSnapshot()`);
+  const turn = Math.abs(Math.atan2(Math.sin(aim.yaw - entry.after.yaw), Math.cos(aim.yaw - entry.after.yaw)));
+  record("birds-eye combat: real mouse movement changes character facing without orbiting the overhead camera", turn > 0.15 && aim.horizontal < 1e-6 && aim.down > 0.999999 && aim.up.every((n, i) => Math.abs(n - entry.after.up[i]) < 1e-6), JSON.stringify({ before: entry.after, aim, turn }));
+  const centered = await b.evaluate(`(() => {
+    const B = __ooga, P = B.pilot, R = B.renderer, a = P.player, reticle = document.getElementById("weapon-reticle"), canvas = document.getElementById("scene"), rect = canvas.getBoundingClientRect(), ray = {};
+    P.hooks.onZoom(60 / P.birdsEyeHeight); B.advance(1.5, 1 / 60); const before = __birdsSnapshot();
+    const width = R.size.width, height = R.size.height, inset = parseFloat(reticle.style.getPropertyValue("--reticle-radius"));
+    const pointer = () => ({ x: parseFloat(reticle.style.left), y: parseFloat(reticle.style.top) });
+    // In a settled overhead projection every point on this vertical ray shares
+    // the same pixel, whether the actual hit is land or an item's raised face.
+    const pointAt = (x, y) => { R.ray(x, y, B.camera, ray); const t = (a.root.position.y - a.baseY - a.hop - ray.oy) / ray.dy;
+      return { x: ray.ox + ray.dx * t, y: ray.oy + ray.dy * t, z: ray.oz + ray.dz * t }; };
+    const start = { x: width * 0.84, y: height * 0.64 }, original = pointAt(start.x, start.y);
+    P.hooks.onOrbit(-1e6, -1e6); P.hooks.onOrbit(start.x, start.y);
+    // Scroll before another frame refreshes aim: the anchor must come from
+    // this pointer position, not the previous assisted hit or cached ground ray.
+    let anchor = original, center = 0, horizontal = 0, minHeight = before.height, screenError = 0, edgeError = 0, directionError = 0, boundsError = 0, inside = 0, outside = 0;
+    const sample = () => {
+      const s = __birdsSnapshot(), p = pointer(), projected = R.project(anchor.x, anchor.y, anchor.z, {});
+      center = Math.max(center, s.center); horizontal = Math.max(horizontal, s.horizontal); minHeight = Math.min(minHeight, s.height);
+      if (projected.x >= inset && projected.x <= width - inset && projected.y >= inset && projected.y <= height - inset) {
+        inside++; screenError = Math.max(screenError, Math.hypot(p.x - projected.x, p.y - projected.y));
+      } else {
+        outside++; edgeError = Math.max(edgeError, Math.min(Math.abs(p.x - inset), Math.abs(width - inset - p.x), Math.abs(p.y - inset), Math.abs(height - inset - p.y)));
+        const dx = projected.x - width / 2, dy = projected.y - height / 2, px = p.x - width / 2, py = p.y - height / 2;
+        directionError = Math.max(directionError, dx * px + dy * py > 0 ? Math.abs(dx * py - dy * px) / Math.hypot(dx, dy) : Infinity);
+      }
+      boundsError = Math.max(boundsError, inset - p.x, p.x - (width - inset), inset - p.y, p.y - (height - inset));
+    };
+    const zoom = (factor, frames = 60) => { P.hooks.onZoom(factor); for (let i = 0; i < frames; i++) { B.advance(1 / 60, 1 / 60); sample(); } };
+    zoom(0.75); const moved = pointer(); zoom(0.8); const edge = pointer(); zoom(0.9); const repeated = pointer();
+    const unlocked = document.pointerLockElement !== canvas; P.focusAim();
+    const mouse = (dx, dy) => canvas.dispatchEvent(new MouseEvent("mousemove", { bubbles: true, clientX: rect.left + start.x, clientY: rect.top + start.y, movementX: dx, movementY: dy }));
+    mouse(0, 0); B.advance(1 / 60, 1 / 60); sample(); const zero = pointer(), zeroError = Math.hypot(zero.x - repeated.x, zero.y - repeated.y);
+    zoom(1 / (0.75 * 0.8 * 0.9), 90); const returned = pointer(), returnError = Math.hypot(returned.x - start.x, returned.y - start.y);
+    zoom(0.54, 90); const clamped = pointer(), dx = -8, dy = -4;
+    // Native coordinates still describe the old cursor location; only this
+    // small relative movement should take over from the displayed edge mark.
+    mouse(dx, dy); B.advance(1 / 60, 1 / 60); const manual = pointer(), manualError = Math.hypot(manual.x - clamped.x - dx * width / rect.width, manual.y - clamped.y - dy * height / rect.height);
+    B.advance(0.2, 1 / 60); const released = pointer(), releasedError = Math.hypot(released.x - manual.x, released.y - manual.y);
+    anchor = pointAt(released.x, released.y); zoom(1 / 0.54, 90);
+    const final = pointer(), originalScreen = R.project(original.x, original.y, original.z, {});
+    P.hooks.onOrbit(-4, -2); B.advance(1 / 60, 1 / 60); const hooked = pointer(), hookError = Math.hypot(hooked.x - final.x + 4, hooked.y - final.y + 2);
+    return { before, center, horizontal, minHeight, restored: P.birdsEyeHeight, inside, outside, screenError, edgeError, directionError, boundsError,
+      travel: Math.hypot(moved.x - start.x, moved.y - start.y), edge, repeated, returnError, unlocked, zeroError, manualError, releasedError, hookError,
+      newTarget: Math.hypot(final.x - originalScreen.x, final.y - originalScreen.y) };
+  })()`);
+  record("birds-eye combat: animated zoom keeps the character centered even while aiming off-center", centered.center < 0.02 && centered.horizontal < 1e-6 && centered.minHeight < centered.before.height - 1 && Math.abs(centered.restored - centered.before.height) < 0.02, JSON.stringify(centered));
+  record("birds-eye combat: zoom tracks the fresh world point, keeps an off-screen target at the directional edge across repeated scrolls and zero-motion events, and restores it on zoom-out", centered.inside > 30 && centered.outside > 30 && centered.screenError < 0.05 && centered.edgeError < 0.05 && centered.directionError < 0.05 && centered.boundsError < 0.01 && centered.travel > 20 && centered.zeroError < 0.02 && centered.returnError < 0.05, JSON.stringify(centered));
+  record("birds-eye combat: small native mouse and orbit gestures release the tracked target without jumping to stale absolute coordinates", centered.unlocked && centered.manualError < 0.02 && centered.releasedError < 0.02 && centered.hookError < 0.02 && centered.newTarget > 20, JSON.stringify(centered));
+  const rotation = await b.evaluate(`(() => {
+    const B = __ooga, angle = () => { const s = __birdsSnapshot(); return Math.atan2(-s.up[0], -s.up[2]); }, wrap = n => Math.atan2(Math.sin(n), Math.cos(n));
+    const key = (type, k) => window.dispatchEvent(new KeyboardEvent(type, { key: k }));
+    const hold = (k, frames) => { const before = angle(); key("keydown", k); const immediate = Math.abs(wrap(angle() - before)); let total = 0, maxStep = 0, center = 0, last = before;
+      for (let i = 0; i < frames; i++) { B.advance(1 / 60, 1 / 60); const next = angle(), step = wrap(next - last); total += step; maxStep = Math.max(maxStep, Math.abs(step)); center = Math.max(center, __birdsSnapshot().center); last = next; }
+      key("keyup", k); B.advance(0.6, 1 / 60); const settled = angle(); B.advance(0.5, 1 / 60);
+      return { before, immediate, total, maxStep, center, after: angle(), stopped: Math.abs(wrap(angle() - settled)) }; };
+    const left = hold("q", 36), right = hold("e", 36), around = hold("e", 252), before = angle(); key("keydown", "n"); key("keyup", "n");
+    const immediate = Math.abs(wrap(angle() - before)); let path = 0, maxStep = 0, monotonic = true, last = before, first = null;
+    for (let i = 0; i < 90; i++) { B.advance(1 / 60, 1 / 60); const next = angle(), step = Math.abs(wrap(next - last)); if (!i) first = next;
+      monotonic = monotonic && Math.abs(next) <= Math.abs(last) + 1e-6; path += step; maxStep = Math.max(maxStep, step); last = next; }
+    return { left, right, returned: Math.abs(wrap(right.after - left.before)), around, north: { before, immediate, first, after: angle(), path, maxStep, monotonic } };
+  })()`);
+  record("birds-eye combat: held Q and E rotate smoothly in opposite directions and settle after release", rotation.left.total > 0.7 && rotation.right.total < -0.7 && [rotation.left, rotation.right].every(r => r.immediate < 1e-6 && r.maxStep < 0.04 && r.center < 0.02 && r.stopped < 0.001) && rotation.returned < 0.01, JSON.stringify(rotation));
+  const north = rotation.north;
+  record("birds-eye combat: N eases back to north along the shortest path after rotating past a full turn", Math.abs(rotation.around.total) > Math.PI * 2 && Math.abs(north.before) > 0.2 && north.immediate < 1e-6 && Math.abs(north.first) > 0.01 && Math.abs(north.first) < Math.abs(north.before) && Math.abs(north.after) < 0.001 && north.path <= Math.abs(north.before) + 0.001 && north.maxStep < 0.25 && north.monotonic, JSON.stringify(north));
+  const zoom = await b.evaluate(`(() => {
+    const B = __ooga, P = B.pilot; P.hooks.onZoom(100); B.advance(1.5, 1 / 60); const max = __birdsSnapshot();
+    P.hooks.onZoom(100); B.advance(0.5, 1 / 60); const clamped = __birdsSnapshot();
+    P.hooks.onZoom(0.75); B.advance(1, 1 / 60); const lowered = __birdsSnapshot();
+    P.hooks.onZoom(100); B.advance(1, 1 / 60); const fromMax = __birdsSnapshot();
+    const C = B.camera, before = [C.position.x, C.position.y, C.position.z]; P.hooks.onZoom(0.001);
+    const immediate = Math.hypot(C.position.x - before[0], C.position.y - before[1], C.position.z - before[2]);
+    let last = before, maxStep = 0, switchFrame = -1;
+    for (let i = 0; i < 90; i++) { B.advance(1 / 60, 1 / 60); const p = C.position;
+      maxStep = Math.max(maxStep, Math.hypot(p.x - last[0], p.y - last[1], p.z - last[2])); last = [p.x, p.y, p.z];
+      if (switchFrame < 0 && P.mode === "shoulder") switchFrame = i + 1; }
+    const shoulder = __birdsSnapshot(); P.hooks.onZoom(0.8); B.advance(1.5, 1 / 60); const first = __birdsSnapshot();
+    P.hooks.onZoom(1.2); B.advance(1.5, 1 / 60); const back = __birdsSnapshot();
+    P.hooks.onZoom(1.2); B.advance(1, 1 / 60); return { max, clamped, lowered, fromMax, immediate, maxStep, switchFrame, shoulder, first, back };
+  })()`);
+  record("birds-eye combat: a full-height inward zoom reaches the relative-height-21 shoulder handoff promptly along a continuous path, and first-person remains reachable", Math.abs(entry.after.height - 21) < 0.01 && Math.abs(zoom.max.height - zoom.clamped.height) < 0.01 && zoom.lowered.height < zoom.max.height && zoom.lowered.mode === "birds-eye" && zoom.fromMax.height > 60 && zoom.immediate < 1e-6 && zoom.maxStep < 5 && zoom.switchFrame > 0 && zoom.switchFrame < 45 && zoom.shoulder.mode === "shoulder" && zoom.first.mode === "first-person" && zoom.back.mode === "shoulder", JSON.stringify(zoom));
+  await b.mouse("mouseMoved", size.x - size.w * 0.16, size.y + size.h * 0.1, { button: "none" });
+  await b.evaluate(`__ooga.advance(0.5, 1 / 60)`);
+  const handoffs = await b.evaluate(`(() => {
+    const B = __ooga, P = B.pilot, difference = (a, b) => Math.hypot(...a.map((n, i) => n - b[i]));
+    window.__birdsHandoff = frames => {
+      const before = __birdsSnapshot(); window.dispatchEvent(new KeyboardEvent("keydown", { key: "x" })); window.dispatchEvent(new KeyboardEvent("keyup", { key: "x" }));
+      let last = before, eyeStep = 0, forwardStep = 0, upStep = 0, projectionStep = 0, radiusError = 0, cursorError = 0, fovError = 0, center = 0, blended = 0;
+      const sample = () => { const s = __birdsSnapshot();
+        eyeStep = Math.max(eyeStep, Math.hypot(s.x - last.x, s.y - last.y, s.z - last.z));
+        forwardStep = Math.max(forwardStep, difference(s.forward, last.forward)); upStep = Math.max(upStep, difference(s.screenUp, last.screenUp));
+        projectionStep = Math.max(projectionStep, Math.abs(s.orthoMix - last.orthoMix)); radiusError = Math.max(radiusError, Math.abs(s.distance - before.distance));
+        cursorError = Math.max(cursorError, difference(s.pointer, before.pointer)); fovError = Math.max(fovError, Math.abs(s.fov - before.fov));
+        if (s.overhead && s.mix === 1) center = Math.max(center, s.center);
+        if (s.orthoMix > 0 && s.orthoMix < 1) blended++;
+        last = s;
+      };
+      sample(); const immediate = { eyeStep, forwardStep, upStep, projectionStep, radiusError, cursorError };
+      for (let i = 0; i < frames; i++) { B.advance(1 / 60, 1 / 60); sample(); }
+      return { before, after: last, immediate, eyeStep, forwardStep, upStep, projectionStep, radiusError, cursorError, fovError, center, blended };
+    };
+    const carry = __birdsHandoff(90), diagonal = [];
+    for (const side of ["a", "d"]) { const before = P.orbit.tYaw; window.dispatchEvent(new KeyboardEvent("keydown", { key: "w" })); window.dispatchEvent(new KeyboardEvent("keydown", { key: side }));
+      B.advance(0.4, 1 / 60); window.dispatchEvent(new KeyboardEvent("keyup", { key: side })); window.dispatchEvent(new KeyboardEvent("keyup", { key: "w" }));
+      diagonal.push(Math.abs(Math.atan2(Math.sin(P.orbit.tYaw - before), Math.cos(P.orbit.tYaw - before)))); }
+    const yaw = P.orbit.tYaw; P.hooks.onOrbit(40, -70); B.advance(1, 1 / 60); const drag = { yaw: Math.abs(P.orbit.tYaw - yaw), down: __birdsSnapshot().down };
+    const entering = __birdsHandoff(18), entryReversed = __birdsHandoff(90);
+    const combat = __birdsHandoff(90), partial = __birdsHandoff(18), reversed = __birdsHandoff(90);
+    return { carry, diagonal, drag, entering, entryReversed, combat, partial, reversed };
+  })()`);
+  const continuous = r => Object.values(r.immediate).every(n => n < 1e-6) && r.eyeStep < 3 && r.forwardStep < 0.15 && r.upStep < 0.15 && r.projectionStep < 0.08 && r.radiusError < 0.02 && r.cursorError < 0.02 && r.fovError < 1e-6 && r.center < 0.02 && r.blended > 2;
+  record("birds-eye combat: X smoothly hands off both ways with a fixed cursor and character distance, including reversal in each direction mid-transition", [handoffs.carry, handoffs.entering, handoffs.entryReversed, handoffs.combat, handoffs.partial, handoffs.reversed].every(continuous)
+    && Math.hypot(handoffs.carry.before.pointer[0] - size.x, handoffs.carry.before.pointer[1] - size.y) > 20
+    && [handoffs.carry, handoffs.entryReversed].every(r => r.after.mode === "orbit" && !r.after.combat && r.after.orthoMix === 0)
+    && Math.abs(handoffs.carry.after.altitude - handoffs.carry.before.altitude) < 0.02 && handoffs.carry.after.down > 0.999
+    && [handoffs.entering, handoffs.partial].every(r => r.after.orthoMix > 0 && r.after.orthoMix < 1)
+    && [handoffs.combat, handoffs.reversed].every(r => r.after.mode === "birds-eye" && r.after.combat && r.after.down > 0.999999 && r.after.orthoMix === 1 && r.after.center < 0.02), JSON.stringify(handoffs));
+  record("birds-eye combat: carry orbit stays still on W+A and W+D, and manual orbit rotation remains available", handoffs.diagonal.every(n => n < 1e-6) && handoffs.drag.yaw > 0.1 && handoffs.drag.down < 0.99 && handoffs.carry.after.cutoff >= 1e5, JSON.stringify({ diagonal: handoffs.diagonal, drag: handoffs.drag, cutoff: handoffs.carry.after.cutoff }));
+  const falling = await b.evaluate(`(() => {
+    const B = __ooga, P = B.pilot, I = B.island, a = P.player, C = B.camera, clouds = BL.scenes.hub.debug.matrixCave.clouds;
+    const visible = clouds.map(c => c.node.visible), diagonal = -Math.SQRT1_2;
+    const key = (type, k) => window.dispatchEvent(new KeyboardEvent(type, { key: k, code: "Key" + k.toUpperCase(), bubbles: true }));
+    let radius = 5; while (radius < 100 && I.onLand(diagonal * radius, diagonal * radius)) radius += 0.25;
+    const x = diagonal * (radius - 1.5), z = x, start = { position: { x, y: I.surfaceAt(x, z), z }, yaw: 0, pitch: 0.4, dist: 24 };
+    const run = bird => {
+      if (P.aiming) P.modeAction("mode-toggle");
+      P.navigate(start); B.advance(1, 1 / 60);
+      if (bird) {
+        P.modeAction("mode-toggle"); key("keydown", "n"); key("keyup", "n"); B.advance(1, 1 / 60);
+        P.hooks.onOrbit(-1e6, -1e6); P.hooks.onOrbit(B.renderer.size.width * 0.9, B.renderer.size.height * 0.9); B.advance(0.4, 1 / 60);
+      }
+      const p = a.root.position, trace = [], projected = {}, initial = [p.x, p.y, p.z];
+      const aimDot = diagonal * (Math.sin(a.root.rotation.y) + Math.cos(a.root.rotation.y));
+      let off = -1, back = -1, departure = null, low = Infinity, center = 0, follow = 0, clearance = Infinity, gravityError = 0, ballisticError = 0, gravityFrames = 0, shown = true;
+      let lastY = p.y, lastEye = C.position.y, lastV = a.hopV;
+      key("keydown", "w"); key("keydown", "a");
+      try {
+        for (let i = 0; i < 600; i++) {
+          B.advance(1 / 60, 1 / 60); const feet = p.y - a.baseY;
+          if (low < -50 && Math.hypot(p.x, p.z) < 12 && feet > -1) { back = i; break; }
+          low = Math.min(low, feet);
+          // Hop is relative to the live support, including the unseen abyss
+          // floor. The body's world height must never jump to that support.
+          if (off < 0 && feet - a.hop < -100) {
+            off = i; departure = { x: p.x - initial[0], z: p.z - initial[2], vx: a.leap.vx, vz: a.leap.vz };
+            key("keyup", "w"); key("keyup", "a");
+          } else if (off >= 0) {
+            gravityFrames++; gravityError = Math.max(gravityError, Math.abs(a.hopV - lastV + 9.8 / 60));
+            ballisticError = Math.max(ballisticError, Math.abs(p.y - lastY - a.hopV / 60));
+          }
+          trace.push([p.x, p.y, p.z, a.hopV, a.leap.vx, a.leap.vz]);
+          if (bird) {
+            const screen = B.project(p.x, p.y, p.z, projected);
+            center = Math.max(center, screen ? Math.hypot(screen.x - B.renderer.size.width / 2, screen.y - B.renderer.size.height / 2) : Infinity);
+            follow = Math.max(follow, Math.abs(C.position.y - lastEye - p.y + lastY));
+            let cut = B.renderOpts.cutawayMaxY;
+            for (let j = 0; j < B.renderOpts.cutawayRegionCount; j++) {
+              const r = B.renderOpts.cutawayRegions[j], dx = p.x - r.x, dz = p.z - r.z;
+              if (Math.abs(dx * r.cos - dz * r.sin) < r.halfWidth + a.bodyRadius && Math.abs(dx * r.sin + dz * r.cos) < r.halfDepth + a.bodyRadius) cut = Math.min(cut, r.y);
+            }
+            clearance = Math.min(clearance, cut - feet - a.bodyHeight - Math.max(0, a.viewLift));
+            shown = shown && a.root.visible && P.mode === "birds-eye" && C.orthoMix === 1;
+          }
+          lastY = p.y; lastEye = C.position.y; lastV = a.hopV;
+        }
+      } finally { key("keyup", "w"); key("keyup", "a"); }
+      return { trace, initial, aimDot, off, back, departure, low, center, follow, clearance, gravityError, ballisticError, gravityFrames, shown };
+    };
+    try {
+      // Moving cloud platforms are unrelated to camera mode; remove that
+      // time-dependent support from both runs, then restore their visibility.
+      for (const c of clouds) c.node.visible = false;
+      const carry = run(false), bird = run(true); let error = 0;
+      for (let i = 0; i < Math.min(carry.trace.length, bird.trace.length); i++) for (let j = 0; j < carry.trace[i].length; j++) error = Math.max(error, Math.abs(carry.trace[i][j] - bird.trace[i][j]));
+      const summarize = r => { const { trace, ...rest } = r; return { ...rest, frames: trace.length }; };
+      return { edge: radius < 100, sameActor: P.player === a, error, carry: summarize(carry), bird: summarize(bird) };
+    } finally {
+      for (let i = 0; i < clouds.length; i++) clouds[i].node.visible = visible[i];
+      P.navigate({ position: { x: -8, y: 0, z: 8 }, yaw: 0, pitch: 0.3, dist: 24 });
+      if (!P.aiming) P.modeAction("mode-toggle"); B.advance(1, 1 / 60);
+    }
+  })()`);
+  record("birds-eye combat: walking off the same ledge has the same launch and gravity as carry orbit, even when aiming opposite travel", falling.edge && falling.sameActor && falling.error < 0.0001
+    && falling.bird.aimDot < -0.5 && falling.carry.frames === falling.bird.frames && falling.carry.off === falling.bird.off && falling.carry.back === falling.bird.back
+    && [falling.carry, falling.bird].every(r => r.off >= 0 && r.back > r.off && r.back < 600 && r.low < -50 && r.gravityFrames > 120 && r.gravityError < 1e-5 && r.ballisticError < 1e-5 && r.departure.x < -0.5 && r.departure.z < -0.5 && r.departure.vx < 0 && r.departure.vz < 0), JSON.stringify(falling));
+  record("birds-eye combat: the falling character stays centered and visible above every cut plane until respawn, without a camera-height lag", falling.bird.shown && falling.bird.center < 0.02 && falling.bird.follow < 1e-5 && falling.bird.clearance > 0.06 && falling.bird.low < -50 && falling.bird.back > falling.bird.off, JSON.stringify(falling.bird));
+  await b.click(size.x, size.y);
+  const hudPointer = await b.evaluate(`(() => {
+    const B = __ooga, P = B.pilot, a = P.player, canvas = document.getElementById("scene"), reticle = document.getElementById("weapon-reticle");
+    B.advance(0.1, 1 / 60);
+    const route = button => {
+      const canvasRect = canvas.getBoundingClientRect(), rect = button.getBoundingClientRect();
+      const x = (rect.left + rect.width / 2 - canvasRect.left) * B.renderer.size.width / canvasRect.width;
+      const y = (rect.top + rect.height / 2 - canvasRect.top) * B.renderer.size.height / canvasRect.height;
+      const currentX = parseFloat(reticle.style.left), currentY = parseFloat(reticle.style.top);
+      P.hooks.onOrbit(x - currentX, y - currentY); B.advance(1 / 60, 1 / 60);
+      const hit = document.elementFromPoint(P.cursor.x, P.cursor.y);
+      canvas.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, cancelable: true, pointerType: "mouse", pointerId: 91, isPrimary: true, button: 0, buttons: 1 }));
+      canvas.dispatchEvent(new PointerEvent("pointerup", { bubbles: true, cancelable: true, pointerType: "mouse", pointerId: 91, isPrimary: true, button: 0, buttons: 0 }));
+      return hit && hit.closest("button") === button;
+    };
+    const shots = a.weapon.shotsFired, primary = a.weapon.primaryEquipped;
+    const secondaryHit = route(document.getElementById("weapon-hud")), equipped = a.weapon.equipped;
+    const primaryHit = route(document.getElementById("primary-hud")), restored = a.weapon.primaryEquipped;
+    const currentX = parseFloat(reticle.style.left), currentY = parseFloat(reticle.style.top);
+    P.hooks.onOrbit(B.renderer.size.width / 2 - currentX, B.renderer.size.height / 2 - currentY); B.advance(1 / 60, 1 / 60);
+    return { active: P.cursor.active, visible: P.cursor.visible, locked: document.pointerLockElement === canvas,
+      secondaryHit, primaryHit, primary, equipped, restored, shots, afterShots: a.weapon.shotsFired,
+      reticleZ: parseInt(getComputedStyle(reticle).zIndex, 10) };
+  })()`);
+  record("birds-eye combat: the reticle sits above HUD buttons, routes clicks to them, and does not fire through them", hudPointer.active && !hudPointer.visible && hudPointer.locked
+    && hudPointer.secondaryHit && hudPointer.primaryHit && hudPointer.primary && hudPointer.equipped && hudPointer.restored
+    && hudPointer.afterShots === hudPointer.shots && hudPointer.reticleZ >= 30, JSON.stringify(hudPointer));
+} };
+
+const hubBirdsEyeFloors = { name: "birds-eye lower floors", why: "regression: ramp labels reversed with the camera and the HQ ceiling cut left the basement arrow covered", run: async (b) => {
+  const state = await b.evaluate(`(() => {
+    const B = __ooga, P = B.pilot, I = B.island, a = P.player, H = I.headquarters, room = H.rooms[0], lower = H.basement.rooms[0], D = BL.scenes.hub.debug;
+    if (!P.birdsEye) { P.hooks.onZoom(1.2); B.advance(1.5, 1 / 60); }
+    P.hooks.onZoom(32 / P.birdsEyeHeight); B.advance(1.5, 1 / 60);
+    let hill = null;
+    for (let x = -24; x <= 24 && !hill; x += 2) for (let z = -24; z <= 24; z += 2) {
+      const floor = I.surfaceAt(x, z);
+      if (floor >= 4 && I.clearAt(x, floor + 0.05, z, 0.35, 2) && B.headquarters.solids.props.clearAt(x, floor + 0.05, z, 0.35, 2)) { hill = { name: "hill", x, z, floor }; break; }
+    }
+    const lab = B.mouths.find(m => BL.caves.slots.find(s => s.id === m.id)?.scene === "lab"), places = [
+      { name: "surface", x: -8, z: 8, floor: 0 }, ...(hill ? [hill] : []),
+      { name: "cave", x: lab.x - Math.sin(lab.ry) * 3, z: lab.z - Math.cos(lab.ry) * 3, floor: lab.floorY },
+      { name: "HQ", x: room.x, z: room.z, floor: H.floor }, { name: "basement", x: lower.x, z: lower.z, floor: H.basement.floor }];
+    const geometry = I.geometry, verts = geometry.verts, originalVerts = Array.from(verts), source = I.cutawaySource, data = source.data, originalData = data.slice(), rows = [], thresholds = [];
+    const entries = [...D.terrainSections, ...D.caveSections], regions = B.renderOpts.cutawayRegions;
+    const paths = I.cutawayPaths, pathState = D.cutawayPaths, roof = D.terrainRampRoof;
+    const rampMarkers = D.headquarters.rampMarkers.map(marker => {
+      const first = marker.ramp.samples[0], ahead = marker.ramp.samples[Math.min(3, marker.ramp.samples.length - 1)];
+      const dx = ahead.x - first.x, dz = ahead.z - first.z, length = Math.hypot(dx, dz) || 1;
+      const forwardX = Math.sin(marker.frame.rotation.y), forwardZ = Math.cos(marker.frame.rotation.y);
+      const arrowForwardX = Math.sin(marker.arrow.rotation.y), arrowForwardZ = Math.cos(marker.arrow.rotation.y);
+      return { label: marker.label, channel: marker.channel, visible: marker.node.visible, arrowVisible: marker.arrow.visible,
+        model: marker.node.geometry.rampMarker?.label, visual: marker.node.geometry.rampMarker?.visual, markerKind: marker.node.geometry.rampMarker?.kind, columns: marker.node.geometry.rampMarker?.columns, rows: marker.node.geometry.rampMarker?.rows,
+        arrowKind: marker.arrow.geometry.rampMarker?.kind, labelDistance: marker.labelDistance, arrowDistance: marker.arrowDistance, scale: marker.frame.scale.x,
+        labelSurfaceError: Math.abs(marker.frame.position.y - marker.labelPoint.y - 0.035),
+        arrowSurfaceError: Math.abs(marker.arrow.position.y - marker.arrowPoint.y - 0.035),
+        aligned: forwardX * dx / length + forwardZ * dz / length,
+        arrowAligned: arrowForwardX * dx / length + arrowForwardZ * dz / length };
+    });
+    // Project the actual label transform through a full camera turn, including
+    // the side-on and reversed views that used to mirror or invert the words.
+    const markerViews = [], markerCoverage = [];
+    for (let turn = 0; turn < 8; turn++) {
+      P.navigate({ position: { x: 13.7, y: 0, z: 20.3 }, yaw: turn * Math.PI / 4, pitch: 0.3, dist: 8 }); B.advance(0.5, 1 / 60);
+      B.renderer.render(BL.scenes.hub.root, B.camera, B.renderOpts);
+      for (const marker of D.headquarters.rampMarkers) {
+        const m = marker.node.world, bounds = BL.scene.boundsOf(marker.node.geometry);
+        const project = (x, z) => B.renderer.project(m[0] * x + m[8] * z + m[12], m[1] * x + m[9] * z + m[13], m[2] * x + m[10] * z + m[14], {});
+        const left = project(bounds.min[0], 0), right = project(bounds.max[0], 0), top = project(0, bounds.min[2]), bottom = project(0, bounds.max[2]);
+        markerViews.push({ label: marker.label, turn, right: right.x - left.x, up: bottom.y - top.y, baseline: Math.abs(right.y - left.y) });
+      }
+    }
+    const vineGeometry = BL.hubModels.vine(); let rampVines = 0;
+    const countRampVines = node => { if (node.geometry === vineGeometry) rampVines++; for (const child of node.children) countRampVines(child); };
+    countRampVines(BL.scenes.hub.root);
+    const standardRim = BL.hubModels.caveMouthRim(), rampRim = BL.hubModels.caveMouthRim(1);
+    const standardRimBounds = BL.scene.boundsOf(standardRim), rampRimBounds = BL.scene.boundsOf(rampRim);
+    const mouthRims = { standard: 0, ramp: 0, expectedRamp: B.mouths.filter(mouth => BL.caves.slots.find(slot => slot.id === mouth.id)?.status === "headquarters").length,
+      standardTop: standardRimBounds.max[1], rampTop: rampRimBounds.max[1], sameOpening: JSON.stringify(standardRim.openingBounds) === JSON.stringify(rampRim.openingBounds) };
+    const rampEntranceFrame = { rampLintels: BL.headquartersModels.rampEntrance(0).faces.filter(face => face.headquartersEntranceLintel).length,
+      roomLintels: BL.headquartersModels.roomEntrance(0).faces.filter(face => face.headquartersEntranceLintel).length };
+    const countMouthRims = node => { const sourceGeometry = node.geometry?.matrixSourceGeometry || node.geometry;
+      if (sourceGeometry === standardRim) mouthRims.standard++; else if (sourceGeometry === rampRim) mouthRims.ramp++;
+      for (const child of node.children) countMouthRims(child); };
+    countMouthRims(BL.scenes.hub.root);
+    const pathRead = () => Array.from(paths.lengths, (length, channel) => ({ channel, length, initial: paths.initial[channel],
+      lo: pathState.lo[channel], hi: pathState.hi[channel], mix: pathState.mix[channel] }));
+    const roofTopology = () => {
+      const original = new Set(geometry.faces), seen = new Set(); let partition = true, walls = 0, voxelWalls = true;
+      for (const mesh of roof.partitionGeometries) {
+        partition = partition && mesh.verts === verts;
+        for (const face of mesh.faces) { partition = partition && original.has(face) && !seen.has(face); seen.add(face); }
+      }
+      for (const mesh of roof.perimeterGeometry) for (const face of mesh.faces) {
+        let minX = Infinity, minY = Infinity, minZ = Infinity, maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
+        for (const index of face.i) { const n = index * 3, x = mesh.verts[n], y = mesh.verts[n + 1], z = mesh.verts[n + 2];
+          minX = Math.min(minX, x); maxX = Math.max(maxX, x); minY = Math.min(minY, y); maxY = Math.max(maxY, y); minZ = Math.min(minZ, z); maxZ = Math.max(maxZ, z); }
+        voxelWalls = voxelWalls && face.cutawayRampWall && maxY > minY && Math.min(maxX - minX, maxZ - minZ) < 1e-7
+          && Math.abs(Math.max(maxX - minX, maxZ - minZ) - paths.unit) < 1e-7;
+        walls++;
+      }
+      return { partition: partition && Array.from(original).every(face => seen.has(face)
+        || face.cutawayFloorChannel >= 2 && face.cutawayFloorChannel < 4), voxelWalls, walls, removable: roof.stats.removableFaces,
+        windowRoofFaces: Array.from(roof.stats.windowRoofFaces) };
+    };
+    const initialSpans = paths.ramps.map((ramp, channel) => ({ channel,
+      span: (paths.initial[channel] - 1) / 254 * paths.lengths[channel],
+      expected: Math.min(ramp.length, channel < 2 ? ramp.cutawayEntranceLength || ramp.width : ramp.width), length: ramp.length, tolerance: ramp.length / 254 }));
+    const birdseyeWindows = H.windows.filter(window => window.kind === "room" || window.kind === "panorama").map(window => ({
+      kind: window.kind, basement: !!window.basement, level: window.birdseyeCutawayLevel, columns: window.birdseyeCutawayColumns || 0
+    }));
+    const lowerFloorOrdered = () => roof.lowerFloorGeometry.every(geometry => geometry.faces.every(face => {
+      const channel = face.cutawayFloorChannel, station = face.cutawayFloorStation;
+      return station < pathState.lo[channel] || pathState.mix[channel] >= 1 - 1e-7
+        && station >= pathState.lo[channel] && station <= pathState.hi[channel];
+    }));
+    const decodePath = key => {
+      let channel = -1, station = 0, owners = 0;
+      for (let i = 0; i < 4; i++) { const value = key >>> (i * 8) & 255; if (value) { channel = i; station = value; owners++; } }
+      return { channel, station, owners };
+    };
+    const windowStations = Array.from({ length: 4 }, () => new Set());
+    for (const window of H.windows) if (window.kind === "ramp") windowStations[window.cutawayChannel].add(1 + Math.round(window.cutawayStation / paths.lengths[window.cutawayChannel] * 254));
+    const rampWindowCells = [];
+    for (let cell = 0; cell < paths.keys.length; cell++) {
+      const decoded = decodePath(paths.keys[cell]);
+      if (decoded.channel < 0 || !source.windows[cell]?.length) continue;
+      const x = paths.origin.x + (Math.floor(cell / paths.height) + 0.5) * paths.unit, z = paths.origin.z + (cell % paths.height + 0.5) * paths.unit;
+      const raw = I.rampColumnAt(x, z, decoded.channel >= 2, {});
+      if (raw) continue;
+      rampWindowCells.push({ cell, ...decoded, channelCorrect: windowStations[decoded.channel].has(decoded.station) });
+    }
+    let overlapCells = 0, overlapOwnership = true, retainedFloors = 0, floorsPreserved = true;
+    const upperColumn = {}, lowerColumn = {}, baseFaces = new Set(roof.baseGeometry.faces);
+    for (let cell = 0; cell < paths.keys.length; cell++) {
+      const x = paths.origin.x + (Math.floor(cell / paths.height) + 0.5) * paths.unit, z = paths.origin.z + (cell % paths.height + 0.5) * paths.unit;
+      const upper = I.rampColumnAt(x, z, false, upperColumn), lower = I.rampColumnAt(x, z, true, lowerColumn);
+      if (upper > 0 && upper <= 2 && lower > 0 && lower <= 2) {
+        const key = paths.keys[cell]; overlapCells++;
+        overlapOwnership = overlapOwnership && !!(key >>> ((upper - 1) * 8) & 255) && !(key >>> 16)
+          && Math.abs(paths.bottoms[cell] - upperColumn.ceiling) < 1e-6;
+      }
+    }
+    for (const face of geometry.faces) if (face.cutawayPathKey && face.i.some(index => verts[index * 3 + 1] < face.cutawayPathBottom - 1e-7)) {
+      retainedFloors++; floorsPreserved = floorsPreserved && baseFaces.has(face);
+    }
+    let rampWindowFaces = 0, rampWindowBaseFaces = 0, rampWindowCrossingFaces = 0, rampWindowFacesPreserved = true, rampWindowFaceOwnership = true;
+    for (const face of geometry.faces) {
+      if (!face.headquartersWindowReveal || !face.cutawayPathKey) continue;
+      rampWindowFaces++;
+      const decoded = decodePath(face.cutawayPathKey), window = H.windows[face.windowIndex];
+      rampWindowFaceOwnership = rampWindowFaceOwnership && decoded.owners === 1 && window?.kind === "ramp"
+        && decoded.channel === window.cutawayChannel && windowStations[decoded.channel].has(decoded.station);
+      let below = false, above = false;
+      for (const index of face.i) {
+        const y = verts[index * 3 + 1];
+        below ||= y < face.cutawayPathBottom - 1e-7;
+        above ||= y > face.cutawayPathBottom + 1e-7;
+      }
+      // A fragment crossing or touching the ceiling is part of the actual
+      // window reveal, not removable roof. It must remain canonical base
+      // geometry while wholly-above fragments may join the roof split.
+      if (below || !above) {
+        rampWindowCrossingFaces++;
+        rampWindowFacesPreserved = rampWindowFacesPreserved && baseFaces.has(face);
+      }
+      if (baseFaces.has(face)) rampWindowBaseFaces++;
+    }
+    const sections = () => D.terrainSections.map(e => ({ visible: e.cap.node.visible, worldY: e.worldY,
+      y: e.cap.node.world[13], faces: e.cap.stats.faces, cache: e.cap.stats.cacheEntries }));
+    const builds = () => entries.map(e => [e.cap.stats.solidBuilds, e.cap.stats.detailBuilds]);
+    for (const q of places) {
+      const support = I.supportAt(q.x, q.z, q.floor + 1, 0.35), clearance = I.clearAt(q.x, q.floor + 0.1, q.z, 0.2, 1.2);
+      P.navigate({ position: { x: q.x, y: q.floor, z: q.z }, yaw: 0, pitch: 0.3, dist: 8 }); B.advance(2, 1 / 60);
+      BL.scene.updateWorld(BL.scenes.hub.root);
+      const activeRegions = regions.slice(0, B.renderOpts.cutawayRegionCount);
+      const before = { cutoff: B.renderOpts.cutawayMaxY, regions: activeRegions.map(r => ({ ...r })), paths: pathRead(), builds: builds(), roofBuilds: roof.stats.rebuilds, height: P.birdsEyeHeight };
+      const caveRegions = D.caveSections.filter(e => activeRegions.includes(e.region)).map(e => ({ ...e.region }));
+      P.hooks.onZoom(1.2); B.advance(0.6, 1 / 60);
+      const zoomHeight = P.birdsEyeHeight;
+      P.hooks.onZoom(1 / 1.2); B.advance(0.6, 1 / 60);
+      const zoomStable = before.cutoff === B.renderOpts.cutawayMaxY && JSON.stringify(before.regions) === JSON.stringify(regions.slice(0, B.renderOpts.cutawayRegionCount))
+        && JSON.stringify(before.paths) === JSON.stringify(pathRead()) && before.roofBuilds === roof.stats.rebuilds && JSON.stringify(before.builds) === JSON.stringify(builds());
+      BL.scene.updateWorld(BL.scenes.hub.root);
+      B.renderer.render(BL.scenes.hub.root, B.camera, B.renderOpts);
+      if (q.name === "surface" || q.name === "HQ") for (const marker of D.headquarters.rampMarkers) {
+        if ((marker.channel < 2) !== (q.name === "surface")) continue;
+        let checked = 0, covered = 0;
+        const m = marker.arrow.world, v = marker.arrow.geometry.verts;
+        for (let i = 0; i < v.length; i += 3) {
+          const x = m[0] * v[i] + m[4] * v[i + 1] + m[8] * v[i + 2] + m[12];
+          const z = m[2] * v[i] + m[6] * v[i + 1] + m[10] * v[i + 2] + m[14];
+          const gx = Math.floor((x - paths.origin.x) / paths.unit), gz = Math.floor((z - paths.origin.z) / paths.unit), cell = gx * paths.height + gz;
+          const station = paths.keys[cell] >>> (marker.channel * 8) & 255;
+          const globallyOpen = paths.bottoms[cell] >= B.renderOpts.cutawayMaxY - 0.01;
+          const locallyOpen = station > 0 && station >= pathState.lo[marker.channel] && station <= pathState.hi[marker.channel] && pathState.mix[marker.channel] === 1;
+          checked++; if (!globallyOpen && !locallyOpen) covered++;
+        }
+        markerCoverage.push({ channel: marker.channel, floor: q.name, checked, covered });
+      }
+      const centers = [0, H.floor, H.basement.floor].map(y => B.renderer.project(0, y, 0, {}));
+      const centerError = centers.every(Boolean) ? Math.max(...centers.map(p => Math.hypot(p.x - centers[0].x, p.y - centers[0].y))) : Infinity;
+      rows.push({ name: q.name, mode: P.mode, overhead: P.birdsEye, horizontal: Math.hypot(B.camera.position.x - a.root.position.x, B.camera.position.z - a.root.position.z),
+        floor: a.root.position.y - a.baseY, requestedFloor: q.floor, ceiling: P.birdsEyeCeiling, floorCeiling: q.name === "HQ" ? H.ceiling : q.name === "basement" ? H.basement.ceiling : null, cutoff: B.renderOpts.cutawayMaxY,
+        regions: before.regions, caveRegions, paths: before.paths, windowMix: Array.from(pathState.windowMix), roof: roofTopology(), caps: sections(), caveCaps: D.caveSections.filter(e => e.cap.node.visible).length, zoomStable, zoomMoved: Math.abs(zoomHeight - before.height) > 0.1, centerError, orthoMix: B.camera.orthoMix,
+        unchanged: I.geometry === geometry && I.geometry.verts === verts && I.supportAt(q.x, q.z, q.floor + 1, 0.35) === support && I.clearAt(q.x, q.floor + 0.1, q.z, 0.2, 1.2) === clearance });
+      if (q.name !== "cave") {
+        const read = () => { const feet = a.root.position.y - a.baseY, relative = B.camera.position.y - feet;
+          return { mode: P.mode, relative, headClearance: relative - a.headOffset * 0.95 - a.viewLift }; };
+        P.hooks.onZoom(21.5 / P.birdsEyeHeight); B.advance(1.5, 1 / 60); const above = read(); P.hooks.onZoom(0.95);
+        let frames = 0; while (P.mode === "birds-eye" && frames++ < 150) B.advance(1 / 60, 1 / 60);
+        const switched = read(); thresholds.push({ name: q.name, floor: q.floor, above, switched, frames });
+        B.advance(1, 1 / 60); P.hooks.onZoom(1.2); B.advance(1, 1 / 60);
+        P.hooks.onZoom(before.height / P.birdsEyeHeight); B.advance(1.5, 1 / 60);
+      }
+    }
+    const landingCoverage = [];
+    for (const point of [{ x: 17.12639, z: 1.63491 }, { x: 18.24953, z: -0.09931 }]) {
+      P.navigate({ position: { x: point.x, y: H.floor, z: point.z }, yaw: 0, pitch: 0.3, dist: 8 }); B.advance(0.5, 1 / 60);
+      landingCoverage.push({ hi: Array.from(pathState.hi), cutFaces: Array.from(roof.stats.cutFaces) });
+    }
+    // Move the actual actor along the authored ramps. The expected plateaus
+    // come from the settled floor visits above, not a copy of the blend rule.
+    const cutRead = () => {
+      const p = a.root.position, feet = p.y - a.baseY, global = B.renderOpts.cutawayMaxY;
+      let cut = global;
+      for (let i = 0; i < B.renderOpts.cutawayRegionCount; i++) {
+        const r = regions[i], dx = p.x - r.x, dz = p.z - r.z;
+        if (Math.abs(dx * r.cos - dz * r.sin) < r.halfWidth && Math.abs(dx * r.sin + dz * r.cos) < r.halfDepth) cut = Math.min(cut, r.y);
+      }
+      const gx = Math.floor((p.x - paths.origin.x) / paths.unit), gz = Math.floor((p.z - paths.origin.z) / paths.unit);
+      if (gx >= 0 && gz >= 0 && gx < paths.width && gz < paths.height) {
+        const cell = gx * paths.height + gz, key = paths.keys[cell];
+        for (let channel = 0; channel < 4; channel++) {
+          const station = key >>> (channel * 8) & 255;
+          if (station && pathState.mix[channel] > 0 && station >= pathState.lo[channel] && station <= pathState.hi[channel])
+            cut = Math.min(cut, 16 + (paths.bottoms[cell] - 16) * pathState.mix[channel]);
+        }
+      }
+      return { y: global >= 1e5 ? 16 : global, clearance: cut - feet - a.bodyHeight - Math.max(0, a.viewLift), feet, regions: B.renderOpts.cutawayRegionCount };
+    };
+    const rampTravel = [];
+    for (const [name, ramp, upper, lower] of [["main-HQ", H.ramps[0], 16, rows.find(r => r.name === "HQ").cutoff], ["HQ-basement", H.basement.ramps[0], rows.find(r => r.name === "HQ").cutoff, rows.find(r => r.name === "basement").cutoff]]) {
+      const samples = ramp.samples, first = samples[0], last = samples[samples.length - 1];
+      const at = progress => {
+        const y = first.y + (last.y - first.y) * progress;
+        let i = 1; while (i < samples.length - 1 && samples[i].y > y) i++;
+        const from = samples[i - 1], to = samples[i], k = (y - from.y) / (to.y - from.y);
+        return { x: from.x + (to.x - from.x) * k, y, z: from.z + (to.z - from.z) * k };
+      };
+      for (const down of [true, false]) {
+        const source = down ? 0.08 : 0.92, destination = 1 - source, start = at(source);
+        P.navigate({ position: start, yaw: 0, pitch: 0.3, dist: 8 }); B.advance(1, 1 / 60);
+        const early = cutRead(); let previous = early, maxStep = 0, clearance = Infinity, maxRegions = 0, positionError = 0, moving = 0, structureHidden = false, slicedVisible = false, visibleFrames = 0, wholeHidden = 0, wholeBarrels = 0, wholeGorillas = 0, wholeComplete = true, lowerFloorsOrdered = lowerFloorOrdered(), lowerActorRoofChecks = 0, lowerActorRoofCovered = 0;
+        const initialLowerMix = Math.max(pathState.mix[2], pathState.mix[3]), lowerGate = H.ceiling - 0.06 - paths.unit;
+        const inactiveLowerCovered = () => [2, 3].every(channel => channel === D.cutawayTravelChannel
+          || pathState.mix[channel] === 0 || pathState.hi[channel] <= paths.initial[channel]);
+        let lowerMixMax = initialLowerMix,
+          lowerRevealFrames = B.renderOpts.cutawayMaxY < lowerGate - 1e-7 && initialLowerMix > 0 ? 1 : 0,
+          lowerRevealGuard = B.renderOpts.cutawayMaxY < lowerGate - 1e-7 || inactiveLowerCovered();
+        const sample = () => {
+          const value = cutRead(), step = Math.abs(value.y - previous.y);
+          maxStep = Math.max(maxStep, step); clearance = Math.min(clearance, value.clearance); maxRegions = Math.max(maxRegions, value.regions);
+          const lowerMix = Math.max(pathState.mix[2], pathState.mix[3]);
+          lowerMixMax = Math.max(lowerMixMax, lowerMix);
+          if (B.renderOpts.cutawayMaxY >= lowerGate - 1e-7) lowerRevealGuard = lowerRevealGuard && inactiveLowerCovered();
+          else if (lowerMix > 0) lowerRevealFrames++;
+          const channel = D.cutawayTravelChannel, position = a.root.position;
+          const gx = Math.floor((position.x - paths.origin.x) / paths.unit), gz = Math.floor((position.z - paths.origin.z) / paths.unit);
+          if (channel >= 2 && gx >= 0 && gz >= 0 && gx < paths.width && gz < paths.height) {
+            const cell = gx * paths.height + gz, station = paths.keys[cell] >>> (channel * 8) & 255;
+            const head = position.y - a.baseY + a.bodyHeight + Math.max(0, a.viewLift);
+            if (station >= pathState.lo[channel] && station <= pathState.hi[channel] && paths.bottoms[cell] > head) {
+              lowerActorRoofChecks++;
+              if (pathState.mix[channel] < 1 - 1e-6) lowerActorRoofCovered++;
+            }
+          }
+          lowerFloorsOrdered = lowerFloorsOrdered && lowerFloorOrdered();
+          structureHidden ||= !!H.node.cutawayWholeHidden || H.entrances.some(entry => entry.node.cutawayWholeHidden);
+          if (!a.root.cutawayWholeHidden) visibleFrames++;
+          wholeHidden = Math.max(wholeHidden, B.crew.list.filter(cave => cave.root.cutawayWholeHidden).length + D.props.filter(prop => prop.node.cutawayWholeHidden).length);
+          wholeBarrels = Math.max(wholeBarrels, D.props.filter(prop => prop.prop === "barrel" && prop.node.cutawayWholeHidden).length);
+          wholeGorillas = Math.max(wholeGorillas, B.clankers.list.filter(entry => entry.root.cutawayWholeHidden).length);
+          wholeComplete = wholeComplete && D.props.every(prop => !prop.node.cutawayWholeHidden || prop.node.cameraHidden)
+            && B.clankers.list.every(entry => !entry.root.cutawayWholeHidden || entry.root.cameraHidden);
+          if (value.clearance < -0.01 && !a.root.cutawayWholeHidden) slicedVisible = true;
+          if (step > 1e-5) moving++;
+          previous = value; return value;
+        };
+        const place = progress => {
+          const point = at(progress); B.crew.relocatePlayer(point, 0); B.advance(1 / 60, 1 / 60);
+          positionError = Math.max(positionError, Math.abs(a.root.position.y - a.baseY - point.y));
+          return sample();
+        };
+        const travel = (from, to, frames, trace = null) => { for (let i = 1; i <= frames; i++) { const progress = from + (to - from) * i / frames, value = place(progress); if (trace) {
+          const active = regions.slice(0, B.renderOpts.cutawayRegionCount);
+          trace.push({ progress, floor: value.y, paths: pathRead(), caveRegionsOnly: active.every(region => D.caveSections.some(entry => entry.region === region)) });
+        } } };
+        const hold = () => { for (let i = 0; i < 45; i++) { B.advance(1 / 60, 1 / 60); sample(); } return previous; };
+        travel(source, 0.5, 36); const middle = hold();
+        // Let the first small excursion settle, then repeat the same noise
+        // band: it must not alternate between the two floor states.
+        place(0.502); place(0.498); B.advance(0.1, 1 / 60); const stopped = sample();
+        let stopDrift = 0;
+        for (let i = 0; i < 18; i++) { const value = place(0.5 + (i % 2 ? -0.002 : 0.002)); stopDrift = Math.max(stopDrift, Math.abs(value.y - stopped.y)); }
+        travel(0.5, source, 36); const reversed = hold();
+        const linear = []; travel(source, destination, 72, linear); const late = hold();
+        const changing = linear.filter(row => row.floor > lower + 0.02 && row.floor < upper - 0.02);
+        const floorWindow = changing.length ? Math.max(...changing.map(row => row.progress)) - Math.min(...changing.map(row => row.progress)) : Infinity;
+        const floorCenter = changing.length ? (Math.max(...changing.map(row => row.progress)) + Math.min(...changing.map(row => row.progress))) / 2 : Infinity;
+        rampTravel.push({ name, down, upper, lower, early, middle, late, reversed, maxStep, clearance, maxRegions, positionError, moving, stopDrift, floorWindow, floorCenter,
+          minimumSpan: linear.every(row => row.paths.every(path => path.hi >= path.initial)), caveRegionsOnly: linear.every(row => row.caveRegionsOnly),
+          lowerMixMax, lowerRevealFrames, lowerRevealGuard, lowerFloorsOrdered, lowerActorRoofChecks, lowerActorRoofCovered,
+          structureHidden, slicedVisible, visibleFrames, wholeHidden, wholeBarrels, wholeGorillas, wholeComplete });
+      }
+    }
+    // Follow cumulative authored distance, including each route's flat tail.
+    // Height-only samples cannot prove that the visible endpoint keeps moving
+    // ahead after the descent itself has reached the next floor.
+    const pathTravel = [];
+    for (let channel = 0; channel < paths.ramps.length; channel++) {
+      const ramp = paths.ramps[channel], samples = ramp.samples;
+      const at = distance => {
+        let i = 1; while (i < samples.length - 1 && samples[i].s < distance) i++;
+        const from = samples[i - 1], to = samples[i], t = (distance - from.s) / (to.s - from.s);
+        return { x: from.x + (to.x - from.x) * t, y: from.y + (to.y - from.y) * t, z: from.z + (to.z - from.z) * t };
+      };
+      P.navigate({ position: at(0), yaw: 0, pitch: 0.3, dist: 8 }); B.advance(1, 1 / 60);
+      let previous = 0, backwards = 0, minimum = Infinity, balance = Infinity, matched = 0, balanced = 0, end = 0, windowActive = false;
+      for (let i = 0; i <= 48; i++) {
+        B.crew.relocatePlayer(at(ramp.length * i / 48), 0); B.advance(1 / 60, 1 / 60);
+        const hi = pathState.hi[channel], endpoint = Math.max(hi, pathState.lo[channel] - 1);
+        backwards = Math.max(backwards, previous - endpoint); previous = endpoint;
+        minimum = Math.min(minimum, hi - paths.initial[channel]);
+        if (D.cutawayTravelChannel === channel) {
+          matched++;
+          const station = 1 + 254 * D.cutawayTravelStation / ramp.length;
+          if (2 * station - 1 <= 255) { balance = Math.min(balance, endpoint - station - (station - 1)); balanced++; }
+        }
+        windowActive ||= pathState.mix[channel] > 0 && rampWindowCells.some(cell => cell.channel === channel
+          && cell.station >= pathState.lo[channel] && cell.station <= pathState.hi[channel]);
+        end = endpoint;
+      }
+      pathTravel.push({ channel, backwards, minimum, balance, matched, balanced, end, windowActive, roof: roofTopology() });
+    }
+    const coverFade = { out: [], in: [] }, readCoverFade = () => ({ path: pathState.mix[0], cave: B.renderOpts.cutawayRegionCount ? regions[0].mix : 0 });
+    P.navigate({ position: { x: -8, y: 0, z: 8 }, yaw: 0, pitch: 0.3, dist: 8 }); B.advance(0.5, 1 / 60);
+    P.navigate({ position: { x: hill.x, y: hill.floor, z: hill.z }, yaw: 0, pitch: 0.3, dist: 8 });
+    for (let i = 0; i < 22; i++) { B.advance(1 / 60, 1 / 60); coverFade.out.push(readCoverFade()); }
+    P.navigate({ position: { x: -8, y: 0, z: 8 }, yaw: 0, pitch: 0.3, dist: 8 });
+    for (let i = 0; i < 22; i++) { B.advance(1 / 60, 1 / 60); coverFade.in.push(readCoverFade()); }
+    const key = (type, value, code) => window.dispatchEvent(new KeyboardEvent(type, { key: value, code, bubbles: true }));
+    const jetWasWorn = !!a.jet, flightFloor = I.surfaceAt(-8, 16);
+    P.navigate({ position: { x: -8, y: flightFloor, z: 16 }, yaw: 0, pitch: 0.3, dist: 8 }); B.advance(1, 1 / 60);
+    if (!jetWasWorn) { key("keydown", "j", "KeyJ"); key("keyup", "j", "KeyJ"); }
+    const flight = { peak: 0, highFrames: 0, fallFrames: 0, clearance: Infinity, preserved: true, centered: true, landed: false };
+    key("keydown", " ", "Space");
+    try {
+      for (let i = 0; i < 300; i++) {
+        if (i === 60) key("keyup", " ", "Space");
+        B.advance(1 / 60, 1 / 60); const value = cutRead(), altitude = value.feet - flightFloor;
+        flight.peak = Math.max(flight.peak, altitude); flight.clearance = Math.min(flight.clearance, value.clearance);
+        if (a.hopV < -0.1) flight.fallFrames++;
+        if (altitude > 4) {
+          flight.highFrames++;
+          flight.preserved = flight.preserved && B.renderOpts.cutawayMaxY >= 1e5 && pathState.mix.every(mix => mix === 0);
+        }
+        flight.centered = flight.centered && P.mode === "birds-eye" && a.root.visible && Math.hypot(B.camera.position.x - a.root.position.x, B.camera.position.z - a.root.position.z) < 1e-6;
+        if (i > 90 && altitude < 0.1 && a.hopV === 0) { flight.landed = true; break; }
+      }
+    } finally {
+      key("keyup", " ", "Space");
+      if (!jetWasWorn) { key("keydown", "j", "KeyJ"); key("keyup", "j", "KeyJ"); }
+    }
+    // Restore the basement before exercising the existing camera handoffs.
+    P.navigate({ position: { x: lower.x, y: H.basement.floor, z: lower.z }, yaw: 0, pitch: 0.3, dist: 8 }); B.advance(2, 1 / 60);
+    const cutState = () => ({ mode: P.mode, player: !!P.player, mix: P.birdsEyeMix, fade: B.renderOpts.cutawayFade, rock: B.renderOpts.cutawayRockMix,
+      markers: D.headquarters.rampMarkers.reduce((count, marker) => count + (marker.node.visible ? 1 : 0), 0),
+      cuts: B.renderOpts.cutawayMaxY < 1e5 ? [B.renderOpts.cutawayMaxY] : regions.slice(0, B.renderOpts.cutawayRegionCount).map(r => r.y) });
+    const transition = (name, action, frames = 60) => {
+      const before = cutState(); action(); const immediate = Math.abs(P.birdsEyeMix - before.mix), immediateFade = Math.abs(B.renderOpts.cutawayFade - before.fade);
+      let last = before, mixStep = 0, fadeStep = 0, cutStep = 0, fadeError = 0, capError = 0, minCut = Infinity, maxCut = -Infinity, changed = 0, direction = true, blended = 0, withoutPlayer = 0;
+      let rockError = Math.abs(before.rock - before.fade), maxRegions = 0;
+      for (let i = 0; i < frames; i++) {
+        B.advance(1 / 60, 1 / 60); const s = cutState(); mixStep = Math.max(mixStep, Math.abs(s.mix - last.mix)); fadeError = Math.max(fadeError, Math.abs(s.fade - s.mix));
+        fadeStep = Math.max(fadeStep, Math.abs(s.fade - last.fade));
+        rockError = Math.max(rockError, Math.abs(s.rock - s.fade));
+        maxRegions = Math.max(maxRegions, B.renderOpts.cutawayRegionCount);
+        if (s.fade > 0 && s.fade < 1) blended++;
+        if (!s.player && s.fade > 0) withoutPlayer++;
+        if (s.cuts.length) { minCut = Math.min(minCut, ...s.cuts); maxCut = Math.max(maxCut, ...s.cuts); }
+        // The disabled 1e6 sentinel lies above all rock. Only compare real
+        // slicing planes while both samples have an active cutaway.
+        if (s.fade > 0 && last.fade > 0 && s.cuts.length === last.cuts.length) for (let j = 0; j < s.cuts.length; j++) {
+          const delta = s.cuts[j] - last.cuts[j]; cutStep = Math.max(cutStep, Math.abs(delta));
+          direction = direction && delta * (s.fade - last.fade) <= 1e-6;
+          if (!j && Math.abs(delta) > 1e-5) changed++;
+        }
+        if (B.renderOpts.cutawayMaxY < 1e5) for (const e of D.terrainSections) if (e.cap.node.visible) capError = Math.max(capError, Math.abs(e.cap.node.world[13] + 0.002 - B.renderOpts.cutawayMaxY));
+        last = s;
+      }
+      return { name, before, after: last, immediate, immediateFade, mixStep, fadeStep, cutStep, fadeError, rockError, capError, span: maxCut - minCut, changed, direction, blended, withoutPlayer, maxRegions };
+    };
+    const toggle = () => P.modeAction("mode-toggle"), transitions = [];
+    transitions.push(transition("basement carry exit", toggle));
+    transitions.push(transition("basement partial entry", toggle, 12));
+    transitions.push(transition("basement entry reversal", toggle));
+    transitions.push(transition("basement carry entry", toggle));
+    transitions.push(transition("basement shoulder exit", () => P.hooks.onZoom(0.001), 150));
+    transitions.push(transition("basement shoulder entry", () => P.hooks.onZoom(1.2)));
+    toggle(); B.advance(1, 1 / 60);
+    P.hooks.onZoom(0.001); B.advance(1, 1 / 60);
+    const carryRoofs = { out: true, in: true, settled: false, hiddenMarkers: true };
+    P.hooks.onZoom(1.2);
+    for (let i = 0; i < 60; i++) {
+      B.advance(1 / 60, 1 / 60);
+      carryRoofs.out = carryRoofs.out && P.mode === "orbit" && B.renderOpts.cutawayFade === 1
+        && B.renderOpts.cutawayMaxY < H.ceiling - 0.5;
+      carryRoofs.hiddenMarkers = carryRoofs.hiddenMarkers && D.headquarters.rampMarkers.every(marker => !marker.node.visible);
+    }
+    P.hooks.onZoom(0.99);
+    for (let i = 0; i < 120 && P.shoulderEntryMix < 1; i++) {
+      B.advance(1 / 60, 1 / 60);
+      carryRoofs.in = carryRoofs.in && P.mode === "shoulder" && B.renderOpts.cutawayFade === 1
+        && B.renderOpts.cutawayMaxY < H.ceiling - 0.5;
+    }
+    B.advance(1, 1 / 60);
+    carryRoofs.settled = P.mode === "shoulder" && P.shoulderEntryMix === 1 && B.renderOpts.cutawayFade === 0;
+    toggle(); P.hooks.onZoom(1.2); B.advance(1, 1 / 60);
+    const cave = places.find(q => q.name === "cave");
+    P.navigate({ position: { x: cave.x, y: cave.floor, z: cave.z }, yaw: 0, pitch: 0.3, dist: 8 }); B.advance(2, 1 / 60);
+    transitions.push(transition("cave roof exit", toggle));
+    transitions.push(transition("cave roof entry", toggle));
+    const basement = { position: { x: lower.x, y: H.basement.floor, z: lower.z }, yaw: 0, pitch: 0.3, dist: 8 };
+    P.navigate(basement); B.advance(2, 1 / 60);
+    const released = transition("basement actor release", () => P.release(true));
+    P.possess(a); if (B.crew.sleeping) B.crew.wakePlayer(); P.navigate(basement); B.advance(0.7, 1 / 60);
+    if (!P.aiming) P.modeAction("mode-toggle"); if (P.mode === "shoulder") P.hooks.onZoom(1.2); B.advance(1, 1 / 60);
+    const restored = P.player === a && P.mode === "birds-eye" && P.birdsEyeMix === 1 && Math.abs(a.root.position.y - a.baseY - H.basement.floor) < 0.2;
+    const landmarks = [B.altar.node.position, B.headquarters.firepit.position, H.basement.hole].map(p => [p.x, p.z]);
+    const clouds = [], weather = [];
+    const visit = n => { if (n.geometry?.cutawayPreserve) clouds.push(n); if (n.geometry?.cutawayHide) weather.push(n); for (const child of n.children) visit(child); };
+    visit(BL.scenes.hub.root);
+    const immutable = I.geometry === geometry && I.geometry.verts === verts && verts.every((v, i) => v === originalVerts[i]) && source.data === data && data.every((v, i) => v === originalData[i]);
+    const cache = entries.map(e => ({ ...e.cap.stats }));
+    return { rows, thresholds, rampTravel, pathTravel, landingCoverage, coverFade, initialSpans, birdseyeWindows, mouthRims, rampEntranceFrame, rampMarkers, markerViews, markerCoverage, rampVines, rampWindowCells, rampWindowFaces, rampWindowBaseFaces, rampWindowCrossingFaces, rampWindowFacesPreserved, rampWindowFaceOwnership,
+      overlapCells, overlapOwnership, retainedFloors, floorsPreserved, noRampRegions: !D.rampSections,
+      flight, transitions, carryRoofs, released, restored, immutable, landmarks, cache, regionStorage: regions === B.renderOpts.cutawayRegions, sections: D.terrainSections.length, caves: D.caveSections.length, clouds: clouds.length, weather: weather.length, weatherPreserved: weather.every(n => n.geometry.cutawayPreserve) };
+  })()`);
+  const rows = state.rows, underground = rows.filter(r => r.requestedFloor < -0.15), surface = rows.filter(r => r.requestedFloor >= -0.15);
+  record("birds-eye combat: surface and hills retain their terrain, caves use local roof cuts, and HQ and basement use the current floor's global section", rows.length === 5 && rows.every(r => r.mode === "birds-eye" && r.overhead && r.horizontal < 1e-6 && Math.abs(r.floor - r.requestedFloor) < 0.2 && r.unchanged)
+    && underground.length === 2 && underground.every(r => r.cutoff > r.floor + 1.3 && r.cutoff < r.floor + 5 && Math.abs(r.cutoff - r.floorCeiling + 0.06) < 0.01 && !r.caveRegions.length && !r.caveCaps && r.caps[0].visible && r.caps[0].faces > 0)
+    && surface.every(r => r.cutoff >= 1e5 && r.caps.every(c => !c.visible) && r.caveRegions.every(region => Math.abs(region.y - 2.85) < 1e-6))
+    && surface.find(r => r.name === "cave").caveRegions.length > 0 && surface.find(r => r.name === "hill").regions.length === 0, JSON.stringify(rows));
+  record("birds-eye combat: surface ramps keep their authored entrance span and basement openings initially extend one ramp-width", state.initialSpans.length === 4
+    && state.initialSpans.every(p => Math.abs(p.span - p.expected) <= p.tolerance)
+    && rows.every(r => r.paths.length === 4 && r.paths.every(p => p.hi >= p.initial))
+    && rows.find(r => r.name === "surface").paths.slice(0, 2).every(p => p.mix === 1 && p.lo === 1)
+    && rows.find(r => r.name === "hill").paths.every(p => p.mix === 0), JSON.stringify({ spans: state.initialSpans, paths: rows.map(r => ({ name: r.name, paths: r.paths })) }));
+  record("birds-eye combat: every authored room window removes only its level's fitted lintel rock", state.birdseyeWindows.length > 0
+    && state.birdseyeWindows.every(window => window.columns > 0 && window.level === (window.basement ? 1 : 0))
+    && rows.find(r => r.name === "surface").windowMix.every(mix => mix === 0)
+    && rows.find(r => r.name === "HQ").windowMix.join() === "1,0"
+    && rows.find(r => r.name === "basement").windowMix.join() === "1,1"
+    && rows.find(r => r.name === "HQ").roof.windowRoofFaces.every(faces => faces > 0), JSON.stringify({ windows: state.birdseyeWindows,
+      levels: rows.map(({ name, windowMix }) => ({ name, windowMix })), faces: rows.find(r => r.name === "HQ").roof.windowRoofFaces }));
+  record("birds-eye combat: surface ramp mouths omit only the overhead stone lintel while ordinary cave frames retain it", state.mouthRims.expectedRamp === 2
+    && state.mouthRims.ramp === state.mouthRims.expectedRamp && state.mouthRims.standard > 0 && state.mouthRims.sameOpening
+    && Math.abs(state.mouthRims.standardTop - 3.5) < 1e-7 && Math.abs(state.mouthRims.rampTop - 3) < 1e-7
+    && state.rampEntranceFrame.rampLintels === 0 && state.rampEntranceFrame.roomLintels > 0, JSON.stringify({ mouths: state.mouthRims, basement: state.rampEntranceFrame }));
+  record("birds-eye combat: each downhill ramp has a dense entrance label and a separate arrow fitted to its surface, hidden outside bird's-eye view", state.rampMarkers.length === 4
+    && state.rampMarkers.map(marker => marker.channel).join() === "0,1,2,3"
+    && state.rampMarkers.map(marker => marker.label).join() === "HQ,HQ,B1,B1"
+    && state.rampMarkers.every(marker => marker.visible && marker.arrowVisible && marker.model === marker.label && marker.markerKind === "label" && marker.arrowKind === "arrow"
+      && marker.visual === marker.label && marker.columns === 5 && marker.rows === 7 && marker.scale === 0.72
+      && marker.labelDistance > 0 && marker.arrowDistance > marker.labelDistance && marker.labelSurfaceError < 1e-7
+      && marker.arrowSurfaceError < 1e-7 && marker.aligned > 0.999 && marker.arrowAligned > 0.999)
+    && state.rampVines === 0
+    && [0, 2, 4, 6].every(i => state.transitions[i].after.markers === 0)
+    && [3, 5, 7].every(i => state.transitions[i].after.markers === 4)
+    && state.released.after.markers === 0 && state.restored, JSON.stringify({ markers: state.rampMarkers, transitions: state.transitions.map(({ name, after }) => ({ name, visible: after.markers })), released: state.released.after.markers }));
+  record("birds-eye combat: HQ and B1 read upright left-to-right through a full camera turn and every entrance exposes its complete downhill arrow", state.markerViews.length === 32
+    && state.markerViews.every(view => view.right > 0 && view.up > 0 && view.baseline < 0.001)
+    && state.markerCoverage.length === 4 && state.markerCoverage.every(marker => marker.checked > 0 && marker.covered === 0), JSON.stringify({ views: state.markerViews, coverage: state.markerCoverage }));
+  record("birds-eye combat: ramp openings use original terrain faces and exact vertical voxel walls, never clipping rectangles or proxy floors", state.noRampRegions
+    && rows.every(r => r.regions.length <= 8 && r.regions.every(region => r.caveRegions.some(cave => cave.id === region.id)) && r.roof.partition && r.roof.voxelWalls && r.roof.removable > 0)
+    && rows.some(r => r.roof.walls > 0) && state.pathTravel.every(r => r.roof.partition && r.roof.voxelWalls), JSON.stringify(rows.map(({ name, roof, regions }) => ({ name, roof, regions }))));
+  record("birds-eye combat: ramp-window cutaway columns extend beyond the raw ramp, keep their authored route station, and retain real window fragments in the terrain base", state.rampWindowCells.length > 0
+    && state.rampWindowCells.every(cell => cell.owners === 1 && cell.channelCorrect)
+    && state.rampWindowFaces > 0 && state.rampWindowCrossingFaces > 0 && state.rampWindowBaseFaces > 0
+    && state.rampWindowFacesPreserved && state.rampWindowFaceOwnership && state.pathTravel.every(r => r.windowActive), JSON.stringify({ cells: state.rampWindowCells, faces: state.rampWindowFaces,
+      base: state.rampWindowBaseFaces, crossing: state.rampWindowCrossingFaces, preserved: state.rampWindowFacesPreserved, ownership: state.rampWindowFaceOwnership, travel: state.pathTravel.map(r => ({ channel: r.channel, active: r.windowActive })) }));
+  record("birds-eye combat: descending either route never shortens its opening and retains as much path ahead as behind until the route ends", state.pathTravel.length === 4
+    && state.pathTravel.every(r => r.backwards === 0 && r.minimum >= 0 && r.matched > 30 && r.balanced > 10 && r.balance >= -1.001 && r.end === 255), JSON.stringify(state.pathTravel));
+  record("birds-eye combat: the HQ landing keeps identical completed ramp coverage inside and just outside the travel detector", state.landingCoverage.length === 2
+    && state.landingCoverage.every(row => row.hi[0] === 255 && row.hi[1] === 255)
+    && JSON.stringify(state.landingCoverage[0]) === JSON.stringify(state.landingCoverage[1]), JSON.stringify(state.landingCoverage));
+  record("birds-eye combat: hill and jet-height cave roofs share the ramp cover's smooth opacity timing", state.coverFade.out.some(row => row.path > 0 && row.path < 1)
+    && state.coverFade.in.some(row => row.path > 0 && row.path < 1)
+    && state.coverFade.out.every((row, i, rows) => Math.abs(row.path - row.cave) < 1e-6 && (!i || row.path <= rows[i - 1].path + 1e-7))
+    && state.coverFade.in.every((row, i, rows) => Math.abs(row.path - row.cave) < 1e-6 && (!i || row.path >= rows[i - 1].path - 1e-7)), JSON.stringify(state.coverFade));
+  record("birds-eye combat: overlapping ramp cells belong to the upper path and retained voxel floors stay in the immutable terrain base", state.overlapCells > 0 && state.overlapOwnership
+    && state.retainedFloors > 0 && state.floorsPreserved, JSON.stringify({ overlaps: state.overlapCells, ownership: state.overlapOwnership, retained: state.retainedFloors, preserved: state.floorsPreserved }));
+  record("birds-eye combat: both ramp connections retain the source floor early, progressively remove it across the ramp and reach the destination before exit in either direction", state.rampTravel.length === 4 && state.rampTravel.every(r =>
+    Math.abs(r.early.y - (r.down ? r.upper : r.lower)) < 0.02 && Math.abs(r.late.y - (r.down ? r.lower : r.upper)) < 0.02
+    && r.middle.y > r.lower + (r.upper - r.lower) * 0.1 && r.middle.y < r.upper - (r.upper - r.lower) * 0.1
+    && r.positionError < 0.2 && r.maxRegions <= 8 && r.moving > 15), JSON.stringify(state.rampTravel));
+  record("birds-eye combat: stopping with small ramp-height noise holds the cut, while reversing smoothly restores the source floor", state.rampTravel.every(r =>
+    r.stopDrift < 0.01 && r.maxStep <= 1 && Math.abs(r.reversed.y - r.early.y) < 0.02), JSON.stringify(state.rampTravel));
+  record("birds-eye combat: upcoming ramp paths retain their minimum span while upper floors reveal progressively in either direction", state.rampTravel.every(r =>
+    r.minimumSpan && r.caveRegionsOnly && r.floorWindow > 0.6 && r.floorWindow < 0.82 && Math.abs(r.floorCenter - 0.5) < 0.04), JSON.stringify(state.rampTravel));
+  record("birds-eye combat: basement entrances open at HQ while the remaining route stays covered until descent", rows.filter(r => r.name !== "HQ" && r.name !== "basement").every(r => r.paths.slice(2).every(p => p.mix === 0))
+    && rows.find(r => r.name === "HQ").paths.slice(2).every(p => p.mix === 1 && p.hi === p.initial)
+    && rows.find(r => r.name === "basement").paths.slice(2).some(p => p.mix > 0)
+    && state.rampTravel.filter(r => r.name === "main-HQ").every(r => r.lowerRevealFrames === 0 && r.lowerRevealGuard)
+    && state.rampTravel.every(r => r.lowerFloorsOrdered)
+    && state.rampTravel.filter(r => r.name === "HQ-basement").every(r => r.lowerRevealGuard && r.lowerRevealFrames > 0 && r.lowerMixMax === 1 && r.lowerActorRoofChecks > 0 && r.lowerActorRoofCovered === 0), JSON.stringify({ rows: rows.map(r => ({ name: r.name, lower: r.paths.slice(2) })),
+      travel: state.rampTravel.map(({ name, down, lowerMixMax, lowerRevealFrames, lowerRevealGuard, lowerActorRoofChecks, lowerActorRoofCovered }) => ({ name, down, lowerMixMax, lowerRevealFrames, lowerRevealGuard, lowerActorRoofChecks, lowerActorRoofCovered })) }));
+  record("birds-eye combat: the upper-floor scan hides sliced actors, gorillas and barrels as whole units without hiding structural rooms or entrances", state.rampTravel.every(r =>
+    !r.slicedVisible && r.visibleFrames > 0 && r.wholeHidden > 0 && r.wholeBarrels > 0 && r.wholeGorillas > 0 && r.wholeComplete && !r.structureHidden), JSON.stringify(state.rampTravel));
+  record("birds-eye combat: jetting above the surface restores ramp cover and the following fall keeps the actor centered with head clearance", state.flight.peak > 4 && state.flight.highFrames > 10
+    && state.flight.fallFrames > 10 && state.flight.clearance >= 0.075 && state.flight.preserved && state.flight.centered && state.flight.landed, JSON.stringify(state.flight));
+  record("birds-eye combat: inward zoom switches at relative height 21 with the same head clearance on the surface, hills, HQ and basement", state.thresholds.length === 4
+    && state.thresholds.every(r => r.above.mode === "birds-eye" && r.above.relative > 21.2 && r.switched.mode === "shoulder" && r.switched.relative >= 20.99 && r.switched.relative <= 21.09 && r.frames < 150)
+    && Math.max(...state.thresholds.map(r => r.switched.headClearance)) - Math.min(...state.thresholds.map(r => r.switched.headClearance)) < 0.05, JSON.stringify(state.thresholds));
+  record("birds-eye combat: zoom leaves section meshes cached, translated islands share the exact world cut height, and terrain and centered landmarks stay unchanged", state.immutable && state.regionStorage && state.sections >= 3 && state.caves > 0 && state.caves <= 8
+    && rows.every(r => r.zoomStable && r.zoomMoved && r.caps.every(c => !c.visible || Math.abs(c.y + 0.002 - r.cutoff) < 1e-5))
+    && underground.some(r => r.caps.slice(1).some(c => c.visible && c.faces > 0))
+    && state.cache.every(c => c.cacheEntries <= 16) && state.cache.some(c => c.cacheEntries === 16)
+    && state.landmarks.length === 3 && state.landmarks.every(p => p[0] === 0 && p[1] === 0) && state.clouds > 0 && state.weather > 0, JSON.stringify({ ...state, rows: rows.map(r => ({ name: r.name, zoomStable: r.zoomStable, zoomMoved: r.zoomMoved, caps: r.caps })) }));
+  record("birds-eye combat: the pile, HQ hearth and basement center align on screen at every selected floor despite their different elevations", rows.every(r => r.orthoMix === 1 && r.centerError < 0.001), JSON.stringify(rows.map(({ name, centerError, orthoMix }) => ({ name, centerError, orthoMix }))));
+  record("birds-eye combat: cave roofs, underground cuts and weather follow the full camera blend through carry and shoulder handoffs, including reversal without a reset", state.transitions.length === 8
+    && state.transitions.every(r => r.immediate < 1e-6 && r.mixStep < 0.08 && r.cutStep < 5 && r.rockError < 1e-6 && r.capError < 1e-5 && r.maxRegions <= 8)
+    && state.transitions.slice(0, 4).every(r => r.after.fade === 1 && r.after.cuts.length > 0)
+    && state.transitions.slice(4).every(r => r.fadeError < 1e-6 && r.span > 1 && r.changed >= 10 && r.direction && r.blended >= 10)
+    && state.transitions[1].after.mix > 0 && state.transitions[1].after.mix < 1
+    && state.transitions[2].before.mix === state.transitions[1].after.mix
+    && [0, 2].every(i => state.transitions[i].after.mix === 0 && state.transitions[i].after.fade === 1 && state.transitions[i].after.cuts.length > 0)
+    && [4, 6].every(i => state.transitions[i].after.mix === 0 && state.transitions[i].after.fade === 0 && !state.transitions[i].after.cuts.length)
+    && [3, 5, 7].every(i => state.transitions[i].after.mix === 1 && state.transitions[i].after.fade === 1 && state.transitions[i].after.cuts.length > 0)
+    && state.transitions[4].after.mode === "shoulder" && state.transitions[5].after.mode === "birds-eye", JSON.stringify(state.transitions));
+  record("carry orbit: upper floors stay hidden in both lower-level camera handoffs and return after shoulder settles", Object.values(state.carryRoofs).every(Boolean), JSON.stringify(state.carryRoofs));
+  const released = state.released;
+  record("birds-eye combat: releasing the actor completes a bounded weather fade and upward rock scan after the camera stops following", released.before.mix === 1 && released.before.fade === 1 && released.immediateFade < 1e-6
+    && released.fadeStep < 0.08 && released.cutStep < 5 && released.capError < 1e-5 && released.span > 1 && released.changed >= 10 && released.direction && released.blended >= 10 && released.withoutPlayer >= 10
+    && released.rockError < 1e-6
+    && !released.after.player && released.after.mix === 0 && released.after.fade === 0 && !released.after.cuts.length && state.restored, JSON.stringify({ released, restored: state.restored }));
+  const rendering = await b.evaluate(`(() => {
+    const B = __ooga, S = BL.scene, root = S.createNode(), floor = BL.models.box({ w: 40, h: 0.2, d: 40, color: "#00ff00" });
+    // One greedy-meshed roof face crosses all four cut edges. Whole-face culling
+    // and clipping only the rectangle's original vertices both fail this case.
+    const roof = { verts: [-6, 0, -6, -6, 0, 6, 6, 0, 6, 6, 0, -6], faces: [{ i: [0, 1, 2, 3], color: [255, 0, 0] }], lines: [] };
+    const top = S.createNode({ geometry: roof, position: { x: 0, y: 5, z: 0 } });
+    const ground = S.createNode({ geometry: floor }); S.addChild(root, ground); S.addChild(root, top);
+    const camera = S.createCamera({ far: 60 }); Object.assign(camera.position, { x: 0, y: 20, z: 0 }); Object.assign(camera.target, { x: 0, y: 0, z: 0 }); camera.up = { x: 0, y: 0, z: -1 };
+    const canvas = document.createElement("canvas"); canvas.getContext("2d", { willReadFrequently: true });
+    const fallback = BL.canvasRenderer.createRenderer(canvas, { width: 256, height: 256 }), rows = [];
+    const region = { x: 0, z: 0, cos: Math.cos(Math.PI / 6), sin: Math.sin(Math.PI / 6), halfWidth: 1.5, halfDepth: 3, y: 2 };
+    const second = { x: -3, z: 0, cos: Math.cos(-Math.PI / 5), sin: Math.sin(-Math.PI / 5), halfWidth: 1.2, halfDepth: 2, y: 2 };
+    const regions = [region, second], original = JSON.stringify(roof), cloud = BL.hubModels.cloud(0);
+    const points = [[0, 5, 0], [region.cos * 1.2 + region.sin * 2.4, 5, -region.sin * 1.2 + region.cos * 2.4], [1.4, 5, -2.8], [4.5, 5, 0], [-3, 5, 0]];
+    const hidden = { ...roof, cutawayHide: true, cutawayPreserve: true }, base = { bloomStrength: 0, shadowStrength: 0, ambientFloor: 1, directStrength: 0 };
+    let cloudPoint = null, cloudDistance = Infinity;
+    for (const face of cloud.faces) {
+      const a = face.i[0] * 3, b = face.i[1] * 3, c = face.i[2] * 3, v = cloud.verts;
+      const ny = (v[b + 2] - v[a + 2]) * (v[c] - v[a]) - (v[b] - v[a]) * (v[c + 2] - v[a + 2]);
+      if (ny <= 0) continue;
+      let x = 0, y = 0, z = 0;
+      for (const i of face.i) { x += v[i * 3]; y += v[i * 3 + 1]; z += v[i * 3 + 2]; }
+      x /= face.i.length; y /= face.i.length; z /= face.i.length;
+      if (x * x + z * z < cloudDistance) { cloudDistance = x * x + z * z; cloudPoint = [x, y + 8, z]; }
+    }
+    try {
+      for (const [renderer, element] of [[B.renderer, document.getElementById("scene")], [fallback, canvas]]) {
+        const read = (opts, samples = points, area = 1) => {
+          renderer.render(root, camera, { ...base, ...opts });
+          return samples.map(point => {
+            const projected = renderer.project(...point, {}), x = Math.floor(projected.x * element.width / renderer.size.width) - Math.floor(area / 2), y = Math.floor(projected.y * element.height / renderer.size.height) - Math.floor(area / 2);
+            let pixels;
+            if (renderer.kind !== "webgl2") pixels = element.getContext("2d").getImageData(x, y, area, area).data;
+            else { const gl = element.getContext("webgl2"); pixels = new Uint8Array(area * area * 4); gl.bindFramebuffer(gl.FRAMEBUFFER, null); gl.readPixels(x, element.height - area - y, area, area, gl.RGBA, gl.UNSIGNED_BYTE, pixels); }
+            const average = [0, 0, 0, 0]; for (let i = 0; i < pixels.length; i++) average[i % 4] += pixels[i];
+            return average.map(n => n / (area * area));
+          });
+        };
+        const covered = read({}), revealed = read({ cutawayMaxY: 2 }), restored = read({});
+        const selective = read({ cutawayRegions: regions, cutawayRegionCount: 1 }), both = read({ cutawayRegions: regions, cutawayRegionCount: 2 });
+        region.y = 5; const coplanar = read({ cutawayRegions: regions, cutawayRegionCount: 1 }); region.y = 2;
+        roof.cutawayPreserve = true;
+        const preserved = read({ cutawayMaxY: 2, cutawayRegions: regions, cutawayRegionCount: 2 });
+        roof.clipMaxY = 4; const ownMaximum = read({ cutawayMaxY: 2, cutawayRegions: regions, cutawayRegionCount: 2 }); delete roof.clipMaxY;
+        roof.clipMinY = 6; const ownMinimum = read({ cutawayMaxY: 2, cutawayRegions: regions, cutawayRegionCount: 2 }); delete roof.clipMinY; delete roof.cutawayPreserve;
+        top.geometry = hidden;
+        const weatherBefore = read({}), weatherWorld = Array.from(top.world), weatherGeometry = JSON.stringify(hidden), weatherFade = [];
+        // Average full ordered-coverage tiles: WebGL fades depth-writing
+        // clouds by coverage, while Canvas blends the same visible fraction.
+        for (const fade of [0, 0.25, 0.5, 0.75, 1, 0.75, 0.5, 0.25, 0]) weatherFade.push({ fade, pixel: read({ cutawayFade: fade, birdsEyeCutaway: true, cutawayMaxY: 2, cutawayRegions: regions, cutawayRegionCount: 2 }, [points[0]], 8)[0] });
+        const weatherHidden = read({ birdsEyeCutaway: true }), weatherAfter = read({});
+        const weatherUnchanged = top.visible && top.geometry === hidden && top.position.y === 5 && top.world.every((v, i) => v === weatherWorld[i]) && JSON.stringify(hidden) === weatherGeometry;
+        top.geometry = cloud; top.position.y = 8;
+        const cloudBefore = read({}, [cloudPoint])[0], cloudCut = read({ cutawayMaxY: 2, cutawayRegions: regions, cutawayRegionCount: 2, birdsEyeCutaway: true }, [cloudPoint])[0];
+        const cloudWorld = Array.from(top.world), cloudPosition = { ...top.position };
+        top.matrixCloud = true; ground.visible = false;
+        camera.position.y = 4; camera.target.y = -5;
+        const loweredPoint = [cloudPoint[0], cloudPoint[1] - 8, cloudPoint[2]];
+        const cloudLowered = read({ cutawayCloudY: 0, cutawayCloudMix: 1 }, [loweredPoint])[0];
+        const cloudWorldUnchanged = top.world.every((v, i) => v === cloudWorld[i]) && Object.keys(cloudPosition).every(k => top.position[k] === cloudPosition[k]);
+        top.matrixCloud = false; top.position.y = 0;
+        const cloudReference = read({}, [loweredPoint])[0];
+        top.position.y = 8; top.matrixCloud = true; camera.position.y = 12;
+        const middlePoint = [cloudPoint[0], cloudPoint[1] - 4, cloudPoint[2]];
+        const cloudMiddle = read({ cutawayCloudY: 0, cutawayCloudMix: 0.5 }, [middlePoint])[0];
+        top.matrixCloud = false; top.position.y = 4;
+        const cloudMiddleReference = read({}, [middlePoint])[0];
+        ground.visible = true; camera.position.y = 20; camera.target.y = 0;
+        top.geometry = roof; top.position.y = 5;
+        rows.push({ kind: renderer.kind, covered, revealed, restored, selective, both, coplanar, preserved, ownMaximum, ownMinimum,
+          weatherBefore, weatherHidden, weatherAfter, weatherFade, weatherUnchanged, cloudBefore, cloudCut, cloudPreserved: cloud.cutawayPreserve,
+          cloudLowered, cloudReference, cloudMiddle, cloudMiddleReference, cloudWorldUnchanged,
+          visible: root.children.every(n => n.visible), immutable: JSON.stringify(roof) === original });
+      }
+    } finally { fallback.dispose(); for (const geometry of [floor, roof, hidden]) B.renderer.releaseGeometry(geometry); B.renderer.render(BL.scenes.hub.root, B.camera, B.renderOpts); }
+    return rows;
+  })()`);
+  const red = p => p[0] > p[1] + 40, green = p => p[1] > p[0] + 40;
+  record("birds-eye combat: WebGL2 and Canvas cut a large roof only inside rotated regions, retain both outside portions and coplanar faces, and restore the original mesh", rendering.length === 2 && rendering.some(r => r.kind === "webgl2") && rendering.some(r => r.kind === "canvas2d") && rendering.every(r => r.covered.every(red) && r.revealed.every(green) && r.restored.every(red)
+    && r.selective.slice(0, 2).every(green) && r.selective.slice(2).every(red) && green(r.both[4]) && red(r.both[2]) && red(r.both[3]) && r.coplanar.every(red) && r.visible && r.immutable), JSON.stringify(rendering));
+  record("birds-eye combat: preserved clouds survive local and global cuts, authored height limits still apply, and weather hides only during the render pass", rendering.every(r => r.preserved.every(red) && r.ownMaximum.every(green) && r.ownMinimum.every(green)
+    && r.weatherBefore.every(red) && r.weatherHidden.every(green) && r.weatherAfter.every(red) && r.weatherUnchanged && r.cloudPreserved
+    && r.cloudBefore[0] > 40 && r.cloudBefore[2] > 40 && r.cloudBefore.every((v, i) => Math.abs(v - r.cloudCut[i]) <= 1)), JSON.stringify(rendering.map(({ kind, preserved, ownMaximum, ownMinimum, weatherHidden, weatherUnchanged, cloudBefore, cloudCut }) => ({ kind, preserved, ownMaximum, ownMinimum, weatherHidden, weatherUnchanged, cloudBefore, cloudCut }))));
+  record("birds-eye combat: WebGL2 and Canvas weather fade independently of rock cuts and reverse to the same coverage without mutating scene nodes or geometry", state.weatherPreserved && rendering.every(r => r.weatherUnchanged && red(r.weatherFade[0].pixel) && green(r.weatherFade[4].pixel)
+    && r.weatherFade[2].pixel[0] > 20 && r.weatherFade[2].pixel[1] > 20
+    && r.weatherFade.slice(1, 5).every((f, i) => f.pixel[0] < r.weatherFade[i].pixel[0] - 10 && f.pixel[1] > r.weatherFade[i].pixel[1] + 10)
+    && r.weatherFade.slice(5).every((f, i) => f.pixel.every((v, channel) => Math.abs(v - r.weatherFade[3 - i].pixel[channel]) <= 1))), JSON.stringify({ weatherPreserved: state.weatherPreserved, renderers: rendering.map(({ kind, weatherFade, weatherUnchanged }) => ({ kind, weatherFade, weatherUnchanged })) }));
+  record("birds-eye combat: low-floor clouds render below the camera with a continuous visual offset while their world transforms and physical positions remain unchanged", rendering.every(r => r.cloudWorldUnchanged && r.cloudLowered[0] > 40 && r.cloudLowered[2] > 40
+    && r.cloudLowered.every((v, i) => Math.abs(v - r.cloudReference[i]) <= 1) && r.cloudMiddle.every((v, i) => Math.abs(v - r.cloudMiddleReference[i]) <= 1)), JSON.stringify(rendering.map(({ kind, cloudLowered, cloudReference, cloudMiddle, cloudMiddleReference, cloudWorldUnchanged }) => ({ kind, cloudLowered, cloudReference, cloudMiddle, cloudMiddleReference, cloudWorldUnchanged }))));
+} };
+
+const hubBirdsEyeProjection = { name: "birds-eye projection", why: "rule: overhead projection keeps vertical landmarks aligned and picking rays agree with rendered geometry throughout the perspective transition", run: async (b) => {
+  const state = await b.evaluate(`(() => {
+    const B = __ooga, S = BL.scene, root = S.createNode(), rows = [], camera = S.createCamera({ near: 0.1, far: 80 });
+    Object.assign(camera.position, { x: 3, y: 20, z: 5 }); Object.assign(camera.target, { x: 3, y: 0, z: 5 }); camera.up = { x: 0, y: 0, z: -1 }; camera.orthoHeight = 20;
+    const red = BL.models.box({ w: 0.8, h: 0.8, d: 0.8, color: "#ff0000" }), blue = BL.models.box({ w: 0.8, h: 0.8, d: 0.8, color: "#0000ff" });
+    const pink = BL.models.box({ w: 0.5, h: 0.5, d: 0.5, color: "#ff00ff" }), poses = [[-1, 4, 2], [7, -8, 8], [9, 18, 5]];
+    for (let i = 0; i < 2; i++) S.addChild(root, S.createNode({ geometry: i ? blue : red, position: { x: poses[i][0], y: poses[i][1], z: poses[i][2] } }));
+    const data = new Float32Array(20); data[0] = data[5] = data[10] = data[15] = data[16] = 1; data.set(poses[2], 12);
+    // Near the eye, this batch lies outside a perspective cone but inside the
+    // orthographic footprint; stale perspective culling would erase it.
+    S.addChild(root, S.createNode({ geometry: pink, instanceData: data, instanceCount: 1, cullSphere: [9, 18, 5, 0.5] }));
+    const canvas = document.createElement("canvas"); canvas.getContext("2d", { willReadFrequently: true });
+    const fallback = BL.canvasRenderer.createRenderer(canvas, { width: 256, height: 256 });
+    const points = [[0, -12, 0], [0, -5, 0], [0, 0, 0], [0, 5, 0], ...poses], opts = { bloomStrength: 0, shadowStrength: 0, ambientFloor: 1, directStrength: 0 };
+    try {
+      for (const [renderer, element] of [[B.renderer, document.getElementById("scene")], [fallback, canvas]]) {
+        for (const mix of [0, 0.25, 0.5, 0.75, 1]) {
+          camera.orthoMix = mix; renderer.render(root, camera, opts);
+          const width = renderer.size.width, height = renderer.size.height, tan = Math.tan(camera.fov / 2), f = height / (2 * tan);
+          let projectError = 0, rayError = 0, rayForward = true;
+          const projected = [], rays = [];
+          for (const [x, y, z] of points) {
+            const depth = 20 - y, w = (1 - mix) * depth + mix * camera.orthoHeight / (2 * tan), p = renderer.project(x, y, z, {});
+            if (!p) { projectError = Infinity; continue; }
+            projectError = Math.max(projectError, Math.hypot(p.x - width / 2 - (x - 3) * f / w, p.y - height / 2 - (z - 5) * f / w));
+            const ray = renderer.ray(p.x, p.y, camera, {}), dx = x - ray.ox, dy = y - ray.oy, dz = z - ray.oz;
+            const t = dx * ray.dx + dy * ray.dy + dz * ray.dz;
+            rayError = Math.max(rayError, Math.hypot(dx - ray.dx * t, dy - ray.dy * t, dz - ray.dz * t)); rayForward &&= t > 0;
+            projected.push(p); rays.push(ray);
+          }
+          const pixels = poses.map(([x, y, z]) => {
+            const p = renderer.project(x, y, z, {}), px = Math.floor(p.x * element.width / width), py = Math.floor(p.y * element.height / height);
+            if (px < 2 || py < 2 || px >= element.width - 2 || py >= element.height - 2) return null;
+            if (renderer.kind !== "webgl2") return Array.from(element.getContext("2d").getImageData(px, py, 1, 1).data);
+            const gl = element.getContext("webgl2"), pixel = new Uint8Array(4); gl.bindFramebuffer(gl.FRAMEBUFFER, null); gl.readPixels(px, element.height - 1 - py, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, pixel); return Array.from(pixel);
+          });
+          const aligned = Math.max(...projected.slice(0, 4).map(p => Math.hypot(p.x - projected[0].x, p.y - projected[0].y)));
+          const parallel = Math.max(...rays.map(r => Math.hypot(r.dx - rays[0].dx, r.dy - rays[0].dy, r.dz - rays[0].dz)));
+          rows.push({ kind: renderer.kind, mix, projectError, rayError, rayForward, aligned, parallel, pixels });
+        }
+        // A stale mix without a valid orthographic height must remain the
+        // ordinary perspective projection, including its picking contract.
+        camera.orthoHeight = 0; camera.orthoMix = 1; renderer.render(root, camera, opts);
+        const p = renderer.project(...poses[0], {}), f = renderer.size.height / (2 * Math.tan(camera.fov / 2));
+        rows.push({ kind: renderer.kind, fallback: true, error: Math.hypot(p.x - renderer.size.width / 2 + 4 * f / 16, p.y - renderer.size.height / 2 + 3 * f / 16) });
+        camera.orthoHeight = 20;
+      }
+      return rows;
+    } finally { fallback.dispose(); for (const geometry of [red, blue, pink]) B.renderer.releaseGeometry(geometry); B.renderer.render(BL.scenes.hub.root, B.camera, B.renderOpts); }
+  })()`);
+  const samples = state.filter(r => !r.fallback), settled = samples.filter(r => r.mix === 1);
+  record("birds-eye projection: WebGL2 and Canvas match the continuous projection formula and their rays hit the same world points at every transition sample", samples.length === 10 && samples.every(r => r.projectError < 0.002 && r.rayError < 1e-4 && r.rayForward)
+    && state.filter(r => r.fallback).every(r => r.error < 0.002) && settled.every(r => r.aligned < 0.001 && r.parallel < 1e-6), JSON.stringify(state));
+  record("birds-eye projection: rendered near and far objects follow projected positions, including a batch outside the old perspective frustum", samples.every(r => r.pixels[0]?.[0] > r.pixels[0]?.[1] + 40 && r.pixels[1]?.[2] > r.pixels[1]?.[1] + 40
+    && (!r.pixels[2] || r.pixels[2][0] > r.pixels[2][1] + 40 && r.pixels[2][2] > r.pixels[2][1] + 40)) && settled.every(r => r.pixels[2]), JSON.stringify(samples.map(({ kind, mix, pixels }) => ({ kind, mix, pixels }))));
+  const anchors = await b.evaluate(`(() => {
+    const B = __ooga, S = BL.scene, root = S.createNode(), actor = S.createNode({ position: { x: 4, y: 0, z: 0 } });
+    const bodyGeometry = BL.models.box({ w: 1, h: 2, d: 1, color: "#999999" }), headGeometry = BL.models.box({ w: 1, h: 1, d: 1, color: "#ffffff" });
+    const body = S.createNode({ geometry: bodyGeometry, position: { x: 0, y: 1, z: 0 } }), head = S.createNode({ geometry: headGeometry, position: { x: 0, y: 2.5, z: 0 } });
+    S.addChild(actor, body, head); S.addChild(root, actor);
+    const roofGeometry = BL.models.box({ w: 16, h: 0.2, d: 16, color: "#777777" }), roof = S.createNode({ geometry: roofGeometry, position: { x: 0, y: 6, z: 0 } }); S.addChild(root, roof);
+    const camera = S.createCamera({ far: 80, orthoHeight: 20 }); Object.assign(camera.position, { x: 0, y: 20, z: 0 }); Object.assign(camera.target, { x: 0, y: 0, z: 0 }); camera.up = { x: 0, y: 0, z: -1 };
+    const opts = { cutawayMaxY: 1e6, cutawayRegionCount: 0, cutawayRegions: [], birdsEyeCutaway: true, bloomStrength: 0, shadowStrength: 0 };
+    const visibility = BL.characterVisibility.create({ root, renderer: B.renderer, camera, renderOpts: opts }), cave = { root: actor, parts: { head } }, rows = [];
+    const sample = name => {
+      B.renderer.render(root, camera, opts); visibility.begin();
+      const out = {}, visible = visibility.anchor(cave, out), projected = [];
+      for (let x = -0.5; x <= 0.5; x++) for (let y = 2; y <= 3; y++) for (let z = -0.5; z <= 0.5; z++) projected.push(B.renderer.project(4 + x, y, z, {}));
+      const left = Math.min(...projected.map(p => p.x)), right = Math.max(...projected.map(p => p.x)), top = Math.min(...projected.map(p => p.y));
+      return { name, mix: camera.orthoMix, visible, error: visible ? Math.hypot(out.x - (left + right) / 2, out.y - top) : null };
+    };
+    try {
+      for (const mix of [0, 0.5, 1]) {
+        camera.orthoMix = mix; roof.visible = false; rows.push(sample("uncovered"));
+        roof.visible = true; rows.push(sample("covered"));
+        opts.cutawayMaxY = 4; rows.push(sample("global cut")); opts.cutawayMaxY = 1e6;
+      }
+      opts.cutawayRegions[0] = { x: 4, z: 0, cos: 1, sin: 0, halfWidth: 1, halfDepth: 1, y: 4 }; opts.cutawayRegionCount = 1;
+      rows.push(sample("local cut"));
+      opts.cutawayRegions[0].x = 4.65; opts.cutawayRegions[0].halfWidth = 0.25;
+      rows.push(sample("visible sliver"));
+      roofGeometry.cutawayPreserve = true; rows.push(sample("preserved roof")); delete roofGeometry.cutawayPreserve;
+      roofGeometry.cutawayHide = true; rows.push(sample("hidden weather")); delete roofGeometry.cutawayHide;
+      roof.matrixCloud = true; roofGeometry.cutawayPreserve = true; opts.cutawayCloudY = -4; opts.cutawayCloudMix = 1;
+      rows.push({ ...sample("lowered cloud"), physicalY: roof.position.y, worldY: roof.world[13] });
+      return rows;
+    } finally { visibility.dispose(); for (const geometry of [bodyGeometry, headGeometry, roofGeometry]) B.renderer.releaseGeometry(geometry); B.renderer.render(BL.scenes.hub.root, B.camera, B.renderOpts); }
+  })()`);
+  record("birds-eye projection: speech anchors follow the rendered head through the transition, ignore cut roofs and weather, and retain a sliver exposed through a local cut", anchors.length === 14 && anchors.every(r => {
+    const expected = r.name !== "covered" && r.name !== "preserved roof";
+    return r.visible === expected && (!expected || r.error < 0.002) && (r.name !== "lowered cloud" || r.physicalY === 6 && r.worldY === 6);
+  }), JSON.stringify(anchors));
+} };
+
+const hubCombatReplay = { name: "birds-eye combat replay", why: "contract: replay links preserve north-up intent and legacy combat orbit poses still migrate", run: async (b) => {
+  const northState = await b.evaluate(`(() => {
+    const B = __ooga, P = B.pilot, key = (type, value) => window.dispatchEvent(new KeyboardEvent(type, { key: value }));
+    const angle = () => Math.atan2(-B.camera.up.x, -B.camera.up.z), wrap = n => Math.atan2(Math.sin(n), Math.cos(n));
+    key("keydown", "q"); B.advance(0.4, 1 / 60); key("keyup", "q"); B.advance(0.6, 1 / 60);
+    const before = angle(), pose = JSON.parse(document.getElementById("position-debug").dataset.pose);
+    P.restorePose(JSON.parse(JSON.stringify(pose)), true);
+    key("keydown", "w"); B.advance(1 / 60, 1 / 60); key("keyup", "w"); B.advance(0.5, 1 / 60);
+    const drift = Math.abs(wrap(angle() - before)), stillUnlocked = !P.birdsEyeNorthUp;
+    key("keydown", "n"); key("keyup", "n"); B.advance(0.8, 1 / 60);
+    const locked = JSON.parse(document.getElementById("position-debug").dataset.pose), north = angle();
+    P.modeAction("mode-toggle"); B.advance(0.8, 1 / 60); P.hooks.onOrbit(120, 0); B.advance(0.8, 1 / 60);
+    const orbit = P.orbit.yaw; P.modeAction("mode-toggle"); B.advance(0.8, 1 / 60);
+    return { storedUnlocked: pose.birdsEyeNorthUp, stillUnlocked, drift, locked: locked.birdsEyeNorthUp, north,
+      reentry: { orbit, angle: angle(), northUp: P.birdsEyeNorthUp, mode: P.mode, error: Math.abs(wrap(angle() - orbit)) } };
+  })()`);
+  record("birds-eye combat: debug replay records explicit north-up intent, while a fresh orbit-to-birds-eye transition clears the old lock and preserves the orbit heading", northState.storedUnlocked === false && northState.stillUnlocked && northState.locked && northState.drift < 0.001 && Math.abs(northState.north) < 0.001
+    && northState.reentry.mode === "birds-eye" && !northState.reentry.northUp && Math.abs(northState.reentry.orbit) > 0.1 && northState.reentry.error < 0.01, JSON.stringify(northState));
+  const legacy = await b.evaluate(`(() => { const pose = JSON.parse(document.getElementById("position-debug").dataset.pose); __ooga.pilot.capturePose(pose); pose.mode = "orbit"; pose.battle = pose.combat; delete pose.combat; delete pose.birdsEyeNorthUp; return pose; })()`);
+  await b.open(hubPage(src, `solo=1&character=portlandhodl&pose=${encodeURIComponent(JSON.stringify(legacy))}`));
+  await untilReady(b);
+  const replay = await b.evaluate(`(() => { const B = __ooga, pose = JSON.parse(document.getElementById("position-debug").dataset.pose), el = B.hud.el.mode; return { mode: B.pilot.mode, combat: B.pilot.aiming, northUp: pose.birdsEyeNorthUp, poseMode: pose.mode, poseCombat: pose.combat, legacyField: Object.hasOwn(pose, "battle"), attribute: el.dataset.combat, legacyAttribute: el.hasAttribute("data-battle"), label: el.getAttribute("aria-label") }; })()`);
+  record("birds-eye combat: old pose links migrate once, and new pose and HUD state use only combat terminology", replay.mode === "birds-eye" && replay.combat && replay.northUp === false && replay.poseMode === "birds-eye" && replay.poseCombat && !replay.legacyField && replay.attribute === "true" && !replay.legacyAttribute && replay.label.includes("combat") && !replay.label.includes("battle"), JSON.stringify(replay));
+  // User-supplied basement replay: the old cursor-entry path saved a zero sideways offset.
+  const collapsed = {
+    version: 1, character: "w-s-bitcoin", mode: "shoulder", closeWanted: false, combat: true, birdsEyeNorthUp: true,
+    position: [4.196401756845946, -10.703027121441215, 6.695479695588937], target: [0.32891306379743845, -11.382788314313563, 5.933603782632617],
+    direction: [-0.9668722041737472, -0.16994030365120447, -0.19046898432851453], up: [0, 1, 0], fov: 0.8377580409572781,
+    actor: [1.2652318088628172, -12.167587702447781, 6.11805402908858], body: [0, -1.7653007492106794, 0], head: [0.17076909418157493, 0, 0],
+    bodyQuaternion: [0, 0, 0, 1], headQuaternion: [0, 0, 0, 1], bodyRolled: false, headRolled: false,
+    orbit: [1.3762919043791138, 0.17076909418157493, 37.33323956694727, -3.165801056565666, -12.167587702447781, 6.0384959367857975],
+    headOffset: [0, 0, 0], headOrbit: false, shoulderSide: 8.60671903579911e-16, closeMix: 0, ads: 0,
+    selectedSlot: 2, ammo: 30, unlimited: false, magazines: [0, 0], magazineCount: 0, aimYaw: -4.8642770478224406e-8, aimPitch: 0.16261560295853825,
+    jetpack: false, fuel: 1, hop: 0, hopV: 0, lift: 0, orthoMix: 0, orthoHeight: 2.8431736609009226
+  };
+  await b.open(hubPage(src, `character=w-s-bitcoin&pose=${encodeURIComponent(JSON.stringify(collapsed))}`));
+  await untilReady(b);
+  const repaired = await b.evaluate(`(() => {
+    const B = __ooga, P = B.pilot, a = P.player, C = B.camera;
+    const pose = JSON.parse(document.getElementById("position-debug").dataset.pose); P.capturePose(pose);
+    const view = JSON.stringify([C.position, C.target, C.up, C.fov]), p = a.root.position;
+    const dx = C.position.x - C.target.x, dz = C.position.z - C.target.z;
+    const side = ((C.position.x - p.x) * dz - (C.position.z - p.z) * dx) / Math.hypot(dx, dz) / a.traits.height;
+    const w = a.parts.head.world, head = B.project(w[12], w[13], w[14], {});
+    B.advance(0.5, 1 / 60);
+    const held = P.poseHeld && view === JSON.stringify([C.position, C.target, C.up, C.fov]);
+    P.restorePose(JSON.parse(JSON.stringify(pose)), true); B.advance(0.2, 1 / 60);
+    return { pose, side, headOffset: B.renderer.size.width / 2 - head.x, held, roundTrip: view === JSON.stringify([C.position, C.target, C.up, C.fov]) };
+  })()`);
+  record("shoulder replay: the supplied zero-offset URL loads beside the head before any input and holds the repaired camera", repaired.pose.mode === "shoulder" && repaired.pose.combat && repaired.pose.shoulderSide === 0.6 && Math.abs(repaired.side - 0.6) < 1e-5 && repaired.headOffset > 0 && repaired.held
+    && repaired.pose.actor.every((n, i) => Math.abs(n - collapsed.actor[i]) < 1e-6) && repaired.pose.selectedSlot === 2 && repaired.pose.ammo === 30 && repaired.roundTrip, JSON.stringify(repaired));
+} };
+
+const hubBirdsEyeTargets = { name: "birds-eye lower-floor targets", why: "rule: hidden upstairs targets cannot steal downstairs aim, and the orange melee dot and secondary shots identify the object that actually receives damage", run: async (b) => {
+  const result = await b.evaluate(`(() => {
+    const B = __ooga, P = B.pilot, S = BL.scene, root = BL.scenes.hub.root, a = P.player, H = B.island.headquarters;
+    const lowerGeometry = BL.models.box({ w: 0.8, h: 1, d: 0.8, color: "#527545" });
+    const upperGeometry = BL.models.box({ w: 3, h: 1, d: 3, color: "#aa5555" });
+    // Two real weapon-query targets share a footprint on separate floors. High
+    // health avoids loot/respawn randomness while retaining the real damage path.
+    const type = B.headquarters.breakables.list[0].type;
+    const make = (geometry, y) => {
+      const node = S.createNode({ geometry, position: { x: 6, y: y + 0.5, z: 0 } });
+      const owner = { kind: "prop", prop: "rock", node, active: true };
+      owner.breakable = { owner, type, health: 100, broken: false };
+      S.addChild(root, node); B.input.add(node, owner); return owner;
+    };
+    const lower = make(lowerGeometry, H.basement.floor), upper = make(upperGeometry, H.floor);
+    const pointAtLower = () => {
+      S.updateWorld(root); B.renderer.render(root, B.camera, B.renderOpts);
+      const p = B.renderer.project(lower.node.position.x, lower.node.position.y, lower.node.position.z, {});
+      P.hooks.onOrbit(-1e6, -1e6); P.hooks.onOrbit(p.x, p.y);
+    };
+    const aim = () => {
+      pointAtLower(); B.advance(0.4, 1 / 60);
+      const target = P.assistedTarget, reticle = document.getElementById("weapon-reticle"), dot = getComputedStyle(reticle.querySelector("span"));
+      return { target: target?.owner === lower ? "lower" : target?.owner === upper ? "upper" : "other", feedback: reticle.dataset.target,
+        dot: dot.backgroundColor, visibility: dot.visibility, x: target?.x, y: target?.y, z: target?.z, ceiling: P.birdsEyeCeiling };
+    };
+    try {
+      P.navigate({ position: { x: 6, y: H.basement.floor, z: -3 }, yaw: 0, pitch: 0.3, dist: 8 }); B.advance(0.7, 1 / 60);
+      P.weaponAction("weapon-primary"); B.advance(0.5, 1 / 60); const far = aim();
+      P.navigate({ position: { x: 6, y: H.basement.floor, z: -0.95 }, yaw: 0, pitch: 0.3, dist: 8 }); B.advance(0.7, 1 / 60);
+      const near = aim(), beforeMelee = lower.breakable.health;
+      P.weaponAction("weapon-fire"); B.advance(0.65, 1 / 60); const afterMelee = lower.breakable.health;
+      const jump = { peak: 0, peakTarget: false, orangeFrames: 0 }; B.crew.jumpPlayer();
+      for (let i = 0; i < 60; i++) {
+        B.advance(1 / 60, 1 / 60);
+        if (a.hop > jump.peak) { jump.peak = a.hop; jump.peakTarget = P.assistedTarget?.owner === lower; }
+        if (a.hop > 0.1 && document.getElementById("weapon-reticle").dataset.target === "object") jump.orangeFrames++;
+      }
+      P.weaponAction("weapon-secondary"); B.advance(0.4, 1 / 60); const firearm = aim(), shotsBefore = a.weapon.shotsFired;
+      P.weaponAction("weapon-secondary"); B.advance(0.7, 1 / 60);
+      const afterShot = lower.breakable.health, shots = a.weapon.shotsFired - shotsBefore, mode = P.mode;
+      P.navigate({ position: { x: 6, y: H.basement.floor, z: -2 }, yaw: 0, pitch: 0.3, dist: 8 }); B.advance(0.5, 1 / 60);
+      P.hooks.onZoom(100); B.advance(1, 1 / 60); aim(); const fromHeight = P.birdsEyeHeight;
+      P.hooks.onZoom(0.001);
+      let frames = 0; for (; frames < 120 && P.mode === "birds-eye"; frames++) { pointAtLower(); B.advance(1 / 60, 1 / 60); }
+      B.advance(0.06, 1 / 60);
+      const anchor = P.assistedTarget ? { x: P.assistedTarget.x, y: P.assistedTarget.y, z: P.assistedTarget.z } : null;
+      const reticle = document.getElementById("weapon-reticle"), handoff = { mode: P.mode, mix: P.birdsEyeMix, frames, fromHeight, anchor,
+        offset: Math.hypot(parseFloat(reticle.style.left) - B.renderer.size.width / 2, parseFloat(reticle.style.top) - B.renderer.size.height / 2),
+        before: lower.breakable.health, shotsBefore: a.weapon.shotsFired };
+      P.weaponAction("weapon-fire"); B.advance(0.3, 1 / 60);
+      handoff.after = lower.breakable.health; handoff.shots = a.weapon.shotsFired - handoff.shotsBefore;
+      B.advance(1, 1 / 60);
+      const held = P.assistedTarget, screen = anchor && B.renderer.project(anchor.x, anchor.y, anchor.z, {});
+      handoff.targetError = anchor && held ? Math.hypot(anchor.x - held.x, anchor.y - held.y, anchor.z - held.z) : Infinity;
+      handoff.centerError = screen ? Math.hypot(screen.x - B.renderer.size.width / 2, screen.y - B.renderer.size.height / 2) : Infinity;
+      const closeAim = [];
+      for (const fresh of [false, true]) {
+        if (fresh) { P.hooks.onOrbit(0.1, 0); B.advance(0.5, 1 / 60); }
+        const C = B.camera, dx = C.target.x - C.position.x, dy = C.target.y - C.position.y, dz = C.target.z - C.position.z;
+        const length = Math.hypot(dx, dy, dz), hit = {};
+        const found = B.input.weaponTargets.ray(hit, C.position.x, C.position.y, C.position.z, dx / length, dy / length, dz / length, 60, a);
+        const point = fresh ? hit : anchor;
+        P.hooks.onZoom(0.8);
+        let error = 0;
+        for (let frame = 0; frame < 90; frame++) {
+          B.advance(1 / 60, 1 / 60);
+          const q = point && B.project(point.x, point.y, point.z, {});
+          error = Math.max(error, q ? Math.hypot(q.x - B.renderer.size.width / 2, q.y - B.renderer.size.height / 2) : Infinity);
+        }
+        const mode = P.mode;
+        if (fresh) { P.hooks.onOrbit(0.015, 0); B.advance(1, 1 / 60); }
+        const eye = B.camera, vx = eye.target.x - eye.position.x, vy = eye.target.y - eye.position.y, vz = eye.target.z - eye.position.z;
+        const rayLength = Math.hypot(vx, vy, vz), exitHit = {};
+        const exitFound = B.input.weaponTargets.ray(exitHit, eye.position.x, eye.position.y, eye.position.z, vx / rayLength, vy / rayLength, vz / rayLength, 60, a);
+        const exitPoint = exitFound ? { x: exitHit.x, y: exitHit.y, z: exitHit.z } : null;
+        P.hooks.onZoom(1.2);
+        let exitError = 0;
+        for (let frame = 0; frame < 90; frame++) {
+          B.advance(1 / 60, 1 / 60);
+          const q = exitPoint && B.project(exitPoint.x, exitPoint.y, exitPoint.z, {});
+          exitError = Math.max(exitError, q ? Math.hypot(q.x - B.renderer.size.width / 2, q.y - B.renderer.size.height / 2) : Infinity);
+        }
+        closeAim.push({ fresh, found, mode, error, exitFound, exitMode: P.mode, exitError });
+      }
+      P.hooks.onZoom(1.2); B.advance(1, 1 / 60);
+      return { far, near, firearm, jump, handoff, closeAim, floor: H.basement.floor, beforeMelee, afterMelee, afterShot,
+        upperHealth: upper.breakable.health, shots, mode };
+    } finally {
+      B.crew.stopBurst(a); B.crew.selectWeapon(1, a);
+      for (const owner of [lower, upper]) { B.input.remove(owner.node); S.removeChild(root, owner.node); B.renderer.releaseGeometry(owner.node.geometry); }
+      B.advance(0.2, 1 / 60);
+    }
+  })()`);
+  record("birds-eye combat: basement aim ignores upstairs geometry, hides the distant melee dot and shows orange in range, then melee and secondary fire damage that same target", result.mode === "birds-eye" && result.far.target === "lower" && result.far.feedback === "out-of-range" && result.far.visibility === "hidden" && result.near.target === "lower" && result.near.feedback === "object" && result.near.dot === "rgb(255, 157, 66)" && result.near.visibility === "visible" && Math.abs(result.near.y - result.floor - 0.5) < 1e-5 && result.afterMelee < result.beforeMelee && result.firearm.target === "lower" && result.shots > 0 && result.afterShot < result.afterMelee && result.upperHealth === 100, JSON.stringify(result));
+  record("birds-eye combat: a jump retains same-floor targeting through its apex and orange feedback while melee remains within reach", result.jump.peak > 0.9 && result.jump.peakTarget && result.jump.orangeFrames > 2, JSON.stringify(result.jump));
+  record("birds-eye combat: a full-height zoom reaches shoulder promptly, retains the exact elevated world anchor through the swoop, and fires into the same target", result.handoff.mode === "shoulder" && result.handoff.mix > 0 && result.handoff.mix < 1 && result.handoff.offset > 20
+    && result.handoff.fromHeight > 60 && result.handoff.frames > 0 && result.handoff.frames < 45 && result.handoff.anchor && result.handoff.anchor.y > result.floor + 0.05
+    && result.handoff.targetError < 1e-6 && result.handoff.centerError < 0.1 && result.handoff.shots > 0 && result.handoff.after < result.handoff.before, JSON.stringify(result.handoff));
+  record("combat zoom: object points stay under the crosshair in both shoulder/first-person directions, including after new first-person aim",
+    result.closeAim.length === 2 && result.closeAim.every(row => row.found && row.mode === "first-person" && row.error < 0.1 && row.exitFound && row.exitMode === "shoulder" && row.exitError < 0.1), JSON.stringify(result.closeAim));
 } };
 
 // ---- Phones ----
@@ -3365,9 +4640,64 @@ const phone = (id, { card = null, play = null, required, sheet = false }) => ({ 
 } });
 
 scene("hub", { steps: [{ name: `work movement lab lanes ${1 / RATES[0]}Hz`, why: "regression: work walkers left their facing-right side of the lab lane", open: "on about 4 boots in 30 the lane targets sit on the centre or far side; unfixed", run: labLanes }, donation("hub"), hubWalking, hubRoutes, hubFall, trip("hub")] });
+scene("hub", { label: "room sign", query: "pos=0", steps: [{ name: "room sign copies hash", why: "rule: tapping a room sign swings it and copies its displayed eight-character code with visible confirmation", run: async (b) => {
+  const point = await b.evaluate(`(() => { const B = __ooga, sign = B.headquarters.roomSigns[0], n = sign.node; Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText: (value) => { window.__roomHash = value; return Promise.resolve(); } } }); window.__roomSignBefore = sign.hits; B.pilot.release(true); B.pilot.navigate({ position: { x: n.position.x, y: n.position.y, z: n.position.z }, target: { x: n.position.x, y: n.position.y - 0.2, z: n.position.z }, yaw: n.rotation.y, pitch: 0, dist: 4 }); B.advance(0.6, 1 / 60); return B.project(n.position.x, n.position.y - 0.2, n.position.z, {}); })()`);
+  await b.click(point.x, point.y);
+  for (let i = 0; i < 20 && !(await b.evaluate(`!!window.__roomHash`)); i++) await b.sleep(10);
+  const state = await b.evaluate(`(() => { const B = __ooga, sign = B.headquarters.roomSigns[0], meta = sign.node.geometry.roomLifehashSign; B.advance(0.08, 1 / 60); return { expected: meta.lines[0], copied: window.__roomHash || "", angle: sign.node.rotation.x, velocity: sign.velocity, hits: sign.hits, before: window.__roomSignBefore, toast: document.getElementById("toast").textContent, code: meta.lines[0] }; })()`);
+  record("room sign: a pointer tap drives the hanging spring, copies its displayed eight-character code, and confirms it in the toast", state.copied === state.expected && state.expected.length === 8 && state.hits === state.before + 1 && Math.abs(state.angle) > 0.01 && Math.abs(state.velocity) > 0.01 && state.toast === `Room hash ${state.code} copied to clipboard`, JSON.stringify(state));
+} }] });
 scene("hub", { label: "chilling", query: "status=chillin&pos=0", steps: [{ name: "chilling Ooga placement", why: "regression: chilling Oogas spawned beside the banana pile and 2140data spun his nunchaku as a permanent idle stance", run: async (b) => {
   const state = await b.evaluate(`(() => { const B = __ooga, inner = B.path.ringOuterRadius + 1.5, rows = [...B.cavemen.values()].map(c => ({ name: c.traits.name, state: c.state, radius: Math.hypot(c.root.position.x, c.root.position.z), snack: c.parts.snack.visible })); const c = B.cavemen.get("2140data"); B.advance(2, 1 / 60); return { inner, rows, spin: c.parts.chukTrail.some(n => n.visible), clubYaw: c.parts.club.rotation.y }; })()`);
   record("chilling Oogas: every Ooga rests beyond the banana ring without eating, and 2140data carries rather than continuously spins his nunchaku", state.rows.every(c => c.state === "chilling" && c.radius >= state.inner && !c.snack) && !state.spin && Math.abs(state.clubYaw) < 1e-6, JSON.stringify(state));
+  const seated = await b.evaluate(`(() => {
+    const gorilla = BL.agent.create({ managed: true, groundAt: () => 0 }), motion = { groom: 0, groomPhase: 0 };
+    const parts = [gorilla.parts.head, gorilla.parts.armL, gorilla.parts.armR];
+    gorilla.poseManaged(2, 0, 0, 0, 0, 0, false, false, "sit", motion);
+    const low = parts.map(part => part.rotation.x), high = low.slice();
+    let compact = true, displacement = 0;
+    for (let frame = 0; frame < 9 * 60; frame++) {
+      motion.groomPhase = frame / 60;
+      gorilla.poseManaged(1 / 60, 0, 0, 0, 0, 0, false, false, "sit", motion);
+      for (let i = 0; i < parts.length; i++) { low[i] = Math.min(low[i], parts[i].rotation.x); high[i] = Math.max(high[i], parts[i].rotation.x); }
+      compact &&= gorilla.sitCompact;
+      displacement = Math.max(displacement, Math.hypot(gorilla.root.position.x, gorilla.root.position.y, gorilla.root.position.z));
+    }
+    gorilla.dispose(); return { ranges: high.map((value, i) => value - low[i]), compact, displacement };
+  })()`);
+  record("seated gorillas: within one short rest the head and both arms move subtly while the seated footprint and root stay planted", seated.ranges.every(range => range > 0.02 && range < 0.2)
+    && seated.compact && seated.displacement === 0, JSON.stringify(seated));
+} }] });
+scene("hub", { label: "lab flask approach", query: "solo=1&character=portlandhodl&status=clankin", steps: [{ name: "lab flask approach", why: "regression: the flask pickup was admitted using an inspection pose and stale bench settings, leaving the scientist retrying at its station", run: async (b) => {
+  const state = await b.evaluate(`(() => {
+    const B = __ooga, C = B.clankers, e = C.list[0], lab = B.headquarters.entropyLab;
+    B.pilot.release(true); e.owner.root.visible = false;
+    const stationIndex = lab.stations.findIndex(station => station.kind === "carry" && station.side < 0);
+    const station = lab.stations[stationIndex], itemIndex = lab.equipment.findIndex(item => item.station === stationIndex), item = lab.equipment[itemIndex];
+    const site = B.crew.workSites.findIndex(site => site.mouth === lab.mouth);
+    e.owner.state = "working"; e.owner.work.site = e.owner.work.plannedSite = site;
+    Object.assign(e, { active: true, controlled: false, mode: "working", phase: "work", site, pendingSite: -1, route: "", parked: false,
+      lounge: "", loungeDepart: false, recover: 0, pound: 0, beat: 0, stand: 0, speed: 0, heading: station.heading,
+      hasSlot: true, slotIndex: stationIndex, slotX: station.x, slotY: station.y, slotZ: station.z, blocked: 0, exitFootprint: false });
+    Object.assign(e.root.position, { x: station.x - Math.sin(station.heading) * 0.7, y: station.y, z: station.z - Math.cos(station.heading) * 0.7 });
+    e.root.visible = true;
+    e.jump.active = e.climb.active = e.drive.airborne = e.drive.resume = e.fire.burning = e.fire.rolling = false;
+    Object.assign(e.lab, { station: stationIndex, pickup: itemIndex, item: -1, stage: "fetch", reach: 0, arrived: false, yielding: 0,
+      pathCount: 0, pathIndex: 0, pathAt: 0, pathPending: false, pathPartial: false, targetX: NaN, targetZ: NaN });
+    Object.assign(e.motion, { lab: true, labWork: "", labReach: 0, labBench: null, labPhase: 0 });
+    e.gorilla.poseManaged(2, e.root.position.x, e.root.position.y, e.root.position.z, e.heading, 0, false, true, "", e.motion);
+    e.stuck.time = e.stuck.taskTime = 0; e.stuck.taskActive = false; e.stuck.x = NaN;
+    const replans = e.stuck.replans, recoveries = e.stuck.recoveries;
+    let seconds = 0, distance = 0, x = e.root.position.x, z = e.root.position.z;
+    while (seconds < 4 && e.lab.item !== itemIndex) {
+      C.update(1 / 60); seconds += 1 / 60;
+      distance += Math.hypot(e.root.position.x - x, e.root.position.z - z); x = e.root.position.x; z = e.root.position.z;
+    }
+    return { seconds, distance, held: e.gorilla.labItem === item.node && item.holder === e,
+      station: e.lab.station, expected: stationIndex, replans: e.stuck.replans - replans, recoveries: e.stuck.recoveries - recoveries };
+  })()`);
+  record("lab flask: the scientist completes its short bench approach and picks up the real flask without circling or stall recovery", state.held && state.station === state.expected
+    && state.seconds < 4 && state.distance >= 0.69 && state.distance < 1 && !state.replans && !state.recoveries, JSON.stringify(state));
 } }] });
 scene("hub", { label: "gorilla traversal", query: "status=chillin", steps: [{ name: "gorilla traversal", why: "regression: low props interrupted the gallop, jump charging took too long, and a stale motion envelope trapped gorillas beneath trees", run: async (b) => {
   const state = await b.evaluate(`(() => {
@@ -3404,6 +4734,29 @@ scene("hub", { label: "gorilla traversal", query: "status=chillin", steps: [{ na
       traversals.push({ kind, x: e.root.position.x, maxY, airborne, stopped, maxVisibleStep });
       solids.remove(node); S.removeChild(root, node); solids.sync();
     }
+    const escapeRock = S.createNode({ geometry: BL.hubModels.rock(0), position: { x: 12, y: B.island.surfaceAt(12, 0), z: 0 } });
+    S.addChild(root, escapeRock); solids.add(escapeRock); S.updateWorld(root); solids.sync();
+    C.release();
+    const rockY = solids.supportAt(12, 0, 50, 50, 0.45);
+    Object.assign(e.root.position, { x: 12, y: rockY, z: 0 });
+    Object.assign(e, { active: true, controlled: false, mode: "chilling", phase: "chill", route: "", lounge: "", loungeDepart: false,
+      parked: false, biped: false, recover: 0, rest: 0, heading: Math.PI / 2, speed: 0, goalX: 12, goalY: rockY, goalZ: 0,
+      footprintMode: "walk", compact: e.gorilla.compact, radius: BL.clankers.WALK_RADIUS, height: BL.clankers.WALK_HEIGHT });
+    e.owner.state = "chilling"; e.root.visible = true;
+    Object.assign(e.drive, { airborne: false, passiveFall: false, grounded: true, resume: false, vx: 0, vy: 0, vz: 0 });
+    e.jump.active = e.fire.burning = e.fire.rolling = false;
+    Object.assign(e.climb, { active: false, searchPending: false, searchDeferred: false, claimPending: false, crestPending: false, retry: 0, searchCursor: 0 });
+    Object.assign(e.roam, { count: 0, index: 0, wall: false, nextChoice: 1000, lastPose: "", transition: 0, progressTime: 0,
+      targetX: NaN, targetY: NaN, targetZ: NaN });
+    e.stuck.x = e.stuck.y = e.stuck.z = NaN; e.stuck.time = e.stuck.taskTime = 0; e.stuck.taskActive = false; e.stuck.reason = "";
+    e.gorilla.poseManaged(2, 12, rockY, 0, e.heading, 0, false, false, "", e.motion);
+    advance(null, 0.5);
+    const assignedExit = Math.hypot(e.goalX - 12, e.goalZ) > 2;
+    escapeRock.visible = false; S.updateWorld(root); solids.sync();
+    advance(null, 3.5);
+    const raisedProp = { rockY, assignedExit, x: e.root.position.x, y: e.root.position.y, z: e.root.position.z,
+      airborne: e.drive.airborne, stuck: e.stuck.time, reason: e.stuck.reason };
+    solids.remove(escapeRock); S.removeChild(root, escapeRock); solids.sync();
     setup(7, 2);
     C.control({ x: 1, z: 0, heading: Math.PI / 2, run: true, jumpHeld: true, jumpPressed: true }); B.advance(1 / 60, 1 / 60);
     advance({ x: 1, z: 0, heading: Math.PI / 2, run: true, jumpHeld: true }, 0.64);
@@ -3418,16 +4771,18 @@ scene("hub", { label: "gorilla traversal", query: "status=chillin", steps: [{ na
       if (Math.abs(e.root.position.x - previous) > 1e-5) movingFrames++;
       previous = e.root.position.x;
     });
-    return { traversals, jump, canopy: { startX: q.x - 2.8, endX: e.root.position.x, lowFrames, bipedFrames, movingFrames } };
+    return { traversals, raisedProp, jump, canopy: { startX: q.x - 2.8, endX: e.root.position.x, lowFrames, bipedFrames, movingFrames } };
   })()`);
   const props = state.traversals.every(row => row.x > 16 && row.maxY >= 0.75 && row.maxY <= 1.05 && !row.airborne && !row.stopped && row.maxVisibleStep < 0.25);
+  const raisedProp = state.raisedProp.rockY > 0.8 && state.raisedProp.assignedExit && state.raisedProp.y < 0.05
+    && Math.abs(state.raisedProp.x - 12) > 1.5 && !state.raisedProp.airborne && state.raisedProp.stuck < 0.65;
   const jump = state.jump.charged > 0.99 && state.jump.airborne && state.jump.vx > 5 && state.jump.moved > 0.5;
   const canopy = state.canopy.lowFrames > 0 && !state.canopy.bipedFrames && state.canopy.movingFrames > 10 && state.canopy.endX < state.canopy.startX - 1;
-  record("gorilla traversal: crates, barrels and rocks keep a continuous grounded gallop, a running jump reaches full charge in 0.65 seconds without losing momentum, and low cover permits an all-fours retreat", props && jump && canopy, JSON.stringify(state));
+  record("gorilla traversal: crates, barrels and rocks keep a continuous grounded gallop, an autonomous gorilla leaves a destroyed raised prop, a running jump reaches full charge in 0.65 seconds without losing momentum, and low cover permits an all-fours retreat", props && raisedProp && jump && canopy, JSON.stringify(state));
 } }] });
 scene("hub", { label: "mirror clanker", query: "solo=1&character=portlandhodl&status=clankin", steps: [{ name: "mirror clanker stays inside", why: "regression: a clanker turned around after crossing the mirror, poked its head back out, and worked beside a glowing generic box", run: async (b) => {
-  const state = await b.evaluate(`(() => { const B = __ooga, C = B.clankers, siteIndex = C.sites.findIndex(s => s.mirrorRoom), site = C.sites[siteIndex], m = site.mouth, e = C.list[0], localZ = p => (p.x - m.x) * site.sr + (p.z - m.z) * site.cr, place = (x, z) => ({ x: m.x + site.cr * x + site.sr * z, y: m.floorY, z: m.z - site.sr * x + site.cr * z }); e.owner.state = "working"; e.owner.work.site = e.owner.work.plannedSite = e.site = siteIndex; e.pendingSite = -1; e.hasSlot = true; e.slotIndex = 0; Object.assign(e, { slotX: place(0, -4.92).x, slotY: m.floorY, slotZ: place(0, -4.92).z, phase: "travel", route: "enter", fromSite: -1, entryTurn: false, blocked: 0, retry: 0 }); Object.assign(e.root.position, place(0, 0)); e.heading = m.ry + Math.PI; B.advance(0.25, 1 / 60); const entry = { turn: e.entryTurn, goal: localZ({ x: e.goalX, z: e.goalZ }) }; Object.assign(e.root.position, place(0, -4.92)); e.phase = "work"; e.route = ""; e.goalX = e.slotX; e.goalY = e.slotY; e.goalZ = e.slotZ; let max = -Infinity; for (let t = 0; t < 18; t += 1 / 30) { B.advance(1 / 30, 1 / 30); max = Math.max(max, localZ(e.root.position)); } return { room: m.room, entry, max, recoveries: e.stuck.recoveries, equipment: C.equipment.filter(item => item.site === siteIndex).length, standTagged: B.matrixGate.stand.geometry.matrixCave !== undefined, buttonTagged: B.matrixGate.button.geometry.matrixCave !== undefined }; })()`);
-  record("mirror clanker: the safe chamber expands, entry continues straight inward, work never recrosses the glass, and only the control button uses the bright Matrix material", state.room.w > 6 && state.room.to > 6.5 && Math.abs(state.entry.goal + 3.5) < 0.01 && state.max <= -1.85 + 1e-6 && state.equipment === 0 && !state.standTagged && state.buttonTagged, JSON.stringify(state));
+  const state = await b.evaluate(`(() => { const B = __ooga, C = B.clankers, siteIndex = C.sites.findIndex(s => s.mirrorRoom), site = C.sites[siteIndex], m = site.mouth, e = C.list[0], localX = p => (p.x - m.x) * site.cr - (p.z - m.z) * site.sr, localZ = p => (p.x - m.x) * site.sr + (p.z - m.z) * site.cr, place = (x, z) => ({ x: m.x + site.cr * x + site.sr * z, y: m.floorY, z: m.z - site.sr * x + site.cr * z }); e.owner.state = "working"; e.owner.work.site = e.owner.work.plannedSite = e.site = siteIndex; e.pendingSite = -1; e.hasSlot = true; e.slotIndex = 0; Object.assign(e, { slotX: place(0, -4.92).x, slotY: m.floorY, slotZ: place(0, -4.92).z, phase: "travel", route: "enter", fromSite: -1, entryTurn: false, blocked: 0, retry: 0 }); Object.assign(e.root.position, place(0, 0)); e.heading = m.ry + Math.PI; B.advance(0.25, 1 / 60); const entry = { turn: e.entryTurn, goal: localZ({ x: e.goalX, z: e.goalZ }) }; Object.assign(e.root.position, place(0, -4.92)); e.phase = "work"; e.route = ""; e.goalX = e.slotX; e.goalY = e.slotY; e.goalZ = e.slotZ; let minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity, distance = 0, lastX = e.root.position.x, lastZ = e.root.position.z; for (let t = 0; t < 18; t += 1 / 30) { B.advance(1 / 30, 1 / 30); const x = localX(e.root.position), z = localZ(e.root.position); minX = Math.min(minX, x); maxX = Math.max(maxX, x); minZ = Math.min(minZ, z); maxZ = Math.max(maxZ, z); distance += Math.hypot(e.root.position.x - lastX, e.root.position.z - lastZ); lastX = e.root.position.x; lastZ = e.root.position.z; } const control = B.matrixGate.button, lever = B.matrixGate.lever; return { room: m.room, entry, minX, maxX, minZ, maxZ, distance, recoveries: e.stuck.recoveries, equipment: C.equipment.filter(item => item.site === siteIndex).length, leverY: control.position.y, leverScale: control.scale.y, leverZ: control.position.z, leverTagged: control.geometry.matrixCave !== undefined && control.children.every(node => node.geometry.matrixCave !== undefined) && lever.children.every(node => node.geometry.matrixCave !== undefined), leverNative: !!control.matrixNative, leverParts: control.children.length, gripParts: lever.children.length }; })()`);
+  record("mirror clanker: the safe chamber expands, entry continues straight inward, runs cross from side to side at varied depths behind the glass, and a compact glyphed lever is mounted within reach on the back wall", state.room.w > 6 && state.room.to > 6.5 && Math.abs(state.entry.goal + 3.5) < 0.01 && state.maxZ <= -1.85 + 1e-6 && state.minX < -0.8 && state.maxX > 0.8 && state.maxZ - state.minZ > 1 && state.distance > 8 && state.equipment === 0 && state.leverY >= 1 && state.leverY < 1.5 && state.leverScale < 1 && state.leverZ < -state.room.to + 0.3 && state.leverTagged && !state.leverNative && state.leverParts === 3 && state.gripParts === 1, JSON.stringify(state));
 } }] });
 scene("hub", { perf: true, query: "bananas=1000", opts: { w: 1920, h: 1080, perf: true, motion: true }, steps: [{ name: "wall movement performance", why: "regression: frame rate fell moving behind cave walls during a donation", run: wallPerformance }] });
 scene("lab", { steps: [donation("lab"), labWalking, labKeys, trip("lab")] });
@@ -3437,7 +4792,10 @@ scene("orbit", { steps: [{ name: "orbit flow", why: "regression: the spacewalk a
 scene("mine", { query: "wip=mine", steps: [mineResume, trip("mine"), mineControls, wipGate] });
 scene("pool", { steps: [poolLeave, trip("pool")] });
 scene("hub", { label: "weapons", query: "character=portlandhodl&weapon=2&mag=1&ammo=6&jetpack=1", steps: [hubAk, hubMelee, hubJetpack] });
+scene("hub", { label: "birds-eye combat", query: "solo=1&character=portlandhodl&weapon=1&mode=shoulder&combat=1", steps: [hubBirdsEye, hubBirdsEyeFloors, hubBirdsEyeProjection, hubBirdsEyeTargets, hubCombatReplay] });
 scene("hub", { label: "mirror", steps: [hubJumbotron, hubMatrix, hubMirror] });
+scene("hub", { label: "side panel", query: "pos=0", steps: [hubSheetPersistence] });
+scene("hub", { label: "clock and block height", query: "pos=0&hour=9", steps: [hubBlockHeight] });
 scene("hub", { label: "canvas2d", query: "canvas2d=1&wip=mine", steps: [canvasTour] });
 scene("hub", { query: "pos=0", opts: PHONE_SIZE, steps: [phone("hub", { required: ["#joy-move", "#joy-look", "#sheet-toggle", "#sheet-bananas"], sheet: true })] });
 scene("lab", { query: "pos=0", opts: PHONE_SIZE, steps: [phone("lab", { required: ["#joy-move", "#joy-look", ".leave"] })] });
@@ -3470,11 +4828,11 @@ const dsbExit = async (b) => {
   await untilPage(b, 'B.scene === "hub" && !B.transitioning', 15000);
 };
 // Dialing and unused gates remain completely independent of destination construction.
-for (const mobile of [false, true]) scene("hub", { label: "stargate " + (mobile ? "canvas2d" : "webgl2"), query: "scene=hub&pos=0&wip=mine" + (mobile ? "&canvas2d=1" : ""), opts: mobile ? { ...PHONE_SIZE, motion: false } : { motion: true }, steps: [{ name: "stargate foundation " + (mobile ? "canvas2d" : "webgl2"), why: "rule: dialing must leave DSB dormant and preserve ordinary abyss falls", run: async b => {
+for (const mobile of [false, true]) scene("hub", { label: "Ooga Portal " + (mobile ? "canvas2d" : "webgl2"), query: "scene=hub&pos=0&wip=mine" + (mobile ? "&canvas2d=1" : ""), opts: mobile ? { ...PHONE_SIZE, motion: false } : { motion: true }, steps: [{ name: "Ooga Portal foundation " + (mobile ? "canvas2d" : "webgl2"), why: "rule: dialing must leave DSB dormant and preserve ordinary abyss falls", run: async b => {
   const check = (name, ok, detail = "") => record(name + (mobile ? " canvas2d" : " webgl2"), ok, detail);
   const dormant = async stage => {
     const counts = await b.evaluate(`window.__gateDormancy`);
-    check("stargate: no DSB runtime or network at " + stage, Object.values(counts).every(v => v === 0), JSON.stringify(counts));
+    check("Ooga Portal: no DSB runtime or network at " + stage, Object.values(counts).every(v => v === 0), JSON.stringify(counts));
   };
   const press = async selector => {
     const p = await b.evaluate(`(() => { const e = document.querySelector(${JSON.stringify(selector)}); e.scrollIntoView({ block: "nearest" }); const r = e.getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; })()`);
@@ -3482,48 +4840,110 @@ for (const mobile of [false, true]) scene("hub", { label: "stargate " + (mobile 
     else await b.click(p.x, p.y);
   };
   await dormant("hub startup");
+  const openScreen = async index => {
+    const p = await b.evaluate(`(() => {
+      const B = __ooga, c = __oldGate.controls[${index}];
+      B.pilot.navigate({ position: c.approach, yaw: c.root.rotation.y, pitch: 0.1, dist: 4 }); B.advance(1.5);
+      window.__gateMenuView = JSON.stringify([B.camera.position, B.camera.target, B.camera.up, B.camera.fov, B.camera.orthoMix, B.camera.orthoHeight]);
+      BL.scene.updateWorld(c.root); const w = c.screen.world;
+      return B.project(w[12] + w[8] * 0.225, w[13] + w[9] * 0.225, w[14] + w[10] * 0.225, {});
+    })()`);
+    if (mobile) { await b.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ x: p.x, y: p.y }] }); await b.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] }); }
+    else await b.click(p.x, p.y);
+  };
   const setup = await b.evaluate(`(() => {
-    const B = __ooga, G = BL.scenes.hub.debug.stargate, h = B.island.headquarters.basement.hole, p = G.placement;
+    const B = __ooga, G = BL.scenes.hub.debug.oogaPortal, h = B.island.headquarters.basement.hole, p = G.arrivalAnchor, c = G.controls[0];
     window.__oldGate = G;
     B.pilot.possess(B.cavemen.get("YellowBrokeIt"));
-    B.pilot.navigate({ position: { x: p.x, y: p.y, z: p.z + 1.3 }, yaw: 0, pitch: 0.45, dist: 5 }); B.advance(0.2);
-    return { state: G.state, mine: BL.caves.slots.find(s => s.id === "c10").scene, dsbSlot: BL.caves.slots.some(s => s.scene === "dsb"), placement: p, radius: G.radius, outer: G.outerRadius, hole: { x: h.x, z: h.z, floor: h.floor }, act: document.getElementById("act").textContent, renderer: B.renderer.kind };
+    B.pilot.navigate({ position: c.approach, yaw: c.root.rotation.y, pitch: 0.1, dist: 4 }); B.advance(0.2);
+    return { state: G.state, mine: BL.caves.slots.find(s => s.id === "c10").scene, dsbSlot: BL.caves.slots.some(s => s.scene === "dsb"), placement: p, radius: G.radius, outer: G.outerRadius, hole: { x: h.x, z: h.z, floor: h.floor }, act: document.getElementById("act").textContent, renderer: B.renderer.kind, controls: G.controls.map(c => ({ x: c.root.position.x, z: c.root.position.z, leverOutward: c.z < c.screenPoint.z, clear: B.island.clearAt(c.approach.x, c.approach.y + 0.01, c.approach.z, B.crew.player.bodyRadius, B.crew.player.bodyHeight) })), selected: G.selected.label, sharedScreen: G.controls[0].label.geometry === G.controls[1].label.geometry, pedestal: !!G.dialer.parent };
   })()`);
-  check("stargate: dormant Pit installation keeps Mine c10, no DSB cave, and native DIAL", setup.state === "OFF" && setup.mine === "mine" && !setup.dsbSlot && setup.act.includes("DIAL") && setup.radius === 4 && setup.outer === 4.5 && setup.placement.y === setup.hole.floor && setup.placement.clearance >= 0.8 && setup.renderer === (mobile ? "canvas2d" : "webgl2"), JSON.stringify(setup));
-  if (mobile) await press("#act"); else await tapKey(b, " ");
-  const menu = await b.evaluate(`(() => { const d = document.getElementById("stargate-menu"), b = [...d.querySelectorAll("ol button")], r = d.getBoundingClientRect(); return { open: d.open, disabled: b.map(e => e.disabled), focus: document.activeElement === b[0], focused: document.activeElement.outerHTML.slice(0, 180), fits: r.left >= 0 && r.right <= innerWidth && r.top >= 0 && r.bottom <= innerHeight }; })()`);
-  check("stargate: native menu has five accessible destinations on desktop/touch", menu.open && menu.disabled.join() === "false,true,true,true,true" && menu.focus && menu.fits, JSON.stringify(menu));
+  check("Ooga Portal: dormant Pit keeps Mine c10 and two accessible SE/SW wall controls", setup.state === "OFF" && setup.mine === "mine" && !setup.dsbSlot && setup.act.includes("TURN ON") && setup.radius === 4 && setup.outer === 4.5 && setup.placement.y === setup.hole.floor && setup.placement.clearance >= 0.8 && setup.renderer === (mobile ? "canvas2d" : "webgl2") && setup.controls.length === 2 && setup.controls[0].x > 0 && setup.controls[1].x < 0 && setup.controls.every(c => c.z > 0 && c.clear && c.leverOutward) && setup.sharedScreen && setup.selected === "DSB Land" && !setup.pedestal, JSON.stringify(setup));
+  const colors = await b.evaluate(`(() => {
+    const g = __oldGate, ring = g.root.children[0].geometry.faces[0].color;
+    const same = face => Array.isArray(face.color) && face.color.length === 3 && face.color.every((channel, i) => Number.isFinite(channel) && channel === ring[i]);
+    return g.controls.every(c => [c.lights, c.grip, c.button.children[1]].every(n => n.geometry.faces.every(same))
+      && c.screen.geometry.faces.slice(0, 24).every(same) && c.button.geometry.faces.some(same)
+      && c.button.geometry.faces.every(f => f.color[0] <= f.color[1]));
+  })()`);
+  check("Ooga Portal: lever trim, grip, lights and screen borders use valid RGB matching the Pit ring", colors);
+  const rimMount = await b.evaluate(`(() => {
+    const g = __oldGate, h = __ooga.island.headquarters.basement.hole, b = BL.scene.boundsOf(g.ring.geometry);
+    const bolts = g.bolts.children.map(n => ({ x: n.position.x, z: n.position.z, unlit: n.geometry.faces.every(f => f.emissive === 0) }));
+    return { top: g.root.position.y + g.ring.position.y + b.max[1], bottom: g.root.position.y + g.ring.position.y + b.min[1], floor: h.floor,
+      bolts, sectors: new Set(bolts.map(p => Math.round(Math.atan2(p.x, -p.z) / (Math.PI / 4)))).size,
+      onBorder: bolts.every(p => Math.hypot(p.x, p.z) > g.radius && Math.hypot(p.x, p.z) < g.outerRadius) };
+  })()`);
+  check("Ooga Portal: ring sits flush with the floor with eight unlit compass-point bolts", Math.abs(rimMount.top - rimMount.floor) < 1e-6 && rimMount.bottom < rimMount.floor
+    && rimMount.bolts.length === 8 && rimMount.sectors === 8 && rimMount.onBorder && rimMount.bolts.every(p => p.unlit && (Math.abs(p.x) < 1e-6 || Math.abs(p.z) < 1e-6 || Math.abs(Math.abs(p.x) - Math.abs(p.z)) < 1e-6)), JSON.stringify(rimMount));
+  await openScreen(0);
+  const menu = await b.evaluate(`(() => { const d = document.getElementById("ooga-portal-menu"), b = [...d.querySelectorAll("ol button")], r = d.getBoundingClientRect(); return { open: d.open, disabled: b.map(e => e.disabled), focus: document.activeElement === b[0], focused: document.activeElement.outerHTML.slice(0, 180), fits: r.left >= 0 && r.right <= innerWidth && r.top >= 0 && r.bottom <= innerHeight }; })()`);
+  check("Ooga Portal: native menu has five accessible destinations on desktop/touch", menu.open && menu.disabled.join() === "false,true,true,true,true" && menu.focus && menu.fits, JSON.stringify(menu));
   await dormant("menu opening");
-  const blocked = await b.evaluate(`(() => { const B = __ooga, p = B.crew.player.root.position, old = { x: p.x, z: p.z }, ammo = B.crew.player.weapon.ammo; document.activeElement.dispatchEvent(new KeyboardEvent("keydown", { key: "w", bubbles: true })); document.activeElement.dispatchEvent(new KeyboardEvent("keydown", { key: " ", bubbles: true })); B.advance(0.3); return old.x === p.x && old.z === p.z && ammo === B.crew.player.weapon.ammo && BL.scenes.hub.debug.stargate.state === "OFF"; })()`);
-  check("stargate: dialog owns movement/action input", blocked);
-  if (mobile) await press("#stargate-menu .modal-close"); else await b.key("Escape");
-  const cancelled = await b.evaluate(`({ open: document.getElementById("stargate-menu").open, axes: { ...__ooga.controls.read() }, focus: document.activeElement.tagName })`);
-  check("stargate: cancel closes and clears held movement", !cancelled.open && cancelled.axes.y === 0, JSON.stringify(cancelled));
-  await press("#act");
-  await press('#stargate-menu [data-destination="0"]');
-  check("stargate: selection begins activation without duplicate activation", await b.evaluate(`__oldGate.state === "ACTIVATING" && !__oldGate.activate(0) && !document.getElementById("stargate-menu").open`));
+  const blocked = await b.evaluate(`(() => { const B = __ooga, p = B.crew.player.root.position, old = { x: p.x, z: p.z }, ammo = B.crew.player.weapon.ammo; document.activeElement.dispatchEvent(new KeyboardEvent("keydown", { key: "w", bubbles: true })); document.activeElement.dispatchEvent(new KeyboardEvent("keydown", { key: " ", bubbles: true })); B.advance(0.3); return old.x === p.x && old.z === p.z && ammo === B.crew.player.weapon.ammo && BL.scenes.hub.debug.oogaPortal.state === "OFF"; })()`);
+  check("Ooga Portal: dialog owns movement/action input", blocked);
+  check("Ooga Portal: screen menu holds the exact camera position and projection", await b.evaluate(`(() => { const B = __ooga; B.advance(1); return __gateMenuView === JSON.stringify([B.camera.position, B.camera.target, B.camera.up, B.camera.fov, B.camera.orthoMix, B.camera.orthoHeight]); })()`));
+  if (mobile) await press("#ooga-portal-menu .modal-close"); else await b.key("Escape");
+  const cancelled = await b.evaluate(`({ open: document.getElementById("ooga-portal-menu").open, axes: { ...__ooga.controls.read() }, focus: document.activeElement.tagName })`);
+  check("Ooga Portal: cancel closes and clears held movement", !cancelled.open && cancelled.axes.y === 0, JSON.stringify(cancelled));
+  check("Ooga Portal: closing the menu resumes shoulder view without a camera handoff", await b.evaluate(`(() => { const B = __ooga; B.advance(0.5); const old = JSON.parse(__gateMenuView); return Math.hypot(B.camera.position.x - old[0].x, B.camera.position.y - old[0].y, B.camera.position.z - old[0].z) < 0.001 && Math.hypot(B.camera.target.x - old[1].x, B.camera.target.y - old[1].y, B.camera.target.z - old[1].z) < 0.001 && B.pilot.mode === "shoulder"; })()`));
+  await openScreen(1);
+  await press('#ooga-portal-menu [data-destination="0"]');
+  check("Ooga Portal: either screen selects without switching on", await b.evaluate(`__oldGate.state === "OFF" && __oldGate.selected.id === "dsb" && __oldGate.controls[0].label.geometry === __oldGate.controls[1].label.geometry && !document.getElementById("ooga-portal-menu").open`));
+  for (const index of [0, 1]) {
+    const nearby = await b.evaluate(`(() => {
+      const B = __ooga, c = __oldGate.controls[${index}], p = c.screenPoint;
+      B.pilot.navigate({ position: { x: p.x * 0.7 + c.x * 0.3 + Math.sin(c.root.rotation.y), y: c.approach.y, z: p.z * 0.7 + c.z * 0.3 + Math.cos(c.root.rotation.y) }, yaw: c.root.rotation.y, pitch: 0.1, dist: 4 }); B.advance(0.2);
+      const a = B.crew.player.root.position, y = a.y + 1.1 - B.crew.player.baseY;
+      return { label: document.getElementById("act").textContent, lever: Math.hypot(c.x - a.x, c.y - y, c.z - a.z), screen: Math.hypot(p.x - a.x, p.y - y, p.z - a.z) };
+    })()`);
+    check("Ooga Portal: closest screen wins with both controls in reach " + index, nearby.label === "DESTINATION" && nearby.screen < nearby.lever && nearby.lever < 2, JSON.stringify(nearby));
+    if (mobile) await press("#act"); else await tapKey(b, " ");
+    check("Ooga Portal: nearby screen action opens menu without toggling " + index, await b.evaluate(`document.getElementById("ooga-portal-menu").open && __oldGate.state === "OFF"`));
+    if (mobile) await press("#ooga-portal-menu .modal-close"); else await b.key("Escape");
+  }
+  await b.evaluate(`(() => { const c = __oldGate.controls[1]; __ooga.pilot.navigate({ position: c.approach, yaw: c.root.rotation.y, pitch: 0.1, dist: 4 }); __ooga.advance(0.2); })()`);
+  if (mobile) await press("#act"); else await tapKey(b, " ");
+  check("Ooga Portal: nearby action starts the selected destination once", await b.evaluate(`__oldGate.state === "ACTIVATING" && !__oldGate.activate(0)`));
   await dormant("selection");
   await b.evaluate(`__gateClock = 700; __oldGate.update()`);
-  check("stargate: activation paints bounded upward geometry or reduced-motion horizon", await b.evaluate(`__oldGate.state === "ACTIVATING" && __oldGate.horizon.visible && (__oldGate.reducedMotion ? !__oldGate.kawoosh.visible : __oldGate.kawoosh.visible && __oldGate.kawoosh.scale.y <= 2.4)`));
+  check("Ooga Portal: activation forms a recessed membrane and rolling lip or reduced-motion horizon", await b.evaluate(`__oldGate.state === "ACTIVATING" && __oldGate.horizon.visible && __oldGate.horizon.position.y === -0.08 && __oldGate.horizon.geometry.portalSurface && (__oldGate.reducedMotion ? !__oldGate.kawoosh.visible : __oldGate.kawoosh.visible && __oldGate.kawoosh.scale.y <= 2.4)`));
   await b.evaluate(`__gateClock = 2000; __oldGate.update()`);
-  check("stargate: active horizon appears after activation", await b.evaluate(`__oldGate.state === "ACTIVE" && __oldGate.horizon.visible && !__oldGate.kawoosh.visible`));
+  check("Ooga Portal: active horizon appears after activation", await b.evaluate(`__oldGate.state === "ACTIVE" && __oldGate.horizon.visible && !__oldGate.kawoosh.visible`));
   await dormant("active window");
   // A controllable clock exercises exact boundaries and a long gap with no update (hidden tab).
   const timing = await b.evaluate(`(() => {
-    let time = 0, crossings = 0; const g = BL.stargate.create({ radius: 2, outerRadius: 2.3, position: { x: 0, y: 0, z: 0 }, destinations: [{ id: "test", enabled: true, label: "Test" }], now: () => time, onTraverse: () => crossings++ });
+    let time = 0, crossings = 0; const g = BL.oogaPortal.create({ radius: 2, outerRadius: 2.3, position: { x: 0, y: 0, z: 0 }, destinations: [{ id: "test", enabled: true, label: "Test" }], now: () => time, onTraverse: () => crossings++ });
     const states = []; g.activate(0); for (const at of [1999, 2000, 11999, 12000, 12450]) { time = at; g.update(); states.push(g.state); }
     const repeat = g.activate(0); time += 2000; g.update(); const wrong = g.traverse({ x: 0, y: -1, z: 0 }, { x: 0, y: 1, z: 0 }); const outside = g.traverse({ x: 3, y: 1, z: 0 }, { x: 3, y: -1, z: 0 }); const hit = g.traverse({ x: 0, y: 1, z: 0 }, { x: 0, y: -1, z: 0 }); const twice = g.traverse({ x: 0, y: 1, z: 0 }, { x: 0, y: -1, z: 0 });
     time += 60000; g.update(); const expired = g.state; g.dispose(); return { states, repeat, wrong, outside, hit, twice, crossings, expired, disposed: g.disposed };
   })()`);
-  check("stargate: exact 2s/10s boundaries, expiry without frames, reuse and opt-in directional crossing", timing.states.join() === "ACTIVATING,ACTIVE,ACTIVE,SHUTDOWN,OFF" && timing.repeat && !timing.wrong && !timing.outside && timing.hit && !timing.twice && timing.crossings === 1 && timing.expired === "OFF" && timing.disposed, JSON.stringify(timing));
-  await b.evaluate(`__gateClock = 12450; __oldGate.update()`);
-  check("stargate: elapsed deadline shuts the gate down unused", await b.evaluate(`__oldGate.state === "OFF" && !__oldGate.horizon.visible`));
+  check("Ooga Portal: exact 2s/10s boundaries, expiry without frames, reuse and opt-in directional crossing", timing.states.join() === "ACTIVATING,ACTIVE,ACTIVE,SHUTDOWN,OFF" && timing.repeat && !timing.wrong && !timing.outside && timing.hit && !timing.twice && timing.crossings === 1 && timing.expired === "OFF" && timing.disposed, JSON.stringify(timing));
+  await b.evaluate(`__gateClock = 60000; __ooga.advance(0.8)`);
+  check("Ooga Portal: both levers stay on past the old expiry", await b.evaluate(`__oldGate.state === "ACTIVE" && __oldGate.horizon.visible && __oldGate.controls.every(c => Math.abs(c.lever.rotation.x - 0.42) < 0.01 && c.lights.glow === 0.9)`));
+  check("Ooga Portal: active knobs and borders glow blue while all four corners on each panel stay unlit", await b.evaluate(`(() => {
+    const color = __oldGate.horizon.geometry.faces[0].color, rim = __oldGate.bolts.children[0].geometry.faces[0].color;
+    const same = face => face.color.every((channel, i) => channel === color[i]);
+    const unlitCorner = face => face.emissive === 0 && face.color.every((channel, i) => channel === rim[i]);
+    return __oldGate.ring.geometry.faces.every(same) && __oldGate.ring.glow === 0.9
+      && __oldGate.bolts.children.every(n => n.geometry.faces.every(unlitCorner))
+      && __oldGate.controls.every(c => c.grip.geometry.faces.every(same) && c.lights.geometry.faces.every(same)
+      && c.button.geometry.faces.filter(face => face.emissive >= 0.8).every(same)
+      && c.screen.geometry.faces.slice(0, 24).every(same)
+      && c.button.geometry.faces.slice(-24).every(unlitCorner)
+      && c.screen.geometry.faces.length === 54 && c.screen.geometry.faces.slice(-24).every(unlitCorner));
+  })()`));
+  await b.evaluate(`(() => { const c = __oldGate.controls[0]; __ooga.pilot.navigate({ position: c.approach, yaw: c.root.rotation.y, pitch: 0.1, dist: 4 }); __ooga.advance(0.2); })()`);
+  if (mobile) await press("#act"); else await tapKey(b, " ");
+  check("Ooga Portal: the opposite wall lever switches the portal off", await b.evaluate(`__oldGate.state === "SHUTDOWN" && !__oldGate.on`));
+  await b.evaluate(`__gateClock += 450; __ooga.advance(0.8)`);
+  check("Ooga Portal: shutdown synchronizes both levers and the inset ring", await b.evaluate(`__oldGate.state === "OFF" && !__oldGate.horizon.visible && __oldGate.ring.glow === 0.25 && __oldGate.ring.geometry.faces.every(f => f.emissive === 0 && f.color.every((v, i) => v === __oldGate.controls[0].screen.geometry.faces[0].color[i])) && __oldGate.controls.every(c => Math.abs(c.lever.rotation.x - Math.PI + 0.42) < 0.01 && c.lights.glow === 0.25)`));
   await dormant("shutdown");
   const falls = await b.evaluate(`(async () => {
     const B = __ooga, g = __oldGate, hole = B.island.headquarters.basement.hole, results = [];
     for (const state of ["OFF", "ACTIVATING", "SHUTDOWN", "expired"]) {
       if (state === "ACTIVATING") g.activate(0);
-      if (state === "SHUTDOWN") { __gateClock += 12000; g.update(); }
+      if (state === "SHUTDOWN") { __gateClock += 2000; g.update(); g.deactivate(); }
       if (state === "expired") { __gateClock += 1000; g.update(); }
       // Position inside the open shaft, then let the real crew fall and abyss handler run.
       B.pilot.navigate({ position: { x: hole.x, y: hole.floor - 1, z: hole.z }, yaw: 0, pitch: 0.3, dist: 4 });
@@ -3532,23 +4952,23 @@ for (const mobile of [false, true]) scene("hub", { label: "stargate " + (mobile 
     }
     return results;
   })()`);
-  check("stargate: inactive, activating, shutdown and expired Pit retain abyss respawn", falls.every(r => r.scene === "hub" && r.fell && r.feet > -10) && falls.map(r => r.active).join() === "OFF,ACTIVATING,SHUTDOWN,OFF", JSON.stringify(falls));
+  check("Ooga Portal: inactive, activating, shutdown and expired Pit retain abyss respawn", falls.every(r => r.scene === "hub" && r.fell && r.feet > -10) && falls.map(r => r.active).join() === "OFF,ACTIVATING,SHUTDOWN,OFF", JSON.stringify(falls));
   await dormant("Pit falls");
   await b.evaluate(`__ooga.go("lab")`); await untilPage(b, 'B.scene === "lab" && !B.transitioning');
-  check("stargate: leaving disposes effects, root and menu ownership", await b.evaluate(`__oldGate.disposed && !__oldGate.root.parent && !__oldGate.dialer.parent && !__oldGate.horizon.visible && !__oldGate.open() && !__oldGate.activate(0) && !document.getElementById("stargate-menu").open`));
+  check("Ooga Portal: leaving disposes effects, controls and menu ownership", await b.evaluate(`__oldGate.disposed && !__oldGate.root.parent && __oldGate.controls.every(c => !c.root.parent) && !__oldGate.horizon.visible && !__oldGate.open() && !__oldGate.activate(0) && !document.getElementById("ooga-portal-menu").open`));
   await b.evaluate(`__ooga.go("hub")`); await untilPage(b, 'B.scene === "hub" && !B.transitioning', 15000);
-  check("stargate: return creates one fresh OFF controller", await b.evaluate(`BL.scenes.hub.debug.stargate !== __oldGate && BL.scenes.hub.debug.stargate.state === "OFF"`));
+  check("Ooga Portal: return creates one fresh OFF controller", await b.evaluate(`BL.scenes.hub.debug.oogaPortal !== __oldGate && BL.scenes.hub.debug.oogaPortal.state === "OFF"`));
   await dormant("round trip");
 } }] });
 
 // Real hub movement consumes the Pit; factory counters distinguish transit from hidden land.
-for (const mobile of [false, true]) scene("hub", { label: "stargate dsb travel " + (mobile ? "canvas2d" : "webgl2"), query: "scene=hub&pos=0&wip=mine" + (mobile ? "&canvas2d=1" : ""), opts: mobile ? { ...PHONE_SIZE, motion: false } : { motion: true }, steps: [{ name: "stargate dsb travel " + (mobile ? "canvas2d" : "webgl2"), why: "playthrough: only a swept Pit crossing enters transit and only its backside crossing constructs DSB Land", run: async b => {
-  const check = (name, ok, detail = "") => record("stargate travel " + (mobile ? "canvas2d: " : "webgl2: ") + name, ok, detail);
+for (const mobile of [false, true]) scene("hub", { label: "Ooga Portal dsb travel " + (mobile ? "canvas2d" : "webgl2"), query: "scene=hub&pos=0&wip=mine" + (mobile ? "&canvas2d=1" : ""), opts: mobile ? { ...PHONE_SIZE, motion: false } : { motion: true }, steps: [{ name: "Ooga Portal dsb travel " + (mobile ? "canvas2d" : "webgl2"), why: "playthrough: only a swept Pit crossing enters transit and only its backside crossing constructs DSB Land", run: async b => {
+  const check = (name, ok, detail = "") => record("Ooga Portal travel " + (mobile ? "canvas2d: " : "webgl2: ") + name, ok, detail);
   const snapshot = () => b.evaluate(`({ ...__gateDormancy, resources: __ooga.dsb?.resources, phase: __ooga.dsb?.phase, requests: __dsbFeedFixture.requests, sockets: __dsbFeedFixture.sockets, plays: __dsbRadioFixture.plays })`);
   const before = await snapshot();
   check("A hub has no DSB resources", before.enter === 0 && before.land === 0 && before.audio === 0 && before.fetch === 0 && before.socket === 0, JSON.stringify(before));
   const fall = async () => b.evaluate(`(() => {
-    const B = __ooga, G = BL.scenes.hub.debug.stargate, hole = B.island.headquarters.basement.hole;
+    const B = __ooga, G = BL.scenes.hub.debug.oogaPortal, hole = B.island.headquarters.basement.hole;
     const actor = B.cavemen.get("rules-without-rulers"); actor.override = "working"; B.crew.refreshStates(true); B.pilot.possess(actor);
     window.__travelActor = actor; window.__travelGate = G;
     G.activate(0); __gateClock += 2000; G.update();
@@ -3592,7 +5012,7 @@ for (const mobile of [false, true]) scene("hub", { label: "stargate dsb travel "
 } }] });
 
 // Placement contract exercises the moved landmarks without changing travel fixtures.
-for (const mobile of [false, true]) scene("dsb", { label: "stargate dsb plaza " + (mobile ? "canvas2d" : "webgl2"), url: hubPage(dist, "scene=dsb&wip=mine" + (mobile ? "&canvas2d=1" : "")), opts: mobile ? { ...PHONE_SIZE, motion: false } : { motion: true }, steps: [{ name: "stargate dsb plaza " + (mobile ? "canvas2d" : "webgl2"), why: "regression: moved Shop and TV keep collision, interactions, radio and cat navigation attached to their fronts", run: async b => {
+for (const mobile of [false, true]) scene("dsb", { label: "Ooga Portal dsb plaza " + (mobile ? "canvas2d" : "webgl2"), url: hubPage(dist, "scene=dsb&wip=mine" + (mobile ? "&canvas2d=1" : "")), opts: mobile ? { ...PHONE_SIZE, motion: false } : { motion: true }, steps: [{ name: "Ooga Portal dsb plaza " + (mobile ? "canvas2d" : "webgl2"), why: "regression: moved Shop and TV keep collision, interactions, radio and cat navigation attached to their fronts", run: async b => {
   const check = (name, ok, detail = "") => record("DSB plaza " + (mobile ? "canvas2d: " : "webgl2: ") + name, ok, detail);
   const press = async selector => {
     const p = await b.evaluate(`(() => { const e = document.querySelector(${JSON.stringify(selector)}); e.scrollIntoView({ block: "nearest" }); const r = e.getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; })()`);
@@ -3633,8 +5053,8 @@ for (const mobile of [false, true]) scene("dsb", { label: "stargate dsb plaza " 
 } }] });
 
 // Return-only integration: the outbound playthrough remains separately ledger-controlled.
-for (const mobile of [false, true]) scene("dsb", { label: "stargate dsb return " + (mobile ? "canvas2d" : "webgl2"), query: "pos=0&wip=mine" + (mobile ? "&canvas2d=1" : ""), opts: mobile ? { ...PHONE_SIZE, motion: false } : { motion: true }, steps: [{ name: "stargate dsb return " + (mobile ? "canvas2d" : "webgl2"), why: "playthrough: front return reaches a receiving Pit, lands safely and restores control without re-entering transit", run: async b => {
-  const check = (name, ok, detail = "") => record("stargate return " + (mobile ? "canvas2d: " : "webgl2: ") + name, ok, detail);
+for (const mobile of [false, true]) scene("dsb", { label: "Ooga Portal dsb return " + (mobile ? "canvas2d" : "webgl2"), query: "pos=0&wip=mine" + (mobile ? "&canvas2d=1" : ""), opts: mobile ? { ...PHONE_SIZE, motion: false } : { motion: true }, steps: [{ name: "Ooga Portal dsb return " + (mobile ? "canvas2d" : "webgl2"), why: "playthrough: front return reaches a receiving Pit, lands safely and restores control without re-entering transit", run: async b => {
+  const check = (name, ok, detail = "") => record("Ooga Portal return " + (mobile ? "canvas2d: " : "webgl2: ") + name, ok, detail);
   const press = async selector => {
     const p = await b.evaluate(`(() => { const e = document.querySelector(${JSON.stringify(selector)}); e.scrollIntoView({ block: "nearest" }); const r = e.getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; })()`);
     if (mobile) { await b.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [p] }); await b.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] }); }
@@ -3642,7 +5062,7 @@ for (const mobile of [false, true]) scene("dsb", { label: "stargate dsb return "
   };
   await b.evaluate(`(() => {
     window.__returnHubEntries = 0; const H = BL.scenes.hub, enter = H.enter, update = H.update;
-    H.enter = ctx => { __returnHubEntries++; window.__returnWorld = ctx.world; enter(ctx); window.__returnStart = { state: H.debug.stargate.state, receiving: H.debug.stargate.receiving, y: __ooga.pilot?.player?.root.position.y }; H.update = () => {}; };
+    H.enter = ctx => { __returnHubEntries++; window.__returnWorld = ctx.world; enter(ctx); window.__returnStart = { state: H.debug.oogaPortal.state, receiving: H.debug.oogaPortal.receiving, y: __ooga.pilot?.player?.root.position.y }; H.update = () => {}; };
     window.__returnHubUpdate = update;
     window.dispatchEvent(new KeyboardEvent("keydown", { key: "w" })); BL.scenes.dsb.update(__ooga.audio.duration + 1, 1); window.dispatchEvent(new KeyboardEvent("keyup", { key: "w" }));
     document.querySelector('[data-action="dsb-skip"]').click();
@@ -3653,9 +5073,9 @@ for (const mobile of [false, true]) scene("dsb", { label: "stargate dsb return "
   const setup = await b.evaluate(`({ phase: __ooga.dsb.phase, gate: __ooga.dsb.gate.root.position, dialer: __ooga.dsb.gate.dialer.position, label: document.getElementById("dsb-context").textContent, entries: __returnHubEntries })`);
   check("existing gate and native nearby DIAL", setup.phase === "land" && setup.gate.x === 0 && setup.gate.y === 2 && setup.gate.z === 28 && setup.dialer.x === 3.7 && setup.dialer.z === 27 && setup.label === "DIAL" && setup.entries === 0, JSON.stringify(setup));
   await press("#dsb-context");
-  const menu = await b.evaluate(`(() => { const d = document.getElementById("stargate-menu"), buttons = [...d.querySelectorAll("ol button")], p = __ooga.dsb.avatar.root.position, before = { ...p }; document.activeElement.dispatchEvent(new KeyboardEvent("keydown", { key: "w", bubbles: true })); BL.scenes.dsb.update(0.2, 3); return { open: d.open, disabled: buttons.map(b => b.disabled).join(), focus: document.activeElement === buttons[0], label: buttons[0].textContent, stopped: p.x === before.x && p.z === before.z }; })()`);
+  const menu = await b.evaluate(`(() => { const d = document.getElementById("ooga-portal-menu"), buttons = [...d.querySelectorAll("ol button")], p = __ooga.dsb.avatar.root.position, before = { ...p }; document.activeElement.dispatchEvent(new KeyboardEvent("keydown", { key: "w", bubbles: true })); BL.scenes.dsb.update(0.2, 3); return { open: d.open, disabled: buttons.map(b => b.disabled).join(), focus: document.activeElement === buttons[0], label: buttons[0].textContent, stopped: p.x === before.x && p.z === before.z }; })()`);
   check("accessible five-destination modal suspends movement", menu.open && menu.disabled === "false,true,true,true,true" && menu.focus && menu.label.includes("OogaBoogaLand") && menu.stopped, JSON.stringify(menu));
-  if (mobile) await press("#stargate-menu .modal-close"); else await b.key("Escape");
+  if (mobile) await press("#ooga-portal-menu .modal-close"); else await b.key("Escape");
   check("cancel clears held inputs", await b.evaluate(`!__ooga.dsb.gate.isOpen && __ooga.controls.read().y === 0`));
   // The modal interaction is covered above. Drive the same public gate action
   // directly here so this block measures the activation/expiry lifecycle only.
@@ -3681,13 +5101,13 @@ for (const mobile of [false, true]) scene("dsb", { label: "stargate dsb return "
   })()`);
   if (!await untilPage(b, 'B.scene === "hub" && !B.transitioning', 20000)) throw Error("Front crossing did not return directly to hub");
   const arrival = await b.evaluate(`(() => {
-    const B = __ooga, H = BL.scenes.hub, G = H.debug.stargate, a = B.pilot.player, route = H.debug.stargateArrival, samples = [];
+    const B = __ooga, H = BL.scenes.hub, G = H.debug.oogaPortal, a = B.pilot.player, route = H.debug.oogaPortalArrival, samples = [];
     const start = { y: a.root.position.y - a.baseY, x: a.root.position.x, z: a.root.position.z };
     window.dispatchEvent(new KeyboardEvent("keydown", { key: "w" }));
     for (let i = 0; i < 6; i++) { __returnHubUpdate(0.45, 10 + i); samples.push({ x: a.root.position.x, y: a.root.position.y - a.baseY, z: a.root.position.z }); }
     window.dispatchEvent(new KeyboardEvent("keyup", { key: "w" }));
     const shutdown = G.state; __gateClock += 450; G.update(); __returnHubUpdate(0, 17); H.update = __returnHubUpdate;
-    return { receiving: __returnStart.state === "ACTIVE" && __returnStart.receiving, start, samples, shutdown, state: G.state, cleared: !H.debug.stargateArrival && !__returnWorld.stargateTravel && !__returnWorld.pilot, landing: route?.plan.landing, name: a.traits.name, sameRoot: a.root === __returnOld.avatar.root, velocity: a.hopV, entries: __returnHubEntries, enter: __gateDormancy.enter, audio: __gateDormancy.audio, originalEnter: __returnOld.enter, originalAudio: __returnOld.audio, level: __returnWorld.level, support: B.island.supportAt(a.root.position.x, a.root.position.z, a.root.position.y - a.baseY) };
+    return { receiving: __returnStart.state === "ACTIVE" && __returnStart.receiving, start, samples, shutdown, state: G.state, cleared: !H.debug.oogaPortalArrival && !__returnWorld.oogaPortalTravel && !__returnWorld.pilot, landing: route?.plan.landing, name: a.traits.name, sameRoot: a.root === __returnOld.avatar.root, velocity: a.hopV, entries: __returnHubEntries, enter: __gateDormancy.enter, audio: __gateDormancy.audio, originalEnter: __returnOld.enter, originalAudio: __returnOld.audio, level: __returnWorld.level, support: B.island.supportAt(a.root.position.x, a.root.position.z, a.root.position.y - a.baseY) };
   })()`);
   check("direct return never starts transit/audio again and preserves canonical identity", arrival.enter === arrival.originalEnter && arrival.audio === arrival.originalAudio && arrival.entries === 1 && arrival.name === "YellowBrokeIt" && !arrival.sameRoot, JSON.stringify(arrival));
   check("receiving Pit rises vertically then moves outward to supported floor", arrival.receiving && arrival.start.y < -12.5 && arrival.start.x === 0 && arrival.start.z === 0 && arrival.samples[0].x === 0 && arrival.samples[1].y > arrival.samples[0].y && Math.hypot(arrival.samples[5].x, arrival.samples[5].z) > 6 && Math.abs(arrival.samples[5].y + 12.5) < 1e-6 && arrival.support === -12.5, JSON.stringify(arrival));
@@ -3986,11 +5406,11 @@ for (const fallback of [false, true]) scene("dsb", { label: "dsb gameplay " + (f
     if (process.env.DSB_CAPTURE && !fallback) await b.screenshot(join(root, "untracked", "dsb-" + kind + "-ride.png"));
     await click("#dsb-context");
   }
-  await b.key("Escape"); record("dsb gameplay: Escape on land requires the return Stargate", await b.evaluate(`__ooga.scene === "dsb"`));
+  await b.key("Escape"); record("dsb gameplay: Escape on land requires the return Ooga Portal", await b.evaluate(`__ooga.scene === "dsb"`));
   await walkTo(-7, 30.5);
   record("dsb gameplay: former return cave has no geometry, collision or exit action", await b.evaluate(`!__ooga.dsb.land.exit && __ooga.dsb.clearAt(-10,30.5) && __ooga.dsb.clearAt(-7,32.5) && document.getElementById("dsb-context").textContent !== "Return to Ooga Booga Land"`));
   await dsbExit(b);
-  record("dsb gameplay: front Stargate crossing returns to hub", await b.evaluate(`__ooga.scene === "hub" && !__ooga.transitioning`));
+  record("dsb gameplay: front Ooga Portal crossing returns to hub", await b.evaluate(`__ooga.scene === "hub" && !__ooga.transitioning`));
 } }] });
 if (process.env.DSB_RADIO_LIVE === "1") scene("dsb", { label: "dsb radio live", url: hubPage(dist, "scene=dsb"), steps: [{ name: "dsb radio live", why: "contract: preserve DSB scene behavior independently of the hub entrance", run: async (b) => {
   await b.key("w"); await untilPage(b, "B.audio.ready", 10000);
@@ -4488,12 +5908,42 @@ const unitChecks = async () => {
   // Sealed cave guides need the hub's seal nodes, so probes reading them stay in the browser tier.
   const island = BL.terrain.island({ seed: 1 });
   {
+    const expected = {
+      c11: [6.25, 0.75, 6.75], c10: [6.25, 0.75, 6.75], c9: [7, 0.5, 6.75],
+      c1: [6.25, 0.75, 6.75], c2: [6.25, 0.75, 6.75], c3: [7, 0.5, 6.75]
+    };
+    const column = { caveIndex: 0, floor: 0, ceiling: 0 }, rows = [];
+    for (let caveIndex = 0; caveIndex < island.mouths.length; caveIndex++) {
+      const mouth = island.mouths[caveIndex], shape = expected[mouth.id];
+      if (!shape) continue;
+      const room = mouth.room, sr = Math.sin(mouth.ry), cr = Math.cos(mouth.ry);
+      const at = (across, along) => ({ x: mouth.x + cr * across - sr * along, z: mouth.z - sr * across - cr * along });
+      let samples = 0, owned = true, clear = true, enclosed = true;
+      for (let along = room.from + 0.5; along <= room.to - 0.5 + 1e-7; along += 0.5) for (const across of [-room.w / 2 + 0.5, 0, room.w / 2 - 0.5]) {
+        const p = at(across, along), cavity = island.cavityAt(p.x, p.z, column, caveIndex + 1, 1);
+        owned = owned && cavity && column.caveIndex === caveIndex + 1 && column.floor === 0 && column.ceiling === room.h;
+        clear = clear && island.clearAt(p.x, 0.05, p.z, 0.3, room.h - 0.25);
+        enclosed = enclosed && island.solidAt(p.x, -0.125, p.z) && island.solidAt(p.x, room.h + 0.49, p.z);
+        samples++;
+      }
+      const middle = (room.from + room.to) / 2;
+      const walls = [at(-room.w / 2 - 0.5, middle), at(room.w / 2 + 0.5, middle), at(0, room.to + 0.5)];
+      const sweepFrom = at(0, -1.4), sweepTo = at(0, room.to - 0.5);
+      rows.push({ id: mouth.id, dimensions: room.w === shape[0] && room.h === 4 && room.from === shape[1] && room.to === shape[2], samples, owned, clear, enclosed,
+        swept: island.voxelSegmentClearAt(sweepFrom.x, 0.05, sweepFrom.z, sweepTo.x, 0.05, sweepTo.z, 0.3, 1.7), walls: walls.every((p) => island.solidAt(p.x, 1, p.z)) });
+    }
+    const ramps = island.mouths.filter((mouth) => mouth.id === "c730" || mouth.id === "c5");
+    record("surface caves: every non-HQ mouth uses a terrain-fitted full-height carved chamber with owned air, solid floors, roofs and enclosing walls", rows.length === 6 && [...new Set(rows.map((row) => row.id))].sort().join() === Object.keys(expected).sort().join()
+      && rows.every((row) => row.dimensions && row.samples === 33 && row.owned && row.clear && row.enclosed && row.swept && row.walls)
+      && ramps.length === 2 && ramps.every((mouth) => mouth.room.w === 6 && mouth.room.h === 4 && mouth.room.from === 2.5 && mouth.room.to === 6.5), JSON.stringify({ rows, ramps: ramps.map((mouth) => ({ id: mouth.id, room: mouth.room })) }));
+  }
+  {
     // Contract: both directions use the production swept aperture and wall-clock cycle.
     const get = document.getElementById, listen = window.addEventListener, unlisten = window.removeEventListener;
     document.getElementById = () => { const node = el(); node.querySelector = () => el(); return node; };
     window.addEventListener = window.removeEventListener = () => {};
     let time = 0, crossings = 0;
-    const gate = BL.stargate.create({ radius: 2.2, outerRadius: 2.5, position: { x: 0, y: 2, z: 28 }, rotation: { x: -Math.PI / 2, y: 0, z: 0 }, now: () => time, destinations: [{ id: "hub", enabled: true }], onTraverse: () => crossings++ });
+    const gate = BL.oogaPortal.create({ radius: 2.2, outerRadius: 2.5, position: { x: 0, y: 2, z: 28 }, rotation: { x: -Math.PI / 2, y: 0, z: 0 }, now: () => time, destinations: [{ id: "hub", enabled: true }], onTraverse: () => crossings++ });
     const from = { x: 0, y: 1, z: 20 }, to = { x: 0, y: 1, z: 60 };
     const off = !gate.traverse(from, to, 0.8), activated = gate.activate(0), duplicate = !gate.activate(0), warming = !gate.traverse(from, to, 0.8);
     time = 1999; gate.update(); const activation = gate.state === "ACTIVATING";
@@ -4503,39 +5953,76 @@ const unitChecks = async () => {
     time = 11999; gate.update(); const fullWindow = gate.state === "ACTIVE";
     time = 12000; gate.update(); const shutdown = gate.state === "SHUTDOWN" && !gate.traverse(from, to, 0.8);
     time = 12450; gate.update(); const expired = gate.state === "OFF" && !gate.traverse(from, to, 0.8);
-    record("Stargate return: directional swept front crossing, exact deadlines and one-use cycle", off && activated && duplicate && warming && activation && active && wrong && outside && swept && once && fullWindow && shutdown && expired && crossings === 1);
+    record("Ooga Portal return: directional swept front crossing, exact deadlines and one-use cycle", off && activated && duplicate && warming && activation && active && wrong && outside && swept && once && fullWindow && shutdown && expired && crossings === 1);
     gate.receive(); time += 60000; gate.update(); const receiving = gate.receiving && gate.state === "ACTIVE" && !gate.activate(0);
     gate.finishReceiving(true); const fading = gate.state === "SHUTDOWN";
     time += 450; gate.update();
-    record("Stargate receiving: host owns duration then restores reusable outbound cycle", receiving && fading && !gate.receiving && gate.state === "OFF" && gate.activate(0));
-    gate.dispose(); document.getElementById = get; globalThis.addEventListener = listen; globalThis.removeEventListener = unlisten;
+    record("Ooga Portal receiving: host owns duration then restores reusable outbound cycle", receiving && fading && !gate.receiving && gate.state === "OFF" && gate.activate(0));
+    gate.dispose();
+    const screens = [null, null];
+    const manual = BL.oogaPortal.create({ radius: 4, outerRadius: 4.5, position: { x: 0, y: 0, z: 0 }, manual: true, floorMounted: true, now: () => time, onTraverse: () => crossings++,
+      destinations: [{ id: "dsb", label: "DSB Land", enabled: true }, { id: "other", label: "Other", enabled: true }, { id: "closed", enabled: false }],
+      onDestination: entry => screens.fill(entry.label) });
+    const defaultDestination = manual.selected.id === "dsb", selected = manual.select(1) && !manual.select(2) && manual.state === "OFF" && screens.every(label => label === "Other");
+    let fullScale = true;
+    const reveal = () => {
+      fullScale = fullScale && manual.horizon.scale.x === 4 && manual.horizon.scale.y === 1 && manual.horizon.scale.z === 4;
+      return manual.horizon.portalReveal;
+    };
+    manual.toggle(); const initialReveal = reveal();
+    time += 700; manual.update(); const warmingReveal = reveal();
+    manual.toggle(); const cancelled = manual.state === "SHUTDOWN" && reveal() === warmingReveal;
+    time += 225; manual.update(); const closingReveal = reveal();
+    time += 225; manual.update(); const stopped = manual.state === "OFF", stoppedReveal = reveal();
+    manual.toggle(); time += 60000; manual.update(); const held = manual.state === "ACTIVE" && manual.selected.id === "other";
+    const activeReveal = reveal();
+    record("Ooga Portal liquid: opening and interrupted shutdown reveal the fixed-size membrane without stretching its waves",
+      fullScale && initialReveal === 0 && warmingReveal > 0 && warmingReveal < 1 && closingReveal > 0 && closingReveal < warmingReveal
+      && stoppedReveal === 0 && activeReveal === 1 && cancelled);
+    const aboveLiquid = !manual.traverse({ x: 0, y: 0.1, z: 0 }, { x: 0, y: -0.04, z: 0 });
+    const throughLiquid = manual.traverse({ x: 0, y: -0.04, z: 0 }, { x: 0, y: -0.12, z: 0 });
+    const membrane = manual.horizon.geometry, liquid = BL.oogaPortalModels.liquidHeight;
+    let contained = true, moving = false;
+    for (let i = 0; i < 32; i++) {
+      const angle = i * Math.PI / 16, x = Math.cos(angle), z = Math.sin(angle);
+      for (let t = 0; t < 6; t += 0.3) {
+        const h = liquid(x * 0.6, z * 0.6, t, 0);
+        contained = contained && Math.abs(h) < 0.08 && Math.abs(liquid(x, z, t, 0)) < 1e-8;
+        moving = moving || Math.abs(h - liquid(x * 0.6, z * 0.6, t + 0.2, 0)) > 0.001;
+      }
+    }
+    record("Ooga Portal liquid: membrane sits halfway into the rim, waves stay below its top, and travel starts at the recessed plane",
+      manual.surfaceY === -0.08 && manual.horizon.position.y === manual.surfaceY && membrane.portalSurface && membrane.castShadow === false
+      && contained && moving && aboveLiquid && throughLiquid);
+    manual.receive(); const locked = !manual.toggle() && !manual.select(0);
+    manual.finishReceiving(true); time += 450; manual.update();
+    record("Ooga Portal wall control: selection, partial activation cancellation, held power and receiving lock", defaultDestination && selected && cancelled && stopped && held && locked && manual.state === "OFF");
+    manual.dispose(); document.getElementById = get; globalThis.addEventListener = listen; globalThis.removeEventListener = unlisten;
   }
   {
-    // Regression: all canonical physical bodies clear the actual Pit terrain and Dialer mesh.
+    // Regression: all canonical physical bodies clear the actual Pit terrain on return.
     const S = BL.scene, root = S.createNode(), noop = () => {}, solids = BL.solidProps.create();
-    const dialer = BL.stargateModels.build(4, 4.5).dialer;
-    Object.assign(dialer.position, { x: -6.4593472661924105, y: -12.5, z: 1.9594215714676189 });
-    dialer.rotation.y = Math.atan2(-dialer.position.x, -dialer.position.z); S.addChild(root, dialer); S.updateWorld(root); solids.add(dialer); solids.sync();
+    const arrivalAnchor = { x: -6.4593472661924105, y: -12.5, z: 1.9594215714676189 };
     const crew = BL.crew.create({ root, world: { level: 0 }, input: { add: noop, remove: noop }, hud: { setRosterRow: noop }, game: { state: { assignments: {}, inventory: [] } }, pile: { footprintEdge: 1, pileEdge: () => 1 }, viewYaw: 0, buildSpots: [], walkIn: { x: 0, z: 3 }, groundAt: () => 0, walkable: () => true, bedrolls: BL.contributors.roster.map((_, i) => ({ x: 30 + i * 2, y: 0, z: 30, hidden: true })), fx: { say: noop, zzzAt: noop, burst: noop, puff: noop, spawnParticle: noop } });
     const hole = island.headquarters.basement.hole, rows = [], point = {};
     for (const actor of crew.cavemen.values()) {
-      const options = { hole, dialer: dialer.position, radius: actor.bodyRadius, height: actor.bodyHeight, supportAt: (x, z, y) => island.supportAt(x, z, y), clearAt: (x, y, z, r, h) => island.clearAt(x, y, z, r, h) && solids.clearAt(x, y, z, r, h) };
-      const route = BL.stargateArrival.plan(options);
+      const options = { hole, dialer: arrivalAnchor, radius: actor.bodyRadius, height: actor.bodyHeight, supportAt: (x, z, y) => island.supportAt(x, z, y), clearAt: (x, y, z, r, h) => island.clearAt(x, y, z, r, h) && solids.clearAt(x, y, z, r, h) };
+      const route = BL.oogaPortalArrival.plan(options);
       let safe = !!route;
       if (route) {
-        for (let i = 0; i <= 1024; i++) { BL.stargateArrival.sample(route, route.duration * i / 1024, point); safe &&= options.clearAt(point.x, point.y + 1e-5, point.z, actor.bodyRadius, actor.bodyHeight); }
+        for (let i = 0; i <= 1024; i++) { BL.oogaPortalArrival.sample(route, route.duration * i / 1024, point); safe &&= options.clearAt(point.x, point.y + 1e-5, point.z, actor.bodyRadius, actor.bodyHeight); }
         safe &&= options.supportAt(point.x, point.z, point.y) === hole.floor && Math.hypot(point.x - hole.x, point.z - hole.z) - actor.bodyRadius > hole.mouthRadius;
       }
       rows.push({ name: actor.traits.name, safe, landing: route?.landing });
     }
-    record("Stargate arrival: every canonical character clears shaft, rim, ceiling and Dialer onto supported floor", rows.length === CAST && rows.every(row => row.safe), JSON.stringify(rows));
+    record("Ooga Portal arrival: every canonical character clears shaft, rim and ceiling onto supported floor", rows.length === CAST && rows.every(row => row.safe), JSON.stringify(rows));
     const get = document.getElementById, listen = window.addEventListener, unlisten = window.removeEventListener;
     document.getElementById = () => { const node = el(); node.querySelector = () => el(); return node; };
     window.addEventListener = window.removeEventListener = () => {};
     const apertures = [];
     for (const actor of crew.cavemen.values()) {
       let count = 0;
-      const gate = BL.stargate.create({ radius: 2.2, outerRadius: 2.5, position: { x: 0, y: 2, z: 0 }, rotation: { x: -Math.PI / 2, y: 0, z: 0 }, receiving: true, onTraverse: () => count++ });
+      const gate = BL.oogaPortal.create({ radius: 2.2, outerRadius: 2.5, position: { x: 0, y: 2, z: 0 }, rotation: { x: -Math.PI / 2, y: 0, z: 0 }, receiving: true, onTraverse: () => count++ });
       const back = { x: 0, y: actor.bodyHeight / 2, z: 25 }, front = { x: 0, y: actor.bodyHeight / 2, z: -0.1 };
       const wrong = !gate.traverse(front, back, actor.bodyRadius, -1), outside = !gate.traverse({ ...back, x: 3 }, { ...front, x: 3 }, actor.bodyRadius, -1);
       const accepted = gate.traverse(back, front, actor.bodyRadius, -1), once = !gate.traverse(back, front, actor.bodyRadius, -1);
@@ -4543,7 +6030,7 @@ const unitChecks = async () => {
       apertures.push({ name: actor.traits.name, pass: wrong && outside && accepted && once && closed && count === 1 });
     }
     document.getElementById = get; window.addEventListener = listen; window.removeEventListener = unlisten;
-    record("Stargate transit regression: all canonical bodies retain one-way backside aperture and finish OFF", apertures.length === CAST && apertures.every(row => row.pass), JSON.stringify(apertures));
+    record("Ooga Portal transit regression: all canonical bodies retain one-way backside aperture and finish OFF", apertures.length === CAST && apertures.every(row => row.pass), JSON.stringify(apertures));
     const land = BL.dsbModels.build(), landmarks = Object.values(land.landmarks), routes = [
       [[0, 7], [0, 26]], [[0, 26], [0, 33]], [[0, 26], [3.7, 25.6]], [[0, 21], [7, 24]],
       [[0, 18], [-10.5, 18]], [[0, 18], [10.5, 18]]

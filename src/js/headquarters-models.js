@@ -18,6 +18,7 @@
   // Static geometry is reused across visits without retaining a departed room or scene.
   const mattressCache = new Array(19);
   const roomSignCache = new Array(19);
+  const rampMarkerCache = new Map();
   const fabric = (pattern, width, depth, top, bottom, centerZ, kind) => {
     const geo = { verts: [], faces: [], lines: [] }, size = pattern.width, colors = pattern.colors;
     const cells = new Uint32Array(size * size), used = new Uint8Array(cells.length);
@@ -123,6 +124,60 @@
     roomSignCache[slot] = geo;
     return geo;
   };
+  const RAMP_MARKER_GLYPHS = {
+    H: ["10001", "10001", "10001", "11111", "10001", "10001", "10001"],
+    Q: ["01110", "10001", "10001", "10001", "10101", "01001", "10110"],
+    B: ["11110", "10001", "10001", "11110", "10001", "10001", "11110"],
+    1: ["00100", "01100", "00100", "00100", "00100", "00100", "01110"]
+  };
+  // Raised floor paint for the overhead combat map. The denser 5x7 alphabet
+  // remains legible at bird's-eye distance without adding a backing plate.
+  // Keep the word's slots in order; HQ retains its mirrored glyphs while B1
+  // uses each glyph's original horizontal orientation.
+  const rampMarkerLabel = (label) => {
+    label = String(label).toUpperCase();
+    const cached = rampMarkerCache.get(label);
+    if (cached) return cached;
+    const visual = label;
+    const parts = [], cell = 0.11, pixel = 0.086, height = 0.025;
+    let cells = -1;
+    for (const ch of visual) cells += ch === " " ? 3 : 6;
+    let cursor = -cells * cell / 2;
+    for (const ch of visual) {
+      if (ch === " ") { cursor += cell * 3; continue; }
+      const glyph = RAMP_MARKER_GLYPHS[ch];
+      if (!glyph) throw new Error(`No ramp-marker glyph for "${ch}"`);
+      for (let row = 0; row < glyph.length; row++) for (let col = 0; col < glyph[row].length; col++) {
+        if (glyph[row][col] !== "1") continue;
+        parts.push(box({ w: pixel, h: height, d: pixel, color: "#f5c542", emissive: 0.45,
+          offset: { x: cursor + (label === "B1" ? col + 0.5 : glyph[row].length - col - 0.5) * cell, y: height / 2, z: (row - 3) * cell } }));
+      }
+      cursor += cell * 6;
+    }
+    const geometry = merge(...parts);
+    geometry.castShadow = false;
+    geometry.rampMarker = { kind: "label", label, visual, columns: 5, rows: 7 };
+    rampMarkerCache.set(label, geometry);
+    return geometry;
+  };
+  const rampMarkerArrow = cached(() => {
+    const parts = [], height = 0.025;
+    const bar = (length, x, z, yaw = 0) => {
+      const geo = box({ w: 0.11, h: height, d: length, color: "#f5c542", emissive: 0.45, offset: { y: height / 2 } });
+      const c = Math.cos(yaw), s = Math.sin(yaw);
+      for (let i = 0; i < geo.verts.length; i += 3) {
+        const px = geo.verts[i], pz = geo.verts[i + 2];
+        geo.verts[i] = px * c + pz * s + x;
+        geo.verts[i + 2] = pz * c - px * s + z;
+      }
+      return geo;
+    };
+    parts.push(bar(0.72, 0, -0.2), bar(0.42, -0.145, 0.3, -Math.PI * 0.75), bar(0.42, 0.145, 0.3, Math.PI * 0.75));
+    const geometry = merge(...parts);
+    geometry.castShadow = false;
+    geometry.rampMarker = { kind: "arrow", direction: "+z" };
+    return geometry;
+  });
   const room = cached(() => {
     const parts = [box({ w: 1.3, h: 0.04, d: 1.3, color: "#39352d", offset: { y: 0.025 } })];
     for (let i = 0; i < 10; i++) {
@@ -146,7 +201,7 @@
     geo.headquartersRamp = true;
     return geo;
   });
-  const buildRoomEntrance = (i, lightLintel) => {
+  const buildRoomEntrance = (i, lightLintel, openTop = false) => {
     const rand = BL.math.mulberry32(827 + i * 311), parts = [];
     for (const side of [-1, 1]) for (let row = 0; row < 8; row++) {
       const x = side * (2.25 + (row + i) % 3 * 0.07), y = 0.25 + row * 0.5, depth = 0.52 + rand() * 0.18;
@@ -155,7 +210,7 @@
         parts.push(box({ w: 0.245, h: 0.245, d: 0.025, color: MOSS[(row + i) % MOSS.length], offset: { x: x + side * 0.08, y: y + 0.12, z: depth * 0.5 - 0.045 } }));
       }
     }
-    for (let col = 0; col < 8; col++) {
+    for (let col = 0; !openTop && col < 8; col++) {
       const x = -2.1 + col * 0.6, y = 3.96 + (col + i) % 3 * 0.04, depth = 0.58 + rand() * 0.15;
       const lintel = box({ w: 0.62, h: 0.52, d: depth, color: lightLintel ? STONE[2] : STONE[(col + i) % STONE.length], offset: { x, y, z: -0.06 } });
       for (const face of lintel.faces) face.headquartersEntranceLintel = true;
@@ -175,6 +230,9 @@
     return geometry;
   };
   const roomEntrance = variants((i) => buildRoomEntrance(i, false));
-  const rampEntrance = variants((i) => buildRoomEntrance(i, true));
-  BL.headquartersModels = { room, entranceRamp, roomEntrance, rampEntrance, mattress, roomSign, MATTRESS, ROOM_RADIUS };
+  // The basement ramps are read from above. Side jambs frame their entrances,
+  // but a lintel would cover the B1 floor mark and recreate a roof across the
+  // opening that the terrain cutaway has already exposed.
+  const rampEntrance = variants((i) => buildRoomEntrance(i, true, true));
+  BL.headquartersModels = { room, entranceRamp, roomEntrance, rampEntrance, mattress, roomSign, rampMarkerLabel, rampMarkerArrow, MATTRESS, ROOM_RADIUS };
 })();

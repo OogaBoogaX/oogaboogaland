@@ -2,7 +2,7 @@
   "use strict";
   const BL = window.BL = window.BL || {};
   const { mat4 } = BL.math;
-  const { updateWorld, traverseVisible, boundsOf, matrixModeOf, hiddenFromCamera } = BL.scene;
+  const { updateWorld, traverseVisible, boundsOf, matrixModeOf, hiddenFromCamera, hiddenFromCutaway } = BL.scene;
   const POINT_LIGHT_CAPACITY = 10;
   const QUALITY = {
     high: { dpr: 1.5, msaa: 4, shadow: 2048, bloom: true, mirror: 1024, environment: 128, environmentCadence: 1, lights: POINT_LIGHT_CAPACITY },
@@ -37,6 +37,24 @@
   const MESH_STRIDE = 10;
   const LINE_STRIDE = 12;
   const MATRIX_MASKS = new Int32Array([630678, 497559, 988959, 495513, 1009263, 288049, 456438, 616809]);
+  // Projection-weighted rays stay parallel in orthographic views and retain
+  // the eye-to-surface direction in perspective, including mirror captures.
+  const VIEW_DIRECTION_GLSL = `
+uniform vec3 uEye;
+uniform vec4 uViewDirection;
+vec3 viewTowardEye(vec3 p) {
+  return uViewDirection.w * (uEye - p) + uViewDirection.xyz;
+}`;
+  // Portal mode 6 uses the instance parameters for time, surge and reveal radius.
+  // Keep the wave equation in sync with oogaPortalModels.liquidHeight (Canvas).
+  const PORTAL_LIQUID_GLSL = `
+float portalHeight(vec2 p, float time, float surge) {
+  float envelope = max(0.0, 1.0 - dot(p, p));
+  float a = length(p - vec2(0.22, -0.17)), b = length(p - vec2(-0.31, 0.24));
+  return envelope * (0.016 * sin(a * 32.0 - time * 4.0) + 0.01 * sin(b * 25.0 - time * 3.0)
+    + 0.008 * sin(p.x * 18.0 + p.y * 12.0 + time * 2.0) - surge * 0.32 * envelope);
+}
+`;
   const MESH_VS = `#version 300 es
 precision highp float;
 layout(location=0) in vec3 aPos;
@@ -49,20 +67,32 @@ layout(location=6) in vec4 aM3;
 layout(location=7) in vec4 aParams;
 uniform mat4 uViewProj;
 uniform mat4 uLightViewProj;
-uniform vec3 uEye;
+${VIEW_DIRECTION_GLSL}
 out vec3 vNormal;
 out vec4 vColor;
 out vec4 vParams;
 out vec4 vShadow;
 out vec3 vWorld;
 out vec3 vInstanceFacing;
+out vec2 vPortalUV;
+out vec4 vPortalView;
+${PORTAL_LIQUID_GLSL}
 out float vMatrixSurface;
 flat out float vMatrixCave;
 flat out float vMatrixPermanentFallback;
 flat out float vSmokeOpacity;
 void main() {
   mat4 m = mat4(aM0, aM1, aM2, aM3);
-  vec4 w = m * vec4(aPos, 1.0);
+  vec3 pos = aPos;
+  vPortalUV = aPos.xz;
+  vPortalView = vec4(0.0);
+  if (aParams.z > 5.5) pos.y += portalHeight(aPos.xz, aParams.x, aParams.y);
+  vec4 w = m * vec4(pos, 1.0);
+  if (aParams.z > 5.5) {
+    vec3 toward = viewTowardEye(w.xyz);
+    vPortalView = vec4(dot(toward, normalize(aM0.xyz)), dot(toward, normalize(aM1.xyz)),
+      dot(toward, normalize(aM2.xyz)), max(0.001, length(aM0.xyz)));
+  }
   vNormal = normalize(mat3(m) * aNormal);
   vColor = aColor;
   vColor.rgb *= 1.0 - clamp(-aParams.y, 0.0, 1.0) * 0.88;
@@ -84,10 +114,41 @@ void main() {
   vWorld = w.xyz;
   vInstanceFacing = normalize(aM2.xyz);
   gl_Position = uViewProj * w;
-  if (aParams.w != 0.0) {
+  if (aParams.w != 0.0 && aParams.z < 5.5) {
     vec3 facing = normalize(aM2.xyz) * sign(aParams.w);
-    if (dot(facing, uEye - aM3.xyz) <= 0.0) gl_Position = vec4(2.0, 2.0, 2.0, 1.0);
+    if (dot(facing, viewTowardEye(aM3.xyz)) <= 0.0) gl_Position = vec4(2.0, 2.0, 2.0, 1.0);
   }
+}`;
+  // A small set of oriented cave apertures leaves the surrounding hills intact.
+  // Underground the same predicate uses a world-height slice across all islands.
+  const CUTAWAY_GLSL = `
+uniform int uCutCount;
+uniform vec4 uCutRegions[8];
+uniform vec4 uCutBounds[8];
+uniform float uCutawayOpacity;
+float cutawayRank() {
+  ivec2 pixel = ivec2(gl_FragCoord.xy) & 3;
+  int rank = ((pixel.x & 1) ^ (pixel.y & 1)) * 8 + (pixel.y & 1) * 4
+    + (((pixel.x >> 1) & 1) ^ ((pixel.y >> 1) & 1)) * 2 + ((pixel.y >> 1) & 1);
+  return (float(rank) + 0.5) / 16.0;
+}
+bool cutaway(vec3 p, float opacity) {
+  // Ordered coverage shares one fade across colour, depth and shadows,
+  // without sorting transparent clouds or changing their shared instances.
+  opacity *= uCutawayOpacity;
+  if (opacity < 1.0 && cutawayRank() >= opacity) return true;
+  if (p.y > uClipMaxY) return true;
+  for (int i = 0; i < 8; i++) {
+    if (i >= uCutCount) break;
+    vec4 r = uCutRegions[i], b = uCutBounds[i];
+    vec2 d = p.xz - r.xy;
+    vec2 local = vec2(d.x * r.z - d.y * r.w, d.x * r.w + d.y * r.z);
+    if (p.y > b.z && abs(local.x) < b.x && abs(local.y) < b.y && cutawayRank() < b.w) return true;
+  }
+  return false;
+}
+bool cutaway(vec3 p) {
+  return cutaway(p, 1.0);
 }`;
   const MESH_FS = `#version 300 es
 precision highp float;
@@ -99,6 +160,9 @@ in vec4 vParams;
 in vec4 vShadow;
 in vec3 vWorld;
 in vec3 vInstanceFacing;
+in vec2 vPortalUV;
+in vec4 vPortalView;
+${PORTAL_LIQUID_GLSL}
 in float vMatrixSurface;
 flat in float vMatrixCave;
 flat in float vMatrixPermanentFallback;
@@ -117,7 +181,7 @@ uniform sampler2DShadow uShadow;
 uniform float uShadowTexel;
 uniform vec4 uLights[20];
 uniform int uLightCount;
-uniform vec3 uEye;
+${VIEW_DIRECTION_GLSL}
 uniform vec3 uFog;
 uniform vec2 uFogRange;
 uniform vec4 uMatrixParams;
@@ -135,6 +199,7 @@ uniform sampler2D uMatrixGlyphTex;
 uniform int uMatrixSamples;
 uniform float uClipMinY;
 uniform float uClipMaxY;
+${CUTAWAY_GLSL}
 uniform float uMatrixGlyphOpacity;
 #ifdef MATRIX_SAMPLE_INTERPOLATION
 vec2 matrixSampleOffsets[4];
@@ -171,7 +236,7 @@ float matrixGlyphAt(vec3 n, float flow, out float glow, out float tip, out float
   const float glyphGap = 0.13;
   const float pixelPitch = 0.021;
   const float pixelSize = 0.016;
-  vec3 viewDir = normalize(uEye - vWorld);
+  vec3 viewDir = normalize(viewTowardEye(vWorld));
   float viewNormal = max(abs(dot(viewDir, n)), 0.08);
   vec3 glyphWorld = vWorld + viewDir * (0.015 / viewNormal);
   vec3 rel = glyphWorld - uMatrixOrigin;
@@ -327,12 +392,37 @@ float matrixPermanentAt(vec3 point, float caveIndex) {
   return depth >= -0.000001 && depth <= bounds.w + voxelReach && abs(across) <= halfWidth + 0.000001 && height >= -0.000001 && height <= ceiling + 0.000001 ? 1.0 : 0.0;
 }
 void main() {
-  if (vWorld.y < uClipMinY || vWorld.y > uClipMaxY) discard;
-  if (vSmokeOpacity < 1.0) {
-    ivec2 pixel = ivec2(gl_FragCoord.xy) & 3;
-    int rank = ((pixel.x & 1) ^ (pixel.y & 1)) * 8 + (pixel.y & 1) * 4
-      + (((pixel.x >> 1) & 1) ^ ((pixel.y >> 1) & 1)) * 2 + ((pixel.y >> 1) & 1);
-    if ((float(rank) + 0.5) / 16.0 >= vSmokeOpacity) discard;
+  if (vWorld.y < uClipMinY || cutaway(vWorld, vSmokeOpacity)) discard;
+  if (vParams.z > 5.5) {
+    vec2 p = vPortalUV;
+    float time = vParams.x, surge = vParams.y, radius = length(p);
+    if (radius > vParams.w) discard;
+    float height = portalHeight(p, time, surge);
+    vec2 gradient = vec2(portalHeight(p + vec2(0.003, 0.0), time, surge) - height,
+      portalHeight(p + vec2(0.0, 0.003), time, surge) - height) / (0.003 * vPortalView.w);
+    vec3 normal = normalize(vec3(-gradient.x, 1.0, -gradient.y));
+    vec3 eye = normalize(vPortalView.xyz);
+    if (eye.y < 0.0) normal = -normal;
+    float fresnel = pow(1.0 - abs(dot(normal, eye)), 3.0);
+    // Interfering wave fronts and drifting caustic strands give the membrane
+    // depth; narrow crests carry the pulses instead of painted solid rings.
+    vec2 warp = p + 0.045 * vec2(sin(p.y * 9.0 + time), cos(p.x * 11.0 - time));
+    float interference = sin(length(warp - vec2(0.22, -0.17)) * 32.0 - time * 4.0)
+      + sin(length(warp + vec2(0.31, -0.24)) * 25.0 - time * 3.0);
+    float caustic = pow(0.5 + 0.5 * sin(warp.x * 21.0 + sin(warp.y * 17.0 + time * 2.0) + time), 10.0);
+    caustic *= 0.4 + 0.6 * pow(0.5 + 0.5 * cos(warp.y * 23.0 - warp.x * 9.0 - time), 3.0);
+    float pulse = pow(0.5 + 0.5 * sin(radius * 20.0 - time * 2.0), 12.0);
+    float crest = smoothstep(0.8, 1.9, interference);
+    float rim = smoothstep(0.88, 1.0, radius);
+    float glint = pow(max(0.0, dot(reflect(-normalize(vec3(-0.4, 1.0, 0.6)), normal), eye)), 40.0);
+    vec3 liquid = mix(vec3(0.015, 0.055, 0.16), vec3(0.035, 0.32, 0.53), 0.48 + 0.22 * interference);
+    liquid += vec3(0.13, 0.58, 0.72) * (crest * 0.36 + caustic * 0.62 + pulse * 0.18);
+    liquid += vec3(0.42, 0.83, 0.95) * (glint * 0.65 + fresnel * 0.28 + rim * (0.25 + 0.1 * sin(time * 2.0)));
+    liquid *= 1.0 + surge * 0.4;
+    float fog = smoothstep(uFogRange.x, uFogRange.y, distance(vWorld, uEye));
+    oColor = vec4(mix(liquid, uFog, fog), 1.0);
+    oBright = vec4(liquid * (0.2 + crest * 0.35 + caustic * 0.4 + rim * 0.2) * (1.0 - fog), 1.0);
+    return;
   }
   vec3 n = normalize(vNormal);
   vec3 base = vColor.rgb;
@@ -389,7 +479,7 @@ void main() {
     float glow = clamp(vColor.a * vParams.x, 0.0, 1.0);
     float tip = clamp(vParams.z, 0.0, 1.0);
     float sideMix = 1.0 - smoothstep(0.45, 0.9, abs(dot(n, normalize(vInstanceFacing))));
-    vec3 viewDir = normalize(uEye - vWorld);
+    vec3 viewDir = normalize(viewTowardEye(vWorld));
     float sideShade = 0.7 + max(dot(n, uLightDir), 0.0) * 0.22 + max(dot(n, viewDir), 0.0) * 0.08;
     vec3 matrixGreen = matrixGlyphColor(base, glow, tip, sideMix, sideShade);
     float matrixFog = smoothstep(uFogRange.x, uFogRange.y, distance(vWorld, uEye));
@@ -461,19 +551,21 @@ layout(location=4) in vec4 aM1;
 layout(location=5) in vec4 aM2;
 layout(location=6) in vec4 aM3;
 uniform mat4 uLightViewProj;
-out float vWorldY;
+out vec3 vWorld;
 void main() {
   vec4 world = mat4(aM0, aM1, aM2, aM3) * vec4(aPos, 1.0);
-  vWorldY = world.y;
+  vWorld = world.xyz;
   gl_Position = uLightViewProj * world;
 }`;
-  const SHADOW_FS = `#version 300 es
+const SHADOW_FS = `#version 300 es
 precision highp float;
-in float vWorldY;
+in vec3 vWorld;
 uniform float uClipMinY;
-uniform float uClipMaxY;
 void main() {
-  if (vWorldY < uClipMinY || vWorldY > uClipMaxY) discard;
+  // Bird's-eye cuts belong to the camera, not the sun. Keep the original
+  // ceiling silhouettes in the shadow map while their colour geometry is
+  // scanned or faded away.
+  if (vWorld.y < uClipMinY) discard;
 }`;
   const LINE_VS = `#version 300 es
 precision highp float;
@@ -489,12 +581,21 @@ layout(location=8) in vec4 aColor;
 uniform mat4 uViewProj;
 uniform vec2 uViewport;
 uniform float uWidth;
+uniform float uClipMaxY;
+out vec3 vWorld;
 out vec4 vColor;
 out vec4 vParams;
 void main() {
-  mat4 m = uViewProj * mat4(aM0, aM1, aM2, aM3);
-  vec4 ca = m * vec4(aA, 1.0);
-  vec4 cb = m * vec4(aB, 1.0);
+  mat4 m = mat4(aM0, aM1, aM2, aM3);
+  vec4 wa = m * vec4(aA, 1.0), wb = m * vec4(aB, 1.0);
+  if (wa.y > uClipMaxY && wb.y > uClipMaxY) {
+    gl_Position = vec4(2.0, 2.0, 2.0, 1.0);
+    return;
+  }
+  if (wa.y > uClipMaxY) wa = mix(wa, wb, (uClipMaxY - wa.y) / (wb.y - wa.y));
+  if (wb.y > uClipMaxY) wb = mix(wb, wa, (uClipMaxY - wb.y) / (wa.y - wb.y));
+  vec4 ca = uViewProj * wa;
+  vec4 cb = uViewProj * wb;
   vColor = aColor;
   vParams = aParams;
   vColor.rgb *= 1.0 - clamp(-aParams.y, 0.0, 1.0) * 0.88;
@@ -513,16 +614,21 @@ void main() {
   dir = len > 0.0001 ? dir / len : vec2(1.0, 0.0);
   vec2 nrm = vec2(-dir.y, dir.x);
   vec4 c = aSide.x < 0.5 ? ca : cb;
+  vWorld = mix(wa.xyz, wb.xyz, aSide.x);
   vec2 off = nrm * aSide.y * uWidth * 0.5 / hv * c.w;
   gl_Position = vec4(c.xy + off, c.z, c.w);
 }`;
   const LINE_FS = `#version 300 es
 precision highp float;
+in vec3 vWorld;
+uniform float uClipMaxY;
+${CUTAWAY_GLSL}
 in vec4 vColor;
 in vec4 vParams;
 layout(location=0) out vec4 oColor;
 layout(location=1) out vec4 oBright;
 void main() {
+  if (cutaway(vWorld)) discard;
   float ember = clamp(-vParams.x, 0.0, 1.0);
   float detail = 0.72 + dot(vColor.rgb, vec3(0.2126, 0.7152, 0.0722)) * 0.28;
   vec3 heat = vec3(1.0, 0.12 + ember * 0.85, 0.01 + ember * ember * ember * 0.74) * detail;
@@ -542,19 +648,26 @@ layout(location=6) in vec4 aM3;
 uniform mat4 uViewProj;
 uniform vec4 uRect;
 out vec2 vUv;
+out vec3 vWorld;
 void main() {
   vUv = (aPos.xy - uRect.xy) / uRect.zw;
   vUv.y = 1.0 - vUv.y;
-  gl_Position = uViewProj * mat4(aM0, aM1, aM2, aM3) * vec4(aPos, 1.0);
+  vec4 world = mat4(aM0, aM1, aM2, aM3) * vec4(aPos, 1.0);
+  vWorld = world.xyz;
+  gl_Position = uViewProj * world;
 }`;
   const IMAGE_FS = `#version 300 es
 precision highp float;
 in vec2 vUv;
+in vec3 vWorld;
 uniform sampler2D uImage;
 uniform bool uReady;
+uniform float uClipMaxY;
+${CUTAWAY_GLSL}
 layout(location=0) out vec4 oColor;
 layout(location=1) out vec4 oBright;
 void main() {
+  if (cutaway(vWorld)) discard;
   bool inside = all(greaterThanEqual(vUv, vec2(0.0))) && all(lessThanEqual(vUv, vec2(1.0)));
   oColor = vec4(uReady && inside ? texture(uImage, vUv).rgb : vec3(0.0), 1.0);
   oBright = vec4(0.0);
@@ -620,6 +733,8 @@ uniform vec3 uTint;
 uniform float uPortal;
 uniform float uReveal;
 uniform float uRippleOnly;
+uniform float uClipMaxY;
+${CUTAWAY_GLSL}
 uniform int uRippleActive;
 uniform float uRippleTime;
 uniform vec4 uRipples[${BL.mirrorRipples.CAPACITY}];
@@ -645,6 +760,7 @@ vec4 bodyField(vec2 uv, int layer) {
   return texture(uBodyField, vec2(uv.x, (uv.y + float(layer)) / ${BL.mirrorBody.CAPACITY + 1}.0));
 }
 void main() {
+  if (cutaway(vWorld)) discard;
   // The ratio cancels perspective interpolation, recovering the original
   // planar depth. Glass inside the near plane still closes the cave entrance.
   gl_FragDepth = clamp(0.5 * vClipDepth.x / vClipDepth.y + 0.5, 0.0, 1.0);
@@ -762,18 +878,15 @@ in vec3 vWorld;
 flat in vec3 vMirrorNormal;
 flat in float vOpacity;
 uniform samplerCube uEnvironment;
-uniform vec3 uEye;
+${VIEW_DIRECTION_GLSL}
 uniform vec3 uTint;
+uniform float uClipMaxY;
+${CUTAWAY_GLSL}
 layout(location=0) out vec4 oColor;
 layout(location=1) out vec4 oBright;
 void main() {
-  if (vOpacity < 1.0) {
-    ivec2 pixel = ivec2(gl_FragCoord.xy) & 3;
-    int rank = ((pixel.x & 1) ^ (pixel.y & 1)) * 8 + (pixel.y & 1) * 4
-      + (((pixel.x >> 1) & 1) ^ ((pixel.y >> 1) & 1)) * 2 + ((pixel.y >> 1) & 1);
-    if ((float(rank) + 0.5) / 16.0 >= vOpacity) discard;
-  }
-  vec3 direction = reflect(normalize(vWorld - uEye), normalize(vMirrorNormal));
+  if (cutaway(vWorld, vOpacity)) discard;
+  vec3 direction = reflect(-normalize(viewTowardEye(vWorld)), normalize(vMirrorNormal));
   oColor = vec4(mix(texture(uEnvironment, direction).rgb, uTint, 0.04), 1.0);
   oBright = vec4(0.0);
 }`;
@@ -899,7 +1012,7 @@ void main() {
     const MIRROR_CLIP = new Float32Array(4);
     const MIRROR_RECT = new Float32Array(4);
     const mirrorView = mat4.create();
-    const mirrorProj = mat4.create();
+    const mirrorProj = mat4.create(), mirrorInverseProj = mat4.create(), mirrorClipCorner = new Float32Array(4);
     const mirrorViewProj = mat4.create();
     const mirrorCapturedViewProj = mat4.create();
     const invViewProj = mat4.create();
@@ -921,7 +1034,8 @@ void main() {
     };
     // Compiles without blocking; ready flips once linked.
     let parallel = null;
-    let ready = false;
+    let ready = false, cutawayMaxY = 1e6, cutawayCount = 0, cutawayFade = 0, cutawayFrame = 0, cutawayCloudY = 0, cutawayCloudMix = 0;
+    const cutawayRegions = new Float32Array(32), cutawayBounds = new Float32Array(32);
     let failure = null;
     const compile = (vs, fs, uniforms) => {
       const make = (type, src) => {
@@ -935,7 +1049,7 @@ void main() {
       gl.attachShader(prog, v);
       gl.attachShader(prog, f);
       gl.linkProgram(prog);
-      return { prog, shaders: [v, f], uniforms, u: {}, clipMinY: NaN, clipMaxY: NaN };
+      return { prog, shaders: [v, f], uniforms: uniforms.concat(["uCutCount", "uCutRegions", "uCutBounds", "uCutawayOpacity"]), u: {}, cutFrame: -1, cutCount: -1, cutOpacity: NaN, clipMinY: NaN, clipMaxY: NaN };
     };
     const finishProgram = (p) => {
       if (!gl.getProgramParameter(p.prog, gl.LINK_STATUS)) {
@@ -957,7 +1071,7 @@ void main() {
     };
     const ensureMirrorProgram = () => {
       if (!mirror.program) {
-        mirror.program = compile(MIRROR_VS, MIRROR_FS, ["uViewProj", "uReflectionViewProj", "uMirrorWorld", "uShard", "uReflection", "uReflectionScale", "uTint", "uPortal", "uReveal", "uRippleOnly", "uMatrixGlyphTex", "uRippleActive", "uRippleTime", "uRipples", "uBodyField", "uBodyBounds", "uBodyTexel", "uBodyContacts", "uBodyActive", "uBodyWaves"]);
+        mirror.program = compile(MIRROR_VS, MIRROR_FS, ["uViewProj", "uReflectionViewProj", "uMirrorWorld", "uShard", "uReflection", "uReflectionScale", "uTint", "uPortal", "uReveal", "uRippleOnly", "uMatrixGlyphTex", "uRippleActive", "uRippleTime", "uRipples", "uBodyField", "uBodyBounds", "uBodyTexel", "uBodyContacts", "uBodyActive", "uBodyWaves", "uClipMaxY"]);
         mirrorDebug.resources++;
       }
       if (mirror.programReady) return true;
@@ -972,10 +1086,10 @@ void main() {
       const matrixSampling = gl.getExtension("OES_shader_multisample_interpolation");
       const meshFragment = matrixSampling ? MESH_FS.replace("#version 300 es", "#version 300 es\n#extension GL_OES_shader_multisample_interpolation : require\n#define MATRIX_SAMPLE_INTERPOLATION") : MESH_FS;
       res.programs = {
-        image: compile(IMAGE_VS, IMAGE_FS, ["uViewProj", "uRect", "uImage", "uReady"]),
-        mesh: compile(MESH_VS, meshFragment, ["uViewProj", "uLightViewProj", "uEye", "uLightDir", "uSky", "uGround", "uSun", "uDirectStrength", "uAmbientFloor", "uDiffuseFloor", "uShadowStrength", "uShadowFloor", "uShadowBias", "uShadow", "uShadowTexel", "uLights", "uLightCount", "uFog", "uFogRange", "uMatrixParams", "uMatrixOrigin", "uMatrixGlyph", "uMatrixCave", "uMatrixCaves", "uMatrixCaveBounds", "uMatrixCaveNear", "uMatrixPermanentCave", "uMatrixPermanentPlane", "uMatrixPermanentAperture", "uMatrixLivingGlobal", "uMatrixGlyphTex", "uMatrixSamples", "uClipMinY", "uClipMaxY", "uMatrixGlyphOpacity"]),
-        shadow: compile(SHADOW_VS, SHADOW_FS, ["uLightViewProj", "uClipMinY", "uClipMaxY"]),
-        line: compile(LINE_VS, LINE_FS, ["uViewProj", "uViewport", "uWidth"]),
+        image: compile(IMAGE_VS, IMAGE_FS, ["uViewProj", "uRect", "uImage", "uReady", "uClipMaxY"]),
+        mesh: compile(MESH_VS, meshFragment, ["uViewProj", "uLightViewProj", "uEye", "uViewDirection", "uLightDir", "uSky", "uGround", "uSun", "uDirectStrength", "uAmbientFloor", "uDiffuseFloor", "uShadowStrength", "uShadowFloor", "uShadowBias", "uShadow", "uShadowTexel", "uLights", "uLightCount", "uFog", "uFogRange", "uMatrixParams", "uMatrixOrigin", "uMatrixGlyph", "uMatrixCave", "uMatrixCaves", "uMatrixCaveBounds", "uMatrixCaveNear", "uMatrixPermanentCave", "uMatrixPermanentPlane", "uMatrixPermanentAperture", "uMatrixLivingGlobal", "uMatrixGlyphTex", "uMatrixSamples", "uClipMinY", "uClipMaxY", "uMatrixGlyphOpacity"]),
+        shadow: compile(SHADOW_VS, SHADOW_FS, ["uLightViewProj", "uClipMinY"]),
+        line: compile(LINE_VS, LINE_FS, ["uViewProj", "uViewport", "uWidth", "uClipMaxY"]),
         sky: compile(QUAD_VS, SKY_FS, ["uInvViewProj", "uHorizon", "uZenith", "uSun", "uSunDir", "uMoonDir", "uStarMatrix", "uStars", "uTime", "uHazeDrop"]),
         blur: compile(QUAD_VS, BLUR_FS, ["uTex", "uDir"]),
         composite: compile(QUAD_VS, COMPOSITE_FS, ["uScene", "uBloom", "uBloomStrength"])
@@ -1400,7 +1514,7 @@ void main() {
       mat4.transformPoint(CENTER, w, b.center[0], b.center[1], b.center[2]);
       const scale = Math.max(w[0] * w[0] + w[1] * w[1] + w[2] * w[2], w[4] * w[4] + w[5] * w[5] + w[6] * w[6], w[8] * w[8] + w[9] * w[9] + w[10] * w[10]);
       node.cullX = CENTER[0];
-      node.cullY = CENTER[1];
+      node.cullY = CENTER[1] + (node.matrixCloud ? Math.min(0, cutawayCloudY - w[13]) * cutawayCloudMix : 0);
       node.cullZ = CENTER[2];
       node.cullR = b.radius * Math.sqrt(scale) + CULL_MARGIN;
     };
@@ -1425,7 +1539,7 @@ void main() {
       }
     };
     const collect = (node) => {
-      if (!node.geometry) return;
+      if (!node.geometry || hiddenFromCutaway(node) || cutawayFade === 1 && node.geometry.cutawayHide) return;
       if (node.mirror || node.mirrorPortal) {
         if (mirror.node) throw new Error("A scene may contain at most one mirror node");
         mirror.node = node;
@@ -1500,15 +1614,21 @@ void main() {
         const n = rec.nodes[i], w = n.world;
         const o = i * INSTANCE_FLOATS;
         let dirty = false;
-        for (let j = 0; j < 16; j++) if (d[o + j] !== w[j]) { d[o + j] = w[j]; dirty = true; }
+        const cloudOffset = n.matrixCloud ? Math.min(0, cutawayCloudY - w[13]) * cutawayCloudMix : 0;
+        for (let j = 0; j < 16; j++) {
+          const value = j === 13 && cloudOffset ? Math.fround(w[j] + cloudOffset) : w[j];
+          if (d[o + j] !== value) { d[o + j] = value; dirty = true; }
+        }
         // Sign-encoded fire/smoke in the cached upload: negative glow = ember, negative highlight = scorch,
         // mode = -1 - smokeOpacity.
-        const glow = Math.fround(n.ember > 0 ? -n.ember : n.glow), highlight = Math.fround(n.scorch > 0 ? -n.scorch : n.highlight);
-        const mode = Math.fround(n.smokeOpacity === undefined ? matrixModeOf(n) : -1 - n.smokeOpacity);
+        const portal = !!rec.geometry.portalSurface;
+        const glow = Math.fround(portal ? n.portalTime : n.ember > 0 ? -n.ember : n.glow), highlight = Math.fround(portal ? n.portalSurge : n.scorch > 0 ? -n.scorch : n.highlight);
+        const mode = portal ? 6 : Math.fround(n.smokeOpacity === undefined ? matrixModeOf(n) : -1 - n.smokeOpacity);
         if (d[o + 16] !== glow) { d[o + 16] = glow; dirty = true; }
         if (d[o + 17] !== highlight) { d[o + 17] = highlight; dirty = true; }
         if (d[o + 18] !== mode) { d[o + 18] = mode; dirty = true; }
-        d[o + 19] = 0;
+        const reveal = portal ? Math.fround(n.portalReveal) : 0;
+        if (d[o + 19] !== reveal) { d[o + 19] = reveal; dirty = true; }
         if (dirty) {
           if (o < lo) lo = o;
           if (o + INSTANCE_FLOATS > hi) hi = o + INSTANCE_FLOATS;
@@ -1600,7 +1720,7 @@ void main() {
       mirrorUp.y = up.y - 2 * upDot * normal[1];
       mirrorUp.z = up.z - 2 * upDot * normal[2];
       mat4.lookAt(mirrorView, mirrorEye, mirrorTarget, mirrorUp);
-      mat4.perspective(mirrorProj, camera.fov, width / height, Math.min(camera.near, cameraSide * 0.5), camera.far);
+      BL.scene.cameraProjection(mirrorProj, camera, width / height, Math.min(camera.near, cameraSide * 0.5));
       // Reflect the actual view and capture only visible glass. Fitting the
       // entire aperture to a perpendicular camera spends nearly all capture
       // texels offscreen at close range, making reflections blur and crawl.
@@ -1615,10 +1735,10 @@ void main() {
       const targetHeight = mirror.renderHeight = Math.max(1, Math.min(settings.mirror, Math.ceil(screenHeight * dpr)));
       mirrorDebug.width = targetWidth;
       mirrorDebug.height = targetHeight;
-      mirrorProj[0] /= halfX;
-      mirrorProj[8] = (mirrorProj[8] + cropX) / halfX;
-      mirrorProj[5] /= halfY;
-      mirrorProj[9] = (mirrorProj[9] + cropY) / halfY;
+      for (let col = 0; col < 16; col += 4) {
+        mirrorProj[col] = (mirrorProj[col] - cropX * mirrorProj[col + 3]) / halfX;
+        mirrorProj[col + 1] = (mirrorProj[col + 1] - cropY * mirrorProj[col + 3]) / halfY;
+      }
       // Sky rays unproject through the cropped projection, before the oblique clip bends z.
       mat4.multiply(mirrorViewProj, mirrorProj, mirrorView);
       skyInverse(mirrorInvViewProj, mirrorProj, mirrorView);
@@ -1631,19 +1751,18 @@ void main() {
       cy /= clen;
       cz /= clen;
       let cw = -(cx * MIRROR_POINT[0] + cy * MIRROR_POINT[1] + cz * MIRROR_POINT[2]);
-      const qx = ((cx >= 0 ? 1 : -1) + mirrorProj[8]) / mirrorProj[0];
-      const qy = ((cy >= 0 ? 1 : -1) + mirrorProj[9]) / mirrorProj[5];
-      const qz = -1;
-      const qw = (1 + mirrorProj[10]) / mirrorProj[14];
+      mat4.invert(mirrorInverseProj, mirrorProj);
+      mat4.transformPoint4(mirrorClipCorner, mirrorInverseProj, cx >= 0 ? 1 : -1, cy >= 0 ? 1 : -1, 1);
+      const qx = mirrorClipCorner[0], qy = mirrorClipCorner[1], qz = mirrorClipCorner[2], qw = mirrorClipCorner[3];
       const clipScale = 2 / (cx * qx + cy * qy + cz * qz + cw * qw);
       cx *= clipScale;
       cy *= clipScale;
       cz *= clipScale;
       cw *= clipScale;
-      mirrorProj[2] = cx;
-      mirrorProj[6] = cy;
-      mirrorProj[10] = cz + 0.998;
-      mirrorProj[14] = cw;
+      mirrorProj[2] = cx - mirrorProj[3] * 0.998;
+      mirrorProj[6] = cy - mirrorProj[7] * 0.998;
+      mirrorProj[10] = cz - mirrorProj[11] * 0.998;
+      mirrorProj[14] = cw - mirrorProj[15] * 0.998;
       mat4.multiply(mirrorViewProj, mirrorProj, mirrorView);
       mirrorDebug.cameraPosition[0] = mirrorEye.x;
       mirrorDebug.cameraPosition[1] = mirrorEye.y;
@@ -1672,7 +1791,7 @@ void main() {
     };
     const ensureShardProgram = () => {
       if (!environment.program) {
-        environment.program = compile(MIRROR_VS, SHARD_FS, ["uViewProj", "uShard", "uEnvironment", "uEye", "uTint"]);
+        environment.program = compile(MIRROR_VS, SHARD_FS, ["uViewProj", "uShard", "uEnvironment", "uEye", "uViewDirection", "uTint", "uClipMaxY"]);
         mirrorDebug.resources++;
       }
       if (environment.ready) return true;
@@ -1724,6 +1843,27 @@ void main() {
     canvas.addEventListener("webglcontextlost", onLost);
     canvas.addEventListener("webglcontextrestored", onRestored);
     let imageTextures = 0, rippleBodyTextures = 0;
+    const applyViewDirection = (program, projection, cameraView) => {
+      const depth = projection[15];
+      gl.uniform4f(program.u.uViewDirection, depth * cameraView[2], depth * cameraView[6], depth * cameraView[10], -projection[11]);
+    };
+    const applyCutaway = (program, geometry) => {
+      const count = geometry?.cutawayPreserve ? 0 : cutawayCount;
+      const opacity = geometry?.cutawayHide ? 1 - cutawayFade : 1;
+      if (program.cutOpacity !== opacity) {
+        gl.uniform1f(program.u.uCutawayOpacity, opacity);
+        program.cutOpacity = opacity;
+      }
+      if (program.cutFrame !== cutawayFrame) {
+        gl.uniform4fv(program.u.uCutRegions, cutawayRegions);
+        gl.uniform4fv(program.u.uCutBounds, cutawayBounds);
+        program.cutFrame = cutawayFrame;
+      }
+      if (program.cutCount !== count) {
+        gl.uniform1i(program.u.uCutCount, count);
+        program.cutCount = count;
+      }
+    };
     const drawImageSurface = (rec, count, cameraPass) => {
       const surface = rec.geometry.imageSurface, image = surface.asset.load(), p = res.programs.image;
       gl.activeTexture(gl.TEXTURE6);
@@ -1742,6 +1882,8 @@ void main() {
       gl.uniform4fv(p.u.uRect, surface.rect);
       gl.uniform1i(p.u.uImage, 6);
       gl.uniform1i(p.u.uReady, rec.imageTexture ? 1 : 0);
+      applyCutaway(p, rec.geometry);
+      gl.uniform1f(p.u.uClipMaxY, Math.min(rec.geometry.cutawayPreserve ? 1e6 : cutawayMaxY, rec.geometry.clipMaxY ?? 1e6));
       gl.bindVertexArray(rec.mesh.vao);
       gl.drawArraysInstanced(gl.TRIANGLES, 0, rec.mesh.count, count);
       gl.activeTexture(gl.TEXTURE0);
@@ -1751,6 +1893,7 @@ void main() {
     const drawParts = (kind, useProgram, excludeMirror = false, cull = false, matrixStage = 0) => {
       for (const rec of activeRecords) {
         if (rec.geometry.mirrorRippleOnly) continue;
+        applyCutaway(res.programs[useProgram], rec.geometry);
         if (excludeMirror && (rec === mirror.record || rec.geometry.mirrorSource)) continue;
         const part = rec[kind], n = rec.batch && rec.batch.drawInstanceCount !== undefined ? rec.drawCount : cull ? rec.drawCount : rec.count;
         if (!part || !n) continue;
@@ -1766,7 +1909,7 @@ void main() {
           gl.uniform1f(res.programs.mesh.u.uMatrixCave, rec.geometry.matrixCave || 0);
         }
         if (kind === "mesh") {
-          const program = res.programs[useProgram], minimumY = rec.geometry.clipMinY ?? -1e6, maximumY = rec.geometry.clipMaxY ?? 1e6;
+          const program = res.programs[useProgram], minimumY = rec.geometry.clipMinY ?? -1e6, maximumY = Math.min(rec.geometry.cutawayPreserve ? 1e6 : cutawayMaxY, rec.geometry.clipMaxY ?? 1e6);
           if (minimumY !== program.clipMinY) {
             gl.uniform1f(program.u.uClipMinY, minimumY);
             program.clipMinY = minimumY;
@@ -1776,7 +1919,10 @@ void main() {
             program.clipMaxY = maximumY;
           }
         }
-        if (kind === "line") gl.uniform1f(res.programs.line.u.uWidth, part.width * dpr);
+        if (kind === "line") {
+          gl.uniform1f(res.programs.line.u.uClipMaxY, rec.geometry.cutawayPreserve ? 1e6 : cutawayMaxY);
+          gl.uniform1f(res.programs.line.u.uWidth, part.width * dpr);
+        }
         // Surface overlays stay above their backing at distant zooms in both color passes; shadow depth and later
         // ordinary meshes stay unchanged.
         const offset = kind === "mesh" && useProgram === "mesh" && rec.geometry.depthOffset;
@@ -1828,6 +1974,7 @@ void main() {
       gl.uniformMatrix4fv(pg.mesh.u.uViewProj, false, mirrorViewProj);
       gl.uniformMatrix4fv(pg.mesh.u.uLightViewProj, false, lightViewProj);
       gl.uniform3f(pg.mesh.u.uEye, mirrorEye.x, mirrorEye.y, mirrorEye.z);
+      applyViewDirection(pg.mesh, mirrorProj, mirrorView);
       gl.uniform3f(pg.mesh.u.uLightDir, lx, ly, lz);
       gl.uniform3fv(pg.mesh.u.uSky, sky);
       gl.uniform3fv(pg.mesh.u.uGround, ground);
@@ -1895,6 +2042,8 @@ void main() {
       if (!mirror.node) return;
       if (pane) {
         gl.useProgram(pg.prog);
+        gl.uniform1f(pg.u.uClipMaxY, cutawayMaxY);
+        applyCutaway(pg, rec.geometry);
         gl.uniformMatrix4fv(pg.u.uViewProj, false, viewProj);
         gl.uniformMatrix4fv(pg.u.uReflectionViewProj, false, mirrorCapturedViewProj);
         gl.uniformMatrix4fv(pg.u.uMirrorWorld, false, mirror.node.world);
@@ -1947,15 +2096,19 @@ void main() {
       if (mirror.shards && environment.ready && environment.tex) {
         const shardProgram = environment.program;
         gl.useProgram(shardProgram.prog);
+        gl.uniform1f(shardProgram.u.uClipMaxY, cutawayMaxY);
+        applyCutaway(shardProgram);
         gl.uniformMatrix4fv(shardProgram.u.uViewProj, false, viewProj);
         gl.uniform1f(shardProgram.u.uShard, 1);
         gl.uniform3f(shardProgram.u.uEye, camera.position.x, camera.position.y, camera.position.z);
+        applyViewDirection(shardProgram, proj, view);
         gl.uniform3f(shardProgram.u.uTint, 0.56, 0.62, 0.67);
         gl.activeTexture(gl.TEXTURE5);
         gl.bindTexture(gl.TEXTURE_CUBE_MAP, environment.tex);
         gl.uniform1i(shardProgram.u.uEnvironment, 5);
         for (const shard of activeRecords) {
           if (!shard.geometry.mirrorSource || !shard.mesh || !shard.drawCount || shard.offscreen) continue;
+          applyCutaway(shardProgram, shard.geometry);
           gl.bindVertexArray(shard.mesh.vao);
           gl.drawArraysInstanced(gl.TRIANGLES, 0, shard.mesh.count, shard.drawCount);
           mirrorDebug.shardsDrawn += shard.drawCount;
@@ -1974,6 +2127,8 @@ void main() {
           if (!ensureMirrorProgram()) return;
           const pg = mirror.program;
           gl.useProgram(pg.prog);
+          gl.uniform1f(pg.u.uClipMaxY, cutawayMaxY);
+          applyCutaway(pg);
           gl.uniformMatrix4fv(pg.u.uViewProj, false, viewProj);
           gl.uniformMatrix4fv(pg.u.uReflectionViewProj, false, viewProj);
           gl.uniform1f(pg.u.uShard, 0);
@@ -1993,6 +2148,7 @@ void main() {
           started = true;
         }
         const pg = mirror.program;
+        applyCutaway(pg, rec.geometry);
         gl.activeTexture(gl.TEXTURE4);
         if (bodyActive) {
           if (!rec.rippleBodyTexture) {
@@ -2045,6 +2201,18 @@ void main() {
     };
     const render = (root, camera, opts = {}) => {
       if (lost || !pollPrograms()) return false;
+      cutawayMaxY = opts.cutawayMaxY ?? 1e6;
+      cutawayFade = Math.max(0, Math.min(1, Number.isFinite(opts.cutawayFade) ? opts.cutawayFade : opts.birdsEyeCutaway ? 1 : 0));
+      cutawayCloudY = opts.cutawayCloudY || 0;
+      cutawayCloudMix = Math.max(0, Math.min(1, opts.cutawayCloudMix || 0));
+      cutawayCount = Math.min(8, opts.cutawayRegionCount || 0);
+      cutawayFrame++;
+      for (let i = 0; i < cutawayCount; i++) {
+        const r = opts.cutawayRegions[i], o = i * 4;
+        cutawayRegions[o] = r.x; cutawayRegions[o + 1] = r.z; cutawayRegions[o + 2] = r.cos; cutawayRegions[o + 3] = r.sin;
+        cutawayBounds[o] = r.halfWidth; cutawayBounds[o + 1] = r.halfDepth; cutawayBounds[o + 2] = r.y;
+        cutawayBounds[o + 3] = Math.max(0, Math.min(1, r.mix === undefined ? 1 : r.mix));
+      }
       const {
         light = DEFAULT_LIGHT,
         sky = DEFAULT_SKY,
@@ -2081,7 +2249,7 @@ void main() {
       const skyOn = !!(horizon && zenith);
       const nLights = lights ? Math.min(lightCount, settings.lights) : 0;
       mat4.lookAt(view, camera.position, camera.target, camera.up || UP);
-      mat4.perspective(proj, camera.fov, width / height, camera.near, camera.far);
+      BL.scene.cameraProjection(proj, camera, width / height);
       mat4.multiply(viewProj, proj, view);
       extractFrustum(viewProj);
       const llen = Math.hypot(light.x, light.y, light.z) || 1;
@@ -2168,6 +2336,31 @@ void main() {
           }
         }
       }
+      const viewActor = opts.beforeView?.();
+      if (viewActor) {
+        // Mirror and shadow buffers already hold the world pose. Refresh only
+        // the changed actor instances for the player's camera pass.
+        updateWorld(viewActor.root, viewActor.root.parent?.world || null);
+        try {
+          for (const node of viewActor.gunViewNodes) {
+            if (!node.visible || !node.geometry) continue;
+            const rec = records.get(node.geometry);
+            if (!rec || !rec.active) continue;
+            writeCullSphere(node);
+            if (hiddenFromCamera(node) || !nodeInFrustum(node, FRUSTUM)) continue;
+            for (let i = rec.drawCount; i < rec.count; i++) {
+              if (rec.nodes[i] !== node) continue;
+              rec.nodes[i] = rec.nodes[rec.drawCount];
+              rec.nodes[rec.drawCount++] = node;
+              break;
+            }
+          }
+          for (const rec of activeRecords) uploadInstances(rec);
+        } finally {
+          opts.afterView?.();
+          updateWorld(viewActor.root, viewActor.root.parent?.world || null);
+        }
+      }
       gl.bindFramebuffer(gl.FRAMEBUFFER, f.scene);
       gl.viewport(0, 0, pw, ph);
       gl.clearColor(clear[0], clear[1], clear[2], 1);
@@ -2177,6 +2370,7 @@ void main() {
       gl.uniformMatrix4fv(pg.mesh.u.uViewProj, false, viewProj);
       gl.uniformMatrix4fv(pg.mesh.u.uLightViewProj, false, lightViewProj);
       gl.uniform3f(pg.mesh.u.uEye, camera.position.x, camera.position.y, camera.position.z);
+      applyViewDirection(pg.mesh, proj, view);
       gl.uniform3f(pg.mesh.u.uLightDir, lx, ly, lz);
       gl.uniform3fv(pg.mesh.u.uSky, sky);
       gl.uniform3fv(pg.mesh.u.uGround, ground);
@@ -2260,13 +2454,14 @@ void main() {
     // Screen position of a world point, written into out.
     const project = (x, y, z, out = {}) => {
       mat4.transformPoint4(P4, viewProj, x, y, z);
-      if (P4[3] <= 0.01) return null;
+      const depth = view[2] * x + view[6] * y + view[10] * z + view[14];
+      if (P4[3] <= 0.01 || depth >= -0.01) return null;
       out.x = (P4[0] / P4[3] * 0.5 + 0.5) * width;
       out.y = (0.5 - P4[1] / P4[3] * 0.5) * height;
-      out.depth = -P4[3];
+      out.depth = depth;
       return out;
     };
-    const ray = (px, py, camera, out) => mat4.rayFromView(out, view, width, height, camera.fov, camera.position, px, py);
+    const ray = (px, py, camera, out) => mat4.rayFromView(out, view, width, height, camera.fov, camera.position, px, py, camera.orthoMix, camera.orthoHeight);
     const setQuality = (name) => {
       if (!QUALITY[name] || QUALITY[name] === settings) return;
       settings = QUALITY[name];

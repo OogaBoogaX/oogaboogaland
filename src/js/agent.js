@@ -296,17 +296,25 @@
     const v = torsoVox(rand);
     for (const [key] of v.map) {
       const [x, y, z] = key.split(",").map(Number);
-      if (!(z >= 5 && x >= 3 && x <= 6)) v.map.set(key, z < 1 ? 13 : 12);
+      if (!(z >= 5 && x >= 3 && x <= 6)) v.map.set(key, 12);
     }
-    // The open coat, folded collar, blue pocket and dark buttons remain
-    // part of the cached torso mesh, so they follow every bend of the body.
-    v.fill(0, 9, -1, 0, 0, 3, 13);
+    // A tapered wraparound hem joins the white back, sides and front panels
+    // into one coat while leaving the center open over the chest.
+    for (let y = -2; y <= 1; y++) {
+      const inset = y === -2 ? 1 : 0, left = inset, right = 9 - inset;
+      for (let x = left; x <= right; x++) for (let z = 0; z <= 6; z++) {
+        if (z === 6 && x >= 3 && x <= 6) continue;
+        if ((x === left || x === right) && (z === 0 || z === 6)) continue;
+        v.set(x, y, z, 12);
+      }
+    }
+    // The open coat, folded collar and blue pocket remain part of the cached
+    // torso mesh, so they follow every bend of the body.
     for (let y = 6; y <= 10; y++) {
       const x = y > 8 ? 2 : 3;
-      v.set(x, y, 6, 13); v.set(9 - x, y, 6, 13);
+      v.set(x, y, 6, 12); v.set(9 - x, y, 6, 12);
     }
     v.fill(1, 2, 4, 5, 7, 7, 14);
-    v.set(6, 3, 7, 14); v.set(6, 1, 7, 14);
     return v;
   };
   const labArmVox = (rand) => {
@@ -416,7 +424,7 @@
       charge: 0, poundCharge: 0, dragging: false, takeoff: 0, landing: 0, crouch: 0, roll: 0, rollBlend: 0, rollAngle: 0, rollTarget: 0,
       smash: false, hipOffsetZ: 0, sideAngle: 0,
       climb: 0, climbBlend: 0, climbPose: NaN, climbStride: 0, climbDirection: 0, mantle: 0,
-      groom: 0, groomBlend: 0, groomSide: 1, groomTime: 0,
+      groom: 0, groomBlend: 0, groomSide: 1, groomTime: 0, sitLook: 0, sitShift: 0,
       lab: false, labWork: "", labPhase: 0, labSide: 1, labReach: 0, labReachGrip: geos.labFlask.labGripY, labPreviewItem: false, labSqueeze: false, labDie: false, labRoll: 0,
       labPalmLift: 0, labBench: null, labTouchArm: false, labTouchSide: 1,
       labArmOffsetX: 0, labArmOffsetY: 0, labArmOffsetZ: 0
@@ -606,12 +614,15 @@
       }
       const crouch = managed ? state.crouch : 0, rolling = managed ? state.rollBlend : 0, climbing = managed ? state.climbBlend : 0;
       const cresting = managed && state.climb ? 4 * state.mantle * (1 - state.mantle) : 0;
-      const grooming = lounge === "sit" ? state.groomBlend : 0, climbPhase = managed ? state.climbStride / 1.2 : 0;
-      // Long still intervals with a small, slow glance or free-hand adjustment.
-      // Spatial phase keeps neighbours from moving together; support arms stay planted.
+      const grooming = lounge === "sit" ? state.groomBlend : 0, sitLook = lounge === "sit" ? state.sitLook : 0;
+      const sitShift = lounge === "sit" ? state.sitShift : 0, climbPhase = managed ? state.climbStride / 1.2 : 0;
+      // Seated rests have frequent, gentle glances and alternating hand lifts.
+      // Spatial phase keeps neighbours from moving together; other reclining
+      // poses keep their longer pauses and their supporting arms planted.
       const restTime = state.groomTime + root.position.x * 0.61 + root.position.z * 0.37;
-      const restCycle = ((restTime % 27) + 27) % 27;
-      const restMotion = lounge && restCycle > 20 ? Math.sin((restCycle - 20) * Math.PI / 7) ** 2 * (1 - grooming) : 0;
+      const restPeriod = lounge === "sit" ? 9 : 27, restPause = lounge === "sit" ? 2 : 20;
+      const restCycle = ((restTime % restPeriod) + restPeriod) % restPeriod;
+      const restMotion = lounge && restCycle > restPause ? Math.sin((restCycle - restPause) * Math.PI / 7) ** 2 * (1 - grooming) : 0;
       const jumping = managed && state.air, takeoff = managed ? state.takeoff : 0;
       const laboratory = managed && state.lab && !lounge && !jumping && !rolling && !climbing && state.pound <= 0 && !state.poundCharge && !state.charge;
       const labWork = laboratory ? state.labWork : "";
@@ -638,7 +649,7 @@
         pitch = state.smash ? 1.02 - 0.86 * poundLift : 1.02 - 0.36 * poundLift;
         state.pound = Math.max(0, state.pound - dt);
       }
-      if (lounge) { pitch = reclining ? 0 : leaning ? -0.46 : -0.18 + grooming * 0.12; bob = 0; }
+      if (lounge) { pitch = reclining ? 0 : leaning ? -0.46 : -0.18 + grooming * 0.12 + Math.abs(sitShift) * 0.07; bob = 0; }
       // A loaded crouch compresses both pairs of limbs, then the takeoff extends
       // them before the airborne tuck. Landing absorbs the impact the same way.
       if (crouch > 0) { pitch += (1.12 - pitch) * crouch; bob *= 1 - crouch; }
@@ -651,8 +662,9 @@
         // Settle the pelvis between the bent thighs instead of holding the
         // whole torso above them on straight arms. A one-hand lean also moves
         // its weight toward that hand; the other hand stays near the lap.
-        chest.position.y = damp(chest.position.y, lounge === "sit" ? -0.324 : leaning ? -0.35 : -0.08 * cresting, cresting ? 16 : 6, dt);
-        chest.rotation.z = damp(chest.rotation.z, leaning ? -leanSide * 0.08 : 0, 6, dt);
+        chest.position.x = damp(chest.position.x, sitShift * 0.035, 5, dt);
+        chest.position.y = damp(chest.position.y, lounge === "sit" ? -0.324 + Math.abs(sitShift) * 0.018 : leaning ? -0.35 : -0.08 * cresting, cresting ? 16 : 6, dt);
+        chest.rotation.z = damp(chest.rotation.z, leaning ? -leanSide * 0.08 : -sitShift * 0.065, 6, dt);
       }
       const o = OFFSETS[state.gait];
       // Arms hang straight down in the world whatever the chest's lean; the swing reaches forward and back.
@@ -677,7 +689,7 @@
           leg.position.y = damp(leg.position.y, Math.max(0, -climbStroke) * 0.09 * climbing, 18, dt);
           leg.position.z = damp(leg.position.z, (0.424 + climbStroke * 0.034) * climbing, 20, dt);
         }
-        let legAngle = lounge ? onSide ? -0.42 : reclining ? 0.1 : leaning ? leanSide ? -1.1 : -1.14 : -1.28 : jumping ? 0.7 - takeoff * 0.85 : o ? -(squeeze ? 0.1 : labSqueeze ? 0.16 : g.legs) * moving * wave(state.phase, o[l.leg]) : 0;
+        let legAngle = lounge ? onSide ? -0.42 : reclining ? 0.1 : leaning ? leanSide ? -1.1 : -1.14 : -1.28 + l.side * sitShift * 0.1 : jumping ? 0.7 - takeoff * 0.85 : o ? -(squeeze ? 0.1 : labSqueeze ? 0.16 : g.legs) * moving * wave(state.phase, o[l.leg]) : 0;
         legAngle += (-1.2 - legAngle) * crouch;
         legAngle += (-0.6 - legAngle) * rolling;
         legAngle += (-0.28 + 0.06 * climbStroke - legAngle) * climbing;
@@ -697,8 +709,9 @@
           const pick = Math.sin(state.groomTime * 10.5), reach = -0.9 + pick * 0.055;
           // The free hand rests near the bent knee. Matching its old angle to
           // the reclined chest left it pointing almost horizontally in midair.
-          const rest = (leaning ? supporting ? -state.pitch + 1 : -0.55 : onSide ? lower ? -2.3 : -1.08 : reclining ? -0.08 : -state.pitch - 0.801)
-            + (supporting ? 0 : Math.sin(restTime * 0.8 + i) * 0.045 * restMotion);
+          const rest = (leaning ? supporting ? -state.pitch + 1 : -0.55 : onSide ? lower ? -2.3 : -1.08 : reclining ? -0.08 : -state.pitch - 0.801 + l.side * sitShift * 0.1)
+            + (lounge === "sit" ? -0.075 * Math.max(0, Math.sin(restTime * 0.9 + i * Math.PI)) * restMotion
+              : supporting ? 0 : Math.sin(restTime * 0.8 + i) * 0.045 * restMotion);
           limb(arm, rest + (reach - rest) * groomArm, dt);
           const restSide = leaning ? supporting ? l.side * 0.18 : -l.side * 0.12 : onSide ? lower ? -l.side * 0.2 : -l.side * 0.55 : reclining ? l.side * 0.18 : -l.side * 0.12;
           arm.rotation.z = damp(arm.rotation.z, restSide + (l.side * 0.6 - restSide) * groomArm, 12, dt);
@@ -774,8 +787,8 @@
       parts.head.rotation.x = -state.pitch * (state.gait === "beat" ? 1.15 : 0.85);
       if (managed) {
         parts.head.rotation.x += (-0.04 - state.climbDirection * 0.16 - parts.head.rotation.x) * climbing;
-        parts.head.rotation.x += Math.sin(restTime * 0.65) * 0.055 * restMotion;
-        parts.head.rotation.y = damp(parts.head.rotation.y, state.groomSide * 0.36 * grooming + Math.sin(restTime * 0.5) * 0.16 * restMotion, 8, dt);
+        parts.head.rotation.x += Math.sin(restTime * 0.65) * 0.055 * restMotion - Math.abs(sitLook) * 0.065;
+        parts.head.rotation.y = damp(parts.head.rotation.y, state.groomSide * 0.36 * grooming + Math.sin(restTime * 0.5) * 0.16 * restMotion + sitLook * 0.3 + sitShift * 0.12, 8, dt);
         if (labWork) {
           parts.head.rotation.x = labWork === "type" || labWork === "roll" ? 0.22 : labWork === "carry" ? 0.08 : -0.08;
           parts.head.rotation.y = labWork === "touch" ? state.labSide * 0.12 : Math.sin(state.labPhase * 0.7) * 0.05;
@@ -1016,6 +1029,8 @@
       state.climbDirection = motion ? clamp(motion.climbDirection || 0, -1, 1) : 0;
       state.mantle = motion ? clamp(motion.mantle || 0, 0, 1) : 0;
       state.groom = motion && lounge === "sit" && state.speed <= 0.1 && !airborne && !state.roll && !state.climb ? clamp(motion.groom || 0, 0, 1) : 0;
+      state.sitLook = motion && lounge === "sit" ? clamp(motion.sitLook || 0, -1, 1) : 0;
+      state.sitShift = motion && lounge === "sit" ? clamp(motion.sitShift || 0, -1, 1) : 0;
       const groomSide = motion && motion.groomSide < 0 ? -1 : 1;
       if (groomSide !== state.groomSide) {
         // A neighbour changing sides first releases the old hand. Switching the

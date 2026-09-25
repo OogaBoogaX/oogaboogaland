@@ -49,7 +49,7 @@
     const pick = (px, py, ignoreCave = null, currentView = false) => {
       if (currentView) {
         BL.math.mat4.lookAt(aimView, camera.position, camera.target, camera.up || aimUp);
-        BL.math.mat4.rayFromView(ray, aimView, renderer.size.width, renderer.size.height, camera.fov, camera.position, px, py);
+        BL.math.mat4.rayFromView(ray, aimView, renderer.size.width, renderer.size.height, camera.fov, camera.position, px, py, camera.orthoMix, camera.orthoHeight);
       } else renderer.ray(px, py, camera, ray);
       let best = null, bestT = Infinity, bestPriority = -Infinity;
       for (const t of targets) {

@@ -35,14 +35,28 @@
     mesh = { vertices, indices: new Uint32Array(indices), order: new Uint32Array(order), nodes };
     meshes.set(geometry, mesh); return mesh;
   };
-  const create = ({ root, renderer, camera, occluded = null }) => {
+  const create = ({ root, renderer, camera, occluded = null, renderOpts = null }) => {
     let records = new WeakMap(), memo = new WeakMap();
     const active = [], candidates = [], view = mat4.create(), nextView = mat4.create(), stack = new Int32Array(64);
     const clipA = new Float64Array(VERTICES * 4), clipB = new Float64Array(VERTICES * 4), projected = new Float64Array(VERTICES * 2);
     const insideA = new Float64Array(VERTICES * 2), insideB = new Float64Array(VERTICES * 2), outside = new Float64Array(VERTICES * 2);
     const fragments = new Float64Array(FRAGMENTS * VERTICES * 2), counts = new Uint8Array(FRAGMENTS);
     let frame = 0, viewVersion = 0, candidateCount = 0, prepared = false, width = 1, height = 1, tanX = 1, tanY = 1, invTanX = 1, invTanY = 1, sideX = 1, sideY = 1, near = 0.1, far = 1000;
+    let orthoMix = 0, perspective = 1, projectionOffset = 0;
+    const ray = { ox: 0, oy: 0, oz: 0, dx: 0, dy: 0, dz: 0 };
+    const projectionDepth = depth => perspective * depth + projectionOffset;
     let planeA = 0, planeB = 0, planeC = 0, witnessX = 0, witnessY = 0, hitEntry = null, hitTriangle = 0, hitDepth = 0;
+    let hitX = 0, hitY = 0, hitZ = 0;
+    const retained = (geometry, x, y, z) => {
+      if (!renderOpts || geometry.cutawayPreserve) return true;
+      if (y > (renderOpts.cutawayMaxY ?? Infinity)) return false;
+      const regions = renderOpts.cutawayRegions, count = Math.min(8, renderOpts.cutawayRegionCount || 0);
+      for (let i = 0; i < count; i++) {
+        const r = regions[i], dx = x - r.x, dz = z - r.z;
+        if (y > r.y && Math.abs(dx * r.cos - dz * r.sin) < r.halfWidth && Math.abs(dx * r.sin + dz * r.cos) < r.halfDepth) return false;
+      }
+      return true;
+    };
     const belongs = (node, owner) => {
       for (let parent = node; parent; parent = parent.parent) if (parent === owner) return true;
       return false;
@@ -61,14 +75,16 @@
       let entry = list[index];
       if (!entry) { entry = { node, inverse: mat4.create(), camera: mat4.create(), world: mat4.create(), bounds: null, geometry: null, instanceData: null, instanceVersion: -1, frame: -1, viewVersion: -1, minX: -Infinity, minY: -Infinity, maxX: Infinity, maxY: Infinity, minDepth: 0, inFrustum: false, orientation: 1, radius: 0, x: 0, y: 0, z: 0, inverseDirty: true, projectionDirty: true, localMinY: -Infinity }; list[index] = entry; }
       const geometry = node.geometry, w = entry.world;
-      let changed = entry.geometry !== geometry;
+      const cloudOffset = node.matrixCloud && renderOpts ? Math.min(0, (renderOpts.cutawayCloudY || 0) - world[offset + 13]) * (renderOpts.cutawayCloudMix || 0) : 0;
+      let changed = entry.geometry !== geometry || entry.cloudOffset !== cloudOffset;
       // Instanced batches publish the same version used by GPU uploads. An
       // unchanged batch needs no repeated matrix comparison for each banana.
       const batchUnchanged = instance >= 0 && node.instanceVersion !== undefined && entry.instanceData === world && entry.instanceVersion === node.instanceVersion;
-      if (!batchUnchanged) for (let i = 0; !changed && i < 16; i++) changed = w[i] !== world[offset + i];
+      if (!batchUnchanged) for (let i = 0; !changed && i < 16; i++) changed = w[i] !== (i === 13 && cloudOffset ? Math.fround(world[offset + i] + cloudOffset) : world[offset + i]);
       if (instance >= 0) { entry.instanceData = world; entry.instanceVersion = node.instanceVersion; }
       if (changed) {
         for (let i = 0; i < 16; i++) w[i] = world[offset + i];
+        w[13] += cloudOffset; entry.cloudOffset = cloudOffset;
         entry.geometry = geometry; entry.bounds = boundsOf(geometry); entry.inverseDirty = true;
         const determinant = w[0] * (w[5] * w[10] - w[6] * w[9]) - w[4] * (w[1] * w[10] - w[2] * w[9]) + w[8] * (w[1] * w[6] - w[2] * w[5]);
         entry.orientation = Math.abs(determinant) < 1e-12 ? 0 : Math.sign(determinant);
@@ -89,9 +105,10 @@
         // This loose sphere rejects unrelated scenery before the full camera
         // transform and exact eight-corner projection are needed.
         const radius = entry.radius + 1e-6 * Math.max(1, Math.abs(x), Math.abs(y), Math.abs(z));
-        entry.inFrustum = !(z + radius < near || z - radius > far || Math.abs(x) > z * tanX + radius * sideX || Math.abs(y) > z * tanY + radius * sideY);
+        const span = projectionDepth(z);
+        entry.inFrustum = !(z + radius < near || z - radius > far || Math.abs(x) > span * tanX + radius * sideX || Math.abs(y) > span * tanY + radius * sideY);
         if (entry.inFrustum) {
-          const front = z - radius, back = z + radius, invFront = 1 / front, invBack = 1 / back;
+          const front = z - radius, back = z + radius, invFront = 1 / projectionDepth(front), invBack = 1 / projectionDepth(back);
           entry.minX = front > near ? Math.min((x - radius) * invFront, (x - radius) * invBack) * invTanX : -Infinity;
           entry.maxX = front > near ? Math.max((x + radius) * invFront, (x + radius) * invBack) * invTanX : Infinity;
           entry.minY = front > near ? Math.min((y - radius) * invFront, (y - radius) * invBack) * invTanY : -Infinity;
@@ -117,7 +134,8 @@
         const depth = -(m[2] * bx + m[6] * by + m[10] * bz + m[14]);
         minDepth = Math.min(minDepth, depth);
         if (depth <= near) continue;
-        const px = (m[0] * bx + m[4] * by + m[8] * bz + m[12]) / (depth * tanX), py = (m[1] * bx + m[5] * by + m[9] * bz + m[13]) / (depth * tanY);
+        const span = projectionDepth(depth);
+        const px = (m[0] * bx + m[4] * by + m[8] * bz + m[12]) / (span * tanX), py = (m[1] * bx + m[5] * by + m[9] * bz + m[13]) / (span * tanY);
         minX = Math.min(minX, px); minY = Math.min(minY, py); maxX = Math.max(maxX, px); maxY = Math.max(maxY, py);
       }
       // Perspective extrema lie at box corners only when the whole box is
@@ -132,7 +150,7 @@
       if (!node.visible || node.cameraHidden) return;
       const geometry = node.geometry;
       // Smoke is translucent; guide lines and glyph effects do not cover UI.
-      if (geometry && geometry.faces && geometry.faces.length && !geometry.matrixGlyph && !node.mirrorPortal && !(node.smokeOpacity < 1)) {
+      if (geometry && geometry.faces && geometry.faces.length && !geometry.matrixGlyph && !node.mirrorPortal && !(node.smokeOpacity < 1) && !(renderOpts?.birdsEyeCutaway && geometry.cutawayHide)) {
         if (node.instanceData) {
           const data = node.instanceData, count = node.drawInstanceCount === undefined ? node.instanceCount : Math.min(node.instanceCount, node.drawInstanceCount);
           for (let i = 0; i < count; i++) if (data[i * 20 + 18] >= -1) add(node, data, i * 20, i);
@@ -144,13 +162,16 @@
       if (prepared) return;
       prepared = true; active.length = 0;
       const size = renderer.size, tangent = Math.tan(camera.fov / 2);
-      let changed = width !== size.width || height !== size.height || near !== camera.near || far !== camera.far || tanY !== tangent;
+      const mix = camera.orthoHeight > 0 ? Math.max(0, Math.min(1, camera.orthoMix || 0)) : 0;
+      const offset = mat4.projectionDepth(0, camera.fov, mix, camera.orthoHeight || 0);
+      let changed = width !== size.width || height !== size.height || near !== camera.near || far !== camera.far || tanY !== tangent || orthoMix !== mix || projectionOffset !== offset;
       mat4.lookAt(nextView, camera.position, camera.target, camera.up || UP);
       for (let i = 0; !changed && i < 16; i++) changed = view[i] !== nextView[i];
       if (changed) {
         width = size.width; height = size.height; near = camera.near; far = camera.far;
+        orthoMix = mix; perspective = 1 - mix; projectionOffset = offset;
         tanY = tangent; tanX = tanY * width / height; invTanX = 1 / tanX; invTanY = 1 / tanY;
-        sideX = Math.hypot(1, tanX); sideY = Math.hypot(1, tanY);
+        sideX = Math.hypot(1, perspective * tanX); sideY = Math.hypot(1, perspective * tanY);
         view.set(nextView); viewVersion++;
       }
       visit(root);
@@ -166,15 +187,25 @@
       return true;
     };
     const nearest = (sx, sy, depth, owner) => {
-      const vx = sx * tanX, vy = sy * tanY;
-      const dx = view[0] * vx + view[1] * vy - view[2], dy = view[4] * vx + view[5] * vy - view[6], dz = view[8] * vx + view[9] * vy - view[10];
-      const eye = camera.position; hitEntry = null; hitDepth = depth - Math.max(1e-6, depth * 1e-7);
+      let dx, dy, dz;
+      if (orthoMix) {
+        mat4.rayFromView(ray, view, width, height, camera.fov, camera.position, (sx + 1) * width / 2, (1 - sy) * height / 2, orthoMix, camera.orthoHeight);
+        // BVH distances use camera depth, while the shared picking ray is unit
+        // length. Its shifted origin remains on the camera's zero-depth plane.
+        const scale = -1 / (view[2] * ray.dx + view[6] * ray.dy + view[10] * ray.dz);
+        dx = ray.dx * scale; dy = ray.dy * scale; dz = ray.dz * scale;
+      } else {
+        const vx = sx * tanX, vy = sy * tanY;
+        dx = view[0] * vx + view[1] * vy - view[2]; dy = view[4] * vx + view[5] * vy - view[6]; dz = view[8] * vx + view[9] * vy - view[10];
+        ray.ox = camera.position.x; ray.oy = camera.position.y; ray.oz = camera.position.z;
+      }
+      hitEntry = null; hitDepth = depth - Math.max(1e-6, depth * 1e-7);
       for (let candidate = 0; candidate < candidateCount; candidate++) {
         const entry = candidates[candidate];
         if (sx < entry.minX || sx > entry.maxX || sy < entry.minY || sy > entry.maxY || entry.minDepth >= hitDepth) continue;
         if (entry.inverseDirty) { mat4.invert(entry.inverse, entry.world); entry.inverseDirty = false; }
         const m = entry.inverse;
-        const x = m[0] * eye.x + m[4] * eye.y + m[8] * eye.z + m[12], y = m[1] * eye.x + m[5] * eye.y + m[9] * eye.z + m[13], z = m[2] * eye.x + m[6] * eye.y + m[10] * eye.z + m[14];
+        const x = m[0] * ray.ox + m[4] * ray.oy + m[8] * ray.oz + m[12], y = m[1] * ray.ox + m[5] * ray.oy + m[9] * ray.oz + m[13], z = m[2] * ray.ox + m[6] * ray.oy + m[10] * ray.oz + m[14];
         const ux = m[0] * dx + m[4] * dy + m[8] * dz, uy = m[1] * dx + m[5] * dy + m[9] * dz, uz = m[2] * dx + m[6] * dy + m[10] * dz;
         if (!rayBox(entry.bounds, x, y, z, ux, uy, uz, hitDepth)) continue;
         const mesh = meshOf(entry.geometry), v = mesh.vertices, indices = mesh.indices;
@@ -192,9 +223,12 @@
             if (beta < -EPS || beta > 1 + EPS) continue;
             const qx = ty * abz - tz * aby, qy = tz * abx - tx * abz, qz = tx * aby - ty * abx, gamma = (ux * qx + uy * qy + uz * qz) / determinant;
             if (gamma < -EPS || beta + gamma > 1 + EPS) continue;
-            const t = (acx * qx + acy * qy + acz * qz) / determinant, worldY = eye.y + dy * t;
+            const t = (acx * qx + acy * qy + acz * qz) / determinant, worldY = ray.oy + dy * t;
             if (t <= near || t >= hitDepth || y + uy * t < entry.localMinY || worldY < (entry.geometry.clipMinY ?? -Infinity) || worldY > (entry.geometry.clipMaxY ?? Infinity)) continue;
+            const worldX = ray.ox + dx * t, worldZ = ray.oz + dz * t;
+            if (!retained(entry.geometry, worldX, worldY, worldZ)) continue;
             hitEntry = entry; hitTriangle = at; hitDepth = t;
+            hitX = worldX; hitY = worldY; hitZ = worldZ;
           }
         }
       }
@@ -215,7 +249,7 @@
       }
       return written;
     };
-    const projectTriangle = (entry, a, b, c) => {
+    const projectTriangle = (entry, a, b, c, blocker = false) => {
       const m = entry.camera, v = entry.geometry.verts;
       for (let i = 0; i < 3; i++) {
         const at = i === 0 ? a : i === 1 ? b : c, o = i * 4, x = v[at], y = v[at + 1], z = v[at + 2];
@@ -224,25 +258,47 @@
       }
       const ax = clipA[4] - clipA[0], ay = clipA[5] - clipA[1], az = clipA[6] - clipA[2], bx = clipA[8] - clipA[0], by = clipA[9] - clipA[1], bz = clipA[10] - clipA[2];
       const nx = ay * bz - az * by, ny = az * bx - ax * bz, nz = ax * by - ay * bx, plane = nx * clipA[0] + ny * clipA[1] + nz * clipA[2];
-      if (plane <= 1e-12) return 0;
-      planeA = nx * tanX / plane; planeB = ny * tanY / plane; planeC = nz / plane;
+      const denominator = perspective * plane + projectionOffset * nz;
+      if (denominator <= 1e-12) return 0;
+      // (1 - mix * depth) / projectedDepth is affine over a screen-space
+      // triangle and decreases with depth in both camera modes. At mix zero
+      // this is the original inverse-depth plane used by polygon subtraction.
+      const gain = perspective + orthoMix * projectionOffset;
+      planeA = gain * nx * tanX / denominator; planeB = gain * ny * tanY / denominator; planeC = (nz - orthoMix * plane) / denominator;
       let src = clipA, dst = clipB, count = 3;
       for (let side = 0; side < 9 && count >= 3; side++) {
         let a = 0, b = 0, c = 0, d = 0, constant = 0;
         if (side === 0) { c = 1; constant = -near; }
         else if (side === 1) { c = -1; constant = far; }
-        else if (side < 4) { a = side === 2 ? 1 : -1; c = tanX; }
-        else if (side < 6) { b = side === 4 ? 1 : -1; c = tanY; }
+        else if (side < 4) { a = side === 2 ? 1 : -1; c = perspective * tanX; constant = projectionOffset * tanX; }
+        else if (side < 6) { b = side === 4 ? 1 : -1; c = perspective * tanY; constant = projectionOffset * tanY; }
         else if (side === 6) { if (entry.localMinY === -Infinity) continue; d = 1; constant = -entry.localMinY; }
         else {
-          const bound = side === 7 ? entry.geometry.clipMinY : entry.geometry.clipMaxY;
-          if (bound === undefined) continue;
+          const cut = !entry.geometry.cutawayPreserve && renderOpts?.cutawayMaxY < 1e6 ? renderOpts.cutawayMaxY : Infinity;
+          const bound = side === 7 ? entry.geometry.clipMinY : Math.min(entry.geometry.clipMaxY ?? Infinity, cut);
+          if (!Number.isFinite(bound)) continue;
           const sign = side === 7 ? 1 : -1;
           a = view[4] * sign; b = view[5] * sign; c = -view[6] * sign; constant = (camera.position.y - bound) * sign;
         }
         count = clip(src, count, dst, 4, a, b, c, d, constant); const swap = src; src = dst; dst = swap;
       }
-      for (let i = 0; i < count; i++) { projected[i * 2] = src[i * 4] / (src[i * 4 + 2] * tanX); projected[i * 2 + 1] = src[i * 4 + 1] / (src[i * 4 + 2] * tanY); }
+      if (blocker && renderOpts && !entry.geometry.cutawayPreserve) for (let i = 0; i < Math.min(8, renderOpts.cutawayRegionCount || 0) && count >= 3; i++) {
+        const r = renderOpts.cutawayRegions[i], dx = hitX - r.x, dz = hitZ - r.z;
+        const u = dx * r.cos - dz * r.sin, v = dx * r.sin + dz * r.cos;
+        let nx = 0, ny = 0, nz = 0, offset = 0;
+        if (hitY <= r.y) { ny = -1; offset = r.y; }
+        else if (u >= r.halfWidth) { nx = r.cos; nz = -r.sin; offset = -r.halfWidth - nx * r.x - nz * r.z; }
+        else if (u <= -r.halfWidth) { nx = -r.cos; nz = r.sin; offset = -r.halfWidth - nx * r.x - nz * r.z; }
+        else if (v >= r.halfDepth) { nx = r.sin; nz = r.cos; offset = -r.halfDepth - nx * r.x - nz * r.z; }
+        else { nx = -r.sin; nz = -r.cos; offset = -r.halfDepth - nx * r.x - nz * r.z; }
+        // Subtract only the retained convex piece containing this witness.
+        // Other pieces get their own rays; a roof's cut-out can never be
+        // accidentally covered by subtracting its original whole triangle.
+        count = clip(src, count, dst, 4, nx * view[0] + ny * view[4] + nz * view[8], nx * view[1] + ny * view[5] + nz * view[9],
+          -nx * view[2] - ny * view[6] - nz * view[10], 0, offset + nx * camera.position.x + ny * camera.position.y + nz * camera.position.z);
+        const swap = src; src = dst; dst = swap;
+      }
+      for (let i = 0; i < count; i++) { const depth = projectionDepth(src[i * 4 + 2]); projected[i * 2] = src[i * 4] / (depth * tanX); projected[i * 2 + 1] = src[i * 4 + 1] / (depth * tanY); }
       return count;
     };
     const area = (p, count) => {
@@ -261,9 +317,10 @@
         const originalArea = area(insideA, count);
         if (count < 3 || originalArea < 1e-14) continue;
         x /= count; y /= count;
-        if (!nearest(x, y, 1 / (targetA * x + targetB * y + targetC), owner)) { witnessX = x; witnessY = y; return true; }
+        const metric = targetA * x + targetB * y + targetC, depth = (1 - projectionOffset * metric) / (perspective * metric + orthoMix);
+        if (!nearest(x, y, depth, owner)) { witnessX = x; witnessY = y; return true; }
         const mesh = meshOf(hitEntry.geometry), indices = mesh.indices;
-        const covered = projectTriangle(hitEntry, indices[hitTriangle], indices[hitTriangle + 1], indices[hitTriangle + 2]);
+        const covered = projectTriangle(hitEntry, indices[hitTriangle], indices[hitTriangle + 1], indices[hitTriangle + 2], true);
         if (covered < 3) { witnessX = x; witnessY = y; return true; }
         let src = insideA, dst = insideB, remainingArea = 0;
         // Subtract the blocker only where its plane lies in front of this
@@ -312,9 +369,10 @@
           const x = i & 1 ? b.max[0] : b.min[0], y = i & 2 ? b.max[1] : b.min[1], z = i & 4 ? b.max[2] : b.min[2];
           const depth = -(m[2] * x + m[6] * y + m[10] * z + m[14]);
           if (depth < near) continue;
-          const px = ((m[0] * x + m[4] * y + m[8] * z + m[12]) / (depth * tanX) + 1) * width / 2;
+          const span = projectionDepth(depth);
+          const px = ((m[0] * x + m[4] * y + m[8] * z + m[12]) / (span * tanX) + 1) * width / 2;
           headMinX = Math.min(headMinX, px); headMaxX = Math.max(headMaxX, px);
-          headTop = Math.min(headTop, (1 - (m[1] * x + m[5] * y + m[9] * z + m[13]) / (depth * tanY)) * height / 2);
+          headTop = Math.min(headTop, (1 - (m[1] * x + m[5] * y + m[9] * z + m[13]) / (span * tanY)) * height / 2);
         }
       }
       for (const child of node.children) projectHead(child);
