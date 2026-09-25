@@ -11,7 +11,7 @@
 (() => {
   "use strict";
   const BL = window.BL = window.BL || {};
-  const ENDPOINT = "https://oogatron.sterlingbreck.workers.dev/v2/stats";
+  const ENDPOINT = "https://oogatron.ruleswithoutrulers.com/v2/stats";
   const POLL_MS = 60000;
   const subscribers = new Set();
   const state = { enabled: false, polls: 0, failures: 0, activity: -1, contributions: 0, lastAt: 0, lastError: "" };
