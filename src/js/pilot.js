@@ -7,7 +7,7 @@
   const BASE_FOV = 48 * Math.PI / 180;
   const MAX_FOV = 64 * Math.PI / 180;
   const MIN_HFOV = 58 * Math.PI / 180;
-  const YAW_RATE = 1.7, PITCH_RATE = 1.1;
+  const YAW_RATE = 1.7, PITCH_RATE = 1.1, DIRECT_VIEW_RATE = 28;
   // Trailing pitch stops 1e-4 short of +-PI/2 so the vertical view keeps a horizontal part and retains its yaw.
   const TRAILING_PITCH = [-Math.PI / 2 + 1e-4, Math.PI / 2 - 1e-4];
   const CLOSE_RATE = 12, CLOSE_SNAP = 0.001, CLOSE_PINCH_EXIT = 1.08, CLOSE_LOOK_DIST = 4;
@@ -1955,14 +1955,16 @@
       const planted = shoulderCombat && !!a.sprint;
       const moveX = planted ? 0 : a.x, moveY = planted ? 0 : a.y;
       if (restoredPose) {
-        if (a.x || a.y || a.up || a.yaw || a.pitch || birdsEye() && a.orbitYaw) resumePose();
+        if (a.x || a.y || a.up || a.yaw || a.pitch || a.orbitYaw) resumePose();
         else return;
       }
       if (aimView()) {
-        if (a.x || a.y || a.up || a.yaw || a.pitch) releaseCursorAim();
-        if (lying) moveLyingView(a.yaw * YAW_RATE * dt, a.pitch * PITCH_RATE * dt);
+        // Armed, the controls keep Q/E off the look axis (birds-eye orbits with them); aiming views turn with them here.
+        const turn = clamp(a.yaw + a.orbitYaw, -1, 1);
+        if (a.x || a.y || a.up || turn || a.pitch) releaseCursorAim();
+        if (lying) moveLyingView(turn * YAW_RATE * dt, a.pitch * PITCH_RATE * dt);
         else {
-          orbit.yaw = orbit.tYaw += a.yaw * YAW_RATE * dt;
+          orbit.yaw = orbit.tYaw += turn * YAW_RATE * dt;
           orbit.pitch = orbit.tPitch = clamp(orbit.tPitch + a.pitch * PITCH_RATE * dt, TRAILING_PITCH[0], TRAILING_PITCH[1]);
         }
         if (armed()) poseAim();
@@ -2349,7 +2351,8 @@
           closeVelocity = 0;
         }
       } else closeMix = closeVelocity = 0;
-      orbit.yaw = directTrailingView ? orbit.tYaw : damp(orbit.yaw, orbit.tYaw, 14, dt);
+      // Direct drags and held keys ease fast rather than land as sent, so uneven input per frame cannot judder.
+      orbit.yaw = damp(orbit.yaw, orbit.tYaw, directTrailingView ? DIRECT_VIEW_RATE : 14, dt);
       if (carryExitMode && cave && !closeWanted) {
         zoomPitchVelocity = 0;
       } else if (zoomTilt && cave && !closeWanted && !directTrailingView) {
@@ -2357,7 +2360,7 @@
         orbit.pitch = orbit.tPitch + (delta + impulse) * decay;
         zoomPitchVelocity = (zoomPitchVelocity - 14 * impulse) * decay;
       } else {
-        orbit.pitch = directTrailingView ? orbit.tPitch : damp(orbit.pitch, orbit.tPitch, 14, dt);
+        orbit.pitch = damp(orbit.pitch, orbit.tPitch, directTrailingView ? DIRECT_VIEW_RATE : 14, dt);
         zoomPitchVelocity = 0;
       }
       if (cave && close && !sleeping && !rolling) crew.look(orbit.yaw + Math.PI, orbit.pitch, closeMix);

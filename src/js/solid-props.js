@@ -52,8 +52,19 @@
     const entries = [], registered = new Map(), transforms = new WeakMap(), stack = new Int32Array(64), triangle = new Float64Array(9), query = new Float64Array(6);
     const clipA = new Float64Array(15), clipB = new Float64Array(15);
     let shoulderPolygons = new Float64Array(0), shoulderAcross = new Float64Array(0), shoulderSeen = new Uint8Array(0), shoulderQueue = new Int32Array(0);
-    const stats = { nodes: 0, active: 0, transforms: 0, triangles: 0, queries: 0, triangleTests: 0 };
+    const stats = { nodes: 0, active: 0, transforms: 0, triangles: 0, queries: 0, triangleTests: 0, candidates: 0 };
     let generation = 0;
+    // Broad phase: a uniform XZ grid of entry indices over the union of entry boxes, rebuilt by counting sort
+    // (so every cell lists ascending indices) on the first query after the entry list changes or a box leaves
+    // the cells it was listed in. GRID_CELL (2 m) is about a hub prop's footprint or a few gorilla parts; it
+    // doubles until the union fits in GRID_CELLS. Entries spanning more than GRID_WIDE cells (island shells,
+    // bridges) or with a non-finite box are candidates for every query until the next rebuild. Queries visit
+    // candidates in registration order, so hits and tie-breaks match a full scan; an unbounded footprint or one
+    // covering more cells than there are entries scans all.
+    const GRID_CELL = 2, GRID_CELLS = 4096, GRID_WIDE = 16, GRID_PAD = 1e-5, GRID_SORT = 32;
+    let gridDirty = true, gridX = 0, gridZ = 0, gridSize = GRID_CELL, gridW = 0, gridD = 0, spanX0 = 0, spanX1 = 0, spanZ0 = 0, spanZ1 = 0;
+    let wideCount = 0, queryStamp = 0, cellItems = new Int32Array(64), wide = new Int32Array(64), candidates = new Int32Array(64), stamps = new Int32Array(64);
+    const cellStart = new Int32Array(GRID_CELLS + 1), cellFill = new Int32Array(GRID_CELLS);
     // Refresh only registered meshes and their ancestors, once per sync; the scene's normal render traversal
     // handles every unrelated node.
     const refreshWorld = (node) => {
@@ -85,8 +96,8 @@
               shoulderAcross = new Float64Array(count * 2);
               shoulderSeen = new Uint8Array(count); shoulderQueue = new Int32Array(count);
             }
-            const entry = { node, geometry, world: mat4.create(), inverse: mat4.create(), box: new Float64Array(6), active: false, initialized: false, orientation: 1, shoulderOnly };
-            entries.push(entry); registered.set(node, entry);
+            const entry = { node, geometry, world: mat4.create(), inverse: mat4.create(), inverseStale: true, box: new Float64Array(6), span: new Int32Array(4), active: false, initialized: false, orientation: 1, shoulderOnly };
+            entries.push(entry); registered.set(node, entry); gridDirty = true;
             stats.triangles += geometry.triangles.length / 3;
           }
         }
@@ -97,7 +108,7 @@
     const remove = (root) => {
       for (let i = entries.length - 1; i >= 0; i--) if (belongs(entries[i].node, root)) {
         stats.triangles -= entries[i].geometry.triangles.length / 3;
-        registered.delete(entries[i].node); entries.splice(i, 1);
+        registered.delete(entries[i].node); entries.splice(i, 1); gridDirty = true;
       }
       stats.nodes = entries.length;
     };
@@ -115,7 +126,8 @@
           // Opening crates can collapse their scale to zero before removal (|determinant| < 1e-12).
           if (Math.abs(determinant) < 1e-12) { entry.active = false; continue; }
           entry.orientation = determinant < 0 ? -1 : 1;
-          entry.world.set(world); mat4.invert(entry.inverse, world); entry.initialized = true;
+          // Animated parts move every frame; invert only when a query first needs the new pose.
+          entry.world.set(world); entry.inverseStale = true; entry.initialized = true;
           const box = entry.geometry.nodes[0].box;
           const x = (box[0] + box[3]) / 2, y = (box[1] + box[4]) / 2, z = (box[2] + box[5]) / 2;
           const hx = (box[3] - box[0]) / 2, hy = (box[4] - box[1]) / 2, hz = (box[5] - box[2]) / 2;
@@ -124,12 +136,97 @@
             const reach = Math.abs(world[axis]) * hx + Math.abs(world[axis + 4]) * hy + Math.abs(world[axis + 8]) * hz;
             entry.box[axis] = center - reach; entry.box[axis + 3] = center + reach;
           }
+          if (!gridDirty && !keepsCells(entry)) gridDirty = true;
         }
         stats.active++;
       }
     };
+    const spanOf = (x0, z0, x1, z1) => {
+      spanX0 = Math.max(0, Math.floor((x0 - gridX) / gridSize)); spanX1 = Math.min(gridW - 1, Math.floor((x1 - gridX) / gridSize));
+      spanZ0 = Math.max(0, Math.floor((z0 - gridZ) / gridSize)); spanZ1 = Math.min(gridD - 1, Math.floor((z1 - gridZ) / gridSize));
+      return spanX0 > spanX1 || spanZ0 > spanZ1 ? 0 : (spanX1 - spanX0 + 1) * (spanZ1 - spanZ0 + 1);
+    };
+    // span is the entry's cell range at the last rebuild; -1 marks a wide entry, -2 one sync had not yet boxed.
+    const keepsCells = (entry) => {
+      const span = entry.span, box = entry.box;
+      return span[0] === -1 || span[0] >= 0 && Math.floor((box[0] - gridX) / gridSize) === span[0] && Math.floor((box[3] - gridX) / gridSize) === span[1]
+        && Math.floor((box[2] - gridZ) / gridSize) === span[2] && Math.floor((box[5] - gridZ) / gridSize) === span[3];
+    };
+    // Initialized entries only: an entry is active only after sync has written its first box.
+    const bucketed = (entry) => entry.initialized && entry.box[3] - entry.box[0] < Infinity && entry.box[5] - entry.box[2] < Infinity;
+    const rebuild = () => {
+      gridDirty = false; wideCount = gridW = gridD = 0;
+      if (entries.length > stamps.length) {
+        let size = stamps.length;
+        while (size < entries.length) size *= 2;
+        wide = new Int32Array(size); candidates = new Int32Array(size); stamps = new Int32Array(size); queryStamp = 0;
+      }
+      let minX = Infinity, minZ = Infinity, maxX = -Infinity, maxZ = -Infinity;
+      for (const entry of entries) if (bucketed(entry)) {
+        minX = Math.min(minX, entry.box[0]); maxX = Math.max(maxX, entry.box[3]);
+        minZ = Math.min(minZ, entry.box[2]); maxZ = Math.max(maxZ, entry.box[5]);
+      }
+      if (minX <= maxX) {
+        gridX = minX; gridZ = minZ; gridSize = GRID_CELL;
+        while ((Math.floor((maxX - minX) / gridSize) + 1) * (Math.floor((maxZ - minZ) / gridSize) + 1) > GRID_CELLS) gridSize *= 2;
+        gridW = Math.floor((maxX - minX) / gridSize) + 1; gridD = Math.floor((maxZ - minZ) / gridSize) + 1;
+      }
+      const cells = gridW * gridD;
+      cellStart.fill(0, 0, cells + 1);
+      for (let i = 0; i < entries.length; i++) {
+        const entry = entries[i], box = entry.box, span = entry.span;
+        span[0] = -2;
+        if (!entry.initialized) continue;
+        if (!bucketed(entry) || spanOf(box[0], box[2], box[3], box[5]) > GRID_WIDE) { span[0] = -1; wide[wideCount++] = i; continue; }
+        span[0] = spanX0; span[1] = spanX1; span[2] = spanZ0; span[3] = spanZ1;
+        for (let cz = spanZ0; cz <= spanZ1; cz++) for (let cx = spanX0; cx <= spanX1; cx++) cellStart[cz * gridW + cx + 1]++;
+      }
+      for (let cell = 0; cell < cells; cell++) { cellStart[cell + 1] += cellStart[cell]; cellFill[cell] = cellStart[cell]; }
+      if (cellStart[cells] > cellItems.length) {
+        let size = cellItems.length;
+        while (size < cellStart[cells]) size *= 2;
+        cellItems = new Int32Array(size);
+      }
+      for (let i = 0; i < entries.length; i++) {
+        const span = entries[i].span;
+        if (span[0] < 0) continue;
+        for (let cz = span[2]; cz <= span[3]; cz++) for (let cx = span[0]; cx <= span[1]; cx++) cellItems[cellFill[cz * gridW + cx]++] = i;
+      }
+    };
+    // Fills candidates with every entry whose box can meet the XZ footprint, ascending; returns the count.
+    const gather = (x0, z0, x1, z1) => {
+      if (gridDirty) rebuild();
+      const n = entries.length;
+      let count = 0;
+      if (!(Math.abs(x1 - x0) < Infinity && Math.abs(z1 - z0) < Infinity)
+        || spanOf(Math.min(x0, x1) - GRID_PAD, Math.min(z0, z1) - GRID_PAD, Math.max(x0, x1) + GRID_PAD, Math.max(z0, z1) + GRID_PAD) > n) {
+        for (; count < n; count++) candidates[count] = count;
+        stats.candidates += n;
+        return n;
+      }
+      if (++queryStamp === 0x7fffffff) { stamps.fill(0); queryStamp = 1; }
+      for (; count < wideCount; count++) { stamps[wide[count]] = queryStamp; candidates[count] = wide[count]; }
+      for (let cz = spanZ0; cz <= spanZ1; cz++) for (let cx = spanX0; cx <= spanX1; cx++) {
+        for (let k = cellStart[cz * gridW + cx], end = cellStart[cz * gridW + cx + 1]; k < end; k++) {
+          const i = cellItems[k];
+          if (stamps[i] !== queryStamp) { stamps[i] = queryStamp; candidates[count++] = i; }
+        }
+      }
+      if (count > GRID_SORT) {
+        count = 0;
+        for (let i = 0; i < n; i++) if (stamps[i] === queryStamp) candidates[count++] = i;
+      } else for (let k = 1; k < count; k++) {
+        const i = candidates[k];
+        let m = k;
+        while (m > 0 && candidates[m - 1] > i) { candidates[m] = candidates[m - 1]; m--; }
+        candidates[m] = i;
+      }
+      stats.candidates += count;
+      return count;
+    };
     const overlaps = (box, x0, y0, z0, x1, y1, z1) => box[0] <= x1 + EPS && box[3] >= x0 - EPS && box[1] <= y1 + EPS && box[4] >= y0 - EPS && box[2] <= z1 + EPS && box[5] >= z0 - EPS;
     const localQuery = (entry, x0, y0, z0, x1, y1, z1) => {
+      if (entry.inverseStale) { mat4.invert(entry.inverse, entry.world); entry.inverseStale = false; }
       const m = entry.inverse, x = (x0 + x1) / 2, y = (y0 + y1) / 2, z = (z0 + z1) / 2, hx = (x1 - x0) / 2, hy = (y1 - y0) / 2, hz = (z1 - z0) / 2;
       for (let axis = 0; axis < 3; axis++) {
         const center = m[axis] * x + m[axis + 4] * y + m[axis + 8] * z + m[axis + 12];
@@ -173,8 +270,8 @@
       if (out) out.node = null;
       let best = -Infinity;
       const limit = y * direction + maxStep;
-      for (const entry of entries) {
-        const box = entry.box;
+      for (let c = 0, count = gather(x - radius, z - radius, x + radius, z + radius); c < count; c++) {
+        const entry = entries[candidates[c]], box = entry.box;
         if (!entry.active || entry.shoulderOnly || box[0] > x + radius || box[3] < x - radius || box[2] > z + radius || box[5] < z - radius || ignore && belongs(entry.node, ignore)) continue;
         const low = direction > 0 ? box[1] : Math.max(box[1], y - maxStep), high = direction > 0 ? Math.min(box[4], y + maxStep) : box[4];
         if (low > high + EPS) continue;
@@ -230,7 +327,8 @@
       stats.queries++;
       const x0 = Math.min(x - radius, toX - toRadius), x1 = Math.max(x + radius, toX + toRadius), y0 = Math.min(y, toY), y1 = Math.max(y + height, toY + toHeight),
         z0 = Math.min(z - radius, toZ - toRadius), z1 = Math.max(z + radius, toZ + toRadius);
-      for (const entry of entries) {
+      for (let c = 0, count = gather(x0, z0, x1, z1); c < count; c++) {
+        const entry = entries[candidates[c]];
         if (!entry.active || entry.shoulderOnly || !overlaps(entry.box, x0, y0, z0, x1, y1, z1) || ignore && belongs(entry.node, ignore)) continue;
         if (inside(entry, x, y + height / 2, z) || inside(entry, toX, toY + toHeight / 2, toZ)) return false;
         localQuery(entry, x0, y0, z0, x1, y1, z1);
@@ -339,7 +437,8 @@
       const margin = reach + radius, toX = x + fx * reach, toZ = z + fz * reach;
       const x0 = Math.min(x, toX) - margin, x1 = Math.max(x, toX) + margin, z0 = Math.min(z, toZ) - margin, z1 = Math.max(z, toZ) + margin;
       let best = reach + EPS;
-      for (const entry of entries) {
+      for (let c = 0, candidateCount = gather(x0, z0, x1, z1); c < candidateCount; c++) {
+        const entry = entries[candidates[c]];
         if (!entry.active || !overlaps(entry.box, x0, bottomY, z0, x1, y + height, z1)) continue;
         localQuery(entry, x0, bottomY, z0, x1, y + height, z1);
         let size = 1, count = 0, nearest = -1; stack[0] = 0;
@@ -395,7 +494,7 @@
       clearAt: (x, y, z, radius, height, ignore = null) => segmentClear(x, y, z, x, y, z, radius, height, ignore),
       supportAt: (x, z, y, maxStep = 0, radius = 0, ignore = null, out = null) => surfaceAt(x, z, y, maxStep, radius, ignore, 1, out),
       ceilingAt: (x, z, y, radius = 0, ignore = null) => surfaceAt(x, z, y, 0, radius, ignore, -1),
-      dispose() { entries.length = 0; registered.clear(); stats.nodes = stats.active = stats.transforms = stats.triangles = 0; }
+      dispose() { entries.length = 0; registered.clear(); gridDirty = true; stats.nodes = stats.active = stats.transforms = stats.triangles = 0; }
     };
   };
   BL.solidProps = { create };

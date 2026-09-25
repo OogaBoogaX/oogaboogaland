@@ -179,6 +179,13 @@
       ticker = { text, t: 0, dur, image: null, dpr: 0 };
     };
     let overlayW = 0, overlayH = 0, overlayDpr = 1;
+    // The overlay's CSS size, read on resize rather than every frame: a per-frame read forces layout after the HUD writes.
+    let cssW = overlay.clientWidth, cssH = overlay.clientHeight;
+    const sizeObserver = new ResizeObserver(() => {
+      cssW = overlay.clientWidth;
+      cssH = overlay.clientHeight;
+    });
+    sizeObserver.observe(overlay);
     const projectRaw = (x, y, z) => renderer.project(x, y, z, SCREEN);
     const project = (x, y, z) => !overlayVisible || overlayVisible(x, y, z) ? projectRaw(x, y, z) : null;
     const drawSpeech = (ctx, text, x, y, alpha, cave = null) => {
@@ -194,7 +201,7 @@
       visibility.begin();
       if (hud) hud.tooltip.beginFrame();
       const dpr = Math.min(window.devicePixelRatio || 1, 2);
-      const w = overlay.clientWidth, h = overlay.clientHeight;
+      const w = cssW, h = cssH;
       if (w !== overlayW || h !== overlayH || dpr !== overlayDpr) {
         overlayW = w;
         overlayH = h;
@@ -254,6 +261,7 @@
       while (particlePool.length > POOL_KEEP) removeChild(root, particlePool.pop().node);
     };
     const dispose = () => {
+      sizeObserver.disconnect();
       if (hud) hud.tooltip.setVisibility(null);
       visibility.dispose();
       for (const p of particles) removeChild(root, p.node);

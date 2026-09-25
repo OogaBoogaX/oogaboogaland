@@ -89,6 +89,8 @@
   let renderer, game, world, go, root, camera, hud, hooks, input, pilot, fx, agentPlay = null;
   let stations = null, unsubscribeChain = null, refreshAt = 0, leaving = false, dust = null;
   const propTargets = [];
+  // The string each head or panel was last built from: an unchanged reading keeps its geometry.
+  const printed = new Map();
 
   const fmt = (n) => gameMod.formatLarge(Math.round(n));
   // Rounded to `d` places with trailing zeros dropped: 10.0 reads 10, 10.1 stays 10.1.
@@ -113,9 +115,11 @@
     return panelFrom(ctx2d, PANEL_W, PANEL_H, PANEL_PX, PANEL_PX, PANEL_BG);
   };
 
-  // Carved headline text, centred on a slab face and replaced whole on each refresh. The cell shrinks
+  // Carved headline text, centred on a slab face and replaced whole when its reading changes. The cell shrinks
   // to fit the slab, so a long reading is set smaller rather than run off the stone.
   const setCarved = (node, text, maxWidth, color) => {
+    if (printed.get(node) === text) return;
+    printed.set(node, text);
     if (node.geometry) renderer.releaseGeometry(node.geometry);
     const cell = Math.min(HEAD_CELL, maxWidth / carveCells(text));
     const { geometry, width } = carve(text, { cell, color });
@@ -123,6 +127,9 @@
     node.position.x = -width / 2;
   };
   const setPanel = (node, ctx2d, lines) => {
+    const text = lines.map((l) => l.join("\t")).join("|");
+    if (printed.get(node) === text) return;
+    printed.set(node, text);
     if (node.geometry) renderer.releaseGeometry(node.geometry);
     node.geometry = makePanel(ctx2d, lines);
   };
@@ -406,6 +413,7 @@
     pilot.dispose();
     for (const node of propTargets) input.remove(node);
     propTargets.length = 0;
+    printed.clear();
     while (root.children.length) removeChild(root, root.children[root.children.length - 1]);
     const targets = input.targetCount;
     input.dispose();

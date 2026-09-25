@@ -621,12 +621,17 @@
     setVec(RENDER_OPTS.shadowCenter, low ? p.x : 0, low ? Math.max(0, p.y - 4) : 0, low ? p.z : 0);
     RENDER_OPTS.time = sceneTime;
   };
-  let flaringWas = false;
+  // quieted: the idle fade is scheduled once per idle stretch, and again after unlock builds the voices.
+  let flaringWas = false, quieted = false;
   const updateAudio = (dt) => {
     if (phase === "board" || phase === "results") {
-      audio.quiet();
+      if (!quieted) {
+        audio.quiet();
+        quieted = true;
+      }
       return;
     }
+    quieted = false;
     const a = audio.state, s = diver.state, pp = plane.node.position;
     a.planeSpeed = planeState.speed;
     a.planeDistance = Math.hypot(pp.x - camera.position.x, pp.y - camera.position.y, pp.z - camera.position.z);
@@ -643,7 +648,10 @@
     dhud.el.mute.setAttribute("aria-pressed", String(audio.muted));
     hud.toast(audio.muted ? "Sound off" : "Sound on");
   };
-  const onGesture = () => audio.unlock();
+  const onGesture = () => {
+    audio.unlock();
+    quieted = false;
+  };
   const updateMeter = () => {
     hud.setMeter(world.level, METER_CAPACITY, phase === "air" ? `${ringsHit} of ${RING_COUNT} rings` : "stable");
   };
@@ -703,8 +711,12 @@
       if (s.phase === "canopy") dhud.setChute(s.flaring ? "flare" : "canopy");
     } else if (phase === "down" || phase === "lost") {
       if (phase === "lost") {
-        diver.substep(dt, NO_INPUT);
-        flightTime += dt;
+        accumulator = Math.min(accumulator + dt, FIXED * MAX_SUBSTEPS);
+        while (accumulator >= FIXED) {
+          accumulator -= FIXED;
+          diver.substep(FIXED, NO_INPUT);
+          flightTime += FIXED;
+        }
       }
       if (sceneTime - landedAt > (phase === "lost" ? LOST_T : LANDED_T)) {
         const p = diver.state.p;
@@ -916,7 +928,7 @@
     dropScene.agentControls = controls;
     audio = dropAudio.create();
     // Cleared per visit: a flare held at leave would suppress the next cue.
-    flaringWas = false;
+    flaringWas = quieted = false;
     dhud.el.mute.setAttribute("aria-pressed", String(audio.muted));
     window.addEventListener("pointerdown", onGesture);
     window.addEventListener("keydown", onGesture);

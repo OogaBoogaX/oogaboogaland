@@ -135,7 +135,7 @@
         mount(shards, site.node, -1.7, 0.01, -0.2); shards.visible = state.broken;
         return;
       }
-      mount(mug, parts.armR, -0.27, -0.48 * h, 0.08 * h);
+      if (mode !== "fill" && mode !== "take") mount(mug, parts.armR, -0.27, -0.48 * h, 0.08 * h);
       if (mode === "sip" || mode === "chug") {
         const lift = smooth(t / 0.25) * (1 - smooth((t - 0.75) / 0.25));
         parts.armR.rotation.x = -0.95 - lift * 0.75; parts.armR.rotation.z = -0.2 * lift;
@@ -178,8 +178,9 @@
         mount(shards, site.node, -1.7, 0.02 + t * 0.08, -0.2); shards.scale.x = shards.scale.z = 1 - t * 0.65;
       } else if (mode === "trashwalk" || mode === "discard") {
         mount(pan, parts.armL, 0, -0.56 * h, 0.1); parts.armL.rotation.x = -1.3;
-        pan.rotation.x = 1.3; mount(shards, pan, 0, 0.03, 0);
-        if (mode === "discard") {
+        pan.rotation.x = 1.3;
+        if (mode !== "discard") mount(shards, pan, 0, 0.03, 0);
+        else {
           mount(shards, site.node, WALK_X + (STATION_X - WALK_X) * t, 0.85 + Math.sin(t * Math.PI) * 0.5, BIN_Z);
           shards.visible = t < 0.9; pan.rotation.z = -t;
         }

@@ -62,17 +62,31 @@
         return cached;
       }
       const v = geometry.verts, triangles = [], triangleBounds = [], triangleCoverFaces = [], coverFaces = [], edgeMap = new Map(), planes = new Map();
-      // Witnesses dedupe by rounded coordinates, first point kept, in insertion order; numeric keys avoid a string
-      // per vertex and sample.
-      const surfacePoints = new Map(), samplePoints = [], vertexIds = new Int32Array(v.length / 3);
+      // Witnesses dedupe by rounded coordinates, first point kept, in insertion order: an open-addressing table of
+      // id + 1 over each id's rounded key triplet, doubled at half load.
+      const samplePoints = [], vertexIds = new Int32Array(v.length / 3);
+      let sampleSlots = new Int32Array(1024), sampleKeys = new Float64Array(1536);
+      const sampleSlot = (slots, kx, ky, kz) => {
+        let h = Math.imul(kx | 0, 73856093) ^ Math.imul(ky | 0, 19349663) ^ Math.imul(kz | 0, 83492791);
+        h = Math.imul(h ^ h >>> 16, 0x85ebca6b); h ^= h >>> 13;
+        const mask = slots.length - 1;
+        let slot = h & mask;
+        for (let id = slots[slot] - 1; id >= 0 && !(sampleKeys[id * 3] === kx && sampleKeys[id * 3 + 1] === ky && sampleKeys[id * 3 + 2] === kz); id = slots[slot] - 1) slot = slot + 1 & mask;
+        return slot;
+      };
       const sample = (x, y, z) => {
-        const kx = Math.round(x / EPS), ky = Math.round(y / EPS), kz = Math.round(z / EPS);
-        let byY = surfacePoints.get(kx);
-        if (!byY) surfacePoints.set(kx, byY = new Map());
-        let byZ = byY.get(ky);
-        if (!byZ) byY.set(ky, byZ = new Map());
-        let id = byZ.get(kz);
-        if (id === undefined) { id = samplePoints.length / 3; byZ.set(kz, id); samplePoints.push(x, y, z); }
+        const kx = Math.round(x / EPS), ky = Math.round(y / EPS), kz = Math.round(z / EPS), slot = sampleSlot(sampleSlots, kx, ky, kz);
+        if (sampleSlots[slot]) return sampleSlots[slot] - 1;
+        const id = samplePoints.length / 3;
+        samplePoints.push(x, y, z);
+        if (id * 3 + 3 > sampleKeys.length) { const keys = new Float64Array(sampleKeys.length * 2); keys.set(sampleKeys); sampleKeys = keys; }
+        sampleKeys[id * 3] = kx; sampleKeys[id * 3 + 1] = ky; sampleKeys[id * 3 + 2] = kz;
+        sampleSlots[slot] = id + 1;
+        if ((id + 1) * 2 > sampleSlots.length) {
+          const slots = new Int32Array(sampleSlots.length * 2);
+          for (let n = 0; n <= id; n++) slots[sampleSlot(slots, sampleKeys[n * 3], sampleKeys[n * 3 + 1], sampleKeys[n * 3 + 2])] = n + 1;
+          sampleSlots = slots;
+        }
         return id;
       };
       for (let faceIndex = 0; faceIndex < geometry.faces.length; faceIndex++) {
@@ -232,7 +246,6 @@
         edgeLines[at] = g.ax + g.dx * t; edgeLines[at + 1] = g.ay + g.dy * t; edgeLines[at + 2] = g.az + g.dz * t;
       }
       const samples = new Float32Array(samplePoints);
-      surfacePoints.clear();
       // Face grids already place neighboring witnesses together; small contiguous bounds prove occlusion for whole
       // patches without another sorted mesh or per-frame buffers.
       const sampleBounds = new Float64Array(Math.ceil(samples.length / (SAMPLE_BLOCK * 3)) * 6);
@@ -293,7 +306,7 @@
           let entry = entries.get(node);
           if (!entry) {
             const group = groupOf(owner);
-            entry = { node, owner, group, character, geometry, hitTriangle: -1, capacity: 0, source: node.geometry, inverse: BL.math.mat4.create(), world: new Float64Array(16), visible: false, shown: false, clipMinY: -Infinity, worldMinY: -Infinity, worldMaxY: Infinity, x: 0, y: 0, z: 0, radius: 0, hx: 0, hy: 0, hz: 0, boundaryBounds: new Float64Array(4), boundaryTriangles: new Float64Array(0), boundaryBoxes: new Float64Array(0), boundaryNodes: new Float64Array(0), boundaryRay: new Float64Array(12), boundaryHits: new Int32Array([-1, -1]), boundaryGrid: null };
+            entry = { node, owner, group, character, geometry, hitTriangle: -1, capacity: 0, source: node.geometry, inverse: BL.math.mat4.create(), world: new Float64Array(16), visible: false, shown: false, clipMinY: -Infinity, worldMinY: -Infinity, worldMaxY: Infinity, x: 0, y: 0, z: 0, radius: 0, hx: 0, hy: 0, hz: 0, scaleX: 0, scaleY: 0, scaleZ: 0, centerY: 0, halfY: 0, boundsGeometry: null, boundaryBounds: new Float64Array(4), boundaryTriangles: new Float64Array(0), boundaryBoxes: new Float64Array(0), boundaryNodes: new Float64Array(0), boundaryRay: new Float64Array(12), boundaryHits: new Int32Array([-1, -1]), boundaryGrid: null };
             registered.push(entry); entries.set(node, entry); group.push(entry);
           }
           // Animated world-height planes can add one boundary per triangle and plane; reserve it at registration,
@@ -479,19 +492,25 @@
       }
       for (let n = 0; n < registered.length; n++) {
         const entry = registered[n], node = entry.node, geometry = geometries.get(node.geometry), w = node.world;
-        const scaleX = Math.hypot(w[0], w[1], w[2]), scaleY = Math.hypot(w[4], w[5], w[6]), scaleZ = Math.hypot(w[8], w[9], w[10]);
+        let worldChanged = false;
+        for (let i = 0; i < 16; i++) if (entry.world[i] !== w[i]) { worldChanged = true; entry.world[i] = w[i]; }
+        // Scale and vertical bounds follow the matrix and geometry only; visibility is still read every frame.
+        if (worldChanged) { entry.scaleX = Math.hypot(w[0], w[1], w[2]); entry.scaleY = Math.hypot(w[4], w[5], w[6]); entry.scaleZ = Math.hypot(w[8], w[9], w[10]); }
+        if (worldChanged || entry.boundsGeometry !== geometry) {
+          const b = geometry && geometry.sphere, p = b && b.center;
+          entry.centerY = b ? w[1] * p[0] + w[5] * p[1] + w[9] * p[2] + w[13] : 0;
+          entry.halfY = b ? (Math.abs(w[1]) * (b.max[0] - b.min[0]) + Math.abs(w[5]) * (b.max[1] - b.min[1]) + Math.abs(w[9]) * (b.max[2] - b.min[2])) / 2 : 0;
+          entry.boundsGeometry = geometry;
+        }
+        const scaleX = entry.scaleX, scaleY = entry.scaleY, scaleZ = entry.scaleZ, centerY = entry.centerY, halfY = entry.halfY;
         // The reflected panel opens from the bottom: its discarded pixels must not remain blockers or perception
         // witnesses after it opens.
         const reveal = node.mirror ? Math.max(0, Math.min(1, node.mirrorReveal || 0)) : 0;
         const clipMinY = reveal && geometry ? geometry.sphere.min[1] + (geometry.sphere.max[1] - geometry.sphere.min[1]) * reveal : -Infinity;
         const worldMinY = node.geometry?.clipMinY ?? -Infinity, worldMaxY = node.geometry?.clipMaxY ?? Infinity;
-        const b = geometry && geometry.sphere, p = b && b.center;
-        const centerY = b ? w[1] * p[0] + w[5] * p[1] + w[9] * p[2] + w[13] : 0;
-        const halfY = b ? (Math.abs(w[1]) * (b.max[0] - b.min[0]) + Math.abs(w[5]) * (b.max[1] - b.min[1]) + Math.abs(w[9]) * (b.max[2] - b.min[2])) / 2 : 0;
         const shown = !!geometry && centerY + halfY >= worldMinY && centerY - halfY <= worldMaxY && worldMinY <= worldMaxY && !node.mirrorPortal && reveal < 1 && scaleX * scaleY * scaleZ > 1e-12 && visible(node) && (!entry.group.provider || !entry.group.provider.includes || entry.group.provider.includes(node)), active = shown && entry.owner !== actorRoot;
         const wasActive = entry.visible, wasShown = entry.shown;
-        let moved = wasShown !== shown || entry.source !== node.geometry || entry.clipMinY !== clipMinY || entry.worldMinY !== worldMinY || entry.worldMaxY !== worldMaxY;
-        for (let i = 0; i < 16; i++) if (entry.world[i] !== w[i]) { moved = true; entry.world[i] = w[i]; }
+        const moved = worldChanged || wasShown !== shown || entry.source !== node.geometry || entry.clipMinY !== clipMinY || entry.worldMinY !== worldMinY || entry.worldMaxY !== worldMaxY;
         if (node.sightSolid && (moved || active !== wasActive) && (active || wasActive)) structuralChanged = true;
         // Both the departed and newly occupied volumes can affect cached sight rays; distant moving scenery cannot
         // invalidate either.

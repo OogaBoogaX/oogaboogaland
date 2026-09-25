@@ -484,7 +484,7 @@
     // Rebuilt per model: recent feed, org totals and org leaderboards, then
     // each active repo's summary followed by its leaderboards.
     const BOARD_TYPES = ["commits", "prs", "reviews", "comments", "issues"];
-    const cycle = () => {
+    const buildCycle = () => {
       const c = [{ name: "recent" }, { name: "totals" }];
       for (const type of BOARD_TYPES) c.push({ name: "leaderboard", params: { type } });
       for (const repo of activeRepos()) {
@@ -495,6 +495,8 @@
       }
       return c;
     };
+    let cycleViews = buildCycle();
+    const cycle = () => cycleViews;
 
     const renderBoard = () => {
       if (!model) {
@@ -518,7 +520,7 @@
     // The navigation chrome lives on the wood frame, unscaled cabinet space.
     const chromeNode = createNode({ geometry: null });
     addChild(node, chromeNode);
-    let chromeKey = "";
+    let chromeCount = -1, chromeCurrent = -1;
 
     const swapGeometry = (target, geometry, renderer) => {
       const old = target.geometry;
@@ -537,9 +539,9 @@
     const refreshChrome = (renderer) => {
       const count = cycle().length;
       const current = cycleIndex % count;
-      const key = `${count}:${current}`;
-      if (key === chromeKey) return;
-      chromeKey = key;
+      if (count === chromeCount && current === chromeCurrent) return;
+      chromeCount = count;
+      chromeCurrent = current;
       swapGeometry(chromeNode, chromeGeometryFrom(count, current), renderer);
     };
 
@@ -655,6 +657,7 @@
           return false;
         }
         model = next;
+        cycleViews = buildCycle();
         // A repo view whose repo vanished falls back inside renderRepo.
         dirty = true;
         return true;

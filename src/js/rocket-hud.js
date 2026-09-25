@@ -353,7 +353,8 @@
       }
     };
     const setGauge = (value) => {
-      el.gauge.hidden = value < 0;
+      // Checked against the element itself because show() also hides the gauge.
+      if (el.gauge.hidden !== value < 0) el.gauge.hidden = value < 0;
       if (value >= 0) setBar(el.needle, value);
     };
     let centerTimer = 0, noticeTimer = 0;

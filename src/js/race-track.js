@@ -822,7 +822,18 @@
       }
       spectators.count = count;
       if (count) {
+        // One world sphere around every stand: the figure is under 1 unit tall and hops 0.18, so 1.5 covers it.
+        let x0 = Infinity, y0 = Infinity, z0 = Infinity, x1 = -Infinity, y1 = -Infinity, z1 = -Infinity;
+        for (let i = 0; i < count; i++) {
+          x0 = Math.min(x0, spectators.x[i]); x1 = Math.max(x1, spectators.x[i]);
+          y0 = Math.min(y0, spectators.y[i]); y1 = Math.max(y1, spectators.y[i]);
+          z0 = Math.min(z0, spectators.z[i]); z1 = Math.max(z1, spectators.z[i]);
+        }
+        const cx = (x0 + x1) / 2, cy = (y0 + y1) / 2, cz = (z0 + z1) / 2;
+        let r2 = 0;
+        for (let i = 0; i < count; i++) r2 = Math.max(r2, (spectators.x[i] - cx) ** 2 + (spectators.y[i] - cy) ** 2 + (spectators.z[i] - cz) ** 2);
         spectators.node = createNode({ geometry: raceModels.spectator(def.seed % 3), instanceData: new Float32Array(SPECTATOR_CAP * 20), instanceCount: count, instanceVersion: 0, fixedInstanceCapacity: true });
+        spectators.node.cullSphere = new Float32Array([cx, cy, cz, Math.sqrt(r2) + 1.5]);
         addChild(root, spectators.node);
         geometries.push(spectators.node.geometry);
       }

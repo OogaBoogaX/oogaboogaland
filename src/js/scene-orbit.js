@@ -1501,11 +1501,17 @@
       o.lightCount = 1;
     } else o.lightCount = 0;
   };
+  // quieted: the idle fade is scheduled once per idle stretch, and again after unlock builds the voices.
+  let quieted = false;
   const updateAudio = (lit) => {
     if (phase === "build" || phase === "results") {
-      audio.quiet();
+      if (!quieted) {
+        audio.quiet();
+        quieted = true;
+      }
       return;
     }
+    quieted = false;
     const a = audio.state, s = flight.state;
     a.engine = lit;
     a.near = clamp(1.4 - Math.hypot(camera.position.x - s.p.x, camera.position.y - s.p.y, camera.position.z - s.p.z) / 160, 0.2, 1);
@@ -1838,7 +1844,10 @@
     rhud.el.mute.setAttribute("aria-pressed", String(audio.muted));
     hud.toast(audio.muted ? "Sound off" : "Sound on");
   };
-  const onGesture = () => audio.unlock();
+  const onGesture = () => {
+    audio.unlock();
+    quieted = false;
+  };
   const onKey = (e) => {
     if (e.key === "Escape") {
       if (phase === "build") go("hub");
@@ -1939,6 +1948,7 @@
     controls = controlsMod.create({ move: document.getElementById("joy-move"), look: document.getElementById("joy-look"), boost: hud.el.act, chord: ctx.canvas, onAction: act });
     orbitScene.agentControls = controls;
     audio = rocketAudio.create();
+    quieted = false;
     rhud.el.mute.setAttribute("aria-pressed", String(audio.muted));
     window.addEventListener("pointerdown", onGesture);
     window.addEventListener("keydown", onGesture);

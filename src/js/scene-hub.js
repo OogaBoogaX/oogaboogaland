@@ -148,6 +148,8 @@
   const BUILD_DEGREES = [12, 40, 66, 80, 102, 165, 195, 212, 282, 297, 312, 340];
   const BUILD_RADIUS = 13;
   const NUDGES = [0, -2, 2, -4, 4, -6, 6, -8, 8];
+  const PATH_GEOMETRY = new WeakMap();
+  const TIMECHAIN_NEAR = 25;
   const VINES = ["c5"];
   const DRESSED = new WeakMap();
   const DRESSING_LAMPS = BL.dressing.LIGHT_RGB.map(([r, g, b]) => ({ r, g, b, radius: 5.5, glow: 0.9, hide: false }));
@@ -2382,12 +2384,6 @@
       const x = node.position.x, z = node.position.z;
       addProp(kind, node, p.x + x * cos + z * sin, p.z - x * sin + z * cos, radius);
     }
-    const boards = BL.timechainBoards.create(site.node, renderer, () => { timechainVersion++; });
-    boards.entries.forEach((entry, index) => {
-      const node = entry.node, x = node.position.x, z = node.position.z;
-      const owner = addProp("timechainboard", node, p.x + x * cos + z * sin, p.z - x * sin + z * cos, 15);
-      owner.boardIndex = index; owner.weaponType = "none"; owner.pickRay = ray => boards.pickScreen(ray, index);
-    });
     presets.timechain = { yaw: p.ry, pitch: 0.03, dist: 3, target: { x: p.x, y: p.y + 4.4, z: p.z } };
     const claimGround = () => {
       claim(p.x, p.z, T.SITE.radius + 1);
@@ -2399,7 +2395,21 @@
     const beer = BL.timechainBeer.create(site);
     solids.add(beer.dispenser); solids.add(beer.cabinet); solids.add(beer.bin);
     addProp("timechainbeer", beer.mug, site.chair.position.x - 0.95, site.chair.position.z, 0.3);
-    return { site, place: p, boards, seat, beer, claimGround, hangout, residentPlaced: false };
+    return { site, place: p, boards: null, seat, beer, claimGround, hangout, residentPlaced: false };
+  };
+  // The Sphere's walls and their feed (six slow API calls, then polls, each repainting a wall) wait until the camera
+  // comes near, so a visit that never goes there never pays for them. They sit on the shell's inner face, which keeps
+  // its outline, so they stay out of the outline registry.
+  const addTimechainBoards = () => {
+    const T = timechainIsland, p = T.place, cos = Math.cos(p.ry), sin = Math.sin(p.ry);
+    const boards = BL.timechainBoards.create(T.site.node, renderer, () => { timechainVersion++; });
+    boards.entries.forEach((entry, index) => {
+      const node = entry.node, x = node.position.x, z = node.position.z;
+      node.sightHidden = entry.panel.sightHidden = true;
+      const owner = addProp("timechainboard", node, p.x + x * cos + z * sin, p.z - x * sin + z * cos, 15);
+      owner.boardIndex = index; owner.weaponType = "none"; owner.pickRay = ray => boards.pickScreen(ray, index);
+    });
+    T.boards = boards;
   };
   const spinTimechainChair = () => {
     if (timechainIsland?.seat.active) timechainIsland.beer.act("spin", timechainIsland.seat);
@@ -4206,8 +4216,11 @@
   const onChain = (snapshot) => {
     weather.apply(snapshot);
     refreshChainSign();
-    chainBoard.refresh();
-    weatherBoard.refresh();
+    // The boards' canvases only feed the dialog, and openPoolBoard repaints on open.
+    if (hud.el.board.open) {
+      chainBoard.refresh();
+      weatherBoard.refresh();
+    }
   };
   const onDonation = (donation) => {
     game.recordDonation(donation);
@@ -5691,7 +5704,7 @@
   // The Timechain Sphere's walls in the shared board dialog: a page a wall, its reading and source in the note.
   let timechainVersion = 0;
   const timechainBoard = {
-    title: "Timechain Sphere", help: "Six walls of chain data. Arrow keys flip the boards.",
+    title: "Timechain Sphere", help: "Six walls of chain data. Arrow keys flip the boards.", wide: true,
     get canvas() { return timechainIsland.boards.entries[timechainIsland.boards.index].canvas; },
     get count() { return BL.timechainData.TITLES.length; }, get index() { return timechainIsland.boards.index; },
     get caption() { return BL.timechainData.TITLES[timechainIsland.boards.index]; },
@@ -5782,6 +5795,7 @@
     if (lawn && lawn.version !== island.path.version) layLawn();
     if (life) { life.gulls.update(elapsed); life.shore.update(elapsed); life.boats.update(elapsed); }
     now = elapsed;
+    if (timechainIsland && !timechainIsland.boards && Math.hypot(camera.position.x - timechainIsland.place.x, camera.position.z - timechainIsland.place.z) < BL.timechainModels.SITE.radius + TIMECHAIN_NEAR) addTimechainBoards();
     pitGate.update();
     for (const control of pitGate.controls) {
       const angle = pitGate.on ? 0.42 : Math.PI - 0.42;
@@ -6788,7 +6802,9 @@
         halfWidth: Math.max(room.w / 2, 2.5) + 0.45, halfDepth: (front - back) / 2, y: mouth.floorY + 2.85 };
       addTerrainSection(island.cutawaySource, root, 0, region);
     }
-    const pathGeometry = { ...island.path.geometry, faces: island.path.geometry.faces.map(face => ({ ...face, matrixPermanentFallback: true, road: true })) };
+    // The path geometry never changes after the island builds; reuse its tagged copy on every visit.
+    let pathGeometry = PATH_GEOMETRY.get(island.path.geometry);
+    if (!pathGeometry) PATH_GEOMETRY.set(island.path.geometry, pathGeometry = { ...island.path.geometry, faces: island.path.geometry.faces.map(face => ({ ...face, matrixPermanentFallback: true, road: true })) });
     pathNode = createNode({ geometry: pathGeometry, instanceData: island.path.instanceData, instanceCount: 0, instanceVersion: 0, depthBias: 0.05 });
     addChild(root, pathNode);
     placed.push(pathNode);
@@ -7517,7 +7533,7 @@
     unsubscribeMempool = null;
     unsubscribeChain();
     unsubscribeChain = null;
-    timechainIsland.boards.dispose();
+    if (timechainIsland.boards) timechainIsland.boards.dispose();
     timechainIsland.beer.dispose();
     hud.closeBoard();
     if (chainSign && chainSign.node.geometry) renderer.releaseGeometry(chainSign.node.geometry);
@@ -7650,7 +7666,8 @@
     root: null, camera: null, input: null, debug: null,
     get inMotion() {
       if (cutawayRestoreTime < CUTAWAY_RESTORE_TIME) return true;
-      if (timechainIsland && (timechainIsland.seat.active || timechainIsland.seat.speed > 0)) return true;
+      // Sani sits nearly always; only a spinning chair needs full rate behind another window.
+      if (timechainIsland && timechainIsland.seat.speed > 0) return true;
       if (pile.inMotion || fx.inMotion || breakables.inMotion || weather.active || magazine && magazine.revealed || MATRIX_WORLD.active || mirrorGuides.state.doorway || mirrorCave.damage.active || mirrorCave.ripples.active || mirrorCave.body.active || entropyLab.phase.ripples.active || entropyLab.phase.body.contacts || entropyLab.phase.body.active) return true;
       for (const sign of headquarters.roomSigns) if (sign.velocity || sign.node.rotation.x) return true;
       for (let i = 0; i < matrixGates.length; i++) if (matrixCave && (matrixGates[i].raising || matrixCave.unlocked && matrixGates[i].node.position.y !== MATRIX_GATE_HIDDEN_Y)) return true;

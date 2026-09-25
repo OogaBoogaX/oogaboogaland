@@ -39,6 +39,9 @@
   const DEFAULT_MOON = { x: 0, y: -1, z: 0 };
   const DEFAULT_STAR_MATRIX = new Float32Array([1, 0, 0, 0, 1, 0, 0, 0, 1]);
   const CULL_MARGIN = 1;
+  // Frames a shadow caster must hold still before it bakes into the static shadow map; each demotion doubles a
+  // record's wait up to 32 times this, so fidgeting crew parts stop costing a rebake every few seconds.
+  const SHADOW_SETTLE = 30;
   const MIRROR_EPSILON = 1e-7;
   const UP = { x: 0, y: 1, z: 0 };
   const NORTH_UP = { x: 0, y: 0, z: -1 };
@@ -1293,6 +1296,10 @@ void main() {
     const FRUSTUM = new Float32Array(24), LIGHT_FRUSTUM = new Float32Array(24), MIRROR_FRUSTUM = new Float32Array(24);
     const CENTER = new Float32Array(3);
     let culled = 0, drawn = 0, suppressed = 0, shadowPassCount = 0, rippleSurfaces = 0, rippleWaves = 0;
+    // Static casters live in a cached depth map (res.shadow.staticFb) baked under shadowBaked; the working map
+    // starts each frame as a copy of it and takes only the moving casters.
+    let shadowFrame = 0, shadowBake = 0, shadowBakedCount = 0, shadowStaticValid = false, shadowSubset = 0, shadowDraws = 0, shadowStaticRebuilds = 0;
+    const shadowPrev = new Float32Array(16), shadowBaked = new Float32Array(16);
     const mirrorEye = { x: 0, y: 0, z: 0 };
     const mirrorTarget = { x: 0, y: 0, z: 0 };
     const mirrorUp = { x: 0, y: 1, z: 0 };
@@ -1322,7 +1329,7 @@ void main() {
       gl.attachShader(prog, v);
       gl.attachShader(prog, f);
       gl.linkProgram(prog);
-      return { prog, shaders: [v, f], uniforms: uniforms.concat(["uCutCount", "uCutRegions", "uCutBounds", "uCutawayOpacity"]), u: {}, cutFrame: -1, cutCount: -1, cutOpacity: NaN, clipMinY: NaN, clipMaxY: NaN, voxel: null, sway: 0, swing: 0 };
+      return { prog, shaders: [v, f], uniforms: uniforms.concat(["uCutCount", "uCutRegions", "uCutBounds", "uCutawayOpacity"]), u: {}, cutFrame: -1, cutCount: -1, cutOpacity: NaN, clipMinY: NaN, clipMaxY: NaN, voxel: null, sway: 0, swing: 0, matrixGlyph: NaN, matrixCave: NaN, lineWidth: NaN };
     };
     const finishProgram = (p) => {
       if (!gl.getProgramParameter(p.prog, gl.LINK_STATUS)) {
@@ -1631,27 +1638,34 @@ void main() {
       if (!s) return;
       gl.deleteTexture(s.tex);
       gl.deleteFramebuffer(s.fb);
+      gl.deleteTexture(s.staticTex);
+      gl.deleteFramebuffer(s.staticFb);
       res.shadow = null;
     };
     const buildShadow = () => {
       destroyShadow();
       const size = settings.shadow;
-      const tex = gl.createTexture();
-      gl.bindTexture(gl.TEXTURE_2D, tex);
-      gl.texStorage2D(gl.TEXTURE_2D, 1, gl.DEPTH_COMPONENT24, size, size);
-      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
-      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
-      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_COMPARE_MODE, gl.COMPARE_REF_TO_TEXTURE);
-      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_COMPARE_FUNC, gl.LEQUAL);
-      const fb = gl.createFramebuffer();
-      gl.bindFramebuffer(gl.FRAMEBUFFER, fb);
-      gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.DEPTH_ATTACHMENT, gl.TEXTURE_2D, tex, 0);
-      gl.drawBuffers([gl.NONE]);
-      gl.readBuffer(gl.NONE);
+      const target = () => {
+        const tex = gl.createTexture();
+        gl.bindTexture(gl.TEXTURE_2D, tex);
+        gl.texStorage2D(gl.TEXTURE_2D, 1, gl.DEPTH_COMPONENT24, size, size);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_COMPARE_MODE, gl.COMPARE_REF_TO_TEXTURE);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_COMPARE_FUNC, gl.LEQUAL);
+        const fb = gl.createFramebuffer();
+        gl.bindFramebuffer(gl.FRAMEBUFFER, fb);
+        gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.DEPTH_ATTACHMENT, gl.TEXTURE_2D, tex, 0);
+        gl.drawBuffers([gl.NONE]);
+        gl.readBuffer(gl.NONE);
+        return { tex, fb };
+      };
+      const work = target(), baked = target();
       gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-      res.shadow = { tex, fb, size };
+      res.shadow = { tex: work.tex, fb: work.fb, staticTex: baked.tex, staticFb: baked.fb, size };
+      shadowStaticValid = false;
     };
     const deleteRecord = (rec) => {
       if (rec.active) {
@@ -1828,7 +1842,7 @@ void main() {
       let rec = records.get(geometry);
       if (!rec) {
         const ibo = gl.createBuffer();
-        rec = { geometry, ibo, capacity: 0, mesh: buildMeshPart(geometry, ibo), line: buildLinePart(geometry, ibo), nodes: [], count: 0, drawCount: 0, cameraHiddenCount: 0, active: false, data: null, batch: null, batchVersion: -1, lightVisible: true, mirrorVisible: true, imageTexture: null, rippleBodyTexture: null, rippleBodyState: null, rippleBodyVersion: -1 };
+        rec = { geometry, ibo, capacity: 0, mesh: buildMeshPart(geometry, ibo), line: buildLinePart(geometry, ibo), nodes: [], count: 0, drawCount: 0, cameraHiddenCount: 0, active: false, data: null, batch: null, batchVersion: -1, lightVisible: true, mirrorVisible: true, imageTexture: null, rippleBodyTexture: null, rippleBodyState: null, rippleBodyVersion: -1, shadowChanged: 0, shadowSettle: SHADOW_SETTLE, shadowCount: -1, shadowClip: NaN, shadowStatic: false, shadowBake: -1 };
         records.set(geometry, rec);
       }
       return rec;
@@ -1872,6 +1886,24 @@ void main() {
         for (let i = 0; !rec.batch && !visible && i < rec.count; i++) visible = nodeInFrustum(rec.nodes[i], LIGHT_FRUSTUM);
         rec.lightVisible = visible;
       }
+    };
+    // A caster is static once its instances, count and clip have held for its settle time. True when the
+    // static set differs from the one baked (a promotion, a demotion, or a baked record gone from the pass).
+    const markShadowStatic = () => {
+      let baked = 0, changed = false;
+      for (const rec of activeRecords) {
+        const n = rec.batch && rec.batch.drawInstanceCount !== undefined ? rec.drawCount : rec.count, clip = rec.geometry.clipMinY ?? -1e6;
+        if (n !== rec.shadowCount || clip !== rec.shadowClip) {
+          rec.shadowCount = n;
+          rec.shadowClip = clip;
+          rec.shadowChanged = shadowFrame;
+        }
+        rec.shadowStatic = shadowFrame - rec.shadowChanged >= rec.shadowSettle && n > 0 && !!rec.mesh && rec.lightVisible && rec.geometry.castShadow !== false && !rec.geometry.mirrorRippleOnly;
+        const was = rec.shadowBake === shadowBake;
+        if (was) baked++;
+        if (was !== rec.shadowStatic) changed = true;
+      }
+      return changed || baked !== shadowBakedCount;
     };
     const markMirrorVisible = () => {
       for (const rec of activeRecords) {
@@ -1943,6 +1975,7 @@ void main() {
           // whole reserved pool on restore.
           if (need > 0) gl.bufferSubData(gl.ARRAY_BUFFER, 0, rec.batch.instanceData, 0, need);
           rec.batchVersion = rec.batch.instanceVersion;
+          rec.shadowChanged = shadowFrame;
         }
         return;
       }
@@ -1952,7 +1985,7 @@ void main() {
       // The buffer mirrors rec.data exactly, so an unchanged block (static props, resting crew) needs no upload.
       const d = rec.data;
       // One moving node in a shared record uploads only its own span.
-      let lo = need, hi = 0;
+      let lo = need, hi = 0, moved = false;
       for (let i = 0; i < rec.count; i++) {
         const n = rec.nodes[i], w = n.world;
         const o = i * INSTANCE_FLOATS;
@@ -1960,7 +1993,7 @@ void main() {
         const cloudOffset = n.matrixCloud ? Math.min(0, cutawayCloudY - w[13]) * cutawayCloudMix : 0;
         for (let j = 0; j < 16; j++) {
           const value = j === 13 && cloudOffset ? Math.fround(w[j] + cloudOffset) : w[j];
-          if (d[o + j] !== value) { d[o + j] = value; dirty = true; }
+          if (d[o + j] !== value) { d[o + j] = value; dirty = moved = true; }
         }
         // Sign-encoded fire/smoke in the cached upload: negative glow = ember, negative highlight = scorch,
         // mode = -1 - smokeOpacity.
@@ -1977,6 +2010,8 @@ void main() {
           if (o + INSTANCE_FLOATS > hi) hi = o + INSTANCE_FLOATS;
         }
       }
+      // Shadow depth reads only the transform, so glow and mode changes leave a caster static.
+      if (moved) rec.shadowChanged = shadowFrame;
       if (rec.capacity < d.length) {
         gl.bindBuffer(gl.ARRAY_BUFFER, rec.ibo);
         gl.bufferData(gl.ARRAY_BUFFER, d, gl.DYNAMIC_DRAW);
@@ -2242,14 +2277,22 @@ void main() {
         if (!part || !n) continue;
         if (cull && rec.offscreen) continue;
         if (kind === "mesh" && useProgram === "shadow" && rec.geometry.castShadow === false) continue;
-        if (useProgram === "shadow" ? !rec.lightVisible : !cull && !rec.mirrorVisible) continue;
+        if (useProgram === "shadow" ? !rec.lightVisible || shadowSubset && rec.shadowStatic !== (shadowSubset === 1) : !cull && !rec.mirrorVisible) continue;
+        if (useProgram === "shadow") shadowDraws++;
         if (kind === "mesh" && useProgram === "mesh") {
           const stage = rec.geometry.matrixRevealBacking ? 1 : rec.geometry.matrixGlyph ? 2 : 0;
           if (stage !== matrixStage) continue;
           if (rec.geometry.imageSurface) { drawImageSurface(rec, n, cull); continue; }
-          gl.uniform1f(res.programs.mesh.u.uMatrixGlyph, stage === 1 ? 3 : stage === 2 ? 1 : rec.geometry.matrixLocalGlyphSurface ? 2 : 0);
-          if (stage === 2) gl.uniform1f(res.programs.mesh.u.uMatrixGlyphOpacity, rec.geometry.matrixGlyphOpacity ?? 1);
-          gl.uniform1f(res.programs.mesh.u.uMatrixCave, rec.geometry.matrixCave || 0);
+          const mesh = res.programs.mesh, glyph = stage === 1 ? 3 : stage === 2 ? 1 : rec.geometry.matrixLocalGlyphSurface ? 2 : 0, cave = rec.geometry.matrixCave || 0;
+          if (glyph !== mesh.matrixGlyph) {
+            gl.uniform1f(mesh.u.uMatrixGlyph, glyph);
+            mesh.matrixGlyph = glyph;
+          }
+          if (stage === 2) gl.uniform1f(mesh.u.uMatrixGlyphOpacity, rec.geometry.matrixGlyphOpacity ?? 1);
+          if (cave !== mesh.matrixCave) {
+            gl.uniform1f(mesh.u.uMatrixCave, cave);
+            mesh.matrixCave = cave;
+          }
         }
         if (kind === "mesh") {
           const program = res.programs[useProgram], minimumY = rec.geometry.clipMinY ?? -1e6, maximumY = Math.min(rec.geometry.cutawayPreserve ? 1e6 : cutawayMaxY, rec.geometry.clipMaxY ?? 1e6);
@@ -2278,8 +2321,15 @@ void main() {
           }
         }
         if (kind === "line") {
-          gl.uniform1f(res.programs.line.u.uClipMaxY, rec.geometry.cutawayPreserve ? 1e6 : cutawayMaxY);
-          gl.uniform1f(res.programs.line.u.uWidth, part.width * dpr);
+          const line = res.programs.line, maximumY = rec.geometry.cutawayPreserve ? 1e6 : cutawayMaxY, lineWidth = part.width * dpr;
+          if (maximumY !== line.clipMaxY) {
+            gl.uniform1f(line.u.uClipMaxY, maximumY);
+            line.clipMaxY = maximumY;
+          }
+          if (lineWidth !== line.lineWidth) {
+            gl.uniform1f(line.u.uWidth, lineWidth);
+            line.lineWidth = lineWidth;
+          }
         }
         // Surface overlays stay above their backing at distant zooms in both color passes; shadow depth and later
         // ordinary meshes stay unchanged.
@@ -2636,10 +2686,18 @@ void main() {
       }
       // Set the light back far enough to bracket the shadowed volume.
       const lightDist = shadowExtent * 1.8, lightDepth = shadowExtent * 1.5;
-      LIGHT_EYE.x = shadowCenter.x + lx * lightDist;
-      LIGHT_EYE.y = shadowCenter.y + ly * lightDist;
-      LIGHT_EYE.z = shadowCenter.z + lz * lightDist;
-      mat4.lookAt(lightView, LIGHT_EYE, shadowCenter, Math.abs(ly) > 0.96 ? NORTH_UP : UP);
+      // The shadow matrix takes the light direction on a grid of 1/size per axis so the static map can hold: a turn
+      // of d radians moves a point at the shadow extent E by E*d in light space and a texel is 2E/size, so the grid's
+      // worst turn (sqrt(3)/2 of a step) shifts it under half a texel whatever the extent. Shading keeps the exact light.
+      let qx = Math.round(lx * sh.size) / sh.size, qy = Math.round(ly * sh.size) / sh.size, qz = Math.round(lz * sh.size) / sh.size;
+      const qlen = Math.hypot(qx, qy, qz);
+      qx /= qlen;
+      qy /= qlen;
+      qz /= qlen;
+      LIGHT_EYE.x = shadowCenter.x + qx * lightDist;
+      LIGHT_EYE.y = shadowCenter.y + qy * lightDist;
+      LIGHT_EYE.z = shadowCenter.z + qz * lightDist;
+      mat4.lookAt(lightView, LIGHT_EYE, shadowCenter, Math.abs(qy) > 0.96 ? NORTH_UP : UP);
       mat4.ortho(lightProj, -shadowExtent, shadowExtent, -shadowExtent, shadowExtent, Math.max(0.5, lightDist - lightDepth), lightDist + lightDepth);
       mat4.multiply(lightViewProj, lightProj, lightView);
       mat4.transformPoint4(P4, lightViewProj, 0, 0, 0);
@@ -2666,6 +2724,7 @@ void main() {
       mirrorDebug.bodyContacts = mirrorDebug.bodyWaves = 0;
       mirror.shards = mirrorDebug.shardsDrawn = 0;
       culled = drawn = suppressed = rippleSurfaces = rippleWaves = 0;
+      shadowFrame++;
       updateWorld(root, null);
       traverseVisible(root, collect);
       for (const rec of activeRecords) {
@@ -2673,15 +2732,54 @@ void main() {
         if (rec.geometry.mirrorSource && !rec.offscreen) mirror.shards += rec.drawCount;
         uploadInstances(rec);
       }
+      // A matrix that moved since last frame (a following shadow centre) draws everything as before; a steady one
+      // bakes the static casters once, then each frame copies them in and draws only the moving ones.
+      let steady = true, baked = shadowStaticValid;
+      for (let i = 0; i < 16; i++) {
+        if (lightViewProj[i] !== shadowPrev[i]) steady = false;
+        if (lightViewProj[i] !== shadowBaked[i]) baked = false;
+      }
+      shadowPrev.set(lightViewProj);
       gl.bindFramebuffer(gl.FRAMEBUFFER, sh.fb);
       gl.viewport(0, 0, sh.size, sh.size);
-      gl.clear(gl.DEPTH_BUFFER_BIT);
       gl.useProgram(pg.shadow.prog);
       gl.uniformMatrix4fv(pg.shadow.u.uLightViewProj, false, lightViewProj);
       extractFrustum(lightViewProj, LIGHT_FRUSTUM);
       markLightVisible();
+      const rebake = markShadowStatic() || !baked;
       gl.cullFace(gl.FRONT);
-      drawParts("mesh", "shadow");
+      shadowDraws = 0;
+      if (!steady) {
+        shadowStaticValid = false;
+        gl.clear(gl.DEPTH_BUFFER_BIT);
+        drawParts("mesh", "shadow");
+      } else {
+        if (rebake) {
+          gl.clear(gl.DEPTH_BUFFER_BIT);
+          shadowSubset = 1;
+          drawParts("mesh", "shadow");
+          gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, sh.staticFb);
+          gl.blitFramebuffer(0, 0, sh.size, sh.size, 0, 0, sh.size, sh.size, gl.DEPTH_BUFFER_BIT, gl.NEAREST);
+          shadowBakedCount = 0;
+          for (const rec of activeRecords) {
+            if (rec.shadowStatic) {
+              rec.shadowBake = shadowBake + 1;
+              shadowBakedCount++;
+            } else if (rec.shadowBake === shadowBake) rec.shadowSettle = Math.min(rec.shadowSettle * 2, SHADOW_SETTLE * 32);
+          }
+          shadowBake++;
+          shadowBaked.set(lightViewProj);
+          shadowStaticValid = true;
+          shadowStaticRebuilds++;
+        } else {
+          gl.bindFramebuffer(gl.READ_FRAMEBUFFER, sh.staticFb);
+          gl.blitFramebuffer(0, 0, sh.size, sh.size, 0, 0, sh.size, sh.size, gl.DEPTH_BUFFER_BIT, gl.NEAREST);
+        }
+        gl.bindFramebuffer(gl.FRAMEBUFFER, sh.fb);
+        shadowSubset = 2;
+        drawParts("mesh", "shadow");
+        shadowSubset = 0;
+      }
       gl.cullFace(gl.BACK);
       shadowPassCount++;
       if (mirror.node) {
@@ -2787,11 +2885,6 @@ void main() {
       gl.enable(gl.CULL_FACE);
       if (f.samples > 0) blit(f);
       gl.disable(gl.DEPTH_TEST);
-      if (f.depthFb && f.samples > 0) {
-        gl.bindFramebuffer(gl.READ_FRAMEBUFFER, f.scene);
-        gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, f.depthFb);
-        gl.blitFramebuffer(0, 0, pw, ph, 0, 0, pw, ph, gl.DEPTH_BUFFER_BIT, gl.NEAREST);
-      }
       const bw = f.bloomW, bh = f.bloomH;
       if (settings.bloom) {
         gl.useProgram(pg.blur.prog);
@@ -2846,6 +2939,12 @@ void main() {
         }
       }
       if (!shaft) gl.uniform4f(pg.composite.u.uShaft, 0, 0, 0, 1);
+      // Only the shaft march reads the resolved depth, and it early-outs at zero strength.
+      if (shaft && f.depthFb && f.samples > 0) {
+        gl.bindFramebuffer(gl.READ_FRAMEBUFFER, f.scene);
+        gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, f.depthFb);
+        gl.blitFramebuffer(0, 0, pw, ph, 0, 0, pw, ph, gl.DEPTH_BUFFER_BIT, gl.NEAREST);
+      }
       gl.activeTexture(gl.TEXTURE4);
       gl.bindTexture(gl.TEXTURE_2D, f.depth || f.bright);
       gl.uniform1i(pg.composite.u.uDepth, 4);
@@ -2926,7 +3025,7 @@ void main() {
       get stats() {
         let shadowFinite = true;
         for (let i = 0; i < 16; i++) if (!Number.isFinite(lightViewProj[i])) shadowFinite = false;
-        return { records: records.size, active: activeRecords.length, mirrorResources: mirrorDebug.resources, imageTextures, rippleBodyTextures, shadowResources: res.shadow ? 2 : 0, shadowSize: res.shadow ? res.shadow.size : 0, shadowPassCount, shadowFinite, culled, drawn, suppressed, rippleSurfaces, rippleWaves };
+        return { records: records.size, active: activeRecords.length, mirrorResources: mirrorDebug.resources, imageTextures, rippleBodyTextures, shadowResources: res.shadow ? 4 : 0, shadowSize: res.shadow ? res.shadow.size : 0, shadowPassCount, shadowFinite, shadowDraws, shadowStatic: shadowStaticValid ? shadowBakedCount : 0, shadowStaticRebuilds, culled, drawn, suppressed, rippleSurfaces, rippleWaves };
       },
       get mirror() {
         return mirrorDebug;

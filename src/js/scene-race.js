@@ -87,7 +87,9 @@
     addChild(root, track.root);
     buildWeather();
     raceScene.renderOpts = track.renderOpts;
-    camera.far = 280;
+    // Fog that ends in the clear colour with no sky pass hides everything past fogFar, so the far plane stops there.
+    const o = track.renderOpts, fogIsClear = !o.horizon && !o.zenith && o.fog && o.clear && o.fog[0] === o.clear[0] && o.fog[1] === o.clear[1] && o.fog[2] === o.clear[2];
+    camera.far = fogIsClear ? Math.min(280, o.fogFar + 10) : 280;
     const g = track.grid[0];
     setVec(TICKER_AT, g.x, g.y + 8.5, g.z);
     if (items) items.setTrack(track);
