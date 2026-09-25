@@ -260,6 +260,8 @@
   const PATH_LIFT = 0.006;
   const MASTER_PATH_CENTER = 2;
   const GATE_Z = -(RADIUS - 2), PASS_HALF = 2.5, PASS_TOP = 5, TRAIL_HALF = 1;
+  const TIMECHAIN = { bearing: 8.25 / 12 * Math.PI * 2, from: 20, top: 4, halfWidth: 1.8, blend: 1.5 };
+  const TIMECHAIN_X = Math.sin(TIMECHAIN.bearing), TIMECHAIN_Z = -Math.cos(TIMECHAIN.bearing);
   const BLUFF_LEN = 8, SIDE_OUT = 2.5, APRON = 3, TRAIL_LEAN = 1.2;
   const P = { grass: 1, grassLight: 2, grassDark: 3, path: 4, stone: 5, stoneDark: 6, inner: 7, dirt: 8, floor: 9 };
   const PALETTE = [null, "#6f7d3e", "#7b8945", "#65733a", "#a3874f", "#877869", "#5e5449", "#2f2824", "#6a4e39", "#3a302a"].map((hex) => hex && hexToRgb(hex));
@@ -495,6 +497,16 @@
           surface = grassAt(wx, wz);
         }
         top = clamp(Math.round(h / UNIT) * UNIT, 0, MAX_HEIGHT);
+      }
+      // A grass terrace cut into the ridge, like the launch approach; the same voxels render and support it.
+      const timechainAlong = wx * TIMECHAIN_X + wz * TIMECHAIN_Z;
+      const timechainAcross = Math.abs(wx * TIMECHAIN_Z - wz * TIMECHAIN_X);
+      if (timechainAlong >= TIMECHAIN.from - 1 && timechainAcross < TIMECHAIN.halfWidth + TIMECHAIN.blend) {
+        const tread = Math.min(TIMECHAIN.top, Math.max(0, Math.floor((timechainAlong - TIMECHAIN.from) / 0.5) * UNIT));
+        const mix = smooth((timechainAcross - TIMECHAIN.halfWidth) / TIMECHAIN.blend);
+        top = Math.round((tread + (top - tread) * mix) / UNIT) * UNIT;
+        surface = grassAt(wx, wz);
+        meadow[i] = top === 0 ? 1 : 0;
       }
       // Carry the ground-level frontage across the outer ridge without lowering a column behind the HQ doorway plane.
       for (let fi = 0; fi < headquartersFronts.length; fi++) {
@@ -1691,6 +1703,7 @@
         const depth = dx * -front.tangent.z + dz * front.tangent.x;
         headquartersPath = Math.abs(across) < front.halfLength && Math.abs(depth) < front.halfWidth && tops[c] === 0;
       }
+      if (wx * TIMECHAIN_X + wz * TIMECHAIN_Z >= MASTER_PATH_CENTER && Math.abs(wx * TIMECHAIN_Z - wz * TIMECHAIN_X) < PATH_HALF) path = true;
       if (headquartersPath) {
         path = true;
       }
@@ -1815,6 +1828,9 @@
       }
       centerlines.push(points);
     }
+    const timechainPath = [];
+    for (let r = MASTER_PATH_CENTER; r <= RADIUS; r += PATH_UNIT) timechainPath.push({ x: TIMECHAIN_X * r, z: TIMECHAIN_Z * r });
+    centerlines.push(timechainPath);
     for (const front of headquartersFronts) {
       centerlines.push(front.connector);
       const points = [];
@@ -2253,5 +2269,5 @@
     ISLANDS.set(seed, built);
     return built;
   };
-  BL.terrain = { makeGrid, gridGeometry, island, segmentBoxClear, cutawaySourceFromVox, PALETTE, MAX_HEIGHT };
+  BL.terrain = { makeGrid, gridGeometry, island, segmentBoxClear, cutawaySourceFromVox, PALETTE, MAX_HEIGHT, TIMECHAIN };
 })();

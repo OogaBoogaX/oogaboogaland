@@ -21,7 +21,7 @@
   const dayParam = DEBUG ? parseFloat(params.get("day")) : NaN;
   const latitudeParam = DEBUG ? parseFloat(params.get("latitude")) : NaN;
   const requestedView = DEBUG ? params.get("view") : null;
-  const preloadedView = requestedView === "hq" ? "underground" : requestedView === "bsmt" ? "basement" : requestedView === "pile" || requestedView === "lab" || requestedView === "mirror" ? requestedView : null;
+  const preloadedView = requestedView === "hq" ? "underground" : requestedView === "bsmt" ? "basement" : requestedView === "pile" || requestedView === "lab" || requestedView === "mirror" || requestedView === "timechain" ? requestedView : null;
   const preloadedPose = DEBUG ? readPositionPose(params.get("pose")) : null;
   const preloadedMode = DEBUG ? params.get("mode") || preloadedPose?.mode : null;
   const preloadedFirstPerson = DEBUG && (params.get("firstperson") === "1" || preloadedMode === "first-person" || preloadedMode === "eye-level");
@@ -331,7 +331,7 @@
   const pitArrivalPoint = { x: 0, y: 0, z: 0 };
   const pitPrevious = { x: 0, y: 0, z: 0 };
   let stateTimer = 0, hintTimer = 0, meterTimer = 0, now = 0, hour = 12, unsubscribeActivity = null;
-  let weather = null, unsubscribeMempool = null, unsubscribeChain = null, mempoolIsland = null;
+  let weather = null, unsubscribeMempool = null, unsubscribeChain = null, mempoolIsland = null, timechainIsland = null;
   // The two boards across the hole from the vine bridge, one reading the chain and one reading the
   // weather. Each holds its canvas, its panel node and the reading it last drew, so a snapshot saying
   // nothing new replaces no geometry.
@@ -2035,6 +2035,78 @@
     };
     return { site, place, centre, groundAt, worldX, worldZ, claimGround };
   };
+  const buildTimechainIsland = () => {
+    const T = BL.timechainModels, site = T.build(island), p = site.place;
+    const cos = Math.cos(p.ry), sin = Math.sin(p.ry);
+    addChild(root, site.node);
+    placed.push(site.node);
+    for (const node of [site.ground, site.shell, site.entrance, site.bridge, site.chair]) solids.add(node);
+    // Match the visible grass tiles, not the bounding sphere around the cliff.
+    for (const [kind, node, radius] of [["timechainentrance", site.entrance, 3], ["timechainbridge", site.bridge, 1.5], ["timechainchair", site.chair, 1.5]]) {
+      const x = node.position.x, z = node.position.z;
+      addProp(kind, node, p.x + x * cos + z * sin, p.z - x * sin + z * cos, radius);
+    }
+    const boards = BL.timechainBoards.create(site.node, renderer, index => {
+      if (timechainBoardShown >= 0) {
+        timechainBoardShown = index;
+        if (hud.el.jumbotron.open) paintTimechainBoard();
+      }
+    });
+    boards.entries.forEach((entry, index) => {
+      const node = entry.node, x = node.position.x, z = node.position.z;
+      const owner = addProp("timechainboard", node, p.x + x * cos + z * sin, p.z - x * sin + z * cos, 15);
+      owner.boardIndex = index; owner.weaponType = "none"; owner.pickRay = ray => boards.pickScreen(ray, index);
+    });
+    presets.timechain = { yaw: p.ry, pitch: 0.03, dist: 3, target: { x: p.x, y: p.y + 4.4, z: p.z } };
+    const claimGround = () => {
+      claim(p.x, p.z, T.SITE.radius + 1);
+      for (let r = p.approachFrom - 1; r <= p.rim; r += 1) claim(T.DIR.x * r, T.DIR.z * r, 2.4);
+    };
+    const hangout = [[-2, -1], [-2, 2], [1, 1]].map(([x, z]) => ({ x: p.x + x * cos + z * sin, z: p.z - x * sin + z * cos, ry: p.ry }));
+    const x = site.chair.position.x, z = site.chair.position.z;
+    const seat = { x: p.x + x * cos + z * sin, z: p.z - x * sin + z * cos, angle: Math.PI, speed: 0, phase: 0, active: false };
+    const beer = BL.timechainBeer.create(site);
+    solids.add(beer.dispenser); solids.add(beer.cabinet); solids.add(beer.bin);
+    addProp("timechainbeer", beer.mug, site.chair.position.x - 0.95, site.chair.position.z, 0.3);
+    return { site, place: p, boards, seat, beer, claimGround, hangout, residentPlaced: false };
+  };
+  const spinTimechainChair = () => {
+    if (timechainIsland?.seat.active) timechainIsland.beer.act("spin", timechainIsland.seat);
+  };
+  const chugTimechainGlass = () => {
+    if (timechainIsland?.seat.active) timechainIsland.beer.act("chug", timechainIsland.seat);
+  };
+  const timechainResidentPose = (cave, dt) => {
+    if (!timechainIsland || cave.traits.name !== "SaniExp") return false;
+    const T = timechainIsland, s = T.seat, parts = cave.parts;
+    if (cave === pilot?.player || contributors.debugState) {
+      T.beer.pause();
+      if (s.active) {
+        s.active = false; cave.root.rotation.x = cave.root.rotation.z = 0;
+        parts.legL.rotation.x = parts.legR.rotation.x = 0;
+        parts.armL.rotation.x = parts.armR.rotation.x = -0.2;
+        parts.head.rotation.x = 0;
+      }
+      return false;
+    }
+    const h = cave.traits.height;
+    s.active = true; s.phase = (s.phase + dt * 7) % (Math.PI * 2);
+    cave.walk = null; cave.hop = cave.hopV = cave.cheer = cave.catchT = 0;
+    cave.act.kind = "idle"; cave.act.until = Infinity;
+    cave.root.visible = true; cave.root.quaternion = null;
+    cave.root.position.x = s.x; cave.root.position.z = s.z; cave.root.position.y = T.place.y + 0.88 * h;
+    cave.root.rotation.x = -0.23; cave.root.rotation.z = 0; cave.root.rotation.y = T.place.ry + s.angle;
+    T.site.chair.scale.x = T.site.chair.scale.y = T.site.chair.scale.z = h;
+    parts.legL.rotation.x = parts.legR.rotation.x = -1.05;
+    parts.armL.quaternion = parts.armR.quaternion = null;
+    parts.armL.rotation.x = -0.95 + Math.sin(s.phase) * 0.035;
+    parts.armR.rotation.x = -0.95 - Math.sin(s.phase) * 0.035;
+    parts.armL.rotation.z = -0.12; parts.armR.rotation.z = 0.12;
+    parts.head.rotation.x = 0.28;
+    parts.club.visible = parts.gun.visible = parts.snack.visible = false;
+    T.beer.update(cave, s, dt);
+    return true;
+  };
   // Dock over the drop and ladder on the bluff
   const buildRim = () => {
     const d = polar(DOCK_DEG, CLIFF_OUTER);
@@ -2444,6 +2516,19 @@
     return !npcClosedCaveAt(s.x, s.z, feet, height) && !npcPileAt(s.x, feet, s.z, height) && !npcWorkZoneAt(cave, s.x, feet, s.z) && npcFireClear(s.x, feet, s.z, s.x, feet, s.z, height) && walkable(s.x, s.z, s.x, s.z, feet, height, cave);
   };
   const wanderSpot = (out, cave = null) => {
+    if (timechainIsland && cave?.traits.name === "SaniExp" && cave.override === "chilling" && !contributors.debugState) {
+      const p = timechainIsland.place, pos = cave.root.position, dir = BL.timechainModels.DIR;
+      if (timechainIsland.residentPlaced && Math.hypot(pos.x - p.x, pos.z - p.z) > BL.timechainModels.SITE.radius - 2) {
+        const along = pos.x * dir.x + pos.z * dir.z, across = Math.abs(pos.x * dir.z - pos.z * dir.x);
+        const radius = along < p.approachFrom || across > 1 ? p.approachFrom - 0.5 : along < p.rim - 0.5 ? p.rim : Math.hypot(p.x, p.z) - p.bridgeZ + 1;
+        out.x = dir.x * radius; out.z = dir.z * radius; out.ry = p.ry + Math.PI;
+        return true;
+      }
+      const home = timechainIsland.hangout[cave.act.trips % timechainIsland.hangout.length];
+      timechainIsland.residentPlaced = true;
+      out.x = home.x; out.z = home.z; out.ry = home.ry;
+      return true;
+    }
     const chilling = cave?.state === "chilling";
     let s = (chilling && Math.random() < 0.35 || RENDER_OPTS.stars > NIGHT && Math.random() < FIRE_SEAT_CHANCE) ? freeSeat() : null;
     if (s && !npcWanderPointClear(s, cave)) s = null;
@@ -3474,7 +3559,8 @@
   const npcDestinationBlocked = (cave, x, z) => {
     // Stroll destinations are on the surface. Evaluate their own floor,
     // not the walker's current elevation at the bottom of a staircase.
-    const feet = island.surfaceAt(x, z);
+    const onTimechain = timechainIsland && Math.hypot(x - timechainIsland.place.x, z - timechainIsland.place.z) < BL.timechainModels.SITE.radius - 1;
+    const feet = onTimechain ? playerSupportAt(x, z, Infinity, Infinity, cave) : island.surfaceAt(x, z);
     return npcClosedCaveAt(x, z, feet, cave.bodyHeight) || npcPileAt(x, feet, z, cave.bodyHeight) || npcWorkZoneAt(cave, x, feet, z) || !npcFireClear(x, feet, z, x, feet, z, cave.bodyHeight) || !walkable(x, z, x, z, feet, cave.bodyHeight, cave);
   };
   const npcWalkable = (fromX, fromZ, toX, toZ, y, height, actor) => {
@@ -3704,7 +3790,7 @@
       case "ooga-portal-screen":
         return pitGate.selected.label + " · tap to change destination";
       case "caveman":
-        return o.cave.traits.display;
+        return o.cave.traits.name === "SaniExp" && timechainIsland?.seat.active ? "Sani · tap to spin his chair" : o.cave.traits.display;
       case "clanker":
         return `${o.entry.owner.traits.display} 🦍`;
       case "crate":
@@ -3722,6 +3808,11 @@
       case "lab-link":
         return "EntropyLab · open website in a new tab";
       case "prop":
+        if (o.prop === "timechainentrance") return "Timechain Sphere - enter the observatory";
+        if (o.prop === "timechainbridge") return "Wooden bridge · to Timechain Sphere";
+        if (o.prop === "timechainboard") return "Timechain display · tap to expand";
+        if (o.prop === "timechainchair") return "Sani's recliner · tap to spin and spill the glass";
+        if (o.prop === "timechainbeer") return "500 ml beer · tap to chug";
         return PROP_TIPS[o.prop] || "";
       default:
         return "";
@@ -3843,6 +3934,21 @@
         break;
       case "poolbridge":
         hud.toast("Vines and planks. The Mempool is across.");
+        break;
+      case "timechainentrance":
+        navigate("timechain");
+        break;
+      case "timechainbridge":
+        hud.toast("Timechain Island · Sani's hangout. Walk across the wooden bridge.");
+        break;
+      case "timechainboard":
+        openTimechainBoard(o.boardIndex);
+        break;
+      case "timechainchair":
+        spinTimechainChair();
+        break;
+      case "timechainbeer":
+        chugTimechainGlass();
         break;
       case "weathersign":
         hud.openWeatherKey();
@@ -4037,7 +4143,8 @@
         break;
       }
       case "caveman":
-        crew.pokeCave(o.cave);
+        if (o.cave.traits.name === "SaniExp" && timechainIsland?.seat.active) spinTimechainChair();
+        else crew.pokeCave(o.cave);
         break;
       case "clanker":
         hud.toast(tooltipFor(hit));
@@ -4498,7 +4605,7 @@
   const navigationClearAt = (x, y, z, radius, height) => {
     if (!physicalClearAt(x, y, z, radius, height)) return false;
     for (const prop of props) {
-      if (!prop.active || prop.prop === "gate" || !prop.node.geometry) continue;
+      if (!prop.active || prop.prop === "gate" || prop.prop === "timechainboard" || !prop.node.geometry) continue;
       const b = BL.scene.boundsOf(prop.node.geometry), m = prop.node.world;
       const cx = (b.min[0] + b.max[0]) / 2, cy = (b.min[1] + b.max[1]) / 2, cz = (b.min[2] + b.max[2]) / 2;
       const hx = (b.max[0] - b.min[0]) / 2, hy = (b.max[1] - b.min[1]) / 2, hz = (b.max[2] - b.min[2]) / 2;
@@ -4535,6 +4642,14 @@
       setVec(target, m.x, m.floorY + (close ? 2.5 : 2.1), m.z);
       pitch = player ? 0.06 : 0.16;
       dist = player ? 8 : 9;
+    } else if (name === "timechain" && timechainIsland) {
+      const site = timechainIsland.place;
+      yaw = site.ry;
+      // Arrive on the bridge side of the control console, not inside its buttons.
+      x = site.x + Math.sin(yaw) * 4.8; z = site.z + Math.cos(yaw) * 4.8;
+      setVec(target, site.x, site.y + 0.8, site.z);
+      pitch = player ? 0.2 : 0.08;
+      dist = player ? 6 : 10;
     } else if (underground) {
       z = 6;
       setVec(target, 0, (basement ? island.headquarters.basement.floor : island.headquarters.floor) + 0.8, 0);
@@ -4545,8 +4660,8 @@
     let found = false;
     for (const offset of NAVIGATION_OFFSETS) {
       p.x = x + Math.cos(yaw) * offset; p.z = z - Math.sin(yaw) * offset;
-      p.y = underground ? (basement ? island.headquarters.basement.floor : island.headquarters.floor) : island.surfaceAt(p.x, p.z);
-      if (!island.onLand(p.x, p.z) || !navigationClearAt(p.x, p.y + 1e-5, p.z, PLAYER_RADIUS, player ? player.bodyHeight : 1.6)) continue;
+      p.y = name === "timechain" ? timechainIsland.place.y : underground ? (basement ? island.headquarters.basement.floor : island.headquarters.floor) : island.surfaceAt(p.x, p.z);
+      if (name !== "timechain" && !island.onLand(p.x, p.z) || !navigationClearAt(p.x, p.y + 1e-5, p.z, PLAYER_RADIUS, player ? player.bodyHeight : 1.6)) continue;
       destination.yaw = Math.atan2(p.x - target.x, p.z - target.z);
       destination.pitch = close ? Math.atan2(p.y + (player ? player.headOffset * CLOSE_VIEW.eyeRatio : CLOSE_VIEW.eyeHeight) - target.y, Math.hypot(p.x - target.x, p.z - target.z)) : pitch;
       destination.dist = dist;
@@ -5132,14 +5247,46 @@
   // The jumbotron's close-up: the board's own canvas painted into the dialog's, and its caption,
   // whenever the board repaints while the dialog is open.
   let jumbotronShown = -1;
+  let timechainBoardShown = -1;
+  const paintTimechainBoard = () => {
+    const entry = timechainIsland?.boards.entries[timechainBoardShown];
+    if (!entry) return;
+    const screen = hud.el.jumbotronScreen, ctx = screen.getContext("2d");
+    if (screen.width !== entry.canvas.width || screen.height !== entry.canvas.height) {
+      screen.width = entry.canvas.width; screen.height = entry.canvas.height;
+    }
+    ctx.clearRect(0, 0, screen.width, screen.height);
+    ctx.drawImage(entry.canvas, 0, 0, screen.width, screen.height);
+    hud.el.jumbotronCaption.textContent = BL.timechainData.TITLES[timechainBoardShown];
+    const details = document.getElementById("jumbotron-details");
+    details.hidden = false; details.textContent = entry.caption;
+    const source = document.createElement("a");
+    source.href = timechainIsland.boards.data[timechainBoardShown].source;
+    source.target = "_blank"; source.rel = "noopener noreferrer";
+    source.textContent = source.href;
+    details.append(document.createTextNode("\nSource: "), source);
+    hud.el.jumbotronIndex.textContent = `${timechainBoardShown + 1} of ${BL.timechainData.TITLES.length}`;
+  };
+  const openTimechainBoard = (index) => {
+    timechainBoardShown = index;
+    timechainIsland.boards.select(index);
+    const page = (delta) => timechainIsland.boards.select((timechainIsland.boards.index + delta + BL.timechainData.TITLES.length) % BL.timechainData.TITLES.length);
+    hud.openJumbotron({ prev: () => page(-1), next: () => page(1) });
+    paintTimechainBoard();
+  };
   const paintJumbotron = () => {
     jumbotronShown = jumbotron.version;
     const screen = hud.el.jumbotronScreen;
+    if (screen.width !== jumbotron.canvas.width || screen.height !== jumbotron.canvas.height) {
+      screen.width = jumbotron.canvas.width; screen.height = jumbotron.canvas.height;
+    }
     screen.getContext("2d").drawImage(jumbotron.canvas, 0, 0);
     hud.el.jumbotronCaption.textContent = jumbotron.caption;
     hud.el.jumbotronIndex.textContent = `${jumbotron.index + 1} of ${jumbotron.count}`;
   };
   const openJumbotron = () => {
+    timechainBoardShown = -1;
+    document.getElementById("jumbotron-details").hidden = true;
     jumbotronShown = -1;
     hud.openJumbotron({ prev: () => jumbotron.prevView(), next: () => jumbotron.nextView() });
     paintJumbotron();
@@ -5224,7 +5371,7 @@
     updateLamps(dt, elapsed, phase !== null);
     if (jumbotron) {
       jumbotron.update(elapsed, renderer);
-      if (hud.el.jumbotron.open && jumbotron.version !== jumbotronShown) paintJumbotron();
+      if (hud.el.jumbotron.open && timechainBoardShown < 0 && jumbotron.version !== jumbotronShown) paintJumbotron();
     }
     if (fireworksShells.length) updateFireworks();
     const next = daylight.phaseAt(hour);
@@ -5249,6 +5396,13 @@
     updateClankerEffects(dt);
     const fallingPlayer = pilot.player;
     if (fallingPlayer) Object.assign(pitPrevious, fallingPlayer.root.position);
+    if (timechainIsland) {
+      const s = timechainIsland.seat, decay = Math.exp(-1.15 * dt);
+      s.angle = (s.angle + s.speed * (1 - decay) / 1.15) % (Math.PI * 2);
+      s.speed *= decay;
+      if (s.speed < 0.005) s.speed = 0;
+      timechainIsland.site.swivel.rotation.y = s.angle;
+    }
     crew.update(dt, elapsed);
     // Sweep before any abyss equipment loss or respawn, including a whole-shaft fall in one step.
     if (!entering && !pilot.poseHeld && fallingPlayer && fallingPlayer === pilot.player
@@ -6254,6 +6408,7 @@
     buildRim();
     buildLaunchSite();
     mempoolIsland = buildMempoolIsland();
+    timechainIsland = buildTimechainIsland();
     const firePos = buildFire();
     fire = lamps[lamps.length - 1];
     // The jumbotron stands on the rim crest just west of the gate, turned to face the meadow center.
@@ -6287,6 +6442,7 @@
     }
     scatter();
     mempoolIsland.claimGround();
+    timechainIsland.claimGround();
     reflowScenery();
     buildSpots();
     buildClouds();
@@ -6481,8 +6637,12 @@
     shared.workHit = (cave) => clankers && clankers.hit(cave);
     shared.workPlanned = (cave, site) => clankers && clankers.plan(cave, site);
     mark("pile");
+    shared.residentPose = timechainResidentPose;
     crew = shared.crew = crewMod.create(shared);
     for (const cave of crew.list) crew.setJetpackOwnership(cave, true, hubModels.jetpack(), hubModels.jetFlame());
+    // Sani hosts the island on ordinary visits; explicit activity fixtures still exercise every state.
+    const sani = crew.cavemen.get("SaniExp");
+    if (sani && !contributors.debugState && preloadedCharacter !== "saniexp") sani.override = "chilling";
     mirrorCave.body = BL.mirrorBody.create(mirrorCave.node, crew.cavemen);
     for (const cave of crew.list) entropyLab.phase.body.track(cave.root, cave.traits.height * 2,
       Math.max(cave.headOpen.verts.length, cave.headClosed.verts.length));
@@ -6589,6 +6749,7 @@
       },
       onDoubleTap: (hit, p) => {
         if (pitArrival) return;
+        if (hit && (hit.owner.prop === "timechainchair" || hit.owner.cave?.traits.name === "SaniExp" && timechainIsland?.seat.active)) { spinTimechainChair(); return; }
         if (hit && hit.owner.kind === "clanker") return;
         else {
           if (clankerPlay.active) clankerPlay.release();
@@ -6677,6 +6838,7 @@
     Object.assign(hubScene, {
       root, camera, input,
       debug: {
+        get timechainIsland() { return timechainIsland; },
         slots: pile.slots, drops: pile.drops, core: pile.core, shell: pile.shell, delivery: pile.delivery, spillEffect: pile.spillEffect, cavemen: crew.cavemen, crates: crates.list, lab: null, hud, applyAllSwag: crew.applyAllSwag, renderLocker: crew.renderLocker, demoTip, setPileLevel: pile.setLevel, refreshStates: crew.refreshStates, trimPool: fx.trimPool,
         get shown() {
           return pile.shown;
@@ -6923,6 +7085,10 @@
     unsubscribeMempool = null;
     unsubscribeChain();
     unsubscribeChain = null;
+    timechainIsland.boards.dispose();
+    timechainIsland.beer.dispose();
+    timechainBoardShown = -1;
+    hud.closeJumbotron();
     if (chainSign && chainSign.node.geometry) renderer.releaseGeometry(chainSign.node.geometry);
     chainSign = null;
     weather.dispose();
@@ -7029,7 +7195,7 @@
     // Drop every per-visit ref but the cached island.
     terrainRampRoof = pathNode = altar = hud = hooks = input = pilot = fx = cameraCover = bananaCover = solids = rockGuides = objectGuides = sightGuides = bananaGuides = pileGuides = platformGuides = mirrorGuides = pile = crew = crates = critters = clock = presets = mirrorCave = matrixCave = matrixControl = gateRain = fire = headquarters = positionDebug = dockStairs = overlayCanvas = null;
     beasts.clear();
-    magazine = magazineState = breakables = weather = mempoolIsland = clankers = clankerPlay = null;
+    magazine = magazineState = breakables = weather = mempoolIsland = timechainIsland = clankers = clankerPlay = null;
     hubScene.input = hubScene.debug = null;
     return { targets: count };
   };
@@ -7053,6 +7219,7 @@
     root: null, camera: null, input: null, debug: null,
     get inMotion() {
       if (cutawayRestoreTime < CUTAWAY_RESTORE_TIME) return true;
+      if (timechainIsland && (timechainIsland.seat.active || timechainIsland.seat.speed > 0)) return true;
       if (pile.inMotion || fx.inMotion || breakables.inMotion || weather.active || magazine && magazine.revealed || MATRIX_WORLD.active || mirrorGuides.state.doorway || mirrorCave.damage.active || mirrorCave.ripples.active || mirrorCave.body.active || entropyLab.phase.ripples.active || entropyLab.phase.body.contacts || entropyLab.phase.body.active) return true;
       for (const sign of headquarters.roomSigns) if (sign.velocity || sign.node.rotation.x) return true;
       for (let i = 0; i < matrixGates.length; i++) if (matrixCave && (matrixGates[i].raising || matrixCave.unlocked && matrixGates[i].node.position.y !== MATRIX_GATE_HIDDEN_Y)) return true;
