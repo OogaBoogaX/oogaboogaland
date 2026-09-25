@@ -211,6 +211,9 @@
         if (e.type === "pointerdown") suppressClick = false;
         return;
       }
+      // Pointer lock may swallow the release of the right press that changed
+      // views. A new right down proves that hold ended; route this new click.
+      if (e.type === "pointerdown" && e.button === 2) blockedButtons &= ~BUTTON_MASK[2];
       blockedButtons &= buttons;
       if (!locked()) {
         if (e.target !== canvas) {

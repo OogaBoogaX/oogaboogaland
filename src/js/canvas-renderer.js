@@ -1417,6 +1417,7 @@
       mirrorDebug.bodyContacts = mirrorDebug.bodyWaves = 0;
       mirrorDebug.shardsDrawn = 0;
       let mirrorNode = null;
+      const viewActor = !environmentCapture && opts.beforeView?.();
       updateWorld(root, null);
       traverseVisible(root, (node) => {
         if (environmentCapture && (node.mirror || node.mirrorPortal || node.mirrorShard || node.mirrorRippleOnly)) return;
@@ -1449,6 +1450,7 @@
           else if (node.geometry) shadeNode(node);
         }
       });
+      if (viewActor) { opts.afterView?.(); updateWorld(viewActor.root, viewActor.root.parent?.world || null); }
       if (!environmentCapture && mirrorNode && mirrorDebug.shardsDrawn) updateEnvironment(root, mirrorNode, camera, opts);
       active.length = poolUsed;
       // Reuse the face-pool high-water mark; equal depths keep gather order.

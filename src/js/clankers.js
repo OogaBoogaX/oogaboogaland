@@ -1053,6 +1053,7 @@
     };
     const leaveLounge = (e) => {
       e.groomTime = 0; e.motion.groom = 0; e.loungePartner = null;
+      e.motion.sitTime = e.motion.sitLookTarget = e.motion.sitShiftTarget = 0;
       if (e.lounge) e.loungeDepart = true;
     };
     const roamStartClear = (e) => {
@@ -1252,6 +1253,8 @@
       e.loungeRoof = roof; e.loungePartner = partner; e.loungeHeading = heading;
       e.loungeCycle = roof ? e.loungeCycle + 1 : 0;
       e.groomTime = 0; e.groomWait = 2 + e.random() * 6;
+      e.motion.sitTime = 0; e.motion.sitWait = 2 + e.random() * 5;
+      e.motion.sitLookTarget = e.motion.sitShiftTarget = 0;
       if (!e.loungeDepart) e.lounge = "";
       e.phase = "chill"; e.motion.groom = 0; e.roam.arrived = false; e.roam.failedChoices = 0; e.roam.pose = partner ? "sit" : pose || loungePose(e);
       e.roam.departPending = false;
@@ -1433,6 +1436,21 @@
       }
       e.motion.groom = damp(e.motion.groom, near && e.groomTime > 0 ? 1 : 0, 6, dt);
       e.motion.groomPhase += dt;
+      const m = e.motion;
+      if (!seated || e.loungeDepart) m.sitTime = m.sitLookTarget = m.sitShiftTarget = 0;
+      else if (m.sitTime > 0) {
+        m.sitTime = Math.max(0, m.sitTime - dt);
+        if (!m.sitTime) m.sitLookTarget = m.sitShiftTarget = 0;
+      } else if ((m.sitWait -= dt) <= 0) {
+        m.sitWait = 4 + e.random() * 7;
+        const choice = e.random(), side = e.random() < 0.5 ? -1 : 1;
+        if (choice < 0.52) { m.sitLookTarget = side; m.sitTime = 1.2 + e.random() * 1.5; }
+        else if (choice < 0.8 && !partner && m.groom < 0.05) {
+          m.sitShiftTarget = side; m.sitLookTarget = side * 0.4; m.sitTime = 3 + e.random() * 2;
+        }
+      }
+      m.sitLook = damp(m.sitLook, m.sitLookTarget, 4, dt);
+      m.sitShift = damp(m.sitShift, m.sitShiftTarget, 3, dt);
     };
     const departLounge = (e, dt) => {
       e.speed = 0; e.motion.groom = 0;
@@ -1617,6 +1635,7 @@
           cancelled: false, charge: 0, vx: 0, vy: 0, vz: 0, airborne: false, passiveFall: false, grounded: true, resume: false, motionRecover: 0, motionEnvelope: false },
         motion: { charge: 0, poundCharge: 0, takeoff: 0, landing: 0, supportOffset: 0, roll: 0, rollAngle: 0, smash: false, dragging: false,
           climb: 0, climbBlend: NaN, climbStride: 0, climbDirection: 0, mantle: 0, groom: 0, groomSide: 1, groomPhase: 0,
+          sitWait: 3, sitTime: 0, sitLook: 0, sitShift: 0, sitLookTarget: 0, sitShiftTarget: 0,
           lab: false, labWork: "", labPhase: i * 0.71, labSide: 1, labDt: 1 / 30, labReach: 0, labGripY: 0.53105, labSqueeze: false,
           labDie: false, labRoll: 0, labBench: null },
         climb: { active: false, requested: 0, requestHeading: 0, requestUntil: 0, action: 0, actionAt: -Infinity,

@@ -3383,38 +3383,54 @@ const hubBirdsEye = { name: "birds-eye combat camera", why: "regression: centere
     && selectionModes[5].mode === "shoulder" && selectionModes[5].combat, JSON.stringify(selectionModes));
   const rightViews = await b.evaluate(`(() => {
     const B = __ooga, P = B.pilot, C = B.camera, a = P.player, canvas = document.getElementById("scene"), rows = [];
-    const click = () => {
-      for (const type of ["pointerdown", "pointerup"]) canvas.dispatchEvent(new PointerEvent(type, {
+    const pointer = type => canvas.dispatchEvent(new PointerEvent(type, {
         bubbles: true, cancelable: true, pointerType: "mouse", pointerId: 92, isPrimary: true, button: 2,
         buttons: type === "pointerdown" ? 2 : 0, clientX: B.renderer.size.width / 2, clientY: B.renderer.size.height / 2
       }));
-    };
+    const click = (release = true) => { pointer("pointerdown"); if (release) pointer("pointerup"); };
     const sample = () => ({ mode: P.mode, combat: P.aiming, distance: P.orbit.dist, wanted: P.orbit.tDist,
       height: P.birdsEyeHeight, y: C.position.y, horizontal: Math.hypot(C.position.x - a.root.position.x, C.position.z - a.root.position.z) });
     for (const floor of [0, B.island.headquarters.basement.floor]) {
       P.navigate({ position: { x: -8, y: floor, z: 8 }, yaw: 0, pitch: 0.3, dist: 4 });
       if (P.aiming) P.modeAction("mode-toggle");
       B.advance(1, 1 / 60);
-      const before = sample(); click(); const single = sample(); click(); const immediate = sample();
+      const before = sample(); click(); const single = sample(); click(false); const immediate = sample();
       B.advance(2, 1 / 60); const out = sample();
       click(); B.advance(1, 1 / 60); const back = sample();
       P.hooks.onZoom(1.2); B.advance(2, 1 / 60); const wheelOut = sample();
       P.hooks.onZoom(0.99); B.advance(1, 1 / 60); const wheelBack = sample();
       rows.push({ floor, before, single, immediate, out, back, wheelOut, wheelBack });
     }
+    P.hooks.onZoom(0.8); B.advance(1, 1 / 60); const carryFirst = sample();
+    P.hooks.onZoom(1.2); B.advance(1, 1 / 60); const carryScrollBack = sample();
+    P.hooks.onZoom(0.8); B.advance(1, 1 / 60);
+    click(); click(false); B.advance(1, 1 / 60); const carryFirstOut = sample();
+    click(); B.advance(1, 1 / 60); const carryFirstBack = sample();
+    P.hooks.onZoom(1.2); B.advance(1, 1 / 60);
     P.modeAction("mode-toggle"); B.advance(1, 1 / 60);
-    click(); click(); B.advance(1, 1 / 60); const combatOut = sample();
+    click(); click(false); B.advance(1, 1 / 60); const combatOut = sample();
     click(); B.advance(1, 1 / 60); const combatBack = sample();
-    return { rows, combatOut, combatBack };
+    P.hooks.onZoom(0.8); B.advance(1, 1 / 60); const combatFirst = sample();
+    click(); click(false); B.advance(1, 1 / 60); const combatFirstOut = sample();
+    click(); B.advance(1, 1 / 60); const combatFirstBack = sample();
+    return { rows, carryFirst, carryScrollBack, carryFirstOut, carryFirstBack, combatOut, combatBack,
+      combatFirst, combatFirstOut, combatFirstBack };
   })()`);
-  record("view gestures: right-click preserves carry, double-right-click exits shoulder, and both orbit zoom boundaries agree",
+  record("view gestures: right-click returns from orbit to the prior shoulder or first-person view, and first-person scroll exits to shoulder",
     rightViews.rows.every(r => r.single.mode === "shoulder" && !r.single.combat && Math.abs(r.immediate.y - r.before.y) < 1e-6
       && [r.out, r.wheelOut].every(s => s.mode === "orbit" && !s.combat && Math.abs(s.distance - 6) < 0.01 && s.wanted === 6)
       && [r.back, r.wheelBack].every(s => s.mode === "shoulder" && !s.combat))
     && rightViews.rows[0].out.horizontal < 0.01
     && Math.abs(rightViews.rows[1].out.y - rightViews.rows[1].before.y) < 0.01
+    && rightViews.carryFirst.mode === "first-person" && !rightViews.carryFirst.combat
+    && rightViews.carryScrollBack.mode === "shoulder" && !rightViews.carryScrollBack.combat
+    && rightViews.carryFirstOut.mode === "orbit" && !rightViews.carryFirstOut.combat
+    && rightViews.carryFirstBack.mode === "first-person" && !rightViews.carryFirstBack.combat
     && rightViews.combatOut.mode === "birds-eye" && rightViews.combatOut.combat && rightViews.combatOut.height === 21
-    && rightViews.combatBack.mode === "shoulder" && rightViews.combatBack.combat, JSON.stringify(rightViews));
+    && rightViews.combatBack.mode === "shoulder" && rightViews.combatBack.combat
+    && rightViews.combatFirst.mode === "first-person" && rightViews.combatFirst.combat
+    && rightViews.combatFirstOut.mode === "birds-eye" && rightViews.combatFirstOut.combat
+    && rightViews.combatFirstBack.mode === "first-person" && rightViews.combatFirstBack.combat, JSON.stringify(rightViews));
   const shoulderFraming = await b.evaluate(`(() => {
     const B = __ooga, P = B.pilot, a = P.player, rows = [];
     const sample = () => {
@@ -4073,6 +4089,25 @@ const hubBirdsEyeFloors = { name: "birds-eye lower floors", why: "regression: ra
     transitions.push(transition("basement carry entry", toggle));
     transitions.push(transition("basement shoulder exit", () => P.hooks.onZoom(0.001), 150));
     transitions.push(transition("basement shoulder entry", () => P.hooks.onZoom(1.2)));
+    toggle(); B.advance(1, 1 / 60);
+    P.hooks.onZoom(0.001); B.advance(1, 1 / 60);
+    const carryRoofs = { out: true, in: true, settled: false, hiddenMarkers: true };
+    P.hooks.onZoom(1.2);
+    for (let i = 0; i < 60; i++) {
+      B.advance(1 / 60, 1 / 60);
+      carryRoofs.out = carryRoofs.out && P.mode === "orbit" && B.renderOpts.cutawayFade === 1
+        && B.renderOpts.cutawayMaxY < H.ceiling - 0.5;
+      carryRoofs.hiddenMarkers = carryRoofs.hiddenMarkers && D.headquarters.rampMarkers.every(marker => !marker.node.visible);
+    }
+    P.hooks.onZoom(0.99);
+    for (let i = 0; i < 120 && P.shoulderEntryMix < 1; i++) {
+      B.advance(1 / 60, 1 / 60);
+      carryRoofs.in = carryRoofs.in && P.mode === "shoulder" && B.renderOpts.cutawayFade === 1
+        && B.renderOpts.cutawayMaxY < H.ceiling - 0.5;
+    }
+    B.advance(1, 1 / 60);
+    carryRoofs.settled = P.mode === "shoulder" && P.shoulderEntryMix === 1 && B.renderOpts.cutawayFade === 0;
+    toggle(); P.hooks.onZoom(1.2); B.advance(1, 1 / 60);
     const cave = places.find(q => q.name === "cave");
     P.navigate({ position: { x: cave.x, y: cave.floor, z: cave.z }, yaw: 0, pitch: 0.3, dist: 8 }); B.advance(2, 1 / 60);
     transitions.push(transition("cave roof exit", toggle));
@@ -4091,7 +4126,7 @@ const hubBirdsEyeFloors = { name: "birds-eye lower floors", why: "regression: ra
     const cache = entries.map(e => ({ ...e.cap.stats }));
     return { rows, thresholds, rampTravel, pathTravel, landingCoverage, coverFade, initialSpans, birdseyeWindows, mouthRims, rampEntranceFrame, rampMarkers, markerViews, markerCoverage, rampVines, rampWindowCells, rampWindowFaces, rampWindowBaseFaces, rampWindowCrossingFaces, rampWindowFacesPreserved, rampWindowFaceOwnership,
       overlapCells, overlapOwnership, retainedFloors, floorsPreserved, noRampRegions: !D.rampSections,
-      flight, transitions, released, restored, immutable, landmarks, cache, regionStorage: regions === B.renderOpts.cutawayRegions, sections: D.terrainSections.length, caves: D.caveSections.length, clouds: clouds.length, weather: weather.length, weatherPreserved: weather.every(n => n.geometry.cutawayPreserve) };
+      flight, transitions, carryRoofs, released, restored, immutable, landmarks, cache, regionStorage: regions === B.renderOpts.cutawayRegions, sections: D.terrainSections.length, caves: D.caveSections.length, clouds: clouds.length, weather: weather.length, weatherPreserved: weather.every(n => n.geometry.cutawayPreserve) };
   })()`);
   const rows = state.rows, underground = rows.filter(r => r.requestedFloor < -0.15), surface = rows.filter(r => r.requestedFloor >= -0.15);
   record("birds-eye combat: surface and hills retain their terrain, caves use local roof cuts, and HQ and basement use the current floor's global section", rows.length === 5 && rows.every(r => r.mode === "birds-eye" && r.overhead && r.horizontal < 1e-6 && Math.abs(r.floor - r.requestedFloor) < 0.2 && r.unchanged)
@@ -4176,12 +4211,16 @@ const hubBirdsEyeFloors = { name: "birds-eye lower floors", why: "regression: ra
     && state.landmarks.length === 3 && state.landmarks.every(p => p[0] === 0 && p[1] === 0) && state.clouds > 0 && state.weather > 0, JSON.stringify({ ...state, rows: rows.map(r => ({ name: r.name, zoomStable: r.zoomStable, zoomMoved: r.zoomMoved, caps: r.caps })) }));
   record("birds-eye combat: the pile, HQ hearth and basement center align on screen at every selected floor despite their different elevations", rows.every(r => r.orthoMix === 1 && r.centerError < 0.001), JSON.stringify(rows.map(({ name, centerError, orthoMix }) => ({ name, centerError, orthoMix }))));
   record("birds-eye combat: cave roofs, underground cuts and weather follow the full camera blend through carry and shoulder handoffs, including reversal without a reset", state.transitions.length === 8
-    && state.transitions.every(r => r.immediate < 1e-6 && r.mixStep < 0.08 && r.cutStep < 5 && r.fadeError < 1e-6 && r.rockError < 1e-6 && r.capError < 1e-5 && r.span > 1 && r.changed >= 10 && r.direction && r.blended >= 10 && r.maxRegions <= 8)
+    && state.transitions.every(r => r.immediate < 1e-6 && r.mixStep < 0.08 && r.cutStep < 5 && r.rockError < 1e-6 && r.capError < 1e-5 && r.maxRegions <= 8)
+    && state.transitions.slice(0, 4).every(r => r.after.fade === 1 && r.after.cuts.length > 0)
+    && state.transitions.slice(4).every(r => r.fadeError < 1e-6 && r.span > 1 && r.changed >= 10 && r.direction && r.blended >= 10)
     && state.transitions[1].after.mix > 0 && state.transitions[1].after.mix < 1
     && state.transitions[2].before.mix === state.transitions[1].after.mix
-    && [0, 2, 4, 6].every(i => state.transitions[i].after.mix === 0 && state.transitions[i].after.fade === 0 && !state.transitions[i].after.cuts.length)
+    && [0, 2].every(i => state.transitions[i].after.mix === 0 && state.transitions[i].after.fade === 1 && state.transitions[i].after.cuts.length > 0)
+    && [4, 6].every(i => state.transitions[i].after.mix === 0 && state.transitions[i].after.fade === 0 && !state.transitions[i].after.cuts.length)
     && [3, 5, 7].every(i => state.transitions[i].after.mix === 1 && state.transitions[i].after.fade === 1 && state.transitions[i].after.cuts.length > 0)
     && state.transitions[4].after.mode === "shoulder" && state.transitions[5].after.mode === "birds-eye", JSON.stringify(state.transitions));
+  record("carry orbit: upper floors stay hidden in both lower-level camera handoffs and return after shoulder settles", Object.values(state.carryRoofs).every(Boolean), JSON.stringify(state.carryRoofs));
   const released = state.released;
   record("birds-eye combat: releasing the actor completes a bounded weather fade and upward rock scan after the camera stops following", released.before.mix === 1 && released.before.fade === 1 && released.immediateFade < 1e-6
     && released.fadeStep < 0.08 && released.cutStep < 5 && released.capError < 1e-5 && released.span > 1 && released.changed >= 10 && released.direction && released.blended >= 10 && released.withoutPlayer >= 10
@@ -4495,8 +4534,20 @@ const hubBirdsEyeTargets = { name: "birds-eye lower-floor targets", why: "rule: 
           const q = point && B.project(point.x, point.y, point.z, {});
           error = Math.max(error, q ? Math.hypot(q.x - B.renderer.size.width / 2, q.y - B.renderer.size.height / 2) : Infinity);
         }
-        closeAim.push({ fresh, found, mode: P.mode, error });
-        P.hooks.onZoom(1.2); B.advance(1, 1 / 60);
+        const mode = P.mode;
+        if (fresh) { P.hooks.onOrbit(0.015, 0); B.advance(1, 1 / 60); }
+        const eye = B.camera, vx = eye.target.x - eye.position.x, vy = eye.target.y - eye.position.y, vz = eye.target.z - eye.position.z;
+        const rayLength = Math.hypot(vx, vy, vz), exitHit = {};
+        const exitFound = B.input.weaponTargets.ray(exitHit, eye.position.x, eye.position.y, eye.position.z, vx / rayLength, vy / rayLength, vz / rayLength, 60, a);
+        const exitPoint = exitFound ? { x: exitHit.x, y: exitHit.y, z: exitHit.z } : null;
+        P.hooks.onZoom(1.2);
+        let exitError = 0;
+        for (let frame = 0; frame < 90; frame++) {
+          B.advance(1 / 60, 1 / 60);
+          const q = exitPoint && B.project(exitPoint.x, exitPoint.y, exitPoint.z, {});
+          exitError = Math.max(exitError, q ? Math.hypot(q.x - B.renderer.size.width / 2, q.y - B.renderer.size.height / 2) : Infinity);
+        }
+        closeAim.push({ fresh, found, mode, error, exitFound, exitMode: P.mode, exitError });
       }
       P.hooks.onZoom(1.2); B.advance(1, 1 / 60);
       return { far, near, firearm, jump, handoff, closeAim, floor: H.basement.floor, beforeMelee, afterMelee, afterShot,
@@ -4512,8 +4563,8 @@ const hubBirdsEyeTargets = { name: "birds-eye lower-floor targets", why: "rule: 
   record("birds-eye combat: a full-height zoom reaches shoulder promptly, retains the exact elevated world anchor through the swoop, and fires into the same target", result.handoff.mode === "shoulder" && result.handoff.mix > 0 && result.handoff.mix < 1 && result.handoff.offset > 20
     && result.handoff.fromHeight > 60 && result.handoff.frames > 0 && result.handoff.frames < 45 && result.handoff.anchor && result.handoff.anchor.y > result.floor + 0.05
     && result.handoff.targetError < 1e-6 && result.handoff.centerError < 0.1 && result.handoff.shots > 0 && result.handoff.after < result.handoff.before, JSON.stringify(result.handoff));
-  record("combat zoom: retained and freshly aimed object points stay under the crosshair throughout shoulder-to-first-person entry",
-    result.closeAim.length === 2 && result.closeAim.every(row => row.found && row.mode === "first-person" && row.error < 0.1), JSON.stringify(result.closeAim));
+  record("combat zoom: object points stay under the crosshair in both shoulder/first-person directions, including after new first-person aim",
+    result.closeAim.length === 2 && result.closeAim.every(row => row.found && row.mode === "first-person" && row.error < 0.1 && row.exitFound && row.exitMode === "shoulder" && row.exitError < 0.1), JSON.stringify(result.closeAim));
 } };
 
 // ---- Phones ----

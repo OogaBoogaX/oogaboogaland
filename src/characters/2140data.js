@@ -202,7 +202,7 @@
     // nunchaku swings the free stick in crew.js, recipe answers a poke with the
     // prompt for adding an Ooga, and the tint hook below drives the colourway.
     look: {
-      nunchaku: true, recipe: true, jetTank: 0.3,
+      nunchaku: true, recipe: true, footRockets: true,
       bald: true, hairless: true, cleanShaven: true, noBrow: true, noPupils: true,
       face: "none", hatY: 12, height: 1.12,
       skin: "#c03429", hair: "#191b1e", fur: "#6e1811"
@@ -256,9 +256,8 @@
           k.parts.chukTrail.push(ghost);
           addChild(k.parts.armL, ghost);
         }
-        // crew.js flies and toggles these built-in thrusters exactly like the
-        // standard pack. The mount sits on the sole plane, under both feet.
-        k.parts.jetpack = createNode({ position: { x: 0, y: -5 * u, z: 0 } });
+        // Both the held jump and an equipped jetpack use the same sole thrusters.
+        k.parts.jetpack = createNode({ position: { x: 0, y: -5 * u, z: 0 }, visible: false });
         k.parts.jetFlame = createNode({ geometry: voxelGeometry(flameVox(), { unit: u, palette: FLAME_PALETTE, origin: { x: -4.5 * u, y: 0, z: -u }, emissive: FLAME_GLOW }), visible: false });
         addChild(k.parts.jetpack, k.parts.jetFlame);
         addChild(k.root, k.parts.jetpack);

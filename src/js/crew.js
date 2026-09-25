@@ -8,12 +8,16 @@
   const CHEW_PERIOD = 3.2;
   const AMMO_MAX = 30, AMMO_PER_BANANA = 3, RELOAD_PERIOD = 1.2, BURST_ROUNDS = 3, BURST_STEP = 0.09, SHOT_PERIOD = 0.44;
   const SHOT_POWER = 0.5;
-  const MELEE_FOCUS_POWER = 1.5, MELEE_MAX_POWER = 2, MELEE_POKE_POWER = 0.5;
-  const MELEE_WIND = 0.08, MELEE_STRIKE = 0.128, MELEE_RECOVER = 0.112;
+  const GUN_MUZZLE_Y = -0.01, GUN_MUZZLE_Z = 0.67;
+  const GUN_SIGHT_DOWN = Math.atan2(0.09 - 0.08, 0.59 + 0.18);
+  const GUN_SIGHT_DROP = 0.08 * Math.cos(GUN_SIGHT_DOWN) + 0.18 * Math.sin(GUN_SIGHT_DOWN);
+  const GUN_SIGHT_YAW = 0.01, GUN_SIGHT_ROLL = 0.045;
+  const MELEE_FOCUS_POWER = 1.5, MELEE_MAX_POWER = 2, MELEE_QUICK_POWER = 0.5;
+  const MELEE_WIND = 0.08, MELEE_QUICK_WIND = 0.025, MELEE_STRIKE = 0.128, MELEE_QUICK_STRIKE = 0.09, MELEE_RECOVER = 0.112;
   const MELEE_RELEASE = MELEE_STRIKE + MELEE_RECOVER, MELEE_TIME = MELEE_WIND + MELEE_RELEASE;
   const MELEE_TAP_TIME = 0.12, MELEE_CHARGE_DELAY = 0.24, MELEE_CHARGE_TIME = 1;
+  const MELEE_COMBO_WINDOW = 0.4, MELEE_BUFFER_MAX = 8;
   const MELEE_READY_HOLD = 0.5, MELEE_CARRY_BLEND = 0.25;
-  const meleeWindAngle = (w) => -1.1 * ease.inOutQuad(clamp((w.meleeHeld ? w.meleeHeldTime - MELEE_TAP_TIME : MELEE_TIME - w.meleeTime) / MELEE_WIND, 0, 1)) - 0.55 * w.meleeCharge;
   const clearMeleeThrust = (cave) => {
     const w = cave.weapon, p = cave.parts.armL.position;
     p.x -= w.meleeOffsetX; p.y -= w.meleeOffsetY; p.z -= w.meleeOffsetZ;
@@ -105,7 +109,8 @@
   const FOLLOW_GAP = 1.15, FOLLOW_RELEASE = 1.7, NPC_PASS_REACH = 1.9;
   const FIRE_FLEE_REACH = 8, FIRE_FLEE_CLEAR = 10, FIRE_MEMORY_RELEASE = 3, NPC_WALK_SPEED = 1.6;
   const NAV_WIDTH = 21, NAV_SIZE = NAV_WIDTH * NAV_WIDTH, NAV_HALF = 10, NAV_CELL = 0.5, NAV_STEP = 0.025, NAV_CENTER = NAV_HALF * NAV_WIDTH + NAV_HALF;
-  const JUMP_SPEED = 4.8, JET_FUEL_SECONDS = 8, JET_MOVE_SECONDS = JET_FUEL_SECONDS * 2, JET_REFILL_SECONDS = 4, JET_LAUNCH_FUEL = 0.2;
+  const JUMP_SPEED = 4.8, ROCKET_JUMP_TIME = 2 * JUMP_SPEED / WALK.gravity;
+  const JET_FUEL_SECONDS = 8, JET_MOVE_SECONDS = JET_FUEL_SECONDS * 2, JET_REFILL_SECONDS = 4, JET_LAUNCH_FUEL = 0.2;
   // Fuel limits range and altitude; releasing thrust falls back to ordinary gravity.
   const JET_ACCEL = 20, JET_RISE = 7, JET_SPEED = 6.4, JET_PUFF = 0.05;
   const JET_SPARKS = [models.particleGeometry("#ffb13b", 0.09, 1), models.particleGeometry("#f3efe4", 0.07, 0.6)];
@@ -132,7 +137,8 @@
     return points;
   };
   const SMOKE_LOCAL = new Float32Array(3), SMOKE_INVERSE = math.mat4.create();
-  const GUN_ARM = math.quat.create(), GUN_GRIP = math.quat.create(), GUN_SWAP_TARGET = math.quat.create();
+  const GUN_ARM = math.quat.create(), GUN_GRIP = math.quat.create(), GUN_SWAP_TARGET = math.quat.create(), GUN_SIGHT = math.quat.create();
+  const MELEE_SWING = math.quat.create(), MELEE_DOWN_INV = 1 / Math.hypot(0.07, -0.27, 0.96);
   const MELEE_REST_ARM = math.quat.create(), MELEE_REST_CLUB = math.quat.create(), MELEE_REST_GRIP = new Float64Array(3);
   const AXE_FORWARD_ROTATION = math.quat.create(), AXE_UPRIGHT_ROTATION = math.quat.create(), AXE_ARM_INVERSE = math.quat.create();
   math.quat.fromEuler(AXE_FORWARD_ROTATION, 0, Math.PI / 2, Math.PI / 2);
@@ -441,9 +447,10 @@
         addChild(stunBirds, createNode({ geometry: STUN_BIRD, position: { x: Math.sin(angle) * 0.34 * h, y: 0, z: Math.cos(angle) * 0.34 * h }, scale: { x: h, y: h, z: h }, sightHidden: true }));
       }
       addChild(cave.root, stunBirds);
-      cave.parts.gunFlash = createNode({ geometry: GUN_FLASH, position: { x: 0, y: -0.03 * h, z: 0.695 * h },
+      cave.parts.gunFlash = createNode({ geometry: GUN_FLASH, position: { x: 0, y: GUN_MUZZLE_Y * h, z: 0.695 * h },
         scale: { x: h, y: h, z: h }, visible: false });
       addChild(cave.parts.gun, cave.parts.gunFlash);
+      cave.gunViewNodes = [cave.parts.armL, cave.parts.fingersL, cave.parts.gunBody, cave.parts.gunFlash, ...cave.parts.gunBananas];
       let weapon = world.weapons.get(contributor.name);
       if (!weapon) { weapon = { equipped: false, ammo: AMMO_MAX }; world.weapons.set(contributor.name, weapon); }
       if (weapon.primaryOwned === undefined) weapon.primaryOwned = true;
@@ -471,9 +478,13 @@
       weapon.aimYaw = 0;
       weapon.primaryEquipped = false;
       weapon.selectedSlot = weapon.selectedSlot === 2 ? 2 : 1;
-      weapon.meleeTime = weapon.meleeCooldown = 0;
+      weapon.meleeTime = 0;
       weapon.meleeHeld = false;
-      weapon.meleePoke = false;
+      weapon.meleeQuick = false;
+      weapon.meleeSide = 1; weapon.meleeComboTime = 0;
+      weapon.meleeBladeTurn = weapon.meleeEntryBladeTurn = 0;
+      weapon.meleeBuffered = 0; weapon.meleeBufferHeld = false;
+      weapon.meleeEntryX = weapon.meleeEntryY = weapon.meleeEntryZ = weapon.meleeEntryClubZ = 0;
       weapon.meleeReadyTime = 0;
       weapon.meleeAxeArm = math.quat.create(); weapon.meleeAxeClub = math.quat.create();
       weapon.meleeAxeGrip = { x: 0, y: 0, z: 0 }; weapon.meleeAxeArmX = 0;
@@ -486,7 +497,6 @@
       weapon.meleeStop = 1;
       weapon.meleePower = 1;
       weapon.axeIdle = cave.traits.stoneAxe ? AXE_STICK_DELAY + AXE_STICK_BLEND : 0;
-      weapon.meleeStrikeFrom = -1.1;
       Object.assign(cave, {
         weapon,
         tintTime: cave.tint ? tintWait() : 0, tintState: 0, tintHold: 0,
@@ -506,6 +516,9 @@
         axeRotation: math.quat.create(),
         gunHandRotation: math.quat.create(),
         gunSupportRotation: math.quat.create(),
+        gunSightArmOffset: { x: 0, y: 0, z: 0 },
+        gunSightCamera: null,
+        gunSightMix: 0,
         magazineModels: [weapon.spareAmmo.length > 0 ? createMagazineModel() : null, weapon.spareAmmo.length > 1 ? createMagazineModel() : null],
         meleePoints: meleeExtremes(cave.parts.club.geometry),
         clubSlingProfile: clubSlingProfile(cave.parts.club.geometry),
@@ -545,6 +558,7 @@
         hop: 0,
         hopV: 0,
         jumps: 0,
+        rocketJumpTime: 0, rocketJumpHeld: false, rocketPuff: 0,
         breathAt: 15 + Math.random() * 15,
         breathPuffs: 0,
         breathTotal: 12,
@@ -577,7 +591,7 @@
       });
       // A character built with its own pack wears it from the first frame and
       // uses the same flight, fuel, recovery and toggle as every other pack.
-      if (cave.parts.jetpack) cave.jet = { node: cave.parts.jetpack, flame: cave.parts.jetFlame, thrust: false, spending: false, power: 0, puff: 0 };
+      if (cave.parts.jetpack && !cave.traits.footRockets) cave.jet = { node: cave.parts.jetpack, flame: cave.parts.jetFlame, thrust: false, spending: false, power: 0, puff: 0 };
       cave.root.visible = false;
       addChild(root, cave.root);
       addChild(root, cave.sleepWeapons);
@@ -759,7 +773,7 @@
       cave.parts.torso.scale.y = 1;
       cave.parts.club.visible = cave.weapon.primaryOwned;
       for (const node of cave.sleepParts.equipment) node.visible = true;
-      if (builtInJetpack(cave)) cave.parts.jetpack.visible = !!cave.jet;
+      if (builtInJetpack(cave)) cave.parts.jetpack.visible = !!cave.jet || cave.rocketJumpTime > 0;
       cave.parts.snack.visible = false;
       cave.parts.gun.visible = false;
       cave.yawn = 0;
@@ -1253,7 +1267,7 @@
     const weaponOrigin = (out, cave = player, melee = false) => {
       BL.scene.updateWorld(cave.root);
       const node = melee ? cave.parts.armL : cave.parts.gun, h = cave.traits.height;
-      math.mat4.transformPoint(MUZZLE, node.world, 0, melee ? 0 : -0.03 * h, melee ? 0 : 0.66 * h);
+      math.mat4.transformPoint(MUZZLE, node.world, 0, melee ? 0 : GUN_MUZZLE_Y * h, melee ? 0 : GUN_MUZZLE_Z * h);
       return setVec(out, MUZZLE[0], MUZZLE[1], MUZZLE[2]);
     };
     const meleeReach = (cave = player) => Math.hypot(0.625, 0.15) * cave.traits.height + BL.scene.boundsOf(cave.parts.club.geometry).max[1];
@@ -1363,7 +1377,7 @@
       const bullet = bulletPool[bulletIdx++ % bulletPool.length], node = bullet.node;
       const h = cave.traits.height;
       BL.scene.updateWorld(cave.root);
-      math.mat4.transformPoint(MUZZLE, cave.parts.gun.world, 0, -0.03 * h, 0.66 * h);
+      math.mat4.transformPoint(MUZZLE, cave.parts.gun.world, 0, GUN_MUZZLE_Y * h, GUN_MUZZLE_Z * h);
       const from = setVec(bullet.from, MUZZLE[0], MUZZLE[1], MUZZLE[2]);
       const to = setVec(bullet.to, spot.x, spot.y === undefined ? groundAt(spot.x, spot.z) + 0.75 : spot.y, spot.z);
       bullet.workShot = cave !== player && !!workBodyTarget && cave.weapon.burstWork;
@@ -1540,11 +1554,14 @@
       cave.weapon.primaryEquipped = slot === 1;
       cave.weapon.equipped = slot === 2;
       if (slot) cave.weapon.selectedSlot = slot;
-      cave.weapon.meleeTime = cave.weapon.meleeCooldown = 0;
+      cave.weapon.meleeTime = 0;
       cave.weapon.meleeReadyTime = 0;
       cave.weapon.meleeTarget.node = null;
       cave.weapon.meleeHeld = false;
-      cave.weapon.meleePoke = false;
+      cave.weapon.meleeQuick = false;
+      cave.weapon.meleeSide = 1; cave.weapon.meleeComboTime = 0;
+      cave.weapon.meleeBladeTurn = cave.weapon.meleeEntryBladeTurn = 0;
+      cave.weapon.meleeBuffered = 0; cave.weapon.meleeBufferHeld = false;
       cave.weapon.meleeHeldTime = cave.weapon.meleeCharge = 0;
       cave.weapon.meleeStrikeTime = MELEE_STRIKE;
       cave.weapon.meleePower = 1;
@@ -1568,9 +1585,21 @@
       }
       return changed;
     };
-    const swingWeapon = (cave = player, held = false, focused = false) => {
-      if (!cave || cave.health.stunned || !cave.weapon.primaryOwned || !cave.weapon.primaryEquipped || cave.weapon.meleeCooldown > 0 || cave.weapon.meleeTime > 0 || cave !== player && (cave.camp.burning || cave.camp.rolling) || cave.camp.seat || cave.bedTravel.mode) return false;
+    const swingWeapon = (cave = player, held = false, focused = false, fromBuffer = false) => {
+      if (!cave || cave.health.stunned || !cave.weapon.primaryOwned || !cave.weapon.primaryEquipped || cave !== player && (cave.camp.burning || cave.camp.rolling) || cave.camp.seat || cave.bedTravel.mode) return false;
       const w = cave.weapon, arm = cave.parts.armL, club = cave.parts.club;
+      if (w.meleeHeld || w.meleeBufferHeld) return false;
+      if (w.meleeTime > MELEE_RECOVER || w.meleeBuffered && !fromBuffer) {
+        // A click made during a stroke waits for its contact instead of being
+        // dropped or forcing the previous hit to finish off screen.
+        if (!held || w.meleeBuffered >= MELEE_BUFFER_MAX) return false;
+        w.meleeBufferHeld = true;
+        return true;
+      }
+      w.meleeSide = w.meleeComboTime > 0 ? -w.meleeSide : 1;
+      w.meleeEntryX = arm.rotation.x; w.meleeEntryY = arm.rotation.y; w.meleeEntryZ = arm.rotation.z;
+      w.meleeEntryClubZ = club.rotation.z;
+      w.meleeEntryBladeTurn = w.meleeBladeTurn;
       if (cave.traits.stoneAxe) {
         if (arm.quaternion) w.meleeAxeArm.set(arm.quaternion);
         else math.quat.fromEuler(w.meleeAxeArm, arm.rotation.x, arm.rotation.y, arm.rotation.z);
@@ -1589,34 +1618,39 @@
       w.meleeAimX = w.meleeAimY = w.meleeAimZ = 0;
       if (!held && ctx.meleeTarget && !ctx.meleeTarget(w.meleeTarget, cave)) w.meleeTarget.node = null;
       w.meleeReadyTime = 0;
-      cave.weapon.meleeTime = MELEE_TIME;
-      cave.weapon.meleeCooldown = 0.45;
-      cave.weapon.meleeHeld = held;
-      cave.weapon.meleePoke = false;
-      cave.weapon.meleeHeldTime = cave.weapon.meleeCharge = 0;
-      cave.weapon.meleeStrikeTime = MELEE_STRIKE;
-      cave.weapon.meleeHit = false;
-      cave.weapon.meleeStop = 1;
-      cave.weapon.meleePower = focused ? MELEE_FOCUS_POWER : 1;
-      cave.weapon.meleeStrikeFrom = -1.1;
+      w.meleeTime = MELEE_TIME;
+      w.meleeHeld = held;
+      w.meleeQuick = false;
+      w.meleeHeldTime = w.meleeCharge = 0;
+      w.meleeStrikeTime = MELEE_STRIKE;
+      w.meleeHit = false;
+      w.meleeStop = 1;
+      w.meleePower = focused ? MELEE_FOCUS_POWER : 1;
+      if (!held) w.meleeComboTime = MELEE_COMBO_WINDOW;
       if (!held) aimMeleeStrike(cave);
       return true;
     };
-    const releaseSwing = (cave = player, cancel = false, focused = null, poke = false) => {
-      if (!cave || !cave.weapon.meleeHeld) return false;
+    const releaseSwing = (cave = player, cancel = false, focused = null, quick = false) => {
+      if (!cave) return false;
       const w = cave.weapon;
+      if (w.meleeBufferHeld) {
+        w.meleeBufferHeld = false;
+        if (cancel) w.meleeBuffered = 0;
+        else w.meleeBuffered = Math.min(MELEE_BUFFER_MAX, w.meleeBuffered + 1);
+        return true;
+      }
+      if (!w.meleeHeld) return false;
       w.meleeTarget.node = null;
       if (!cancel && ctx.meleeTarget && !ctx.meleeTarget(w.meleeTarget, cave)) w.meleeTarget.node = null;
-      w.meleeStrikeFrom = meleeWindAngle(w);
       w.meleeHeld = false;
-      w.meleePoke = poke && !cancel;
+      w.meleeQuick = quick && !cancel;
       const focusPower = focused === null ? w.meleePower : focused ? MELEE_FOCUS_POWER : 1;
-      w.meleePower = w.meleePoke ? MELEE_POKE_POWER : Math.min(MELEE_MAX_POWER, Math.max(focusPower, 1 + w.meleeCharge));
-      // A quick tap never enters the swing wind-up. Its short preparation
-      // points the weapon ahead before the straight thrust can hit anything.
-      w.meleeStrikeTime = MELEE_STRIKE * (1 + w.meleeCharge * 0.5);
-      w.meleeTime = cancel ? 0 : w.meleeStrikeTime + MELEE_RECOVER + (w.meleePoke ? MELEE_WIND : 0);
+      w.meleePower = w.meleeQuick ? MELEE_QUICK_POWER : Math.min(MELEE_MAX_POWER, Math.max(focusPower, 1 + w.meleeCharge));
+      w.meleeStrikeTime = w.meleeQuick ? MELEE_QUICK_STRIKE : MELEE_STRIKE * (1 + w.meleeCharge * 0.5);
+      w.meleeTime = cancel ? 0 : w.meleeStrikeTime + MELEE_RECOVER + (w.meleeQuick ? MELEE_QUICK_WIND : 0);
+      w.meleeComboTime = cancel ? 0 : MELEE_COMBO_WINDOW;
       if (cancel) {
+        w.meleeBuffered = 0;
         w.meleeReadyTime = 0;
         w.meleePower = 1;
         w.meleeHeldTime = w.meleeCharge = 0;
@@ -1708,10 +1742,14 @@
       setVec(gun.position, px - MUZZLE[0], py - MUZZLE[1], pz - MUZZLE[2]);
       cave.weapon.aimPitch = pitch;
     };
-    const poseWeapon = (cave) => {
+    const poseWeapon = (cave, sightCamera = null, sightMix = 0, primaryViewMix = 0) => {
       if (cave.health.stunned) return;
       const w = cave.weapon, parts = cave.parts, gun = parts.gun, h = cave.traits.height;
       clearMeleeThrust(cave);
+      const sightArmOffset = cave.gunSightArmOffset;
+      parts.armL.position.x -= sightArmOffset.x; parts.armL.position.y -= sightArmOffset.y; parts.armL.position.z -= sightArmOffset.z;
+      sightArmOffset.x = sightArmOffset.y = sightArmOffset.z = 0;
+      if (sightCamera && cave === player) { cave.gunSightCamera = sightCamera; cave.gunSightMix = sightMix; }
       if (cave === player || hasMagazine(cave)) syncMagazine(cave);
       let leftSupportsGun = false;
       parts.armR.quaternion = parts.armL.quaternion = null;
@@ -1843,59 +1881,73 @@
           setVec(parts.club.rotation, 0, 0, Math.PI / 2);
           parts.club.quaternion = null;
         }
-        let swing = 0, lower = 0;
+        let wind = 0, stroke = 0;
         const release = w.meleeStrikeTime + MELEE_RECOVER;
-        if (w.meleeTime > release || w.meleeHeld) {
-          swing = meleeWindAngle(w);
+        if (w.meleeHeld) {
+          wind = ease.inOutQuad(clamp(w.meleeHeldTime / MELEE_WIND, 0, 1));
+        } else if (w.meleeTime > release) {
+          wind = ease.inOutQuad(clamp(1 - (w.meleeTime - release) / (w.meleeQuick ? MELEE_QUICK_WIND : MELEE_WIND), 0, 1));
         } else if (w.meleeTime > MELEE_RECOVER) {
-          lower = ease.inOutQuad((release - w.meleeTime) / w.meleeStrikeTime);
-          swing = w.meleeStrikeFrom * (1 - lower);
+          wind = 1;
+          stroke = ease.inOutQuad((release - w.meleeTime) / w.meleeStrikeTime);
         } else if (w.meleeTime > 0) {
           const recovery = 1 - ease.inOutQuad(1 - w.meleeTime / MELEE_RECOVER);
-          lower = w.meleeStop * recovery;
-          swing = w.meleeStrikeFrom * (1 - w.meleeStop) * recovery;
+          wind = recovery;
+          stroke = w.meleeStop;
         }
         const neutral = -0.95 + (w.aiming ? w.aimPitch : 0);
-        const poking = w.meleePoke && w.meleeTime > 0;
-        // Keep the arm on the thrust line for the whole poke. Turning toward
-        // the ready pose while retracting reads as a small, unintended chop.
-        const pokeFacing = !poking ? 0 : w.meleeTime > release ? ease.inOutQuad(clamp(1 - (w.meleeTime - release) / MELEE_WIND, 0, 1))
-          : 1;
-        const thrust = !poking ? 0 : w.meleeTime > release ? 0 : w.meleeTime > MELEE_RECOVER ? lower
-          : w.meleeStop * ease.inOutQuad(clamp((w.meleeTime / MELEE_RECOVER - 0.45) / 0.55, 0, 1));
-        if (poking) swing = (-Math.PI / 2 + 0.95) * pokeFacing;
-        parts.armL.rotation.x = neutral + swing;
-        parts.armL.rotation.y = (w.aiming ? w.aimYaw : 0) - parts.armL.poseYaw * pokeFacing;
-        math.quat.fromEuler(GUN_ARM, parts.armL.rotation.x, parts.armL.rotation.y, parts.armL.rotation.z * (1 - pokeFacing));
+        const side = w.meleeSide, backCut = side < 0;
+        const startX = -2.05 - 0.25 * w.meleeCharge, endX = -0.22;
+        const recovering = !w.meleeHeld && w.meleeTime <= MELEE_RECOVER;
+        const closeHold = w.aiming ? primaryViewMix * (1 - wind) : 0;
+        parts.armL.rotation.x = lerp(recovering ? neutral : w.meleeEntryX,
+          backCut ? startX : lerp(startX, endX, stroke), wind);
+        const strikeYaw = backCut ? -1.1 : lerp(-0.22, 0.15, stroke);
+        parts.armL.rotation.y = lerp(recovering ? (w.aiming ? w.aimYaw : 0) : w.meleeEntryY,
+          (w.aiming ? w.aimYaw : 0) + strikeYaw - parts.armL.poseYaw, wind);
+        // Hold the return cut's shoulder angle; turn the whole rigid arm in
+        // one plane about that fixed shoulder pivot below.
+        const strikeRoll = backCut ? 1.2 : lerp(-0.55, 0.4, stroke);
+        parts.armL.rotation.z = lerp(recovering ? -0.12 : w.meleeEntryZ,
+          strikeRoll, wind);
+        // The close hold draws the weapon inward and up. The camera's view
+        // blend carries the hand back to its shoulder hold without a pose jump.
+        math.quat.fromEuler(GUN_ARM, parts.armL.rotation.x - 0.14 * closeHold,
+          parts.armL.rotation.y - 0.1 * closeHold, parts.armL.rotation.z + 0.22 * closeHold);
         math.quat.fromEuler(GUN_GRIP, 0, Math.PI / 2, 0);
         math.quat.multiply(cave.gunHandRotation, GUN_ARM, GUN_GRIP);
-        // Ordinary swings lower the arm once and chop the wrist to horizontal.
-        let horizontal = Math.atan2(Math.cos(neutral) * Math.cos(parts.armL.rotation.z), Math.sin(neutral));
-        if (horizontal < 0) horizontal += Math.PI * 2;
-        parts.club.rotation.z = Math.PI / 2 + Math.max(0, horizontal - Math.PI / 2) * lower;
-        if (poking) {
-          const yaw = (w.aiming ? w.aimYaw : 0) - parts.armL.poseYaw, pitch = w.aiming ? w.aimPitch : 0;
-          // Keep the shaft on the aim line: inverse wrist * desired shaft.
-          // Both grip and tip then translate together instead of sweeping an arc.
-          const q = cave.gunHandRotation;
-          FINGER_INVERSE[0] = -q[0]; FINGER_INVERSE[1] = -q[1]; FINGER_INVERSE[2] = -q[2]; FINGER_INVERSE[3] = q[3];
-          math.quat.fromEuler(GUN_GRIP, Math.PI / 2 + pitch, yaw, 0);
-          math.quat.multiply(GUN_GRIP, FINGER_INVERSE, GUN_GRIP);
-          math.quat.fromEuler(cave.axeRotation, 0, 0, Math.PI / 2);
-          math.quat.slerpTo(cave.axeRotation, GUN_GRIP, pokeFacing);
-          parts.club.quaternion = cave.axeRotation;
-          const reach = (thrust * 0.2 - pokeFacing * 0.1) * h;
-          w.meleeOffsetX = Math.sin(yaw) * Math.cos(pitch) * reach;
-          w.meleeOffsetY = -Math.sin(pitch) * reach;
-          w.meleeOffsetZ = Math.cos(yaw) * Math.cos(pitch) * reach;
-          parts.armL.position.x += w.meleeOffsetX;
-          parts.armL.position.y += w.meleeOffsetY;
-          parts.armL.position.z += w.meleeOffsetZ;
+        if (backCut && stroke > 0 && wind > 0) {
+          math.quat.rotateVec(MUZZLE, cave.gunHandRotation, 0, -1, 0);
+          const yaw = (w.aiming ? w.aimYaw : 0) - parts.armL.poseYaw;
+          const cy = Math.cos(yaw), sy = Math.sin(yaw);
+          const tx = (0.07 * cy + 0.96 * sy) * MELEE_DOWN_INV;
+          const ty = -0.27 * MELEE_DOWN_INV;
+          const tz = (0.96 * cy - 0.07 * sy) * MELEE_DOWN_INV;
+          const ax = MUZZLE[1] * tz - MUZZLE[2] * ty;
+          const ay = MUZZLE[2] * tx - MUZZLE[0] * tz;
+          const az = MUZZLE[0] * ty - MUZZLE[1] * tx;
+          const span = Math.hypot(ax, ay, az);
+          if (span > 1e-5) {
+            const dot = clamp(MUZZLE[0] * tx + MUZZLE[1] * ty + MUZZLE[2] * tz, -1, 1);
+            math.quat.fromAxisAngle(MELEE_SWING, ax / span, ay / span, az / span,
+              Math.atan2(span, dot) * stroke * wind);
+            math.quat.multiply(cave.gunHandRotation, MELEE_SWING, cave.gunHandRotation);
+          }
         }
-        // A jab translates the axe exactly as held, keeping the blade's
-        // orientation instead of rolling it into a different grip first.
-        const axeGrip = !cave.traits.stoneAxe ? 0 : w.meleeHeld ? 1 - ease.inOutQuad(clamp((w.meleeHeldTime - MELEE_TAP_TIME) / MELEE_WIND, 0, 1))
-          : poking ? 1 : w.meleePoke ? ease.inOutQuad(clamp(w.meleeReadyTime / MELEE_CARRY_BLEND, 0, 1)) : 0;
+        // The wrist leads the return cut so the axe starts falling with the arm.
+        parts.club.rotation.z = lerp(recovering ? Math.PI / 2 : w.meleeEntryClubZ, Math.PI / 2, wind)
+          + (backCut ? 1.1 * Math.sqrt(stroke) * wind : 0) - (recovering ? 0.14 * closeHold : 0);
+        if (cave.traits.stoneAxe && raisedPrimary) {
+          // The first cut turns the edge slightly as it lands, then unwinds
+          // with the arm. The return blade faces forward in its new shoulder pose.
+          const bladeTarget = backCut ? 0 : 0.08 * stroke;
+          w.meleeBladeTurn = recovering ? bladeTarget * wind : lerp(w.meleeEntryBladeTurn, bladeTarget, wind);
+          math.quat.fromEuler(cave.axeRotation, parts.club.rotation.x, parts.club.rotation.y, parts.club.rotation.z);
+          math.quat.fromEuler(GUN_GRIP, 0, w.meleeBladeTurn, 0);
+          math.quat.multiply(cave.axeRotation, cave.axeRotation, GUN_GRIP);
+          parts.club.quaternion = cave.axeRotation;
+        }
+        const axeGrip = cave.traits.stoneAxe && (w.meleeHeld || w.meleeQuick && w.meleeTime > release) ? 1 - wind : 0;
         if (axeGrip > 0) {
           if (w.meleeHeld) {
             math.quat.fromEuler(GUN_ARM, 0, -parts.armL.poseYaw, 0);
@@ -1903,8 +1955,7 @@
             math.quat.slerpTo(cave.gunHandRotation, GUN_ARM, axeGrip);
             parts.armL.rotation.x = lerp(parts.armL.rotation.x, w.meleeAxeArmX, axeGrip);
           }
-          // Counterturn at the grip while the arm extends, so the original
-          // blade stays upright (or diagonal) rather than turning sideways.
+          // Preserve the axe's resting grip while the arm starts its wind-up.
           math.quat.fromEuler(GUN_ARM, 0, parts.armL.poseYaw, 0);
           math.quat.multiply(GUN_ARM, GUN_ARM, cave.gunHandRotation);
           FINGER_INVERSE[0] = -GUN_ARM[0]; FINGER_INVERSE[1] = -GUN_ARM[1]; FINGER_INVERSE[2] = -GUN_ARM[2]; FINGER_INVERSE[3] = GUN_ARM[3];
@@ -1923,7 +1974,7 @@
           parts.club.quaternion = cave.axeRotation;
           setVec(parts.club.position, lerp(parts.club.position.x, MELEE_REST_GRIP[0], carry), lerp(parts.club.position.y, MELEE_REST_GRIP[1], carry), lerp(parts.club.position.z, MELEE_REST_GRIP[2], carry));
         }
-        const towardTarget = poking ? thrust : lower;
+        const towardTarget = !backCut && w.meleeTime > MELEE_RECOVER && w.meleeTime <= release ? stroke : 0;
         if (towardTarget > 0) {
           const dx = w.meleeAimX * towardTarget, dy = w.meleeAimY * towardTarget, dz = w.meleeAimZ * towardTarget;
           w.meleeOffsetX += dx; w.meleeOffsetY += dy; w.meleeOffsetZ += dz;
@@ -2090,6 +2141,48 @@
       if (working && workBodyTarget && cave.work.phase === "shoot" && cave.work.targetReady && drawn && !celebrating
         && !w.reloading && !w.reloadHandoff && !w.swapTime) poseWorkAim(cave);
       if (cave === player) { posePeek(cave, 0); aimPeek(cave); }
+      if (sightCamera && sightMix > 0 && cave === player && drawn && w.equipped && w.aiming
+        && !w.reloading && !w.reloadHandoff && !w.swapTime && !cave.root.quaternion) {
+        const eye = sightCamera.position, target = sightCamera.target, p = cave.root.position;
+        const dx = target.x - eye.x, dy = target.y - eye.y, dz = target.z - eye.z;
+        const length = Math.hypot(dx, dy, dz) || 1, yaw = cave.root.rotation.y, cy = Math.cos(yaw), sy = Math.sin(yaw);
+        const fx = (cy * dx - sy * dz) / length, fy = dy / length, fz = (sy * dx + cy * dz) / length;
+        const flat = Math.max(1e-5, Math.hypot(fx, fz));
+        const kick = clamp((w.recoil - GUN_HOLD + GUN_KICK) / GUN_KICK, 0, 1);
+        const forward = (0.85 - 0.04 * kick) * h, drop = (GUN_SIGHT_DROP - 0.02 * kick) * h;
+        const sightPitch = -Math.atan2(fy, flat) + GUN_SIGHT_DOWN - 0.035 * kick;
+        // Cant the gun slightly, then keep the front post on the centre ray.
+        const sightSide = (0.09 * Math.sin(GUN_SIGHT_ROLL) * Math.cos(GUN_SIGHT_YAW)
+          - Math.sin(GUN_SIGHT_YAW) * (0.09 * Math.cos(GUN_SIGHT_ROLL) * Math.sin(sightPitch)
+            + 0.59 * Math.cos(sightPitch))) * h;
+        const ex = cy * (eye.x - p.x) - sy * (eye.z - p.z);
+        const ez = sy * (eye.x - p.x) + cy * (eye.z - p.z);
+        gun.position.x = lerp(gun.position.x, ex + fx * forward + fy * fx / flat * drop + fz / flat * sightSide, sightMix);
+        gun.position.y = lerp(gun.position.y, eye.y - p.y + fy * forward - flat * drop, sightMix);
+        gun.position.z = lerp(gun.position.z, ez + fz * forward + fy * fz / flat * drop - fx / flat * sightSide, sightMix);
+        math.quat.fromEuler(GUN_SIGHT, sightPitch, Math.atan2(fx, fz) + GUN_SIGHT_YAW, GUN_SIGHT_ROLL);
+        math.quat.slerpTo(gun.quaternion, GUN_SIGHT, sightMix);
+        gun.poseLean *= 1 - sightMix;
+        // The gun moves to the eye in this pose; carry the gripping hand with
+        // it instead of leaving the arm at its pre-sight position.
+        const arm = parts.armL;
+        math.quat.rotateVec(MUZZLE, gun.quaternion, 0, -0.14 * h, -0.184 * h);
+        const tx = gun.position.x + MUZZLE[0] - arm.position.x;
+        const ty = gun.position.y + MUZZLE[1] - arm.position.y;
+        const tz = gun.position.z + MUZZLE[2] - arm.position.z;
+        math.quat.rotateVec(MUZZLE, arm.quaternion, 0, -0.625 * h, 0.15 * h);
+        const ax = MUZZLE[0], ay = MUZZLE[1], az = MUZZLE[2];
+        GUN_ARM[0] = ay * tz - az * ty;
+        GUN_ARM[1] = az * tx - ax * tz;
+        GUN_ARM[2] = ax * ty - ay * tx;
+        GUN_ARM[3] = Math.hypot(ax, ay, az) * Math.hypot(tx, ty, tz) + ax * tx + ay * ty + az * tz;
+        math.quat.normalize(GUN_ARM);
+        math.quat.multiply(cave.gunHandRotation, GUN_ARM, arm.quaternion);
+        arm.quaternion = cave.gunHandRotation;
+        math.quat.rotateVec(MUZZLE, arm.quaternion, 0, -0.625 * h, 0.15 * h);
+        sightArmOffset.x = tx - MUZZLE[0]; sightArmOffset.y = ty - MUZZLE[1]; sightArmOffset.z = tz - MUZZLE[2];
+        arm.position.x += sightArmOffset.x; arm.position.y += sightArmOffset.y; arm.position.z += sightArmOffset.z;
+      }
       poseHands(cave, leftSupportsGun);
     };
     const stopBurst = (cave) => {
@@ -2151,8 +2244,9 @@
       }
       if (!w.unlimited) w.ammo--;
       w.shotsFired++; w.recoil = GUN_HOLD;
-      poseWeapon(cave);
+      poseWeapon(cave, cave === player ? cave.gunSightCamera : null, cave === player ? cave.gunSightMix : 0);
       fireBullet(cave, spot);
+      if (cave === player && cave.gunSightMix > 0) poseWeapon(cave);
       return true;
     };
     const interruptReloadToFire = (cave) => {
@@ -2200,7 +2294,13 @@
         return true;
       }
       if (!weaponReady(player)) return false;
-      if (w.triggerHeld) return true;
+      if (w.triggerHeld) {
+        if (single && !w.triggerSingle) {
+          w.triggerSingle = true;
+          w.burstRemaining = 0;
+        }
+        return true;
+      }
       w.triggerSingle = single;
       w.triggerHeld = true;
       if (!w.burstRemaining) {
@@ -2459,6 +2559,8 @@
       cave.walk = null;
       cave.hop = cave.hopV = cave.cheer = cave.catchT = 0;
       cave.leap.vx = cave.leap.vz = 0;
+      cave.rocketJumpTime = 0;
+      if (cave.traits.footRockets && !cave.jet) cave.parts.jetpack.visible = cave.parts.jetFlame.visible = false;
       cave.camp.seat = seat;
       seat.sitter = cave;
       cave.root.rotation.y = seat.ry;
@@ -3956,6 +4058,28 @@
         startWander(cave);
       }
     };
+    const footSparks = (cave, power) => {
+      const p = cave.root.position, side = cave.traits.height * 2.5 / 16, yaw = cave.root.rotation.y;
+      const dx = Math.cos(yaw) * side, dz = -Math.sin(yaw) * side;
+      ctx.fx.burst(p.x - dx, p.y - cave.baseY + 0.04, p.z - dz, power, JET_SPARKS, 1.1);
+      ctx.fx.burst(p.x + dx, p.y - cave.baseY + 0.04, p.z + dz, power, JET_SPARKS, 1.1);
+    };
+    const runRocketJump = (cave, dt) => {
+      const burning = cave.rocketJumpTime > 0 && cave.rocketJumpHeld && cave.hopV > 0 && !cave.health.stunned;
+      if (!burning) cave.rocketJumpTime = 0;
+      else {
+        const burn = Math.min(dt, cave.rocketJumpTime);
+        // Half gravity for twice the ordinary apex time gives exactly the
+        // height of two full jumps timed at their apices, without jetpack fuel.
+        cave.hopV += WALK.gravity * burn * 0.5;
+        cave.rocketJumpTime -= burn;
+        cave.rocketPuff -= dt;
+        if (cave.rocketPuff <= 0) { cave.rocketPuff = JET_PUFF; footSparks(cave, 1); }
+      }
+      cave.parts.jetpack.visible = burning;
+      cave.parts.jetFlame.visible = burning;
+      if (burning) cave.parts.jetFlame.scale.y = 0.7 + Math.sin(elapsed * 40 + cave.phase) * 0.3;
+    };
     const runJet = (cave, dt) => {
       const jet = cave.jet;
       if (cave.jetRecovering) jet.thrust = false;
@@ -3973,8 +4097,11 @@
         jet.puff -= dt;
         if (jet.puff <= 0) {
           jet.puff = JET_PUFF;
-          const p = cave.root.position;
-          ctx.fx.burst(p.x, p.y + 0.12, p.z, jet.power, JET_SPARKS, 1.1);
+          if (cave.traits.footRockets) footSparks(cave, jet.power / 2);
+          else {
+            const p = cave.root.position;
+            ctx.fx.burst(p.x, p.y + 0.12, p.z, jet.power, JET_SPARKS, 1.1);
+          }
         }
       }
       jet.flame.visible = jet.power > 0;
@@ -4024,6 +4151,7 @@
       const fromX = p.x, fromZ = p.z;
       const wasGround = groundY(cave);
       if (cave.jet) runJet(cave, dt);
+      else if (cave.traits.footRockets) runRocketJump(cave, dt);
       clampPlayerCeiling(cave, wasGround);
       p.y = wasGround + cave.hop;
       if (cave.jet && cave.jet.thrust && ctx.glideJetCeiling && ctx.glideJetCeiling(cave, dt)) cave.hopV = Math.max(cave.hopV, JET_RISE);
@@ -4481,6 +4609,8 @@
         health.delay = 0;
         cave.walk = null;
         cave.leap.vx = cave.leap.vz = cave.hopV = 0;
+        cave.rocketJumpTime = 0;
+        if (cave.traits.footRockets && !cave.jet) cave.parts.jetpack.visible = cave.parts.jetFlame.visible = false;
         stopBurst(cave);
         stopReload(cave, true);
         releaseSwing(cave, true);
@@ -4488,10 +4618,11 @@
         // must stop before the stunned update takes over until recovery.
         const w = cave.weapon;
         clearMeleeThrust(cave);
-        w.meleeTime = w.meleeCooldown = w.meleeReadyTime = 0;
+        w.meleeTime = w.meleeReadyTime = w.meleeComboTime = 0;
+        w.meleeBuffered = 0; w.meleeBufferHeld = false;
         w.meleeTarget.node = w.meleeTarget.owner = null;
         w.meleeAimX = w.meleeAimY = w.meleeAimZ = 0;
-        w.meleePoke = false;
+        w.meleeQuick = false;
         dropStunGear(cave);
       }
       return true;
@@ -4511,6 +4642,7 @@
     const wearJetpack = (cave, geometry, flameGeometry) => {
       if (cave.jet || ctx.jetpackAllowed && !ctx.jetpackAllowed(cave)) return null;
       if (builtInJetpack(cave)) {
+        cave.rocketJumpTime = 0;
         cave.parts.jetpack.visible = true;
         cave.jet = { node: cave.parts.jetpack, flame: cave.parts.jetFlame, thrust: false, spending: false, power: 0, puff: 0 };
         if (ctx.refreshMirrorObject) ctx.refreshMirrorObject(cave.root);
@@ -4552,6 +4684,9 @@
     };
     const thrust = (on) => {
       if (player && player.jet) player.jet.thrust = !!on && !player.health.stunned && !player.jetRecovering && player.jetFuel > 0;
+    };
+    const holdRocketJump = (on) => {
+      if (player && player.traits.footRockets && !player.jet) player.rocketJumpHeld = !!on;
     };
 
     const sleepPlayer = (bed) => {
@@ -4656,6 +4791,7 @@
       if (!player) return;
       const cave = player;
       cave.humanControlled = false;
+      cave.rocketJumpHeld = false;
       cave.weapon.aiming = false;
       refreshRosterRow(cave);
       stopBurst(cave);
@@ -4663,9 +4799,10 @@
       cave.work.phase = "";
       cave.work.plannedSite = -1; cave.work.targetReady = false;
       cave.weapon.primaryEquipped = false;
-      cave.weapon.meleeTime = cave.weapon.meleeCooldown = 0;
+      cave.weapon.meleeTime = cave.weapon.meleeComboTime = 0;
       cave.weapon.meleeHeld = false;
-      cave.weapon.meleePoke = false;
+      cave.weapon.meleeQuick = false;
+      cave.weapon.meleeBuffered = 0; cave.weapon.meleeBufferHeld = false;
       cave.weapon.meleeReadyTime = 0;
       cave.weapon.meleeTarget.node = cave.weapon.meleeTarget.owner = null;
       cave.weapon.meleeHeldTime = cave.weapon.meleeCharge = 0;
@@ -4756,6 +4893,9 @@
       cave.peek = 0;
       posePeek(cave, 0);
       cave.hop = cave.hopV = cave.act.phase = 0;
+      cave.rocketJumpTime = cave.rocketPuff = 0;
+      cave.rocketJumpHeld = false;
+      if (cave.traits.footRockets && !cave.jet) cave.parts.jetpack.visible = cave.parts.jetFlame.visible = false;
       cave.cloudSupport = null;
       cave.jumps = 0;
       cave.leap.vx = cave.leap.vz = cave.leap.land = 0;
@@ -4833,6 +4973,16 @@
     };
     const jumpPlayer = () => {
       if (!player || player.health.stunned || player.bedTravel.manual || player.camp.seat || player.camp.rolling || player.jet && !player.jetRecovering) return false;
+      if (player.traits.footRockets && !player.jet) {
+        if (!grounded(player)) return false;
+        elevatePlayer(0);
+        player.jumps = 1;
+        player.hopV = JUMP_SPEED;
+        player.rocketJumpTime = ROCKET_JUMP_TIME;
+        player.rocketJumpHeld = true;
+        player.rocketPuff = 0;
+        return true;
+      }
       if (grounded(player)) player.jumps = 0;
       else player.jumps = Math.max(1, player.jumps);
       if (player.jumps >= 2 && !inBananas(player)) return false;
@@ -4863,8 +5013,9 @@
         }
         return false;
       }
-      jumpPlayer();
-      return true;
+      const jumped = jumpPlayer();
+      // Let the held Space reach the rocket jump after the initial press.
+      return !(jumped && player.traits.footRockets && !player.jet);
     };
     const applySwag = (cave) => {
       for (const anchorKey of SWAG_ANCHORS) {
@@ -5123,11 +5274,11 @@
       const ownX = p.x, ownY = p.y, ownZ = p.z;
       const w = cave.weapon, club = cave.parts.club, meleeBefore = w.meleeTime;
       const meleeRelease = w.meleeStrikeTime + MELEE_RECOVER;
-      // Only the forward strike can hit. Held wind-up and recovery never
+      // Only the forward stroke can hit. Held wind-up and recovery never
       // repeatedly disturb a surface, and idle actors do no contact work.
       const meleeStep = dt * (cave.traits.nunchaku ? NUNCHAKU_RATE : 1);
       const striking = dt > 0 && (ctx.onMeleeStrike || input.weaponTargets || ctx.fireReachable) && cave === player && w.primaryEquipped && !w.meleeHeld && !w.meleeHit
-        && w.meleeTime > MELEE_RECOVER && w.meleeTime - meleeStep < meleeRelease && (!w.meleePoke || w.meleeTime <= meleeRelease)
+        && w.meleeTime > MELEE_RECOVER && w.meleeTime - meleeStep < meleeRelease && (!w.meleeQuick || w.meleeTime <= meleeRelease)
         && !cave.camp.seat && !cave.bedTravel.mode;
       if (striking) {
         BL.scene.updateWorld(cave.root);
@@ -5137,7 +5288,7 @@
       updateWeapon(cave, dt);
       // Always display and check the end of the chop before recovering, even
       // when a frame would otherwise step across the horizontal limit.
-      const meleeFloor = w.meleeHeld ? MELEE_RELEASE : w.meleePoke && w.meleeTime > meleeRelease ? meleeRelease : w.meleeTime > MELEE_RECOVER ? MELEE_RECOVER : 0;
+      const meleeFloor = w.meleeHeld ? MELEE_RELEASE : w.meleeQuick && w.meleeTime > meleeRelease ? meleeRelease : w.meleeTime > MELEE_RECOVER ? MELEE_RECOVER : 0;
       w.meleeTime = Math.max(meleeFloor, w.meleeTime - meleeStep);
       w.meleeReadyTime = meleeBefore > 0 && w.meleeTime === 0 ? MELEE_READY_HOLD + MELEE_CARRY_BLEND : Math.max(0, w.meleeReadyTime - dt);
       if (w.meleeHeld) {
@@ -5145,7 +5296,7 @@
         w.meleeCharge = ease.inOutQuad(clamp((w.meleeHeldTime - MELEE_CHARGE_DELAY) / MELEE_CHARGE_TIME, 0, 1));
         w.meleePower = Math.max(w.meleePower, 1 + w.meleeCharge);
       }
-      cave.weapon.meleeCooldown = Math.max(0, cave.weapon.meleeCooldown - meleeStep);
+      w.meleeComboTime = Math.max(0, w.meleeComboTime - dt);
       if (!runCamp(cave, dt)) updateCaveman(cave, dt);
       else stopReload(cave);
       watchWalker(cave, dt, x, z);
@@ -5217,6 +5368,11 @@
           poseWeapon(cave);
           BL.scene.updateWorld(cave.root);
         }
+      }
+      if (w.meleeBuffered && !w.meleeBufferHeld && w.meleeTime <= MELEE_RECOVER && cave === player) {
+        w.meleeBuffered--;
+        if (swingWeapon(cave, true, false, true)) releaseSwing(cave, false, false, true);
+        else w.meleeBuffered = 0;
       }
       if (ctx.characterSupportAt) riding.support = ctx.characterSupportAt(cave);
       if (dt > 0 && cave.root.visible && (cave.state === "working" || cave.state === "chilling") && ctx.onBodyMove) ctx.onBodyMove(cave, x, y, z, dt);
@@ -5325,7 +5481,7 @@
     const stats = () => ({ built: builtEquipment.length });
     return {
       cavemen, list: crewList, fanSlots, stateOf, stateCounts, workingCavemen, eatingCavemen, workingCount, eatingCount, feedableCavemen, refreshStates, refreshRosterRow, updateFan, rush, headWorldOf, applyAllSwag, wornBy, renderLocker, pokeCave, idleSay, drawQuotes,
-      control, release, relocatePlayer, sleepPlayer, wakePlayer, sitPlayer, standPlayer, ignite, dropRoll, damage, fireView, steer: steerPlayer, look: lookPlayer, elevate: elevatePlayer, playerAction, jumpPlayer, poseWeapon, wearJetpack, removeJetpack, setJetpackOwnership, thrust, update, dispose, stats,
+      control, release, relocatePlayer, sleepPlayer, wakePlayer, sitPlayer, standPlayer, ignite, dropRoll, damage, fireView, steer: steerPlayer, look: lookPlayer, elevate: elevatePlayer, playerAction, jumpPlayer, poseWeapon, wearJetpack, removeJetpack, setJetpackOwnership, thrust, holdRocketJump, update, dispose, stats,
       actorClear, builtInJetpack, toggleTint, twirl, toggleWeapon, selectWeapon, configureWeapon, swingWeapon, releaseSwing, fireWeapon, setWeaponTrigger, canFire, weaponOrigin, meleeReach, nearReload, canReload, startReload, stopReload, stopBurst, canSwapMagazine, swapMagazine, collectMagazine, collectGroundMagazine, collectAmmo, removeMagazines, hasMagazine, magazineCount, magazineAmmo, totalAmmo, workSites,
       get sleeping() { return !!(player && player.bedTravel.manual && player.state === "sleeping"); },
       get player() {

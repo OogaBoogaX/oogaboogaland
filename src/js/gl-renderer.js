@@ -2336,6 +2336,31 @@ void main() {
           }
         }
       }
+      const viewActor = opts.beforeView?.();
+      if (viewActor) {
+        // Mirror and shadow buffers already hold the world pose. Refresh only
+        // the changed actor instances for the player's camera pass.
+        updateWorld(viewActor.root, viewActor.root.parent?.world || null);
+        try {
+          for (const node of viewActor.gunViewNodes) {
+            if (!node.visible || !node.geometry) continue;
+            const rec = records.get(node.geometry);
+            if (!rec || !rec.active) continue;
+            writeCullSphere(node);
+            if (hiddenFromCamera(node) || !nodeInFrustum(node, FRUSTUM)) continue;
+            for (let i = rec.drawCount; i < rec.count; i++) {
+              if (rec.nodes[i] !== node) continue;
+              rec.nodes[i] = rec.nodes[rec.drawCount];
+              rec.nodes[rec.drawCount++] = node;
+              break;
+            }
+          }
+          for (const rec of activeRecords) uploadInstances(rec);
+        } finally {
+          opts.afterView?.();
+          updateWorld(viewActor.root, viewActor.root.parent?.world || null);
+        }
+      }
       gl.bindFramebuffer(gl.FRAMEBUFFER, f.scene);
       gl.viewport(0, 0, pw, ph);
       gl.clearColor(clear[0], clear[1], clear[2], 1);

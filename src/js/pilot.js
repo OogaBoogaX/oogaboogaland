@@ -184,7 +184,7 @@
     let peekTarget = 0, peekMix = 0;
     let aimCave = null, aimMix = 0, aimVelocity = 0, adsMix = 0, ads = false, disposed = false;
     let aimLeftAccepted = false, aimLeftFocused = false, aimReleaseEvent = null;
-    let rightDownAt = -Infinity, rightTapAt = -Infinity, rightTravel = 0, rightExitHeld = false;
+    let rightDownAt = -Infinity, rightTapAt = -Infinity, rightTravel = 0, rightExitHeld = false, rightReturnFirstPerson = false;
     let primaryButtonCave = null;
     const buttonTarget = { x: 0, y: 0, z: 0 };
     let reticleRadius = -1;
@@ -1023,7 +1023,7 @@
       !!cave && cave.weapon.meleeHeldTime < BL.crew.MELEE_TAP_TIME);
     const releaseRightTap = () => {
       const now = performance.now();
-      if (Number.isFinite(rightDownAt)) rightTapAt = shoulderView && !closeWanted
+      if (Number.isFinite(rightDownAt)) rightTapAt = aimView()
         && now - rightDownAt <= RIGHT_DOUBLE_TIME && rightTravel <= RIGHT_TAP_TRAVEL ? now : -Infinity;
       rightDownAt = -Infinity;
       rightExitHeld = false;
@@ -1036,14 +1036,18 @@
       }
       if (e.type === "pointermove" && Number.isFinite(rightDownAt)) rightTravel += Math.hypot(e.movementX || 0, e.movementY || 0);
       if (e.button === 2 && e.type === "pointerup") releaseRightTap();
+      // The carry cursor can absorb the release that follows a view switch.
+      // A fresh press is a new gesture even if that release never reached us.
+      if (rightExitHeld && e.type === "pointerdown") rightExitHeld = false;
       if (rightExitHeld) { e.preventDefault(); e.stopImmediatePropagation(); return; }
       if (e.type === "pointerdown") {
         if (e.button !== 2) rightDownAt = -Infinity;
-        if (e.button === 2 && shoulderView && !closeWanted && weaponViewReady(player())) {
+        if (e.button === 2 && aimView()) {
           const now = performance.now();
           if (now - rightTapAt <= RIGHT_DOUBLE_TIME) {
             e.preventDefault(); e.stopImmediatePropagation();
             ads = false;
+            rightReturnFirstPerson = closeWanted;
             shooterView(false);
             rightExitHeld = true;
             return;
@@ -1057,13 +1061,13 @@
         e.preventDefault(); e.stopImmediatePropagation();
         if (!closeWanted && !shoulderView) {
           const rect = canvas.getBoundingClientRect();
-          shooterView(true, e.clientX - rect.left, e.clientY - rect.top);
+          resumeRightView(e.clientX - rect.left, e.clientY - rect.top);
         }
         return;
       }
       if (birdsEye() && e.button === 2 && e.type === "pointerdown") {
         e.preventDefault(); e.stopImmediatePropagation();
-        shooterView(true, renderer.size.width / 2, renderer.size.height / 2);
+        resumeRightView(renderer.size.width / 2, renderer.size.height / 2);
         return;
       }
       e.preventDefault(); e.stopImmediatePropagation();
@@ -1098,7 +1102,10 @@
             aimLeftAccepted = !ads || w.shotsFired + w.triggerQueued > before;
           }
         }
-        if (e.button === 2) ads = true;
+        if (e.button === 2) {
+          ads = true;
+          if (e.buttons & 1 && !player().weapon.primaryEquipped) crew.setWeaponTrigger(true, true);
+        }
       } else if (e.type === "pointerup" || e.type === "pointermove") {
         if (e.button === 0) {
           releaseAimAttack(e);
@@ -1299,6 +1306,20 @@
         quat.multiply(entryRoll, inverseRotation, cameraRotation);
       }
     };
+    const lockCurrentAimPoint = () => {
+      // Save the surface beneath the displayed reticle before the eye moves.
+      // Keeping only the viewing direction introduces shoulder parallax.
+      const p = camera.position, dx = camera.target.x - p.x, dy = camera.target.y - p.y, dz = camera.target.z - p.z;
+      const length = Math.hypot(dx, dy, dz) || 1;
+      if (!targetAlongAim(cursorPoint, p.x, p.y, p.z, dx / length, dy / length, dz / length)) {
+        pointAlongAim(cursorPoint, p.x, p.y, p.z, dx / length, dy / length, dz / length, 60, sightClear || cursorClear, 18);
+      }
+      if (Math.hypot(cursorPoint.x - p.x, cursorPoint.y - p.y, cursorPoint.z - p.z) < 0.1) {
+        cursorPoint.x = p.x + dx / length * 60; cursorPoint.y = p.y + dy / length * 60; cursorPoint.z = p.z + dz / length * 60;
+      }
+      aimAtCursor = true; aimPreserveFacing = false;
+      aimScreenX = aimScreenY = 0;
+    };
     const enterClose = (combat = false) => {
       if (!close || closeWanted) return;
       closeWanted = true;
@@ -1312,20 +1333,7 @@
       syncAim();
       if (aimView()) {
         if (cave.camp.rolling) releaseCursorAim();
-        else if (!aimAtCursor) {
-          // Dolly toward the eyes while retaining the exact surface under
-          // the reticle. Keeping only its direction introduces parallax.
-          const p = camera.position, dx = camera.target.x - p.x, dy = camera.target.y - p.y, dz = camera.target.z - p.z;
-          const length = Math.hypot(dx, dy, dz) || 1;
-          if (!targetAlongAim(cursorPoint, p.x, p.y, p.z, dx / length, dy / length, dz / length)) {
-            pointAlongAim(cursorPoint, p.x, p.y, p.z, dx / length, dy / length, dz / length, 60, sightClear || cursorClear, 18);
-          }
-          if (Math.hypot(cursorPoint.x - p.x, cursorPoint.y - p.y, cursorPoint.z - p.z) < 0.1) {
-            cursorPoint.x = p.x + dx / length * 60; cursorPoint.y = p.y + dy / length * 60; cursorPoint.z = p.z + dz / length * 60;
-          }
-          aimAtCursor = true; aimPreserveFacing = false;
-          aimScreenX = aimScreenY = 0;
-        }
+        else if (!aimAtCursor) lockCurrentAimPoint();
         headOrbit = exitAngleHold = entryOffsetActive = entryRebase = false;
         return;
       }
@@ -1347,8 +1355,10 @@
     };
     const exitClose = () => {
       if (!closeWanted) return;
-      shoulderView = !!player();
+      const cave = player();
+      shoulderView = !!cave;
       if (aimView()) {
+        if (cave && !cave.camp.rolling) lockCurrentAimPoint();
         closeWanted = false;
         closeExitScale = 1;
         headOrbit = exitAngleHold = entryOffsetActive = entryRebase = false;
@@ -1360,7 +1370,7 @@
       else dollyTime = DOLLY_HANDOFF;
       closeRate = closeMix < 1 ? 10 : CLOSE_RATE;
       distanceVelocity = 0;
-      const cave = player(), up = camera.up, dx = camera.target.x - camera.position.x, dy = camera.target.y - camera.position.y, dz = camera.target.z - camera.position.z;
+      const up = camera.up, dx = camera.target.x - camera.position.x, dy = camera.target.y - camera.position.y, dz = camera.target.z - camera.position.z;
       if (dollyTime < DOLLY_HANDOFF) {
         // Outward zoom moves along the held viewing ray: keep longitudinal velocity, drop a fading sideways head turn.
         const along = (dollyVelocity.x * dx + dollyVelocity.y * dy + dollyVelocity.z * dz) / (dx * dx + dy * dy + dz * dz);
@@ -1528,6 +1538,7 @@
       const cave = player();
       if (!weaponViewReady(cave)) return;
       rightDownAt = rightTapAt = -Infinity;
+      if (active) rightReturnFirstPerson = false;
       if (active && birdsEye() && !closeWanted) {
         // The assisted hit may be centred on an object and refreshed on a
         // throttle. The cursor anchor is the exact rendered ray hit, including
@@ -1606,6 +1617,11 @@
       crew.poseWeapon(cave);
       syncWeaponHud();
       syncModeHud();
+    };
+    const resumeRightView = (px, py) => {
+      const firstPerson = rightReturnFirstPerson;
+      shooterView(true, px, py);
+      if (firstPerson && shoulderView) enterClose();
     };
     const modeAction = (action) => {
       const cave = player();
@@ -1950,6 +1966,7 @@
         followTarget.z = p.z;
         orbit.target = followTarget;
         if (cave.jet) crew.thrust(a.up > 0);
+        else if (cave.traits.footRockets) crew.holdRocketJump(a.up > 0);
         crew.steer(fx0 * moveY + rx * moveX, fz0 * moveY + rz * moveX, armed() ? 1 : close ? closeMix : 0, moveY, moveX,
           armed() ? ads ? 0.65 : !shoulderCombat && a.sprint && moveY > 0.05 && !cave.weapon.reloading ? 1.35 : 1 : 1, peekTarget);
       } else {
@@ -2211,7 +2228,11 @@
         cave.weapon.aimYaw = Math.atan2(Math.sin(localYaw), Math.cos(localYaw));
         cave.weapon.aimPitch = aimWeaponPitch + (cave.weapon.aimPitch - aimWeaponPitch) * aimMix;
       }
-      crew.poseWeapon(cave);
+      // Keep the world hold for reflections; the renderer applies the sight
+      // pose only while uploading the player's camera view.
+      crew.poseWeapon(cave, camera, 0, closeMix * aimMix);
+      cave.gunSightMix = adsMix * closeMix * aimMix;
+      if (reticle.dataset.sight !== String(cave.gunSightMix > 0.95)) reticle.dataset.sight = String(cave.gunSightMix > 0.95);
       if (armed()) updateFeedback(cave, dt);
       syncHeadVisibility(cave);
       if (overheadExit) {
@@ -2236,6 +2257,7 @@
       }
       syncAim();
       const cave = player();
+      if (cave) cave.gunSightMix = 0;
       syncModeHud();
       if (birdsEye()) { updateOverhead(cave, dt); return; }
       // A bed or seated pose has its own camera anchor; a held carry-exit
@@ -2824,6 +2846,7 @@
       // carry/shoulder exits and mid-transition reversals retain this value.
       get birdsEye() { return birdsEye(); }, get birdsEyeMix() { return camera.orthoMix || 0; }, get birdsEyeHeight() { return overheadHeight; }, get birdsEyeNorthUp() { return overheadNorthUp; },
       get birdsEyeCeiling() { return overheadCeiling; },
+      get shoulderEntryMix() { return aimMix; },
       bind, setActive, readInput, update, goPreset, navigate, enterClose, possess, release, action, modeAction, weaponAction, weaponMode, showAct, dispose, get player() {
       return player();
     }, get assistedTarget() {

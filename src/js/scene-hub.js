@@ -80,6 +80,19 @@
     stars: 0, torch: 0, day: 1, twilight: 0, lampFactor: 0, directStrength: 1, directionalLightStrength: 1, sunStrength: 1, moonStrength: 0, ambientFloor: 0.18, diffuseFloor: 0, shadowStrength: 1, shadowFloor: 0, shadowBias: 0.002, outdoorDarkestSurfaceEstimate: 0.34, activeLightSource: "sun", latitude: 20, dayOfYear: 172, continuousDay: 171.5, solarDeclination: 0, siderealAngle: 0, sunAltitude: 90, sunAzimuth: 180, moonAltitude: -90, moonAzimuth: 0, sunriseHour: 6, sunsetHour: 18,
     time: 0, bloomStrength: 0.5, lights: new Float32Array(80), lightCount: 0, shadowCenter: { x: 0, y: 0, z: 0 }, shadowExtent: 34, matrix: MATRIX_WORLD, cutawayMaxY: 1e6, birdsEyeCutaway: false, cutawayFade: 0, cutawayRockMix: 0, cutawayRegions: [], cutawayRegionCount: 0, cutawayCloudY: 0, cutawayCloudMix: 0
   };
+  let viewPoseActor = null;
+  RENDER_OPTS.beforeView = () => {
+    const cave = pilot?.player;
+    if (!cave || !crew || !cave.weapon.equipped || !cave.weapon.aiming || cave.gunSightMix <= 0) return null;
+    viewPoseActor = cave;
+    crew.poseWeapon(cave, camera, cave.gunSightMix);
+    return cave;
+  };
+  RENDER_OPTS.afterView = () => {
+    if (!viewPoseActor) return;
+    crew.poseWeapon(viewPoseActor);
+    viewPoseActor = null;
+  };
   RENDER_OPTS.starMatrix[0] = RENDER_OPTS.starMatrix[4] = RENDER_OPTS.starMatrix[8] = 1;
   const DAYLIGHT_DEBUG = {
     sunDirection: RENDER_OPTS.sunDirection, moonDirection: RENDER_OPTS.moon, celestialPole: RENDER_OPTS.celestialPole,
@@ -192,7 +205,7 @@
   const CUTAWAY_TOP = 16, CUTAWAY_RESTORE_TIME = 0.65, CUTAWAY_REGION_CAP = 8;
   const CUTAWAY_RAMP_START = 0.12, CUTAWAY_RAMP_END = 0.88;
   const CUTAWAY_FLOOR_RATE = 56, CUTAWAY_FLOOR_DEADBAND = 0.015;
-  let cutawayHeight = NaN, cutawayFeet = 0, cutawayPlayer = null, cutawayCameraMix = 0;
+  let cutawayHeight = NaN, cutawayFeet = 0, cutawayPlayer = null, cutawayCameraMix = 0, cutawayCarryActive = false;
   let cutawayX = 0, cutawayZ = 0, cutawayHeadY = 0, cutawayHill = false;
   let cutawayProgress = NaN, cutawayLevel = 0, cutawayHillMix = 0;
   let cutawayRestoreMix = 0, cutawayRestoreTime = CUTAWAY_RESTORE_TIME;
@@ -1655,7 +1668,7 @@
       solids.add(control.root);
       control.label.geometry = BL.oogaPortalModels.destinationLabel(pitGate.selected.label);
       addTarget(control.button, { kind: "ooga-portal-lever", control, priority: 2 }, { radius: 0.72 });
-      addTarget(control.screen, { kind: "ooga-portal-screen", priority: 2 });
+      addTarget(control.screen, { kind: "ooga-portal-screen", control, priority: 2 });
     }
   };
   const buildHeadquarters = () => {
@@ -3063,8 +3076,14 @@
   };
   const updateBirdsEyeCutaway = (dt) => {
     clearCutawayHidden();
-    const player = pilot.player, cameraMix = player ? pilot.birdsEyeMix : 0;
-    const showRampMarkers = cameraMix > 0.5;
+    const player = pilot.player, overheadMix = player ? pilot.birdsEyeMix : 0;
+    const carryCutaway = !!player && !pilot.aiming && !pilot.closeWanted && player.root.position.y - player.baseY < -0.5
+      && (pilot.mode === "orbit" || pilot.mode === "shoulder" && pilot.shoulderEntryMix < 1);
+    // Keep the already-open floor through a carry-to-combat overhead handoff;
+    // the overhead spring starts at zero even though the roof is already gone.
+    const carryBridge = cutawayCarryActive && pilot.birdsEye && overheadMix < 1;
+    const cameraMix = Math.max(overheadMix, carryCutaway || carryBridge ? 1 : 0);
+    const showRampMarkers = overheadMix > 0.5;
     for (const marker of headquarters.rampMarkers) {
       marker.node.visible = marker.frame.visible = marker.arrow.visible = showRampMarkers;
       if (!showRampMarkers) continue;
@@ -3080,11 +3099,12 @@
     // Restore the last displayed section independently on just those exits.
     const interrupted = !player || player !== cutawayPlayer || player.health.stunned || crew.sleeping
       || player.camp.seat || player.bedTravel.mode || clankerPlay.active;
-    if (!cameraMix && cutawayCameraMix > 0 && interrupted) {
+    if (!cameraMix && cutawayCameraMix > 0 && (interrupted || cutawayCarryActive)) {
       cutawayRestoreMix = RENDER_OPTS.cutawayFade;
       cutawayRestoreTime = 0;
     }
     cutawayCameraMix = cameraMix;
+    cutawayCarryActive = carryCutaway || carryBridge;
     cutawayRestoreTime = Math.min(CUTAWAY_RESTORE_TIME, cutawayRestoreTime + dt);
     const t = cutawayRestoreTime / CUTAWAY_RESTORE_TIME;
     const restoring = cutawayRestoreMix * (1 - t * t * (3 - 2 * t));
@@ -3996,18 +4016,24 @@
     world.pilot = pilot.player ? pilot.player.traits.name : null;
     enterScene(presets[id], id);
   };
+  const portalTapReachable = (control, screen) => {
+    const player = pilot.player, at = player ? player.root.position : camera.position;
+    const point = screen ? control.screenPoint : control;
+    return !pitGate.receiving && !(player && pilot.moving)
+      && actionWithinReach(at.x, at.y + (player ? 1.1 - player.baseY : 0), at.z, point.x, point.y, point.z, 2);
+  };
   const onTap = (hit, p) => {
     if (pitArrival || pitGate?.isOpen) return;
     if (!hit) return;
     const o = hit.owner;
     switch (o.kind) {
       case "ooga-portal-screen":
-        pitGate.open();
+        if (portalTapReachable(o.control, true)) pitGate.open();
+        else hud.toast("Move closer to an Ooga Portal screen.");
         break;
       case "ooga-portal-lever": {
-        const player = pilot.player, at = player ? player.root.position : camera.position;
-        if (!pitGate.receiving && !(player && pilot.moving) && actionWithinReach(at.x, at.y + (player ? 1.1 - player.baseY : 0), at.z, o.control.x, o.control.y, o.control.z, 2)) pitGate.toggle();
-        else hud.toast("Move closer to a Ooga Portal lever.");
+        if (portalTapReachable(o.control, false)) pitGate.toggle();
+        else hud.toast("Move closer to an Ooga Portal lever.");
         break;
       }
       case "caveman":
@@ -6912,6 +6938,7 @@
     cutawayProgress = NaN;
     cutawayLevel = cutawayHillMix = 0;
     cutawayFeet = cutawayCameraMix = cutawayRestoreMix = 0;
+    cutawayCarryActive = false;
     cutawayX = cutawayZ = cutawayHeadY = 0;
     cutawayHill = false;
     cutawayPlayer = null;

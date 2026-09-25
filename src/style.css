@@ -1559,7 +1559,7 @@ body[data-active-scene="mine"] .mode-hud {
 .mode-face-icon {
   position: absolute;
   left: 5px;
-  top: 4px;
+  top: 2px;
 }
 
 .mode-hud[data-gorilla="true"] .mode-face-icon {
@@ -1599,7 +1599,7 @@ body[data-active-scene="mine"] .mode-hud {
   display: block;
   position: absolute;
   left: 54px;
-  top: 10px;
+  top: 8px;
   width: 10px;
   height: 32px;
   overflow: hidden;
@@ -4601,6 +4601,9 @@ body.orbit-dragging #tooltip {
 .weapon-reticle[data-close="true"] > svg {
   visibility: hidden;
 }
+.weapon-reticle[data-sight="true"] > svg {
+  clip-path: inset(0 0 50% 0);
+}
 .weapon-reticle[data-occluded="true"] {
   visibility: hidden;
 }
@@ -4623,6 +4626,9 @@ body.orbit-dragging #tooltip {
   width: 4px;
   height: 4px;
   background: var(--reticle-target);
+}
+.weapon-reticle[data-sight="true"] > span {
+  background: linear-gradient(to bottom, var(--reticle-target, #fff9dc) 50%, transparent 50%);
 }
 .weapon-reticle[data-target="out-of-range"] > span {
   visibility: hidden;

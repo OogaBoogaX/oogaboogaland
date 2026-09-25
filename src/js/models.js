@@ -407,16 +407,29 @@
       gasBlock.verts[i + 1] = y * cos - z * sin - 0.005 * h;
       gasBlock.verts[i + 2] = y * sin + z * cos + 0.46 * h;
     }
+    // A compact rear blade with an open, half-round notch. Its top and the
+    // front post define the first-person sight line.
+    const rearSight = [box({ w: 0.05 * h, h: 0.004 * h, d: 0.014 * h, color: pal.barrel, offset: { y: 0.067 * h, z: -0.18 * h } })];
+    for (let i = 0; i < 8; i++) {
+      const low = 0.069 + i * 0.011 / 8, high = low + 0.011 / 8;
+      const mid = (low + high) * 0.5;
+      const inner = Math.sqrt(Math.max(0, 0.011 ** 2 - (mid - 0.08) ** 2));
+      const width = 0.025 - inner;
+      for (const side of [-1, 1]) rearSight.push(box({ w: width * h, h: (high - low) * h, d: 0.014 * h,
+        color: pal.barrel, offset: { x: side * (0.025 + inner) * 0.5 * h, y: mid * h, z: -0.18 * h } }));
+    }
     const pieces = [
-      // Long receiver, tapered wooden stock, low barrel and raised gas tube.
+      // Long receiver, tapered wooden stock, barrel and raised gas tube.
       box({ w: 0.11 * h, h: 0.13 * h, d: 0.4 * h, color: pal.body, emissive: pal.emissive, offset: { z: -0.035 * h } }),
       stock,
       box({ w: 0.09 * h, h: 0.14 * h, d: 0.02 * h, color: pal.barrel, offset: { z: -0.516 * h, y: -0.04 * h } }),
-      box({ w: 0.09 * h, h: 0.095 * h, d: 0.22 * h, color: pal.stock, offset: { z: 0.24 * h } }),
-      box({ w: 0.035 * h, h: 0.035 * h, d: 0.38 * h, color: pal.barrel, emissive: pal.emissive, offset: { z: 0.47 * h, y: -0.03 * h } }),
+      box({ w: 0.09 * h, h: 0.13 * h, d: 0.22 * h, color: pal.stock, offset: { z: 0.24 * h } }),
+      box({ w: 0.035 * h, h: 0.035 * h, d: 0.38 * h, color: pal.barrel, emissive: pal.emissive, offset: { z: 0.47 * h, y: -0.01 * h } }),
       box({ w: 0.026 * h, h: 0.026 * h, d: 0.095 * h, color: pal.barrel, emissive: pal.emissive, offset: { z: 0.3925 * h, y: 0.02 * h } }),
       gasBlock,
       box({ w: 0.03 * h, h: 0.085 * h, d: 0.03 * h, color: pal.barrel, offset: { z: 0.59 * h, y: 0.0075 * h } }),
+      ...rearSight,
+      box({ w: 0.01 * h, h: 0.04 * h, d: 0.016 * h, color: pal.barrel, offset: { y: 0.07 * h, z: 0.59 * h } }),
       box({ w: 0.065 * h, h: 0.18 * h, d: 0.066 * h, color: pal.stock, offset: { y: -0.14 * h, z: -0.184 * h } }),
       // A hollow guard ends behind the magazine, leaving a visible gap.
       box({ w: 0.045 * h, h: 0.012 * h, d: 0.106 * h, color: pal.body, offset: { y: -0.13 * h, z: -0.098 * h } }),
