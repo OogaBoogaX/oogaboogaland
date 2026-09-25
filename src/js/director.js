@@ -299,9 +299,10 @@
     // `advance` just wrote into lastTime: a negative step would run the scene backwards.
     const dt = Math.max(0, Math.min(0.1, (now - lastTime) / 1e3));
     lastTime = now;
-    step(dt, now);
-    // Only a displayed frame carries a real interval; `advance` must not tier.
+    // Only a displayed frame carries a real interval; `advance` must not tier. A step resizes the canvas, which
+    // clears it, so it comes before this frame's draw: after it, the browser presented one black frame.
     if (!interval) autoTier(delivered, now);
+    step(dt, now);
   };
 
   const onKeyDown = (e) => {
