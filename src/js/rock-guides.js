@@ -1,4 +1,10 @@
 // Perceived wall sections and the basement rim, for views through island stone.
+//
+// The wall cue for views through island stone. It builds its contexts once per island, creating
+// `slopeGuides`, `caveGuides`, `holeGuides` and `wallApertures` itself (they are never created anywhere
+// else), over one build that is never written, and gives each visit its own fade and camera state. The API
+// from `create` is `select`, `updateSurface`, `updateSurfaces`, `resetSurface`, `contexts`, `all` and
+// `stats`.
 (() => {
   "use strict";
   const BL = window.BL = window.BL || {};

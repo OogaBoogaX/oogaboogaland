@@ -1,4 +1,11 @@
 // Ooga Rally: the racing scene behind the 9 o'clock cave.
+//
+// Phases: garage, countdown, racing, paused, finished. A chase camera; lighting from the ten nearest
+// torches; donations; `leave`. The rocket start reads the throttle through the count. Every lap
+// and the results show the delta against the record lap. The first release of each drift tier is
+// taught once a visit. The crowd swells on laps and finishes, and second and third place get podium
+// confetti. Prompts switch to touch wording on a coarse pointer. The Mirror toggle (`race-mirror`,
+// shown once the Cup is gold) rebuilds the track flipped.
 (() => {
   "use strict";
   const BL = window.BL = window.BL || {};
@@ -369,7 +376,7 @@
     const fast = clamp((Math.abs(p.speed) - m.top * 0.55) / (m.top * 0.6), 0, 1) + (p.boost > 0 ? 0.35 : 0);
     camera.fov = damp(camera.fov, lerp(FOV_BASE, FOV_FAST, Math.min(1, fast)), 6, dt);
   };
-  // Shadows follow the player; the seven nearest torches become point lights.
+  // Shadows follow the player; the ten nearest torches (LIGHT_CAPACITY) become point lights.
   const updateLighting = () => {
     const opts = track.renderOpts, p = racers.player;
     const cx = p ? p.x : camera.target.x, cz = p ? p.z : camera.target.z, cy = p ? p.y : camera.target.y;

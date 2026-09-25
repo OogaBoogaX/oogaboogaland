@@ -206,7 +206,7 @@ Double-click the Agent to play it; double-click again or press **Escape** to let
 
 ## Weather
 
-The weather is the mempool and it stands over the Mempool island. **Soak** (the backlog paying at least 1 sat/vB, averaged over ten minutes) sets how hard it rains in six steps: dry, drizzle, light rain, rain, heavy rain, downpour. **Gale** (how many vbytes a second arrive) sets the wind. Every block strikes lightning and rolls thunder, and a downpour throws extra. The sky stays as the clock paints it until the rain is falling hard.
+The weather is the mempool and it stands over the Mempool island. **Soak** (the backlog paying at least 1 sat/vB, averaged over ten minutes) sets how hard it rains in six steps: dry, drizzle, light rain, rain, heavy rain, downpour. **Gale** (how many vbytes a second arrive) sets the wind. Every block strikes lightning and rolls thunder, and only a block does. The sky stays as the clock paints it until the rain is falling hard.
 
 ## Debug
 

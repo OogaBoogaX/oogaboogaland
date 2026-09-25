@@ -4,6 +4,9 @@
 //
 // The room's voice is the fan drone: its pitch and level follow how many units are actually running,
 // so the operation is audible before it is read. Heat opens a filter, a dead breaker kills it dead.
+//
+// Eight pooled voices carry cues for buying, selling, paying, blocks, the breaker, fire and a meltdown.
+// It shares the rally's mute key.
 (() => {
   "use strict";
   const BL = window.BL = window.BL || {};

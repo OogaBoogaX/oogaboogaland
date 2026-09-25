@@ -1,5 +1,11 @@
 // Procedural race sound: one AudioContext made on the first gesture, fixed voice pool gated by gain.
 // One noise loop serves wind, drift scrub and crowd.
+//
+// The pool is eight pre-started oscillator voices; the context opens only on a gesture the browser
+// has activated (`navigator.userActivation`). The kart runs a three-speed engine: first gear pulls
+// from idle, later gears drop in at half revs and wind to a limiter, two cruise shifts drop the note
+// flat out, and a held throttle blips it in place during the countdown. The dino is a growl pitched
+// by speed, and on foot there are footfalls. `cues`, `update`, `quiet`, `setMuted`, `dispose`.
 (() => {
   "use strict";
   const BL = window.BL = window.BL || {};

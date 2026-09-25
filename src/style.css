@@ -2405,35 +2405,16 @@ body[data-active-scene="mine"] .mode-hud {
   overscroll-behavior: contain;
 }
 
-/* The weather key: one tablet of terms, matching the recipe's slab rather than a bare browser list. */
-.weather-key {
-  max-height: min(46vh, 420px);
-  margin: 10px 0 0;
-  padding: 10px 12px;
-  overflow: auto;
-  background: var(--tablet);
-  border: 2px solid var(--stone-dk);
-  border-radius: 9px 7px 10px 8px;
-  box-shadow: var(--tablet-shadow);
-  color: var(--paper);
-  font-size: 11.5px;
-  line-height: 1.55;
-  overscroll-behavior: contain;
-}
-
-.weather-key > div + div {
-  margin-top: 10px;
-}
-
-/* The jumbotron's close-up: the board's own pixels, blown up, with the frame's paging under it. */
-.jumbotron-modal {
+/* The board close-up, shared by every readable board: the board's own pixels blown up, the page's caption between
+   the chevrons, one dot a page, and the page's note on a tablet. */
+.board-modal {
   width: 440px;
 }
 
-.jumbotron-screen {
+.board-screen {
   display: block;
   width: 100%;
-  aspect-ratio: 16 / 9;
+  height: auto;
   margin: 10px 0 8px;
   border: 3px solid #1a1612;
   border-radius: 6px;
@@ -2442,14 +2423,14 @@ body[data-active-scene="mine"] .mode-hud {
   box-shadow: 0 0 0 2px var(--stone-dk), 0 0 18px rgba(255, 216, 74, 0.18);
 }
 
-.jumbotron-nav {
+.board-nav {
   display: grid;
   grid-template-columns: 36px 1fr 36px;
   align-items: center;
   gap: 8px;
 }
 
-.jumbotron-page {
+.board-page {
   height: 32px;
   border: 2px solid var(--wood-edge);
   border-radius: 6px;
@@ -2460,58 +2441,71 @@ body[data-active-scene="mine"] .mode-hud {
   cursor: pointer;
 }
 
-.jumbotron-caption {
-  display: grid;
-  text-align: center;
+/* A one-page board keeps the caption centred: the chevrons keep their columns, unseen. */
+.board-page[hidden] {
+  display: block;
+  visibility: hidden;
 }
 
-.jumbotron-caption b {
+.board-caption {
+  text-align: center;
   font-size: 12px;
   letter-spacing: 0.08em;
   text-transform: uppercase;
+  overflow-wrap: anywhere;
 }
 
-.jumbotron-caption small {
-  color: var(--muted);
-  font-size: 10px;
+.board-dots {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 7px;
+  margin: 10px 0 0;
 }
 
-#jumbotron-details {
-  max-height: 25vh;
-  overflow-y: auto;
+.board-dots[hidden] {
+  display: none;
+}
+
+.board-dot {
+  position: relative;
+  width: 12px;
+  height: 12px;
+  padding: 0;
+  border: 2px solid var(--wood-edge);
+  border-radius: 50%;
+  background: var(--stone-dk);
+  cursor: pointer;
+}
+
+/* A finger-sized target round each dot, overlapping into the gaps. */
+.board-dot::before {
+  content: "";
+  position: absolute;
+  inset: -6px;
+}
+
+.board-dot[aria-current="true"] {
+  background: var(--accent);
+  box-shadow: 0 0 8px rgba(255, 216, 74, 0.55);
+}
+
+.board-note {
+  margin: 10px 0 0;
+  padding: 10px 12px;
+  background: var(--tablet);
+  border: 2px solid var(--stone-dk);
+  border-radius: 9px 7px 10px 8px;
+  box-shadow: var(--tablet-shadow);
+  color: var(--paper);
+  font-size: 11.5px;
+  line-height: 1.55;
   overflow-wrap: anywhere;
   white-space: pre-line;
 }
 
-.weather-key dt {
-  margin: 0 0 2px;
-  color: var(--warn);
-  font-weight: 700;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-}
-
-.weather-key dd {
-  margin: 0;
-  opacity: 0.88;
-}
-
-/* A phone reads one column down the page; anything with room reads two, so the key is a card rather
-   than a scroll. The dialog widens with it, since 340px would only reflow the same column twice. */
-@media (min-width: 720px) {
-  #weather-key {
-    width: 640px;
-  }
-
-  #weather-key .weather-key {
-    max-height: none;
-    columns: 2;
-    column-gap: 22px;
-  }
-
-  #weather-key .weather-key div {
-    break-inside: avoid;
-  }
+.board-note[hidden] {
+  display: none;
 }
 
 .recipe-actions {

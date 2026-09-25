@@ -44,6 +44,12 @@
           v.set(1 + i, 7 - i, 0, P.white);
           v.set(7 - i, 7 - i, 0, P.white);
         }
+        // Under the tailcoat, the Ooga's leopard loincloth: its wrap here, its flaps from models.js.
+        const hide = k.color("#c8923a"), spot = k.color("#4a2f16");
+        k.loin = [hide, spot];
+        for (let x = 0; x <= 8; x++) for (let z = 0; z <= 5; z++) for (const y of [0, 1]) {
+          if (x === 0 || x === 8 || z === 0 || z === 5) v.set(x, y, z, (x * 3 + y * 5 + z * 7) % 6 === 0 ? spot : hide);
+        }
       },
       // A carved pumpkin, ribbed in two oranges, rounded top and bottom
       skull(k, v) {

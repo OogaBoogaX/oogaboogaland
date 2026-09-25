@@ -1,3 +1,6 @@
+// Props whose render mesh is also their collision shell, over one local-space tree per geometry. The API
+// from `create` is `add`, `remove`, `sync`, `segmentClear`, `clearAt`, `supportAt`, `ceilingAt`,
+// `shoulderAt` and `isActive`.
 (() => {
   "use strict";
   const BL = window.BL = window.BL || {};

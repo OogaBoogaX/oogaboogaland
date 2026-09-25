@@ -7,6 +7,44 @@
 // A run is up to an hour, so the visit is built for a flat heap. Every node is made in `enter` and
 // shown or hidden after that; the ASICs are one instanced batch per model at fixed capacity; the drop
 // targets, flames and lights are fixed pools; nothing in `update` or `overlay` allocates.
+//
+// Phases `intro`, `run`, `results`. Chambers show as they are dug; the ASIC batches rebuild only when
+// the sim's `layoutVersion` or `faultVersion` moves (lamps out when off, scorched when dead, ember when
+// burning). Each chamber has a breaker and lever; every fan bought stands on its spot with its blades
+// spun by its chamber's speed; a busbar riser stands per level; the crystal cell glows with the
+// battery's charge; haze fills a chamber whose fan is down. Cooling fans spin up to about twenty turns a
+// second and swap to a blurred disc past a few, turned at about eight a second with three unlike streaks
+// so it has no symmetry to alias (a real speed would strobe backwards at sixty frames). The nearest
+// lamps and dressing lanterns are lit up to the light capacity, and the sun comes down the shaft from
+// the island's clock.
+//
+// Placing: drop markers show the dragged item's free spots, and the camera swings round to frame them
+// when a drag starts and to whatever a tap bought (a dig glides to the new chamber's preset; neither
+// moves it while an Ooga is driven). Cards show each model's profit and break-even, chamber upgrades and
+// sell-all; faults are marked on the overlay and workable by hand only within `DRIVE_REACH`.
+//
+// The player is the Ooga who walked in, driven from the first frame. The overview (V, the View button,
+// 0, and every dig) takes the camera off him to a chamber's preset and back behind him on his next step.
+// Space and the WORK button on a coarse pointer both arrive as the pilot's `onFreeAction`, which is
+// `actBeside`: a fire beside him is smothered over `SMOTHER_SECONDS` unless he carries a Fire Stopper,
+// taken from and hung back on the wall with Space; the melting box is pulled by hand (`workFault("melt")`,
+// the card's Pull it). Abandon shift is `sim.end("left")`.
+//
+// Charts: the trader's candlestick chart (candles, wicks and a last-price line) and the pool board's hash
+// chart (your hash as bars, the difficulty as amber marks on its own scale) are fixed instanced batches
+// written from the sim's rings (`candle*`, `hashHist`, `diffHist`). Their titles, the live figure and a
+// price scale are set in the jumbotron's 5x7 font on one offscreen canvas per visit through
+// `poolModels.panelFrom`, rebuilt at most once a second when a shown figure moves and released when
+// replaced. The pool board's panel shows the real chain's epoch.
+//
+// The coin follows the chain's price (`followCoin`): the first live price a run sees fixes its display
+// `rate` and locks it for the whole run (`rateLocked`). The live chain pays the pool or hands solo a
+// roll, and the payout ticks once a hundredth of a coin. Notices cover launches, retargets, overloads and
+// the halving; centre cards cover launches, digs, the halving (a ten-second countdown and a lamp dip at
+// the cut) and the banked win; a title card opens the intro.
+//
+// The run lives on `world.mine` for the page life, is saved every few seconds and on leave, and is
+// restored from storage when the cave is next entered on any page; a finished run clears it.
 (() => {
   "use strict";
   const BL = window.BL = window.BL || {};
@@ -33,10 +71,11 @@
     big: { yaw: 0, pitch: 0.5, dist: 13, target: { x: 0, y: 2, z: -37 } }
   };
   // Inside the rock: no sky, lit by its own lamps, and a haze that swallows the far end of a big cave.
+  // Lamplight, not daylight: a warm fill from the rock and a golden haze.
   const RENDER_OPTS = {
-    clear: [0.03, 0.028, 0.026], shadowCenter: { x: 0, y: 1.6, z: 4 }, shadowExtent: 22,
-    lights: new Float32Array(80), lightCount: 0, bloomStrength: 0.9,
-    fog: [0.04, 0.034, 0.03], fogNear: 22, fogFar: 60
+    clear: [0.05, 0.036, 0.024], sky: [0.54, 0.44, 0.33], ground: [0.32, 0.25, 0.17], shadowCenter: { x: 0, y: 1.6, z: 4 }, shadowExtent: 22,
+    lights: new Float32Array(BL.glRenderer.POINT_LIGHT_CAPACITY * 8), lightCount: 0, bloomStrength: 0.9,
+    fog: [0.11, 0.075, 0.045], fogNear: 22, fogFar: 60
   };
   // The island's clock, sampled only for how much sun reaches the Sun Leaves down the shaft.
   const SKY = {
@@ -178,7 +217,7 @@
     return false;
   };
   // Circles the Oogas walk round: the fixed props, and every holder and generator standing now.
-  const OBSTACLE_MAX = 96;
+  const OBSTACLE_MAX = 160;
   const obstacles = { x: new Float32Array(OBSTACLE_MAX), z: new Float32Array(OBSTACLE_MAX), r: new Float32Array(OBSTACLE_MAX), count: 0, fixed: 0 };
   const obstacle = (x, z, r) => {
     if (obstacles.count >= OBSTACLE_MAX) return;
@@ -200,6 +239,7 @@
       obstacle(A.shelves.x, A.shelves.z + dz * 1.3, 0.55);
     }
     for (const dx of [-1.4, 0, 1.4]) obstacle(A.trophyShelf.x + dx, A.trophyShelf.z, 0.5);
+    for (const d of L.DRESS_AT) obstacle(d.x, d.z, 0.45);
     obstacles.fixed = obstacles.count;
   };
   // Holders and generators change with the layout, so they are laid over the fixed props each time.
@@ -561,9 +601,11 @@
 
   // Ten lights reach the shader: a glow on every fire and tripped breaker, the sun down the shaft, and
   // the nearest lamps to the view. In the dark only the emergency red is left.
-  const lightScore = new Float32Array(L.LAMPS.length);
+  // The chamber lamps, then every dressing lantern: one nearest-first list, the lanterns a little dimmer.
+  // Built on the first lit frame, not at page load: the lanterns come from baking the chambers' dressing.
+  let HUNG = null, LAMP_N = 0, lightScore = null;
   const pushLight = (n, x, y, z, radius, r, g, b) => {
-    if (n >= 10) return n;
+    if (n >= BL.glRenderer.POINT_LIGHT_CAPACITY) return n;
     const o = n * 8, Lt = RENDER_OPTS.lights;
     Lt[o] = x;
     Lt[o + 1] = y;
@@ -591,12 +633,18 @@
       const k = Math.min(1, glowN[here] / 12);
       n = pushLight(n, glowX[here] / glowN[here], 1.6, glowZ[here] / glowN[here], 6 + here * 3, 0.1 * k, 0.42 * k, 0.32 * k);
     }
-    for (let i = 0; i < L.LAMPS.length; i++) {
-      const lamp = L.LAMPS[i];
-      lightScore[i] = lamp.chamber > s.dug ? Infinity : (lamp.x - t.x) * (lamp.x - t.x) + (lamp.z - t.z) * (lamp.z - t.z);
+    if (!HUNG) {
+      HUNG = MM.dressingLights();
+      LAMP_N = L.LAMPS.length + HUNG.length / 4;
+      lightScore = new Float32Array(LAMP_N);
+    }
+    for (let i = 0; i < LAMP_N; i++) {
+      const hung = i >= L.LAMPS.length, h = (i - L.LAMPS.length) * 4;
+      const x = hung ? HUNG[h] : L.LAMPS[i].x, z = hung ? HUNG[h + 2] : L.LAMPS[i].z, chamber = hung ? HUNG[h + 3] : L.LAMPS[i].chamber;
+      lightScore[i] = chamber > s.dug ? Infinity : (x - t.x) * (x - t.x) + (z - t.z) * (z - t.z);
     }
     // Nearest first, by repeated minimum: a handful of lamps, no sort and no list.
-    while (n < 10) {
+    while (n < BL.glRenderer.POINT_LIGHT_CAPACITY) {
       let best = -1, bestD = Infinity;
       for (let i = 0; i < lightScore.length; i++) if (lightScore[i] < bestD) {
         bestD = lightScore[i];
@@ -604,8 +652,13 @@
       }
       if (best < 0) break;
       lightScore[best] = Infinity;
+      if (best >= L.LAMPS.length) {
+        const h = (best - L.LAMPS.length) * 4;
+        n = out || s.tripped[HUNG[h + 3]] ? n : pushLight(n, HUNG[h], HUNG[h + 1], HUNG[h + 2], 6, 1, 0.66, 0.3);
+        continue;
+      }
       const lamp = L.LAMPS[best], radius = 10 + lamp.chamber * 3;
-      n = out || s.tripped[lamp.chamber] ? pushLight(n, lamp.x, lamp.y, lamp.z, radius * 0.6, 0.35, 0.05, 0.04) : pushLight(n, lamp.x, lamp.y, lamp.z, radius, 0.55, 0.47, 0.36);
+      n = out || s.tripped[lamp.chamber] ? pushLight(n, lamp.x, lamp.y, lamp.z, radius * 0.6, 0.35, 0.05, 0.04) : pushLight(n, lamp.x, lamp.y, lamp.z, radius, 0.85, 0.62, 0.34);
     }
     RENDER_OPTS.lightCount = n;
     RENDER_OPTS.shadowCenter.x = t.x;

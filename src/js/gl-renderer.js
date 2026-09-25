@@ -1,13 +1,31 @@
+// The WebGL2 renderer: instancing, frustum culling, a shadow map, MSAA, quality tiers and a pixel budget.
+// The sky pass draws sun, moon, stars and painted clouds (`clouds` cover in the render options); cloud
+// nodes (matrix mode 4) light as soft cartoon cumulus. The sea (`sea` height in the render options; the
+// hub and the drop set it to -70) is a sky-pass plane with waves, Fresnel sky, sun glint, foam and horizon
+// haze, tinted by the sky. Sun shafts are marched over the sky in the depth on high and medium.
+//
+// Up to `POINT_LIGHT_CAPACITY` (32) point lights; each tier draws its first 32/20/10. Wind bends any
+// geometry with a `sway` strength by the square of local height, and rocks lanterns with `swing` (rock as a
+// piece, phase running along the ground). Water and lava are face materials (`face.water = true` or
+// `"lava"`, flagged to the shader through the normal's length): level water ripples, falls stream, both
+// reflect the sky and glint; lava flows with glowing cracks. Everything animates on the renderer's own clock.
+//
+// Block detail (seam, tone, grain) applies to every face on its geometry's `voxel` grid (`[unit, ox, oy,
+// oz]`, set by `voxelGeometry`, `gridGeometry` and the dressing baker, checked per face at upload and
+// flagged by a doubled normal); rock-sized voxels (a quarter metre and up) group into bevelled two-cell
+// stones. The composite adds a sky rim, bloom at two radii and one display grade (shoulder, S curve,
+// saturation, split tone, vignette, dither). canvas-renderer.js implements the same surface.
 (() => {
   "use strict";
   const BL = window.BL = window.BL || {};
   const { mat4 } = BL.math;
   const { updateWorld, traverseVisible, boundsOf, matrixModeOf, hiddenFromCamera, hiddenFromCutaway } = BL.scene;
-  const POINT_LIGHT_CAPACITY = 10;
+  // Scenes fill up to POINT_LIGHT_CAPACITY lights in priority order; each tier draws only its first `lights`.
+  const POINT_LIGHT_CAPACITY = 32;
   const QUALITY = {
-    high: { dpr: 1.5, msaa: 4, shadow: 2048, bloom: true, mirror: 1024, environment: 128, environmentCadence: 1, lights: POINT_LIGHT_CAPACITY },
-    medium: { dpr: 1.25, msaa: 2, shadow: 1024, bloom: true, mirror: 768, environment: 96, environmentCadence: 2, lights: POINT_LIGHT_CAPACITY },
-    low: { dpr: 1, msaa: 0, shadow: 512, bloom: false, mirror: 512, environment: 64, environmentCadence: 4, lights: POINT_LIGHT_CAPACITY }
+    high: { dpr: 1.5, msaa: 4, shadow: 2048, bloom: true, shafts: true, mirror: 1024, environment: 128, environmentCadence: 1, lights: 32 },
+    medium: { dpr: 1.25, msaa: 2, shadow: 1024, bloom: true, shafts: true, mirror: 768, environment: 96, environmentCadence: 2, lights: 20 },
+    low: { dpr: 1, msaa: 0, shadow: 512, bloom: false, shafts: false, mirror: 512, environment: 64, environmentCadence: 4, lights: 10 }
   };
   const INSTANCE_FLOATS = 20;
   // MAX_PIXELS caps the pixel ratio to bound buffer memory.
@@ -68,6 +86,9 @@ layout(location=7) in vec4 aParams;
 uniform mat4 uViewProj;
 uniform mat4 uLightViewProj;
 ${VIEW_DIRECTION_GLSL}
+uniform float uWindTime;
+uniform float uSway;
+uniform float uSwing;
 out vec3 vNormal;
 out vec4 vColor;
 out vec4 vParams;
@@ -77,6 +98,8 @@ out vec3 vInstanceFacing;
 out vec2 vPortalUV;
 out vec4 vPortalView;
 ${PORTAL_LIQUID_GLSL}
+out vec3 vLocal;
+out vec3 vLocalNormal;
 out float vMatrixSurface;
 flat out float vMatrixCave;
 flat out float vMatrixPermanentFallback;
@@ -92,6 +115,20 @@ void main() {
     vec3 toward = viewTowardEye(w.xyz);
     vPortalView = vec4(dot(toward, normalize(aM0.xyz)), dot(toward, normalize(aM1.xyz)),
       dot(toward, normalize(aM2.xyz)), max(0.001, length(aM0.xyz)));
+  }
+  // Wind: a geometry with sway bends from its foot, each copy on its own phase from where it stands.
+  if (uSway > 0.0) {
+    float ph = uWindTime * 1.9 + m[3].x * 0.37 + m[3].z * 0.29;
+    w.xz += vec2(0.8, 0.6) * (sin(ph) + 0.35 * sin(ph * 2.3 + 1.7)) * uSway * max(aPos.y, 0.0) * max(aPos.y, 0.0);
+  }
+  // Swing: lanterns and bulbs on a cable rock in the wind. The phase runs smoothly along the ground, so one
+  // lantern moves as a piece while its neighbours a metre off rock out of step with it, like a gust passing.
+  if (uSwing > 0.0) {
+    float ph = w.x * 0.8 + w.z * 0.6;
+    float swing = sin(uWindTime * 1.7 + ph) * 0.045 + sin(uWindTime * 3.3 + ph * 2.1) * 0.012;
+    w.x += swing * uSwing;
+    w.z += swing * uSwing * 0.55;
+    w.y += abs(swing) * uSwing * 0.15;
   }
   vNormal = normalize(mat3(m) * aNormal);
   vColor = aColor;
@@ -112,6 +149,8 @@ void main() {
   vParams.z = max(0.0, aParams.z);
   vShadow = uLightViewProj * w;
   vWorld = w.xyz;
+  vLocal = aPos;
+  vLocalNormal = aNormal;
   vInstanceFacing = normalize(aM2.xyz);
   gl_Position = uViewProj * w;
   if (aParams.w != 0.0 && aParams.z < 5.5) {
@@ -163,6 +202,8 @@ in vec3 vInstanceFacing;
 in vec2 vPortalUV;
 in vec4 vPortalView;
 ${PORTAL_LIQUID_GLSL}
+in vec3 vLocal;
+in vec3 vLocalNormal;
 in float vMatrixSurface;
 flat in float vMatrixCave;
 flat in float vMatrixPermanentFallback;
@@ -179,7 +220,7 @@ uniform float uShadowFloor;
 uniform float uShadowBias;
 uniform sampler2DShadow uShadow;
 uniform float uShadowTexel;
-uniform vec4 uLights[20];
+uniform vec4 uLights[64];
 uniform int uLightCount;
 ${VIEW_DIRECTION_GLSL}
 uniform vec3 uFog;
@@ -201,6 +242,8 @@ uniform float uClipMinY;
 uniform float uClipMaxY;
 ${CUTAWAY_GLSL}
 uniform float uMatrixGlyphOpacity;
+uniform vec4 uVoxel;
+uniform float uWindTime;
 #ifdef MATRIX_SAMPLE_INTERPOLATION
 vec2 matrixSampleOffsets[4];
 #endif
@@ -346,22 +389,138 @@ float shadowAt(vec3 p, float bias) {
   return s / 9.0;
 }
 vec3 lightFactorAt(vec3 n) {
-  float ndl = max(max(dot(n, uLightDir), 0.0), uDiffuseFloor);
+  float lam = dot(n, uLightDir);
+  float ndl = max(max(lam, 0.0), uDiffuseFloor);
   vec3 sp = vShadow.xyz * 0.5 + 0.5;
   float bias = max(uShadowBias * (1.0 - ndl), uShadowBias * 0.32);
   float sh = shadowAt(sp, bias);
   vec3 factor = max(mix(uGround, uSky, n.y * 0.5 + 0.5), vec3(uAmbientFloor));
-  factor += uSun * ndl * uDirectStrength * mix(1.0, max(sh, uShadowFloor), uShadowStrength);
-  for (int i = 0; i < 10; i++) {
+  // Cartoon sun: part Lambert, part a soft two-tone ramp, so every side that sees the sun reads as one bright
+  // coat of paint and the terminator rolls off rather than grading each face its own shade.
+  float toon = max(mix(ndl, smoothstep(-0.05, 0.45, lam), 0.45), uDiffuseFloor);
+  float lit = mix(1.0, max(sh, uShadowFloor), uShadowStrength);
+  factor += uSun * toon * uDirectStrength * lit;
+  // Painted shadows: what the sun misses takes a cool violet fill instead of only going dark.
+  factor += vec3(0.05, 0.04, 0.11) * uDirectStrength * (1.0 - lit * toon);
+  for (int i = 0; i < 32; i++) {
     if (i >= uLightCount) break;
     vec4 lp = uLights[i * 2];
     vec3 ld = lp.xyz - vWorld;
     float dist = length(ld);
+    if (dist >= lp.w) continue;
     float a = clamp(1.0 - dist / lp.w, 0.0, 1.0);
     a *= a;
     factor += uLights[i * 2 + 1].rgb * a * max(dot(n, ld), 0.0) / max(dist, 0.0001);
   }
   return factor;
+}
+float cellHash(ivec3 c) {
+  uint x = uint(c.x) * 73856093u ^ uint(c.y) * 19349663u ^ uint(c.z) * 83492791u;
+  x ^= x >> 16;
+  x *= 2146121005u;
+  x ^= x >> 15;
+  return float(x >> 8) / 16777216.0;
+}
+// Voxel geometry carries its grid (unit, origin) so merged runs still read as built blocks. Walls are coursed
+// stone: a joint under every course and stone ends at a length each course draws for itself (one to three
+// blocks), with a tone per stone; floors and roofs carry no joints at all, only a soft tone per block, so open
+// ground never shows a grid. Every layer fades out before its cells shrink under a few pixels.
+float voxelDetail() {
+  // Faces on the grid carry a doubled normal (see buildMeshPart); water and lava carry longer ones.
+  float nl = dot(vLocalNormal, vLocalNormal);
+  if (uVoxel.x <= 0.0 || nl < 2.0 || nl > 6.0) return 1.0;
+  vec3 ln = normalize(vLocalNormal);
+  vec3 c = (vLocal - uVoxel.yzw) / uVoxel.x;
+  vec3 an = abs(ln);
+  vec3 block = floor(c - ln * 0.5);
+  if (an.y > 0.5) {
+    float px = max(fwidth(c.x), fwidth(c.z));
+    ivec3 cell = ivec3(block);
+    float tone = (cellHash(cell) - 0.5) * 0.045 * (1.0 - smoothstep(0.25, 0.9, px));
+    ivec2 sub = ivec2(floor(fract(c.xz) * 4.0));
+    float grain = (cellHash(cell * 5 + ivec3(sub, sub.x + sub.y * 4)) - 0.5) * 0.022 * (1.0 - smoothstep(0.04, 0.2, px));
+    return 1.0 + tone + grain;
+  }
+  bool facesX = an.x > an.z;
+  // Rock voxels (a quarter metre and up) are grouped four to a stone side, a metre a course, so cliffs read as
+  // big pillowed blocks.
+  float k = uVoxel.x >= 0.2 ? 4.0 : 1.0;
+  float along = (facesX ? c.z : c.x) / k, up = c.y / k;
+  int plane = int(facesX ? block.x : block.z) * 7 + (facesX ? 1 : 2);
+  float px = max(fwidth(along), fwidth(up));
+  int course = int(floor(up));
+  float w = 1.0 + floor(cellHash(ivec3(course, plane, 11)) * 3.0);
+  float a = (along + floor(cellHash(ivec3(course, plane, 23)) * 3.0)) / w;
+  ivec3 stone = ivec3(int(floor(a)), course, plane);
+  float tone = (cellHash(stone) - 0.5) * 0.08 * (1.0 - smoothstep(0.3, 1.0, px));
+  ivec2 sub = ivec2(floor(fract(vec2(along, up)) * 4.0));
+  float grain = (cellHash(ivec3(block) * 5 + ivec3(sub, sub.x + sub.y * 4)) - 0.5) * 0.025 * (1.0 - smoothstep(0.04, 0.2, px));
+  // Some course joints are left out, so stones stand one or two courses tall and the face reads as rock.
+  float fu = fract(up), fa = fract(a) * w;
+  float below = cellHash(ivec3(course, plane, 31)) < 0.4 ? 9.0 : fu;
+  float above = cellHash(ivec3(course + 1, plane, 31)) < 0.4 ? 9.0 : 1.0 - fu;
+  float edge = min(min(below, above), min(fa, w - fa));
+  float seam = (1.0 - smoothstep(0.04, 0.04 + px * 1.5, edge)) * (1.0 - smoothstep(0.05, 0.18, px));
+  // Rock stones are pillowed: a lit top lip, a shaded underside and darker ends, rolling in over a wide band so
+  // every block reads as rounded, cartoon stone.
+  float bevel = 0.0;
+  if (k > 1.5) {
+    float lip = 1.0 - smoothstep(0.0, 0.3, above), under = 1.0 - smoothstep(0.0, 0.3, below), ends = 1.0 - smoothstep(0.0, 0.22, min(fa, w - fa));
+    bevel = (lip * 0.14 - under * 0.15 - ends * 0.07) * (1.0 - smoothstep(0.08, 0.3, px));
+  }
+  // Seams belong to masonry: fine voxels (faces, hands, props, trim) keep only a whisper of one, so small
+  // things read smooth and painted rather than gridded.
+  return 1.0 + tone + grain + bevel - seam * 0.13 * clamp(uVoxel.x / 0.25, 0.15, 1.0);
+}
+float hash21(vec2 p) {
+  vec3 q = fract(vec3(p.xyx) * 0.1031);
+  q += dot(q, q.yzx + 33.33);
+  return fract((q.x + q.y) * q.z);
+}
+float vnoise(vec2 p) {
+  vec2 i = floor(p), f = fract(p);
+  f = f * f * (3.0 - 2.0 * f);
+  return mix(mix(hash21(i), hash21(i + vec2(1.0, 0.0)), f.x), mix(hash21(i + vec2(0.0, 1.0)), hash21(i + vec2(1.0, 1.0)), f.x), f.y);
+}
+// Water: level faces ripple under two drifting noise fields, steep faces fall in streaks; both reflect the sky
+// by Fresnel and glint in the sun, and the brightest crests reach the bloom.
+vec3 waterShade(vec3 lit, vec3 n, out vec3 bright) {
+  float t = uWindTime;
+  bool fall = abs(n.y) < 0.6;
+  vec2 q = fall ? vec2(dot(vWorld.xz, normalize(vec2(-n.z, n.x) + 1e-5)) * 2.2, vWorld.y * 0.9 + t * 3.2) : vWorld.xz * 0.45 + vec2(t * 0.06, t * 0.04);
+  float a = vnoise(q), b = vnoise(q * 2.3 + vec2(5.2, 1.3) - t * 0.05);
+  vec3 wn = fall ? n : normalize(vec3((a - 0.5) * 0.5, 1.0, (b - 0.5) * 0.5));
+  vec3 v = normalize(uEye - vWorld), r = reflect(-v, wn);
+  float fres = 0.12 + 0.88 * pow(1.0 - max(dot(v, wn), 0.0), 4.0);
+  vec3 skyc = uSky * (0.9 + 0.5 * clamp(r.y, 0.0, 1.0)) + uSun * uDirectStrength * 0.15;
+  vec3 col = mix(lit, skyc, fres * 0.65);
+  float glint = pow(max(dot(r, uLightDir), 0.0), 120.0) * uDirectStrength;
+  float foam = fall ? smoothstep(0.5, 0.85, vnoise(q * vec2(1.0, 0.25))) : smoothstep(0.72, 0.8, a * 0.6 + b * 0.4);
+  col += uSun * glint * 2.0 + vec3(0.85, 0.95, 1.0) * foam * (fall ? 0.55 : 0.2);
+  bright = uSun * glint * 1.2 + vec3(foam * (fall ? 0.15 : 0.05));
+  return col;
+}
+// Lava: a dark crust drifting over a hot flow, its cracks glowing into the bloom.
+// Roads (flagged five times over): painted dirt, soft sun-bleached patches at two scales and a scatter of
+// darker and lighter cartoon pebble specks on a 9 cm lattice, all in world space so tiles never show a seam.
+float roadDetail() {
+  vec2 p = vWorld.xz;
+  float bleach = vnoise(p * 0.35) * 0.6 + vnoise(p * 1.3 + 7.1) * 0.4;
+  vec2 cell = floor(p / 0.09);
+  float h = hash21(cell), speck = step(0.93, h) * (hash21(cell + 3.7) < 0.5 ? -0.16 : 0.1);
+  vec2 f = fract(p / 0.09) - 0.5;
+  speck *= 1.0 - smoothstep(0.22, 0.34, length(f));
+  return 0.9 + bleach * 0.2 + speck;
+}
+vec3 lavaShade(out vec3 bright) {
+  vec2 q = vWorld.xz * 0.35 + vec2(uWindTime * 0.05, uWindTime * 0.02);
+  float n = vnoise(q) * 0.65 + vnoise(q * 2.7 - uWindTime * 0.08) * 0.35;
+  float crack = 1.0 - smoothstep(0.03, 0.12, abs(n - 0.5));
+  float pulse = 0.85 + 0.15 * sin(uWindTime * 2.0 + n * 12.0);
+  vec3 hot = vec3(1.0, 0.42, 0.06) * pulse, crust = mix(vec3(0.16, 0.05, 0.03), vec3(0.45, 0.12, 0.03), n);
+  vec3 col = mix(crust, hot * 1.4, max(crack, smoothstep(0.62, 0.78, n) * 0.6));
+  bright = hot * max(crack, smoothstep(0.62, 0.78, n) * 0.5) * 0.9;
+  return col;
 }
 vec3 matrixGlyphColor(vec3 base, float glow, float tip, float sideMix, float sideShade) {
   float emission = mix(0.78, 1.15, glow);
@@ -532,14 +691,36 @@ void main() {
   vec3 heat = vec3(1.0, 0.12 + ember * 0.85, 0.01 + ember * ember * ember * 0.74) * detail;
   base = mix(base, heat, ember * 0.9);
   float emissive = max(clamp(vColor.a * max(0.0, vParams.x), 0.0, 1.0), ember * 0.9);
+  base *= mix(voxelDetail(), 1.0, max(emissive, cloud));
+  if (dot(vLocalNormal, vLocalNormal) > 20.0) {
+    // Marching squares on the road grid: each tile corner takes the share of road among the four tiles meeting
+    // there (from the eight-neighbour mask in the first instance parameter, stored as 1 + mask); the tile keeps
+    // what lies inside the bilinear half line, so staircases read as straight diagonals and curves.
+    int mask = int(vParams.x + 0.5) - 1;
+    float ex = float(mask & 1) , wx = float((mask >> 1) & 1), nz = float((mask >> 2) & 1), sz = float((mask >> 3) & 1);
+    float ne = float((mask >> 4) & 1), nw = float((mask >> 5) & 1), se = float((mask >> 6) & 1), sw = float((mask >> 7) & 1);
+    vec2 u = clamp(vLocal.xz / 0.125 + 0.5, 0.0, 1.0);
+    float c00 = (1.0 + wx + sz + sw) * 0.25, c10 = (1.0 + ex + sz + se) * 0.25, c01 = (1.0 + wx + nz + nw) * 0.25, c11 = (1.0 + ex + nz + ne) * 0.25;
+    if (mix(mix(c00, c10, u.x), mix(c01, c11, u.x), u.y) < 0.5) discard;
+    base *= roadDetail();
+  }
   vec3 lightFactor = lightFactorAt(n);
+  // Clouds are lit like cartoon cumulus: sky fill everywhere, the sun on every face that sees it, no hard shade.
+  if (cloud > 0.5) lightFactor = uSky * 0.85 + uSun * uDirectStrength * (0.4 + 0.45 * max(dot(n, uLightDir), 0.0)) + vec3(0.18) * uDirectStrength;
+  // Sky rim: a grazing view picks up the sky's fill, which lifts silhouettes off the ground behind them.
+  float rim = pow(1.0 - clamp(dot(n, normalize(uEye - vWorld)), 0.0, 1.0), 3.0) * clamp(n.y * 0.5 + 0.6, 0.0, 1.0);
+  lightFactor += uSky * rim * 0.22 + uSun * uDirectStrength * rim * 0.1;
   vec3 lit = base * lightFactor;
   vec3 col = mix(lit, base * 1.15, emissive);
   col = mix(col, vec3(1.0, 0.86, 0.45), vParams.y * 0.4);
   float tip = clamp(vParams.z, 0.0, 1.0) * (1.0 - step(1.5, vParams.z));
   col = mix(col, vec3(0.84, 1.0, 0.89), tip * 0.88);
+  vec3 surfaceBright = vec3(0.0);
+  float nl = dot(vLocalNormal, vLocalNormal);
+  if (nl > 12.0 && nl < 20.0) col = lavaShade(surfaceBright);
+  else if (nl > 6.0 && nl < 12.0) col = waterShade(col, n, surfaceBright);
   vec3 normalColor = clamp(mix(col, uFog, fog), 0.0, 1.0);
-  vec3 normalBright = clamp(col * (emissive * 0.9 + vParams.y * 0.5 + tip * 0.85) * (1.0 - fog), 0.0, 1.0);
+  vec3 normalBright = clamp((col * (emissive * 0.9 + vParams.y * 0.5 + tip * 0.85) + surfaceBright) * (1.0 - fog), 0.0, 1.0);
   oColor = vec4(mix(normalColor, matrixColorResult, front), 1.0);
   oBright = vec4(mix(normalBright, matrixBrightResult, front), 1.0);
 }`;
@@ -911,12 +1092,29 @@ uniform mat3 uStarMatrix;
 uniform float uStars;
 uniform float uTime;
 uniform float uHazeDrop;
+uniform float uClouds;
+uniform vec4 uSea;
+uniform vec2 uSeaEye;
 layout(location=0) out vec4 oColor;
 layout(location=1) out vec4 oBright;
 float hash(vec2 p) {
   vec3 q = fract(vec3(p.xyx) * 0.1031);
   q += dot(q, q.yzx + 33.33);
   return fract((q.x + q.y) * q.z);
+}
+float valueNoise(vec2 p) {
+  vec2 i = floor(p), f = fract(p);
+  f = f * f * (3.0 - 2.0 * f);
+  return mix(mix(hash(i), hash(i + vec2(1.0, 0.0)), f.x), mix(hash(i + vec2(0.0, 1.0)), hash(i + vec2(1.0, 1.0)), f.x), f.y);
+}
+float fbm(vec2 p) {
+  float v = 0.0, a = 0.5;
+  for (int i = 0; i < 5; i++) {
+    v += valueNoise(p) * a;
+    p = p * 2.03 + vec2(17.1, 9.2);
+    a *= 0.5;
+  }
+  return v;
 }
 void main() {
   vec4 far = uInvViewProj * vec4(vUv * 2.0 - 1.0, 1.0, 1.0);
@@ -951,6 +1149,48 @@ void main() {
       stars = mix(vec3(1.0), vec3(0.75, 0.85, 1.0), h3) * s;
     }
   }
+  // The sea far below the island: the view ray meets a level plane, waves from two drifting noise fields bend
+  // its normal, the sky reflects by Fresnel, the sun glints, crests foam, and it hazes into the horizon.
+  if (uSea.x > 0.0 && d.y < -0.0005) {
+    float t = (uSea.y - uSea.z) / d.y;
+    vec2 p = uSeaEye + d.xz * t;
+    float e = 0.6;
+    float h0 = fbm(p * 0.045 + vec2(uTime * 0.02, uTime * 0.013)), hx = fbm((p + vec2(e, 0.0)) * 0.045 + vec2(uTime * 0.02, uTime * 0.013)), hz = fbm((p + vec2(0.0, e)) * 0.045 + vec2(uTime * 0.02, uTime * 0.013));
+    vec3 n = normalize(vec3((h0 - hx) * 2.2, 1.0, (h0 - hz) * 2.2));
+    vec3 r = reflect(d, n);
+    float fres = 0.08 + 0.92 * pow(1.0 - max(dot(-d, n), 0.0), 5.0);
+    vec3 skyR = mix(uHorizon, uZenith, smoothstep(0.0, 0.5, r.y));
+    float day = 1.0 - uStars;
+    vec3 deep = mix(vec3(0.04, 0.06, 0.12), vec3(0.03, 0.34, 0.52), day);
+    vec3 shallow = mix(vec3(0.05, 0.09, 0.15), vec3(0.06, 0.55, 0.62), day);
+    vec3 water = mix(shallow, deep, smoothstep(0.35, 0.65, h0));
+    water = mix(water, skyR, fres);
+    // The sea takes the sky's own colour, warm at dusk and dim at night, over its daytime blues.
+    water *= mix(vec3(1.0), uHorizon * 1.35, 0.4);
+    water += uSun * pow(max(dot(r, uSunDir), 0.0), 220.0) * 3.0 * day;
+    water += vec3(0.85, 0.95, 1.0) * smoothstep(0.66, 0.74, h0) * 0.22 * day;
+    // Haze by distance, pushed out by however far the eye climbs past island heights, so a dive from altitude
+    // still sees blue sea below instead of a sheet of horizon colour; at island heights nothing changes.
+    float lift = max(0.0, uSea.z - uSea.y - 120.0);
+    col = mix(water, uHorizon, smoothstep(160.0 + lift * 1.2, 900.0 + lift * 2.5, t));
+  }
+  // Painted cumulus on a plane over the world, drifting with time: lit toward the sun, grey underneath,
+  // taking the horizon's colour at dusk and dimming to the night sky. They thin out toward the horizon.
+  float cover = 0.0;
+  if (uClouds > 0.0 && d.y > 0.0) {
+    vec2 p = d.xz / (d.y + 0.12) * 1.6 + vec2(uTime * 0.012, uTime * 0.004);
+    float n = fbm(p);
+    cover = smoothstep(1.0 - uClouds, 1.0 - uClouds + 0.22, n) * smoothstep(0.0, 0.18, d.y);
+    float lit = clamp(0.62 + (n - fbm(p + uSunDir.xz * 0.35)) * 3.0, 0.3, 1.1);
+    vec3 day = mix(vec3(0.78, 0.82, 0.9), vec3(1.0, 0.98, 0.95), lit) + uSun * 0.25 * lit;
+    vec3 night = mix(uZenith, uHorizon, 0.5) * (0.7 + 0.5 * lit);
+    vec3 cloudCol = mix(day, night, uStars);
+    cloudCol = mix(cloudCol, uHorizon * 1.05, smoothstep(0.35, 0.0, d.y) * 0.6);
+    col = mix(col, cloudCol, cover * 0.92);
+    sun *= 1.0 - cover * 0.85;
+    moon *= 1.0 - cover;
+    stars *= 1.0 - cover;
+  }
   oColor = vec4(col + sun + moon + stars, 1.0);
   oBright = vec4(uSun * sunDisc * 0.6 + moon * 0.5 + stars * 0.35, 1.0);
 }`;
@@ -970,15 +1210,48 @@ void main() {
   }
   oColor = vec4(sum, 1.0);
 }`;
+  // Display grade over every scene: obscurance, two bloom radii, a soft shoulder that rolls hot light off instead
+  // of clipping it, a soft S curve, rich animation-cel saturation, cool shadows under warm highlights, vignette
+  // and dither.
   const COMPOSITE_FS = `#version 300 es
 precision highp float;
 in vec2 vUv;
 uniform sampler2D uScene;
 uniform sampler2D uBloom;
+uniform sampler2D uBloomWide;
 uniform float uBloomStrength;
+uniform sampler2D uDepth;
+uniform vec4 uShaft;
+uniform vec3 uShaftColor;
 out vec4 oColor;
 void main() {
-  vec3 col = texture(uScene, vUv).rgb + texture(uBloom, vUv).rgb * uBloomStrength;
+  vec3 col = texture(uScene, vUv).rgb;
+  // Sun shafts: open sky marched toward the sun's place on screen, so the light streams past every
+  // silhouette standing in front of it.
+  if (uShaft.z > 0.0) {
+    vec2 march = (uShaft.xy - vUv) / 28.0;
+    vec2 uv = vUv + march * fract(sin(dot(gl_FragCoord.xy, vec2(12.9898, 78.233))) * 43758.5453);
+    float light = 0.0, w = 1.0;
+    for (int i = 0; i < 28; i++) {
+      light += step(0.99999, texture(uDepth, uv).r) * w;
+      w *= 0.955;
+      uv += march;
+    }
+    vec2 a = (vUv - uShaft.xy) * vec2(uShaft.w, 1.0);
+    col += uShaftColor * light / 28.0 * uShaft.z * (1.0 - smoothstep(0.0, 0.9, length(a)));
+  }
+  col += (texture(uBloom, vUv).rgb + texture(uBloomWide, vUv).rgb * 0.7) * uBloomStrength;
+  vec3 hot = max(col - 0.82, 0.0);
+  col = min(col, 0.82) + 0.18 * (1.0 - exp(-hot / 0.18));
+  // A gentle S curve whose toe is lifted, so shaded faces keep their colour instead of sinking to black.
+  col = mix(col, col * col * (3.0 - 2.0 * col), 0.14);
+  col += (1.0 - smoothstep(0.0, 0.25, col)) * 0.025;
+  float l = dot(col, vec3(0.2126, 0.7152, 0.0722));
+  col = max(mix(vec3(l), col, 1.2), 0.0);
+  col *= mix(vec3(0.95, 0.99, 1.07), vec3(1.05, 1.0, 0.93), smoothstep(0.1, 0.75, l));
+  vec2 q = vUv - 0.5;
+  col *= 1.0 - 0.16 * smoothstep(0.3, 0.9, dot(q, q) * 2.2);
+  col += (fract(sin(dot(gl_FragCoord.xy, vec2(12.9898, 78.233))) * 43758.5453) - 0.5) / 255.0;
   oColor = vec4(col, 1.0);
 }`;
   const isSupported = () => {
@@ -1049,7 +1322,7 @@ void main() {
       gl.attachShader(prog, v);
       gl.attachShader(prog, f);
       gl.linkProgram(prog);
-      return { prog, shaders: [v, f], uniforms: uniforms.concat(["uCutCount", "uCutRegions", "uCutBounds", "uCutawayOpacity"]), u: {}, cutFrame: -1, cutCount: -1, cutOpacity: NaN, clipMinY: NaN, clipMaxY: NaN };
+      return { prog, shaders: [v, f], uniforms: uniforms.concat(["uCutCount", "uCutRegions", "uCutBounds", "uCutawayOpacity"]), u: {}, cutFrame: -1, cutCount: -1, cutOpacity: NaN, clipMinY: NaN, clipMaxY: NaN, voxel: null, sway: 0, swing: 0 };
     };
     const finishProgram = (p) => {
       if (!gl.getProgramParameter(p.prog, gl.LINK_STATUS)) {
@@ -1087,12 +1360,12 @@ void main() {
       const meshFragment = matrixSampling ? MESH_FS.replace("#version 300 es", "#version 300 es\n#extension GL_OES_shader_multisample_interpolation : require\n#define MATRIX_SAMPLE_INTERPOLATION") : MESH_FS;
       res.programs = {
         image: compile(IMAGE_VS, IMAGE_FS, ["uViewProj", "uRect", "uImage", "uReady", "uClipMaxY"]),
-        mesh: compile(MESH_VS, meshFragment, ["uViewProj", "uLightViewProj", "uEye", "uViewDirection", "uLightDir", "uSky", "uGround", "uSun", "uDirectStrength", "uAmbientFloor", "uDiffuseFloor", "uShadowStrength", "uShadowFloor", "uShadowBias", "uShadow", "uShadowTexel", "uLights", "uLightCount", "uFog", "uFogRange", "uMatrixParams", "uMatrixOrigin", "uMatrixGlyph", "uMatrixCave", "uMatrixCaves", "uMatrixCaveBounds", "uMatrixCaveNear", "uMatrixPermanentCave", "uMatrixPermanentPlane", "uMatrixPermanentAperture", "uMatrixLivingGlobal", "uMatrixGlyphTex", "uMatrixSamples", "uClipMinY", "uClipMaxY", "uMatrixGlyphOpacity"]),
-        shadow: compile(SHADOW_VS, SHADOW_FS, ["uLightViewProj", "uClipMinY"]),
+        mesh: compile(MESH_VS, meshFragment, ["uViewProj", "uLightViewProj", "uEye", "uViewDirection", "uLightDir", "uSky", "uGround", "uSun", "uDirectStrength", "uAmbientFloor", "uDiffuseFloor", "uShadowStrength", "uShadowFloor", "uShadowBias", "uShadow", "uShadowTexel", "uLights", "uLightCount", "uFog", "uFogRange", "uMatrixParams", "uMatrixOrigin", "uMatrixGlyph", "uMatrixCave", "uMatrixCaves", "uMatrixCaveBounds", "uMatrixCaveNear", "uMatrixPermanentCave", "uMatrixPermanentPlane", "uMatrixPermanentAperture", "uMatrixLivingGlobal", "uMatrixGlyphTex", "uMatrixSamples", "uClipMinY", "uClipMaxY", "uMatrixGlyphOpacity", "uVoxel", "uWindTime", "uSway", "uSwing"]),
+        shadow: compile(SHADOW_VS, SHADOW_FS, ["uLightViewProj", "uClipMinY", "uClipMaxY"]),
         line: compile(LINE_VS, LINE_FS, ["uViewProj", "uViewport", "uWidth", "uClipMaxY"]),
-        sky: compile(QUAD_VS, SKY_FS, ["uInvViewProj", "uHorizon", "uZenith", "uSun", "uSunDir", "uMoonDir", "uStarMatrix", "uStars", "uTime", "uHazeDrop"]),
+        sky: compile(QUAD_VS, SKY_FS, ["uInvViewProj", "uHorizon", "uZenith", "uSun", "uSunDir", "uMoonDir", "uStarMatrix", "uStars", "uTime", "uHazeDrop", "uClouds", "uSea", "uSeaEye"]),
         blur: compile(QUAD_VS, BLUR_FS, ["uTex", "uDir"]),
-        composite: compile(QUAD_VS, COMPOSITE_FS, ["uScene", "uBloom", "uBloomStrength"])
+        composite: compile(QUAD_VS, COMPOSITE_FS, ["uScene", "uBloom", "uBloomWide", "uBloomStrength", "uDepth", "uShaft", "uShaftColor"])
       };
       res.quadVao = gl.createVertexArray();
     };
@@ -1306,11 +1579,21 @@ void main() {
         gl.framebufferRenderbuffer(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.RENDERBUFFER, c0);
         gl.framebufferRenderbuffer(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT1, gl.RENDERBUFFER, c1);
         gl.framebufferRenderbuffer(gl.FRAMEBUFFER, gl.DEPTH_ATTACHMENT, gl.RENDERBUFFER, d);
+        if (settings.shafts) {
+          // Sun shafts read a single-sample copy of the depth, blitted after the scene resolves.
+          f.depth = createTexture(pw, ph, gl.DEPTH_COMPONENT24, gl.NEAREST);
+          f.depthFb = gl.createFramebuffer();
+          f.textures.push(f.depth);
+          f.framebuffers.push(f.depthFb);
+          gl.bindFramebuffer(gl.FRAMEBUFFER, f.depthFb);
+          gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.DEPTH_ATTACHMENT, gl.TEXTURE_2D, f.depth, 0);
+          gl.drawBuffers([gl.NONE]);
+        }
       } else {
         f.scene = f.resolve;
-        const d = createRenderbuffer(pw, ph, gl.DEPTH_COMPONENT24, 0);
-        f.renderbuffers.push(d);
-        gl.framebufferRenderbuffer(gl.FRAMEBUFFER, gl.DEPTH_ATTACHMENT, gl.RENDERBUFFER, d);
+        f.depth = createTexture(pw, ph, gl.DEPTH_COMPONENT24, gl.NEAREST);
+        f.textures.push(f.depth);
+        gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.DEPTH_ATTACHMENT, gl.TEXTURE_2D, f.depth, 0);
       }
       gl.bindFramebuffer(gl.FRAMEBUFFER, f.scene);
       gl.drawBuffers(DRAW_BOTH);
@@ -1327,6 +1610,19 @@ void main() {
         f.framebuffers.push(fb);
         f.ping.push({ tex, fb });
       }
+      const target = (w, h, internal) => {
+        const tex = createTexture(w, h, internal, gl.LINEAR);
+        const fb = gl.createFramebuffer();
+        gl.bindFramebuffer(gl.FRAMEBUFFER, fb);
+        gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tex, 0);
+        f.textures.push(tex);
+        f.framebuffers.push(fb);
+        return { tex, fb };
+      };
+      // The wide bloom level at an eighth of the frame gives lamps the broad halo the quarter level cannot.
+      f.wideW = Math.max(1, bw >> 1);
+      f.wideH = Math.max(1, bh >> 1);
+      f.wide = settings.bloom ? [target(f.wideW, f.wideH, gl.RGBA8), target(f.wideW, f.wideH, gl.RGBA8)] : null;
       gl.bindFramebuffer(gl.FRAMEBUFFER, null);
       res.fbo = f;
     };
@@ -1415,13 +1711,46 @@ void main() {
       for (const f of faces) triCount += f.i.length - 2;
       if (!triCount) return null;
       const source = geometry.mirrorSource, stride = source ? MESH_STRIDE + 3 : MESH_STRIDE;
+      // A voxel geometry names its grid; a face whose corners all sit on it gets block detail, flagged by a doubled
+      // normal. Faces moved off the grid after the build (a shift, a scale, a merged prop) simply go without.
+      const voxel = geometry.voxel || null;
+      const onGrid = (idx) => {
+        for (let a = 0; a < 3; a++) {
+          const t = (verts[idx * 3 + a] - voxel[1 + a]) / voxel[0];
+          if (Math.abs(t - Math.round(t)) > 1e-3) return false;
+        }
+        return true;
+      };
+      let gridded = 0;
       const out = new Float32Array(triCount * 3 * stride);
+      // A `smooth` geometry shades with vertex normals: each face's area-weighted Newell normal summed into the
+      // vertices it uses, once at upload (cartoon foliage reads as soft round clumps, not facets).
+      const smooth = geometry.smooth ? new Float32Array(verts.length) : null;
+      // `normals` (one per vertex, all zeros for "not set") wins over both: foliage cards light as one soft mass by
+      // taking the direction out of their canopy instead of their own facing.
+      const given = geometry.normals || null;
+      if (smooth) for (const f of faces) {
+        let nx = 0, ny = 0, nz = 0;
+        for (let k = 0, m = f.i.length; k < m; k++) {
+          const a = f.i[k] * 3, b = f.i[(k + 1) % m] * 3;
+          nx += (verts[a + 1] - verts[b + 1]) * (verts[a + 2] + verts[b + 2]);
+          ny += (verts[a + 2] - verts[b + 2]) * (verts[a] + verts[b]);
+          nz += (verts[a] - verts[b]) * (verts[a + 1] + verts[b + 1]);
+        }
+        for (const idx of f.i) { smooth[idx * 3] += nx; smooth[idx * 3 + 1] += ny; smooth[idx * 3 + 2] += nz; }
+      }
       let o = 0;
       const put = (idx, nx, ny, nz, c, e) => {
         const b = idx * 3;
         out[o++] = verts[b];
         out[o++] = verts[b + 1];
         out[o++] = verts[b + 2];
+        if (given && (given[b] || given[b + 1] || given[b + 2])) {
+          nx = given[b]; ny = given[b + 1]; nz = given[b + 2];
+        } else if (smooth) {
+          const l = Math.hypot(smooth[b], smooth[b + 1], smooth[b + 2]) || 1;
+          nx = smooth[b] / l; ny = smooth[b + 1] / l; nz = smooth[b + 2] / l;
+        }
         out[o++] = nx;
         out[o++] = ny;
         out[o++] = nz;
@@ -1444,6 +1773,18 @@ void main() {
         nx /= len;
         ny /= len;
         nz /= len;
+        // Water, lava and roads are flagged the same way, three, four and five times over.
+        const surface = f.water === "lava" ? 4 : f.water ? 3 : f.road ? 5 : 0;
+        if (surface) {
+          nx *= surface;
+          ny *= surface;
+          nz *= surface;
+        } else if (voxel && f.i.every(onGrid)) {
+          nx *= 2;
+          ny *= 2;
+          nz *= 2;
+          gridded++;
+        }
         const emissive = f.emissive || 0;
         const e = f.matrixCave || f.matrixLocalGlyphSurface || f.matrixWorldGlyphSurface || f.matrixPermanentFallback ? -1 - (f.matrixCave || 0) * 2 - (f.matrixWorldGlyphSurface ? 32 : 0) - (f.matrixPermanentFallback ? 64 : 0) - emissive : emissive;
         for (let k = 1; k < f.i.length - 1; k++) {
@@ -1452,7 +1793,9 @@ void main() {
           put(f.i[k + 1], nx, ny, nz, f.color, e);
         }
       }
-      return makePart(out, stride, source ? [[0, 3], [1, 3], [2, 4], [9, 3]] : [[0, 3], [1, 3], [2, 4]], ibo);
+      const part = makePart(out, stride, source ? [[0, 3], [1, 3], [2, 4], [9, 3]] : [[0, 3], [1, 3], [2, 4]], ibo);
+      part.voxel = gridded ? voxel : null;
+      return part;
     };
     const LINE_CORNERS = [[0, -1], [1, -1], [1, 1], [0, -1], [1, 1], [0, 1]];
     const buildLinePart = (geometry, ibo) => {
@@ -1918,6 +2261,21 @@ void main() {
             gl.uniform1f(program.u.uClipMaxY, maximumY);
             program.clipMaxY = maximumY;
           }
+          const voxel = rec.mesh.voxel;
+          if (useProgram === "mesh" && voxel !== program.voxel) {
+            if (voxel) gl.uniform4fv(program.u.uVoxel, voxel);
+            else gl.uniform4f(program.u.uVoxel, 0, 0, 0, 0);
+            program.voxel = voxel;
+          }
+          const sway = rec.geometry.sway || 0, swing = rec.geometry.swing || 0;
+          if (useProgram === "mesh" && sway !== program.sway) {
+            gl.uniform1f(program.u.uSway, sway);
+            program.sway = sway;
+          }
+          if (useProgram === "mesh" && swing !== program.swing) {
+            gl.uniform1f(program.u.uSwing, swing);
+            program.swing = swing;
+          }
         }
         if (kind === "line") {
           gl.uniform1f(res.programs.line.u.uClipMaxY, rec.geometry.cutawayPreserve ? 1e6 : cutawayMaxY);
@@ -2241,9 +2599,13 @@ void main() {
         fog = null,
         fogNear = 0,
         fogFar = 0,
-        matrix = null
+        matrix = null,
+        clouds = 0,
+        sea = null
       } = opts;
       const fogColor = fog || NO_FOG, fogA = fog ? fogNear : FOG_OFF, fogB = fog ? fogFar : FOG_OFF + 1;
+      gl.useProgram(res.programs.mesh.prog);
+      gl.uniform1f(res.programs.mesh.u.uWindTime, performance.now() * 0.001 % 3600);
       if (canvas.clientWidth !== width || canvas.clientHeight !== height) resize();
       const f = res.fbo, sh = res.shadow, pg = res.programs;
       const skyOn = !!(horizon && zenith);
@@ -2266,7 +2628,11 @@ void main() {
         gl.uniform3f(pg.sky.u.uMoonDir, moon.x, moon.y, moon.z);
         gl.uniformMatrix3fv(pg.sky.u.uStarMatrix, false, starMatrix);
         gl.uniform1f(pg.sky.u.uStars, stars);
-        gl.uniform1f(pg.sky.u.uTime, time);
+        // The sky's clouds, stars and sea move on the renderer's own clock, so every scene's water is alive.
+        gl.uniform1f(pg.sky.u.uTime, performance.now() * 0.001 % 3600);
+        gl.uniform1f(pg.sky.u.uClouds, clouds);
+        gl.uniform4f(pg.sky.u.uSea, sea === null ? 0 : 1, sea === null ? 0 : sea, camera.position.y, 0);
+        gl.uniform2f(pg.sky.u.uSeaEye, camera.position.x, camera.position.z);
       }
       // Set the light back far enough to bracket the shadowed volume.
       const lightDist = shadowExtent * 1.8, lightDepth = shadowExtent * 1.5;
@@ -2421,6 +2787,11 @@ void main() {
       gl.enable(gl.CULL_FACE);
       if (f.samples > 0) blit(f);
       gl.disable(gl.DEPTH_TEST);
+      if (f.depthFb && f.samples > 0) {
+        gl.bindFramebuffer(gl.READ_FRAMEBUFFER, f.scene);
+        gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, f.depthFb);
+        gl.blitFramebuffer(0, 0, pw, ph, 0, 0, pw, ph, gl.DEPTH_BUFFER_BIT, gl.NEAREST);
+      }
       const bw = f.bloomW, bh = f.bloomH;
       if (settings.bloom) {
         gl.useProgram(pg.blur.prog);
@@ -2437,6 +2808,19 @@ void main() {
         gl.bindTexture(gl.TEXTURE_2D, f.ping[0].tex);
         gl.uniform2f(pg.blur.u.uDir, 0, 2.2 / bh);
         fullscreen(pg.blur, f.ping[1].fb, bw, bh);
+        const ww = f.wideW, wh = f.wideH;
+        gl.bindTexture(gl.TEXTURE_2D, f.ping[1].tex);
+        gl.uniform2f(pg.blur.u.uDir, 1.6 / ww, 0);
+        fullscreen(pg.blur, f.wide[0].fb, ww, wh);
+        gl.bindTexture(gl.TEXTURE_2D, f.wide[0].tex);
+        gl.uniform2f(pg.blur.u.uDir, 0, 1.6 / wh);
+        fullscreen(pg.blur, f.wide[1].fb, ww, wh);
+        gl.bindTexture(gl.TEXTURE_2D, f.wide[1].tex);
+        gl.uniform2f(pg.blur.u.uDir, 2.8 / ww, 0);
+        fullscreen(pg.blur, f.wide[0].fb, ww, wh);
+        gl.bindTexture(gl.TEXTURE_2D, f.wide[0].tex);
+        gl.uniform2f(pg.blur.u.uDir, 0, 2.8 / wh);
+        fullscreen(pg.blur, f.wide[1].fb, ww, wh);
       }
       gl.useProgram(pg.composite.prog);
       gl.activeTexture(gl.TEXTURE0);
@@ -2445,6 +2829,26 @@ void main() {
       gl.activeTexture(gl.TEXTURE1);
       gl.bindTexture(gl.TEXTURE_2D, settings.bloom ? f.ping[1].tex : f.bright);
       gl.uniform1i(pg.composite.u.uBloom, 1);
+      gl.activeTexture(gl.TEXTURE2);
+      gl.bindTexture(gl.TEXTURE_2D, f.wide ? f.wide[1].tex : f.bright);
+      gl.uniform1i(pg.composite.u.uBloomWide, 2);
+      // The sun's place on screen, when the sky is drawn, the sun is up and roughly ahead of the view.
+      let shaft = 0;
+      if (skyOn && f.depth && settings.shafts && sy > 0.02) {
+        const far = camera.far * 0.9;
+        mat4.transformPoint4(P4, viewProj, camera.position.x + sx * far, camera.position.y + sy * far, camera.position.z + sz * far);
+        if (P4[3] > 0) {
+          const ux = (P4[0] / P4[3]) * 0.5 + 0.5, uy = (P4[1] / P4[3]) * 0.5 + 0.5;
+          const off = Math.max(0, Math.hypot(ux - 0.5, uy - 0.5) - 0.5);
+          shaft = 0.55 * Math.min(1, sy * 6) * Math.max(0, 1 - off * 1.6);
+          gl.uniform4f(pg.composite.u.uShaft, ux, uy, shaft, width / height);
+          gl.uniform3fv(pg.composite.u.uShaftColor, sun);
+        }
+      }
+      if (!shaft) gl.uniform4f(pg.composite.u.uShaft, 0, 0, 0, 1);
+      gl.activeTexture(gl.TEXTURE4);
+      gl.bindTexture(gl.TEXTURE_2D, f.depth || f.bright);
+      gl.uniform1i(pg.composite.u.uDepth, 4);
       gl.uniform1f(pg.composite.u.uBloomStrength, settings.bloom ? bloomStrength : 0);
       fullscreen(pg.composite, null, pw, ph);
       gl.activeTexture(gl.TEXTURE0);
@@ -2538,5 +2942,5 @@ void main() {
       }
     };
   };
-  BL.glRenderer = { createRenderer, isSupported, QUALITY };
+  BL.glRenderer = { createRenderer, isSupported, QUALITY, POINT_LIGHT_CAPACITY };
 })();

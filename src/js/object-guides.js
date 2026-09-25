@@ -1,4 +1,10 @@
 // Cached camera silhouettes and exact local-space visibility queries.
+//
+// The registry behind every object outline. Camera silhouettes are baked once per vertex array and never
+// written again; the queries are exact local-space visibility, proximity, occlusion and actor tests:
+// `register`, `collect`, `refresh`, `cameraClear`, `perceptionClear`, `perceived`, `concealed`, `distance`,
+// `inView`, `actorVisible`, `ownerBoundaryAt`. Providers (the pile, the platform, the mirror) join the same
+// registry through `create({ providers })`. sight-guides.js draws the result.
 (() => {
   "use strict";
   const BL = window.BL = window.BL || {};

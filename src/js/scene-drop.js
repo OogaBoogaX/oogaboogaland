@@ -1,4 +1,21 @@
 // Ooga Drop: the skydiving scene launched from the plane on the rally cave roof.
+//
+// Phases `board`, `climb`, `air`, `down`, `lost`, `results`: the plane's roll, helix climb and jump mark,
+// the course laid on a hands-off reference fall, ring crossings, the streak batch, clouds, the two-axis
+// orbit camera (unbounded yaw in flight, easing back behind the subject 1.5 s after the last drag), the
+// island's clock, donations, `leave`. The jump is at `JUMP_ALT` 430, well over the first ring at 300, so
+// the fall has time to line up on the column; a held Space hurries the plane up and round again on every
+// lap until the count, and the last `COUNT_SECONDS` before the mark read 3, 2, 1 (`audio.cues.count`),
+// then JUMP. `layCourse(jump)` draws the dogleg's size, side and the reference pitch from the jump count
+// (`game.recordJump`, `game.state.drop.jumps`), so every jump has its own shape while staying flyable by
+// construction.
+//
+// Rings through the middle (`BULL`) are bullseyes and all eight a clean sweep; a miss within `NEAR_MISS`
+// says by how much. The next two rings are lit and the rest dim, and a `marker` hoop sits on the next
+// ring's plane where the fall is heading. Accuracy is to the nearer of the target and the pile's middle;
+// a canopy touchdown under `SOFT_SINK` and a pull under `LOW_PULL` pay bonuses; results say the distance
+// to the next medal and the jump number; a score of zero is never a best. On touchdown the eye cuts low
+// and to the side, and a pile landing squashes the mound.
 (() => {
   "use strict";
   const BL = window.BL = window.BL || {};
@@ -46,15 +63,20 @@
   const CLOUD_PUFF = models.particleGeometry("#eef3f7", 0.14, 0.2);
   const DUST_BITS = [DUST], DIRT_BITS = [DIRT], BANANA_BITS = [BANANA_BIT], CLOUD_BITS = [CLOUD_PUFF];
   const MARKER_SCALE = 0.6;
-  // Sky, light and haze; daylight.sample rewrites these from the island's clock every frame.
+  // Sky, light and haze; daylight.sample rewrites these from the island's clock every frame. The haze reaches full
+  // strength only far past anything the dive shows: from altitude the sea below sits hundreds of metres off, and a
+  // nearer far end washed it out to the pale horizon colour.
   const RENDER_OPTS = {
     clear: new Float32Array(3), horizon: new Float32Array(3), zenith: new Float32Array(3), sky: new Float32Array(3), ground: new Float32Array(3), sun: new Float32Array(3), direct: new Float32Array(3),
     light: { x: 0.55, y: 0.78, z: -0.25 }, sunDirection: { x: 0, y: 1, z: 0 }, moon: { x: 0, y: 1, z: 0 }, starMatrix: new Float32Array(9),
     stars: 0, torch: 0, day: 1, twilight: 0, lampFactor: 0, directStrength: 1, sunStrength: 1, moonStrength: 0, ambientFloor: 0.18, diffuseFloor: 0, shadowStrength: 1, shadowFloor: 0, shadowBias: 0.002,
-    time: 0, bloomStrength: 0.5, lights: new Float32Array(80), lightCount: 0, shadowCenter: { x: 0, y: 0, z: 0 }, shadowExtent: 34, fog: null, fogNear: 240, fogFar: 760
+    time: 0, bloomStrength: 0.5, lights: new Float32Array(80), lightCount: 0, shadowCenter: { x: 0, y: 0, z: 0 }, shadowExtent: 34, fog: null, fogNear: 320, fogFar: 1500
   };
   RENDER_OPTS.starMatrix[0] = RENDER_OPTS.starMatrix[4] = RENDER_OPTS.starMatrix[8] = 1;
   RENDER_OPTS.fog = RENDER_OPTS.horizon;
+  RENDER_OPTS.clouds = 0.42;
+  // Deeper than the hub's: the low cloud deck here reaches down to -78.
+  RENDER_OPTS.sea = -95;
   const setVec = (v, x, y, z) => {
     v.x = x;
     v.y = y;
@@ -77,7 +99,7 @@
   let renderer, game, world, go, lootEnabled, testBananas, root, camera, island, hud, dhud, hooks, input, fx, controls, audio, clock, diver, plane, streaks, mound, hole, agent, marker;
   let phase = "board", jumpOpenUntil = 0, callStage = 0, markNear = 0, accumulator = 0, sceneTime = 0, flightTime = 0, landedAt = 0, score = 0, ringsHit = 0, pulled = false, jumpOpen = false, result = null;
   // The pull altitude and the sink at touchdown, for the bonuses they earn.
-  let pullAlt = 0, landSink = 0;
+  let pullAlt = 0, landSink = 0, life = null;
   let meterTimer = 0, stateTimer = 0, hintTimer = 0;
   const placed = [];
   const clouds = [];
@@ -627,6 +649,7 @@
   };
   const update = (dt, elapsed) => {
     sceneTime = elapsed;
+    if (life) { life.gulls.update(elapsed); life.boats.update(elapsed); }
     const hour = clock.read();
     daylight.sample(hour, RENDER_OPTS, clock.dayOfYear, islandLatitude, clock.continuousDay);
     agent.update(dt);
@@ -826,9 +849,30 @@
       const wrapAt = low ? 160 : 150;
       const y = low ? -52 - rand() * 26 : 24 + rand() * 270;
       const s = low ? 3 + rand() * 2 : 1.1 + rand() * 1.2;
-      const node = createNode({ position: { x: lerp(-wrapAt, wrapAt, rand()), y, z: low ? lerp(-140, 140, rand()) : (rand() < 0.5 ? -1 : 1) * lerp(38, 140, rand()) }, scale: { x: s, y: s, z: s }, geometry: hubModels.cloud(i % 3) });
+      const node = createNode({ position: { x: lerp(-wrapAt, wrapAt, rand()), y, z: low ? lerp(-140, 140, rand()) : (rand() < 0.5 ? -1 : 1) * lerp(38, 140, rand()) }, scale: { x: s, y: s, z: s }, geometry: hubModels.cloud(i % 3), matrixCloud: true });
       place(node);
       clouds.push({ node, speed: 0.3 + rand() * 0.5, wrap: wrapAt });
+    }
+    // The world the jump falls into: islands on the sea, sails and gulls. Nothing here is solid or sighted.
+    if (renderer.kind !== "canvas2d") {
+      [[25, 260], [95, 330], [160, 240], [215, 300], [290, 280], [340, 360]].forEach(([deg, r], i) => {
+        place(createNode({ geometry: BL.dressing.islet(i % 3), position: { x: Math.sin(deg * Math.PI / 180) * r, y: RENDER_OPTS.sea - 2, z: -Math.cos(deg * Math.PI / 180) * r }, rotation: { x: 0, y: deg * 0.7, z: 0 } }));
+      });
+      life = { gulls: BL.dressing.flock({ count: 26, radius: [40, 160], height: [20, 200], seed: 11, scale: 2.4 }), boats: BL.dressing.fleet({ sea: RENDER_OPTS.sea, spots: [[140, 0.4, 9], [190, 2.2, 11], [230, 3.9, 10], [170, 5.1, 8], [260, 1.3, 12]] }) };
+      place(life.gulls.node);
+      for (const node of life.boats.nodes) place(node);
+      // Palms on the island below, on level ground clear of the paths, the same three swaying shapes as the hub.
+      const prand = mulberry32(SEED + 91);
+      const rally = island.mouths.find((m) => m.id === "c9");
+      for (let n = 0, tries = 0; n < 40 && tries < 600; tries++) {
+        const a = prand() * Math.PI * 2, r = 8 + prand() * 22, x = Math.sin(a) * r, z = -Math.cos(a) * r, y = island.surfaceAt(x, z);
+        if (!island.onLand(x, z) || island.isPath(x, z) || Math.hypot(x, z) < 6 || Math.hypot(x - rally.x, z - rally.z) < 11) continue;
+        let level = true;
+        for (let i = 0; i < 4 && level; i++) level = Math.abs(island.surfaceAt(x + Math.cos(i * 1.571) * 0.6, z + Math.sin(i * 1.571) * 0.6) - y) < 0.26;
+        if (!level) continue;
+        place(createNode({ geometry: BL.dressing.palm(n % 3), position: { x, y, z }, rotation: { x: 0, y: prand() * 6.283, z: 0 } }));
+        n++;
+      }
     }
     // The roof spot comes from the hub's own cave mouth c9; the plane parks on it, the windsock beside it.
     const mouth = island.mouths.find((m) => m.id === "c9");
@@ -1039,6 +1083,7 @@
     hud.setAct("Ooga!");
     for (const node of placed) removeChild(root, node);
     placed.length = clouds.length = rings.length = 0;
+    life = null;
     agent.dispose();
     const count = input.targetCount;
     input.dispose();

@@ -943,19 +943,20 @@ Then run npm run build and ONLY=characters node test/run.mjs.</pre>
         <button type="button" data-action="recipe-copy">Copy prompt</button>
       </div>
     </dialog>
-    <dialog class="modal jumbotron-modal" id="jumbotron-modal" aria-label="Island board">
+    <dialog class="modal board-modal" id="board-modal" aria-labelledby="board-title">
       <div class="panel-head">
-        <h2><span data-sign>Island board</span></h2>
-        <button type="button" class="modal-close" data-action="jumbotron-close" aria-label="Close">&times;</button>
+        <h2><span data-sign id="board-title">Board</span></h2>
+        <button type="button" class="modal-close" data-action="board-close" aria-label="Close">&times;</button>
       </div>
-      <canvas class="jumbotron-screen" id="jumbotron-screen" width="192" height="108" aria-label="The board"></canvas>
-      <div class="jumbotron-nav">
-        <button type="button" class="jumbotron-page" data-action="jumbotron-prev" aria-label="Previous board">&lsaquo;</button>
-        <span class="jumbotron-caption"><b id="jumbotron-caption">&nbsp;</b><small id="jumbotron-index">&nbsp;</small></span>
-        <button type="button" class="jumbotron-page" data-action="jumbotron-next" aria-label="Next board">&rsaquo;</button>
+      <canvas class="board-screen" id="board-screen" width="192" height="108" aria-label="The board"></canvas>
+      <div class="board-nav">
+        <button type="button" class="board-page" id="board-prev" data-action="board-prev" aria-label="Previous page">&lsaquo;</button>
+        <b class="board-caption" id="board-caption">&nbsp;</b>
+        <button type="button" class="board-page" id="board-next" data-action="board-next" aria-label="Next page">&rsaquo;</button>
       </div>
-      <p class="help" id="jumbotron-details" hidden></p>
-      <p class="help">Arrow keys flip the boards.</p>
+      <div class="board-dots" id="board-dots" aria-label="Pages"></div>
+      <p class="board-note" id="board-note" hidden></p>
+      <p class="help" id="board-help"></p>
     </dialog>
     <dialog class="modal" id="ooga-portal-menu" aria-labelledby="ooga-portal-title" aria-describedby="ooga-portal-status">
       <div class="panel-head">
@@ -964,27 +965,6 @@ Then run npm run build and ONLY=characters node test/run.mjs.</pre>
       </div>
       <ol aria-label="Destinations"></ol>
       <p class="help" id="ooga-portal-status" role="status"></p>
-    </dialog>
-    <dialog class="modal" id="weather-key" aria-label="Reading the weather">
-      <div class="panel-head">
-        <h2><span data-sign>Reading the weather</span></h2>
-        <button type="button" class="modal-close" data-action="weather-close" aria-label="Close">&times;</button>
-      </div>
-      <p class="help">The weather runs on live Bitcoin data. Here's what each part means.</p>
-      <dl class="weather-key">
-        <div>
-          <dt>Rain</dt>
-          <dd>The backlog paying at least 1 sat/vB, averaged over ten minutes. Dry, drizzle, light rain, rain, heavy rain, then a downpour as it grows, and it keeps falling until the fee-paying pool clears. The cheap sub-sat pile underneath doesn't count.</dd>
-        </div>
-        <div>
-          <dt>Wind</dt>
-          <dd>Transactions turning up, in vbytes a second. The busier it gets, the further the rain leans over. Rain always slants the way the wind is going, never into it.</dd>
-        </div>
-        <div>
-          <dt>Lightning</dt>
-          <dd>Somebody found a block. Every one of them throws a bolt over the island, whatever the weather is doing. A downpour throws extra on its own.</dd>
-        </div>
-      </dl>
     </dialog>
     <div class="bottom-hud">
       <button type="button" class="act" id="act" data-action="act" hidden>JUMP!</button>
@@ -1028,6 +1008,7 @@ Then run npm run build and ONLY=characters node test/run.mjs.</pre>
   <script src="js/terrain-cutaway.js"></script>
   <script src="js/lab-wallpaper.js"></script>
   <script src="js/hub-models.js"></script>
+  <script src="js/dressing.js"></script>
   <script src="js/lifehash.js"></script>
   <script src="js/jumbotron-data.js"></script>
   <script src="js/jumbotron.js"></script>
@@ -1073,6 +1054,7 @@ Then run npm run build and ONLY=characters node test/run.mjs.</pre>
   <script src="js/rocket.js"></script>
   <script src="js/rocket-models.js"></script>
     <script src="js/pool-models.js"></script>
+  <script src="js/pool-wildlife.js"></script>
   <script src="js/timechain-models.js"></script>
   <script src="js/timechain-beer.js"></script>
   <script src="js/timechain-data.js"></script>

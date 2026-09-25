@@ -1,4 +1,18 @@
 // Race tracks: a closed spline becomes a road ribbon, terrain skirt, walls and baked decor in culled sectors.
+//
+// `TRACKS` and `THEMES` hold the definitions. `build` turns a closed Catmull-Rom spline into the road
+// ribbon with curbs, walls and lips before gaps, the terrain skirt in chunks, decor baked per sector,
+// spectators, torches, checkpoints, the grid, item spawns and the minimap; the built track answers
+// `nearest`, `project`, `heightAt`, `surfaceAt` and `roadY`. `build` takes `slots` (a grid slot per
+// racer), `hour` (the bay rolls its `hours`) and `mirror` (`mirrored` flips x, the banks and the wall
+// bits, every gap still downhill; bests live under `<id>-m`).
+//
+// Solid decor kinds carry `solid`, a radius at scale 1, and every placed one goes into the fixed
+// `props` table (`PROP_CAP`), indexed by sector through `sectorProps` and `sectorOf`, for the racers
+// to bounce off; nothing solid stands on the road, its curbs or its shoulder. The skirt keeps an
+// `APRON` flat past the shoulder and climbs into the hills over `APRON_RISE`. The peak rolls
+// snowballs across its ice (`spawns.boulders`, drawn as `raceModels.snowball`). The gorge's lava sits
+// under half bloom with a `seamGlow`.
 (() => {
   "use strict";
   const BL = window.BL = window.BL || {};
@@ -54,12 +68,46 @@
     geo.verts.push(x, y, z);
     return geo.verts.length / 3 - 1;
   };
+  // A source's shading normals, once per geometry: its explicit `normals` where given, the averaged face normals of
+  // a `smooth` one, zeros (the face's own) otherwise. Baking carries them, so cartoon foliage and rounded rocks keep
+  // their soft shading inside a sector's merged mesh.
+  const NORMALS = new WeakMap();
+  const normalsOf = (geo) => {
+    let out = NORMALS.get(geo);
+    if (out) return out;
+    const v = geo.verts, given = geo.normals;
+    out = new Float32Array(v.length);
+    if (geo.smooth) for (const f of geo.faces) {
+      let nx = 0, ny = 0, nz = 0;
+      for (let k = 0, m = f.i.length; k < m; k++) {
+        const a = f.i[k] * 3, b = f.i[(k + 1) % m] * 3;
+        nx += (v[a + 1] - v[b + 1]) * (v[a + 2] + v[b + 2]);
+        ny += (v[a + 2] - v[b + 2]) * (v[a] + v[b]);
+        nz += (v[a] - v[b]) * (v[a + 1] + v[b + 1]);
+      }
+      for (const idx of f.i) { out[idx * 3] += nx; out[idx * 3 + 1] += ny; out[idx * 3 + 2] += nz; }
+    }
+    for (let i = 0; i < out.length; i += 3) {
+      if (given && (given[i] || given[i + 1] || given[i + 2])) { out[i] = given[i]; out[i + 1] = given[i + 1]; out[i + 2] = given[i + 2]; }
+      const l = Math.hypot(out[i], out[i + 1], out[i + 2]);
+      if (l) { out[i] /= l; out[i + 1] /= l; out[i + 2] /= l; }
+    }
+    NORMALS.set(geo, out);
+    return out;
+  };
   const bake = (out, geo, x, y, z, yaw, s = 1) => {
     const base = out.verts.length / 3, v = geo.verts, c = Math.cos(yaw), sn = Math.sin(yaw);
     for (let i = 0; i < v.length; i += 3) {
       const px = v[i] * s, py = v[i + 1] * s, pz = v[i + 2] * s;
       out.verts.push(x + px * c + pz * sn, y + py, z + pz * c - px * sn);
     }
+    if (geo.smooth || geo.normals) {
+      // The sector mesh takes normals from the first shaded piece on; everything before it is padded unset.
+      if (!out.normals) out.normals = [];
+      while (out.normals.length < base * 3) out.normals.push(0);
+      const nv = normalsOf(geo);
+      for (let i = 0; i < nv.length; i += 3) out.normals.push(nv[i] * c + nv[i + 2] * sn, nv[i + 1], nv[i + 2] * c - nv[i] * sn);
+    } else if (out.normals) while (out.normals.length < out.verts.length) out.normals.push(0);
     for (const f of geo.faces) out.faces.push({ i: f.i.map((k) => k + base), color: f.color, emissive: f.emissive });
   };
   const writeInstance = (data, o, yaw, s, x, y, z, glow = 1) => {
@@ -75,7 +123,7 @@
     const opts = {
       clear: new Float32Array(3), horizon: new Float32Array(3), zenith: new Float32Array(3), sky: new Float32Array(3), ground: new Float32Array(3), sun: new Float32Array(3), direct: new Float32Array(3),
       light: { x: 0.5, y: 0.8, z: 0.2 }, sunDirection: { x: 0, y: 1, z: 0 }, moon: { x: 0, y: 1, z: 0 }, starMatrix: new Float32Array(9), stars: 0, time: 0,
-      lights: new Float32Array(80), lightCount: 0, shadowCenter: { x: 0, y: 0, z: 0 }, shadowExtent: 38, bloomStrength: 0.55
+      lights: new Float32Array(80), lightCount: 0, shadowCenter: { x: 0, y: 0, z: 0 }, shadowExtent: 38, bloomStrength: 0.55, clouds: 0.42
     };
     daylight.sample(hour, opts, 172, 20);
     // Fog colour is the horizon colour the sky pass paints, so fog fades into the sky.
@@ -293,6 +341,10 @@
     const root = createNode();
     const geometries = [];
     const keep = (geo) => {
+      if (geo.normals) {
+        while (geo.normals.length < geo.verts.length) geo.normals.push(0);
+        geo.normals = Float32Array.from(geo.normals);
+      }
       geometries.push(geo);
       return geo;
     };
@@ -665,6 +717,8 @@
             const color = wet ? mix(floor.color, floor.deep, tone) : theme.ground((h00 + h11) * 0.5 - floor.level, tone);
             const a = vert(geo, wx, h00, wz), b = vert(geo, wx + CELL, h10, wz), c = vert(geo, wx + CELL, h11, wz + CELL), d = vert(geo, wx, h01, wz + CELL);
             quad(geo, a, d, c, b, color, wet ? floor.emissive : 0);
+            // Standing water ripples and a lava floor flows: the renderer's surface materials.
+            if (wet) geo.faces[geo.faces.length - 1].water = floor.emissive >= 0.4 ? "lava" : true;
           }
         }
         if (!geo.faces.length) continue;
@@ -853,6 +907,7 @@
       renderOpts.shadowStrength = 0.35;
       renderOpts.stars = 0;
       renderOpts.bloomStrength = 0.35;
+      renderOpts.clouds = 0.85;
       renderOpts.fogNear = 40;
       renderOpts.fogFar = 170;
     }

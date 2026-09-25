@@ -8,6 +8,51 @@
 //
 // Randomness is seeded rather than crypto: a run has to be reproducible for a check to mean anything,
 // and nothing here is a fairness question between people. The die in the lab still uses randomInt.
+//
+// The step is a quarter second. Every unit sits in a spot with its model (`unit`, `dead`, `pad`,
+// `power` typed arrays). The coin trades at the real price whenever the scene has one (`setLive`,
+// `livePrice`; the price-moving events are skipped then) and otherwise on an island market in bull and
+// bear turns, with a tick-by-tick wiggle round its trend and a fixed ring of the last 24 half-minute
+// candles (`candleO`, `candleH`, `candleL`, `candleC`). Around it: the grid's moving price, a
+// fixed-price contract, model launches at a premium that settle and push older models down, and the
+// halving with its used-market flood.
+//
+// The network and a difficulty that retargets every nine blocks, with blocks coming at `blockRate` (the
+// network over the difficulty) between them, so bought hash pays faster until the retarget catches up.
+// The share of a block is hash over the whole network (`others + hash`) and `hashprice` carries no
+// block-rate factor, so the retarget lag pays only through faster blocks. A real block off the feed pays
+// the island's subsidy plus its fees, once; `setFees` takes the live mempool's fee multiplier.
+//
+// Each chamber's load runs against its circuit (over it for four seconds trips its breaker) and its heat
+// against its cooling: the bare rock plus every fan standing in it (`cooler`, `placeCooler`,
+// `sellCooler`, `fansIn`, `coolerCostFor`). A chamber starts with no fans, and a cooling failure stops a
+// chamber's fans only if it has some. Over the line throttles, far over kills and burns. A fire eats
+// along its rack's bays and after `FIRE_JUMP_AFTER` of them jumps to the nearest other rack in the
+// chamber; nothing puts one out but someone reaching it. A Cold Pool's pump draws its `pumpKw` on the
+// chamber's circuit. A meltdown comes as a warning first: a `melt` fault on a box on air for `MELT_WARN`
+// seconds (pulled with `fixFault`, it only dies; left, `meltdown` counts a failure).
+//
+// Safety gear is bought with `buySafety(k, c)` from the `SAFETY` table. Fire Stoppers (`extinguishers`)
+// hang on the wall until someone takes one down (`takeStopper`, `hangStopper`) and carries it to a fire,
+// where `fixFault(f, 1)` spends it; `carrying` is the player's stopper in hand, part of the run. A Spare
+// Breaker (`spares`) throws a trip back after its `delay` once the chamber's `demandKw`, what it would
+// draw with the breaker in, fits the circuit, so a surge clears itself and an overload waits. A Smoke
+// Alarm (`alarms`, `alarmOn`) sounds when the heat passes `warn` of the throttle line.
+//
+// Money: own generation, the grid billed on credit (past about three minutes of bill the cave is cut off
+// and comes back by itself once paid; the credit limit is latched at the cut-off, `cutLimit`, and holds
+// until the debt is paid), the battery through outages, and curtailment offers paid on `costRate`
+// (`curtailPay`); the grid signs no contract during a spike. Expected income and power cost are smoothed
+// for the profit bar. Also here: the event table, faults that are places, wear on pushed models, loans,
+// crack rocks, trophies, digs, milestones, the three losses and the hour. A seized loan takes racks, then
+// generators, then trophies.
+//
+// 21 coin banks the win (`won`, `goalAt`, the speed bonus from that time) and the hour plays on with the
+// score counting; a win stays a win whatever ends the run. `carryOn` marks the run `continued` (no speed
+// bonus and no medal), puts out every fire and melt, and for a seized loan sells racks and all in them at
+// the used price until it is covered. `snapshot` and `restore` turn the run into plain data and back,
+// and `save`, `load` and `clear` keep it under one localStorage key while a run is live, the dice
+// included (`randState`).
 (() => {
   "use strict";
   const BL = window.BL = window.BL || {};

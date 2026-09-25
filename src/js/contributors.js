@@ -1,3 +1,7 @@
+// The roster, built from the character registry, with bounded repository activity from oogatron snapshots
+// (schemas 1-3; a schema-3 snapshot's `repos[].contributors` fans last-seen onto per-repository keys so
+// work routes pick the matching cave). It gives each contributor a working (<1h), chilling (<24h) or
+// sleeping state, the active solo roster, and hashed traits with each character's `look` laid over them.
 (() => {
   "use strict";
   const BL = window.BL = window.BL || {};

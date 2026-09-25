@@ -1,4 +1,9 @@
 // Fixed walking routes between the meadow and the headquarters beds.
+//
+// A validated waypoint graph from the meadow down to the HQ and basement beds, memoised per island and
+// remapped onto each visit's beds. `create` returns `route`, `clearSegment` (continuous floor plus
+// architectural clearance, the shortcut test the crew reuses), `points`, `radius`, `height`, and the node
+// and edge counts.
 (() => {
   "use strict";
   const BL = window.BL = window.BL || {};

@@ -1,4 +1,9 @@
 // Pickups, crates, boost pads, thrown rocks, peels, boulders, skid marks - every one a fixed pool.
+//
+// Banana pickups feed the turbo meter; skid marks sit in a ring buffer. `use` fires the held item.
+// `ODDS` has four rows by place, the last row for last place. A rock thrown on the brake goes
+// backward and a peel dropped on the brake lies ahead. A pad tops a boost up to its own strength.
+// Skid marks are laid on the first substep of a frame (`update(dt, elapsed, first)`).
 (() => {
   "use strict";
   const BL = window.BL = window.BL || {};

@@ -1,10 +1,20 @@
 // Live Bitcoin feed from mempool.space: one socket while the tab is visible, reconnecting with backoff.
 // Subscribers get plain events, { type: "block", height, txCount } for each block mined after connect,
-// { type: "fees", nextFee, blocks } whenever the projected next block's median fee moves and
+// { type: "fees", nextFee, blocks } with each mempool-blocks projection (the projected next block's
+// median fee) and
 // { type: "stats", count, vsize, totalFee, inflow, fees, da } with each mempool push (about once a
 // second): the transaction count, the backlog in vB, its fees in sats, the inflow in vB/s, the
 // recommended fee tiers and the difficulty epoch, in the shapes the REST endpoints serve them.
 // One of the page's live feeds (chain.js polls REST and the price, oogatron-live.js the org stats).
+//
+// The socket `want`s blocks, stats and mempool-blocks, never `track-mempool`, which streams every
+// transaction at ~225 MB an hour. The tip list on connect only seeds the height; `total_fee` arrives
+// in BTC and leaves in sats. Backoff resets on the first message, not on open, and a link silent for
+// STALL_MS is dropped and redialled. `setHidden` (the director's visibility pause) closes the socket
+// while the tab is hidden and forgets the height, so the tip list on return seeds it silently rather
+// than striking, toasting or paying the mine for blocks found while away. Exports start, setHidden,
+// subscribe, dispose, parse, emit and state (with nextFee, projectedBlocks and inflow); the director
+// leaves it off under `nosim` and `mempool=0`.
 (() => {
   "use strict";
   const BL = window.BL = window.BL || {};

@@ -1,3 +1,11 @@
+// Procedural geometry: the lab room (`labRoom`), cavemen (`caveman`), props, crates, the `SWAG` catalog, and
+// the shared builders (`box`, `bevelBox`, `lathe`, `tube`, `ring`, `polyline`, `merge`, `makeVox`, `voxCoords`,
+// `voxelGeometry`, `cached`).
+//
+// Every caveman wears a hide belt, a fur shoulder strap and a loincloth whose flaps hang over the thighs
+// (`k.loinFlaps(v)`, colours from `k.loin`, which a torso hook may set; a character that replaces its torso
+// in `gear` calls it itself, as 2140data does). Shaven faces get a mouth and bare heads ears. None of these
+// draws from `k.rand`, so no character's existing draws move.
 (() => {
   "use strict";
   const BL = window.BL = window.BL || {};
@@ -34,6 +42,58 @@
     face(geo, [c[0], c[4], c[7], c[3]], rgb, opts);
     face(geo, [c[3], c[7], c[6], c[2]], rgb, opts);
     face(geo, [c[0], c[1], c[5], c[4]], rgb, opts);
+    return geo;
+  };
+  // A box with every edge chamfered: the chunky, rounded-looking timber of the island's signs, bridges and boards.
+  // Each corner splits into three vertices, one on each face it touches; the chamfers take a lighter tone so
+  // edges catch the light like a painted plank. Winding is fixed per face against the outward direction.
+  const bevelBox = ({ w = 1, h = 1, d = 1, color, emissive = 0, offset = {}, bevel = Math.min(w, h, d) * 0.2 } = {}) => {
+    const geo = geometry();
+    const half = [w / 2, h / 2, d / 2], off = [offset.x || 0, offset.y || 0, offset.z || 0];
+    const rgb = hexToRgb(color), edge = rgb.map((v) => Math.min(255, Math.round(v * 1.1))), opts = { emissive };
+    // vert(s, a): the corner with signs s = [sx, sy, sz], on the face of axis a.
+    const index = new Map();
+    const vert = (s, a) => {
+      const key = s[0] * 9 + s[1] * 3 + s[2] + a * 27;
+      let i = index.get(key);
+      if (i === undefined) {
+        const p = [0, 1, 2].map((k) => s[k] * (k === a ? half[k] : half[k] - bevel) + off[k]);
+        index.set(key, i = pushVert(geo, p[0], p[1], p[2]));
+      }
+      return i;
+    };
+    const add = (ids, c, out) => {
+      const v = geo.verts;
+      let nx = 0, ny = 0, nz = 0;
+      for (let k = 0; k < ids.length; k++) {
+        const p = ids[k] * 3, q = ids[(k + 1) % ids.length] * 3;
+        nx += (v[p + 1] - v[q + 1]) * (v[p + 2] + v[q + 2]);
+        ny += (v[p + 2] - v[q + 2]) * (v[p] + v[q]);
+        nz += (v[p] - v[q]) * (v[p + 1] + v[q + 1]);
+      }
+      face(geo, nx * out[0] + ny * out[1] + nz * out[2] < 0 ? ids.reverse() : ids, c, opts);
+    };
+    const S = [-1, 1];
+    for (let a = 0; a < 3; a++) {
+      const b = (a + 1) % 3, c = (a + 2) % 3;
+      for (const sa of S) {
+        const s = (u, t) => { const r = [0, 0, 0]; r[a] = sa; r[b] = u; r[c] = t; return r; };
+        const out = [0, 0, 0];
+        out[a] = sa;
+        add([vert(s(-1, -1), a), vert(s(1, -1), a), vert(s(1, 1), a), vert(s(-1, 1), a)], rgb, out);
+      }
+      // The four chamfers running along axis a.
+      for (const sb of S) for (const sc of S) {
+        const s = (t) => { const r = [0, 0, 0]; r[a] = t; r[b] = sb; r[c] = sc; return r; };
+        const out = [0, 0, 0];
+        out[b] = sb; out[c] = sc;
+        add([vert(s(-1), b), vert(s(1), b), vert(s(1), c), vert(s(-1), c)], edge, out);
+      }
+    }
+    for (const sx of S) for (const sy of S) for (const sz of S) {
+      const s = [sx, sy, sz];
+      add([vert(s, 0), vert(s, 1), vert(s, 2)], edge, s);
+    }
     return geo;
   };
   const panel = ({ w = 1, h = 1, tilesX = 4, tilesY = 4, color, altColor, emissive = 0 } = {}) => {
@@ -129,6 +189,9 @@
   };
   const merge = (...geos) => {
     const out = geometry();
+    // One grid survives a merge when every voxel part shares its unit; the renderer checks each face against it.
+    const voxel = geos.find((geo) => geo.voxel)?.voxel;
+    if (voxel && geos.every((geo) => !geo.voxel || geo.voxel[0] === voxel[0])) out.voxel = voxel;
     for (const geo of geos) {
       const shift = out.verts.length / 3;
       // Index walk, not a spread: a large geometry would overflow the stack.
@@ -199,6 +262,7 @@
   };
   const voxelGeometry = (vox, { unit, palette, origin = { x: 0, y: 0, z: 0 }, emissive = {} }) => {
     const geo = geometry();
+    geo.voxel = new Float32Array([unit, origin.x, origin.y, origin.z]);
     const rgb = palette.map((c) => typeof c === "string" ? hexToRgb(c) : c);
     const emit = (pts, c) => {
       face(geo, pts.map(([x, y, z]) => pushVert(geo, origin.x + x * unit, origin.y + y * unit, origin.z + z * unit)), rgb[c], { emissive: emissive[c] || 0 });
@@ -518,7 +582,19 @@
     const root = createNode({ position: { x: 0, y: legH, z: 0 } });
     const eyeCells = [];
     // nose: the beard's nose jitter pair; lid: closed-eye colour; headEmissive: lit head indices
-    const k = { traits, h, u, rand, P, color, jit, skinJ, hairJ, leopard, vg, root, parts, armX: 0, eyeCells, nose: [P.nose, P.skin], lid: null, headEmissive: undefined };
+    // loin: the loincloth's two colours, fur and spot unless a torso hook names its own.
+    const k = { traits, h, u, rand, P, color, jit, skinJ, hairJ, leopard, vg, root, parts, armX: 0, eyeCells, nose: [P.nose, P.skin], lid: null, headEmissive: undefined, loin: null };
+    // Hashed from the cell, never drawn from rand, so no character's existing draws move.
+    const cellMix = (x, y, z) => ((Math.imul(x + 11, 73856093) ^ Math.imul(y + 7, 19349663) ^ Math.imul(z + 5, 83492791)) >>> 0) % 7;
+    // The loincloth every Ooga wears: a flap front and back that hangs over the thighs, cut ragged at the hem.
+    const loinFlaps = (v) => {
+      const [a, b] = k.loin || [P.fur, P.spot];
+      for (const z of [0, 5]) for (let x = 2; x <= 6; x++) {
+        const hem = x === 2 || x === 6 ? -1 : cellMix(x, 0, z) < 2 ? -3 : -2;
+        for (let y = -1; y >= hem; y--) v.set(x, y, z, cellMix(x, y, z) === 0 ? b : a);
+      }
+    };
+    k.loinFlaps = loinFlaps;
     const legVox = (side) => {
       const v = makeVox();
       v.fill(0, 3, 2, 4, 0, 3, skinJ);
@@ -541,9 +617,17 @@
         v.fill(0, 8, 0, 2, 0, 5, leopard);
         rosettes(v, 0, 8, 0, 2, 0, 5, 8);
         v.fill(1, 7, 3, 7, 1, 4, skinJ);
+        // A hide belt with a stone buckle, and a fur strap over one shoulder to the other hip.
+        v.fill(1, 7, 3, 3, 1, 4, P.wood);
+        v.set(4, 3, 4, P.stone);
+        for (let y = 4; y <= 7; y++) {
+          const x = 7 - Math.round((y - 4) * 1.6);
+          for (const z of [1, 4]) for (const dx of [0, 1]) if (x + dx >= 1 && x + dx <= 7) v.set(x + dx, y, z, cellMix(x + dx, y, z) === 0 ? P.spot : P.fur);
+        }
       }
       if (dress.torso) dress.torso(k, v);
       for (let x = 0; x <= 8; x++) for (let z = 0; z <= 5; z++) if (rand() < 0.18) v.del(x, 0, z);
+      loinFlaps(v);
       return v;
     };
     parts.torso = createNode({ scale: { x: belly, y: 1, z: belly }, geometry: vg(torsoVox(), { x: -4.5 * u, y: 0, z: -3 * u }) });
@@ -628,6 +712,8 @@
       const face = traits.face || (traits.slim || traits.cleanShaven ? "nose" : "beard");
       if (face === "nose") {
         v.fill(3, 3, 2, 3, 6, 6, P.nose);
+        // A mouth under it, so a shaven face has an expression.
+        v.fill(2, 4, 0, 0, 5, 5, P.spot);
       } else if (face === "smirk") {
         v.set(3, 1, 6, P.nose);
         v.fill(2, 4, 0, 0, 6, 6, P.spot);
@@ -646,6 +732,8 @@
         v.fill(-1, -1, traits.slim ? -3 : 2, 5, -1, 4, hairJ);
         v.fill(7, 7, traits.slim ? -3 : 2, 5, -1, 4, hairJ);
       }
+      // Ears on a bare head; hair covers them otherwise.
+      if (!hairy && !dress.skull) for (const x of [-1, 7]) v.fill(x, x, 2, 3, 2, 3, P.skinDk);
       if (dress.crown) dress.crown(k, v);
       for (const [key, c] of [...v.map]) {
         if (c !== P.hair && c !== P.hairDk) continue;
@@ -1131,5 +1219,5 @@
       item.buildNode = () => createNode({ geometry: swagGeo(item.id, item.build) });
     }
   }
-  BL.models = { geometry, pushVert, face, voxCoords, box, panel, lathe, tube, ring, polyline, merge, forward, cached, variants, noShadow, makeVox, voxelGeometry, voxelFaces, banana, bananaGeometry, bananaTileGeometry, bananaPileCoreGeometry, bananaPileRadiusScale, bananaPileHeightOffset, BANANA_AMMO_SCALE, BANANA_PILE_PROFILE, particleGeometry, spareMagazine, caveman, CLUB_PALETTE, GOLD_CLUB_PALETTE, labRoom, buildableGeos, crate, die, dieRotationFor, SWAG, TIER_COLORS };
+  BL.models = { geometry, pushVert, face, voxCoords, box, bevelBox, panel, lathe, tube, ring, polyline, merge, forward, cached, variants, noShadow, makeVox, voxelGeometry, voxelFaces, banana, bananaGeometry, bananaTileGeometry, bananaPileCoreGeometry, bananaPileRadiusScale, bananaPileHeightOffset, BANANA_AMMO_SCALE, BANANA_PILE_PROFILE, particleGeometry, spareMagazine, caveman, CLUB_PALETTE, GOLD_CLUB_PALETTE, labRoom, buildableGeos, crate, die, dieRotationFor, SWAG, TIER_COLORS };
 })();

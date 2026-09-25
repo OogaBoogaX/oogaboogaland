@@ -9,6 +9,20 @@
 // Fixed from the moment the visit starts: the bodies are built once, a job is a slot on the operator,
 // a route is at most five waypoints, collision reads the scene's fixed obstacle table, and nothing in
 // `update` allocates.
+//
+// The lead is `lead` (`drive`, `driven`): he walks the scene's walkable floor round its fixed obstacle
+// table, is sent along a route with `walkTo` (counted in `arrivals`) and swings at a rock with `swing`
+// (counted in `strikes` as the point lands), alternating the pickaxe in his right hand with the club in
+// his left; swings asked for mid-swing queue up to `SWING_QUEUE` behind it, so every click is a crack.
+// `carry` and `carrying` are his Fire Stopper.
+//
+// The others walk through the tunnel mouths and down the middle aisle to the nearest fire, tripped
+// breaker, failed fan or payable dead unit and fix it after a few seconds. A fire job is its rack
+// (`sameRack`), so they follow the fire along the bays; they go by way of the chamber's Fire Stopper hook
+// when one hangs there (`job.fetch`), carry the stopper in the left hand and spend it on the fire (bare
+// hands take `SMOTHER_SECONDS`). They bark on taking a job, hang a carried stopper back when sent home,
+// and look for jobs four times a second; with no work, after standing a while, they visit the scene's
+// stations one after another.
 (() => {
   "use strict";
   const BL = window.BL = window.BL || {};

@@ -5,6 +5,27 @@
 // A run is an hour long, so every readout writes a text node only when its value moves, the palette
 // rewrites a tile only when its price or state does, and the jobs list and card rebuild only when the
 // sim's version counters say something changed. Nothing here rebuilds per frame.
+//
+// The palette has four tabs of tiles, each item drawn once by `hud.renderIcon`, with its price, state and
+// for a machine its profit a minute and its payback; the best buy (the shortest payback with a spot)
+// carries `data-best`. Drag and drop runs on pointer events in the rocket builder's pattern: the scene
+// answers `onDrag` and places on `onDrop`, the tile captures the pointer, and a drop over either panel is
+// no drop.
+//
+// The operation panel shows the coin mined to four places and flashed on every payout, the live score
+// against the goal and the hour, the current step of `GOALS` (a loan step among them), the profit bar of
+// earning, power and profit a minute with a heat strip under it (one bar per dug chamber, always in
+// view), the curtailment offer, and the Money, Power and Cave tabs with each chamber's load and heat.
+// Hashprice reads in island units a TH a block, and "buy now" shows on the retarget count just after a
+// retarget. Crack rocks, the loan, everything-back-on and the cut-off and outage alert live here too.
+//
+// The jobs list holds faults, dead machines and models switched off or losing money (not during a price
+// spike); every row is a place, tapped to look there and open its card through `onJob`. Event notices,
+// milestone calls and the results (a continued run wears no medal) round it out. `ticker(text, kind)`
+// keeps four recycled lines that fade on their own and carries the log's words; the toast is for the
+// player's own actions. A mini strip shows while both panels are folded on a phone. With `coarse` both
+// panels start folded when a run shows, and every `[data-coarse]` line and the goals read as buttons
+// rather than keys.
 (() => {
   "use strict";
   const BL = window.BL = window.BL || {};
