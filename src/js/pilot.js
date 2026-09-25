@@ -122,7 +122,8 @@
     // Carry still owns an orbit. Combat's overhead view owns only height and
     // a screen-space pointer; neither mouse movement nor zoom rotates it.
     const overheadMin = ctx.birdsEyeMin ?? OVERHEAD_MIN;
-    const carryOrbitMin = Math.max(DIST_MIN, clamp(close ? close.trailingDist : follow.min, follow.min, follow.max));
+    // A scene with no follow (the mine) never carries an Ooga, so it never reads this.
+    const carryOrbitMin = follow ? Math.max(DIST_MIN, clamp(close ? close.trailingDist : follow.min, follow.min, follow.max)) : DIST_MIN;
     const overheadDefault = ctx.birdsEyeMin ?? Math.max(OVERHEAD_MIN + 1, DIST_MAX * 0.5);
     let overheadActive = false, overheadMix = 0, overheadExit = 0, overheadTime = 0;
     let overheadHeight = overheadDefault, overheadWanted = overheadHeight, overheadVelocity = 0, overheadYaw = 0;

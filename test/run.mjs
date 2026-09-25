@@ -2907,12 +2907,12 @@ const mineResume = { name: "mine save and finish", why: "playthrough: a mine run
   // The page seeds the mine's dice from the clock, and some seeds roll an early rug pull that pays nothing;
   // a saved run with a fixed seed is loaded exactly as a player's save is, so every run rolls the same.
   await b.evaluate(`(() => { const sim = window.BL.mineSim.create({ seed: 7 }); sim.simulate(1); window.BL.mineSim.save(sim, ""); })()`);
-  await b.open(sceneUrl("mine", "wip=mine"));
+  await b.open(sceneUrl("mine"));
   await untilReady(b);
   const bought = await b.evaluate(`(() => { const M = window.__ooga.mine; if (M.phase !== "run") M.start(); M.setBananas(1e5); let n = 0; while (n < 8 && M.buy("m1", -1)) n++; M.simulate(120); return n; })()`);
   await tourGo(b, "hub");
   const saved = await b.evaluate(`(() => { const raw = localStorage.getItem("oogaboogaland.mine"), s = raw && JSON.parse(raw).state; return s && { time: s.time, mined: s.minedSats, unit: JSON.stringify(s.unit) }; })()`);
-  await b.open(sceneUrl("mine", "wip=mine"));
+  await b.open(sceneUrl("mine"));
   await untilReady(b);
   const resumed = await b.evaluate(`(() => { const s = window.__ooga.mine.state; return { phase: window.__ooga.mine.phase, time: s.time, mined: s.minedSats, unit: JSON.stringify(Array.from(s.unit)) }; })()`);
   record("mine save: a run left mid-way is saved and a reload resumes it where it stood", bought === 8 && !!saved && resumed.phase === "run" && resumed.unit === saved.unit && resumed.time >= saved.time && resumed.time < saved.time + 10 && resumed.mined >= saved.mined, JSON.stringify({ bought, saved: saved && { time: saved.time, mined: saved.mined }, resumed: { phase: resumed.phase, time: resumed.time, mined: resumed.mined } }));
@@ -2920,22 +2920,6 @@ const mineResume = { name: "mine save and finish", why: "playthrough: a mine run
   // The score counts whole hundredths of a coin, so a short run may score 0; what is proven is that coin was
   // mined and the score shown is the run's own.
   record("mine playthrough: the resumed run finishes to its results with the score shown, kept as the best and its save cleared", r.ok, JSON.stringify(r));
-} };
-// Ooga Mine is the game marked `wip` today; the gate itself is the director's and serves every such game.
-const wipGate = { name: "wip gate", why: "rule: a wip game stays shut unless the page names it or says wip=1, with or without debug, and its saves stay stored", run: async (b) => {
-  const best = await b.evaluate(`window.__ooga.game.state.mine.best && window.__ooga.game.state.mine.best.score`);
-  await b.evaluate(`localStorage.setItem("oogaboogaland.mine", "kept")`);
-  await b.open(sceneUrl("mine", "wip=kart"));
-  await untilReady(b);
-  const shut = await b.evaluate(`(() => { const B = window.__ooga; let refused = false; try { B.go("mine"); } catch { refused = true; } return { scene: B.scene, registered: !!window.BL.scenes.mine, slot: window.BL.caves.slots.find((s) => s.id === "c10").status, refused, run: localStorage.getItem("oogaboogaland.mine"), best: B.game.state.mine.best && B.game.state.mine.best.score }; })()`);
-  await b.open(sceneUrl("mine", "wip=1"));
-  await untilReady(b);
-  const all = await b.evaluate(`window.__ooga.scene`);
-  // A shared link carries no debug, so there is no __ooga: the director's body attribute says which scene opened.
-  await b.open(`${src}?nosim=1&wip=mine`);
-  let open = null;
-  for (const t0 = Date.now(); open !== "mine" && Date.now() - t0 < 15000; await new Promise((r) => setTimeout(r, 100))) open = await b.evaluate(`document.body.dataset.activeScene || null`);
-  record("wip gate: a page naming another game keeps the mine shut to its cave, URL and go() with its saves stored, wip=1 opens it, and wip=mine alone lands in it without debug", shut.scene === "hub" && !shut.registered && shut.slot === "dark" && shut.refused && shut.run === "kept" && shut.best === best && all === "mine" && open === "mine", JSON.stringify({ shut, all, open }));
 } };
 
 // Steering is measured on screen, never derived: A/D shipped mirrored in the rally and Q/E in the drop,
@@ -3071,7 +3055,7 @@ const orbitEscape = { name: "orbit escape", why: "rule: Escape mid-flight return
 } };
 
 const mineControls = { name: "mine controls", why: "regression: steering keys came out mirrored in two other games; the mine walks relative to its camera", run: async (b) => {
-  await b.open(sceneUrl("mine", "wip=mine"));
+  await b.open(sceneUrl("mine"));
   await untilReady(b);
   const st = `({ phase: window.__ooga.mine.phase, time: window.__ooga.mine.state.time })`;
   await b.key(" ");
@@ -4978,20 +4962,20 @@ scene("lab", { steps: [donation("lab"), labWalking, labKeys, trip("lab")] });
 scene("race", { query: "rain=0", steps: [raceStart, { name: "race tracks", why: "regression: the 12-slot grid spawned a free banana on Banana Bay", run: async (b) => { await b.evaluate(`window.__ooga.race.toGarage()`); await raceTracks[1](b); } }, racePause, play("race", "a whole cup under the autopilot: every racer finishes in order, the cup medal and every track's best are saved", cupRun), raceMirror, raceAgain, trip("race")] });
 scene("drop", { steps: [dropStart, dropSteering, play("drop", "a jump lands on the target, scores its own medal and is saved as the best", dropRun), dropCrash, trip("drop")] });
 scene("orbit", { steps: [{ name: "orbit flow", why: "regression: the spacewalk air bonus was missing from the flight log", run: orbitFlow }, orbitSteering, orbitMissed, orbitEscape, trip("orbit")] });
-scene("mine", { query: "wip=mine", steps: [mineResume, trip("mine"), mineControls, wipGate] });
+scene("mine", { steps: [mineResume, trip("mine"), mineControls] });
 scene("pool", { steps: [poolLeave, trip("pool")] });
 scene("hub", { label: "weapons", query: "character=portlandhodl&weapon=2&mag=1&ammo=6&jetpack=1", steps: [hubAk, hubMelee, hubJetpack] });
 scene("hub", { label: "birds-eye combat", query: "solo=1&character=portlandhodl&weapon=1&mode=shoulder&combat=1", steps: [hubBirdsEye, hubBirdsEyeFloors, hubBirdsEyeProjection, hubBirdsEyeTargets, hubCombatReplay] });
 scene("hub", { label: "mirror", steps: [hubJumbotron, hubMatrix, hubMirror] });
 scene("hub", { label: "side panel", query: "pos=0", steps: [hubSheetPersistence] });
 scene("hub", { label: "clock and block height", query: "pos=0&hour=9", steps: [hubBlockHeight] });
-scene("hub", { label: "canvas2d", query: "canvas2d=1&wip=mine", steps: [canvasTour] });
+scene("hub", { label: "canvas2d", query: "canvas2d=1", steps: [canvasTour] });
 scene("hub", { query: "pos=0", opts: PHONE_SIZE, steps: [phone("hub", { required: ["#joy-move", "#joy-look", "#sheet-toggle", "#sheet-bananas"], sheet: true })] });
 scene("lab", { query: "pos=0", opts: PHONE_SIZE, steps: [phone("lab", { required: ["#joy-move", "#joy-look", ".leave"] })] });
 scene("race", { query: "pos=0&rain=0", opts: PHONE_SIZE, steps: [phone("race", { card: '[data-intro="race"]', play: "window.__ooga.race.startRace()", required: ["#joy-move", "#act", "#item-btn", "#race-garage-btn", ".leave"] })] });
 scene("drop", { query: "pos=0", opts: PHONE_SIZE, steps: [phone("drop", { card: '[data-intro="drop"]', play: "window.__ooga.drop.start()", required: ["#joy-move", "#joy-look", "#act", ".leave"] })] });
 scene("orbit", { query: "pos=0", opts: PHONE_SIZE, steps: [phone("orbit", { card: '[data-intro="orbit"]', play: "window.__ooga.orbit.launch()", required: ["#joy-move", "#act", ".leave"] })] });
-scene("mine", { query: "pos=0&wip=mine", opts: PHONE_SIZE, steps: [phone("mine", { card: "#mine-intro", required: ["#joy-move", "#joy-look", "#act", "#mine-view-btn", "#mine-pause-btn", "#mine-mute", ".leave"] })] });
+scene("mine", { query: "pos=0", opts: PHONE_SIZE, steps: [phone("mine", { card: "#mine-intro", required: ["#joy-move", "#joy-look", "#act", "#mine-view-btn", "#mine-pause-btn", "#mine-mute", ".leave"] })] });
 scene("pool", { query: "pos=0", opts: PHONE_SIZE, steps: [phone("pool", { required: ["#joy-move", "#joy-look", ".leave"] })] });
 
 // DSB has no hub entrance during this merge. Exercise the existing world.pilot
@@ -5017,7 +5001,7 @@ const dsbExit = async (b) => {
   await untilPage(b, 'B.scene === "hub" && !B.transitioning', 15000);
 };
 // Dialing and unused gates remain completely independent of destination construction.
-for (const mobile of [false, true]) scene("hub", { label: "Ooga Portal " + (mobile ? "canvas2d" : "webgl2"), query: "scene=hub&pos=0&wip=mine" + (mobile ? "&canvas2d=1" : ""), opts: mobile ? { ...PHONE_SIZE, motion: false } : { motion: true }, steps: [{ name: "Ooga Portal foundation " + (mobile ? "canvas2d" : "webgl2"), why: "rule: dialing must leave DSB dormant and preserve ordinary abyss falls", run: async b => {
+for (const mobile of [false, true]) scene("hub", { label: "Ooga Portal " + (mobile ? "canvas2d" : "webgl2"), query: "scene=hub&pos=0" + (mobile ? "&canvas2d=1" : ""), opts: mobile ? { ...PHONE_SIZE, motion: false } : { motion: true }, steps: [{ name: "Ooga Portal foundation " + (mobile ? "canvas2d" : "webgl2"), why: "rule: dialing must leave DSB dormant and preserve ordinary abyss falls", run: async b => {
   const check = (name, ok, detail = "") => record(name + (mobile ? " canvas2d" : " webgl2"), ok, detail);
   const dormant = async stage => {
     const counts = await b.evaluate(`window.__gateDormancy`);
@@ -5151,7 +5135,7 @@ for (const mobile of [false, true]) scene("hub", { label: "Ooga Portal " + (mobi
 } }] });
 
 // Real hub movement consumes the Pit; factory counters distinguish transit from hidden land.
-for (const mobile of [false, true]) scene("hub", { label: "Ooga Portal dsb travel " + (mobile ? "canvas2d" : "webgl2"), query: "scene=hub&pos=0&wip=mine" + (mobile ? "&canvas2d=1" : ""), opts: mobile ? { ...PHONE_SIZE, motion: false } : { motion: true }, steps: [{ name: "Ooga Portal dsb travel " + (mobile ? "canvas2d" : "webgl2"), why: "playthrough: only a swept Pit crossing enters transit and only its backside crossing constructs DSB Land", run: async b => {
+for (const mobile of [false, true]) scene("hub", { label: "Ooga Portal dsb travel " + (mobile ? "canvas2d" : "webgl2"), query: "scene=hub&pos=0" + (mobile ? "&canvas2d=1" : ""), opts: mobile ? { ...PHONE_SIZE, motion: false } : { motion: true }, steps: [{ name: "Ooga Portal dsb travel " + (mobile ? "canvas2d" : "webgl2"), why: "playthrough: only a swept Pit crossing enters transit and only its backside crossing constructs DSB Land", run: async b => {
   const check = (name, ok, detail = "") => record("Ooga Portal travel " + (mobile ? "canvas2d: " : "webgl2: ") + name, ok, detail);
   const snapshot = () => b.evaluate(`({ ...__gateDormancy, resources: __ooga.dsb?.resources, phase: __ooga.dsb?.phase, requests: __dsbFeedFixture.requests, sockets: __dsbFeedFixture.sockets, plays: __dsbRadioFixture.plays })`);
   const before = await snapshot();
@@ -5201,7 +5185,7 @@ for (const mobile of [false, true]) scene("hub", { label: "Ooga Portal dsb trave
 } }] });
 
 // Placement contract exercises the moved landmarks without changing travel fixtures.
-for (const mobile of [false, true]) scene("dsb", { label: "Ooga Portal dsb plaza " + (mobile ? "canvas2d" : "webgl2"), url: hubPage(dist, "scene=dsb&wip=mine" + (mobile ? "&canvas2d=1" : "")), opts: mobile ? { ...PHONE_SIZE, motion: false } : { motion: true }, steps: [{ name: "Ooga Portal dsb plaza " + (mobile ? "canvas2d" : "webgl2"), why: "regression: moved Shop and TV keep collision, interactions, radio and cat navigation attached to their fronts", run: async b => {
+for (const mobile of [false, true]) scene("dsb", { label: "Ooga Portal dsb plaza " + (mobile ? "canvas2d" : "webgl2"), url: hubPage(dist, "scene=dsb" + (mobile ? "&canvas2d=1" : "")), opts: mobile ? { ...PHONE_SIZE, motion: false } : { motion: true }, steps: [{ name: "Ooga Portal dsb plaza " + (mobile ? "canvas2d" : "webgl2"), why: "regression: moved Shop and TV keep collision, interactions, radio and cat navigation attached to their fronts", run: async b => {
   const check = (name, ok, detail = "") => record("DSB plaza " + (mobile ? "canvas2d: " : "webgl2: ") + name, ok, detail);
   const press = async selector => {
     const p = await b.evaluate(`(() => { const e = document.querySelector(${JSON.stringify(selector)}); e.scrollIntoView({ block: "nearest" }); const r = e.getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; })()`);
@@ -5242,7 +5226,7 @@ for (const mobile of [false, true]) scene("dsb", { label: "Ooga Portal dsb plaza
 } }] });
 
 // Return-only integration: the outbound playthrough remains separately ledger-controlled.
-for (const mobile of [false, true]) scene("dsb", { label: "Ooga Portal dsb return " + (mobile ? "canvas2d" : "webgl2"), query: "pos=0&wip=mine" + (mobile ? "&canvas2d=1" : ""), opts: mobile ? { ...PHONE_SIZE, motion: false } : { motion: true }, steps: [{ name: "Ooga Portal dsb return " + (mobile ? "canvas2d" : "webgl2"), why: "playthrough: front return reaches a receiving Pit, lands safely and restores control without re-entering transit", run: async b => {
+for (const mobile of [false, true]) scene("dsb", { label: "Ooga Portal dsb return " + (mobile ? "canvas2d" : "webgl2"), query: "pos=0" + (mobile ? "&canvas2d=1" : ""), opts: mobile ? { ...PHONE_SIZE, motion: false } : { motion: true }, steps: [{ name: "Ooga Portal dsb return " + (mobile ? "canvas2d" : "webgl2"), why: "playthrough: front return reaches a receiving Pit, lands safely and restores control without re-entering transit", run: async b => {
   const check = (name, ok, detail = "") => record("Ooga Portal return " + (mobile ? "canvas2d: " : "webgl2: ") + name, ok, detail);
   const press = async selector => {
     const p = await b.evaluate(`(() => { const e = document.querySelector(${JSON.stringify(selector)}); e.scrollIntoView({ block: "nearest" }); const r = e.getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; })()`);
