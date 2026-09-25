@@ -59,7 +59,7 @@
   // Joystick bases, a hold-to-climb button, a canvas whose mouse chord walks, and a Space handler
   const create = ({ move = null, look = null, boost = null, chord = null, onAction = null, pressActions = false, shooter = () => false, canDescend = () => true } = {}) => {
     const held = { forward: 0, back: 0, left: 0, right: 0, yawLeft: 0, yawRight: 0, pitchDown: 0, pitchUp: 0, up: 0, space: 0, down: 0, boost: 0, chord: 0, sprint: 0 };
-    const axes = { x: 0, y: 0, up: 0, yaw: 0, pitch: 0, sprint: 0, shiftTap: 0 };
+    const axes = { x: 0, y: 0, up: 0, yaw: 0, pitch: 0, orbitYaw: 0, sprint: 0, shiftTap: 0 };
     let spaceDown = false, boostPointer = null, boostClick = false, shiftAt = 0, shiftUsed = false, shiftTap = 0;
     const typing = (e) => e.target && (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA" || (e.target.closest && e.target.closest("dialog")));
     const onKeyDown = (e) => {
@@ -138,6 +138,8 @@
       axes.x = clamp(held.right - held.left + (moveStick ? moveStick.x : 0), -1, 1);
       axes.y = clamp(held.forward - held.back + (shooter() ? 0 : held.chord) + (moveStick ? moveStick.y : 0), -1, 1);
       axes.up = clamp(held.up + held.space + held.boost - (canDescend() ? held.down : 0), -1, 1);
+      // Bird's-eye combat rotates with Q/E while its look stick aims the pointer.
+      axes.orbitYaw = held.yawLeft - held.yawRight;
       axes.yaw = clamp((shooter() ? 0 : held.yawLeft - held.yawRight) - (lookStick ? lookStick.x : 0), -1, 1);
       axes.pitch = clamp((shooter() ? 0 : held.pitchDown - held.pitchUp) - (lookStick ? lookStick.y : 0), -1, 1);
       axes.sprint = shooter() ? held.sprint : 0;

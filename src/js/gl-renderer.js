@@ -2,7 +2,7 @@
   "use strict";
   const BL = window.BL = window.BL || {};
   const { mat4 } = BL.math;
-  const { updateWorld, traverseVisible, boundsOf, matrixModeOf, hiddenFromCamera } = BL.scene;
+  const { updateWorld, traverseVisible, boundsOf, matrixModeOf, hiddenFromCamera, hiddenFromCutaway } = BL.scene;
   const POINT_LIGHT_CAPACITY = 10;
   const QUALITY = {
     high: { dpr: 1.5, msaa: 4, shadow: 2048, bloom: true, mirror: 1024, environment: 128, environmentCadence: 1, lights: POINT_LIGHT_CAPACITY },
@@ -45,6 +45,16 @@ uniform vec4 uViewDirection;
 vec3 viewTowardEye(vec3 p) {
   return uViewDirection.w * (uEye - p) + uViewDirection.xyz;
 }`;
+  // Portal mode 6 uses the instance parameters for time, surge and reveal radius.
+  // Keep the wave equation in sync with oogaPortalModels.liquidHeight (Canvas).
+  const PORTAL_LIQUID_GLSL = `
+float portalHeight(vec2 p, float time, float surge) {
+  float envelope = max(0.0, 1.0 - dot(p, p));
+  float a = length(p - vec2(0.22, -0.17)), b = length(p - vec2(-0.31, 0.24));
+  return envelope * (0.016 * sin(a * 32.0 - time * 4.0) + 0.01 * sin(b * 25.0 - time * 3.0)
+    + 0.008 * sin(p.x * 18.0 + p.y * 12.0 + time * 2.0) - surge * 0.32 * envelope);
+}
+`;
   const MESH_VS = `#version 300 es
 precision highp float;
 layout(location=0) in vec3 aPos;
@@ -64,13 +74,25 @@ out vec4 vParams;
 out vec4 vShadow;
 out vec3 vWorld;
 out vec3 vInstanceFacing;
+out vec2 vPortalUV;
+out vec4 vPortalView;
+${PORTAL_LIQUID_GLSL}
 out float vMatrixSurface;
 flat out float vMatrixCave;
 flat out float vMatrixPermanentFallback;
 flat out float vSmokeOpacity;
 void main() {
   mat4 m = mat4(aM0, aM1, aM2, aM3);
-  vec4 w = m * vec4(aPos, 1.0);
+  vec3 pos = aPos;
+  vPortalUV = aPos.xz;
+  vPortalView = vec4(0.0);
+  if (aParams.z > 5.5) pos.y += portalHeight(aPos.xz, aParams.x, aParams.y);
+  vec4 w = m * vec4(pos, 1.0);
+  if (aParams.z > 5.5) {
+    vec3 toward = viewTowardEye(w.xyz);
+    vPortalView = vec4(dot(toward, normalize(aM0.xyz)), dot(toward, normalize(aM1.xyz)),
+      dot(toward, normalize(aM2.xyz)), max(0.001, length(aM0.xyz)));
+  }
   vNormal = normalize(mat3(m) * aNormal);
   vColor = aColor;
   vColor.rgb *= 1.0 - clamp(-aParams.y, 0.0, 1.0) * 0.88;
@@ -92,7 +114,7 @@ void main() {
   vWorld = w.xyz;
   vInstanceFacing = normalize(aM2.xyz);
   gl_Position = uViewProj * w;
-  if (aParams.w != 0.0) {
+  if (aParams.w != 0.0 && aParams.z < 5.5) {
     vec3 facing = normalize(aM2.xyz) * sign(aParams.w);
     if (dot(facing, viewTowardEye(aM3.xyz)) <= 0.0) gl_Position = vec4(2.0, 2.0, 2.0, 1.0);
   }
@@ -103,16 +125,30 @@ void main() {
 uniform int uCutCount;
 uniform vec4 uCutRegions[8];
 uniform vec4 uCutBounds[8];
-bool cutaway(vec3 p) {
+uniform float uCutawayOpacity;
+float cutawayRank() {
+  ivec2 pixel = ivec2(gl_FragCoord.xy) & 3;
+  int rank = ((pixel.x & 1) ^ (pixel.y & 1)) * 8 + (pixel.y & 1) * 4
+    + (((pixel.x >> 1) & 1) ^ ((pixel.y >> 1) & 1)) * 2 + ((pixel.y >> 1) & 1);
+  return (float(rank) + 0.5) / 16.0;
+}
+bool cutaway(vec3 p, float opacity) {
+  // Ordered coverage shares one fade across colour, depth and shadows,
+  // without sorting transparent clouds or changing their shared instances.
+  opacity *= uCutawayOpacity;
+  if (opacity < 1.0 && cutawayRank() >= opacity) return true;
   if (p.y > uClipMaxY) return true;
   for (int i = 0; i < 8; i++) {
     if (i >= uCutCount) break;
     vec4 r = uCutRegions[i], b = uCutBounds[i];
     vec2 d = p.xz - r.xy;
     vec2 local = vec2(d.x * r.z - d.y * r.w, d.x * r.w + d.y * r.z);
-    if (p.y > b.z && abs(local.x) < b.x && abs(local.y) < b.y) return true;
+    if (p.y > b.z && abs(local.x) < b.x && abs(local.y) < b.y && cutawayRank() < b.w) return true;
   }
   return false;
+}
+bool cutaway(vec3 p) {
+  return cutaway(p, 1.0);
 }`;
   const MESH_FS = `#version 300 es
 precision highp float;
@@ -124,6 +160,9 @@ in vec4 vParams;
 in vec4 vShadow;
 in vec3 vWorld;
 in vec3 vInstanceFacing;
+in vec2 vPortalUV;
+in vec4 vPortalView;
+${PORTAL_LIQUID_GLSL}
 in float vMatrixSurface;
 flat in float vMatrixCave;
 flat in float vMatrixPermanentFallback;
@@ -353,12 +392,37 @@ float matrixPermanentAt(vec3 point, float caveIndex) {
   return depth >= -0.000001 && depth <= bounds.w + voxelReach && abs(across) <= halfWidth + 0.000001 && height >= -0.000001 && height <= ceiling + 0.000001 ? 1.0 : 0.0;
 }
 void main() {
-  if (vWorld.y < uClipMinY || cutaway(vWorld)) discard;
-  if (vSmokeOpacity < 1.0) {
-    ivec2 pixel = ivec2(gl_FragCoord.xy) & 3;
-    int rank = ((pixel.x & 1) ^ (pixel.y & 1)) * 8 + (pixel.y & 1) * 4
-      + (((pixel.x >> 1) & 1) ^ ((pixel.y >> 1) & 1)) * 2 + ((pixel.y >> 1) & 1);
-    if ((float(rank) + 0.5) / 16.0 >= vSmokeOpacity) discard;
+  if (vWorld.y < uClipMinY || cutaway(vWorld, vSmokeOpacity)) discard;
+  if (vParams.z > 5.5) {
+    vec2 p = vPortalUV;
+    float time = vParams.x, surge = vParams.y, radius = length(p);
+    if (radius > vParams.w) discard;
+    float height = portalHeight(p, time, surge);
+    vec2 gradient = vec2(portalHeight(p + vec2(0.003, 0.0), time, surge) - height,
+      portalHeight(p + vec2(0.0, 0.003), time, surge) - height) / (0.003 * vPortalView.w);
+    vec3 normal = normalize(vec3(-gradient.x, 1.0, -gradient.y));
+    vec3 eye = normalize(vPortalView.xyz);
+    if (eye.y < 0.0) normal = -normal;
+    float fresnel = pow(1.0 - abs(dot(normal, eye)), 3.0);
+    // Interfering wave fronts and drifting caustic strands give the membrane
+    // depth; narrow crests carry the pulses instead of painted solid rings.
+    vec2 warp = p + 0.045 * vec2(sin(p.y * 9.0 + time), cos(p.x * 11.0 - time));
+    float interference = sin(length(warp - vec2(0.22, -0.17)) * 32.0 - time * 4.0)
+      + sin(length(warp + vec2(0.31, -0.24)) * 25.0 - time * 3.0);
+    float caustic = pow(0.5 + 0.5 * sin(warp.x * 21.0 + sin(warp.y * 17.0 + time * 2.0) + time), 10.0);
+    caustic *= 0.4 + 0.6 * pow(0.5 + 0.5 * cos(warp.y * 23.0 - warp.x * 9.0 - time), 3.0);
+    float pulse = pow(0.5 + 0.5 * sin(radius * 20.0 - time * 2.0), 12.0);
+    float crest = smoothstep(0.8, 1.9, interference);
+    float rim = smoothstep(0.88, 1.0, radius);
+    float glint = pow(max(0.0, dot(reflect(-normalize(vec3(-0.4, 1.0, 0.6)), normal), eye)), 40.0);
+    vec3 liquid = mix(vec3(0.015, 0.055, 0.16), vec3(0.035, 0.32, 0.53), 0.48 + 0.22 * interference);
+    liquid += vec3(0.13, 0.58, 0.72) * (crest * 0.36 + caustic * 0.62 + pulse * 0.18);
+    liquid += vec3(0.42, 0.83, 0.95) * (glint * 0.65 + fresnel * 0.28 + rim * (0.25 + 0.1 * sin(time * 2.0)));
+    liquid *= 1.0 + surge * 0.4;
+    float fog = smoothstep(uFogRange.x, uFogRange.y, distance(vWorld, uEye));
+    oColor = vec4(mix(liquid, uFog, fog), 1.0);
+    oBright = vec4(liquid * (0.2 + crest * 0.35 + caustic * 0.4 + rim * 0.2) * (1.0 - fog), 1.0);
+    return;
   }
   vec3 n = normalize(vNormal);
   vec3 base = vColor.rgb;
@@ -493,14 +557,15 @@ void main() {
   vWorld = world.xyz;
   gl_Position = uLightViewProj * world;
 }`;
-  const SHADOW_FS = `#version 300 es
+const SHADOW_FS = `#version 300 es
 precision highp float;
 in vec3 vWorld;
 uniform float uClipMinY;
-uniform float uClipMaxY;
-${CUTAWAY_GLSL}
 void main() {
-  if (vWorld.y < uClipMinY || cutaway(vWorld)) discard;
+  // Bird's-eye cuts belong to the camera, not the sun. Keep the original
+  // ceiling silhouettes in the shadow map while their colour geometry is
+  // scanned or faded away.
+  if (vWorld.y < uClipMinY) discard;
 }`;
   const LINE_VS = `#version 300 es
 precision highp float;
@@ -820,13 +885,7 @@ ${CUTAWAY_GLSL}
 layout(location=0) out vec4 oColor;
 layout(location=1) out vec4 oBright;
 void main() {
-  if (cutaway(vWorld)) discard;
-  if (vOpacity < 1.0) {
-    ivec2 pixel = ivec2(gl_FragCoord.xy) & 3;
-    int rank = ((pixel.x & 1) ^ (pixel.y & 1)) * 8 + (pixel.y & 1) * 4
-      + (((pixel.x >> 1) & 1) ^ ((pixel.y >> 1) & 1)) * 2 + ((pixel.y >> 1) & 1);
-    if ((float(rank) + 0.5) / 16.0 >= vOpacity) discard;
-  }
+  if (cutaway(vWorld, vOpacity)) discard;
   vec3 direction = reflect(-normalize(viewTowardEye(vWorld)), normalize(vMirrorNormal));
   oColor = vec4(mix(texture(uEnvironment, direction).rgb, uTint, 0.04), 1.0);
   oBright = vec4(0.0);
@@ -975,7 +1034,7 @@ void main() {
     };
     // Compiles without blocking; ready flips once linked.
     let parallel = null;
-    let ready = false, cutawayMaxY = 1e6, cutawayCount = 0, birdsEyeCutaway = false, cutawayFrame = 0, cutawayCloudY = 0, cutawayCloudMix = 0;
+    let ready = false, cutawayMaxY = 1e6, cutawayCount = 0, cutawayFade = 0, cutawayFrame = 0, cutawayCloudY = 0, cutawayCloudMix = 0;
     const cutawayRegions = new Float32Array(32), cutawayBounds = new Float32Array(32);
     let failure = null;
     const compile = (vs, fs, uniforms) => {
@@ -990,7 +1049,7 @@ void main() {
       gl.attachShader(prog, v);
       gl.attachShader(prog, f);
       gl.linkProgram(prog);
-      return { prog, shaders: [v, f], uniforms: uniforms.concat(["uCutCount", "uCutRegions", "uCutBounds"]), u: {}, cutFrame: -1, cutCount: -1, clipMinY: NaN, clipMaxY: NaN };
+      return { prog, shaders: [v, f], uniforms: uniforms.concat(["uCutCount", "uCutRegions", "uCutBounds", "uCutawayOpacity"]), u: {}, cutFrame: -1, cutCount: -1, cutOpacity: NaN, clipMinY: NaN, clipMaxY: NaN };
     };
     const finishProgram = (p) => {
       if (!gl.getProgramParameter(p.prog, gl.LINK_STATUS)) {
@@ -1029,7 +1088,7 @@ void main() {
       res.programs = {
         image: compile(IMAGE_VS, IMAGE_FS, ["uViewProj", "uRect", "uImage", "uReady", "uClipMaxY"]),
         mesh: compile(MESH_VS, meshFragment, ["uViewProj", "uLightViewProj", "uEye", "uViewDirection", "uLightDir", "uSky", "uGround", "uSun", "uDirectStrength", "uAmbientFloor", "uDiffuseFloor", "uShadowStrength", "uShadowFloor", "uShadowBias", "uShadow", "uShadowTexel", "uLights", "uLightCount", "uFog", "uFogRange", "uMatrixParams", "uMatrixOrigin", "uMatrixGlyph", "uMatrixCave", "uMatrixCaves", "uMatrixCaveBounds", "uMatrixCaveNear", "uMatrixPermanentCave", "uMatrixPermanentPlane", "uMatrixPermanentAperture", "uMatrixLivingGlobal", "uMatrixGlyphTex", "uMatrixSamples", "uClipMinY", "uClipMaxY", "uMatrixGlyphOpacity"]),
-        shadow: compile(SHADOW_VS, SHADOW_FS, ["uLightViewProj", "uClipMinY", "uClipMaxY"]),
+        shadow: compile(SHADOW_VS, SHADOW_FS, ["uLightViewProj", "uClipMinY"]),
         line: compile(LINE_VS, LINE_FS, ["uViewProj", "uViewport", "uWidth", "uClipMaxY"]),
         sky: compile(QUAD_VS, SKY_FS, ["uInvViewProj", "uHorizon", "uZenith", "uSun", "uSunDir", "uMoonDir", "uStarMatrix", "uStars", "uTime", "uHazeDrop"]),
         blur: compile(QUAD_VS, BLUR_FS, ["uTex", "uDir"]),
@@ -1480,7 +1539,7 @@ void main() {
       }
     };
     const collect = (node) => {
-      if (!node.geometry || birdsEyeCutaway && node.geometry.cutawayHide) return;
+      if (!node.geometry || hiddenFromCutaway(node) || cutawayFade === 1 && node.geometry.cutawayHide) return;
       if (node.mirror || node.mirrorPortal) {
         if (mirror.node) throw new Error("A scene may contain at most one mirror node");
         mirror.node = node;
@@ -1562,12 +1621,14 @@ void main() {
         }
         // Sign-encoded fire/smoke in the cached upload: negative glow = ember, negative highlight = scorch,
         // mode = -1 - smokeOpacity.
-        const glow = Math.fround(n.ember > 0 ? -n.ember : n.glow), highlight = Math.fround(n.scorch > 0 ? -n.scorch : n.highlight);
-        const mode = Math.fround(n.smokeOpacity === undefined ? matrixModeOf(n) : -1 - n.smokeOpacity);
+        const portal = !!rec.geometry.portalSurface;
+        const glow = Math.fround(portal ? n.portalTime : n.ember > 0 ? -n.ember : n.glow), highlight = Math.fround(portal ? n.portalSurge : n.scorch > 0 ? -n.scorch : n.highlight);
+        const mode = portal ? 6 : Math.fround(n.smokeOpacity === undefined ? matrixModeOf(n) : -1 - n.smokeOpacity);
         if (d[o + 16] !== glow) { d[o + 16] = glow; dirty = true; }
         if (d[o + 17] !== highlight) { d[o + 17] = highlight; dirty = true; }
         if (d[o + 18] !== mode) { d[o + 18] = mode; dirty = true; }
-        d[o + 19] = 0;
+        const reveal = portal ? Math.fround(n.portalReveal) : 0;
+        if (d[o + 19] !== reveal) { d[o + 19] = reveal; dirty = true; }
         if (dirty) {
           if (o < lo) lo = o;
           if (o + INSTANCE_FLOATS > hi) hi = o + INSTANCE_FLOATS;
@@ -1788,6 +1849,11 @@ void main() {
     };
     const applyCutaway = (program, geometry) => {
       const count = geometry?.cutawayPreserve ? 0 : cutawayCount;
+      const opacity = geometry?.cutawayHide ? 1 - cutawayFade : 1;
+      if (program.cutOpacity !== opacity) {
+        gl.uniform1f(program.u.uCutawayOpacity, opacity);
+        program.cutOpacity = opacity;
+      }
       if (program.cutFrame !== cutawayFrame) {
         gl.uniform4fv(program.u.uCutRegions, cutawayRegions);
         gl.uniform4fv(program.u.uCutBounds, cutawayBounds);
@@ -1977,7 +2043,7 @@ void main() {
       if (pane) {
         gl.useProgram(pg.prog);
         gl.uniform1f(pg.u.uClipMaxY, cutawayMaxY);
-        applyCutaway(pg);
+        applyCutaway(pg, rec.geometry);
         gl.uniformMatrix4fv(pg.u.uViewProj, false, viewProj);
         gl.uniformMatrix4fv(pg.u.uReflectionViewProj, false, mirrorCapturedViewProj);
         gl.uniformMatrix4fv(pg.u.uMirrorWorld, false, mirror.node.world);
@@ -2042,6 +2108,7 @@ void main() {
         gl.uniform1i(shardProgram.u.uEnvironment, 5);
         for (const shard of activeRecords) {
           if (!shard.geometry.mirrorSource || !shard.mesh || !shard.drawCount || shard.offscreen) continue;
+          applyCutaway(shardProgram, shard.geometry);
           gl.bindVertexArray(shard.mesh.vao);
           gl.drawArraysInstanced(gl.TRIANGLES, 0, shard.mesh.count, shard.drawCount);
           mirrorDebug.shardsDrawn += shard.drawCount;
@@ -2081,6 +2148,7 @@ void main() {
           started = true;
         }
         const pg = mirror.program;
+        applyCutaway(pg, rec.geometry);
         gl.activeTexture(gl.TEXTURE4);
         if (bodyActive) {
           if (!rec.rippleBodyTexture) {
@@ -2134,7 +2202,7 @@ void main() {
     const render = (root, camera, opts = {}) => {
       if (lost || !pollPrograms()) return false;
       cutawayMaxY = opts.cutawayMaxY ?? 1e6;
-      birdsEyeCutaway = !!opts.birdsEyeCutaway;
+      cutawayFade = Math.max(0, Math.min(1, Number.isFinite(opts.cutawayFade) ? opts.cutawayFade : opts.birdsEyeCutaway ? 1 : 0));
       cutawayCloudY = opts.cutawayCloudY || 0;
       cutawayCloudMix = Math.max(0, Math.min(1, opts.cutawayCloudMix || 0));
       cutawayCount = Math.min(8, opts.cutawayRegionCount || 0);
@@ -2143,6 +2211,7 @@ void main() {
         const r = opts.cutawayRegions[i], o = i * 4;
         cutawayRegions[o] = r.x; cutawayRegions[o + 1] = r.z; cutawayRegions[o + 2] = r.cos; cutawayRegions[o + 3] = r.sin;
         cutawayBounds[o] = r.halfWidth; cutawayBounds[o + 1] = r.halfDepth; cutawayBounds[o + 2] = r.y;
+        cutawayBounds[o + 3] = Math.max(0, Math.min(1, r.mix === undefined ? 1 : r.mix));
       }
       const {
         light = DEFAULT_LIGHT,

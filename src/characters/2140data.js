@@ -256,8 +256,8 @@
           k.parts.chukTrail.push(ghost);
           addChild(k.parts.armL, ghost);
         }
-        // crew.js flies him exactly as it flies the world jetpack, and nothing
-        // takes his thrusters off. The mount sits on the sole plane, under both feet.
+        // crew.js flies and toggles these built-in thrusters exactly like the
+        // standard pack. The mount sits on the sole plane, under both feet.
         k.parts.jetpack = createNode({ position: { x: 0, y: -5 * u, z: 0 } });
         k.parts.jetFlame = createNode({ geometry: voxelGeometry(flameVox(), { unit: u, palette: FLAME_PALETTE, origin: { x: -4.5 * u, y: 0, z: -u }, emissive: FLAME_GLOW }), visible: false });
         addChild(k.parts.jetpack, k.parts.jetFlame);

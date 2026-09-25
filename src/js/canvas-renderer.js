@@ -2,7 +2,7 @@
   "use strict";
   const BL = window.BL = window.BL || {};
   const { mat4, lerp, sortByKey, sortScratch } = BL.math;
-  const { updateWorld, traverseVisible, matrixModeOf, hiddenFromCamera } = BL.scene;
+  const { updateWorld, traverseVisible, matrixModeOf, hiddenFromCamera, hiddenFromCutaway } = BL.scene;
   const DEFAULT_SKY = [0.5, 0.52, 0.58];
   const DEFAULT_GROUND = [0.22, 0.2, 0.19];
   const CUBE_VIEWS = new Float32Array([1, 0, 0, 0, -1, 0, -1, 0, 0, 0, -1, 0, 0, 1, 0, 0, 0, 1, 0, -1, 0, 0, 0, -1, 0, 0, 1, 0, -1, 0, 0, 0, -1, 0, -1, 0]);
@@ -95,7 +95,7 @@
     const cutawayCounts = new Uint8Array(cutawayStack.length), cutawayNext = new Uint8Array(cutawayStack.length);
     const cutawayA = new Float32Array(CLIP_VERTICES * 3), cutawayB = new Float32Array(CLIP_VERTICES * 3);
     const lineWorld = new Float32Array(6), lineRanges = new Float64Array((CUTAWAY_REGIONS + 1) * 2);
-    let cutawayUsed = 0, cutawayCount = 0, cutawaySurface = null, cutawayRegionCount = 0, lineRangeCount = 0, birdsEyeCutaway = false;
+    let cutawayUsed = 0, cutawayCount = 0, cutawaySurface = null, cutawayRegionCount = 0, lineRangeCount = 0, cutawayFade = 0;
     const rippleView = mat4.create();
     const rippleCircle = new Float32Array(98);
     for (let i = 0; i <= 48; i++) {
@@ -325,8 +325,8 @@
       return -1;
     };
     const shadeNode = (node) => {
-      if (node.smokeOpacity === 0) return;
-      if (birdsEyeCutaway && node.geometry.cutawayHide) return;
+      const opacity = (node.smokeOpacity === undefined ? 1 : node.smokeOpacity) * (node.geometry.cutawayHide ? 1 - cutawayFade : 1);
+      if (opacity === 0) return;
       if (node.mirrorRippleOnly && !node.mirrorRipples?.active && !node.mirrorBody?.contacts && !node.mirrorBody?.active) return;
       const { verts, faces, lines } = node.geometry;
       let w = node.world;
@@ -341,6 +341,7 @@
       const mirrorFace = !!(node.mirror || node.mirrorPortal || node.mirrorShard || node.mirrorRippleOnly);
       const portalFace = !!node.mirrorPortal || !!node.mirrorWalkThrough && mirrorDebug.portal;
       const localMatrixGlyph = !!node.geometry.matrixGlyph;
+      const liquid = !!node.geometry.portalSurface;
       // Every voxel face in a glyph shares this instance plane and basis.
       const glyphLength = localMatrixGlyph ? Math.hypot(w[8], w[9], w[10]) : 1;
       const glyphNx = w[8] / glyphLength, glyphNy = w[9] / glyphLength, glyphNz = w[10] / glyphLength;
@@ -364,10 +365,23 @@
         for (const face of faces) {
           const idx = face.i;
           const count = idx.length;
-          let centerX = 0, centerY = 0, centerZ = 0;
+          if (liquid) {
+            // Portal faces are radial strips. Skip those beyond the reveal,
+            // then trim only the crossing strip; the interior keeps its scale.
+            const a = idx[0] * 3, b = idx[1] * 3;
+            if (Math.min(Math.hypot(verts[a], verts[a + 2]), Math.hypot(verts[b], verts[b + 2])) >= node.portalReveal) continue;
+          }
+          let centerX = 0, centerY = 0, centerZ = 0, liquidX = 0, liquidZ = 0;
           for (let k = 0; k < count; k++) {
             const b = idx[k] * 3;
-            mat4.transformPoint(V[k], w, verts[b], verts[b + 1], verts[b + 2]);
+            let x = verts[b], z = verts[b + 2];
+            if (liquid) {
+              const radius = Math.hypot(x, z);
+              if (radius > node.portalReveal) { const clip = node.portalReveal / radius; x *= clip; z *= clip; }
+              liquidX += x / count; liquidZ += z / count;
+            }
+            const displacement = liquid ? BL.oogaPortalModels.liquidHeight(x, z, node.portalTime, node.portalSurge) : 0;
+            mat4.transformPoint(V[k], w, x, verts[b + 1] + displacement, z);
             centerX += V[k][0];
             centerY += V[k][1];
             centerZ += V[k][2];
@@ -526,7 +540,7 @@
               rec.n = clipped;
               rec.depth = zsum / clipped - (node.depthBias || 0);
               rec.line = false;
-              rec.smokeOpacity = node.smokeOpacity === undefined ? 1 : node.smokeOpacity;
+              rec.smokeOpacity = opacity;
               rec.mirror = mirrorFace;
               rec.mirrorNode = mirrorFace ? node : null;
               rec.imageNode = node.geometry.imageSurface ? node : null;
@@ -541,7 +555,7 @@
               }
               rec.portal = portalFace;
               rec.matrixGlyph = localMatrixGlyph;
-              rec.matrixGlyphOpacity = node.geometry.matrixGlyphOpacity ?? 1;
+              rec.matrixGlyphOpacity = (node.geometry.matrixGlyphOpacity ?? 1) * opacity;
               rec.matrixCave = cave;
               // Keep cave travel for any owned or crossing face; distant static
               // fallbacks need only the ordinary radial wave sample.
@@ -588,6 +602,16 @@
               let red = lerp(lerp(cr * k, 214, tip * 0.88), fogRgb[0], fog);
               let green = lerp(lerp(cg * k, 255, tip * 0.88), fogRgb[1], fog);
               let blue = lerp(lerp(cb * k, 227, tip * 0.88), fogRgb[2], fog);
+              if (liquid) {
+                const time = node.portalTime, radius = Math.hypot(liquidX, liquidZ);
+                const interference = Math.sin(Math.hypot(liquidX - 0.22, liquidZ + 0.17) * 32 - time * 4)
+                  + Math.sin(Math.hypot(liquidX + 0.31, liquidZ - 0.24) * 25 - time * 3);
+                const crest = smooth((interference - 0.8) / 1.1), pulse = (0.5 + 0.5 * Math.sin(radius * 20 - time * 2)) ** 12;
+                const shine = crest * 0.55 + pulse * 0.18 + smooth((radius - 0.88) / 0.12) * 0.25;
+                red = lerp(6 + shine * 85, fogRgb[0], fog);
+                green = lerp(44 + interference * 14 + shine * 140, fogRgb[1], fog);
+                blue = lerp(92 + interference * 22 + shine * 150, fogRgb[2], fog);
+              }
               if (maximumFront && !localMatrixGlyph) {
                 const pulse = matrixLiving ? 0.88 + Math.sin(matrixTime * 2.2 - flow * 0.5) * 0.08 : 0;
                 const matrixFog = smooth((Math.hypot(centerX - eye.x, centerY - eye.y, centerZ - eye.z) - fogNear) / (fogFar - fogNear));
@@ -663,6 +687,7 @@
             rec.n = 2;
             rec.depth = (CLIP_OUT[2] + CLIP_OUT[5]) / 2 - (node.depthBias || 0);
             rec.line = true;
+            rec.smokeOpacity = opacity;
             rec.imageNode = null;
             rec.mirror = false;
             rec.mirrorNode = null;
@@ -680,7 +705,7 @@
       }
     };
     const shadeBatch = (node) => {
-      if (birdsEyeCutaway && node.geometry.cutawayHide) return;
+      if (cutawayFade === 1 && node.geometry.cutawayHide) return;
       const data = node.instanceData;
       const glyphs = !!node.geometry.matrixGlyph;
       const tanX = width * 0.5 / lastF, tanY = height * 0.5 / lastF;
@@ -1305,14 +1330,18 @@
     };
     const render = (root, camera, opts = {}) => {
       cutawayMaxY = opts.cutawayMaxY < 1e6 ? opts.cutawayMaxY : Infinity;
-      birdsEyeCutaway = !!opts.birdsEyeCutaway;
+      cutawayFade = Math.max(0, Math.min(1, Number.isFinite(opts.cutawayFade) ? opts.cutawayFade : opts.birdsEyeCutaway ? 1 : 0));
       cutawayCloudY = opts.cutawayCloudY || 0;
       cutawayCloudMix = Math.max(0, Math.min(1, opts.cutawayCloudMix || 0));
       const regions = opts.cutawayRegions;
       cutawayRegionCount = Math.max(0, Math.min(CUTAWAY_REGIONS, regions?.length || 0, opts.cutawayRegionCount | 0));
       for (let i = 0; i < cutawayRegionCount; i++) {
         const region = regions[i], at = i * 20, c = region.cos, s = region.sin, x = region.x, z = region.z;
-        cutawayPlanes[at] = 0; cutawayPlanes[at + 1] = -1; cutawayPlanes[at + 2] = 0; cutawayPlanes[at + 3] = region.y;
+        const mix = Math.max(0, Math.min(1, region.mix === undefined ? 1 : region.mix));
+        // Canvas has no depth-fragment coverage mask. Moving the section plane
+        // through the roof gives its fallback the same smooth timing instead
+        // of snapping when the WebGL aperture fades.
+        cutawayPlanes[at] = 0; cutawayPlanes[at + 1] = -1; cutawayPlanes[at + 2] = 0; cutawayPlanes[at + 3] = region.y + (1 - mix) * 64;
         cutawayPlanes[at + 4] = c; cutawayPlanes[at + 5] = 0; cutawayPlanes[at + 6] = -s;
         cutawayPlanes[at + 7] = -c * x + s * z - region.halfWidth;
         cutawayPlanes[at + 8] = -c; cutawayPlanes[at + 9] = 0; cutawayPlanes[at + 10] = s;
@@ -1415,7 +1444,7 @@
           mirrorDebug.cameraTarget[1] = mirrorDebug.cameraPosition[1] + normal[1];
           mirrorDebug.cameraTarget[2] = mirrorDebug.cameraPosition[2] + normal[2];
         }
-        if (environmentCapture || !hiddenFromCamera(node)) {
+        if (!hiddenFromCutaway(node) && (environmentCapture || !hiddenFromCamera(node))) {
           if (node.instanceData) shadeBatch(node);
           else if (node.geometry) shadeNode(node);
         }
@@ -1472,20 +1501,22 @@
         ctx.beginPath();
         ctx.moveTo(rec.pts[0], rec.pts[1]);
         if (rec.line) {
+          ctx.globalAlpha = rec.smokeOpacity;
           ctx.lineTo(rec.pts[2], rec.pts[3]);
           if (rec.lineGlow > 0) {
             ctx.strokeStyle = rec.style;
-            ctx.globalAlpha = 0.12 * rec.lineGlow;
+            ctx.globalAlpha = 0.12 * rec.lineGlow * rec.smokeOpacity;
             ctx.lineWidth = 11;
             ctx.stroke();
-            ctx.globalAlpha = 0.28 * rec.lineGlow;
+            ctx.globalAlpha = 0.28 * rec.lineGlow * rec.smokeOpacity;
             ctx.lineWidth = 4.5;
             ctx.stroke();
-            ctx.globalAlpha = 1;
+            ctx.globalAlpha = rec.smokeOpacity;
           }
           ctx.strokeStyle = rec.coreStyle || rec.style;
           ctx.lineWidth = rec.lineGlow > 0 ? 1.8 : 1.4;
           ctx.stroke();
+          ctx.globalAlpha = 1;
         } else {
           for (let k = 1; k < rec.n; k++) ctx.lineTo(rec.pts[k * 2], rec.pts[k * 2 + 1]);
           ctx.closePath();
@@ -1498,8 +1529,16 @@
             ctx.stroke();
             if (rec.smokeOpacity !== 1) ctx.globalAlpha = 1;
           }
-          if (rec.imageNode) { drawImageSurface(rec.imageNode); rec.imageNode = null; }
-          if (rec.matrix && (matrixDensity > 0 || rec.matrixPartial) && !rec.mirrorNode?.mirrorRippleOnly) drawMatrix(rec);
+          if (rec.imageNode) {
+            ctx.globalAlpha = rec.smokeOpacity;
+            drawImageSurface(rec.imageNode); rec.imageNode = null;
+            ctx.globalAlpha = 1;
+          }
+          if (rec.matrix && (matrixDensity > 0 || rec.matrixPartial) && !rec.mirrorNode?.mirrorRippleOnly) {
+            ctx.globalAlpha = rec.smokeOpacity;
+            drawMatrix(rec);
+            ctx.globalAlpha = 1;
+          }
           if (rec.mirror) {
             const node = rec.mirrorNode;
             if (!node.mirrorShard && !node.mirrorRippleOnly) mirrorDebug.surfaceDrawn = true;

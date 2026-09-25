@@ -158,14 +158,9 @@
         <p data-scene="pool" hidden>Mempool cave</p>
       </div>
       <time class="world-clock" id="world-clock" aria-label="Local time"></time>
-      <button type="button" class="world-bananas" id="world-bananas">
-        <svg class="banana-icon" viewBox="0 0 9 9" shape-rendering="crispEdges" aria-hidden="true">
-          <path fill="#211b14" d="M0 0h1v5H0zM2 0h1v2H2zM3 2h1v2H3zM4 4h1v1H4zM1 5h1v2H1zM5 5h1v1H5zM6 6h1v1H6zM2 7h2v1H2zM7 7h1v1H7zM4 8h4v1H4z" />
-          <path fill="#ffd84a" d="M1 2h2v2H1zM1 4h3v1H1zM2 5h3v1H2zM2 6h4v1H2zM4 7h3v1H4z" />
-          <path fill="#789a3b" d="M1 0h1v2H1z" />
-        </svg>
-        <span id="world-banana-count">1000</span><span class="world-banana-label"> bananas in pile</span>
-      </button>
+      <div class="world-block" id="world-block" aria-live="polite" aria-label="Bitcoin block height unavailable">
+        <span>Block</span><span id="world-block-height">&mdash;</span>
+      </div>
       <nav class="presets hub-presets" aria-label="Island destinations" data-scene="hub" hidden>
         <button type="button" data-preset="pile">PILE</button>
         <button type="button" data-preset="lab">LAB</button>
@@ -215,7 +210,7 @@
       </nav>
     </header>
 
-    <aside class="sheet" id="sheet" data-open="true">
+    <aside class="sheet" id="sheet" data-open="false">
       <button type="button" class="sheet-toggle sheet-toggle-bananas" id="sheet-bananas"
         aria-label="Bananas and project metrics">
         <svg class="banana-icon" viewBox="0 0 9 9" shape-rendering="crispEdges" aria-hidden="true">
@@ -307,6 +302,30 @@
           <span class="detached-dot" data-detached-preset="basement" title="Basement"></span>
         </span>
         <span class="detached-destination-name" id="detached-destination-name" aria-live="polite"></span>
+      </button>
+      <button type="button" class="jetpack-hud" id="jetpack-hud" data-action="jetpack-toggle"
+        data-equipped="false" aria-label="Put on jetpack" aria-pressed="false" hidden>
+        <svg class="jetpack-icon" viewBox="0 0 12 14" shape-rendering="crispEdges" aria-hidden="true">
+          <path fill="#9aa1a8" d="M1 1h3v1H1zM8 1h3v1H8zM4 3h4v6H4z" />
+          <path fill="#c8552f" d="M1 2h3v8H1zM8 2h3v8H8z" />
+          <path fill="#e47b4f" d="M1 2h1v7H1zM8 2h1v7H8z" />
+          <path fill="#3c3f44" d="M1 10h3v1H1zM8 10h3v1H8zM4 5h4v2H4z" />
+          <path fill="#ffb13b" d="M1 11h3v1H1zM8 11h3v1H8z" />
+          <path fill="#ffe9a8" d="M2 12h1v1H2zM9 12h1v1H9z" />
+        </svg>
+        <span class="equipment-compact jetpack-compact">
+          <span class="jetpack-compact-fuel" id="jetpack-fuel-compact" role="meter" aria-label="Jetpack fuel"
+            aria-valuemin="0" aria-valuemax="100" aria-valuenow="100">
+            <span class="jetpack-compact-fuel-fill" id="jetpack-fuel-compact-fill"></span>
+          </span>
+        </span>
+        <div class="jetpack-readout">
+          <div class="jetpack-label"><span>Fuel</span><span id="jetpack-fuel-value" aria-hidden="true">100%</span></div>
+          <div class="jetpack-fuel" id="jetpack-fuel" role="progressbar" aria-label="Jetpack fuel"
+            aria-valuemin="0" aria-valuemax="100" aria-valuenow="100">
+            <span class="jetpack-fuel-fill" id="jetpack-fuel-fill"></span>
+          </div>
+        </div>
       </button>
       <button type="button" class="gorilla-hud" id="gorilla-smash-hud" data-action="gorilla-smash"
         aria-label="Smash the ground with both arms" title="Two-arm ground smash" hidden>
@@ -448,30 +467,6 @@
         </span>
       </button>
       </div>
-      <button type="button" class="jetpack-hud" id="jetpack-hud" data-action="jetpack-toggle"
-        data-equipped="false" aria-label="Put on jetpack" aria-pressed="false" hidden>
-        <svg class="jetpack-icon" viewBox="0 0 12 14" shape-rendering="crispEdges" aria-hidden="true">
-          <path fill="#9aa1a8" d="M1 1h3v1H1zM8 1h3v1H8zM4 3h4v6H4z" />
-          <path fill="#c8552f" d="M1 2h3v8H1zM8 2h3v8H8z" />
-          <path fill="#e47b4f" d="M1 2h1v7H1zM8 2h1v7H8z" />
-          <path fill="#3c3f44" d="M1 10h3v1H1zM8 10h3v1H8zM4 5h4v2H4z" />
-          <path fill="#ffb13b" d="M1 11h3v1H1zM8 11h3v1H8z" />
-          <path fill="#ffe9a8" d="M2 12h1v1H2zM9 12h1v1H9z" />
-        </svg>
-        <span class="equipment-compact jetpack-compact">
-          <span class="jetpack-compact-fuel" id="jetpack-fuel-compact" role="meter" aria-label="Jetpack fuel"
-            aria-valuemin="0" aria-valuemax="100" aria-valuenow="100">
-            <span class="jetpack-compact-fuel-fill" id="jetpack-fuel-compact-fill"></span>
-          </span>
-        </span>
-        <div class="jetpack-readout">
-          <div class="jetpack-label"><span>Fuel</span><span id="jetpack-fuel-value" aria-hidden="true">100%</span></div>
-          <div class="jetpack-fuel" id="jetpack-fuel" role="progressbar" aria-label="Jetpack fuel"
-            aria-valuemin="0" aria-valuemax="100" aria-valuenow="100">
-            <span class="jetpack-fuel-fill" id="jetpack-fuel-fill"></span>
-          </div>
-        </div>
-      </button>
     </div>
     <div class="joysticks">
       <div class="joystick" id="joy-move" aria-hidden="true"><span></span></div>
@@ -961,13 +956,13 @@ Then run npm run build and ONLY=characters node test/run.mjs.</pre>
       </div>
       <p class="help">OogaBoogaX on the big screen. Arrow keys flip the boards.</p>
     </dialog>
-    <dialog class="modal" id="stargate-menu" aria-labelledby="stargate-title" aria-describedby="stargate-status">
+    <dialog class="modal" id="ooga-portal-menu" aria-labelledby="ooga-portal-title" aria-describedby="ooga-portal-status">
       <div class="panel-head">
-        <h2 id="stargate-title">STARGATE DIALER</h2>
-        <button type="button" class="modal-close" aria-label="Close Stargate dialer">&times;</button>
+        <h2 id="ooga-portal-title">OOGA PORTAL DIALER</h2>
+        <button type="button" class="modal-close" aria-label="Close Ooga Portal dialer">&times;</button>
       </div>
       <ol aria-label="Destinations"></ol>
-      <p class="help" id="stargate-status" role="status"></p>
+      <p class="help" id="ooga-portal-status" role="status"></p>
     </dialog>
     <dialog class="modal" id="weather-key" aria-label="Reading the weather">
       <div class="panel-head">
@@ -1080,9 +1075,9 @@ Then run npm run build and ONLY=characters node test/run.mjs.</pre>
   <script src="js/solid-props.js"></script>
   <script src="js/breakables.js"></script>
   <script src="js/agent.js"></script>
-  <script src="js/stargate-models.js"></script>
-  <script src="js/stargate.js"></script>
-  <script src="js/stargate-arrival.js"></script>
+  <script src="js/ooga-portal-models.js"></script>
+  <script src="js/ooga-portal.js"></script>
+  <script src="js/ooga-portal-arrival.js"></script>
   <script src="js/lab-phase.js"></script>
   <script src="js/clankers.js"></script>
   <script src="js/clanker-play.js"></script>

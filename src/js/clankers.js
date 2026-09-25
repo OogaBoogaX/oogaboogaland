@@ -847,6 +847,12 @@
       point.heading = station.heading; point.side = station.side;
       return point;
     };
+    const labPickupPose = (e, equipment) => {
+      e.motion.labReach = 1;
+      e.motion.labGripY = equipment.node.geometry.labGripY || BL.scene.boundsOf(equipment.node.geometry).max[1] * 0.85;
+      e.motion.labDie = equipment.kind === "die";
+      e.motion.labBench = equipment.bench || null;
+    };
     const reserveLab = (e, moving, recovering = false) => {
       if (!labStations.length) return false;
       if (!moving && !recovering) {
@@ -868,6 +874,7 @@
       }
       const p = e.root.position, previous = e.lab.station;
       const radius = e.radius, height = e.height, compact = e.compact, mode = e.footprintMode;
+      const reach = e.motion.labReach, grip = e.motion.labGripY, die = e.motion.labDie, bench = e.motion.labBench;
       e.radius = BL.agent.LAB_RADIUS || 1.1; e.height = BL.agent.LAB_HEIGHT || 2.8;
       e.compact = e.planningLab = true; e.footprintMode = "lab";
       const start = moving ? (Math.max(0, previous) + 1) % labStations.length : e.index % labStations.length;
@@ -887,6 +894,11 @@
         // A rolled die can move its pickup spot. Prove the exact destination
         // workLab will use, instead of discarding this route after committing.
         const destination = pickup >= 0 ? labPickupPoint(station, labEquipment[pickup], e.lab.pickupPoint) : station;
+        // Admit the real pickup pose, including this bench and vessel height.
+        // A raised inspection pose or the previous bench's reach is not the
+        // pose the worker must fit when it arrives here.
+        e.motion.labReach = 0; e.motion.labBench = null; e.motion.labDie = false;
+        if (pickup >= 0) labPickupPose(e, labEquipment[pickup]);
         e.planningLabWork = station.kind; e.planningLabSide = station.side === -1 ? -1 : 1;
         if (occupied(e, destination.x, destination.y, destination.z, true, destination.heading)
           || reserved(e, destination.x, destination.z, destination.heading)
@@ -898,6 +910,7 @@
         chosen = index; chosenPickup = pickup; break;
       }
       e.radius = radius; e.height = height; e.compact = compact; e.footprintMode = mode; e.planningLab = false; e.planningLabWork = "";
+      e.motion.labReach = reach; e.motion.labGripY = grip; e.motion.labDie = die; e.motion.labBench = bench;
       if (chosen < 0) {
         if (moving) e.lab.pathPending = false;
         return false;
@@ -956,9 +969,23 @@
       // for ordinary repository populations. Every candidate still checks the
       // complete current/planned rig against furniture and other residents.
       const cells = ROOM_CELLS;
-      const start = move ? (e.slotIndex + 1 + e.workCycle) % cells.length : 0;
-      for (let i = 0; i < cells.length; i++) {
-        const index = (start + i) % cells.length, cell = cells[index];
+      let order = null;
+      if (move && site.mirrorRoom) {
+        const across = (p.x - site.mouth.x) * site.cr - (p.z - site.mouth.z) * site.sr;
+        const along = (p.x - site.mouth.x) * site.sr + (p.z - site.mouth.z) * site.cr;
+        const side = across > 0.2 ? -1 : across < -0.2 ? 1 : ((e.index + e.workCycle) & 1 ? 1 : -1);
+        const deep = along > -4.15;
+        const preferred = side < 0 ? deep ? [0, 2] : [2, 0] : deep ? [1, 3] : [3, 1];
+        const other = side < 0 ? deep ? [1, 3] : [3, 1] : deep ? [0, 2] : [2, 0];
+        // Cross to the opposite side first and alternate the deep and shallow
+        // lanes. Occupancy may choose a fallback, but every safe room cell is
+        // still considered before giving up.
+        order = [...preferred, ...other, deep ? 8 : 9, deep ? 9 : 8];
+      }
+      const start = move && !order ? (e.slotIndex + 1 + e.workCycle) % cells.length : 0;
+      const count = order ? order.length : cells.length;
+      for (let i = 0; i < count; i++) {
+        const index = order ? order[i] : (start + i) % cells.length, cell = cells[index];
         // Keep the complete working pose behind the mirror plane. The old
         // middle row left the torso inside while a turn, jump or pound could
         // put the head back through the glass.
@@ -1080,13 +1107,21 @@
       const steps = Math.max(1, Math.ceil(distance / 0.4)), dx = (nx - x) / steps, dz = (nz - z) / steps;
       let px = x, py = y, pz = z;
       for (let i = 1; i <= steps; i++) {
-        const tx = x + dx * i, tz = z + dz * i, ty = support(e, tx, tz, py, STEP, facing);
+        const tx = x + dx * i, tz = z + dz * i;
+        let ty = support(e, tx, tz, py, STEP, facing), propDrop = false;
         // A prop's edge has no continuous wall to grip. Prove the horizontal
         // clearance and vertical landing here, then use the existing passive
         // descent at execution. Otherwise every route off a rock is mistaken
         // for an unavailable climb, even though walking off it is supported.
-        const propDrop = py - ty > STEP && py - (ctx.terrainSupportAt
-          ? ctx.terrainSupportAt(e, px, pz, py, STEP, facing) : groundAt(px, pz, py)) > STEP;
+        const terrainHere = ctx.terrainSupportAt
+          ? ctx.terrainSupportAt(e, px, pz, py, PROP_STEP, facing) : groundAt(px, pz, py);
+        if (!Number.isFinite(ty) && py - terrainHere > STEP) {
+          const terrainThere = ctx.terrainSupportAt
+            ? ctx.terrainSupportAt(e, tx, tz, py, PROP_STEP, facing) : groundAt(tx, tz, py);
+          if (Number.isFinite(terrainThere) && py - terrainThere > STEP && py - terrainThere <= PROP_STEP) {
+            ty = terrainThere; propDrop = true;
+          }
+        }
         if (!Number.isFinite(ty) || Math.abs(ty - py) > STEP && !propDrop || !landing(tx, ty, tz)
           || !roamPeerClear(e, tx, ty, tz, facing, true, px, py, pz, facing)
           || !propStepClear(e, px, py, pz, tx, ty, tz, facing, facing)) {
@@ -1357,6 +1392,10 @@
         e.roam.wallFailedX = e.goalX; e.roam.wallFailedZ = e.goalZ; e.roam.wallFailedUntil = elapsed + 60;
       }
       e.roam.count = e.roam.index = 0; e.roam.wall = false; e.roam.alignTime = 0;
+      // A spawned prop can sit directly beneath an otherwise valid wall
+      // dismount. Leave that temporary support before choosing a lounge;
+      // route planning from its top must not turn the prop into a rest spot.
+      if (choosePropExit(e)) return;
       if (chooseChill(e, false, true)) return;
       const p = e.root.position;
       setGoal(e, p.x, p.y, p.z); e.rest = 12 + e.random() * 8;
@@ -2842,6 +2881,32 @@
       const terrain = ctx.terrainSupportAt ? ctx.terrainSupportAt(e, p.x, p.z, p.y, STEP) : groundAt(p.x, p.z, p.y);
       return p.y - terrain > 0.02;
     };
+    const choosePropExit = (e) => {
+      if (!raisedSupport(e)) return false;
+      const p = e.root.position;
+      const goalDX = e.goalX - p.x, goalDZ = e.goalZ - p.z;
+      const preferred = Math.hypot(goalDX, goalDZ) > 0.5 ? Math.atan2(goalDX, goalDZ) : e.heading;
+      const compact = e.compact, mode = e.footprintMode, radius = e.radius, height = e.height;
+      e.compact = e.planningRoam = true; e.footprintMode = "walk"; e.radius = WALK_RADIUS; e.height = WALK_HEIGHT;
+      for (let ring = 0; ring < 3; ring++) for (let turn = 0; turn < 16; turn++) {
+        const side = turn ? Math.ceil(turn / 2) * (turn % 2 ? 1 : -1) : 0;
+        const heading = preferred + side * Math.PI / 8, distance = 2.8 + ring * 0.8;
+        const x = p.x + Math.sin(heading) * distance, z = p.z + Math.cos(heading) * distance;
+        const y = ctx.terrainSupportAt
+          ? ctx.terrainSupportAt(e, x, z, p.y, PROP_STEP, heading) : groundAt(x, z, p.y);
+        if (!Number.isFinite(y) || p.y - y <= 0.02 || p.y - y > PROP_STEP || !landing(x, y, z)
+          || occupied(e, x, y, z, true, heading)
+          || !propStepClear(e, p.x, p.y, p.z, x, y, z, e.heading, heading)) continue;
+        e.compact = compact; e.footprintMode = mode; e.radius = radius; e.height = height; e.planningRoam = false;
+        e.roam.count = e.roam.index = 0; e.roam.wall = false; e.roam.alignTime = 0;
+        e.roam.targetX = e.roam.targetY = e.roam.targetZ = NaN;
+        e.lounge = ""; e.loungePartner = null; e.rest = 0; e.exitFootprint = true;
+        setGoal(e, x, y, z);
+        return true;
+      }
+      e.compact = compact; e.footprintMode = mode; e.radius = radius; e.height = height; e.planningRoam = false;
+      return false;
+    };
     const entryFor = (value) => value === undefined ? player : typeof value === "number" ? list[value]
       : value && value.gorilla ? value : byOwner.get(value);
     const resumeEntry = (e) => {
@@ -2990,12 +3055,15 @@
       e.radius = r; e.height = h; e.compact = compact; return false;
     };
     const beginSupportFall = (e, x, z, heading, vx, vz) => {
-      const p = e.root.position, floor = groundAt(x, z, p.y);
+      const p = e.root.position, floor = ctx.terrainSupportAt
+        ? ctx.terrainSupportAt(e, x, z, p.y, PROP_STEP, heading) : groundAt(x, z, p.y);
+      const currentFloor = ctx.terrainSupportAt
+        ? ctx.terrainSupportAt(e, p.x, p.z, p.y, PROP_STEP, e.heading) : groundAt(p.x, p.z, p.y);
       // Props have no continuous cliff face to scale. Walk off their supported
       // top and hand the descent to ordinary gravity, never snap to the meadow
       // or reject every step merely because the ground is more than STEP away.
       if (e.parked || e.climb.active || !Number.isFinite(floor) || !landing(x, floor, z)
-        || p.y - groundAt(p.x, p.z, p.y) <= STEP) return false;
+        || p.y - currentFloor <= STEP) return false;
       if (occupied(e, x, p.y, z, true, heading) || !staticClear(e, p.x, p.y, p.z, x, p.y, z, e.heading, heading)) return false;
       p.x = x; p.z = z; e.heading = heading;
       const d = e.drive;
@@ -3394,9 +3462,8 @@
         if (equipment) {
           job.bench = equipment.station;
           destination = labPickupPoint(labStations[job.bench], equipment, job.pickupPoint);
-          e.motion.labGripY = equipment.node.geometry.labGripY || BL.scene.boundsOf(equipment.node.geometry).max[1] * 0.85;
-          e.motion.labDie = equipment.kind === "die";
-          e.motion.labBench = equipment.bench || null;
+          labPickupPose(e, equipment);
+          if (job.stage === "inspect") e.motion.labReach = 0;
         } else destination = null;
       }
       if (!destination) { e.speed = 0; return; }
@@ -3505,6 +3572,14 @@
       updateFire(e, dt);
       if (e.climb.active) { updateClimb(e, dt); poseEntry(e, dt, beforeX, beforeY, beforeZ); return; }
       if (e.controlled || e.drive.airborne || e.drive.resume) {
+        updateDriven(e, dt); poseEntry(e, dt, beforeX, beforeY, beforeZ); return;
+      }
+      // Breakable scenery can disappear between the final climb sample and
+      // the grounded handoff. Re-read live support before any idle/work logic;
+      // an unsupported gorilla falls now instead of waiting at the old height.
+      const liveFloor = support(e, p.x, p.z, p.y, PROP_STEP);
+      if (!e.jump.active && !e.fire.rolling && Number.isFinite(liveFloor) && liveFloor < p.y - STEP
+        && beginSupportFall(e, p.x, p.z, e.heading, 0, 0)) {
         updateDriven(e, dt); poseEntry(e, dt, beforeX, beforeY, beforeZ); return;
       }
       if (e.fire.rolling || escapeForRoll(e, dt)) { poseEntry(e, dt, beforeX, beforeY, beforeZ); return; }
@@ -3619,9 +3694,9 @@
       } else if (e.phase === "work") {
         if (e.motion.lab) workLab(e, dt);
         else if (sites[e.site].mirrorRoom) {
-          // Mirror-room clankers are moving targets. Keep each run inside the
-          // glass and reserve its next lane before leaving the current one.
-          if (Math.hypot(e.goalX - p.x, e.goalZ - p.z) > 0.18) move(e, dt, SPEED * 1.08);
+          // Mirror-room clankers run side to side on alternating depth lanes.
+          // Keep each run inside the glass and reserve its destination first.
+          if (Math.hypot(e.goalX - p.x, e.goalZ - p.z) > 0.18) move(e, dt, SPEED * 1.3);
           else {
             e.speed = damp(e.speed, 0, 12, dt); e.rest -= dt;
             if (e.rest <= 0) {
@@ -3663,6 +3738,7 @@
         }
       } else {
         if (Math.hypot(e.goalX - p.x, e.goalZ - p.z) > 0.025 || Math.abs(e.goalY - p.y) > 0.55) moveRoam(e, dt);
+        else if (raisedSupport(e) && choosePropExit(e)) move(e, dt, CHILL_SPEED);
         else {
           e.speed = damp(e.speed, 0, 12, dt);
           if (!e.roam.departPending && !e.lowCover && !e.exitFootprint && !e.lounge && grass(p.x, p.y, p.z, e.loungePartner ? 0.9 : FOOT) && alignLounge(e, dt)) {

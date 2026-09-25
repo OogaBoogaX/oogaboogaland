@@ -39,11 +39,15 @@
   };
   // Exposed grid faces, greedy-meshed one slice at a time.
   const DIR_BIT = 0x100, FLOOR_DETAIL_BIT = 0x4000;
-  const gridGeometry = (grid, { unit, palette, origin = { x: 0, y: 0, z: 0 }, matrixCaves = null, floorRooms = [] }) => {
+  const gridGeometry = (grid, { unit, palette, origin = { x: 0, y: 0, z: 0 }, matrixCaves = null, floorRooms = [], cutawayPathKeys = null, cutawayPathBottoms = null, cutawayWindowMask = null, cutawayWindowTops = null, cutawayWindowCeilings = null }) => {
     const { data, sx, sy, sz } = grid;
     const dims = [sx, sy, sz], strides = [sy * sz, sz, 1];
     const geo = { verts: [], faces: [], lines: [] };
     const mask = new Int16Array(Math.max(sx * sy, sy * sz, sz * sx));
+    const pathMask = cutawayPathKeys ? new Uint32Array(mask.length) : null;
+    const pathBottomMask = cutawayPathBottoms ? new Float32Array(mask.length) : null;
+    const windowMask = cutawayWindowMask ? new Uint8Array(mask.length) : null;
+    const windowColumnMask = cutawayWindowMask ? new Uint32Array(mask.length) : null;
     const floorDetails = floorRooms.map((room) => ({ ...room, cr: Math.cos(room.angle), sr: Math.sin(room.angle) }));
     // Rooms bucketed by the slice their floor lands on, so the y sweep never refilters the whole list.
     const floorsByRow = new Map();
@@ -90,6 +94,24 @@
           const a = k > 0 ? data[base - sd] : 0, b = k < nd ? data[base] : 0;
           if (!a === !b) return;
           const n = j * nu + i;
+          if (pathMask || windowMask) {
+            const solid = a && !b ? base - sd : base;
+            const x = Math.floor(solid / (sy * sz)), z = solid % sz, column = x * sz + z;
+            if (pathMask) pathMask[n] = cutawayPathKeys[column];
+            if (pathBottomMask) pathBottomMask[n] = cutawayPathBottoms[column];
+            if (windowMask) {
+              let key = cutawayWindowMask[column];
+              if (key && cutawayWindowTops && cutawayWindowCeilings) {
+                const gy = Math.floor(solid / sz) % sy, bottom = origin.y + gy * unit, top = bottom + unit;
+                for (let level = 0; level < cutawayWindowCeilings.length; level++) if (key & 1 << level) {
+                  const openingTop = cutawayWindowTops[level * sx * sz + column];
+                  if (!(top > openingTop + 1e-7 && bottom < cutawayWindowCeilings[level] - 1e-7)) key &= ~(1 << level);
+                }
+              }
+              windowMask[n] = key;
+              windowColumnMask[n] = key ? column + 1 : 0;
+            }
+          }
           const cave = matrixCaves && (a && !b && k < nd ? matrixCaves[base] : !a && b && k > 0 ? matrixCaves[base - sd] : 0);
           mask[n] = a && !b ? a | DIR_BIT | (cave << 9) : b | (cave << 9);
           if (i < i0) i0 = i;
@@ -126,19 +148,30 @@
               continue;
             }
             // Detail only furnished room floors; common areas keep the greedy mesh or Canvas floors paint over low beds.
-            const span = c & FLOOR_DETAIL_BIT ? Math.max(1, Math.round(1 / unit)) : Infinity;
+            const pathKey = pathMask ? pathMask[n] : 0;
+            const pathBottom = pathBottomMask ? pathBottomMask[n] : 0;
+            const windowKey = windowMask ? windowMask[n] : 0;
+            const windowColumn = windowKey ? windowColumnMask[n] - 1 : -1;
+            // Ramp-roof faces stay on their authored voxel cells. The render
+            // cutaway can then remove the true curved ceiling footprint in
+            // either renderer instead of approximating it with a rectangle.
+            const span = pathKey || windowKey ? 1 : c & FLOOR_DETAIL_BIT ? Math.max(1, Math.round(1 / unit)) : Infinity;
             let w = 1;
-            while (w < span && i + w < nu && mask[n + w] === c) w++;
+            while (w < span && i + w < nu && mask[n + w] === c && (!pathMask || pathMask[n + w] === pathKey)) w++;
             let h = 1;
             for (; h < span && j + h < nv; h++) {
               let same = true;
-              for (let x = 0; x < w && same; x++) same = mask[n + x + h * nu] === c;
+              for (let x = 0; x < w && same; x++) same = mask[n + x + h * nu] === c && (!pathMask || pathMask[n + x + h * nu] === pathKey);
               if (!same) break;
             }
             // (d, u, v) is cyclic, so this vertex order faces +d.
             const c0 = at(d, k, u, i, v, j), c1 = at(d, k, u, i + w, v, j), c2 = at(d, k, u, i + w, v, j + h), c3 = at(d, k, u, i, v, j + h);
-            geo.faces.push({ i: c & DIR_BIT ? [c0, c1, c2, c3] : [c0, c3, c2, c1], color: palette[c & 0xff], emissive: 0, matrixCave: (c & ~FLOOR_DETAIL_BIT) >> 9, matrixLocalGlyphSurface: ((c & ~FLOOR_DETAIL_BIT) >> 9) !== 0 });
-            for (let y = 0; y < h; y++) mask.fill(0, n + y * nu, n + y * nu + w);
+            geo.faces.push({ i: c & DIR_BIT ? [c0, c1, c2, c3] : [c0, c3, c2, c1], color: palette[c & 0xff], emissive: 0, matrixCave: (c & ~FLOOR_DETAIL_BIT) >> 9, matrixLocalGlyphSurface: ((c & ~FLOOR_DETAIL_BIT) >> 9) !== 0, cutawayPathKey: pathKey, cutawayPathBottom: pathBottom, cutawayWindowMask: windowKey, cutawayWindowColumn: windowColumn });
+            for (let y = 0; y < h; y++) {
+              mask.fill(0, n + y * nu, n + y * nu + w);
+              if (pathMask) pathMask.fill(0, n + y * nu, n + y * nu + w);
+              if (windowMask) { windowMask.fill(0, n + y * nu, n + y * nu + w); windowColumnMask.fill(0, n + y * nu, n + y * nu + w); }
+            }
             i += w;
             n += w;
           }
@@ -252,6 +285,7 @@
   const HEADQUARTERS_ROOM = { x: 0, z: 0, radius: 14 };
   const HEADQUARTERS_RAMP_ARC = 1.4;
   const HEADQUARTERS_RAMP_SAMPLES = 96;
+  const HEADQUARTERS_RAMP_ENTRANCE = 1.75;
   const facing = (angle) => {
     const ry = (Math.PI * 2 - angle) % (Math.PI * 2);
     return ry > Math.PI ? ry - Math.PI * 2 : ry;
@@ -392,9 +426,11 @@
     // Basement intervals use their own six-bit range, -16..-0.25.
     const basementCavities = new Uint16Array(SX * SZ);
     const basementCells = new Uint8Array(SX * SZ);
+    const basementStations = new Float32Array(SX * SZ);
     const basementCollision = new Uint32Array(SX * SZ);
     const basementHeights = new Float32Array((SX + 1) * (SZ + 1));
     const rampCells = new Uint8Array(SX * SZ);
+    const rampStations = new Float32Array(SX * SZ);
     const frontageCells = new Uint8Array(SX * SZ);
     const rampCollision = new Uint32Array(SX * SZ);
     const rampHeights = new Float32Array((SX + 1) * (SZ + 1));
@@ -508,7 +544,7 @@
       const ceilingCell = Number.isFinite(ceiling) ? Math.round(ceiling / UNIT) + offset : 63;
       return caveIndex | (floorCell << 4) | (ceilingCell << 10);
     };
-    // Fit the two active work chambers inside their existing mountains. Check
+    // Fit every surface chamber inside its existing mountain. Check
     // the same quarter-unit columns the carve removes, including their outer
     // corners; never raise a roof or break the island skin to gain floor space.
     const fitWorkRoom = (frame) => {
@@ -532,8 +568,7 @@
         if (safe) { frame.room = { w, h: ROOM.h, from, to }; area = candidateArea; }
       }
     };
-    fitWorkRoom(frames.find((f) => f.id === "c11"));
-    fitWorkRoom(frames.find((f) => f.id === "c1"));
+    for (const frame of frames) if (frame.id !== "c730" && frame.id !== "c5") fitWorkRoom(frame);
     const carve = (f, caveIndex) => {
       const e = f.e, chamber = f.room || ROOM;
       const cx = f.x + f.ox * 4, cz = f.z + f.oz * 4;
@@ -581,14 +616,17 @@
       const startAngle = Math.atan2(from.x, -from.z), direction = i ? -1 : 1;
       const startRadius = Math.hypot(from.x, from.z), endRadius = HEADQUARTERS_ROOM.radius - 0.8;
       const samples = [];
+      let station = 0, previous = null;
       for (let n = 0; n <= HEADQUARTERS_RAMP_SAMPLES; n++) {
         const t = n / HEADQUARTERS_RAMP_SAMPLES;
         const angle = startAngle + direction * HEADQUARTERS_RAMP_ARC * t;
         const radius = startRadius + (endRadius - startRadius) * smooth((t - 0.38) / 0.62);
-        samples.push({ x: Math.sin(angle) * radius, z: -Math.cos(angle) * radius, y: HEADQUARTERS_FLOOR * Math.min(t / 0.54, 1), t });
+        const point = { x: Math.sin(angle) * radius, z: -Math.cos(angle) * radius, y: HEADQUARTERS_FLOOR * Math.min(t / 0.54, 1), t, s: station };
+        if (previous) point.s = station += Math.hypot(point.x - previous.x, point.z - previous.z);
+        samples.push(point); previous = point;
       }
       const to = samples[samples.length - 1];
-      return { id: f.id, from, to: { x: to.x, z: to.z }, width: 4, startAngle, endAngle: startAngle + direction * HEADQUARTERS_RAMP_ARC, direction, slope: -samples[1].y / Math.hypot(samples[1].x - from.x, samples[1].z - from.z), axis: { x: f.ox, z: f.oz }, samples };
+      return { id: f.id, from, to: { x: to.x, z: to.z }, width: 4, entranceLength: HEADQUARTERS_RAMP_ENTRANCE, cutawayEntranceLength: ROOM.from, length: station, startAngle, endAngle: startAngle + direction * HEADQUARTERS_RAMP_ARC, direction, slope: -samples[1].y / Math.hypot(samples[1].x - from.x, samples[1].z - from.z), axis: { x: f.ox, z: f.oz }, samples };
     });
     const headquartersRooms = [120, 138, 152, 166, 180, 194, 208, 238, 255].map((degrees, index) => {
       const angle = degrees / 180 * Math.PI, sx = Math.sin(angle), sz = -Math.cos(angle);
@@ -667,13 +705,14 @@
         const a = ramp.samples[i - 1], b = ramp.samples[i], dx = b.x - a.x, dz = b.z - a.z;
         const t = clamp(((x - a.x) * dx + (z - a.z) * dz) / (dx * dx + dz * dz), 0, 1);
         const ex = x - a.x - dx * t, ez = z - a.z - dz * t, d = ex * ex + ez * ez;
-        if (d < distance) { distance = d; floor = a.y + (b.y - a.y) * t; if (ramp.basement) station = a.s + (b.s - a.s) * t; }
+        if (d < distance) { distance = d; floor = a.y + (b.y - a.y) * t; station = a.s + (b.s - a.s) * t; }
       }
       out.distance = Math.sqrt(distance);
-      if (ramp.basement) { out.floor = floor; out.station = station; return; }
+      out.station = station;
+      if (ramp.basement) { out.floor = floor; return; }
       const along = (x - ramp.from.x) * ramp.axis.x + (z - ramp.from.z) * ramp.axis.z;
       // A short planar throat meets the doorway exactly, then bends into the curve.
-      const join = clamp((along - 1) / 0.75, 0, 1);
+      const join = clamp((along - (ramp.entranceLength - 0.75)) / 0.75, 0, 1);
       out.floor = -Math.max(0, along) * ramp.slope * (1 - join) + floor * join;
     };
     const roomAxes = new Map();
@@ -711,6 +750,7 @@
           if (rampProbe.distance > ramp.width / 2 || (wx - ramp.from.x) * ramp.axis.x + (wz - ramp.from.z) * ramp.axis.z < -UNIT / 2) continue;
           const floor = rampProbe.floor;
           rampCells[gx * SZ + gz] = ri + 1;
+          rampStations[gx * SZ + gz] = rampProbe.station;
           const frame = headquartersFrames[ri], dx = wx - frame.x, dz = wz - frame.z;
           const along = dx * frame.ox + dz * frame.oz, across = Math.abs(dz * frame.ox - dx * frame.oz);
           const ceiling = Math.ceil((floor + 3.5) / UNIT) * UNIT;
@@ -747,6 +787,7 @@
           if (rampProbe.floor > HEADQUARTERS_FLOOR) continue;
         }
         rampCells[gx * SZ + gz] = 0;
+        rampStations[gx * SZ + gz] = 0;
         carveHeadquartersColumn(gx, gz, HEADQUARTERS_FLOOR, HEADQUARTERS_CEILING);
       }
     }
@@ -871,7 +912,7 @@
         const ramp = basement.ramps[ri], bounds = basementRampBounds[ri];
         if (x < bounds.minX || x > bounds.maxX || z < bounds.minZ || z > bounds.maxZ) continue;
         sampleRamp(ramp, x, z, rampProbe);
-        if (rampProbe.distance <= ramp.width / 2) { basementCells[i] = ri + 1; break; }
+        if (rampProbe.distance <= ramp.width / 2) { basementCells[i] = ri + 1; basementStations[i] = rampProbe.station; break; }
       }
       if (!basementCells[i] || !lowerCavities[i]) continue;
       const floor = (((lowerCavities[i] >> 4) & 63) - 32) * UNIT;
@@ -968,9 +1009,12 @@
       if (ri === basementCommon) basementCells[cell] = 0;
       if (!sloped) continue;
       const v = rampGeometry.verts.length / 3;
+      const cutawayFloorChannel = ri + 1;
+      const cutawayFloorStation = 1 + Math.round(clamp(basementStations[cell] / basementRoutes[ri - 1].length, 0, 1) * 254);
       rampGeometry.verts.push(x, a, z, x, b, z + UNIT, x + UNIT, c, z + UNIT, x + UNIT, d, z);
       basementCollision[cell] = (rampGeometry.faces.length << 2) | 2;
-      rampGeometry.faces.push({ i: [v, v + 1, v + 2], color: PALETTE[P.floor], emissive: 0, headquartersBasementRamp: ri }, { i: [v, v + 2, v + 3], color: PALETTE[P.floor], emissive: 0, headquartersBasementRamp: ri });
+      rampGeometry.faces.push({ i: [v, v + 1, v + 2], color: PALETTE[P.floor], emissive: 0, headquartersBasementRamp: ri, cutawayFloorChannel, cutawayFloorStation },
+        { i: [v, v + 2, v + 3], color: PALETTE[P.floor], emissive: 0, headquartersBasementRamp: ri, cutawayFloorChannel, cutawayFloorStation });
     }
     // The wider openings expose the outer edge of each lower ramp. Continue
     // its visible sides down to the carved support instead of leaving slivers
@@ -981,6 +1025,8 @@
       const x = gx * UNIT + ORIGIN.x, z = gz * UNIT + ORIGIN.z, i = gx * (SZ + 1) + gz;
       const corners = [[x, basementHeights[i], z], [x, basementHeights[i + 1], z + UNIT], [x + UNIT, basementHeights[i + SZ + 2], z + UNIT], [x + UNIT, basementHeights[i + SZ + 1], z]];
       const base = (((basementCavities[cell] >> 4) & 63) - 64) * UNIT;
+      const cutawayFloorChannel = ri + 1;
+      const cutawayFloorStation = 1 + Math.round(clamp(basementStations[cell] / basementRoutes[ri - 1].length, 0, 1) * 254);
       const neighbors = [gx ? basementCells[cell - SZ] : 0, gz + 1 < SZ ? basementCells[cell + 1] : 0, gx + 1 < SX ? basementCells[cell + SZ] : 0, gz ? basementCells[cell - 1] : 0];
       for (let edge = 0; edge < 4; edge++) {
         if (neighbors[edge] === ri) continue;
@@ -988,7 +1034,7 @@
         if (a[1] <= base + 1e-7 && b[1] <= base + 1e-7) continue;
         const v = rampGeometry.verts.length / 3;
         rampGeometry.verts.push(a[0], a[1], a[2], a[0], base, a[2], b[0], base, b[2], b[0], b[1], b[2]);
-        rampGeometry.faces.push({ i: [v, v + 1, v + 2, v + 3], color: PALETTE[P.stoneDark], emissive: 0, headquartersBasementRampSkirt: ri });
+        rampGeometry.faces.push({ i: [v, v + 1, v + 2, v + 3], color: PALETTE[P.stoneDark], emissive: 0, headquartersBasementRampSkirt: ri, cutawayFloorChannel, cutawayFloorStation });
       }
     }
     for (const balcony of basement.balconies) carveBalconyOpening(balcony);
@@ -1012,16 +1058,23 @@
     }
     // Window openings cut through the cliff, with solid stone below each sill.
     const headquartersWindows = [];
-    for (const ramp of headquartersRamps) {
-      for (const index of [18, 30, 43]) {
-        const sample = ramp.samples[index], angle = Math.atan2(sample.x, -sample.z);
-        headquartersWindows.push({ kind: "ramp", x: sample.x, z: sample.z, floor: sample.y, y: sample.y + 2, sill: Math.ceil((sample.y + 1.05) / UNIT) * UNIT, angle, width: 3, height: 1.75 });
+    for (let rampIndex = 0; rampIndex < headquartersRamps.length; rampIndex++) {
+      const ramp = headquartersRamps[rampIndex];
+      for (const sampleIndex of [18, 30, 43]) {
+        const sample = ramp.samples[sampleIndex], angle = Math.atan2(sample.x, -sample.z);
+        headquartersWindows.push({ kind: "ramp", cutawayChannel: rampIndex, cutawayStation: sample.s,
+          cutawayCeiling: Math.ceil((sample.y + 3.5) / UNIT) * UNIT,
+          x: sample.x, z: sample.z, floor: sample.y, y: sample.y + 2, sill: Math.ceil((sample.y + 1.05) / UNIT) * UNIT, angle, width: 3, height: 1.75 });
       }
     }
-    for (const ramp of basement.ramps) {
+    for (let routeIndex = 0; routeIndex < basement.ramps.length; routeIndex++) {
+      const ramp = basement.ramps[routeIndex];
       for (const sampleIndex of [42, 56, 72]) {
         const sample = ramp.samples[sampleIndex], angle = Math.atan2(sample.x, -sample.z), sill = Math.ceil((sample.y + 1.15) / UNIT) * UNIT, height = 1.75;
-        headquartersWindows.push({ kind: "ramp", basement: true, rampIndex: ramp.index, sampleIndex, station: sample.s, x: sample.x, z: sample.z, floor: sample.y, y: sill + height / 2, sill, angle, width: 3, height });
+        headquartersWindows.push({ kind: "ramp", basement: true, rampIndex: ramp.index, sampleIndex, station: sample.s,
+          cutawayChannel: routeIndex + 2, cutawayStation: sample.s,
+          cutawayCeiling: Math.ceil((sample.y + HEADQUARTERS_HEIGHT + UNIT) / UNIT) * UNIT,
+          x: sample.x, z: sample.z, floor: sample.y, y: sill + height / 2, sill, angle, width: 3, height });
       }
     }
     for (const room of [...headquartersRooms, ...basement.rooms]) {
@@ -1033,6 +1086,8 @@
     const panoramaAngle = (panoramaStart + panoramaEnd) / 2, panoramaRadius = headquartersGallery.radius - UNIT;
     headquartersWindows.push({ kind: "panorama", x: Math.sin(panoramaAngle) * panoramaRadius, z: -Math.cos(panoramaAngle) * panoramaRadius, floor: HEADQUARTERS_FLOOR, y: HEADQUARTERS_FLOOR + 2.125, sill: HEADQUARTERS_FLOOR + 1, angle: panoramaAngle, startAngle: panoramaStart, endAngle: panoramaEnd, radius: panoramaRadius, width: panoramaRadius * (panoramaEnd - panoramaStart), height: 2.25 });
     const windowCuts = new Map(), windowColumns = new Array(SX * SZ), windowGeometry = { verts: [], faces: [], lines: [] };
+    let windowCutawayChannels = new Uint8Array(SX * SZ), windowCutawayStations = new Float32Array(SX * SZ), windowCutawayBottoms = new Float32Array(SX * SZ);
+    const birdseyeWindowMask = new Uint8Array(SX * SZ), birdseyeWindowTops = new Float32Array(SX * SZ * 2).fill(-Infinity);
     const windowSightIds = new Map(), windowSightExact = new Map(), windowSightValues = [], windowSightIndices = [];
     const windowFlareWidth = 2, windowFlareHeight = 1.3;
     for (const [index, window] of headquartersWindows.entries()) {
@@ -1077,7 +1132,28 @@
         a.flare.vertical = Math.min(a.flare.vertical, room); b.flare.vertical = Math.min(b.flare.vertical, room);
       }
     }
+    // Keep the exact columns each authored frustum touches. Ramp apertures join
+    // their route reveal; room apertures remove only the fitted lintel band for
+    // their own underground level instead of using a rectangular proxy cut.
+    const recordWindowCutaway = (window, column) => {
+      if (window.kind === "room" || window.kind === "panorama") {
+        const level = window.basement ? 1 : 0;
+        window.birdseyeCutawayLevel = level;
+        window.birdseyeCutawayColumns = (window.birdseyeCutawayColumns || 0) + 1;
+        birdseyeWindowMask[column] |= 1 << level;
+        birdseyeWindowTops[level * SX * SZ + column] = Math.max(birdseyeWindowTops[level * SX * SZ + column], window.sill + window.height);
+      }
+      if (window.cutawayChannel === undefined) return;
+      const channel = window.cutawayChannel, owner = windowCutawayChannels[column] - 1;
+      const stronger = owner < 0 || channel < 2 && owner >= 2;
+      if (!stronger && (owner !== channel || window.cutawayStation >= windowCutawayStations[column])) return;
+      windowCutawayChannels[column] = channel + 1;
+      windowCutawayStations[column] = window.cutawayStation;
+      windowCutawayBottoms[column] = window.cutawayCeiling;
+    };
     const cutColumn = (window, planes, lower, upper, gx, gz, x, z, cx, cz) => {
+      const column = gx * SZ + gz;
+      let recorded = false;
       for (let gy = Math.max(0, Math.floor((lower - ORIGIN.y) / UNIT)); gy < Math.min(SY, Math.ceil((upper - ORIGIN.y) / UNIT)); gy++) {
         const id = grid.index(gx, gy, gz), prior = windowCuts.get(id), color = prior ? prior.color : data[id];
         if (!color) continue;
@@ -1089,6 +1165,7 @@
           if (mid + reach > 1e-8) whollyInside = false;
         }
         if (outside) continue;
+        if (!recorded) { recordWindowCutaway(window, column); recorded = true; }
         if (whollyInside) { data[id] = 0; windowCuts.delete(id); continue; }
         const remaining = [];
         for (const fragment of prior ? prior.fragments : [cutCube(x, y, z, UNIT)]) {
@@ -1227,7 +1304,8 @@
         for (let i = 1; i < polygon.points.length - 1; i += 5) {
           const indices = [offset];
           for (let k = i; k < Math.min(i + 6, polygon.points.length); k++) indices.push(offset + k);
-          windowGeometry.faces.push({ i: indices, color: PALETTE[cut.color], emissive: 0, headquartersWindowReveal: polygon.reveal, windowIndex: polygon.windowIndex, matrixCave: cut.matrixCave, matrixLocalGlyphSurface: cut.matrixCave !== 0 });
+          windowGeometry.faces.push({ i: indices, color: PALETTE[cut.color], emissive: 0, headquartersWindowReveal: polygon.reveal,
+            windowIndex: polygon.windowIndex, cutawayColumn: column, matrixCave: cut.matrixCave, matrixLocalGlyphSurface: cut.matrixCave !== 0 });
         }
       }
       const sightOffset = windowSightIndices.length;
@@ -1778,14 +1856,99 @@
       return { id: f.id, clock: f.clock, angle: f.angle, x: f.x, z: f.z, ry: facing(f.axis), floorY: 0, room,
         inside: { x: f.x + f.ox * inside, z: f.z + f.oz * inside }, apron: { x: f.x - f.ox * 1.6, z: f.z - f.oz * 1.6 } };
     });
-    const geometry = gridGeometry(grid, { unit: UNIT, palette: PALETTE, origin: ORIGIN, matrixCaves, floorRooms: [...headquartersRooms, ...basement.rooms] });
+    // One byte per authored route records progress along the exact carved
+    // ceiling footprint. Main-ramp cells win at physical overlaps so cutting
+    // the lower route can never erase the upper ramp drawn above it.
+    const cutawayPathKeys = new Uint32Array(SX * SZ);
+    const cutawayPathBottoms = new Float32Array(SX * SZ);
+    const cutawayPathLengths = new Float32Array(4);
+    const cutawayPathInitial = new Uint8Array(4);
+    const cutawayPathBottomByStation = new Float32Array(4 * 256).fill(Infinity);
+    for (let channel = 0; channel < 2; channel++) {
+      const ramp = headquartersRamps[channel];
+      cutawayPathLengths[channel] = ramp.length;
+      // At rest expose the authored mouth depth, independently of the shorter
+      // planar floor throat used by movement. The first side window
+      // joins the opening as the player enters instead of already being
+      // visible from the lawn. Travel can extend this endpoint but never
+      // contract it below the same world-space length.
+      const initial = Math.min(ramp.length, ramp.cutawayEntranceLength);
+      cutawayPathInitial[channel] = 1 + Math.round(initial / ramp.length * 254);
+    }
+    for (let channel = 2; channel < 4; channel++) {
+      const ramp = basement.ramps[channel - 2];
+      cutawayPathLengths[channel] = ramp.length;
+      // One ramp-width of opening exposes the label and complete downhill
+      // arrow, with a short margin before the retained ceiling begins.
+      cutawayPathInitial[channel] = 1 + Math.round(Math.min(ramp.length, ramp.width) / ramp.length * 254);
+    }
+    for (let cell = 0; cell < cutawayPathKeys.length; cell++) {
+      let channel = -1, station = 0, cavity = 0, offset = 32;
+      const upper = rampCells[cell];
+      if (upper && upper <= 2) {
+        channel = upper - 1; station = rampStations[cell]; cavity = lowerCavities[cell];
+      } else {
+        const lower = basementCells[cell];
+        if (lower && lower < 3) { channel = lower + 1; station = basementStations[cell]; cavity = basementCavities[cell]; offset = 64; }
+      }
+      if (channel < 0 || !cavity) continue;
+      const length = cutawayPathLengths[channel] || 1;
+      const encoded = 1 + Math.round(clamp(station / length, 0, 1) * 254);
+      const bottom = ((cavity >> 10) - offset) * UNIT;
+      cutawayPathKeys[cell] = (encoded << (channel * 8)) >>> 0;
+      cutawayPathBottoms[cell] = bottom;
+      cutawayPathBottomByStation[channel * 256 + encoded] = Math.min(cutawayPathBottomByStation[channel * 256 + encoded], bottom);
+    }
+    // A ramp window's throat and flare continue beyond the centre corridor.
+    // Extend the same route through only those authored cut columns so removing
+    // the roof reveals the real aperture. Existing upper-ramp ownership wins;
+    // a main-level window likewise wins over a lower route at a stacked cell.
+    for (let cell = 0; cell < windowCutawayChannels.length; cell++) {
+      const owner = windowCutawayChannels[cell];
+      if (!owner) continue;
+      const channel = owner - 1, current = cutawayPathKeys[cell];
+      let currentChannel = -1;
+      for (let index = 0; index < 4; index++) if (current >>> (index * 8) & 255) { currentChannel = index; break; }
+      if (currentChannel >= 0 && (currentChannel < 2 || channel >= 2)) continue;
+      const length = cutawayPathLengths[channel] || 1;
+      const encoded = 1 + Math.round(clamp(windowCutawayStations[cell] / length, 0, 1) * 254);
+      const bottom = windowCutawayBottoms[cell];
+      cutawayPathKeys[cell] = (encoded << (channel * 8)) >>> 0;
+      cutawayPathBottoms[cell] = bottom;
+      cutawayPathBottomByStation[channel * 256 + encoded] = Math.min(cutawayPathBottomByStation[channel * 256 + encoded], bottom);
+    }
+    windowCutawayChannels = windowCutawayStations = windowCutawayBottoms = null;
+    // A ramp only descends, but several voxel columns can quantize into one
+    // station while other station bytes have no cell centre. Carry the lowest
+    // known ceiling forward so the global floor scan advances one continuous
+    // prefix instead of reopening a small skipped band.
+    for (let channel = 0; channel < 4; channel++) {
+      let bottom = Infinity;
+      for (let station = 1; station <= 255; station++) {
+        const at = channel * 256 + station;
+        if (Number.isFinite(cutawayPathBottomByStation[at])) bottom = Math.min(bottom, cutawayPathBottomByStation[at]);
+        cutawayPathBottomByStation[at] = bottom;
+      }
+    }
+    const cutawayPaths = { keys: cutawayPathKeys, bottoms: cutawayPathBottoms, lengths: cutawayPathLengths,
+      initial: cutawayPathInitial, bottomByStation: cutawayPathBottomByStation, width: SX, height: SZ, unit: UNIT, origin: ORIGIN,
+      ramps: [headquartersRamps[0], headquartersRamps[1], basement.ramps[0], basement.ramps[1]] };
+    const birdseyeWindowCeilings = new Float32Array([HEADQUARTERS_CEILING, basement.ceiling]);
+    const geometry = gridGeometry(grid, { unit: UNIT, palette: PALETTE, origin: ORIGIN, matrixCaves,
+      floorRooms: [...headquartersRooms, ...basement.rooms], cutawayPathKeys, cutawayPathBottoms, cutawayWindowMask: birdseyeWindowMask,
+      cutawayWindowTops: birdseyeWindowTops, cutawayWindowCeilings: birdseyeWindowCeilings });
     const rampOffset = geometry.verts.length / 3;
     const rampFaceOffset = geometry.faces.length;
     for (const v of rampGeometry.verts) geometry.verts.push(v);
     for (const face of rampGeometry.faces) geometry.faces.push({ ...face, i: face.i.map((i) => i + rampOffset) });
     const windowOffset = geometry.verts.length / 3;
     for (const value of windowGeometry.verts) geometry.verts.push(value);
-    for (const face of windowGeometry.faces) geometry.faces.push({ ...face, i: face.i.map((i) => i + windowOffset) });
+    for (const face of windowGeometry.faces) {
+      const { cutawayColumn, ...renderFace } = face, pathKey = cutawayPathKeys[cutawayColumn];
+      geometry.faces.push({ ...renderFace, i: face.i.map((i) => i + windowOffset),
+        cutawayPathKey: pathKey, cutawayPathBottom: pathKey ? cutawayPathBottoms[cutawayColumn] : undefined,
+        cutawayWindowMask: birdseyeWindowMask[cutawayColumn], cutawayWindowColumn: birdseyeWindowMask[cutawayColumn] ? cutawayColumn : -1 });
+    }
     const rockCaves = compactCaveLabels(matrixCaves, geometry, grid, UNIT, ORIGIN);
     matrixCaves = null;
     // Four half-spaces give each continuous ramp's triangular footprint and sloping top; its column supplies the
@@ -2047,9 +2210,11 @@
       geometry,
       // Shared construction data is read-only to rendering. The cap builder
       // fills only actual solid cells and the continuous window/ramp remnants.
-      cutawaySource: { data, sx: SX, sy: SY, sz: SZ, unit: UNIT, origin: ORIGIN, palette: PALETTE, windows: windowColumns,
+      cutawaySource: { data, sx: SX, sy: SY, sz: SZ, unit: UNIT, origin: ORIGIN, palette: PALETTE, windows: windowColumns, cutawayPaths,
+        birdseyeWindows: { mask: birdseyeWindowMask, tops: birdseyeWindowTops, ceilings: birdseyeWindowCeilings, levels: 2 },
         rampGeometry: geometry, rampFaceOffset, rampLayers: [{ ranges: rampCollision, cavities: lowerCavities, offset: 32 }, { ranges: basementCollision, cavities: basementCavities, offset: 64 }] },
       path,
+      cutawayPaths,
       heightAt,
       surfaceAt,
       supportAt,

@@ -171,10 +171,10 @@
   const departGate = () => {
     if (phase !== "land" || exiting) return;
     world.pilot = avatar.traits.name;
-    world.stargateTravel = { from: "dsb", to: "hub", arrival: "pit", name: world.pilot };
+    world.oogaPortalTravel = { from: "dsb", to: "hub", arrival: "pit", name: world.pilot };
     exiting = true; syncPlayer(); pilot.controls.reset(); input.reset(); go("hub");
   };
-  const returnHub = () => { if (phase === "entrance") { exiting = true; syncPlayer(); go("hub"); } else toast("Use the Stargate Dialer, then cross the active gate to return to OogaBoogaLand."); };
+  const returnHub = () => { if (phase === "entrance") { exiting = true; syncPlayer(); go("hub"); } else toast("Use the Ooga Portal Dialer, then cross the active gate to return to OogaBoogaLand."); };
   const contextAction = () => {
     if (phase === "boat" || phase === "coaster") return "ride";
     if (phase !== "land" || exiting || transitGate.isOpen || tv.isOpen || conversation.isOpen) return "";
@@ -199,11 +199,11 @@
     camera.target.x = camera.position.x + Math.sin(yaw) * cp * 10; camera.target.y = camera.position.y + Math.sin(pitch) * 10; camera.target.z = camera.position.z + Math.cos(yaw) * cp * 10;
   };
   const openTv = () => {
-    if (phase !== "land" || !nearLandmark("tv") || location().y > 6) { toast("Walk up to the screen facing the Stargate plaza to open it."); return; }
+    if (phase !== "land" || !nearLandmark("tv") || location().y > 6) { toast("Walk up to the screen facing the Ooga Portal plaza to open it."); return; }
     tv.open(); syncPlayer();
   };
   const openShop = () => {
-    if (phase !== "land" || !nearLandmark("shop")) { toast("Visit the meme stand facing the Stargate plaza."); return; }
+    if (phase !== "land" || !nearLandmark("shop")) { toast("Visit the meme stand facing the Ooga Portal plaza."); return; }
     panel.dataset.folded = "false"; document.getElementById("dsb-toggle").textContent = "Hide DSB menu"; document.getElementById("dsb-toggle").setAttribute("aria-expanded", "true"); document.getElementById("dsb-shop").hidden = false; syncPlayer();
   };
   const buy = (kind) => {
@@ -246,7 +246,7 @@
   const onTap = (hit) => {
     if (!playerEnabled() || pilot.aiming || !hit) return;
     const owner = hit.owner;
-    if (owner.kind === "stargate-dialer") { if (nearDialer()) transitGate.open(); else toast("Move closer to the Stargate dialer."); }
+    if (owner.kind === "ooga-portal-dialer") { if (nearDialer()) transitGate.open(); else toast("Move closer to the Ooga Portal dialer."); }
     else if (owner.kind === "dsb-agent") { if (nearZuzu()) conversation.open(); else toast("Walk closer to talk to Zuzu."); }
     else if (owner.kind === "visitor") { if (tomatoes) throwTomato(owner.cave); else toast("Grab tomatoes at the meme stand, then tap an Ooga."); }
     else if (owner.kind === "tv") openTv();
@@ -416,7 +416,7 @@
     // Reuse the arrival gate and its existing pedestal, outside the central crossing lane.
     Object.assign(transitGate.dialer.position, { x: transitGate.root.position.x + transitGate.outerRadius + 1.2, y: 0, z: VIEW.position.z + 1 });
     transitGate.dialer.rotation.y = Math.PI;
-    addChild(land.root, transitGate.dialer); register(transitGate.dialer, "stargate-dialer", "Stargate dialer · OogaBoogaLand");
+    addChild(land.root, transitGate.dialer); register(transitGate.dialer, "ooga-portal-dialer", "Ooga Portal dialer · OogaBoogaLand");
     transitGate.enableDialer([{ id: "hub", label: "OogaBoogaLand", enabled: true }, ...Array.from({ length: 4 }, (_, i) => ({ id: "quarantine-" + i, label: "Quarantined - Replicator Infestation - Clean Up In Progress", enabled: false }))]);
     zuzu = BL.dsbAgent.create({ parent: land.root, input, clearAt, landmarks: land.landmarks });
     if (!RAIL_GEOMETRY) {
@@ -450,8 +450,8 @@
     land = data = tv = zuzu = conversation = null;
     // Local +Y faces inward (-Z); the passage approaches the back from +Z.
     // Seat the lower ring in the floor so standing body centres clear the aperture.
-    transitGate = BL.stargate.create({ radius: 2.2, outerRadius: 2.5, position: { x: 0, y: 2.0, z: 0 }, rotation: { x: -Math.PI / 2, y: 0, z: 0 }, receiving: true,
-      menuHint: "Cross the active Stargate from DSB Land to return to OogaBoogaLand.",
+    transitGate = BL.oogaPortal.create({ radius: 2.2, outerRadius: 2.5, position: { x: 0, y: 2.0, z: 0 }, rotation: { x: -Math.PI / 2, y: 0, z: 0 }, receiving: true,
+      menuHint: "Cross the active Ooga Portal from DSB Land to return to OogaBoogaLand.",
       onMenu: () => { syncPlayer(); pilot.controls.reset(); input.reset(); hud.tooltip.hide(); },
       onTraverse: id => { if (phase === "entrance") reveal(); else if (id === "hub") departGate(); } });
     addChild(root, transitGate.root);

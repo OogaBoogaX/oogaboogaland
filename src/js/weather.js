@@ -120,6 +120,8 @@
     }
     const geometry = models.noShadow(models.merge(...geos));
     geometry.cutawayHide = true;
+    // Clouds fade independently of the scanning rock/ceiling cut planes.
+    geometry.cutawayPreserve = true;
     return geometry;
   });
   const CLOUD_FAIR = puff(3301, ["#f2f5f8", "#dfe6ee", 0.12]);

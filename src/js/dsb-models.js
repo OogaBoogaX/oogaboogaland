@@ -136,7 +136,7 @@
     block(shop, "#bc8644", -1.6, 2.2, 0.9, 1.6, 0.45, 0.8);
     const banana = BL.models.banana(); banana.position.x = 0; banana.position.y = 2.12; banana.position.z = 0.9; addChild(shop, banana);
     block(shop, "#f14b68", 1.5, 2.3, 0.9, 0.6, 0.6, 0.6);
-    // The walnut CRT faces the Shop across the open Stargate plaza.
+    // The walnut CRT faces the Shop across the open Ooga Portal plaza.
     const tv = createNode({ position: { x: 14, y: 0, z: 18 }, rotation: { x: 0, y: -Math.PI / 2, z: 0 } }); addChild(root, tv);
     for (const x of [-2.7, 2.7]) block(tv, "#78543b", x, 0.7, 0, 0.45, 1.4, 1.5);
     block(tv, "#78543b", 0, 3.2, 0, 8, 4.4, 2.8);

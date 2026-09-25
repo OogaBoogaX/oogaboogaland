@@ -35,6 +35,7 @@
   const overlayCtx = overlayCanvas.getContext("2d");
   const qualityLabel = $("quality");
   const curtain = $("curtain");
+  const worldBlock = $("world-block"), worldBlockHeight = $("world-block-height");
   const SAYINGS = [
     "growing the island…", "counting the bananas…", "waking the Oogas…", "polishing the rocks…", "herding the clouds…",
     "lighting the torches…", "packing the leaf chutes…", "lashing sticks into a rocket…", "filling barrels with banana mash…",
@@ -63,7 +64,7 @@
   showQuality();
   const game = gameMod.create({ catalog: models.SWAG });
   // world survives scene swaps: banana level, equipment ownership, and the Ooga handed from hub to scene.
-  const world = { level: START_BANANAS, pilot: null, jetpack: { owned: false, fuel: 1 }, mirrorBroken: false };
+  const world = { level: START_BANANAS, pilot: null, mirrorBroken: false };
   const debugMagazines = DEBUG ? (params.get("mag") === "2" ? 2 : params.get("mag") === "1" ? 1 : 0) : 0;
   world.magazine = { owned: debugMagazines > 0, count: debugMagazines, ammo: debugMagazines ? 30 : 0, carrier: null };
 
@@ -77,6 +78,7 @@
   const clockTime = DEBUG ? window.BL.daylight.parseTime(params.get("time")) : NaN;
   const clockDaylen = DEBUG ? Number(params.get("daylen")) : NaN;
   const clockStartDate = new Date();
+  const clockZoneFormat = new Intl.DateTimeFormat("en-US", { timeZoneName: "short" });
   const requestedClockHour = DEBUG && params.has("hour") ? Number(params.get("hour")) : NaN;
   const clockBaseHour = Number.isFinite(requestedClockHour) ? requestedClockHour : clockStartDate.getHours() + clockStartDate.getMinutes() / 60 + clockStartDate.getSeconds() / 3600;
   let clockNextUpdate = 0, clockMinute = -1;
@@ -110,22 +112,26 @@
     if (minute === clockMinute) return;
     clockMinute = minute;
     const twelve = hours % 12 || 12;
-    const text = `${twelve < 10 ? " " : Math.floor(twelve / 10)}${twelve % 10}:${Math.floor(minutes / 10)}${minutes % 10} ${hours < 12 ? "AM" : "PM"}`;
+    const zone = (clockZoneFormat.formatToParts(CLOCK_DATE).find(part => part.type === "timeZoneName")?.value || "UTC").toUpperCase().replaceAll("−", "-");
+    const text = `${twelve}:${Math.floor(minutes / 10)}${minutes % 10} ${hours < 12 ? "AM" : "PM"} ${zone}`;
     let d = "", cursor = 0;
     for (let i = 0; i < text.length; i++) {
       const ch = text[i];
       if (ch === " ") {
-        cursor += i === 0 ? 4 : 2;
+        cursor += 2;
         continue;
       }
       const glyph = window.BL.hubModels.SIGN_GLYPHS[ch];
+      if (!glyph) throw new Error(`No clock glyph for "${ch}"`);
       for (let row = 0; row < glyph.length; row++) for (let col = 0; col < glyph[row].length; col++) if (glyph[row][col] === "1") d += `M${cursor + col} ${row}h.82v.82h-.82z`;
       cursor += 4;
     }
-    const label = text.trimStart();
+    const cells = cursor - 1;
+    clockSvg.setAttribute("viewBox", `0 0 ${cells} 6`);
+    worldClock.style.width = `${cells / 6}em`;
     clockPath.setAttribute("d", d);
     worldClock.dateTime = `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}`;
-    worldClock.setAttribute("aria-label", `${Number.isFinite(clockTime) || clockDaylen > 0 ? "Ooga Booga time" : "Local time"} ${label}`);
+    worldClock.setAttribute("aria-label", `${Number.isFinite(clockTime) || clockDaylen > 0 ? "Ooga Booga time" : "Local time"} ${text}`);
   };
   const go = (id) => {
     const next = scenes[id];
@@ -358,6 +364,19 @@
   // checks drive the hub's weather through emit and apply, and the jumbotron through refreshData.
   const mempool = window.BL.mempool;
   const chain = window.BL.chain;
+  let shownBlockHeight = -1;
+  const showBlockHeight = (snapshot) => {
+    const height = Number.isInteger(snapshot.height) && snapshot.height > 0 ? snapshot.height : 0;
+    if (height === shownBlockHeight) return;
+    shownBlockHeight = height;
+    worldBlockHeight.textContent = height ? height.toLocaleString("en-US") : "\u2014";
+    worldBlock.setAttribute("aria-label", height ? `Bitcoin block height ${height}` : "Bitcoin block height unavailable");
+  };
+  const unsubscribeBlockHeight = chain.subscribe(showBlockHeight);
+  const unsubscribeBlockFeed = mempool.subscribe((event) => {
+    if (event.type === "block") showBlockHeight(event);
+  });
+  showBlockHeight(chain.snapshot);
   if (!params.has("nosim") && params.get("mempool") !== "0") mempool.start();
   if (!params.has("nosim") && params.get("oogatron") !== "0") window.BL.oogatronLive.start();
   // `?chain=esplora` or `?chain=https://host/api` pins the provider; otherwise mempool.space leads
@@ -489,6 +508,8 @@
     window.cancelAnimationFrame(raf);
     window.clearInterval(housekeepTimer);
     unsubscribeDonations();
+    unsubscribeBlockFeed();
+    unsubscribeBlockHeight();
     feedPanel.close();
     mempool.dispose();
     chain.dispose();

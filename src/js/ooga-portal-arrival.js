@@ -33,5 +33,5 @@
     }
     return null;
   };
-  BL.stargateArrival = { plan, sample, DURATION };
+  BL.oogaPortalArrival = { plan, sample, DURATION };
 })();

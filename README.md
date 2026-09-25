@@ -15,23 +15,40 @@ npm run watch   # the same, rebuilding on every change under src/
 
 ## The island
 
-The page lands on the hub. Fly with **W A S D**, **Q E** to turn, **Z**/**Space** up and **X** down; drag to orbit, scroll to zoom. On a phone the left stick moves and the right stick looks. Double-tap an Ooga to walk in their boots: **Space** (or **JUMP!**) jumps, twice for a double jump, and uses the control, bench or launcher beside you. **Escape** lets go.
+The page lands on the hub. Fly with **W A S D**, **Q E** to turn, **Z**/**Space** up and **X** down; drag to orbit, scroll to zoom. On a phone the left stick moves and the right stick looks. Double-tap an Ooga to walk in their boots and focus the shoulder-combat aim: **Space** (or **JUMP!**) jumps, twice for a double jump, and uses the control, bench or launcher beside you. **Escape** lets go.
 
 With an Ooga selected, **X** or the face button switches between combat and carry.
 Combat has **first-person**, **shoulder**, and **birds-eye** views. Scroll outward
-from shoulder to move directly overhead, initially halfway to the maximum height;
-scroll farther out to rise, or inward to descend and smoothly return to shoulder.
-In birds-eye, the mouse points the Ooga toward the world position under the cursor;
-it does not rotate the camera. Roofs and upper floors blocking the current level
-are cut away for this view, including inside caves, HQ, and the basement, and aiming
-uses that visible level. Carry mode retains its freely angled orbit camera. Debug links accept
+from shoulder to move directly overhead at the zoom boundary: camera height 21
+on the main level, following the character's head by the equivalent offset on
+other floors or raised surfaces. Scroll farther out to rise, or inward past
+that boundary to smoothly return to shoulder.
+**Double-right-click** in shoulder view returns to the nearest birds-eye or
+carry orbit view. Carry orbit exits and re-enters shoulder at the same 6-unit
+distance: directly above outdoors, or extending horizontally beneath a ceiling.
+**Right-click** from orbit or birds-eye returns to shoulder while preserving
+carry or combat mode; **X** changes that mode.
+In birds-eye, the Ooga stays centered on screen and the mouse points them toward
+the world position under the cursor. During animated zoom, the cursor follows
+the same land or item point. If it leaves the screen, the cursor stays at the
+edge in its direction and follows it back into view; moving the mouse or aim
+stick selects a new point. Hold **Q E** to rotate smoothly; **N** smoothly returns
+north to the top. Roofs and upper floors scan away through solid rock as
+the camera enters this view, including inside caves, HQ, and the basement, then
+scan back throughout the return to carry. Each floor reveals the nearby
+half of its connecting ramps; standing on a hill preserves the ground over them.
+Dark clouds fade out and back in with the camera transition. Aiming
+uses the revealed level. Switching between birds-eye and carry smoothly blends
+the camera views, keeping the cursor's screen position and the distance to the
+Ooga unchanged. Carry starts at the current height and angle, with free orbit
+controls. Debug links accept
 `mode=birds-eye` and `combat=1|0`; copied pose links use the same combat terminology.
 
 The island keeps your local time from dawn to midnight. Roster labels show yellow for clank (a contribution within the hour), orange for chill (24 hours) and gray for sleep; commits, pull requests, reviews, merges and comments across every OogaBoogaX repository count, and a fresh contribution wakes its sleeper. Working Oogas load banana ammunition at the pile, run to their project's cave and shoot into it. Tap the jumbotron's screen for a close-up you can page through.
 
 The 11 o'clock cave is **EntropyLab**, the 9 o'clock cave **Ooga Rally**, the plane on the rally roof **Ooga Drop**, and the rope bridge off the south rim leads to **Ooga Orbit**. A vine bridge at 4 o'clock reaches the **Mempool island**, whose cave reads the chain out in stone. Every game opens on a title card; **Enter** or its button starts it, **Escape** or **Leave** brings you back.
 
-Two ramps inside HQ lead to a basement of beds: **Space** lies down, **WAKE UP!** gets up. Walk off the edge and you fall through an open window into HQ, or into the abyss and back to the pile; land on the clouds to walk their tops. A jetpack spins above a cloud beyond the island: jump into it to collect it, **J** puts it on, hold **Space** to climb. 2140data has thrusters in his feet, and his plating runs green while the coin is up on the day and red while it is down.
+Two ramps inside HQ lead to a basement of beds: **Space** lies down, **WAKE UP!** gets up. Walk off the edge and you fall through an open window into HQ, or into the abyss and back to the pile; land on the clouds to walk their tops. Every Ooga owns a jetpack: **J** puts it on or takes it off, and holding **Space** climbs while it is equipped. An abyss respawn keeps the jetpack but loses spare magazines and the bananas loaded in the AK-47. 2140data's pack is built into his feet, and his plating runs green while the coin is up on the day and red while it is down.
 
 Repository activity is tracked separately for each character and project. After a
 magazine and a refill, workers visit their next recently active repository's open
@@ -50,8 +67,8 @@ and taking glassware from the benches to inspect and swirl before returning it.
 Incoming bananas disappear at the entrance with the mirror's glyph ripples;
 crossing bodies leave the same shaped glyph outline on that plane. The center
 monitor shows the supplied EntropyLab wallpaper and is never a workstation.
-The lab has a larger, full-height interior with solid rock around it. In other work
-caves, gorillas take banana hits across their bodies, stand, beat their chests, jump,
+Every surface work cave has a terrain-fitted, full-height interior with solid rock
+around it. Gorillas take banana hits across their bodies, stand, beat their chests, jump,
 and pound the floor to build equipment. Inside caves, arms and shoulders may pass
 through other gorillas while torsos avoid each other and full bodies avoid scenery.
 A gorilla stays inside when its Ooga reloads for the same cave.
@@ -119,7 +136,7 @@ and gray while offline; activity labels stay visible in either case. Hovered nam
 keep their existing dot colors: green while human-controlled, otherwise the activity
 color. Future live global state can use the same presence indicator.
 
-**Weapons.** **G** switches, **1** is the club, **2** the rifle. Right-click enters the shooting view. **Left mouse** fires or swings: a tap pokes, a press swings, a hold charges to double damage. **R** swaps magazines, **Space** beside the pile reloads. Boxes, barrels and rocks break and drop pickups. The OBL mirror cracks, breaks panel by panel and heals when left alone.
+**Weapons.** **G** switches, **1** is the club, **2** the rifle. Right-click enters shoulder view without changing carry/combat mode. **Left mouse** fires or swings in combat: a tap pokes, a press swings, a hold charges to double damage. **R** swaps magazines, **Space** beside the pile reloads. Boxes, barrels and rocks break and drop banana or `+1 MAG` pickups. The OBL mirror cracks, breaks panel by panel and heals when left alone.
 
 ## Ooga Rally
 
@@ -194,15 +211,18 @@ Read [AGENTS.md](AGENTS.md) first: the module layout, the engine patterns, how t
 ## DSB Land
 
 **DSB Land has no cave slot. Ooga Mine owns c10.** To visit DSB, control an
-Ooga and use the chest-height Dialer beside the basement Pit Stargate. Destination
-1 is DSB Land; destinations 2–5 are disabled: “Quarantined - Replicator Infestation -
-Clean Up In Progress”. Activation takes approximately two seconds, followed by a
-ten-second ACTIVE traversal window. Physically cross downward through the active
-Pit to travel. An inactive Pit retains its ordinary abyss behavior.
+Ooga and press **Space** beside either wall lever southeast or southwest of the
+basement Pit to switch the Ooga Portal on or off. Both levers stay in sync. The screen
+beside each lever displays **DSB Land** by default; click either screen or press
+**Space** when closer to the screen to choose a destination. Space uses whichever
+is closer, the lever or the screen. Destinations 2–5 are disabled: “Quarantined - Replicator Infestation -
+Clean Up In Progress”. Activation takes approximately two seconds, and the gate
+stays active until switched off. Physically cross downward through the active Pit
+to travel. An inactive Pit retains its ordinary abyss behavior.
 
 Outbound travel uses the one-way white-light transit cave. Hold W / Up or push the
-left touch stick forward, then cross the **back** of the upright Stargate. Only
-that crossing constructs DSB Land. Ordinary hub play, opening the Dialer, dialing,
+left touch stick forward, then cross the **back** of the upright Ooga Portal. Only
+that crossing constructs DSB Land. Ordinary hub play, opening the destination menu, selecting,
 activation and waiting construct no DSB Land; transit has no land rides, shops,
 TV, Zuzu, land data subscription or outdoor radio. Four recordings accompany the
 passage when audio is available; audio never blocks movement or completion.
@@ -213,11 +233,11 @@ To return, use the DSB Dialer beside the same upright gate. Destination 1 is
 OogaBoogaLand; 2–5 remain quarantined. After the same two-second activation, cross
 the **front** during its ten-second ACTIVE window. Return goes directly to the hub,
 without the transit cave. The receiving Pit is active while the Ooga rises through
-it, moves outward and lands safely beside the Dialer. Controls resume and the gate
+it, moves outward and lands safely on the basement floor. Controls resume and the gate
 shuts down without an immediate reverse transition. Escape can cancel an unfinished
-transit; it does not bypass the return Stargate from DSB Land.
+transit; it does not bypass the return Ooga Portal from DSB Land.
 
-The upright Stargate is at (0, 2, 28), with its Dialer at (3.7, 0, 27). The Meme Shop
+The upright Ooga Portal is at (0, 2, 28), with its Dialer at (3.7, 0, 27). The Meme Shop
 at (-14, 0, 18), facing +90°, and NodeRunner TV at (14, 0, 18), facing -90°, face the
 central plaza. Their collision, interactions, radio source and Zuzu destinations
 follow their landmark transforms.

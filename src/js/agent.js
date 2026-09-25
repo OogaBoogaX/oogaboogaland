@@ -615,11 +615,13 @@
       const crouch = managed ? state.crouch : 0, rolling = managed ? state.rollBlend : 0, climbing = managed ? state.climbBlend : 0;
       const cresting = managed && state.climb ? 4 * state.mantle * (1 - state.mantle) : 0;
       const grooming = lounge === "sit" ? state.groomBlend : 0, climbPhase = managed ? state.climbStride / 1.2 : 0;
-      // Long still intervals with a small, slow glance or free-hand adjustment.
-      // Spatial phase keeps neighbours from moving together; support arms stay planted.
+      // Seated rests have frequent, gentle glances and alternating hand lifts.
+      // Spatial phase keeps neighbours from moving together; other reclining
+      // poses keep their longer pauses and their supporting arms planted.
       const restTime = state.groomTime + root.position.x * 0.61 + root.position.z * 0.37;
-      const restCycle = ((restTime % 27) + 27) % 27;
-      const restMotion = lounge && restCycle > 20 ? Math.sin((restCycle - 20) * Math.PI / 7) ** 2 * (1 - grooming) : 0;
+      const restPeriod = lounge === "sit" ? 9 : 27, restPause = lounge === "sit" ? 2 : 20;
+      const restCycle = ((restTime % restPeriod) + restPeriod) % restPeriod;
+      const restMotion = lounge && restCycle > restPause ? Math.sin((restCycle - restPause) * Math.PI / 7) ** 2 * (1 - grooming) : 0;
       const jumping = managed && state.air, takeoff = managed ? state.takeoff : 0;
       const laboratory = managed && state.lab && !lounge && !jumping && !rolling && !climbing && state.pound <= 0 && !state.poundCharge && !state.charge;
       const labWork = laboratory ? state.labWork : "";
@@ -706,7 +708,8 @@
           // The free hand rests near the bent knee. Matching its old angle to
           // the reclined chest left it pointing almost horizontally in midair.
           const rest = (leaning ? supporting ? -state.pitch + 1 : -0.55 : onSide ? lower ? -2.3 : -1.08 : reclining ? -0.08 : -state.pitch - 0.801)
-            + (supporting ? 0 : Math.sin(restTime * 0.8 + i) * 0.045 * restMotion);
+            + (lounge === "sit" ? -0.075 * Math.max(0, Math.sin(restTime * 0.9 + i * Math.PI)) * restMotion
+              : supporting ? 0 : Math.sin(restTime * 0.8 + i) * 0.045 * restMotion);
           limb(arm, rest + (reach - rest) * groomArm, dt);
           const restSide = leaning ? supporting ? l.side * 0.18 : -l.side * 0.12 : onSide ? lower ? -l.side * 0.2 : -l.side * 0.55 : reclining ? l.side * 0.18 : -l.side * 0.12;
           arm.rotation.z = damp(arm.rotation.z, restSide + (l.side * 0.6 - restSide) * groomArm, 12, dt);

@@ -1,4 +1,4 @@
-// A visible carry cursor shares the shooter's pointer lock and real picking.
+// The virtual cursor shares pointer lock and real picking across carry and overhead views.
 (() => {
   "use strict";
   const BL = window.BL = window.BL || {};
@@ -7,7 +7,8 @@
   const create = ({ canvas, requestLock, unlock }) => {
     const element = document.getElementById("carry-cursor"), reticle = document.getElementById("weapon-reticle");
     const pressed = [null, null, null];
-    let active = false, dispatching = false, x = 0, y = 0;
+    let active = false, visible = true, dispatching = false, x = window.innerWidth / 2, y = window.innerHeight / 2;
+    let canvasLeft = 0, canvasTop = 0, canvasWidth = 1, canvasHeight = 1;
     let pointerId = 1, buttons = 0, blockedButtons = 0, suppressClick = false;
     let captured = null, hovered = null, hoverButton = null, pendingMove = null;
     let aimAnimation = null, reticleAnimation = null, aimProgress = 0, aimBase = 0, visualBase = 0;
@@ -17,6 +18,18 @@
     const targetAtCursor = () => {
       const hit = hitAtCursor();
       return hit.closest(INTERACTIVE) || hit;
+    };
+    const measureCanvas = () => {
+      const rect = canvas.getBoundingClientRect();
+      canvasLeft = rect.left; canvasTop = rect.top;
+      canvasWidth = rect.width || 1; canvasHeight = rect.height || 1;
+      return rect;
+    };
+    const setHoverButton = (button) => {
+      if (button === hoverButton) return;
+      if (hoverButton) hoverButton.classList.remove("virtual-hover");
+      hoverButton = button;
+      if (hoverButton && !hoverButton.matches(":disabled")) hoverButton.classList.add("virtual-hover");
     };
     const dispatch = (target, event) => {
       const previous = dispatching;
@@ -63,7 +76,7 @@
     };
     const beginAim = (clientX, clientY) => {
       endAim();
-      const rect = canvas.getBoundingClientRect();
+      const rect = measureCanvas();
       x = aimFromX = clientX; y = aimFromY = clientY;
       aimToX = rect.left + rect.width / 2; aimToY = rect.top + rect.height / 2;
       aimProgress = aimBase = visualBase = 0;
@@ -94,11 +107,7 @@
     const rebaseAim = () => { if (aimAnimation) aimBase = aimProgress; };
     const hover = (e) => {
       const target = targetAtCursor(), button = target.closest(INTERACTIVE);
-      if (button !== hoverButton) {
-        if (hoverButton) hoverButton.classList.remove("virtual-hover");
-        hoverButton = button;
-        if (hoverButton && !hoverButton.matches(":disabled")) hoverButton.classList.add("virtual-hover");
-      }
+      setHoverButton(button);
       if (target !== hovered) {
         if (hovered) pointer(hovered, "pointerleave", e, -1);
         hovered = target;
@@ -122,20 +131,20 @@
       clearPresses();
       if (hovered) pointer(hovered, "pointerleave", { button: -1, buttons: 0 }, -1, 0);
       hovered = null;
-      if (hoverButton) hoverButton.classList.remove("virtual-hover");
-      hoverButton = null;
+      setHoverButton(null);
       element.hidden = true;
       document.body.classList.remove("carry-cursor-active");
     };
-    const start = () => {
+    const start = (clientX = null, clientY = null, show = true) => {
       endAim();
       if (active) clearPresses();
-      const rect = canvas.getBoundingClientRect();
-      x = rect.left + rect.width / 2; y = rect.top + rect.height / 2;
+      const rect = measureCanvas();
+      x = clientX ?? rect.left + rect.width / 2; y = clientY ?? rect.top + rect.height / 2;
       active = true;
+      visible = show;
       blockedButtons = buttons;
       suppressClick = true;
-      element.hidden = false;
+      element.hidden = !visible;
       document.body.classList.add("carry-cursor-active");
       paint();
       clearPresses();
@@ -143,6 +152,12 @@
         const e = { button: -1, buttons: 0 };
         pointer(hover(e), "pointermove", e, -1, 0);
       } else requestLock();
+    };
+    const placeCanvas = (localX, localY, width, height) => {
+      x = canvasLeft + localX * canvasWidth / Math.max(1, width);
+      y = canvasTop + localY * canvasHeight / Math.max(1, height);
+      paint();
+      if (active) setHoverButton(targetAtCursor().closest(INTERACTIVE));
     };
     const nativeControl = (target) => target.matches("input, select, textarea") || !!target.closest("dialog");
     const focusNative = (target) => {
@@ -192,6 +207,7 @@
       pointerId = e.pointerId;
       buttons = e.type === "pointercancel" ? 0 : e.buttons;
       if (!active) {
+        if (!locked()) { x = e.clientX; y = e.clientY; }
         if (e.type === "pointerdown") suppressClick = false;
         return;
       }
@@ -201,6 +217,12 @@
           // A denied lock never creates an offset native cursor. HUD controls
           // remain usable; a canvas press only retries capture.
           if (e.type === "pointerdown") { stop(); unlock(); suppressClick = false; }
+          return;
+        }
+        // Right-click changes the pilot's view even before pointer lock has
+        // settled. Let its press and release reach the canvas in that case.
+        if (e.button === 2) {
+          if (e.type === "pointerdown") requestLock();
           return;
         }
         e.stopImmediatePropagation();
@@ -270,6 +292,7 @@
       if (active && allowed && target !== canvas) { scrollPanel(target, e); hover(e); }
     };
     const onResize = () => {
+      measureCanvas();
       if (active) paint();
       else if (aimAnimation) {
         // Keep the displayed pixel when the viewport changes, then finish the
@@ -307,7 +330,8 @@
       window.removeEventListener("wheel", onWheel, true);
       window.removeEventListener("resize", onResize);
     };
-    return { start, stop, beginAim, updateAim, rebaseAim, endAim, dispose, element, get active() { return active; }, get x() { return x; }, get y() { return y; } };
+    return { start, stop, placeCanvas, beginAim, updateAim, rebaseAim, endAim, dispose, element,
+      get active() { return active; }, get visible() { return visible; }, get x() { return x; }, get y() { return y; } };
   };
   BL.cursor = { create };
 })();

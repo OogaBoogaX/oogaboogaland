@@ -501,8 +501,7 @@
         stunGear: { selectedSlot: 1, drops: [
           { kind: "ammo", slot: 0, active: false, returning: false, node: null, model: null, owner: null, ammo: 0, label: "", unlimited: false, equipped: false, fuel: 0, sx: 0, sy: 0, sz: 0, returnTime: 0 },
           { kind: "magazine", slot: 1, active: false, returning: false, node: null, model: null, owner: null, ammo: 0, label: "", unlimited: false, equipped: false, fuel: 0, sx: 0, sy: 0, sz: 0, returnTime: 0 },
-          { kind: "magazine", slot: 2, active: false, returning: false, node: null, model: null, owner: null, ammo: 0, label: "", unlimited: false, equipped: false, fuel: 0, sx: 0, sy: 0, sz: 0, returnTime: 0 },
-          { kind: "jetpack", slot: 3, active: false, returning: false, node: null, model: null, owner: null, ammo: 0, label: "", unlimited: false, equipped: false, fuel: 0, sx: 0, sy: 0, sz: 0, returnTime: 0 }
+          { kind: "magazine", slot: 2, active: false, returning: false, node: null, model: null, owner: null, ammo: 0, label: "", unlimited: false, equipped: false, fuel: 0, sx: 0, sy: 0, sz: 0, returnTime: 0 }
         ] },
         axeRotation: math.quat.create(),
         gunHandRotation: math.quat.create(),
@@ -576,8 +575,8 @@
         act: { kind: "eat", until: 0, trips: 0, sayAt: 0, said: true, phase: 0, spot: { x: 0, z: 0, ry: NaN } },
         swagNodes: []
       });
-      // A character built with its own pack wears it from the first frame: the
-      // same flight, fuel and recovery as the world jetpack, minus the pickup.
+      // A character built with its own pack wears it from the first frame and
+      // uses the same flight, fuel, recovery and toggle as every other pack.
       if (cave.parts.jetpack) cave.jet = { node: cave.parts.jetpack, flame: cave.parts.jetFlame, thrust: false, spending: false, power: 0, puff: 0 };
       cave.root.visible = false;
       addChild(root, cave.root);
@@ -718,7 +717,7 @@
       parts.gun.visible = cave.weapon.secondaryOwned;
       parts.club.quaternion = null;
       parts.gunFlash.visible = false;
-      if (cave.jetpackOwned && !cave.jet && cave.jetpackGeometry) makeJetpack(cave, cave.jetpackGeometry, cave.jetpackFlameGeometry);
+      if (cave.jetpackOwned && !cave.jet && cave.jetpackGeometry && !builtInJetpack(cave)) makeJetpack(cave, cave.jetpackGeometry, cave.jetpackFlameGeometry);
       if (cave.jet && !builtInJetpack(cave)) {
         if (cave.jet.node.parent) removeChild(cave.jet.node.parent, cave.jet.node);
         addChild(rest, cave.jet.node);
@@ -760,6 +759,7 @@
       cave.parts.torso.scale.y = 1;
       cave.parts.club.visible = cave.weapon.primaryOwned;
       for (const node of cave.sleepParts.equipment) node.visible = true;
+      if (builtInJetpack(cave)) cave.parts.jetpack.visible = !!cave.jet;
       cave.parts.snack.visible = false;
       cave.parts.gun.visible = false;
       cave.yawn = 0;
@@ -1626,7 +1626,7 @@
       return true;
     };
     // Thrusters built into a character sit wherever its own model puts them, so
-    // only the world's pack takes the centre of the back.
+    // only the standard pack takes the centre of the back.
     const backPack = (cave) => !!cave.jet && !cave.parts.jetpack;
     const jetTank = (cave) => cave.traits.jetTank > 0 ? cave.traits.jetTank : 1;
     const carryingStoneAxe = (cave) => cave.weapon.primaryOwned && cave.traits.stoneAxe && cave.root.visible && cave.state !== "sleeping"
@@ -3962,7 +3962,7 @@
       const moving = !cave.jetRecovering && (cave.hop > 0 || cave.hopV > 0) && Math.hypot(steer.x, steer.z) > 0.05;
       jet.power = (jet.thrust ? 2 : 0) + (moving ? 1 : 0);
       jet.spending = jet.power > 0;
-      // A character's own thrusters can hold less than the world's pack: the gauge
+      // A character's own thrusters can hold less than the standard pack: the gauge
       // still reads its own tank, that tank is just a shorter burn.
       if (jet.spending) cave.jetFuel = Math.max(0, cave.jetFuel - dt * jet.power / (JET_MOVE_SECONDS * jetTank(cave)));
       if (cave.jetFuel < 1e-10) { cave.jetFuel = 0; jet.thrust = false; jet.power = 0; }
@@ -4021,6 +4021,7 @@
     };
     const runPlayer = (cave, dt, driving = true) => {
       const p = cave.root.position, leap = cave.leap;
+      const fromX = p.x, fromZ = p.z;
       const wasGround = groundY(cave);
       if (cave.jet) runJet(cave, dt);
       clampPlayerCeiling(cave, wasGround);
@@ -4068,8 +4069,11 @@
           cave.hop += drop;
           if (!cave.cloudSupport && !inBananas(cave)) {
             cave.hopV = Math.max(cave.hopV, WALK.ledgeRise);
-            leap.vx = Math.sin(cave.root.rotation.y) * WALK.ledgeSpeed;
-            leap.vz = Math.cos(cave.root.rotation.y) * WALK.ledgeSpeed;
+            // Aim may face away from travel. Leaving the same ledge must
+            // carry the same motion in combat and carry views.
+            const dx = p.x - fromX, dz = p.z - fromZ, distance = Math.hypot(dx, dz);
+            leap.vx = (distance > 1e-7 ? dx / distance : Math.sin(cave.root.rotation.y)) * WALK.ledgeSpeed;
+            leap.vz = (distance > 1e-7 ? dz / distance : Math.cos(cave.root.rotation.y)) * WALK.ledgeSpeed;
           }
         }
       }
@@ -4323,7 +4327,7 @@
       const radius = (0.58 + drop.slot * 0.055) * h;
       const x = p.x + Math.sin(angle) * radius, z = p.z + Math.cos(angle) * radius;
       setVec(node.position, x, groundAt(x, z, p.y - cave.baseY) + 0.09 * h, z);
-      setVec(node.rotation, drop.kind === "jetpack" ? -0.3 : Math.PI / 2, angle, 0);
+      setVec(node.rotation, Math.PI / 2, angle, 0);
       node.quaternion = null;
       node.visible = true;
       drop.owner = cave;
@@ -4331,6 +4335,7 @@
       drop.returning = false;
       drop.returnTime = 0;
       if (drop.kind === "ammo") drop.label = drop.unlimited ? "∞" : "+" + drop.ammo;
+      else if (drop.kind === "magazine") drop.label = "+1 MAG";
       if (drop.model) drop.model.setAmmo(drop.ammo);
       if (ctx.refreshMirrorObject) ctx.refreshMirrorObject(node);
     };
@@ -4357,8 +4362,6 @@
         if (drop.model) drop.model.setAmmo(drop.ammo);
         if (drop.ammo === before && w.spareAmmo.length === count) return false;
         if (drop.ammo > 0) return true;
-      } else if (drop.kind === "jetpack") {
-        if (!ctx.collectStunJetpack || !ctx.collectStunJetpack(cave, drop.fuel, drop.equipped && cave === drop.owner)) return false;
       }
       drop.active = drop.returning = false;
       drop.node.visible = false;
@@ -4383,14 +4386,6 @@
       }
       w.spareAmmo.length = 0;
       syncMagazine(cave);
-      if (ctx.dropStunJetpack) {
-        const dropped = ctx.dropStunJetpack(cave);
-        if (dropped) {
-          drops[3].fuel = dropped.fuel;
-          drops[3].equipped = dropped.equipped;
-          placeStunDrop(cave, drops[3], dropped.geometry);
-        }
-      }
       w.equipped = w.primaryEquipped = w.aiming = false;
       cave.parts.club.visible = cave.parts.gun.visible = cave.parts.gunFlash.visible = false;
       if (cave.parts.chukTrail) for (const trail of cave.parts.chukTrail) trail.visible = false;
@@ -4511,15 +4506,21 @@
       cave.jet = { node, flame, thrust: false, spending: false, power: 0, puff: 0 };
       return node;
     };
+    const builtInJetpack = (cave) => !!cave.parts.jetpack;
     // Put the jetpack on a caveman's back
     const wearJetpack = (cave, geometry, flameGeometry) => {
       if (cave.jet || ctx.jetpackAllowed && !ctx.jetpackAllowed(cave)) return null;
+      if (builtInJetpack(cave)) {
+        cave.parts.jetpack.visible = true;
+        cave.jet = { node: cave.parts.jetpack, flame: cave.parts.jetFlame, thrust: false, spending: false, power: 0, puff: 0 };
+        if (ctx.refreshMirrorObject) ctx.refreshMirrorObject(cave.root);
+        return cave.parts.jetpack;
+      }
       const node = makeJetpack(cave, geometry, flameGeometry);
       if (ctx.refreshMirrorObject) ctx.refreshMirrorObject(cave.root);
       if (cave.jetFuel < JET_LAUNCH_FUEL && grounded(cave)) cave.jetRecovering = true;
       return node;
     };
-    const builtInJetpack = (cave) => !!cave.parts.jetpack;
     const cutJet = (cave) => {
       const jet = cave.jet;
       jet.thrust = jet.spending = false;
@@ -4528,8 +4529,13 @@
     };
     const removeJetpack = (cave) => {
       if (!cave.jet) return false;
-      // Built in: it cannot come off, so a scene asking for it back only stops it burning.
-      if (builtInJetpack(cave)) { cutJet(cave); return false; }
+      if (builtInJetpack(cave)) {
+        cutJet(cave);
+        cave.parts.jetpack.visible = false;
+        cave.jet = null;
+        if (ctx.refreshMirrorObject) ctx.refreshMirrorObject(cave.root);
+        return true;
+      }
       if (cave.jet.node.parent) removeChild(cave.jet.node.parent, cave.jet.node);
       cave.jet = null;
       if (ctx.refreshMirrorObject) ctx.refreshMirrorObject(cave.root);
@@ -4946,7 +4952,7 @@
         const drops = crewList[caveIndex].stunGear.drops;
         for (let dropIndex = 0; dropIndex < drops.length; dropIndex++) {
           const drop = drops[dropIndex];
-          if (!drop.active || drop.kind !== "ammo") continue;
+          if (!drop.active || drop.kind !== "ammo" && drop.kind !== "magazine") continue;
           const p = drop.node.position, pos = project(p.x, p.y + 0.4, p.z);
           if (pos) { ctx2d.strokeText(drop.label, pos.x, pos.y + 1); ctx2d.fillText(drop.label, pos.x, pos.y); }
         }

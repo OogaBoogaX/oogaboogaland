@@ -105,6 +105,10 @@
     for (let n = node; n; n = n.parent) if (n.cameraHidden) return true;
     return false;
   };
+  const hiddenFromCutaway = (node) => {
+    for (let n = node; n; n = n.parent) if (n.cutawayWholeHidden) return true;
+    return false;
+  };
   const boundsCache = new WeakMap();
   const boundsOf = (geometry) => {
     let b = boundsCache.get(geometry);
@@ -163,5 +167,5 @@
     for (const tw of tweens) tw.alive = false;
     tweens.length = 0;
   };
-  BL.scene = { createNode, addChild, removeChild, updateLocal, updateWorld, traverseVisible, createCamera, cameraProjection, boundsOf, matrixModeOf, hiddenFromCamera, addTween, stepTweens, tweenCount, clearTweens };
+  BL.scene = { createNode, addChild, removeChild, updateLocal, updateWorld, traverseVisible, createCamera, cameraProjection, boundsOf, matrixModeOf, hiddenFromCamera, hiddenFromCutaway, addTween, stepTweens, tweenCount, clearTweens };
 })();
