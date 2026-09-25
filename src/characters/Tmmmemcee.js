@@ -35,6 +35,29 @@
     return merge(snoutShape, nostril(-0.038), nostril(0.038));
   });
 
+
+  // Pig ears - leaf-shaped, sticking up from the temple area of the head.
+  // The most recognizable pig feature from the South Park ManBearPig reference.
+  const earGeometry = cached(() => {
+    const pink = "#f0a8a8";
+    const ear = (sx) => forward(
+      lathe({
+        profile: [
+          [0, 0],
+          [0.07, 0.04],
+          [0.08, 0.10],
+          [0.075, 0.16],
+          [0.05, 0.22],
+          [0, 0.28]
+        ],
+        segments: 10,
+        color: pink
+      }),
+      { x: sx, y: 0.55, z: 0.10 }
+    );
+    return merge(ear(-0.20), ear(0.20));
+  });
+
   // Pig tusks — small ivory tusks hanging from the upper jaw, one on each side
   // of the snout. Same dress-hook pattern as MrHodlX's gas mask and timechainb's
   // lion cub.
@@ -79,6 +102,10 @@
         addChild(k.parts.head, createNode({
           scale: { x: h, y: h, z: h },
           geometry: tuskGeometry()
+        }));
+        addChild(k.parts.head, createNode({
+          scale: { x: h, y: h, z: h },
+          geometry: earGeometry()
         }));
       }
     }
