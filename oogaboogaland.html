@@ -5,7 +5,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta http-equiv="Content-Security-Policy"
-    content="default-src 'none'; script-src 'sha256-KWyTYacaOqnD9aQRZZi/1Y9GN3n4B4F2FhDzeJKIa4g='; style-src 'sha256-yX4+i7wwxc5WHFThRDUIA/+XYBW/UDOB6JEaeVXV1fg='; img-src 'self' data:; media-src https://stream.noderunnersradio.com; connect-src https: wss:; base-uri 'none'; form-action 'none'">
+    content="default-src 'none'; script-src 'sha256-KQiZ0iTrMgwgUAc2ngEYPm1Zkx2+UXf3sKYhwRPc2aM='; style-src 'sha256-I/rEwUTyNjejiFWB/Uljb0ulhubgKelQqZmL8TlQays='; img-src 'self' data:; media-src https://stream.noderunnersradio.com; connect-src https: wss:; base-uri 'none'; form-action 'none'">
   <meta name="referrer" content="no-referrer">
   <meta name="color-scheme" content="dark">
   <meta name="theme-color" content="#0a0a0b">
@@ -2489,6 +2489,13 @@ body[data-active-scene="mine"] .mode-hud {
 .jumbotron-caption small {
   color: var(--muted);
   font-size: 10px;
+}
+
+#jumbotron-details {
+  max-height: 25vh;
+  overflow-y: auto;
+  overflow-wrap: anywhere;
+  white-space: pre-line;
 }
 
 .weather-key dt {
@@ -6941,9 +6948,9 @@ Then run npm run build and ONLY=characters node test/run.mjs.</pre>
         <button type="button" data-action="recipe-copy">Copy prompt</button>
       </div>
     </dialog>
-    <dialog class="modal jumbotron-modal" id="jumbotron-modal" aria-label="The jumbotron">
+    <dialog class="modal jumbotron-modal" id="jumbotron-modal" aria-label="Island board">
       <div class="panel-head">
-        <h2><span data-sign>Jumbotron</span></h2>
+        <h2><span data-sign>Island board</span></h2>
         <button type="button" class="modal-close" data-action="jumbotron-close" aria-label="Close">&times;</button>
       </div>
       <canvas class="jumbotron-screen" id="jumbotron-screen" width="192" height="108" aria-label="The board"></canvas>
@@ -6952,7 +6959,8 @@ Then run npm run build and ONLY=characters node test/run.mjs.</pre>
         <span class="jumbotron-caption"><b id="jumbotron-caption">&nbsp;</b><small id="jumbotron-index">&nbsp;</small></span>
         <button type="button" class="jumbotron-page" data-action="jumbotron-next" aria-label="Next board">&rsaquo;</button>
       </div>
-      <p class="help">OogaBoogaX on the big screen. Arrow keys flip the boards.</p>
+      <p class="help" id="jumbotron-details" hidden></p>
+      <p class="help">Arrow keys flip the boards.</p>
     </dialog>
     <dialog class="modal" id="ooga-portal-menu" aria-labelledby="ooga-portal-title" aria-describedby="ooga-portal-status">
       <div class="panel-head">
@@ -15325,6 +15333,8 @@ void main() {
   const PATH_LIFT = 0.006;
   const MASTER_PATH_CENTER = 2;
   const GATE_Z = -(RADIUS - 2), PASS_HALF = 2.5, PASS_TOP = 5, TRAIL_HALF = 1;
+  const TIMECHAIN = { bearing: 8.25 / 12 * Math.PI * 2, from: 20, top: 4, halfWidth: 1.8, blend: 1.5 };
+  const TIMECHAIN_X = Math.sin(TIMECHAIN.bearing), TIMECHAIN_Z = -Math.cos(TIMECHAIN.bearing);
   const BLUFF_LEN = 8, SIDE_OUT = 2.5, APRON = 3, TRAIL_LEAN = 1.2;
   const P = { grass: 1, grassLight: 2, grassDark: 3, path: 4, stone: 5, stoneDark: 6, inner: 7, dirt: 8, floor: 9 };
   const PALETTE = [null, "#6f7d3e", "#7b8945", "#65733a", "#a3874f", "#877869", "#5e5449", "#2f2824", "#6a4e39", "#3a302a"].map((hex) => hex && hexToRgb(hex));
@@ -15560,6 +15570,16 @@ void main() {
           surface = grassAt(wx, wz);
         }
         top = clamp(Math.round(h / UNIT) * UNIT, 0, MAX_HEIGHT);
+      }
+      // A grass terrace cut into the ridge, like the launch approach; the same voxels render and support it.
+      const timechainAlong = wx * TIMECHAIN_X + wz * TIMECHAIN_Z;
+      const timechainAcross = Math.abs(wx * TIMECHAIN_Z - wz * TIMECHAIN_X);
+      if (timechainAlong >= TIMECHAIN.from - 1 && timechainAcross < TIMECHAIN.halfWidth + TIMECHAIN.blend) {
+        const tread = Math.min(TIMECHAIN.top, Math.max(0, Math.floor((timechainAlong - TIMECHAIN.from) / 0.5) * UNIT));
+        const mix = smooth((timechainAcross - TIMECHAIN.halfWidth) / TIMECHAIN.blend);
+        top = Math.round((tread + (top - tread) * mix) / UNIT) * UNIT;
+        surface = grassAt(wx, wz);
+        meadow[i] = top === 0 ? 1 : 0;
       }
       // Carry the ground-level frontage across the outer ridge without lowering a column behind the HQ doorway plane.
       for (let fi = 0; fi < headquartersFronts.length; fi++) {
@@ -16756,6 +16776,7 @@ void main() {
         const depth = dx * -front.tangent.z + dz * front.tangent.x;
         headquartersPath = Math.abs(across) < front.halfLength && Math.abs(depth) < front.halfWidth && tops[c] === 0;
       }
+      if (wx * TIMECHAIN_X + wz * TIMECHAIN_Z >= MASTER_PATH_CENTER && Math.abs(wx * TIMECHAIN_Z - wz * TIMECHAIN_X) < PATH_HALF) path = true;
       if (headquartersPath) {
         path = true;
       }
@@ -16880,6 +16901,9 @@ void main() {
       }
       centerlines.push(points);
     }
+    const timechainPath = [];
+    for (let r = MASTER_PATH_CENTER; r <= RADIUS; r += PATH_UNIT) timechainPath.push({ x: TIMECHAIN_X * r, z: TIMECHAIN_Z * r });
+    centerlines.push(timechainPath);
     for (const front of headquartersFronts) {
       centerlines.push(front.connector);
       const points = [];
@@ -17318,7 +17342,7 @@ void main() {
     ISLANDS.set(seed, built);
     return built;
   };
-  BL.terrain = { makeGrid, gridGeometry, island, segmentBoxClear, cutawaySourceFromVox, PALETTE, MAX_HEIGHT };
+  BL.terrain = { makeGrid, gridGeometry, island, segmentBoxClear, cutawaySourceFromVox, PALETTE, MAX_HEIGHT, TIMECHAIN };
 })();
 
 // ---- js/terrain-cutaway.js ----
@@ -18829,7 +18853,7 @@ void main() {
 (() => {
   "use strict";
   const BL = window.BL = window.BL || {};
-  BL.jumbotronData = {"meta":{"generated_at":"2026-09-25T19:07:05.750Z","org":"OogaBoogaX","schema_version":3},"totals":{"contributors":49,"commits":1264,"prs":461,"reviews":56,"issues":18,"comments":367},"leaderboards":{"commits":[{"login":"portlandhodl","count":395},{"login":"w-s-bitcoin","count":360},{"login":"MrHodlX","count":115},{"login":"timechainb","count":79},{"login":"2140data","count":48},{"login":"dplusplus1024","count":44},{"login":"ottoz0r","count":31},{"login":"pdubl22","count":23},{"login":"YellowBrokeIt","count":20},{"login":"Hero-Gamer","count":17},{"login":"rules-without-rulers","count":16},{"login":"itme-brain","count":13},{"login":"claude","count":12},{"login":"RandyMcMillan","count":11},{"login":"J25dunn","count":10},{"login":"MHODL","count":7},{"login":"Rob1Ham","count":7},{"login":"knorrium","count":7},{"login":"Jdelg718","count":5},{"login":"drneski","count":5},{"login":"email:0ca1dda35e422a0f","count":4},{"login":"email:bdb4923572c8ac13","count":4},{"login":"BTCMcBoatface","count":3},{"login":"codex","count":3},{"login":"email:bed3af55053c78f6","count":3},{"login":"tmmmemcee","count":3},{"login":"Holo-Elfstone","count":2},{"login":"SaniExp","count":2},{"login":"csuwildcat","count":2},{"login":"dani69654","count":2},{"login":"hotpixelgroup","count":2},{"login":"CypherBoxLLC","count":1},{"login":"FNBIP","count":1},{"login":"HodlDee","count":1},{"login":"doggyballs","count":1},{"login":"email:56537ddd43347582","count":1},{"login":"email:78da113009979a72","count":1},{"login":"email:93964419ae80c511","count":1},{"login":"kaloudis","count":1},{"login":"zmeyer44","count":1}],"prs":[{"login":"MrHodlX","count":95},{"login":"portlandhodl","count":85},{"login":"w-s-bitcoin","count":65},{"login":"timechainb","count":32},{"login":"2140data","count":26},{"login":"ottoz0r","count":19},{"login":"J25dunn","count":16},{"login":"dplusplus1024","count":13},{"login":"rules-without-rulers","count":13},{"login":"Hero-Gamer","count":12},{"login":"Rob1Ham","count":11},{"login":"itme-brain","count":11},{"login":"tmmmemcee","count":6},{"login":"Jdelg718","count":5},{"login":"knorrium","count":5},{"login":"RandyMcMillan","count":4},{"login":"drneski","count":4},{"login":"hotpixelgroup","count":4},{"login":"FNBIP","count":3},{"login":"MiguelMedeiros","count":3},{"login":"SaniExp","count":3},{"login":"YellowBrokeIt","count":3},{"login":"dani69654","count":3},{"login":"BTCMcBoatface","count":2},{"login":"HodlDee","count":2},{"login":"Holo-Elfstone","count":2},{"login":"csuwildcat","count":2},{"login":"doggyballs","count":2},{"login":"pdubl22","count":2},{"login":"zmeyer44","count":2},{"login":"CypherBoxLLC","count":1},{"login":"Korg1970","count":1},{"login":"Shitnobi","count":1},{"login":"kaloudis","count":1},{"login":"mikeinspace","count":1},{"login":"unclejim7","count":1}],"reviews":[{"login":"MrHodlX","count":27},{"login":"J25dunn","count":14},{"login":"w-s-bitcoin","count":9},{"login":"portlandhodl","count":5},{"login":"Hero-Gamer","count":1}],"comments":[{"login":"portlandhodl","count":87},{"login":"MrHodlX","count":60},{"login":"Hero-Gamer","count":53},{"login":"w-s-bitcoin","count":48},{"login":"RandyMcMillan","count":19},{"login":"J25dunn","count":18},{"login":"BTCMcBoatface","count":14},{"login":"dplusplus1024","count":11},{"login":"itme-brain","count":9},{"login":"dani69654","count":7},{"login":"ottoz0r","count":6},{"login":"rules-without-rulers","count":6},{"login":"timechainb","count":6},{"login":"hotpixelgroup","count":4},{"login":"tmmmemcee","count":3},{"login":"HodlDee","count":2},{"login":"Holo-Elfstone","count":2},{"login":"Jdelg718","count":2},{"login":"100megasats","count":1},{"login":"2140data","count":1},{"login":"Bitcoin-Bill","count":1},{"login":"BitcoinUbuntu","count":1},{"login":"YellowBrokeIt","count":1},{"login":"csuwildcat","count":1},{"login":"doggyballs","count":1},{"login":"drneski","count":1},{"login":"remcoros","count":1},{"login":"unclejim7","count":1}],"issues":[{"login":"MrHodlX","count":7},{"login":"rules-without-rulers","count":6},{"login":"BitcoinUbuntu","count":2},{"login":"Hero-Gamer","count":1},{"login":"portlandhodl","count":1},{"login":"timechainb","count":1}]},"repos":[{"name":"entropylab","totals":{"contributors":45,"commits":1019,"prs":385,"reviews":50,"issues":12,"comments":357},"weekly":[{"week":"2026-W35","commits":333,"prs":134,"reviews":2,"issues":1,"comments":69},{"week":"2026-W36","commits":399,"prs":136,"reviews":16,"issues":0,"comments":130},{"week":"2026-W37","commits":82,"prs":36,"reviews":18,"issues":2,"comments":76},{"week":"2026-W38","commits":132,"prs":51,"reviews":5,"issues":2,"comments":39},{"week":"2026-W39","commits":73,"prs":28,"reviews":9,"issues":7,"comments":43}],"last_activity_at":"2026-09-25T19:05:37Z","leaderboards":{"commits":[{"login":"portlandhodl","count":395},{"login":"w-s-bitcoin","count":217},{"login":"MrHodlX","count":110},{"login":"timechainb","count":79},{"login":"dplusplus1024","count":44},{"login":"ottoz0r","count":24},{"login":"pdubl22","count":23},{"login":"Hero-Gamer","count":17},{"login":"itme-brain","count":13},{"login":"claude","count":12},{"login":"RandyMcMillan","count":11},{"login":"J25dunn","count":10},{"login":"2140data","count":9},{"login":"MHODL","count":7},{"login":"Rob1Ham","count":7},{"login":"Jdelg718","count":5},{"login":"email:0ca1dda35e422a0f","count":4},{"login":"email:bdb4923572c8ac13","count":4},{"login":"BTCMcBoatface","count":3},{"login":"codex","count":3},{"login":"email:bed3af55053c78f6","count":3},{"login":"SaniExp","count":2},{"login":"csuwildcat","count":2},{"login":"dani69654","count":2},{"login":"hotpixelgroup","count":2},{"login":"rules-without-rulers","count":2},{"login":"CypherBoxLLC","count":1},{"login":"FNBIP","count":1},{"login":"HodlDee","count":1},{"login":"doggyballs","count":1},{"login":"email:56537ddd43347582","count":1},{"login":"email:78da113009979a72","count":1},{"login":"email:93964419ae80c511","count":1},{"login":"kaloudis","count":1},{"login":"zmeyer44","count":1}],"prs":[{"login":"MrHodlX","count":92},{"login":"portlandhodl","count":85},{"login":"w-s-bitcoin","count":37},{"login":"timechainb","count":32},{"login":"ottoz0r","count":18},{"login":"J25dunn","count":16},{"login":"dplusplus1024","count":13},{"login":"Hero-Gamer","count":12},{"login":"Rob1Ham","count":11},{"login":"itme-brain","count":11},{"login":"2140data","count":10},{"login":"Jdelg718","count":5},{"login":"RandyMcMillan","count":4},{"login":"hotpixelgroup","count":4},{"login":"FNBIP","count":3},{"login":"MiguelMedeiros","count":3},{"login":"SaniExp","count":3},{"login":"dani69654","count":3},{"login":"tmmmemcee","count":3},{"login":"BTCMcBoatface","count":2},{"login":"HodlDee","count":2},{"login":"csuwildcat","count":2},{"login":"doggyballs","count":2},{"login":"pdubl22","count":2},{"login":"rules-without-rulers","count":2},{"login":"zmeyer44","count":2},{"login":"CypherBoxLLC","count":1},{"login":"Korg1970","count":1},{"login":"Shitnobi","count":1},{"login":"kaloudis","count":1},{"login":"mikeinspace","count":1},{"login":"unclejim7","count":1}],"reviews":[{"login":"MrHodlX","count":27},{"login":"J25dunn","count":14},{"login":"portlandhodl","count":5},{"login":"w-s-bitcoin","count":3},{"login":"Hero-Gamer","count":1}],"comments":[{"login":"portlandhodl","count":87},{"login":"MrHodlX","count":60},{"login":"Hero-Gamer","count":53},{"login":"w-s-bitcoin","count":46},{"login":"RandyMcMillan","count":19},{"login":"J25dunn","count":18},{"login":"BTCMcBoatface","count":14},{"login":"dplusplus1024","count":11},{"login":"itme-brain","count":9},{"login":"dani69654","count":7},{"login":"ottoz0r","count":6},{"login":"timechainb","count":6},{"login":"hotpixelgroup","count":4},{"login":"tmmmemcee","count":3},{"login":"HodlDee","count":2},{"login":"Jdelg718","count":2},{"login":"rules-without-rulers","count":2},{"login":"100megasats","count":1},{"login":"2140data","count":1},{"login":"Bitcoin-Bill","count":1},{"login":"BitcoinUbuntu","count":1},{"login":"csuwildcat","count":1},{"login":"doggyballs","count":1},{"login":"remcoros","count":1},{"login":"unclejim7","count":1}],"issues":[{"login":"MrHodlX","count":7},{"login":"BitcoinUbuntu","count":2},{"login":"Hero-Gamer","count":1},{"login":"portlandhodl","count":1},{"login":"timechainb","count":1}]},"contributors":[{"login":"w-s-bitcoin","last_seen_at":"2026-09-24T00:46:08Z"},{"login":"timechainb","last_seen_at":"2026-09-25T17:15:39Z"},{"login":"portlandhodl","last_seen_at":"2026-09-25T18:36:36Z"},{"login":"MrHodlX","last_seen_at":"2026-09-25T19:05:37Z"},{"login":"J25dunn","last_seen_at":"2026-09-14T00:52:02Z"},{"login":"BTCMcBoatface","last_seen_at":"2026-09-12T22:51:09Z"},{"login":"Hero-Gamer","last_seen_at":"2026-09-16T23:19:21Z"},{"login":"kaloudis","last_seen_at":"2026-09-11T03:10:01Z"},{"login":"email:bed3af55053c78f6","last_seen_at":"2026-09-10T22:41:09Z"},{"login":"hotpixelgroup","last_seen_at":"2026-09-17T16:15:09Z"},{"login":"email:0ca1dda35e422a0f","last_seen_at":"2026-09-05T16:17:09Z"},{"login":"Rob1Ham","last_seen_at":"2026-09-05T04:49:37Z"},{"login":"dplusplus1024","last_seen_at":"2026-09-04T16:46:04Z"},{"login":"HodlDee","last_seen_at":"2026-09-02T15:19:10Z"},{"login":"pdubl22","last_seen_at":"2026-09-02T04:06:43Z"},{"login":"ottoz0r","last_seen_at":"2026-09-02T02:19:20Z"},{"login":"FNBIP","last_seen_at":"2026-09-02T00:55:23Z"},{"login":"SaniExp","last_seen_at":"2026-09-02T16:47:02Z"},{"login":"Jdelg718","last_seen_at":"2026-08-31T15:06:08Z"},{"login":"dani69654","last_seen_at":"2026-09-09T10:02:14Z"},{"login":"RandyMcMillan","last_seen_at":"2026-08-31T09:57:39Z"},{"login":"doggyballs","last_seen_at":"2026-09-21T00:35:15Z"},{"login":"2140data","last_seen_at":"2026-08-31T04:54:04Z"},{"login":"itme-brain","last_seen_at":"2026-09-05T00:24:12Z"},{"login":"zmeyer44","last_seen_at":"2026-08-31T14:06:04Z"},{"login":"csuwildcat","last_seen_at":"2026-08-30T20:04:05Z"},{"login":"MHODL","last_seen_at":"2026-08-30T19:00:46Z"},{"login":"rules-without-rulers","last_seen_at":"2026-09-12T17:11:11Z"},{"login":"email:78da113009979a72","last_seen_at":"2026-08-30T03:08:17Z"},{"login":"email:bdb4923572c8ac13","last_seen_at":"2026-08-29T03:53:33Z"},{"login":"email:56537ddd43347582","last_seen_at":"2026-08-25T19:35:57Z"},{"login":"Shitnobi","last_seen_at":"2026-08-26T23:09:24Z"},{"login":"MiguelMedeiros","last_seen_at":"2026-08-27T21:47:11Z"},{"login":"tmmmemcee","last_seen_at":"2026-09-17T00:58:54Z"},{"login":"100megasats","last_seen_at":"2026-08-30T20:53:53Z"},{"login":"unclejim7","last_seen_at":"2026-09-05T04:37:51Z"},{"login":"mikeinspace","last_seen_at":"2026-09-10T05:25:42Z"},{"login":"remcoros","last_seen_at":"2026-09-12T15:11:21Z"},{"login":"Korg1970","last_seen_at":"2026-09-12T17:42:58Z"},{"login":"Bitcoin-Bill","last_seen_at":"2026-09-02T01:00:57Z"},{"login":"claude","last_seen_at":"2026-09-23T23:41:13Z"},{"login":"CypherBoxLLC","last_seen_at":"2026-09-19T22:44:16Z"},{"login":"email:93964419ae80c511","last_seen_at":"2026-09-20T10:42:49Z"},{"login":"codex","last_seen_at":"2026-09-21T01:04:42Z"},{"login":"BitcoinUbuntu","last_seen_at":"2026-09-25T18:06:38Z"}]},{"name":"oogaboogaland","totals":{"contributors":10,"commits":226,"prs":70,"reviews":6,"issues":6,"comments":10},"weekly":[{"week":"2026-W37","commits":45,"prs":19,"reviews":0,"issues":0,"comments":1},{"week":"2026-W38","commits":80,"prs":30,"reviews":3,"issues":0,"comments":0},{"week":"2026-W39","commits":101,"prs":21,"reviews":3,"issues":6,"comments":9}],"last_activity_at":"2026-09-25T04:34:22Z","leaderboards":{"commits":[{"login":"w-s-bitcoin","count":130},{"login":"2140data","count":39},{"login":"YellowBrokeIt","count":20},{"login":"rules-without-rulers","count":14},{"login":"knorrium","count":7},{"login":"MrHodlX","count":5},{"login":"drneski","count":5},{"login":"tmmmemcee","count":3},{"login":"Holo-Elfstone","count":2},{"login":"ottoz0r","count":1}],"prs":[{"login":"w-s-bitcoin","count":22},{"login":"2140data","count":16},{"login":"rules-without-rulers","count":11},{"login":"knorrium","count":5},{"login":"drneski","count":4},{"login":"MrHodlX","count":3},{"login":"YellowBrokeIt","count":3},{"login":"tmmmemcee","count":3},{"login":"Holo-Elfstone","count":2},{"login":"ottoz0r","count":1}],"reviews":[{"login":"w-s-bitcoin","count":6}],"comments":[{"login":"rules-without-rulers","count":4},{"login":"Holo-Elfstone","count":2},{"login":"w-s-bitcoin","count":2},{"login":"YellowBrokeIt","count":1},{"login":"drneski","count":1}],"issues":[{"login":"rules-without-rulers","count":6}]},"contributors":[{"login":"w-s-bitcoin","last_seen_at":"2026-09-25T04:03:38Z"},{"login":"MrHodlX","last_seen_at":"2026-09-20T21:37:43Z"},{"login":"ottoz0r","last_seen_at":"2026-09-07T21:41:44Z"},{"login":"2140data","last_seen_at":"2026-09-23T13:42:44Z"},{"login":"rules-without-rulers","last_seen_at":"2026-09-25T04:14:15Z"},{"login":"tmmmemcee","last_seen_at":"2026-09-24T22:34:07Z"},{"login":"knorrium","last_seen_at":"2026-09-20T21:18:34Z"},{"login":"drneski","last_seen_at":"2026-09-25T04:34:22Z"},{"login":"YellowBrokeIt","last_seen_at":"2026-09-23T22:46:53Z"},{"login":"Holo-Elfstone","last_seen_at":"2026-09-21T20:29:14Z"}]},{"name":"bedrock","totals":{"contributors":2,"commits":19,"prs":6,"reviews":0,"issues":0,"comments":0},"weekly":[{"week":"2026-W36","commits":16,"prs":6,"reviews":0,"issues":0,"comments":0},{"week":"2026-W37","commits":3,"prs":0,"reviews":0,"issues":0,"comments":0}],"last_activity_at":"2026-09-07T05:21:02Z","leaderboards":{"commits":[{"login":"w-s-bitcoin","count":13},{"login":"ottoz0r","count":6}],"prs":[{"login":"w-s-bitcoin","count":6}],"reviews":[],"comments":[],"issues":[]},"contributors":[{"login":"w-s-bitcoin","last_seen_at":"2026-09-07T05:21:02Z"},{"login":"ottoz0r","last_seen_at":"2026-09-04T21:29:31Z"}]}],"recent":[{"login":"MrHodlX","repo":"entropylab","type":"comment","occurred_at":"2026-09-25T19:05:37Z"},{"login":"MrHodlX","repo":"entropylab","type":"merge","occurred_at":"2026-09-25T19:05:36Z"},{"login":"MrHodlX","repo":"entropylab","type":"commit","occurred_at":"2026-09-25T18:56:07Z"},{"login":"MrHodlX","repo":"entropylab","type":"merge","occurred_at":"2026-09-25T18:54:05Z"},{"login":"MrHodlX","repo":"entropylab","type":"comment","occurred_at":"2026-09-25T18:54:03Z"},{"login":"MrHodlX","repo":"entropylab","type":"comment","occurred_at":"2026-09-25T18:42:08Z"},{"login":"portlandhodl","repo":"entropylab","type":"pr","occurred_at":"2026-09-25T18:36:36Z"},{"login":"MrHodlX","repo":"entropylab","type":"comment","occurred_at":"2026-09-25T18:35:36Z"},{"login":"portlandhodl","repo":"entropylab","type":"commit","occurred_at":"2026-09-25T18:34:45Z"},{"login":"MrHodlX","repo":"entropylab","type":"comment","occurred_at":"2026-09-25T18:29:14Z"},{"login":"MrHodlX","repo":"entropylab","type":"comment","occurred_at":"2026-09-25T18:19:46Z"},{"login":"BitcoinUbuntu","repo":"entropylab","type":"comment","occurred_at":"2026-09-25T18:06:38Z"}],"contributors":[{"login":"portlandhodl","last_seen_at":"2026-09-25T18:36:36Z"},{"login":"w-s-bitcoin","last_seen_at":"2026-09-25T04:03:38Z"},{"login":"MrHodlX","last_seen_at":"2026-09-25T19:05:37Z"},{"login":"timechainb","last_seen_at":"2026-09-25T17:15:39Z"},{"login":"Hero-Gamer","last_seen_at":"2026-09-16T23:19:21Z"},{"login":"2140data","last_seen_at":"2026-09-23T13:42:44Z"},{"login":"dplusplus1024","last_seen_at":"2026-09-04T16:46:04Z"},{"login":"J25dunn","last_seen_at":"2026-09-14T12:31:24Z"},{"login":"ottoz0r","last_seen_at":"2026-09-07T21:41:44Z"},{"login":"rules-without-rulers","last_seen_at":"2026-09-25T04:14:15Z"},{"login":"RandyMcMillan","last_seen_at":"2026-08-31T09:57:39Z"},{"login":"itme-brain","last_seen_at":"2026-09-05T00:24:12Z"},{"login":"pdubl22","last_seen_at":"2026-09-02T04:06:43Z"},{"login":"YellowBrokeIt","last_seen_at":"2026-09-23T22:46:53Z"},{"login":"BTCMcBoatface","last_seen_at":"2026-09-12T22:51:09Z"},{"login":"Rob1Ham","last_seen_at":"2026-09-05T04:49:37Z"},{"login":"Jdelg718","last_seen_at":"2026-08-31T15:06:08Z"},{"login":"claude","last_seen_at":"2026-09-23T23:41:13Z"},{"login":"dani69654","last_seen_at":"2026-09-09T10:02:14Z"},{"login":"knorrium","last_seen_at":"2026-09-20T21:18:34Z"},{"login":"tmmmemcee","last_seen_at":"2026-09-24T22:34:07Z"},{"login":"drneski","last_seen_at":"2026-09-25T04:34:22Z"},{"login":"hotpixelgroup","last_seen_at":"2026-09-17T16:15:09Z"},{"login":"MHODL","last_seen_at":"2026-08-30T19:00:46Z"},{"login":"Holo-Elfstone","last_seen_at":"2026-09-21T20:29:14Z"},{"login":"HodlDee","last_seen_at":"2026-09-02T15:19:10Z"},{"login":"SaniExp","last_seen_at":"2026-09-02T16:47:02Z"},{"login":"csuwildcat","last_seen_at":"2026-08-30T20:04:05Z"},{"login":"FNBIP","last_seen_at":"2026-09-02T00:55:23Z"},{"login":"doggyballs","last_seen_at":"2026-09-21T00:35:15Z"},{"login":"email:0ca1dda35e422a0f","last_seen_at":"2026-09-05T16:17:09Z"},{"login":"email:bdb4923572c8ac13","last_seen_at":"2026-08-29T03:53:33Z"},{"login":"BitcoinUbuntu","last_seen_at":"2026-09-25T18:06:38Z"},{"login":"MiguelMedeiros","last_seen_at":"2026-08-27T21:47:11Z"},{"login":"codex","last_seen_at":"2026-09-21T01:04:42Z"},{"login":"email:bed3af55053c78f6","last_seen_at":"2026-09-10T22:41:09Z"},{"login":"zmeyer44","last_seen_at":"2026-08-31T14:06:04Z"},{"login":"CypherBoxLLC","last_seen_at":"2026-09-19T22:44:16Z"},{"login":"kaloudis","last_seen_at":"2026-09-11T03:10:01Z"},{"login":"unclejim7","last_seen_at":"2026-09-05T04:37:51Z"},{"login":"100megasats","last_seen_at":"2026-08-30T20:53:53Z"},{"login":"Bitcoin-Bill","last_seen_at":"2026-09-02T01:00:57Z"},{"login":"Korg1970","last_seen_at":"2026-09-12T17:42:58Z"},{"login":"Shitnobi","last_seen_at":"2026-08-26T23:09:24Z"},{"login":"email:56537ddd43347582","last_seen_at":"2026-08-25T19:35:57Z"},{"login":"email:78da113009979a72","last_seen_at":"2026-08-30T03:08:17Z"},{"login":"email:93964419ae80c511","last_seen_at":"2026-09-20T10:42:49Z"},{"login":"mikeinspace","last_seen_at":"2026-09-10T05:25:42Z"},{"login":"remcoros","last_seen_at":"2026-09-12T15:11:21Z"}]};
+  BL.jumbotronData = {"meta":{"generated_at":"2026-09-25T19:37:35.604Z","org":"OogaBoogaX","schema_version":3},"totals":{"contributors":49,"commits":1272,"prs":464,"reviews":56,"issues":19,"comments":370},"leaderboards":{"commits":[{"login":"portlandhodl","count":395},{"login":"w-s-bitcoin","count":368},{"login":"MrHodlX","count":115},{"login":"timechainb","count":79},{"login":"2140data","count":48},{"login":"dplusplus1024","count":44},{"login":"ottoz0r","count":31},{"login":"pdubl22","count":23},{"login":"YellowBrokeIt","count":20},{"login":"Hero-Gamer","count":17},{"login":"rules-without-rulers","count":16},{"login":"itme-brain","count":13},{"login":"claude","count":12},{"login":"RandyMcMillan","count":11},{"login":"J25dunn","count":10},{"login":"MHODL","count":7},{"login":"Rob1Ham","count":7},{"login":"knorrium","count":7},{"login":"Jdelg718","count":5},{"login":"drneski","count":5},{"login":"email:0ca1dda35e422a0f","count":4},{"login":"email:bdb4923572c8ac13","count":4},{"login":"BTCMcBoatface","count":3},{"login":"codex","count":3},{"login":"email:bed3af55053c78f6","count":3},{"login":"tmmmemcee","count":3},{"login":"Holo-Elfstone","count":2},{"login":"SaniExp","count":2},{"login":"csuwildcat","count":2},{"login":"dani69654","count":2},{"login":"hotpixelgroup","count":2},{"login":"CypherBoxLLC","count":1},{"login":"FNBIP","count":1},{"login":"HodlDee","count":1},{"login":"doggyballs","count":1},{"login":"email:56537ddd43347582","count":1},{"login":"email:78da113009979a72","count":1},{"login":"email:93964419ae80c511","count":1},{"login":"kaloudis","count":1},{"login":"zmeyer44","count":1}],"prs":[{"login":"MrHodlX","count":96},{"login":"portlandhodl","count":85},{"login":"w-s-bitcoin","count":66},{"login":"timechainb","count":32},{"login":"2140data","count":26},{"login":"ottoz0r","count":19},{"login":"J25dunn","count":16},{"login":"dplusplus1024","count":13},{"login":"rules-without-rulers","count":13},{"login":"Hero-Gamer","count":12},{"login":"Rob1Ham","count":11},{"login":"itme-brain","count":11},{"login":"tmmmemcee","count":6},{"login":"Jdelg718","count":5},{"login":"knorrium","count":5},{"login":"RandyMcMillan","count":4},{"login":"SaniExp","count":4},{"login":"drneski","count":4},{"login":"hotpixelgroup","count":4},{"login":"FNBIP","count":3},{"login":"MiguelMedeiros","count":3},{"login":"YellowBrokeIt","count":3},{"login":"dani69654","count":3},{"login":"BTCMcBoatface","count":2},{"login":"HodlDee","count":2},{"login":"Holo-Elfstone","count":2},{"login":"csuwildcat","count":2},{"login":"doggyballs","count":2},{"login":"pdubl22","count":2},{"login":"zmeyer44","count":2},{"login":"CypherBoxLLC","count":1},{"login":"Korg1970","count":1},{"login":"Shitnobi","count":1},{"login":"kaloudis","count":1},{"login":"mikeinspace","count":1},{"login":"unclejim7","count":1}],"reviews":[{"login":"MrHodlX","count":27},{"login":"J25dunn","count":14},{"login":"w-s-bitcoin","count":9},{"login":"portlandhodl","count":5},{"login":"Hero-Gamer","count":1}],"comments":[{"login":"portlandhodl","count":87},{"login":"MrHodlX","count":63},{"login":"Hero-Gamer","count":53},{"login":"w-s-bitcoin","count":48},{"login":"RandyMcMillan","count":19},{"login":"J25dunn","count":18},{"login":"BTCMcBoatface","count":14},{"login":"dplusplus1024","count":11},{"login":"itme-brain","count":9},{"login":"dani69654","count":7},{"login":"ottoz0r","count":6},{"login":"rules-without-rulers","count":6},{"login":"timechainb","count":6},{"login":"hotpixelgroup","count":4},{"login":"tmmmemcee","count":3},{"login":"HodlDee","count":2},{"login":"Holo-Elfstone","count":2},{"login":"Jdelg718","count":2},{"login":"100megasats","count":1},{"login":"2140data","count":1},{"login":"Bitcoin-Bill","count":1},{"login":"BitcoinUbuntu","count":1},{"login":"YellowBrokeIt","count":1},{"login":"csuwildcat","count":1},{"login":"doggyballs","count":1},{"login":"drneski","count":1},{"login":"remcoros","count":1},{"login":"unclejim7","count":1}],"issues":[{"login":"MrHodlX","count":8},{"login":"rules-without-rulers","count":6},{"login":"BitcoinUbuntu","count":2},{"login":"Hero-Gamer","count":1},{"login":"portlandhodl","count":1},{"login":"timechainb","count":1}]},"repos":[{"name":"entropylab","totals":{"contributors":45,"commits":1019,"prs":386,"reviews":50,"issues":13,"comments":360},"weekly":[{"week":"2026-W35","commits":333,"prs":134,"reviews":2,"issues":1,"comments":69},{"week":"2026-W36","commits":399,"prs":136,"reviews":16,"issues":0,"comments":130},{"week":"2026-W37","commits":82,"prs":36,"reviews":18,"issues":2,"comments":76},{"week":"2026-W38","commits":132,"prs":51,"reviews":5,"issues":2,"comments":39},{"week":"2026-W39","commits":73,"prs":29,"reviews":9,"issues":8,"comments":46}],"last_activity_at":"2026-09-25T19:31:17Z","leaderboards":{"commits":[{"login":"portlandhodl","count":395},{"login":"w-s-bitcoin","count":217},{"login":"MrHodlX","count":110},{"login":"timechainb","count":79},{"login":"dplusplus1024","count":44},{"login":"ottoz0r","count":24},{"login":"pdubl22","count":23},{"login":"Hero-Gamer","count":17},{"login":"itme-brain","count":13},{"login":"claude","count":12},{"login":"RandyMcMillan","count":11},{"login":"J25dunn","count":10},{"login":"2140data","count":9},{"login":"MHODL","count":7},{"login":"Rob1Ham","count":7},{"login":"Jdelg718","count":5},{"login":"email:0ca1dda35e422a0f","count":4},{"login":"email:bdb4923572c8ac13","count":4},{"login":"BTCMcBoatface","count":3},{"login":"codex","count":3},{"login":"email:bed3af55053c78f6","count":3},{"login":"SaniExp","count":2},{"login":"csuwildcat","count":2},{"login":"dani69654","count":2},{"login":"hotpixelgroup","count":2},{"login":"rules-without-rulers","count":2},{"login":"CypherBoxLLC","count":1},{"login":"FNBIP","count":1},{"login":"HodlDee","count":1},{"login":"doggyballs","count":1},{"login":"email:56537ddd43347582","count":1},{"login":"email:78da113009979a72","count":1},{"login":"email:93964419ae80c511","count":1},{"login":"kaloudis","count":1},{"login":"zmeyer44","count":1}],"prs":[{"login":"MrHodlX","count":93},{"login":"portlandhodl","count":85},{"login":"w-s-bitcoin","count":37},{"login":"timechainb","count":32},{"login":"ottoz0r","count":18},{"login":"J25dunn","count":16},{"login":"dplusplus1024","count":13},{"login":"Hero-Gamer","count":12},{"login":"Rob1Ham","count":11},{"login":"itme-brain","count":11},{"login":"2140data","count":10},{"login":"Jdelg718","count":5},{"login":"RandyMcMillan","count":4},{"login":"hotpixelgroup","count":4},{"login":"FNBIP","count":3},{"login":"MiguelMedeiros","count":3},{"login":"SaniExp","count":3},{"login":"dani69654","count":3},{"login":"tmmmemcee","count":3},{"login":"BTCMcBoatface","count":2},{"login":"HodlDee","count":2},{"login":"csuwildcat","count":2},{"login":"doggyballs","count":2},{"login":"pdubl22","count":2},{"login":"rules-without-rulers","count":2},{"login":"zmeyer44","count":2},{"login":"CypherBoxLLC","count":1},{"login":"Korg1970","count":1},{"login":"Shitnobi","count":1},{"login":"kaloudis","count":1},{"login":"mikeinspace","count":1},{"login":"unclejim7","count":1}],"reviews":[{"login":"MrHodlX","count":27},{"login":"J25dunn","count":14},{"login":"portlandhodl","count":5},{"login":"w-s-bitcoin","count":3},{"login":"Hero-Gamer","count":1}],"comments":[{"login":"portlandhodl","count":87},{"login":"MrHodlX","count":63},{"login":"Hero-Gamer","count":53},{"login":"w-s-bitcoin","count":46},{"login":"RandyMcMillan","count":19},{"login":"J25dunn","count":18},{"login":"BTCMcBoatface","count":14},{"login":"dplusplus1024","count":11},{"login":"itme-brain","count":9},{"login":"dani69654","count":7},{"login":"ottoz0r","count":6},{"login":"timechainb","count":6},{"login":"hotpixelgroup","count":4},{"login":"tmmmemcee","count":3},{"login":"HodlDee","count":2},{"login":"Jdelg718","count":2},{"login":"rules-without-rulers","count":2},{"login":"100megasats","count":1},{"login":"2140data","count":1},{"login":"Bitcoin-Bill","count":1},{"login":"BitcoinUbuntu","count":1},{"login":"csuwildcat","count":1},{"login":"doggyballs","count":1},{"login":"remcoros","count":1},{"login":"unclejim7","count":1}],"issues":[{"login":"MrHodlX","count":8},{"login":"BitcoinUbuntu","count":2},{"login":"Hero-Gamer","count":1},{"login":"portlandhodl","count":1},{"login":"timechainb","count":1}]},"contributors":[{"login":"w-s-bitcoin","last_seen_at":"2026-09-24T00:46:08Z"},{"login":"timechainb","last_seen_at":"2026-09-25T17:15:39Z"},{"login":"portlandhodl","last_seen_at":"2026-09-25T18:36:36Z"},{"login":"MrHodlX","last_seen_at":"2026-09-25T19:31:17Z"},{"login":"J25dunn","last_seen_at":"2026-09-14T00:52:02Z"},{"login":"BTCMcBoatface","last_seen_at":"2026-09-12T22:51:09Z"},{"login":"Hero-Gamer","last_seen_at":"2026-09-16T23:19:21Z"},{"login":"kaloudis","last_seen_at":"2026-09-11T03:10:01Z"},{"login":"email:bed3af55053c78f6","last_seen_at":"2026-09-10T22:41:09Z"},{"login":"hotpixelgroup","last_seen_at":"2026-09-17T16:15:09Z"},{"login":"email:0ca1dda35e422a0f","last_seen_at":"2026-09-05T16:17:09Z"},{"login":"Rob1Ham","last_seen_at":"2026-09-05T04:49:37Z"},{"login":"dplusplus1024","last_seen_at":"2026-09-04T16:46:04Z"},{"login":"HodlDee","last_seen_at":"2026-09-02T15:19:10Z"},{"login":"pdubl22","last_seen_at":"2026-09-02T04:06:43Z"},{"login":"ottoz0r","last_seen_at":"2026-09-02T02:19:20Z"},{"login":"FNBIP","last_seen_at":"2026-09-02T00:55:23Z"},{"login":"SaniExp","last_seen_at":"2026-09-02T16:47:02Z"},{"login":"Jdelg718","last_seen_at":"2026-08-31T15:06:08Z"},{"login":"dani69654","last_seen_at":"2026-09-09T10:02:14Z"},{"login":"RandyMcMillan","last_seen_at":"2026-08-31T09:57:39Z"},{"login":"doggyballs","last_seen_at":"2026-09-21T00:35:15Z"},{"login":"2140data","last_seen_at":"2026-08-31T04:54:04Z"},{"login":"itme-brain","last_seen_at":"2026-09-05T00:24:12Z"},{"login":"zmeyer44","last_seen_at":"2026-08-31T14:06:04Z"},{"login":"csuwildcat","last_seen_at":"2026-08-30T20:04:05Z"},{"login":"MHODL","last_seen_at":"2026-08-30T19:00:46Z"},{"login":"rules-without-rulers","last_seen_at":"2026-09-12T17:11:11Z"},{"login":"email:78da113009979a72","last_seen_at":"2026-08-30T03:08:17Z"},{"login":"email:bdb4923572c8ac13","last_seen_at":"2026-08-29T03:53:33Z"},{"login":"email:56537ddd43347582","last_seen_at":"2026-08-25T19:35:57Z"},{"login":"Shitnobi","last_seen_at":"2026-08-26T23:09:24Z"},{"login":"MiguelMedeiros","last_seen_at":"2026-08-27T21:47:11Z"},{"login":"tmmmemcee","last_seen_at":"2026-09-17T00:58:54Z"},{"login":"100megasats","last_seen_at":"2026-08-30T20:53:53Z"},{"login":"unclejim7","last_seen_at":"2026-09-05T04:37:51Z"},{"login":"mikeinspace","last_seen_at":"2026-09-10T05:25:42Z"},{"login":"remcoros","last_seen_at":"2026-09-12T15:11:21Z"},{"login":"Korg1970","last_seen_at":"2026-09-12T17:42:58Z"},{"login":"Bitcoin-Bill","last_seen_at":"2026-09-02T01:00:57Z"},{"login":"claude","last_seen_at":"2026-09-23T23:41:13Z"},{"login":"CypherBoxLLC","last_seen_at":"2026-09-19T22:44:16Z"},{"login":"email:93964419ae80c511","last_seen_at":"2026-09-20T10:42:49Z"},{"login":"codex","last_seen_at":"2026-09-21T01:04:42Z"},{"login":"BitcoinUbuntu","last_seen_at":"2026-09-25T18:06:38Z"}]},{"name":"oogaboogaland","totals":{"contributors":11,"commits":234,"prs":72,"reviews":6,"issues":6,"comments":10},"weekly":[{"week":"2026-W37","commits":45,"prs":19,"reviews":0,"issues":0,"comments":1},{"week":"2026-W38","commits":80,"prs":30,"reviews":3,"issues":0,"comments":0},{"week":"2026-W39","commits":109,"prs":23,"reviews":3,"issues":6,"comments":9}],"last_activity_at":"2026-09-25T19:35:29Z","leaderboards":{"commits":[{"login":"w-s-bitcoin","count":138},{"login":"2140data","count":39},{"login":"YellowBrokeIt","count":20},{"login":"rules-without-rulers","count":14},{"login":"knorrium","count":7},{"login":"MrHodlX","count":5},{"login":"drneski","count":5},{"login":"tmmmemcee","count":3},{"login":"Holo-Elfstone","count":2},{"login":"ottoz0r","count":1}],"prs":[{"login":"w-s-bitcoin","count":23},{"login":"2140data","count":16},{"login":"rules-without-rulers","count":11},{"login":"knorrium","count":5},{"login":"drneski","count":4},{"login":"MrHodlX","count":3},{"login":"YellowBrokeIt","count":3},{"login":"tmmmemcee","count":3},{"login":"Holo-Elfstone","count":2},{"login":"SaniExp","count":1},{"login":"ottoz0r","count":1}],"reviews":[{"login":"w-s-bitcoin","count":6}],"comments":[{"login":"rules-without-rulers","count":4},{"login":"Holo-Elfstone","count":2},{"login":"w-s-bitcoin","count":2},{"login":"YellowBrokeIt","count":1},{"login":"drneski","count":1}],"issues":[{"login":"rules-without-rulers","count":6}]},"contributors":[{"login":"w-s-bitcoin","last_seen_at":"2026-09-25T19:32:14Z"},{"login":"MrHodlX","last_seen_at":"2026-09-20T21:37:43Z"},{"login":"ottoz0r","last_seen_at":"2026-09-07T21:41:44Z"},{"login":"SaniExp","last_seen_at":"2026-09-25T19:35:29Z"},{"login":"2140data","last_seen_at":"2026-09-23T13:42:44Z"},{"login":"rules-without-rulers","last_seen_at":"2026-09-25T04:14:15Z"},{"login":"tmmmemcee","last_seen_at":"2026-09-24T22:34:07Z"},{"login":"knorrium","last_seen_at":"2026-09-20T21:18:34Z"},{"login":"drneski","last_seen_at":"2026-09-25T04:34:22Z"},{"login":"YellowBrokeIt","last_seen_at":"2026-09-23T22:46:53Z"},{"login":"Holo-Elfstone","last_seen_at":"2026-09-21T20:29:14Z"}]},{"name":"bedrock","totals":{"contributors":2,"commits":19,"prs":6,"reviews":0,"issues":0,"comments":0},"weekly":[{"week":"2026-W36","commits":16,"prs":6,"reviews":0,"issues":0,"comments":0},{"week":"2026-W37","commits":3,"prs":0,"reviews":0,"issues":0,"comments":0}],"last_activity_at":"2026-09-07T05:21:02Z","leaderboards":{"commits":[{"login":"w-s-bitcoin","count":13},{"login":"ottoz0r","count":6}],"prs":[{"login":"w-s-bitcoin","count":6}],"reviews":[],"comments":[],"issues":[]},"contributors":[{"login":"w-s-bitcoin","last_seen_at":"2026-09-07T05:21:02Z"},{"login":"ottoz0r","last_seen_at":"2026-09-04T21:29:31Z"}]}],"recent":[{"login":"SaniExp","repo":"oogaboogaland","type":"pr","occurred_at":"2026-09-25T19:35:29Z"},{"login":"w-s-bitcoin","repo":"oogaboogaland","type":"pr","occurred_at":"2026-09-25T19:32:14Z","draft":true},{"login":"MrHodlX","repo":"entropylab","type":"comment","occurred_at":"2026-09-25T19:31:17Z"},{"login":"MrHodlX","repo":"entropylab","type":"comment","occurred_at":"2026-09-25T19:17:40Z"},{"login":"MrHodlX","repo":"entropylab","type":"pr","occurred_at":"2026-09-25T19:17:39Z","draft":true},{"login":"MrHodlX","repo":"entropylab","type":"issue","occurred_at":"2026-09-25T19:12:17Z"},{"login":"MrHodlX","repo":"entropylab","type":"comment","occurred_at":"2026-09-25T19:08:15Z"},{"login":"w-s-bitcoin","repo":"oogaboogaland","type":"merge","occurred_at":"2026-09-25T19:06:56Z"},{"login":"MrHodlX","repo":"entropylab","type":"comment","occurred_at":"2026-09-25T19:05:37Z"},{"login":"MrHodlX","repo":"entropylab","type":"merge","occurred_at":"2026-09-25T19:05:36Z"},{"login":"w-s-bitcoin","repo":"oogaboogaland","type":"commit","occurred_at":"2026-09-25T19:03:15Z"},{"login":"w-s-bitcoin","repo":"oogaboogaland","type":"commit","occurred_at":"2026-09-25T19:03:15Z"}],"contributors":[{"login":"portlandhodl","last_seen_at":"2026-09-25T18:36:36Z"},{"login":"w-s-bitcoin","last_seen_at":"2026-09-25T19:32:14Z"},{"login":"MrHodlX","last_seen_at":"2026-09-25T19:31:17Z"},{"login":"timechainb","last_seen_at":"2026-09-25T17:15:39Z"},{"login":"Hero-Gamer","last_seen_at":"2026-09-16T23:19:21Z"},{"login":"2140data","last_seen_at":"2026-09-23T13:42:44Z"},{"login":"dplusplus1024","last_seen_at":"2026-09-04T16:46:04Z"},{"login":"J25dunn","last_seen_at":"2026-09-14T12:31:24Z"},{"login":"ottoz0r","last_seen_at":"2026-09-07T21:41:44Z"},{"login":"rules-without-rulers","last_seen_at":"2026-09-25T04:14:15Z"},{"login":"RandyMcMillan","last_seen_at":"2026-08-31T09:57:39Z"},{"login":"itme-brain","last_seen_at":"2026-09-05T00:24:12Z"},{"login":"pdubl22","last_seen_at":"2026-09-02T04:06:43Z"},{"login":"YellowBrokeIt","last_seen_at":"2026-09-23T22:46:53Z"},{"login":"BTCMcBoatface","last_seen_at":"2026-09-12T22:51:09Z"},{"login":"Rob1Ham","last_seen_at":"2026-09-05T04:49:37Z"},{"login":"Jdelg718","last_seen_at":"2026-08-31T15:06:08Z"},{"login":"claude","last_seen_at":"2026-09-23T23:41:13Z"},{"login":"dani69654","last_seen_at":"2026-09-09T10:02:14Z"},{"login":"knorrium","last_seen_at":"2026-09-20T21:18:34Z"},{"login":"tmmmemcee","last_seen_at":"2026-09-24T22:34:07Z"},{"login":"drneski","last_seen_at":"2026-09-25T04:34:22Z"},{"login":"hotpixelgroup","last_seen_at":"2026-09-17T16:15:09Z"},{"login":"MHODL","last_seen_at":"2026-08-30T19:00:46Z"},{"login":"Holo-Elfstone","last_seen_at":"2026-09-21T20:29:14Z"},{"login":"SaniExp","last_seen_at":"2026-09-25T19:35:29Z"},{"login":"HodlDee","last_seen_at":"2026-09-02T15:19:10Z"},{"login":"csuwildcat","last_seen_at":"2026-08-30T20:04:05Z"},{"login":"FNBIP","last_seen_at":"2026-09-02T00:55:23Z"},{"login":"doggyballs","last_seen_at":"2026-09-21T00:35:15Z"},{"login":"email:0ca1dda35e422a0f","last_seen_at":"2026-09-05T16:17:09Z"},{"login":"email:bdb4923572c8ac13","last_seen_at":"2026-08-29T03:53:33Z"},{"login":"BitcoinUbuntu","last_seen_at":"2026-09-25T18:06:38Z"},{"login":"MiguelMedeiros","last_seen_at":"2026-08-27T21:47:11Z"},{"login":"codex","last_seen_at":"2026-09-21T01:04:42Z"},{"login":"email:bed3af55053c78f6","last_seen_at":"2026-09-10T22:41:09Z"},{"login":"zmeyer44","last_seen_at":"2026-08-31T14:06:04Z"},{"login":"CypherBoxLLC","last_seen_at":"2026-09-19T22:44:16Z"},{"login":"kaloudis","last_seen_at":"2026-09-11T03:10:01Z"},{"login":"unclejim7","last_seen_at":"2026-09-05T04:37:51Z"},{"login":"100megasats","last_seen_at":"2026-08-30T20:53:53Z"},{"login":"Bitcoin-Bill","last_seen_at":"2026-09-02T01:00:57Z"},{"login":"Korg1970","last_seen_at":"2026-09-12T17:42:58Z"},{"login":"Shitnobi","last_seen_at":"2026-08-26T23:09:24Z"},{"login":"email:56537ddd43347582","last_seen_at":"2026-08-25T19:35:57Z"},{"login":"email:78da113009979a72","last_seen_at":"2026-08-30T03:08:17Z"},{"login":"email:93964419ae80c511","last_seen_at":"2026-09-20T10:42:49Z"},{"login":"mikeinspace","last_seen_at":"2026-09-10T05:25:42Z"},{"login":"remcoros","last_seen_at":"2026-09-12T15:11:21Z"}]};
 })();
 
 // ---- js/jumbotron.js ----
@@ -18909,6 +18933,9 @@ void main() {
     ",": [0, 0, 0, 0, 0, 0b00100, 0b01000],
     ":": [0, 0b00110, 0b00110, 0, 0b00110, 0b00110, 0],
     "/": [0b00001, 0b00010, 0b00010, 0b00100, 0b01000, 0b01000, 0b10000],
+    "%": [0b11001, 0b11010, 0b00010, 0b00100, 0b01000, 0b01011, 0b10011],
+    "(": [0b00010, 0b00100, 0b01000, 0b01000, 0b01000, 0b00100, 0b00010],
+    ")": [0b01000, 0b00100, 0b00010, 0b00010, 0b00010, 0b00100, 0b01000],
     "+": [0, 0b00100, 0b00100, 0b11111, 0b00100, 0b00100, 0],
     "*": [0, 0b10101, 0b01110, 0b11111, 0b01110, 0b10101, 0],
     "'": [0b00100, 0b00100, 0, 0, 0, 0, 0],
@@ -24009,6 +24036,43 @@ void main() {
   });
 })();
 
+// ---- characters/SaniExp.js ----
+(() => {
+  "use strict";
+  const BL = window.BL;
+  BL.characters.add({
+    handle: "SaniExp",
+    display: "Sani",
+    joined: 1790294400,
+    // Historical activity from the bundled Oogatron snapshot; live stats refresh it.
+    lastCommit: 1788367622,
+    look: { bald: true, face: "beard" },
+    dress: {
+      gear(k) {
+        const v = BL.models.makeVox(), ink = k.color("#252b2b"), faded = k.color("#414947");
+        // Keep the standard arm and hand shape; ink stops above the bare forearms.
+        v.fill(0, 2, 2, 7, 0, 2, k.skinJ);
+        v.fill(-1, 3, 8, 10, -1, 3, k.skinJ);
+        v.fill(-1, 3, 0, 1, -1, 3, k.skinJ);
+        for (let y = 6; y <= 10; y++) {
+          const lo = y >= 8 ? -1 : 0, hi = y >= 8 ? 3 : 2;
+          for (let t = lo; t <= hi; t++) {
+            // Broken bands and diagonal marks wrap all four faces of each upper arm.
+            if (y === 6 || (t + y + 12) % 3 === 0) {
+              v.set(t, y, lo, ink); v.set(hi, y, t, ink);
+            }
+            if (y === 6 || (t - y + 12) % 3 === 0) {
+              v.set(t, y, hi, faded); v.set(lo, y, t, faded);
+            }
+          }
+        }
+        const arm = k.vg(v, { x: -1.5 * k.u, y: -11 * k.u, z: -1.5 * k.u });
+        k.parts.armL.geometry = k.parts.armR.geometry = arm;
+      }
+    }
+  });
+})();
+
 // ---- characters/Tmmmemcee.js ----
 (() => {
   "use strict";
@@ -26194,7 +26258,9 @@ void main() {
         const d2 = lx * lx + ly * ly + lz * lz - tca * tca;
         if (d2 > r * r) continue;
         const thc = Math.sqrt(r * r - d2);
-        const hitT = tca - thc;
+        // Authored controls may refine their broad sphere to the visible surface.
+        const hitT = t.owner.pickRay ? t.owner.pickRay(ray) : tca - thc;
+        if (!Number.isFinite(hitT) || t.owner.pickRay && hitT < 0) continue;
         const priority = t.owner.priority || 0;
         if (priority > bestPriority || (priority === bestPriority && hitT < bestT)) {
           bestT = hitT;
@@ -37897,6 +37963,12 @@ void main() {
         riding.updated = true;
         return;
       }
+      // A scene may host a seated resident without sending them into ordinary work/stroll AI.
+      if (ctx.residentPose && ctx.residentPose(cave, dt)) {
+        riding.continuous = false;
+        riding.updated = true;
+        return;
+      }
       if (cave.clankerDragged) {
         riding.continuous = false;
         riding.updated = true;
@@ -42829,6 +42901,604 @@ void main() {
     jaguar, toucan, monkey, flowers, log,
     COLORS: { LEAF, LEAF_DK, LEAF_LT, BARK, BARK_LT, STONE, STONE_DK, MOSS, WET, GOLD }
   };
+})();
+
+// ---- js/timechain-models.js ----
+// Timechain Sphere: a hollow, walk-in data observatory connected to the southwest rim.
+(() => {
+  "use strict";
+  const BL = window.BL = window.BL || {};
+  const { cached, box, merge, makeVox, voxelGeometry } = BL.models;
+  const { createNode, addChild } = BL.scene;
+  const SITE = { bearing: BL.terrain.TIMECHAIN.bearing, radius: 13, depth: 12, span: 18, width: 2.6 };
+  const DIR = { x: Math.sin(SITE.bearing), z: -Math.cos(SITE.bearing) };
+  const UNIT = 0.5, WOOD = "#795335", GOLD = "#c39748";
+  const ground = cached(() => {
+    const v = makeVox(), r = 12.55 / UNIT;
+    for (let x = -26; x < 26; x++) for (let z = -26; z < 26; z++) {
+      if (Math.hypot(x + 0.5, z + 0.5) > r) continue;
+      v.set(x, -1, z, Math.abs(x + 0.5) < 1.5 ? 2 : (x + z) % 4 === 0 ? 1 : 0);
+    }
+    return voxelGeometry(v, { unit: UNIT, palette: ["#263843", "#304650", "#a3874f"], origin: { x: 0, y: 0, z: 0 } });
+  });
+  // The destination is a hollow sphere, with a real doorway through both skins.
+  const shell = cached(() => {
+    const geo = { verts: [], faces: [], lines: [], lineWidth: 1 }, segments = 96, radius = 13, cy = 3;
+    const levels = Array.from({ length: 49 }, (_, i) => -Math.PI / 2 + i * Math.PI / 48);
+    levels.push(Math.asin(-cy / radius), Math.asin((4.8 - cy) / radius)); levels.sort((a, b) => a - b);
+    const colors = ["#d9700b", "#e8810d", "#f7931a", "#ef8910"].map(BL.math.hexToRgb);
+    for (let row = 0; row < levels.length - 1; row++) for (let col = 0; col < segments; col++) {
+      const lo = -Math.PI + col * 2 * Math.PI / segments, hi = lo + 2 * Math.PI / segments;
+      const bottom = levels[row], top = levels[row + 1], latitude = (bottom + top) / 2, longitude = (lo + hi) / 2;
+      const y = cy + radius * Math.sin(latitude);
+      if (Math.abs(longitude) < Math.PI / 16 && y > 0 && y < 4.8) continue;
+      const ribbon = Math.abs(latitude - 0.5 - 0.12 * Math.sin(longitude * 3)) < 0.06 || Math.abs(latitude + 0.5 + 0.12 * Math.sin(longitude * 3)) < 0.06;
+      for (let skin = 0; skin < 2; skin++) {
+        const base = geo.verts.length / 3, r = radius - skin * 0.16;
+        for (const [a, b] of [[lo, bottom], [hi, bottom], [hi, top], [lo, top]]) geo.verts.push(r * Math.cos(b) * Math.sin(a), cy + r * Math.sin(b), r * Math.cos(b) * Math.cos(a));
+        geo.faces.push({ i: skin ? [base + 3, base + 2, base + 1, base] : [base, base + 1, base + 2, base + 3], color: skin ? [19, 32, 45] : ribbon ? [255, 188, 83] : colors[(row + col % 3) % colors.length], emissive: skin ? 0.45 : ribbon ? 0.8 : 0.5 });
+        if (!skin) for (let edge = 0; edge < 2; edge++) geo.lines.push({ i: [base + edge, base + edge + 1], color: [133, 65, 8], emissive: 0.25 });
+      }
+    }
+    const bitcoin = ["00011011000", "00011011000", "01111111100", "00110000110", "00110000110", "00111111100", "00110000110", "00110000011", "00110000011", "01111111110", "00011011000", "00011011000"];
+    for (const [bearing, elevation] of [[0, 0.72], [Math.PI / 2, 0.25], [-Math.PI / 2, 0.25], [Math.PI, 0.25]]) {
+      for (let row = 0; row < bitcoin.length; row++) for (let col = 0; col < bitcoin[row].length; col++) {
+        if (bitcoin[row][col] !== "1") continue;
+        const left = bearing + (col - 5.5) * 0.075, right = left + 0.075;
+        const top = elevation + (6 - row) * 0.075, bottom = top - 0.075, base = geo.verts.length / 3;
+        for (const [a, b] of [[left, bottom], [right, bottom], [right, top], [left, top]]) geo.verts.push(13.05 * Math.cos(b) * Math.sin(a), cy + 13.05 * Math.sin(b), 13.05 * Math.cos(b) * Math.cos(a));
+        geo.faces.push({ i: [base, base + 1, base + 2, base + 3], color: [255, 249, 230], emissive: 0.85 });
+      }
+    }
+    return geo;
+  });
+  const portal = cached(() => merge(
+    box({ w: 5.6, h: 0.2, d: 0.6, color: "#ffbd53", emissive: 0.8, offset: { y: 4.85 } }),
+    ...[-2.7, 2.7].map(x => box({ w: 0.18, h: 4.8, d: 0.6, color: "#ffbd53", emissive: 0.8, offset: { x, y: 2.4 } }))
+  ));
+  const bridge = cached(() => {
+    const geos = [], count = Math.round(SITE.span / 0.45), length = SITE.span / count;
+    // Touching planks keep continuous support; a shallow lip avoids coplanar grass at each shore.
+    for (let i = 0; i < count; i++) geos.push(box({ w: SITE.width, h: 0.16, d: length, color: i % 3 ? WOOD : "#8b6340", offset: { y: -0.04, z: (i + 0.5) * length } }));
+    for (const side of [-1, 1]) {
+      const x = side * (SITE.width / 2 + 0.08);
+      geos.push(box({ w: 0.12, h: 0.12, d: SITE.span, color: GOLD, offset: { x, y: 0.95, z: SITE.span / 2 } }));
+      for (let i = 0; i <= 6; i++) geos.push(box({ w: 0.18, h: 1.1, d: 0.18, color: WOOD, offset: { x, y: 0.45, z: i * SITE.span / 6 } }));
+    }
+    return merge(...geos);
+  });
+  const chairBase = cached(() => merge(
+    box({ w: 1.35, h: 0.12, d: 1.1, color: "#33434c", offset: { y: 0.12 } }),
+    box({ w: 0.22, h: 0.55, d: 0.22, color: "#8a9ba6", offset: { y: 0.38 } })
+  ));
+  const chairSeat = cached(() => merge(
+    box({ w: 1.24, h: 0.22, d: 0.95, color: "#253d48", offset: { y: 0.68 } }),
+    box({ w: 1.04, h: 0.14, d: 0.85, color: "#477485", offset: { y: 0.81 } }),
+    box({ w: 1.08, h: 0.15, d: 0.4, color: "#477485", offset: { y: 0.64, z: 0.52 } }),
+    ...[-0.63, 0.63].map(x => box({ w: 0.18, h: 0.18, d: 1.05, color: "#334e5a", offset: { x, y: 1.08 } }))
+  ));
+  const chairBack = cached(() => merge(
+    box({ w: 1.25, h: 1.25, d: 0.22, color: "#253d48", offset: { y: 0.58 } }),
+    box({ w: 1.05, h: 0.9, d: 0.17, color: "#477485", offset: { y: 0.55, z: 0.15 } }),
+    box({ w: 0.72, h: 0.27, d: 0.25, color: "#68a0ad", offset: { y: 1.07, z: 0.16 } })
+  ));
+  const laptopBase = cached(() => {
+    const geos = [box({ w: 1.04, h: 0.065, d: 0.65, color: "#96a9b5" })];
+    for (let row = 0; row < 3; row++) for (let col = 0; col < 9; col++) geos.push(box({ w: 0.075, h: 0.015, d: 0.065, color: "#263843", offset: { x: (col - 4) * 0.1, y: 0.042, z: 0.06 + row * 0.08 } }));
+    geos.push(box({ w: 0.3, h: 0.01, d: 0.16, color: "#617681", offset: { y: 0.04, z: -0.18 } }));
+    return merge(...geos);
+  });
+  const laptopLid = cached(() => merge(
+    box({ w: 1.04, h: 0.47, d: 0.055, color: "#96a9b5", offset: { y: 0.22 } }),
+    box({ w: 0.94, h: 0.39, d: 0.015, color: "#112733", emissive: 0.45, offset: { y: 0.23, z: -0.036 } }),
+    ...[0, 1, 2, 3].map(i => box({ w: 0.28 + (i % 3) * 0.13, h: 0.025, d: 0.01, color: i % 2 ? "#8ee2a2" : "#67d8ed", emissive: 0.85, offset: { x: -0.14, y: 0.34 - i * 0.075, z: -0.05 } }))
+  ));
+  const build = (island) => {
+    let rim = 27.4;
+    while (rim < 36 && island.surfaceAt(DIR.x * (rim + 0.1), DIR.z * (rim + 0.1)) > 0.5) rim += 0.1;
+    // Overlap both shores, so the bridge meets solid ground rather than a voxel corner.
+    const start = rim - 1, bridgeZ = SITE.radius - 2, radius = start + SITE.span + bridgeZ;
+    const place = { x: DIR.x * radius, y: island.surfaceAt(DIR.x * start, DIR.z * start) + 0.02, z: DIR.z * radius, ry: -SITE.bearing, rim: start, bridgeZ, approachFrom: BL.terrain.TIMECHAIN.from };
+    const node = createNode({ position: { x: place.x, y: place.y, z: place.z }, rotation: { x: 0, y: place.ry, z: 0 } });
+    const groundNode = createNode({ geometry: ground() });
+    const shellNode = createNode({ geometry: shell() });
+    const entrance = createNode({ geometry: portal(), position: { x: 0, y: 0, z: 12.65 } });
+    addChild(entrance, createNode({ position: { x: 0, y: 5.6, z: 0 }, geometry: BL.hubModels.caveSign("TIMECHAIN SPHERE") }));
+    const bridgeNode = createNode({ position: { x: 0, y: 0, z: bridgeZ }, geometry: bridge() });
+    const chairNode = createNode({ position: { x: 0, y: 0, z: 1.8 }, geometry: chairBase() });
+    const swivel = createNode({ geometry: chairSeat(), rotation: { x: 0, y: Math.PI, z: 0 } });
+    const back = createNode({ geometry: chairBack(), position: { x: 0, y: 0.82, z: -0.44 }, rotation: { x: -0.23, y: 0, z: 0 } });
+    const laptop = createNode({ geometry: laptopBase(), position: { x: 0, y: 1, z: 0.58 } });
+    addChild(laptop, createNode({ geometry: laptopLid(), position: { x: 0, y: 0.035, z: 0.3 }, rotation: { x: 0.14, y: 0, z: 0 } }));
+    addChild(swivel, back, laptop); addChild(chairNode, swivel);
+    addChild(node, groundNode, shellNode, entrance, bridgeNode, chairNode);
+    return { node, shell: shellNode, entrance, ground: groundNode, bridge: bridgeNode, chair: chairNode, swivel, laptop, place };
+  };
+  BL.timechainModels = { SITE, DIR, build };
+})();
+
+// ---- js/timechain-beer.js ----
+(() => {
+  "use strict";
+  const BL = window.BL;
+  const { createNode, addChild, removeChild } = BL.scene;
+  const { box, merge, cached, lathe, ring, tube } = BL.models;
+  const dispenserGeometry = cached(() => merge(
+    box({ w: 1.5, h: 0.15, d: 1.2, color: "#33434c", offset: { y: 0.075 } }),
+    box({ w: 1.25, h: 0.8, d: 0.85, color: "#ae6c26", offset: { y: 0.55 } }),
+    box({ w: 1.4, h: 0.12, d: 1.1, color: "#96a9b5", offset: { y: 0.99 } }),
+    box({ w: 0.18, h: 0.65, d: 0.18, color: "#96a9b5", offset: { y: 1.36 } }),
+    box({ w: 0.18, h: 0.14, d: 0.6, color: "#d5a34b", offset: { y: 1.65, z: 0.25 } }),
+    box({ w: 0.1, h: 0.18, d: 0.1, color: "#96a9b5", offset: { y: 1.59, z: 0.5 } }),
+    box({ w: 0.55, h: 0.06, d: 0.48, color: "#263843", offset: { y: 1.075, z: 0.45 } })
+  ));
+  const CAPACITY_LITRES = 0.5, FILL_RADIUS = 0.05;
+  const FILL_HEIGHT = CAPACITY_LITRES * 0.001 / (Math.PI * FILL_RADIUS * FILL_RADIUS);
+  const GLASS_SCALE = 1.3;
+  // The serving glass holds 500 ml; its larger display scale keeps it readable in the scene.
+  const glassGeometry = cached(() => {
+    const pieces = [ring({ r: 0.06, thickness: 0.006, y: 0.18, segments: 24, color: "#d8eff1" }),
+      lathe({ profile: [[0, 0], [0.049, 0], [0.055, 0.008], [0.06, 0.18], [0.052, 0.18], [0.05, 0.012], [0, 0.012]], segments: 24, color: "#bbdee2" }),
+      tube({ path: t => ({ x: 0.06 + Math.sin(Math.PI * t) * 0.05, y: 0.025 + t * 0.1, z: 0 }), radius: () => 0.008, rings: 12, segments: 6, colorFn: () => "#c5e4e8" })];
+    for (let i = 0; i < 12; i++) pieces.push(box({ w: 0.004, h: 0.16, d: 0.004, color: "#bbdee2", offset: { x: Math.cos(i * Math.PI / 6) * 0.057, y: 0.087, z: Math.sin(i * Math.PI / 6) * 0.057 } }));
+    return merge(...pieces);
+  });
+  const liquidGeometry = cached(() => lathe({ profile: [[0, 0], [FILL_RADIUS, 0], [FILL_RADIUS, FILL_HEIGHT], [0, FILL_HEIGHT]], segments: 24, color: "#eaa323", emissive: 0.12 }));
+  const foamGeometry = cached(() => lathe({ profile: [[0, 0], [0.051, 0], [0.051, 0.005], [0, 0.005]], segments: 24, color: "#fff1d4" }));
+  const cabinetGeometry = cached(() => merge(
+    box({ w: 1.7, h: 1.8, d: 0.12, color: "#283e48", offset: { y: 0.9, z: -0.3 } }),
+    ...[-0.8, 0.8].map(x => box({ w: 0.1, h: 1.8, d: 0.7, color: "#96a9b5", offset: { x, y: 0.9 } })),
+    ...[-0.68, 0.68].map(x => box({ w: 0.025, h: 1.56, d: 0.54, color: "#86b9c2", emissive: 0.08, offset: { x, y: 0.9 } })),
+    ...[0.12, 0.8, 1.55, 1.8].map(y => box({ w: 1.7, h: 0.07, d: 0.7, color: "#96a9b5", offset: { y } }))
+  ));
+  const binGeometry = cached(() => lathe({ profile: [[0, 0], [0.38, 0], [0.46, 0.8], [0.4, 0.8], [0.33, 0.1], [0, 0.1]], segments: 16, color: "#455964" }));
+  const streamGeometry = cached(() => box({ w: 0.025, h: 1, d: 0.025, color: "#edaa24", emissive: 0.2 }));
+  const trayGeometry = cached(() => box({ w: 0.6, h: 0.09, d: 0.65, color: "#334e5a" }));
+  const shardGeometry = cached(() => merge(...Array.from({ length: 9 }, (_, i) => box({ w: 0.07, h: 0.025, d: 0.11, color: "#c5e4e8", offset: { x: Math.sin(i * 2.4) * 0.33, y: 0.025, z: Math.cos(i * 2.4) * 0.3 } }))));
+  const panGeometry = cached(() => box({ w: 0.65, h: 0.045, d: 0.5, color: "#738996" }));
+  const brushGeometry = cached(() => merge(box({ w: 0.045, h: 0.65, d: 0.045, color: "#b17d46", offset: { y: -0.25 } }), box({ w: 0.4, h: 0.13, d: 0.12, color: "#d3ba72", offset: { y: -0.6 } })));
+  const leverGeometry = cached(() => box({ w: 0.08, h: 0.28, d: 0.08, color: "#263843", offset: { y: 0.12 } }));
+  const DURATIONS = { work: 18, sip: 3, chug: 6.5, spin: 2.5, rise: 2, walk: 5, fill: 7, return: 5, sit: 2, cleanwalk: 1, clean: 1.25, trashwalk: 2.5, discard: 0.75, cabinetwalk: 1, take: 0.75, tapwalk: 1 };
+  const STATION_X = 11.6, DISPENSER_Z = 0, CABINET_Z = -2.2, BIN_Z = 2.2, WALK_X = 9.6;
+  const smooth = t => { t = Math.max(0, Math.min(1, t)); return t * t * (3 - 2 * t); };
+  const create = site => {
+    const station = (geometry, z) => createNode({ geometry, position: { x: STATION_X, y: 0, z }, rotation: { x: 0, y: -Math.PI / 2, z: 0 } });
+    const dispenser = station(dispenserGeometry(), DISPENSER_Z), cabinet = station(cabinetGeometry(), CABINET_Z), bin = station(binGeometry(), BIN_Z);
+    const badge = createNode({ geometry: BL.hubModels.caveSign("500 ML"), position: { x: 0, y: 0.62, z: 0.46 }, scale: { x: 0.18, y: 0.18, z: 0.18 } });
+    const stream = createNode({ geometry: streamGeometry(), visible: false });
+    const lever = createNode({ geometry: leverGeometry(), position: { x: 0, y: 1.7, z: 0.25 } });
+    addChild(dispenser, badge, stream, lever); addChild(site.node, dispenser, cabinet, bin);
+    const stock = [];
+    for (const y of [0.16, 0.84]) for (const x of [-0.48, 0, 0.48]) {
+      const cup = createNode({ geometry: glassGeometry(), position: { x, y, z: 0.05 }, scale: { x: GLASS_SCALE, y: GLASS_SCALE, z: GLASS_SCALE } });
+      stock.push(cup); addChild(cabinet, cup);
+    }
+    const tray = createNode({ geometry: trayGeometry(), position: { x: 0.95, y: 1.05, z: 0 } });
+    addChild(site.swivel, tray);
+    const mug = createNode({ geometry: glassGeometry(), scale: { x: GLASS_SCALE, y: GLASS_SCALE, z: GLASS_SCALE } }), liquid = createNode({ geometry: liquidGeometry(), position: { x: 0, y: 0.012, z: 0 } }), foam = createNode({ geometry: foamGeometry() });
+    addChild(mug, liquid, foam); addChild(tray, mug);
+    const shards = createNode({ geometry: shardGeometry(), visible: false }), pan = createNode({ geometry: panGeometry(), visible: false }), brush = createNode({ geometry: brushGeometry(), visible: false });
+    addChild(site.node, shards, pan, brush);
+    const state = { mode: "work", elapsed: 0, litres: CAPACITY_LITRES, sips: 0, refills: 0, broken: false, cleaned: 0, replaced: 0 };
+    let sipStart = CAPACITY_LITRES, startAngle = Math.PI, x = 0, z = 1.8, fromX = 0, fromZ = 0, toX = 0, toZ = 0, fallX = 0, fallZ = 0, fallY = 0;
+    const mount = (node, parent, px, py, pz) => {
+      if (node.parent !== parent) { removeChild(node.parent, node); addChild(parent, node); }
+      node.position.x = px; node.position.y = py; node.position.z = pz;
+      node.rotation.x = node.rotation.y = node.rotation.z = 0;
+    };
+    const route = (mode, tx, tz) => { state.mode = mode; fromX = x; fromZ = z; toX = tx; toZ = tz; };
+    const seated = () => state.mode === "work" || state.mode === "sip" || state.mode === "chug" || state.mode === "spin";
+    const pause = () => {
+      state.mode = "work"; state.elapsed = 0;
+      if (state.broken) state.litres = 0;
+      state.broken = false; x = 0; z = 1.8;
+      mount(mug, tray, 0, 0.07, 0); mount(shards, site.node, 0, 0, 0);
+      mount(pan, site.node, 0, 0, 0); mount(brush, site.node, 0, 0, 0);
+      mug.visible = stream.visible = shards.visible = pan.visible = brush.visible = false;
+      lever.rotation.x = 0; stock[4].visible = true;
+    };
+    const act = (action, seat) => {
+      if (state.mode !== "work" && state.mode !== "sip") return false;
+      state.elapsed = 0; sipStart = state.litres;
+      if (action === "chug") { state.mode = "chug"; return true; }
+      if (action !== "spin") return false;
+      state.mode = "spin"; seat.speed = Math.min(7, seat.speed + 4.5);
+      const h = site.chair.scale.x;
+      fallX = Math.cos(seat.angle) * 0.95 * h;
+      fallZ = 1.8 - Math.sin(seat.angle) * 0.95 * h; fallY = 1.12 * h;
+      return true;
+    };
+    const update = (cave, seat, dt) => {
+      const h = cave.traits.height, parts = cave.parts, p = site.place;
+      state.elapsed += dt;
+      while (state.elapsed >= DURATIONS[state.mode]) {
+        state.elapsed -= DURATIONS[state.mode];
+        // Complete the previous leg before the next route starts (also for large dt).
+        if (state.mode.endsWith("walk") || state.mode === "return") { x = toX; z = toZ; }
+        switch (state.mode) {
+          case "work": sipStart = state.litres; state.mode = state.litres > 0.001 ? "sip" : "rise"; startAngle = seat.angle; break;
+          case "sip": case "chug": {
+            const chug = state.mode === "chug";
+            state.sips++; state.litres = chug ? 0 : Math.max(0, sipStart - CAPACITY_LITRES / 5);
+            state.mode = state.litres < 0.001 ? "rise" : "work"; startAngle = seat.angle; break;
+          }
+          case "spin": state.broken = true; state.litres = 0; state.mode = "rise"; startAngle = seat.angle; break;
+          case "rise": x = 1.6; z = 0.2; if (state.broken) route("cleanwalk", -1.7, -0.2); else route("walk", WALK_X, DISPENSER_Z); break;
+          case "cleanwalk": state.mode = "clean"; break;
+          case "clean": route("trashwalk", WALK_X, BIN_Z); break;
+          case "trashwalk": state.mode = "discard"; break;
+          case "discard": state.cleaned++; route("cabinetwalk", WALK_X, CABINET_Z); break;
+          case "cabinetwalk": state.mode = "take"; break;
+          case "take": state.broken = false; state.replaced++; stock[4].visible = false; route("tapwalk", WALK_X, DISPENSER_Z); break;
+          case "walk": case "tapwalk": state.mode = "fill"; break;
+          case "fill": state.litres = CAPACITY_LITRES; state.refills++; route("return", 1.6, 0.2); break;
+          case "return": state.mode = "sit"; break;
+          case "sit": state.mode = "work"; x = 0; z = 1.8; stock[4].visible = true; break;
+        }
+      }
+      const mode = state.mode, t = state.elapsed / DURATIONS[mode];
+      mug.visible = !state.broken; stream.visible = mode === "fill";
+      lever.rotation.x = mode === "fill" ? -0.5 : 0;
+      pan.visible = mode === "clean" || mode === "trashwalk" || mode === "discard";
+      brush.visible = mode === "clean";
+      if (mode === "sip" || mode === "chug") state.litres = Math.max(0, sipStart - (mode === "chug" ? sipStart : CAPACITY_LITRES / 5) * smooth((t - 0.25) / 0.5));
+      if (mode === "fill") state.litres = t * CAPACITY_LITRES;
+      liquid.visible = foam.visible = state.litres > 0.001;
+      const fill = state.litres / CAPACITY_LITRES;
+      liquid.scale.y = Math.max(0.001, fill); foam.position.y = 0.012 + fill * FILL_HEIGHT;
+      if (mode === "work") { mount(mug, tray, 0, 0.07, 0); return; }
+      if (mode === "spin") {
+        const flight = Math.min(1, state.elapsed / 0.7);
+        mount(mug, site.node, fallX + (-1.7 - fallX) * flight, Math.max(0.04, fallY * (1 - flight * flight)), fallZ + (-0.2 - fallZ) * flight);
+        mug.rotation.z = flight * 2.4;
+        if (flight === 1) { state.broken = true; state.litres = 0; mug.visible = false; }
+        mount(shards, site.node, -1.7, 0.01, -0.2); shards.visible = state.broken;
+        return;
+      }
+      mount(mug, parts.armR, -0.27, -0.48 * h, 0.08 * h);
+      if (mode === "sip" || mode === "chug") {
+        const lift = smooth(t / 0.25) * (1 - smooth((t - 0.75) / 0.25));
+        parts.armR.rotation.x = -0.95 - lift * 0.75; parts.armR.rotation.z = -0.2 * lift;
+        parts.head.rotation.x = 0.28 - lift * 0.4;
+        mug.rotation.x = -parts.armR.rotation.x + 0.23 - lift * (mode === "chug" ? 1.1 : 0.7);
+        return;
+      }
+      seat.speed = 0;
+      seat.angle = mode === "rise" ? startAngle + Math.atan2(Math.sin(Math.PI - startAngle), Math.cos(Math.PI - startAngle)) * smooth(t) : Math.PI;
+      site.swivel.rotation.y = seat.angle;
+      let standing = 1, heading = Math.PI / 2;
+      const walking = mode.endsWith("walk") || mode === "return";
+      if (mode === "rise" || mode === "sit") {
+        standing = mode === "rise" ? smooth(t) : 1 - smooth(t);
+        x = 1.6 * standing; z = 1.8 - 1.6 * standing; heading = seat.angle;
+      } else if (walking) {
+        x = fromX + (toX - fromX) * t; z = fromZ + (toZ - fromZ) * t;
+        heading = Math.atan2(toX - fromX, toZ - fromZ);
+      }
+      cave.root.position.x = p.x + x * Math.cos(p.ry) + z * Math.sin(p.ry);
+      cave.root.position.z = p.z - x * Math.sin(p.ry) + z * Math.cos(p.ry);
+      cave.root.position.y = p.y + 0.88 * h * (1 - standing) + cave.baseY * standing;
+      cave.root.rotation.x = mode === "clean" ? 0.65 : -0.23 * (1 - standing); cave.root.rotation.y = p.ry + heading;
+      const stride = walking ? Math.sin(state.elapsed * 9) * 0.5 : 0;
+      parts.legL.rotation.x = -1.05 * (1 - standing) + stride; parts.legR.rotation.x = -1.05 * (1 - standing) - stride;
+      parts.head.rotation.x = 0.12; parts.armL.rotation.x = -0.2 - stride * 0.5;
+      parts.armR.rotation.x = -1.1; parts.armR.rotation.z = 0;
+      mug.rotation.x = -parts.armR.rotation.x - cave.root.rotation.x;
+      if (mode === "fill") {
+        mount(mug, dispenser, 0, 1.11, 0.5);
+        const bottom = 1.15 + fill * FILL_HEIGHT;
+        stream.scale.y = Math.max(0.01, 1.5 - bottom);
+        stream.position.y = (1.5 + bottom) / 2; stream.position.z = 0.5;
+        parts.armR.rotation.x = -2;
+      }
+      if (mode === "clean") {
+        mount(pan, site.node, -1.7, 0.08, -0.2);
+        mount(brush, parts.armR, 0, -0.55 * h, 0);
+        parts.armR.rotation.x = -0.6; parts.armR.rotation.z = Math.sin(t * Math.PI * 8) * 0.35;
+        mount(shards, site.node, -1.7, 0.02 + t * 0.08, -0.2); shards.scale.x = shards.scale.z = 1 - t * 0.65;
+      } else if (mode === "trashwalk" || mode === "discard") {
+        mount(pan, parts.armL, 0, -0.56 * h, 0.1); parts.armL.rotation.x = -1.3;
+        pan.rotation.x = 1.3; mount(shards, pan, 0, 0.03, 0);
+        if (mode === "discard") {
+          mount(shards, site.node, WALK_X + (STATION_X - WALK_X) * t, 0.85 + Math.sin(t * Math.PI) * 0.5, BIN_Z);
+          shards.visible = t < 0.9; pan.rotation.z = -t;
+        }
+      } else if (!state.broken || mode === "cabinetwalk" || mode === "take") shards.visible = false;
+      if (mode === "take") { parts.armR.rotation.x = -1.7; mug.visible = t > 0.6; mount(mug, cabinet, 0, 0.84, 0.05); stock[4].visible = t <= 0.6; }
+    };
+    return { dispenser, cabinet, bin, mug, stream, shards, state, update, pause, act, get seated() { return seated(); }, dispose: pause };
+  };
+  BL.timechainBeer = { create };
+})();
+
+// ---- js/timechain-data.js ----
+// Public Timechain Index readings; each endpoint owns its refresh and backoff.
+(() => {
+  "use strict";
+  const BL = window.BL = window.BL || {};
+  const BASE = "https://api.timechainindex.com/OogaBooga/";
+  const ENDPOINTS = ["bitcoin_distribution", "addresses_distribution", "utxos_distribution", "etf_history", "cex_history", "top10holders"];
+  const SOURCES = ["https://timechainindex.com/bitcoindistribution", "https://timechainindex.com/addcounttovaluebar", "https://timechainindex.com/?resource=utxocounttovaluebar", "https://timechainindex.com/tagsoverviewver", "https://timechainindex.com/tagsoverviewver", "https://timechainindex.com/holdingsbyentityver"];
+  const TITLES = ["BITCOIN DISTRIBUTION", "ADDRESS BALANCES (BTC)", "UTXO SIZES (BTC)", "ETF/ETP HOLDINGS", "EXCHANGE HOLDINGS", "TOP 10 HOLDERS"];
+  const number = v => {
+    if (typeof v !== "number" && (typeof v !== "string" || !/^-?\d+(\.\d+)?$/.test(v))) throw new Error("Invalid number");
+    const n = Number(v);
+    if (!Number.isFinite(n)) throw new Error("Invalid number");
+    return n;
+  };
+  const positive = v => { const n = number(v); if (n < 0) throw new Error("Negative balance"); return n; };
+  const label = v => { if (typeof v !== "string" || !v.trim() || v.length > 160) throw new Error("Invalid label"); return v; };
+  const fmt = n => n.toLocaleString("en-US", { maximumFractionDigits: 1 });
+  const signed = n => (n > 0 ? "+" : "") + fmt(n);
+  const date = v => {
+    if (typeof v !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(v) || !Number.isFinite(Date.parse(v)) || new Date(v).toISOString().slice(0, 10) !== v) throw new Error("Invalid date");
+    return v;
+  };
+  const stampDate = stamp => date(stamp.slice(0, 4) + "-" + stamp.slice(4, 6) + "-" + stamp.slice(6, 8));
+  const snapshotLabel = (day, height) => [day, height === null ? "" : "BLOCK " + height].filter(Boolean).join(" / ");
+  const parse = (index, rows) => {
+    if (!Array.isArray(rows) || !rows.length || rows.length > 1000) throw new Error("Invalid response");
+    let snapshotDate = "", blockHeight = null;
+    for (const row of rows) {
+      if (row.blocktime != null) {
+        const day = date(row.blocktime);
+        if (snapshotDate && day !== snapshotDate) throw new Error("Mixed dates");
+        snapshotDate = day;
+      }
+      if (row.blockheight != null) {
+        const height = positive(row.blockheight);
+        if (!Number.isSafeInteger(height) || blockHeight !== null && height !== blockHeight) throw new Error("Mixed blocks");
+        blockHeight = height;
+      }
+    }
+    let lines = [], bars = [], table = [], asof = "", note = "";
+    if (index === 0) {
+      const items = rows.map(r => ({ name: label(r.tag), value: positive(r.total) })).sort((a, b) => b.value - a.value);
+      const mined = items.filter(r => r.name !== "To Be Mined"), total = mined.reduce((s, r) => s + r.value, 0);
+      if (!total) throw new Error("Empty supply");
+      const detail = mined.map(r => r.name + ": " + fmt(r.value) + " BTC (" + (r.value / total * 100).toFixed(1) + "%)");
+      lines = [fmt(total) + " BTC CLASSIFIED", ...mined.slice(0, 5).map(r => r.name + " " + (r.value / total * 100).toFixed(1) + "%")];
+      bars = mined.map(r => r.value);
+      table = ["CATEGORY                  BTC       SHARE", ...mined.map(r => r.name.padEnd(22) + fmt(r.value).padStart(13) + "  " + (r.value / total * 100).toFixed(1) + "%")];
+      note = "Shares of reported mined categories. API attributions, including Individuals, are estimates, not proof of ownership.\n" + detail.join("\n");
+      const unmined = items.find(r => r.name === "To Be Mined");
+      if (unmined) table.push("", "TO BE MINED  " + fmt(unmined.value) + " BTC");
+      if (unmined) note += "\nTo Be Mined: " + fmt(unmined.value) + " BTC (excluded from percentages).";
+    } else if (index === 1 || index === 2) {
+      const field = index === 1 ? "TotalAddresses" : "TotalUTXOS", unit = index === 1 ? "ADDRESSES" : "UTXOS";
+      const items = rows.map(r => {
+        const count = positive(r[field]), sats = positive(r.TotalSats);
+        if (!Number.isSafeInteger(count) || !Number.isSafeInteger(sats)) throw new Error("Invalid count");
+        return { name: label(r.Bracket), count, btc: sats / 1e8 };
+      });
+      const total = items.reduce((s, r) => s + r.count, 0);
+      if (!total) throw new Error("Empty distribution");
+      const ranked = items.slice().sort((a, b) => b.count - a.count);
+      lines = [fmt(total) + " " + unit, ...ranked.slice(0, 5).map(r => r.name.replace(" BTC", "") + " " + (r.count / total * 100).toFixed(1) + "%")];
+      bars = items.map(r => r.count);
+      table = items.flatMap(r => [r.name, "  " + fmt(r.count) + " " + unit + " / " + (r.count / total * 100).toFixed(1) + "%", "  " + fmt(r.btc) + " BTC", ""]);
+      note = "Distribution by " + unit.toLowerCase() + " count, not BTC share. Addresses and UTXOs are not people. All balance brackets below:\n" + items.map(r => r.name + ": " + fmt(r.count) + " " + unit.toLowerCase() + " (" + (r.count / total * 100).toFixed(1) + "%), " + fmt(r.btc) + " BTC").join("\n");
+    } else if (index === 3 || index === 4) {
+      const tag = index === 3 ? "ETFs/ETPs" : "CEXs", r = rows.find(r => r.tag === tag);
+      if (!r) throw new Error("Missing category");
+      const key = Object.keys(r).filter(k => /^total_\d{14}$/.test(k)).sort().pop();
+      if (!key) throw new Error("Missing holdings date");
+      asof = stampDate(key.slice(6));
+      if (snapshotDate && snapshotDate !== asof) throw new Error("Mixed dates");
+      snapshotDate = asof;
+      const changes = Object.keys(r).filter(k => /^diff_total_\d{14}$/.test(k)).map(k => ({ date: stampDate(k.slice(11)), value: number(r[k]) })).sort((a, b) => b.date.localeCompare(a.date));
+      const at = new Date(asof), prior = days => new Date(at.getTime() - days * 86400000).toISOString().slice(0, 10);
+      const monthsAgo = months => {
+        const d = new Date(at); d.setUTCDate(1); d.setUTCMonth(d.getUTCMonth() - months);
+        const last = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 0)).getUTCDate(); d.setUTCDate(Math.min(at.getUTCDate(), last)); return d.toISOString().slice(0, 10);
+      };
+      lines = [fmt(positive(r[key])) + " BTC HELD", ...[["1D", prior(1)], ["7D", prior(7)], ["1M", monthsAgo(1)], ["90D", prior(90)], ["1Y", monthsAgo(12)]].map(([name, target]) => {
+        const c = changes.find(c => c.date === target); return name + " " + (c ? signed(c.value) + " BTC" : "UNAVAILABLE");
+      })];
+      table = ["BALANCE CHANGE SINCE", ...changes.map(c => c.date + "   " + signed(c.value) + " BTC")];
+      note = "Aggregate " + tag + " on-chain balances, not investment inflows. Each change compares the holdings date to the stated earlier snapshot. Missing exact comparisons stay unavailable.\n" + changes.map(c => "Since " + c.date + ": " + signed(c.value) + " BTC").join("\n");
+    } else if (index === 5) {
+      const items = rows.map(r => ({ name: label(r.entity), tag: label(r.tag), value: positive(r.total), addresses: positive(r.addcount), utxos: positive(r.utxos) })).sort((a, b) => b.value - a.value).slice(0, 10);
+      lines = ["TOP HOLDERS / BTC", ...items.slice(0, 5).map((r, i) => (i + 1) + ". " + r.name.split(" (")[0].slice(0, 21) + " " + fmt(r.value))];
+      bars = items.map(r => r.value);
+      table = items.flatMap((r, i) => [(i + 1) + ". " + r.name, "   " + fmt(r.value) + " BTC / " + r.tag, "   " + fmt(r.addresses) + " ADDRESSES / " + fmt(r.utxos) + " UTXOS", ""]);
+      note = "Balances in BTC. Labels are API attributions, not proof of ownership; categories can include groups.\n" + items.map((r, i) => (i + 1) + ". " + r.name + " [" + r.tag + "]: " + fmt(r.value) + " BTC; " + fmt(r.addresses) + " addresses; " + fmt(r.utxos) + " UTXOs").join("\n");
+    } else throw new Error("Unknown view");
+    return { title: TITLES[index], lines, bars, table, asof: snapshotLabel(snapshotDate, blockHeight), snapshotDate, blockHeight, note };
+  };
+  const create = onChange => {
+    const boards = TITLES.map((title, i) => ({ title, lines: [], bars: [], asof: "", note: "", status: "LOADING", checked: 0, source: SOURCES[i] }));
+    const states = boards.map(() => ({ timer: 0, controller: null, failures: 0, due: 0, pending: null }));
+    let disposed = false, started = false, enabled = false;
+    let sharedDate = "", sharedHeight = null;
+    const shareSnapshot = index => {
+      // The endpoints describe one snapshot; fill omissions as sibling responses arrive.
+      // Failed views retain both their last reading and its previous snapshot label.
+      boards.forEach((board, i) => {
+        if (board.status !== "LIVE API") return;
+        const asof = snapshotLabel(board.snapshotDate || sharedDate, board.blockHeight ?? sharedHeight);
+        if (asof === board.asof) return;
+        board.asof = asof;
+        if (i !== index && onChange) onChange(i);
+      });
+    };
+    const poll = index => {
+      const s = states[index], board = boards[index];
+      if (disposed || document.hidden) return Promise.resolve();
+      if (s.pending) return s.pending;
+      clearTimeout(s.timer); s.timer = 0;
+      const controller = new AbortController(); s.controller = controller;
+      s.pending = (async () => {
+        const timeout = setTimeout(() => controller.abort(), 15000);
+        let retry = 0;
+        try {
+          const response = await fetch(BASE + ENDPOINTS[index], { signal: controller.signal, credentials: "omit", cache: "no-store" });
+          if (!response.ok) {
+            const value = response.headers.get("Retry-After");
+            retry = value ? (/^\d+$/.test(value) ? Number(value) * 1000 : Date.parse(value) - Date.now()) : 0;
+            throw new Error("Request failed");
+          }
+          const result = parse(index, await response.json());
+          if (disposed || controller.signal.aborted) return;
+          Object.assign(board, result, { status: "LIVE API", checked: Date.now() }); s.failures = 0;
+          if (result.snapshotDate) sharedDate = result.snapshotDate;
+          if (result.blockHeight !== null) sharedHeight = result.blockHeight;
+        } catch {
+          if (disposed || document.hidden) return;
+          s.failures++;
+          board.status = board.checked ? "STALE / RETRYING" : "API UNAVAILABLE";
+        } finally {
+          clearTimeout(timeout); s.controller = null; s.pending = null;
+          if (!disposed) {
+            if (document.hidden && controller.signal.aborted) { s.due = 0; return; }
+            const delay = Math.max(Number.isFinite(retry) ? Math.max(0, retry) : 0, s.failures ? Math.min(1800000, 30000 * 2 ** Math.min(s.failures - 1, 6)) : 300000);
+            s.due = Date.now() + Math.min(delay, 2147483647);
+            if (enabled && !document.hidden) s.timer = setTimeout(() => poll(index), Math.min(delay, 2147483647));
+            shareSnapshot(index);
+            if (onChange) onChange(index);
+          }
+        }
+      })();
+      return s.pending;
+    };
+    const visibility = () => {
+      states.forEach((s, i) => {
+        clearTimeout(s.timer); s.timer = 0;
+        if (document.hidden) { if (s.controller) s.controller.abort(); }
+        else if (enabled) s.timer = setTimeout(() => poll(i), Math.max(0, s.due - Date.now()));
+      });
+    };
+    return { boards, refresh: () => Promise.all(states.map((s, i) => poll(i))), start() {
+      if (started || disposed) return;
+      started = true;
+      const q = new URLSearchParams(location.search);
+      enabled = q.get("timechain") !== "0" && (!q.has("nosim") || q.get("timechain") === "1");
+      if (enabled) { document.addEventListener("visibilitychange", visibility); states.forEach((s, i) => poll(i)); }
+      else boards.forEach(b => { b.status = "LIVE DATA PAUSED"; });
+    }, dispose() {
+      disposed = true; enabled = false;
+      document.removeEventListener("visibilitychange", visibility);
+      states.forEach(s => { clearTimeout(s.timer); if (s.controller) s.controller.abort(); });
+    } };
+  };
+  BL.timechainData = { parse, create, TITLES, ENDPOINTS };
+})();
+
+// ---- js/timechain-boards.js ----
+// Six permanent wall sections inside the Timechain Sphere; no screen furniture or tabs.
+(() => {
+  "use strict";
+  const BL = window.BL = window.BL || {};
+  const { createNode, addChild } = BL.scene;
+  const W = 384, RADIUS = 12.72, WIDTH = 10.8, HEIGHT = 9.4, BOTTOM = 1.1, BG = [19, 32, 45];
+  const ANGLES = [-0.49, -1.47, -2.45, 0.49, 1.47, 2.45];
+  const COLORS = ["#ffbd53", "#8bdfa3", "#60dbef", "#bd98ed", "#ec927f", "#bad57b"];
+  const bend = geo => {
+    for (let i = 0; i < geo.verts.length; i += 3) {
+      const longitude = geo.verts[i] / RADIUS, latitude = (geo.verts[i + 1] - 3) / RADIUS;
+      const r = RADIUS - geo.verts[i + 2], ring = r * Math.cos(latitude);
+      geo.verts[i] = ring * Math.sin(longitude);
+      geo.verts[i + 1] = 3 + r * Math.sin(latitude);
+      geo.verts[i + 2] = -ring * Math.cos(longitude);
+    }
+    return geo;
+  };
+  const wall = BL.models.cached(() => {
+    const geo = { verts: [], faces: [], lines: [], castShadow: false };
+    for (let y = 0; y < 20; y++) for (let x = 0; x < 24; x++) {
+      const left = (x / 24 - 0.5) * WIDTH, right = ((x + 1) / 24 - 0.5) * WIDTH;
+      const bottom = BOTTOM + y / 20 * HEIGHT, top = BOTTOM + (y + 1) / 20 * HEIGHT, base = geo.verts.length / 3;
+      geo.verts.push(left, bottom, 0, right, bottom, 0, right, top, 0, left, top, 0);
+      geo.faces.push({ i: [base, base + 1, base + 2, base + 3], color: BG, emissive: 0.45 });
+    }
+    return bend(geo);
+  });
+  const projectPanel = flat => {
+    const geo = { verts: [], faces: [], lines: [], castShadow: false };
+    for (const face of flat.faces) {
+      const a = face.i[0] * 3, b = face.i[1] * 3, c = face.i[2] * 3;
+      const left = flat.verts[a] - WIDTH / 2, right = flat.verts[b] - WIDTH / 2;
+      const bottom = flat.verts[a + 1] + BOTTOM, top = flat.verts[c + 1] + BOTTOM;
+      const count = Math.max(1, Math.ceil((right - left) / 0.3));
+      for (let i = 0; i < count; i++) {
+        const lo = left + (right - left) * i / count, hi = left + (right - left) * (i + 1) / count, base = geo.verts.length / 3;
+        geo.verts.push(lo, bottom, 0.025, hi, bottom, 0.025, hi, top, 0.025, lo, top, 0.025);
+        geo.faces.push({ i: [base, base + 1, base + 2, base + 3], color: face.color, emissive: face.emissive });
+      }
+    }
+    return bend(geo);
+  };
+  const create = (parent, renderer, onChange) => {
+    let selected = 0;
+    const entries = ANGLES.map(angle => {
+      const node = createNode({ geometry: wall(), rotation: { x: 0, y: -angle, z: 0 } }), panel = createNode();
+      const canvas = document.createElement("canvas"); canvas.width = W; canvas.height = 384;
+      addChild(node, panel); addChild(parent, node);
+      return { node, panel, canvas, ctx: canvas.getContext("2d", { willReadFrequently: true }), caption: "", rowCount: 0, angle };
+    });
+    const feed = BL.timechainData.create(index => { paint(index); if (index === selected && onChange) onChange(index); });
+    const inverse = BL.math.mat4.create(), localRay = new Float64Array(6);
+    const pickScreen = (ray, index) => {
+      BL.math.mat4.invert(inverse, entries[index].node.world);
+      const m = inverse, r = localRay;
+      r[0] = m[0] * ray.ox + m[4] * ray.oy + m[8] * ray.oz + m[12];
+      r[1] = m[1] * ray.ox + m[5] * ray.oy + m[9] * ray.oz + m[13] - 3;
+      r[2] = m[2] * ray.ox + m[6] * ray.oy + m[10] * ray.oz + m[14];
+      r[3] = m[0] * ray.dx + m[4] * ray.dy + m[8] * ray.dz;
+      r[4] = m[1] * ray.dx + m[5] * ray.dy + m[9] * ray.dz;
+      r[5] = m[2] * ray.dx + m[6] * ray.dy + m[10] * ray.dz;
+      const a = r[3] * r[3] + r[4] * r[4] + r[5] * r[5], b = r[0] * r[3] + r[1] * r[4] + r[2] * r[5];
+      const d = b * b - a * (r[0] * r[0] + r[1] * r[1] + r[2] * r[2] - RADIUS * RADIUS);
+      if (a < 1e-12 || d < 0) return Infinity;
+      for (let side = -1; side <= 1; side += 2) {
+        const t = (-b + side * Math.sqrt(d)) / a;
+        const x = r[0] + t * r[3], y = r[1] + t * r[4], z = r[2] + t * r[5];
+        const longitude = Math.atan2(x, -z), latitude = Math.atan2(y, Math.hypot(x, z));
+        if (t >= 0 && Math.abs(longitude) <= WIDTH / (2 * RADIUS) && latitude >= (BOTTOM - 3) / RADIUS && latitude <= (BOTTOM + HEIGHT - 3) / RADIUS) return t;
+      }
+      return Infinity;
+    };
+    const paint = index => {
+      const data = feed.boards[index], entry = entries[index], ctx = entry.ctx, text = BL.jumbotron.text;
+      const rows = [];
+      for (const raw of data.table || []) {
+        const value = raw.toUpperCase();
+        if (!value.length) rows.push("");
+        for (let start = 0; start < value.length; start += 60) rows.push(value.slice(start, start + 60));
+      }
+      const h = Math.max(384, 104 + rows.length * 9);
+      entry.canvas.height = h; entry.rowCount = rows.length;
+      ctx.fillStyle = "#13202d"; ctx.fillRect(0, 0, W, h);
+      const line = (s, x, y, color, scale = 1) => text.drawText(ctx, String(s).toUpperCase(), x, y, color, scale);
+      const centred = (s, y, color, scale = 1) => line(s, Math.floor((W - text.measureText(String(s), scale)) / 2), y, color, scale);
+      centred("TIMECHAIN SPHERE / " + String(index + 1).padStart(2, "0"), 7, COLORS[index]);
+      centred(data.title, 25, "#edf4f7", 2);
+      centred(data.asof || data.status, 45, "#97b4c6");
+      centred(data.lines[0] || data.status, 63, COLORS[index]);
+      rows.forEach((row, i) => line(row, 12, 85 + i * 9, "#e0edf4"));
+      if (data.status !== "LIVE API") line(data.status, 12, h - 24, "#97b4c6");
+      centred("EXPLORE DATA AND SOURCES", h - 12, COLORS[index]);
+      if (entry.panel.geometry) renderer.releaseGeometry(entry.panel.geometry);
+      entry.panel.geometry = projectPanel(BL.poolModels.panelFrom(ctx, W, h, WIDTH / W, HEIGHT / h, BG));
+      entry.caption = data.title + " — " + (data.asof || data.status) + ". " + data.lines.join("; ") + ". " + data.note + (data.checked ? "\nLast fetched " + new Date(data.checked).toISOString() + "." : "");
+    };
+    const select = index => {
+      if (!Number.isInteger(index) || index < 0 || index >= entries.length || index === selected) return;
+      selected = index;
+      if (onChange) onChange(index);
+    };
+    feed.start(); entries.forEach((entry, index) => paint(index));
+    return { entries, pickScreen, get index() { return selected; }, select, refresh: feed.refresh,
+      get data() { return feed.boards; }, dispose() {
+        feed.dispose();
+        for (const entry of entries) {
+          if (entry.panel.geometry) renderer.releaseGeometry(entry.panel.geometry);
+          entry.panel.geometry = null;
+        }
+      }
+    };
+  };
+  BL.timechainBoards = { create };
 })();
 
 // ---- js/solid-props.js ----
@@ -49709,7 +50379,7 @@ void main() {
   const dayParam = DEBUG ? parseFloat(params.get("day")) : NaN;
   const latitudeParam = DEBUG ? parseFloat(params.get("latitude")) : NaN;
   const requestedView = DEBUG ? params.get("view") : null;
-  const preloadedView = requestedView === "hq" ? "underground" : requestedView === "bsmt" ? "basement" : requestedView === "pile" || requestedView === "lab" || requestedView === "mirror" ? requestedView : null;
+  const preloadedView = requestedView === "hq" ? "underground" : requestedView === "bsmt" ? "basement" : requestedView === "pile" || requestedView === "lab" || requestedView === "mirror" || requestedView === "timechain" ? requestedView : null;
   const preloadedPose = DEBUG ? readPositionPose(params.get("pose")) : null;
   const preloadedMode = DEBUG ? params.get("mode") || preloadedPose?.mode : null;
   const preloadedFirstPerson = DEBUG && (params.get("firstperson") === "1" || preloadedMode === "first-person" || preloadedMode === "eye-level");
@@ -50019,7 +50689,7 @@ void main() {
   const pitArrivalPoint = { x: 0, y: 0, z: 0 };
   const pitPrevious = { x: 0, y: 0, z: 0 };
   let stateTimer = 0, hintTimer = 0, meterTimer = 0, now = 0, hour = 12, unsubscribeActivity = null;
-  let weather = null, unsubscribeMempool = null, unsubscribeChain = null, mempoolIsland = null;
+  let weather = null, unsubscribeMempool = null, unsubscribeChain = null, mempoolIsland = null, timechainIsland = null;
   // The two boards across the hole from the vine bridge, one reading the chain and one reading the
   // weather. Each holds its canvas, its panel node and the reading it last drew, so a snapshot saying
   // nothing new replaces no geometry.
@@ -51723,6 +52393,78 @@ void main() {
     };
     return { site, place, centre, groundAt, worldX, worldZ, claimGround };
   };
+  const buildTimechainIsland = () => {
+    const T = BL.timechainModels, site = T.build(island), p = site.place;
+    const cos = Math.cos(p.ry), sin = Math.sin(p.ry);
+    addChild(root, site.node);
+    placed.push(site.node);
+    for (const node of [site.ground, site.shell, site.entrance, site.bridge, site.chair]) solids.add(node);
+    // Match the visible grass tiles, not the bounding sphere around the cliff.
+    for (const [kind, node, radius] of [["timechainentrance", site.entrance, 3], ["timechainbridge", site.bridge, 1.5], ["timechainchair", site.chair, 1.5]]) {
+      const x = node.position.x, z = node.position.z;
+      addProp(kind, node, p.x + x * cos + z * sin, p.z - x * sin + z * cos, radius);
+    }
+    const boards = BL.timechainBoards.create(site.node, renderer, index => {
+      if (timechainBoardShown >= 0) {
+        timechainBoardShown = index;
+        if (hud.el.jumbotron.open) paintTimechainBoard();
+      }
+    });
+    boards.entries.forEach((entry, index) => {
+      const node = entry.node, x = node.position.x, z = node.position.z;
+      const owner = addProp("timechainboard", node, p.x + x * cos + z * sin, p.z - x * sin + z * cos, 15);
+      owner.boardIndex = index; owner.weaponType = "none"; owner.pickRay = ray => boards.pickScreen(ray, index);
+    });
+    presets.timechain = { yaw: p.ry, pitch: 0.03, dist: 3, target: { x: p.x, y: p.y + 4.4, z: p.z } };
+    const claimGround = () => {
+      claim(p.x, p.z, T.SITE.radius + 1);
+      for (let r = p.approachFrom - 1; r <= p.rim; r += 1) claim(T.DIR.x * r, T.DIR.z * r, 2.4);
+    };
+    const hangout = [[-2, -1], [-2, 2], [1, 1]].map(([x, z]) => ({ x: p.x + x * cos + z * sin, z: p.z - x * sin + z * cos, ry: p.ry }));
+    const x = site.chair.position.x, z = site.chair.position.z;
+    const seat = { x: p.x + x * cos + z * sin, z: p.z - x * sin + z * cos, angle: Math.PI, speed: 0, phase: 0, active: false };
+    const beer = BL.timechainBeer.create(site);
+    solids.add(beer.dispenser); solids.add(beer.cabinet); solids.add(beer.bin);
+    addProp("timechainbeer", beer.mug, site.chair.position.x - 0.95, site.chair.position.z, 0.3);
+    return { site, place: p, boards, seat, beer, claimGround, hangout, residentPlaced: false };
+  };
+  const spinTimechainChair = () => {
+    if (timechainIsland?.seat.active) timechainIsland.beer.act("spin", timechainIsland.seat);
+  };
+  const chugTimechainGlass = () => {
+    if (timechainIsland?.seat.active) timechainIsland.beer.act("chug", timechainIsland.seat);
+  };
+  const timechainResidentPose = (cave, dt) => {
+    if (!timechainIsland || cave.traits.name !== "SaniExp") return false;
+    const T = timechainIsland, s = T.seat, parts = cave.parts;
+    if (cave === pilot?.player || contributors.debugState) {
+      T.beer.pause();
+      if (s.active) {
+        s.active = false; cave.root.rotation.x = cave.root.rotation.z = 0;
+        parts.legL.rotation.x = parts.legR.rotation.x = 0;
+        parts.armL.rotation.x = parts.armR.rotation.x = -0.2;
+        parts.head.rotation.x = 0;
+      }
+      return false;
+    }
+    const h = cave.traits.height;
+    s.active = true; s.phase = (s.phase + dt * 7) % (Math.PI * 2);
+    cave.walk = null; cave.hop = cave.hopV = cave.cheer = cave.catchT = 0;
+    cave.act.kind = "idle"; cave.act.until = Infinity;
+    cave.root.visible = true; cave.root.quaternion = null;
+    cave.root.position.x = s.x; cave.root.position.z = s.z; cave.root.position.y = T.place.y + 0.88 * h;
+    cave.root.rotation.x = -0.23; cave.root.rotation.z = 0; cave.root.rotation.y = T.place.ry + s.angle;
+    T.site.chair.scale.x = T.site.chair.scale.y = T.site.chair.scale.z = h;
+    parts.legL.rotation.x = parts.legR.rotation.x = -1.05;
+    parts.armL.quaternion = parts.armR.quaternion = null;
+    parts.armL.rotation.x = -0.95 + Math.sin(s.phase) * 0.035;
+    parts.armR.rotation.x = -0.95 - Math.sin(s.phase) * 0.035;
+    parts.armL.rotation.z = -0.12; parts.armR.rotation.z = 0.12;
+    parts.head.rotation.x = 0.28;
+    parts.club.visible = parts.gun.visible = parts.snack.visible = false;
+    T.beer.update(cave, s, dt);
+    return true;
+  };
   // Dock over the drop and ladder on the bluff
   const buildRim = () => {
     const d = polar(DOCK_DEG, CLIFF_OUTER);
@@ -52132,6 +52874,19 @@ void main() {
     return !npcClosedCaveAt(s.x, s.z, feet, height) && !npcPileAt(s.x, feet, s.z, height) && !npcWorkZoneAt(cave, s.x, feet, s.z) && npcFireClear(s.x, feet, s.z, s.x, feet, s.z, height) && walkable(s.x, s.z, s.x, s.z, feet, height, cave);
   };
   const wanderSpot = (out, cave = null) => {
+    if (timechainIsland && cave?.traits.name === "SaniExp" && cave.override === "chilling" && !contributors.debugState) {
+      const p = timechainIsland.place, pos = cave.root.position, dir = BL.timechainModels.DIR;
+      if (timechainIsland.residentPlaced && Math.hypot(pos.x - p.x, pos.z - p.z) > BL.timechainModels.SITE.radius - 2) {
+        const along = pos.x * dir.x + pos.z * dir.z, across = Math.abs(pos.x * dir.z - pos.z * dir.x);
+        const radius = along < p.approachFrom || across > 1 ? p.approachFrom - 0.5 : along < p.rim - 0.5 ? p.rim : Math.hypot(p.x, p.z) - p.bridgeZ + 1;
+        out.x = dir.x * radius; out.z = dir.z * radius; out.ry = p.ry + Math.PI;
+        return true;
+      }
+      const home = timechainIsland.hangout[cave.act.trips % timechainIsland.hangout.length];
+      timechainIsland.residentPlaced = true;
+      out.x = home.x; out.z = home.z; out.ry = home.ry;
+      return true;
+    }
     const chilling = cave?.state === "chilling";
     let s = (chilling && Math.random() < 0.35 || RENDER_OPTS.stars > NIGHT && Math.random() < FIRE_SEAT_CHANCE) ? freeSeat() : null;
     if (s && !npcWanderPointClear(s, cave)) s = null;
@@ -53162,7 +53917,8 @@ void main() {
   const npcDestinationBlocked = (cave, x, z) => {
     // Stroll destinations are on the surface. Evaluate their own floor,
     // not the walker's current elevation at the bottom of a staircase.
-    const feet = island.surfaceAt(x, z);
+    const onTimechain = timechainIsland && Math.hypot(x - timechainIsland.place.x, z - timechainIsland.place.z) < BL.timechainModels.SITE.radius - 1;
+    const feet = onTimechain ? playerSupportAt(x, z, Infinity, Infinity, cave) : island.surfaceAt(x, z);
     return npcClosedCaveAt(x, z, feet, cave.bodyHeight) || npcPileAt(x, feet, z, cave.bodyHeight) || npcWorkZoneAt(cave, x, feet, z) || !npcFireClear(x, feet, z, x, feet, z, cave.bodyHeight) || !walkable(x, z, x, z, feet, cave.bodyHeight, cave);
   };
   const npcWalkable = (fromX, fromZ, toX, toZ, y, height, actor) => {
@@ -53392,7 +54148,7 @@ void main() {
       case "ooga-portal-screen":
         return pitGate.selected.label + " · tap to change destination";
       case "caveman":
-        return o.cave.traits.display;
+        return o.cave.traits.name === "SaniExp" && timechainIsland?.seat.active ? "Sani · tap to spin his chair" : o.cave.traits.display;
       case "clanker":
         return `${o.entry.owner.traits.display} 🦍`;
       case "crate":
@@ -53410,6 +54166,11 @@ void main() {
       case "lab-link":
         return "EntropyLab · open website in a new tab";
       case "prop":
+        if (o.prop === "timechainentrance") return "Timechain Sphere - enter the observatory";
+        if (o.prop === "timechainbridge") return "Wooden bridge · to Timechain Sphere";
+        if (o.prop === "timechainboard") return "Timechain display · tap to expand";
+        if (o.prop === "timechainchair") return "Sani's recliner · tap to spin and spill the glass";
+        if (o.prop === "timechainbeer") return "500 ml beer · tap to chug";
         return PROP_TIPS[o.prop] || "";
       default:
         return "";
@@ -53531,6 +54292,21 @@ void main() {
         break;
       case "poolbridge":
         hud.toast("Vines and planks. The Mempool is across.");
+        break;
+      case "timechainentrance":
+        navigate("timechain");
+        break;
+      case "timechainbridge":
+        hud.toast("Timechain Island · Sani's hangout. Walk across the wooden bridge.");
+        break;
+      case "timechainboard":
+        openTimechainBoard(o.boardIndex);
+        break;
+      case "timechainchair":
+        spinTimechainChair();
+        break;
+      case "timechainbeer":
+        chugTimechainGlass();
         break;
       case "weathersign":
         hud.openWeatherKey();
@@ -53725,7 +54501,8 @@ void main() {
         break;
       }
       case "caveman":
-        crew.pokeCave(o.cave);
+        if (o.cave.traits.name === "SaniExp" && timechainIsland?.seat.active) spinTimechainChair();
+        else crew.pokeCave(o.cave);
         break;
       case "clanker":
         hud.toast(tooltipFor(hit));
@@ -54186,7 +54963,7 @@ void main() {
   const navigationClearAt = (x, y, z, radius, height) => {
     if (!physicalClearAt(x, y, z, radius, height)) return false;
     for (const prop of props) {
-      if (!prop.active || prop.prop === "gate" || !prop.node.geometry) continue;
+      if (!prop.active || prop.prop === "gate" || prop.prop === "timechainboard" || !prop.node.geometry) continue;
       const b = BL.scene.boundsOf(prop.node.geometry), m = prop.node.world;
       const cx = (b.min[0] + b.max[0]) / 2, cy = (b.min[1] + b.max[1]) / 2, cz = (b.min[2] + b.max[2]) / 2;
       const hx = (b.max[0] - b.min[0]) / 2, hy = (b.max[1] - b.min[1]) / 2, hz = (b.max[2] - b.min[2]) / 2;
@@ -54223,6 +55000,14 @@ void main() {
       setVec(target, m.x, m.floorY + (close ? 2.5 : 2.1), m.z);
       pitch = player ? 0.06 : 0.16;
       dist = player ? 8 : 9;
+    } else if (name === "timechain" && timechainIsland) {
+      const site = timechainIsland.place;
+      yaw = site.ry;
+      // Arrive on the bridge side of the control console, not inside its buttons.
+      x = site.x + Math.sin(yaw) * 4.8; z = site.z + Math.cos(yaw) * 4.8;
+      setVec(target, site.x, site.y + 0.8, site.z);
+      pitch = player ? 0.2 : 0.08;
+      dist = player ? 6 : 10;
     } else if (underground) {
       z = 6;
       setVec(target, 0, (basement ? island.headquarters.basement.floor : island.headquarters.floor) + 0.8, 0);
@@ -54233,8 +55018,8 @@ void main() {
     let found = false;
     for (const offset of NAVIGATION_OFFSETS) {
       p.x = x + Math.cos(yaw) * offset; p.z = z - Math.sin(yaw) * offset;
-      p.y = underground ? (basement ? island.headquarters.basement.floor : island.headquarters.floor) : island.surfaceAt(p.x, p.z);
-      if (!island.onLand(p.x, p.z) || !navigationClearAt(p.x, p.y + 1e-5, p.z, PLAYER_RADIUS, player ? player.bodyHeight : 1.6)) continue;
+      p.y = name === "timechain" ? timechainIsland.place.y : underground ? (basement ? island.headquarters.basement.floor : island.headquarters.floor) : island.surfaceAt(p.x, p.z);
+      if (name !== "timechain" && !island.onLand(p.x, p.z) || !navigationClearAt(p.x, p.y + 1e-5, p.z, PLAYER_RADIUS, player ? player.bodyHeight : 1.6)) continue;
       destination.yaw = Math.atan2(p.x - target.x, p.z - target.z);
       destination.pitch = close ? Math.atan2(p.y + (player ? player.headOffset * CLOSE_VIEW.eyeRatio : CLOSE_VIEW.eyeHeight) - target.y, Math.hypot(p.x - target.x, p.z - target.z)) : pitch;
       destination.dist = dist;
@@ -54820,14 +55605,46 @@ void main() {
   // The jumbotron's close-up: the board's own canvas painted into the dialog's, and its caption,
   // whenever the board repaints while the dialog is open.
   let jumbotronShown = -1;
+  let timechainBoardShown = -1;
+  const paintTimechainBoard = () => {
+    const entry = timechainIsland?.boards.entries[timechainBoardShown];
+    if (!entry) return;
+    const screen = hud.el.jumbotronScreen, ctx = screen.getContext("2d");
+    if (screen.width !== entry.canvas.width || screen.height !== entry.canvas.height) {
+      screen.width = entry.canvas.width; screen.height = entry.canvas.height;
+    }
+    ctx.clearRect(0, 0, screen.width, screen.height);
+    ctx.drawImage(entry.canvas, 0, 0, screen.width, screen.height);
+    hud.el.jumbotronCaption.textContent = BL.timechainData.TITLES[timechainBoardShown];
+    const details = document.getElementById("jumbotron-details");
+    details.hidden = false; details.textContent = entry.caption;
+    const source = document.createElement("a");
+    source.href = timechainIsland.boards.data[timechainBoardShown].source;
+    source.target = "_blank"; source.rel = "noopener noreferrer";
+    source.textContent = source.href;
+    details.append(document.createTextNode("\nSource: "), source);
+    hud.el.jumbotronIndex.textContent = `${timechainBoardShown + 1} of ${BL.timechainData.TITLES.length}`;
+  };
+  const openTimechainBoard = (index) => {
+    timechainBoardShown = index;
+    timechainIsland.boards.select(index);
+    const page = (delta) => timechainIsland.boards.select((timechainIsland.boards.index + delta + BL.timechainData.TITLES.length) % BL.timechainData.TITLES.length);
+    hud.openJumbotron({ prev: () => page(-1), next: () => page(1) });
+    paintTimechainBoard();
+  };
   const paintJumbotron = () => {
     jumbotronShown = jumbotron.version;
     const screen = hud.el.jumbotronScreen;
+    if (screen.width !== jumbotron.canvas.width || screen.height !== jumbotron.canvas.height) {
+      screen.width = jumbotron.canvas.width; screen.height = jumbotron.canvas.height;
+    }
     screen.getContext("2d").drawImage(jumbotron.canvas, 0, 0);
     hud.el.jumbotronCaption.textContent = jumbotron.caption;
     hud.el.jumbotronIndex.textContent = `${jumbotron.index + 1} of ${jumbotron.count}`;
   };
   const openJumbotron = () => {
+    timechainBoardShown = -1;
+    document.getElementById("jumbotron-details").hidden = true;
     jumbotronShown = -1;
     hud.openJumbotron({ prev: () => jumbotron.prevView(), next: () => jumbotron.nextView() });
     paintJumbotron();
@@ -54912,7 +55729,7 @@ void main() {
     updateLamps(dt, elapsed, phase !== null);
     if (jumbotron) {
       jumbotron.update(elapsed, renderer);
-      if (hud.el.jumbotron.open && jumbotron.version !== jumbotronShown) paintJumbotron();
+      if (hud.el.jumbotron.open && timechainBoardShown < 0 && jumbotron.version !== jumbotronShown) paintJumbotron();
     }
     if (fireworksShells.length) updateFireworks();
     const next = daylight.phaseAt(hour);
@@ -54937,6 +55754,13 @@ void main() {
     updateClankerEffects(dt);
     const fallingPlayer = pilot.player;
     if (fallingPlayer) Object.assign(pitPrevious, fallingPlayer.root.position);
+    if (timechainIsland) {
+      const s = timechainIsland.seat, decay = Math.exp(-1.15 * dt);
+      s.angle = (s.angle + s.speed * (1 - decay) / 1.15) % (Math.PI * 2);
+      s.speed *= decay;
+      if (s.speed < 0.005) s.speed = 0;
+      timechainIsland.site.swivel.rotation.y = s.angle;
+    }
     crew.update(dt, elapsed);
     // Sweep before any abyss equipment loss or respawn, including a whole-shaft fall in one step.
     if (!entering && !pilot.poseHeld && fallingPlayer && fallingPlayer === pilot.player
@@ -55942,6 +56766,7 @@ void main() {
     buildRim();
     buildLaunchSite();
     mempoolIsland = buildMempoolIsland();
+    timechainIsland = buildTimechainIsland();
     const firePos = buildFire();
     fire = lamps[lamps.length - 1];
     // The jumbotron stands on the rim crest just west of the gate, turned to face the meadow center.
@@ -55975,6 +56800,7 @@ void main() {
     }
     scatter();
     mempoolIsland.claimGround();
+    timechainIsland.claimGround();
     reflowScenery();
     buildSpots();
     buildClouds();
@@ -56169,8 +56995,12 @@ void main() {
     shared.workHit = (cave) => clankers && clankers.hit(cave);
     shared.workPlanned = (cave, site) => clankers && clankers.plan(cave, site);
     mark("pile");
+    shared.residentPose = timechainResidentPose;
     crew = shared.crew = crewMod.create(shared);
     for (const cave of crew.list) crew.setJetpackOwnership(cave, true, hubModels.jetpack(), hubModels.jetFlame());
+    // Sani hosts the island on ordinary visits; explicit activity fixtures still exercise every state.
+    const sani = crew.cavemen.get("SaniExp");
+    if (sani && !contributors.debugState && preloadedCharacter !== "saniexp") sani.override = "chilling";
     mirrorCave.body = BL.mirrorBody.create(mirrorCave.node, crew.cavemen);
     for (const cave of crew.list) entropyLab.phase.body.track(cave.root, cave.traits.height * 2,
       Math.max(cave.headOpen.verts.length, cave.headClosed.verts.length));
@@ -56277,6 +57107,7 @@ void main() {
       },
       onDoubleTap: (hit, p) => {
         if (pitArrival) return;
+        if (hit && (hit.owner.prop === "timechainchair" || hit.owner.cave?.traits.name === "SaniExp" && timechainIsland?.seat.active)) { spinTimechainChair(); return; }
         if (hit && hit.owner.kind === "clanker") return;
         else {
           if (clankerPlay.active) clankerPlay.release();
@@ -56365,6 +57196,7 @@ void main() {
     Object.assign(hubScene, {
       root, camera, input,
       debug: {
+        get timechainIsland() { return timechainIsland; },
         slots: pile.slots, drops: pile.drops, core: pile.core, shell: pile.shell, delivery: pile.delivery, spillEffect: pile.spillEffect, cavemen: crew.cavemen, crates: crates.list, lab: null, hud, applyAllSwag: crew.applyAllSwag, renderLocker: crew.renderLocker, demoTip, setPileLevel: pile.setLevel, refreshStates: crew.refreshStates, trimPool: fx.trimPool,
         get shown() {
           return pile.shown;
@@ -56611,6 +57443,10 @@ void main() {
     unsubscribeMempool = null;
     unsubscribeChain();
     unsubscribeChain = null;
+    timechainIsland.boards.dispose();
+    timechainIsland.beer.dispose();
+    timechainBoardShown = -1;
+    hud.closeJumbotron();
     if (chainSign && chainSign.node.geometry) renderer.releaseGeometry(chainSign.node.geometry);
     chainSign = null;
     weather.dispose();
@@ -56717,7 +57553,7 @@ void main() {
     // Drop every per-visit ref but the cached island.
     terrainRampRoof = pathNode = altar = hud = hooks = input = pilot = fx = cameraCover = bananaCover = solids = rockGuides = objectGuides = sightGuides = bananaGuides = pileGuides = platformGuides = mirrorGuides = pile = crew = crates = critters = clock = presets = mirrorCave = matrixCave = matrixControl = gateRain = fire = headquarters = positionDebug = dockStairs = overlayCanvas = null;
     beasts.clear();
-    magazine = magazineState = breakables = weather = mempoolIsland = clankers = clankerPlay = null;
+    magazine = magazineState = breakables = weather = mempoolIsland = timechainIsland = clankers = clankerPlay = null;
     hubScene.input = hubScene.debug = null;
     return { targets: count };
   };
@@ -56741,6 +57577,7 @@ void main() {
     root: null, camera: null, input: null, debug: null,
     get inMotion() {
       if (cutawayRestoreTime < CUTAWAY_RESTORE_TIME) return true;
+      if (timechainIsland && (timechainIsland.seat.active || timechainIsland.seat.speed > 0)) return true;
       if (pile.inMotion || fx.inMotion || breakables.inMotion || weather.active || magazine && magazine.revealed || MATRIX_WORLD.active || mirrorGuides.state.doorway || mirrorCave.damage.active || mirrorCave.ripples.active || mirrorCave.body.active || entropyLab.phase.ripples.active || entropyLab.phase.body.contacts || entropyLab.phase.body.active) return true;
       for (const sign of headquarters.roomSigns) if (sign.velocity || sign.node.rotation.x) return true;
       for (let i = 0; i < matrixGates.length; i++) if (matrixCave && (matrixGates[i].raising || matrixCave.unlocked && matrixGates[i].node.position.y !== MATRIX_GATE_HIDDEN_Y)) return true;
