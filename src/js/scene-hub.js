@@ -5701,17 +5701,15 @@
     if (first) hud.setSubtitle("an island of caves");
     if (!first) hud.toast(PHASE_TOASTS[next]);
   };
-  // The Timechain Sphere's walls in the shared board dialog: a page a wall, its reading and source in the note.
+  // The Timechain Sphere's walls in the shared board dialog: a page a wall, its source in the note.
   let timechainVersion = 0;
   const timechainBoard = {
     title: "Timechain Sphere", help: "Six walls of chain data. Arrow keys flip the boards.", wide: true,
     get canvas() { return timechainIsland.boards.entries[timechainIsland.boards.index].canvas; },
     get count() { return BL.timechainData.TITLES.length; }, get index() { return timechainIsland.boards.index; },
     get caption() { return BL.timechainData.TITLES[timechainIsland.boards.index]; },
-    get note() {
-      const i = timechainIsland.boards.index;
-      return `${timechainIsland.boards.entries[i].caption}\nSource: ${timechainIsland.boards.data[i].source}`;
-    },
+    // The wall already shows the reading; the note only says where it comes from.
+    get note() { return `Source: ${timechainIsland.boards.data[timechainIsland.boards.index].source}`; },
     get version() { return timechainVersion; },
     go: (i) => timechainIsland.boards.select(i)
   };

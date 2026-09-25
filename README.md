@@ -192,8 +192,6 @@ At the Sky Top, 500 up, the sky hook holds you over the island. **Space** drops 
 
 ## Ooga Mine
 
-Not open yet: its cave stays sealed, but `?wip=mine` opens it for anyone.
-
 A Bitcoin mining tycoon, and the lesson is margin: every machine earns hash and burns power, and the profit bar says whether the operation is making money. Drag gear from the shop onto a lit spot or tap to place it. Crack the banana rock (**C**), take a loan, put up a Rack and drag a Thunder Box into it. Newer models launch through the hour, each doing more hash for the same power; when the pads run out, dig into the Rack Hall and the Big Cave.
 
 The network climbs every few minutes (buy just after a retarget for the whole epoch at the old difficulty), and at 30:00 the reward halves. Power comes off the grid at a moving price: lock it with a contract, build your own, keep a battery for outages. Each chamber has its own circuit and cooling: overload trips a breaker, heat slows machines and starts fires. Fires eat along a rack and jump to the next; take a Fire Stopper off the wall (**Space** beside it) and carry it over, or beat it out by hand for five seconds. A box about to melt down glows red for ten seconds: pull it in time and it only dies.

@@ -2,22 +2,31 @@
 (() => {
   "use strict";
   const BL = window.BL = window.BL || {};
-  const { cached, box, merge, makeVox, voxelGeometry } = BL.models;
+  const { cached, box, lathe, merge, makeVox, voxelGeometry } = BL.models;
   const { createNode, addChild } = BL.scene;
   const SITE = { bearing: BL.terrain.TIMECHAIN.bearing, radius: 13, depth: 12, span: 18, width: 2.6 };
   const DIR = { x: Math.sin(SITE.bearing), z: -Math.cos(SITE.bearing) };
   const UNIT = 0.5, WOOD = "#795335", GOLD = "#c39748";
+  const SHELL_R = 13, SHELL_SKIN = 0.16, SHELL_CY = 3;
+  // Where the shell's inner skin meets a height: the floor must stay inside it, underside included.
+  const innerReach = (y) => Math.sqrt((SHELL_R - SHELL_SKIN) ** 2 - (SHELL_CY - y) ** 2);
   const ground = cached(() => {
-    const v = makeVox(), r = 12.55 / UNIT;
+    const v = makeVox(), limit = innerReach(-UNIT) - 0.01;
     for (let x = -26; x < 26; x++) for (let z = -26; z < 26; z++) {
-      if (Math.hypot(x + 0.5, z + 0.5) > r) continue;
+      // A block stays only if its farthest corner is inside the wall, so no square edge pokes through the shell.
+      if (Math.hypot(Math.max(-x, x + 1), Math.max(-z, z + 1)) * UNIT > limit) continue;
       v.set(x, -1, z, Math.abs(x + 0.5) < 1.5 ? 2 : (x + z) % 4 === 0 ? 1 : 0);
     }
-    return voxelGeometry(v, { unit: UNIT, palette: ["#263843", "#304650", "#a3874f"], origin: { x: 0, y: 0, z: 0 } });
+    // A low trim closes the notches the square blocks leave against the curve; it walks as floor.
+    const trimIn = limit - UNIT * Math.SQRT2, trimOut = innerReach(0.04) - 0.03;
+    return merge(
+      voxelGeometry(v, { unit: UNIT, palette: ["#263843", "#304650", "#a3874f"], origin: { x: 0, y: 0, z: 0 } }),
+      lathe({ profile: [[trimIn, 0], [trimOut, 0], [trimOut, 0.04], [trimIn, 0.04], [trimIn, 0]], segments: 96, color: "#1d2b33" })
+    );
   });
   // The destination is a hollow sphere, with a real doorway through both skins.
   const shell = cached(() => {
-    const geo = { verts: [], faces: [], lines: [], lineWidth: 1 }, segments = 96, radius = 13, cy = 3;
+    const geo = { verts: [], faces: [], lines: [], lineWidth: 1 }, segments = 96, radius = SHELL_R, cy = SHELL_CY;
     const levels = Array.from({ length: 49 }, (_, i) => -Math.PI / 2 + i * Math.PI / 48);
     levels.push(Math.asin(-cy / radius), Math.asin((4.8 - cy) / radius)); levels.sort((a, b) => a - b);
     const colors = ["#d9700b", "#e8810d", "#f7931a", "#ef8910"].map(BL.math.hexToRgb);
@@ -28,7 +37,7 @@
       if (Math.abs(longitude) < Math.PI / 16 && y > 0 && y < 4.8) continue;
       const ribbon = Math.abs(latitude - 0.5 - 0.12 * Math.sin(longitude * 3)) < 0.06 || Math.abs(latitude + 0.5 + 0.12 * Math.sin(longitude * 3)) < 0.06;
       for (let skin = 0; skin < 2; skin++) {
-        const base = geo.verts.length / 3, r = radius - skin * 0.16;
+        const base = geo.verts.length / 3, r = radius - skin * SHELL_SKIN;
         for (const [a, b] of [[lo, bottom], [hi, bottom], [hi, top], [lo, top]]) geo.verts.push(r * Math.cos(b) * Math.sin(a), cy + r * Math.sin(b), r * Math.cos(b) * Math.cos(a));
         geo.faces.push({ i: skin ? [base + 3, base + 2, base + 1, base] : [base, base + 1, base + 2, base + 3], color: skin ? [19, 32, 45] : ribbon ? [255, 188, 83] : colors[(row + col % 3) % colors.length], emissive: skin ? 0.45 : ribbon ? 0.8 : 0.5 });
         if (!skin) for (let edge = 0; edge < 2; edge++) geo.lines.push({ i: [base + edge, base + edge + 1], color: [133, 65, 8], emissive: 0.25 });

@@ -2508,35 +2508,10 @@ body[data-active-scene="mine"] .mode-hud {
   display: none;
 }
 
-/* A wide board (the Timechain Sphere) sets its page beside its note on desktop; phones keep the stack. */
+/* A wide board (the Timechain Sphere, a tall page of rows) gets a wider dialog on desktop; phones keep the default. */
 @media (min-width: 721px) {
   .board-modal.board-wide {
-    width: 980px;
-  }
-
-  .board-modal.board-wide[open] {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-    column-gap: 20px;
-    align-content: start;
-  }
-
-  .board-wide .panel-head,
-  .board-wide #board-help {
-    grid-column: 1 / -1;
-  }
-
-  .board-wide .board-screen,
-  .board-wide .board-nav,
-  .board-wide .board-dots {
-    grid-column: 1;
-  }
-
-  .board-wide .board-note {
-    grid-column: 2;
-    grid-row: 2 / span 3;
-    align-self: start;
-    margin-top: 10px;
+    width: 640px;
   }
 }
 

@@ -371,7 +371,7 @@
   });
 
   // The rubble plug in a tunnel mouth that a dig breaks out: tumbled voxel boulders packed to the tunnel's
-  // size, with banana-yellow chalk marks saying dig here.
+  // size.
   const seal = cached(() => {
     const u = ROCK_UNIT, sx = Math.round((TUNNEL.w + 0.5) / u), sy = Math.round((TUNNEL.h + 0.3) / u), sz = 4;
     const grid = BL.terrain.makeGrid(sx, sy, sz), ox = -sx * u / 2;
@@ -383,11 +383,7 @@
       const k = cellHash(bx, by, 0, 7);
       grid.set(gx, gy, gz, seam ? 6 : k < 0.3 ? 3 : k < 0.6 ? 1 : k < 0.85 ? 2 : 10);
     }
-    const parts = [BL.terrain.gridGeometry(grid, { unit: u, palette: ROCK_PALETTE, origin: { x: ox, y: 0, z: 0 } })];
-    // The seal is turned to face the chamber it closes, so its carved side and the marks sit at local -z.
-    parts.push(bx({ w: 0.8, h: 0.08, d: 0.02, color: BANANA, emissive: 0.5, offset: { y: 1.7, z: -0.02 } }));
-    parts.push(bx({ w: 0.08, h: 0.8, d: 0.02, color: BANANA, emissive: 0.5, offset: { y: 1.7, z: -0.02 } }));
-    return merge(...parts);
+    return BL.terrain.gridGeometry(grid, { unit: u, palette: ROCK_PALETTE, origin: { x: ox, y: 0, z: 0 } });
   });
 
   // The whole cave at full extent: three chambers, their walls and ceilings, the tunnels, and a seal in
