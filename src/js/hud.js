@@ -630,6 +630,7 @@
       if (screen.width !== src.width || screen.height !== src.height) {
         screen.width = src.width;
         screen.height = src.height;
+        screen.style.setProperty("--board-ratio", String(src.width / src.height));
       }
       screen.getContext("2d").drawImage(src, 0, 0);
       el.boardCaption.textContent = board.caption;

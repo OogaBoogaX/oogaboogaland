@@ -2395,7 +2395,7 @@
     const beer = BL.timechainBeer.create(site);
     solids.add(beer.dispenser); solids.add(beer.cabinet); solids.add(beer.bin);
     addProp("timechainbeer", beer.mug, site.chair.position.x - 0.95, site.chair.position.z, 0.3);
-    return { site, place: p, boards: null, seat, beer, claimGround, hangout, residentPlaced: false };
+    return { site, place: p, boards: null, seat, beer, claimGround, hangout, residentPlaced: false, show: T.show(site) };
   };
   // The Sphere's walls and their feed (six slow API calls, then polls, each repainting a wall) wait until the camera
   // comes near, so a visit that never goes there never pays for them. They sit on the shell's inner face, which keeps
@@ -5840,6 +5840,7 @@
       s.speed *= decay;
       if (s.speed < 0.005) s.speed = 0;
       timechainIsland.site.swivel.rotation.y = s.angle;
+      timechainIsland.show(dt);
     }
     crew.update(dt, elapsed);
     mempoolIsland.wildlife.update(dt, elapsed);

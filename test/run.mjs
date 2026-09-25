@@ -1490,10 +1490,10 @@ const { autoQualityProbe } = (() => {
       const changes = [], state = { focused: true, now: 0 };
       const renderer = { kind: "webgl2", quality, setQuality(value) { this.quality = value; changes.push(value); } };
       const context = { renderer, document: { hasFocus: () => state.focused }, transition: null, renderedFrames, showQuality() {} };
-      const tier = runInNewContext(`${controller}\n({ autoTier, tierFromBoot })`, context);
+      const tier = runInNewContext(`${controller}\n({ autoTier, tierFromBoot, BOOT_MEDIUM, BOOT_LOW })`, context);
       // The governor reads delivered intervals only, so a frame costs the probe nothing but the interval it took.
       const frames = (count, interval = 1000 / 60) => { for (let n = 0; n < count; n++) tier.autoTier(interval, state.now += interval); };
-      return { changes, state, renderer, context, frames, boot: tier.tierFromBoot };
+      return { changes, state, renderer, context, frames, boot: tier.tierFromBoot, medium: tier.BOOT_MEDIUM, low: tier.BOOT_LOW };
     };
     const healthy = create(); healthy.frames(1200);
     // A GPU-bound machine issues cheap frames and delivers slow ones: the old governor could not see it at all.
@@ -1509,12 +1509,13 @@ const { autoQualityProbe } = (() => {
     excluded.state.focused = false; excluded.frames(600, 40);
     excluded.state.focused = true; excluded.context.transition = {}; excluded.frames(600, 40);
     const fallback = create(); fallback.renderer.kind = "canvas2d"; fallback.frames(600, 40);
-    // Boot cost is the only device signal Safari cannot mask, and it is read once, before any frame exists.
-    const fast = create(); fast.boot(1600);
-    const middling = create(); middling.boot(3000);
-    const crawling = create(); crawling.boot(5000);
-    const floor = create("low"); floor.boot(9000); floor.boot(1000);
-    const phone = create("medium"); phone.boot(3000);
+    // Boot cost is the only device signal Safari cannot mask, and it is read once, before any frame exists. The
+    // boots sit inside the director's own bands, so recalibrating its thresholds never strands this check.
+    const fast = create(); fast.boot(fast.medium * 0.5);
+    const middling = create(); middling.boot((middling.medium + middling.low) / 2);
+    const crawling = create(); crawling.boot(crawling.low * 1.2);
+    const floor = create("low"); floor.boot(floor.low * 2); floor.boot(floor.medium * 0.3);
+    const phone = create("medium"); phone.boot((phone.medium + phone.low) / 2);
     return { healthy: healthy.changes.length === 0, gpuBound: bound.changes[0] === "medium",
       reactsIn: slowAt, reactsFast: slowAt <= 2500, ignoresSpikes: spike.changes.length === 0,
       bounded: bounded.changes.join("|") === "medium|low", warmup: warming.changes.length === 0,

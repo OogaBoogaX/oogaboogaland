@@ -80,6 +80,7 @@ Classic scripts, each an IIFE with `"use strict"`, sharing `window.BL`. A file e
 | `mine-rigs.js`, `mine-sim.js`, `mine-models.js`, `mine-hud.js`, `mine-audio.js`, `mine-crew.js`, `scene-mine.js` | Ooga Mine: catalog arithmetic, the seeded allocation-free sim (`snapshot`, `save`, `load`), the cave and its `LAYOUT`, panels, sound, operators, and the scene, which is only a view of the sim |
 | `pool-models.js` | the Mempool island's geometry: cartoon flora, animals, bridge and stairwell from the hub kit, solid pieces walking on their first block build (`collisionGeometry`). `merge` does not carry `lineWidth`; set it on the merged geometry |
 | `pool-wildlife.js` | the Mempool island's animals, alive: `poolModels.beastRig` faceted rigs driven by a small state machine (idle, walk, rest and sleep, glide for climbing, the log and flight) on the gorillas' pattern; `create` returns `list`, `update`, `startle`, `dispose` |
+| `timechain-models.js`, `timechain-beer.js`, `timechain-data.js`, `timechain-boards.js` | the Timechain Sphere off the southwest rim: the walk-in LED ball (sixteen screen lunes and a logo layer lit by `show` through `glow`/`highlight`), its bridge, recliner and beer; the timechainindex.com feed (off under `nosim` unless `timechain=1`) and the six wall boards, built when the camera comes near. Solids count crossings on an upward ray, so a collision shell must be closed: the screen stays off it and the doorway's cut between the skins is walled in the shell |
 | `director.js` | the app: renderer, frame loop, governor, keys, donations, routing, transitions |
 
 Load-order constraints beyond "after what it uses":
@@ -212,7 +213,7 @@ New event geometry and pickup nodes must stay capped and take part in `liveGeome
 
 | Files | Scene |
 |---|---|
-| `scene-hub.js`, `hub-*`, `headquarters*`, `critters.js`, `pool-wildlife.js`, `weather*`, `jumbotron*`, `npc-paths.js`, `pilot.js` | `hub` |
+| `scene-hub.js`, `hub-*`, `headquarters*`, `critters.js`, `pool-wildlife.js`, `timechain-*`, `weather*`, `jumbotron*`, `npc-paths.js`, `pilot.js` | `hub` |
 | `scene-lab.js`, `lab-*` | `lab` |
 | `scene-race.js`, `race-*`, `racers.js` | `race` |
 | `scene-drop.js`, `drop-*`, `skydiver.js` | `drop` |
