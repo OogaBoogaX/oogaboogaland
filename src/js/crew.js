@@ -5258,6 +5258,12 @@
         riding.updated = true;
         return;
       }
+      // A scene may host a seated resident without sending them into ordinary work/stroll AI.
+      if (ctx.residentPose && ctx.residentPose(cave, dt)) {
+        riding.continuous = false;
+        riding.updated = true;
+        return;
+      }
       if (cave.clankerDragged) {
         riding.continuous = false;
         riding.updated = true;

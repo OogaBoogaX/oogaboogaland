@@ -2476,6 +2476,13 @@ body[data-active-scene="mine"] .mode-hud {
   font-size: 10px;
 }
 
+#jumbotron-details {
+  max-height: 25vh;
+  overflow-y: auto;
+  overflow-wrap: anywhere;
+  white-space: pre-line;
+}
+
 .weather-key dt {
   margin: 0 0 2px;
   color: var(--warn);

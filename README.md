@@ -138,6 +138,42 @@ color. Future live global state can use the same presence indicator.
 
 **Weapons.** **G** switches, **1** is the club, **2** the rifle. Right-click enters shoulder view without changing carry/combat mode. **Left mouse** fires or swings in combat: a tap pokes, a press swings, a hold charges to double damage. **R** swaps magazines, **Space** beside the pile reloads. Boxes, barrels and rocks break and drop banana or `+1 MAG` pickups. The OBL mirror cracks, breaks panel by panel and heals when left alone.
 
+## Timechain Sphere
+
+Sani's hangout is a hollow Bitcoin-orange sphere off the hub's southwest rim.
+Follow the earth path up the terraces and cross the wooden bridge through its
+illuminated doorway. Tap the entrance to move inside, or walk through it.
+Sani works on his laptop and takes occasional sips from a one-litre beer glass.
+When it is empty, he gets up, walks to the dispenser, pours a fresh litre, and
+returns to work. Tapping him or his chair while seated spins them together.
+The routine pauses while a visitor controls Sani.
+
+Six permanent data sections cover the curved interior walls: BTC distribution,
+address balances, UTXO sizes, ETF/ETP holdings, exchange holdings, and top holders.
+All sections are visible together as you turn around; there are no tabs or
+freestanding screens. Smaller text displays all categories, balance brackets,
+history comparisons, and all ten holders. Tap any section for an enlarged view
+and its public Timechain Index source link. The floor opens the charts suite in a new tab.
+
+Data comes directly from the six public, keyless endpoints at
+`https://api.timechainindex.com/OogaBooga/`. Each endpoint refreshes every five
+minutes while the hub is visible, with bounded retries after failures. The screen
+keeps the last successful reading and marks it stale if a refresh fails. Snapshot
+dates or block heights are separate from the last successful fetch time; the
+six endpoints share their snapshot date and block height, filling missing fields
+from sibling responses. Requests stop when leaving the
+hub. No local export, database credentials, or generated snapshot is required.
+
+ETF and exchange changes describe on-chain balances, not investment inflows.
+Distribution categories and holder names are API attributions, not proof
+of ownership. Addresses and UTXOs are not people. BTC distribution percentages
+exclude the separately listed unmined amount. Bracket counts and BTC amounts are
+kept distinct, with satoshis converted to BTC.
+
+To preview it as Sani, use `?debug=1&character=SaniExp&view=timechain`.
+`nosim=1` pauses these requests for offline tests; add `timechain=1` to enable
+only this feed in that mode, or `timechain=0` to disable it explicitly.
+
 ## Ooga Rally
 
 **W** accelerates, **S** brakes, **A D** steer, a held **Space** drifts (orange, blue, then purple the longer you hold; release for the boost), **E** throws the item (brake while throwing a rock to send it backward, or while dropping a peel to lay it ahead), **Q** looks back, **Escape** pauses. Hold **W** through the last count for a rocket start; hold it earlier and the wheels spin. Every lap reads against your record lap. Trackside rocks and trees stop a kart.

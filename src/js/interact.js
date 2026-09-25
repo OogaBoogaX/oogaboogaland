@@ -70,7 +70,9 @@
         const d2 = lx * lx + ly * ly + lz * lz - tca * tca;
         if (d2 > r * r) continue;
         const thc = Math.sqrt(r * r - d2);
-        const hitT = tca - thc;
+        // Authored controls may refine their broad sphere to the visible surface.
+        const hitT = t.owner.pickRay ? t.owner.pickRay(ray) : tca - thc;
+        if (!Number.isFinite(hitT) || t.owner.pickRay && hitT < 0) continue;
         const priority = t.owner.priority || 0;
         if (priority > bestPriority || (priority === bestPriority && hitT < bestT)) {
           bestT = hitT;

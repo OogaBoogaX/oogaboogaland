@@ -943,9 +943,9 @@ Then run npm run build and ONLY=characters node test/run.mjs.</pre>
         <button type="button" data-action="recipe-copy">Copy prompt</button>
       </div>
     </dialog>
-    <dialog class="modal jumbotron-modal" id="jumbotron-modal" aria-label="The jumbotron">
+    <dialog class="modal jumbotron-modal" id="jumbotron-modal" aria-label="Island board">
       <div class="panel-head">
-        <h2><span data-sign>Jumbotron</span></h2>
+        <h2><span data-sign>Island board</span></h2>
         <button type="button" class="modal-close" data-action="jumbotron-close" aria-label="Close">&times;</button>
       </div>
       <canvas class="jumbotron-screen" id="jumbotron-screen" width="192" height="108" aria-label="The board"></canvas>
@@ -954,7 +954,8 @@ Then run npm run build and ONLY=characters node test/run.mjs.</pre>
         <span class="jumbotron-caption"><b id="jumbotron-caption">&nbsp;</b><small id="jumbotron-index">&nbsp;</small></span>
         <button type="button" class="jumbotron-page" data-action="jumbotron-next" aria-label="Next board">&rsaquo;</button>
       </div>
-      <p class="help">OogaBoogaX on the big screen. Arrow keys flip the boards.</p>
+      <p class="help" id="jumbotron-details" hidden></p>
+      <p class="help">Arrow keys flip the boards.</p>
     </dialog>
     <dialog class="modal" id="ooga-portal-menu" aria-labelledby="ooga-portal-title" aria-describedby="ooga-portal-status">
       <div class="panel-head">
@@ -1072,6 +1073,10 @@ Then run npm run build and ONLY=characters node test/run.mjs.</pre>
   <script src="js/rocket.js"></script>
   <script src="js/rocket-models.js"></script>
     <script src="js/pool-models.js"></script>
+  <script src="js/timechain-models.js"></script>
+  <script src="js/timechain-beer.js"></script>
+  <script src="js/timechain-data.js"></script>
+  <script src="js/timechain-boards.js"></script>
   <script src="js/solid-props.js"></script>
   <script src="js/breakables.js"></script>
   <script src="js/agent.js"></script>
