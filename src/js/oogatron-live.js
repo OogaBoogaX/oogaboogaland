@@ -2,8 +2,8 @@
 // page life, every minute while the tab is visible. Subscribers get plain
 // events: { type: "stats", stats } for every good poll (the full /v2/stats
 // payload, schema 3), and { type: "contribution", delta, activity } when the
-// org's commits+prs+reviews+comments rose since the previous poll — the fireworks
-// signal. The baseline is the first successful poll, never the baked
+// org's commits+prs+reviews+issues+comments rose since the previous poll — the
+// fireworks signal. The baseline is the first successful poll, never the baked
 // snapshot: a stale bake must not fire celebration on every page load.
 // Network errors are silent (counted in state); the page always keeps the
 // baked board. Like the mempool feed, this stays off under nosim and can be
@@ -33,7 +33,7 @@
         throw new Error("unexpected stats shape");
       }
       const t = stats.totals;
-      const activity = (t.commits | 0) + (t.prs | 0) + (t.reviews | 0) + (t.comments | 0);
+      const activity = (t.commits | 0) + (t.prs | 0) + (t.reviews | 0) + (t.issues | 0) + (t.comments | 0);
       state.polls++;
       state.lastAt = Date.now();
       state.lastError = "";

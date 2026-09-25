@@ -3212,6 +3212,32 @@ const tapKey = async (b, key) => {
   await b.send("Input.dispatchKeyEvent", { type: "keyDown", key, code, text: key });
   await b.send("Input.dispatchKeyEvent", { type: "keyUp", key, code });
 };
+// The board's rotation and ticker derive from the baked data, so the check reads its
+// expectations from the same file rather than pinning counts that move with the org.
+const hubJumbotron = { name: "hub jumbotron", why: "rule: the rotation runs recent, org totals and five org boards, then each active repo's summary and five boards, and a draft PR ticks as DRAFT PR", run: async (b) => {
+  const r = await b.evaluate(`(() => {
+    const B = window.__ooga, j = B.jumbotron, data = window.BL.jumbotronData;
+    const ref = Date.parse(data.meta.generated_at) || Date.now();
+    const active = data.repos.filter((repo) => repo.last_activity_at && ref - Date.parse(repo.last_activity_at) <= 7 * 24 * 3600 * 1000).slice(0, 6);
+    j.goToView(0);
+    const captions = [];
+    for (let i = 0; i < j.count; i++) { captions.push(j.caption); j.nextView(); }
+    const wrapped = j.caption;
+    // Same single-row feed twice, the pr flagged draft and not: the ticker's type column must differ.
+    const feed = (draft) => ({ ...data, recent: [{ login: data.contributors[0].login, repo: data.repos[0].name, type: "pr", occurred_at: data.meta.generated_at, draft }] });
+    const column = () => { j.setView("recent"); B.advance(0.2, 1 / 30); return j.canvas.getContext("2d").getImageData(126, 12, 60, 92).data.join(); };
+    j.refreshData(feed(false));
+    const plain = column();
+    j.refreshData(feed(true));
+    const drafted = column();
+    j.refreshData(data);
+    j.goToView(0);
+    return { count: j.count, expected: 2 + 5 + active.length * 6, captions: captions.slice(0, 8), wrapped, differs: plain !== drafted };
+  })()`);
+  const orgBoards = ["commits", "prs", "reviews", "comments", "issues"].map((t) => "org · " + t);
+  record("hub jumbotron: the rotation is recent, org totals, five org leaderboards, then six slides per active repo, wrapping back to the start", r.count === r.expected && r.captions[0] === "Recent activity" && r.captions[1] === "Org totals" && orgBoards.every((c, i) => r.captions[2 + i] === c) && r.wrapped === "Recent activity", JSON.stringify(r));
+  record("hub jumbotron: a draft PR draws a different ticker row than the same PR undrafted", r.differs, JSON.stringify({ differs: r.differs }));
+} };
 // The healthiest of its kind, so a prop an earlier step shot at is never the one measured.
 const nextTo = (prop, gap, yaw = "-Math.PI / 2", pitch = 0.3) => `(() => { const B = window.__ooga, a = B.cavemen.get("portlandhodl"); if (B.crew.player !== a) B.pilot.possess(a); const r = B.headquarters.breakables.list.filter((r) => r.owner.prop === "${prop}" && r.owner.active && !r.broken).sort((a, b) => b.health - a.health)[0]; window.__target = r; const t = r.owner.node.position; B.pilot.navigate({ position: { x: t.x - ${gap}, y: a.root.position.y, z: t.z }, yaw: ${yaw}, pitch: ${pitch}, dist: 4 }); B.advance(0.3, 1 / 60); return r.health; })()`;
 const hubMelee = { name: "hub melee", why: "rule: a swing does one damage, so a box breaks in one, a barrel in three and a rock in five, and the prop comes back", run: async (b) => {
@@ -3411,7 +3437,7 @@ scene("orbit", { steps: [{ name: "orbit flow", why: "regression: the spacewalk a
 scene("mine", { query: "wip=mine", steps: [mineResume, trip("mine"), mineControls, wipGate] });
 scene("pool", { steps: [poolLeave, trip("pool")] });
 scene("hub", { label: "weapons", query: "character=portlandhodl&weapon=2&mag=1&ammo=6&jetpack=1", steps: [hubAk, hubMelee, hubJetpack] });
-scene("hub", { label: "mirror", steps: [hubMatrix, hubMirror] });
+scene("hub", { label: "mirror", steps: [hubJumbotron, hubMatrix, hubMirror] });
 scene("hub", { label: "canvas2d", query: "canvas2d=1&wip=mine", steps: [canvasTour] });
 scene("hub", { query: "pos=0", opts: PHONE_SIZE, steps: [phone("hub", { required: ["#joy-move", "#joy-look", "#sheet-toggle", "#sheet-bananas"], sheet: true })] });
 scene("lab", { query: "pos=0", opts: PHONE_SIZE, steps: [phone("lab", { required: ["#joy-move", "#joy-look", ".leave"] })] });

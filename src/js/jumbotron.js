@@ -117,7 +117,8 @@
   const normalizeBoard = (b) => Array.isArray(b) ? b.map((e) => ({ login: String(e.login), count: e.count | 0 })) : [];
   const normalizeBoards = (lb) => ({
     commits: normalizeBoard(lb && lb.commits), prs: normalizeBoard(lb && lb.prs),
-    reviews: normalizeBoard(lb && lb.reviews), comments: normalizeBoard(lb && lb.comments)
+    reviews: normalizeBoard(lb && lb.reviews), comments: normalizeBoard(lb && lb.comments),
+    issues: normalizeBoard(lb && lb.issues)
   });
   // Board rows carry GitHub logins; a character maps its login to the in-game name.
   const displayLabel = (c) => c.login.startsWith("email:") ? "anonymous" : BL.characters.displayOf(c.login);
@@ -143,7 +144,8 @@
       };
     });
     const recent = (Array.isArray(json.recent) ? json.recent : []).map((e) => ({
-      login: String(e.login), repo: String(e.repo), type: String(e.type), occurredAt: String(e.occurred_at)
+      login: String(e.login), repo: String(e.repo), type: String(e.type), occurredAt: String(e.occurred_at),
+      draft: e.draft === true
     }));
     // Org-wide weekly series: the repos' weeks summed.
     const weeklyMap = new Map();
@@ -274,10 +276,12 @@
     }
     let y = 15;
     for (const e of model.recent.slice(0, 11)) {
-      const color = PALETTE[TYPE_COLOR[e.type]] || PALETTE.accent;
+      // A draft PR reads muted: it is announced, not landed.
+      const draft = e.type === "pr" && e.draft;
+      const color = draft ? PALETTE.dim : PALETTE[TYPE_COLOR[e.type]] || PALETTE.accent;
       drawText(ctx, fitText(displayLabel(e).toUpperCase(), 60, 1), 4, y, PALETTE.text, 1);
       drawText(ctx, fitText(e.repo.toUpperCase(), 54, 1), 68, y, PALETTE.dim, 1);
-      drawText(ctx, fitText(e.type.toUpperCase(), 42, 1), 126, y, color, 1);
+      drawText(ctx, fitText(draft ? "DRAFT PR" : e.type.toUpperCase(), 42, 1), 126, y, color, 1);
       const age = recentAge(e.occurredAt);
       drawText(ctx, age, BOARD_W - 4 - measureText(age, 1), y, PALETTE.dim, 1);
       y += 8;
@@ -449,13 +453,15 @@
         .slice(0, MAX_REPO_BOARDS);
     };
 
-    // Rebuilt per model: recent feed, org totals, then each active repo's
-    // summary followed by its four leaderboards.
+    // Rebuilt per model: recent feed, org totals and org leaderboards, then
+    // each active repo's summary followed by its leaderboards.
+    const BOARD_TYPES = ["commits", "prs", "reviews", "comments", "issues"];
     const cycle = () => {
       const c = [{ name: "recent" }, { name: "totals" }];
+      for (const type of BOARD_TYPES) c.push({ name: "leaderboard", params: { type } });
       for (const repo of activeRepos()) {
         c.push({ name: "repo", params: { name: repo.name } });
-        for (const type of ["commits", "prs", "reviews", "comments"]) {
+        for (const type of BOARD_TYPES) {
           c.push({ name: "leaderboard", params: { type, repo: repo.name } });
         }
       }
@@ -537,7 +543,7 @@
 
     // The slide's name for a caption: the view and, for a repository or a leaderboard, whose.
     const captionOf = (v) => v.name === "recent" ? "Recent activity" : v.name === "totals" ? "Org totals"
-      : v.name === "repo" ? v.params.name : `${v.params.repo} · ${v.params.type}`;
+      : v.name === "repo" ? v.params.name : `${v.params.repo || "org"} · ${v.params.type}`;
     const api = {
       node,
       canvas,
@@ -611,7 +617,7 @@
       autoRotate(seconds) {
         rotateEvery = seconds > 0 ? seconds : 0;
       },
-      // A fresh /v1/stats payload from the live poller; invalid data is
+      // A fresh /v2/stats payload from the live poller; invalid data is
       // ignored so a worker hiccup can never blank the board.
       refreshData(json) {
         let next;

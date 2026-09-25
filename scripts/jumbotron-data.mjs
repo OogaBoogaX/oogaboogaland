@@ -38,8 +38,8 @@ if (stats.repos.some((r) => (Array.isArray(r.contributors) ? r.contributors : []
 // Ship public handles and activity only, never profile names or metadata.
 const counts = ({ commits, prs, reviews, issues, comments }) => ({ commits, prs, reviews, issues, comments });
 const weekly = (rows) => rows.map(({ week, commits, prs, reviews, issues, comments }) => ({ week, commits, prs, reviews, issues, comments }));
-const boards = (lb) => Object.fromEntries(["commits", "prs", "reviews", "comments"].map((kind) => [kind,
-  lb[kind].map(({ login, count }) => ({ login, count }))
+const boards = (lb) => Object.fromEntries(["commits", "prs", "reviews", "comments", "issues"].map((kind) => [kind,
+  (lb[kind] || []).map(({ login, count }) => ({ login, count }))
 ]));
 const snapshot = {
   meta: { generated_at: stats.meta.generated_at, org: stats.meta.org, schema_version: stats.meta.schema_version },
@@ -54,7 +54,10 @@ const snapshot = {
     // Per-repo last activity: the island routes each Ooga to their repo's cave.
     contributors: (r.contributors || []).map(({ login, last_seen_at }) => ({ login, last_seen_at }))
   })),
-  recent: stats.recent.map(({ login, repo, type, occurred_at }) => ({ login, repo, type, occurred_at })),
+  // draft rides along on pr rows so the ticker can tag them DRAFT PR.
+  recent: stats.recent.map(({ login, repo, type, occurred_at, draft }) => (
+    draft === true ? { login, repo, type, occurred_at, draft: true } : { login, repo, type, occurred_at }
+  )),
   // The jumbotron needs logins for leaderboard labels; the caveman roster
   // needs last_seen_at for sleep states. Nothing else ships.
   contributors: stats.contributors.map((c) => ({
