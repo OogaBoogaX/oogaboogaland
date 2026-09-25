@@ -31,7 +31,10 @@
       grip: k.color("#0f1013"),
       gripLt: k.color("#3a3e45"),
       wire: k.color("#f2b81c"),
-      laser: k.color("#ff2a1e")
+      laser: k.color("#ff2a1e"),
+      // His hide loincloth is leopard in both colourways: the machine still dresses like an Ooga.
+      loin: k.color("#c8923a"),
+      loinSpot: k.color("#4a2f16")
     };
   };
   const glowOf = (C) => ({ [C.core]: 1, [C.glyph]: 0.22, [C.laser]: 1, [C.light]: 0.2 });
@@ -107,6 +110,10 @@
     v.fill(1, 2, 4, 5, 0, 0, C.dark);
     v.fill(6, 7, 4, 5, 0, 0, C.dark);
     v.set(4, 6, 0, C.core);
+    // A leopard wrap round the pelvis, under the wiring.
+    for (let x = 0; x <= 8; x++) for (let z = 0; z <= 5; z++) for (const y of [0, 1]) {
+      if (x === 0 || x === 8 || z === 0 || z === 5) v.set(x, y, z, (x * 3 + y * 5 + z * 7) % 6 === 0 ? C.loinSpot : C.loin);
+    }
     return v;
   };
   const fingerVox = (C) => {
@@ -218,7 +225,10 @@
         const C = colors(k), u = k.u, glow = glowOf(C);
         k.parts.legL.geometry = k.vg(legVox(C, -1), { x: -2 * u, y: -5 * u, z: -2.5 * u }, glow);
         k.parts.legR.geometry = k.vg(legVox(C, 1), { x: -2 * u, y: -5 * u, z: -2.5 * u }, glow);
-        k.parts.torso.geometry = k.vg(torsoVox(C), { x: -4.5 * u, y: 0, z: -3 * u }, glow);
+        const torso = torsoVox(C);
+        k.loin = [C.loin, C.loinSpot];
+        k.loinFlaps(torso);
+        k.parts.torso.geometry = k.vg(torso, { x: -4.5 * u, y: 0, z: -3 * u }, glow);
         const arm = k.vg(armVox(C), { x: -1.5 * u, y: -11 * u, z: -1.5 * u }, glow);
         k.parts.armL.geometry = k.parts.armR.geometry = arm;
         const fingers = k.vg(fingerVox(C), { x: -1.5 * u, y: -u, z: -1.5 * u });

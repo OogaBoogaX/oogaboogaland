@@ -14,16 +14,12 @@
     }
     return -1;
   };
-  const create = (source, releaseGeometry = () => {}) => {
-    const node = createNode({ visible: false }), solid = createNode(), detail = createNode();
-    const pathNodes = source.cutawayPaths ? Array.from({ length: 4 }, () => createNode()) : [];
-    const detailPathNodes = source.cutawayPaths ? Array.from({ length: 4 }, () => createNode()) : [];
-    addChild(node, solid, detail, ...pathNodes, ...detailPathNodes);
-    const { data, sx, sy, sz, unit, origin, palette } = source;
-    const detailStride = Math.ceil(sy * unit / DETAIL_STEP) + 1;
-    const mask = new Uint8Array(sx * sz), polygon = new Float64Array(512), clipped = new Float64Array(512), hull = new Float64Array(1024);
-    // Architectural fragments occupy only a few columns. Index them once so
-    // a moving slice never scans the whole island for each detail-height step.
+  // Architectural fragments occupy only a few columns. Index them once per read-only source so
+  // a moving slice never scans the whole island for each detail-height step, nor each section for each source.
+  const COLUMNS = new WeakMap();
+  const columnsOf = (source) => {
+    let index = COLUMNS.get(source);
+    if (index) return index;
     const windowColumns = [], rampColumns = [];
     if (source.windows) for (let column = 0; column < source.windows.length; column++) {
       const pieces = source.windows[column];
@@ -34,6 +30,19 @@
       for (let column = 0; column < info.ranges.length; column++) if (info.ranges[column]) columns.push(column);
       rampColumns.push({ info, columns });
     }
+    index = { windowColumns, rampColumns };
+    COLUMNS.set(source, index);
+    return index;
+  };
+  const create = (source, releaseGeometry = () => {}) => {
+    const node = createNode({ visible: false }), solid = createNode(), detail = createNode();
+    const pathNodes = source.cutawayPaths ? Array.from({ length: 4 }, () => createNode()) : [];
+    const detailPathNodes = source.cutawayPaths ? Array.from({ length: 4 }, () => createNode()) : [];
+    addChild(node, solid, detail, ...pathNodes, ...detailPathNodes);
+    const { data, sx, sy, sz, unit, origin, palette } = source;
+    const detailStride = Math.ceil(sy * unit / DETAIL_STEP) + 1;
+    const mask = new Uint8Array(sx * sz), polygon = new Float64Array(512), clipped = new Float64Array(512), hull = new Float64Array(1024);
+    const { windowColumns, rampColumns } = columnsOf(source);
     const solidCache = [], detailCache = [];
     const stats = { solidBuilds: 0, detailBuilds: 0, cacheEntries: 0, faces: 0 };
     let generation = 0, currentSolid = null, currentDetail = null;

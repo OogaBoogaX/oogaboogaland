@@ -78,7 +78,7 @@
     clear: new Float32Array(3), horizon: new Float32Array(3), zenith: new Float32Array(3), sky: new Float32Array(3), ground: new Float32Array(3), sun: new Float32Array(3), direct: new Float32Array(3),
     light: { x: 0.55, y: 0.78, z: -0.25 }, sunDirection: { x: 0, y: 1, z: 0 }, moon: { x: 0, y: 1, z: 0 }, celestialPole: { x: 0, y: Math.sin(20 * DEG), z: -Math.cos(20 * DEG) }, starMatrix: new Float32Array(9),
     stars: 0, torch: 0, day: 1, twilight: 0, lampFactor: 0, directStrength: 1, directionalLightStrength: 1, sunStrength: 1, moonStrength: 0, ambientFloor: 0.18, diffuseFloor: 0, shadowStrength: 1, shadowFloor: 0, shadowBias: 0.002, outdoorDarkestSurfaceEstimate: 0.34, activeLightSource: "sun", latitude: 20, dayOfYear: 172, continuousDay: 171.5, solarDeclination: 0, siderealAngle: 0, sunAltitude: 90, sunAzimuth: 180, moonAltitude: -90, moonAzimuth: 0, sunriseHour: 6, sunsetHour: 18,
-    time: 0, bloomStrength: 0.5, lights: new Float32Array(80), lightCount: 0, shadowCenter: { x: 0, y: 0, z: 0 }, shadowExtent: 34, matrix: MATRIX_WORLD, cutawayMaxY: 1e6, birdsEyeCutaway: false, cutawayFade: 0, cutawayRockMix: 0, cutawayRegions: [], cutawayRegionCount: 0, cutawayCloudY: 0, cutawayCloudMix: 0
+    time: 0, bloomStrength: 0.5, lights: new Float32Array(BL.glRenderer.POINT_LIGHT_CAPACITY * 8), lightCount: 0, shadowCenter: { x: 0, y: 0, z: 0 }, shadowExtent: 34, matrix: MATRIX_WORLD, sea: -70, cutawayMaxY: 1e6, birdsEyeCutaway: false, cutawayFade: 0, cutawayRockMix: 0, cutawayRegions: [], cutawayRegionCount: 0, cutawayCloudY: 0, cutawayCloudMix: 0
   };
   let viewPoseActor = null;
   RENDER_OPTS.beforeView = () => {
@@ -132,7 +132,7 @@
   const PHASE_TOASTS = { dawn: "Dawn breaks over the island", morning: "Morning on the island", noon: "High noon", dusk: "Dusk settles over the island", night: "Night. The torches are lit.", midnight: "Midnight. The island sleeps." };
   // Lamp colours and reach; a lamp's flame reads through node.glow.
   const LAMP = { torch: { r: 1.0, g: 0.62, b: 0.25, radius: 6, glow: 0.85, hide: false }, fire: { r: 1.0, g: 0.55, b: 0.2, radius: 9, glow: 0.9, hide: true }, lantern: { r: 1.0, g: 0.8, b: 0.45, radius: 4, glow: 0.9, hide: false } };
-  const LIGHT_CAPACITY = 10;
+  const LIGHT_CAPACITY = BL.glRenderer.POINT_LIGHT_CAPACITY;
   const LIGHTING_DEBUG = {
     registeredLampCount: 0, activeFullLightCount: 0, approximatedLightCount: 0,
     configuredLightCapacity: LIGHT_CAPACITY, selectedCount: 0, approximatedCount: 0,
@@ -148,6 +148,12 @@
   const BUILD_DEGREES = [12, 40, 66, 80, 102, 165, 195, 212, 282, 297, 312, 340];
   const BUILD_RADIUS = 13;
   const NUDGES = [0, -2, 2, -4, 4, -6, 6, -8, 8];
+  const PATH_GEOMETRY = new WeakMap();
+  const TIMECHAIN_NEAR = 25;
+  const VINES = ["c5"];
+  const DRESSED = new WeakMap();
+  const DRESSING_LAMPS = BL.dressing.LIGHT_RGB.map(([r, g, b]) => ({ r, g, b, radius: 5.5, glow: 0.9, hide: false }));
+  const dressingLights = [];
   const PILE_SCALE = 0.45;
   const SCENERY_CLEARANCE = 0.25;
   const OBL_REPO = "oogaboogax/oogaboogaland";
@@ -157,12 +163,13 @@
   const WANDER_COUNT = 36, WANDER_INNER = 5.5;
   const ALTAR_HEIGHT = 0.34, ALTAR_BLOCK_WIDTH = 0.2, ALTAR_BLOCK_ARC = 0.3, ALTAR_RING_GAP = 0.02, ALTAR_MAX_BLOCKS = 512;
   const RIPEN = 25, TREE_CHANCE = 0.5, BUSH_CHANCE = 0.25;
-  const PROP_TIPS = { tree: "Tree · shake it", bush: "Bush · rustle it", rock: "Rock · hit to break", crate: "Box · hit to break", barrel: "Barrel · hit to break", flower: "Flowers", torch: "Torch · warm", firepit: "Fire pit", bedroll: "Somebody's bed", ladder: "Ladder · wobbly", dock: "Dock · creaky", magazine: "Spare magazine · walk into it to collect", plane: "Ooga Drop · tap to fly", sign: "Ooga Drop · the plane flies from here", launchpad: "Ooga Orbit · tap to build a rocket", rocket: "Ooga Orbit · tap to fly", tower: "Launch tower · steady", orbitsign: "Ooga Orbit · the pad past the bridge", bridge: "Rope bridge · to the launch pad", poolbridge: "Vine bridge · to the Mempool island", poolstair: "The Mempool · tap to climb down", poolsign: "The Mempool · the cave reads the chain", chainsign: "The chain, at a glance", weathersign: "Reading the weather · tap for the key", poolrock: "Mossy rock", poolfern: "Fern · rustle it", poollog: "Fallen log · something lives in it", jaguar: "Jaguar · do not poke", monkey: "Monkey · it watches you", toucan: "Toucan · big beak", canopy: "Rainforest tree · shake it", windsock: "Windsock · a fair wind", jumbotron: "Jumbotron · OogaBoogaX on the big screen · tap the screen for a close-up", gate: null };
+  const PROP_TIPS = { tree: "Tree · shake it", bush: "Bush · rustle it", rock: "Rock · hit to break", crate: "Box · hit to break", barrel: "Barrel · hit to break", flower: "Flowers", torch: "Torch · warm", firepit: "Fire pit", bedroll: "Somebody's bed", ladder: "Ladder · wobbly", dock: "Dock · creaky", magazine: "Spare magazine · walk into it to collect", plane: "Ooga Drop · tap to fly", sign: "Ooga Drop · the plane flies from here", launchpad: "Ooga Orbit · tap to build a rocket", rocket: "Ooga Orbit · tap to fly", tower: "Launch tower · steady", orbitsign: "Ooga Orbit · the pad past the bridge", bridge: "Rope bridge · to the launch pad", poolbridge: "Vine bridge · to the Mempool island", poolstair: "The Mempool · tap to climb down", poolsign: "The Mempool · the cave reads the chain", chainsign: "The chain, at a glance · tap to read it", weathersign: "Reading the weather · tap for the key", poolrock: "Mossy rock", poolfern: "Fern · rustle it", poollog: "Fallen log · something lives in it", jaguar: "Jaguar · do not poke", monkey: "Monkey · it watches you", toucan: "Toucan · big beak", canopy: "Rainforest tree · shake it", windsock: "Windsock · a fair wind", jumbotron: "Jumbotron · OogaBoogaX on the big screen · tap the screen for a close-up", palm: "Palm · shake it", gate: null };
   const workCave = (slot) => slot.repo && (slot.status === "open" || slot.status === "mirror")
     && (slot.repo !== OBL_REPO || slot.status === "mirror");
   const MATRIX_LIVING_PROPS = new Set(["tree"]);
   const SOLID_PROPS = new Set(["tree", "rock", "crate", "barrel", "firepit", "dock", "jumbotron", "launchpad", "rocket", "tower", "bridge", "orbitsign", "poolbridge", "poolstair", "poolrock", "canopy"]);
   const BUSH_WORDS = ["Something rustles.", "A beetle. Ooga leaves it.", "Just a bush."];
+  const PALM_WORDS = ["Coconuts. Ooga wanted bananas.", "A coconut thuds down. Ooga dodges.", "The fronds swish."];
   const LEAF = models.particleGeometry("#4a8530", 0.12, 0);
   const PETALS = ["#e04a3a", "#f2c94c", "#f3efe4"].map((c) => models.particleGeometry(c, 0.09, 0));
   const CHIP = models.particleGeometry("#6b625a", 0.1, 0);
@@ -527,6 +534,62 @@
   const addTarget = (node, owner, opts) => {
     input.add(node, owner, opts);
     targets.push(node);
+  };
+  // Poking the set dressing. Every piece a baked set placed (`baked.picks`) gets a pick sphere on a node kept off
+  // the scene graph, over one shared faceless geometry: never drawn, never baked into outlines or the GPU, and
+  // released with the visit's other targets. `toWorld` maps a piece's set coordinates to the island, or null to
+  // leave it out (the garage furniture inside a mouth belongs to the cave, not the facade).
+  const PICK_GEOMETRY = { verts: [-0.5, -0.5, -0.5, 0.5, 0.5, 0.5], faces: [], lines: [] };
+  const addPieceTargets = (picks, toWorld) => {
+    for (let i = 0; i < picks.length; i += 6) {
+      const at = toWorld(picks[i + 2], picks[i + 3], picks[i + 4]);
+      if (!at) continue;
+      const node = createNode({ position: at, geometry: PICK_GEOMETRY });
+      BL.scene.updateWorld(node);
+      addTarget(node, { kind: "piece", piece: picks[i], variant: picks[i + 1], node, x: at.x, y: at.y, z: at.z, next: 0, weaponType: "none" }, { radius: Math.max(0.35, picks[i + 5]) });
+    }
+  };
+  // What each piece says when poked: its tooltip, the particles it throws and the lines it answers with.
+  const PIECES = {
+    lanternPost: ["Lantern post", "spark", ["The lantern swings. Ooga squints.", "Warm glass. Ooga licks a finger."]],
+    crate: ["Crate", "dust", ["Nailed shut. Ooga knocks anyway.", "Something rattles inside."]],
+    coalCrate: ["Coal crate", "dust", ["Coal for the Lightning Factory.", "Ooga gets coal on its nose."]],
+    dynamiteCrate: ["Dynamite · do not poke", "spark", ["DO NOT POKE. Ooga pokes.", "Fizz... phew."]],
+    barrel: ["Barrel", "dust", ["Sloshes. Ooga drank half.", "Smells like banana brew."]],
+    cart: ["Ore cart", "chip", ["The wheels squeak.", "Full of shiny rocks."]],
+    rails: ["Mine rails", "chip", ["Clank."]],
+    banner: ["Banner", "dust", ["The banner flaps.", "Ooga salutes the banner."]],
+    tireStack: ["Tyres", "dust", ["Boing!", "Bouncy. Ooga bounces."]],
+    flag: ["Flag", "dust", ["The flag snaps in the wind."]],
+    cone: ["Cone", "dust", ["Boop.", "Ooga wears it as a hat. Briefly."]],
+    barrier: ["Barrier", "chip", ["Solid. Don't crash into it."]],
+    fuelPump: ["Fuel pump", "spark", ["Smells like banana fuel.", "Empty. The karts drank it all."]],
+    startLights: ["Start lights", "spark", ["Red... amber... GO!"]],
+    die: ["Big die · roll it", "dust", null],
+    flaskBench: ["Flasks", "spark", ["Bubbles. Ooga does not drink it.", "It fizzes. Science!"]],
+    terminal: ["Terminal", "spark", ["beep boop", "It prints random numbers. Ooga approves."]],
+    chalkboard: ["Chalkboard", "dust", ["More entropy, more bananas.", "Ooga adds a doodle."]],
+    pickRack: ["Pickaxes", "chip", ["Sharp. Ooga counts three picks."]],
+    oreHeap: ["Ore heap", "chip", ["Shiny rocks!", "Ooga finds a glint of gold."]],
+    monolith: ["Monolith", "spark", ["The glyphs hum.", "Cold stone. It watches back."]],
+    runeStone: ["Rune stone", "spark", ["The rune glows at Ooga."]],
+    coil: ["Coil · zap", "spark", ["ZAP!", "Ooga's fur stands on end."]],
+    gauge: ["Gauge", "spark", ["The needle twitches.", "Pressure high. Ooga fine."]],
+    rubble: ["Rubble", "chip", ["Loose rocks.", "Ooga kicks a pebble."]],
+    sack: ["Sack", "dust", ["A sack of banana flour.", "Soft. Good pillow."]],
+    bench: ["Log bench", "dust", ["A good log for sitting."]],
+    vine: ["Vines", "leaf", ["The vines swing.", "Rustle rustle."]],
+    boards: ["Boarded up · coming soon", "dust", ["Boarded up. Coming soon.", "Ooga peeks through a gap. Dark."]]
+  };
+  const PIECE_BURST = { spark: SPARK, dust: DUST, chip: CHIP, leaf: LEAF };
+  const pokePiece = (o) => {
+    if (now < o.next) return;
+    o.next = now + 0.6;
+    const words = PIECES[o.piece];
+    if (!words) return;
+    fx.burst(o.x, o.y, o.z, words[1] === "spark" ? 10 : 7, [PIECE_BURST[words[1]]], 1.3);
+    // A throwaway roll: nothing rides on it, so Math.random is fine here.
+    hud.toast(words[2] ? words[2][fnv1a(`${o.piece}/${Math.floor(now * 2)}`) % words[2].length] : `Ooga rolls the big die: ${1 + Math.floor(Math.random() * 6)}!`);
   };
   const clampDrag = (p) => {
     const max = island.meadowRadius - 0.5, r = Math.hypot(p.x, p.z);
@@ -1222,7 +1285,7 @@
 
   const addProp = (kind, node, x, z, radius) => {
     const owner = { kind: "prop", prop: kind, node, x, z, ripe: 0, pickRadius: radius, active: true };
-    if (kind === "tree" || kind === "bush" || kind === "flower" || kind === "grass") owner.weaponType = "none";
+    if (kind === "tree" || kind === "bush" || kind === "flower" || kind === "grass" || kind === "palm") owner.weaponType = "none";
     addTarget(node, owner, { radius });
     props.push(owner);
     if (SOLID_PROPS.has(kind)) solids.add(node);
@@ -1405,6 +1468,274 @@
   };
   // Mouth local frame: +z leads out of the cave.
   const sealedCaveVariant = (id) => id === "c3" ? 1 : id === "c10" ? 2 : 0;
+  // Every cave wears its own facade from the shared voxel kit: two lantern posts, a string over the lintel,
+  // vines off the rim, and the theme's own things either side of the path (lab dice and flasks, rally tyres and
+  // start lights, mine picks and ore, the mirror's glyph monoliths, the Lightning Factory's coil and coal). The
+  // Headquarters ramps run down a cutting rather than into a cliff and wear none. Each mouth bakes to one solid, one hanging and one glowing mesh, memoised per island
+  // so a revisit only places nodes. Pieces are [kind, x, z, quarter turns, variant, lift] in the mouth's frame.
+  const THEMES = {
+    lab: { glass: 1, icon: "die", string: ["bulb", 1], pieces: [["flaskBench", -5.3, 1.1], ["die", -4.1, 2.8, 0, 1], ["die", -3.5, 3.6, 1, 3], ["die", -4.1, 2.8, 1, 4, 0.5], ["terminal", 5.2, 1.0], ["chalkboard", 6.5, 2.5], ["die", 4.3, 3.2, 1, 2], ["banner", -6.7, 0.7, 0, 1], ["sack", 6.0, 3.6, 0, 1]] },
+    rally: { glass: 0, icon: "flag", string: ["pennant", 0], inside: [["checkerMat", 0, -3.6, 0, 0, 0], ["toolWall", -3.15, -4.4, 1], ["workbench", -2.55, -4.4, 1], ["tireRack", 3.1, -4.6, 3], ["oilDrum", 2.6, -5.9, 0, 0], ["oilDrum", 2.9, -2.3, 0, 1], ["cone", -2.2, -1.6], ["cone", 2.3, -1.2]], ceiling: [[-2.2, 2.2, -1.4, -6.2, 3.05, [0.2, 0.5, 0.8]]], pieces: [["tireStack", -5.0, 0.9, 0, 0], ["tireStack", -5.8, 2.0, 0, 1], ["tireStack", -5.8, 2.0, 0, 0, 0.56], ["cone", -3.6, 3.0], ["cone", -4.0, 3.7], ["fuelPump", -6.6, 3.2], ["startLights", 5.0, 0.9], ["barrier", 5.7, 2.5, 0, 0], ["flag", 6.6, 0.9, 0, 0], ["flag", 3.7, 3.5, 0, 1], ["tireStack", 6.7, 3.4, 0, 1]] },
+    mine: { glass: 0, icon: "pick", string: ["hanging", 0, [0.28, 0.72]], pieces: [["pickRack", -5.4, 0.9], ["dynamiteCrate", -4.3, 2.6], ["oreHeap", -6.3, 2.7, 0, 0], ["coalCrate", 5.0, 1.0, 0, 2], ["oreHeap", 6.1, 2.6, 0, 1], ["barrel", 4.3, 3.0, 0, 1], ["banner", 6.7, 0.8, 0, 3], ["crate", 5.1, 2.1, 0, 0]] },
+    matrix: { glass: 2, icon: "glyph", string: ["bulb", 2], pieces: [["monolith", -5.0, 0.9, 0, 0], ["monolith", 5.0, 0.9, 0, 1], ["runeStone", -4.2, 2.8, 0, 0], ["runeStone", 4.4, 2.9, 0, 1], ["banner", 6.5, 0.8, 0, 4], ["banner", -6.5, 0.8, 0, 4], ["rubble", -6.3, 2.6, 0, 1]] },
+    lightning: { glass: 0, icon: "bolt", string: ["hanging", 0, [0.3, 0.7]], boards: true, pieces: [["coalCrate", -5.1, 0.8, 0, 3], ["crate", -5.4, 2.1, 1, 0], ["crate", -5.4, 2.1, 0, 1, 0.75], ["barrel", -4.3, 2.9, 0, 1], ["sack", -3.5, 2.8, 1, 0], ["rubble", -6.4, 0.9, 0, 1], ["gauge", 5.0, 0.9], ["cart", 5.7, 2.4, 1], ["banner", 6.6, 0.8, 0, 0], ["coil", 3.8, 3.4], ["coalCrate", 6.4, 3.4, 0, 1]] },
+  };
+  const THEME_ICON = (slot) => THEMES[slot.theme]?.icon || null;
+  const mouthDressing = (slot, m) => {
+    let byIsland = DRESSED.get(island);
+    if (!byIsland) DRESSED.set(island, byIsland = new Map());
+    let baked = byIsland.get(slot.id);
+    if (baked) return baked;
+    const theme = THEMES[slot.theme];
+    const sr = Math.sin(m.ry), cr = Math.cos(m.ry);
+    const set = BL.dressing.set(), ground = [];
+    // Ground pieces stand on the island itself; one whose spot is inside the cliff or over a drop is left out.
+    const stand = (kind, lx, lz, turns = 0, variant = 0, lift = 0) => {
+      const y = island.surfaceAt(m.x + cr * lx + sr * lz, m.z - sr * lx + cr * lz) - m.floorY;
+      if (Math.abs(y) > 0.9) return;
+      set.put(kind, lx, y + lift, lz, turns, variant);
+      if (!lift) ground.push(lx, lz);
+    };
+    stand("lanternPost", -4.4, 1.6, 0, theme.glass);
+    stand("lanternPost", 4.4, 1.6, 2, theme.glass);
+    for (const piece of theme.pieces) stand(...piece);
+    const [lamp, variant, at] = theme.string;
+    set.cable(-3.05, 3.42, 1.1, 3.05, 3.42, 1.1, 0.3, at || [0.1, 0.24, 0.38, 0.5, 0.62, 0.76, 0.9], lamp, variant);
+    set.cable(-4.44, 2.98, 1.6, -3.05, 3.42, 1.1, 0.12);
+    set.cable(4.44, 2.98, 1.6, 3.05, 3.42, 1.1, 0.12);
+    set.put("vine", -3.0, 3.5, 1.06, 0, 0);
+    set.put("vine", 2.6, 3.5, 1.06, 0, 1);
+    // A dark cave's rock stands flush with the rim's face, so the planks go on in front of both.
+    if (theme.boards) set.put("boards", 0, 0.2, 1.06);
+    // Inside the mouth the floor is the cave's own, level with the doorway.
+    for (const [kind, lx, lz, turns = 0, variant = 0, lift = 0] of theme.inside || []) set.put(kind, lx, lift, lz, turns, variant);
+    for (const [ax, bx, az, bz, y, lamps] of theme.ceiling || []) {
+      set.cable(ax, y, az, ax, y, bz, 0.15, lamps, "hanging", theme.glass);
+      set.cable(bx, y, az, bx, y, bz, 0.15, lamps, "hanging", theme.glass);
+    }
+    baked = { ...set.build(), ground };
+    byIsland.set(slot.id, baked);
+    return baked;
+  };
+  // A baked set's nodes under `parent`: the solid collides, the glowing layers breathe with the lamps.
+  const addDressing = (baked, parent, x, y, z, id, track) => {
+    for (const node of BL.dressing.nodes(baked, { living: true })) {
+      addChild(parent, node);
+      if (track) placed.push(node);
+      if (node.geometry === baked.solid) solids.add(node);
+      else if (node.geometry === baked.glow || node.geometry === baked.swingGlow) addLamp(node, LAMP.lantern, x, y, z, false, lamps.length, `${id}:${lamps.length}`).always = true;
+    }
+  };
+  const dressMouth = (slot, m, group) => {
+    // The Canvas 2D fallback draws every face on the CPU; it keeps the plain island.
+    if (renderer.kind === "canvas2d" || !THEMES[slot.theme]) return;
+    const baked = mouthDressing(slot, m);
+    addDressing(baked, group, m.x, m.floorY + 2.4, m.z, `${slot.id}:dressing`, false);
+    const sr = Math.sin(m.ry), cr = Math.cos(m.ry), g = baked.ground, lit = baked.lights;
+    for (let i = 0; i < lit.length; i += 4) dressingLights.push(m.x + cr * lit[i] + sr * lit[i + 2], m.floorY + lit[i + 1], m.z - sr * lit[i] + cr * lit[i + 2], lit[i + 3]);
+    addPieceTargets(baked.picks, (lx, ly, lz) => lz < 0.3 ? null : { x: m.x + cr * lx + sr * lz, y: m.floorY + ly, z: m.z - sr * lx + cr * lz });
+    // Headquarters and a sealed cave that is coming soon still hang their name over the door.
+    if (slot.status !== "open" && slot.status !== "mirror" && slot.name) addChild(group, createNode({ position: { x: 0, y: 4.5, z: 0.52 }, geometry: hubModels.caveSign(slot.name, THEME_ICON(slot)) }));
+    for (let i = 0; i < g.length; i += 2) claim(m.x + cr * g[i] + sr * g[i + 1], m.z - sr * g[i] + cr * g[i + 1], 0.8);
+  };
+  // The meadow from the same kit, in world axes: lantern posts beside the paths with their arms over them, a
+  // camp of stores round the fire, and rubble in the grass. Spots are chosen by the same claims and path tests
+  // the scatter uses, before it runs; the whole island bakes to one solid, one hanging and one glowing mesh.
+  const meadowDressing = (fire) => {
+    if (renderer.kind === "canvas2d") return;
+    let byIsland = DRESSED.get(island);
+    if (!byIsland) DRESSED.set(island, byIsland = new Map());
+    let baked = byIsland.get("meadow");
+    if (!baked) {
+      const set = BL.dressing.set(), ground = [];
+      const ok = (x, z, r) => island.surfaceAt(x, z) === 0 && free(x, z, r) && workSceneryClear(x, z, r) && !nearMouth(x, z, 7);
+      const stand = (kind, x, z, turns, variant, r) => {
+        set.put(kind, x, 0, z, turns, variant);
+        ground.push(x, z, r);
+        claim(x, z, r);
+      };
+      const ARM = [[1, 0], [0, -1], [-1, 0], [0, 1]];
+      const posts = [];
+      for (let r = 7; r <= island.meadowRadius - 2; r += 3.5) for (let deg = 0; deg < 360; deg += 6) {
+        const p = polar(deg + r * 7, r);
+        if (!nearPath(p.x, p.z, 1.7) || nearPath(p.x, p.z, 1.0) || !ok(p.x, p.z, 0.7)) continue;
+        if (posts.some((q) => Math.hypot(q.x - p.x, q.z - p.z) < 8)) continue;
+        let turns = -1;
+        for (let q = 0; q < 4 && turns < 0; q++) if (island.isPath(p.x + ARM[q][0] * 1.4, p.z + ARM[q][1] * 1.4)) turns = q;
+        if (turns < 0) continue;
+        posts.push(p);
+        stand("lanternPost", p.x, p.z, turns, 0, 0.7);
+      }
+      const CAMP = [["bench", 0.9], ["barrel", 0.55], ["coalCrate", 0.6], ["crate", 0.6], ["sack", 0.5], ["banner", 0.6, 5], ["rubble", 0.8]];
+      let placed = 0;
+      for (let k = 0; k < 16 && placed < CAMP.length; k++) {
+        const a = k / 16 * Math.PI * 2 + 0.3, x = fire.x + Math.cos(a) * 3.1, z = fire.z + Math.sin(a) * 3.1;
+        const [kind, r, variant = placed] = CAMP[placed];
+        if (!ok(x, z, r) || nearPath(x, z, 0.8)) continue;
+        stand(kind, x, z, k & 3, variant, r);
+        placed++;
+      }
+      let rubble = 0;
+      for (let deg = 17; deg < 360 && rubble < 12; deg += 29) {
+        const p = polar(deg, 9 + (deg * 37 % 17));
+        if (!ok(p.x, p.z, 0.9) || nearPath(p.x, p.z, 1.2)) continue;
+        stand("rubble", p.x, p.z, deg & 3, rubble, 0.9);
+        rubble++;
+      }
+      baked = { ...set.build(), ground };
+      byIsland.set("meadow", baked);
+    } else for (let i = 0; i < baked.ground.length; i += 3) claim(baked.ground[i], baked.ground[i + 1], baked.ground[i + 2]);
+    addDressing(baked, root, fire.x, 2.4, fire.z, "meadow:dressing", true);
+    addPieceTargets(baked.picks, (x, y, z) => ({ x, y, z }));
+    // Every dressing lantern is a real light at dusk, registered after the torches and the fire so the
+    // renderer's tier keeps those first; the lanterns' glass glows through the shared glow node above.
+    const lit = baked.lights;
+    for (let i = 0; i < lit.length; i += 4) dressingLights.push(lit[i], lit[i + 1], lit[i + 2], lit[i + 3]);
+    for (let i = 0; i < dressingLights.length; i += 4) {
+      addLamp({ glow: 0, flare: 0, visible: true }, DRESSING_LAMPS[dressingLights[i + 3]], dressingLights[i], dressingLights[i + 1], dressingLights[i + 2], true, (i / 4) % 5, `dressing:${i / 4}`);
+    }
+    dressingLights.length = 0;
+  };
+  // The lawn: swaying tufts in small clumps across the meadow's grass as one fixed instanced batch, a single
+  // draw. Clumps with bare grass between them read as tufts, not a carpet of blades. It follows the painted
+  // paths, so it is laid again whenever the island's paths change.
+  const LAWN_CAP = 300;
+  // Every tuft owns its slot: it keeps a tuft's width off the roads, off anything claimed on the island (props,
+  // dressing, palms, scenery) and a cell apart from every other tuft, checked through a grid of the tufts
+  // already laid (tuft index + 1 per cell). The grid is allocated once a page and cleared on each relay.
+  const LAWN_CELL = 0.45, LAWN_SPAN = Math.ceil(2 * MEADOW_OUTER / LAWN_CELL) + 5;
+  let lawn = null, lawnGrid = null;
+  const lawnCell = (v) => Math.floor((v + MEADOW_OUTER) / LAWN_CELL) + 2;
+  const layLawn = () => {
+    const data = lawn.node.instanceData, rand = mulberry32(fnv1a("lawn"));
+    const inner = Math.max(MEADOW_INNER, island.path.debug.ringOuterRadius + 0.6);
+    if (lawnGrid) lawnGrid.fill(0);
+    else lawnGrid = new Int16Array(LAWN_SPAN * LAWN_SPAN);
+    const tuftClear = (x, z) => {
+      const cx = lawnCell(x), cz = lawnCell(z);
+      for (let dz = -1; dz <= 1; dz++) for (let dx = -1; dx <= 1; dx++) {
+        const t = lawnGrid[(cz + dz) * LAWN_SPAN + cx + dx];
+        if (t && Math.hypot(data[(t - 1) * 20 + 12] - x, data[(t - 1) * 20 + 14] - z) < LAWN_CELL) return false;
+      }
+      return true;
+    };
+    let n = 0;
+    for (let tries = 0; n < LAWN_CAP && tries < LAWN_CAP * 3; tries++) {
+      const p = polar(rand() * 360, Math.sqrt(lerp(inner * inner, MEADOW_OUTER * MEADOW_OUTER, rand())));
+      for (let k = 1 + Math.floor(rand() * 3); k > 0 && n < LAWN_CAP; k--) {
+        const x = p.x + (rand() - 0.5) * 1.1, z = p.z + (rand() - 0.5) * 1.1;
+        const yaw = rand() * Math.PI * 2, s = 0.75 + rand() * 0.5;
+        if (!island.isGrassAt(x, z) || island.path.overlaps(x, z, 0.3) || !free(x, z, 0.2) || !tuftClear(x, z)) continue;
+        lawnGrid[lawnCell(z) * LAWN_SPAN + lawnCell(x)] = n + 1;
+        const c = Math.cos(yaw) * s, sn = Math.sin(yaw) * s, o = n++ * 20;
+        data[o] = c; data[o + 1] = 0; data[o + 2] = -sn; data[o + 3] = 0;
+        data[o + 4] = 0; data[o + 5] = s; data[o + 6] = 0; data[o + 7] = 0;
+        data[o + 8] = sn; data[o + 9] = 0; data[o + 10] = c; data[o + 11] = 0;
+        data[o + 12] = x; data[o + 13] = island.surfaceAt(x, z); data[o + 14] = z; data[o + 15] = 1;
+        data[o + 16] = data[o + 17] = data[o + 18] = data[o + 19] = 0;
+      }
+    }
+    lawn.node.instanceCount = n;
+    lawn.node.instanceVersion++;
+    lawn.version = island.path.version;
+  };
+  // Palms: a pair beside every dressed mouth, groves of one to three along the meadow's edge under the cliffs and
+  // on the cliff tops. Each is its own node on one of three shared geometries, so the wind bends every crown on
+  // its own phase for three draws; each claims its own slot, so nothing else stands in its trunk or crown.
+  const plantPalms = () => {
+    if (renderer.kind === "canvas2d") return;
+    const rand = mulberry32(fnv1a("palms"));
+    let n = 0;
+    const plant = (x, z) => {
+      const y = island.surfaceAt(x, z);
+      if (nearPath(x, z, 1.1) || !free(x, z, 1.2)) return false;
+      // Level ground only: every side within a quarter metre of the foot.
+      for (let i = 0; i < 4; i++) if (Math.abs(island.surfaceAt(x + Math.cos(i * 1.571) * 0.6, z + Math.sin(i * 1.571) * 0.6) - y) > 0.26) return false;
+      const node = createNode({ geometry: BL.dressing.palm(n++ % 3), position: { x, y, z }, rotation: { x: 0, y: rand() * Math.PI * 2, z: 0 }, sightHidden: true });
+      addChild(root, node);
+      placed.push(node);
+      solids.add(node);
+      addProp("palm", node, x, z, 1.6);
+      claim(x, z, 1.2);
+      return true;
+    };
+    // A grove: up to `size` palms round a centre a trunk-and-crown apart (2.9 m), each standing only where it fits.
+    const grove = (cx, cz, size, fits) => {
+      if (size === 1) return fits(cx, cz) && plant(cx, cz) ? 1 : 0;
+      let planted = 0;
+      const a0 = rand() * Math.PI * 2, r = size === 2 ? 1.45 : 1.68;
+      for (let k = 0; k < size; k++) {
+        const a = a0 + k * Math.PI * 2 / size, x = cx + Math.cos(a) * r, z = cz + Math.sin(a) * r;
+        if (fits(x, z) && plant(x, z)) planted++;
+      }
+      return planted;
+    };
+    const groveSize = () => {
+      const r = rand();
+      return r < 0.25 ? 1 : r < 0.65 ? 2 : 3;
+    };
+    for (const m of island.mouths) {
+      const slot = caves.slots.find((candidate) => candidate.id === m.id);
+      if (!THEMES[slot.theme]) continue;
+      const sr = Math.sin(m.ry), cr = Math.cos(m.ry);
+      for (const lx of [-7.6, 7.6]) {
+        let planted = 0;
+        for (const lz of [1.4, 4.4, 2.9]) if (planted < 2 && plant(m.x + cr * (lx + Math.sign(lx) * (lz - 1.4) * 0.3) + sr * lz, m.z - sr * (lx + Math.sign(lx) * (lz - 1.4) * 0.3) + cr * lz)) planted++;
+      }
+    }
+    const meadowEdge = (x, z) => !nearMouth(x, z, 6) && island.surfaceAt(x, z) === 0;
+    for (let deg = 5; deg < 360; deg += 38) {
+      const size = groveSize();
+      for (let k = 0; k < 4; k++) {
+        const p = polar(deg + (rand() - 0.5) * 12, MEADOW_OUTER - 3 - rand() * 3.5);
+        if (grove(p.x, p.z, size, meadowEdge)) break;
+      }
+    }
+    // Along the cliff tops, where they break the skyline.
+    const cliffTop = (x, z) => island.surfaceAt(x, z) > 2.5 && !nearMouth(x, z, 5);
+    for (let deg = 11, placedTop = 0; deg < 360 && placedTop < 16; deg += 34) {
+      const size = groveSize();
+      for (let k = 0; k < 5; k++) {
+        const p = polar(deg + (rand() - 0.5) * 14, lerp(CLIFF_INNER, CLIFF_OUTER, rand()));
+        const planted = grove(p.x, p.z, size, cliffTop);
+        if (planted) { placedTop += planted; break; }
+      }
+    }
+  };
+  // The sea far below and the islands on it, standing well out past the clouds.
+  const SEA_Y = -70;
+  const raiseIslets = () => {
+    if (renderer.kind === "canvas2d") return;
+    const spots = [[25, 260], [95, 330], [160, 240], [215, 300], [290, 280], [340, 360]];
+    spots.forEach(([deg, r], i) => {
+      const p = polar(deg, r);
+      // Scenery on the horizon: no outlines, sight tests or cover ever need it.
+      const node = createNode({ geometry: BL.dressing.islet(i % 3), position: { x: p.x, y: SEA_Y - 2, z: p.z }, rotation: { x: 0, y: deg * 0.7, z: 0 }, sightHidden: true });
+      addChild(root, node);
+      placed.push(node);
+    });
+  };
+  // Life over the sea: gulls wheeling round the island and sails out on the water.
+  let life = null;
+  const buildLife = () => {
+    if (renderer.kind === "canvas2d") return;
+    const gulls = BL.dressing.flock({ count: 22, radius: [28, 70], height: [8, 30], seed: 3 });
+    const shore = BL.dressing.flock({ count: 10, radius: [90, 150], height: [SEA_Y + 6, SEA_Y + 20], seed: 8, scale: 3 });
+    const boats = BL.dressing.fleet({ sea: SEA_Y, spots: [[140, 0.4, 9], [190, 2.2, 11], [230, 3.9, 10], [170, 5.1, 8], [260, 1.3, 12]] });
+    for (const node of [gulls.node, shore.node, ...boats.nodes]) {
+      addChild(root, node);
+      placed.push(node);
+    }
+    life = { gulls, shore, boats };
+  };
+  const buildLawn = () => {
+    if (renderer.kind === "canvas2d") return;
+    const node = createNode({ geometry: hubModels.lawnTuft(), instanceData: new Float32Array(LAWN_CAP * 20), instanceCount: 0, instanceVersion: 0, fixedInstanceCapacity: true });
+    addChild(root, node);
+    placed.push(node);
+    lawn = { node, version: -1 };
+    layLawn();
+  };
   const buildMouth = (slot, m) => {
     const ax = Math.sin(m.ry), az = Math.cos(m.ry);
     const caveIndex = island.mouths.indexOf(m) + 1;
@@ -1538,7 +1869,7 @@
         claim(tx, tz, 0.5);
         addProp("torch", torch, tx, tz, 0.7);
       }
-      const sign = createNode({ position: { x: 0, y: 4.5, z: 0.52 }, geometry: hubModels.caveSign(slot.name), matrixEmissiveLiving: true, sightHidden: slot.scene === "lab" });
+      const sign = createNode({ position: { x: 0, y: 4.5, z: 0.52 }, geometry: hubModels.caveSign(slot.name, THEME_ICON(slot)), matrixEmissiveLiving: true, sightHidden: slot.scene === "lab" });
       addChild(group, sign);
       const halfW = sign.geometry.signWidth * 0.5, halfH = sign.geometry.signHeight * 0.5;
       const x = m.x + ax * sign.position.z, y = m.floorY + sign.position.y, z = m.z + az * sign.position.z;
@@ -1565,6 +1896,8 @@
       lamp.debug = debug;
       entranceLights.push(debug);
     }
+    dressMouth(slot, m, group);
+    if (VINES.includes(slot.id)) for (const x of [-1.1, 1.1]) addChild(group, createNode({ position: { x, y: 3.45, z: 0.95 }, geometry: hubModels.vine() }));
     addChild(root, group);
     placed.push(group);
     const glyphs = buildCaveGlyphs(slot, m, group);
@@ -1891,29 +2224,14 @@
       get active() { return active; }, get lastStep() { return lastStep; }, get contacts() { return contacts; }, get jumpRejects() { return jumpRejects; }
     };
   };
-  // A poked animal cries out and startles: one bubble from the shared pool and one bounded tween that
-  // always returns it to its resting pose, so nothing accumulates however often it is prodded.
+  // A poked animal cries out from the shared bubble pool and startles: its own brain decides what that means
+  // (the jaguar bolts, the monkey makes for a tree, the toucan takes off, a sleeper wakes).
   const pokeBeast = (node, kind) => {
     const beast = beasts.get(node);
     if (!beast) return;
     const cries = BEAST_CRIES[kind];
-    fx.sayAt(beast.x, beast.y + (kind === "toucan" ? 1.5 : 1.1), beast.z, cries[fnv1a(`${kind}/${Math.floor(now * 3)}`) % cries.length], 1.8);
-    if (beast.busy) return;
-    beast.busy = true;
-    const hop = kind === "jaguar" ? 0.35 : 0.6, turn = kind === "toucan" ? 1.4 : 0.9;
-    addTween({
-      dur: 0.55,
-      update: (t) => {
-        const k = Math.sin(t * Math.PI);
-        node.position.y = k * hop;
-        node.rotation.y = beast.rest + Math.sin(t * Math.PI * 2) * turn;
-      },
-      done: () => {
-        node.position.y = 0;
-        node.rotation.y = beast.rest;
-        beast.busy = false;
-      }
-    });
+    fx.sayAt(beast.wx, beast.wy + (kind === "toucan" ? 0.9 : 1.1), beast.wz, cries[fnv1a(`${kind}/${Math.floor(now * 3)}`) % cries.length], 1.8);
+    mempoolIsland.wildlife.startle(beast);
   };
   // The Mempool island off the west rim: jungle floor, a vine bridge and the cave that reads the
   // chain. Everything solid, so an Ooga walks across and in. The scatter is claimed off the crossing.
@@ -1962,25 +2280,22 @@
       chainSign = { node: panelNode, ctx2d: canvas.getContext("2d", { alpha: false, willReadFrequently: true }), printed: "" };
     }
     for (const torch of site.torches) atNode("torch", torch, 0.5);
-    // Wildlife first, so the scatter can be kept off it: one cached build per species shared by every
-    // copy, placed once and never animated, so the whole menagerie is three draw calls and nothing in
-    // the frame loop. Each one claims the ground it stands on and no plant is seeded inside that.
-    const wildlife = [
-      ["jaguar", P.jaguar(), -7.4, 5.2, 2.1],
-      ["jaguar", P.jaguar(), 8.1, 6.6, -0.6],
-      ["monkey", P.monkey(), 5.6, -7.8, 1.2],
-      ["monkey", P.monkey(), -8.6, -3.4, -2.3],
-      ["toucan", P.toucan(), -4.2, -8.6, 0.4],
-      ["toucan", P.toucan(), 9.4, 1.8, 2.7]
+    // The animals' starting spots are claimed before the scatter, so no plant is seeded where one stands; they
+    // come alive once the forest is placed (`pool-wildlife.js`), since they walk round its trunks and climb them.
+    const ANIMALS = [
+      ["jaguar", -7.4, 5.2, 2.1], ["jaguar", 8.1, 6.6, -0.6],
+      ["monkey", 5.6, -7.8, 1.2], ["monkey", -8.6, -3.4, -2.3],
+      ["toucan", -4.2, -8.6, 0.4], ["toucan", 9.4, 1.8, 2.7]
     ];
-    const claimed = [];
-    for (const [kind, geometry, lx, lz, ry] of wildlife) {
-      const node = createNode({ position: { x: lx, y: 0, z: lz }, rotation: { x: 0, y: ry, z: 0 }, geometry });
-      addChild(site.node, node);
-      atNode(kind, node, 0.7);
-      beasts.set(node, { kind, node, rest: ry, x: worldX(lx, lz), z: worldZ(lx, lz), y: place.y, busy: false });
-      claimed.push({ x: lx, z: lz, r: BEAST_CLEAR });
-    }
+    const claimed = ANIMALS.map(([, x, z]) => ({ x, z, r: BEAST_CLEAR }));
+    // What the animals keep off, in the island group's frame: the stairwell, the pond, the boards, the cave
+    // sign and its torches, then every trunk, rock and log the scatter places.
+    const obstacles = [
+      { x: 0, z: 0, r: S.shaftR + 1.2 }, { x: 6.4, z: -4.6, r: 2.8 },
+      { x: -2.6, z: -(S.shaftR + 2.6), r: 1.1 }, { x: 0, z: -(S.shaftR + 2.6), r: 1.1 }, { x: 2.6, z: -(S.shaftR + 2.6), r: 1.1 }, { x: B.w / 2 + 1, z: -(S.shaftR + 2.6), r: 0.7 },
+      { x: 0, z: S.shaftR + 2.1, r: 1.3 }, { x: -(S.shaftR + 1.5), z: S.shaftR * 0.7, r: 0.4 }, { x: S.shaftR + 1.5, z: S.shaftR * 0.7, r: 0.4 }
+    ];
+    const trees = [], logs = [];
     // Rainforest: three canopy heights, ferns and shrubs under them, each species one shared geometry
     // and one prop kind, so every plant answers a tap the way the home island's own scatter does.
     // `r` is both the footprint it claims and the radius a pointer picks it by.
@@ -2011,8 +2326,31 @@
       // A little scale and turn per copy: free variety, since every copy shares one cached build.
       const k = 0.82 + rand() * 0.45;
       const node = createNode({ position: { x, y: 0, z }, rotation: { x: 0, y: rand() * Math.PI * 2, z: 0 }, scale: { x: k, y: 0.9 + rand() * 0.3, z: k }, geometry });
+      // Undergrowth stays out of the outline registry, as the home scatter's bushes and flowers do.
+      if (pick.kind === "bush" || pick.kind === "poolfern" || pick.kind === "flower") node.sightHidden = true;
       addChild(site.node, node);
       atNode(pick.kind, node, pick.r * k);
+      const feature = { x, z, ry: node.rotation.y, k, sy: node.scale.y, geometry };
+      if (pick.kind === "canopy") { trees.push(feature); obstacles.push({ x, z, r: 0.45 * k }); }
+      else if (pick.kind === "poolrock") obstacles.push({ x, z, r: 0.75 * k });
+      else if (pick.kind === "poollog") {
+        logs.push(feature);
+        const ax = Math.cos(feature.ry), az = -Math.sin(feature.ry);
+        for (const t of [-1.2, 0, 1.2]) obstacles.push({ x: x + ax * t * k, z: z + az * t * k, r: 0.4 * k });
+      }
+    }
+    const WORLD_AT = (lx, lz, out) => { out.x = worldX(lx, lz); out.z = worldZ(lx, lz); return out; };
+    const wildlife = BL.poolWildlife.create({
+      parent: site.node, obstacles, trees, logs, baseY: place.y, toWorld: WORLD_AT,
+      animals: ANIMALS.map(([kind, x, z, heading]) => ({ kind, x, z, heading })),
+      sleepy: () => phase === "night" || phase === "midnight",
+      zzzAt: (x, y, z) => fx.zzzAt(x, y, z)
+    });
+    // Each animal answers a tap through its body part, and its pick owner follows it about the island.
+    for (const beast of wildlife.list) {
+      beast.wx = worldX(beast.x, beast.z); beast.wy = place.y; beast.wz = worldZ(beast.x, beast.z);
+      beast.owner = addProp(beast.kind, beast.node, beast.wx, beast.wz, 0.7);
+      beasts.set(beast.node, beast);
     }
     // The islet and the rim-to-bridge-head walk are claimed after the home scatter, not before it.
     // Claiming first made the scatter's seeded retries draw different numbers, reshuffling trees all
@@ -2033,7 +2371,7 @@
       if (d2 <= S.isletR * S.isletR) return place.y;
       return island.surfaceAt(gx, gz);
     };
-    return { site, place, centre, groundAt, worldX, worldZ, claimGround };
+    return { site, place, centre, groundAt, worldX, worldZ, claimGround, wildlife };
   };
   const buildTimechainIsland = () => {
     const T = BL.timechainModels, site = T.build(island), p = site.place;
@@ -2046,17 +2384,6 @@
       const x = node.position.x, z = node.position.z;
       addProp(kind, node, p.x + x * cos + z * sin, p.z - x * sin + z * cos, radius);
     }
-    const boards = BL.timechainBoards.create(site.node, renderer, index => {
-      if (timechainBoardShown >= 0) {
-        timechainBoardShown = index;
-        if (hud.el.jumbotron.open) paintTimechainBoard();
-      }
-    });
-    boards.entries.forEach((entry, index) => {
-      const node = entry.node, x = node.position.x, z = node.position.z;
-      const owner = addProp("timechainboard", node, p.x + x * cos + z * sin, p.z - x * sin + z * cos, 15);
-      owner.boardIndex = index; owner.weaponType = "none"; owner.pickRay = ray => boards.pickScreen(ray, index);
-    });
     presets.timechain = { yaw: p.ry, pitch: 0.03, dist: 3, target: { x: p.x, y: p.y + 4.4, z: p.z } };
     const claimGround = () => {
       claim(p.x, p.z, T.SITE.radius + 1);
@@ -2068,7 +2395,21 @@
     const beer = BL.timechainBeer.create(site);
     solids.add(beer.dispenser); solids.add(beer.cabinet); solids.add(beer.bin);
     addProp("timechainbeer", beer.mug, site.chair.position.x - 0.95, site.chair.position.z, 0.3);
-    return { site, place: p, boards, seat, beer, claimGround, hangout, residentPlaced: false };
+    return { site, place: p, boards: null, seat, beer, claimGround, hangout, residentPlaced: false };
+  };
+  // The Sphere's walls and their feed (six slow API calls, then polls, each repainting a wall) wait until the camera
+  // comes near, so a visit that never goes there never pays for them. They sit on the shell's inner face, which keeps
+  // its outline, so they stay out of the outline registry.
+  const addTimechainBoards = () => {
+    const T = timechainIsland, p = T.place, cos = Math.cos(p.ry), sin = Math.sin(p.ry);
+    const boards = BL.timechainBoards.create(T.site.node, renderer, () => { timechainVersion++; });
+    boards.entries.forEach((entry, index) => {
+      const node = entry.node, x = node.position.x, z = node.position.z;
+      node.sightHidden = entry.panel.sightHidden = true;
+      const owner = addProp("timechainboard", node, p.x + x * cos + z * sin, p.z - x * sin + z * cos, 15);
+      owner.boardIndex = index; owner.weaponType = "none"; owner.pickRay = ray => boards.pickScreen(ray, index);
+    });
+    T.boards = boards;
   };
   const spinTimechainChair = () => {
     if (timechainIsland?.seat.active) timechainIsland.beer.act("spin", timechainIsland.seat);
@@ -2173,24 +2514,24 @@
     const meadow = (count, radius, kind, geometryAt, square = false) => {
       for (let n = 0, tries = 0; n < count && tries < 1500; tries++) {
         const { x, z } = polar(rand() * 360, Math.sqrt(lerp(MEADOW_INNER * MEADOW_INNER, MEADOW_OUTER * MEADOW_OUTER, rand())));
-        if (island.surfaceAt(x, z) > 0 || nearMouth(x, z, 3.5) || !workSceneryClear(x, z, radius) || !candidateFree(x, z, radius)) continue;
+        if (island.surfaceAt(x, z) > 0 || nearMouth(x, z, 3.5) || !workSceneryClear(x, z, radius) || !candidateFree(x, z, radius) || !free(x, z, radius) || island.path.overlaps(x, z, radius)) continue;
         addScenery(geometryAt(n), x, z, square ? Math.floor(rand() * 4) * Math.PI / 2 + (rand() - 0.5) * 0.4 : rand() * Math.PI * 2, 0, kind, radius);
         n++;
       }
     };
-    const cliff = (count, radius, minHeight, kind, geometryAt) => {
+    const cliff = (count, radius, minHeight, kind, geometryAt, grove = false) => {
       // Safe root ledges are rarer than decorative bush sites (48000 tree tries vs 1200).
       // Bounds the seeded search while retaining the full grove on the cliffs.
-      for (let n = 0, tries = 0; n < count && tries < (kind === "tree" ? 48000 : 1200); tries++) {
-        const { x, z } = polar(rand() * 360, lerp(CLIFF_INNER, CLIFF_OUTER, rand()));
+      let n = 0;
+      const tryAt = (x, z) => {
         const h = island.surfaceAt(x, z);
-        if (h < minHeight || !free(x, z, radius)) continue;
+        if (h < minHeight || !free(x, z, radius)) return false;
         let clear = true;
         for (let i = 0; i < 4 && clear; i++) {
           const a = (i + 0.5) * Math.PI / 2;
           if (island.surfaceAt(x + Math.cos(a) * 1.2, z + Math.sin(a) * 1.2) > h + 1.5) clear = false;
         }
-        if (!clear || nearMouth(x, z, 4) || !candidateFree(x, z, radius)) continue;
+        if (!clear || nearMouth(x, z, 4) || !candidateFree(x, z, radius)) return false;
         let geometry = geometryAt(n);
         if (kind === "tree" && !treeGroundClear(geometry, x, z, h)) {
           // A narrower crown can fit a ledge that cannot clear the next variant.
@@ -2201,20 +2542,32 @@
             if (alternate === geometry) continue;
             if (treeGroundClear(alternate, x, z, h)) { geometry = alternate; fits = true; }
           }
-          if (!fits) continue;
+          if (!fits) return false;
         }
         addScenery(geometry, x, z, rand() * Math.PI * 2, h, kind, radius);
         n++;
+        return true;
+      };
+      for (let tries = 0; n < count && tries < (kind === "tree" ? 48000 : 1200); tries++) {
+        const { x, z } = polar(rand() * 360, lerp(CLIFF_INNER, CLIFF_OUTER, rand()));
+        if (!tryAt(x, z) || !grove) continue;
+        // Copses: most trees take one or two neighbours just over a footprint apart, so the cliffs read as
+        // groves rather than a ring of singles. A neighbour that does not fit its ledge is simply skipped.
+        const r = rand(), extra = r < 0.25 ? 0 : r < 0.65 ? 1 : 2, a0 = rand() * Math.PI * 2;
+        for (let k = 0; k < extra && n < count; k++) {
+          const a = a0 + k * 2.1 + (rand() - 0.5) * 0.5, d = radius * 2 + 0.2 + rand() * 0.6;
+          tryAt(x + Math.cos(a) * d, z + Math.sin(a) * d);
+        }
       }
     };
-    cliff(40, 1.4, 3, "tree", (n) => hubModels.tree(n % 4 === 3 ? 3 : n % 3));
-    cliff(60, 1, 0.5, "bush", (n) => hubModels.bush(n % 3));
-    meadow(60, 0.7, "bush", (n) => hubModels.bush(n % 3));
+    cliff(40, 1.4, 3, "tree", (n) => hubModels.tree(n % 4 === 3 ? 3 : n % 3), true);
+    cliff(30, 1, 0.5, "bush", (n) => hubModels.bush(n % 3));
+    meadow(30, 0.7, "bush", (n) => hubModels.bush(n % 3));
     meadow(8, 0.9, "rock", () => hubModels.rock(0));
     meadow(10, 0.7, "crate", () => hubModels.woodCrate(), true);
     meadow(8, 0.6, "barrel", () => hubModels.barrel());
     meadow(50, 0.35, "flower", () => hubModels.flowerTuft());
-    meadow(150, 0.3, "grass", () => hubModels.grass());
+    meadow(18, 0.3, "grass", () => hubModels.grass());
   };
   const sceneryReason = (o) => {
     const clearance = island.path.debug.ringOuterRadius + SCENERY_CLEARANCE;
@@ -3765,10 +4118,109 @@
     if (node.geometry) renderer.releaseGeometry(node.geometry);
     node.geometry = poolModels.panelFrom(c2, CHAIN_PANEL_W, CHAIN_PANEL_H, poolModels.CHAIN_BOARD.px, poolModels.CHAIN_BOARD.px, CHAIN_PANEL_BG);
   };
+  // The Mempool island's two boards in the shared board dialog. Each is a list of pages, every page a caption, a
+  // note and a drawing in the jumbotron's 5x7 font on the board's own small canvas; `refresh` redraws the shown
+  // page and moves `version`, which is all the dialog watches.
+  const POOL_BOARD_W = 128, POOL_BOARD_H = 48, POOL_BOARD_BG = "#0f110f", POOL_DIM = "#9b8f7a";
+  const poolBoard = (title, pages) => {
+    const canvas = document.createElement("canvas");
+    canvas.width = POOL_BOARD_W;
+    canvas.height = POOL_BOARD_H;
+    const c2 = canvas.getContext("2d", { alpha: false });
+    const board = {
+      title, help: "Live Bitcoin data. Arrow keys flip the pages.", canvas, count: pages.length, index: 0, version: 0, caption: "", note: "",
+      go(i) {
+        board.index = i;
+        board.refresh();
+      },
+      refresh() {
+        const page = pages[board.index];
+        c2.fillStyle = POOL_BOARD_BG;
+        c2.fillRect(0, 0, POOL_BOARD_W, POOL_BOARD_H);
+        page.draw(c2, chain.snapshot);
+        board.caption = page.caption;
+        board.note = page.note(chain.snapshot);
+        board.version++;
+      }
+    };
+    return board;
+  };
+  // A reading: its label small at the top, its value as large as fits, a line under it and an optional gauge.
+  const reading = (c2, label, value, color, under, gauge = -1, gaugeColor = color) => {
+    const text = BL.jumbotron.text, centre = (t, y, ink, scale) => text.drawText(c2, t, Math.round((POOL_BOARD_W - text.measureText(t, scale)) / 2), y, ink, scale);
+    centre(label, 4, POOL_DIM, 1);
+    const scale = text.measureText(value, 2) <= POOL_BOARD_W - 8 ? 2 : 1;
+    centre(value, scale === 2 ? 15 : 19, color, scale);
+    if (under) centre(under, 34, POOL_DIM, 1);
+    if (gauge < 0) return;
+    c2.fillStyle = "#2a2724";
+    c2.fillRect(14, 43, POOL_BOARD_W - 28, 3);
+    c2.fillStyle = gaugeColor;
+    c2.fillRect(14, 43, Math.round((POOL_BOARD_W - 28) * clamp(gauge, 0, 1)), 3);
+  };
+  const chainStatus = (s) => {
+    const age = s.at ? Math.round((Date.now() - s.at) / 1000) : 0;
+    return !s.height ? "Waiting on the chain."
+      : s.live ? `Live. Block ${s.height}, ${gameMod.formatLarge(s.count)} transactions waiting, ${s.deep.toFixed(1)} blocks deep.`
+      : `Last heard ${age > 90 ? `${Math.round(age / 60)} min` : `${age}s`} ago from ${s.degraded ? "a fallback source" : "nobody"}; the board has gone grey until the chain answers.`;
+  };
+  const rowPage = (i, caption, under, note) => ({
+    caption,
+    draw: (c2, s) => {
+      const [label, value, color] = chainRows(s)[i];
+      reading(c2, label, value, color, under(s));
+    },
+    note: () => note
+  });
+  const chainBoard = poolBoard("The chain", [
+    {
+      caption: "At a glance",
+      draw: (c2, s) => {
+        const text = BL.jumbotron.text;
+        let y = 5;
+        for (const [label, value, color] of chainRows(s)) {
+          text.drawText(c2, label, 8, y, POOL_DIM, 1);
+          text.drawText(c2, value, POOL_BOARD_W - 8 - text.measureText(value, 1), y, color, 1);
+          y += 10;
+        }
+      },
+      note: chainStatus
+    },
+    rowPage(0, "Block height", (s) => s.lastTxCount ? `${gameMod.formatLarge(s.lastTxCount)} TX IN IT` : "", "The newest block on the chain. Every block mined while you are here throws a bolt over the rainforest."),
+    rowPage(1, "Price", () => "US DOLLARS", "Bitcoin's price from a live exchange feed."),
+    rowPage(2, "Mempool", (s) => s.count ? `${s.deep.toFixed(1)} BLOCKS DEEP` : "", "Transactions waiting for a block, and how many blocks of space they would fill."),
+    rowPage(3, "Next-block fee", (s) => s.hourFee ? `HOUR ${String(+s.hourFee.toFixed(s.hourFee >= 10 ? 0 : 2))} SAT/VB` : "", "The fee rate that gets a transaction into the next block, in sats per virtual byte, with the rate for within the hour under it.")
+  ]);
+  const weatherBoard = poolBoard("Reading the weather", [
+    {
+      caption: "Rain",
+      draw: (c2, s) => reading(c2, "RAIN", weatherMod.STEPS[weather.state.step].name.toUpperCase(), s.live ? "#8fc3ff" : STALE_INK, "PAYING BACKLOG", s.soak),
+      note: () => "The backlog paying at least 1 sat/vB, averaged over ten minutes. Dry, drizzle, light rain, rain, heavy rain, then a downpour as it grows, and it keeps falling until the fee-paying pool clears. The cheap sub-sat pile underneath doesn't count."
+    },
+    {
+      caption: "Wind",
+      draw: (c2, s) => reading(c2, "WIND", `${gameMod.formatLarge(Math.round(s.inflow))} VB/S`, s.live ? "#e6f2ff" : STALE_INK, "TRANSACTIONS ARRIVING", s.gale),
+      note: () => "Transactions turning up, in vbytes a second. The busier it gets, the further the rain leans over. Rain always slants the way the wind is going, never into it."
+    },
+    {
+      caption: "Lightning",
+      draw: (c2, s) => reading(c2, "LAST BLOCK", s.height ? String(s.height) : "-", s.live ? "#ffe066" : STALE_INK, "A BOLT EACH BLOCK"),
+      note: () => "Somebody found a block. Every one of them throws a bolt over the island, whatever the weather is doing, and only a block does."
+    }
+  ]);
+  const openPoolBoard = (board) => {
+    board.refresh();
+    hud.openBoard(board);
+  };
   // The standing chain snapshot: how full the pool is, how fast blocks land, how hard they arrive.
   const onChain = (snapshot) => {
     weather.apply(snapshot);
     refreshChainSign();
+    // The boards' canvases only feed the dialog, and openPoolBoard repaints on open.
+    if (hud.el.board.open) {
+      chainBoard.refresh();
+      weatherBoard.refresh();
+    }
   };
   const onDonation = (donation) => {
     game.recordDonation(donation);
@@ -3796,7 +4248,7 @@
       case "crate":
         return `${o.crate.loot.tier} crate · tap to open`;
       case "cave":
-        return o.slot.status === "open" ? o.slot.scene === "lab" ? `${o.slot.name} · island workshop` : `${o.slot.name} · tap to enter` : o.slot.status === "headquarters" ? "Headquarters · walk down the ramp" : o.slot.status === "mirror" ? `${o.slot.name} · mirror` : o.slot.status === "sleeping" ? "A project sleeps here · zzz" : "An empty cave";
+        return o.slot.status === "open" ? o.slot.scene === "lab" ? `${o.slot.name} · island workshop` : `${o.slot.name} · tap to enter` : o.slot.status === "headquarters" ? "Headquarters · walk down the ramp" : o.slot.status === "mirror" ? `${o.slot.name} · mirror` : o.slot.status === "sleeping" ? "A project sleeps here · zzz" : o.slot.soon ? `${o.slot.name} · coming soon` : "An empty cave";
       case "gate":
         return `${caves.gate.name} · leads nowhere yet`;
       case "matrix-button":
@@ -3814,6 +4266,8 @@
         if (o.prop === "timechainchair") return "Sani's recliner · tap to spin and spill the glass";
         if (o.prop === "timechainbeer") return "500 ml beer · tap to chug";
         return PROP_TIPS[o.prop] || "";
+      case "piece":
+        return PIECES[o.piece] ? PIECES[o.piece][0] : "";
       default:
         return "";
     }
@@ -3862,6 +4316,11 @@
       case "rock":
         fx.burst(x, 0.6, z, 6, [CHIP], 1.4);
         hud.toast("Solid rock. Ow.");
+        break;
+      case "palm":
+        if (!wobble(o.node, 0.05)) return;
+        fx.burst(x, w[13] + 3.6, z, 12, [LEAF], 1.6);
+        if (!dropBanana(o, TREE_CHANCE)) hud.toast(PALM_WORDS[fnv1a(`${o.x}/${o.z}/${Math.floor(now)}`) % PALM_WORDS.length]);
         break;
       case "jumbotron":
         // Resolve the tap onto the cabinet: the side arrows and the dot strip page the board where
@@ -3951,16 +4410,11 @@
         chugTimechainGlass();
         break;
       case "weathersign":
-        hud.openWeatherKey();
+        openPoolBoard(weatherBoard);
         break;
-      case "chainsign": {
-        const snap = chain.snapshot;
-        const age = snap.at ? Math.round((Date.now() - snap.at) / 1000) : 0;
-        hud.toast(!snap.height ? "Waiting on the chain."
-          : snap.live ? `Block ${snap.height} · ${gameMod.formatLarge(snap.count)} waiting · ${snap.deep.toFixed(1)} blocks deep`
-          : `Last heard ${age > 90 ? `${Math.round(age / 60)} min` : `${age}s`} ago · block ${snap.height} · ${snap.degraded ? "fallback source" : "no answer"}`);
+      case "chainsign":
+        openPoolBoard(chainBoard);
         break;
-      }
       case "poolrock":
         hud.toast("Moss grows thick on the Mempool island.");
         break;
@@ -4145,6 +4599,9 @@
       case "caveman":
         if (o.cave.traits.name === "SaniExp" && timechainIsland?.seat.active) spinTimechainChair();
         else crew.pokeCave(o.cave);
+        break;
+      case "piece":
+        pokePiece(o);
         break;
       case "clanker":
         hud.toast(tooltipFor(hit));
@@ -5244,53 +5701,33 @@
     if (first) hud.setSubtitle("an island of caves");
     if (!first) hud.toast(PHASE_TOASTS[next]);
   };
-  // The jumbotron's close-up: the board's own canvas painted into the dialog's, and its caption,
-  // whenever the board repaints while the dialog is open.
-  let jumbotronShown = -1;
-  let timechainBoardShown = -1;
-  const paintTimechainBoard = () => {
-    const entry = timechainIsland?.boards.entries[timechainBoardShown];
-    if (!entry) return;
-    const screen = hud.el.jumbotronScreen, ctx = screen.getContext("2d");
-    if (screen.width !== entry.canvas.width || screen.height !== entry.canvas.height) {
-      screen.width = entry.canvas.width; screen.height = entry.canvas.height;
-    }
-    ctx.clearRect(0, 0, screen.width, screen.height);
-    ctx.drawImage(entry.canvas, 0, 0, screen.width, screen.height);
-    hud.el.jumbotronCaption.textContent = BL.timechainData.TITLES[timechainBoardShown];
-    const details = document.getElementById("jumbotron-details");
-    details.hidden = false; details.textContent = entry.caption;
-    const source = document.createElement("a");
-    source.href = timechainIsland.boards.data[timechainBoardShown].source;
-    source.target = "_blank"; source.rel = "noopener noreferrer";
-    source.textContent = source.href;
-    details.append(document.createTextNode("\nSource: "), source);
-    hud.el.jumbotronIndex.textContent = `${timechainBoardShown + 1} of ${BL.timechainData.TITLES.length}`;
+  // The Timechain Sphere's walls in the shared board dialog: a page a wall, its reading and source in the note.
+  let timechainVersion = 0;
+  const timechainBoard = {
+    title: "Timechain Sphere", help: "Six walls of chain data. Arrow keys flip the boards.", wide: true,
+    get canvas() { return timechainIsland.boards.entries[timechainIsland.boards.index].canvas; },
+    get count() { return BL.timechainData.TITLES.length; }, get index() { return timechainIsland.boards.index; },
+    get caption() { return BL.timechainData.TITLES[timechainIsland.boards.index]; },
+    get note() {
+      const i = timechainIsland.boards.index;
+      return `${timechainIsland.boards.entries[i].caption}\nSource: ${timechainIsland.boards.data[i].source}`;
+    },
+    get version() { return timechainVersion; },
+    go: (i) => timechainIsland.boards.select(i)
   };
   const openTimechainBoard = (index) => {
-    timechainBoardShown = index;
     timechainIsland.boards.select(index);
-    const page = (delta) => timechainIsland.boards.select((timechainIsland.boards.index + delta + BL.timechainData.TITLES.length) % BL.timechainData.TITLES.length);
-    hud.openJumbotron({ prev: () => page(-1), next: () => page(1) });
-    paintTimechainBoard();
+    timechainVersion++;
+    hud.openBoard(timechainBoard);
   };
-  const paintJumbotron = () => {
-    jumbotronShown = jumbotron.version;
-    const screen = hud.el.jumbotronScreen;
-    if (screen.width !== jumbotron.canvas.width || screen.height !== jumbotron.canvas.height) {
-      screen.width = jumbotron.canvas.width; screen.height = jumbotron.canvas.height;
-    }
-    screen.getContext("2d").drawImage(jumbotron.canvas, 0, 0);
-    hud.el.jumbotronCaption.textContent = jumbotron.caption;
-    hud.el.jumbotronIndex.textContent = `${jumbotron.index + 1} of ${jumbotron.count}`;
+  // The jumbotron's close-up in the shared board dialog, read straight off the board as it pages and repaints.
+  const jumbotronBoard = {
+    title: "Jumbotron", help: "OogaBoogaX on the big screen. Arrow keys flip the boards.", note: "",
+    get canvas() { return jumbotron.canvas; }, get count() { return jumbotron.count; }, get index() { return jumbotron.index; },
+    get caption() { return jumbotron.caption; }, get version() { return jumbotron.version; },
+    go: (i) => jumbotron.goToView(i)
   };
-  const openJumbotron = () => {
-    timechainBoardShown = -1;
-    document.getElementById("jumbotron-details").hidden = true;
-    jumbotronShown = -1;
-    hud.openJumbotron({ prev: () => jumbotron.prevView(), next: () => jumbotron.nextView() });
-    paintJumbotron();
-  };
+  const openJumbotron = () => hud.openBoard(jumbotronBoard);
   // Contribution fireworks: shells rise from the jumbotron and burst in the
   // board's stat colors. Queued with absolute scene-clock times and stepped in
   // update(), so a waiting shell costs nothing per frame.
@@ -5355,7 +5792,10 @@
     }
   };
   const update = (dt, elapsed) => {
+    if (lawn && lawn.version !== island.path.version) layLawn();
+    if (life) { life.gulls.update(elapsed); life.shore.update(elapsed); life.boats.update(elapsed); }
     now = elapsed;
+    if (timechainIsland && !timechainIsland.boards && Math.hypot(camera.position.x - timechainIsland.place.x, camera.position.z - timechainIsland.place.z) < BL.timechainModels.SITE.radius + TIMECHAIN_NEAR) addTimechainBoards();
     pitGate.update();
     for (const control of pitGate.controls) {
       const angle = pitGate.on ? 0.42 : Math.PI - 0.42;
@@ -5371,7 +5811,7 @@
     updateLamps(dt, elapsed, phase !== null);
     if (jumbotron) {
       jumbotron.update(elapsed, renderer);
-      if (hud.el.jumbotron.open && timechainBoardShown < 0 && jumbotron.version !== jumbotronShown) paintJumbotron();
+      hud.updateBoard();
     }
     if (fireworksShells.length) updateFireworks();
     const next = daylight.phaseAt(hour);
@@ -5404,6 +5844,7 @@
       timechainIsland.site.swivel.rotation.y = s.angle;
     }
     crew.update(dt, elapsed);
+    mempoolIsland.wildlife.update(dt, elapsed);
     // Sweep before any abyss equipment loss or respawn, including a whole-shaft fall in one step.
     if (!entering && !pilot.poseHeld && fallingPlayer && fallingPlayer === pilot.player
       && pitGate.traverse(pitPrevious, fallingPlayer.root.position, fallingPlayer.bodyRadius)) return;
@@ -6296,7 +6737,7 @@
     MATRIX_WORLD.active = MATRIX_WORLD.direction = MATRIX_WORLD.radius = MATRIX_WORLD.time = MATRIX_WORLD.permanentCave = 0;
     MATRIX_WORLD.livingGlobal = 0;
     MATRIX_WORLD.density = renderer.kind === "canvas2d" ? MATRIX_DENSITY.canvas2d / MATRIX_DENSITY.high : MATRIX_DENSITY[renderer.quality] / MATRIX_DENSITY.high;
-    camera = createCamera({ fov: 48, near: 0.5, far: 140 });
+    camera = createCamera({ fov: 48, near: 0.5, far: 900 });
     root = createNode();
     positionDebug = document.getElementById("position-debug");
     positionDebug.hidden = !POSITION_DEBUG;
@@ -6361,7 +6802,9 @@
         halfWidth: Math.max(room.w / 2, 2.5) + 0.45, halfDepth: (front - back) / 2, y: mouth.floorY + 2.85 };
       addTerrainSection(island.cutawaySource, root, 0, region);
     }
-    const pathGeometry = { ...island.path.geometry, faces: island.path.geometry.faces.map(face => ({ ...face, matrixPermanentFallback: true })) };
+    // The path geometry never changes after the island builds; reuse its tagged copy on every visit.
+    let pathGeometry = PATH_GEOMETRY.get(island.path.geometry);
+    if (!pathGeometry) PATH_GEOMETRY.set(island.path.geometry, pathGeometry = { ...island.path.geometry, faces: island.path.geometry.faces.map(face => ({ ...face, matrixPermanentFallback: true, road: true })) });
     pathNode = createNode({ geometry: pathGeometry, instanceData: island.path.instanceData, instanceCount: 0, instanceVersion: 0, depthBias: 0.05 });
     addChild(root, pathNode);
     placed.push(pathNode);
@@ -6440,9 +6883,14 @@
         } else if (event.type === "contribution") launchFireworks(event.delta);
       });
     }
+    meadowDressing(firePos);
+    plantPalms();
+    raiseIslets();
+    buildLife();
     scatter();
     mempoolIsland.claimGround();
     timechainIsland.claimGround();
+    buildLawn();
     reflowScenery();
     buildSpots();
     buildClouds();
@@ -7085,10 +7533,9 @@
     unsubscribeMempool = null;
     unsubscribeChain();
     unsubscribeChain = null;
-    timechainIsland.boards.dispose();
+    if (timechainIsland.boards) timechainIsland.boards.dispose();
     timechainIsland.beer.dispose();
-    timechainBoardShown = -1;
-    hud.closeJumbotron();
+    hud.closeBoard();
     if (chainSign && chainSign.node.geometry) renderer.releaseGeometry(chainSign.node.geometry);
     chainSign = null;
     weather.dispose();
@@ -7193,7 +7640,7 @@
     input.dispose();
     hud.dispose();
     // Drop every per-visit ref but the cached island.
-    terrainRampRoof = pathNode = altar = hud = hooks = input = pilot = fx = cameraCover = bananaCover = solids = rockGuides = objectGuides = sightGuides = bananaGuides = pileGuides = platformGuides = mirrorGuides = pile = crew = crates = critters = clock = presets = mirrorCave = matrixCave = matrixControl = gateRain = fire = headquarters = positionDebug = dockStairs = overlayCanvas = null;
+    terrainRampRoof = pathNode = altar = lawn = life = hud = hooks = input = pilot = fx = cameraCover = bananaCover = solids = rockGuides = objectGuides = sightGuides = bananaGuides = pileGuides = platformGuides = mirrorGuides = pile = crew = crates = critters = clock = presets = mirrorCave = matrixCave = matrixControl = gateRain = fire = headquarters = positionDebug = dockStairs = overlayCanvas = null;
     beasts.clear();
     magazine = magazineState = breakables = weather = mempoolIsland = timechainIsland = clankers = clankerPlay = null;
     hubScene.input = hubScene.debug = null;
@@ -7219,7 +7666,8 @@
     root: null, camera: null, input: null, debug: null,
     get inMotion() {
       if (cutawayRestoreTime < CUTAWAY_RESTORE_TIME) return true;
-      if (timechainIsland && (timechainIsland.seat.active || timechainIsland.seat.speed > 0)) return true;
+      // Sani sits nearly always; only a spinning chair needs full rate behind another window.
+      if (timechainIsland && timechainIsland.seat.speed > 0) return true;
       if (pile.inMotion || fx.inMotion || breakables.inMotion || weather.active || magazine && magazine.revealed || MATRIX_WORLD.active || mirrorGuides.state.doorway || mirrorCave.damage.active || mirrorCave.ripples.active || mirrorCave.body.active || entropyLab.phase.ripples.active || entropyLab.phase.body.contacts || entropyLab.phase.body.active) return true;
       for (const sign of headquarters.roomSigns) if (sign.velocity || sign.node.rotation.x) return true;
       for (let i = 0; i < matrixGates.length; i++) if (matrixCave && (matrixGates[i].raising || matrixCave.unlocked && matrixGates[i].node.position.y !== MATRIX_GATE_HIDDEN_Y)) return true;

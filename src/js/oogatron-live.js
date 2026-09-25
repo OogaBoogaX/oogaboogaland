@@ -8,6 +8,10 @@
 // Network errors are silent (counted in state); the page always keeps the
 // baked board. Like the mempool feed, this stays off under nosim and can be
 // disabled with oogatron=0.
+//
+// The hub feeds each stats event to both the jumbotron and
+// `contributors.applySnapshot`, so fresh activity wakes sleepers. Exports
+// start, subscribe, dispose and state.
 (() => {
   "use strict";
   const BL = window.BL = window.BL || {};

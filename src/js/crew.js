@@ -1,3 +1,9 @@
+// The cavemen from the roster: activity and presence, repository work trips, weapons and magazines, pile
+// reloading, sleep, grounded cheers, strolls, possession and jetpack flight, swag and pokes.
+//
+// A character with a `tint` pair wears its second colourway while the coin is up on the day
+// (`chain.snapshot.priceUsd` against `priceOpenUsd`) and its first while it is down, on the old timer when
+// there is no reading; a poke's toggle holds `TINT_HOLD` seconds before the price has its say again.
 (() => {
   "use strict";
   const BL = window.BL = window.BL || {};

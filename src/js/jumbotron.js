@@ -1,10 +1,26 @@
 // Jumbotron board, ported from rules-without-rulers/oogatron (its jumbotron/data.js + views.js).
 // Data baked in as BL.jumbotronData by scripts/jumbotron-data.mjs for the first paint;
 // oogatron-live.js may push fresher payloads in through refreshData at runtime.
+// jumbotron-data.js is that bake (oogatron schema 3, from /v2/stats), generated and never edited.
+//
+// The hub board is a cached cabinet with bitmap views: the recent-contributions feed, org totals
+// with issue counts, per-repo totals and per-repo commit/PR/review/comment leaderboards. The
+// rotation hides repos idle over seven days. Navigation is mounted on the frame in cave-sign style:
+// paper-white block chevrons on the side rails page, and one clickable indicator block per slide on
+// the bottom rail (the current one lit) jumps. `tapAt(worldRay)` resolves a tap through the
+// cabinet's inverted world matrix, answers `screen` for the screen itself so the hub opens the
+// shared board dialog (`hud.openBoard`), and pages only from the rails; `prevView`, `goToView` and
+// `boardToWorld` do the rest, and any manual change restarts the auto-rotate timer. `canvas`,
+// `version`, `index`, `count`, `caption` and `goToView` are all that dialog reads.
+// `refreshData` accepts a live payload and the screen geometry it replaces is released, so the
+// board stays bounded; the module itself never fetches.
+//
+// Its 5x7 `FONT` (exported under `text`) is the page's other shared alphabet: the board and the
+// Mempool cave's wall panels both set from it, and an unknown character draws as a box.
 (() => {
   "use strict";
   const BL = window.BL = window.BL || {};
-  const { box, merge, cached } = BL.models;
+  const { box, bevelBox, merge, cached } = BL.models;
   const { createNode, addChild } = BL.scene;
   const { mat4 } = BL.math;
 
@@ -23,7 +39,6 @@
     plank: "#a9773f",
     woodDark: "#5c4425",
     screenBezel: "#1d2326",
-    standDark: "#4a3319",
     nail: "#3a2a18",
     woodJoint: "#42301a"
   };
@@ -297,12 +312,14 @@
   const MAX_REPO_BOARDS = 6;
   const ACTIVE_WINDOW_MS = 7 * 24 * 3600 * 1000;
 
-  const SW = 16 / 9, SH = 1, BORDER = 0.16, DEPTH = 0.14;
+  const SW = 16 / 9, SH = 1, BORDER = 0.16, DEPTH = 0.14, FRAME_D = 0.3;
   // Wide thick frame: lit pixels keep a wood margin and sit back of the rails, so edge-on views show wood.
   const RAIL = (SH + 2 * BORDER) / 7.5;
   // DROP = how far the stand reaches below the cabinet's middle, so the hub seats it without copying numbers.
   const LEG_H = 0.34, FOOT_H = 0.06;
   const DROP = (SH + 2 * BORDER) / 2 + LEG_H + FOOT_H / 2;
+  // How far the posts reach below DROP, into the ground.
+  const POST_BURY = 0.8;
   const OPEN_X = (SW + 2 * BORDER) / 2 - RAIL, OPEN_Y = (SH + 2 * BORDER) / 2 - RAIL;
   const MARGIN = 0.05;
   const FIT = Math.min(2 * (OPEN_X - MARGIN) / SW, 2 * (OPEN_Y - MARGIN) / SH);
@@ -311,13 +328,20 @@
     const outerW = SW + 2 * BORDER, outerH = SH + 2 * BORDER;
     const t = RAIL;
     // Rails sit forward of the backing, never flush: coplanar faces make the board sparkle from either side.
+    // The rails' faces stay where the chrome and the tap plane expect them (z = 0.02 + DEPTH / 2); the timber
+    // grows backwards to FRAME_D, so the cabinet reads as thick bevelled wood like the island's signs.
+    const fz = 0.02 + DEPTH / 2 - FRAME_D / 2;
     const parts = [
       // Backing is 0.024 narrower than the rails (0.012 a side): matching their extent flickers coplanar seams.
-      box({ w: outerW - 0.024, h: outerH - 0.024, d: 0.06, color: PALETTE.plank, offset: { z: -0.04 } }),
-      box({ w: outerW - 0.008, h: t, d: DEPTH, color: PALETTE.woodDark, offset: { y: outerH / 2 - t / 2, z: 0.02 } }),
-      box({ w: outerW - 0.008, h: t, d: DEPTH, color: PALETTE.woodDark, offset: { y: -(outerH / 2 - t / 2), z: 0.02 } }),
-      box({ w: t, h: outerH - 0.008, d: DEPTH - 0.008, color: PALETTE.woodDark, offset: { x: outerW / 2 - t / 2, z: 0.02 } }),
-      box({ w: t, h: outerH - 0.008, d: DEPTH - 0.008, color: PALETTE.woodDark, offset: { x: -(outerW / 2 - t / 2), z: 0.02 } }),
+      // Its back sits 0.02 behind the rails' backs, never flush with them.
+      box({ w: outerW - 0.024, h: outerH - 0.024, d: 0.2, color: PALETTE.plank, offset: { z: -0.13 } }),
+      bevelBox({ w: outerW - 0.008, h: t, d: FRAME_D, color: PALETTE.woodDark, offset: { y: outerH / 2 - t / 2, z: fz } }),
+      bevelBox({ w: outerW - 0.008, h: t, d: FRAME_D, color: PALETTE.woodDark, offset: { y: -(outerH / 2 - t / 2), z: fz } }),
+      // Side rails a clear 0.02 shallower front and back than the top and bottom ones they overlap at the corners.
+      bevelBox({ w: t, h: outerH - 0.008, d: FRAME_D - 0.04, color: PALETTE.woodDark, offset: { x: outerW / 2 - t / 2, z: fz } }),
+      bevelBox({ w: t, h: outerH - 0.008, d: FRAME_D - 0.04, color: PALETTE.woodDark, offset: { x: -(outerW / 2 - t / 2), z: fz } }),
+      // A thick cap plank along the top, overhanging the frame like a sign's header.
+      bevelBox({ w: outerW + 0.2, h: 0.12, d: FRAME_D + 0.08, color: PALETTE.plank, offset: { y: outerH / 2 + 0.06, z: fz } }),
       box({ w: 2 * OPEN_X + 0.04, h: 2 * OPEN_Y + 0.04, d: 0.06, color: PALETTE.screenBezel, offset: { z: 0.01 } })
     ];
     // No thin strips: edge-on they fall below a pixel and sparkle against the screen. Depth comes from chunky parts.
@@ -328,9 +352,10 @@
     }
     const legX = SW / 2 - 0.18, legH = LEG_H, bottom = -outerH / 2;
     for (const sx of [-legX, legX]) {
-      // Legs run up into the frame rather than butting flush against its underside.
-      parts.push(box({ w: 0.12, h: legH, d: 0.12, color: PALETTE.woodDark, offset: { x: sx, y: bottom - legH / 2 + 0.015 } }));
-      parts.push(box({ w: 0.3, h: FOOT_H, d: 0.3, color: PALETTE.standDark, offset: { x: sx, y: bottom - legH } }));
+      // Posts run up into the frame rather than butting flush against its underside, and down past DROP into
+      // the ground, so they stay buried on the uneven rim and never show a flush base.
+      const postH = legH + FOOT_H + 0.015 + POST_BURY;
+      parts.push(bevelBox({ w: 0.2, h: postH, d: 0.2, color: PALETTE.woodDark, offset: { x: sx, y: bottom + 0.015 - postH / 2, z: fz } }));
     }
     return merge(...parts);
   });
@@ -459,7 +484,7 @@
     // Rebuilt per model: recent feed, org totals and org leaderboards, then
     // each active repo's summary followed by its leaderboards.
     const BOARD_TYPES = ["commits", "prs", "reviews", "comments", "issues"];
-    const cycle = () => {
+    const buildCycle = () => {
       const c = [{ name: "recent" }, { name: "totals" }];
       for (const type of BOARD_TYPES) c.push({ name: "leaderboard", params: { type } });
       for (const repo of activeRepos()) {
@@ -470,6 +495,8 @@
       }
       return c;
     };
+    let cycleViews = buildCycle();
+    const cycle = () => cycleViews;
 
     const renderBoard = () => {
       if (!model) {
@@ -493,7 +520,7 @@
     // The navigation chrome lives on the wood frame, unscaled cabinet space.
     const chromeNode = createNode({ geometry: null });
     addChild(node, chromeNode);
-    let chromeKey = "";
+    let chromeCount = -1, chromeCurrent = -1;
 
     const swapGeometry = (target, geometry, renderer) => {
       const old = target.geometry;
@@ -512,9 +539,9 @@
     const refreshChrome = (renderer) => {
       const count = cycle().length;
       const current = cycleIndex % count;
-      const key = `${count}:${current}`;
-      if (key === chromeKey) return;
-      chromeKey = key;
+      if (count === chromeCount && current === chromeCurrent) return;
+      chromeCount = count;
+      chromeCurrent = current;
       swapGeometry(chromeNode, chromeGeometryFrom(count, current), renderer);
     };
 
@@ -630,6 +657,7 @@
           return false;
         }
         model = next;
+        cycleViews = buildCycle();
         // A repo view whose repo vanished falls back inside renderRepo.
         dirty = true;
         return true;

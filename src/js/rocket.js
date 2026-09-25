@@ -1,5 +1,15 @@
 // Ooga Orbit flight: the attached stack as one body over a round world; gravity pulls to the world's centre,
 // air thins with height, stages drop, ascent lean stays in the launch plane. Fixed step, no allocation.
+//
+// Runs on the scene's 1/120 s step over a round world (`R`, `SEA`, `CY`, `GM`), air thinning by `SCALE_H`
+// and ending at 150. Thrust and fuel go by stage; the lean (`psi`) is planar in the launch plane on the way
+// up, with fins against flipping. Stress comes from dynamic pressure and lean, heat from density times
+// speed cubed on the pod's hull and shield. `homeward`: everything that can come off comes off and the pod
+// turns freely on three axes with lift and a weathervane. Also the sky hook (`hold`, `stand`), ground only
+// near the top of the world (`NEAR_GROUND`), the steerable leaf chute, touchdowns on land and water (`LAND`,
+// `SPLASH`), and `onDrop` for every stage that comes off. `Q_LIMIT` 16 puts max-Q where a full-throttle Jug
+// in thick air strains and a Firecracker is a real one, so the throttle is an ascent decision; the
+// autopilot eases the throttle past `Q_GUARD`; the early kick waits for lift-off (no lean while clamped).
 (() => {
   "use strict";
   const BL = window.BL = window.BL || {};

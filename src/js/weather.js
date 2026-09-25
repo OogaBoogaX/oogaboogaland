@@ -1,6 +1,6 @@
 // The island's weather, derived from the chain snapshot rather than pinged by it. Two axes come out
 // of chain.js — soak (how much of the backlog pays a fee) and gale (how fast transactions arrive) —
-// and soak alone names one of six standing steps, dry through downpour; gale only sets the wind.
+// and soak alone names one of six standing steps (dry, drizzle, light rain, rain, heavy rain, downpour); gale only sets the wind.
 // Precipitation is a population held at a target, not a burst per transaction, so it rains for as
 // long as the backlog stands; a block strikes.
 //
@@ -8,6 +8,24 @@
 // boot and picked at random, so a strike allocates nothing. The sky is written over the daylight clock's colours after it
 // samples; the clock, its sun, moon, phases and factors are never touched, and a clear sky leaves
 // every sampled value exactly as it was.
+//
+// The weather is a cell standing over one place, not a curtain that follows the camera. `create`
+// takes the cell's `centre` and the `heightAt` its rain lands on; precipitation falls inside FIELD_R
+// of that centre, sky, fog and flash scale by `near` (full within NEAR_FULL, gone by NEAR_NONE) and
+// the sound by its own shorter HEARD_FULL/HEARD_NONE, so the rain is heard only around the rainforest.
+//
+// `stepFor(soak, prev)` climbs a step as soon as soak reaches it and leaves it only HYSTERESIS below.
+// How much falls, the drop size and the sky's grey follow the continuous `wetAt(soak)` through the
+// steps' own points, so a step names the weather while the rain only eases.
+// Lightning is for new blocks only: every block strikes whatever the weather is doing, nothing else does; a bolt
+// takes a random turn, scale and mirror. The rain batch is tier-scaled (720/480/260, 120 on Canvas
+// 2D), and a streak lies along its drop's velocity, so its head is upwind and the rain leans the way
+// the wind travels. The sky goes through `cloudFor` on `wetAt`, the same clear band, after
+// `daylight.sample`. Audio is background: MASTER sits under the rally and drop engines and a strike
+// is a few times the rain, never the page's loudest thing.
+//
+// Exports STEPS, stepFor, wetAt, cloudFor and create; an instance offers apply, strike, update,
+// setMuted, dispose, state, active and stats.
 (() => {
   "use strict";
   const BL = window.BL = window.BL || {};
@@ -45,7 +63,6 @@
   const WIND_MAX = 9, WIND_TURN = 0.05;
   const FLASH_MAX = 0.85, FLASH_TAU = 0.12, BOLT_SHOW = 0.25, BOLT_RANGE = 18, BOLT_HEIGHT = 26, BOLT_VARIANTS = 8;
   const THUNDER_DELAY_MIN = 0.5, THUNDER_DELAY_SPREAD = 1;
-  const AMBIENT_MIN = 14, AMBIENT_SPREAD = 26;
   // Weather is background, not an event: the whole bed sits well under the rally and drop engines, and
   // a strike is only a few times the rain rather than the loudest thing on the page.
   const STORAGE_KEY = "oogaboogaland.audio", MASTER = 0.3, NOISE_SECONDS = 2;
@@ -55,17 +72,19 @@
   const CLEAR_NIGHT = 0.25, CLEAR_DAY = 0.55;
   const OVERCAST_MIX = 0.7, OVERCAST_DARKEN = 0.22, OVERCAST_DIM = 0.45;
   const OVERCAST_TINT = [0.9, 0.93, 1];
-  const FOG_NEAR = 40, FOG_FAR = 150, FOG_OFF_NEAR = 400, FOG_OFF_FAR = 600;
+  // Clear air still hazes toward the horizon, so the far islets and clouds sit back; rain pulls it in, but only
+  // so far: the fog is full colour at its far end, and a rain range ending at 150 had every far islet and boat
+  // turn to pale grey near the rainforest. Rain thickens the haze without ever washing the horizon out.
+  const FOG_NEAR = 60, FOG_FAR = 560, FOG_OFF_NEAR = 90, FOG_OFF_FAR = 620;
 
-  // Six standing steps on soak. `from` is where a step begins, `wet` how much falls there, `storm`
-  // whether it thunders on its own as well as on every block.
+  // Six standing steps on soak. `from` is where a step begins, `wet` how much falls there.
   const STEPS = [
-    { name: "dry", from: 0, wet: 0, storm: false },
-    { name: "drizzle", from: 0.1, wet: 0.12, storm: false },
-    { name: "light rain", from: 0.25, wet: 0.3, storm: false },
-    { name: "rain", from: 0.45, wet: 0.5, storm: false },
-    { name: "heavy rain", from: 0.65, wet: 0.75, storm: false },
-    { name: "downpour", from: 0.85, wet: 1, storm: true }
+    { name: "dry", from: 0, wet: 0 },
+    { name: "drizzle", from: 0.1, wet: 0.12 },
+    { name: "light rain", from: 0.25, wet: 0.3 },
+    { name: "rain", from: 0.45, wet: 0.5 },
+    { name: "heavy rain", from: 0.65, wet: 0.75 },
+    { name: "downpour", from: 0.85, wet: 1 }
   ];
   // A step is climbed as soon as soak reaches it and left only once soak falls HYSTERESIS below it,
   // so a backlog hovering on a boundary holds its step instead of flicking between two.
@@ -76,8 +95,8 @@
     while (i > 0 && soak < STEPS[i].from - HYSTERESIS) i--;
     return i;
   };
-  // How much falls, continuous through the steps' own points: a step names the weather and decides
-  // the storm, while the rain itself only ever eases. Nothing below drizzle, all of it at downpour.
+  // How much falls, continuous through the steps' own points: a step names the weather, while the rain
+  // itself only ever eases. Nothing below drizzle, all of it at downpour.
   const wetAt = (soak) => {
     if (soak < STEPS[1].from) return 0;
     let i = 1;
@@ -171,7 +190,7 @@
     const x = new Float32Array(cap), y = new Float32Array(cap), z = new Float32Array(cap);
     const w = new Float32Array(cap), h = new Float32Array(cap), vy = new Float32Array(cap);
     let count = 0;
-    let flash = 0, flashT = -1, boltT = -1, thunderAt = -1, ambientAt = -1, strikes = 0, boltVariant = -1;
+    let flash = 0, flashT = -1, boltT = -1, thunderAt = -1, strikes = 0, boltVariant = -1;
     // Everything the feed sets is a target; the live value walks there so nothing snaps.
     let soak = 0, soakTarget = 0, gale = 0, galeTarget = 0, wet = 0;
     let cloud = 0, near = 0, heard = 0, windAngle = Math.random() * Math.PI * 2, windX = 0, windZ = 0;
@@ -434,16 +453,6 @@
         windGain.gain.setTargetAtTime(gale * (wet > 0 ? 0.07 : 0.02) * heard, ctx.currentTime, 0.4);
       }
 
-      // A storm strikes on its own as well as on every block; ten minutes between blocks is no storm.
-      if (state.storm) {
-        if (ambientAt < 0) ambientAt = AMBIENT_MIN + Math.random() * AMBIENT_SPREAD;
-        ambientAt -= dt * (0.5 + soak);
-        if (ambientAt < 0) {
-          ambientAt = AMBIENT_MIN + Math.random() * AMBIENT_SPREAD;
-          strike();
-        }
-      } else ambientAt = -1;
-
       if (boltT >= 0) {
         boltT += dt;
         if (boltT > BOLT_SHOW) {
@@ -471,19 +480,20 @@
       // The storm is a place, so standing on the far side of the world leaves your own sky exactly as
       // the clock painted it while you watch it rain over there.
       if (opts) {
-        // A clear sky leaves the clock's colours, light and fog exactly as sampled. The sky greys with
-        // how hard it is raining, so a drizzle falls under the clock's own sky.
+        // A clear sky leaves the clock's colours and light exactly as sampled, under the clear-air haze. The
+        // sky greys with how hard it is raining, so a drizzle falls under the clock's own sky.
         cloud = cloudFor(wet, opts.day) * near;
         if (cloud > 0.02) {
           const k = cloud * OVERCAST_MIX;
           greyen(opts.clear, k, OVERCAST_TINT); greyen(opts.horizon, k, OVERCAST_TINT); greyen(opts.zenith, k, OVERCAST_TINT);
           greyen(opts.sky, k, OVERCAST_TINT); greyen(opts.ground, k, OVERCAST_TINT); greyen(opts.direct, k, OVERCAST_TINT);
           opts.directStrength *= 1 - cloud * (1 - OVERCAST_DIM);
-          fog[0] = opts.horizon[0]; fog[1] = opts.horizon[1]; fog[2] = opts.horizon[2];
-          opts.fog = fog;
-          opts.fogNear = lerp(FOG_OFF_NEAR, FOG_NEAR, cloud);
-          opts.fogFar = lerp(FOG_OFF_FAR, FOG_FAR, cloud);
-        } else opts.fog = null;
+        }
+        fog[0] = opts.horizon[0]; fog[1] = opts.horizon[1]; fog[2] = opts.horizon[2];
+        opts.fog = fog;
+        opts.fogNear = lerp(FOG_OFF_NEAR, FOG_NEAR, cloud);
+        opts.fogFar = lerp(FOG_OFF_FAR, FOG_FAR, cloud);
+        opts.clouds = 0.42 + cloud * 0.5;
       }
       if (flash > 0 && opts) {
         // A distant bolt still flickers the sky, just faintly; underneath it the whole sky goes white.

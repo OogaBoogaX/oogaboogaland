@@ -1,10 +1,20 @@
 // Race props: mounts, gantry, pickups, spectators, themed decor; one cached geometry per builder.
+// The Rock Kart and Dino mounts, gantry and lamps, boost pad, item crate, rock, peel, boulder,
+// spectators, banners, torch stands, and the themed decor: palms, lagoon rocks, lava rocks,
+// obsidian, bones, pines, crystals, ice spikes, snow rocks and buoys.
 (() => {
   "use strict";
   const BL = window.BL = window.BL || {};
   const { hexToRgb, mulberry32 } = BL.math;
   const { createNode, addChild } = BL.scene;
-  const { box, lathe, merge, cached, variants, makeVox: vox, voxelGeometry: voxGeo } = BL.models;
+  const { box, bevelBox, lathe, merge, cached, variants, makeVox: vox, voxelGeometry: voxGeo } = BL.models;
+  const { puff, limb, padNormals, flatInto } = BL.hubModels;
+  // Cartoon builders on the hub's kit: `soft()` starts a smooth geometry that bevelled parts join through
+  // `flatInto`, `tones(hex)` is one colour in the four bands `puff` takes, and `lump` a rounded stone.
+  const soft = () => ({ verts: [], faces: [], lines: [], smooth: true });
+  const tones = (hex) => { const c = hexToRgb(hex); return [c, c, c, c]; };
+  const lump = (geo, x, y, z, rx, ry, rz, hex, rand, rings = 5, segs = 9) => puff(geo, x, y, z, rx, ry, rz, tones(hex), rand, rings, segs);
+  const ROPE = "#b89760";
   const keyed = (build) => {
     const cache = new Map();
     return (key) => {
@@ -73,30 +83,43 @@
   const WOOD = "#8a6236", WOOD_DK = "#5c4425", PLANK = "#a9773f", STONE = ["#7a716a", "#6b625a", "#57504a"];
 
   const KART = { length: 1.7, width: 1.1, wheelR: 0.3, wheelX: 0.58, wheelZ: 0.58, seatY: 0.42 };
-  const kartChassis = cached(() => merge(
-    box({ w: 0.78, h: 0.42, d: KART.length, color: WOOD, offset: { y: 0.42 } }),
-    box({ w: 0.6, h: 0.44, d: 0.2, color: WOOD_DK, offset: { y: 0.42, z: KART.length / 2 - 0.02 } }),
-    box({ w: 0.6, h: 0.44, d: 0.2, color: WOOD_DK, offset: { y: 0.42, z: -KART.length / 2 + 0.02 } }),
-    box({ w: 0.9, h: 0.1, d: 0.1, color: WOOD_DK, offset: { y: 0.34, z: 0.55 } }),
-    box({ w: 0.9, h: 0.1, d: 0.1, color: WOOD_DK, offset: { y: 0.34, z: -0.55 } }),
-    box({ w: 1.16, h: 0.08, d: 0.08, color: "#3a3a3a", offset: { y: KART.wheelR, z: KART.wheelZ } }),
-    box({ w: 1.16, h: 0.08, d: 0.08, color: "#3a3a3a", offset: { y: KART.wheelR, z: -KART.wheelZ } }),
-    box({ w: 0.5, h: 0.1, d: 0.5, color: "#4a3319", offset: { y: 0.55, z: -0.15 } }),
-    box({ w: 0.36, h: 0.3, d: 0.08, color: "#4a3319", offset: { y: 0.75, z: -0.42 } }),
-    box({ w: 0.06, h: 0.42, d: 0.06, color: "#3a2a18", offset: { y: 0.82, z: 0.32 } }),
-    box({ w: 0.3, h: 0.06, d: 0.06, color: "#3a2a18", offset: { y: 1.03, z: 0.32 } }),
-    box({ w: 0.7, h: 0.16, d: 0.3, color: "#7a5630", offset: { y: 0.68, z: 0.66 } }),
-    ...[-0.5, 0.1, 0.45].map((z) => box({ w: 0.84, h: 0.08, d: 0.1, color: "#3a2a18", offset: { y: 0.42, z } })),
-    box({ w: 0.5, h: 0.3, d: 0.34, color: "#6b625a", offset: { y: 0.78, z: 0.62 } }),
-    box({ w: 0.16, h: 0.08, d: 0.16, color: "#ff8a2a", emissive: 0.8, offset: { y: 0.95, z: 0.62 } }),
-    ...[-0.22, 0.22].map((x) => box({ w: 0.1, h: 0.1, d: 0.34, color: "#e8e2d2", offset: { x, y: 0.5, z: -0.98 } }))
-  ));
+  // A chunky bevelled timber tub on smooth log axles: planked sides lashed with rope, bumpers fore and aft, a hide
+  // seat with a backrest, a stick to steer by, a stone dash with a glowing ember and two bone exhausts.
+  const kartChassis = cached(() => {
+    const g = soft(), rand = mulberry32(81);
+    flatInto(g,
+      bevelBox({ w: 0.78, h: 0.42, d: KART.length, color: WOOD, bevel: 0.07, offset: { y: 0.42 } }),
+      ...[0.3, 0.46].map((y) => bevelBox({ w: 0.8, h: 0.03, d: KART.length - 0.12, color: "#6e4c28", bevel: 0.01, offset: { y } })),
+      bevelBox({ w: 0.66, h: 0.46, d: 0.22, color: WOOD_DK, bevel: 0.06, offset: { y: 0.42, z: KART.length / 2 - 0.02 } }),
+      bevelBox({ w: 0.66, h: 0.46, d: 0.22, color: WOOD_DK, bevel: 0.06, offset: { y: 0.42, z: -KART.length / 2 + 0.02 } }),
+      ...[-0.5, 0.1, 0.45].map((z) => bevelBox({ w: 0.86, h: 0.09, d: 0.11, color: ROPE, bevel: 0.03, offset: { y: 0.42, z } })),
+      bevelBox({ w: 0.52, h: 0.12, d: 0.5, color: "#4a3319", bevel: 0.04, offset: { y: 0.56, z: -0.15 } }),
+      bevelBox({ w: 0.4, h: 0.32, d: 0.1, color: "#4a3319", bevel: 0.03, offset: { y: 0.76, z: -0.42 } }),
+      bevelBox({ w: 0.72, h: 0.16, d: 0.32, color: "#7a5630", bevel: 0.05, offset: { y: 0.68, z: 0.66 } })
+    );
+    // The hide on the seat and the stone dash with its ember.
+    lump(g, 0, 0.64, -0.15, 0.24, 0.06, 0.24, "#d9a441", rand, 3, 8);
+    lump(g, 0, 0.8, 0.62, 0.26, 0.15, 0.17, "#6b625a", rand, 4, 8);
+    const ember = g.faces.length;
+    lump(g, 0, 0.94, 0.62, 0.09, 0.05, 0.09, "#ff8a2a", rand, 3, 7);
+    for (let f = ember; f < g.faces.length; f++) g.faces[f].emissive = 0.8;
+    // Axles, the steering stick and its grip, then the bone exhausts.
+    for (const z of [KART.wheelZ, -KART.wheelZ]) limb(g, -0.58, KART.wheelR, z, 0.58, KART.wheelR, z, 0.05, 0.05, 7, hexToRgb("#3a2a18"));
+    limb(g, 0, 0.6, 0.32, 0, 1.02, 0.34, 0.035, 0.03, 6, hexToRgb("#3a2a18"));
+    limb(g, -0.15, 1.03, 0.34, 0.15, 1.03, 0.34, 0.035, 0.035, 6, hexToRgb("#3a2a18"));
+    for (const x of [-0.22, 0.22]) {
+      limb(g, x, 0.5, -0.82, x, 0.52, -1.12, 0.05, 0.05, 7, hexToRgb("#e8e2d2"));
+      lump(g, x, 0.52, -1.14, 0.07, 0.07, 0.05, "#f2ecdc", rand, 3, 7);
+    }
+    return g;
+  });
+  // A stone wheel with chamfered rims, fourteen chipped segments and a timber hub.
   const kartWheel = cached(() => yToX(merge(
-    lathe({ profile: [[0, -0.11], [0.2, -0.11], [KART.wheelR, -0.09], [KART.wheelR, 0.09], [0.2, 0.11], [0, 0.11]], segments: 10, color: (t) => t < 0.2 || t > 0.8 ? "#5b544d" : "#7a716a" }),
-    lathe({ profile: [[0, -0.125], [0.08, -0.125], [0.08, 0.125], [0, 0.125]], segments: 6, color: "#3a2a18" })
+    lathe({ profile: [[0, -0.11], [0.19, -0.11], [0.27, -0.1], [KART.wheelR, -0.06], [KART.wheelR, 0.06], [0.27, 0.1], [0.19, 0.11], [0, 0.11]], segments: 14, color: (t) => t < 0.3 || t > 0.7 ? "#5b544d" : "#7a716a" }),
+    lathe({ profile: [[0, -0.13], [0.09, -0.13], [0.1, -0.12], [0.1, 0.12], [0.09, 0.13], [0, 0.13]], segments: 8, color: "#3a2a18" })
   )));
   const kartPennant = keyed((color) => merge(
-    box({ w: 0.04, h: 1.3, d: 0.04, color: "#3a2a18", offset: { x: -0.36, y: 0.65, z: -0.7 } }),
+    bevelBox({ w: 0.06, h: 1.3, d: 0.06, color: "#3a2a18", bevel: 0.015, offset: { x: -0.36, y: 0.65, z: -0.7 } }),
     box({ w: 0.02, h: 0.28, d: 0.42, color, emissive: 0.15, offset: { x: -0.36, y: 1.16, z: -0.5 } }),
     box({ w: 0.02, h: 0.14, d: 0.22, color, emissive: 0.15, offset: { x: -0.36, y: 1.09, z: -0.18 } })
   ));
@@ -192,26 +215,31 @@
   };
 
   const GANTRY = { span: 16, height: 5 };
+  // Two pillars of stacked bevelled stone blocks, each a little turned and sized its own way, capped with slabs,
+  // under a lashed timber beam and a planked walk hung with pennants.
   const gantry = cached(() => {
     const rand = mulberry32(77);
     const stone = () => STONE[rand() < 0.3 ? 2 : rand() < 0.5 ? 1 : 0];
     const parts = [];
     for (const side of [-1, 1]) {
-      for (let y = 0; y < GANTRY.height; y += 0.5) parts.push(box({ w: 0.9 + (rand() - 0.5) * 0.12, h: 0.5, d: 0.9 + (rand() - 0.5) * 0.12, color: stone(), offset: { x: side * GANTRY.span / 2, y: y + 0.25 } }));
-      parts.push(box({ w: 1.2, h: 0.3, d: 1.2, color: "#57504a", offset: { x: side * GANTRY.span / 2, y: GANTRY.height + 0.15 } }));
+      for (let y = 0; y < GANTRY.height; y += 0.5) parts.push(turn(bevelBox({ w: 0.92 + (rand() - 0.5) * 0.14, h: 0.5, d: 0.92 + (rand() - 0.5) * 0.14, color: stone(), bevel: 0.08, offset: { y: y + 0.25 } }), (rand() - 0.5) * 0.25));
+      for (let k = parts.length - GANTRY.height * 2; k < parts.length; k++) shift(parts[k], side * GANTRY.span / 2, 0, 0);
+      parts.push(bevelBox({ w: 1.3, h: 0.3, d: 1.3, color: "#57504a", bevel: 0.07, offset: { x: side * GANTRY.span / 2, y: GANTRY.height + 0.15 } }));
+      for (const y of [GANTRY.height + 0.42, GANTRY.height + 0.68]) parts.push(bevelBox({ w: 0.6, h: 0.08, d: 0.6, color: ROPE, bevel: 0.025, offset: { x: side * (GANTRY.span / 2 - 0.2), y } }));
     }
-    parts.push(box({ w: GANTRY.span + 1.4, h: 0.5, d: 0.5, color: WOOD_DK, offset: { y: GANTRY.height + 0.55 } }));
-    parts.push(box({ w: GANTRY.span - 1, h: 0.14, d: 0.6, color: PLANK, offset: { y: GANTRY.height + 0.87 } }));
+    parts.push(bevelBox({ w: GANTRY.span + 1.4, h: 0.5, d: 0.5, color: WOOD_DK, bevel: 0.1, offset: { y: GANTRY.height + 0.55 } }));
+    parts.push(bevelBox({ w: GANTRY.span - 1, h: 0.14, d: 0.6, color: PLANK, bevel: 0.04, offset: { y: GANTRY.height + 0.87 } }));
     const colors = ["#f5c542", "#e04a3a", "#22c55e", "#f3efe4"];
     for (let x = -GANTRY.span / 2 + 0.9; x < GANTRY.span / 2 - 0.6; x += 0.62) {
-      parts.push(box({ w: 0.4, h: 0.32, d: 0.03, color: colors[Math.floor(rand() * colors.length)], emissive: 0.1, offset: { x, y: GANTRY.height + 0.14, z: 0.32 } }));
-      parts.push(box({ w: 0.2, h: 0.2, d: 0.03, color: colors[Math.floor(rand() * colors.length)], emissive: 0.1, offset: { x, y: GANTRY.height - 0.12, z: 0.32 } }));
+      parts.push(bevelBox({ w: 0.4, h: 0.32, d: 0.04, color: colors[Math.floor(rand() * colors.length)], emissive: 0.1, bevel: 0.015, offset: { x, y: GANTRY.height + 0.14, z: 0.32 } }));
+      parts.push(bevelBox({ w: 0.2, h: 0.2, d: 0.04, color: colors[Math.floor(rand() * colors.length)], emissive: 0.1, bevel: 0.015, offset: { x, y: GANTRY.height - 0.12, z: 0.32 } }));
     }
     return merge(...parts);
   });
   const gantryLamp = cached(() => merge(
-    box({ w: 0.34, h: 0.12, d: 0.34, color: "#3a2a18", offset: { y: -0.06 } }),
-    box({ w: 0.26, h: 0.3, d: 0.26, color: "#ffb13b", emissive: 1, offset: { y: -0.27 } })
+    bevelBox({ w: 0.36, h: 0.12, d: 0.36, color: "#3a2a18", bevel: 0.03, offset: { y: -0.06 } }),
+    bevelBox({ w: 0.26, h: 0.3, d: 0.26, color: "#ffb13b", emissive: 1, bevel: 0.05, offset: { y: -0.27 } }),
+    bevelBox({ w: 0.32, h: 0.06, d: 0.32, color: "#3a2a18", bevel: 0.02, offset: { y: -0.45 } })
   ));
   const gantryLampY = GANTRY.height + 0.3;
   // Boost pad chevron points along +z.
@@ -222,38 +250,34 @@
       turn(box({ w: 0.2, h: 0.03, d: 1.1, color: "#ffb13b", emissive: 1, offset: { x: 0.4, y: 0.075, z: z - 0.3 } }), -0.6)
     ))
   )));
+  // The mystery crate: bevelled planks between chunky corner posts, a glowing banana-gold panel on every side.
   const itemCrate = cached(() => merge(
-    box({ w: 0.8, h: 0.8, d: 0.8, color: PLANK, offset: { y: 0.4 } }),
-    ...[[-0.38, -0.38], [0.38, -0.38], [-0.38, 0.38], [0.38, 0.38]].map(([x, z]) => box({ w: 0.1, h: 0.84, d: 0.1, color: WOOD_DK, offset: { x, y: 0.42, z } })),
-    box({ w: 0.84, h: 0.1, d: 0.84, color: WOOD_DK, offset: { y: 0.8 } }),
-    box({ w: 0.36, h: 0.36, d: 0.02, color: "#ffb13b", emissive: 0.9, offset: { y: 0.42, z: 0.41 } }),
-    box({ w: 0.36, h: 0.36, d: 0.02, color: "#ffb13b", emissive: 0.9, offset: { y: 0.42, z: -0.41 } }),
-    box({ w: 0.02, h: 0.36, d: 0.36, color: "#ffb13b", emissive: 0.9, offset: { x: 0.41, y: 0.42 } }),
-    box({ w: 0.02, h: 0.36, d: 0.36, color: "#ffb13b", emissive: 0.9, offset: { x: -0.41, y: 0.42 } })
+    box({ w: 0.7, h: 0.7, d: 0.7, color: "#3a2616", offset: { y: 0.42 } }),
+    ...[0, 1, 2, 3].map((side) => turn(merge(
+      ...[0, 1, 2].map((k) => bevelBox({ w: 0.7, h: 0.22, d: 0.05, color: k === 1 ? "#b07a42" : PLANK, bevel: 0.018, offset: { y: 0.17 + k * 0.25, z: 0.375 } })),
+      bevelBox({ w: 0.34, h: 0.34, d: 0.03, color: "#ffb13b", emissive: 0.9, bevel: 0.03, offset: { y: 0.42, z: 0.41 } })
+    ), side * Math.PI / 2)),
+    ...[[-0.38, -0.38], [0.38, -0.38], [-0.38, 0.38], [0.38, 0.38]].map(([x, z]) => bevelBox({ w: 0.11, h: 0.86, d: 0.11, color: WOOD_DK, bevel: 0.03, offset: { x, y: 0.42, z } })),
+    bevelBox({ w: 0.86, h: 0.1, d: 0.86, color: WOOD_DK, bevel: 0.03, offset: { y: 0.8 } })
   ));
-  const rockShot = cached(() => {
-    const rand = mulberry32(19);
-    const v = vox();
-    for (let x = -2; x <= 2; x++) for (let y = -2; y <= 2; y++) for (let z = -2; z <= 2; z++) if (x * x + y * y + z * z <= 5.5 && rand() > 0.12) v.set(x, y, z, rand() < 0.3 ? 1 : 0);
-    return voxGeo(v, { unit: 0.09, palette: ["#6b625a", "#57504a"], origin: { x: -0.045, y: -0.045, z: -0.045 } });
-  });
+  // Rolling hazards and thrown rocks as rounded stones: a main lobe with a few knobbly lumps.
+  const roundStone = (seed, r, hex, dark) => {
+    const g = soft(), rand = mulberry32(seed);
+    lump(g, 0, 0, 0, r, r * 0.95, r, hex, rand, 6, 11);
+    for (let k = 0; k < 5; k++) {
+      const a = rand() * Math.PI * 2, b = (rand() - 0.5) * 2;
+      lump(g, Math.cos(a) * r * 0.62, b * r * 0.5, Math.sin(a) * r * 0.62, r * 0.42, r * 0.38, r * 0.42, k % 2 ? dark : hex, rand, 4, 8);
+    }
+    return g;
+  };
+  const rockShot = cached(() => roundStone(19, 0.2, "#6b625a", "#57504a"));
   const peel = cached(() => noShadow(merge(
     box({ w: 0.24, h: 0.06, d: 0.24, color: "#e0b53a", offset: { y: 0.04 } }),
     ...[0, 1, 2, 3].map((i) => turn(box({ w: 0.2, h: 0.04, d: 0.5, color: "#f5c542", offset: { y: 0.05, z: 0.32 } }), i * Math.PI / 2 + 0.4))
   )));
-  const boulder = cached(() => {
-    const rand = mulberry32(311);
-    const v = vox();
-    for (let x = -5; x <= 5; x++) for (let y = -5; y <= 5; y++) for (let z = -5; z <= 5; z++) if (x * x + y * y + z * z <= 28 && !(x * x + y * y + z * z > 22 && rand() < 0.3)) v.set(x, y, z, rand() < 0.25 ? 1 : 0);
-    return voxGeo(v, { unit: 0.16, palette: ["#5e5449", "#45403a"], origin: { x: -0.08, y: -0.08, z: -0.08 } });
-  });
+  const boulder = cached(() => roundStone(311, 0.82, "#5e5449", "#45403a"));
   // The same rolling hazard packed from snow, for the peak's ice.
-  const snowball = cached(() => {
-    const rand = mulberry32(313);
-    const v = vox();
-    for (let x = -5; x <= 5; x++) for (let y = -5; y <= 5; y++) for (let z = -5; z <= 5; z++) if (x * x + y * y + z * z <= 28 && !(x * x + y * y + z * z > 22 && rand() < 0.3)) v.set(x, y, z, rand() < 0.3 ? 1 : 0);
-    return voxGeo(v, { unit: 0.16, palette: ["#f2f6f9", "#cfdde8"], origin: { x: -0.08, y: -0.08, z: -0.08 } });
-  });
+  const snowball = cached(() => roundStone(313, 0.82, "#f2f6f9", "#cfdde8"));
   const spectator = variants((i) => {
     const skins = ["#c98a5b", "#a9744c", "#d9a06b"], furs = ["#d98a2e", "#c98936", "#e09a40"];
     const v = vox();
@@ -268,70 +292,45 @@
     return noShadow(voxGeo(v, { unit: 0.075, palette: [skins[i % 3], furs[i % 3], "#2b1b10"], origin: { x: 0, y: 0, z: 0 } }));
   });
   const banner = keyed((color) => merge(
-    box({ w: 0.12, h: 3.2, d: 0.12, color: "#3a2a18", offset: { y: 1.6 } }),
+    bevelBox({ w: 0.16, h: 3.2, d: 0.16, color: "#3a2a18", bevel: 0.035, offset: { y: 1.6 } }),
+    bevelBox({ w: 0.22, h: 0.08, d: 0.22, color: ROPE, bevel: 0.02, offset: { y: 3.0 } }),
     box({ w: 0.04, h: 1.4, d: 0.9, color, emissive: 0.1, offset: { y: 2.3, z: 0.5 } }),
     box({ w: 0.04, h: 0.5, d: 0.5, color, emissive: 0.1, offset: { y: 1.45, z: 0.3 } })
   ));
   const torchStand = cached(() => {
     const geo = merge(
-      box({ w: 0.5, h: 0.3, d: 0.5, color: "#57504a", offset: { y: 0.15 } }),
-      box({ w: 0.14, h: 1.6, d: 0.14, color: WOOD_DK, offset: { y: 1.1 } }),
-      box({ w: 0.26, h: 0.16, d: 0.26, color: "#3a2a18", offset: { y: 1.96 } })
+      bevelBox({ w: 0.54, h: 0.3, d: 0.54, color: "#57504a", bevel: 0.07, offset: { y: 0.15 } }),
+      bevelBox({ w: 0.18, h: 1.6, d: 0.18, color: WOOD_DK, bevel: 0.04, offset: { y: 1.1 } }),
+      bevelBox({ w: 0.24, h: 0.08, d: 0.24, color: ROPE, bevel: 0.02, offset: { y: 1.6 } }),
+      bevelBox({ w: 0.3, h: 0.16, d: 0.3, color: "#3a2a18", bevel: 0.04, offset: { y: 1.96 } })
     );
     geo.flameY = 2.2;
     return geo;
   });
   const torchFlame = cached(() => noShadow(box({ w: 0.28, h: 0.3, d: 0.28, color: "#ffb13b", emissive: 1 })));
 
-  const palm = variants((i) => {
-    const rand = mulberry32(500 + i);
-    const parts = [];
-    const lean = (rand() - 0.5) * 0.5, h = 3.6 + rand() * 1.4, rings = 9;
-    let x = 0, z = 0;
-    for (let n = 0; n < rings; n++) {
-      const t = n / rings;
-      x += Math.sin(lean) * (h / rings) * t;
-      parts.push(box({ w: 0.42 - t * 0.14, h: h / rings + 0.04, d: 0.42 - t * 0.14, color: n % 2 ? "#7a5a3a" : "#6a4c2e", offset: { x, y: (n + 0.5) * (h / rings), z } }));
-    }
-    const top = { x: x + Math.sin(lean) * 0.2, y: h + 0.1, z };
-    for (let f = 0; f < 7; f++) {
-      const a = f / 7 * Math.PI * 2 + rand() * 0.4;
-      for (let s = 0; s < 5; s++) {
-        const r = 0.3 + s * 0.5, droop = s * s * 0.12;
-        parts.push(turn(box({ w: 0.6 - s * 0.09, h: 0.06, d: 0.58, color: s % 2 ? "#4f9a3d" : "#3e7a2c", offset: { z: r, y: -droop } }), a, 0, 0.1 + s * 0.12));
-        if (s > 0 && s < 4) parts.push(turn(box({ w: 0.9 - s * 0.12, h: 0.04, d: 0.34, color: s % 2 ? "#3e7a2c" : "#5aa845", offset: { z: r + 0.1, y: -droop - 0.02 } }), a, 0, 0.1 + s * 0.12));
-      }
-    }
-    for (let f = 0; f < 5; f++) {
-      const a = f / 5 * Math.PI * 2 + 0.3 + rand() * 0.4;
-      for (let s = 0; s < 3; s++) {
-        const r = 0.25 + s * 0.45;
-        parts.push(turn(box({ w: 0.5 - s * 0.1, h: 0.05, d: 0.5, color: s % 2 ? "#5aa845" : "#4f9a3d", offset: { z: r, y: 0.25 + s * 0.12 - s * s * 0.1 } }), a, 0, -0.2 + s * 0.14));
-      }
-    }
-    parts.push(box({ w: 0.42, h: 0.5, d: 0.42, color: "#5aa845", offset: { y: 0.25 } }));
-    for (const [cx, cz] of [[0.2, 0.1], [-0.15, 0.2], [0.05, -0.2]]) parts.push(box({ w: 0.22, h: 0.22, d: 0.22, color: "#5c4425", offset: { x: cx, y: -0.2, z: cz } }));
-    return merge(...parts.slice(0, rings), ...parts.slice(rings).map((g) => shift(g, top.x, top.y, top.z)));
-  });
-  const lagoonRock = variants((i) => {
-    const rand = mulberry32(600 + i);
-    const v = vox();
-    const rx = 3 + i, ry = 2 + i * 0.5, rz = 2.5 + i;
-    for (let x = -rx; x <= rx; x++) for (let y = 0; y <= ry; y++) for (let z = -rz; z <= rz; z++) {
-      const d = (x / rx) ** 2 + (y / ry) ** 2 + (z / rz) ** 2;
-      if (d <= 1 && !(d > 0.7 && rand() < 0.3)) v.set(x, y, z, rand() < 0.25 ? 1 : 0);
-    }
-    return voxGeo(v, { unit: 0.3, palette: ["#8d857b", "#6f6860"], origin: { x: -0.15, y: 0, z: -0.15 } });
-  });
+  // The hub's approved cartoon palm: segmented flaring trunk and V-folded notched fronds.
+  const palm = (i) => BL.dressing.palm(i);
+  // Rounded cartoon boulders: two or three squat smooth stones leaning together, a cushion of weed or moss on top.
+  const stoneHeap = (seed, size, hex, dark, cap, capH = 0.2) => {
+    const g = soft(), rand = mulberry32(seed);
+    lump(g, 0, size * 0.42, 0, size, size * 0.7, size * 0.85, hex, rand, 6, 11);
+    lump(g, size * 0.75, size * 0.25, -size * 0.35, size * 0.55, size * 0.45, size * 0.5, dark, rand, 5, 9);
+    lump(g, -size * 0.6, size * 0.2, size * 0.45, size * 0.42, size * 0.34, size * 0.4, hex, rand, 5, 9);
+    if (cap) lump(g, -size * 0.1, size * (0.42 + 0.7 * 0.82), 0, size * 0.7, size * capH, size * 0.62, cap, rand, 4, 10);
+    return g;
+  };
+  const lagoonRock = variants((i) => stoneHeap(600 + i, 0.95 + i * 0.3, "#8d857b", "#6f6860", "#6d8a3a", 0.14));
+  // Dark basalt lumps with glowing seams of lava pressed into their cracks.
   const lavaRock = variants((i) => {
-    const rand = mulberry32(700 + i);
-    const v = vox();
-    const r = 2 + i;
-    for (let x = -r; x <= r; x++) for (let y = 0; y <= r + 1; y++) for (let z = -r; z <= r; z++) {
-      const d = (x * x + z * z) / (r * r) + (y / (r + 1)) ** 2;
-      if (d <= 1 && !(d > 0.6 && rand() < 0.35)) v.set(x, y, z, rand() < 0.08 ? 2 : rand() < 0.3 ? 1 : 0);
+    const size = 0.7 + i * 0.3, g = stoneHeap(700 + i, size, "#2b2724", "#1c1917", null), rand = mulberry32(710 + i);
+    const glow = g.faces.length;
+    for (let k = 0; k < 4; k++) {
+      const a = rand() * Math.PI * 2;
+      lump(g, Math.cos(a) * size * 0.78, size * (0.35 + rand() * 0.35), Math.sin(a) * size * 0.66, size * 0.16, size * 0.07, size * 0.16, "#ff6a1e", rand, 3, 7);
     }
-    return voxGeo(v, { unit: 0.32, palette: ["#2b2724", "#1c1917", "#ff6a1e"], origin: { x: -0.16, y: 0, z: -0.16 }, emissive: { 2: 1 } });
+    for (let f = glow; f < g.faces.length; f++) g.faces[f].emissive = 1;
+    return g;
   });
   const obsidianSpike = variants((i) => {
     const h = 2.4 + i * 1.2;
@@ -341,11 +340,17 @@
       box({ w: 0.12, h: h * 0.5, d: 0.12, color: "#ff6a1e", emissive: 1, offset: { x: 0.24, y: h * 0.35 } })
     );
   });
-  const bones = cached(() => merge(
-    turn(box({ w: 0.16, h: 0.16, d: 1.6, color: "#e8e2d2", offset: { y: 0.08 } }), 0.3),
-    turn(box({ w: 0.16, h: 0.16, d: 1.3, color: "#d9d2c0", offset: { x: 0.5, y: 0.08, z: 0.3 } }), -0.8),
-    shift(lathe({ profile: [[0, 0], [0.42, 0.05], [0.5, 0.4], [0.3, 0.72], [0, 0.78]], segments: 8, color: "#e8e2d2" }), -0.6, 0, -0.5)
-  ));
+  // Old bones in the ash: two long bones with knobbed ends and a skull, all smooth.
+  const bones = cached(() => {
+    const g = soft(), rand = mulberry32(347), ivory = hexToRgb("#e8e2d2");
+    for (const [x0, z0, x1, z1] of [[-0.24, -0.76, 0.24, 0.76], [0.1, 0.8, 0.9, -0.2]]) {
+      limb(g, x0, 0.08, z0, x1, 0.08, z1, 0.07, 0.07, 7, ivory);
+      for (const [x, z] of [[x0, z0], [x1, z1]]) for (const d of [-0.05, 0.05]) lump(g, x + d, 0.1, z - d, 0.09, 0.08, 0.09, "#efe9da", rand, 4, 7);
+    }
+    lump(g, -0.6, 0.3, -0.5, 0.42, 0.34, 0.38, "#e8e2d2", rand, 6, 10);
+    for (const s of [-1, 1]) lump(g, -0.3, 0.34, -0.5 + s * 0.16, 0.08, 0.09, 0.07, "#2b2521", rand, 3, 7);
+    return g;
+  });
   const pine = variants((i) => {
     const rand = mulberry32(800 + i);
     const h = 3.6 + rand() * 1.8, parts = [box({ w: 0.36, h: h * 0.4, d: 0.36, color: "#4e361f", offset: { y: h * 0.2 } })];
@@ -373,16 +378,7 @@
       shift(turn(lathe({ profile: [[0.3, 0], [0.18, h * 0.3], [0, h * 0.55]], segments: 5, color: "#dbeef8" }), i * 1.7), 0.4, 0, 0.3)
     );
   });
-  const snowRock = variants((i) => {
-    const rand = mulberry32(900 + i);
-    const v = vox();
-    const r = 2 + i;
-    for (let x = -r; x <= r; x++) for (let y = 0; y <= r; y++) for (let z = -r; z <= r; z++) {
-      const d = (x * x + z * z) / (r * r) + (y / r) ** 2;
-      if (d <= 1 && !(d > 0.65 && rand() < 0.3)) v.set(x, y, z, y >= r - 1 || (y >= r - 2 && rand() < 0.5) ? 2 : rand() < 0.3 ? 1 : 0);
-    }
-    return voxGeo(v, { unit: 0.32, palette: ["#6f7c87", "#586470", "#eef3f7"], origin: { x: -0.16, y: 0, z: -0.16 } });
-  });
+  const snowRock = variants((i) => stoneHeap(900 + i, 0.75 + i * 0.3, "#6f7c87", "#586470", "#eef3f7", 0.24));
   const stalactite = variants((i) => {
     const h = 2 + i * 1.3;
     return merge(
@@ -394,16 +390,16 @@
   const snowFlake = cached(() => noShadow(box({ w: 0.09, h: 0.09, d: 0.09, color: "#f6f9fb", emissive: 0.25 })));
   // Walkway module is one unit long along z, for tiling.
   const planks = cached(() => merge(
-    ...Array.from({ length: 4 }, (_, n) => box({ w: 1, h: 0.12, d: 0.24, color: n % 2 ? "#8f6538" : "#9c7040", offset: { y: -0.06, z: -0.375 + n * 0.25 } }))
+    ...Array.from({ length: 4 }, (_, n) => bevelBox({ w: 1, h: 0.12, d: 0.24, color: n % 2 ? "#8f6538" : "#9c7040", bevel: 0.035, offset: { y: -0.06, z: -0.375 + n * 0.25 } }))
   ));
   const buoy = cached(() => merge(
     lathe({ profile: [[0, 0], [0.4, 0.05], [0.45, 0.3], [0.3, 0.6], [0, 0.65]], segments: 8, color: (t) => t < 0.5 ? "#e04a3a" : "#f3efe4" }),
-    box({ w: 0.08, h: 0.7, d: 0.08, color: "#3a2a18", offset: { y: 0.95 } }),
-    box({ w: 0.18, h: 0.18, d: 0.18, color: "#ffd27a", emissive: 1, offset: { y: 1.35 } })
+    bevelBox({ w: 0.1, h: 0.7, d: 0.1, color: "#3a2a18", bevel: 0.025, offset: { y: 0.95 } }),
+    bevelBox({ w: 0.2, h: 0.2, d: 0.2, color: "#ffd27a", emissive: 1, bevel: 0.04, offset: { y: 1.35 } })
   ));
   const post = cached(() => merge(
-    box({ w: 0.18, h: 1.4, d: 0.18, color: "#3a2a18", offset: { y: 0.7 } }),
-    box({ w: 0.3, h: 0.3, d: 0.3, color: "#e04a3a", offset: { y: 1.5 } })
+    bevelBox({ w: 0.2, h: 1.4, d: 0.2, color: "#3a2a18", bevel: 0.045, offset: { y: 0.7 } }),
+    bevelBox({ w: 0.32, h: 0.3, d: 0.32, color: "#e04a3a", bevel: 0.06, offset: { y: 1.5 } })
   ));
 
   BL.raceModels = { KART, GANTRY, gantryLampY, DINO_HIDES, kart, kartWheel, dino, gantry, gantryLamp, boostFlame, stalactite, rainDrop, snowFlake, boostPad, itemCrate, rockShot, peel, boulder, snowball, spectator, banner, torchStand, torchFlame, palm, lagoonRock, lavaRock, obsidianSpike, bones, pine, crystal, iceSpike, snowRock, planks, buoy, post, turn, shift, yToX, yToZ };

@@ -2712,7 +2712,6 @@ const weatherStepChecks = async () => {
   const names = [0, 0.1, 0.25, 0.45, 0.65, 0.85, 1].map((k) => STEPS[stepFor(k)].name);
   const ladder = names.join() === "dry,drizzle,light rain,rain,heavy rain,downpour,downpour";
   const holds = stepFor(0.42, 3) === 3 && stepFor(0.39, 3) === 2 && stepFor(0.46, 2) === 3 && stepFor(0.02, 5) === 0;
-  const storms = STEPS.filter((st) => st.storm).map((st) => st.name).join() === "downpour";
   let continuous = true, previous = 0;
   for (let k = 0.1; k <= 1.0001; k += 0.001) {
     const wet = wetAt(k);
@@ -2720,8 +2719,8 @@ const weatherStepChecks = async () => {
     previous = wet;
   }
   const ends = wetAt(0) === 0 && wetAt(0.0999) === 0 && Math.abs(wetAt(0.1) - 0.12) < 1e-9 && wetAt(0.85) === 1 && wetAt(1) === 1;
-  record("weather steps: soak alone names dry through downpour, a step holds against a hover on its boundary, only the downpour storms, and the rain amount rises continuously",
-    ladder && holds && storms && continuous && ends, JSON.stringify({ names, holds, storms, continuous, ends }));
+  record("weather steps: soak alone names dry through downpour, a step holds against a hover on its boundary, and the rain amount rises continuously",
+    ladder && holds && continuous && ends, JSON.stringify({ names, holds, continuous, ends }));
 };
 const debugActivityStatusChecks = async () => {
   const sources = await Promise.all(CONTRIBUTOR_SOURCES.map((name) => readFile(new URL(`../src/js/${name}.js`, import.meta.url), "utf8")));
@@ -4761,18 +4760,18 @@ for (const fallback of [false, true]) scene("hub", { label: "timechain " + (fall
     })()`);
     await b.click(point.x, point.y);
     boards.pointer.push(await b.evaluate(`(() => {
-      const T = BL.scenes.hub.debug.timechainIsland, details = document.getElementById('jumbotron-details');
-      return document.getElementById('jumbotron-modal').open && document.getElementById('jumbotron-caption').textContent === BL.timechainData.TITLES[${index}]
-        && details.querySelector('a').href === T.boards.data[${index}].source && !details.textContent.includes('api.timechainindex.com');
+      const T = BL.scenes.hub.debug.timechainIsland, note = document.getElementById('board-note');
+      return document.getElementById('board-modal').open && document.getElementById('board-caption').textContent === BL.timechainData.TITLES[${index}]
+        && note.textContent.includes(T.boards.data[${index}].source) && !note.textContent.includes('api.timechainindex.com');
     })()`));
-    await b.evaluate(`document.querySelector('[data-action="jumbotron-close"]').click()`);
+    await b.evaluate(`document.querySelector('[data-action="board-close"]').click()`);
   }
   boards.independent = await b.evaluate(`(() => {
     const T = BL.scenes.hub.debug.timechainIsland, before = T.boards.entries.map(e => e.panel.geometry);
     BL.scenes.hub.debug.useProp(BL.scenes.hub.debug.props.find(p => p.prop === 'timechainboard' && p.boardIndex === 5));
-    document.querySelector('[data-action="jumbotron-next"]').click();
-    const wraps = document.getElementById('jumbotron-caption').textContent === BL.timechainData.TITLES[0];
-    document.querySelector('[data-action="jumbotron-close"]').click();
+    document.querySelector('[data-action="board-next"]').click();
+    const wraps = document.getElementById('board-caption').textContent === BL.timechainData.TITLES[0];
+    document.querySelector('[data-action="board-close"]').click();
     return wraps && T.boards.entries.every((e, i) => e.panel.geometry === before[i]);
   })()`);
   record("timechain " + (fallback ? "canvas2d" : "webgl2") + ": six complete wall sections stay visible and open their own details", boards.count === 6 && boards.loaded && boards.bounded && boards.complete && boards.noTabs && boards.independent && boards.pointer.every(Boolean), JSON.stringify(boards));

@@ -18,12 +18,13 @@
   const NIGHT_SKY = [0.33, 0.37, 0.50];
   const NIGHT_GROUND = [0.27, 0.28, 0.35];
   const NIGHT_SUN = [0.22, 0.26, 0.40];
-  const DAY_CLEAR = [0.36, 0.56, 0.82];
-  const DAY_HORIZON = [0.70, 0.82, 0.94];
-  const DAY_ZENITH = [0.24, 0.46, 0.84];
-  const DAY_SKY = [0.60, 0.64, 0.74];
-  const DAY_GROUND = [0.34, 0.34, 0.30];
-  const DAY_SUN = [0.48, 0.44, 0.38];
+  // The sun is the key light and the sky a cooler fill under it, so lit and shaded faces read apart.
+  const DAY_CLEAR = [0.36, 0.58, 0.88];
+  const DAY_HORIZON = [0.66, 0.82, 0.97];
+  const DAY_ZENITH = [0.18, 0.44, 0.90];
+  const DAY_SKY = [0.44, 0.52, 0.68];
+  const DAY_GROUND = [0.30, 0.27, 0.21];
+  const DAY_SUN = [0.74, 0.64, 0.50];
   const TWILIGHT_CLEAR = [0.34, 0.25, 0.42];
   const TWILIGHT_HORIZON = [1.00, 0.53, 0.25];
   const TWILIGHT_ZENITH = [0.18, 0.20, 0.48];
@@ -162,9 +163,10 @@
     out.sunStrength = sunStrength;
     out.moonStrength = moonStrength;
     const nightFill = 1 - daylight;
-    out.ambientFloor = lerp(0.18, 0.27, nightFill);
+    // Daytime shade keeps a floor of sky light, so a face turned from the sun still reads.
+    out.ambientFloor = lerp(0.24, 0.27, nightFill);
     out.diffuseFloor = 0.10 * nightFill;
-    out.shadowFloor = 0.38 * nightFill;
+    out.shadowFloor = lerp(0.3, 0.38, nightFill);
     out.shadowStrength = clamp(sunStrength + moonStrength * 0.5, 0, 1);
     out.outdoorDarkestSurfaceEstimate = Math.max(out.ambientFloor, Math.min(out.sky[0], out.sky[1], out.sky[2], out.ground[0], out.ground[1], out.ground[2]));
     out.shadowBias = lerp(0.0012, 0.0038, 1 - horizonCos);

@@ -7,13 +7,42 @@
 // Two providers, one code path. `/mempool`, `/mempool/recent`, `/blocks` and `/blocks/tip/height`
 // return the same shapes from mempool.space and from any Esplora instance, so the fallback is a base
 // URL swap; the mempool.space-only endpoints are dropped for ten minutes when they fail and tried
-// again after. Every reader tolerates a missing field rather than branching.
+// again after, leaving `/fee-estimates` (same shape on both) to stand in for the fee tiers. Every reader
+// tolerates a missing field rather than branching.
 //
 // Polite by construction: one poll of a kind at a time, each cycle rescheduling from its own
 // completion, every failure widening the gap, and Retry-After obeyed when a provider sends one.
 //
 // Nothing here allocates per frame: the snapshot is one object mutated in place and the fee ladder is
 // a fixed typed array. Weather reads the two derived axes at the foot of the snapshot.
+//
+// The snapshot is the standing view behind the weather and the Mempool cave: backlog, the fee ladder
+// in fixed rungs, tip, block pace, difficulty epoch, hashrate and price. The socket's `stats` and
+// `fees` land in it (coalesced into one announce a tick later) and stamp `socketAt`, never
+// `succeeded`, so a REST provider's backoff and Retry-After stand; while they are fresh, REST
+// `/mempool` adds only the histogram and the fee and difficulty endpoints are skipped. REST polls
+// only while the tab is visible, and a 200 whose body has no usable shape counts as a failure, not a
+// poll. Three consecutive failures swap the base URL to Esplora; the preferred provider is probed
+// every fifteen minutes.
+//
+// `derive` sets the weather axes. `soak` comes from the paying backlog: `paying` is the vsize at
+// 1 sat/vB or more (the fee ladder's first rung before normalizing), `payEma` its ten-minute average
+// by elapsed time, cached for reloads, and `paySoak` maps it on a log scale from PAY_DRY to PAY_FULL
+// MvB. `gale` comes from the socket's inflow and is zero once the socket is stale.
+//
+// The live price is Coinbase Exchange's public `ticker_batch` socket (`readTicker`: `type:
+// "ticker"`, strings parsed, `open_24h` as `priceOpenUsd`), subscribed in `onopen` because the feed
+// drops a socket not subscribed within five seconds; an `error` or an empty `subscriptions` closes it
+// with backoff, and PRICE_STALL of silence (the feed says nothing while the price is flat) redials.
+// Only while it is not delivering does the minute REST walk run through PRICE_SOURCES in order of
+// measured speed (Coinbase Exchange stats, Kraken, Coinbase spot, mempool.space), so a degraded chain
+// source keeps its ticker; the first two carry the day's open (Coinbase's a rolling 24 hours,
+// Kraken's today's UTC), and the walk goes on past a found price until the open is known.
+//
+// `snapshot.live` (a fresh socket push or REST poll) is computed on read, never stored, and the last
+// snapshot rides in sessionStorage to paint a reload before the first poll lands. Exports start,
+// setHidden, subscribe, dispose, derive and snapshot among others; the director leaves it off under
+// `nosim` and `chain=0`, and `chain=esplora` or `chain=https://host/api` pins the provider.
 (() => {
   "use strict";
   const BL = window.BL = window.BL || {};

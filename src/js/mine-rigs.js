@@ -11,6 +11,21 @@
 // at 250,000 bananas, the scale every price here is tuned against. What the player sees is scaled by the
 // run's rate (the live coin price over COIN), so the coin opens at the real price and a banana reads as
 // about a dollar.
+//
+// Exports: `MODELS` (the CPU on the bench, the GPU rig on a shelf, and five ASIC models in bays, each
+// fewer watts a TH than the last and launching on its minute), `HOLDERS` (rack on air, Cold Pool under
+// oil), `POWER` (three generators and the Crystal Bank), `BATTERY`, `DIGS` (Den, Rack Hall, Big Cave,
+// each with its own pads, power nooks, circuit and cooling), `BUSBAR`, the fans (`COOLERS`, bought onto
+// a chamber's `COOL_SPOTS`, each carrying its `share` of the chamber's `cool` over the bare rock's
+// `COOL_PASSIVE`; `chamberOfCool`), `PUSH`, `TROPHIES` (four, each a trade), `CRACK`, `LOAN`,
+// `SOLO_MAX` (a solo roll's best odds), `SMOTHER_SECONDS`, `FIRE_JUMP_AFTER` and `FIRE_JUMP`.
+//
+// `UNITS` is the flat spot table (bench, shelf, then every pad's bays) with `spotOfUnit`, `padOfUnit`,
+// `bayOfUnit` and `chamberOfUnit`. The arithmetic: the halving at `HALVING_AT`, `subsidyAt`,
+// `efficiencyOf`, `profitPerMinute`, `breakEven` and `paybackMinutes` (what one machine earns after its
+// power, the grid price at which it stops, and how long until it has paid for itself), `othersTarget`
+// (the rest of the network: a floor that climbs every epoch plus miners who copy what you run, shaken
+// out by the halving), `bananasForSats`, `scoreOf`, `medalFor`.
 (() => {
   "use strict";
   const BL = window.BL = window.BL || {};

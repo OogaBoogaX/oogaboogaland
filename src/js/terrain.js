@@ -42,7 +42,7 @@
   const gridGeometry = (grid, { unit, palette, origin = { x: 0, y: 0, z: 0 }, matrixCaves = null, floorRooms = [], cutawayPathKeys = null, cutawayPathBottoms = null, cutawayWindowMask = null, cutawayWindowTops = null, cutawayWindowCeilings = null }) => {
     const { data, sx, sy, sz } = grid;
     const dims = [sx, sy, sz], strides = [sy * sz, sz, 1];
-    const geo = { verts: [], faces: [], lines: [] };
+    const geo = { verts: [], faces: [], lines: [], voxel: new Float32Array([unit, origin.x, origin.y, origin.z]) };
     const mask = new Int16Array(Math.max(sx * sy, sy * sz, sz * sx));
     const pathMask = cutawayPathKeys ? new Uint32Array(mask.length) : null;
     const pathBottomMask = cutawayPathBottoms ? new Float32Array(mask.length) : null;
@@ -452,8 +452,9 @@
       const g = noise(q(wx) / 3 + 120, q(wz) / 3 + 60);
       return g < 0.38 ? P.grassDark : g < 0.68 ? P.grass : P.grassLight;
     };
+    // Rock strata in metre blocks and metre courses, so a cliff face shows big coloured stones, not speckle.
     const strata = (wx, wz, gy) => {
-      const s = noise(q(wx) / 2 + q(gy * UNIT) * 1.8 + 400, q(wz) / 2 + 400);
+      const s = noise(Math.floor(wx) / 2 + Math.floor(gy * UNIT) * 1.8 + 400, Math.floor(wz) / 2 + 400);
       return s < 0.35 ? P.stoneDark : s < 0.7 ? P.stone : P.dirt;
     };
     const shapeColumn = (gx, gz, wx) => {
@@ -485,18 +486,25 @@
       if (r < edge && bluff <= 0) {
         meadow[i] = 1;
       } else {
-        let h = 0.4 + (plateau + noise(wx / 12 + 80, wz / 12 + 80) * 2.5) * smooth((r - edge) / ramp) - 1.2 * smooth((r - (RADIUS - 2)) / 2) + (noise(wx / 5 + 20, wz / 5 + 20) - 0.5) * 1.2;
-        h *= 1 - 0.6 * smooth(1 - (Math.PI - Math.abs(theta)) / 0.5);
+        // Big blocks: away from the mouths and the aprons the bluff takes its height from a block lattice, a metre
+        // where the rock is massive and half a metre where it breaks up, and steps in half metres (still under a
+        // walker's step), so cliffs read as big and small blocks instead of a quarter-metre grain.
+        const coarse = bluff <= 0 && !apron, B = noise(wx / 9 + 900, wz / 9 + 900) > 0.45 ? 1 : 0.5;
+        const sx = coarse ? (Math.floor(wx / B) + 0.5) * B : wx, sz = coarse ? (Math.floor(wz / B) + 0.5) * B : wz;
+        const sr = coarse ? Math.hypot(sx, sz) : r, st = coarse ? Math.atan2(sx, -sz) : theta;
+        let h = 0.4 + (plateau + noise(sx / 12 + 80, sz / 12 + 80) * 2.5) * smooth((sr - edge) / ramp) - 1.2 * smooth((sr - (RADIUS - 2)) / 2) + (noise(sx / 5 + 20, sz / 5 + 20) - 0.5) * 1.2;
+        h *= 1 - 0.6 * smooth(1 - (Math.PI - Math.abs(st)) / 0.5);
         const crest = BLUFF + noise(wx / 4 + 500, wz / 4 + 500) * 1.5;
         if (h < crest) h += (crest - h) * bluff;
-        const patch = noise(q(wx) / 4 + 700, q(wz) / 4 + 700);
+        const patch = noise(q(sx) / 4 + 700, q(sz) / 4 + 700);
         if (apron) h = 0;
         else if (patch <= 0.58) surface = patch < 0.3 ? P.stoneDark : P.stone;
         if (Math.abs(wx) < PASS_HALF && wz < 0) {
           h = Math.min(PASS_TOP, Math.floor((r - MEADOW) / UNIT) * UNIT);
           surface = grassAt(wx, wz);
         }
-        top = clamp(Math.round(h / UNIT) * UNIT, 0, MAX_HEIGHT);
+        const step = coarse && !(Math.abs(wx) < PASS_HALF && wz < 0) ? 0.5 : UNIT;
+        top = clamp(Math.round(h / step) * step, 0, MAX_HEIGHT);
       }
       // A grass terrace cut into the ridge, like the launch approach; the same voxels render and support it.
       const timechainAlong = wx * TIMECHAIN_X + wz * TIMECHAIN_Z;
@@ -1783,6 +1791,16 @@
         if (tileInnerRadius(wx, wz) < ringOuter) continue;
         writePathTile(i, wx, wz);
         visibleSpokeCount++;
+      }
+      // Each tile carries which of its eight neighbours are road (1 +x, 2 -x, 4 +z, 8 -z, then 16 +x+z, 32 -x+z,
+      // 64 +x-z, 128 -x-z) in its first parameter, stored as 1 + mask (road tiles are never emissive, so the slot is
+      // free); the road shader cuts each tile along the marching-squares half line of those neighbours, which turns
+      // the tile staircase into straight diagonals and curves.
+      for (let t = 0; t < pathCount; t++) {
+        const o = t * 20, gx = Math.floor((pathData[o + 12] - ORIGIN.x) / PATH_UNIT), gz = Math.floor((pathData[o + 14] - ORIGIN.z) / PATH_UNIT);
+        const at = (x, z) => x >= 0 && z >= 0 && x < PX && z < PZ && paths[x * PZ + z] === 1;
+        pathData[o + 16] = 1 + (at(gx + 1, gz) ? 1 : 0) + (at(gx - 1, gz) ? 2 : 0) + (at(gx, gz + 1) ? 4 : 0) + (at(gx, gz - 1) ? 8 : 0)
+          + (at(gx + 1, gz + 1) ? 16 : 0) + (at(gx - 1, gz + 1) ? 32 : 0) + (at(gx + 1, gz - 1) ? 64 : 0) + (at(gx - 1, gz - 1) ? 128 : 0);
       }
       pathVersion++;
       pathReflows++;

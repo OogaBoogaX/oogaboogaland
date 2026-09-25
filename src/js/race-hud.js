@@ -1,3 +1,7 @@
+// The rally's HUD: the garage board, the in-race strip, countdown and notices, results, pause, and
+// the minimap and speed lines drawn on the overlay. `setBoost(k, full, tier)` colours the drift bar
+// by tier, `setPips` lights the ten banana pips, the item box shows the item's pixel icon, and
+// `mirror()` picks the mirrored bests for the garage rows.
 (() => {
   "use strict";
   const BL = window.BL = window.BL || {};

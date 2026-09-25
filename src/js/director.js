@@ -232,8 +232,10 @@
     showQuality();
   };
   // Boot time is a device probe no browser can refuse: Safari masks GPU strings, where thresholds matter most.
-  // BOOT_MEDIUM 2200 / BOOT_LOW 3400 measure building the first scene.
-  const BOOT_MEDIUM = 2200, BOOT_LOW = 3400;
+  // BOOT_MEDIUM / BOOT_LOW measure building the first scene. Recalibrated 2026-09-24 against the hub as it now
+  // is: an M4 Max builds it in about 2.35 s, so the old 2200 started every machine at medium. The same ratio to
+  // that fast build is kept, and the frame-interval auto-tier still steps a slow device down while it plays.
+  const BOOT_MEDIUM = 3600, BOOT_LOW = 5400;
   const tierFromBoot = (ms) => {
     if (renderer.kind !== "webgl2") return;
     const wanted = ms > BOOT_LOW ? "low" : ms > BOOT_MEDIUM ? "medium" : null;

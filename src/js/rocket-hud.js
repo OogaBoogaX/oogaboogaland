@@ -1,5 +1,14 @@
 // Ooga Orbit HUD: builder, flight strip and meters, clamp gauge, calls/notices, results board.
 // Text and bars change only when their value does.
+//
+// The builder has a tab per part kind over tiles of each part, drawn once per page by `hud.renderIcon`; the
+// readiness gauges for speed to spend and lift-off push; fact chips; the stack grouped by stage, with move
+// and remove through one delegated listener; problems, presets, pilot and Launch. Drag and drop runs on
+// pointer events alone: tiles onto the rocket (the scene's `slots` project its part boundaries) or into
+// the list, rows to reorder or off to remove, a long press to pick up on touch. The flight strip shows
+// height, speed, stage, fuel, push, heat, shield and stress, with an altimeter marked Pad, Air and Orbit;
+// then the flight log. `setMeters(mode)` shows fuel, push and stress on the way up and heat and shield
+// coming home.
 (() => {
   "use strict";
   const BL = window.BL = window.BL || {};
@@ -344,7 +353,8 @@
       }
     };
     const setGauge = (value) => {
-      el.gauge.hidden = value < 0;
+      // Checked against the element itself because show() also hides the gauge.
+      if (el.gauge.hidden !== value < 0) el.gauge.hidden = value < 0;
       if (value >= 0) setBar(el.needle, value);
     };
     let centerTimer = 0, noticeTimer = 0;

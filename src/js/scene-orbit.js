@@ -1,4 +1,25 @@
 // Build on the pad, release clamps, stage to the Sky Top, sky-hook hold, spacewalk, fall home shield first.
+//
+// Ooga Orbit. Phases `build`, `count`, `ignite`, `ascent`, `orbit`, `eva`, `descent`, `down`, `boom`,
+// `results`. The pad builder; the side camera on the way up (downrange to the right); the camera-relative
+// pod turn with rim air puffs and the attitude ball. The Sky Top goal is `TOP` = `rocket.ORBIT_ALT` (500):
+// reaching it with anything still rising hands the flight to the sky hook, which reels it over the pad and
+// holds it still with `flight.hold`, then after the spacewalk lets go with `flight.stand` and a downward
+// throw. The climb autopilot follows `leanTarget` by height (an arc capped at 40 degrees), flies whenever A
+// and D are left alone, G toggles it, and draws a yellow aim line. The log gives the reason a flight missed
+// orbit; the mission checklist has seven steps, the one in hand lit with a live detail, skipped and failed
+// ones struck. The spacewalk (phase `eva`) is a suited copy of the pilot on a tether in the pod's own frame,
+// flying to the space rock, measuring it and climbing back in. Falling stages, smoke puffs and plasma
+// streaks live in fixed rings of instanced batches; the sky darkens with height; donations and `leave`.
+//
+// A tapped tank or fin joins the stage under the last Vine Knot; a pod goes on top and a shield under it.
+// Scoring: thrift (`SCORE.thrift` a banana under `REF_BILL`) and a fast climb (`SCORE.fast`, from the clamps
+// to the top against `FAST_BEST`) on a completed mission, `SCORE.hand` for a climb flown without the
+// autopilot, the pad on a gradient from its middle, and a failed flight capped under bronze. A stage
+// dropped with fuel is counted (`fuelWasted`) and named in the post-mortem; descent Space always reaches
+// `pullChute` so an early press explains itself. The spacewalk has `EVA_AIR` seconds of air (the tether
+// reels in at zero, leftover air pays) and the rock's place in the pod's frame (`eva.rockE/U/F`) is drawn per
+// launch. A pad landing gets confetti, the ticker and a word from the Agent.
 (() => {
   "use strict";
   const BL = window.BL = window.BL || {};
@@ -62,6 +83,7 @@
   };
   RENDER_OPTS.starMatrix[0] = RENDER_OPTS.starMatrix[4] = RENDER_OPTS.starMatrix[8] = 1;
   RENDER_OPTS.fog = RENDER_OPTS.horizon;
+  RENDER_OPTS.clouds = 0.4;
   const SPACE_ZENITH = [0.004, 0.006, 0.02], SPACE_HORIZON = [0.16, 0.34, 0.62], SPACE_CLEAR = [0.004, 0.006, 0.02];
   const setVec = (v, x, y, z) => {
     v.x = x;
@@ -1479,11 +1501,17 @@
       o.lightCount = 1;
     } else o.lightCount = 0;
   };
+  // quieted: the idle fade is scheduled once per idle stretch, and again after unlock builds the voices.
+  let quieted = false;
   const updateAudio = (lit) => {
     if (phase === "build" || phase === "results") {
-      audio.quiet();
+      if (!quieted) {
+        audio.quiet();
+        quieted = true;
+      }
       return;
     }
+    quieted = false;
     const a = audio.state, s = flight.state;
     a.engine = lit;
     a.near = clamp(1.4 - Math.hypot(camera.position.x - s.p.x, camera.position.y - s.p.y, camera.position.z - s.p.z) / 160, 0.2, 1);
@@ -1816,7 +1844,10 @@
     rhud.el.mute.setAttribute("aria-pressed", String(audio.muted));
     hud.toast(audio.muted ? "Sound off" : "Sound on");
   };
-  const onGesture = () => audio.unlock();
+  const onGesture = () => {
+    audio.unlock();
+    quieted = false;
+  };
   const onKey = (e) => {
     if (e.key === "Escape") {
       if (phase === "build") go("hub");
@@ -1886,7 +1917,7 @@
       const q = quat.create(), axis = Math.hypot(dz, dx) || 1;
       quat.fromAxisAngle(q, dz / axis, 0, -dx / axis, Math.acos(clamp(dy, -1, 1)));
       const s = 3.5 + rand() * 5;
-      place(createNode({ position: { x: dx * h, y: CY + dy * h, z: dz * h }, quaternion: q, scale: { x: s, y: s * 0.7, z: s }, geometry: hubModels.cloud(i % 3) }));
+      place(createNode({ position: { x: dx * h, y: CY + dy * h, z: dz * h }, quaternion: q, scale: { x: s, y: s * 0.7, z: s }, geometry: hubModels.cloud(i % 3), matrixCloud: true }));
     }
     smoke = { node: place(createNode({ geometry: rocketModels.puff(), instanceData: new Float32Array(SMOKE * 20), instanceCount: 0, instanceVersion: 0, fixedInstanceCapacity: true, visible: false })), x: new Float32Array(SMOKE), y: new Float32Array(SMOKE), z: new Float32Array(SMOKE), vx: new Float32Array(SMOKE), vy: new Float32Array(SMOKE), vz: new Float32Array(SMOKE), age: new Float32Array(SMOKE), life: new Float32Array(SMOKE), size: new Float32Array(SMOKE), next: 0, count: 0 };
     plasma = { node: place(createNode({ geometry: rocketModels.plasma(), instanceData: new Float32Array(PLASMA * 20), instanceCount: 0, instanceVersion: 0, fixedInstanceCapacity: true, visible: false })), x: new Float32Array(PLASMA), y: new Float32Array(PLASMA), z: new Float32Array(PLASMA) };
@@ -1917,6 +1948,7 @@
     controls = controlsMod.create({ move: document.getElementById("joy-move"), look: document.getElementById("joy-look"), boost: hud.el.act, chord: ctx.canvas, onAction: act });
     orbitScene.agentControls = controls;
     audio = rocketAudio.create();
+    quieted = false;
     rhud.el.mute.setAttribute("aria-pressed", String(audio.muted));
     window.addEventListener("pointerdown", onGesture);
     window.addEventListener("keydown", onGesture);

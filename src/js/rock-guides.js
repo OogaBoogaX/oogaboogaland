@@ -1,4 +1,10 @@
 // Perceived wall sections and the basement rim, for views through island stone.
+//
+// The wall cue for views through island stone. It builds its contexts once per island, creating
+// `slopeGuides`, `caveGuides`, `holeGuides` and `wallApertures` itself (they are never created anywhere
+// else), over one build that is never written, and gives each visit its own fade and camera state. The API
+// from `create` is `select`, `updateSurface`, `updateSurfaces`, `resetSurface`, `contexts`, `all` and
+// `stats`.
 (() => {
   "use strict";
   const BL = window.BL = window.BL || {};
@@ -571,17 +577,18 @@
       const length = Math.hypot(nx, ny, nz);
       if (length < EPS) continue;
       nx /= length; ny /= length; nz /= length;
-      const points = face.i.map((i) => [v[i * 3], v[i * 3 + 1], v[i * 3 + 2]]);
       let cx = 0, cy = 0, cz = 0, minX = Infinity, minY = Infinity, minZ = Infinity, maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
-      for (const p of points) {
-        cx += p[0]; cy += p[1]; cz += p[2];
-        minX = Math.min(minX, p[0]); minY = Math.min(minY, p[1]); minZ = Math.min(minZ, p[2]); maxX = Math.max(maxX, p[0]); maxY = Math.max(maxY, p[1]); maxZ = Math.max(maxZ, p[2]);
+      for (const i of face.i) {
+        const x = v[i * 3], y = v[i * 3 + 1], z = v[i * 3 + 2];
+        cx += x; cy += y; cz += z;
+        minX = Math.min(minX, x); minY = Math.min(minY, y); minZ = Math.min(minZ, z); maxX = Math.max(maxX, x); maxY = Math.max(maxY, y); maxZ = Math.max(maxZ, z);
       }
-      cx /= points.length; cy /= points.length; cz /= points.length;
+      cx /= face.i.length; cy /= face.i.length; cz /= face.i.length;
       const front = island.clearAt(cx + nx * 0.025, cy + ny * 0.025, cz + nz * 0.025, 0, 0), back = island.clearAt(cx - nx * 0.025, cy - ny * 0.025, cz - nz * 0.025, 0, 0);
       if (front === back) continue;
       const outwardY = front ? ny : -ny, riser = Math.abs(outwardY) <= 0.1, tread = outwardY > 0.9 && cy > EPS;
       if (!riser && !tread || riser && maxY < -EPS) continue;
+      const points = face.i.map((i) => [v[i * 3], v[i * 3 + 1], v[i * 3 + 2]]);
       let reveal = false;
       for (const window of H.windows) {
         for (const frustum of window.flare.frusta) {

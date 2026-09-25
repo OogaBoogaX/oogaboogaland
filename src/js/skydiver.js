@@ -1,4 +1,10 @@
 // One contributor body turning freely on a quaternion, air pushing on it like a flat plate, then a canopy.
+//
+// `place`, `jump`, `deploy`, `land`: under the canopy every touchdown stands; without one the impact picks
+// `hole`, `tumble` or `pancake` from the spine angle and the ground speed. The fixed-step flat-plate model
+// has gravity, plate pressure along the belly normal, skin drag, player rates and a weathervane the stick
+// cannot outmuscle. The canopy flight has bloom, sink, forward, toggles and a flare reserve; it trims at
+// `FORWARD` 8 and `SINK` 6, `DIVE_SINK` 10.5. `pose` goes by phase.
 (() => {
   "use strict";
   const BL = window.BL = window.BL || {};

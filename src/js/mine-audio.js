@@ -4,6 +4,9 @@
 //
 // The room's voice is the fan drone: its pitch and level follow how many units are actually running,
 // so the operation is audible before it is read. Heat opens a filter, a dead breaker kills it dead.
+//
+// Eight pooled voices carry cues for buying, selling, paying, blocks, the breaker, fire and a meltdown.
+// It shares the rally's mute key.
 (() => {
   "use strict";
   const BL = window.BL = window.BL || {};
@@ -106,6 +109,14 @@
       }
       return pick;
     };
+
+    // A hidden tab stops the room's loops and voices; showing it again picks them up.
+    const onVisibility = () => {
+      if (!ctx || ctx.state === "closed") return;
+      if (document.hidden) ctx.suspend().catch(() => {});
+      else ctx.resume().catch(() => {});
+    };
+    document.addEventListener("visibilitychange", onVisibility);
 
     // A cue is a frequency ramp and a gain envelope on a pooled voice. No nodes are made here.
     const blip = (from, to, seconds, level, type) => {
@@ -219,6 +230,7 @@
         return state;
       },
       dispose() {
+        document.removeEventListener("visibilitychange", onVisibility);
         if (!ctx) return;
         quiet();
         for (const v of voices) v.osc.stop();

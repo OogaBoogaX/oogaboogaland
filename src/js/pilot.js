@@ -7,7 +7,7 @@
   const BASE_FOV = 48 * Math.PI / 180;
   const MAX_FOV = 64 * Math.PI / 180;
   const MIN_HFOV = 58 * Math.PI / 180;
-  const YAW_RATE = 1.7, PITCH_RATE = 1.1;
+  const YAW_RATE = 1.7, PITCH_RATE = 1.1, DIRECT_VIEW_RATE = 28;
   // Trailing pitch stops 1e-4 short of +-PI/2 so the vertical view keeps a horizontal part and retains its yaw.
   const TRAILING_PITCH = [-Math.PI / 2 + 1e-4, Math.PI / 2 - 1e-4];
   const CLOSE_RATE = 12, CLOSE_SNAP = 0.001, CLOSE_PINCH_EXIT = 1.08, CLOSE_LOOK_DIST = 4;
@@ -534,6 +534,14 @@
       out.x = targetHit.x; out.y = targetHit.y; out.z = targetHit.z;
       return true;
     };
+    // The view ray aims, but cover counts only from the muzzle's depth on: a palm or rock
+    // between the camera and the Ooga must not stop the aim point behind the gun.
+    const aimAlongView = (out, x, y, z, dx, dy, dz) => {
+      crew.weaponOrigin(targetOrigin, player(), false);
+      const skip = Math.max(0, (targetOrigin.x - x) * dx + (targetOrigin.y - y) * dy + (targetOrigin.z - z) * dz);
+      x += dx * skip; y += dy * skip; z += dz * skip;
+      if (!targetAlongAim(out, x, y, z, dx, dy, dz)) pointAlongAim(out, x, y, z, dx, dy, dz);
+    };
     const aimTarget = (out, spread = false) => {
       if (assistedView()) {
         const cave = player();
@@ -577,14 +585,12 @@
         mat4.lookAt(cursorView, camera.position, camera.target, camera.up || cursorUp);
         mat4.rayFromView(cursorRay, cursorView, renderer.size.width, renderer.size.height, camera.fov, camera.position,
           renderer.size.width / 2 + Math.cos(angle) * radius, renderer.size.height / 2 + Math.sin(angle) * radius, camera.orthoMix, camera.orthoHeight);
-        if (!targetAlongAim(out, cursorRay.ox, cursorRay.oy, cursorRay.oz, cursorRay.dx, cursorRay.dy, cursorRay.dz)) {
-          pointAlongAim(out, cursorRay.ox, cursorRay.oy, cursorRay.oz, cursorRay.dx, cursorRay.dy, cursorRay.dz);
-        }
+        aimAlongView(out, cursorRay.ox, cursorRay.oy, cursorRay.oz, cursorRay.dx, cursorRay.dy, cursorRay.dz);
         return;
       }
       const p = camera.position, dx = camera.target.x - p.x, dy = camera.target.y - p.y, dz = camera.target.z - p.z;
       const length = Math.hypot(dx, dy, dz);
-      if (!targetAlongAim(out, p.x, p.y, p.z, dx / length, dy / length, dz / length)) pointAlongAim(out, p.x, p.y, p.z, dx / length, dy / length, dz / length);
+      aimAlongView(out, p.x, p.y, p.z, dx / length, dy / length, dz / length);
     };
     const resolveReticleTarget = (out, cave, primary) => {
       if (!input || !input.weaponTargets) return false;
@@ -1783,7 +1789,11 @@
     };
     // Held it climbs, clicked it acts; both mouse buttons on the canvas walk
     const controls = createControls({ move: document.getElementById("joy-move"), look: document.getElementById("joy-look"), boost: hud.el.act, chord: canvas, onAction: action, pressActions: true, shooter: armed, canDescend: () => !player() });
-    let trailingViewInput = false, trailingZoomInput = false, stoppedZoomGesture = null;
+    // A wheel gesture that crosses a mode boundary is held there so its momentum cannot carry on into the next
+    // mode; the hold lasts ZOOM_HOLD seconds. A mouse or trackpad that keeps scrolling extends one gesture for as
+    // long as it scrolls, so an unbounded hold left the view stuck in shoulder or first person.
+    const ZOOM_HOLD = 0.35;
+    let trailingViewInput = false, trailingZoomInput = false, stoppedZoomGesture = null, stoppedZoomAt = 0;
     const zoomPitch = (cave, fromDistance) => {
       if (!weaponViewReady(cave)) return;
       if (carryExitMode === 1) return;
@@ -1831,7 +1841,7 @@
       onZoom: (factor, gesture = null, px = null, py = null) => {
         if (factor === 1) return;
         resumePose();
-        if (gesture !== null && gesture === stoppedZoomGesture) return;
+        if (gesture !== null && gesture === stoppedZoomGesture && performance.now() - stoppedZoomAt < ZOOM_HOLD * 1000) return;
         const cave = player();
         if (birdsEye()) {
           // X may preserve a radius below the scroll boundary. Scrolling in
@@ -1853,6 +1863,7 @@
             if (closeWanted) {
               exitClose();
               stoppedZoomGesture = gesture;
+              stoppedZoomAt = performance.now();
             }
             else {
               shooterView(false);
@@ -1888,6 +1899,7 @@
           if (weaponViewReady(cave)) {
             shooterView(true, px, py);
             stoppedZoomGesture = gesture;
+              stoppedZoomAt = performance.now();
           }
           else enterClose();
         }
@@ -1943,14 +1955,16 @@
       const planted = shoulderCombat && !!a.sprint;
       const moveX = planted ? 0 : a.x, moveY = planted ? 0 : a.y;
       if (restoredPose) {
-        if (a.x || a.y || a.up || a.yaw || a.pitch || birdsEye() && a.orbitYaw) resumePose();
+        if (a.x || a.y || a.up || a.yaw || a.pitch || a.orbitYaw) resumePose();
         else return;
       }
       if (aimView()) {
-        if (a.x || a.y || a.up || a.yaw || a.pitch) releaseCursorAim();
-        if (lying) moveLyingView(a.yaw * YAW_RATE * dt, a.pitch * PITCH_RATE * dt);
+        // Armed, the controls keep Q/E off the look axis (birds-eye orbits with them); aiming views turn with them here.
+        const turn = clamp(a.yaw + a.orbitYaw, -1, 1);
+        if (a.x || a.y || a.up || turn || a.pitch) releaseCursorAim();
+        if (lying) moveLyingView(turn * YAW_RATE * dt, a.pitch * PITCH_RATE * dt);
         else {
-          orbit.yaw = orbit.tYaw += a.yaw * YAW_RATE * dt;
+          orbit.yaw = orbit.tYaw += turn * YAW_RATE * dt;
           orbit.pitch = orbit.tPitch = clamp(orbit.tPitch + a.pitch * PITCH_RATE * dt, TRAILING_PITCH[0], TRAILING_PITCH[1]);
         }
         if (armed()) poseAim();
@@ -2337,7 +2351,8 @@
           closeVelocity = 0;
         }
       } else closeMix = closeVelocity = 0;
-      orbit.yaw = directTrailingView ? orbit.tYaw : damp(orbit.yaw, orbit.tYaw, 14, dt);
+      // Direct drags and held keys ease fast rather than land as sent, so uneven input per frame cannot judder.
+      orbit.yaw = damp(orbit.yaw, orbit.tYaw, directTrailingView ? DIRECT_VIEW_RATE : 14, dt);
       if (carryExitMode && cave && !closeWanted) {
         zoomPitchVelocity = 0;
       } else if (zoomTilt && cave && !closeWanted && !directTrailingView) {
@@ -2345,7 +2360,7 @@
         orbit.pitch = orbit.tPitch + (delta + impulse) * decay;
         zoomPitchVelocity = (zoomPitchVelocity - 14 * impulse) * decay;
       } else {
-        orbit.pitch = directTrailingView ? orbit.tPitch : damp(orbit.pitch, orbit.tPitch, 14, dt);
+        orbit.pitch = damp(orbit.pitch, orbit.tPitch, directTrailingView ? DIRECT_VIEW_RATE : 14, dt);
         zoomPitchVelocity = 0;
       }
       if (cave && close && !sleeping && !rolling) crew.look(orbit.yaw + Math.PI, orbit.pitch, closeMix);

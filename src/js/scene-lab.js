@@ -26,6 +26,18 @@
     bench: { yaw: -1.5, pitch: 0.3, dist: 6, target: { x: 6.5, y: 1, z: 1.5 } }
   };
   const RENDER_OPTS = { shadowCenter: { x: 0, y: 1.5, z: 0 }, shadowExtent: 13.5 };
+  // Festoon bulbs strung corner to corner and across under the ceiling, from the shared kit: two draws.
+  const festoons = models.cached(() => {
+    const set = BL.dressing.set(), y = 4.25, e = ROOM_HALF - 0.3, bulbs = [0.12, 0.24, 0.36, 0.48, 0.6, 0.72, 0.84];
+    set.cable(-e, y, -e, e, y, e, 0.6, bulbs, "bulb");
+    set.cable(e, y, -e, -e, y, e, 0.6, bulbs, "bulb");
+    set.cable(-e, y, -2.5, e, y, -2.5, 0.45, bulbs, "bulb");
+    set.cable(-e, y, 3.5, e, y, 3.5, 0.45, bulbs, "bulb");
+    const out = set.build();
+    // Strung under the lab's overhead light, the cables would stripe the whole floor with shadow.
+    for (const layer of [out.hang, out.swing]) if (layer) models.noShadow(layer);
+    return out;
+  });
   const BUILD_SPOTS = [
     { x: 5.4, z: -9.3, ry: 0 }, { x: 6.7, z: -9.3, ry: 0 }, { x: 8, z: -9.3, ry: 0 },
     { x: -5.1, z: -9.3, ry: 0 }, { x: -9.1, z: -9.3, ry: 0 },
@@ -49,7 +61,7 @@
 
   // One visit's state: made in enter(), dropped in leave().
   let renderer, game, world, go, lootEnabled, testBananas, root, camera, lab, hud, hooks, input, pilot, fx, pile, crew, crates, pulseNodes, agent, agentPlay;
-  let stateTimer = 0, hintTimer = 0, meterTimer = 0, unsubscribeActivity = null;
+  let stateTimer = 0, hintTimer = 0, meterTimer = 0, unsubscribeActivity = null, dust = null;
   const propTargets = [];
   const addProp = (node, owner, opts) => {
     input.add(node, owner, opts);
@@ -284,6 +296,7 @@
     fx.update(dt);
     stepTweens(dt);
     pilot.update(dt);
+    dust.update(elapsed, pilot.orbit.target.x, pilot.orbit.target.z);
     meterTimer -= dt;
     if (meterTimer <= 0) {
       meterTimer = 0.25;
@@ -347,6 +360,10 @@
     root = createNode();
     lab = models.labRoom({ half: ROOM_HALF });
     addChild(root, lab.room);
+    const dressed = festoons();
+    addChild(lab.room, ...BL.dressing.nodes(dressed, { glow: 1 }));
+    dust = BL.dressing.motes({ count: 160, span: 16, low: 0.5, high: 4.2 });
+    addChild(lab.room, dust.node);
     mark("room");
     hud = hudMod.create({ roster: contributors.activeRoster, catalog: models.SWAG, tierColors: models.TIER_COLORS, renderIcon: hudMod.renderIcon, lootEnabled });
     hooks = {};
@@ -509,7 +526,7 @@
     const targets = input.targetCount;
     input.dispose();
     hud.dispose();
-    lab = hud = hooks = input = pilot = fx = pile = crew = crates = pulseNodes = agent = agentPlay = null;
+    lab = hud = hooks = input = pilot = fx = pile = crew = crates = pulseNodes = agent = agentPlay = dust = null;
     labScene.input = labScene.debug = labScene.agent = labScene.agentView = labScene.agentControls = labScene.agentHandoff = labScene.summonAgent = null;
     return { targets };
   };

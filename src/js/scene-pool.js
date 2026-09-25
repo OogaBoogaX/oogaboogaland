@@ -6,6 +6,15 @@
 // sign glyphs and the dense panels are the jumbotron's 5x7 font run-length merged into quads. The
 // numbers refresh from the chain snapshot at most once a second, and each refresh releases the
 // geometry it replaces, so a cave left open all day holds its size.
+//
+// All four stations read the one `chain.snapshot`. `setCarved` shrinks its cell to fit the slab, so
+// no reading runs off the stone, and the pool under the tablet's stalactite fills between blocks.
+// Stations stand on the wall at their own bearing, turned in by `bearing + PI`, and every preset
+// stands between one and the fire looking out at it; `entrance` stands on the stair landing and
+// looks across the fire at the tablet. Ten lamps come first (the fire, the five tier torches, one
+// over each other station and the stair lantern), then the hanging lanterns of the hall's dressing.
+// One exit behind one latch, reached by Escape, the HUD's Leave button, and the stair mouth tapped
+// or flown into; the walk-out needs the fly axes engaged, since an orbit sweep crosses the same arch.
 (() => {
   "use strict";
   const BL = window.BL = window.BL || {};
@@ -38,10 +47,10 @@
   };
   // Dim, warm and lit from the braziers: the cave passes no sky.
   const RENDER_OPTS = {
-    clear: [0.04, 0.05, 0.06], sky: [0.1, 0.09, 0.08], ground: [0.05, 0.05, 0.05],
+    clear: [0.05, 0.045, 0.04], sky: [0.24, 0.19, 0.14], ground: [0.11, 0.09, 0.07],
     direct: [0.5, 0.42, 0.3], directStrength: 0.4, ambientFloor: 0.26,
     sun: { x: 0.2, y: 0.9, z: 0.1 }, shadowCenter: { x: 0, y: 1.5, z: 0 }, shadowExtent: 16,
-    lights: new Float32Array(80), lightCount: 0, bloomStrength: 0.5
+    lights: new Float32Array(BL.glRenderer.POINT_LIGHT_CAPACITY * 8), lightCount: 0, bloomStrength: 0.5
   };
   const LADDER_N = BL.chain.LADDER, NOTCHES = 48, REFRESH = 1;
   const PANEL_BG = [12, 10, 9];
@@ -57,9 +66,31 @@
   const dripPool = models.cached(() => models.noShadow(models.lathe({ profile: [[0.85, 0.03], [0, 0.03]], segments: 14, color: "#2d4a55", emissive: 0.3 })));
   const stalactite = models.cached(() => latheBy({ profile: [[0.3, 0], [0.18, -0.9], [0, -1.5]], segments: 7, color: () => "#6b747b" }));
 
+  // The hall dressed from the shared kit: a ring of lamp cables under the vault and stores stacked on the three
+  // diagonals the stations and the stair leave free. Three draws, built once for the page.
+  const dressing = models.cached(() => {
+    const set = BL.dressing.set(), ring = 10.8, y = 5.4;
+    for (let k = 0; k < 8; k++) {
+      const a = k * Math.PI / 4, b = a + Math.PI / 4;
+      set.cable(Math.sin(a) * ring, y, Math.cos(a) * ring, Math.sin(b) * ring, y, Math.cos(b) * ring, 0.55, [0.3, 0.7], k & 1 ? "hanging" : "bulb");
+    }
+    const r = 11.2;
+    for (const bearing of [Math.PI / 4, 3 * Math.PI / 4, -3 * Math.PI / 4]) {
+      const cx = Math.sin(bearing) * r, cz = Math.cos(bearing) * r, sx = Math.cos(bearing), sz = -Math.sin(bearing);
+      const turns = ((Math.round(bearing / (Math.PI / 2)) + 2) % 4 + 4) % 4;
+      set.put("coalCrate", cx, 0, cz, turns, 1);
+      set.put("crate", cx + sx * 0.9, 0, cz + sz * 0.9, turns + 1, 0);
+      set.put("crate", cx + sx * 0.9, 0.75, cz + sz * 0.9, turns, 1);
+      set.put("barrel", cx - sx * 0.95, 0, cz - sz * 0.95, 0, 1);
+      set.put("sack", cx - sx * 0.6 - Math.sin(bearing) * 0.8, 0, cz - sz * 0.6 - Math.cos(bearing) * 0.8, turns, 0);
+    }
+    return set.build();
+  });
   let renderer, game, world, go, root, camera, hud, hooks, input, pilot, fx, agentPlay = null;
-  let stations = null, unsubscribeChain = null, refreshAt = 0, leaving = false;
+  let stations = null, unsubscribeChain = null, refreshAt = 0, leaving = false, dust = null;
   const propTargets = [];
+  // The string each head or panel was last built from: an unchanged reading keeps its geometry.
+  const printed = new Map();
 
   const fmt = (n) => gameMod.formatLarge(Math.round(n));
   // Rounded to `d` places with trailing zeros dropped: 10.0 reads 10, 10.1 stays 10.1.
@@ -84,9 +115,11 @@
     return panelFrom(ctx2d, PANEL_W, PANEL_H, PANEL_PX, PANEL_PX, PANEL_BG);
   };
 
-  // Carved headline text, centred on a slab face and replaced whole on each refresh. The cell shrinks
+  // Carved headline text, centred on a slab face and replaced whole when its reading changes. The cell shrinks
   // to fit the slab, so a long reading is set smaller rather than run off the stone.
   const setCarved = (node, text, maxWidth, color) => {
+    if (printed.get(node) === text) return;
+    printed.set(node, text);
     if (node.geometry) renderer.releaseGeometry(node.geometry);
     const cell = Math.min(HEAD_CELL, maxWidth / carveCells(text));
     const { geometry, width } = carve(text, { cell, color });
@@ -94,6 +127,9 @@
     node.position.x = -width / 2;
   };
   const setPanel = (node, ctx2d, lines) => {
+    const text = lines.map((l) => l.join("\t")).join("|");
+    if (printed.get(node) === text) return;
+    printed.set(node, text);
     if (node.geometry) renderer.releaseGeometry(node.geometry);
     node.geometry = makePanel(ctx2d, lines);
   };
@@ -252,6 +288,10 @@
       rotation: { x: 0, y: STAIR_BEARING + Math.PI, z: 0 }, geometry: stairFoot()
     });
     addChild(root, shell, fire, stairs);
+    dust = BL.dressing.motes({ count: 200, span: 16, low: 0.5, high: 6 });
+    addChild(root, dust.node);
+    const dressed = dressing();
+    addChild(root, ...BL.dressing.nodes(dressed, { glow: 1 }));
     stations = buildStations();
     addChild(root, stations.ladderNode, stations.tiersNode, stations.chainNode, stations.epochNode);
 
@@ -297,7 +337,7 @@
     });
     fx = fxMod.create({ root, input, hooks, hud, game, world, renderer, camera, overlay: ctx.overlay, tickerAt: { x: 0, y: 6, z: 0 } });
 
-    // Ten lamps, the cap: the fire, the five tier torches, one over each of the other three stations
+    // Ten lamps first: the fire, the five tier torches, one over each of the other three stations
     // and one on the stair lantern. Every station has to carry its own light or it reads as a shadow.
     const lights = RENDER_OPTS.lights;
     const lamp = (i, x, y, z, radius, r, g, b) => {
@@ -314,7 +354,11 @@
     lamp(7, chainSpot.x, 3.4, chainSpot.z, 13, 0.9, 0.74, 0.42);
     lamp(8, epochSpot.x, 3.4, epochSpot.z, 13, 0.85, 0.72, 0.45);
     lamp(9, Math.sin(STAIR_BEARING) * 11.5, 4.4, Math.cos(STAIR_BEARING) * 11.5, 10, 1, 0.62, 0.26);
-    RENDER_OPTS.lightCount = 10;
+    // Then the ring's hanging lanterns, which the higher tiers can afford.
+    const hung = dressing().lights;
+    let count = 10;
+    for (let i = 0; i < hung.length && count < BL.glRenderer.POINT_LIGHT_CAPACITY; i += 4) lamp(count++, hung[i], hung[i + 1], hung[i + 2], 6, 1, 0.66, 0.3);
+    RENDER_OPTS.lightCount = count;
 
     refresh();
     unsubscribeChain = chain.subscribe(refresh);
@@ -336,6 +380,7 @@
   const update = (dt, elapsed) => {
     pilot.readInput(dt);
     pilot.update(dt);
+    dust.update(elapsed, pilot.orbit.target.x, pilot.orbit.target.z);
     if (!leaving) {
       const a = pilot.controls.read();
       // Only while the visitor is driving: an orbit sweep crosses the same arch without meaning to.
@@ -368,11 +413,12 @@
     pilot.dispose();
     for (const node of propTargets) input.remove(node);
     propTargets.length = 0;
+    printed.clear();
     while (root.children.length) removeChild(root, root.children[root.children.length - 1]);
     const targets = input.targetCount;
     input.dispose();
     hud.dispose();
-    stations = hud = hooks = input = pilot = fx = agentPlay = null;
+    stations = hud = hooks = input = pilot = fx = agentPlay = dust = null;
     poolScene.input = poolScene.debug = null;
     return { targets };
   };

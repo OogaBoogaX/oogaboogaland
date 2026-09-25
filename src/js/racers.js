@@ -1,4 +1,13 @@
 // Racers: contributors on foot, in a Rock Kart or on a Dino; one arcade controller and an AI driver.
+//
+// The active contributors race on a mount (`MOUNTS`) under a fixed-step arcade controller: throttle,
+// steer, drift charge and tiered boost, hop, launches and landings, walls, falls, hazards and respawn,
+// plus racer pushes, checkpoints, laps, ranks, the rubber band, the AI driver and mount animation.
+// Each mount has one lever of its own (`charge` for the dino's drift, `boostMul` for the runner's
+// boost, `recover` for its spin); the AI field is `AI_MOUNTS`, two karts and two dinos to a runner.
+// `start(playerStart)` gives a throttle held from inside the last count `START_BOOST`, from earlier
+// `START_SPIN` of wheelspin, and the sharper AI `AI_START_BOOST`. A racer inside a prop's circle (the
+// track's `props`, its sector and the two beside it) is pushed out and knocked as by a wall.
 (() => {
   "use strict";
   const BL = window.BL = window.BL || {};
@@ -397,7 +406,7 @@
           r.wallHit = 0.25;
         }
       }
-      // Trackside props in this sector and its neighbours: a solid one stops the racer where it stands.
+      // Trackside props in this sector and its neighbours: a solid one pushes the racer out of its circle and knocks it as a wall does.
       const secs = track.sectorProps, sec = track.sectorOf(r.idx), last = secs.length - 1, px = track.props.x, pz = track.props.z, pr = track.props.r;
       for (let k = -1; k <= 1; k++) {
         const si = (sec + k + last) % last;

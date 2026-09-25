@@ -47,7 +47,7 @@
       const node = createNode({ geometry: wall(), rotation: { x: 0, y: -angle, z: 0 } }), panel = createNode();
       const canvas = document.createElement("canvas"); canvas.width = W; canvas.height = 384;
       addChild(node, panel); addChild(parent, node);
-      return { node, panel, canvas, ctx: canvas.getContext("2d", { willReadFrequently: true }), caption: "", rowCount: 0, angle };
+      return { node, panel, canvas, ctx: canvas.getContext("2d", { willReadFrequently: true }), caption: "", drawn: null, rowCount: 0, angle };
     });
     const feed = BL.timechainData.create(index => { paint(index); if (index === selected && onChange) onChange(index); });
     const inverse = BL.math.mat4.create(), localRay = new Float64Array(6);
@@ -73,6 +73,11 @@
     };
     const paint = index => {
       const data = feed.boards[index], entry = entries[index], ctx = entry.ctx, text = BL.jumbotron.text;
+      entry.caption = data.title + " — " + (data.asof || data.status) + ". " + data.lines.join("; ") + ". " + data.note + (data.checked ? "\nLast fetched " + new Date(data.checked).toISOString() + "." : "");
+      // Every poll reports in, changed or not; rebuilding the wall's geometry for an identical reading is a hitch.
+      const drawn = `${data.title}\n${data.asof}\n${data.status}\n${data.lines[0] || ""}\n${(data.table || []).join("\n")}`;
+      if (drawn === entry.drawn) return;
+      entry.drawn = drawn;
       const rows = [];
       for (const raw of data.table || []) {
         const value = raw.toUpperCase();
@@ -93,7 +98,6 @@
       centred("EXPLORE DATA AND SOURCES", h - 12, COLORS[index]);
       if (entry.panel.geometry) renderer.releaseGeometry(entry.panel.geometry);
       entry.panel.geometry = projectPanel(BL.poolModels.panelFrom(ctx, W, h, WIDTH / W, HEIGHT / h, BG));
-      entry.caption = data.title + " — " + (data.asof || data.status) + ". " + data.lines.join("; ") + ". " + data.note + (data.checked ? "\nLast fetched " + new Date(data.checked).toISOString() + "." : "");
     };
     const select = index => {
       if (!Number.isInteger(index) || index < 0 || index >= entries.length || index === selected) return;

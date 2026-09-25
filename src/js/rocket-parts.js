@@ -1,4 +1,10 @@
 // Ooga Orbit parts: catalog, stacking rules, the stages a stack splits into, and the builder's numbers.
+//
+// `PARTS`: pods, shields, tanks, engines, the Vine Knot and fins, each with height, radius, dry mass, fuel,
+// thrust, exhaust speed, shield and hull ratings and a banana price. `PRESETS`; `stagesOf` (the stack cut
+// at its knots); `check` (problems stop a launch, warnings only say); `stats` (mass, speed per stage,
+// lift-off push, bill); `sanitize`. Loads before `game.js`, which validates the saved build with it.
+// `stats.stability` is the worst attached case: fins on a dropped stage leave with it.
 (() => {
   "use strict";
   const BL = window.BL = window.BL || {};

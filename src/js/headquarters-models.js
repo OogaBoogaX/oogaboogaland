@@ -1,3 +1,7 @@
+// Cached geometry for the underground HQ and its basement: `room`, `entranceRamp`, `roomEntrance`,
+// `rampEntrance`, `mattress` (blanket plus a pillow carrying the same LifeHash a quarter turn round),
+// `roomSign` (the first eight hex of that hash), `MATTRESS` and `ROOM_RADIUS`. Eleven HQ and eight basement
+// slots reuse their geometry across visits.
 (() => {
   "use strict";
   const BL = window.BL = window.BL || {};

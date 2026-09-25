@@ -6,13 +6,35 @@
 // The cave's readable surfaces come from two places the island already trusts: `hubModels.SIGN_GLYPHS`
 // for carved headline numbers and the jumbotron's 5x7 font for the dense wall panels, turned into
 // bounded run-length quads the same way the big board does it.
+//
+// The island stands on the 4 o'clock `BEARING`, placed to miss the cave mouths in `terrain.js`'s
+// CLOCKS, the gate trail on spoke(0) at 12 and the launch bridge on spoke(PI) at 6. Everything is
+// built in a local frame whose +z points back at the home island, which `rotation.y = -bearing` maps
+// inward, as the terrain turns its own mouths: the voxel islet, the vine bridge, three canopy heights
+// with lianas, ferns, shrubs, mossy rocks and the pond, and the stairwell down the islet's centre,
+// carved out of its own voxels so it is a real hole with a lined wall, a turning flight and a landing
+// (`stairFoot`), with its sign and torches. The hall below is `caveR` 14 by `caveH` 8; `WALL` is its
+// section as fractions of those two, and `wallRadiusAt`/`ceilingHeightAt` read that one curve both
+// ways, so the lathe, the stalactites and the camera clamp all come from it. Floor rings run
+// outward-in and the wall top-down, which is what faces their normals into the room.
+//
+// Station pieces: `stationFace`/`stationPlaque` carry a station's readables, `tabletSlab` is the
+// standing tablet, `carve` cuts headline type from `hubModels.SIGN_GLYPHS` and `panelFrom` merges a
+// canvas of the jumbotron's 5x7 font into bounded quads. `chainBoard`/`CHAIN_BOARD` is the stats
+// board, whose panel is placed from the board's own numbers so resizing CHAIN_BOARD carries the face
+// with it, and `infoSign` the weather key beside it. The plants, rocks, animals, bridge and stairwell are
+// cartoon geometry from the hub's kit (`leafy`, `puff`, `limb`, `flatInto`), one cached build each shared by
+// every copy; the solid ones keep their first block build as `collisionGeometry`. `spot` finds the rim and
+// `build` returns the placed group.
+// Set `lineWidth` on a merged geometry, not on the polylines going into it: `merge` does not carry it.
 (() => {
   "use strict";
   const BL = window.BL = window.BL || {};
   const { models, math } = BL;
   const { createNode, addChild } = BL.scene;
-  const { cached, box, lathe, merge, polyline, makeVox, voxelGeometry, noShadow, pushVert, face } = models;
+  const { cached, box, bevelBox, lathe, merge, polyline, makeVox, voxelGeometry, noShadow, pushVert, face } = models;
   const { mulberry32, lerp, hexToRgb } = math;
+  const { puff, leafy, pointedLeaf, flower, FLOWER_INKS, limb, padNormals, flatInto, rock } = BL.hubModels;
 
   // A lathe whose colour varies by ring and segment, as `rocket-models.js` defines for the launch pad.
   const latheBy = ({ profile, segments = 8, color, emissive = 0 }) => {
@@ -37,8 +59,9 @@
   // and reads as thread against a canopy this size.
   const VINE_WIDTH = 3.6;
   const STONE = "#6f6f6a", STONE_DK = "#54544f", MOSS = "#3c6b40", WET = "#3a4a52", GOLD = "#e8c14a";
+  const MOSS_RGB = hexToRgb("#4f7f36"), MOSS_TONES = [MOSS_RGB, MOSS_RGB, MOSS_RGB, MOSS_RGB];
 
-  // 4 o'clock is the one bearing with no cave mouth on it: CLOCKS fills 11, 10, 9, 7.5, 5, 3, 2 and 1,
+  // 4 o'clock is the one bearing with no cave mouth on it: terrain's CLOCKS fills 11, 10, 9, 7.25, 4.75, 3, 2 and 1,
   // spoke(0) at 12 carries the gate trail and spoke(PI) at 6 carries the launch bridge.
   const BEARING = 4 / 12 * Math.PI * 2;
   const DIR = { x: Math.sin(BEARING), z: -Math.cos(BEARING) };
@@ -67,24 +90,28 @@
   };
 
   // A floating chunk of jungle floor: leaf litter, loam, then rock tapering to a point. Top face at y = 0.
+  // Laid on the hub's coarse lattice: the outline, the depth and every colour are decided per metre block (two
+  // cells square), so the rim steps a metre at a time and the tones come in metre patches and courses, never a
+  // speckle of single cells. Only the stairwell stays round, cut per cell.
   const islet = cached(() => {
-    const rand = mulberry32(5551);
     const v = makeVox(), R = SITE.isletR / UNIT, deep = SITE.isletDepth / UNIT;
+    const hash = (a, b, c) => (Math.imul(a, 73856093) ^ Math.imul(b, 19349663) ^ Math.imul(c, 83492791)) >>> 0;
     for (let x = -Math.ceil(R) - 1; x <= Math.ceil(R) + 1; x++) {
       for (let z = -Math.ceil(R) - 1; z <= Math.ceil(R) + 1; z++) {
-        const a = Math.atan2(z, x), edge = R * (0.9 + 0.1 * Math.sin(a * 4 - 0.7) + 0.05 * Math.sin(a * 9 + 2.1));
-        const r = Math.hypot(x + 0.5, z + 0.5);
+        const bx = Math.floor(x / 2), bz = Math.floor(z / 2), cx = bx * 2 + 1, cz = bz * 2 + 1;
+        const a = Math.atan2(cz, cx), edge = R * (0.9 + 0.1 * Math.sin(a * 4 - 0.7) + 0.05 * Math.sin(a * 9 + 2.1));
+        const r = Math.hypot(cx, cz);
         if (r > edge) continue;
-        const k = r / edge, depth = Math.max(2, Math.round(deep * (1 - Math.pow(k, 1.4)) * (0.82 + rand() * 0.24)));
+        const k = r / edge, depth = Math.max(2, Math.round(deep * (1 - Math.pow(k, 1.4)) * (0.82 + (hash(bx, 7, bz) % 1000) / 1000 * 0.24)));
         // The stairwell is an actual hole down the middle: no ground inside it at all.
-        const inShaft = r < SITE.shaftR / UNIT, shaftCells = SITE.shaftDepth / UNIT;
+        const inShaft = Math.hypot(x + 0.5, z + 0.5) < SITE.shaftR / UNIT, shaftCells = SITE.shaftDepth / UNIT;
         for (let y = 1; y <= depth; y++) {
           if (inShaft && y <= shaftCells) continue;
-          v.set(x, -y, z, y === 1 ? (rand() < 0.35 ? 1 : 0) : y <= 3 ? 2 : (rand() < 0.28 ? 4 : 3));
+          v.set(x, -y, z, y === 1 ? (hash(bx, 1, bz) % 100 < 30 ? 1 : 0) : y <= 3 ? 2 : (hash(bx, Math.floor((y - 4) / 2), bz) % 100 < 28 ? 4 : 3));
         }
       }
     }
-    const options = { unit: UNIT, palette: [LEAF, LEAF_DK, "#5a4530", STONE, STONE_DK], origin: { x: 0, y: 0, z: 0 } };
+    const options = { unit: UNIT, palette: ["#3f7d34", "#346d2c", "#5a4530", STONE, STONE_DK], origin: { x: 0, y: 0, z: 0 } };
     const geometry = voxelGeometry(v, options);
     // Keep one compact material grid for render-only floor sections. The
     // temporary sparse voxel map and collision geometry remain independent.
@@ -94,11 +121,12 @@
 
   // Planks on two slung vines, sagging to the middle. Built in its own frame: z = 0 to z = SITE.span.
   const deckY = (t) => -SITE.sag * 4 * t * (1 - t);
-  const bridge = cached(() => {
+  // The crossing as it was first built, kept as the bridge's collision shell so walking on it never changes.
+  const bridgeShell = cached(() => {
     const geos = [], w = SITE.width, count = Math.round(SITE.span / 0.46);
     for (let i = 0; i < count; i++) {
       const t = (i + 0.5) / count;
-      geos.push(box({ w, h: 0.08, d: 0.34, color: i % 3 === 0 ? BARK : BARK_LT, offset: { y: deckY(t), z: t * SITE.span } }));
+      geos.push(bevelBox({ w, h: 0.18, d: 0.34, color: i % 3 === 0 ? BARK : BARK_LT, bevel: 0.04, offset: { y: deckY(t) - 0.05, z: t * SITE.span } }));
     }
     const steps = 24;
     for (const side of [-1, 1]) {
@@ -117,10 +145,10 @@
     // A gateway at each end: two posts, a lashed crossbeam and a lantern, so the crossing reads as a way in.
     for (const z of [0, SITE.span]) {
       for (const side of [-1, 1]) {
-        geos.push(box({ w: 0.26, h: 2.6, d: 0.26, color: BARK, offset: { x: side * (w / 2 + 0.12), y: 1.1, z } }));
-        geos.push(box({ w: 0.34, h: 0.18, d: 0.34, color: MOSS, offset: { x: side * (w / 2 + 0.12), y: 2.34, z } }));
+        geos.push(bevelBox({ w: 0.36, h: 2.6, d: 0.36, color: BARK, offset: { x: side * (w / 2 + 0.16), y: 1.1, z } }));
+        geos.push(bevelBox({ w: 0.46, h: 0.2, d: 0.46, color: MOSS, offset: { x: side * (w / 2 + 0.16), y: 2.34, z } }));
       }
-      geos.push(box({ w: w + 0.7, h: 0.2, d: 0.2, color: BARK_LT, offset: { y: 2.5, z } }));
+      geos.push(bevelBox({ w: w + 0.9, h: 0.3, d: 0.3, color: BARK_LT, offset: { y: 2.52, z } }));
       geos.push(box({ w: 0.26, h: 0.34, d: 0.26, color: "#ffb347", emissive: 1, offset: { y: 2.18, z } }));
     }
     // Vines slung under the deck, following its own sag.
@@ -137,9 +165,71 @@
     geo.lineWidth = VINE_WIDTH;
     return geo;
   });
+  // Drawn as a cartoon crossing: the same bevelled planks and gateways, with its rails, hangers and underslung
+  // ropes as thick smooth vines, leaves sprouting along the rails and moss cushions on the post tops.
+  const VINE = hexToRgb("#3f6b2a"), VINE_DK = hexToRgb("#2f5424"), LEAF_TONES = ["#2f6b2c", "#3f8a34", "#56a43f", "#74bd52"].map(hexToRgb);
+  const bridge = cached(() => {
+    const rand = mulberry32(5561), w = SITE.width, count = Math.round(SITE.span / 0.46);
+    const geo = { verts: [], faces: [], lines: [], smooth: true, normals: [] };
+    const vine = (pts, r0, r1, color) => {
+      for (let i = 0; i < pts.length - 1; i++) {
+        const t0 = i / (pts.length - 1), t1 = (i + 1) / (pts.length - 1), a = pts[i], b = pts[i + 1];
+        limb(geo, a.x, a.y, a.z, b.x, b.y, b.z, lerp(r0, r1, t0), lerp(r0, r1, t1), 6, color);
+      }
+      padNormals(geo);
+    };
+    const steps = 16;
+    for (const side of [-1, 1]) {
+      const x = side * w / 2, rail = [], deck = [], under = [];
+      for (let i = 0; i <= steps; i++) {
+        const t = i / steps;
+        rail.push({ x, y: deckY(t) + 0.95, z: t * SITE.span });
+        deck.push({ x, y: deckY(t) - 0.04, z: t * SITE.span });
+        under.push({ x: side * w * 0.32, y: deckY(t) - 0.5 - Math.sin(t * Math.PI) * 0.55, z: t * SITE.span });
+      }
+      vine(rail, 0.075, 0.075, VINE);
+      vine(deck, 0.06, 0.06, VINE_DK);
+      vine(under, 0.055, 0.055, VINE_DK);
+      for (let i = 2; i < steps - 1; i += 2) {
+        const t = i / steps;
+        vine([{ x, y: deckY(t) - 0.04, z: t * SITE.span }, { x, y: deckY(t) + 0.95, z: t * SITE.span }], 0.035, 0.03, VINE_DK);
+      }
+      // Leaves in twos and threes along the rail, hanging out and down from it, lit as if the rail were a hedge.
+      for (let i = 1; i < 24; i++) {
+        const t = (i + rand() * 0.6) / 24, y = deckY(t) + 0.95, z = t * SITE.span;
+        for (let n = rand() < 0.5 ? 2 : 3; n > 0; n--) {
+          const out = side * (0.3 + rand() * 0.6), down = -0.3 - rand() * 0.7, along = (rand() - 0.5) * 0.8, l = Math.hypot(out, down, along);
+          const ax = out / l, ay = down / l, az = along / l, wx = -az, wz = ax, wl = Math.hypot(wx, wz) || 1;
+          const band = 1 + ((rand() * 3) | 0);
+          pointedLeaf(geo, x, y, z, ax, ay, az, wx / wl, 0, wz / wl, side * 0.86, 0.51, 0, 0.26 + rand() * 0.12, LEAF_TONES[band], LEAF_TONES[band - 1]);
+        }
+      }
+    }
+    for (let i = 0; i < count; i++) {
+      const t = (i + 0.5) / count;
+      flatInto(geo, bevelBox({ w, h: 0.18, d: 0.34, color: i % 3 === 0 ? BARK : BARK_LT, bevel: 0.04, offset: { y: deckY(t) - 0.05, z: t * SITE.span } }));
+    }
+    for (const z of [0, SITE.span]) {
+      for (const side of [-1, 1]) {
+        flatInto(geo, bevelBox({ w: 0.36, h: 2.6, d: 0.36, color: BARK, offset: { x: side * (w / 2 + 0.16), y: 1.1, z } }));
+        puff(geo, side * (w / 2 + 0.16), 2.42, z, 0.3, 0.16, 0.3, MOSS_TONES, rand, 4, 8);
+      }
+      flatInto(geo,
+        bevelBox({ w: w + 0.9, h: 0.3, d: 0.3, color: BARK_LT, offset: { y: 2.52, z } }),
+        bevelBox({ w: 0.3, h: 0.08, d: 0.3, color: "#3b2a1c", offset: { y: 2.33, z } }),
+        bevelBox({ w: 0.26, h: 0.3, d: 0.26, color: "#ffb347", emissive: 1, bevel: 0.05, offset: { y: 2.13, z } }),
+        bevelBox({ w: 0.3, h: 0.06, d: 0.3, color: "#3b2a1c", offset: { y: 1.96, z } })
+      );
+    }
+    geo.normals = Float32Array.from(geo.normals);
+    geo.collisionGeometry = bridgeShell();
+    return geo;
+  });
 
   // Rainforest: three canopy heights so the scatter reads as layers rather than a field of one tree.
-  const canopy = (seed, height, spread) => cached(() => {
+  // The first build, trunk blocks and crown slabs, is kept as each tree's collision shell, so the walkable upper
+  // crown and the solid trunk stay exactly where they were.
+  const canopyShell = (seed, height, spread) => {
     const rand = mulberry32(seed), geos = [];
     const lean = (rand() - 0.5) * 0.25;
     for (let i = 0; i < 7; i++) {
@@ -147,137 +237,393 @@
       geos.push(box({ w: lerp(0.5, 0.26, t), h: height / 6, d: lerp(0.5, 0.26, t), color: i % 2 ? BARK : BARK_LT, offset: { x: lean * t * height, y: height * t + height / 12 } }));
     }
     const top = height + 0.1, cx = lean * height;
-    // Layered slabs, not a sphere: the flat look is the point, but a slab a third as deep as it is wide
-    // reads as paper. Thicker slabs, spaced further apart, keep the layers distinct and give the crown
-    // some body.
     for (let i = 0; i < 5; i++) {
       const a = i / 5 * Math.PI * 2 + rand(), r = spread * (0.55 + rand() * 0.45);
       geos.push(box({ w: r * 1.5, h: 0.52, d: r * 1.5, color: i % 2 ? LEAF : LEAF_LT, offset: { x: cx + Math.cos(a) * r * 0.35, y: top - i * 0.4, z: Math.sin(a) * r * 0.35 } }));
     }
     geos.push(box({ w: spread * 1.1, h: 0.58, d: spread * 1.1, color: LEAF_DK, offset: { x: cx, y: top + 0.36 } }));
-    // A liana or two off the crown, the jungle's one vertical line.
-    for (let i = 0; i < 2; i++) {
-      const a = rand() * Math.PI * 2, r = spread * 0.5;
-      const x0 = cx + Math.cos(a) * r, z0 = Math.sin(a) * r;
-      const pts = [];
-      for (let j = 0; j <= 5; j++) pts.push({ x: x0 + (rand() - 0.5) * 0.2, y: top - j * (height * 0.11), z: z0 + (rand() - 0.5) * 0.2 });
-      geos.push(polyline({ points: pts, color: MOSS, emissive: 0 }));
+    return merge(...geos);
+  };
+  const mono = (hex) => {
+    const c = hexToRgb(hex);
+    return [c, c, c, c];
+  };
+  // A leaf card from p along axis a, lying in the plane whose normal is n; its width runs along n x a.
+  const leaflet = (geo, px, py, pz, ax, ay, az, nx, ny, nz, length, light, dark) => {
+    const wx = ny * az - nz * ay, wy = nz * ax - nx * az, wz = nx * ay - ny * ax, wl = Math.hypot(wx, wy, wz) || 1;
+    pointedLeaf(geo, px, py, pz, ax, ay, az, wx / wl, wy / wl, wz / wl, nx, ny, nz, length, light, dark);
+  };
+  // The unit normal of a leaf held along axis a with its face turned as far up as the axis allows.
+  const UP = [0, 0, 0];
+  const faceUp = (ax, ay, az) => {
+    const k = ay, nx = -ax * k, ny = 1 - ay * k, nz = -az * k, l = Math.hypot(nx, ny, nz) || 1;
+    UP[0] = nx / l; UP[1] = ny / l; UP[2] = nz / l;
+    return UP;
+  };
+  const JUNGLE = ["#1f552a", "#2e7433", "#43923d", "#62b04c"].map(hexToRgb);
+  const BARK_RGB = hexToRgb(BARK), LIANA = hexToRgb("#3f6a33");
+  const TRUNK = hexToRgb("#6b4d33"), TRUNK_LT = hexToRgb("#7a5a3c");
+  // Drawn as a cartoon rainforest tree: a tall tapered trunk on flared buttress roots, limbs reaching out to a wide
+  // umbrella of leafy clumps (one broad crown and four lower satellites, so the layers of the old slabs survive),
+  // and lianas hanging from the clumps' undersides as smooth cords.
+  const canopy = (seed, height, spread) => cached(() => {
+    const lean = (mulberry32(seed)() - 0.5) * 0.25, top = height + 0.1, cx = lean * height;
+    const rand = mulberry32(seed + 500), geo = { verts: [], faces: [], lines: [], smooth: true, normals: [] };
+    limb(geo, 0, -0.1, 0, cx * 0.8, height * 0.8, 0, 0.34, 0.2, 8, TRUNK);
+    limb(geo, cx * 0.8, height * 0.8, 0, cx, top - 0.2, 0, 0.2, 0.12, 8, TRUNK);
+    for (let k = 0; k < 4; k++) {
+      const a = k / 4 * Math.PI * 2 + 0.4 + rand() * 0.4;
+      limb(geo, Math.cos(a) * 0.08, 0.95, Math.sin(a) * 0.08, Math.cos(a) * 0.68, -0.06, Math.sin(a) * 0.68, 0.16, 0.05, 5, TRUNK);
     }
-    const geo = merge(...geos);
-    // The lianas are the only lines in the build, so the whole tree's width is theirs: rope, not thread.
-    geo.lineWidth = VINE_WIDTH;
+    const crowns = [[cx, top + 0.2, 0, spread * 0.7, spread * 0.26]], branches = [];
+    for (let k = 0; k < 5; k++) {
+      const a = k / 5 * Math.PI * 2 + rand() * 0.6, r = spread * (0.72 + rand() * 0.14);
+      crowns.push([cx + Math.cos(a) * r, top - 0.25 - rand() * 0.5, Math.sin(a) * r, spread * (0.4 + rand() * 0.08), spread * 0.2]);
+      const branch = [cx * 0.85, height * 0.8, 0, cx + Math.cos(a) * r * 0.85, top - 0.45, Math.sin(a) * r * 0.85];
+      limb(geo, ...branch, 0.12, 0.05, 6, TRUNK_LT);
+      branches.push(branch);
+    }
+    padNormals(geo);
+    for (const [x, y, z, rx, ry] of crowns) leafy(geo, x, y, z, rx, ry, rx, JUNGLE, rand, Math.round(6 + rx * rx * 5), 0.44);
+    for (let k = 1; k < crowns.length; k += 2) {
+      const [x, y, z, rx, ry] = crowns[k], a = rand() * Math.PI * 2, x0 = x + Math.cos(a) * rx * 0.5, z0 = z + Math.sin(a) * rx * 0.5;
+      let px = x0, py = y - ry * 0.5, pz = z0;
+      for (let j = 1; j <= 5; j++) {
+        const nx = x0 + (rand() - 0.5) * 0.25, ny = y - ry * 0.5 - j * height * 0.1, nz = z0 + (rand() - 0.5) * 0.25;
+        limb(geo, px, py, pz, nx, ny, nz, 0.04, 0.035, 5, LIANA);
+        px = nx; py = ny; pz = nz;
+      }
+      padNormals(geo);
+    }
+    geo.normals = Float32Array.from(geo.normals);
+    geo.sway = 0.0006;
+    // Where the wildlife climbs and perches, in the tree's own frame: the trunk's lean at the top, its height, the
+    // five limbs (from the trunk out to each lower crown), and a perch on top of every crown.
+    geo.climb = { lean: cx, height, branches, perches: crowns.map(([x, y, z, , ry]) => [x, y + ry * 0.9, z]) };
+    geo.collisionGeometry = canopyShell(seed, height, spread);
     return geo;
   });
   const CANOPY = [canopy(71, 7.5, 3.2), canopy(72, 5.4, 2.6), canopy(73, 9.2, 3.8)];
 
+  // Eight fronds arching out and down, each a row of paired leaflets shrinking to a tip.
+  const FERN = ["#2c6a2a", "#3d8a34", "#56a842", "#79c457"].map(hexToRgb);
   const fern = cached(() => {
-    const rand = mulberry32(88), geos = [];
-    for (let i = 0; i < 7; i++) {
-      const a = i / 7 * Math.PI * 2, len = 0.55 + rand() * 0.35;
-      geos.push(box({ w: len, h: 0.07, d: 0.2, color: i % 2 ? LEAF : LEAF_LT, offset: { x: Math.cos(a) * len * 0.5, y: 0.22 + rand() * 0.18, z: Math.sin(a) * len * 0.5 } }));
+    const rand = mulberry32(88), geo = { verts: [], faces: [], lines: [], normals: [] };
+    for (let i = 0; i < 8; i++) {
+      const a = i / 8 * Math.PI * 2 + rand() * 0.3, len = 0.6 + rand() * 0.35, ca = Math.cos(a), sa = Math.sin(a), rise = 0.45 + rand() * 0.2;
+      const at = (t, out) => { out[0] = ca * len * t; out[1] = 0.05 + Math.sin(t * Math.PI * 0.8) * len * rise; out[2] = sa * len * t; return out; };
+      const p = [0, 0, 0], q = [0, 0, 0], light = FERN[2 + (i & 1)], dark = FERN[1 + (i & 1)];
+      for (let j = 0; j <= 6; j++) {
+        const t = (j + 0.6) / 6.6;
+        at(Math.min(1, t), p); at(Math.min(1, t + 0.05), q);
+        let fx = q[0] - p[0], fy = q[1] - p[1], fz = q[2] - p[2];
+        const fl = Math.hypot(fx, fy, fz) || 1;
+        fx /= fl; fy /= fl; fz /= fl;
+        const size = 0.22 * (1 - t * 0.55) * len;
+        for (const side of j === 6 ? [0] : [-1, 1]) {
+          let ax = -sa * side + fx * 0.7, ay = -0.12 + fy * 0.7, az = ca * side + fz * 0.7;
+          const l = Math.hypot(ax, ay, az);
+          ax /= l; ay /= l; az /= l;
+          const n = faceUp(ax, ay, az);
+          leaflet(geo, p[0], p[1], p[2], ax, ay, az, n[0], n[1], n[2], size, light, dark);
+        }
+      }
     }
-    return noShadow(merge(...geos));
+    geo.normals = Float32Array.from(geo.normals);
+    return Object.assign(noShadow(geo), { sway: 0.06 });
   });
-  const shrub = cached(() => merge(
-    box({ w: 0.9, h: 0.55, d: 0.9, color: LEAF_DK, offset: { y: 0.28 } }),
-    box({ w: 0.6, h: 0.3, d: 0.6, color: LEAF, offset: { y: 0.66 } })
-  ));
-  const mossRock = cached(() => merge(
-    box({ w: 1.1, h: 0.7, d: 0.95, color: STONE, offset: { y: 0.35 } }),
-    box({ w: 0.8, h: 0.12, d: 0.7, color: MOSS, offset: { y: 0.74 } })
-  ));
-  // Rainforest wildlife, in the same voxel idiom as the cavemen and the Agent: one cached build per
-  // species, shared by every copy placed, so the whole menagerie is three draw calls and no per-frame work.
-  const fill = (v, x0, x1, y0, y1, z0, z1, i) => {
-    for (let x = x0; x <= x1; x++) for (let y = y0; y <= y1; y++) for (let z = z0; z <= z1; z++) v.set(x, y, z, i);
+  // A jungle shrub: two leafy clumps over a skirt of broad elephant-ear leaves.
+  const SHRUB = ["#2f6424", "#478a2f", "#62a63a", "#83c24c"].map(hexToRgb);
+  const shrub = cached(() => {
+    const rand = mulberry32(95), geo = { verts: [], faces: [], lines: [], normals: [] };
+    leafy(geo, 0, 0.4, 0, 0.56, 0.38, 0.56, SHRUB, rand, 18, 0.2);
+    leafy(geo, 0.12, 0.72, -0.08, 0.36, 0.26, 0.36, SHRUB, rand, 10, 0.17);
+    for (let k = 0; k < 5; k++) {
+      const a = k / 5 * Math.PI * 2 + rand() * 0.5, l = Math.hypot(0.8, 0.45);
+      const ax = Math.cos(a) * 0.8 / l, ay = 0.45 / l, az = Math.sin(a) * 0.8 / l, n = faceUp(ax, ay, az);
+      leaflet(geo, Math.cos(a) * 0.25, 0.12, Math.sin(a) * 0.25, ax, ay, az, n[0], n[1], n[2], 0.55 + rand() * 0.15, SHRUB[2], SHRUB[1]);
+    }
+    geo.normals = Float32Array.from(geo.normals);
+    return Object.assign(geo, { sway: 0.03 });
+  });
+  // The hub's rounded boulder in its jungle variant, walked against as the old block rock.
+  const mossRock = cached(() => ({
+    ...rock(2),
+    collisionGeometry: merge(
+      box({ w: 1.1, h: 0.7, d: 0.95, color: STONE, offset: { y: 0.35 } }),
+      box({ w: 0.8, h: 0.12, d: 0.7, color: MOSS, offset: { y: 0.74 } })
+    )
+  }));
+  // Rainforest wildlife, drawn after the low-poly reference animals: real anatomy in few large flat facets, each
+  // triangle one painted colour, so a jaguar's rosettes are whole black facets and a toucan's bill is bands of
+  // them. Every animal is a rig of parts, each built in its own joint frame, that `pool-wildlife.js` poses and
+  // drives. All three face +x.
+  //
+  // `loft` rings `sides` points round a path of stations [x, y, z, ry, rz] (ry the half-size across the path in
+  // its vertical plane, rz the lateral one), rings alternating by half a step so the surface breaks into
+  // triangles, and paints each triangle by `paint(x, y, z, nx, ny, nz)` at its centre.
+  const loft = (geo, stations, sides, paint) => {
+    const n = stations.length, rings = [];
+    for (let i = 0; i < n; i++) {
+      const s = stations[i], a = stations[Math.max(0, i - 1)], b = stations[Math.min(n - 1, i + 1)];
+      let tx = b[0] - a[0], ty = b[1] - a[1], tz = b[2] - a[2];
+      const tl = Math.hypot(tx, ty, tz) || 1;
+      tx /= tl; ty /= tl; tz /= tl;
+      // Lateral is the path crossed with up, or +z made square to a vertical run.
+      let lx = -tz, ly = 0, lz = tx;
+      if (Math.hypot(lx, lz) < 0.3) { lx = -tx * tz; ly = -ty * tz; lz = 1 - tz * tz; }
+      const ll = Math.hypot(lx, ly, lz);
+      lx /= ll; ly /= ll; lz /= ll;
+      const vx = ly * tz - lz * ty, vy = lz * tx - lx * tz, vz = lx * ty - ly * tx, ring = [];
+      for (let k = 0; k < sides; k++) {
+        const t = (k + (i & 1) * 0.5) / sides * Math.PI * 2, c = Math.cos(t) * s[3], d = Math.sin(t) * s[4];
+        ring.push([s[0] + vx * c + lx * d, s[1] + vy * c + ly * d, s[2] + vz * c + lz * d]);
+      }
+      rings.push(ring);
+    }
+    const tri = (p, q, r, ref) => {
+      const ux = q[0] - p[0], uy = q[1] - p[1], uz = q[2] - p[2], wx = r[0] - p[0], wy = r[1] - p[1], wz = r[2] - p[2];
+      let nx = uy * wz - uz * wy, ny = uz * wx - ux * wz, nz = ux * wy - uy * wx;
+      const mx = (p[0] + q[0] + r[0]) / 3, my = (p[1] + q[1] + r[1]) / 3, mz = (p[2] + q[2] + r[2]) / 3;
+      if (nx * (mx - ref[0]) + ny * (my - ref[1]) + nz * (mz - ref[2]) < 0) { const swap = q; q = r; r = swap; nx = -nx; ny = -ny; nz = -nz; }
+      const l = Math.hypot(nx, ny, nz) || 1, base = geo.verts.length / 3;
+      geo.verts.push(p[0], p[1], p[2], q[0], q[1], q[2], r[0], r[1], r[2]);
+      geo.faces.push({ i: [base, base + 1, base + 2], color: paint(mx, my, mz, nx / l, ny / l, nz / l), emissive: 0 });
+    };
+    const mid = (i, j) => [(stations[i][0] + stations[j][0]) / 2, (stations[i][1] + stations[j][1]) / 2, (stations[i][2] + stations[j][2]) / 2];
+    for (let i = 0; i < n - 1; i++) {
+      const A = rings[i], B = rings[i + 1], ref = mid(i, i + 1);
+      for (let k = 0; k < sides; k++) {
+        const k1 = (k + 1) % sides;
+        if (i & 1) { tri(A[k], B[k1], A[k1], ref); tri(A[k], B[k], B[k1], ref); }
+        else { tri(A[k], B[k], A[k1], ref); tri(A[k1], B[k], B[k1], ref); }
+      }
+    }
+    for (const [i, j] of [[0, 1], [n - 1, n - 2]]) {
+      const s = stations[i];
+      if (!s[3] && !s[4]) continue;
+      const c = [s[0], s[1], s[2]], ref = mid(i, j);
+      for (let k = 0; k < sides; k++) tri(c, rings[i][k], rings[i][(k + 1) % sides], ref);
+    }
+    return geo;
   };
-  // 0 coat, 1 rosette, 2 belly, 3 muzzle/eye
-  const JAGUAR = ["#c8913f", "#2a2017", "#e6d6ae", "#15110c"];
-  const jaguar = cached(() => {
-    const v = makeVox(), rand = mulberry32(6101);
-    fill(v, 0, 9, 2, 4, 0, 3, 0);
-    fill(v, 0, 9, 2, 2, 0, 3, 2);
-    // Rosettes scattered along the flanks, deterministic so every jaguar on the island matches.
-    for (let x = 1; x <= 8; x++) for (let z = 0; z <= 3; z++) if (rand() < 0.22) v.set(x, 4, z, 1);
-    for (let x = 1; x <= 8; x++) for (const z of [0, 3]) if (rand() < 0.3) v.set(x, 3, z, 1);
-    fill(v, 9, 11, 3, 5, 1, 2, 0);
-    fill(v, 11, 11, 3, 3, 1, 2, 3);
-    v.set(10, 5, 0, 0); v.set(10, 5, 3, 0);
-    v.set(11, 4, 1, 3); v.set(11, 4, 2, 3);
-    for (const [lx, lz] of [[1, 0], [1, 3], [8, 0], [8, 3]]) fill(v, lx, lx + 1, 0, 1, lz, lz, 0);
-    for (let i = 0; i < 5; i++) v.set(-1 - i, 4 + ((i / 2) | 0), 1 + (i & 1), i % 2 ? 1 : 0);
-    return voxelGeometry(v, { unit: 0.13, palette: JAGUAR, origin: { x: 0, y: 0, z: 0 } });
-  });
-  // 0 plumage, 1 beak, 2 beak tip, 3 throat, 4 eye
-  const TOUCAN = ["#16161a", "#f0972a", "#e8d24a", "#f4f0e6", "#d8d2c4"];
-  const toucan = cached(() => {
-    const v = makeVox();
-    fill(v, 0, 4, 2, 5, 0, 2, 0);
-    fill(v, 1, 3, 3, 4, 0, 0, 3);
-    fill(v, 4, 6, 4, 6, 0, 2, 0);
-    fill(v, 5, 5, 5, 5, 0, 0, 4);
-    fill(v, 5, 5, 5, 5, 2, 2, 4);
-    // The beak: most of the bird, tapering and brightening to its tip.
-    fill(v, 7, 9, 4, 5, 1, 1, 1);
-    fill(v, 7, 8, 3, 5, 1, 1, 1);
-    fill(v, 10, 11, 4, 4, 1, 1, 2);
-    for (let i = 0; i < 4; i++) v.set(-1 - i, 2 - ((i / 2) | 0), 1, 0);
-    v.set(1, 1, 0, 1); v.set(3, 1, 0, 1);
-    return voxelGeometry(v, { unit: 0.09, palette: TOUCAN, origin: { x: 0, y: 0, z: 0 } });
-  });
-  // 0 fur, 1 face, 2 belly, 3 eye
-  const MONKEY = ["#6b4a2e", "#c69a6d", "#8a6640", "#1a1410"];
-  const monkey = cached(() => {
-    const v = makeVox();
-    fill(v, 0, 3, 2, 5, 0, 3, 0);
-    fill(v, 1, 2, 2, 4, 0, 0, 2);
-    fill(v, 0, 3, 6, 8, 0, 3, 0);
-    fill(v, 1, 2, 6, 7, 0, 0, 1);
-    v.set(1, 7, 0, 3); v.set(2, 7, 0, 3);
-    v.set(0, 8, 0, 0); v.set(3, 8, 0, 0);
-    v.set(0, 8, 3, 0); v.set(3, 8, 3, 0);
-    // Arms down the sides and a long tail curling up behind.
-    for (const z of [0, 3]) fill(v, -1, -1, 3, 5, z, z, 0);
-    for (let i = 0; i < 7; i++) v.set(4 + ((i / 3) | 0), 2 + i, 1 + (i & 1), 0);
-    fill(v, 0, 3, 0, 1, 0, 1, 0);
-    return voxelGeometry(v, { unit: 0.1, palette: MONKEY, origin: { x: 0, y: 0, z: 0 } });
-  });
-
-  const flowers = cached(() => {
-    const rand = mulberry32(404), geos = [];
-    const petals = ["#e86a9a", "#f2c14a", "#d95d7a", "#f0f0e2"];
-    for (let i = 0; i < 9; i++) {
-      const a = rand() * Math.PI * 2, r = rand() * 0.55;
-      const x = Math.cos(a) * r, z = Math.sin(a) * r, h = 0.28 + rand() * 0.22;
-      geos.push(box({ w: 0.05, h, d: 0.05, color: LEAF_LT, offset: { x, y: h / 2, z } }));
-      geos.push(box({ w: 0.17, h: 0.09, d: 0.17, color: petals[(rand() * petals.length) | 0], emissive: 0.2, offset: { x, y: h + 0.04, z } }));
+  const part = (build) => {
+    const geo = { verts: [], faces: [], lines: [] };
+    build(geo);
+    return geo;
+  };
+  // A rig: parts keyed by name, each { geometry, at: [x, y, z], parent } with `at` in the parent's frame
+  // (the root's for the body, the body's for the rest).
+  const RIG_BUILDERS = {
+    // Built from measurements of the reference jaguar the maintainer chose: every station below is a slice of
+    // that model (body every 9 cm, head, ears, each leg top to paw, the tail along its hang), so the silhouette is
+    // its silhouette. A deep body held high on straight forelegs and sloping hind legs, the neck rising to a head
+    // above the back, and a long tail hanging from the rump to the ground. The coat is its palette as a mosaic of
+    // small facets: black over about two-fifths, tawny, brown and sand, pale peach underneath, on the jaw and paws.
+    jaguar: () => {
+      const rand = mulberry32(6101), ink = hexToRgb("#0e0a07"), tawny = hexToRgb("#f0a860"), sand = hexToRgb("#d8c090"), brown = hexToRgb("#906030"), pale = hexToRgb("#f0c0a8"), nose = hexToRgb("#c07070");
+      const coat = (spots, belly, paleSpots = 0.1) => (x, y, z, nx, ny) => {
+        const r = rand();
+        if (ny < belly) return r < paleSpots ? ink : pale;
+        return r < spots ? ink : r < spots + 0.1 ? brown : r < spots + 0.18 ? sand : tawny;
+      };
+      const legPaint = (foot) => {
+        const upper = coat(0.4, -2), shin = coat(0.26, -2);
+        return (x, y, z, nx, ny, nz) => y < foot ? pale : y < -0.2 ? shin(x, y, z, nx, ny, nz) : upper(x, y, z, nx, ny, nz);
+      };
+      const FRONT = [[0, 0.1, 0, 0.12, 0.08], [0, 0, 0, 0.103, 0.074], [0.011, -0.052, 0, 0.073, 0.044], [0.008, -0.105, 0, 0.066, 0.039], [0.007, -0.158, 0, 0.06, 0.035], [0.008, -0.21, 0, 0.055, 0.034],
+        [0.012, -0.263, 0, 0.048, 0.035], [0.042, -0.315, 0, 0.072, 0.038], [0.057, -0.368, 0, 0.083, 0.052], [0.06, -0.394, 0, 0.07, 0.045]];
+      const HIND = [[0, 0.1, 0, 0.14, 0.07], [0, 0, 0, 0.126, 0.047], [-0.006, -0.055, 0, 0.106, 0.045], [-0.033, -0.11, 0, 0.101, 0.044], [-0.062, -0.165, 0, 0.091, 0.04], [-0.092, -0.22, 0, 0.074, 0.036],
+        [-0.113, -0.275, 0, 0.046, 0.033], [-0.08, -0.33, 0, 0.064, 0.029], [-0.059, -0.385, 0, 0.069, 0.041], [-0.055, -0.412, 0, 0.06, 0.036]];
+      const TAIL = [[0.03, 0.02, 0, 0.04, 0.04], [0.013, -0.048, 0, 0.033, 0.033], [-0.006, -0.117, 0, 0.034, 0.034], [-0.031, -0.187, 0, 0.032, 0.032], [-0.062, -0.259, 0, 0.031, 0.031], [-0.091, -0.328, 0, 0.03, 0.03],
+        [-0.126, -0.399, 0, 0.029, 0.029], [-0.159, -0.465, 0, 0.028, 0.028], [-0.217, -0.529, 0, 0.03, 0.03], [-0.301, -0.573, 0, 0.03, 0.03], [-0.36, -0.59, 0, 0.012, 0.012]];
+      const headFur = coat(0.2, -0.4, 0), tailFur = coat(0.4, -2);
+      return {
+        body: { at: [0, 0.58, 0], geometry: part((g) => loft(g, [[-0.53, -0.008, 0, 0.02, 0.02], [-0.495, -0.008, 0, 0.064, 0.033], [-0.404, -0.007, 0, 0.133, 0.132], [-0.313, 0.008, 0, 0.148, 0.143], [-0.222, 0.019, 0, 0.159, 0.143],
+          [-0.132, 0.024, 0, 0.163, 0.138], [-0.041, 0.019, 0, 0.172, 0.137], [0.05, 0.005, 0, 0.183, 0.146], [0.141, -0.003, 0, 0.187, 0.159], [0.232, -0.006, 0, 0.187, 0.162], [0.322, 0.006, 0, 0.179, 0.163],
+          [0.413, 0.02, 0, 0.18, 0.157], [0.504, 0.038, 0, 0.198, 0.134], [0.595, 0.1, 0, 0.165, 0.098], [0.63, 0.13, 0, 0.12, 0.09]], 10, coat(0.4, -0.55))) },
+        head: { at: [0.6, 0.14, 0], parent: "body", geometry: part((g) => {
+          loft(g, [[-0.01, 0, 0, 0.11, 0.09], [0.019, 0.003, 0, 0.122, 0.098], [0.058, 0.017, 0, 0.108, 0.106], [0.096, 0.029, 0, 0.095, 0.11], [0.135, 0.028, 0, 0.097, 0.111], [0.174, 0.022, 0, 0.103, 0.093],
+            [0.212, 0.006, 0, 0.086, 0.061], [0.251, -0.01, 0, 0.04, 0.05], [0.262, -0.012, 0, 0.012, 0.015]], 9,
+            (x, y, z, nx, ny, nz) => x > 0.24 && ny > -0.2 ? nose : ny < -0.35 || x > 0.2 && y < -0.02 ? pale : headFur(x, y, z, nx, ny, nz));
+          for (const s of [-1, 1]) {
+            loft(g, [[0.125, 0.1, s * 0.065, 0.03, 0.016], [0.135, 0.15, s * 0.075, 0.018, 0.01], [0.14, 0.175, s * 0.078, 0.004, 0.004]], 5, (x, y, z, nx) => nx < -0.3 ? ink : tawny);
+            loft(g, [[0.19, 0.045, s * 0.07, 0.015, 0.012], [0.2, 0.047, s * 0.09, 0.009, 0.007]], 5, () => ink);
+          }
+        }) },
+        legFL: { at: [0.383, -0.186, 0.074], parent: "body", geometry: part((g) => loft(g, FRONT, 7, legPaint(-0.35))) },
+        legFR: { at: [0.383, -0.186, -0.074], parent: "body", geometry: part((g) => loft(g, FRONT, 7, legPaint(-0.35))) },
+        legBL: { at: [-0.285, -0.168, 0.096], parent: "body", geometry: part((g) => loft(g, HIND, 7, legPaint(-0.37))) },
+        legBR: { at: [-0.285, -0.168, -0.096], parent: "body", geometry: part((g) => loft(g, HIND, 7, legPaint(-0.37))) },
+        tail: { at: [-0.5, 0.04, 0], parent: "body", geometry: part((g) => loft(g, TAIL, 6,
+          (x, y, z, nx, ny, nz) => y < -0.47 ? (Math.round((x - y) * 16) % 2 ? ink : tawny) : tailFur(x, y, z, nx, ny, nz))) }
+      };
+    },
+    // Reddish-brown fur in two close tones, a mauve face mask, peach muzzle, ears, hands and feet. Knuckle-walks on
+    // arms longer than its legs, head low and forward; a short curled tail keeps it a monkey.
+    monkey: () => {
+      const rand = mulberry32(6103), fur = hexToRgb("#8e4a1a"), furDk = hexToRgb("#7a3e16"), mask = hexToRgb("#784848"), peach = hexToRgb("#f0c090"), ink = hexToRgb("#141010");
+      const coat = () => rand() < 0.3 ? furDk : fur;
+      const limbPaint = (hand) => (x, y) => y < hand ? peach : coat();
+      const ARM = [[0, 0, 0, 0.065, 0.06], [0.05, -0.25, 0, 0.055, 0.05], [0.1, -0.47, 0, 0.045, 0.045], [0.13, -0.52, 0, 0.04, 0.05], [0.18, -0.53, 0, 0.02, 0.04]];
+      const LEG = [[0, 0, 0, 0.075, 0.07], [0.1, -0.16, 0, 0.06, 0.055], [-0.02, -0.34, 0, 0.045, 0.045], [0.02, -0.39, 0, 0.035, 0.05], [0.12, -0.4, 0, 0.02, 0.05]];
+      return {
+        body: { at: [0, 0.4, 0], geometry: part((g) => loft(g, [[-0.08, -0.02, 0, 0.1, 0.1], [0.04, 0.05, 0, 0.16, 0.15], [0.16, 0.11, 0, 0.18, 0.18], [0.27, 0.15, 0, 0.17, 0.2], [0.34, 0.16, 0, 0.12, 0.14], [0.37, 0.16, 0, 0.06, 0.07]], 7, coat)) },
+        head: { at: [0.36, 0.2, 0], parent: "body", geometry: part((g) => {
+          loft(g, [[-0.02, 0, 0, 0.08, 0.08], [0.04, 0.03, 0, 0.12, 0.12], [0.12, 0.04, 0, 0.125, 0.12], [0.19, 0.02, 0, 0.1, 0.1], [0.24, -0.02, 0, 0.07, 0.08], [0.27, -0.04, 0, 0.04, 0.05]], 7,
+            (x, y, z, nx, ny) => x > 0.21 && ny < 0.5 ? peach : x > 0.12 && nx > 0.2 ? mask : coat());
+          for (const s of [-1, 1]) {
+            loft(g, [[0.07, 0.04, s * 0.1, 0.045, 0.015], [0.075, 0.05, s * 0.145, 0.032, 0.008]], 5, () => peach);
+            loft(g, [[0.19, 0.05, s * 0.05, 0.02, 0.015], [0.205, 0.055, s * 0.08, 0.012, 0.009]], 4, () => ink);
+          }
+        }) },
+        armL: { at: [0.28, 0.12, 0.18], parent: "body", geometry: part((g) => loft(g, ARM, 5, limbPaint(-0.48))) },
+        armR: { at: [0.28, 0.12, -0.18], parent: "body", geometry: part((g) => loft(g, ARM, 5, limbPaint(-0.48))) },
+        legL: { at: [0, 0, 0.1], parent: "body", geometry: part((g) => loft(g, LEG, 5, limbPaint(-0.36))) },
+        legR: { at: [0, 0, -0.1], parent: "body", geometry: part((g) => loft(g, LEG, 5, limbPaint(-0.36))) },
+        tail: { at: [-0.08, 0.02, 0], parent: "body", geometry: part((g) => loft(g, [[0, 0, 0, 0.028, 0.028], [-0.12, 0.08, 0, 0.024, 0.024], [-0.18, 0.22, 0, 0.02, 0.02], [-0.13, 0.32, 0, 0.016, 0.016], [-0.06, 0.33, 0, 0.008, 0.008]], 5, coat)) }
+      };
+    },
+    // Black plumage, a sunny yellow bib, a red vent and lime face skin; the keel bill runs lime, orange and red in
+    // bands. It perches upright like the reference parrot on blue-grey feet, with folded wings that open to fly
+    // and a long tail.
+    toucan: () => {
+      const rand = mulberry32(6102), black = hexToRgb("#16161c"), sheen = hexToRgb("#262a3a"), bib = hexToRgb("#f2d640"), bibEdge = hexToRgb("#f7ecb0"), vent = hexToRgb("#c8322e");
+      const lime = hexToRgb("#9ad04a"), orange = hexToRgb("#f0972a"), red = hexToRgb("#d83a2a"), blue = hexToRgb("#2c4c8a"), foot = hexToRgb("#5e7aa0"), ink = hexToRgb("#0c0c10");
+      const plumage = () => rand() < 0.2 ? sheen : black;
+      const WING = [[0, 0, 0, 0.07, 0.02], [-0.1, -0.1, 0, 0.08, 0.022], [-0.2, -0.2, 0, 0.06, 0.018], [-0.28, -0.27, 0, 0.025, 0.01]];
+      const LEG = [[0, 0, 0, 0.022, 0.022], [0.01, -0.16, 0, 0.016, 0.016], [0.015, -0.175, 0, 0.008, 0.008]];
+      const feet = (g, s) => {
+        loft(g, LEG, 4, () => foot);
+        for (const [dx, dz] of [[0.07, 0.018], [0.07, -0.018], [-0.05, 0.012]]) loft(g, [[0.01, -0.17, 0, 0.01, 0.01], [0.01 + dx, -0.178, dz * s, 0.005, 0.005]], 4, () => foot);
+      };
+      return {
+        body: { at: [0, 0.2, 0], geometry: part((g) => loft(g, [[-0.14, -0.04, 0, 0.045, 0.045], [-0.08, 0.03, 0, 0.1, 0.09], [-0.01, 0.13, 0, 0.125, 0.11], [0.05, 0.24, 0, 0.11, 0.1], [0.08, 0.31, 0, 0.075, 0.075], [0.09, 0.34, 0, 0.04, 0.04]], 7,
+          (x, y, z, nx) => y < 0.03 && x < -0.04 ? vent : nx > 0.3 && y > 0.14 ? (y < 0.19 ? bibEdge : bib) : plumage())) },
+        head: { at: [0.08, 0.33, 0], parent: "body", geometry: part((g) => {
+          loft(g, [[0, 0, 0, 0.065, 0.065], [0.02, 0.05, 0, 0.095, 0.085], [0.07, 0.09, 0, 0.09, 0.08], [0.12, 0.09, 0, 0.06, 0.06], [0.14, 0.085, 0, 0.04, 0.045]], 6,
+            (x, y, z, nx, ny, nz) => ny < -0.2 && x > -0.01 ? bib : Math.abs(nz) > 0.6 && x > 0.03 && y > 0.05 ? lime : plumage());
+          loft(g, [[0.12, 0.085, 0, 0.065, 0.045], [0.24, 0.07, 0, 0.058, 0.04], [0.36, 0.03, 0, 0.035, 0.028], [0.42, -0.005, 0, 0.01, 0.01]], 6,
+            (x) => x < 0.19 ? lime : x < 0.33 ? orange : red);
+          for (const s of [-1, 1]) loft(g, [[0.06, 0.1, s * 0.055, 0.02, 0.015], [0.065, 0.1, s * 0.085, 0.012, 0.008]], 4, () => ink);
+        }) },
+        wingL: { at: [0.02, 0.24, 0.09], parent: "body", geometry: part((g) => loft(g, WING, 5, (x) => x < -0.2 ? (rand() < 0.5 ? blue : black) : plumage())) },
+        wingR: { at: [0.02, 0.24, -0.09], parent: "body", geometry: part((g) => loft(g, WING, 5, (x) => x < -0.2 ? (rand() < 0.5 ? blue : black) : plumage())) },
+        tail: { at: [-0.13, -0.03, 0], parent: "body", geometry: part((g) => loft(g, [[0, 0, 0, 0.025, 0.05], [-0.16, -0.06, 0, 0.02, 0.055], [-0.32, -0.1, 0, 0.015, 0.05], [-0.36, -0.11, 0, 0.005, 0.03]], 4, plumage)) },
+        legL: { at: [0, -0.02, 0.045], parent: "body", geometry: part((g) => feet(g, 1)) },
+        legR: { at: [0, -0.02, -0.045], parent: "body", geometry: part((g) => feet(g, -1)) }
+      };
     }
-    return noShadow(merge(...geos));
+  };
+  const RIGS = {};
+  const beastRig = (kind) => RIGS[kind] || (RIGS[kind] = RIG_BUILDERS[kind]());
+
+  // A flower patch: a rosette of leaves on the ground and seven stems, each topped with a five-petal flower.
+  const PATCH_LEAVES = ["#3f7f2c", "#5b9a3a"].map(hexToRgb), STEM = hexToRgb(LEAF_LT);
+  const flowers = cached(() => {
+    const rand = mulberry32(404), geo = { verts: [], faces: [], lines: [], smooth: true, normals: [] };
+    for (let k = 0; k < 7; k++) {
+      const a = k / 7 * Math.PI * 2 + rand() * 0.4, l = Math.hypot(0.85, 0.3);
+      const ax = Math.cos(a) * 0.85 / l, ay = 0.3 / l, az = Math.sin(a) * 0.85 / l, n = faceUp(ax, ay, az);
+      leaflet(geo, Math.cos(a) * 0.05, 0.02, Math.sin(a) * 0.05, ax, ay, az, n[0], n[1], n[2], 0.3 + rand() * 0.1, PATCH_LEAVES[1], PATCH_LEAVES[0]);
+    }
+    for (let i = 0; i < 7; i++) {
+      const a = rand() * Math.PI * 2, r = 0.1 + rand() * 0.42, x = Math.cos(a) * r, z = Math.sin(a) * r, h = 0.3 + rand() * 0.24;
+      limb(geo, x * 0.6, 0, z * 0.6, x, h, z, 0.016, 0.012, 5, STEM);
+      padNormals(geo);
+      const ink = FLOWER_INKS[i % FLOWER_INKS.length], nl = Math.hypot(x * 0.5, 1, z * 0.5);
+      flower(geo, x, h, z, x * 0.5 / nl, 1 / nl, z * 0.5 / nl, ink[0], ink[1], 0.1, rand);
+    }
+    geo.normals = Float32Array.from(geo.normals);
+    return Object.assign(noShadow(geo), { sway: 0.08 });
   });
+  // A fallen trunk: round and smooth, pale sawn ends round a darker heart, a snapped branch stub, a long cushion
+  // of moss along its back and three faintly glowing mushrooms.
   const log = cached(() => {
-    const geos = [merge(
-      box({ w: 3.2, h: 0.62, d: 0.62, color: BARK, offset: { y: 0.31 } }),
-      box({ w: 2.6, h: 0.14, d: 0.5, color: MOSS, offset: { y: 0.62 } }),
-      box({ w: 0.12, h: 0.5, d: 0.5, color: "#6b533c", offset: { x: 1.62, y: 0.31 } })
-    )];
-    for (let i = 0; i < 3; i++) geos.push(box({ w: 0.24, h: 0.1, d: 0.24, color: "#d8d2b4", emissive: 0.15, offset: { x: -1 + i * 0.9, y: 0.68, z: 0.2 } }));
-    return merge(...geos);
+    const rand = mulberry32(1771), geo = { verts: [], faces: [], lines: [], smooth: true, normals: [] }, SIDES = 9;
+    limb(geo, -1.6, 0.3, 0, 1.55, 0.29, 0, 0.3, 0.28, SIDES, BARK_RGB);
+    limb(geo, -0.4, 0.45, 0.1, -0.55, 0.8, 0.34, 0.09, 0.06, 6, BARK_RGB);
+    for (const [x, y, r, s] of [[1.55, 0.29, 0.28, 1], [-1.6, 0.3, 0.3, -1]]) {
+      for (const [k, color] of [[1, hexToRgb("#b08a5c")], [0.55, hexToRgb("#8a6a44")]]) {
+        const ids = [];
+        for (let e = 0; e < SIDES; e++) {
+          const a = e / SIDES * Math.PI * 2;
+          geo.verts.push(x + s * (k < 1 ? 0.006 : 0), y + Math.cos(a) * r * k, Math.sin(a) * r * k);
+          ids.push(geo.verts.length / 3 - 1);
+        }
+        geo.faces.push({ i: s > 0 ? ids : ids.reverse(), color, emissive: 0 });
+      }
+    }
+    padNormals(geo);
+    puff(geo, 0.1, 0.52, 0, 1.2, 0.12, 0.24, MOSS_TONES, rand, 4, 10);
+    for (let i = 0; i < 3; i++) {
+      const x = -1 + i * 0.9;
+      limb(geo, x, 0.5, 0.2, x, 0.62, 0.25, 0.03, 0.025, 5, hexToRgb("#e8e0c8"));
+      padNormals(geo);
+      const first = geo.faces.length;
+      puff(geo, x, 0.63, 0.25, 0.11, 0.05, 0.11, mono("#d8d2b4"), rand, 3, 8);
+      for (let f = first; f < geo.faces.length; f++) geo.faces[f].emissive = 0.15;
+    }
+    geo.normals = Float32Array.from(geo.normals);
+    // The top of the trunk along its own x, where a big cat can lie.
+    geo.rest = { y: 0.58, from: -1.2, to: 1.2 };
+    return geo;
   });
 
   // A still pool of standing water: the island's name, and the only flat thing on it.
-  const pond = cached(() => noShadow(lathe({ profile: [[2.6, 0.06], [0, 0.06]], segments: 20, color: WET, emissive: 0.22 })));
+  const pond = cached(() => {
+    const geo = noShadow(lathe({ profile: [[2.6, 0.06], [0, 0.06]], segments: 20, color: WET, emissive: 0.22 }));
+    for (const f of geo.faces) f.water = true;
+    return geo;
+  });
 
   // The stairwell: a mossy stone kerb round the hole, a lined shaft so you never see sky through it,
   // and a flight turning down into the dark. Its own origin is the hole's centre at ground level.
+  // `stairwellShell` is the first block build, kept as the drawn stairwell's collision shell.
   const STAIR_STEPS = 26, STAIR_TURNS = 1.35, STAIR_INNER = 0.55, LINING_DROP = 0.12;
-  const stairwell = cached(() => {
+  const stairwellShell = () => {
     const R = SITE.shaftR, D = SITE.shaftDepth, geos = [];
-    // Kerb: blocks round the lip, a couple of them mossy.
     const kerb = 20;
     for (let i = 0; i < kerb; i++) {
       const a = i / kerb * Math.PI * 2, x = Math.cos(a) * (R + 0.3), z = Math.sin(a) * (R + 0.3);
       geos.push(box({ w: 0.8, h: 0.55, d: 0.8, color: i % 3 === 0 ? STONE_DK : STONE, offset: { x, y: 0.18, z } }));
       if (i % 4 === 0) geos.push(box({ w: 0.62, h: 0.1, d: 0.62, color: MOSS, offset: { x, y: 0.48, z } }));
+    }
+    const wall = 18;
+    for (let i = 0; i < wall; i++) {
+      const a = i / wall * Math.PI * 2, x = Math.cos(a) * (R + 0.12), z = Math.sin(a) * (R + 0.12);
+      geos.push(box({ w: 1.15, h: D, d: 1.15, color: i % 2 ? "#3a352f" : "#2f2b26", offset: { x, y: -D / 2 - LINING_DROP, z } }));
+    }
+    for (let i = 0; i < STAIR_STEPS; i++) {
+      const t = i / (STAIR_STEPS - 1), a = t * STAIR_TURNS * Math.PI * 2;
+      const rad = (R - 0.75) * (1 - STAIR_INNER * t * 0.35);
+      const y = -0.35 - t * (D - 1.1);
+      geos.push(box({ w: 1.65, h: 0.26, d: 1.15, color: i % 2 ? "#6a635a" : "#7a736a", offset: { x: Math.cos(a) * rad, y, z: Math.sin(a) * rad } }));
+      if (i % 3 === 0) geos.push(box({ w: 0.3, h: 0.9, d: 0.3, color: "#4b463f", offset: { x: Math.cos(a) * rad, y: y - 0.55, z: Math.sin(a) * rad } }));
+    }
+    geos.push(lathe({ profile: [[R - 0.1, -D + 0.1], [0, -D + 0.1]], segments: 16, color: "#332f2a" }));
+    return merge(...geos);
+  };
+  // Turns a part about y so its +x points along angle a (x to cos a, z to sin a), in place.
+  const aim = (geo, a) => {
+    const c = Math.cos(a), s = Math.sin(a), v = geo.verts;
+    for (let i = 0; i < v.length; i += 3) {
+      const x = v[i], z = v[i + 2];
+      v[i] = x * c - z * s;
+      v[i + 2] = x * s + z * c;
+    }
+    return geo;
+  };
+  // Drawn in the cartoon way: the kerb a ring of rounded stones shouldered together under moss cushions, the
+  // treads bevelled slabs turned to the shaft's centre on chunky newels, and the torches bevelled posts.
+  const KERB = [STONE_DK, STONE, "#7c7b74"].map(mono);
+  const stairwell = cached(() => {
+    const R = SITE.shaftR, D = SITE.shaftDepth, rand = mulberry32(4801), geo = { verts: [], faces: [], lines: [], smooth: true, normals: [] };
+    const kerb = 18;
+    for (let i = 0; i < kerb; i++) {
+      const a = (i + (rand() - 0.5) * 0.2) / kerb * Math.PI * 2, x = Math.cos(a) * (R + 0.3), z = Math.sin(a) * (R + 0.3), s = 0.9 + rand() * 0.25;
+      puff(geo, x, 0.12, z, 0.52 * s, 0.34 * s, 0.52 * s, KERB[i % 3], rand, 4, 8);
+      if (i % 4 === 0) puff(geo, x, 0.12 + 0.3 * s, z, 0.36 * s, 0.1, 0.36 * s, MOSS_TONES, rand, 3, 8);
     }
     // Shaft lining, dark and windowless, so the hole reads as depth rather than a gap in the island.
     // It hangs below the rim rather than reaching it: the islet's own top face is at y = 0, and a
@@ -287,71 +633,103 @@
     const wall = 18;
     for (let i = 0; i < wall; i++) {
       const a = i / wall * Math.PI * 2, x = Math.cos(a) * (R + 0.12), z = Math.sin(a) * (R + 0.12);
-      geos.push(box({ w: 1.15, h: D, d: 1.15, color: i % 2 ? "#3a352f" : "#2f2b26", offset: { x, y: -D / 2 - LINING_DROP, z } }));
+      flatInto(geo, box({ w: 1.15, h: D, d: 1.15, color: i % 2 ? "#3a352f" : "#2f2b26", offset: { x, y: -D / 2 - LINING_DROP, z } }));
     }
     // The flight itself, turning down the inside of the shaft to a landing at the bottom.
     for (let i = 0; i < STAIR_STEPS; i++) {
       const t = i / (STAIR_STEPS - 1), a = t * STAIR_TURNS * Math.PI * 2;
       const rad = (R - 0.75) * (1 - STAIR_INNER * t * 0.35);
       const y = -0.35 - t * (D - 1.1);
-      geos.push(box({ w: 1.65, h: 0.26, d: 1.15, color: i % 2 ? "#6a635a" : "#7a736a", offset: { x: Math.cos(a) * rad, y, z: Math.sin(a) * rad } }));
+      flatInto(geo, aim(bevelBox({ w: 1.65, h: 0.3, d: 1.1, color: i % 2 ? "#6a635a" : "#7a736a", bevel: 0.07, offset: { x: rad, y } }), a));
       // A stub of newel under every few treads, so the flight has something to stand on.
-      if (i % 3 === 0) geos.push(box({ w: 0.3, h: 0.9, d: 0.3, color: "#4b463f", offset: { x: Math.cos(a) * rad, y: y - 0.55, z: Math.sin(a) * rad } }));
+      if (i % 3 === 0) flatInto(geo, aim(bevelBox({ w: 0.4, h: 0.9, d: 0.4, color: "#4b463f", offset: { x: rad, y: y - 0.58 } }), a));
     }
-    geos.push(lathe({ profile: [[R - 0.1, -D + 0.1], [0, -D + 0.1]], segments: 16, color: "#332f2a" }));
+    flatInto(geo, lathe({ profile: [[R - 0.1, -D + 0.1], [0, -D + 0.1]], segments: 16, color: "#332f2a" }));
     // Two torches down the wall: the only light in the hole, and the cue that it goes somewhere.
     for (const [a, y] of [[0.9, -1.6], [3.7, -4.6]]) {
-      geos.push(box({ w: 0.22, h: 0.7, d: 0.22, color: BARK, offset: { x: Math.cos(a) * (R - 0.35), y, z: Math.sin(a) * (R - 0.35) } }));
-      geos.push(box({ w: 0.3, h: 0.3, d: 0.3, color: "#ff9a2a", emissive: 1, offset: { x: Math.cos(a) * (R - 0.35), y: y + 0.5, z: Math.sin(a) * (R - 0.35) } }));
+      flatInto(geo, aim(merge(
+        bevelBox({ w: 0.24, h: 0.7, d: 0.24, color: BARK, offset: { x: R - 0.35, y } }),
+        bevelBox({ w: 0.36, h: 0.12, d: 0.36, color: "#3b2a1c", offset: { x: R - 0.35, y: y + 0.36 } }),
+        bevelBox({ w: 0.3, h: 0.3, d: 0.3, color: "#ff9a2a", emissive: 1, bevel: 0.06, offset: { x: R - 0.35, y: y + 0.55 } })
+      ), a));
     }
-    return merge(...geos);
+    geo.normals = Float32Array.from(geo.normals);
+    geo.collisionGeometry = stairwellShell();
+    return geo;
   });
-  const caveSign = cached(() => merge(
-    box({ w: 3.1, h: 0.75, d: 0.14, color: BARK, offset: { y: 0.38 } }),
-    box({ w: 3.3, h: 0.12, d: 0.18, color: BARK_LT, offset: { y: 0.8 } })
-  ));
+  const caveSign = cached(() => BL.hubModels.postSign("The Mempool", 0.8, 0.3));
   // A torch in two pieces, so a station can stretch its stem without stretching its flame.
   const TORCH_STEM_H = 1.6;
   const torchStem = cached(() => box({ w: 0.2, h: TORCH_STEM_H, d: 0.2, color: BARK, offset: { y: TORCH_STEM_H / 2 } }));
   const torchFlame = cached(() => box({ w: 0.3, h: 0.3, d: 0.3, color: "#ff9a2a", emissive: 1, offset: { y: 0.15 } }));
+  // Iron plates on a frame's corners, each held by two rivets, as the cave signs wear them: `x` and `y` are the
+  // corner centres' offsets from (0, cy), `z` the frame's front face.
+  const IRON = "#3b3d42", RIVET = "#8a8f98";
+  // The cave signs' warm plank tones, so the island's boards read as the same carpentry.
+  const SIGN_WOOD = ["#b27a43", "#c08a50", "#a86f3b"], SIGN_POST = "#6b4524";
+  const ironCorners = (x, cy, y, z, size) => {
+    const out = [];
+    for (const sx of [-1, 1]) for (const sy of [-1, 1]) {
+      const px = sx * x, py = cy + sy * y;
+      out.push(bevelBox({ w: size, h: size * 0.92, d: 0.05, color: IRON, bevel: 0.015, offset: { x: px, y: py, z: z + 0.02 } }));
+      for (const dx of [-0.3, 0.3]) out.push(box({ w: size * 0.19, h: size * 0.19, d: 0.03, color: RIVET, offset: { x: px + dx * size, y: py - sy * size * 0.12, z: z + 0.055 } }));
+    }
+    return out;
+  };
+  // A hanging-lamp cap and base around an emissive core, standing on `y`.
+  const lampOn = (y, size) => [
+    bevelBox({ w: size * 1.2, h: size * 0.25, d: size * 1.2, color: "#3b2a1c", offset: { y: y + size * 0.12 } }),
+    bevelBox({ w: size, h: size, d: size, color: "#ffb347", emissive: 1, bevel: size * 0.2, offset: { y: y + size * 0.72 } }),
+    bevelBox({ w: size * 1.2, h: size * 0.22, d: size * 1.2, color: "#3b2a1c", offset: { y: y + size * 1.32 } })
+  ];
   // A small standing board across the hole from the bridge, carrying the chain's headline numbers so a
   // visitor reads them without going down. The face looks along +z, which is the way `carve` and
   // `panelFrom` cut, so placing it with `rotation.y = 0` on the far side turns it back at the crossing.
   // `y` is the board's bottom edge, so it is also how much post shows under it: a board this size
   // wants short legs, not stilts.
-  const CHAIN_BOARD = { w: 6.8, h: 3, y: 1, d: 0.2, px: 0.06 };
-  const chainBoard = cached(() => merge(
-    ...[-1, 1].map((side) => box({ w: 0.3, h: CHAIN_BOARD.y + 0.3, d: 0.3, color: BARK, offset: { x: side * (CHAIN_BOARD.w / 2 - 0.3), y: (CHAIN_BOARD.y + 0.3) / 2 } })),
-    box({ w: CHAIN_BOARD.w, h: CHAIN_BOARD.h, d: CHAIN_BOARD.d, color: "#2a2724", offset: { y: CHAIN_BOARD.y + CHAIN_BOARD.h / 2 } }),
-    box({ w: CHAIN_BOARD.w + 0.34, h: 0.26, d: 0.32, color: BARK_LT, offset: { y: CHAIN_BOARD.y + CHAIN_BOARD.h + 0.1 } }),
-    box({ w: CHAIN_BOARD.w + 0.34, h: 0.22, d: 0.32, color: BARK_LT, offset: { y: CHAIN_BOARD.y - 0.08 } }),
-    box({ w: 0.3, h: 0.3, d: 0.3, color: "#ffb347", emissive: 1, offset: { y: CHAIN_BOARD.y + CHAIN_BOARD.h + 0.36 } })
-  ));
+  const CHAIN_BOARD = { w: 6.8, h: 3, y: 1, d: 0.3, px: 0.06 };
+  // Framed like the cave signs: stout legs, thick bevelled rails with ragged ends standing proud of the slate,
+  // bevelled stiles, iron plates riveted over the corners and a lamp on the top rail.
+  const chainBoard = cached(() => {
+    const B = CHAIN_BOARD, top = B.y + B.h;
+    return merge(
+      ...[-1, 1].map((side) => bevelBox({ w: 0.5, h: B.y + 0.4, d: 0.5, color: SIGN_POST, offset: { x: side * (B.w / 2 - 0.3), y: (B.y + 0.4) / 2 } })),
+      box({ w: B.w, h: B.h, d: B.d, color: "#2a2724", offset: { y: B.y + B.h / 2 } }),
+      bevelBox({ w: B.w + 0.57, h: 0.4, d: 0.52, color: SIGN_WOOD[1], bevel: 0.08, offset: { x: 0.04, y: top + 0.12 } }),
+      bevelBox({ w: B.w + 0.44, h: 0.36, d: 0.52, color: SIGN_WOOD[2], bevel: 0.08, offset: { x: -0.05, y: B.y - 0.1 } }),
+      ...[-1, 1].map((side) => bevelBox({ w: 0.34, h: B.h, d: 0.48, color: SIGN_WOOD[0], bevel: 0.07, offset: { x: side * (B.w / 2 - 0.1), y: B.y + B.h / 2 } })),
+      ...ironCorners(B.w / 2 - 0.1, B.y + B.h / 2, B.h / 2 + 0.05, 0.26, 0.36),
+      ...lampOn(top + 0.32, 0.3)
+    );
+  });
   // A small post beside the big board, carrying a question mark: the weather key is behind it.
-  const INFO_SIGN = { w: 1.1, h: 1.1, y: 1.1, d: 0.16 };
-  const infoSign = cached(() => merge(
-    box({ w: 0.2, h: INFO_SIGN.y + 0.2, d: 0.2, color: BARK, offset: { y: (INFO_SIGN.y + 0.2) / 2 } }),
-    box({ w: INFO_SIGN.w, h: INFO_SIGN.h, d: INFO_SIGN.d, color: "#3a3430", offset: { y: INFO_SIGN.y + INFO_SIGN.h / 2 } }),
-    box({ w: INFO_SIGN.w + 0.16, h: 0.14, d: INFO_SIGN.d + 0.1, color: BARK_LT, offset: { y: INFO_SIGN.y + INFO_SIGN.h + 0.05 } }),
-    box({ w: INFO_SIGN.w + 0.16, h: 0.12, d: INFO_SIGN.d + 0.1, color: BARK_LT, offset: { y: INFO_SIGN.y - 0.04 } }),
-    // A question mark cut proud of the face, in the island's own sign glyphs.
-    ...(() => {
-      const glyph = BL.hubModels.SIGN_GLYPHS["?"], cell = 0.16, out = [];
-      for (let row = 0; row < glyph.length; row++) {
-        for (let col = 0; col < glyph[row].length; col++) {
-          if (glyph[row][col] !== "1") continue;
-          out.push(box({
-            w: cell, h: cell, d: 0.07, color: GOLD, emissive: 0.6,
-            offset: { x: (col - 1) * cell, y: INFO_SIGN.y + INFO_SIGN.h * 0.5 + (2 - row) * cell, z: INFO_SIGN.d / 2 }
-          }));
-        }
+  const INFO_SIGN = { w: 1.1, h: 1.1, y: 1.1, d: 0.26 };
+  const infoSign = cached(() => {
+    const I = INFO_SIGN, glyph = BL.hubModels.SIGN_GLYPHS["?"], cell = 0.16, runs = [];
+    // The question mark in cream, cut as solid horizontal runs of whole cells like the cave signs' letters.
+    for (let row = 0; row < glyph.length; row++) {
+      for (let col = 0; col < glyph[row].length; col++) {
+        if (glyph[row][col] !== "1") continue;
+        let n = 1;
+        while (glyph[row][col + n] === "1") n++;
+        runs.push(box({ w: cell * n, h: cell, d: 0.07, color: "#f6ecd2", emissive: 0.35, offset: { x: (col - 1 + (n - 1) / 2) * cell, y: I.y + I.h * 0.5 + (2 - row) * cell, z: I.d / 2 } }));
+        col += n - 1;
       }
-      return out;
-    })()
-  ));
+    }
+    return merge(
+      bevelBox({ w: 0.36, h: I.y, d: 0.36, color: SIGN_POST, offset: { y: I.y / 2 } }),
+      box({ w: I.w, h: I.h, d: I.d, color: "#3a3430", offset: { y: I.y + I.h / 2 } }),
+      bevelBox({ w: I.w + 0.36, h: 0.26, d: I.d + 0.18, color: SIGN_WOOD[1], bevel: 0.06, offset: { x: 0.03, y: I.y + I.h + 0.07 } }),
+      bevelBox({ w: I.w + 0.28, h: 0.24, d: I.d + 0.18, color: SIGN_WOOD[2], bevel: 0.06, offset: { x: -0.03, y: I.y - 0.06 } }),
+      ...[-1, 1].map((side) => bevelBox({ w: 0.22, h: I.h, d: I.d + 0.14, color: SIGN_WOOD[0], bevel: 0.05, offset: { x: side * (I.w / 2 + 0.02), y: I.y + I.h / 2 } })),
+      ...ironCorners(I.w / 2 + 0.02, I.y + I.h / 2, I.h / 2 + 0.05, I.d / 2 + 0.07, 0.2),
+      ...runs
+    );
+  });
   const torchPost = cached(() => merge(
-    box({ w: 0.2, h: TORCH_STEM_H, d: 0.2, color: BARK, offset: { y: TORCH_STEM_H / 2 } }),
-    box({ w: 0.3, h: 0.3, d: 0.3, color: "#ff9a2a", emissive: 1, offset: { y: 1.75 } })
+    bevelBox({ w: 0.24, h: TORCH_STEM_H, d: 0.24, color: BARK, offset: { y: TORCH_STEM_H / 2 } }),
+    bevelBox({ w: 0.36, h: 0.12, d: 0.36, color: "#3b2a1c", offset: { y: TORCH_STEM_H + 0.02 } }),
+    bevelBox({ w: 0.3, h: 0.3, d: 0.3, color: "#ff9a2a", emissive: 1, bevel: 0.06, offset: { y: 1.75 } })
   ));
 
   // The hall's section, as fractions of caveR and caveH: straight to head height so the wall reads
@@ -554,7 +932,7 @@
     TORCH_STEM_H, room, stairFoot, wallRadiusAt, ceilingHeightAt, brazier,
     stationFace, stationPlaque, FACE_W, FACE_Z,
     tabletSlab, carve, carveCells, panelFrom, chainBoard, CHAIN_BOARD, infoSign, INFO_SIGN, CANOPY, fern, shrub, mossRock, pond, deckY, STAIR_STEPS,
-    jaguar, toucan, monkey, flowers, log,
+    beastRig, flowers, log,
     COLORS: { LEAF, LEAF_DK, LEAF_LT, BARK, BARK_LT, STONE, STONE_DK, MOSS, WET, GOLD }
   };
 })();

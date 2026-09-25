@@ -148,8 +148,8 @@
       worldLootHint: $("world-loot-hint"),
       subtitle: $("subtitle"),
       actions: [...document.querySelectorAll("[data-action]")],
-      weatherKey: document.getElementById("weather-key"),
-      jumbotron: document.getElementById("jumbotron-modal"), jumbotronScreen: $("jumbotron-screen"), jumbotronCaption: $("jumbotron-caption"), jumbotronIndex: $("jumbotron-index"),
+      board: $("board-modal"), boardTitle: $("board-title"), boardScreen: $("board-screen"), boardCaption: $("board-caption"), boardNote: $("board-note"),
+      boardDots: $("board-dots"), boardPrev: $("board-prev"), boardNext: $("board-next"), boardHelp: $("board-help"),
       act: $("act"),
       mode: $("mode-hud"),
       modeFree: $("freeroam-icon"),
@@ -618,30 +618,73 @@
       e.preventDefault();
       closeFeed();
     });
-    // The weather key: what the rain, the wind and the strikes are reading off the chain.
-    const openWeatherKey = () => {
-      if (el.weatherKey && !el.weatherKey.open) el.weatherKey.showModal();
+    // The board close-up: one dialog for every readable board (the jumbotron, the chain board, the weather key).
+    // A board is any object with `title`, `help`, `canvas`, `count`, `index`, `caption`, `note`, `version` and
+    // `go(index)`, plus an optional `wide`, which sets the page beside its note on desktop. The dialog copies the canvas, captions the page, lays one dot per page and pages with the
+    // chevrons, the dots and the arrow keys; it never learns what a board shows, so a board can change freely.
+    // `updateBoard` repaints whenever the open board's version moves.
+    let board = null, boardShown = -1, boardDots = -1;
+    const paintBoard = () => {
+      boardShown = board.version;
+      const src = board.canvas, screen = el.boardScreen;
+      if (screen.width !== src.width || screen.height !== src.height) {
+        screen.width = src.width;
+        screen.height = src.height;
+      }
+      screen.getContext("2d").drawImage(src, 0, 0);
+      el.boardCaption.textContent = board.caption;
+      el.boardNote.textContent = board.note || "";
+      el.boardNote.hidden = !board.note;
+      if (boardDots !== board.count) {
+        boardDots = board.count;
+        const dots = [];
+        for (let i = 0; i < board.count; i++) {
+          const dot = document.createElement("button");
+          dot.type = "button";
+          dot.className = "board-dot";
+          dot.dataset.page = String(i);
+          dot.setAttribute("aria-label", `Page ${i + 1}`);
+          dots.push(dot);
+        }
+        el.boardDots.replaceChildren(...dots);
+        el.boardDots.hidden = el.boardPrev.hidden = el.boardNext.hidden = board.count < 2;
+      }
+      for (const dot of el.boardDots.children) dot.setAttribute("aria-current", String(+dot.dataset.page === board.index));
     };
-    const closeWeatherKey = () => {
-      if (el.weatherKey && el.weatherKey.open) el.weatherKey.close();
+    const openBoard = (next) => {
+      board = next;
+      boardDots = -1;
+      letterSign(el.boardTitle, board.title);
+      el.board.classList.toggle("board-wide", !!board.wide);
+      el.boardHelp.textContent = board.help;
+      paintBoard();
+      if (!el.board.open) el.board.showModal();
     };
-    // The jumbotron's close-up: the hub opens it with its paging (`prev`, `next`) and paints the board
-    // into its canvas while it is open; the dialog itself only pages and closes.
-    let jumbotronPaging = null;
-    const openJumbotron = (paging) => {
-      jumbotronPaging = paging;
-      if (!el.jumbotron.open) el.jumbotron.showModal();
+    const closeBoard = () => {
+      board = null;
+      if (el.board.open) el.board.close();
     };
-    const closeJumbotron = () => {
-      jumbotronPaging = null;
-      if (el.jumbotron.open) el.jumbotron.close();
+    const updateBoard = () => {
+      if (board && board.version !== boardShown) paintBoard();
     };
-    on(el.jumbotron, "keydown", (e) => {
-      if (e.key === "Escape") closeJumbotron();
-      else if (e.key === "ArrowLeft" && jumbotronPaging) jumbotronPaging.prev();
-      else if (e.key === "ArrowRight" && jumbotronPaging) jumbotronPaging.next();
+    const pageBoard = (step) => {
+      if (!board) return;
+      board.go((board.index + step + board.count) % board.count);
+      updateBoard();
+    };
+    on(el.board, "keydown", (e) => {
+      if (e.key === "Escape") closeBoard();
+      else if (e.key === "ArrowLeft") pageBoard(-1);
+      else if (e.key === "ArrowRight") pageBoard(1);
       else return;
       e.preventDefault();
+    });
+    on(el.boardDots, "click", (e) => {
+      const dot = e.target.closest(".board-dot");
+      if (!dot || !board) return;
+      dot.blur();
+      board.go(+dot.dataset.page);
+      updateBoard();
     });
     const openRecipe = () => {
       if (!el.recipe.open) el.recipe.showModal();
@@ -653,11 +696,6 @@
       if (e.key !== "Escape") return;
       e.preventDefault();
       closeRecipe();
-    });
-    if (el.weatherKey) on(el.weatherKey, "keydown", (e) => {
-      if (e.key !== "Escape") return;
-      e.preventDefault();
-      closeWeatherKey();
     });
     // Every popup closes when the visitor presses outside it, in every scene: a modal dialog on its
     // backdrop (the press lands on the dialog itself, outside its box), a card or a pause box anywhere
@@ -677,8 +715,7 @@
     }, true);
     dismissOutside(el.feed, closeFeed);
     dismissOutside(el.recipe, closeRecipe);
-    dismissOutside(el.weatherKey, closeWeatherKey);
-    dismissOutside(el.jumbotron, closeJumbotron);
+    dismissOutside(el.board, closeBoard);
     // The prompt is written to be pasted, so it leaves in one click.
     const copyRecipe = (button) => {
       const text = el.recipeText.textContent;
@@ -786,10 +823,9 @@
       if (b.dataset.action === "feed") openFeed();
       else if (b.dataset.action === "feed-close") closeFeed();
       else if (b.dataset.action === "recipe-close") closeRecipe();
-      else if (b.dataset.action === "weather-close") closeWeatherKey();
-      else if (b.dataset.action === "jumbotron-close") closeJumbotron();
-      else if (b.dataset.action === "jumbotron-prev") jumbotronPaging && jumbotronPaging.prev();
-      else if (b.dataset.action === "jumbotron-next") jumbotronPaging && jumbotronPaging.next();
+      else if (b.dataset.action === "board-close") closeBoard();
+      else if (b.dataset.action === "board-prev") pageBoard(-1);
+      else if (b.dataset.action === "board-next") pageBoard(1);
       else if (b.dataset.action === "recipe-copy") copyRecipe(b);
       else if (b.dataset.action === "intro-go") b.closest("[data-intro]").hidden = true;
       else if (b === el.mode && !modeSelected) actionHandler && actionHandler("mode-preset", nextDetachedView());
@@ -1115,10 +1151,9 @@
       setJetpack(false, false, 0);
       closeFeed();
       closeRecipe();
-      closeWeatherKey();
-      closeJumbotron();
+      closeBoard();
     };
-    return { el, openFeed, closeFeed, openRecipe, closeRecipe, dismissOutside, openJumbotron, closeJumbotron, setRosterRow, setMeter, setStats, setAct, setMode, setGorilla, setDetachedView, setPrimary, setWeapon, setMagazine, setJetpack, setSubtitle, onAction, toast, tooltip, hint, hideHint, letterSign, selectTab, onPreset, onIdentityChange, setIdentity, setDonationUrl, onAssign, onUnassign, renderInventory, dispose, openWeatherKey, closeWeatherKey };
+    return { el, openFeed, closeFeed, openRecipe, closeRecipe, dismissOutside, openBoard, closeBoard, updateBoard, setRosterRow, setMeter, setStats, setAct, setMode, setGorilla, setDetachedView, setPrimary, setWeapon, setMagazine, setJetpack, setSubtitle, onAction, toast, tooltip, hint, hideHint, letterSign, selectTab, onPreset, onIdentityChange, setIdentity, setDonationUrl, onAssign, onUnassign, renderInventory, dispose };
   };
   BL.hud = { create, renderIcon, signLettering, STATE_LABELS, statusFor };
 })();

@@ -2,6 +2,12 @@
 // plain dark ape; inside the Matrix and in the games its true nature shows, one
 // voxel map drawn in glowing code green. It knuckle-walks, gallops on all fours
 // and sometimes walks hunched on its hind legs.
+//
+// A hips/chest rig over one voxel map per part in two palettes (`ape`, and glowing `code` for the Matrix
+// and the games), the `knuckle`, `gallop` and `hunch` gaits and a chest `beat`. The API is `create`
+// (returning `walk`, `pace`, `place`, `setForm`, `poke`, `liveGeometry`, `dispose` among others) and
+// `createPlay`, which the director owns. Its root is `matrixNative` (matrix mode 5), so the renderers keep
+// its palette inside the Matrix.
 (() => {
   "use strict";
   const BL = window.BL = window.BL || {};

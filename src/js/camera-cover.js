@@ -72,6 +72,13 @@
   // Keeps the driven Ooga's silhouette; shared overlay uses the same world transforms in both renderers.
   const create = (overlay, interiorTextureAt = null) => {
     const ctx = overlay.getContext("2d");
+    // The overlay's CSS size, read on resize rather than every frame: a per-frame read forces layout after the HUD writes.
+    let cssW = overlay.clientWidth, cssH = overlay.clientHeight;
+    const sizeObserver = new ResizeObserver(() => {
+      cssW = overlay.clientWidth;
+      cssH = overlay.clientHeight;
+    });
+    sizeObserver.observe(overlay);
     const mask = document.createElement("canvas"), rim = document.createElement("canvas"), stone = document.createElement("canvas");
     const maskCtx = mask.getContext("2d"), rimCtx = rim.getContext("2d"), stoneCtx = stone.getContext("2d");
     const concealed = document.createElement("canvas"), concealedRim = document.createElement("canvas");
@@ -191,7 +198,7 @@
     };
     const drawRock = (camera, solidAt, materialAt) => {
       rockAt = solidAt;
-      screenW = overlay.clientWidth; screenH = overlay.clientHeight;
+      screenW = cssW; screenH = cssH;
       planeX = camera.position.x - view[2] * camera.near;
       planeY = camera.position.y - view[6] * camera.near;
       planeZ = camera.position.z - view[10] * camera.near;
@@ -730,7 +737,7 @@
       if (guides?.objectsEnabled === false) structurePhases.fill(0);
       const hasStructures = guides?.objectsEnabled !== false && (guides?.structures ? guides.structures.length : guides?.structure?.surfaceActive);
       if (!touchesRock && !occluded && !guides?.count && !guides?.providerCount && !hasStructures) return;
-      const w = overlay.clientWidth, h = overlay.clientHeight;
+      const w = cssW, h = cssH;
       screenW = w; screenH = h;
       ctx.save();
       ctx.globalAlpha = 1;
@@ -779,6 +786,7 @@
       ctx.restore();
     };
     const dispose = () => {
+      sizeObserver.disconnect();
       mask.width = mask.height = rim.width = rim.height = stone.width = stone.height = concealed.width = concealed.height = concealedRim.width = concealedRim.height = visible.width = visible.height = apertureMask.width = apertureMask.height = wallLayer.width = wallLayer.height = 1;
       wallContexts.fill(null); wallCached = false; state.glyphInterior = false;
       glyphMaterial = textureMaterial = null;
