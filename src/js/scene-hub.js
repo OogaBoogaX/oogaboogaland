@@ -161,6 +161,7 @@
   const CLOUD_COUNT = 30, CLOUD_WRAP = 60, CLOUD_NEAR = 36;
   const CLOUD_GAP = 0.35, CLOUD_LOOK = 36, CLOUD_PLAN_STEP = 2;
   const CLOUD_SIDE_RATE = 0.7, CLOUD_RISE_RATE = 0.55;
+  const CLOUD_FADE = 2.5, CLOUD_STALL = 1.5, CLOUD_NO_PROGRESS = 24, CLOUD_CLEAR_RUN = 8;
   const CLOUD_SIDE_OFFSETS = [0, -7, 7, -14, 14, -24, 24];
   const CLOUD_HEIGHT_OFFSETS = [0, -6, 6, -12, 12];
   const WANDER_COUNT = 36, WANDER_INNER = 5.5;
@@ -517,6 +518,7 @@
   const claimed = [];
   const clouds = [];
   const cloudObstacles = [];
+  let cloudRandom = null;
   let launchCloudSpot = null;
   const lamps = [];
   const entranceLights = [];
@@ -2574,7 +2576,7 @@
     cliff(40, 1.4, 3, "tree", (n) => hubModels.tree(n % 4 === 3 ? 3 : n % 3), true);
     cliff(30, 1, 0.5, "bush", (n) => hubModels.bush(n % 3));
     meadow(30, 0.7, "bush", (n) => hubModels.bush(n % 3));
-    meadow(8, 0.9, "rock", () => hubModels.rock(0));
+    meadow(8, 0.9, "rock", () => hubModels.breakableRock());
     meadow(10, 0.7, "crate", () => hubModels.woodCrate(2), true);
     meadow(8, 0.6, "barrel", () => hubModels.barrel(1));
     meadow(50, 0.35, "flower", () => hubModels.flowerTuft());
@@ -2877,7 +2879,7 @@
   };
   const npcWanderPointClear = (s, cave) => {
     const feet = island.surfaceAt(s.x, s.z), height = cave ? cave.bodyHeight : 1.5;
-    return !npcClosedCaveAt(s.x, s.z, feet, height) && !npcPileAt(s.x, feet, s.z, height) && !npcWorkZoneAt(cave, s.x, feet, s.z) && npcFireClear(s.x, feet, s.z, s.x, feet, s.z, height) && walkable(s.x, s.z, s.x, s.z, feet, height, cave);
+    return !npcRampRoofAt(s.x, feet, s.z) && !npcClosedCaveAt(s.x, s.z, feet, height) && !npcPileAt(s.x, feet, s.z, height) && !npcWorkZoneAt(cave, s.x, feet, s.z) && npcFireClear(s.x, feet, s.z, s.x, feet, s.z, height) && walkable(s.x, s.z, s.x, s.z, feet, height, cave);
   };
   const wanderSpot = (out, cave = null) => {
     if (timechainIsland && cave?.traits.name === "SaniExp" && cave.override === "chilling" && !contributors.debugState) {
@@ -2912,6 +2914,24 @@
     out.z = s.z;
     out.ry = s.ry;
     return true;
+  };
+  const npcRecoverySpot = (cave, out) => {
+    const p = cave.root.position;
+    let nearest = Infinity;
+    for (let i = 0; i < spots.length; i++) {
+      const s = spots[i], distance = (s.x - p.x) ** 2 + (s.z - p.z) ** 2;
+      if (distance >= nearest || seatTaken(s) || !npcWanderPointClear(s, cave)) continue;
+      const feet = island.surfaceAt(s.x, s.z);
+      let occupied = false;
+      for (let j = 0; j < crew.list.length; j++) {
+        const other = crew.list[j], q = other.root.position, otherFeet = q.y - other.baseY;
+        if (other !== cave && other.root.visible && feet < otherFeet + other.bodyHeight && feet + cave.bodyHeight > otherFeet
+          && Math.hypot(s.x - q.x, s.z - q.z) < cave.bodyRadius + other.bodyRadius) { occupied = true; break; }
+      }
+      if (occupied) continue;
+      nearest = distance; out.x = s.x; out.y = feet; out.z = s.z;
+    }
+    return Number.isFinite(nearest);
   };
   // Surface caves and the headquarters can share a column below the same roof.
   const supportAt = (x, z, y = Infinity) => island.supportAt(x, z, y, STEP_MAX);
@@ -3127,15 +3147,16 @@
     cloudHit = null;
     for (let i = 0; i < clouds.length; i++) {
       const cloud = clouds[i], node = cloud.node, p = node.position;
-      if (!node.visible || node.parent !== root) continue;
-      const lx = x - p.x, lz = z - p.z, bounds = cloud.bounds;
-      if (lx < bounds[0] - PLAYER_RADIUS || lx > bounds[2] + PLAYER_RADIUS || lz < bounds[1] - PLAYER_RADIUS || lz > bounds[3] + PLAYER_RADIUS) continue;
+      if (!node.visible || node.parent !== root || cloud.size < 0.2) continue;
+      const size = cloud.size, lx = (x - p.x) / size, lz = (z - p.z) / size, bounds = cloud.bounds;
+      const reach = PLAYER_RADIUS / size;
+      if (lx < bounds[0] - reach || lx > bounds[2] + reach || lz < bounds[1] - reach || lz > bounds[3] + reach) continue;
       const tops = cloud.tops;
       for (let j = 0; j < tops.length; j += 5) {
-        const top = p.y + tops[j + 4];
+        const top = p.y + tops[j + 4] * size;
         if (top <= floor || top > y + maxStep + 1e-7) continue;
         const dx = Math.max(tops[j] - lx, 0, lx - tops[j + 2]), dz = Math.max(tops[j + 1] - lz, 0, lz - tops[j + 3]);
-        if (dx * dx + dz * dz >= PLAYER_RADIUS * PLAYER_RADIUS - 1e-9) continue;
+        if (dx * dx + dz * dz >= reach * reach - 1e-9) continue;
         if (top > y + 1e-7 && height && (!physicalClearAt(x, top, z, PLAYER_RADIUS, height, actor) || !island.voxelSegmentClearAt(x, y, z, x, top, z, PLAYER_RADIUS, height))) continue;
         floor = top;
         cloudHit = cloud;
@@ -3818,6 +3839,16 @@
   // Cave-mouth frames are narrow structural ledges, not NPC destinations.
   // Recovery may otherwise jump onto the top bar and find no legal walking
   // step back down to the apron.
+  const NPC_RAMP_ROOF_COLUMN = { floor: 0, ceiling: 0 };
+  const npcRampRoofAt = (x, y, z, radius = PLAYER_RADIUS) => {
+    for (let i = 0; i < 5; i++) {
+      const px = i === 1 ? x - radius : i === 2 ? x + radius : x;
+      const pz = i === 3 ? z - radius : i === 4 ? z + radius : z;
+      if (island.rampColumnAt(px, pz, false, NPC_RAMP_ROOF_COLUMN)
+        && y >= NPC_RAMP_ROOF_COLUMN.ceiling - 0.55) return true;
+    }
+    return false;
+  };
   const npcCaveRimAt = (x, y, z) => {
     for (let i = 0; i < CAMERA_OPENINGS.length; i++) {
       const entry = CAMERA_OPENINGS[i], m = entry.mouth;
@@ -3905,13 +3936,14 @@
     // not the walker's current elevation at the bottom of a staircase.
     const onTimechain = timechainIsland && Math.hypot(x - timechainIsland.place.x, z - timechainIsland.place.z) < BL.timechainModels.SITE.radius - 1;
     const feet = onTimechain ? playerSupportAt(x, z, Infinity, Infinity, cave) : island.surfaceAt(x, z);
-    return npcClosedCaveAt(x, z, feet, cave.bodyHeight) || npcPileAt(x, feet, z, cave.bodyHeight) || npcWorkZoneAt(cave, x, feet, z) || !npcFireClear(x, feet, z, x, feet, z, cave.bodyHeight) || !walkable(x, z, x, z, feet, cave.bodyHeight, cave);
+    return npcRampRoofAt(x, feet, z) || npcClosedCaveAt(x, z, feet, cave.bodyHeight) || npcPileAt(x, feet, z, cave.bodyHeight) || npcWorkZoneAt(cave, x, feet, z) || !npcFireClear(x, feet, z, x, feet, z, cave.bodyHeight) || !walkable(x, z, x, z, feet, cave.bodyHeight, cave);
   };
   const npcWalkable = (fromX, fromZ, toX, toZ, y, height, actor) => {
     if (!walkable(fromX, fromZ, toX, toZ, y, height, actor)) return false;
     // Sweep to the actual downhill support too.
     // Checking at the previous, higher floor can clear a move whose lowered torso intersects the wall.
     const feet = playerSupportAt(toX, toZ, y, y, actor);
+    if (npcRampRoofAt(toX, feet, toZ) && !npcRampRoofAt(fromX, y, fromZ)) return false;
     if (!npcClosedCaveClear(fromX, y, fromZ, toX, feet, toZ, height)) return false;
     if (!npcWorkZoneClear(actor, fromX, y, fromZ, toX, feet, toZ)) return false;
     if (!npcFireClear(fromX, y, fromZ, toX, feet, toZ, height)) return false;
@@ -4034,9 +4066,39 @@
     }
     cloud.goalSide = cloud.bestSide; cloud.goalY = cloud.bestY;
   };
-  // Clouds ring the island and plan a lane before reaching an island, bridge or another cloud.
+  const cloudOccupied = (cloud) => {
+    if (!crew) return false;
+    for (let i = 0; i < crew.list.length; i++) {
+      const cave = crew.list[i];
+      if (cave.root.visible && cave.cloudSupport === cloud) return true;
+    }
+    return false;
+  };
+  const placeCloud = (cloud, initial = false) => {
+    const p = cloud.node.position, rand = cloudRandom;
+    for (let attempt = 0; attempt < 512; attempt++) {
+      const angle = rand() * Math.PI * 2;
+      const radius = Math.sqrt(lerp(CLOUD_NEAR * CLOUD_NEAR, CLOUD_WRAP * CLOUD_WRAP, rand()));
+      p.x = Math.cos(angle) * radius; p.z = Math.sin(angle) * radius;
+      p.y = attempt < 384 ? lerp(-9, 13, rand()) : lerp(13, 35, rand());
+      if (!cloudClearAt(cloud, p.x, p.y, p.z)) continue;
+      cloud.goalSide = cloud.beside ? p.x : p.z;
+      cloud.goalY = p.y;
+      if (cloudRouteTime(cloud, cloud.goalSide, cloud.goalY, CLOUD_CLEAR_RUN) <= CLOUD_CLEAR_RUN) continue;
+      cloud.age = initial ? CLOUD_FADE : 0;
+      cloud.life = lerp(55, 145, rand());
+      cloud.size = initial ? 1 : 0.01;
+      cloud.node.scale.x = cloud.node.scale.y = cloud.node.scale.z = cloud.size;
+      cloud.stalled = cloud.blocked = cloud.dx = cloud.dz = 0;
+      cloud.planTimer = 0;
+      cloud.wrapped = !initial;
+      return;
+    }
+    throw new Error("No clear cloud spawn in the island ring");
+  };
+  // Clouds ring the island, appearing at clear points throughout the ring.
   const buildClouds = () => {
-    const rand = mulberry32(SEED + 77);
+    const rand = cloudRandom = mulberry32(SEED + 77);
     const surfaces = new Map();
     buildCloudObstacles();
     for (let i = 0; i < CLOUD_COUNT; i++) {
@@ -4066,26 +4128,10 @@
       }
       const cloud = { node, speed: 0.4 + rand() * 0.4, beside, tops: surface.tops, bounds: surface.bounds,
         fullBounds: surface.fullBounds, centerTop: surface.centerTop, dx: 0, dz: 0, wrapped: false,
-        goalSide: 0, goalY: 0, planTimer: i / CLOUD_COUNT, bestTime: 0, bestCost: 0, bestSide: 0, bestY: 0 };
-      let placedCloud = false;
-      for (let attempt = 0; attempt < 96; attempt++) {
-        const out = (rand() < 0.5 ? -1 : 1) * lerp(CLOUD_NEAR, CLOUD_WRAP, rand());
-        const span = lerp(-CLOUD_WRAP, CLOUD_WRAP, rand());
-        const y = beside ? lerp(-9, 11, rand()) : lerp(-3, 13, rand());
-        const x = beside ? out : span, z = beside ? span : -Math.abs(out);
-        if (!cloudClearAt(cloud, x, y, z)) continue;
-        node.position.x = x; node.position.y = y; node.position.z = z;
-        cloud.goalSide = beside ? x : z; cloud.goalY = y;
-        placedCloud = true;
-        break;
-      }
-      if (!placedCloud) {
-        node.position.x = beside ? -CLOUD_WRAP : -CLOUD_WRAP + i;
-        node.position.y = 35 + i * 7;
-        node.position.z = beside ? -CLOUD_WRAP + i : -CLOUD_WRAP;
-        while (!cloudClearAt(cloud, node.position.x, node.position.y, node.position.z)) node.position.y += 7;
-        cloud.goalSide = beside ? node.position.x : node.position.z; cloud.goalY = node.position.y;
-      }
+        goalSide: 0, goalY: 0, planTimer: i / CLOUD_COUNT, bestTime: 0, bestCost: 0, bestSide: 0, bestY: 0,
+        age: 0, life: 0, size: 1, stalled: 0, blocked: 0 };
+      placeCloud(cloud, true);
+      cloud.planTimer = i / CLOUD_COUNT;
       addChild(root, node);
       placed.push(node);
       clouds.push(cloud);
@@ -4095,21 +4141,17 @@
   const updateClouds = (dt) => {
     for (let i = 0; i < clouds.length; i++) {
       const cloud = clouds[i], p = cloud.node.position;
+      cloud.age = Math.min(CLOUD_FADE, cloud.age + dt);
+      if (cloud.life <= CLOUD_FADE && cloudOccupied(cloud)) cloud.life = CLOUD_FADE;
+      else cloud.life -= dt;
+      if (cloud.life <= 0) { placeCloud(cloud); planCloud(cloud); continue; }
+      cloud.size = Math.max(0.01, Math.min(1, cloud.age / CLOUD_FADE, cloud.life / CLOUD_FADE));
+      cloud.node.scale.x = cloud.node.scale.y = cloud.node.scale.z = cloud.size;
       if ((cloud.planTimer -= dt) <= 0) { planCloud(cloud); cloud.planTimer = 0.8; }
       const x = p.x, y = p.y, z = p.z, along = (cloud.beside ? z : x) + cloud.speed * dt;
       cloud.wrapped = false;
       if (along > CLOUD_WRAP) {
-        let found = false;
-        for (let si = 0; !found && si < CLOUD_SIDE_OFFSETS.length; si++) for (let yi = 0; yi < CLOUD_HEIGHT_OFFSETS.length; yi++) {
-          const side = clamp(cloud.goalSide + CLOUD_SIDE_OFFSETS[si], -84, 84);
-          const height = clamp(cloud.goalY + CLOUD_HEIGHT_OFFSETS[yi], -35, 35);
-          const nx = cloud.beside ? side : -CLOUD_WRAP, nz = cloud.beside ? -CLOUD_WRAP : side;
-          if (!cloudClearAt(cloud, nx, height, nz)) continue;
-          p.x = nx; p.y = height; p.z = nz;
-          cloud.goalSide = side; cloud.goalY = height; cloud.planTimer = 0;
-          cloud.wrapped = found = true;
-          break;
-        }
+        placeCloud(cloud); planCloud(cloud); continue;
       } else {
         const side = cloudToward(cloud.beside ? x : z, cloud.goalSide, CLOUD_SIDE_RATE * dt);
         const height = cloudToward(y, cloud.goalY, CLOUD_RISE_RATE * dt);
@@ -4118,9 +4160,12 @@
         else if (cloudClearAt(cloud, cloud.beside ? side : x, height, cloud.beside ? z : side)) {
           if (cloud.beside) p.x = side; else p.z = side;
           p.y = height;
-          cloud.planTimer = 0;
-        } else cloud.planTimer = 0;
+          cloud.planTimer = 0.25;
+        } else cloud.planTimer = 0.25;
       }
+      cloud.stalled = Math.hypot(p.x - x, p.y - y, p.z - z) < cloud.speed * dt * 0.05 ? cloud.stalled + dt : 0;
+      cloud.blocked = (cloud.beside ? p.z - z : p.x - x) < cloud.speed * dt * 0.25 ? cloud.blocked + dt : 0;
+      if (cloud.stalled >= CLOUD_STALL || cloud.blocked >= CLOUD_NO_PROGRESS) { placeCloud(cloud); planCloud(cloud); continue; }
       cloud.dx = cloud.wrapped ? 0 : p.x - x;
       cloud.dz = cloud.wrapped ? 0 : p.z - z;
     }
@@ -6352,6 +6397,8 @@
   // Props remain live blockers throughout a climb, but never become a cached
   // wall-route endpoint. A spawned rock beneath a dismount therefore blocks or
   // reverses that route; destroying it reopens the terrain landing immediately.
+  // The surface over an HQ ramp is a tunnel roof, not a resting clearing.
+  const clankerRestSurfaceClear = (x, y, z, foot) => !npcRampRoofAt(x, y, z, foot);
   const clankerClimbSolidAt = (x, y, z) => island.solidAt(x, y, z);
   const clankerClimbSurfaceAt = (x, z) => island.surfaceAt(x, z);
   const LAB_ITEM_INVERSE = math.mat4.create(), LAB_ITEM_LOCAL = math.mat4.create();
@@ -7042,7 +7089,9 @@
     shared.prepareNpcRoutes = refreshWorkZones;
     shared.npcDetour = npcWorkDetour;
     shared.npcRouteBlocked = (cave, x, y, z) => npcClosedCaveAt(x, z, y, cave.bodyHeight) || npcWorkZoneAt(cave, x, y, z)
-      || cave.state === "chilling" && Math.hypot(x, z) < island.path.debug.ringOuterRadius + 1.5;
+      || npcRampRoofAt(x, y, z) || cave.state === "chilling" && Math.hypot(x, z) < island.path.debug.ringOuterRadius + 1.5;
+    shared.npcStrandedAt = (cave, x, y, z) => npcRampRoofAt(x, y, z);
+    shared.npcRecoverySpot = npcRecoverySpot;
     shared.shoulderObstacleActive = solids.isActive;
     shared.shoulderObstacle = (cave, fx, fz, reach, out) => {
       const p = cave.root.position;
@@ -7106,7 +7155,7 @@
       && matrixGateSegmentClear(x, y, z, toX, toY, toZ, 0.001, 0.002);
     shared.inBananas = inBananas;
     shared.npcDestinationBlocked = npcDestinationBlocked;
-    shared.npcLandingAllowed = (x, y, z, height, cave) => !npcCaveRimAt(x, y, z) && !npcClosedCaveAt(x, z, y, height) && !npcPileAt(x, y, z, height) && !npcWorkZoneAt(cave, x, y, z) && npcFireClear(x, y, z, x, y, z, height);
+    shared.npcLandingAllowed = (x, y, z, height, cave) => !npcRampRoofAt(x, y, z) && !npcCaveRimAt(x, y, z) && !npcClosedCaveAt(x, z, y, height) && !npcPileAt(x, y, z, height) && !npcWorkZoneAt(cave, x, y, z) && npcFireClear(x, y, z, x, y, z, height);
     shared.npcRecoveryDrop = (x, y, z) => npcCaveRimAt(x, y, z);
     shared.npcHazardClear = (x, y, z, toX, toY, toZ, height, cave) => npcClosedCaveClear(x, y, z, toX, toY, toZ, height) && npcFireClear(x, y, z, toX, toY, toZ, height) && npcWorkZoneClear(cave, x, y, z, toX, toY, toZ);
     shared.onModelChange = refreshObjectGuides;
@@ -7124,7 +7173,7 @@
     bananaCover = BL.bananaCover.create({ overlay: ctx.overlay, pile, renderOpts: RENDER_OPTS, renderer, floor: ALTAR_HEIGHT, lightVisibleAt: bananaLightVisibleAt });
     headquarters.bananaCover = bananaCover;
     solids.sync();
-    shared.npcPaths = headquarters.npcPaths = BL.npcPaths.create({ island, walkable: npcWalkable, pointAllowed: (x, z) => !npcClosedCaveAt(x, z),
+    shared.npcPaths = headquarters.npcPaths = BL.npcPaths.create({ island, walkable: npcWalkable, pointAllowed: (x, z) => !npcClosedCaveAt(x, z) && !npcRampRoofAt(x, island.surfaceAt(x, z), z),
       surfaceAt: (x, z, y) => island.supportAt(x, z, y, 1e-6, null, PLAYER_RADIUS) });
     const sleepNavigation = headquarters.sleepNavigation = BL.headquartersSleep.create({ island, beds: bedrolls, walkable: sleepRouteClear, surfaceRoute: shared.npcPaths.route });
     const sleepRouteFrom = { x: 0, y: 0, z: 0 };
@@ -7270,7 +7319,7 @@
       climbRidersClear: clankerRidersClear, restPoseClear: clankerRestPoseClear,
       groomClear: clankerGroomClear, underCanopy: clankerUnderCanopy,
       groundAt: (x, z, y) => island.supportAt(x, z, y, 0.52), surfaceAt: island.surfaceAt,
-      isGrass: island.isGrassAt, onLand: island.onLand,
+      isGrass: island.isGrassAt, restSurfaceClear: clankerRestSurfaceClear, onLand: island.onLand,
       roamRadius: island.radius, meadowRadius: island.meadowRadius,
       clear: clankerClear, push: pushClankerProp, onPound: poundClankerEquipment, onGrab: grabClankerOoga, onReleaseDrag: releaseClankerDrag,
       fireContact: clankerFireContact, canSmash: canClankerSmash, supportAt: clankerSupportAt, terrainSupportAt: clankerTerrainSupportAt,
@@ -7740,7 +7789,7 @@
     for (const node of targets) input.remove(node);
     for (const node of placed) removeChild(root, node);
     targets.length = placed.length = claimed.length = scenery.length = sceneryClaims.length = matrixInteriors.length = matrixGates.length = sealedCaves.length = clouds.length = cloudObstacles.length = lamps.length = entranceLights.length = fireSeats.length = sleepers.length = labels.length = spots.length = openMouths.length = headquartersRimLintels.length = launchers.length = props.length = 0;
-    launchCloudSpot = null;
+    launchCloudSpot = cloudRandom = null;
     fireHazards.length = 0;
     workZones.length = 0;
     closedCaveZones.length = 0;

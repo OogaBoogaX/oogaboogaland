@@ -949,6 +949,58 @@
     puff(geo, x - rx * 0.1, y + ry * (i === 2 ? 0.72 : 0.82), z, rx * (i === 2 ? 0.8 : 0.62), ry * (i === 2 ? 0.3 : 0.2), rz * (i === 2 ? 0.78 : 0.6), MOSS, rand, 3, 8);
     return geo;
   });
+  // The shootable meadow stone has irregular shoulders and a moss cover that follows the upper facets.
+  const breakableRock = cached(() => {
+    const geo = geometry(), rand = mulberry32(449), rings = [], sides = 24;
+    const levels = [[0.04, 0.48, 0.4], [0.13, 0.66, 0.54], [0.28, 0.74, 0.61], [0.44, 0.76, 0.62],
+      [0.6, 0.73, 0.6], [0.76, 0.67, 0.55], [0.9, 0.58, 0.48], [1.02, 0.48, 0.4]];
+    const angles = [], wrinkles = [], mossEdge = [];
+    for (let s = 0; s < sides; s++) {
+      const a = s / sides * Math.PI * 2;
+      angles.push(a);
+      wrinkles.push(0.95 + 0.05 * Math.sin(a * 3 + 0.7) + 0.04 * Math.sin(a * 7 - 0.4) + rand() * 0.06);
+      mossEdge.push(0.63 + 0.09 * Math.sin(a * 2 + 0.5) + 0.08 * Math.sin(a * 5 - 0.7) + (rand() - 0.5) * 0.07);
+    }
+    for (let level = 0; level < levels.length; level++) {
+      const [y, rx, rz] = levels[level], row = [];
+      for (let s = 0; s < sides; s++) {
+        const a = angles[s], c = Math.cos(a), d = Math.sin(a), contour = wrinkles[s] * (0.97 + rand() * 0.06);
+        row.push(pushVert(geo, Math.sign(c) * Math.abs(c) ** 0.76 * rx * contour,
+          y + (level === 0 ? 0 : 0.02 * Math.sin(a * 4 + level) + (rand() - 0.5) * 0.025),
+          Math.sign(d) * Math.abs(d) ** 0.76 * rz * contour));
+      }
+      rings.push(row);
+    }
+    const stone = ["#363b38", "#414642", "#4c514c", "#595e57", "#656960"].map(hexToRgb);
+    const lichen = ["#3d4d38", "#465b38", "#526640", "#596d41"].map(hexToRgb);
+    const moss = ["#365824", "#456b2b", "#557d30", "#668b34", "#789b3d"].map(hexToRgb);
+    const ink = (y, edge) => y > edge + 0.07 ? moss[Math.floor(rand() * moss.length)]
+      : y > edge - 0.07 ? lichen[Math.floor(rand() * lichen.length)]
+        : stone[Math.floor(rand() * stone.length)];
+    for (let level = 0; level < rings.length - 1; level++) for (let s = 0; s < sides; s++) {
+      const next = (s + 1) % sides, lo = rings[level], hi = rings[level + 1];
+      const edge = (mossEdge[s] + mossEdge[next]) * 0.5;
+      face(geo, [lo[s], hi[s], hi[next]], ink((levels[level][0] + 2 * levels[level + 1][0]) / 3, edge));
+      face(geo, [lo[s], hi[next], lo[next]], ink((2 * levels[level][0] + levels[level + 1][0]) / 3, edge));
+    }
+    const top = pushVert(geo, -0.03, 1.11, 0.02), rim = rings[rings.length - 1];
+    for (let s = 0; s < sides; s++) face(geo, [top, rim[(s + 1) % sides], rim[s]], moss[Math.floor(rand() * moss.length)]);
+    // Fine, uneven tufts texture the continuous cap without reading as separate round clumps.
+    for (let n = 0; n < 190; n++) {
+      const a = rand() * Math.PI * 2, r = Math.sqrt(rand()) * 0.94;
+      const x = Math.cos(a) * 0.45 * r, z = Math.sin(a) * 0.37 * r;
+      const y = 1.11 - 0.08 * r + (rand() - 0.5) * 0.012;
+      const spread = 0.012 + rand() * 0.017, height = 0.02 + rand() * 0.045;
+      const tip = pushVert(geo, x + (rand() - 0.5) * spread, y + height, z + (rand() - 0.5) * spread);
+      const a0 = pushVert(geo, x - spread, y, z - spread);
+      const b0 = pushVert(geo, x + spread, y, z - spread);
+      const c0 = pushVert(geo, x, y, z + spread);
+      face(geo, [a0, b0, tip], moss[Math.floor(rand() * moss.length)]);
+      face(geo, [b0, c0, tip], moss[Math.floor(rand() * moss.length)]);
+      face(geo, [c0, a0, tip], moss[Math.floor(rand() * moss.length)]);
+    }
+    return geo;
+  });
   const altarSlab = cached(() => lathe({
     profile: [[0, 0], [1, 0], [1, 0.82], [0.96, 1], [0, 1]],
     segments: 32,
@@ -992,17 +1044,22 @@
     return geo;
   };
   // Separate bevelled planks with thin dark gaps between them, chunky bevelled corner posts and rails, a diagonal
-  // brace across the two broad faces, and riveted iron brackets on the top corners. Variant 1 is open for
-  // the dressing kit's coal and dynamite; variant 2 marks the shootable ammo crate.
+  // brace across the two broad faces, and riveted iron brackets on the top corners. The decorative variant has
+  // its lid slid aside; variant 1 is open for coal and dynamite; variant 2 marks the shootable ammo crate.
   const woodCrate = variants((variant) => {
-    const open = variant === 1;
-    const parts = [box({ w: 0.76, h: 0.76, d: 0.76, color: "#3a2616", offset: { y: 0.45 } })];
+    const open = variant !== 2;
+    const parts = variant === 0 ? [
+      box({ w: 0.74, h: 0.08, d: 0.74, color: "#302012", offset: { y: 0.1 } }),
+      ...[-0.35, 0.35].map((x) => box({ w: 0.06, h: 0.7, d: 0.7, color: "#49301b", offset: { x, y: 0.48 } })),
+      ...[-0.35, 0.35].map((z) => box({ w: 0.7, h: 0.7, d: 0.06, color: "#49301b", offset: { y: 0.48, z } }))
+    ] : [box({ w: 0.76, h: 0.76, d: 0.76, color: "#3a2616", offset: { y: 0.45 } })];
     // Three planks a side, turned to face out of each of the four sides, and three across the lid.
     for (let side = 0; side < 4; side++) for (let k = 0; k < 3; k++) {
       const plank = bevelBox({ w: 0.78, h: 0.24, d: 0.05, color: CRATE_PLANKS[(k + side) % 3], bevel: 0.02, offset: { y: 0.18 + k * 0.27, z: 0.425 } });
       parts.push(turn(plank, side * Math.PI / 2));
     }
-    if (!open) for (let k = 0; k < 3; k++) parts.push(bevelBox({ w: 0.78, h: 0.05, d: 0.24, color: CRATE_PLANKS[(k + 1) % 3], bevel: 0.02, offset: { y: 0.875, z: (k - 1) * 0.27 } }));
+    if (!open || variant === 0) for (let k = 0; k < 3; k++) parts.push(bevelBox({ w: 0.78, h: 0.05, d: 0.24, color: CRATE_PLANKS[(k + 1) % 3], bevel: 0.02, offset: { x: variant === 0 ? 0.34 : 0, y: variant === 0 ? 0.97 : 0.875, z: (k - 1) * 0.27 } }));
+    if (variant === 0) for (const z of [-0.27, 0.27]) parts.push(bevelBox({ w: 0.72, h: 0.035, d: 0.08, color: WOOD_DK, bevel: 0.01, offset: { x: 0.34, y: 1.005, z } }));
     for (const [x, z] of [[-0.42, -0.42], [0.42, -0.42], [-0.42, 0.42], [0.42, 0.42]]) parts.push(bevelBox({ w: 0.12, h: 0.94, d: 0.12, color: WOOD_DK, bevel: 0.03, offset: { x, y: 0.47, z } }));
     for (const y of [0.05, 0.89]) {
       for (const z of [-0.42, 0.42]) parts.push(bevelBox({ w: 0.94, h: 0.1, d: 0.11, color: WOOD_DK, bevel: 0.025, offset: { y, z } }));
@@ -1026,8 +1083,8 @@
     ring({ r: 0.45, thickness: 0.03, y: 0.24, segments: 8, color: "#3a2a1a" }),
     ring({ r: 0.45, thickness: 0.03, y: 0.66, segments: 8, color: "#3a2a1a" })
   );
-  // The same bulge in fourteen staves of alternating wood, a chamfered lip, iron hoops set with rivets, an inset
-  // planked head with a bung and a spigot near the foot. Variant 1 marks the shootable ammo barrel.
+  // The same bulge in fourteen staves of alternating wood, a chamfered lip, iron hoops set with rivets, and a
+  // spigot near the foot. The decorative head is slid aside; variant 1 marks the shootable ammo barrel.
   const BARREL_PROFILE = [[0.3, 0], [0.33, 0.03], [0.4, 0.16], [0.43, 0.45], [0.4, 0.74], [0.33, 0.87], [0.31, 0.9]];
   const STAVES = ["#7a5230", "#8a5e36", "#6e4a2a"].map(hexToRgb);
   const barrel = variants((ammo) => {
@@ -1048,13 +1105,17 @@
       }
       return BARREL_PROFILE[BARREL_PROFILE.length - 1][0];
     };
-    const parts = [geo,
-      // The head, sunk a little inside the lip, three planks and a bung.
-      lathe({ profile: [[0.3, 0.875], [0, 0.875]], segments: segs, color: "#5e3f22" }),
-      ...[-1, 0, 1].map((k) => box({ w: 0.012, h: 0.006, d: 0.5, color: "#3e2814", offset: { x: k * 0.1, y: 0.879 } })),
-      lathe({ profile: [[0.045, 0.875], [0.045, 0.9], [0, 0.9]], segments: 8, color: "#3e2814" })
-    ];
-    moved(parts[parts.length - 1], 0.16, 0, 0.08);
+    const parts = [geo];
+    if (ammo) {
+      parts.push(lathe({ profile: [[0.3, 0.875], [0, 0.875]], segments: segs, color: "#5e3f22" }));
+      for (const k of [-1, 0, 1]) parts.push(box({ w: 0.012, h: 0.006, d: 0.5, color: "#3e2814", offset: { x: k * 0.1, y: 0.879 } }));
+      parts.push(moved(lathe({ profile: [[0.045, 0.875], [0.045, 0.9], [0, 0.9]], segments: 8, color: "#3e2814" }), 0.16, 0, 0.08));
+    } else {
+      // The inset floor and inner staves show below a head resting partway across the opening.
+      parts.push(lathe({ profile: [[0.29, 0.88], [0.27, 0.58], [0, 0.58]], segments: segs, color: "#382514" }));
+      parts.push(moved(lathe({ profile: [[0.3, 0.92], [0.3, 0.97], [0, 0.97]], segments: segs, color: "#77502e" }), 0.22, 0, -0.04));
+      for (const k of [-1, 0, 1]) parts.push(box({ w: 0.012, h: 0.007, d: 0.48, color: "#4b301a", offset: { x: 0.22 + k * 0.1, y: 0.975, z: -0.04 } }));
+    }
     // Hoops: bevelled iron bands at the foot, either side of the belly and the lip, with rivets on the two middle ones.
     for (const [y, h] of [[0.05, 0.05], [0.26, 0.06], [0.64, 0.06], [0.85, 0.05]]) {
       const r = radiusAt(y) + 0.012;
@@ -1065,12 +1126,12 @@
       }
     }
     if (ammo) {
-      // The AK ammo meter's pixel banana follows the barrel's curve.
+      // Three AK ammo meter bananas follow the barrel's curve at even thirds.
       const art = AMMO_BANANA, cell = 0.04;
-      for (let row = 0; row < art.rows.length; row++) for (let col = 0; col < art.rows[row].length; col++) {
+      for (let mark = 0; mark < 3; mark++) for (let row = 0; row < art.rows.length; row++) for (let col = 0; col < art.rows[row].length; col++) {
         const ch = art.rows[row][col];
         if (ch === ".") continue;
-        const y = 0.45 - (row - 4) * cell, a = (col - 4) * cell / radiusAt(y), r = radiusAt(y) + 0.004;
+        const y = 0.45 - (row - 4) * cell, a = mark * Math.PI * 2 / 3 + (col - 4) * cell / radiusAt(y), r = radiusAt(y) + 0.004;
         parts.push(turn(box({ w: 0.006, h: cell, d: cell, color: art.ink[ch], offset: { x: r, y } }), a));
       }
     }
@@ -1250,5 +1311,5 @@
       ...[-0.8, 0.8].map(brace)
     );
   });
-  BL.hubModels = { SIGN_GLYPHS, SIGN_ICONS, jetpack, jetFlame, caveMouthRim, mirrorPanel, matrixPrisonBars, sealedCaveFace, matrixLeverPlate, matrixLeverLights, matrixLeverHub, matrixLeverArm, matrixLeverGrip, matrixLeverLabels, matrixGlyph, caveSign, postSign, CAVE_SIGN_WIDTH, CAVE_SIGN_HEIGHT, gate, caveShelves, entropyLab, bedroll, tree, bush, rock, voxelRock, puff, leafy, pointedLeaf, flower, FLOWER_INKS, limb, padNormals, flatInto, altarSlab, altarBlock, woodCrate, barrel, flowerTuft, torch, grass, lawnTuft, lantern, firepit, fireFlame, butterfly, firefly, ember, vine, cloud, ladder, dock, TREE_HEIGHT };
+  BL.hubModels = { SIGN_GLYPHS, SIGN_ICONS, jetpack, jetFlame, caveMouthRim, mirrorPanel, matrixPrisonBars, sealedCaveFace, matrixLeverPlate, matrixLeverLights, matrixLeverHub, matrixLeverArm, matrixLeverGrip, matrixLeverLabels, matrixGlyph, caveSign, postSign, CAVE_SIGN_WIDTH, CAVE_SIGN_HEIGHT, gate, caveShelves, entropyLab, bedroll, tree, bush, rock, breakableRock, voxelRock, puff, leafy, pointedLeaf, flower, FLOWER_INKS, limb, padNormals, flatInto, altarSlab, altarBlock, woodCrate, barrel, flowerTuft, torch, grass, lawnTuft, lantern, firepit, fireFlame, butterfly, firefly, ember, vine, cloud, ladder, dock, TREE_HEIGHT };
 })();
