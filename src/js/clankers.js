@@ -26,6 +26,9 @@
   // Aisle lanes admit the complete walking rig and its turn, unlike points
   // beside the bench faces that fit only a stationary sideways work pose.
   const LAB_ROUTE_X = [-1.14, 0, 1.14], LAB_ROUTE_Z = [-0.15, -1.8, -3.2, -4.05];
+  // Stand as soon as the coat clears the plane, then walk to the room's route start.
+  const LAB_ENTRY_GOAL = -1;
+  const LAB_ROUTE_START = -2.5;
   const create = (ctx) => {
     const { crew, sites, groundAt, clear } = ctx;
     const footprint = BL.agent.footprint, torso = BL.agent.torso;
@@ -34,6 +37,7 @@
     // Stations are authored once in world space: { x, y, z, heading, kind,
     // side, enabled? }. labInside owns the entrance plane, independently of assignment.
     const labSite = Number.isInteger(ctx.labSite) ? ctx.labSite : -1, labStations = ctx.labStations || [], labEquipment = ctx.labEquipment || [];
+    const coatClip = labSite >= 0 ? BL.agent.labCoatClip(sites[labSite].mouth) : null;
     const labNodes = new Float64Array(16 * 3), labHeadings = new Float64Array(16), labCosts = new Float64Array(16), labTimes = new Float64Array(16), labWaits = new Float64Array(16), labFixed = new Uint8Array(16), labPrevious = new Int8Array(16), labQueue = new Uint8Array(16);
     const labEdges = new Uint8Array(16 * 16 * 2), labEdgeWaits = new Float64Array(16 * 16 * 2), labEdgeTimes = new Float64Array(16 * 16 * 2);
     const labGeometry = new Uint8Array(128);
@@ -47,6 +51,7 @@
     const roamPath = new Float64Array(12), roamPoint = { x: 0, y: 0, z: 0, heading: 0 };
     let roamBudget = 1, roamNext = 0, roamTurn = -1, roamSerial = 0;
     let disposed = false, elapsed = 0, player = null;
+    let debugShuttle = null, debugShuttleAt = 0, debugShuttleUntil = 0;
     let climbFrameBudget = 0, climbTurn = -1, climbNext = 0;
     const alive = (cave) => cave.state === "working" || cave.state === "chilling";
     const releasePortal = (e) => {
@@ -303,9 +308,10 @@
     const syncLab = (e) => {
       const p = e.root.position, inside = insideLab(p.x, p.y, p.z), wasInside = e.motion.lab;
       e.motion.lab = inside;
+      e.motion.labRunIn = e.route === "enter" && e.site === labSite && !e.entryTurn;
       e.motion.labSqueeze = false;
       if (inside) {
-        e.parked = false; e.biped = true; e.lounge = "";
+        e.parked = false; e.biped = !e.motion.labRunIn; e.lounge = "";
         if (!wasInside && !e.controlled && !e.actionControlled) e.pound = e.beat = e.stand = e.recover = 0;
       } else if (wasInside) {
         e.biped = false;
@@ -315,7 +321,7 @@
       if (e.controlled || e.fire.rolling || e.climb.active || e.jump.active || e.drive.airborne || e.pound || e.beat || e.recover) e.motion.labWork = "";
     };
     const labEnvelope = (e) => {
-      if (!e.motion.lab || e.climb.active || e.jump.active || e.drive.airborne || e.fire.rolling || e.fire.rollRecover
+      if (!e.motion.lab || e.motion.labRunIn || e.climb.active || e.jump.active || e.drive.airborne || e.fire.rolling || e.fire.rollRecover
         || e.drive.jumpArmed || e.drive.motionRecover || e.pound || e.beat || e.recover || e.motion.smash || e.gorilla.smashActive) return false;
       e.biped = true; e.footprintMode = "lab"; e.compact = !!(e.gorilla.labIdleCompact || e.gorilla.labWalkCompact || e.gorilla.labCompact);
       e.radius = Math.max(BL.agent.LAB_RADIUS || 1.1, e.gorilla.bodyRadius + 0.04);
@@ -645,7 +651,7 @@
       if (e.lab.pathCount && elapsed < e.lab.readyAt) { e.speed = 0; e.blocked = 0; return; }
       const station = labStations[e.lab.station];
       const fixed = e.lab.pathFixed && e.lab.pathCount;
-      const final = !e.lab.yielding && !e.lab.pathPartial && e.route !== "exit" && station && e.lab.pathIndex + 1 >= e.lab.pathCount;
+      const final = e.entryTurn !== 1 && !e.lab.yielding && !e.lab.pathPartial && e.route !== "exit" && station && e.lab.pathIndex + 1 >= e.lab.pathCount;
       const desired = fixed ? e.lab.pathHeading
         : final && distance <= 0.800001
         ? station.heading : Math.atan2(dx, dz);
@@ -1594,9 +1600,10 @@
       if (e.lounge === "sit" && e.gorilla.sitCompact) { e.footprintMode = "sit"; e.compact = true; }
       e.root.visible = true;
       if (ctx.track && !e.tracked) { ctx.track(e); e.tracked = true; }
+      if (e === debugShuttle) { debugShuttleAt = elapsed + 4; debugShuttleUntil = 0; }
     };
     for (let i = 0; i < crew.list.length; i++) {
-      const owner = crew.list[i], gorilla = BL.agent.create({ managed: true, groundAt, scale: SCALE });
+      const owner = crew.list[i], gorilla = BL.agent.create({ managed: true, groundAt, scale: SCALE, coatClip });
       gorilla.poseManaged(0.6, 0, 0, 0, i * 2.39996323, 0, false, false);
       const entry = {
         owner, cave: owner, tooltipOwner: owner, gorilla, root: gorilla.root, parts: gorilla.parts,
@@ -1636,7 +1643,7 @@
         motion: { charge: 0, poundCharge: 0, takeoff: 0, landing: 0, supportOffset: 0, roll: 0, rollAngle: 0, smash: false, dragging: false,
           climb: 0, climbBlend: NaN, climbStride: 0, climbDirection: 0, mantle: 0, groom: 0, groomSide: 1, groomPhase: 0,
           sitWait: 3, sitTime: 0, sitLook: 0, sitShift: 0, sitLookTarget: 0, sitShiftTarget: 0,
-          lab: false, labWork: "", labPhase: i * 0.71, labSide: 1, labDt: 1 / 30, labReach: 0, labGripY: 0.53105, labSqueeze: false,
+          lab: false, labRunIn: false, labWork: "", labPhase: i * 0.71, labSide: 1, labDt: 1 / 30, labReach: 0, labGripY: 0.53105, labSqueeze: false,
           labDie: false, labRoll: 0, labBench: null },
         climb: { active: false, requested: 0, requestHeading: 0, requestUntil: 0, action: 0, actionAt: -Infinity,
           actionX: 0, actionY: 0, actionZ: 0, actionHeading: 0, autoDirection: -1, descending: false, progress: 0, length: 0, lowerY: 0, upperY: 0, climbs: 0,
@@ -1667,9 +1674,19 @@
       for (let i = 0; i < list.length; i++) if (!list[i].active && alive(list[i].owner)) activate(list[i]);
     };
     sync();
+    const startLabShuttle = (owner) => {
+      const e = byOwner.get(owner);
+      if (labSite < 0 || !e) return false;
+      debugShuttle = e; debugShuttleAt = elapsed + 4; debugShuttleUntil = 0;
+      owner.work.site = owner.work.plannedSite = labSite;
+      if (!e.active) activate(e);
+      if (e.site !== labSite || e.phase === "chill") beginTravel(e, labSite);
+      return true;
+    };
     const plan = (cave, index) => {
       const e = byOwner.get(cave);
       if (!e || !sites[index]) return;
+      if (e === debugShuttle && index !== labSite) return;
       if (e.controlled || e.drive.airborne || e.climb.active) { e.pendingSite = index; return; }
       // Reloading never evicts a gorilla whose next shift is in this cave.
       if (e.site === index) return;
@@ -2452,6 +2469,12 @@
         }
         releasePortal(e); e.route = "ring";
         if (e.phase === "leave") {
+          if (e === debugShuttle) {
+            e.phase = "travel"; e.route = "island"; e.exitFootprint = true;
+            sitePoint(from, 0, 5.5, POINT);
+            setGoal(e, POINT.x, POINT.y, POINT.z);
+            return true;
+          }
           e.phase = "chill"; e.route = ""; e.exitFootprint = true;
           return chooseChill(e, true);
         }
@@ -2459,6 +2482,12 @@
           e.phase = "wait"; e.route = ""; e.overflow = true; e.retry = 2;
           waitSpot(e); return true;
         }
+      }
+      if (e.route === "island") {
+        if (Math.hypot(e.goalX - p.x, e.goalZ - p.z) > 0.3) return true;
+        if (!debugShuttleUntil) debugShuttleUntil = elapsed + 2.5;
+        if (elapsed < debugShuttleUntil) return false;
+        debugShuttleUntil = 0; e.route = "apron";
       }
       if (e.route === "ring") {
         const fromAngle = Math.atan2(p.x, p.z), toAngle = Math.atan2(site.mouth.x, site.mouth.z);
@@ -2501,6 +2530,29 @@
           return false;
         }
         e.overflow = false;
+        if (e.site === labSite) {
+          if (!e.entryTurn) {
+            sitePoint(site, 0, LAB_ENTRY_GOAL, POINT);
+            if (Math.hypot(POINT.x - p.x, POINT.z - p.z) > 0.08) {
+              if (e.blocked > 0.3) requestLabPass(e, POINT.x, POINT.z);
+              setGoal(e, POINT.x, POINT.y, POINT.z); return true;
+            }
+            e.speed = 0;
+            if (!ordinaryLabStep(e, p.x, p.y, p.z, e.heading, 0, true)) {
+              requestLabPass(e, e.slotX, e.slotZ); return false;
+            }
+            e.entryTurn = 1;
+            return false;
+          }
+          if (e.entryTurn === 1) {
+            sitePoint(site, 0, LAB_ROUTE_START, POINT);
+            if (Math.hypot(POINT.x - p.x, POINT.z - p.z) > 0.08) {
+              if (e.blocked > 0.3) requestLabPass(e, POINT.x, POINT.z);
+              setGoal(e, POINT.x, POINT.y, POINT.z); return true;
+            }
+            e.entryTurn = 2;
+          }
+        }
         if (site.mirrorRoom) {
           const along = (p.x - site.mouth.x) * site.sr + (p.z - site.mouth.z) * site.cr;
           if (along > -3.3) {
@@ -2540,6 +2592,7 @@
         } else setGoal(e, e.slotX, e.slotY, e.slotZ);
         if (Math.hypot(e.slotX - p.x, e.slotZ - p.z) < 0.2) {
           e.phase = "work"; e.route = ""; e.rest = 0.8 + e.random(); releasePortal(e);
+          if (e === debugShuttle) debugShuttleAt = elapsed + 8;
         }
         return true;
       }
@@ -3633,7 +3686,7 @@
       }
       // Outside a work room the gait always stays on all fours. Standing is
       // a brief idle action inside, never a narrow-door collision workaround.
-      e.biped = e.motion.lab || e.parked || e.phase === "work" && (e.stand > 0 || e.beat > 0);
+      e.biped = e.motion.lab && !e.motion.labRunIn || e.parked || e.phase === "work" && (e.stand > 0 || e.beat > 0);
       if (e.parked && e.gorilla.standCompact) e.footprintMode = "stand";
       else if (!e.parked && e.footprintMode === "stand" && e.gorilla.compact) e.footprintMode = "walk";
       else if (e.phase === "chill" && !e.exitFootprint && !e.gorilla.motionActive && e.gorilla.compact
@@ -3697,7 +3750,7 @@
             setGoal(e, POINT.x, POINT.y, POINT.z);
             move(e, dt, 0.6);
           }
-        } else if (travelGoal(e, dt)) { if (!e.jump.active) { if (e.motion.lab && (e.fromSite === labSite && e.route === "exit" || e.site === labSite && (e.route === "enter" || e.phase === "work"))) moveLab(e, dt); else move(e, dt, SPEED); } }
+        } else if (travelGoal(e, dt)) { if (!e.jump.active) { if (e.motion.lab && !e.motion.labRunIn && (e.fromSite === labSite && e.route === "exit" || e.site === labSite && (e.route === "enter" || e.phase === "work"))) moveLab(e, dt); else move(e, dt, SPEED); } }
         else { e.speed = damp(e.speed, 0, 12, dt); }
       } else if (e.phase === "wait") {
         yieldSpace(e);
@@ -3934,6 +3987,13 @@
       }
       while (remaining > 1e-8) {
         const step = Math.min(remaining, 1 / 30); remaining -= step; elapsed += step;
+        if (debugShuttle && debugShuttle.active && !debugShuttle.controlled && debugShuttle.phase === "work"
+          && debugShuttle.site === labSite && debugShuttle.motion.lab && elapsed >= debugShuttleAt) {
+          releaseLab(debugShuttle);
+          debugShuttle.hasSlot = false; debugShuttle.slotIndex = -1;
+          debugShuttle.phase = "leave"; debugShuttle.route = "exit"; debugShuttle.fromSite = labSite;
+          debugShuttle.parked = false; debugShuttle.rest = 0; debugShuttleAt = Infinity;
+        }
         for (let i = 0; i < list.length; i++) {
           updateEntry(list[i], step);
           recoverStall(list[i], step);
@@ -3987,7 +4047,7 @@
       list.length = 0; byOwner.clear();
       portals.fill(null);
     };
-    return { list, sync, update, target, hit, plan, stats, liveGeometry, dispose, contactAt,
+    return { list, sync, update, target, hit, plan, startLabShuttle, stats, liveGeometry, dispose, contactAt,
       possess, release, control, cancelInput, climbAction, startClimb, smash, grab, chestBeat, ignite, dropRoll, get player() { return player; } };
   };
   BL.clankers = { create, WALK_RADIUS, WALK_HEIGHT };

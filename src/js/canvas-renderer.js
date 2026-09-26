@@ -513,6 +513,19 @@
               surface = destination;
               if (surfaceCount < 3) continue;
             }
+            const objectClip = node.geometry.clipPlane;
+            if (objectClip) {
+              if (!surface) {
+                surface = MIRROR_CLIP_IN;
+                for (let k = 0; k < count; k++) {
+                  surface[k * 3] = V[k][0]; surface[k * 3 + 1] = V[k][1]; surface[k * 3 + 2] = V[k][2];
+                }
+              }
+              const destination = surface === MIRROR_CLIP_IN ? MIRROR_CLIP_OUT : MIRROR_CLIP_IN;
+              surfaceCount = clipPlane(surface, surfaceCount, objectClip[0], objectClip[1], objectClip[2], objectClip[3], destination);
+              surface = destination;
+              if (surfaceCount < 3) continue;
+            }
             if (selective) beginCutaway(surface, surfaceCount);
             for (let piece = 0; selective ? nextCutaway() : piece < 1; piece++) {
               if (selective) { surface = cutawaySurface; surfaceCount = cutawayCount; }
@@ -652,6 +665,16 @@
           const a = line.i[0] * 3, b = line.i[1] * 3;
           mat4.transformPoint(V[0], w, verts[a], verts[a + 1], verts[a + 2]);
           mat4.transformPoint(V[1], w, verts[b], verts[b + 1], verts[b + 2]);
+          const objectClip = node.geometry.clipPlane;
+          if (objectClip) {
+            const da = objectClip[0] * V[0][0] + objectClip[1] * V[0][1] + objectClip[2] * V[0][2] + objectClip[3];
+            const db = objectClip[0] * V[1][0] + objectClip[1] * V[1][1] + objectClip[2] * V[1][2] + objectClip[3];
+            if (da > 0 && db > 0) continue;
+            if (da > 0 || db > 0) {
+              const end = V[da > 0 ? 0 : 1], other = V[da > 0 ? 1 : 0], amount = da > 0 ? da / (da - db) : db / (db - da);
+              for (let k = 0; k < 3; k++) end[k] = lerp(end[k], other[k], amount);
+            }
+          }
           if (V[0][1] < clipMinimumY && V[1][1] < clipMinimumY) continue;
           if (V[0][1] < clipMinimumY || V[1][1] < clipMinimumY) {
             const end = V[V[0][1] < clipMinimumY ? 0 : 1], other = V[V[0][1] < clipMinimumY ? 1 : 0];

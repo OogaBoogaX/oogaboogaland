@@ -59,7 +59,7 @@
   };
   const create = (ctx) => {
     const { renderer, canvas, camera, hud, presets, dist: [DIST_MIN, DIST_MAX], follow, fly, clampTarget, clampCamera, coarse, close = null, ceilingAt = null } = ctx;
-    let crew = null, fx = null, input = null, active = true;
+    let crew = null, fx = null, input = null, reticleTarget = null, active = true;
     let restoredPose = null;
     const freeTarget = { x: 0, y: 0, z: 0 };
     const followTarget = { x: 0, y: 0, z: 0 };
@@ -106,6 +106,7 @@
     const bind = (systems) => {
       crew = systems.crew;
       input = systems.input;
+      reticleTarget = systems.reticleTarget || null;
       sightClear = systems.fireReachable || null;
       cursorClear = systems.cursorReachable || sightClear;
       aimSurface = systems.aimSurface || null;
@@ -147,6 +148,14 @@
     let assistedTargetActive = false, assistedTargetInRange = false, assistedTargetClose = false, assistedTargetDistance = Infinity, assistedTargetWait = 0, assistedReticleX = NaN, assistedReticleY = NaN;
     const targetFeedback = (type) => {
       if (reticle.dataset.target !== type) reticle.dataset.target = type;
+    };
+    const feedbackType = (hit) => {
+      if (!hit || !hit.owner) return "none";
+      const kind = hit.owner.kind;
+      if (kind === "clanker" || kind === "agent") return "friendly";
+      if (kind === "caveman") return hit.type;
+      if (kind === "crate") return "object";
+      return reticleTarget ? reticleTarget(hit) : hit.type;
     };
     const setCombatTooltip = (hit) => {
       const cave = hit && hit.owner && hit.owner.kind === "caveman" ? hit.owner.cave : null;
@@ -593,19 +602,19 @@
       const length = Math.hypot(dx, dy, dz);
       aimAlongView(out, p.x, p.y, p.z, dx / length, dy / length, dz / length);
     };
-    const resolveReticleTarget = (out, cave, primary) => {
+    const resolveReticleTarget = (out, cave, primary, visual = false) => {
       if (!input || !input.weaponTargets) return false;
       crew.weaponOrigin(targetOrigin, cave, primary);
       const eye = camera.position, dx = camera.target.x - eye.x, dy = camera.target.y - eye.y, dz = camera.target.z - eye.z;
-      const length = Math.hypot(dx, dy, dz), reach = primary ? crew.meleeReach(cave) : 60;
+      const length = Math.hypot(dx, dy, dz), reach = visual ? 60 : primary ? crew.meleeReach(cave) : 60;
       const eyeReach = reach + Math.hypot(eye.x - targetOrigin.x, eye.y - targetOrigin.y, eye.z - targetOrigin.z);
-      if (!input.weaponTargets.ray(out, eye.x, eye.y, eye.z, dx / length, dy / length, dz / length, Math.min(60, eyeReach), cave)) return false;
+      if (!input.weaponTargets.ray(out, eye.x, eye.y, eye.z, dx / length, dy / length, dz / length, Math.min(60, eyeReach), cave, null, visual)) return false;
       const mx = out.x - targetOrigin.x, my = out.y - targetOrigin.y, mz = out.z - targetOrigin.z;
       const distance = Math.hypot(mx, my, mz), near = Math.max(0, 1 - TARGET_MARGIN / Math.max(distance, TARGET_MARGIN));
       const cameraNear = Math.max(0, out.distance - TARGET_MARGIN) / length;
       const clear = sightClear || cursorClear;
-      // Share the exact reach and cover checks between the reticle and a
-      // released melee strike; a displayed orange target promises a hit.
+      // Melee contacts keep their weapon reach; visual feedback can inspect
+      // interactive targets farther away without changing a released strike.
       return distance <= reach && (!clear || clear(eye.x, eye.y, eye.z, eye.x + dx * cameraNear, eye.y + dy * cameraNear, eye.z + dz * cameraNear, out.node, true))
         && (!clear || clear(targetOrigin.x, targetOrigin.y, targetOrigin.z, targetOrigin.x + mx * near, targetOrigin.y + my * near, targetOrigin.z + mz * near, out.node, true));
     };
@@ -637,18 +646,26 @@
       targetWait -= dt;
       const primary = cave.weapon.primaryEquipped;
       if (targetWait > 0 && primary === targetPrimary) {
-        setCombatTooltip(assistedView() ? assistedTargetActive ? assistedTargetHit : null : targetActive ? targetHit : null);
+        setCombatTooltip(targetActive ? targetHit : null);
         return;
       }
       targetWait = TARGET_INTERVAL;
       targetPrimary = primary;
       if (assistedView()) {
-        targetFeedback(assistedTargetActive ? primary && !assistedTargetInRange ? "out-of-range" : assistedTargetHit.type : "none");
-        setCombatTooltip(assistedTargetActive ? assistedTargetHit : null);
+        targetActive = !!(input && input.weaponTargets && input.weaponTargets.ray(targetHit,
+          cursorRay.ox, cursorRay.oy, cursorRay.oz, cursorRay.dx, cursorRay.dy, cursorRay.dz, 60, cave, null, true));
+        if (targetActive) {
+          const clear = sightClear || cursorClear, near = Math.max(0, 1 - TARGET_MARGIN / Math.max(targetHit.distance, TARGET_MARGIN));
+          if (clear && !clear(cursorRay.ox, cursorRay.oy, cursorRay.oz,
+            cursorRay.ox + (targetHit.x - cursorRay.ox) * near, cursorRay.oy + (targetHit.y - cursorRay.oy) * near,
+            cursorRay.oz + (targetHit.z - cursorRay.oz) * near, targetHit.node, true)) targetActive = false;
+        }
+        targetFeedback(targetActive ? feedbackType(targetHit) : "none");
+        setCombatTooltip(targetActive ? targetHit : null);
         return;
       }
-      targetActive = resolveReticleTarget(targetHit, cave, primary);
-      targetFeedback(targetActive ? targetHit.type : "none");
+      targetActive = resolveReticleTarget(targetHit, cave, primary, true);
+      targetFeedback(targetActive ? feedbackType(targetHit) : "none");
       setCombatTooltip(targetActive ? targetHit : null);
     };
     const positionReticle = (x, y) => {

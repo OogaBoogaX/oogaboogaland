@@ -1386,6 +1386,9 @@ body[data-active-scene="mine"] .mode-hud {
   box-shadow: 0 0 0 1px #171714, 0 1px 3px #000;
 }
 
+.tooltip--name.tooltip--no-status-dot { grid-template-columns: auto; }
+.tooltip--name.tooltip--no-status-dot::before { display: none; }
+
 .tooltip-health {
   grid-column: 1 / -1;
   width: 72px;
@@ -4640,7 +4643,7 @@ body.orbit-dragging #tooltip {
   height: 100%;
   overflow: visible;
   fill: none;
-  stroke: #fff9dc;
+  stroke: #fff;
   stroke-width: 1.5px;
   stroke-linecap: round;
 }
@@ -4682,9 +4685,6 @@ body.orbit-dragging #tooltip {
 .weapon-reticle[data-target="out-of-range"] > span {
   visibility: hidden;
 }
-.weapon-reticle[data-hit="friendly"] { --reticle-hit-color: #65e879; }
-.weapon-reticle[data-hit="enemy"] { --reticle-hit-color: #ff6464; }
-.weapon-reticle[data-hit="object"] { --reticle-hit-color: #ff9d42; }
 .weapon-reticle > span::after {
   content: "";
   position: absolute;
@@ -4692,7 +4692,7 @@ body.orbit-dragging #tooltip {
   top: 50%;
   width: 10px;
   height: 10px;
-  border: 1.5px solid var(--reticle-hit-color, #fff9dc);
+  border: 1.5px solid #fff;
   border-radius: 50%;
   opacity: var(--reticle-hit, 0);
   transform: translate(-50%, -50%) scale(calc(1.7 - var(--reticle-hit, 0) * 0.7));
