@@ -5,8 +5,8 @@
   const BL = window.BL = window.BL || {};
   const { createNode, addChild, removeChild } = BL.scene;
   // `plane` is the shield's depth in the mouth's frame: the lab hangs it in the doorway, the Lightning Factory
-  // further down its tunnel.
-  const create = (group, mouth, opening, plane = 0.5) => {
+  // further down its tunnel. `tint` colours its glyph crests, [r, g, b] from 0 to 1; left out, they are green.
+  const create = (group, mouth, opening, plane = 0.5, tint = null) => {
     const sr = Math.sin(mouth.ry), cr = Math.cos(mouth.ry);
     const minX = opening.minX, maxX = opening.maxX, minY = opening.floorY, maxY = opening.ceilingY;
     const color = [0, 0, 0], geometry = {
@@ -14,7 +14,7 @@
       faces: [{ i: [0, 1, 2, 3], color }, { i: [3, 2, 1, 0], color }],
       lines: [], castShadow: false, mirrorRippleOnly: true
     };
-    const node = createNode({ geometry, position: { x: 0, y: 0, z: plane }, mirrorRippleOnly: true, matrixNative: true, sightHidden: true });
+    const node = createNode({ geometry, position: { x: 0, y: 0, z: plane }, mirrorRippleOnly: true, matrixNative: true, sightHidden: true, rippleTint: tint });
     addChild(group, node);
     const ripples = BL.mirrorRipples.create(node);
     // The same mesh-section atlas as the mirror outlines any registered body
