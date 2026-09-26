@@ -5,7 +5,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta http-equiv="Content-Security-Policy"
-    content="default-src 'none'; script-src 'sha256-IASStor2aBbbgu/xAkS9z+haD210iLYQxi160OqLEwo='; style-src 'sha256-PgDC2yA6pf+i4oX24qW0kzCZrZzvEgk8mNBJ3UcIVhk='; img-src 'self' data:; media-src https://stream.noderunnersradio.com; connect-src https: wss:; base-uri 'none'; form-action 'none'">
+    content="default-src 'none'; script-src 'sha256-UGXyYphxuQzEY7GJY2Wv/5ksX5r+63/mY1mbbSlOSAE='; style-src 'sha256-dD8AVtazyOPkZfKxgDWlpmEf8gXYv6jhVe8qLiDx4zs='; img-src 'self' data:; media-src https://stream.noderunnersradio.com; connect-src https: wss:; base-uri 'none'; form-action 'none'">
   <meta name="referrer" content="no-referrer">
   <meta name="color-scheme" content="dark">
   <meta name="theme-color" content="#0a0a0b">
@@ -1400,6 +1400,9 @@ body[data-active-scene="mine"] .mode-hud {
   background: var(--muted);
   box-shadow: 0 0 0 1px #171714, 0 1px 3px #000;
 }
+
+.tooltip--name.tooltip--no-status-dot { grid-template-columns: auto; }
+.tooltip--name.tooltip--no-status-dot::before { display: none; }
 
 .tooltip-health {
   grid-column: 1 / -1;
@@ -4655,7 +4658,7 @@ body.orbit-dragging #tooltip {
   height: 100%;
   overflow: visible;
   fill: none;
-  stroke: #fff9dc;
+  stroke: #fff;
   stroke-width: 1.5px;
   stroke-linecap: round;
 }
@@ -4697,9 +4700,6 @@ body.orbit-dragging #tooltip {
 .weapon-reticle[data-target="out-of-range"] > span {
   visibility: hidden;
 }
-.weapon-reticle[data-hit="friendly"] { --reticle-hit-color: #65e879; }
-.weapon-reticle[data-hit="enemy"] { --reticle-hit-color: #ff6464; }
-.weapon-reticle[data-hit="object"] { --reticle-hit-color: #ff9d42; }
 .weapon-reticle > span::after {
   content: "";
   position: absolute;
@@ -4707,7 +4707,7 @@ body.orbit-dragging #tooltip {
   top: 50%;
   width: 10px;
   height: 10px;
-  border: 1.5px solid var(--reticle-hit-color, #fff9dc);
+  border: 1.5px solid #fff;
   border-radius: 50%;
   opacity: var(--reticle-hit, 0);
   transform: translate(-50%, -50%) scale(calc(1.7 - var(--reticle-hit, 0) * 0.7));
@@ -9640,6 +9640,7 @@ Then run npm run build and ONLY=characters node test/run.mjs.</pre>
     low: { dpr: 1, msaa: 0, shadow: 512, bloom: false, shafts: false, mirror: 512, environment: 64, environmentCadence: 4, lights: 10 }
   };
   const INSTANCE_FLOATS = 20;
+  const NO_OBJECT_CLIP = new Float32Array([0, 0, 0, -1]);
   // MAX_PIXELS caps the pixel ratio to bound buffer memory.
   const MAX_PIXELS = 2.6e6;
   const DEFAULT_LIGHT = { x: 0.45, y: 0.85, z: 0.3 };
@@ -9855,6 +9856,7 @@ uniform sampler2D uMatrixGlyphTex;
 uniform int uMatrixSamples;
 uniform float uClipMinY;
 uniform float uClipMaxY;
+uniform vec4 uObjectClip;
 ${CUTAWAY_GLSL}
 uniform float uMatrixGlyphOpacity;
 uniform vec4 uVoxel;
@@ -10166,7 +10168,7 @@ float matrixPermanentAt(vec3 point, float caveIndex) {
   return depth >= -0.000001 && depth <= bounds.w + voxelReach && abs(across) <= halfWidth + 0.000001 && height >= -0.000001 && height <= ceiling + 0.000001 ? 1.0 : 0.0;
 }
 void main() {
-  if (vWorld.y < uClipMinY || cutaway(vWorld, vSmokeOpacity)) discard;
+  if (vWorld.y < uClipMinY || dot(uObjectClip, vec4(vWorld, 1.0)) > 0.0 || cutaway(vWorld, vSmokeOpacity)) discard;
   if (vParams.z > 5.5) {
     vec2 p = vPortalUV;
     float time = vParams.x, surge = vParams.y, radius = length(p);
@@ -10357,11 +10359,12 @@ const SHADOW_FS = `#version 300 es
 precision highp float;
 in vec3 vWorld;
 uniform float uClipMinY;
+uniform vec4 uObjectClip;
 void main() {
   // Bird's-eye cuts belong to the camera, not the sun. Keep the original
   // ceiling silhouettes in the shadow map while their colour geometry is
   // scanned or faded away.
-  if (vWorld.y < uClipMinY) discard;
+  if (vWorld.y < uClipMinY || dot(uObjectClip, vec4(vWorld, 1.0)) > 0.0) discard;
 }`;
   const LINE_VS = `#version 300 es
 precision highp float;
@@ -10418,13 +10421,14 @@ void main() {
 precision highp float;
 in vec3 vWorld;
 uniform float uClipMaxY;
+uniform vec4 uObjectClip;
 ${CUTAWAY_GLSL}
 in vec4 vColor;
 in vec4 vParams;
 layout(location=0) out vec4 oColor;
 layout(location=1) out vec4 oBright;
 void main() {
-  if (cutaway(vWorld)) discard;
+  if (dot(uObjectClip, vec4(vWorld, 1.0)) > 0.0 || cutaway(vWorld)) discard;
   float ember = clamp(-vParams.x, 0.0, 1.0);
   float detail = 0.72 + dot(vColor.rgb, vec3(0.2126, 0.7152, 0.0722)) * 0.28;
   vec3 heat = vec3(1.0, 0.12 + ember * 0.85, 0.01 + ember * ember * ember * 0.74) * detail;
@@ -10941,7 +10945,7 @@ void main() {
       gl.attachShader(prog, v);
       gl.attachShader(prog, f);
       gl.linkProgram(prog);
-      return { prog, shaders: [v, f], uniforms: uniforms.concat(["uCutCount", "uCutRegions", "uCutBounds", "uCutawayOpacity"]), u: {}, cutFrame: -1, cutCount: -1, cutOpacity: NaN, clipMinY: NaN, clipMaxY: NaN, voxel: null, sway: 0, swing: 0, matrixGlyph: NaN, matrixCave: NaN, lineWidth: NaN };
+      return { prog, shaders: [v, f], uniforms: uniforms.concat(["uCutCount", "uCutRegions", "uCutBounds", "uCutawayOpacity"]), u: {}, cutFrame: -1, cutCount: -1, cutOpacity: NaN, clipMinY: NaN, clipMaxY: NaN, objectClip: null, voxel: null, sway: 0, swing: 0, matrixGlyph: NaN, matrixCave: NaN, lineWidth: NaN };
     };
     const finishProgram = (p) => {
       if (!gl.getProgramParameter(p.prog, gl.LINK_STATUS)) {
@@ -10979,9 +10983,9 @@ void main() {
       const meshFragment = matrixSampling ? MESH_FS.replace("#version 300 es", "#version 300 es\n#extension GL_OES_shader_multisample_interpolation : require\n#define MATRIX_SAMPLE_INTERPOLATION") : MESH_FS;
       res.programs = {
         image: compile(IMAGE_VS, IMAGE_FS, ["uViewProj", "uRect", "uImage", "uReady", "uClipMaxY"]),
-        mesh: compile(MESH_VS, meshFragment, ["uViewProj", "uLightViewProj", "uEye", "uViewDirection", "uLightDir", "uSky", "uGround", "uSun", "uDirectStrength", "uAmbientFloor", "uDiffuseFloor", "uShadowStrength", "uShadowFloor", "uShadowBias", "uShadow", "uShadowTexel", "uLights", "uLightCount", "uFog", "uFogRange", "uMatrixParams", "uMatrixOrigin", "uMatrixGlyph", "uMatrixCave", "uMatrixCaves", "uMatrixCaveBounds", "uMatrixCaveNear", "uMatrixPermanentCave", "uMatrixPermanentPlane", "uMatrixPermanentAperture", "uMatrixLivingGlobal", "uMatrixGlyphTex", "uMatrixSamples", "uClipMinY", "uClipMaxY", "uMatrixGlyphOpacity", "uVoxel", "uWindTime", "uSway", "uSwing"]),
-        shadow: compile(SHADOW_VS, SHADOW_FS, ["uLightViewProj", "uClipMinY", "uClipMaxY"]),
-        line: compile(LINE_VS, LINE_FS, ["uViewProj", "uViewport", "uWidth", "uClipMaxY"]),
+        mesh: compile(MESH_VS, meshFragment, ["uViewProj", "uLightViewProj", "uEye", "uViewDirection", "uLightDir", "uSky", "uGround", "uSun", "uDirectStrength", "uAmbientFloor", "uDiffuseFloor", "uShadowStrength", "uShadowFloor", "uShadowBias", "uShadow", "uShadowTexel", "uLights", "uLightCount", "uFog", "uFogRange", "uMatrixParams", "uMatrixOrigin", "uMatrixGlyph", "uMatrixCave", "uMatrixCaves", "uMatrixCaveBounds", "uMatrixCaveNear", "uMatrixPermanentCave", "uMatrixPermanentPlane", "uMatrixPermanentAperture", "uMatrixLivingGlobal", "uMatrixGlyphTex", "uMatrixSamples", "uClipMinY", "uClipMaxY", "uObjectClip", "uMatrixGlyphOpacity", "uVoxel", "uWindTime", "uSway", "uSwing"]),
+        shadow: compile(SHADOW_VS, SHADOW_FS, ["uLightViewProj", "uClipMinY", "uClipMaxY", "uObjectClip"]),
+        line: compile(LINE_VS, LINE_FS, ["uViewProj", "uViewport", "uWidth", "uClipMaxY", "uObjectClip"]),
         sky: compile(QUAD_VS, SKY_FS, ["uInvViewProj", "uHorizon", "uZenith", "uSun", "uSunDir", "uMoonDir", "uStarMatrix", "uStars", "uTime", "uHazeDrop", "uClouds", "uSea", "uSeaEye"]),
         blur: compile(QUAD_VS, BLUR_FS, ["uTex", "uDir"]),
         composite: compile(QUAD_VS, COMPOSITE_FS, ["uScene", "uBloom", "uBloomWide", "uBloomStrength", "uDepth", "uShaft", "uShaftColor"])
@@ -11890,6 +11894,11 @@ void main() {
         if (cull && rec.offscreen) continue;
         if (kind === "mesh" && useProgram === "shadow" && rec.geometry.castShadow === false) continue;
         if (useProgram === "shadow" ? !rec.lightVisible || shadowSubset && rec.shadowStatic !== (shadowSubset === 1) : !cull && !rec.mirrorVisible) continue;
+        const program = res.programs[useProgram], objectClip = rec.geometry.clipPlane || NO_OBJECT_CLIP;
+        if (objectClip !== program.objectClip) {
+          gl.uniform4fv(program.u.uObjectClip, objectClip);
+          program.objectClip = objectClip;
+        }
         if (useProgram === "shadow") shadowDraws++;
         if (kind === "mesh" && useProgram === "mesh") {
           const stage = rec.geometry.matrixRevealBacking ? 1 : rec.geometry.matrixGlyph ? 2 : 0;
@@ -11907,7 +11916,7 @@ void main() {
           }
         }
         if (kind === "mesh") {
-          const program = res.programs[useProgram], minimumY = rec.geometry.clipMinY ?? -1e6, maximumY = Math.min(rec.geometry.cutawayPreserve ? 1e6 : cutawayMaxY, rec.geometry.clipMaxY ?? 1e6);
+          const minimumY = rec.geometry.clipMinY ?? -1e6, maximumY = Math.min(rec.geometry.cutawayPreserve ? 1e6 : cutawayMaxY, rec.geometry.clipMaxY ?? 1e6);
           if (minimumY !== program.clipMinY) {
             gl.uniform1f(program.u.uClipMinY, minimumY);
             program.clipMinY = minimumY;
@@ -13172,6 +13181,19 @@ void main() {
               surface = destination;
               if (surfaceCount < 3) continue;
             }
+            const objectClip = node.geometry.clipPlane;
+            if (objectClip) {
+              if (!surface) {
+                surface = MIRROR_CLIP_IN;
+                for (let k = 0; k < count; k++) {
+                  surface[k * 3] = V[k][0]; surface[k * 3 + 1] = V[k][1]; surface[k * 3 + 2] = V[k][2];
+                }
+              }
+              const destination = surface === MIRROR_CLIP_IN ? MIRROR_CLIP_OUT : MIRROR_CLIP_IN;
+              surfaceCount = clipPlane(surface, surfaceCount, objectClip[0], objectClip[1], objectClip[2], objectClip[3], destination);
+              surface = destination;
+              if (surfaceCount < 3) continue;
+            }
             if (selective) beginCutaway(surface, surfaceCount);
             for (let piece = 0; selective ? nextCutaway() : piece < 1; piece++) {
               if (selective) { surface = cutawaySurface; surfaceCount = cutawayCount; }
@@ -13311,6 +13333,16 @@ void main() {
           const a = line.i[0] * 3, b = line.i[1] * 3;
           mat4.transformPoint(V[0], w, verts[a], verts[a + 1], verts[a + 2]);
           mat4.transformPoint(V[1], w, verts[b], verts[b + 1], verts[b + 2]);
+          const objectClip = node.geometry.clipPlane;
+          if (objectClip) {
+            const da = objectClip[0] * V[0][0] + objectClip[1] * V[0][1] + objectClip[2] * V[0][2] + objectClip[3];
+            const db = objectClip[0] * V[1][0] + objectClip[1] * V[1][1] + objectClip[2] * V[1][2] + objectClip[3];
+            if (da > 0 && db > 0) continue;
+            if (da > 0 || db > 0) {
+              const end = V[da > 0 ? 0 : 1], other = V[da > 0 ? 1 : 0], amount = da > 0 ? da / (da - db) : db / (db - da);
+              for (let k = 0; k < 3; k++) end[k] = lerp(end[k], other[k], amount);
+            }
+          }
           if (V[0][1] < clipMinimumY && V[1][1] < clipMinimumY) continue;
           if (V[0][1] < clipMinimumY || V[1][1] < clipMinimumY) {
             const end = V[V[0][1] < clipMinimumY ? 0 : 1], other = V[V[0][1] < clipMinimumY ? 1 : 0];
@@ -18514,7 +18546,7 @@ void main() {
   "use strict";
   const BL = window.BL = window.BL || {};
   const { hexToRgb, mulberry32 } = BL.math;
-  const { box, bevelBox, lathe, ring, merge, cached, variants, makeVox: vox, voxelGeometry: voxGeo, voxCoords } = BL.models;
+  const { geometry, pushVert, face, box, bevelBox, lathe, ring, merge, cached, variants, makeVox: vox, voxelGeometry: voxGeo, voxCoords } = BL.models;
   const blob = (v, { cx, cy, cz, rx, ry, rz, chip = 0, floor = -Infinity, rand, color }) => {
     for (let x = Math.floor(cx - rx); x <= Math.ceil(cx + rx); x++) {
       for (let y = Math.max(floor, Math.floor(cy - ry)); y <= Math.ceil(cy + ry); y++) {
@@ -18761,14 +18793,17 @@ void main() {
     POST_SIGNS.set(key, geo);
     return geo;
   };
-  const caveMouthRim = variants((openTop) => {
+  // Variant 0 is the full frame, 1 the jambs and 2 the lintel alone.
+  const caveMouthRim = variants((part) => {
     const rand = mulberry32(31);
     const v = vox();
     const stone = pick(rand, 0, 1, 0.3);
     const light = pick(rand, 2, 0, 0.5);
-    v.fill(-6, -6, 0, 5, 0, 1, stone);
-    v.fill(5, 5, 0, 5, 0, 1, stone);
-    if (!openTop) v.fill(-5, 4, 6, 6, 0, 1, light);
+    if (part !== 2) {
+      v.fill(-6, -6, 0, 5, 0, 1, stone);
+      v.fill(5, 5, 0, 5, 0, 1, stone);
+    }
+    if (part !== 1) v.fill(-5, 4, 6, 6, 0, 1, light);
     const geo = voxGeo(v, { unit: VOX, palette: CLIFF, origin: { x: 0, y: 0, z: -VOX } });
     geo.jambCenterX = 2.75;
     geo.frontZ = 0.5;
@@ -19467,15 +19502,35 @@ void main() {
     box({ w: 0.1, h: 0.1, d: 0.94, color: WOOD_DK, offset: { x: 0.42, y: 0.89 } })
   );
   const IRON = "#3b3d42", RIVET = "#8a8f98", CRATE_PLANKS = ["#b07a42", "#a06c38", "#bc864c"];
+  // The nine-pixel banana from the AK ammo meter's weapon-banana-glyph.
+  const AMMO_BANANA = { ink: { D: "#211b14", Y: "#ffd84a", G: "#789a3b" }, rows: [
+    "DGD......", "DGD......", "DYYD.....", "DYYD.....", "DYYYD....",
+    ".DYYYD...", ".DYYYYD..", "..DDYYYD.", "....DDDD."
+  ] };
+  const crateBanana = () => {
+    const geo = geometry(), cell = 0.045, z = 0.486;
+    for (let row = 0; row < 9; row++) for (let col = 0; col < 9; col++) {
+      const ch = AMMO_BANANA.rows[row][col];
+      if (ch === ".") continue;
+      const x = (col - 4) * cell, y = 0.47 + (4 - row) * cell;
+      const a = pushVert(geo, x - cell / 2, y - cell / 2, z);
+      const b = pushVert(geo, x + cell / 2, y - cell / 2, z);
+      const c = pushVert(geo, x + cell / 2, y + cell / 2, z);
+      const d = pushVert(geo, x - cell / 2, y + cell / 2, z);
+      face(geo, [a, b, c, d], hexToRgb(AMMO_BANANA.ink[ch]));
+    }
+    return geo;
+  };
   // Moves a built part by (x, y, z), in place.
   const moved = (geo, x, y, z) => {
     for (let i = 0; i < geo.verts.length; i += 3) { geo.verts[i] += x; geo.verts[i + 1] += y; geo.verts[i + 2] += z; }
     return geo;
   };
   // Separate bevelled planks with thin dark gaps between them, chunky bevelled corner posts and rails, a diagonal
-  // brace across the two broad faces, and riveted iron brackets on the top corners. Variant 1 is open: no lid, so
-  // the dressing kit's coal and dynamite crates can show what they hold.
-  const woodCrate = variants((open) => {
+  // brace across the two broad faces, and riveted iron brackets on the top corners. Variant 1 is open for
+  // the dressing kit's coal and dynamite; variant 2 marks the shootable ammo crate.
+  const woodCrate = variants((variant) => {
+    const open = variant === 1;
     const parts = [box({ w: 0.76, h: 0.76, d: 0.76, color: "#3a2616", offset: { y: 0.45 } })];
     // Three planks a side, turned to face out of each of the four sides, and three across the lid.
     for (let side = 0; side < 4; side++) for (let k = 0; k < 3; k++) {
@@ -19490,6 +19545,7 @@ void main() {
     }
     // The brace: one bevelled board corner to corner across each broad face.
     for (const z of [-0.46, 0.46]) parts.push(moved(turn(bevelBox({ w: 1.0, h: 0.1, d: 0.04, color: WOOD, bevel: 0.015 }), 0, Math.atan2(0.72, 0.72)), 0, 0.47, z));
+    if (variant === 2) for (let side = 0; side < 4; side++) parts.push(turn(crateBanana(), side * Math.PI / 2));
     // Iron brackets folded over the four top corners, two rivets each.
     for (const [x, z] of [[-0.42, -0.42], [0.42, -0.42], [-0.42, 0.42], [0.42, 0.42]]) {
       parts.push(bevelBox({ w: 0.16, h: 0.14, d: 0.16, color: IRON, bevel: 0.02, offset: { x, y: 0.86, z } }));
@@ -19506,10 +19562,10 @@ void main() {
     ring({ r: 0.45, thickness: 0.03, y: 0.66, segments: 8, color: "#3a2a1a" })
   );
   // The same bulge in fourteen staves of alternating wood, a chamfered lip, iron hoops set with rivets, an inset
-  // planked head with a bung, a painted banana on the belly and a spigot near the foot.
+  // planked head with a bung and a spigot near the foot. Variant 1 marks the shootable ammo barrel.
   const BARREL_PROFILE = [[0.3, 0], [0.33, 0.03], [0.4, 0.16], [0.43, 0.45], [0.4, 0.74], [0.33, 0.87], [0.31, 0.9]];
   const STAVES = ["#7a5230", "#8a5e36", "#6e4a2a"].map(hexToRgb);
-  const barrel = cached(() => {
+  const barrel = variants((ammo) => {
     const segs = 14, geo = { verts: [], faces: [], lines: [] };
     const rings = BARREL_PROFILE.map(([r, y]) => Array.from({ length: segs }, (_, s) => {
       const a = s / segs * Math.PI * 2;
@@ -19543,15 +19599,17 @@ void main() {
         parts.push(box({ w: 0.028, h: 0.028, d: 0.028, color: RIVET, offset: { x: Math.cos(a) * (r + 0.014), y, z: Math.sin(a) * (r + 0.014) } }));
       }
     }
-    // The painted banana on the belly, in the signs' banana badge, each cell set on the curve.
-    const art = SIGN_BADGES.banana, cell = 0.04;
-    for (let row = 0; row < art.rows.length; row++) for (let col = 0; col < art.rows[row].length; col++) {
-      const ch = art.rows[row][col];
-      if (ch === ".") continue;
-      const y = 0.52 - (row - 3) * cell, a = (col - 3) * cell / radiusAt(y), r = radiusAt(y) + 0.004;
-      parts.push(turn(box({ w: 0.006, h: cell, d: cell, color: art.ink[ch], offset: { x: r, y } }), a));
+    if (ammo) {
+      // The AK ammo meter's pixel banana follows the barrel's curve.
+      const art = AMMO_BANANA, cell = 0.04;
+      for (let row = 0; row < art.rows.length; row++) for (let col = 0; col < art.rows[row].length; col++) {
+        const ch = art.rows[row][col];
+        if (ch === ".") continue;
+        const y = 0.45 - (row - 4) * cell, a = (col - 4) * cell / radiusAt(y), r = radiusAt(y) + 0.004;
+        parts.push(turn(box({ w: 0.006, h: cell, d: cell, color: art.ink[ch], offset: { x: r, y } }), a));
+      }
     }
-    // A wooden spigot near the foot, turned away from the banana.
+    // A wooden spigot near the foot, turned away from the front.
     parts.push(turn(merge(
       box({ w: 0.08, h: 0.05, d: 0.05, color: "#5c4425", offset: { x: radiusAt(0.18) + 0.03, y: 0.18 } }),
       box({ w: 0.03, h: 0.07, d: 0.03, color: IRON, offset: { x: radiusAt(0.18) + 0.06, y: 0.15 } })
@@ -20768,7 +20826,7 @@ void main() {
 (() => {
   "use strict";
   const BL = window.BL = window.BL || {};
-  BL.jumbotronData = {"meta":{"generated_at":"2026-09-25T16:20:00.403Z","org":"OogaBoogaX","schema_version":3},"totals":{"contributors":49,"commits":1258,"prs":458,"reviews":56,"issues":17,"comments":358},"leaderboards":{"commits":[{"login":"portlandhodl","count":394},{"login":"w-s-bitcoin","count":360},{"login":"MrHodlX","count":111},{"login":"timechainb","count":78},{"login":"2140data","count":48},{"login":"dplusplus1024","count":44},{"login":"ottoz0r","count":31},{"login":"pdubl22","count":23},{"login":"YellowBrokeIt","count":20},{"login":"Hero-Gamer","count":17},{"login":"rules-without-rulers","count":16},{"login":"itme-brain","count":13},{"login":"claude","count":12},{"login":"RandyMcMillan","count":11},{"login":"J25dunn","count":10},{"login":"MHODL","count":7},{"login":"Rob1Ham","count":7},{"login":"knorrium","count":7},{"login":"Jdelg718","count":5},{"login":"drneski","count":5},{"login":"email:0ca1dda35e422a0f","count":4},{"login":"email:bdb4923572c8ac13","count":4},{"login":"BTCMcBoatface","count":3},{"login":"codex","count":3},{"login":"email:bed3af55053c78f6","count":3},{"login":"tmmmemcee","count":3},{"login":"Holo-Elfstone","count":2},{"login":"SaniExp","count":2},{"login":"csuwildcat","count":2},{"login":"dani69654","count":2},{"login":"hotpixelgroup","count":2},{"login":"CypherBoxLLC","count":1},{"login":"FNBIP","count":1},{"login":"HodlDee","count":1},{"login":"doggyballs","count":1},{"login":"email:56537ddd43347582","count":1},{"login":"email:78da113009979a72","count":1},{"login":"email:93964419ae80c511","count":1},{"login":"kaloudis","count":1},{"login":"zmeyer44","count":1}],"prs":[{"login":"MrHodlX","count":94},{"login":"portlandhodl","count":84},{"login":"w-s-bitcoin","count":65},{"login":"timechainb","count":31},{"login":"2140data","count":26},{"login":"ottoz0r","count":19},{"login":"J25dunn","count":16},{"login":"dplusplus1024","count":13},{"login":"rules-without-rulers","count":13},{"login":"Hero-Gamer","count":12},{"login":"Rob1Ham","count":11},{"login":"itme-brain","count":11},{"login":"tmmmemcee","count":6},{"login":"Jdelg718","count":5},{"login":"knorrium","count":5},{"login":"RandyMcMillan","count":4},{"login":"drneski","count":4},{"login":"hotpixelgroup","count":4},{"login":"FNBIP","count":3},{"login":"MiguelMedeiros","count":3},{"login":"SaniExp","count":3},{"login":"YellowBrokeIt","count":3},{"login":"dani69654","count":3},{"login":"BTCMcBoatface","count":2},{"login":"HodlDee","count":2},{"login":"Holo-Elfstone","count":2},{"login":"csuwildcat","count":2},{"login":"doggyballs","count":2},{"login":"pdubl22","count":2},{"login":"zmeyer44","count":2},{"login":"CypherBoxLLC","count":1},{"login":"Korg1970","count":1},{"login":"Shitnobi","count":1},{"login":"kaloudis","count":1},{"login":"mikeinspace","count":1},{"login":"unclejim7","count":1}],"reviews":[{"login":"MrHodlX","count":27},{"login":"J25dunn","count":14},{"login":"w-s-bitcoin","count":9},{"login":"portlandhodl","count":5},{"login":"Hero-Gamer","count":1}],"comments":[{"login":"portlandhodl","count":87},{"login":"Hero-Gamer","count":53},{"login":"MrHodlX","count":52},{"login":"w-s-bitcoin","count":48},{"login":"RandyMcMillan","count":19},{"login":"J25dunn","count":18},{"login":"BTCMcBoatface","count":14},{"login":"dplusplus1024","count":11},{"login":"itme-brain","count":9},{"login":"dani69654","count":7},{"login":"ottoz0r","count":6},{"login":"rules-without-rulers","count":6},{"login":"timechainb","count":6},{"login":"hotpixelgroup","count":4},{"login":"tmmmemcee","count":3},{"login":"HodlDee","count":2},{"login":"Holo-Elfstone","count":2},{"login":"Jdelg718","count":2},{"login":"100megasats","count":1},{"login":"2140data","count":1},{"login":"Bitcoin-Bill","count":1},{"login":"YellowBrokeIt","count":1},{"login":"csuwildcat","count":1},{"login":"doggyballs","count":1},{"login":"drneski","count":1},{"login":"remcoros","count":1},{"login":"unclejim7","count":1}]},"repos":[{"name":"entropylab","totals":{"contributors":45,"commits":1013,"prs":382,"reviews":50,"issues":11,"comments":348},"weekly":[{"week":"2026-W35","commits":333,"prs":134,"reviews":2,"issues":1,"comments":69},{"week":"2026-W36","commits":399,"prs":136,"reviews":16,"issues":0,"comments":130},{"week":"2026-W37","commits":82,"prs":36,"reviews":18,"issues":2,"comments":76},{"week":"2026-W38","commits":132,"prs":51,"reviews":5,"issues":2,"comments":39},{"week":"2026-W39","commits":67,"prs":25,"reviews":9,"issues":6,"comments":34}],"last_activity_at":"2026-09-25T15:58:08Z","leaderboards":{"commits":[{"login":"portlandhodl","count":394},{"login":"w-s-bitcoin","count":217},{"login":"MrHodlX","count":106},{"login":"timechainb","count":78},{"login":"dplusplus1024","count":44},{"login":"ottoz0r","count":24},{"login":"pdubl22","count":23},{"login":"Hero-Gamer","count":17},{"login":"itme-brain","count":13},{"login":"claude","count":12},{"login":"RandyMcMillan","count":11},{"login":"J25dunn","count":10},{"login":"2140data","count":9},{"login":"MHODL","count":7},{"login":"Rob1Ham","count":7},{"login":"Jdelg718","count":5},{"login":"email:0ca1dda35e422a0f","count":4},{"login":"email:bdb4923572c8ac13","count":4},{"login":"BTCMcBoatface","count":3},{"login":"codex","count":3},{"login":"email:bed3af55053c78f6","count":3},{"login":"SaniExp","count":2},{"login":"csuwildcat","count":2},{"login":"dani69654","count":2},{"login":"hotpixelgroup","count":2},{"login":"rules-without-rulers","count":2},{"login":"CypherBoxLLC","count":1},{"login":"FNBIP","count":1},{"login":"HodlDee","count":1},{"login":"doggyballs","count":1},{"login":"email:56537ddd43347582","count":1},{"login":"email:78da113009979a72","count":1},{"login":"email:93964419ae80c511","count":1},{"login":"kaloudis","count":1},{"login":"zmeyer44","count":1}],"prs":[{"login":"MrHodlX","count":91},{"login":"portlandhodl","count":84},{"login":"w-s-bitcoin","count":37},{"login":"timechainb","count":31},{"login":"ottoz0r","count":18},{"login":"J25dunn","count":16},{"login":"dplusplus1024","count":13},{"login":"Hero-Gamer","count":12},{"login":"Rob1Ham","count":11},{"login":"itme-brain","count":11},{"login":"2140data","count":10},{"login":"Jdelg718","count":5},{"login":"RandyMcMillan","count":4},{"login":"hotpixelgroup","count":4},{"login":"FNBIP","count":3},{"login":"MiguelMedeiros","count":3},{"login":"SaniExp","count":3},{"login":"dani69654","count":3},{"login":"tmmmemcee","count":3},{"login":"BTCMcBoatface","count":2},{"login":"HodlDee","count":2},{"login":"csuwildcat","count":2},{"login":"doggyballs","count":2},{"login":"pdubl22","count":2},{"login":"rules-without-rulers","count":2},{"login":"zmeyer44","count":2},{"login":"CypherBoxLLC","count":1},{"login":"Korg1970","count":1},{"login":"Shitnobi","count":1},{"login":"kaloudis","count":1},{"login":"mikeinspace","count":1},{"login":"unclejim7","count":1}],"reviews":[{"login":"MrHodlX","count":27},{"login":"J25dunn","count":14},{"login":"portlandhodl","count":5},{"login":"w-s-bitcoin","count":3},{"login":"Hero-Gamer","count":1}],"comments":[{"login":"portlandhodl","count":87},{"login":"Hero-Gamer","count":53},{"login":"MrHodlX","count":52},{"login":"w-s-bitcoin","count":46},{"login":"RandyMcMillan","count":19},{"login":"J25dunn","count":18},{"login":"BTCMcBoatface","count":14},{"login":"dplusplus1024","count":11},{"login":"itme-brain","count":9},{"login":"dani69654","count":7},{"login":"ottoz0r","count":6},{"login":"timechainb","count":6},{"login":"hotpixelgroup","count":4},{"login":"tmmmemcee","count":3},{"login":"HodlDee","count":2},{"login":"Jdelg718","count":2},{"login":"rules-without-rulers","count":2},{"login":"100megasats","count":1},{"login":"2140data","count":1},{"login":"Bitcoin-Bill","count":1},{"login":"csuwildcat","count":1},{"login":"doggyballs","count":1},{"login":"remcoros","count":1},{"login":"unclejim7","count":1}]},"contributors":[{"login":"w-s-bitcoin","last_seen_at":"2026-09-24T00:46:08Z"},{"login":"timechainb","last_seen_at":"2026-09-25T05:14:34Z"},{"login":"portlandhodl","last_seen_at":"2026-09-25T13:58:09Z"},{"login":"MrHodlX","last_seen_at":"2026-09-25T15:58:08Z"},{"login":"J25dunn","last_seen_at":"2026-09-14T00:52:02Z"},{"login":"BTCMcBoatface","last_seen_at":"2026-09-12T22:51:09Z"},{"login":"Hero-Gamer","last_seen_at":"2026-09-16T23:19:21Z"},{"login":"kaloudis","last_seen_at":"2026-09-11T03:10:01Z"},{"login":"email:bed3af55053c78f6","last_seen_at":"2026-09-10T22:41:09Z"},{"login":"hotpixelgroup","last_seen_at":"2026-09-17T16:15:09Z"},{"login":"email:0ca1dda35e422a0f","last_seen_at":"2026-09-05T16:17:09Z"},{"login":"Rob1Ham","last_seen_at":"2026-09-05T04:49:37Z"},{"login":"dplusplus1024","last_seen_at":"2026-09-04T16:46:04Z"},{"login":"HodlDee","last_seen_at":"2026-09-02T15:19:10Z"},{"login":"pdubl22","last_seen_at":"2026-09-02T04:06:43Z"},{"login":"ottoz0r","last_seen_at":"2026-09-02T02:19:20Z"},{"login":"FNBIP","last_seen_at":"2026-09-02T00:55:23Z"},{"login":"SaniExp","last_seen_at":"2026-09-02T16:47:02Z"},{"login":"Jdelg718","last_seen_at":"2026-08-31T15:06:08Z"},{"login":"dani69654","last_seen_at":"2026-09-09T10:02:14Z"},{"login":"RandyMcMillan","last_seen_at":"2026-08-31T09:57:39Z"},{"login":"doggyballs","last_seen_at":"2026-09-21T00:35:15Z"},{"login":"2140data","last_seen_at":"2026-08-31T04:54:04Z"},{"login":"itme-brain","last_seen_at":"2026-09-05T00:24:12Z"},{"login":"zmeyer44","last_seen_at":"2026-08-31T14:06:04Z"},{"login":"csuwildcat","last_seen_at":"2026-08-30T20:04:05Z"},{"login":"MHODL","last_seen_at":"2026-08-30T19:00:46Z"},{"login":"rules-without-rulers","last_seen_at":"2026-09-12T17:11:11Z"},{"login":"email:78da113009979a72","last_seen_at":"2026-08-30T03:08:17Z"},{"login":"email:bdb4923572c8ac13","last_seen_at":"2026-08-29T03:53:33Z"},{"login":"email:56537ddd43347582","last_seen_at":"2026-08-25T19:35:57Z"},{"login":"Shitnobi","last_seen_at":"2026-08-26T23:09:24Z"},{"login":"MiguelMedeiros","last_seen_at":"2026-08-27T21:47:11Z"},{"login":"tmmmemcee","last_seen_at":"2026-09-17T00:58:54Z"},{"login":"100megasats","last_seen_at":"2026-08-30T20:53:53Z"},{"login":"unclejim7","last_seen_at":"2026-09-05T04:37:51Z"},{"login":"mikeinspace","last_seen_at":"2026-09-10T05:25:42Z"},{"login":"remcoros","last_seen_at":"2026-09-12T15:11:21Z"},{"login":"Korg1970","last_seen_at":"2026-09-12T17:42:58Z"},{"login":"Bitcoin-Bill","last_seen_at":"2026-09-02T01:00:57Z"},{"login":"claude","last_seen_at":"2026-09-23T23:41:13Z"},{"login":"CypherBoxLLC","last_seen_at":"2026-09-19T22:44:16Z"},{"login":"email:93964419ae80c511","last_seen_at":"2026-09-20T10:42:49Z"},{"login":"codex","last_seen_at":"2026-09-21T01:04:42Z"},{"login":"BitcoinUbuntu","last_seen_at":"2026-09-24T17:28:36Z"}]},{"name":"oogaboogaland","totals":{"contributors":10,"commits":226,"prs":70,"reviews":6,"issues":6,"comments":10},"weekly":[{"week":"2026-W37","commits":45,"prs":19,"reviews":0,"issues":0,"comments":1},{"week":"2026-W38","commits":80,"prs":30,"reviews":3,"issues":0,"comments":0},{"week":"2026-W39","commits":101,"prs":21,"reviews":3,"issues":6,"comments":9}],"last_activity_at":"2026-09-25T04:34:22Z","leaderboards":{"commits":[{"login":"w-s-bitcoin","count":130},{"login":"2140data","count":39},{"login":"YellowBrokeIt","count":20},{"login":"rules-without-rulers","count":14},{"login":"knorrium","count":7},{"login":"MrHodlX","count":5},{"login":"drneski","count":5},{"login":"tmmmemcee","count":3},{"login":"Holo-Elfstone","count":2},{"login":"ottoz0r","count":1}],"prs":[{"login":"w-s-bitcoin","count":22},{"login":"2140data","count":16},{"login":"rules-without-rulers","count":11},{"login":"knorrium","count":5},{"login":"drneski","count":4},{"login":"MrHodlX","count":3},{"login":"YellowBrokeIt","count":3},{"login":"tmmmemcee","count":3},{"login":"Holo-Elfstone","count":2},{"login":"ottoz0r","count":1}],"reviews":[{"login":"w-s-bitcoin","count":6}],"comments":[{"login":"rules-without-rulers","count":4},{"login":"Holo-Elfstone","count":2},{"login":"w-s-bitcoin","count":2},{"login":"YellowBrokeIt","count":1},{"login":"drneski","count":1}]},"contributors":[{"login":"w-s-bitcoin","last_seen_at":"2026-09-25T04:03:38Z"},{"login":"MrHodlX","last_seen_at":"2026-09-20T21:37:43Z"},{"login":"ottoz0r","last_seen_at":"2026-09-07T21:41:44Z"},{"login":"2140data","last_seen_at":"2026-09-23T13:42:44Z"},{"login":"rules-without-rulers","last_seen_at":"2026-09-25T04:14:15Z"},{"login":"tmmmemcee","last_seen_at":"2026-09-24T22:34:07Z"},{"login":"knorrium","last_seen_at":"2026-09-20T21:18:34Z"},{"login":"drneski","last_seen_at":"2026-09-25T04:34:22Z"},{"login":"YellowBrokeIt","last_seen_at":"2026-09-23T22:46:53Z"},{"login":"Holo-Elfstone","last_seen_at":"2026-09-21T20:29:14Z"}]},{"name":"bedrock","totals":{"contributors":2,"commits":19,"prs":6,"reviews":0,"issues":0,"comments":0},"weekly":[{"week":"2026-W36","commits":16,"prs":6,"reviews":0,"issues":0,"comments":0},{"week":"2026-W37","commits":3,"prs":0,"reviews":0,"issues":0,"comments":0}],"last_activity_at":"2026-09-07T05:21:02Z","leaderboards":{"commits":[{"login":"w-s-bitcoin","count":13},{"login":"ottoz0r","count":6}],"prs":[{"login":"w-s-bitcoin","count":6}],"reviews":[],"comments":[]},"contributors":[{"login":"w-s-bitcoin","last_seen_at":"2026-09-07T05:21:02Z"},{"login":"ottoz0r","last_seen_at":"2026-09-04T21:29:31Z"}]}],"recent":[{"login":"MrHodlX","repo":"entropylab","type":"comment","occurred_at":"2026-09-25T15:58:08Z"},{"login":"MrHodlX","repo":"entropylab","type":"merge","occurred_at":"2026-09-25T15:43:25Z"},{"login":"MrHodlX","repo":"entropylab","type":"commit","occurred_at":"2026-09-25T15:36:49Z"},{"login":"MrHodlX","repo":"entropylab","type":"commit","occurred_at":"2026-09-25T15:22:00Z"},{"login":"MrHodlX","repo":"entropylab","type":"comment","occurred_at":"2026-09-25T15:20:00Z"},{"login":"MrHodlX","repo":"entropylab","type":"comment","occurred_at":"2026-09-25T15:14:08Z"},{"login":"MrHodlX","repo":"entropylab","type":"merge","occurred_at":"2026-09-25T15:03:01Z"},{"login":"MrHodlX","repo":"entropylab","type":"comment","occurred_at":"2026-09-25T14:55:38Z"},{"login":"MrHodlX","repo":"entropylab","type":"comment","occurred_at":"2026-09-25T14:38:15Z"},{"login":"MrHodlX","repo":"entropylab","type":"comment","occurred_at":"2026-09-25T14:22:03Z"},{"login":"MrHodlX","repo":"entropylab","type":"pr","occurred_at":"2026-09-25T14:17:05Z"},{"login":"portlandhodl","repo":"entropylab","type":"comment","occurred_at":"2026-09-25T13:58:09Z"}],"contributors":[{"login":"portlandhodl","last_seen_at":"2026-09-25T13:58:09Z"},{"login":"w-s-bitcoin","last_seen_at":"2026-09-25T04:03:38Z"},{"login":"MrHodlX","last_seen_at":"2026-09-25T15:58:08Z"},{"login":"timechainb","last_seen_at":"2026-09-25T05:14:34Z"},{"login":"Hero-Gamer","last_seen_at":"2026-09-16T23:19:21Z"},{"login":"2140data","last_seen_at":"2026-09-23T13:42:44Z"},{"login":"dplusplus1024","last_seen_at":"2026-09-04T16:46:04Z"},{"login":"J25dunn","last_seen_at":"2026-09-14T12:31:24Z"},{"login":"ottoz0r","last_seen_at":"2026-09-07T21:41:44Z"},{"login":"rules-without-rulers","last_seen_at":"2026-09-25T04:14:15Z"},{"login":"RandyMcMillan","last_seen_at":"2026-08-31T09:57:39Z"},{"login":"itme-brain","last_seen_at":"2026-09-05T00:24:12Z"},{"login":"pdubl22","last_seen_at":"2026-09-02T04:06:43Z"},{"login":"YellowBrokeIt","last_seen_at":"2026-09-23T22:46:53Z"},{"login":"BTCMcBoatface","last_seen_at":"2026-09-12T22:51:09Z"},{"login":"Rob1Ham","last_seen_at":"2026-09-05T04:49:37Z"},{"login":"Jdelg718","last_seen_at":"2026-08-31T15:06:08Z"},{"login":"claude","last_seen_at":"2026-09-23T23:41:13Z"},{"login":"dani69654","last_seen_at":"2026-09-09T10:02:14Z"},{"login":"knorrium","last_seen_at":"2026-09-20T21:18:34Z"},{"login":"tmmmemcee","last_seen_at":"2026-09-24T22:34:07Z"},{"login":"drneski","last_seen_at":"2026-09-25T04:34:22Z"},{"login":"hotpixelgroup","last_seen_at":"2026-09-17T16:15:09Z"},{"login":"MHODL","last_seen_at":"2026-08-30T19:00:46Z"},{"login":"Holo-Elfstone","last_seen_at":"2026-09-21T20:29:14Z"},{"login":"HodlDee","last_seen_at":"2026-09-02T15:19:10Z"},{"login":"SaniExp","last_seen_at":"2026-09-02T16:47:02Z"},{"login":"csuwildcat","last_seen_at":"2026-08-30T20:04:05Z"},{"login":"FNBIP","last_seen_at":"2026-09-02T00:55:23Z"},{"login":"doggyballs","last_seen_at":"2026-09-21T00:35:15Z"},{"login":"email:0ca1dda35e422a0f","last_seen_at":"2026-09-05T16:17:09Z"},{"login":"email:bdb4923572c8ac13","last_seen_at":"2026-08-29T03:53:33Z"},{"login":"MiguelMedeiros","last_seen_at":"2026-08-27T21:47:11Z"},{"login":"codex","last_seen_at":"2026-09-21T01:04:42Z"},{"login":"email:bed3af55053c78f6","last_seen_at":"2026-09-10T22:41:09Z"},{"login":"zmeyer44","last_seen_at":"2026-08-31T14:06:04Z"},{"login":"BitcoinUbuntu","last_seen_at":"2026-09-24T17:28:36Z"},{"login":"CypherBoxLLC","last_seen_at":"2026-09-19T22:44:16Z"},{"login":"kaloudis","last_seen_at":"2026-09-11T03:10:01Z"},{"login":"unclejim7","last_seen_at":"2026-09-05T04:37:51Z"},{"login":"100megasats","last_seen_at":"2026-08-30T20:53:53Z"},{"login":"Bitcoin-Bill","last_seen_at":"2026-09-02T01:00:57Z"},{"login":"Korg1970","last_seen_at":"2026-09-12T17:42:58Z"},{"login":"Shitnobi","last_seen_at":"2026-08-26T23:09:24Z"},{"login":"email:56537ddd43347582","last_seen_at":"2026-08-25T19:35:57Z"},{"login":"email:78da113009979a72","last_seen_at":"2026-08-30T03:08:17Z"},{"login":"email:93964419ae80c511","last_seen_at":"2026-09-20T10:42:49Z"},{"login":"mikeinspace","last_seen_at":"2026-09-10T05:25:42Z"},{"login":"remcoros","last_seen_at":"2026-09-12T15:11:21Z"}]};
+  BL.jumbotronData = {"meta":{"generated_at":"2026-09-26T03:56:35.927Z","org":"OogaBoogaX","schema_version":3},"totals":{"contributors":49,"commits":1289,"prs":470,"reviews":56,"issues":24,"comments":384},"leaderboards":{"commits":[{"login":"portlandhodl","count":395},{"login":"w-s-bitcoin","count":369},{"login":"MrHodlX","count":118},{"login":"timechainb","count":82},{"login":"2140data","count":57},{"login":"dplusplus1024","count":44},{"login":"ottoz0r","count":31},{"login":"pdubl22","count":23},{"login":"YellowBrokeIt","count":20},{"login":"Hero-Gamer","count":17},{"login":"rules-without-rulers","count":16},{"login":"itme-brain","count":13},{"login":"claude","count":12},{"login":"RandyMcMillan","count":11},{"login":"J25dunn","count":10},{"login":"MHODL","count":7},{"login":"Rob1Ham","count":7},{"login":"knorrium","count":7},{"login":"Jdelg718","count":5},{"login":"drneski","count":5},{"login":"email:0ca1dda35e422a0f","count":4},{"login":"email:bdb4923572c8ac13","count":4},{"login":"BTCMcBoatface","count":3},{"login":"SaniExp","count":3},{"login":"codex","count":3},{"login":"email:bed3af55053c78f6","count":3},{"login":"tmmmemcee","count":3},{"login":"Holo-Elfstone","count":2},{"login":"csuwildcat","count":2},{"login":"dani69654","count":2},{"login":"hotpixelgroup","count":2},{"login":"CypherBoxLLC","count":1},{"login":"FNBIP","count":1},{"login":"HodlDee","count":1},{"login":"doggyballs","count":1},{"login":"email:56537ddd43347582","count":1},{"login":"email:78da113009979a72","count":1},{"login":"email:93964419ae80c511","count":1},{"login":"kaloudis","count":1},{"login":"zmeyer44","count":1}],"prs":[{"login":"MrHodlX","count":97},{"login":"portlandhodl","count":85},{"login":"w-s-bitcoin","count":66},{"login":"timechainb","count":33},{"login":"2140data","count":29},{"login":"ottoz0r","count":19},{"login":"J25dunn","count":16},{"login":"dplusplus1024","count":13},{"login":"rules-without-rulers","count":13},{"login":"Hero-Gamer","count":12},{"login":"Rob1Ham","count":11},{"login":"itme-brain","count":11},{"login":"tmmmemcee","count":6},{"login":"Jdelg718","count":5},{"login":"drneski","count":5},{"login":"knorrium","count":5},{"login":"RandyMcMillan","count":4},{"login":"SaniExp","count":4},{"login":"hotpixelgroup","count":4},{"login":"FNBIP","count":3},{"login":"MiguelMedeiros","count":3},{"login":"YellowBrokeIt","count":3},{"login":"dani69654","count":3},{"login":"BTCMcBoatface","count":2},{"login":"HodlDee","count":2},{"login":"Holo-Elfstone","count":2},{"login":"csuwildcat","count":2},{"login":"doggyballs","count":2},{"login":"pdubl22","count":2},{"login":"zmeyer44","count":2},{"login":"CypherBoxLLC","count":1},{"login":"Korg1970","count":1},{"login":"Shitnobi","count":1},{"login":"kaloudis","count":1},{"login":"mikeinspace","count":1},{"login":"unclejim7","count":1}],"reviews":[{"login":"MrHodlX","count":27},{"login":"J25dunn","count":14},{"login":"w-s-bitcoin","count":9},{"login":"portlandhodl","count":5},{"login":"Hero-Gamer","count":1}],"comments":[{"login":"portlandhodl","count":88},{"login":"MrHodlX","count":76},{"login":"Hero-Gamer","count":53},{"login":"w-s-bitcoin","count":48},{"login":"RandyMcMillan","count":19},{"login":"J25dunn","count":18},{"login":"BTCMcBoatface","count":14},{"login":"dplusplus1024","count":11},{"login":"itme-brain","count":9},{"login":"dani69654","count":7},{"login":"ottoz0r","count":6},{"login":"rules-without-rulers","count":6},{"login":"timechainb","count":6},{"login":"hotpixelgroup","count":4},{"login":"tmmmemcee","count":3},{"login":"HodlDee","count":2},{"login":"Holo-Elfstone","count":2},{"login":"Jdelg718","count":2},{"login":"100megasats","count":1},{"login":"2140data","count":1},{"login":"Bitcoin-Bill","count":1},{"login":"BitcoinUbuntu","count":1},{"login":"YellowBrokeIt","count":1},{"login":"csuwildcat","count":1},{"login":"doggyballs","count":1},{"login":"drneski","count":1},{"login":"remcoros","count":1},{"login":"unclejim7","count":1}],"issues":[{"login":"MrHodlX","count":13},{"login":"rules-without-rulers","count":6},{"login":"BitcoinUbuntu","count":2},{"login":"Hero-Gamer","count":1},{"login":"portlandhodl","count":1},{"login":"timechainb","count":1}]},"repos":[{"name":"entropylab","totals":{"contributors":45,"commits":1026,"prs":388,"reviews":50,"issues":18,"comments":374},"weekly":[{"week":"2026-W35","commits":333,"prs":134,"reviews":2,"issues":1,"comments":69},{"week":"2026-W36","commits":399,"prs":136,"reviews":16,"issues":0,"comments":130},{"week":"2026-W37","commits":82,"prs":36,"reviews":18,"issues":2,"comments":76},{"week":"2026-W38","commits":132,"prs":51,"reviews":5,"issues":2,"comments":39},{"week":"2026-W39","commits":80,"prs":31,"reviews":9,"issues":13,"comments":60}],"last_activity_at":"2026-09-26T01:36:03Z","leaderboards":{"commits":[{"login":"portlandhodl","count":395},{"login":"w-s-bitcoin","count":218},{"login":"MrHodlX","count":113},{"login":"timechainb","count":82},{"login":"dplusplus1024","count":44},{"login":"ottoz0r","count":24},{"login":"pdubl22","count":23},{"login":"Hero-Gamer","count":17},{"login":"itme-brain","count":13},{"login":"claude","count":12},{"login":"RandyMcMillan","count":11},{"login":"J25dunn","count":10},{"login":"2140data","count":9},{"login":"MHODL","count":7},{"login":"Rob1Ham","count":7},{"login":"Jdelg718","count":5},{"login":"email:0ca1dda35e422a0f","count":4},{"login":"email:bdb4923572c8ac13","count":4},{"login":"BTCMcBoatface","count":3},{"login":"codex","count":3},{"login":"email:bed3af55053c78f6","count":3},{"login":"SaniExp","count":2},{"login":"csuwildcat","count":2},{"login":"dani69654","count":2},{"login":"hotpixelgroup","count":2},{"login":"rules-without-rulers","count":2},{"login":"CypherBoxLLC","count":1},{"login":"FNBIP","count":1},{"login":"HodlDee","count":1},{"login":"doggyballs","count":1},{"login":"email:56537ddd43347582","count":1},{"login":"email:78da113009979a72","count":1},{"login":"email:93964419ae80c511","count":1},{"login":"kaloudis","count":1},{"login":"zmeyer44","count":1}],"prs":[{"login":"MrHodlX","count":94},{"login":"portlandhodl","count":85},{"login":"w-s-bitcoin","count":37},{"login":"timechainb","count":33},{"login":"ottoz0r","count":18},{"login":"J25dunn","count":16},{"login":"dplusplus1024","count":13},{"login":"Hero-Gamer","count":12},{"login":"Rob1Ham","count":11},{"login":"itme-brain","count":11},{"login":"2140data","count":10},{"login":"Jdelg718","count":5},{"login":"RandyMcMillan","count":4},{"login":"hotpixelgroup","count":4},{"login":"FNBIP","count":3},{"login":"MiguelMedeiros","count":3},{"login":"SaniExp","count":3},{"login":"dani69654","count":3},{"login":"tmmmemcee","count":3},{"login":"BTCMcBoatface","count":2},{"login":"HodlDee","count":2},{"login":"csuwildcat","count":2},{"login":"doggyballs","count":2},{"login":"pdubl22","count":2},{"login":"rules-without-rulers","count":2},{"login":"zmeyer44","count":2},{"login":"CypherBoxLLC","count":1},{"login":"Korg1970","count":1},{"login":"Shitnobi","count":1},{"login":"kaloudis","count":1},{"login":"mikeinspace","count":1},{"login":"unclejim7","count":1}],"reviews":[{"login":"MrHodlX","count":27},{"login":"J25dunn","count":14},{"login":"portlandhodl","count":5},{"login":"w-s-bitcoin","count":3},{"login":"Hero-Gamer","count":1}],"comments":[{"login":"portlandhodl","count":88},{"login":"MrHodlX","count":76},{"login":"Hero-Gamer","count":53},{"login":"w-s-bitcoin","count":46},{"login":"RandyMcMillan","count":19},{"login":"J25dunn","count":18},{"login":"BTCMcBoatface","count":14},{"login":"dplusplus1024","count":11},{"login":"itme-brain","count":9},{"login":"dani69654","count":7},{"login":"ottoz0r","count":6},{"login":"timechainb","count":6},{"login":"hotpixelgroup","count":4},{"login":"tmmmemcee","count":3},{"login":"HodlDee","count":2},{"login":"Jdelg718","count":2},{"login":"rules-without-rulers","count":2},{"login":"100megasats","count":1},{"login":"2140data","count":1},{"login":"Bitcoin-Bill","count":1},{"login":"BitcoinUbuntu","count":1},{"login":"csuwildcat","count":1},{"login":"doggyballs","count":1},{"login":"remcoros","count":1},{"login":"unclejim7","count":1}],"issues":[{"login":"MrHodlX","count":13},{"login":"BitcoinUbuntu","count":2},{"login":"Hero-Gamer","count":1},{"login":"portlandhodl","count":1},{"login":"timechainb","count":1}]},"contributors":[{"login":"w-s-bitcoin","last_seen_at":"2026-09-25T20:27:53Z"},{"login":"timechainb","last_seen_at":"2026-09-25T20:24:03Z"},{"login":"portlandhodl","last_seen_at":"2026-09-25T21:00:05Z"},{"login":"MrHodlX","last_seen_at":"2026-09-26T01:36:03Z"},{"login":"J25dunn","last_seen_at":"2026-09-14T00:52:02Z"},{"login":"BTCMcBoatface","last_seen_at":"2026-09-12T22:51:09Z"},{"login":"Hero-Gamer","last_seen_at":"2026-09-16T23:19:21Z"},{"login":"kaloudis","last_seen_at":"2026-09-11T03:10:01Z"},{"login":"email:bed3af55053c78f6","last_seen_at":"2026-09-10T22:41:09Z"},{"login":"hotpixelgroup","last_seen_at":"2026-09-17T16:15:09Z"},{"login":"email:0ca1dda35e422a0f","last_seen_at":"2026-09-05T16:17:09Z"},{"login":"Rob1Ham","last_seen_at":"2026-09-05T04:49:37Z"},{"login":"dplusplus1024","last_seen_at":"2026-09-04T16:46:04Z"},{"login":"HodlDee","last_seen_at":"2026-09-02T15:19:10Z"},{"login":"pdubl22","last_seen_at":"2026-09-02T04:06:43Z"},{"login":"ottoz0r","last_seen_at":"2026-09-02T02:19:20Z"},{"login":"FNBIP","last_seen_at":"2026-09-02T00:55:23Z"},{"login":"SaniExp","last_seen_at":"2026-09-02T16:47:02Z"},{"login":"Jdelg718","last_seen_at":"2026-08-31T15:06:08Z"},{"login":"dani69654","last_seen_at":"2026-09-09T10:02:14Z"},{"login":"RandyMcMillan","last_seen_at":"2026-08-31T09:57:39Z"},{"login":"doggyballs","last_seen_at":"2026-09-21T00:35:15Z"},{"login":"2140data","last_seen_at":"2026-08-31T04:54:04Z"},{"login":"itme-brain","last_seen_at":"2026-09-05T00:24:12Z"},{"login":"zmeyer44","last_seen_at":"2026-08-31T14:06:04Z"},{"login":"csuwildcat","last_seen_at":"2026-08-30T20:04:05Z"},{"login":"MHODL","last_seen_at":"2026-08-30T19:00:46Z"},{"login":"rules-without-rulers","last_seen_at":"2026-09-12T17:11:11Z"},{"login":"email:78da113009979a72","last_seen_at":"2026-08-30T03:08:17Z"},{"login":"email:bdb4923572c8ac13","last_seen_at":"2026-08-29T03:53:33Z"},{"login":"email:56537ddd43347582","last_seen_at":"2026-08-25T19:35:57Z"},{"login":"Shitnobi","last_seen_at":"2026-08-26T23:09:24Z"},{"login":"MiguelMedeiros","last_seen_at":"2026-08-27T21:47:11Z"},{"login":"tmmmemcee","last_seen_at":"2026-09-17T00:58:54Z"},{"login":"100megasats","last_seen_at":"2026-08-30T20:53:53Z"},{"login":"unclejim7","last_seen_at":"2026-09-05T04:37:51Z"},{"login":"mikeinspace","last_seen_at":"2026-09-10T05:25:42Z"},{"login":"remcoros","last_seen_at":"2026-09-12T15:11:21Z"},{"login":"Korg1970","last_seen_at":"2026-09-12T17:42:58Z"},{"login":"Bitcoin-Bill","last_seen_at":"2026-09-02T01:00:57Z"},{"login":"claude","last_seen_at":"2026-09-23T23:41:13Z"},{"login":"CypherBoxLLC","last_seen_at":"2026-09-19T22:44:16Z"},{"login":"email:93964419ae80c511","last_seen_at":"2026-09-20T10:42:49Z"},{"login":"codex","last_seen_at":"2026-09-21T01:04:42Z"},{"login":"BitcoinUbuntu","last_seen_at":"2026-09-25T18:06:38Z"}]},{"name":"oogaboogaland","totals":{"contributors":11,"commits":244,"prs":76,"reviews":6,"issues":6,"comments":10},"weekly":[{"week":"2026-W37","commits":45,"prs":19,"reviews":0,"issues":0,"comments":1},{"week":"2026-W38","commits":80,"prs":30,"reviews":3,"issues":0,"comments":0},{"week":"2026-W39","commits":119,"prs":27,"reviews":3,"issues":6,"comments":9}],"last_activity_at":"2026-09-26T01:08:57Z","leaderboards":{"commits":[{"login":"w-s-bitcoin","count":138},{"login":"2140data","count":48},{"login":"YellowBrokeIt","count":20},{"login":"rules-without-rulers","count":14},{"login":"knorrium","count":7},{"login":"MrHodlX","count":5},{"login":"drneski","count":5},{"login":"tmmmemcee","count":3},{"login":"Holo-Elfstone","count":2},{"login":"SaniExp","count":1},{"login":"ottoz0r","count":1}],"prs":[{"login":"w-s-bitcoin","count":23},{"login":"2140data","count":19},{"login":"rules-without-rulers","count":11},{"login":"drneski","count":5},{"login":"knorrium","count":5},{"login":"MrHodlX","count":3},{"login":"YellowBrokeIt","count":3},{"login":"tmmmemcee","count":3},{"login":"Holo-Elfstone","count":2},{"login":"SaniExp","count":1},{"login":"ottoz0r","count":1}],"reviews":[{"login":"w-s-bitcoin","count":6}],"comments":[{"login":"rules-without-rulers","count":4},{"login":"Holo-Elfstone","count":2},{"login":"w-s-bitcoin","count":2},{"login":"YellowBrokeIt","count":1},{"login":"drneski","count":1}],"issues":[{"login":"rules-without-rulers","count":6}]},"contributors":[{"login":"w-s-bitcoin","last_seen_at":"2026-09-25T19:32:14Z"},{"login":"MrHodlX","last_seen_at":"2026-09-20T21:37:43Z"},{"login":"ottoz0r","last_seen_at":"2026-09-07T21:41:44Z"},{"login":"SaniExp","last_seen_at":"2026-09-25T19:35:29Z"},{"login":"2140data","last_seen_at":"2026-09-25T23:49:17Z"},{"login":"rules-without-rulers","last_seen_at":"2026-09-25T04:14:15Z"},{"login":"tmmmemcee","last_seen_at":"2026-09-24T22:34:07Z"},{"login":"knorrium","last_seen_at":"2026-09-20T21:18:34Z"},{"login":"drneski","last_seen_at":"2026-09-26T01:08:57Z"},{"login":"YellowBrokeIt","last_seen_at":"2026-09-23T22:46:53Z"},{"login":"Holo-Elfstone","last_seen_at":"2026-09-21T20:29:14Z"}]},{"name":"bedrock","totals":{"contributors":2,"commits":19,"prs":6,"reviews":0,"issues":0,"comments":0},"weekly":[{"week":"2026-W36","commits":16,"prs":6,"reviews":0,"issues":0,"comments":0},{"week":"2026-W37","commits":3,"prs":0,"reviews":0,"issues":0,"comments":0}],"last_activity_at":"2026-09-07T05:21:02Z","leaderboards":{"commits":[{"login":"w-s-bitcoin","count":13},{"login":"ottoz0r","count":6}],"prs":[{"login":"w-s-bitcoin","count":6}],"reviews":[],"comments":[],"issues":[]},"contributors":[{"login":"w-s-bitcoin","last_seen_at":"2026-09-07T05:21:02Z"},{"login":"ottoz0r","last_seen_at":"2026-09-04T21:29:31Z"}]}],"recent":[{"login":"MrHodlX","repo":"entropylab","type":"comment","occurred_at":"2026-09-26T01:36:03Z"},{"login":"MrHodlX","repo":"entropylab","type":"comment","occurred_at":"2026-09-26T01:35:26Z"},{"login":"MrHodlX","repo":"entropylab","type":"comment","occurred_at":"2026-09-26T01:30:46Z"},{"login":"MrHodlX","repo":"entropylab","type":"comment","occurred_at":"2026-09-26T01:24:51Z"},{"login":"MrHodlX","repo":"entropylab","type":"comment","occurred_at":"2026-09-26T01:20:17Z"},{"login":"drneski","repo":"oogaboogaland","type":"pr","occurred_at":"2026-09-26T01:08:57Z","draft":true},{"login":"MrHodlX","repo":"entropylab","type":"issue","occurred_at":"2026-09-26T01:00:53Z"},{"login":"MrHodlX","repo":"entropylab","type":"issue","occurred_at":"2026-09-26T00:58:32Z"},{"login":"MrHodlX","repo":"entropylab","type":"issue","occurred_at":"2026-09-26T00:58:22Z"},{"login":"MrHodlX","repo":"entropylab","type":"issue","occurred_at":"2026-09-26T00:58:13Z"},{"login":"2140data","repo":"oogaboogaland","type":"merge","occurred_at":"2026-09-25T23:49:17Z"},{"login":"2140data","repo":"oogaboogaland","type":"pr","occurred_at":"2026-09-25T23:49:09Z"}],"contributors":[{"login":"portlandhodl","last_seen_at":"2026-09-25T21:00:05Z"},{"login":"w-s-bitcoin","last_seen_at":"2026-09-25T20:27:53Z"},{"login":"MrHodlX","last_seen_at":"2026-09-26T01:36:03Z"},{"login":"timechainb","last_seen_at":"2026-09-25T20:24:03Z"},{"login":"2140data","last_seen_at":"2026-09-25T23:49:17Z"},{"login":"Hero-Gamer","last_seen_at":"2026-09-16T23:19:21Z"},{"login":"dplusplus1024","last_seen_at":"2026-09-04T16:46:04Z"},{"login":"J25dunn","last_seen_at":"2026-09-14T12:31:24Z"},{"login":"ottoz0r","last_seen_at":"2026-09-07T21:41:44Z"},{"login":"rules-without-rulers","last_seen_at":"2026-09-25T04:14:15Z"},{"login":"RandyMcMillan","last_seen_at":"2026-08-31T09:57:39Z"},{"login":"itme-brain","last_seen_at":"2026-09-05T00:24:12Z"},{"login":"pdubl22","last_seen_at":"2026-09-02T04:06:43Z"},{"login":"YellowBrokeIt","last_seen_at":"2026-09-23T22:46:53Z"},{"login":"BTCMcBoatface","last_seen_at":"2026-09-12T22:51:09Z"},{"login":"Rob1Ham","last_seen_at":"2026-09-05T04:49:37Z"},{"login":"Jdelg718","last_seen_at":"2026-08-31T15:06:08Z"},{"login":"claude","last_seen_at":"2026-09-23T23:41:13Z"},{"login":"dani69654","last_seen_at":"2026-09-09T10:02:14Z"},{"login":"knorrium","last_seen_at":"2026-09-20T21:18:34Z"},{"login":"tmmmemcee","last_seen_at":"2026-09-24T22:34:07Z"},{"login":"drneski","last_seen_at":"2026-09-26T01:08:57Z"},{"login":"hotpixelgroup","last_seen_at":"2026-09-17T16:15:09Z"},{"login":"MHODL","last_seen_at":"2026-08-30T19:00:46Z"},{"login":"SaniExp","last_seen_at":"2026-09-25T19:35:29Z"},{"login":"Holo-Elfstone","last_seen_at":"2026-09-21T20:29:14Z"},{"login":"HodlDee","last_seen_at":"2026-09-02T15:19:10Z"},{"login":"csuwildcat","last_seen_at":"2026-08-30T20:04:05Z"},{"login":"FNBIP","last_seen_at":"2026-09-02T00:55:23Z"},{"login":"doggyballs","last_seen_at":"2026-09-21T00:35:15Z"},{"login":"email:0ca1dda35e422a0f","last_seen_at":"2026-09-05T16:17:09Z"},{"login":"email:bdb4923572c8ac13","last_seen_at":"2026-08-29T03:53:33Z"},{"login":"BitcoinUbuntu","last_seen_at":"2026-09-25T18:06:38Z"},{"login":"MiguelMedeiros","last_seen_at":"2026-08-27T21:47:11Z"},{"login":"codex","last_seen_at":"2026-09-21T01:04:42Z"},{"login":"email:bed3af55053c78f6","last_seen_at":"2026-09-10T22:41:09Z"},{"login":"zmeyer44","last_seen_at":"2026-08-31T14:06:04Z"},{"login":"CypherBoxLLC","last_seen_at":"2026-09-19T22:44:16Z"},{"login":"kaloudis","last_seen_at":"2026-09-11T03:10:01Z"},{"login":"unclejim7","last_seen_at":"2026-09-05T04:37:51Z"},{"login":"100megasats","last_seen_at":"2026-08-30T20:53:53Z"},{"login":"Bitcoin-Bill","last_seen_at":"2026-09-02T01:00:57Z"},{"login":"Korg1970","last_seen_at":"2026-09-12T17:42:58Z"},{"login":"Shitnobi","last_seen_at":"2026-08-26T23:09:24Z"},{"login":"email:56537ddd43347582","last_seen_at":"2026-08-25T19:35:57Z"},{"login":"email:78da113009979a72","last_seen_at":"2026-08-30T03:08:17Z"},{"login":"email:93964419ae80c511","last_seen_at":"2026-09-20T10:42:49Z"},{"login":"mikeinspace","last_seen_at":"2026-09-10T05:25:42Z"},{"login":"remcoros","last_seen_at":"2026-09-12T15:11:21Z"}]};
 })();
 
 // ---- js/jumbotron.js ----
@@ -27986,9 +28044,9 @@ void main() {
       stats.transforms++;
       return true;
     };
-    const eligible = (target, ignore) => {
+    const eligible = (target, ignore, includeNonWeapon = false) => {
       const { node, owner } = target;
-      return !!node.geometry && owner.active !== false && owner.weaponType !== "none" && (!ignore || owner.cave !== ignore)
+      return !!node.geometry && owner.active !== false && (includeNonWeapon || owner.weaponType !== "none") && (!ignore || owner.cave !== ignore)
         && !(node.mirror && (node.mirrorPortal || node.mirrorReveal >= 1)) && refreshWorld(node);
     };
     const sync = node => {
@@ -28018,14 +28076,27 @@ void main() {
     const onMirror = (node, bounds, x, y) => x >= bounds.min[0] - EPS && x <= bounds.max[0] + EPS
       && y >= bounds.min[1] + (bounds.max[1] - bounds.min[1]) * (node.mirrorReveal || 0) - EPS && y <= bounds.max[1] + EPS
       && (!node.mirrorDamage || node.mirrorDamage.contains(x, y));
-    const ray = (out, ox, oy, oz, dx, dy, dz, maxDistance, ignore = null, accept = null) => {
+    const ray = (out, ox, oy, oz, dx, dy, dz, maxDistance, ignore = null, accept = null, includeNonWeapon = false) => {
       begin(out);
       const length = Math.hypot(dx, dy, dz);
       if (!length || maxDistance < 0) return false;
       dx /= length; dy /= length; dz /= length;
       let nearest = maxDistance;
       for (const target of targets) {
-        if (!eligible(target, ignore) || accept && !accept(target.owner, target.node)) continue;
+        if (!eligible(target, ignore, includeNonWeapon) || accept && !accept(target.owner, target.node)) continue;
+        if (includeNonWeapon && target.radius && !target.node.geometry.faces.length) {
+          const m = target.node.world, px = m[12] - ox, py = m[13] - oy, pz = m[14] - oz;
+          const radius = target.radius * Math.sqrt(Math.max(
+            m[0] * m[0] + m[1] * m[1] + m[2] * m[2],
+            m[4] * m[4] + m[5] * m[5] + m[6] * m[6],
+            m[8] * m[8] + m[9] * m[9] + m[10] * m[10]));
+          const along = px * dx + py * dy + pz * dz, side = px * px + py * py + pz * pz - along * along;
+          if (along >= 0 && side <= radius * radius) {
+            const found = Math.max(0, along - Math.sqrt(Math.max(0, radius * radius - side)));
+            if (found < nearest) { nearest = found; hit(out, target, found, ox + dx * found, oy + dy * found, oz + dz * found); }
+          }
+          continue;
+        }
         const entry = sync(target.node);
         if (!entry || !rayBox(entry.box, ox, oy, oz, dx, dy, dz, nearest)) continue;
         stats.candidates++;
@@ -29262,7 +29333,7 @@ void main() {
   };
   const create = (ctx) => {
     const { renderer, canvas, camera, hud, presets, dist: [DIST_MIN, DIST_MAX], follow, fly, clampTarget, clampCamera, coarse, close = null, ceilingAt = null } = ctx;
-    let crew = null, fx = null, input = null, active = true;
+    let crew = null, fx = null, input = null, reticleTarget = null, active = true;
     let restoredPose = null;
     const freeTarget = { x: 0, y: 0, z: 0 };
     const followTarget = { x: 0, y: 0, z: 0 };
@@ -29309,6 +29380,7 @@ void main() {
     const bind = (systems) => {
       crew = systems.crew;
       input = systems.input;
+      reticleTarget = systems.reticleTarget || null;
       sightClear = systems.fireReachable || null;
       cursorClear = systems.cursorReachable || sightClear;
       aimSurface = systems.aimSurface || null;
@@ -29350,6 +29422,14 @@ void main() {
     let assistedTargetActive = false, assistedTargetInRange = false, assistedTargetClose = false, assistedTargetDistance = Infinity, assistedTargetWait = 0, assistedReticleX = NaN, assistedReticleY = NaN;
     const targetFeedback = (type) => {
       if (reticle.dataset.target !== type) reticle.dataset.target = type;
+    };
+    const feedbackType = (hit) => {
+      if (!hit || !hit.owner) return "none";
+      const kind = hit.owner.kind;
+      if (kind === "clanker" || kind === "agent") return "friendly";
+      if (kind === "caveman") return hit.type;
+      if (kind === "crate") return "object";
+      return reticleTarget ? reticleTarget(hit) : hit.type;
     };
     const setCombatTooltip = (hit) => {
       const cave = hit && hit.owner && hit.owner.kind === "caveman" ? hit.owner.cave : null;
@@ -29796,19 +29876,19 @@ void main() {
       const length = Math.hypot(dx, dy, dz);
       aimAlongView(out, p.x, p.y, p.z, dx / length, dy / length, dz / length);
     };
-    const resolveReticleTarget = (out, cave, primary) => {
+    const resolveReticleTarget = (out, cave, primary, visual = false) => {
       if (!input || !input.weaponTargets) return false;
       crew.weaponOrigin(targetOrigin, cave, primary);
       const eye = camera.position, dx = camera.target.x - eye.x, dy = camera.target.y - eye.y, dz = camera.target.z - eye.z;
-      const length = Math.hypot(dx, dy, dz), reach = primary ? crew.meleeReach(cave) : 60;
+      const length = Math.hypot(dx, dy, dz), reach = visual ? 60 : primary ? crew.meleeReach(cave) : 60;
       const eyeReach = reach + Math.hypot(eye.x - targetOrigin.x, eye.y - targetOrigin.y, eye.z - targetOrigin.z);
-      if (!input.weaponTargets.ray(out, eye.x, eye.y, eye.z, dx / length, dy / length, dz / length, Math.min(60, eyeReach), cave)) return false;
+      if (!input.weaponTargets.ray(out, eye.x, eye.y, eye.z, dx / length, dy / length, dz / length, Math.min(60, eyeReach), cave, null, visual)) return false;
       const mx = out.x - targetOrigin.x, my = out.y - targetOrigin.y, mz = out.z - targetOrigin.z;
       const distance = Math.hypot(mx, my, mz), near = Math.max(0, 1 - TARGET_MARGIN / Math.max(distance, TARGET_MARGIN));
       const cameraNear = Math.max(0, out.distance - TARGET_MARGIN) / length;
       const clear = sightClear || cursorClear;
-      // Share the exact reach and cover checks between the reticle and a
-      // released melee strike; a displayed orange target promises a hit.
+      // Melee contacts keep their weapon reach; visual feedback can inspect
+      // interactive targets farther away without changing a released strike.
       return distance <= reach && (!clear || clear(eye.x, eye.y, eye.z, eye.x + dx * cameraNear, eye.y + dy * cameraNear, eye.z + dz * cameraNear, out.node, true))
         && (!clear || clear(targetOrigin.x, targetOrigin.y, targetOrigin.z, targetOrigin.x + mx * near, targetOrigin.y + my * near, targetOrigin.z + mz * near, out.node, true));
     };
@@ -29840,18 +29920,26 @@ void main() {
       targetWait -= dt;
       const primary = cave.weapon.primaryEquipped;
       if (targetWait > 0 && primary === targetPrimary) {
-        setCombatTooltip(assistedView() ? assistedTargetActive ? assistedTargetHit : null : targetActive ? targetHit : null);
+        setCombatTooltip(targetActive ? targetHit : null);
         return;
       }
       targetWait = TARGET_INTERVAL;
       targetPrimary = primary;
       if (assistedView()) {
-        targetFeedback(assistedTargetActive ? primary && !assistedTargetInRange ? "out-of-range" : assistedTargetHit.type : "none");
-        setCombatTooltip(assistedTargetActive ? assistedTargetHit : null);
+        targetActive = !!(input && input.weaponTargets && input.weaponTargets.ray(targetHit,
+          cursorRay.ox, cursorRay.oy, cursorRay.oz, cursorRay.dx, cursorRay.dy, cursorRay.dz, 60, cave, null, true));
+        if (targetActive) {
+          const clear = sightClear || cursorClear, near = Math.max(0, 1 - TARGET_MARGIN / Math.max(targetHit.distance, TARGET_MARGIN));
+          if (clear && !clear(cursorRay.ox, cursorRay.oy, cursorRay.oz,
+            cursorRay.ox + (targetHit.x - cursorRay.ox) * near, cursorRay.oy + (targetHit.y - cursorRay.oy) * near,
+            cursorRay.oz + (targetHit.z - cursorRay.oz) * near, targetHit.node, true)) targetActive = false;
+        }
+        targetFeedback(targetActive ? feedbackType(targetHit) : "none");
+        setCombatTooltip(targetActive ? targetHit : null);
         return;
       }
-      targetActive = resolveReticleTarget(targetHit, cave, primary);
-      targetFeedback(targetActive ? targetHit.type : "none");
+      targetActive = resolveReticleTarget(targetHit, cave, primary, true);
+      targetFeedback(targetActive ? feedbackType(targetHit) : "none");
       setCombatTooltip(targetActive ? targetHit : null);
     };
     const positionReticle = (x, y) => {
@@ -33545,10 +33633,12 @@ void main() {
       el.tooltip.style.transform = `translate(${left}px, ${top}px)`;
     };
     const tooltip = {
-      show: (text, x, y, cave = null) => {
+      show: (text, x, y, cave = null, noStatusDot = false) => {
         if (cave !== tipCave) tipSpeechTop = Infinity;
         tipCave = cave;
-        const name = !!cave, changed = text !== tipText || name !== tipName;
+        const name = !!cave;
+        const changed = text !== tipText || name !== tipName || el.tooltip.classList.contains("tooltip--no-status-dot") !== noStatusDot;
+        el.tooltip.classList.toggle("tooltip--no-status-dot", noStatusDot);
         if (name !== tipName) {
           tipName = name;
           el.tooltip.classList.toggle("tooltip--name", name);
@@ -45666,7 +45756,7 @@ void main() {
 // a small state machine on the pattern of the hub's gorillas, roaming, resting, sleeping and climbing.
 //
 // States: `idle` (look about, the toucan pecks), `walk` (turn, then gait to a goal, waiting for a neighbour in
-// the way), `rest` (lie or sit; asleep by night or on a nap, with zzz marks) and `glide` (a timed move from one
+// the way), `rest` (lie or sit; asleep by night or on a nap) and `glide` (a timed move from one
 // point to another under a chosen pose: climbing a trunk, walking a branch, hopping onto the log, flying).
 // The jaguar walks, naps and lies along the fallen log; the monkey knuckle-walks, sits and climbs a canopy
 // trunk to sit out on a branch; the toucan hops and pecks, and every so often flies to a crown top or another
@@ -45687,14 +45777,14 @@ void main() {
     monkey: { walk: 0.6, run: 1.5, stride: 0.62, turn: 3.4, radius: 0.35, swing: 0.5 },
     toucan: { walk: 0.32, run: 0.6, stride: 0.2, turn: 5, radius: 0.22, swing: 0, fly: 3.4 }
   };
-  const INNER = 4.6, OUTER = 9, POSE_RATE = 7, CLIMB_SPEED = 0.75, ZZZ_EVERY = 2.2;
+  const INNER = 4.6, OUTER = 9, POSE_RATE = 7, CLIMB_SPEED = 0.75;
   const angleTo = (from, to) => Math.atan2(Math.sin(to - from), Math.cos(to - from));
   const headingOf = (dx, dz) => Math.atan2(-dz, dx);
   const ease = (a, key, target, k) => (a[key] += (target - a[key]) * k);
   const wave = (a, offset) => Math.sin(TAU * (a.phase + offset));
 
   const create = (ctx) => {
-    const { parent, obstacles, sleepy, zzzAt, toWorld } = ctx;
+    const { parent, obstacles, sleepy, toWorld } = ctx;
     const rand = mulberry32(7717), SPOT = { x: 0, z: 0 }, WORLD = { x: 0, z: 0 };
     // Trees and logs in the island frame, read once from each placed node's transform.
     const place = (n, x, y, z, out) => {
@@ -45768,7 +45858,7 @@ void main() {
       setState(a, "glide", a.gdur);
     };
     const rest = (a, time, asleep) => {
-      a.asleep = asleep; a.zzz = 0.8;
+      a.asleep = asleep;
       setState(a, "rest", time);
     };
     const idle = (a, time) => setState(a, "idle", time);
@@ -45969,13 +46059,6 @@ void main() {
         if (t >= 1) arrive(a);
         return;
       }
-      if (a.state === "rest" && a.asleep) {
-        if ((a.zzz -= dt) <= 0) {
-          a.zzz = ZZZ_EVERY;
-          toWorld(a.x, a.z, WORLD);
-          zzzAt(WORLD.x, ctx.baseY + a.y + a.zzzY, WORLD.z);
-        }
-      }
       if (a.state === "idle" && (a.look -= dt) <= 0) {
         a.look = 1.2 + rand() * 2.4;
         a.lookYaw = (rand() - 0.5) * 1.4;
@@ -46061,7 +46144,7 @@ void main() {
         x: def.x, y: 0, z: def.z, heading: def.heading, gx: def.x, gz: def.z, state: "idle", timer: 1 + list.length, waits: 0,
         speed: 0, moving: 0, phase: 0, after: "", pose: "stand", arc: 0, face: 0, gt: 0, gdur: 1,
         sx: 0, sy: 0, sz: 0, ex: 0, ey: 0, ez: 0, dx: 1, dz: 0, u0: 0.2, onBranch: false,
-        tree: null, branch: null, log: null, perch: null, asleep: false, zzz: 0, zzzY: def.kind === "toucan" ? 0.6 : 0.8,
+        tree: null, branch: null, log: null, perch: null, asleep: false,
         look: 0, lookYaw: 0, peck: 0, snarl: 0,
         bodyY: rig.body.at[1], pitch: 0, front: 0, back: 0, headPitch: 0, headYaw: 0, wing: 0,
         wx: 0, wy: 0, wz: 0, owner: null
@@ -47689,10 +47772,12 @@ void main() {
   const HIP = 8 * U, SHOULDER_Y = 11 * U, SHOULDER_X = 6 * U, NECK_Y = 10.5 * U;
   const QUAD = 1.0, HUNCH = 0.5, REAR = 0.12;
   // Palette slots, shared by both forms
-  const C = { body: 0, bodyDk: 1, hide: 2, hideDk: 3, pad: 4, groove: 5, dash: 6, shades: 7, eye: 8, silver: 9, nostril: 10, brow: 11 };
-  const APE = ["#2b2724", "#1d1a18", "#56504b", "#46403c", "#3d3834", "#161412", "#2b2724", "#070707", "#2a1a0e", "#8b8681", "#0e0d0c", "#3a3531"];
-  const CODE = ["#0f5a22", "#093a15", "#6dff8c", "#48d864", "#a4ffb4", "#08300f", "#3dff66", "#070707", "#e6ffea", "#5cf07c", "#062a0d", "#86ffa0"];
-  const CODE_GLOW = { [C.body]: 0.12, [C.bodyDk]: 0.05, [C.hide]: 0.6, [C.hideDk]: 0.45, [C.pad]: 0.85, [C.dash]: 1, [C.eye]: 1, [C.silver]: 0.55, [C.brow]: 0.6 };
+  const C = { body: 0, bodyDk: 1, hide: 2, hideDk: 3, pad: 4, groove: 5, dash: 6, shades: 7, eye: 8, silver: 9, nostril: 10, brow: 11, silverShade: 14 };
+  const APE = ["#2b2724", "#1d1a18", "#56504b", "#46403c", "#3d3834", "#161412", "#2b2724", "#070707", "#2a1a0e", "#8b8681", "#0e0d0c", "#3a3531", "#f3f1df", "#c5ccd0", "#797570"];
+  const CODE = ["#0f5a22", "#093a15", "#6dff8c", "#48d864", "#a4ffb4", "#08300f", "#3dff66", "#070707", "#e6ffea", "#5cf07c", "#062a0d", "#86ffa0", "#f3f1df", "#c5ccd0", "#44dc67"];
+  const CODE_GLOW = { [C.body]: 0.12, [C.bodyDk]: 0.05, [C.hide]: 0.6, [C.hideDk]: 0.45, [C.pad]: 0.85, [C.dash]: 1, [C.eye]: 1, [C.silver]: 0.55, [C.silverShade]: 0.45, [C.brow]: 0.6 };
+  const BACK_SHADES = [C.body, C.hideDk, C.hide, C.silverShade, C.silver];
+  const BACK_CONTOUR = [2.2, 2.8, 3.2, 3.8, 4.1, 3.9, 4.2, 4.0, 3.8, 3.4, 2.8, 2.1];
   // Per gait: chest lean, limb swing, then a roaming and a driven pair of ground
   // speed (m/s) and stride per cycle (m). Driven it keeps up with an Ooga
   // (pilot.WALK.speed) and the gallop outruns one; roaming it ambles.
@@ -47920,14 +48005,27 @@ void main() {
     const v = makeVox(), fur = jitter(rand, C.body, C.bodyDk, 0.2);
     v.fill(1, 8, 0, 2, 1, 5, fur);
     v.fill(0, 9, 3, 11, 0, 6, fur);
-    // The pale chest plate on the front, the silver back and shoulder mounds on top
+    // Pale chest in front, dark shoulder mounds and a silver back behind them.
     v.fill(2, 7, 3, 9, 6, 6, jitter(rand, C.hide, C.hideDk, 0.25));
     v.fill(3, 6, 2, 2, 5, 5, C.hideDk);
-    v.fill(1, 8, 10, 11, 0, 2, C.silver);
     for (const [x0, x1] of [[-2, 1], [8, 11]]) {
       v.fill(x0, x1, 8, 12, 1, 5, fur);
-      v.fill(x0, x1, 12, 12, 1, 5, C.silver);
-      v.fill(x0, x1, 10, 11, 5, 5, C.silver);
+    }
+    // An uneven saddle follows the back muscles, broad between the shoulder
+    // blades and tapered at the neck and waist. Grain breaks up its outline
+    // and gives the silver fur mottled depth without a rectangular border.
+    for (let y = 0; y <= 11; y++) {
+      const lower = y < 3, left = lower ? 1 : 0, right = lower ? 8 : 9;
+      for (let x = left; x <= right; x++) for (let z = lower ? 1 : 0; z <= 2; z++) {
+        const center = 4.5 + 0.18 * Math.sin(y * 1.2);
+        const grain = (rand() - 0.5) * 0.55 + 0.15 * Math.sin(x * 2.6 + y * 1.8);
+        const edge = BACK_CONTOUR[y] - Math.abs(x - center) - z * 0.32 + grain;
+        let shade = Math.max(0, Math.min(4, Math.round(1.1 + edge * 1.1)));
+        if (!shade) continue;
+        if (shade === 4 && rand() < 0.18) shade = 3;
+        else if (shade === 3 && rand() < 0.1) shade = 2;
+        v.set(x, y, z, BACK_SHADES[shade]);
+      }
     }
     return codeDashes(v);
   };
@@ -47966,7 +48064,7 @@ void main() {
     v.fill(0, 4, 0, 0, 1, 1, C.hideDk);
     return v;
   };
-  const LAB_PALETTE = APE.concat(["#f3f1df", "#c5ccd0", "#658392"]);
+  const LAB_PALETTE = APE;
   const labTorsoVox = (rand) => {
     const v = torsoVox(rand);
     for (const [key] of v.map) {
@@ -47983,13 +48081,12 @@ void main() {
         v.set(x, y, z, 12);
       }
     }
-    // The open coat, folded collar and blue pocket remain part of the cached
-    // torso mesh, so they follow every bend of the body.
+    // The open coat and folded collar remain part of the cached torso mesh,
+    // so they follow every bend of the body.
     for (let y = 6; y <= 10; y++) {
       const x = y > 8 ? 2 : 3;
       v.set(x, y, 6, 12); v.set(9 - x, y, 6, 12);
     }
-    v.fill(1, 2, 4, 5, 7, 7, 14);
     return v;
   };
   const labArmVox = (rand) => {
@@ -48034,6 +48131,18 @@ void main() {
       labFlask: flask
     };
   });
+  const EMPTY_COLLISION = { verts: [], faces: [], lines: [] };
+  const labCoatClip = (mouth) => {
+    const geos = geometries(), sr = Math.sin(mouth.ry), cr = Math.cos(mouth.ry);
+    const limit = sr * mouth.x + cr * mouth.z + 0.5;
+    const inside = new Float32Array([sr, 0, cr, -limit]);
+    const outside = new Float32Array([-sr, 0, -cr, limit]);
+    const clipped = (geometry, plane, overlay = false) => ({ ...geometry, clipPlane: plane,
+      collisionGeometry: overlay ? EMPTY_COLLISION : geometry.collisionGeometry });
+    const plain = (part) => ({ ape: clipped(part.ape, outside), code: clipped(part.code, outside) });
+    return { mouth, sr, cr, reach: 4, torso: plain(geos.torso), armL: plain(geos.armL), armR: plain(geos.armR),
+      labTorso: clipped(geos.labTorso, inside, true), labArm: clipped(geos.labArm, inside, true) };
+  };
   const PART_NAMES = ["legL", "legR", "torso", "armL", "armR", "head"];
   const CLIMB_VERTICES = new WeakMap();
   const climbVertices = (geometry) => {
@@ -48061,7 +48170,7 @@ void main() {
   // groundAt(x, z) is the walking surface; walkable(fromX, fromZ, toX, toZ, y, height),
   // when given, is the scene's own swept test, the one its Oogas walk by, and bounds
   // every step the Agent takes. A walk is a list of { x, z } waypoints.
-  const create = ({ groundAt, walkable = null, form = "ape", x = 0, z = 0, heading = 0, managed = false, scale = 1 }) => {
+  const create = ({ groundAt, walkable = null, form = "ape", x = 0, z = 0, heading = 0, managed = false, scale = 1, coatClip = null }) => {
     const geos = geometries();
     const root = createNode({ position: { x, y: groundAt(x, z), z }, rotation: { x: 0, y: heading, z: 0 }, scale: { x: scale, y: scale, z: scale } });
     // The renderers draw the Agent's own palette inside the Matrix instead of repainting it.
@@ -48077,6 +48186,16 @@ void main() {
       head: createNode({ position: { x: 0, y: NECK_Y, z: 1.5 * U } })
     };
     addChild(chest, parts.armL, parts.armR, parts.head);
+    const coatParts = coatClip ? {
+      torso: createNode({ geometry: coatClip.labTorso, visible: false }),
+      armL: createNode({ geometry: coatClip.labArm, visible: false }),
+      armR: createNode({ geometry: coatClip.labArm, visible: false })
+    } : null;
+    if (coatParts) {
+      addChild(parts.torso, coatParts.torso);
+      addChild(parts.armL, coatParts.armL);
+      addChild(parts.armR, coatParts.armR);
+    }
     if (managed) {
       parts.jaw = createNode({ position: { x: 0, y: U, z: 4 * U } });
       addChild(parts.head, parts.jaw);
@@ -48100,7 +48219,7 @@ void main() {
       smash: false, hipOffsetZ: 0, sideAngle: 0,
       climb: 0, climbBlend: 0, climbPose: NaN, climbStride: 0, climbDirection: 0, mantle: 0,
       groom: 0, groomBlend: 0, groomSide: 1, groomTime: 0, sitLook: 0, sitShift: 0,
-      lab: false, labWork: "", labPhase: 0, labSide: 1, labReach: 0, labReachGrip: geos.labFlask.labGripY, labPreviewItem: false, labSqueeze: false, labDie: false, labRoll: 0,
+      lab: false, labRunIn: false, coatSplit: false, labWork: "", labPhase: 0, labSide: 1, labReach: 0, labReachGrip: geos.labFlask.labGripY, labPreviewItem: false, labSqueeze: false, labDie: false, labRoll: 0,
       labPalmLift: 0, labBench: null, labTouchArm: false, labTouchSide: 1,
       labArmOffsetX: 0, labArmOffsetY: 0, labArmOffsetZ: 0
     };
@@ -48125,8 +48244,10 @@ void main() {
     const setForm = (next, force = false) => {
       if (state.form === next && !force) return;
       state.form = next;
-      for (const name of PART_NAMES) parts[name].geometry = state.lab && name === "torso" ? geos.labTorso
-        : state.lab && (name === "armL" || name === "armR") ? geos.labArm : geos[managed && name === "head" ? "feedingHead" : name][next];
+      for (const name of PART_NAMES) parts[name].geometry = state.coatSplit && (name === "torso" || name === "armL" || name === "armR")
+        ? coatClip[name][next] : state.lab && name === "torso" ? geos.labTorso
+          : state.lab && (name === "armL" || name === "armR") ? geos.labArm : geos[managed && name === "head" ? "feedingHead" : name][next];
+      if (coatParts) coatParts.torso.visible = coatParts.armL.visible = coatParts.armR.visible = state.coatSplit;
       if (managed) parts.jaw.geometry = geos.jaw[next];
       if (refreshGeometry) refreshGeometry();
     };
@@ -48299,7 +48420,7 @@ void main() {
       const restCycle = ((restTime % restPeriod) + restPeriod) % restPeriod;
       const restMotion = lounge && restCycle > restPause ? Math.sin((restCycle - restPause) * Math.PI / 7) ** 2 * (1 - grooming) : 0;
       const jumping = managed && state.air, takeoff = managed ? state.takeoff : 0;
-      const laboratory = managed && state.lab && !lounge && !jumping && !rolling && !climbing && state.pound <= 0 && !state.poundCharge && !state.charge;
+      const laboratory = managed && state.lab && !state.labRunIn && !lounge && !jumping && !rolling && !climbing && state.pound <= 0 && !state.poundCharge && !state.charge;
       const labWork = laboratory ? state.labWork : "";
       const labSqueeze = laboratory && state.labSqueeze && !labWork && labFlask === labPlaceholder;
       const labWalking = laboratory && !labWork && !labSqueeze && state.speed > 0.1;
@@ -48349,13 +48470,12 @@ void main() {
           arm.position.x -= state.labArmOffsetX; arm.position.y -= state.labArmOffsetY; arm.position.z -= state.labArmOffsetZ;
           state.labArmOffsetX = state.labArmOffsetY = state.labArmOffsetZ = 0;
         }
-        // A standing neighbour tucks its shoulders and takes short steps to let
-        // another adult pass. Meshes and model scale stay exactly the same.
+        // Keep an idle scientist's shoulders at the same width as its walking
+        // pose; narrow gaps can let the arms pass through scenery instead.
         const climbStroke = wave(climbPhase, l.side < 0 ? 0 : 0.5), leg = parts[l.leg];
         if (managed) {
-          // Ordinary lab steps leave room between the coat and forearms. Only
-          // an actual narrow passage requests the separately measured tuck.
-          arm.position.x = damp(arm.position.x, l.side * ((labSqueeze ? 0.22 : labWalking ? 0.66 : laboratory ? 0.36 : squeeze ? 0.4 : SHOULDER_X) * (1 - climbing) + 0.38 * climbing), 12, dt);
+          // Ordinary lab steps leave room between the coat and forearms.
+          arm.position.x = damp(arm.position.x, l.side * ((laboratory ? 0.66 : squeeze ? 0.4 : SHOULDER_X) * (1 - climbing) + 0.38 * climbing), 12, dt);
           // Counter the torso's tilt during each lift so the hands and toes
           // move along the wall instead of pumping away from its surface.
           arm.position.z = damp(arm.position.z, 0.5 * U - climbing * (0.036 + climbStroke * 0.055), 20, dt);
@@ -48567,7 +48687,7 @@ void main() {
       mat4.multiply(envelopeHead, envelopeChest, parts.head.local);
       body.minX = body.minY = body.minZ = Infinity;
       body.maxX = body.maxY = body.maxZ = -Infinity;
-      let radius2 = 0, compactRadius2 = 0, poundRadius2 = 0, standRadius2 = 0, parkRadius2 = 0, sitRadius2 = 0, sitWidth = 0, labRadius2 = 0;
+      let radius2 = 0, compactRadius2 = 0, poundRadius2 = 0, standRadius2 = 0, parkRadius2 = 0, sitRadius2 = 0, sitWidth = 0, labRadius2 = 0, labBodyRadius2 = 0, labBodyMinY = Infinity, labBodyMaxY = -Infinity;
       const exactRest = !!state.lounge || Math.abs(state.sideAngle) > 0.001;
       let supportY = Infinity;
       for (let i = 0; i < envelopeParts.length; i++) {
@@ -48584,6 +48704,10 @@ void main() {
           body.minY = Math.min(body.minY, py); body.maxY = Math.max(body.maxY, py);
           body.minZ = Math.min(body.minZ, pz); body.maxZ = Math.max(body.maxZ, pz);
           radius2 = Math.max(radius2, px * px + pz * pz);
+          if (part !== parts.armL && part !== parts.armR) {
+            labBodyRadius2 = Math.max(labBodyRadius2, px * px + pz * pz);
+            labBodyMinY = Math.min(labBodyMinY, py); labBodyMaxY = Math.max(labBodyMaxY, py);
+          }
           const nearest = Math.min(Math.abs(pz - QUAD_CENTERS[0] * scale), Math.abs(pz - QUAD_CENTERS[1] * scale), Math.abs(pz - QUAD_CENTERS[2] * scale));
           compactRadius2 = Math.max(compactRadius2, px * px + nearest * nearest);
           const poundNearest = Math.min(Math.abs(pz - POUND_CENTERS[0] * scale), Math.abs(pz - POUND_CENTERS[1] * scale), Math.abs(pz - POUND_CENTERS[2] * scale));
@@ -48648,9 +48772,9 @@ void main() {
       body.labCompact = state.lab && labRadius2 <= (LAB_RADIUS * scale) ** 2
         && Math.max(-body.minX, body.maxX) <= Math.sqrt(LAB_RADIUS ** 2 - 0.4 ** 2) * scale;
       body.labIdleCompact = state.lab && !state.labWork && state.speed <= 0.1
-        && radius2 <= (LAB_IDLE_RADIUS * scale) ** 2 && body.height <= LAB_HEIGHT * scale;
+        && labBodyRadius2 <= (LAB_IDLE_RADIUS * scale) ** 2 && labBodyMaxY - labBodyMinY <= LAB_HEIGHT * scale;
       body.labWalkCompact = state.lab && !state.labWork
-        && radius2 <= (LAB_WALK_RADIUS * scale) ** 2 && body.height <= LAB_HEIGHT * scale;
+        && labBodyRadius2 <= (LAB_WALK_RADIUS * scale) ** 2 && labBodyMaxY - labBodyMinY <= LAB_HEIGHT * scale;
       body.labSqueezeCompact = state.lab && state.labSqueeze && !state.labWork && labFlask === labPlaceholder
         && radius2 <= (LAB_SQUEEZE_RADIUS * scale) ** 2 && body.height <= LAB_HEIGHT * scale;
     };
@@ -48672,10 +48796,23 @@ void main() {
       state.speed = Math.abs(speed);
       state.air = airborne;
       const lab = !!(motion && motion.lab);
-      if (state.lab !== lab) {
-        state.lab = lab; setForm(state.form, true);
+      let coatSplit = false;
+      if (coatClip) {
+        const dx = px - coatClip.mouth.x, dz = pz - coatClip.mouth.z;
+        const along = dx * coatClip.sr + dz * coatClip.cr - 0.5;
+        const across = dx * coatClip.cr - dz * coatClip.sr;
+        coatSplit = Math.abs(along) < coatClip.reach && Math.abs(across) < 2.5 + MANAGED_MOTION_RADIUS
+          && py > coatClip.mouth.floorY - 1.5 && py < coatClip.mouth.floorY + coatClip.mouth.room.h + 1.5;
+      }
+      const labChanged = state.lab !== lab, coatChanged = state.coatSplit !== coatSplit;
+      if (labChanged || coatChanged) {
+        state.lab = lab; state.coatSplit = coatSplit;
+        setForm(state.form, true);
+      }
+      state.labRunIn = !!(motion && motion.labRunIn);
+      if (labChanged) {
         if (!airborne && !state.roll && !state.climb) {
-          state.pitch = lab ? 0.08 : QUAD; chest.rotation.x = state.pitch;
+          state.pitch = lab && !state.labRunIn ? 0.08 : QUAD; chest.rotation.x = state.pitch;
           parts.armL.rotation.x = parts.armR.rotation.x = -state.pitch;
         }
       }
@@ -48691,7 +48828,7 @@ void main() {
       state.labSqueeze = !!(motion && motion.labSqueeze);
       state.labDie = !!(motion && motion.labDie);
       state.labRoll = state.labDie && motion ? clamp(motion.labRoll || 0, 0, 1) : 0;
-      state.biped = lab || biped;
+      state.biped = lab && !state.labRunIn || biped;
       state.charge = motion ? clamp(motion.charge || 0, 0, 1) : 0;
       state.poundCharge = motion ? clamp(motion.poundCharge || 0, 0, 1) : 0;
       state.takeoff = motion ? clamp(motion.takeoff || 0, 0, 1) : 0;
@@ -48742,7 +48879,7 @@ void main() {
     };
     // These matrices come from the current pose, including the floor adjustment
     // and reclining hips, so projectiles never chase the previous render frame.
-    const previewNodes = managed ? [root, hips, ...envelopeParts] : null;
+    const previewNodes = managed ? [root, hips, ...envelopeParts, ...(coatParts ? [coatParts.torso, coatParts.armL, coatParts.armR] : [])] : null;
     const previewTransforms = managed ? new Float64Array(previewNodes.length * 10) : null;
     const previewQuaternions = managed ? new Array(previewNodes.length) : null;
     const previewGeometries = managed ? new Array(previewNodes.length) : null;
@@ -48866,6 +49003,7 @@ void main() {
         if (q) for (let j = 0; j < 4; j++) previewTransforms[at + 6 + j] = q[j];
       }
       const lab = !!(motion && motion.lab);
+      const passArms = lab && !motion.labWork && labFlask === labPlaceholder;
       if (fromLounge !== null) poseManaged(2, px, py, pz, facing, 0, false, false, fromLounge, motion);
       let fromVisible = 0;
       if (clearAt && (!staticPose || fromLounge !== null)) {
@@ -48884,7 +49022,7 @@ void main() {
         previewBounds(previewTo, lab);
         if (sequenceStep > 0 && clearAt && clearAt.beginPose) clearAt.beginPose(entry);
         for (let i = 0; i < envelopeParts.length && clear; i++) {
-          if (!envelopeParts[i].visible) continue;
+          if (!envelopeParts[i].visible || passArms && (i === 3 || i === 4)) continue;
           const vertices = previewVertices[i], offset = i * 16, m = previewMatrices;
           const from = (fromVisible & (1 << i)) ? previewFrom : previewTo;
           let enclosed = false;
@@ -48931,9 +49069,10 @@ void main() {
       refreshGeometry(); measureBody();
       return clear;
     };
-    const labPreviewMotion = { lab: true, labWork: "", labPhase: 0, labSide: 1, labReach: 0, labGripY: geos.labFlask.labGripY, labSqueeze: false, labDie: false, labRoll: 0, labBench: null };
+    const labPreviewMotion = { lab: true, labRunIn: false, labWork: "", labPhase: 0, labSide: 1, labReach: 0, labGripY: geos.labFlask.labGripY, labSqueeze: false, labDie: false, labRoll: 0, labBench: null };
     const labPoseClear = (dt, x, y, z, heading, speed, work, phase, side, solidAt, clearAt, entry, staticPose = false, laboratory = true) => {
       labPreviewMotion.lab = laboratory;
+      labPreviewMotion.labRunIn = !!(laboratory && entry && !entry.planningLab && entry.motion.labRunIn);
       labPreviewMotion.labWork = laboratory ? work : ""; labPreviewMotion.labPhase = phase; labPreviewMotion.labSide = side;
       labPreviewMotion.labReach = laboratory && entry ? entry.motion.labReach || 0 : 0;
       labPreviewMotion.labGripY = laboratory && entry && Number.isFinite(entry.motion.labGripY) ? entry.motion.labGripY : labGripY;
@@ -49166,7 +49305,7 @@ void main() {
     };
     return { start, stop, update, get active() { return !!agent; }, get agent() { return agent; }, get startedAt() { return startedAt; } };
   };
-  BL.agent = { create, createPlay, GAITS, TRIPLE_MS, QUAD, HUNCH, BODY, POUND_TIME, MANAGED_BEAT_TIME, MANAGED_MOTION_RADIUS, MANAGED_MOTION_HEIGHT, MANAGED_SMASH_RADIUS, LAB_RADIUS, LAB_HEIGHT, LAB_CENTERS, LAB_IDLE_RADIUS, LAB_WALK_RADIUS, LAB_SQUEEZE_RADIUS, footprint, torso,
+  BL.agent = { create, createPlay, labCoatClip, GAITS, TRIPLE_MS, QUAD, HUNCH, BODY, POUND_TIME, MANAGED_BEAT_TIME, MANAGED_MOTION_RADIUS, MANAGED_MOTION_HEIGHT, MANAGED_SMASH_RADIUS, LAB_RADIUS, LAB_HEIGHT, LAB_CENTERS, LAB_IDLE_RADIUS, LAB_WALK_RADIUS, LAB_SQUEEZE_RADIUS, footprint, torso,
     labFlaskGeometry: () => geometries().labFlask };
 })();
 
@@ -49585,6 +49724,9 @@ void main() {
   // Aisle lanes admit the complete walking rig and its turn, unlike points
   // beside the bench faces that fit only a stationary sideways work pose.
   const LAB_ROUTE_X = [-1.14, 0, 1.14], LAB_ROUTE_Z = [-0.15, -1.8, -3.2, -4.05];
+  // Stand as soon as the coat clears the plane, then walk to the room's route start.
+  const LAB_ENTRY_GOAL = -1;
+  const LAB_ROUTE_START = -2.5;
   const create = (ctx) => {
     const { crew, sites, groundAt, clear } = ctx;
     const footprint = BL.agent.footprint, torso = BL.agent.torso;
@@ -49593,6 +49735,7 @@ void main() {
     // Stations are authored once in world space: { x, y, z, heading, kind,
     // side, enabled? }. labInside owns the entrance plane, independently of assignment.
     const labSite = Number.isInteger(ctx.labSite) ? ctx.labSite : -1, labStations = ctx.labStations || [], labEquipment = ctx.labEquipment || [];
+    const coatClip = labSite >= 0 ? BL.agent.labCoatClip(sites[labSite].mouth) : null;
     const labNodes = new Float64Array(16 * 3), labHeadings = new Float64Array(16), labCosts = new Float64Array(16), labTimes = new Float64Array(16), labWaits = new Float64Array(16), labFixed = new Uint8Array(16), labPrevious = new Int8Array(16), labQueue = new Uint8Array(16);
     const labEdges = new Uint8Array(16 * 16 * 2), labEdgeWaits = new Float64Array(16 * 16 * 2), labEdgeTimes = new Float64Array(16 * 16 * 2);
     const labGeometry = new Uint8Array(128);
@@ -49606,6 +49749,7 @@ void main() {
     const roamPath = new Float64Array(12), roamPoint = { x: 0, y: 0, z: 0, heading: 0 };
     let roamBudget = 1, roamNext = 0, roamTurn = -1, roamSerial = 0;
     let disposed = false, elapsed = 0, player = null;
+    let debugShuttle = null, debugShuttleAt = 0, debugShuttleUntil = 0;
     let climbFrameBudget = 0, climbTurn = -1, climbNext = 0;
     const alive = (cave) => cave.state === "working" || cave.state === "chilling";
     const releasePortal = (e) => {
@@ -49862,9 +50006,10 @@ void main() {
     const syncLab = (e) => {
       const p = e.root.position, inside = insideLab(p.x, p.y, p.z), wasInside = e.motion.lab;
       e.motion.lab = inside;
+      e.motion.labRunIn = e.route === "enter" && e.site === labSite && !e.entryTurn;
       e.motion.labSqueeze = false;
       if (inside) {
-        e.parked = false; e.biped = true; e.lounge = "";
+        e.parked = false; e.biped = !e.motion.labRunIn; e.lounge = "";
         if (!wasInside && !e.controlled && !e.actionControlled) e.pound = e.beat = e.stand = e.recover = 0;
       } else if (wasInside) {
         e.biped = false;
@@ -49874,7 +50019,7 @@ void main() {
       if (e.controlled || e.fire.rolling || e.climb.active || e.jump.active || e.drive.airborne || e.pound || e.beat || e.recover) e.motion.labWork = "";
     };
     const labEnvelope = (e) => {
-      if (!e.motion.lab || e.climb.active || e.jump.active || e.drive.airborne || e.fire.rolling || e.fire.rollRecover
+      if (!e.motion.lab || e.motion.labRunIn || e.climb.active || e.jump.active || e.drive.airborne || e.fire.rolling || e.fire.rollRecover
         || e.drive.jumpArmed || e.drive.motionRecover || e.pound || e.beat || e.recover || e.motion.smash || e.gorilla.smashActive) return false;
       e.biped = true; e.footprintMode = "lab"; e.compact = !!(e.gorilla.labIdleCompact || e.gorilla.labWalkCompact || e.gorilla.labCompact);
       e.radius = Math.max(BL.agent.LAB_RADIUS || 1.1, e.gorilla.bodyRadius + 0.04);
@@ -50204,7 +50349,7 @@ void main() {
       if (e.lab.pathCount && elapsed < e.lab.readyAt) { e.speed = 0; e.blocked = 0; return; }
       const station = labStations[e.lab.station];
       const fixed = e.lab.pathFixed && e.lab.pathCount;
-      const final = !e.lab.yielding && !e.lab.pathPartial && e.route !== "exit" && station && e.lab.pathIndex + 1 >= e.lab.pathCount;
+      const final = e.entryTurn !== 1 && !e.lab.yielding && !e.lab.pathPartial && e.route !== "exit" && station && e.lab.pathIndex + 1 >= e.lab.pathCount;
       const desired = fixed ? e.lab.pathHeading
         : final && distance <= 0.800001
         ? station.heading : Math.atan2(dx, dz);
@@ -51153,9 +51298,10 @@ void main() {
       if (e.lounge === "sit" && e.gorilla.sitCompact) { e.footprintMode = "sit"; e.compact = true; }
       e.root.visible = true;
       if (ctx.track && !e.tracked) { ctx.track(e); e.tracked = true; }
+      if (e === debugShuttle) { debugShuttleAt = elapsed + 4; debugShuttleUntil = 0; }
     };
     for (let i = 0; i < crew.list.length; i++) {
-      const owner = crew.list[i], gorilla = BL.agent.create({ managed: true, groundAt, scale: SCALE });
+      const owner = crew.list[i], gorilla = BL.agent.create({ managed: true, groundAt, scale: SCALE, coatClip });
       gorilla.poseManaged(0.6, 0, 0, 0, i * 2.39996323, 0, false, false);
       const entry = {
         owner, cave: owner, tooltipOwner: owner, gorilla, root: gorilla.root, parts: gorilla.parts,
@@ -51195,7 +51341,7 @@ void main() {
         motion: { charge: 0, poundCharge: 0, takeoff: 0, landing: 0, supportOffset: 0, roll: 0, rollAngle: 0, smash: false, dragging: false,
           climb: 0, climbBlend: NaN, climbStride: 0, climbDirection: 0, mantle: 0, groom: 0, groomSide: 1, groomPhase: 0,
           sitWait: 3, sitTime: 0, sitLook: 0, sitShift: 0, sitLookTarget: 0, sitShiftTarget: 0,
-          lab: false, labWork: "", labPhase: i * 0.71, labSide: 1, labDt: 1 / 30, labReach: 0, labGripY: 0.53105, labSqueeze: false,
+          lab: false, labRunIn: false, labWork: "", labPhase: i * 0.71, labSide: 1, labDt: 1 / 30, labReach: 0, labGripY: 0.53105, labSqueeze: false,
           labDie: false, labRoll: 0, labBench: null },
         climb: { active: false, requested: 0, requestHeading: 0, requestUntil: 0, action: 0, actionAt: -Infinity,
           actionX: 0, actionY: 0, actionZ: 0, actionHeading: 0, autoDirection: -1, descending: false, progress: 0, length: 0, lowerY: 0, upperY: 0, climbs: 0,
@@ -51226,9 +51372,19 @@ void main() {
       for (let i = 0; i < list.length; i++) if (!list[i].active && alive(list[i].owner)) activate(list[i]);
     };
     sync();
+    const startLabShuttle = (owner) => {
+      const e = byOwner.get(owner);
+      if (labSite < 0 || !e) return false;
+      debugShuttle = e; debugShuttleAt = elapsed + 4; debugShuttleUntil = 0;
+      owner.work.site = owner.work.plannedSite = labSite;
+      if (!e.active) activate(e);
+      if (e.site !== labSite || e.phase === "chill") beginTravel(e, labSite);
+      return true;
+    };
     const plan = (cave, index) => {
       const e = byOwner.get(cave);
       if (!e || !sites[index]) return;
+      if (e === debugShuttle && index !== labSite) return;
       if (e.controlled || e.drive.airborne || e.climb.active) { e.pendingSite = index; return; }
       // Reloading never evicts a gorilla whose next shift is in this cave.
       if (e.site === index) return;
@@ -52011,6 +52167,12 @@ void main() {
         }
         releasePortal(e); e.route = "ring";
         if (e.phase === "leave") {
+          if (e === debugShuttle) {
+            e.phase = "travel"; e.route = "island"; e.exitFootprint = true;
+            sitePoint(from, 0, 5.5, POINT);
+            setGoal(e, POINT.x, POINT.y, POINT.z);
+            return true;
+          }
           e.phase = "chill"; e.route = ""; e.exitFootprint = true;
           return chooseChill(e, true);
         }
@@ -52018,6 +52180,12 @@ void main() {
           e.phase = "wait"; e.route = ""; e.overflow = true; e.retry = 2;
           waitSpot(e); return true;
         }
+      }
+      if (e.route === "island") {
+        if (Math.hypot(e.goalX - p.x, e.goalZ - p.z) > 0.3) return true;
+        if (!debugShuttleUntil) debugShuttleUntil = elapsed + 2.5;
+        if (elapsed < debugShuttleUntil) return false;
+        debugShuttleUntil = 0; e.route = "apron";
       }
       if (e.route === "ring") {
         const fromAngle = Math.atan2(p.x, p.z), toAngle = Math.atan2(site.mouth.x, site.mouth.z);
@@ -52060,6 +52228,29 @@ void main() {
           return false;
         }
         e.overflow = false;
+        if (e.site === labSite) {
+          if (!e.entryTurn) {
+            sitePoint(site, 0, LAB_ENTRY_GOAL, POINT);
+            if (Math.hypot(POINT.x - p.x, POINT.z - p.z) > 0.08) {
+              if (e.blocked > 0.3) requestLabPass(e, POINT.x, POINT.z);
+              setGoal(e, POINT.x, POINT.y, POINT.z); return true;
+            }
+            e.speed = 0;
+            if (!ordinaryLabStep(e, p.x, p.y, p.z, e.heading, 0, true)) {
+              requestLabPass(e, e.slotX, e.slotZ); return false;
+            }
+            e.entryTurn = 1;
+            return false;
+          }
+          if (e.entryTurn === 1) {
+            sitePoint(site, 0, LAB_ROUTE_START, POINT);
+            if (Math.hypot(POINT.x - p.x, POINT.z - p.z) > 0.08) {
+              if (e.blocked > 0.3) requestLabPass(e, POINT.x, POINT.z);
+              setGoal(e, POINT.x, POINT.y, POINT.z); return true;
+            }
+            e.entryTurn = 2;
+          }
+        }
         if (site.mirrorRoom) {
           const along = (p.x - site.mouth.x) * site.sr + (p.z - site.mouth.z) * site.cr;
           if (along > -3.3) {
@@ -52099,6 +52290,7 @@ void main() {
         } else setGoal(e, e.slotX, e.slotY, e.slotZ);
         if (Math.hypot(e.slotX - p.x, e.slotZ - p.z) < 0.2) {
           e.phase = "work"; e.route = ""; e.rest = 0.8 + e.random(); releasePortal(e);
+          if (e === debugShuttle) debugShuttleAt = elapsed + 8;
         }
         return true;
       }
@@ -53192,7 +53384,7 @@ void main() {
       }
       // Outside a work room the gait always stays on all fours. Standing is
       // a brief idle action inside, never a narrow-door collision workaround.
-      e.biped = e.motion.lab || e.parked || e.phase === "work" && (e.stand > 0 || e.beat > 0);
+      e.biped = e.motion.lab && !e.motion.labRunIn || e.parked || e.phase === "work" && (e.stand > 0 || e.beat > 0);
       if (e.parked && e.gorilla.standCompact) e.footprintMode = "stand";
       else if (!e.parked && e.footprintMode === "stand" && e.gorilla.compact) e.footprintMode = "walk";
       else if (e.phase === "chill" && !e.exitFootprint && !e.gorilla.motionActive && e.gorilla.compact
@@ -53256,7 +53448,7 @@ void main() {
             setGoal(e, POINT.x, POINT.y, POINT.z);
             move(e, dt, 0.6);
           }
-        } else if (travelGoal(e, dt)) { if (!e.jump.active) { if (e.motion.lab && (e.fromSite === labSite && e.route === "exit" || e.site === labSite && (e.route === "enter" || e.phase === "work"))) moveLab(e, dt); else move(e, dt, SPEED); } }
+        } else if (travelGoal(e, dt)) { if (!e.jump.active) { if (e.motion.lab && !e.motion.labRunIn && (e.fromSite === labSite && e.route === "exit" || e.site === labSite && (e.route === "enter" || e.phase === "work"))) moveLab(e, dt); else move(e, dt, SPEED); } }
         else { e.speed = damp(e.speed, 0, 12, dt); }
       } else if (e.phase === "wait") {
         yieldSpace(e);
@@ -53493,6 +53685,13 @@ void main() {
       }
       while (remaining > 1e-8) {
         const step = Math.min(remaining, 1 / 30); remaining -= step; elapsed += step;
+        if (debugShuttle && debugShuttle.active && !debugShuttle.controlled && debugShuttle.phase === "work"
+          && debugShuttle.site === labSite && debugShuttle.motion.lab && elapsed >= debugShuttleAt) {
+          releaseLab(debugShuttle);
+          debugShuttle.hasSlot = false; debugShuttle.slotIndex = -1;
+          debugShuttle.phase = "leave"; debugShuttle.route = "exit"; debugShuttle.fromSite = labSite;
+          debugShuttle.parked = false; debugShuttle.rest = 0; debugShuttleAt = Infinity;
+        }
         for (let i = 0; i < list.length; i++) {
           updateEntry(list[i], step);
           recoverStall(list[i], step);
@@ -53546,7 +53745,7 @@ void main() {
       list.length = 0; byOwner.clear();
       portals.fill(null);
     };
-    return { list, sync, update, target, hit, plan, stats, liveGeometry, dispose, contactAt,
+    return { list, sync, update, target, hit, plan, startLabShuttle, stats, liveGeometry, dispose, contactAt,
       possess, release, control, cancelInput, climbAction, startClimb, smash, grab, chestBeat, ignite, dropRoll, get player() { return player; } };
   };
   BL.clankers = { create, WALK_RADIUS, WALK_HEIGHT };
@@ -54057,7 +54256,6 @@ void main() {
   const NUDGES = [0, -2, 2, -4, 4, -6, 6, -8, 8];
   const PATH_GEOMETRY = new WeakMap();
   const TIMECHAIN_NEAR = 25, TIMECHAIN_OUTER_PERIOD = 180;
-  const VINES = ["c5"];
   const DRESSED = new WeakMap();
   const DRESSING_LAMPS = BL.dressing.LIGHT_RGB.map(([r, g, b]) => ({ r, g, b, radius: 5.5, glow: 0.9, hide: false }));
   const dressingLights = [];
@@ -54067,10 +54265,15 @@ void main() {
   const MEADOW_INNER = 5, MEADOW_OUTER = MEADOW - 1.5, CLIFF_INNER = MEADOW + 1.5, CLIFF_OUTER = RADIUS - 1;
   const DOCK_DEG = 105, LADDER_Z = -3.6, LADDER_LEAN = 0.65;
   const CLOUD_COUNT = 30, CLOUD_WRAP = 60, CLOUD_NEAR = 36;
+  const CLOUD_GAP = 0.35, CLOUD_LOOK = 36, CLOUD_PLAN_STEP = 2;
+  const CLOUD_SIDE_RATE = 0.7, CLOUD_RISE_RATE = 0.55;
+  const CLOUD_SIDE_OFFSETS = [0, -7, 7, -14, 14, -24, 24];
+  const CLOUD_HEIGHT_OFFSETS = [0, -6, 6, -12, 12];
   const WANDER_COUNT = 36, WANDER_INNER = 5.5;
   const ALTAR_HEIGHT = 0.34, ALTAR_BLOCK_WIDTH = 0.2, ALTAR_BLOCK_ARC = 0.3, ALTAR_RING_GAP = 0.02, ALTAR_MAX_BLOCKS = 512;
   const RIPEN = 25, TREE_CHANCE = 0.5, BUSH_CHANCE = 0.25;
   const PROP_TIPS = { tree: "Tree · shake it", bush: "Bush · rustle it", rock: "Rock · hit to break", crate: "Box · hit to break", barrel: "Barrel · hit to break", flower: "Flowers", torch: "Torch · warm", firepit: "Fire pit", bedroll: "Somebody's bed", ladder: "Ladder · wobbly", dock: "Dock · creaky", magazine: "Spare magazine · walk into it to collect", plane: "Ooga Drop · tap to fly", sign: "Ooga Drop · the plane flies from here", launchpad: "Ooga Orbit · tap to build a rocket", rocket: "Ooga Orbit · tap to fly", tower: "Launch tower · steady", orbitsign: "Ooga Orbit · the pad past the bridge", bridge: "Rope bridge · to the launch pad", poolbridge: "Vine bridge · to the Mempool island", poolstair: "The Mempool · tap to climb down", poolsign: "The Mempool · the cave reads the chain", chainsign: "The chain, at a glance · tap to read it", weathersign: "Reading the weather · tap for the key", poolrock: "Mossy rock", poolfern: "Fern · rustle it", poollog: "Fallen log · something lives in it", jaguar: "Jaguar · do not poke", monkey: "Monkey · it watches you", toucan: "Toucan · big beak", canopy: "Rainforest tree · shake it", windsock: "Windsock · a fair wind", jumbotron: "Jumbotron · OogaBoogaX on the big screen · tap the screen for a close-up", palm: "Palm · shake it", gate: null };
+  const RETICLE_PROPS = new Set(["tree", "bush", "rock", "crate", "barrel", "flower", "torch", "firepit", "ladder", "plane", "sign", "launchpad", "rocket", "tower", "orbitsign", "poolstair", "poolsign", "chainsign", "weathersign", "poolfern", "poollog", "jaguar", "monkey", "toucan", "canopy", "jumbotron", "palm", "timechainentrance", "timechainboard", "timechainchair", "timechainbeer"]);
   const workCave = (slot) => slot.repo && (slot.status === "open" || slot.status === "mirror")
     && (slot.repo !== OBL_REPO || slot.status === "mirror");
   const MATRIX_LIVING_PROPS = new Set(["tree"]);
@@ -54419,6 +54622,8 @@ void main() {
   const targets = [];
   const claimed = [];
   const clouds = [];
+  const cloudObstacles = [];
+  let launchCloudSpot = null;
   const lamps = [];
   const entranceLights = [];
   const fireSeats = [];
@@ -54429,6 +54634,7 @@ void main() {
   const labels = [];
   const spots = [];
   const openMouths = [];
+  const headquartersRimLintels = [];
   const launchers = [];
   const props = [];
   const scenery = [];
@@ -55649,6 +55855,12 @@ void main() {
     const rim = createNode({ position: { x: 0, y: 0, z: 0.5 }, geometry: hubModels.caveMouthRim(slot.status === "headquarters" ? 1 : 0), sightSolid: true });
     addChild(group, rim);
     solids.add(rim);
+    if (slot.status === "headquarters") {
+      const lintel = createNode({ position: { x: 0, y: 0, z: 0.5 }, geometry: hubModels.caveMouthRim(2), sightSolid: true });
+      addChild(group, lintel);
+      solids.add(lintel);
+      headquartersRimLintels.push(lintel);
+    }
     if (slot.status === "dark") {
       const geometry = hubModels.sealedCaveFace(sealedCaveVariant(slot.id));
       const seal = createNode({ position: { x: 0, y: 0, z: 0.52 }, geometry, matrixExterior: true, sightSolid: true });
@@ -55803,7 +56015,6 @@ void main() {
       entranceLights.push(debug);
     }
     dressMouth(slot, m, group);
-    if (VINES.includes(slot.id)) for (const x of [-1.1, 1.1]) addChild(group, createNode({ position: { x, y: 3.45, z: 0.95 }, geometry: hubModels.vine() }));
     addChild(root, group);
     placed.push(group);
     const glyphs = buildCaveGlyphs(slot, m, group);
@@ -56018,6 +56229,7 @@ void main() {
   const buildLaunchSite = () => {
     const { SITE } = rocketModels;
     const spot = rocketModels.siteSpot(island, {});
+    launchCloudSpot = spot;
     const site = rocketModels.site(spot);
     addChild(root, site.node);
     placed.push(site.node);
@@ -56249,8 +56461,7 @@ void main() {
     const wildlife = BL.poolWildlife.create({
       parent: site.node, obstacles, trees, logs, baseY: place.y, toWorld: WORLD_AT,
       animals: ANIMALS.map(([kind, x, z, heading]) => ({ kind, x, z, heading })),
-      sleepy: () => phase === "night" || phase === "midnight",
-      zzzAt: (x, y, z) => fx.zzzAt(x, y, z)
+      sleepy: () => phase === "night" || phase === "midnight"
     });
     // Each animal answers a tap through its body part, and its pick owner follows it about the island.
     for (const beast of wildlife.list) {
@@ -56470,8 +56681,8 @@ void main() {
     cliff(30, 1, 0.5, "bush", (n) => hubModels.bush(n % 3));
     meadow(30, 0.7, "bush", (n) => hubModels.bush(n % 3));
     meadow(8, 0.9, "rock", () => hubModels.rock(0));
-    meadow(10, 0.7, "crate", () => hubModels.woodCrate(), true);
-    meadow(8, 0.6, "barrel", () => hubModels.barrel());
+    meadow(10, 0.7, "crate", () => hubModels.woodCrate(2), true);
+    meadow(8, 0.6, "barrel", () => hubModels.barrel(1));
     meadow(50, 0.35, "flower", () => hubModels.flowerTuft());
     meadow(18, 0.3, "grass", () => hubModels.grass());
   };
@@ -57422,6 +57633,7 @@ void main() {
     clearCutawayHidden();
     const player = pilot.player, cameraMix = player && pilot.birdsEye ? pilot.birdsEyeMix : 0;
     const showRampMarkers = cameraMix > 0.5;
+    for (const lintel of headquartersRimLintels) lintel.visible = !showRampMarkers;
     for (const marker of headquarters.rampMarkers) {
       marker.node.visible = marker.frame.visible = marker.arrow.visible = showRampMarkers;
       if (!showRampMarkers) continue;
@@ -57844,19 +58056,102 @@ void main() {
     p.x = x; p.z = z;
     return true;
   };
-  // Clouds ring the island without crossing it.
+  const cloudBox = (x0, y0, z0, x1, y1, z1) => cloudObstacles.push({ x0, y0, z0, x1, y1, z1 });
+  const cloudBridgeBox = (x0, z0, x1, z1, y, width) => {
+    const reach = width / 2 + 0.7;
+    cloudBox(Math.min(x0, x1) - reach, y - 1.5, Math.min(z0, z1) - reach,
+      Math.max(x0, x1) + reach, y + 3.5, Math.max(z0, z1) + reach);
+  };
+  const buildCloudObstacles = () => {
+    cloudObstacles.length = 0;
+    cloudBox(-RADIUS - 4, -30, -RADIUS - 4, RADIUS + 4, 24, RADIUS + 4);
+    const launch = launchCloudSpot, launchSite = rocketModels.SITE;
+    cloudBox(launch.x - launchSite.isletR - 2, launch.y - launchSite.isletDepth - 1, launch.z - launchSite.isletR - 2,
+      launch.x + launchSite.isletR + 2, launch.y + 24, launch.z + launchSite.isletR + 2);
+    cloudBridgeBox(launch.x, launch.bridgeZ, launch.x, launch.bridgeZ + launchSite.span, launch.y, launchSite.width);
+    const pool = mempoolIsland.place, poolSite = poolModels.SITE, poolDir = poolModels.DIR;
+    cloudBox(pool.x - poolSite.isletR - 4, pool.y - poolSite.isletDepth - 1, pool.z - poolSite.isletR - 4,
+      pool.x + poolSite.isletR + 4, pool.y + 25, pool.z + poolSite.isletR + 4);
+    cloudBridgeBox(pool.bridgeX, pool.bridgeZ, pool.x - poolDir.x * (poolSite.isletR - 1),
+      pool.z - poolDir.z * (poolSite.isletR - 1), pool.y, poolSite.width);
+    const sphere = timechainIsland.place, sphereSite = BL.timechainModels.SITE, sphereDir = BL.timechainModels.DIR;
+    cloudBox(sphere.x - sphereSite.radius - 0.25, sphere.y + 3 - sphereSite.radius - 0.25,
+      sphere.z - sphereSite.radius - 0.25, sphere.x + sphereSite.radius + 0.25,
+      sphere.y + 3 + sphereSite.radius + 0.25, sphere.z + sphereSite.radius + 0.25);
+    cloudBridgeBox(sphere.x - sphereDir.x * sphere.bridgeZ, sphere.z - sphereDir.z * sphere.bridgeZ,
+      sphere.x - sphereDir.x * (sphere.bridgeZ + sphereSite.span),
+      sphere.z - sphereDir.z * (sphere.bridgeZ + sphereSite.span), sphere.y, sphereSite.width);
+  };
+  const cloudToward = (value, target, distance) => value + clamp(target - value, -distance, distance);
+  const cloudClearAt = (cloud, x, y, z, ahead = 0) => {
+    const b = cloud.fullBounds;
+    const x0 = x + b[0], y0 = y + b[1], z0 = z + b[2], x1 = x + b[3], y1 = y + b[4], z1 = z + b[5];
+    for (let i = 0; i < cloudObstacles.length; i++) {
+      const o = cloudObstacles[i];
+      if (x0 < o.x1 + CLOUD_GAP && x1 > o.x0 - CLOUD_GAP && y0 < o.y1 + CLOUD_GAP && y1 > o.y0 - CLOUD_GAP
+        && z0 < o.z1 + CLOUD_GAP && z1 > o.z0 - CLOUD_GAP) return false;
+    }
+    for (let i = 0; i < clouds.length; i++) {
+      const other = clouds[i];
+      if (other === cloud) continue;
+      const p = other.node.position, travel = other.speed * ahead;
+      if ((other.beside ? p.z : p.x) + travel > CLOUD_WRAP) continue;
+      const ox = other.beside ? cloudToward(p.x, other.goalSide, CLOUD_SIDE_RATE * ahead) : p.x + travel;
+      const oz = other.beside ? p.z + travel : cloudToward(p.z, other.goalSide, CLOUD_SIDE_RATE * ahead);
+      const oy = cloudToward(p.y, other.goalY, CLOUD_RISE_RATE * ahead), q = other.fullBounds;
+      if (x0 < ox + q[3] + CLOUD_GAP && x1 > ox + q[0] - CLOUD_GAP && y0 < oy + q[4] + CLOUD_GAP
+        && y1 > oy + q[1] - CLOUD_GAP && z0 < oz + q[5] + CLOUD_GAP && z1 > oz + q[2] - CLOUD_GAP) return false;
+    }
+    return true;
+  };
+  const cloudRouteTime = (cloud, side, height, horizon) => {
+    const p = cloud.node.position, axis = cloud.beside ? p.z : p.x, lateral = cloud.beside ? p.x : p.z;
+    for (let t = 0; t <= horizon + CLOUD_PLAN_STEP; t += CLOUD_PLAN_STEP) {
+      t = Math.min(t, horizon);
+      const along = axis + cloud.speed * t, across = cloudToward(lateral, side, CLOUD_SIDE_RATE * t);
+      const y = cloudToward(p.y, height, CLOUD_RISE_RATE * t);
+      if (!cloudClearAt(cloud, cloud.beside ? across : along, y, cloud.beside ? along : across, t)) return t;
+      if (t === horizon) break;
+    }
+    return horizon + CLOUD_PLAN_STEP;
+  };
+  const considerCloudRoute = (cloud, side, height, horizon) => {
+    side = clamp(side, -84, 84); height = clamp(height, -35, 35);
+    const time = cloudRouteTime(cloud, side, height, horizon), p = cloud.node.position;
+    const lateral = cloud.beside ? p.x : p.z;
+    const cost = Math.abs(side - lateral) + Math.abs(height - p.y) * 1.2
+      + (side === cloud.goalSide && height === cloud.goalY ? 0 : 0.2);
+    if (time > cloud.bestTime || time === cloud.bestTime && cost < cloud.bestCost) {
+      cloud.bestTime = time; cloud.bestCost = cost; cloud.bestSide = side; cloud.bestY = height;
+    }
+  };
+  const planCloud = (cloud) => {
+    const p = cloud.node.position, axis = cloud.beside ? p.z : p.x, side = cloud.beside ? p.x : p.z;
+    const horizon = Math.min(CLOUD_LOOK, (CLOUD_WRAP - axis) / cloud.speed);
+    if (horizon <= 0) return;
+    cloud.bestTime = -1; cloud.bestCost = Infinity;
+    considerCloudRoute(cloud, cloud.goalSide, cloud.goalY, horizon);
+    for (let i = 0; i < CLOUD_SIDE_OFFSETS.length; i++) considerCloudRoute(cloud, side + CLOUD_SIDE_OFFSETS[i], p.y, horizon);
+    for (let i = 1; i < CLOUD_HEIGHT_OFFSETS.length; i++) considerCloudRoute(cloud, side, p.y + CLOUD_HEIGHT_OFFSETS[i], horizon);
+    if (cloud.bestTime <= horizon) {
+      for (let si = 0; si < 2; si++) for (let yi = 0; yi < 2; yi++) {
+        considerCloudRoute(cloud, side + (si ? 14 : -14), p.y + (yi ? 6 : -6), horizon);
+      }
+    }
+    cloud.goalSide = cloud.bestSide; cloud.goalY = cloud.bestY;
+  };
+  // Clouds ring the island and plan a lane before reaching an island, bridge or another cloud.
   const buildClouds = () => {
     const rand = mulberry32(SEED + 77);
     const surfaces = new Map();
+    buildCloudObstacles();
     for (let i = 0; i < CLOUD_COUNT; i++) {
       const beside = i % 2 === 0;
-      const out = (rand() < 0.5 ? -1 : 1) * lerp(CLOUD_NEAR, CLOUD_WRAP, rand());
-      const span = lerp(-CLOUD_WRAP, CLOUD_WRAP, rand());
-      const y = beside ? lerp(-4, 6, rand()) : lerp(2, 8, rand());
-      const node = createNode({ position: { x: beside ? out : span, y, z: beside ? span : -Math.abs(out) }, geometry: hubModels.cloud(Math.min(2, i % 4)), matrixCloud: true });
+      const node = createNode({ geometry: hubModels.cloud(Math.min(2, i % 4)), matrixCloud: true });
       let surface = surfaces.get(node.geometry);
       if (!surface) {
         const tops = [], bounds = [Infinity, Infinity, -Infinity, -Infinity], v = node.geometry.verts;
+        const full = BL.scene.boundsOf(node.geometry);
         for (const face of node.geometry.faces) {
           const a = face.i[0] * 3, b = face.i[1] * 3, c = face.i[2] * 3;
           if ((v[b + 2] - v[a + 2]) * (v[c] - v[a]) - (v[b] - v[a]) * (v[c + 2] - v[a + 2]) <= 0) continue;
@@ -57871,25 +58166,69 @@ void main() {
         }
         let centerTop = -Infinity;
         for (let j = 0; j < tops.length; j += 5) if (tops[j] <= 0 && tops[j + 2] >= 0 && tops[j + 1] <= 0 && tops[j + 3] >= 0) centerTop = Math.max(centerTop, tops[j + 4]);
-        surface = { tops: new Float64Array(tops), bounds: new Float64Array(bounds), centerTop };
+        surface = { tops: new Float64Array(tops), bounds: new Float64Array(bounds), centerTop,
+          fullBounds: new Float64Array([...full.min, ...full.max]) };
         surfaces.set(node.geometry, surface);
+      }
+      const cloud = { node, speed: 0.4 + rand() * 0.4, beside, tops: surface.tops, bounds: surface.bounds,
+        fullBounds: surface.fullBounds, centerTop: surface.centerTop, dx: 0, dz: 0, wrapped: false,
+        goalSide: 0, goalY: 0, planTimer: i / CLOUD_COUNT, bestTime: 0, bestCost: 0, bestSide: 0, bestY: 0 };
+      let placedCloud = false;
+      for (let attempt = 0; attempt < 96; attempt++) {
+        const out = (rand() < 0.5 ? -1 : 1) * lerp(CLOUD_NEAR, CLOUD_WRAP, rand());
+        const span = lerp(-CLOUD_WRAP, CLOUD_WRAP, rand());
+        const y = beside ? lerp(-9, 11, rand()) : lerp(-3, 13, rand());
+        const x = beside ? out : span, z = beside ? span : -Math.abs(out);
+        if (!cloudClearAt(cloud, x, y, z)) continue;
+        node.position.x = x; node.position.y = y; node.position.z = z;
+        cloud.goalSide = beside ? x : z; cloud.goalY = y;
+        placedCloud = true;
+        break;
+      }
+      if (!placedCloud) {
+        node.position.x = beside ? -CLOUD_WRAP : -CLOUD_WRAP + i;
+        node.position.y = 35 + i * 7;
+        node.position.z = beside ? -CLOUD_WRAP + i : -CLOUD_WRAP;
+        while (!cloudClearAt(cloud, node.position.x, node.position.y, node.position.z)) node.position.y += 7;
+        cloud.goalSide = beside ? node.position.x : node.position.z; cloud.goalY = node.position.y;
       }
       addChild(root, node);
       placed.push(node);
-      clouds.push({ node, speed: 0.4 + rand() * 0.4, beside, tops: surface.tops, bounds: surface.bounds, centerTop: surface.centerTop, dx: 0, dz: 0, wrapped: false });
+      clouds.push(cloud);
     }
+    for (let i = 0; i < clouds.length; i++) planCloud(clouds[i]);
   };
   const updateClouds = (dt) => {
     for (let i = 0; i < clouds.length; i++) {
       const cloud = clouds[i], p = cloud.node.position;
-      cloud.dx = cloud.beside ? 0 : cloud.speed * dt;
-      cloud.dz = cloud.beside ? cloud.speed * dt : 0;
-      p.x += cloud.dx; p.z += cloud.dz;
-      cloud.wrapped = cloud.beside ? p.z > CLOUD_WRAP : p.x > CLOUD_WRAP;
-      if (cloud.wrapped) {
-        if (cloud.beside) p.z -= CLOUD_WRAP * 2;
-        else p.x -= CLOUD_WRAP * 2;
+      if ((cloud.planTimer -= dt) <= 0) { planCloud(cloud); cloud.planTimer = 0.8; }
+      const x = p.x, y = p.y, z = p.z, along = (cloud.beside ? z : x) + cloud.speed * dt;
+      cloud.wrapped = false;
+      if (along > CLOUD_WRAP) {
+        let found = false;
+        for (let si = 0; !found && si < CLOUD_SIDE_OFFSETS.length; si++) for (let yi = 0; yi < CLOUD_HEIGHT_OFFSETS.length; yi++) {
+          const side = clamp(cloud.goalSide + CLOUD_SIDE_OFFSETS[si], -84, 84);
+          const height = clamp(cloud.goalY + CLOUD_HEIGHT_OFFSETS[yi], -35, 35);
+          const nx = cloud.beside ? side : -CLOUD_WRAP, nz = cloud.beside ? -CLOUD_WRAP : side;
+          if (!cloudClearAt(cloud, nx, height, nz)) continue;
+          p.x = nx; p.y = height; p.z = nz;
+          cloud.goalSide = side; cloud.goalY = height; cloud.planTimer = 0;
+          cloud.wrapped = found = true;
+          break;
+        }
+      } else {
+        const side = cloudToward(cloud.beside ? x : z, cloud.goalSide, CLOUD_SIDE_RATE * dt);
+        const height = cloudToward(y, cloud.goalY, CLOUD_RISE_RATE * dt);
+        const nx = cloud.beside ? side : along, nz = cloud.beside ? along : side;
+        if (cloudClearAt(cloud, nx, height, nz)) { p.x = nx; p.y = height; p.z = nz; }
+        else if (cloudClearAt(cloud, cloud.beside ? side : x, height, cloud.beside ? z : side)) {
+          if (cloud.beside) p.x = side; else p.z = side;
+          p.y = height;
+          cloud.planTimer = 0;
+        } else cloud.planTimer = 0;
       }
+      cloud.dx = cloud.wrapped ? 0 : p.x - x;
+      cloud.dz = cloud.wrapped ? 0 : p.z - z;
     }
   };
   // The dais and its flush, one block-wide perimeter grow continuously with the pile.
@@ -58129,7 +58468,7 @@ void main() {
       case "caveman":
         return o.cave.traits.name === "SaniExp" && timechainIsland?.seat.active ? "Sani · tap to spin his chair" : o.cave.traits.display;
       case "clanker":
-        return `${o.entry.owner.traits.display} 🦍`;
+        return `🦍 ${o.entry.owner.traits.display}`;
       case "crate":
         return `${o.crate.loot.tier} crate · tap to open`;
       case "cave":
@@ -58156,6 +58495,14 @@ void main() {
       default:
         return "";
     }
+  };
+  const reticleTarget = (hit) => {
+    const o = hit.owner;
+    if (hit.node === mirrorCave.node || o.kind === "room-sign" || o.kind === "matrix-button" || o.kind === "matrix-gate"
+      || o.kind === "ooga-portal-lever" || o.kind === "ooga-portal-screen" || o.kind === "lab-link" || o.kind === "piece") return "object";
+    if (o.kind === "cave") return o.slot.status === "open" ? "object" : "none";
+    if (o.kind === "prop" && (o.breakable || RETICLE_PROPS.has(o.prop))) return "object";
+    return "none";
   };
   const wobble = (node, amp) => {
     if (node.busy) return false;
@@ -60782,7 +61129,7 @@ void main() {
     spawnMagazinePickup();
     critters = crittersMod.create({ root, renderer, flowers: scenery.filter((o) => o.prop === "flower" && o.active), fire: firePos, secondaryFire: { x: 0, y: island.headquarters.floor, z: 0 }, meadowRadius: MEADOW, heightAt: island.surfaceAt });
     mark("props");
-    const shared = { root, input, hooks, hud, game, world, renderer, camera, overlay: ctx.overlay, overlayVisible: matrixOverlayVisible, zzzVisible: sleepMarksVisible, tickerAt: TICKER_AT, buildSpots: buildSpotsList, walkIn: WALK_IN, clampDrag, viewYaw: PILE_VIEW.yaw, bedrolls, pileScale: PILE_SCALE, pileY: ALTAR_HEIGHT + 0.02, matrixLivingPile: true, onLayout: layoutPile, onShown: () => { meterTimer = 0; }, crateRadius: () => Math.max(4.4, altar.platformRadius + 0.8), groundAt: playerSupportAt, prepareCloudSupport, cloudAt, ceilingAt, wanderSpot, walkable, flyable, glideJetCeiling, useNear, abyssAt, abyssRespawnY: ABYSS_RESPAWN_Y, jetpackAllowed, phase: () => phase };
+    const shared = { root, input, hooks, hud, game, world, renderer, camera, overlay: ctx.overlay, overlayVisible: matrixOverlayVisible, zzzVisible: sleepMarksVisible, tickerAt: TICKER_AT, buildSpots: buildSpotsList, walkIn: WALK_IN, clampDrag, viewYaw: PILE_VIEW.yaw, bedrolls, pileScale: PILE_SCALE, pileY: ALTAR_HEIGHT + 0.02, matrixLivingPile: true, onLayout: layoutPile, onShown: () => { meterTimer = 0; }, crateRadius: () => Math.max(4.4, altar.platformRadius + 0.8), groundAt: playerSupportAt, prepareCloudSupport, cloudAt, ceilingAt, wanderSpot, walkable, flyable, glideJetCeiling, useNear, abyssAt, abyssRespawnY: ABYSS_RESPAWN_Y, jetpackAllowed, reticleTarget, phase: () => phase };
     shared.reloadRadius = () => island.path.debug.ringOuterRadius;
     shared.reloadHeight = ALTAR_HEIGHT;
     shared.onAbyssRespawn = loseAbyssAmmo;
@@ -61016,8 +61363,12 @@ void main() {
       const y = island.surfaceAt(x, z);
       if (Number.isFinite(y)) loungeRoofs.push({ x, y, z, angle: mouth.ry });
     }
+    const labSiteIndex = shared.workSites.findIndex(site => site.mouth === entropyLab.mouth);
+    const debugLabShuttle = DEBUG && !contributors.solo && !contributors.debugState && labSiteIndex >= 0
+      ? crew.list.find(cave => cave.state === "working" && cave.work.site === labSiteIndex) || crew.list[0] : null;
+    if (debugLabShuttle) debugLabShuttle.override = "working";
     clankers = BL.clankers.create({ root, crew, sites: shared.workSites, loungeRoofs,
-      labSite: shared.workSites.findIndex(site => site.mouth === entropyLab.mouth),
+      labSite: labSiteIndex,
       labInside: entropyLab.phase.inside, labStations: entropyLab.stations,
       labEquipment: entropyLab.equipment, labPickup: pickUpLabEquipment, labReturn: returnLabEquipment, labRoll: rollLabEquipment,
       solidAt: island.solidAt, climbSolidAt: clankerClimbSolidAt, climbSurfaceAt: clankerClimbSurfaceAt,
@@ -61066,10 +61417,10 @@ void main() {
 
     Object.assign(hooks, {
       onHover: (hit, p) => {
-        if (hit) hud.tooltip.show(tooltipFor(hit), p.x, p.y, hit.owner.cave);
+        if (hit) hud.tooltip.show(tooltipFor(hit), p.x, p.y, hit.owner.cave, hit.owner.kind === "clanker");
         else hud.tooltip.hide();
       },
-      onHoverMove: (hit, p) => hud.tooltip.show(tooltipFor(hit), p.x, p.y, hit.owner.cave),
+      onHoverMove: (hit, p) => hud.tooltip.show(tooltipFor(hit), p.x, p.y, hit.owner.cave, hit.owner.kind === "clanker"),
       onTap,
       ...pilot.hooks,
       onOrbit: (dx, dy) => {
@@ -61111,6 +61462,7 @@ void main() {
     });
     meterTimer = 0;
     crew.refreshStates(true);
+    if (debugLabShuttle) clankers.startLabShuttle(debugLabShuttle);
     unsubscribeActivity = contributors.subscribe(() => crew.refreshStates());
     let initialCharacter = ctx.from === null && preloadedCharacter ? contributors.activeRoster.find((entry) => entry.name.toLowerCase() === preloadedCharacter) : null;
     if (ctx.from === null && (preloadedJetpackWear || preloadedEquipment) && !params.has("character") && !initialCharacter) initialCharacter = contributors.activeRoster.find((entry) => crew.stateOf(crew.cavemen.get(entry.name)) === "working") || contributors.activeRoster[0];
@@ -61493,7 +61845,8 @@ void main() {
     }
     for (const node of targets) input.remove(node);
     for (const node of placed) removeChild(root, node);
-    targets.length = placed.length = claimed.length = scenery.length = sceneryClaims.length = matrixInteriors.length = matrixGates.length = sealedCaves.length = clouds.length = lamps.length = entranceLights.length = fireSeats.length = sleepers.length = labels.length = spots.length = openMouths.length = launchers.length = props.length = 0;
+    targets.length = placed.length = claimed.length = scenery.length = sceneryClaims.length = matrixInteriors.length = matrixGates.length = sealedCaves.length = clouds.length = cloudObstacles.length = lamps.length = entranceLights.length = fireSeats.length = sleepers.length = labels.length = spots.length = openMouths.length = headquartersRimLintels.length = launchers.length = props.length = 0;
+    launchCloudSpot = null;
     fireHazards.length = 0;
     workZones.length = 0;
     closedCaveZones.length = 0;
@@ -61932,7 +62285,7 @@ void main() {
     hooks = {};
     input = interactMod.create({ canvas: ctx.canvas, renderer, camera, hooks });
     pilot = pilotMod.create({ renderer, canvas: ctx.canvas, camera, hud, presets: PRESETS, landing: "pile", pitch: PITCH, dist: DIST, follow: FOLLOW, fly: FLY, clampTarget, clampCamera, ceilingAt: () => 4.3, coarse: COARSE, close: { eyeHeight: 1.1, eyeRatio: 0.95, eyeForward: 0.16, pitch: [-1.35, 1.35], trailingDist: 4, orbitDist: 5, maxStep: 0.6, groundAt: () => 0 } });
-    const shared = { root, input, hooks, hud, game, world, renderer, camera, overlay: ctx.overlay, tickerAt: TICKER_AT, buildSpots: BUILD_SPOTS.slice(), walkIn: WALK_IN, clampDrag, viewYaw: PRESETS.pile.yaw, bedrolls: lab.bedrolls, pileScale: 0.45, onShown: (shown) => { lab.equipment.abacus.setValue(shown); meterTimer = 0; }, walkable };
+    const shared = { root, input, hooks, hud, game, world, renderer, camera, overlay: ctx.overlay, tickerAt: TICKER_AT, buildSpots: BUILD_SPOTS.slice(), walkIn: WALK_IN, clampDrag, viewYaw: PRESETS.pile.yaw, bedrolls: lab.bedrolls, pileScale: 0.45, onShown: (shown) => { lab.equipment.abacus.setValue(shown); meterTimer = 0; }, walkable, reticleTarget: () => "object" };
     shared.onWeaponImpact = (source, hit, dx, dy, dz, power) => {
       if (hit.owner.kind === "caveman") crew.damage(hit.owner.cave, power);
     };
