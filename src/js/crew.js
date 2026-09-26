@@ -13,16 +13,16 @@
   const EAT_RATE = 1 / 20;
   const CHEW_PERIOD = 3.2;
   const AMMO_MAX = 30, AMMO_PER_BANANA = 3, RELOAD_PERIOD = 1.2, BURST_ROUNDS = 3, BURST_STEP = 0.09, SHOT_PERIOD = 0.44;
+  const FOCUSED_AUTO_HOLD = 0.12;
   const SHOT_POWER = 0.5;
   const GUN_MUZZLE_Y = -0.01, GUN_MUZZLE_Z = 0.67;
   const GUN_SIGHT_DOWN = Math.atan2(0.09 - 0.08, 0.59 + 0.18);
   const GUN_SIGHT_DROP = 0.08 * Math.cos(GUN_SIGHT_DOWN) + 0.18 * Math.sin(GUN_SIGHT_DOWN);
-  const GUN_SIGHT_YAW = 0.01, GUN_SIGHT_ROLL = 0.045;
   const MELEE_FOCUS_POWER = 1.5, MELEE_MAX_POWER = 2, MELEE_QUICK_POWER = 0.5;
   const MELEE_WIND = 0.08, MELEE_QUICK_WIND = 0.025, MELEE_STRIKE = 0.128, MELEE_QUICK_STRIKE = 0.09, MELEE_RECOVER = 0.112;
   const MELEE_RELEASE = MELEE_STRIKE + MELEE_RECOVER, MELEE_TIME = MELEE_WIND + MELEE_RELEASE;
   const MELEE_TAP_TIME = 0.12, MELEE_CHARGE_DELAY = 0.24, MELEE_CHARGE_TIME = 1;
-  const MELEE_COMBO_WINDOW = 0.4, MELEE_BUFFER_MAX = 8;
+  const MELEE_COMBO_WINDOW = 0.4;
   const MELEE_READY_HOLD = 0.5, MELEE_CARRY_BLEND = 0.25;
   const clearMeleeThrust = (cave) => {
     const w = cave.weapon, p = cave.parts.armL.position;
@@ -123,9 +123,11 @@
   const LAND_DUST = [models.particleGeometry("#a3874f", 0.1, 0)];
   const MASK_SMOKE = { ...models.particleGeometry("#c9cbce", 0.09, 0.15) };
   const MASK_PORTS = [[0, 0], ...[0, 1, 2, 3, 4, 5].map((i) => [Math.cos(i / 6 * Math.PI * 2) * 0.065, Math.sin(i / 6 * Math.PI * 2) * 0.065])];
-  const MASK_SMOKE_CAP = MASK_PORTS.length * 36;
-  const MASK_SMOKE_SMALL = 0.34, MASK_SMOKE_MERGE_MAX = 12;
+  const MASK_SMOKE_PER_PORT = 2, MASK_SMOKE_SMALL_PER_PORT = 4;
+  const MASK_SMOKE_CAP = MASK_PORTS.length * Math.max(36 * MASK_SMOKE_PER_PORT, 12 * MASK_SMOKE_SMALL_PER_PORT);
+  const MASK_SMOKE_SMALL = 0.34, MASK_SMOKE_MERGE_MAX = 12, MASK_SMOKE_SEPARATION = 0.04;
   const MASK_SMOKE_MAX = MASK_SMOKE_SMALL * Math.cbrt(MASK_SMOKE_MERGE_MAX);
+  const MASK_SMOKE_RISE = 0.06, MASK_SMOKE_LIFT = 0.12;
   const BURN_FLAMES = [models.particleGeometry("#ff8a2a", 0.14, 1), models.particleGeometry("#ffc148", 0.12, 1)];
   const BURN_SMOKE = models.particleGeometry("#70685f", 0.18, 0);
   const ROLL_SECONDS = 3, SOOT_SECONDS = 10, EMBER_HEAT_SECONDS = 4;
@@ -474,6 +476,7 @@
       weapon.reloadFireRounds = BURST_ROUNDS;
       weapon.burstRemaining = weapon.burstTimer = 0;
       weapon.triggerHeld = weapon.triggerSingle = false;
+      weapon.triggerHeldTime = 0;
       weapon.triggerQueued = 0;
       weapon.burstPlayerAim = false;
       weapon.burstWork = false;
@@ -489,7 +492,6 @@
       weapon.meleeQuick = false;
       weapon.meleeSide = 1; weapon.meleeComboTime = 0;
       weapon.meleeBladeTurn = weapon.meleeEntryBladeTurn = 0;
-      weapon.meleeBuffered = 0; weapon.meleeBufferHeld = false;
       weapon.meleeEntryX = weapon.meleeEntryY = weapon.meleeEntryZ = weapon.meleeEntryClubZ = 0;
       weapon.meleeReadyTime = 0;
       weapon.meleeAxeArm = math.quat.create(); weapon.meleeAxeClub = math.quat.create();
@@ -1567,7 +1569,6 @@
       cave.weapon.meleeQuick = false;
       cave.weapon.meleeSide = 1; cave.weapon.meleeComboTime = 0;
       cave.weapon.meleeBladeTurn = cave.weapon.meleeEntryBladeTurn = 0;
-      cave.weapon.meleeBuffered = 0; cave.weapon.meleeBufferHeld = false;
       cave.weapon.meleeHeldTime = cave.weapon.meleeCharge = 0;
       cave.weapon.meleeStrikeTime = MELEE_STRIKE;
       cave.weapon.meleePower = 1;
@@ -1591,17 +1592,10 @@
       }
       return changed;
     };
-    const swingWeapon = (cave = player, held = false, focused = false, fromBuffer = false) => {
+    const swingWeapon = (cave = player, held = false, focused = false) => {
       if (!cave || cave.health.stunned || !cave.weapon.primaryOwned || !cave.weapon.primaryEquipped || cave !== player && (cave.camp.burning || cave.camp.rolling) || cave.camp.seat || cave.bedTravel.mode) return false;
       const w = cave.weapon, arm = cave.parts.armL, club = cave.parts.club;
-      if (w.meleeHeld || w.meleeBufferHeld) return false;
-      if (w.meleeTime > MELEE_RECOVER || w.meleeBuffered && !fromBuffer) {
-        // A click made during a stroke waits for its contact instead of being
-        // dropped or forcing the previous hit to finish off screen.
-        if (!held || w.meleeBuffered >= MELEE_BUFFER_MAX) return false;
-        w.meleeBufferHeld = true;
-        return true;
-      }
+      if (w.meleeHeld) return false;
       w.meleeSide = w.meleeComboTime > 0 ? -w.meleeSide : 1;
       w.meleeEntryX = arm.rotation.x; w.meleeEntryY = arm.rotation.y; w.meleeEntryZ = arm.rotation.z;
       w.meleeEntryClubZ = club.rotation.z;
@@ -1634,17 +1628,15 @@
       w.meleePower = focused ? MELEE_FOCUS_POWER : 1;
       if (!held) w.meleeComboTime = MELEE_COMBO_WINDOW;
       if (!held) aimMeleeStrike(cave);
+      if (!held && w.meleeTarget.node) {
+        weaponOrigin(weaponStart, cave, true);
+        hitMeleeTarget(cave);
+      }
       return true;
     };
     const releaseSwing = (cave = player, cancel = false, focused = null, quick = false) => {
       if (!cave) return false;
       const w = cave.weapon;
-      if (w.meleeBufferHeld) {
-        w.meleeBufferHeld = false;
-        if (cancel) w.meleeBuffered = 0;
-        else w.meleeBuffered = Math.min(MELEE_BUFFER_MAX, w.meleeBuffered + 1);
-        return true;
-      }
       if (!w.meleeHeld) return false;
       w.meleeTarget.node = null;
       if (!cancel && ctx.meleeTarget && !ctx.meleeTarget(w.meleeTarget, cave)) w.meleeTarget.node = null;
@@ -1656,13 +1648,16 @@
       w.meleeTime = cancel ? 0 : w.meleeStrikeTime + MELEE_RECOVER + (w.meleeQuick ? MELEE_QUICK_WIND : 0);
       w.meleeComboTime = cancel ? 0 : MELEE_COMBO_WINDOW;
       if (cancel) {
-        w.meleeBuffered = 0;
         w.meleeReadyTime = 0;
         w.meleePower = 1;
         w.meleeHeldTime = w.meleeCharge = 0;
         w.meleeStrikeTime = MELEE_STRIKE;
       }
       aimMeleeStrike(cave);
+      if (!cancel && w.meleeTarget.node) {
+        weaponOrigin(weaponStart, cave, true);
+        hitMeleeTarget(cave);
+      }
       return true;
     };
     // Thrusters built into a character sit wherever its own model puts them, so
@@ -1816,7 +1811,8 @@
         // haft midpoint to just beneath the stone head.
         parts.armL.rotation.x = lerp(parts.armL.rotation.x, AXE_STICK_ARM, stick);
         parts.armL.rotation.y = parts.armL.rotation.z = 0;
-        const grip = lerp(7 / 16, 11 / 16, stick) * h;
+        const hockeyStick = cave.traits.name === "MrHodlX";
+        const grip = (hockeyStick ? lerp(10 / 16, 13 / 16, stick) : lerp(7 / 16, 11 / 16, stick)) * h;
         const gripX = lerp(0.075, 0.025, stick) * h;
         cave.axeRotation.set(AXE_FORWARD_ROTATION);
         math.quat.slerpTo(cave.axeRotation, AXE_UPRIGHT_ROTATION, stick);
@@ -1857,7 +1853,11 @@
           setVec(ghost.rotation, Math.PI / 2, spin + side * (i + 1) * CHUK_TRAIL, 0);
         }
       } else {
-        setVec(parts.club.position, slungClub ? -0.25 * h : 0, (slungClub ? 0.25 : raisedPrimary ? -0.625 : -0.62) * h, (slungClub ? -0.3 : raisedPrimary ? 0.15 : 0.08) * h);
+        const hockeySling = slungClub && cave.traits.name === "MrHodlX";
+        const slingX = hockeySling ? -0.29 : -0.25, slingY = hockeySling ? 0.21 : 0.25;
+        setVec(parts.club.position, slungClub ? slingX * h : 0,
+          (slungClub ? slingY : raisedPrimary ? -0.625 : -0.62) * h,
+          (slungClub ? -0.3 : raisedPrimary ? 0.15 : 0.08) * h);
         setVec(parts.club.rotation, slungClub ? cave.traits.stoneAxe ? 0 : CLUB_SLING_TILT : raisedPrimary ? 0 : cave.clubCarry.x,
           0, slungClub ? CLUB_SLING_ANGLE : raisedPrimary ? Math.PI / 2 : cave.clubCarry.z);
       }
@@ -2157,16 +2157,13 @@
         const kick = clamp((w.recoil - GUN_HOLD + GUN_KICK) / GUN_KICK, 0, 1);
         const forward = (0.85 - 0.04 * kick) * h, drop = (GUN_SIGHT_DROP - 0.02 * kick) * h;
         const sightPitch = -Math.atan2(fy, flat) + GUN_SIGHT_DOWN - 0.035 * kick;
-        // Cant the gun slightly, then keep the front post on the centre ray.
-        const sightSide = (0.09 * Math.sin(GUN_SIGHT_ROLL) * Math.cos(GUN_SIGHT_YAW)
-          - Math.sin(GUN_SIGHT_YAW) * (0.09 * Math.cos(GUN_SIGHT_ROLL) * Math.sin(sightPitch)
-            + 0.59 * Math.cos(sightPitch))) * h;
+        // Keep the sights straight and centered on the view ray.
         const ex = cy * (eye.x - p.x) - sy * (eye.z - p.z);
         const ez = sy * (eye.x - p.x) + cy * (eye.z - p.z);
-        gun.position.x = lerp(gun.position.x, ex + fx * forward + fy * fx / flat * drop + fz / flat * sightSide, sightMix);
+        gun.position.x = lerp(gun.position.x, ex + fx * forward + fy * fx / flat * drop, sightMix);
         gun.position.y = lerp(gun.position.y, eye.y - p.y + fy * forward - flat * drop, sightMix);
-        gun.position.z = lerp(gun.position.z, ez + fz * forward + fy * fz / flat * drop - fx / flat * sightSide, sightMix);
-        math.quat.fromEuler(GUN_SIGHT, sightPitch, Math.atan2(fx, fz) + GUN_SIGHT_YAW, GUN_SIGHT_ROLL);
+        gun.position.z = lerp(gun.position.z, ez + fz * forward + fy * fz / flat * drop, sightMix);
+        math.quat.fromEuler(GUN_SIGHT, sightPitch, Math.atan2(fx, fz), 0);
         math.quat.slerpTo(gun.quaternion, GUN_SIGHT, sightMix);
         gun.poseLean *= 1 - sightMix;
         // The gun moves to the eye in this pose; carry the gripping hand with
@@ -2195,6 +2192,7 @@
       const w = cave.weapon;
       w.burstRemaining = w.burstTimer = w.recoil = 0;
       w.triggerHeld = w.triggerSingle = false;
+      w.triggerHeldTime = 0;
       w.triggerQueued = 0;
       w.reloadFire = w.reloadFireHeld = false;
       w.reloadFireRounds = BURST_ROUNDS;
@@ -2288,6 +2286,7 @@
       if (!held) {
         w.triggerHeld = false;
         w.triggerSingle = false;
+        w.triggerHeldTime = 0;
         w.reloadFireHeld = false;
         if (!w.burstRemaining) w.burstTimer = 0;
         return true;
@@ -2300,15 +2299,10 @@
         return true;
       }
       if (!weaponReady(player)) return false;
-      if (w.triggerHeld) {
-        if (single && !w.triggerSingle) {
-          w.triggerSingle = true;
-          w.burstRemaining = 0;
-        }
-        return true;
-      }
+      if (w.triggerHeld) return true;
       w.triggerSingle = single;
       w.triggerHeld = true;
+      w.triggerHeldTime = 0;
       if (!w.burstRemaining) {
         // A fresh press may wait out the previous shot's cooldown. It never
         // resumes automatically after reload, stow or another cancellation.
@@ -2328,6 +2322,10 @@
       // free hand cheers. The unfinished reload resumes from the same round.
       if (cave !== player && cave.state === "working" && cave.cheer > 0) { stopBurst(cave); return; }
       w.cooldown = Math.max(0, w.cooldown - dt);
+      if (w.triggerHeld && w.triggerSingle) {
+        w.triggerHeldTime += dt;
+        if (w.triggerHeldTime >= FOCUSED_AUTO_HOLD) w.triggerSingle = false;
+      }
       w.recoil = Math.max(0, w.recoil - dt);
       w.reloadHandoffFrame = !!w.reloadHandoff;
       if (w.reloadHandoff) {
@@ -2373,14 +2371,17 @@
         return;
       }
       if (!w.burstRemaining && !w.triggerHeld) return;
-      // Focused aim is semi-automatic: one press owns one round even when
-      // the button remains held. Releasing arms the next press.
-      if (w.triggerSingle && !w.burstRemaining) return;
+      // A short focused press stays a single shot. A longer hold resumes
+      // automatic fire on the same shot clock.
+      if (w.triggerSingle && !w.burstRemaining) {
+        w.burstTimer = Math.max(0, w.burstTimer - dt);
+        return;
+      }
       if (!weaponReady(cave) || w.burstWork && (cave.work.phase !== "shoot" || !siteActive(cave, workSites[cave.work.site]))) {
         stopBurst(cave);
         return;
       }
-      if (w.triggerHeld && !w.burstTimer) { fireWeapon(cave); return; }
+      if (w.triggerHeld && !w.burstTimer && w.triggerHeldTime < FOCUSED_AUTO_HOLD) { fireWeapon(cave); return; }
       w.burstTimer -= dt;
       // Finish a tapped burst; holding continues on the same shot clock.
       // Keep the normal magazine-sized catch-up bound in unlimited debug mode.
@@ -4625,7 +4626,6 @@
         const w = cave.weapon;
         clearMeleeThrust(cave);
         w.meleeTime = w.meleeReadyTime = w.meleeComboTime = 0;
-        w.meleeBuffered = 0; w.meleeBufferHeld = false;
         w.meleeTarget.node = w.meleeTarget.owner = null;
         w.meleeAimX = w.meleeAimY = w.meleeAimZ = 0;
         w.meleeQuick = false;
@@ -4808,7 +4808,6 @@
       cave.weapon.meleeTime = cave.weapon.meleeComboTime = 0;
       cave.weapon.meleeHeld = false;
       cave.weapon.meleeQuick = false;
-      cave.weapon.meleeBuffered = 0; cave.weapon.meleeBufferHeld = false;
       cave.weapon.meleeReadyTime = 0;
       cave.weapon.meleeTarget.node = cave.weapon.meleeTarget.owner = null;
       cave.weapon.meleeHeldTime = cave.weapon.meleeCharge = 0;
@@ -5116,7 +5115,7 @@
       }
       ctx2d.restore();
     };
-    const wrapMaskSmoke = (cave, puff, dt, walking) => {
+    const wrapMaskSmoke = (cave, puff) => {
       const node = puff.node, p = node.position, bounds = cave.gunHeadBounds, m = cave.parts.head.world;
       math.mat4.transformPoint(SMOKE_LOCAL, SMOKE_INVERSE, p.x, p.y, p.z);
       const radius = 0.09 * node.scale.x * Math.sqrt(3), x = SMOKE_LOCAL[0], y = SMOKE_LOCAL[1], z = SMOKE_LOCAL[2];
@@ -5128,9 +5127,6 @@
       // them. Keep the same side for a puff as it curls past the head.
       const side = puff.wrapSide;
       let nx = x;
-      if (walking > 0.1 && z > maxZ && x > minX && x < maxX) {
-        nx += side * walking * dt * 0.8 * clamp(1 - (z - maxZ) / 0.2, 0, 1);
-      }
       if (nx > minX && nx < maxX && z > minZ && z < maxZ) nx = side < 0 ? minX - 0.001 : maxX + 0.001;
       if (nx === x) return;
       math.mat4.transformPoint(MUZZLE, m, nx, y, z);
@@ -5146,57 +5142,102 @@
       // Refresh the head after movement and animation, even offscreen.
       BL.scene.updateWorld(cave.root);
       math.mat4.invert(SMOKE_INVERSE, cave.parts.head.world);
-      const walking = Math.hypot(cave.shoulder.motionX, cave.shoulder.motionZ);
+      const motion = cave.shoulder, walkingSpeed = Math.hypot(motion.motionX, motion.motionZ);
+      const walking = walkingSpeed > 0.25 && cave.hop === 0;
+      const forwardX = walking ? motion.motionX / walkingSpeed : 0;
+      const forwardZ = walking ? motion.motionZ / walkingSpeed : 0;
+      const head = cave.parts.head.world;
+      math.mat4.transformPoint(MUZZLE, head, 0, 0.27 * cave.traits.height, 0);
+      const headX = MUZZLE[0], headY = MUZZLE[1], headZ = MUZZLE[2];
       for (let i = 0; i < cave.breathSmoke.length; i++) {
         const puff = cave.breathSmoke[i];
         if (puff.life <= 0) continue;
         puff.life = Math.max(0, puff.life - dt);
-        const drag = Math.exp(-1.3 * dt);
-        puff.vx *= drag; puff.vz *= drag; puff.vy = damp(puff.vy, 0.3, 0.9, dt);
         const node = puff.node;
         const time = puff.maxLife - puff.life;
+        // Keep the initial exhale, then let both sizes settle into a slow upward drift.
+        const exhaling = time < 0.25;
+        const drag = Math.exp(-(exhaling ? 1.3 : 3.2) * dt);
+        puff.vx *= drag; puff.vz *= drag;
+        puff.vy = damp(puff.vy, exhaling ? 0.15 : MASK_SMOKE_RISE, exhaling ? 0.9 : 3.2, dt);
+        if (walking && time > 0.12 && time < 2.2) {
+          const p = node.position;
+          const dx = p.x - headX, dz = p.z - headZ;
+          const along = dx * forwardX + dz * forwardZ;
+          if (along > -2.5 && along < 1.5) {
+            // The walking direction shapes the wake without passing the Ooga's
+            // velocity to smoke. Wisps fan around the head, then meet behind it.
+            const across = -dx * forwardZ + dz * forwardX;
+            const wake = clamp((0.1 - along) / 0.7, 0, 1);
+            const spread = lerp(0.42, 0.03, wake);
+            const side = clamp((Math.cos(puff.phase) * spread - across) * 3, -0.9, 0.9);
+            const rise = clamp((Math.sin(puff.phase) * spread * 0.7 - (p.y - headY)) * 2, -0.5, 0.5);
+            puff.vx = damp(puff.vx, -forwardX * 0.22 - forwardZ * side, 4, dt);
+            puff.vy = damp(puff.vy, MASK_SMOKE_RISE + rise, 4, dt);
+            puff.vz = damp(puff.vz, -forwardZ * 0.22 + forwardX * side, 4, dt);
+          }
+        }
         node.position.x += (puff.vx + Math.sin(time * 3 + puff.phase) * 0.025) * dt;
         node.position.y += puff.vy * dt;
         node.position.z += (puff.vz + Math.cos(time * 2.5 + puff.phase) * 0.025) * dt;
         node.rotation.y += 1.2 * dt;
-        // Smoke keeps spreading as it floats away; fading never pulls it back in.
+        // Individual puffs keep expanding even when the walking wake converges.
         const age = 1 - puff.life / puff.maxLife;
         const s = Math.min(MASK_SMOKE_MAX, puff.size * (1 + age * 1.8));
         node.scale.x = node.scale.y = node.scale.z = s;
         node.smokeOpacity = 0.85 * Math.min(1, puff.life / (puff.maxLife * 0.65));
-        wrapMaskSmoke(cave, puff, dt, walking);
+        wrapMaskSmoke(cave, puff);
       }
       cave.breathMerge -= dt;
       if (cave.breathMerge <= 0) {
         cave.breathMerge = 0.14;
-        // Neighbouring wisps merge into larger clouds once clear of the filter.
-        // Scan the fixed pool at a bounded cadence and conserve cube volume.
+        // Neighbours merge once clear of the filter. Others push apart before
+        // too many smoke cubes occupy the same space, while retaining some overlap.
         const smoke = cave.breathSmoke;
         for (let i = 0; i < smoke.length; i++) {
           const a = smoke[i];
-          if (a.life <= 0 || a.maxLife - a.life < 0.2) continue;
+          if (a.life <= 0) continue;
           for (let j = i + 1; j < smoke.length; j++) {
             const b = smoke[j];
-            if (b.life <= 0 || b.maxLife - b.life < 0.2 || a.cubes + b.cubes > MASK_SMOKE_MERGE_MAX) continue;
+            if (b.life <= 0) continue;
             const ap = a.node.position, bp = b.node.position;
-            const dx = bp.x - ap.x, dy = bp.y - ap.y, dz = bp.z - ap.z;
-            const reach = 0.09 * (a.node.scale.x + b.node.scale.x) * 1.35;
-            if (dx * dx + dy * dy + dz * dz > reach * reach) continue;
-            const av = a.node.scale.x ** 3, bv = b.node.scale.x ** 3, size = Math.cbrt(av + bv);
-            if (size > MASK_SMOKE_MAX) continue;
-            const weight = bv / (av + bv);
-            ap.x += dx * weight; ap.y += dy * weight; ap.z += dz * weight;
-            a.vx = lerp(a.vx, b.vx, weight); a.vy = lerp(a.vy, b.vy, weight); a.vz = lerp(a.vz, b.vz, weight);
-            a.life = Math.max(a.life, b.life); a.maxLife = Math.max(a.maxLife, b.maxLife);
-            a.cubes += b.cubes;
-            a.size = size / (1 + (1 - a.life / a.maxLife) * 1.8);
-            setVec(a.node.scale, size, size, size);
-            a.node.smokeOpacity = Math.max(a.node.smokeOpacity, b.node.smokeOpacity);
-            b.life = 0; b.node.smokeOpacity = 0;
+            let dx = bp.x - ap.x, dy = bp.y - ap.y, dz = bp.z - ap.z;
+            let distance2 = dx * dx + dy * dy + dz * dz;
+            const scales = a.node.scale.x + b.node.scale.x;
+            const reach = 0.09 * scales * 1.35;
+            if (distance2 > reach * reach) continue;
+            const av = a.node.scale.x ** 3, bv = b.node.scale.x ** 3;
+            if (a.maxLife - a.life >= 0.2 && b.maxLife - b.life >= 0.2 && a.cubes + b.cubes <= MASK_SMOKE_MERGE_MAX) {
+              const size = Math.cbrt(av + bv);
+              if (size <= MASK_SMOKE_MAX) {
+                const weight = bv / (av + bv);
+                ap.x += dx * weight; ap.y += dy * weight; ap.z += dz * weight;
+                a.vx = lerp(a.vx, b.vx, weight); a.vy = lerp(a.vy, b.vy, weight); a.vz = lerp(a.vz, b.vz, weight);
+                a.life = Math.max(a.life, b.life); a.maxLife = Math.max(a.maxLife, b.maxLife);
+                a.cubes += b.cubes;
+                a.size = size / (1 + (1 - a.life / a.maxLife) * 1.8);
+                setVec(a.node.scale, size, size, size);
+                a.node.smokeOpacity = Math.max(a.node.smokeOpacity, b.node.smokeOpacity);
+                b.life = 0; b.node.smokeOpacity = 0;
+                continue;
+              }
+            }
+            const spacing = MASK_SMOKE_SEPARATION * scales;
+            if (distance2 >= spacing * spacing) continue;
+            if (distance2 < 1e-10) {
+              dx = i & 1 ? 0.001 : -0.001;
+              dy = 0;
+              dz = j & 1 ? 0.001 : -0.001;
+              distance2 = dx * dx + dz * dz;
+            }
+            const push = (spacing / Math.sqrt(distance2) - 1) * 0.7;
+            const aShare = bv / (av + bv), bShare = av / (av + bv);
+            ap.x -= dx * push * aShare; ap.y -= dy * push * aShare; ap.z -= dz * push * aShare;
+            bp.x += dx * push * bShare; bp.y += dy * push * bShare; bp.z += dz * push * bShare;
           }
         }
         // Merging conserves volume but can move the new centre toward the head.
-        for (let i = 0; i < smoke.length; i++) if (smoke[i].life > 0) wrapMaskSmoke(cave, smoke[i], 0, walking);
+        for (let i = 0; i < smoke.length; i++) if (smoke[i].life > 0) wrapMaskSmoke(cave, smoke[i]);
       }
       if (!cave.root.visible || cave.state !== "working" && cave.state !== "chilling") return;
       cave.breathAt -= dt;
@@ -5209,25 +5250,28 @@
       // The filter's front is at (0, 0.1, 0.467) in the scaled mask.
       const m = cave.parts.head.world, h = cave.traits.height;
       const forwardLength = Math.hypot(m[8], m[9], m[10]);
-      const first = (cave.breathTotal - cave.breathPuffs) * MASK_PORTS.length;
-      for (let i = 0; i < MASK_PORTS.length; i++) {
+      const perPort = cave.breathHuge ? MASK_SMOKE_PER_PORT : MASK_SMOKE_SMALL_PER_PORT;
+      const first = (cave.breathTotal - cave.breathPuffs) * MASK_PORTS.length * perPort;
+      for (let i = 0; i < MASK_PORTS.length * perPort; i++) {
         // Matches the centre hole and six surrounding holes in MrHodlX's gas mask (src/characters/MrHodlX.js).
-        const port = MASK_PORTS[i];
+        const port = MASK_PORTS[i % MASK_PORTS.length];
         math.mat4.transformPoint(MUZZLE, m, (port[0] + (Math.random() - 0.5) * 0.006) * h, (0.1 + port[1] + (Math.random() - 0.5) * 0.006) * h, (0.49 + Math.random() * 0.004) * h);
-        const k = ((cave.breathHuge ? 1.35 : 0.16) + walking * 1.15) * (0.8 + Math.random() * 0.4) / forwardLength;
-        const side = (Math.random() - 0.5) * 0.012;
-        const lift = (Math.random() - 0.5) * 0.012;
+        const k = (cave.breathHuge ? 1.35 : 0.16) * (0.8 + Math.random() * 0.4) / forwardLength;
+        const spread = cave.breathHuge ? 3.5 : 0, jitter = cave.breathHuge ? 0.18 : 0.012;
+        const side = port[0] * spread + (Math.random() - 0.5) * jitter;
+        const lift = port[1] * spread + (Math.random() - 0.5) * jitter;
         const puff = cave.breathSmoke[first + i];
         setVec(puff.node.position, MUZZLE[0], MUZZLE[1], MUZZLE[2]);
         puff.size = cave.breathHuge ? 0.48 + Math.random() * 0.16 : MASK_SMOKE_SMALL * (0.75 + Math.random() * 0.25);
         puff.cubes = 1;
         puff.phase = Math.random() * Math.PI * 2;
-        puff.wrapSide = port[0] ? Math.sign(port[0]) : i & 1 ? -1 : 1;
+        puff.wrapSide = walking ? (Math.cos(puff.phase) < 0 ? -1 : 1)
+          : port[0] ? Math.sign(port[0]) : i & 1 ? -1 : 1;
         puff.node.rotation.y = puff.phase;
         setVec(puff.node.scale, puff.size, puff.size, puff.size);
         puff.node.smokeOpacity = 0.85;
         puff.vx = m[8] * k + m[0] * side + m[4] * lift;
-        puff.vy = m[9] * k + m[1] * side + m[5] * lift + 0.24;
+        puff.vy = m[9] * k + m[1] * side + m[5] * lift + MASK_SMOKE_LIFT;
         puff.vz = m[10] * k + m[2] * side + m[6] * lift;
         puff.life = puff.maxLife = cave.breathHuge ? 4 + Math.random() * 0.6 : 2.6 + Math.random() * 0.6;
       }
@@ -5380,11 +5424,6 @@
           poseWeapon(cave);
           BL.scene.updateWorld(cave.root);
         }
-      }
-      if (w.meleeBuffered && !w.meleeBufferHeld && w.meleeTime <= MELEE_RECOVER && cave === player) {
-        w.meleeBuffered--;
-        if (swingWeapon(cave, true, false, true)) releaseSwing(cave, false, false, true);
-        else w.meleeBuffered = 0;
       }
       if (ctx.characterSupportAt) riding.support = ctx.characterSupportAt(cave);
       if (dt > 0 && cave.root.visible && (cave.state === "working" || cave.state === "chilling") && ctx.onBodyMove) ctx.onBodyMove(cave, x, y, z, dt);

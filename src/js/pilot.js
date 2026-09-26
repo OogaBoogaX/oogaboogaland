@@ -609,7 +609,13 @@
         && (!clear || clear(targetOrigin.x, targetOrigin.y, targetOrigin.z, targetOrigin.x + mx * near, targetOrigin.y + my * near, targetOrigin.z + mz * near, out.node, true));
     };
     const meleeTarget = (out, cave) => {
-      if (cave !== player() || !armed() || !cave.weapon.primaryEquipped) return false;
+      if (cave !== player() || !cave.weapon.primaryEquipped) return false;
+      if (!armed()) {
+        crew.weaponOrigin(targetOrigin, cave, true);
+        const yaw = cave.root.rotation.y;
+        return input.weaponTargets.verticalRay(out, targetOrigin.x, targetOrigin.y, targetOrigin.z,
+          Math.sin(yaw), Math.cos(yaw), crew.meleeReach(cave), cave, sightClear || cursorClear) && out.type === "object";
+      }
       if (assistedView()) {
         if (!assistedTargetActive || !assistedTargetInRange || assistedTargetHit.type !== "object") return false;
         Object.assign(out, assistedTargetHit);
@@ -1105,12 +1111,12 @@
             const w = player().weapon, before = w.shotsFired + w.triggerQueued;
             aimLeftFocused = ads;
             weaponAction("weapon-fire", true);
-            aimLeftAccepted = !ads || w.shotsFired + w.triggerQueued > before;
+            aimLeftAccepted = !ads || w.triggerHeld || w.reloadFireHeld || w.shotsFired + w.triggerQueued > before;
           }
         }
         if (e.button === 2) {
           ads = true;
-          if (e.buttons & 1 && !player().weapon.primaryEquipped) crew.setWeaponTrigger(true, true);
+          if (e.buttons & 1 && !player().weapon.primaryEquipped && crew.setWeaponTrigger(true, true)) aimLeftAccepted = true;
         }
       } else if (e.type === "pointerup" || e.type === "pointermove") {
         if (e.button === 0) {
@@ -1150,7 +1156,8 @@
       }
     };
     const releaseAimAttack = (e) => {
-      if (externalControl || !crew || aimReleaseEvent === e) return;
+      if (externalControl || !crew || aimReleaseEvent === e || e.type === "mouseup" && aimReleaseEvent?.type === "pointerup"
+        && e.button === aimReleaseEvent.button && e.timeStamp - aimReleaseEvent.timeStamp < 100) return;
       aimReleaseEvent = e;
       const cave = player(), focused = aimLeftFocused || ads;
       // Chorded mouse buttons do not consistently emit a second pointerdown:
@@ -1510,7 +1517,7 @@
         crew.toggleWeapon(cave);
         syncAim();
         if (armed() && cave.weapon.equipped) lockAim();
-        if (cave.weapon.equipped) hud.hint(armed() ? "Left-click bursts · hold right-click for single-shot aim · 1 melee · 2 AK · scroll to change view · Space reloads or jumps / jetpacks" : "AK equipped · right-click or scroll in to aim · 1 melee · Space reloads beside the pile or jumps / jetpacks");
+        if (cave.weapon.equipped) hud.hint(armed() ? "Left-click bursts · zoom: tap one shot, hold for auto · 1 melee · 2 AK · scroll to change view · Space reloads or jumps / jetpacks" : "AK equipped · right-click or scroll in to aim · 1 melee · Space reloads beside the pile or jumps / jetpacks");
         else hud.hint(armed() ? "Hold left-click to raise the club · release to strike · right-click focuses a harder swing · 2 AK · scroll out for navigation" : "Club equipped · right-click or scroll in to aim · 2 AK");
       } else if (action === "weapon-fire") {
         if (cave.weapon.primaryEquipped) crew.swingWeapon(cave, false, ads);
@@ -1535,7 +1542,7 @@
       syncAim();
       if (armed()) lockAim();
       syncWeaponHud();
-      hud.hint(armed() ? slot === 1 ? "Hold left-click to raise the club · release to strike · right-click focuses a harder swing · 2 AK · scroll out for navigation" : "Left-click bursts · hold right-click for single-shot aim · 1 melee · scroll out for navigation · Space reloads beside the pile" : "1 melee · 2 AK · right-click or scroll in to aim · Space reloads beside the pile or jumps / jetpacks");
+      hud.hint(armed() ? slot === 1 ? "Hold left-click to raise the club · release to strike · right-click focuses a harder swing · 2 AK · scroll out for navigation" : "Left-click bursts · zoom: tap one shot, hold for auto · 1 melee · scroll out for navigation · Space reloads beside the pile" : "1 melee · 2 AK · right-click or scroll in to aim · Space reloads beside the pile or jumps / jetpacks");
       if (ctx.reloadAnywhere) hud.hint("1 melee · 2 AK · right-click to aim · V fire · R reload · Space use / reload / jump");
       return true;
     };
@@ -1750,28 +1757,34 @@
         orbit.yaw = orbit.tYaw = Math.atan2(-dx, -dz);
         orbit.pitch = orbit.tPitch = clamp(Math.atan2(-dy, Math.hypot(dx, dz)), TRAILING_PITCH[0], TRAILING_PITCH[1]);
       }
-      const recovered = (closeWanted || closeMix > 0) && ctx.releaseView && ctx.releaseView(cave, camera.position);
+      if ((closeWanted || closeMix > 0) && ctx.releaseView) ctx.releaseView(cave, camera.position);
+      closeWanted = false;
       resetGroundView();
-      if (closeWanted) {
-        setFreeEye();
-        closeMix = 1;
-        closeVelocity = 0;
-      }
-      else if (recovered) {
-        // ctx.releaseView handed back a clear eye in solid rock: rebase the orbit so the next frame keeps that position.
-        const cp = Math.cos(orbit.pitch), distance = orbit.dist;
-        freeTarget.x = camera.position.x - Math.sin(orbit.yaw) * cp * distance;
-        freeTarget.y = camera.position.y - Math.sin(orbit.pitch) * distance;
-        freeTarget.z = camera.position.z - Math.cos(orbit.yaw) * cp * distance;
-        orbit.target = freeTarget;
-        orbit.tx = freeTarget.x; orbit.ty = freeTarget.y; orbit.tz = freeTarget.z;
-      }
       restoreHead();
       entryRebase = entryOffsetActive = false;
       closeCave = null;
       crew.release();
       syncAim();
+      const portrait = clamp(1 - renderer.size.width / Math.max(1, renderer.size.height), 0, 0.6);
+      freeTarget.x = camera.target.x;
+      freeTarget.y = camera.target.y + portrait * 0.6;
+      freeTarget.z = camera.target.z;
+      const dx = camera.position.x - freeTarget.x, dy = camera.position.y - freeTarget.y, dz = camera.position.z - freeTarget.z;
+      orbit.dist = orbit.tDist = Math.hypot(dx, dy, dz);
+      const horizontal = Math.hypot(dx, dz);
+      orbit.yaw = orbit.tYaw = horizontal > 1e-5 ? Math.atan2(dx, dz)
+        : camera.up ? Math.atan2(camera.up.x, camera.up.z) : orbit.yaw;
+      orbit.pitch = orbit.tPitch = clamp(Math.atan2(dy, horizontal), TRAILING_PITCH[0], TRAILING_PITCH[1]);
+      closeMix = closeVelocity = 0;
+      orbit.target = freeTarget;
+      orbit.tx = freeTarget.x; orbit.ty = freeTarget.y; orbit.tz = freeTarget.z;
+      distanceVelocity = zoomPitchVelocity = 0;
+      dollyTime = DOLLY_HANDOFF;
+      eyeMotionValid = false;
+      headOrbit = exitAngleHold = closeCameraActive = false;
       carryExitMode = carryFocusRemaining = 0;
+      freeStrafe = freeForward = freeClimb = 0;
+      freeMoveYaw = orbit.yaw;
       hud.el.act.hidden = true;
       syncJetpackHud();
       syncWeaponHud();

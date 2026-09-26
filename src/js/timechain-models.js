@@ -7,45 +7,118 @@
   const SITE = { bearing: BL.terrain.TIMECHAIN.bearing, radius: 13, depth: 12, span: 18, width: 2.6 };
   const DIR = { x: Math.sin(SITE.bearing), z: -Math.cos(SITE.bearing) };
   const UNIT = 0.5, WOOD = "#795335", GOLD = "#c39748";
+  const BITCOIN = ["00011011000", "00011011000", "01111111100", "00110000110", "00110000110", "00111111100", "00110000110", "00110000011", "00110000011", "01111111110", "00011011000", "00011011000"];
+  const SYMBOL_CELL = 0.075, SYMBOL_SLICES = 4, SYMBOL_RADIUS = 13.05, SHELL_CY = 3;
+  const DOOR_BOTTOM = Math.asin(-SHELL_CY / SYMBOL_RADIUS), DOOR_TOP = Math.asin((4.8 - SHELL_CY) / SYMBOL_RADIUS);
+  const DOOR_HALF_ANGLE = Math.PI / 16, TAU = Math.PI * 2;
+  // The ribbon wave opens three wide pockets; center one B in each.
+  const SYMBOL_BEARINGS = [Math.PI / 6, Math.PI / 6 + TAU / 3, Math.PI / 6 - TAU / 3];
   const ground = cached(() => {
-    const v = makeVox(), r = 12.55 / UNIT;
+    // Keep the square floor corners inside the curved shell at the slab's bottom.
+    const v = makeVox(), r = 12.1 / UNIT;
     for (let x = -26; x < 26; x++) for (let z = -26; z < 26; z++) {
       if (Math.hypot(x + 0.5, z + 0.5) > r) continue;
       v.set(x, -1, z, Math.abs(x + 0.5) < 1.5 ? 2 : (x + z) % 4 === 0 ? 1 : 0);
     }
     return voxelGeometry(v, { unit: UNIT, palette: ["#263843", "#304650", "#a3874f"], origin: { x: 0, y: 0, z: 0 } });
   });
-  // The destination is a hollow sphere, with a real doorway through both skins.
+  // The original painted wall remains solid; a thin exterior turns above it.
   const shell = cached(() => {
-    const geo = { verts: [], faces: [], lines: [], lineWidth: 1 }, segments = 96, radius = 13, cy = 3;
+    const fixed = { verts: [], faces: [], lines: [], lineWidth: 1 };
+    const outer = { verts: [], faces: [], lines: [], lineWidth: 1 };
+    const segments = 96, radius = 13, cy = SHELL_CY;
     const levels = Array.from({ length: 49 }, (_, i) => -Math.PI / 2 + i * Math.PI / 48);
     levels.push(Math.asin(-cy / radius), Math.asin((4.8 - cy) / radius)); levels.sort((a, b) => a - b);
     const colors = ["#d9700b", "#e8810d", "#f7931a", "#ef8910"].map(BL.math.hexToRgb);
+    const step = TAU / segments;
     for (let row = 0; row < levels.length - 1; row++) for (let col = 0; col < segments; col++) {
       const lo = -Math.PI + col * 2 * Math.PI / segments, hi = lo + 2 * Math.PI / segments;
       const bottom = levels[row], top = levels[row + 1], latitude = (bottom + top) / 2, longitude = (lo + hi) / 2;
       const y = cy + radius * Math.sin(latitude);
-      if (Math.abs(longitude) < Math.PI / 16 && y > 0 && y < 4.8) continue;
+      if (Math.abs(longitude) < DOOR_HALF_ANGLE && y > 0 && y < 4.8) continue;
       const ribbon = Math.abs(latitude - 0.5 - 0.12 * Math.sin(longitude * 3)) < 0.06 || Math.abs(latitude + 0.5 + 0.12 * Math.sin(longitude * 3)) < 0.06;
-      for (let skin = 0; skin < 2; skin++) {
-        const base = geo.verts.length / 3, r = radius - skin * 0.16;
+      for (let skin = 0; skin < 2; skin++) for (let layer = 0; layer < (!skin && (y <= 0 || y >= 4.8) ? 2 : 1); layer++) {
+        const geo = layer ? outer : fixed, base = geo.verts.length / 3, r = radius - skin * 0.16 + layer * 0.02;
         for (const [a, b] of [[lo, bottom], [hi, bottom], [hi, top], [lo, top]]) geo.verts.push(r * Math.cos(b) * Math.sin(a), cy + r * Math.sin(b), r * Math.cos(b) * Math.cos(a));
         geo.faces.push({ i: skin ? [base + 3, base + 2, base + 1, base] : [base, base + 1, base + 2, base + 3], color: skin ? [19, 32, 45] : ribbon ? [255, 188, 83] : colors[(row + col % 3) % colors.length], emissive: skin ? 0.45 : ribbon ? 0.8 : 0.5 });
         if (!skin) for (let edge = 0; edge < 2; edge++) geo.lines.push({ i: [base + edge, base + edge + 1], color: [133, 65, 8], emissive: 0.25 });
       }
     }
-    const bitcoin = ["00011011000", "00011011000", "01111111100", "00110000110", "00110000110", "00111111100", "00110000110", "00110000011", "00110000011", "01111111110", "00011011000", "00011011000"];
-    for (const [bearing, elevation] of [[0, 0.72], [Math.PI / 2, 0.25], [-Math.PI / 2, 0.25], [Math.PI, 0.25]]) {
-      for (let row = 0; row < bitcoin.length; row++) for (let col = 0; col < bitcoin[row].length; col++) {
-        if (bitcoin[row][col] !== "1") continue;
-        const left = bearing + (col - 5.5) * 0.075, right = left + 0.075;
-        const top = elevation + (6 - row) * 0.075, bottom = top - 0.075, base = geo.verts.length / 3;
-        for (const [a, b] of [[left, bottom], [right, bottom], [right, top], [left, top]]) geo.verts.push(13.05 * Math.cos(b) * Math.sin(a), cy + 13.05 * Math.sin(b), 13.05 * Math.cos(b) * Math.cos(a));
-        geo.faces.push({ i: [base, base + 1, base + 2, base + 3], color: [255, 249, 230], emissive: 0.85 });
+    // Match each door-height panel's original paint and grid lines, including the panels hidden by the doorway.
+    const bandRows = [], bandGroups = new Map(), doorRows = [];
+    for (let row = 0; row < levels.length - 1; row++) {
+      const bottom = levels[row], top = levels[row + 1], y = cy + radius * Math.sin((bottom + top) / 2);
+      if (y > 0 && y < 4.8) doorRows.push({ row, bottom, top });
+    }
+    const sliceWidth = step / SYMBOL_SLICES, halfSlice = sliceWidth / 2;
+    for (let col = 0; col < segments; col++) {
+      const longitude = -Math.PI + (col + 0.5) * step;
+      const paints = doorRows.map(({ row, bottom, top }) => {
+        const latitude = (bottom + top) / 2;
+        const ribbon = Math.abs(latitude - 0.5 - 0.12 * Math.sin(longitude * 3)) < 0.06 || Math.abs(latitude + 0.5 + 0.12 * Math.sin(longitude * 3)) < 0.06;
+        return ribbon ? 4 : (row + col % 3) % colors.length;
+      });
+      for (let slice = 0; slice < SYMBOL_SLICES; slice++) {
+        const edge = slice === SYMBOL_SLICES - 1, key = `${paints.join("")}:${edge ? 1 : 0}`;
+        let group = bandGroups.get(key);
+        if (!group) {
+          const geometry = { verts: [], faces: [], lines: [], lineWidth: 1 };
+          for (let i = 0; i < doorRows.length; i++) {
+            const { bottom, top } = doorRows[i], base = geometry.verts.length / 3, r = radius + 0.02;
+            for (const [a, b] of [[-halfSlice, bottom], [halfSlice, bottom], [halfSlice, top], [-halfSlice, top]]) geometry.verts.push(r * Math.cos(b) * Math.sin(a), cy + r * Math.sin(b), r * Math.cos(b) * Math.cos(a));
+            geometry.faces.push({ i: [base, base + 1, base + 2, base + 3], color: paints[i] === 4 ? [255, 188, 83] : colors[paints[i]], emissive: paints[i] === 4 ? 0.8 : 0.5 });
+            geometry.lines.push({ i: [base, base + 1], color: [133, 65, 8], emissive: 0.25 });
+            if (edge) geometry.lines.push({ i: [base + 1, base + 2], color: [133, 65, 8], emissive: 0.25 });
+          }
+          group = { geometry, angles: [], mask: true, halfWidth: halfSlice };
+          bandGroups.set(key, group); bandRows.push(group);
+        }
+        group.angles.push(longitude + (slice - (SYMBOL_SLICES - 1) / 2) * sliceWidth);
       }
     }
-    return geo;
+    const symbolRows = [];
+    for (let row = 0; row < BITCOIN.length; row++) {
+      const top = (BITCOIN.length / 2 - row) * SYMBOL_CELL, bottom = top - SYMBOL_CELL;
+      const cuts = [bottom];
+      if (bottom < DOOR_BOTTOM && DOOR_BOTTOM < top) cuts.push(DOOR_BOTTOM);
+      if (bottom < DOOR_TOP && DOOR_TOP < top) cuts.push(DOOR_TOP);
+      cuts.push(top);
+      for (let part = 0; part < cuts.length - 1; part++) {
+        const low = cuts[part], high = cuts[part + 1], half = SYMBOL_CELL / (SYMBOL_SLICES * 2);
+        const geometry = { verts: [], faces: [{ i: [0, 1, 2, 3], color: [255, 249, 230], emissive: 0.85 }], lines: [] };
+        for (const [a, b] of [[-half, low], [half, low], [half, high], [-half, high]]) geometry.verts.push(SYMBOL_RADIUS * Math.cos(b) * Math.sin(a), cy + SYMBOL_RADIUS * Math.sin(b), SYMBOL_RADIUS * Math.cos(b) * Math.cos(a));
+        symbolRows.push({ row, geometry, mask: low >= DOOR_BOTTOM && high <= DOOR_TOP });
+      }
+    }
+    return { fixed, outer, bandRows, symbolRows };
   });
+  const rotatingBatch = (geometry, angles, place, mask, halfWidth) => {
+    const node = createNode({ geometry, sightHidden: true, instanceData: new Float32Array(angles.length * 20), instanceCount: 0, instanceVersion: 0, fixedInstanceCapacity: true });
+    const baseCos = new Float32Array(angles.length), baseSin = new Float32Array(angles.length);
+    for (let i = 0; i < angles.length; i++) {
+      baseCos[i] = Math.cos(place.ry + angles[i]); baseSin[i] = Math.sin(place.ry + angles[i]);
+    }
+    return { node, angles: new Float32Array(angles), baseCos, baseSin, place, mask, halfWidth };
+  };
+  const turnBatch = (batch, spin, spinCos, spinSin) => {
+    const { node, angles, baseCos, baseSin, place, mask, halfWidth } = batch, data = node.instanceData;
+    let count = 0;
+    for (let i = 0; i < angles.length; i++) {
+      let local = angles[i] + spin;
+      if (local > Math.PI) local -= TAU;
+      if (local > Math.PI) local -= TAU;
+      if (local < -Math.PI) local += TAU;
+      if (mask && Math.abs(local) < DOOR_HALF_ANGLE + halfWidth) continue;
+      const c = baseCos[i] * spinCos - baseSin[i] * spinSin, s = baseSin[i] * spinCos + baseCos[i] * spinSin, o = count++ * 20;
+      data[o] = c; data[o + 1] = 0; data[o + 2] = -s; data[o + 3] = 0;
+      data[o + 4] = 0; data[o + 5] = 1; data[o + 6] = 0; data[o + 7] = 0;
+      data[o + 8] = s; data[o + 9] = 0; data[o + 10] = c; data[o + 11] = 0;
+      data[o + 12] = place.x; data[o + 13] = place.y; data[o + 14] = place.z; data[o + 15] = 1;
+      data[o + 16] = 1; data[o + 17] = 0; data[o + 18] = 0; data[o + 19] = 0;
+    }
+    node.instanceCount = count;
+    node.instanceVersion++;
+  };
   const portal = cached(() => merge(
     box({ w: 5.6, h: 0.2, d: 0.6, color: "#ffbd53", emissive: 0.8, offset: { y: 4.85 } }),
     ...[-2.7, 2.7].map(x => box({ w: 0.18, h: 4.8, d: 0.6, color: "#ffbd53", emissive: 0.8, offset: { x, y: 2.4 } }))
@@ -95,7 +168,29 @@
     const place = { x: DIR.x * radius, y: island.surfaceAt(DIR.x * start, DIR.z * start) + 0.02, z: DIR.z * radius, ry: -SITE.bearing, rim: start, bridgeZ, approachFrom: BL.terrain.TIMECHAIN.from };
     const node = createNode({ position: { x: place.x, y: place.y, z: place.z }, rotation: { x: 0, y: place.ry, z: 0 } });
     const groundNode = createNode({ geometry: ground() });
-    const shellNode = createNode({ geometry: shell() });
+    const skins = shell();
+    const shellNode = createNode({ geometry: skins.fixed });
+    const outer = createNode({ geometry: skins.outer, sightHidden: true });
+    const batches = [];
+    for (const band of skins.bandRows) {
+      const batch = rotatingBatch(band.geometry, band.angles, place, band.mask, band.halfWidth);
+      batches.push(batch); addChild(outer, batch.node);
+    }
+    for (const part of skins.symbolRows) {
+      const angles = [];
+      for (const bearing of SYMBOL_BEARINGS) for (let col = 0; col < BITCOIN[part.row].length; col++) {
+        if (BITCOIN[part.row][col] !== "1") continue;
+        for (let slice = 0; slice < SYMBOL_SLICES; slice++) angles.push(bearing + (col - 5 + (slice - (SYMBOL_SLICES - 1) / 2) / SYMBOL_SLICES) * SYMBOL_CELL);
+      }
+      const batch = rotatingBatch(part.geometry, angles, place, part.mask, SYMBOL_CELL / (SYMBOL_SLICES * 2));
+      batches.push(batch); addChild(outer, batch.node);
+    }
+    const turn = (angle) => {
+      outer.rotation.y = angle;
+      const c = Math.cos(angle), s = Math.sin(angle);
+      for (let i = 0; i < batches.length; i++) turnBatch(batches[i], angle, c, s);
+    };
+    turn(0);
     const entrance = createNode({ geometry: portal(), position: { x: 0, y: 0, z: 12.65 } });
     addChild(entrance, createNode({ position: { x: 0, y: 5.6, z: 0 }, geometry: BL.hubModels.caveSign("TIMECHAIN SPHERE") }));
     const bridgeNode = createNode({ position: { x: 0, y: 0, z: bridgeZ }, geometry: bridge() });
@@ -105,8 +200,8 @@
     const laptop = createNode({ geometry: laptopBase(), position: { x: 0, y: 1, z: 0.58 } });
     addChild(laptop, createNode({ geometry: laptopLid(), position: { x: 0, y: 0.035, z: 0.3 }, rotation: { x: 0.14, y: 0, z: 0 } }));
     addChild(swivel, back, laptop); addChild(chairNode, swivel);
-    addChild(node, groundNode, shellNode, entrance, bridgeNode, chairNode);
-    return { node, shell: shellNode, entrance, ground: groundNode, bridge: bridgeNode, chair: chairNode, swivel, laptop, place };
+    addChild(node, groundNode, shellNode, outer, entrance, bridgeNode, chairNode);
+    return { node, shell: shellNode, outer, turn, entrance, ground: groundNode, bridge: bridgeNode, chair: chairNode, swivel, laptop, place };
   };
   BL.timechainModels = { SITE, DIR, build };
 })();

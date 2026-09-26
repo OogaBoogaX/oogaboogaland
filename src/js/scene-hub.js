@@ -149,7 +149,7 @@
   const BUILD_RADIUS = 13;
   const NUDGES = [0, -2, 2, -4, 4, -6, 6, -8, 8];
   const PATH_GEOMETRY = new WeakMap();
-  const TIMECHAIN_NEAR = 25;
+  const TIMECHAIN_NEAR = 25, TIMECHAIN_OUTER_PERIOD = 180;
   const VINES = ["c5"];
   const DRESSED = new WeakMap();
   const DRESSING_LAMPS = BL.dressing.LIGHT_RGB.map(([r, g, b]) => ({ r, g, b, radius: 5.5, glow: 0.9, hide: false }));
@@ -209,13 +209,12 @@
   const terrainSections = [], caveSections = [];
   // Above the island and its cave roofs; never interpolate from the renderer's
   // infinite/no-cut sentinel or the scan would happen only in its last frame.
-  const CUTAWAY_TOP = 16, CUTAWAY_RESTORE_TIME = 0.65, CUTAWAY_REGION_CAP = 8;
+  const CUTAWAY_TOP = 16, CUTAWAY_REGION_CAP = 8;
   const CUTAWAY_RAMP_START = 0.12, CUTAWAY_RAMP_END = 0.88;
   const CUTAWAY_FLOOR_RATE = 56, CUTAWAY_FLOOR_DEADBAND = 0.015;
-  let cutawayHeight = NaN, cutawayFeet = 0, cutawayPlayer = null, cutawayCameraMix = 0, cutawayCarryActive = false;
+  let cutawayHeight = NaN, cutawayFeet = 0, cutawayPlayer = null;
   let cutawayX = 0, cutawayZ = 0, cutawayHeadY = 0, cutawayHill = false;
   let cutawayProgress = NaN, cutawayLevel = 0, cutawayHillMix = 0;
-  let cutawayRestoreMix = 0, cutawayRestoreTime = CUTAWAY_RESTORE_TIME;
   let cutawayTravelRamp = null, cutawayTravelChannel = -1, cutawayTravelStation = 0;
   const CUTAWAY_PATH_STATE = { lo: new Uint16Array(4), hi: new Uint16Array(4), mix: new Float32Array(4), windowMix: new Float32Array(2), active: 0, version: 1 };
   const cutawayHiddenNodes = [];
@@ -3514,14 +3513,8 @@
   };
   const updateBirdsEyeCutaway = (dt) => {
     clearCutawayHidden();
-    const player = pilot.player, overheadMix = player ? pilot.birdsEyeMix : 0;
-    const carryCutaway = !!player && !pilot.aiming && !pilot.closeWanted && player.root.position.y - player.baseY < -0.5
-      && (pilot.mode === "orbit" || pilot.mode === "shoulder" && pilot.shoulderEntryMix < 1);
-    // Keep the already-open floor through a carry-to-combat overhead handoff;
-    // the overhead spring starts at zero even though the roof is already gone.
-    const carryBridge = cutawayCarryActive && pilot.birdsEye && overheadMix < 1;
-    const cameraMix = Math.max(overheadMix, carryCutaway || carryBridge ? 1 : 0);
-    const showRampMarkers = overheadMix > 0.5;
+    const player = pilot.player, cameraMix = player && pilot.birdsEye ? pilot.birdsEyeMix : 0;
+    const showRampMarkers = cameraMix > 0.5;
     for (const marker of headquarters.rampMarkers) {
       marker.node.visible = marker.frame.visible = marker.arrow.visible = showRampMarkers;
       if (!showRampMarkers) continue;
@@ -3533,22 +3526,7 @@
       const z = up.x * downhill.x + up.y * downhill.y + up.z * downhill.z;
       marker.node.rotation.y = Math.atan2(-x, -z);
     }
-    // Losing the actor or its upright view has no camera dolly to follow.
-    // Restore the last displayed section independently on just those exits.
-    const interrupted = !player || player !== cutawayPlayer || player.health.stunned || crew.sleeping
-      || player.camp.seat || player.bedTravel.mode || clankerPlay.active;
-    if (!cameraMix && cutawayCameraMix > 0 && (interrupted || cutawayCarryActive)) {
-      cutawayRestoreMix = RENDER_OPTS.cutawayFade;
-      cutawayRestoreTime = 0;
-    }
-    cutawayCameraMix = cameraMix;
-    cutawayCarryActive = carryCutaway || carryBridge;
-    cutawayRestoreTime = Math.min(CUTAWAY_RESTORE_TIME, cutawayRestoreTime + dt);
-    const t = cutawayRestoreTime / CUTAWAY_RESTORE_TIME;
-    const restoring = cutawayRestoreMix * (1 - t * t * (3 - 2 * t));
-    // Re-enter from the still-visible cut, not from an uncut ceiling. The
-    // ordinary camera-controlled entry/exit is unchanged when no tail exists.
-    const mix = cameraMix + (1 - cameraMix) * restoring, active = mix > 0;
+    const mix = cameraMix, active = mix > 0;
     // Scan through the full camera blend in both directions, including reversals.
     const rockMix = mix;
     RENDER_OPTS.birdsEyeCutaway = active;
@@ -5837,6 +5815,7 @@
     const fallingPlayer = pilot.player;
     if (fallingPlayer) Object.assign(pitPrevious, fallingPlayer.root.position);
     if (timechainIsland) {
+      timechainIsland.site.turn((elapsed % TIMECHAIN_OUTER_PERIOD) * Math.PI * 2 / TIMECHAIN_OUTER_PERIOD);
       const s = timechainIsland.seat, decay = Math.exp(-1.15 * dt);
       s.angle = (s.angle + s.speed * (1 - decay) / 1.15) % (Math.PI * 2);
       s.speed *= decay;
@@ -7550,14 +7529,12 @@
     cutawayHeight = NaN;
     cutawayProgress = NaN;
     cutawayLevel = cutawayHillMix = 0;
-    cutawayFeet = cutawayCameraMix = cutawayRestoreMix = 0;
-    cutawayCarryActive = false;
+    cutawayFeet = 0;
     cutawayX = cutawayZ = cutawayHeadY = 0;
     cutawayHill = false;
     cutawayPlayer = null;
     cutawayTravelRamp = null; cutawayTravelChannel = -1; cutawayTravelStation = 0;
     CUTAWAY_PATH_STATE.lo.fill(0); CUTAWAY_PATH_STATE.hi.fill(0); CUTAWAY_PATH_STATE.mix.fill(0); CUTAWAY_PATH_STATE.windowMix.fill(0); CUTAWAY_PATH_STATE.active = 0; CUTAWAY_PATH_STATE.version++;
-    cutawayRestoreTime = CUTAWAY_RESTORE_TIME;
     window.clearTimeout(hintTimer);
     if (positionDebug) {
       positionDebug.removeEventListener("click", copyPositionDebug);
@@ -7665,7 +7642,6 @@
     id: "hub", enter, update, overlay, onDonation, onKey, onLootCleared, renderOpts: RENDER_OPTS, leave, stats, liveGeometry,
     root: null, camera: null, input: null, debug: null,
     get inMotion() {
-      if (cutawayRestoreTime < CUTAWAY_RESTORE_TIME) return true;
       // Sani sits nearly always; only a spinning chair needs full rate behind another window.
       if (timechainIsland && timechainIsland.seat.speed > 0) return true;
       if (pile.inMotion || fx.inMotion || breakables.inMotion || weather.active || magazine && magazine.revealed || MATRIX_WORLD.active || mirrorGuides.state.doorway || mirrorCave.damage.active || mirrorCave.ripples.active || mirrorCave.body.active || entropyLab.phase.ripples.active || entropyLab.phase.body.contacts || entropyLab.phase.body.active) return true;

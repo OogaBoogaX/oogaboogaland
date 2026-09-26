@@ -4635,7 +4635,7 @@ body.orbit-dragging #tooltip {
   visibility: hidden;
 }
 .weapon-reticle[data-sight="true"] > svg {
-  clip-path: inset(0 0 50% 0);
+  visibility: hidden;
 }
 .weapon-reticle[data-occluded="true"] {
   visibility: hidden;
@@ -4661,7 +4661,10 @@ body.orbit-dragging #tooltip {
   background: var(--reticle-target);
 }
 .weapon-reticle[data-sight="true"] > span {
-  background: linear-gradient(to bottom, var(--reticle-target, #fff9dc) 50%, transparent 50%);
+  top: calc(50% + 4px);
+  width: 4px;
+  height: 4px;
+  background: var(--reticle-target, #fff9dc);
 }
 .weapon-reticle[data-target="out-of-range"] > span {
   visibility: hidden;
