@@ -16,7 +16,7 @@
     { ...slot("c9", 9, "race", "open", "Ooga Rally", "oogaboogax/oogaboogaland"), theme: "rally" },
     slot("c730", 7.25, null, "headquarters", "Headquarters"),
     { ...slot("c1", 1, null, "mirror", "Ooga Booga Land", "oogaboogax/oogaboogaland"), theme: "matrix" },
-    { ...slot("c2", 2, null, "dark", "Lightning Factory"), theme: "lightning", soon: true },
+    { ...slot("c2", 2, "factory", "open", "Lightning Factory"), theme: "lightning" },
     slot("c3", 3),
     slot("c5", 4.75, null, "headquarters", "Headquarters")
   ];

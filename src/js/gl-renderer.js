@@ -921,6 +921,8 @@ uniform vec3 uTint;
 uniform float uPortal;
 uniform float uReveal;
 uniform float uRippleOnly;
+// A shield's or a mirror's glyph crests in a colour of its own; a negative red keeps the Matrix green.
+uniform vec3 uCrestTint;
 uniform float uClipMaxY;
 ${CUTAWAY_GLSL}
 uniform int uRippleActive;
@@ -1046,12 +1048,13 @@ void main() {
         float tip = position == train - 1 ? 1.0 : position == train - 2 ? 0.55 : 0.0;
         vec3 base = (glyph & 1) == 0 ? vec3(24.0, 220.0, 74.0) : vec3(70.0, 255.0, 112.0);
         vec3 green = mix(base / 255.0 * mix(0.78, 1.15, glow), vec3(0.84, 1.0, 0.89), tip * 0.88);
+        vec3 crest = uCrestTint.r < 0.0 ? green : mix(uCrestTint * mix(0.78, 1.15, glow), vec3(0.9, 0.97, 1.0), tip * 0.88);
         if (uRippleOnly > 0.5) {
           // Premultiplied glyphs reveal the actual scene behind this plane;
           // the faint crest adds light without an opaque reflection or tint.
-          color = color * (1.0 - alpha) + green * alpha;
+          color = color * (1.0 - alpha) + crest * alpha;
           effectAlpha = alpha;
-        } else color = mix(color, green, alpha);
+        } else color = mix(color, crest, alpha);
       }
     }
   }
@@ -1291,6 +1294,7 @@ void main() {
     const MIRROR_POINT = new Float32Array(3);
     const MIRROR_CLIP = new Float32Array(4);
     const MIRROR_RECT = new Float32Array(4);
+    const REFLECTOR_CENTER = new Float32Array(3), REFLECTOR_NORMAL = new Float32Array(3);
     const mirrorView = mat4.create();
     const mirrorProj = mat4.create(), mirrorInverseProj = mat4.create(), mirrorClipCorner = new Float32Array(4);
     const mirrorViewProj = mat4.create();
@@ -1312,6 +1316,14 @@ void main() {
     const res = { programs: {}, fbo: null, shadow: null, bloom: null, quadVao: null, matrixTexture: null };
     const mirror = { node: null, record: null, geometry: null, program: null, programReady: false, fb: null, tex: null, depth: null, width: 0, height: 0, renderWidth: 0, renderHeight: 0, portal: false, reveal: 0, frontFacing: false, walkThrough: false, captureValid: false, bodyTex: null, bodyState: null, bodyVersion: -1, shards: 0 };
     const environment = { program: null, ready: false, fb: null, tex: null, depth: null, size: 0, next: 0, valid: 0, frame: 0, origin: new Float32Array(3) };
+    // Reflectors: plain planar mirrors a scene may hold several of (the factory's peer shields), each with a capture
+    // of its own, drawn with the mirror's program and their ripples. The mirror above stays the one mirror with
+    // panels, a body and a portal. The reflector covering most of the screen captures every frame and the others take
+    // turns, one a frame, so a scene pays two reflection passes at most; one waiting its turn shows its last capture.
+    // A reflector needs a geometry of its own, which keys its capture. `reflectorPass` is the record a capture leaves
+    // out (null in the eye's pass, which draws every reflector itself).
+    const reflectorNodes = [], reflectorTargets = new Map();
+    let reflectorTurn = 0, reflectorPass = null;
     const mirrorDebug = {
       active: false, faux: false, portal: false, reveal: 0, surfaceDrawn: false, captureValid: false, width: 0, height: 0, textureWidth: 0, textureHeight: 0, samples: 0, allocationCount: 0, reflectionPassCount: 0, skippedPassCount: 0, resources: 0, captureExcluded: false, reflectionOnlyCount: 0, planeDistance: 0, ripples: 0, bodyContacts: 0, bodyWaves: 0,
       cameraPosition: new Float32Array(3), cameraTarget: new Float32Array(3), planeCenter: new Float32Array(3), planeNormal: new Float32Array(3), capturedViewProj: mirrorCapturedViewProj, shardsDrawn: 0, environmentPassCount: 0, environmentFaces: 0, environmentSize: 0, environmentResources: 0, skipReason: "none"
@@ -1355,7 +1367,7 @@ void main() {
     };
     const ensureMirrorProgram = () => {
       if (!mirror.program) {
-        mirror.program = compile(MIRROR_VS, MIRROR_FS, ["uViewProj", "uReflectionViewProj", "uMirrorWorld", "uShard", "uReflection", "uReflectionScale", "uTint", "uPortal", "uReveal", "uRippleOnly", "uMatrixGlyphTex", "uRippleActive", "uRippleTime", "uRipples", "uBodyField", "uBodyBounds", "uBodyTexel", "uBodyContacts", "uBodyActive", "uBodyWaves", "uClipMaxY"]);
+        mirror.program = compile(MIRROR_VS, MIRROR_FS, ["uViewProj", "uReflectionViewProj", "uMirrorWorld", "uShard", "uReflection", "uReflectionScale", "uTint", "uPortal", "uReveal", "uRippleOnly", "uCrestTint", "uMatrixGlyphTex", "uRippleActive", "uRippleTime", "uRipples", "uBodyField", "uBodyBounds", "uBodyTexel", "uBodyContacts", "uBodyActive", "uBodyWaves", "uClipMaxY"]);
         mirrorDebug.resources++;
       }
       if (mirror.programReady) return true;
@@ -1445,6 +1457,44 @@ void main() {
       mirror.fb = mirror.tex = mirror.depth = null;
       mirror.width = mirror.height = mirror.renderWidth = mirror.renderHeight = 0;
       mirrorDebug.width = mirrorDebug.height = mirrorDebug.textureWidth = mirrorDebug.textureHeight = mirrorDebug.samples = 0;
+    };
+    const destroyReflector = (geometry) => {
+      const t = reflectorTargets.get(geometry);
+      if (!t) return;
+      if (t.fb) {
+        gl.deleteTexture(t.tex);
+        gl.deleteRenderbuffer(t.depth);
+        gl.deleteFramebuffer(t.fb);
+        mirrorDebug.resources -= 3;
+      }
+      reflectorTargets.delete(geometry);
+    };
+    const reflectorTarget = (geometry) => {
+      let t = reflectorTargets.get(geometry);
+      if (!t) reflectorTargets.set(geometry, t = { fb: null, tex: null, depth: null, size: 0, renderWidth: 0, renderHeight: 0, viewProj: new Float32Array(16), valid: false, area: 0, record: null });
+      return t;
+    };
+    // One square allocation per reflector at the tier's mirror size, as the mirror keeps.
+    const ensureReflectorTarget = (t) => {
+      const size = settings.mirror;
+      if (t.fb && t.size === size) return;
+      if (t.fb) {
+        gl.deleteTexture(t.tex);
+        gl.deleteRenderbuffer(t.depth);
+        gl.deleteFramebuffer(t.fb);
+        mirrorDebug.resources -= 3;
+      }
+      t.tex = createTexture(size, size, gl.RGBA8, gl.LINEAR);
+      t.depth = createRenderbuffer(size, size, gl.DEPTH_COMPONENT24, 0);
+      t.fb = gl.createFramebuffer();
+      gl.bindFramebuffer(gl.FRAMEBUFFER, t.fb);
+      gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, t.tex, 0);
+      gl.framebufferRenderbuffer(gl.FRAMEBUFFER, gl.DEPTH_ATTACHMENT, gl.RENDERBUFFER, t.depth);
+      gl.drawBuffers([gl.COLOR_ATTACHMENT0]);
+      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+      mirrorDebug.resources += 3;
+      t.size = size;
+      t.valid = false;
     };
     const destroyEnvironment = () => {
       if (!environment.fb) return;
@@ -1544,6 +1594,7 @@ void main() {
       environment.size = environment.valid = environment.next = environment.frame = 0;
       mirrorDebug.environmentFaces = mirrorDebug.environmentSize = mirrorDebug.environmentResources = 0;
       mirror.node = mirror.record = mirror.geometry = mirror.program = mirror.fb = mirror.tex = mirror.depth = mirror.bodyTex = mirror.bodyState = null;
+      reflectorTargets.clear();
       mirror.bodyVersion = -1;
       mirror.programReady = false;
       mirror.width = mirror.height = mirror.renderWidth = mirror.renderHeight = 0;
@@ -1932,6 +1983,10 @@ void main() {
       }
       const rec = recordFor(node.geometry);
       if (node.mirror || node.mirrorPortal) mirror.record = rec;
+      if (node.geometry.reflector) {
+        reflectorNodes.push(node);
+        reflectorTarget(node.geometry).record = rec;
+      }
       if (!rec.active) {
         rec.active = true;
         rec.count = 0;
@@ -2079,8 +2134,10 @@ void main() {
       mirrorDebug.portal = mirror.portal;
       mirrorDebug.reveal = mirror.reveal;
     };
-    const prepareMirrorCamera = (camera) => {
-      const node = mirror.node, world = node.world, center = mirrorDebug.planeCenter, normal = mirrorDebug.planeNormal;
+    // Readies the reflected camera for the mirror, or for a reflector when `target` is one; only the mirror's own
+    // capture writes the debug readout.
+    const prepareMirrorCamera = (camera, node = mirror.node, target = mirror) => {
+      const own = target === mirror, world = node.world, center = own ? mirrorDebug.planeCenter : REFLECTOR_CENTER, normal = own ? mirrorDebug.planeNormal : REFLECTOR_NORMAL;
       center[0] = world[12];
       center[1] = world[13];
       center[2] = world[14];
@@ -2089,12 +2146,12 @@ void main() {
       normal[1] = world[9] / nlen;
       normal[2] = world[10] / nlen;
       const cameraSide = (camera.position.x - center[0]) * normal[0] + (camera.position.y - center[1]) * normal[1] + (camera.position.z - center[2]) * normal[2];
-      if (cameraSide <= MIRROR_EPSILON) return skipMirrorPass("back-facing");
+      if (cameraSide <= MIRROR_EPSILON) return own && skipMirrorPass("back-facing");
       if (!mirrorRect(node, viewProj) || MIRROR_RECT[2] < -1 || MIRROR_RECT[0] > 1 || MIRROR_RECT[3] < -1 || MIRROR_RECT[1] > 1) {
-        return skipMirrorPass("offscreen");
+        return own && skipMirrorPass("offscreen");
       }
       const area = (Math.min(1, MIRROR_RECT[2]) - Math.max(-1, MIRROR_RECT[0])) * width * 0.5 * (Math.min(1, MIRROR_RECT[3]) - Math.max(-1, MIRROR_RECT[1])) * height * 0.5;
-      if (area < 16) return skipMirrorPass("negligible");
+      if (area < 16) return own && skipMirrorPass("negligible");
       reflectMirrorPoint(mirrorEye, camera.position, center, normal);
       reflectMirrorPoint(mirrorTarget, camera.target, center, normal);
       const up = camera.up || UP, upDot = up.x * normal[0] + up.y * normal[1] + up.z * normal[2];
@@ -2113,10 +2170,12 @@ void main() {
       const cropX = (left + right) * 0.5, cropY = (bottom + top) * 0.5;
       const halfX = (right - left) * 0.5, halfY = (top - bottom) * 0.5;
       const screenWidth = Math.max(1, halfX * width), screenHeight = Math.max(1, halfY * height);
-      const targetWidth = mirror.renderWidth = Math.max(1, Math.min(settings.mirror, Math.ceil(screenWidth * dpr)));
-      const targetHeight = mirror.renderHeight = Math.max(1, Math.min(settings.mirror, Math.ceil(screenHeight * dpr)));
-      mirrorDebug.width = targetWidth;
-      mirrorDebug.height = targetHeight;
+      const targetWidth = target.renderWidth = Math.max(1, Math.min(settings.mirror, Math.ceil(screenWidth * dpr)));
+      const targetHeight = target.renderHeight = Math.max(1, Math.min(settings.mirror, Math.ceil(screenHeight * dpr)));
+      if (own) {
+        mirrorDebug.width = targetWidth;
+        mirrorDebug.height = targetHeight;
+      }
       for (let col = 0; col < 16; col += 4) {
         mirrorProj[col] = (mirrorProj[col] - cropX * mirrorProj[col + 3]) / halfX;
         mirrorProj[col + 1] = (mirrorProj[col + 1] - cropY * mirrorProj[col + 3]) / halfY;
@@ -2146,6 +2205,7 @@ void main() {
       mirrorProj[10] = cz - mirrorProj[11] * 0.998;
       mirrorProj[14] = cw - mirrorProj[15] * 0.998;
       mat4.multiply(mirrorViewProj, mirrorProj, mirrorView);
+      if (!own) return true;
       mirrorDebug.cameraPosition[0] = mirrorEye.x;
       mirrorDebug.cameraPosition[1] = mirrorEye.y;
       mirrorDebug.cameraPosition[2] = mirrorEye.z;
@@ -2154,6 +2214,13 @@ void main() {
       mirrorDebug.cameraTarget[2] = mirrorTarget.z;
       mirrorDebug.skipReason = "none";
       return true;
+    };
+    // How many pixels of the eye's view a reflector's glass covers, facing it; 0 when it faces away or is off screen.
+    const reflectorArea = (node, camera) => {
+      const w = node.world, nlen = Math.hypot(w[8], w[9], w[10]) || 1;
+      if (((camera.position.x - w[12]) * w[8] + (camera.position.y - w[13]) * w[9] + (camera.position.z - w[14]) * w[10]) / nlen <= MIRROR_EPSILON) return 0;
+      if (!mirrorRect(node, viewProj) || MIRROR_RECT[2] < -1 || MIRROR_RECT[0] > 1 || MIRROR_RECT[3] < -1 || MIRROR_RECT[1] > 1) return 0;
+      return (Math.min(1, MIRROR_RECT[2]) - Math.max(-1, MIRROR_RECT[0])) * width * 0.5 * (Math.min(1, MIRROR_RECT[3]) - Math.max(-1, MIRROR_RECT[1])) * height * 0.5;
     };
     const prepareEnvironmentCamera = (camera, face) => {
       const world = mirror.node.world, at = face * 6;
@@ -2254,7 +2321,9 @@ void main() {
         imageTextures++;
         gl.bindTexture(gl.TEXTURE_2D, rec.imageTexture);
         gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, image);
-        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+        // Mipmapped, so lettering seen from across a hall stays legible instead of sparkling.
+        gl.generateMipmap(gl.TEXTURE_2D);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
         gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
         gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
         gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
@@ -2277,6 +2346,7 @@ void main() {
         if (rec.geometry.mirrorRippleOnly) continue;
         applyCutaway(res.programs[useProgram], rec.geometry);
         if (excludeMirror && (rec === mirror.record || rec.geometry.mirrorSource)) continue;
+        if (rec.geometry.reflector && (reflectorPass === null || rec === reflectorPass)) continue;
         const part = rec[kind], n = rec.batch && rec.batch.drawInstanceCount !== undefined ? rec.drawCount : cull ? rec.drawCount : rec.count;
         if (!part || !n) continue;
         if (cull && rec.offscreen) continue;
@@ -2372,15 +2442,18 @@ void main() {
       gl.depthMask(true);
       gl.depthFunc(gl.LESS);
     };
-    const renderMirrorCapture = (clear, sky, ground, direct, directStrength, ambientFloor, diffuseFloor, shadowStrength, shadowFloor, shadowBias, lx, ly, lz, sh, lights, lightCount, skyOn, fog, fogNear, fogFar, matrix, environmentFace = -1) => {
+    const renderMirrorCapture = (clear, sky, ground, direct, directStrength, ambientFloor, diffuseFloor, shadowStrength, shadowFloor, shadowBias, lx, ly, lz, sh, lights, lightCount, skyOn, fog, fogNear, fogFar, matrix, environmentFace = -1, target = mirror) => {
       const cube = environmentFace >= 0;
-      if (!cube) ensureMirrorTarget();
+      if (target !== mirror) ensureReflectorTarget(target);
+      else if (!cube) ensureMirrorTarget();
       extractFrustum(mirrorViewProj, MIRROR_FRUSTUM);
       markMirrorVisible();
+      // Every reflector shows in a reflection as its plain glass, but the one being captured.
+      reflectorPass = target.record;
       const pg = res.programs;
-      gl.bindFramebuffer(gl.FRAMEBUFFER, cube ? environment.fb : mirror.fb);
+      gl.bindFramebuffer(gl.FRAMEBUFFER, cube ? environment.fb : target.fb);
       if (cube) gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_CUBE_MAP_POSITIVE_X + environmentFace, environment.tex, 0);
-      const captureWidth = cube ? environment.size : mirror.renderWidth, captureHeight = cube ? environment.size : mirror.renderHeight;
+      const captureWidth = cube ? environment.size : target.renderWidth, captureHeight = cube ? environment.size : target.renderHeight;
       gl.viewport(0, 0, captureWidth, captureHeight);
       gl.enable(gl.SCISSOR_TEST);
       gl.scissor(0, 0, captureWidth, captureHeight);
@@ -2438,6 +2511,12 @@ void main() {
       gl.disable(gl.CULL_FACE);
       drawParts("line", "line", true);
       gl.enable(gl.CULL_FACE);
+      reflectorPass = null;
+      if (target !== mirror) {
+        target.viewProj.set(mirrorViewProj);
+        target.valid = true;
+        return;
+      }
       if (cube) {
         environment.valid |= 1 << environmentFace;
         mirrorDebug.environmentFaces = environment.valid;
@@ -2470,6 +2549,8 @@ void main() {
         gl.uniform1f(pg.u.uPortal, mirror.portal ? 1 : 0);
         gl.uniform1f(pg.u.uReveal, mirror.reveal);
         gl.uniform1f(pg.u.uRippleOnly, 0);
+        const tint = mirror.node.rippleTint;
+        gl.uniform3f(pg.u.uCrestTint, tint ? tint[0] : -1, tint ? tint[1] : 0, tint ? tint[2] : 0);
         const ripples = mirror.node.mirrorRipples, body = mirror.node.mirrorBody;
         mirrorDebug.ripples = ripples ? ripples.active : 0;
         gl.uniform1i(pg.u.uRippleActive, mirrorDebug.ripples);
@@ -2533,6 +2614,46 @@ void main() {
       }
       gl.activeTexture(gl.TEXTURE0);
     };
+    // Each reflector facing the eye draws its own last capture, through the matrix it was captured with, and its
+    // ripples in its crest tint.
+    const drawReflectors = (camera) => {
+      if (!reflectorNodes.length || !mirror.programReady) return;
+      const pg = mirror.program;
+      gl.useProgram(pg.prog);
+      gl.uniform1f(pg.u.uClipMaxY, cutawayMaxY);
+      gl.uniformMatrix4fv(pg.u.uViewProj, false, viewProj);
+      gl.uniform1f(pg.u.uShard, 0);
+      gl.uniform3f(pg.u.uTint, 0.56, 0.62, 0.67);
+      gl.uniform1f(pg.u.uPortal, 0);
+      gl.uniform1f(pg.u.uReveal, 0);
+      gl.uniform1f(pg.u.uRippleOnly, 0);
+      gl.uniform1i(pg.u.uBodyContacts, 0);
+      gl.uniform1i(pg.u.uBodyActive, 0);
+      gl.uniform4fv(pg.u.uBodyWaves, NO_MIRROR_BODY_WAVES);
+      bindMatrixTexture(pg);
+      gl.activeTexture(gl.TEXTURE4);
+      gl.bindTexture(gl.TEXTURE_2D, res.matrixTexture);
+      gl.uniform1i(pg.u.uBodyField, 4);
+      gl.activeTexture(gl.TEXTURE2);
+      gl.uniform1i(pg.u.uReflection, 2);
+      for (const node of reflectorNodes) {
+        const t = reflectorTargets.get(node.geometry), rec = t && t.record, w = node.world;
+        if (!rec || !rec.mesh || !rec.drawCount || rec.offscreen || !t.valid) continue;
+        if ((camera.position.x - w[12]) * w[8] + (camera.position.y - w[13]) * w[9] + (camera.position.z - w[14]) * w[10] <= 0) continue;
+        applyCutaway(pg, rec.geometry);
+        gl.uniformMatrix4fv(pg.u.uReflectionViewProj, false, t.viewProj);
+        gl.uniformMatrix4fv(pg.u.uMirrorWorld, false, w);
+        gl.uniform2f(pg.u.uReflectionScale, t.renderWidth / t.size, t.renderHeight / t.size);
+        const tint = node.rippleTint, ripples = node.mirrorRipples;
+        gl.uniform3f(pg.u.uCrestTint, tint ? tint[0] : -1, tint ? tint[1] : 0, tint ? tint[2] : 0);
+        gl.uniform1i(pg.u.uRippleActive, ripples ? ripples.active : 0);
+        gl.uniform1f(pg.u.uRippleTime, ripples ? ripples.time : 0);
+        gl.uniform4fv(pg.u.uRipples, ripples ? ripples.waves : NO_MIRROR_RIPPLES);
+        gl.bindTexture(gl.TEXTURE_2D, t.tex);
+        gl.bindVertexArray(rec.mesh.vao);
+        gl.drawArraysInstanced(gl.TRIANGLES, 0, rec.mesh.count, rec.count);
+      }
+    };
     const drawRippleSurfaces = () => {
       let started = false;
       for (const rec of activeRecords) {
@@ -2588,6 +2709,8 @@ void main() {
         gl.uniform1i(pg.u.uRippleActive, ripples ? ripples.active : 0);
         gl.uniform1f(pg.u.uRippleTime, bodyActive ? body.time : ripples ? ripples.time : 0);
         gl.uniform4fv(pg.u.uRipples, ripples ? ripples.waves : NO_MIRROR_RIPPLES);
+        const tint = node.rippleTint;
+        gl.uniform3f(pg.u.uCrestTint, tint ? tint[0] : -1, tint ? tint[1] : 0, tint ? tint[2] : 0);
         gl.bindVertexArray(rec.mesh.vao);
         gl.drawArraysInstanced(gl.TRIANGLES, 0, rec.mesh.count, rec.drawCount);
         rippleSurfaces += rec.drawCount; rippleWaves += ripples ? ripples.active : 0;
@@ -2722,6 +2845,7 @@ void main() {
         rec.offscreen = false;
       }
       activeRecords.length = 0;
+      reflectorNodes.length = 0;
       mirror.node = mirror.record = null;
       mirror.portal = mirror.frontFacing = mirror.walkThrough = false;
       mirror.reveal = 0;
@@ -2809,6 +2933,33 @@ void main() {
           }
         }
       }
+      if (reflectorNodes.length && ensureMirrorProgram()) {
+        // The reflector covering most of the view captures every frame, and one other in turn.
+        const n = reflectorNodes.length;
+        let best = -1, bestArea = 16;
+        for (let i = 0; i < n; i++) {
+          const t = reflectorTarget(reflectorNodes[i].geometry);
+          t.area = reflectorArea(reflectorNodes[i], camera);
+          if (t.area > bestArea) { bestArea = t.area; best = i; }
+        }
+        // One just come into view with nothing captured yet goes first.
+        let turn = -1;
+        for (let i = 0; i < n && turn < 0; i++) {
+          const t = reflectorTargets.get(reflectorNodes[i].geometry);
+          if (i !== best && t.area >= 16 && !t.valid) turn = i;
+        }
+        for (let k = 0; k < n && turn < 0; k++) {
+          const i = (reflectorTurn + k) % n;
+          if (i !== best && reflectorTargets.get(reflectorNodes[i].geometry).area >= 16) turn = i;
+        }
+        if (turn >= 0) reflectorTurn = turn + 1;
+        for (let pass = 0; pass < 2; pass++) {
+          const i = pass ? turn : best;
+          if (i < 0) continue;
+          const node = reflectorNodes[i], t = reflectorTargets.get(node.geometry);
+          if (prepareMirrorCamera(camera, node, t)) renderMirrorCapture(clear, sky, ground, direct, directStrength, ambientFloor, diffuseFloor, shadowStrength, shadowFloor, shadowBias, lx, ly, lz, sh, lights, nLights, skyOn, fogColor, fogA, fogB, matrix, -1, t);
+        }
+      }
       const viewActor = opts.beforeView?.();
       if (viewActor) {
         // Mirror and shadow buffers already hold the world pose. Refresh only
@@ -2876,6 +3027,7 @@ void main() {
       gl.uniform1f(pg.mesh.u.uMatrixLivingGlobal, matrix ? matrix.livingGlobal ?? 1 : 1);
       drawParts("mesh", "mesh", true, true);
       drawMirrorSurface(camera);
+      drawReflectors(camera);
       if (skyOn) drawSky(invViewProj, camera.position.y);
       // Ordinary surfaces first, then the effect-only black liner and native voxel glyphs; alpha follows the backing
       // shader's wave, depth still rejects hidden faces.
@@ -2985,6 +3137,7 @@ void main() {
       canvas.removeEventListener("webglcontextlost", onLost);
       canvas.removeEventListener("webglcontextrestored", onRestored);
       destroyRecords();
+      for (const geometry of [...reflectorTargets.keys()]) destroyReflector(geometry);
       destroyMirror();
       destroyFbo();
       destroyShadow();
@@ -3001,7 +3154,7 @@ void main() {
       if (mirror.geometry && !live.has(mirror.geometry)) destroyMirror();
       else if (!mirror.geometry && mirror.program) {
         let rippleLive = false;
-        for (const geometry of live) if (geometry.mirrorRippleOnly) { rippleLive = true; break; }
+        for (const geometry of live) if (geometry.mirrorRippleOnly || geometry.reflector) { rippleLive = true; break; }
         if (!rippleLive) destroyMirrorProgram();
       }
       for (const geometry of records.keys()) {
@@ -3012,6 +3165,7 @@ void main() {
       return released;
     };
     const releaseGeometry = (geometry) => {
+      destroyReflector(geometry);
       const rec = records.get(geometry);
       if (!rec) return;
       deleteRecord(rec);

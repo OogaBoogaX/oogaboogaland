@@ -338,7 +338,7 @@
       const f = lastF;
       const ember = Math.min(1, node.ember || 0), scorch = 1 - Math.min(1, node.scorch || 0) * 0.88;
       const materialGlow = ember > 0 ? 0 : node.glow;
-      const mirrorFace = !!(node.mirror || node.mirrorPortal || node.mirrorShard || node.mirrorRippleOnly);
+      const mirrorFace = !!(node.mirror || node.mirrorPortal || node.mirrorShard || node.mirrorRippleOnly || node.geometry.reflector);
       const portalFace = !!node.mirrorPortal || !!node.mirrorWalkThrough && mirrorDebug.portal;
       const localMatrixGlyph = !!node.geometry.matrixGlyph;
       const liquid = !!node.geometry.portalSurface;

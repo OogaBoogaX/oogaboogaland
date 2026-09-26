@@ -208,7 +208,7 @@
 
   // One visit's state: created in enter, dropped in leave.
   let jumbotronSpot, oogatronUnsub, renderer, game, world, go, lootEnabled, testBananas, root, camera, overlayCanvas, island, terrainRampRoof, pathNode, altar, hud, hooks, input, pilot, fx, cameraCover, bananaCover, solids, rockGuides, objectGuides, sightGuides, bananaGuides, pileGuides, platformGuides, mirrorGuides, pile, crew, crates, critters, clock, presets, entering, mirrorCave, matrixCave, matrixControl, gateRain, fire, headquarters, dockStairs, jumbotron, positionDebug, pitGate;
-  let magazine, magazineState, breakables, clankers, clankerPlay, clankerMeshes, clankerPartOwners, entropyLab;
+  let magazine, magazineState, breakables, clankers, clankerPlay, clankerMeshes, clankerPartOwners, entropyLab, factoryMouth = null, glCanvas = null;
   const clankerEquipment = [];
   const terrainSections = [], caveSections = [];
   // Above the island and its cave roofs; never interpolate from the renderer's
@@ -1512,7 +1512,7 @@
     set.put("vine", -3.0, 3.5, 1.06, 0, 0);
     set.put("vine", 2.6, 3.5, 1.06, 0, 1);
     // A dark cave's rock stands flush with the rim's face, so the planks go on in front of both.
-    if (theme.boards) set.put("boards", 0, 0.2, 1.06);
+    if (theme.boards && slot.status === "dark") set.put("boards", 0, 0.2, 1.06);
     // Inside the mouth the floor is the cave's own, level with the doorway.
     for (const [kind, lx, lz, turns = 0, variant = 0, lift = 0] of theme.inside || []) set.put(kind, lx, lift, lz, turns, variant);
     for (const [ax, bx, az, bz, y, lamps] of theme.ceiling || []) {
@@ -1541,7 +1541,7 @@
     for (let i = 0; i < lit.length; i += 4) dressingLights.push(m.x + cr * lit[i] + sr * lit[i + 2], m.floorY + lit[i + 1], m.z - sr * lit[i] + cr * lit[i + 2], lit[i + 3]);
     addPieceTargets(baked.picks, (lx, ly, lz) => lz < 0.3 ? null : { x: m.x + cr * lx + sr * lz, y: m.floorY + ly, z: m.z - sr * lx + cr * lz });
     // Headquarters and a sealed cave that is coming soon still hang their name over the door.
-    if (slot.status !== "open" && slot.status !== "mirror" && slot.name) addChild(group, createNode({ position: { x: 0, y: 4.5, z: 0.52 }, geometry: hubModels.caveSign(slot.name, THEME_ICON(slot)) }));
+    if ((slot.status !== "open" || slot.scene === "factory") && slot.status !== "mirror" && slot.name) addChild(group, createNode({ position: { x: 0, y: 4.5, z: 0.52 }, geometry: hubModels.caveSign(slot.name, THEME_ICON(slot)) }));
     for (let i = 0; i < g.length; i += 2) claim(m.x + cr * g[i] + sr * g[i + 1], m.z - sr * g[i] + cr * g[i + 1], 0.8);
   };
   // The meadow from the same kit, in world axes: lantern posts beside the paths with their arms over them, a
@@ -1829,6 +1829,11 @@
         item.holder = null;
       }
       entropyLab = { ...lab, group, mouth: m, opening: rim.geometry.openingBounds, stations, phase: null };
+    } else if (slot.status === "open" && slot.scene === "factory") {
+      // The Lightning Factory's tunnel: timber sets and lamps down to a phase shield like the lab's, set further in.
+      const tunnel = BL.factoryModels.hubTunnel();
+      addChild(group, createNode({ geometry: tunnel.timber }), createNode({ geometry: tunnel.glow, sightHidden: true }));
+      factoryMouth = { slot, mouth: m, group, opening: rim.geometry.openingBounds, phase: null };
     } else if (slot.status === "open") {
       const geometry = hubModels.caveShelves(), back = -6.5 - BL.scene.boundsOf(geometry).min[2];
       for (const x of [-1.3, 1.3]) {
@@ -4663,6 +4668,7 @@
   };
   const releaseForScene = id => {
     if (id === "dsb") world.pilot = pilot.player ? pilot.player.traits.name : null;
+    if (id === "factory" && factoryMouth) factoryMouth.snap = true;
     pilot.release(true);
     hud.tooltip.hide();
   };
@@ -4688,6 +4694,71 @@
         orbit.yaw = from.yaw + turn * k;
       }, done: () => { enteringTween = null; go(id); }
     });
+  };
+  // The Lightning Factory's shield: the lab's phase plane set further down the tunnel. Nothing works at this
+  // mouth to keep it rippling as the lab's crew does, so it hums on its own, a glyph wave every fraction of a
+  // second somewhere on it, and bodies crossing it leave their outline. The played Ooga walking through it goes
+  // in, with a full ripple where it crossed and no dolly back out to the mouth.
+  const factoryShield = (dt, elapsed) => {
+    const f = factoryMouth, m = f.mouth, o = f.opening, player = pilot.player;
+    f.phase.update(dt, elapsed);
+    f.phase.body.update(dt);
+    f.phase.body.time = f.phase.ripples.time;
+    f.hum -= dt;
+    if (f.hum <= 0) {
+      f.hum = 0.1 + Math.random() * 0.22;
+      f.phase.ripples.pulse(o.minX + Math.random() * (o.maxX - o.minX), o.floorY + Math.random() * (o.ceilingY - o.floorY), 0);
+    }
+    if (!player || entering || !BL.scenes.factory) return;
+    const p = player.root.position, sr = Math.sin(m.ry), cr = Math.cos(m.ry), shield = BL.factoryModels.SHIELD_Z;
+    const along = (p.x - m.x) * sr + (p.z - m.z) * cr, across = (p.x - m.x) * cr - (p.z - m.z) * sr;
+    if (along > shield || along < shield - 2 || Math.abs(across) > 2.4) return;
+    f.phase.ripples.pulse(across, p.y - m.floorY + 1, 0);
+    entering = true;
+    world.pilot = player.traits.name;
+    releaseForScene("factory");
+    go("factory");
+  };
+  // The Lightning Factory looks back out through its own end of this tunnel, so on the way in the island is
+  // photographed once from the shield, looking out, while the screen is dark: the mouth's own dressing is hidden,
+  // since the factory builds the tunnel and its lamps itself, and so is the Ooga walking in. What the factory can
+  // see through its rim is cropped out, halved down to a small copy that its display blurs as it enlarges it, given
+  // back the saturation the page's grade will add again, and misted a little, as seen through the shield.
+  const FACTORY_VIEW = { width: 320, eye: 1.7, across: 0.82, up: 0.46, down: 0.5, colour: 0.83, mist: 0.12, haze: [206, 228, 238] };
+  const snapFactoryView = () => {
+    const f = factoryMouth, m = f.mouth, V = FACTORY_VIEW, sr = Math.sin(m.ry), cr = Math.cos(m.ry), from = BL.factoryModels.SHIELD_Z;
+    const W = glCanvas.width, H = glCanvas.height, aspect = W / H, t = Math.max(V.up, V.down, V.across / aspect);
+    const view = createCamera({ fov: 2 * Math.atan(t) * 180 / Math.PI, near: 0.2, far: camera.far });
+    Object.assign(view.position, { x: m.x + sr * from, y: m.floorY + V.eye, z: m.z + cr * from });
+    Object.assign(view.target, { x: view.position.x + sr, y: view.position.y, z: view.position.z + cr });
+    const me = world.pilot ? crew.cavemen.get(world.pilot) : null, shown = !!me && me.root.visible;
+    f.group.visible = false;
+    if (me) me.root.visible = false;
+    const drawn = renderer.render(root, view, { ...RENDER_OPTS, birdsEyeCutaway: false, cutawayFade: 0, cutawayMaxY: 1e6, cutawayRegionCount: 0 });
+    f.group.visible = true;
+    if (me) me.root.visible = shown;
+    if (!drawn) return;
+    let src = glCanvas, sx = W / 2 * (1 - V.across / (t * aspect)), sy = H / 2 * (1 - V.up / t), sw = W - 2 * sx, sh = H / 2 * (V.up + V.down) / t;
+    const w = V.width, h = Math.round(w * (V.up + V.down) / (2 * V.across));
+    while (sw > w * 2) {
+      const half = document.createElement("canvas");
+      half.width = Math.ceil(sw / 2); half.height = Math.ceil(sh / 2);
+      half.getContext("2d").drawImage(src, sx, sy, sw, sh, 0, 0, half.width, half.height);
+      src = half; sx = sy = 0; sw = half.width; sh = half.height;
+    }
+    const out = document.createElement("canvas"), g = out.getContext("2d", { willReadFrequently: true });
+    out.width = w; out.height = h;
+    g.imageSmoothingQuality = "high";
+    g.drawImage(src, sx, sy, sw, sh, 0, 0, w, h);
+    const pixels = g.getImageData(0, 0, w, h), d = pixels.data;
+    for (let i = 0; i < d.length; i += 4) {
+      const l = 0.2126 * d[i] + 0.7152 * d[i + 1] + 0.0722 * d[i + 2];
+      for (let k = 0; k < 3; k++) d[i + k] = (l + (d[i + k] - l) * V.colour) * (1 - V.mist) + V.haze[k] * V.mist;
+    }
+    g.putImageData(pixels, 0, 0);
+    const image = new Image();
+    image.src = out.toDataURL("image/jpeg", 0.9);
+    world.factoryView = { width: w, height: h, load: () => image, eye: V.eye, from, across: V.across, up: V.up, down: V.down };
   };
   // Whoever the visitor is playing goes in with them, as world.pilot; a scene that has a use for it
   // takes it on the way in.
@@ -5217,8 +5288,8 @@
       setVec(target, island.gate.x, island.surfaceAt(island.gate.x, island.gate.z) + 2.5, island.gate.z);
       pitch = player ? 0 : 0.2;
       dist = player ? 10 : 12;
-    } else if (name === "lab" || name === "mirror") {
-      const id = name === "lab" ? "c11" : "c1", m = island.mouths.find((mouth) => mouth.id === id);
+    } else if (name === "lab" || name === "mirror" || name === "factory") {
+      const id = name === "lab" ? "c11" : name === "factory" ? "c2" : "c1", m = island.mouths.find((mouth) => mouth.id === id);
       yaw = m.ry;
       const approach = close ? 6 : 4;
       x = m.x + Math.sin(yaw) * approach; z = m.z + Math.cos(yaw) * approach;
@@ -5951,6 +6022,7 @@
     syncMirrorDamage();
     mirrorCave.ripples.update(dt, elapsed);
     entropyLab.phase.update(dt, elapsed);
+    if (factoryMouth) factoryShield(dt, elapsed);
     prepareClankerRiders();
     prepareClankerStrike();
     clankers.update(dt);
@@ -6848,6 +6920,7 @@
 
   const enter = (ctx) => {
     ({ renderer, game, world, go, lootEnabled, testBananas } = ctx);
+    glCanvas = ctx.canvas;
     pitDeparting = false; pitArrival = null;
     const travel = world.oogaPortalTravel;
     const pitReturn = ctx.from === "dsb" && travel?.from === "dsb" && travel.to === "hub" && travel.arrival === "pit" && travel.name === world.pilot;
@@ -7074,10 +7147,12 @@
     mirrorCave.shattered = false;
     mirrorCave.ripples = BL.mirrorRipples.create(mirrorCave.node);
     entropyLab.phase = BL.labPhase.create(entropyLab.group, entropyLab.mouth, entropyLab.opening);
+    if (factoryMouth) Object.assign(factoryMouth, { phase: BL.labPhase.create(factoryMouth.group, factoryMouth.mouth, factoryMouth.opening, BL.factoryModels.SHIELD_Z), hum: 0 });
     headquarters.entropyLab = entropyLab;
     entropyLab.updateEquipment = updateLabEquipment;
     shared.clipProjectileTarget = entropyLab.phase.clipTarget;
     shared.absorbProjectile = (ax, ay, az, point, dt, source, workShot) => entropyLab.phase.absorb(ax, ay, az, point, dt)
+      || !!(factoryMouth && factoryMouth.phase.absorb(ax, ay, az, point, dt))
       || !!(workShot && source && shared.workSites[source.work.site]?.mirrorRoom && !mirrorCave.damage.broken
         && mirrorCave.ripples.absorb(ax, ay, az, point));
     shared.onProjectileMove = (ax, ay, az, bx, by, bz, dt, source, workShot) => {
@@ -7220,6 +7295,8 @@
     mirrorCave.body = BL.mirrorBody.create(mirrorCave.node, crew.cavemen);
     for (const cave of crew.list) entropyLab.phase.body.track(cave.root, cave.traits.height * 2,
       Math.max(cave.headOpen.verts.length, cave.headClosed.verts.length));
+    if (factoryMouth) for (const cave of crew.list) factoryMouth.phase.body.track(cave.root, cave.traits.height * 2,
+      Math.max(cave.headOpen.verts.length, cave.headClosed.verts.length));
     if (magazine) trackMirrorObject(magazine.node, 1);
     for (let caveIndex = 0; caveIndex < crew.list.length; caveIndex++) {
       const cave = crew.list[caveIndex];
@@ -7360,8 +7437,9 @@
     unsubscribeActivity = contributors.subscribe(() => crew.refreshStates());
     let initialCharacter = ctx.from === null && preloadedCharacter ? contributors.activeRoster.find((entry) => entry.name.toLowerCase() === preloadedCharacter) : null;
     if (ctx.from === null && (preloadedJetpackWear || preloadedEquipment) && !params.has("character") && !initialCharacter) initialCharacter = contributors.activeRoster.find((entry) => crew.stateOf(crew.cavemen.get(entry.name)) === "working") || contributors.activeRoster[0];
-    const returningCharacter = ctx.from === "dsb" ? world.pilot : null;
-    if (ctx.from === "dsb") world.pilot = null;
+    // The Ooga that went into DSB or the Lightning Factory comes back out as the one played.
+    const returningCharacter = ctx.from === "dsb" || ctx.from === "factory" ? world.pilot : null;
+    if (ctx.from === "dsb" || ctx.from === "factory") world.pilot = null;
     if (initialCharacter || returningCharacter) {
       const cave = crew.cavemen.get(returningCharacter || initialCharacter.name);
       if (!contributors.debugState && crew.stateOf(cave) !== "working") {
@@ -7373,7 +7451,7 @@
     }
     const initialFirstPerson = ctx.from === null && preloadedFirstPerson;
     if (initialFirstPerson) pilot.enterClose(true);
-    if (returningCharacter && !pitReturn) navigate("pile");
+    if (returningCharacter && !pitReturn) navigate(ctx.from === "factory" ? "factory" : "pile");
     else if (!crew.sleeping && (preloadedView || initialCharacter || initialFirstPerson)) navigate(preloadedView || "pile");
     if (initialCharacter && preloadedJetpack) {
       grantJetpack(pilot.player, preloadedJetpackWear);
@@ -7650,6 +7728,8 @@
     mark("covered-view");
   };
   const leave = () => {
+    if (factoryMouth && factoryMouth.snap) snapFactoryView();
+    glCanvas = null;
     clearCutawayHidden();
     pitArrival = null;
     pitGate.dispose();
@@ -7725,6 +7805,8 @@
     mirrorCave.ripples.dispose();
     entropyLab.phase.dispose();
     entropyLab = null;
+    if (factoryMouth) factoryMouth.phase.dispose();
+    factoryMouth = null;
     mirrorCave.body.dispose();
     pilot.dispose();
     if (oogatronUnsub) {
@@ -7782,6 +7864,7 @@
     mirrorCave.damage.liveGeometry(set);
     clankers.liveGeometry(set);
     entropyLab.phase.liveGeometry(set);
+    if (factoryMouth) factoryMouth.phase.liveGeometry(set);
     for (const item of clankerEquipment) set.add(item.node.geometry);
     for (const cave of crew.cavemen.values()) set.add(cave.headOpen).add(cave.headClosed);
   };

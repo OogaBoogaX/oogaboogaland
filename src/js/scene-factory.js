@@ -1,0 +1,949 @@
+// The Lightning Factory: a Lightning node at work, shown as a factory in a tiered cavern behind the 2 o'clock
+// mouth, run by gorillas in hard hats. Everything that moves is driven by the node's event stream through
+// `factory-feed.js`; until a real node publishes, `factory-mock.js` plays a demo node, and the entrance says so.
+//
+// What each station shows, and what it may not (Foundry's consumer rules, docs/lightning-factory.md):
+// - The node core glows while the node runs and goes dark when it says it stopped.
+// - Four featured lines stand on the main and high levels, each with two capacitors: blue lights on a settled
+//   forward, orange sputters on a failed one. Sats ride the conduit from the line into the core, always the
+//   same way, so the animation says "activity here" and never which side of the channel moved.
+// - The on-chain forge fires when a line is opened or closed; its bay's lantern turns red while it is taken down.
+// - The switchboard's screens light with every forward; its board carries the node's own counts and
+//   Foundry's hourly summary, which is labelled as Foundry's.
+// - The rebalancer spins for a rebalance, and never touches a line.
+// - The treasury's gold is the node's public capacity; its belt carries each of the demo node's fees to the crate.
+// - The watchtower's beam sweeps while the feed is live and goes dark when it falls silent: that is "no
+//   signal", which is not the same as the node stopping.
+// - The galleries under the vault hold the lines past the featured four; the study hall is locked for now.
+//
+// The first view stands on the entrance balcony and looks across at the core, the way the concept frames it.
+// Escape, the Leave button and the tunnel behind the balcony all go back to the island.
+(() => {
+  "use strict";
+  const BL = window.BL = window.BL || {};
+  const { math, models, contributors, game: gameMod, hud: hudMod, interact: interactMod, pilot: pilotMod, fx: fxMod } = BL;
+  const FM = BL.factoryModels;
+  const { clamp, mat4 } = math;
+  const { createNode, addChild, removeChild, createCamera, stepTweens, tweenCount, traverseVisible } = BL.scene;
+  const { LAYOUT, LEVEL, HALL, CONDUIT_SAMPLES } = FM;
+
+  const COARSE = window.matchMedia("(pointer: coarse)").matches;
+  const PITCH = [-0.2, 1.3], DIST = [4, 30];
+  const FOLLOW = { y: 0.9, min: 3, max: 7, pitch: [0.25, 0.8] };
+  const FLY = { speed: 6, perDist: 0.4, climb: 4, yMax: HALL.h - 3 };
+  // The shield across the way out, as wide as the mouth's opening, as on the hub's side; and how far past where the
+  // hub took its picture of the island the picture hangs.
+  const GATE_OPENING = { minX: -2.5, maxX: 2.5, floorY: 0, ceilingY: 3 }, OUTSIDE_DISTANCE = 34;
+  // Each peer tunnel's shield, across the inside of its arch in the tunnel's frame, and its blue; and where on the
+  // node's walkway it sets down whoever walks into it.
+  const PEER_OPENING = { minX: -2.1, maxX: 2.1, floorY: 0.1, ceilingY: 4.65 }, PEER_PLANE = 0.45, PEER_TINT = [0.3, 0.72, 1], NODE_RETURN = { x: 0, z: 1.6 };
+  const view = (x, y, z, yaw, pitch, dist) => ({ yaw, pitch, dist, target: { x, y, z } });
+  const bay = (i, dist = 11) => { const b = LAYOUT.bays[i]; return view(b.x * 0.9, b.y + 2, b.z, b.x < 0 ? 0.55 : -0.55, 0.22, dist); };
+  // `entrance` is the balcony's view across the core; the rest frame one station each.
+  const PRESETS = {
+    entrance: view(0, 9, -6, 0, 0.07, 33),
+    core: view(0, 8, -4, 0.35, 0.12, 15),
+    lines: view(0, 8.5, -8, 0, 0.18, 20),
+    lineA: bay(0), lineB: bay(1), lineC: bay(2), lineD: bay(3),
+    forge: view(0, 2.2, 1.5, 0.75, 0.22, 10),
+    switchboard: view(-12, 4, 6, 0.55, 0.22, 9),
+    rebalancer: view(14, 4.6, 4.2, -0.8, 0.3, 10),
+    treasury: view(12, 5, 12.5, -0.3, 0.25, 10),
+    lookout: view(-16, 19, -14, 0.7, 0.15, 14),
+    study: view(19, 8.6, 12, -Math.PI / 2 + 0.2, 0.2, 11),
+    galleries: view(4, 17, -16, 0, 0.14, 17)
+  };
+  const RENDER_OPTS = {
+    clear: [0.07, 0.05, 0.04], sky: [0.42, 0.3, 0.2], ground: [0.16, 0.11, 0.08],
+    direct: [0.6, 0.45, 0.32], directStrength: 0.35, ambientFloor: 0.34,
+    sun: { x: 0.25, y: 0.9, z: 0.3 }, shadowCenter: { x: 0, y: 6, z: -4 }, shadowExtent: 30,
+    lights: new Float32Array(BL.glRenderer.POINT_LIGHT_CAPACITY * 8), lightCount: 0, bloomStrength: 0.85,
+    fog: [0.1, 0.07, 0.05], fogNear: 40, fogFar: 110
+  };
+  // Seconds a flash, a sputter, the forge's heat, the rebalancer's run and a cart's trip last.
+  const FLASH = 0.35, SPUTTER = 0.9, HEAT = 7, SPIN = 7, TRIP = 9;
+  // The treasury's belt: how many nuggets ride it at once, and the seconds one takes up it.
+  const BELT_CAP = 6, BELT_TIME = 1.8, BELT = FM.TRE.belt;
+  // A rebalance's bucketed size, as its board reads it.
+  const SIZES = { dust: "Dust", small: "Small", medium: "Medium", large: "Large", very_large: "Very large" };
+  const NODE_STATES = { starting: "Starting", ready: "Ready", stopped: "Stopped" };
+  const SAT_CAP = 160, GALLERY_N = LAYOUT.galleries.reduce((n, g) => n + g.stations, 0);
+  // How many sats a forward sends down its conduit, by its bucketed size.
+  const SATS_FOR = { dust: 1, small: 1, medium: 2, large: 3, very_large: 4 };
+  const TIPS = {
+    core: ["Node core · this Lightning node", "The node core is the Lightning node itself: lit while it runs, dark when it stops."],
+    line: ["Line · a Lightning channel", "Each line is a channel to one peer. Blue flashes when a payment passes through it, orange when one fails."],
+    forge: ["On-chain forge · open and close", "Channels are opened and closed with Bitcoin transactions: the forge fires when a line is built or taken down."],
+    switchboard: ["Switchboard · routing", "Every payment the node passes on for someone else is a forward. The screens light as they go through."],
+    rebalancer: ["Rebalancer · moving liquidity", "Rebalancing moves sats between channels so lines keep working. It is shown by the hour, never for one line."],
+    treasury: ["Treasury · routing fees", "The gold under the glass is the node's public capacity, visible to anyone on the Lightning network. Each forward that earns the demo node a fee sends a nugget up the belt into the crate."],
+    lookout: ["Watchtower · the node's signal", "The beam sweeps while the node's events are arriving. Dark means no signal: the node may be fine, but nothing is getting through."],
+    study: ["Study Hall · locked", "Bananas first! The study hall opens in a later update."],
+    tunnel: ["Peer tunnel", "Through here lives the peer at the other end of a line."],
+    galleries: ["More channels", "Every line past the featured four stands up in the galleries."],
+    exit: ["The way out", "Back to the island."]
+  };
+
+  let renderer, game, world, go, root, camera, hud, hooks, input, pilot, fx, agentPlay = null;
+  let feed = null, mock = null, unsubscribe = null, leaving = false, dust = null, clock = 0;
+  // The Ooga the visitor walked in as: one playable actor from the shared crew, and the world it carries.
+  let people = null, avatar = null, playerWorld = null;
+  let scene = null;
+  const targets = [];
+  const SAT_POS = { x: 0, y: 0, z: 0 }, SAT_ROT = { x: 0, y: 0, z: 0 }, SAT_SCALE = { x: 1, y: 1, z: 1 };
+  const SAT_M = mat4.create();
+
+  // The dressing: crates and coal by the forge, a gauge by the switchboard, and vines over the way
+  // out. One set, built once for the page.
+  const dressing = models.cached(() => {
+    const set = BL.dressing.set(), L = LAYOUT;
+    const [c0, c1, c2, c3, c4] = FM.FORGE_STORES;
+    set.put("coalCrate", c0[0], 0, c0[1], 1, 1); set.put("coalCrate", c1[0], 0, c1[1], 0, 2);
+    set.put("crate", c2[0], 0, c2[1], 0, 0); set.put("crate", c2[0], 0.75, c2[1], 1, 1); set.put("barrel", c3[0], 0, c3[1], 0, 1);
+    set.put("sack", c4[0], 0, c4[1], 1, 0);
+    set.put("gauge", L.switchboard.x + 3.1, L.switchboard.y, L.switchboard.z - 0.4, 0, 0);
+    const my = L.entrance.y, mz = FM.EXIT_Z;
+    set.put("vine", -3.0, my + 3.5, mz + 1.06, 0, 0);
+    set.put("vine", 2.6, my + 3.5, mz + 1.06, 0, 1);
+    return set.build();
+  });
+  // The lanterns, hung as the concept hangs them: big ones on posts at the head of the stairway and lamps on arms
+  // at its foot and by the stations, small ones on the rails of the lines, the balcony, the walkway, the core's
+  // walkway and the porches, strings of them across the hall and over the way out, and a few on long chains
+  // from the vault. A rail lantern stands on one of its rail's posts.
+  const lighting = models.cached(() => {
+    const L = LAYOUT, e = L.entrance, lamps = [];
+    const onRail = (x0, z0, x1, z1, y, fractions) => {
+      const n = Math.max(2, Math.round(Math.hypot(x1 - x0, z1 - z0) / 1.4) + 1);
+      for (const f of fractions) { const k = Math.round(f * (n - 1)) / (n - 1); lamps.push(["rail", x0 + (x1 - x0) * k, y, z0 + (z1 - z0) * k]); }
+    };
+    const [sx, , foot, , , head, sw] = L.stairway;
+    lamps.push(["top", -2.3, e.y, head + 0.5], ["top", 2.3, e.y, head + 0.5], ["post", -2.4, 0, foot - 0.7, 0], ["post", 2.4, 0, foot - 0.7, Math.PI]);
+    // Down the stairway's rails, on their posts.
+    for (let z = foot + 0.1 + 3; z < head - 1; z += 3) for (const s of [-1, 1]) lamps.push(["rail", sx + s * (sw / 2 + 0.1), e.y * (z - foot) / (head - foot), z]);
+    // A lantern from each arm of every line's frame, two from the forge's header, two from each tunnel's.
+    for (const b of L.bays) for (const s of [-1, 1]) lamps.push(["hang", FM.stationX(b) + s * 3.05, b.y + 3.88, FM.stationZ(b) - 0.6]);
+    for (const s of [-1, 1]) lamps.push(["hang", L.forge.x + s * 3.05, 4.05, L.forge.z + 1.2]);
+    for (const t of L.tunnels) for (const s of [-1, 1]) {
+      const lx = s * 3.3, lz = 0.8, c = Math.cos(t.turn), sn = Math.sin(t.turn);
+      lamps.push(["hang", t.x + lx * c + lz * sn, t.y + 5.9, t.z - lx * sn + lz * c]);
+    }
+    // Two from the study hall's header, which faces -x.
+    for (const [lx, ly, lz] of FM.STUDY.lamps) lamps.push(["hang", L.study.x - lz, L.study.y + ly, L.study.z + lx]);
+    lamps.push(["post", L.switchboard.x + 3.1, L.switchboard.y, L.switchboard.z - 1.9, Math.PI]);
+    // Two from each of the rebalancer's and the treasury's signs.
+    for (const [d, spots] of [[L.rebalancer, FM.REB.lamps], [L.treasury, FM.TRE.lamps]]) for (const [x, y, z] of spots) lamps.push(["hang", d.x + x, d.y + y, d.z + z]);
+    const [[w0, w1, a0], [s0, , s1]] = L.walk;
+    onRail(w0, a0 + 0.1, w1, a0 + 0.1, e.y, [0.2, 0.5, 0.8]);
+    onRail(s0 + 0.1, a0, s0 + 0.1, s1, e.y, [0.1, 0.3, 0.5, 0.7, 0.9]);
+    onRail(-e.w / 2 + 0.1, e.z - e.d / 2 + 0.1, -e.w / 2 + 0.1, e.z + e.d / 2 - 0.1, e.y, [0.5]);
+    const r = L.ring;
+    for (const i of [5, 9, 16, 19, 23, 26]) { const a = i / 28 * Math.PI * 2; lamps.push(["rail", r.x + Math.cos(a) * (r.outer - 0.15), r.y - 0.05, r.z + Math.sin(a) * (r.outer - 0.15)]); }
+    for (const t of L.tunnels) {
+      const [x0, x1, z0, z1] = FM.porchOf(t);
+      if (t.turn) onRail(x0, z0 + 0.1, x1, z0 + 0.1, t.y, [0.5]);
+      else onRail(x0 + 0.1, z0, x0 + 0.1, z1, t.y, [0.5]);
+    }
+    for (const s of [-1, 1]) lamps.push(["chain", s * 6, 12.5, 8], ["chain", s * 13, 16.5, 3]);
+    const my = e.y, mz = FM.EXIT_Z;
+    return FM.lanterns(lamps, [
+      [-14, 16, -12, 14, 16, -12, 1.6, [0.2, 0.4, 0.6, 0.8]], [-18, 13.5, -8, 18, 13.5, -8, 1.4, [0.2, 0.35, 0.65, 0.8]],
+      [-20, 9, 8, -13, 9, 12, 0.6, [0.5]], [20, 9.5, 5, 13.5, 9, 7, 0.6, [0.5]],
+      // Just past the rim, the mouth's own string of lamps, hung where the hub hangs it.
+      [-3.05, my + 3.42, mz + 1.1, 3.05, my + 3.42, mz + 1.1, 0.3, [0.3, 0.7]]
+    ]);
+  });
+
+  // Where a line stands: one of the four featured bays, a gallery stand, or nowhere shown (the overflow count).
+  // Only a line being opened may claim a free place, or any line on a public stream, whose slots are new each
+  // day; a forward on a line with no place shows nowhere rather than taking a bay.
+  const placeLine = (s, id, claim) => {
+    if (s.placeOf.has(id)) return s.placeOf.get(id);
+    if (!claim) return null;
+    for (let i = 0; i < s.bays.length; i++) if (!s.bays[i].line) return claimBay(s, i, id);
+    for (let i = 0; i < s.gallery.length; i++) if (!s.gallery[i].line) { s.gallery[i].line = id; s.placeOf.set(id, s.gallery[i]); return s.gallery[i]; }
+    return null;
+  };
+  const claimBay = (s, i, id) => {
+    const b = s.bays[i];
+    if (b.line) s.placeOf.delete(b.line);
+    b.line = id;
+    s.placeOf.set(id, b);
+    const channel = mock && mock.snapshot.channels.find((c) => c.id === id);
+    setBoard(b.label, `CHANNEL ${b.letter}`, channel ? `Peer: ${channel.peer}` : `Line ${b.letter}`, true);
+    setBoard(s.tunnels[i].label, "PEER TUNNEL", channel ? channel.peer : `Line ${b.letter}`, true);
+    return b;
+  };
+  // The demo node's featured floor: its three largest public channels, and the newest line in the fourth bay.
+  const featureFromSnapshot = (s) => {
+    const chans = mock.snapshot.channels.filter((c) => c.active).sort((a, b) => b.capacity - a.capacity);
+    const newest = mock.newest;
+    const featured = chans.filter((c) => c.id !== newest).slice(0, 3);
+    featured.forEach((c, i) => claimBay(s, i, c.id));
+    claimBay(s, 3, newest);
+    let g = 0;
+    for (const c of chans) if (!s.placeOf.has(c.id) && g < s.gallery.length) { s.gallery[g].line = c.id; s.placeOf.set(c.id, s.gallery[g++]); }
+    for (const b of s.bays) { b.state = "active"; b.build = 1; }
+  };
+
+  const onEvent = (e, line) => {
+    const s = scene, replay = e.stream === "replay", p = e.payload || {};
+    const claim = e.schema === BL.factoryFeed.PUBLIC || e.type === "channel.opening" || e.type === "channel.active";
+    const place = line ? placeLine(s, line, claim) : null;
+    switch (e.type) {
+      case "channel.opening":
+        s.forgeHeat = HEAT;
+        s.cartT = 0;
+        if (place && place.bay) {
+          place.state = "building";
+          place.build = 0;
+          nudge(s, place.gorilla);
+        }
+        nudge(s, s.forgeCrew);
+        break;
+      case "channel.active":
+        if (place && place.bay) {
+          place.state = "active";
+          if (replay) place.build = 1;
+          place.flashL = FLASH * 2;
+        }
+        break;
+      case "channel.closing":
+        s.forgeHeat = HEAT;
+        if (place && place.bay) { place.state = "dismantling"; nudge(s, place.gorilla); }
+        nudge(s, s.forgeCrew);
+        break;
+      case "channel.closed":
+        s.cartT = 0;
+        if (place) {
+          if (place.bay) { place.state = "empty"; place.build = 0; }
+          s.placeOf.delete(place.line);
+          place.line = null;
+        }
+        break;
+      case "forward.settled":
+        if (replay) break;
+        s.switchBusy = FLASH;
+        if (p.fee) dropNugget(s);
+        if (place) {
+          place.flashL = FLASH;
+          if (place.bay) for (let k = SATS_FOR[p.scale] || 1; k > 0; k--) launchSat(s, place.index, k * 0.18);
+        } else s.overflowFlash = FLASH;
+        break;
+      case "forward.failed":
+        if (replay) break;
+        if (place) place.sputter = SPUTTER;
+        break;
+      case "rebalance.succeeded":
+        s.rebScale = p.scale || null;
+        s.rebHour = e.bucket.slice(11, 16);
+        if (replay) break;
+        s.spin = SPIN;
+        nudge(s, s.rebalanceCrew);
+        break;
+      case "rebalance.failed":
+        s.rebFailed += p.count || 1;
+        break;
+    }
+    s.dirty = true;
+  };
+  // A fee's nugget sets off up the treasury's belt; with the belt full, it lands in the crate at once.
+  const dropNugget = (s) => {
+    for (let i = 0; i < BELT_CAP; i++) {
+      if (s.nuggetT[i] >= 0) continue;
+      s.nuggetT[i] = 0;
+      s.nuggets[i].visible = true;
+      return;
+    }
+    s.hopper = Math.min(1, s.hopper + 0.05);
+  };
+  // A worker reacts to its station's event with a chest beat, if it is not already busy.
+  const nudge = (s, g) => { if (g && !g.agent.driven) g.agent.poke(); };
+  const launchSat = (s, bayIndex, delay) => {
+    const q = s.sats;
+    for (let i = 0; i < SAT_CAP; i++) {
+      if (q.bay[i] >= 0) continue;
+      q.bay[i] = bayIndex;
+      q.t[i] = -delay;
+      q.speed[i] = 0.32 + Math.random() * 0.12;
+      q.spin[i] = Math.random() * 6.28;
+      return;
+    }
+  };
+
+  // A label hung at (x, y, z) under `parent`: the lettered face and the board behind it, which `setBoard` fills.
+  const labelNode = (parent, x, y, z, turn = 0) => {
+    const node = createNode({ position: { x, y, z }, rotation: { x: 0, y: turn, z: 0 } });
+    node.face = createNode();
+    node.back = createNode();
+    addChild(node, node.back, node.face);
+    addChild(parent, node);
+    return node;
+  };
+  // The boards that read the stream: refreshed once a second, and only when their text changes. A board whose
+  // reading moves (`keep` false) owns its label and releases it when the next one replaces it.
+  const setBoard = (node, title, sub, keep, opts) => {
+    const key = `${title}|${sub}`;
+    if (node.printed === key) return;
+    node.printed = key;
+    if (node.owned) {
+      renderer.releaseGeometry(node.face.geometry);
+      renderer.releaseGeometry(node.back.geometry);
+    }
+    const l = FM.label(title, sub, { ...opts, keep });
+    node.face.geometry = l.face;
+    node.back.geometry = l.back;
+    node.owned = !keep;
+  };
+  // A board of numbers, reprinted only when a row changes; it owns its picture and releases the one it replaces.
+  const setData = (node, title, rows, width) => {
+    const key = title + rows.join("|");
+    if (node.printed === key) return;
+    node.printed = key;
+    if (node.owned) {
+      renderer.releaseGeometry(node.face.geometry);
+      renderer.releaseGeometry(node.back.geometry);
+    }
+    const d = FM.dataBoard(title, rows, { width, keep: false });
+    node.face.geometry = d.face;
+    node.back.geometry = d.back;
+    node.owned = true;
+  };
+  const sats = (n) => n.toLocaleString("en-US");
+  const refreshBoards = (s) => {
+    const r = feed.reading, signal = feed.signal;
+    setBoard(s.lookoutLabel, "WATCHTOWER OUTPOST", signal === "live" ? (r.stream === "replay" ? "(Catching Up)" : "(Signal: Live)") : signal === "silent" ? "(No Signal)" : "(Waiting)", true);
+    const snap = mock.snapshot;
+    // The rebalancer's boards never name a line: a rebalance says only its size and its hour.
+    setData(s.rebBoards[0], "LAST REBALANCE", [["Size", s.rebScale ? SIZES[s.rebScale] : "None yet", "count"], ["Hour", s.rebHour ? `${s.rebHour} UTC` : "None yet", "count"], ["Lines", "Private", "plain"]], 1.6);
+    setData(s.rebBoards[1], "REBALANCES", [["Done", r.rebalances, "ok"], ["Failed", s.rebFailed, "count"], ["Shown", "By the hour", "plain"]], 1.6);
+    let low = Infinity, high = 0;
+    for (const c of snap.channels) if (c.active) { low = Math.min(low, c.feePpm); high = Math.max(high, c.feePpm); }
+    setData(s.feeBoard, "ROUTING FEES (PUBLIC)", [["Forwards settled", sats(r.settled), "count"], ["Earned a fee", sats(r.fees), "sats"], ["Hour's success", r.summary ? `${Math.round(r.summary.ratio * 100)}%` : "None yet", "ok"]], 1.9);
+    setData(s.statsBoard, "NODE STATS (PUBLIC)", [["Channels", r.channels ?? snap.channelCount, "count"], ["Peers", r.peers ?? snap.peerCount, "count"], ["Total capacity", `${sats(snap.capacity)} sats`, "sats"], ["Fee policy", `${low} / ${high} ppm`, "plain"], ["Node", NODE_STATES[r.node] || "Unknown", "ok"]], 1.9);
+    const summary = r.summary ? `Foundry hour: ${r.summary.count} fwd, ${Math.round(r.summary.ratio * 100)}% ok` : "(Routing & Forwarding)";
+    setBoard(s.switchLabel, "SWITCHBOARD", summary, false);
+    const shown = s.placeOf.size, total = r.channels ?? snap.channelCount;
+    setBoard(s.galleryLabel, "MORE CHANNELS", `${Math.max(0, total - 4)} lines, ${Math.max(0, total - shown)} not shown`, true);
+    // The core names what it is: a demo node on simulated events, until a real node publishes.
+    setBoard(s.coreLabel, "NODE CORE", r.node === "stopped" ? "(Node Stopped)" : r.contract === BL.factoryFeed.DEMO ? "(Demo Node, Simulated)" : "(Your LN Node)", true, { height: 1.6 });
+  };
+
+  const leaveCave = () => {
+    if (leaving) return;
+    leaving = true;
+    go("hub");
+  };
+  const onKey = (e) => {
+    if (e.key === "Escape") {
+      leaveCave();
+      return true;
+    }
+    return false;
+  };
+  const onDonation = () => {};
+  const onLootCleared = () => {};
+
+  const build = () => {
+    const L = LAYOUT, s = {
+      bays: [], gallery: [], tunnels: [], placeOf: new Map(), crew: [], sats: null,
+      forgeHeat: 0, cartT: 1, switchBusy: 0, spin: 0, hopper: 0, glow: 0, overflowFlash: 0, beam: 0, dirty: true, refreshAt: 0,
+      forgeCrew: null, rebalanceCrew: null, rebScale: null, rebHour: null, rebFailed: 0,
+      nuggets: [], nuggetT: new Float32Array(BELT_CAP).fill(-1)
+    };
+    const hall = FM.hall(), cond = FM.conduits();
+    addChild(root, createNode({ geometry: hall.rock }), createNode({ geometry: hall.walls }), createNode({ geometry: hall.glow, sightHidden: true }), createNode({ geometry: FM.scaffold() }),
+      createNode({ geometry: FM.coreBody() }), createNode({ geometry: cond.pipe }), createNode({ geometry: cond.glow }), createNode({ geometry: FM.forge() }));
+    const peer = FM.peerPipes();
+    addChild(root, createNode({ geometry: peer.pipe }), createNode({ geometry: peer.glow, sightHidden: true }));
+    // Banners of the bolt hung either side of the core from the high lines' decks, as the concept hangs them.
+    for (const x of [-12.5, 12.5]) addChild(root, createNode({ position: { x, y: LEVEL.high - 0.45, z: L.bays[0].z + L.bays[0].d / 2 + 0.1 }, geometry: FM.banner(2.2) }));
+    s.chamber = createNode({ geometry: FM.coreChamber().lit });
+    s.forgeFire = createNode({ geometry: FM.forgeFire().warm });
+    // One cart runs the left track in and out of the forge; another stands loaded on the right.
+    s.cart = createNode({ position: { x: L.forge.x + FM.FORGE_TRACKS[0], y: 0, z: 2 }, geometry: FM.cart() });
+    for (const [x, z] of FM.COILS) addChild(root, createNode({ position: { x, y: LEVEL.main, z }, geometry: FM.teslaCoil() }));
+    addChild(root, s.chamber, s.forgeFire, s.cart, createNode({ position: { x: L.forge.x + FM.FORGE_TRACKS[1], y: 0, z: FM.FORGE_CART_Z }, geometry: FM.cart() }));
+    s.coreLabel = labelNode(root, L.core.x, L.core.chamber[1] + 1.1, L.core.z + 3.3);
+    setBoard(labelNode(root, L.forge.x, 4.5, L.ring.z + L.ring.outer + 0.8), "ON-CHAIN FORGE", "(Open / Close)", true);
+    // Featured bays: frame, two capacitors and a label on a group at the deck's centre.
+    const caps = FM.capacitor();
+    L.bays.forEach((b, index) => {
+      const node = createNode({ position: { x: FM.stationX(b), y: b.y, z: FM.stationZ(b) } });
+      const frame = createNode({ geometry: FM.stationFrame() });
+      // The blue tank, the peer's side, stands toward the line's tunnel; the orange one, the node's, toward the core.
+      const out = Math.sign(b.x);
+      const capL = createNode({ position: { x: out * 1.2, y: 0, z: 0 }, geometry: caps.blue.dim });
+      const capR = createNode({ position: { x: -out * 1.2, y: 0, z: 0 }, geometry: caps.orange.dim });
+      addChild(node, frame, capL, capR);
+      const lbl = labelNode(node, 0, 5.1, -0.55);
+      // The line's status lantern, under the frame's beam between the tanks.
+      const status = createNode({ position: { x: 0, y: 4.0, z: -0.3 }, geometry: FM.statusLantern().alert });
+      addChild(node, status);
+      addChild(root, node);
+      s.bays.push({ bay: true, index, letter: b.letter, node, frame, capL, capR, status, label: lbl, line: null, state: "empty", build: 0, flashL: 0, sputter: 0, gorilla: null });
+    });
+    // Peer tunnels, each behind its line.
+    const tunnels = FM.tunnels();
+    L.tunnels.forEach((t, i) => {
+      const node = createNode({ position: { x: t.x, y: t.y, z: t.z }, rotation: { x: 0, y: t.turn, z: 0 } });
+      const stone = createNode({ geometry: tunnels[i].stone });
+      addChild(node, stone, createNode({ geometry: tunnels[i].glow, sightHidden: true }));
+      const lbl = labelNode(node, 0, FM.TUNNEL_SIGN.y, FM.TUNNEL_SIGN.z);
+      addChild(node, createNode({ position: { x: -(FM.TUNNEL_POST + 0.75), y: 5.9, z: 0.6 }, geometry: FM.banner(2.2) }));
+      addChild(root, node);
+      // The peer's shield across the arch: the lab's phase plane in the concept's blue, humming like the gate.
+      const phase = BL.labPhase.create(node, { x: t.x, z: t.z, ry: t.turn, floorY: t.y, room: { w: 4.2, h: 4.7, from: 0, to: 3 } }, PEER_OPENING, PEER_PLANE, PEER_TINT);
+      // Its face is a mirror, a reflector of its own, and takes the shield's ripples, so the blue waves run over the
+      // reflection; the shield's own plane only keeps the ripples.
+      const face = createNode({ geometry: FM.peerMirrors()[i], position: { x: 0, y: 0, z: PEER_PLANE }, rippleTint: PEER_TINT, sightHidden: true });
+      face.mirrorRipples = phase.ripples;
+      phase.node.visible = false;
+      addChild(node, face);
+      s.tunnels.push({ at: t, node, stone, label: lbl, phase, face, hum: Math.random() * 0.3 });
+    });
+    // Gallery stands along the top decks.
+    const gcaps = FM.galleryCaps();
+    for (const g of L.galleries) {
+      for (let i = 0; i < g.stations; i++) {
+        const node = createNode({ position: { x: g.x - g.w / 2 + (i + 0.5) * g.w / g.stations, y: g.y, z: g.z - 0.3 } });
+        const caps2 = createNode({ geometry: gcaps.dim }), stand = createNode({ geometry: FM.galleryStation() });
+        addChild(node, stand, caps2);
+        addChild(root, node);
+        s.gallery.push({ bay: false, index: s.gallery.length, node, stand, caps: caps2, line: null, flashL: 0, sputter: 0 });
+      }
+    }
+    s.galleryLabel = labelNode(root, L.galleries[0].x, L.galleries[0].y + 2.6, L.galleries[0].z + 1.6);
+    // The switchboard, the rebalancer and the treasury on their decks.
+    const sw = L.switchboard, rb = L.rebalancer, tr = L.treasury, lk = L.lookout, st = L.study;
+    const switchNode = createNode({ position: { x: sw.x, y: sw.y, z: sw.z } });
+    s.screens = createNode({ geometry: FM.switchScreens().calm });
+    const switchBody = createNode({ geometry: FM.switchboard() });
+    addChild(switchNode, switchBody, s.screens);
+    s.switchLabel = labelNode(switchNode, 0, 4.55, -2.1);
+    // The rebalancer: its rings spin and its arrows light while a rebalance runs.
+    const REB = FM.REB, rebGeo = FM.rebalancerBase(), rebNode = createNode({ position: { x: rb.x, y: rb.y, z: rb.z } });
+    s.ring = createNode({ position: { x: 0, y: 0.56, z: REB.cz }, geometry: FM.rebalancerRing().off });
+    s.flow = createNode({ geometry: FM.rebalancerFlow().off });
+    const rebBody = createNode({ geometry: rebGeo.body });
+    addChild(rebNode, rebBody, createNode({ geometry: rebGeo.glow }), s.ring, s.flow);
+    for (const [x, z] of REB.crates) addChild(rebNode, createNode({ position: { x, y: 0, z }, rotation: { x: 0, y: x * 0.06, z: 0 }, geometry: FM.goldCrate() }));
+    const [rsx, rsy, rsz] = REB.sign, [rbl, rbm, rbr] = REB.boards;
+    setBoard(labelNode(rebNode, rsx, rsy, rsz), "REBALANCER", "(Move Liquidity)", true, { height: 1.15 });
+    s.rebBoards = [labelNode(rebNode, rbl[0], rbl[1], rbl[2]), labelNode(rebNode, rbr[0], rbr[1], rbr[2])];
+    const move = FM.moveBoard(), moveNode = labelNode(rebNode, rbm[0], rbm[1], rbm[2]);
+    moveNode.face.geometry = move.face;
+    moveNode.back.geometry = move.back;
+    // The treasury: the gold under the glass, the crate the belt fills, a cart and a crate of gold, and the belt's
+    // nuggets, each hidden until a fee sets it off.
+    const TRE = FM.TRE, trGeo = FM.treasuryBody(), trNode = createNode({ position: { x: tr.x, y: tr.y, z: tr.z } });
+    s.pile = createNode({ position: { x: 0, y: TRE.top, z: TRE.vz }, geometry: FM.goldPile() });
+    s.fill = createNode({ position: { x: TRE.crate[0], y: 0.1, z: TRE.crate[1] }, geometry: FM.hopperFill() });
+    const trBody = createNode({ geometry: trGeo.body });
+    addChild(trNode, trBody, createNode({ geometry: trGeo.glow }), s.pile, s.fill);
+    addChild(trNode, createNode({ position: { x: TRE.cart[0], y: 0, z: TRE.cart[1] }, rotation: { x: 0, y: 0.35, z: 0 }, geometry: FM.cart() }));
+    for (const [x, z] of TRE.crates) addChild(trNode, createNode({ position: { x, y: 0, z }, geometry: FM.goldCrate() }));
+    for (let i = 0; i < BELT_CAP; i++) {
+      const n = createNode({ geometry: FM.beltNugget(), position: { x: BELT[0][0], y: BELT[0][1], z: BELT[0][2] }, visible: false });
+      s.nuggets.push(n);
+      addChild(trNode, n);
+    }
+    const [tsx, tsy, tsz] = TRE.sign, [tbl, tbr] = TRE.boards;
+    setBoard(labelNode(trNode, tsx, tsy, tsz), "TREASURY", "(Routing Fees)", true, { height: 1.15 });
+    s.feeBoard = labelNode(trNode, tbl[0], tbl[1], tbl[2]);
+    s.statsBoard = labelNode(trNode, tbr[0], tbr[1], tbr[2]);
+    // The watchtower on the top deck: tower, lamp and the beam that sweeps round it.
+    const lkNode = createNode({ position: { x: lk.x, y: lk.y, z: lk.z } });
+    s.lamp = createNode({ geometry: FM.lookoutLamp().on });
+    s.beam = createNode({ position: { x: 0, y: lk.tower + 1, z: 0 }, geometry: FM.lookoutBeam(), sightHidden: true });
+    const lkBody = createNode({ geometry: FM.lookoutTower() });
+    addChild(lkNode, lkBody, s.lamp, s.beam);
+    s.lookoutLabel = labelNode(lkNode, 2.2, 2.6, 2.3);
+    // The study hall in the right wall, facing into the hall: locked for now.
+    const stNode = createNode({ position: { x: st.x, y: st.y, z: st.z }, rotation: { x: 0, y: -Math.PI / 2, z: 0 } });
+    const hallGeo = FM.studyHall();
+    const stBody = createNode({ geometry: hallGeo.stone });
+    addChild(stNode, stBody, createNode({ geometry: hallGeo.glow }));
+    const [sgx, sgy, sgz] = FM.STUDY.sign, [nx, ny, nz, nLean] = FM.STUDY.note, [bx, by, bz, bLean] = FM.STUDY.board;
+    setBoard(labelNode(stNode, sgx, sgy, sgz), "STUDY HALL", "", true, { style: "gold", height: 1.6 });
+    const note = FM.studyNote(), noteNode = createNode({ position: { x: nx, y: ny, z: nz }, rotation: { x: 0, y: 0, z: nLean } });
+    addChild(noteNode, createNode({ geometry: note.back }), createNode({ geometry: note.face }));
+    const lesson = FM.studyBoard(), lessonNode = createNode({ position: { x: bx, y: by, z: bz }, rotation: { x: bLean, y: 0, z: 0 } });
+    addChild(lessonNode, createNode({ geometry: lesson.back }), createNode({ geometry: lesson.face }));
+    addChild(stNode, noteNode, lessonNode);
+    addChild(root, switchNode, rebNode, trNode, lkNode, stNode);
+    // Sats riding the conduits: one instanced batch of fixed capacity.
+    const satGeo = { ...FM.sat() };
+    s.satNode = createNode({ geometry: satGeo, instanceData: new Float32Array(SAT_CAP * 20), instanceCount: 0, instanceVersion: 0, fixedInstanceCapacity: true, sightHidden: true });
+    s.satGeo = satGeo;
+    addChild(root, s.satNode);
+    s.sats = { bay: new Int8Array(SAT_CAP).fill(-1), t: new Float32Array(SAT_CAP), speed: new Float32Array(SAT_CAP), spin: new Float32Array(SAT_CAP) };
+    s.paths = cond.paths;
+    // Station targets, for tooltips and taps: each on a node that has geometry, since picking needs its bounds.
+    const target = (node, kind, preset, radius, extra = {}) => {
+      input.add(node, { kind, preset, ...extra }, { radius });
+      targets.push(node);
+    };
+    target(s.chamber, "core", "core", 3.5);
+    s.bays.forEach((b, i) => target(b.frame, "line", ["lineA", "lineB", "lineC", "lineD"][i], 3, { place: b }));
+    target(s.forgeFire, "forge", "forge", 2.6);
+    target(switchBody, "switchboard", "switchboard", 3);
+    target(rebBody, "rebalancer", "rebalancer", 2.8);
+    target(trBody, "treasury", "treasury", 3);
+    target(lkBody, "lookout", "lookout", 3.5);
+    target(stBody, "study", "study", 3.2);
+    s.tunnels.forEach((t, i) => target(t.stone, "tunnel", ["lineA", "lineB", "lineC", "lineD"][i], 3, { place: s.bays[i] }));
+    for (const g of s.gallery) target(g.stand, "galleries", "galleries", 1.2);
+    // The way out: behind the balcony the tunnel runs on to the rim, the same tunnel the hub dresses its mouth
+    // with, and the shield hangs across it at the balcony's back edge, the lab's phase plane humming as the one
+    // outside does. Past the rim hangs the picture of the island the hub took on the way in, or with no visit
+    // from the hub, the island drawn simply.
+    const e = LAYOUT.entrance, tunnel = FM.exitTunnel(), view = world.factoryView;
+    const mouth = createNode({ position: { x: 0, y: e.y, z: FM.EXIT_Z } }), exit = createNode({ geometry: tunnel.timber });
+    addChild(root, mouth);
+    addChild(mouth, createNode({ geometry: tunnel.rock }), exit, createNode({ geometry: tunnel.glow, sightHidden: true }), view
+      ? createNode({ geometry: FM.outsideView(view, OUTSIDE_DISTANCE), position: { x: 0, y: 0, z: view.from + OUTSIDE_DISTANCE }, rotation: { x: 0, y: Math.PI, z: 0 }, sightHidden: true })
+      : createNode({ geometry: tunnel.outside, sightHidden: true }));
+    target(exit, "exit", null, 2.5);
+    const gz = HALL.front - 0.6, gateGroup = createNode({ position: { x: 0, y: e.y, z: gz } });
+    addChild(root, gateGroup);
+    s.gate = { hum: 0, phase: BL.labPhase.create(gateGroup, { x: 0, z: gz, ry: 0, floorY: e.y, room: { w: 5, h: 4, from: 0, to: 6 } }, GATE_OPENING, 0) };
+    return s;
+  };
+
+  // Gorillas in hard hats, each working its own deck: they pace near their station and beat their chests when
+  // something happens there.
+  const hireCrew = (s) => {
+    const L = LAYOUT, hat = FM.hardHat();
+    const worker = (x, y, z, radius, w, d, heading = 0) => {
+      const cx = x, cz = z;
+      const walkable = (fx, fz, nx, nz) => Math.abs(nx - cx) < w / 2 - 0.5 && Math.abs(nz - cz) < d / 2 - 0.5;
+      const agent = BL.agent.create({ groundAt: () => y, walkable, form: "ape", x, z, heading, scale: 0.72 });
+      addChild(agent.parts.head, createNode({ position: { x: 0, y: 0.6, z: 0.05 }, geometry: hat }));
+      agent.pace(x, z, radius);
+      addChild(root, agent.root);
+      const g = { agent };
+      s.crew.push(g);
+      return g;
+    };
+    s.forgeCrew = worker(-2.4, 0, 4, 1.4, 6, 6, Math.PI);
+    worker(2.6, 0, 5, 1.4, 6, 6, Math.PI);
+    s.bays.forEach((b, i) => {
+      const d = L.bays[i];
+      b.gorilla = worker(FM.stationX(d) + (d.x < 0 ? 1.8 : -1.8), d.y, FM.stationZ(d) + 2.1, 0.6, d.w, d.d);
+    });
+    worker(L.switchboard.x, L.switchboard.y, L.switchboard.z + 0.9, 0.8, L.switchboard.w, L.switchboard.d, Math.PI);
+    s.rebalanceCrew = worker(L.rebalancer.x + FM.REB.operator[0], L.rebalancer.y, L.rebalancer.z + FM.REB.operator[1], 0.4, L.rebalancer.w, L.rebalancer.d, Math.PI);
+    worker(L.treasury.x + FM.TRE.operator[0], L.treasury.y, L.treasury.z + FM.TRE.operator[1], 0.6, L.treasury.w, L.treasury.d);
+    worker(L.lookout.x + 1.8, L.lookout.y, L.lookout.z + 1.6, 0.8, L.lookout.w, L.lookout.d);
+  };
+
+  // Point lights, most important first so the lowest tier keeps them: the core, the forge, the four lines, the
+  // switchboard, rebalancer, treasury and watchtower. Every other light shares the rest of the slots by nearness to
+  // the view (`glowNear`), as the mine shares its lamps: the study, the tunnels, the balcony, the galleries and the
+  // daylight at the rim, and every lantern, which throws a wide, soft, warm pool and flickers like a flame.
+  const LIGHT = { core: 0, forge: 1, bay: 2, switchboard: 6, rebalancer: 7, treasury: 8, lookout: 9 }, FIXED = 10;
+  const lamp = (i, x, y, z, radius, r, g, b) => {
+    const o = i * 8, l = RENDER_OPTS.lights;
+    l[o] = x; l[o + 1] = y; l[o + 2] = z; l[o + 3] = radius; l[o + 4] = r; l[o + 5] = g; l[o + 6] = b; l[o + 7] = 0;
+  };
+  const lightUp = () => {
+    const L = LAYOUT;
+    lamp(LIGHT.core, L.core.x, 8.3, L.core.z + 3.4, 26, 1, 0.62, 0.25);
+    lamp(LIGHT.forge, L.forge.x, 1.9, L.forge.z + 1.6, 12, 1, 0.45, 0.15);
+    L.bays.forEach((b, i) => lamp(LIGHT.bay + i, FM.stationX(b), b.y + 2.2, b.z + 1.6, 9, 0.55, 0.75, 1));
+    lamp(LIGHT.switchboard, L.switchboard.x, L.switchboard.y + 2.2, L.switchboard.z + 0.8, 9, 0.35, 0.6, 1);
+    lamp(LIGHT.rebalancer, L.rebalancer.x, L.rebalancer.y + 1.6, L.rebalancer.z + 0.6, 9, 0.35, 0.9, 1);
+    lamp(LIGHT.treasury, L.treasury.x, L.treasury.y + 2, L.treasury.z + 1, 9, 1, 0.8, 0.35);
+    lamp(LIGHT.lookout, L.lookout.x, L.lookout.y + L.lookout.tower + 1, L.lookout.z, 14, 1, 0.82, 0.45);
+    RENDER_OPTS.lightCount = Math.min(BL.glRenderer.POINT_LIGHT_CAPACITY, FIXED + lightPool().length / 8);
+  };
+  // The shared lights, [x, y, z, radius, r, g, b, flicker] each: flicker 0 is steady, otherwise the flame's phase.
+  const LANTERN_GLOW = [1.3, 0.8, 0.36], LANTERN_REACH = 7.5;
+  const lightPool = models.cached(() => {
+    const L = LAYOUT, e = L.entrance, out = [];
+    out.push(L.study.x + 1, L.study.y + 2.8, L.study.z, 6, 1, 0.75, 0.4, 0);
+    L.tunnels.forEach((t, i) => {
+      const rgb = math.hexToRgb(FM.TUNNEL_THEMES[i].ring);
+      out.push(t.x + Math.sin(t.turn) * 2, t.y + 2.4, t.z + Math.cos(t.turn) * 2, 8, rgb[0] / 255, rgb[1] / 255, rgb[2] / 255, 0);
+    });
+    out.push(0, e.y + 2.2, e.z - 4, 12, 1, 0.66, 0.3, 0);
+    for (const g of L.galleries) out.push(g.x, g.y + 2, g.z + 1, 10, 1, 0.66, 0.3, 0);
+    // Daylight falling in at the rim, so the tunnel's far end is lit the way the island lights it.
+    out.push(0, e.y + 2.2, FM.EXIT_Z - 0.6, 9, 1.15, 1.1, 1, 0);
+    for (const hung of [lighting().lights, dressing().lights]) {
+      for (let i = 0; i < hung.length; i += 4) out.push(hung[i], hung[i + 1], hung[i + 2], LANTERN_REACH, ...LANTERN_GLOW, 1 + (i * 0.37) % 6);
+    }
+    return new Float32Array(out);
+  });
+  let poolScore = null;
+  // The shared slots go to the lights nearest the view, nearest first, by repeated minimum: no sort, no list.
+  const glowNear = (elapsed) => {
+    const P = lightPool(), n = P.length / 8, t = pilot.orbit.target, Lt = RENDER_OPTS.lights;
+    if (!poolScore) poolScore = new Float32Array(n);
+    for (let i = 0; i < n; i++) {
+      const o = i * 8, dx = P[o] - t.x, dy = P[o + 1] - t.y, dz = P[o + 2] - t.z;
+      poolScore[i] = dx * dx + dy * dy * 2 + dz * dz;
+    }
+    for (let slot = FIXED; slot < RENDER_OPTS.lightCount; slot++) {
+      let best = 0, bestD = Infinity;
+      for (let i = 0; i < n; i++) if (poolScore[i] < bestD) { bestD = poolScore[i]; best = i; }
+      poolScore[best] = Infinity;
+      const o = best * 8, f = P[o + 7], k = f ? 0.9 + Math.sin(elapsed * 9.3 + f) * 0.06 + Math.sin(elapsed * 23.7 + f * 3.1) * 0.04 : 1, w = slot * 8;
+      Lt[w] = P[o]; Lt[w + 1] = P[o + 1]; Lt[w + 2] = P[o + 2]; Lt[w + 3] = P[o + 3];
+      Lt[w + 4] = P[o + 4] * k; Lt[w + 5] = P[o + 5] * k; Lt[w + 6] = P[o + 6] * k; Lt[w + 7] = 0;
+    }
+  };
+  const LIGHT_BASE = new Float32Array(BL.glRenderer.POINT_LIGHT_CAPACITY * 8);
+
+  // The crew's support and step test on the hall's floor: the highest surface within a step of the feet, clear of
+  // what stands there, and never off an edge.
+  const groundFor = (x, z, feet) => FM.supportAt(x, z, feet);
+  const walkableFor = (ax, az, bx, bz, y, height, actor) => {
+    const steps = Math.max(1, Math.ceil(Math.hypot(bx - ax, bz - az) / 0.2)), r = actor.bodyRadius || 0.35;
+    for (let i = 1; i <= steps; i++) {
+      const x = ax + (bx - ax) * i / steps, z = az + (bz - az) * i / steps;
+      if (!FM.clearAt(x, z, y, r) || FM.supportAt(x, z, y) < y - FM.STEP) return false;
+    }
+    return true;
+  };
+  const feetOf = () => avatar ? avatar.root.position.y - avatar.baseY : 0;
+
+  const enter = (ctx) => {
+    ({ renderer, game, world, go, agentPlay } = ctx);
+    camera = createCamera({ fov: 55, near: 0.3, far: 150 });
+    root = createNode();
+    hud = hudMod.create({ roster: contributors.activeRoster, catalog: models.SWAG, tierColors: models.TIER_COLORS, renderIcon: hudMod.renderIcon, lootEnabled: ctx.lootEnabled });
+    if (window.matchMedia("(max-width: 720px), (max-height: 500px)").matches) hud.el.sheet.dataset.open = "false";
+    hooks = {};
+    input = interactMod.create({ canvas: ctx.canvas, renderer, camera, hooks });
+    const clampTarget = (p) => {
+      p.x = clamp(p.x, -HALL.halfW + 3, HALL.halfW - 3);
+      p.y = clamp(p.y, 0.5, HALL.h - 3);
+      p.z = clamp(p.z, HALL.back + 2.5, HALL.front - 2);
+    };
+    // Out of the walls, which lean in as they rise; only the tunnel out lets the eye nearer the front.
+    const clampCamera = (p) => {
+      p.y = clamp(p.y, 0.6, HALL.h - 2);
+      const lean = p.y / HALL.h * FM.WALL_LEAN;
+      p.x = clamp(p.x, -HALL.halfW + 2 + lean, HALL.halfW - 2 - lean);
+      p.z = clamp(p.z, HALL.back + 2 + lean, HALL.front - (Math.abs(p.x) < 6 ? 1.2 : 2 + lean));
+    };
+    pilot = pilotMod.create({
+      renderer, canvas: ctx.canvas, camera, hud, presets: PRESETS, landing: "entrance", pitch: PITCH, dist: DIST,
+      follow: FOLLOW, fly: FLY, clampTarget, clampCamera, ceilingAt: () => HALL.h - 2, coarse: COARSE,
+      close: { eyeHeight: 1.1, eyeRatio: 0.95, eyeForward: 0.16, pitch: [-1.35, 1.35], trailingDist: 4, orbitDist: 5, maxStep: 0.6, groundAt: (x, z) => FM.supportAt(x, z, feetOf()) }
+    });
+    const tipFor = (hit) => {
+      const o = hit.owner, tip = TIPS[o.kind];
+      if (o.kind === "line" || o.kind === "tunnel") {
+        const b = o.place, c = b.line && mock.snapshot.channels.find((ch) => ch.id === b.line);
+        return o.kind === "line" ? `Channel ${b.letter}${c ? ` · peer ${c.peer}` : ""}` : `Peer tunnel${c ? ` · ${c.peer}` : ""}`;
+      }
+      return tip ? tip[0] : "";
+    };
+    Object.assign(hooks, {
+      onHover: (hit, p) => {
+        if (hit) hud.tooltip.show(tipFor(hit), p.x, p.y);
+        else hud.tooltip.hide();
+      },
+      onHoverMove: (hit, p) => hud.tooltip.show(tipFor(hit), p.x, p.y),
+      onTap: (hit) => {
+        if (!hit) return;
+        const o = hit.owner;
+        if (o.kind === "exit") return leaveCave();
+        if (o.preset) pilot.goPreset(o.preset);
+        const tip = TIPS[o.kind];
+        if (tip) hud.toast(tip[1]);
+      },
+      ...pilot.hooks
+    });
+    hud.onPreset(pilot.goPreset);
+    hud.onAction((action) => {
+      if (action === "leave") leaveCave();
+      else if (action === "reset-view") pilot.goPreset("entrance");
+    });
+    fx = fxMod.create({ root, input, hooks, hud, game, world, renderer, camera, overlay: ctx.overlay, tickerAt: { x: 0, y: 14, z: -4 } });
+    dust = BL.dressing.motes({ count: 240, span: 22, low: 0.5, high: 16 });
+    addChild(root, dust.node);
+    const dressed = dressing(), lit = lighting();
+    addChild(root, ...BL.dressing.nodes(dressed, { glow: 1 }), createNode({ geometry: lit.frame }), createNode({ geometry: lit.glass, sightHidden: true }));
+    scene = build();
+    hireCrew(scene);
+    // Whoever walked in stays themselves: their Ooga stands on the balcony facing the core, under the visitor's
+    // control. A page that opens here takes `character=` instead, as the island does. With nobody, the view stays
+    // free.
+    const asked = ctx.from === null ? new URLSearchParams(location.search).get("character")?.trim().toLowerCase() : null;
+    const named = asked ? contributors.roster.find((c) => c.name.toLowerCase() === asked) : null;
+    const playerName = named ? named.name : world.pilot && contributors.roster.some((c) => c.name === world.pilot) ? world.pilot : null;
+    world.pilot = null;
+    if (playerName) {
+      playerWorld = { level: 0, weapons: new Map(), magazine: { owned: false, count: 0, ammo: 0, carrier: null } };
+      const shared = { root, input, hud, game, world: playerWorld, playerName, fx, viewYaw: 0, groundAt: groundFor, walkable: walkableFor };
+      people = shared.crew = BL.crew.create(shared);
+      pilot.bind(shared);
+      avatar = people.cavemen.get(playerName);
+      const e = LAYOUT.entrance;
+      Object.assign(avatar.root.position, { x: 0, y: avatar.baseY + e.y, z: e.z + 1 });
+      avatar.root.rotation.y = Math.PI;
+      pilot.possess(avatar);
+      scene.gate.phase.body.track(avatar.root, avatar.traits.height * 2, Math.max(avatar.headOpen.verts.length, avatar.headClosed.verts.length));
+    }
+    lightUp();
+    LIGHT_BASE.set(RENDER_OPTS.lights);
+
+    // The demo node runs on scene time, so the feed judges its silence by the same clock.
+    clock = Date.now();
+    feed = BL.factoryFeed.create({ now: () => clock, silentAfter: 10000 });
+    mock = BL.factoryMock.create({ seed: 21 });
+    featureFromSnapshot(scene);
+    unsubscribe = feed.subscribe(onEvent);
+    mock.replay(feed.accept);
+    refreshBoards(scene);
+    leaving = false;
+
+    factoryScene.root = root;
+    factoryScene.camera = camera;
+    factoryScene.input = input;
+    factoryScene.debug = {
+      hud, camera, controls: pilot.controls, pilot,
+      factory: { feed, mock, get scene() { return scene; }, simulate(seconds, dt = 1 / 30) { for (let t = 0; t < seconds; t += dt) mock.update(dt, feed.accept); } }
+    };
+  };
+
+  // A peer tunnel's shield lets nobody through yet: whoever walks into it sends a ripple across it and is set back
+  // down on the node's walkway, facing the core.
+  const peerShield = (s) => {
+    const p = avatar.root.position, feet = p.y - avatar.baseY;
+    for (let i = 0; i < s.tunnels.length; i++) {
+      const t = s.tunnels[i], at = t.at, c = Math.cos(at.turn), sn = Math.sin(at.turn), dx = p.x - at.x, dz = p.z - at.z;
+      const across = dx * c - dz * sn, along = dx * sn + dz * c;
+      if (along > PEER_PLANE + 0.35 || along < -1 || Math.abs(across) > PEER_OPENING.maxX || Math.abs(feet - at.y) > 0.6) continue;
+      for (let k = 0; k < 3; k++) t.phase.ripples.pulse(across, 0.6 + k * 0.7, 0);
+      p.x = NODE_RETURN.x;
+      p.y = LEVEL.main + avatar.baseY;
+      p.z = NODE_RETURN.z;
+      avatar.root.rotation.y = Math.PI;
+      hud.toast("The peer's shield holds. Back to the node.");
+      return;
+    }
+  };
+
+  // Per frame, allocation-free: the stream, then every animated part eased toward what it last heard.
+  const update = (dt, elapsed) => {
+    const s = scene;
+    pilot.readInput(dt);
+    if (people) people.update(dt, elapsed);
+    pilot.update(dt);
+    // The gate's shield hums, and shows the outline of whoever walks through it.
+    const g = s.gate;
+    g.phase.update(dt, elapsed);
+    g.phase.body.update(dt);
+    g.phase.body.time = g.phase.ripples.time;
+    g.hum -= dt;
+    if (g.hum <= 0) {
+      g.hum = 0.1 + Math.random() * 0.22;
+      g.phase.ripples.pulse(GATE_OPENING.minX + Math.random() * (GATE_OPENING.maxX - GATE_OPENING.minX), Math.random() * GATE_OPENING.ceilingY, 0);
+    }
+    // The peer tunnels' shields hum in their blue.
+    for (let i = 0; i < s.tunnels.length; i++) {
+      const t = s.tunnels[i];
+      t.phase.update(dt, elapsed);
+      t.hum -= dt;
+      if (t.hum <= 0) {
+        t.hum = 0.16 + Math.random() * 0.3;
+        t.phase.ripples.pulse(PEER_OPENING.minX + Math.random() * (PEER_OPENING.maxX - PEER_OPENING.minX), PEER_OPENING.floorY + Math.random() * (PEER_OPENING.ceilingY - PEER_OPENING.floorY), 0);
+      }
+    }
+    clock += dt * 1000;
+    mock.update(dt, feed.accept);
+    dust.update(elapsed, pilot.orbit.target.x, pilot.orbit.target.z);
+    for (let i = 0; i < s.crew.length; i++) s.crew[i].agent.update(dt);
+    // Out through the gate: walked into it, or flown into it with the free view.
+    if (!leaving) {
+      if (avatar) {
+        if (avatar.root.position.z > HALL.front - 1.3) leaveCave();
+        else peerShield(s);
+      } else {
+        const a = pilot.controls.read();
+        if (Math.hypot(a.x, a.y) > 0.05 && camera.position.z > HALL.front - 2.2 && Math.abs(camera.position.x) < 3) leaveCave();
+      }
+    }
+    const node = feed.reading.node, signal = feed.signal, running = node === "ready" || node === "starting";
+    // The core: eased toward lit while the node runs, flickering as it starts, dark when it has stopped.
+    const want = node === "ready" ? 1 : node === "starting" ? 0.45 + Math.sin(elapsed * 23) * 0.25 : 0;
+    s.glow += (want - s.glow) * Math.min(1, dt * 3);
+    const cc = FM.coreChamber(), chamberGeo = s.glow > 0.35 ? cc.lit : cc.dark;
+    if (s.chamber.geometry !== chamberGeo) s.chamber.geometry = chamberGeo;
+    glowNear(elapsed);
+    const L = RENDER_OPTS.lights, B = LIGHT_BASE;
+    const pulse = 0.85 + Math.sin(elapsed * 2.1) * 0.08;
+    for (let k = 4; k < 7; k++) L[LIGHT.core * 8 + k] = B[LIGHT.core * 8 + k] * (0.12 + s.glow * pulse);
+    // The forge: hot while a line is opened or closed, and its cart runs out along the track and back.
+    s.forgeHeat = Math.max(0, s.forgeHeat - dt);
+    const ff = FM.forgeFire(), fire = s.forgeHeat > 0 ? ff.hot : ff.warm;
+    if (s.forgeFire.geometry !== fire) s.forgeFire.geometry = fire;
+    for (let k = 4; k < 7; k++) L[LIGHT.forge * 8 + k] = B[LIGHT.forge * 8 + k] * (s.forgeHeat > 0 ? 1.4 + Math.sin(elapsed * 17) * 0.2 : 0.7);
+    if (s.cartT < 1) {
+      s.cartT = Math.min(1, s.cartT + dt / TRIP);
+      const out = Math.sin(s.cartT * Math.PI);
+      s.cart.position.z = LAYOUT.forge.z + 1.3 + out * 7.5;
+    }
+    // The featured lines: their stations always stand; a line being built or taken down shows in its status lantern and
+    // its light, and its capacitors flash and sputter.
+    const caps = FM.capacitor(), statusLit = FM.statusLantern();
+    for (let i = 0; i < s.bays.length; i++) {
+      const b = s.bays[i];
+      if (b.state === "building") b.build = Math.min(1, b.build + dt / 12);
+      else if (b.state === "dismantling") b.build = Math.max(0.15, b.build - dt / 12);
+      else if (b.state === "active") b.build = Math.min(1, b.build + dt);
+      else b.build = Math.max(0, b.build - dt);
+      const k = b.build;
+      b.flashL = Math.max(0, b.flashL - dt);
+      b.sputter = Math.max(0, b.sputter - dt);
+      const blue = b.flashL > 0 && running ? caps.blue.lit : caps.blue.dim;
+      const orange = b.sputter > 0 && Math.sin(b.sputter * 40) > 0 ? caps.orange.lit : caps.orange.dim;
+      if (b.capL.geometry !== blue) b.capL.geometry = blue;
+      if (b.capR.geometry !== orange) b.capR.geometry = orange;
+      const status = b.state === "active" || b.state === "building" ? statusLit.ok : statusLit.alert;
+      if (b.status.geometry !== status) b.status.geometry = status;
+      const o = (LIGHT.bay + i) * 8, boost = (b.flashL > 0 ? 1.6 : 0.6) * (0.2 + 0.8 * k);
+      for (let c = 4; c < 7; c++) L[o + c] = B[o + c] * boost;
+    }
+    const gc = FM.galleryCaps();
+    for (let i = 0; i < s.gallery.length; i++) {
+      const g = s.gallery[i];
+      g.flashL = Math.max(0, g.flashL - dt);
+      const geo = g.flashL > 0 ? gc.lit : gc.dim;
+      if (g.caps.geometry !== geo) g.caps.geometry = geo;
+      g.node.visible = !!g.line;
+    }
+    // The switchboard, the rebalancer and the treasury.
+    s.switchBusy = Math.max(0, s.switchBusy - dt);
+    const sc = FM.switchScreens(), screens = s.switchBusy > 0 ? sc.busy : sc.calm;
+    if (s.screens.geometry !== screens) s.screens.geometry = screens;
+    s.spin = Math.max(0, s.spin - dt);
+    const rr = FM.rebalancerRing(), ring = s.spin > 0 ? rr.on : rr.off, rf = FM.rebalancerFlow(), flow = s.spin > 0 ? rf.on : rf.off;
+    if (s.ring.geometry !== ring) s.ring.geometry = ring;
+    if (s.flow.geometry !== flow) s.flow.geometry = flow;
+    s.ring.rotation.y += dt * (s.spin > 0 ? 5 : 0.4);
+    for (let k = 4; k < 7; k++) L[LIGHT.rebalancer * 8 + k] = B[LIGHT.rebalancer * 8 + k] * (s.spin > 0 ? 1.5 : 0.5);
+    // The belt lifts each nugget from the chute to over the crate, where it drops in and the crate's gold rises.
+    for (let i = 0; i < BELT_CAP; i++) {
+      const t = s.nuggetT[i];
+      if (t < 0) continue;
+      const n = s.nuggets[i], next = t + dt / BELT_TIME;
+      if (next >= 1) {
+        s.nuggetT[i] = -1;
+        n.visible = false;
+        s.hopper = Math.min(1, s.hopper + 0.05);
+        continue;
+      }
+      s.nuggetT[i] = next;
+      n.position.y = BELT[0][1] + (BELT[1][1] - BELT[0][1]) * next + 0.1;
+      n.position.z = BELT[0][2] + (BELT[1][2] - BELT[0][2]) * next;
+      n.rotation.y = next * 2.4;
+    }
+    if (s.hopper >= 1) s.hopper = 0;
+    s.fill.position.y = 0.1 + s.hopper * 0.55;
+    // The heap under the glass grows with the public capacity, as far as the glass allows.
+    const capacityScale = Math.min(0.9, (0.6 + Math.log10(Math.max(1e6, mock.snapshot.capacity) / 1e6) * 0.35) * 0.8);
+    s.pile.scale.x = s.pile.scale.z = capacityScale;
+    s.pile.scale.y = capacityScale * 0.9;
+    // The watchtower: the beam sweeps while the feed is live; silent, the lamp goes out.
+    const live = signal === "live";
+    const ll = FM.lookoutLamp(), lampGeo = live ? ll.on : ll.off;
+    if (s.lamp.geometry !== lampGeo) s.lamp.geometry = lampGeo;
+    s.beam.visible = live;
+    s.beam.rotation.y += dt * 0.9;
+    for (let k = 4; k < 7; k++) L[LIGHT.lookout * 8 + k] = B[LIGHT.lookout * 8 + k] * (live ? 1 : 0.08);
+    // Sats: along the conduit from their line into the core, where they pulse the chamber as they land.
+    const q = s.sats, data = s.satNode.instanceData;
+    let count = 0;
+    for (let i = 0; i < SAT_CAP; i++) {
+      const bi = q.bay[i];
+      if (bi < 0) continue;
+      q.t[i] += dt * q.speed[i];
+      if (q.t[i] >= 1) { q.bay[i] = -1; continue; }
+      if (q.t[i] < 0) continue;
+      const path = s.paths[bi], u = q.t[i] * CONDUIT_SAMPLES, j = Math.min(CONDUIT_SAMPLES - 1, Math.floor(u)), f = u - j, a = j * 3;
+      SAT_POS.x = path[a] + (path[a + 3] - path[a]) * f;
+      SAT_POS.y = path[a + 1] + (path[a + 4] - path[a + 1]) * f;
+      SAT_POS.z = path[a + 2] + (path[a + 5] - path[a + 2]) * f;
+      SAT_ROT.y = q.spin[i] + elapsed * 3;
+      const size = 1 + Math.sin(q.t[i] * Math.PI) * 0.25;
+      SAT_SCALE.x = SAT_SCALE.y = SAT_SCALE.z = size;
+      mat4.fromTRS(SAT_M, SAT_POS, SAT_ROT, SAT_SCALE);
+      const at = count++ * 20;
+      data.set(SAT_M, at);
+      data[at + 16] = 1; data[at + 17] = 0.4; data[at + 18] = 0; data[at + 19] = 0;
+    }
+    s.satNode.instanceCount = count;
+    s.satNode.visible = count > 0;
+    s.satNode.instanceVersion++;
+    s.refreshAt -= dt;
+    if (s.refreshAt <= 0) {
+      s.refreshAt = 1;
+      refreshBoards(s);
+    }
+    stepTweens(dt);
+    fx.update(dt, elapsed);
+  };
+  const drawExtra = () => {};
+  const overlay = (dt) => fx.drawOverlay(dt, drawExtra);
+
+  const leave = () => {
+    // Whoever walked in walks back out as themselves: the island takes the same Ooga back at this mouth.
+    if (avatar) world.pilot = avatar.traits.name;
+    unsubscribe();
+    unsubscribe = null;
+    for (const node of [scene.switchLabel]) if (node.owned) {
+      renderer.releaseGeometry(node.face.geometry);
+      renderer.releaseGeometry(node.back.geometry);
+    }
+    for (const g of scene.crew) g.agent.dispose();
+    scene.gate.phase.dispose();
+    for (const t of scene.tunnels) { t.phase.dispose(); t.face.mirrorRipples = null; }
+    if (people) people.dispose();
+    fx.dispose();
+    pilot.dispose();
+    for (const node of targets) input.remove(node);
+    targets.length = 0;
+    feed.dispose();
+    while (root.children.length) removeChild(root, root.children[root.children.length - 1]);
+    const count = input.targetCount;
+    input.dispose();
+    hud.dispose();
+    scene = feed = mock = hud = hooks = input = pilot = fx = agentPlay = dust = people = avatar = playerWorld = null;
+    factoryScene.input = factoryScene.debug = null;
+    return { targets: count };
+  };
+  // Geometry kept off the graph but swapped in when something flashes, so it stays on the GPU.
+  const liveGeometry = (set) => {
+    for (const pair of [FM.coreChamber(), FM.forgeFire(), FM.switchScreens(), FM.rebalancerRing(), FM.lookoutLamp(), FM.galleryCaps(), FM.capacitor().blue, FM.capacitor().orange]) {
+      for (const k in pair) set.add(pair[k]);
+    }
+    if (scene) {
+      for (const g of scene.crew) g.agent.liveGeometry(set);
+      scene.gate.phase.liveGeometry(set);
+      for (const t of scene.tunnels) t.phase.liveGeometry(set);
+    }
+    if (avatar) set.add(avatar.headOpen).add(avatar.headClosed);
+  };
+  const stats = () => {
+    let nodes = 0;
+    traverseVisible(root, () => nodes++);
+    const all = (n) => 1 + n.children.reduce((sum, c) => sum + all(c), 0);
+    return { visibleNodes: nodes, allNodes: all(root), tweens: tweenCount(), targets: input.targetCount, ...fx.stats(), feed: feed ? { ...feed.counts } : null };
+  };
+
+  const factoryScene = {
+    id: "factory", enter, update, overlay, onDonation, onKey, onLootCleared, renderOpts: RENDER_OPTS, leave, stats, liveGeometry,
+    root: null, camera: null, input: null, debug: null, agent: null, agentView: null, agentControls: null, agentHandoff: null,
+    get inMotion() {
+      return !!scene;
+    }
+  };
+  BL.scenes = BL.scenes || {};
+  BL.scenes.factory = factoryScene;
+})();
