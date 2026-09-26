@@ -11,7 +11,7 @@
   "use strict";
   const BL = window.BL = window.BL || {};
   const { hexToRgb, mulberry32 } = BL.math;
-  const { box, bevelBox, lathe, ring, merge, cached, variants, makeVox: vox, voxelGeometry: voxGeo, voxCoords } = BL.models;
+  const { geometry, pushVert, face, box, bevelBox, lathe, ring, merge, cached, variants, makeVox: vox, voxelGeometry: voxGeo, voxCoords } = BL.models;
   const blob = (v, { cx, cy, cz, rx, ry, rz, chip = 0, floor = -Infinity, rand, color }) => {
     for (let x = Math.floor(cx - rx); x <= Math.ceil(cx + rx); x++) {
       for (let y = Math.max(floor, Math.floor(cy - ry)); y <= Math.ceil(cy + ry); y++) {
@@ -258,14 +258,17 @@
     POST_SIGNS.set(key, geo);
     return geo;
   };
-  const caveMouthRim = variants((openTop) => {
+  // Variant 0 is the full frame, 1 the jambs and 2 the lintel alone.
+  const caveMouthRim = variants((part) => {
     const rand = mulberry32(31);
     const v = vox();
     const stone = pick(rand, 0, 1, 0.3);
     const light = pick(rand, 2, 0, 0.5);
-    v.fill(-6, -6, 0, 5, 0, 1, stone);
-    v.fill(5, 5, 0, 5, 0, 1, stone);
-    if (!openTop) v.fill(-5, 4, 6, 6, 0, 1, light);
+    if (part !== 2) {
+      v.fill(-6, -6, 0, 5, 0, 1, stone);
+      v.fill(5, 5, 0, 5, 0, 1, stone);
+    }
+    if (part !== 1) v.fill(-5, 4, 6, 6, 0, 1, light);
     const geo = voxGeo(v, { unit: VOX, palette: CLIFF, origin: { x: 0, y: 0, z: -VOX } });
     geo.jambCenterX = 2.75;
     geo.frontZ = 0.5;
@@ -964,15 +967,35 @@
     box({ w: 0.1, h: 0.1, d: 0.94, color: WOOD_DK, offset: { x: 0.42, y: 0.89 } })
   );
   const IRON = "#3b3d42", RIVET = "#8a8f98", CRATE_PLANKS = ["#b07a42", "#a06c38", "#bc864c"];
+  // The nine-pixel banana from the AK ammo meter's weapon-banana-glyph.
+  const AMMO_BANANA = { ink: { D: "#211b14", Y: "#ffd84a", G: "#789a3b" }, rows: [
+    "DGD......", "DGD......", "DYYD.....", "DYYD.....", "DYYYD....",
+    ".DYYYD...", ".DYYYYD..", "..DDYYYD.", "....DDDD."
+  ] };
+  const crateBanana = () => {
+    const geo = geometry(), cell = 0.045, z = 0.486;
+    for (let row = 0; row < 9; row++) for (let col = 0; col < 9; col++) {
+      const ch = AMMO_BANANA.rows[row][col];
+      if (ch === ".") continue;
+      const x = (col - 4) * cell, y = 0.47 + (4 - row) * cell;
+      const a = pushVert(geo, x - cell / 2, y - cell / 2, z);
+      const b = pushVert(geo, x + cell / 2, y - cell / 2, z);
+      const c = pushVert(geo, x + cell / 2, y + cell / 2, z);
+      const d = pushVert(geo, x - cell / 2, y + cell / 2, z);
+      face(geo, [a, b, c, d], hexToRgb(AMMO_BANANA.ink[ch]));
+    }
+    return geo;
+  };
   // Moves a built part by (x, y, z), in place.
   const moved = (geo, x, y, z) => {
     for (let i = 0; i < geo.verts.length; i += 3) { geo.verts[i] += x; geo.verts[i + 1] += y; geo.verts[i + 2] += z; }
     return geo;
   };
   // Separate bevelled planks with thin dark gaps between them, chunky bevelled corner posts and rails, a diagonal
-  // brace across the two broad faces, and riveted iron brackets on the top corners. Variant 1 is open: no lid, so
-  // the dressing kit's coal and dynamite crates can show what they hold.
-  const woodCrate = variants((open) => {
+  // brace across the two broad faces, and riveted iron brackets on the top corners. Variant 1 is open for
+  // the dressing kit's coal and dynamite; variant 2 marks the shootable ammo crate.
+  const woodCrate = variants((variant) => {
+    const open = variant === 1;
     const parts = [box({ w: 0.76, h: 0.76, d: 0.76, color: "#3a2616", offset: { y: 0.45 } })];
     // Three planks a side, turned to face out of each of the four sides, and three across the lid.
     for (let side = 0; side < 4; side++) for (let k = 0; k < 3; k++) {
@@ -987,6 +1010,7 @@
     }
     // The brace: one bevelled board corner to corner across each broad face.
     for (const z of [-0.46, 0.46]) parts.push(moved(turn(bevelBox({ w: 1.0, h: 0.1, d: 0.04, color: WOOD, bevel: 0.015 }), 0, Math.atan2(0.72, 0.72)), 0, 0.47, z));
+    if (variant === 2) for (let side = 0; side < 4; side++) parts.push(turn(crateBanana(), side * Math.PI / 2));
     // Iron brackets folded over the four top corners, two rivets each.
     for (const [x, z] of [[-0.42, -0.42], [0.42, -0.42], [-0.42, 0.42], [0.42, 0.42]]) {
       parts.push(bevelBox({ w: 0.16, h: 0.14, d: 0.16, color: IRON, bevel: 0.02, offset: { x, y: 0.86, z } }));
@@ -1003,10 +1027,10 @@
     ring({ r: 0.45, thickness: 0.03, y: 0.66, segments: 8, color: "#3a2a1a" })
   );
   // The same bulge in fourteen staves of alternating wood, a chamfered lip, iron hoops set with rivets, an inset
-  // planked head with a bung, a painted banana on the belly and a spigot near the foot.
+  // planked head with a bung and a spigot near the foot. Variant 1 marks the shootable ammo barrel.
   const BARREL_PROFILE = [[0.3, 0], [0.33, 0.03], [0.4, 0.16], [0.43, 0.45], [0.4, 0.74], [0.33, 0.87], [0.31, 0.9]];
   const STAVES = ["#7a5230", "#8a5e36", "#6e4a2a"].map(hexToRgb);
-  const barrel = cached(() => {
+  const barrel = variants((ammo) => {
     const segs = 14, geo = { verts: [], faces: [], lines: [] };
     const rings = BARREL_PROFILE.map(([r, y]) => Array.from({ length: segs }, (_, s) => {
       const a = s / segs * Math.PI * 2;
@@ -1040,15 +1064,17 @@
         parts.push(box({ w: 0.028, h: 0.028, d: 0.028, color: RIVET, offset: { x: Math.cos(a) * (r + 0.014), y, z: Math.sin(a) * (r + 0.014) } }));
       }
     }
-    // The painted banana on the belly, in the signs' banana badge, each cell set on the curve.
-    const art = SIGN_BADGES.banana, cell = 0.04;
-    for (let row = 0; row < art.rows.length; row++) for (let col = 0; col < art.rows[row].length; col++) {
-      const ch = art.rows[row][col];
-      if (ch === ".") continue;
-      const y = 0.52 - (row - 3) * cell, a = (col - 3) * cell / radiusAt(y), r = radiusAt(y) + 0.004;
-      parts.push(turn(box({ w: 0.006, h: cell, d: cell, color: art.ink[ch], offset: { x: r, y } }), a));
+    if (ammo) {
+      // The AK ammo meter's pixel banana follows the barrel's curve.
+      const art = AMMO_BANANA, cell = 0.04;
+      for (let row = 0; row < art.rows.length; row++) for (let col = 0; col < art.rows[row].length; col++) {
+        const ch = art.rows[row][col];
+        if (ch === ".") continue;
+        const y = 0.45 - (row - 4) * cell, a = (col - 4) * cell / radiusAt(y), r = radiusAt(y) + 0.004;
+        parts.push(turn(box({ w: 0.006, h: cell, d: cell, color: art.ink[ch], offset: { x: r, y } }), a));
+      }
     }
-    // A wooden spigot near the foot, turned away from the banana.
+    // A wooden spigot near the foot, turned away from the front.
     parts.push(turn(merge(
       box({ w: 0.08, h: 0.05, d: 0.05, color: "#5c4425", offset: { x: radiusAt(0.18) + 0.03, y: 0.18 } }),
       box({ w: 0.03, h: 0.07, d: 0.03, color: IRON, offset: { x: radiusAt(0.18) + 0.06, y: 0.15 } })

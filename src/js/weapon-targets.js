@@ -116,9 +116,9 @@
       stats.transforms++;
       return true;
     };
-    const eligible = (target, ignore) => {
+    const eligible = (target, ignore, includeNonWeapon = false) => {
       const { node, owner } = target;
-      return !!node.geometry && owner.active !== false && owner.weaponType !== "none" && (!ignore || owner.cave !== ignore)
+      return !!node.geometry && owner.active !== false && (includeNonWeapon || owner.weaponType !== "none") && (!ignore || owner.cave !== ignore)
         && !(node.mirror && (node.mirrorPortal || node.mirrorReveal >= 1)) && refreshWorld(node);
     };
     const sync = node => {
@@ -148,14 +148,27 @@
     const onMirror = (node, bounds, x, y) => x >= bounds.min[0] - EPS && x <= bounds.max[0] + EPS
       && y >= bounds.min[1] + (bounds.max[1] - bounds.min[1]) * (node.mirrorReveal || 0) - EPS && y <= bounds.max[1] + EPS
       && (!node.mirrorDamage || node.mirrorDamage.contains(x, y));
-    const ray = (out, ox, oy, oz, dx, dy, dz, maxDistance, ignore = null, accept = null) => {
+    const ray = (out, ox, oy, oz, dx, dy, dz, maxDistance, ignore = null, accept = null, includeNonWeapon = false) => {
       begin(out);
       const length = Math.hypot(dx, dy, dz);
       if (!length || maxDistance < 0) return false;
       dx /= length; dy /= length; dz /= length;
       let nearest = maxDistance;
       for (const target of targets) {
-        if (!eligible(target, ignore) || accept && !accept(target.owner, target.node)) continue;
+        if (!eligible(target, ignore, includeNonWeapon) || accept && !accept(target.owner, target.node)) continue;
+        if (includeNonWeapon && target.radius && !target.node.geometry.faces.length) {
+          const m = target.node.world, px = m[12] - ox, py = m[13] - oy, pz = m[14] - oz;
+          const radius = target.radius * Math.sqrt(Math.max(
+            m[0] * m[0] + m[1] * m[1] + m[2] * m[2],
+            m[4] * m[4] + m[5] * m[5] + m[6] * m[6],
+            m[8] * m[8] + m[9] * m[9] + m[10] * m[10]));
+          const along = px * dx + py * dy + pz * dz, side = px * px + py * py + pz * pz - along * along;
+          if (along >= 0 && side <= radius * radius) {
+            const found = Math.max(0, along - Math.sqrt(Math.max(0, radius * radius - side)));
+            if (found < nearest) { nearest = found; hit(out, target, found, ox + dx * found, oy + dy * found, oz + dz * found); }
+          }
+          continue;
+        }
         const entry = sync(target.node);
         if (!entry || !rayBox(entry.box, ox, oy, oz, dx, dy, dz, nearest)) continue;
         stats.candidates++;

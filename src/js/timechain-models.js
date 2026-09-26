@@ -25,28 +25,18 @@
       lathe({ profile: [[trimIn, 0], [trimOut, 0], [trimOut, 0.04], [trimIn, 0.04], [trimIn, 0]], segments: 96, color: "#1d2b33" })
     );
   });
-  // The destination is a hollow LED sphere, with a real doorway through both skins. The outer skin is the screen:
-  // sixteen lunes and one logo layer, each its own node so `show` lights them through `glow` and `highlight` (a
-  // float per instance, no geometry upload). Its tiles shade as one round ball from normals out of the centre. The
-  // inner skin draws the interior and carries both skins as the collision shell; the screen stays off it, because
-  // a lone skin (the logos floated one once) counts as solid under it and walls off the floor.
+  // The interior and collision shell stay fixed while the painted exterior turns around the open doorway.
   const SEGMENTS = 96, STEP = 2 * Math.PI / SEGMENTS, LUNES = 16, DOOR_TOP = 4.8, INSIDE = [19, 32, 45];
-  const LOGOS = [[0, 0.72], [Math.PI / 2, 0.25], [-Math.PI / 2, 0.25], [Math.PI, 0.25]];
+  const TAU = Math.PI * 2, DOOR_HALF_ANGLE = Math.PI / 16, SYMBOL_CELL = 0.075, SYMBOL_SLICES = 4, SYMBOL_RADIUS = SHELL_R + 0.05;
+  const SYMBOL_BEARINGS = [Math.PI / 6, Math.PI / 6 + TAU / 3, Math.PI / 6 - TAU / 3];
+  const DOOR_BOTTOM_LAT = Math.asin(-SHELL_CY / SYMBOL_RADIUS), DOOR_TOP_LAT = Math.asin((DOOR_TOP - SHELL_CY) / SYMBOL_RADIUS);
   const BITCOIN = ["00011011000", "00011011000", "01111111100", "00110000110", "00110000110", "00111111100", "00110000110", "00110000011", "00110000011", "01111111110", "00011011000", "00011011000"];
-  // One logo pixel a tile, so every stroke is whole tiles.
-  const logoAt = (longitude, latitude) => LOGOS.some(([bearing, elevation]) => {
-    const along = (longitude - bearing + 3 * Math.PI) % (2 * Math.PI) - Math.PI;
-    const col = Math.round(along / STEP + 5.5), row = Math.floor(6 - (latitude - elevation) / STEP);
-    return row >= 0 && row < BITCOIN.length && col >= 0 && col < BITCOIN[row].length && BITCOIN[row][col] === "1";
-  });
   const shell = cached(() => {
     const levels = Array.from({ length: 49 }, (_, i) => -Math.PI / 2 + i * Math.PI / 48);
     levels.push(Math.asin(-SHELL_CY / SHELL_R), Math.asin((DOOR_TOP - SHELL_CY) / SHELL_R)); levels.sort((a, b) => a - b);
     const tones = ["#d9700b", "#e8810d", "#f7931a", "#ef8910"].map(BL.math.hexToRgb), ribbon = [255, 188, 83], logo = [255, 249, 230];
     const layer = () => ({ verts: [], faces: [], lines: [], normals: [] });
-    const lunes = Array.from({ length: LUNES }, layer), logos = layer(), inner = layer(), solid = { verts: [], faces: [], lines: [] };
-    // The tiles under the logos in their plain colours, one set a lune: shown in the logos' place when a show hides them.
-    const gaps = Array.from({ length: LUNES }, layer);
+    const caps = Array.from({ length: LUNES }, layer), inner = layer(), solid = { verts: [], faces: [], lines: [] };
     const quad = (geo, r, lo, hi, bottom, top, inward, color, emissive) => {
       const base = geo.verts.length / 3, sign = inward ? -1 : 1;
       for (const [a, b] of [[lo, bottom], [hi, bottom], [hi, top], [lo, top]]) {
@@ -60,12 +50,10 @@
       const lo = -Math.PI + col * STEP, hi = lo + STEP, bottom = levels[row], top = levels[row + 1];
       const latitude = (bottom + top) / 2, longitude = (lo + hi) / 2;
       const y = SHELL_CY + SHELL_R * Math.sin(latitude);
-      if (Math.abs(longitude) < Math.PI / 16 && y > 0 && y < DOOR_TOP) continue;
+      if (Math.abs(longitude) < DOOR_HALF_ANGLE && y > 0 && y < DOOR_TOP) continue;
       const band = Math.abs(latitude - 0.5 - 0.12 * Math.sin(longitude * 3)) < 0.06 || Math.abs(latitude + 0.5 + 0.12 * Math.sin(longitude * 3)) < 0.06;
-      const lit = logoAt(longitude, latitude);
       const lune = Math.floor(col * LUNES / SEGMENTS), plain = band ? ribbon : tones[(row + col % 3) % tones.length];
-      quad(lit ? logos : lunes[lune], SHELL_R, lo, hi, bottom, top, false, lit ? logo : plain, lit ? 0.85 : band ? 0.8 : 0.5);
-      if (lit) quad(gaps[lune], SHELL_R, lo, hi, bottom, top, false, plain, band ? 0.8 : 0.5);
+      if (y <= 0 || y >= DOOR_TOP) quad(caps[lune], SHELL_R + 0.02, lo, hi, bottom, top, false, plain, band ? 0.8 : 0.5);
       quad(inner, SHELL_R - SHELL_SKIN, lo, hi, bottom, top, true, INSIDE, 0.45);
       quad(solid, SHELL_R, lo, hi, bottom, top, false, INSIDE, 0);
       quad(solid, SHELL_R - SHELL_SKIN, lo, hi, bottom, top, true, INSIDE, 0);
@@ -95,10 +83,75 @@
       const a = side * edge, bottom = levels[row], top = levels[row + 1];
       reveal([at(outer, a, bottom), at(outer, a, top), at(innerR, a, top), at(innerR, a, bottom)], [-side * Math.cos(a), 0, side * Math.sin(a)]);
     }
-    for (const geo of [...lunes, ...gaps, logos, inner]) geo.normals = Float32Array.from(geo.normals);
+    // Split the door-height band into angular strips, then mask only strips crossing the fixed opening.
+    const bandRows = [], bandGroups = new Map(), doorRows = [], sliceWidth = STEP / SYMBOL_SLICES;
+    for (let row = 0; row < levels.length - 1; row++) {
+      const bottom = levels[row], top = levels[row + 1], y = SHELL_CY + SHELL_R * Math.sin((bottom + top) / 2);
+      if (y > 0 && y < DOOR_TOP) doorRows.push({ row, bottom, top });
+    }
+    for (let col = 0; col < SEGMENTS; col++) {
+      const longitude = -Math.PI + (col + 0.5) * STEP, lune = Math.floor(col * LUNES / SEGMENTS);
+      const paints = doorRows.map(({ row, bottom, top }) => {
+        const latitude = (bottom + top) / 2;
+        const band = Math.abs(latitude - 0.5 - 0.12 * Math.sin(longitude * 3)) < 0.06 || Math.abs(latitude + 0.5 + 0.12 * Math.sin(longitude * 3)) < 0.06;
+        return band ? 4 : (row + col % 3) % tones.length;
+      });
+      for (let slice = 0; slice < SYMBOL_SLICES; slice++) {
+        const key = `${lune}:${paints.join("")}`;
+        let group = bandGroups.get(key);
+        if (!group) {
+          const geometry = layer();
+          for (let i = 0; i < doorRows.length; i++) quad(geometry, SHELL_R + 0.02, -sliceWidth / 2, sliceWidth / 2,
+            doorRows[i].bottom, doorRows[i].top, false, paints[i] === 4 ? ribbon : tones[paints[i]], paints[i] === 4 ? 0.8 : 0.5);
+          group = { geometry, angles: [], lune, halfWidth: sliceWidth / 2 };
+          bandGroups.set(key, group); bandRows.push(group);
+        }
+        group.angles.push(longitude + (slice - (SYMBOL_SLICES - 1) / 2) * sliceWidth);
+      }
+    }
+    const symbolRows = [];
+    for (let row = 0; row < BITCOIN.length; row++) {
+      const top = (BITCOIN.length / 2 - row) * SYMBOL_CELL, bottom = top - SYMBOL_CELL, cuts = [bottom];
+      if (bottom < DOOR_BOTTOM_LAT && DOOR_BOTTOM_LAT < top) cuts.push(DOOR_BOTTOM_LAT);
+      if (bottom < DOOR_TOP_LAT && DOOR_TOP_LAT < top) cuts.push(DOOR_TOP_LAT);
+      cuts.push(top);
+      for (let part = 0; part < cuts.length - 1; part++) {
+        const low = cuts[part], high = cuts[part + 1], geometry = layer(), half = SYMBOL_CELL / (SYMBOL_SLICES * 2);
+        quad(geometry, SYMBOL_RADIUS, -half, half, low, high, false, logo, 0.85);
+        symbolRows.push({ row, geometry, mask: low >= DOOR_BOTTOM_LAT && high <= DOOR_TOP_LAT, halfWidth: half });
+      }
+    }
+    for (const geo of [...caps, inner, ...bandRows.map(row => row.geometry), ...symbolRows.map(row => row.geometry)]) geo.normals = Float32Array.from(geo.normals);
     inner.collisionGeometry = solid;
-    return { lunes, gaps: gaps.map(geo => geo.faces.length ? geo : null), logos, inner };
+    return { caps, inner, bandRows, symbolRows };
   });
+  const rotatingBatch = (geometry, angles, place, owner, mask, halfWidth) => {
+    const node = createNode({ geometry, sightHidden: true, instanceData: new Float32Array(angles.length * 20), instanceCount: 0, instanceVersion: 0, fixedInstanceCapacity: true });
+    const baseCos = new Float32Array(angles.length), baseSin = new Float32Array(angles.length);
+    for (let i = 0; i < angles.length; i++) {
+      baseCos[i] = Math.cos(place.ry + angles[i]); baseSin[i] = Math.sin(place.ry + angles[i]);
+    }
+    return { node, angles: new Float32Array(angles), baseCos, baseSin, place, owner, mask, halfWidth };
+  };
+  const turnBatch = (batch, spin, spinCos, spinSin) => {
+    const { node, angles, baseCos, baseSin, place, owner, mask, halfWidth } = batch, data = node.instanceData;
+    let count = 0;
+    for (let i = 0; i < angles.length; i++) {
+      let local = angles[i] + spin;
+      if (local > Math.PI) local -= TAU;
+      if (local > Math.PI) local -= TAU;
+      if (local < -Math.PI) local += TAU;
+      if (mask && Math.abs(local) < DOOR_HALF_ANGLE + halfWidth) continue;
+      const c = baseCos[i] * spinCos - baseSin[i] * spinSin, s = baseSin[i] * spinCos + baseCos[i] * spinSin, o = count++ * 20;
+      data[o] = c; data[o + 1] = 0; data[o + 2] = -s; data[o + 3] = 0;
+      data[o + 4] = 0; data[o + 5] = 1; data[o + 6] = 0; data[o + 7] = 0;
+      data[o + 8] = s; data[o + 9] = 0; data[o + 10] = c; data[o + 11] = 0;
+      data[o + 12] = place.x; data[o + 13] = place.y; data[o + 14] = place.z; data[o + 15] = 1;
+      data[o + 16] = owner.glow; data[o + 17] = owner.highlight; data[o + 18] = 0; data[o + 19] = 0;
+    }
+    node.instanceCount = count;
+    node.instanceVersion++;
+  };
   // A chunky timber frame over the cut edges of both skins, lit gold along its inner faces.
   const portal = cached(() => merge(
     bevelBox({ w: 6, h: 0.5, d: 0.9, color: WOOD, offset: { y: 5.05 } }),
@@ -192,13 +245,33 @@
     const place = { x: DIR.x * radius, y: island.surfaceAt(DIR.x * start, DIR.z * start) + 0.02, z: DIR.z * radius, ry: -SITE.bearing, rim: start, bridgeZ, approachFrom: BL.terrain.TIMECHAIN.from };
     const node = createNode({ position: { x: place.x, y: place.y, z: place.z }, rotation: { x: 0, y: place.ry, z: 0 } });
     const groundNode = createNode({ geometry: ground() });
-    const { lunes, gaps, logos, inner } = shell();
+    const { caps, inner, bandRows, symbolRows } = shell();
     const shellNode = createNode({ geometry: inner });
-    // The screen hangs off the site, not the shell, so registering the shell as a solid never takes it in.
-    const screen = [...lunes, logos].map(geometry => createNode({ geometry }));
-    // Hidden until a show takes the logos away; still under the root, so they stay on the GPU between shows.
-    const gapNodes = gaps.map(geometry => geometry && createNode({ geometry, visible: false }));
-    for (const gap of gapNodes) if (gap) gap.sightHidden = true;
+    const outer = createNode({ sightHidden: true });
+    const screen = caps.map(geometry => createNode({ geometry }));
+    const logo = createNode();
+    screen.push(logo);
+    addChild(outer, ...screen.slice(0, LUNES));
+    const batches = [], logoBatches = [];
+    for (const band of bandRows) {
+      const batch = rotatingBatch(band.geometry, band.angles, place, screen[band.lune], true, band.halfWidth);
+      batches.push(batch); addChild(outer, batch.node);
+    }
+    for (const part of symbolRows) {
+      const angles = [];
+      for (const bearing of SYMBOL_BEARINGS) for (let col = 0; col < BITCOIN[part.row].length; col++) {
+        if (BITCOIN[part.row][col] !== "1") continue;
+        for (let slice = 0; slice < SYMBOL_SLICES; slice++) angles.push(bearing + (col - 5 + (slice - (SYMBOL_SLICES - 1) / 2) / SYMBOL_SLICES) * SYMBOL_CELL);
+      }
+      const batch = rotatingBatch(part.geometry, angles, place, logo, part.mask, part.halfWidth);
+      batches.push(batch); logoBatches.push(batch); addChild(outer, batch.node);
+    }
+    const turn = (angle) => {
+      outer.rotation.y = angle;
+      const c = Math.cos(angle), s = Math.sin(angle);
+      for (let i = 0; i < batches.length; i++) turnBatch(batches[i], angle, c, s);
+    };
+    turn(0);
     const entrance = createNode({ geometry: portal(), position: { x: 0, y: 0, z: 12.65 } });
     addChild(entrance, createNode({ position: { x: 0, y: 5.6, z: 0 }, geometry: BL.hubModels.caveSign("TIMECHAIN SPHERE") }));
     const bridgeNode = createNode({ position: { x: 0, y: 0, z: bridgeZ }, geometry: bridge() });
@@ -208,8 +281,8 @@
     const laptop = createNode({ geometry: laptopBase(), position: { x: 0, y: 1, z: 0.58 } });
     addChild(laptop, createNode({ geometry: laptopLid(), position: { x: 0, y: 0.035, z: 0.3 }, rotation: { x: 0.14, y: 0, z: 0 } }));
     addChild(swivel, back, laptop); addChild(chairNode, swivel);
-    addChild(node, groundNode, shellNode, ...screen, ...gapNodes.filter(Boolean), entrance, bridgeNode, chairNode);
-    return { node, shell: shellNode, screen, gaps: gapNodes, entrance, ground: groundNode, bridge: bridgeNode, chair: chairNode, swivel, laptop, place };
+    addChild(node, groundNode, shellNode, outer, entrance, bridgeNode, chairNode);
+    return { node, shell: shellNode, outer, turn, screen, logoBatches, entrance, ground: groundNode, bridge: bridgeNode, chair: chairNode, swivel, laptop, place };
   };
   // Most of the time the screen holds its picture; every minute or so it runs a seven-second show on the lunes'
   // `glow` and `highlight`, never the same one twice running, then settles back exactly. Some shows take the logos
@@ -226,11 +299,11 @@
   const wrap = (angle) => (angle + 5 * Math.PI) % (2 * Math.PI) - Math.PI;
   const show = (site) => {
     let wait = 20 + Math.random() * 40, t = -1, kind = -1;
-    const logo = site.screen[LUNES], gaps = site.gaps;
+    const logo = site.screen[LUNES];
     const showLogo = (on) => {
       if (logo.visible === on) return;
       logo.visible = on;
-      for (const gap of gaps) if (gap) gap.visible = !on;
+      for (const batch of site.logoBatches) batch.node.visible = on;
     };
     return (dt) => {
       if (t < 0) {
@@ -279,8 +352,6 @@
         }
         screen[i].glow = 1 + (glow - 1) * fade;
         screen[i].highlight = highlight * fade;
-        const gap = gaps[i];
-        if (gap) { gap.glow = screen[i].glow; gap.highlight = screen[i].highlight; }
       }
       logo.glow = 1 + (logoGlow - 1) * fade;
       showLogo(logoOn || fade < 1);

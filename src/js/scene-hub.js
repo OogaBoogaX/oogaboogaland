@@ -149,8 +149,7 @@
   const BUILD_RADIUS = 13;
   const NUDGES = [0, -2, 2, -4, 4, -6, 6, -8, 8];
   const PATH_GEOMETRY = new WeakMap();
-  const TIMECHAIN_NEAR = 25;
-  const VINES = ["c5"];
+  const TIMECHAIN_NEAR = 25, TIMECHAIN_OUTER_PERIOD = 180;
   const DRESSED = new WeakMap();
   const DRESSING_LAMPS = BL.dressing.LIGHT_RGB.map(([r, g, b]) => ({ r, g, b, radius: 5.5, glow: 0.9, hide: false }));
   const dressingLights = [];
@@ -160,10 +159,15 @@
   const MEADOW_INNER = 5, MEADOW_OUTER = MEADOW - 1.5, CLIFF_INNER = MEADOW + 1.5, CLIFF_OUTER = RADIUS - 1;
   const DOCK_DEG = 105, LADDER_Z = -3.6, LADDER_LEAN = 0.65;
   const CLOUD_COUNT = 30, CLOUD_WRAP = 60, CLOUD_NEAR = 36;
+  const CLOUD_GAP = 0.35, CLOUD_LOOK = 36, CLOUD_PLAN_STEP = 2;
+  const CLOUD_SIDE_RATE = 0.7, CLOUD_RISE_RATE = 0.55;
+  const CLOUD_SIDE_OFFSETS = [0, -7, 7, -14, 14, -24, 24];
+  const CLOUD_HEIGHT_OFFSETS = [0, -6, 6, -12, 12];
   const WANDER_COUNT = 36, WANDER_INNER = 5.5;
   const ALTAR_HEIGHT = 0.34, ALTAR_BLOCK_WIDTH = 0.2, ALTAR_BLOCK_ARC = 0.3, ALTAR_RING_GAP = 0.02, ALTAR_MAX_BLOCKS = 512;
   const RIPEN = 25, TREE_CHANCE = 0.5, BUSH_CHANCE = 0.25;
   const PROP_TIPS = { tree: "Tree · shake it", bush: "Bush · rustle it", rock: "Rock · hit to break", crate: "Box · hit to break", barrel: "Barrel · hit to break", flower: "Flowers", torch: "Torch · warm", firepit: "Fire pit", bedroll: "Somebody's bed", ladder: "Ladder · wobbly", dock: "Dock · creaky", magazine: "Spare magazine · walk into it to collect", plane: "Ooga Drop · tap to fly", sign: "Ooga Drop · the plane flies from here", launchpad: "Ooga Orbit · tap to build a rocket", rocket: "Ooga Orbit · tap to fly", tower: "Launch tower · steady", orbitsign: "Ooga Orbit · the pad past the bridge", bridge: "Rope bridge · to the launch pad", poolbridge: "Vine bridge · to the Mempool island", poolstair: "The Mempool · tap to climb down", poolsign: "The Mempool · the cave reads the chain", chainsign: "The chain, at a glance · tap to read it", weathersign: "Reading the weather · tap for the key", poolrock: "Mossy rock", poolfern: "Fern · rustle it", poollog: "Fallen log · something lives in it", jaguar: "Jaguar · do not poke", monkey: "Monkey · it watches you", toucan: "Toucan · big beak", canopy: "Rainforest tree · shake it", windsock: "Windsock · a fair wind", jumbotron: "Jumbotron · OogaBoogaX on the big screen · tap the screen for a close-up", palm: "Palm · shake it", gate: null };
+  const RETICLE_PROPS = new Set(["tree", "bush", "rock", "crate", "barrel", "flower", "torch", "firepit", "ladder", "plane", "sign", "launchpad", "rocket", "tower", "orbitsign", "poolstair", "poolsign", "chainsign", "weathersign", "poolfern", "poollog", "jaguar", "monkey", "toucan", "canopy", "jumbotron", "palm", "timechainentrance", "timechainboard", "timechainchair", "timechainbeer"]);
   const workCave = (slot) => slot.repo && (slot.status === "open" || slot.status === "mirror")
     && (slot.repo !== OBL_REPO || slot.status === "mirror");
   const MATRIX_LIVING_PROPS = new Set(["tree"]);
@@ -209,13 +213,12 @@
   const terrainSections = [], caveSections = [];
   // Above the island and its cave roofs; never interpolate from the renderer's
   // infinite/no-cut sentinel or the scan would happen only in its last frame.
-  const CUTAWAY_TOP = 16, CUTAWAY_RESTORE_TIME = 0.65, CUTAWAY_REGION_CAP = 8;
+  const CUTAWAY_TOP = 16, CUTAWAY_REGION_CAP = 8;
   const CUTAWAY_RAMP_START = 0.12, CUTAWAY_RAMP_END = 0.88;
   const CUTAWAY_FLOOR_RATE = 56, CUTAWAY_FLOOR_DEADBAND = 0.015;
-  let cutawayHeight = NaN, cutawayFeet = 0, cutawayPlayer = null, cutawayCameraMix = 0, cutawayCarryActive = false;
+  let cutawayHeight = NaN, cutawayFeet = 0, cutawayPlayer = null;
   let cutawayX = 0, cutawayZ = 0, cutawayHeadY = 0, cutawayHill = false;
   let cutawayProgress = NaN, cutawayLevel = 0, cutawayHillMix = 0;
-  let cutawayRestoreMix = 0, cutawayRestoreTime = CUTAWAY_RESTORE_TIME;
   let cutawayTravelRamp = null, cutawayTravelChannel = -1, cutawayTravelStation = 0;
   const CUTAWAY_PATH_STATE = { lo: new Uint16Array(4), hi: new Uint16Array(4), mix: new Float32Array(4), windowMix: new Float32Array(2), active: 0, version: 1 };
   const cutawayHiddenNodes = [];
@@ -513,6 +516,8 @@
   const targets = [];
   const claimed = [];
   const clouds = [];
+  const cloudObstacles = [];
+  let launchCloudSpot = null;
   const lamps = [];
   const entranceLights = [];
   const fireSeats = [];
@@ -523,6 +528,7 @@
   const labels = [];
   const spots = [];
   const openMouths = [];
+  const headquartersRimLintels = [];
   const launchers = [];
   const props = [];
   const scenery = [];
@@ -1743,6 +1749,12 @@
     const rim = createNode({ position: { x: 0, y: 0, z: 0.5 }, geometry: hubModels.caveMouthRim(slot.status === "headquarters" ? 1 : 0), sightSolid: true });
     addChild(group, rim);
     solids.add(rim);
+    if (slot.status === "headquarters") {
+      const lintel = createNode({ position: { x: 0, y: 0, z: 0.5 }, geometry: hubModels.caveMouthRim(2), sightSolid: true });
+      addChild(group, lintel);
+      solids.add(lintel);
+      headquartersRimLintels.push(lintel);
+    }
     if (slot.status === "dark") {
       const geometry = hubModels.sealedCaveFace(sealedCaveVariant(slot.id));
       const seal = createNode({ position: { x: 0, y: 0, z: 0.52 }, geometry, matrixExterior: true, sightSolid: true });
@@ -1897,7 +1909,6 @@
       entranceLights.push(debug);
     }
     dressMouth(slot, m, group);
-    if (VINES.includes(slot.id)) for (const x of [-1.1, 1.1]) addChild(group, createNode({ position: { x, y: 3.45, z: 0.95 }, geometry: hubModels.vine() }));
     addChild(root, group);
     placed.push(group);
     const glyphs = buildCaveGlyphs(slot, m, group);
@@ -2112,6 +2123,7 @@
   const buildLaunchSite = () => {
     const { SITE } = rocketModels;
     const spot = rocketModels.siteSpot(island, {});
+    launchCloudSpot = spot;
     const site = rocketModels.site(spot);
     addChild(root, site.node);
     placed.push(site.node);
@@ -2343,8 +2355,7 @@
     const wildlife = BL.poolWildlife.create({
       parent: site.node, obstacles, trees, logs, baseY: place.y, toWorld: WORLD_AT,
       animals: ANIMALS.map(([kind, x, z, heading]) => ({ kind, x, z, heading })),
-      sleepy: () => phase === "night" || phase === "midnight",
-      zzzAt: (x, y, z) => fx.zzzAt(x, y, z)
+      sleepy: () => phase === "night" || phase === "midnight"
     });
     // Each animal answers a tap through its body part, and its pick owner follows it about the island.
     for (const beast of wildlife.list) {
@@ -2564,8 +2575,8 @@
     cliff(30, 1, 0.5, "bush", (n) => hubModels.bush(n % 3));
     meadow(30, 0.7, "bush", (n) => hubModels.bush(n % 3));
     meadow(8, 0.9, "rock", () => hubModels.rock(0));
-    meadow(10, 0.7, "crate", () => hubModels.woodCrate(), true);
-    meadow(8, 0.6, "barrel", () => hubModels.barrel());
+    meadow(10, 0.7, "crate", () => hubModels.woodCrate(2), true);
+    meadow(8, 0.6, "barrel", () => hubModels.barrel(1));
     meadow(50, 0.35, "flower", () => hubModels.flowerTuft());
     meadow(18, 0.3, "grass", () => hubModels.grass());
   };
@@ -3514,14 +3525,9 @@
   };
   const updateBirdsEyeCutaway = (dt) => {
     clearCutawayHidden();
-    const player = pilot.player, overheadMix = player ? pilot.birdsEyeMix : 0;
-    const carryCutaway = !!player && !pilot.aiming && !pilot.closeWanted && player.root.position.y - player.baseY < -0.5
-      && (pilot.mode === "orbit" || pilot.mode === "shoulder" && pilot.shoulderEntryMix < 1);
-    // Keep the already-open floor through a carry-to-combat overhead handoff;
-    // the overhead spring starts at zero even though the roof is already gone.
-    const carryBridge = cutawayCarryActive && pilot.birdsEye && overheadMix < 1;
-    const cameraMix = Math.max(overheadMix, carryCutaway || carryBridge ? 1 : 0);
-    const showRampMarkers = overheadMix > 0.5;
+    const player = pilot.player, cameraMix = player && pilot.birdsEye ? pilot.birdsEyeMix : 0;
+    const showRampMarkers = cameraMix > 0.5;
+    for (const lintel of headquartersRimLintels) lintel.visible = !showRampMarkers;
     for (const marker of headquarters.rampMarkers) {
       marker.node.visible = marker.frame.visible = marker.arrow.visible = showRampMarkers;
       if (!showRampMarkers) continue;
@@ -3533,22 +3539,7 @@
       const z = up.x * downhill.x + up.y * downhill.y + up.z * downhill.z;
       marker.node.rotation.y = Math.atan2(-x, -z);
     }
-    // Losing the actor or its upright view has no camera dolly to follow.
-    // Restore the last displayed section independently on just those exits.
-    const interrupted = !player || player !== cutawayPlayer || player.health.stunned || crew.sleeping
-      || player.camp.seat || player.bedTravel.mode || clankerPlay.active;
-    if (!cameraMix && cutawayCameraMix > 0 && (interrupted || cutawayCarryActive)) {
-      cutawayRestoreMix = RENDER_OPTS.cutawayFade;
-      cutawayRestoreTime = 0;
-    }
-    cutawayCameraMix = cameraMix;
-    cutawayCarryActive = carryCutaway || carryBridge;
-    cutawayRestoreTime = Math.min(CUTAWAY_RESTORE_TIME, cutawayRestoreTime + dt);
-    const t = cutawayRestoreTime / CUTAWAY_RESTORE_TIME;
-    const restoring = cutawayRestoreMix * (1 - t * t * (3 - 2 * t));
-    // Re-enter from the still-visible cut, not from an uncut ceiling. The
-    // ordinary camera-controlled entry/exit is unchanged when no tail exists.
-    const mix = cameraMix + (1 - cameraMix) * restoring, active = mix > 0;
+    const mix = cameraMix, active = mix > 0;
     // Scan through the full camera blend in both directions, including reversals.
     const rockMix = mix;
     RENDER_OPTS.birdsEyeCutaway = active;
@@ -3959,19 +3950,102 @@
     p.x = x; p.z = z;
     return true;
   };
-  // Clouds ring the island without crossing it.
+  const cloudBox = (x0, y0, z0, x1, y1, z1) => cloudObstacles.push({ x0, y0, z0, x1, y1, z1 });
+  const cloudBridgeBox = (x0, z0, x1, z1, y, width) => {
+    const reach = width / 2 + 0.7;
+    cloudBox(Math.min(x0, x1) - reach, y - 1.5, Math.min(z0, z1) - reach,
+      Math.max(x0, x1) + reach, y + 3.5, Math.max(z0, z1) + reach);
+  };
+  const buildCloudObstacles = () => {
+    cloudObstacles.length = 0;
+    cloudBox(-RADIUS - 4, -30, -RADIUS - 4, RADIUS + 4, 24, RADIUS + 4);
+    const launch = launchCloudSpot, launchSite = rocketModels.SITE;
+    cloudBox(launch.x - launchSite.isletR - 2, launch.y - launchSite.isletDepth - 1, launch.z - launchSite.isletR - 2,
+      launch.x + launchSite.isletR + 2, launch.y + 24, launch.z + launchSite.isletR + 2);
+    cloudBridgeBox(launch.x, launch.bridgeZ, launch.x, launch.bridgeZ + launchSite.span, launch.y, launchSite.width);
+    const pool = mempoolIsland.place, poolSite = poolModels.SITE, poolDir = poolModels.DIR;
+    cloudBox(pool.x - poolSite.isletR - 4, pool.y - poolSite.isletDepth - 1, pool.z - poolSite.isletR - 4,
+      pool.x + poolSite.isletR + 4, pool.y + 25, pool.z + poolSite.isletR + 4);
+    cloudBridgeBox(pool.bridgeX, pool.bridgeZ, pool.x - poolDir.x * (poolSite.isletR - 1),
+      pool.z - poolDir.z * (poolSite.isletR - 1), pool.y, poolSite.width);
+    const sphere = timechainIsland.place, sphereSite = BL.timechainModels.SITE, sphereDir = BL.timechainModels.DIR;
+    cloudBox(sphere.x - sphereSite.radius - 0.25, sphere.y + 3 - sphereSite.radius - 0.25,
+      sphere.z - sphereSite.radius - 0.25, sphere.x + sphereSite.radius + 0.25,
+      sphere.y + 3 + sphereSite.radius + 0.25, sphere.z + sphereSite.radius + 0.25);
+    cloudBridgeBox(sphere.x - sphereDir.x * sphere.bridgeZ, sphere.z - sphereDir.z * sphere.bridgeZ,
+      sphere.x - sphereDir.x * (sphere.bridgeZ + sphereSite.span),
+      sphere.z - sphereDir.z * (sphere.bridgeZ + sphereSite.span), sphere.y, sphereSite.width);
+  };
+  const cloudToward = (value, target, distance) => value + clamp(target - value, -distance, distance);
+  const cloudClearAt = (cloud, x, y, z, ahead = 0) => {
+    const b = cloud.fullBounds;
+    const x0 = x + b[0], y0 = y + b[1], z0 = z + b[2], x1 = x + b[3], y1 = y + b[4], z1 = z + b[5];
+    for (let i = 0; i < cloudObstacles.length; i++) {
+      const o = cloudObstacles[i];
+      if (x0 < o.x1 + CLOUD_GAP && x1 > o.x0 - CLOUD_GAP && y0 < o.y1 + CLOUD_GAP && y1 > o.y0 - CLOUD_GAP
+        && z0 < o.z1 + CLOUD_GAP && z1 > o.z0 - CLOUD_GAP) return false;
+    }
+    for (let i = 0; i < clouds.length; i++) {
+      const other = clouds[i];
+      if (other === cloud) continue;
+      const p = other.node.position, travel = other.speed * ahead;
+      if ((other.beside ? p.z : p.x) + travel > CLOUD_WRAP) continue;
+      const ox = other.beside ? cloudToward(p.x, other.goalSide, CLOUD_SIDE_RATE * ahead) : p.x + travel;
+      const oz = other.beside ? p.z + travel : cloudToward(p.z, other.goalSide, CLOUD_SIDE_RATE * ahead);
+      const oy = cloudToward(p.y, other.goalY, CLOUD_RISE_RATE * ahead), q = other.fullBounds;
+      if (x0 < ox + q[3] + CLOUD_GAP && x1 > ox + q[0] - CLOUD_GAP && y0 < oy + q[4] + CLOUD_GAP
+        && y1 > oy + q[1] - CLOUD_GAP && z0 < oz + q[5] + CLOUD_GAP && z1 > oz + q[2] - CLOUD_GAP) return false;
+    }
+    return true;
+  };
+  const cloudRouteTime = (cloud, side, height, horizon) => {
+    const p = cloud.node.position, axis = cloud.beside ? p.z : p.x, lateral = cloud.beside ? p.x : p.z;
+    for (let t = 0; t <= horizon + CLOUD_PLAN_STEP; t += CLOUD_PLAN_STEP) {
+      t = Math.min(t, horizon);
+      const along = axis + cloud.speed * t, across = cloudToward(lateral, side, CLOUD_SIDE_RATE * t);
+      const y = cloudToward(p.y, height, CLOUD_RISE_RATE * t);
+      if (!cloudClearAt(cloud, cloud.beside ? across : along, y, cloud.beside ? along : across, t)) return t;
+      if (t === horizon) break;
+    }
+    return horizon + CLOUD_PLAN_STEP;
+  };
+  const considerCloudRoute = (cloud, side, height, horizon) => {
+    side = clamp(side, -84, 84); height = clamp(height, -35, 35);
+    const time = cloudRouteTime(cloud, side, height, horizon), p = cloud.node.position;
+    const lateral = cloud.beside ? p.x : p.z;
+    const cost = Math.abs(side - lateral) + Math.abs(height - p.y) * 1.2
+      + (side === cloud.goalSide && height === cloud.goalY ? 0 : 0.2);
+    if (time > cloud.bestTime || time === cloud.bestTime && cost < cloud.bestCost) {
+      cloud.bestTime = time; cloud.bestCost = cost; cloud.bestSide = side; cloud.bestY = height;
+    }
+  };
+  const planCloud = (cloud) => {
+    const p = cloud.node.position, axis = cloud.beside ? p.z : p.x, side = cloud.beside ? p.x : p.z;
+    const horizon = Math.min(CLOUD_LOOK, (CLOUD_WRAP - axis) / cloud.speed);
+    if (horizon <= 0) return;
+    cloud.bestTime = -1; cloud.bestCost = Infinity;
+    considerCloudRoute(cloud, cloud.goalSide, cloud.goalY, horizon);
+    for (let i = 0; i < CLOUD_SIDE_OFFSETS.length; i++) considerCloudRoute(cloud, side + CLOUD_SIDE_OFFSETS[i], p.y, horizon);
+    for (let i = 1; i < CLOUD_HEIGHT_OFFSETS.length; i++) considerCloudRoute(cloud, side, p.y + CLOUD_HEIGHT_OFFSETS[i], horizon);
+    if (cloud.bestTime <= horizon) {
+      for (let si = 0; si < 2; si++) for (let yi = 0; yi < 2; yi++) {
+        considerCloudRoute(cloud, side + (si ? 14 : -14), p.y + (yi ? 6 : -6), horizon);
+      }
+    }
+    cloud.goalSide = cloud.bestSide; cloud.goalY = cloud.bestY;
+  };
+  // Clouds ring the island and plan a lane before reaching an island, bridge or another cloud.
   const buildClouds = () => {
     const rand = mulberry32(SEED + 77);
     const surfaces = new Map();
+    buildCloudObstacles();
     for (let i = 0; i < CLOUD_COUNT; i++) {
       const beside = i % 2 === 0;
-      const out = (rand() < 0.5 ? -1 : 1) * lerp(CLOUD_NEAR, CLOUD_WRAP, rand());
-      const span = lerp(-CLOUD_WRAP, CLOUD_WRAP, rand());
-      const y = beside ? lerp(-4, 6, rand()) : lerp(2, 8, rand());
-      const node = createNode({ position: { x: beside ? out : span, y, z: beside ? span : -Math.abs(out) }, geometry: hubModels.cloud(Math.min(2, i % 4)), matrixCloud: true });
+      const node = createNode({ geometry: hubModels.cloud(Math.min(2, i % 4)), matrixCloud: true });
       let surface = surfaces.get(node.geometry);
       if (!surface) {
         const tops = [], bounds = [Infinity, Infinity, -Infinity, -Infinity], v = node.geometry.verts;
+        const full = BL.scene.boundsOf(node.geometry);
         for (const face of node.geometry.faces) {
           const a = face.i[0] * 3, b = face.i[1] * 3, c = face.i[2] * 3;
           if ((v[b + 2] - v[a + 2]) * (v[c] - v[a]) - (v[b] - v[a]) * (v[c + 2] - v[a + 2]) <= 0) continue;
@@ -3986,25 +4060,69 @@
         }
         let centerTop = -Infinity;
         for (let j = 0; j < tops.length; j += 5) if (tops[j] <= 0 && tops[j + 2] >= 0 && tops[j + 1] <= 0 && tops[j + 3] >= 0) centerTop = Math.max(centerTop, tops[j + 4]);
-        surface = { tops: new Float64Array(tops), bounds: new Float64Array(bounds), centerTop };
+        surface = { tops: new Float64Array(tops), bounds: new Float64Array(bounds), centerTop,
+          fullBounds: new Float64Array([...full.min, ...full.max]) };
         surfaces.set(node.geometry, surface);
+      }
+      const cloud = { node, speed: 0.4 + rand() * 0.4, beside, tops: surface.tops, bounds: surface.bounds,
+        fullBounds: surface.fullBounds, centerTop: surface.centerTop, dx: 0, dz: 0, wrapped: false,
+        goalSide: 0, goalY: 0, planTimer: i / CLOUD_COUNT, bestTime: 0, bestCost: 0, bestSide: 0, bestY: 0 };
+      let placedCloud = false;
+      for (let attempt = 0; attempt < 96; attempt++) {
+        const out = (rand() < 0.5 ? -1 : 1) * lerp(CLOUD_NEAR, CLOUD_WRAP, rand());
+        const span = lerp(-CLOUD_WRAP, CLOUD_WRAP, rand());
+        const y = beside ? lerp(-9, 11, rand()) : lerp(-3, 13, rand());
+        const x = beside ? out : span, z = beside ? span : -Math.abs(out);
+        if (!cloudClearAt(cloud, x, y, z)) continue;
+        node.position.x = x; node.position.y = y; node.position.z = z;
+        cloud.goalSide = beside ? x : z; cloud.goalY = y;
+        placedCloud = true;
+        break;
+      }
+      if (!placedCloud) {
+        node.position.x = beside ? -CLOUD_WRAP : -CLOUD_WRAP + i;
+        node.position.y = 35 + i * 7;
+        node.position.z = beside ? -CLOUD_WRAP + i : -CLOUD_WRAP;
+        while (!cloudClearAt(cloud, node.position.x, node.position.y, node.position.z)) node.position.y += 7;
+        cloud.goalSide = beside ? node.position.x : node.position.z; cloud.goalY = node.position.y;
       }
       addChild(root, node);
       placed.push(node);
-      clouds.push({ node, speed: 0.4 + rand() * 0.4, beside, tops: surface.tops, bounds: surface.bounds, centerTop: surface.centerTop, dx: 0, dz: 0, wrapped: false });
+      clouds.push(cloud);
     }
+    for (let i = 0; i < clouds.length; i++) planCloud(clouds[i]);
   };
   const updateClouds = (dt) => {
     for (let i = 0; i < clouds.length; i++) {
       const cloud = clouds[i], p = cloud.node.position;
-      cloud.dx = cloud.beside ? 0 : cloud.speed * dt;
-      cloud.dz = cloud.beside ? cloud.speed * dt : 0;
-      p.x += cloud.dx; p.z += cloud.dz;
-      cloud.wrapped = cloud.beside ? p.z > CLOUD_WRAP : p.x > CLOUD_WRAP;
-      if (cloud.wrapped) {
-        if (cloud.beside) p.z -= CLOUD_WRAP * 2;
-        else p.x -= CLOUD_WRAP * 2;
+      if ((cloud.planTimer -= dt) <= 0) { planCloud(cloud); cloud.planTimer = 0.8; }
+      const x = p.x, y = p.y, z = p.z, along = (cloud.beside ? z : x) + cloud.speed * dt;
+      cloud.wrapped = false;
+      if (along > CLOUD_WRAP) {
+        let found = false;
+        for (let si = 0; !found && si < CLOUD_SIDE_OFFSETS.length; si++) for (let yi = 0; yi < CLOUD_HEIGHT_OFFSETS.length; yi++) {
+          const side = clamp(cloud.goalSide + CLOUD_SIDE_OFFSETS[si], -84, 84);
+          const height = clamp(cloud.goalY + CLOUD_HEIGHT_OFFSETS[yi], -35, 35);
+          const nx = cloud.beside ? side : -CLOUD_WRAP, nz = cloud.beside ? -CLOUD_WRAP : side;
+          if (!cloudClearAt(cloud, nx, height, nz)) continue;
+          p.x = nx; p.y = height; p.z = nz;
+          cloud.goalSide = side; cloud.goalY = height; cloud.planTimer = 0;
+          cloud.wrapped = found = true;
+          break;
+        }
+      } else {
+        const side = cloudToward(cloud.beside ? x : z, cloud.goalSide, CLOUD_SIDE_RATE * dt);
+        const height = cloudToward(y, cloud.goalY, CLOUD_RISE_RATE * dt);
+        const nx = cloud.beside ? side : along, nz = cloud.beside ? along : side;
+        if (cloudClearAt(cloud, nx, height, nz)) { p.x = nx; p.y = height; p.z = nz; }
+        else if (cloudClearAt(cloud, cloud.beside ? side : x, height, cloud.beside ? z : side)) {
+          if (cloud.beside) p.x = side; else p.z = side;
+          p.y = height;
+          cloud.planTimer = 0;
+        } else cloud.planTimer = 0;
       }
+      cloud.dx = cloud.wrapped ? 0 : p.x - x;
+      cloud.dz = cloud.wrapped ? 0 : p.z - z;
     }
   };
   // The dais and its flush, one block-wide perimeter grow continuously with the pile.
@@ -4244,7 +4362,7 @@
       case "caveman":
         return o.cave.traits.name === "SaniExp" && timechainIsland?.seat.active ? "Sani · tap to spin his chair" : o.cave.traits.display;
       case "clanker":
-        return `${o.entry.owner.traits.display} 🦍`;
+        return `🦍 ${o.entry.owner.traits.display}`;
       case "crate":
         return `${o.crate.loot.tier} crate · tap to open`;
       case "cave":
@@ -4271,6 +4389,14 @@
       default:
         return "";
     }
+  };
+  const reticleTarget = (hit) => {
+    const o = hit.owner;
+    if (hit.node === mirrorCave.node || o.kind === "room-sign" || o.kind === "matrix-button" || o.kind === "matrix-gate"
+      || o.kind === "ooga-portal-lever" || o.kind === "ooga-portal-screen" || o.kind === "lab-link" || o.kind === "piece") return "object";
+    if (o.kind === "cave") return o.slot.status === "open" ? "object" : "none";
+    if (o.kind === "prop" && (o.breakable || RETICLE_PROPS.has(o.prop))) return "object";
+    return "none";
   };
   const wobble = (node, amp) => {
     if (node.busy) return false;
@@ -5835,6 +5961,7 @@
     const fallingPlayer = pilot.player;
     if (fallingPlayer) Object.assign(pitPrevious, fallingPlayer.root.position);
     if (timechainIsland) {
+      timechainIsland.site.turn((elapsed % TIMECHAIN_OUTER_PERIOD) * Math.PI * 2 / TIMECHAIN_OUTER_PERIOD);
       const s = timechainIsland.seat, decay = Math.exp(-1.15 * dt);
       s.angle = (s.angle + s.speed * (1 - decay) / 1.15) % (Math.PI * 2);
       s.speed *= decay;
@@ -6896,7 +7023,7 @@
     spawnMagazinePickup();
     critters = crittersMod.create({ root, renderer, flowers: scenery.filter((o) => o.prop === "flower" && o.active), fire: firePos, secondaryFire: { x: 0, y: island.headquarters.floor, z: 0 }, meadowRadius: MEADOW, heightAt: island.surfaceAt });
     mark("props");
-    const shared = { root, input, hooks, hud, game, world, renderer, camera, overlay: ctx.overlay, overlayVisible: matrixOverlayVisible, zzzVisible: sleepMarksVisible, tickerAt: TICKER_AT, buildSpots: buildSpotsList, walkIn: WALK_IN, clampDrag, viewYaw: PILE_VIEW.yaw, bedrolls, pileScale: PILE_SCALE, pileY: ALTAR_HEIGHT + 0.02, matrixLivingPile: true, onLayout: layoutPile, onShown: () => { meterTimer = 0; }, crateRadius: () => Math.max(4.4, altar.platformRadius + 0.8), groundAt: playerSupportAt, prepareCloudSupport, cloudAt, ceilingAt, wanderSpot, walkable, flyable, glideJetCeiling, useNear, abyssAt, abyssRespawnY: ABYSS_RESPAWN_Y, jetpackAllowed, phase: () => phase };
+    const shared = { root, input, hooks, hud, game, world, renderer, camera, overlay: ctx.overlay, overlayVisible: matrixOverlayVisible, zzzVisible: sleepMarksVisible, tickerAt: TICKER_AT, buildSpots: buildSpotsList, walkIn: WALK_IN, clampDrag, viewYaw: PILE_VIEW.yaw, bedrolls, pileScale: PILE_SCALE, pileY: ALTAR_HEIGHT + 0.02, matrixLivingPile: true, onLayout: layoutPile, onShown: () => { meterTimer = 0; }, crateRadius: () => Math.max(4.4, altar.platformRadius + 0.8), groundAt: playerSupportAt, prepareCloudSupport, cloudAt, ceilingAt, wanderSpot, walkable, flyable, glideJetCeiling, useNear, abyssAt, abyssRespawnY: ABYSS_RESPAWN_Y, jetpackAllowed, reticleTarget, phase: () => phase };
     shared.reloadRadius = () => island.path.debug.ringOuterRadius;
     shared.reloadHeight = ALTAR_HEIGHT;
     shared.onAbyssRespawn = loseAbyssAmmo;
@@ -7130,8 +7257,12 @@
       const y = island.surfaceAt(x, z);
       if (Number.isFinite(y)) loungeRoofs.push({ x, y, z, angle: mouth.ry });
     }
+    const labSiteIndex = shared.workSites.findIndex(site => site.mouth === entropyLab.mouth);
+    const debugLabShuttle = DEBUG && !contributors.solo && !contributors.debugState && labSiteIndex >= 0
+      ? crew.list.find(cave => cave.state === "working" && cave.work.site === labSiteIndex) || crew.list[0] : null;
+    if (debugLabShuttle) debugLabShuttle.override = "working";
     clankers = BL.clankers.create({ root, crew, sites: shared.workSites, loungeRoofs,
-      labSite: shared.workSites.findIndex(site => site.mouth === entropyLab.mouth),
+      labSite: labSiteIndex,
       labInside: entropyLab.phase.inside, labStations: entropyLab.stations,
       labEquipment: entropyLab.equipment, labPickup: pickUpLabEquipment, labReturn: returnLabEquipment, labRoll: rollLabEquipment,
       solidAt: island.solidAt, climbSolidAt: clankerClimbSolidAt, climbSurfaceAt: clankerClimbSurfaceAt,
@@ -7180,10 +7311,10 @@
 
     Object.assign(hooks, {
       onHover: (hit, p) => {
-        if (hit) hud.tooltip.show(tooltipFor(hit), p.x, p.y, hit.owner.cave);
+        if (hit) hud.tooltip.show(tooltipFor(hit), p.x, p.y, hit.owner.cave, hit.owner.kind === "clanker");
         else hud.tooltip.hide();
       },
-      onHoverMove: (hit, p) => hud.tooltip.show(tooltipFor(hit), p.x, p.y, hit.owner.cave),
+      onHoverMove: (hit, p) => hud.tooltip.show(tooltipFor(hit), p.x, p.y, hit.owner.cave, hit.owner.kind === "clanker"),
       onTap,
       ...pilot.hooks,
       onOrbit: (dx, dy) => {
@@ -7225,6 +7356,7 @@
     });
     meterTimer = 0;
     crew.refreshStates(true);
+    if (debugLabShuttle) clankers.startLabShuttle(debugLabShuttle);
     unsubscribeActivity = contributors.subscribe(() => crew.refreshStates());
     let initialCharacter = ctx.from === null && preloadedCharacter ? contributors.activeRoster.find((entry) => entry.name.toLowerCase() === preloadedCharacter) : null;
     if (ctx.from === null && (preloadedJetpackWear || preloadedEquipment) && !params.has("character") && !initialCharacter) initialCharacter = contributors.activeRoster.find((entry) => crew.stateOf(crew.cavemen.get(entry.name)) === "working") || contributors.activeRoster[0];
@@ -7549,14 +7681,12 @@
     cutawayHeight = NaN;
     cutawayProgress = NaN;
     cutawayLevel = cutawayHillMix = 0;
-    cutawayFeet = cutawayCameraMix = cutawayRestoreMix = 0;
-    cutawayCarryActive = false;
+    cutawayFeet = 0;
     cutawayX = cutawayZ = cutawayHeadY = 0;
     cutawayHill = false;
     cutawayPlayer = null;
     cutawayTravelRamp = null; cutawayTravelChannel = -1; cutawayTravelStation = 0;
     CUTAWAY_PATH_STATE.lo.fill(0); CUTAWAY_PATH_STATE.hi.fill(0); CUTAWAY_PATH_STATE.mix.fill(0); CUTAWAY_PATH_STATE.windowMix.fill(0); CUTAWAY_PATH_STATE.active = 0; CUTAWAY_PATH_STATE.version++;
-    cutawayRestoreTime = CUTAWAY_RESTORE_TIME;
     window.clearTimeout(hintTimer);
     if (positionDebug) {
       positionDebug.removeEventListener("click", copyPositionDebug);
@@ -7609,7 +7739,8 @@
     }
     for (const node of targets) input.remove(node);
     for (const node of placed) removeChild(root, node);
-    targets.length = placed.length = claimed.length = scenery.length = sceneryClaims.length = matrixInteriors.length = matrixGates.length = sealedCaves.length = clouds.length = lamps.length = entranceLights.length = fireSeats.length = sleepers.length = labels.length = spots.length = openMouths.length = launchers.length = props.length = 0;
+    targets.length = placed.length = claimed.length = scenery.length = sceneryClaims.length = matrixInteriors.length = matrixGates.length = sealedCaves.length = clouds.length = cloudObstacles.length = lamps.length = entranceLights.length = fireSeats.length = sleepers.length = labels.length = spots.length = openMouths.length = headquartersRimLintels.length = launchers.length = props.length = 0;
+    launchCloudSpot = null;
     fireHazards.length = 0;
     workZones.length = 0;
     closedCaveZones.length = 0;
@@ -7664,7 +7795,6 @@
     id: "hub", enter, update, overlay, onDonation, onKey, onLootCleared, renderOpts: RENDER_OPTS, leave, stats, liveGeometry,
     root: null, camera: null, input: null, debug: null,
     get inMotion() {
-      if (cutawayRestoreTime < CUTAWAY_RESTORE_TIME) return true;
       // Sani sits nearly always; only a spinning chair needs full rate behind another window.
       if (timechainIsland && timechainIsland.seat.speed > 0) return true;
       if (pile.inMotion || fx.inMotion || breakables.inMotion || weather.active || magazine && magazine.revealed || MATRIX_WORLD.active || mirrorGuides.state.doorway || mirrorCave.damage.active || mirrorCave.ripples.active || mirrorCave.body.active || entropyLab.phase.ripples.active || entropyLab.phase.body.contacts || entropyLab.phase.body.active) return true;

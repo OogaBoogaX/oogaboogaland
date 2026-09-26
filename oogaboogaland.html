@@ -5,7 +5,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta http-equiv="Content-Security-Policy"
-    content="default-src 'none'; script-src 'sha256-5hwdcj41MFge9YyT4xoSDzvgC3/ZnabYb99GC0fTRgE='; style-src 'sha256-wPyWeN9SGKjGkRRTydcTKlleNEo0IAJGDkLpSv9tNDs='; img-src 'self' data:; media-src https://stream.noderunnersradio.com; connect-src https: wss:; base-uri 'none'; form-action 'none'">
+    content="default-src 'none'; script-src 'sha256-IASStor2aBbbgu/xAkS9z+haD210iLYQxi160OqLEwo='; style-src 'sha256-PgDC2yA6pf+i4oX24qW0kzCZrZzvEgk8mNBJ3UcIVhk='; img-src 'self' data:; media-src https://stream.noderunnersradio.com; connect-src https: wss:; base-uri 'none'; form-action 'none'">
   <meta name="referrer" content="no-referrer">
   <meta name="color-scheme" content="dark">
   <meta name="theme-color" content="#0a0a0b">
@@ -4663,7 +4663,7 @@ body.orbit-dragging #tooltip {
   visibility: hidden;
 }
 .weapon-reticle[data-sight="true"] > svg {
-  clip-path: inset(0 0 50% 0);
+  visibility: hidden;
 }
 .weapon-reticle[data-occluded="true"] {
   visibility: hidden;
@@ -4689,7 +4689,10 @@ body.orbit-dragging #tooltip {
   background: var(--reticle-target);
 }
 .weapon-reticle[data-sight="true"] > span {
-  background: linear-gradient(to bottom, var(--reticle-target, #fff9dc) 50%, transparent 50%);
+  top: calc(50% + 4px);
+  width: 4px;
+  height: 4px;
+  background: var(--reticle-target, #fff9dc);
 }
 .weapon-reticle[data-target="out-of-range"] > span {
   visibility: hidden;
@@ -14756,33 +14759,39 @@ void main() {
       stock.verts[i] *= 1 - front * 0.12;
       stock.verts[i + 1] = stock.verts[i + 1] * (1 - front * 0.35) + (-0.04 + front * 0.025) * h;
     }
+    // Keep the handguard just inside the receiver where they overlap, then
+    // slope only its underside upward toward the barrel.
+    const handguard = box({ w: 0.09 * h, h: 0.122 * h, d: 0.22 * h, color: pal.stock, offset: { z: 0.24 * h } });
+    for (let i = 0; i < handguard.verts.length; i += 3) {
+      if (handguard.verts[i + 1] < 0) handguard.verts[i + 1] += (handguard.verts[i + 2] / h - 0.13) / 0.22 * 0.02 * h;
+    }
     // The upper gas tube meets the front of the wood and slopes into the barrel.
     const gasBlock = box({ w: 0.029 * h, h: 0.029 * h, d: Math.hypot(0.06, 0.05) * h, color: pal.barrel, emissive: pal.emissive });
     const angle = Math.atan2(0.05, 0.06), cos = Math.cos(angle), sin = Math.sin(angle);
     for (let i = 0; i < gasBlock.verts.length; i += 3) {
       const y = gasBlock.verts[i + 1], z = gasBlock.verts[i + 2];
-      gasBlock.verts[i + 1] = y * cos - z * sin - 0.005 * h;
+      gasBlock.verts[i + 1] = y * cos - z * sin + 0.01 * h;
       gasBlock.verts[i + 2] = y * sin + z * cos + 0.46 * h;
     }
     // A compact rear blade with an open, half-round notch. Its top and the
     // front post define the first-person sight line.
-    const rearSight = [box({ w: 0.05 * h, h: 0.004 * h, d: 0.014 * h, color: pal.barrel, offset: { y: 0.067 * h, z: -0.18 * h } })];
+    const rearSight = [box({ w: 0.042 * h, h: 0.004 * h, d: 0.014 * h, color: pal.barrel, offset: { y: 0.067 * h, z: -0.18 * h } })];
     for (let i = 0; i < 8; i++) {
       const low = 0.069 + i * 0.011 / 8, high = low + 0.011 / 8;
       const mid = (low + high) * 0.5;
       const inner = Math.sqrt(Math.max(0, 0.011 ** 2 - (mid - 0.08) ** 2));
-      const width = 0.025 - inner;
+      const width = 0.021 - inner;
       for (const side of [-1, 1]) rearSight.push(box({ w: width * h, h: (high - low) * h, d: 0.014 * h,
-        color: pal.barrel, offset: { x: side * (0.025 + inner) * 0.5 * h, y: mid * h, z: -0.18 * h } }));
+        color: pal.barrel, offset: { x: side * (0.021 + inner) * 0.5 * h, y: mid * h, z: -0.18 * h } }));
     }
     const pieces = [
       // Long receiver, tapered wooden stock, barrel and raised gas tube.
       box({ w: 0.11 * h, h: 0.13 * h, d: 0.4 * h, color: pal.body, emissive: pal.emissive, offset: { z: -0.035 * h } }),
       stock,
       box({ w: 0.09 * h, h: 0.14 * h, d: 0.02 * h, color: pal.barrel, offset: { z: -0.516 * h, y: -0.04 * h } }),
-      box({ w: 0.09 * h, h: 0.13 * h, d: 0.22 * h, color: pal.stock, offset: { z: 0.24 * h } }),
+      handguard,
       box({ w: 0.035 * h, h: 0.035 * h, d: 0.38 * h, color: pal.barrel, emissive: pal.emissive, offset: { z: 0.47 * h, y: -0.01 * h } }),
-      box({ w: 0.026 * h, h: 0.026 * h, d: 0.095 * h, color: pal.barrel, emissive: pal.emissive, offset: { z: 0.3925 * h, y: 0.02 * h } }),
+      box({ w: 0.026 * h, h: 0.026 * h, d: 0.095 * h, color: pal.barrel, emissive: pal.emissive, offset: { z: 0.3925 * h, y: 0.035 * h } }),
       gasBlock,
       box({ w: 0.03 * h, h: 0.085 * h, d: 0.03 * h, color: pal.barrel, offset: { z: 0.59 * h, y: 0.0075 * h } }),
       ...rearSight,
@@ -20759,7 +20768,7 @@ void main() {
 (() => {
   "use strict";
   const BL = window.BL = window.BL || {};
-  BL.jumbotronData = {"meta":{"generated_at":"2026-09-25T23:49:00.626Z","org":"OogaBoogaX","schema_version":3},"totals":{"contributors":49,"commits":1287,"prs":468,"reviews":56,"issues":20,"comments":379},"leaderboards":{"commits":[{"login":"portlandhodl","count":395},{"login":"w-s-bitcoin","count":369},{"login":"MrHodlX","count":118},{"login":"timechainb","count":82},{"login":"2140data","count":55},{"login":"dplusplus1024","count":44},{"login":"ottoz0r","count":31},{"login":"pdubl22","count":23},{"login":"YellowBrokeIt","count":20},{"login":"Hero-Gamer","count":17},{"login":"rules-without-rulers","count":16},{"login":"itme-brain","count":13},{"login":"claude","count":12},{"login":"RandyMcMillan","count":11},{"login":"J25dunn","count":10},{"login":"MHODL","count":7},{"login":"Rob1Ham","count":7},{"login":"knorrium","count":7},{"login":"Jdelg718","count":5},{"login":"drneski","count":5},{"login":"email:0ca1dda35e422a0f","count":4},{"login":"email:bdb4923572c8ac13","count":4},{"login":"BTCMcBoatface","count":3},{"login":"SaniExp","count":3},{"login":"codex","count":3},{"login":"email:bed3af55053c78f6","count":3},{"login":"tmmmemcee","count":3},{"login":"Holo-Elfstone","count":2},{"login":"csuwildcat","count":2},{"login":"dani69654","count":2},{"login":"hotpixelgroup","count":2},{"login":"CypherBoxLLC","count":1},{"login":"FNBIP","count":1},{"login":"HodlDee","count":1},{"login":"doggyballs","count":1},{"login":"email:56537ddd43347582","count":1},{"login":"email:78da113009979a72","count":1},{"login":"email:93964419ae80c511","count":1},{"login":"kaloudis","count":1},{"login":"zmeyer44","count":1}],"prs":[{"login":"MrHodlX","count":97},{"login":"portlandhodl","count":85},{"login":"w-s-bitcoin","count":66},{"login":"timechainb","count":33},{"login":"2140data","count":28},{"login":"ottoz0r","count":19},{"login":"J25dunn","count":16},{"login":"dplusplus1024","count":13},{"login":"rules-without-rulers","count":13},{"login":"Hero-Gamer","count":12},{"login":"Rob1Ham","count":11},{"login":"itme-brain","count":11},{"login":"tmmmemcee","count":6},{"login":"Jdelg718","count":5},{"login":"knorrium","count":5},{"login":"RandyMcMillan","count":4},{"login":"SaniExp","count":4},{"login":"drneski","count":4},{"login":"hotpixelgroup","count":4},{"login":"FNBIP","count":3},{"login":"MiguelMedeiros","count":3},{"login":"YellowBrokeIt","count":3},{"login":"dani69654","count":3},{"login":"BTCMcBoatface","count":2},{"login":"HodlDee","count":2},{"login":"Holo-Elfstone","count":2},{"login":"csuwildcat","count":2},{"login":"doggyballs","count":2},{"login":"pdubl22","count":2},{"login":"zmeyer44","count":2},{"login":"CypherBoxLLC","count":1},{"login":"Korg1970","count":1},{"login":"Shitnobi","count":1},{"login":"kaloudis","count":1},{"login":"mikeinspace","count":1},{"login":"unclejim7","count":1}],"reviews":[{"login":"MrHodlX","count":27},{"login":"J25dunn","count":14},{"login":"w-s-bitcoin","count":9},{"login":"portlandhodl","count":5},{"login":"Hero-Gamer","count":1}],"comments":[{"login":"portlandhodl","count":88},{"login":"MrHodlX","count":71},{"login":"Hero-Gamer","count":53},{"login":"w-s-bitcoin","count":48},{"login":"RandyMcMillan","count":19},{"login":"J25dunn","count":18},{"login":"BTCMcBoatface","count":14},{"login":"dplusplus1024","count":11},{"login":"itme-brain","count":9},{"login":"dani69654","count":7},{"login":"ottoz0r","count":6},{"login":"rules-without-rulers","count":6},{"login":"timechainb","count":6},{"login":"hotpixelgroup","count":4},{"login":"tmmmemcee","count":3},{"login":"HodlDee","count":2},{"login":"Holo-Elfstone","count":2},{"login":"Jdelg718","count":2},{"login":"100megasats","count":1},{"login":"2140data","count":1},{"login":"Bitcoin-Bill","count":1},{"login":"BitcoinUbuntu","count":1},{"login":"YellowBrokeIt","count":1},{"login":"csuwildcat","count":1},{"login":"doggyballs","count":1},{"login":"drneski","count":1},{"login":"remcoros","count":1},{"login":"unclejim7","count":1}],"issues":[{"login":"MrHodlX","count":9},{"login":"rules-without-rulers","count":6},{"login":"BitcoinUbuntu","count":2},{"login":"Hero-Gamer","count":1},{"login":"portlandhodl","count":1},{"login":"timechainb","count":1}]},"repos":[{"name":"entropylab","totals":{"contributors":45,"commits":1026,"prs":388,"reviews":50,"issues":14,"comments":369},"weekly":[{"week":"2026-W35","commits":333,"prs":134,"reviews":2,"issues":1,"comments":69},{"week":"2026-W36","commits":399,"prs":136,"reviews":16,"issues":0,"comments":130},{"week":"2026-W37","commits":82,"prs":36,"reviews":18,"issues":2,"comments":76},{"week":"2026-W38","commits":132,"prs":51,"reviews":5,"issues":2,"comments":39},{"week":"2026-W39","commits":80,"prs":31,"reviews":9,"issues":9,"comments":55}],"last_activity_at":"2026-09-25T23:04:01Z","leaderboards":{"commits":[{"login":"portlandhodl","count":395},{"login":"w-s-bitcoin","count":218},{"login":"MrHodlX","count":113},{"login":"timechainb","count":82},{"login":"dplusplus1024","count":44},{"login":"ottoz0r","count":24},{"login":"pdubl22","count":23},{"login":"Hero-Gamer","count":17},{"login":"itme-brain","count":13},{"login":"claude","count":12},{"login":"RandyMcMillan","count":11},{"login":"J25dunn","count":10},{"login":"2140data","count":9},{"login":"MHODL","count":7},{"login":"Rob1Ham","count":7},{"login":"Jdelg718","count":5},{"login":"email:0ca1dda35e422a0f","count":4},{"login":"email:bdb4923572c8ac13","count":4},{"login":"BTCMcBoatface","count":3},{"login":"codex","count":3},{"login":"email:bed3af55053c78f6","count":3},{"login":"SaniExp","count":2},{"login":"csuwildcat","count":2},{"login":"dani69654","count":2},{"login":"hotpixelgroup","count":2},{"login":"rules-without-rulers","count":2},{"login":"CypherBoxLLC","count":1},{"login":"FNBIP","count":1},{"login":"HodlDee","count":1},{"login":"doggyballs","count":1},{"login":"email:56537ddd43347582","count":1},{"login":"email:78da113009979a72","count":1},{"login":"email:93964419ae80c511","count":1},{"login":"kaloudis","count":1},{"login":"zmeyer44","count":1}],"prs":[{"login":"MrHodlX","count":94},{"login":"portlandhodl","count":85},{"login":"w-s-bitcoin","count":37},{"login":"timechainb","count":33},{"login":"ottoz0r","count":18},{"login":"J25dunn","count":16},{"login":"dplusplus1024","count":13},{"login":"Hero-Gamer","count":12},{"login":"Rob1Ham","count":11},{"login":"itme-brain","count":11},{"login":"2140data","count":10},{"login":"Jdelg718","count":5},{"login":"RandyMcMillan","count":4},{"login":"hotpixelgroup","count":4},{"login":"FNBIP","count":3},{"login":"MiguelMedeiros","count":3},{"login":"SaniExp","count":3},{"login":"dani69654","count":3},{"login":"tmmmemcee","count":3},{"login":"BTCMcBoatface","count":2},{"login":"HodlDee","count":2},{"login":"csuwildcat","count":2},{"login":"doggyballs","count":2},{"login":"pdubl22","count":2},{"login":"rules-without-rulers","count":2},{"login":"zmeyer44","count":2},{"login":"CypherBoxLLC","count":1},{"login":"Korg1970","count":1},{"login":"Shitnobi","count":1},{"login":"kaloudis","count":1},{"login":"mikeinspace","count":1},{"login":"unclejim7","count":1}],"reviews":[{"login":"MrHodlX","count":27},{"login":"J25dunn","count":14},{"login":"portlandhodl","count":5},{"login":"w-s-bitcoin","count":3},{"login":"Hero-Gamer","count":1}],"comments":[{"login":"portlandhodl","count":88},{"login":"MrHodlX","count":71},{"login":"Hero-Gamer","count":53},{"login":"w-s-bitcoin","count":46},{"login":"RandyMcMillan","count":19},{"login":"J25dunn","count":18},{"login":"BTCMcBoatface","count":14},{"login":"dplusplus1024","count":11},{"login":"itme-brain","count":9},{"login":"dani69654","count":7},{"login":"ottoz0r","count":6},{"login":"timechainb","count":6},{"login":"hotpixelgroup","count":4},{"login":"tmmmemcee","count":3},{"login":"HodlDee","count":2},{"login":"Jdelg718","count":2},{"login":"rules-without-rulers","count":2},{"login":"100megasats","count":1},{"login":"2140data","count":1},{"login":"Bitcoin-Bill","count":1},{"login":"BitcoinUbuntu","count":1},{"login":"csuwildcat","count":1},{"login":"doggyballs","count":1},{"login":"remcoros","count":1},{"login":"unclejim7","count":1}],"issues":[{"login":"MrHodlX","count":9},{"login":"BitcoinUbuntu","count":2},{"login":"Hero-Gamer","count":1},{"login":"portlandhodl","count":1},{"login":"timechainb","count":1}]},"contributors":[{"login":"w-s-bitcoin","last_seen_at":"2026-09-25T20:27:53Z"},{"login":"timechainb","last_seen_at":"2026-09-25T20:24:03Z"},{"login":"portlandhodl","last_seen_at":"2026-09-25T21:00:05Z"},{"login":"MrHodlX","last_seen_at":"2026-09-25T23:04:01Z"},{"login":"J25dunn","last_seen_at":"2026-09-14T00:52:02Z"},{"login":"BTCMcBoatface","last_seen_at":"2026-09-12T22:51:09Z"},{"login":"Hero-Gamer","last_seen_at":"2026-09-16T23:19:21Z"},{"login":"kaloudis","last_seen_at":"2026-09-11T03:10:01Z"},{"login":"email:bed3af55053c78f6","last_seen_at":"2026-09-10T22:41:09Z"},{"login":"hotpixelgroup","last_seen_at":"2026-09-17T16:15:09Z"},{"login":"email:0ca1dda35e422a0f","last_seen_at":"2026-09-05T16:17:09Z"},{"login":"Rob1Ham","last_seen_at":"2026-09-05T04:49:37Z"},{"login":"dplusplus1024","last_seen_at":"2026-09-04T16:46:04Z"},{"login":"HodlDee","last_seen_at":"2026-09-02T15:19:10Z"},{"login":"pdubl22","last_seen_at":"2026-09-02T04:06:43Z"},{"login":"ottoz0r","last_seen_at":"2026-09-02T02:19:20Z"},{"login":"FNBIP","last_seen_at":"2026-09-02T00:55:23Z"},{"login":"SaniExp","last_seen_at":"2026-09-02T16:47:02Z"},{"login":"Jdelg718","last_seen_at":"2026-08-31T15:06:08Z"},{"login":"dani69654","last_seen_at":"2026-09-09T10:02:14Z"},{"login":"RandyMcMillan","last_seen_at":"2026-08-31T09:57:39Z"},{"login":"doggyballs","last_seen_at":"2026-09-21T00:35:15Z"},{"login":"2140data","last_seen_at":"2026-08-31T04:54:04Z"},{"login":"itme-brain","last_seen_at":"2026-09-05T00:24:12Z"},{"login":"zmeyer44","last_seen_at":"2026-08-31T14:06:04Z"},{"login":"csuwildcat","last_seen_at":"2026-08-30T20:04:05Z"},{"login":"MHODL","last_seen_at":"2026-08-30T19:00:46Z"},{"login":"rules-without-rulers","last_seen_at":"2026-09-12T17:11:11Z"},{"login":"email:78da113009979a72","last_seen_at":"2026-08-30T03:08:17Z"},{"login":"email:bdb4923572c8ac13","last_seen_at":"2026-08-29T03:53:33Z"},{"login":"email:56537ddd43347582","last_seen_at":"2026-08-25T19:35:57Z"},{"login":"Shitnobi","last_seen_at":"2026-08-26T23:09:24Z"},{"login":"MiguelMedeiros","last_seen_at":"2026-08-27T21:47:11Z"},{"login":"tmmmemcee","last_seen_at":"2026-09-17T00:58:54Z"},{"login":"100megasats","last_seen_at":"2026-08-30T20:53:53Z"},{"login":"unclejim7","last_seen_at":"2026-09-05T04:37:51Z"},{"login":"mikeinspace","last_seen_at":"2026-09-10T05:25:42Z"},{"login":"remcoros","last_seen_at":"2026-09-12T15:11:21Z"},{"login":"Korg1970","last_seen_at":"2026-09-12T17:42:58Z"},{"login":"Bitcoin-Bill","last_seen_at":"2026-09-02T01:00:57Z"},{"login":"claude","last_seen_at":"2026-09-23T23:41:13Z"},{"login":"CypherBoxLLC","last_seen_at":"2026-09-19T22:44:16Z"},{"login":"email:93964419ae80c511","last_seen_at":"2026-09-20T10:42:49Z"},{"login":"codex","last_seen_at":"2026-09-21T01:04:42Z"},{"login":"BitcoinUbuntu","last_seen_at":"2026-09-25T18:06:38Z"}]},{"name":"oogaboogaland","totals":{"contributors":11,"commits":242,"prs":74,"reviews":6,"issues":6,"comments":10},"weekly":[{"week":"2026-W37","commits":45,"prs":19,"reviews":0,"issues":0,"comments":1},{"week":"2026-W38","commits":80,"prs":30,"reviews":3,"issues":0,"comments":0},{"week":"2026-W39","commits":117,"prs":25,"reviews":3,"issues":6,"comments":9}],"last_activity_at":"2026-09-25T22:22:25Z","leaderboards":{"commits":[{"login":"w-s-bitcoin","count":138},{"login":"2140data","count":46},{"login":"YellowBrokeIt","count":20},{"login":"rules-without-rulers","count":14},{"login":"knorrium","count":7},{"login":"MrHodlX","count":5},{"login":"drneski","count":5},{"login":"tmmmemcee","count":3},{"login":"Holo-Elfstone","count":2},{"login":"SaniExp","count":1},{"login":"ottoz0r","count":1}],"prs":[{"login":"w-s-bitcoin","count":23},{"login":"2140data","count":18},{"login":"rules-without-rulers","count":11},{"login":"knorrium","count":5},{"login":"drneski","count":4},{"login":"MrHodlX","count":3},{"login":"YellowBrokeIt","count":3},{"login":"tmmmemcee","count":3},{"login":"Holo-Elfstone","count":2},{"login":"SaniExp","count":1},{"login":"ottoz0r","count":1}],"reviews":[{"login":"w-s-bitcoin","count":6}],"comments":[{"login":"rules-without-rulers","count":4},{"login":"Holo-Elfstone","count":2},{"login":"w-s-bitcoin","count":2},{"login":"YellowBrokeIt","count":1},{"login":"drneski","count":1}],"issues":[{"login":"rules-without-rulers","count":6}]},"contributors":[{"login":"w-s-bitcoin","last_seen_at":"2026-09-25T19:32:14Z"},{"login":"MrHodlX","last_seen_at":"2026-09-20T21:37:43Z"},{"login":"ottoz0r","last_seen_at":"2026-09-07T21:41:44Z"},{"login":"SaniExp","last_seen_at":"2026-09-25T19:35:29Z"},{"login":"2140data","last_seen_at":"2026-09-25T22:22:25Z"},{"login":"rules-without-rulers","last_seen_at":"2026-09-25T04:14:15Z"},{"login":"tmmmemcee","last_seen_at":"2026-09-24T22:34:07Z"},{"login":"knorrium","last_seen_at":"2026-09-20T21:18:34Z"},{"login":"drneski","last_seen_at":"2026-09-25T04:34:22Z"},{"login":"YellowBrokeIt","last_seen_at":"2026-09-23T22:46:53Z"},{"login":"Holo-Elfstone","last_seen_at":"2026-09-21T20:29:14Z"}]},{"name":"bedrock","totals":{"contributors":2,"commits":19,"prs":6,"reviews":0,"issues":0,"comments":0},"weekly":[{"week":"2026-W36","commits":16,"prs":6,"reviews":0,"issues":0,"comments":0},{"week":"2026-W37","commits":3,"prs":0,"reviews":0,"issues":0,"comments":0}],"last_activity_at":"2026-09-07T05:21:02Z","leaderboards":{"commits":[{"login":"w-s-bitcoin","count":13},{"login":"ottoz0r","count":6}],"prs":[{"login":"w-s-bitcoin","count":6}],"reviews":[],"comments":[],"issues":[]},"contributors":[{"login":"w-s-bitcoin","last_seen_at":"2026-09-07T05:21:02Z"},{"login":"ottoz0r","last_seen_at":"2026-09-04T21:29:31Z"}]}],"recent":[{"login":"MrHodlX","repo":"entropylab","type":"issue","occurred_at":"2026-09-25T23:04:01Z"},{"login":"MrHodlX","repo":"entropylab","type":"merge","occurred_at":"2026-09-25T22:58:15Z"},{"login":"MrHodlX","repo":"entropylab","type":"comment","occurred_at":"2026-09-25T22:46:51Z"},{"login":"MrHodlX","repo":"entropylab","type":"commit","occurred_at":"2026-09-25T22:44:36Z"},{"login":"MrHodlX","repo":"entropylab","type":"comment","occurred_at":"2026-09-25T22:39:47Z"},{"login":"MrHodlX","repo":"entropylab","type":"pr","occurred_at":"2026-09-25T22:24:41Z"},{"login":"2140data","repo":"oogaboogaland","type":"commit","occurred_at":"2026-09-25T22:22:25Z"},{"login":"MrHodlX","repo":"entropylab","type":"commit","occurred_at":"2026-09-25T22:21:47Z"},{"login":"2140data","repo":"oogaboogaland","type":"merge","occurred_at":"2026-09-25T22:19:02Z"},{"login":"2140data","repo":"oogaboogaland","type":"pr","occurred_at":"2026-09-25T22:18:54Z"},{"login":"2140data","repo":"oogaboogaland","type":"commit","occurred_at":"2026-09-25T22:17:01Z"},{"login":"2140data","repo":"oogaboogaland","type":"merge","occurred_at":"2026-09-25T21:22:03Z"}],"contributors":[{"login":"portlandhodl","last_seen_at":"2026-09-25T21:00:05Z"},{"login":"w-s-bitcoin","last_seen_at":"2026-09-25T20:27:53Z"},{"login":"MrHodlX","last_seen_at":"2026-09-25T23:04:01Z"},{"login":"timechainb","last_seen_at":"2026-09-25T20:24:03Z"},{"login":"2140data","last_seen_at":"2026-09-25T22:22:25Z"},{"login":"Hero-Gamer","last_seen_at":"2026-09-16T23:19:21Z"},{"login":"dplusplus1024","last_seen_at":"2026-09-04T16:46:04Z"},{"login":"J25dunn","last_seen_at":"2026-09-14T12:31:24Z"},{"login":"ottoz0r","last_seen_at":"2026-09-07T21:41:44Z"},{"login":"rules-without-rulers","last_seen_at":"2026-09-25T04:14:15Z"},{"login":"RandyMcMillan","last_seen_at":"2026-08-31T09:57:39Z"},{"login":"itme-brain","last_seen_at":"2026-09-05T00:24:12Z"},{"login":"pdubl22","last_seen_at":"2026-09-02T04:06:43Z"},{"login":"YellowBrokeIt","last_seen_at":"2026-09-23T22:46:53Z"},{"login":"BTCMcBoatface","last_seen_at":"2026-09-12T22:51:09Z"},{"login":"Rob1Ham","last_seen_at":"2026-09-05T04:49:37Z"},{"login":"Jdelg718","last_seen_at":"2026-08-31T15:06:08Z"},{"login":"claude","last_seen_at":"2026-09-23T23:41:13Z"},{"login":"dani69654","last_seen_at":"2026-09-09T10:02:14Z"},{"login":"knorrium","last_seen_at":"2026-09-20T21:18:34Z"},{"login":"tmmmemcee","last_seen_at":"2026-09-24T22:34:07Z"},{"login":"drneski","last_seen_at":"2026-09-25T04:34:22Z"},{"login":"hotpixelgroup","last_seen_at":"2026-09-17T16:15:09Z"},{"login":"MHODL","last_seen_at":"2026-08-30T19:00:46Z"},{"login":"SaniExp","last_seen_at":"2026-09-25T19:35:29Z"},{"login":"Holo-Elfstone","last_seen_at":"2026-09-21T20:29:14Z"},{"login":"HodlDee","last_seen_at":"2026-09-02T15:19:10Z"},{"login":"csuwildcat","last_seen_at":"2026-08-30T20:04:05Z"},{"login":"FNBIP","last_seen_at":"2026-09-02T00:55:23Z"},{"login":"doggyballs","last_seen_at":"2026-09-21T00:35:15Z"},{"login":"email:0ca1dda35e422a0f","last_seen_at":"2026-09-05T16:17:09Z"},{"login":"email:bdb4923572c8ac13","last_seen_at":"2026-08-29T03:53:33Z"},{"login":"BitcoinUbuntu","last_seen_at":"2026-09-25T18:06:38Z"},{"login":"MiguelMedeiros","last_seen_at":"2026-08-27T21:47:11Z"},{"login":"codex","last_seen_at":"2026-09-21T01:04:42Z"},{"login":"email:bed3af55053c78f6","last_seen_at":"2026-09-10T22:41:09Z"},{"login":"zmeyer44","last_seen_at":"2026-08-31T14:06:04Z"},{"login":"CypherBoxLLC","last_seen_at":"2026-09-19T22:44:16Z"},{"login":"kaloudis","last_seen_at":"2026-09-11T03:10:01Z"},{"login":"unclejim7","last_seen_at":"2026-09-05T04:37:51Z"},{"login":"100megasats","last_seen_at":"2026-08-30T20:53:53Z"},{"login":"Bitcoin-Bill","last_seen_at":"2026-09-02T01:00:57Z"},{"login":"Korg1970","last_seen_at":"2026-09-12T17:42:58Z"},{"login":"Shitnobi","last_seen_at":"2026-08-26T23:09:24Z"},{"login":"email:56537ddd43347582","last_seen_at":"2026-08-25T19:35:57Z"},{"login":"email:78da113009979a72","last_seen_at":"2026-08-30T03:08:17Z"},{"login":"email:93964419ae80c511","last_seen_at":"2026-09-20T10:42:49Z"},{"login":"mikeinspace","last_seen_at":"2026-09-10T05:25:42Z"},{"login":"remcoros","last_seen_at":"2026-09-12T15:11:21Z"}]};
+  BL.jumbotronData = {"meta":{"generated_at":"2026-09-25T16:20:00.403Z","org":"OogaBoogaX","schema_version":3},"totals":{"contributors":49,"commits":1258,"prs":458,"reviews":56,"issues":17,"comments":358},"leaderboards":{"commits":[{"login":"portlandhodl","count":394},{"login":"w-s-bitcoin","count":360},{"login":"MrHodlX","count":111},{"login":"timechainb","count":78},{"login":"2140data","count":48},{"login":"dplusplus1024","count":44},{"login":"ottoz0r","count":31},{"login":"pdubl22","count":23},{"login":"YellowBrokeIt","count":20},{"login":"Hero-Gamer","count":17},{"login":"rules-without-rulers","count":16},{"login":"itme-brain","count":13},{"login":"claude","count":12},{"login":"RandyMcMillan","count":11},{"login":"J25dunn","count":10},{"login":"MHODL","count":7},{"login":"Rob1Ham","count":7},{"login":"knorrium","count":7},{"login":"Jdelg718","count":5},{"login":"drneski","count":5},{"login":"email:0ca1dda35e422a0f","count":4},{"login":"email:bdb4923572c8ac13","count":4},{"login":"BTCMcBoatface","count":3},{"login":"codex","count":3},{"login":"email:bed3af55053c78f6","count":3},{"login":"tmmmemcee","count":3},{"login":"Holo-Elfstone","count":2},{"login":"SaniExp","count":2},{"login":"csuwildcat","count":2},{"login":"dani69654","count":2},{"login":"hotpixelgroup","count":2},{"login":"CypherBoxLLC","count":1},{"login":"FNBIP","count":1},{"login":"HodlDee","count":1},{"login":"doggyballs","count":1},{"login":"email:56537ddd43347582","count":1},{"login":"email:78da113009979a72","count":1},{"login":"email:93964419ae80c511","count":1},{"login":"kaloudis","count":1},{"login":"zmeyer44","count":1}],"prs":[{"login":"MrHodlX","count":94},{"login":"portlandhodl","count":84},{"login":"w-s-bitcoin","count":65},{"login":"timechainb","count":31},{"login":"2140data","count":26},{"login":"ottoz0r","count":19},{"login":"J25dunn","count":16},{"login":"dplusplus1024","count":13},{"login":"rules-without-rulers","count":13},{"login":"Hero-Gamer","count":12},{"login":"Rob1Ham","count":11},{"login":"itme-brain","count":11},{"login":"tmmmemcee","count":6},{"login":"Jdelg718","count":5},{"login":"knorrium","count":5},{"login":"RandyMcMillan","count":4},{"login":"drneski","count":4},{"login":"hotpixelgroup","count":4},{"login":"FNBIP","count":3},{"login":"MiguelMedeiros","count":3},{"login":"SaniExp","count":3},{"login":"YellowBrokeIt","count":3},{"login":"dani69654","count":3},{"login":"BTCMcBoatface","count":2},{"login":"HodlDee","count":2},{"login":"Holo-Elfstone","count":2},{"login":"csuwildcat","count":2},{"login":"doggyballs","count":2},{"login":"pdubl22","count":2},{"login":"zmeyer44","count":2},{"login":"CypherBoxLLC","count":1},{"login":"Korg1970","count":1},{"login":"Shitnobi","count":1},{"login":"kaloudis","count":1},{"login":"mikeinspace","count":1},{"login":"unclejim7","count":1}],"reviews":[{"login":"MrHodlX","count":27},{"login":"J25dunn","count":14},{"login":"w-s-bitcoin","count":9},{"login":"portlandhodl","count":5},{"login":"Hero-Gamer","count":1}],"comments":[{"login":"portlandhodl","count":87},{"login":"Hero-Gamer","count":53},{"login":"MrHodlX","count":52},{"login":"w-s-bitcoin","count":48},{"login":"RandyMcMillan","count":19},{"login":"J25dunn","count":18},{"login":"BTCMcBoatface","count":14},{"login":"dplusplus1024","count":11},{"login":"itme-brain","count":9},{"login":"dani69654","count":7},{"login":"ottoz0r","count":6},{"login":"rules-without-rulers","count":6},{"login":"timechainb","count":6},{"login":"hotpixelgroup","count":4},{"login":"tmmmemcee","count":3},{"login":"HodlDee","count":2},{"login":"Holo-Elfstone","count":2},{"login":"Jdelg718","count":2},{"login":"100megasats","count":1},{"login":"2140data","count":1},{"login":"Bitcoin-Bill","count":1},{"login":"YellowBrokeIt","count":1},{"login":"csuwildcat","count":1},{"login":"doggyballs","count":1},{"login":"drneski","count":1},{"login":"remcoros","count":1},{"login":"unclejim7","count":1}]},"repos":[{"name":"entropylab","totals":{"contributors":45,"commits":1013,"prs":382,"reviews":50,"issues":11,"comments":348},"weekly":[{"week":"2026-W35","commits":333,"prs":134,"reviews":2,"issues":1,"comments":69},{"week":"2026-W36","commits":399,"prs":136,"reviews":16,"issues":0,"comments":130},{"week":"2026-W37","commits":82,"prs":36,"reviews":18,"issues":2,"comments":76},{"week":"2026-W38","commits":132,"prs":51,"reviews":5,"issues":2,"comments":39},{"week":"2026-W39","commits":67,"prs":25,"reviews":9,"issues":6,"comments":34}],"last_activity_at":"2026-09-25T15:58:08Z","leaderboards":{"commits":[{"login":"portlandhodl","count":394},{"login":"w-s-bitcoin","count":217},{"login":"MrHodlX","count":106},{"login":"timechainb","count":78},{"login":"dplusplus1024","count":44},{"login":"ottoz0r","count":24},{"login":"pdubl22","count":23},{"login":"Hero-Gamer","count":17},{"login":"itme-brain","count":13},{"login":"claude","count":12},{"login":"RandyMcMillan","count":11},{"login":"J25dunn","count":10},{"login":"2140data","count":9},{"login":"MHODL","count":7},{"login":"Rob1Ham","count":7},{"login":"Jdelg718","count":5},{"login":"email:0ca1dda35e422a0f","count":4},{"login":"email:bdb4923572c8ac13","count":4},{"login":"BTCMcBoatface","count":3},{"login":"codex","count":3},{"login":"email:bed3af55053c78f6","count":3},{"login":"SaniExp","count":2},{"login":"csuwildcat","count":2},{"login":"dani69654","count":2},{"login":"hotpixelgroup","count":2},{"login":"rules-without-rulers","count":2},{"login":"CypherBoxLLC","count":1},{"login":"FNBIP","count":1},{"login":"HodlDee","count":1},{"login":"doggyballs","count":1},{"login":"email:56537ddd43347582","count":1},{"login":"email:78da113009979a72","count":1},{"login":"email:93964419ae80c511","count":1},{"login":"kaloudis","count":1},{"login":"zmeyer44","count":1}],"prs":[{"login":"MrHodlX","count":91},{"login":"portlandhodl","count":84},{"login":"w-s-bitcoin","count":37},{"login":"timechainb","count":31},{"login":"ottoz0r","count":18},{"login":"J25dunn","count":16},{"login":"dplusplus1024","count":13},{"login":"Hero-Gamer","count":12},{"login":"Rob1Ham","count":11},{"login":"itme-brain","count":11},{"login":"2140data","count":10},{"login":"Jdelg718","count":5},{"login":"RandyMcMillan","count":4},{"login":"hotpixelgroup","count":4},{"login":"FNBIP","count":3},{"login":"MiguelMedeiros","count":3},{"login":"SaniExp","count":3},{"login":"dani69654","count":3},{"login":"tmmmemcee","count":3},{"login":"BTCMcBoatface","count":2},{"login":"HodlDee","count":2},{"login":"csuwildcat","count":2},{"login":"doggyballs","count":2},{"login":"pdubl22","count":2},{"login":"rules-without-rulers","count":2},{"login":"zmeyer44","count":2},{"login":"CypherBoxLLC","count":1},{"login":"Korg1970","count":1},{"login":"Shitnobi","count":1},{"login":"kaloudis","count":1},{"login":"mikeinspace","count":1},{"login":"unclejim7","count":1}],"reviews":[{"login":"MrHodlX","count":27},{"login":"J25dunn","count":14},{"login":"portlandhodl","count":5},{"login":"w-s-bitcoin","count":3},{"login":"Hero-Gamer","count":1}],"comments":[{"login":"portlandhodl","count":87},{"login":"Hero-Gamer","count":53},{"login":"MrHodlX","count":52},{"login":"w-s-bitcoin","count":46},{"login":"RandyMcMillan","count":19},{"login":"J25dunn","count":18},{"login":"BTCMcBoatface","count":14},{"login":"dplusplus1024","count":11},{"login":"itme-brain","count":9},{"login":"dani69654","count":7},{"login":"ottoz0r","count":6},{"login":"timechainb","count":6},{"login":"hotpixelgroup","count":4},{"login":"tmmmemcee","count":3},{"login":"HodlDee","count":2},{"login":"Jdelg718","count":2},{"login":"rules-without-rulers","count":2},{"login":"100megasats","count":1},{"login":"2140data","count":1},{"login":"Bitcoin-Bill","count":1},{"login":"csuwildcat","count":1},{"login":"doggyballs","count":1},{"login":"remcoros","count":1},{"login":"unclejim7","count":1}]},"contributors":[{"login":"w-s-bitcoin","last_seen_at":"2026-09-24T00:46:08Z"},{"login":"timechainb","last_seen_at":"2026-09-25T05:14:34Z"},{"login":"portlandhodl","last_seen_at":"2026-09-25T13:58:09Z"},{"login":"MrHodlX","last_seen_at":"2026-09-25T15:58:08Z"},{"login":"J25dunn","last_seen_at":"2026-09-14T00:52:02Z"},{"login":"BTCMcBoatface","last_seen_at":"2026-09-12T22:51:09Z"},{"login":"Hero-Gamer","last_seen_at":"2026-09-16T23:19:21Z"},{"login":"kaloudis","last_seen_at":"2026-09-11T03:10:01Z"},{"login":"email:bed3af55053c78f6","last_seen_at":"2026-09-10T22:41:09Z"},{"login":"hotpixelgroup","last_seen_at":"2026-09-17T16:15:09Z"},{"login":"email:0ca1dda35e422a0f","last_seen_at":"2026-09-05T16:17:09Z"},{"login":"Rob1Ham","last_seen_at":"2026-09-05T04:49:37Z"},{"login":"dplusplus1024","last_seen_at":"2026-09-04T16:46:04Z"},{"login":"HodlDee","last_seen_at":"2026-09-02T15:19:10Z"},{"login":"pdubl22","last_seen_at":"2026-09-02T04:06:43Z"},{"login":"ottoz0r","last_seen_at":"2026-09-02T02:19:20Z"},{"login":"FNBIP","last_seen_at":"2026-09-02T00:55:23Z"},{"login":"SaniExp","last_seen_at":"2026-09-02T16:47:02Z"},{"login":"Jdelg718","last_seen_at":"2026-08-31T15:06:08Z"},{"login":"dani69654","last_seen_at":"2026-09-09T10:02:14Z"},{"login":"RandyMcMillan","last_seen_at":"2026-08-31T09:57:39Z"},{"login":"doggyballs","last_seen_at":"2026-09-21T00:35:15Z"},{"login":"2140data","last_seen_at":"2026-08-31T04:54:04Z"},{"login":"itme-brain","last_seen_at":"2026-09-05T00:24:12Z"},{"login":"zmeyer44","last_seen_at":"2026-08-31T14:06:04Z"},{"login":"csuwildcat","last_seen_at":"2026-08-30T20:04:05Z"},{"login":"MHODL","last_seen_at":"2026-08-30T19:00:46Z"},{"login":"rules-without-rulers","last_seen_at":"2026-09-12T17:11:11Z"},{"login":"email:78da113009979a72","last_seen_at":"2026-08-30T03:08:17Z"},{"login":"email:bdb4923572c8ac13","last_seen_at":"2026-08-29T03:53:33Z"},{"login":"email:56537ddd43347582","last_seen_at":"2026-08-25T19:35:57Z"},{"login":"Shitnobi","last_seen_at":"2026-08-26T23:09:24Z"},{"login":"MiguelMedeiros","last_seen_at":"2026-08-27T21:47:11Z"},{"login":"tmmmemcee","last_seen_at":"2026-09-17T00:58:54Z"},{"login":"100megasats","last_seen_at":"2026-08-30T20:53:53Z"},{"login":"unclejim7","last_seen_at":"2026-09-05T04:37:51Z"},{"login":"mikeinspace","last_seen_at":"2026-09-10T05:25:42Z"},{"login":"remcoros","last_seen_at":"2026-09-12T15:11:21Z"},{"login":"Korg1970","last_seen_at":"2026-09-12T17:42:58Z"},{"login":"Bitcoin-Bill","last_seen_at":"2026-09-02T01:00:57Z"},{"login":"claude","last_seen_at":"2026-09-23T23:41:13Z"},{"login":"CypherBoxLLC","last_seen_at":"2026-09-19T22:44:16Z"},{"login":"email:93964419ae80c511","last_seen_at":"2026-09-20T10:42:49Z"},{"login":"codex","last_seen_at":"2026-09-21T01:04:42Z"},{"login":"BitcoinUbuntu","last_seen_at":"2026-09-24T17:28:36Z"}]},{"name":"oogaboogaland","totals":{"contributors":10,"commits":226,"prs":70,"reviews":6,"issues":6,"comments":10},"weekly":[{"week":"2026-W37","commits":45,"prs":19,"reviews":0,"issues":0,"comments":1},{"week":"2026-W38","commits":80,"prs":30,"reviews":3,"issues":0,"comments":0},{"week":"2026-W39","commits":101,"prs":21,"reviews":3,"issues":6,"comments":9}],"last_activity_at":"2026-09-25T04:34:22Z","leaderboards":{"commits":[{"login":"w-s-bitcoin","count":130},{"login":"2140data","count":39},{"login":"YellowBrokeIt","count":20},{"login":"rules-without-rulers","count":14},{"login":"knorrium","count":7},{"login":"MrHodlX","count":5},{"login":"drneski","count":5},{"login":"tmmmemcee","count":3},{"login":"Holo-Elfstone","count":2},{"login":"ottoz0r","count":1}],"prs":[{"login":"w-s-bitcoin","count":22},{"login":"2140data","count":16},{"login":"rules-without-rulers","count":11},{"login":"knorrium","count":5},{"login":"drneski","count":4},{"login":"MrHodlX","count":3},{"login":"YellowBrokeIt","count":3},{"login":"tmmmemcee","count":3},{"login":"Holo-Elfstone","count":2},{"login":"ottoz0r","count":1}],"reviews":[{"login":"w-s-bitcoin","count":6}],"comments":[{"login":"rules-without-rulers","count":4},{"login":"Holo-Elfstone","count":2},{"login":"w-s-bitcoin","count":2},{"login":"YellowBrokeIt","count":1},{"login":"drneski","count":1}]},"contributors":[{"login":"w-s-bitcoin","last_seen_at":"2026-09-25T04:03:38Z"},{"login":"MrHodlX","last_seen_at":"2026-09-20T21:37:43Z"},{"login":"ottoz0r","last_seen_at":"2026-09-07T21:41:44Z"},{"login":"2140data","last_seen_at":"2026-09-23T13:42:44Z"},{"login":"rules-without-rulers","last_seen_at":"2026-09-25T04:14:15Z"},{"login":"tmmmemcee","last_seen_at":"2026-09-24T22:34:07Z"},{"login":"knorrium","last_seen_at":"2026-09-20T21:18:34Z"},{"login":"drneski","last_seen_at":"2026-09-25T04:34:22Z"},{"login":"YellowBrokeIt","last_seen_at":"2026-09-23T22:46:53Z"},{"login":"Holo-Elfstone","last_seen_at":"2026-09-21T20:29:14Z"}]},{"name":"bedrock","totals":{"contributors":2,"commits":19,"prs":6,"reviews":0,"issues":0,"comments":0},"weekly":[{"week":"2026-W36","commits":16,"prs":6,"reviews":0,"issues":0,"comments":0},{"week":"2026-W37","commits":3,"prs":0,"reviews":0,"issues":0,"comments":0}],"last_activity_at":"2026-09-07T05:21:02Z","leaderboards":{"commits":[{"login":"w-s-bitcoin","count":13},{"login":"ottoz0r","count":6}],"prs":[{"login":"w-s-bitcoin","count":6}],"reviews":[],"comments":[]},"contributors":[{"login":"w-s-bitcoin","last_seen_at":"2026-09-07T05:21:02Z"},{"login":"ottoz0r","last_seen_at":"2026-09-04T21:29:31Z"}]}],"recent":[{"login":"MrHodlX","repo":"entropylab","type":"comment","occurred_at":"2026-09-25T15:58:08Z"},{"login":"MrHodlX","repo":"entropylab","type":"merge","occurred_at":"2026-09-25T15:43:25Z"},{"login":"MrHodlX","repo":"entropylab","type":"commit","occurred_at":"2026-09-25T15:36:49Z"},{"login":"MrHodlX","repo":"entropylab","type":"commit","occurred_at":"2026-09-25T15:22:00Z"},{"login":"MrHodlX","repo":"entropylab","type":"comment","occurred_at":"2026-09-25T15:20:00Z"},{"login":"MrHodlX","repo":"entropylab","type":"comment","occurred_at":"2026-09-25T15:14:08Z"},{"login":"MrHodlX","repo":"entropylab","type":"merge","occurred_at":"2026-09-25T15:03:01Z"},{"login":"MrHodlX","repo":"entropylab","type":"comment","occurred_at":"2026-09-25T14:55:38Z"},{"login":"MrHodlX","repo":"entropylab","type":"comment","occurred_at":"2026-09-25T14:38:15Z"},{"login":"MrHodlX","repo":"entropylab","type":"comment","occurred_at":"2026-09-25T14:22:03Z"},{"login":"MrHodlX","repo":"entropylab","type":"pr","occurred_at":"2026-09-25T14:17:05Z"},{"login":"portlandhodl","repo":"entropylab","type":"comment","occurred_at":"2026-09-25T13:58:09Z"}],"contributors":[{"login":"portlandhodl","last_seen_at":"2026-09-25T13:58:09Z"},{"login":"w-s-bitcoin","last_seen_at":"2026-09-25T04:03:38Z"},{"login":"MrHodlX","last_seen_at":"2026-09-25T15:58:08Z"},{"login":"timechainb","last_seen_at":"2026-09-25T05:14:34Z"},{"login":"Hero-Gamer","last_seen_at":"2026-09-16T23:19:21Z"},{"login":"2140data","last_seen_at":"2026-09-23T13:42:44Z"},{"login":"dplusplus1024","last_seen_at":"2026-09-04T16:46:04Z"},{"login":"J25dunn","last_seen_at":"2026-09-14T12:31:24Z"},{"login":"ottoz0r","last_seen_at":"2026-09-07T21:41:44Z"},{"login":"rules-without-rulers","last_seen_at":"2026-09-25T04:14:15Z"},{"login":"RandyMcMillan","last_seen_at":"2026-08-31T09:57:39Z"},{"login":"itme-brain","last_seen_at":"2026-09-05T00:24:12Z"},{"login":"pdubl22","last_seen_at":"2026-09-02T04:06:43Z"},{"login":"YellowBrokeIt","last_seen_at":"2026-09-23T22:46:53Z"},{"login":"BTCMcBoatface","last_seen_at":"2026-09-12T22:51:09Z"},{"login":"Rob1Ham","last_seen_at":"2026-09-05T04:49:37Z"},{"login":"Jdelg718","last_seen_at":"2026-08-31T15:06:08Z"},{"login":"claude","last_seen_at":"2026-09-23T23:41:13Z"},{"login":"dani69654","last_seen_at":"2026-09-09T10:02:14Z"},{"login":"knorrium","last_seen_at":"2026-09-20T21:18:34Z"},{"login":"tmmmemcee","last_seen_at":"2026-09-24T22:34:07Z"},{"login":"drneski","last_seen_at":"2026-09-25T04:34:22Z"},{"login":"hotpixelgroup","last_seen_at":"2026-09-17T16:15:09Z"},{"login":"MHODL","last_seen_at":"2026-08-30T19:00:46Z"},{"login":"Holo-Elfstone","last_seen_at":"2026-09-21T20:29:14Z"},{"login":"HodlDee","last_seen_at":"2026-09-02T15:19:10Z"},{"login":"SaniExp","last_seen_at":"2026-09-02T16:47:02Z"},{"login":"csuwildcat","last_seen_at":"2026-08-30T20:04:05Z"},{"login":"FNBIP","last_seen_at":"2026-09-02T00:55:23Z"},{"login":"doggyballs","last_seen_at":"2026-09-21T00:35:15Z"},{"login":"email:0ca1dda35e422a0f","last_seen_at":"2026-09-05T16:17:09Z"},{"login":"email:bdb4923572c8ac13","last_seen_at":"2026-08-29T03:53:33Z"},{"login":"MiguelMedeiros","last_seen_at":"2026-08-27T21:47:11Z"},{"login":"codex","last_seen_at":"2026-09-21T01:04:42Z"},{"login":"email:bed3af55053c78f6","last_seen_at":"2026-09-10T22:41:09Z"},{"login":"zmeyer44","last_seen_at":"2026-08-31T14:06:04Z"},{"login":"BitcoinUbuntu","last_seen_at":"2026-09-24T17:28:36Z"},{"login":"CypherBoxLLC","last_seen_at":"2026-09-19T22:44:16Z"},{"login":"kaloudis","last_seen_at":"2026-09-11T03:10:01Z"},{"login":"unclejim7","last_seen_at":"2026-09-05T04:37:51Z"},{"login":"100megasats","last_seen_at":"2026-08-30T20:53:53Z"},{"login":"Bitcoin-Bill","last_seen_at":"2026-09-02T01:00:57Z"},{"login":"Korg1970","last_seen_at":"2026-09-12T17:42:58Z"},{"login":"Shitnobi","last_seen_at":"2026-08-26T23:09:24Z"},{"login":"email:56537ddd43347582","last_seen_at":"2026-08-25T19:35:57Z"},{"login":"email:78da113009979a72","last_seen_at":"2026-08-30T03:08:17Z"},{"login":"email:93964419ae80c511","last_seen_at":"2026-09-20T10:42:49Z"},{"login":"mikeinspace","last_seen_at":"2026-09-10T05:25:42Z"},{"login":"remcoros","last_seen_at":"2026-09-12T15:11:21Z"}]};
 })();
 
 // ---- js/jumbotron.js ----
@@ -25952,7 +25961,8 @@ void main() {
 (() => {
   "use strict";
   const BL = window.BL;
-  const { box, lathe, ring, merge, forward, cached } = BL.models;
+  const { box, lathe, ring, merge, forward, cached, geometry, pushVert, face, tube } = BL.models;
+  const { hexToRgb } = BL.math;
   const { createNode, addChild } = BL.scene;
   // crew.js MASK_PORTS match the centre hole and six surrounding holes here.
   const gasMaskGeometry = cached(() => {
@@ -25969,14 +25979,84 @@ void main() {
       .map(([hx, hy]) => box({ w: 0.03, h: 0.03, d: 0.008, color: "#0f1113", offset: { x: hx, y: 0.1 + hy, z: 0.463 } }));
     return merge(hood, snout, filter, ...holes, lens(-0.12), lens(0.12), tube(-0.21), tube(0.21), ring({ r: 0.315, thickness: 0.02, y: 0.4, segments: 14, color: trim }));
   });
+  const hockeyStickGeometry = (h, gold = false) => {
+    const u = h / 16, shaft = geometry(), blade = geometry(), shaftRings = [], bladeSections = [];
+    const bladeSegments = 28, bladeRise = 2.8;
+    const shaftColor = hexToRgb(gold ? "#a77b32" : "#292e31");
+    const shaftSide = hexToRgb(gold ? "#805a25" : "#1b2023");
+    const tape = (gold ? ["#e8cf8d", "#cba95d", "#dfc27c"] : ["#e1dfd7", "#b9b9b3", "#d1d0ca"]).map(hexToRgb);
+    const tapeEdge = hexToRgb(gold ? "#ad8848" : "#999b98");
+    const seam = gold ? "#765922" : "#777b7a";
+    for (let i = 0; i <= 20; i++) {
+      const t = i / 20, y = (-3 + 18.2 * t) * u, w = 0.8 * u, d = 0.52 * u;
+      shaftRings.push([pushVert(shaft, -w, y, -d), pushVert(shaft, w, y, -d),
+        pushVert(shaft, w, y, d), pushVert(shaft, -w, y, d)]);
+      if (!i) continue;
+      for (let side = 0; side < 4; side++) face(shaft,
+        [shaftRings[i - 1][side], shaftRings[i][side], shaftRings[i][(side + 1) % 4], shaftRings[i - 1][(side + 1) % 4]],
+        t <= 0.2 ? tape[1] : side % 2 ? shaftSide : shaftColor);
+    }
+    face(shaft, shaftRings[0], tape[1]);
+    const gripWrap = tube({ rings: 80, segments: 4, radius: () => 0.025 * u, colorFn: () => seam,
+      path: (t) => {
+        const around = t * 16, edge = Math.floor(around) % 4, along = around - Math.floor(around);
+        const w = 0.8 * u, d = 0.52 * u;
+        return { x: edge === 0 ? -w + 2 * w * along : edge === 1 ? w : edge === 2 ? w - 2 * w * along : -w,
+          y: (-3 + 3.64 * t) * u,
+          z: edge === 0 ? d : edge === 1 ? d - 2 * d * along : edge === 2 ? -d : -d + 2 * d * along };
+      } });
+    const bladeShape = (t) => {
+      const heelT = Math.min(1, t / 0.4), heel = heelT * heelT * (3 - 2 * heelT);
+      const toeT = Math.max(0, (t - 0.78) / 0.22), toe = Math.sqrt(Math.max(0.01, 1 - toeT * toeT));
+      const dx = 8.5 * (4 * t - 3 * t * t), dy = 3 * bladeRise * (1 - t) * (1 - t);
+      const length = Math.hypot(dx, dy);
+      return { x: -8.5 * t * t * (2 - t) * u, y: (15.2 + bladeRise * (1 - (1 - t) ** 3)) * u,
+        z: 1.15 * t * t * (3 - 2 * t) * u, nx: dy / length, ny: dx / length,
+        halfY: (0.8 + 0.85 * heel) * toe * u, halfZ: (0.52 - 0.1 * t) * toe * u };
+    };
+    for (let i = 0; i <= bladeSegments; i++) {
+      const s = bladeShape(i / bladeSegments), wx = s.nx * s.halfY, wy = s.ny * s.halfY;
+      bladeSections.push([pushVert(blade, s.x - wx, s.y - wy, s.z - s.halfZ),
+        pushVert(blade, s.x + wx, s.y + wy, s.z - s.halfZ),
+        pushVert(blade, s.x + wx, s.y + wy, s.z + s.halfZ),
+        pushVert(blade, s.x - wx, s.y - wy, s.z + s.halfZ)]);
+      if (!i) continue;
+      const a = bladeSections[i - 1], b = bladeSections[i], taped = i >= 11 && i <= 21;
+      const color = taped ? tape[Math.floor((i - 11) / 3) % tape.length] : shaftColor;
+      const edge = taped ? tapeEdge : shaftSide;
+      for (let side = 0; side < 4; side++) face(blade,
+        [a[side], b[side], b[(side + 1) % 4], a[(side + 1) % 4]], side % 2 ? edge : color);
+    }
+    face(blade, [...bladeSections[bladeSegments]].reverse(), shaftSide);
+    const wraps = [];
+    for (let i = 0; i <= 6; i++) {
+      const s = bladeShape(0.35 + i * (0.4 / 6));
+      wraps.push(tube({ rings: 12, segments: 4, radius: () => 0.025 * u, colorFn: () => seam,
+        path: (t) => {
+          const edge = Math.min(3, Math.floor(t * 4)), along = t * 4 - edge;
+          const halfY = s.halfY - 0.035 * u;
+          const across = edge === 0 ? -halfY + 2 * halfY * along
+            : edge === 2 ? halfY - 2 * halfY * along : edge === 1 ? halfY : -halfY;
+          const z = edge === 0 ? s.z + s.halfZ : edge === 2 ? s.z - s.halfZ
+            : edge === 1 ? s.z + s.halfZ * (1 - 2 * along) : s.z - s.halfZ * (1 - 2 * along);
+          const skew = across / s.halfY * 0.18 * u;
+          return { x: s.x + s.nx * across - s.ny * skew, y: s.y + s.ny * across + s.nx * skew, z };
+        } }));
+    }
+    const stick = merge(shaft, blade, gripWrap, ...wraps);
+    stick.stoneAxe = true;
+    stick.weaponLength = 20 * u;
+    return stick;
+  };
   BL.characters.add({
     handle: "MrHodlX",
     joined: 1788800920,
     lastCommit: 1788200000,
     // gasMask also drives the mask's breath smoke in crew.js; nose, beard and mouth sit under the mask
-    look: { gasMask: true, hairless: true, noBrow: true, face: "none" },
+    look: { gasMask: true, stoneAxe: true, hairless: true, noBrow: true, face: "none" },
     dress: {
       hatY: (k) => 0.66 * k.h,
+      club: (k) => ({ default: hockeyStickGeometry(k.h), gold: hockeyStickGeometry(k.h, true), rest: { x: 0.24, z: 0 }, carry: { x: 0.95, z: 0 } }),
       headgear(k) {
         const h = k.h;
         addChild(k.parts.head, createNode({ scale: { x: h, y: h, z: h }, geometry: gasMaskGeometry() }));
@@ -29733,7 +29813,13 @@ void main() {
         && (!clear || clear(targetOrigin.x, targetOrigin.y, targetOrigin.z, targetOrigin.x + mx * near, targetOrigin.y + my * near, targetOrigin.z + mz * near, out.node, true));
     };
     const meleeTarget = (out, cave) => {
-      if (cave !== player() || !armed() || !cave.weapon.primaryEquipped) return false;
+      if (cave !== player() || !cave.weapon.primaryEquipped) return false;
+      if (!armed()) {
+        crew.weaponOrigin(targetOrigin, cave, true);
+        const yaw = cave.root.rotation.y;
+        return input.weaponTargets.verticalRay(out, targetOrigin.x, targetOrigin.y, targetOrigin.z,
+          Math.sin(yaw), Math.cos(yaw), crew.meleeReach(cave), cave, sightClear || cursorClear) && out.type === "object";
+      }
       if (assistedView()) {
         if (!assistedTargetActive || !assistedTargetInRange || assistedTargetHit.type !== "object") return false;
         Object.assign(out, assistedTargetHit);
@@ -30229,12 +30315,12 @@ void main() {
             const w = player().weapon, before = w.shotsFired + w.triggerQueued;
             aimLeftFocused = ads;
             weaponAction("weapon-fire", true);
-            aimLeftAccepted = !ads || w.shotsFired + w.triggerQueued > before;
+            aimLeftAccepted = !ads || w.triggerHeld || w.reloadFireHeld || w.shotsFired + w.triggerQueued > before;
           }
         }
         if (e.button === 2) {
           ads = true;
-          if (e.buttons & 1 && !player().weapon.primaryEquipped) crew.setWeaponTrigger(true, true);
+          if (e.buttons & 1 && !player().weapon.primaryEquipped && crew.setWeaponTrigger(true, true)) aimLeftAccepted = true;
         }
       } else if (e.type === "pointerup" || e.type === "pointermove") {
         if (e.button === 0) {
@@ -30274,7 +30360,8 @@ void main() {
       }
     };
     const releaseAimAttack = (e) => {
-      if (externalControl || !crew || aimReleaseEvent === e) return;
+      if (externalControl || !crew || aimReleaseEvent === e || e.type === "mouseup" && aimReleaseEvent?.type === "pointerup"
+        && e.button === aimReleaseEvent.button && e.timeStamp - aimReleaseEvent.timeStamp < 100) return;
       aimReleaseEvent = e;
       const cave = player(), focused = aimLeftFocused || ads;
       // Chorded mouse buttons do not consistently emit a second pointerdown:
@@ -30634,7 +30721,7 @@ void main() {
         crew.toggleWeapon(cave);
         syncAim();
         if (armed() && cave.weapon.equipped) lockAim();
-        if (cave.weapon.equipped) hud.hint(armed() ? "Left-click bursts · hold right-click for single-shot aim · 1 melee · 2 AK · scroll to change view · Space reloads or jumps / jetpacks" : "AK equipped · right-click or scroll in to aim · 1 melee · Space reloads beside the pile or jumps / jetpacks");
+        if (cave.weapon.equipped) hud.hint(armed() ? "Left-click bursts · zoom: tap one shot, hold for auto · 1 melee · 2 AK · scroll to change view · Space reloads or jumps / jetpacks" : "AK equipped · right-click or scroll in to aim · 1 melee · Space reloads beside the pile or jumps / jetpacks");
         else hud.hint(armed() ? "Hold left-click to raise the club · release to strike · right-click focuses a harder swing · 2 AK · scroll out for navigation" : "Club equipped · right-click or scroll in to aim · 2 AK");
       } else if (action === "weapon-fire") {
         if (cave.weapon.primaryEquipped) crew.swingWeapon(cave, false, ads);
@@ -30659,7 +30746,7 @@ void main() {
       syncAim();
       if (armed()) lockAim();
       syncWeaponHud();
-      hud.hint(armed() ? slot === 1 ? "Hold left-click to raise the club · release to strike · right-click focuses a harder swing · 2 AK · scroll out for navigation" : "Left-click bursts · hold right-click for single-shot aim · 1 melee · scroll out for navigation · Space reloads beside the pile" : "1 melee · 2 AK · right-click or scroll in to aim · Space reloads beside the pile or jumps / jetpacks");
+      hud.hint(armed() ? slot === 1 ? "Hold left-click to raise the club · release to strike · right-click focuses a harder swing · 2 AK · scroll out for navigation" : "Left-click bursts · zoom: tap one shot, hold for auto · 1 melee · scroll out for navigation · Space reloads beside the pile" : "1 melee · 2 AK · right-click or scroll in to aim · Space reloads beside the pile or jumps / jetpacks");
       if (ctx.reloadAnywhere) hud.hint("1 melee · 2 AK · right-click to aim · V fire · R reload · Space use / reload / jump");
       return true;
     };
@@ -30874,28 +30961,34 @@ void main() {
         orbit.yaw = orbit.tYaw = Math.atan2(-dx, -dz);
         orbit.pitch = orbit.tPitch = clamp(Math.atan2(-dy, Math.hypot(dx, dz)), TRAILING_PITCH[0], TRAILING_PITCH[1]);
       }
-      const recovered = (closeWanted || closeMix > 0) && ctx.releaseView && ctx.releaseView(cave, camera.position);
+      if ((closeWanted || closeMix > 0) && ctx.releaseView) ctx.releaseView(cave, camera.position);
+      closeWanted = false;
       resetGroundView();
-      if (closeWanted) {
-        setFreeEye();
-        closeMix = 1;
-        closeVelocity = 0;
-      }
-      else if (recovered) {
-        // ctx.releaseView handed back a clear eye in solid rock: rebase the orbit so the next frame keeps that position.
-        const cp = Math.cos(orbit.pitch), distance = orbit.dist;
-        freeTarget.x = camera.position.x - Math.sin(orbit.yaw) * cp * distance;
-        freeTarget.y = camera.position.y - Math.sin(orbit.pitch) * distance;
-        freeTarget.z = camera.position.z - Math.cos(orbit.yaw) * cp * distance;
-        orbit.target = freeTarget;
-        orbit.tx = freeTarget.x; orbit.ty = freeTarget.y; orbit.tz = freeTarget.z;
-      }
       restoreHead();
       entryRebase = entryOffsetActive = false;
       closeCave = null;
       crew.release();
       syncAim();
+      const portrait = clamp(1 - renderer.size.width / Math.max(1, renderer.size.height), 0, 0.6);
+      freeTarget.x = camera.target.x;
+      freeTarget.y = camera.target.y + portrait * 0.6;
+      freeTarget.z = camera.target.z;
+      const dx = camera.position.x - freeTarget.x, dy = camera.position.y - freeTarget.y, dz = camera.position.z - freeTarget.z;
+      orbit.dist = orbit.tDist = Math.hypot(dx, dy, dz);
+      const horizontal = Math.hypot(dx, dz);
+      orbit.yaw = orbit.tYaw = horizontal > 1e-5 ? Math.atan2(dx, dz)
+        : camera.up ? Math.atan2(camera.up.x, camera.up.z) : orbit.yaw;
+      orbit.pitch = orbit.tPitch = clamp(Math.atan2(dy, horizontal), TRAILING_PITCH[0], TRAILING_PITCH[1]);
+      closeMix = closeVelocity = 0;
+      orbit.target = freeTarget;
+      orbit.tx = freeTarget.x; orbit.ty = freeTarget.y; orbit.tz = freeTarget.z;
+      distanceVelocity = zoomPitchVelocity = 0;
+      dollyTime = DOLLY_HANDOFF;
+      eyeMotionValid = false;
+      headOrbit = exitAngleHold = closeCameraActive = false;
       carryExitMode = carryFocusRemaining = 0;
+      freeStrafe = freeForward = freeClimb = 0;
+      freeMoveYaw = orbit.yaw;
       hud.el.act.hidden = true;
       syncJetpackHud();
       syncWeaponHud();
@@ -34850,16 +34943,16 @@ void main() {
   const EAT_RATE = 1 / 20;
   const CHEW_PERIOD = 3.2;
   const AMMO_MAX = 30, AMMO_PER_BANANA = 3, RELOAD_PERIOD = 1.2, BURST_ROUNDS = 3, BURST_STEP = 0.09, SHOT_PERIOD = 0.44;
+  const FOCUSED_AUTO_HOLD = 0.12;
   const SHOT_POWER = 0.5;
   const GUN_MUZZLE_Y = -0.01, GUN_MUZZLE_Z = 0.67;
   const GUN_SIGHT_DOWN = Math.atan2(0.09 - 0.08, 0.59 + 0.18);
   const GUN_SIGHT_DROP = 0.08 * Math.cos(GUN_SIGHT_DOWN) + 0.18 * Math.sin(GUN_SIGHT_DOWN);
-  const GUN_SIGHT_YAW = 0.01, GUN_SIGHT_ROLL = 0.045;
   const MELEE_FOCUS_POWER = 1.5, MELEE_MAX_POWER = 2, MELEE_QUICK_POWER = 0.5;
   const MELEE_WIND = 0.08, MELEE_QUICK_WIND = 0.025, MELEE_STRIKE = 0.128, MELEE_QUICK_STRIKE = 0.09, MELEE_RECOVER = 0.112;
   const MELEE_RELEASE = MELEE_STRIKE + MELEE_RECOVER, MELEE_TIME = MELEE_WIND + MELEE_RELEASE;
   const MELEE_TAP_TIME = 0.12, MELEE_CHARGE_DELAY = 0.24, MELEE_CHARGE_TIME = 1;
-  const MELEE_COMBO_WINDOW = 0.4, MELEE_BUFFER_MAX = 8;
+  const MELEE_COMBO_WINDOW = 0.4;
   const MELEE_READY_HOLD = 0.5, MELEE_CARRY_BLEND = 0.25;
   const clearMeleeThrust = (cave) => {
     const w = cave.weapon, p = cave.parts.armL.position;
@@ -34960,9 +35053,11 @@ void main() {
   const LAND_DUST = [models.particleGeometry("#a3874f", 0.1, 0)];
   const MASK_SMOKE = { ...models.particleGeometry("#c9cbce", 0.09, 0.15) };
   const MASK_PORTS = [[0, 0], ...[0, 1, 2, 3, 4, 5].map((i) => [Math.cos(i / 6 * Math.PI * 2) * 0.065, Math.sin(i / 6 * Math.PI * 2) * 0.065])];
-  const MASK_SMOKE_CAP = MASK_PORTS.length * 36;
-  const MASK_SMOKE_SMALL = 0.34, MASK_SMOKE_MERGE_MAX = 12;
+  const MASK_SMOKE_PER_PORT = 2, MASK_SMOKE_SMALL_PER_PORT = 4;
+  const MASK_SMOKE_CAP = MASK_PORTS.length * Math.max(36 * MASK_SMOKE_PER_PORT, 12 * MASK_SMOKE_SMALL_PER_PORT);
+  const MASK_SMOKE_SMALL = 0.34, MASK_SMOKE_MERGE_MAX = 12, MASK_SMOKE_SEPARATION = 0.04;
   const MASK_SMOKE_MAX = MASK_SMOKE_SMALL * Math.cbrt(MASK_SMOKE_MERGE_MAX);
+  const MASK_SMOKE_RISE = 0.06, MASK_SMOKE_LIFT = 0.12;
   const BURN_FLAMES = [models.particleGeometry("#ff8a2a", 0.14, 1), models.particleGeometry("#ffc148", 0.12, 1)];
   const BURN_SMOKE = models.particleGeometry("#70685f", 0.18, 0);
   const ROLL_SECONDS = 3, SOOT_SECONDS = 10, EMBER_HEAT_SECONDS = 4;
@@ -35311,6 +35406,7 @@ void main() {
       weapon.reloadFireRounds = BURST_ROUNDS;
       weapon.burstRemaining = weapon.burstTimer = 0;
       weapon.triggerHeld = weapon.triggerSingle = false;
+      weapon.triggerHeldTime = 0;
       weapon.triggerQueued = 0;
       weapon.burstPlayerAim = false;
       weapon.burstWork = false;
@@ -35326,7 +35422,6 @@ void main() {
       weapon.meleeQuick = false;
       weapon.meleeSide = 1; weapon.meleeComboTime = 0;
       weapon.meleeBladeTurn = weapon.meleeEntryBladeTurn = 0;
-      weapon.meleeBuffered = 0; weapon.meleeBufferHeld = false;
       weapon.meleeEntryX = weapon.meleeEntryY = weapon.meleeEntryZ = weapon.meleeEntryClubZ = 0;
       weapon.meleeReadyTime = 0;
       weapon.meleeAxeArm = math.quat.create(); weapon.meleeAxeClub = math.quat.create();
@@ -36404,7 +36499,6 @@ void main() {
       cave.weapon.meleeQuick = false;
       cave.weapon.meleeSide = 1; cave.weapon.meleeComboTime = 0;
       cave.weapon.meleeBladeTurn = cave.weapon.meleeEntryBladeTurn = 0;
-      cave.weapon.meleeBuffered = 0; cave.weapon.meleeBufferHeld = false;
       cave.weapon.meleeHeldTime = cave.weapon.meleeCharge = 0;
       cave.weapon.meleeStrikeTime = MELEE_STRIKE;
       cave.weapon.meleePower = 1;
@@ -36428,17 +36522,10 @@ void main() {
       }
       return changed;
     };
-    const swingWeapon = (cave = player, held = false, focused = false, fromBuffer = false) => {
+    const swingWeapon = (cave = player, held = false, focused = false) => {
       if (!cave || cave.health.stunned || !cave.weapon.primaryOwned || !cave.weapon.primaryEquipped || cave !== player && (cave.camp.burning || cave.camp.rolling) || cave.camp.seat || cave.bedTravel.mode) return false;
       const w = cave.weapon, arm = cave.parts.armL, club = cave.parts.club;
-      if (w.meleeHeld || w.meleeBufferHeld) return false;
-      if (w.meleeTime > MELEE_RECOVER || w.meleeBuffered && !fromBuffer) {
-        // A click made during a stroke waits for its contact instead of being
-        // dropped or forcing the previous hit to finish off screen.
-        if (!held || w.meleeBuffered >= MELEE_BUFFER_MAX) return false;
-        w.meleeBufferHeld = true;
-        return true;
-      }
+      if (w.meleeHeld) return false;
       w.meleeSide = w.meleeComboTime > 0 ? -w.meleeSide : 1;
       w.meleeEntryX = arm.rotation.x; w.meleeEntryY = arm.rotation.y; w.meleeEntryZ = arm.rotation.z;
       w.meleeEntryClubZ = club.rotation.z;
@@ -36471,17 +36558,15 @@ void main() {
       w.meleePower = focused ? MELEE_FOCUS_POWER : 1;
       if (!held) w.meleeComboTime = MELEE_COMBO_WINDOW;
       if (!held) aimMeleeStrike(cave);
+      if (!held && w.meleeTarget.node) {
+        weaponOrigin(weaponStart, cave, true);
+        hitMeleeTarget(cave);
+      }
       return true;
     };
     const releaseSwing = (cave = player, cancel = false, focused = null, quick = false) => {
       if (!cave) return false;
       const w = cave.weapon;
-      if (w.meleeBufferHeld) {
-        w.meleeBufferHeld = false;
-        if (cancel) w.meleeBuffered = 0;
-        else w.meleeBuffered = Math.min(MELEE_BUFFER_MAX, w.meleeBuffered + 1);
-        return true;
-      }
       if (!w.meleeHeld) return false;
       w.meleeTarget.node = null;
       if (!cancel && ctx.meleeTarget && !ctx.meleeTarget(w.meleeTarget, cave)) w.meleeTarget.node = null;
@@ -36493,13 +36578,16 @@ void main() {
       w.meleeTime = cancel ? 0 : w.meleeStrikeTime + MELEE_RECOVER + (w.meleeQuick ? MELEE_QUICK_WIND : 0);
       w.meleeComboTime = cancel ? 0 : MELEE_COMBO_WINDOW;
       if (cancel) {
-        w.meleeBuffered = 0;
         w.meleeReadyTime = 0;
         w.meleePower = 1;
         w.meleeHeldTime = w.meleeCharge = 0;
         w.meleeStrikeTime = MELEE_STRIKE;
       }
       aimMeleeStrike(cave);
+      if (!cancel && w.meleeTarget.node) {
+        weaponOrigin(weaponStart, cave, true);
+        hitMeleeTarget(cave);
+      }
       return true;
     };
     // Thrusters built into a character sit wherever its own model puts them, so
@@ -36653,7 +36741,8 @@ void main() {
         // haft midpoint to just beneath the stone head.
         parts.armL.rotation.x = lerp(parts.armL.rotation.x, AXE_STICK_ARM, stick);
         parts.armL.rotation.y = parts.armL.rotation.z = 0;
-        const grip = lerp(7 / 16, 11 / 16, stick) * h;
+        const hockeyStick = cave.traits.name === "MrHodlX";
+        const grip = (hockeyStick ? lerp(10 / 16, 13 / 16, stick) : lerp(7 / 16, 11 / 16, stick)) * h;
         const gripX = lerp(0.075, 0.025, stick) * h;
         cave.axeRotation.set(AXE_FORWARD_ROTATION);
         math.quat.slerpTo(cave.axeRotation, AXE_UPRIGHT_ROTATION, stick);
@@ -36694,7 +36783,11 @@ void main() {
           setVec(ghost.rotation, Math.PI / 2, spin + side * (i + 1) * CHUK_TRAIL, 0);
         }
       } else {
-        setVec(parts.club.position, slungClub ? -0.25 * h : 0, (slungClub ? 0.25 : raisedPrimary ? -0.625 : -0.62) * h, (slungClub ? -0.3 : raisedPrimary ? 0.15 : 0.08) * h);
+        const hockeySling = slungClub && cave.traits.name === "MrHodlX";
+        const slingX = hockeySling ? -0.29 : -0.25, slingY = hockeySling ? 0.21 : 0.25;
+        setVec(parts.club.position, slungClub ? slingX * h : 0,
+          (slungClub ? slingY : raisedPrimary ? -0.625 : -0.62) * h,
+          (slungClub ? -0.3 : raisedPrimary ? 0.15 : 0.08) * h);
         setVec(parts.club.rotation, slungClub ? cave.traits.stoneAxe ? 0 : CLUB_SLING_TILT : raisedPrimary ? 0 : cave.clubCarry.x,
           0, slungClub ? CLUB_SLING_ANGLE : raisedPrimary ? Math.PI / 2 : cave.clubCarry.z);
       }
@@ -36994,16 +37087,13 @@ void main() {
         const kick = clamp((w.recoil - GUN_HOLD + GUN_KICK) / GUN_KICK, 0, 1);
         const forward = (0.85 - 0.04 * kick) * h, drop = (GUN_SIGHT_DROP - 0.02 * kick) * h;
         const sightPitch = -Math.atan2(fy, flat) + GUN_SIGHT_DOWN - 0.035 * kick;
-        // Cant the gun slightly, then keep the front post on the centre ray.
-        const sightSide = (0.09 * Math.sin(GUN_SIGHT_ROLL) * Math.cos(GUN_SIGHT_YAW)
-          - Math.sin(GUN_SIGHT_YAW) * (0.09 * Math.cos(GUN_SIGHT_ROLL) * Math.sin(sightPitch)
-            + 0.59 * Math.cos(sightPitch))) * h;
+        // Keep the sights straight and centered on the view ray.
         const ex = cy * (eye.x - p.x) - sy * (eye.z - p.z);
         const ez = sy * (eye.x - p.x) + cy * (eye.z - p.z);
-        gun.position.x = lerp(gun.position.x, ex + fx * forward + fy * fx / flat * drop + fz / flat * sightSide, sightMix);
+        gun.position.x = lerp(gun.position.x, ex + fx * forward + fy * fx / flat * drop, sightMix);
         gun.position.y = lerp(gun.position.y, eye.y - p.y + fy * forward - flat * drop, sightMix);
-        gun.position.z = lerp(gun.position.z, ez + fz * forward + fy * fz / flat * drop - fx / flat * sightSide, sightMix);
-        math.quat.fromEuler(GUN_SIGHT, sightPitch, Math.atan2(fx, fz) + GUN_SIGHT_YAW, GUN_SIGHT_ROLL);
+        gun.position.z = lerp(gun.position.z, ez + fz * forward + fy * fz / flat * drop, sightMix);
+        math.quat.fromEuler(GUN_SIGHT, sightPitch, Math.atan2(fx, fz), 0);
         math.quat.slerpTo(gun.quaternion, GUN_SIGHT, sightMix);
         gun.poseLean *= 1 - sightMix;
         // The gun moves to the eye in this pose; carry the gripping hand with
@@ -37032,6 +37122,7 @@ void main() {
       const w = cave.weapon;
       w.burstRemaining = w.burstTimer = w.recoil = 0;
       w.triggerHeld = w.triggerSingle = false;
+      w.triggerHeldTime = 0;
       w.triggerQueued = 0;
       w.reloadFire = w.reloadFireHeld = false;
       w.reloadFireRounds = BURST_ROUNDS;
@@ -37125,6 +37216,7 @@ void main() {
       if (!held) {
         w.triggerHeld = false;
         w.triggerSingle = false;
+        w.triggerHeldTime = 0;
         w.reloadFireHeld = false;
         if (!w.burstRemaining) w.burstTimer = 0;
         return true;
@@ -37137,15 +37229,10 @@ void main() {
         return true;
       }
       if (!weaponReady(player)) return false;
-      if (w.triggerHeld) {
-        if (single && !w.triggerSingle) {
-          w.triggerSingle = true;
-          w.burstRemaining = 0;
-        }
-        return true;
-      }
+      if (w.triggerHeld) return true;
       w.triggerSingle = single;
       w.triggerHeld = true;
+      w.triggerHeldTime = 0;
       if (!w.burstRemaining) {
         // A fresh press may wait out the previous shot's cooldown. It never
         // resumes automatically after reload, stow or another cancellation.
@@ -37165,6 +37252,10 @@ void main() {
       // free hand cheers. The unfinished reload resumes from the same round.
       if (cave !== player && cave.state === "working" && cave.cheer > 0) { stopBurst(cave); return; }
       w.cooldown = Math.max(0, w.cooldown - dt);
+      if (w.triggerHeld && w.triggerSingle) {
+        w.triggerHeldTime += dt;
+        if (w.triggerHeldTime >= FOCUSED_AUTO_HOLD) w.triggerSingle = false;
+      }
       w.recoil = Math.max(0, w.recoil - dt);
       w.reloadHandoffFrame = !!w.reloadHandoff;
       if (w.reloadHandoff) {
@@ -37210,14 +37301,17 @@ void main() {
         return;
       }
       if (!w.burstRemaining && !w.triggerHeld) return;
-      // Focused aim is semi-automatic: one press owns one round even when
-      // the button remains held. Releasing arms the next press.
-      if (w.triggerSingle && !w.burstRemaining) return;
+      // A short focused press stays a single shot. A longer hold resumes
+      // automatic fire on the same shot clock.
+      if (w.triggerSingle && !w.burstRemaining) {
+        w.burstTimer = Math.max(0, w.burstTimer - dt);
+        return;
+      }
       if (!weaponReady(cave) || w.burstWork && (cave.work.phase !== "shoot" || !siteActive(cave, workSites[cave.work.site]))) {
         stopBurst(cave);
         return;
       }
-      if (w.triggerHeld && !w.burstTimer) { fireWeapon(cave); return; }
+      if (w.triggerHeld && !w.burstTimer && w.triggerHeldTime < FOCUSED_AUTO_HOLD) { fireWeapon(cave); return; }
       w.burstTimer -= dt;
       // Finish a tapped burst; holding continues on the same shot clock.
       // Keep the normal magazine-sized catch-up bound in unlimited debug mode.
@@ -39462,7 +39556,6 @@ void main() {
         const w = cave.weapon;
         clearMeleeThrust(cave);
         w.meleeTime = w.meleeReadyTime = w.meleeComboTime = 0;
-        w.meleeBuffered = 0; w.meleeBufferHeld = false;
         w.meleeTarget.node = w.meleeTarget.owner = null;
         w.meleeAimX = w.meleeAimY = w.meleeAimZ = 0;
         w.meleeQuick = false;
@@ -39645,7 +39738,6 @@ void main() {
       cave.weapon.meleeTime = cave.weapon.meleeComboTime = 0;
       cave.weapon.meleeHeld = false;
       cave.weapon.meleeQuick = false;
-      cave.weapon.meleeBuffered = 0; cave.weapon.meleeBufferHeld = false;
       cave.weapon.meleeReadyTime = 0;
       cave.weapon.meleeTarget.node = cave.weapon.meleeTarget.owner = null;
       cave.weapon.meleeHeldTime = cave.weapon.meleeCharge = 0;
@@ -39953,7 +40045,7 @@ void main() {
       }
       ctx2d.restore();
     };
-    const wrapMaskSmoke = (cave, puff, dt, walking) => {
+    const wrapMaskSmoke = (cave, puff) => {
       const node = puff.node, p = node.position, bounds = cave.gunHeadBounds, m = cave.parts.head.world;
       math.mat4.transformPoint(SMOKE_LOCAL, SMOKE_INVERSE, p.x, p.y, p.z);
       const radius = 0.09 * node.scale.x * Math.sqrt(3), x = SMOKE_LOCAL[0], y = SMOKE_LOCAL[1], z = SMOKE_LOCAL[2];
@@ -39965,9 +40057,6 @@ void main() {
       // them. Keep the same side for a puff as it curls past the head.
       const side = puff.wrapSide;
       let nx = x;
-      if (walking > 0.1 && z > maxZ && x > minX && x < maxX) {
-        nx += side * walking * dt * 0.8 * clamp(1 - (z - maxZ) / 0.2, 0, 1);
-      }
       if (nx > minX && nx < maxX && z > minZ && z < maxZ) nx = side < 0 ? minX - 0.001 : maxX + 0.001;
       if (nx === x) return;
       math.mat4.transformPoint(MUZZLE, m, nx, y, z);
@@ -39983,57 +40072,102 @@ void main() {
       // Refresh the head after movement and animation, even offscreen.
       BL.scene.updateWorld(cave.root);
       math.mat4.invert(SMOKE_INVERSE, cave.parts.head.world);
-      const walking = Math.hypot(cave.shoulder.motionX, cave.shoulder.motionZ);
+      const motion = cave.shoulder, walkingSpeed = Math.hypot(motion.motionX, motion.motionZ);
+      const walking = walkingSpeed > 0.25 && cave.hop === 0;
+      const forwardX = walking ? motion.motionX / walkingSpeed : 0;
+      const forwardZ = walking ? motion.motionZ / walkingSpeed : 0;
+      const head = cave.parts.head.world;
+      math.mat4.transformPoint(MUZZLE, head, 0, 0.27 * cave.traits.height, 0);
+      const headX = MUZZLE[0], headY = MUZZLE[1], headZ = MUZZLE[2];
       for (let i = 0; i < cave.breathSmoke.length; i++) {
         const puff = cave.breathSmoke[i];
         if (puff.life <= 0) continue;
         puff.life = Math.max(0, puff.life - dt);
-        const drag = Math.exp(-1.3 * dt);
-        puff.vx *= drag; puff.vz *= drag; puff.vy = damp(puff.vy, 0.3, 0.9, dt);
         const node = puff.node;
         const time = puff.maxLife - puff.life;
+        // Keep the initial exhale, then let both sizes settle into a slow upward drift.
+        const exhaling = time < 0.25;
+        const drag = Math.exp(-(exhaling ? 1.3 : 3.2) * dt);
+        puff.vx *= drag; puff.vz *= drag;
+        puff.vy = damp(puff.vy, exhaling ? 0.15 : MASK_SMOKE_RISE, exhaling ? 0.9 : 3.2, dt);
+        if (walking && time > 0.12 && time < 2.2) {
+          const p = node.position;
+          const dx = p.x - headX, dz = p.z - headZ;
+          const along = dx * forwardX + dz * forwardZ;
+          if (along > -2.5 && along < 1.5) {
+            // The walking direction shapes the wake without passing the Ooga's
+            // velocity to smoke. Wisps fan around the head, then meet behind it.
+            const across = -dx * forwardZ + dz * forwardX;
+            const wake = clamp((0.1 - along) / 0.7, 0, 1);
+            const spread = lerp(0.42, 0.03, wake);
+            const side = clamp((Math.cos(puff.phase) * spread - across) * 3, -0.9, 0.9);
+            const rise = clamp((Math.sin(puff.phase) * spread * 0.7 - (p.y - headY)) * 2, -0.5, 0.5);
+            puff.vx = damp(puff.vx, -forwardX * 0.22 - forwardZ * side, 4, dt);
+            puff.vy = damp(puff.vy, MASK_SMOKE_RISE + rise, 4, dt);
+            puff.vz = damp(puff.vz, -forwardZ * 0.22 + forwardX * side, 4, dt);
+          }
+        }
         node.position.x += (puff.vx + Math.sin(time * 3 + puff.phase) * 0.025) * dt;
         node.position.y += puff.vy * dt;
         node.position.z += (puff.vz + Math.cos(time * 2.5 + puff.phase) * 0.025) * dt;
         node.rotation.y += 1.2 * dt;
-        // Smoke keeps spreading as it floats away; fading never pulls it back in.
+        // Individual puffs keep expanding even when the walking wake converges.
         const age = 1 - puff.life / puff.maxLife;
         const s = Math.min(MASK_SMOKE_MAX, puff.size * (1 + age * 1.8));
         node.scale.x = node.scale.y = node.scale.z = s;
         node.smokeOpacity = 0.85 * Math.min(1, puff.life / (puff.maxLife * 0.65));
-        wrapMaskSmoke(cave, puff, dt, walking);
+        wrapMaskSmoke(cave, puff);
       }
       cave.breathMerge -= dt;
       if (cave.breathMerge <= 0) {
         cave.breathMerge = 0.14;
-        // Neighbouring wisps merge into larger clouds once clear of the filter.
-        // Scan the fixed pool at a bounded cadence and conserve cube volume.
+        // Neighbours merge once clear of the filter. Others push apart before
+        // too many smoke cubes occupy the same space, while retaining some overlap.
         const smoke = cave.breathSmoke;
         for (let i = 0; i < smoke.length; i++) {
           const a = smoke[i];
-          if (a.life <= 0 || a.maxLife - a.life < 0.2) continue;
+          if (a.life <= 0) continue;
           for (let j = i + 1; j < smoke.length; j++) {
             const b = smoke[j];
-            if (b.life <= 0 || b.maxLife - b.life < 0.2 || a.cubes + b.cubes > MASK_SMOKE_MERGE_MAX) continue;
+            if (b.life <= 0) continue;
             const ap = a.node.position, bp = b.node.position;
-            const dx = bp.x - ap.x, dy = bp.y - ap.y, dz = bp.z - ap.z;
-            const reach = 0.09 * (a.node.scale.x + b.node.scale.x) * 1.35;
-            if (dx * dx + dy * dy + dz * dz > reach * reach) continue;
-            const av = a.node.scale.x ** 3, bv = b.node.scale.x ** 3, size = Math.cbrt(av + bv);
-            if (size > MASK_SMOKE_MAX) continue;
-            const weight = bv / (av + bv);
-            ap.x += dx * weight; ap.y += dy * weight; ap.z += dz * weight;
-            a.vx = lerp(a.vx, b.vx, weight); a.vy = lerp(a.vy, b.vy, weight); a.vz = lerp(a.vz, b.vz, weight);
-            a.life = Math.max(a.life, b.life); a.maxLife = Math.max(a.maxLife, b.maxLife);
-            a.cubes += b.cubes;
-            a.size = size / (1 + (1 - a.life / a.maxLife) * 1.8);
-            setVec(a.node.scale, size, size, size);
-            a.node.smokeOpacity = Math.max(a.node.smokeOpacity, b.node.smokeOpacity);
-            b.life = 0; b.node.smokeOpacity = 0;
+            let dx = bp.x - ap.x, dy = bp.y - ap.y, dz = bp.z - ap.z;
+            let distance2 = dx * dx + dy * dy + dz * dz;
+            const scales = a.node.scale.x + b.node.scale.x;
+            const reach = 0.09 * scales * 1.35;
+            if (distance2 > reach * reach) continue;
+            const av = a.node.scale.x ** 3, bv = b.node.scale.x ** 3;
+            if (a.maxLife - a.life >= 0.2 && b.maxLife - b.life >= 0.2 && a.cubes + b.cubes <= MASK_SMOKE_MERGE_MAX) {
+              const size = Math.cbrt(av + bv);
+              if (size <= MASK_SMOKE_MAX) {
+                const weight = bv / (av + bv);
+                ap.x += dx * weight; ap.y += dy * weight; ap.z += dz * weight;
+                a.vx = lerp(a.vx, b.vx, weight); a.vy = lerp(a.vy, b.vy, weight); a.vz = lerp(a.vz, b.vz, weight);
+                a.life = Math.max(a.life, b.life); a.maxLife = Math.max(a.maxLife, b.maxLife);
+                a.cubes += b.cubes;
+                a.size = size / (1 + (1 - a.life / a.maxLife) * 1.8);
+                setVec(a.node.scale, size, size, size);
+                a.node.smokeOpacity = Math.max(a.node.smokeOpacity, b.node.smokeOpacity);
+                b.life = 0; b.node.smokeOpacity = 0;
+                continue;
+              }
+            }
+            const spacing = MASK_SMOKE_SEPARATION * scales;
+            if (distance2 >= spacing * spacing) continue;
+            if (distance2 < 1e-10) {
+              dx = i & 1 ? 0.001 : -0.001;
+              dy = 0;
+              dz = j & 1 ? 0.001 : -0.001;
+              distance2 = dx * dx + dz * dz;
+            }
+            const push = (spacing / Math.sqrt(distance2) - 1) * 0.7;
+            const aShare = bv / (av + bv), bShare = av / (av + bv);
+            ap.x -= dx * push * aShare; ap.y -= dy * push * aShare; ap.z -= dz * push * aShare;
+            bp.x += dx * push * bShare; bp.y += dy * push * bShare; bp.z += dz * push * bShare;
           }
         }
         // Merging conserves volume but can move the new centre toward the head.
-        for (let i = 0; i < smoke.length; i++) if (smoke[i].life > 0) wrapMaskSmoke(cave, smoke[i], 0, walking);
+        for (let i = 0; i < smoke.length; i++) if (smoke[i].life > 0) wrapMaskSmoke(cave, smoke[i]);
       }
       if (!cave.root.visible || cave.state !== "working" && cave.state !== "chilling") return;
       cave.breathAt -= dt;
@@ -40046,25 +40180,28 @@ void main() {
       // The filter's front is at (0, 0.1, 0.467) in the scaled mask.
       const m = cave.parts.head.world, h = cave.traits.height;
       const forwardLength = Math.hypot(m[8], m[9], m[10]);
-      const first = (cave.breathTotal - cave.breathPuffs) * MASK_PORTS.length;
-      for (let i = 0; i < MASK_PORTS.length; i++) {
+      const perPort = cave.breathHuge ? MASK_SMOKE_PER_PORT : MASK_SMOKE_SMALL_PER_PORT;
+      const first = (cave.breathTotal - cave.breathPuffs) * MASK_PORTS.length * perPort;
+      for (let i = 0; i < MASK_PORTS.length * perPort; i++) {
         // Matches the centre hole and six surrounding holes in MrHodlX's gas mask (src/characters/MrHodlX.js).
-        const port = MASK_PORTS[i];
+        const port = MASK_PORTS[i % MASK_PORTS.length];
         math.mat4.transformPoint(MUZZLE, m, (port[0] + (Math.random() - 0.5) * 0.006) * h, (0.1 + port[1] + (Math.random() - 0.5) * 0.006) * h, (0.49 + Math.random() * 0.004) * h);
-        const k = ((cave.breathHuge ? 1.35 : 0.16) + walking * 1.15) * (0.8 + Math.random() * 0.4) / forwardLength;
-        const side = (Math.random() - 0.5) * 0.012;
-        const lift = (Math.random() - 0.5) * 0.012;
+        const k = (cave.breathHuge ? 1.35 : 0.16) * (0.8 + Math.random() * 0.4) / forwardLength;
+        const spread = cave.breathHuge ? 3.5 : 0, jitter = cave.breathHuge ? 0.18 : 0.012;
+        const side = port[0] * spread + (Math.random() - 0.5) * jitter;
+        const lift = port[1] * spread + (Math.random() - 0.5) * jitter;
         const puff = cave.breathSmoke[first + i];
         setVec(puff.node.position, MUZZLE[0], MUZZLE[1], MUZZLE[2]);
         puff.size = cave.breathHuge ? 0.48 + Math.random() * 0.16 : MASK_SMOKE_SMALL * (0.75 + Math.random() * 0.25);
         puff.cubes = 1;
         puff.phase = Math.random() * Math.PI * 2;
-        puff.wrapSide = port[0] ? Math.sign(port[0]) : i & 1 ? -1 : 1;
+        puff.wrapSide = walking ? (Math.cos(puff.phase) < 0 ? -1 : 1)
+          : port[0] ? Math.sign(port[0]) : i & 1 ? -1 : 1;
         puff.node.rotation.y = puff.phase;
         setVec(puff.node.scale, puff.size, puff.size, puff.size);
         puff.node.smokeOpacity = 0.85;
         puff.vx = m[8] * k + m[0] * side + m[4] * lift;
-        puff.vy = m[9] * k + m[1] * side + m[5] * lift + 0.24;
+        puff.vy = m[9] * k + m[1] * side + m[5] * lift + MASK_SMOKE_LIFT;
         puff.vz = m[10] * k + m[2] * side + m[6] * lift;
         puff.life = puff.maxLife = cave.breathHuge ? 4 + Math.random() * 0.6 : 2.6 + Math.random() * 0.6;
       }
@@ -40217,11 +40354,6 @@ void main() {
           poseWeapon(cave);
           BL.scene.updateWorld(cave.root);
         }
-      }
-      if (w.meleeBuffered && !w.meleeBufferHeld && w.meleeTime <= MELEE_RECOVER && cave === player) {
-        w.meleeBuffered--;
-        if (swingWeapon(cave, true, false, true)) releaseSwing(cave, false, false, true);
-        else w.meleeBuffered = 0;
       }
       if (ctx.characterSupportAt) riding.support = ctx.characterSupportAt(cave);
       if (dt > 0 && cave.root.visible && (cave.state === "working" || cave.state === "chilling") && ctx.onBodyMove) ctx.onBodyMove(cave, x, y, z, dt);
@@ -45985,28 +46117,18 @@ void main() {
       lathe({ profile: [[trimIn, 0], [trimOut, 0], [trimOut, 0.04], [trimIn, 0.04], [trimIn, 0]], segments: 96, color: "#1d2b33" })
     );
   });
-  // The destination is a hollow LED sphere, with a real doorway through both skins. The outer skin is the screen:
-  // sixteen lunes and one logo layer, each its own node so `show` lights them through `glow` and `highlight` (a
-  // float per instance, no geometry upload). Its tiles shade as one round ball from normals out of the centre. The
-  // inner skin draws the interior and carries both skins as the collision shell; the screen stays off it, because
-  // a lone skin (the logos floated one once) counts as solid under it and walls off the floor.
+  // The interior and collision shell stay fixed while the painted exterior turns around the open doorway.
   const SEGMENTS = 96, STEP = 2 * Math.PI / SEGMENTS, LUNES = 16, DOOR_TOP = 4.8, INSIDE = [19, 32, 45];
-  const LOGOS = [[0, 0.72], [Math.PI / 2, 0.25], [-Math.PI / 2, 0.25], [Math.PI, 0.25]];
+  const TAU = Math.PI * 2, DOOR_HALF_ANGLE = Math.PI / 16, SYMBOL_CELL = 0.075, SYMBOL_SLICES = 4, SYMBOL_RADIUS = SHELL_R + 0.05;
+  const SYMBOL_BEARINGS = [Math.PI / 6, Math.PI / 6 + TAU / 3, Math.PI / 6 - TAU / 3];
+  const DOOR_BOTTOM_LAT = Math.asin(-SHELL_CY / SYMBOL_RADIUS), DOOR_TOP_LAT = Math.asin((DOOR_TOP - SHELL_CY) / SYMBOL_RADIUS);
   const BITCOIN = ["00011011000", "00011011000", "01111111100", "00110000110", "00110000110", "00111111100", "00110000110", "00110000011", "00110000011", "01111111110", "00011011000", "00011011000"];
-  // One logo pixel a tile, so every stroke is whole tiles.
-  const logoAt = (longitude, latitude) => LOGOS.some(([bearing, elevation]) => {
-    const along = (longitude - bearing + 3 * Math.PI) % (2 * Math.PI) - Math.PI;
-    const col = Math.round(along / STEP + 5.5), row = Math.floor(6 - (latitude - elevation) / STEP);
-    return row >= 0 && row < BITCOIN.length && col >= 0 && col < BITCOIN[row].length && BITCOIN[row][col] === "1";
-  });
   const shell = cached(() => {
     const levels = Array.from({ length: 49 }, (_, i) => -Math.PI / 2 + i * Math.PI / 48);
     levels.push(Math.asin(-SHELL_CY / SHELL_R), Math.asin((DOOR_TOP - SHELL_CY) / SHELL_R)); levels.sort((a, b) => a - b);
     const tones = ["#d9700b", "#e8810d", "#f7931a", "#ef8910"].map(BL.math.hexToRgb), ribbon = [255, 188, 83], logo = [255, 249, 230];
     const layer = () => ({ verts: [], faces: [], lines: [], normals: [] });
-    const lunes = Array.from({ length: LUNES }, layer), logos = layer(), inner = layer(), solid = { verts: [], faces: [], lines: [] };
-    // The tiles under the logos in their plain colours, one set a lune: shown in the logos' place when a show hides them.
-    const gaps = Array.from({ length: LUNES }, layer);
+    const caps = Array.from({ length: LUNES }, layer), inner = layer(), solid = { verts: [], faces: [], lines: [] };
     const quad = (geo, r, lo, hi, bottom, top, inward, color, emissive) => {
       const base = geo.verts.length / 3, sign = inward ? -1 : 1;
       for (const [a, b] of [[lo, bottom], [hi, bottom], [hi, top], [lo, top]]) {
@@ -46020,12 +46142,10 @@ void main() {
       const lo = -Math.PI + col * STEP, hi = lo + STEP, bottom = levels[row], top = levels[row + 1];
       const latitude = (bottom + top) / 2, longitude = (lo + hi) / 2;
       const y = SHELL_CY + SHELL_R * Math.sin(latitude);
-      if (Math.abs(longitude) < Math.PI / 16 && y > 0 && y < DOOR_TOP) continue;
+      if (Math.abs(longitude) < DOOR_HALF_ANGLE && y > 0 && y < DOOR_TOP) continue;
       const band = Math.abs(latitude - 0.5 - 0.12 * Math.sin(longitude * 3)) < 0.06 || Math.abs(latitude + 0.5 + 0.12 * Math.sin(longitude * 3)) < 0.06;
-      const lit = logoAt(longitude, latitude);
       const lune = Math.floor(col * LUNES / SEGMENTS), plain = band ? ribbon : tones[(row + col % 3) % tones.length];
-      quad(lit ? logos : lunes[lune], SHELL_R, lo, hi, bottom, top, false, lit ? logo : plain, lit ? 0.85 : band ? 0.8 : 0.5);
-      if (lit) quad(gaps[lune], SHELL_R, lo, hi, bottom, top, false, plain, band ? 0.8 : 0.5);
+      if (y <= 0 || y >= DOOR_TOP) quad(caps[lune], SHELL_R + 0.02, lo, hi, bottom, top, false, plain, band ? 0.8 : 0.5);
       quad(inner, SHELL_R - SHELL_SKIN, lo, hi, bottom, top, true, INSIDE, 0.45);
       quad(solid, SHELL_R, lo, hi, bottom, top, false, INSIDE, 0);
       quad(solid, SHELL_R - SHELL_SKIN, lo, hi, bottom, top, true, INSIDE, 0);
@@ -46055,10 +46175,75 @@ void main() {
       const a = side * edge, bottom = levels[row], top = levels[row + 1];
       reveal([at(outer, a, bottom), at(outer, a, top), at(innerR, a, top), at(innerR, a, bottom)], [-side * Math.cos(a), 0, side * Math.sin(a)]);
     }
-    for (const geo of [...lunes, ...gaps, logos, inner]) geo.normals = Float32Array.from(geo.normals);
+    // Split the door-height band into angular strips, then mask only strips crossing the fixed opening.
+    const bandRows = [], bandGroups = new Map(), doorRows = [], sliceWidth = STEP / SYMBOL_SLICES;
+    for (let row = 0; row < levels.length - 1; row++) {
+      const bottom = levels[row], top = levels[row + 1], y = SHELL_CY + SHELL_R * Math.sin((bottom + top) / 2);
+      if (y > 0 && y < DOOR_TOP) doorRows.push({ row, bottom, top });
+    }
+    for (let col = 0; col < SEGMENTS; col++) {
+      const longitude = -Math.PI + (col + 0.5) * STEP, lune = Math.floor(col * LUNES / SEGMENTS);
+      const paints = doorRows.map(({ row, bottom, top }) => {
+        const latitude = (bottom + top) / 2;
+        const band = Math.abs(latitude - 0.5 - 0.12 * Math.sin(longitude * 3)) < 0.06 || Math.abs(latitude + 0.5 + 0.12 * Math.sin(longitude * 3)) < 0.06;
+        return band ? 4 : (row + col % 3) % tones.length;
+      });
+      for (let slice = 0; slice < SYMBOL_SLICES; slice++) {
+        const key = `${lune}:${paints.join("")}`;
+        let group = bandGroups.get(key);
+        if (!group) {
+          const geometry = layer();
+          for (let i = 0; i < doorRows.length; i++) quad(geometry, SHELL_R + 0.02, -sliceWidth / 2, sliceWidth / 2,
+            doorRows[i].bottom, doorRows[i].top, false, paints[i] === 4 ? ribbon : tones[paints[i]], paints[i] === 4 ? 0.8 : 0.5);
+          group = { geometry, angles: [], lune, halfWidth: sliceWidth / 2 };
+          bandGroups.set(key, group); bandRows.push(group);
+        }
+        group.angles.push(longitude + (slice - (SYMBOL_SLICES - 1) / 2) * sliceWidth);
+      }
+    }
+    const symbolRows = [];
+    for (let row = 0; row < BITCOIN.length; row++) {
+      const top = (BITCOIN.length / 2 - row) * SYMBOL_CELL, bottom = top - SYMBOL_CELL, cuts = [bottom];
+      if (bottom < DOOR_BOTTOM_LAT && DOOR_BOTTOM_LAT < top) cuts.push(DOOR_BOTTOM_LAT);
+      if (bottom < DOOR_TOP_LAT && DOOR_TOP_LAT < top) cuts.push(DOOR_TOP_LAT);
+      cuts.push(top);
+      for (let part = 0; part < cuts.length - 1; part++) {
+        const low = cuts[part], high = cuts[part + 1], geometry = layer(), half = SYMBOL_CELL / (SYMBOL_SLICES * 2);
+        quad(geometry, SYMBOL_RADIUS, -half, half, low, high, false, logo, 0.85);
+        symbolRows.push({ row, geometry, mask: low >= DOOR_BOTTOM_LAT && high <= DOOR_TOP_LAT, halfWidth: half });
+      }
+    }
+    for (const geo of [...caps, inner, ...bandRows.map(row => row.geometry), ...symbolRows.map(row => row.geometry)]) geo.normals = Float32Array.from(geo.normals);
     inner.collisionGeometry = solid;
-    return { lunes, gaps: gaps.map(geo => geo.faces.length ? geo : null), logos, inner };
+    return { caps, inner, bandRows, symbolRows };
   });
+  const rotatingBatch = (geometry, angles, place, owner, mask, halfWidth) => {
+    const node = createNode({ geometry, sightHidden: true, instanceData: new Float32Array(angles.length * 20), instanceCount: 0, instanceVersion: 0, fixedInstanceCapacity: true });
+    const baseCos = new Float32Array(angles.length), baseSin = new Float32Array(angles.length);
+    for (let i = 0; i < angles.length; i++) {
+      baseCos[i] = Math.cos(place.ry + angles[i]); baseSin[i] = Math.sin(place.ry + angles[i]);
+    }
+    return { node, angles: new Float32Array(angles), baseCos, baseSin, place, owner, mask, halfWidth };
+  };
+  const turnBatch = (batch, spin, spinCos, spinSin) => {
+    const { node, angles, baseCos, baseSin, place, owner, mask, halfWidth } = batch, data = node.instanceData;
+    let count = 0;
+    for (let i = 0; i < angles.length; i++) {
+      let local = angles[i] + spin;
+      if (local > Math.PI) local -= TAU;
+      if (local > Math.PI) local -= TAU;
+      if (local < -Math.PI) local += TAU;
+      if (mask && Math.abs(local) < DOOR_HALF_ANGLE + halfWidth) continue;
+      const c = baseCos[i] * spinCos - baseSin[i] * spinSin, s = baseSin[i] * spinCos + baseCos[i] * spinSin, o = count++ * 20;
+      data[o] = c; data[o + 1] = 0; data[o + 2] = -s; data[o + 3] = 0;
+      data[o + 4] = 0; data[o + 5] = 1; data[o + 6] = 0; data[o + 7] = 0;
+      data[o + 8] = s; data[o + 9] = 0; data[o + 10] = c; data[o + 11] = 0;
+      data[o + 12] = place.x; data[o + 13] = place.y; data[o + 14] = place.z; data[o + 15] = 1;
+      data[o + 16] = owner.glow; data[o + 17] = owner.highlight; data[o + 18] = 0; data[o + 19] = 0;
+    }
+    node.instanceCount = count;
+    node.instanceVersion++;
+  };
   // A chunky timber frame over the cut edges of both skins, lit gold along its inner faces.
   const portal = cached(() => merge(
     bevelBox({ w: 6, h: 0.5, d: 0.9, color: WOOD, offset: { y: 5.05 } }),
@@ -46152,13 +46337,33 @@ void main() {
     const place = { x: DIR.x * radius, y: island.surfaceAt(DIR.x * start, DIR.z * start) + 0.02, z: DIR.z * radius, ry: -SITE.bearing, rim: start, bridgeZ, approachFrom: BL.terrain.TIMECHAIN.from };
     const node = createNode({ position: { x: place.x, y: place.y, z: place.z }, rotation: { x: 0, y: place.ry, z: 0 } });
     const groundNode = createNode({ geometry: ground() });
-    const { lunes, gaps, logos, inner } = shell();
+    const { caps, inner, bandRows, symbolRows } = shell();
     const shellNode = createNode({ geometry: inner });
-    // The screen hangs off the site, not the shell, so registering the shell as a solid never takes it in.
-    const screen = [...lunes, logos].map(geometry => createNode({ geometry }));
-    // Hidden until a show takes the logos away; still under the root, so they stay on the GPU between shows.
-    const gapNodes = gaps.map(geometry => geometry && createNode({ geometry, visible: false }));
-    for (const gap of gapNodes) if (gap) gap.sightHidden = true;
+    const outer = createNode({ sightHidden: true });
+    const screen = caps.map(geometry => createNode({ geometry }));
+    const logo = createNode();
+    screen.push(logo);
+    addChild(outer, ...screen.slice(0, LUNES));
+    const batches = [], logoBatches = [];
+    for (const band of bandRows) {
+      const batch = rotatingBatch(band.geometry, band.angles, place, screen[band.lune], true, band.halfWidth);
+      batches.push(batch); addChild(outer, batch.node);
+    }
+    for (const part of symbolRows) {
+      const angles = [];
+      for (const bearing of SYMBOL_BEARINGS) for (let col = 0; col < BITCOIN[part.row].length; col++) {
+        if (BITCOIN[part.row][col] !== "1") continue;
+        for (let slice = 0; slice < SYMBOL_SLICES; slice++) angles.push(bearing + (col - 5 + (slice - (SYMBOL_SLICES - 1) / 2) / SYMBOL_SLICES) * SYMBOL_CELL);
+      }
+      const batch = rotatingBatch(part.geometry, angles, place, logo, part.mask, part.halfWidth);
+      batches.push(batch); logoBatches.push(batch); addChild(outer, batch.node);
+    }
+    const turn = (angle) => {
+      outer.rotation.y = angle;
+      const c = Math.cos(angle), s = Math.sin(angle);
+      for (let i = 0; i < batches.length; i++) turnBatch(batches[i], angle, c, s);
+    };
+    turn(0);
     const entrance = createNode({ geometry: portal(), position: { x: 0, y: 0, z: 12.65 } });
     addChild(entrance, createNode({ position: { x: 0, y: 5.6, z: 0 }, geometry: BL.hubModels.caveSign("TIMECHAIN SPHERE") }));
     const bridgeNode = createNode({ position: { x: 0, y: 0, z: bridgeZ }, geometry: bridge() });
@@ -46168,8 +46373,8 @@ void main() {
     const laptop = createNode({ geometry: laptopBase(), position: { x: 0, y: 1, z: 0.58 } });
     addChild(laptop, createNode({ geometry: laptopLid(), position: { x: 0, y: 0.035, z: 0.3 }, rotation: { x: 0.14, y: 0, z: 0 } }));
     addChild(swivel, back, laptop); addChild(chairNode, swivel);
-    addChild(node, groundNode, shellNode, ...screen, ...gapNodes.filter(Boolean), entrance, bridgeNode, chairNode);
-    return { node, shell: shellNode, screen, gaps: gapNodes, entrance, ground: groundNode, bridge: bridgeNode, chair: chairNode, swivel, laptop, place };
+    addChild(node, groundNode, shellNode, outer, entrance, bridgeNode, chairNode);
+    return { node, shell: shellNode, outer, turn, screen, logoBatches, entrance, ground: groundNode, bridge: bridgeNode, chair: chairNode, swivel, laptop, place };
   };
   // Most of the time the screen holds its picture; every minute or so it runs a seven-second show on the lunes'
   // `glow` and `highlight`, never the same one twice running, then settles back exactly. Some shows take the logos
@@ -46186,11 +46391,11 @@ void main() {
   const wrap = (angle) => (angle + 5 * Math.PI) % (2 * Math.PI) - Math.PI;
   const show = (site) => {
     let wait = 20 + Math.random() * 40, t = -1, kind = -1;
-    const logo = site.screen[LUNES], gaps = site.gaps;
+    const logo = site.screen[LUNES];
     const showLogo = (on) => {
       if (logo.visible === on) return;
       logo.visible = on;
-      for (const gap of gaps) if (gap) gap.visible = !on;
+      for (const batch of site.logoBatches) batch.node.visible = on;
     };
     return (dt) => {
       if (t < 0) {
@@ -46239,8 +46444,6 @@ void main() {
         }
         screen[i].glow = 1 + (glow - 1) * fade;
         screen[i].highlight = highlight * fade;
-        const gap = gaps[i];
-        if (gap) { gap.glow = screen[i].glow; gap.highlight = screen[i].highlight; }
       }
       logo.glow = 1 + (logoGlow - 1) * fade;
       showLogo(logoOn || fade < 1);
@@ -53853,7 +54056,7 @@ void main() {
   const BUILD_RADIUS = 13;
   const NUDGES = [0, -2, 2, -4, 4, -6, 6, -8, 8];
   const PATH_GEOMETRY = new WeakMap();
-  const TIMECHAIN_NEAR = 25;
+  const TIMECHAIN_NEAR = 25, TIMECHAIN_OUTER_PERIOD = 180;
   const VINES = ["c5"];
   const DRESSED = new WeakMap();
   const DRESSING_LAMPS = BL.dressing.LIGHT_RGB.map(([r, g, b]) => ({ r, g, b, radius: 5.5, glow: 0.9, hide: false }));
@@ -53913,13 +54116,12 @@ void main() {
   const terrainSections = [], caveSections = [];
   // Above the island and its cave roofs; never interpolate from the renderer's
   // infinite/no-cut sentinel or the scan would happen only in its last frame.
-  const CUTAWAY_TOP = 16, CUTAWAY_RESTORE_TIME = 0.65, CUTAWAY_REGION_CAP = 8;
+  const CUTAWAY_TOP = 16, CUTAWAY_REGION_CAP = 8;
   const CUTAWAY_RAMP_START = 0.12, CUTAWAY_RAMP_END = 0.88;
   const CUTAWAY_FLOOR_RATE = 56, CUTAWAY_FLOOR_DEADBAND = 0.015;
-  let cutawayHeight = NaN, cutawayFeet = 0, cutawayPlayer = null, cutawayCameraMix = 0, cutawayCarryActive = false;
+  let cutawayHeight = NaN, cutawayFeet = 0, cutawayPlayer = null;
   let cutawayX = 0, cutawayZ = 0, cutawayHeadY = 0, cutawayHill = false;
   let cutawayProgress = NaN, cutawayLevel = 0, cutawayHillMix = 0;
-  let cutawayRestoreMix = 0, cutawayRestoreTime = CUTAWAY_RESTORE_TIME;
   let cutawayTravelRamp = null, cutawayTravelChannel = -1, cutawayTravelStation = 0;
   const CUTAWAY_PATH_STATE = { lo: new Uint16Array(4), hi: new Uint16Array(4), mix: new Float32Array(4), windowMix: new Float32Array(2), active: 0, version: 1 };
   const cutawayHiddenNodes = [];
@@ -57218,14 +57420,8 @@ void main() {
   };
   const updateBirdsEyeCutaway = (dt) => {
     clearCutawayHidden();
-    const player = pilot.player, overheadMix = player ? pilot.birdsEyeMix : 0;
-    const carryCutaway = !!player && !pilot.aiming && !pilot.closeWanted && player.root.position.y - player.baseY < -0.5
-      && (pilot.mode === "orbit" || pilot.mode === "shoulder" && pilot.shoulderEntryMix < 1);
-    // Keep the already-open floor through a carry-to-combat overhead handoff;
-    // the overhead spring starts at zero even though the roof is already gone.
-    const carryBridge = cutawayCarryActive && pilot.birdsEye && overheadMix < 1;
-    const cameraMix = Math.max(overheadMix, carryCutaway || carryBridge ? 1 : 0);
-    const showRampMarkers = overheadMix > 0.5;
+    const player = pilot.player, cameraMix = player && pilot.birdsEye ? pilot.birdsEyeMix : 0;
+    const showRampMarkers = cameraMix > 0.5;
     for (const marker of headquarters.rampMarkers) {
       marker.node.visible = marker.frame.visible = marker.arrow.visible = showRampMarkers;
       if (!showRampMarkers) continue;
@@ -57237,22 +57433,7 @@ void main() {
       const z = up.x * downhill.x + up.y * downhill.y + up.z * downhill.z;
       marker.node.rotation.y = Math.atan2(-x, -z);
     }
-    // Losing the actor or its upright view has no camera dolly to follow.
-    // Restore the last displayed section independently on just those exits.
-    const interrupted = !player || player !== cutawayPlayer || player.health.stunned || crew.sleeping
-      || player.camp.seat || player.bedTravel.mode || clankerPlay.active;
-    if (!cameraMix && cutawayCameraMix > 0 && (interrupted || cutawayCarryActive)) {
-      cutawayRestoreMix = RENDER_OPTS.cutawayFade;
-      cutawayRestoreTime = 0;
-    }
-    cutawayCameraMix = cameraMix;
-    cutawayCarryActive = carryCutaway || carryBridge;
-    cutawayRestoreTime = Math.min(CUTAWAY_RESTORE_TIME, cutawayRestoreTime + dt);
-    const t = cutawayRestoreTime / CUTAWAY_RESTORE_TIME;
-    const restoring = cutawayRestoreMix * (1 - t * t * (3 - 2 * t));
-    // Re-enter from the still-visible cut, not from an uncut ceiling. The
-    // ordinary camera-controlled entry/exit is unchanged when no tail exists.
-    const mix = cameraMix + (1 - cameraMix) * restoring, active = mix > 0;
+    const mix = cameraMix, active = mix > 0;
     // Scan through the full camera blend in both directions, including reversals.
     const rockMix = mix;
     RENDER_OPTS.birdsEyeCutaway = active;
@@ -59539,6 +59720,7 @@ void main() {
     const fallingPlayer = pilot.player;
     if (fallingPlayer) Object.assign(pitPrevious, fallingPlayer.root.position);
     if (timechainIsland) {
+      timechainIsland.site.turn((elapsed % TIMECHAIN_OUTER_PERIOD) * Math.PI * 2 / TIMECHAIN_OUTER_PERIOD);
       const s = timechainIsland.seat, decay = Math.exp(-1.15 * dt);
       s.angle = (s.angle + s.speed * (1 - decay) / 1.15) % (Math.PI * 2);
       s.speed *= decay;
@@ -61253,14 +61435,12 @@ void main() {
     cutawayHeight = NaN;
     cutawayProgress = NaN;
     cutawayLevel = cutawayHillMix = 0;
-    cutawayFeet = cutawayCameraMix = cutawayRestoreMix = 0;
-    cutawayCarryActive = false;
+    cutawayFeet = 0;
     cutawayX = cutawayZ = cutawayHeadY = 0;
     cutawayHill = false;
     cutawayPlayer = null;
     cutawayTravelRamp = null; cutawayTravelChannel = -1; cutawayTravelStation = 0;
     CUTAWAY_PATH_STATE.lo.fill(0); CUTAWAY_PATH_STATE.hi.fill(0); CUTAWAY_PATH_STATE.mix.fill(0); CUTAWAY_PATH_STATE.windowMix.fill(0); CUTAWAY_PATH_STATE.active = 0; CUTAWAY_PATH_STATE.version++;
-    cutawayRestoreTime = CUTAWAY_RESTORE_TIME;
     window.clearTimeout(hintTimer);
     if (positionDebug) {
       positionDebug.removeEventListener("click", copyPositionDebug);
@@ -61368,7 +61548,6 @@ void main() {
     id: "hub", enter, update, overlay, onDonation, onKey, onLootCleared, renderOpts: RENDER_OPTS, leave, stats, liveGeometry,
     root: null, camera: null, input: null, debug: null,
     get inMotion() {
-      if (cutawayRestoreTime < CUTAWAY_RESTORE_TIME) return true;
       // Sani sits nearly always; only a spinning chair needs full rate behind another window.
       if (timechainIsland && timechainIsland.seat.speed > 0) return true;
       if (pile.inMotion || fx.inMotion || breakables.inMotion || weather.active || magazine && magazine.revealed || MATRIX_WORLD.active || mirrorGuides.state.doorway || mirrorCave.damage.active || mirrorCave.ripples.active || mirrorCave.body.active || entropyLab.phase.ripples.active || entropyLab.phase.body.contacts || entropyLab.phase.body.active) return true;

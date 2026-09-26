@@ -2,7 +2,7 @@
 // a small state machine on the pattern of the hub's gorillas, roaming, resting, sleeping and climbing.
 //
 // States: `idle` (look about, the toucan pecks), `walk` (turn, then gait to a goal, waiting for a neighbour in
-// the way), `rest` (lie or sit; asleep by night or on a nap, with zzz marks) and `glide` (a timed move from one
+// the way), `rest` (lie or sit; asleep by night or on a nap) and `glide` (a timed move from one
 // point to another under a chosen pose: climbing a trunk, walking a branch, hopping onto the log, flying).
 // The jaguar walks, naps and lies along the fallen log; the monkey knuckle-walks, sits and climbs a canopy
 // trunk to sit out on a branch; the toucan hops and pecks, and every so often flies to a crown top or another
@@ -23,14 +23,14 @@
     monkey: { walk: 0.6, run: 1.5, stride: 0.62, turn: 3.4, radius: 0.35, swing: 0.5 },
     toucan: { walk: 0.32, run: 0.6, stride: 0.2, turn: 5, radius: 0.22, swing: 0, fly: 3.4 }
   };
-  const INNER = 4.6, OUTER = 9, POSE_RATE = 7, CLIMB_SPEED = 0.75, ZZZ_EVERY = 2.2;
+  const INNER = 4.6, OUTER = 9, POSE_RATE = 7, CLIMB_SPEED = 0.75;
   const angleTo = (from, to) => Math.atan2(Math.sin(to - from), Math.cos(to - from));
   const headingOf = (dx, dz) => Math.atan2(-dz, dx);
   const ease = (a, key, target, k) => (a[key] += (target - a[key]) * k);
   const wave = (a, offset) => Math.sin(TAU * (a.phase + offset));
 
   const create = (ctx) => {
-    const { parent, obstacles, sleepy, zzzAt, toWorld } = ctx;
+    const { parent, obstacles, sleepy, toWorld } = ctx;
     const rand = mulberry32(7717), SPOT = { x: 0, z: 0 }, WORLD = { x: 0, z: 0 };
     // Trees and logs in the island frame, read once from each placed node's transform.
     const place = (n, x, y, z, out) => {
@@ -104,7 +104,7 @@
       setState(a, "glide", a.gdur);
     };
     const rest = (a, time, asleep) => {
-      a.asleep = asleep; a.zzz = 0.8;
+      a.asleep = asleep;
       setState(a, "rest", time);
     };
     const idle = (a, time) => setState(a, "idle", time);
@@ -305,13 +305,6 @@
         if (t >= 1) arrive(a);
         return;
       }
-      if (a.state === "rest" && a.asleep) {
-        if ((a.zzz -= dt) <= 0) {
-          a.zzz = ZZZ_EVERY;
-          toWorld(a.x, a.z, WORLD);
-          zzzAt(WORLD.x, ctx.baseY + a.y + a.zzzY, WORLD.z);
-        }
-      }
       if (a.state === "idle" && (a.look -= dt) <= 0) {
         a.look = 1.2 + rand() * 2.4;
         a.lookYaw = (rand() - 0.5) * 1.4;
@@ -397,7 +390,7 @@
         x: def.x, y: 0, z: def.z, heading: def.heading, gx: def.x, gz: def.z, state: "idle", timer: 1 + list.length, waits: 0,
         speed: 0, moving: 0, phase: 0, after: "", pose: "stand", arc: 0, face: 0, gt: 0, gdur: 1,
         sx: 0, sy: 0, sz: 0, ex: 0, ey: 0, ez: 0, dx: 1, dz: 0, u0: 0.2, onBranch: false,
-        tree: null, branch: null, log: null, perch: null, asleep: false, zzz: 0, zzzY: def.kind === "toucan" ? 0.6 : 0.8,
+        tree: null, branch: null, log: null, perch: null, asleep: false,
         look: 0, lookYaw: 0, peck: 0, snarl: 0,
         bodyY: rig.body.at[1], pitch: 0, front: 0, back: 0, headPitch: 0, headYaw: 0, wing: 0,
         wx: 0, wy: 0, wz: 0, owner: null

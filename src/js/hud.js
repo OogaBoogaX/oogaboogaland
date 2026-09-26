@@ -863,10 +863,12 @@
       el.tooltip.style.transform = `translate(${left}px, ${top}px)`;
     };
     const tooltip = {
-      show: (text, x, y, cave = null) => {
+      show: (text, x, y, cave = null, noStatusDot = false) => {
         if (cave !== tipCave) tipSpeechTop = Infinity;
         tipCave = cave;
-        const name = !!cave, changed = text !== tipText || name !== tipName;
+        const name = !!cave;
+        const changed = text !== tipText || name !== tipName || el.tooltip.classList.contains("tooltip--no-status-dot") !== noStatusDot;
+        el.tooltip.classList.toggle("tooltip--no-status-dot", noStatusDot);
         if (name !== tipName) {
           tipName = name;
           el.tooltip.classList.toggle("tooltip--name", name);
