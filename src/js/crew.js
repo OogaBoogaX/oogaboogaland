@@ -430,6 +430,7 @@
     const cavemen = new Map();
     // crewList mirrors roster order; the Map is written only in create and cleared in dispose, so it stays valid.
     const crewList = [];
+    const NPC_RECOVERY_SPOT = { x: 0, y: 0, z: 0 };
     if (!world.weapons) world.weapons = new Map();
     if (!world.health) world.health = new Map();
     const legacyMagazine = world.magazine || (world.magazine = { owned: false, count: 0, ammo: 0, carrier: null });
@@ -557,7 +558,7 @@
         pathing: ctx.npcPaths ? ctx.npcPaths.createState() : null,
         traffic: { moving: false, waiting: false, leader: null, crossing: null, tx: 0, tz: 0, fx: 0, fz: 1, distance: 0, speed: 0 },
         progress: { x: NaN, z: NaN, stalled: 0, motionless: 0, retry: 0, replanned: false, navigationHop: false, escaped: false,
-          backoff: 0, backX: 0, backZ: 0, detours: 0, replans: 0, resets: 0 },
+          backoff: 0, backX: 0, backZ: 0, detours: 0, replans: 0, resets: 0, roofTime: 0 },
         avoidance: { active: false, side: i & 1 ? 1 : -1, stalled: 0, best: Infinity, tx: NaN, tz: NaN,
           detour: { site: -1, phase: 0, side: 1, entryX: 0, goalX: NaN, goalZ: NaN, x: 0, z: 0 },
           navigation: { mode: 0, x: 0, z: 0, count: 0, index: 0, searches: 0, expansions: 0,
@@ -3351,6 +3352,24 @@
     const watchWalker = (cave, dt, fromX, fromZ) => {
       const progress = cave.progress, p = cave.root.position, travel = cave.bedTravel, work = cave.work;
       const airborne = cave.hop > 0 || cave.hopV > 0;
+      const roof = dt > 0 && cave !== player && cave.root.visible && (cave.state === "working" || cave.state === "chilling")
+        && !cave.health.stunned && !cave.clankerDragged && !cave.camp.burning && !cave.camp.rolling
+        && ctx.npcStrandedAt && ctx.npcStrandedAt(cave, p.x, p.y - cave.baseY, p.z);
+      if (!roof) progress.roofTime = 0;
+      else if ((progress.roofTime += dt) >= 8 && !airborne && ctx.npcRecoverySpot) {
+        if (ctx.npcRecoverySpot(cave, NPC_RECOVERY_SPOT)) {
+          setVec(p, NPC_RECOVERY_SPOT.x, cave.baseY + NPC_RECOVERY_SPOT.y, NPC_RECOVERY_SPOT.z);
+          cave.hop = cave.hopV = cave.jumps = 0; cave.leap.vx = cave.leap.vz = cave.leap.land = 0;
+          cave.cloudSupport = null;
+          resetWalkerRoute(cave);
+          if (cave.state === "chilling") { cave.walk = null; startWander(cave); }
+          progress.x = p.x; progress.z = p.z;
+          progress.stalled = progress.motionless = progress.retry = progress.backoff = progress.roofTime = 0;
+          progress.replanned = progress.navigationHop = progress.escaped = false; progress.resets++;
+          return;
+        }
+        progress.roofTime = 6;
+      }
       // Retain the navigation intent through its landing frame, when the
       // ordinary traffic snapshot is still paused and mode 4 has just ended.
       const navigationHop = cave.avoidance.navigation.mode === 4 || progress.navigationHop;

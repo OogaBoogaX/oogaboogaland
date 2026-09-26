@@ -145,6 +145,7 @@
       return true;
     };
     const grass = (x, y, z, foot = FOOT) => Number.isFinite(y) && Math.hypot(x, z) < roamRadius
+      && (!ctx.restSurfaceClear || ctx.restSurfaceClear(x, y, z, foot))
       && (!ctx.onLand || ctx.onLand(x, z)) && (!ctx.isGrass || ctx.isGrass(x, z, y)
         && ctx.isGrass(x - foot, z, y) && ctx.isGrass(x + foot, z, y)
         && ctx.isGrass(x, z - foot, y) && ctx.isGrass(x, z + foot, y) || unusedRoof(x, y, z, foot));
@@ -1617,6 +1618,7 @@
         lowCover: false, backoutLeft: 0, backoutHeading: 0,
         sampleTime: 0, sampleX: 0, sampleZ: 0, stuckTime: 0, portalSince: 0, portalRetry: 0,
         stuck: { time: 0, stage: 0, taskTime: 0, taskActive: false, taskX: 0, taskZ: 0, taskDistance: 0,
+          invalidTime: 0, invalidX: NaN, invalidZ: NaN,
           replans: 0, recoveries: 0, escapes: 0, escapeLeft: 0, escapeBlocked: 0, escapeX: 0, escapeZ: 0,
           retryAt: 0, reason: "", x: NaN, y: NaN, z: NaN, workTime: 0, workCycles: 0, workReach: 0, workStage: "", workItem: -1,
           turnError: Infinity, heading: NaN, searchCursor: 0 },
@@ -3835,6 +3837,13 @@
     };
     const recoverStall = (e, dt) => {
       const p = e.root.position, s = e.stuck, job = e.lab, r = e.roam;
+      const invalidRest = e.active && !e.controlled && e.phase === "chill" && Math.abs(e.speed) < 0.1
+        && !e.fire.burning && !e.fire.rolling && !e.pound && !e.beat
+        && !grass(p.x, p.y, p.z, e.loungePartner ? 0.9 : FOOT);
+      if (!invalidRest || !Number.isFinite(s.invalidX) || Math.hypot(p.x - s.invalidX, p.z - s.invalidZ) > 0.5) {
+        s.invalidTime = 0; s.invalidX = p.x; s.invalidZ = p.z;
+      } else s.invalidTime += dt;
+      const invalidExpired = s.invalidTime >= 8 && !e.climb.active && !e.jump.active && !e.drive.airborne;
       if (!e.active || e.controlled || e.phase !== "chill") r.departPending = false;
       if (r.departPending && Math.hypot(p.x - r.departX, p.y - r.departY, p.z - r.departZ) > 0.15) {
         r.departX = p.x; r.departY = p.y; r.departZ = p.z; r.departAt = elapsed;
@@ -3874,18 +3883,18 @@
       const taskExpired = s.taskActive && s.taskTime >= 8 || r.departPending && elapsed - r.departAt >= 8;
       // An independent clock survives changing waypoints and mutual yielding.
       // Limb animation alone is not progress; real work and deliberate rest are.
-      if (!e.active || e.controlled || e.fire.burning || e.fire.rolling || e.pound || e.beat
+      if (!invalidExpired && (!e.active || e.controlled || e.fire.burning || e.fire.rolling || e.pound || e.beat
         || resting || !wantsMove || r.departPending && !departureStalled
         || e.phase === "chill" && !departureStalled && (e.recover > 0
           || !e.loungeDepart && !e.climb.active && (elapsed < e.roam.waitUntil || e.roam.progressTime < 2.1)
           || e.climb.claimPending && elapsed - e.climb.claimProgressAt < 1.5)
-        || !taskExpired && (elapsed < job.coordinationUntil || elapsed < job.trafficWait || job.pathCount && elapsed < job.readyAt || progressed) || !Number.isFinite(s.x)) {
+        || !taskExpired && (elapsed < job.coordinationUntil || elapsed < job.trafficWait || job.pathCount && elapsed < job.readyAt || progressed) || !Number.isFinite(s.x))) {
         s.x = p.x; s.y = p.y; s.z = p.z; s.time = 0; s.stage = 0;
         return;
       }
       s.time += dt;
-      if (!taskExpired && (s.time < 0.65 || s.stage && elapsed < s.retryAt || labEscape && e.motion.lab)) return;
-      const hard = s.time >= 8 || taskExpired, lab = e.motion.lab;
+      if (!invalidExpired && !taskExpired && (s.time < 0.65 || s.stage && elapsed < s.retryAt || labEscape && e.motion.lab)) return;
+      const hard = s.time >= 8 || taskExpired || invalidExpired, lab = e.motion.lab;
       // A live climb may be paused between search slices. Replanning that
       // mid-wall pose as a ground walk is unsafe, so retain its grip until reset.
       if (!hard && (e.climb.active || e.jump.active || e.drive.airborne)) { s.stage = 1; s.retryAt = elapsed + 0.5; return; }
@@ -3926,7 +3935,8 @@
         // scenery still reject the candidate through the normal reservation.
         activate(e, e.motion.lab && e.site === labSite);
         e.fire.soot = soot; e.fire.cooldown = cooldown;
-        s.recoveries++; s.reason = "relocated"; s.time = 0; s.stage = 0;
+        s.recoveries++; s.reason = "relocated"; s.time = s.invalidTime = 0; s.stage = 0;
+        s.invalidX = s.invalidZ = NaN;
         s.x = p.x; s.y = p.y; s.z = p.z;
       } else {
         if (lab && !s.taskActive) {
