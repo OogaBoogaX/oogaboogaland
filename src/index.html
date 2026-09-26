@@ -156,6 +156,7 @@
         <p data-scene="hub" id="subtitle">an island of caves</p>
         <p data-scene="lab" hidden>EntropyLab cave</p>
         <p data-scene="pool" hidden>Mempool cave</p>
+        <p data-scene="factory" hidden>Lightning Factory</p>
       </div>
       <time class="world-clock" id="world-clock" aria-label="Local time"></time>
       <div class="world-block" id="world-block" aria-live="polite" aria-label="Bitcoin block height unavailable">
@@ -180,6 +181,13 @@
         <button type="button" data-preset="tiers">Tiers</button>
         <button type="button" data-preset="chain">Chain</button>
         <button type="button" data-preset="epoch">Epoch</button>
+        <button type="button" class="leave" data-action="leave">Leave<span> cave</span></button>
+      </nav>
+      <nav class="presets" aria-label="Lightning Factory" data-scene="factory" hidden>
+        <button type="button" data-preset="core">Core</button>
+        <button type="button" data-preset="lines">Lines</button>
+        <button type="button" data-preset="forge">Forge</button>
+        <button type="button" data-preset="treasury">Treasury</button>
         <button type="button" class="leave" data-action="leave">Leave<span> cave</span></button>
       </nav>
       <nav class="presets" aria-label="Race" data-scene="race" hidden>
@@ -1071,6 +1079,10 @@ Then run npm run build and ONLY=characters node test/run.mjs.</pre>
   <script src="js/scene-hub.js"></script>
   <script src="js/scene-lab.js"></script>
     <script src="js/scene-pool.js"></script>
+  <script src="js/factory-feed.js"></script>
+  <script src="js/factory-mock.js"></script>
+  <script src="js/factory-models.js"></script>
+  <script src="js/scene-factory.js"></script>
   <script src="js/race-track.js"></script>
   <script src="js/racers.js"></script>
   <script src="js/race-items.js"></script>

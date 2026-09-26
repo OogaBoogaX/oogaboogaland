@@ -4,8 +4,10 @@
   "use strict";
   const BL = window.BL = window.BL || {};
   const { createNode, addChild, removeChild } = BL.scene;
-  const create = (group, mouth, opening) => {
-    const sr = Math.sin(mouth.ry), cr = Math.cos(mouth.ry), plane = 0.5;
+  // `plane` is the shield's depth in the mouth's frame: the lab hangs it in the doorway, the Lightning Factory
+  // further down its tunnel.
+  const create = (group, mouth, opening, plane = 0.5) => {
+    const sr = Math.sin(mouth.ry), cr = Math.cos(mouth.ry);
     const minX = opening.minX, maxX = opening.maxX, minY = opening.floorY, maxY = opening.ceilingY;
     const color = [0, 0, 0], geometry = {
       verts: [minX, minY, 0, maxX, minY, 0, maxX, maxY, 0, minX, maxY, 0],
