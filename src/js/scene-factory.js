@@ -5,9 +5,15 @@
 // What each station shows, and what it may not (Foundry's consumer rules, docs/lightning-factory.md):
 // - The node core glows while the node runs and goes dark when it says it stopped.
 // - Four featured lines stand on the main and high levels, each with two capacitors: blue lights on a settled
-//   forward, orange sputters on a failed one. Sats ride the conduit from the line into the core, always the
-//   same way, so the animation says "activity here" and never which side of the channel moved.
-// - The on-chain forge fires when a line is opened or closed; its bay's lantern turns red while it is taken down.
+//   forward, orange sputters on a failed one. A forward's sats ride inside the glass conduits: in along the line it
+//   came in on, through the core, and out along the line it left by, when the event names that line (the demo
+//   contract's `out`; Foundry's public events name one line only, and then the sats only go in). A failed forward's
+//   sats reach the core and come back, glowing red, and the line they were bound for sputters. A large forward is a
+//   stream of sats and a surge through the node: the chamber flares white, rings of light climb it and the Tesla
+//   coils arc to it.
+// - The on-chain forge fires when a line is opened or closed; its bay's lantern turns red while it is taken down. An
+//   opening sends carts of sats up the left shaft from the chain for the forge to consume; a close has it mint a coin
+//   that rolls back down the right shaft. The carts count the opening's bucketed size, never an amount.
 // - The switchboard's screens light with every forward; its board carries the node's own counts and
 //   Foundry's hourly summary, which is labelled as Foundry's.
 // - The rebalancer spins for a rebalance, and never touches a line.
@@ -60,20 +66,41 @@
     lights: new Float32Array(BL.glRenderer.POINT_LIGHT_CAPACITY * 8), lightCount: 0, bloomStrength: 0.85,
     fog: [0.1, 0.07, 0.05], fogNear: 40, fogFar: 110
   };
-  // Seconds a flash, a sputter, the forge's heat, the rebalancer's run and a cart's trip last.
-  const FLASH = 0.35, SPUTTER = 0.9, HEAT = 7, SPIN = 7, TRIP = 9;
+  // Seconds a flash, a sputter, the forge's heat and the rebalancer's run last.
+  const FLASH = 0.35, SPUTTER = 0.9, HEAT = 7, SPIN = 7;
+  // The forge's lines: how many carts an opening sends by its bucketed size, how many can be out at once and how far
+  // apart they leave, how many metres a cart takes to go into the fire, and how long the forge spins its sign to mint.
+  const CARTS_FOR = { dust: 1, small: 1, medium: 1, large: 2, very_large: 3 }, CART_POOL = 4, CART_GAP = 1.1, CONSUME = 1.4, MINT_SPIN = 1.2;
+  const FIRE = { x: LAYOUT.forge.x, y: 0.7, z: LAYOUT.forge.z + 0.4 }, AT = { x: 0, y: 0, z: 0, yaw: 0, pitch: 0 };
+  const SPARKS = ["#ffc83a", "#ff8a1f", "#fff2b8"].map((c) => models.particleGeometry(c, 0.1, 1));
+  const SPARKS_CYAN = ["#7fe0ff", "#e8fbff", "#ffe07a"].map((c) => models.particleGeometry(c, 0.1, 1));
+  const SURGE_SPARKS = ["#fff2c0", "#ffd27a", "#dffaff"].map((c) => models.particleGeometry(c, 0.1, 1));
+  // A point `d` metres along one of the forge's lines, from the bottom of its shaft, into `out`: no allocation.
+  const lineAt = (line, d, out) => {
+    const f = Math.max(0, Math.min(line.n - 1.001, d / FM.LINE_STEP)), i = Math.floor(f), k = f - i, P = line.pts, a = i * 5, b = a + 5;
+    out.x = P[a] + (P[b] - P[a]) * k;
+    out.y = P[a + 1] + (P[b + 1] - P[a + 1]) * k;
+    out.z = P[a + 2] + (P[b + 2] - P[a + 2]) * k;
+    out.yaw = P[a + 3];
+    out.pitch = P[a + 4];
+    return out;
+  };
   // The treasury's belt: how many nuggets ride it at once, and the seconds one takes up it.
   const BELT_CAP = 6, BELT_TIME = 1.8, BELT = FM.TRE.belt;
   // A rebalance's bucketed size, as its board reads it.
   const SIZES = { dust: "Dust", small: "Small", medium: "Medium", large: "Large", very_large: "Very large" };
   const NODE_STATES = { starting: "Starting", ready: "Ready", stopped: "Stopped" };
   const SAT_CAP = 160, GALLERY_N = LAYOUT.galleries.reduce((n, g) => n + g.stations, 0);
-  // How many sats a forward sends down its conduit, by its bucketed size.
-  const SATS_FOR = { dust: 1, small: 1, medium: 2, large: 3, very_large: 4 };
+  // How many sats a forward sends through its conduits, by its bucketed size, and a sat's flags: part of a large
+  // forward's stream, of a very large one's, of a failed forward, and the lead sat, whose arrival sets off the surge.
+  const SATS_FOR = { dust: 1, small: 1, medium: 2, large: 10, very_large: 18 };
+  const BIG = 1, HUGE = 2, FAILED = 4, LEAD = 8;
   const TIPS = {
     core: ["Node core · this Lightning node", "The node core is the Lightning node itself: lit while it runs, dark when it stops."],
     line: ["Line · a Lightning channel", "Each line is a channel to one peer. Blue flashes when a payment passes through it, orange when one fails."],
-    forge: ["On-chain forge · open and close", "Channels are opened and closed with Bitcoin transactions: the forge fires when a line is built or taken down."],
+    forge: ["On-chain forge · open and close", "Channels are opened and closed with Bitcoin transactions. Opening one feeds the forge carts of sats from the chain; closing one mints a coin that goes back down to it."],
+    shaftIn: ["From the chain · opening channels", "Sats come up this shaft from the Bitcoin chain. Each channel the node opens sends carts of them into the forge, more for a bigger channel."],
+    shaftOut: ["To the chain · closing channels", "When a channel closes, its sats go back to the Bitcoin chain: the forge mints them into a coin that rolls down this shaft."],
     switchboard: ["Switchboard · routing", "Every payment the node passes on for someone else is a forward. The screens light as they go through."],
     rebalancer: ["Rebalancer · moving liquidity", "Rebalancing moves sats between channels so lines keep working. It is shown by the hour, never for one line."],
     treasury: ["Treasury · routing fees", "The gold under the glass is the node's public capacity, visible to anyone on the Lightning network. Each forward that earns the demo node a fee sends a nugget up the belt into the crate."],
@@ -131,6 +158,8 @@
     // Two from the study hall's header, which faces -x.
     for (const [lx, ly, lz] of FM.STUDY.lamps) lamps.push(["hang", L.study.x - lz, L.study.y + ly, L.study.z + lx]);
     lamps.push(["post", L.switchboard.x + 3.1, L.switchboard.y, L.switchboard.z - 1.9, Math.PI]);
+    // Two from the arms at the ends of each forge shaft's header.
+    for (const [x, z] of FM.SHAFTS) for (const s of [-1, 1]) lamps.push(["hang", x + s * 1.7, 2.76, z - 0.2]);
     // Two from each of the rebalancer's and the treasury's signs.
     for (const [d, spots] of [[L.rebalancer, FM.REB.lamps], [L.treasury, FM.TRE.lamps]]) for (const [x, y, z] of spots) lamps.push(["hang", d.x + x, d.y + y, d.z + z]);
     const [[w0, w1, a0], [s0, , s1]] = L.walk;
@@ -193,7 +222,7 @@
     switch (e.type) {
       case "channel.opening":
         s.forgeHeat = HEAT;
-        s.cartT = 0;
+        if (!replay) s.inQueue += CARTS_FOR[p.scale] || 1;
         if (place && place.bay) {
           place.state = "building";
           place.build = 0;
@@ -214,7 +243,7 @@
         nudge(s, s.forgeCrew);
         break;
       case "channel.closed":
-        s.cartT = 0;
+        if (!replay) s.outQueue++;
         if (place) {
           if (place.bay) { place.state = "empty"; place.build = 0; }
           s.placeOf.delete(place.line);
@@ -225,14 +254,11 @@
         if (replay) break;
         s.switchBusy = FLASH;
         if (p.fee) dropNugget(s);
-        if (place) {
-          place.flashL = FLASH;
-          if (place.bay) for (let k = SATS_FOR[p.scale] || 1; k > 0; k--) launchSat(s, place.index, k * 0.18);
-        } else s.overflowFlash = FLASH;
+        forward(s, place, p.out ? placeLine(s, p.out, false) : null, p.scale, false);
         break;
       case "forward.failed":
         if (replay) break;
-        if (place) place.sputter = SPUTTER;
+        forward(s, place, p.out ? placeLine(s, p.out, false) : null, p.scale, true);
         break;
       case "rebalance.succeeded":
         s.rebScale = p.scale || null;
@@ -259,16 +285,47 @@
   };
   // A worker reacts to its station's event with a chest beat, if it is not already busy.
   const nudge = (s, g) => { if (g && !g.agent.driven) g.agent.poke(); };
-  const launchSat = (s, bayIndex, delay) => {
+  // A forward from the line it came in on (`from`) to the line it left by (`to`, or null when the event does not say):
+  // its sats ride in along `from`'s conduit to the core and on out along `to`'s, or for a failed forward back out
+  // along `from`'s, flashing each featured line as they leave and arrive. A line off the featured four flashes at once
+  // in its gallery; with neither featured, the overflow count flashes. A large forward's stream packs its sats close.
+  const forward = (s, from, to, scale, failed) => {
+    const n = SATS_FOR[scale] || 1, big = scale === "large" || scale === "very_large", gap = big ? 0.06 : 0.18;
+    const flags = (big ? BIG : 0) | (scale === "very_large" ? HUGE : 0) | (failed ? FAILED : 0);
+    const inBay = from && from.bay ? from.index : -1, outBay = to && to.bay ? to.index : -1;
+    if (from) from.flashL = FLASH;
+    if (to && !to.bay) to[failed ? "sputter" : "flashL"] = failed ? SPUTTER : FLASH;
+    if (!from && !to) s.overflowFlash = FLASH;
+    if (inBay >= 0) for (let k = 0; k < n; k++) launchSat(s, inBay, 1, k * gap, failed ? inBay : outBay, flags | (k ? 0 : LEAD), failed ? outBay : -1);
+    else if (outBay >= 0 && !failed) {
+      for (let k = 0; k < n; k++) launchSat(s, outBay, -1, k * gap, -1, flags, -1);
+      if (big) surge(s, flags);
+    }
+  };
+  // A sat set on a conduit, `dir` 1 in toward the core or -1 out from it, `delay` in the conduit's length before it
+  // starts; `next` the conduit it goes on out by from the core (-1 none), and `aim` the line a failed forward was
+  // bound for, which sputters as the sat reaches the core.
+  const launchSat = (s, bayIndex, dir, delay, next, flags, aim) => {
     const q = s.sats;
     for (let i = 0; i < SAT_CAP; i++) {
       if (q.bay[i] >= 0) continue;
       q.bay[i] = bayIndex;
-      q.t[i] = -delay;
-      q.speed[i] = 0.32 + Math.random() * 0.12;
+      q.dir[i] = dir;
+      q.t[i] = dir > 0 ? -delay : 1 + delay;
+      q.next[i] = next;
+      q.aim[i] = aim;
+      q.flags[i] = flags;
+      q.speed[i] = (flags & BIG ? 0.42 : 0.32) + Math.random() * 0.12;
       q.spin[i] = Math.random() * 6.28;
       return;
     }
+  };
+  // A big forward reaching the core: the surge starts, stronger for a very large one, with sparks off the crown.
+  const surge = (s, flags) => {
+    s.surge = flags & HUGE ? 1.5 : 1;
+    s.surgeT = 0;
+    const c = LAYOUT.core;
+    fx.burst(c.x, c.chamber[1] + 4.4, c.z, flags & HUGE ? 26 : 16, SURGE_SPARKS, 3);
   };
 
   // A label hung at (x, y, z) under `parent`: the lettered face and the board behind it, which `setBoard` fills.
@@ -347,23 +404,48 @@
   const build = () => {
     const L = LAYOUT, s = {
       bays: [], gallery: [], tunnels: [], placeOf: new Map(), crew: [], sats: null,
-      forgeHeat: 0, cartT: 1, switchBusy: 0, spin: 0, hopper: 0, glow: 0, overflowFlash: 0, beam: 0, dirty: true, refreshAt: 0,
+      forgeHeat: 0, switchBusy: 0, spin: 0, hopper: 0, glow: 0, overflowFlash: 0, beam: 0, dirty: true, refreshAt: 0,
       forgeCrew: null, rebalanceCrew: null, rebScale: null, rebHour: null, rebFailed: 0,
-      nuggets: [], nuggetT: new Float32Array(BELT_CAP).fill(-1)
+      nuggets: [], nuggetT: new Float32Array(BELT_CAP).fill(-1),
+      // The forge's lines: carts waiting to come up and out on the line, coins waiting to be minted and the one rolling,
+      // the flash and its rings, the sign's spin, and each shaft's glow.
+      carts: [], inQueue: 0, inGap: 0, outQueue: 0, mintT: -1, coinD: -1, coinV: 0, trail: 0,
+      flash: 0, flashKind: 0, waveT: -1, signTurn: 0, signPulse: 0, shaftGlow: [0, 0], shafts: [],
+      // A big forward's surge through the node, and how long since it began (-1 idle).
+      surge: 0, surgeT: -1
     };
     const hall = FM.hall(), cond = FM.conduits();
     addChild(root, createNode({ geometry: hall.rock }), createNode({ geometry: hall.walls }), createNode({ geometry: hall.glow, sightHidden: true }), createNode({ geometry: FM.scaffold() }),
-      createNode({ geometry: FM.coreBody() }), createNode({ geometry: cond.pipe }), createNode({ geometry: cond.glow }), createNode({ geometry: FM.forge() }));
+      createNode({ geometry: FM.coreBody() }), createNode({ geometry: cond.pipe }), createNode({ geometry: cond.glass, sightHidden: true }), createNode({ geometry: cond.glow }), createNode({ geometry: FM.forge() }));
+    // The surge's rings round the chamber and the coils' arcs, hidden until a big forward comes through.
+    s.coreRings = [0, 1, 2].map(() => createNode({ position: { x: L.core.x, y: 0, z: L.core.z }, geometry: FM.coreRing(), visible: false, sightHidden: true }));
+    s.arcs = FM.teslaArcs().map((shapes) => createNode({ geometry: shapes[0], visible: false, sightHidden: true }));
+    addChild(root, ...s.coreRings, ...s.arcs);
     const peer = FM.peerPipes();
     addChild(root, createNode({ geometry: peer.pipe }), createNode({ geometry: peer.glow, sightHidden: true }));
     // Banners of the bolt hung either side of the core from the high lines' decks, as the concept hangs them.
     for (const x of [-12.5, 12.5]) addChild(root, createNode({ position: { x, y: LEVEL.high - 0.45, z: L.bays[0].z + L.bays[0].d / 2 + 0.1 }, geometry: FM.banner(2.2) }));
     s.chamber = createNode({ geometry: FM.coreChamber().lit });
     s.forgeFire = createNode({ geometry: FM.forgeFire().warm });
-    // One cart runs the left track in and out of the forge; another stands loaded on the right.
-    s.cart = createNode({ position: { x: L.forge.x + FM.FORGE_TRACKS[0], y: 0, z: 2 }, geometry: FM.cart() });
+    s.forgeSign = createNode({ position: { x: L.forge.x, y: FM.FORGE_CY, z: L.forge.z + 0.14 }, geometry: FM.forgeSign().warm });
+    s.waves = [0, 1].map(() => createNode({ position: { x: L.forge.x, y: FM.FORGE_CY, z: L.forge.z + 0.6 }, geometry: FM.forgeWave().gold, visible: false, sightHidden: true }));
     for (const [x, z] of FM.COILS) addChild(root, createNode({ position: { x, y: LEVEL.main, z }, geometry: FM.teslaCoil() }));
-    addChild(root, s.chamber, s.forgeFire, s.cart, createNode({ position: { x: L.forge.x + FM.FORGE_TRACKS[1], y: 0, z: FM.FORGE_CART_Z }, geometry: FM.cart() }));
+    addChild(root, s.chamber, s.forgeFire, s.forgeSign, ...s.waves, createNode({ geometry: FM.forgeTrack() }));
+    // The forge's shafts, each with its sign, its glow and a target; the carts that come up the left and the coin that
+    // goes down the right.
+    FM.forgeShafts().forEach((sh, i) => {
+      const [x, z] = FM.SHAFTS[i], rock = createNode({ geometry: sh.rock }), glow = createNode({ geometry: sh.glow.dim, sightHidden: true });
+      addChild(root, rock, glow, createNode({ geometry: sh.crystals, sightHidden: true }));
+      setBoard(labelNode(root, x, 3.62, z - 0.4, Math.PI), i ? "TO THE CHAIN" : "FROM THE CHAIN", i ? "(Closing Channels)" : "(Opening Channels)", true, { height: 0.95 });
+      s.shafts.push({ rock, glow });
+    });
+    for (let i = 0; i < CART_POOL; i++) {
+      const node = createNode({ geometry: FM.cart(), visible: false });
+      addChild(root, node);
+      s.carts.push({ node, active: false, d: 0, v: 0 });
+    }
+    s.coin = createNode({ geometry: FM.mintCoin(), visible: false });
+    addChild(root, s.coin);
     s.coreLabel = labelNode(root, L.core.x, L.core.chamber[1] + 1.1, L.core.z + 3.3);
     setBoard(labelNode(root, L.forge.x, 4.5, L.ring.z + L.ring.outer + 0.8), "ON-CHAIN FORGE", "(Open / Close)", true);
     // Featured bays: frame, two capacitors and a label on a group at the deck's centre.
@@ -441,7 +523,7 @@
     s.fill = createNode({ position: { x: TRE.crate[0], y: 0.1, z: TRE.crate[1] }, geometry: FM.hopperFill() });
     const trBody = createNode({ geometry: trGeo.body });
     addChild(trNode, trBody, createNode({ geometry: trGeo.glow }), s.pile, s.fill);
-    addChild(trNode, createNode({ position: { x: TRE.cart[0], y: 0, z: TRE.cart[1] }, rotation: { x: 0, y: 0.35, z: 0 }, geometry: FM.cart() }));
+    addChild(trNode, createNode({ position: { x: TRE.cart[0], y: -0.14, z: TRE.cart[1] }, rotation: { x: 0, y: 0.35, z: 0 }, geometry: FM.cart() }));
     for (const [x, z] of TRE.crates) addChild(trNode, createNode({ position: { x, y: 0, z }, geometry: FM.goldCrate() }));
     for (let i = 0; i < BELT_CAP; i++) {
       const n = createNode({ geometry: FM.beltNugget(), position: { x: BELT[0][0], y: BELT[0][1], z: BELT[0][2] }, visible: false });
@@ -473,11 +555,17 @@
     addChild(stNode, noteNode, lessonNode);
     addChild(root, switchNode, rebNode, trNode, lkNode, stNode);
     // Sats riding the conduits: one instanced batch of fixed capacity.
-    const satGeo = { ...FM.sat() };
+    // Two batches: gold sats, and red ones for a failed forward's sats coming back.
+    const satGeo = { ...FM.sat() }, redGeo = { ...FM.satFailed() };
     s.satNode = createNode({ geometry: satGeo, instanceData: new Float32Array(SAT_CAP * 20), instanceCount: 0, instanceVersion: 0, fixedInstanceCapacity: true, sightHidden: true });
+    s.redNode = createNode({ geometry: redGeo, instanceData: new Float32Array(SAT_CAP * 20), instanceCount: 0, instanceVersion: 0, fixedInstanceCapacity: true, sightHidden: true });
     s.satGeo = satGeo;
-    addChild(root, s.satNode);
-    s.sats = { bay: new Int8Array(SAT_CAP).fill(-1), t: new Float32Array(SAT_CAP), speed: new Float32Array(SAT_CAP), spin: new Float32Array(SAT_CAP) };
+    s.redGeo = redGeo;
+    addChild(root, s.satNode, s.redNode);
+    s.sats = {
+      bay: new Int8Array(SAT_CAP).fill(-1), dir: new Int8Array(SAT_CAP), next: new Int8Array(SAT_CAP), aim: new Int8Array(SAT_CAP), flags: new Uint8Array(SAT_CAP),
+      t: new Float32Array(SAT_CAP), speed: new Float32Array(SAT_CAP), spin: new Float32Array(SAT_CAP)
+    };
     s.paths = cond.paths;
     // Station targets, for tooltips and taps: each on a node that has geometry, since picking needs its bounds.
     const target = (node, kind, preset, radius, extra = {}) => {
@@ -487,6 +575,7 @@
     target(s.chamber, "core", "core", 3.5);
     s.bays.forEach((b, i) => target(b.frame, "line", ["lineA", "lineB", "lineC", "lineD"][i], 3, { place: b }));
     target(s.forgeFire, "forge", "forge", 2.6);
+    s.shafts.forEach((sh, i) => target(sh.rock, i ? "shaftOut" : "shaftIn", "forge", 2.6));
     target(switchBody, "switchboard", "switchboard", 3);
     target(rebBody, "rebalancer", "rebalancer", 2.8);
     target(trBody, "treasury", "treasury", 3);
@@ -730,6 +819,146 @@
   };
 
   // Per frame, allocation-free: the stream, then every animated part eased toward what it last heard.
+  // The forge's lines, a frame at a time. A queued cart comes up the left shaft once the last is clear of it, rolls
+  // out and down the track, slows at the forge and goes into the fire, shrinking as it goes; the forge takes it with
+  // a flash: its sign turns once, white, the light flares and two gold rings run out over the arch in a spray of
+  // sparks. A queued coin is minted first: the sign spins three times, then the coin rolls out of the fire on a cyan
+  // flash and away down the right line, trailing sparks, into its shaft, which lights as it goes.
+  const forgeLines = (s, dt) => {
+    const [inLine, outLine] = FM.forgeLines(), waves = FM.forgeWave();
+    s.inGap -= dt;
+    for (let i = 0; i < s.carts.length && s.inQueue > 0 && s.inGap <= 0; i++) {
+      const c = s.carts[i];
+      if (c.active) continue;
+      c.active = true;
+      c.d = 0;
+      c.v = 0.6;
+      c.node.visible = true;
+      s.inQueue--;
+      s.inGap = CART_GAP;
+      s.shaftGlow[0] = 1;
+    }
+    for (let i = 0; i < s.carts.length; i++) {
+      const c = s.carts[i];
+      if (!c.active) continue;
+      const left = inLine.length - c.d;
+      c.v += Math.max(-2 * dt, Math.min(2 * dt, (left < 3 ? 1.3 : 2.4) - c.v));
+      c.d += c.v * dt;
+      if (c.d >= inLine.length) {
+        c.active = false;
+        c.node.visible = false;
+        forgeFlash(s, 0, waves.gold, SPARKS);
+        continue;
+      }
+      lineAt(inLine, c.d, AT);
+      const k = Math.min(1, (inLine.length - c.d) / CONSUME), e = k * k * (3 - 2 * k), n = c.node;
+      n.position.x = FIRE.x + (AT.x - FIRE.x) * e;
+      n.position.y = FIRE.y + (AT.y - FIRE.y) * e;
+      n.position.z = FIRE.z + (AT.z - FIRE.z) * e;
+      n.rotation.y = AT.yaw;
+      n.rotation.x = -AT.pitch;
+      n.scale.x = n.scale.y = n.scale.z = 0.1 + 0.9 * e;
+    }
+    if (s.outQueue > 0 && s.mintT < 0 && s.coinD < 0) {
+      s.outQueue--;
+      s.mintT = 0;
+      s.signTurn += Math.PI * 6;
+      s.signPulse = 1;
+    }
+    if (s.mintT >= 0 && (s.mintT += dt) >= MINT_SPIN) {
+      s.mintT = -1;
+      s.coinD = 0;
+      s.coinV = 0.3;
+      s.coin.visible = true;
+      forgeFlash(s, 1, waves.cyan, SPARKS_CYAN);
+    }
+    if (s.coinD >= 0) {
+      s.coinV = Math.min(2.1, s.coinV + 1.6 * dt);
+      s.coinD += s.coinV * dt;
+      const d = outLine.length - s.coinD, c = s.coin;
+      if (d <= 0) {
+        s.coinD = -1;
+        c.visible = false;
+      } else {
+        lineAt(outLine, d, AT);
+        const k = Math.min(1, 0.2 + s.coinD / 0.9);
+        c.position.x = AT.x;
+        c.position.y = AT.y + (FM.COIN_R + 0.14) * k;
+        c.position.z = AT.z;
+        c.rotation.y = AT.yaw + Math.PI;
+        c.rotation.x += s.coinV * dt / FM.COIN_R;
+        c.scale.x = c.scale.y = c.scale.z = k;
+        if (d < 4) s.shaftGlow[1] = 1;
+        if ((s.trail -= dt) <= 0 && AT.y > -0.3) {
+          s.trail = 0.06;
+          fx.spawnParticle(SPARKS[s.coinD * 7 % 3 | 0], AT.x, 0.2, AT.z, (Math.random() - 0.5) * 0.6, 0.8 + Math.random() * 0.8, (Math.random() - 0.5) * 0.6, 0.7, 5, 2.5);
+        }
+      }
+    }
+    // The sign turns off what it owes, fastest at the start, and swells with a flash.
+    const sign = s.forgeSign, fs = FM.forgeSign(), turn = Math.min(s.signTurn, dt * (3 + s.signTurn * 2.2));
+    s.signTurn -= turn;
+    sign.rotation.y = (sign.rotation.y + turn) % (Math.PI * 2);
+    s.signPulse = Math.max(0, s.signPulse - dt * 1.5);
+    sign.scale.x = sign.scale.y = sign.scale.z = 1 + 0.3 * Math.sin(s.signPulse * Math.PI);
+    const signGeo = s.flash > 0.25 || s.mintT >= 0 ? fs.white : s.forgeHeat > 0 ? fs.hot : fs.warm;
+    if (sign.geometry !== signGeo) sign.geometry = signGeo;
+    if (s.waveT >= 0) {
+      s.waveT += dt;
+      for (let i = 0; i < s.waves.length; i++) {
+        const p = (s.waveT - i * 0.16) / 0.6, w = s.waves[i];
+        w.visible = p > 0 && p < 1;
+        if (!w.visible) continue;
+        const r = 1.95 + 1.25 * (1 - (1 - p) * (1 - p));
+        w.scale.x = w.scale.y = r;
+        w.scale.z = 1 - p * 0.6;
+      }
+      if (s.waveT > 0.8) s.waveT = -1;
+    }
+    s.flash = Math.max(0, s.flash - dt * 1.3);
+    for (let i = 0; i < s.shafts.length; i++) {
+      s.shaftGlow[i] = Math.max(0, s.shaftGlow[i] - dt * 0.8);
+      const sh = FM.forgeShafts()[i].glow, geo = s.shaftGlow[i] > 0.2 ? sh.bright : sh.dim;
+      if (s.shafts[i].glow.geometry !== geo) s.shafts[i].glow.geometry = geo;
+    }
+  };
+  // The surge, a frame at a time: three rings of light climb the chamber one after another, swelling as they go, and
+  // each coil's arc flickers between its shapes, while the surge fades.
+  const surgeFrame = (s, dt) => {
+    if (s.surgeT < 0) return;
+    s.surgeT += dt;
+    s.surge = Math.max(0, s.surge - dt * 0.9);
+    const [lo, hi] = LAYOUT.core.chamber;
+    for (let i = 0; i < s.coreRings.length; i++) {
+      const p = (s.surgeT - i * 0.2) / 0.9, r = s.coreRings[i];
+      r.visible = p > 0 && p < 1;
+      if (!r.visible) continue;
+      r.position.y = lo - 0.2 + (hi - lo + 0.8) * p * (2 - p);
+      r.scale.x = r.scale.z = 1 + 0.12 * Math.sin(p * Math.PI);
+      r.scale.y = 1 + 0.6 * (1 - p);
+    }
+    const arcs = FM.teslaArcs(), live = s.surgeT < (s.surge > 1 ? 1.5 : 1.1);
+    for (let i = 0; i < s.arcs.length; i++) {
+      const a = s.arcs[i], k = Math.floor(s.surgeT / 0.06 + i) % 3;
+      a.visible = live && k !== 2;
+      if (a.geometry !== arcs[i][k]) a.geometry = arcs[i][k];
+    }
+    if (s.surgeT > 1.6) {
+      s.surgeT = -1;
+      for (let i = 0; i < s.arcs.length; i++) s.arcs[i].visible = false;
+    }
+  };
+  // The forge taking a cart (kind 0, gold) or minting a coin (kind 1, cyan).
+  const forgeFlash = (s, kind, wave, sparks) => {
+    s.flash = 1;
+    s.flashKind = kind;
+    s.waveT = 0;
+    s.signPulse = 1;
+    if (!kind) s.signTurn += Math.PI * 2;
+    for (let i = 0; i < s.waves.length; i++) s.waves[i].geometry = wave;
+    fx.burst(FIRE.x, 1.3, LAYOUT.forge.z + 1.2, 18, sparks, 3.2);
+  };
+
   const update = (dt, elapsed) => {
     const s = scene;
     pilot.readInput(dt);
@@ -773,22 +1002,22 @@
     // The core: eased toward lit while the node runs, flickering as it starts, dark when it has stopped.
     const want = node === "ready" ? 1 : node === "starting" ? 0.45 + Math.sin(elapsed * 23) * 0.25 : 0;
     s.glow += (want - s.glow) * Math.min(1, dt * 3);
-    const cc = FM.coreChamber(), chamberGeo = s.glow > 0.35 ? cc.lit : cc.dark;
+    const cc = FM.coreChamber(), chamberGeo = s.glow > 0.35 ? s.surge > 0.45 ? cc.surge : cc.lit : cc.dark;
     if (s.chamber.geometry !== chamberGeo) s.chamber.geometry = chamberGeo;
+    surgeFrame(s, dt);
     glowNear(elapsed);
     const L = RENDER_OPTS.lights, B = LIGHT_BASE;
-    const pulse = 0.85 + Math.sin(elapsed * 2.1) * 0.08;
-    for (let k = 4; k < 7; k++) L[LIGHT.core * 8 + k] = B[LIGHT.core * 8 + k] * (0.12 + s.glow * pulse);
-    // The forge: hot while a line is opened or closed, and its cart runs out along the track and back.
+    const pulse = 0.85 + Math.sin(elapsed * 2.1) * 0.08, co = LIGHT.core * 8, white = Math.min(1, s.surge);
+    for (let k = 4; k < 7; k++) L[co + k] = (B[co + k] * (1 - white * 0.5) + white * 0.5) * (0.12 + s.glow * pulse + s.surge * 2.2);
+    // The forge: hot while a line is opened or closed; carts come up to it and coins go down from it.
     s.forgeHeat = Math.max(0, s.forgeHeat - dt);
-    const ff = FM.forgeFire(), fire = s.forgeHeat > 0 ? ff.hot : ff.warm;
+    const ff = FM.forgeFire(), fire = s.forgeHeat > 0 || s.flash > 0 ? ff.hot : ff.warm;
     if (s.forgeFire.geometry !== fire) s.forgeFire.geometry = fire;
-    for (let k = 4; k < 7; k++) L[LIGHT.forge * 8 + k] = B[LIGHT.forge * 8 + k] * (s.forgeHeat > 0 ? 1.4 + Math.sin(elapsed * 17) * 0.2 : 0.7);
-    if (s.cartT < 1) {
-      s.cartT = Math.min(1, s.cartT + dt / TRIP);
-      const out = Math.sin(s.cartT * Math.PI);
-      s.cart.position.z = LAYOUT.forge.z + 1.3 + out * 7.5;
-    }
+    forgeLines(s, dt);
+    const fo = LIGHT.forge * 8, cool = s.flashKind === 1 ? s.flash : 0, heat = (s.forgeHeat > 0 ? 1.4 + Math.sin(elapsed * 17) * 0.2 : 0.7) + 2.6 * s.flash;
+    L[fo + 4] = (B[fo + 4] * (1 - cool) + 0.4 * cool) * heat;
+    L[fo + 5] = (B[fo + 5] * (1 - cool) + 0.85 * cool) * heat;
+    L[fo + 6] = (B[fo + 6] * (1 - cool) + cool) * heat;
     // The featured lines: their stations always stand; a line being built or taken down shows in its status lantern and
     // its light, and its capacitors flash and sputter.
     const caps = FM.capacitor(), statusLit = FM.statusLantern();
@@ -857,30 +1086,45 @@
     s.beam.visible = live;
     s.beam.rotation.y += dt * 0.9;
     for (let k = 4; k < 7; k++) L[LIGHT.lookout * 8 + k] = B[LIGHT.lookout * 8 + k] * (live ? 1 : 0.08);
-    // Sats: along the conduit from their line into the core, where they pulse the chamber as they land.
-    const q = s.sats, data = s.satNode.instanceData;
-    let count = 0;
+    // Sats: in along a conduit to the core, then out along another to the line the forward left by, or back.
+    const q = s.sats, data = s.satNode.instanceData, red = s.redNode.instanceData;
+    let count = 0, reds = 0;
     for (let i = 0; i < SAT_CAP; i++) {
-      const bi = q.bay[i];
-      if (bi < 0) continue;
-      q.t[i] += dt * q.speed[i];
-      if (q.t[i] >= 1) { q.bay[i] = -1; continue; }
-      if (q.t[i] < 0) continue;
-      const path = s.paths[bi], u = q.t[i] * CONDUIT_SAMPLES, j = Math.min(CONDUIT_SAMPLES - 1, Math.floor(u)), f = u - j, a = j * 3;
+      if (q.bay[i] < 0) continue;
+      q.t[i] += dt * q.speed[i] * q.dir[i];
+      if (q.dir[i] > 0 && q.t[i] >= 1) {
+        if ((q.flags[i] & (BIG | LEAD)) === (BIG | LEAD)) surge(s, q.flags[i]);
+        if (q.aim[i] >= 0) s.bays[q.aim[i]].sputter = SPUTTER;
+        if (q.next[i] < 0) { q.bay[i] = -1; continue; }
+        q.bay[i] = q.next[i];
+        q.dir[i] = -1;
+        q.t[i] = 1;
+      } else if (q.dir[i] < 0 && q.t[i] <= 0) {
+        const b = s.bays[q.bay[i]];
+        if (q.flags[i] & FAILED) b.sputter = SPUTTER;
+        else b.flashL = FLASH;
+        q.bay[i] = -1;
+        continue;
+      }
+      if (q.t[i] < 0 || q.t[i] > 1) continue;
+      const bi = q.bay[i], path = s.paths[bi], u = q.t[i] * CONDUIT_SAMPLES, j = Math.min(CONDUIT_SAMPLES - 1, Math.floor(u)), f = u - j, a = j * 3;
       SAT_POS.x = path[a] + (path[a + 3] - path[a]) * f;
       SAT_POS.y = path[a + 1] + (path[a + 4] - path[a + 1]) * f;
       SAT_POS.z = path[a + 2] + (path[a + 5] - path[a + 2]) * f;
       SAT_ROT.y = q.spin[i] + elapsed * 3;
-      const size = 1 + Math.sin(q.t[i] * Math.PI) * 0.25;
+      const size = (q.flags[i] & BIG ? 1.12 : 1) + Math.sin(q.t[i] * Math.PI) * 0.2;
       SAT_SCALE.x = SAT_SCALE.y = SAT_SCALE.z = size;
       mat4.fromTRS(SAT_M, SAT_POS, SAT_ROT, SAT_SCALE);
-      const at = count++ * 20;
-      data.set(SAT_M, at);
-      data[at + 16] = 1; data[at + 17] = 0.4; data[at + 18] = 0; data[at + 19] = 0;
+      const back = q.flags[i] & FAILED && q.dir[i] < 0, out = back ? red : data, at = (back ? reds++ : count++) * 20;
+      out.set(SAT_M, at);
+      out[at + 16] = 1; out[at + 17] = 0.4; out[at + 18] = 0; out[at + 19] = 0;
     }
     s.satNode.instanceCount = count;
     s.satNode.visible = count > 0;
     s.satNode.instanceVersion++;
+    s.redNode.instanceCount = reds;
+    s.redNode.visible = reds > 0;
+    s.redNode.instanceVersion++;
     s.refreshAt -= dt;
     if (s.refreshAt <= 0) {
       s.refreshAt = 1;
@@ -920,9 +1164,11 @@
   };
   // Geometry kept off the graph but swapped in when something flashes, so it stays on the GPU.
   const liveGeometry = (set) => {
-    for (const pair of [FM.coreChamber(), FM.forgeFire(), FM.switchScreens(), FM.rebalancerRing(), FM.lookoutLamp(), FM.galleryCaps(), FM.capacitor().blue, FM.capacitor().orange]) {
+    for (const pair of [FM.coreChamber(), FM.forgeFire(), FM.forgeSign(), FM.forgeWave(), FM.switchScreens(), FM.rebalancerRing(), FM.rebalancerFlow(), FM.lookoutLamp(), FM.galleryCaps(), FM.capacitor().blue, FM.capacitor().orange]) {
       for (const k in pair) set.add(pair[k]);
     }
+    for (const sh of FM.forgeShafts()) set.add(sh.glow.dim).add(sh.glow.bright);
+    for (const shapes of FM.teslaArcs()) for (const g of shapes) set.add(g);
     if (scene) {
       for (const g of scene.crew) g.agent.liveGeometry(set);
       scene.gate.phase.liveGeometry(set);

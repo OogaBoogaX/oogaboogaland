@@ -7,7 +7,9 @@
 // policy. The peers are made up. `update(dt, emit)` runs the show: a forward every second or two, mostly on
 // the featured lines and sometimes failing, a rebalance now and then, Foundry's hourly summary, and a loop
 // of LOOP seconds that closes the newest line and opens another in its place, lets the feed fall silent
-// for a while, and stops and restarts the node. `replay(emit)` first tells the history a page catches up on.
+// for a while, and stops and restarts the node. Between those beats one of the smaller lines closes now and
+// then and another opens in its place (`CHURN`), so the forge has work every half minute or so and a
+// visitor sees it within seconds of coming in. `replay(emit)` first tells the history a page catches up on.
 (() => {
   "use strict";
   const BL = window.BL = window.BL || {};
@@ -17,11 +19,16 @@
   // The loop's beats, in seconds: a line closes and is dismantled, a new one is built in its place, the
   // feed goes quiet, and the node stops and comes back.
   const BEATS = { close: 24, closed: 36, open: 48, active: 62, quiet: 100, loud: 118, stop: 124, start: 132, ready: 136 };
+  // The smaller lines' churn, [second in the loop, beat]: the spare line opens and comes up, and another closes and
+  // becomes the next spare, three times a loop and clear of the featured line's beats, the quiet and the restart.
+  const CHURN = [[4, "open"], [14, "active"], [18, "close"], [22, "closed"], [72, "open"], [82, "active"], [86, "close"], [90, "closed"],
+    [138, "open"], [140, "close"], [144, "closed"], [146, "active"]];
   const PEERS = ["Beach", "Volcano", "Jungle", "Harbor", "Tidepool", "Reef", "Glacier", "Canyon", "Meadow", "Lagoon", "Summit",
     "Bayou", "Mesa", "Delta", "Tundra", "Grotto", "Ridge", "Marsh", "Fjord", "Dune", "Cove", "Crater", "Orchard", "Quarry"];
 
   // The node's public face. The first three peers are the largest channels; Harbor and Tidepool take turns
-  // as the newest line, which is the one the loop closes and replaces.
+  // as the newest line, which is the one the loop closes and replaces. Quarry starts closed, the churn's
+  // first spare.
   const snapshot = (seed) => {
     const rand = mulberry32(seed ^ 0x5eed);
     const channels = PEERS.map((peer, i) => ({
@@ -29,7 +36,7 @@
       capacity: i < 3 ? [8e6, 7e6, 6e6][i] : Math.round((0.5 + rand() * 4.5) * 1e5) * 10,
       ageDays: i === 3 ? 2 : i === 4 ? 0 : 20 + Math.floor(rand() * 400),
       feePpm: [50, 100, 150, 250, 400][Math.floor(rand() * 5)], baseMsat: rand() < 0.5 ? 0 : 1000,
-      active: i !== 4
+      active: i !== 4 && peer !== "Quarry"
     }));
     const active = channels.filter((c) => c.active);
     return {
@@ -43,7 +50,7 @@
   const create = ({ seed = 21, now = () => Date.now(), node = "ooga" } = {}) => {
     const rand = mulberry32(seed), snap = snapshot(seed);
     let seq = 0, t = 0, loop = 0, nextForward = 1, nextRebalance = 30, nextSummary = 55, settled = 0, failed = 0;
-    let beat = 0, quiet = false, newest = "harbor";
+    let beat = 0, quiet = false, newest = "harbor", churn = 0, spare = "quarry", opening = null, leaving = null, turn = 4;
     const HEX = "0123456789abcdef";
     // Random public ids in the UUIDv4 shape the schema requires, drawn from the seed so a replay repeats.
     const uuid = () => {
@@ -67,24 +74,25 @@
     });
     const channel = (id) => snap.channels.find((c) => c.id === id);
     const scaleOf = (sats) => sats < 1e4 ? "dust" : sats < 1e5 ? "small" : sats < 1e6 ? "medium" : sats < 1e7 ? "large" : "very_large";
-    // A forward on an active line: mostly the three largest and the newest, sometimes one of the rest.
-    const pickLine = () => {
+    // A forward on an active line: mostly the three largest and the newest, sometimes one of the rest; never `not`.
+    const pickLine = (not = null) => {
       const featured = rand() < 0.72;
       for (let tries = 0; tries < 8; tries++) {
         const c = featured ? channel(["beach", "volcano", "jungle", newest][Math.floor(rand() * 4)]) : snap.channels[4 + Math.floor(rand() * (snap.channels.length - 4))];
-        if (c.active) return c;
+        if (c.active && c.id !== not) return c;
       }
-      return channel("beach");
+      return channel(not === "beach" ? "volcano" : "beach");
     };
+    // A forward comes in on one line and leaves by another. Now and then a large one, rarely a very large one.
     const forward = (emit) => {
-      const c = pickLine(), fail = rand() < 0.12, r = rand();
-      const scale = r < 0.08 ? "dust" : r < 0.62 ? "small" : r < 0.96 ? "medium" : "large";
+      const c = pickLine(), out = pickLine(c.id), fail = rand() < 0.12, r = rand();
+      const scale = r < 0.08 ? "dust" : r < 0.6 ? "small" : r < 0.92 ? "medium" : r < 0.985 ? "large" : "very_large";
       if (fail) {
         failed++;
-        emit(event("forward.failed", { scale, count: 1, station: c.id }));
+        emit(event("forward.failed", { scale, count: 1, station: c.id, out: out.id }));
       } else {
         settled++;
-        emit(event("forward.settled", { scale, count: 1, station: c.id, fee: "dust" }));
+        emit(event("forward.settled", { scale, count: 1, station: c.id, out: out.id, fee: "dust" }));
       }
     };
     const replay = (emit) => {
@@ -94,9 +102,46 @@
       for (const c of snap.channels) if (c.active) emit(event("channel.active", { scale: scaleOf(c.capacity), station: c.id, channel_count: snap.channelCount }, "replay"));
       for (let i = 0; i < 6; i++) forward((e) => { e.stream = "replay"; emit(e); });
     };
+    // The next smaller line to close: round the lines past the featured ones, skipping any closed or opening.
+    const nextToClose = () => {
+      for (let k = 0; k < snap.channels.length; k++) {
+        turn = turn + 1 < snap.channels.length ? turn + 1 : 5;
+        const c = snap.channels[turn];
+        if (c.active && c.id !== opening) return c.id;
+      }
+      return null;
+    };
+    const churnBeat = (emit, at) => {
+      const next = CHURN[churn];
+      if (!next || at < next[0]) return;
+      churn++;
+      switch (next[1]) {
+        case "open":
+          opening = spare;
+          emit(event("channel.opening", { scale: scaleOf(channel(opening).capacity), station: opening }));
+          break;
+        case "active":
+          channel(opening).active = true;
+          emit(event("channel.active", { scale: scaleOf(channel(opening).capacity), station: opening, channel_count: snap.channelCount }));
+          opening = null;
+          break;
+        case "close":
+          leaving = nextToClose();
+          if (leaving) emit(event("channel.closing", { scale: scaleOf(channel(leaving).capacity), station: leaving }));
+          break;
+        case "closed":
+          if (!leaving) break;
+          channel(leaving).active = false;
+          emit(event("channel.closed", { scale: scaleOf(channel(leaving).capacity), station: leaving, channel_count: snap.channelCount }));
+          spare = leaving;
+          leaving = null;
+          break;
+      }
+    };
     // The loop's scripted beats, each fired once as the clock passes it.
     const script = (emit) => {
       const at = t - loop * LOOP;
+      churnBeat(emit, at);
       const next = ["close", "closed", "open", "active", "quiet", "loud", "stop", "start", "ready"][beat];
       if (!next || at < BEATS[next]) return;
       beat++;
@@ -125,6 +170,7 @@
       if (t - loop * LOOP >= LOOP) {
         loop++;
         beat = 0;
+        churn = 0;
       }
       script(emit);
       if (quiet) return;

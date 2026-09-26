@@ -231,6 +231,8 @@ uniform vec2 uFogRange;
 uniform vec4 uMatrixParams;
 uniform vec3 uMatrixOrigin;
 uniform float uMatrixGlyph;
+// Glass: below 1, a geometry drawn in the glass pass is that see-through, and thicker toward its silhouette.
+uniform float uGlass;
 uniform float uMatrixCave;
 uniform vec4 uMatrixCaves[8];
 uniform vec4 uMatrixCaveBounds[8];
@@ -724,8 +726,9 @@ void main() {
   else if (nl > 6.0 && nl < 12.0) col = waterShade(col, n, surfaceBright);
   vec3 normalColor = clamp(mix(col, uFog, fog), 0.0, 1.0);
   vec3 normalBright = clamp((col * (emissive * 0.9 + vParams.y * 0.5 + tip * 0.85) + surfaceBright) * (1.0 - fog), 0.0, 1.0);
-  oColor = vec4(mix(normalColor, matrixColorResult, front), 1.0);
-  oBright = vec4(mix(normalBright, matrixBrightResult, front), 1.0);
+  float glassAlpha = uGlass < 1.0 ? clamp(uGlass + pow(1.0 - abs(dot(n, normalize(uEye - vWorld))), 2.0) * 0.55, 0.0, 1.0) : 1.0;
+  oColor = vec4(mix(normalColor, matrixColorResult, front), glassAlpha);
+  oBright = vec4(mix(normalBright, matrixBrightResult, front), glassAlpha);
 }`;
   const SHADOW_VS = `#version 300 es
 precision highp float;
@@ -1320,6 +1323,10 @@ void main() {
     // out (null in the eye's pass, which draws every reflector itself).
     const reflectorNodes = [], reflectorTargets = new Map();
     let reflectorTurn = 0, reflectorPass = null;
+    // Glass (`geometry.glass`, its see-through alpha) draws after everything opaque and the sky, blended and leaving
+    // the depth alone, back faces first so a tube shows its far wall through its near one. `glassPass` is set while it
+    // draws; every other pass leaves glass out.
+    let glassPass = false;
     const mirrorDebug = {
       active: false, faux: false, portal: false, reveal: 0, surfaceDrawn: false, captureValid: false, width: 0, height: 0, textureWidth: 0, textureHeight: 0, samples: 0, allocationCount: 0, reflectionPassCount: 0, skippedPassCount: 0, resources: 0, captureExcluded: false, reflectionOnlyCount: 0, planeDistance: 0, ripples: 0, bodyContacts: 0, bodyWaves: 0,
       cameraPosition: new Float32Array(3), cameraTarget: new Float32Array(3), planeCenter: new Float32Array(3), planeNormal: new Float32Array(3), capturedViewProj: mirrorCapturedViewProj, shardsDrawn: 0, environmentPassCount: 0, environmentFaces: 0, environmentSize: 0, environmentResources: 0, skipReason: "none"
@@ -1351,6 +1358,11 @@ void main() {
       for (const sh of p.shaders) gl.deleteShader(sh);
       p.shaders = [];
       for (const name of p.uniforms) p.u[name] = gl.getUniformLocation(p.prog, name);
+      // Every mesh is opaque but in the glass pass, which sets its own and puts this back.
+      if (p.u.uGlass) {
+        gl.useProgram(p.prog);
+        gl.uniform1f(p.u.uGlass, 1);
+      }
     };
     const destroyMirrorProgram = () => {
       const p = mirror.program;
@@ -1379,7 +1391,7 @@ void main() {
       const meshFragment = matrixSampling ? MESH_FS.replace("#version 300 es", "#version 300 es\n#extension GL_OES_shader_multisample_interpolation : require\n#define MATRIX_SAMPLE_INTERPOLATION") : MESH_FS;
       res.programs = {
         image: compile(IMAGE_VS, IMAGE_FS, ["uViewProj", "uRect", "uImage", "uReady", "uClipMaxY"]),
-        mesh: compile(MESH_VS, meshFragment, ["uViewProj", "uLightViewProj", "uEye", "uViewDirection", "uLightDir", "uSky", "uGround", "uSun", "uDirectStrength", "uAmbientFloor", "uDiffuseFloor", "uShadowStrength", "uShadowFloor", "uShadowBias", "uShadow", "uShadowTexel", "uLights", "uLightCount", "uFog", "uFogRange", "uMatrixParams", "uMatrixOrigin", "uMatrixGlyph", "uMatrixCave", "uMatrixCaves", "uMatrixCaveBounds", "uMatrixCaveNear", "uMatrixPermanentCave", "uMatrixPermanentPlane", "uMatrixPermanentAperture", "uMatrixLivingGlobal", "uMatrixGlyphTex", "uMatrixSamples", "uClipMinY", "uClipMaxY", "uMatrixGlyphOpacity", "uVoxel", "uWindTime", "uSway", "uSwing"]),
+        mesh: compile(MESH_VS, meshFragment, ["uViewProj", "uLightViewProj", "uEye", "uViewDirection", "uLightDir", "uSky", "uGround", "uSun", "uDirectStrength", "uAmbientFloor", "uDiffuseFloor", "uShadowStrength", "uShadowFloor", "uShadowBias", "uShadow", "uShadowTexel", "uLights", "uLightCount", "uFog", "uFogRange", "uMatrixParams", "uMatrixOrigin", "uMatrixGlyph", "uMatrixCave", "uMatrixCaves", "uMatrixCaveBounds", "uMatrixCaveNear", "uMatrixPermanentCave", "uMatrixPermanentPlane", "uMatrixPermanentAperture", "uMatrixLivingGlobal", "uMatrixGlyphTex", "uMatrixSamples", "uClipMinY", "uClipMaxY", "uMatrixGlyphOpacity", "uVoxel", "uWindTime", "uSway", "uSwing", "uGlass"]),
         shadow: compile(SHADOW_VS, SHADOW_FS, ["uLightViewProj", "uClipMinY", "uClipMaxY"]),
         line: compile(LINE_VS, LINE_FS, ["uViewProj", "uViewport", "uWidth", "uClipMaxY"]),
         sky: compile(QUAD_VS, SKY_FS, ["uInvViewProj", "uHorizon", "uZenith", "uSun", "uSunDir", "uMoonDir", "uStarMatrix", "uStars", "uTime", "uHazeDrop", "uClouds", "uSea", "uSeaEye"]),
@@ -2336,6 +2348,25 @@ void main() {
       gl.activeTexture(gl.TEXTURE0);
       gl.useProgram(res.programs.mesh.prog);
     };
+    const drawGlass = (cull) => {
+      let any = false;
+      for (const rec of activeRecords) if (rec.geometry.glass && rec.count) { any = true; break; }
+      if (!any) return;
+      const mesh = res.programs.mesh;
+      gl.useProgram(mesh.prog);
+      gl.enable(gl.BLEND);
+      gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+      gl.depthMask(false);
+      glassPass = true;
+      gl.cullFace(gl.FRONT);
+      drawParts("mesh", "mesh", true, cull);
+      gl.cullFace(gl.BACK);
+      drawParts("mesh", "mesh", true, cull);
+      glassPass = false;
+      gl.uniform1f(mesh.u.uGlass, 1);
+      gl.depthMask(true);
+      gl.disable(gl.BLEND);
+    };
     // The camera pass draws only the in-frustum front of each record; shadow and mirror draw all.
     const drawParts = (kind, useProgram, excludeMirror = false, cull = false, matrixStage = 0) => {
       for (const rec of activeRecords) {
@@ -2343,6 +2374,8 @@ void main() {
         applyCutaway(res.programs[useProgram], rec.geometry);
         if (excludeMirror && (rec === mirror.record || rec.geometry.mirrorSource)) continue;
         if (rec.geometry.reflector && (reflectorPass === null || rec === reflectorPass)) continue;
+        if (useProgram === "mesh" && !rec.geometry.glass !== !glassPass) continue;
+        if (glassPass) gl.uniform1f(res.programs.mesh.u.uGlass, rec.geometry.glass);
         const part = rec[kind], n = rec.batch && rec.batch.drawInstanceCount !== undefined ? rec.drawCount : cull ? rec.drawCount : rec.count;
         if (!part || !n) continue;
         if (cull && rec.offscreen) continue;
@@ -2490,6 +2523,7 @@ void main() {
       gl.uniform1f(pg.mesh.u.uMatrixLivingGlobal, matrix ? matrix.livingGlobal ?? 1 : 1);
       drawParts("mesh", "mesh", true);
       if (skyOn) drawSky(mirrorInvViewProj, mirrorEye.y);
+      drawGlass(false);
       gl.useProgram(pg.mesh.prog);
       gl.enable(gl.BLEND);
       gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
@@ -3020,6 +3054,7 @@ void main() {
       drawMirrorSurface(camera);
       drawReflectors(camera);
       if (skyOn) drawSky(invViewProj, camera.position.y);
+      drawGlass(true);
       // Ordinary surfaces first, then the effect-only black liner and native voxel glyphs; alpha follows the backing
       // shader's wave, depth still rejects hidden faces.
       gl.useProgram(pg.mesh.prog);

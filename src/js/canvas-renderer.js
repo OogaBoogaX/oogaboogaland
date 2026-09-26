@@ -325,7 +325,7 @@
       return -1;
     };
     const shadeNode = (node) => {
-      const opacity = (node.smokeOpacity === undefined ? 1 : node.smokeOpacity) * (node.geometry.cutawayHide ? 1 - cutawayFade : 1);
+      const opacity = (node.smokeOpacity === undefined ? 1 : node.smokeOpacity) * (node.geometry.cutawayHide ? 1 - cutawayFade : 1) * (node.geometry.glass || 1);
       if (opacity === 0) return;
       if (node.mirrorRippleOnly && !node.mirrorRipples?.active && !node.mirrorBody?.contacts && !node.mirrorBody?.active) return;
       const { verts, faces, lines } = node.geometry;

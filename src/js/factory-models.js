@@ -32,7 +32,7 @@
 
   const LEVEL = { pit: 0, low: 2.5, main: 5, high: 10, top: 15.5 };
   // Rock outcrops either side of the front of the pit: [x, z, size].
-  const OUTCROPS = [[-11, 21, 1.3], [-16, 25, 1.6], [14.5, 20, 1], [-6, 17, 0.8], [7, 15, 0.9]];
+  const OUTCROPS = [[-11, 21, 1.3], [-16, 25, 1.6], [14.5, 20, 1]];
   const HALL = { halfW: 23, back: -22, front: 30, h: 26 };
   // The walls' stone comes in cells this big and leans this far in over the hall's height.
   const WALL_CELL = 0.75, WALL_LEAN = 3.5, STATION_BACK = 0.8;
@@ -812,7 +812,9 @@
       const a = i / planks * TAU, a2 = (i + 1) / planks * TAU, edge = (rad, t) => [r.x + Math.cos(t) * rad, r.z + Math.sin(t) * rad];
       const seam = (rad) => 0.015 / rad;
       geos.push(slab([edge(r.inner, a + seam(r.inner)), edge(r.outer, a + seam(r.outer)), edge(r.outer, a2 - seam(r.outer)), edge(r.inner, a2 - seam(r.inner))], r.y - 0.2, r.y, i % 3 ? TIMBER : TIMBER_LT));
-      if (i % 4 === 0) geos.push(...columnParts(r.x + Math.cos(a) * (r.outer - 0.4), r.z + Math.sin(a) * (r.outer - 0.4), 0, r.y - 0.2, 0.4));
+      // Posts under it every few planks, but where the forge's arch carries it and its lines run in.
+      const cx = r.x + Math.cos(a) * (r.outer - 0.4), cz = r.z + Math.sin(a) * (r.outer - 0.4);
+      if (i % 4 === 0 && !(Math.abs(cx - L.forge.x) < 3.3 && cz > L.forge.z - 1)) geos.push(...columnParts(cx, cz, 0, r.y - 0.2, 0.4));
     }
     // Its rail runs round the outside, open exactly between the rails of what arrives: the bridges to C and D where
     // they leave it and the stairs' landings where they cross it. Each gap is an arc [from, to] of the rail's circle
@@ -929,7 +931,8 @@
     block(L.core.x, L.core.z, 4.35, -1, LEVEL.main - 0.3);
     block(L.core.x, L.core.z, L.ring.inner, LEVEL.main - 0.3, HALL.h);
     for (const x of [-2.9, -2.2, -1, 0, 1, 2.2, 2.9]) block(L.forge.x + x, L.forge.z + 0.6, 0.75, -1, 4);
-    block(L.forge.x + FORGE_TRACKS[1], FORGE_CART_Z, 0.8, -1, 1.5);
+    // The forge's shafts, their mounds and mouths.
+    for (const [x, z] of SHAFTS) for (const dz of [1.2, 3]) block(x, z + dz, 2.3, -1, 4.4);
     block(L.forge.x + FORGE_CONSOLE[0], L.forge.z + FORGE_CONSOLE[1], 0.45, -1, 2);
     for (const s of [-1, 1]) block(L.forge.x + s * 3.7, L.forge.z + 0.75, 0.35, -1, 4.4);
     for (const [x, z] of COILS) block(x, z, 0.45, LEVEL.main - 0.5, LEVEL.main + 2.5);
@@ -1095,11 +1098,12 @@
   // The glass chamber, the four bolts on it and the lantern's flame: lit while the node runs, dark when it stops.
   const coreChamber = cached(() => {
     const c = LAYOUT.core, [lo, hi] = c.chamber, mid = (lo + hi) / 2;
-    const build = (lit) => {
+    // `surge` is the chamber in a big forward's flash: its glass white-gold, bolts and cracks white, the flame high.
+    const build = (lit, surge = false) => {
       const glass = turn([[2.44, lo], [2.5, lo + 0.45], [2.53, lo + 1.5], [2.53, hi - 1.5], [2.5, hi - 0.45], [2.44, hi]], 32,
-        (t) => lit ? (t < 0.15 || t > 0.8 ? "#d65a1a" : t < 0.35 || t > 0.6 ? "#f5822c" : "#ffa640") : "#3a2418", lit ? 0.8 : 0.12);
-      const flame = turn([[0.3, hi + 3.36], [0.42, hi + 3.8], [0.36, hi + 4.25], [0, hi + 4.5]], 14, lit ? "#ffe08a" : "#4a3420", lit ? 1 : 0.1);
-      const bolts = [0, 1, 2, 3].map((k) => turnedY(moved(smoothBolt(3.6, 0.3, lit ? "#fff4c0" : "#6a4a2a", lit ? 1 : 0.15), 0, mid, 2.66), k * Math.PI / 2));
+        (t) => surge ? (t < 0.15 || t > 0.8 ? "#ffb347" : t < 0.35 || t > 0.6 ? "#ffd27a" : "#fff2c8") : lit ? (t < 0.15 || t > 0.8 ? "#d65a1a" : t < 0.35 || t > 0.6 ? "#f5822c" : "#ffa640") : "#3a2418", lit ? (surge ? 1 : 0.8) : 0.12);
+      const flame = turn([[0.3, hi + 3.36], [surge ? 0.5 : 0.42, hi + 3.8], [surge ? 0.44 : 0.36, hi + (surge ? 4.5 : 4.25)], [0, hi + (surge ? 5 : 4.5)]], 14, surge ? "#fff6d0" : lit ? "#ffe08a" : "#4a3420", lit ? 1 : 0.1);
+      const bolts = [0, 1, 2, 3].map((k) => turnedY(moved(smoothBolt(3.6, 0.3, surge ? "#ffffff" : lit ? "#fff4c0" : "#6a4a2a", lit ? 1 : 0.15), 0, mid, 2.66), k * Math.PI / 2));
       // Molten cracks running out from behind each bolt across its window, as the concept's glass has them.
       const rand = mulberry32(501), cracks = [];
       for (let k = 0; k < 4; k++) for (let n = 0; n < 9; n++) {
@@ -1107,16 +1111,39 @@
         const du = Math.sign(u || 1) * (0.5 + rand() * 0.5), dv = (rand() - 0.5) * 0.8;
         for (let seg = 0; seg < 3; seg++) {
           const u1 = Math.max(-0.82, Math.min(0.82, u + du * (0.22 + rand() * 0.18))), v1 = v + dv * 0.3 + (rand() - 0.5) * 0.3;
-          cracks.push(turnedY(beam(u, mid + v, 2.57, u1, mid + v1, 2.57, 0.045, lit ? "#ffe89a" : "#5a3018", lit ? 1 : 0.1), k * Math.PI / 2));
+          cracks.push(turnedY(beam(u, mid + v, 2.57, u1, mid + v1, 2.57, 0.045, surge ? "#ffffff" : lit ? "#ffe89a" : "#5a3018", lit ? 1 : 0.1), k * Math.PI / 2));
           u = u1; v = v1;
         }
       }
       return noShadow(moved(shaded([glass, flame], [...bolts, ...cracks]), c.x, 0, c.z));
     };
-    return { lit: build(true), dark: build(false) };
+    return { lit: build(true), dark: build(false), surge: build(true, true) };
   });
-  // Conduits from each featured line's capacitors to the chamber: a thick copper pipe with brass flanges along it and
-  // glowing orange bands between them. It rises straight out of the top of the line's inner capacitor, where its
+  // A big forward's surge through the node: a ring of light that climbs the chamber (at unit radius; the scene sets
+  // it round the chamber), and arcs of lightning from each Tesla coil's crown to the chamber's glass, three shapes a
+  // coil that the scene flickers between.
+  const coreRing = cached(() => noShadow(torus(2.78, 0.1, "#fff2c0", 1, 48, 8)));
+  const teslaArcs = cached(() => COILS.map(([x, z], i) => {
+    const c = LAYOUT.core, rand = mulberry32(700 + i), top = [x, LEVEL.main + 2.35, z];
+    const dx = x - c.x, dz = z - c.z, l = Math.hypot(dx, dz);
+    return [0, 1, 2].map(() => {
+      const end = [c.x + dx / l * 2.56, c.chamber[0] + 1.6 + rand() * 2.2, c.z + dz / l * 2.56], geos = [], pts = [top];
+      for (let k = 1; k < 7; k++) {
+        const f = k / 7, j = 0.32 * Math.sin(f * Math.PI);
+        pts.push([top[0] + (end[0] - top[0]) * f + (rand() - 0.5) * j, top[1] + (end[1] - top[1]) * f + (rand() - 0.5) * j, top[2] + (end[2] - top[2]) * f + (rand() - 0.5) * j]);
+      }
+      pts.push(end);
+      for (let k = 0; k + 1 < pts.length; k++) geos.push(beam(...pts[k], ...pts[k + 1], 0.06, k % 2 ? "#dffaff" : "#ffffff", 1));
+      for (const k of [2, 4]) {
+        const [px, py, pz] = pts[k];
+        geos.push(beam(px, py, pz, px + (rand() - 0.5) * 0.9, py + (rand() - 0.2) * 0.7, pz + (rand() - 0.5) * 0.9, 0.035, "#bff4ff", 1));
+      }
+      return noShadow(merge(...geos));
+    });
+  }));
+  // Conduits from each featured line's capacitors to the chamber: a thick tube of clear glass (`glass`, drawn in the
+  // renderer's glass pass) that the sats ride inside, with brass flanges along it and thin glowing orange bands between
+  // them. It rises straight out of the top of the line's inner capacitor, where its
   // terminal was, and arches over to the chamber, meeting both in a turned bronze flare so the pipe grows out of
   // them. A bronze clamp at the top of its arch hangs it on a chain from the vault. The path the sats ride is sampled
   // once so the scene only reads it.
@@ -1134,17 +1161,17 @@
     };
   };
   const conduits = cached(() => {
-    const round = [], lamps = [], paths = [];
+    const round = [], glass = [], lamps = [], paths = [];
     for (const bay of LAYOUT.bays) {
       const path = conduitPath(bay), samples = new Float32Array((CONDUIT_SAMPLES + 1) * 3);
       let length = 0;
       for (let i = 0; i <= CONDUIT_SAMPLES; i++) {
         const p = path(i / CONDUIT_SAMPLES);
-        samples[i * 3] = p.x; samples[i * 3 + 1] = p.y + 0.3; samples[i * 3 + 2] = p.z;
-        if (i) length += Math.hypot(p.x - samples[i * 3 - 3], p.y + 0.3 - samples[i * 3 - 2], p.z - samples[i * 3 - 1]);
+        samples[i * 3] = p.x; samples[i * 3 + 1] = p.y; samples[i * 3 + 2] = p.z;
+        if (i) length += Math.hypot(p.x - samples[i * 3 - 3], p.y - samples[i * 3 - 2], p.z - samples[i * 3 - 1]);
       }
       paths.push(samples);
-      round.push(tube({ path, radius: () => 0.36, rings: 48, segments: 14, colorFn: () => COPPER }));
+      glass.push(tube({ path, radius: () => 0.36, rings: 48, segments: 18, colorFn: () => "#ffe6c0", emissive: 0.1 }));
       const at = (t, build) => {
         const p = path(t), a = path(Math.max(0, t - 0.01)), b = path(Math.min(1, t + 0.01));
         return along(build(), p.x, p.y, p.z, b.x - a.x, b.y - a.y, b.z - a.z);
@@ -1162,12 +1189,16 @@
       round.push(moved(turn([[0.1, 0], [0.1, 0.22], [0, 0.24]], 10, BRONZE), peak.x, peak.y + 0.46, peak.z), ...chain(peak.x, HALL.h + 0.5, peak.z, peak.x, peak.y + 0.7, peak.z, 0.12, IRON_DK));
       // Glowing bands along the pipe, orange for the node's own side of the line, as the concept lights them.
       const bands = Math.round(length / 0.9);
-      for (let i = 1; i < bands; i++) if (i % Math.max(2, Math.round(1.5 / (length / flanges / 0.9))) || true) lamps.push(at((i - 0.5) / bands, () => turn([[0.36, -0.16], [0.385, -0.12], [0.385, 0.12], [0.36, 0.16]], 16, i % 2 ? "#ff9a30" : "#ffc060", 1)));
+      for (let i = 1; i < bands; i++) lamps.push(at((i - 0.5) / bands, () => turn([[0.36, -0.05], [0.39, -0.03], [0.39, 0.03], [0.36, 0.05]], 18, i % 2 ? "#ff9a30" : "#ffc060", 1)));
     }
-    return { pipe: shaded(round), glow: noShadow(shaded(lamps)), paths };
+    const tubes = noShadow(shaded(glass));
+    tubes.glass = 0.2;
+    return { pipe: shaded(round), glass: tubes, glow: noShadow(shaded(lamps)), paths };
   });
   // A sat: a small faceted gold gem, drawn by the hundred as one instanced batch.
   const sat = cached(() => noShadow(lathe({ profile: [[0, -0.2], [0.17, -0.02], [0.14, 0.08], [0, 0.2]], segments: 6, color: GOLD, emissive: 0.85 })));
+  // A failed forward's sat on its way back: the same gem, glowing red.
+  const satFailed = cached(() => noShadow(lathe({ profile: [[0, -0.2], [0.17, -0.02], [0.14, 0.08], [0, 0.2]], segments: 6, color: "#ff3a2a", emissive: 0.9 })));
 
   // ---- a featured line ----------------------------------------------------------------------------------
 
@@ -1278,7 +1309,7 @@
   // opened or closed on chain.
   // The height of the arch's and the fire's middle: low enough that the keystone ends inside the core walkway's planks.
   const FORGE_CY = 1.55;
-  const FORGE_TRACKS = [-0.95, 0.95], FORGE_CART_Z = 4.6, FORGE_CONSOLE = [-2.45, 1.4];
+  const FORGE_TRACKS = [-0.95, 0.95], FORGE_CONSOLE = [-2.45, 1.4];
   // The stores by the forge, [x, z]: between its tracks and the stairs up to the core's walkway, clear of both.
   const FORGE_STORES = [[-2.5, 3.4], [2.5, 2.8], [-2.5, 5], [2.5, 4.6], [2.3, 6.2]];
   const forge = cached(() => {
@@ -1291,10 +1322,6 @@
       geos.push(bevelBox({ w: 0.64, h: 0.5, d, color: (row + (x < 2.5 ? 0 : 1)) % 2 ? STONE[1] : STONE[3], bevel: 0.08, offset: { x: s * x, y: 0.26 + row * 0.52, z } }));
     }
     geos.push(bevelBox({ w: 3.8, h: 3.4, d: 0.4, color: "#1e120c", bevel: 0.06, offset: { y: 1.7, z: -0.6 } }));
-    for (const tx of FORGE_TRACKS) {
-      for (const x of [-0.45, 0.45]) geos.push(box({ w: 0.08, h: 0.08, d: 11.5, color: IRON_LT, offset: { x: tx + x, y: 0.12, z: 5.75 } }));
-      for (let z = 0; z < 11.3; z += 0.5) geos.push(box({ w: 1.25, h: 0.07, d: 0.2, color: TIMBER_DK, offset: { x: tx, y: 0.04, z } }));
-    }
     const rim = tube({ path: (t) => ({ x: Math.cos(Math.PI * t) * 1.9, y: cy + Math.sin(Math.PI * t) * 1.9, z: 0.45 }), radius: () => 0.13, rings: 28, segments: 8, colorFn: () => BRASS });
     // The timber frame round the arch, as the concept builds it: posts with glowing vents, a header beam on iron
     // brackets, all under the core's walkway.
@@ -1325,9 +1352,8 @@
         (t) => hot ? (t < 0.3 ? "#e8500e" : t < 0.6 ? "#ff6e18" : "#ff8a24") : (t < 0.3 ? "#9a360c" : t < 0.6 ? "#c84a12" : "#dc5a16"), hot ? 1 : 0.85));
       const heat = forwardLathe(torus(1.76, 0.1, hot ? "#ffd868" : "#ff9a38", 1, 36, 8));
       const floor = turn([[1.5, 0.03], [0, 0.04]], 24, hot ? "#ff8a24" : "#c84a12", hot ? 0.9 : 0.6);
-      const sign = smoothBitcoin(2.3, 0.24, hot ? "#fff2b8" : "#ffd98a", 1);
       const flames = [[-1.05, 0.55], [-0.55, 0.75], [0, 0.62], [0.55, 0.78], [1.05, 0.52]].flatMap(([x, h]) => flame(hot ? h * 1.25 : h, x, 0.22, 0.32, hot));
-      return noShadow(moved(shaded([moved(face, 0, FORGE_CY, -0.36), moved(heat, 0, FORGE_CY, -0.2), moved(floor, 0, 0, 1.4)], [moved(sign, 0, FORGE_CY, 0.14), ...flames]), f.x, 0, f.z));
+      return noShadow(moved(shaded([moved(face, 0, FORGE_CY, -0.36), moved(heat, 0, FORGE_CY, -0.2), moved(floor, 0, 0, 1.4)], flames), f.x, 0, f.z));
     };
     return { hot: build(true), warm: build(false) };
   });
@@ -1340,14 +1366,207 @@
     tube({ path: (t) => ({ x: Math.cos(t * TAU * 10) * 0.19, y: 0.5 + t * 1.5, z: Math.sin(t * TAU * 10) * 0.19 }), radius: () => 0.035, rings: 200, segments: 5, colorFn: () => COPPER }),
     moved(torus(0.34, 0.12, BRASS, 0, 22, 8), 0, 2.22, 0)
   ], [moved(smoothBolt(0.8, 0.05, "#fff4b0", 1), 0.4, 2.62, 0), moved(turnedY(smoothBolt(0.6, 0.05, "#bff8ff", 1), 1.4), -0.34, 2.56, 0.12)]));
-  // A cart for the forge's track: the mine's own, heaped with glowing gold.
-  const cart = cached(() => {
-    const rand = mulberry32(61), gold = [];
-    for (let i = 0; i < 14; i++) {
-      const sz = 0.16 + rand() * 0.1;
-      gold.push(moved(turnedY(bevelBox({ w: sz, h: sz * 0.85, d: sz, color: rand() < 0.4 ? "#ffe27a" : "#ffc83a", emissive: 0.9, bevel: 0.03 }), rand() * TAU), (rand() - 0.5) * 0.7, 0.98 + rand() * 0.22, (rand() - 0.5) * 0.7));
+  // The ₿ in the forge's fire, its own node so the scene can spin and pulse it: warm, hot while a line is opened or
+  // closed, and white in a flash.
+  const forgeSign = cached(() => {
+    const build = (color) => noShadow(smoothBitcoin(2.3, 0.24, color, 1));
+    return { warm: build("#ffd98a"), hot: build("#fff2b8"), white: build("#ffffff") };
+  });
+  // The ring of light that runs out over the forge's arch when it takes a cart (gold) or mints a coin (cyan), at unit
+  // radius facing +z; the scene scales it out.
+  const forgeWave = cached(() => {
+    const build = (color) => noShadow(forwardLathe(torus(1, 0.05, color, 1, 48, 8)));
+    return { gold: build("#ffe9a8"), cyan: build("#bff4ff") };
+  });
+
+  // ---- the forge's lines -------------------------------------------------------------------------------
+
+  // The forge's two mine shafts either side of the stairway's foot, where its lines come up out of the ground: [x, z]
+  // of each mouth, which faces the forge (-z). The left, from the chain, sends carts of sats up to be consumed; the
+  // right, to the chain, takes the coins the forge mints back down. Inside each the line runs SHAFT_DEEP metres into
+  // the dark, the last SHAFT_RAMP of it dropping away down the shaft.
+  const SHAFTS = [[-6, 14.2], [6, 14.2]], SHAFT_DEEP = 3, SHAFT_RAMP = 2, LINE_STEP = 0.05, FORGE_END = 1;
+  // Each line sampled every LINE_STEP metres by length from the bottom of its shaft to the forge's fire, as
+  // [x, y, z, heading, pitch], so a cart or a coin rolls it at an even speed: up the shaft, out of its mouth, an S over
+  // to the forge's track and straight on into the fire.
+  const forgeLines = cached(() => SHAFTS.map(([sx, sz], i) => {
+    const tx = LAYOUT.forge.x + FORGE_TRACKS[i], z0 = sz - 2.4, z1 = 6.8, zm = (z0 + z1) / 2, dense = [];
+    for (let k = 0; k <= 30; k++) dense.push([sx, sz + SHAFT_DEEP - (SHAFT_DEEP + 2.4) * k / 30]);
+    for (let k = 1; k <= 80; k++) {
+      const t = k / 80, u = 1 - t;
+      dense.push([(u * u * u + 3 * u * u * t) * sx + (3 * u * t * t + t * t * t) * tx, u * u * u * z0 + 3 * u * t * zm + t * t * t * z1]);
     }
-    return merge(BL.mineModels.hubCart(), ...gold);
+    for (let k = 1; k <= 30; k++) dense.push([tx, z1 + (FORGE_END - z1) * k / 30]);
+    const cum = [0];
+    for (let k = 1; k < dense.length; k++) cum.push(cum[k - 1] + Math.hypot(dense[k][0] - dense[k - 1][0], dense[k][1] - dense[k - 1][1]));
+    const length = cum[cum.length - 1], n = Math.floor(length / LINE_STEP) + 1, pts = new Float32Array(n * 5);
+    let seg = 0;
+    for (let j = 0; j < n; j++) {
+      const d = Math.min(length, j * LINE_STEP);
+      while (seg < dense.length - 2 && cum[seg + 1] < d) seg++;
+      const a = dense[seg], b = dense[seg + 1], f = (d - cum[seg]) / (cum[seg + 1] - cum[seg] || 1), drop = Math.max(0, 1 - d / SHAFT_RAMP);
+      pts[j * 5] = a[0] + (b[0] - a[0]) * f;
+      pts[j * 5 + 1] = -1.6 * drop * drop;
+      pts[j * 5 + 2] = a[1] + (b[1] - a[1]) * f;
+      pts[j * 5 + 3] = Math.atan2(b[0] - a[0], b[1] - a[1]);
+      pts[j * 5 + 4] = Math.atan(3.2 * drop / SHAFT_RAMP);
+    }
+    return { pts, n, length };
+  }));
+  // The lines' track: two iron rails on sleepers along each line, from out of the shaft's mouth (and on down into
+  // the dark) to the forge, where they run on past the carts' end into the furnace to its back wall over an iron
+  // hearth plate with a glowing grate, heating from iron to a glowing orange over their last few metres so the line
+  // runs into the fire rather than stopping short of it.
+  const mixColor = (a, b, t) => "#" + hexToRgb(a).map((v, k) => Math.round(v + (hexToRgb(b)[k] - v) * t).toString(16).padStart(2, "0")).join("");
+  const forgeTrack = cached(() => {
+    const geos = [], f = LAYOUT.forge, back = f.z - 0.45, hearth = f.z + 1;
+    const heat = (dEnd) => Math.max(0, Math.min(1, 1 - dEnd / 3.2)) ** 1.5;
+    const rail = (ax, ay, az, bx, by, bz, h) => geos.push(beam(ax, ay, az, bx, by, bz, 0.08, h > 0.02 ? mixColor(IRON_LT, "#ffb25a", h) : IRON_LT, h * 0.95));
+    for (const { pts, n, length } of forgeLines()) {
+      const side = (j, off) => [pts[j * 5] + Math.cos(pts[j * 5 + 3]) * off, pts[j * 5 + 1] + 0.1, pts[j * 5 + 2] - Math.sin(pts[j * 5 + 3]) * off];
+      for (let j = 0; j + 1 < n; j += 5) {
+        const k = Math.min(n - 1, j + 5), h = heat(length - j * LINE_STEP);
+        for (const off of [-0.45, 0.45]) rail(...side(j, off), ...side(k, off), h);
+      }
+      const e = (n - 1) * 5;
+      for (const off of [-0.45, 0.45]) rail(pts[e] + off, 0.1, pts[e + 2], pts[e] + off, 0.1, back, 1);
+      for (let j = 4; j < n; j += 10) {
+        if (pts[j * 5 + 2] < hearth + 0.2 && Math.abs(pts[j * 5] - f.x) < 2) continue;
+        geos.push(moved(turnedY(box({ w: 1.25, h: 0.07, d: 0.2, color: TIMBER_DK }), pts[j * 5 + 3]), pts[j * 5], pts[j * 5 + 1] + 0.04, pts[j * 5 + 2]));
+      }
+    }
+    // The hearth: an iron plate across the arch's mouth, riveted along its lip, with the grate glowing between its bars.
+    geos.push(bevelBox({ w: 3.7, h: 0.06, d: hearth + 0.65 - back, color: IRON_DK, bevel: 0.02, offset: { x: f.x, y: 0.03, z: (hearth + 0.65 + back) / 2 } }));
+    for (let k = 0; k < 4; k++) geos.push(box({ w: 3.3, h: 0.012, d: 0.06, color: k % 2 ? "#ff9a2a" : "#ffc868", emissive: 1, offset: { x: f.x, y: 0.066, z: back + 0.35 + k * 0.28 } }));
+    for (let k = 0; k < 9; k++) geos.push(moved(ball(0.035, IRON_LT, 0, 6), f.x - 1.7 + k * 0.425, 0.065, hearth + 0.58));
+    return merge(...geos);
+  });
+  // A shaft's mound: a hill of rough stone round a timbered mouth, lined dark inside, where the floor gives way to a
+  // black drop at the back; crystals of its line's colour in the rock, and the glow of the shaft below (`glow`, dim
+  // and bright), which the scene brightens when a cart comes up or a coin goes down. Built in the mound's frame, x
+  // across and +z into the hill with the mouth at z 0 facing -z, and set at its mouth.
+  const SHAFT_TINTS = [["#ff9a2a", "#ffd9a0"], ["#4fc8ff", "#d4f6ff"]];
+  const forgeShafts = cached(() => SHAFTS.map(([sx, sz], i) => {
+    const rand = mulberry32(900 + i), rock = [], lit = [], D = SHAFT_DEEP, W = 1.15, H = 2.5, stone = () => STONE[Math.floor(rand() * 4)];
+    // The lining: dark walls and roof, a dark floor up to the drop and a black one over it, and the back wall.
+    for (const s of [-1, 1]) rock.push(box({ w: 0.12, h: H, d: D + 0.2, color: "#1a120c", offset: { x: s * (W + 0.06), y: H / 2, z: D / 2 } }));
+    rock.push(box({ w: 2 * W + 0.24, h: 0.12, d: D + 0.2, color: "#150e09", offset: { y: H + 0.06, z: D / 2 } }));
+    rock.push(box({ w: 2 * W + 0.24, h: H + 0.1, d: 0.12, color: "#0a0705", offset: { y: H / 2, z: D + 0.16 } }));
+    rock.push(box({ w: 2 * W, h: 0.01, d: D - SHAFT_RAMP, color: "#23180f", offset: { y: 0.005, z: (D - SHAFT_RAMP) / 2 } }));
+    rock.push(box({ w: 2 * W, h: 0.012, d: SHAFT_RAMP + 0.1, color: "#020101", offset: { y: 0.006, z: D - SHAFT_RAMP / 2 + 0.05 } }));
+    // The mouth's timber set, banded in iron, with knee braces, arms at the header's ends for lanterns, and a second
+    // set further in.
+    for (const s of [-1, 1]) {
+      rock.push(bevelBox({ w: 0.32, h: H + 0.2, d: 0.36, color: TIMBER_DK, bevel: 0.05, offset: { x: s * (W + 0.16), y: (H + 0.2) / 2, z: -0.05 } }));
+      for (const y of [0.7, 1.9]) rock.push(bevelBox({ w: 0.38, h: 0.09, d: 0.42, color: IRON_DK, bevel: 0.02, offset: { x: s * (W + 0.16), y, z: -0.05 } }));
+      rock.push(beam(s * (W + 0.05), H - 0.55, -0.12, s * (W - 0.55), H + 0.12, -0.12, 0.12, TIMBER));
+      rock.push(bevelBox({ w: 0.5, h: 0.08, d: 0.08, color: IRON_DK, bevel: 0.01, offset: { x: s * (W + 0.55), y: H + 0.3, z: -0.2 } }));
+      rock.push(bevelBox({ w: 0.24, h: H, d: 0.24, color: TIMBER_DK, bevel: 0.04, offset: { x: s * (W - 0.1), y: H / 2, z: 1.2 } }));
+    }
+    rock.push(bevelBox({ w: 2 * W + 1.1, h: 0.38, d: 0.46, color: TIMBER, bevel: 0.06, offset: { y: H + 0.3, z: -0.05 } }));
+    rock.push(bevelBox({ w: 2 * W, h: 0.24, d: 0.28, color: TIMBER_DK, bevel: 0.04, offset: { y: H - 0.1, z: 1.2 } }));
+    // The hill: courses of rough stone either side of the mouth, and a crown over it stepping back as it rises.
+    for (const s of [-1, 1]) for (let row = 0; row < 5; row++) {
+      for (let z = -0.3 + row * 0.1; z < D + 0.5;) {
+        const d = Math.min(0.8 + rand() * 0.7, D + 0.9 - z), w = 1.15 - row * 0.1 + rand() * 0.2;
+        rock.push(bevelBox({ w, h: 0.58, d, color: stone(), bevel: 0.13, offset: { x: s * (W + 0.3 + w / 2 + (rand() - 0.5) * 0.12), y: 0.29 + row * 0.55, z: z + d / 2 } }));
+        z += d;
+      }
+    }
+    for (let k = 0; k < 3; k++) {
+      const half = 2.55 - k * 0.75, y = H + 0.72 + k * 0.46;
+      for (let z = 0.05 + k * 0.55; z < D + 0.5 - k * 0.35;) {
+        const d = Math.min(0.9 + rand() * 0.6, D + 0.9 - k * 0.35 - z);
+        for (let x = -half; x < half - 0.1;) {
+          const w = Math.min(0.9 + rand() * 0.6, half - x);
+          rock.push(bevelBox({ w, h: 0.52, d, color: stone(), bevel: 0.14, offset: { x: x + w / 2, y: y + (rand() - 0.5) * 0.08, z: z + d / 2 } }));
+          x += w;
+        }
+        z += d;
+      }
+    }
+    // Rubble at the hill's foot either side of the mouth.
+    for (const s of [-1, 1]) for (let k = 0; k < 3; k++) {
+      const w = 0.3 + rand() * 0.25;
+      rock.push(moved(turnedY(bevelBox({ w, h: w * 0.7, d: w, color: stone(), bevel: 0.08 }), rand() * TAU), s * (W + 1.3 + rand() * 0.9), w * 0.35, -0.5 - rand() * 0.6));
+    }
+    // Crystals of the line's colour growing out of the rock.
+    const [deep, light] = SHAFT_TINTS[i];
+    for (const [x, y, z, sc] of [[-2.3, 0.5, 0.1, 0.8], [2.4, 1.2, 0.6, 0.6], [1.1, H + 1.9, 1.6, 0.7], [-1.6, H + 1.1, 0.9, 0.55]]) {
+      for (let k = 0; k < 3; k++) {
+        const a = rand() * TAU, lean = 0.25 + rand() * 0.3, h = sc * (0.8 + rand()), r = sc * (0.14 + rand() * 0.08);
+        const g = lathe({ profile: [[r, 0], [r * 0.9, h * 0.8], [0, h]], segments: 6, color: k % 2 ? deep : light, emissive: 0.85 });
+        const v = g.verts, c = Math.cos(a) * lean, sn = Math.sin(a) * lean;
+        for (let q = 0; q < v.length; q += 3) { v[q] += v[q + 1] * c; v[q + 2] += v[q + 1] * sn; }
+        lit.push(moved(g, x + Math.cos(a) * sc * 0.2, y, z + Math.sin(a) * sc * 0.2));
+      }
+    }
+    // The shaft's own glow, low on the walls round the drop and, bright, over the drop itself.
+    const glowOf = (bright) => {
+      const e = bright ? 1 : 0.5, parts = [
+        box({ w: 2 * W - 0.1, h: 0.5, d: 0.04, color: deep, emissive: e, offset: { y: 0.25, z: D + 0.09 } }),
+        box({ w: 2 * W - 0.1, h: 0.4, d: 0.04, color: deep, emissive: e * 0.55, offset: { y: 0.7, z: D + 0.09 } })
+      ];
+      for (const s of [-1, 1]) parts.push(box({ w: 0.04, h: 0.35, d: SHAFT_RAMP, color: deep, emissive: e * 0.7, offset: { x: s * (W - 0.02), y: 0.18, z: D - SHAFT_RAMP / 2 } }));
+      if (bright) parts.push(box({ w: 2 * W - 0.2, h: 0.02, d: SHAFT_RAMP - 0.2, color: light, emissive: 1, offset: { y: 0.02, z: D - SHAFT_RAMP / 2 } }));
+      return noShadow(moved(merge(...parts), sx, 0, sz));
+    };
+    return { rock: moved(merge(...rock), sx, 0, sz), crystals: noShadow(moved(merge(...lit), sx, 0, sz)), glow: { dim: glowOf(false), bright: glowOf(true) } };
+  }));
+
+  // A cart for the forge's lines: an iron tub bound in straps and riveted, on four wheels that ride the rails, heaped
+  // with sats: a glowing mound of amber, a cluster of sat crystals in its middle, cut gems in gold and orange over it
+  // with their facets catching the light, and two Bitcoin coins stood in the heap. Its wheels sit on a rail's top,
+  // 0.14 up.
+  const SAT_GEMS = ["#ff9a1f", "#ffc83a", "#ffe7a0", "#ff6a1a", "#ffb347"];
+  const gem = (size, color, emissive = 0.8) => lathe({ profile: [[0, -0.1], [0.12, 0.01], [0.085, 0.05], [0, 0.055]].map(([r, h]) => [r * size, h * size]), segments: 8, color, emissive });
+  const coin = (r, color, glyph, emissive) => [
+    forwardLathe(turn([[0, -0.025], [r * 0.85, -0.025], [r, -0.018], [r, 0.018], [r * 0.85, 0.025], [0, 0.025]], 20, color, emissive)),
+    moved(smoothBitcoin(r * 1.25, 0.012, glyph, emissive), 0, 0, 0.03),
+    turnedY(moved(smoothBitcoin(r * 1.25, 0.012, glyph, emissive), 0, 0, 0.03), Math.PI)
+  ];
+  const cart = cached(() => {
+    const rand = mulberry32(61), round = [], flat = [];
+    flat.push(bevelBox({ w: 1.1, h: 0.62, d: 1.3, color: IRON, bevel: 0.07, offset: { y: 0.8 } }));
+    flat.push(bevelBox({ w: 1.18, h: 0.08, d: 1.38, color: IRON_DK, bevel: 0.02, offset: { y: 1.11 } }));
+    for (const z of [-0.38, 0.38]) flat.push(bevelBox({ w: 1.14, h: 0.6, d: 0.07, color: IRON_DK, bevel: 0.015, offset: { y: 0.8, z } }));
+    for (const s of [-1, 1]) for (let k = 0; k < 5; k++) round.push(moved(ball(0.03, IRON_LT, 0, 6), s * 0.56, 1.03, -0.52 + k * 0.26));
+    flat.push(bevelBox({ w: 0.9, h: 0.1, d: 1.2, color: IRON_DK, bevel: 0.02, offset: { y: 0.46 } }));
+    for (const z of [-0.42, 0.42]) {
+      round.push(moved(turnedZ(turn([[0.04, -0.52], [0.04, 0.52]], 8, IRON_DK), Math.PI / 2), 0, 0.34, z));
+      for (const s of [-1, 1]) round.push(moved(turnedY(forwardLathe(turn([[0, -0.04], [0.2, -0.04], [0.2, 0.04], [0.13, 0.05], [0.06, 0.08], [0, 0.08]], 16, "#2b2d31")), s * Math.PI / 2), s * 0.45, 0.34, z));
+    }
+    // The load: the amber mound, then the crystals, the gems and the coins on it.
+    const dome = turn([[0.52, 0], [0.46, 0.12], [0.3, 0.24], [0, 0.3]], 20, "#c47418", 0.45);
+    for (let k = 2; k < dome.verts.length; k += 3) dome.verts[k] *= 1.2;
+    round.push(moved(dome, 0, 1.08, 0));
+    const heap = (r) => 1.08 + 0.3 * Math.max(0, 1 - (r / 0.55) ** 2);
+    for (let k = 0; k < 3; k++) {
+      const h = 0.34 + rand() * 0.14, g = lathe({ profile: [[0.07, 0], [0.065, h * 0.75], [0, h]], segments: 6, color: k % 2 ? "#ffd27a" : "#ff8a1f", emissive: 1 });
+      flat.push(moved(turnedZ(turnedX(g, (rand() - 0.5) * 0.7), (rand() - 0.5) * 0.7), (k - 1) * 0.1, heap(0) - 0.08, (rand() - 0.5) * 0.1));
+    }
+    for (let k = 0; k < 12; k++) {
+      const a = k / 12 * TAU + rand() * 0.4, r = 0.18 + rand() * 0.32, size = 0.9 + rand() * 0.7;
+      flat.push(moved(turnedZ(turnedX(gem(size, SAT_GEMS[k % SAT_GEMS.length], 0.65 + rand() * 0.3), (rand() - 0.5) * 1.4), (rand() - 0.5) * 1.4), Math.cos(a) * r, heap(r) + 0.02, Math.sin(a) * r * 1.15));
+    }
+    for (const [x, z, a] of [[0.28, 0.18, 0.5], [-0.26, -0.24, -0.8]]) {
+      for (const g of coin(0.17, GOLD, "#a8680e", 0.55)) flat.push(moved(turnedY(turnedX(g, 0.35), a), x, heap(Math.hypot(x, z / 1.2)) + 0.12, z));
+    }
+    return shaded(round, flat);
+  });
+  // The coin the forge mints when sats leave: a thick disc of gold with a raised rim, a milled edge and the ₿ struck
+  // on both faces, `COIN_R` in radius and standing on its edge, its axle along x, so it rolls along z.
+  const COIN_R = 0.6;
+  const mintCoin = cached(() => {
+    const t = 0.16, R = COIN_R, round = [], flat = [];
+    round.push(forwardLathe(turn([[0, -t / 2], [R - 0.08, -t / 2], [R - 0.02, -t / 2 + 0.02], [R, -t / 2 + 0.05], [R, t / 2 - 0.05], [R - 0.02, t / 2 - 0.02], [R - 0.08, t / 2], [0, t / 2]], 40, GOLD, 0.55)));
+    for (const s of [-1, 1]) round.push(moved(forwardLathe(torus(R - 0.07, 0.022, "#ffe07a", 0.65, 40, 6)), 0, 0, s * t / 2));
+    for (let k = 0; k < 44; k++) {
+      const a = k / 44 * TAU;
+      flat.push(moved(turnedZ(box({ w: 0.025, h: 0.03, d: t - 0.07, color: "#d99a1e", emissive: 0.5 }), a), Math.cos(a) * (R + 0.008), Math.sin(a) * (R + 0.008), 0));
+    }
+    flat.push(moved(smoothBitcoin(0.62, 0.03, "#b87a10", 0.4), 0, 0, t / 2 + 0.012), turnedY(moved(smoothBitcoin(0.62, 0.03, "#b87a10", 0.4), 0, 0, t / 2 + 0.012), Math.PI));
+    return turnedY(shaded(round, flat), Math.PI / 2);
   });
 
   // The switchboard, a cockpit of screens round the operator as the concept draws it. Everything is placed round
@@ -2305,10 +2524,11 @@
   };
 
   BL.factoryModels = {
-    LAYOUT, LEVEL, HALL, WALL_LEAN, STATION_BACK, stationX, stationZ, SHIELD_Z, porchOf, FORGE_TRACKS, FORGE_CART_Z, FORGE_STORES, COILS, teslaCoil, banner, statusLantern, peerPipes, peerMirrors, TUNNEL_SIGN, TUNNEL_POST, EXIT_Z, CONDUIT_SAMPLES, TUNNEL_THEMES, STEP, supportAt, clearAt,
-    hall, scaffold, coreBody, coreChamber, conduits, sat, stationFrame, capacitor, forge, forgeFire, cart,
+    LAYOUT, LEVEL, HALL, WALL_LEAN, STATION_BACK, stationX, stationZ, SHIELD_Z, porchOf, FORGE_TRACKS, FORGE_STORES, FORGE_CY, SHAFTS, LINE_STEP, COIN_R,
+    forgeSign, forgeWave, forgeLines, forgeTrack, forgeShafts, mintCoin, COILS, teslaCoil, banner, statusLantern, peerPipes, peerMirrors, TUNNEL_SIGN, TUNNEL_POST, EXIT_Z, CONDUIT_SAMPLES, TUNNEL_THEMES, STEP, supportAt, clearAt,
+    hall, scaffold, coreBody, coreChamber, conduits, sat, satFailed, stationFrame, capacitor, forge, forgeFire, cart,
     switchboard, switchScreens, REB, TRE, rebalancerBase, rebalancerRing, rebalancerFlow, treasuryBody, goldPile, hopperFill, beltNugget, goldCrate, dataBoard, moveBoard,
-    lookoutTower, lookoutLamp, lookoutBeam, STUDY, studyHall, studyNote, studyBoard, tunnels, galleryStation, galleryCaps, label, lanterns, hardHat, hubTunnel, exitTunnel, outsideView,
+    coreRing, teslaArcs, lookoutTower, lookoutLamp, lookoutBeam, STUDY, studyHall, studyNote, studyBoard, tunnels, galleryStation, galleryCaps, label, lanterns, hardHat, hubTunnel, exitTunnel, outsideView,
     beam, moved, turnedY, smoothBolt, smoothBitcoin
   };
 })();

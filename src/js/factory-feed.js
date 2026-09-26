@@ -5,7 +5,7 @@
 //
 // Two contracts are read. `foundry.public.event.v1` is Foundry's public schema, closed at every level. The demo
 // node speaks `obl.factory.demo.v1`: the same envelope and payload plus a `station` (which public channel the
-// event belongs to) and, on a settled forward, a bucketed `fee`. It is a separate contract rather than extra
+// event belongs to), on a forward the `out` station it left by, and on a settled forward a bucketed `fee`. It is a separate contract rather than extra
 // fields on the first, so a real Foundry stream can never be mistaken for it.
 //
 // Liveness keeps two things apart: the node said it stopped (`node.stopped`, observed), and the feed went quiet
@@ -20,7 +20,7 @@
   const SCALES = ["dust", "small", "medium", "large", "very_large"];
   const ENVELOPE = new Set(["schema", "id", "seq", "bucket", "node", "origin", "stream", "type", "payload"]);
   const PAYLOAD = new Set(["scale", "count", "success_ratio", "peer_count", "channel_count", "slot"]);
-  const DEMO_PAYLOAD = new Set([...PAYLOAD, "station", "fee"]);
+  const DEMO_PAYLOAD = new Set([...PAYLOAD, "station", "out", "fee"]);
   const ID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
   const NODE = /^[a-z0-9][a-z0-9-]{0,30}[a-z0-9]$/, SLOT = /^[a-z0-9]{1,8}$/, STATION = /^[a-z0-9][a-z0-9-]{0,31}$/;
   // A bucket is floored to its granularity, so it never carries seconds; a rebalance's is floored to the hour.
@@ -53,6 +53,7 @@
       if (p.slot !== undefined && !(typeof p.slot === "string" && SLOT.test(p.slot))) return "slot";
       if (p.station !== undefined && !(typeof p.station === "string" && STATION.test(p.station))) return "station";
       if (p.fee !== undefined && (e.type !== "forward.settled" || !SCALES.includes(p.fee))) return "fee";
+      if (p.out !== undefined && (e.type !== "forward.settled" && e.type !== "forward.failed" || typeof p.out !== "string" || !STATION.test(p.out) || p.out === p.station)) return "out";
     }
     // A rebalance happens because a channel ran low, so it may not name a line, carry a success rate, or be
     // timed finer than its hour; the demo contract keeps the same rule.
