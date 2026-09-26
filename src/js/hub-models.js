@@ -174,7 +174,7 @@
   // A cave's name board: three thick bevelled planks with ragged ends on two posts that stand proud above and
   // below, the name raised in faintly glowing cream on one dark stained panel so it reads day and night and
   // from across the island (solid letters and one panel, nothing thin enough to break up at distance), the
-  // cave's badge either side and iron plates on the corners. The front face sits at SIGN_FRONT and nothing reaches behind
+  // cave's badge before it (badge and name centred as one group) and iron plates on the corners. The front face sits at SIGN_FRONT and nothing reaches behind
   // z = -0.07, so it hangs where the old board did.
   const caveSign = (text = "EntropyLab", iconName = null) => {
     const key = iconName ? text + "|" + iconName : text;
@@ -184,7 +184,9 @@
     for (const ch of text) cells += ch === " " ? 2 : 4;
     const textW = cells * SIGN_CELL;
     const iconW = iconName ? SIGN_CELL * BADGE_CELLS : 0;
-    const width = Math.max(CAVE_SIGN_WIDTH, textW + SIGN_PAD + (iconName ? iconW * 2 + SIGN_CELL * 2 : 0));
+    const width = Math.max(CAVE_SIGN_WIDTH, textW + SIGN_PAD + (iconName ? iconW + SIGN_CELL : 0));
+    // The badge leads the name; the pair is centred together, so the name moves right by half the badge and its gap.
+    const shift = iconName ? (iconW + SIGN_CELL) * 0.5 : 0;
     const half = CAVE_SIGN_HEIGHT * 0.5, plankH = (CAVE_SIGN_HEIGHT - 0.04) / 3, depth = 0.3, mid = SIGN_FRONT - depth / 2;
     const geos = [];
     // Posts first, so the planks cover them and only their ends show.
@@ -193,10 +195,10 @@
       geos.push(bevelBox({ w: width + grow, h: plankH, d: depth, color: SIGN_PLANKS[k], bevel: 0.05, offset: { x: shift, y: half - plankH * (k + 0.5) - 0.02 * k, z: mid } }));
     });
     // The dark panel the name sits on: one piece, a little proud of the planks, covering descenders too.
-    geos.push(bevelBox({ w: textW + 0.14, h: 0.52, d: 0.035, color: "#3f2513", bevel: 0.012, offset: { y: -0.035, z: SIGN_FRONT + 0.0125 } }));
+    geos.push(bevelBox({ w: textW + 0.14, h: 0.52, d: 0.035, color: "#3f2513", bevel: 0.012, offset: { x: shift, y: -0.035, z: SIGN_FRONT + 0.0125 } }));
     // Letters as solid horizontal runs of whole cells, touching row to row, so a glyph is one clean shape.
     const run = (x0, y, n) => geos.push(box({ w: SIGN_CELL * n, h: SIGN_CELL, d: 0.07, color: SIGN_INK, emissive: 0.25, offset: { x: x0 + SIGN_CELL * (n - 1) * 0.5, y, z: SIGN_FRONT + 0.03 } }));
-    let cursor = -textW * 0.5;
+    let cursor = shift - textW * 0.5;
     for (const ch of text) {
       if (ch === " ") {
         cursor += SIGN_CELL * 2;
@@ -218,11 +220,9 @@
     }
     if (iconName) {
       const badge = badgeCells(iconName);
-      for (const side of [-1, 1]) {
-        const x0 = side * (textW * 0.5 + SIGN_CELL + iconW * 0.5) - iconW * 0.5 + SIGN_CELL * 0.5;
-        for (const [col, row, color, proud] of badge) {
-          geos.push(box({ w: SIGN_PIXEL + 0.014, h: SIGN_PIXEL + 0.014, d: proud ? 0.07 : 0.045, color, emissive: proud ? 0.35 : 0, offset: { x: x0 + col * SIGN_CELL, y: (4 - row) * SIGN_CELL, z: SIGN_FRONT + (proud ? 0.03 : 0.0175) } }));
-        }
+      const x0 = shift - textW * 0.5 - SIGN_CELL - iconW + SIGN_CELL * 0.5;
+      for (const [col, row, color, proud] of badge) {
+        geos.push(box({ w: SIGN_PIXEL + 0.014, h: SIGN_PIXEL + 0.014, d: proud ? 0.07 : 0.045, color, emissive: proud ? 0.35 : 0, offset: { x: x0 + col * SIGN_CELL, y: (4 - row) * SIGN_CELL, z: SIGN_FRONT + (proud ? 0.03 : 0.0175) } }));
       }
     }
     // Iron plates on the four corners, each held by two rivets.

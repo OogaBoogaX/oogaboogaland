@@ -620,7 +620,7 @@
     });
     // The board close-up: one dialog for every readable board (the jumbotron, the chain board, the weather key).
     // A board is any object with `title`, `help`, `canvas`, `count`, `index`, `caption`, `note`, `version` and
-    // `go(index)`, plus an optional `wide`, which sets the page beside its note on desktop. The dialog copies the canvas, captions the page, lays one dot per page and pages with the
+    // `go(index)`, plus an optional `wide`, which widens the dialog on desktop. The dialog copies the canvas, captions the page, lays one dot per page and pages with the
     // chevrons, the dots and the arrow keys; it never learns what a board shows, so a board can change freely.
     // `updateBoard` repaints whenever the open board's version moves.
     let board = null, boardShown = -1, boardDots = -1;
@@ -630,6 +630,7 @@
       if (screen.width !== src.width || screen.height !== src.height) {
         screen.width = src.width;
         screen.height = src.height;
+        screen.style.setProperty("--board-ratio", String(src.width / src.height));
       }
       screen.getContext("2d").drawImage(src, 0, 0);
       el.boardCaption.textContent = board.caption;

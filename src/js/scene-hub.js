@@ -2394,7 +2394,7 @@
     const beer = BL.timechainBeer.create(site);
     solids.add(beer.dispenser); solids.add(beer.cabinet); solids.add(beer.bin);
     addProp("timechainbeer", beer.mug, site.chair.position.x - 0.95, site.chair.position.z, 0.3);
-    return { site, place: p, boards: null, seat, beer, claimGround, hangout, residentPlaced: false };
+    return { site, place: p, boards: null, seat, beer, claimGround, hangout, residentPlaced: false, show: T.show(site) };
   };
   // The Sphere's walls and their feed (six slow API calls, then polls, each repainting a wall) wait until the camera
   // comes near, so a visit that never goes there never pays for them. They sit on the shell's inner face, which keeps
@@ -5679,17 +5679,15 @@
     if (first) hud.setSubtitle("an island of caves");
     if (!first) hud.toast(PHASE_TOASTS[next]);
   };
-  // The Timechain Sphere's walls in the shared board dialog: a page a wall, its reading and source in the note.
+  // The Timechain Sphere's walls in the shared board dialog: a page a wall, its source in the note.
   let timechainVersion = 0;
   const timechainBoard = {
     title: "Timechain Sphere", help: "Six walls of chain data. Arrow keys flip the boards.", wide: true,
     get canvas() { return timechainIsland.boards.entries[timechainIsland.boards.index].canvas; },
     get count() { return BL.timechainData.TITLES.length; }, get index() { return timechainIsland.boards.index; },
     get caption() { return BL.timechainData.TITLES[timechainIsland.boards.index]; },
-    get note() {
-      const i = timechainIsland.boards.index;
-      return `${timechainIsland.boards.entries[i].caption}\nSource: ${timechainIsland.boards.data[i].source}`;
-    },
+    // The wall already shows the reading; the note only says where it comes from.
+    get note() { return `Source: ${timechainIsland.boards.data[timechainIsland.boards.index].source}`; },
     get version() { return timechainVersion; },
     go: (i) => timechainIsland.boards.select(i)
   };
@@ -5821,6 +5819,7 @@
       s.speed *= decay;
       if (s.speed < 0.005) s.speed = 0;
       timechainIsland.site.swivel.rotation.y = s.angle;
+      timechainIsland.show(dt);
     }
     crew.update(dt, elapsed);
     mempoolIsland.wildlife.update(dt, elapsed);

@@ -2508,35 +2508,48 @@ body[data-active-scene="mine"] .mode-hud {
   display: none;
 }
 
-/* A wide board (the Timechain Sphere) sets its page beside its note on desktop; phones keep the stack. */
+/* A wide board (the Timechain Sphere, a tall page of rows) gets a wide dialog on desktop: the page on the left,
+   fitted to the window's height, and the caption, pages, note and help in a column beside it. Phones keep the
+   default. */
 @media (min-width: 721px) {
   .board-modal.board-wide {
-    width: 980px;
+    width: min(960px, calc(100vw - 32px));
   }
 
   .board-modal.board-wide[open] {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-    column-gap: 20px;
-    align-content: start;
+    grid-template-columns: minmax(0, 1fr) 280px;
+    grid-template-rows: auto auto auto auto auto 1fr;
+    grid-template-areas: "head head" "screen nav" "screen dots" "screen note" "screen help" "screen .";
+    column-gap: 18px;
+    align-items: start;
   }
 
-  .board-wide .panel-head,
-  .board-wide #board-help {
-    grid-column: 1 / -1;
+  .board-wide .panel-head {
+    grid-area: head;
   }
 
-  .board-wide .board-screen,
-  .board-wide .board-nav,
+  .board-wide .board-screen {
+    grid-area: screen;
+    justify-self: center;
+    width: min(100%, calc((100dvh - 140px) * var(--board-ratio, 1)));
+    margin: 0;
+  }
+
+  .board-wide .board-nav {
+    grid-area: nav;
+  }
+
   .board-wide .board-dots {
-    grid-column: 1;
+    grid-area: dots;
   }
 
   .board-wide .board-note {
-    grid-column: 2;
-    grid-row: 2 / span 3;
-    align-self: start;
-    margin-top: 10px;
+    grid-area: note;
+  }
+
+  .board-wide .help {
+    grid-area: help;
   }
 }
 
