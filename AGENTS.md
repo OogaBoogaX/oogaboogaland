@@ -4,7 +4,7 @@ Rules for AI agents and people changing Ooga Booga Land. Read it before changing
 
 ## What this is
 
-A WebGL2 floating island whose cliff caves are projects. The page lands on the hub. The open caves are the EntropyLab lab, where donated bananas feed voxel cavemen who stand for its contributors, and Ooga Rally, a three-track kart race. A plane on the rally cave's roof launches Ooga Drop, a skydive; a launch islet off the south rim flies Ooga Orbit; a vine bridge at 4 o'clock reaches the Mempool island, whose cave reads the chain out in stone; Ooga Mine is the 10 o'clock cave. Pile, crew, effects and loot crates are shared systems, and the pile level is shared everywhere.
+A WebGL2 floating island whose cliff caves are projects. The page lands on the hub. The open caves are the EntropyLab lab, where donated bananas feed voxel cavemen who stand for its contributors, and Ooga Rally, a three-track kart race. A plane on the rally cave's roof launches Ooga Drop, a skydive; a launch islet off the south rim flies Ooga Orbit; a vine bridge at 4 o'clock reaches the Mempool island, whose cave reads the chain out in stone; Ooga Mine is the 10 o'clock cave; the Lightning Factory, a Lightning node at work, is the 2 o'clock cave. Pile, crew, effects and loot crates are shared systems, and the pile level is shared everywhere.
 
 The page is static with three live feeds: the mempool.space socket (`mempool.js`), the chain snapshot (`chain.js`: REST from mempool.space or Esplora, plus the Coinbase price socket and its REST fallbacks) and the oogatron stats poller (`oogatron-live.js`: the jumbotron every minute, fireworks when org activity rises). Payments are a simulator stub and all state lives in localStorage. A backend comes later and must fit the contract in `src/js/donations.js`; add no network code for it before it exists. Player controls are in the README.
 
@@ -78,6 +78,7 @@ Classic scripts, each an IIFE with `"use strict"`, sharing `window.BL`. A file e
 | `skydiver.js`, `drop-hud.js`, `drop-audio.js`, `drop-models.js`, `scene-drop.js` | Ooga Drop: the diver's physics, HUD, sound, the roof plane and course props, the scene |
 | `rocket-parts.js`, `rocket.js`, `rocket-models.js`, `rocket-hud.js`, `rocket-audio.js`, `scene-orbit.js` | Ooga Orbit: the part catalog and build checks, flight physics, geometry and launch site, HUD, sound, the scene |
 | `mine-rigs.js`, `mine-sim.js`, `mine-models.js`, `mine-hud.js`, `mine-audio.js`, `mine-crew.js`, `scene-mine.js` | Ooga Mine: catalog arithmetic, the seeded allocation-free sim (`snapshot`, `save`, `load`), the cave and its `LAYOUT`, panels, sound, operators, and the scene, which is only a view of the sim |
+| `factory-feed.js`, `factory-mock.js`, `factory-models.js`, `scene-factory.js` | The Lightning Factory: the reader of a node's events under Foundry's public contract and the demo contract, the seeded demo node that stands in for a real one, the hall's geometry, `LAYOUT` and walkable floor (`supportAt`, `clearAt`, `walkable`), and the scene. The hub dresses the 2 o'clock mouth with its `hubTunnel` and walks the played Ooga in through its shield |
 | `pool-models.js` | the Mempool island's geometry: cartoon flora, animals, bridge and stairwell from the hub kit, solid pieces walking on their first block build (`collisionGeometry`). `merge` does not carry `lineWidth`; set it on the merged geometry |
 | `pool-wildlife.js` | the Mempool island's animals, alive: `poolModels.beastRig` faceted rigs driven by a small state machine (idle, walk, rest and sleep, glide for climbing, the log and flight) on the gorillas' pattern; `create` returns `list`, `update`, `startle`, `dispose` |
 | `timechain-models.js`, `timechain-beer.js`, `timechain-data.js`, `timechain-boards.js` | the Timechain Sphere off the southwest rim: the walk-in LED ball (sixteen screen lunes and a logo layer lit by `show` through `glow`/`highlight`), its bridge, recliner and beer; the timechainindex.com feed (off under `nosim` unless `timechain=1`) and the six wall boards, built when the camera comes near. Solids count crossings on an upward ray, so a collision shell must be closed: the screen stays off it and the doorway's cut between the skins is walled in the shell |
@@ -220,6 +221,7 @@ New event geometry and pickup nodes must stay capped and take part in `liveGeome
 | `scene-orbit.js`, `rocket*` | `orbit` |
 | `scene-mine.js`, `mine-*` | `mine` |
 | `scene-pool.js`, `pool-*`, `chain.js`, `mempool.js` | `pool` |
+| `scene-factory.js`, `factory-*` | `factory` (and `hub` when the mouth's entrance in `scene-hub.js` changes) |
 | anything shared (`director.js`, `scene.js`, the renderers, `crew.js`, `pile.js`, `fx.js`, `game.js`, `hud.js`, `models.js`, `terrain.js`) | `full` |
 
 | Command | Runs | Takes |
@@ -240,6 +242,7 @@ What each scene proves:
 | `orbit` | the full flight and its log; every key its way on screen on the climb, falling home, under the chute and on the spacewalk; a rocket that falls back names the missed orbit first, even on the pad; Escape to the builder, then to the island |
 | `mine` | a run left mid-way resumes after a reload and finishes to its results; Space leaves the intro alone, Enter starts, W A S D and Q E their way on screen, P pauses, Escape closes, pauses, leaves |
 | `pool` | Escape returns to the island |
+| `factory` | W A S D walk their way on screen; a forward's sats ride in along one line's conduit, through the core and out along another's, and a failed one comes back; the forge takes carts of sats and mints a coin; a peer tunnel's shield sends the Ooga back to the node; walking through the 2 o'clock shield and back out keeps the same Ooga, and Escape leaves; the widest Ooga on the roster reaches every stair, deck and shield; it boots on Canvas 2D. Its feed contracts and demo node are checked in the global tier |
 
 Extra sessions, each its own Chrome: `hub weapons` (the AK spends and R swaps magazines unaimed; one melee swing breaks a box, three a barrel, five a rock, and it comes back; the jetpack climbs on fuel, refills, and the abyss takes it with one notice), `hub mirror` (the Matrix button raises the bars and the wave and lowers them; 68 damage shatters the mirror open and it stays broken), `hub canvas2d` (every scene boots and paints on Canvas 2D), and a `<scene> phone` session per scene at 390x844 with touch (title cards in touch words that start on a tap; nothing clipped, wrapped by accident or off screen; every control on screen and uncovered).
 

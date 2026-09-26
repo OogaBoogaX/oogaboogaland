@@ -2678,6 +2678,8 @@ void main() {
         gl.bindVertexArray(rec.mesh.vao);
         gl.drawArraysInstanced(gl.TRIANGLES, 0, rec.mesh.count, rec.count);
       }
+      // The passes after this one bind their inputs to unit 0.
+      gl.activeTexture(gl.TEXTURE0);
     };
     const drawRippleSurfaces = () => {
       let started = false;

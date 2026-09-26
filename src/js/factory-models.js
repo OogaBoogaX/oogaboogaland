@@ -74,7 +74,7 @@
     // Level 2, the balcony's level: the walkway from the balcony's right side round the right wall, past the study
     // hall, to the Harbor line's porch, as decks [x0, x1, z0, z1]; each line's porch out to its peer tunnel comes
     // from the line and the tunnel (`porchOf`).
-    walk: [[2.5, 17.6, 23.7, 26.3], [17.6, 20.2, -0.5, 26.3]],
+    walk: [[2.5, 17.6, 23.7, 26.3], [17.6, 20.2, 0, 26.3]],
     // Every other flight of stairs, [x, y, z] at the bottom and at the top and its width, read by the scaffold that
     // builds them (cutting the rail wherever one lands) and by the floor an Ooga walks: pit to the switchboard, the
     // treasury and the core's walkway, the main level to the high lines up the lines' inner sides, and the high
@@ -102,12 +102,15 @@
   const stationZ = (b) => b.z - (b.back ?? STATION_BACK);
 
   // A line's porch out to its peer tunnel, [x0, x1, z0, z1] at the tunnel's level: from the line's outer edge to
-  // the tunnel's face for the lines on the side walls, from the line's back edge for those at the back.
+  // the tunnel's face for the lines on the side walls, from the line's back edge for those at the back. It is
+  // `PORCH_HALF` either side of the tunnel's middle, nearly the arch's width, so the widest Ooga walks up the middle
+  // past the console box by the arch.
+  const PORCH_HALF = 2;
   const porchOf = (t) => {
     const b = LAYOUT.bays[t.bay];
-    if (t.turn === 0) return [t.x - 1.5, t.x + 1.5, t.z + 0.6, b.z - b.d / 2];
+    if (t.turn === 0) return [t.x - PORCH_HALF, t.x + PORCH_HALF, t.z + 0.6, b.z - b.d / 2];
     const s = Math.sign(t.x), inner = b.x + s * b.w / 2, face = t.x - s * 0.5;
-    return [Math.min(inner, face), Math.max(inner, face), t.z - 1.5, t.z + 1.5];
+    return [Math.min(inner, face), Math.max(inner, face), t.z - PORCH_HALF, t.z + PORCH_HALF];
   };
 
   // A stair that lands at the core's walkway, and how far its landing runs on over the walkway's curve.
@@ -756,7 +759,7 @@
     landings.push([ld.x, ld.y, ld.z - ld.d / 2 - 0.1, ld.w / 2 - 0.1]);
     for (const t of L.tunnels) {
       const b = L.bays[t.bay];
-      landings.push(t.turn === 0 ? [t.x, t.y, b.z - b.d / 2 + 0.1, 1.4] : [b.x + Math.sign(t.x) * (b.w / 2 - 0.1), t.y, t.z, 1.4]);
+      landings.push(t.turn === 0 ? [t.x, t.y, b.z - b.d / 2 + 0.1, PORCH_HALF - 0.1] : [b.x + Math.sign(t.x) * (b.w / 2 - 0.1), t.y, t.z, PORCH_HALF - 0.1]);
     }
     const [gx, , , , gy1, , gw] = L.stairway;
     landings.push([gx, gy1, e.z - e.d / 2 + 0.1, gw / 2 + 0.1], [e.x + e.w / 2 - 0.1, e.y, (a0 + a1) / 2, (a1 - a0) / 2 - 0.1]);
@@ -1011,6 +1014,16 @@
     const r = F.ring, d = Math.hypot(x - r.x, z - r.z);
     if (r.y > best && r.y <= reach && d >= r.inner + 0.1 && d <= r.outer - 0.2) best = r.y;
     return best;
+  };
+  // Whether a walker of `radius` whose feet are at `feet` can step from (ax, az) to (bx, bz): clear of everything
+  // standing on the floors all the way, and never dropping more than a step. The scene's walkers and the tests share it.
+  const walkable = (ax, az, bx, bz, feet, radius) => {
+    const steps = Math.max(1, Math.ceil(Math.hypot(bx - ax, bz - az) / 0.2));
+    for (let i = 1; i <= steps; i++) {
+      const x = ax + (bx - ax) * i / steps, z = az + (bz - az) * i / steps;
+      if (!clearAt(x, z, feet, radius) || supportAt(x, z, feet) < feet - STEP) return false;
+    }
+    return true;
   };
   const clearAt = (x, z, feet, radius) => {
     if (Math.abs(x) > HALL.halfW - 2 || z < HALL.back + 2 || z > HALL.front - 0.4) return false;
@@ -2107,7 +2120,7 @@
     { ring: "#6fff9a", sky: "#1f5a3a", ground: "#2f5a2a", accent: "#1f4a24" },
     { ring: "#6fb8ff", sky: "#1f3a6a", ground: "#4a6a8a", accent: "#e8e0d0" }
   ];
-  const TUNNEL_SIGN = { y: 6.15, z: 0.7 }, TUNNEL_POST = 3.95, TUNNEL_BOX = [-1.15, 0.85];
+  const TUNNEL_SIGN = { y: 6.15, z: 0.7 }, TUNNEL_POST = 3.95, TUNNEL_BOX = [-1.55, 0.85];
   const tunnel = (theme) => {
     const T = TUNNEL_THEMES[theme], geos = [], glow = [], lit = [], rand = mulberry32(theme * 11 + 3), cy = 2.6;
     for (const [r, n, depth, z] of [[2.5, 12, 1.4, 0], [3.2, 16, 1.1, -0.15]]) for (let k = 0; k <= n; k++) {
@@ -2525,7 +2538,7 @@
 
   BL.factoryModels = {
     LAYOUT, LEVEL, HALL, WALL_LEAN, STATION_BACK, stationX, stationZ, SHIELD_Z, porchOf, FORGE_TRACKS, FORGE_STORES, FORGE_CY, SHAFTS, LINE_STEP, COIN_R,
-    forgeSign, forgeWave, forgeLines, forgeTrack, forgeShafts, mintCoin, COILS, teslaCoil, banner, statusLantern, peerPipes, peerMirrors, TUNNEL_SIGN, TUNNEL_POST, EXIT_Z, CONDUIT_SAMPLES, TUNNEL_THEMES, STEP, supportAt, clearAt,
+    forgeSign, forgeWave, forgeLines, forgeTrack, forgeShafts, mintCoin, COILS, teslaCoil, banner, statusLantern, peerPipes, peerMirrors, TUNNEL_SIGN, TUNNEL_POST, EXIT_Z, CONDUIT_SAMPLES, TUNNEL_THEMES, STEP, supportAt, clearAt, walkable,
     hall, scaffold, coreBody, coreChamber, conduits, sat, satFailed, stationFrame, capacitor, forge, forgeFire, cart,
     switchboard, switchScreens, REB, TRE, rebalancerBase, rebalancerRing, rebalancerFlow, treasuryBody, goldPile, hopperFill, beltNugget, goldCrate, dataBoard, moveBoard,
     coreRing, teslaArcs, lookoutTower, lookoutLamp, lookoutBeam, STUDY, studyHall, studyNote, studyBoard, tunnels, galleryStation, galleryCaps, label, lanterns, hardHat, hubTunnel, exitTunnel, outsideView,

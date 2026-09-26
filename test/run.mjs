@@ -2246,7 +2246,7 @@ const orbitFlow = async (b) => {
 // `node test/run.mjs race mine` runs the global unit tier plus those scenes; `full` runs every scene and the
 // perf floor; `perf` runs the perf floor alone; `unit` (or nothing) runs only the global tier.
 // Eight lanes saturate a 16-core box (measured 2026-09-20); raising it only adds heat.
-const SCENES = ["hub", "lab", "race", "drop", "orbit", "mine", "pool", "dsb"];
+const SCENES = ["hub", "lab", "race", "drop", "orbit", "mine", "pool", "dsb", "factory"];
 const LANES = Number(process.env.LANES) || 8;
 const ARGS = process.argv.slice(2);
 for (const a of ARGS) if (!SCENES.includes(a) && !["unit", "perf", "full"].includes(a)) throw new Error(`Unknown argument "${a}" (unit | perf | full | ${SCENES.join(" | ")})`);
@@ -3210,11 +3210,12 @@ const hubMatrix = { name: "hub matrix", why: "rule: the room lever raises the mi
     regions: D.caveSections.map(entry => { const room = rooms.get(entry.region.id); return { id: entry.region.id, width: entry.region.halfWidth, depth: entry.region.halfDepth, expectedWidth: room.w / 2 + 0.45, expectedDepth: (room.to + 1.6) / 2 }; }),
     sealed: B.matrixGate.sealed.map(entry => ({ id: entry.mouth.id, visible: entry.node.visible, stop: entry.stopZ }))
   }; })()`);
-  record("hub caves: every ordinary carved chamber feeds complete Matrix surfaces, fitted bird's-eye roof regions and the two dormant cave seals", carved.caves.length === 6 && [...new Set(carved.caves.map(cave => cave.id))].sort().join() === "c1,c10,c11,c2,c3,c9"
+  // c2 opened onto the Lightning Factory, so it has a roof region of its own and only c3 is still sealed.
+  record("hub caves: every ordinary carved chamber feeds complete Matrix surfaces, fitted bird's-eye roof regions and the one dormant cave seal", carved.caves.length === 6 && [...new Set(carved.caves.map(cave => cave.id))].sort().join() === "c1,c10,c11,c2,c3,c9"
     && carved.caves.every(cave => cave.terrain > 0 && cave.counts.floor > 0 && cave.counts.ceiling > 0 && cave.counts.wall > 0)
-    && carved.regions.length === 4 && carved.regions.map(region => region.id).sort().join() === "c1,c10,c11,c9"
+    && carved.regions.length === 5 && carved.regions.map(region => region.id).sort().join() === "c1,c10,c11,c2,c9"
     && carved.regions.every(region => Math.abs(region.width - region.expectedWidth) < 1e-7 && Math.abs(region.depth - region.expectedDepth) < 1e-7)
-    && carved.sealed.length === 2 && carved.sealed.map(entry => entry.id).sort().join() === "c2,c3" && carved.sealed.every(entry => entry.visible && Number.isFinite(entry.stop)), JSON.stringify(carved));
+    && carved.sealed.length === 1 && carved.sealed.map(entry => entry.id).sort().join() === "c3" && carved.sealed.every(entry => entry.visible && Number.isFinite(entry.stop)), JSON.stringify(carved));
 } };
 const hubMirror = { name: "hub mirror", why: "rule: 68 damage shatters the mirror, which unlocks its gate, ends the glyph hint and stays broken for the visit", run: async (b) => {
   const r = await b.evaluate(`(() => { const B = window.__ooga, M = B.mirrorCave, g = M.gate, w = M.node.world, G = B.matrixGate, m = M.mouth; B.pilot.navigate({ position: { x: G.x + Math.sin(m.ry) * 0.8, y: m.floorY, z: G.z + Math.cos(m.ry) * 0.8 }, yaw: m.ry, pitch: 0.3, dist: 3 }); B.advance(0.5, 1 / 60); const before = { broken: M.damage.broken, locked: g.locked, hint: M.guides.state.doorway }; M.damage.hit(67.5, w[12], w[13], w[14]); B.advance(1 / 60, 1 / 60); const whole = { broken: M.damage.broken, locked: g.locked }; M.damage.hit(0.5, w[12], w[13], w[14]); B.advance(1 / 60, 1 / 60); const u0 = M.guides.state.doorwayUpdates; B.advance(1, 1 / 60); const after = { broken: M.damage.broken, shattered: M.shattered, locked: g.locked, reveal: M.node.mirrorReveal, hint: M.guides.state.doorway, frozen: M.guides.state.doorwayUpdates === u0 }; B.go("pool"); let n = 0; while ((B.transitioning || B.scene !== "pool") && n++ < 600) B.advance(1 / 30, 1 / 30); B.go("hub"); n = 0; while ((B.transitioning || B.scene !== "hub") && n++ < 600) B.advance(1 / 30, 1 / 30); B.advance(0.5, 1 / 60); const N = B.mirrorCave; return { before, whole, after, back: { broken: N.damage.broken, shattered: N.shattered, locked: N.gate.locked, reveal: N.node.mirrorReveal, hint: N.guides.state.doorway } }; })()`);
@@ -4623,6 +4624,103 @@ const phone = (id, { card = null, play = null, required, sheet = false }) => ({ 
   record(`${id} phone: ${card ? "the title card reads in touch words and its go button starts the game, then " : ""}nothing is clipped, wrapped by accident or off screen, and every control is under a thumb${sheet ? ", with the sheet open too" : ""}`, ok, JSON.stringify(seen));
 } });
 
+// ---- The Lightning Factory ----
+// The demo node is held still so an event handed to the feed is the only thing moving; events use the demo
+// contract and a node of their own, so their sequence numbers never meet the demo node's.
+const FACTORY_EVENT = `const F = window.BL.factoryFeed, X = window.__ooga.factory, stamp = () => { const d = new Date(); d.setUTCSeconds(0, 0); return d.toISOString(); }; window.__factorySeq = window.__factorySeq || 0; const send = (type, payload) => { const n = ++window.__factorySeq; return X.feed.accept({ schema: F.DEMO, id: "aaaaaaaa-bbbb-4ccc-8ddd-" + String(n).padStart(12, "0"), seq: n, bucket: stamp(), node: "probe", origin: "observed", stream: "live", type, payload }); }; X.mock.update = () => {};`;
+// Holds whichever of W A S D moves the camera-relative way nearest (dx, dz) in the world, for `seconds`.
+const walkToward = async (b, dx, dz, seconds) => {
+  const k = await b.evaluate(`(() => { const c = window.__ooga.camera, fx = c.target.x - c.position.x, fz = c.target.z - c.position.z, l = Math.hypot(fx, fz), f = [fx / l, fz / l], r = [-f[1], f[0]], d = [${dx}, ${dz}]; const score = { w: f[0] * d[0] + f[1] * d[1], s: -(f[0] * d[0] + f[1] * d[1]), d: -(r[0] * d[0] + r[1] * d[1]), a: r[0] * d[0] + r[1] * d[1] }; return Object.entries(score).sort((p, q) => q[1] - p[1])[0][0]; })()`);
+  await holdKey(b, k, seconds);
+  return k;
+};
+const factoryWalking = { name: "factory walking", why: "rule: W A S D walk the visitor's Ooga their way on screen in the factory, as they do on the island", run: async (b) => {
+  const ooga = await walkKeys(b, "portlandhodl", 0, 8, [0, 2.2], 0.5);
+  record("factory walking: W A S D walk the visitor's Ooga away, left, back and right on screen on the forge floor from two camera angles", allWalk(ooga), JSON.stringify(ooga));
+} };
+const factoryForward = { name: "factory forward", why: "rule: a forward's sats go in along the line it came in on, through the core and out along the line it left by; a failed one comes back and its target sputters", run: async (b) => {
+  const r = await b.evaluate(`(() => { const B = window.__ooga; ${FACTORY_EVENT} const s = X.scene, q = s.sats, bays = s.bays;
+    for (let t = 0; t < 10 && q.bay.some((v) => v >= 0); t += 0.25) B.advance(0.25, 1 / 20);
+    const watch = (seconds, from, to) => { let inbound = 0, outbound = 0, backOnFrom = 0, onTo = 0, surged = false, sputtered = false; for (let t = 0; t < seconds; t += 1 / 20) { B.advance(1 / 20, 1 / 20); let i1 = 0, o1 = 0, b1 = 0, t1 = 0; for (let i = 0; i < q.bay.length; i++) { if (q.bay[i] < 0 || q.t[i] < 0 || q.t[i] > 1) continue; if (q.bay[i] === from && q.dir[i] > 0) i1++; if (q.bay[i] === from && q.dir[i] < 0) b1++; if (q.bay[i] === to && q.dir[i] < 0) o1++; if (q.bay[i] === to) t1++; } inbound = Math.max(inbound, i1); outbound = Math.max(outbound, o1); backOnFrom = Math.max(backOnFrom, b1); onTo = Math.max(onTo, t1); surged = surged || s.surgeT >= 0; sputtered = sputtered || bays[to].sputter > 0; } return { inbound, outbound, backOnFrom, onTo, surged, sputtered, flashTo: +bays[to].flashL.toFixed(2), left: q.bay.filter((v) => v >= 0).length }; };
+    const sent = send("forward.settled", { scale: "large", count: 1, station: bays[0].line, out: bays[3].line, fee: "dust" });
+    const big = watch(8, 0, 3);
+    const failedSent = send("forward.failed", { scale: "small", count: 1, station: bays[2].line, out: bays[1].line });
+    const failed = watch(8, 2, 1);
+    return { sent, big, failedSent, failed }; })()`);
+  record("factory forward: a large forward's stream rides in along its line's conduit, surges the node and rides out along the other line's to light it; a failed one comes back along its own and sputters the line it was bound for", r.sent && r.big.inbound >= 8 && r.big.outbound >= 8 && r.big.backOnFrom === 0 && r.big.surged && r.big.left === 0 && r.failedSent && r.failed.inbound >= 1 && r.failed.backOnFrom >= 1 && r.failed.onTo === 0 && r.failed.sputtered && !r.failed.surged && r.failed.left === 0, JSON.stringify(r));
+} };
+const factoryForge = { name: "factory forge", why: "rule: opening a channel sends carts up to the forge, which takes each with a flash; closing one mints a coin that rolls back down to the chain", run: async (b) => {
+  const r = await b.evaluate(`(() => { const B = window.__ooga; ${FACTORY_EVENT} const s = X.scene, spare = X.mock.snapshot.channels.find((c) => !c.active), gallery = s.gallery.find((g) => g.line);
+    const opened = send("channel.opening", { scale: "large", station: spare.id });
+    let carts = 0, flashes = 0, rising = false, lastFlash = 0;
+    for (let t = 0; t < 16; t += 1 / 20) { B.advance(1 / 20, 1 / 20); carts = Math.max(carts, s.carts.filter((c) => c.active).length); rising = rising || s.shaftGlow[0] > 0.5; if (s.flash > lastFlash + 0.5 && s.flashKind === 0) flashes++; lastFlash = s.flash; }
+    const inDone = { carts, flashes, rising, waiting: s.inQueue, out: s.carts.filter((c) => c.active).length };
+    const closed = send("channel.closed", { scale: "large", station: gallery.line, channel_count: 20 });
+    let minted = false, rolled = false, sunk = false, cyan = false; lastFlash = s.flash;
+    for (let t = 0; t < 16; t += 1 / 20) { B.advance(1 / 20, 1 / 20); minted = minted || s.mintT >= 0; rolled = rolled || s.coinD > 0; if (s.flash > lastFlash + 0.5 && s.flashKind === 1) cyan = true; lastFlash = s.flash; sunk = sunk || (s.coinD > 0 && s.shaftGlow[1] > 0.5); }
+    return { opened, inDone, closed, minted, rolled, cyan, sunk, coinGone: s.coinD < 0 && !s.coin.visible }; })()`);
+  record("factory forge: a large channel's opening sends two carts up the chain's shaft that the forge takes with a gold flash each, and a close mints a coin on a cyan flash that rolls down the other shaft", r.opened && r.inDone.carts === 2 && r.inDone.flashes === 2 && r.inDone.rising && r.inDone.waiting === 0 && r.inDone.out === 0 && r.closed && r.minted && r.rolled && r.cyan && r.sunk && r.coinGone, JSON.stringify(r));
+} };
+const factoryShields = { name: "factory peer shield", why: "rule: a peer tunnel's shield lets nobody through and sets whoever walks into it back on the node's walkway", run: async (b) => {
+  // The Harbor line's porch, walking into its tunnel's shield toward the right wall.
+  await b.evaluate(`(() => { const B = window.__ooga, a = B.cavemen.get("portlandhodl"), t = window.BL.factoryModels.LAYOUT.tunnels[3]; if (B.crew.player !== a) B.pilot.possess(a); B.pilot.navigate({ position: { x: t.x - 2.6, y: t.y, z: t.z }, yaw: -Math.PI / 2, pitch: 0.3, dist: 6 }); B.advance(0.5, 1 / 60); })()`);
+  const key = await walkToward(b, 1, 0, 1.6);
+  const r = await b.evaluate(`(() => { const B = window.__ooga, p = B.cavemen.get("portlandhodl").root.position, L = window.BL.factoryModels.LAYOUT; return { x: +p.x.toFixed(2), z: +p.z.toFixed(2), onRing: Math.hypot(p.x - L.ring.x, p.z - L.ring.z) < L.ring.outer + 2.5, scene: B.scene }; })()`);
+  r.key = key;
+  record("factory peer shield: walking into a peer tunnel's shield sets the Ooga back on the node's walkway", r.scene === "factory" && r.onRing && r.x < 5, JSON.stringify(r));
+} };
+// Everywhere the widest Ooga on the roster can walk from the balcony, by the factory's own step rule on a
+// quarter-metre grid: both ends of every stair, every line's deck and its peer tunnel's porch, the switchboard,
+// treasury, watchtower, landing, galleries and the forge floor. It runs on the island, where the whole roster is
+// built. Level 1's rebalancer has no route yet, so it is not asked for.
+const factoryFloor = { name: "factory floor", why: "regression: stairs landed against rails and blocks, and lanes round the tanks and past the tunnels' console boxes were too narrow to walk", run: async (b) => {
+  const r = await b.evaluate(`(() => {
+    let R = 0, who = ""; for (const cave of window.__ooga.cavemen.values()) if (cave.bodyRadius > R) { R = cave.bodyRadius; who = cave.traits.name; }
+    const M = window.BL.factoryModels, L = M.LAYOUT, G = 0.25, X0 = -21, Z0 = -20, NX = 169, NZ = 201, seen = new Map(), queue = [];
+    const add = (i, k, y) => { const key = (i * NZ + k) * 128 + Math.round(y * 4); if (!seen.has(key)) { seen.set(key, [i, k, y]); queue.push(key); } };
+    add(Math.round(-X0 / G), Math.round((27 - Z0) / G), M.supportAt(0, 27, L.entrance.y + 0.2));
+    for (let h = 0; h < queue.length; h++) {
+      const [i, k, y] = seen.get(queue[h]), x = X0 + i * G, z = Z0 + k * G;
+      for (const [di, dk] of [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [1, -1], [-1, 1], [-1, -1]]) {
+        const ni = i + di, nk = k + dk;
+        if (ni < 0 || nk < 0 || ni >= NX || nk >= NZ) continue;
+        const nx = X0 + ni * G, nz = Z0 + nk * G;
+        if (M.walkable(x, z, nx, nz, y, R)) add(ni, nk, M.supportAt(nx, nz, y));
+      }
+    }
+    const cells = [...seen.values()].map(([i, k, y]) => [X0 + i * G, Z0 + k * G, y]);
+    const reachedIn = (x0, x1, z0, z1, y) => cells.some(([x, z, h]) => x >= x0 && x <= x1 && z >= z0 && z <= z1 && Math.abs(h - y) < 0.3);
+    const near = (x, z, y) => reachedIn(x - 0.6, x + 0.6, z - 0.6, z + 0.6, y), missing = [];
+    L.stairs.forEach(([ax, ay, az, bx, by, bz], n) => { if (!near(ax, az, ay)) missing.push("stair " + n + " foot"); if (!near(bx, bz, by)) missing.push("stair " + n + " head"); });
+    const decks = { A: L.bays[0], B: L.bays[1], C: L.bays[2], D: L.bays[3], switchboard: L.switchboard, treasury: L.treasury, watchtower: L.lookout, landing: L.landing, gallery1: L.galleries[0], gallery2: L.galleries[1] };
+    for (const [name, d] of Object.entries(decks)) if (!reachedIn(d.x - d.w / 2, d.x + d.w / 2, d.z - d.d / 2, d.z + d.d / 2, d.y)) missing.push(name);
+    // Each porch as far as its peer tunnel's shield, where a walker is sent back.
+    L.tunnels.forEach((t, n) => { const c = Math.cos(t.turn), sn = Math.sin(t.turn), d = 1.1; if (!near(t.x + sn * d, t.z + c * d, t.y)) missing.push("shield " + "ABCD"[n]); });
+    if (!near(L.stairway[0], L.stairway[2] - 1, 0)) missing.push("forge floor");
+    return { who, radius: +R.toFixed(2), missing, cells: cells.length };
+  })()`);
+  record("factory floor: from the balcony the widest Ooga on the roster reaches both ends of every stair, every line's deck, each peer tunnel's shield, the switchboard, treasury, watchtower, landing, galleries and the forge", r.missing.length === 0 && r.radius > 0.6 && r.cells > 20000, JSON.stringify(r));
+} };
+// The way in and out: from the island through the 2 o'clock mouth's shield, back out past the balcony, and Escape.
+const factoryEntrance = { name: "factory entrance", why: "rule: the Ooga walked through the 2 o'clock shield is the one inside, the one walked back out stands at the mouth, and Escape leaves", run: async (b) => {
+  await b.evaluate(`(() => { const B = window.__ooga, a = B.cavemen.get("portlandhodl"), slot = window.BL.caves.slots.find((s) => s.scene === "factory"), m = B.mouths.find((m) => m.id === slot.id), along = window.BL.factoryModels.SHIELD_Z + 0.6; if (B.crew.player !== a) B.pilot.possess(a); B.pilot.navigate({ position: { x: m.x + Math.sin(m.ry) * along, y: m.floorY, z: m.z + Math.cos(m.ry) * along }, yaw: m.ry, pitch: 0.2, dist: 5 }); B.advance(0.5, 1 / 60); window.__mouth = { x: m.x, z: m.z, ry: m.ry }; })()`);
+  const inKey = await b.evaluate(`(() => { const m = window.__mouth; return [-Math.sin(m.ry), -Math.cos(m.ry)]; })()`);
+  await walkToward(b, inKey[0], inKey[1], 0.8);
+  const arrived = await b.evaluate(`(() => { const B = window.__ooga; for (let i = 0; i < 240 && (B.transitioning || B.scene !== "factory"); i++) B.advance(1 / 30, 1 / 30); B.advance(0.3, 1 / 30); return { scene: B.scene, ooga: B.crew && B.crew.player ? B.crew.player.traits.name : null }; })()`);
+  await b.evaluate(`(() => { const B = window.__ooga, a = B.crew.player, e = window.BL.factoryModels.LAYOUT.entrance; B.pilot.navigate({ position: { x: 0, y: e.y, z: e.z + 2.2 }, yaw: 0, pitch: 0.2, dist: 5 }); B.advance(0.5, 1 / 60); })()`);
+  await walkToward(b, 0, 1, 0.8);
+  const back = await b.evaluate(`(() => { const B = window.__ooga, m = window.__mouth; for (let i = 0; i < 240 && (B.transitioning || B.scene !== "hub"); i++) B.advance(1 / 30, 1 / 30); B.advance(0.3, 1 / 30); const p = B.crew.player && B.crew.player.root.position; return { scene: B.scene, ooga: B.crew.player ? B.crew.player.traits.name : null, fromMouth: p ? +Math.hypot(p.x - m.x, p.z - m.z).toFixed(1) : null }; })()`);
+  await tourGo(b, "factory");
+  await b.key("Escape");
+  await untilPage(b, 'B.scene === "hub" && !B.transitioning', 15000);
+  const escaped = await b.evaluate(`window.__ooga.scene`);
+  record("factory entrance: walking through the 2 o'clock shield takes the same Ooga inside, walking back out past the balcony returns it to the mouth, and Escape leaves the factory", arrived.scene === "factory" && arrived.ooga === "portlandhodl" && back.scene === "hub" && back.ooga === "portlandhodl" && back.fromMouth !== null && back.fromMouth < 10 && escaped === "hub", JSON.stringify({ arrived, back, escaped }));
+} };
+const factoryCanvas = { name: "factory canvas2d", why: "contract: the Canvas 2D fallback boots and draws the factory", run: async (b) => {
+  const r = await b.evaluate(`(() => { const B = window.__ooga, c = document.getElementById("scene"), t = document.createElement("canvas"); t.width = t.height = 8; const x = t.getContext("2d", { willReadFrequently: true }); x.drawImage(c, 0, 0, 8, 8); const d = x.getImageData(0, 0, 8, 8).data, seen = new Set(); for (let i = 0; i < d.length; i += 4) seen.add(d[i] + "," + d[i + 1] + "," + d[i + 2]); return { kind: B.renderer.kind, scene: B.scene, colours: seen.size }; })()`);
+  record("factory canvas2d: with WebGL2 unavailable the factory still boots and paints", r.kind === "canvas2d" && r.scene === "factory" && r.colours >= 4, JSON.stringify(r));
+} };
+
 scene("hub", { steps: [{ name: `work movement lab lanes ${1 / RATES[0]}Hz`, why: "regression: work walkers left their facing-right side of the lab lane", open: "on about 4 boots in 30 the lane targets sit on the centre or far side; unfixed", run: labLanes }, donation("hub"), hubWalking, hubRoutes, hubFall, trip("hub")] });
 scene("hub", { label: "room sign", query: "pos=0", steps: [{ name: "room sign copies hash", why: "rule: tapping a room sign swings it and copies its displayed eight-character code with visible confirmation", run: async (b) => {
   const point = await b.evaluate(`(() => { const B = __ooga, sign = B.headquarters.roomSigns[0], n = sign.node; Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText: (value) => { window.__roomHash = value; return Promise.resolve(); } } }); window.__roomSignBefore = sign.hits; B.pilot.release(true); B.pilot.navigate({ position: { x: n.position.x, y: n.position.y, z: n.position.z }, target: { x: n.position.x, y: n.position.y - 0.2, z: n.position.z }, yaw: n.rotation.y, pitch: 0, dist: 4 }); B.advance(0.6, 1 / 60); return B.project(n.position.x, n.position.y - 0.2, n.position.z, {}); })()`);
@@ -4965,6 +5063,9 @@ scene("drop", { steps: [dropStart, dropSteering, play("drop", "a jump lands on t
 scene("orbit", { steps: [{ name: "orbit flow", why: "regression: the spacewalk air bonus was missing from the flight log", run: orbitFlow }, orbitSteering, orbitMissed, orbitEscape, trip("orbit")] });
 scene("mine", { steps: [mineResume, trip("mine"), mineControls] });
 scene("pool", { steps: [poolLeave, trip("pool")] });
+scene("factory", { query: "character=portlandhodl", steps: [factoryWalking, factoryForward, factoryForge, factoryShields, trip("factory")] });
+scene("factory", { label: "entrance", url: hubPage(src, "character=portlandhodl"), steps: [factoryFloor, factoryEntrance] });
+scene("factory", { label: "canvas2d", query: "canvas2d=1", steps: [factoryCanvas] });
 scene("hub", { label: "weapons", query: "character=portlandhodl&weapon=2&mag=1&ammo=6&jetpack=1", steps: [hubAk, hubMelee, hubJetpack] });
 scene("hub", { label: "birds-eye combat", query: "solo=1&character=portlandhodl&weapon=1&mode=shoulder&combat=1", steps: [hubBirdsEye, hubBirdsEyeFloors, hubBirdsEyeProjection, hubBirdsEyeTargets, hubCombatReplay] });
 scene("hub", { label: "mirror", steps: [hubJumbotron, hubMatrix, hubMirror] });
@@ -4978,6 +5079,7 @@ scene("drop", { query: "pos=0", opts: PHONE_SIZE, steps: [phone("drop", { card: 
 scene("orbit", { query: "pos=0", opts: PHONE_SIZE, steps: [phone("orbit", { card: '[data-intro="orbit"]', play: "window.__ooga.orbit.launch()", required: ["#joy-move", "#act", ".leave"] })] });
 scene("mine", { query: "pos=0", opts: PHONE_SIZE, steps: [phone("mine", { card: "#mine-intro", required: ["#joy-move", "#joy-look", "#act", "#mine-view-btn", "#mine-pause-btn", "#mine-mute", ".leave"] })] });
 scene("pool", { query: "pos=0", opts: PHONE_SIZE, steps: [phone("pool", { required: ["#joy-move", "#joy-look", ".leave"] })] });
+scene("factory", { query: "pos=0", opts: PHONE_SIZE, steps: [phone("factory", { required: ["#joy-move", "#joy-look", ".leave"] })] });
 
 // DSB has no hub entrance during this merge. Exercise the existing world.pilot
 // contract explicitly; no new player-facing route is introduced by the fixture.
@@ -6018,6 +6120,54 @@ scene("dsb", { label: "lifecycle", url: hubPage(src), steps: [{ name: "dsb lifec
 
 // Node tier: pure computation over window.BL under a minimal DOM shim, calling the same probe functions.
 // 30 checks in about three seconds, against ~3.7 s of launch and boot per browser task.
+// The Lightning Factory in Node: the feed's two contracts, the demo node that stands in for a real one, and the
+// walkable floor of the hall, each through the module's own functions.
+const factoryChecks = (BL) => {
+  const F = BL.factoryFeed, bucket = (hour) => { const d = new Date(Date.UTC(2026, 8, 26, 12, hour ? 0 : 34)); return d.toISOString(); };
+  let seq = 0;
+  const event = (type, payload, { schema = F.DEMO, hour = false, at = ++seq } = {}) => ({ schema, id: "11111111-2222-4333-8444-" + String(at).padStart(12, "0"), seq: at, bucket: bucket(hour), node: "probe", origin: "observed", stream: "live", type, payload });
+  {
+    const why = (e) => F.refusal(e) || "ok";
+    const r = {
+      publicForward: why(event("forward.settled", { scale: "small", count: 1 }, { schema: F.PUBLIC })),
+      publicStation: why(event("forward.settled", { scale: "small", station: "beach" }, { schema: F.PUBLIC })),
+      publicOut: why(event("forward.settled", { scale: "small", out: "harbor" }, { schema: F.PUBLIC })),
+      publicFee: why(event("forward.settled", { scale: "small", fee: "dust" }, { schema: F.PUBLIC })),
+      demoRoute: why(event("forward.settled", { scale: "large", station: "beach", out: "harbor", fee: "dust" })),
+      demoFailed: why(event("forward.failed", { scale: "small", station: "beach", out: "harbor" })),
+      demoLoop: why(event("forward.settled", { scale: "small", station: "beach", out: "beach" })),
+      demoOutOnChannel: why(event("channel.active", { scale: "large", station: "beach", out: "harbor" })),
+      rebalanceLine: why(event("rebalance.succeeded", { scale: "large", station: "beach" }, { hour: true })),
+      rebalanceMinute: why(event("rebalance.succeeded", { scale: "large" })),
+      rebalanceHour: why(event("rebalance.succeeded", { scale: "large" }, { hour: true }))
+    };
+    record("factory feed: Foundry's public events carry no line, route or fee; the demo contract names a forward's two different lines and nothing else; a rebalance never names a line and is timed to the hour", r.publicForward === "ok" && r.publicStation === "payload" && r.publicOut === "payload" && r.publicFee === "payload" && r.demoRoute === "ok" && r.demoFailed === "ok" && r.demoLoop === "out" && r.demoOutOnChannel === "out" && r.rebalanceLine === "rebalance" && r.rebalanceMinute === "bucket" && r.rebalanceHour === "ok", JSON.stringify(r));
+    const feed = F.create({ now: () => 0 }), seen = [];
+    feed.subscribe((e) => seen.push(e.seq));
+    for (const at of [1, 2, 2, 5, 6]) feed.accept(event("forward.settled", { scale: "small", station: "beach", out: "harbor" }, { at }));
+    const c = feed.counts;
+    record("factory feed: a repeated seq is one event and a skipped one is counted as a gap", c.accepted === 4 && c.duplicates === 1 && c.gaps === 1 && seen.join() === "1,2,5,6", JSON.stringify({ counts: c, seen }));
+  }
+  {
+    // Two demo nodes on the same seed and clock play the same show; the feed takes every event it plays.
+    const play = (seconds) => {
+      const mock = BL.factoryMock.create({ seed: 21, now: () => Date.UTC(2026, 8, 26, 12) }), feed = F.create({ now: () => 0 }), events = [];
+      let t = 0;
+      const take = (e) => { events.push({ t, type: e.type, p: e.payload }); feed.accept(e); };
+      mock.replay(take);
+      for (; t < seconds; t += 0.25) mock.update(0.25, take);
+      return { events, counts: feed.counts, mock };
+    };
+    const a = play(300), b = play(300), same = JSON.stringify(a.events) === JSON.stringify(b.events);
+    const forwards = a.events.filter((e) => e.type.startsWith("forward.")), routed = forwards.every((e) => e.p.out && e.p.out !== e.p.station);
+    const big = forwards.filter((e) => e.p.scale === "large" || e.p.scale === "very_large").length;
+    record("factory demo node: the same seed plays the same show, the feed takes every event, and every forward runs from one line out along another, now and then a large one", same && a.counts.dropped === 0 && a.counts.gaps === 0 && forwards.length > 100 && routed && big > 3, JSON.stringify({ same, counts: a.counts, forwards: forwards.length, routed, big }));
+    // The forge has work within seconds of a visit and never waits long, and the churn neither drains nor floods the lines.
+    const forge = a.events.filter((e) => e.t > 0 && (e.type === "channel.opening" || e.type === "channel.closed")).map((e) => e.t), gaps = forge.slice(1).map((t, i) => t - forge[i]);
+    const counts = a.events.filter((e) => e.t > 0 && e.p.channel_count !== undefined).map((e) => e.p.channel_count), start = a.mock.snapshot.channels.length;
+    record("factory demo node: the first channel reaches the forge within ten seconds and the forge never waits a minute, while the number of open lines holds steady", forge[0] < 10 && Math.max(...gaps) < 60 && counts.length > 8 && Math.max(...counts) - Math.min(...counts) <= 2, JSON.stringify({ first: forge[0], longest: Math.max(...gaps), openLines: [Math.min(...counts), Math.max(...counts)], channels: start }));
+  }
+};
 const unitChecks = async () => {
   const canvasStub = () => ({
     width: 0, height: 0,
@@ -6076,6 +6226,7 @@ const unitChecks = async () => {
     let rejected = false; try { BL.qr.encode("q".repeat(2332)); } catch (error) { rejected = error instanceof RangeError; }
     record("QR invoices: matrices match independent reference at short and long capacities", rows.every(r => r.pass) && rejected, JSON.stringify(rows));
   }
+  factoryChecks(BL);
   await characterChecks(); await contributorActivityChecks(); await mempoolFeedChecks(); await debugActivityStatusChecks(); await soloDebugChecks(); await adaptiveQualityChecks(); await chainSnapshotChecks(); await dsbSharedDataChecks(); await timechainDataChecks(); await weatherStepChecks(); await gameRulesChecks();
 
   // Scene state built directly instead of booted; seed 1 matches scene-hub.js.

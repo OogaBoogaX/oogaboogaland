@@ -688,14 +688,7 @@
   // The crew's support and step test on the hall's floor: the highest surface within a step of the feet, clear of
   // what stands there, and never off an edge.
   const groundFor = (x, z, feet) => FM.supportAt(x, z, feet);
-  const walkableFor = (ax, az, bx, bz, y, height, actor) => {
-    const steps = Math.max(1, Math.ceil(Math.hypot(bx - ax, bz - az) / 0.2)), r = actor.bodyRadius || 0.35;
-    for (let i = 1; i <= steps; i++) {
-      const x = ax + (bx - ax) * i / steps, z = az + (bz - az) * i / steps;
-      if (!FM.clearAt(x, z, y, r) || FM.supportAt(x, z, y) < y - FM.STEP) return false;
-    }
-    return true;
-  };
+  const walkableFor = (ax, az, bx, bz, y, height, actor) => FM.walkable(ax, az, bx, bz, y, actor.bodyRadius || 0.35);
   const feetOf = () => avatar ? avatar.root.position.y - avatar.baseY : 0;
 
   const enter = (ctx) => {
@@ -795,7 +788,7 @@
     factoryScene.camera = camera;
     factoryScene.input = input;
     factoryScene.debug = {
-      hud, camera, controls: pilot.controls, pilot,
+      hud, camera, controls: pilot.controls, pilot, crew: people, cavemen: people ? people.cavemen : null,
       factory: { feed, mock, get scene() { return scene; }, simulate(seconds, dt = 1 / 30) { for (let t = 0; t < seconds; t += dt) mock.update(dt, feed.accept); } }
     };
   };
