@@ -57,7 +57,7 @@
     forge: view(0, 2.2, 1.5, 0.75, 0.22, 10),
     switchboard: view(-12, 4, 6, 0.55, 0.22, 9),
     rebalancer: view(14, 4.6, 4.2, -0.8, 0.3, 10),
-    treasury: view(12, 5, 12.5, -0.3, 0.25, 10),
+    treasury: view(13.5, 5, 20, -0.3, 0.25, 10),
     lookout: view(-16, 19, -14, 0.7, 0.15, 14),
     study: view(19, 8.6, 12, -Math.PI / 2 + 0.2, 0.2, 11),
     galleries: view(4, 17, -16, 0, 0.14, 17)
@@ -367,7 +367,7 @@
   const sats = (n) => n.toLocaleString("en-US");
   const refreshBoards = (s) => {
     const r = feed.reading, signal = feed.signal;
-    setBoard(s.lookoutLabel, "WATCHTOWER OUTPOST", signal === "live" ? (r.stream === "replay" ? "(Catching Up)" : "(Signal: Live)") : signal === "silent" ? "(No Signal)" : "(Waiting)", true);
+    setBoard(s.lookoutLabel, "WATCHTOWER\nOUTPOST", signal === "live" ? (r.stream === "replay" ? "(Catching Up)" : "(Signal: Live)") : signal === "silent" ? "(No Signal)" : "(Waiting)", true);
     const snap = mock.snapshot;
     // The rebalancer's boards never name a line: a rebalance says only its size and its hour.
     setData(s.rebBoards[0], "LAST REBALANCE", [["Size", s.rebScale ? SIZES[s.rebScale] : "None yet", "count"], ["Hour", s.rebHour ? `${s.rebHour} UTC` : "None yet", "count"], ["Lines", "Private", "plain"]], 1.6);
@@ -390,7 +390,10 @@
     go("hub");
   };
   const onKey = (e) => {
+    if ((e.key === "x" || e.key === "X") && !e.repeat && pilot.modeAction("mode-toggle")) return true;
     if ((e.key === "1" || e.key === "2") && pilot.weaponMode(Number(e.key))) return true;
+    if (e.key === "g" || e.key === "G") return pilot.weaponAction("weapon-toggle");
+    if (e.key === "v" || e.key === "V") return pilot.weaponAction("weapon-fire");
     if (e.key === "Escape") {
       leaveCave();
       return true;
@@ -500,7 +503,7 @@
         s.gallery.push({ bay: false, index: s.gallery.length, node, stand, caps: caps2, line: null, flashL: 0, sputter: 0 });
       }
     }
-    s.galleryLabel = labelNode(root, L.galleries[0].x, L.galleries[0].y + 2.6, L.galleries[0].z + 1.6);
+    s.galleryLabel = labelNode(root, 0, L.LEVEL.top + 4.5, L.HALL.back + 4.9);
     // The switchboard, the rebalancer and the treasury on their decks.
     const sw = L.switchboard, rb = L.rebalancer, tr = L.treasury, lk = L.lookout, st = L.study;
     const switchNode = createNode({ position: { x: sw.x, y: sw.y, z: sw.z } });
@@ -547,7 +550,7 @@
     addChild(s.lamp, createNode({ geometry: optics.frame }), createNode({ geometry: optics.lens }), s.beam);
     const lkBody = createNode({ geometry: FM.lookoutTower() });
     addChild(lkNode, lkBody, s.lamp);
-    s.lookoutLabel = labelNode(lkNode, 2.2, 2.6, 2.3);
+    s.lookoutLabel = labelNode(lkNode, 0, 2.6, 2.3);
     // The study hall in the right wall, facing into the hall: locked for now.
     const stNode = createNode({ position: { x: st.x, y: st.y, z: st.z }, rotation: { x: 0, y: -Math.PI / 2, z: 0 } });
     const hallGeo = FM.studyHall();
@@ -752,6 +755,7 @@
     camera = createCamera({ fov: 55, near: 0.3, far: 150 });
     root = createNode();
     hud = hudMod.create({ roster: contributors.activeRoster, catalog: models.SWAG, tierColors: models.TIER_COLORS, renderIcon: hudMod.renderIcon, lootEnabled: ctx.lootEnabled });
+    hud.setAreaLabel("LF");
     if (window.matchMedia("(max-width: 720px), (max-height: 500px)").matches) hud.el.sheet.dataset.open = "false";
     hooks = {};
     input = interactMod.create({ canvas: ctx.canvas, renderer, camera, hooks });
@@ -802,6 +806,8 @@
     hud.onAction((action) => {
       if (action === "leave") leaveCave();
       else if (action === "reset-view") pilot.goPreset("entrance");
+      else if (action === "act") pilot.action();
+      else if (action.startsWith("mode-")) pilot.modeAction(action);
       else if (action.startsWith("weapon-") || action === "magazine-swap") pilot.weaponAction(action);
     });
     fx = fxMod.create({ root, input, hooks, hud, game, world, renderer, camera, overlay: ctx.overlay, tickerAt: { x: 0, y: 14, z: -4 } });
@@ -819,7 +825,9 @@
     const playerName = named ? named.name : world.pilot && contributors.roster.some((c) => c.name === world.pilot) ? world.pilot : null;
     world.pilot = null;
     if (playerName) {
-      playerWorld = { level: 0, weapons: new Map(), magazine: { owned: false, count: 0, ammo: 0, carrier: null } };
+      // Keep the visitor's weapons and magazines across the doorway. The
+      // factory has no banana pile, so its private pile level stays zero.
+      playerWorld = { level: 0, weapons: world.weapons, magazine: world.magazine };
       const shared = { root, input, hud, game, world: playerWorld, playerName, fx, viewYaw: 0, groundAt: groundFor, walkable: walkableFor, flyable: flyableFor, ceilingAt: ceilingFor, ladders: LAYOUT.ladders, onBodyMove: resolveLanding, clipProjectileTarget, absorbProjectile, reloadPolicy };
       shared.onModelChange = () => {
         if (!avatar) return;
@@ -827,9 +835,12 @@
         for (const t of scene.tunnels) t.body.refresh(avatar.root);
       };
       people = shared.crew = BL.crew.create(shared);
+      world.weapons = playerWorld.weapons;
+      world.magazine = playerWorld.magazine;
       pilot.bind(shared);
       avatar = people.cavemen.get(playerName);
       pilot.possess(avatar);
+      people.selectWeapon(avatar.weapon.selectedSlot, avatar);
       // An arrival, as on the island: the Ooga stands a step inside the gate facing the core and the view starts
       // settled over its shoulder, never sweeping in from wherever the new camera began.
       pilot.navigate(ARRIVAL);
@@ -1233,9 +1244,10 @@
     for (const g of scene.crew) g.agent.dispose();
     scene.gate.phase.dispose();
     for (const t of scene.tunnels) { t.ripples.dispose(); t.body.dispose(); }
+    // Save the carry/combat choice while the controlled actor still exists.
+    pilot.dispose();
     if (people) people.dispose();
     fx.dispose();
-    pilot.dispose();
     for (const node of targets) input.remove(node);
     targets.length = 0;
     while (root.children.length) removeChild(root, root.children[root.children.length - 1]);

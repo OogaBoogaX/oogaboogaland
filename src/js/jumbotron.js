@@ -1,12 +1,13 @@
-// Jumbotron board, ported from rules-without-rulers/oogatron (its jumbotron/data.js + views.js).
+// Oogatron board, ported from rules-without-rulers/oogatron (its jumbotron/data.js + views.js).
 // Data baked in as BL.jumbotronData by scripts/jumbotron-data.mjs for the first paint;
 // oogatron-live.js may push fresher payloads in through refreshData at runtime.
 // jumbotron-data.js is that bake (oogatron schema 3, from /v2/stats), generated and never edited.
 //
 // The hub board is a cached cabinet with bitmap views: the recent-contributions feed, org totals
 // with issue counts, per-repo totals and per-repo commit/PR/review/comment leaderboards. The
-// rotation hides repos idle over seven days. Navigation is mounted on the frame in cave-sign style:
-// paper-white block chevrons on the side rails page, and one clickable indicator block per slide on
+// main rotation includes only EntropyLab and OBL repo panels and hides repos idle over seven days. Popup readers can
+// browse and filter the other repos too. Navigation is mounted on the frame in cave-sign style:
+// paper-white block chevrons on the side rails page, and one clickable indicator dot per slide on
 // the bottom rail (the current one lit) jumps. `tapAt(worldRay)` resolves a tap through the
 // cabinet's inverted world matrix, answers `screen` for the screen itself so the hub opens the
 // shared board dialog (`hud.openBoard`), and pages only from the rails; `prevView`, `goToView` and
@@ -96,6 +97,7 @@
     "*": [0, 0b10101, 0b01110, 0b11111, 0b01110, 0b10101, 0],
     "'": [0b00100, 0b00100, 0, 0, 0, 0, 0],
     "!": [0b00100, 0b00100, 0b00100, 0b00100, 0b00100, 0, 0b00100],
+    "?": [0b01110, 0b10001, 0b00001, 0b00010, 0b00100, 0, 0b00100],
     $: [0b00100, 0b01111, 0b10100, 0b01110, 0b00101, 0b11110, 0b00100]
   };
   const FALLBACK_GLYPH = [0b11111, 0b10001, 0b10001, 0b10001, 0b10001, 0b10001, 0b11111];
@@ -164,7 +166,7 @@
     const recent = (Array.isArray(json.recent) ? json.recent : []).map((e) => ({
       login: String(e.login), repo: String(e.repo), type: String(e.type), occurredAt: String(e.occurred_at),
       draft: e.draft === true
-    }));
+    })).sort((a, b) => Date.parse(b.occurredAt) - Date.parse(a.occurredAt));
     // Org-wide weekly series: the repos' weeks summed.
     const weeklyMap = new Map();
     for (const r of repos) {
@@ -212,13 +214,15 @@
       ["ISSUES", totals.issues, PALETTE.issues],
       ["COMMENTS", totals.comments, PALETTE.comments]
     ];
-    // Six rows: y=14 step 13 keeps the last scale-2 numeral clear of the nav strip.
+    // Keep counts at the label's scale, with generous space between rows;
+    // wide counts stay clear of both labels and the sparkline.
     let y = 14;
     for (const [label, value, color] of rows) {
       drawText(ctx, String(label), 6, y + 3, PALETTE.dim, 1);
       const v = String(value);
-      drawText(ctx, v, BOARD_W - 66 - measureText(v, 2), y, color, 2);
-      y += 13;
+      const width = measureText(v), scale = Math.min(1, 48 / width);
+      drawText(ctx, v, BOARD_W - 66 - width * scale, y + Math.floor((14 - GLYPH_H * scale) / 2), color, scale);
+      y += 15;
     }
     const spark = weeklyTotals.slice(-14);
     if (spark.length > 0) {
@@ -234,7 +238,7 @@
   };
 
   const renderTotals = (ctx, model) =>
-    renderTotalsBoard(ctx, `${(model.org || "OOGABOOGAX").toUpperCase()} TOTALS`, model.latestWeek || "", model.totals, model.weeklyTotals);
+    renderTotalsBoard(ctx, model.filtered ? "FILTERED TOTALS" : `${(model.org || "OOGABOOGAX").toUpperCase()} TOTALS`, model.latestWeek || "", model.totals, model.weeklyTotals);
 
   const renderRepo = (ctx, model, params) => {
     const repo = model.repos.find((r) => r.name === (params && params.name)) || model.repos[0];
@@ -273,8 +277,9 @@
   };
 
   const TYPE_COLOR = { commit: "commits", pr: "prs", review: "reviews", merge: "accent", issue: "issues", comment: "comments" };
+  const RECENT_TYPES = ["commit", "pr", "review", "merge", "issue", "comment"];
   // Short relative age for the recent feed, against wall-clock now.
-  const recentAge = (iso, nowMs = Date.now()) => {
+  const recentAge = (iso, nowMs) => {
     const ms = nowMs - Date.parse(iso);
     if (!Number.isFinite(ms) || ms < 0) return "NOW";
     const minutes = Math.floor(ms / 60000);
@@ -284,25 +289,28 @@
     return `${Math.floor(hours / 24)}D`;
   };
 
-  // The opening board: who did what where, newest first.
-  const renderRecent = (ctx, model) => {
+  // The latest ten matching events, newest first, with no age cutoff.
+  // Readers filter the complete history before this display limit is applied.
+  const renderRecent = (ctx, model, params, nowMs) => {
     clearBoard(ctx);
     header(ctx, "RECENT", model.latestWeek || "");
     if (!model.recent.length) {
       drawText(ctx, "NO ACTIVITY", 52, 48, PALETTE.dim, 1);
       return false;
     }
-    let y = 15;
-    for (const e of model.recent.slice(0, 11)) {
+    const recent = model.recent.slice(0, 10);
+    // Keep the ten-row spacing so shorter lists stay at the top.
+    const step = (BOARD_H - 4 - GLYPH_H - 16) / 9;
+    for (let i = 0; i < recent.length; i++) {
+      const e = recent[i], y = Math.round(16 + i * step);
       // A draft PR reads muted: it is announced, not landed.
       const draft = e.type === "pr" && e.draft;
       const color = draft ? PALETTE.dim : PALETTE[TYPE_COLOR[e.type]] || PALETTE.accent;
       drawText(ctx, fitText(displayLabel(e).toUpperCase(), 60, 1), 4, y, PALETTE.text, 1);
       drawText(ctx, fitText(e.repo.toUpperCase(), 54, 1), 68, y, PALETTE.dim, 1);
       drawText(ctx, fitText(draft ? "DRAFT PR" : e.type.toUpperCase(), 42, 1), 126, y, color, 1);
-      const age = recentAge(e.occurredAt);
+      const age = recentAge(e.occurredAt, nowMs);
       drawText(ctx, age, BOARD_W - 4 - measureText(age, 1), y, PALETTE.dim, 1);
-      y += 8;
     }
     return false;
   };
@@ -338,8 +346,8 @@
       bevelBox({ w: outerW - 0.008, h: t, d: FRAME_D, color: PALETTE.woodDark, offset: { y: outerH / 2 - t / 2, z: fz } }),
       bevelBox({ w: outerW - 0.008, h: t, d: FRAME_D, color: PALETTE.woodDark, offset: { y: -(outerH / 2 - t / 2), z: fz } }),
       // Side rails a clear 0.02 shallower front and back than the top and bottom ones they overlap at the corners.
-      bevelBox({ w: t, h: outerH - 0.008, d: FRAME_D - 0.04, color: PALETTE.woodDark, offset: { x: outerW / 2 - t / 2, z: fz } }),
-      bevelBox({ w: t, h: outerH - 0.008, d: FRAME_D - 0.04, color: PALETTE.woodDark, offset: { x: -(outerW / 2 - t / 2), z: fz } }),
+      bevelBox({ w: t, h: outerH - 0.008, d: FRAME_D - 0.04, color: PALETTE.woodDark, bevel: 0.022, offset: { x: outerW / 2 - t / 2, z: fz } }),
+      bevelBox({ w: t, h: outerH - 0.008, d: FRAME_D - 0.04, color: PALETTE.woodDark, bevel: 0.022, offset: { x: -(outerW / 2 - t / 2), z: fz } }),
       // A thick cap plank along the top, overhanging the frame like a sign's header.
       bevelBox({ w: outerW + 0.2, h: 0.12, d: FRAME_D + 0.08, color: PALETTE.plank, offset: { y: outerH / 2 + 0.06, z: fz } }),
       box({ w: 2 * OPEN_X + 0.04, h: 2 * OPEN_Y + 0.04, d: 0.06, color: PALETTE.screenBezel, offset: { z: 0.01 } })
@@ -401,15 +409,13 @@
   };
 
   // ---- Frame-mounted navigation chrome -------------------------------------
-  // Arrows on the side rails and one indicator block per slide on the bottom
-  // rail, in the cave sign's paper-white blocks (#f3efe4, gentle emissive) so
-  // the cabinet reads like the island's other signage. Blocks sit proud of
-  // the rail faces (0.086/0.09) — coplanar faces sparkle.
+  // Paper-white square-pixel arrows painted flat on the side rails. Circular indicators on the bottom rail use
+  // the popup's dark stone and orange selection colours. Small clearance above the wood avoids coplanar flicker.
   const CHROME_WHITE = [243, 239, 228];
-  const CHROME_DIM = [166, 166, 162];
+  const DOT_DARK = [45, 43, 40], DOT_ORANGE = [216, 137, 43];
   const OUTER_W = SW + 2 * BORDER, OUTER_H = SH + 2 * BORDER;
-  const CHROME_CELL = 0.036, CHROME_PIXEL = 0.03;
-  const ARROW_Z = 0.096, DOT_Z = 0.1, DOT_SIZE = 0.05;
+  const CHROME_CELL = 0.027, CHROME_PIXEL = 0.0225;
+  const ARROW_Z = 0.074, DOT_Z = 0.1, DOT_SIZE = 0.05;
   const RAIL_X = OUTER_W / 2 - RAIL / 2, RAIL_Y = OUTER_H / 2 - RAIL / 2;
   // 4x7 chevrons, rows top-first; mirrored for the right rail.
   const ARROW_LEFT = ["0001", "0010", "0100", "1000", "0100", "0010", "0001"];
@@ -427,6 +433,15 @@
       }
     }
   };
+  const pushDot = (geo, cx, cy, color, emissive) => {
+    const base = geo.verts.length / 3, indices = [];
+    for (let i = 0; i < 16; i++) {
+      const angle = i * Math.PI / 8;
+      geo.verts.push(cx + Math.cos(angle) * DOT_SIZE / 2, cy + Math.sin(angle) * DOT_SIZE / 2, DOT_Z);
+      indices.push(base + i);
+    }
+    geo.faces.push({ i: indices, color, emissive });
+  };
   // The dot row's geometry and hit-test share this layout; pitch shrinks so
   // the row stays clear of the corner joint plates however long the cycle.
   const dotLayout = (n) => {
@@ -440,7 +455,7 @@
     const { pitch, x0 } = dotLayout(count);
     for (let i = 0; i < count; i++) {
       const lit = i === current;
-      pushBlock(geo, x0 + i * pitch, -RAIL_Y, DOT_SIZE, DOT_Z, lit ? CHROME_WHITE : CHROME_DIM, lit ? 0.9 : 0.12);
+      pushDot(geo, x0 + i * pitch, -RAIL_Y, lit ? DOT_ORANGE : DOT_DARK, lit ? 0.9 : 0);
     }
     geo.castShadow = false;
     return geo;
@@ -463,9 +478,13 @@
     let view = { name: "recent", params: undefined };
     let cycleIndex = 0;
     let rotateEvery = 8;
+    let paused = false;
+    let lastElapsed = 0;
     let lastSwitchAt = 0;
     let resetRotation = false;
     let dirty = true;
+    // All canvases use one minute-aligned age sample, even when painted at different times or paused on RECENT.
+    let recentNow = Math.floor(Date.now() / 60000) * 60000;
     // World->local for board taps, cached: the cabinet never moves once placed.
     const tapInverse = new Float32Array(16);
     let tapInverseValid = false;
@@ -473,30 +492,84 @@
 
     // Repos idle for a week disappear from the rotation entirely; the clock
     // reference is the payload's own generated_at so the bake is deterministic.
-    const activeRepos = () => {
-      if (!model) return [];
-      const ref = Date.parse(model.generatedAt) || Date.now();
-      return model.repos
-        .filter((r) => r.lastActivityAt && ref - Date.parse(r.lastActivityAt) <= ACTIVE_WINDOW_MS)
+    const activeRepos = (source = model, mainBoard = false) => {
+      if (!source) return [];
+      const ref = Date.parse(source.generatedAt) || Date.now();
+      return source.repos
+        .filter((r) => (!mainBoard || r.name === "entropylab" || r.name === "oogaboogaland")
+          && r.lastActivityAt && ref - Date.parse(r.lastActivityAt) <= ACTIVE_WINDOW_MS)
         .slice(0, MAX_REPO_BOARDS);
     };
 
     // Rebuilt per model: recent feed, org totals and org leaderboards, then
     // each active repo's summary followed by its leaderboards.
     const BOARD_TYPES = ["commits", "prs", "reviews", "comments", "issues"];
-    const buildCycle = () => {
-      const c = [{ name: "recent" }, { name: "totals" }];
-      for (const type of BOARD_TYPES) c.push({ name: "leaderboard", params: { type } });
-      for (const repo of activeRepos()) {
-        c.push({ name: "repo", params: { name: repo.name } });
-        for (const type of BOARD_TYPES) {
+    const BOARD_EVENT_TYPES = { commits: "commit", prs: "pr", reviews: "review", comments: "comment", issues: "issue" };
+    const buildCycle = (source = model, filtered = false, explicitRepos = false, mainBoard = false) => {
+      const types = source?.boardTypes || BOARD_TYPES;
+      const c = [{ name: "recent" }];
+      if (!source?.typeFiltered) c.push({ name: "totals" });
+      for (const type of types) {
+        if (!filtered || source.leaderboards[type].length) c.push({ name: "leaderboard", params: { type } });
+      }
+      for (const repo of explicitRepos ? source.repos : activeRepos(source, mainBoard)) {
+        if (filtered && !types.some((type) => repo.leaderboards[type].length)) continue;
+        if (!source?.typeFiltered) c.push({ name: "repo", params: { name: repo.name } });
+        for (const type of types) {
+          if (filtered && !repo.leaderboards[type].length) continue;
           c.push({ name: "leaderboard", params: { type, repo: repo.name } });
         }
       }
       return c;
     };
-    let cycleViews = buildCycle();
+    let cycleViews = buildCycle(model, false, false, true);
     const cycle = () => cycleViews;
+
+    // Build a reader's projection only on a filter edit or a new feed, never per frame.
+    const filteredModel = (source, filters) => {
+      if (!source || filters.repos === null && filters.users === null && filters.types === null) return source;
+      const users = filters.users === null ? null : new Set(filters.users);
+      const repos = filters.repos === null ? null : new Set(filters.repos);
+      const types = filters.types === null ? null : new Set(filters.types);
+      const pickBoards = (boards) => Object.fromEntries(BOARD_TYPES.map((type) =>
+        [type, users ? boards[type].filter((row) => users.has(row.login)) : boards[type]]));
+      const totalsOf = (boards) => {
+        const logins = new Set(), totals = { contributors: 0 };
+        for (const type of BOARD_TYPES) {
+          totals[type] = 0;
+          for (const row of boards[type]) { totals[type] += row.count; logins.add(row.login); }
+        }
+        totals.contributors = logins.size;
+        return totals;
+      };
+      const selectedRepos = source.repos.filter((repo) => !repos || repos.has(repo.name)).map((repo) => {
+        const leaderboards = pickBoards(repo.leaderboards);
+        return { ...repo, leaderboards, totals: users ? totalsOf(leaderboards) : repo.totals,
+          // The feed has no per-user weekly history; don't show other users' history.
+          weeklyTotals: users ? [] : repo.weeklyTotals };
+      });
+      let leaderboards = pickBoards(source.leaderboards), totals = users ? totalsOf(leaderboards) : source.totals;
+      let weeklyTotals = users ? [] : source.weeklyTotals;
+      if (repos) {
+        leaderboards = {};
+        for (const type of BOARD_TYPES) {
+          const counts = new Map();
+          for (const repo of selectedRepos) for (const row of repo.leaderboards[type]) {
+            counts.set(row.login, (counts.get(row.login) || 0) + row.count);
+          }
+          leaderboards[type] = [...counts].map(([login, count]) => ({ login, count }))
+            .sort((a, b) => b.count - a.count || a.login.localeCompare(b.login));
+        }
+        totals = totalsOf(leaderboards);
+        if (!users) for (const type of BOARD_TYPES) totals[type] = selectedRepos.reduce((sum, repo) => sum + repo.totals[type], 0);
+        const weeks = new Map();
+        for (const repo of selectedRepos) for (const week of repo.weeklyTotals) weeks.set(week.week, (weeks.get(week.week) || 0) + week.total);
+        weeklyTotals = [...weeks].map(([week, total]) => ({ week, total })).sort((a, b) => a.week < b.week ? -1 : a.week > b.week ? 1 : 0);
+      }
+      const boardTypes = types === null ? null : BOARD_TYPES.filter((type) => types.has(BOARD_EVENT_TYPES[type]));
+      return { ...source, filtered: true, typeFiltered: types !== null, boardTypes, repos: selectedRepos, leaderboards, totals, weeklyTotals,
+        recent: source.recent.filter((row) => (!repos || repos.has(row.repo)) && (!users || users.has(row.login)) && (!types || types.has(row.type))) };
+    };
 
     const renderBoard = () => {
       if (!model) {
@@ -505,7 +578,7 @@
         drawText(ctx, "AWAITING DATA", 57, 60, PALETTE.dim, 1);
         return;
       }
-      (VIEWS[view.name] || VIEWS.totals)(ctx, model, view.params);
+      (VIEWS[view.name] || VIEWS.totals)(ctx, model, view.params, recentNow);
     };
 
     const node = createNode({
@@ -574,6 +647,14 @@
     // The slide's name for a caption: the view and, for a repository or a leaderboard, whose.
     const captionOf = (v) => v.name === "recent" ? "Recent activity" : v.name === "totals" ? "Org totals"
       : v.name === "repo" ? v.params.name : `${v.params.repo || "org"} · ${v.params.type}`;
+    const indexOfView = (selected, pages = cycle()) => {
+      for (let i = 0; i < pages.length; i++) {
+        const page = pages[i];
+        if (page.name === selected.name && page.params?.name === selected.params?.name
+          && page.params?.repo === selected.params?.repo && page.params?.type === selected.params?.type) return i;
+      }
+      return 0;
+    };
     const api = {
       node,
       canvas,
@@ -582,6 +663,75 @@
       get index() { return cycleIndex % cycle().length; },
       get count() { return cycle().length; },
       get caption() { return captionOf(view); },
+      get paused() { return paused; },
+      // Popup readers share the parsed feed, but own only a small bitmap and
+      // their page/cycling state. They never build another cabinet or GPU mesh.
+      createReader(state = null) {
+        const canvas = document.createElement("canvas");
+        canvas.width = BOARD_W; canvas.height = BOARD_H;
+        const context = canvas.getContext("2d", { alpha: false });
+        let filters = { repos: state?.filters?.repos ?? null, users: state?.filters?.users ?? null, types: state?.filters?.types ?? null };
+        let source = filteredModel(model, filters), pages = buildCycle(source, source !== model, filters.repos !== null);
+        let index = indexOfView(state ? state.screen : view, pages), selected = pages[index], seenModel = model;
+        let filterVersion = 0;
+        let paused = state?.paused ?? false, dirty = true, version = 0, switchAt = lastElapsed;
+        let shownRecentNow = -1;
+        const reader = {
+          title: "Oogatron", floating: true, help: "", note: "", canvas,
+          get count() { return pages.length; },
+          get index() { return index; },
+          get view() { return selected; },
+          get caption() { return captionOf(selected); },
+          get version() { return version; },
+          get paused() { return paused; },
+          get filters() { return filters; },
+          get filterVersion() { return filterVersion; },
+          get repos() { return model ? model.repos : []; },
+          get users() { return model ? model.contributors : []; },
+          get types() { return RECENT_TYPES; },
+          setFilter(kind, values) {
+            filters = { ...filters, [kind]: values };
+            source = filteredModel(model, filters);
+            pages = buildCycle(source, source !== model, filters.repos !== null);
+            index = indexOfView(selected, pages); selected = pages[index];
+            filterVersion++; switchAt = lastElapsed; dirty = true;
+          },
+          setPaused(value) { paused = value; switchAt = lastElapsed; },
+          go(next) {
+            if (!Number.isInteger(next) || next < 0 || next >= pages.length) return;
+            index = next; selected = pages[index];
+            switchAt = lastElapsed; dirty = true;
+          },
+          update(elapsed = lastElapsed) {
+            if (seenModel !== model) {
+              seenModel = model;
+              source = filteredModel(model, filters);
+              pages = buildCycle(source, source !== model, filters.repos !== null);
+              index = indexOfView(selected, pages);
+              selected = pages[index];
+              filterVersion++;
+              dirty = true;
+            }
+            if (!paused && rotateEvery > 0 && elapsed - switchAt >= rotateEvery) reader.go((index + 1) % pages.length);
+            if (selected.name === "recent" && shownRecentNow !== recentNow) dirty = true;
+            if (!dirty) return;
+            if (source) (VIEWS[selected.name] || VIEWS.totals)(context, source, selected.params, recentNow);
+            else {
+              clearBoard(context);
+              drawText(context, "AWAITING DATA", 57, 48, PALETTE.dim, 1);
+            }
+            dirty = false;
+            shownRecentNow = recentNow;
+            version++;
+          },
+          dispose() { canvas.width = canvas.height = 0; }
+        };
+        return reader;
+      },
+      setPaused(value) {
+        paused = value;
+        resetRotation = true;
+      },
       setView(name, params) {
         if (!VIEWS[name]) return;
         view = { name, params };
@@ -657,18 +807,24 @@
           return false;
         }
         model = next;
-        cycleViews = buildCycle();
+        cycleViews = buildCycle(model, false, false, true);
         // A repo view whose repo vanished falls back inside renderRepo.
         dirty = true;
         return true;
       },
       update(elapsed, renderer) {
+        lastElapsed = elapsed;
+        const now = Math.floor(Date.now() / 60000) * 60000;
+        if (now !== recentNow) {
+          recentNow = now;
+          if (view.name === "recent") dirty = true;
+        }
         // Any manual slide change restarts the auto-rotate countdown.
         if (resetRotation) {
           lastSwitchAt = elapsed;
           resetRotation = false;
         }
-        if (rotateEvery > 0 && elapsed - lastSwitchAt >= rotateEvery) {
+        if (!paused && rotateEvery > 0 && elapsed - lastSwitchAt >= rotateEvery) {
           lastSwitchAt = elapsed;
           api.nextView();
           resetRotation = false;

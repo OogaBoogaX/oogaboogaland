@@ -19,8 +19,8 @@
 // as one instanced batch), rack, Cold Pool, pad, the three generators and the Crystal Bank, sky hole,
 // workbench, shelves, breaker and lever, the Fan Wall and Box Fan with their blades mounted by
 // `FAN_MOUNT`, the busbar riser, the crystal cell, pool board, trader's stall and price board, banana
-// rock, trophy shelf and the eight trophies, drop marker, lamp, flame and crystal, and the hub mouth's
-// dressing (`hubTrack`, `hubCart`, `hubRack`, in the mouth's local frame with +z out of the cave).
+// rock, trophy shelf and the eight trophies, drop marker, lamp, flame and crystal, and `hubCart`, the cart of
+// glowing ore that stands by the Lightning Factory's switchboard.
 (() => {
   "use strict";
   const BL = window.BL = window.BL || {};
@@ -701,31 +701,9 @@
   // A busbar run overhead in the hall, copper that glows faintly when there is power in it.
   LAYOUT.ROCKS = ROCKS;
 
-  // ---- the mine's mouth on the island ----
-  // What the hub dresses the 10 o'clock mouth with, in the mouth's own frame (+z out of the cave):
-  // a track running out of the dark with a cart of glowing ore on it, timber sets down the tunnel, a
-  // lantern, a pickaxe, and a rack of Thunder Boxes blinking further in. The cart and the rack are
-  // their own geometry so the hub can make them solid.
-  const hubTrack = cached(() => {
-    const parts = [];
-    for (const x of [-0.45, 0.45]) parts.push(bx({ w: 0.07, h: 0.07, d: 7.4, color: "#6f757c", offset: { x, y: 0.1, z: -1.8 } }));
-    for (let z = 1.7; z > -5.5; z -= 0.5) parts.push(bx({ w: 1.3, h: 0.06, d: 0.18, color: TIMBER_DARK, offset: { y: 0.04, z } }));
-    for (const z of [-1.1, -3.2]) {
-      parts.push(bx({ w: 0.24, h: 2.8, d: 0.24, color: TIMBER, offset: { x: -1.95, y: 1.4, z } }));
-      parts.push(bx({ w: 0.24, h: 2.8, d: 0.24, color: TIMBER, offset: { x: 1.95, y: 1.4, z } }));
-      parts.push(bx({ w: 4.3, h: 0.26, d: 0.3, color: TIMBER_DARK, offset: { y: 2.86, z } }));
-    }
-    // The lantern off the first timber, the pickaxe against the wall, and a heap of ore by the mouth.
-    parts.push(bx({ w: 0.04, h: 0.4, d: 0.04, color: "#2b2521", offset: { x: -1.5, y: 2.55, z: -1.1 } }));
-    parts.push(bx({ w: 0.2, h: 0.24, d: 0.2, color: "#ffd27a", emissive: 1, offset: { x: -1.5, y: 2.25, z: -1.1 } }));
-    parts.push(moved(turn(bx({ w: 0.06, h: 1.1, d: 0.06, color: TIMBER }), 0, 0.3), -2.1, 0.55, -2.3));
-    parts.push(moved(turn(bx({ w: 0.5, h: 0.08, d: 0.06, color: METAL }), 0, 0.3), -2.1, 1.08, -2.14));
-    for (let i = 0; i < 7; i++) {
-      const a = i * 0.9, r = 0.18 + (i % 3) * 0.12;
-      parts.push(bx({ w: 0.18, h: 0.16 + (i % 2) * 0.1, d: 0.16, color: i % 3 ? STONE_LIGHT : "#7fe0ff", emissive: i % 3 ? 0 : 0.8, offset: { x: 1.6 + Math.cos(a) * r, y: 0.08, z: 1.1 + Math.sin(a) * r } }));
-    }
-    return merge(...parts);
-  });
+  // ---- the ore cart ----
+  // A mine cart of glowing ore on four wheels, its origin on the ground under its middle; one stands by the
+  // Lightning Factory's switchboard.
   const hubCart = cached(() => merge(
     bx({ w: 1.1, h: 0.62, d: 1.3, color: "#4a4f55", offset: { y: 0.55 } }),
     bx({ w: 1.16, h: 0.06, d: 1.36, color: METAL_DARK, offset: { y: 0.88 } }),
@@ -734,11 +712,6 @@
     ...[[-0.25, -0.3, "#7fe0ff", 0.7], [0.2, -0.2, STONE_LIGHT, 0], [-0.1, 0.2, "#b58cff", 0.7], [0.3, 0.3, STONE, 0], [0, 0, "#f5c542", 0.7]].map(([x, z, color, emissive]) =>
       bx({ w: 0.36, h: 0.28, d: 0.36, color, emissive, offset: { x, y: 0.98, z } }))
   ));
-  const hubRack = cached(() => {
-    const parts = [rackFrame()];
-    for (let b = 0; b < 6; b++) parts.push(placedCopy(asic(b % 3 === 2 ? 1 : 0), 0, 0.34 + b * 0.27, 0.02, 1, 0));
-    return merge(...parts);
-  });
   const flame = cached(() => BL.hubModels.fireFlame());
   // A charge crystal, the panic power the trader sells by the bag.
   const crystal = cached(() => merge(
@@ -788,7 +761,7 @@
   });
   BL.mineModels = {
     dressingLights,
-    LAYOUT, CHART, POOL_CHART, pickaxe, extinguisher, spareBreaker, smokeAlarm, chamberTimber, tunnelFrame, hubTrack, hubCart, hubRack, chartScreen, candle, chartMark, bayLocal, cave, pebbleBox, shinyRocks, thunderBox, asic, ASIC_LOOKS, rackFrame, coldPool, pad, waterWheel, sunLeaves, steamVent,
+    LAYOUT, CHART, POOL_CHART, pickaxe, extinguisher, spareBreaker, smokeAlarm, chamberTimber, tunnelFrame, hubCart, chartScreen, candle, chartMark, bayLocal, cave, pebbleBox, shinyRocks, thunderBox, asic, ASIC_LOOKS, rackFrame, coldPool, pad, waterWheel, sunLeaves, steamVent,
     POWER_BUILDERS, skyHole, workbench, shelves, breakerPanel, breakerLever, fanWall, boxFan, FAN_MOUNT, busbarRiser, crystalCell, fanBlade, fanBlur, poolBoard, traderStall,
     priceBoard, crackRock, trophyShelf, trophy, marker, lamp, flame, crystal, seal, chamberDecor
   };

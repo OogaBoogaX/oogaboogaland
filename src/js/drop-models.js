@@ -161,20 +161,19 @@
   const hole = cached(() => noShadow(lathe({ profile: [[0, 0.03], [0.45, 0.03], [0.62, 0.03], [0.62, -0.02]], segments: 12, color: (t) => t < 0.5 ? "#1a120b" : "#3a2a18" })));
   // Unit-length streak along z; the scene stretches it along the diver's velocity.
   const streak = cached(() => noShadow(box({ w: 0.03, h: 0.03, d: 1, color: "#eef3f7", emissive: 0.35 })));
-  // Plane park spot on the roof over a mouth's room, nose to the meadow; shared by the hub and the scene.
-  // Roof read under both wheels, higher wins; pitch turns about the axle, out.y is the plane origin at that scale.
-  const roofSpot = (island, m, out = {}, scale = 1) => {
+  // Plane park spot on the roof over a mouth's room, nose to the meadow.
+  // Roof read under both wheels, higher wins; pitch turns about the axle, out.y is the plane origin.
+  const roofSpot = (island, m, out) => {
     const ax = Math.sin(m.ry), az = Math.cos(m.ry), rx = Math.cos(m.ry), rz = -Math.sin(m.ry);
     out.x = m.x + ax * ROOF_BACK;
     out.z = m.z + az * ROOF_BACK;
-    const wx = ax * PLANE.wheelZ * scale, wz = az * PLANE.wheelZ * scale;
-    const left = island.surfaceAt(out.x + wx - rx * PLANE.wheelX * scale, out.z + wz - rz * PLANE.wheelX * scale);
-    const right = island.surfaceAt(out.x + wx + rx * PLANE.wheelX * scale, out.z + wz + rz * PLANE.wheelX * scale);
-    out.y = Math.max(left, right) - (PLANE.wheelR * (Math.cos(PARK_PITCH) - 1) - PLANE.wheelZ * Math.sin(PARK_PITCH)) * scale;
+    const wx = ax * PLANE.wheelZ, wz = az * PLANE.wheelZ;
+    const left = island.surfaceAt(out.x + wx - rx * PLANE.wheelX, out.z + wz - rz * PLANE.wheelX);
+    const right = island.surfaceAt(out.x + wx + rx * PLANE.wheelX, out.z + wz + rz * PLANE.wheelX);
+    out.y = Math.max(left, right) - (PLANE.wheelR * (Math.cos(PARK_PITCH) - 1) - PLANE.wheelZ * Math.sin(PARK_PITCH));
     out.ry = m.ry;
     out.ax = ax;
     out.az = az;
-    return out;
   };
-  BL.dropModels = { PLANE, CANOPY, ROOF_BACK, PARK_PITCH, SIGN_AT, roofSign, plane, planeBody, propeller, windsock, hoop, canopy, pack, target, streak, hole, roofSpot };
+  BL.dropModels = { PLANE, CANOPY, PARK_PITCH, SIGN_AT, roofSign, plane, planeBody, propeller, windsock, hoop, canopy, pack, target, streak, hole, roofSpot };
 })();

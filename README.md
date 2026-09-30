@@ -1,6 +1,6 @@
 # Ooga Booga Land
 
-A WebGL2 floating island whose cliff caves are games. Voxel cavemen stand in for the contributors of [OogaBoogaX](https://github.com/OogaBoogaX); donated bananas feed them, the live Bitcoin mempool makes the weather, and the rim jumbotron shows the org's live stats. Plain JavaScript, no dependencies, read-only network connections only. Payments are a simulator for now; visitor state stays in the visitor's browser.
+A WebGL2 floating island whose cliff caves hold projects and an arcade of games. Voxel cavemen stand in for the contributors of [OogaBoogaX](https://github.com/OogaBoogaX); donated bananas feed them, the live Bitcoin mempool makes the weather, and the rim Oogatron shows the org's live stats. Plain JavaScript, no dependencies, read-only network connections only. Payments are a simulator for now; visitor state stays in the visitor's browser.
 
 ## Run it
 
@@ -27,7 +27,7 @@ npm run watch   # the same, rebuilding on every change under src/
 
 Roster colours show activity across every OogaBoogaX repo: yellow worked in the last hour, orange in the last day, gray asleep. Working Oogas load bananas at the pile and shoot them into their project's cave, where their gorilla companions build. HQ's ramps lead down to a basement of beds.
 
-Around the rim: **EntropyLab** (11 o'clock), **Ooga Rally** (9), **Ooga Drop** (the plane on the rally roof), **Ooga Mine** (10), **Ooga Orbit** (the bridge off the south rim), the **Mempool island** (4) and the **Timechain Sphere** (southwest). Every game opens on a title card; **Enter** starts, **Escape** leaves.
+Around the rim: **EntropyLab** (11 o'clock), the **Lightning Factory** (2), **Ooga Arcade** (3), where a cabinet opens each game, the **Mempool island** (4) and the **Timechain Sphere** (southwest). Every game opens on a title card; **Enter** starts, **Escape** leaves.
 
 ## Timechain Sphere
 
@@ -48,6 +48,16 @@ The mempool is the weather over the Mempool island: the fee-paying backlog sets 
 ## Debug
 
 Each game and cave has an address to share, with its own preview card: `/oogarally`, `/oogadrop`, `/oogaorbit`, `/oogamine`, `/mempool`, `/dsb`, `/entropylab`, `/lightning` and `/sphere`. They work on the site and under `npm run serve`, and as `oogaboogaland.html#/oogarally` when the file is opened from disk; routes live in `src/js/routes.js`, and `npm run cards` recaptures the cards. `?scene=lab`, `race`, `drop`, `orbit`, `mine` or `dsb` opens that scene; `?nosim=1` silences the simulator and every feed; `?canvas2d=1` forces the Canvas 2D fallback; `?debug=1` exposes `window.__ooga`. AGENTS.md lists every flag and fixture.
+
+With `debug=1`, repeat `ooga=<handle>:<mode>[:<caves>]` to set individual owners to `clank`, `chill` or `sleep`. Once any `ooga` flag is present, unlisted owners and omitted/invalid modes sleep, including maintainers and Sani. This fixture overrides `status=` and live activity for the visit; without `ooga`, normal activity and the existing debug defaults apply. GitHub logins also work. Repeating an owner replaces its earlier setting. The companion gorillas follow their owners' modes.
+
+Clanking requires a comma-separated cave list: `lab` for EntropyLab, `obl` for Ooga Booga Land, and `lf` for Lightning Factory. Cave IDs (`c11`, `c1`, `c2`) and repository names (`oogaboogax/entropylab`, `oogaboogax/oogaboogaland`, `drneski/lightning-foundry`) also work. Unknown caves are ignored; a clank entry with no valid caves sleeps. Workers cycle through only their listed repositories. `&ooga=` makes everyone sleep. LF work routing is enabled for this debug fixture.
+
+Example: five clanking owners, five chilling owners, and everyone else sleeping. w-s-bitcoin visits all three repositories, portlandhodl visits lab/OBL, DrNeski visits lab/LF, bc1gui visits the lab, and 2140data visits OBL. Append this query to the built page's address:
+
+```text
+?debug=1&nosim=1&ooga=w-s-bitcoin:clank:lab,obl,lf&ooga=portlandhodl:clank:lab,obl&ooga=DrNeski:clank:lab,lf&ooga=bc1gui:clank:lab&ooga=2140data:clank:obl&ooga=SaniExp:chill&ooga=MrHodlX:chill&ooga=Holo-Elfstone:chill&ooga=Tmmmemcee:chill&ooga=YellowBrokeIt:chill
+```
 
 In the hub, `?debug=1&character=gorilla-SaniExp` starts controlling SaniExp's gorilla. `clanker-SaniExp` is an equivalent selection, and both prefixes work with `solo=1`. A sleeping selected contributor is woken for this debug visit. Click the canvas to focus combat controls.
 
@@ -89,7 +99,7 @@ Read [AGENTS.md](AGENTS.md) first: the module layout, the engine patterns, how t
 
 ## DSB Land
 
-Reached through the **Ooga Portal** in HQ's basement. As an Ooga, press **Space** at a lever beside the Pit to switch the portal on, pick **DSB Land** on the screen, then drop through the glowing Pit. To come home, use the **DSB Dialer** beside the upright gate and walk back through it.
+Reached through **₿IFRÖST** beyond the north pass. Walk through the DSB window in its chamber. To come home, use the **DSB Dialer** beside the upright gate and walk back through it into ₿IFRÖST.
 
 Inside: a river boat and the **Bitcoin coaster** (ride on the live price), the **Meme Shop** (demo tokens for snacks and tomatoes), and **NodeRunner TV**, whose radio takes song requests paid over Lightning from your own wallet. **Turtle view** shows the whole land. A direct visit is `?scene=dsb`.
 

@@ -255,6 +255,7 @@
   const MOUTH = { w: 5, h: 3, depth: 5 };
   const ROOM = { w: 6, h: 4, from: 2.5, to: 6.5 };
   const PATH_HALF = 0.75;
+  const RING_HALF = PATH_HALF * 1.5;
   const PATH_UNIT = UNIT / 2;
   const PATH_CAPACITY = 32768;
   const PATH_LIFT = 0.006;
@@ -263,7 +264,9 @@
   const STAIR_TERRACE = { from: MEADOW, top: 2.5, halfWidth: 1.8, blend: 1.5 };
   const TIMECHAIN = { bearing: 8.25 / 12 * Math.PI * 2, ...STAIR_TERRACE };
   const TIMECHAIN_X = Math.sin(TIMECHAIN.bearing), TIMECHAIN_Z = -Math.cos(TIMECHAIN.bearing);
-  const POOL_APPROACH = { bearing: 3.625 / 12 * Math.PI * 2, from: MEADOW, to: RADIUS - 0.5, top: 6.25, tread: 0.285, halfWidth: 2.6, blend: 1.5 };
+  // Deeper treads keep the diagonal voxel risers within an Ooga's step clearance. Reach the full height
+  // half a metre before the bridge so its underside cannot block the final rise onto the deck.
+  const POOL_APPROACH = { bearing: 3.625 / 12 * Math.PI * 2, from: 19, to: RADIUS - 0.5, top: 6.25, tread: 0.4, halfWidth: 2.6, blend: 1.5 };
   const POOL_X = Math.sin(POOL_APPROACH.bearing), POOL_Z = -Math.cos(POOL_APPROACH.bearing);
   const BLUFF_LEN = 8, SIDE_OUT = 2.5, APRON = 3, TRAIL_LEAN = 1.2;
   const P = { grass: 1, grassLight: 2, grassDark: 3, path: 4, stone: 5, stoneDark: 6, inner: 7, dirt: 8, floor: 9 };
@@ -1841,8 +1844,9 @@
       const quantized = Math.ceil((requestedInner - 1e-9) / PATH_UNIT) * PATH_UNIT;
       if (quantized === ringInner) return false;
       ringInner = quantized;
-      ringCenter = ringInner + PATH_HALF;
-      ringOuter = ringCenter + PATH_HALF;
+      // Keep loading beside the pile, with a separate passing lane outside it.
+      ringCenter = ringInner + RING_HALF;
+      ringOuter = ringCenter + RING_HALF;
       pathVisible = ringOuter <= MEADOW;
       pathCount = 0;
       ringPathCount = 0;
@@ -1954,6 +1958,8 @@
         get ringInnerRadius() { return ringInner; },
         get ringCenterRadius() { return ringCenter; },
         get ringOuterRadius() { return ringOuter; },
+        get ringLoadingRadius() { return ringInner + RING_HALF / 2; },
+        get ringTrafficRadius() { return ringOuter - RING_HALF / 2; },
         get quantizedRadius() { return ringInner; },
         get visibleInstanceCount() { return pathCount; },
         masterSpokeCellCount: masterPathCount,

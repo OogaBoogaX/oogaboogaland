@@ -317,18 +317,9 @@
   const labTorsoVox = (rand) => {
     const v = torsoVox(rand);
     for (const [key] of v.map) {
-      const [x, y, z] = key.split(",").map(Number);
+      const [x, , z] = key.split(",").map(Number);
+      // Extend the open coat to the bottom of the torso.
       if (!(z >= 5 && x >= 3 && x <= 6)) v.map.set(key, 12);
-    }
-    // A tapered wraparound hem joins the white back, sides and front panels
-    // into one coat while leaving the center open over the chest.
-    for (let y = -2; y <= 1; y++) {
-      const inset = y === -2 ? 1 : 0, left = inset, right = 9 - inset;
-      for (let x = left; x <= right; x++) for (let z = 0; z <= 6; z++) {
-        if (z === 6 && x >= 3 && x <= 6) continue;
-        if ((x === left || x === right) && (z === 0 || z === 6)) continue;
-        v.set(x, y, z, 12);
-      }
     }
     // The open coat and folded collar remain part of the cached torso mesh,
     // so they follow every bend of the body.
@@ -1155,6 +1146,9 @@
       state.backwards = speed < 0;
       state.speed = Math.abs(speed);
       state.air = airborne;
+      // A repository handoff interrupts the optional chest beat; the limbs
+      // still ease back into their walking pose before their next safe step.
+      if (motion && motion.workExit) state.beat = 0;
       // A stopped walker can lead with either hand. Apply an admitted starting
       // phase once; a swept preview may pose several intermediate substeps.
       const walkPhase = motion ? motion.walkPhase : NaN;

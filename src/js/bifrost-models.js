@@ -6,8 +6,8 @@
 //
 // A window is a row in `WINDOWS` and a slot in `SLOTS`, in the same order. A `travel` row walks through to its
 // scene, and looks through a short passage lined with the field's blue onto a picture of that world (the scene
-// takes the picture); a world not open yet is a `mirror`, a reflector that sends whoever touches it back into the
-// hall. Opening a world is changing its row, and giving the scene its picture and stand-in.
+// takes the picture); a world not open yet is a `mirror`, a reflector linked to the next mirror in the hall.
+// Opening a world is changing its row, and giving the scene its picture and stand-in.
 //
 // The name is carved in raised gilt letters (`word`), chiselled strokes swept along each letter's centre line,
 // since the island's 3x5 sign alphabet has no ₿ or Ö. `supportAt`, `clearAt` and `walkable` are the walkable
@@ -592,16 +592,14 @@
     return noShadow(merge(...parts));
   });
   // A window's mirror, `MIRROR_Z` past the wall's face inside its arch: one quad facing +z at z 0, a reflector keyed on
-  // its own geometry, so each window has a glass of its own (by slot). `flash` is the same opening in the field's blue
-  // a hair in front, which the scene fades in when the glass sends someone back; `backing` closes the arch behind the
-  // glass, which shows nothing until its first capture and on Canvas 2D only its sheen. Every window shares those two.
+  // its own geometry, so each window has a glass of its own (by slot). `backing` closes the arch behind the glass,
+  // which shows nothing until its first capture and on Canvas 2D only its sheen. Every window shares the backing.
   const MIRROR_Z = 0.25;
   const quadAt = (z, color, emissive) => ({
     verts: [-WINDOW.halfW, 0.05, z, WINDOW.halfW, 0.05, z, WINDOW.halfW, WINDOW_TOP, z, -WINDOW.halfW, WINDOW_TOP, z],
     faces: [{ i: [0, 1, 2, 3], color: hexToRgb(color), emissive }], lines: [], castShadow: false
   });
   const mirrorShared = cached(() => ({
-    flash: quadAt(0.03, "#5fb8ff", 1),
     backing: box({ w: 2 * WINDOW.halfW + 0.4, h: WINDOW_TOP + 0.4, d: 0.2, color: "#0a0d16", offset: { y: (WINDOW_TOP + 0.4) / 2, z: -MIRROR_Z - 0.35 } })
   }));
   const mirror = variants(() => ({ glass: { ...quadAt(0, "#8395a6", 0), reflector: true }, ...mirrorShared() }));
@@ -812,9 +810,10 @@
 
   // The floor is flat but for the dais's two steps; past the wall's line there is floor only in the tunnel and in a
   // window's opening.
+  const [[STEP_R0, STEP_Y0], [STEP_R1, STEP_Y1]] = CORE.steps;
   const supportAt = (x, z) => {
-    const r = Math.hypot(x, z), [[r0, y0], [r1, y1]] = CORE.steps;
-    return r < r1 ? y1 : r < r0 ? y0 : 0;
+    const r = Math.hypot(x, z);
+    return r < STEP_R1 ? STEP_Y1 : r < STEP_R0 ? STEP_Y0 : 0;
   };
   // Obstacles as circles [x, z, radius]: the lantern posts, the court's posts, the benches (two circles each), the
   // planters, the fronts of the windows' frames either side, and the dressing.
@@ -830,8 +829,11 @@
     ...DRESS.flatMap(([, x, z, , , r]) => [x, z, r])
   ]);
   // How far past the wall's face a walker's body may reach in each window: a traveller walks on through the field
-  // while the scene fades; a mirror stops them just short of the glass.
-  const reachOf = (kind) => kind === "travel" ? WINDOW.plane + WINDOW.recess : MIRROR_Z - 0.05;
+  // while the scene fades; a linked mirror allows the body's centre across the
+  // glass before the scene carries that step out of its destination mirror.
+  const reachOf = (kind) => (kind === "travel" ? WINDOW.plane : MIRROR_Z) + WINDOW.recess;
+  // Each window's bearing turned once, for the walk checks.
+  const SLOT_SIN = SLOTS.map((b) => Math.sin(b)), SLOT_COS = SLOTS.map((b) => Math.cos(b));
   const clearAt = (x, z, radius, kinds) => {
     const r = Math.hypot(x, z);
     if (r < CORE.plinth + radius) return false;
@@ -844,7 +846,7 @@
     if (z > 0 && Math.abs(x) <= ENTRY.halfW - 0.1 - radius) return z <= ENTRY.field + ENTRY.beyond;
     // Into a window's opening, as far as its kind allows, from wherever the hall's ring leaves off for this walker.
     for (let i = 0; i < SLOTS.length; i++) {
-      const b = SLOTS[i], sr = Math.sin(b), cr = Math.cos(b), along = x * sr + z * cr - HALL.r, across = x * cr - z * sr;
+      const sr = SLOT_SIN[i], cr = SLOT_COS[i], along = x * sr + z * cr - HALL.r, across = x * cr - z * sr;
       if (Math.abs(across) <= WINDOW.halfW - 0.1 - radius && along > -1.5 - radius && along <= reachOf(kinds[i]) - radius) return true;
     }
     return false;
@@ -859,16 +861,15 @@
 
   // ---- the chamber through the island's gate -------------------------------------------------------------
 
-  // The chamber as the island sees it through the field in the gatehouse's portal, as the Lightning Factory's hall is
-  // seen through its shield (`FM.hubWindow`): the island's window (`bifrost-window.js`) pulls every point of this
-  // stand-in along its own sight line into a band just behind the field, so it is built at full size in the chamber's
-  // frame from the chamber's own tables, and kept light. Every face glows with the chamber's light at rest baked into
-  // its colour, so the island's sun and clock never touch it, and stone stays dark, so the island's bloom picks out
-  // only the lights. Every sight line through the field runs down the tunnel between its walls, so past the tunnel
-  // only the fan they reach is built: the floor there, the far arc of the wall with its four windows, the pilasters and
-  // the dome over it, the court and the mechanism. Floor, wall and dome share one grid of bearings, so no seam opens
-  // between them; inlays are cut into what they lie in rather than laid over it, and lit details stand a tenth of a
-  // metre proud, so the window's squeeze never folds them together.
+  // The chamber as the island sees it through the field in the gatehouse's portal: the island's window
+  // (`bifrost-window.js`) pulls every point of this stand-in along its own sight line into a band just behind the
+  // field, so it is built at full size in the chamber's frame from the chamber's own tables, and kept light. Every face
+  // glows with the chamber's light at rest baked into its colour, so the island's sun and clock never touch it, and
+  // stone stays dark, so the island's bloom picks out only the lights. Every sight line through the field runs down the
+  // tunnel between its walls, so past the tunnel only the fan they reach is built: the floor there, the far arc of the
+  // wall with its four windows, the pilasters and the dome over it, the court and the mechanism. Floor, wall and dome
+  // share one grid of bearings, so no seam opens between them; inlays are cut into what they lie in rather than laid
+  // over it, and lit details stand a tenth of a metre proud, so the window's squeeze never folds them together.
   //
   // `front` is the tunnel's last half metre before the field at true size, where an Ooga walks through, with the
   // field's emitters; `hall` is everything else that stands still, cut off where `front` begins (`GATE_CUT`). The window

@@ -1,11 +1,11 @@
-// The island's window into ₿IFRÖST through the field in the gatehouse's portal: the Lightning Factory's window
-// (`factory-window.js`) at a second gate. `BM.gateWindow`, a light stand-in of the chamber built once at full size in
-// the chamber's frame, is pulled every frame along each point's own sight line from the viewer's eye into the DEPTH
-// metres just behind the field (`relief`, one central collineation on that eye). Moving a point along its sight line
-// never moves it on screen, so the window draws exactly what a window into the whole chamber would, in the ordinary
-// pass, and the island's own depth masks it. Only the tunnel's last half metre before the field, where an Ooga walks
-// through, stands at true size (`front`). The drawn relief is held to the passage behind the field (`clipMinY`,
-// `clipMaxY`, `clipSlab`), which the gatehouse closes in stone, so what would land outside it would be hidden anyway.
+// The island's window into ₿IFRÖST through the field in the gatehouse's portal. `BM.gateWindow`, a light stand-in of
+// the chamber built once at full size in the chamber's frame, is pulled every frame along each point's own sight line
+// from the viewer's eye into the DEPTH metres just behind the field (`relief`, one central collineation on that eye).
+// Moving a point along its sight line never moves it on screen, so the window draws exactly what a window into the
+// whole chamber would, in the ordinary pass, and the island's own depth masks it. Only the tunnel's last half metre
+// before the field, where an Ooga walks through, stands at true size (`front`). The drawn relief is held to the passage
+// behind the field (`clipMinY`, `clipMaxY`, `clipSlab`), which the gatehouse closes in stone, so what would land
+// outside it would be hidden anyway.
 //
 // The mechanism turns in it as the chamber turns it at rest: the ₿ spinning and bobbing, each ring on its own tip,
 // bands of light climbing the beam, and the open world's window breathing in its colour. Nothing in it answers the

@@ -34,7 +34,7 @@
   const { createNode, addChild } = BL.scene;
   const { cached, box, bevelBox, lathe, merge, polyline, makeVox, voxelGeometry, noShadow, pushVert, face, turnedY } = models;
   const { mulberry32, lerp, hexToRgb } = math;
-  const { puff, leafy, pointedLeaf, flower, FLOWER_INKS, limb, padNormals, flatInto, rock } = BL.hubModels;
+  const { puff, leafy, canopySupport, pointedLeaf, flower, FLOWER_INKS, limb, padNormals, flatInto, rock } = BL.hubModels;
 
   // A lathe whose colour varies by ring and segment, as `rocket-models.js` defines for the launch pad.
   const latheBy = ({ profile, segments = 8, color, emissive = 0 }) => {
@@ -186,8 +186,7 @@
         deck.push({ x, y: deckY(t) - 0.04, z: t * SITE.span });
         under.push({ x: side * w * 0.32, y: deckY(t) - 0.5 - Math.sin(t * Math.PI) * 0.55, z: t * SITE.span });
       }
-      under.unshift({ x: side * w * 0.36, y: -1.1, z: -2.2 });
-      under.push({ x: side * w * 0.36, y: -1.1, z: SITE.span + 2.2 });
+      // End beneath the bridge gateways; tails beyond them emerge through the stair rock.
       vine(rail, 0.075, 0.075, VINE);
       vine(deck, 0.06, 0.06, VINE_DK);
       vine(under, 0.055, 0.055, VINE_DK);
@@ -290,7 +289,9 @@
       branches.push(branch);
     }
     padNormals(geo);
+    const canopyStart = geo.faces.length;
     for (const [x, y, z, rx, ry] of crowns) leafy(geo, x, y, z, rx, ry, rx, JUNGLE, rand, Math.round(6 + rx * rx * 5), 0.44);
+    const canopyEnd = geo.faces.length;
     for (let k = 1; k < crowns.length; k += 2) {
       const [x, y, z, rx, ry] = crowns[k], a = rand() * Math.PI * 2, x0 = x + Math.cos(a) * rx * 0.5, z0 = z + Math.sin(a) * rx * 0.5;
       let px = x0, py = y - ry * 0.5, pz = z0;
@@ -306,7 +307,7 @@
     // Where the wildlife climbs and perches, in the tree's own frame: the trunk's lean at the top, its height, the
     // five limbs (from the trunk out to each lower crown), and a perch on top of every crown.
     geo.climb = { lean: cx, height, branches, perches: crowns.map(([x, y, z, , ry]) => [x, y + ry * 0.9, z]) };
-    geo.collisionGeometry = canopyShell(seed, height, spread);
+    geo.collisionGeometry = merge(canopyShell(seed, height, spread), canopySupport(geo, canopyStart, canopyEnd));
     return geo;
   });
   const CANOPY = [canopy(71, 7.5, 3.2), canopy(72, 5.4, 2.6), canopy(73, 9.2, 3.8)];

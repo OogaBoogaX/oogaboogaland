@@ -1,7 +1,7 @@
 // ₿IFRÖST: the chamber of windows onto other worlds. A short tunnel from the island opens into a round hall of stone
 // and bronze; the ₿ mechanism turns at its middle, and round the wall stand the windows, an open world's labelled
 // over its arch. Travel is walking: an Ooga that walks through a window's field goes to that world, and one that walks
-// into a window whose world is not open yet meets its own reflection and is sent back into the hall. A window's frame
+// into a window whose world is not open yet crosses its reflection and emerges from the next mirror. A window's frame
 // glows brighter as someone comes near. Nobody but an Ooga crosses, so a visit without one only looks.
 //
 // Whoever walked in stays themselves: the Ooga the island handed over (`world.pilot`), or on a page that opens here,
@@ -65,13 +65,12 @@
     core: ["₿IFRÖST · the mechanism", "The heart of ₿IFRÖST. It turns for now; one day it may do more."],
     exit: ["The way out", "Back to the island."],
     travel: ["walk through to travel", "Walk an Ooga through the field to go there."],
-    mirror: ["Not open yet · a mirror for now", "Not open yet. Ooga still building this world; its window shows you yourself."]
+    mirror: ["Linked mirror · walk through", "Walk through the glass to come out of the next mirror in the chamber."]
   };
   // How the ₿'s rings turn, radians a second, and how each is tipped.
   const TAU = Math.PI * 2;
   const RING_SPIN = [0.5, -0.35, 0.25], RING_TILT = [[Math.PI / 2, 0], [1.1, 0.5], [0.4, -0.9]];
-  // The mirror's set-back: how far out from the glass the Ooga stands again, and how long the blue flash lasts.
-  const SETBACK = 4.5, FLASH = 0.45;
+  const MIRROR_ROTATION = math.quat.create();
   // How many times, half a second apart, a page that opens here tries to photograph DSB Land.
   const PICTURE_TRIES = 10;
   // How far past the way in's field the island's picture of the islet hangs, square to the tunnel, as the Lightning
@@ -275,7 +274,7 @@
         addChild(node, board);
       }
       addChild(root, node);
-      const w = { row, kind, node, neon, ribs: null, rim: null, rims: null, tint: null, sn: Math.sin(f.bearing), c: Math.cos(f.bearing), phase: null, face: null, flash: null, picture: null, light: -1, near: 0, hum: Math.random() * 0.3, glow: 0, armed: true };
+      const w = { row, kind, node, neon, ribs: null, rim: null, rims: null, tint: null, sn: Math.sin(f.bearing), c: Math.cos(f.bearing), phase: null, body: null, face: null, picture: null, light: -1, near: 0, hum: Math.random() * 0.3, transform: null, yaw: 0, crossings: 0 };
       if (kind === "travel") {
         const passage = BM.passage();
         w.rims = Array.from({ length: BM.RIM_STEPS }, (_, k) => BM.portalRim(row.tint, k));
@@ -296,14 +295,29 @@
         w.face = createNode({ geometry: m.glass, position: { x: 0, y: 0, z: -MIRROR_Z }, rippleTint: TINT, sightHidden: true });
         w.face.mirrorRipples = w.phase.ripples;
         w.phase.node.visible = false;
-        w.flash = createNode({ geometry: m.flash, position: { x: 0, y: 0, z: -MIRROR_Z }, visible: false, smokeOpacity: 0, sightHidden: true });
-        addChild(node, w.face, w.flash);
+        addChild(node, w.face);
       }
+      // A reflective face owns its contact atlas; the hidden ripple field
+      // cannot sample contacts. Travel fields use their existing atlas.
+      w.body = w.face ? BL.mirrorBody.create(w.face, new Map()) : w.phase.body;
+      w.tip = kind === "travel" ? `${row.name} · ${TIPS.travel[0]}` : TIPS.mirror[0];
       s.windows.push(w);
       s.kinds.push(kind);
       input.add(stone, { kind: "window", window: w }, { radius: 3 });
       targets.push(stone);
     });
+    // Closed-world mirrors form a loop. One rigid transform per doorway
+    // preserves its local crossing point and turns inward travel into an exit.
+    const mirrors = s.windows.filter((w) => w.kind === "mirror");
+    for (let i = 0; i < mirrors.length; i++) {
+      const w = mirrors[i], other = mirrors[(i + 1) % mirrors.length];
+      const yaw = other.node.rotation.y - w.node.rotation.y + Math.PI, c = Math.cos(yaw), sn = Math.sin(yaw);
+      const r = HALL.r + MIRROR_Z, x = w.sn * r, z = w.c * r, m = math.mat4.create();
+      m[0] = m[10] = c; m[2] = -sn; m[8] = sn;
+      m[12] = other.sn * r - x * c - z * sn;
+      m[14] = other.c * r + x * sn - z * c;
+      w.transform = m; w.yaw = yaw;
+    }
     input.add(s.core, { kind: "core" }, { radius: 3.2 });
     targets.push(s.core);
     input.add(s.mouth, { kind: "exit" }, { radius: 3 });
@@ -384,7 +398,7 @@
     });
     const tipFor = (hit) => {
       const o = hit.owner;
-      if (o.kind === "window") return o.window.kind === "travel" ? `${o.window.row.name} · ${TIPS.travel[0]}` : TIPS.mirror[0];
+      if (o.kind === "window") return o.window.tip;
       return TIPS[o.kind] ? TIPS[o.kind][0] : "";
     };
     Object.assign(hooks, {
@@ -433,6 +447,7 @@
       avatar.root.rotation.y = Math.PI;
       pilot.possess(avatar);
       scene.gate.phase.body.track(avatar.root, avatar.traits.height * 2, Math.max(avatar.headOpen.verts.length, avatar.headClosed.verts.length));
+      for (const w of scene.windows) w.body.track(avatar.root, avatar.traits.height * 2, Math.max(avatar.headOpen.verts.length, avatar.headClosed.verts.length));
       // Back from a world, out of its window: standing in front of it, facing the mechanism. In from the island: through
       // the field at the tunnel's end.
       const from = scene.windows.find((w) => w.kind === "travel" && w.row.scene === ctx.from);
@@ -467,24 +482,34 @@
     AT.across = p.x * w.c - p.z * w.sn;
     return AT;
   };
-  // The windows, each frame, for the Ooga standing on the hall's floor: a travel window's field takes it through; a
-  // mirror flashes, ripples where it touched and sets it back out, once until it lets go and steps clear.
-  const windowsFrame = () => {
-    const p = avatar.root.position, feet = p.y - avatar.baseY, radius = avatar.bodyRadius || 0.35, a = pilot.controls.read(), moving = Math.hypot(a.x, a.y) > 0.05;
-    if (feet > 0.6) return;
+  // Cross the glass itself, retaining the step's overshoot. The emerging
+  // character is inside the destination plane, so holding forward cannot
+  // immediately send them through it again.
+  const windowsFrame = (previousX, previousY, previousZ) => {
+    if (people.player !== avatar) return;
+    const p = avatar.root.position, feet = p.y - avatar.baseY;
     for (let i = 0; i < scene.windows.length; i++) {
       const w = scene.windows[i], at = against(w, p);
       if (Math.abs(at.across) > WINDOW.halfW) continue;
       if (w.kind === "travel") {
-        if (at.along > WINDOW.plane) travel(w);
+        if (feet <= 0.6 && at.along > WINDOW.plane) { travel(w); return; }
       } else {
-        if (!w.armed && !moving && at.along < MIRROR_Z - 1.2) w.armed = true;
-        if (!w.armed || at.along < MIRROR_Z - radius - 0.2) continue;
-        w.armed = false;
-        for (let k = 0; k < 3; k++) w.phase.ripples.pulse(-at.across, 0.6 + k * 0.7, 0);
-        w.glow = FLASH;
-        standBefore(w, SETBACK);
-        hud.toast("Not open yet. The mirror sends you back.");
+        const from = previousX * w.sn + previousZ * w.c - HALL.r - MIRROR_Z, to = at.along - MIRROR_Z;
+        if (from > 1e-7 || to < 0 || to - from < 1e-8) continue;
+        const t = -from / (to - from), across = (previousX + (p.x - previousX) * t) * w.c - (previousZ + (p.z - previousZ) * t) * w.sn;
+        const bottom = previousY + (p.y - previousY) * t - avatar.baseY;
+        if (bottom < -0.12 || !BM.inArch(across, bottom + avatar.bodyHeight, WINDOW.halfW, WINDOW.spring)) continue;
+        const m = w.transform, x = p.x, z = p.z, vx = avatar.leap.vx, vz = avatar.leap.vz;
+        p.x = m[0] * x + m[8] * z + m[12]; p.z = m[2] * x + m[10] * z + m[14];
+        avatar.root.rotation.y += w.yaw;
+        if (avatar.root.quaternion) {
+          math.quat.fromEuler(MIRROR_ROTATION, 0, w.yaw, 0);
+          math.quat.multiply(avatar.root.quaternion, MIRROR_ROTATION, avatar.root.quaternion);
+        }
+        avatar.leap.vx = m[0] * vx + m[8] * vz; avatar.leap.vz = m[2] * vx + m[10] * vz;
+        pilot.transformView(m, w.yaw);
+        w.crossings++;
+        return;
       }
     }
   };
@@ -565,6 +590,7 @@
 
   const update = (dt, elapsed) => {
     const s = scene;
+    const previousX = avatar ? avatar.root.position.x : 0, previousY = avatar ? avatar.root.position.y : 0, previousZ = avatar ? avatar.root.position.z : 0;
     pilot.readInput(dt);
     if (people) people.update(dt, elapsed);
     pilot.update(dt);
@@ -582,7 +608,7 @@
     }
     // The open world's window alone answers whoever comes near (the Ooga, or with none, the view): its glow, its rim,
     // which breathes at rest and climbs to white-hot, its light and the light's reach, its passage's ribs and how often
-    // its field ripples. The mirrors keep their look. Every field hums in the same blue, and a mirror's flash fades.
+    // its field ripples. The mirrors keep their look. Every field hums in the same blue.
     const who = avatar ? avatar.root.position : pilot.orbit.target, L = RENDER_OPTS.lights;
     for (let i = 0; i < s.windows.length; i++) {
       const w = s.windows[i];
@@ -599,16 +625,12 @@
         L[o + 4] = w.tint[0] * power; L[o + 5] = w.tint[1] * power; L[o + 6] = w.tint[2] * power;
       }
       w.phase.update(dt, elapsed);
+      w.body.update(dt);
+      w.body.time = w.phase.ripples.time;
       w.hum -= dt;
       if (w.hum <= 0) {
         w.hum = (0.16 + Math.random() * 0.3) * (1 - 0.65 * w.near);
         w.phase.ripples.pulse((Math.random() * 2 - 1) * WINDOW.halfW, Math.random() * WINDOW_TOP, 0);
-      }
-      if (w.glow > 0) {
-        w.glow = Math.max(0, w.glow - dt);
-        const k = w.glow / FLASH;
-        w.flash.visible = k > 0.02;
-        w.flash.smokeOpacity = 0.7 * k * k;
       }
     }
     // The lanterns flicker like flames.
@@ -622,7 +644,7 @@
       if (avatar) {
         const p = avatar.root.position;
         if (p.z > ENTRY.field && Math.abs(p.x) < ENTRY.halfW) leaveChamber();
-        else windowsFrame();
+        else windowsFrame(previousX, previousY, previousZ);
       } else {
         const a = pilot.controls.read(), p = camera.position;
         if (Math.hypot(a.x, a.y) > 0.05 && p.z > ENTRY.field - 1.2 && Math.abs(p.x) < ENTRY.halfW) leaveChamber();
@@ -652,7 +674,7 @@
     if (avatar && !leaving) world.pilot = avatar.traits.name;
     for (const w of scene.windows) {
       w.phase.dispose();
-      if (w.face) w.face.mirrorRipples = null;
+      if (w.face) { w.body.dispose(); w.face.mirrorRipples = null; }
       if (w.picture && w.picture.owned) renderer.releaseGeometry(w.picture.geometry);
     }
     scene.gate.phase.dispose();
@@ -688,7 +710,7 @@
   };
 
   const bifrostScene = {
-    id: "bifrost", wip: true, enter, update, overlay, onDonation, onKey, onLootCleared, renderOpts: RENDER_OPTS, leave, stats, liveGeometry,
+    id: "bifrost", enter, update, overlay, onDonation, onKey, onLootCleared, renderOpts: RENDER_OPTS, leave, stats, liveGeometry,
     root: null, camera: null, input: null, debug: null, agent: null, agentView: null, agentControls: null, agentHandoff: null,
     get inMotion() {
       return !!scene;

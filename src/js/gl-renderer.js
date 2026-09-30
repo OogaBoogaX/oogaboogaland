@@ -1341,7 +1341,7 @@ void main() {
     const invViewProj = mat4.create();
     const mirrorInvViewProj = mat4.create();
     const FRUSTUM = new Float32Array(24), LIGHT_FRUSTUM = new Float32Array(24), MIRROR_FRUSTUM = new Float32Array(24);
-    const CENTER = new Float32Array(3);
+    const CENTER = new Float32Array(3), CULL = new Float64Array(4);
     let culled = 0, drawn = 0, suppressed = 0, shadowPassCount = 0, rippleSurfaces = 0, rippleWaves = 0;
     // Static casters live in a cached depth map (res.shadow.staticFb) baked under shadowBaked; the working map
     // starts each frame as a copy of it and takes only the moving casters.
@@ -1351,7 +1351,9 @@ void main() {
     const mirrorTarget = { x: 0, y: 0, z: 0 };
     const mirrorUp = { x: 0, y: 1, z: 0 };
     const records = new Map();
+    // Refilled in place every frame (`activeCount` during collect), so its backing store is never dropped and regrown.
     const activeRecords = [];
+    let activeCount = 0;
     const res = { programs: {}, fbo: null, shadow: null, bloom: null, quadVao: null, matrixTexture: null };
     const mirror = { node: null, record: null, geometry: null, program: null, programReady: false, fb: null, tex: null, depth: null, width: 0, height: 0, renderWidth: 0, renderHeight: 0, portal: false, reveal: 0, frontFacing: false, walkThrough: false, captureValid: false, bodyTex: null, bodyState: null, bodyVersion: -1, shards: 0 };
     const environment = { program: null, ready: false, fb: null, tex: null, depth: null, size: 0, next: 0, valid: 0, frame: 0, origin: new Float32Array(3) };
@@ -1945,7 +1947,7 @@ void main() {
       let rec = records.get(geometry);
       if (!rec) {
         const ibo = gl.createBuffer();
-        rec = { geometry, ibo, capacity: 0, mesh: buildMeshPart(geometry, ibo), line: buildLinePart(geometry, ibo), nodes: [], count: 0, drawCount: 0, cameraHiddenCount: 0, active: false, data: null, batch: null, batchVersion: -1, lightVisible: true, mirrorVisible: true, imageTexture: null, rippleBodyTexture: null, rippleBodyState: null, rippleBodyVersion: -1, shadowChanged: 0, shadowSettle: SHADOW_SETTLE, shadowCount: -1, shadowClip: NaN, shadowStatic: false, shadowBake: -1 };
+        rec = { geometry, ibo, capacity: 0, mesh: buildMeshPart(geometry, ibo), line: buildLinePart(geometry, ibo), nodes: [], spheres: new Float64Array(4), count: 0, drawCount: 0, cameraHiddenCount: 0, active: false, data: null, batch: null, batchVersion: -1, lightVisible: true, mirrorVisible: true, imageTexture: null, rippleBodyTexture: null, rippleBodyState: null, rippleBodyVersion: -1, shadowChanged: 0, shadowSettle: SHADOW_SETTLE, shadowCount: -1, shadowClip: NaN, shadowStatic: false, shadowBake: -1 };
         records.set(geometry, rec);
       }
       return rec;
@@ -1968,17 +1970,36 @@ void main() {
       }
       return true;
     };
-    // Camera, shadow and mirror passes test the same world sphere: collect computes it once onto the node.
-    const writeCullSphere = (node) => {
+    // Camera, shadow and mirror passes test the same world sphere: collect computes it once into the record's
+    // `spheres` (x, y, z, r at four times the node's slot, moved with it). Never onto the node: a float field read
+    // or written on the graph's many node shapes boxes a new number every time.
+    const writeCullSphere = (node, out, o) => {
       const b = boundsOf(node.geometry), w = node.world;
       mat4.transformPoint(CENTER, w, b.center[0], b.center[1], b.center[2]);
       const scale = Math.max(w[0] * w[0] + w[1] * w[1] + w[2] * w[2], w[4] * w[4] + w[5] * w[5] + w[6] * w[6], w[8] * w[8] + w[9] * w[9] + w[10] * w[10]);
-      node.cullX = CENTER[0];
-      node.cullY = CENTER[1] + (node.matrixCloud ? Math.min(0, cutawayCloudY - w[13]) * cutawayCloudMix : 0);
-      node.cullZ = CENTER[2];
-      node.cullR = b.radius * Math.sqrt(scale) + CULL_MARGIN;
+      out[o] = CENTER[0];
+      out[o + 1] = CENTER[1] + (node.matrixCloud ? Math.min(0, cutawayCloudY - w[13]) * cutawayCloudMix : 0);
+      out[o + 2] = CENTER[2];
+      out[o + 3] = b.radius * Math.sqrt(scale) + CULL_MARGIN;
     };
-    const nodeInFrustum = (node, planes) => sphereInFrustum(node.cullX, node.cullY, node.cullZ, node.cullR, planes);
+    const slotInFrustum = (s, o, planes) => {
+      const x = s[o], y = s[o + 1], z = s[o + 2], r = s[o + 3];
+      for (let i = 0; i < 24; i += 4) {
+        if (planes[i] * x + planes[i + 1] * y + planes[i + 2] * z + planes[i + 3] < -r) return false;
+      }
+      return true;
+    };
+    // The node in slot i takes the next slot of the draw region, its sphere with it.
+    const drawSlot = (rec, i) => {
+      const j = rec.drawCount++, nodes = rec.nodes, s = rec.spheres, node = nodes[i];
+      nodes[i] = nodes[j];
+      nodes[j] = node;
+      for (let k = 0; k < 4; k++) {
+        const t = s[i * 4 + k];
+        s[i * 4 + k] = s[j * 4 + k];
+        s[j * 4 + k] = t;
+      }
+    };
     // Shadow and mirror draw every instance of a record; one wholly outside that pass's clip volume skips the
     // draw call, partial records draw in full.
     const markLightVisible = () => {
@@ -1986,7 +2007,7 @@ void main() {
         if (rec.geometry.castShadow === false) continue;
         const sphere = rec.batch && rec.batch.cullSphere;
         let visible = rec.batch ? !sphere || sphereInFrustum(sphere[0], sphere[1], sphere[2], sphere[3] + CULL_MARGIN, LIGHT_FRUSTUM) : false;
-        for (let i = 0; !rec.batch && !visible && i < rec.count; i++) visible = nodeInFrustum(rec.nodes[i], LIGHT_FRUSTUM);
+        for (let i = 0; !rec.batch && !visible && i < rec.count; i++) visible = slotInFrustum(rec.spheres, i * 4, LIGHT_FRUSTUM);
         rec.lightVisible = visible;
       }
     };
@@ -2012,7 +2033,7 @@ void main() {
       for (const rec of activeRecords) {
         const sphere = rec.batch && rec.batch.cullSphere;
         let visible = rec.batch ? !sphere || sphereInFrustum(sphere[0], sphere[1], sphere[2], sphere[3] + CULL_MARGIN, MIRROR_FRUSTUM) : false;
-        for (let i = 0; !rec.batch && !visible && i < rec.count; i++) visible = nodeInFrustum(rec.nodes[i], MIRROR_FRUSTUM);
+        for (let i = 0; !rec.batch && !visible && i < rec.count; i++) visible = slotInFrustum(rec.spheres, i * 4, MIRROR_FRUSTUM);
         rec.mirrorVisible = visible;
       }
     };
@@ -2040,7 +2061,7 @@ void main() {
         rec.count = 0;
         rec.drawCount = 0;
         rec.cameraHiddenCount = 0;
-        activeRecords.push(rec);
+        activeRecords[activeCount++] = rec;
       }
       if (node.instanceData) {
         rec.batch = node;
@@ -2053,15 +2074,18 @@ void main() {
       // In-frustum nodes stay in front of the culled ones by swapping into the draw region.
       const idx = rec.count++;
       rec.nodes[idx] = node;
+      if (rec.spheres.length < rec.count * 4) {
+        const grown = new Float64Array(Math.max(rec.count * 4, rec.spheres.length * 2));
+        grown.set(rec.spheres);
+        rec.spheres = grown;
+      }
       // Camera-hidden nodes still cast shadows and appear in the mirror.
-      writeCullSphere(node);
+      writeCullSphere(node, rec.spheres, idx * 4);
       if (node.smokeOpacity === 0 || hiddenFromCamera(node)) {
         rec.cameraHiddenCount++;
         suppressed++;
-      } else if (nodeInFrustum(node, FRUSTUM)) {
-        rec.nodes[idx] = rec.nodes[rec.drawCount];
-        rec.nodes[rec.drawCount++] = node;
-      } else culled++;
+      } else if (slotInFrustum(rec.spheres, idx * 4, FRUSTUM)) drawSlot(rec, idx);
+      else culled++;
     };
     const uploadInstances = (rec) => {
       const need = rec.count * INSTANCE_FLOATS;
@@ -2312,6 +2336,11 @@ void main() {
     };
     const init = () => {
       parallel = gl.getExtension("KHR_parallel_shader_compile");
+      // Every flat varying is the same at a triangle's three corners, so the first corner draws the same pixels as
+      // GL's default last. Under the default, ANGLE's Metal backend (Safari, Chrome on Apple) rewrites each flat
+      // draw's vertices into index buffers it keeps: about 2.6 GB of GPU memory on the hub.
+      const provoking = gl.getExtension("WEBGL_provoking_vertex");
+      if (provoking) provoking.provokingVertexWEBGL(provoking.FIRST_VERTEX_CONVENTION_WEBGL);
       buildPrograms();
       buildMatrixTexture();
       buildShadow();
@@ -2390,7 +2419,7 @@ void main() {
     };
     const drawGlass = (cull) => {
       let any = false;
-      for (const rec of activeRecords) if (rec.geometry.glass && rec.count) { any = true; break; }
+      for (let i = 0; i < activeRecords.length; i++) if (activeRecords[i].geometry.glass && activeRecords[i].count) { any = true; break; }
       if (!any) return;
       const mesh = res.programs.mesh;
       gl.useProgram(mesh.prog);
@@ -2952,14 +2981,16 @@ void main() {
       lightProj[12] += (Math.round(P4[0] * shadowSnap) - P4[0] * shadowSnap) / shadowSnap;
       lightProj[13] += (Math.round(P4[1] * shadowSnap) - P4[1] * shadowSnap) / shadowSnap;
       mat4.multiply(lightViewProj, lightProj, lightView);
-      for (const rec of activeRecords) {
+      // Indexed loops: render stays on the baseline compiler, where for-of boxes an iterator result every record.
+      for (let i = 0; i < activeRecords.length; i++) {
+        const rec = activeRecords[i];
         rec.active = false;
         // Drop the references without trimming the backing store the next frame's collect would immediately regrow.
         rec.nodes.fill(null);
         rec.batch = null;
         rec.offscreen = false;
       }
-      activeRecords.length = 0;
+      activeCount = 0;
       reflectorNodes.length = 0;
       mirror.node = mirror.record = null;
       mirror.portal = mirror.frontFacing = mirror.walkThrough = false;
@@ -2975,7 +3006,9 @@ void main() {
       shadowFrame++;
       updateWorld(root, null);
       traverseVisible(root, collect);
-      for (const rec of activeRecords) {
+      activeRecords.length = activeCount;
+      for (let i = 0; i < activeRecords.length; i++) {
+        const rec = activeRecords[i];
         if (rec.offscreen) culled += rec.drawCount; else drawn += rec.drawCount;
         if (rec.geometry.mirrorSource && !rec.offscreen) mirror.shards += rec.drawCount;
         uploadInstances(rec);
@@ -3085,12 +3118,12 @@ void main() {
             if (!node.visible || !node.geometry) continue;
             const rec = records.get(node.geometry);
             if (!rec || !rec.active) continue;
-            writeCullSphere(node);
-            if (hiddenFromCamera(node) || !nodeInFrustum(node, FRUSTUM)) continue;
+            writeCullSphere(node, CULL, 0);
+            if (hiddenFromCamera(node) || !slotInFrustum(CULL, 0, FRUSTUM)) continue;
             for (let i = rec.drawCount; i < rec.count; i++) {
               if (rec.nodes[i] !== node) continue;
-              rec.nodes[i] = rec.nodes[rec.drawCount];
-              rec.nodes[rec.drawCount++] = node;
+              rec.spheres.set(CULL, i * 4);
+              drawSlot(rec, i);
               break;
             }
           }

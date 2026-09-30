@@ -1,9 +1,9 @@
 // Fixed walking routes between the meadow and the headquarters beds.
 //
 // A validated waypoint graph from the meadow down to the HQ and basement beds, memoised per island and
-// remapped onto each visit's beds. `create` returns `route`, `clearSegment` (continuous floor plus
-// architectural clearance, the shortcut test the crew reuses), `points`, `radius`, `height`, and the node
-// and edge counts.
+// remapped onto each visit's beds. `create` returns `route`, `plan` (the same route a leg at a time, for a
+// caller that spreads planning over frames), `clearSegment` (continuous floor plus architectural clearance,
+// the shortcut test the crew reuses), `points`, `radius`, `height`, and the node and edge counts.
 (() => {
   "use strict";
   const BL = window.BL = window.BL || {};
@@ -89,8 +89,9 @@
     }
     // Search storage belongs to this visit and is reused for each state change.
     const size = points.length, distance = new Float64Array(size), previous = new Int32Array(size), visited = new Uint8Array(size);
-    const candidates = new Int32Array(16), candidateDistance = new Float64Array(16);
-    const rounded = (route) => {
+    // Planning pauses (`yield`) after each leg it tests, so a caller can spread a route over frames (`plan`); `route`
+    // runs one straight through. Only the graph search runs unbroken, so it keeps the shared search storage.
+    const rounded = function* (route) {
       const result = [route[0]];
       for (let i = 1; i < route.length - 1; i++) {
         const before = route[i - 1], corner = route[i], after = route[i + 1];
@@ -106,22 +107,25 @@
           a.y = floorAt(a.x, a.y, a.z); b.y = floorAt(b.x, b.y, b.z);
           const samples = [a], steps = Math.max(4, Math.ceil(reach * 2 / SAMPLE));
           let valid = segment(result[result.length - 1], a, false, 0.3);
+          yield;
           for (let n = 1; valid && n <= steps; n++) {
             const t = n / steps, u = 1 - t;
             const x = u * u * a.x + 2 * u * t * corner.x + t * t * b.x, z = u * u * a.z + 2 * u * t * corner.z + t * t * b.z;
             const guide = u * u * a.y + 2 * u * t * corner.y + t * t * b.y, y = floorAt(x, guide, z), p = { x, y, z };
             valid = Math.abs(y - guide) <= STEP + 1e-6 && segment(samples[samples.length - 1], p, false, 0.3);
             samples.push(p);
+            yield;
           }
           if (valid && segment(b, after, false, 0.3)) curve = samples;
+          yield;
         }
         if (curve) result.push(...curve); else result.push(corner);
       }
       result.push(route[route.length - 1]);
       return result;
     };
-    const attach = (from, onlySurface, out) => {
-      candidates.fill(-1); candidateDistance.fill(Infinity);
+    const attach = function* (from, onlySurface, out) {
+      const candidates = new Int32Array(16).fill(-1), candidateDistance = new Float64Array(16).fill(Infinity);
       const count = size;
       for (let j = 0; j < count; j++) {
         const id = j, p = points[id];
@@ -133,11 +137,14 @@
         while (k > 0 && d < candidateDistance[k - 1]) { candidates[k] = candidates[k - 1]; candidateDistance[k] = candidateDistance[k - 1]; k--; }
         candidates[k] = id; candidateDistance[k] = d;
       }
-      for (let i = 0; i < candidates.length; i++) if (candidates[i] >= 0 && segment(from, points[candidates[i]], onlySurface) && segment(points[candidates[i]], from, onlySurface)) out.push({ id: candidates[i], cost: candidateDistance[i] });
+      for (let i = 0; i < candidates.length; i++) {
+        if (candidates[i] >= 0 && segment(from, points[candidates[i]], onlySurface) && segment(points[candidates[i]], from, onlySurface)) out.push({ id: candidates[i], cost: candidateDistance[i] });
+        yield;
+      }
     };
-    const route = (x, y, z, bed, toBed, homeX = 0, homeZ = -16) => {
+    const plan = function* (x, y, z, bed, toBed, homeX = 0, homeZ = -16) {
       const from = { x, y, z }, starts = [], ends = [];
-      attach(from, y >= -0.1, starts);
+      yield* attach(from, y >= -0.1, starts);
       let target = null;
       if (toBed) {
         const id = bedNodes.get(bed);
@@ -145,7 +152,7 @@
         ends.push({ id, cost: 0 });
       } else {
         target = { x: homeX, y: island.surfaceAt(homeX, homeZ), z: homeZ };
-        attach(target, true, ends);
+        yield* attach(target, true, ends);
       }
       if (!starts.length || !ends.length) return null;
       distance.fill(Infinity); previous.fill(-1); visited.fill(0);
@@ -178,11 +185,14 @@
           // Keep slope bends, but let their nearly straight, shallow tails merge into the landing. Otherwise the
           // last tiny height change restricts the next corner's rounding to a few centimetres.
           const flat = Math.abs(a.y - b.y) <= 1e-7 && Math.abs(a.y - p.y) <= 1e-7;
-          if (a.y >= -0.05 || !(flat || almostFlat && straight) || !segment(a, p, false, 0.3)) break;
+          if (a.y >= -0.05 || !(flat || almostFlat && straight)) break;
+          const clear = segment(a, p, false, 0.3);
+          yield;
+          if (!clear) break;
           simplified.splice(n - 2, 1);
         }
       }
-      const smooth = rounded(simplified);
+      const smooth = yield* rounded(simplified);
       if (surfaceRoute) {
         let join = -1;
         if (toBed) {
@@ -193,13 +203,17 @@
         if (join >= 0) {
           const above = toBed ? surfaceRoute(smooth[0], smooth[join]) : surfaceRoute(smooth[join], smooth[smooth.length - 1]);
           let valid = true;
-          for (let i = 1; valid && i < above.length; i++) valid = segment(above[i - 1], above[i], true, 0.3);
+          for (let i = 1; valid && i < above.length; i++) { valid = segment(above[i - 1], above[i], true, 0.3); yield; }
           if (valid) return toBed ? above.concat(smooth.slice(join + 1)) : smooth.slice(0, join).concat(above);
         }
       }
       return smooth;
     };
-    return { route, clearSegment: segment, points, radius: RADIUS, height: HEIGHT, nodeCount: size, edgeCount: edges.reduce((sum, list) => sum + list.length, 0) / 2 };
+    const route = (...args) => {
+      const planning = plan(...args);
+      for (;;) { const step = planning.next(); if (step.done) return step.value; }
+    };
+    return { route, plan, clearSegment: segment, points, radius: RADIUS, height: HEIGHT, nodeCount: size, edgeCount: edges.reduce((sum, list) => sum + list.length, 0) / 2 };
   };
   BL.headquartersSleep = { create };
 })();

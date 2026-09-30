@@ -5,13 +5,14 @@
 // `SIGN_GLYPHS` is the blocky 3x5 alphabet every carved sign in the world is cut from, the Mempool cave's
 // headlines included. It must stay complete: a missing key is silently skipped and the reading loses a
 // letter. `SIGN_ICONS` are the cave emblems dressing.js banners carry; `SIGN_BADGES` the larger outlined ones
-// either side of a cave sign's name. `postSign` stands a scaled cave sign on two pegs for the launchers and
-// the Mempool island.
+// either side of a cave sign's name. `postSign` stands a scaled cave sign on two pegs for the Drop and Orbit
+// launch sites and the Mempool island. The jungle kit (`withJungle` and its vines, leaves, bamboo, lashings,
+// logs and thatch) dresses machines and stalls in the geometry they already draw with.
 (() => {
   "use strict";
   const BL = window.BL = window.BL || {};
   const { hexToRgb, mulberry32 } = BL.math;
-  const { geometry, pushVert, face, box, bevelBox, lathe, glassVessel, ring, merge, cached, variants, makeVox: vox, voxelGeometry: voxGeo, voxCoords, moved, turnedY, turnedZ } = BL.models;
+  const { geometry, pushVert, face, box, bevelBox, lathe, glassVessel, ring, merge, cached, variants, makeVox: vox, voxelGeometry: voxGeo, voxCoords, moved, turnedX, turnedY, turnedZ, along, prism } = BL.models;
   const blob = (v, { cx, cy, cz, rx, ry, rz, chip = 0, floor = -Infinity, rand, color }) => {
     for (let x = Math.floor(cx - rx); x <= Math.ceil(cx + rx); x++) {
       for (let y = Math.max(floor, Math.floor(cy - ry)); y <= Math.ceil(cy + ry); y++) {
@@ -130,8 +131,6 @@
   const SIGN_ICONS = {
     bolt: ["...##", "..##.", ".##..", "#####", "..##.", ".##..", "##..."],
     die: ["#####", "#...#", "#.#.#", "#...#", "#.#.#", "#...#", "#####"],
-    flag: ["#.#.#", ".#.#.", "#.#.#", ".#.#.", "#....", "#....", "#...."],
-    pick: ["####.", "#..##", "...#.", "..#..", ".#...", "#....", "....."],
     glyph: ["#.##.", "##..#", ".#.#.", "#..##", ".##.#", "#.#..", "##.##"],
     banana: ["....#", "...##", "..##.", ".##..", "##...", "#....", "....."]
   };
@@ -142,7 +141,10 @@
     flag: { ink: { "#": "#f2efe8", "*": "#1b1b1e", "P": "#a8703e" }, rows: ["P#*#*#.", "P*#*#*#", "P#*#*#*", "P*#*#*.", "P......", "P......", "P......"] },
     pick: { ink: { "I": "#c9ced6", "+": "#eef1f5", "H": "#a8703e" }, rows: ["..+II..", ".I.H.I.", "I..H..I", "...H...", "...H...", "...H...", "...H..."] },
     glyph: { ink: { "#": "#46ff72" }, rows: [".#.##..", ".##..#.", "..#.#..", ".#..##.", "..##.#.", ".#.#...", ".##.##."] },
-    banana: { ink: { "#": "#f5d142", "+": "#fff3a0", "S": "#6b4a26" }, rows: [".....S.", ".....##", "....+#.", "...+##.", "..+##..", "#+##...", ".##...."] }
+    banana: { ink: { "#": "#f5d142", "+": "#fff3a0", "S": "#6b4a26" }, rows: [".....S.", ".....##", "....+#.", "...+##.", "..+##..", "#+##...", ".##...."] },
+    joystick: { ink: { "R": "#e0452b", "+": "#ff9c86", "H": "#efe6d2", "#": "#c9ced6" }, rows: ["..+RR..", "..RRR..", "...H...", "...H...", "...H...", "#######", ".#####."] },
+    chute: { ink: { "#": "#e0452b", "+": "#f2efe8", "L": "#f2efe8", "S": "#f5d142" }, rows: ["..###..", ".#+#+#.", "#+#+#+#", "L.....L", ".L...L.", "..LSL..", "...S..."] },
+    rocket: { ink: { "#": "#f2efe8", "R": "#e0452b", "W": "#7fe0ff", "F": "#ffb02e" }, rows: ["...R...", "..RRR..", "..#W#..", "..###..", ".R###R.", "R.#F#.R", "...F..."] }
   };
   const BADGE_OUTLINE = "#2a1a0c", BADGE_CELLS = 9;
   const BADGE_CELL = SIGN_CELL * 5 / 7, BADGE_GAP = SIGN_CELL * 2;
@@ -249,8 +251,8 @@
     SIGN_CACHE.set(key, geo);
     return geo;
   };
-  // A small name board on two chunky pegs, for the launchers and the Mempool island: the cave sign scaled down,
-  // its bottom `peg` above the ground. `signWidth` and `signHeight` are its scaled size.
+  // A small name board on two chunky pegs, for the Drop and Orbit launch sites and the Mempool island: the cave
+  // sign scaled down, its bottom `peg` above the ground. `signWidth` and `signHeight` are its scaled size.
   const POST_SIGNS = new Map();
   const postSign = (text, scale, peg) => {
     const key = `${text}|${scale}|${peg}`;
@@ -593,8 +595,13 @@
     };
     for (const x of [-half + 1.17, 0, half - 1.17]) {
       const desk = place(labDesk(), x, back), display = createLabScreen(desk, stations.length, 0, x ? codeGeometry[0] : null);
+      if (!x) {
+        display.work = createLabScreen(desk, stations.length, 0, codeGeometry[0]);
+        display.work.node.visible = false;
+        addChild(node, display.work.node);
+      }
       addChild(node, display.node); displays.push(display);
-      stations.push({ x, y: 0, z: rearWork, heading: Math.PI, kind: "type", enabled: x !== 0 });
+      stations.push({ x, y: 0, z: rearWork, heading: Math.PI, kind: "type", overflow: x === 0 });
     }
     const sideZ = -Math.max(room.from + 1.4, 2.17);
     for (const side of [-1, 1]) {
@@ -606,9 +613,9 @@
         const offset = (i - 1) * 0.9, front = -0.03;
         const home = { x: bench.position.x + Math.cos(facing) * offset + Math.sin(facing) * front,
           y: 1.14, z: i === 2 ? -1.08 : side < 0 ? -2.3 - i * 0.8 : -2.5 - i * 0.68 };
-        const kind = side > 0 && i === 2 ? "die" : i === 1 ? "beaker" : "flask";
+        const kind = i === 2 ? side > 0 ? "die" : "beaker" : i === 1 ? "beaker" : "flask";
         const geometry = kind === "die" ? labDie() : kind === "beaker" ? labBeaker(side > 0 ? 1 : 0) : BL.agent.labFlaskGeometry(side > 0 ? 1 : 0);
-        if (i === 1) geometry.labGripY = 0.3;
+        if (kind === "beaker") geometry.labGripY = 0.3;
         const item = createNode({ geometry, position: { ...home }, rotation: { x: 0, y: facing, z: 0 } });
         BL.models.attachGlassShell(item);
         addChild(node, item);
@@ -622,15 +629,21 @@
             minZ: kind === "die" ? -1.5 : sideZ - 1.3, maxZ: sideZ + 1.3, y: 1.13 },
           pickup: { x: home.x, y: home.y + geometry.labGripY, z: home.z } });
       }
-      stations.push({ x: side * (half - 1.78), y: 0, z: -3.1, heading: side * Math.PI / 2, kind: "touch", side });
+      stations.push({ x: side * (half - 1.78), y: 0, z: -3.1, heading: side * Math.PI / 2, kind: "touch", side, contact: screen });
     }
     for (const side of [-1, 1]) stations.push({ x: side * (half - 0.44 - 1.213094), y: 0, z: -1.08 + side * 0.272893, heading: side * Math.PI / 2, kind: "carry", side });
-    const updateScreens = (dt, activeMask) => {
-      if (!activeMask || !(dt > 0)) return false;
+    const updateScreens = (dt, activeMask, claimedMask = activeMask) => {
       let changed = false;
       for (let i = 0; i < displays.length; i++) {
-        const display = displays[i];
-        if (!display.strips.length || !(activeMask & (1 << display.station))) continue;
+        let display = displays[i];
+        if (display.work) {
+          const occupied = !!(claimedMask & (1 << display.station));
+          if (display.work.node.visible !== occupied) {
+            display.work.node.visible = occupied; display.node.visible = !occupied; changed = true;
+          }
+          display = display.work;
+        }
+        if (!(dt > 0) || !display.strips.length || !(activeMask & (1 << display.station))) continue;
         const span = LAB_CODE.length * 0.088;
         display.clock = (display.clock + dt) % (span / LAB_SCROLL_SPEED);
         const top = (display.kind ? 2.59 : 2.04) + display.clock * LAB_SCROLL_SPEED;
@@ -850,15 +863,244 @@
     if (geo.normals) padNormals(geo);
     return geo;
   };
-  const cartoonTree = (i, rand) => {
+  // The drawn leaves extend beyond the old solid crown. Their upward faces
+  // catch landings, but never become walls or ceilings for walkers below.
+  // Built once with the tree and indexed by solidProps with its trunk shell.
+  const canopySupport = (geo, from, to = geo.faces.length) => {
+    const faces = [], v = geo.verts;
+    for (let f = from; f < to; f++) {
+      const face = geo.faces[f], a = face.i[0] * 3;
+      for (let i = 1; i + 1 < face.i.length; i++) {
+        const b = face.i[i] * 3, c = face.i[i + 1] * 3;
+        const ny = (v[b + 2] - v[a + 2]) * (v[c] - v[a]) - (v[b] - v[a]) * (v[c + 2] - v[a + 2]);
+        if (ny > 1e-10) faces.push({ i: [a / 3, b / 3, c / 3], color: face.color, emissive: 0, supportOnly: true });
+      }
+    }
+    return { verts: v, faces, lines: [] };
+  };
+  // ---- the jungle kit -------------------------------------------------------------------------------------
+  // Vines, leaves, bamboo, rope lashings, logs and thatch, to dress a machine or a stall the Ooga way in the same
+  // geometry as the thing it dresses. `withJungle(body, grow)` copies a built body into a smooth geometry carrying
+  // explicit normals and hands it to `grow`, which writes vines (`liana`, `garland`) and leaves (`sprig`) into it.
+  // `bamboo`, `lashing` and `log` return round parts for `shaded`'s round list and `thatch` a flat part for its flat
+  // list, fresh on every call. Colours are hex or rgb; every leaf draws from the `rand` it is handed.
+  const JUNGLE_LEAVES = ["#2f6b2c", "#3f8a34", "#56a43f", "#74bd52"].map(hexToRgb), JUNGLE_VINE = hexToRgb("#3f6b2a");
+  const ROPE = "#c9a36a", STRAW = ["#e2bd6a", "#caa050", "#a67f3a"];
+  const rgbOf = (c) => typeof c === "string" ? hexToRgb(c) : c;
+  const hexOf = (c) => typeof c === "string" ? c : "#" + c.map((v) => (256 | v).toString(16).slice(1)).join("");
+  const dim = (rgb, k) => rgb.map((v) => Math.min(255, Math.round(v * k)));
+  // A smooth geometry with explicit normals holding a copy of `body` (a flat `merge` or a `shaded` result, left
+  // unchanged; `null` for none), grown by `grow(geo)`: the body's flat faces stay flat, its round parts and the vines
+  // shade smooth and the leaves light by their own normals. Build it where it stands: `merge`, `scaled` and the
+  // `turned*` helpers drop or mislight the leaves' normals afterwards; `moved` keeps them.
+  const withJungle = (body, grow) => {
+    const geo = { verts: [], faces: [], lines: [], smooth: true, normals: [] };
+    if (body && body.smooth) {
+      for (let i = 0; i < body.verts.length; i++) geo.verts.push(body.verts[i]);
+      for (const f of body.faces) geo.faces.push({ ...f, i: f.i.slice() });
+      for (const l of body.lines) geo.lines.push({ ...l, i: l.i.slice() });
+      if (body.normals) for (let i = 0; i < body.normals.length; i++) geo.normals.push(body.normals[i]);
+    } else if (body) flatInto(geo, body);
+    grow(padNormals(geo));
+    geo.normals = Float32Array.from(padNormals(geo).normals);
+    if (body && body.castShadow === false) geo.castShadow = false;
+    return geo;
+  };
+  // A vine through `points` ([x, y, z] each) tapering from radius r0 to r1 in six-sided smooth segments, written into
+  // a `withJungle` geometry. "#2f5424" is the darker vine the Mempool bridge slings under its deck. A repeated point
+  // (two runs joined at a post) adds nothing.
+  const liana = (geo, points, r0 = 0.04, r1 = r0, color = JUNGLE_VINE) => {
+    const rgb = rgbOf(color), n = points.length - 1;
+    for (let i = 0; i < n; i++) {
+      const a = points[i], b = points[i + 1];
+      if (Math.hypot(b[0] - a[0], b[1] - a[1], b[2] - a[2]) < 1e-6) continue;
+      limb(geo, a[0], a[1], a[2], b[0], b[1], b[2], r0 + (r1 - r0) * i / n, r0 + (r1 - r0) * (i + 1) / n, 6, rgb);
+    }
+    return padNormals(geo);
+  };
+  // The points of a vine slung from a to b in `steps` segments, sagging `sag` at its middle.
+  const sagPoints = (ax, ay, az, bx, by, bz, sag, steps = 8) => Array.from({ length: steps + 1 }, (_, k) => {
+    const t = k / steps;
+    return [ax + (bx - ax) * t, ay + (by - ay) * t - Math.sin(t * Math.PI) * sag, az + (bz - az) * t];
+  });
+  // A fan of `count` two-tone pointed leaves about `size` long sprouting from (x, y, z) along (dx, dy, dz), spread
+  // round that direction and lit by it tipped up, as if from out of a plant; `tones` dark to light. About 12
+  // triangles a leaf, written into a `withJungle` geometry.
+  const sprig = (geo, x, y, z, dx, dy, dz, count, size, rand, tones = JUNGLE_LEAVES) => {
+    const dl = Math.hypot(dx, dy, dz) || 1, rgb = tones.map(rgbOf);
+    dx /= dl; dy /= dl; dz /= dl;
+    const ny0 = Math.abs(dy) * 0.5 + 0.55, nl = Math.hypot(dx, ny0, dz), nx = dx / nl, ny = ny0 / nl, nz = dz / nl;
+    // A frame across the direction to spread the leaves in.
+    let ux = -dz, uz = dx;
+    if (Math.hypot(ux, uz) < 0.2) { ux = 1; uz = 0; }
+    const ul = Math.hypot(ux, uz);
+    ux /= ul; uz /= ul;
+    const vx = dy * uz, vy = dz * ux - dx * uz, vz = -dy * ux, turn0 = rand() * Math.PI * 2;
+    for (let k = 0; k < count; k++) {
+      const t = turn0 + k / count * Math.PI * 2, spread = 0.35 + rand() * 0.35, c = Math.cos(t) * spread, s = Math.sin(t) * spread;
+      let ax = dx + ux * c + vx * s, ay = dy + vy * s, az = dz + uz * c + vz * s;
+      const al = Math.hypot(ax, ay, az);
+      ax /= al; ay /= al; az /= al;
+      // Across the leaf, so it turns its face to the light.
+      let wx = ay * nz - az * ny, wy = az * nx - ax * nz, wz = ax * ny - ay * nx, wl = Math.hypot(wx, wy, wz);
+      if (wl < 0.2) { wx = ux; wy = 0; wz = uz; wl = 1; }
+      const band = 1 + Math.floor(rand() * (rgb.length - 1));
+      pointedLeaf(geo, x, y, z, ax, ay, az, wx / wl, wy / wl, wz / wl, nx, ny, nz, size * (0.8 + rand() * 0.4), rgb[band], rgb[band - 1]);
+    }
+    return geo;
+  };
+  // A leafy vine along `points`, as the Mempool bridge's rails: sprigs of two or three leaves every `every` metres
+  // hanging out and down from it, toward the direction `out` ([x, y, z]) when given, else to either side; `droop` 0
+  // holds them level, 1 straight down. Garlands for beams, signs, rails and cabinet tops, and the cords of a net.
+  // `rand` (a `mulberry32`) is required, as for `sprig`: seed each garland its own so no two hang alike.
+  const garland = (geo, points, { r = 0.035, color = JUNGLE_VINE, every = 0.3, size = 0.24, droop = 0.6, out = null, rand, tones = JUNGLE_LEAVES } = {}) => {
+    liana(geo, points, r, r * 0.8, color);
+    let run = 0, next = every / 2;
+    for (let i = 0; i < points.length - 1; i++) {
+      const a = points[i], b = points[i + 1], tx = b[0] - a[0], ty = b[1] - a[1], tz = b[2] - a[2], len = Math.hypot(tx, ty, tz);
+      const across = Math.hypot(tx, tz), sx = across > 1e-6 ? -tz / across : 1, sz = across > 1e-6 ? tx / across : 0;
+      for (; next < run + len; next += every) {
+        const t = (next - run) / len, side = rand() < 0.5 ? -1 : 1, lean = (rand() - 0.5) * 0.6 / len;
+        const hx = out ? out[0] : sx * side, hy = out ? out[1] : 0, hz = out ? out[2] : sz * side;
+        sprig(geo, a[0] + tx * t, a[1] + ty * t, a[2] + tz * t, hx * (1 - droop) + tx * lean, hy * (1 - droop) - droop, hz * (1 - droop) + tz * lean, rand() < 0.5 ? 2 : 3, size, rand, tones);
+      }
+      run += len;
+    }
+    return geo;
+  };
+  // Stands a lathe of `rows` ([radius, height] up +y) from a to b, band p (rows p to p + 1) painted `tones[p]` and
+  // every other segment a shade darker, like hand-painted grain.
+  const turnedPart = (rows, tones, segments, ax, ay, az, bx, by, bz) => {
+    const geo = lathe({ profile: rows, segments, color: "#000000" }), grain = tones.map((c) => dim(c, 0.9));
+    geo.faces.forEach((f, k) => { f.color = (k % 2 ? grain : tones)[Math.floor(k / segments)]; });
+    return along(geo, ax, ay, az, bx - ax, by - ay, bz - az);
+  };
+  // A bamboo cane from a to b, radius r: a ridged node in a darker band about every 0.3 m and a cut top, its pale rim
+  // round the hollow. `tone` "#b8a04a" is the green-gold cane, "#cdb06a" a dry one. A round part.
+  const bamboo = (ax, ay, az, bx, by, bz, r, tone = "#b8a04a") => {
+    const len = Math.hypot(bx - ax, by - ay, bz - az), n = Math.max(1, Math.round(len / 0.3)), cane = rgbOf(tone);
+    const node = dim(cane, 0.75), rim = dim(cane, 1.22), hollow = dim(cane, 0.42), rows = [], tones = [];
+    const at = (rad, y, c) => { rows.push([rad, y]); tones.push(c); };
+    at(0, 0, node); at(r, 0, cane);
+    for (let k = 1; k < n; k++) { const y = k * len / n; at(r, y - 0.035, node); at(r * 1.14, y, node); at(r, y + 0.035, cane); }
+    at(r, len, rim); at(r, len, rim); at(r * 0.72, len, hollow); at(r * 0.72, len - r * 0.9, hollow); at(0, len - r * 0.9, hollow);
+    return turnedPart(rows, tones, 8, ax, ay, az, bx, by, bz);
+  };
+  // Rope lashed round a pole of radius r at (x, y, z), the pole's axis along (dx, dy, dz): three wraps side by side,
+  // the middle one a shade darker, turned as one shell whose ends tuck into the pole. A round part, for bamboo
+  // joints, stall posts and the corners of a net.
+  const lashing = (x, y, z, dx, dy, dz, r, color = ROPE) => {
+    const t = Math.max(0.008, r * 0.2), light = rgbOf(color), dark = dim(light, 0.8);
+    const rows = [[r - 0.2 * t, -2.6 * t], [r + t, -1.7 * t], [r + 0.3 * t, -0.85 * t], [r + t, 0], [r + 0.3 * t, 0.85 * t], [r + t, 1.7 * t], [r - 0.2 * t, 2.6 * t]];
+    return turnedPart(rows, [light, light, dark, dark, light, light], 10, x, y, z, x + dx, y + dy, z + dz);
+  };
+  // A log from a to b, radius r: streaked bark swelling a little at the middle over chamfered ends, and at each end a
+  // pale end-grain disc inside a darker ring. A round part, for stools, legs and table stumps.
+  const log = (ax, ay, az, bx, by, bz, r, color = "#6b4a2b") => {
+    const len = Math.hypot(bx - ax, by - ay, bz - az), bark = rgbOf(color), core = hexToRgb("#e0c08a"), ring = hexToRgb("#9a6a3a"), e = Math.min(r * 0.18, len * 0.2);
+    const rows = [[0, 0], [r * 0.6, 0], [r * 0.84, 0], [r * 0.84, 0], [r, e], [r * 1.03, len / 2], [r, len - e], [r * 0.84, len], [r * 0.84, len], [r * 0.6, len], [0, len]];
+    return turnedPart(rows, [core, ring, bark, bark, bark, bark, bark, ring, ring, core], r >= 0.1 ? 10 : 8, ax, ay, az, bx, by, bz);
+  };
+  // A thatched awning `w` wide and `d` deep, the top of its back edge at the origin, falling `drop` toward +z: courses
+  // of narrow straw bundles (0.1 to 0.15 m, staggered) laid down the slope, `rows` courses at least and more on a long
+  // slope so each shows about 0.4 m. Each bundle is a rounded wedge, thin where it tucks under the course above and
+  // about 0.12 thick at its butt, lit on one side of its ridge, flared to lap its neighbours and drawn out to a ragged
+  // end, so every course stands proud over the next; a few stray straws poke out of the butts. A dark underside, and
+  // a fine two-layer zigzag fringe hangs from the eave. Three straw tones, light to dark: mostly the two lighter, the
+  // darkest more often toward the eave; the underside is the darkest dimmed. Dried palm greens ("#8a9a48",
+  // "#6f7f36", "#55662a") for `tones` make it a leaf thatch. A flat part, `seed` fixing every draw.
+  const thatch = (w, d, { drop = d * 0.45, rows = d > 1.4 ? 4 : 3, seed = 1, tones = STRAW } = {}) => {
+    const rand = mulberry32(seed), geo = geometry(), V = geo.verts, a = Math.atan2(drop, d), cs = Math.cos(a), sn = Math.sin(a);
+    const L = Math.hypot(d, drop), courses = Math.max(rows, Math.round(L / 0.4)), step = L / courses, rgb = tones.map(rgbOf);
+    // A bundle's thickness at its top and its butt, how far the base sinks below the slope by the eave, and how much
+    // of a course tucks under the one above.
+    const H0 = 0.03, H1 = 0.12, SINK = 0.14, LAP = 0.5;
+    // The roof's frame: x across, s down the slope, n out of it; the base the bundles lie on falls below the slope.
+    const P = (x, s, n) => pushVert(geo, x, -s * sn + n * cs, s * cs + n * sn);
+    const base = (s) => -H0 - SINK * s / L;
+    // A face on `ids`, wound to face away from `ref` (a point inside the solid it closes).
+    const put = (ids, color, ref) => {
+      let nx = 0, ny = 0, nz = 0, ox = 0, oy = 0, oz = 0;
+      for (let k = 0; k < ids.length; k++) {
+        const p = ids[k] * 3, q = ids[(k + 1) % ids.length] * 3;
+        nx += (V[p + 1] - V[q + 1]) * (V[p + 2] + V[q + 2]);
+        ny += (V[p + 2] - V[q + 2]) * (V[p] + V[q]);
+        nz += (V[p] - V[q]) * (V[p + 1] + V[q + 1]);
+        ox += V[p] / ids.length; oy += V[p + 1] / ids.length; oz += V[p + 2] / ids.length;
+      }
+      face(geo, nx * (ox - ref[0]) + ny * (oy - ref[1]) + nz * (oz - ref[2]) < 0 ? ids.reverse() : ids, color);
+    };
+    const mid = (ids) => [0, 1, 2].map((c) => ids.reduce((t, i) => t + V[i * 3 + c], 0) / ids.length);
+    // One bundle across xa..xb from s0 down to its butt at s1, `h` thick there: base corners, shoulders and a ridge,
+    // fanning wider down to the butt and skewed a little aside, its ridge and shoulders each drawn out their own way
+    // past it (a point, a notch or a slant); `under` closes its bottom (the eave's course). Its top end tucks under
+    // the course above, or against the back wall.
+    const butts = [];
+    const bundle = (xa, xb, s0, s1, h, color, under) => {
+      const cx = (xa + xb) / 2, hw0 = (xb - xa) * 0.5, hw1 = (xb - xa) * 0.64, rx = (rand() - 0.5) * 0.3, lift = rand() * 0.012;
+      const tip = 0.03 + rand() * 0.06, skew = (rand() - 0.5) * 0.06;
+      const ring = (c, hw, ht, sb, sl, st, sr) => [[-hw, sb, 0], [-hw * 0.52, sl, ht * 0.64], [rx * hw, st, ht], [hw * 0.52, sr, ht * 0.64], [hw, sb, 0]]
+        .map(([x, s, n]) => P(c + x, s, base(s) + lift + n));
+      const up = ring(cx, hw0, H0, s0, s0, s0, s0), end = ring(cx + skew, hw1, h, s1, s1 + tip * rand(), s1 + tip * (0.2 + rand() * 0.8), s1 + tip * rand());
+      const ref = mid([...up, ...end]);
+      const side = dim(color, 0.78), shades = [side, dim(color, 1.25), color, side];
+      for (let k = 0; k < 4; k++) put([up[k], up[k + 1], end[k + 1], end[k]], shades[k], ref);
+      const cut = dim(color, 1.05);
+      put([end[0], end[1], end[2]], cut, ref);
+      put([end[2], end[3], end[4]], cut, ref);
+      put([end[0], end[2], end[4]], dim(color, 0.84), ref);
+      if (under) put([up[0], up[4], end[4], end[0]], dim(rgb[rgb.length - 1], 0.6), ref);
+      butts.push(cx + skew, s1, h + lift);
+    };
+    // Mostly the two lighter tones, the darkest more often toward the eave.
+    const tone = (k) => dim(rgb[Math.min(rgb.length - 1, Math.floor(rand() * 2.2 + k / courses * 0.5))], 0.9 + rand() * 0.2);
+    for (let k = 0; k < courses; k++) {
+      const widths = Array.from({ length: Math.max(2, Math.round(w / 0.125)) }, () => 0.8 + rand() * 0.4), sum = widths.reduce((t, v) => t + v, 0);
+      let x = -w / 2;
+      for (const f of widths) {
+        const bw = f * w / sum, last = k === courses - 1, s1 = last ? L - 0.03 + rand() * 0.04 : (k + 1) * step + (rand() - 0.4) * 0.08;
+        bundle(x, x + bw, k ? (k - LAP) * step : 0, s1, H1 * (0.85 + rand() * 0.3), tone(k), last);
+        x += bw;
+      }
+    }
+    // The underside, down to where the eave course's own bottoms take over.
+    const shadow = dim(rgb[rgb.length - 1], 0.6), s2 = (courses - 1) * step, under = [P(-w / 2, 0, base(0) - 0.004), P(w / 2, 0, base(0) - 0.004), P(w / 2, s2, base(s2) - 0.004), P(-w / 2, s2, base(s2) - 0.004)];
+    put(under, shadow, mid(under).map((v, c) => v + [0, cs, sn][c]));
+    // Stray straws: thin three-sided spikes out of random butts, down the slope and a little out and aside.
+    for (let j = Math.round(w * courses * 0.6); j > 0; j--) {
+      const b = Math.floor(rand() * butts.length / 3) * 3, len = 0.18 + rand() * 0.12, r = 0.018;
+      const dx = (rand() - 0.5) * 1.2, dn = 0.2 + rand() * 0.5, dl = Math.hypot(dx, 1, dn);
+      const x = butts[b], s = butts[b + 1] - 0.02, n = base(s) + butts[b + 2] * 0.6;
+      const tipId = P(x + dx / dl * len, s + len / dl, n + dn / dl * len);
+      const ring = [0, 1, 2].map((k) => P(x + Math.cos(k * 2.1) * r, s, n + Math.sin(k * 2.1) * r)), ref = mid([...ring, tipId]);
+      const color = dim(rgb[0], 1.2 - rand() * 0.12);
+      for (let k = 0; k < 3; k++) put([ring[k], ring[(k + 1) % 3], tipId], color, ref);
+    }
+    // The fringe: two staggered rows of fine straw teeth along the eave, the back row darker, hung from inside the
+    // eave course and turned out with it; a tooth's top face is buried there, so it goes.
+    const parts = [geo];
+    for (const [layer, s] of [[1, L - 0.12], [0, L - 0.05]]) {
+      const m = Math.max(3, Math.round(w / 0.08)), tw = w / m * 1.7, y = -s * sn + (base(s) + 0.03) * cs, z = s * cs + (base(s) + 0.03) * sn;
+      for (let j = 0; j < m; j++) {
+        const l = 0.13 + rand() * 0.1 + (j % 2 ? 0 : 0.04), c = dim(rgb[layer + (rand() < 0.35 ? 1 : 0)], (layer ? 0.85 : 1) * (0.94 + rand() * 0.12));
+        const tooth = prism([[-tw / 2, 0], [(rand() - 0.5) * tw * 0.4, -l], [tw / 2, 0]], 0.04, hexOf(c));
+        tooth.faces.splice(2, 1);
+        parts.push(moved(turnedX(tooth, -a * 0.5), -w / 2 + (j + 0.25 + layer * 0.5) * w / m, y, z));
+      }
+    }
+    return merge(...parts);
+  };
+  const cartoonTree = (i, rand, shell) => {
     const geo = { verts: [], faces: [], lines: [], smooth: true, normals: [] }, tones = CANOPIES[i].map(hexToRgb);
     limb(geo, 0, -0.1, 0, 0.05, 2.1, 0.02, 0.24, 0.14, 8, BARK[0]);
     limb(geo, 0.05, 1.55, 0, 0.62, 1.95, 0.02, 0.09, 0.05, 6, BARK[1]);
     if (i % 2) limb(geo, 0, 1.5, -0.1, -0.7, 1.9, -0.3, 0.08, 0.05, 6, BARK[1]);
     // The bark keeps its smooth normals: zeros mean "not given" to the renderer.
     while (geo.normals.length < geo.verts.length) geo.normals.push(0);
+    const canopyStart = geo.faces.length;
     for (const [cx, cy, cz, rx, ry, rz] of CROWNS[i]) leafy(geo, cx * QUARTER, cy * QUARTER, cz * QUARTER, rx * QUARTER, ry * QUARTER, rz * QUARTER, tones, rand, Math.round(14 + rx * rz * 2.6), 0.3);
     geo.normals = Float32Array.from(geo.normals);
+    geo.collisionGeometry = merge(shell, canopySupport(geo, canopyStart));
     return geo;
   };
   // Tree is TREE_HEIGHT units tall.
@@ -898,14 +1140,15 @@
     }
     const palette = ["#6b4a2b", "#4e361f", ...CANOPIES[i]];
     // Drawn as a cartoon tree: a tapered eight-sided trunk with its branch stubs under crowns of low-poly
-    // puffs on the voxel crown's own ellipsoids. The voxels still decide collision and every measurement below.
-    const geometry = cartoonTree(i, rand);
-    geometry.collisionGeometry = voxGeo(solid, { unit: QUARTER, palette });
+    // puffs on the voxel crown's own ellipsoids. Keep its solid shell and
+    // extend landing support across every visible leaf and lower crown.
+    const shell = voxGeo(solid, { unit: QUARTER, palette });
+    const geometry = cartoonTree(i, rand, shell);
     // Crowns stir in the wind; the collision shell stays where it stands.
     geometry.sway = 0.003;
     let radius = 0, solidRadius = 0;
     for (let j = 0; j < geometry.verts.length; j += 3) radius = Math.max(radius, Math.hypot(geometry.verts[j], geometry.verts[j + 2]));
-    const solidVerts = geometry.collisionGeometry.verts;
+    const solidVerts = shell.verts;
     for (let j = 0; j < solidVerts.length; j += 3) solidRadius = Math.max(solidRadius, Math.hypot(solidVerts[j], solidVerts[j + 2]));
     geometry.treeRadius = radius;
     geometry.treeSolidRadius = solidRadius;
@@ -1048,7 +1291,7 @@
   };
   // Separate bevelled planks with thin dark gaps between them, chunky bevelled corner posts and rails, a diagonal
   // brace across the two broad faces, and riveted iron brackets on the top corners. The decorative variant has
-  // its lid slid aside; variant 1 is open for coal and dynamite; variant 2 marks the shootable ammo crate.
+  // its lid slid aside; variant 1 is open for the dressing kit's coal; variant 2 marks the shootable ammo crate.
   const woodCrate = variants((variant) => {
     const open = variant !== 2;
     const parts = variant === 0 ? [
@@ -1332,5 +1575,5 @@
       ...[-0.8, 0.8].map(brace)
     );
   });
-  BL.hubModels = { SIGN_GLYPHS, SIGN_ICONS, AMMO_BANANA, jetpack, jetFlame, caveMouthRim, mirrorPanel, matrixPrisonBars, sealedCaveFace, matrixLeverPlate, matrixLeverLights, matrixLeverHub, matrixLeverArm, matrixLeverGrip, matrixLeverLabels, matrixGlyph, caveSign, postSign, CAVE_SIGN_WIDTH, CAVE_SIGN_HEIGHT, gate, caveShelves, entropyLab, bedroll, tree, bush, rock, breakableRock, voxelRock, puff, leafy, pointedLeaf, flower, FLOWER_INKS, limb, padNormals, flatInto, altarSlab, altarBlock, woodCrate, barrel, flowerTuft, torch, grass, lawnTuft, lantern, firepit, fireFlame, butterfly, firefly, ember, vine, cloud, ladder, dock, TREE_HEIGHT };
+  BL.hubModels = { SIGN_GLYPHS, SIGN_ICONS, AMMO_BANANA, jetpack, jetFlame, caveMouthRim, mirrorPanel, matrixPrisonBars, sealedCaveFace, matrixLeverPlate, matrixLeverLights, matrixLeverHub, matrixLeverArm, matrixLeverGrip, matrixLeverLabels, matrixGlyph, caveSign, postSign, CAVE_SIGN_WIDTH, CAVE_SIGN_HEIGHT, gate, caveShelves, entropyLab, bedroll, tree, bush, rock, breakableRock, voxelRock, puff, leafy, pointedLeaf, flower, FLOWER_INKS, limb, padNormals, flatInto, canopySupport, withJungle, liana, sagPoints, sprig, garland, bamboo, lashing, log, thatch, altarSlab, altarBlock, woodCrate, barrel, flowerTuft, torch, grass, lawnTuft, lantern, firepit, fireFlame, butterfly, firefly, ember, vine, cloud, ladder, dock, TREE_HEIGHT };
 })();

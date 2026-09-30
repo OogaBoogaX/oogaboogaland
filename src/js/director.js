@@ -141,6 +141,12 @@
     return true;
   };
   const router = routerMod.create(scenes, window.BL.routes, go);
+  // The logo is the site's home link: from any scene it goes back to the island, as a website's logo goes home.
+  document.querySelector(".home-link").addEventListener("click", (e) => {
+    e.preventDefault();
+    e.currentTarget.blur();
+    if (active && active.id !== "hub") go("hub");
+  });
   const agentPlay = BL.agent.createPlay();
   const ctx = { renderer, canvas: sceneCanvas, overlay: overlayCanvas, game, world, go, lootEnabled: LOOT_ENABLED, testBananas: TEST_BANANAS, agentPlay, from: null, place: null };
   const sceneSections = [...document.querySelectorAll("[data-scene]")];
@@ -173,8 +179,18 @@
     active.liveGeometry(live);
     return live;
   };
+  // The page's first AudioContext wakes the browser's audio, about 60 ms on the main thread; every later one costs well
+  // under a millisecond, closed or not. Paid once here, behind the fade, so a scene's first sound never stalls a frame;
+  // only after a gesture, as the scenes' own sound waits for one.
+  let audioAwake = false;
+  const wakeAudio = () => {
+    if (audioAwake || typeof AudioContext === "undefined" || navigator.userActivation && !navigator.userActivation.hasBeenActive) return;
+    audioAwake = true;
+    new AudioContext().close().catch(() => {});
+  };
   const swap = (next, place) => {
     const leaving = active;
+    wakeAudio();
     agentPlay.stop(true);
     const left = leaving.leave();
     if (DEBUG && leaving.root.children.length) throw new Error(`${leaving.id}.leave left ${leaving.root.children.length} nodes in its root`);
@@ -516,7 +532,7 @@
         return world.level;
       }
     };
-    for (const key of ["slots", "drops", "core", "shell", "delivery", "spillEffect", "cavemen", "crates", "lab", "headquarters", "hud", "applyAllSwag", "renderLocker", "demoTip", "setPileLevel", "refreshStates", "trimPool", "shown", "island", "mouths", "labels", "camera", "cameraCave", "crew", "fx", "controls", "props", "altar", "path", "scenery", "jetpack", "magazine", "mirrorCave", "matrixCave", "matrixGate", "pilot", "renderOpts", "lamps", "entranceLights", "lighting", "fireSeats", "critters", "storm", "daylight", "setHour", "track", "racers", "items", "race", "audio", "weather", "launchers", "drop", "diver", "plane", "course", "jumbotron", "fireworks", "fireworksPending", "orbit", "flight", "site", "agent", "poolIsland", "mine", "dsb", "clankers", "clankerPlay", "factory", "bifrost"]) {
+    for (const key of ["slots", "drops", "core", "shell", "delivery", "spillEffect", "cavemen", "crates", "lab", "headquarters", "hud", "applyAllSwag", "renderLocker", "demoTip", "setPileLevel", "refreshStates", "trimPool", "shown", "island", "mouths", "labels", "camera", "cameraCave", "crew", "fx", "controls", "props", "altar", "path", "scenery", "jetpack", "magazine", "mirrorCave", "matrixCave", "matrixGate", "pilot", "renderOpts", "lamps", "entranceLights", "lighting", "fireSeats", "critters", "storm", "daylight", "setHour", "track", "racers", "items", "race", "audio", "weather", "drop", "diver", "plane", "course", "jumbotron", "fireworks", "fireworksPending", "orbit", "flight", "site", "agent", "poolIsland", "mine", "dsb", "clankers", "clankerPlay", "factory", "bifrost", "arcade", "carnival"]) {
       Object.defineProperty(ooga, key, { get: () => active.debug && active.debug[key], enumerable: true });
     }
     window.__ooga = ooga;

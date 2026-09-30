@@ -568,6 +568,15 @@
     }
     return geo;
   };
+  // A convex outline, counter-clockwise from the front, extruded `depth` thick about z 0.
+  const prism = (points, depth, color, emissive = 0) => {
+    const geo = geometry(), rgb = hexToRgb(color), opts = { emissive }, n = points.length;
+    const back = points.map(([x, y]) => pushVert(geo, x, y, -depth / 2)), front = points.map(([x, y]) => pushVert(geo, x, y, depth / 2));
+    for (let i = 0; i < n; i++) face(geo, [back[i], back[(i + 1) % n], front[(i + 1) % n], front[i]], rgb, opts);
+    face(geo, front, rgb, opts);
+    face(geo, back.slice().reverse(), rgb, opts);
+    return geo;
+  };
   // Tips a freshly built geometry about x: a positive angle leans its top toward +z.
   const turnedX = (geo, a) => {
     const v = geo.verts, c = Math.cos(a), s = Math.sin(a);
@@ -1307,5 +1316,233 @@
       item.buildNode = () => createNode({ geometry: swagGeo(item.id, item.build) });
     }
   }
-  BL.models = { geometry, pushVert, face, voxCoords, box, bevelBox, panel, lathe, glassVessel, attachGlassShell, tube, ring, polyline, merge, forward, moved, turnedX, turnedY, turnedZ, cached, variants, noShadow, makeVox, voxelGeometry, voxelFaces, banana, bananaGeometry, bananaTileGeometry, bananaPileCoreGeometry, bananaPileRadiusScale, bananaPileHeightOffset, BANANA_AMMO_SCALE, BANANA_PILE_PROFILE, particleGeometry, spareMagazine, caveman, CLUB_PALETTE, GOLD_CLUB_PALETTE, labRoom, buildableGeos, crate, die, dieRotationFor, SWAG, TIER_COLORS };
+  // ---- the interior kit ---------------------------------------------------------------------------------
+  // Timber structure, turned parts, chains and lanterns shared by the cave interiors (the Lightning Factory, Ooga
+  // Arcade), in the warm timber and black iron those caves are built of.
+  const TAU = Math.PI * 2, mulberry32 = BL.math.mulberry32;
+  const TIMBER = "#8a5a32", TIMBER_LT = "#a8703e", TIMBER_DK = "#5c3a1e", IRON_DK = "#2c2e33", STONE_DK = "#3a2f28";
+  // A squared beam between two points: braces, rails, chains and cables.
+  const beam = (ax, ay, az, bx, by, bz, w, color, emissive = 0) => {
+    const dx = bx - ax, dy = by - ay, dz = bz - az, len = Math.hypot(dx, dy, dz) || 1;
+    const ux = dx / len, uy = dy / len, uz = dz / len;
+    let hx = 0, hy = 1, hz = 0;
+    if (Math.abs(uy) > 0.9) { hx = 1; hy = 0; }
+    let px = uy * hz - uz * hy, py = uz * hx - ux * hz, pz = ux * hy - uy * hx;
+    const pl = Math.hypot(px, py, pz);
+    px /= pl; py /= pl; pz /= pl;
+    const qx = uy * pz - uz * py, qy = uz * px - ux * pz, qz = ux * py - uy * px;
+    const geo = geometry(), rgb = hexToRgb(color), r = w / 2, opts = { emissive };
+    const ring = (x, y, z) => [[-1, -1], [1, -1], [1, 1], [-1, 1]].map(([s, t]) => pushVert(geo, x + (px * s + qx * t) * r, y + (py * s + qy * t) * r, z + (pz * s + qz * t) * r));
+    const a = ring(ax, ay, az), b = ring(bx, by, bz);
+    for (let i = 0; i < 4; i++) face(geo, [a[i], a[(i + 1) % 4], b[(i + 1) % 4], b[i]], rgb, opts);
+    face(geo, b, rgb, opts);
+    face(geo, a.slice().reverse(), rgb, opts);
+    return geo;
+  };
+  // A lathe laid on its side along +z, for pipes, lenses and wheels.
+  const forwardLathe = (geo) => {
+    const v = geo.verts;
+    for (let i = 0; i < v.length; i += 3) { const y = v[i + 1]; v[i + 1] = v[i + 2]; v[i + 2] = y; }
+    geo.faces.forEach((f) => f.i.reverse());
+    return geo;
+  };
+  // ---- turned parts -------------------------------------------------------------------------------
+  // The machines are turned, like the stethoscope: lathes and tubes shaded smooth, so a glass drum or a pipe
+  // reads round instead of faceted. `turn` doubles the profile's sharp corners so rims and caps keep their crease;
+  // `shaded` gathers turned parts into one smooth geometry and folds flat ones (boxes, signs) in unsmoothed.
+  const turn = (profile, segments, color, emissive = 0) => {
+    const points = [];
+    profile.forEach((p, i) => {
+      points.push(p);
+      if (i === 0 || i === profile.length - 1) return;
+      const a = profile[i - 1], b = profile[i + 1], ux = p[0] - a[0], uy = p[1] - a[1], vx = b[0] - p[0], vy = b[1] - p[1];
+      if ((ux * vx + uy * vy) / (Math.hypot(ux, uy) * Math.hypot(vx, vy) || 1) < 0.75) points.push(p);
+    });
+    return lathe({ profile: points, segments, color, emissive });
+  };
+  const shaded = (round, flat = []) => {
+    const g = merge(...round);
+    g.smooth = true;
+    if (flat.length) BL.hubModels.flatInto(g, ...flat);
+    return g;
+  };
+  // A ring of round section: `R` to the middle of the tube, `r` its thickness, lying flat about +y.
+  const torus = (R, r, color, emissive = 0, segments = 20, sides = 8) => lathe({
+    profile: Array.from({ length: sides + 1 }, (_, k) => [R + Math.cos(k / sides * TAU) * r, Math.sin(k / sides * TAU) * r]),
+    segments, color, emissive
+  });
+  // Stands a geometry built round +y at (x, y, z) with that axis turned onto the direction (dx, dy, dz).
+  const along = (geo, x, y, z, dx, dy, dz) => {
+    const l = Math.hypot(dx, dy, dz) || 1, tx = dx / l, ty = dy / l, tz = dz / l;
+    const hx = Math.abs(ty) < 0.9 ? 0 : 1, hy = Math.abs(ty) < 0.9 ? 1 : 0;
+    let nx = hy * tz, ny = -hx * tz, nz = hx * ty - hy * tx;
+    const nl = Math.hypot(nx, ny, nz) || 1;
+    nx /= nl; ny /= nl; nz /= nl;
+    const bx = ny * tz - nz * ty, by = nz * tx - nx * tz, bz = nx * ty - ny * tx, v = geo.verts;
+    for (let i = 0; i < v.length; i += 3) {
+      const a = v[i], b = v[i + 1], c = v[i + 2];
+      v[i] = x + nx * a + tx * b + bx * c; v[i + 1] = y + ny * a + ty * b + by * c; v[i + 2] = z + nz * a + tz * b + bz * c;
+    }
+    return geo;
+  };
+  // A chain from one point to another: oval links of round iron, each a quarter turn from the last.
+  const chain = (ax, ay, az, bx, by, bz, size = 0.16, color = IRON_DK) => {
+    const len = Math.hypot(bx - ax, by - ay, bz - az), pitch = size * 2.2, n = Math.max(1, Math.round(len / pitch)), out = [];
+    for (let i = 0; i < n; i++) {
+      const t = (i + 0.5) / n, link = forwardLathe(torus(size, size * 0.3, color, 0, 10, 6));
+      for (let k = 1; k < link.verts.length; k += 3) link.verts[k] *= 1.55;
+      if (i % 2) turnedY(link, Math.PI / 2);
+      out.push(along(link, ax + (bx - ax) * t, ay + (by - ay) * t, az + (bz - az) * t, bx - ax, by - ay, bz - az));
+    }
+    return out;
+  };
+
+  // A rail from one point to another on a deck whose top is at y 0, as the concept builds them: square posts with
+  // caps every metre and a half, a broad handrail laid flat along the top, a bottom rail and a cross of braces in
+  // each bay. `ends` leaves out a post at an end another rail already stands on.
+  const railParts = (x0, z0, x1, z1, ends = [true, true]) => {
+    const geos = [], len = Math.hypot(x1 - x0, z1 - z0), n = Math.max(1, Math.round(len / 1.5)), a = Math.atan2(-(z1 - z0), x1 - x0);
+    const at = (t) => [x0 + (x1 - x0) * t, z0 + (z1 - z0) * t];
+    for (let i = 0; i <= n; i++) {
+      if (i === 0 && !ends[0] || i === n && !ends[1]) continue;
+      const [x, z] = at(i / n);
+      geos.push(bevelBox({ w: 0.17, h: 1.06, d: 0.17, color: TIMBER_DK, bevel: 0.03, offset: { x, y: 0.53, z } }));
+      geos.push(bevelBox({ w: 0.25, h: 0.08, d: 0.25, color: TIMBER_LT, bevel: 0.02, offset: { x, y: 1.1, z } }));
+    }
+    geos.push(moved(turnedY(bevelBox({ w: len + 0.12, h: 0.09, d: 0.2, color: TIMBER_LT, bevel: 0.025 }), a), (x0 + x1) / 2, 1.02, (z0 + z1) / 2));
+    geos.push(beam(x0, 0.2, z0, x1, 0.2, z1, 0.1, TIMBER));
+    for (let i = 0; i < n; i++) {
+      const [ax, az] = at(i / n), [bx, bz] = at((i + 1) / n);
+      geos.push(beam(ax, 0.25, az, bx, 0.97, bz, 0.055, TIMBER), beam(ax, 0.97, az, bx, 0.25, bz, 0.055, TIMBER));
+    }
+    return geos;
+  };
+  // A support column, as the concept props its decks: a stone footing, a square timber post bound with iron straps,
+  // and a cap block under the deck, from y0 up to y1 at (x, z).
+  const columnParts = (x, z, y0, y1, w = 0.38) => {
+    const geos = [
+      bevelBox({ w: w + 0.3, h: 0.36, d: w + 0.3, color: STONE_DK, bevel: 0.07, offset: { x, y: y0 + 0.14, z } }),
+      bevelBox({ w, h: y1 - y0 - 0.32, d: w, color: TIMBER_DK, bevel: 0.06, offset: { x, y: (y0 + 0.3 + y1 - 0.02) / 2, z } }),
+      bevelBox({ w: w + 0.16, h: 0.16, d: w + 0.16, color: TIMBER_LT, bevel: 0.03, offset: { x, y: y1 - 0.08, z } })
+    ];
+    for (let y = y0 + 1.1; y < y1 - 0.5; y += 1.4) geos.push(bevelBox({ w: w + 0.06, h: 0.08, d: w + 0.06, color: IRON_DK, bevel: 0.015, offset: { x, y, z } }));
+    return geos;
+  };
+  // Where a w by d deck's posts stand, in its frame: under its frame at the corners and every few metres round it.
+  const deckGrid = (w, d) => {
+    const cols = Math.max(2, Math.round(w / 3.2) + 1), rows = Math.max(2, Math.round(d / 3.2) + 1);
+    return { cols, rows, at: (i, j) => [(i / (cols - 1) - 0.5) * (w - 0.4), (j / (rows - 1) - 0.5) * (d - 0.4)] };
+  };
+  const deckPosts = (w, d) => {
+    const { cols, rows, at } = deckGrid(w, d), out = [];
+    for (let i = 0; i < cols; i++) for (let j = 0; j < rows; j++) if (i === 0 || i === cols - 1 || j === 0 || j === rows - 1) out.push(at(i, j));
+    return out;
+  };
+  // A plank deck with its top at y 0, a frame of joists round its edge under the planks, posts down to what stands
+  // below, and a rail along the named edges ("n" is -z, "s" +z, "w" -x, "e" +x). Posts stand under the frame at the
+  // corners and every few metres round it; `drop` is how far down each one reaches, a number or a function of its
+  // (x, z) in the deck's frame, and 0 leaves the posts out.
+  const deckParts = (w, d, drop, rails = "", seed = 1, cuts = []) => {
+    const rand = mulberry32(seed), geos = [], across = w >= d;
+    const n = Math.max(2, Math.round((across ? d : w) / 0.9));
+    for (let i = 0; i < n; i++) {
+      const t = (i + 0.5) / n - 0.5, tone = [TIMBER, TIMBER_LT, "#946236"][Math.floor(rand() * 3)];
+      geos.push(across
+        ? bevelBox({ w: w - 0.04, h: 0.2, d: d / n - 0.05, color: tone, bevel: 0.04, offset: { y: -0.1, z: t * d } })
+        : bevelBox({ w: w / n - 0.05, h: 0.2, d: d - 0.04, color: tone, bevel: 0.04, offset: { x: t * w, y: -0.1 } }));
+    }
+    for (const s of [-1, 1]) {
+      geos.push(bevelBox({ w, h: 0.34, d: 0.28, color: TIMBER_DK, bevel: 0.05, offset: { y: -0.37, z: s * (d / 2 - 0.2) } }));
+      geos.push(bevelBox({ w: 0.28, h: 0.34, d: d - 0.68, color: TIMBER_DK, bevel: 0.05, offset: { x: s * (w / 2 - 0.2), y: -0.37 } }));
+    }
+    const reach = typeof drop === "function" ? drop : () => drop;
+    const { cols, rows, at } = deckGrid(w, d);
+    for (const [x, z] of deckPosts(w, d)) {
+      const down = reach(x, z);
+      if (down < 0.4) continue;
+      geos.push(...columnParts(x, z, -down, -0.54));
+      // Knee braces from each column up into the frame, toward the deck's middle.
+      if (down > 1.6) {
+        if (x) geos.push(beam(x, -1.35, z, x - Math.sign(x) * 0.8, -0.56, z, 0.12, TIMBER));
+        if (z) geos.push(beam(x, -1.35, z, x, -0.56, z - Math.sign(z) * 0.8, 0.12, TIMBER));
+      }
+    }
+    // Cross braces on the long faces, for the scaffold look, between the corner posts and no deeper than the shorter.
+    for (const s of [-1, 1]) {
+      const [ax, az] = across ? at(0, s < 0 ? 0 : rows - 1) : at(s < 0 ? 0 : cols - 1, 0), [bx, bz] = across ? at(cols - 1, s < 0 ? 0 : rows - 1) : at(s < 0 ? 0 : cols - 1, rows - 1);
+      const depth = Math.min(reach(ax, az), reach(bx, bz), 4.5);
+      if (depth > 1.5) geos.push(beam(ax, -depth + 0.3, az, bx, -0.6, bz, 0.16, TIMBER), beam(ax, -0.6, az, bx, -depth + 0.3, bz, 0.16, TIMBER));
+    }
+    // A rail leaves a gap wherever a stair or a bridge lands on its edge, exactly as wide as what arrives, and ends
+    // either side of it on a post that the arriving rails share: `cuts` are [x, z, half-width] in the deck's frame, on
+    // the rail's line, and a stair's also the way its flight runs off the deck, so it opens only the rail it crosses
+    // and as wide as it crosses it.
+    const rail = (x0, z0, x1, z1, ends = [true, true]) => {
+      const len = Math.hypot(x1 - x0, z1 - z0), ux = (x1 - x0) / len, uz = (z1 - z0) / len, keep = [[0, len]];
+      const out = (x0 + x1) * uz - (z0 + z1) * ux > 0 ? 1 : -1, nx = uz * out, nz = -ux * out;
+      for (const [cx, cz, width, dx, dz] of cuts) {
+        if (Math.abs((cx - x0) * uz - (cz - z0) * ux) > 0.6) continue;
+        // A stair's centre line where it crosses this rail's line, and its width along the rail at that slant.
+        const along = dx === undefined ? 1 : dx * nx + dz * nz;
+        if (along < 0.3) continue;
+        const k = dx === undefined ? 0 : -((cx - x0) * nx + (cz - z0) * nz) / along, t = (cx + (dx || 0) * k - x0) * ux + (cz + (dz || 0) * k - z0) * uz, half = width / along;
+        if (t < -half || t > len + half) continue;
+        for (let i = keep.length - 1; i >= 0; i--) {
+          const [a, b] = keep[i];
+          if (t + half <= a || t - half >= b) continue;
+          keep.splice(i, 1, ...[[a, t - half], [t + half, b]].filter(([p, q]) => q - p > 0.12));
+        }
+      }
+      for (const [a, b] of keep) geos.push(...railParts(x0 + ux * a, z0 + uz * a, x0 + ux * b, z0 + uz * b, [a > 0 || ends[0], b < len || ends[1]]));
+    };
+    // Corners are shared: the side rails leave out the post the front or back rail already stands there.
+    const hw = w / 2 - 0.1, hd = d / 2 - 0.1, north = rails.includes("n"), south = rails.includes("s");
+    if (north) rail(-hw, -hd, hw, -hd);
+    if (south) rail(-hw, hd, hw, hd);
+    if (rails.includes("w")) rail(-hw, -hd, -hw, hd, [!north, !south]);
+    if (rails.includes("e")) rail(hw, -hd, hw, hd, [!north, !south]);
+    return geos;
+  };
+  // A flight of steps from (ax, ay, az) up to (bx, by, bz), `w` wide. An end on a deck's rail leaves out its posts,
+  // since the rail's own end posts stand there (`posts` [foot, head]).
+  const stairParts = (ax, ay, az, bx, by, bz, w = 1.6, posts = [true, true]) => {
+    const geos = [], rise = by - ay, steps = Math.max(3, Math.round(rise / 0.32)), len = Math.hypot(bx - ax, bz - az);
+    const ux = (bx - ax) / len, uz = (bz - az) / len, px = -uz, pz = ux;
+    for (const s of [-1, 1]) geos.push(beam(ax + px * s * w / 2, ay, az + pz * s * w / 2, bx + px * s * w / 2, by, bz + pz * s * w / 2, 0.22, TIMBER_DK));
+    for (let i = 0; i < steps; i++) {
+      const t = (i + 0.5) / steps, x = ax + (bx - ax) * t, z = az + (bz - az) * t, y = ay + rise * t;
+      geos.push(beam(x - px * w / 2, y + 0.06, z - pz * w / 2, x + px * w / 2, y + 0.06, z + pz * w / 2, 0.14, i % 2 ? TIMBER : TIMBER_LT));
+    }
+    // A handrail up each side on capped posts, and a middle rail.
+    for (const s of [-1, 1]) {
+      const sx = px * s * (w / 2 + 0.05), sz = pz * s * (w / 2 + 0.05), n = Math.max(2, Math.round(len / 1.6) + 1);
+      for (let i = 0; i < n; i++) {
+        if (i === 0 && !posts[0] || i === n - 1 && !posts[1]) continue;
+        const t = i / (n - 1), x = ax + (bx - ax) * t + sx, z = az + (bz - az) * t + sz, y = ay + rise * t;
+        geos.push(bevelBox({ w: 0.15, h: 1.02, d: 0.15, color: TIMBER_DK, bevel: 0.03, offset: { x, y: y + 0.5, z } }), bevelBox({ w: 0.22, h: 0.07, d: 0.22, color: TIMBER_LT, bevel: 0.02, offset: { x, y: y + 1.05, z } }));
+      }
+      geos.push(beam(ax + sx, ay + 1, az + sz, bx + sx, by + 1, bz + sz, 0.13, TIMBER_LT), beam(ax + sx, ay + 0.55, az + sz, bx + sx, by + 0.55, bz + sz, 0.08, TIMBER));
+    }
+    return geos;
+  };
+
+  // The concept's lanterns: a square lantern of warm glass in a black iron frame, iron posts at its corners and a
+  // cross of glazing bars on each face, a flat foot, a peaked cap and a ring to hang it by, `s` times the size of one
+  // 0.84 m tall with its foot at the origin. The glass is its own list, lit; `tint` colours it, and `grid` false
+  // leaves the faces clear for a sign.
+  const LANTERN_GLASS = "#ffc860";
+  const lanternParts = (s, x, y, z, frame, glass, tint = LANTERN_GLASS, grid = true) => {
+    const W = 0.34 * s, lo = 0.08 * s, hi = 0.52 * s, mid = y + (lo + hi) / 2, tall = hi - lo;
+    frame.push(box({ w: W + 0.08 * s, h: 0.07 * s, d: W + 0.08 * s, color: IRON_DK, offset: { x, y: y + 0.035 * s, z } }));
+    frame.push(moved(turnedY(lathe({ profile: [[0.3, 0.5], [0.3, 0.56], [0.14, 0.72], [0.05, 0.76], [0, 0.77]].map(([r, h]) => [r * s, h * s]), segments: 4, color: IRON_DK }), Math.PI / 4), x, y, z));
+    frame.push(moved(forwardLathe(torus(0.06 * s, 0.014 * s, IRON_DK, 0, 10, 5)), x, y + 0.84 * s, z));
+    for (const [cx, cz] of [[-1, -1], [1, -1], [1, 1], [-1, 1]]) frame.push(box({ w: 0.05 * s, h: tall + 0.03 * s, d: 0.05 * s, color: IRON_DK, offset: { x: x + cx * W / 2, y: mid, z: z + cz * W / 2 } }));
+    if (grid) for (const [nx, nz] of [[0, 1], [0, -1], [1, 0], [-1, 0]]) {
+      const fx = x + nx * (W / 2 + 0.006), fz = z + nz * (W / 2 + 0.006), thin = 0.012;
+      frame.push(box({ w: nz ? 0.03 * s : thin, h: tall, d: nx ? 0.03 * s : thin, color: IRON_DK, offset: { x: fx, y: mid, z: fz } }));
+      frame.push(box({ w: nz ? W : thin, h: 0.03 * s, d: nx ? W : thin, color: IRON_DK, offset: { x: fx, y: mid, z: fz } }));
+    }
+    glass.push(box({ w: W, h: tall, d: W, color: tint, emissive: 1, offset: { x, y: mid, z } }));
+  };
+  BL.models = { beam, forwardLathe, turn, shaded, torus, along, chain, railParts, columnParts, deckGrid, deckPosts, deckParts, stairParts, lanternParts, LANTERN_GLASS, geometry, pushVert, face, voxCoords, box, bevelBox, panel, lathe, glassVessel, attachGlassShell, tube, ring, polyline, merge, forward, moved, turnedX, turnedY, turnedZ, prism, cached, variants, noShadow, makeVox, voxelGeometry, voxelFaces, banana, bananaGeometry, bananaTileGeometry, bananaPileCoreGeometry, bananaPileRadiusScale, bananaPileHeightOffset, BANANA_AMMO_SCALE, BANANA_PILE_PROFILE, particleGeometry, spareMagazine, caveman, CLUB_PALETTE, GOLD_CLUB_PALETTE, labRoom, buildableGeos, crate, die, dieRotationFor, SWAG, TIER_COLORS };
 })();

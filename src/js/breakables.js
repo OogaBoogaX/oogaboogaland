@@ -89,10 +89,17 @@
       if (ctx.trackMirrorObject) ctx.trackMirrorObject(node, 2);
       rewardCount++;
     };
-    const hit = (source, contact, power = 1) => {
+    const hit = (source, contact, power = 1, showDamage = !!source && source === crew.player) => {
       const owner = contact && contact.owner, record = owner && owner.breakable;
       if (!record || record.broken || !owner.active || !owner.node.visible || !(power > 0)) return false;
       record.health = Math.max(0, record.health - power);
+      if (showDamage) {
+        const node = owner.node;
+        updateWorld(node, node.parent.world);
+        const bounds = BL.scene.boundsOf(node.geometry), w = node.world, low = bounds.min, high = bounds.max;
+        const top = w[13] + Math.max(w[1] * low[0], w[1] * high[0]) + Math.max(w[5] * low[1], w[5] * high[1]) + Math.max(w[9] * low[2], w[9] * high[2]);
+        fx.damageNumber(w[12], top + 0.15, w[14], power);
+      }
       fx.burst(contact.x, contact.y, contact.z, record.health ? 2 : 7, record.type.debris, record.health ? 0.8 : 1.5);
       if (record.health) return true;
       if (record.reveal) { record.reveal = 0; revealingCount--; }

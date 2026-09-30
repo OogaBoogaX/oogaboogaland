@@ -251,6 +251,15 @@ select {
   filter: drop-shadow(0 2px 0 rgba(0, 0, 0, 0.6));
 }
 
+.home-link {
+  color: inherit;
+  text-decoration: none;
+}
+
+body[data-active-scene="hub"] .home-link {
+  cursor: default;
+}
+
 .brand p {
   margin: 2px 0 0;
   color: var(--faint);
@@ -615,7 +624,8 @@ select {
 
 /* The games own the whole screen: the island's roster and banana sheet, pull tabs and all, and its
    chain height stay on the island and in the lab. The mine borrows the island's camera, so it
-   also hides the island's view-mode compass. */
+   also hides the island's view-mode compass; Ooga Arcade plays as the mine does, empty-handed, so it
+   hides the compass and the weapon slots too. */
 body[data-active-scene="race"] .sheet,
 body[data-active-scene="drop"] .sheet,
 body[data-active-scene="orbit"] .sheet,
@@ -624,7 +634,64 @@ body[data-active-scene="race"] .world-block,
 body[data-active-scene="drop"] .world-block,
 body[data-active-scene="orbit"] .world-block,
 body[data-active-scene="mine"] .world-block,
-body[data-active-scene="mine"] .mode-hud {
+body[data-active-scene="mine"] .mode-hud,
+body[data-active-scene="skee"] .sheet,
+body[data-active-scene="hoops"] .sheet,
+body[data-active-scene="shy"] .sheet,
+body[data-active-scene="claw"] .sheet,
+body[data-active-scene="hockey"] .sheet,
+body[data-active-scene="billiards"] .sheet,
+body[data-active-scene="darts"] .sheet,
+body[data-active-scene="pinball"] .sheet,
+body[data-active-scene="ride"] .sheet,
+body[data-active-scene="skee"] .world-block,
+body[data-active-scene="hoops"] .world-block,
+body[data-active-scene="shy"] .world-block,
+body[data-active-scene="claw"] .world-block,
+body[data-active-scene="hockey"] .world-block,
+body[data-active-scene="billiards"] .world-block,
+body[data-active-scene="darts"] .world-block,
+body[data-active-scene="pinball"] .world-block,
+body[data-active-scene="ride"] .world-block,
+body[data-active-scene="skee"] .mode-hud,
+body[data-active-scene="hoops"] .mode-hud,
+body[data-active-scene="shy"] .mode-hud,
+body[data-active-scene="claw"] .mode-hud,
+body[data-active-scene="hockey"] .mode-hud,
+body[data-active-scene="billiards"] .mode-hud,
+body[data-active-scene="darts"] .mode-hud,
+body[data-active-scene="pinball"] .mode-hud,
+body[data-active-scene="ride"] .mode-hud,
+body[data-active-scene="invaders"] .sheet,
+body[data-active-scene="snake"] .sheet,
+body[data-active-scene="pong"] .sheet,
+body[data-active-scene="stampede"] .sheet,
+body[data-active-scene="flap"] .sheet,
+body[data-active-scene="breaker"] .sheet,
+body[data-active-scene="dash"] .sheet,
+body[data-active-scene="stacker"] .sheet,
+body[data-active-scene="invaders"] .world-block,
+body[data-active-scene="snake"] .world-block,
+body[data-active-scene="pong"] .world-block,
+body[data-active-scene="stampede"] .world-block,
+body[data-active-scene="flap"] .world-block,
+body[data-active-scene="breaker"] .world-block,
+body[data-active-scene="dash"] .world-block,
+body[data-active-scene="stacker"] .world-block,
+body[data-active-scene="invaders"] .mode-hud,
+body[data-active-scene="snake"] .mode-hud,
+body[data-active-scene="pong"] .mode-hud,
+body[data-active-scene="stampede"] .mode-hud,
+body[data-active-scene="flap"] .mode-hud,
+body[data-active-scene="breaker"] .mode-hud,
+body[data-active-scene="dash"] .mode-hud,
+body[data-active-scene="stacker"] .mode-hud,
+body[data-active-scene="arcade"] .sheet,
+body[data-active-scene="arcade"] .world-block,
+body[data-active-scene="arcade"] .mode-hud,
+body[data-active-scene="arcade"] .primary-hud,
+body[data-active-scene="arcade"] .weapon-hud,
+body[data-active-scene="arcade"] .magazine-hud {
   display: none;
 }
 
@@ -1757,7 +1824,7 @@ body[data-active-scene="mine"] .mode-hud {
   width: 100%;
   height: 100%;
   background: #ffd84a;
-  transform: scaleY(0.25);
+  transform: scaleY(0.5);
   transform-origin: bottom;
 }
 
@@ -1779,6 +1846,18 @@ body[data-active-scene="mine"] .mode-hud {
   height: 100%;
   background: #ffd84a;
   transform-origin: bottom;
+}
+
+.jetpack-compact-fuel::after {
+  content: "";
+  position: absolute;
+  bottom: 20%;
+  left: 0;
+  right: 0;
+  height: 1px;
+  z-index: 1;
+  background: rgba(0, 0, 0, 0.65);
+  pointer-events: none;
 }
 
 .jetpack-compact-fuel[data-level="low"] .jetpack-compact-fuel-fill {
@@ -2026,6 +2105,7 @@ body[data-active-scene="mine"] .mode-hud {
 }
 
 .jetpack-fuel {
+  position: relative;
   height: 8px;
   overflow: hidden;
   border-radius: 2px;
@@ -2041,12 +2121,24 @@ body[data-active-scene="mine"] .mode-hud {
   transform-origin: left;
 }
 
+.jetpack-hud[data-equipped="true"] .jetpack-fuel-fill {
+  background: #ffd84a;
+}
+
 .jetpack-fuel[data-level="low"] .jetpack-fuel-fill {
   background: var(--danger);
 }
 
-.jetpack-hud[data-equipped="true"] .jetpack-fuel-fill {
-  background: #ffd84a;
+.jetpack-fuel::after {
+  content: "";
+  position: absolute;
+  left: 20%;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  z-index: 1;
+  background: rgba(0, 0, 0, 0.65);
+  pointer-events: none;
 }
 
 @media (max-width: 360px) {
@@ -2518,11 +2610,19 @@ body[data-active-scene="mine"] .mode-hud {
 .board-nav {
   display: grid;
   grid-template-columns: 36px 1fr 36px;
+  grid-template-areas: "prev center next";
   align-items: center;
   gap: 8px;
 }
 
+.board-nav > .board-page:first-child { grid-area: prev; }
+.board-nav > .board-center { grid-area: center; }
+.board-nav > .board-page:last-child { grid-area: next; }
+
 .board-page {
+  display: grid;
+  place-items: center;
+  padding: 0;
   height: 32px;
   border: 2px solid var(--wood-edge);
   border-radius: 6px;
@@ -2531,6 +2631,18 @@ body[data-active-scene="mine"] .mode-hud {
   font-size: 22px;
   line-height: 1;
   cursor: pointer;
+}
+
+.board-page svg {
+  display: block;
+  width: 1em;
+  height: 1em;
+  pointer-events: none;
+}
+
+.board-pause[aria-pressed="false"] .board-play,
+.board-pause[aria-pressed="true"] .board-pause-bars {
+  display: none;
 }
 
 /* A one-page board keeps the caption centred: the chevrons keep their columns, unseen. */
@@ -2545,6 +2657,141 @@ body[data-active-scene="mine"] .mode-hud {
   letter-spacing: 0.08em;
   text-transform: uppercase;
   overflow-wrap: anywhere;
+}
+
+.board-center {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 0;
+}
+
+.board-caption[hidden], .board-pause[hidden], .board-resize[hidden] {
+  display: none;
+}
+
+.board-pause {
+  width: 44px;
+}
+
+/* The Oogatron is a window over the island, without a modal backdrop or input barrier. */
+.board-modal.board-floating[open] {
+  position: fixed;
+  inset: auto;
+  margin: 0;
+  max-width: none;
+  max-height: none;
+  padding: calc(8px * var(--board-scale)) calc(10px * var(--board-scale));
+  background: repeating-linear-gradient(90deg, rgba(0, 0, 0, 0.05) 0 2px, transparent 2px 11px), repeating-linear-gradient(180deg, var(--plank) 0 34px, var(--wood-edge) 34px 36px, var(--wood) 36px 70px, var(--wood-edge) 70px 72px);
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto auto;
+  gap: calc(8px * var(--board-scale));
+  overflow: hidden;
+  pointer-events: auto;
+  z-index: 20;
+}
+
+.board-floating .panel-head {
+  display: grid;
+  grid-template-columns: calc(28px * var(--board-scale)) minmax(0, 1fr) calc(28px * var(--board-scale));
+  align-items: center;
+  cursor: move;
+  touch-action: none;
+  user-select: none;
+}
+
+.board-floating .panel-head h2 {
+  margin: 0;
+  font-size: calc(14px * var(--board-scale));
+  text-align: center;
+}
+
+.board-filter[hidden], .board-filter-menu[hidden] { display: none; }
+.board-filter svg { display: block; width: 1em; height: 1em; margin: auto; pointer-events: none; }
+.board-filter[data-active="true"] { color: var(--accent); border-color: var(--accent); }
+.board-filter-menu {
+  position: absolute;
+  inset: calc(44px * var(--board-scale)) calc(10px * var(--board-scale)) calc(10px * var(--board-scale));
+  z-index: 1;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  gap: calc(8px * var(--board-scale));
+  padding: calc(8px * var(--board-scale));
+  border: 2px solid var(--wood-edge);
+  border-radius: 6px;
+  background: var(--tablet);
+  font-size: calc(12px * var(--board-scale));
+}
+.board-filter-tabs { display: flex; gap: calc(6px * var(--board-scale)); }
+.board-filter-tabs button, .board-filter-done {
+  padding: calc(6px * var(--board-scale)) calc(10px * var(--board-scale));
+  border: 2px solid var(--wood-edge);
+  border-radius: 5px;
+  background: var(--wood-edge);
+  color: var(--paper);
+  font: inherit;
+  cursor: pointer;
+}
+.board-filter-tabs button { flex: 1; }
+.board-filter-tabs [aria-selected="true"] { border-color: var(--accent); color: var(--accent); }
+.board-filter-list { min-height: 0; overflow: auto; overscroll-behavior: contain; }
+.board-filter-list label { display: flex; align-items: center; gap: calc(8px * var(--board-scale)); padding: calc(5px * var(--board-scale)); overflow-wrap: anywhere; cursor: pointer; }
+.board-filter-list input { flex: none; width: calc(15px * var(--board-scale)); height: calc(15px * var(--board-scale)); margin: 0; accent-color: var(--accent); }
+
+.board-floating .modal-close {
+  margin: 0;
+  width: calc(28px * var(--board-scale));
+  height: calc(28px * var(--board-scale));
+  font-size: calc(18px * var(--board-scale));
+}
+
+.board-floating .board-screen {
+  height: 100%;
+  min-height: 0;
+  margin: 0;
+  object-fit: contain;
+}
+
+.board-floating .board-nav {
+  grid-template-columns: calc(36px * var(--board-scale)) minmax(0, 1fr) calc(36px * var(--board-scale));
+  gap: calc(8px * var(--board-scale));
+}
+
+.board-floating .board-page {
+  height: calc(32px * var(--board-scale));
+  font-size: calc(22px * var(--board-scale));
+}
+
+.board-floating .board-pause {
+  width: calc(44px * var(--board-scale));
+}
+
+.board-floating .board-dots {
+  margin: 0;
+  gap: calc(7px * var(--board-scale));
+}
+
+.board-floating .board-dot {
+  width: calc(12px * var(--board-scale));
+  height: calc(12px * var(--board-scale));
+}
+
+.board-floating .help[hidden] {
+  display: none;
+}
+
+.board-resize {
+  position: absolute;
+  right: 2px;
+  bottom: 2px;
+  width: calc(20px * var(--board-scale));
+  height: calc(20px * var(--board-scale));
+  padding: 0;
+  border: 0;
+  background: repeating-linear-gradient(135deg, transparent 0 4px, var(--paper) 4px 6px);
+  clip-path: polygon(100% 0, 100% 100%, 0 100%);
+  cursor: nwse-resize;
+  touch-action: none;
 }
 
 .board-dots {
@@ -6133,3 +6380,661 @@ body.mine-dragging #tooltip {
 #ooga-portal-menu ol button { width: 100%; min-height: 48px; text-align: left; white-space: normal; }
 #ooga-portal-menu ol button:disabled { opacity: 0.65; cursor: not-allowed; }
 #ooga-portal-menu button:focus-visible { outline: 3px solid #83e0ed; outline-offset: 2px; }
+
+/* Ooga Arcade's carnival games: the rally's HUD pieces, sized for a thumb and dressed from the jungle. A big score,
+   the power meter (a bamboo cane with a leaf-green window and a bone for its needle) over one wide action button
+   carved from a timber plank, pop callouts, an ON FIRE tiki torch, and results with stars. */
+.carnival-score b {
+  font-size: 34px;
+  color: var(--accent-text);
+  font-variant-numeric: tabular-nums;
+}
+
+/* The score box stacks the score and best over the goal bar; once the run passes its best, the Best burns gold. */
+#carnival .carnival-scores {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 4px;
+  min-width: 176px;
+}
+
+.carnival-scoreline {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+}
+
+.carnival-best b {
+  font-variant-numeric: tabular-nums;
+}
+
+.carnival-best[data-record="true"] span,
+.carnival-best[data-record="true"] b {
+  color: #ffd23a;
+  text-shadow: 0 0 8px rgba(255, 210, 58, 0.6);
+}
+
+/* The goal bar: a groove cut in the stone that fills with ember gold as the score climbs, and the three star
+   thresholds standing on it as pixel stars, dark until the score reaches each. */
+.carnival-goal {
+  position: relative;
+  height: 18px;
+  margin: 2px 9px 0 0;
+}
+
+.carnival-goal::before,
+.carnival-goal-fill {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 6px;
+  height: 6px;
+  border-radius: 3px;
+}
+
+.carnival-goal::before {
+  background: rgba(0, 0, 0, 0.45);
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.6), 0 1px 0 rgba(255, 255, 255, 0.06);
+}
+
+.carnival-goal-fill {
+  background: linear-gradient(90deg, #b8641f, #ff9a3c 55%, #ffd23a);
+  box-shadow: 0 0 8px rgba(255, 160, 60, 0.55);
+  transform: scaleX(0);
+  transform-origin: left center;
+}
+
+.carnival-goal-star {
+  position: absolute;
+  top: 0;
+  width: 18px;
+  height: 18px;
+  margin-left: -9px;
+  fill: #5a4a36;
+  filter: drop-shadow(1px 0 0 #1c150e) drop-shadow(-1px 0 0 #1c150e) drop-shadow(0 1px 0 #1c150e) drop-shadow(0 -1px 0 #1c150e);
+}
+
+/* The stars stand evenly along the bar (the scene's GOAL_AT), whatever the game's thresholds. */
+.carnival-goal-star:nth-of-type(1) {
+  left: 30%;
+}
+
+.carnival-goal-star:nth-of-type(2) {
+  left: 60%;
+}
+
+.carnival-goal-star:nth-of-type(3) {
+  left: 90%;
+}
+
+.carnival-goal-star[data-lit="true"] {
+  fill: #ffd23a;
+  filter: drop-shadow(1px 0 0 #5a2a08) drop-shadow(-1px 0 0 #5a2a08) drop-shadow(0 0 5px rgba(255, 210, 58, 0.95));
+}
+
+/* NEW BEST, the moment the run passes the best it started with: a ribbon that drops in under the score box, holds
+   and fades. */
+.carnival-record {
+  position: absolute;
+  left: 0;
+  top: calc(100% + 8px);
+  padding: 4px 12px;
+  border: 2px solid #ffd23a;
+  border-radius: 999px;
+  background: #e0452b;
+  color: #fff8e0;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  box-shadow: 0 0 16px rgba(255, 120, 40, 0.7);
+  pointer-events: none;
+}
+
+/* A big moment's warm flash, over the view and under the HUD. */
+.carnival-flash {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  background: radial-gradient(ellipse at 50% 45%, rgba(255, 244, 214, 0.5), rgba(255, 190, 110, 0.16) 45%, transparent 72%);
+  pointer-events: none;
+}
+
+/* The streak and its multiplier, a stone chip over the meter; the coaching line, a dark pill between the meter and
+   the button, one line sized for its longest words. */
+.carnival-combo,
+.carnival-coach {
+  position: absolute;
+  left: 0;
+  right: 0;
+  width: max-content;
+  margin: 0 auto;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.carnival-combo {
+  bottom: calc(172px + var(--safe-bottom));
+  padding: 4px 12px;
+  border: 2px solid var(--stone-dk);
+  border-radius: 9px 7px 10px 8px;
+  background: var(--tablet);
+  box-shadow: var(--tablet-shadow);
+  color: #ffd23a;
+  font-size: 14px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.carnival-coach {
+  bottom: calc(102px + var(--safe-bottom));
+  padding: 3px 12px;
+  border-radius: 999px;
+  background: rgba(20, 14, 8, 0.74);
+  color: var(--paper);
+  font-size: 12px;
+  line-height: 18px;
+  text-shadow: 0 1px 0 rgba(0, 0, 0, 0.6);
+}
+
+/* Pinball's multiplier stands nearly all game, so its chip hangs under the right-hand stats, off the flippers. */
+#carnival[data-kind="pinball"] .carnival-combo {
+  top: calc(124px + var(--safe-top));
+  right: calc(16px + var(--safe-right));
+  bottom: auto;
+  left: auto;
+  margin: 0;
+}
+
+/* Stone Stacker's own screen shows its combo, its x2 and its fire, so the chips would say each twice. */
+#carnival[data-kind="stacker"] .carnival-combo,
+#carnival[data-kind="stacker"] .carnival-streak {
+  display: none;
+}
+
+/* Under the results' and the pause's cards the play controls stand down. */
+#carnival[data-phase="results"] .carnival-act,
+#carnival[data-phase="pause"] .carnival-act,
+#carnival[data-phase="results"] .carnival-meter,
+#carnival[data-phase="pause"] .carnival-meter,
+#carnival[data-phase="results"] .carnival-combo,
+#carnival[data-phase="pause"] .carnival-combo,
+#carnival[data-phase="results"] .carnival-streak,
+#carnival[data-phase="pause"] .carnival-coach {
+  visibility: hidden;
+}
+
+/* The carnival games take the act button and the canvas; the walking sticks stay in the scenes that walk. */
+body[data-active-scene="skee"] .joysticks,
+body[data-active-scene="hoops"] .joysticks,
+body[data-active-scene="shy"] .joysticks,
+body[data-active-scene="claw"] .joysticks,
+body[data-active-scene="hockey"] .joysticks,
+body[data-active-scene="billiards"] .joysticks,
+body[data-active-scene="darts"] .joysticks,
+body[data-active-scene="pinball"] .joysticks,
+body[data-active-scene="ride"] .joysticks,
+body[data-active-scene="invaders"] .joysticks,
+body[data-active-scene="snake"] .joysticks,
+body[data-active-scene="pong"] .joysticks,
+body[data-active-scene="stampede"] .joysticks,
+body[data-active-scene="flap"] .joysticks,
+body[data-active-scene="breaker"] .joysticks,
+body[data-active-scene="dash"] .joysticks,
+body[data-active-scene="stacker"] .joysticks {
+  display: none;
+}
+
+/* A tiki torch: the badge burns hottest at its foot, a flame licks up from its top and it stands on a bamboo pole. */
+.carnival-streak {
+  position: absolute;
+  left: 50%;
+  top: calc(128px + var(--safe-top));
+  transform: translateX(-50%);
+  padding: 6px 16px;
+  border: 2px solid #ffd23a;
+  border-radius: 22px 22px 10px 10px;
+  background: radial-gradient(ellipse 75% 130% at 50% 120%, #fff3a0, #ffd23a 32%, #ff9a3c 60%, #e0452b 92%);
+  color: #3a1206;
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  text-shadow: 0 0 6px rgba(255, 243, 160, 0.9);
+  box-shadow: 0 0 18px rgba(255, 120, 40, 0.8);
+  pointer-events: none;
+  animation: carnival-pulse 0.6s ease-in-out infinite alternate;
+}
+
+.carnival-streak::before {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: -13px;
+  width: 16px;
+  height: 16px;
+  margin-left: -8px;
+  border-radius: 50% 0 50% 50%;
+  background: radial-gradient(circle at 38% 62%, #fff3a0 0 22%, #ffb13a 52%, #e0452b 88%);
+  box-shadow: 0 0 10px rgba(255, 140, 40, 0.9);
+  transform: rotate(-45deg);
+  z-index: -1;
+}
+
+.carnival-streak::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  bottom: -16px;
+  width: 12px;
+  height: 14px;
+  margin-left: -6px;
+  border: 2px solid var(--wood-edge);
+  border-top: 0;
+  border-radius: 0 0 3px 3px;
+  background: repeating-linear-gradient(180deg, transparent 0 4px, rgba(74, 51, 25, 0.75) 4px 6px), linear-gradient(90deg, #6f6a24, #d8c46a 45%, #8a7f30);
+}
+
+@keyframes carnival-pulse {
+  to { transform: translateX(-50%) scale(1.08); box-shadow: 0 0 30px rgba(255, 160, 40, 1); }
+}
+
+/* A callout sizes to its words but never past the screen: a long one breaks at a space into two even lines. */
+.carnival-pop {
+  top: 40%;
+  width: max-content;
+  max-width: calc(100vw - 32px);
+  font-size: 38px;
+  line-height: 1.1;
+  text-align: center;
+  text-wrap: balance;
+  color: #fff3c8;
+  text-shadow: 0 4px 0 rgba(0, 0, 0, 0.6), 0 0 22px rgba(255, 95, 162, 0.7);
+}
+
+.carnival-pop[data-big="true"] {
+  font-size: 60px;
+  color: #ffd23a;
+  text-shadow: 0 5px 0 rgba(0, 0, 0, 0.6), 0 0 32px rgba(255, 210, 58, 0.9);
+}
+
+/* Ptero Flap's flight fills its whole screen, so in play its callouts stay off the glass: above it on a wide view
+   (the glass spans 19% to 81% of the height), below it on a tall one, where scene-carnival.js's `retroView` fits the
+   4:3 glass to 92% of the width and lifts it 7%, so its foot sits at 43% of the height plus 34.5% of the width. */
+#carnival[data-kind="flap"][data-phase="play"] .carnival-pop {
+  top: 10%;
+}
+
+@media (max-aspect-ratio: 1/1) {
+  #carnival[data-kind="flap"][data-phase="play"] .carnival-pop {
+    top: calc(43% + 34.5vw + 30px);
+  }
+}
+
+/* The power meter is a dried bamboo cane: dark gold-brown, so the fresh leaf is the only bright green on it, with a
+   node band every fifth of its length and rope wrapped round both ends, drawn in its own background layers so the
+   window and the bone always sit on top. */
+.carnival-meter {
+  position: absolute;
+  left: 50%;
+  bottom: calc(134px + var(--safe-bottom));
+  transform: translateX(-50%);
+  width: min(460px, calc(100vw - 48px));
+  height: 26px;
+  border: 3px solid var(--wood-edge);
+  border-radius: 999px;
+  background:
+    repeating-linear-gradient(115deg, var(--wood-edge) 0 2px, var(--wood) 2px 4px, var(--plank) 4px 5px) left / 16px 100% no-repeat,
+    repeating-linear-gradient(115deg, var(--wood-edge) 0 2px, var(--wood) 2px 4px, var(--plank) 4px 5px) right / 16px 100% no-repeat,
+    repeating-linear-gradient(90deg, transparent 0 calc(20% - 4px), rgba(58, 52, 16, 0.85) calc(20% - 4px) calc(20% - 2px), rgba(255, 240, 170, 0.5) calc(20% - 2px) 20%),
+    linear-gradient(180deg, rgba(255, 250, 210, 0) 8%, rgba(255, 250, 210, 0.1) 26%, rgba(255, 250, 210, 0) 46%),
+    linear-gradient(180deg, #8f7c3a, #6b5c26 42%, #4a3f18 78%, #2f2810);
+  box-shadow: 0 4px 0 rgba(0, 0, 0, 0.4), inset 0 -3px 4px rgba(0, 0, 0, 0.35);
+  overflow: hidden;
+  pointer-events: none;
+}
+
+/* The green window is a fresh leaf, cut to a blade with its pale midrib along the middle and a hard dark edge. */
+.carnival-window {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  border-radius: 9px 2px;
+  background: linear-gradient(180deg, transparent calc(50% - 1px), rgba(236, 255, 196, 0.85) calc(50% - 1px) calc(50% + 1px), transparent calc(50% + 1px)), linear-gradient(180deg, #b8ff7e, #5fd83e 55%, #2f9e2c);
+  box-shadow: 0 0 0 2px #10300a, 0 0 14px rgba(140, 255, 90, 0.9);
+}
+
+.carnival-needle {
+  position: absolute;
+  inset: 0;
+}
+
+/* The needle is a bone: a cream shaft with two round knobs at each end, outlined dark so it reads over the cane. */
+.carnival-needle::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -6px;
+  width: 12px;
+  background:
+    radial-gradient(circle at 3px 3.5px, #fff8e6 3px, transparent 3.5px),
+    radial-gradient(circle at 9px 3.5px, #fff8e6 3px, transparent 3.5px),
+    radial-gradient(circle at 3px calc(100% - 3.5px), #fff8e6 3px, transparent 3.5px),
+    radial-gradient(circle at 9px calc(100% - 3.5px), #fff8e6 3px, transparent 3.5px),
+    linear-gradient(90deg, transparent 3.5px, #f3e8cc 3.5px 8.5px, transparent 8.5px);
+  filter: drop-shadow(1px 0 0 #2a1a0c) drop-shadow(-1px 0 0 #2a1a0c) drop-shadow(0 0 4px rgba(255, 210, 58, 0.7));
+}
+
+/* The action button is a plank carved from warm timber: grain, a dark edge, the word cut in, and a leaf on its corner. */
+.carnival-act {
+  position: absolute;
+  left: 50%;
+  bottom: calc(28px + var(--safe-bottom));
+  transform: translateX(-50%);
+  min-width: 220px;
+  height: 68px;
+  padding: 0 34px;
+  border: 3px solid var(--wood-edge);
+  border-radius: 16px 12px 18px 13px;
+  background:
+    repeating-linear-gradient(177deg, rgba(92, 52, 18, 0.16) 0 1px, transparent 1px 7px),
+    repeating-linear-gradient(183deg, rgba(255, 234, 190, 0.12) 0 1px, transparent 1px 11px),
+    linear-gradient(180deg, #ecb870, #d39650 48%, #b47a3c);
+  color: var(--ink);
+  font-size: 26px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  text-shadow: 0 1px 0 rgba(255, 236, 196, 0.6);
+  box-shadow: 0 6px 0 var(--wood-dk), inset 0 2px 0 rgba(255, 240, 205, 0.55), inset 0 -3px 0 rgba(74, 51, 25, 0.4), 0 10px 24px rgba(0, 0, 0, 0.45), 0 0 22px rgba(255, 190, 90, 0.35);
+  touch-action: manipulation;
+}
+
+.carnival-act::before {
+  content: "";
+  position: absolute;
+  left: 14px;
+  top: -9px;
+  width: 26px;
+  height: 13px;
+  border-radius: 0 100% 0 100%;
+  background: linear-gradient(to top right, transparent calc(50% - 0.75px), rgba(230, 255, 190, 0.75) calc(50% - 0.75px) calc(50% + 0.75px), transparent calc(50% + 0.75px)), linear-gradient(135deg, #9fe060, #4ea23a 60%, #2f7a2c);
+  box-shadow: inset 0 0 0 1px rgba(20, 60, 12, 0.5);
+  transform: rotate(-18deg);
+  pointer-events: none;
+}
+
+.carnival-act:active:not(:disabled) {
+  transform: translateX(-50%) translateY(4px);
+  box-shadow: 0 2px 0 var(--wood-dk), inset 0 2px 0 rgba(255, 240, 205, 0.55), inset 0 -3px 0 rgba(74, 51, 25, 0.4), 0 6px 14px rgba(0, 0, 0, 0.45);
+}
+
+.carnival-act:disabled {
+  opacity: 0.55;
+  filter: saturate(0.6);
+}
+
+.carnival-results {
+  text-align: center;
+}
+
+.carnival-stars {
+  display: flex;
+  justify-content: center;
+  gap: 14px;
+  margin: 10px 0 2px;
+}
+
+/* Each star with the score it takes printed under it. */
+.carnival-star-slot {
+  display: grid;
+  justify-items: center;
+  gap: 2px;
+}
+
+.carnival-star-need {
+  color: rgba(243, 239, 228, 0.78);
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  font-variant-numeric: tabular-nums;
+  text-shadow: 0 1px 0 rgba(0, 0, 0, 0.5);
+}
+
+/* The game's breakdown of the run under the total, when it gives one: prose, so it may wrap. */
+.carnival-note {
+  margin: 6px 0 0;
+  color: var(--paper);
+  font-size: 12px;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+  text-shadow: 0 1px 0 rgba(0, 0, 0, 0.5);
+}
+
+/* How to play, on the pause card. */
+.carnival-help {
+  margin: 10px 0 0;
+  padding: 8px 12px;
+  background: var(--tablet);
+  border: 2px solid var(--stone-dk);
+  border-radius: 9px 7px 10px 8px;
+  color: var(--paper);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.carnival-star {
+  width: 44px;
+  height: 44px;
+  fill: rgba(0, 0, 0, 0.35);
+}
+
+.carnival-star[data-lit="true"] {
+  fill: #ffd23a;
+  filter: drop-shadow(0 0 8px rgba(255, 210, 58, 0.9));
+}
+
+/* What the watching Oogas think of the run: one line under the stars, sized for its longest words ("Ooga try
+   again.") so it never wraps on a phone. */
+.carnival-says {
+  margin: 4px 0 0;
+  font-size: 18px;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  white-space: nowrap;
+  color: var(--paper);
+  text-shadow: 0 2px 0 rgba(0, 0, 0, 0.55), 0 0 12px rgba(255, 190, 90, 0.35);
+}
+
+.carnival-final {
+  margin: 4px 0 0;
+}
+
+.carnival-final b {
+  display: block;
+  font-size: 58px;
+  line-height: 1.05;
+  color: var(--accent-text);
+  font-variant-numeric: tabular-nums;
+}
+
+.carnival-newbest {
+  display: inline-block;
+  margin-top: 4px;
+  padding: 3px 12px;
+  border-radius: 999px;
+  background: #e0452b;
+  color: #fff8e0;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  animation: carnival-pulse-badge 0.7s ease-in-out infinite alternate;
+}
+
+@keyframes carnival-pulse-badge {
+  to { transform: scale(1.1); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .carnival-streak,
+  .carnival-newbest {
+    animation: none;
+  }
+}
+
+.carnival-rows li {
+  grid-template-columns: 1fr auto;
+  text-align: left;
+}
+
+.carnival-rows li::before {
+  content: none;
+}
+
+/* The carnival title cards' rule tiles are tanned hide, not slate: dark leather stitched round its edge, the small
+   print in bone. */
+#carnival .game-rules li {
+  background: linear-gradient(160deg, #603e24, #4a2f1a 55%, #37220f);
+  border-color: #24160a;
+  outline: 1px dashed rgba(239, 230, 210, 0.24);
+  outline-offset: -5px;
+}
+
+#carnival .game-rules small {
+  color: rgba(239, 230, 210, 0.76);
+}
+
+/* On a phone the right-hand stats stack, so a long label such as Coconuts never pushes them into the score or
+   reflows as the numbers change, the score steps down so a pinball's five or six digits still clear them (and again
+   at seven, with its best shortened), the torch
+   burns below both boards, and the callouts shrink so most fit one line. */
+@media (max-width: 720px) {
+  #carnival .race-hud-right {
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 4px;
+    max-width: none;
+  }
+
+  #carnival .carnival-score b {
+    font-size: 28px;
+  }
+
+  #carnival .carnival-score b[data-long="true"] {
+    font-size: 23px;
+  }
+
+  #carnival .carnival-scores {
+    min-width: 140px;
+  }
+
+  .carnival-record {
+    top: calc(100% + 6px);
+    padding: 3px 10px;
+    font-size: 11px;
+  }
+
+  .carnival-combo {
+    font-size: 12px;
+  }
+
+  #carnival[data-kind="pinball"] .carnival-combo {
+    top: calc(172px + var(--safe-top));
+    right: calc(10px + var(--safe-right));
+  }
+
+  .carnival-streak {
+    top: calc(174px + var(--safe-top));
+  }
+
+  .carnival-pop {
+    font-size: 24px;
+    letter-spacing: 0.04em;
+  }
+
+  .carnival-pop[data-big="true"] {
+    font-size: 40px;
+  }
+}
+
+/* The arcade's prize counter: the ticket balance and a grid of prizes, each with its price and a redeem button. */
+.prize-panel {
+  width: min(520px, calc(100vw - 32px));
+  text-align: center;
+}
+
+.prize-balance {
+  margin: 6px 0 10px;
+  font-size: 14px;
+}
+
+.prize-balance b {
+  font-size: 22px;
+  color: var(--accent-text);
+}
+
+.prize-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.prize {
+  display: grid;
+  justify-items: center;
+  gap: 3px;
+  padding: 10px 6px 8px;
+  border: 2px solid var(--stone-dk);
+  border-radius: 9px 7px 10px 8px;
+  background: var(--tablet);
+  box-shadow: var(--tablet-shadow);
+}
+
+.prize[data-owned="true"] {
+  border-color: #ffd23a;
+  box-shadow: 0 0 14px rgba(255, 210, 58, 0.55);
+}
+
+.prize-icon {
+  width: 40px;
+  height: 40px;
+}
+
+.prize b {
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.prize small {
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.prize-buy {
+  width: 100%;
+  margin-top: 4px;
+  font-size: 12px;
+}
+
+.prize-buy:disabled {
+  opacity: 0.5;
+}
+
+@media (max-width: 480px) {
+  .prize-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  /* Two columns reach down over the act button, idle while the counter is up, so it steps aside for Ooga done. */
+  body:has(#prize-panel:not([hidden])) #act {
+    visibility: hidden;
+  }
+}

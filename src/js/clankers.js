@@ -36,11 +36,17 @@
   // Stand as soon as the coat clears the plane, then walk to the room's route start.
   const LAB_ENTRY_GOAL = -1;
   const LAB_ROUTE_START = -2.5;
+  const LAB_TURN_SPEED = 6;
   const create = (ctx) => {
     const { crew, sites, groundAt, clear } = ctx;
     const footprint = BL.agent.footprint, torso = BL.agent.torso;
     const pointSupportAt = ctx.pointSupportAt || groundAt;
     const climbSolidAt = ctx.climbSolidAt || ctx.solidAt, climbSurfaceAt = ctx.climbSurfaceAt || ctx.surfaceAt;
+    const wallPanels = climbSolidAt ? BL.wallPanels.create(climbSolidAt) : null;
+    const PANEL = { x: 0, y: 0, z: 0, heading: 0, nx: 0, nz: 1 };
+    const RAMP = { groundX: 0, groundZ: 0, uneven: 0 };
+    const walkingRampAt = (x, y, z, heading) => !!(ctx.surfaceAt
+      && BL.wallPanels.rampAt(ctx.surfaceAt, x, y, z, heading, RAMP));
     const list = [], byOwner = new Map(), portals = new Array(sites.length).fill(null);
     // Stations are authored once in world space: { x, y, z, heading, kind,
     // side, enabled? }. labInside owns the entrance plane, independently of assignment.
@@ -48,11 +54,13 @@
     const coatClip = labSite >= 0 ? BL.agent.labCoatClip(sites[labSite].mouth) : null;
     const labNodes = new Float64Array(16 * 3), labHeadings = new Float64Array(16), labCosts = new Float64Array(16), labTimes = new Float64Array(16), labWaits = new Float64Array(16), labFixed = new Uint8Array(16), labPrevious = new Int8Array(16), labQueue = new Uint8Array(16);
     const labEdges = new Uint8Array(16 * 16 * 2), labEdgeWaits = new Float64Array(16 * 16 * 2), labEdgeTimes = new Float64Array(16 * 16 * 2);
+    const labPenalties = new Float64Array(16 * 16);
+    const labStationOrder = new Uint16Array(labStations.length);
     const labGeometry = new Uint8Array(128);
     const labFuturePoint = { x: 0, y: 0, z: 0, heading: 0 };
-    let labPassAt = 0, labRouteBudget = 1, labRouteTurn = -1, labRouteNext = 0, labWaitSerial = 0;
+    let labPassAt = 0, labRouteBudget = 1, labRouteTurn = -1, labRouteNext = 0;
     let labEscape = null;
-    const roamRadius = ctx.roamRadius || 28, ringRadius = Math.min(roamRadius - 6, (ctx.meadowRadius || 22) - 6);
+    const roamRadius = ctx.roamRadius || 28;
     const POINT = { x: 0, y: 0, z: 0, heading: 0 };
     const loungeSpots = new Float64Array(320 * 3);
     let loungeCount = 0, roofCount = 0, loungeReady = false;
@@ -75,19 +83,26 @@
     const WALL_POINT = { x: 0, y: 0, z: 0, heading: 0, radius: 0 };
     const WALL_RECTANGLE = { halfForward: 0, halfSide: 0, centerForward: 0 };
     const alive = (cave) => cave.state === "working" || cave.state === "chilling";
+    const enteringCave = e => !e.controlled && e.mode === "working" && e.phase === "travel"
+      && (e.route === "apron" || e.route === "enter");
+    const labWorker = e => !e.controlled && e.mode === "working"
+      && (e.route === "exit" && e.fromSite === labSite || e.site === labSite && (e.motion.lab || e.planningLab));
+    const labSpeed = e => e.lab.yielding ? 0.65 : e.route === "exit" ? SPEED : 1.1;
+    const enteringAisle = (e) => e.phase === "travel" && e.route === "enter"
+      && (e.site === labSite ? !e.entryTurn || e.entryTurn === 1 : !e.entryTurn);
     const releasePortal = (e) => {
       if (e.portal >= 0 && portals[e.portal] === e) portals[e.portal] = null;
       e.portal = -1;
     };
     const claimPortal = (e, site) => {
       if (portals[site] === e) {
-        if (e.route !== "exit" && !e.jump.active && caveAt(e.root.position.x, e.root.position.y, e.root.position.z) !== site
+        if (e.route !== "exit" && e.route !== "enter" && !e.jump.active && caveAt(e.root.position.x, e.root.position.y, e.root.position.z) !== site
           && elapsed - e.portalSince > 18) {
           releasePortal(e); e.portalRetry = elapsed + 2; e.portalWait = false;
         } else return true;
       }
       const holder = portals[site];
-      if (holder && e.route === "exit" && holder.route !== "exit" && !holder.jump.active
+      if (holder && e.route === "exit" && holder.route !== "exit" && holder.route !== "enter" && !holder.jump.active
         && caveAt(holder.root.position.x, holder.root.position.y, holder.root.position.z) !== site) {
         releasePortal(holder); holder.route = "apron"; holder.portalWait = false;
       }
@@ -106,17 +121,6 @@
         if (distance < nearest) { next = other; nearest = distance; }
       }
       if (next && next !== e) return false;
-      if (!next) {
-        let hits = Infinity;
-        for (let i = 0; i < list.length; i++) {
-          const other = list[i];
-          if (!other.active || other.site !== site || !other.hasSlot || other.portalRetry > elapsed
-            || other.route !== "apron" && other.route !== "enter") continue;
-          const p = other.root.position, distance = (p.x - mouth.x) ** 2 + (p.z - mouth.z) ** 2;
-          if (other.hits < hits || other.hits === hits && distance < nearest) { next = other; hits = other.hits; nearest = distance; }
-        }
-        if (next !== e) return false;
-      }
       portals[site] = e; e.portal = site; e.portalSince = elapsed;
       return true;
     };
@@ -144,7 +148,28 @@
       return -1;
     };
     const chillZones = ctx.chillZones || [];
+    const loungeAreas = ctx.loungeAreas || [];
+    const nearInactiveCave = (x, z) => {
+      if (!loungeAreas.length) return true;
+      for (let i = 0; i < loungeAreas.length; i++) {
+        const area = loungeAreas[i];
+        if ((x - area.x) ** 2 + (z - area.z) ** 2 < area.radius ** 2) return true;
+      }
+      return false;
+    };
+    const descentWalls = ctx.descentWalls || [];
     const autonomousChill = (e) => e.mode === "chilling" && e.phase === "chill" && !e.controlled && !e.debugMove.active;
+    const descentWallAt = (e, x, y, z) => {
+      const c = e.climb;
+      if (e.controlled || e.debugMove.active || c.debugTraverse || !c.active || !c.descending) return null;
+      for (let i = 0; i < descentWalls.length; i++) {
+        const wall = descentWalls[i], dx = x - wall.x, dz = z - wall.z;
+        const across = dx * wall.cr - dz * wall.sr, along = dx * wall.sr + dz * wall.cr;
+        if (Math.abs(across) <= wall.half && along >= -2.5 && along <= 2.5
+          && y > wall.floor + 0.6 && Math.sin(c.heading) * wall.sr + Math.cos(c.heading) * wall.cr < -0.5) return wall;
+      }
+      return null;
+    };
     const chillCaveClear = (x, y, z, nx = x, ny = y, nz = z, escaping = false) => {
       for (let i = 0; i < chillZones.length; i++) {
         const zone = chillZones[i];
@@ -179,7 +204,7 @@
       return index;
     };
     const unusedRoof = (x, y, z, foot) => {
-      const roofs = ctx.climbRoofs || ctx.loungeRoofs;
+      const roofs = ctx.loungeRoofs || ctx.climbRoofs;
       if (!roofs || !ctx.surfaceAt || Math.abs(ctx.surfaceAt(x, z) - y) > 0.05) return false;
       let patch = false;
       for (let i = 0; i < roofs.length; i++) {
@@ -187,7 +212,7 @@
         if (y >= roof.y - 0.55 && (roof.x - x) ** 2 + (roof.z - z) ** 2 < 4.5 ** 2) { patch = true; break; }
       }
       if (!patch) return false;
-      // Unused cave tops contain exposed stone as well as grass. All four
+      // Eligible cave and HQ tops contain exposed stone as well as grass. All four
       // sides still need a nearby supporting top; the full rig clearance
       // rejects higher rock before a resting place is accepted.
       for (let side = 0; side < 4; side++) {
@@ -199,6 +224,9 @@
     };
     const grass = (x, y, z, foot = FOOT) => Number.isFinite(y) && Math.hypot(x, z) < roamRadius
       && chillCaveClear(x, y, z)
+      && (nearInactiveCave(x, z) || unusedRoof(x, y, z, foot))
+      // Grass on an active cave is still a climbable surface, but never a resting destination.
+      && (roofAt(x, y, z) < 0 || unusedRoof(x, y, z, foot))
       && (!ctx.restSurfaceClear || ctx.restSurfaceClear(x, y, z, foot))
       && (!ctx.onLand || ctx.onLand(x, z)) && (!ctx.isGrass || ctx.isGrass(x, z, y)
         && ctx.isGrass(x - foot, z, y) && ctx.isGrass(x + foot, z, y)
@@ -208,8 +236,11 @@
       // Underground platforms can extend beyond the top island footprint.
       // A real floor beneath the centre also admits their inward handoff.
       && (landing(x, y, z) || Number.isFinite(y) && Math.abs(pointSupportAt(x, z, y + 0.02) - y) < 0.05);
+    // A cave departure can fly over the reserved apron. Its destination is
+    // outside that zone, and scenery/peer clearance still certifies the arc.
     const staticClear = (e, x, y, z, nx = x, ny = y, nz = z, fromHeading = e.heading, toHeading = fromHeading) =>
-      (!autonomousChill(e) || chillCaveClear(x, y, z, nx, ny, nz, true))
+      (!autonomousChill(e) || e.climb.departurePlanning || e.jump.active && e.jump.caveExit
+        || chillCaveClear(x, y, z, nx, ny, nz, true))
       && clear(x, y, z, nx, ny, nz, e.radius, e.height, e, null, fromHeading, toHeading);
     // Retained routes double as short-lived space/time reservations. Predict
     // from the actual position, so a late worker never leaves a phantom path
@@ -221,7 +252,7 @@
         || !job.pathCount || job.arrived && !job.yielding) return out;
       const settling = e.gorilla.labItem ? !e.gorilla.labCompact : !e.gorilla.labWalkCompact;
       seconds -= Math.max(settling ? 0.15 : 0, job.readyAt - elapsed);
-      const speed = job.yielding ? 0.65 : 1.1;
+      const speed = labSpeed(e);
       for (let i = job.pathIndex; seconds > 0 && i < job.pathCount; i++) {
         if (i > job.pathIndex) seconds -= job.pathWaits[i];
         if (seconds <= 0) break;
@@ -229,8 +260,8 @@
         const fixed = Number.isFinite(job.pathFacings[i]);
         const final = !fixed && i + 1 === job.pathCount && !job.pathPartial && !job.yielding && e.route !== "exit";
         const facing = fixed ? job.pathFacings[i] : final && distance <= 0.8 ? job.targetHeading : Math.atan2(dx, dz);
-        const turn = Math.atan2(Math.sin(facing - out.heading), Math.cos(facing - out.heading)), duration = Math.abs(turn) / 3;
-        if (seconds < duration) { out.heading += Math.sign(turn) * seconds * 3; break; }
+        const turn = Math.atan2(Math.sin(facing - out.heading), Math.cos(facing - out.heading)), duration = Math.abs(turn) / LAB_TURN_SPEED;
+        if (seconds < duration) { out.heading += Math.sign(turn) * seconds * LAB_TURN_SPEED; break; }
         seconds -= duration; out.heading = facing;
         const approach = final ? Math.min(distance, 0.8) : 0, travel = distance - approach;
         let step = Math.min(travel, seconds * speed);
@@ -239,8 +270,8 @@
         if (step < travel || seconds <= 0) break;
         if (final) {
           const turn = Math.atan2(Math.sin(job.targetHeading - facing), Math.cos(job.targetHeading - facing));
-          const duration = Math.abs(turn) / 3;
-          if (seconds < duration) { out.heading += Math.sign(turn) * seconds * 3; break; }
+          const duration = Math.abs(turn) / LAB_TURN_SPEED;
+          if (seconds < duration) { out.heading += Math.sign(turn) * seconds * LAB_TURN_SPEED; break; }
           seconds -= duration; out.heading = job.targetHeading;
           step = Math.min(approach, seconds * speed);
           if (distance > 0) { out.x += dx / distance * step; out.z += dz / distance * step; }
@@ -250,34 +281,34 @@
         out.x = job.path[at]; out.y = job.path[at + 1]; out.z = job.path[at + 2];
         if (fixed && i + 1 === job.pathCount && !job.pathPartial && !job.yielding && e.route !== "exit") {
           const turn = Math.atan2(Math.sin(job.targetHeading - out.heading), Math.cos(job.targetHeading - out.heading));
-          const duration = Math.abs(turn) / 3;
-          if (seconds < duration) { out.heading += Math.sign(turn) * seconds * 3; break; }
+          const duration = Math.abs(turn) / LAB_TURN_SPEED;
+          if (seconds < duration) { out.heading += Math.sign(turn) * seconds * LAB_TURN_SPEED; break; }
           seconds -= duration; out.heading = job.targetHeading;
         }
       }
       return out;
     };
-    // On the surface only the centres reserve space. Overlapping limbs and
-    // shoulders cannot stop a gorilla from using a clear path.
+    // Surface NPCs reserve their trunks against peers, leaving arms and
+    // shoulders free to overlap. Player movement keeps centre clearance.
     const occupied = (e, x, y, z, destinations = true, heading = e.heading) => {
+      // Workers pass companions through the entrance and shared lab aisles.
+      // Equipment claims keep their work positions distinct; scenery stays solid.
+      if (enteringCave(e) || labWorker(e)) return false;
       const start = e.root.position;
       if (!e.motion.lab && !e.planningLabTraffic && !e.climb.active) {
         for (let i = 0; i < list.length; i++) {
           const other = list[i];
           if (other === e || !other.active) continue;
           const p = other.root.position, dx = x - p.x, dz = z - p.z;
+          if (!e.controlled) {
+            const shape = torso || footprint;
+            if (shape.overlaps(e, x, y, z, heading, other, p.x, p.y, p.z, other.heading, SPACE)
+              && !shape.separates(e, start.x, start.y, start.z, e.heading, x, y, z, heading,
+                other, p.x, p.y, p.z, other.heading, SPACE)) return true;
+            continue;
+          }
           const distance2 = dx * dx + dz * dz;
           if (Math.abs(y - p.y) < 1.2 && distance2 < 0.04
-            && distance2 < (start.x - p.x) ** 2 + (start.z - p.z) ** 2 - 1e-6) return true;
-        }
-        for (let i = 0; i < crew.list.length; i++) {
-          const other = crew.list[i];
-          if (!other.root.visible || other.state === "away" || other.state === "sleeping"
-            || other.clankerRide?.entry === e) continue;
-          const p = other.root.position, feet = p.y - other.baseY, centerY = y + 0.65;
-          const dx = x - p.x, dz = z - p.z, distance2 = dx * dx + dz * dz;
-          if (centerY > feet && centerY < feet + (other.bodyHeight || other.traits.height)
-            && distance2 < 0.04
             && distance2 < (start.x - p.x) ** 2 + (start.z - p.z) ** 2 - 1e-6) return true;
         }
         return false;
@@ -312,14 +343,6 @@
             && (x - nearX) ** 2 + (z - nearZ) ** 2 < radius * radius) return true;
         }
       }
-      for (let i = 0; i < crew.list.length; i++) {
-        const other = crew.list[i];
-        if (!other.root.visible || other.state === "away" || other.state === "sleeping" || other.clankerRide?.entry === e) continue;
-        const p = other.root.position, feet = p.y - other.baseY;
-        if (footprint.circleOverlaps(e, x, y, z, heading, p.x, feet, p.z, 0.38, other.bodyHeight || other.traits.height, SPACE)
-          && !footprint.circleSeparates(e, start.x, start.y, start.z, e.heading, x, y, z, heading,
-            p.x, feet, p.z, 0.38, other.bodyHeight || other.traits.height, SPACE)) return true;
-      }
       return false;
     };
     const expandGesture = (e, radius) => {
@@ -335,6 +358,8 @@
       for (let i = 0; i < list.length; i++) {
         const other = list[i];
         if (other === e || !other.active || !other.hasSlot || other.site !== e.site) continue;
+        // Interior staging is not a claim on nearby keyboards or benches.
+        if (e.site === labSite && other.lab.station < 0) continue;
         const station = other.site === labSite && labStations[other.lab.station];
         const compact = other.compact, mode = other.footprintMode, work = other.planningLabWork;
         if (station) { other.compact = other.planningLab = true; other.footprintMode = "lab"; other.planningLabWork = station.kind; }
@@ -365,7 +390,7 @@
       if (e.lab.item >= 0 && ctx.labReturn) ctx.labReturn(e);
       e.lab.item = e.lab.pickup = -1; e.lab.stage = ""; e.lab.station = -1; e.lab.time = e.lab.reach = 0; e.lab.arrived = false;
       e.lab.yielding = 0; e.lab.yieldFor = null; e.lab.yieldReady = false; e.lab.pathPending = e.lab.pathPartial = false; e.lab.squeezeUntil = 0;
-      e.lab.waitOrder = e.lab.coordinationUntil = e.lab.trafficWait = 0;
+      e.lab.coordinationUntil = e.lab.trafficWait = 0;
       e.lab.pathCount = e.lab.pathIndex = 0; e.motion.labWork = ""; e.motion.labReach = 0; e.motion.labSqueeze = false;
       e.motion.labDie = false; e.motion.labRoll = 0;
       e.motion.labBench = null;
@@ -425,17 +450,17 @@
         const turns = Math.ceil(Math.abs(turn) / 0.2);
         for (let n = 1; n <= turns; n++) {
           const angle = facing + turn * n / turns;
-          e.labPlanTime = time + Math.abs(turn) * n / turns / 3;
+          e.labPlanTime = time + Math.abs(turn) * n / turns / LAB_TURN_SPEED;
           if (occupied(e, px, py, pz, true, angle)
             || !labProof(proof, e, px, py, pz, px, py, pz, angle, angle)) return false;
           proof++;
         }
-        time += Math.abs(turn) / 3;
+        time += Math.abs(turn) / LAB_TURN_SPEED;
         facing = desired;
         const step = Math.min(0.3, remaining, final && !fixed && remaining > 0.800001 ? remaining - 0.8 : remaining);
         travelled += step;
         const k = distance ? travelled / distance : 1, x = ax + (bx - ax) * k, y = ay + (by - ay) * k, z = az + (bz - az) * k;
-        time += step / (e.lab.yielding ? 0.65 : 1.1); e.labPlanTime = time;
+        time += step / labSpeed(e); e.labPlanTime = time;
         if (occupied(e, x, y, z, true, facing)
           || !labProof(proof, e, fixed ? px : x, fixed ? py : y, fixed ? pz : z, x, y, z, facing, facing)) return false;
         proof++;
@@ -448,12 +473,12 @@
         const turns = Math.ceil(Math.abs(turn) / 0.2);
         for (let i = 1; i <= turns; i++) {
           const angle = facing + turn * i / turns;
-          e.labPlanTime = time + Math.abs(turn) * i / turns / 3;
+          e.labPlanTime = time + Math.abs(turn) * i / turns / LAB_TURN_SPEED;
           if (occupied(e, bx, by, bz, true, angle)
             || !labProof(proof, e, bx, by, bz, bx, by, bz, facing + turn * (i - 1) / turns, angle)) return false;
           proof++;
         }
-        time += Math.abs(turn) / 3;
+        time += Math.abs(turn) / LAB_TURN_SPEED;
       }
       e.labPlanTime = time;
       return true;
@@ -479,6 +504,18 @@
       }
       return true;
     };
+    const labExitTrafficClear = (e, x, y, z) => {
+      const p = e.root.position, dx = x - p.x, dz = z - p.z, length2 = dx * dx + dz * dz;
+      for (const other of list) {
+        if (other === e || !other.active || Math.abs(other.root.position.y - y) > 1) continue;
+        const q = other.root.position;
+        const k = length2 ? clamp(((q.x - p.x) * dx + (q.z - p.z) * dz) / length2, 0, 1) : 0;
+        const future = labFuture(other, Math.sqrt(length2) * k / labSpeed(e), labFuturePoint);
+        const t = length2 ? clamp(((future.x - p.x) * dx + (future.z - p.z) * dz) / length2, 0, 1) : 0;
+        if (Math.hypot(future.x - p.x - dx * t, future.z - p.z - dz * t) < 1.5) return false;
+      }
+      return true;
+    };
     // A small shared roadmap covers the gaps between the three workstation
     // rows. Each route owns only its retained points; searching never allocates.
     const planLabPath = (e, tx, ty, tz, heading, partial = false) => {
@@ -491,7 +528,8 @@
       const planning = e.planningLab, work = e.planningLabWork, squeeze = e.motion.labSqueeze, speed = e.speed;
       const carrying = !!e.gorilla.labItem;
       const departure = (carrying ? e.gorilla.labCompact : e.gorilla.labWalkCompact) ? 0 : 0.4;
-      e.radius = carrying ? BL.agent.LAB_RADIUS : BL.agent.LAB_WALK_RADIUS; e.height = BL.agent.LAB_HEIGHT; e.speed = 1.1;
+      const travelSpeed = labSpeed(e);
+      e.radius = carrying ? BL.agent.LAB_RADIUS : BL.agent.LAB_WALK_RADIUS; e.height = BL.agent.LAB_HEIGHT; e.speed = travelSpeed;
       e.compact = e.planningLab = e.planningLabTraffic = true; e.footprintMode = "lab"; e.planningLabWork = carrying ? "carry" : "";
       e.labPendingTraffic = false;
       e.motion.labSqueeze = false;
@@ -511,6 +549,25 @@
         const at = count++ * 3;
         sitePoint(site, x, z, POINT); labNodes[at] = POINT.x; labNodes[at + 1] = POINT.y; labNodes[at + 2] = POINT.z;
       }
+      // Prefer the authored facing-right aisle and avoid coworkers' predicted
+      // crossings. These are costs, not locks: traffic never closes a safe
+      // scenery route, and a stationary scientist cannot trap an exit.
+      for (let i = 0; i < count; i++) for (let j = 0; j < count; j++) {
+        const a = i * 3, b = j * 3;
+        const dx = labNodes[b] - labNodes[a], dz = labNodes[b + 2] - labNodes[a + 2];
+        const distance = Math.hypot(dx, dz), x = (labNodes[a] + labNodes[b]) * 0.5;
+        const y = (labNodes[a + 1] + labNodes[b + 1]) * 0.5, z = (labNodes[a + 2] + labNodes[b + 2]) * 0.5;
+        const along = dx * site.sr + dz * site.cr;
+        const across = (x - site.mouth.x) * site.cr - (z - site.mouth.z) * site.sr;
+        let penalty = Math.abs(along) > 0.4 ? distance * Math.max(0, 0.55 - across * Math.sign(along)) : 0;
+        for (const other of list) {
+          if (other === e || !other.active || !other.motion.lab) continue;
+          const q = labFuture(other, Math.hypot(labNodes[a] - p.x, labNodes[a + 2] - p.z) / travelSpeed + distance / (travelSpeed * 2), labFuturePoint);
+          if (Math.abs(q.y - y) > 1) continue;
+          penalty += Math.max(0, 1.5 - Math.hypot(q.x - x, q.z - z)) * 2;
+        }
+        labPenalties[i * 16 + j] = penalty;
+      }
       // Peer arms may pass, but every route still fits the natural gait against
       // cabinets, benches and stone. There is no smaller passing animation.
       job.pathFixed = false; job.pathHeading = e.heading;
@@ -520,22 +577,27 @@
       // Neighbouring jobs on one bench need a shuffle along it, not a detour
       // into the aisle just to face the direction of a short sideways step.
       let directSide = false, sideWait = 0, traffic = false;
-      e.speed = sideways && dx * Math.sin(e.heading) + dz * Math.cos(e.heading) < 0 ? -1.1 : 1.1;
+      e.speed = sideways && dx * Math.sin(e.heading) + dz * Math.cos(e.heading) < 0 ? -travelSpeed : travelSpeed;
       if (sideways) for (; sideWait <= 2; sideWait += 0.5) {
         if (labSegment(e, p.x, p.y, p.z, tx, ty, tz, heading, e.heading, true, true, 0, sideWait + departure, sideWait > 0)) { directSide = true; break; }
         if (!e.labTrafficBlocked) break;
         traffic = true;
       }
+      // An empty exit aisle takes the shortest proven route. Lane costs are
+      // only useful when there is traffic, not for detouring a lone departure.
+      const directExit = e.route === "exit" && !directSide && labExitTrafficClear(e, tx, ty, tz)
+        && labSegment(e, p.x, p.y, p.z, tx, ty, tz, heading, e.heading, false, false, 0, departure);
       labPrevious.fill(-1); labPrevious[0] = 0; labCosts.fill(Infinity); labCosts[0] = 0;
       labQueue.fill(0); labQueue[0] = 1; labTimes[0] = 0; labEdges.fill(0);
       if (directSide) { labPrevious[1] = 0; labHeadings[1] = e.heading; labFixed[1] = 1; labWaits[1] = sideWait; }
+      if (directExit) { labPrevious[1] = 0; labHeadings[1] = Math.atan2(dx, dz); labFixed[1] = labWaits[1] = 0; }
       // Validate promising edges lazily. The Euclidean lower bound orders the
       // frontier; a costly full-rig proof runs only when that edge could improve
       // the best route, rather than for every neighbour of every visited node.
       e.labPlanTime = 8;
       const blockedEnd = partial && !staged && occupied(e, tx, ty, tz, true, heading) && !e.labTrafficBlocked;
       let stagedAt = -1;
-      for (let visit = 0; !directSide && visit < count * count * 4; visit++) {
+      for (let visit = 0; !directSide && !directExit && visit < count * count * 4; visit++) {
         let from = -1, next = -1, fixed = false, edge = -1, cost = Infinity, estimate = Infinity;
         for (let i = 0; i < count; i++) if (labQueue[i]) {
           const a = i * 3;
@@ -549,7 +611,8 @@
               const id = (i * 16 + j) * 2 + mode, state = labEdges[id];
               if (state === 1) continue;
               const turn = mode ? 0 : Math.abs(Math.atan2(Math.sin(Math.atan2(dx, dz) - labHeadings[i]), Math.cos(Math.atan2(dx, dz) - labHeadings[i])));
-              const candidate = labCosts[i] + length * (mode ? 2 : 1) + turn * 0.18 + (state === 2 ? labEdgeWaits[id] * 1.1 : 0);
+              const candidate = labCosts[i] + length * (mode ? 2 : 1) + turn * 0.18 + labPenalties[i * 16 + j]
+                + (state === 2 ? labEdgeWaits[id] * travelSpeed : 0);
               if (candidate + remaining < estimate) { from = i; next = j; fixed = !!mode; edge = id; cost = candidate; estimate = candidate + remaining; }
             }
           }
@@ -559,7 +622,7 @@
         const facing = next === 1 ? heading : Math.atan2(dx, dz);
         if (labEdges[edge] === 0) {
           labEdges[edge] = 1;
-          e.speed = fixed && dx * Math.sin(labHeadings[from]) + dz * Math.cos(labHeadings[from]) < 0 ? -1.1 : 1.1;
+          e.speed = fixed && dx * Math.sin(labHeadings[from]) + dz * Math.cos(labHeadings[from]) < 0 ? -travelSpeed : travelSpeed;
           for (let delay = 0; delay <= 2; delay += 0.5) {
             if (labSegment(e, labNodes[a], labNodes[a + 1], labNodes[a + 2], labNodes[b], labNodes[b + 1], labNodes[b + 2], facing,
               labHeadings[from], next === 1 && !job.yielding && e.route !== "exit", fixed, labTimes[from], delay + (from === 0 ? departure : 0), delay > 0)) {
@@ -706,7 +769,7 @@
       } else { e.speed = 0; s.escapeBlocked += dt; }
       return true;
     };
-    const moveLab = (e, dt, speed = 1.1) => {
+    const moveLab = (e, dt, speed = labSpeed(e)) => {
       const p = e.root.position, dx = e.goalX - p.x, dz = e.goalZ - p.z, distance = Math.hypot(dx, dz);
       const carrying = !!e.gorilla.labItem;
       e.motion.labSqueeze = false;
@@ -721,10 +784,10 @@
         : final && distance <= 0.800001
         ? station.heading : Math.atan2(dx, dz);
       const turn = Math.atan2(Math.sin(desired - e.heading), Math.cos(desired - e.heading));
-      const heading = e.heading + clamp(turn, -dt * 3, dt * 3);
+      const heading = e.heading + clamp(turn, -dt * LAB_TURN_SPEED, dt * LAB_TURN_SPEED);
       // Clear the starting turn before committing to a forward walk. A fixed
       // departure or short bench shuffle intentionally keeps its facing.
-      const step = !fixed && Math.abs(turn) > dt * 3 ? 0
+      const step = !fixed && Math.abs(turn) > dt * LAB_TURN_SPEED ? 0
         : Math.min(distance, speed * dt, final && !fixed && distance > 0.800001 ? distance - 0.8 : distance);
       const x = p.x + dx / distance * step, z = p.z + dz / distance * step;
       const walkingSpeed = (dx * Math.sin(heading) + dz * Math.cos(heading) < 0 ? -1 : 1) * speed;
@@ -756,7 +819,7 @@
       e.speed = step / dt * (dx * Math.sin(heading) + dz * Math.cos(heading) < 0 ? -1 : 1); e.blocked = 0;
     };
     const requestLabPass = (requester, tx, tz) => {
-      if (elapsed < labPassAt || labSite < 0) return false;
+      if (enteringCave(requester) || labWorker(requester) || elapsed < labPassAt || labSite < 0) return false;
       // Ask for clearance along the route actually being walked. The straight
       // chord to a distant workstation may cross an unrelated occupied desk.
       if (requester.lab.pathCount) {
@@ -924,40 +987,39 @@
       e.motion.labDie = equipment.kind === "die";
       e.motion.labBench = equipment.bench || null;
     };
-    const reserveLab = (e, moving, recovering = false) => {
+    const reserveLab = (e, moving) => {
       if (!labStations.length) return false;
-      if (!moving && !recovering) {
-        if (!e.lab.waitOrder) e.lab.waitOrder = ++labWaitSerial;
-        for (const other of list) {
-          if (other !== e && other.active && other.mode === "working" && other.site === labSite && !other.hasSlot
-            && other.lab.waitOrder > 0 && other.lab.waitOrder < e.lab.waitOrder) return false;
-        }
-      }
-      if (moving) {
-        const mouth = sites[labSite].mouth;
-        for (const other of list) {
-          if (other === e || !other.active) continue;
-          if (other.site === labSite && other.mode === "working" && other.lab.waitOrder > 0) return false;
-          if (other.phase === "travel" && other.site === labSite || other.route === "exit" && other.fromSite === labSite) return false;
-          if (other.controlled && Math.hypot(other.drive.x, other.drive.z) > 0.05
-            && Math.hypot(other.root.position.x - mouth.x, other.root.position.z - mouth.z) < 8) return false;
-        }
-      }
       const p = e.root.position, previous = e.lab.station;
       const radius = e.radius, height = e.height, compact = e.compact, mode = e.footprintMode;
       const reach = e.motion.labReach, grip = e.motion.labGripY, die = e.motion.labDie, bench = e.motion.labBench;
       e.radius = BL.agent.LAB_RADIUS || 1.1; e.height = BL.agent.LAB_HEIGHT || 2.8;
       e.compact = e.planningLab = true; e.footprintMode = "lab";
-      const start = moving ? (Math.max(0, previous) + 1) % labStations.length : e.index % labStations.length;
+      // Shuffle the available jobs with this actor's seeded random stream.
+      // Reuse one scratch order; claims still make every station exclusive.
+      for (let i = 0; i < labStationOrder.length; i++) labStationOrder[i] = i;
+      for (let i = labStationOrder.length - 1; i > 0; i--) {
+        const at = Math.floor(e.random() * (i + 1)), value = labStationOrder[i];
+        labStationOrder[i] = labStationOrder[at]; labStationOrder[at] = value;
+      }
+      // All six regular claims precede the middle computer. A current regular
+      // worker keeps its station rather than manufacturing an overflow shift.
+      let full = previous < 0 || labStations[previous].overflow;
+      for (let i = 0; i < labStations.length && full; i++) {
+        if (labStations[i].enabled === false || labStations[i].overflow) continue;
+        let claimed = false;
+        for (const other of list) if (other.active && other.site === labSite && other.lab.station === i) { claimed = true; break; }
+        if (!claimed) full = false;
+      }
       let chosen = -1, chosenPickup = -1;
-      for (let i = 0; i < labStations.length; i++) {
-        const index = (start + i) % labStations.length, station = labStations[index];
+      for (let i = 0; i < labStations.length * 2; i++) {
+        const index = labStationOrder[i % labStations.length], station = labStations[index];
         if (station.enabled === false) continue;
+        if (i < labStations.length ? station.overflow : !station.overflow || !full) continue;
         if (moving && (index === previous || Math.hypot(station.x - p.x, station.z - p.z) < 0.65)) continue;
         let claimed = false;
         for (let j = 0; j < list.length; j++) {
           const other = list[j];
-          if (other !== e && other.active && other.site === labSite && other.hasSlot && other.lab.station === index) { claimed = true; break; }
+          if (other !== e && other.active && other.site === labSite && other.lab.station === index) { claimed = true; break; }
         }
         if (claimed) continue;
         const pickup = station.kind === "carry" ? labPickupFor(e, index) : -1;
@@ -970,9 +1032,9 @@
         // pose the worker must fit when it arrives here.
         e.motion.labReach = 0; e.motion.labBench = null; e.motion.labDie = false;
         if (pickup >= 0) labPickupPose(e, labEquipment[pickup]);
+        e.planningLabStation = index;
         e.planningLabWork = station.kind; e.planningLabSide = station.side === -1 ? -1 : 1;
         if (occupied(e, destination.x, destination.y, destination.z, true, destination.heading)
-          || reserved(e, destination.x, destination.z, destination.heading)
           || !staticClear(e, destination.x, destination.y, destination.z, destination.x, destination.y, destination.z, destination.heading, destination.heading)) continue;
         // Changing jobs is optional. Keep the current desk productive until a
         // complete route is reserved; staging in its aisle would release the
@@ -980,7 +1042,7 @@
         if (moving && !planLabPath(e, destination.x, destination.y, destination.z, destination.heading)) continue;
         chosen = index; chosenPickup = pickup; break;
       }
-      e.radius = radius; e.height = height; e.compact = compact; e.footprintMode = mode; e.planningLab = false; e.planningLabWork = "";
+      e.radius = radius; e.height = height; e.compact = compact; e.footprintMode = mode; e.planningLab = false; e.planningLabWork = ""; e.planningLabStation = -1;
       e.motion.labReach = reach; e.motion.labGripY = grip; e.motion.labDie = die; e.motion.labBench = bench;
       if (chosen < 0) {
         if (moving) e.lab.pathPending = false;
@@ -988,52 +1050,68 @@
       }
       const station = labStations[chosen];
       const destination = chosenPickup >= 0 ? labPickupPoint(station, labEquipment[chosenPickup], e.lab.pickupPoint) : station;
-      e.lab.waitOrder = 0;
       e.lab.station = chosen; e.lab.arrived = false; e.lab.time = e.lab.reach = 0;
       e.lab.stage = station.kind === "carry" ? "fetch" : ""; e.lab.bench = -1; e.lab.pickup = chosenPickup;
       e.slotIndex = chosen; e.slotX = destination.x; e.slotY = destination.y; e.slotZ = destination.z; e.hasSlot = true;
       return true;
     };
-    const yieldLabStation = (e) => {
-      let waiting = false;
-      for (const other of list) {
-        if (other === e || !other.active || other.site !== labSite) continue;
-        // Keep one complete exit/entry exchange in flight through the arch.
-        if (other.phase === "travel" || other.phase === "leave") return false;
-        if (other.mode === "working" && other.phase === "wait" && other.lab.waitOrder > 0) waiting = true;
-      }
-      if (!waiting || e.lab.item >= 0 || e.lab.yielding) return false;
-      releasePortal(e); releaseLab(e);
-      e.motion.labSqueeze = false;
-      e.lab.waitOrder = ++labWaitSerial;
-      e.hasSlot = false; e.slotIndex = -1; e.overflow = true;
-      e.phase = "travel"; e.route = "exit"; e.fromSite = labSite;
-      e.blocked = e.retry = 0;
-      return true;
-    };
     const trafficAt = (x, y, z) => {
       // Keep the doorway and its central apron open even between shifts.
-      // The wider firing fan belongs only to real assigned workers; reserving
-      // every empty fan removes most of the meadow from idle destinations.
       for (let i = 0; i < sites.length; i++) {
         const site = sites[i], m = site.mouth, dx = x - m.x, dz = z - m.z;
         if (y < m.floorY - 0.2 || y > m.floorY + 2.6) continue;
         const across = dx * site.cr - dz * site.sr, along = dx * site.sr + dz * site.cr;
         if (along <= -0.5 || along >= 12 || Math.abs(across) >= 6.5) continue;
         if (along < 6.5 && Math.abs(across) < 2.5) return true;
-        for (let j = 0; j < crew.list.length; j++) {
-          const cave = crew.list[j], work = cave.work;
-          if (cave === crew.player || cave.state !== "working" || !cave.root.visible) continue;
-          if (work.plannedSite === i || work.site === i && (work.phase === "outbound"
-            || work.phase === "station" || work.phase === "shoot" || work.phase === "return")) return true;
-        }
       }
       return false;
     };
-    const reserve = (e, move = false, recovering = false) => {
+    const reserveFloor = (e) => {
+      const site = sites[e.site], lab = e.site === labSite;
+      const radius = e.radius, height = e.height, compact = e.compact, mode = e.footprintMode;
+      const planning = e.planningLab, work = e.planningLabWork;
+      e.planningEntry = true;
+      if (lab) {
+        e.radius = BL.agent.LAB_RADIUS; e.height = BL.agent.LAB_HEIGHT;
+        e.compact = e.planningLab = true; e.footprintMode = "lab"; e.planningLabWork = "";
+      }
+      let best = -Infinity, chosen = -1;
+      const point = e.lab.waitPoint;
+      // Equipment capacity never limits entry. Choose a supported interior
+      // spot, preferring distance from residents and their reserved desks.
+      for (let i = 0; i < ROOM_CELLS.length; i++) {
+        const index = (i + e.index) % ROOM_CELLS.length, cell = ROOM_CELLS[index];
+        if (cell[1] > -1.84 || site.mirrorRoom && cell[1] > -3) continue;
+        sitePoint(site, cell[0] * (site.mirrorRoom ? 0.76 : 1), cell[1], POINT);
+        const heading = site.mouth.ry + Math.PI;
+        if (!staticClear(e, POINT.x, POINT.y, POINT.z, POINT.x, POINT.y, POINT.z, heading, heading)) continue;
+        let distance = Infinity;
+        for (const other of list) {
+          if (other === e || !other.active) continue;
+          const q = other.hasSlot && other.site === e.site ? null : other.root.position;
+          const x = q ? q.x : other.slotX, y = q ? q.y : other.slotY, z = q ? q.z : other.slotZ;
+          if (Math.abs(y - POINT.y) < e.height)
+            distance = Math.min(distance, (x - POINT.x) ** 2 + (z - POINT.z) ** 2);
+        }
+        if (chosen >= 0 && distance <= best) continue;
+        chosen = index; best = distance;
+        point.x = POINT.x; point.y = POINT.y; point.z = POINT.z; point.heading = heading;
+      }
+      e.radius = radius; e.height = height; e.compact = compact; e.footprintMode = mode;
+      e.planningLab = planning; e.planningLabWork = work;
+      e.planningEntry = false;
+      if (chosen < 0) return false;
+      e.lab.station = -1; e.lab.stage = ""; e.lab.pickup = -1;
+      e.lab.arrived = false; e.lab.time = 1; e.lab.waitSince = elapsed;
+      e.lab.pathCount = e.lab.pathIndex = 0; e.lab.pathAt = 0;
+      e.lab.pathPending = e.lab.pathPartial = false; e.lab.targetX = e.lab.targetZ = NaN;
+      e.slotIndex = -1; e.slotX = point.x; e.slotY = point.y; e.slotZ = point.z; e.hasSlot = true;
+      return true;
+    };
+    const reserve = (e, move = false) => {
       const site = sites[e.site];
       if (!site) return false;
-      if (e.site === labSite) return reserveLab(e, move, recovering);
+      if (e.site === labSite) return reserveLab(e, move) || !move && reserveFloor(e);
       const p = e.root.position, previousHeading = e.heading;
       e.heading = site.mouth.ry;
       // Fill the sides before the centre, keeping a route through the mouth
@@ -1071,7 +1149,7 @@
         e.slotIndex = index; e.slotX = POINT.x; e.slotY = POINT.y; e.slotZ = POINT.z; e.hasSlot = true;
         e.heading = previousHeading; return true;
       }
-      e.heading = previousHeading; return false;
+      e.heading = previousHeading; return !move && reserveFloor(e);
     };
     const restTransitionClear = (e, lounge, dt = 0) => {
       if (!ctx.restPoseClear) return true;
@@ -1278,10 +1356,10 @@
     const prepareLounges = (e) => {
       if (loungeReady) return;
       loungeReady = true;
-      const roofs = ctx.climbRoofs || ctx.loungeRoofs, meadow = ctx.meadowRadius || 22;
+      const roofs = ctx.loungeRoofs || ctx.climbRoofs, meadow = ctx.meadowRadius || 22;
       const compact = e.compact, radius = e.radius, height = e.height;
       e.compact = false; e.radius = Math.max(radius, 2.12); e.height = Math.max(height, 2.7);
-      // Search clear patches on active and inactive roofs, including stone. The
+      // Search clear patches on inactive cave and HQ ramp roofs, including stone. The
       // first small ring often lands on trees or higher voxels; a bounded half-
       // metre grid finds the actual clearings without moving props or rock.
       if (roofs && ctx.surfaceAt) for (let i = 0; i < roofs.length && loungeCount < 80; i++) {
@@ -1332,9 +1410,8 @@
     };
     const loungeGoal = (e, x, y, z, roof, partner = null, heading = NaN, pose = "") => {
       setGoal(e, x, y, z);
-      // Surface trips go straight to their destination; old retained routes
-      // must not survive a new lounging choice.
-      e.roam.count = e.roam.index = 0; e.roam.wall = false;
+      // Try direct travel first; discard any detour from the previous outing.
+      e.roam.count = e.roam.index = 0; e.roam.wall = e.roam.detour = false;
       e.roam.targetX = x; e.roam.targetY = y; e.roam.targetZ = z;
       e.roam.progressDistance = Infinity; e.roam.progressTime = 0;
       e.roam.runUp = e.roam.jumpRetry = 0;
@@ -1455,7 +1532,10 @@
           if (trafficAt(x, y, z) || !chillCaveClear(x, y, z)) continue;
           const distance = Math.hypot(x - p.x, z - p.z);
           if (roofTour && !pass && roof && roofAt(x, y, z) === currentRoof) continue;
-          const tripLimit = roofTour && roof ? 24 : !stayLevel && roof !== onRoof ? 18 : 12;
+          // A former worker may start on the opposite side of the island.
+          // Let it reach the inactive frontage before choosing shorter outings.
+          const tripLimit = !stayLevel && !onRoof && !roof && loungeAreas.length ? roamRadius * 2
+            : roofTour && roof ? 24 : !stayLevel && roof !== onRoof ? 18 : 12;
           if (!spawn && (distance < 2 || distance > tripLimit || loungeFailed(e, x, z))) continue;
           // Filter a future walking arrival, not the current reclining body's
           // large fallback circle. The exact new rest and rise are proved by
@@ -1605,37 +1685,19 @@
       e.heading = heading; e.roam.alignTime = 0;
       return false;
     };
-    const waitSpot = (e) => {
-      const p = e.root.position;
-      // The human firing fan is at the cave apron. Overflow waits well inland,
-      // outside the fan's reload approach.
-      const fromAngle = Math.hypot(p.x, p.z) > 1 ? Math.atan2(p.x, p.z) : e.index * 2.39996323;
-      for (let i = 0; i < 96; i++) {
-        const angle = fromAngle + (e.random() - 0.5) * (i < 16 ? 0.9 : TAU), radius = ringRadius * (0.5 + e.random() * 0.58);
-        const x = Math.sin(angle) * radius, z = Math.cos(angle) * radius, y = groundAt(x, z, 0);
-        if (!grass(x, y, z, e.foot) || trafficAt(x, y, z) || occupied(e, x, y, z) || !staticClear(e, x, y, z)) continue;
-        setGoal(e, x, y, z); return true;
+    const spawnApproach = (e) => {
+      const p = e.root.position, site = sites[e.site];
+      // A newly visible worker starts on the inward approach, never in an
+      // outside waiting area. Companions cannot prevent this spawn.
+      e.planningEntry = true;
+      for (let i = 0; i < 12; i++) {
+        sitePoint(site, i % 3 === 0 ? 0 : i % 3 === 1 ? -2.5 : 2.5, 5.5 + Math.floor(i / 3), POINT);
+        const x = POINT.x, z = POINT.z, y = groundAt(x, z, site.mouth.floorY);
+        if (Math.abs(y - site.mouth.floorY) > STEP || !landing(x, y, z) || !staticClear(e, x, y, z)) continue;
+        e.planningEntry = false; setGoal(e, x, y, z); return true;
       }
+      e.planningEntry = false;
       setGoal(e, p.x, p.y, p.z); return false;
-    };
-    const yieldSpace = (e) => {
-      if (e.yieldFor > 0) return;
-      const p = e.root.position;
-      for (let i = 0; i < list.length; i++) {
-        const other = list[i];
-        if (other === e || !other.active || other.phase !== "travel" && other.phase !== "leave") continue;
-        const q = other.root.position, dx = p.x - q.x, dz = p.z - q.z, distance = Math.hypot(dx, dz);
-        if (Math.abs(p.y - q.y) > e.height || distance > e.radius + other.radius + 2.5) continue;
-        if (dx * (other.goalX - q.x) + dz * (other.goalZ - q.z) <= 0) continue;
-        const away = Math.atan2(dx, dz);
-        for (let n = 0; n < 12; n++) {
-          const angle = away + STEERING[n % 6], step = n < 6 ? 3 : 4.5;
-          const x = p.x + Math.sin(angle) * step, z = p.z + Math.cos(angle) * step, y = groundAt(x, z, p.y);
-          if (!grass(x, y, z, e.foot) || trafficAt(x, y, z) || occupied(e, x, y, z) || !staticClear(e, x, y, z)) continue;
-          setGoal(e, x, y, z); e.yieldFor = 1.2; e.rest = 0; return;
-        }
-        e.yieldFor = 0.5;
-      }
     };
     const beginTravel = (e, siteIndex) => {
       e.roam.departPending = false;
@@ -1647,16 +1709,19 @@
       const p = e.root.position, from = caveAt(p.x, p.y, p.z);
       e.fromSite = from;
       const room = reserve(e);
-      if (from === siteIndex && room) {
+      if (from === siteIndex) {
         e.phase = "work"; e.route = ""; e.rest = 0.5;
-        setGoal(e, e.slotX, e.slotY, e.slotZ);
-      } else if (!room && from < 0) {
-        e.phase = "wait"; e.overflow = true; e.retry = 1 + e.index * 0.07;
-        if (grass(p.x, p.y, p.z, e.foot) && Math.hypot(p.x, p.z) < ringRadius * 0.8) setGoal(e, p.x, p.y, p.z);
-        else waitSpot(e);
+        if (room) setGoal(e, e.slotX, e.slotY, e.slotZ);
+        else {
+          e.lab.station = -1; e.lab.stage = ""; e.lab.time = 1;
+          e.lab.waitSince = elapsed;
+          e.lab.waitPoint.x = e.slotX = p.x; e.lab.waitPoint.y = e.slotY = p.y;
+          e.lab.waitPoint.z = e.slotZ = p.z; e.lab.waitPoint.heading = e.heading;
+          e.hasSlot = true; setGoal(e, p.x, p.y, p.z);
+        }
       }
     };
-    const activate = (e, recovering = false, atPosition = false) => {
+    const activate = (e, atPosition = false) => {
       clearWallSearch(e);
       const d = e.drive, f = e.fire, m = e.motion;
       e.backoutLeft = 0;
@@ -1689,16 +1754,16 @@
         d.run = d.passiveFall = d.cancelled = false; d.heading = e.heading;
         e.exitFootprint = true; e.height = WALK_HEIGHT;
         setGoal(e, e.root.position.x, e.root.position.y, e.root.position.z);
-      } else if (e.mode === "working" && sites[e.site] && reserve(e, false, recovering)) {
+      } else if (e.mode === "working" && sites[e.site] && reserve(e)) {
         e.root.position.x = e.slotX; e.root.position.y = e.slotY; e.root.position.z = e.slotZ;
-        e.heading = e.site === labSite && labStations[e.lab.station] ? labStations[e.lab.station].heading : sites[e.site].mouth.ry;
+        e.heading = e.site === labSite ? (labStations[e.lab.station] || e.lab.waitPoint).heading : sites[e.site].mouth.ry;
         e.phase = "work"; e.route = ""; e.rest = 1 + e.random() * 2;
         setGoal(e, e.slotX, e.slotY, e.slotZ);
       } else {
         e.parked = false; e.biped = false; e.footprintMode = "walk";
         e.gorilla.poseManaged(2, e.root.position.x, e.root.position.y, e.root.position.z, e.heading, 0, false, false);
         e.compact = e.mode === "working" && e.gorilla.compact;
-        if (e.mode === "working" ? waitSpot(e) : spawnLounge(e)) {
+        if (e.mode === "working" ? spawnApproach(e) : spawnLounge(e)) {
           e.root.position.x = e.goalX; e.root.position.y = e.goalY; e.root.position.z = e.goalZ;
           if (e.mode === "working" && sites[e.site]) beginTravel(e, e.site);
         } else { e.active = false; e.retry = 1; return; }
@@ -1718,10 +1783,10 @@
         owner, cave: owner, tooltipOwner: owner, gorilla, root: gorilla.root, parts: gorilla.parts,
         health: { value: BL.crew.HEALTH_MAX * 2, max: BL.crew.HEALTH_MAX * 2 }, index: i,
         radius: WALK_RADIUS, height: 2.7, foot: FOOT, minY: 0, biped: false, compact: owner.state === "working" && gorilla.compact, footprintMode: "walk",
-        active: false, tracked: false, mode: "", phase: "", route: "", entryTurn: false, site: -1, fromSite: -1, portal: -1,
+        active: false, tracked: false, mode: "", phase: "", route: "", entryTurn: false, planningEntry: false, site: -1, fromSite: -1, portal: -1,
         hasSlot: false, slotIndex: -1, slotX: 0, slotY: 0, slotZ: 0, goalX: 0, goalY: 0, goalZ: 0,
         random: mulberry32(fnv1a(`clanker/${owner.id || owner.traits.name || i}`)),
-        heading: i * 2.39996323, speed: 0, blocked: 0, retry: 0, rest: 0, yieldFor: 0, turn: 1, portalWait: false,
+        heading: i * 2.39996323, speed: 0, blocked: 0, retry: 0, rest: 0, turn: 1, portalWait: false,
         steerHeading: NaN, steerSide: 0, steerFor: 0, steerClear: 0, steerGoalX: NaN, steerGoalZ: NaN,
         backoutLeft: 0, backoutHeading: 0,
         sampleTime: 0, sampleX: 0, sampleZ: 0, stuckTime: 0, portalSince: 0, portalRetry: 0,
@@ -1733,7 +1798,7 @@
         overflow: false, activity: 0, hits: 0, pounds: 0, pound: 0, poundHit: false, poundPower: 2,
         beat: 0, beats: 0, stand: 0, parked: false, parkFor: 0, exitFootprint: false, workCycle: 0, recover: 0, lounge: "", jumps: 0,
         loungePartner: null, loungeHeading: NaN, loungeCycle: 0, loungeRoof: false, loungeDepart: false, groomTime: 0, groomWait: 0,
-        planningRoam: false, planningSeat: false, walkPoseChecked: false, roam: { path: new Float64Array(12), count: 0, index: 0, wall: false, level: 0, reverseStart: false, departHeading: 0, propDeparture: false,
+        planningRoam: false, planningSeat: false, walkPoseChecked: false, roam: { path: new Float64Array(12), count: 0, index: 0, wall: false, detour: false, level: 0, reverseStart: false, departHeading: 0, propDeparture: false,
           targetX: NaN, targetY: NaN, targetZ: NaN, order: 0, waitUntil: 0, blocked: 0, obstacle: null, waitPeer: null, waitX: 0, waitZ: 0,
           plans: 0, arrived: false, pose: "", poseWait: 0, lastPose: "", transition: 0, nextChoice: 0, failedChoices: 0, runUp: 0, jumpRetry: 0,
           departPending: false, departAt: 0, departX: 0, departY: 0, departZ: 0, riseAdmitted: false,
@@ -1747,12 +1812,12 @@
           progressDistance: Infinity, progressTime: 0,
           visited: new Float64Array(32 * 3), visitedCount: 0, visitedNext: 0,
           failed: new Float64Array(32 * 3), failedCount: 0, failedNext: 0 },
-        planningLab: false, planningLabWork: "", planningLabSide: 1, lab: { station: -1, time: 0, arrived: false, cycles: 0,
+        planningLab: false, planningLabWork: "", planningLabSide: 1, planningLabStation: -1, lab: { station: -1, time: 0, arrived: false, cycles: 0, waitSince: 0,
           item: -1, pickup: -1, bench: -1, pickupPoint: { x: 0, y: 0, z: 0, heading: 0, side: 1 },
           stage: "", reach: 0, yielding: 0, yieldStation: -1, yieldSide: 1, yieldUntil: 0, yieldFor: null, yieldDX: 0, yieldDZ: 0,
           yieldAlong: 0, yieldChoice: 0, yieldReady: false, yieldTargetX: 0, yieldTargetZ: 0,
           yieldProgressX: 0, yieldProgressZ: 0, yieldProgressAt: 0, yieldPoint: { x: 0, y: 0, z: 0, heading: 0 },
-          squeezeUntil: 0, waitOrder: 0, coordinationUntil: 0, path: new Float64Array(16 * 3), pathFacings: new Float64Array(16), pathWaits: new Float64Array(16), plans: 0, readyAt: 0, targetHeading: 0, trafficWait: 0, pathPending: false, pathPartial: false, pathFixed: false, pathHeading: 0, pathCount: 0, pathIndex: 0, pathAt: 0, targetX: NaN, targetY: NaN, targetZ: NaN },
+          squeezeUntil: 0, waitPoint: { x: 0, y: 0, z: 0, heading: 0 }, coordinationUntil: 0, path: new Float64Array(16 * 3), pathFacings: new Float64Array(16), pathWaits: new Float64Array(16), plans: 0, readyAt: 0, targetHeading: 0, trafficWait: 0, pathPending: false, pathPartial: false, pathFixed: false, pathHeading: 0, pathCount: 0, pathIndex: 0, pathAt: 0, targetX: NaN, targetY: NaN, targetZ: NaN },
         drive: { x: 0, z: 0, climbAxis: 0, climbSide: 0, heading: NaN, climbExitHeading: NaN, climbExitLook: NaN,
           run: false, jumpHeld: false, jumpDown: false, jumpPressed: false, jumpBuffer: 0, jumps: 0, avoidSide: 0, avoidHeading: 0, avoidTime: 0,
           cancelled: false, vx: 0, vy: 0, vz: 0, airborne: false, passiveFall: false, grounded: true, resume: false, motionRecover: 0, motionEnvelope: false },
@@ -1762,16 +1827,17 @@
           climbGripX: NaN, climbGripY: NaN, climbGripZ: NaN, climbGripStride: 0, climbGripDirection: 0, climbGripSide: 0, climbGripRelease: 0,
           climb: 0, climbBlend: NaN, openingSettle: 0, climbStride: 0, climbDirection: 0, climbSide: 0, verifyGrip: false, mantle: 0, groom: 0, groomSide: 1, groomPhase: 0,
           sitWait: 3, sitTime: 0, sitLook: 0, sitShift: 0, sitLookTarget: 0, sitShiftTarget: 0,
-          lab: false, labRunIn: false, labWork: "", labPhase: i * 0.71, labSide: 1, labDt: 1 / 30, labReach: 0, labGripY: 0.53105, labSqueeze: false,
+          lab: false, labRunIn: false, workExit: false, labWork: "", labPhase: i * 0.71, labSide: 1, labDt: 1 / 30, labReach: 0, labGripY: 0.53105, labSqueeze: false,
           labDie: false, labRoll: 0, labBench: null },
         climb: { active: false,
+          panel: { x: 0, y: 0, z: 0, heading: 0, nx: 0, nz: 1, u: 0, v: 0, depth: 0 },
           autoDirection: -1, descending: false, progress: 0, length: 0, lowerY: 0, upperY: 0, climbs: 0,
           count: 0, index: 0, heading: 0, topHeading: 0, exitHeading: 0, fromTop: false, basePrepEnd: 0, lowerGroundDistance: 0, bottomTurn: 0, mount: 0, finish: 0, retry: 0, blocked: 0, mantleStart: 0, mantleRiseEnd: 0, autoTo: -1, waitRelease: false, lowerExit: true, minimum: 0, attempts: 0, failure: "", blockX: 0, blockY: 0, blockZ: 0,
           searchPending: false, searchDeferred: false, searchCursor: 0, searchIndex: 0, searchBudget: 0,
           searchX: 0, searchY: 0, searchZ: 0, searchHeading: 0, searchDescending: false,
           searchGoalX: 0, searchGoalY: 0, searchGoalZ: 0,
           claimPending: false, crestPending: false, claimOrder: 0, claimFor: -1, claimOwnerOrder: 0, claimProgress: 0, claimProgressAt: 0, claimRetreat: false,
-          returning: false, reversals: 0, holdPose: false, free: false, lipBypass: false, mountPending: false, airAttachAfter: 0, handoffDirection: 0,
+          returning: false, reversals: 0, holdPose: false, free: false, lipBypass: false, mountPending: false, airAttachAfter: 0, departureRetry: 0, departurePlanning: false, handoffDirection: 0,
           freeTargetX: 0, freeTargetY: NaN, freeTargetZ: 0, openingCrossY: 0,
           openingStagePending: false, openingStageX: 0, openingStageZ: 0,
           openingExit: false, openingExitX: 0, openingExitZ: 0, openingExitHeading: 0,
@@ -1786,7 +1852,7 @@
           panic: { active: false, x: 0, y: 0, z: 0, seenAt: -Infinity, awayX: 0, awayZ: 0 } },
         fireFX: { next: 0 },
         jump: { active: false, progress: 0, reverse: false, blocked: 0, duration: 0, fromX: 0, fromY: 0, fromZ: 0,
-          toX: 0, toY: 0, toZ: 0, lift: 0, wall: false,
+          toX: 0, toY: 0, toZ: 0, lift: 0, wall: false, caveExit: false,
           points: new Float64Array((JUMP_SAMPLES + 1) * 3) }
       };
       entry.motion.supportEntry = entry;
@@ -1818,7 +1884,10 @@
       // Reloading never evicts a gorilla whose next shift is in this cave.
       if (e.site === index) return;
       if (!e.active) { e.site = index; return; }
-      if (e.motion.lab && e.lab.item >= 0) { e.pendingSite = index; return; }
+      // Release this job and its held equipment now; returning to a bench
+      // must not keep the owner waiting at the next repository.
+      e.pendingSite = -1;
+      e.rest = e.stand = e.beat = 0;
       beginTravel(e, index);
     };
     const jumpPoint = (jump, t, out) => {
@@ -1869,7 +1938,7 @@
           || occupied(e, POINT.x, POINT.y, POINT.z)) { e.radius = previousRadius; e.height = previousHeight; e.compact = previousCompact; return false; }
         points[j] = POINT.x; points[j + 1] = POINT.y; points[j + 2] = POINT.z;
       }
-      jump.active = true; jump.wall = wall; jump.progress = 0; jump.reverse = false; jump.blocked = 0; e.jumps++;
+      jump.active = true; jump.wall = wall; jump.caveExit = false; jump.progress = 0; jump.reverse = false; jump.blocked = 0; e.jumps++;
       return true;
     };
     const tryRoofHop = (e, heading, destination) => {
@@ -1892,8 +1961,12 @@
     };
     const tryRoofJump = (e, heading) => {
       const p = e.root.position, previousHeading = e.heading;
-      heading = wallFaceHeading(e, heading, false);
-      if (Math.cos(heading - previousHeading) < 0.85) return false;
+      // An active entrance has no face at ground height. Measure the stone
+      // above its opening before aiming the running jump at that panel.
+      const approach = heading;
+      heading = wallFaceHeading(e, heading);
+      if (!Number.isFinite(heading) && wallPanels.fit(p.x, p.y + 3.5, p.z, approach, PANEL)) heading = PANEL.heading;
+      if (!Number.isFinite(heading) || Math.cos(heading - previousHeading) < 0.85) return false;
       const sx = Math.sin(heading), sz = Math.cos(heading);
       e.heading = heading;
       // Aim for a real grip above the opening, not a roof landing. Twelve
@@ -1997,8 +2070,11 @@
       return fits;
     };
     const climbClear = (e, x, y, z, nx = x, ny = y, nz = z, heading = e.climb.active ? e.climb.heading : e.heading, actors = true, wallTravel = false) => {
-      if (autonomousChill(e) && !chillCaveClear(x, y, z, nx, ny, nz, true)) return false;
-      if (!wallTravel && ctx.climbRidersClear && !ctx.climbRidersClear(e, x, y, z, nx, ny, nz, heading, heading)) return false;
+      const departure = descentWallAt(e, x, y, z);
+      // Stay on the exterior face down to the jump height, even where its
+      // entrance apron is reserved. The actual stone/prop sweep still applies.
+      if (autonomousChill(e) && !(wallTravel && departure && ny > departure.floor + 0.6)
+        && !chillCaveClear(x, y, z, nx, ny, nz, true)) return false;
       if (!wallTravel && actors && !e.controlled && ctx.climbPeersClear
         && !ctx.climbPeersClear(e, x, y, z, nx, ny, nz, heading, heading)) return false;
       // The upright rectangle owns wall support. On the wall, only the core
@@ -2010,7 +2086,6 @@
     };
     const climbWalkClear = (e, x, y, z, nx, ny, nz, heading, actors = true) => {
       if (autonomousChill(e) && !chillCaveClear(x, y, z, nx, ny, nz, true)) return false;
-      if (ctx.climbRidersClear && !ctx.climbRidersClear(e, x, y, z, nx, ny, nz, heading, heading)) return false;
       if (actors && ctx.climbPeersClear && !ctx.climbPeersClear(e, x, y, z, nx, ny, nz, heading, heading)) return false;
       return ctx.climbClear ? ctx.climbClear(e, x, y + 0.65, z, nx, ny + 0.65, nz,
         0.42, 0.5, false, actors, !ctx.climbPeersClear)
@@ -2175,14 +2250,9 @@
       }
       return true;
     };
-    const wallEdgeClear = (e, x, y, z, heading, nx, ny, nz, nextHeading) => {
-      const turn = Math.atan2(Math.sin(nextHeading - heading), Math.cos(nextHeading - heading));
-      if (Math.abs(turn) > 0.5 || Math.hypot(nx - x, ny - y, nz - z) > WALL_STEP * 2.5) return false;
-      // Sweeping each yaw over the short edge also covers the corner between
-      // neighboring wall normals; a clear endpoint cannot cut through a ridge.
-      return climbClear(e, x, y, z, nx, ny, nz, heading, false)
-        && climbClear(e, x, y, z, nx, ny, nz, heading + turn * 0.5, false)
-        && climbClear(e, x, y, z, nx, ny, nz, nextHeading, false);
+    const wallEdgeClear = (e, x, y, z, heading, nx, ny, nz) => {
+      return Math.hypot(nx - x, ny - y, nz - z) <= WALL_STEP * 2.5
+        && climbClear(e, x, y, z, nx, ny, nz, heading, false);
     };
     const plannedGuideMotion = { climb: 1, climbBlend: 1, mantle: 0, climbStride: 0,
       climbDirection: 0, climbSide: 0, verifyGrip: true };
@@ -2197,32 +2267,29 @@
       plannedTurnMotion.climbBlend = 1; plannedTurnMotion.mantle = 0;
       plannedTurnMotion.climbSide = side; plannedTurnMotion.climbDirection = vertical;
       plannedTurnMotion.climbStride = e.motion.climbStride + Math.hypot(x - px, y - py, z - pz);
-      for (let choice = 0; choice < 5; choice++) {
-        const yaw = heading + (choice ? Math.ceil(choice / 2) * 0.2 * (choice % 2 ? 1 : -1) : 0);
-        const sx = Math.sin(yaw), sz = Math.cos(yaw);
-        let wall = Infinity;
-        for (let h = 0; h < 7; h++) for (let across = -1; across <= 1; across++) {
-          for (let depth = 0.08; depth <= 2.6; depth += 0.16) {
-            if (climbSolidAt(x + sx * depth + sz * across * 0.72, y + 0.06 + h * 0.48,
-              z + sz * depth - sx * across * 0.72)) { wall = Math.min(wall, depth - 0.04); break; }
-          }
+      const sx = Math.sin(heading), sz = Math.cos(heading);
+      let wall = Infinity;
+      for (let h = 0; h < 7; h++) for (let across = -1; across <= 1; across++) {
+        for (let depth = 0.08; depth <= 2.6; depth += 0.16) {
+          if (climbSolidAt(x + sx * depth + sz * across * 0.72, y + 0.06 + h * 0.48,
+            z + sz * depth - sx * across * 0.72)) { wall = Math.min(wall, depth - 0.04); break; }
         }
-        if (!Number.isFinite(wall)) continue;
-        const depth = wall - CLIMB_STANDOFF;
-        // Keep the previous contact plane across small recesses instead of
-        // moving in and out with each stone. Project outward at protrusions;
-        // the unchanged edge sweep still owns corners and openings.
-        const steady = clamp((px - x) * sx + (pz - z) * sz, depth - 0.36, depth);
-        for (let trial = -1; trial < 4; trial++) {
-          const offset = trial < 0 ? steady : depth - trial * 0.12;
-          const nx = x + sx * offset, nz = z + sz * offset;
-          const score = (nx - x) ** 2 + (nz - z) ** 2 + Math.abs(yaw - heading) * 0.12;
-          if (score >= best || !wallBodyClear(nx, y, nz, yaw) || !wallGrip(nx, y, nz, yaw)
-            || !wallEdgeClear(e, px, py, pz, heading, nx, y, nz, yaw)
-            || trial < 0 && !climbGuidePoseClear(e, nx, y, nz, yaw)
-            || !e.gorilla.climbPoseClear(2, nx, y, nz, yaw, plannedTurnMotion, ctx.solidAt, plannedTurnClear, e, 0, true)) continue;
-          best = score; WALL_POINT.x = nx; WALL_POINT.y = y; WALL_POINT.z = nz; WALL_POINT.heading = yaw;
-        }
+      }
+      if (!Number.isFinite(wall)) return false;
+      const depth = wall - CLIMB_STANDOFF;
+      // Keep the previous contact plane across small recesses instead of
+      // moving in and out with each stone. Project outward at protrusions;
+      // the unchanged edge sweep still owns corners and openings.
+      const steady = clamp((px - x) * sx + (pz - z) * sz, depth - 0.36, depth);
+      for (let trial = -1; trial < 4; trial++) {
+        const offset = trial < 0 ? steady : depth - trial * 0.12;
+        const nx = x + sx * offset, nz = z + sz * offset;
+        const score = (nx - x) ** 2 + (nz - z) ** 2;
+        if (score >= best || !wallBodyClear(nx, y, nz, heading) || !wallGrip(nx, y, nz, heading)
+          || !wallEdgeClear(e, px, py, pz, heading, nx, y, nz)
+          || trial < 0 && !climbGuidePoseClear(e, nx, y, nz, heading)
+          || !e.gorilla.climbPoseClear(2, nx, y, nz, heading, plannedTurnMotion, ctx.solidAt, plannedTurnClear, e, 0, true)) continue;
+        best = score; WALL_POINT.x = nx; WALL_POINT.y = y; WALL_POINT.z = nz; WALL_POINT.heading = heading;
       }
       return Number.isFinite(best);
     };
@@ -2320,7 +2387,7 @@
           if (!projectWallPoint(e, x, y, z, px, py, pz, heading, du, dv)) { s.attempts[to]++; continue; }
           s.points[target] = WALL_POINT.x; s.points[target + 1] = WALL_POINT.y; s.points[target + 2] = WALL_POINT.z;
           s.headings[to] = WALL_POINT.heading;
-        } else if (!wallEdgeClear(e, px, py, pz, heading, s.points[target], s.points[target + 1], s.points[target + 2], s.headings[to])) continue;
+        } else if (!wallEdgeClear(e, px, py, pz, heading, s.points[target], s.points[target + 1], s.points[target + 2])) continue;
         const cost = s.costs[from] + Math.hypot(s.points[target] - px, s.points[target + 1] - py, s.points[target + 2] - pz);
         if (cost >= s.costs[to]) continue;
         s.states[to] = 1; s.parents[to] = from; s.costs[to] = cost;
@@ -2785,6 +2852,8 @@
       return Infinity;
     };
     const cliffRiserAhead = (x, z, heading, direction, distance = 3.2) => {
+      const floor = climbSurfaceAt(x, z);
+      if (walkingRampAt(x, floor, z, heading)) return false;
       const sx = Math.sin(heading), sz = Math.cos(heading);
       let previous = climbSurfaceAt(x - sx * 0.4, z - sz * 0.4);
       for (let d = -0.2; d <= distance; d += 0.2) {
@@ -2880,6 +2949,7 @@
       const heading = WALL_POINT.heading;
       if (!openingLanding(e, p.x, p.y, p.z, heading, WALL_POINT)) return false;
       e.heading = c.heading = c.topHeading = heading;
+      bindWallPanel(e, heading);
       c.active = c.free = c.descending = c.fromTop = true;
       c.mountPending = c.holdPose = c.waitRelease = c.lipBypass = false;
       c.searchPending = c.searchDeferred = c.claimPending = c.crestPending = false;
@@ -2893,7 +2963,11 @@
     };
     const updateRectangleClimb = (e, dt) => {
       const c = e.climb, d = e.drive, m = e.motion, p = e.root.position;
-      const heading = e.heading, sx = Math.sin(heading), sz = Math.cos(heading);
+      // The contact plane owns facing, independently of the trip/look bearing
+      // that brought the gorilla here. S changes vertical travel, not yaw.
+      const heading = c.panel.heading, sx = c.panel.nx, sz = c.panel.nz;
+      e.heading = c.heading = heading;
+      wallPanels.coordinates(c.panel, p.x, p.y, p.z);
       const goal = e.debugMove.active ? e.debugMove.target : e;
       const goalX = e.debugMove.active ? goal.x : e.goalX;
       const goalY = e.debugMove.active ? goal.y : e.goalY;
@@ -2915,7 +2989,7 @@
       }
       const length = Math.max(1, Math.hypot(side, vertical)); side /= length; vertical /= length;
       const distance = CLIMB_SPEED * (e.controlled && d.run ? 2 : 1) * dt;
-      if (autonomousChill(e) && vertical < 0
+      if (autonomousChill(e) && vertical < 0 && !descentWallAt(e, p.x, p.y, p.z)
         && !chillCaveClear(p.x, p.y, p.z, p.x, p.y - Math.max(distance, 0.4), p.z, true)) {
         // Cross above the entrance to the nearest corner before descending,
         // rather than stopping at its reserved ceiling or entering the room.
@@ -3088,25 +3162,16 @@
         }
       }
       if (Math.abs(side) + Math.abs(vertical) < 0.001) return;
-      const tx = p.x + sz * side * distance, ty = p.y + vertical * distance;
-      const tz = p.z - sx * side * distance;
-      for (let turn = 0; turn < 5; turn++) {
-        const facing = heading + (turn ? Math.ceil(turn / 2) * 0.2 * (turn % 2 ? 1 : -1) : 0);
-        const fx = Math.sin(facing), fz = Math.cos(facing);
-        for (let offset = 0; offset < 5; offset++) {
-          const shift = offset ? Math.ceil(offset / 2) * 0.12 * (offset % 2 ? -1 : 1) : 0;
-          const x = tx + fx * shift, z = tz + fz * shift;
-          const contact = wallContactShare(e, x, ty, z, facing);
-          if ((contact < WALL_ENTER_SHARE
-            && !(c.lipBypass && !turn && !offset && wallLipHold(x, ty, z, facing)))
-            || !wallBodyClear(x, ty, z, facing)
-            || !climbClear(e, p.x, p.y, p.z, x, ty, z, facing, true, true)) continue;
-          const travel = Math.hypot(x - p.x, ty - p.y, z - p.z);
-          p.x = x; p.y = ty; p.z = z; e.heading = c.heading = facing;
-          m.climbStride += travel * (vertical < 0 ? -1 : 1);
-          c.lipBypass = contact < WALL_ENTER_SHARE;
-          c.blocked = 0; return;
-        }
+      wallPanels.point(c.panel, c.panel.u + side * distance, c.panel.v + vertical * distance, c.panel.depth, WALL_POINT);
+      const tx = WALL_POINT.x, ty = WALL_POINT.y, tz = WALL_POINT.z;
+      const contact = wallContactShare(e, tx, ty, tz, heading);
+      if ((contact >= WALL_ENTER_SHARE || c.lipBypass && wallLipHold(tx, ty, tz, heading))
+        && wallBodyClear(tx, ty, tz, heading)
+        && climbClear(e, p.x, p.y, p.z, tx, ty, tz, heading, true, true)) {
+        p.x = tx; p.y = ty; p.z = tz;
+        m.climbStride += distance * (vertical < 0 ? -1 : 1);
+        c.lipBypass = contact < WALL_ENTER_SHARE;
+        c.blocked = 0; return;
       }
       if (side && vertical) for (let axis = 0; axis < 2; axis++) {
         const x = axis ? p.x : tx, y = axis ? ty : p.y, z = axis ? p.z : tz;
@@ -3164,28 +3229,50 @@
         && projectWallPoint(e, tx, ty, tz, p.x, p.y, p.z, heading, side, vertical)) {
         const travel = Math.hypot(WALL_POINT.x - p.x, WALL_POINT.y - p.y, WALL_POINT.z - p.z);
         p.x = WALL_POINT.x; p.y = WALL_POINT.y; p.z = WALL_POINT.z;
-        e.heading = c.heading = WALL_POINT.heading;
         m.climbStride += travel * (vertical < 0 ? -1 : 1);
         c.blocked = 0; return;
       }
+      // Crossing a corner can require a different panel. Measure that face;
+      // never rotate by guessed offsets merely to escape a blocked step.
+      if (side && Math.floor((c.blocked + dt) / 0.18) !== Math.floor(c.blocked / 0.18)
+        && wallPanels.fit(tx, ty, tz, heading, PANEL)
+        && Math.cos(PANEL.heading - heading) > 0.35
+        && Math.abs(Math.sin(PANEL.heading - heading)) > 0.08
+        && wallBodyClear(tx, ty, tz, PANEL.heading)
+        && wallContactShare(e, tx, ty, tz, PANEL.heading) >= WALL_ENTER_SHARE
+        && climbClear(e, p.x, p.y, p.z, tx, ty, tz, heading, true, true)
+        && climbClear(e, p.x, p.y, p.z, tx, ty, tz, PANEL.heading, true, true)) {
+        p.x = tx; p.y = ty; p.z = tz; e.heading = c.heading = PANEL.heading;
+        bindWallPanel(e, c.heading);
+        m.climbStride += distance * (vertical < 0 ? -1 : 1);
+        c.lipBypass = false; c.blocked = 0; return;
+      }
       c.blocked += dt;
     };
-    const wallFaceHeading = (e, heading, descending) => {
-      if (descending || !climbSolidAt) return heading;
-      const p = e.root.position, sx = Math.sin(heading), sz = Math.cos(heading);
-      let left = NaN, right = NaN;
-      for (let d = 0.3; d <= 1.8 && (!Number.isFinite(left) || !Number.isFinite(right)); d += 0.14) {
-        if (!Number.isFinite(left) && climbSolidAt(p.x + sx * d - sz * 0.6, p.y + 0.9, p.z + sz * d + sx * 0.6)) left = d;
-        if (!Number.isFinite(right) && climbSolidAt(p.x + sx * d + sz * 0.6, p.y + 0.9, p.z + sz * d - sx * 0.6)) right = d;
-      }
-      // Face the local wall when approaching a broad side at a slight angle.
-      // Open corners retain the input bearing and the normal route fallbacks.
-      return Number.isFinite(left) && Number.isFinite(right)
-        ? heading + clamp(Math.atan2(left - right, 1.2), -0.55, 0.55) : heading;
+    const wallFaceHeading = (e, heading) => {
+      const p = e.root.position;
+      return wallPanels && wallPanels.fit(p.x, p.y, p.z, heading, PANEL)
+        ? PANEL.heading : NaN;
+    };
+    const bindWallPanel = (e, heading, x = e.root.position.x, y = e.root.position.y, z = e.root.position.z) => {
+      const panel = e.climb.panel;
+      panel.heading = heading; panel.nx = Math.sin(heading); panel.nz = Math.cos(heading);
+      panel.x = x + panel.nx * CLIMB_STANDOFF; panel.y = y; panel.z = z + panel.nz * CLIMB_STANDOFF;
+      wallPanels.coordinates(panel, x, y, z);
+    };
+    const attachWallPanel = (e) => {
+      const p = e.root.position, c = e.climb;
+      if (!wallPanels.fit(p.x, p.y, p.z, c.heading, PANEL)
+        || !wallBodyClear(p.x, p.y, p.z, PANEL.heading)
+        || wallContactShare(e, p.x, p.y, p.z, PANEL.heading) < WALL_ENTER_SHARE
+        || !climbClear(e, p.x, p.y, p.z, p.x, p.y, p.z, PANEL.heading, true, true)) return false;
+      e.heading = c.heading = PANEL.heading;
+      bindWallPanel(e, c.heading);
+      return true;
     };
     const climbApproachHeading = (e, heading, descending) => e.debugMove.active && e.debugMove.wallTarget
       && Number.isFinite(e.debugMove.normalHeading) ? e.debugMove.normalHeading + (descending ? Math.PI : 0)
-      : wallFaceHeading(e, heading, descending);
+      : descending ? heading : wallFaceHeading(e, heading);
     const pendingClimbSearch = (e) => {
       const c = e.climb;
       if (!c.searchPending) return false;
@@ -3193,7 +3280,7 @@
       const dx = e.controlled ? d.x : e.goalX - p.x;
       const dz = e.controlled ? d.z : e.goalZ - p.z;
       const heading = climbApproachHeading(e, Math.atan2(dx, dz), c.searchDescending);
-      if (!e.active || c.active || !e.controlled && (!alive(e.owner) || !e.debugMove.active && e.mode !== e.owner.state)
+      if (!Number.isFinite(heading) || !e.active || c.active || !e.controlled && (!alive(e.owner) || !e.debugMove.active && e.mode !== e.owner.state)
         || e.recover > 0 || e.jump.active || d.airborne || e.pound || e.beat || e.stand || e.parked || e.fire.rolling
         || Math.hypot(dx, dz) <= (e.controlled ? 0.05 : 0.18)
         || Math.hypot(p.x - c.searchX, p.y - c.searchY, p.z - c.searchZ) > 0.35
@@ -3253,6 +3340,8 @@
       if (!climbSolidAt || !climbSurfaceAt || e.climb.active || e.climb.retry > 0 || e.jump.active || e.drive.airborne
         || e.fire.rolling || e.pound || e.beat || e.recover > 0 || e.parked) return false;
       if (descending && beginEdgeClimb(e, heading)) return true;
+      if (!descending) heading = wallFaceHeading(e, heading);
+      if (!Number.isFinite(heading)) return false;
       const p = e.root.position, sx = Math.sin(heading), sz = Math.cos(heading);
       e.climb.retry = e.controlled ? 0.12 : 0.6; e.climb.failure = "search";
       if (descending) {
@@ -3299,8 +3388,9 @@
     };
     const tryClimb = (e, heading, descending = false) => {
       const c = e.climb, p = e.root.position;
+      if (c.retry > 0 || walkingRampAt(p.x, p.y, p.z, heading)) return false;
       heading = climbApproachHeading(e, heading, descending);
-      if (c.retry > 0) return false;
+      if (!Number.isFinite(heading)) return false;
       if (c.claimPending && c.searchDescending === descending && pendingClimbSearch(e)) {
         if (!admitClimb(e)) return false;
         c.searchPending = c.searchDeferred = false;
@@ -3340,16 +3430,7 @@
       if (tryClimbAlong(e, heading, descending)) return true;
       if (c.searchDeferred) return false;
       if (!c.retry) { c.searchPending = false; return false; }
-      // A diagonal approach can point through the corner of the cave rim.
-      // Approach that same wall squarely, then resume the original goal above.
-      const cardinal = Math.round(heading / (Math.PI / 2)) * Math.PI / 2;
-      if (Math.abs(Math.atan2(Math.sin(cardinal - heading), Math.cos(cardinal - heading))) > 0.02) {
-        c.retry = 0;
-        if (tryClimbAlong(e, cardinal, descending)) return true;
-        if (c.searchDeferred) return false;
-      }
-      if (normalDelta > 0.02 && nearbyNormal
-        && Math.abs(Math.atan2(Math.sin(normal - cardinal), Math.cos(normal - cardinal))) > 0.02) {
+      if (normalDelta > 0.02 && nearbyNormal) {
         e.climb.retry = 0;
         if (tryClimbAlong(e, normal, descending)) return true;
         if (c.searchDeferred) return false;
@@ -3480,7 +3561,7 @@
           fits = true;
         }
       }
-      if (!fits || ctx.climbRidersClear && !ctx.climbRidersClear(e, p.x, p.y, p.z, p.x, p.y, p.z, e.heading, heading)) {
+      if (!fits) {
         m.climbGripRelease = 0;
         m.climbGripX = m.climbGripY = m.climbGripZ = NaN; return false;
       }
@@ -3491,11 +3572,12 @@
     const controlledRailDetour = (e, dt, released, travelDt) => {
       const c = e.climb, p = e.root.position;
       if (!e.controlled || c.blocked < 0.2 || c.progress <= c.lowerGroundDistance + 0.12
-        || c.progress >= c.mantleStart - 0.12 || !wallGrip(p.x, p.y, p.z, e.heading)) return false;
+        || c.progress >= c.mantleStart - 0.12 || !wallGrip(p.x, p.y, p.z, c.heading)
+        || !attachWallPanel(e)) return false;
       // The authored vertical rail no longer matches this voxel face. Keep
       // the exact current pose and let checked free climbing follow the live
       // wall; do not jump to the next rail point.
-      c.free = true; c.handoffDirection = 0;
+      c.free = true; c.handoffDirection = 0; e.heading = c.heading;
       e.motion.climbGripX = e.motion.climbGripY = e.motion.climbGripZ = NaN;
       e.motion.climbGripRelease = 0;
       updateRectangleClimb(e, travelDt);
@@ -3521,9 +3603,47 @@
       e.footprintMode = "walk"; e.compact = false; e.radius = MOTION_RADIUS; e.height = MOTION_HEIGHT;
       e.speed = 0; e.jumps++;
     };
+    const jumpOffCaveSide = (e) => {
+      const c = e.climb, p = e.root.position, wall = descentWallAt(e, p.x, p.y, p.z);
+      if (!wall || c.mountPending || c.handoffDirection || p.y > wall.middle + 0.05 || elapsed < c.departureRetry) return false;
+      c.departureRetry = elapsed + 0.4;
+      const across = (p.x - wall.x) * wall.cr - (p.z - wall.z) * wall.sr;
+      const preferred = across < 0 ? -1 : across > 0 ? 1 : e.turn;
+      const heading = e.heading, compact = e.compact, mode = e.footprintMode;
+      const radius = e.radius, height = e.height;
+      // Prove a full airborne arc to real ground beyond either side of the
+      // entrance. Release the climbing envelope for that proof: flight must
+      // not keep testing a hand grip against the wall it is leaving.
+      c.active = false; c.departurePlanning = true; e.footprintMode = "walk";
+      for (let side = 0; side < 2; side++) for (let reach = 0; reach < 3; reach++) {
+        const sign = side ? -preferred : preferred;
+        const lateral = Math.max(Math.abs(across) + 1.5, wall.half + 0.5) + reach * 0.6;
+        const outward = 3 + reach * 0.8;
+        const x = wall.x + wall.cr * sign * lateral + wall.sr * outward;
+        const z = wall.z - wall.sr * sign * lateral + wall.cr * outward;
+        const y = groundAt(x, z, wall.floor + STEP);
+        if (!Number.isFinite(y) || Math.abs(y - wall.floor) > STEP || !chillCaveClear(x, y, z)) continue;
+        e.heading = Math.atan2(x - p.x, z - p.z);
+        if (!prepareJump(e, x, y, z, 2.2)) continue;
+        c.departurePlanning = false; e.jump.caveExit = true;
+        e.drive.resume = false;
+        finishRectangleClimb(e, p.y, e.heading);
+        e.drive.grounded = false;
+        c.airAttachAfter = elapsed + e.jump.duration + 0.5;
+        e.compact = false; e.radius = Math.max(MOTION_RADIUS, radius); e.height = Math.max(MOTION_HEIGHT, height);
+        e.motion.takeoff = 1; e.rest = 0;
+        e.roam.count = e.roam.index = 0; e.roam.wall = false;
+        return true;
+      }
+      c.active = true; c.departurePlanning = false; e.heading = heading; e.compact = compact;
+      e.footprintMode = mode; e.radius = radius; e.height = height;
+      return false;
+    };
     const updateClimb = (e, dt) => {
       const c = e.climb, d = e.drive, m = e.motion, p = e.root.position;
+      if (c.free) e.heading = c.heading = c.panel.heading;
       if (e.controlled && d.jumpPressed) { jumpOffWall(e); return; }
+      if (jumpOffCaveSide(e)) return;
       const travelDt = dt * (e.controlled && d.run ? 2 : 1);
       // Keep both ground rectangles current while climbing. Their different
       // heights/angles describe the actual footing available at a handoff.
@@ -3542,8 +3662,8 @@
       // fully wall-facing rectangle its direction; partial crest yaw points
       // it back at roof terrain instead of down the face.
       if ((!c.fromTop || c.progress <= c.mantleStart + 0.001)
-        && wallContactShare(e, p.x, p.y, p.z, e.heading) >= WALL_ENTER_SHARE) {
-        c.free = true; c.handoffDirection = 0;
+        && wallContactShare(e, p.x, p.y, p.z, c.heading) >= WALL_ENTER_SHARE && attachWallPanel(e)) {
+        c.free = true; c.handoffDirection = 0; e.heading = c.heading;
         updateRectangleClimb(e, dt); return;
       }
       if (e.debugMove.active && c.debugStop >= 0 && Math.abs(c.progress - c.debugStop) < 0.001) {
@@ -3564,7 +3684,7 @@
       m.climb = 1; m.climbDirection = m.climbSide = 0;
       if (e.controlled && Math.abs(d.climbSide) > 0.01 && !c.handoffDirection && c.autoTo < 0
         && c.progress > c.lowerGroundDistance + 0.12 && c.progress < c.mantleStart - 0.12
-        && m.climbBlend > 0.98 && e.gorilla.debug.climbing > 0.98) {
+        && m.climbBlend > 0.98 && e.gorilla.debug.climbing > 0.98 && attachWallPanel(e)) {
         c.free = true; c.handoffDirection = 0;
         updateRectangleClimb(e, travelDt); return;
       }
@@ -3597,8 +3717,7 @@
           const facing = e.heading + clamp(turn, -travelDt * 3, travelDt * 3);
           m.climbBlend = m.mantle = 0;
           if (climbStartTurnClear(e, facing)
-            && climbPoseClear(e, dt, p.x, p.y, p.z, facing, m)
-            && (!ctx.climbRidersClear || ctx.climbRidersClear(e, p.x, p.y, p.z, p.x, p.y, p.z, e.heading, facing))) {
+            && climbPoseClear(e, dt, p.x, p.y, p.z, facing, m)) {
             e.heading = facing; c.blocked = 0;
           } else climbBlocked(e, dt);
           return;
@@ -3615,8 +3734,7 @@
         while (!climbPoseClear(e, dt, p.x, p.y, p.z, facing, m) && blend < 1) {
           blend = Math.min(1, blend + 0.12); m.climbBlend = blend;
         }
-        if (climbPoseClear(e, dt, p.x, p.y, p.z, facing, m)
-          && (!ctx.climbRidersClear || ctx.climbRidersClear(e, p.x, p.y, p.z, p.x, p.y, p.z, e.heading, facing))) {
+        if (climbPoseClear(e, dt, p.x, p.y, p.z, facing, m)) {
           e.heading = facing; c.bottomTurn = turn; c.blocked = 0;
         } else {
           m.climbBlend = oldBlend; m.mantle = oldMantle; climbBlocked(e, dt);
@@ -3659,7 +3777,6 @@
           * (next - riseEnd) / Math.max(0.1, c.length - riseEnd), 0, 1);
       const ground = next <= c.lowerGroundDistance + 0.001 && c.lowerExit;
       let blend = (1 - top) * (1 - top), facing = c.heading;
-      if (c.debugTraverse && next >= c.traverseStart - 1e-6 && next <= c.traverseEnd + 1e-6) facing = POINT.heading;
       if (top > 0) {
         const turn = Math.atan2(Math.sin(c.topHeading - c.heading), Math.cos(c.topHeading - c.heading));
         facing = c.heading + turn * top;
@@ -3752,7 +3869,7 @@
         // advance toward the open lip before continuing the pivot.
         if (!top || !climbPoseClear(e, dt, POINT.x, POINT.y, POINT.z, e.heading, m, speed)) {
           if (prepareClimbPose(e, dt, facing, oldStride, nextStride, nextDirection, nextSide)
-            || facing !== e.heading && prepareClimbPose(e, dt, e.heading, oldStride, nextStride, nextDirection, nextSide)) {
+            || top > 0 && facing !== e.heading && prepareClimbPose(e, dt, e.heading, oldStride, nextStride, nextDirection, nextSide)) {
             if (controlledRailDetour(e, dt, released, travelDt)) return;
             return;
           }
@@ -3761,10 +3878,6 @@
           climbBlocked(e, dt); return;
         }
         facing = e.heading;
-      }
-      if (ctx.climbRidersClear && !ctx.climbRidersClear(e, p.x, p.y, p.z, POINT.x, POINT.y, POINT.z, e.heading, facing)) {
-        m.climbBlend = oldBlend; m.mantle = oldMantle; m.climbStride = oldStride; m.climbDirection = 0; m.climbSide = oldSide;
-        climbBlocked(e, dt); return;
       }
       c.blocked = 0; e.speed = speed;
       p.x = POINT.x; p.y = POINT.y; p.z = POINT.z; c.progress = next; c.lowerClearance = nextClearance; e.heading = facing;
@@ -3789,16 +3902,16 @@
       if (e.route === "exit") {
         const from = e.fromSite >= 0 ? sites[e.fromSite] : null;
         const along = from ? (p.x - from.mouth.x) * from.sr + (p.z - from.mouth.z) * from.cr : Infinity;
-        if (from && along < 0.5 + e.radius && p.y < from.mouth.floorY + 2.7) {
+        const exitRadius = Math.max(e.radius, WALK_RADIUS);
+        if (from && along < 0.5 + exitRadius && p.y < from.mouth.floorY + 2.7) {
           if (e.fromSite === labSite && e.motion.lab) {
             // Queued departures must also retract their workstation pose, or
             // their hands can cover the aisle needed by the portal holder.
             e.motion.labWork = ""; e.motion.labReach = 0; e.motion.labSqueeze = false;
           }
-          if (!claimPortal(e, e.fromSite)) return false;
           if (e.fromSite === labSite && e.motion.lab) {
             const across = (p.x - from.mouth.x) * from.cr - (p.z - from.mouth.z) * from.sr;
-            if (along < -0.6 || Math.abs(across) > 0.3) {
+            if (e.portal !== e.fromSite && (along < -0.6 || Math.abs(across) > 0.3)) {
               sitePoint(from, 0, -0.45, POINT);
               // Route searches reuse POINT for their roadmap nodes. Keep the
               // actual exit target when asking a blocked coworker to move.
@@ -3813,7 +3926,14 @@
               return true;
             }
           }
-          sitePoint(from, 0, 0.7 + e.radius, POINT);
+          // Walk the room route before claiming the narrow doorway. A rear
+          // departure cannot hold everyone else at their workstations.
+          if (!claimPortal(e, e.fromSite)) return false;
+          // The room route is finished. Its last fixed-facing leg and wait
+          // must not carry into the continuous outward doorway crossing.
+          e.lab.pathCount = e.lab.pathIndex = 0; e.lab.pathFixed = false;
+          e.lab.readyAt = e.lab.trafficWait = 0;
+          sitePoint(from, 0, 0.7 + exitRadius, POINT);
           if (e.fromSite === labSite && e.blocked > 0.3) requestLabPass(e, POINT.x, POINT.z);
           setGoal(e, POINT.x, POINT.y, POINT.z);
           return true;
@@ -3829,10 +3949,6 @@
           e.phase = "chill"; e.route = ""; e.exitFootprint = true;
           return chooseChill(e, true);
         }
-        if (!e.hasSlot && !reserve(e)) {
-          e.phase = "wait"; e.route = ""; e.overflow = true; e.retry = 2;
-          waitSpot(e); return true;
-        }
       }
       if (e.route === "island") {
         if (Math.hypot(e.goalX - p.x, e.goalZ - p.z) > 0.3) return true;
@@ -3841,10 +3957,7 @@
         debugShuttleUntil = 0; e.route = "apron";
       }
       if (e.route === "apron") {
-        if (!claimPortal(e, e.site)) {
-          if (!e.portalWait) { e.portalWait = true; waitSpot(e); }
-          return true;
-        }
+        // Workstation and doorway reservations cannot hold a worker outside.
         e.portalWait = false;
         // Walk into the centre aisle before approaching the arch. Painted
         // paths do not change the gait or trigger a leap.
@@ -3855,73 +3968,51 @@
         e.route = "enter"; e.entryTurn = false;
       }
       if (e.route === "enter") {
-        if (!claimPortal(e, e.site)) return false;
-        if (!e.hasSlot && !reserve(e)) {
-          e.overflow = true;
-          if (e.site === labSite) {
-            releasePortal(e); e.phase = "wait"; e.route = ""; e.retry = 1;
-            waitSpot(e); return true;
-          }
-          return false;
-        }
         e.overflow = false;
         if (e.site === labSite) {
           if (!e.entryTurn) {
             sitePoint(site, 0, LAB_ENTRY_GOAL, POINT);
             if (Math.hypot(POINT.x - p.x, POINT.z - p.z) > 0.08) {
-              if (e.blocked > 0.3) requestLabPass(e, POINT.x, POINT.z);
               setGoal(e, POINT.x, POINT.y, POINT.z); return true;
             }
-            e.speed = 0;
-            if (!ordinaryLabStep(e, p.x, p.y, p.z, e.heading, 0, true)) {
-              requestLabPass(e, e.slotX, e.slotZ); return false;
-            }
             e.entryTurn = 1;
-            return false;
+            syncLab(e); labEnvelope(e);
           }
           if (e.entryTurn === 1) {
             sitePoint(site, 0, LAB_ROUTE_START, POINT);
             if (Math.hypot(POINT.x - p.x, POINT.z - p.z) > 0.08) {
-              if (e.blocked > 0.3) requestLabPass(e, POINT.x, POINT.z);
               setGoal(e, POINT.x, POINT.y, POINT.z); return true;
             }
             e.entryTurn = 2;
+            releasePortal(e);
           }
         }
-        if (site.mirrorRoom) {
+        if (e.site !== labSite && !e.entryTurn) {
           const along = (p.x - site.mouth.x) * site.sr + (p.z - site.mouth.z) * site.cr;
           if (along > -3.3) {
-            // Cross straight through the mirror and establish full-body
-            // clearance in the centre aisle before turning toward a room
-            // slot. A diagonal turn at the plane is what exposed the head.
+            // Clear the complete body into the centre aisle before heading
+            // to a work slot. Keep the same inward run through every arch.
             sitePoint(site, 0, -3.5, POINT);
             setGoal(e, POINT.x, POINT.y, POINT.z);
             return true;
           }
-        }
-        // A mirror-room worker continues forward after crossing the plane.
-        // Turning to face the mouth here made its head immediately poke back
-        // through the mirror before it reached a reserved work slot.
-        if (e.motion.lab || site.mirrorRoom) e.entryTurn = true;
-        if (!e.entryTurn) {
-          sitePoint(site, 0, -0.45, POINT);
-          if (Math.hypot(POINT.x - p.x, POINT.z - p.z) > 0.16) {
-            if (e.site === labSite && e.blocked > 0.3) requestLabPass(e, POINT.x, POINT.z);
-            setGoal(e, POINT.x, POINT.y, POINT.z); return true;
-          }
-          const turn = Math.atan2(Math.sin(site.mouth.ry - e.heading), Math.cos(site.mouth.ry - e.heading));
-          const heading = e.heading + clamp(turn, -dt * 3, dt * 3);
-          e.speed = 0;
-          // Turn in the vestibule only when every intermediate part of the
-          // full rig clears its neighbours, the arch and the cave fixtures.
-          if (!occupied(e, p.x, p.y, p.z, true, heading)
-            && staticClear(e, p.x, p.y, p.z, p.x, p.y, p.z, e.heading, heading)) e.heading = heading;
-          if (Math.abs(turn) > 0.04) return false;
           e.entryTurn = true;
+          releasePortal(e);
         }
+        if (!e.hasSlot && !reserve(e)) {
+          // The room floor is reachable even if every equipment pose is busy.
+          // Retry desk selection from inside rather than reversing to a queue.
+          e.lab.station = -1; e.lab.stage = ""; e.lab.time = 1;
+          e.lab.waitSince = elapsed;
+          e.lab.waitPoint.x = e.slotX = p.x; e.lab.waitPoint.y = e.slotY = p.y;
+          e.lab.waitPoint.z = e.slotZ = p.z; e.lab.waitPoint.heading = e.heading;
+          e.hasSlot = true;
+        }
+        // Workstation navigation starts only after the inward aisle is clear.
+        if (e.motion.lab || site.mirrorRoom) e.entryTurn = true;
         if (e.site === labSite && e.motion.lab) {
           const station = labStations[e.lab.station];
-          if (!labGoal(e, e.slotX, e.slotY, e.slotZ, station ? station.heading : e.heading)) {
+          if (!labGoal(e, e.slotX, e.slotY, e.slotZ, (station || e.lab.waitPoint).heading)) {
             requestLabPass(e, e.slotX, e.slotZ); return false;
           }
         } else setGoal(e, e.slotX, e.slotY, e.slotZ);
@@ -3969,8 +4060,62 @@
         || !e.controlled && ctx.fireClear && !ctx.fireClear(e, p.x, p.y, p.z,
           p.x + sx * 2, p.y, p.z + sz * 2, e.heading, heading);
     };
+    const separateSurfacePeers = (e, dt) => {
+      if (enteringCave(e) || e.controlled || e.motion.lab || e.climb.active || e.jump.active || e.drive.airborne
+        || e.lounge || e.loungeDepart || e.fire.burning || e.fire.rolling || e.pound || e.beat
+        || e.gorilla.motionActive) return false;
+      const p = e.root.position, shape = torso || footprint;
+      let crowded = false, dx = 0, dz = 0;
+      for (const other of list) {
+        if (other === e || !other.active) continue;
+        const q = other.root.position;
+        if (!shape.overlaps(e, p.x, p.y, p.z, e.heading, other, q.x, q.y, q.z, other.heading, SPACE)) continue;
+        crowded = true;
+        const distance2 = Math.max(0.01, (p.x - q.x) ** 2 + (p.z - q.z) ** 2);
+        dx += (p.x - q.x) / distance2; dz += (p.z - q.z) / distance2;
+      }
+      if (!crowded) return false;
+      // Keep the current facing while stepping sideways/backwards out of an
+      // existing pileup. Turning first can expand the trunk into another peer.
+      const heading = Math.hypot(dx, dz) > 1e-6 ? Math.atan2(dx, dz) : e.index * 2.399963229728653;
+      const step = CHILL_SPEED * dt;
+      for (let i = 0; i < 16; i++) {
+        const side = i ? Math.ceil(i / 2) * (i % 2 ? 1 : -1) : 0;
+        const angle = heading + side * Math.PI / 8;
+        const x = p.x + Math.sin(angle) * step, z = p.z + Math.cos(angle) * step;
+        const y = support(e, x, z, p.y, PROP_STEP);
+        if (!Number.isFinite(y) || Math.abs(y - p.y) > PROP_STEP || !actorLanding(e, x, y, z)
+          || occupied(e, x, y, z) || !propStepClear(e, p.x, p.y, p.z, x, y, z, e.heading, e.heading)) continue;
+        setSupportY(e, y, x, z); p.x = x; p.z = z;
+        e.speed = CHILL_SPEED * (Math.cos(angle - e.heading) < 0 ? -1 : 1);
+        e.roam.progressTime = e.blocked = 0;
+        return true;
+      }
+      return false;
+    };
+    const moveEntryAisle = (e, dt) => {
+      const p = e.root.position, dx = e.goalX - p.x, dz = e.goalZ - p.z, distance = Math.hypot(dx, dz);
+      e.backoutLeft = e.steerFor = e.steerSide = e.stuckTime = 0;
+      if (distance < 0.02) { e.speed = 0; return; }
+      const desired = Math.atan2(dx, dz), turn = Math.atan2(Math.sin(desired - e.heading), Math.cos(desired - e.heading));
+      const heading = e.heading + clamp(turn, -dt * 7, dt * 7), step = Math.min(distance, SPEED * dt);
+      const x = p.x + dx / distance * step, z = p.z + dz / distance * step;
+      e.footprintMode = "pound"; e.compact = e.gorilla.poundCompact;
+      labEnvelope(e);
+      const y = support(e, x, z, p.y, PROP_STEP, heading);
+      // Only prove the actual supported step. No steering fan, future-pose
+      // horizon or blocked timer may reverse an admitted entrance run.
+      if (!Number.isFinite(y) || Math.abs(y - p.y) > PROP_STEP || !actorLanding(e, x, y, z)
+        || occupied(e, x, y, z, true, heading)
+        || !propStepClear(e, p.x, p.y, p.z, x, y, z, e.heading, heading)) {
+        e.speed = 0; e.blocked += dt; return;
+      }
+      setSupportY(e, y, x, z, heading); p.x = x; p.z = z; e.heading = heading;
+      e.speed = step / dt; e.blocked = 0;
+    };
     const move = (e, dt, speed) => {
       if (e.recover > 0) { e.speed = 0; return; }
+      if (enteringAisle(e)) { moveEntryAisle(e, dt); return; }
       if (e.backoutLeft > 0 && backOut(e, dt)) return;
       const p = e.root.position, dx = e.goalX - p.x, dz = e.goalZ - p.z, distance = Math.hypot(dx, dz);
       if (distance < (e.motion.lab ? 0.06 : 0.15)) { e.speed = damp(e.speed, 0, 12, dt); return; }
@@ -4004,7 +4149,6 @@
             const angle = desired + STEERING[i] * e.turn;
             if (tryJump(e, angle)) { e.heading = angle; return; }
           }
-          if (e.phase === "wait") waitSpot(e);
         }
       }
       const initialMode = e.footprintMode, initialCompact = e.compact;
@@ -4022,8 +4166,7 @@
           && e.lab.pathIndex + 1 >= e.lab.pathCount && labStations[e.lab.stage === "fetch" || e.lab.stage === "return" ? e.lab.bench : e.lab.station];
         const roomFacing = e.motion.lab ? labStation && distance < 0.8 ? labStation.heading : NaN
           : e.route === "exit" && e.fromSite >= 0 ? sites[e.fromSite].mouth.ry
-          : (e.phase === "work" || e.route === "enter") && !sites[e.site].mirrorRoom
-            ? sites[e.site].mouth.ry + (e.route === "enter" && !e.entryTurn ? Math.PI : 0) : NaN;
+          : e.phase === "work" && !sites[e.site].mirrorRoom ? sites[e.site].mouth.ry : NaN;
         const facingTurn = Number.isFinite(roomFacing)
           ? Math.atan2(Math.sin(roomFacing - e.heading), Math.cos(roomFacing - e.heading)) : turn;
         const facing = e.heading + clamp(facingTurn, -dt * 5, dt * 5);
@@ -4098,7 +4241,7 @@
           if (e.phase === "work" && !e.lab.yielding) {
             if (reserve(e, true)) setGoal(e, e.slotX, e.slotY, e.slotZ);
           } else if (e.phase === "chill") chooseChill(e);
-          else { e.route = caveAt(p.x, p.y, p.z) >= 0 ? "exit" : "apron"; e.fromSite = caveAt(p.x, p.y, p.z); }
+          else if (!enteringCave(e)) { e.route = caveAt(p.x, p.y, p.z) >= 0 ? "exit" : "apron"; e.fromSite = caveAt(p.x, p.y, p.z); }
         }
       }
     };
@@ -4114,12 +4257,12 @@
         r.wallFailedX = e.goalX; r.wallFailedZ = e.goalZ; r.wallFailedUntil = elapsed + 60;
       }
       r.failedX = e.goalX; r.failedZ = e.goalZ; r.failedUntil = elapsed + 60;
-      r.count = r.index = 0; r.wall = r.propDeparture = false; r.blocked = r.progressTime = 0; r.obstacle = null;
+      r.count = r.index = 0; r.wall = r.propDeparture = r.detour = false; r.blocked = r.progressTime = 0; r.obstacle = null;
       setGoal(e, p.x, p.y, p.z); e.rest = 0; e.speed = 0;
       r.nextChoice = elapsed + 0.2;
     };
-    // The retained waypoint planner is parked for now. Surface goals use the
-    // direct mover below instead of routing around the meadow or other actors.
+    // A blocked meadow stroll retains a short, proven route around scenery.
+    // Open travel and roof climbing still use the direct mover below.
     const moveRoamPlanned = (e, dt) => {
       const p = e.root.position, r = e.roam;
       const point = r.index * 3;
@@ -4270,8 +4413,9 @@
       const p = e.root.position, r = e.roam;
       if (r.targetX !== e.goalX || r.targetY !== e.goalY || r.targetZ !== e.goalZ) {
         r.targetX = e.goalX; r.targetY = e.goalY; r.targetZ = e.goalZ;
-        r.progressDistance = Infinity; r.progressTime = 0;
+        r.progressDistance = Infinity; r.progressTime = 0; r.detour = false;
       }
+      if (!e.debugMove.active && r.detour) { moveRoamPlanned(e, dt); return; }
       const roofTrip = !e.debugMove.active && e.mode === "chilling" && e.loungeRoof
         && e.goalY > p.y + 0.8 && caveAt(p.x, p.y, p.z) < 0;
       const heading = Math.atan2(e.goalX - p.x, e.goalZ - p.z);
@@ -4305,9 +4449,20 @@
       const distance = Math.hypot(e.goalX - p.x, e.goalZ - p.z) + Math.abs(e.goalY - p.y) * 0.5;
       if (distance < r.progressDistance - 0.15) { r.progressDistance = distance; r.progressTime = 0; }
       else if (!e.climb.searchPending && !e.climb.claimPending && !e.climb.active) r.progressTime += dt;
+      // Small steering arcs cannot find every route between trees and reserved
+      // cave aprons. Spend the existing shared route budget only after stalled
+      // progress, and keep climbs/jumps on their existing controllers.
+      if (r.progressTime > 0.8 && Math.abs(e.goalY - p.y) < 0.55
+        && !e.climb.active && !e.jump.active && !e.drive.airborne && roamBudget && elapsed >= r.planAt) {
+        r.planAt = elapsed + 0.6;
+        if (planRoam(e, e.goalX, e.goalY, e.goalZ, NaN, "", true)) {
+          r.detour = true; r.progressTime = 0; r.progressX = r.progressZ = NaN;
+          r.progressDistance = r.progressTurn = Infinity; r.waitPeer = null; r.runUp = 0;
+          return;
+        }
+      }
       if (r.progressTime > 4) {
-        r.failedX = e.goalX; r.failedZ = e.goalZ; r.failedUntil = elapsed + 15;
-        chooseChill(e);
+        abandonRoam(e);
       }
     };
     const updateDebugMove = (e, dt) => {
@@ -4496,7 +4651,7 @@
         cancelInput();
         e.root.position.x = x; e.root.position.y = y; e.root.position.z = z;
       }
-      activate(e, false, e.controlled);
+      activate(e, e.controlled);
     };
     const possess = (value) => {
       const e = entryFor(value);
@@ -4649,12 +4804,19 @@
       if (d.airborne || c.active || !climbSurfaceAt
         || Math.abs(climbSurfaceAt(p.x, p.z) - p.y) > 0.2) return false;
       if (!cliffRiserAhead(p.x, p.z, outward, -1, 1.6)) return false;
-      const sx = Math.sin(outward), sz = Math.cos(outward), heading = outward + Math.PI;
+      const sx = Math.sin(outward), sz = Math.cos(outward);
       for (let edge = 0.2; edge <= 0.8; edge += 0.2) {
         if (climbSurfaceAt(p.x + sx * edge, p.z + sz * edge) >= p.y - 0.8) continue;
         const distance = edge + CLIMB_STANDOFF;
-        const x = p.x + sx * distance, y = p.y - 0.7, z = p.z + sz * distance;
-        if (wallContactShare(e, x, y, z, heading) < WALL_ENTER_SHARE
+        let x = p.x + sx * distance, z = p.z + sz * distance;
+        const y = p.y - 0.7;
+        if (!wallPanels.fit(x, y - 1.4, z, outward + Math.PI, PANEL)) continue;
+        const heading = PANEL.heading, nx = PANEL.nx, nz = PANEL.nz;
+        // Put the mount outside the fitted panel, even at a diagonal edge.
+        const correction = (PANEL.x - x) * nx + (PANEL.z - z) * nz - CLIMB_STANDOFF;
+        if (Math.abs(correction) > 0.6) continue;
+        x += nx * correction; z += nz * correction;
+        if (wallContactShare(e, x, y, z, heading) < WALL_ENTER_SHARE || !wallBodyClear(x, y, z, heading)
           || !climbClear(e, p.x, p.y, p.z, x, p.y, z, heading, true, true)
           || !climbClear(e, x, p.y, z, x, y, z, heading, true, true)) continue;
         c.active = c.free = c.mountPending = c.descending = c.fromTop = true;
@@ -4662,6 +4824,7 @@
         c.handoffStartX = p.x; c.handoffStartY = p.y; c.handoffStartZ = p.z;
         c.waitRelease = e.controlled && d.climbAxis > 0;
         c.heading = c.topHeading = heading; c.blocked = 0; c.autoTo = -1; c.climbs++;
+        bindWallPanel(e, heading, x, y, z);
         c.searchPending = c.searchDeferred = c.claimPending = c.crestPending = false;
         d.airborne = d.passiveFall = d.grounded = false;
         d.vx = d.vy = d.vz = 0; d.jumps = 0;
@@ -4677,11 +4840,17 @@
       const speed = Math.hypot(d.vx, d.vz);
       if (speed < 0.2) return false;
       const travelHeading = Math.atan2(d.vx, d.vz);
-      let heading = wallFaceHeading(e, travelHeading, false), descending = false;
-      if (d.airborne && d.vy <= 0 && wallContactShare(e, p.x, p.y, p.z, heading) < WALL_ENTER_SHARE
-        && wallContactShare(e, p.x, p.y, p.z, travelHeading + Math.PI) >= WALL_ENTER_SHARE) {
-        heading = travelHeading + Math.PI; descending = true;
+      if (walkingRampAt(p.x, p.y, p.z, travelHeading)) return false;
+      let heading = wallFaceHeading(e, travelHeading), descending = false;
+      if (d.airborne && d.vy <= 0 && (!Number.isFinite(heading)
+        || wallContactShare(e, p.x, p.y, p.z, heading) < WALL_ENTER_SHARE)) {
+        const reverse = wallFaceHeading(e, travelHeading + Math.PI);
+        if (Number.isFinite(reverse) && wallContactShare(e, p.x, p.y, p.z, reverse) >= WALL_ENTER_SHARE) {
+          heading = reverse; descending = true;
+        }
       }
+      if (!Number.isFinite(heading)) return false;
+      if (walkingRampAt(p.x, p.y, p.z, heading)) return false;
       const sx = Math.sin(heading), sz = Math.cos(heading);
       if (!descending && (d.vx * sx + d.vz * sz < 0.2
         || !d.airborne && !cliffRiserAhead(p.x, p.z, heading, 1))) return false;
@@ -4699,6 +4868,7 @@
         for (let i = 0; i < 3; i++) {
           const y = p.y + (i === 1 ? -0.12 : i === 2 ? 0.12 : 0);
           if (wallContactShare(e, x, y, z, heading) < WALL_ENTER_SHARE
+            || !wallBodyClear(x, y, z, heading)
             || !climbClear(e, p.x, p.y, p.z, x, y, z, heading)) continue;
           p.x = x; p.y = y; p.z = z; e.heading = heading;
           c.active = c.free = true; c.fromTop = descending || !e.controlled; c.descending = descending;
@@ -4710,6 +4880,7 @@
           c.autoTo = -1; c.airAttachAfter = 0; c.handoffDirection = 0;
           c.searchPending = c.searchDeferred = c.claimPending = c.crestPending = false;
           c.heading = c.topHeading = heading; c.climbs++;
+          bindWallPanel(e, heading);
           d.vx = d.vy = d.vz = 0; d.airborne = d.passiveFall = d.grounded = d.motionEnvelope = false;
           d.jumpPressed = false; d.jumpBuffer = 0; d.jumpDown = d.jumpHeld; d.jumps = 0;
           e.motion.climb = e.motion.climbBlend = 1; e.motion.mantle = e.motion.takeoff = 0;
@@ -4864,7 +5035,9 @@
     };
     const drivenGroundStep = (e, x, z, heading, drop, allowFall = false) => {
       const p = e.root.position, d = e.drive;
-      if (allowFall && e.controlled && d.run
+      const ramp = walkingRampAt(x, p.y, z, heading);
+      if (ramp) drop = Math.max(drop, BL.wallPanels.RAMP_STEP);
+      if (allowFall && e.controlled && d.run && !ramp
         && pointSupportAt(p.x, p.z, p.y + 0.1) >= p.y - STEP
         && pointSupportAt(x, z, p.y + 0.1) < p.y - STEP
         && beginSupportFall(e, x, z, heading, d.vx, d.vz)) return true;
@@ -5079,6 +5252,7 @@
         if (dx * sx + dz * sz > 2.4 || Math.abs(dx * sz - dz * sx) > 1.1) exit.openingExit = false;
       }
       syncLab(e);
+      e.motion.workExit = !e.controlled && e.mode === "working" && e.phase === "travel" && e.route === "exit";
       e.motion.openingSettle = Math.max(0, e.motion.openingSettle - dt * 1.4);
       e.motion.supportOffset = damp(e.motion.supportOffset, 0, 12, dt);
       e.motion.labPhase += dt;
@@ -5119,6 +5293,10 @@
           e.roam.transition = Math.max(0, e.roam.transition - dt);
         }
       }
+      if (e.climb.active && e.climb.free) {
+        e.heading = e.climb.heading = e.climb.panel.heading;
+        wallPanels.coordinates(e.climb.panel, p.x, p.y, p.z);
+      }
       e.gorilla.poseManaged(dt, p.x, p.y, p.z, e.heading, e.speed,
         e.jump.active || e.drive.airborne && !e.drive.passiveFall, e.biped, e.lounge, e.motion);
       e.motion.walkPhase = NaN;
@@ -5148,13 +5326,36 @@
       if (ctx.fireContact && ctx.fireContact(e, beforeX, beforeY, beforeZ)) ignite(e);
       if (ctx.onMove && (beforeX !== p.x || beforeY !== p.y || beforeZ !== p.z)) ctx.onMove(e, beforeX, beforeY, beforeZ, dt);
     };
+    const shareLabStation = (e) => {
+      // A completed job releases its desk for an interior coworker. Keep the
+      // whole handoff in the lab; returning glassware precedes this call.
+      let next = null;
+      for (const other of list) {
+        if (other === e || !other.active || other.controlled || other.mode !== "working"
+          || other.site !== labSite || !other.motion.lab || other.lab.station >= 0
+          || other.fire.burning || other.fire.rolling || other.debugMove.active
+          || other.phase !== "work" && other.route !== "enter") continue;
+        if (!next || other.lab.waitSince < next.lab.waitSince) next = other;
+      }
+      if (!next) return false;
+      // Fill an unused regular/overflow station before interrupting anyone.
+      if (reserveLab(next, false)) { setGoal(next, next.slotX, next.slotY, next.slotZ); return false; }
+      if (!reserveFloor(e)) return false;
+      e.lab.time = 3; e.lab.cycles++; e.workCycle++;
+      e.motion.labWork = ""; e.motion.labReach = 0;
+      setGoal(e, e.slotX, e.slotY, e.slotZ);
+      // Give the oldest waiting coworker the released equipment immediately,
+      // rather than letting the same roster entries win every one-second poll.
+      if (reserveLab(next, false)) setGoal(next, next.slotX, next.slotY, next.slotZ);
+      return true;
+    };
     const finishLabItem = (e) => {
       const job = e.lab;
       job.item = -1; job.stage = ""; job.reach = 0; job.time = 0;
       job.arrived = false;
       if (job.yielding) { job.stage = "fetch"; return; }
       if (e.mode !== e.owner.state || e.pendingSite >= 0 && e.pendingSite !== e.site) return;
-      if (yieldLabStation(e)) return;
+      if (shareLabStation(e)) return;
       if (reserve(e, true)) { job.cycles++; e.workCycle++; setGoal(e, e.slotX, e.slotY, e.slotZ); }
       else job.stage = "fetch";
     };
@@ -5180,7 +5381,7 @@
         return;
       }
       if (station && station.kind === "carry" && job.item < 0 && !job.stage) job.stage = "fetch";
-      let destination = station;
+      let destination = station || job.waitPoint;
       if (job.stage === "fetch" || job.stage === "inspect" || job.stage === "return") {
         job.pickup = labPickupFor(e, job.station);
         const equipment = labEquipment[job.pickup];
@@ -5204,6 +5405,16 @@
         return;
       }
       e.speed = damp(e.speed, 0, 12, dt);
+      if (!station) {
+        // Wait for equipment inside the lab. A busy desk never evicts this
+        // worker or sends it back through the entrance to wait outside.
+        job.arrived = true; job.time -= dt;
+        if (job.time <= 0) {
+          job.time = 1;
+          if (reserve(e, true)) { job.cycles++; e.workCycle++; setGoal(e, e.slotX, e.slotY, e.slotZ); }
+        }
+        return;
+      }
       // Finish retracting the wider walking shoulders before raising the hands.
       // Doing both together sweeps the elbows outside either final footprint.
       if (job.item < 0 && !wasWorking) {
@@ -5212,7 +5423,7 @@
       }
       const turn = Math.atan2(Math.sin(destination.heading - e.heading), Math.cos(destination.heading - e.heading));
       {
-        const heading = e.heading + clamp(turn, -dt * 3, dt * 3);
+        const heading = e.heading + clamp(turn, -dt * LAB_TURN_SPEED, dt * LAB_TURN_SPEED);
         if (Math.abs(turn) > 0.01 && !occupied(e, p.x, p.y, p.z, true, heading)
           && staticClear(e, p.x, p.y, p.z, p.x, p.y, p.z, e.heading, heading)) e.heading = heading;
       }
@@ -5258,7 +5469,7 @@
           return;
         }
         if (job.item >= 0) { job.stage = "return"; job.arrived = false; job.reach = 0; job.pathCount = 0; return; }
-        if (yieldLabStation(e)) return;
+        if (shareLabStation(e)) return;
         // A workstation stays occupied until its scientist has a real, clear
         // next job. Failed reservations keep the hands working, not idling.
         if (reserve(e, true)) {
@@ -5280,7 +5491,6 @@
       e.climb.retry = Math.max(0, e.climb.retry - dt);
       if (e.controlled || e.mode !== "chilling" || e.fire.burning) e.motion.groom = 0;
       if (e.controlled || e.fire.burning) e.loungeDepart = false;
-      e.yieldFor = Math.max(0, e.yieldFor - dt);
       e.parkFor = Math.max(0, e.parkFor - dt);
       if (!alive(e.owner) && !e.controlled && !e.drive.airborne && !e.fire.rolling && !e.climb.active) {
         if (e.active) {
@@ -5322,6 +5532,7 @@
         && liveFloor >= p.y - STEP && liveFloor <= p.y + PROP_STEP) setSupportY(e, liveFloor);
       if (e.fire.rolling || escapeForRoll(e, dt)) { poseEntry(e, dt, beforeX, beforeY, beforeZ); return; }
       if (fleeFire(e, dt)) { poseEntry(e, dt, beforeX, beforeY, beforeZ); return; }
+      if (separateSurfacePeers(e, dt)) { poseEntry(e, dt, beforeX, beforeY, beforeZ); return; }
       if (e.motion.lab && e.lab.item >= 0 && (e.mode !== e.owner.state || e.pendingSite >= 0 && e.pendingSite !== e.site)) {
         if (e.lab.stage !== "return") { e.lab.stage = "return"; e.lab.reach = 0; }
         workLab(e, dt); poseEntry(e, dt, beforeX, beforeY, beforeZ); return;
@@ -5383,8 +5594,8 @@
       e.height = Math.max(gestureHeight, e.gorilla.bodyHeight + 0.04);
       e.foot = FOOT;
       labEnvelope(e);
-      if (stepLabEscape(e, dt) || labEscape && labEscape !== e && e.motion.lab && e.stuck.time >= 0.65
-        && Math.hypot(p.x - labEscape.root.position.x, p.z - labEscape.root.position.z) < 3) {
+      if (!enteringCave(e) && (stepLabEscape(e, dt) || labEscape && labEscape !== e && e.motion.lab && e.stuck.time >= 0.65
+        && !labWorker(e) && Math.hypot(p.x - labEscape.root.position.x, p.z - labEscape.root.position.z) < 3)) {
         if (labEscape !== e) e.speed = 0;
         poseEntry(e, dt, beforeX, beforeY, beforeZ); return;
       }
@@ -5427,19 +5638,8 @@
             setGoal(e, POINT.x, POINT.y, POINT.z);
             move(e, dt, 0.6);
           }
-        } else if (travelGoal(e, dt)) { if (!e.jump.active) { if (e.motion.lab && !e.motion.labRunIn && (e.fromSite === labSite && e.route === "exit" || e.site === labSite && (e.route === "enter" || e.phase === "work"))) moveLab(e, dt); else move(e, dt, e.mode === "chilling" ? CHILL_SPEED : SPEED); } }
+        } else if (travelGoal(e, dt)) { if (!e.jump.active) { if (enteringAisle(e)) moveEntryAisle(e, dt); else if (e.motion.lab && !e.motion.labRunIn && (e.fromSite === labSite && e.route === "exit" || e.site === labSite && (e.route === "enter" || e.phase === "work"))) moveLab(e, dt); else move(e, dt, e.mode === "chilling" ? CHILL_SPEED : SPEED); } }
         else { e.speed = damp(e.speed, 0, 12, dt); }
-      } else if (e.phase === "wait") {
-        yieldSpace(e);
-        move(e, dt, CHILL_SPEED);
-        if (!e.retry) {
-          e.retry = 1.5 + e.index * 0.07;
-          if (Math.hypot(p.x, p.z) > ringRadius * 0.8) waitSpot(e);
-          if ((e.site === labSite || e.owner.work.phase !== "return" && e.owner.work.phase !== "reload") && reserve(e)) {
-            e.overflow = false; e.phase = "travel"; e.route = "exit";
-            e.fromSite = caveAt(p.x, p.y, p.z);
-          }
-        }
       } else if (e.phase === "work") {
         if (e.motion.lab) workLab(e, dt);
         else if (sites[e.site].mirrorRoom) {
@@ -5560,7 +5760,8 @@
       s.workStage = job.stage; s.workItem = job.item; s.turnError = turnError;
       s.searchCursor = e.climb.searchCursor; s.heading = e.heading;
       const away = Math.hypot(e.goalX - p.x, e.goalZ - p.z) > 0.18 || Math.abs(e.goalY - p.y) > 0.55;
-      const resting = !r.departPending && !e.loungeDepart && (e.lounge && e.rest > 0 || !e.motion.lab && !away && e.rest > 0);
+      const resting = !r.departPending && !e.loungeDepart && (e.lounge && e.rest > 0 || !e.motion.lab && !away && e.rest > 0
+        || e.motion.lab && e.phase === "work" && job.station < 0 && job.arrived && !away);
       const wantsMove = r.departPending || e.loungeDepart || e.climb.active || e.climb.searchPending || e.jump.active || e.drive.airborne
         || e.phase === "travel" || e.phase === "leave" || e.motion.lab && e.phase === "work" || away;
       // Escaping in circles must not pass as completing the blocked job.
@@ -5587,8 +5788,12 @@
         return;
       }
       s.time += dt;
-      if (!invalidExpired && !taskExpired && (s.time < 0.65 || s.stage && elapsed < s.retryAt || labEscape && e.motion.lab)) return;
+      if (!invalidExpired && !taskExpired && (s.time < 0.65 || s.stage && elapsed < s.retryAt
+        || labEscape && e.motion.lab && !enteringCave(e))) return;
       const hard = s.time >= 8 || taskExpired || invalidExpired, lab = e.motion.lab;
+      // An inward run never becomes a yielding/backout route. If its actual
+      // geometry remains blocked, bounded recovery places it inside instead.
+      if (!hard && enteringCave(e)) return;
       // A live climb may be paused between search slices. Replanning that
       // mid-wall pose as a ground walk is unsafe, so retain its grip until reset.
       if (!hard && (e.climb.active || e.jump.active || e.drive.airborne)) { s.stage = 1; s.retryAt = elapsed + 0.5; return; }
@@ -5609,7 +5814,7 @@
       e.climb.searchPending = e.climb.searchDeferred = e.climb.claimPending = e.climb.crestPending = false;
       e.climb.searchCursor = e.climb.retry = 0;
       if (climbTurn === e.index) climbTurn = -1;
-      e.blocked = e.stuckTime = e.retry = e.portalRetry = e.yieldFor = 0;
+      e.blocked = e.stuckTime = e.retry = e.portalRetry = 0;
       e.steerHeading = e.steerGoalX = e.steerGoalZ = NaN; e.backoutLeft = 0;
       e.lab.pathAt = 0; e.lab.targetX = e.lab.targetZ = NaN;
       if (hard || !lab) { e.hasSlot = false; e.slotIndex = -1; }
@@ -5618,15 +5823,11 @@
       if (hard) {
         if (labEscape === e) labEscape = null;
         s.escapeLeft = 0; s.taskTime = 0; s.taskActive = false;
-        // Activation already reserves a supported, collision-checked work or
-        // resting spot. If none fits it stays hidden and retries; never place a
-        // body inside another actor or scenery just to make a timeout pass.
+        // Recovery reserves a supported workstation or interior floor spot;
+        // equipment availability cannot send the worker to an outside queue.
         const soot = e.fire.soot, cooldown = e.fire.cooldown;
         e.climb.active = e.drive.passiveFall = false;
-        // An existing lab occupant need not join the entrance queue again to
-        // recover into a free workstation. Claimed stations, bodies and solid
-        // scenery still reject the candidate through the normal reservation.
-        activate(e, e.motion.lab && e.site === labSite);
+        activate(e);
         e.fire.soot = soot; e.fire.cooldown = cooldown;
         s.recoveries++; s.reason = "relocated"; s.time = s.invalidTime = 0; s.stage = 0;
         s.invalidX = s.invalidZ = NaN;
@@ -5710,10 +5911,18 @@
         }
       }
     };
+    const companionTarget = (cave, out) => {
+      const e = byOwner.get(cave);
+      if (!e || !e.active || e.mode !== "working") return false;
+      e.gorilla.bodyTarget(out);
+      return true;
+    };
     const target = (cave, out, sample = 0) => {
       const e = byOwner.get(cave);
       if (!e || !e.active || e.mode !== "working" || e.site !== cave.work.site
         || e.phase !== "work" && !(e.phase === "travel" && e.route === "enter")) return false;
+      const p = e.root.position;
+      if (e.site === labSite ? !insideLab(p.x, p.y, p.z) : caveAt(p.x, p.y, p.z) !== cave.work.site) return false;
       if (e.site === labSite) {
         // The entrance transforms incoming bananas; desk workers are never
         // projectile targets behind equipment or another scientist.
@@ -5721,8 +5930,6 @@
         out.y += 1.3 + (Math.sin(sample * 1.7 + e.index) * 0.5 + 0.5);
         return true;
       }
-      const p = e.root.position;
-      if (caveAt(p.x, p.y, p.z) !== cave.work.site) return false;
       e.gorilla.bodyTarget(out, sample);
       return true;
     };
@@ -5758,7 +5965,7 @@
       list.length = 0; byOwner.clear();
       portals.fill(null);
     };
-    return { list, sync, update, target, hit, plan, startLabShuttle, debugMove, cancelDebugMove, stats, liveGeometry, dispose, contactAt,
+    return { list, sync, update, target, companionTarget, hit, plan, startLabShuttle, debugMove, cancelDebugMove, stats, liveGeometry, dispose, contactAt,
       possess, release, respawn, control, cancelInput, smash, chestBeat, ignite, dropRoll, supportRemoved,
       get player() { return player; } };
   };

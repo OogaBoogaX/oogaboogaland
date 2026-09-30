@@ -263,9 +263,10 @@
     const N = 720, edge = new Float32Array(N);
     let reach = 0;
     for (let i = 0; i < N; i++) {
-      const a = (i / N - 0.5) * TAU, s = Math.sin(a), c = Math.cos(a);
+      // The outline once a bearing, not once a step: the same table, a tenth of the hub's build time for it.
+      const a = (i / N - 0.5) * TAU, s = Math.sin(a), c = Math.cos(a), o = outline(Math.atan2(s, c));
       let r = 0;
-      while (inside(s * (r + 0.05), c * (r + 0.05))) r += 0.05;
+      while (Math.hypot(s * (r + 0.05), c * (r + 0.05)) <= o) r += 0.05;
       edge[i] = r;
       reach = Math.max(reach, r);
     }
@@ -385,11 +386,11 @@
     if (wing > rim + HEAD_LAMP.u - HEAD_LAMP.side / 2 - 0.07) throw new Error(`₿IFRÖST's head pedestals stand ${(wing - rim).toFixed(2)} m past the rim, on a ridge wall`);
     // The islet's middle, with the deck running from the head's outer face to its front edge.
     const P = plan(), dist = rim + H.over + AXIS.deck + P.frontZ, x = ux * dist, z = uz * dist;
-    // The other islets stay well clear: the Mempool island and the launch islet where their spots put them, and the
-    // Timechain Sphere anywhere out along its bearing, since where it stands is its own build's to find.
-    const pool = BL.poolModels.spot(island, {}), launch = BL.rocketModels.siteSpot(island, {}), T = BL.timechainModels;
+    // The other islets stay well clear: the Mempool island where its spot puts it, and the Timechain Sphere anywhere
+    // out along its bearing, since where it stands is its own build's to find.
+    const pool = BL.poolModels.spot(island, {}), T = BL.timechainModels;
     const out = Math.max(0, x * T.DIR.x + z * T.DIR.z);
-    for (const [name, ox, oz, r] of [["Mempool island", pool.x, pool.z, BL.poolModels.SITE.isletR], ["launch islet", launch.x, launch.z, BL.rocketModels.SITE.isletR], ["Timechain Sphere", T.DIR.x * out, T.DIR.z * out, T.SITE.radius]]) {
+    for (const [name, ox, oz, r] of [["Mempool island", pool.x, pool.z, BL.poolModels.SITE.isletR], ["Timechain Sphere", T.DIR.x * out, T.DIR.z * out, T.SITE.radius]]) {
       const apart = Math.hypot(ox - x, oz - z) - r - P.reach;
       if (apart < CLEAR) throw new Error(`₿IFRÖST's islet comes within ${apart.toFixed(1)} m of the ${name}`);
     }
@@ -559,7 +560,7 @@
   const dress = cached(() => {
     const P = plan(), T = TERRACE, K = T.skin, G = GATE.stairs, LOW = [0.38, 0.37], TALL = [0.38, 0.37, 0.38, 0.37], DIRT = ROCK_TONES[R.DIRT], RISER = 0.12;
     const lamp = BG.lantern(), fire = BG.brazier(), banner = BG.runeBanner(1, "post");
-    const props = [], glass = [], fires = [], light = [vines().tips], blooms = [], shell = [], foliage = [], paving = geometry();
+    const props = [], marks = [], glass = [], fires = [], light = [vines().tips], blooms = [], shell = [], foliage = [], paving = geometry();
     const ground = (x, z, what, r) => {
       const y = P.soilAt(x, z);
       if (!(y >= 0) || P.soilAt(x - r, z - r) !== y || P.soilAt(x + r, z - r) !== y || P.soilAt(x + r, z + r) !== y || P.soilAt(x - r, z + r) !== y) {
@@ -639,7 +640,8 @@
     for (const [x, z] of FRONT_BANNERS) {
       const out = Math.sign(x), y = ground(x - 0.72, z, "banner post", 0.12);
       if (ground(x + 0.72, z, "banner post", 0.12) !== y) throw new Error(`₿IFRÖST's banner at ${x}, ${z} straddles two levels`);
-      props.push(put(gallows(), x, y, z, out > 0 ? 0 : Math.PI), put(banner.cloth, x, y + 2.94, z + 0.1), put(banner.mark, x, y + 2.94, z + 0.1), put(banner.rod, x, y + 2.94, z + 0.1));
+      props.push(put(gallows(), x, y, z, out > 0 ? 0 : Math.PI), put(banner.cloth, x, y + 2.94, z + 0.1), put(banner.rod, x, y + 2.94, z + 0.1));
+      marks.push(put(banner.mark, x, y + 2.94, z + 0.1));
       lantern(x + out * GALLOWS_HANG.x, y + GALLOWS_HANG.y, z);
       for (const s of [-1, 1]) shell.push(block(x + s * 0.72 - 0.12, x + s * 0.72 + 0.12, y - 0.2, y + 3.2, z - 0.12, z + 0.12));
     }
@@ -674,8 +676,10 @@
     FLOWERS.forEach(([x, z], i) => flowerPatch(blooms, x, ground(x, z, "flower patch", 0.3), z, 40 + i));
     // Where the falls pour, and their lips over the rim.
     for (const f of P.falls) light.push(put(fallLip(), f.x, 0, f.z, f.ry));
+    const bannerMarks = noShadow(merge(...marks));
+    bannerMarks.depthOffset = true;
     return {
-      props: merge(...props), flags: noShadow(paving), flowers: noShadow(merge(...blooms)), glass: noShadow(merge(...glass)), fire: noShadow(merge(...fires)),
+      props: merge(...props), bannerMarks, flags: noShadow(paving), flowers: noShadow(merge(...blooms)), glass: noShadow(merge(...glass)), fire: noShadow(merge(...fires)),
       light: noShadow(merge(...light)), shell, foliage, falls: P.falls
     };
   });
@@ -838,6 +842,7 @@
     const decor = [
       hidden(D.props), hidden(D.flags), hidden(D.flowers), hidden(curtains()), hidden(vines().vines), hidden(D.light),
       hidden(G.trims, atGate()), hidden(G.banners, atGate()), hidden(G.light, atGate()), hidden(G.field, atGate()),
+      hidden(D.bannerMarks, { depthBias: -0.3 }), hidden(G.bannerMarks, { ...atGate(), depthBias: -0.3 }),
       hidden(B.trims), hidden(B.panes), hidden(B.paving), ...D.foliage.map(plant)
     ];
     const lamps = [hidden(G.glow, atGate()), hidden(D.glass), hidden(D.fire), hidden(B.glass), hidden(B.lights)];

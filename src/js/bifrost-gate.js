@@ -236,8 +236,9 @@
   // A banner as the concept hangs them, `scale` times one 1.1 m wide and 2.6 m from its rod at the origin to its point:
   // navy cloth edged in gold and cut to a point with a gold drop at its tip (`cloth`), its white mark on both faces, each
   // reading true from its own side (`mark`, apart so Canvas 2D can sort it before the cloth), and the gilt rod with its
-  // knobs (`rod`). Cached by mark and scale.
-  const BANNER = { w: 1.1, h: 2.6, tail: 0.42, top: -0.06, hem: 0.085, t: 0.02 };
+  // knobs (`rod`). Cached by mark and scale. The mark stands `lift` off the cloth: a few millimetres fight the cloth in
+  // the depth buffer from afar under the close camera's 0.06 m near plane, and flicker as the view turns.
+  const BANNER = { w: 1.1, h: 2.6, tail: 0.42, top: -0.06, hem: 0.085, t: 0.02, lift: 0.015 };
   // The marks the concept's banners carry, drawn in thick square-ended strokes. Each stroke is [x0, y0, x1, y1] in stave
   // lengths, up from the stave's foot (y 0) to its head (y 1), and each mark gives, on a banner of scale 1, how far
   // below the rod the stave's head hangs (`head`), the stave's length (`len`), the strokes' width (`w`) and how far the
@@ -270,19 +271,25 @@
     }
   };
   const bannerCache = new Map();
+  // Painted runes keep their own batch so the depth offset never pulls the cloth forward too.
+  const bannerMarks = (parts) => {
+    const geo = noShadow(merge(...parts));
+    geo.depthOffset = true;
+    return geo;
+  };
   const runeBanner = (scale = 1, mark = "gate") => {
     const key = `${mark}|${scale}`;
     if (bannerCache.has(key)) return bannerCache.get(key);
     const M = MARKS[mark];
     if (!M) throw new Error(`No banner mark "${mark}"`);
-    const { w, h, tail, top, hem, t } = BANNER, cloth = geometry(), rune = geometry();
+    const { w, h, tail, top, hem, t, lift } = BANNER, cloth = geometry(), rune = geometry();
     const outer = [[-w / 2, top], [w / 2, top], [w / 2, top - h + tail], [0, top - h], [-w / 2, top - h + tail]], inner = inset(outer, hem);
     const at = (u, v, side) => [side * (M.dx + u) * M.len, M.head + (v - 1) * M.len];
     for (const side of [1, -1]) {
       const flat = (pts, color, emissive) => facing(cloth, pts.map(([x, y]) => [x, y, side * t]), color, emissive, 0, top - h / 2, side * 5);
       flat(inner, NAVY, 0.05);
       outer.forEach((p, k) => { const k2 = (k + 1) % outer.length; flat([p, outer[k2], inner[k2], inner[k]], GOLD, 0.25); });
-      for (const [u0, v0, u1, v1] of M.strokes) bar(rune, ...at(u0, v0, side), ...at(u1, v1, side), M.w, side * (t + 0.004), RUNE_WHITE, 0.35, side);
+      for (const [u0, v0, u1, v1] of M.strokes) bar(rune, ...at(u0, v0, side), ...at(u1, v1, side), M.w, side * (t + lift), RUNE_WHITE, 0.35, side);
     }
     const drop = moved(lathe({ profile: [[0, 0.02], [0.08, -0.08], [0, -0.22]], segments: 4, color: GOLD_LT, emissive: 0.3 }), 0, top - h, 0);
     const knob = () => lathe({ profile: [[0, -0.09], [0.075, -0.04], [0.075, 0.04], [0, 0.09]], segments: 6, color: GOLD, emissive: 0.25 });
@@ -463,7 +470,7 @@
   // Everything of the gate, built once a page in its frame.
   const build = cached(() => {
     const { back } = GATE, S = ENTRY.spring, F = GATE.fieldZ, M = GATE.medallion, Sp = GATE.spire;
-    const stone = [mass(), stairs()], trims = [], cloth = [], glow = [];
+    const stone = [mass(), stairs()], trims = [], cloth = [], marks = [], glow = [];
     const frame = geometry(), gilt = geometry(), lit = [];
 
     // The portal's frame: the gold trim round the opening, the rune band, navy and faintly aglow over the arch and dark
@@ -526,7 +533,8 @@
     // wall between the candle pillars, each on its rod held off the wall by iron stubs.
     const hang = (scale, mark, x, y, wall, rear) => {
       const b = runeBanner(scale, mark), z = rear ? wall - 0.13 : wall + 0.13, place = (geo) => moved(rear ? turnedY(merge(geo), Math.PI) : merge(geo), x, y, z);
-      cloth.push(place(b.cloth), place(b.mark));
+      cloth.push(place(b.cloth));
+      marks.push(place(b.mark));
       trims.push(place(b.rod));
       for (const sx of [-1, 1]) trims.push(FM.beam(x + sx * (BANNER.w / 2 + 0.05) * scale, y, wall, x + sx * (BANNER.w / 2 + 0.05) * scale, y, z, 0.06, IRON));
     };
@@ -578,7 +586,7 @@
     const geo = merge(...stone);
     geo.collisionGeometry = shell();
     return {
-      stone: geo, trims: merge(...trims), banners: merge(...cloth), glow: noShadow(merge(...glow)), light: noShadow(merge(...lit)), field: field()
+      stone: geo, trims: merge(...trims), banners: merge(...cloth), bannerMarks: bannerMarks(marks), glow: noShadow(merge(...glow)), light: noShadow(merge(...lit)), field: field()
     };
   });
 
@@ -599,11 +607,10 @@
     half: 2, spring: 4, crown: 4.7, ring: 0.28, tower: 2.5, deep: 0.75, towerTop: 5.75, cap: 0.25, plinth: 0.45, pier: 3.5, front: 1, pierTop: 4.25,
     buried: 1, lip: 0.08, block: 0.25, band: 2.2, proud: 0.2, set: 0.25, course: 0.3, trim: 0.22, top: 6, ends: 5.55
   };
-  // On the band: the name, its cap height and baseline; either side of it a rune on a faintly glowing square `glow` on a
-  // side, the middle of each, its stave's length and its stroke, drawn four tenths as wide again as the banners' to fill
-  // the square as the concept's do; and the keystone's gold plate, its width, how far under the crown it hangs and its
-  // top, with its diamond's half-height.
-  const NAMEPLATE = { cap: 0.5, base: 5.02, runeX: 1.65, runeY: 5.05, glow: 0.66, stave: 0.58, stroke: 0.045, key: 0.46, hang: 0.15, keyTop: 5, diamond: 0.12 };
+  // On the band: the name, its cap height and baseline; either side of it a rune on a faintly glowing disc `glow` across,
+  // the middle of each, its stave's length and its stroke, drawn four tenths as wide again as the banners'; and the
+  // keystone's gold plate, its width, how far under the crown it hangs and its top, with its diamond's half-height.
+  const NAMEPLATE = { cap: 0.5, base: 5.12, runeX: 1.65, runeY: 5.05, glow: 0.56, stave: 0.396, stroke: 0.0306, key: 0.46, hang: 0.15, keyTop: 5, diamond: 0.12 };
   // The parapet over the band, set back behind its face: a course `half` either side and `deep` either side of the line,
   // from `from` inside the lintel up to `course`, and on it the merlons [out from, out to, top] mirrored about the
   // middle, stepping up to the dark pair either side of the crystals.
@@ -692,7 +699,7 @@
   // The arch at the head of Bifröst, built once a page: the solid `stone` over a closed shell (the towers and piers with
   // their capitals and plinths, the lintel and the band over the opening in columns cut on the curve, the band's ends,
   // the keystone, the parapet, the crystals and the lanterns' stones), the `trims` (gold, the runes' squares, lantern
-  // bodies, the banners' rods and marks, vines and moss), the `banners`' cloth, the dusk-lit `glow` (the lanterns' glass)
+  // bodies, the banners' rods, vines and moss), the `banners`' cloth and painted `bannerMarks`, the dusk-lit `glow` (the lanterns' glass)
   // and the always-lit `light` (the name, the runes, the diamond and the crystals); and what the hub places it by, in
   // its frame: the opening's half-width, the jambs' top (`spring`) and the curve's (`crown`), the top of its crystals,
   // the height of its middle, the glass its dusk sparks fly from (`spark`), the point its warm light pools from
@@ -700,7 +707,7 @@
   // box round a piece of its shell, or Infinity.
   const landmark = cached(() => {
     const A = ARCH, N = NAMEPLATE, P = PARAPET, face = A.deep + A.proud, back = A.deep - A.set, front = face + 0.1;
-    const stone = [archPillars()], trims = [], cloth = [], glow = [], lit = [], shellParts = [], bounds = [];
+    const stone = [archPillars()], trims = [], cloth = [], marks = [], glow = [], lit = [], shellParts = [], bounds = [];
     const span = (s, a, b) => s > 0 ? [a, b] : [-b, -a];
     // A piece of the shell, closed and convex, with the box round it kept for picking.
     const solid = (geo) => {
@@ -761,10 +768,10 @@
       solid(block(-N.key / 2, N.key / 2, y0, N.keyTop, face - 0.05, z));
       solid(block(-0.07, 0.07, y0 - 0.11, y0, face - 0.03, face + 0.09));
     }
-    // Either side of the name the banners' bind rune in blue on a square of faint blue.
+    // Either side of the name the banners' bind rune in blue on a disc of faint blue.
     for (const s of [-1, 1]) {
       const x = s * N.runeX, y = N.runeY, z = face + 0.02, w = N.stroke;
-      trims.push(box({ w: N.glow, h: N.glow, d: 0.02, color: RUNE_SQUARE, emissive: 0.06, offset: { x, y, z: face + 0.01 } }));
+      trims.push(moved(disc(N.glow / 2, 0.02, RUNE_SQUARE, 0.06), x, y, face + 0.01));
       for (const [u0, v0, u1, v1] of MARKS.gate.strokes) {
         const p = (u, v) => [x + u * N.stave * 1.4, y + (v - 0.5) * N.stave, z + w / 2];
         lit.push(stroke(p(u0, v0), p(u1, v1), w, BLUE, 1));
@@ -806,12 +813,13 @@
     }
     solid(block(extent[0], extent[1], crest, peak, extent[2], extent[3]));
 
-    // The banners on the piers' faces, each on its rod held off the stone by iron stubs, their marks with the trims.
+    // The banners on the piers' faces, each on its rod held off the stone by iron stubs, with the painted marks separate.
     const flag = runeBanner(ARCH_BANNER.scale, "gate"), hangZ = A.front + 0.13;
     for (const s of [-1, 1]) {
       const x = s * ARCH_BANNER.x, y = ARCH_BANNER.y;
       cloth.push(moved(merge(flag.cloth), x, y, hangZ));
-      trims.push(moved(merge(flag.mark), x, y, hangZ), moved(merge(flag.rod), x, y, hangZ));
+      marks.push(moved(merge(flag.mark), x, y, hangZ));
+      trims.push(moved(merge(flag.rod), x, y, hangZ));
       for (const e of [-1, 1]) trims.push(FM.beam(x + e * (BANNER.w / 2 + 0.05) * ARCH_BANNER.scale, y, A.front, x + e * (BANNER.w / 2 + 0.05) * ARCH_BANNER.scale, y, hangZ, 0.06, IRON));
     }
 
@@ -841,9 +849,25 @@
       ARCH_MOSS.forEach(([x, y, z, w, d], i) => trims.push(box({ w, h: 0.1, d, color: MOSS[i % 3], offset: { x: s * x, y: y + 0.05, z } })));
     }
 
-    // The name in chiselled gold, its chamfers and walls laid in the concept's golds and all brightened to glow warm,
-    // with the lit parts laid in flat.
-    const name = moved(BM.word("₿IFRÖST", N.cap), 0, N.base, face), gilds = NAME_GILT.recolour.map(([a, b]) => [hexToRgb(a), hexToRgb(b)]);
+    // Keep each chiselled letter rigid at its original cap height along a baseline concentric with the opening.
+    // Centre each visible glyph in an equal-width slot along the curve, with a tighter slot for the narrow I.
+    // Its tangent turns the letter without warping the strokes; the baseline clears the bitcoin's descenders.
+    const letters = [..."₿IFRÖST"], textRadius = R + N.base - A.crown, parts = [];
+    const slots = letters.map(ch => (ch === "I" ? 0.42 : 0.74) * N.cap / textRadius);
+    let along = -slots.reduce((sum, slot) => sum + slot, 0) / 2;
+    for (let j = 0; j < letters.length; j++) {
+      const glyph = BM.word(letters[j], N.cap), v = glyph.verts;
+      let lo = Infinity, hi = -Infinity;
+      for (let i = 0; i < v.length; i += 3) {
+        const a = Math.atan2(v[i], textRadius + v[i + 1]);
+        lo = Math.min(lo, a); hi = Math.max(hi, a);
+      }
+      const a = along + slots[j] / 2 - (lo + hi) / 2;
+      parts.push(moved(turnedZ(glyph, -a), textRadius * Math.sin(a), cy + textRadius * Math.cos(a), face));
+      along += slots[j];
+    }
+    const name = noShadow(merge(...parts)), gilds = NAME_GILT.recolour.map(([a, b]) => [hexToRgb(a), hexToRgb(b)]);
+    name.smooth = true;
     for (const f of name.faces) {
       f.emissive = Math.min(1, f.emissive * NAME_GILT.glow);
       for (const [from, to] of gilds) if (f.color[0] === from[0] && f.color[1] === from[1] && f.color[2] === from[2]) f.color = to;
@@ -852,6 +876,9 @@
 
     const geo = merge(...stone), shell = merge(...shellParts), V = shell.verts, B = Float64Array.from(bounds);
     geo.collisionGeometry = shell;
+    // The quarter-unit pillars share planes with the island's pass walls and ridge. Prefer their dressed stone at
+    // those joins, without moving the shell or letting it draw through rock that actually stands in front.
+    geo.depthOffset = true;
     let radius = 0;
     for (let i = 0; i < V.length; i += 3) radius = Math.max(radius, Math.hypot(V[i], V[i + 2]));
     const pick = (ox, oy, oz, dx, dy, dz) => {
@@ -873,7 +900,7 @@
       return best;
     };
     return {
-      stone: geo, trims: merge(...trims), banners: merge(...cloth), glow: noShadow(merge(...glow)), light: name,
+      stone: geo, trims: merge(...trims), banners: merge(...cloth), bannerMarks: bannerMarks(marks), glow: noShadow(merge(...glow)), light: name,
       opening: { half: A.half, spring: A.spring, crown: A.crown }, top: peak, middle: peak / 2, spark, pool: ARCH_LIGHT, reach: radius, pick
     };
   });

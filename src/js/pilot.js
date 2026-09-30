@@ -1471,8 +1471,7 @@
       const reload = secondaryReady && weapon.equipped && crew.canReload(cave);
       hud.setPrimary(primaryReady, !!weapon && !weapon.equipped, primaryReady ? cave.parts.club.geometry : null,
         weapon ? weapon.meleeCharge : 0, !!weapon && weapon.meleeHeld,
-        weapon && weapon.meleeTime > 0 && !(weapon.meleeHeld && weapon.meleeHeldTime < BL.crew.MELEE_TAP_TIME)
-          ? weapon.meleePower : 0.5, !!weapon && weapon.aiming, cave ? cave.traits.name : "");
+        weapon ? crew.meleePower(cave) : 1, !!weapon && weapon.aiming, cave ? cave.traits.name : "");
       hud.setWeapon(secondaryReady, !!weapon && weapon.equipped, weapon ? weapon.ammo : 0, !!weapon && weapon.reloading, reload, !!weapon && weapon.unlimited);
       const count = secondaryReady && crew ? crew.magazineCount(cave) : 0, canSwap = !!crew && secondaryReady && crew.canSwapMagazine(cave);
       hud.setMagazine(count, crew ? crew.magazineAmmo(cave, 0) : 0, crew ? crew.magazineAmmo(cave, 1) : 0, canSwap,
@@ -1545,7 +1544,7 @@
         syncAim();
         if (armed() && cave.weapon.equipped) lockAim();
         if (cave.weapon.equipped) hud.hint(armed() ? "Left-click bursts · F rifle strike · zoom: tap one shot, hold for auto · 1 melee · 2 AK · scroll to change view · Space reloads or jumps / jetpacks" : "AK equipped · right-click or scroll in to aim · 1 melee · Space reloads beside the pile or jumps / jetpacks");
-        else hud.hint(armed() ? "Hold left-click to raise the club · release to strike · right-click focuses a harder swing · 2 AK · scroll out for navigation" : "Club equipped · right-click or scroll in to aim · 2 AK");
+        else hud.hint(armed() ? "Hold left-click to raise the club · release to strike · allow 0.2s between hits for full power · 2 AK · scroll out for navigation" : "Club equipped · right-click or scroll in to aim · 2 AK");
       } else if (action === "weapon-fire") {
         if (cave.weapon.primaryEquipped) crew.swingWeapon(cave, false, ads);
         else if (!(held ? crew.setWeaponTrigger(true, ads) : crew.fireWeapon(cave, null, ads ? 1 : undefined)) && cave.weapon.equipped && !cave.weapon.unlimited && !cave.weapon.ammo) hud.hint("Empty magazine · press Space within reach of the pile to reload");
@@ -1571,7 +1570,7 @@
       syncAim();
       if (armed()) lockAim();
       syncWeaponHud();
-      hud.hint(armed() ? slot === 1 ? "Hold left-click to raise the club · release to strike · right-click focuses a harder swing · 2 AK · scroll out for navigation" : "Left-click bursts · F rifle strike · zoom: tap one shot, hold for auto · 1 melee · scroll out for navigation · Space reloads beside the pile" : "1 melee · 2 AK · right-click or scroll in to aim · Space reloads beside the pile or jumps / jetpacks");
+      hud.hint(armed() ? slot === 1 ? "Hold left-click to raise the club · release to strike · allow 0.2s between hits for full power · 2 AK · scroll out for navigation" : "Left-click bursts · F rifle strike · zoom: tap one shot, hold for auto · 1 melee · scroll out for navigation · Space reloads beside the pile" : "1 melee · 2 AK · right-click or scroll in to aim · Space reloads beside the pile or jumps / jetpacks");
       if (ctx.reloadAnywhere) hud.hint("1 melee · 2 AK · right-click to aim · F rifle strike · V fire · R reload · Space use / reload / jump");
       return true;
     };
@@ -1648,10 +1647,8 @@
         zoomPitchVelocity = 0;
         if (birdsEye()) overheadHeight = overheadWanted = overheadMin;
         else {
-          if (carryExitMode !== 1) {
-            beginCenteredCarry(cave);
-            orbit.tPitch = Math.PI / 2;
-          }
+          // Carry leaves shoulder through syncAim's swooping orbit handoff.
+          // Only combat enters the overhead camera; do not force carry to its pole.
           orbit.tDist = carryOrbitMin;
         }
         restoreHead();
@@ -2934,7 +2931,7 @@
       restoreHead();
       hud.el.act.hidden = true;
       hud.setAct(ACT_DO);
-      hud.setPrimary(false, false, null, 0, false, 0.5, false);
+      hud.setPrimary(false, false, null, 0, false, 1, false);
       hud.setWeapon(false, false, 0);
       hud.setMagazine(0, 0, 0, false);
       if (hud.setMode) hud.setMode(null, false, "detached", false);

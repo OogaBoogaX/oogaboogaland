@@ -152,12 +152,30 @@
 
     <header class="topbar">
       <div class="brand">
-        <h1><span data-sign>Ooga Booga Land</span></h1>
+        <h1><a class="home-link" href="./" title="Back to the island"><span data-sign>Ooga Booga Land</span></a></h1>
         <p data-scene="hub" id="subtitle">an island of caves</p>
         <p data-scene="lab" hidden>EntropyLab cave</p>
         <p data-scene="pool" hidden>Mempool cave</p>
         <p data-scene="factory" hidden>Lightning Factory</p>
         <p data-scene="bifrost" hidden>₿IFRÖST</p>
+        <p data-scene="arcade" hidden>Ooga Arcade</p>
+        <p data-scene="skee" hidden>Ooga Arcade · Thro-ball</p>
+        <p data-scene="hoops" hidden>Ooga Arcade · Hoop Shot</p>
+        <p data-scene="shy" hidden>Ooga Arcade · Coconut Toss</p>
+        <p data-scene="claw" hidden>Ooga Arcade · Claw Machine</p>
+        <p data-scene="hockey" hidden>Ooga Arcade · Air Hockey</p>
+        <p data-scene="billiards" hidden>Ooga Arcade · Pool</p>
+        <p data-scene="darts" hidden>Ooga Arcade · Darts</p>
+        <p data-scene="pinball" hidden>Ooga Arcade · Pinball</p>
+        <p data-scene="ride" hidden>Ooga Arcade · Beast Ride</p>
+        <p data-scene="invaders" hidden>Ooga Arcade · Coconut Invaders</p>
+        <p data-scene="snake" hidden>Ooga Arcade · Banana Snake</p>
+        <p data-scene="pong" hidden>Ooga Arcade · Ooga Pong</p>
+        <p data-scene="stampede" hidden>Ooga Arcade · Mammoth Stampede</p>
+        <p data-scene="flap" hidden>Ooga Arcade · Ptero Flap</p>
+        <p data-scene="breaker" hidden>Ooga Arcade · Rock Breaker</p>
+        <p data-scene="dash" hidden>Ooga Arcade · Dino Dash</p>
+        <p data-scene="stacker" hidden>Ooga Arcade · Stone Stacker</p>
       </div>
       <time class="world-clock" id="world-clock" aria-label="Local time"></time>
       <div class="world-block" id="world-block" aria-live="polite" aria-label="Bitcoin block height unavailable">
@@ -189,6 +207,82 @@
         <button type="button" data-preset="lines">Lines</button>
         <button type="button" data-preset="forge">Forge</button>
         <button type="button" data-preset="treasury">Treasury</button>
+        <button type="button" class="leave" data-action="leave">Leave<span> cave</span></button>
+      </nav>
+      <nav class="presets" aria-label="Thro-ball" data-scene="skee" hidden>
+        <button type="button" data-action="carnival-mute">Sound</button>
+        <button type="button" class="leave" data-action="leave">Arcade</button>
+      </nav>
+      <nav class="presets" aria-label="Hoop Shot" data-scene="hoops" hidden>
+        <button type="button" data-action="carnival-mute">Sound</button>
+        <button type="button" class="leave" data-action="leave">Arcade</button>
+      </nav>
+      <nav class="presets" aria-label="Coconut Toss" data-scene="shy" hidden>
+        <button type="button" data-action="carnival-mute">Sound</button>
+        <button type="button" class="leave" data-action="leave">Arcade</button>
+      </nav>
+      <nav class="presets" aria-label="Claw Machine" data-scene="claw" hidden>
+        <button type="button" data-action="carnival-mute">Sound</button>
+        <button type="button" class="leave" data-action="leave">Arcade</button>
+      </nav>
+      <nav class="presets" aria-label="Air Hockey" data-scene="hockey" hidden>
+        <button type="button" data-action="carnival-mute">Sound</button>
+        <button type="button" class="leave" data-action="leave">Arcade</button>
+      </nav>
+      <nav class="presets" aria-label="Pool" data-scene="billiards" hidden>
+        <button type="button" data-action="carnival-mute">Sound</button>
+        <button type="button" class="leave" data-action="leave">Arcade</button>
+      </nav>
+      <nav class="presets" aria-label="Darts" data-scene="darts" hidden>
+        <button type="button" data-action="carnival-mute">Sound</button>
+        <button type="button" class="leave" data-action="leave">Arcade</button>
+      </nav>
+      <nav class="presets" aria-label="Pinball" data-scene="pinball" hidden>
+        <button type="button" data-action="carnival-mute">Sound</button>
+        <button type="button" class="leave" data-action="leave">Arcade</button>
+      </nav>
+      <nav class="presets" aria-label="Beast Ride" data-scene="ride" hidden>
+        <button type="button" data-action="carnival-mute">Sound</button>
+        <button type="button" class="leave" data-action="leave">Arcade</button>
+      </nav>
+      <nav class="presets" aria-label="Coconut Invaders" data-scene="invaders" hidden>
+        <button type="button" data-action="carnival-mute">Sound</button>
+        <button type="button" class="leave" data-action="leave">Arcade</button>
+      </nav>
+      <nav class="presets" aria-label="Banana Snake" data-scene="snake" hidden>
+        <button type="button" data-action="carnival-mute">Sound</button>
+        <button type="button" class="leave" data-action="leave">Arcade</button>
+      </nav>
+      <nav class="presets" aria-label="Ooga Pong" data-scene="pong" hidden>
+        <button type="button" data-action="carnival-mute">Sound</button>
+        <button type="button" class="leave" data-action="leave">Arcade</button>
+      </nav>
+      <nav class="presets" aria-label="Mammoth Stampede" data-scene="stampede" hidden>
+        <button type="button" data-action="carnival-mute">Sound</button>
+        <button type="button" class="leave" data-action="leave">Arcade</button>
+      </nav>
+      <nav class="presets" aria-label="Ptero Flap" data-scene="flap" hidden>
+        <button type="button" data-action="carnival-mute">Sound</button>
+        <button type="button" class="leave" data-action="leave">Arcade</button>
+      </nav>
+      <nav class="presets" aria-label="Rock Breaker" data-scene="breaker" hidden>
+        <button type="button" data-action="carnival-mute">Sound</button>
+        <button type="button" class="leave" data-action="leave">Arcade</button>
+      </nav>
+      <nav class="presets" aria-label="Dino Dash" data-scene="dash" hidden>
+        <button type="button" data-action="carnival-mute">Sound</button>
+        <button type="button" class="leave" data-action="leave">Arcade</button>
+      </nav>
+      <nav class="presets" aria-label="Stone Stacker" data-scene="stacker" hidden>
+        <button type="button" data-action="carnival-mute">Sound</button>
+        <button type="button" class="leave" data-action="leave">Arcade</button>
+      </nav>
+      <nav class="presets" aria-label="Ooga Arcade" data-scene="arcade" hidden>
+        <button type="button" data-preset="cabinets">Games</button>
+        <button type="button" data-preset="hoops">Hoop</button>
+        <button type="button" data-preset="skee">Thro</button>
+        <button type="button" data-preset="shy">Coconuts</button>
+        <button type="button" data-action="arcade-mute">Sound</button>
         <button type="button" class="leave" data-action="leave">Leave<span> cave</span></button>
       </nav>
       <nav class="presets" aria-label="Race" data-scene="race" hidden>
@@ -364,7 +458,7 @@
         <span class="weapon-toggle"><canvas class="primary-icon" id="primary-icon" width="48" height="48" aria-hidden="true"></canvas></span>
         <span class="equipment-compact primary-readout">
           <span class="primary-strength" id="primary-strength" role="meter" aria-label="Melee hit strength"
-            aria-valuemin="50" aria-valuemax="200" aria-valuenow="50" aria-valuetext="50% of normal swing damage">
+            aria-valuemin="25" aria-valuemax="200" aria-valuenow="100" aria-valuetext="100% of normal swing damage">
             <span class="primary-strength-fill" id="primary-strength-fill"></span>
           </span>
         </span>
@@ -636,6 +730,308 @@
           <button type="button" data-action="drop-again">Again</button>
           <button type="button" data-action="drop-board">Board</button>
           <button type="button" data-action="leave">Exit Game</button>
+        </div>
+      </section>
+    </div>
+    <div class="race arcade-ui" id="arcade-ui" data-scene="arcade" hidden>
+      <section class="race-results prize-panel" id="prize-panel" hidden aria-label="Prize counter">
+        <h2><span data-sign>Prize counter</span></h2>
+        <p class="prize-balance">Ooga got <b id="prize-tickets">0</b> tickets</p>
+        <ul class="prize-grid">
+          <li class="prize" data-prize="banana-plush"><svg class="prize-icon" viewBox="0 0 9 9" shape-rendering="crispEdges" aria-hidden="true"><path fill="#f5d142" d="M7 0h1v2H7zM6 2h2v2H6zM5 4h2v1H5zM4 5h2v1H4zM1 6h4v1H1zM0 7h3v1H0z" /><path fill="#6b4a26" d="M7 0h1v1H7z" /></svg><b>Banana plush</b><small><span class="prize-cost">30</span> tickets</small><button type="button" class="prize-buy" data-prize="banana-plush" data-cost="30">Trade</button></li>
+          <li class="prize" data-prize="coconut-cup"><svg class="prize-icon" viewBox="0 0 9 9" shape-rendering="crispEdges" aria-hidden="true"><path fill="#c8583a" d="M6 0h1v3H6z" /><path fill="#6b4a26" d="M2 3h5v1H2zM1 4h7v3H1zM2 7h5v1H2z" /><path fill="#f3efe4" d="M2 4h5v1H2z" /></svg><b>Coconut cup</b><small><span class="prize-cost">60</span> tickets</small><button type="button" class="prize-buy" data-prize="coconut-cup" data-cost="60">Trade</button></li>
+          <li class="prize" data-prize="bone-kazoo"><svg class="prize-icon" viewBox="0 0 9 9" shape-rendering="crispEdges" aria-hidden="true"><path fill="#efe6d2" d="M0 2h2v2H0zM0 5h2v2H0zM2 3h5v3H2zM7 2h2v2H7zM7 5h2v2H7z" /></svg><b>Bone kazoo</b><small><span class="prize-cost">100</span> tickets</small><button type="button" class="prize-buy" data-prize="bone-kazoo" data-cost="100">Trade</button></li>
+          <li class="prize" data-prize="gold-sticker"><svg class="prize-icon" viewBox="0 0 9 9" shape-rendering="crispEdges" aria-hidden="true"><path fill="#c9a36a" d="M3 0h3v1H3zM3 1h1v1H3zM5 1h1v1H5z" /><path fill="#efe6d2" d="M4 1h1v1H4z" /><path fill="#f2dcc2" d="M2 2h5v1H2zM1 3h7v4H1zM2 7h5v1H2z" /><path fill="#d9953a" d="M2 3h5v1H2zM2 4h1v3H2zM6 4h1v3H6zM4 5h1v2H4zM5 6h1v1H5z" /></svg><b>Shell charm</b><small><span class="prize-cost">150</span> tickets</small><button type="button" class="prize-buy" data-prize="gold-sticker" data-cost="150">Trade</button></li>
+          <li class="prize" data-prize="gorilla-plush"><svg class="prize-icon" viewBox="0 0 9 9" shape-rendering="crispEdges" aria-hidden="true"><path fill="#3a3530" d="M1 0h2v2H1zM6 0h2v2H6zM2 1h5v4H2zM1 5h7v4H1z" /><path fill="#8a7a6a" d="M3 3h3v2H3z" /></svg><b>Gorilla idol</b><small><span class="prize-cost">250</span> tickets</small><button type="button" class="prize-buy" data-prize="gorilla-plush" data-cost="250">Trade</button></li>
+          <li class="prize" data-prize="crown"><svg class="prize-icon" viewBox="0 0 9 9" shape-rendering="crispEdges" aria-hidden="true"><path fill="#d8563a" d="M2 1h1v4H2z" /><path fill="#f2e8d0" d="M4 1h1v4H4z" /><path fill="#3a3432" d="M4 0h1v1H4z" /><path fill="#e0a040" d="M6 1h1v4H6z" /><path fill="#efe6d2" d="M1 5h1v1H1zM3 5h1v1H3zM5 5h1v1H5zM7 5h1v1H7z" /><path fill="#7a4a26" d="M1 6h7v2H1z" /><path fill="#d9a441" d="M3 6h3v1H3z" /></svg><b>Feather crown</b><small><span class="prize-cost">500</span> tickets</small><button type="button" class="prize-buy" data-prize="crown" data-cost="500">Trade</button></li>
+        </ul>
+        <p class="help">Every game pays tickets. Trade for loot!</p>
+        <div class="actions"><button type="button" class="prize-close">Ooga done</button></div>
+      </section>
+    </div>
+    <div class="race carnival" id="carnival" hidden>
+      <div class="carnival-flash" id="carnival-flash" aria-hidden="true"></div>
+      <div class="race-strip">
+        <div class="race-hud race-hud-left carnival-scores">
+          <div class="carnival-scoreline">
+            <div class="race-lap carnival-score"><span>Score</span><b id="carnival-score">0</b></div>
+            <div class="race-lap carnival-best" id="carnival-best-box"><span>Best</span><b id="carnival-best">0</b></div>
+          </div>
+          <div class="carnival-goal" aria-hidden="true"><span class="carnival-goal-fill" id="carnival-goal-fill"></span><svg class="carnival-goal-star" viewBox="0 0 9 9" shape-rendering="crispEdges" data-lit="false"><path d="M4 0h1v2H4zM3 2h3v1H3zM0 3h9v1H0zM1 4h7v1H1zM2 5h5v1H2zM1 6h3v2H1zM5 6h3v2H5z" /></svg><svg class="carnival-goal-star" viewBox="0 0 9 9" shape-rendering="crispEdges" data-lit="false"><path d="M4 0h1v2H4zM3 2h3v1H3zM0 3h9v1H0zM1 4h7v1H1zM2 5h5v1H2zM1 6h3v2H1zM5 6h3v2H5z" /></svg><svg class="carnival-goal-star" viewBox="0 0 9 9" shape-rendering="crispEdges" data-lit="false"><path d="M4 0h1v2H4zM3 2h3v1H3zM0 3h9v1H0zM1 4h7v1H1zM2 5h5v1H2zM1 6h3v2H1zM5 6h3v2H5z" /></svg></div>
+          <div class="carnival-record" id="carnival-record" hidden>New best!</div>
+        </div>
+        <div class="race-hud race-hud-right">
+          <div class="race-lap"><span id="carnival-left-label">Coconuts</span><b id="carnival-left">0</b></div>
+          <div class="race-lap"><span id="carnival-round-label">Round</span><b id="carnival-round">1</b></div>
+          <div class="race-lap" id="carnival-need" hidden><span id="carnival-need-label">Need</span><b id="carnival-target">0</b></div>
+        </div>
+      </div>
+      <div class="carnival-streak" id="carnival-streak" hidden>On fire!</div>
+      <div class="race-center carnival-pop" id="carnival-pop" hidden>&nbsp;</div>
+      <div class="carnival-combo" id="carnival-combo" hidden>&nbsp;</div>
+      <div class="carnival-meter" id="carnival-meter" hidden aria-hidden="true"><span class="carnival-window" id="carnival-window"></span><span class="carnival-needle" id="carnival-needle"></span></div>
+      <p class="carnival-coach" id="carnival-coach" hidden>&nbsp;</p>
+      <button type="button" class="carnival-act" data-action="carnival-act" id="carnival-act">Play</button>
+      <section class="race-results carnival-results" id="carnival-results" hidden aria-label="Results">
+        <h2><span data-sign id="carnival-title">Thro-ball</span></h2>
+        <div class="carnival-stars" id="carnival-stars"><span class="carnival-star-slot"><svg class="carnival-star" viewBox="0 0 9 9" shape-rendering="crispEdges" aria-hidden="true" data-lit="false"><path d="M4 0h1v2H4zM3 2h3v1H3zM0 3h9v1H0zM1 4h7v1H1zM2 5h5v1H2zM1 6h3v2H1zM5 6h3v2H5z" /></svg><small class="carnival-star-need">0</small></span><span class="carnival-star-slot"><svg class="carnival-star" viewBox="0 0 9 9" shape-rendering="crispEdges" aria-hidden="true" data-lit="false"><path d="M4 0h1v2H4zM3 2h3v1H3zM0 3h9v1H0zM1 4h7v1H1zM2 5h5v1H2zM1 6h3v2H1zM5 6h3v2H5z" /></svg><small class="carnival-star-need">0</small></span><span class="carnival-star-slot"><svg class="carnival-star" viewBox="0 0 9 9" shape-rendering="crispEdges" aria-hidden="true" data-lit="false"><path d="M4 0h1v2H4zM3 2h3v1H3zM0 3h9v1H0zM1 4h7v1H1zM2 5h5v1H2zM1 6h3v2H1zM5 6h3v2H5z" /></svg><small class="carnival-star-need">0</small></span></div>
+        <p class="carnival-says" id="carnival-says">Ooga okay.</p>
+        <p class="carnival-final"><b id="carnival-final">0</b><small class="carnival-newbest" id="carnival-newbest" hidden>New best!</small></p>
+        <p class="carnival-note" id="carnival-note" hidden>&nbsp;</p>
+        <ul class="race-podium carnival-rows">
+          <li><span>Best</span><b id="carnival-final-best">0</b></li>
+          <li><span>Tickets won</span><b id="carnival-won">+0</b></li>
+          <li><span>Your tickets</span><b id="carnival-tickets">0</b></li>
+        </ul>
+        <div class="actions">
+          <button type="button" data-action="carnival-again">Play again</button>
+          <button type="button" data-action="leave">Back to arcade</button>
+        </div>
+      </section>
+      <section class="race-pause" id="carnival-pause" hidden aria-label="Paused">
+        <h2><span data-sign>Paused</span></h2>
+        <p class="help carnival-help" id="carnival-help">&nbsp;</p>
+        <div class="actions">
+          <button type="button" data-action="carnival-resume">Resume</button>
+          <button type="button" data-action="leave">Back to arcade</button>
+        </div>
+      </section>
+      <section class="race-results game-intro" id="skee-intro" data-intro="skee" hidden aria-label="Thro-ball">
+        <div class="game-intro-glow" aria-hidden="true"><div class="game-intro-rays"></div></div>
+        <p class="game-intro-kicker">Roll coconut. Coconut go pop!</p>
+        <h2 class="game-intro-title"><span data-sign>Thro-ball</span></h2>
+        <svg class="game-intro-coin" viewBox="0 0 16 16" shape-rendering="crispEdges" aria-hidden="true"><path fill="#c8583a" d="M5 1h6v1H5zM3 2h2v1H3zM11 2h2v1H11zM2 3h1v2H2zM13 3h1v2H13zM1 5h1v6H1zM14 5h1v6H14zM2 11h1v2H2zM13 11h1v2H13zM3 13h2v1H3zM11 13h2v1H11zM5 14h6v1H5z" /><path fill="#d9a53a" d="M6 4h4v1H6zM4 5h2v1H4zM10 5h2v1H10zM4 6h1v4H4zM11 6h1v4H11zM4 10h2v1H4zM10 10h2v1H10zM6 11h4v1H6z" /><path fill="#efe6d2" d="M7 6h2v1H7zM6 7h4v2H6zM7 9h2v1H7z" /></svg>
+        <p class="game-intro-goal">Nine coconuts. Land them in the <b>50</b> and the <b>100s</b>.</p>
+        <ul class="game-rules">
+          <li><svg class="game-rule-icon" viewBox="0 0 9 9" shape-rendering="crispEdges" aria-hidden="true"><path fill="#f3efe4" d="M4 0h1v5H4zM5 3h1v2H5zM6 4h1v1H6zM3 5h4v3H3zM2 6h1v1H2z" /></svg><b data-coarse="Tap to aim">Space to aim</b><small>The beads show where it rolls</small></li><li><svg class="game-rule-icon" viewBox="0 0 9 9" shape-rendering="crispEdges" aria-hidden="true"><path fill="#b07a40" d="M3 0h3v1H3zM2 1h5v1H2zM1 2h7v4H1zM2 6h5v1H2zM3 7h3v1H3z" /><path fill="#d8a868" d="M3 0h1v1H3zM2 1h1v1H2zM1 2h1v2H1z" /><path fill="#8a5a2c" d="M2 4h1v2H2zM6 4h1v1H6zM4 6h1v1H4z" /><path fill="#3a2412" d="M3 2h1v1H3zM5 2h1v1H5zM4 3h1v1H4z" /></svg><b data-coarse="Tap again to roll">Space again to roll</b><small>Stop the meter in the green</small></li><li><svg class="game-rule-icon" viewBox="0 0 9 9" shape-rendering="crispEdges" aria-hidden="true"><path fill="#ff9a3c" d="M4 0h1v2H4zM3 2h3v2H3zM2 4h5v3H2zM3 7h3v1H3z" /><path fill="#ffd23a" d="M4 4h1v3H4z" /></svg><b>Hot cup pays double</b><small>A new one every coconut</small></li><li><svg class="game-rule-icon" viewBox="0 0 9 9" shape-rendering="crispEdges" aria-hidden="true"><path fill="#cdb06a" d="M8 1h1v8H8z" /><path fill="#fff3c8" d="M1 8h1v1H1zM3 7h1v1H3zM5 6h1v1H5zM7 5h1v1H7zM5 3h1v1H5zM3 2h1v1H3z" /><path fill="#ffd23a" d="M0 0h3v1H0zM1 1h1v1H1z" /></svg><b>Trick shot +50</b><small>Bank into the far 100, dead centre</small></li><li><svg class="game-rule-icon" viewBox="0 0 9 9" shape-rendering="crispEdges" aria-hidden="true"><path fill="#ffc83a" d="M3 0h3v1H3zM2 1h5v1H2zM1 2h7v4H1zM2 6h5v1H2zM3 7h3v1H3z" /><path fill="#fff3a0" d="M3 0h1v1H3zM2 1h1v1H2zM1 2h1v2H1z" /><path fill="#e0a228" d="M2 4h1v2H2zM6 4h1v1H6zM4 6h1v1H4z" /><path fill="#8a5210" d="M3 2h1v1H3zM5 2h1v1H5zM4 3h1v1H4z" /></svg><b>Golden round</b><small>The last three double the cups</small></li><li><svg class="game-rule-icon" viewBox="0 0 9 9" shape-rendering="crispEdges" aria-hidden="true"><path fill="#c8583a" d="M0 2h9v5H0z" /><path fill="#efe6d2" d="M1 3h1v1H1zM1 5h1v1H1zM3 3h5v3H3z" /><path fill="#c8583a" d="M4 4h3v1H4z" /></svg><b>Win tickets</b><small>Trade them for prizes. Ooga rich!</small></li>
+        </ul>
+        <div class="actions">
+          <button type="button" class="game-intro-go" data-action="intro-go">Roll!</button>
+          <button type="button" data-action="leave">Back to arcade</button>
+        </div>
+      </section>
+      <section class="race-results game-intro" id="hoops-intro" data-intro="hoops" hidden aria-label="Hoop Shot">
+        <div class="game-intro-glow" aria-hidden="true"><div class="game-intro-rays"></div></div>
+        <p class="game-intro-kicker">Ooga dunk coconut. Beat buzzer!</p>
+        <h2 class="game-intro-title"><span data-sign>Hoop Shot</span></h2>
+        <svg class="game-intro-coin" viewBox="0 0 16 16" shape-rendering="crispEdges" aria-hidden="true"><path fill="#f3efe4" d="M2 1h12v7H2z" /><path fill="#e0452b" d="M5 3h6v1H5zM5 4h1v2H5zM10 4h1v2H10zM5 6h6v1H5z" /><path fill="#ff6a1f" d="M4 8h8v1H4z" /><path fill="#f3efe4" d="M5 9h1v3H5zM7 9h1v4H7zM9 9h1v4H9zM11 9h1v3H11z" /><path fill="#6b4a26" d="M12 11h3v1H12zM11 12h5v3H11zM12 15h3v1H12z" /><path fill="#8a6238" d="M12 14h1v1H12zM14 14h1v1H14z" /><path fill="#2a1a0c" d="M12 12h1v1H12zM14 12h1v1H14zM13 13h1v1H13z" /></svg>
+        <p class="game-intro-goal">Five rounds. Reach each round's <b>target</b> to play on.</p>
+        <ul class="game-rules">
+          <li><svg class="game-rule-icon" viewBox="0 0 9 9" shape-rendering="crispEdges" aria-hidden="true"><path fill="#f3efe4" d="M4 0h1v5H4zM5 3h1v2H5zM6 4h1v1H6zM3 5h4v3H3zM2 6h1v1H2z" /></svg><b data-coarse="Tap to shoot">Space to shoot</b><small>Stop the meter in the green</small></li><li><svg class="game-rule-icon" viewBox="0 0 9 9" shape-rendering="crispEdges" aria-hidden="true"><path fill="#ff6a1f" d="M2 1h5v1H2z" /><path fill="#f3efe4" d="M2 2h1v2H2zM4 2h1v3H4zM6 2h1v2H6z" /><path fill="#d9a53a" d="M0 7h4v1H0zM1 6h1v3H1zM5 7h4v1H5zM7 6h1v3H7z" /></svg><b>Moving hoop</b><small>Shoot while its square glows</small></li><li><svg class="game-rule-icon" viewBox="0 0 9 9" shape-rendering="crispEdges" aria-hidden="true"><path fill="#ffc83a" d="M3 0h3v1H3zM2 1h5v1H2zM1 2h7v4H1zM2 6h5v1H2zM3 7h3v1H3z" /><path fill="#fff3a0" d="M3 0h1v1H3zM2 1h1v1H2zM1 2h1v2H1z" /><path fill="#e0a228" d="M2 4h1v2H2zM6 4h1v1H6zM4 6h1v1H4z" /><path fill="#8a5210" d="M3 2h1v1H3zM5 2h1v1H5zM4 3h1v1H4z" /></svg><b>Money rack</b><small>The last 6 seconds pay double</small></li><li><svg class="game-rule-icon" viewBox="0 0 9 9" shape-rendering="crispEdges" aria-hidden="true"><path fill="#ff5a1f" d="M4 0h1v1H4zM3 1h2v2H3zM2 3h5v5H2zM6 2h1v1H6z" /><path fill="#ffd23a" d="M3 5h3v3H3zM4 4h1v1H4z" /></svg><b>Three in a row</b><small>Sets the rim on fire: +1 a basket</small></li><li><svg class="game-rule-icon" viewBox="0 0 9 9" shape-rendering="crispEdges" aria-hidden="true"><path fill="#ffd23a" d="M4 0h1v2H4zM3 2h3v1H3zM0 3h9v1H0zM1 4h7v1H1zM2 5h5v1H2zM1 6h3v2H1zM5 6h3v2H5z" /></svg><b>Swish</b><small>Dead centre scores a bonus</small></li><li><svg class="game-rule-icon" viewBox="0 0 9 9" shape-rendering="crispEdges" aria-hidden="true"><path fill="#c8583a" d="M0 2h9v5H0z" /><path fill="#efe6d2" d="M1 3h1v1H1zM1 5h1v1H1zM3 3h5v3H3z" /><path fill="#c8583a" d="M4 4h3v1H4z" /></svg><b>Win tickets</b><small>Trade them for prizes. Ooga rich!</small></li>
+        </ul>
+        <div class="actions">
+          <button type="button" class="game-intro-go" data-action="intro-go">Shoot!</button>
+          <button type="button" data-action="leave">Back to arcade</button>
+        </div>
+      </section>
+      <section class="race-results game-intro" id="shy-intro" data-intro="shy" hidden aria-label="Coconut Toss">
+        <div class="game-intro-glow" aria-hidden="true"><div class="game-intro-rays"></div></div>
+        <p class="game-intro-kicker">Green coconut bonk brown coconut</p>
+        <h2 class="game-intro-title"><span data-sign>Coconut Toss</span></h2>
+        <svg class="game-intro-coin" viewBox="0 0 16 16" shape-rendering="crispEdges" aria-hidden="true"><path fill="#caa050" d="M0 0h16v4H0z" /><path fill="#e2bd6a" d="M0 0h16v1H0zM1 1h1v3H1zM5 1h1v3H5zM9 1h1v3H9zM13 1h1v3H13z" /><path fill="#a67f3a" d="M3 1h1v3H3zM7 1h1v3H7zM11 1h1v3H11zM15 1h1v3H15zM0 4h1v1H0zM2 4h1v1H2zM4 4h1v1H4zM6 4h1v1H6zM8 4h1v1H8zM10 4h1v1H10zM12 4h1v1H12zM14 4h1v1H14z" /><path fill="#6b4a26" d="M2 6h3v1H2zM1 7h5v3H1zM11 6h3v1H11zM10 7h5v3H10z" /><path fill="#8a6238" d="M2 9h1v1H2zM4 8h1v1H4zM13 9h1v1H13zM11 8h1v1H11z" /><path fill="#2a1a0c" d="M2 7h1v1H2zM4 7h1v1H4zM3 8h1v1H3zM11 7h1v1H11zM13 7h1v1H13zM12 8h1v1H12z" /><path fill="#ffc83a" d="M6 5h4v1H6zM5 6h6v4H5zM6 10h4v1H6z" /><path fill="#fff3a0" d="M5 8h1v2H5z" /><path fill="#8a5210" d="M6 6h1v1H6zM9 6h1v1H9zM7 7h2v1H7z" /><path fill="#8a5a34" d="M3 10h1v5H3zM7 11h2v4H7zM12 10h1v5H12z" /></svg>
+        <p class="game-intro-goal">25 throws, five racks. Knock every <b>coconut</b> off.</p>
+        <ul class="game-rules">
+          <li><svg class="game-rule-icon" viewBox="0 0 9 9" shape-rendering="crispEdges" aria-hidden="true"><path fill="#7fa83a" d="M4 1h3v1H4zM3 2h5v4H3zM4 6h3v1H4z" /><path fill="#5f8a2a" d="M3 4h1v2H3zM6 4h1v1H6z" /><path fill="#2a1a0c" d="M4 2h1v1H4zM6 2h1v1H6zM5 3h1v1H5z" /><path fill="#f3efe4" d="M0 3h2v1H0zM0 5h2v1H0z" /></svg><b data-coarse="Tap to throw">Space to throw</b><small>Dead on as the marker glows</small></li><li><svg class="game-rule-icon" viewBox="0 0 9 9" shape-rendering="crispEdges" aria-hidden="true"><path fill="#b07a40" d="M3 1h3v1H3zM2 2h5v4H2zM3 6h3v1H3z" /><path fill="#d8a868" d="M3 1h1v1H3zM2 2h1v2H2z" /><path fill="#8a5a2c" d="M4 5h1v1H4z" /><path fill="#3a2412" d="M3 2h1v1H3zM5 2h1v1H5zM4 3h1v1H4z" /><path fill="#f3efe4" d="M0 3h1v3H0zM8 3h1v3H8z" /></svg><b>Glancing hits wobble</b><small>Hit it again to drop it</small></li><li><svg class="game-rule-icon" viewBox="0 0 9 9" shape-rendering="crispEdges" aria-hidden="true"><path fill="#ff5a1f" d="M4 0h1v1H4zM3 1h2v2H3zM2 3h5v5H2zM6 2h1v1H6z" /><path fill="#ffd23a" d="M3 5h3v3H3zM4 4h1v1H4z" /></svg><b>Combo</b><small>Knock them off in a row for more</small></li><li><svg class="game-rule-icon" viewBox="0 0 9 9" shape-rendering="crispEdges" aria-hidden="true"><path fill="#ffc83a" d="M3 0h3v1H3zM2 1h5v1H2zM1 2h7v4H1zM2 6h5v1H2zM3 7h3v1H3z" /><path fill="#fff3a0" d="M3 0h1v1H3zM2 1h1v1H2zM1 2h1v2H1z" /><path fill="#e0a228" d="M2 4h1v2H2zM6 4h1v1H6zM4 6h1v1H4z" /><path fill="#8a5210" d="M3 2h1v1H3zM5 2h1v1H5zM4 3h1v1H4z" /></svg><b>Golden coconut</b><small>Worth 3. The last rack is all gold</small></li><li><svg class="game-rule-icon" viewBox="0 0 9 9" shape-rendering="crispEdges" aria-hidden="true"><path fill="#5f8a2a" d="M4 0h1v3H4z" /><path fill="#ffc83a" d="M3 3h3v1H3zM2 4h5v3H2zM3 7h3v1H3z" /><path fill="#fff3a0" d="M2 4h1v1H2z" /><path fill="#8a5210" d="M3 5h1v1H3zM5 5h1v1H5z" /></svg><b>Golden swing</b><small>Throw as it glows: +5, two throws back</small></li><li><svg class="game-rule-icon" viewBox="0 0 9 9" shape-rendering="crispEdges" aria-hidden="true"><path fill="#c8583a" d="M0 2h9v5H0z" /><path fill="#efe6d2" d="M1 3h1v1H1zM1 5h1v1H1zM3 3h5v3H3z" /><path fill="#c8583a" d="M4 4h3v1H4z" /></svg><b>Win tickets</b><small>Trade them for prizes. Ooga rich!</small></li>
+        </ul>
+        <div class="actions">
+          <button type="button" class="game-intro-go" data-action="intro-go">Throw!</button>
+          <button type="button" data-action="leave">Back to arcade</button>
+        </div>
+      </section>
+      <section class="race-results game-intro" id="claw-intro" data-intro="claw" hidden aria-label="Claw Machine">
+        <div class="game-intro-glow" aria-hidden="true"><div class="game-intro-rays"></div></div>
+        <p class="game-intro-kicker">Claw go down. Ooga grab!</p>
+        <h2 class="game-intro-title"><span data-sign>Claw Machine</span></h2>
+        <svg class="game-intro-coin" viewBox="0 0 16 16" shape-rendering="crispEdges" aria-hidden="true"><path fill="#efe6d2" d="M7 0h2v5H7zM5 5h6v2H5zM4 7h1v4H4zM11 7h1v4H11zM3 11h2v1H3zM11 11h2v1H11zM7 7h2v4H7z" /><path fill="#3a3530" d="M5 12h6v3H5zM4 13h1v1H4zM11 13h1v1H11z" /><path fill="#8a7a6a" d="M7 13h2v1H7z" /></svg>
+        <p class="game-intro-goal">Three rounds of three tries. <b>Dead centre</b> holds the prize.</p>
+        <ul class="game-rules">
+          <li><svg class="game-rule-icon" viewBox="0 0 9 9" shape-rendering="crispEdges" aria-hidden="true"><path fill="#f3efe4" d="M0 4h9v1H0zM1 3h1v3H1zM7 3h1v3H7z" /></svg><b data-coarse="Tap to stop, twice">Space to stop, twice</b><small>Across, then front to back</small></li><li><svg class="game-rule-icon" viewBox="0 0 9 9" shape-rendering="crispEdges" aria-hidden="true"><path fill="#f3efe4" d="M4 0h1v5H4zM2 3h1v1H2zM6 3h1v1H6zM3 4h1v1H3zM5 4h1v1H5z" /><path fill="#ffd23a" d="M3 7h3v2H3z" /></svg><b>Nudge in the green</b><small>Just before it lands</small></li><li><svg class="game-rule-icon" viewBox="0 0 9 9" shape-rendering="crispEdges" aria-hidden="true"><path fill="#ffd23a" d="M3 3h3v3H3z" /><path fill="#f3efe4" d="M4 0h1v2H4zM0 4h2v1H0zM7 4h2v1H7zM4 7h1v2H4z" /></svg><b>Dead centre holds</b><small>Off centre, grip in the green</small></li><li><svg class="game-rule-icon" viewBox="0 0 9 9" shape-rendering="crispEdges" aria-hidden="true"><path fill="#3a3530" d="M2 2h5v5H2zM1 1h2v2H1zM6 1h2v2H6z" /><path fill="#8a7a6a" d="M3 4h3v2H3z" /></svg><b>Idol 20, banana 12</b><small>Coconut 8. A full round +15</small></li><li><svg class="game-rule-icon" viewBox="0 0 9 9" shape-rendering="crispEdges" aria-hidden="true"><path fill="#ffc83a" d="M3 0h3v1H3zM2 1h5v1H2zM1 2h7v4H1zM2 6h5v1H2zM3 7h3v1H3z" /><path fill="#fff3a0" d="M3 0h1v1H3zM2 1h1v1H2zM1 2h1v2H1z" /><path fill="#e0a228" d="M2 4h1v2H2zM6 4h1v1H6zM4 6h1v1H4z" /><path fill="#8a5210" d="M3 2h1v1H3zM5 2h1v1H5zM4 3h1v1H4z" /></svg><b>Golden jackpot</b><small>Grows with every prize won</small></li><li><svg class="game-rule-icon" viewBox="0 0 9 9" shape-rendering="crispEdges" aria-hidden="true"><path fill="#c8583a" d="M0 2h9v5H0z" /><path fill="#efe6d2" d="M1 3h1v1H1zM1 5h1v1H1zM3 3h5v3H3z" /><path fill="#c8583a" d="M4 4h3v1H4z" /></svg><b>Win tickets</b><small>Trade them for prizes. Ooga rich!</small></li>
+        </ul>
+        <div class="actions">
+          <button type="button" class="game-intro-go" data-action="intro-go">Grab!</button>
+          <button type="button" data-action="leave">Back to arcade</button>
+        </div>
+      </section>
+      <section class="race-results game-intro" id="hockey-intro" data-intro="hockey" hidden aria-label="Air Hockey">
+        <div class="game-intro-glow" aria-hidden="true"><div class="game-intro-rays"></div></div>
+        <p class="game-intro-kicker">Whack it past other Ooga!</p>
+        <h2 class="game-intro-title"><span data-sign>Air Hockey</span></h2>
+        <svg class="game-intro-coin" viewBox="0 0 16 16" shape-rendering="crispEdges" aria-hidden="true"><path fill="#efe6d2" d="M5 1h6v1H5zM3 2h2v1H3zM11 2h2v1H11zM2 3h1v2H2zM13 3h1v2H13zM1 5h1v6H1zM14 5h1v6H14zM2 11h1v2H2zM13 11h1v2H13zM3 13h2v1H3zM11 13h2v1H11zM5 14h6v1H5z" /><path fill="#c8583a" d="M6 4h4v1H6zM4 5h2v1H4zM10 5h2v1H10zM4 6h1v4H4zM11 6h1v4H11zM4 10h2v1H4zM10 10h2v1H10zM6 11h4v1H6z" /><path fill="#d9a53a" d="M7 6h2v1H7zM6 7h4v2H6zM7 9h2v1H7z" /></svg>
+        <p class="game-intro-goal">First to <b>7</b> goals, or ahead when the sand runs out.</p>
+        <ul class="game-rules">
+          <li><svg class="game-rule-icon" viewBox="0 0 9 9" shape-rendering="crispEdges" aria-hidden="true"><path fill="#f3efe4" d="M0 4h9v1H0zM1 3h1v3H1zM7 3h1v3H7z" /></svg><b>Slide your mallet</b><small>Drag, or arrows and A D</small></li><li><svg class="game-rule-icon" viewBox="0 0 9 9" shape-rendering="crispEdges" aria-hidden="true"><path fill="#ff5a1f" d="M4 0h1v1H4zM3 1h2v2H3zM2 3h5v5H2zM6 2h1v1H6z" /><path fill="#ffd23a" d="M3 5h3v3H3zM4 4h1v1H4z" /></svg><b>Smash in the green</b><small>A power smash sets it on fire</small></li><li><svg class="game-rule-icon" viewBox="0 0 9 9" shape-rendering="crispEdges" aria-hidden="true"><path fill="#c8583a" d="M0 0h9v1H0z" /><path fill="#d9a53a" d="M1 6h1v2H1zM2 4h1v2H2zM3 2h1v2H3zM4 1h1v1H4zM5 2h1v2H5zM6 4h1v2H6z" /><path fill="#f3efe4" d="M7 6h2v2H7z" /></svg><b>Bank it off a rail</b><small>+5 a goal, on fire +5 more</small></li><li><svg class="game-rule-icon" viewBox="0 0 9 9" shape-rendering="crispEdges" aria-hidden="true"><path fill="#3a3530" d="M2 2h5v5H2zM1 1h2v2H1zM6 1h2v2H6z" /><path fill="#8a7a6a" d="M3 4h3v2H3z" /></svg><b>Three Oogas</b><small>Wall, then Basher, then Wild</small></li><li><svg class="game-rule-icon" viewBox="0 0 9 9" shape-rendering="crispEdges" aria-hidden="true"><path fill="#ffd23a" d="M4 0h1v2H4zM3 2h3v1H3zM0 3h9v1H0zM1 4h7v1H1zM2 5h5v1H2zM1 6h3v2H1zM5 6h3v2H5z" /></svg><b>Win big</b><small>A shutout scores most</small></li><li><svg class="game-rule-icon" viewBox="0 0 9 9" shape-rendering="crispEdges" aria-hidden="true"><path fill="#c8583a" d="M0 2h9v5H0z" /><path fill="#efe6d2" d="M1 3h1v1H1zM1 5h1v1H1zM3 3h5v3H3z" /><path fill="#c8583a" d="M4 4h3v1H4z" /></svg><b>Win tickets</b><small>Trade them for prizes. Ooga rich!</small></li>
+        </ul>
+        <div class="actions">
+          <button type="button" class="game-intro-go" data-action="intro-go">Face off!</button>
+          <button type="button" data-action="leave">Back to arcade</button>
+        </div>
+      </section>
+      <section class="race-results game-intro" id="billiards-intro" data-intro="billiards" hidden aria-label="Pool">
+        <div class="game-intro-glow" aria-hidden="true"><div class="game-intro-rays"></div></div>
+        <p class="game-intro-kicker">Poke coconut. Coconut go hole.</p>
+        <h2 class="game-intro-title"><span data-sign>Pool</span></h2>
+        <svg class="game-intro-coin" viewBox="0 0 16 16" shape-rendering="crispEdges" aria-hidden="true"><path fill="#2f6b3e" d="M5 1h6v1H5zM3 2h2v1H3zM11 2h2v1H11zM2 3h1v2H2zM13 3h1v2H13zM1 5h1v6H1zM14 5h1v6H14zM2 11h1v2H2zM13 11h1v2H13zM3 13h2v1H3zM11 13h2v1H11zM5 14h6v1H5z" /><path fill="#c8302a" d="M6 3h4v1H6zM5 4h6v1H5zM4 5h8v5H4zM5 10h6v1H5zM6 11h4v1H6z" /><path fill="#e63730" d="M6 3h1v1H6zM5 4h1v1H5zM4 5h1v2H4z" /><path fill="#a02622" d="M5 7h1v2H5zM10 7h1v3H10z" /><path fill="#1c140c" d="M6 5h1v1H6zM9 5h1v1H9zM7 6h2v1H7z" /><path fill="#f6ecd2" d="M7 8h2v2H7z" /></svg>
+        <p class="game-intro-goal">Ten shots. Stop on the <b>gold</b> pocket, <b>black coconut</b> last.</p>
+        <ul class="game-rules">
+          <li><svg class="game-rule-icon" viewBox="0 0 9 9" shape-rendering="crispEdges" aria-hidden="true"><path fill="#f3efe4" d="M4 0h1v5H4zM5 3h1v2H5zM6 4h1v1H6zM3 5h4v3H3zM2 6h1v1H2z" /></svg><b data-coarse="Tap to aim">Space to aim</b><small>Stop the cue on a gold pocket</small></li><li><svg class="game-rule-icon" viewBox="0 0 9 9" shape-rendering="crispEdges" aria-hidden="true"><path fill="#f3efe4" d="M4 0h1v5H4zM5 3h1v2H5zM6 4h1v1H6zM3 5h4v3H3zM2 6h1v1H2z" /></svg><b data-coarse="Tap to shoot">Space to shoot</b><small>The green sinks it, its middle +5</small></li><li><svg class="game-rule-icon" viewBox="0 0 9 9" shape-rendering="crispEdges" aria-hidden="true"><path fill="#e8483a" d="M3 0h3v1H3zM2 1h5v1H2zM1 2h7v4H1zM2 6h5v1H2zM3 7h3v1H3z" /><path fill="#ff7a5a" d="M3 0h1v1H3zM2 1h1v1H2zM1 2h1v2H1z" /><path fill="#c8302a" d="M2 4h1v2H2zM6 4h1v1H6z" /><path fill="#1c140c" d="M3 2h1v1H3zM5 2h1v1H5zM4 3h1v1H4z" /><path fill="#f6ecd2" d="M3 5h3v2H3z" /></svg><b>Coconuts score 10</b><small>The black coconut 30, last</small></li><li><svg class="game-rule-icon" viewBox="0 0 9 9" shape-rendering="crispEdges" aria-hidden="true"><path fill="#c8583a" d="M3 0h3v1H3zM1 1h2v1H1zM6 1h2v1H6zM0 3h1v3H0zM8 3h1v3H8zM1 7h2v1H1zM6 7h2v1H6zM3 8h3v1H3z" /><path fill="#d9a53a" d="M4 3h1v3H4zM3 4h3v1H3z" /></svg><b>Trick shots +10</b><small>Bank, combo or two at once</small></li><li><svg class="game-rule-icon" viewBox="0 0 9 9" shape-rendering="crispEdges" aria-hidden="true"><path fill="#efe6d2" d="M2 0h5v1H2zM1 1h7v4H1zM2 5h5v1H2zM3 6h3v2H3z" /><path fill="#1c140c" d="M2 2h2v2H2zM5 2h2v2H5zM4 4h1v1H4zM4 7h1v1H4z" /></svg><b>Fouls cost</b><small>Black too soon -20, scratch -10</small></li><li><svg class="game-rule-icon" viewBox="0 0 9 9" shape-rendering="crispEdges" aria-hidden="true"><path fill="#c8583a" d="M0 2h9v5H0z" /><path fill="#efe6d2" d="M1 3h1v1H1zM1 5h1v1H1zM3 3h5v3H3z" /><path fill="#c8583a" d="M4 4h3v1H4z" /></svg><b>Win tickets</b><small>Trade them for prizes. Ooga rich!</small></li>
+        </ul>
+        <div class="actions">
+          <button type="button" class="game-intro-go" data-action="intro-go">Break!</button>
+          <button type="button" data-action="leave">Back to arcade</button>
+        </div>
+      </section>
+      <section class="race-results game-intro" id="darts-intro" data-intro="darts" hidden aria-label="Darts">
+        <div class="game-intro-glow" aria-hidden="true"><div class="game-intro-rays"></div></div>
+        <p class="game-intro-kicker">Ooga throw pointy sticks</p>
+        <h2 class="game-intro-title"><span data-sign>Darts</span></h2>
+        <svg class="game-intro-coin" viewBox="0 0 16 16" shape-rendering="crispEdges" aria-hidden="true"><path fill="#b8302a" d="M5 1h6v1H5zM3 2h2v1H3zM11 2h2v1H11zM2 3h1v2H2zM13 3h1v2H13zM1 5h1v6H1zM14 5h1v6H14zM2 11h1v2H2zM13 11h1v2H13zM3 13h2v1H3zM11 13h2v1H11zM5 14h6v1H5z" /><path fill="#2f7a44" d="M6 4h4v1H6zM4 5h2v1H4zM10 5h2v1H10zM4 6h1v4H4zM11 6h1v4H11zM4 10h2v1H4zM10 10h2v1H10zM6 11h4v1H6z" /><path fill="#ffd23a" d="M7 6h2v1H7zM6 7h4v2H6zM7 9h2v1H7z" /></svg>
+        <p class="game-intro-goal">Three rounds: the <b>treble 20</b>, the <b>bull</b>, the <b>checkout</b>.</p>
+        <ul class="game-rules">
+          <li><svg class="game-rule-icon" viewBox="0 0 9 9" shape-rendering="crispEdges" aria-hidden="true"><path fill="#f3efe4" d="M4 0h1v5H4zM5 3h1v2H5zM6 4h1v1H6zM3 5h4v3H3zM2 6h1v1H2z" /></svg><b data-coarse="Tap twice to throw">Space twice to throw</b><small>Stop the line across, then up</small></li><li><svg class="game-rule-icon" viewBox="0 0 9 9" shape-rendering="crispEdges" aria-hidden="true"><path fill="#c8583a" d="M3 0h3v1H3zM1 1h2v1H1zM6 1h2v1H6zM0 3h1v3H0zM8 3h1v3H8zM1 7h2v1H1zM6 7h2v1H6zM3 8h3v1H3z" /><path fill="#d9a53a" d="M4 3h1v3H4zM3 4h3v1H3z" /></svg><b>Round 1: treble 20</b><small>60 a dart. The bull only 25</small></li><li><svg class="game-rule-icon" viewBox="0 0 9 9" shape-rendering="crispEdges" aria-hidden="true"><path fill="#ffd23a" d="M4 0h1v2H4zM3 2h3v1H3zM0 3h9v1H0zM1 4h7v1H1zM2 5h5v1H2zM1 6h3v2H1zM5 6h3v2H5z" /></svg><b>Round 2: the bull</b><small>50, and 60 for two in a row</small></li><li><svg class="game-rule-icon" viewBox="0 0 9 9" shape-rendering="crispEdges" aria-hidden="true"><path fill="#ffd23a" d="M3 0h3v1H3zM1 1h2v1H1zM6 1h2v1H6z" /><path fill="#c8583a" d="M0 3h1v3H0zM8 3h1v3H8zM1 7h2v1H1zM6 7h2v1H6zM3 8h3v1H3z" /><path fill="#f3efe4" d="M4 4h1v1H4z" /></svg><b>Round 3: checkout</b><small>The ringed double pays 60</small></li><li><svg class="game-rule-icon" viewBox="0 0 9 9" shape-rendering="crispEdges" aria-hidden="true"><path fill="#ff5a1f" d="M4 0h1v1H4zM3 1h2v2H3zM2 3h5v5H2zM6 2h1v1H6z" /><path fill="#ffd23a" d="M3 5h3v3H3zM4 4h1v1H4z" /></svg><b>On fire +10</b><small>Three on target in a row</small></li><li><svg class="game-rule-icon" viewBox="0 0 9 9" shape-rendering="crispEdges" aria-hidden="true"><path fill="#c8583a" d="M0 2h9v5H0z" /><path fill="#efe6d2" d="M1 3h1v1H1zM1 5h1v1H1zM3 3h5v3H3z" /><path fill="#c8583a" d="M4 4h3v1H4z" /></svg><b>Win tickets</b><small>Trade them for prizes. Ooga rich!</small></li>
+        </ul>
+        <div class="actions">
+          <button type="button" class="game-intro-go" data-action="intro-go">Throw!</button>
+          <button type="button" data-action="leave">Back to arcade</button>
+        </div>
+      </section>
+      <section class="race-results game-intro" id="pinball-intro" data-intro="pinball" hidden aria-label="Pinball">
+        <div class="game-intro-glow" aria-hidden="true"><div class="game-intro-rays"></div></div>
+        <p class="game-intro-kicker">Tiny coconut. Big bonk.</p>
+        <h2 class="game-intro-title"><span data-sign>Pinball</span></h2>
+        <svg class="game-intro-coin" viewBox="0 0 16 16" shape-rendering="crispEdges" aria-hidden="true"><path fill="#ffd23a" d="M5 1h6v1H5zM3 2h2v1H3zM11 2h2v1H11zM2 3h1v2H2zM13 3h1v2H13zM1 5h1v6H1zM14 5h1v6H14zM2 11h1v2H2zM13 11h1v2H13zM3 13h2v1H3zM11 13h2v1H11zM5 14h6v1H5z" /><path fill="#c8583a" d="M6 4h4v1H6zM4 5h2v1H4zM10 5h2v1H10zM4 6h1v4H4zM11 6h1v4H11zM4 10h2v1H4zM10 10h2v1H10zM6 11h4v1H6z" /><path fill="#6b4a26" d="M7 5h2v1H7zM6 6h4v4H6zM7 10h2v1H7z" /><path fill="#8a6238" d="M7 5h1v1H7zM6 8h1v2H6z" /><path fill="#2a1a0c" d="M6 6h1v1H6zM9 6h1v1H9zM7 7h2v1H7z" /></svg>
+        <p class="game-intro-goal">Three coconuts. Keep it <b>alive</b>.</p>
+        <ul class="game-rules">
+          <li><svg class="game-rule-icon" viewBox="0 0 9 9" shape-rendering="crispEdges" aria-hidden="true"><path fill="#f3efe4" d="M4 0h1v5H4zM5 3h1v2H5zM6 4h1v1H6zM3 5h4v3H3zM2 6h1v1H2z" /></svg><b data-coarse="Tap to launch">Space to launch</b><small>In the green: skill shot</small></li><li><svg class="game-rule-icon" viewBox="0 0 9 9" shape-rendering="crispEdges" aria-hidden="true"><path fill="#f3efe4" d="M4 0h1v5H4zM5 3h1v2H5zM6 4h1v1H6zM3 5h4v3H3zM2 6h1v1H2z" /></svg><b data-coarse="Tap to flip">Space to flip</b><small>Late shoots across. Mash and flop</small></li><li><svg class="game-rule-icon" viewBox="0 0 9 9" shape-rendering="crispEdges" aria-hidden="true"><path fill="#efe6d2" d="M1 5h1v4H1zM2 3h1v2H2zM3 2h1v1H3zM4 1h3v1H4zM7 2h1v2H7z" /><path fill="#ffa53a" d="M6 6h2v2H6z" /></svg><b>Mammoth ramp</b><small>Up it again quick to combo</small></li><li><svg class="game-rule-icon" viewBox="0 0 9 9" shape-rendering="crispEdges" aria-hidden="true"><path fill="#efe6d2" d="M0 3h2v5H0zM3 1h3v7H3zM7 3h2v5H7z" /><path fill="#c8b690" d="M1 4h1v1H1zM4 2h1v1H4zM8 4h1v1H8z" /></svg><b>Mammoth teeth</b><small>Knock all three: multiball</small></li><li><svg class="game-rule-icon" viewBox="0 0 9 9" shape-rendering="crispEdges" aria-hidden="true"><path fill="#ffd23a" d="M4 0h1v2H4zM3 2h3v1H3zM0 3h9v1H0zM1 4h7v1H1zM2 5h5v1H2zM1 6h3v2H1zM5 6h3v2H5z" /></svg><b>Top lanes</b><small>All three raise the multiplier</small></li><li><svg class="game-rule-icon" viewBox="0 0 9 9" shape-rendering="crispEdges" aria-hidden="true"><path fill="#c8583a" d="M0 2h9v5H0z" /><path fill="#efe6d2" d="M1 3h1v1H1zM1 5h1v1H1zM3 3h5v3H3z" /><path fill="#c8583a" d="M4 4h3v1H4z" /></svg><b>Win tickets</b><small>Trade them for prizes. Ooga rich!</small></li>
+        </ul>
+        <div class="actions">
+          <button type="button" class="game-intro-go" data-action="intro-go">Launch!</button>
+          <button type="button" data-action="leave">Back to arcade</button>
+        </div>
+      </section>
+      <section class="race-results game-intro" id="ride-intro" data-intro="ride" hidden aria-label="Beast Ride">
+        <div class="game-intro-glow" aria-hidden="true"><div class="game-intro-rays"></div></div>
+        <p class="game-intro-kicker">Ooga ride! Bump on beat!</p>
+        <h2 class="game-intro-title"><span data-sign>Beast Ride</span></h2>
+        <svg class="game-intro-coin" viewBox="0 0 16 16" shape-rendering="crispEdges" aria-hidden="true"><path fill="#d9a53a" d="M5 1h6v1H5zM3 2h2v1H3zM11 2h2v1H11zM2 3h1v2H2zM13 3h1v2H13zM1 5h1v6H1zM14 5h1v6H14zM2 11h1v2H2zM13 11h1v2H13zM3 13h2v1H3zM11 13h2v1H11zM5 14h6v1H5z" /><path fill="#3f7a72" d="M6 4h4v1H6zM4 5h2v1H4zM10 5h2v1H10zM4 6h1v4H4zM11 6h1v4H11zM4 10h2v1H4zM10 10h2v1H10zM6 11h4v1H6z" /><path fill="#ffd23a" d="M7 6h2v1H7zM6 7h4v2H6zM7 9h2v1H7z" /></svg>
+        <p class="game-intro-goal">Ride the beast's <b>beat</b>: five phrases, faster and busier.</p>
+        <ul class="game-rules">
+          <li><svg class="game-rule-icon" viewBox="0 0 9 9" shape-rendering="crispEdges" aria-hidden="true"><path fill="#f3efe4" d="M4 0h1v5H4zM5 3h1v2H5zM6 4h1v1H6zM3 5h4v3H3zM2 6h1v1H2z" /></svg><b data-coarse="Tap on each coconut">Space on each coconut</b><small>As the bone crosses the green</small></li><li><svg class="game-rule-icon" viewBox="0 0 9 9" shape-rendering="crispEdges" aria-hidden="true"><path fill="#ffd23a" d="M4 0h1v2H4zM3 2h3v1H3zM0 3h9v1H0zM1 4h7v1H1zM2 5h5v1H2zM1 6h3v2H1zM5 6h3v2H5z" /></svg><b>Perfect dead on</b><small>Good near it. Too soon is a miss</small></li><li><svg class="game-rule-icon" viewBox="0 0 9 9" shape-rendering="crispEdges" aria-hidden="true"><path fill="#ff5a1f" d="M4 0h1v1H4zM3 1h2v2H3zM2 3h5v5H2zM6 2h1v1H6z" /><path fill="#ffd23a" d="M3 5h3v3H3zM4 4h1v1H4z" /></svg><b>Streaks multiply</b><small>Eight in a row doubles, up to x4</small></li><li><svg class="game-rule-icon" viewBox="0 0 9 9" shape-rendering="crispEdges" aria-hidden="true"><path fill="#d9a53a" d="M0 3h2v3H0zM2 2h1v5H2zM3 1h1v7H3z" /><path fill="#f3efe4" d="M5 2h1v1H5zM6 1h1v1H6zM5 4h3v1H5zM5 6h1v1H5zM6 7h1v1H6z" /></svg><b>Clean phrase roars</b><small>A bonus for no misses</small></li><li><svg class="game-rule-icon" viewBox="0 0 9 9" shape-rendering="crispEdges" aria-hidden="true"><path fill="#c8583a" d="M1 1h1v1H1zM0 2h1v1H0zM8 3h1v1H8zM7 4h1v1H7z" /><path fill="#ffd23a" d="M8 0h1v1H8zM7 1h2v1H7zM5 2h3v1H5zM3 3h3v1H3zM1 4h3v1H1z" /><path fill="#f3efe4" d="M4 4h1v1H4zM3 5h3v1H3zM4 6h1v1H4zM3 7h3v1H3zM2 8h5v1H2z" /></svg><b>Each beast its beat</b><small>Thump, dash, stomp or march</small></li><li><svg class="game-rule-icon" viewBox="0 0 9 9" shape-rendering="crispEdges" aria-hidden="true"><path fill="#c8583a" d="M0 2h9v5H0z" /><path fill="#efe6d2" d="M1 3h1v1H1zM1 5h1v1H1zM3 3h5v3H3z" /><path fill="#c8583a" d="M4 4h3v1H4z" /></svg><b>Win tickets</b><small>Trade them for prizes. Ooga rich!</small></li>
+        </ul>
+        <div class="actions">
+          <button type="button" class="game-intro-go" data-action="intro-go">Ride!</button>
+          <button type="button" data-action="leave">Back to arcade</button>
+        </div>
+      </section>
+      <section class="race-results game-intro" id="invaders-intro" data-intro="invaders" hidden aria-label="Coconut Invaders">
+        <div class="game-intro-glow" aria-hidden="true"><div class="game-intro-rays"></div></div>
+        <p class="game-intro-kicker">Bugs come down. Ooga throw coconut!</p>
+        <h2 class="game-intro-title"><span data-sign>Coconut Invaders</span></h2>
+        <svg class="game-intro-coin" viewBox="0 0 16 16" shape-rendering="crispEdges" aria-hidden="true"><path fill="#7a5ab8" d="M1 1h1v1H1zM13 1h1v1H13zM2 2h1v1H2zM12 2h1v1H12zM3 3h1v1H3zM11 3h1v1H11z" /><path fill="#b98cff" d="M2 1h1v1H2zM12 1h1v1H12zM3 2h2v1H3zM10 2h2v1H10zM4 3h3v1H4zM8 3h3v1H8zM4 4h7v1H4zM5 5h1v1H5zM7 5h1v1H7zM9 5h1v1H9zM6 6h1v1H6zM8 6h1v1H8z" /><path fill="#efe6d2" d="M7 3h1v1H7z" /><path fill="#ffd23a" d="M6 5h1v1H6zM8 5h1v1H8zM7 9h1v1H7z" /><path fill="#ffb02e" d="M7 6h1v1H7zM7 7h1v1H7z" /><path fill="#8a5a2c" d="M6 11h2v1H6zM5 12h1v1H5zM7 12h2v1H7zM5 13h3v1H5zM6 14h1v1H6z" /><path fill="#c89a5a" d="M6 12h1v1H6z" /><path fill="#4a2e18" d="M8 13h1v1H8zM7 14h1v1H7z" /></svg>
+        <p class="game-intro-goal">Five waves. <b>Hits in a row</b> multiply your score.</p>
+        <ul class="game-rules">
+          <li><svg class="game-rule-icon" viewBox="0 0 9 9" shape-rendering="crispEdges" aria-hidden="true"><path fill="#f3efe4" d="M1 3h1v1H1zM7 3h1v1H7zM0 4h9v1H0zM1 5h1v1H1zM7 5h1v1H7z" /></svg><b>Move your Ooga</b><small data-coarse="Drag across the screen">A and D or the arrows</small></li><li><svg class="game-rule-icon" viewBox="0 0 9 9" shape-rendering="crispEdges" aria-hidden="true"><path fill="#ffd23a" d="M4 0h1v1H4zM4 1h1v1H4z" /><path fill="#8a5a2c" d="M3 3h2v1H3zM2 4h1v1H2zM4 4h2v1H4zM2 5h3v1H2zM3 6h1v1H3z" /><path fill="#c89a5a" d="M3 4h1v1H3z" /><path fill="#4a2e18" d="M5 5h1v1H5zM4 6h1v1H4z" /></svg><b>Throw coconuts</b><small data-coarse="Tap throws, two in the air">Space throws, two in the air</small></li><li><svg class="game-rule-icon" viewBox="0 0 9 9" shape-rendering="crispEdges" aria-hidden="true"><path fill="#b4b4bc" d="M2 1h5v1H2zM1 2h7v1H1zM1 3h1v1H1zM3 3h3v1H3zM7 3h1v1H7zM1 4h7v1H1zM1 5h2v1H1zM6 5h2v1H6zM1 6h2v1H1zM6 6h2v1H6z" /><path fill="#8e8e96" d="M2 3h1v1H2zM6 3h1v1H6z" /></svg><b>Hide behind stone</b><small>Rocks and spit chip it away</small></li><li><svg class="game-rule-icon" viewBox="0 0 9 9" shape-rendering="crispEdges" aria-hidden="true"><path fill="#b98cff" d="M0 0h1v1H0zM8 0h1v1H8zM0 1h2v1H0zM7 1h2v1H7zM1 2h2v1H1zM6 2h2v1H6zM2 3h5v1H2zM3 4h1v1H3zM5 4h1v1H5z" /><path fill="#efe6d2" d="M4 2h1v1H4z" /><path fill="#ffd23a" d="M4 4h1v1H4z" /><path fill="#ffb02e" d="M4 5h1v1H4zM4 6h1v1H4z" /></svg><b>Divers pay double</b><small>Hit a pterodactyl mid-dive</small></li><li><svg class="game-rule-icon" viewBox="0 0 9 9" shape-rendering="crispEdges" aria-hidden="true"><path fill="#e0a228" d="M4 0h1v1H4zM6 3h1v1H6zM5 4h2v1H5zM4 5h2v1H4z" /><path fill="#ffd23a" d="M3 1h3v1H3zM2 2h1v1H2zM4 2h3v1H4zM2 3h4v1H2zM2 4h3v1H2zM3 5h1v1H3z" /><path fill="#fff3a0" d="M3 2h1v1H3z" /></svg><b>Golden coconut</b><small>Eight in a row: it pierces all</small></li><li><svg class="game-rule-icon" viewBox="0 0 9 9" shape-rendering="crispEdges" aria-hidden="true"><path fill="#4e3420" d="M2 0h4v1H2zM1 1h1v1H1zM6 1h1v1H6zM0 2h1v1H0zM7 2h1v1H7zM8 3h1v1H8z" /><path fill="#7a5230" d="M2 1h4v1H2zM1 2h6v1H1zM0 3h6v1H0zM7 3h1v1H7zM0 4h7v1H0zM1 5h1v1H1zM3 5h1v1H3zM5 5h1v1H5zM1 6h1v1H1zM3 6h1v1H3zM5 6h1v1H5z" /><path fill="#1b1410" d="M6 3h1v1H6z" /><path fill="#efe6d2" d="M7 4h2v1H7zM8 5h1v1H8z" /></svg><b>Mammoth up top</b><small>Bonk it for a big bonus</small></li>
+        </ul>
+        <div class="actions">
+          <button type="button" class="game-intro-go" data-action="intro-go">Throw!</button>
+          <button type="button" data-action="leave">Back to arcade</button>
+        </div>
+      </section>
+      <section class="race-results game-intro" id="snake-intro" data-intro="snake" hidden aria-label="Banana Snake">
+        <div class="game-intro-glow" aria-hidden="true"><div class="game-intro-rays"></div></div>
+        <p class="game-intro-kicker">Banana snake hungry. Ooga steer!</p>
+        <h2 class="game-intro-title"><span data-sign>Banana Snake</span></h2>
+        <svg class="game-intro-coin" viewBox="0 0 16 16" shape-rendering="crispEdges" aria-hidden="true"><path fill="#8a5a2c" d="M2 1h2v1H2zM1 2h1v1H1zM3 2h2v1H3zM1 3h3v1H1zM2 4h1v1H2z" /><path fill="#c89a5a" d="M2 2h1v1H2z" /><path fill="#f0b830" d="M11 2h3v1H11zM10 3h1v1H10zM12 3h3v1H12zM10 4h4v1H10z" /><path fill="#4a2e18" d="M4 3h1v1H4zM3 4h1v1H3z" /><path fill="#1b1410" d="M11 3h1v1H11z" /><path fill="#ffd23a" d="M9 5h3v1H9zM4 6h7v1H4zM3 7h2v1H3zM3 8h2v1H3zM4 9h9v1H4zM12 10h2v1H12zM12 11h2v1H12zM3 12h10v1H3zM2 13h2v1H2z" /><path fill="#b8872a" d="M2 14h1v1H2z" /></svg>
+        <p class="game-intro-goal">Ninety seconds to <b>sundown</b>. Grow long: every segment pays.</p>
+        <ul class="game-rules">
+          <li><svg class="game-rule-icon" viewBox="0 0 9 9" shape-rendering="crispEdges" aria-hidden="true"><path fill="#f3efe4" d="M4 0h1v1H4zM3 1h3v1H3zM4 2h1v2H4zM1 3h1v1H1zM7 3h1v1H7zM0 4h9v1H0zM1 5h1v1H1zM7 5h1v1H7zM4 5h1v2H4zM3 7h3v1H3zM4 8h1v1H4z" /></svg><b>Steer the snake</b><small data-coarse="Swipe the way to go">Arrows or W A S D</small></li><li><svg class="game-rule-icon" viewBox="0 0 9 9" shape-rendering="crispEdges" aria-hidden="true"><path fill="#8a5a2c" d="M3 1h3v1H3zM2 2h5v1H2zM1 3h7v4H1zM2 7h5v1H2z" /><path fill="#c89a5a" d="M3 2h1v1H3zM2 3h1v2H2z" /><path fill="#4a2e18" d="M4 3h1v1H4zM6 3h1v1H6zM5 5h1v1H5z" /></svg><b>Eat coconuts</b><small>Longer and faster with each</small></li><li><svg class="game-rule-icon" viewBox="0 0 9 9" shape-rendering="crispEdges" aria-hidden="true"><path fill="#ff5a1f" d="M4 0h1v1H4zM3 1h2v2H3zM2 3h5v5H2zM6 2h1v1H6z" /><path fill="#ffd23a" d="M3 5h3v3H3zM4 4h1v1H4z" /></svg><b>Chain them</b><small>Quick eats multiply, up to ×5</small></li><li><svg class="game-rule-icon" viewBox="0 0 9 9" shape-rendering="crispEdges" aria-hidden="true"><path fill="#f3efe4" d="M0 2h3v1H0zM1 4h3v1H1zM0 6h3v1H0z" /><path fill="#ffd23a" d="M4 1h1v7H4zM5 2h1v5H5zM6 3h1v3H6zM7 4h1v1H7z" /></svg><b>Dash</b><small data-coarse="Tap lunges ahead">Space lunges ahead</small></li><li><svg class="game-rule-icon" viewBox="0 0 9 9" shape-rendering="crispEdges" aria-hidden="true"><path fill="#5a3a1e" d="M7 0h1v1H7z" /><path fill="#ffd23a" d="M7 1h1v1H7zM6 2h2v2H6zM5 4h2v1H5zM0 4h1v1H0zM0 5h6v1H0z" /><path fill="#e0a228" d="M1 6h4v1H1z" /><path fill="#fff3a0" d="M1 1h1v1H1zM0 0h1v1H0zM2 0h1v1H2zM1 2h1v1H1z" /></svg><b>Golden banana</b><small>Big points in a tight spot</small></li><li><svg class="game-rule-icon" viewBox="0 0 9 9" shape-rendering="crispEdges" aria-hidden="true"><path fill="#8e8e96" d="M3 1h3v1H3zM2 2h5v1H2zM1 3h7v4H1zM2 7h5v1H2z" /><path fill="#b4b4bc" d="M3 2h2v1H3zM2 3h1v2H2z" /><path fill="#5a5a62" d="M6 5h2v2H6zM3 7h4v1H3z" /></svg><b>Mind the cave</b><small>Rocks fall, pits flare. Three snakes</small></li>
+        </ul>
+        <div class="actions">
+          <button type="button" class="game-intro-go" data-action="intro-go">Slither!</button>
+          <button type="button" data-action="leave">Back to arcade</button>
+        </div>
+      </section>
+      <section class="race-results game-intro" id="pong-intro" data-intro="pong" hidden aria-label="Ooga Pong">
+        <div class="game-intro-glow" aria-hidden="true"><div class="game-intro-rays"></div></div>
+        <p class="game-intro-kicker">Coconut back and forth. Ooga smash!</p>
+        <h2 class="game-intro-title"><span data-sign>Ooga Pong</span></h2>
+        <svg class="game-intro-coin" viewBox="0 0 16 16" shape-rendering="crispEdges" aria-hidden="true"><path fill="#7a4e28" d="M4 1h8v1H4z" /><path fill="#4e3018" d="M4 2h8v1H4z" /><path fill="#b07a44" d="M3 1h1v2H3zM12 1h1v2H12z" /><path fill="#ffd23a" d="M7 5h2v1H7zM6 6h1v1H6zM8 6h2v1H8zM6 7h3v1H6zM11 9h1v1H11zM12 11h1v1H12z" /><path fill="#fff3a0" d="M7 6h1v1H7z" /><path fill="#e0a228" d="M9 7h1v1H9zM7 8h2v1H7z" /><path fill="#ff8a2a" d="M5 9h2v1H5zM4 10h1v1H4z" /><path fill="#e0452b" d="M5 10h1v1H5zM3 11h1v1H3z" /><path fill="#efe6d2" d="M1 12h2v3H1zM13 12h2v3H13zM3 13h10v1H3z" /><path fill="#b8ac94" d="M3 14h10v1H3z" /></svg>
+        <p class="game-intro-goal">Beat four rivals. <b>Long rallies</b> multiply every point.</p>
+        <ul class="game-rules">
+          <li><svg class="game-rule-icon" viewBox="0 0 9 9" shape-rendering="crispEdges" aria-hidden="true"><path fill="#f3efe4" d="M1 3h1v1H1zM7 3h1v1H7zM0 4h9v1H0zM1 5h1v1H1zM7 5h1v1H7z" /></svg><b>Move your Ooga</b><small data-coarse="Drag across the screen">A and D or the arrows</small></li><li><svg class="game-rule-icon" viewBox="0 0 9 9" shape-rendering="crispEdges" aria-hidden="true"><path fill="#ffd23a" d="M5 0h4v1H5zM8 1h1v3H8zM7 1h1v1H7zM6 2h1v1H6zM5 3h1v1H5zM4 4h1v1H4z" /><path fill="#efe6d2" d="M0 6h2v3H0zM7 6h2v3H7zM2 7h5v1H2z" /></svg><b>Angle it</b><small>The club's end sends it wide</small></li><li><svg class="game-rule-icon" viewBox="0 0 9 9" shape-rendering="crispEdges" aria-hidden="true"><path fill="#ffd23a" d="M5 1h2v1H5zM4 2h4v2H4zM5 4h2v1H5z" /><path fill="#fff3a0" d="M5 2h1v1H5z" /><path fill="#ff8a2a" d="M3 4h1v1H3zM2 5h2v1H2z" /><path fill="#e0452b" d="M1 6h2v1H1zM0 7h1v1H0z" /></svg><b>Smash as it lands</b><small data-coarse="Tap Smash on the beat, not too soon">Space on the beat, not too soon</small></li><li><svg class="game-rule-icon" viewBox="0 0 9 9" shape-rendering="crispEdges" aria-hidden="true"><path fill="#ff5a1f" d="M4 0h1v1H4zM3 1h2v2H3zM2 3h5v5H2zM6 2h1v1H6z" /><path fill="#ffd23a" d="M3 5h3v3H3zM4 4h1v1H4z" /></svg><b>Rallies multiply</b><small>x2, x3, x4, and it speeds up</small></li><li><svg class="game-rule-icon" viewBox="0 0 9 9" shape-rendering="crispEdges" aria-hidden="true"><path fill="#ffd23a" d="M7 1h1v1H7zM6 2h2v1H6zM0 3h1v1H0zM5 3h2v1H5zM0 4h2v1H0zM4 4h2v1H4zM1 5h4v1H1z" /><path fill="#e0a228" d="M7 3h1v1H7zM6 4h1v1H6zM5 5h2v1H5zM2 6h3v1H2z" /><path fill="#4a2e18" d="M8 0h1v2H8z" /></svg><b>Golden banana</b><small>Knock it down for a bonus</small></li><li><svg class="game-rule-icon" viewBox="0 0 9 9" shape-rendering="crispEdges" aria-hidden="true"><path fill="#e0452b" d="M1 1h2v1H1zM6 1h2v1H6zM0 2h4v1H0zM5 2h4v1H5zM0 3h9v2H0zM1 5h7v1H1zM2 6h5v1H2zM3 7h3v1H3zM4 8h1v1H4z" /><path fill="#ff9a8a" d="M1 2h1v1H1z" /></svg><b>Four rivals</b><small>Knock out hearts. Three Oogas</small></li>
+        </ul>
+        <div class="actions">
+          <button type="button" class="game-intro-go" data-action="intro-go">Serve!</button>
+          <button type="button" data-action="leave">Back to arcade</button>
+        </div>
+      </section>
+      <section class="race-results game-intro" id="stampede-intro" data-intro="stampede" hidden aria-label="Mammoth Stampede">
+        <div class="game-intro-glow" aria-hidden="true"><div class="game-intro-rays"></div></div>
+        <p class="game-intro-kicker">Herd coming! Ooga hop across!</p>
+        <h2 class="game-intro-title"><span data-sign>Mammoth Stampede</span></h2>
+        <svg class="game-intro-coin" viewBox="0 0 16 16" shape-rendering="crispEdges" aria-hidden="true"><path fill="#4e3420" d="M3 1h9v1H3zM2 2h1v1H2zM12 2h1v1H12zM1 3h1v1H1zM13 3h1v1H13z" /><path fill="#7a5230" d="M3 2h9v1H3zM2 3h11v1H2zM1 4h3v1H1zM5 4h5v1H5zM11 4h3v1H11zM1 5h13v1H1zM2 6h11v1H2zM4 7h7v1H4zM5 8h5v1H5zM5 9h5v1H5zM5 10h5v1H5zM5 11h5v1H5zM5 12h2v1H5zM8 12h2v1H8zM5 13h2v1H5zM9 13h1v1H9zM6 14h1v1H6z" /><path fill="#1b1410" d="M4 4h1v1H4zM10 4h1v1H10z" /><path fill="#efe6d2" d="M1 7h2v1H1zM12 7h2v1H12zM0 8h1v1H0zM14 8h1v1H14zM0 9h1v1H0zM14 9h1v1H14zM1 10h1v1H1zM13 10h1v1H13zM2 11h2v1H2zM11 11h2v1H11z" /></svg>
+        <p class="game-intro-goal">Three herds. Hop an Ooga into all <b>five caves</b> to cross each one.</p>
+        <ul class="game-rules">
+          <li><svg class="game-rule-icon" viewBox="0 0 9 9" shape-rendering="crispEdges" aria-hidden="true"><path fill="#f3efe4" d="M4 0h1v1H4zM3 1h3v1H3zM2 2h5v1H2zM1 3h7v1H1zM3 4h3v5H3z" /></svg><b>Hop forward</b><small data-coarse="Tap hops. Never back">Space hops. Never back</small></li><li><svg class="game-rule-icon" viewBox="0 0 9 9" shape-rendering="crispEdges" aria-hidden="true"><path fill="#f3efe4" d="M1 3h1v1H1zM7 3h1v1H7zM0 4h9v1H0zM1 5h1v1H1zM7 5h1v1H7z" /></svg><b>Step aside</b><small data-coarse="Swipe left or right">A and D or the arrows</small></li><li><svg class="game-rule-icon" viewBox="0 0 9 9" shape-rendering="crispEdges" aria-hidden="true"><path fill="#8a5a2c" d="M1 3h7v4H1z" /><path fill="#a8743c" d="M1 3h7v1H1z" /><path fill="#c89a5a" d="M0 4h1v2H0zM8 4h1v2H8z" /><path fill="#4a2e18" d="M4 5h2v1H4z" /><path fill="#46a0e0" d="M0 8h2v1H0zM3 8h3v1H3zM7 8h2v1H7z" /></svg><b>Ride the river</b><small>Logs and turtles, never water</small></li><li><svg class="game-rule-icon" viewBox="0 0 9 9" shape-rendering="crispEdges" aria-hidden="true"><path fill="#e0452b" d="M0 2h1v1H0zM1 3h1v1H1zM2 4h1v1H2zM1 5h1v1H1zM0 6h1v1H0zM3 2h1v1H3zM4 3h1v1H4zM5 4h1v1H5zM4 5h1v1H4zM3 6h1v1H3zM6 2h1v1H6zM7 3h1v1H7zM8 4h1v1H8zM7 5h1v1H7zM6 6h1v1H6z" /></svg><b>Stampede!</b><small>A red lane: a herd is coming</small></li><li><svg class="game-rule-icon" viewBox="0 0 9 9" shape-rendering="crispEdges" aria-hidden="true"><path fill="#6fae3a" d="M7 1h1v1H7z" /><path fill="#ffd23a" d="M6 2h2v1H6zM6 3h2v1H6zM5 4h2v1H5zM0 5h1v1H0zM4 5h3v1H4zM1 6h5v1H1z" /><path fill="#e0a228" d="M2 7h3v1H2z" /></svg><b>Bananas and gold</b><small>Carry bananas home for more</small></li><li><svg class="game-rule-icon" viewBox="0 0 9 9" shape-rendering="crispEdges" aria-hidden="true"><path fill="#ffd23a" d="M4 0h1v1H4zM3 1h2v1H3zM3 2h3v1H3z" /><path fill="#ff8a2a" d="M2 3h4v1H2zM2 4h5v1H2zM1 5h3v1H1zM6 5h1v1H6zM1 6h3v1H1zM6 6h2v1H6z" /><path fill="#ffd23a" d="M4 5h2v2H4z" /><path fill="#e0452b" d="M2 7h5v1H2zM3 8h3v1H3z" /></svg><b>Caves in a row</b><small>Up to x4 while no Ooga falls</small></li>
+        </ul>
+        <div class="actions">
+          <button type="button" class="game-intro-go" data-action="intro-go">Hop!</button>
+          <button type="button" data-action="leave">Back to arcade</button>
+        </div>
+      </section>
+      <section class="race-results game-intro" id="flap-intro" data-intro="flap" hidden aria-label="Ptero Flap">
+        <div class="game-intro-glow" aria-hidden="true"><div class="game-intro-rays"></div></div>
+        <p class="game-intro-kicker">Flap flap! Through the bones!</p>
+        <h2 class="game-intro-title"><span data-sign>Ptero Flap</span></h2>
+        <svg class="game-intro-coin" viewBox="0 0 16 16" shape-rendering="crispEdges" aria-hidden="true"><path fill="#efe6d2" d="M12 0h1v1H12zM12 1h1v1H12zM12 2h1v1H12zM11 3h3v1H11zM8 5h1v1H8zM8 6h1v1H8zM11 10h3v1H11zM12 11h1v1H12zM12 12h1v1H12zM12 13h1v1H12z" /><path fill="#b8ac94" d="M13 0h1v1H13zM13 1h1v1H13zM13 2h1v1H13zM14 3h1v1H14zM14 10h1v1H14zM13 11h1v1H13zM13 12h1v1H13zM13 13h1v1H13z" /><path fill="#7a5ab8" d="M0 2h1v1H0zM0 3h1v1H0zM2 3h1v1H2zM1 4h1v1H1zM4 4h1v1H4zM1 5h1v1H1zM5 5h1v1H5zM2 6h1v1H2zM6 6h1v1H6zM3 7h2v1H3zM5 8h1v1H5zM6 9h2v1H6zM9 9h1v1H9z" /><path fill="#dcc8ff" d="M1 3h1v1H1zM2 4h1v1H2zM2 5h2v1H2zM3 6h2v1H3z" /><path fill="#b98cff" d="M3 4h1v1H3zM4 5h1v1H4zM5 6h1v1H5zM9 6h2v1H9zM5 7h5v1H5zM6 8h4v1H6zM8 9h1v1H8z" /><path fill="#1b1410" d="M10 7h1v1H10z" /><path fill="#ffb02e" d="M11 7h2v1H11zM10 8h2v1H10z" /><path fill="#ff8a2a" d="M2 13h1v1H2zM8 13h1v1H8zM14 13h1v1H14zM1 14h1v1H1zM3 14h1v1H3zM7 14h1v1H7zM9 14h1v1H9zM12 14h1v1H12zM14 14h1v1H14z" /><path fill="#ffd23a" d="M2 14h1v1H2zM8 14h1v1H8zM13 14h1v1H13z" /><path fill="#e0452b" d="M0 15h16v1H0z" /></svg>
+        <p class="game-intro-goal">Five caves to the nest. <b>Dead centre</b> is a bullseye; a row multiplies.</p>
+        <ul class="game-rules">
+          <li><svg class="game-rule-icon" viewBox="0 0 9 9" shape-rendering="crispEdges" aria-hidden="true"><path fill="#f3efe4" d="M4 0h1v1H4zM3 1h3v1H3zM2 2h1v1H2zM4 2h1v1H4zM6 2h1v1H6zM4 3h1v1H4zM4 4h1v1H4zM4 5h1v1H4z" /><path fill="#7a5ab8" d="M0 4h1v1H0zM8 4h1v1H8zM0 5h1v1H0zM8 5h1v1H8zM1 6h1v1H1zM7 6h1v1H7zM2 7h1v1H2zM6 7h1v1H6zM3 8h3v1H3z" /><path fill="#b98cff" d="M1 5h1v1H1zM7 5h1v1H7zM2 6h2v1H2zM5 6h2v1H5zM3 7h3v1H3z" /></svg><b>Flap</b><small data-coarse="Tap flaps, gravity pulls">Space flaps, gravity pulls</small></li><li><svg class="game-rule-icon" viewBox="0 0 9 9" shape-rendering="crispEdges" aria-hidden="true"><path fill="#efe6d2" d="M3 0h1v1H3zM3 1h1v1H3zM2 2h3v1H2zM2 6h3v1H2zM3 7h1v1H3zM3 8h1v1H3z" /><path fill="#b8ac94" d="M4 0h1v1H4zM4 1h1v1H4zM5 2h1v1H5zM5 6h1v1H5zM4 7h1v1H4zM4 8h1v1H4z" /><path fill="#ffd23a" d="M0 4h1v1H0zM3 4h1v1H3zM6 4h1v1H6zM8 4h1v1H8z" /></svg><b>Bullseye the gates</b><small>Dead centre in a row: up to x4</small></li><li><svg class="game-rule-icon" viewBox="0 0 9 9" shape-rendering="crispEdges" aria-hidden="true"><path fill="#6b4a1e" d="M3 0h2v1H3zM2 1h1v1H2zM5 1h1v1H5z" /><path fill="#ffd23a" d="M0 2h1v1H0zM3 2h1v1H3zM6 2h1v1H6zM0 3h2v1H0zM3 3h2v1H3zM6 3h2v1H6zM1 4h2v1H1zM4 4h2v1H4zM7 4h2v1H7zM2 5h2v1H2zM6 5h2v1H6z" /><path fill="#e0a228" d="M0 4h1v1H0zM3 4h1v1H3zM6 4h1v1H6zM1 5h1v1H1zM5 5h1v1H5zM2 6h2v1H2zM6 6h2v1H6z" /></svg><b>Bunch by the bone</b><small>+30, but it breaks your run</small></li><li><svg class="game-rule-icon" viewBox="0 0 9 9" shape-rendering="crispEdges" aria-hidden="true"><path fill="#ff8a2a" d="M4 0h1v1H4zM3 1h2v1H3zM2 2h2v1H2zM5 2h1v1H5zM2 3h1v1H2zM5 3h1v1H5zM7 3h1v1H7zM1 4h2v1H1zM6 4h2v1H6zM1 5h1v1H1zM7 5h1v1H7zM1 6h1v1H1zM7 6h1v1H7zM2 7h1v1H2zM6 7h1v1H6z" /><path fill="#ffd23a" d="M4 2h1v1H4zM3 3h2v1H3zM3 4h3v1H3zM2 5h5v1H2zM2 6h5v1H2zM3 7h3v1H3z" /><path fill="#e0452b" d="M0 8h9v1H0z" /></svg><b>Three lives</b><small>Bone, lava or fire takes one</small></li><li><svg class="game-rule-icon" viewBox="0 0 9 9" shape-rendering="crispEdges" aria-hidden="true"><path fill="#ffd23a" d="M3 1h3v1H3zM2 2h1v1H2zM4 2h3v1H4zM1 3h1v1H1zM3 3h4v1H3zM1 4h6v1H1zM1 5h5v1H1zM2 6h3v1H2z" /><path fill="#fff3a0" d="M3 2h1v1H3zM2 3h1v1H2z" /><path fill="#e0a228" d="M7 3h1v1H7zM7 4h1v1H7zM6 5h2v1H6zM5 6h2v1H5zM3 7h3v1H3z" /></svg><b>Golden coconut</b><small>Down by the lava: one more life</small></li><li><svg class="game-rule-icon" viewBox="0 0 9 9" shape-rendering="crispEdges" aria-hidden="true"><path fill="#f3efe4" d="M2 1h1v1H2zM4 1h1v1H4zM6 1h1v1H6zM1 2h7v1H1zM1 3h7v1H1z" /><path fill="#8a5a2c" d="M0 4h1v1H0zM2 4h2v1H2zM5 4h2v1H5zM8 4h1v1H8zM1 5h3v1H1zM5 5h3v1H5zM3 6h3v1H3z" /><path fill="#4a2e18" d="M1 4h1v1H1zM4 4h1v1H4zM7 4h1v1H7zM4 5h1v1H4zM2 6h1v1H2zM6 6h1v1H6z" /></svg><b>Reach the nest</b><small>Five caves. Lives left pay big</small></li>
+        </ul>
+        <div class="actions">
+          <button type="button" class="game-intro-go" data-action="intro-go">Flap!</button>
+          <button type="button" data-action="leave">Back to arcade</button>
+        </div>
+      </section>
+      <section class="race-results game-intro" id="breaker-intro" data-intro="breaker" hidden aria-label="Rock Breaker">
+        <div class="game-intro-glow" aria-hidden="true"><div class="game-intro-rays"></div></div>
+        <p class="game-intro-kicker">Coconut smash rock. Ooga no drop!</p>
+        <h2 class="game-intro-title"><span data-sign>Rock Breaker</span></h2>
+        <svg class="game-intro-coin" viewBox="0 0 16 16" shape-rendering="crispEdges" aria-hidden="true"><path fill="#b4b4bc" d="M0 0h5v1H0zM12 0h4v1H12zM0 4h2v1H0zM3 4h5v1H3zM15 4h1v1H15z" /><path fill="#8e8e96" d="M0 1h4v1H0zM12 1h3v1H12zM0 5h1v1H0zM3 5h4v1H3zM15 5h1v1H15z" /><path fill="#6b6b73" d="M4 1h1v1H4zM15 1h1v1H15zM0 2h5v1H0zM12 2h4v1H12zM1 5h1v1H1zM7 5h1v1H7zM0 6h2v1H0zM3 6h5v1H3zM15 6h1v1H15z" /><path fill="#6a3a28" d="M6 0h5v1H6z" /><path fill="#3c1e14" d="M6 1h2v1H6zM9 1h2v1H9zM6 2h1v1H6zM10 2h1v1H10z" /><path fill="#ff8a2a" d="M8 1h1v1H8zM7 2h1v1H7zM9 2h1v1H9zM13 5h1v1H13zM9 6h1v1H9zM8 11h1v1H8zM7 12h1v1H7z" /><path fill="#ffd23a" d="M8 2h1v1H8zM10 5h1v1H10zM6 13h1v1H6z" /><path fill="#8a5a2c" d="M10 8h2v1H10zM9 9h1v1H9zM11 9h2v1H11zM9 10h4v1H9zM10 11h1v1H10zM2 15h12v1H2z" /><path fill="#c89a5a" d="M10 9h1v1H10z" /><path fill="#4a2e18" d="M13 10h1v1H13zM11 11h1v1H11z" /><path fill="#c68642" d="M2 14h12v1H2z" /></svg>
+        <p class="game-intro-goal">Four walls before the cave comes in. <b>Smash</b> to chain up to x5.</p>
+        <ul class="game-rules">
+          <li><svg class="game-rule-icon" viewBox="0 0 9 9" shape-rendering="crispEdges" aria-hidden="true"><path fill="#f3efe4" d="M1 3h1v1H1zM7 3h1v1H7zM0 4h9v1H0zM1 5h1v1H1zM7 5h1v1H7z" /></svg><b>Move the log</b><small data-coarse="Drag across the screen">Mouse, A and D or the arrows</small></li><li><svg class="game-rule-icon" viewBox="0 0 9 9" shape-rendering="crispEdges" aria-hidden="true"><path fill="#ffd23a" d="M0 0h1v1H0zM8 0h1v1H8z" /><path fill="#ff8a2a" d="M4 0h1v1H4zM2 1h1v1H2zM6 1h1v1H6z" /><path fill="#8a5a2c" d="M3 3h2v1H3zM2 4h1v1H2zM4 4h2v1H4zM2 5h4v1H2zM3 6h1v1H3z" /><path fill="#c89a5a" d="M3 4h1v1H3z" /><path fill="#4a2e18" d="M6 5h1v1H6zM4 6h1v1H4z" /><path fill="#c68642" d="M0 8h9v1H0z" /></svg><b>Smash as it lands</b><small data-coarse="The button launches, then smashes">Space or click launches, then smashes</small></li><li><svg class="game-rule-icon" viewBox="0 0 9 9" shape-rendering="crispEdges" aria-hidden="true"><path fill="#ff8a2a" d="M1 3h1v1H1zM3 3h1v1H3zM2 4h1v1H2zM1 5h1v1H1zM3 5h1v1H3z" /><path fill="#ffd23a" d="M5 2h3v1H5zM5 3h1v1H5zM5 4h3v1H5zM7 5h1v1H7zM5 6h3v1H5z" /></svg><b>Chain the rocks</b><small>Only smashes keep it going</small></li><li><svg class="game-rule-icon" viewBox="0 0 9 9" shape-rendering="crispEdges" aria-hidden="true"><path fill="#ffd23a" d="M2 0h1v1H2zM4 1h1v1H4zM8 1h1v1H8zM6 4h1v1H6zM5 5h1v1H5zM3 6h1v1H3z" /><path fill="#ff8a2a" d="M6 0h1v1H6zM0 1h1v1H0zM6 3h1v1H6zM5 4h1v1H5zM3 5h2v1H3zM6 5h1v1H6zM2 6h1v1H2zM1 7h1v1H1z" /><path fill="#6a3a28" d="M0 3h6v1H0zM7 3h2v1H7zM0 4h1v1H0zM0 5h1v1H0zM0 6h1v1H0z" /><path fill="#3c1e14" d="M1 4h4v1H1zM7 4h2v1H7zM1 5h2v1H1zM7 5h2v1H7zM1 6h1v1H1zM4 6h5v1H4z" /><path fill="#20100a" d="M0 7h1v1H0zM2 7h7v1H2z" /></svg><b>Ember rocks blow</b><small>The rocks round them go too</small></li><li><svg class="game-rule-icon" viewBox="0 0 9 9" shape-rendering="crispEdges" aria-hidden="true"><path fill="#b4b4bc" d="M0 2h9v1H0z" /><path fill="#8e8e96" d="M0 3h4v1H0zM5 3h4v1H5zM0 4h3v1H0zM6 4h3v1H6zM0 5h3v1H0zM6 5h3v1H6zM0 6h9v1H0z" /><path fill="#46ffd2" d="M4 3h1v1H4zM3 4h1v1H3zM5 4h1v1H5zM4 5h1v1H4z" /><path fill="#ffffff" d="M4 4h1v1H4z" /><path fill="#1f8f78" d="M3 5h1v1H3zM5 5h1v1H5z" /><path fill="#6b6b73" d="M0 7h9v1H0z" /></svg><b>Ore drops powers</b><small>Long log, three coconuts, fire</small></li><li><svg class="game-rule-icon" viewBox="0 0 9 9" shape-rendering="crispEdges" aria-hidden="true"><path fill="#8e8e96" d="M0 0h9v1H0zM0 1h1v1H0zM2 1h3v1H2zM6 1h3v1H6z" /><path fill="#6b6b73" d="M1 1h1v1H1zM5 1h1v1H5zM0 2h9v1H0z" /><path fill="#efe6d2" d="M4 3h1v1H4zM2 4h1v1H2zM4 4h1v1H4zM6 4h1v1H6zM3 5h3v1H3zM4 6h1v1H4z" /><path fill="#e0452b" d="M0 8h2v1H0zM3 8h2v1H3zM6 8h2v1H6z" /></svg><b>Mind the red line</b><small>The rock creeps down to it</small></li>
+        </ul>
+        <div class="actions">
+          <button type="button" class="game-intro-go" data-action="intro-go">Smash!</button>
+          <button type="button" data-action="leave">Back to arcade</button>
+        </div>
+      </section>
+      <section class="race-results game-intro" id="dash-intro" data-intro="dash" hidden aria-label="Dino Dash">
+        <div class="game-intro-glow" aria-hidden="true"><div class="game-intro-rays"></div></div>
+        <p class="game-intro-kicker">Dino run fast. Ooga jump!</p>
+        <h2 class="game-intro-title"><span data-sign>Dino Dash</span></h2>
+        <svg class="game-intro-coin" viewBox="0 0 16 16" shape-rendering="crispEdges" aria-hidden="true"><path fill="#5a3a1e" d="M2 1h3v1H2zM1 2h1v1H1zM5 2h1v1H5z" /><path fill="#6fae3a" d="M10 1h4v1H10zM9 2h6v1H9zM9 3h2v1H9zM12 3h3v1H12zM9 4h4v1H9zM8 5h4v1H8zM0 6h1v1H0zM6 6h6v1H6zM0 7h3v1H0zM5 7h7v1H5zM1 8h10v1H1zM3 9h2v1H3zM8 9h2v1H8zM3 10h2v1H3zM7 10h2v1H7zM3 11h1v1H3zM8 11h2v1H8z" /><path fill="#3a2414" d="M2 2h3v1H2zM1 3h2v1H1zM1 4h1v1H1z" /><path fill="#c68642" d="M3 3h3v1H3zM2 4h2v1H2zM5 4h1v1H5zM2 5h6v1H2z" /><path fill="#07080d" d="M11 3h1v1H11z" /><path fill="#1b1410" d="M4 4h1v1H4z" /><path fill="#efe6d2" d="M13 4h2v1H13zM12 7h1v1H12zM3 12h2v1H3zM9 12h1v1H9z" /><path fill="#d9953a" d="M2 6h4v1H2zM3 7h2v1H3z" /><path fill="#3a6e24" d="M2 9h1v1H2z" /><path fill="#a6d45a" d="M5 9h3v1H5z" /><path fill="#2f8a3a" d="M13 9h1v1H13zM11 10h1v1H11zM13 10h1v1H13zM15 10h1v1H15zM11 11h4v1H11zM12 12h2v1H12zM12 13h2v1H12z" /><path fill="#8a5a2c" d="M0 14h16v1H0z" /></svg>
+        <p class="game-intro-goal">Four lands, each faster. <b>Three bonks</b> end it; a new land heals one.</p>
+        <ul class="game-rules">
+          <li><svg class="game-rule-icon" viewBox="0 0 9 9" shape-rendering="crispEdges" aria-hidden="true"><path fill="#f3efe4" d="M4 0h1v1H4zM3 1h3v1H3zM2 2h5v1H2zM1 3h7v1H1zM3 4h3v1H3zM3 5h3v1H3zM3 6h3v1H3z" /><path fill="#8a5a2c" d="M0 8h9v1H0z" /></svg><b>Jump</b><small data-coarse="Tap jumps">Space jumps</small></li><li><svg class="game-rule-icon" viewBox="0 0 9 9" shape-rendering="crispEdges" aria-hidden="true"><path fill="#ffd23a" d="M4 0h1v1H4zM3 1h1v1H3zM5 1h1v1H5zM2 2h1v1H2zM6 2h1v1H6zM1 3h1v1H1zM7 3h1v1H7zM4 4h1v1H4zM3 5h1v1H3zM5 5h1v1H5zM2 6h1v1H2zM6 6h1v1H6zM1 7h1v1H1zM7 7h1v1H7z" /></svg><b>Jump again</b><small>Once more in the air</small></li><li><svg class="game-rule-icon" viewBox="0 0 9 9" shape-rendering="crispEdges" aria-hidden="true"><path fill="#7a5ab8" d="M6 0h2v1H6zM5 1h1v1H5zM7 1h1v1H7zM4 2h1v1H4zM6 2h1v1H6zM5 3h1v1H5zM8 4h1v1H8zM7 5h2v1H7zM5 7h2v1H5z" /><path fill="#b98cff" d="M6 1h1v1H6zM5 2h1v1H5zM3 3h2v1H3zM2 4h1v1H2zM4 4h4v1H4zM2 5h5v1H2zM4 6h3v1H4z" /><path fill="#ffb02e" d="M0 4h2v1H0z" /><path fill="#07080d" d="M3 4h1v1H3z" /></svg><b>Mind the pteros</b><small>Jump low ones, stay under high ones</small></li><li><svg class="game-rule-icon" viewBox="0 0 9 9" shape-rendering="crispEdges" aria-hidden="true"><path fill="#f3efe4" d="M4 0h1v1H4zM4 1h1v1H4zM2 2h5v1H2zM3 3h3v1H3zM4 4h1v1H4z" /><path fill="#b98cff" d="M1 6h7v1H1zM0 7h2v1H0zM3 7h4v1H3z" /><path fill="#07080d" d="M2 7h1v1H2z" /><path fill="#7a5ab8" d="M7 7h2v1H7zM2 8h2v1H2zM5 8h2v1H5z" /></svg><b>Stomp beasts</b><small>Land on them; a chain pays double</small></li><li><svg class="game-rule-icon" viewBox="0 0 9 9" shape-rendering="crispEdges" aria-hidden="true"><path fill="#4a2e18" d="M7 0h1v1H7z" /><path fill="#ffd23a" d="M6 1h1v1H6zM6 2h1v1H6zM5 3h1v1H5zM3 4h3v1H3zM1 5h4v1H1z" /><path fill="#ffb02e" d="M7 1h1v1H7zM7 2h1v1H7zM6 3h2v1H6zM6 4h1v1H6zM5 5h1v1H5zM2 6h3v1H2z" /></svg><b>Bananas in a row</b><small>Multiply everything, up to x4</small></li><li><svg class="game-rule-icon" viewBox="0 0 9 9" shape-rendering="crispEdges" aria-hidden="true"><path fill="#ff8a2a" d="M4 0h1v1H4zM3 1h1v1H3zM5 1h1v1H5zM3 2h1v1H3zM5 2h1v1H5zM8 2h1v1H8zM2 3h1v1H2zM6 3h1v1H6zM8 3h1v1H8z" /><path fill="#ffd23a" d="M4 1h1v1H4zM4 2h1v1H4zM3 3h3v1H3zM3 4h4v1H3zM2 5h1v1H2zM4 5h4v1H4zM2 6h6v1H2zM3 7h4v1H3z" /><path fill="#e0a228" d="M2 4h1v1H2zM7 4h1v1H7zM1 5h1v1H1zM8 5h1v1H8zM1 6h1v1H1zM8 6h1v1H8zM2 7h1v1H2zM7 7h1v1H7zM3 8h4v1H3z" /><path fill="#fff3a0" d="M3 5h1v1H3z" /></svg><b>Golden coconut</b><small>Up high. Sets the dino on fire!</small></li>
+        </ul>
+        <div class="actions">
+          <button type="button" class="game-intro-go" data-action="intro-go">Dash!</button>
+          <button type="button" data-action="leave">Back to arcade</button>
+        </div>
+      </section>
+      <section class="race-results game-intro" id="stacker-intro" data-intro="stacker" hidden aria-label="Stone Stacker">
+        <div class="game-intro-glow" aria-hidden="true"><div class="game-intro-rays"></div></div>
+        <p class="game-intro-kicker">Stones fall. Ooga stack neat!</p>
+        <h2 class="game-intro-title"><span data-sign>Stone Stacker</span></h2>
+        <svg class="game-intro-coin" viewBox="0 0 16 16" shape-rendering="crispEdges" aria-hidden="true"><path fill="#f2c070" d="M4 1h8v1H4zM6 4h4v1H6z" /><path fill="#d9953a" d="M4 2h8v1H4zM4 3h8v1H4zM6 5h4v1H6zM6 6h4v1H6z" /><path fill="#ffd23a" d="M6 8h1v1H6zM9 8h1v1H9z" /><path fill="#a2d86c" d="M0 10h6v1H0z" /><path fill="#6ff0d2" d="M10 10h3v1H10z" /><path fill="#b4b4bc" d="M13 10h3v1H13z" /><path fill="#6fae3a" d="M0 11h6v1H0zM0 12h6v1H0z" /><path fill="#2fb8a0" d="M10 11h3v1H10zM10 12h3v1H10z" /><path fill="#8e8e96" d="M13 11h3v1H13zM13 12h3v1H13z" /><path fill="#fffaf0" d="M0 13h3v1H0z" /><path fill="#ec8a62" d="M3 13h6v1H3z" /><path fill="#7fb0e0" d="M9 13h7v1H9z" /><path fill="#efe6d2" d="M0 14h3v1H0zM0 15h3v1H0z" /><path fill="#c8583a" d="M3 14h6v1H3zM3 15h6v1H3z" /><path fill="#4a7ab0" d="M9 14h7v1H9zM9 15h7v1H9z" /></svg>
+        <p class="game-intro-goal">Stack the falling stones. <b>Four rows at once</b> is an OOGA clear.</p>
+        <ul class="game-rules">
+          <li><svg class="game-rule-icon" viewBox="0 0 9 9" shape-rendering="crispEdges" aria-hidden="true"><path fill="#f3efe4" d="M1 1h1v1H1zM7 1h1v1H7zM0 2h9v1H0zM1 3h1v1H1zM7 3h1v1H7zM4 3h1v5H4zM2 5h1v1H2zM6 5h1v1H6zM3 6h1v1H3zM5 6h1v1H5z" /></svg><b>Move and drop</b><small data-coarse="Swipe, or pull down to drop">A, D and S, or the arrows</small></li><li><svg class="game-rule-icon" viewBox="0 0 9 9" shape-rendering="crispEdges" aria-hidden="true"><path fill="#f3efe4" d="M3 0h3v1H3zM2 1h1v1H2zM6 1h1v1H6zM1 2h1v1H1zM7 2h1v1H7zM1 3h1v1H1zM6 3h3v1H6zM1 4h1v1H1zM7 4h1v1H7zM1 5h1v1H1zM2 6h1v1H2zM6 6h1v1H6zM3 7h3v1H3z" /></svg><b>Turn the stone</b><small data-coarse="Tap turns it">Space or W turns it</small></li><li><svg class="game-rule-icon" viewBox="0 0 9 9" shape-rendering="crispEdges" aria-hidden="true"><path fill="#ffd23a" d="M1 0h1v1H1zM4 1h1v1H4zM7 1h1v1H7z" /><path fill="#a2d86c" d="M0 3h3v1H0z" /><path fill="#f2c070" d="M3 3h3v1H3z" /><path fill="#6ff0d2" d="M6 3h3v1H6z" /><path fill="#6fae3a" d="M0 4h3v1H0zM0 5h3v1H0z" /><path fill="#d9953a" d="M3 4h3v1H3zM3 5h3v1H3z" /><path fill="#2fb8a0" d="M6 4h3v1H6zM6 5h3v1H6z" /><path fill="#8e8e96" d="M0 6h3v1H0zM4 6h5v1H4zM0 7h3v1H0zM4 7h5v1H4zM0 8h5v1H0zM6 8h3v1H6z" /></svg><b>Fill a row</b><small>Full rows crumble for points</small></li><li><svg class="game-rule-icon" viewBox="0 0 9 9" shape-rendering="crispEdges" aria-hidden="true"><path fill="#fffaf0" d="M3 0h3v1H3z" /><path fill="#efe6d2" d="M3 1h3v1H3zM3 2h3v1H3zM3 3h3v1H3zM3 4h3v1H3zM3 5h3v1H3zM3 6h3v1H3zM3 7h3v1H3zM3 8h3v1H3z" /><path fill="#8e8e96" d="M0 5h3v1H0zM6 5h3v1H6zM0 6h3v1H0zM6 6h3v1H6zM0 7h3v1H0zM6 7h3v1H6zM0 8h3v1H0zM6 8h3v1H6z" /></svg><b>OOGA clear</b><small>Four rows at once pays big</small></li><li><svg class="game-rule-icon" viewBox="0 0 9 9" shape-rendering="crispEdges" aria-hidden="true"><path fill="#ff8a2a" d="M4 0h1v1H4zM3 1h2v1H3zM3 2h3v1H3zM2 3h4v1H2zM7 3h1v1H7zM1 4h3v1H1zM5 4h3v1H5zM1 5h2v1H1zM6 5h2v1H6zM1 6h2v1H1zM6 6h2v1H6zM2 7h1v1H2zM6 7h1v1H6zM3 8h3v1H3z" /><path fill="#ffd23a" d="M4 4h1v1H4zM3 5h3v1H3zM3 6h1v1H3zM5 6h1v1H5zM3 7h3v1H3z" /><path fill="#fff3a0" d="M4 6h1v1H4z" /></svg><b>Catch fire</b><small>Three clears in a row: x2</small></li><li><svg class="game-rule-icon" viewBox="0 0 9 9" shape-rendering="crispEdges" aria-hidden="true"><path fill="#4e3420" d="M2 0h4v1H2zM1 1h1v1H1zM6 1h1v1H6zM0 2h1v1H0zM7 2h1v1H7zM8 3h1v1H8z" /><path fill="#7a5230" d="M2 1h4v1H2zM1 2h6v1H1zM0 3h6v1H0zM7 3h1v1H7zM0 4h7v1H0zM1 5h1v1H1zM3 5h1v1H3zM5 5h1v1H5zM1 6h1v1H1zM3 6h1v1H3zM5 6h1v1H5z" /><path fill="#1b1410" d="M6 3h1v1H6z" /><path fill="#efe6d2" d="M7 4h2v1H7zM8 5h1v1H8z" /></svg><b>Mammoth rumble</b><small>Rubble rises. Clear it fast</small></li>
+        </ul>
+        <div class="actions">
+          <button type="button" class="game-intro-go" data-action="intro-go">Stack!</button>
+          <button type="button" data-action="leave">Back to arcade</button>
         </div>
       </section>
     </div>
@@ -979,19 +1375,33 @@ Then run npm run build and ONLY=characters node test/run.mjs.</pre>
       </div>
     </dialog>
     <dialog class="modal board-modal" id="board-modal" aria-labelledby="board-title">
-      <div class="panel-head">
+      <div class="panel-head" id="board-head">
+        <button type="button" class="modal-close board-filter" id="board-filter" data-action="board-filter" aria-label="Filter repos, contributors, and contribution types" aria-expanded="false" aria-controls="board-filter-menu" hidden><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 4H21L14 12V19L10 21V12Z"/></svg></button>
         <h2><span data-sign id="board-title">Board</span></h2>
         <button type="button" class="modal-close" data-action="board-close" aria-label="Close">&times;</button>
       </div>
+      <section class="board-filter-menu" id="board-filter-menu" aria-label="Oogatron filters" hidden>
+        <div class="board-filter-tabs" role="tablist" aria-label="Filter by">
+          <button type="button" id="board-filter-repos" role="tab" aria-selected="true" aria-controls="board-filter-list" data-filter-tab="repos">Repos</button>
+          <button type="button" id="board-filter-users" role="tab" aria-selected="false" aria-controls="board-filter-list" data-filter-tab="users" tabindex="-1">Contributors</button>
+          <button type="button" id="board-filter-types" role="tab" aria-selected="false" aria-controls="board-filter-list" data-filter-tab="types" tabindex="-1">Type</button>
+        </div>
+        <div class="board-filter-list" id="board-filter-list" role="tabpanel" aria-labelledby="board-filter-repos"></div>
+        <button type="button" class="board-filter-done" data-action="board-filter-done">Done</button>
+      </section>
       <canvas class="board-screen" id="board-screen" width="192" height="108" aria-label="The board"></canvas>
       <div class="board-nav">
-        <button type="button" class="board-page" id="board-prev" data-action="board-prev" aria-label="Previous page">&lsaquo;</button>
-        <b class="board-caption" id="board-caption">&nbsp;</b>
-        <button type="button" class="board-page" id="board-next" data-action="board-next" aria-label="Next page">&rsaquo;</button>
+        <button type="button" class="board-page" id="board-prev" data-action="board-prev" aria-label="Previous page"><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="3"><path d="M15 6L9 12L15 18"/></svg></button>
+        <div class="board-center">
+          <b class="board-caption" id="board-caption">&nbsp;</b>
+          <button type="button" class="board-page board-pause" id="board-pause" data-action="board-pause" aria-label="Pause screen cycling" aria-pressed="false" hidden><svg viewBox="0 0 24 24" aria-hidden="true" fill="currentColor"><g class="board-pause-bars"><rect x="6" y="5" width="4" height="14"/><rect x="14" y="5" width="4" height="14"/></g><path class="board-play" d="M8 5L20 12L8 19Z"/></svg></button>
+        </div>
+        <button type="button" class="board-page" id="board-next" data-action="board-next" aria-label="Next page"><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="3"><path d="M9 6L15 12L9 18"/></svg></button>
       </div>
       <div class="board-dots" id="board-dots" aria-label="Pages"></div>
       <p class="board-note" id="board-note" hidden></p>
       <p class="help" id="board-help"></p>
+      <button type="button" class="board-resize" id="board-resize" aria-label="Resize Oogatron window; arrow keys adjust size" hidden></button>
     </dialog>
     <dialog class="modal" id="ooga-portal-menu" aria-labelledby="ooga-portal-title" aria-describedby="ooga-portal-status">
       <div class="panel-head">
@@ -1100,8 +1510,8 @@ Then run npm run build and ONLY=characters node test/run.mjs.</pre>
   <script src="js/agent.js"></script>
   <script src="js/ooga-portal-models.js"></script>
   <script src="js/ooga-portal.js"></script>
-  <script src="js/ooga-portal-arrival.js"></script>
   <script src="js/lab-phase.js"></script>
+  <script src="js/wall-panels.js"></script>
   <script src="js/clankers.js"></script>
   <script src="js/clanker-play.js"></script>
   <script src="js/scene-hub.js"></script>
@@ -1112,6 +1522,12 @@ Then run npm run build and ONLY=characters node test/run.mjs.</pre>
   <script src="js/factory-models.js"></script>
   <script src="js/factory-window.js"></script>
   <script src="js/scene-factory.js"></script>
+  <script src="js/arcade-models.js"></script>
+  <script src="js/arcade-games.js"></script>
+  <script src="js/retro-games.js"></script>
+  <script src="js/scene-arcade.js"></script>
+  <script src="js/carnival-audio.js"></script>
+  <script src="js/scene-carnival.js"></script>
   <script src="js/race-track.js"></script>
   <script src="js/racers.js"></script>
   <script src="js/race-items.js"></script>
