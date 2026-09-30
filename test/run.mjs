@@ -3385,9 +3385,11 @@ const play = (id, what, code) => ({ name: `${id} playthrough`, why: "playthrough
   const r = await b.evaluate(code);
   record(`${id} playthrough: ${what}`, r.ok, JSON.stringify(r));
 } });
-const donation = (id) => ({ name: `${id} donation`, why: "playthrough: a donation becomes bananas on the pile", run: async (b) => {
-  const r = await b.evaluate(`(() => { const B = window.__ooga, s0 = B.stats().dropsLanded, d0 = B.game.state.donations; B.demoTip(4000); B.advance(6, 1 / 30); const landed = B.stats().dropsLanded - s0; return { ok: landed === window.BL.game.bananasFor(4000) && B.game.state.donations === d0 + 1, landed }; })()`);
-  record(`${id} donation: a 4000 sat donation is counted and lands its bananas on the pile`, r.ok, JSON.stringify(r));
+// `stat` names the scene's count of bananas delivered, read from stats(): drops landed on the pile, or the bananas the
+// factory's cooker sent out through its exit shield. `seconds` covers the scene's whole show.
+const donation = (id, { stat = "dropsLanded", seconds = 6, where = "lands its bananas on the pile" } = {}) => ({ name: `${id} donation`, why: "playthrough: a donation is counted and becomes its bananas", run: async (b) => {
+  const r = await b.evaluate(`(() => { const B = window.__ooga, s0 = B.stats().${stat}, d0 = B.game.state.donations; B.demoTip(4000); B.advance(${seconds}, 1 / 30); const landed = B.stats().${stat} - s0; return { ok: landed === window.BL.game.bananasFor(4000) && B.game.state.donations === d0 + 1, landed }; })()`);
+  record(`${id} donation: a 4000 sat donation is counted and ${where}`, r.ok, JSON.stringify(r));
 } });
 // Every track of the cup under the autopilot: all racers finish in order, the points and the cup medal
 // are the standings', and every track keeps a best. Ties share a place, so the saved medal may be any of theirs.
@@ -5841,9 +5843,86 @@ const factoryShields = { name: "factory peer portals", why: "rule: paired peer m
     && Math.abs(row.after.feet - row.before.feet) < 0.25 && row.cameraChange < 0.25 && row.sameMode && row.walkedOut && row.stayedOut && row.returned && row.supported)
     && r.rows[1].air && r.rows[1].after.feet > 0, JSON.stringify(r));
 } };
+// The banana cooker: a tip is counted once, the moment it arrives, and cooked where the visitor can watch it, never
+// passed off as routing. The demo node is held still and its conduits emptied, so anything moving is the tip's, and
+// the exit shield's hum is stopped, so its ripple count is crossings alone. The kiosk is tapped with the view free, as
+// the room sign is.
+const factoryCooker = { name: "factory cooker", why: "rule: a tip in the factory, from the kiosk's dialog or anywhere, is counted once and cooked in plain sight: no sat of it rides a line or lights a bay, the core never surges for it, each banana leaves through the exit shield, the board names no tipper and no time, a stopped node's cubes come in from outside, and a burst stays inside the cooker's pools", run: async (b) => {
+  const at = await b.evaluate(`(() => { const B = window.__ooga; ${FACTORY_EVENT} const s = X.scene, q = s.sats;
+    for (let t = 0; t < 10 && q.bay.some((v) => v >= 0); t += 0.25) B.advance(0.25, 1 / 20);
+    s.gate.hum = Infinity;
+    for (const [id, value] of [["handle", "tester"], ["message", "zebra 12:34"]]) { const el = document.getElementById(id); el.value = value; el.dispatchEvent(new Event("change")); }
+    B.pilot.release(true);
+    const w = s.kiosk.world, p = { x: w[12], y: w[13] + 1.3, z: w[14] };
+    B.pilot.navigate({ position: p, target: p, yaw: s.kiosk.rotation.y, pitch: 0.2, dist: 4 }); B.advance(0.6, 1 / 60);
+    return B.project(p.x, p.y, p.z, {}); })()`);
+  await b.click(at.x, at.y);
+  for (let i = 0; i < 20 && !(await b.evaluate(`document.getElementById("feed").open`)); i++) await b.sleep(10);
+  const r = await b.evaluate(`(() => { const B = window.__ooga, G = window.BL.game, s = B.factory.scene, q = s.sats, g = s.gate.phase.ripples;
+    const feed = document.getElementById("feed"), qr = document.getElementById("qr"), opened = { dialog: feed.open, qr: qr.width > 0 && qr.height > 0 };
+    const n = G.bananasFor(1200), l0 = B.level, d0 = B.game.state.donations, h0 = g.hits;
+    feed.querySelector('[data-action="tip"]').click();
+    const counted = { level: B.level - l0, donations: B.game.state.donations - d0, handle: B.game.state.handle };
+    B.hud.closeFeed();
+    const busy = () => { const c = B.stats().cooker; return c.cubes + c.bananas + c.queued > 0; };
+    let routed = 0, lit = 0, surged = false, recounted = false, first = null;
+    for (let t = 0; t < 20 && (t < 1 || busy()); t += 1 / 20) {
+      B.advance(1 / 20, 1 / 20);
+      for (let i = 0; i < q.bay.length; i++) if (q.bay[i] >= 0) routed++;
+      for (const place of s.bays) if (place.flashL > 0 || place.sputter > 0) lit++;
+      for (const place of s.gallery) if (place.flashL > 0) lit++;
+      surged = surged || s.surgeT >= 0;
+      recounted = recounted || B.level !== l0 + n;
+      const c = s.cubeNode; if (!first && c.instanceCount) first = { x: c.instanceData[12], y: c.instanceData[13], z: c.instanceData[14] };
+    }
+    B.advance(1.2, 1 / 20);
+    const printed = s.cookBoard.printed;
+    return { opened, n, counted, routed, lit, surged, recounted, first, core: window.BL.factoryModels.LAYOUT.core, rippled: g.hits - h0,
+      board: { printed, rounded: printed.includes(G.formatLarge(1200)), named: /tester|zebra/i.test(printed), timed: /\\d{1,2}:\\d{2}/.test(printed) } };
+  })()`);
+  record("factory kiosk: tapping the cooker's kiosk opens the feed dialog with this page's QR, and its Tip button tips in the factory under the visitor's handle", r.opened.dialog && r.opened.qr && r.counted.donations === 1 && r.counted.handle === "tester", JSON.stringify({ opened: r.opened, counted: r.counted }));
+  record("factory cooker: a tip's bananas count once, the moment it arrives, and each leaves through the exit shield; no sat of it rides a line or lights a bay, and the core never surges for it", r.counted.level === r.n && !r.recounted && r.rippled === r.n && r.routed === 0 && r.lit === 0 && !r.surged, JSON.stringify(r));
+  record("factory cooker: the donations board shows the last tip rounded and never the tipper's handle, message or a time", r.board.rounded && !r.board.named && !r.board.timed, JSON.stringify(r.board));
+  const stopped = await b.evaluate(`(() => { const B = window.__ooga; ${FACTORY_EVENT} const s = X.scene, g = s.gate.phase.ripples, G = window.BL.game, shield = window.BL.factoryModels.HALL.front - 0.6;
+    send("node.stopped"); B.advance(0.5, 1 / 20);
+    const reading = X.feed.reading.node, n = G.bananasFor(120000), h0 = g.hits;
+    B.demoTip(120000);
+    let first = null;
+    for (let t = 0; t < 30; t += 1 / 20) {
+      B.advance(1 / 20, 1 / 20);
+      const c = s.cubeNode; if (!first && c.instanceCount) first = { x: +c.instanceData[12].toFixed(2), y: +c.instanceData[13].toFixed(2), z: +c.instanceData[14].toFixed(2) };
+      const o = B.stats().cooker; if (t > 1 && o.cubes + o.bananas + o.queued === 0) break;
+    }
+    send("node.ready"); B.advance(0.5, 1 / 20);
+    return { reading, n, first, shield, rippled: g.hits - h0 };
+  })()`);
+  const core = r.core, fromCore = !!r.first && Math.hypot(r.first.x - core.x, r.first.z - core.z) < core.radius + 2 && r.first.y > core.chamber[0] - 1 && r.first.y < core.chamber[1] + 1;
+  record("factory cooker: a running node tosses a tip's sat cubes from the core's chamber; one that reads stopped takes them in through the exit shield instead, which ripples for each cube in and each banana out", fromCore && stopped.reading === "stopped" && !!stopped.first && stopped.first.z > stopped.shield - 1.5 && stopped.rippled === 2 * stopped.n, JSON.stringify({ running: r.first, stopped }));
+  const burst = await b.evaluate(`(() => { const B = window.__ooga, G = window.BL.game, s = B.factory.scene, q = s.sats, per = G.bananasFor(120000);
+    const cap = { cubes: s.cubeNode.instanceData.length / 20, bananas: s.fruitNode.instanceData.length / 20 }, tips = Math.ceil((Math.max(cap.cubes, cap.bananas) + 1) / per), n = tips * per;
+    const bare = () => { const t = B.stats(); return t.allNodes - t.particles - t.pool; }, nodes = bare(), l0 = B.level, out0 = B.stats().cooker.out;
+    for (let i = 0; i < tips; i++) B.demoTip(120000);
+    const level = B.level - l0;
+    let cubes = 0, bananas = 0, grew = 0, routed = 0;
+    for (let t = 0; t < 60 && B.stats().cooker.out - out0 < n; t += 1 / 10) {
+      B.advance(1 / 10, 1 / 10);
+      const c = B.stats().cooker; cubes = Math.max(cubes, c.cubes); bananas = Math.max(bananas, c.bananas);
+      grew = Math.max(grew, bare() - nodes);
+      for (let i = 0; i < q.bay.length; i++) if (q.bay[i] >= 0) routed++;
+    }
+    const out = B.stats().cooker.out - out0;
+    s.gate.hum = 0;
+    // One more tip left in the air, so the round trip that follows leaves the hall mid-show.
+    B.demoTip(120000); B.advance(1, 1 / 20);
+    return { cap, tips, n, level, cubes, bananas, grew, routed, out };
+  })()`);
+  record("factory cooker: a burst of tips past the cooker's pools is counted at once, stays inside the pools, adds no nodes, rides no line, and still sends every banana out", burst.level === burst.n && burst.cubes <= burst.cap.cubes && burst.bananas <= burst.cap.bananas && burst.grew === 0 && burst.routed === 0 && burst.out === burst.n, JSON.stringify(burst));
+} };
 // Everywhere the widest Ooga on the roster can walk from the balcony, by the factory's own step rule on a
-// quarter-metre grid: both ends of every stair, every line's deck and its peer tunnel's porch, the switchboard,
-// rebalancer, treasury, watchtower, landing, galleries and the forge floor. It runs on the island, where the whole roster is built.
+// quarter-metre grid: both ends of every stair, every line's deck and its peer tunnel's porch, the switchboard, the
+// right-wall platform with the rebalancer, treasury and banana cooker, the watchtower, landing, galleries and the forge
+// floor; and the platform walked end to end on its own deck from the cooker's stair. It runs on the island, where the
+// whole roster is built.
 const factoryFloor = { name: "factory floor", why: "regression: stairs landed against rails and blocks, and lanes round the tanks and past the tunnels' console boxes were too narrow to walk", run: async (b) => {
   const r = await b.evaluate(`(() => {
     let R = 0, who = ""; for (const cave of window.__ooga.cavemen.values()) if (cave.bodyRadius > R) { R = cave.bodyRadius; who = cave.traits.name; }
@@ -5871,15 +5950,27 @@ const factoryFloor = { name: "factory floor", why: "regression: stairs landed ag
     const reachedIn = (x0, x1, z0, z1, y) => cells.some(([x, z, h]) => x >= x0 && x <= x1 && z >= z0 && z <= z1 && Math.abs(h - y) < 0.3);
     const near = (x, z, y) => reachedIn(x - 0.6, x + 0.6, z - 0.6, z + 0.6, y), missing = [];
     L.stairs.forEach(([ax, ay, az, bx, by, bz], n) => { if (!near(ax, az, ay)) missing.push("stair " + n + " foot"); if (!near(bx, bz, by)) missing.push("stair " + n + " head"); });
-    const decks = { A: L.bays[0], B: L.bays[1], C: L.bays[2], D: L.bays[3], switchboard: L.switchboard, rebalancer: L.rebalancer, treasury: L.treasury, watchtower: L.lookout, lighthouse: L.lookoutDeck, landing: L.landing, gallery1: L.galleries[0], gallery2: L.galleries[1] };
+    const decks = { A: L.bays[0], B: L.bays[1], C: L.bays[2], D: L.bays[3], switchboard: L.switchboard, platform: L.platform, rebalancer: L.rebalancer, treasury: L.treasury, cooker: L.cooker, watchtower: L.lookout, lighthouse: L.lookoutDeck, landing: L.landing, gallery1: L.galleries[0], gallery2: L.galleries[1] };
     for (const [name, d] of Object.entries(decks)) if (!reachedIn(d.x - d.w / 2, d.x + d.w / 2, d.z - d.d / 2, d.z + d.d / 2, d.y)) missing.push(name);
-    if (!near(L.rebalancer.x + M.REB.operator[0], L.rebalancer.z + M.REB.operator[1], L.rebalancer.y)) missing.push("rebalancer operator lane");
+    const spots = [["rebalancer operator lane", L.rebalancer, M.REB.operator], ["treasury operator", L.treasury, M.TRE.operator], ["cooker kiosk", L.cooker, M.COOK.kiosk]];
+    for (const [name, d, [x, z]] of spots) if (!near(d.x + x, d.z + z, d.y)) missing.push(name);
+    // The platform is one deck: from the head of the stair up from the pit, never leaving the deck's own floor or
+    // taking a ladder, the widest Ooga walks past the cooker and the treasury to the rebalancer.
+    const P = L.platform, st = L.stairs.find((q) => q[4] === P.y), deck = new Set(), dq = [];
+    const put = (i, k) => { const key = i * NZ + k; if (!deck.has(key)) { deck.add(key); dq.push(key); } };
+    put(Math.round((st[3] - X0) / G), Math.round((st[5] - Z0) / G));
+    for (let h = 0; h < dq.length; h++) {
+      const i = Math.floor(dq[h] / NZ), k = dq[h] % NZ, x = X0 + i * G, z = Z0 + k * G;
+      for (const [di, dk] of [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [1, -1], [-1, 1], [-1, -1]]) if (M.walkable(x, z, x + di * G, z + dk * G, P.y, R) && M.supportAt(x + di * G, z + dk * G, P.y) === P.y) put(i + di, k + dk);
+    }
+    const walked = (x, z) => { for (const key of deck) if (Math.abs(X0 + Math.floor(key / NZ) * G - x) <= 0.6 && Math.abs(Z0 + key % NZ * G - z) <= 0.6) return true; return false; };
+    for (const [name, d, [x, z]] of spots) if (!walked(d.x + x, d.z + z)) missing.push(name + " along the platform");
     // Each porch reaches its peer mirror's walkable threshold.
     L.tunnels.forEach((t, n) => { const c = Math.cos(t.turn), sn = Math.sin(t.turn), d = 1.1; if (!near(t.x + sn * d, t.z + c * d, t.y)) missing.push("shield " + "ABCD"[n]); });
     if (!near(L.stairway[0], L.stairway[2] - 1, 0)) missing.push("forge floor");
-    return { who, radius: +R.toFixed(2), missing, cells: cells.length };
+    return { who, radius: +R.toFixed(2), missing, cells: cells.length, deck: deck.size };
   })()`);
-  record("factory floor: from the balcony the widest Ooga on the roster reaches both ends of every stair, every line's deck, each peer tunnel's shield, the switchboard, rebalancer and its operator lane, treasury, watchtower, landing, galleries and the forge", r.missing.length === 0 && r.radius > 0.6 && r.cells > 20000, JSON.stringify(r));
+  record("factory floor: from the balcony the widest Ooga on the roster reaches both ends of every stair, every line's deck, each peer tunnel's shield, the switchboard, the right-wall platform with the rebalancer's operator lane, the treasury and the cooker's kiosk (walking the platform's length from the cooker's stair), the watchtower, landing, galleries and the forge", r.missing.length === 0 && r.radius > 0.6 && r.cells > 20000, JSON.stringify(r));
 } };
 // The way in and out: from the island through the 2 o'clock mouth's shield, back out past the balcony, and Escape.
 const factoryEntrance = { name: "factory entrance", why: "regression: flying above the mouth entered the factory and reaching its front wall away from the doorway exited; real doorway crossings must still keep the same Ooga", run: async (b) => {
@@ -6019,8 +6110,8 @@ const carnivalPlay = (kind, step) => ({ name: `${kind} playthrough`, why: "playt
   record(`${kind} playthrough: the game reaches its results card, and its best and tickets are saved, paid once`, r.phase === "results" && r.shown && r.best === r.score && r.tickets === before + r.paid, JSON.stringify({ ...r, before }));
 } });
 const factoryCanvas = { name: "factory canvas2d", why: "contract: the Canvas 2D fallback boots and draws the factory", run: async (b) => {
-  const r = await b.evaluate(`(() => { const B = window.__ooga, c = document.getElementById("scene"), t = document.createElement("canvas"); t.width = t.height = 8; const x = t.getContext("2d", { willReadFrequently: true }); x.drawImage(c, 0, 0, 8, 8); const d = x.getImageData(0, 0, 8, 8).data, seen = new Set(); for (let i = 0; i < d.length; i += 4) seen.add(d[i] + "," + d[i + 1] + "," + d[i + 2]); return { kind: B.renderer.kind, scene: B.scene, colours: seen.size }; })()`);
-  record("factory canvas2d: with WebGL2 unavailable the factory still boots and paints", r.kind === "canvas2d" && r.scene === "factory" && r.colours >= 4, JSON.stringify(r));
+  const r = await b.evaluate(`(() => { const B = window.__ooga, c = document.getElementById("scene"), t = document.createElement("canvas"); t.width = t.height = 8; const x = t.getContext("2d", { willReadFrequently: true }); B.demoTip(4000); let flying = 0; for (let s = 0; s < 6 && !flying; s += 0.1) { B.advance(0.1, 0.1); const k = B.stats().cooker; flying = k.cubes + k.bananas; } x.drawImage(c, 0, 0, 8, 8); const d = x.getImageData(0, 0, 8, 8).data, seen = new Set(); for (let i = 0; i < d.length; i += 4) seen.add(d[i] + "," + d[i + 1] + "," + d[i + 2]); return { kind: B.renderer.kind, scene: B.scene, colours: seen.size, flying }; })()`);
+  record("factory canvas2d: with WebGL2 unavailable the factory still boots and paints, a tip's show in the air", r.kind === "canvas2d" && r.scene === "factory" && r.colours >= 4 && r.flying > 0, JSON.stringify(r));
 } };
 
 scene("hub", { steps: [{ name: `work movement lab lanes ${1 / RATES[0]}Hz`, why: "regression: work walkers left their facing-right side of the lab lane", open: "on about 4 boots in 30 the lane targets sit on the centre or far side; unfixed", run: labLanes }, donation("hub"), hubWalking, hubMapNavigation, hubRainforestSteps, hubRoutes, hubFall, hubGrounding, trip("hub"), factoryActivityRouting] });
@@ -7506,7 +7597,9 @@ scene("race", { query: "rain=0", steps: [raceStart, { name: "race tracks", why: 
 scene("drop", { steps: [dropStart, dropSteering, play("drop", "a jump lands on the target, scores its own medal and is saved as the best", dropRun), dropCrash, trip("drop")] });
 scene("orbit", { steps: [{ name: "orbit flow", why: "regression: the spacewalk air bonus was missing from the flight log", run: orbitFlow }, orbitSteering, orbitMissed, orbitEscape, trip("orbit")] });
 scene("mine", { steps: [mineResume, trip("mine"), mineControls] });
-scene("factory", { query: "character=portlandhodl", steps: [factoryWalking, factoryGreeter, factoryLadders, factoryRailingJump, factoryWeapons, factoryForward, factoryForge, factoryShields, trip("factory")] });
+scene("pool", { steps: [poolLeave, trip("pool")] });
+scene("factory", { query: "character=portlandhodl", steps: [factoryWalking, factoryGreeter, factoryLadders, factoryRailingJump, factoryWeapons, factoryForward, factoryForge, factoryShields] });
+scene("factory", { label: "cooker", query: "character=portlandhodl", steps: [donation("factory", { stat: "cooker.out", seconds: 14, where: "the cooker sends its bananas out through the exit shield" }), factoryCooker, trip("factory")] });
 scene("factory", { label: "entrance", url: hubPage(src, "character=portlandhodl"), steps: [factoryFloor, factoryEntrance] });
 scene("factory", { label: "canvas2d", query: "canvas2d=1", steps: [factoryCanvas] });
 scene("bifrost", { url: hubPage(src, "solo=1&character=portlandhodl"), steps: [bifrostEntrance, bifrostWalking, bifrostExit, trip("bifrost")] });
@@ -8461,7 +8554,7 @@ scene("dsb", { label: "lifecycle", url: hubPage(src), steps: [{ name: "dsb lifec
   record("soak: dsb cycles: GPU records, listeners and heap remain bounded", Math.abs(after.stats.gl.records - before.stats.gl.records) <= 3 && before.nodes === after.nodes && before.listeners === after.listeners && within(before, after, 0.1), heapDetail(before, after));
 } }] });
 
-scene("factory", { label: "lifecycle", url: hubPage(src), steps: [{ name: "factory lifecycle", why: "contract: repeated factory visits release the hall's listeners, nodes and GPU resources while retaining one bounded shared node", run: async (b) => {
+scene("factory", { label: "lifecycle", url: hubPage(src), steps: [{ name: "factory lifecycle", why: "contract: repeated factory visits, each left with a tip's show in the air, release the hall's listeners, nodes and GPU resources while retaining one bounded shared node", run: async (b) => {
   const { rendered, settled, snapshot, travel, heapDetail, within } = await dsbSoak(b);
   // Keep resource comparisons at one tier, as in the other lifecycle soaks.
   await b.evaluate('__ooga.renderer.setQuality("low")');
@@ -8474,11 +8567,13 @@ scene("factory", { label: "lifecycle", url: hubPage(src), steps: [{ name: "facto
       return () => { if (live) { live = false; __factoryLife.subscriptions--; } return off(); };
     };
   })()`);
-  // Warm both scenes, so the counts below start from a visit made after the instrumenting.
-  await travel("factory"); await travel("lab"); await travel("hub"); await settled(); await rendered(2);
+  // A legendary tip two seconds before each departure, so every visit leaves with cubes or bananas in the air.
+  const tip = (id) => b.evaluate(`(() => { const B = window.__ooga; window.BL.scenes.factory.onDonation({ id: "${id}", sats: 120000, handle: "soak", message: "", at: Date.now() }); B.advance(2, 1 / 30); const c = B.stats().cooker; return c.cubes + c.bananas + c.queued; })()`);
+  // Warm both scenes and the cooker's show, so the counts below start from a visit made after the instrumenting.
+  await travel("factory"); await tip("soak-warm"); await travel("lab"); await travel("hub"); await settled(); await rendered(2);
   const before = await snapshot(), visits = [];
   for (let i = 0; i < 6; i++) {
-    await travel("factory");
+    await travel("factory"); const inFlight = await tip(`soak-${i}`);
     // One listener belongs to the hall and one to Flink; both leave with the scene.
     const hall = await b.evaluate('__factoryLife.subscriptions');
     await travel("lab");
@@ -8488,10 +8583,10 @@ scene("factory", { label: "lifecycle", url: hubPage(src), steps: [{ name: "facto
       const n = __ooga.factory.node;
       return { same: n === __factoryLife.node, subscriptions: __factoryLife.subscriptions, lines: n.placeOf.size, places: n.bays.length + n.stands.length };
     })()`);
-    visits.push({ ...visit, hall, away });
+    visits.push({ ...visit, hall, away, inFlight });
   }
   const after = await snapshot(), same = (key) => before.stats[key] === after.stats[key];
-  record("soak: factory cycles: one bounded node survives six round trips, the hall's subscription released, without retaining scene nodes, targets or DOM", visits.every((v) => v.same && v.hall === 2 && v.away === 0 && v.subscriptions === 1 && v.lines <= v.places)
+  record("soak: factory cycles: one bounded node survives six round trips, each left mid-show, the hall's subscription released, without retaining scene nodes, targets or DOM", visits.every((v) => v.same && v.hall === 2 && v.away === 0 && v.subscriptions === 1 && v.lines <= v.places && v.inFlight > 0)
     && same("allNodes") && same("targets") && same("dom") && after.stats.tweens === 0, JSON.stringify({ visits, before: before.stats, after: after.stats }));
   record("soak: factory cycles: GPU records, listeners and retained heap remain bounded", Math.abs(after.stats.gl.records - before.stats.gl.records) <= 3 && before.nodes === after.nodes && before.listeners === after.listeners && within(before, after, 0.1), heapDetail(before, after));
 } }] });
