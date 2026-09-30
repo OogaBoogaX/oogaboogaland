@@ -718,9 +718,9 @@
     const closePaymentGuide = () => { if (el.payment.open) el.payment.close(); };
     on(el.payment, "cancel", (e) => { e.preventDefault(); if (actionHandler) actionHandler("payment-close"); });
     on(el.payment, "keydown", (e) => {
-      if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
+      if (e.key !== "Escape" && e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
       e.preventDefault(); e.stopPropagation();
-      if (!e.repeat && actionHandler) actionHandler(e.key === "ArrowLeft" ? "payment-back" : "payment-next");
+      if (!e.repeat && actionHandler) actionHandler(e.key === "Escape" ? "payment-close" : e.key === "ArrowLeft" ? "payment-back" : "payment-next");
     });
     const openFeed = () => {
       if (!el.feed.open) el.feed.showModal();
