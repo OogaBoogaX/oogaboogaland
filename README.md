@@ -29,6 +29,12 @@ Roster colours show activity across every OogaBoogaX repo: yellow worked in the 
 
 Around the rim: **EntropyLab** (11 o'clock), the **Lightning Factory** (2), **Ooga Arcade** (3), where a cabinet opens each game, the **Mempool island** (4) and the **Timechain Sphere** (southwest). Every game opens on a title card; **Enter** starts, **Escape** leaves.
 
+## Follow a Lightning payment
+
+Inside the Lightning Factory, choose **Follow payment** or tap the switchboard. Pick **Settled** or **Failed**, then **Begin**. **Next** and **Back** (or the arrow keys) move through the incoming channel, node, outgoing channel or failed return, and fee/result. **Replay step** repeats the bright marker's animation; **Latest** selects the newest captured example of that outcome. **Finish**, **Escape**, the close button or a press outside the guide returns to the hall and restores your Ooga if you were controlling one.
+
+The guide captures demo forwards between the four main channels during the visit, so an outcome may need a moment to arrive. It keeps the selected example while the factory continues running. Amounts, private balances and failure reasons are not inferred; the marker illustrates channel updates, not an on-chain coin transfer. Replaying never adds forwards or fees to the node's totals, and public events without a complete route cannot become a lesson.
+
 ## Timechain Sphere
 
 Sani's hangout: a walk-in sphere whose six inner walls show live [Timechain Index](https://timechainindex.com) data (BTC distribution, address balances, UTXO sizes, ETF and exchange holdings, top holders). The walls load once you come near and refresh every five minutes. Tap a wall for a close-up and its source; tap Sani to spin his chair. Holdings are on-chain balances and API attributions, not proof of ownership. `timechain=0` turns the feed off.

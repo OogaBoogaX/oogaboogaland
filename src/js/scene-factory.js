@@ -106,7 +106,7 @@
     forge: ["On-chain forge · open and close", "Channels are opened and closed with Bitcoin transactions. Opening one feeds the forge carts of sats from the chain; closing one mints a coin that goes back down to it."],
     shaftIn: ["From the chain · opening channels", "Sats come up this shaft from the Bitcoin chain. Each channel the node opens sends carts of them into the forge, more for a bigger channel."],
     shaftOut: ["To the chain · closing channels", "When a channel closes, its sats go back to the Bitcoin chain: the forge mints them into a coin that rolls down this shaft."],
-    switchboard: ["Switchboard · routing", "Every payment the node passes on for someone else is a forward. The screens light as they go through."],
+    switchboard: ["Switchboard · follow a payment", "Follow a recorded demo payment through the node, one step at a time."],
     rebalancer: ["Rebalancer · moving liquidity", "Rebalancing moves sats between channels so lines keep working. It is shown by the hour, never for one line."],
     treasury: ["Treasury · routing fees", "The gold under the glass is the node's public capacity, visible to anyone on the Lightning network. Each forward that earns the demo node a fee sends a nugget up the belt into the crate."],
     lookout: ["Watchtower · the node's signal", "The beam sweeps while the node's events are arriving. Dark means no signal: the node may be fine, but nothing is getting through."],
@@ -122,6 +122,7 @@
   // The Ooga the visitor walked in as: one playable actor from the shared crew, and the world it carries.
   let people = null, avatar = null, playerWorld = null;
   let scene = null;
+  let payment = null;
   const targets = [];
   const SAT_POS = { x: 0, y: 0, z: 0 }, SAT_ROT = { x: 0, y: 0, z: 0 }, SAT_SCALE = { x: 1, y: 1, z: 1 };
   const SAT_M = mat4.create();
@@ -214,9 +215,141 @@
     return b;
   };
 
+  // Two recent floor forwards and one pinned lesson. Playback owns one marker, never emits into the feed,
+  // and never changes the factory's counters or particle pools. Public events do not disclose a full route.
+  const createPaymentGuide = () => {
+    const sample = () => ({ valid: false, from: 0, to: 0, fromName: "", toName: "", scale: null, fee: null, seq: 0 });
+    const recent = [sample(), sample()], selected = sample();
+    const state = { ready: false, failed: false, step: -1, from: "Incoming peer", to: "Outgoing peer", heading: "", body: "", detail: "" };
+    const marker = createNode({ geometry: FM.sat(), scale: { x: 2, y: 2, z: 2 }, highlight: 0.7, visible: false, sightHidden: true });
+    addChild(root, marker);
+    const views = ["lineA", "lineB", "lineC", "lineD"];
+    let active = false, time = 0, returnPlayer = null;
+    const render = () => {
+      const failed = state.failed, step = state.step;
+      state.ready = selected.valid;
+      state.from = selected.valid ? selected.fromName : "Incoming peer";
+      state.to = selected.valid ? selected.toName : "Outgoing peer";
+      state.detail = selected.valid ? `${failed ? "Failed" : "Settled"} demo forward · size: ${SIZES[selected.scale] || "not supplied"}. Amount and channel balances are not shown.` : "Waiting for a demo forward between the four main channels.";
+      if (!selected.valid) {
+        state.heading = "Waiting for an example";
+        state.body = feed.reading.contract === BL.factoryFeed.PUBLIC
+          ? "This public stream does not reveal a complete payment route. Detailed playback needs a demo event; no missing route or failure reason is guessed."
+          : `The factory is listening for a ${failed ? "failed" : "settled"} demo forward. You can choose the other outcome or close this guide while you wait.`;
+      } else if (step < 0) {
+        state.heading = "Your payment is ready";
+        state.body = "Follow this recorded forward through one routing node. The bright marker is an illustration, not a coin moving on-chain. Begin when you are ready.";
+      } else if (step === 0) {
+        state.heading = "Incoming channel";
+        state.body = `The forwarding attempt arrives from ${selected.fromName}. A Lightning payment uses channels between peers; this is one node along its route, not the entire journey.`;
+      } else if (step === 1) {
+        state.heading = "Through the node";
+        state.body = `The node attempts to forward toward ${selected.toName}. A channel's total capacity does not tell us its spendable balance in that direction.`;
+      } else if (step === 2) {
+        state.heading = failed ? "The attempt failed" : "Outgoing channel";
+        state.body = failed
+          ? "The red marker returns along the incoming channel to illustrate a failed attempt being unwound. The event does not tell us why it failed; low liquidity is only one possible cause."
+          : `The forward settled through the channel to ${selected.toName}. Successful forwarding updates channel balances without an on-chain transaction for each payment.`;
+      } else {
+        state.heading = failed ? "No forwarding fee" : "The routing fee";
+        state.body = failed
+          ? "A failed forwarding attempt earns no routing fee. This event does not tell us whether another attempt later succeeded. Compare a settled example to see the difference."
+          : selected.fee
+            ? `This demo event reports a ${SIZES[selected.fee].toLowerCase()} fee bucket, not an exact satoshi amount. The treasury nugget represents the fee earned for forwarding. Replaying this lesson earns nothing extra.`
+            : "This settled event does not report a fee. Missing fee data does not mean a zero fee, so this lesson shows no treasury nugget.";
+      }
+      hud.setPaymentGuide(state);
+    };
+    const choose = (failed) => {
+      state.failed = failed;
+      state.step = -1;
+      Object.assign(selected, recent[failed ? 1 : 0]);
+      marker.visible = false;
+      render();
+    };
+    const capture = (e, from, to) => {
+      const p = e.payload;
+      if (e.schema !== BL.factoryFeed.DEMO || e.stream === "replay" || !from || !to || !from.bay || !to.bay || (p.count || 1) !== 1) return;
+      const failed = e.type === "forward.failed", row = recent[failed ? 1 : 0];
+      row.valid = true; row.from = from.index; row.to = to.index; row.scale = p.scale || null; row.fee = p.fee || null; row.seq = e.seq;
+      row.fromName = `Channel ${from.letter}`; row.toName = `Channel ${to.letter}`;
+      for (const c of mock.snapshot.channels) {
+        if (c.id === p.station) row.fromName = c.peer;
+        if (c.id === p.out) row.toName = c.peer;
+      }
+      // New events may fill a waiting lesson, but never replace a payment being read or move the camera.
+      if (active && !selected.valid && failed === state.failed) { Object.assign(selected, row); render(); }
+    };
+    const showStep = (step) => {
+      state.step = step;
+      time = 0;
+      marker.geometry = state.failed && step >= 2 ? FM.satFailed() : FM.sat();
+      marker.visible = step >= 0 && !(step === 3 && (state.failed || !selected.fee));
+      const preset = step < 0 ? "lines" : step === 0 ? views[selected.from] : step === 1 ? "core"
+        : step === 2 ? views[state.failed ? selected.from : selected.to] : state.failed || !selected.fee ? "switchboard" : "treasury";
+      pilot.goPreset(preset);
+      render();
+    };
+    const close = () => {
+      if (!active) return;
+      active = false;
+      marker.visible = false;
+      hud.closePaymentGuide();
+      pilot.setActive(true);
+      if (returnPlayer) pilot.possess(returnPlayer);
+      returnPlayer = null;
+    };
+    const open = () => {
+      if (active) return;
+      active = true;
+      returnPlayer = pilot.player;
+      pilot.goPreset("lines");
+      pilot.setActive(false);
+      hud.tooltip.hide();
+      choose(!recent[0].valid && recent[1].valid);
+      hud.openPaymentGuide();
+    };
+    const action = (name) => {
+      if (name === "payment-open") { open(); return; }
+      if (!active) return;
+      if (name === "payment-close") close();
+      else if (name === "payment-settled" || name === "payment-failed" || name === "payment-latest") {
+        choose(name === "payment-latest" ? state.failed : name === "payment-failed");
+        pilot.goPreset("lines");
+      } else if (selected.valid) {
+        if (name === "payment-next") { if (state.step === 3) close(); else showStep(state.step + 1); }
+        else if (name === "payment-back" && state.step >= 0) showStep(state.step - 1);
+        else if (name === "payment-replay" && state.step >= 0) showStep(state.step);
+      }
+    };
+    const update = (dt) => {
+      if (!active || !marker.visible) return;
+      time = Math.min(2.4, time + dt);
+      const t = time / 2.4, step = state.step, p = marker.position;
+      if (step === 0 || step === 2) {
+        const path = scene.paths[step === 0 || state.failed ? selected.from : selected.to];
+        const u = (step === 0 ? t : 1 - t) * CONDUIT_SAMPLES, j = Math.min(CONDUIT_SAMPLES - 1, Math.floor(u)), f = u - j, a = j * 3;
+        p.x = path[a] + (path[a + 3] - path[a]) * f;
+        p.y = path[a + 1] + (path[a + 4] - path[a + 1]) * f;
+        p.z = path[a + 2] + (path[a + 5] - path[a + 2]) * f;
+      } else if (step === 1) {
+        const from = scene.paths[selected.from], to = scene.paths[selected.to], at = CONDUIT_SAMPLES * 3;
+        p.x = from[at] + (to[at] - from[at]) * t;
+        p.y = from[at + 1] + (to[at + 1] - from[at + 1]) * t;
+        p.z = from[at + 2] + (to[at + 2] - from[at + 2]) * t;
+      } else {
+        p.x = LAYOUT.treasury.x;
+        p.y = LAYOUT.treasury.y + BELT[0][1] + (BELT[1][1] - BELT[0][1]) * t + 0.1;
+        p.z = LAYOUT.treasury.z + BELT[0][2] + (BELT[1][2] - BELT[0][2]) * t;
+      }
+      marker.rotation.y = time * 3;
+    };
+    return { capture, open, action, update, close, get active() { return active; }, get step() { return state.step; }, get sequence() { return selected.seq; } };
+  };
+
   const onEvent = (e) => {
     const s = scene, replay = e.stream === "replay", p = e.payload || {};
-    const place = placeIn(s, shared.at);
+    const place = placeIn(s, shared.at), out = p.out ? placeIn(s, shared.indexOf(p.out)) : null;
     switch (e.type) {
       case "channel.opening":
         s.forgeHeat = HEAT;
@@ -250,13 +383,15 @@
         break;
       case "forward.settled":
         if (replay) break;
+        payment.capture(e, place, out);
         s.switchBusy = FLASH;
         if (p.fee) dropNugget(s);
-        forward(s, place, p.out ? placeIn(s, shared.indexOf(p.out)) : null, p.scale, false);
+        forward(s, place, out, p.scale, false);
         break;
       case "forward.failed":
         if (replay) break;
-        forward(s, place, p.out ? placeIn(s, shared.indexOf(p.out)) : null, p.scale, true);
+        payment.capture(e, place, out);
+        forward(s, place, out, p.scale, true);
         break;
       case "rebalance.succeeded":
         s.rebScale = p.scale || null;
@@ -390,6 +525,7 @@
     go("hub");
   };
   const onKey = (e) => {
+    if (payment.active) { if (e.key === "Escape") payment.close(); return true; }
     if ((e.key === "x" || e.key === "X") && !e.repeat && pilot.modeAction("mode-toggle")) return true;
     if ((e.key === "1" || e.key === "2") && pilot.weaponMode(Number(e.key))) return true;
     if (e.key === "g" || e.key === "G") return pilot.weaponAction("weapon-toggle");
@@ -796,6 +932,7 @@
         if (!hit) return;
         const o = hit.owner;
         if (o.kind === "exit") return leaveCave();
+        if (o.kind === "switchboard") return payment.open();
         if (o.preset) pilot.goPreset(o.preset);
         const tip = TIPS[o.kind];
         if (tip) hud.toast(tip[1]);
@@ -804,7 +941,8 @@
     });
     hud.onPreset(pilot.goPreset);
     hud.onAction((action) => {
-      if (action === "leave") leaveCave();
+      if (action.startsWith("payment-")) payment.action(action);
+      else if (action === "leave") leaveCave();
       else if (action === "reset-view") pilot.goPreset("entrance");
       else if (action === "act") pilot.action();
       else if (action.startsWith("mode-")) pilot.modeAction(action);
@@ -861,6 +999,7 @@
       b.build = p.state === "active" || p.state === "dismantling" ? 1 : 0;
     });
     shared.stands.forEach((p) => placeIn(scene, p));
+    payment = createPaymentGuide();
     unsubscribe = feed.subscribe(onEvent);
     refreshBoards(scene);
     leaving = false;
@@ -870,7 +1009,7 @@
     factoryScene.input = input;
     factoryScene.debug = {
       hud, camera, controls: pilot.controls, pilot, crew: people, cavemen: people ? people.cavemen : null,
-      factory: { feed, mock, get scene() { return scene; }, simulate(seconds, dt = 1 / 30) { for (let t = 0; t < seconds; t += dt) shared.tick(dt); } }
+      factory: { feed, mock, payment, get scene() { return scene; }, simulate(seconds, dt = 1 / 30) { for (let t = 0; t < seconds; t += dt) shared.tick(dt); } }
     };
   };
 
@@ -1047,7 +1186,7 @@
     const s = scene;
     const previousX = avatar ? avatar.root.position.x : 0, previousY = avatar ? avatar.root.position.y : 0, previousZ = avatar ? avatar.root.position.z : 0;
     pilot.readInput(dt);
-    if (people) people.update(dt, elapsed);
+    if (people && !payment.active) people.update(dt, elapsed);
     pilot.update(dt);
     // Cut the vault and inward-leaning walls away so the outer decks stay visible.
     // Restore them only after the birdseye blend fully returns, including reversals.
@@ -1078,7 +1217,7 @@
     dust.update(elapsed, pilot.orbit.target.x, pilot.orbit.target.z);
     for (let i = 0; i < s.crew.length; i++) s.crew[i].agent.update(dt);
     // Out through the gate: walked into it, or flown into it with the free view.
-    if (!leaving) {
+    if (!leaving && !payment.active) {
       const p = avatar ? avatar.root.position : camera.position, y = p.y - (avatar ? avatar.baseY : 0) - LAYOUT.entrance.y;
       const inOpening = p.x >= GATE_OPENING.minX && p.x <= GATE_OPENING.maxX && y >= GATE_OPENING.floorY - 0.12 && y < GATE_OPENING.ceilingY;
       if (avatar) {
@@ -1221,6 +1360,7 @@
     s.redNode.instanceCount = reds;
     s.redNode.visible = reds > 0;
     s.redNode.instanceVersion++;
+    payment.update(dt);
     s.refreshAt -= dt;
     if (s.refreshAt <= 0) {
       s.refreshAt = 1;
@@ -1233,6 +1373,7 @@
   const overlay = (dt) => fx.drawOverlay(dt, drawExtra);
 
   const leave = () => {
+    payment.close();
     // Whoever walked in walks back out as themselves: the island takes the same Ooga back at this mouth.
     if (avatar) world.pilot = avatar.traits.name;
     unsubscribe();
@@ -1254,12 +1395,13 @@
     const count = input.targetCount;
     input.dispose();
     hud.dispose();
-    scene = shared = feed = mock = hud = hooks = input = pilot = fx = agentPlay = dust = people = avatar = playerWorld = null;
+    scene = shared = feed = mock = hud = hooks = input = pilot = fx = agentPlay = dust = people = avatar = playerWorld = payment = null;
     factoryScene.input = factoryScene.debug = null;
     return { targets: count };
   };
   // Geometry kept off the graph but swapped in when something flashes, so it stays on the GPU.
   const liveGeometry = (set) => {
+    set.add(FM.sat()).add(FM.satFailed());
     for (const pair of [FM.coreChamber(), FM.forgeFire(), FM.forgeSign(), FM.forgeWave(), FM.switchScreens(), FM.rebalancerRing(), FM.rebalancerFlow(), FM.lookoutLamp(), FM.galleryCaps(), FM.capacitor().blue, FM.capacitor().orange]) {
       for (const k in pair) set.add(pair[k]);
     }

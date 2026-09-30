@@ -207,6 +207,7 @@
         <button type="button" data-preset="lines">Lines</button>
         <button type="button" data-preset="forge">Forge</button>
         <button type="button" data-preset="treasury">Treasury</button>
+        <button type="button" data-action="payment-open">Follow payment</button>
         <button type="button" class="leave" data-action="leave">Leave<span> cave</span></button>
       </nav>
       <nav class="presets" aria-label="Thro-ball" data-scene="skee" hidden>
@@ -1373,6 +1374,34 @@ Then run npm run build and ONLY=characters node test/run.mjs.</pre>
         <button type="button" id="chalk-clean">Clean board</button>
         <button type="button" id="chalk-reset">Reset message</button>
       </div>
+    </dialog>
+    <dialog class="modal payment-guide" id="payment-guide" aria-labelledby="payment-title" tabindex="-1">
+      <div class="panel-head">
+        <h2 id="payment-title">Follow a payment</h2>
+        <button type="button" class="modal-close" data-action="payment-close" aria-label="Close payment guide">&times;</button>
+      </div>
+      <p class="payment-source">DEMO REPLAY · NO REAL PAYMENT</p>
+      <div class="payment-choices" aria-label="Payment outcome">
+        <button type="button" data-action="payment-settled" aria-pressed="true">Settled</button>
+        <button type="button" data-action="payment-failed" aria-pressed="false">Failed</button>
+        <button type="button" data-action="payment-latest">Latest</button>
+      </div>
+      <div class="payment-route" aria-label="Recorded route">
+        <span id="payment-from">Incoming peer</span><span aria-hidden="true">→</span>
+        <span>Node</span><span aria-hidden="true">→</span><span id="payment-to">Outgoing peer</span>
+      </div>
+      <div class="payment-copy" aria-live="polite" aria-atomic="true">
+        <p class="payment-step" id="payment-step"></p>
+        <h3 id="payment-heading">Choose a payment</h3>
+        <p id="payment-body"></p>
+      </div>
+      <p class="payment-detail" id="payment-detail"></p>
+      <div class="payment-actions">
+        <button type="button" data-action="payment-back">Back</button>
+        <button type="button" data-action="payment-replay">Replay step</button>
+        <button type="button" data-action="payment-next">Begin</button>
+      </div>
+      <p class="payment-foot">A recorded forward between the four main channels. The bright marker explains it; the factory keeps running.</p>
     </dialog>
     <dialog class="modal board-modal" id="board-modal" aria-labelledby="board-title">
       <div class="panel-head" id="board-head">

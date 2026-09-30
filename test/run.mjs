@@ -5286,6 +5286,40 @@ const factoryForward = { name: "factory forward", why: "rule: a forward's sats g
     const failed = watch(8, 2, 1);
     return { sent, big, failedSent, failed }; })()`);
   record("factory forward: a large forward's stream rides in along its line's conduit, surges the node and rides out along the other line's to light it; a failed one comes back along its own and sputters the line it was bound for", r.sent && r.big.inbound >= 8 && r.big.outbound >= 8 && r.big.backOnFrom === 0 && r.big.surged && r.big.left === 0 && r.failedSent && r.failed.inbound >= 1 && r.failed.backOnFrom >= 1 && r.failed.onTo === 0 && r.failed.sputtered && !r.failed.surged && r.failed.left === 0, JSON.stringify(r));
+  const lesson = await b.evaluate(`(() => {
+    const B = __ooga; ${FACTORY_EVENT}
+    const s = X.scene, guide = X.payment, reading = X.feed.reading, dialog = document.getElementById("payment-guide");
+    const click = (name) => document.querySelector('[data-action="payment-' + name + '"]').click();
+    const heading = () => document.getElementById("payment-heading").textContent;
+    const before = [X.feed.counts.accepted, reading.settled, reading.failed, reading.fees, s.hopper].join();
+    const player = B.pilot.player, position = player ? [player.root.position.x, player.root.position.y, player.root.position.z].join() : "";
+    click("open"); click("settled");
+    const opened = dialog.open && guide.active && guide.step === -1, settled = [];
+    for (let i = 0; i < 4; i++) { click("next"); B.advance(2.5, 1 / 30); settled.push(heading()); click("replay"); B.advance(2.5, 1 / 30); }
+    const bucketed = document.getElementById("payment-body").textContent.includes("not an exact satoshi amount");
+    click("failed");
+    const failed = [];
+    for (let i = 0; i < 4; i++) { click("next"); B.advance(2.5, 1 / 30); failed.push(heading()); }
+    click("back");
+    const unknownReason = document.getElementById("payment-body").textContent.includes("does not tell us why");
+    const unchanged = before === [X.feed.counts.accepted, reading.settled, reading.failed, reading.fees, s.hopper].join();
+    click("close");
+    const restored = !dialog.open && B.pilot.player === player && (!player || position === [player.root.position.x, player.root.position.y, player.root.position.z].join());
+    click("open"); click("settled"); click("next");
+    const pinned = guide.sequence;
+    send("forward.settled", { scale: "small", count: 1, station: s.bays[1].line, out: s.bays[2].line });
+    const kept = guide.sequence === pinned && guide.step === 0;
+    click("latest");
+    const latest = guide.sequence !== pinned && guide.step === -1;
+    for (let i = 0; i < 4; i++) click("next");
+    const unknownFee = document.getElementById("payment-body").textContent.includes("Missing fee data does not mean a zero fee");
+    return { opened, settled, failed, bucketed, unknownReason, unchanged, restored, kept, latest, unknownFee };
+  })()`);
+  record("factory payment lesson: settled and failed examples explain four stages without changing accounting, preserve the chosen forward until Latest, and restore the visitor", lesson.opened && lesson.settled.join() === "Incoming channel,Through the node,Outgoing channel,The routing fee"
+    && lesson.failed.join() === "Incoming channel,Through the node,The attempt failed,No forwarding fee" && lesson.bucketed && lesson.unknownReason && lesson.unchanged && lesson.restored && lesson.kept && lesson.latest && lesson.unknownFee, JSON.stringify(lesson));
+  await b.key("Escape");
+  const closed = await b.evaluate(`({ scene: __ooga.scene, open: document.getElementById("payment-guide").open, active: __ooga.factory.payment.active })`);
+  record("factory payment lesson: Escape closes the guide without leaving the hall", closed.scene === "factory" && !closed.open && !closed.active, JSON.stringify(closed));
 } };
 const factoryForge = { name: "factory forge", why: "rule: opening a channel sends carts up to the forge, which takes each with a flash; closing one mints a coin that rolls back down to the chain", run: async (b) => {
   const r = await b.evaluate(`(() => { const B = window.__ooga; ${FACTORY_EVENT} const s = X.scene, spare = X.mock.snapshot.channels.find((c) => !c.active), gallery = s.gallery.find((g) => g.line);

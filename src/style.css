@@ -2497,6 +2497,60 @@ body[data-active-scene="arcade"] .magazine-hud {
   overscroll-behavior: contain;
 }
 
+/* A compact lesson leaves the factory in view above it, including on a phone. */
+.payment-guide {
+  position: fixed;
+  inset: auto max(12px, var(--safe-right)) max(12px, var(--safe-bottom)) auto;
+  width: 390px;
+  max-width: calc(100vw - 24px);
+  max-height: calc(100dvh - 24px);
+  margin: 0;
+  padding: 12px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.payment-guide::backdrop { background: rgba(0, 0, 0, 0.16); }
+.payment-guide .panel-head h2 { margin: 0; font-size: 14px; white-space: nowrap; }
+.payment-guide .modal-close { width: 36px; height: 36px; margin: 0; }
+.payment-source, .payment-step { margin: 6px 0; color: var(--accent-text); font-size: 9px; }
+.payment-choices, .payment-actions { display: flex; gap: 6px; }
+.payment-guide button:not(.modal-close) {
+  flex: 1;
+  min-height: 36px;
+  padding: 6px;
+  border: 2px solid var(--wood-edge);
+  border-radius: 6px;
+  background: var(--tablet);
+  color: var(--paper);
+  font: inherit;
+  font-size: 10px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.payment-guide button[aria-pressed="true"], .payment-guide button:focus-visible { border-color: var(--accent-text); }
+.payment-guide button:disabled { opacity: 0.45; cursor: default; }
+.payment-route {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto auto minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  margin: 10px 0;
+  padding: 8px;
+  background: var(--tablet);
+  border-radius: 6px;
+  color: var(--accent-text);
+  font-size: 10px;
+  text-align: center;
+  overflow-wrap: anywhere;
+}
+.payment-copy { padding: 8px 10px; background: var(--tablet); border-radius: 6px; }
+.payment-copy h3 { margin: 0 0 6px; font-size: 13px; white-space: nowrap; }
+.payment-copy p:not(.payment-step) { margin: 0; font-size: 11px; line-height: 1.5; }
+.payment-detail, .payment-foot { margin: 8px 0; font-size: 9.5px; line-height: 1.45; overflow-wrap: anywhere; }
+.payment-foot { margin-bottom: 0; }
+.presets[data-scene="factory"] { flex-wrap: wrap; }
+
 /* The board close-up, shared by every readable board: the board's own pixels blown up, the page's caption between
    the chevrons, one dot a page, and the page's note on a tablet. */
 .board-modal {

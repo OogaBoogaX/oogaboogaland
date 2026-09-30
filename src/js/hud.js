@@ -183,6 +183,8 @@
       worldLootHint: $("world-loot-hint"),
       subtitle: $("subtitle"),
       actions: [...document.querySelectorAll("[data-action]")],
+      payment: $("payment-guide"), paymentFrom: $("payment-from"), paymentTo: $("payment-to"), paymentStep: $("payment-step"),
+      paymentHeading: $("payment-heading"), paymentBody: $("payment-body"), paymentDetail: $("payment-detail"),
       board: $("board-modal"), boardTitle: $("board-title"), boardScreen: $("board-screen"), boardCaption: $("board-caption"), boardNote: $("board-note"),
       boardDots: $("board-dots"), boardPrev: $("board-prev"), boardNext: $("board-next"), boardHelp: $("board-help"),
       boardHead: $("board-head"), boardPause: $("board-pause"), boardResize: $("board-resize"),
@@ -693,6 +695,33 @@
     const onAction = (fn) => {
       actionHandler = fn;
     };
+    const paymentButtons = [...el.payment.querySelectorAll("[data-action]")];
+    const setPaymentGuide = (state) => {
+      el.paymentFrom.textContent = state.from;
+      el.paymentTo.textContent = state.to;
+      el.paymentStep.textContent = state.step < 0 ? "Choose an example, then begin" : `Step ${state.step + 1} of 4`;
+      el.paymentHeading.textContent = state.heading;
+      el.paymentBody.textContent = state.body;
+      el.paymentDetail.textContent = state.detail;
+      for (const b of paymentButtons) {
+        const action = b.dataset.action;
+        if (action === "payment-settled" || action === "payment-failed") b.setAttribute("aria-pressed", String(state.failed === (action === "payment-failed")));
+        if (action === "payment-back") b.disabled = state.step < 0;
+        if (action === "payment-replay") b.disabled = state.step < 0;
+        if (action === "payment-next") { b.disabled = !state.ready; b.textContent = state.step < 0 ? "Begin" : state.step === 3 ? "Finish" : "Next"; }
+      }
+    };
+    const openPaymentGuide = () => {
+      if (!el.payment.open) el.payment.showModal();
+      el.payment.focus();
+    };
+    const closePaymentGuide = () => { if (el.payment.open) el.payment.close(); };
+    on(el.payment, "cancel", (e) => { e.preventDefault(); if (actionHandler) actionHandler("payment-close"); });
+    on(el.payment, "keydown", (e) => {
+      if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
+      e.preventDefault(); e.stopPropagation();
+      if (!e.repeat && actionHandler) actionHandler(e.key === "ArrowLeft" ? "payment-back" : "payment-next");
+    });
     const openFeed = () => {
       if (!el.feed.open) el.feed.showModal();
     };
@@ -1159,6 +1188,7 @@
     dismissOutside(el.feed, closeFeed);
     dismissOutside(el.recipe, closeRecipe);
     dismissOutside(el.board, () => mainBoard.close());
+    dismissOutside(el.payment, () => { if (actionHandler) actionHandler("payment-close"); });
     // The prompt is written to be pasted, so it leaves in one click.
     const copyRecipe = (button) => {
       const text = el.recipeText.textContent;
@@ -1271,6 +1301,7 @@
         actionHandler && actionHandler("mode-preset", dot ? dot.dataset.detachedPreset : nextDetachedView());
       }
       else actionHandler && actionHandler(b.dataset.action);
+      if (b.dataset.action.startsWith("payment-") && el.payment.open) el.payment.focus();
     });
     // A game's side panels fold away and come back from a tab on the screen's edge: a `data-fold`
     // button toggles the panel it names, and the stylesheet shows the tab while the panel is folded.
@@ -1593,12 +1624,13 @@
       setJetpack(false, false, 0);
       closeFeed();
       closeRecipe();
+      closePaymentGuide();
       closeBoard(true);
       mainBoard.dispose();
       el.board.classList.remove("board-floating");
       el.board.removeAttribute("style");
     };
-    return { el, openFeed, closeFeed, openRecipe, closeRecipe, dismissOutside, openBoard, closeBoard, updateBoard, restoreBoards, setRosterRow, setMeter, setStats, setAct, setMode, setGorilla, setDetachedView, fadeDetachedName, setAreaLabel, setPrimary, setWeapon, setMagazine, setJetpack, setSubtitle, onAction, toast, tooltip, hint, hideHint, letterSign, selectTab, onPreset, onIdentityChange, setIdentity, setDonationUrl, onAssign, onUnassign, renderInventory, dispose };
+    return { el, openFeed, closeFeed, openRecipe, closeRecipe, setPaymentGuide, openPaymentGuide, closePaymentGuide, dismissOutside, openBoard, closeBoard, updateBoard, restoreBoards, setRosterRow, setMeter, setStats, setAct, setMode, setGorilla, setDetachedView, fadeDetachedName, setAreaLabel, setPrimary, setWeapon, setMagazine, setJetpack, setSubtitle, onAction, toast, tooltip, hint, hideHint, letterSign, selectTab, onPreset, onIdentityChange, setIdentity, setDonationUrl, onAssign, onUnassign, renderInventory, dispose };
   };
   BL.hud = { create, renderIcon, signLettering, STATE_LABELS, statusFor };
 })();
