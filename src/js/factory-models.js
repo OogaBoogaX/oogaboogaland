@@ -9,7 +9,8 @@
 //
 // Station pieces are built facing +z, the way a visitor on the balcony reads them, and turned into place by the
 // scene. Where the scene animates a part (the core's chamber, a capacitor's glass, the rebalancer's ring, the
-// lookout's beam, the treasury's pile and hopper, the carts) it is its own geometry, with a lit and a dim
+// lookout's beam, the treasury's pile and hopper, the carts, the cooker's jaw, porthole and gears) it is its own
+// geometry, with a lit and a dim
 // variant where it flashes, so a flash is a geometry swap and never a rebuild.
 //
 // The house style: timber and stone are chamfered `bevelBox`es; the machines are turned, lathes and tubes shaded
@@ -66,8 +67,13 @@
       { bay: 3, x: 20.8, y: LEVEL.main, z: -2, turn: -Math.PI / 2 }
     ],
     switchboard: { x: -12, y: LEVEL.low, z: 6, w: 7, d: 5 },
-    rebalancer: { x: 14, y: LEVEL.low, z: 4.2, w: 8, d: 10 },
-    treasury: { x: 13.5, y: LEVEL.low, z: 20, w: 7, d: 5 },
+    // One platform along the right wall carries the node's money in a row toward the way out: the rebalancer, the
+    // treasury and the banana cooker, each station facing +z. The platform is the deck; a station's entry is where
+    // it stands, and its w and d size its gorilla's patch.
+    platform: { x: 13.4, y: LEVEL.low, z: 12.15, w: 8, d: 20.7 },
+    rebalancer: { x: 14, y: LEVEL.low, z: 5, w: 8, d: 6.4 },
+    treasury: { x: 14.1, y: LEVEL.low, z: 13.2, w: 8, d: 5 },
+    cooker: { x: 13.75, y: LEVEL.low, z: 19.4, w: 8, d: 5 },
     // In front of the core's stone foot, whose face is at z 0.2 there.
     forge: { x: 0, z: 0.7 },
     lookout: { x: -16, y: LEVEL.top, z: -14, w: 6, d: 6, tower: 5.5 },
@@ -76,7 +82,7 @@
     // Vertical climbing planes; normals point out from the upper landing.
     ladders: [
       { x: -10, z: 8.4, bottom: 0, top: LEVEL.low, nx: 0, nz: 1, width: 1.4, inset: 0.3 },
-      { x: 10.1, z: 6.8, bottom: 0, top: LEVEL.low, nx: -1, nz: 0, width: 1.4, inset: 0.3 },
+      { x: 9.5, z: 6.8, bottom: 0, top: LEVEL.low, nx: -1, nz: 0, width: 1.4, inset: 0.3 },
       { x: 12, z: 22.4, bottom: 0, top: LEVEL.low, nx: 0, nz: 1, width: 1.4, inset: 0.3 },
       { x: -17.2, z: -16, bottom: LEVEL.top, top: LEVEL.top + 5.65, nx: 0, nz: -1, width: 1.4, inset: 0.3 }
     ],
@@ -87,13 +93,15 @@
     walk: [[2.5, 17.6, 23.7, 26.3], [17.6, 20.2, 0, 26.3]],
     // Every other flight of stairs, [x, y, z] at the bottom and at the top and its width, read by the scaffold that
     // builds them (cutting the rail wherever one lands) and by the floor an Ooga walks: pit to the
-    // core's walkway, the main level to the high lines up the lines' inner sides, and the high
-    // lines to the landing in front of the first gallery, one flight from each. An end on a deck's edge stands on that
-    // edge's rail line and crosses it square, so its rails meet the ends of the deck's.
+    // core's walkway, the main level to the high lines up the lines' inner sides, the high
+    // lines to the landing in front of the first gallery, one flight from each, and the pit up to the platform by the
+    // cooker. An end on a deck's edge stands on that edge's rail line and crosses it square, so its rails meet the
+    // ends of the deck's.
     stairs: [
       [-4.8, 0, 7.5, -4.8, LEVEL.main, 1.3, 1.6], [4.8, 0, 7.5, 4.8, LEVEL.main, 1.3, 1.6],
       [-9.2, LEVEL.main, -4.4, -9.2, LEVEL.high, -9.6, 1.6], [9.2, LEVEL.main, -4.4, 9.2, LEVEL.high, -9.6, 1.6],
-      [-6.4, LEVEL.high, -14.05, -0.8, LEVEL.top, -14.05, 1.6], [6.4, LEVEL.high, -14.05, 0.8, LEVEL.top, -14.05, 1.6]
+      [-6.4, LEVEL.high, -14.05, -0.8, LEVEL.top, -14.05, 1.6], [6.4, LEVEL.high, -14.05, 0.8, LEVEL.top, -14.05, 1.6],
+      [5.6, 0, 20.4, 9.5, LEVEL.low, 20.4, 1.6]
     ],
     // The landing the flights from A and B meet at, against the first gallery's front, and the bridges along the top:
     // the watchtower to the first gallery and the first gallery to the second, [x0, z0, x1, z1, width] edge to edge.
@@ -196,6 +204,18 @@
     return [disc(0.42, 0.62, 0.27), disc(-0.45, 0, 0.27), disc(0.42, -0.62, 0.27), link(-0.45, 0, 0.42, 0.62, 0.07), link(-0.45, 0, 0.42, -0.62, 0.07)];
   })();
   const networkGlyph = (height, depth, color, emissive = 1) => solidGlyph(NET_PIECES, height, depth, color, emissive);
+  // A banana as the cooker's signs draw it: a crescent lying on its back, fat in the middle and thin at its ends, in
+  // convex quads, with its stalk up at the right.
+  const BANANA_PIECES = (() => {
+    const n = 8, R = 1.25, cy = 0.95, pieces = [];
+    const at = (k, inset) => { const a = Math.PI * (1.2 + 0.6 * k / n), r = R - inset; return [Math.cos(a) * r, cy + Math.sin(a) * r]; };
+    const thick = (k) => 0.05 + 0.42 * Math.pow(Math.sin(Math.PI * k / n), 0.7);
+    for (let k = 0; k < n; k++) pieces.push([at(k, 0), at(k + 1, 0), at(k + 1, thick(k + 1)), at(k, thick(k))]);
+    const [ex, ey] = at(n, 0.02);
+    pieces.push([[ex - 0.04, ey], [ex + 0.14, ey + 0.16], [ex + 0.06, ey + 0.22], [ex - 0.1, ey + 0.08]]);
+    return pieces;
+  })();
+  const bananaGlyph = (height, depth, color, emissive = 1) => solidGlyph(BANANA_PIECES, height, depth, color, emissive);
 
   // A banner of the concept's blue (or `cloth`) with the bolt on both faces, hung from a rod: `h` tall, the rod at
   // the origin, facing +z. Cached by height and cloth and shared, so a builder that places one moves a copy
@@ -482,7 +502,7 @@
     const L = LAYOUT, geos = [], r = L.ring, R = r.outer - 0.15, e = L.entrance, [[, , a0, a1], [s1x0, s1x1, s1z0]] = L.walk;
     const place = (parts, x, y, z) => { for (const g of parts) geos.push(moved(g, x, y, z)); };
     // Whether (x, y, z) stands on a deck's rail line, where that rail's cut ends carry the posts.
-    const DECKS = [...L.bays, L.switchboard, L.rebalancer, L.treasury, L.lookout, ...L.galleries, e];
+    const DECKS = [...L.bays, L.switchboard, L.platform, L.lookout, ...L.galleries, e];
     const atRail = (x, y, z) => DECKS.some((d) => Math.abs(y - d.y) < 0.3 && Math.abs(x - d.x) < d.w / 2 + 0.2 && Math.abs(z - d.z) < d.d / 2 + 0.2 &&
       (Math.abs(Math.abs(x - d.x) - (d.w / 2 - 0.1)) < 0.15 || Math.abs(Math.abs(z - d.z) - (d.d / 2 - 0.1)) < 0.15));
     // A bridge's two sides, each from where it leaves the rail line `from` of what it starts on to where it meets the
@@ -536,7 +556,7 @@
     // Every deck is railed all round, open only where something lands on it; the galleries' backs are the wall, and
     // they hang from it on brackets rather than stand on posts, which would land in the porches below them.
     for (const b of L.bays) deckAt(b, "nsew");
-    for (const d of [L.switchboard, L.rebalancer, L.treasury]) deckAt(d, "nsew");
+    for (const d of [L.switchboard, L.platform]) deckAt(d, "nsew");
     deckAt(L.lookout, "nsew");
     deckAt(L.lookoutDeck, "nsew", 0);
     deckAt(L.lookoutApproach, "ew", 0);
@@ -683,7 +703,7 @@
   const FLOOR = cached(() => {
     const L = LAYOUT, rects = [], strips = [], blocks = [], discs = [];
     const rect = (d, y = d.y) => rects.push(d.x - d.w / 2 + 0.15, d.x + d.w / 2 - 0.15, d.z - d.d / 2 + 0.15, d.z + d.d / 2 - 0.15, y);
-    for (const d of [...L.bays, L.switchboard, L.rebalancer, L.treasury, L.lookout, L.lookoutDeck, L.lookoutApproach, ...L.galleries]) rect(d);
+    for (const d of [...L.bays, L.switchboard, L.platform, L.lookout, L.lookoutDeck, L.lookoutApproach, ...L.galleries]) rect(d);
     // The landing runs on into the first gallery it opens onto.
     const ld = L.landing;
     rects.push(ld.x - ld.w / 2 + 0.15, ld.x + ld.w / 2 - 0.15, ld.z - ld.d / 2 - 0.4, ld.z + ld.d / 2 - 0.15, ld.y);
@@ -765,6 +785,13 @@
     block(tr.x + TRE.desk[0], tr.z + TRE.desk[1], 0.6, tr.y - 0.5, tr.y + 1.6);
     block(tr.x + TRE.cart[0], tr.z + TRE.cart[1], 0.65, tr.y - 0.5, tr.y + 1.3);
     for (const [x, z] of TRE.crates) block(tr.x + x, tr.z + z, 0.55, tr.y - 0.5, tr.y + 1);
+    // The cooker's chest, whose jaw opens above it, its stack and spout, its sign's posts, and the kiosk.
+    const ck = L.cooker;
+    for (const dz of [-0.7, 0.7]) block(ck.x, ck.z + dz, 1.35, ck.y - 0.5, ck.y + 3.4);
+    block(ck.x + COOK.stack[0], ck.z + COOK.stack[1], 0.3, ck.y - 0.5, ck.y + COOK.stackTop);
+    block(ck.x + COOK.lip[0] + 0.1, ck.z + COOK.lip[2] - 0.05, 0.35, ck.y - 0.5, ck.y + 1.4);
+    for (const s of [-1, 1]) block(ck.x + s * COOK.post, ck.z + COOK.postZ, 0.25, ck.y - 0.5, ck.y + 6);
+    block(ck.x + COOK.kiosk[0], ck.z + COOK.kiosk[1], 0.35, ck.y - 0.5, ck.y + 2.2);
     block(lk.x, lk.z, 1.35, lk.y - 0.5, L.lookoutDeck.y - 0.3);
     block(lk.x, lk.z, 1, L.lookoutDeck.y - 0.3, lk.y + lk.tower + 3);
     // Each peer tunnel's console box; the connected glass stays walkable.
@@ -956,11 +983,12 @@
   const coreChamber = cached(() => {
     const c = LAYOUT.core, [lo, hi] = c.chamber, mid = (lo + hi) / 2;
     // `surge` is the chamber in a big forward's flash: its glass white-gold, bolts and cracks white, the flame high.
-    const build = (lit, surge = false) => {
+    // `lime` is the chamber taking a tip: its glass green, bolts and cracks pale green, never a forward's white-gold.
+    const build = (lit, surge = false, lime = false) => {
       const glass = turn([[2.44, lo], [2.5, lo + 0.45], [2.53, lo + 1.5], [2.53, hi - 1.5], [2.5, hi - 0.45], [2.44, hi]], 32,
-        (t) => surge ? (t < 0.15 || t > 0.8 ? "#ffb347" : t < 0.35 || t > 0.6 ? "#ffd27a" : "#fff2c8") : lit ? (t < 0.15 || t > 0.8 ? "#d65a1a" : t < 0.35 || t > 0.6 ? "#f5822c" : "#ffa640") : "#3a2418", lit ? (surge ? 1 : 0.8) : 0.12);
-      const flame = turn([[0.3, hi + 3.36], [surge ? 0.5 : 0.42, hi + 3.8], [surge ? 0.44 : 0.36, hi + (surge ? 4.5 : 4.25)], [0, hi + (surge ? 5 : 4.5)]], 14, surge ? "#fff6d0" : lit ? "#ffe08a" : "#4a3420", lit ? 1 : 0.1);
-      const bolts = [0, 1, 2, 3].map((k) => turnedY(moved(smoothBolt(3.6, 0.3, surge ? "#ffffff" : lit ? "#fff4c0" : "#6a4a2a", lit ? 1 : 0.15), 0, mid, 2.66), k * Math.PI / 2));
+        (t) => lime ? (t < 0.15 || t > 0.8 ? "#3fae2a" : t < 0.35 || t > 0.6 ? "#7fe04a" : "#d8ffa0") : surge ? (t < 0.15 || t > 0.8 ? "#ffb347" : t < 0.35 || t > 0.6 ? "#ffd27a" : "#fff2c8") : lit ? (t < 0.15 || t > 0.8 ? "#d65a1a" : t < 0.35 || t > 0.6 ? "#f5822c" : "#ffa640") : "#3a2418", lit ? (surge || lime ? 1 : 0.8) : 0.12);
+      const flame = turn([[0.3, hi + 3.36], [surge ? 0.5 : 0.42, hi + 3.8], [surge ? 0.44 : 0.36, hi + (surge ? 4.5 : 4.25)], [0, hi + (surge ? 5 : 4.5)]], 14, lime ? "#eaffc8" : surge ? "#fff6d0" : lit ? "#ffe08a" : "#4a3420", lit ? 1 : 0.1);
+      const bolts = [0, 1, 2, 3].map((k) => turnedY(moved(smoothBolt(3.6, 0.3, lime ? "#f4ffe0" : surge ? "#ffffff" : lit ? "#fff4c0" : "#6a4a2a", lit ? 1 : 0.15), 0, mid, 2.66), k * Math.PI / 2));
       // Molten cracks running out from behind each bolt across its window, as the concept's glass has them.
       const rand = mulberry32(501), cracks = [];
       for (let k = 0; k < 4; k++) for (let n = 0; n < 9; n++) {
@@ -968,18 +996,20 @@
         const du = Math.sign(u || 1) * (0.5 + rand() * 0.5), dv = (rand() - 0.5) * 0.8;
         for (let seg = 0; seg < 3; seg++) {
           const u1 = Math.max(-0.82, Math.min(0.82, u + du * (0.22 + rand() * 0.18))), v1 = v + dv * 0.3 + (rand() - 0.5) * 0.3;
-          cracks.push(turnedY(beam(u, mid + v, 2.57, u1, mid + v1, 2.57, 0.045, surge ? "#ffffff" : lit ? "#ffe89a" : "#5a3018", lit ? 1 : 0.1), k * Math.PI / 2));
+          cracks.push(turnedY(beam(u, mid + v, 2.57, u1, mid + v1, 2.57, 0.045, lime ? "#e6ffb0" : surge ? "#ffffff" : lit ? "#ffe89a" : "#5a3018", lit ? 1 : 0.1), k * Math.PI / 2));
           u = u1; v = v1;
         }
       }
       return noShadow(moved(shaded([glass, flame], [...bolts, ...cracks]), c.x, 0, c.z));
     };
-    return { lit: build(true), dark: build(false), surge: build(true, true) };
+    return { lit: build(true), dark: build(false), surge: build(true, true), lime: build(true, false, true) };
   });
   // A big forward's surge through the node: a ring of light that climbs the chamber (at unit radius; the scene sets
   // it round the chamber), and arcs of lightning from each Tesla coil's crown to the chamber's glass, three shapes a
   // coil that the scene flickers between.
   const coreRing = cached(() => noShadow(torus(2.78, 0.1, "#fff2c0", 1, 48, 8)));
+  // A tip's ring: one lime band that climbs the chamber as the core takes the sats, fatter than a surge's.
+  const coreRingLime = cached(() => noShadow(torus(2.78, 0.16, "#b6ff5a", 1, 48, 8)));
   const teslaArcs = cached(() => COILS.map(([x, z], i) => {
     const c = LAYOUT.core, rand = mulberry32(700 + i), top = [x, LEVEL.main + 2.35, z];
     const dx = x - c.x, dz = z - c.z, l = Math.hypot(dx, dz);
@@ -1666,9 +1696,9 @@
   // whose gold (`hopperFill`) the scene raises. A desk with a monitor stands at the left; the boards hang from the
   // sign's posts, and the sign carries stacks of coins beside its lettering. `TRE` places what the scene hangs.
   const TRE = {
-    vz: -0.7, deep: 2.6, top: 1.62, dome: [1.15, 1.45], pipeX: 1.55, pipeY: 3.75, post: 3.3, postZ: -2.3, sign: [0.45, 4.9, -1.97],
-    boards: [[-2.45, 2.55, -2.05], [2.45, 2.55, -2.05]], lamps: [[-3.3, 5.24, -1.8], [3.3, 5.24, -1.8]],
-    belt: [[0, 0.34, 0.66], [0, 0.98, 1.66]], crate: [0, 2.1], desk: [-2.65, -0.3], cart: [2.55, 1.35], crates: [[2.7, -0.9]], operator: [1.4, 1.6]
+    vz: -0.7, deep: 2.6, top: 1.62, dome: [1.15, 1.45], pipeX: 1.55, pipeY: 3.75, post: 2.4, postZ: -2.3, sign: [0.45, 4.9, -1.97],
+    boards: [[-2.45, 2.55, -2.05], [2.45, 2.55, -2.05]], lamps: [[-2.4, 5.24, -1.8], [2.4, 5.24, -1.8]],
+    belt: [[0, 0.34, 0.66], [0, 0.98, 1.66]], crate: [0, 2.1], desk: [-2.05, 1.55], cart: [2.25, 1.45], crates: [[2.4, -1.1]], operator: [1.05, 1.6]
   };
   const treasuryBody = cached(() => {
     const round = [], flat = [], glow = [], vz = TRE.vz, front = vz + TRE.deep / 2, [DR, DH] = TRE.dome, DB = TRE.top;
@@ -1751,6 +1781,156 @@
   // The crate's gold, which the scene raises as the belt brings in each fee's nugget, and the nugget.
   const hopperFill = cached(() => noShadow(lathe({ profile: [[0.29, 0], [0.29, 0.05], [0.2, 0.13], [0, 0.18]], segments: 12, color: "#ffd84a", emissive: 0.85 })));
   const beltNugget = cached(() => noShadow(bevelBox({ w: 0.16, h: 0.13, d: 0.16, color: "#ffd24a", emissive: 0.95, bevel: 0.03 })));
+
+  // The banana cooker, at the platform's end nearest the way out: a timber chest bound in iron whose lid is a jaw,
+  // hinged along the wall-side edge, so when it opens to catch a tip's sats it gapes at the core, bronze teeth over
+  // the iron ones along the rim facing the hall, a red palate and the firebox glowing in its throat. A porthole with a
+  // banana in it looks out of the front (`cookerPort`, dim, and lit while it cooks), two gears mesh on the hall side
+  // (`cookerGear`, turned by the scene), a copper stack smokes behind it, and a bronze spout at the front corner
+  // throws the bananas out toward the way out. The sign and the donations board hang on two posts behind it, and
+  // the kiosk (`cookerKiosk`), where a visitor tips, stands at the platform's corner by the stair. In the deck's
+  // frame, +z toward the entrance. `COOK` places what the scene hangs and moves: the lid's hinge and how far it
+  // opens, the mouth the sats drop into, the spout's lip and heading, the gears, the stack's top, the sign, the
+  // board, the lanterns, the kiosk and the cook's spot.
+  const COOK = (() => {
+    const c = LAYOUT.cooker, lip = [-1.35, 1.25, 1.55], dx = -c.x - lip[0], dz = HALL.front - 0.6 - c.z - lip[2], l = Math.hypot(dx, dz);
+    return {
+      w: 2.2, h: 1.5, d: 2.8, hinge: [1.1, 1.5, 0], open: 1.95, mouth: [0, 1.55, 0], port: [0, 0.78, 1.41],
+      // [x, y, z, radius, teeth] on the hall side: teeth in step with the radius, the centres their radii and a tooth
+      // apart, so they mesh.
+      gears: [[-1.18, 0.92, -0.5, 0.42, 16], [-1.18, 0.46, 0.13, 0.26, 10]],
+      stack: [0.45, -1.8], stackTop: 3.7, spout: [-0.75, 0.95, 1.4], lip, dir: [dx / l, dz / l],
+      post: 2.5, postZ: -2.3, postH: 6.2, sign: [0, 5.65, -1.97], board: [-1.3, 2.55, -2.05], lamps: [[-2.5, 5.84, -1.8], [2.5, 5.84, -1.8]],
+      kiosk: [-3.75, 2.5], operator: [1.85, 0.45]
+    };
+  })();
+  const cookerBody = cached(() => {
+    const { w, h, d } = COOK, round = [], flat = [], glow = [];
+    // The chest, its top a little below the rim, with the palate and the firebox's glow inside the rim.
+    flat.push(bevelBox({ w, h: h - 0.18, d, color: "#5a3a22", bevel: 0.08, offset: { y: 0.12 + (h - 0.18) / 2 } }));
+    for (const s of [-1, 1]) flat.push(bevelBox({ w: w + 0.02, h: 0.12, d: 0.1, color: TIMBER_DK, bevel: 0.03, offset: { y: h - 0.06, z: s * (d / 2 - 0.05) } }), bevelBox({ w: 0.1, h: 0.12, d, color: TIMBER_DK, bevel: 0.03, offset: { x: s * (w / 2 - 0.05), y: h - 0.06 } }));
+    flat.push(box({ w: w - 0.2, h: 0.03, d: d - 0.2, color: "#7a1f14", offset: { y: h - 0.14 } }));
+    glow.push(box({ w: w - 0.7, h: 0.02, d: d - 0.8, color: "#ff7a2a", emissive: 0.95, offset: { y: h - 0.12 } }));
+    // Iron bands round it, riveted on the front and the hall side, and iron at the corners on bronze feet.
+    for (const y of [0.32, h - 0.3]) {
+      flat.push(bevelBox({ w: w + 0.06, h: 0.12, d: d + 0.06, color: IRON_DK, bevel: 0.03, offset: { y } }));
+      for (let x = -w / 2 + 0.12; x <= w / 2 - 0.11; x += 0.24) round.push(moved(ball(0.035, IRON_LT, 0, 6), x, y, d / 2 + 0.04));
+      for (let z = -d / 2 + 0.12; z <= d / 2 - 0.11; z += 0.24) round.push(moved(ball(0.035, IRON_LT, 0, 6), -w / 2 - 0.04, y, z));
+    }
+    for (const sx of [-1, 1]) for (const sz of [-1, 1]) {
+      flat.push(bevelBox({ w: 0.18, h: h - 0.1, d: 0.18, color: IRON_DK, bevel: 0.03, offset: { x: sx * (w / 2 + 0.01), y: 0.1 + (h - 0.1) / 2, z: sz * (d / 2 + 0.01) } }));
+      round.push(moved(turn([[0.15, 0], [0.15, 0.06], [0.11, 0.12], [0, 0.12]], 12, BRONZE), sx * (w / 2 - 0.1), 0, sz * (d / 2 - 0.1)));
+    }
+    // The rim's iron teeth along the hall side, pointing up, half a pitch from the lid's.
+    const n = 10, pitch = d / n;
+    for (let k = 1; k < n; k++) flat.push(moved(turnedY(prism([[-pitch * 0.4, 0], [pitch * 0.4, 0], [0, 0.17]], 0.06, "#d8d2c4"), Math.PI / 2), -w / 2 + 0.04, h - 0.02, -d / 2 + pitch * k));
+    // The porthole's riveted bronze bezel; its glass is `cookerPort`.
+    const [px, py, pz] = COOK.port;
+    round.push(moved(forwardLathe(torus(0.32, 0.065, BRONZE, 0, 28, 8)), px, py, pz + 0.02));
+    for (let k = 0; k < 10; k++) { const a = k / 10 * TAU; round.push(moved(ball(0.03, IRON_LT, 0, 6), px + Math.cos(a) * 0.32, py + Math.sin(a) * 0.32, pz + 0.09)); }
+    // A brass plate under the porthole, the banana glowing on it.
+    flat.push(bevelBox({ w: 0.62, h: 0.2, d: 0.04, color: BRASS, bevel: 0.02, offset: { y: 0.22, z: d / 2 + 0.03 } }));
+    glow.push(moved(bananaGlyph(0.16, 0.02, "#fff06a", 0.9), 0, 0.22, d / 2 + 0.06));
+    return { body: shaded(round, flat), glow: noShadow(shaded(glow)) };
+  });
+  // What does not shake while it churns: the stack behind it, the spout at its front corner, and the sign's posts
+  // and frame.
+  const cookerFixtures = cached(() => {
+    const round = [], flat = [], glow = [];
+    const [kx, kz] = COOK.stack, top = COOK.stackTop;
+    round.push(moved(turn([[0.22, 0], [0.22, 0.12], [0.17, 0.16], [0.17, top - 0.3], [0.23, top - 0.24], [0.23, top - 0.1], [0.27, top], [0.2, top], [0.2, top - 0.05], [0, top - 0.05]], 16, (t) => t > 0.85 ? "#1a120c" : COPPER), kx, 0, kz));
+    for (const y of [0.9, 1.9, 2.7]) round.push(moved(torus(0.19, 0.03, BRONZE, 0, 16, 6), kx, y, kz));
+    // A copper pipe from the chest's back into the stack.
+    round.push(...pipeParts(roundedPath([[kx - 0.05, 0.95, -COOK.d / 2 - 0.02], [kx - 0.05, 0.95, kz + 0.17]], 0.1), 0.08, COPPER, 0, [0.5]));
+    // The spout: out of the front corner toward the way out, rising to a flared bronze mouth.
+    const [sx, sy, sz] = COOK.spout, [lx, ly, lz] = COOK.lip;
+    const path = roundedPath([[sx, sy, sz - 0.05], [sx, sy, sz + 0.12], [lx, ly, lz]], 0.12);
+    round.push(...pipeParts(path, 0.13, COPPER, 0, [0.5]));
+    const p = path.at(1), q = path.at(0.96);
+    round.push(along(turn([[0.26, 0], [0.24, 0.04], [0.19, 0.12], [0.16, 0.2]], 18, BRONZE), p.x, p.y, p.z, p.x - q.x, p.y - q.y, p.z - q.z));
+    glow.push(moved(ball(0.1, "#ffb347", 0.9, 10), p.x, p.y, p.z));
+    // The sign on its posts, a bunch of bananas beside the lettering.
+    signPosts(flat, COOK.post, COOK.postZ, COOK.postH);
+    const [, sy2, sz2] = COOK.sign, [bx, by, bz] = COOK.board;
+    signFrame(round, flat, 0, sy2, sz2, 5.4, 1.4);
+    for (let k = 0; k < 3; k++) glow.push(moved(turnedZ(bananaGlyph(0.5, 0.06, "#ffd23a", 0.85), 0.45 - k * 0.3), -2.2 + k * 0.08, sy2 - 0.04 + k * 0.05, sz2 + 0.12 + k * 0.01));
+    // The donations board hangs on chains from the sign's frame.
+    for (const dx of [-0.7, 0.7]) round.push(...chain(bx + dx, by + 0.42, bz, bx + dx, sy2 - 0.7, sz2 - 0.06, 0.04, IRON_DK));
+    return { body: shaded(round, flat), glow: noShadow(shaded(glow)) };
+  });
+  // The jaw in its hinge's frame: planks from the hinge at the origin out along -x, banded and riveted, a brass
+  // handle near its free edge, a red palate under it and bronze teeth hanging from that edge. The scene opens it
+  // with a negative rotation.z.
+  const cookerLid = cached(() => {
+    const { w, d } = COOK, round = [], flat = [], L = w + 0.08, n = 10, pitch = d / n;
+    flat.push(bevelBox({ w: L, h: 0.14, d: d + 0.1, color: "#5a3a22", bevel: 0.05, offset: { x: -L / 2, y: 0.07 } }));
+    flat.push(box({ w: L - 0.12, h: 0.02, d: d - 0.05, color: "#8a2418", offset: { x: -L / 2, y: -0.005 } }));
+    for (const z of [-(d / 2 - 0.35), d / 2 - 0.35]) {
+      flat.push(bevelBox({ w: L + 0.04, h: 0.05, d: 0.12, color: IRON_DK, bevel: 0.015, offset: { x: -L / 2, y: 0.155, z } }));
+      for (let x = -L + 0.1; x <= -0.08; x += 0.22) round.push(moved(ball(0.03, IRON_LT, 0, 6), x, 0.19, z));
+    }
+    round.push(tube({ path: (t) => ({ x: -L + 0.2, y: 0.2 + Math.sin(Math.PI * t) * 0.1, z: -0.35 + 0.7 * t }), radius: () => 0.03, rings: 10, segments: 6, colorFn: () => BRASS }));
+    for (const z of [-0.7, 0.7]) round.push(moved(turnedX(turn([[0.07, -0.22], [0.07, 0.22]], 12, BRONZE), Math.PI / 2), 0, 0.06, z));
+    for (let k = 0; k < n; k++) flat.push(moved(turnedY(prism([[-pitch * 0.4, 0], [0, -0.19], [pitch * 0.4, 0]], 0.06, "#e8e0cc"), Math.PI / 2), -L + 0.05, 0.01, -d / 2 + pitch * (k + 0.5)));
+    return shaded(round, flat);
+  });
+  // The porthole: domed glass over the banana, dim at rest and lit while it cooks.
+  const cookerPort = cached(() => {
+    const build = (lit) => noShadow(shaded([forwardLathe(turn([[0.3, -0.02], [0.3, 0.01], [0.18, 0.04], [0, 0.05]], 24, lit ? "#ff9a2a" : "#2a1a0c", lit ? 0.95 : 0.3))],
+      [moved(bananaGlyph(0.34, 0.03, lit ? "#fff06a" : "#8a6a1e", lit ? 1 : 0.35), 0, 0, 0.05)]));
+    return { dim: build(false), lit: build(true) };
+  });
+  // A gear for the cooker's side: a bronze disc with a raised hub, cut into `teeth` round its edge as the minted
+  // coin's edge is milled, with spokes on its face; its axle along x, so the scene turns it by rotation.x. Cached by
+  // size.
+  const gearCache = new Map();
+  const cookerGear = (r, teeth) => {
+    const key = `${r}|${teeth}`;
+    let geo = gearCache.get(key);
+    if (geo) return geo;
+    const t = 0.1, th = 0.07, round = [], flat = [];
+    round.push(forwardLathe(turn([[0, -t / 2], [r - 0.04, -t / 2], [r, -t / 2 + 0.02], [r, t / 2 - 0.02], [r - 0.04, t / 2], [0, t / 2]], 32, BRONZE)));
+    round.push(forwardLathe(turn([[0, -t / 2 - 0.04], [0.07, -t / 2 - 0.04], [0.09, -t / 2], [0.09, t / 2], [0.07, t / 2 + 0.04], [0, t / 2 + 0.04]], 14, IRON_DK)));
+    for (let k = 0; k < teeth; k++) {
+      const a = k / teeth * TAU;
+      flat.push(moved(turnedZ(bevelBox({ w: th, h: TAU * r / teeth * 0.5, d: t, color: BRONZE_DK, bevel: 0.015 }), a), Math.cos(a) * (r + th / 2 - 0.01), Math.sin(a) * (r + th / 2 - 0.01), 0));
+    }
+    for (let k = 0; k < 3; k++) flat.push(turnedZ(box({ w: r * 1.6, h: 0.05, d: 0.02, color: BRONZE_DK, offset: { z: t / 2 + 0.005 } }), k * Math.PI / 3));
+    geo = turnedY(shaded(round, flat), Math.PI / 2);
+    gearCache.set(key, geo);
+    return geo;
+  };
+  // The kiosk where a visitor tips: an iron post on a bronze foot, a raked screen glowing lime with the banana and the
+  // ₿ on it, a coin slot, and a glass jar of bananas on a shelf. Facing +z.
+  const cookerKiosk = cached(() => {
+    const round = [], flat = [], glow = [];
+    round.push(turn([[0.34, 0], [0.34, 0.08], [0.24, 0.14], [0, 0.14]], 18, BRONZE));
+    flat.push(bevelBox({ w: 0.22, h: 1.2, d: 0.22, color: IRON_DK, bevel: 0.04, offset: { y: 0.72 } }));
+    const rake = 0.35, head = (g) => moved(turnedX(g, -rake), 0, 1.55, 0.02);
+    flat.push(head(bevelBox({ w: 0.9, h: 0.62, d: 0.16, color: IRON, bevel: 0.05 })));
+    glow.push(head(box({ w: 0.76, h: 0.48, d: 0.02, color: "#1a3a0c", emissive: 0.9, offset: { z: 0.085 } })));
+    glow.push(head(moved(bananaGlyph(0.26, 0.02, "#e8ff6a", 1), -0.16, 0.02, 0.1)), head(moved(smoothBitcoin(0.26, 0.02, "#b6ff3a", 1), 0.2, 0.02, 0.1)));
+    flat.push(box({ w: 0.2, h: 0.04, d: 0.08, color: "#0c0806", offset: { y: 1.12, z: 0.13 } }), bevelBox({ w: 0.3, h: 0.14, d: 0.06, color: BRASS, bevel: 0.02, offset: { y: 1.12, z: 0.1 } }));
+    // The jar on its shelf, bananas inside.
+    flat.push(bevelBox({ w: 0.46, h: 0.05, d: 0.36, color: TIMBER_LT, bevel: 0.015, offset: { x: 0.34, y: 0.95, z: 0.05 } }));
+    glow.push(moved(turn([[0.13, 0], [0.15, 0.06], [0.15, 0.26], [0.11, 0.3], [0.11, 0.33]], 16, "#cfeeff", 0.25), 0.34, 0.975, 0.05));
+    // Small copies of the island's banana: the transforms work in place, and the shared one must stay as it is.
+    const small = () => { const g = models.bananaGeometry(); return { ...g, verts: g.verts.map((v) => v * 0.26) }; };
+    for (let k = 0; k < 3; k++) round.push(moved(turnedZ(turnedY(small(), k * 1.9), 0.9 + k * 0.3), 0.34 + (k - 1) * 0.02, 1.0 + k * 0.03, 0.05));
+    return { body: shaded(round, flat), glow: noShadow(shaded(glow)) };
+  });
+  // A donation's sat: a lime cube with the ₿ on two faces, green going in so the bananas come out ripe; drawn by the
+  // dozen as one instanced batch.
+  const satCube = cached(() => noShadow(merge(
+    bevelBox({ w: 0.3, h: 0.3, d: 0.3, color: "#7fe83a", emissive: 0.9, bevel: 0.05 }),
+    moved(smoothBitcoin(0.2, 0.02, "#f0ffd8", 1), 0, 0, 0.155),
+    turnedY(moved(smoothBitcoin(0.2, 0.02, "#f0ffd8", 1), 0, 0, 0.155), Math.PI))));
+  // A banana thrown out of the cooker: the island's banana, lowered so it turns about its middle. Its own object,
+  // since the crew's thrown rounds draw the shared one.
+  const flyingBanana = cached(() => {
+    const b = models.bananaGeometry();
+    return noShadow({ ...b, verts: b.verts.map((v, i) => i % 3 === 1 ? v - 0.22 : v) });
+  });
 
   // The lookout: a timber tower on the top deck with a lantern room, a blue banner with the bolt hanging from it,
   // and a copper dome; the beam sweeps while the feed is live.
@@ -2526,7 +2706,7 @@
     for (const [lx, ly, lz] of STUDY.lamps) lamps.push(["hang", L.study.x - lz, L.study.y + ly, L.study.z + lx]);
     lamps.push(["post", L.switchboard.x + 3.1, L.switchboard.y, L.switchboard.z - 1.9, Math.PI]);
     for (const [x, z] of SHAFTS) for (const s of [-1, 1]) lamps.push(["hang", x + s * 1.7, 2.76, z - 0.2]);
-    for (const [d, spots] of [[L.rebalancer, REB.lamps], [L.treasury, TRE.lamps]]) for (const [x, y, z] of spots) lamps.push(["hang", d.x + x, d.y + y, d.z + z]);
+    for (const [d, spots] of [[L.rebalancer, REB.lamps], [L.treasury, TRE.lamps], [L.cooker, COOK.lamps]]) for (const [x, y, z] of spots) lamps.push(["hang", d.x + x, d.y + y, d.z + z]);
     const [[w0, w1, a0], [s0, , s1]] = L.walk;
     onRail(w0, a0 + 0.1, w1, a0 + 0.1, e.y, [0.2, 0.5, 0.8]);
     onRail(s0 + 0.1, a0, s0 + 0.1, s1, e.y, [0.1, 0.3, 0.5, 0.7, 0.9]);
@@ -2646,7 +2826,7 @@
       for (const [ax, ay, az, bx, by, bz, w] of L.stairs) parts.push(board(ax, ay, az, bx, by, bz, w - 0.1, TIMBER));
       for (const [bx0, bz0, bx1, bz1] of RING_BRIDGES) parts.push(board(bx0, M, bz0, bx1, M, bz1, 2, TIMBER));
       for (const [bx0, bz0, bx1, bz1, w] of L.bridges) parts.push(board(bx0 - 0.3, LEVEL.top, bz0, bx1 + 0.3, LEVEL.top, bz1, w, TIMBER));
-      for (const d of [L.switchboard, L.rebalancer, L.treasury, L.landing, ...L.galleries]) parts.push(span(d.x - d.w / 2, d.x + d.w / 2, d.y - 0.3, d.y, d.z - d.d / 2, d.z + d.d / 2, TIMBER));
+      for (const d of [L.switchboard, L.platform, L.landing, ...L.galleries]) parts.push(span(d.x - d.w / 2, d.x + d.w / 2, d.y - 0.3, d.y, d.z - d.d / 2, d.z + d.d / 2, TIMBER));
       for (const t of L.tunnels) { const [p0, p1, q0, q1] = porchOf(t); parts.push(span(p0, p1, t.y - 0.3, t.y, q0, q1, TIMBER)); }
     }
 
@@ -2741,6 +2921,11 @@
       parts.push(moved(lathe({ profile: [[1.85, 0], [1.85, 0.56], [0, 0.56]], segments: 12, color: IRON_DK }), rb.x, rb.y, rb.z + REB.cz), moved(lathe({ profile: [[1.95, 0.42], [1.95, 0.52]], segments: 12, color: "#5fe3ff", emissive: 0.95 }), rb.x, rb.y, rb.z + REB.cz));
       parts.push(span(tr.x - 1.4, tr.x + 1.4, tr.y, tr.y + 1.5, tr.z + TRE.vz - TRE.deep / 2, tr.z + TRE.vz + TRE.deep / 2, "#5a3a22"));
       parts.push(moved(lathe({ profile: [[TRE.dome[0], 0], [0.9, 0.7], [0.5, 1.2], [0, TRE.dome[1]]], segments: 8, color: "#d9a52a", emissive: 0.6 }), tr.x, tr.y + TRE.top, tr.z + TRE.vz));
+      // The cooker: its chest and shut jaw, the porthole's dim glow on its front and the stack behind it.
+      const ck = L.cooker;
+      parts.push(span(ck.x - COOK.w / 2, ck.x + COOK.w / 2, ck.y, ck.y + COOK.h + 0.14, ck.z - COOK.d / 2, ck.z + COOK.d / 2, "#5a3a22"));
+      parts.push(moved(forwardLathe(lathe({ profile: [[0.32, 0], [0, 0.04]], segments: 10, color: "#ff9a2a", emissive: 0.5 })), ck.x + COOK.port[0], ck.y + COOK.port[1], ck.z + COOK.port[2] + 0.03));
+      parts.push(moved(lathe({ profile: [[0.2, 0], [0.2, COOK.stackTop], [0, COOK.stackTop]], segments: 8, color: COPPER }), ck.x + COOK.stack[0], ck.y, ck.z + COOK.stack[1]));
     }
     // The galleries under the vault, each stand's pair of tanks as dim glass on its plate, with their front rails.
     for (const g of L.galleries) {
@@ -2946,6 +3131,7 @@
     forgeSign, forgeWave, forgeLines, forgeTrack, forgeShafts, mintCoin, COILS, teslaCoil, banner, statusLantern, peerPipes, peerMirrors, TUNNEL_SIGN, TUNNEL_POST, EXIT_Z, CONDUIT_SAMPLES, TUNNEL_THEMES, STEP, supportAt, stairCeilingAt, clearAt, walkable, resolveFall,
     hall, scaffold, coreBody, coreChamber, conduits, sat, satFailed, stationFrame, capacitor, forge, forgeFire, cart,
     switchboard, switchScreens, REB, TRE, rebalancerBase, rebalancerRing, rebalancerFlow, treasuryBody, goldPile, hopperFill, beltNugget, goldCrate, dataBoard, moveBoard,
+    COOK, cookerBody, cookerFixtures, cookerLid, cookerPort, cookerGear, cookerKiosk, satCube, flyingBanana, coreRingLime,
     coreRing, teslaArcs, lookoutTower, lookoutLamp, lookoutOptics, lookoutBeam, LOOKOUT_BEAM, STUDY, studyHall, studyNote, studyBoard, tunnels, galleryStation, galleryCaps, label, lanterns, hardHat, hubTunnel, hubWindow, bakeWindow, windowLights, exitTunnel, outsideView,
     beam, moved, turnedY, smoothBolt, smoothBitcoin
   };
