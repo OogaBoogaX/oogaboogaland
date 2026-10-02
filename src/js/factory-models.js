@@ -84,10 +84,13 @@
     ladders: [
       { x: -10, z: 8.4, bottom: 0, top: LEVEL.low, nx: 0, nz: 1, width: 1.4, inset: 0.3 },
       { x: 9.5, z: 6.8, bottom: 0, top: LEVEL.low, nx: -1, nz: 0, width: 1.4, inset: 0.3 },
-      { x: 12, z: 22.4, bottom: 0, top: LEVEL.low, nx: 0, nz: 1, width: 1.4, inset: 0.3 },
+      { x: 9.5, z: 12, bottom: 0, top: LEVEL.low, nx: -1, nz: 0, width: 1.4, inset: 0.3 },
       { x: -17.2, z: -16, bottom: LEVEL.top, top: LEVEL.top + 5.65, nx: 0, nz: -1, width: 1.4, inset: 0.3 }
     ],
     study: { x: 21.4, y: LEVEL.main, z: 12, w: 4, d: 7 },
+    // The donation kiosk, built into the right wall where the walkway from the balcony meets it, facing back along the
+    // walkway (turned like the study hall, its +z out of the rock).
+    kiosk: { x: 21.4, y: LEVEL.main, z: 24.7, turn: -Math.PI / 2 },
     // Level 2, the balcony's level: the walkway from the balcony's right side round the right wall, past the study
     // hall, to the Harbor line's porch, as decks [x0, x1, z0, z1]; each line's porch out to its peer tunnel comes
     // from the line and the tunnel (`porchOf`).
@@ -380,11 +383,11 @@
       rock.push(box({ w: 4, h: 0.4, d: 4, color: STONE[Math.floor(rand() * 4)], offset: { x: x + 2, y: -0.2 - rand() * 0.06, z: z + 2 } }));
     }
     // Walls: voxel stone in cells of WALL_CELL metres, leaning in as they rise and heaved in and out at two scales,
-    // a shell three cells thick behind the face. Openings in the walls for the peer tunnels, the study hall and the
-    // tunnel out: [wall, centre along it, bottom, top, half-width]; the walls are "back", "left", "right" and
-    // "front", and along a wall is x for the back and front and z for the sides.
+    // a shell three cells thick behind the face. Openings in the walls for the peer tunnels, the study hall, the
+    // donation kiosk and the tunnel out: [wall, centre along it, bottom, top, half-width]; the walls are "back",
+    // "left", "right" and "front", and along a wall is x for the back and front and z for the sides.
     const openings = LAYOUT.tunnels.map((t) => [t.turn === 0 ? "back" : t.x < 0 ? "left" : "right", t.turn === 0 ? t.x : t.z, t.y - 0.5, t.y + 7.8, 4.3]);
-    openings.push(["right", LAYOUT.study.z, LAYOUT.study.y - 0.5, LAYOUT.study.y + 9.5, 3.4], ["front", 0, 3, 10.5, 6.5]);
+    openings.push(["right", LAYOUT.study.z, LAYOUT.study.y - 0.5, LAYOUT.study.y + 9.5, 3.4], ["right", LAYOUT.kiosk.z, LAYOUT.kiosk.y - 0.5, LAYOUT.kiosk.y + 5.6, 2], ["front", 0, 3, 10.5, 6.5]);
     const open = (wall, u, y) => openings.some(([w, c, y0, y1, half]) => w === wall && Math.abs(u - c) < half && y > y0 && y < y1);
     const C = WALL_CELL, v = makeVox(), cell = (m) => Math.floor(m / C);
     const hash = (a, b, k) => {
@@ -786,22 +789,23 @@
     block(tr.x + TRE.desk[0], tr.z + TRE.desk[1], 0.6, tr.y - 0.5, tr.y + 1.6);
     block(tr.x + TRE.cart[0], tr.z + TRE.cart[1], 0.65, tr.y - 0.5, tr.y + 1.3);
     for (const [x, z] of TRE.crates) block(tr.x + x, tr.z + z, 0.55, tr.y - 0.5, tr.y + 1);
-    // The cooker's chest, whose jaw opens above it, its stack and spout, its sign's posts, and the kiosk.
+    // The cooker's chest, whose jaw opens above it, its stack and chute, and its sign's posts.
     const ck = L.cooker;
     for (const dz of [-0.7, 0.7]) block(ck.x, ck.z + dz, 1.35, ck.y - 0.5, ck.y + 3.4);
     block(ck.x + COOK.stack[0], ck.z + COOK.stack[1], 0.3, ck.y - 0.5, ck.y + COOK.stackTop);
-    block(ck.x + COOK.lip[0] + 0.1, ck.z + COOK.lip[2] - 0.05, 0.35, ck.y - 0.5, ck.y + 1.4);
+    const [hx, , hz] = COOK.hatch, [cx, , cz] = COOK.lip;
+    for (const t of [0.45, 1]) block(ck.x + hx + (cx - hx) * t, ck.z + hz + (cz - hz) * t, 0.33, ck.y - 0.5, ck.y + 1.3);
     for (const s of [-1, 1]) block(ck.x + s * COOK.post, ck.z + COOK.postZ, 0.25, ck.y - 0.5, ck.y + 6);
-    block(ck.x + COOK.kiosk[0], ck.z + COOK.kiosk[1], 0.35, ck.y - 0.5, ck.y + 2.2);
     block(lk.x, lk.z, 1.35, lk.y - 0.5, L.lookoutDeck.y - 0.3);
     block(lk.x, lk.z, 1, L.lookoutDeck.y - 0.3, lk.y + lk.tower + 3);
     // Each peer tunnel's console box; the connected glass stays walkable.
-    // And the study hall's locked door.
+    // And the study hall's locked door, and the donation kiosk's counter at the walkway's edge.
     for (const t of L.tunnels) {
       const [bx, bz] = TUNNEL_BOX, c = Math.cos(t.turn), sn = Math.sin(t.turn);
       block(t.x + bx * c + bz * sn, t.z - bx * sn + bz * c, 0.45, t.y - 0.5, t.y + 1.5);
     }
     block(L.study.x + 0.4, L.study.z, 1.2, L.study.y - 0.5, L.study.y + 5);
+    block(L.kiosk.x - 0.15, L.kiosk.z, 1, L.kiosk.y - 0.5, L.kiosk.y + 5);
     // The study hall's portal faces -x, so its x runs along world z and its z comes out toward -x.
     const st = L.study, S = STUDY;
     for (const s of [-1, 1]) block(st.x - S.z, st.z + s * S.post, 0.35, st.y - 0.5, st.y + 8);
@@ -1783,73 +1787,106 @@
   const hopperFill = cached(() => noShadow(lathe({ profile: [[0.29, 0], [0.29, 0.05], [0.2, 0.13], [0, 0.18]], segments: 12, color: "#ffd84a", emissive: 0.85 })));
   const beltNugget = cached(() => noShadow(bevelBox({ w: 0.16, h: 0.13, d: 0.16, color: "#ffd24a", emissive: 0.95, bevel: 0.03 })));
 
-  // The banana cooker, at the platform's end nearest the way out: a timber chest bound in iron whose lid is a jaw,
-  // hinged along the wall-side edge, so when it opens to catch a tip's sats it gapes at the core, bronze teeth over
-  // the iron ones along the rim facing the hall, a red palate and the firebox glowing in its throat. A porthole with a
-  // banana in it looks out of the front (`cookerPort`, dim, and lit while it cooks), two gears mesh on the hall side
-  // (`cookerGear`, turned by the scene), a copper stack smokes behind it, and a bronze spout at the front corner
-  // throws the bananas out toward the way out. The sign and the donations board hang on two posts behind it, and
-  // the kiosk (`cookerKiosk`), where a visitor tips, stands at the platform's corner by the stair. In the deck's
-  // frame, +z toward the entrance. `COOK` places what the scene hangs and moves: the lid's hinge and how far it
-  // opens, the mouth the sats drop into, the spout's lip and heading, the gears, the stack's top, the sign, the
-  // board, the lanterns, the kiosk and the cook's spot.
+  // The banana cooker, at the platform's end nearest the way out, as the concept draws it: black iron in a bright
+  // orange frame on a hazard-striped plinth, its lid a jaw hinged at the back (the wall side, +x) that opens toward the
+  // hall on white teeth, a red palate and a tongue. The porthole (`cookerPort`, dim, and lit while it cooks) and the
+  // gears (`cookerGear`, turned by the scene) face the hall (-x); the stack stands at the back corner away from the way
+  // out, clear of the open jaw and behind the chest from the kiosk's side; the launch chute leaves the right side (+z) from a hatch and runs down toward the way out, where its lip
+  // throws the bananas. The sign and the donations board hang on two posts behind it. In the deck's frame, +z toward
+  // the entrance. `COOK` places what the scene hangs and moves: the lid's hinge and how far it opens, the mouth the
+  // sats drop into, the porthole, the gears, the stack, the hatch and the chute's lip and heading, the sign, the board,
+  // the lanterns and the cook's spot.
+  const ORANGE = "#f39a1e", ORANGE_DK = "#c46d10", IRON_BK = "#211c19", MOUTH = "#b3181f", MOUTH_DK = "#6e0d12", TOOTH = "#f6f1e6", HAZARD = "#ffc21a";
   const COOK = (() => {
-    const c = LAYOUT.cooker, lip = [-1.35, 1.25, 1.55], dx = -c.x - lip[0], dz = HALL.front - 0.6 - c.z - lip[2], l = Math.hypot(dx, dz);
+    const c = LAYOUT.cooker, hatch = [0.25, 1.02, 1.46], gx = -c.x - hatch[0], gz = HALL.front - 0.6 - c.z - hatch[2], gl = Math.hypot(gx, gz);
+    const lip = [hatch[0] + gx / gl * 0.9, 0.86, hatch[2] + gz / gl * 0.9], dx = -c.x - lip[0], dz = HALL.front - 0.6 - c.z - lip[2], l = Math.hypot(dx, dz);
     return {
-      w: 2.2, h: 1.5, d: 2.8, hinge: [1.1, 1.5, 0], open: 1.95, mouth: [0, 1.55, 0], port: [0, 0.78, 1.41],
+      w: 2.2, h: 1.5, d: 2.8, plinth: 0.16, rim: 1.2, hinge: [1.1, 1.5, 0], open: 1.3, mouth: [0, 1.55, 0], port: [-1.14, 0.84, -0.5],
       // [x, y, z, radius, teeth] on the hall side: teeth in step with the radius, the centres their radii and a tooth
       // apart, so they mesh.
-      gears: [[-1.18, 0.92, -0.5, 0.42, 16], [-1.18, 0.46, 0.13, 0.26, 10]],
-      stack: [0.45, -1.8], stackTop: 3.7, spout: [-0.75, 0.95, 1.4], lip, dir: [dx / l, dz / l],
+      gears: [[-1.2, 0.96, 0.5, 0.34, 13], [-1.2, 0.54, 0.956, 0.18, 7]],
+      stack: [1.55, -0.85], stackTop: 3.7, hatch, lip, dir: [dx / l, dz / l],
       post: 2.5, postZ: -2.3, postH: 6.2, sign: [0, 5.65, -1.97], board: [-1.3, 2.55, -2.05], lamps: [[-2.5, 5.84, -1.8], [2.5, 5.84, -1.8]],
-      kiosk: [-3.75, 2.5], operator: [1.85, 0.45]
+      operator: [1.95, 0.75]
     };
   })();
+  // Chunky white teeth, `n` of them along z over `span`, on a gum strip: the rim's point up (`dir` 1), the jaw's down,
+  // half a pitch along (`shift`) so the two rows mesh.
+  const teethRow = (flat, round, x, y, span, n, dir, shift = 0) => {
+    const pitch = span / n;
+    flat.push(bevelBox({ w: 0.16, h: 0.06, d: span + 0.08, color: MOUTH_DK, bevel: 0.02, offset: { x, y: y + dir * 0.02 } }));
+    for (let k = 0; k < n; k++) {
+      const z = -span / 2 + pitch * (k + 0.5) + shift, tall = k % 3 === 1 ? 0.25 : 0.21;
+      flat.push(bevelBox({ w: 0.13, h: tall, d: pitch * 0.8, color: TOOTH, bevel: 0.05, offset: { x, y: y + dir * (0.03 + tall / 2), z } }));
+      round.push(moved(ball(0.035, "#ffffff", 0.15, 6), x - 0.05, y + dir * (0.05 + tall * 0.7), z - pitch * 0.18));
+    }
+  };
   const cookerBody = cached(() => {
-    const { w, h, d } = COOK, round = [], flat = [], glow = [];
-    // The chest, its top a little below the rim, with the palate and the firebox's glow inside the rim.
-    flat.push(bevelBox({ w, h: h - 0.18, d, color: "#5a3a22", bevel: 0.08, offset: { y: 0.12 + (h - 0.18) / 2 } }));
-    for (const s of [-1, 1]) flat.push(bevelBox({ w: w + 0.02, h: 0.12, d: 0.1, color: TIMBER_DK, bevel: 0.03, offset: { y: h - 0.06, z: s * (d / 2 - 0.05) } }), bevelBox({ w: 0.1, h: 0.12, d, color: TIMBER_DK, bevel: 0.03, offset: { x: s * (w / 2 - 0.05), y: h - 0.06 } }));
-    flat.push(box({ w: w - 0.2, h: 0.03, d: d - 0.2, color: "#7a1f14", offset: { y: h - 0.14 } }));
-    glow.push(box({ w: w - 0.7, h: 0.02, d: d - 0.8, color: "#ff7a2a", emissive: 0.95, offset: { y: h - 0.12 } }));
-    // Iron bands round it, riveted on the front and the hall side, and iron at the corners on bronze feet.
-    for (const y of [0.32, h - 0.3]) {
-      flat.push(bevelBox({ w: w + 0.06, h: 0.12, d: d + 0.06, color: IRON_DK, bevel: 0.03, offset: { y } }));
-      for (let x = -w / 2 + 0.12; x <= w / 2 - 0.11; x += 0.24) round.push(moved(ball(0.035, IRON_LT, 0, 6), x, y, d / 2 + 0.04));
-      for (let z = -d / 2 + 0.12; z <= d / 2 - 0.11; z += 0.24) round.push(moved(ball(0.035, IRON_LT, 0, 6), -w / 2 - 0.04, y, z));
+    const { w, h, d, plinth: P, rim: R } = COOK, round = [], flat = [], glow = [];
+    // The plinth, striped yellow on black along the hall side and the right.
+    flat.push(bevelBox({ w: w + 0.2, h: P, d: d + 0.2, color: IRON_BK, bevel: 0.03, offset: { y: P / 2 } }));
+    const stripe = (x0) => prism([[x0, 0.025], [x0 + 0.1, 0.025], [x0 + 0.2, P - 0.025], [x0 + 0.1, P - 0.025]], 0.02, HAZARD);
+    for (let x = -d / 2 - 0.08; x < d / 2 - 0.1; x += 0.24) flat.push(moved(turnedY(stripe(x), -Math.PI / 2), -w / 2 - 0.105, 0, 0));
+    for (let x = -w / 2 - 0.08; x < w / 2 - 0.1; x += 0.24) flat.push(moved(stripe(x), 0, 0, d / 2 + 0.105));
+    // Black iron up to the mouth, the orange frame round it: corner posts, a band at the foot and the rim's walls.
+    flat.push(bevelBox({ w: w - 0.04, h: R - P, d: d - 0.04, color: IRON_BK, bevel: 0.04, offset: { y: (P + R) / 2 } }));
+    for (const sx of [-1, 1]) for (const sz of [-1, 1]) flat.push(bevelBox({ w: 0.22, h: h - P, d: 0.22, color: ORANGE, bevel: 0.05, offset: { x: sx * (w / 2 - 0.08), y: (P + h) / 2, z: sz * (d / 2 - 0.08) } }));
+    for (const s of [-1, 1]) {
+      flat.push(bevelBox({ w: 0.2, h: 0.12, d: d + 0.02, color: ORANGE_DK, bevel: 0.03, offset: { x: s * (w / 2 - 0.08), y: P + 0.07 } }));
+      flat.push(bevelBox({ w: w + 0.02, h: 0.12, d: 0.2, color: ORANGE_DK, bevel: 0.03, offset: { y: P + 0.07, z: s * (d / 2 - 0.08) } }));
+      // The rim's walls, open toward the hall where the jaw closes on the teeth.
+      if (s > 0) flat.push(bevelBox({ w: 0.22, h: h - R, d: d + 0.02, color: ORANGE, bevel: 0.05, offset: { x: w / 2 - 0.09, y: (R + h) / 2 } }));
+      flat.push(bevelBox({ w: w + 0.02, h: h - R, d: 0.22, color: ORANGE, bevel: 0.05, offset: { y: (R + h) / 2, z: s * (d / 2 - 0.09) } }));
+      // The mouth's red lining inside the rim.
+      if (s > 0) flat.push(box({ w: 0.02, h: h - R - 0.04, d: d - 0.44, color: MOUTH_DK, offset: { x: w / 2 - 0.205, y: (R + h) / 2 - 0.02 } }));
+      flat.push(box({ w: w - 0.44, h: h - R - 0.04, d: 0.02, color: MOUTH_DK, offset: { y: (R + h) / 2 - 0.02, z: s * (d / 2 - 0.205) } }));
     }
-    for (const sx of [-1, 1]) for (const sz of [-1, 1]) {
-      flat.push(bevelBox({ w: 0.18, h: h - 0.1, d: 0.18, color: IRON_DK, bevel: 0.03, offset: { x: sx * (w / 2 + 0.01), y: 0.1 + (h - 0.1) / 2, z: sz * (d / 2 + 0.01) } }));
-      round.push(moved(turn([[0.15, 0], [0.15, 0.06], [0.11, 0.12], [0, 0.12]], 12, BRONZE), sx * (w / 2 - 0.1), 0, sz * (d / 2 - 0.1)));
+    // Gold rivets along the frame on the hall side and the right.
+    for (const y of [P + 0.07, R - 0.07]) {
+      for (let z = -d / 2 + 0.3; z <= d / 2 - 0.29; z += 0.3) round.push(moved(ball(0.035, GOLD, 0.2, 6), -w / 2 - 0.02, y, z));
+      for (let x = -w / 2 + 0.3; x <= w / 2 - 0.29; x += 0.3) round.push(moved(ball(0.035, GOLD, 0.2, 6), x, y, d / 2 + 0.02));
     }
-    // The rim's iron teeth along the hall side, pointing up, half a pitch from the lid's.
-    const n = 10, pitch = d / n;
-    for (let k = 1; k < n; k++) flat.push(moved(turnedY(prism([[-pitch * 0.4, 0], [pitch * 0.4, 0], [0, 0.17]], 0.06, "#d8d2c4"), Math.PI / 2), -w / 2 + 0.04, h - 0.02, -d / 2 + pitch * k));
-    // The porthole's riveted bronze bezel; its glass is `cookerPort`.
+    // Inside: a red floor, a fat tongue and the firebox's glow at the throat.
+    flat.push(box({ w: w - 0.42, h: 0.04, d: d - 0.42, color: MOUTH, offset: { y: R + 0.02 } }));
+    const tongue = ball(0.5, "#e2485a", 0, 14);
+    round.push(moved({ ...tongue, verts: tongue.verts.map((v, i) => v * [0.8, 0.22, 1.6][i % 3]) }, -0.12, R + 0.05, 0));
+    glow.push(box({ w: 0.26, h: 0.02, d: d - 0.9, color: "#ff7a2a", emissive: 0.95, offset: { x: w / 2 - 0.4, y: R + 0.05 } }));
+    // An orange lip along the front under the lower teeth, whose tips stand just under the shut jaw.
+    flat.push(bevelBox({ w: 0.24, h: 0.1, d: d - 0.4, color: ORANGE, bevel: 0.03, offset: { x: -w / 2 + 0.06, y: R - 0.05 } }));
+    teethRow(flat, round, -w / 2 + 0.13, R, d - 0.5, 8, 1);
+    // The porthole's orange bezel on the hall side, riveted; its glass is `cookerPort`. Amber lamps on the front posts.
     const [px, py, pz] = COOK.port;
-    round.push(moved(forwardLathe(torus(0.32, 0.065, BRONZE, 0, 28, 8)), px, py, pz + 0.02));
-    for (let k = 0; k < 10; k++) { const a = k / 10 * TAU; round.push(moved(ball(0.03, IRON_LT, 0, 6), px + Math.cos(a) * 0.32, py + Math.sin(a) * 0.32, pz + 0.09)); }
-    // A brass plate under the porthole, the banana glowing on it.
-    flat.push(bevelBox({ w: 0.62, h: 0.2, d: 0.04, color: BRASS, bevel: 0.02, offset: { y: 0.22, z: d / 2 + 0.03 } }));
-    glow.push(moved(bananaGlyph(0.16, 0.02, "#fff06a", 0.9), 0, 0.22, d / 2 + 0.06));
+    round.push(moved(turnedY(forwardLathe(torus(0.41, 0.075, ORANGE, 0, 28, 8)), -Math.PI / 2), px + 0.02, py, pz));
+    for (let k = 0; k < 10; k++) { const a = k / 10 * TAU; round.push(moved(ball(0.03, GOLD, 0.2, 6), px - 0.06, py + Math.sin(a) * 0.41, pz + Math.cos(a) * 0.41)); }
+    for (const sz of [-1, 1]) for (const y of [0.55, 1.0]) glow.push(bevelBox({ w: 0.06, h: 0.1, d: 0.1, color: "#ffd35a", emissive: 1, bevel: 0.02, offset: { x: -w / 2 - 0.04, y, z: sz * (d / 2 - 0.08) } }));
+    // The hatch the bananas leave by, on the right: an orange frame round a dark mouth with the chute's glow in it.
+    const [hx, hy, hz] = COOK.hatch;
+    flat.push(box({ w: 0.46, h: 0.34, d: 0.04, color: "#120d0a", offset: { x: hx, y: hy + 0.02, z: d / 2 - 0.01 } }));
+    for (const s of [-1, 1]) {
+      flat.push(bevelBox({ w: 0.62, h: 0.09, d: 0.08, color: ORANGE, bevel: 0.025, offset: { x: hx, y: hy + 0.02 + s * 0.215, z: d / 2 + 0.02 } }));
+      flat.push(bevelBox({ w: 0.09, h: 0.52, d: 0.08, color: ORANGE, bevel: 0.025, offset: { x: hx + s * 0.27, y: hy + 0.02, z: d / 2 + 0.02 } }));
+    }
+    glow.push(box({ w: 0.38, h: 0.06, d: 0.02, color: "#ff9a2a", emissive: 0.8, offset: { x: hx, y: hy - 0.1, z: d / 2 + 0.005 } }));
     return { body: shaded(round, flat), glow: noShadow(shaded(glow)) };
   });
-  // What does not shake while it churns: the stack behind it, the spout at its front corner, and the sign's posts
-  // and frame.
+  // What does not chew: the stack at the back-right, the launch chute, and the sign's posts and frame.
   const cookerFixtures = cached(() => {
     const round = [], flat = [], glow = [];
     const [kx, kz] = COOK.stack, top = COOK.stackTop;
-    round.push(moved(turn([[0.22, 0], [0.22, 0.12], [0.17, 0.16], [0.17, top - 0.3], [0.23, top - 0.24], [0.23, top - 0.1], [0.27, top], [0.2, top], [0.2, top - 0.05], [0, top - 0.05]], 16, (t) => t > 0.85 ? "#1a120c" : COPPER), kx, 0, kz));
-    for (const y of [0.9, 1.9, 2.7]) round.push(moved(torus(0.19, 0.03, BRONZE, 0, 16, 6), kx, y, kz));
-    // A copper pipe from the chest's back into the stack.
-    round.push(...pipeParts(roundedPath([[kx - 0.05, 0.95, -COOK.d / 2 - 0.02], [kx - 0.05, 0.95, kz + 0.17]], 0.1), 0.08, COPPER, 0, [0.5]));
-    // The spout: out of the front corner toward the way out, rising to a flared bronze mouth.
-    const [sx, sy, sz] = COOK.spout, [lx, ly, lz] = COOK.lip;
-    const path = roundedPath([[sx, sy, sz - 0.05], [sx, sy, sz + 0.12], [lx, ly, lz]], 0.12);
-    round.push(...pipeParts(path, 0.13, COPPER, 0, [0.5]));
-    const p = path.at(1), q = path.at(0.96);
-    round.push(along(turn([[0.26, 0], [0.24, 0.04], [0.19, 0.12], [0.16, 0.2]], 18, BRONZE), p.x, p.y, p.z, p.x - q.x, p.y - q.y, p.z - q.z));
-    glow.push(moved(ball(0.1, "#ffb347", 0.9, 10), p.x, p.y, p.z));
+    round.push(moved(turn([[0.22, 0], [0.22, 0.12], [0.17, 0.16], [0.17, top - 0.3], [0.23, top - 0.24], [0.23, top - 0.1], [0.27, top], [0.2, top], [0.2, top - 0.05], [0, top - 0.05]], 16, (t) => t > 0.85 ? "#120d0a" : IRON_BK), kx, 0, kz));
+    for (const y of [0.9, 1.9, 2.7, top - 0.17]) round.push(moved(torus(y > 3 ? 0.24 : 0.19, 0.035, ORANGE, 0, 16, 6), kx, y, kz));
+    round.push(...pipeParts(roundedPath([[COOK.w / 2 - 0.02, 0.9, kz], [kx - 0.15, 0.9, kz]], 0.05), 0.09, IRON_BK, 0, []));
+    // The chute: a black trough with orange walls, sloping from the hatch to a lip that kicks up, on a leg.
+    const [hx, hy, hz] = COOK.hatch, [lx, ly, lz] = COOK.lip, vx = lx - hx, vz = lz - hz, run = Math.hypot(vx, vz), len = Math.hypot(run, hy - ly);
+    const pitch = Math.atan2(hy - ly, run), yaw = Math.atan2(vx, vz), chute = (g) => moved(turnedY(turnedX(g, pitch), yaw), hx, hy - 0.12, hz);
+    flat.push(chute(bevelBox({ w: 0.44, h: 0.05, d: len + 0.05, color: IRON_BK, bevel: 0.015, offset: { z: len / 2 } })));
+    for (const s of [-1, 1]) flat.push(chute(bevelBox({ w: 0.06, h: 0.2, d: len + 0.05, color: ORANGE, bevel: 0.02, offset: { x: s * 0.22, y: 0.08, z: len / 2 } })));
+    for (let k = 1; k < 4; k++) flat.push(chute(box({ w: 0.38, h: 0.02, d: 0.04, color: ORANGE_DK, offset: { y: 0.035, z: len * k / 4 } })));
+    flat.push(moved(turnedY(turnedX(bevelBox({ w: 0.44, h: 0.05, d: 0.3, color: IRON_BK, bevel: 0.015, offset: { z: 0.13 } }), -0.55), yaw), lx, ly - 0.12, lz));
+    for (const s of [-1, 1]) flat.push(moved(turnedY(turnedX(bevelBox({ w: 0.06, h: 0.16, d: 0.3, color: ORANGE, bevel: 0.02, offset: { x: s * 0.22, y: 0.06, z: 0.13 } }), -0.55), yaw), lx, ly - 0.12, lz));
+    const leg = ly - 0.14 + 0.2 * (hy - ly) / run;
+    flat.push(bevelBox({ w: 0.12, h: leg, d: 0.12, color: IRON_BK, bevel: 0.02, offset: { x: lx - vx / run * 0.2, y: leg / 2, z: lz - vz / run * 0.2 } }));
+    glow.push(moved(ball(0.07, "#ffb347", 0.9, 8), lx + vx / run * 0.2, ly + 0.02, lz + vz / run * 0.2));
     // The sign on its posts, a bunch of bananas beside the lettering.
     signPosts(flat, COOK.post, COOK.postZ, COOK.postH);
     const [, sy2, sz2] = COOK.sign, [bx, by, bz] = COOK.board;
@@ -1859,65 +1896,206 @@
     for (const dx of [-0.7, 0.7]) round.push(...chain(bx + dx, by + 0.42, bz, bx + dx, sy2 - 0.7, sz2 - 0.06, 0.04, IRON_DK));
     return { body: shaded(round, flat), glow: noShadow(shaded(glow)) };
   });
-  // The jaw in its hinge's frame: planks from the hinge at the origin out along -x, banded and riveted, a brass
-  // handle near its free edge, a red palate under it and bronze teeth hanging from that edge. The scene opens it
-  // with a negative rotation.z.
+  // The jaw in its hinge's frame: orange from the hinge at the origin out along -x, strapped in black iron and riveted in
+  // gold, a ridged red palate under it and the upper teeth hanging from its free edge, in front of the lower ones. The scene opens it with a negative
+  // rotation.z.
   const cookerLid = cached(() => {
-    const { w, d } = COOK, round = [], flat = [], L = w + 0.08, n = 10, pitch = d / n;
-    flat.push(bevelBox({ w: L, h: 0.14, d: d + 0.1, color: "#5a3a22", bevel: 0.05, offset: { x: -L / 2, y: 0.07 } }));
-    flat.push(box({ w: L - 0.12, h: 0.02, d: d - 0.05, color: "#8a2418", offset: { x: -L / 2, y: -0.005 } }));
-    for (const z of [-(d / 2 - 0.35), d / 2 - 0.35]) {
-      flat.push(bevelBox({ w: L + 0.04, h: 0.05, d: 0.12, color: IRON_DK, bevel: 0.015, offset: { x: -L / 2, y: 0.155, z } }));
-      for (let x = -L + 0.1; x <= -0.08; x += 0.22) round.push(moved(ball(0.03, IRON_LT, 0, 6), x, 0.19, z));
+    const { w, d } = COOK, round = [], flat = [], L = w + 0.08, D = d + 0.1;
+    flat.push(bevelBox({ w: L, h: 0.16, d: D, color: ORANGE, bevel: 0.06, offset: { x: -L / 2, y: 0.08 } }));
+    for (const s of [-1, 1]) {
+      flat.push(bevelBox({ w: L + 0.02, h: 0.08, d: 0.24, color: IRON_BK, bevel: 0.03, offset: { x: -L / 2, y: 0.18, z: s * (D / 2 - 0.12) } }));
+      flat.push(bevelBox({ w: 0.26, h: 0.08, d: D - 0.46, color: IRON_BK, bevel: 0.03, offset: { x: s < 0 ? -L + 0.13 : -0.13, y: 0.18 } }));
     }
-    round.push(tube({ path: (t) => ({ x: -L + 0.2, y: 0.2 + Math.sin(Math.PI * t) * 0.1, z: -0.35 + 0.7 * t }), radius: () => 0.03, rings: 10, segments: 6, colorFn: () => BRASS }));
-    for (const z of [-0.7, 0.7]) round.push(moved(turnedX(turn([[0.07, -0.22], [0.07, 0.22]], 12, BRONZE), Math.PI / 2), 0, 0.06, z));
-    for (let k = 0; k < n; k++) flat.push(moved(turnedY(prism([[-pitch * 0.4, 0], [0, -0.19], [pitch * 0.4, 0]], 0.06, "#e8e0cc"), Math.PI / 2), -L + 0.05, 0.01, -d / 2 + pitch * (k + 0.5)));
+    flat.push(bevelBox({ w: L - 0.6, h: 0.05, d: 0.18, color: ORANGE_DK, bevel: 0.02, offset: { x: -L / 2, y: 0.18 } }));
+    for (let z = -D / 2 + 0.35; z <= D / 2 - 0.34; z += 0.36) round.push(moved(ball(0.035, GOLD, 0.2, 6), -L + 0.13, 0.225, z));
+    for (let x = -L + 0.4; x <= -0.39; x += 0.36) for (const s of [-1, 1]) round.push(moved(ball(0.035, GOLD, 0.2, 6), x, 0.225, s * (D / 2 - 0.12)));
+    flat.push(box({ w: L - 0.12, h: 0.02, d: D - 0.1, color: MOUTH, offset: { x: -L / 2, y: -0.005 } }));
+    for (let k = 1; k < 5; k++) flat.push(bevelBox({ w: 0.07, h: 0.03, d: D - 0.6, color: MOUTH_DK, bevel: 0.012, offset: { x: -L * k / 5, y: -0.02 } }));
+    teethRow(flat, round, -L + 0.07, 0, d - 0.5, 8, -1, (d - 0.5) / 16);
+    for (const z of [-0.8, 0.8]) round.push(moved(turnedX(turn([[0.08, -0.24], [0.08, 0.24]], 12, ORANGE_DK), Math.PI / 2), 0, 0.06, z));
     return shaded(round, flat);
   });
-  // The porthole: domed glass over the banana, dim at rest and lit while it cooks.
+  // The porthole: domed glass over the banana, dim at rest and lit while it cooks. Facing +z; the scene turns it.
   const cookerPort = cached(() => {
-    const build = (lit) => noShadow(shaded([forwardLathe(turn([[0.3, -0.02], [0.3, 0.01], [0.18, 0.04], [0, 0.05]], 24, lit ? "#ff9a2a" : "#2a1a0c", lit ? 0.95 : 0.3))],
-      [moved(bananaGlyph(0.34, 0.03, lit ? "#fff06a" : "#8a6a1e", lit ? 1 : 0.35), 0, 0, 0.05)]));
+    const build = (lit) => noShadow(shaded([forwardLathe(turn([[0.36, -0.02], [0.36, 0.01], [0.22, 0.05], [0, 0.06]], 24, lit ? "#ff9a2a" : "#2a1a0c", lit ? 0.95 : 0.3))],
+      [moved(bananaGlyph(0.42, 0.03, lit ? "#fff06a" : "#8a6a1e", lit ? 1 : 0.35), 0, 0, 0.06)]));
     return { dim: build(false), lit: build(true) };
   });
-  // A gear for the cooker's side: a bronze disc with a raised hub, cut into `teeth` round its edge as the minted
-  // coin's edge is milled, with spokes on its face; its axle along x, so the scene turns it by rotation.x. Cached by
-  // size.
+  // A gear for the cooker's side: an iron disc with an orange hub, cut into `teeth` round its edge, with spokes on its
+  // face; its axle along x, so the scene turns it by rotation.x. Cached by size.
   const gearCache = new Map();
   const cookerGear = (r, teeth) => {
     const key = `${r}|${teeth}`;
     let geo = gearCache.get(key);
     if (geo) return geo;
     const t = 0.1, th = 0.07, round = [], flat = [];
-    round.push(forwardLathe(turn([[0, -t / 2], [r - 0.04, -t / 2], [r, -t / 2 + 0.02], [r, t / 2 - 0.02], [r - 0.04, t / 2], [0, t / 2]], 32, BRONZE)));
-    round.push(forwardLathe(turn([[0, -t / 2 - 0.04], [0.07, -t / 2 - 0.04], [0.09, -t / 2], [0.09, t / 2], [0.07, t / 2 + 0.04], [0, t / 2 + 0.04]], 14, IRON_DK)));
+    round.push(forwardLathe(turn([[0, -t / 2], [r - 0.04, -t / 2], [r, -t / 2 + 0.02], [r, t / 2 - 0.02], [r - 0.04, t / 2], [0, t / 2]], 32, IRON)));
+    round.push(forwardLathe(turn([[0, -t / 2 - 0.04], [0.07, -t / 2 - 0.04], [0.09, -t / 2], [0.09, t / 2], [0.07, t / 2 + 0.04], [0, t / 2 + 0.04]], 14, ORANGE)));
     for (let k = 0; k < teeth; k++) {
       const a = k / teeth * TAU;
-      flat.push(moved(turnedZ(bevelBox({ w: th, h: TAU * r / teeth * 0.5, d: t, color: BRONZE_DK, bevel: 0.015 }), a), Math.cos(a) * (r + th / 2 - 0.01), Math.sin(a) * (r + th / 2 - 0.01), 0));
+      flat.push(moved(turnedZ(bevelBox({ w: th, h: TAU * r / teeth * 0.5, d: t, color: IRON_LT, bevel: 0.015 }), a), Math.cos(a) * (r + th / 2 - 0.01), Math.sin(a) * (r + th / 2 - 0.01), 0));
     }
-    for (let k = 0; k < 3; k++) flat.push(turnedZ(box({ w: r * 1.6, h: 0.05, d: 0.02, color: BRONZE_DK, offset: { z: t / 2 + 0.005 } }), k * Math.PI / 3));
+    for (let k = 0; k < 3; k++) flat.push(turnedZ(box({ w: r * 1.6, h: 0.05, d: 0.02, color: IRON_DK, offset: { z: t / 2 + 0.005 } }), k * Math.PI / 3));
     geo = turnedY(shaded(round, flat), Math.PI / 2);
     gearCache.set(key, geo);
     return geo;
   };
-  // The kiosk where a visitor tips: an iron post on a bronze foot, a raked screen glowing lime with the banana and the
-  // ₿ on it, a coin slot, and a glass jar of bananas on a shelf. Facing +z.
-  const cookerKiosk = cached(() => {
-    const round = [], flat = [], glow = [];
-    round.push(turn([[0.34, 0], [0.34, 0.08], [0.24, 0.14], [0, 0.14]], 18, BRONZE));
-    flat.push(bevelBox({ w: 0.22, h: 1.2, d: 0.22, color: IRON_DK, bevel: 0.04, offset: { y: 0.72 } }));
-    const rake = 0.35, head = (g) => moved(turnedX(g, -rake), 0, 1.55, 0.02);
-    flat.push(head(bevelBox({ w: 0.9, h: 0.62, d: 0.16, color: IRON, bevel: 0.05 })));
-    glow.push(head(box({ w: 0.76, h: 0.48, d: 0.02, color: "#1a3a0c", emissive: 0.9, offset: { z: 0.085 } })));
-    glow.push(head(moved(bananaGlyph(0.26, 0.02, "#e8ff6a", 1), -0.16, 0.02, 0.1)), head(moved(smoothBitcoin(0.26, 0.02, "#b6ff3a", 1), 0.2, 0.02, 0.1)));
-    flat.push(box({ w: 0.2, h: 0.04, d: 0.08, color: "#0c0806", offset: { y: 1.12, z: 0.13 } }), bevelBox({ w: 0.3, h: 0.14, d: 0.06, color: BRASS, bevel: 0.02, offset: { y: 1.12, z: 0.1 } }));
-    // The jar on its shelf, bananas inside.
-    flat.push(bevelBox({ w: 0.46, h: 0.05, d: 0.36, color: TIMBER_LT, bevel: 0.015, offset: { x: 0.34, y: 0.95, z: 0.05 } }));
-    glow.push(moved(turn([[0.13, 0], [0.15, 0.06], [0.15, 0.26], [0.11, 0.3], [0.11, 0.33]], 16, "#cfeeff", 0.25), 0.34, 0.975, 0.05));
-    // Small copies of the island's banana: the transforms work in place, and the shared one must stay as it is.
-    const small = () => { const g = models.bananaGeometry(); return { ...g, verts: g.verts.map((v) => v * 0.26) }; };
-    for (let k = 0; k < 3; k++) round.push(moved(turnedZ(turnedY(small(), k * 1.9), 0.9 + k * 0.3), 0.34 + (k - 1) * 0.02, 1.0 + k * 0.03, 0.05));
+  // The sats the jaw has caught, heaped on the tongue; the scene grows the heap as they land.
+  const cookerSats = cached(() => {
+    const rand = mulberry32(29), parts = [];
+    for (let i = 0; i < 9; i++) parts.push(moved(turnedY(turnedX(bevelBox({ w: 0.22, h: 0.22, d: 0.22, color: i % 3 ? "#7fe83a" : "#b8ff6a", emissive: 0.9, bevel: 0.04 }), rand() * 0.8), rand() * TAU), (rand() - 0.5) * 0.7, 0.09 + (i > 5 ? 0.12 : 0), (rand() - 0.5) * 1.2));
+    return noShadow(merge(...parts));
+  });
+
+  // The donation kiosk, built into the right wall where the walkway from the balcony meets it, as the concept's
+  // integrated alcove draws it: the hall leaves an opening in the rock (`LAYOUT.kiosk`), and courses of pale cut stone
+  // frame it, iron plates riveted to them, round a portal of bright orange timber bound in iron: a lit bolt on each
+  // post and a bigger one on each side's stone, the frame stepping up from its header to a glowing banana on top, the
+  // DONATE SATS plaque framed in timber under the header (`kioskPlaque`), the big raked screen in its orange surround
+  // (`kioskScreen`), which shows the kiosk's attract screen (`kioskIdle`) or, while the cooker works, its thanks
+  // (`kioskThanks`), a counter under it and a lit grille under that, crystal at its feet, ivy down its sides, and
+  // brackets for two lanterns, which the scene hangs with the hall's. In the kiosk's frame: x along the wall (the
+  // visitor's right), +z out into the cave, the walkway's planks at y 0.
+  // `KIOSK` places what the scene hangs (the screen and its lean, the plaque) and, in the cave's frame, the lanterns'
+  // hooks, where a visitor stands to use it, the point used, and the glass (`glass`: its size, its face in the screen's
+  // frame, and in the cave's its middle, the normal out of it and its right and up), which the scene lays the
+  // kiosk's screen flow (`factory-kiosk.js`) over.
+  const KIOSK = (() => {
+    const k = LAYOUT.kiosk, c = Math.cos(k.turn), s = Math.sin(k.turn), at = (x, z) => [k.x + x * c + z * s, k.z - x * s + z * c];
+    const dir = (x, y, z) => [x * c + z * s, y, -x * s + z * c];
+    const lamps = [[-1.95, 4.15, 1.35], [1.95, 4.15, 1.35]], screen = [0, 2.08, 0.8], lean = -0.2, sn = Math.sin(lean), cs = Math.cos(lean);
+    const w = 1.7, h = w * BL.factoryKiosk.H / BL.factoryKiosk.W, z = 0.07, [mx, mz] = at(0, screen[2] + z * cs);
+    return {
+      screen, lean, plaque: [0, 3.2, 1.1], lamps, hooks: lamps.map(([x, y, z]) => { const [wx, wz] = at(x, z); return [wx, k.y + y, wz]; }),
+      stand: at(0, 2.1), use: at(0, 1.1),
+      glass: { w, h, z, at: [mx, k.y + screen[1] - z * sn, mz], normal: dir(0, -sn, cs), up: dir(0, cs, sn), right: dir(1, 0, 0) }
+    };
+  })();
+  // The kiosk's own stone and timber: paler than the hall's rock, brighter than its decks.
+  const KIOSK_STONE = ["#a39383", "#968676", "#b09f8c", "#8a7b6b"], KIOSK_TIMBER = "#e07c28", KIOSK_TIMBER_DK = "#b65f1c";
+  // An iron plate `size` square at (x, y, z), facing +z with a rivet in each corner: the plate into `flat`, the rivets
+  // into `round`.
+  const kioskPlate = (flat, round, x, y, z, size) => {
+    flat.push(bevelBox({ w: size, h: size, d: 0.05, color: IRON_DK, bevel: 0.015, offset: { x, y, z } }));
+    for (const [px, py] of [[-1, -1], [1, -1], [1, 1], [-1, 1]]) round.push(moved(ball(0.035, IRON_LT, 0, 6), x + px * size * 0.32, y + py * size * 0.32, z + 0.035));
+  };
+  const paintBolt = (g, x, y, size, color) => {
+    g.fillStyle = color;
+    g.beginPath();
+    for (const [px, py] of [[0.12, -0.5], [-0.32, 0.08], [-0.04, 0.08], [-0.14, 0.5], [0.32, -0.12], [0.04, -0.12]]) g.lineTo(x + px * size, y + py * size);
+    g.closePath();
+    g.fill();
+  };
+  const kioskPlaque = cached(() => {
+    const canvas = document.createElement("canvas"), g = canvas.getContext("2d"), w = 784, h = 160;
+    canvas.width = w;
+    canvas.height = h;
+    g.fillStyle = "#120c07";
+    g.fillRect(0, 0, w, h);
+    g.strokeStyle = "rgba(255,200,80,0.55)";
+    g.lineWidth = 4;
+    g.strokeRect(6, 6, w - 12, h - 12);
+    g.fillStyle = "#ffd24a";
+    g.font = `bold ${Math.round(h * 0.5)}px ${LABEL_FONT}`;
+    g.textAlign = "center";
+    g.textBaseline = "middle";
+    g.fillText("DONATE SATS", w / 2, h / 2 + 4);
+    for (const s of [-1, 1]) paintBolt(g, w / 2 + s * w * 0.43, h / 2, h * 0.72, "#ffd24a");
+    return noShadow(picture(canvas, 1.96, 0.4, 0));
+  });
+  // The screen's own pictures, painted by the kiosk's flow at twice its pixels: its attract screen while nobody is at
+  // it, and its thanks while the cooker works.
+  const kioskIdle = cached(() => noShadow(picture(BL.factoryKiosk.still("idle", 2), KIOSK.glass.w, KIOSK.glass.h, 0)));
+  const kioskThanks = cached(() => noShadow(picture(BL.factoryKiosk.still("thanks", 2), KIOSK.glass.w, KIOSK.glass.h, 0)));
+  // The screen in its own frame, centred on it: the dark glass in an iron bezel, in a surround of the orange timber
+  // with an iron plate riveted over each corner. The scene leans it back and hangs the pictures on the glass's face.
+  const kioskScreen = cached(() => {
+    const { w, h, z } = KIOSK.glass, flat = [bevelBox({ w: w + 0.16, h: h + 0.16, d: 0.1, color: IRON_DK, bevel: 0.03 })], round = [];
+    for (const s of [-1, 1]) {
+      flat.push(bevelBox({ w: w + 0.46, h: 0.15, d: 0.15, color: KIOSK_TIMBER, bevel: 0.04, offset: { y: s * (h / 2 + 0.155), z: 0.01 } }));
+      flat.push(bevelBox({ w: 0.15, h: h + 0.16, d: 0.15, color: KIOSK_TIMBER_DK, bevel: 0.04, offset: { x: s * (w / 2 + 0.155), z: 0.01 } }));
+      for (const t of [-1, 1]) kioskPlate(flat, round, s * (w / 2 + 0.155), t * (h / 2 + 0.155), 0.11, 0.2);
+    }
+    return { frame: shaded(round, flat), glass: noShadow(box({ w, h, d: 0.02, color: "#0d1116", emissive: 0.5, offset: { z: z - 0.018 } })) };
+  });
+  const donationKiosk = cached(() => {
+    const round = [], flat = [], glow = [], rand = mulberry32(91), plate = (x, y, z, size) => kioskPlate(flat, round, x, y, z, size);
+    const rivet = (x, y, z) => round.push(moved(ball(0.035, IRON_LT, 0, 6), x, y, z));
+    // The rock cut back round the alcove: a slab behind it all, and the niche's own floor, back, sides and roof.
+    flat.push(box({ w: 4.8, h: 6.6, d: 0.5, color: STONE_DK, offset: { y: 2.6, z: -2.7 } }));
+    flat.push(bevelBox({ w: 2.9, h: 0.12, d: 2.5, color: STONE[3], bevel: 0.02, offset: { y: -0.06, z: -0.1 } }));
+    flat.push(bevelBox({ w: 2.9, h: 3.9, d: 0.3, color: STONE_DK, bevel: 0.05, offset: { y: 1.95, z: -1.3 } }));
+    for (const s of [-1, 1]) flat.push(bevelBox({ w: 0.3, h: 3.9, d: 2.4, color: STONE[1], bevel: 0.05, offset: { x: s * 1.45, y: 1.95, z: -0.1 } }));
+    flat.push(bevelBox({ w: 3.2, h: 0.3, d: 2.4, color: STONE[0], bevel: 0.05, offset: { y: 3.95, z: -0.1 } }));
+    // Courses of the pale stone either side of the opening, from below the planks to the lintel, their joints
+    // staggered and those over the bolts plated in iron; and three courses across over it, out to the rock the hall
+    // leaves, the outer stones of the first plated too.
+    for (const s of [-1, 1]) for (let y = -0.5, row = 0; y < 3.95; row++) {
+      const h = Math.min(0.68 + rand() * 0.24, 3.95 - y), w = row % 2 ? 0.62 : 0.74, d = 1.9 + rand() * 0.2, x = s * (1.5 + w / 2), z = 0.17 + rand() * 0.04;
+      flat.push(bevelBox({ w: w - 0.04, h: h - 0.04, d, color: KIOSK_STONE[Math.floor(rand() * 4)], bevel: 0.08, offset: { x, y: y + h / 2, z } }));
+      if (y + h / 2 > 2.3 && h > 0.4) plate(x, y + h / 2, z + d / 2 + 0.025, 0.26);
+      y += h;
+    }
+    for (const [y0, h] of [[3.95, 0.62], [4.57, 0.5], [5.07, 0.45]]) for (let x = -2.3; x < 2.3;) {
+      const w = Math.min(0.8 + rand() * 0.35, 2.3 - x), d = 2, z = 0.12 + rand() * 0.04;
+      flat.push(bevelBox({ w: w - 0.04, h: h - 0.04, d, color: KIOSK_STONE[Math.floor(rand() * 4)], bevel: 0.1, offset: { x: x + w / 2, y: y0 + h / 2, z } }));
+      if (y0 === 3.95 && Math.abs(x + w / 2) > 1.7) plate(x + w / 2, y0 + h / 2, z + d / 2 + 0.025, 0.26);
+      x += w;
+    }
+    // The portal of orange timber inside the stone: posts bound in iron on stone footings, a lit bolt on each and a
+    // bigger one on the stone beside it, over an iron plate.
+    for (const s of [-1, 1]) {
+      const x = s * 1.3;
+      flat.push(bevelBox({ w: 0.46, h: 0.3, d: 0.46, color: STONE_DK, bevel: 0.06, offset: { x, y: 0.15, z: 0.95 } }));
+      flat.push(bevelBox({ w: 0.32, h: 3.25, d: 0.34, color: KIOSK_TIMBER, bevel: 0.05, offset: { x, y: 1.925, z: 0.95 } }));
+      for (const y of [0.75, 3.05]) {
+        flat.push(bevelBox({ w: 0.36, h: 0.1, d: 0.38, color: IRON_DK, bevel: 0.02, offset: { x, y, z: 0.95 } }));
+        rivet(x, y, 1.15);
+      }
+      glow.push(moved(smoothBolt(0.52, 0.06, "#ffd23a", 1), x, 1.95, 1.14));
+      glow.push(moved(smoothBolt(0.7, 0.07, "#ffc21a", 1), s * 1.85, 1.6, 1.24));
+      plate(s * 1.85, 0.6, 1.22, 0.34);
+    }
+    // The header over the posts, plated at its ends, and the frame stepping up from it in two shorter beams to the
+    // banana: a dark round in a gold ring standing on the top step, the banana glowing in it.
+    for (const [y, w, h, color] of [[3.55, 3.0, 0.3, KIOSK_TIMBER], [3.85, 2.2, 0.25, KIOSK_TIMBER_DK], [4.1, 1.4, 0.22, KIOSK_TIMBER]]) {
+      flat.push(bevelBox({ w, h, d: 0.4, color, bevel: 0.05, offset: { y: y + h / 2, z: 1.0 } }));
+    }
+    for (const s of [-1, 1]) plate(s * 1.3, 3.7, 1.225, 0.24);
+    round.push(moved(forwardLathe(turn([[0.42, 0], [0.42, 0.06], [0.36, 0.12], [0, 0.13]], 24, "#24170d")), 0, 4.78, 1.1));
+    round.push(moved(forwardLathe(torus(0.44, 0.055, "#d99a1e", 0, 32, 8)), 0, 4.78, 1.17));
+    glow.push(moved(turnedZ(bananaGlyph(0.5, 0.06, "#ffd84a", 1), 0.25), 0, 4.78, 1.24));
+    // The plaque's iron under the header, framed in the timber with a plate on each corner; the scene hangs the
+    // lettering on it.
+    const [, py, pz] = KIOSK.plaque;
+    flat.push(bevelBox({ w: 2.1, h: 0.5, d: 0.06, color: IRON_DK, bevel: 0.02, offset: { y: py, z: pz - 0.04 } }));
+    for (const s of [-1, 1]) {
+      flat.push(bevelBox({ w: 2.3, h: 0.1, d: 0.14, color: KIOSK_TIMBER, bevel: 0.03, offset: { y: py + s * 0.3, z: pz - 0.03 } }));
+      flat.push(bevelBox({ w: 0.1, h: 0.5, d: 0.14, color: KIOSK_TIMBER_DK, bevel: 0.03, offset: { x: s * 1.1, y: py, z: pz - 0.03 } }));
+      for (const t of [-1, 1]) plate(s * 1.1, py + t * 0.3, pz + 0.065, 0.15);
+    }
+    // The counter under the screen on iron brackets, and under it the grille: an iron panel with its slats lit as if
+    // the cooker's fire were behind it, and bars across them.
+    flat.push(bevelBox({ w: 2.26, h: 0.1, d: 0.5, color: KIOSK_TIMBER, bevel: 0.03, offset: { y: 1.2, z: 0.88 } }));
+    for (const s of [-1, 1]) flat.push(beam(s * 1.0, 0.95, 0.7, s * 1.0, 1.15, 1.05, 0.06, IRON_DK));
+    flat.push(bevelBox({ w: 1.8, h: 0.8, d: 0.16, color: IRON_BK, bevel: 0.03, offset: { y: 0.62, z: 0.9 } }));
+    for (let k = 0; k < 5; k++) glow.push(box({ w: 1.5, h: 0.06, d: 0.02, color: k % 2 ? "#ffb81c" : "#ffd24a", emissive: 1, offset: { y: 0.34 + k * 0.14, z: 0.985 } }));
+    for (let k = 0; k < 7; k++) flat.push(box({ w: 0.045, h: 0.66, d: 0.04, color: IRON_DK, offset: { x: (k - 3) * 0.22, y: 0.62, z: 1.0 } }));
+    for (const s of [-1, 1]) for (const t of [-1, 1]) rivet(s * 0.82, 0.62 + t * 0.33, 1.0);
+    // Brackets out of the stone for the lanterns.
+    for (const [x, y, z] of KIOSK.lamps) {
+      flat.push(bevelBox({ w: 0.3, h: 0.3, d: 0.05, color: IRON_DK, bevel: 0.015, offset: { x, y: y + 0.05, z: 1.2 } }));
+      flat.push(bevelBox({ w: 0.07, h: 0.07, d: 0.26, color: IRON_DK, bevel: 0.015, offset: { x, y: y + 0.03, z: z - 0.08 } }));
+    }
+    // Blue crystal out of the stone at both feet, and ivy down both sides.
+    for (const s of [-1, 1]) for (let k = 0; k < 5; k++) {
+      const h = 0.25 + rand() * 0.35;
+      glow.push(moved(turnedZ(prism([[-0.05, 0], [0.05, 0], [0.035, h * 0.85], [0, h], [-0.035, h * 0.85]], 0.08, k % 2 ? CYAN : CRYSTAL, 0.85), (k - 2) * 0.32 * s), s * (1.78 + (k - 2) * 0.09), 0, 1.18 + (rand() - 0.5) * 0.08));
+    }
+    for (const [x, top, len, n, z] of [[1.95, 4.9, 2.9, 9, 1.22], [-2.02, 5.3, 2.2, 7, 1.3]]) {
+      round.push(tube({ path: (t) => ({ x: x + Math.sin(t * 5 + x) * 0.08, y: top - t * len, z }), radius: () => 0.025, rings: 16, segments: 5, colorFn: () => "#2f5a22" }));
+      for (let k = 0; k < n; k++) flat.push(moved(turnedZ(leaf(1.6, k % 2 ? "#4f9a36" : "#3c8229"), (rand() - 0.5) * 1.2), x + (rand() - 0.5) * 0.4, top - 0.2 - k * len / n, z + 0.02));
+    }
     return { body: shaded(round, flat), glow: noShadow(shaded(glow)) };
   });
   // A donation's sat: a lime cube with the ₿ on two faces, green going in so the bananas come out ripe; drawn by the
@@ -2924,11 +3102,13 @@
       parts.push(moved(lathe({ profile: [[1.85, 0], [1.85, 0.56], [0, 0.56]], segments: 12, color: IRON_DK }), rb.x, rb.y, rb.z + REB.cz), moved(lathe({ profile: [[1.95, 0.42], [1.95, 0.52]], segments: 12, color: "#5fe3ff", emissive: 0.95 }), rb.x, rb.y, rb.z + REB.cz));
       parts.push(span(tr.x - 1.4, tr.x + 1.4, tr.y, tr.y + 1.5, tr.z + TRE.vz - TRE.deep / 2, tr.z + TRE.vz + TRE.deep / 2, "#5a3a22"));
       parts.push(moved(lathe({ profile: [[TRE.dome[0], 0], [0.9, 0.7], [0.5, 1.2], [0, TRE.dome[1]]], segments: 8, color: "#d9a52a", emissive: 0.6 }), tr.x, tr.y + TRE.top, tr.z + TRE.vz));
-      // The cooker: its chest and shut jaw, the porthole's dim glow on its front and the stack behind it.
+      // The cooker: its black chest in the orange frame with the jaw shut, the porthole's dim glow on the hall side and
+      // the stack behind it.
       const ck = L.cooker;
-      parts.push(span(ck.x - COOK.w / 2, ck.x + COOK.w / 2, ck.y, ck.y + COOK.h + 0.14, ck.z - COOK.d / 2, ck.z + COOK.d / 2, "#5a3a22"));
-      parts.push(moved(forwardLathe(lathe({ profile: [[0.32, 0], [0, 0.04]], segments: 10, color: "#ff9a2a", emissive: 0.5 })), ck.x + COOK.port[0], ck.y + COOK.port[1], ck.z + COOK.port[2] + 0.03));
-      parts.push(moved(lathe({ profile: [[0.2, 0], [0.2, COOK.stackTop], [0, COOK.stackTop]], segments: 8, color: COPPER }), ck.x + COOK.stack[0], ck.y, ck.z + COOK.stack[1]));
+      parts.push(span(ck.x - COOK.w / 2, ck.x + COOK.w / 2, ck.y, ck.y + COOK.h + 0.14, ck.z - COOK.d / 2, ck.z + COOK.d / 2, IRON_BK));
+      parts.push(span(ck.x - COOK.w / 2 - 0.03, ck.x + COOK.w / 2 + 0.03, ck.y + COOK.h - 0.1, ck.y + COOK.h + 0.14, ck.z - COOK.d / 2 - 0.03, ck.z + COOK.d / 2 + 0.03, ORANGE));
+      parts.push(moved(turnedY(forwardLathe(lathe({ profile: [[0.36, 0], [0, 0.04]], segments: 10, color: "#ff9a2a", emissive: 0.5 })), -Math.PI / 2), ck.x + COOK.port[0] - 0.03, ck.y + COOK.port[1], ck.z + COOK.port[2]));
+      parts.push(moved(lathe({ profile: [[0.2, 0], [0.2, COOK.stackTop], [0, COOK.stackTop]], segments: 8, color: IRON_BK }), ck.x + COOK.stack[0], ck.y, ck.z + COOK.stack[1]));
     }
     // The galleries under the vault, each stand's pair of tanks as dim glass on its plate, with their front rails.
     for (const g of L.galleries) {
@@ -3134,7 +3314,7 @@
     forgeSign, forgeWave, forgeLines, forgeTrack, forgeShafts, mintCoin, COILS, teslaCoil, banner, statusLantern, peerPipes, peerMirrors, TUNNEL_SIGN, TUNNEL_POST, EXIT_Z, CONDUIT_SAMPLES, TUNNEL_THEMES, STEP, supportAt, stairCeilingAt, clearAt, walkable, resolveFall,
     hall, scaffold, coreBody, coreChamber, conduits, sat, satFailed, stationFrame, capacitor, forge, forgeFire, cart,
     switchboard, switchScreens, REB, TRE, rebalancerBase, rebalancerRing, rebalancerFlow, treasuryBody, goldPile, hopperFill, beltNugget, goldCrate, dataBoard, moveBoard,
-    COOK, cookerBody, cookerFixtures, cookerLid, cookerPort, cookerGear, cookerKiosk, satCube, flyingBanana, coreRingLime,
+    COOK, KIOSK, cookerBody, cookerFixtures, cookerLid, cookerPort, cookerGear, cookerSats, donationKiosk, kioskScreen, kioskPlaque, kioskIdle, kioskThanks, satCube, flyingBanana, coreRingLime,
     coreRing, teslaArcs, lookoutTower, lookoutLamp, lookoutOptics, lookoutBeam, LOOKOUT_BEAM, STUDY, studyHall, studyNote, studyBoard, tunnels, galleryStation, galleryCaps, label, lanterns, hardHat, hubTunnel, hubWindow, bakeWindow, windowLights, exitTunnel, outsideView,
     beam, moved, turnedY, smoothBolt, smoothBitcoin
   };

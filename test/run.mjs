@@ -5846,27 +5846,41 @@ const factoryShields = { name: "factory peer portals", why: "rule: paired peer m
 // The banana cooker: a tip is counted once, the moment it arrives, and cooked where the visitor can watch it, never
 // passed off as routing. The demo node is held still and its conduits emptied, so anything moving is the tip's, and
 // the exit shield's hum is stopped, so its ripple count is crossings alone. The kiosk is tapped with the view free, as
-// the room sign is.
-const factoryCooker = { name: "factory cooker", why: "rule: a tip in the factory, from the kiosk's dialog or anywhere, is counted once and cooked in plain sight: no sat of it rides a line or lights a bay, the core never surges for it, each banana leaves through the exit shield, the board names no tipper and no time, a stopped node's cubes come in from outside, and a burst stays inside the cooker's pools", run: async (b) => {
+// the room sign is, and its screen is worked with the keys the way a visitor works it.
+const factoryCooker = { name: "factory cooker", why: "rule: a tip in the factory, paid at the kiosk or arriving from anywhere, is counted once and cooked in plain sight: the kiosk runs the whole simulated donation and holds the visitor's bananas until they watch, no sat of it rides a line or lights a bay, the core never surges for it, each banana leaves through the exit shield, the board names no tipper and no time, a stopped node's cubes come in from outside, and a burst stays inside the cooker's pools", run: async (b) => {
   const at = await b.evaluate(`(() => { const B = window.__ooga; ${FACTORY_EVENT} const s = X.scene, q = s.sats;
     for (let t = 0; t < 10 && q.bay.some((v) => v >= 0); t += 0.25) B.advance(0.25, 1 / 20);
     s.gate.hum = Infinity;
     for (const [id, value] of [["handle", "tester"], ["message", "zebra 12:34"]]) { const el = document.getElementById(id); el.value = value; el.dispatchEvent(new Event("change")); }
     B.pilot.release(true);
-    const w = s.kiosk.world, p = { x: w[12], y: w[13] + 1.3, z: w[14] };
+    const w = s.kioskScreen.world, p = { x: w[12], y: w[13], z: w[14] };
     B.pilot.navigate({ position: p, target: p, yaw: s.kiosk.rotation.y, pitch: 0.2, dist: 4 }); B.advance(0.6, 1 / 60);
     return B.project(p.x, p.y, p.z, {}); })()`);
   await b.click(at.x, at.y);
-  for (let i = 0; i < 20 && !(await b.evaluate(`document.getElementById("feed").open`)); i++) await b.sleep(10);
-  const r = await b.evaluate(`(() => { const B = window.__ooga, G = window.BL.game, s = B.factory.scene, q = s.sats, g = s.gate.phase.ripples;
-    const feed = document.getElementById("feed"), qr = document.getElementById("qr"), opened = { dialog: feed.open, qr: qr.width > 0 && qr.height > 0 };
-    const n = G.bananasFor(1200), l0 = B.level, d0 = B.game.state.donations, h0 = g.hits;
-    feed.querySelector('[data-action="tip"]').click();
-    const counted = { level: B.level - l0, donations: B.game.state.donations - d0, handle: B.game.state.handle };
-    B.hud.closeFeed();
+  const screen = () => b.evaluate(`(() => { const B = window.__ooga, s = B.factory.scene, f = s.booth.flow;
+    return { mode: s.booth.mode, state: f.state, sats: f.sats, bananas: f.bananas, invoice: f.invoice ? f.invoice.id : null, qr: f.invoice ? f.invoice.code.size : 0, left: f.left, held: s.booth.held }; })()`);
+  await b.evaluate(`window.__ooga.advance(1, 1 / 30)`);
+  const opened = await screen();
+  for (const k of ["Enter", "1", "2", "0", "0"]) await b.key(k);
+  const typed = await screen();
+  await b.key("Enter");
+  const quoted = await screen();
+  await b.key("Enter");
+  const invoiced = await b.evaluate(`(() => { const B = window.__ooga, s = B.factory.scene;
+    window.__tipFrom = { level: B.level, donations: B.game.state.donations, hits: s.gate.phase.ripples.hits };
+    B.advance(2, 1 / 30); const f = s.booth.flow; return { state: f.state, invoice: f.invoice ? f.invoice.id : null, qr: f.invoice ? f.invoice.code.size : 0, left: f.left }; })()`);
+  await b.key("Enter");
+  const paid = await b.evaluate(`(() => { const B = window.__ooga, G = window.BL.game, s = B.factory.scene, f = s.booth.flow, from = window.__tipFrom;
+    const waiting = f.state;
+    B.advance(3, 1 / 30);
+    const c = B.stats().cooker;
+    return { waiting, state: f.state, held: s.booth.held, n: G.bananasFor(1200), level: B.level - from.level, donations: B.game.state.donations - from.donations, handle: B.game.state.handle, idle: c.phase === 0 && c.queued === 0 && c.cubes === 0 }; })()`);
+  await b.key("Enter");
+  const r = await b.evaluate(`(() => { const B = window.__ooga, G = window.BL.game, s = B.factory.scene, q = s.sats, g = s.gate.phase.ripples, from = window.__tipFrom;
+    const n = G.bananasFor(1200), l0 = from.level, h0 = from.hits, watching = s.booth.mode;
     const busy = () => { const c = B.stats().cooker; return c.cubes + c.bananas + c.queued > 0; };
     let routed = 0, lit = 0, surged = false, recounted = false, first = null;
-    for (let t = 0; t < 20 && (t < 1 || busy()); t += 1 / 20) {
+    for (let t = 0; t < 20 && (t < 2.5 || busy()); t += 1 / 20) {
       B.advance(1 / 20, 1 / 20);
       for (let i = 0; i < q.bay.length; i++) if (q.bay[i] >= 0) routed++;
       for (const place of s.bays) if (place.flashL > 0 || place.sputter > 0) lit++;
@@ -5875,12 +5889,16 @@ const factoryCooker = { name: "factory cooker", why: "rule: a tip in the factory
       recounted = recounted || B.level !== l0 + n;
       const c = s.cubeNode; if (!first && c.instanceCount) first = { x: c.instanceData[12], y: c.instanceData[13], z: c.instanceData[14] };
     }
-    B.advance(1.2, 1 / 20);
+    B.advance(3.5, 1 / 20);
     const printed = s.cookBoard.printed;
-    return { opened, n, counted, routed, lit, surged, recounted, first, core: window.BL.factoryModels.LAYOUT.core, rippled: g.hits - h0,
+    return { n, watching, back: s.booth.mode, counted: { level: B.level - l0 }, routed, lit, surged, recounted, first, core: window.BL.factoryModels.LAYOUT.core, rippled: g.hits - h0,
       board: { printed, rounded: printed.includes(G.formatLarge(1200)), named: /tester|zebra/i.test(printed), timed: /\\d{1,2}:\\d{2}/.test(printed) } };
   })()`);
-  record("factory kiosk: tapping the cooker's kiosk opens the feed dialog with this page's QR, and its Tip button tips in the factory under the visitor's handle", r.opened.dialog && r.opened.qr && r.counted.donations === 1 && r.counted.handle === "tester", JSON.stringify({ opened: r.opened, counted: r.counted }));
+  record("factory kiosk: tapping the kiosk in the right wall puts its screen in view, and the whole simulated donation runs on it from the keys: an amount typed in, its quote in bananas, an invoice with its QR and expiry, the wait and the payment, which counts the tip once under the visitor's handle and holds its bananas until the visitor turns to watch, then hands the view back",
+    opened.mode === 1 && opened.state === "idle" && typed.state === "amount" && typed.sats === 1200 && quoted.state === "quote" && quoted.bananas === paid.n
+    && invoiced.state === "invoice" && !!invoiced.invoice && invoiced.qr > 0 && invoiced.left > 290 && paid.waiting === "waiting" && paid.state === "paid"
+    && paid.level === paid.n && paid.donations === 1 && paid.handle === "tester" && paid.held === paid.n && paid.idle && r.watching === 3 && r.back === 0,
+    JSON.stringify({ opened, typed, quoted, invoiced, paid, watching: r.watching, back: r.back }));
   record("factory cooker: a tip's bananas count once, the moment it arrives, and each leaves through the exit shield; no sat of it rides a line or lights a bay, and the core never surges for it", r.counted.level === r.n && !r.recounted && r.rippled === r.n && r.routed === 0 && r.lit === 0 && !r.surged, JSON.stringify(r));
   record("factory cooker: the donations board shows the last tip rounded and never the tipper's handle, message or a time", r.board.rounded && !r.board.named && !r.board.timed, JSON.stringify(r.board));
   const stopped = await b.evaluate(`(() => { const B = window.__ooga; ${FACTORY_EVENT} const s = X.scene, g = s.gate.phase.ripples, G = window.BL.game, shield = window.BL.factoryModels.HALL.front - 0.6;
@@ -5920,9 +5938,9 @@ const factoryCooker = { name: "factory cooker", why: "rule: a tip in the factory
 } };
 // Everywhere the widest Ooga on the roster can walk from the balcony, by the factory's own step rule on a
 // quarter-metre grid: both ends of every stair, every line's deck and its peer tunnel's porch, the switchboard, the
-// right-wall platform with the rebalancer, treasury and banana cooker, the watchtower, landing, galleries and the forge
-// floor; and the platform walked end to end on its own deck from the cooker's stair. It runs on the island, where the
-// whole roster is built.
+// right-wall platform with the rebalancer, treasury and banana cooker, the donation kiosk in the right wall, the
+// watchtower, landing, galleries and the forge floor; and the platform walked end to end on its own deck from the
+// cooker's stair. It runs on the island, where the whole roster is built.
 const factoryFloor = { name: "factory floor", why: "regression: stairs landed against rails and blocks, and lanes round the tanks and past the tunnels' console boxes were too narrow to walk", run: async (b) => {
   const r = await b.evaluate(`(() => {
     let R = 0, who = ""; for (const cave of window.__ooga.cavemen.values()) if (cave.bodyRadius > R) { R = cave.bodyRadius; who = cave.traits.name; }
@@ -5952,8 +5970,9 @@ const factoryFloor = { name: "factory floor", why: "regression: stairs landed ag
     L.stairs.forEach(([ax, ay, az, bx, by, bz], n) => { if (!near(ax, az, ay)) missing.push("stair " + n + " foot"); if (!near(bx, bz, by)) missing.push("stair " + n + " head"); });
     const decks = { A: L.bays[0], B: L.bays[1], C: L.bays[2], D: L.bays[3], switchboard: L.switchboard, platform: L.platform, rebalancer: L.rebalancer, treasury: L.treasury, cooker: L.cooker, watchtower: L.lookout, lighthouse: L.lookoutDeck, landing: L.landing, gallery1: L.galleries[0], gallery2: L.galleries[1] };
     for (const [name, d] of Object.entries(decks)) if (!reachedIn(d.x - d.w / 2, d.x + d.w / 2, d.z - d.d / 2, d.z + d.d / 2, d.y)) missing.push(name);
-    const spots = [["rebalancer operator lane", L.rebalancer, M.REB.operator], ["treasury operator", L.treasury, M.TRE.operator], ["cooker kiosk", L.cooker, M.COOK.kiosk]];
+    const spots = [["rebalancer operator lane", L.rebalancer, M.REB.operator], ["treasury operator", L.treasury, M.TRE.operator]];
     for (const [name, d, [x, z]] of spots) if (!near(d.x + x, d.z + z, d.y)) missing.push(name);
+    if (!near(M.KIOSK.stand[0], M.KIOSK.stand[1], L.kiosk.y)) missing.push("donation kiosk");
     // The platform is one deck: from the head of the stair up from the pit, never leaving the deck's own floor or
     // taking a ladder, the widest Ooga walks past the cooker and the treasury to the rebalancer.
     const P = L.platform, st = L.stairs.find((q) => q[4] === P.y), deck = new Set(), dq = [];
@@ -5970,7 +5989,7 @@ const factoryFloor = { name: "factory floor", why: "regression: stairs landed ag
     if (!near(L.stairway[0], L.stairway[2] - 1, 0)) missing.push("forge floor");
     return { who, radius: +R.toFixed(2), missing, cells: cells.length, deck: deck.size };
   })()`);
-  record("factory floor: from the balcony the widest Ooga on the roster reaches both ends of every stair, every line's deck, each peer tunnel's shield, the switchboard, the right-wall platform with the rebalancer's operator lane, the treasury and the cooker's kiosk (walking the platform's length from the cooker's stair), the watchtower, landing, galleries and the forge", r.missing.length === 0 && r.radius > 0.6 && r.cells > 20000, JSON.stringify(r));
+  record("factory floor: from the balcony the widest Ooga on the roster reaches both ends of every stair, every line's deck, each peer tunnel's shield, the switchboard, the right-wall platform with the rebalancer's operator lane and the treasury (walking the platform's length from the cooker's stair), the donation kiosk in the right wall, the watchtower, landing, galleries and the forge", r.missing.length === 0 && r.radius > 0.6 && r.cells > 20000, JSON.stringify(r));
 } };
 // The way in and out: from the island through the 2 o'clock mouth's shield, back out past the balcony, and Escape.
 const factoryEntrance = { name: "factory entrance", why: "regression: flying above the mouth entered the factory and reaching its front wall away from the doorway exited; real doorway crossings must still keep the same Ooga", run: async (b) => {
