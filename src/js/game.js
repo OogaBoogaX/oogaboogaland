@@ -153,9 +153,10 @@
     };
     const assignedTo = (entryId) => Object.keys(state.assignments).find((name) => state.assignments[name] === entryId) || null;
     // A donation, wherever it lands: the totals, and the donations board's tally of bananas made, the last tip and
-    // its day's sats and bananas. A day already rolled out of the tally (a late replay) counts in the totals only.
-    const recordDonation = (donation) => {
-      const bananas = bananasFor(donation.sats), day = dayOf(donation.at), days = state.tipDays;
+    // its day's sats and bananas. `counted` is the API's count in real mode, kept whole; without it the game's own.
+    // A day already rolled out of the tally (a late replay) counts in the totals only.
+    const recordDonation = (donation, counted = null) => {
+      const bananas = counted === null ? bananasFor(donation.sats) : Math.round(counted), day = dayOf(donation.at), days = state.tipDays;
       state.totalSats += donation.sats;
       state.donations += 1;
       state.bananas += bananas;

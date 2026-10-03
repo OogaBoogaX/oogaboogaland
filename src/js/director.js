@@ -288,6 +288,9 @@
     elapsed += dt;
     if (transition) stepTransition(dt);
     sceneTime += dt;
+    // In real mode the API owns the pile, so every browser shows the same one: its last count less what has been
+    // eaten since it arrived, in whole bananas.
+    if (pileFeed.at) world.level = Math.min(pileMod.MAX_BANANAS, Math.max(0, Math.floor(pileFeed.bananas - pileFeed.eatPerHour * (performance.now() - pileFeed.at) / 36e5)));
     active.update(dt, sceneTime);
     agentPlay.update(dt);
     updateWorldClock(now);
@@ -419,7 +422,13 @@
     mempool.setHidden(true);
     chain.setHidden(true);
   }
-  const unsubscribeDonations = donations.subscribe((donation) => active.onDonation(donation), { identity: () => game.state });
+  // Each donation goes to the active scene with the API's banana count (null when simulated); in real mode the pile
+  // follows the API's.
+  const pileFeed = { bananas: 0, eatPerHour: 0, at: 0 };
+  const unsubscribeDonations = donations.subscribe((donation, bananas) => active.onDonation(donation, bananas), {
+    identity: () => game.state,
+    onPile: ({ bananas, eatPerHour }) => Object.assign(pileFeed, { bananas, eatPerHour, at: performance.now() })
+  });
   // The feed panel: the Konami code toggles a page-wide readout of the socket, its counters and its last events.
   // It subscribes and ticks only while open, and its text nodes change only with their value.
   const KONAMI = ["ArrowUp", "ArrowUp", "ArrowDown", "ArrowDown", "ArrowLeft", "ArrowRight", "ArrowLeft", "ArrowRight", "b", "a"];

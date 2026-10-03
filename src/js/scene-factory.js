@@ -148,8 +148,8 @@
     rebalancer: ["Rebalancer · moving liquidity", "Rebalancing moves sats between channels so lines keep working. It is shown by the hour, never for one line."],
     treasury: ["Treasury · routing fees", "The gold under the glass is the node's public capacity, visible to anyone on the Lightning network. Each forward that earns the demo node a fee sends a nugget up the belt into the crate."],
     cooker: ["Banana cooker · tips into bananas", "Every tip is cooked here: the core throws its sats across, the cooker chomps and churns, and the bananas fly out through the gate to the island."],
-    kiosk: ["Donation kiosk · tip the Ooga Boogas", "Walk up and press Space, or tap it: pick an amount, pay its invoice and watch the cooker turn it into bananas. Payments are simulated in this build."],
-    board: ["Banana donation board", "The tips this browser has seen, rounded and naming no one. Payments are simulated in this build; the backend will count everyone's."],
+    kiosk: ["Donation kiosk · tip the Ooga Boogas", `Walk up and press Space, or tap it: pick an amount, pay its invoice and watch the cooker turn it into bananas.${donations.real ? "" : " Payments are simulated in this build."}`],
+    board: ["Banana donation board", `The tips this browser has seen, rounded and naming no one.${donations.real ? "" : " Payments are simulated in this build."} Everyone's totals come later.`],
     lookout: ["Watchtower · the node's signal", "The beam sweeps while the node's events are arriving. Dark means no signal: the node may be fine, but nothing is getting through."],
     study: ["Study Hall · locked", "Bananas first! The study hall opens in a later update."],
     tunnel: ["Peer tunnel", "Through here lives the peer at the other end of a line."],
@@ -860,7 +860,7 @@
     setBoard(s.galleryLabel, "MORE CHANNELS", `${Math.max(0, total - 4)} lines, ${Math.max(0, total - shown)} not shown`, false);
     // The cooker's board counts what it has cooked on this page, rounded, and never names a donor or a time.
     const c = shared.cooker;
-    setData(s.cookBoard, "DONATIONS (SIMULATED)", [["Tips cooked", gameMod.formatLarge(c.tips), "count"], ["Bananas out", gameMod.formatLarge(c.bananas), "ok"], ["Last tip", c.last ? `${rounded(c.last)} sats` : "None yet", "sats"]], 1.9);
+    setData(s.cookBoard, donations.real ? "DONATIONS" : "DONATIONS (SIMULATED)", [["Tips cooked", gameMod.formatLarge(c.tips), "count"], ["Bananas out", gameMod.formatLarge(c.bananas), "ok"], ["Last tip", c.last ? `${rounded(c.last)} sats` : "None yet", "sats"]], 1.9);
     // The donations board: this browser's tips (the game's tally), rounded and naming no one or no time, until the
     // backend counts everyone's.
     const g = game.state, [todaySats, todayBananas] = game.tipsWithin(1), [weekSats, weekBananas] = game.tipsWithin(7);
@@ -899,17 +899,19 @@
   };
   // A tip, wherever the visitor stands in the hall: counted at once, its bananas on the shared level, thanked, and
   // queued for the cooker, which turns it into those bananas before everyone's eyes.
-  const onDonation = (donation) => {
-    game.recordDonation(donation);
-    const bananas = gameMod.bananasFor(donation.sats);
-    world.level = Math.min(pileMod.MAX_BANANAS, world.level + bananas);
+  // In real mode `counted` is the API's `{ exact, rounded }`: the donation counts its exact bananas (the pile itself
+  // follows the API's), and the cooker still cooks the game's one to twelve, a show of them.
+  const onDonation = (donation, counted = null) => {
+    game.recordDonation(donation, counted && counted.exact);
+    const bananas = gameMod.bananasFor(donation.sats), shown = counted ? counted.rounded : bananas;
+    world.level = Math.min(pileMod.MAX_BANANAS, world.level + (counted ? counted.exact : bananas));
     const who = donation.handle ? `@${donation.handle}` : "anon";
-    hud.toast(`+${gameMod.formatLarge(donation.sats)} sats · ${bananas} banana${bananas > 1 ? "s" : ""} · ${who}`);
-    fx.showTicker(`THANKS ${donation.handle ? "@" + donation.handle.toUpperCase() : "ANON"} · ${bananas} BANANAS`, 4.5);
+    hud.toast(`+${gameMod.formatLarge(donation.sats)} sats · ${gameMod.formatLarge(shown)} banana${shown === 1 ? "" : "s"} · ${who}`);
+    fx.showTicker(`THANKS ${donation.handle ? "@" + donation.handle.toUpperCase() : "ANON"} · ${gameMod.formatLarge(shown)} BANANAS`, 4.5);
     hud.setStats(game.state);
     // The visitor's own tip, paid at the kiosk, waits on its screen until they turn to watch it cook.
     const b = scene.booth;
-    if (b.flow.receive(donation.id)) {
+    if (b.flow.receive(donation.id, counted)) {
       b.held += bananas;
       b.heldSats += donation.sats;
     } else cook(scene, bananas, donation.sats);
@@ -1455,16 +1457,22 @@
     // The kiosk's attract screen carries this visit's donation link, the one the dialog shows. Its screen flow: each
     // invoice a fresh donation request, its simulated payment this visitor's tip in the backend's shape, and the
     // screens' way out to the show and back to the walk.
-    scene.kioskIdle.geometry = FM.kioskIdle(donationRequest.url);
+    // In real mode there is no fixed donation link, so the attract screen's QR holds the Factory's own address, which
+    // opens the cave on a phone.
+    const link = donations.real ? `${BL.routes.site}/lightning` : donationRequest.url;
+    scene.kioskIdle.geometry = FM.kioskIdle(link);
     scene.booth.flow = BL.factoryKiosk.create({
-      link: () => donationRequest.url,
+      link: () => link,
+      real: donations.real,
+      invoice: (sats) => donations.invoice({ sats, message: game.state.message }),
+      open: () => donations.state.open,
       request: () => donations.createRequest(game.state),
       bananasFor: gameMod.bananasFor,
       price: () => BL.chain.snapshot.priceUsd,
       handle: () => donations.sanitize(game.state.handle, donations.HANDLE_MAX),
       copy: (text) => {
         if (navigator.clipboard) navigator.clipboard.writeText(text).catch(() => {});
-        hud.toast("Invoice copied · payments are simulated in this build");
+        hud.toast(donations.real ? "Invoice copied" : "Invoice copied · payments are simulated in this build");
       },
       pay: (id, sats) => onDonation(tipEvent(id, sats)),
       release: () => releaseTip(scene),

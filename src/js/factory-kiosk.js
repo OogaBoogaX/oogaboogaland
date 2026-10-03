@@ -6,10 +6,12 @@
 // square canvas, `W` by `H`, which the scene lays over the kiosk's glass while the visitor is at it; `still` paints
 // the glass's own pictures for when nobody is (the attract screen, and the thanks while the cooker works).
 //
-// Payments are simulated: SETTLE after the visitor pays, the flow asks the scene to emit the donation event the
-// backend will one day push, `{ id, sats, handle, message, at }` under the invoice's request id, and the scene hands
-// every event back through `receive(id)`, which takes the one this invoice is waiting for. So a real payment will end
-// the wait the same way. The scene holds that tip's bananas until the visitor asks to watch, or HOLD runs out.
+// Simulated, SETTLE after the visitor presses to pay, the flow asks the scene to emit the donation event the API
+// pushes, `{ id, sats, handle, message, at }` under the invoice's id. In real mode (`hooks.real`, the page's API in
+// use) the amount, once confirmed, asks the API for its invoice at once (`hooks.invoice`): the quote shows the API's
+// bananas and rate, the invoice its bolt11 as a `lightning:` QR and its own expiry, and nothing settles but the
+// socket. Either way the scene hands every donation back through `receive(id)`, which takes the one this invoice is
+// waiting for. The scene holds that tip's bananas until the visitor asks to watch, or HOLD runs out.
 //
 // `create(hooks)` returns the flow: `start`, `stop`, `key(e)`, `tap(u, v)` in the canvas's pixels, `receive(id)`,
 // `update(dt)`, `paint()`, which repaints only after a change, and `animate(ctx, time)`, which draws what moves (the
@@ -26,6 +28,13 @@
   const INK = {
     bg: "#090c10", panel: "#121a22", line: "#2b3440", gold: "#ffd24a", amber: "#ffb81c", white: "#f3efe4", dim: "#8d96a3",
     green: "#7fe83a", paid: "#07160c", red: "#ff6a4a", dark: "#1b1206", off: "#262c34", coin: "#f7931a", coinDk: "#b8650c"
+  };
+  // What the screen says when the API says no: [title, line, note] by its error.
+  const PROBLEMS = {
+    closed: ["DONATIONS ARE CLOSED", "THE NODE IS RESTING.", "TRY AGAIN A LITTLE LATER."],
+    busy: ["TOO MANY TRIES", "TRY AGAIN IN A MINUTE.", "THE NODE TAKES A FEW A MINUTE."],
+    network: ["NO CONNECTION", "CAN'T REACH THE NODE.", "CHECK YOUR CONNECTION AND TRY AGAIN."],
+    invalid: ["SOMETHING WENT WRONG", "THAT DIDN'T WORK.", "TRY AGAIN."]
   };
   // The few letters the jumbotron's alphabet lacks, and a comma with a tail, so 4,000 never reads as four.
   const EXTRA = {
@@ -156,10 +165,10 @@
     canvas.height = H * scale;
     g.setTransform(scale, 0, 0, scale, 0, 0);
     if (kind === "thanks") paintThanks(g);
-    else paintIdle(g, BL.qr.encode(url), null);
+    else paintIdle(g, BL.qr.encode(url), null, false);
     return canvas;
   };
-  const paintIdle = (g, code, button) => {
+  const paintIdle = (g, code, button, closed) => {
     face(g, "");
     const tw = width("DONATE SATS", 4);
     write(g, "DONATE SATS", W / 2, 18, 4, INK.gold, "center");
@@ -168,7 +177,7 @@
     qrBox(g, 102, 60, 196, code, false);
     write(g, "TURN SATS", W / 2, 268, 3, INK.white, "center");
     write(g, "INTO BANANAS", W / 2, 294, 3, INK.white, "center");
-    if (button) button(96, 328, 208, 56, "START", "primary", "start", 4);
+    if (button) button(96, 328, 208, 56, closed ? "CLOSED" : "START", closed ? "off" : "primary", "start", 4);
     else {
       g.fillStyle = INK.gold;
       g.fillRect(96, 328, 208, 56);
@@ -187,15 +196,16 @@
   };
 
   // ---- the flow -------------------------------------------------------------------------------------------------
-  // `hooks`: link() for the visit's donation link, request() for a new donation request ({ id, url }), bananasFor(sats),
-  // price() in dollars or 0, handle(), copy(text), pay(id, sats) when a simulated payment settles, release() when HOLD
-  // runs out, watch() and close().
+  // `hooks`: link() for what the attract screen's QR holds, bananasFor(sats), price() in dollars or 0, handle(),
+  // copy(text), release() when HOLD runs out, watch() and close(); simulated, request() for a new donation request
+  // ({ id, url }) and pay(id, sats) when a payment settles; in real mode, `real`, invoice(sats), which resolves to the
+  // API's reply or `{ error }`, and open(), the API's word on whether donations are open (null before it has said).
   const create = (hooks) => {
-    const canvas = document.createElement("canvas"), g = canvas.getContext("2d"), idleCode = BL.qr.encode(hooks.link());
+    const canvas = document.createElement("canvas"), g = canvas.getContext("2d"), idleCode = BL.qr.encode(hooks.link()), real = !!hooks.real;
     canvas.width = W;
     canvas.height = H;
-    let dirty = true, shown = -1, buttons = [];
-    const flow = { canvas, W, H, open: false, state: "idle", digits: "", sats: 0, bananas: 0, invoice: null, left: 0, settle: 0, hold: 0 };
+    let dirty = true, shown = -1, buttons = [], ticket = 0, shownOpen = null;
+    const flow = { canvas, W, H, open: false, state: "idle", digits: "", sats: 0, bananas: 0, invoice: null, reply: null, error: "", left: 0, settle: 0, hold: 0 };
     const set = (state) => {
       flow.state = state;
       dirty = true;
@@ -226,7 +236,9 @@
       flow.sats = Number(flow.digits) || 0;
       flow.bananas = hooks.bananasFor(Math.max(1, flow.sats));
     };
-    const valid = () => flow.sats >= MIN && flow.sats <= MAX;
+    // The API sets the limits in real mode and answers `amount` past them.
+    const valid = () => real ? flow.sats >= 1 : flow.sats >= MIN && flow.sats <= MAX;
+    const closed = () => real && hooks.open() === false;
     const invoice = () => {
       const r = hooks.request(), id = r.id.replace(/[^0-9a-z]/gi, "");
       flow.invoice = { id: r.id, url: r.url, code: BL.qr.encode(r.url), bolt: `lnbc${flow.sats * 10}n1p${id}` };
@@ -234,38 +246,63 @@
       shown = -1;
       set("invoice");
     };
+    // Real mode: the API's invoice for this amount, then `next`. A reply that finds the visitor gone on is dropped.
+    const ask = (next) => {
+      const t = ++ticket;
+      flow.error = "";
+      set("quoting");
+      hooks.invoice(flow.sats).then((r) => {
+        if (t !== ticket || flow.state !== "quoting") return;
+        if (r.error) {
+          flow.error = r.error;
+          return set(r.error === "amount" ? "amount" : "problem");
+        }
+        flow.reply = r;
+        flow.bananas = r.bananas ? r.bananas.rounded : 0;
+        flow.invoice = { id: r.invoice.id, code: BL.qr.encode(`lightning:${r.invoice.bolt11.toUpperCase()}`), bolt: r.invoice.bolt11, expires: r.invoice.expires };
+        flow.left = r.invoice.expires - Date.now() / 1000;
+        shown = -1;
+        set(next);
+      });
+    };
     const act = (a) => {
       if (a === "close") return hooks.close();
       const s = flow.state;
-      if (s === "idle" && a === "start") return set("amount");
+      if (s === "idle" && a === "start" && !closed()) return set("amount");
       if (s === "amount") {
         if (a.length === 1 && a >= "0" && a <= "9") {
           if (flow.digits.length < 7 && !(flow.digits === "" && a === "0")) flow.digits += a;
         } else if (a === "clear") flow.digits = "";
         else if (a === "rub") flow.digits = flow.digits.slice(0, -1);
-        else if (a === "go" && valid()) return set("quote");
+        else if (a === "go" && valid()) return real ? ask("quote") : set("quote");
         else if (a === "back") return set("idle");
         else return;
+        flow.error = "";
         quote();
         return set("amount");
       }
+      if (s === "quoting" && a === "back") {
+        ticket++;
+        return set("amount");
+      }
+      if (s === "problem" && a === "back") return set("amount");
       if (s === "quote") {
-        if (a === "create") return invoice();
+        if (a === "create") return real ? set("invoice") : invoice();
         if (a === "back") return set("amount");
       }
       if (s === "invoice") {
-        if (a === "pay") {
+        if (a === "pay" && !real) {
           flow.settle = SETTLE;
           return set("waiting");
         }
-        if (a === "regen") return invoice();
+        if (a === "regen") return real ? ask("invoice") : invoice();
         if (a === "copy") return hooks.copy(flow.invoice.bolt);
         if (a === "back") return set("quote");
       }
       if (s === "waiting" && (a === "cancel" || a === "back")) return set("invoice");
       if (s === "paid" && (a === "watch" || a === "back")) return hooks.watch();
       if (s === "expired") {
-        if (a === "regen") return invoice();
+        if (a === "regen") return real ? ask("invoice") : invoice();
         if (a === "back") return set("quote");
       }
     };
@@ -274,7 +311,7 @@
     flow.key = (e) => {
       const k = e.key, s = flow.state;
       if (k === "Escape") return s === "idle" ? hooks.close() : act("back");
-      if (k === "Enter" || k === " ") return act({ idle: "start", amount: "go", quote: "create", invoice: "pay", paid: "watch", expired: "regen" }[s] || "");
+      if (k === "Enter" || k === " ") return act({ idle: "start", amount: "go", quote: "create", invoice: real ? "" : "pay", paid: "watch", expired: "regen", problem: "back" }[s] || "");
       if (s === "amount") {
         if (k.length === 1 && k >= "0" && k <= "9") return act(k);
         if (k === "Backspace") return act("rub");
@@ -290,21 +327,25 @@
       if (flow.state === "idle") act("start");
     };
     flow.start = () => {
+      ticket++;
       flow.open = true;
-      flow.digits = "";
-      flow.invoice = null;
+      flow.digits = flow.error = "";
+      flow.invoice = flow.reply = null;
       quote();
       set("idle");
     };
     flow.stop = () => {
+      ticket++;
       flow.open = false;
-      flow.invoice = null;
+      flow.invoice = flow.reply = null;
       set("idle");
     };
-    // A donation event: true when it is this invoice's payment, which the screen then thanks.
-    flow.receive = (id) => {
+    // A donation event: true when it is this invoice's payment, which the screen then thanks with the API's count
+    // when it sent one.
+    flow.receive = (id, bananas = null) => {
       const s = flow.state;
       if (!flow.invoice || id !== flow.invoice.id || s !== "invoice" && s !== "waiting") return false;
+      if (bananas) flow.bananas = bananas.rounded;
       flow.hold = HOLD;
       set("paid");
       return true;
@@ -312,8 +353,12 @@
     // The invoice's clock, the payment settling, and the paid screen's hold on the bananas.
     flow.update = (dt) => {
       const s = flow.state;
+      if (real && hooks.open() !== shownOpen) {
+        shownOpen = hooks.open();
+        if (s === "idle") dirty = true;
+      }
       if (s === "invoice" || s === "waiting") {
-        flow.left -= dt;
+        flow.left = real ? flow.invoice.expires - Date.now() / 1000 : flow.left - dt;
         if (flow.left <= 0) return set("expired");
         const tick = Math.ceil(flow.left);
         if (tick !== shown) {
@@ -328,20 +373,27 @@
       if (s === "paid" && flow.hold > 0 && (flow.hold -= dt) <= 0) hooks.release();
     };
     // The wait's spinner over the dimmed QR, turning with `time`; allocation-free.
-    flow.animate = (g, time) => {
-      if (flow.state !== "waiting") return;
+    // The spinners: over the dimmed QR while a simulated payment settles, in the middle while the API quotes, and
+    // in the waiting pill under a real invoice; turning with `time`, allocation-free.
+    const spin = (g, x, y, r, width, time) => {
       const a = time * 5;
       g.lineCap = "round";
-      g.lineWidth = 9;
+      g.lineWidth = width;
       g.strokeStyle = INK.line;
       g.beginPath();
-      g.arc(120, 142, 34, 0, Math.PI * 2);
+      g.arc(x, y, r, 0, Math.PI * 2);
       g.stroke();
       g.strokeStyle = INK.gold;
       g.beginPath();
-      g.arc(120, 142, 34, a, a + Math.PI * 0.6);
+      g.arc(x, y, r, a, a + Math.PI * 0.6);
       g.stroke();
       g.lineCap = "butt";
+    };
+    flow.animate = (g, time) => {
+      const s = flow.state;
+      if (s === "waiting") spin(g, 120, 142, 34, 9, time);
+      else if (s === "quoting") spin(g, W / 2, 226, 30, 8, time);
+      else if (s === "invoice" && real) spin(g, 200, 335, 9, 4, time);
     };
     // Repaints after a change only.
     flow.paint = () => {
@@ -349,14 +401,28 @@
       dirty = false;
       buttons = [];
       const s = flow.state, v = flow.invoice;
-      if (s === "idle") paintIdle(g, idleCode, button);
+      if (s === "idle") paintIdle(g, idleCode, button, closed());
+      else if (s === "quoting") {
+        face(g, "CONFIRM DONATION");
+        write(g, `${sats(flow.sats)} SATS`, W / 2, 110, 4, INK.gold, "center");
+        write(g, "GETTING YOUR QUOTE...", W / 2, 162, 2, INK.white, "center");
+        button(130, 320, 140, 48, "< BACK", "", "back");
+      } else if (s === "problem") {
+        const [title, line, note] = PROBLEMS[flow.error] || PROBLEMS.invalid;
+        face(g, title, INK.red);
+        write(g, line, W / 2, 140, 2, INK.white, "center");
+        write(g, note, W / 2, 176, 1, INK.dim, "center");
+        button(130, 320, 140, 52, "< BACK", "", "back");
+        closeButton();
+      }
       else if (s === "amount") {
         face(g, "ENTER SATS TO DONATE");
         panel(g, 40, 44, 320, 56, INK.amber);
         if (flow.digits) write(g, sats(flow.sats), 54, 58, 4, INK.white);
         else write(g, "0", 54, 58, 4, INK.dim);
         write(g, "SATS", 346, 66, 2, INK.dim, "right");
-        if (flow.digits && !valid()) write(g, flow.sats < MIN ? `MIN ${sats(MIN)} SATS` : `MAX ${sats(MAX)} SATS`, W / 2, 106, 1, INK.red, "center");
+        if (flow.error === "amount") write(g, "THAT AMOUNT ISN'T ACCEPTED. TRY ANOTHER.", W / 2, 106, 1, INK.red, "center");
+        else if (flow.digits && !valid()) write(g, flow.sats < MIN ? `MIN ${sats(MIN)} SATS` : `MAX ${sats(MAX)} SATS`, W / 2, 106, 1, INK.red, "center");
         const keys = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "clear", "0", "rub"];
         keys.forEach((k, i) => {
           const x = 44 + (i % 3) * 106, y = 120 + Math.floor(i / 3) * 54;
@@ -375,6 +441,33 @@
           }
         });
         button(100, 340, 200, 48, "CONTINUE >", valid() ? "primary" : "off", "go");
+        closeButton();
+      } else if (s === "quote" && real) {
+        const { bananas, rate } = flow.reply;
+        face(g, "CONFIRM DONATION");
+        panel(g, 30, 44, 340, 92);
+        write(g, "YOU DONATE", 42, 54, 1, INK.dim);
+        write(g, `${sats(flow.sats)} SATS`, 42, 70, 4, INK.gold);
+        if (rate) write(g, `≈ $${(flow.sats / 1e8 * rate.usdPerBtc).toFixed(2)} USD`, 42, 110, 2, INK.white);
+        write(g, "RATE", 42, 144, 1, INK.dim);
+        write(g, rate ? `1 BANANA = $1 = ${sats(Math.round(rate.satsPerBanana))} SATS` : "NO PRICE YET", 42, 156, 2, INK.white);
+        panel(g, 30, 176, 340, 84);
+        write(g, "YOU WILL MAKE", 42, 186, 1, INK.dim);
+        if (bananas) {
+          write(g, `EXACT ${bananas.exact.toFixed(2)}`, 358, 186, 1, INK.dim, "right");
+          banana(g, 66, 244, 17, INK.gold);
+          write(g, `${sats(bananas.rounded)} BANANA${bananas.rounded === 1 ? "" : "S"}`, 96, 212, 4, INK.gold);
+        } else write(g, "COUNTED WHEN PAID", 42, 214, 2, INK.gold);
+        if (!rate) write(g, "NO PRICE YET: THE BANANAS ARE COUNTED LATER", W / 2, 276, 1, INK.red, "center");
+        else if (rate.stale) {
+          const at = new Date(rate.at);
+          write(g, `OLD PRICE: THE LAST ONE, FROM ${String(at.getHours()).padStart(2, "0")}:${String(at.getMinutes()).padStart(2, "0")}`, W / 2, 276, 1, INK.red, "center");
+        } else {
+          info(g, 46, 279, INK.dim);
+          write(g, "THIS RATE IS LOCKED INTO THE INVOICE", 60, 276, 1, INK.dim);
+        }
+        button(30, 326, 120, 52, "< BACK", "", "back");
+        button(160, 326, 210, 52, "SHOW INVOICE", "primary", "create");
         closeButton();
       } else if (s === "quote") {
         face(g, "CONFIRM DONATION");
@@ -404,7 +497,7 @@
         write(g, "SATS", 232, 78, 1, INK.dim);
         write(g, "BANANAS", 232, 98, 1, INK.dim);
         banana(g, 244, 128, 10, INK.gold);
-        write(g, String(flow.bananas), 262, 112, 2, INK.gold);
+        write(g, real && !flow.reply.bananas ? "LATER" : sats(flow.bananas), 262, 112, 2, INK.gold);
         write(g, "EXPIRES IN", 232, 144, 1, INK.dim);
         write(g, clock(flow.left), 232, 156, 4, flow.left <= 60 ? INK.red : INK.gold);
         if (waiting) {
@@ -423,10 +516,13 @@
           g.strokeRect(355.5, 273.5, 9, 11);
           g.strokeRect(359.5, 276.5, 9, 11);
           button(20, 312, 150, 46, "REGENERATE", "", "regen");
-          button(178, 312, 202, 46, "SIMULATE PAYMENT", "primary", "pay");
+          if (real) {
+            panel(g, 178, 312, 202, 46, INK.amber);
+            write(g, "WAITING FOR PAYMENT", 296, 332, 1, INK.white, "center");
+          } else button(178, 312, 202, 46, "SIMULATE PAYMENT", "primary", "pay");
           closeButton();
         }
-        write(g, "PAYMENTS ARE SIMULATED IN THIS BUILD", W / 2, 378, 1, INK.dim, "center");
+        write(g, real ? "PAY WITH ANY LIGHTNING WALLET" : "PAYMENTS ARE SIMULATED IN THIS BUILD", W / 2, 378, 1, INK.dim, "center");
       } else if (s === "paid") {
         face(g, "PAYMENT RECEIVED!", INK.gold, INK.paid);
         banana(g, W / 2, 118, 44, INK.gold);
