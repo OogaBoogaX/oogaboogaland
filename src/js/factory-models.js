@@ -2163,7 +2163,7 @@
     g.textAlign = "right";
     g.font = `500 24px ${BOARD_FONT}`;
     g.fillStyle = BOARD_INK.dim;
-    g.fillText("SIMULATED · THIS BROWSER'S TIPS", cw - 60, 718);
+    g.fillText(BL.donations.real ? "THIS BROWSER'S TIPS" : "SIMULATED · THIS BROWSER'S TIPS", cw - 60, 718);
     return noShadow(picture(canvas, W, H, 0));
   });
   // The board's figures for its right-hand column, each row of `values` a list of [text, kind] runs ("big" or "unit"
