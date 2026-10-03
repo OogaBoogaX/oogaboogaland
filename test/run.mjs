@@ -3259,9 +3259,19 @@ const gameRulesChecks = async () => {
     saved.mine.best.ending = "exploded"; saved.drop.best.landing = "pancake"; saved.race.best.bay.lap = "fast";
     store.set("oogaboogaland.v1", JSON.stringify(saved));
     const bad = make().state, dropped = bad.mine.best === null && bad.drop.best === null && !bad.race.best.bay && bad.orbit.best.score === 1500;
+    // The donations board's tally: two tips today and one the day before, kept through a reload, the week holding all
+    // three; a malformed day is dropped alone.
+    const day = 864e5, now = Date.now();
+    for (const [sats, ago] of [[4000, 0], [1200, 0], [800, 1]]) g.recordDonation({ id: `t${sats}`, sats, handle: "", message: "", at: now - ago * day });
+    const tally = make(), tips = { today: tally.tipsWithin(1), week: tally.tipsWithin(7), bananas: tally.state.bananas, last: tally.state.lastTip };
+    const raw = JSON.parse(store.get("oogaboogaland.v1"));
+    raw.tipDays.unshift([-1, "lots", 2]);
+    store.set("oogaboogaland.v1", JSON.stringify(raw));
+    const tallied = tips.today[0] === 5200 && tips.today[1] === 13 && tips.week[0] === 6000 && tips.week[1] === 15 && tips.bananas === 15 && tips.last === 800
+      && make().state.tipDays.length === 2;
     store.set("oogaboogaland.v1", "{not json");
     const junk = make().state.orbit.best === null;
-    record("saves: every game's best survives a reload, a worse result or a crash landing never replaces it, and a malformed best, a stored crash or a broken file is dropped alone", Object.values(bests).flat().every(Boolean) && kept && dropped && junk, JSON.stringify({ bests, kept, dropped, junk }));
+    record("saves: every game's best and the donations board's tally survive a reload, a worse result or a crash landing never replaces a best, and a malformed best, day, a stored crash or a broken file is dropped alone", Object.values(bests).flat().every(Boolean) && kept && dropped && tallied && junk, JSON.stringify({ bests, kept, dropped, tips, junk }));
     // Tickets spent at a machine (the jackpot wheel): refused, spending nothing, when they fall short or the cost is
     // no whole number above nothing; a spend that goes through is saved.
     const wallet = make();
@@ -5890,9 +5900,9 @@ const factoryCooker = { name: "factory cooker", why: "rule: a tip in the factory
       const c = s.cubeNode; if (!first && c.instanceCount) first = { x: c.instanceData[12], y: c.instanceData[13], z: c.instanceData[14] };
     }
     B.advance(3.5, 1 / 20);
-    const printed = s.cookBoard.printed;
+    const printed = s.cookBoard.printed, wall = s.boardValues.printed;
     return { n, watching, back: s.booth.mode, counted: { level: B.level - l0 }, routed, lit, surged, recounted, first, core: window.BL.factoryModels.LAYOUT.core, rippled: g.hits - h0,
-      board: { printed, rounded: printed.includes(G.formatLarge(1200)), named: /tester|zebra/i.test(printed), timed: /\\d{1,2}:\\d{2}/.test(printed) } };
+      board: { printed, wall, rounded: printed.includes(G.formatLarge(1200)) && wall.endsWith(G.formatLarge(1200) + " SATS"), named: /tester|zebra/i.test(printed + wall), timed: /\\d{1,2}:\\d{2}/.test(printed + wall) } };
   })()`);
   record("factory kiosk: tapping the kiosk in the right wall puts its screen in view, and the whole simulated donation runs on it from the keys: an amount typed in, its quote in bananas, an invoice with its QR and expiry, the wait and the payment, which counts the tip once under the visitor's handle and holds its bananas until the visitor turns to watch, then hands the view back",
     opened.mode === 1 && opened.state === "idle" && typed.state === "amount" && typed.sats === 1200 && quoted.state === "quote" && quoted.bananas === paid.n
@@ -5900,7 +5910,7 @@ const factoryCooker = { name: "factory cooker", why: "rule: a tip in the factory
     && paid.level === paid.n && paid.donations === 1 && paid.handle === "tester" && paid.held === paid.n && paid.idle && r.watching === 3 && r.back === 0,
     JSON.stringify({ opened, typed, quoted, invoiced, paid, watching: r.watching, back: r.back }));
   record("factory cooker: a tip's bananas count once, the moment it arrives, and each leaves through the exit shield; no sat of it rides a line or lights a bay, and the core never surges for it", r.counted.level === r.n && !r.recounted && r.rippled === r.n && r.routed === 0 && r.lit === 0 && !r.surged, JSON.stringify(r));
-  record("factory cooker: the donations board shows the last tip rounded and never the tipper's handle, message or a time", r.board.rounded && !r.board.named && !r.board.timed, JSON.stringify(r.board));
+  record("factory cooker: the cooker's board and the donations board on the wall show the last tip rounded and never the tipper's handle, message or a time", r.board.rounded && !r.board.named && !r.board.timed, JSON.stringify(r.board));
   const stopped = await b.evaluate(`(() => { const B = window.__ooga; ${FACTORY_EVENT} const s = X.scene, g = s.gate.phase.ripples, G = window.BL.game, shield = window.BL.factoryModels.HALL.front - 0.6;
     send("node.stopped"); B.advance(0.5, 1 / 20);
     const reading = X.feed.reading.node, n = G.bananasFor(120000), h0 = g.hits;

@@ -26,6 +26,9 @@
     return { tier, item: pool[fnv1a(`${donation.id}/loot`) % pool.length] };
   };
   const bananasFor = (sats) => Math.max(1, Math.min(12, Math.round(sats / SATS_PER_BANANA)));
+  // The donations board's tally keeps the sats and bananas of each of the last TIP_DAYS local days, by day number.
+  const TIP_DAYS = 7, DAY_MS = 864e5;
+  const dayOf = (at) => Math.floor((at - new Date(at).getTimezoneOffset() * 6e4) / DAY_MS);
   const LARGE_UNITS = [[1e12, "T"], [1e9, "B"], [1e6, "M"], [1e3, "K"]];
   const formatLarge = (n) => {
     const unit = LARGE_UNITS.find(([size]) => n >= size);
@@ -48,7 +51,7 @@
   };
   const isString = (v, max) => typeof v === "string" && v.length <= max;
   const isEntry = (e, catalog) => e && typeof e === "object" && isString(e.id, 40) && catalog.some((c) => c.id === e.itemId) && LOOT_TIERS.some((t) => t.tier === e.tier) && isString(e.donationId, 64) && Number.isFinite(e.at);
-  const defaults = () => ({ inventory: [], assignments: {}, handle: "", message: "", handFed: 0, totalSats: 0, donations: 0, race: { best: {}, cup: null }, drop: { best: null, jumps: 0 }, orbit: { best: null, build: null }, mine: { best: null }, arcade: { skee: 0, hoops: 0, shy: 0, claw: 0, hockey: 0, billiards: 0, darts: 0, pinball: 0, ride: 0, invaders: 0, snake: 0, pong: 0, stampede: 0, flap: 0, breaker: 0, dash: 0, stacker: 0, tickets: 0, prizes: [] } });
+  const defaults = () => ({ inventory: [], assignments: {}, handle: "", message: "", handFed: 0, totalSats: 0, donations: 0, bananas: 0, lastTip: 0, tipDays: [], race: { best: {}, cup: null }, drop: { best: null, jumps: 0 }, orbit: { best: null, build: null }, mine: { best: null }, arcade: { skee: 0, hoops: 0, shy: 0, claw: 0, hockey: 0, billiards: 0, darts: 0, pinball: 0, ride: 0, invaders: 0, snake: 0, pong: 0, stampede: 0, flap: 0, breaker: 0, dash: 0, stacker: 0, tickets: 0, prizes: [] } });
   // Ooga Arcade's carnival bests, each capped past the most its game can score (nine doubled 100s; the round games
   // run on), the retro cabinets' bests (`retro-games.js`, capped past any run), the ticket balance, and the prizes
   // (`ARCADE_PRIZES` ids) redeemed at the counter.
@@ -75,8 +78,15 @@
       }
       if (isString(parsed.handle, HANDLE_MAX)) state.handle = parsed.handle;
       if (isString(parsed.message, MESSAGE_MAX)) state.message = parsed.message;
-      for (const key of ["handFed", "totalSats", "donations"]) {
+      for (const key of ["handFed", "totalSats", "donations", "bananas", "lastTip"]) {
         if (Number.isFinite(parsed[key]) && parsed[key] >= 0) state[key] = Math.floor(parsed[key]);
+      }
+      // Each day's tally is [day, sats, bananas], the days rising; a malformed one is dropped alone.
+      if (Array.isArray(parsed.tipDays)) {
+        for (const d of parsed.tipDays.slice(-TIP_DAYS)) {
+          const last = state.tipDays[state.tipDays.length - 1];
+          if (Array.isArray(d) && d.length === 3 && d.every((v) => Number.isInteger(v) && v >= 0) && (!last || d[0] > last[0])) state.tipDays.push(d.slice());
+        }
       }
       if (parsed.race && parsed.race.best && typeof parsed.race.best === "object") {
         for (const [track, b] of Object.entries(parsed.race.best)) {
@@ -155,10 +165,31 @@
       return entry ? catalog.find((c) => c.id === entry.itemId) : null;
     };
     const assignedTo = (entryId) => Object.keys(state.assignments).find((name) => state.assignments[name] === entryId) || null;
+    // A donation, wherever it lands: the totals, and the donations board's tally of bananas made, the last tip and
+    // its day's sats and bananas. A day already rolled out of the tally (a late replay) counts in the totals only.
     const recordDonation = (donation) => {
+      const bananas = bananasFor(donation.sats), day = dayOf(donation.at), days = state.tipDays;
       state.totalSats += donation.sats;
       state.donations += 1;
+      state.bananas += bananas;
+      state.lastTip = donation.sats;
+      let i = days.length - 1;
+      while (i >= 0 && days[i][0] > day) i--;
+      if (i >= 0 && days[i][0] === day) {
+        days[i][1] += donation.sats;
+        days[i][2] += bananas;
+      } else if (i >= 0 || days.length < TIP_DAYS) {
+        days.splice(i + 1, 0, [day, donation.sats, bananas]);
+        if (days.length > TIP_DAYS) days.shift();
+      }
       save(state);
+    };
+    // This browser's tips over the last `days` local days, today included, as [sats, bananas].
+    const tipsWithin = (days, now = Date.now()) => {
+      const from = dayOf(now) - days + 1;
+      let sats = 0, bananas = 0;
+      for (const [day, s, b] of state.tipDays) if (day >= from) { sats += s; bananas += b; }
+      return [sats, bananas];
     };
     const recordHandFed = () => {
       state.handFed += 1;
@@ -278,7 +309,7 @@
       if (seconds < 5400) return `${Math.round(seconds / 60)}m`;
       return `${(seconds / 3600).toFixed(1)}h`;
     };
-    return { state, countOf, lootFor: lootForVisitor, addItem, assign, unassign, itemOf, assignedTo, clearLoot, resetAll, recordDonation, recordHandFed, recordRace, recordCup, recordJump, recordDrop, recordOrbit, recordMine, recordArcade, addTickets, spendTickets, redeem, setOrbitBuild, setIdentity, forecast, formatDuration };
+    return { state, countOf, lootFor: lootForVisitor, addItem, assign, unassign, itemOf, assignedTo, clearLoot, resetAll, recordDonation, tipsWithin, recordHandFed, recordRace, recordCup, recordJump, recordDrop, recordOrbit, recordMine, recordArcade, addTickets, spendTickets, redeem, setOrbitBuild, setIdentity, forecast, formatDuration };
   };
   BL.game = { create, LOOT_TIERS, STACK_MAX, SATS_PER_BANANA, tierFor, lootFor, bananasFor, formatLarge, formatThree, formatFeeRate };
 })();

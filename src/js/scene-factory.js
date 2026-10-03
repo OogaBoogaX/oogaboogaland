@@ -149,6 +149,7 @@
     treasury: ["Treasury · routing fees", "The gold under the glass is the node's public capacity, visible to anyone on the Lightning network. Each forward that earns the demo node a fee sends a nugget up the belt into the crate."],
     cooker: ["Banana cooker · tips into bananas", "Every tip is cooked here: the core throws its sats across, the cooker chomps and churns, and the bananas fly out through the gate to the island."],
     kiosk: ["Donation kiosk · tip the Ooga Boogas", "Walk up and press Space, or tap it: pick an amount, pay its invoice and watch the cooker turn it into bananas. Payments are simulated in this build."],
+    board: ["Banana donation board", "The tips this browser has seen, rounded and naming no one. Payments are simulated in this build; the backend will count everyone's."],
     lookout: ["Watchtower · the node's signal", "The beam sweeps while the node's events are arriving. Dark means no signal: the node may be fine, but nothing is getting through."],
     study: ["Study Hall · locked", "Bananas first! The study hall opens in a later update."],
     tunnel: ["Peer tunnel", "Through here lives the peer at the other end of a line."],
@@ -215,9 +216,11 @@
       const lx = s * 3.3, lz = 0.8, c = Math.cos(t.turn), sn = Math.sin(t.turn);
       lamps.push(["hang", t.x + lx * c + lz * sn, t.y + 5.9, t.z - lx * sn + lz * c]);
     }
-    // Two from the study hall's header, which faces -x, and two from the brackets either side of the donation kiosk.
+    // Two from the study hall's header, which faces -x, two on chains either side of the donation kiosk, and two from
+    // the ends of the donations board's top beam.
     for (const [lx, ly, lz] of FM.STUDY.lamps) lamps.push(["hang", L.study.x - lz, L.study.y + ly, L.study.z + lx]);
     for (const [x, y, z] of FM.KIOSK.hooks) lamps.push(["hang", x, y, z]);
+    for (const [x, y, z] of FM.BOARD.hooks) lamps.push(["hang", x, y, z]);
     lamps.push(["post", L.switchboard.x + 3.1, L.switchboard.y, L.switchboard.z - 1.9, Math.PI]);
     // Two from the arms at the ends of each forge shaft's header.
     for (const [x, z] of FM.SHAFTS) for (const s of [-1, 1]) lamps.push(["hang", x + s * 1.7, 2.76, z - 0.2]);
@@ -827,7 +830,17 @@
     node.back.geometry = d.back;
     node.owned = true;
   };
+  // The donations board's figures, each row a list of runs (`FM.boardValues`), repainted only when one changes; the
+  // node owns its picture and lets go of the one it replaces.
+  const setFigures = (node, rows) => {
+    const key = rows.map((runs) => runs.map((r) => r[0]).join("")).join("|");
+    if (node.printed === key) return;
+    node.printed = key;
+    if (node.geometry) renderer.releaseGeometry(node.geometry);
+    node.geometry = FM.boardValues(rows);
+  };
   const sats = (n) => n.toLocaleString("en-US");
+  const bananaCount = (n) => n < 1e6 ? sats(n) : gameMod.formatLarge(n);
   // A tip as the cooker's board shows it: two significant figures, then K, M and B from a thousand up.
   const rounded = (n) => { const step = 10 ** Math.max(0, Math.floor(Math.log10(n)) - 1); return gameMod.formatLarge(Math.round(n / step) * step); };
   const refreshBoards = (s) => {
@@ -848,6 +861,17 @@
     // The cooker's board counts what it has cooked on this page, rounded, and never names a donor or a time.
     const c = shared.cooker;
     setData(s.cookBoard, "DONATIONS (SIMULATED)", [["Tips cooked", gameMod.formatLarge(c.tips), "count"], ["Bananas out", gameMod.formatLarge(c.bananas), "ok"], ["Last tip", c.last ? `${rounded(c.last)} sats` : "None yet", "sats"]], 1.9);
+    // The donations board: this browser's tips (the game's tally), rounded and naming no one or no time, until the
+    // backend counts everyone's.
+    const g = game.state, [todaySats, todayBananas] = game.tipsWithin(1), [weekSats, weekBananas] = game.tipsWithin(7);
+    setFigures(s.boardValues, [
+      [[rounded(g.totalSats), "big"], [" SATS", "unit"]],
+      [[bananaCount(g.bananas), "big"]],
+      [[rounded(todaySats), "big"], [" SATS", "unit"], [` (${bananaCount(todayBananas)}`, "note"], ["", "banana"], [")", "note"]],
+      [[rounded(weekSats), "big"], [" SATS", "unit"], [` (${bananaCount(weekBananas)}`, "note"], ["", "banana"], [")", "note"]],
+      [[String(gameMod.SATS_PER_BANANA), "big"], [" SATS = 1", "unit"], ["", "banana"]],
+      g.lastTip ? [[rounded(g.lastTip), "big"], [" SATS", "unit"]] : [["NONE YET", "note"]]
+    ]);
     // The core names what it is: a demo node on simulated events, until a real node publishes.
     setBoard(s.coreLabel, "NODE CORE", r.node === "stopped" ? "(Node Stopped)" : r.contract === BL.factoryFeed.DEMO ? "(Demo Node, Simulated)" : "(Your LN Node)", true, { height: 1.6 });
   };
@@ -1060,20 +1084,28 @@
     const [csx, csy, csz] = COOK.sign, [cbx, cby, cbz] = COOK.board;
     setBoard(labelNode(ckNode, csx + 0.45, csy, csz), "BANANA COOKER", "(Tips Into Bananas)", true, { height: 1 });
     s.cookBoard = labelNode(ckNode, cbx, cby, cbz);
-    // The donation kiosk in the right wall at the walkway's end, facing back along it: its stone, timber and lit parts,
-    // the plaque, and the screen leaning back, showing its attract screen, or its thanks while the cooker works. The
-    // glass's corners in the cave's frame, for laying the flow over it.
+    // The donation kiosk in the right wall at the walkway's end, facing back along it: its timber, its iron and lit
+    // parts, and the screen leaning back, showing its attract screen (enter hangs this visit's), or its thanks while
+    // the cooker works. The glass's corners in the cave's frame, for laying the flow over it.
     const K = FM.KIOSK, G = K.glass, kiosk = FM.donationKiosk(), screen = FM.kioskScreen(), kp = L.kiosk;
     const kioskNode = createNode({ position: { x: kp.x, y: kp.y, z: kp.z }, rotation: { x: 0, y: kp.turn, z: 0 } });
-    const kioskBody = createNode({ geometry: kiosk.body });
-    const [px0, py0, pz0] = K.plaque, [sx0, sy0, sz0] = K.screen;
+    const kioskBody = createNode({ geometry: kiosk.timber });
+    const [sx0, sy0, sz0] = K.screen;
     s.kioskScreen = createNode({ position: { x: sx0, y: sy0, z: sz0 }, rotation: { x: K.lean, y: 0, z: 0 } });
-    s.kioskIdle = createNode({ position: { x: 0, y: 0, z: G.z }, geometry: FM.kioskIdle() });
+    s.kioskIdle = createNode({ position: { x: 0, y: 0, z: G.z } });
     s.kioskThanks = createNode({ position: { x: 0, y: 0, z: G.z }, geometry: FM.kioskThanks(), visible: false });
     addChild(s.kioskScreen, createNode({ geometry: screen.frame }), createNode({ geometry: screen.glass }), s.kioskIdle, s.kioskThanks);
     s.kioskGlow = createNode({ geometry: kiosk.glow });
-    addChild(kioskNode, kioskBody, s.kioskGlow, createNode({ position: { x: px0, y: py0, z: pz0 }, geometry: FM.kioskPlaque() }), s.kioskScreen);
+    addChild(kioskNode, kioskBody, createNode({ geometry: kiosk.iron }), s.kioskGlow, s.kioskScreen);
     s.kiosk = kioskNode;
+    // The donations board between the study hall and the kiosk: its timber, iron, candles and ivy, the face painted once
+    // and its figures, which `refreshBoards` paints.
+    const BD = FM.BOARD, board = FM.donationBoard(), bp = L.board;
+    const boardNode = createNode({ position: { x: bp.x, y: bp.y, z: bp.z }, rotation: { x: 0, y: bp.turn, z: 0 } });
+    const boardBody = createNode({ geometry: board.timber }), boardFace = createNode({ position: { x: BD.face[0], y: BD.face[1], z: BD.face[2] }, geometry: FM.boardFace() });
+    s.boardValues = createNode({ position: { x: BD.values[0], y: BD.values[1], z: BD.values[2] } });
+    addChild(boardFace, s.boardValues);
+    addChild(boardNode, boardBody, createNode({ geometry: board.iron }), createNode({ geometry: board.trim }), createNode({ geometry: board.glow }), boardFace);
     s.glassCorners = [];
     for (const [u, v] of [[-1, 1], [1, 1], [-1, -1], [1, -1]]) for (let i = 0; i < 3; i++) s.glassCorners.push(G.at[i] + G.right[i] * u * G.w / 2 + G.up[i] * v * G.h / 2);
     // The watchtower on the top deck: tower, lamp and the beam that sweeps round it.
@@ -1097,7 +1129,7 @@
     const lesson = FM.studyBoard(), lessonNode = createNode({ position: { x: bx, y: by, z: bz }, rotation: { x: bLean, y: 0, z: 0 } });
     addChild(lessonNode, createNode({ geometry: lesson.back }), createNode({ geometry: lesson.face }));
     addChild(stNode, noteNode, lessonNode);
-    addChild(root, switchNode, rebNode, trNode, ckNode, kioskNode, lkNode, stNode);
+    addChild(root, switchNode, rebNode, trNode, ckNode, kioskNode, boardNode, lkNode, stNode);
     // The cooker's flying things, each an instanced batch of fixed capacity on its own geometry: the tips' cubes and the
     // bananas; and the lime ring that climbs the core as it takes a tip.
     s.cubeNode = createNode({ geometry: { ...FM.satCube() }, instanceData: new Float32Array(CUBE_CAP * 20), instanceCount: 0, instanceVersion: 0, fixedInstanceCapacity: true, sightHidden: true, visible: false });
@@ -1144,6 +1176,7 @@
     target(trBody, "treasury", "treasury", 3);
     target(ckBody, "cooker", "cooker", 2.2);
     target(kioskBody, "kiosk", null, 1.6);
+    target(boardBody, "board", null, 2.4);
     target(lkBody, "lookout", "lookout", 3.5);
     target(stBody, "study", "study", 3.2);
     s.tunnels.forEach((t, i) => target(t.stone, "tunnel", ["lineA", "lineB", "lineC", "lineD"][i], 3, { place: s.bays[i] }));
@@ -1423,9 +1456,12 @@
     const dressed = dressing(), lit = lighting();
     addChild(root, ...BL.dressing.nodes(dressed, { glow: 1 }), createNode({ geometry: lit.frame }), createNode({ geometry: lit.glass, sightHidden: true }));
     scene = build();
-    // The kiosk's screen flow: each invoice a fresh donation request, its simulated payment this visitor's tip in the
-    // backend's shape, and the screens' way out to the show and back to the walk.
+    // The kiosk's attract screen carries this visit's donation link, the one the dialog shows. Its screen flow: each
+    // invoice a fresh donation request, its simulated payment this visitor's tip in the backend's shape, and the
+    // screens' way out to the show and back to the walk.
+    scene.kioskIdle.geometry = FM.kioskIdle(donationRequest.url);
     scene.booth.flow = BL.factoryKiosk.create({
+      link: () => donationRequest.url,
       request: () => donations.createRequest(game.state),
       bananasFor: gameMod.bananasFor,
       price: () => BL.chain.snapshot.priceUsd,

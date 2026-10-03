@@ -91,6 +91,9 @@
     // The donation kiosk, built into the right wall where the walkway from the balcony meets it, facing back along the
     // walkway (turned like the study hall, its +z out of the rock).
     kiosk: { x: 21.4, y: LEVEL.main, z: 24.7, turn: -Math.PI / 2 },
+    // The donations board on the right wall between the study hall and the kiosk, over the walkway, facing into the hall
+    // as they do, in a recess the hall leaves in its rock.
+    board: { x: 21.4, y: LEVEL.main, z: 19.125, turn: -Math.PI / 2 },
     // Level 2, the balcony's level: the walkway from the balcony's right side round the right wall, past the study
     // hall, to the Harbor line's porch, as decks [x0, x1, z0, z1]; each line's porch out to its peer tunnel comes
     // from the line and the tunnel (`porchOf`).
@@ -383,12 +386,18 @@
       rock.push(box({ w: 4, h: 0.4, d: 4, color: STONE[Math.floor(rand() * 4)], offset: { x: x + 2, y: -0.2 - rand() * 0.06, z: z + 2 } }));
     }
     // Walls: voxel stone in cells of WALL_CELL metres, leaning in as they rise and heaved in and out at two scales,
-    // a shell three cells thick behind the face. Openings in the walls for the peer tunnels, the study hall, the
-    // donation kiosk and the tunnel out: [wall, centre along it, bottom, top, half-width]; the walls are "back",
-    // "left", "right" and "front", and along a wall is x for the back and front and z for the sides.
+    // a shell three cells thick behind the face. Openings in the walls for the peer tunnels, the study hall and the
+    // tunnel out: [wall, centre along it, bottom, top, half-width]; the walls are "back", "left", "right" and "front",
+    // and along a wall is x for the back and front and z for the sides. Recesses, the donation kiosk's niche and the
+    // donations board's, set the face back flat at a depth of their own instead: [..., half-width, depth].
     const openings = LAYOUT.tunnels.map((t) => [t.turn === 0 ? "back" : t.x < 0 ? "left" : "right", t.turn === 0 ? t.x : t.z, t.y - 0.5, t.y + 7.8, 4.3]);
-    openings.push(["right", LAYOUT.study.z, LAYOUT.study.y - 0.5, LAYOUT.study.y + 9.5, 3.4], ["right", LAYOUT.kiosk.z, LAYOUT.kiosk.y - 0.5, LAYOUT.kiosk.y + 5.6, 2], ["front", 0, 3, 10.5, 6.5]);
+    openings.push(["right", LAYOUT.study.z, LAYOUT.study.y - 0.5, LAYOUT.study.y + 9.5, 3.4], ["front", 0, 3, 10.5, 6.5]);
     const open = (wall, u, y) => openings.some(([w, c, y0, y1, half]) => w === wall && Math.abs(u - c) < half && y > y0 && y < y1);
+    const recesses = [["right", LAYOUT.kiosk.z, LAYOUT.kiosk.y - 0.5, LAYOUT.kiosk.y + 5.6, 2, 1.6], ["right", LAYOUT.board.z, LAYOUT.board.y + 0.9, LAYOUT.board.y + 4.6, 2.3, 1.6]];
+    const recess = (wall, u, y) => {
+      for (const [w, c, y0, y1, half, depth] of recesses) if (w === wall && Math.abs(u - c) < half && y > y0 && y < y1) return depth;
+      return 0;
+    };
     const C = WALL_CELL, v = makeVox(), cell = (m) => Math.floor(m / C);
     const hash = (a, b, k) => {
       let h = (a * 374761393 + b * 668265263 + k * 2147483647) | 0;
@@ -411,7 +420,7 @@
         if (open(name, u, y)) continue;
         // The back wall is smooth where the water runs down it.
         const groove = name === "back" && falls.some((f) => Math.abs(u - f) < 1.1);
-        const depth = 0.5 + y / H * WALL_LEAN + (groove ? 0 : heave(u, y, 3.2, k) * 0.95 + hash(iu, iy, k + 9) * 0.3);
+        const depth = recess(name, u, y) || 0.5 + y / H * WALL_LEAN + (groove ? 0 : heave(u, y, 3.2, k) * 0.95 + hash(iu, iy, k + 9) * 0.3);
         const tone = hash(iu >> 1, iy >> 1, k + 3), color = tone < 0.1 ? 5 : 1 + Math.floor(hash(iu >> 1, iy >> 1, k + 5) * 3.99);
         for (let d = 0; d < 3; d++) put(iu, iy, depth, d, color);
       }
@@ -1947,157 +1956,289 @@
     return noShadow(merge(...parts));
   });
 
-  // The donation kiosk, built into the right wall where the walkway from the balcony meets it, as the concept's
-  // integrated alcove draws it: the hall leaves an opening in the rock (`LAYOUT.kiosk`), and courses of pale cut stone
-  // frame it, iron plates riveted to them, round a portal of bright orange timber bound in iron: a lit bolt on each
-  // post and a bigger one on each side's stone, the frame stepping up from its header to a glowing banana on top, the
-  // DONATE SATS plaque framed in timber under the header (`kioskPlaque`), the big raked screen in its orange surround
-  // (`kioskScreen`), which shows the kiosk's attract screen (`kioskIdle`) or, while the cooker works, its thanks
-  // (`kioskThanks`), a counter under it and a lit grille under that, crystal at its feet, ivy down its sides, and
-  // brackets for two lanterns, which the scene hangs with the hall's. In the kiosk's frame: x along the wall (the
-  // visitor's right), +z out into the cave, the walkway's planks at y 0.
-  // `KIOSK` places what the scene hangs (the screen and its lean, the plaque) and, in the cave's frame, the lanterns'
-  // hooks, where a visitor stands to use it, the point used, and the glass (`glass`: its size, its face in the screen's
-  // frame, and in the cave's its middle, the normal out of it and its right and up), which the scene lays the
-  // kiosk's screen flow (`factory-kiosk.js`) over.
+  // ---- the donation corner: the kiosk and the donations board ------------------------------------------------------
+  // Both are built as their concepts draw them, in timber bolted with iron, each standing in a niche the hall leaves in
+  // its rock (`hall`'s recesses: the wall's own rock, its face set back flat 0.4 out from the kiosk's line). Their
+  // timber is voxels an eighth of a metre across (`PX`), its grain running along each beam, so the renderer's block
+  // detail gives it the concepts' pixel texture. Iron, glass, lamps and lettering stay smooth. Each is built in its own
+  // frame: x along the wall (the visitor's right), y up from the walkway, +z out of the rock.
+  const PX = 0.125, VOX_FROM = { x: -3, y: -0.5, z: -1.5 };
+  const PIXEL = [null, "#9a5a28", "#8b5022", "#a6652e", "#7d461e", "#57301a"], TIMBER_TONES = [1, 2, 3, 4], GRAIN = 5;
+  const cellOf = (m, axis) => Math.round((m - VOX_FROM[axis]) / PX);
+  const pixelGeometry = (v) => voxelGeometry(v, { unit: PX, palette: PIXEL, origin: VOX_FROM });
+  // Timber over the cells from (x0, y0, z0) to (x1, y1, z1) metres, its grain along x or y: each line of cells along
+  // the grain keeps one tone, a few lines darker, and now and then a knot.
+  const pixelTimber = (v, rand, x0, x1, y0, y1, z0, z1, along) => {
+    const a = cellOf(x0, "x"), b = cellOf(x1, "x") - 1, c = cellOf(y0, "y"), d = cellOf(y1, "y") - 1, e = cellOf(z0, "z"), f = cellOf(z1, "z") - 1;
+    const tones = new Map();
+    for (let i = a; i <= b; i++) for (let j = c; j <= d; j++) for (let k = e; k <= f; k++) {
+      const line = along === "x" ? j * 1000 + k : i * 1000 + k;
+      if (!tones.has(line)) tones.set(line, rand() < 0.12 ? GRAIN : TIMBER_TONES[Math.floor(rand() * 4)]);
+      v.set(i, j, k, rand() < 0.015 ? GRAIN : tones.get(line));
+    }
+  };
+  const carve = (v, x0, x1, y0, y1, z0, z1) => {
+    for (let i = cellOf(x0, "x"); i < cellOf(x1, "x"); i++) for (let j = cellOf(y0, "y"); j < cellOf(y1, "y"); j++) for (let k = cellOf(z0, "z"); k < cellOf(z1, "z"); k++) v.del(i, j, k);
+  };
+  // An iron plate `w` by `h` facing +z with its back at z, a hex bolt in each corner and, if `middle`, a bigger one in
+  // the middle.
+  const hexBolt = (r, x, y, z) => moved(prism(Array.from({ length: 6 }, (_, k) => [Math.cos(k * Math.PI / 3 + Math.PI / 6) * r, Math.sin(k * Math.PI / 3 + Math.PI / 6) * r]), 0.035, IRON_LT), x, y, z + 0.0175);
+  const ironPlate = (out, x, y, z, w, h = w, middle = false) => {
+    out.push(bevelBox({ w, h, d: 0.04, color: IRON_DK, bevel: 0.012, offset: { x, y, z: z + 0.02 } }));
+    const bx = w / 2 - Math.min(0.06, w * 0.22), by = h / 2 - Math.min(0.06, h * 0.22), r = Math.min(0.03, Math.min(w, h) * 0.12);
+    for (const [sx, sy] of [[-1, -1], [1, -1], [1, 1], [-1, 1]]) out.push(hexBolt(r, x + sx * bx, y + sy * by, z + 0.04));
+    if (middle) out.push(hexBolt(r * 1.8, x, y, z + 0.04));
+  };
+  // An iron eye under a beam at (x, y, z) and a chain down from it to the hook a lantern of the hall's list hangs from.
+  const lanternChain = (out, x, y, z, hookY) => {
+    out.push(moved(turnedY(forwardLathe(torus(0.05, 0.016, IRON_DK, 0, 10, 5)), Math.PI / 2), x, y - 0.05, z));
+    out.push(...chain(x, y - 0.1, z, x, hookY, z, 0.05, IRON_DK));
+  };
+
+  // The donation kiosk, built into the right wall where the walkway from the balcony meets it, as the concept draws
+  // it: a timber frame on a timber platform, two posts rising past the beam over the screen to a cap that runs out
+  // past them, joined with iron; the framed banana medallion between the beam and the cap on planks; the screen
+  // between the posts, which shows the kiosk's attract screen (`kioskIdle`) or, while the cooker works, its thanks
+  // (`kioskThanks`); and under it a timber base with a lit grille. Two lanterns hang on long chains from the cap's
+  // ends, and crystal grows at its feet.
+  // `KIOSK` places what the scene hangs (the screen and its lean) and, in the cave's frame, the lanterns' hooks, where a
+  // visitor stands to use it, the point used, and the glass (`glass`: its size, its face in the screen's frame, and in
+  // the cave's its middle, the normal out of it and its right and up), which the scene lays the kiosk's screen flow
+  // (`factory-kiosk.js`) over.
   const KIOSK = (() => {
     const k = LAYOUT.kiosk, c = Math.cos(k.turn), s = Math.sin(k.turn), at = (x, z) => [k.x + x * c + z * s, k.z - x * s + z * c];
     const dir = (x, y, z) => [x * c + z * s, y, -x * s + z * c];
-    const lamps = [[-1.95, 4.15, 1.35], [1.95, 4.15, 1.35]], screen = [0, 2.08, 0.8], lean = -0.2, sn = Math.sin(lean), cs = Math.cos(lean);
-    const w = 1.7, h = w * BL.factoryKiosk.H / BL.factoryKiosk.W, z = 0.07, [mx, mz] = at(0, screen[2] + z * cs);
+    const lamps = [[-1.95, 3, 0.85], [1.95, 3, 0.85]], screen = [0, 1.84, 0.72], lean = -0.1, sn = Math.sin(lean), cs = Math.cos(lean);
+    const w = 1.8, h = w * BL.factoryKiosk.H / BL.factoryKiosk.W, z = 0.07, [mx, mz] = at(0, screen[2] + z * cs);
     return {
-      screen, lean, plaque: [0, 3.2, 1.1], lamps, hooks: lamps.map(([x, y, z]) => { const [wx, wz] = at(x, z); return [wx, k.y + y, wz]; }),
+      screen, lean, lamps, hooks: lamps.map(([x, y, z]) => { const [wx, wz] = at(x, z); return [wx, k.y + y, wz]; }),
       stand: at(0, 2.1), use: at(0, 1.1),
       glass: { w, h, z, at: [mx, k.y + screen[1] - z * sn, mz], normal: dir(0, -sn, cs), up: dir(0, cs, sn), right: dir(1, 0, 0) }
     };
   })();
-  // The kiosk's own stone and timber: paler than the hall's rock, brighter than its decks.
-  const KIOSK_STONE = ["#a39383", "#968676", "#b09f8c", "#8a7b6b"], KIOSK_TIMBER = "#e07c28", KIOSK_TIMBER_DK = "#b65f1c";
-  // An iron plate `size` square at (x, y, z), facing +z with a rivet in each corner: the plate into `flat`, the rivets
-  // into `round`.
-  const kioskPlate = (flat, round, x, y, z, size) => {
-    flat.push(bevelBox({ w: size, h: size, d: 0.05, color: IRON_DK, bevel: 0.015, offset: { x, y, z } }));
-    for (const [px, py] of [[-1, -1], [1, -1], [1, 1], [-1, 1]]) round.push(moved(ball(0.035, IRON_LT, 0, 6), x + px * size * 0.32, y + py * size * 0.32, z + 0.035));
-  };
-  const paintBolt = (g, x, y, size, color) => {
-    g.fillStyle = color;
-    g.beginPath();
-    for (const [px, py] of [[0.12, -0.5], [-0.32, 0.08], [-0.04, 0.08], [-0.14, 0.5], [0.32, -0.12], [0.04, -0.12]]) g.lineTo(x + px * size, y + py * size);
-    g.closePath();
-    g.fill();
-  };
-  const kioskPlaque = cached(() => {
-    const canvas = document.createElement("canvas"), g = canvas.getContext("2d"), w = 784, h = 160;
-    canvas.width = w;
-    canvas.height = h;
-    g.fillStyle = "#120c07";
-    g.fillRect(0, 0, w, h);
-    g.strokeStyle = "rgba(255,200,80,0.55)";
-    g.lineWidth = 4;
-    g.strokeRect(6, 6, w - 12, h - 12);
-    g.fillStyle = "#ffd24a";
-    g.font = `bold ${Math.round(h * 0.5)}px ${LABEL_FONT}`;
-    g.textAlign = "center";
-    g.textBaseline = "middle";
-    g.fillText("DONATE SATS", w / 2, h / 2 + 4);
-    for (const s of [-1, 1]) paintBolt(g, w / 2 + s * w * 0.43, h / 2, h * 0.72, "#ffd24a");
-    return noShadow(picture(canvas, 1.96, 0.4, 0));
-  });
-  // The screen's own pictures, painted by the kiosk's flow at twice its pixels: its attract screen while nobody is at
-  // it, and its thanks while the cooker works.
-  const kioskIdle = cached(() => noShadow(picture(BL.factoryKiosk.still("idle", 2), KIOSK.glass.w, KIOSK.glass.h, 0)));
-  const kioskThanks = cached(() => noShadow(picture(BL.factoryKiosk.still("thanks", 2), KIOSK.glass.w, KIOSK.glass.h, 0)));
-  // The screen in its own frame, centred on it: the dark glass in an iron bezel, in a surround of the orange timber
-  // with an iron plate riveted over each corner. The scene leans it back and hangs the pictures on the glass's face.
+  // The screen's own pictures, painted by the kiosk's flow at twice its pixels: its thanks while the cooker works, and
+  // its attract screen with this visit's donation link as its QR, made each visit.
+  const kioskThanks = cached(() => noShadow(picture(BL.factoryKiosk.still("thanks", null, 2), KIOSK.glass.w, KIOSK.glass.h, 0)));
+  const kioskIdle = (url) => noShadow(picture(BL.factoryKiosk.still("idle", url, 2), KIOSK.glass.w, KIOSK.glass.h, 0));
+  // The screen in its own frame, centred on it: the dark glass in an iron bezel with a lip round it. The scene leans it
+  // back and hangs the pictures on the glass's face.
   const kioskScreen = cached(() => {
-    const { w, h, z } = KIOSK.glass, flat = [bevelBox({ w: w + 0.16, h: h + 0.16, d: 0.1, color: IRON_DK, bevel: 0.03 })], round = [];
+    const { w, h, z } = KIOSK.glass, flat = [bevelBox({ w: w + 0.2, h: h + 0.2, d: 0.1, color: IRON_BK, bevel: 0.03 })];
     for (const s of [-1, 1]) {
-      flat.push(bevelBox({ w: w + 0.46, h: 0.15, d: 0.15, color: KIOSK_TIMBER, bevel: 0.04, offset: { y: s * (h / 2 + 0.155), z: 0.01 } }));
-      flat.push(bevelBox({ w: 0.15, h: h + 0.16, d: 0.15, color: KIOSK_TIMBER_DK, bevel: 0.04, offset: { x: s * (w / 2 + 0.155), z: 0.01 } }));
-      for (const t of [-1, 1]) kioskPlate(flat, round, s * (w / 2 + 0.155), t * (h / 2 + 0.155), 0.11, 0.2);
+      flat.push(bevelBox({ w: w + 0.12, h: 0.05, d: 0.03, color: IRON_DK, bevel: 0.01, offset: { y: s * (h / 2 + 0.035), z: 0.06 } }));
+      flat.push(bevelBox({ w: 0.05, h: h + 0.12, d: 0.03, color: IRON_DK, bevel: 0.01, offset: { x: s * (w / 2 + 0.035), z: 0.06 } }));
     }
-    return { frame: shaded(round, flat), glass: noShadow(box({ w, h, d: 0.02, color: "#0d1116", emissive: 0.5, offset: { z: z - 0.018 } })) };
+    return { frame: merge(...flat), glass: noShadow(box({ w, h, d: 0.02, color: "#0d1116", emissive: 0.5, offset: { z: z - 0.018 } })) };
   });
   const donationKiosk = cached(() => {
-    const round = [], flat = [], glow = [], rand = mulberry32(91), plate = (x, y, z, size) => kioskPlate(flat, round, x, y, z, size);
-    const rivet = (x, y, z) => round.push(moved(ball(0.035, IRON_LT, 0, 6), x, y, z));
-    // The rock cut back round the alcove: a slab behind it all, and the niche's own floor, back, sides and roof.
-    flat.push(box({ w: 4.8, h: 6.6, d: 0.5, color: STONE_DK, offset: { y: 2.6, z: -2.7 } }));
-    flat.push(bevelBox({ w: 2.9, h: 0.12, d: 2.5, color: STONE[3], bevel: 0.02, offset: { y: -0.06, z: -0.1 } }));
-    flat.push(bevelBox({ w: 2.9, h: 3.9, d: 0.3, color: STONE_DK, bevel: 0.05, offset: { y: 1.95, z: -1.3 } }));
-    for (const s of [-1, 1]) flat.push(bevelBox({ w: 0.3, h: 3.9, d: 2.4, color: STONE[1], bevel: 0.05, offset: { x: s * 1.45, y: 1.95, z: -0.1 } }));
-    flat.push(bevelBox({ w: 3.2, h: 0.3, d: 2.4, color: STONE[0], bevel: 0.05, offset: { y: 3.95, z: -0.1 } }));
-    // Courses of the pale stone either side of the opening, from below the planks to the lintel, their joints
-    // staggered and those over the bolts plated in iron; and three courses across over it, out to the rock the hall
-    // leaves, the outer stones of the first plated too.
-    for (const s of [-1, 1]) for (let y = -0.5, row = 0; y < 3.95; row++) {
-      const h = Math.min(0.68 + rand() * 0.24, 3.95 - y), w = row % 2 ? 0.62 : 0.74, d = 1.9 + rand() * 0.2, x = s * (1.5 + w / 2), z = 0.17 + rand() * 0.04;
-      flat.push(bevelBox({ w: w - 0.04, h: h - 0.04, d, color: KIOSK_STONE[Math.floor(rand() * 4)], bevel: 0.08, offset: { x, y: y + h / 2, z } }));
-      if (y + h / 2 > 2.3 && h > 0.4) plate(x, y + h / 2, z + d / 2 + 0.025, 0.26);
-      y += h;
-    }
-    for (const [y0, h] of [[3.95, 0.62], [4.57, 0.5], [5.07, 0.45]]) for (let x = -2.3; x < 2.3;) {
-      const w = Math.min(0.8 + rand() * 0.35, 2.3 - x), d = 2, z = 0.12 + rand() * 0.04;
-      flat.push(bevelBox({ w: w - 0.04, h: h - 0.04, d, color: KIOSK_STONE[Math.floor(rand() * 4)], bevel: 0.1, offset: { x: x + w / 2, y: y0 + h / 2, z } }));
-      if (y0 === 3.95 && Math.abs(x + w / 2) > 1.7) plate(x + w / 2, y0 + h / 2, z + d / 2 + 0.025, 0.26);
-      x += w;
-    }
-    // The portal of orange timber inside the stone: posts bound in iron on stone footings, a lit bolt on each and a
-    // bigger one on the stone beside it, over an iron plate.
+    const v = makeVox(), rand = mulberry32(91), iron = [], glow = [];
+    // The platform it stands on, out to the walkway's end; the frame: two posts from it up past the beam to the cap,
+    // which runs out past them for the lanterns, and planks either side of the medallion; the base under the screen
+    // with the grille's recess cut in its face.
+    pixelTimber(v, rand, -2.125, 2.125, -0.375, 0.125, 0.375, 1.25, "x");
+    for (const s of [-1, 1]) pixelTimber(v, rand, s > 0 ? 1 : -1.5, s > 0 ? 1.5 : -1, 0.125, 4.375, 0.5, 1, "y");
+    pixelTimber(v, rand, -1.75, 1.75, 2.875, 3.375, 0.5, 1.125, "x");
+    pixelTimber(v, rand, -2.25, 2.25, 4.375, 4.875, 0.5, 1.125, "x");
+    for (let y = 3.375; y < 4.375 - 1e-6; y += 0.25) for (const s of [-1, 1]) pixelTimber(v, rand, s > 0 ? 0.5 : -1, s > 0 ? 1 : -0.5, y, y + 0.25, 0.5, 0.75, "x");
+    pixelTimber(v, rand, -1, 1, 0.125, 0.75, 0.5, 1, "x");
+    carve(v, -0.75, 0.75, 0.25, 0.625, 0.875, 1);
+    // The medallion's box between the beam and the cap, its field set back in it.
+    for (const [x0, x1, y0, y1] of [[-0.5, 0.5, 3.375, 3.5], [-0.5, 0.5, 4.25, 4.375], [-0.5, -0.375, 3.5, 4.25], [0.375, 0.5, 3.5, 4.25]]) pixelTimber(v, rand, x0, x1, y0, y1, 0.5, 1.125, y1 - y0 > 0.2 ? "y" : "x");
+    pixelTimber(v, rand, -0.375, 0.375, 3.5, 4.25, 0.5, 0.875, "x");
+    // Iron where the timber meets: the beam's and the cap's joints, the posts' feet, the cap's ends, the medallion's
+    // corners; and the lanterns' chains from under the cap.
     for (const s of [-1, 1]) {
-      const x = s * 1.3;
-      flat.push(bevelBox({ w: 0.46, h: 0.3, d: 0.46, color: STONE_DK, bevel: 0.06, offset: { x, y: 0.15, z: 0.95 } }));
-      flat.push(bevelBox({ w: 0.32, h: 3.25, d: 0.34, color: KIOSK_TIMBER, bevel: 0.05, offset: { x, y: 1.925, z: 0.95 } }));
-      for (const y of [0.75, 3.05]) {
-        flat.push(bevelBox({ w: 0.36, h: 0.1, d: 0.38, color: IRON_DK, bevel: 0.02, offset: { x, y, z: 0.95 } }));
-        rivet(x, y, 1.15);
-      }
-      glow.push(moved(smoothBolt(0.52, 0.06, "#ffd23a", 1), x, 1.95, 1.14));
-      glow.push(moved(smoothBolt(0.7, 0.07, "#ffc21a", 1), s * 1.85, 1.6, 1.24));
-      plate(s * 1.85, 0.6, 1.22, 0.34);
+      ironPlate(iron, s * 1.25, 3.125, 1.125, 0.42, 0.42, true);
+      ironPlate(iron, s * 1.25, 4.625, 1.125, 0.42, 0.42, true);
+      ironPlate(iron, s * 1.25, 0.44, 1, 0.42, 0.36);
+      ironPlate(iron, s * 2.08, 4.625, 1.125, 0.26, 0.36);
+      lanternChain(iron, KIOSK.lamps[s > 0 ? 1 : 0][0], 4.375, KIOSK.lamps[0][2], KIOSK.lamps[0][1]);
+      for (const t of [-1, 1]) ironPlate(iron, s * 0.44, 3.875 + t * 0.44, 1.125, 0.17, 0.17);
     }
-    // The header over the posts, plated at its ends, and the frame stepping up from it in two shorter beams to the
-    // banana: a dark round in a gold ring standing on the top step, the banana glowing in it.
-    for (const [y, w, h, color] of [[3.55, 3.0, 0.3, KIOSK_TIMBER], [3.85, 2.2, 0.25, KIOSK_TIMBER_DK], [4.1, 1.4, 0.22, KIOSK_TIMBER]]) {
-      flat.push(bevelBox({ w, h, d: 0.4, color, bevel: 0.05, offset: { y: y + h / 2, z: 1.0 } }));
-    }
-    for (const s of [-1, 1]) plate(s * 1.3, 3.7, 1.225, 0.24);
-    round.push(moved(forwardLathe(turn([[0.42, 0], [0.42, 0.06], [0.36, 0.12], [0, 0.13]], 24, "#24170d")), 0, 4.78, 1.1));
-    round.push(moved(forwardLathe(torus(0.44, 0.055, "#d99a1e", 0, 32, 8)), 0, 4.78, 1.17));
-    glow.push(moved(turnedZ(bananaGlyph(0.5, 0.06, "#ffd84a", 1), 0.25), 0, 4.78, 1.24));
-    // The plaque's iron under the header, framed in the timber with a plate on each corner; the scene hangs the
-    // lettering on it.
-    const [, py, pz] = KIOSK.plaque;
-    flat.push(bevelBox({ w: 2.1, h: 0.5, d: 0.06, color: IRON_DK, bevel: 0.02, offset: { y: py, z: pz - 0.04 } }));
-    for (const s of [-1, 1]) {
-      flat.push(bevelBox({ w: 2.3, h: 0.1, d: 0.14, color: KIOSK_TIMBER, bevel: 0.03, offset: { y: py + s * 0.3, z: pz - 0.03 } }));
-      flat.push(bevelBox({ w: 0.1, h: 0.5, d: 0.14, color: KIOSK_TIMBER_DK, bevel: 0.03, offset: { x: s * 1.1, y: py, z: pz - 0.03 } }));
-      for (const t of [-1, 1]) plate(s * 1.1, py + t * 0.3, pz + 0.065, 0.15);
-    }
-    // The counter under the screen on iron brackets, and under it the grille: an iron panel with its slats lit as if
-    // the cooker's fire were behind it, and bars across them.
-    flat.push(bevelBox({ w: 2.26, h: 0.1, d: 0.5, color: KIOSK_TIMBER, bevel: 0.03, offset: { y: 1.2, z: 0.88 } }));
-    for (const s of [-1, 1]) flat.push(beam(s * 1.0, 0.95, 0.7, s * 1.0, 1.15, 1.05, 0.06, IRON_DK));
-    flat.push(bevelBox({ w: 1.8, h: 0.8, d: 0.16, color: IRON_BK, bevel: 0.03, offset: { y: 0.62, z: 0.9 } }));
-    for (let k = 0; k < 5; k++) glow.push(box({ w: 1.5, h: 0.06, d: 0.02, color: k % 2 ? "#ffb81c" : "#ffd24a", emissive: 1, offset: { y: 0.34 + k * 0.14, z: 0.985 } }));
-    for (let k = 0; k < 7; k++) flat.push(box({ w: 0.045, h: 0.66, d: 0.04, color: IRON_DK, offset: { x: (k - 3) * 0.22, y: 0.62, z: 1.0 } }));
-    for (const s of [-1, 1]) for (const t of [-1, 1]) rivet(s * 0.82, 0.62 + t * 0.33, 1.0);
-    // Brackets out of the stone for the lanterns.
-    for (const [x, y, z] of KIOSK.lamps) {
-      flat.push(bevelBox({ w: 0.3, h: 0.3, d: 0.05, color: IRON_DK, bevel: 0.015, offset: { x, y: y + 0.05, z: 1.2 } }));
-      flat.push(bevelBox({ w: 0.07, h: 0.07, d: 0.26, color: IRON_DK, bevel: 0.015, offset: { x, y: y + 0.03, z: z - 0.08 } }));
-    }
-    // Blue crystal out of the stone at both feet, and ivy down both sides.
+    // The medallion's dark field and its banana; the grille's dark back and its three lit slats.
+    iron.push(box({ w: 0.75, h: 0.75, d: 0.03, color: "#1a1009", offset: { y: 3.875, z: 0.89 } }));
+    glow.push(moved(turnedZ(bananaGlyph(0.52, 0.07, "#ffd84a", 1), 0.25), 0, 3.875, 0.95));
+    iron.push(box({ w: 1.5, h: 0.375, d: 0.04, color: IRON_BK, offset: { y: 0.4375, z: 0.895 } }));
+    for (let k = 0; k < 3; k++) glow.push(bevelBox({ w: 1.3, h: 0.07, d: 0.03, color: k === 1 ? "#ffd24a" : "#ffc21a", emissive: 1, bevel: 0.01, offset: { y: 0.32 + k * 0.1175, z: 0.93 } }));
+    // Blue crystal on the platform at both front corners.
     for (const s of [-1, 1]) for (let k = 0; k < 5; k++) {
       const h = 0.25 + rand() * 0.35;
-      glow.push(moved(turnedZ(prism([[-0.05, 0], [0.05, 0], [0.035, h * 0.85], [0, h], [-0.035, h * 0.85]], 0.08, k % 2 ? CYAN : CRYSTAL, 0.85), (k - 2) * 0.32 * s), s * (1.78 + (k - 2) * 0.09), 0, 1.18 + (rand() - 0.5) * 0.08));
+      glow.push(moved(turnedZ(prism([[-0.05, 0], [0.05, 0], [0.035, h * 0.85], [0, h], [-0.035, h * 0.85]], 0.08, k % 2 ? CYAN : CRYSTAL, 0.85), (k - 2) * 0.32 * s), s * (1.85 + (k - 2) * 0.06), 0.125, 1.08 + (rand() - 0.5) * 0.08));
     }
-    for (const [x, top, len, n, z] of [[1.95, 4.9, 2.9, 9, 1.22], [-2.02, 5.3, 2.2, 7, 1.3]]) {
-      round.push(tube({ path: (t) => ({ x: x + Math.sin(t * 5 + x) * 0.08, y: top - t * len, z }), radius: () => 0.025, rings: 16, segments: 5, colorFn: () => "#2f5a22" }));
-      for (let k = 0; k < n; k++) flat.push(moved(turnedZ(leaf(1.6, k % 2 ? "#4f9a36" : "#3c8229"), (rand() - 0.5) * 1.2), x + (rand() - 0.5) * 0.4, top - 0.2 - k * len / n, z + 0.02));
-    }
-    return { body: shaded(round, flat), glow: noShadow(shaded(glow)) };
+    return { timber: pixelGeometry(v), iron: merge(...iron), glow: noShadow(merge(...glow)) };
   });
+
+  // The donations board on the right wall between the study hall and the kiosk, over the walkway, as its concept draws
+  // it: a timber frame bolted with iron round a dark board, standing in a niche of the rock, a lantern on a chain from
+  // each end of its top beam, candles on the rock ledge under it and ivy over it. The board's face
+  // (`boardFace`) carries its title, icons and labels, painted once; its figures (`boardValues`) are a picture of their
+  // own laid over its right-hand column, repainted when they change. `BOARD` places the face and the figures in the
+  // board's frame and, in the cave's, the lanterns' hooks.
+  const BOARD_FACE = { w: 3, h: 1.875, px: 400 }, BOARD_VALUES = { x: 640, y: 150, w: 530, h: 540 };
+  const BOARD = (() => {
+    const b = LAYOUT.board, c = Math.cos(b.turn), s = Math.sin(b.turn), at = (x, z) => [b.x + x * c + z * s, b.z - x * s + z * c];
+    const lamps = [[-2.1, 3.5, 0.75], [2.1, 3.5, 0.75]], face = [0, 2.6875, 0.752], P = BOARD_FACE.px, V = BOARD_VALUES;
+    return {
+      face, lamps, hooks: lamps.map(([x, y, z]) => { const [wx, wz] = at(x, z); return [wx, b.y + y, wz]; }),
+      values: [(V.x + V.w / 2) / P - BOARD_FACE.w / 2, BOARD_FACE.h / 2 - (V.y + V.h / 2) / P, 0.002]
+    };
+  })();
+  const BOARD_FONT = '"Avenir Next Condensed", "Roboto Condensed", "Arial Narrow", "Helvetica Neue", sans-serif';
+  const BOARD_INK = { slate: "#16110d", gold: "#ffcf3f", goldLt: "#ffe387", white: "#f1e8d8", dim: "#8d8172", rule: "#6e5532" };
+  const boardBanana = (g, x, y, r) => {
+    g.fillStyle = "#ffd23a";
+    g.beginPath();
+    g.arc(x, y - r * 0.55, r, Math.PI * 0.16, Math.PI * 0.84);
+    g.arc(x, y - r * 1.05, r * 1.15, Math.PI * 0.76, Math.PI * 0.24, true);
+    g.closePath();
+    g.fill();
+    g.fillStyle = "#7a5418";
+    g.fillRect(x + r * 0.74, y - r * 0.36, Math.max(3, r * 0.18), Math.max(3, r * 0.24));
+  };
+  // The rows' icons, each about `r` across round (x, y): a stack of coins, a banana, a calendar, a bolt and a figure.
+  const boardIcon = (g, kind, x, y, r) => {
+    if (kind === "coins") {
+      for (let k = 2; k >= 0; k--) {
+        g.fillStyle = "#b98a1c";
+        g.beginPath(); g.ellipse(x, y + r * 0.42 - k * r * 0.36 + r * 0.1, r * 0.82, r * 0.3, 0, 0, Math.PI * 2); g.fill();
+        g.fillStyle = k ? "#f2c23a" : "#ffd75a";
+        g.beginPath(); g.ellipse(x, y + r * 0.42 - k * r * 0.36, r * 0.82, r * 0.3, 0, 0, Math.PI * 2); g.fill();
+      }
+    } else if (kind === "banana") boardBanana(g, x, y + r * 0.62, r * 0.82);
+    else if (kind === "calendar") {
+      g.fillStyle = BOARD_INK.white;
+      g.fillRect(x - r * 0.8, y - r * 0.62, r * 1.6, r * 1.42);
+      g.fillStyle = BOARD_INK.slate;
+      g.fillRect(x - r * 0.62, y - r * 0.22, r * 1.24, r * 0.84);
+      g.fillStyle = BOARD_INK.white;
+      for (const sx of [-0.42, 0.42]) g.fillRect(x + sx * r - r * 0.09, y - r * 0.86, r * 0.18, r * 0.36);
+      for (let i = 0; i < 3; i++) for (let j = 0; j < 2; j++) g.fillRect(x - r * 0.48 + i * r * 0.36, y - r * 0.1 + j * r * 0.36, r * 0.24, r * 0.22);
+    } else if (kind === "bolt") {
+      g.fillStyle = "#ffd23a";
+      g.beginPath();
+      for (const [px, py] of [[0.12, -1], [-0.62, 0.16], [-0.06, 0.16], [-0.26, 1], [0.62, -0.24], [0.06, -0.24]]) g.lineTo(x + px * r, y + py * r);
+      g.closePath();
+      g.fill();
+    } else {
+      g.fillStyle = BOARD_INK.white;
+      g.beginPath(); g.arc(x, y - r * 0.38, r * 0.4, 0, Math.PI * 2); g.fill();
+      g.beginPath(); g.ellipse(x, y + r * 0.72, r * 0.78, r * 0.6, 0, Math.PI, 0); g.fill();
+    }
+  };
+  const BOARD_ROWS = [["coins", "TOTAL DONATED", 200], ["banana", "BANANAS PRODUCED", 285], ["calendar", "TODAY", 400], ["calendar", "THIS WEEK", 482], ["bolt", "CURRENT RATE", 564], ["figure", "LATEST DONATION", 646]], BOARD_RULE = 336;
+  const boardFace = cached(() => {
+    const { w: W, h: H, px: P } = BOARD_FACE, canvas = document.createElement("canvas"), g = canvas.getContext("2d");
+    canvas.width = W * P;
+    canvas.height = H * P;
+    const cw = canvas.width;
+    g.fillStyle = BOARD_INK.slate;
+    g.fillRect(0, 0, cw, canvas.height);
+    g.strokeStyle = "#3d2b1b";
+    g.lineWidth = 6;
+    g.strokeRect(9, 9, cw - 18, canvas.height - 18);
+    g.fillStyle = "#0e0a07";
+    g.fillRect(14, 14, cw - 28, 104);
+    g.fillStyle = "rgba(196,140,52,0.55)";
+    g.fillRect(14, 118, cw - 28, 3);
+    // The title in gold between two bananas.
+    g.textBaseline = "middle";
+    g.textAlign = "center";
+    g.font = `bold 84px ${BOARD_FONT}`;
+    const title = "BANANA DONATION BOARD", tw = g.measureText(title).width, shine = g.createLinearGradient(0, 30, 0, 104);
+    shine.addColorStop(0, BOARD_INK.goldLt);
+    shine.addColorStop(1, "#f4a91e");
+    g.fillStyle = shine;
+    g.fillText(title, cw / 2, 70);
+    for (const s of [-1, 1]) boardBanana(g, cw / 2 + s * (tw / 2 + 52), 92, 30);
+    // The rows' icons and labels, the rule between the totals and the rest, and the note in the corner.
+    g.textAlign = "left";
+    g.font = `600 44px ${BOARD_FONT}`;
+    for (const [icon, label, y] of BOARD_ROWS) {
+      boardIcon(g, icon, 92, y, 26);
+      g.fillStyle = BOARD_INK.white;
+      g.fillText(label, 150, y + 2);
+    }
+    g.fillStyle = BOARD_INK.rule;
+    g.fillRect(60, BOARD_RULE, BOARD_VALUES.x - 60, 3);
+    g.textAlign = "right";
+    g.font = `500 24px ${BOARD_FONT}`;
+    g.fillStyle = BOARD_INK.dim;
+    g.fillText("SIMULATED · THIS BROWSER'S TIPS", cw - 60, 718);
+    return noShadow(picture(canvas, W, H, 0));
+  });
+  // The board's figures for its right-hand column, each row of `values` a list of [text, kind] runs ("big" or "unit"
+  // in gold, "note" in white, "banana" the icon), set on its label's line and shrunk to fit the column if need be.
+  const boardValues = (values) => {
+    const V = BOARD_VALUES, P = BOARD_FACE.px, canvas = document.createElement("canvas"), g = canvas.getContext("2d");
+    canvas.width = V.w;
+    canvas.height = V.h;
+    g.fillStyle = BOARD_INK.slate;
+    g.fillRect(0, 0, V.w, V.h);
+    g.fillStyle = BOARD_INK.rule;
+    g.fillRect(0, BOARD_RULE - V.y, V.w - 30, 3);
+    g.textBaseline = "middle";
+    g.textAlign = "left";
+    const fonts = { big: [72, "bold"], unit: [46, "600"], note: [42, "500"] };
+    values.forEach((runs, row) => {
+      const y = BOARD_ROWS[row][2] - V.y, small = row > 1 ? 0.76 : 1;
+      let total = 0;
+      const width = (k) => {
+        let wsum = 0;
+        for (const [text, kind] of runs) {
+          if (kind === "banana") { wsum += 40 * small * k; continue; }
+          const [size, weight] = fonts[kind];
+          g.font = `${weight} ${size * small * k}px ${BOARD_FONT}`;
+          wsum += g.measureText(text).width;
+        }
+        return wsum;
+      };
+      total = width(1);
+      const k = Math.min(1, (V.w - 40) / total);
+      let x = 10;
+      for (const [text, kind] of runs) {
+        if (kind === "banana") {
+          boardBanana(g, x + 18 * small * k, y + 16 * small * k, 20 * small * k);
+          x += 40 * small * k;
+          continue;
+        }
+        const [size, weight] = fonts[kind];
+        g.font = `${weight} ${size * small * k}px ${BOARD_FONT}`;
+        g.fillStyle = kind === "note" ? BOARD_INK.white : BOARD_INK.gold;
+        g.fillText(text, x, y + 2);
+        x += g.measureText(text).width;
+      }
+    });
+    return noShadow(picture(canvas, V.w / P, V.h / P, 0));
+  };
+  const donationBoard = cached(() => {
+    const v = makeVox(), rand = mulberry32(57), iron = [], glow = [], round = [], flat = [];
+    // The frame: posts either side, a top beam running out past them for the lanterns and a bottom beam.
+    for (const s of [-1, 1]) pixelTimber(v, rand, s > 0 ? 1.5 : -1.875, s > 0 ? 1.875 : -1.5, 1.375, 4, 0.5, 0.875, "y");
+    pixelTimber(v, rand, -2.375, 2.375, 3.625, 4, 0.5, 1, "x");
+    pixelTimber(v, rand, -2, 2, 1.375, 1.75, 0.5, 0.875, "x");
+    // The board itself behind the face, and iron at every joint: the beams over the posts, the top beam's ends, and an
+    // eye under each end for a lantern.
+    iron.push(box({ w: BOARD_FACE.w, h: BOARD_FACE.h, d: 0.25, color: "#120e0b", offset: { y: BOARD.face[1], z: 0.625 } }));
+    for (const s of [-1, 1]) {
+      ironPlate(iron, s * 1.6875, 3.8125, 1, 0.36, 0.36, true);
+      ironPlate(iron, s * 1.6875, 1.5625, 0.875, 0.36, 0.36, true);
+      ironPlate(iron, s * 2.24, 3.8125, 1, 0.24, 0.3);
+      iron.push(moved(turnedY(forwardLathe(torus(0.05, 0.016, IRON_DK, 0, 10, 5)), Math.PI / 2), s * 2.1, 3.575, BOARD.lamps[0][2]));
+    }
+    // Candles on the rock ledge the niche leaves under the board, their flames lit.
+    for (const x of [-1.6, -1.35, 1.35, 1.65]) {
+      const tall = 0.12 + rand() * 0.1;
+      round.push(moved(lathe({ profile: [[0.04, 0], [0.04, tall], [0.03, tall + 0.01], [0, tall + 0.01]], segments: 8, color: "#efe2c4" }), x, 1, 0.85));
+      glow.push(moved(lathe({ profile: [[0, 0], [0.022, 0.03], [0.014, 0.07], [0, 0.1]], segments: 6, color: "#ffb43a", emissive: 1 }), x, 1.01 + tall, 0.85));
+    }
+    // Ivy over the top beam and down beside the lanterns.
+    for (const [x, top, len, n, z] of [[-2.5, 4.6, 2.4, 8, 0.6], [2.5, 4.6, 1.8, 6, 0.6], [-0.9, 4.55, 0.7, 3, 1.05], [1.1, 4.55, 0.5, 2, 1.05]]) {
+      round.push(tube({ path: (t) => ({ x: x + Math.sin(t * 5 + x) * 0.06, y: top - t * len, z }), radius: () => 0.022, rings: 14, segments: 5, colorFn: () => "#2f5a22" }));
+      for (let k = 0; k < n; k++) flat.push(moved(turnedZ(leaf(1.5, k % 2 ? "#4f9a36" : "#3c8229"), (rand() - 0.5) * 1.3), x + (rand() - 0.5) * 0.3, top - 0.15 - k * len / n, z + 0.03));
+    }
+    return { timber: pixelGeometry(v), iron: merge(...iron), trim: shaded(round, flat), glow: noShadow(merge(...glow)) };
+  });
+
   // A donation's sat: a lime cube with the ₿ on two faces, green going in so the bananas come out ripe; drawn by the
   // dozen as one instanced batch.
   const satCube = cached(() => noShadow(merge(
@@ -3314,7 +3455,7 @@
     forgeSign, forgeWave, forgeLines, forgeTrack, forgeShafts, mintCoin, COILS, teslaCoil, banner, statusLantern, peerPipes, peerMirrors, TUNNEL_SIGN, TUNNEL_POST, EXIT_Z, CONDUIT_SAMPLES, TUNNEL_THEMES, STEP, supportAt, stairCeilingAt, clearAt, walkable, resolveFall,
     hall, scaffold, coreBody, coreChamber, conduits, sat, satFailed, stationFrame, capacitor, forge, forgeFire, cart,
     switchboard, switchScreens, REB, TRE, rebalancerBase, rebalancerRing, rebalancerFlow, treasuryBody, goldPile, hopperFill, beltNugget, goldCrate, dataBoard, moveBoard,
-    COOK, KIOSK, cookerBody, cookerFixtures, cookerLid, cookerPort, cookerGear, cookerSats, donationKiosk, kioskScreen, kioskPlaque, kioskIdle, kioskThanks, satCube, flyingBanana, coreRingLime,
+    COOK, KIOSK, cookerBody, cookerFixtures, cookerLid, cookerPort, cookerGear, cookerSats, donationKiosk, kioskScreen, kioskIdle, kioskThanks, BOARD, donationBoard, boardFace, boardValues, satCube, flyingBanana, coreRingLime,
     coreRing, teslaArcs, lookoutTower, lookoutLamp, lookoutOptics, lookoutBeam, LOOKOUT_BEAM, STUDY, studyHall, studyNote, studyBoard, tunnels, galleryStation, galleryCaps, label, lanterns, hardHat, hubTunnel, hubWindow, bakeWindow, windowLights, exitTunnel, outsideView,
     beam, moved, turnedY, smoothBolt, smoothBitcoin
   };

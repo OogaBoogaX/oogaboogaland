@@ -1,10 +1,10 @@
-// The donation kiosk's screen, as the concept's screen flow draws it: the simulated sequence a visitor runs at the
-// kiosk in the factory's right wall. The attract screen; an amount typed on a keypad; its quote in bananas (and in
-// dollars, when the price feed has one); a Lightning invoice for it, with this page's donation request as its QR, a
-// five-minute expiry, copy and regenerate; the wait while it is paid; and the payment received, which sends the
-// visitor to watch the cooker. Everything is set in the jumbotron's 5x7 letters on one canvas, `W` by `H`, which the
-// scene lays over the kiosk's glass while the visitor is at it; `still` paints the glass's own pictures for when
-// nobody is (the attract screen, and the thanks while the cooker works).
+// The donation kiosk's screen, as the concepts draw it: the simulated sequence a visitor runs at the kiosk in the
+// factory's right wall. The attract screen, with this visit's donation link as its QR and START; an amount typed on a
+// keypad; its quote in bananas (and in dollars, when the price feed has one); a Lightning invoice for it, with a fresh
+// donation request as its QR, a five-minute expiry, copy and regenerate; the wait while it is paid; and the payment
+// received, which sends the visitor to watch the cooker. Everything is set in the jumbotron's 5x7 letters on one
+// square canvas, `W` by `H`, which the scene lays over the kiosk's glass while the visitor is at it; `still` paints
+// the glass's own pictures for when nobody is (the attract screen, and the thanks while the cooker works).
 //
 // Payments are simulated: SETTLE after the visitor pays, the flow asks the scene to emit the donation event the
 // backend will one day push, `{ id, sats, handle, message, at }` under the invoice's request id, and the scene hands
@@ -19,7 +19,7 @@
   "use strict";
   const BL = window.BL;
   const T = BL.jumbotron.text, GW = T.GLYPH_W, GH = T.GLYPH_H, TR = T.TRACKING;
-  const W = 400, H = 284;
+  const W = 400, H = 400;
   // An amount's bounds, an invoice's life, a simulated payment's settling, and how long the paid screen holds the
   // visitor's bananas back from the cooker before it cooks them anyway.
   const MIN = 400, MAX = 1000000, EXPIRY = 300, SETTLE = 2.4, HOLD = 12;
@@ -148,49 +148,50 @@
     }
   };
 
-  // The still pictures for the kiosk's glass when nobody is at it: the attract screen, and the thanks while the cooker
-  // works on any tip. Each a fresh canvas, `scale` times the screen's pixels.
-  const still = (kind, scale = 1) => {
+  // The still pictures for the kiosk's glass when nobody is at it: the attract screen with the donation link `url` as
+  // its QR, and the thanks while the cooker works on any tip. Each a fresh canvas, `scale` times the screen's pixels.
+  const still = (kind, url, scale = 1) => {
     const canvas = document.createElement("canvas"), g = canvas.getContext("2d");
     canvas.width = W * scale;
     canvas.height = H * scale;
     g.setTransform(scale, 0, 0, scale, 0, 0);
     if (kind === "thanks") paintThanks(g);
-    else paintIdle(g, null);
+    else paintIdle(g, BL.qr.encode(url), null);
     return canvas;
   };
-  const paintIdle = (g, button) => {
+  const paintIdle = (g, code, button) => {
     face(g, "");
     const tw = width("DONATE SATS", 4);
-    write(g, "DONATE SATS", W / 2, 16, 4, INK.gold, "center");
-    bolt(g, W / 2 - tw / 2 - 24, 12, 34, INK.gold);
-    bolt(g, W / 2 + tw / 2 + 8, 12, 34, INK.gold);
-    write(g, "TURN SATS INTO BANANAS", W / 2, 60, 2, INK.white, "center");
-    coin(g, 128, 124, 34);
-    arrow(g, 202, 124, 22, INK.white);
-    banana(g, 284, 132, 40, INK.gold);
-    write(g, "TAP THE SCREEN TO START", W / 2, 180, 2, INK.dim, "center");
-    if (button) button(92, 214, 216, 46, "ENTER AMOUNT >", "primary", "start");
+    write(g, "DONATE SATS", W / 2, 18, 4, INK.gold, "center");
+    bolt(g, W / 2 - tw / 2 - 30, 12, 40, INK.gold);
+    bolt(g, W / 2 + tw / 2 + 8, 12, 40, INK.gold);
+    qrBox(g, 102, 60, 196, code, false);
+    write(g, "TURN SATS", W / 2, 268, 3, INK.white, "center");
+    write(g, "INTO BANANAS", W / 2, 294, 3, INK.white, "center");
+    if (button) button(96, 328, 208, 56, "START", "primary", "start", 4);
     else {
       g.fillStyle = INK.gold;
-      g.fillRect(92, 214, 216, 46);
-      write(g, "ENTER AMOUNT >", W / 2, 230, 2, INK.dark, "center");
+      g.fillRect(96, 328, 208, 56);
+      g.fillStyle = "#fff0a8";
+      g.fillRect(99, 331, 202, 2);
+      write(g, "START", W / 2, 342, 4, INK.dark, "center");
     }
   };
   const paintThanks = (g) => {
     face(g, "", INK.gold, INK.paid);
-    write(g, "TIP RECEIVED!", W / 2, 22, 3, INK.gold, "center");
-    banana(g, W / 2, 112, 46, INK.gold);
-    sparkles(g, [[120, 74, 8], [282, 70, 8], [104, 132, 6], [300, 136, 6], [150, 156, 5], [252, 158, 5]]);
-    write(g, "BANANAS COOKING", W / 2, 182, 3, INK.white, "center");
-    write(g, "WATCH THE COOKER", W / 2, 228, 2, INK.green, "center");
+    write(g, "TIP RECEIVED!", W / 2, 40, 4, INK.gold, "center");
+    banana(g, W / 2, 190, 56, INK.gold);
+    sparkles(g, [[110, 110, 9], [292, 104, 9], [92, 180, 7], [310, 186, 7], [140, 214, 6], [262, 216, 6]]);
+    write(g, "BANANAS COOKING", W / 2, 252, 3, INK.white, "center");
+    write(g, "WATCH THE COOKER", W / 2, 304, 2, INK.green, "center");
   };
 
   // ---- the flow -------------------------------------------------------------------------------------------------
-  // `hooks`: request() for a new donation request ({ id, url }), bananasFor(sats), price() in dollars or 0, handle(),
-  // copy(text), pay(id, sats) when a simulated payment settles, release() when HOLD runs out, watch() and close().
+  // `hooks`: link() for the visit's donation link, request() for a new donation request ({ id, url }), bananasFor(sats),
+  // price() in dollars or 0, handle(), copy(text), pay(id, sats) when a simulated payment settles, release() when HOLD
+  // runs out, watch() and close().
   const create = (hooks) => {
-    const canvas = document.createElement("canvas"), g = canvas.getContext("2d");
+    const canvas = document.createElement("canvas"), g = canvas.getContext("2d"), idleCode = BL.qr.encode(hooks.link());
     canvas.width = W;
     canvas.height = H;
     let dirty = true, shown = -1, buttons = [];
@@ -199,7 +200,7 @@
       flow.state = state;
       dirty = true;
     };
-    const button = (x, y, w, h, label, kind, act) => {
+    const button = (x, y, w, h, label, kind, act, scale = 2) => {
       const on = kind !== "off";
       g.fillStyle = kind === "primary" ? INK.gold : kind === "off" ? INK.off : INK.panel;
       g.fillRect(x, y, w, h);
@@ -211,7 +212,7 @@
         g.lineWidth = 2;
         g.strokeRect(x + 1, y + 1, w - 2, h - 2);
       }
-      write(g, label, x + w / 2, y + Math.round((h - GH * 2) / 2), 2, kind === "primary" ? INK.dark : on ? INK.white : INK.dim, "center");
+      write(g, label, x + w / 2, y + Math.round((h - GH * scale) / 2), scale, kind === "primary" ? INK.dark : on ? INK.white : INK.dim, "center");
       if (on) buttons.push({ x, y, w, h, act });
     };
     const closeButton = () => {
@@ -331,14 +332,14 @@
       if (flow.state !== "waiting") return;
       const a = time * 5;
       g.lineCap = "round";
-      g.lineWidth = 8;
+      g.lineWidth = 9;
       g.strokeStyle = INK.line;
       g.beginPath();
-      g.arc(92, 116, 30, 0, Math.PI * 2);
+      g.arc(120, 142, 34, 0, Math.PI * 2);
       g.stroke();
       g.strokeStyle = INK.gold;
       g.beginPath();
-      g.arc(92, 116, 30, a, a + Math.PI * 0.6);
+      g.arc(120, 142, 34, a, a + Math.PI * 0.6);
       g.stroke();
       g.lineCap = "butt";
     };
@@ -348,100 +349,101 @@
       dirty = false;
       buttons = [];
       const s = flow.state, v = flow.invoice;
-      if (s === "idle") paintIdle(g, button);
+      if (s === "idle") paintIdle(g, idleCode, button);
       else if (s === "amount") {
         face(g, "ENTER SATS TO DONATE");
-        panel(g, 70, 40, 260, 40, INK.amber);
-        if (flow.digits) write(g, sats(flow.sats), 84, 50, 3, INK.white);
-        else write(g, "0", 84, 50, 3, INK.dim);
-        write(g, "SATS", 318, 54, 2, INK.dim, "right");
-        if (flow.digits && !valid()) write(g, flow.sats < MIN ? `MIN ${sats(MIN)} SATS` : `MAX ${sats(MAX)} SATS`, W / 2, 86, 1, INK.red, "center");
+        panel(g, 40, 44, 320, 56, INK.amber);
+        if (flow.digits) write(g, sats(flow.sats), 54, 58, 4, INK.white);
+        else write(g, "0", 54, 58, 4, INK.dim);
+        write(g, "SATS", 346, 66, 2, INK.dim, "right");
+        if (flow.digits && !valid()) write(g, flow.sats < MIN ? `MIN ${sats(MIN)} SATS` : `MAX ${sats(MAX)} SATS`, W / 2, 106, 1, INK.red, "center");
         const keys = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "clear", "0", "rub"];
         keys.forEach((k, i) => {
-          const x = 72 + (i % 3) * 88, y = 96 + Math.floor(i / 3) * 34;
-          button(x, y, 80, 28, k === "clear" ? "CLEAR" : k === "rub" ? "" : k, "", k);
+          const x = 44 + (i % 3) * 106, y = 120 + Math.floor(i / 3) * 54;
+          button(x, y, 100, 46, k === "clear" ? "CLEAR" : k === "rub" ? "" : k, "", k, k.length === 1 ? 3 : 2);
           if (k === "rub") {
             g.fillStyle = INK.white;
             g.beginPath();
-            g.moveTo(x + 26, y + 14);
-            g.lineTo(x + 34, y + 7);
-            g.lineTo(x + 54, y + 7);
-            g.lineTo(x + 54, y + 21);
-            g.lineTo(x + 34, y + 21);
+            g.moveTo(x + 30, y + 23);
+            g.lineTo(x + 40, y + 13);
+            g.lineTo(x + 70, y + 13);
+            g.lineTo(x + 70, y + 33);
+            g.lineTo(x + 40, y + 33);
             g.closePath();
             g.fill();
-            write(g, "X", x + 45, y + 11, 1, INK.panel, "center");
+            write(g, "X", x + 56, y + 20, 1, INK.panel, "center");
           }
         });
-        button(110, 236, 180, 40, "CONTINUE >", valid() ? "primary" : "off", "go");
+        button(100, 340, 200, 48, "CONTINUE >", valid() ? "primary" : "off", "go");
         closeButton();
       } else if (s === "quote") {
         face(g, "CONFIRM DONATION");
-        panel(g, 50, 40, 300, 68);
-        write(g, "YOU DONATE", 62, 48, 1, INK.dim);
-        write(g, `${sats(flow.sats)} SATS`, 62, 60, 3, INK.gold);
+        panel(g, 30, 44, 340, 92);
+        write(g, "YOU DONATE", 42, 54, 1, INK.dim);
+        write(g, `${sats(flow.sats)} SATS`, 42, 70, 4, INK.gold);
         const usd = hooks.price();
-        if (usd > 0) write(g, `≈ $${(flow.sats / 1e8 * usd).toFixed(2)} USD`, 62, 92, 1, INK.white);
-        write(g, "RATE", 62, 118, 1, INK.dim);
-        write(g, "1 BANANA = 400 SATS", 338, 118, 1, INK.white, "right");
-        panel(g, 50, 132, 300, 56);
-        write(g, "YOU WILL MAKE", 62, 140, 1, INK.dim);
-        banana(g, 78, 176, 13, INK.gold);
-        write(g, `${flow.bananas} BANANA${flow.bananas > 1 ? "S" : ""}`, 100, 156, 3, INK.gold);
-        if (hooks.bananasFor(flow.sats + 400) === flow.bananas) write(g, `MAX ${flow.bananas} PER TIP`, 338, 140, 1, INK.dim, "right");
-        info(g, 66, 202, INK.dim);
-        write(g, "QUOTE LOCKED WHEN INVOICE IS CREATED", 78, 199, 1, INK.dim);
-        button(50, 226, 100, 40, "< BACK", "", "back");
-        button(158, 226, 192, 40, "CREATE INVOICE", "primary", "create");
+        if (usd > 0) write(g, `≈ $${(flow.sats / 1e8 * usd).toFixed(2)} USD`, 42, 110, 2, INK.white);
+        write(g, "RATE", 42, 152, 1, INK.dim);
+        write(g, "1 BANANA = 400 SATS", 358, 148, 2, INK.white, "right");
+        panel(g, 30, 176, 340, 84);
+        write(g, "YOU WILL MAKE", 42, 186, 1, INK.dim);
+        if (hooks.bananasFor(flow.sats + 400) === flow.bananas) write(g, `MAX ${flow.bananas} PER TIP`, 358, 186, 1, INK.dim, "right");
+        banana(g, 66, 244, 17, INK.gold);
+        write(g, `${flow.bananas} BANANA${flow.bananas > 1 ? "S" : ""}`, 96, 212, 4, INK.gold);
+        info(g, 46, 279, INK.dim);
+        write(g, "QUOTE LOCKED WHEN INVOICE IS CREATED", 60, 276, 1, INK.dim);
+        button(30, 326, 120, 52, "< BACK", "", "back");
+        button(160, 326, 210, 52, "CREATE INVOICE", "primary", "create");
         closeButton();
       } else if (s === "invoice" || s === "waiting") {
         const waiting = s === "waiting";
         face(g, waiting ? "WAITING FOR PAYMENT..." : "PAY LIGHTNING INVOICE");
-        qrBox(g, 16, 40, 152, v.code, waiting);
-        write(g, "AMOUNT", 184, 44, 1, INK.dim);
-        write(g, `${sats(flow.sats)} SATS`, 184, 56, 2, INK.white);
-        write(g, "BANANAS", 184, 82, 1, INK.dim);
-        banana(g, 196, 104, 9, INK.gold);
-        write(g, String(flow.bananas), 214, 94, 2, INK.gold);
-        write(g, "EXPIRES IN", 184, 120, 1, INK.dim);
-        write(g, clock(flow.left), 184, 132, 4, flow.left <= 60 ? INK.red : INK.gold);
-        write(g, "PAYMENTS ARE SIMULATED", 184, 172, 1, INK.dim);
+        qrBox(g, 20, 42, 200, v.code, waiting);
+        write(g, "AMOUNT", 232, 48, 1, INK.dim);
+        write(g, sats(flow.sats), 232, 60, 2, INK.white);
+        write(g, "SATS", 232, 78, 1, INK.dim);
+        write(g, "BANANAS", 232, 98, 1, INK.dim);
+        banana(g, 244, 128, 10, INK.gold);
+        write(g, String(flow.bananas), 262, 112, 2, INK.gold);
+        write(g, "EXPIRES IN", 232, 144, 1, INK.dim);
+        write(g, clock(flow.left), 232, 156, 4, flow.left <= 60 ? INK.red : INK.gold);
         if (waiting) {
-          write(g, "SCAN WITH YOUR WALLET TO COMPLETE PAYMENT.", 16, 200, 1, INK.white);
-          panel(g, 16, 212, 368, 26, INK.amber);
-          info(g, 30, 225, INK.gold);
-          write(g, "YOUR DONATION WILL TRIGGER THE BANANA COOKER WHEN PAID.", 42, 222, 1, INK.white);
-          button(140, 246, 120, 32, "X CANCEL", "", "cancel");
+          write(g, "SCAN WITH YOUR WALLET TO COMPLETE PAYMENT.", 20, 252, 1, INK.white);
+          panel(g, 20, 266, 360, 40, INK.amber);
+          info(g, 36, 286, INK.gold);
+          write(g, "YOUR DONATION WILL TRIGGER THE BANANA COOKER WHEN PAID.", 48, 283, 1, INK.white);
+          button(130, 320, 140, 48, "X CANCEL", "", "cancel");
         } else {
-          write(g, "SCAN WITH YOUR WALLET", 92, 198, 1, INK.white, "center");
-          panel(g, 16, 210, 330, 24);
-          write(g, `${v.bolt.slice(0, 16)}...${v.bolt.slice(-4)}`.toUpperCase(), 26, 219, 1, INK.white);
-          button(352, 210, 32, 24, "", "", "copy");
+          write(g, "SCAN WITH YOUR WALLET", 120, 250, 1, INK.white, "center");
+          panel(g, 20, 266, 316, 32);
+          write(g, `${v.bolt.slice(0, 18)}...${v.bolt.slice(-5)}`.toUpperCase(), 30, 279, 1, INK.white);
+          button(344, 266, 36, 32, "", "", "copy");
           g.strokeStyle = INK.white;
           g.lineWidth = 1.5;
-          g.strokeRect(362.5, 215.5, 9, 11);
-          g.strokeRect(366.5, 218.5, 9, 11);
-          button(16, 242, 156, 34, "REGENERATE", "", "regen");
-          button(180, 242, 204, 34, "SIMULATE PAYMENT", "primary", "pay");
+          g.strokeRect(355.5, 273.5, 9, 11);
+          g.strokeRect(359.5, 276.5, 9, 11);
+          button(20, 312, 150, 46, "REGENERATE", "", "regen");
+          button(178, 312, 202, 46, "SIMULATE PAYMENT", "primary", "pay");
           closeButton();
         }
+        write(g, "PAYMENTS ARE SIMULATED IN THIS BUILD", W / 2, 378, 1, INK.dim, "center");
       } else if (s === "paid") {
         face(g, "PAYMENT RECEIVED!", INK.gold, INK.paid);
-        banana(g, W / 2, 92, 40, INK.gold);
-        sparkles(g, [[132, 62, 7], [270, 58, 7], [118, 106, 5], [284, 110, 5]]);
-        write(g, `${sats(flow.sats)} SATS RECEIVED`, W / 2, 124, 2, INK.white, "center");
-        write(g, `${flow.bananas} BANANA${flow.bananas > 1 ? "S" : ""}`, W / 2, 146, 3, INK.gold, "center");
+        banana(g, W / 2, 118, 44, INK.gold);
+        sparkles(g, [[124, 70, 8], [276, 66, 8], [110, 118, 6], [290, 122, 6]]);
+        write(g, `${sats(flow.sats)} SATS RECEIVED`, W / 2, 150, 2, INK.white, "center");
+        write(g, `${flow.bananas} BANANA${flow.bananas > 1 ? "S" : ""}`, W / 2, 176, 4, INK.gold, "center");
         const who = hooks.handle();
-        write(g, who ? `THANK YOU @${who}!` : "THANK YOU!", W / 2, 178, 1, INK.white, "center");
-        panel(g, 40, 194, 320, 30, INK.green);
-        write(g, "THE COOKER IS BEHIND YOU. WATCH IT COOK!", W / 2, 205, 1, INK.green, "center");
-        button(100, 234, 200, 40, "WATCH IT COOK >", "primary", "watch");
+        write(g, who ? `THANK YOU @${who}!` : "THANK YOU!", W / 2, 220, 1, INK.white, "center");
+        panel(g, 30, 246, 340, 44, INK.green);
+        write(g, "THE COOKER IS BEHIND YOU. WATCH IT COOK!", W / 2, 265, 1, INK.green, "center");
+        button(80, 312, 240, 56, "WATCH IT COOK >", "primary", "watch");
       } else {
         face(g, "INVOICE EXPIRED", INK.red);
-        write(g, "THIS INVOICE TIMED OUT.", W / 2, 96, 2, INK.white, "center");
-        write(g, "MAKE A NEW ONE TO DONATE.", W / 2, 126, 1, INK.dim, "center");
-        button(50, 226, 100, 40, "< BACK", "", "back");
-        button(158, 226, 192, 40, "NEW INVOICE", "primary", "regen");
+        write(g, "THIS INVOICE TIMED OUT.", W / 2, 150, 2, INK.white, "center");
+        write(g, "MAKE A NEW ONE TO DONATE.", W / 2, 186, 1, INK.dim, "center");
+        button(30, 326, 120, 52, "< BACK", "", "back");
+        button(160, 326, 210, 52, "NEW INVOICE", "primary", "regen");
         closeButton();
       }
     };
