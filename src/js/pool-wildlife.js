@@ -140,7 +140,7 @@
         if (dot > bestDot) { bestDot = dot; best = b; }
       }
       const bl = Math.hypot(best[3] - best[0], best[5] - best[2]) || 1;
-      a.tree = tree; a.branch = best; a.dx = (best[3] - best[0]) / bl; a.dz = (best[5] - best[2]) / bl;
+      a.tree = tree; a.branch = best; a.dx = (best[3] - best[0]) / bl; a.dz = (best[5] - best[2]) / bl; a.stalls = 0;
       // Where the limb leaves the trunk on this side: the climb ends exactly there, on the limb's top.
       a.u0 = clamp((trunkRadius(tree, best[1]) + CHEST) / bl, 0.05, 0.3);
       tree.taken = a;
@@ -151,6 +151,12 @@
       if (a.tree) a.tree.taken = null;
       a.tree = a.branch = null;
       a.onBranch = false;
+    };
+    // A climb starts at the trunk's foot. An interrupted approach walks the rest of the way on the
+    // ground; it never glides up through the air.
+    const atTrunkFoot = (a) => {
+      clingAt(a.tree, 0, a.dx, a.dz, CLING);
+      return Math.hypot(CLING[0] - a.x, CLING[2] - a.z) < 0.4;
     };
     const perchFree = () => {
       let count = 0;
@@ -203,6 +209,12 @@
       if (a.kind === "monkey") {
         if (a.tree) {
           if (night) return rest(a, 30 + rand() * 30, true);
+          if (!a.onBranch) {
+            // On the ground the climb starts at the trunk's foot: an interrupted approach walks on.
+            if (!atTrunkFoot(a)) return walkTo(a, CLING[0], CLING[2], a.cfg.walk, "climb");
+            a.after = "climb";
+            return arrive(a);
+          }
           a.onBranch = false;
           onBranch(a, a.u0, CLING);
           return glide(a, CLING[0], CLING[1], CLING[2], 0.5, "walk", "down", 0, headingOf(-a.dx, -a.dz), a.tree.base);
@@ -235,6 +247,13 @@
         }
         case "logRest": return rest(a, 12 + rand() * 20, rand() < 0.6 || sleepy());
         case "climb": {
+          // The approach can end short of the trunk (its timer ran out): walk the rest, and give the
+          // tree up after a few tries rather than glide up through the air.
+          if (!atTrunkFoot(a)) {
+            if (++a.stalls > 2) { a.stalls = 0; leaveTree(a); return idle(a, 1 + rand() * 2); }
+            return walkTo(a, CLING[0], CLING[2], a.cfg.walk, "climb");
+          }
+          a.stalls = 0;
           // Up the bark, chest to the trunk, to where the limb leaves it on this side.
           onBranch(a, a.u0, CLING);
           const top = CLING[1];
@@ -399,7 +418,7 @@
       addChild(parent, root);
       const a = {
         kind: def.kind, cfg: SPECIES[def.kind], root, parts, node: parts.body, seed: list.length * 1.7,
-        x: def.x, y: 0, z: def.z, base: groundAt(def.x, def.z), sb: 0, eb: 0, heading: def.heading, gx: def.x, gz: def.z, state: "idle", timer: 1 + list.length, waits: 0,
+        x: def.x, y: 0, z: def.z, base: groundAt(def.x, def.z), sb: 0, eb: 0, heading: def.heading, gx: def.x, gz: def.z, state: "idle", timer: 1 + list.length, waits: 0, stalls: 0,
         speed: 0, moving: 0, phase: 0, after: "", pose: "stand", arc: 0, face: 0, gt: 0, gdur: 1,
         sx: 0, sy: 0, sz: 0, ex: 0, ey: 0, ez: 0, dx: 1, dz: 0, u0: 0.2, onBranch: false,
         tree: null, branch: null, log: null, perch: null, asleep: false,
