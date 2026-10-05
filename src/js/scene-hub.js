@@ -2556,43 +2556,53 @@
       atNode("bush", node, geometry.plantRadius * width);
       thickets.push({ x, y: ground, z, r: geometry.plantRadius * width, h: geometry.plantHeight * height });
     };
-    // Five uneven pockets on the water side of the shoreline trees, with open water between them and
-    // toward the entrance. The entire crown, including its sway, stays within the pool's rim.
+    // Five larger pockets behind the shoreline trees, on their path side in the flooded shallows.
+    // Leaves can reach back over the water; their outer edge and sway stop before the walking path.
     let foliageIndex = 0;
     for (const [degrees, count] of [[61.5, 2], [133.5, 3], [205.5, 2], [241.5, 3], [313.5, 2]]) {
       for (let j = 0; j < count; j++) {
         const geometry = undergrowth[foliageIndex++ % undergrowth.length];
-        const width = Math.min((j ? 0.6 : 0.94) + foliageRand() * 0.22, 1.36 / geometry.plantRadius);
-        const radius = geometry.plantRadius * width + 0.14, r = L.LAKE_R - radius - 0.08 - foliageRand() * 0.12;
-        const spread = Math.max(0, 18 * DEG - Math.asin((radius + 0.35) / r));
+        const width = Math.min((j ? 1.04 : 1.32) + foliageRand() * 0.28, 1.78 / geometry.plantRadius);
+        const radius = geometry.plantRadius * width + 0.14;
+        const r = Math.min(L.LAKE_R + 0.6 + foliageRand() * 0.25, L.RING.lowland - 0.12 - radius);
+        const spread = Math.max(0, 18 * DEG - Math.asin((radius + L.CHANNEL.low + 0.03) / r));
         const bearing = degrees * DEG + (j ? (j & 1 ? 1 : -1) : foliageRand() - 0.5) * spread * 0.9;
-        plantThicket(geometry, Math.sin(bearing) * r, L.membraneY(r), Math.cos(bearing) * r,
-          width, 1.15 + foliageRand() * 0.3, bearing + (foliageRand() - 0.5) * 1.8);
+        const x = Math.sin(bearing) * r, z = Math.cos(bearing) * r;
+        plantThicket(geometry, x, Math.max(L.LEVEL.shore, L.groundAt(x, z)), z,
+          width, (j ? 1.35 : 1.6) + foliageRand() * 0.3, bearing + (foliageRand() - 0.5) * 1.8);
       }
     }
-    // Larger patches gather around the forest's existing trees instead of filling every empty square.
-    // Full leaf footprints keep the paths, sleeping nests, channels, signs and animal starts open.
-    const poolThickets = thickets.length;
-    for (let attempt = 0; attempt < 720 && thickets.length < poolThickets + 18; attempt++) {
-      const tree = trees[(foliageRand() * trees.length) | 0];
-      if (Math.hypot(tree.x, tree.z) <= L.LAKE_R + 0.1) continue;
+    // Start on the raised jungle's outer shoulders, then gather patches around trees and in forest gaps.
+    // Full leaf footprints keep paths, nests and channels open; only the roots need level footing.
+    const poolThickets = thickets.length, shoulders = [55, 75, 95, 115, 135, 145];
+    for (let attempt = 0; attempt < 1200 && thickets.length < poolThickets + 24; attempt++) {
+      const shoulder = attempt < shoulders.length * 12;
       const geometry = undergrowth[(thickets.length - poolThickets) % undergrowth.length];
-      const width = 0.7 + foliageRand() * 0.36, radius = geometry.plantRadius * width + 0.12;
-      const angle = foliageRand() * Math.PI * 2, offset = 1.1 + foliageRand() * 1.6;
-      const x = tree.x + Math.sin(angle) * offset, z = tree.z + Math.cos(angle) * offset;
+      const width = Math.min(1.02 + foliageRand() * 0.3, (shoulder ? 1.42 : 1.7) / geometry.plantRadius);
+      const radius = geometry.plantRadius * width + 0.12;
+      const angle = shoulder ? (shoulders[(attempt / 12) | 0] + (foliageRand() - 0.5) * 9) * DEG : foliageRand() * Math.PI * 2;
+      const radial = shoulder ? 18.91 + foliageRand() * 0.09
+        : L.RING.path + radius + foliageRand() * (L.edgeAt(angle) - L.RING.path - 2 * radius - 0.3);
+      let x = Math.sin(angle) * radial, z = Math.cos(angle) * radial;
+      if (!shoulder && attempt % 3) {
+        const tree = trees[(foliageRand() * trees.length) | 0];
+        if (Math.hypot(tree.x, tree.z) <= L.LAKE_R + 0.1) continue;
+        const offset = 1.3 + foliageRand() * 1.8;
+        x = tree.x + Math.sin(angle) * offset; z = tree.z + Math.cos(angle) * offset;
+      }
       const ground = L.groundAt(x, z), r = Math.hypot(x, z), bearing = Math.atan2(x, z);
       if (ground < L.LEVEL.ground || L.keptClear(x, z, radius) || r + radius > L.edgeAt(bearing) - 0.3
-        || !level(x, z, Math.min(0.55, radius * 0.4), ground)) continue;
+        || !level(x, z, 0.24 * width, ground)) continue;
       let supported = true;
       for (let j = 0; j < 8; j++) {
         const a = j * Math.PI / 4, px = x + Math.sin(a) * radius, pz = z + Math.cos(a) * radius;
-        if (Math.abs(L.groundAt(px, pz) - ground) > L.UNIT || !L.onIsland(px, pz, 0.25)) { supported = false; break; }
+        if (L.groundAt(px, pz) > ground + L.UNIT || !L.onIsland(px, pz, 0.25)) { supported = false; break; }
       }
       if (!supported) continue;
       if (claimed.some((c) => Math.hypot(x - c.x, z - c.z) < c.r + radius)
         || obstacles.some((c) => Math.hypot(x - c.x, z - c.z) < c.r + radius * 0.55)
         || thickets.some((c) => Math.hypot(x - c.x, z - c.z) < (c.r + radius) * 0.62)) continue;
-      plantThicket(geometry, x, ground, z, width, 0.8 + foliageRand() * 0.38, angle);
+      plantThicket(geometry, x, ground, z, width, 1.15 + foliageRand() * 0.4, angle);
     }
     // What the rain lands on above the ground: the dense middle of every crown, a dome over its cells of the
     // layout's grid. A crown's ragged edge lets the drops through, so the forest floor still sees rain between
