@@ -184,7 +184,7 @@
   const WANDER_COUNT = 36, WANDER_INNER = 5.5;
   const ALTAR_HEIGHT = 0.34, ALTAR_BLOCK_WIDTH = 0.2, ALTAR_BLOCK_ARC = 0.3, ALTAR_RING_GAP = 0.02, ALTAR_MAX_BLOCKS = 512;
   const RIPEN = 25, TREE_CHANCE = 0.5, BUSH_CHANCE = 0.25;
-  const PROP_TIPS = { tree: "Tree · shake it", bush: "Bush · rustle it", rock: "Rock · hit to break", crate: "Box · hit to break", barrel: "Barrel · hit to break", flower: "Flowers", torch: "Torch · warm", firepit: "Fire pit", bedroll: "Somebody's bed", ladder: "Ladder · wobbly", dock: "Dock · creaky", magazine: "Spare magazine · walk into it to collect", poolbridge: "Vine bridge · to the Mempool island", poolsign: "The Mempool · the way down is through the hill", poolpainting: "Wall painting · tap to read it closely", chainsign: "The chain, at a glance · tap to read it", weathersign: "Reading the weather · tap for the key", poolrock: "Mossy rock", poolfern: "Fern · rustle it", poollog: "Fallen log · something lives in it", jaguar: "Jaguar · do not poke", monkey: "Monkey · it watches you", toucan: "Toucan · big beak", canopy: "Rainforest tree · shake it", jumbotron: "Oogatron · OogaBoogaX on the big screen · tap the screen for a close-up", palm: "Palm · shake it", bifrostbridge: "Bifröst · the bridge to ₿IFRÖST", bifrostgate: "₿IFRÖST · walk an Ooga through the field", heimdall: "Heimdall · keeper of the bridge", gate: null };
+  const PROP_TIPS = { tree: "Tree · shake it", bush: "Bush · rustle it", rock: "Rock · hit to break", crate: "Box · hit to break", barrel: "Barrel · hit to break", flower: "Flowers", torch: "Torch · warm", firepit: "Fire pit", bedroll: "Somebody's bed", ladder: "Ladder · wobbly", dock: "Dock · creaky", magazine: "Spare magazine · walk into it to collect", poolbridge: "Vine bridge · to the Mempool island", poolsign: "Mempool Rainforest · the way down is through the hill", poolpainting: "Wall painting · tap to read it closely", chainsign: "The chain, at a glance · tap to read it", weathersign: "Reading the weather · tap for the key", poolrock: "Mossy rock", poolfern: "Fern · rustle it", poollog: "Fallen log · something lives in it", jaguar: "Jaguar · do not poke", monkey: "Monkey · it watches you", toucan: "Toucan · big beak", canopy: "Rainforest tree · shake it", jumbotron: "Oogatron · OogaBoogaX on the big screen · tap the screen for a close-up", palm: "Palm · shake it", bifrostbridge: "Bifröst · the bridge to ₿IFRÖST", bifrostgate: "₿IFRÖST · walk an Ooga through the field", heimdall: "Heimdall · keeper of the bridge", gate: null };
   const RETICLE_PROPS = new Set(["tree", "bush", "rock", "crate", "barrel", "flower", "torch", "firepit", "ladder", "poolsign", "poolpainting", "chainsign", "weathersign", "poolfern", "poollog", "jaguar", "monkey", "toucan", "canopy", "jumbotron", "palm", "timechainentrance", "timechainboard", "timechainchair", "timechainbeer", "bifrostgate", "heimdall"]);
   const workCave = (slot) => slot.repo && (slot.status === "open" || slot.status === "mirror");
   const MATRIX_LIVING_PROPS = new Set(["tree"]);
@@ -2356,20 +2356,18 @@
     for (const node of site.crossings) node.sightHidden = true;
     addProp("poolbridge", site.bridge, worldX(0, place.bridgeLocalZ + S.span / 2), worldZ(0, place.bridgeLocalZ + S.span / 2), S.width);
     addLamp(site.bridge, LAMP.lantern, worldX(0, place.bridgeLocalZ), place.y + 3.4, worldZ(0, place.bridgeLocalZ), false, 0, "poolbridge:lanterns").nightOnly = true;
-    atNode("poolsign", site.sign, 1.4);
-    // The chain board stands along the court's far edge, turned to the bridge, with the weather key at the lake end
-    // of the court: both are read on the way in, before the forest closes round the path.
-    const B = P.CHAIN_BOARD, boardBearing = L.COURT.from + 0.05;
-    const boardNode = createNode({ position: { x: Math.sin(boardBearing) * 17.7, y: L.LEVEL.court, z: Math.cos(boardBearing) * 17.7 }, rotation: { x: 0, y: Math.PI / 2 + boardBearing, z: 0 }, geometry: P.chainBoard() });
-    // The panel is centred on the face from the board's own numbers, so resizing the board moves it.
-    const panelNode = createNode({
-      position: { x: -CHAIN_PANEL_W * B.px / 2, y: B.y + (B.h - CHAIN_PANEL_H * B.px) / 2, z: B.d / 2 + 0.02 }
-    });
+    atNode("poolsign", site.sign, site.sign.geometry.signWidth * 0.55);
+    // World east is the far shore from the bridge. Face inward across the water, in front of the shoreline
+    // trees, with the board and its lettering curved around the pool's centre at this same radius.
+    const B = P.CHAIN_BOARD, boardBearing = Math.PI / 2 - place.ry;
+    const boardNode = createNode({ position: { x: Math.sin(boardBearing) * B.r, y: L.LEVEL.shore, z: Math.cos(boardBearing) * B.r }, rotation: { x: 0, y: boardBearing + Math.PI, z: 0 }, geometry: P.chainBoard() });
+    const panelNode = createNode();
     addChild(boardNode, panelNode);
     addChild(site.node, boardNode);
     atNode("chainsign", boardNode, B.w * 0.55);
-    // A small post beside the way to the lake: the weather is the other half of what the chain is saying here.
-    const infoNode = createNode({ position: { x: Math.sin(-0.17) * 14.4, y: L.LEVEL.court, z: Math.cos(-0.17) * 14.4 }, rotation: { x: 0, y: 0.25, z: 0 }, geometry: P.infoSign() });
+    // Keep the question-mark weather key beside the board, just past its curved frame.
+    const infoBearing = boardBearing + (B.w / 2 + P.INFO_SIGN.w / 2 + 0.8) / B.r;
+    const infoNode = createNode({ position: { x: Math.sin(infoBearing) * B.r, y: L.LEVEL.shore, z: Math.cos(infoBearing) * B.r }, rotation: { x: 0, y: infoBearing + Math.PI, z: 0 }, geometry: P.infoSign() });
     addChild(site.node, infoNode);
     atNode("weathersign", infoNode, 1);
     {
@@ -2461,11 +2459,10 @@
       }
     }
     const claimed = ANIMALS.map(([, x, z]) => ({ x, z, r: BEAST_CLEAR }));
-    // What the animals keep off, in the island group's frame: the boards and the sign, then every trunk, rock and
-    // log the scatter places.
+    // What the animals keep off, in the island group's frame: the boards, then every trunk, rock and log the
+    // scatter places. The entrance name is overhead, so it does not block the gateway.
     const obstacles = [
-      { x: boardNode.position.x, z: boardNode.position.z, r: B.w / 2 }, { x: infoNode.position.x, z: infoNode.position.z, r: 0.7 },
-      { x: site.sign.position.x, z: site.sign.position.z, r: 1.3 }
+      { x: boardNode.position.x, z: boardNode.position.z, r: B.w / 2 }, { x: infoNode.position.x, z: infoNode.position.z, r: 0.7 }
     ];
     const trees = [], logs = [];
     // Rainforest: three canopy heights, ferns and shrubs under them, each species one shared geometry
@@ -4858,7 +4855,7 @@
     }
     const node = chainSign.node;
     if (node.geometry) renderer.releaseGeometry(node.geometry);
-    node.geometry = poolModels.panelFrom(c2, CHAIN_PANEL_W, CHAIN_PANEL_H, poolModels.CHAIN_BOARD.px, poolModels.CHAIN_BOARD.px, CHAIN_PANEL_BG);
+    node.geometry = poolModels.chainPanel(c2, CHAIN_PANEL_W, CHAIN_PANEL_H, CHAIN_PANEL_BG);
   };
   // The Mempool island's two boards in the shared board dialog. Each is a list of pages, every page a caption, a
   // note and a drawing in the jumbotron's 5x7 font on the board's own small canvas; `refresh` redraws the shown

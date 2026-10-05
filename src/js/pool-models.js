@@ -14,7 +14,7 @@
 //
 // `carve` cuts headline type from `hubModels.SIGN_GLYPHS` and `panelFrom` merges a canvas of the jumbotron's 5x7
 // font into bounded quads, which is how the chamber's wall paintings are set. `chainBoard`/`CHAIN_BOARD`
-// is the stats board by the bridge court, whose panel is placed from the board's own numbers, and `infoSign` the
+// is the curved stats board on the lake's east shore, whose panel follows the same arc, and `infoSign` the
 // weather key beside it. The plants, rocks, animals and bridge are cartoon geometry from the hub's kit (`leafy`,
 // `puff`, `limb`, `flatInto`), one cached build each shared by every copy; the solid ones keep their first block
 // build as `collisionGeometry`. `spot` finds the rim and `build` returns the placed group.
@@ -959,7 +959,7 @@
     return geo;
   });
 
-  const caveSign = cached(() => BL.hubModels.postSign("The Mempool", 0.8, 0.3));
+  const caveSign = cached(() => BL.hubModels.caveSign("Mempool Rainforest"));
   const TORCH_STEM_H = 1.6;
   // Iron plates on a frame's corners, each held by two rivets, as the cave signs wear them: `x` and `y` are the
   // corner centres' offsets from (0, cy), `z` the frame's front face.
@@ -981,25 +981,52 @@
     bevelBox({ w: size, h: size, d: size, color: "#ffb347", emissive: 1, bevel: size * 0.2, offset: { y: y + size * 0.72 } }),
     bevelBox({ w: size * 1.2, h: size * 0.22, d: size * 1.2, color: "#3b2a1c", offset: { y: y + size * 1.32 } })
   ];
-  // A small standing board across the hole from the bridge, carrying the chain's headline numbers so a
-  // visitor reads them without going down. The face looks along +z, which is the way `carve` and
-  // `panelFrom` cut, so placing it with `rotation.y = 0` on the far side turns it back at the crossing.
-  // `y` is the board's bottom edge, so it is also how much post shows under it: a board this size
-  // wants short legs, not stilts.
-  const CHAIN_BOARD = { w: 6.8, h: 3, y: 1, d: 0.3, px: 0.06 };
+  // The chain board stands just inside the east shoreline, in front of the trees. Its inward-facing slate,
+  // frame and live lettering share the pool's circular arc; +z faces the centre in the board's own frame.
+  // Its feet reach the bowl, while the face stays above the fullest waterline.
+  const CHAIN_BOARD = { w: 6.8, h: 3, y: 1, d: 0.3, px: 0.06, r: L.LAKE_R - 0.75 };
+  const BOARD_FOOT = L.membraneY(CHAIN_BOARD.r - 0.3) - 0.08;
+  const curveChainBoard = (source, ox = 0, oy = 0, oz = 0) => {
+    const geo = { ...source, verts: [], faces: [], lines: [] }, v = source.verts, radius = CHAIN_BOARD.r;
+    const point = (x, y, z) => {
+      const a = (x + ox) / radius, r = radius - z - oz;
+      return pushVert(geo, Math.sin(a) * r, y + oy, radius - Math.cos(a) * r);
+    };
+    for (const f of source.faces) {
+      const ids = f.i.slice();
+      if (ids.length !== 4) {
+        geo.faces.push({ ...f, i: ids.map((id) => point(v[id * 3], v[id * 3 + 1], v[id * 3 + 2])) });
+        continue;
+      }
+      // Split wide faces before bending: moving only a plank's end vertices leaves a flat chord.
+      if (Math.abs(v[ids[3] * 3] - v[ids[0] * 3]) > Math.abs(v[ids[1] * 3] - v[ids[0] * 3])) ids.push(ids.shift());
+      const a = ids[0] * 3, b = ids[1] * 3, c = ids[2] * 3, d = ids[3] * 3;
+      const count = Math.max(1, Math.ceil(Math.max(Math.abs(v[b] - v[a]), Math.abs(v[c] - v[d])) / 0.24));
+      for (let i = 0; i < count; i++) {
+        const u = i / count, t = (i + 1) / count;
+        geo.faces.push({ ...f, i: [
+          point(lerp(v[a], v[b], u), lerp(v[a + 1], v[b + 1], u), lerp(v[a + 2], v[b + 2], u)),
+          point(lerp(v[a], v[b], t), lerp(v[a + 1], v[b + 1], t), lerp(v[a + 2], v[b + 2], t)),
+          point(lerp(v[d], v[c], t), lerp(v[d + 1], v[c + 1], t), lerp(v[d + 2], v[c + 2], t)),
+          point(lerp(v[d], v[c], u), lerp(v[d + 1], v[c + 1], u), lerp(v[d + 2], v[c + 2], u))
+        ] });
+      }
+    }
+    return geo;
+  };
   // Framed like the cave signs: stout legs, thick bevelled rails with ragged ends standing proud of the slate,
   // bevelled stiles, iron plates riveted over the corners and a lamp on the top rail.
   const chainBoard = cached(() => {
     const B = CHAIN_BOARD, top = B.y + B.h;
-    return merge(
-      ...[-1, 1].map((side) => bevelBox({ w: 0.5, h: B.y + 0.4, d: 0.5, color: SIGN_POST, offset: { x: side * (B.w / 2 - 0.3), y: (B.y + 0.4) / 2 } })),
+    return curveChainBoard(merge(
+      ...[-1, 1].map((side) => bevelBox({ w: 0.5, h: B.y + 0.4 - BOARD_FOOT, d: 0.5, color: SIGN_POST, offset: { x: side * (B.w / 2 - 0.3), y: (B.y + 0.4 + BOARD_FOOT) / 2 } })),
       box({ w: B.w, h: B.h, d: B.d, color: "#2a2724", offset: { y: B.y + B.h / 2 } }),
       bevelBox({ w: B.w + 0.57, h: 0.4, d: 0.52, color: SIGN_WOOD[1], bevel: 0.08, offset: { x: 0.04, y: top + 0.12 } }),
       bevelBox({ w: B.w + 0.44, h: 0.36, d: 0.52, color: SIGN_WOOD[2], bevel: 0.08, offset: { x: -0.05, y: B.y - 0.1 } }),
       ...[-1, 1].map((side) => bevelBox({ w: 0.34, h: B.h, d: 0.48, color: SIGN_WOOD[0], bevel: 0.07, offset: { x: side * (B.w / 2 - 0.1), y: B.y + B.h / 2 } })),
       ...ironCorners(B.w / 2 - 0.1, B.y + B.h / 2, B.h / 2 + 0.05, 0.26, 0.36),
       ...lampOn(top + 0.32, 0.3)
-    );
+    ));
   });
   // A small post beside the big board, carrying a question mark: the weather key is behind it.
   const INFO_SIGN = { w: 1.1, h: 1.1, y: 1.1, d: 0.26 };
@@ -1016,7 +1043,7 @@
       }
     }
     return merge(
-      bevelBox({ w: 0.36, h: I.y, d: 0.36, color: SIGN_POST, offset: { y: I.y / 2 } }),
+      bevelBox({ w: 0.36, h: I.y - BOARD_FOOT, d: 0.36, color: SIGN_POST, offset: { y: (I.y + BOARD_FOOT) / 2 } }),
       box({ w: I.w, h: I.h, d: I.d, color: "#3a3430", offset: { y: I.y + I.h / 2 } }),
       bevelBox({ w: I.w + 0.36, h: 0.26, d: I.d + 0.18, color: SIGN_WOOD[1], bevel: 0.06, offset: { x: 0.03, y: I.y + I.h + 0.07 } }),
       bevelBox({ w: I.w + 0.28, h: 0.24, d: I.d + 0.18, color: SIGN_WOOD[2], bevel: 0.06, offset: { x: -0.03, y: I.y - 0.06 } }),
@@ -1132,8 +1159,15 @@
     return geo;
   };
 
+  // Live numbers sit just proud of the slate and bend with it, including the run-merged glyph faces.
+  const chainPanel = (ctx, w, h, background) => {
+    const B = CHAIN_BOARD;
+    return curveChainBoard(panelFrom(ctx, w, h, B.px, B.px, background),
+      -w * B.px / 2, B.y + (B.h - h * B.px) / 2, B.d / 2 + 0.02);
+  };
+
   // The island as one group: its body, the smooth floors, the bridge, the lake's membrane, the plank crossings,
-  // the clearings' beds, the sign by the mouth and the torches of the court. Scatter is the hub's.
+  // the clearings' beds, the name above the bridge gateway and the torches of the court. Scatter is the hub's.
   const build = (place) => {
     const node = createNode({ position: { x: place.x, y: place.y, z: place.z }, rotation: { x: 0, y: place.ry, z: 0 } });
     const groundNode = createNode({ geometry: islet() });
@@ -1150,10 +1184,8 @@
       rotation: { x: 0, y: channel.bearing, z: 0 }, geometry: crossing()
     }));
     const beds = L.NESTS.map((nest, i) => createNode({ position: { x: nest.x, y: nest.y, z: nest.z }, rotation: { x: 0, y: nest.bearing, z: 0 }, geometry: NEST_BEDS[i](), sightHidden: true }));
-    // The sign stands on the court beside the mouth, its face to the bridge.
-    // Clear of the bridge's gateway and turned to whoever steps off it.
-    const mouth = L.RAMP.start - 0.1, signR = L.RAMP.r + L.RAMP.half + 0.9;
-    const signNode = createNode({ position: { x: Math.sin(mouth) * signR, y: L.LEVEL.court, z: Math.cos(mouth) * signR }, rotation: { x: 0, y: -0.85, z: 0 }, geometry: caveSign() });
+    // The full name crowns the island gateway, with its lower pegs seated into the crossbeam.
+    const signNode = createNode({ position: { x: 0, y: 4.48, z: place.bridgeLocalZ }, geometry: caveSign() });
     // Lit like every hub torch, so the Matrix treats their flames as fire rather than as stone.
     const torches = [-1, 1].map((side) => {
       const r = L.RAMP.r + side * (L.RAMP.half + 0.9), b = L.RAMP.start - 0.07;
@@ -1165,7 +1197,7 @@
 
   BL.poolModels = {
     SITE, UNIT, BEARING, DIR, WATER, FOAM, spot, build, latheBy, islet, rampFloor, membrane, chamberBacking, crossing, CROSSING, NEST_BEDS, bridge, caveSign, torchPost, wallTorch, VEINS, roots,
-    TORCH_STEM_H, carve, carveCells, panelFrom, chainBoard, CHAIN_BOARD, infoSign, INFO_SIGN, CANOPY, UNDERGROWTH, fern, shrub, mossRock, deckY,
+    TORCH_STEM_H, carve, carveCells, panelFrom, chainPanel, chainBoard, CHAIN_BOARD, infoSign, INFO_SIGN, CANOPY, UNDERGROWTH, fern, shrub, mossRock, deckY,
     beastRig, flowers, log,
     COLORS: { LEAF, LEAF_DK, LEAF_LT, BARK, BARK_LT, STONE, STONE_DK, MOSS, WET, GOLD }
   };

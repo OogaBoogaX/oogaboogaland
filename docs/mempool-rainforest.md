@@ -6,6 +6,8 @@ Issue: https://github.com/OogaBoogaX/oogaboogaland/issues/140. Its five images a
 
 ## Local preview revisions
 
+The chain billboard now stands just inside the east shoreline, facing across the pool toward the bridge with the trees behind it. Its slate, timber rails and live lettering all follow the same 7.25 m radius around the pool centre; the feet extend down to the bowl and the face stays above full overflow. The question-mark weather key stays beside it with its existing tap interaction. The full “Mempool Rainforest” name is mounted above the island-end bridge frame, leaving the gateway clear.
+
 Buoyancy outside the curved bowl now uses at least the shore or channel-bed height. Shore voxels whose centres fall inside the lake can report the underground chamber floor; that lower floor must never admit an underground walker into the pool's water volume. The shared footing check protects both Oogas and gorillas while retaining normal swimming above the bed.
 
 The rain now falls vertically. The cloud deck again uses its original 34 m placement radius and drifting formation. Bed-route gorillas turn toward their route even on raised bridge decks, with the existing swept collision checks. The pool and streams now use the waterfall's luminous three-blue palette, drifting rectangular patches, moving square foam and fine surface grain (`face.lake`) on both renderers. The bright water retains transparency (base opacity 0.78; foam and grazing views are denser), with the same colour and motion when seen from below. Rain and movement still deform the surface in 3D. The hanging curved underside carries the same moving water material at base opacity 0.55, clipped at the current waterline; its collision shell stays active even when empty.
