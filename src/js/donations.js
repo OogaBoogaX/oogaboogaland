@@ -4,27 +4,16 @@
 // leaderboard and whether donations are open. Without an API the simulator plays tips now and then, as it always has,
 // for demos and for the suite.
 //
-// The API's address is the production one once it is up, and empty until then. A page served from this machine may
-// name another with `?api=https://host` (the local regtest stack); anywhere else the parameter is ignored, so a link
-// can never point the real site at someone else's invoices. The content policy (`connect-src https: wss:`) would not
-// stop it.
+// The page only ever calls its own address: its Worker passes /donations/* on to bananapayserver over a service binding
+// and names the donor from its own GitHub sign-in, so the page never names one. Real mode starts once that Worker says
+// it has the binding (`useOrigin`, which the director calls when the account's look at /api/me reports `donations`), so
+// staging and production each find their own with nothing stamped into the build. The socket's status says which
+// network the payments are on: anything but mainnet is a test (`testNetwork`), and the page labels it so.
 (() => {
   "use strict";
   const BL = window.BL = window.BL || {};
-  const API_DEFAULT = "", LOCAL_HOSTS = ["localhost", "127.0.0.1"];
-  const apiOf = () => {
-    const asked = new URLSearchParams(location.search).get("api");
-    if (asked && LOCAL_HOSTS.includes(location.hostname)) {
-      try {
-        const url = new URL(asked);
-        if (url.protocol === "https:") return url.origin;
-      } catch {
-        // Not an address: no override.
-      }
-    }
-    return API_DEFAULT;
-  };
-  const api = apiOf(), real = !!api;
+  const NETWORKS = ["mainnet", "testnet", "signet", "regtest"];
+  let real = false;
   const config = {
     serverUrl: "https://btcpay.example.org",
     storeId: "REPLACE_WITH_STORE_ID",
@@ -55,12 +44,12 @@
 
   // ---- real mode: the API ------------------------------------------------------------------------------------
   const isNumber = (v) => typeof v === "number" && Number.isFinite(v);
-  // One call: JSON in and out with the sign-in cookie. Resolves to the reply (`{}` for a 204), or to `{ error }` as
-  // the API names it, `network` when it cannot be reached.
+  // One call to the page's own Worker: JSON in and out with the sign-in cookie. Resolves to the reply (`{}` for a
+  // 204), or to `{ error }` as the API names it, `network` when it cannot be reached.
   const call = async (path, body) => {
     let res;
     try {
-      res = await fetch(api + path, { method: "POST", credentials: "include", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+      res = await fetch(path, { method: "POST", credentials: "same-origin", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
     } catch {
       return { error: "network" };
     }
@@ -97,9 +86,10 @@
 
   // The socket. It sends nothing (a page that does is closed), comes back with backoff, and on a reconnect asks for
   // what it missed after the last donation it played; a donation already played is skipped. `state.open` is the
-  // API's last word on whether donations are open, null before it has said.
+  // API's last word on whether donations are open, and `state.network` the network it takes payments on, each null
+  // before it has said.
   const SOCKET_MIN = 1000, SOCKET_MAX = 60000, PLAYED = 64;
-  const state = { open: null, connected: false, attempts: 0, donations: 0 };
+  const state = { open: null, network: null, connected: false, attempts: 0, donations: 0 };
   const played = new Array(PLAYED).fill(""), handlers = { donation: null, status: null, pile: null, board: null };
   let socket = null, timer = 0, backoff = SOCKET_MIN, after = "", playedAt = 0, live = false;
   const donationOf = (d) => {
@@ -117,6 +107,7 @@
     backoff = SOCKET_MIN;
     if (data.type === "status" && typeof data.open === "boolean") {
       state.open = data.open;
+      if (NETWORKS.includes(data.network)) state.network = data.network;
       if (handlers.status) handlers.status(data.open);
     } else if (data.type === "donation") {
       const donation = donationOf(data.donation), b = data.bananas;
@@ -142,7 +133,7 @@
     state.attempts++;
     let ws;
     try {
-      ws = new WebSocket(`${api.replace(/^https/, "wss")}/donations/socket${after ? `?after=${encodeURIComponent(after)}` : ""}`);
+      ws = new WebSocket(`${location.origin.replace(/^http/, "ws")}/donations/socket${after ? `?after=${encodeURIComponent(after)}` : ""}`);
     } catch {
       retry();
       return;
@@ -171,45 +162,64 @@
     }
     return SIM_AMOUNTS[0];
   };
+  let simTimer = 0, identity = () => ({}), subscribed = false;
+  const simulate = (delayMs) => {
+    simTimer = window.setTimeout(() => {
+      const who = identity();
+      handlers.donation({
+        id: `sim-${randomId()}`,
+        sats: pickAmount(),
+        handle: sanitize(who.handle, HANDLE_MAX),
+        message: sanitize(who.message, MESSAGE_MAX),
+        at: Date.now()
+      }, null);
+      simulate(15e3 + Math.random() * 20e3);
+    }, delayMs);
+  };
+  // Real mode opens the socket; otherwise the simulator plays, unless nosim has switched it off.
+  const begin = () => {
+    if (!real) {
+      if (config.simulate) simulate(6e3);
+      return;
+    }
+    if (typeof WebSocket === "undefined") return;
+    live = true;
+    connect();
+  };
   // Each donation reaches `onDonation(donation, bananas)`, `bananas` the API's `{ exact, rounded }` in real mode and
   // null from the simulator. In real mode `onStatus(open)`, `onPile({ bananas, eatPerHour })` and
   // `onBoard(entries)` follow the socket too.
-  const subscribe = (onDonation, { identity = () => ({}), onStatus = null, onPile = null, onBoard = null } = {}) => {
-    if (real) {
-      if (typeof WebSocket === "undefined") return () => {};
-      Object.assign(handlers, { donation: onDonation, status: onStatus, pile: onPile, board: onBoard });
-      live = true;
-      connect();
-      return () => {
-        live = false;
-        window.clearTimeout(timer);
-        timer = 0;
-        if (socket) {
-          const ws = socket;
-          socket = null;
-          ws.onopen = ws.onmessage = ws.onclose = ws.onerror = null;
-          ws.close();
-        }
-        state.connected = false;
-      };
-    }
-    if (!config.simulate) return () => { };
-    let timer = 0;
-    const schedule = (delayMs) => {
-      timer = window.setTimeout(() => {
-        const who = identity();
-        onDonation({
-          id: `sim-${randomId()}`,
-          sats: pickAmount(),
-          handle: sanitize(who.handle, HANDLE_MAX),
-          message: sanitize(who.message, MESSAGE_MAX),
-          at: Date.now()
-        }, null);
-        schedule(15e3 + Math.random() * 20e3);
-      }, delayMs);
+  const subscribe = (onDonation, { identity: who = () => ({}), onStatus = null, onPile = null, onBoard = null } = {}) => {
+    Object.assign(handlers, { donation: onDonation, status: onStatus, pile: onPile, board: onBoard });
+    identity = who;
+    subscribed = true;
+    begin();
+    return () => {
+      subscribed = live = false;
+      window.clearTimeout(simTimer);
+      window.clearTimeout(timer);
+      simTimer = timer = 0;
+      if (socket) {
+        const ws = socket;
+        socket = null;
+        ws.onopen = ws.onmessage = ws.onclose = ws.onerror = null;
+        ws.close();
+      }
+      state.connected = false;
     };
-    schedule(6e3);
-    return () => window.clearTimeout(timer);
   };
-  BL.donations = { config, real, api, state, createRequest, invoice, note, subscribe, sanitize, HANDLE_MAX, MESSAGE_MAX };
+  // The page's own Worker reaches the API: real mode from now on. The answer can come after the simulator has started,
+  // which then stops for the socket.
+  const useOrigin = () => {
+    if (real || location.protocol !== "https:" && location.protocol !== "http:") return;
+    real = true;
+    if (!subscribed) return;
+    window.clearTimeout(simTimer);
+    simTimer = 0;
+    begin();
+  };
+  // The test network real donations are paid on (signet on staging), or "" for mainnet, before the API has said, and
+  // when simulated.
+  const testNetwork = () => real && state.network && state.network !== "mainnet" ? state.network : "";
+  BL.donations = { config, get real() { return real; }, get testNetwork() { return testNetwork(); }, state, useOrigin, createRequest, invoice, note, subscribe, sanitize, HANDLE_MAX, MESSAGE_MAX };
 })();

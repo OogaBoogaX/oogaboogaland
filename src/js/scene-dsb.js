@@ -503,6 +503,6 @@
     dsbScene.input = dsbScene.debug = null; return { targets: count };
   };
   const stats = () => { let visibleNodes = 0, allNodes = 0; traverseVisible(root, () => visibleNodes++); const visit = (node) => { allNodes++; for (const child of node.children) visit(child); }; visit(root); return { visibleNodes, allNodes, targets: input.targetCount, tweens: tweenCount(), dsbShots: shots.length, phase }; };
-  Object.assign(dsbScene, { enter, leave, update, overlay, onKey, stats, onLootCleared: () => {}, onDonation: (donation) => { game.recordDonation(donation); world.level = Math.min(BL.pile.MAX_BANANAS, world.level + BL.game.bananasFor(donation.sats)); }, liveGeometry: (set) => { set.add(avatar.headOpen).add(avatar.headClosed); for (const visitor of visitors) set.add(visitor.headOpen).add(visitor.headClosed); } });
+  Object.assign(dsbScene, { enter, leave, update, overlay, onKey, stats, onLootCleared: () => {}, onDonation: (donation, counted = null) => { game.recordDonation(donation, counted && counted.exact); world.level = Math.min(BL.pile.MAX_BANANAS, world.level + (counted ? counted.exact : BL.game.bananasFor(donation.sats))); }, liveGeometry: (set) => { set.add(avatar.headOpen).add(avatar.headClosed); for (const visitor of visitors) set.add(visitor.headOpen).add(visitor.headClosed); } });
   BL.scenes.dsb = dsbScene;
 })();

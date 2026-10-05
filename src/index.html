@@ -1423,16 +1423,25 @@
       </div>
       <canvas id="qr" width="0" height="0" aria-label="Donation QR code"></canvas>
       <p class="qr-url" id="qr-url"></p>
-      <label class="field"><span>Your handle</span><input id="handle" type="text" maxlength="39" autocomplete="off"
-          spellcheck="false" placeholder="anon" autofocus></label>
+      <div id="feed-kiosk" hidden>
+        <p class="help">Tips are paid with any Lightning wallet at the kiosk in the Lightning Factory, where the cooker
+          turns them into bananas.</p>
+        <p class="help" id="feed-account" hidden>Signed in with GitHub, your tips carry your name; signed out, they are
+          anonymous.</p>
+        <p class="help" id="feed-test" hidden>This is a test site: tips here are paid on a Bitcoin test network, with
+          coins that have no value.</p>
+      </div>
+      <label class="field" id="handle-field"><span>Your handle</span><input id="handle" type="text" maxlength="39"
+          autocomplete="off" spellcheck="false" placeholder="anon" autofocus></label>
       <label class="field"><span>Banana message</span><input id="message" type="text" maxlength="80" autocomplete="off"
           placeholder="shown when your banana is eaten"></label>
-      <div class="actions">
+      <div class="actions" id="feed-tips">
         <button type="button" data-action="tip">Tip 1.2K sats</button>
         <button type="button" data-action="tip-legendary">Tip 120K sats</button>
       </div>
-      <p class="help">Payments are simulated in this build.<span id="crate-help" hidden> Crates drop at 1K, 5K, 21K and
-          100K sats.</span></p>
+      <div class="actions feed-go" id="feed-go" hidden><button type="button" data-action="kiosk">Go to the kiosk</button></div>
+      <p class="help" id="feed-help"><span id="feed-simulated">Payments are simulated in this build.</span><span
+          id="crate-help" hidden> Crates drop at 1K, 5K, 21K and 100K sats.</span></p>
     </dialog>
     <dialog class="modal" id="recipe" aria-label="Add an Ooga">
       <div class="panel-head">

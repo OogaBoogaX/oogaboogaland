@@ -148,8 +148,8 @@
     rebalancer: ["Rebalancer · moving liquidity", "Rebalancing moves sats between channels so lines keep working. It is shown by the hour, never for one line."],
     treasury: ["Treasury · routing fees", "The gold under the glass is the node's public capacity, visible to anyone on the Lightning network. Each forward that earns the demo node a fee sends a nugget up the belt into the crate."],
     cooker: ["Banana cooker · tips into bananas", "Every tip is cooked here: the core throws its sats across, the cooker chomps and churns, and the bananas fly out through the gate to the island."],
-    kiosk: ["Donation kiosk · tip the Ooga Boogas", `Walk up and press Space, or tap it: pick an amount, pay its invoice and watch the cooker turn it into bananas.${donations.real ? "" : " Payments are simulated in this build."}`],
-    board: ["Banana donation board", `The tips this browser has seen, rounded and naming no one.${donations.real ? "" : " Payments are simulated in this build."} Everyone's totals come later.`],
+    kiosk: ["Donation kiosk · tip the Ooga Boogas", "Walk up and press Space, or tap it: pick an amount, pay its invoice and watch the cooker turn it into bananas.", true],
+    board: ["Banana donation board", "The tips this browser has seen, rounded and naming no one. Everyone's totals come later.", true],
     lookout: ["Watchtower · the node's signal", "The beam sweeps while the node's events are arriving. Dark means no signal: the node may be fine, but nothing is getting through."],
     study: ["Study Hall · locked", "Bananas first! The study hall opens in a later update."],
     tunnel: ["Peer tunnel", "Through here lives the peer at the other end of a line."],
@@ -792,6 +792,43 @@
     else leaveBooth(s);
   };
 
+  // Whatever shows donations as real or simulated, for the mode they are in now: the kiosk's attract picture (this
+  // visit's donation link as its QR, the one the dialog shows, or in real mode, with no fixed link, this site's own
+  // Factory address, which opens the cave on a phone), its screen flow (simulated, each invoice a fresh donation request
+  // and its payment this visitor's tip in the backend's shape; real, the API's invoices) with the screens' way out to
+  // the show and back to the walk, and the donations board's face. Set in `enter`, and again from `update` when the
+  // page's Worker turns real mode on after the visit has begun, when a visitor at the kiosk starts over on the new flow,
+  // or when the API names a test network, which only the pictures need: the flow reads it as it goes.
+  const showMode = (s) => {
+    const real = donations.real, net = donations.testNetwork, link = real ? `${location.origin}/lightning` : s.donationLink, b = s.booth;
+    s.kioskIdle.geometry = FM.kioskIdle(link, net);
+    s.boardFace.geometry = FM.boardFace(!real ? "SIMULATED · THIS BROWSER'S TIPS" : net ? `${net.toUpperCase()} TEST · THIS BROWSER'S TIPS` : "THIS BROWSER'S TIPS");
+    s.net = net;
+    if (s.real === real) return;
+    s.real = real;
+    b.flow = BL.factoryKiosk.create({
+      link: () => link,
+      real,
+      invoice: (sats, anon) => donations.invoice({ sats, message: game.state.message, anon }),
+      open: () => donations.state.open,
+      testNetwork: () => donations.testNetwork,
+      account: () => BL.net.state,
+      signIn: () => BL.net.login(),
+      request: () => donations.createRequest(game.state),
+      bananasFor: gameMod.bananasFor,
+      price: () => BL.chain.snapshot.priceUsd,
+      copy: (text) => {
+        if (navigator.clipboard) navigator.clipboard.writeText(text).catch(() => {});
+        hud.toast(real ? "Invoice copied" : "Invoice copied · payments are simulated in this build");
+      },
+      pay: (id, sats) => onDonation(tipEvent(id, sats)),
+      release: () => releaseTip(s),
+      watch: () => watchBooth(s),
+      close: () => leaveBooth(s)
+    });
+    if (b.mode === AT_KIOSK) b.flow.start();
+  };
+
   // A label hung at (x, y, z) under `parent`: the lettered face and the board behind it, which `setBoard` fills.
   const labelNode = (parent, x, y, z, turn = 0) => {
     const node = createNode({ position: { x, y, z }, rotation: { x: 0, y: turn, z: 0 } });
@@ -860,7 +897,7 @@
     setBoard(s.galleryLabel, "MORE CHANNELS", `${Math.max(0, total - 4)} lines, ${Math.max(0, total - shown)} not shown`, false);
     // The cooker's board counts what it has cooked on this page, rounded, and never names a donor or a time.
     const c = shared.cooker;
-    setData(s.cookBoard, donations.real ? "DONATIONS" : "DONATIONS (SIMULATED)", [["Tips cooked", gameMod.formatLarge(c.tips), "count"], ["Bananas out", gameMod.formatLarge(c.bananas), "ok"], ["Last tip", c.last ? `${rounded(c.last)} sats` : "None yet", "sats"]], 1.9);
+    setData(s.cookBoard, !donations.real ? "DONATIONS (SIMULATED)" : donations.testNetwork ? "DONATIONS (TEST)" : "DONATIONS", [["Tips cooked", gameMod.formatLarge(c.tips), "count"], ["Bananas out", gameMod.formatLarge(c.bananas), "ok"], ["Last tip", c.last ? `${rounded(c.last)} sats` : "None yet", "sats"]], 1.9);
     // The donations board: this browser's tips (the game's tally), rounded and naming no one or no time, until the
     // backend counts everyone's.
     const g = game.state, [todaySats, todayBananas] = game.tipsWithin(1), [weekSats, weekBananas] = game.tipsWithin(7);
@@ -913,14 +950,17 @@
     hud.setStats(game.state);
     // The visitor's own tip, paid at the kiosk, waits on its screen until they turn to watch it cook.
     const b = scene.booth;
-    if (b.flow.receive(donation.id, counted)) {
+    if (b.flow.receive(donation.id, counted, donation.handle)) {
       b.held += bananas;
       b.heldSats += donation.sats;
     } else cook(scene, bananas, donation.sats);
   };
-  // A tip from this visitor, in the shape the backend will push.
+  // A tip from this visitor, in the shape the backend will push. A demo tip is the simulation's alone: in real mode it
+  // would put a tip nobody paid on the boards.
   const tipEvent = (id, sats) => ({ id, sats, handle: donations.sanitize(game.state.handle, donations.HANDLE_MAX), message: donations.sanitize(game.state.message, donations.MESSAGE_MAX), at: Date.now() });
-  const demoTip = (sats) => onDonation(tipEvent(`demo-${Date.now()}`, sats));
+  const demoTip = (sats) => {
+    if (!donations.real) onDonation(tipEvent(`demo-${Date.now()}`, sats));
+  };
   const onLootCleared = () => {};
 
   const build = () => {
@@ -1104,10 +1144,11 @@
     // and its figures, which `refreshBoards` paints.
     const BD = FM.BOARD, board = FM.donationBoard(), bp = L.board;
     const boardNode = createNode({ position: { x: bp.x, y: bp.y, z: bp.z }, rotation: { x: 0, y: bp.turn, z: 0 } });
-    const boardBody = createNode({ geometry: board.timber }), boardFace = createNode({ position: { x: BD.face[0], y: BD.face[1], z: BD.face[2] }, geometry: FM.boardFace() });
+    const boardBody = createNode({ geometry: board.timber });
+    s.boardFace = createNode({ position: { x: BD.face[0], y: BD.face[1], z: BD.face[2] } });
     s.boardValues = createNode({ position: { x: BD.values[0], y: BD.values[1], z: BD.values[2] } });
-    addChild(boardFace, s.boardValues);
-    addChild(boardNode, boardBody, createNode({ geometry: board.iron }), createNode({ geometry: board.trim }), createNode({ geometry: board.glow }), boardFace);
+    addChild(s.boardFace, s.boardValues);
+    addChild(boardNode, boardBody, createNode({ geometry: board.iron }), createNode({ geometry: board.trim }), createNode({ geometry: board.glow }), s.boardFace);
     s.glassCorners = [];
     for (const [u, v] of [[-1, 1], [1, 1], [-1, -1], [1, -1]]) for (let i = 0; i < 3; i++) s.glassCorners.push(G.at[i] + G.right[i] * u * G.w / 2 + G.up[i] * v * G.h / 2);
     // The watchtower on the top deck: tower, lamp and the beam that sweeps round it.
@@ -1404,8 +1445,10 @@
         if (o.kind === "greeter") return greeter.greet();
         if (o.kind === "kiosk") return openBooth(scene);
         if (o.preset) pilot.goPreset(o.preset);
-        const tip = TIPS[o.kind];
-        if (tip) hud.toast(tip[1]);
+        // The kiosk's and the board's words own up to simulated or test payments, asked now: the page's Worker can turn
+        // real mode on after the visit has begun.
+        const tip = TIPS[o.kind], net = donations.testNetwork;
+        if (tip) hud.toast(!tip[2] || donations.real && !net ? tip[1] : `${tip[1]} ${net ? `Payments here are on ${net}, a test network, with coins that have no value.` : "Payments are simulated in this build."}`);
       },
       onOrbit: (dx, dy) => {
         if (!scene.booth.mode) onOrbit(dx, dy);
@@ -1431,6 +1474,11 @@
         hud.closeFeed();
         endBooth(scene);
         pilot.goPreset("show");
+      }
+      // In real mode the dialog sends the tip to the kiosk: the view glides on to its glass from wherever it is.
+      else if (action === "kiosk" && scene.booth.mode !== AT_KIOSK) {
+        endBooth(scene);
+        openBooth(scene);
       }
       else if (action === "reset") { game.resetAll(); location.reload(); }
       else if (action === "leave") leaveCave();
@@ -1458,31 +1506,8 @@
     const dressed = dressing(), lit = lighting();
     addChild(root, ...BL.dressing.nodes(dressed, { glow: 1 }), createNode({ geometry: lit.frame }), createNode({ geometry: lit.glass, sightHidden: true }));
     scene = build();
-    // The kiosk's attract screen carries this visit's donation link, the one the dialog shows. Its screen flow: each
-    // invoice a fresh donation request, its simulated payment this visitor's tip in the backend's shape, and the
-    // screens' way out to the show and back to the walk.
-    // In real mode there is no fixed donation link, so the attract screen's QR holds the Factory's own address, which
-    // opens the cave on a phone.
-    const link = donations.real ? `${BL.routes.site}/lightning` : donationRequest.url;
-    scene.kioskIdle.geometry = FM.kioskIdle(link);
-    scene.booth.flow = BL.factoryKiosk.create({
-      link: () => link,
-      real: donations.real,
-      invoice: (sats) => donations.invoice({ sats, message: game.state.message }),
-      open: () => donations.state.open,
-      request: () => donations.createRequest(game.state),
-      bananasFor: gameMod.bananasFor,
-      price: () => BL.chain.snapshot.priceUsd,
-      handle: () => donations.sanitize(game.state.handle, donations.HANDLE_MAX),
-      copy: (text) => {
-        if (navigator.clipboard) navigator.clipboard.writeText(text).catch(() => {});
-        hud.toast(donations.real ? "Invoice copied" : "Invoice copied · payments are simulated in this build");
-      },
-      pay: (id, sats) => onDonation(tipEvent(id, sats)),
-      release: () => releaseTip(scene),
-      watch: () => watchBooth(scene),
-      close: () => leaveBooth(scene)
-    });
+    scene.donationLink = donationRequest.url;
+    showMode(scene);
     hireCrew(scene);
     // Whoever walked in stays themselves: their Ooga stands on the balcony facing the core, under the visitor's
     // control. A page that opens here takes `character=` instead, as the island does. With nobody, the view stays
@@ -1542,6 +1567,8 @@
       demoRunning: () => feed.reading.contract === "obl.factory.demo.v1" || feed.reading.contract === null && !!shared.mock, coarse: COARSE });
     // With no Ooga the visitor cannot talk to the foreman: a hint points them to the island to pick one.
     if (!avatar) hud.hint(`${BL.factoryGreeter.NAME} the foreman gives tours here — pick an Ooga on the island first`);
+    // Sent from the island's dialog to tip: on to the kiosk's glass at the first frame, once the pilot has placed the view.
+    scene.toKiosk = ctx.place === "kiosk";
 
     factoryScene.root = root;
     factoryScene.camera = camera;
@@ -1727,6 +1754,11 @@
     pilot.readInput(dt);
     if (people) people.update(dt, elapsed);
     pilot.update(dt);
+    if (s.real !== donations.real || s.net !== donations.testNetwork) showMode(s);
+    if (s.toKiosk) {
+      s.toKiosk = false;
+      openBooth(s);
+    }
     boothFrame(s, dt);
     // Cut the vault and inward-leaning walls away so the outer decks stay visible.
     // Restore them only after the birdseye blend fully returns, including reversals.

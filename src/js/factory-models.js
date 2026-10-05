@@ -2019,7 +2019,7 @@
   // The screen's own pictures, painted by the kiosk's flow at twice its pixels: its thanks while the cooker works, and
   // its attract screen with this visit's donation link as its QR, made each visit.
   const kioskThanks = cached(() => noShadow(picture(BL.factoryKiosk.still("thanks", null, 2), KIOSK.glass.w, KIOSK.glass.h, 0)));
-  const kioskIdle = (url) => noShadow(picture(BL.factoryKiosk.still("idle", url, 2), KIOSK.glass.w, KIOSK.glass.h, 0));
+  const kioskIdle = (url, net) => noShadow(picture(BL.factoryKiosk.still("idle", url, 2, net), KIOSK.glass.w, KIOSK.glass.h, 0));
   // The screen in its own frame, centred on it: the dark glass in an iron bezel with a lip round it. The scene leans it
   // back and hangs the pictures on the glass's face.
   const kioskScreen = cached(() => {
@@ -2071,7 +2071,8 @@
   // The donations board on the right wall between the study hall and the kiosk, over the walkway, as its concept draws
   // it: a timber frame bolted with iron round a dark board, standing in a niche of the rock, a lantern on a chain from
   // each end of its top beam, candles on the rock ledge under it and ivy over it. The board's face
-  // (`boardFace`) carries its title, icons and labels, painted once; its figures (`boardValues`) are a picture of their
+  // (`boardFace(note)`) carries its title, icons and labels, painted once for each corner note (simulated, test or
+  // real tips); its figures (`boardValues`) are a picture of their
   // own laid over its right-hand column, repainted when they change. `BOARD` places the face and the figures in the
   // board's frame and, in the cave's, the lanterns' hooks.
   const BOARD_FACE = { w: 3, h: 1.875, px: 400 }, BOARD_VALUES = { x: 640, y: 150, w: 530, h: 540 };
@@ -2126,7 +2127,9 @@
     }
   };
   const BOARD_ROWS = [["coins", "TOTAL DONATED", 200], ["banana", "BANANAS PRODUCED", 285], ["calendar", "TODAY", 400], ["calendar", "THIS WEEK", 482], ["bolt", "CURRENT RATE", 564], ["figure", "LATEST DONATION", 646]], BOARD_RULE = 336;
-  const boardFace = cached(() => {
+  const boardFaces = new Map();
+  const boardFace = (note) => boardFaces.get(note) || boardFaces.set(note, paintBoardFace(note)).get(note);
+  const paintBoardFace = (note) => {
     const { w: W, h: H, px: P } = BOARD_FACE, canvas = document.createElement("canvas"), g = canvas.getContext("2d");
     canvas.width = W * P;
     canvas.height = H * P;
@@ -2163,9 +2166,9 @@
     g.textAlign = "right";
     g.font = `500 24px ${BOARD_FONT}`;
     g.fillStyle = BOARD_INK.dim;
-    g.fillText(BL.donations.real ? "THIS BROWSER'S TIPS" : "SIMULATED · THIS BROWSER'S TIPS", cw - 60, 718);
+    g.fillText(note, cw - 60, 718);
     return noShadow(picture(canvas, W, H, 0));
-  });
+  };
   // The board's figures for its right-hand column, each row of `values` a list of [text, kind] runs ("big" or "unit"
   // in gold, "note" in white, "banana" the icon), set on its label's line and shrunk to fit the column if need be.
   const boardValues = (values) => {

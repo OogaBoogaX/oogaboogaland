@@ -10,13 +10,16 @@
 // pushes, `{ id, sats, handle, message, at }` under the invoice's id. In real mode (`hooks.real`, the page's API in
 // use) the amount, once confirmed, asks the API for its invoice at once (`hooks.invoice`): the quote shows the API's
 // bananas and rate, the invoice its bolt11 as a `lightning:` QR and its own expiry, and nothing settles but the
-// socket. Either way the scene hands every donation back through `receive(id)`, which takes the one this invoice is
-// waiting for. The scene holds that tip's bananas until the visitor asks to watch, or HOLD runs out.
+// socket. In real mode the quote also says who the tip is from: the signed-in login, which the visitor may hide (a new
+// invoice, since the API made this one under the login), or anonymous when signed out, with a way to sign in. Either
+// way the scene hands every donation back through `receive(id, bananas, handle)`, which takes the one this invoice is
+// waiting for and thanks the donor it names. The scene holds that tip's bananas until the visitor asks to watch, or
+// HOLD runs out.
 //
-// `create(hooks)` returns the flow: `start`, `stop`, `key(e)`, `tap(u, v)` in the canvas's pixels, `receive(id)`,
-// `update(dt)`, `paint()`, which repaints only after a change, and `animate(ctx, time)`, which draws what moves (the
-// wait's spinner) in the canvas's pixels over the painted screen. `state`, `sats`, `bananas`, `invoice` and `left` are
-// for the scene and checks.
+// `create(hooks)` returns the flow: `start`, `stop`, `key(e)`, `tap(u, v)` in the canvas's pixels,
+// `receive(id, bananas, handle)`, `update(dt)`, `paint()`, which repaints only after a change, and `animate(ctx, time)`,
+// which draws what moves (the wait's spinner) in the canvas's pixels over the painted screen. `state`, `sats`,
+// `bananas`, `invoice` and `left` are for the scene and checks.
 (() => {
   "use strict";
   const BL = window.BL;
@@ -158,17 +161,18 @@
   };
 
   // The still pictures for the kiosk's glass when nobody is at it: the attract screen with the donation link `url` as
-  // its QR, and the thanks while the cooker works on any tip. Each a fresh canvas, `scale` times the screen's pixels.
-  const still = (kind, url, scale = 1) => {
+  // its QR (and a line saying so when real donations are on the test network `net`), and the thanks while the cooker
+  // works on any tip. Each a fresh canvas, `scale` times the screen's pixels.
+  const still = (kind, url, scale = 1, net = "") => {
     const canvas = document.createElement("canvas"), g = canvas.getContext("2d");
     canvas.width = W * scale;
     canvas.height = H * scale;
     g.setTransform(scale, 0, 0, scale, 0, 0);
     if (kind === "thanks") paintThanks(g);
-    else paintIdle(g, BL.qr.encode(url), null, false);
+    else paintIdle(g, BL.qr.encode(url), null, false, net);
     return canvas;
   };
-  const paintIdle = (g, code, button, closed) => {
+  const paintIdle = (g, code, button, closed, net) => {
     face(g, "");
     const tw = width("DONATE SATS", 4);
     write(g, "DONATE SATS", W / 2, 18, 4, INK.gold, "center");
@@ -177,6 +181,7 @@
     qrBox(g, 102, 60, 196, code, false);
     write(g, "TURN SATS", W / 2, 268, 3, INK.white, "center");
     write(g, "INTO BANANAS", W / 2, 294, 3, INK.white, "center");
+    if (net) write(g, `${net.toUpperCase()} TEST · NOT REAL BITCOIN`, W / 2, 318, 1, INK.amber, "center");
     if (button) button(96, 328, 208, 56, closed ? "CLOSED" : "START", closed ? "off" : "primary", "start", 4);
     else {
       g.fillStyle = INK.gold;
@@ -196,16 +201,18 @@
   };
 
   // ---- the flow -------------------------------------------------------------------------------------------------
-  // `hooks`: link() for what the attract screen's QR holds, bananasFor(sats), price() in dollars or 0, handle(),
-  // copy(text), release() when HOLD runs out, watch() and close(); simulated, request() for a new donation request
-  // ({ id, url }) and pay(id, sats) when a payment settles; in real mode, `real`, invoice(sats), which resolves to the
-  // API's reply or `{ error }`, and open(), the API's word on whether donations are open (null before it has said).
+  // `hooks`: link() for what the attract screen's QR holds, bananasFor(sats), price() in dollars or 0, copy(text),
+  // release() when HOLD runs out, watch() and close(); simulated, request() for a new donation request ({ id, url })
+  // and pay(id, sats) when a payment settles; in real mode, `real`, invoice(sats, anon), which resolves to the API's
+  // reply or `{ error }`, open(), the API's word on whether donations are open (null before it has said),
+  // testNetwork(), the test network payments are on or "" for mainnet, account(), the page's account (`backend`, and
+  // `me` when signed in), and signIn().
   const create = (hooks) => {
     const canvas = document.createElement("canvas"), g = canvas.getContext("2d"), idleCode = BL.qr.encode(hooks.link()), real = !!hooks.real;
     canvas.width = W;
     canvas.height = H;
-    let dirty = true, shown = -1, buttons = [], ticket = 0, shownOpen = null;
-    const flow = { canvas, W, H, open: false, state: "idle", digits: "", sats: 0, bananas: 0, invoice: null, reply: null, error: "", left: 0, settle: 0, hold: 0 };
+    let dirty = true, shown = -1, buttons = [], ticket = 0, shownOpen = null, shownNet = "";
+    const flow = { canvas, W, H, open: false, state: "idle", digits: "", sats: 0, bananas: 0, invoice: null, reply: null, error: "", left: 0, settle: 0, hold: 0, anon: false, who: "" };
     const set = (state) => {
       flow.state = state;
       dirty = true;
@@ -251,7 +258,7 @@
       const t = ++ticket;
       flow.error = "";
       set("quoting");
-      hooks.invoice(flow.sats).then((r) => {
+      hooks.invoice(flow.sats, flow.anon).then((r) => {
         if (t !== ticket || flow.state !== "quoting") return;
         if (r.error) {
           flow.error = r.error;
@@ -289,6 +296,12 @@
       if (s === "quote") {
         if (a === "create") return real ? set("invoice") : invoice();
         if (a === "back") return set("amount");
+        // The API made this invoice under the login or without it, so hiding the name asks for a new one.
+        if (a === "anon") {
+          flow.anon = !flow.anon;
+          return ask("quote");
+        }
+        if (a === "signin") return hooks.signIn();
       }
       if (s === "invoice") {
         if (a === "pay" && !real) {
@@ -307,7 +320,8 @@
       }
     };
     // Keys, as the screen's buttons: Enter or Space the main one, Escape back (or out, from the attract screen), the
-    // digits, Backspace and Delete on the keypad, C to copy and R to regenerate an invoice.
+    // digits, Backspace and Delete on the keypad, A to hide or show the donor's name on a real quote, C to copy and R to
+    // regenerate an invoice.
     flow.key = (e) => {
       const k = e.key, s = flow.state;
       if (k === "Escape") return s === "idle" ? hooks.close() : act("back");
@@ -318,6 +332,7 @@
         if (k === "Delete") return act("clear");
       }
       if (k === "Backspace") return act("back");
+      if (s === "quote" && real && (k === "a" || k === "A") && hooks.account().me) return act("anon");
       if (s === "invoice" && (k === "c" || k === "C")) return act("copy");
       if ((s === "invoice" || s === "expired") && (k === "r" || k === "R")) return act("regen");
     };
@@ -329,8 +344,9 @@
     flow.start = () => {
       ticket++;
       flow.open = true;
-      flow.digits = flow.error = "";
+      flow.digits = flow.error = flow.who = "";
       flow.invoice = flow.reply = null;
+      flow.anon = false;
       quote();
       set("idle");
     };
@@ -340,12 +356,13 @@
       flow.invoice = flow.reply = null;
       set("idle");
     };
-    // A donation event: true when it is this invoice's payment, which the screen then thanks with the API's count
-    // when it sent one.
-    flow.receive = (id, bananas = null) => {
+    // A donation event: true when it is this invoice's payment, which the screen then thanks, naming the donor the
+    // donation names (none for an anonymous tip), with the API's count when it sent one.
+    flow.receive = (id, bananas = null, handle = "") => {
       const s = flow.state;
       if (!flow.invoice || id !== flow.invoice.id || s !== "invoice" && s !== "waiting") return false;
       if (bananas) flow.bananas = bananas.rounded;
+      flow.who = handle;
       flow.hold = HOLD;
       set("paid");
       return true;
@@ -356,6 +373,10 @@
       if (real && hooks.open() !== shownOpen) {
         shownOpen = hooks.open();
         if (s === "idle") dirty = true;
+      }
+      if (real && hooks.testNetwork() !== shownNet) {
+        shownNet = hooks.testNetwork();
+        dirty = true;
       }
       if (s === "invoice" || s === "waiting") {
         flow.left = real ? flow.invoice.expires - Date.now() / 1000 : flow.left - dt;
@@ -395,13 +416,23 @@
       else if (s === "quoting") spin(g, W / 2, 226, 30, 8, time);
       else if (s === "invoice" && real) spin(g, 200, 335, 9, 4, time);
     };
+    // A real quote's last row: who the tip is from, and the way to change that, as one wide button. A login too long for
+    // the row at the big size drops to the small one, and then loses its FROM.
+    const fromRow = (name, change, a) => {
+      const y = 288, h = 30, room = 324 - width(change, 1) - 10;
+      panel(g, 30, y, 340, h, INK.amber);
+      buttons.push({ x: 30, y, w: 340, h, act: a });
+      const s = width(name, 2) <= room ? 2 : 1, text = s === 1 && width(name, 1) > room ? name.replace(/^FROM /, "") : name;
+      write(g, text, 38, y + Math.round((h - GH * s) / 2), s, INK.gold);
+      write(g, change, 362, y + Math.round((h - GH) / 2), 1, INK.amber, "right");
+    };
     // Repaints after a change only.
     flow.paint = () => {
       if (!dirty) return;
       dirty = false;
       buttons = [];
       const s = flow.state, v = flow.invoice;
-      if (s === "idle") paintIdle(g, idleCode, button, closed());
+      if (s === "idle") paintIdle(g, idleCode, button, closed(), shownNet);
       else if (s === "quoting") {
         face(g, "CONFIRM DONATION");
         write(g, `${sats(flow.sats)} SATS`, W / 2, 110, 4, INK.gold, "center");
@@ -466,6 +497,9 @@
           info(g, 46, 279, INK.dim);
           write(g, "THIS RATE IS LOCKED INTO THE INVOICE", 60, 276, 1, INK.dim);
         }
+        const { backend, me } = hooks.account();
+        if (me) fromRow(flow.anon ? "ANONYMOUS" : `FROM @${me.login}`, flow.anon ? "SHOW MY NAME" : "GO ANONYMOUS", "anon");
+        else if (backend) fromRow("ANONYMOUS", "SIGN IN TO USE YOUR NAME", "signin");
         button(30, 326, 120, 52, "< BACK", "", "back");
         button(160, 326, 210, 52, "SHOW INVOICE", "primary", "create");
         closeButton();
@@ -522,15 +556,15 @@
           } else button(178, 312, 202, 46, "SIMULATE PAYMENT", "primary", "pay");
           closeButton();
         }
-        write(g, real ? "PAY WITH ANY LIGHTNING WALLET" : "PAYMENTS ARE SIMULATED IN THIS BUILD", W / 2, 378, 1, INK.dim, "center");
+        const net = shownNet.toUpperCase();
+        write(g, !real ? "PAYMENTS ARE SIMULATED IN THIS BUILD" : net ? `TEST INVOICE ON ${net} · PAY WITH A ${net} WALLET` : "PAY WITH ANY LIGHTNING WALLET", W / 2, 378, 1, net ? INK.amber : INK.dim, "center");
       } else if (s === "paid") {
         face(g, "PAYMENT RECEIVED!", INK.gold, INK.paid);
         banana(g, W / 2, 118, 44, INK.gold);
         sparkles(g, [[124, 70, 8], [276, 66, 8], [110, 118, 6], [290, 122, 6]]);
         write(g, `${sats(flow.sats)} SATS RECEIVED`, W / 2, 150, 2, INK.white, "center");
-        write(g, `${flow.bananas} BANANA${flow.bananas > 1 ? "S" : ""}`, W / 2, 176, 4, INK.gold, "center");
-        const who = hooks.handle();
-        write(g, who ? `THANK YOU @${who}!` : "THANK YOU!", W / 2, 220, 1, INK.white, "center");
+        write(g, `${sats(flow.bananas)} BANANA${flow.bananas === 1 ? "" : "S"}`, W / 2, 176, 4, INK.gold, "center");
+        write(g, flow.who ? `THANK YOU @${flow.who}!` : "THANK YOU!", W / 2, 220, 1, INK.white, "center");
         panel(g, 30, 246, 340, 44, INK.green);
         write(g, "THE COOKER IS BEHIND YOU. WATCH IT COOK!", W / 2, 265, 1, INK.green, "center");
         button(80, 312, 240, 56, "WATCH IT COOK >", "primary", "watch");

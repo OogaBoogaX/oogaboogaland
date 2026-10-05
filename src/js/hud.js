@@ -181,6 +181,14 @@
       lootTab: $("loot-tab"),
       lootCount: $("loot-count"),
       crateHelp: $("crate-help"),
+      feedKiosk: $("feed-kiosk"),
+      feedAccount: $("feed-account"),
+      feedTest: $("feed-test"),
+      feedTips: $("feed-tips"),
+      feedGo: $("feed-go"),
+      feedHelp: $("feed-help"),
+      feedSimulated: $("feed-simulated"),
+      handleField: $("handle-field"),
       worldLootHint: $("world-loot-hint"),
       subtitle: $("subtitle"),
       actions: [...document.querySelectorAll("[data-action]")],
@@ -788,8 +796,17 @@
     const onAction = (fn) => {
       actionHandler = fn;
     };
+    // Real donations are paid at the Lightning Factory's kiosk, so in real mode the dialog sends the visitor there, and
+    // the simulated link, the typed handle (the API names a donor from their sign-in) and the demo tips step aside.
     const openFeed = () => {
-      if (!el.feed.open) el.feed.showModal();
+      if (el.feed.open) return;
+      const real = BL.donations.real;
+      el.qr.hidden = el.qrUrl.hidden = el.handleField.hidden = el.feedTips.hidden = el.feedSimulated.hidden = real;
+      el.feedKiosk.hidden = el.feedGo.hidden = !real;
+      el.feedAccount.hidden = !BL.net.state.backend;
+      el.feedTest.hidden = !BL.donations.testNetwork;
+      el.feedHelp.hidden = real && el.crateHelp.hidden;
+      el.feed.showModal();
     };
     const closeFeed = () => {
       if (el.feed.open) el.feed.close();
@@ -1392,6 +1409,10 @@
       b.blur();
       if (b.dataset.action === "feed") openFeed();
       else if (b.dataset.action === "feed-close") closeFeed();
+      else if (b.dataset.action === "kiosk") {
+        closeFeed();
+        actionHandler && actionHandler("kiosk");
+      }
       else if (b.dataset.action === "recipe-close") closeRecipe();
       else if (b.dataset.action === "recipe-copy") copyRecipe(b);
       else if (b.dataset.action === "intro-go") b.closest("[data-intro]").hidden = true;

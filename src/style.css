@@ -1112,6 +1112,10 @@ body[data-active-scene="arcade"] .magazine-hud {
   margin-top: 14px;
 }
 
+.actions.feed-go {
+  grid-template-columns: 1fr;
+}
+
 .actions button {
   min-height: 38px;
   padding: 0 10px;
