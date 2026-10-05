@@ -2989,8 +2989,8 @@ const poolWildlifeChecks = async () => {
     head: { at: [0.16, 0.55, 0], parent: "body", geometry: {} }
   }) };
   runInNewContext(await readFile(new URL("../src/js/pool-wildlife.js", import.meta.url), "utf8"), context);
-  const boot = () => BL.poolWildlife.create({
-    parent: BL.scene.createNode(), obstacles: [], sleepy: () => false, groundAt: () => 0, spotOk: () => true,
+  const boot = (waterAt) => BL.poolWildlife.create({
+    parent: BL.scene.createNode(), obstacles: [], sleepy: () => false, baseY: 0, groundAt: () => 0, spotOk: () => true, waterAt,
     toWorld: (x, z, out) => { out.x = x; out.z = z; }, logs: [],
     trees: [{ x: 0, y: 0, z: 0, k: 1, sy: 1, ry: 0, geometry: { climb: { height: 6, lean: 0, branches: [[0, 3, 0, 2, 3.4, 0]], perches: [] } } }],
     animals: [{ kind: "monkey", x: 8, z: 0, heading: 0 }]
@@ -3016,8 +3016,15 @@ const poolWildlifeChecks = async () => {
   const timer = play(boot(), (a) => { a.timer = -1; });
   const walksOn = timer.poked && timer.poked.state === "walk" && timer.poked.after === "climb" && timer.poked.y === 0;
   const startled = boot(), poke = play(startled, (a) => startled.startle(a));
-  record("pool wildlife: a monkey interrupted on its way to a tree walks the rest of the way on the ground and climbs only from the trunk's foot",
-    walksOn && timer.worst < 0.05 && timer.climbed && timer.returned && poke.worst < 0.05 && poke.climbed && poke.returned, JSON.stringify({ timer, poke }));
+  // A poke during a swimming approach must not turn the pause into a submerged sitting pose.
+  const wading = boot(() => 1), swimmer = wading.list[0];
+  let time = 0;
+  for (let i = 0; i < 300 * 30 && !(swimmer.tree && swimmer.state === "walk"); i++) wading.update(1 / 30, time += 1 / 30);
+  const approaching = !!swimmer.tree && swimmer.state === "walk", feet = swimmer.root.position.y;
+  wading.startle(swimmer); wading.update(1 / 30, time += 1 / 30);
+  const afloat = approaching && swimmer.state === "rest" && swimmer.swimming && Math.abs(swimmer.root.position.y - feet) < 0.01 && Number.isFinite(swimmer.wy);
+  record("pool wildlife: a monkey interrupted on its way to a tree walks the rest of the way on the ground and climbs only from the trunk's foot, and a startled swimming approach stays afloat during its pause",
+    walksOn && timer.worst < 0.05 && timer.climbed && timer.returned && poke.worst < 0.05 && poke.climbed && poke.returned && afloat, JSON.stringify({ timer, poke, afloat }));
 };
 const debugActivityStatusChecks = async () => {
   const sources = await Promise.all(CONTRIBUTOR_SOURCES.map((name) => readFile(new URL(`../src/js/${name}.js`, import.meta.url), "utf8")));

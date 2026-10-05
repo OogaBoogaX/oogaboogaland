@@ -507,7 +507,7 @@
         step(a, dt);
         a.swimming = false;
         // A reserved tree/log is still a ground trip until the animal actually mounts it.
-        if (a.state !== "glide" && a.state !== "wallUp" && a.state !== "wallOver" && (a.state === "walk" || !a.tree && !a.log && !a.perch)) {
+        if (a.state !== "glide" && a.state !== "wallUp" && a.state !== "wallOver" && (a.state === "walk" || a.tree && !a.onBranch || !a.tree && !a.log && !a.perch)) {
           const ground = groundAt(a.x, a.z);
           const water = a.kind === "monkey" && ctx.waterAt ? ctx.waterAt(a.x, a.z) : -Infinity;
           a.swimming = water > ground + SWIM_DEPTH;
