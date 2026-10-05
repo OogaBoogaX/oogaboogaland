@@ -649,12 +649,12 @@
         if (preview !== null) { reading = true; vsize = preview; target = levelFor(preview); }
         else target = reading ? levelFor(vsize) : L.WATER.low;
       },
-      // Debug depth percentage spans the empty bowl through full overflow, including partial trench filling.
-      previewFill(percent) {
-        if (percent !== null && !Number.isFinite(percent)) return;
-        fill = percent === null ? null : clamp(percent, 0, 100);
+      // Debug depth runs from 0 to 200: empty bowl through full overflow, including partial trench filling.
+      previewFill(value) {
+        if (value !== null && !Number.isFinite(value)) return;
+        fill = value === null ? null : clamp(value, 0, 200);
         preview = null;
-        target = fill === null ? (reading ? levelFor(vsize) : L.WATER.low) : lerp(-L.MEMBRANE_DEPTH, L.WATER.flood, fill / 100);
+        target = fill === null ? (reading ? levelFor(vsize) : L.WATER.low) : lerp(-L.MEMBRANE_DEPTH, L.WATER.flood, fill / 200);
         level = target; stage = target > HYDRO.STAGE.highOn ? 2 : target > HYDRO.STAGE.on ? 1 : 0; settle = true;
       },
       get active() { if (rippleCount) return true; for (const seq of sequences) if (seq.active) return true; return Math.abs(level - target) > 1e-3 || Math.abs(shown - level) > 0.11; },

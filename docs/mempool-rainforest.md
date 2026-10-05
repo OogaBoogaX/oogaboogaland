@@ -18,7 +18,7 @@ The underside is a fixed spherical cap with no inflection and a closed collision
 
 Rain impacts and moving Oogas, gorillas, remote visitors and wildlife now drive actual surface displacement instead of coloured ring overlays. Expanding wave packets have raised crests and negative troughs, add together, and fade; heavier rain supplies more and stronger impacts. WebGL displaces the lake and flood mesh vertices and derives lighting normals from the same wave equation. Canvas displaces a coarser mesh with the equivalent CPU equation. Separate rain/wake budgets cap the shared field at 32 packets (fewer on lower tiers); overlap is smoothly limited to 18 cm and packets fit inside the wet footprint. The fine surface meshes and wave buffers are built once per visit, with no per-frame geometry rebuilding. Bright blue water is preserved. Floating bodies still use the mean water level.
 
-`?debug=1&poolfill=50` pins half depth immediately; 0 empties the bowl and 100 selects the full flood level, overflowing the shores and feeding the waterfalls. The scale now spans the bowl bottom through the full flood depth; overflow begins around 88, with partial trenches at 90 and 95 and full trenches at 100. It is not a volume percentage or a rain override. Blank and non-finite values are ignored, finite values clamp to 0–100, and the flag has no effect without debug. The shore mesh's inward voxel corners are bevelled outside the circular lake; collision uses that same mesh.
+`?debug=1&poolfill=100` pins half depth immediately; 0 empties the bowl and 200 selects the full flood level, overflowing the shores and feeding the waterfalls. The scale spans the bowl bottom through the full flood depth; overflow begins around 176, with partial trenches at 180 and 190 and full trenches at 200. It is not a volume percentage, transaction backlog or rain override. Blank and non-finite values are ignored, finite values clamp to 0–200, and the flag has no effect without debug. The shore mesh's inward voxel corners are bevelled outside the circular lake; collision uses that same mesh.
 
 Eight smaller canopy trees are rooted in the pool bowl with their trunk centres directly on the shoreline, between outlets, with their trunks rising through the water. Their roots follow the bowl height; monkeys enter and leave these trunks at swimming height while flooded.
 
@@ -114,7 +114,7 @@ Monkeys follow the ground during tree approaches and float with their necks at t
 
 ```js
 __ooga.poolIsland.preview.lake(130)   // stand the lake at 130 MvB (floods); lake(null) hands it back to the feed
-__ooga.poolIsland.preview.fill(50)    // half depth immediately; 0 empty, 100 overflowing, null restores the feed
+__ooga.poolIsland.preview.fill(100)   // half depth immediately; 0 empty, 200 overflowing, null restores the feed
 __ooga.poolIsland.preview.block()     // a block: the bolt and the cube
 __ooga.poolIsland.preview.sleep("portlandhodl", true)   // put an Ooga to sleep: its gorilla walks to bed; false wakes it
 ```

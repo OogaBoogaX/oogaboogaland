@@ -2717,7 +2717,7 @@
     // MvB (null hands it back to the feed), a block's bolt and cube, and an Ooga put to sleep or woken by name.
     const preview = {
       lake: (mvb) => water.preview(mvb === null || mvb === undefined ? null : mvb * 1e6),
-      fill: (percent) => { water.previewFill(percent); if (percent === null) water.apply(chain.snapshot); },
+      fill: (value) => { water.previewFill(value); if (value === null) water.apply(chain.snapshot); },
       block: () => { weather.strike(); water.block(); },
       sleep: (name, asleep = true) => {
         const cave = crew.list.find((c) => c.traits.name === name);
