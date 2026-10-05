@@ -222,14 +222,19 @@
       for (const door of L.DOORS) if (Math.abs((a + to) / 2 - door.at * RAMP.sweep) * 18 < L.DOOR.half + 0.4) {
         quad(RAMP.start + a, RAMP.start + to, RAMP.r + reach, L.edgeAt(RAMP.start + (a + to) / 2) - 0.25, L.rampY(a), L.rampY(to), EARTH[n & 1]);
       }
-      // Through a link: the descent's own surface carried on out through the mouths and along the gallery, to the
-      // cliff or to the lip beyond it, in half steps so the sheet follows the rim. A lipped edge wears the ledge's skirt.
-      if (L.linkAt((a + to) / 2)) for (let h = 0; h < 2; h++) {
+      // Through a link: carry the descent's surface out through the mouths and along the gallery. Between
+      // galleries only the exterior lip continues, with its inner edge buried in the intact cliff wall.
+      const link = L.linkAt((a + to) / 2);
+      if (link || L.lipAt(RAMP.start + (a + to) / 2)) for (let h = 0; h < 2; h++) {
         const a0 = a + (to - a) * h / 2, a1 = a + (to - a) * (h + 1) / 2, b0 = RAMP.start + a0, b1 = RAMP.start + a1;
-        const lip = Math.min(L.lipAt(b0), L.lipAt(b1)), out = lip ? lip - 0.04 : -0.25, r0 = floorEdge(b0, L.edgeAt(b0) + out), r1 = floorEdge(b1, L.edgeAt(b1) + out), y0 = L.rampY(a0), y1 = L.rampY(a1);
-        face(geo, [at(b0, RAMP.r + reach, y0), at(b0, r0, y0), at(b1, r1, y1), at(b1, RAMP.r + reach, y1)], LEDGE_TONES[n & 1], SHEET);
+        const lip = Math.min(L.lipAt(b0), L.lipAt(b1));
+        if (!link && (!lip || L.fallGap(b0, L.edgeAt(b0), L.UNIT * Math.SQRT1_2) || L.fallGap(b1, L.edgeAt(b1), L.UNIT * Math.SQRT1_2))) continue;
+        const out = lip ? lip - 0.04 : -0.25, r0 = floorEdge(b0, L.edgeAt(b0) + out), r1 = floorEdge(b1, L.edgeAt(b1) + out), y0 = L.rampY(a0), y1 = L.rampY(a1);
+        const inner0 = link ? RAMP.r + reach : L.edgeAt(b0) - 0.3, inner1 = link ? RAMP.r + reach : L.edgeAt(b1) - 0.3;
+        if (!link && (r0 <= inner0 || r1 <= inner1)) continue;
+        face(geo, [at(b0, inner0, y0), at(b0, r0, y0), at(b1, r1, y1), at(b1, inner1, y1)], LEDGE_TONES[n & 1], SHEET);
         if (lip) face(geo, [at(b0, r0, y0), at(b0, r0, y0 - 0.62), at(b1, r1, y1 - 0.62), at(b1, r1, y1)], SKIRT, SHEET);
-        galleryEnd = shelfJoin(galleryEnd, b0, b1, RAMP.r + reach, RAMP.r + reach, r0, r1, y0, y1);
+        galleryEnd = shelfJoin(galleryEnd, b0, b1, inner0, inner1, r0, r1, y0, y1);
       }
     }
     if (galleryEnd) capEnd(galleryEnd.b, galleryEnd.inner, galleryEnd.outer, galleryEnd.y, true);

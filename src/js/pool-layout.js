@@ -209,9 +209,14 @@
   };
   const lipAt = (bearing, r = edgeAt(bearing)) => {
     const a = rampAngle(bearing), link = linkAt(a);
-    if (!link || a <= link.from * RAMP.sweep || a >= link.to * RAMP.sweep) return 0;
-    if (fallGap(bearing, r)) return 0;
-    return link.lip;
+    let lip = 0;
+    if (link && a > link.from * RAMP.sweep && a < link.to * RAMP.sweep) lip = link.lip;
+    else {
+      // Continue the exterior shelf between the galleries without cutting another passage into the cliff.
+      const from = LINKS[0].to * RAMP.sweep, to = LINKS[1].from * RAMP.sweep;
+      if (a >= from && a <= to) lip = LINKS[0].lip + (LINKS[1].lip - LINKS[0].lip) * (a - from) / (to - from);
+    }
+    return lip && !fallGap(bearing, r) ? lip : 0;
   };
 
   // One column of ground: its top (a cell top, or -Infinity where there is none), its underside, the material it
