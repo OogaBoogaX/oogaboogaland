@@ -1,0 +1,9 @@
+# Covered movement investigation: issue #128
+
+The current canonical engine still fails the unchanged high-tier desktop movement floor. A native run without CPU-profiler sampling measured covered movement at 30.0 FPS, p95 50 ms, low quality. It exercised real alternating steering, travelled 3.36 m, retained outlines on every sampled covered frame, donated and kept all 26 required particles. Its worst overlay took 29.4 ms. Ordinary movement also failed in that run; native scheduling and quality adaptation vary, so a single FPS comparison is not an optimization claim.
+
+[Evidence](covered-movement-128-evidence.json) records the exact existing suite conditions and result. `npm run build` followed by `node scripts/profile-covered-movement.mjs` reuses the suite's actual wallPerformance workload and acceptance checks. `--cpu` additionally writes a DevTools CPU profile under ignored `untracked/`; sampling adds overhead. Failures return a nonzero status. No automatic test scripts or acceptance thresholds change.
+
+CPU profiles identify owner-union boundary searches as the main contour cost, with terrain sight queries and overlay compositing also significant. Increasing per-triangle grid capacity reduced BVH fallbacks substantially but did not restore the floor. Finer owner grids, broad-triangle side lists, analytical interval unions and whole-cell triangle certificates either failed to improve the workload or regressed it. Those prototypes were discarded; this branch changes no shipped engine behavior.
+
+The floor remains unresolved. The next substantive change needs to reduce contour work while proving current clipping, tiny openings, motion, world anchors, mode transitions and both renderer behavior. Pose quantization, fewer particles, lowered quality and relaxed thresholds are not supported by these results. This is an investigation and reusable profiling tool, not a fix or a closure claim for #128.
