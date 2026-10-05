@@ -65,8 +65,7 @@
   // under a clear sky and the weather only thickens and darkens it. Every node shares one cached
   // geometry, so the whole deck is a single instanced draw call whatever its size.
   const CLOUD = { high: 64, medium: 46, low: 28 }, CLOUD_CANVAS = 16;
-  // The visible deck stays just beyond the roughly 22 m island radius, including each puff's size.
-  const CLOUD_R = 23, CLOUD_LIFT = 3.2, CLOUD_DRIFT = 0.06, CLOUD_EASE = 0.7;
+  const CLOUD_R = 34, CLOUD_LIFT = 3.2, CLOUD_DRIFT = 0.06, CLOUD_EASE = 0.7;
   const CLOUD_FLOOR = 0.62, CLOUD_TIERS = 3;
   // Drops grow with the rain: fine in a drizzle, fat in a downpour.
   const DROP_MIN = 0.7, DROP_MAX = 4, DROP_LIFT = 0.7;
@@ -150,10 +149,6 @@
       geos.push(models.box({ w, h, d: w * (0.7 + rand() * 0.4), color: i % 2 ? tone[0] : tone[1], emissive: tone[2], offset: { x: Math.cos(a) * r, y: rand() * 0.7, z: Math.sin(a) * r } }));
     }
     const geometry = models.noShadow(models.merge(...geos));
-    geometry.cloudRadius = 0;
-    for (let i = 0; i < geometry.verts.length; i += 3) {
-      geometry.cloudRadius = Math.max(geometry.cloudRadius, Math.hypot(geometry.verts[i], geometry.verts[i + 2]));
-    }
     geometry.cutawayHide = true;
     // Clouds fade independently of the scanning rock/ceiling cut planes.
     geometry.cutawayPreserve = true;
@@ -414,11 +409,9 @@
           cloudX[i] = -cloudX[i] / cr * CLOUD_R;
           cloudZ[i] = -cloudZ[i] / cr * CLOUD_R;
         }
+        cloud.position.x = centre.x + cloudX[i];
+        cloud.position.z = centre.z + cloudZ[i];
         const k = cloudBase[i] * (0.8 + cloudCover * 0.6);
-        // Larger storm puffs sit further in, so thickening and wind cannot spread the deck past its rim.
-        const spread = Math.max(0, CLOUD_R - cloud.geometry.cloudRadius * k) / CLOUD_R;
-        cloud.position.x = centre.x + cloudX[i] * spread;
-        cloud.position.z = centre.z + cloudZ[i] * spread;
         cloud.scale.x = cloud.scale.z = k;
         cloud.scale.y = k * 0.6;
         // Lightning lights the deck from inside before it lights anything else.
