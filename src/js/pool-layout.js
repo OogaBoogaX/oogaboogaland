@@ -43,7 +43,7 @@
   const JUNCTION = { before: 0.15, after: 0.25, height: 3.5 };
   RILL.end = RAMP.sweep - JUNCTION.before + 0.055;
   // The ledge down the outside of the cliff, beside the descent and at its height, to the lower door.
-  const LEDGE = { width: 3.2, lead: 0.12, tail: 0.2, to: 0.5, thick: 2.5, lip: 1 };
+  const LEDGE = { width: 3.2, lead: 0.26, tail: 0.2, to: 0.5, thick: 2.5, lip: 1 };
   // The plan's links A and B: two loops off the descent on its cliff side, as fractions of the sweep. Each leaves by
   // a mouth through the outer wall, runs behind a pier of rock along a gallery cut into the cliff's face and open to
   // the sea, and comes back in by a second mouth. There is no room in the shell for a walled tunnel beside the
@@ -191,8 +191,18 @@
   // The voxel floor under the smooth one: the step at or just below it, never above.
   const stepUnder = (y) => y >= 0 ? 0 : Math.max(FLOOR, down(y - 0.08));
   const roofUnder = (r) => r < LAKE_R ? Infinity : r < RING.shore ? -1.5 : r < RING.lowland ? -2.5 : r < 11.25 ? -3.5 : -4.5;
-  const ledgeAngle = (a) => a > TAU - LEDGE.lead ? 0 : a;
-  const onLedge = (a) => a > TAU - LEDGE.lead || a <= LEDGE.to * RAMP.sweep + LEDGE.tail;
+  const ledgeAngle = (a) => a >= TAU - LEDGE.lead ? a - TAU : a;
+  const onLedge = (a) => {
+    a = ledgeAngle(a);
+    return a >= -LEDGE.lead && a <= LEDGE.to * RAMP.sweep + LEDGE.tail;
+  };
+  // A rounded flare grows out of the bridge court instead of a full-width panel jutting off its edge.
+  // The voxel backing and smooth walking surface share the same taper.
+  const ledgeWidth = (a) => {
+    if (!onLedge(a)) return 0;
+    const t = clamp((ledgeAngle(a) + LEDGE.lead) / LEDGE.lead, 0, 1);
+    return LEDGE.width * t * t * (3 - 2 * t);
+  };
   const ledgeY = (a) => rampY(Math.min(ledgeAngle(a), LEDGE.to * RAMP.sweep));
   // The rock over the descent while it is shallow: a ridge that keeps `roof` on it, falling as it falls.
   const ridgeTop = (a) => Math.min(LEVEL.peak, up(rampY(a) + RAMP.head + RAMP.roof + 0.25));
@@ -234,8 +244,8 @@
     if (r >= edge) {
       // Outside the cliff only the ledge stands: a shelf hanging on the rock, thinner toward its lip.
       if (fallGap(bearing, r, UNIT * Math.SQRT1_2)) return c;
-      const lip = lipAt(bearing, r), width = lip || LEDGE.width;
-      if (r > edge + width || !lip && !onLedge(a)) return c;
+      const lip = lipAt(bearing, r), width = lip || ledgeWidth(a);
+      if (width <= 0 || r > edge + width || !lip && !onLedge(a)) return c;
       c.ledge = true;
       c.top = stepUnder(lip ? rampY(a) : ledgeY(a));
       c.bottom = c.top - (LEDGE.thick - (r - edge) / width * (LEDGE.thick - LEDGE.lip));
@@ -440,7 +450,7 @@
     if (!margin) return body().heights[i * SZ + k] > -Infinity;
     const bearing = wrap(Math.atan2(x, z)), edge = edgeAt(bearing);
     const lip = lipAt(bearing, r);
-    return r + margin < edge || r + margin < edge + (lip || LEDGE.width) && (lip > 0 || onLedge(rampAngle(bearing))) && body().heights[i * SZ + k] > -Infinity;
+    return r + margin < edge || r + margin < edge + (lip || ledgeWidth(rampAngle(bearing))) && (lip > 0 || onLedge(rampAngle(bearing))) && body().heights[i * SZ + k] > -Infinity;
   };
   // Whether a point of the forest floor is a path, a court, a nest, a channel or the shore: kept clear of plants.
   const keptClear = (x, z, margin = 0) => {
@@ -472,7 +482,7 @@
   BL.poolLayout = {
     UNIT, R, LAKE_R, CHAMBER_R, SHAFT_R, FLOOR, MEMBRANE_DEPTH, LEVEL, WATER, RING, RAMP, DOORS, DOOR, BAYS, WINDOW, JUNCTION, LEDGE, LINK, LINKS, linkAt, lipAt, STOPS, STOP, COURT, BRIDGE, NEST, NESTS,
     CHANNEL, CHANNELS, channelOutlet, fallGap, RILL, rillRadius, rillInner, RILL_STATIONS, RILL_TAIL, rillTailPoint, rillTailDistance, rillJunctionY, HILLS, SLOT_GRID: SLOT, SLOTS, ORIGIN, SX, SY, SZ, M, PALETTE,
-    wrap, turn, edgeAt, membraneY, waterRadius, rampAngle, rampY, rampHalf, stepUnder, roofUnder, onLedge, ledgeY, ridgeTop, column, body,
+    wrap, turn, edgeAt, membraneY, waterRadius, rampAngle, rampY, rampHalf, stepUnder, roofUnder, onLedge, ledgeWidth, ledgeY, ridgeTop, column, body,
     groundAt, solidAt, covered, sightClear, boxSolid, boxClear, onIsland, keptClear, rampPoint
   };
 })();

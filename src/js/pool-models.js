@@ -273,14 +273,17 @@
         face(geo, ids, Math.abs(j + 0.5 - bands / 2) < 2 ? SKIRT : EARTH[0], SHEET);
       }
     }
-    const end = L.LEDGE.to * RAMP.sweep + L.LEDGE.tail;
-    for (let a = 0, n = 0; a < end - 1e-6; a += STEP, n++) {
-      const to = Math.min(end, a + STEP), b0 = RAMP.start + a, b1 = RAMP.start + to, y0 = L.ledgeY(a), y1 = L.ledgeY(to);
-      const r0 = L.edgeAt(b0), r1 = L.edgeAt(b1), out = L.LEDGE.width - 0.04;
+    const end = L.LEDGE.to * RAMP.sweep + L.LEDGE.tail, leadSteps = Math.ceil(L.LEDGE.lead / STEP) * 2;
+    for (let n = -leadSteps; n * STEP < end - 1e-6; n++) {
+      const a = n < 0 ? n * L.LEDGE.lead / leadSteps : n * STEP;
+      const to = n < 0 ? (n + 1) * L.LEDGE.lead / leadSteps : Math.min(end, a + STEP);
+      const b0 = RAMP.start + a, b1 = RAMP.start + to, y0 = L.ledgeY(a) + 0.008, y1 = L.ledgeY(to) + 0.008;
+      const r0 = L.edgeAt(b0), r1 = L.edgeAt(b1);
+      const out0 = Math.max(0, L.ledgeWidth(a) - 0.04), out1 = Math.max(0, L.ledgeWidth(to) - 0.04);
       if (L.fallGap(b0, r0, L.UNIT * Math.SQRT1_2) || L.fallGap(b1, r1, L.UNIT * Math.SQRT1_2)) continue;
-      face(geo, [at(b0, r0 - 0.3, y0), at(b0, r0 + out, y0), at(b1, r1 + out, y1), at(b1, r1 - 0.3, y1)], LEDGE_TONES[n & 1], SHEET);
-      face(geo, [at(b0, r0 + out, y0), at(b0, r0 + out, y0 - 0.62), at(b1, r1 + out, y1 - 0.62), at(b1, r1 + out, y1)], SKIRT, SHEET);
-      ledgeEnd = shelfJoin(ledgeEnd, b0, b1, r0 - 0.3, r1 - 0.3, r0 + out, r1 + out, y0, y1);
+      face(geo, [at(b0, r0 - 0.3, y0), at(b0, r0 + out0, y0), at(b1, r1 + out1, y1), at(b1, r1 - 0.3, y1)], LEDGE_TONES[n & 1], SHEET);
+      face(geo, [at(b0, r0 + out0, y0), at(b0, r0 + out0, y0 - 0.62), at(b1, r1 + out1, y1 - 0.62), at(b1, r1 + out1, y1)], SKIRT, SHEET);
+      ledgeEnd = shelfJoin(ledgeEnd, b0, b1, r0 - 0.3, r1 - 0.3, r0 + out0, r1 + out1, y0, y1);
     }
     if (ledgeEnd) capEnd(ledgeEnd.b, ledgeEnd.inner, ledgeEnd.outer, ledgeEnd.y, true);
     // Support only: a sheet is a floor to stand on, never a wall, a ceiling or the skin of a solid.
