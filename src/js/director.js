@@ -439,7 +439,7 @@
   const net = window.BL.net;
   const unsubscribeAccount = net.subscribe(window.BL.hud.showAccount);
   const unsubscribeVoice = window.BL.voice.subscribe(() => window.BL.hud.showAccount(net.state));
-  const look = !params.has("nosim") && params.get("net") !== "0" ? net.start() : null;
+  const accountReady = !params.has("nosim") && params.get("net") !== "0" ? net.start() : Promise.resolve();
   // A tab opened in the background waits for its first look before it holds any socket.
   if (document.hidden) {
     mempool.setHidden(true);
@@ -447,24 +447,18 @@
   }
   // Each donation goes to the active scene with the API's banana count (null when simulated); in real mode the pile
   // follows the API's. The page's own Worker turns real mode on in the account's look at /api/me, so the subscription
-  // waits for that look, LOOK_MS at most, and a page about to go real never plays a simulated tip; a look that answers
-  // later still turns it on. A donation pushed while the first scene is still being built has no scene to land in.
-  const LOOK_MS = 5000;
+  // waits for that look (bounded, as the boot's wait is) and a page about to go real never plays a simulated tip. A
+  // donation pushed while the first scene is still being built has no scene to land in.
   const pileFeed = { bananas: 0, eatPerHour: 0, at: 0 };
-  let unsubscribeDonations = null, lookTimer = 0;
-  const subscribeDonations = () => {
+  let unsubscribeDonations = null;
+  accountReady.then(() => {
+    if (destroyed) return;
     if (net.state.donations) donations.useOrigin();
-    if (unsubscribeDonations) return;
-    window.clearTimeout(lookTimer);
-    unsubscribeDonations = donations.subscribe((donation, bananas) => active && active.onDonation(donation, bananas), {
+    unsubscribeDonations = donations.subscribe((donation, bananas) => { if (active) active.onDonation(donation, bananas); }, {
       identity: () => game.state,
       onPile: ({ bananas, eatPerHour }) => Object.assign(pileFeed, { bananas, eatPerHour, at: performance.now() })
     });
-  };
-  if (look) {
-    look.then(subscribeDonations);
-    lookTimer = window.setTimeout(subscribeDonations, LOOK_MS);
-  } else subscribeDonations();
+  });
   // The feed panel: the Konami code toggles a page-wide readout of the socket, its counters and its last events.
   // It subscribes and ticks only while open, and its text nodes change only with their value.
   const KONAMI = ["ArrowUp", "ArrowUp", "ArrowDown", "ArrowDown", "ArrowLeft", "ArrowRight", "ArrowLeft", "ArrowRight", "b", "a"];
@@ -591,10 +585,7 @@
     destroyed = true;
     window.cancelAnimationFrame(raf);
     window.clearInterval(housekeepTimer);
-    window.clearTimeout(lookTimer);
     if (unsubscribeDonations) unsubscribeDonations();
-    // A look that answers after this subscribes nothing.
-    unsubscribeDonations = () => {};
     unsubscribeBlockFeed();
     unsubscribeBlockHeight();
     feedPanel.close();

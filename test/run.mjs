@@ -7626,8 +7626,7 @@ scene("race", { query: "rain=0", steps: [raceStart, { name: "race tracks", why: 
 scene("drop", { steps: [dropStart, dropSteering, play("drop", "a jump lands on the target, scores its own medal and is saved as the best", dropRun), dropCrash, trip("drop")] });
 scene("orbit", { steps: [{ name: "orbit flow", why: "regression: the spacewalk air bonus was missing from the flight log", run: orbitFlow }, orbitSteering, orbitMissed, orbitEscape, trip("orbit")] });
 scene("mine", { steps: [mineResume, trip("mine"), mineControls] });
-scene("pool", { steps: [poolLeave, trip("pool")] });
-scene("factory", { query: "character=portlandhodl", steps: [factoryWalking, factoryGreeter, factoryLadders, factoryRailingJump, factoryWeapons, factoryForward, factoryForge, factoryShields] });
+scene("factory", { query: "character=portlandhodl", steps: [factoryWalking, factoryGreeter, factoryLadders, factoryRailingJump, factoryWeapons, factoryForward, factoryForge, factoryShields, trip("factory")] });
 scene("factory", { label: "cooker", query: "character=portlandhodl", steps: [donation("factory", { stat: "cooker.out", seconds: 14, where: "the cooker sends its bananas out through the exit shield" }), factoryCooker, trip("factory")] });
 scene("factory", { label: "entrance", url: hubPage(src, "character=portlandhodl"), steps: [factoryFloor, factoryEntrance] });
 scene("factory", { label: "canvas2d", query: "canvas2d=1", steps: [factoryCanvas] });
@@ -8602,9 +8601,10 @@ scene("factory", { label: "lifecycle", url: hubPage(src), steps: [{ name: "facto
   await travel("factory"); await tip("soak-warm"); await travel("lab"); await travel("hub"); await settled(); await rendered(2);
   const before = await snapshot(), visits = [];
   for (let i = 0; i < 6; i++) {
-    await travel("factory"); const inFlight = await tip(`soak-${i}`);
+    await travel("factory");
     // One listener belongs to the hall and one to Flink; both leave with the scene.
     const hall = await b.evaluate('__factoryLife.subscriptions');
+    const inFlight = await tip(`soak-${i}`);
     await travel("lab");
     const away = await b.evaluate('__factoryLife.subscriptions');
     await travel("hub"); await settled(); await rendered(2);

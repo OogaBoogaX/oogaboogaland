@@ -209,8 +209,8 @@
       if (!data || !("player" in data)) return;
       state.backend = true;
       state.me = accept(data.player);
-      if (state.me) BL.contributors.addTemporary(data.character, state.me.login);
       state.donations = data.donations === true;
+      if (state.me) BL.contributors.addTemporary(data.character, state.me.login);
     } catch {
       return;
     }

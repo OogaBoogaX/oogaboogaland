@@ -77,6 +77,6 @@ test("the page never receives the avatar url or ban fields", () => {
 
 test("the page takes real donations only from a Worker with the bananapayserver binding", async () => {
   const me = async (env) => (await handleApi(new Request("https://site.test/api/me"), { SITE_ORIGIN: "https://site.test", ...env }, new URL("https://site.test/api/me"))).json();
-  assert.deepEqual(await me({}), { player: null, donations: false });
-  assert.deepEqual(await me({ DONATIONS: {} }), { player: null, donations: true });
+  assert.deepEqual(await me({}), { player: null, character: null, donations: false });
+  assert.deepEqual(await me({ DONATIONS: {} }), { player: null, character: null, donations: true });
 });

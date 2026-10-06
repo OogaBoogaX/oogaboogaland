@@ -219,8 +219,7 @@
     // Two from the study hall's header, which faces -x, two on chains either side of the donation kiosk, and two from
     // the ends of the donations board's top beam.
     for (const [lx, ly, lz] of FM.STUDY.lamps) lamps.push(["hang", L.study.x - lz, L.study.y + ly, L.study.z + lx]);
-    for (const [x, y, z] of FM.KIOSK.hooks) lamps.push(["hang", x, y, z]);
-    for (const [x, y, z] of FM.BOARD.hooks) lamps.push(["hang", x, y, z]);
+    if (FM.donationCorner()) for (const [x, y, z] of [...FM.KIOSK.hooks, ...FM.BOARD.hooks]) lamps.push(["hang", x, y, z]);
     lamps.push(["post", L.switchboard.x + 3.1, L.switchboard.y, L.switchboard.z - 1.9, Math.PI]);
     // Two from the arms at the ends of each forge shaft's header.
     for (const [x, z] of FM.SHAFTS) for (const s of [-1, 1]) lamps.push(["hang", x + s * 1.7, 2.76, z - 0.2]);
@@ -569,6 +568,7 @@
     // The kiosk: its screen thanks the tipper in place of its attract screen while the cooker works and a moment
     // after, and its lights breathe, quicker and brighter then.
     s.thanks = c.phase || s.tipCount || c.out || m ? THANKS : Math.max(0, s.thanks - dt);
+    if (!s.corner) return;
     const thanking = s.thanks > 0;
     s.kioskThanks.visible = thanking;
     s.kioskIdle.visible = !thanking;
@@ -723,7 +723,7 @@
   // the visitor is told how to use it, once each time they come within reach.
   const boothFrame = (s, dt) => {
     const b = s.booth;
-    if (!b.mode && avatar && people.player === avatar) {
+    if (s.corner && !b.mode && avatar && people.player === avatar) {
       const p = avatar.root.position, U = FM.KIOSK.use;
       const near = Math.abs(feetOf() - LAYOUT.kiosk.y) < 0.6 && Math.hypot(p.x - U[0], p.z - U[1]) < KIOSK_HINT;
       if (near && !b.near) hud.hint(COARSE ? "Donation kiosk · tap it or the act button to donate" : "Donation kiosk · press Space to donate");
@@ -801,6 +801,11 @@
   // or when the API names a test network, which only the pictures need: the flow reads it as it goes.
   const showMode = (s) => {
     const real = donations.real, net = donations.testNetwork, link = real ? `${location.origin}/lightning` : s.donationLink, b = s.booth;
+    if (!s.corner) {
+      s.real = real;
+      s.net = net;
+      return;
+    }
     s.kioskIdle.geometry = FM.kioskIdle(link, net);
     s.boardFace.geometry = FM.boardFace(!real ? "SIMULATED · THIS BROWSER'S TIPS" : net ? `${net.toUpperCase()} TEST · THIS BROWSER'S TIPS` : "THIS BROWSER'S TIPS");
     s.net = net;
@@ -901,7 +906,7 @@
     // The donations board: this browser's tips (the game's tally), rounded and naming no one or no time, until the
     // backend counts everyone's.
     const g = game.state, [todaySats, todayBananas] = game.tipsWithin(1), [weekSats, weekBananas] = game.tipsWithin(7);
-    setFigures(s.boardValues, [
+    if (s.corner) setFigures(s.boardValues, [
       [[rounded(g.totalSats), "big"], [" SATS", "unit"]],
       [[bananaCount(g.bananas), "big"]],
       [[rounded(todaySats), "big"], [" SATS", "unit"], [` (${bananaCount(todayBananas)}`, "note"], ["", "banana"], [")", "note"]],
@@ -950,7 +955,7 @@
     hud.setStats(game.state);
     // The visitor's own tip, paid at the kiosk, waits on its screen until they turn to watch it cook.
     const b = scene.booth;
-    if (b.flow.receive(donation.id, counted, donation.handle)) {
+    if (b.flow && b.flow.receive(donation.id, counted, donation.handle)) {
       b.held += bananas;
       b.heldSats += donation.sats;
     } else cook(scene, bananas, donation.sats);
@@ -1126,31 +1131,36 @@
     const [csx, csy, csz] = COOK.sign, [cbx, cby, cbz] = COOK.board;
     setBoard(labelNode(ckNode, csx + 0.45, csy, csz), "BANANA COOKER", "(Tips Into Bananas)", true, { height: 1 });
     s.cookBoard = labelNode(ckNode, cbx, cby, cbz);
-    // The donation kiosk in the right wall at the walkway's end, facing back along it: its timber, its iron and lit
-    // parts, and the screen leaning back, showing its attract screen (enter hangs this visit's), or its thanks while
-    // the cooker works. The glass's corners in the cave's frame, for laying the flow over it.
-    const K = FM.KIOSK, G = K.glass, kiosk = FM.donationKiosk(), screen = FM.kioskScreen(), kp = L.kiosk;
-    const kioskNode = createNode({ position: { x: kp.x, y: kp.y, z: kp.z }, rotation: { x: 0, y: kp.turn, z: 0 } });
-    const kioskBody = createNode({ geometry: kiosk.timber });
-    const [sx0, sy0, sz0] = K.screen;
-    s.kioskScreen = createNode({ position: { x: sx0, y: sy0, z: sz0 }, rotation: { x: K.lean, y: 0, z: 0 } });
-    s.kioskIdle = createNode({ position: { x: 0, y: 0, z: G.z } });
-    s.kioskThanks = createNode({ position: { x: 0, y: 0, z: G.z }, geometry: FM.kioskThanks(), visible: false });
-    addChild(s.kioskScreen, createNode({ geometry: screen.frame }), createNode({ geometry: screen.glass }), s.kioskIdle, s.kioskThanks);
-    s.kioskGlow = createNode({ geometry: kiosk.glow });
-    addChild(kioskNode, kioskBody, createNode({ geometry: kiosk.iron }), s.kioskGlow, s.kioskScreen);
-    s.kiosk = kioskNode;
-    // The donations board between the study hall and the kiosk: its timber, iron, candles and ivy, the face painted once
-    // and its figures, which `refreshBoards` paints.
-    const BD = FM.BOARD, board = FM.donationBoard(), bp = L.board;
-    const boardNode = createNode({ position: { x: bp.x, y: bp.y, z: bp.z }, rotation: { x: 0, y: bp.turn, z: 0 } });
-    const boardBody = createNode({ geometry: board.timber });
-    s.boardFace = createNode({ position: { x: BD.face[0], y: BD.face[1], z: BD.face[2] } });
-    s.boardValues = createNode({ position: { x: BD.values[0], y: BD.values[1], z: BD.values[2] } });
-    addChild(s.boardFace, s.boardValues);
-    addChild(boardNode, boardBody, createNode({ geometry: board.iron }), createNode({ geometry: board.trim }), createNode({ geometry: board.glow }), s.boardFace);
-    s.glassCorners = [];
-    for (const [u, v] of [[-1, 1], [1, 1], [-1, -1], [1, -1]]) for (let i = 0; i < 3; i++) s.glassCorners.push(G.at[i] + G.right[i] * u * G.w / 2 + G.up[i] * v * G.h / 2);
+    // The donation corner, where it stands (`FM.donationCorner`).
+    s.corner = FM.donationCorner();
+    let kioskNode = null, kioskBody = null, boardNode = null, boardBody = null;
+    if (s.corner) {
+      // The donation kiosk in the right wall at the walkway's end, facing back along it: its timber, its iron and lit
+      // parts, and the screen leaning back, showing its attract screen (enter hangs this visit's), or its thanks while
+      // the cooker works. The glass's corners in the cave's frame, for laying the flow over it.
+      const K = FM.KIOSK, G = K.glass, kiosk = FM.donationKiosk(), screen = FM.kioskScreen(), kp = L.kiosk;
+      kioskNode = createNode({ position: { x: kp.x, y: kp.y, z: kp.z }, rotation: { x: 0, y: kp.turn, z: 0 } });
+      kioskBody = createNode({ geometry: kiosk.timber });
+      const [sx0, sy0, sz0] = K.screen;
+      s.kioskScreen = createNode({ position: { x: sx0, y: sy0, z: sz0 }, rotation: { x: K.lean, y: 0, z: 0 } });
+      s.kioskIdle = createNode({ position: { x: 0, y: 0, z: G.z } });
+      s.kioskThanks = createNode({ position: { x: 0, y: 0, z: G.z }, geometry: FM.kioskThanks(), visible: false });
+      addChild(s.kioskScreen, createNode({ geometry: screen.frame }), createNode({ geometry: screen.glass }), s.kioskIdle, s.kioskThanks);
+      s.kioskGlow = createNode({ geometry: kiosk.glow });
+      addChild(kioskNode, kioskBody, createNode({ geometry: kiosk.iron }), s.kioskGlow, s.kioskScreen);
+      s.kiosk = kioskNode;
+      // The donations board between the study hall and the kiosk: its timber, iron, candles and ivy, the face painted once
+      // and its figures, which `refreshBoards` paints.
+      const BD = FM.BOARD, board = FM.donationBoard(), bp = L.board;
+      boardNode = createNode({ position: { x: bp.x, y: bp.y, z: bp.z }, rotation: { x: 0, y: bp.turn, z: 0 } });
+      boardBody = createNode({ geometry: board.timber });
+      s.boardFace = createNode({ position: { x: BD.face[0], y: BD.face[1], z: BD.face[2] } });
+      s.boardValues = createNode({ position: { x: BD.values[0], y: BD.values[1], z: BD.values[2] } });
+      addChild(s.boardFace, s.boardValues);
+      addChild(boardNode, boardBody, createNode({ geometry: board.iron }), createNode({ geometry: board.trim }), createNode({ geometry: board.glow }), s.boardFace);
+      s.glassCorners = [];
+      for (const [u, v] of [[-1, 1], [1, 1], [-1, -1], [1, -1]]) for (let i = 0; i < 3; i++) s.glassCorners.push(G.at[i] + G.right[i] * u * G.w / 2 + G.up[i] * v * G.h / 2);
+    }
     // The watchtower on the top deck: tower, lamp and the beam that sweeps round it.
     const lkNode = createNode({ position: { x: lk.x, y: lk.y, z: lk.z } });
     s.lamp = createNode({ position: { x: 0, y: lk.tower + 1, z: 0 }, rotation: { x: 0, y: 0, z: FM.LOOKOUT_BEAM.pitch }, geometry: FM.lookoutLamp().on });
@@ -1172,7 +1182,8 @@
     const lesson = FM.studyBoard(), lessonNode = createNode({ position: { x: bx, y: by, z: bz }, rotation: { x: bLean, y: 0, z: 0 } });
     addChild(lessonNode, createNode({ geometry: lesson.back }), createNode({ geometry: lesson.face }));
     addChild(stNode, noteNode, lessonNode);
-    addChild(root, switchNode, rebNode, trNode, ckNode, kioskNode, boardNode, lkNode, stNode);
+    addChild(root, switchNode, rebNode, trNode, ckNode, lkNode, stNode);
+    if (s.corner) addChild(root, kioskNode, boardNode);
     // The cooker's flying things, each an instanced batch of fixed capacity on its own geometry: the tips' cubes and the
     // bananas; and the lime ring that climbs the core as it takes a tip.
     s.cubeNode = createNode({ geometry: { ...FM.satCube() }, instanceData: new Float32Array(CUBE_CAP * 20), instanceCount: 0, instanceVersion: 0, fixedInstanceCapacity: true, sightHidden: true, visible: false });
@@ -1218,8 +1229,10 @@
     target(rebBody, "rebalancer", "rebalancer", 2.8);
     target(trBody, "treasury", "treasury", 3);
     target(ckBody, "cooker", "cooker", 2.2);
-    target(kioskBody, "kiosk", null, 1.6);
-    target(boardBody, "board", null, 2.4);
+    if (s.corner) {
+      target(kioskBody, "kiosk", null, 1.6);
+      target(boardBody, "board", null, 2.4);
+    }
     target(lkBody, "lookout", "lookout", 3.5);
     target(stBody, "study", "study", 3.2);
     s.tunnels.forEach((t, i) => target(t.stone, "tunnel", ["lineA", "lineB", "lineC", "lineD"][i], 3, { place: s.bays[i] }));
@@ -1374,6 +1387,7 @@
   const feetOf = () => avatar ? avatar.root.position.y - avatar.baseY : 0;
   // Space by the kiosk steps up to its screen, as a tap on it does.
   const nearKiosk = (x, z, reach, feet) => {
+    if (!scene.corner) return false;
     const [ux, uz] = FM.KIOSK.use;
     if (Math.abs(feet - LAYOUT.kiosk.y) > 0.6 || Math.hypot(x - ux, z - uz) > reach) return false;
     openBooth(scene);
@@ -1442,8 +1456,8 @@
         if (!hit) return;
         const o = hit.owner;
         if (o.kind === "exit") return leaveCave();
-        if (o.kind === "greeter") return greeter.greet();
         if (o.kind === "kiosk") return openBooth(scene);
+        if (o.kind === "greeter") return greeter.greet();
         if (o.preset) pilot.goPreset(o.preset);
         // The kiosk's and the board's words own up to simulated or test payments, asked now: the page's Worker can turn
         // real mode on after the visit has begun.
@@ -1476,7 +1490,7 @@
         pilot.goPreset("show");
       }
       // In real mode the dialog sends the tip to the kiosk: the view glides on to its glass from wherever it is.
-      else if (action === "kiosk" && scene.booth.mode !== AT_KIOSK) {
+      else if (action === "kiosk" && scene.corner && scene.booth.mode !== AT_KIOSK) {
         endBooth(scene);
         openBooth(scene);
       }
@@ -1568,7 +1582,7 @@
     // With no Ooga the visitor cannot talk to the foreman: a hint points them to the island to pick one.
     if (!avatar) hud.hint(`${BL.factoryGreeter.NAME} the foreman gives tours here — pick an Ooga on the island first`);
     // Sent from the island's dialog to tip: on to the kiosk's glass at the first frame, once the pilot has placed the view.
-    scene.toKiosk = ctx.place === "kiosk";
+    scene.toKiosk = ctx.place === "kiosk" && scene.corner;
 
     factoryScene.root = root;
     factoryScene.camera = camera;

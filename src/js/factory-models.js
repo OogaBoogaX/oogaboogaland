@@ -122,6 +122,13 @@
     ]
   };
 
+  // The donation corner (the kiosk, its niche in the rock and the donations board) stands only where donations are real,
+  // the page's Worker having bananapayserver's binding, or on a debug page, so a build merged before donations go live
+  // shows the hall as it was. Decided once a page: the account's look answers before the first scene is built.
+  let corner = null;
+  const donationCorner = () => corner ?? (corner = !BL.donations || BL.donations.real
+    || typeof location !== "undefined" && new URLSearchParams(location.search).get("debug") === "1");
+
   // Where a line's station stands: its x, shifted from the deck's middle, and its z, `STATION_BACK` behind it.
   const stationX = (b) => b.x + (b.shift || 0);
   const stationZ = (b) => b.z - (b.back ?? STATION_BACK);
@@ -394,7 +401,7 @@
     const openings = LAYOUT.tunnels.map((t) => [t.turn === 0 ? "back" : t.x < 0 ? "left" : "right", t.turn === 0 ? t.x : t.z, t.y - 0.5, t.y + 7.8, 4.3]);
     openings.push(["right", LAYOUT.study.z, LAYOUT.study.y - 0.5, LAYOUT.study.y + 9.5, 3.4], ["front", 0, 3, 10.5, 6.5]);
     const open = (wall, u, y) => openings.some(([w, c, y0, y1, half]) => w === wall && Math.abs(u - c) < half && y > y0 && y < y1);
-    const recesses = [["right", LAYOUT.kiosk.z, LAYOUT.kiosk.y - 0.5, LAYOUT.kiosk.y + 5.6, 2, 1.6], ["right", LAYOUT.board.z, LAYOUT.board.y + 0.9, LAYOUT.board.y + 4.6, 2.3, 1.6]];
+    const recesses = donationCorner() ? [["right", LAYOUT.kiosk.z, LAYOUT.kiosk.y - 0.5, LAYOUT.kiosk.y + 5.6, 2, 1.6], ["right", LAYOUT.board.z, LAYOUT.board.y + 0.9, LAYOUT.board.y + 4.6, 2.3, 1.6]] : [];
     const recess = (wall, u, y) => {
       for (const [w, c, y0, y1, half, depth] of recesses) if (w === wall && Math.abs(u - c) < half && y > y0 && y < y1) return depth;
       return 0;
@@ -815,7 +822,7 @@
       block(t.x + bx * c + bz * sn, t.z - bx * sn + bz * c, 0.45, t.y - 0.5, t.y + 1.5);
     }
     block(L.study.x + 0.4, L.study.z, 1.2, L.study.y - 0.5, L.study.y + 5);
-    block(L.kiosk.x - 0.15, L.kiosk.z, 1, L.kiosk.y - 0.5, L.kiosk.y + 5);
+    if (donationCorner()) block(L.kiosk.x - 0.15, L.kiosk.z, 1, L.kiosk.y - 0.5, L.kiosk.y + 5);
     // The study hall's portal faces -x, so its x runs along world z and its z comes out toward -x.
     const st = L.study, S = STUDY;
     for (const s of [-1, 1]) block(st.x - S.z, st.z + s * S.post, 0.35, st.y - 0.5, st.y + 8);
@@ -3459,7 +3466,7 @@
     forgeSign, forgeWave, forgeLines, forgeTrack, forgeShafts, mintCoin, COILS, teslaCoil, banner, statusLantern, peerPipes, peerMirrors, TUNNEL_SIGN, TUNNEL_POST, EXIT_Z, CONDUIT_SAMPLES, TUNNEL_THEMES, STEP, supportAt, stairCeilingAt, clearAt, walkable, resolveFall,
     hall, scaffold, coreBody, coreChamber, conduits, sat, satFailed, stationFrame, capacitor, forge, forgeFire, cart,
     switchboard, switchScreens, REB, TRE, rebalancerBase, rebalancerRing, rebalancerFlow, treasuryBody, goldPile, hopperFill, beltNugget, goldCrate, dataBoard, moveBoard,
-    COOK, KIOSK, cookerBody, cookerFixtures, cookerLid, cookerPort, cookerGear, cookerSats, donationKiosk, kioskScreen, kioskIdle, kioskThanks, BOARD, donationBoard, boardFace, boardValues, satCube, flyingBanana, coreRingLime,
+    COOK, KIOSK, donationCorner, cookerBody, cookerFixtures, cookerLid, cookerPort, cookerGear, cookerSats, donationKiosk, kioskScreen, kioskIdle, kioskThanks, BOARD, donationBoard, boardFace, boardValues, satCube, flyingBanana, coreRingLime,
     coreRing, teslaArcs, lookoutTower, lookoutLamp, lookoutOptics, lookoutBeam, LOOKOUT_BEAM, STUDY, studyHall, studyNote, studyBoard, tunnels, galleryStation, galleryCaps, label, lanterns, hardHat, hubTunnel, hubWindow, bakeWindow, windowLights, exitTunnel, outsideView,
     beam, moved, turnedY, smoothBolt, smoothBitcoin
   };
