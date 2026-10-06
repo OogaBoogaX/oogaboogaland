@@ -69,11 +69,12 @@
     switchboard: { x: -12, y: LEVEL.low, z: 6, w: 7, d: 5 },
     // One platform along the right wall carries the node's money in a row toward the way out: the rebalancer, the
     // treasury and the banana cooker, each station facing +z. The platform is the deck; a station's entry is where
-    // it stands, and its w and d size its gorilla's patch.
+    // it stands, and its w and d size its gorilla's patch. The cooker stands far enough from the treasury, and the
+    // treasury's cart beside its vault, for the widest Ooga to walk round the treasury's front to its operator.
     platform: { x: 13.4, y: LEVEL.low, z: 12.15, w: 8, d: 20.7 },
     rebalancer: { x: 14, y: LEVEL.low, z: 5, w: 8, d: 6.4 },
     treasury: { x: 14.1, y: LEVEL.low, z: 13.2, w: 8, d: 5 },
-    cooker: { x: 13.75, y: LEVEL.low, z: 19.4, w: 8, d: 5 },
+    cooker: { x: 13.75, y: LEVEL.low, z: 19.9, w: 8, d: 5 },
     // In front of the core's stone foot, whose face is at z 0.2 there.
     forge: { x: 0, z: 0.7 },
     // The rear landing leaves a full body clear of both the tower and the deck posts.
@@ -1712,7 +1713,7 @@
   const TRE = {
     vz: -0.7, deep: 2.6, top: 1.62, dome: [1.15, 1.45], pipeX: 1.55, pipeY: 3.75, post: 2.4, postZ: -2.3, sign: [0.45, 4.9, -1.97],
     boards: [[-2.45, 2.55, -2.05], [2.45, 2.55, -2.05]], lamps: [[-2.4, 5.24, -1.8], [2.4, 5.24, -1.8]],
-    belt: [[0, 0.34, 0.66], [0, 0.98, 1.66]], crate: [0, 2.1], desk: [-2.05, 1.55], cart: [2.25, 1.45], crates: [[2.4, -1.1]], operator: [1.05, 1.6]
+    belt: [[0, 0.34, 0.66], [0, 0.98, 1.66]], crate: [0, 2.1], desk: [-2.05, 1.55], cart: [2.45, 0.4], crates: [[2.4, -1.1]], operator: [1.05, 1.6]
   };
   const treasuryBody = cached(() => {
     const round = [], flat = [], glow = [], vz = TRE.vz, front = vz + TRE.deep / 2, [DR, DH] = TRE.dome, DB = TRE.top;

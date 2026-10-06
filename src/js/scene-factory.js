@@ -68,7 +68,7 @@
     rebalancer: view(14, 4.6, 5, -0.8, 0.3, 10),
     // The nav's Treasury frames the whole platform: the rebalancer, the treasury and the cooker in a row.
     treasury: view(13.2, 3.6, 12.6, -0.7, 0.52, 15.5),
-    cooker: view(13.75, 4, 19.4, -1.45, 0.28, 9),
+    cooker: view(13.75, 4, 19.9, -1.45, 0.28, 9),
     // After a tip from the dialog: from over the kiosk, down on the cooker's jaw with the core beyond it, the bananas
     // flying off to the left toward the way out.
     show: view(11.2, 5.7, 18.2, 0.848, 0.38, 12),
