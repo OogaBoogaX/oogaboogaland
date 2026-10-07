@@ -29,8 +29,12 @@
 // page muted its microphone, and `state.body` is the Ooga this page reports driving.
 // `setHealth` reports the driven Ooga's health (on a change, at most HP_MS apart), which other pages draw over
 // it; remote records carry `hp` and `ko`.
-// Exports start, subscribe, subscribeRoster, dispose, login, logout, rejoin, setBody, setZone, setHub, setMuted, setHealth, sendNpc,
-// npcFrame, sendPose, mayDrive, ownCharacter, characterOf, serverNow, remotes and state.
+// Ooga Chat: `sendChat` sends a line (sanitized as donation messages are, CHAT_MAX characters at most) while the
+// room is live; `subscribeChat` hears the room's lines as `fn(lines, replace)`: one new line, or on every
+// (re)join the lines the room still holds, which replace whatever the page had. The room names each line's
+// speaker; the page keeps nothing (chat.js shows them).
+// Exports start, subscribe, subscribeRoster, subscribeChat, dispose, login, logout, rejoin, setBody, setZone, setHub, setMuted, setHealth, sendNpc,
+// sendChat, npcFrame, sendPose, mayDrive, ownCharacter, characterOf, serverNow, remotes, state, CHAT_MAX and CHAT_KEEP.
 (() => {
   "use strict";
   const BL = window.BL = window.BL || {};
@@ -40,8 +44,11 @@
   const PING_MS = 10000;
   const HIDDEN_PAUSE_MS = 5 * 60000;
   const BACKOFF_MS = 500, BACKOFF_MAX_MS = 15000;
+  // The room's own limits (worker/src/protocol.js): characters in a line, lines it holds.
+  const CHAT_MAX = 160, CHAT_KEEP = 100;
   const subscribers = new Set();
   const rosterSubscribers = new Set();
+  const chatSubscribers = new Set();
   const remotes = new Map();
   // room: "off" (signed out or no backend), "connecting", "live", "paused" (hidden a while), or a kick that
 // stopped it ("replaced", "full").
@@ -108,6 +115,14 @@
     rec.muted = p.muted === true;
     rec.x = +p.x || 0; rec.y = +p.y || 0; rec.z = +p.z || 0; rec.yaw = +p.yaw || 0;
     remotes.set(p.id, rec);
+  };
+
+  // Only the fields chat.js shows; the room already sanitized the text and named the speaker.
+  const chatLine = (m) => m && Number.isSafeInteger(m.id) && typeof m.login === "string" && typeof m.text === "string"
+    ? { id: m.id, at: Number.isFinite(m.at) ? m.at : 0, login: m.login, name: typeof m.name === "string" && m.name ? m.name : m.login, text: m.text.slice(0, CHAT_MAX) }
+    : null;
+  const chatHeard = (lines, replace) => {
+    for (const fn of chatSubscribers) fn(lines, replace);
   };
 
   const onMessage = (e) => {
@@ -186,6 +201,17 @@
       state.hostId = Number.isSafeInteger(msg.id) ? msg.id : 0;
       state.followers = Number.isSafeInteger(msg.followers) ? msg.followers : 0;
       emit();
+    } else if (msg.t === "chat") {
+      const line = chatLine(msg);
+      if (line) chatHeard([line], false);
+    } else if (msg.t === "chat-history") {
+      if (!Array.isArray(msg.messages)) return;
+      const lines = [];
+      for (const m of msg.messages.slice(-CHAT_KEEP)) {
+        const line = chatLine(m);
+        if (line) lines.push(line);
+      }
+      chatHeard(lines, true);
     } else if (msg.t === "voice") {
       if (Array.isArray(msg.peers)) BL.voice.setPeers(msg.peers, Array.isArray(msg.gens) ? msg.gens : null);
     } else if (msg.t === "release") {
@@ -364,6 +390,14 @@
     sendMute();
   };
 
+  // One line of Ooga Chat; false when it was not sent (not live, empty, or too long once sanitized).
+  const sendChat = (text) => {
+    const line = BL.donations.sanitize(text, Infinity);
+    if (state.room !== "live" || !line || line.length > CHAT_MAX) return false;
+    send(JSON.stringify({ t: "chat", text: line }));
+    return true;
+  };
+
   // Throttled to POSE_MS and skipped while nothing moved, so a standing Ooga costs nothing.
   const sendPose = (x, y, z, yaw) => {
     if (state.room !== "live") return;
@@ -412,6 +446,10 @@
     rosterSubscribers.add(fn);
     return () => rosterSubscribers.delete(fn);
   };
+  const subscribeChat = (fn) => {
+    chatSubscribers.add(fn);
+    return () => chatSubscribers.delete(fn);
+  };
 
   const dispose = () => {
     document.removeEventListener("visibilitychange", onVisibility);
@@ -420,8 +458,9 @@
     window.clearTimeout(hiddenTimer);
     subscribers.clear();
     rosterSubscribers.clear();
+    chatSubscribers.clear();
     close("off");
   };
 
-  BL.net = { start, subscribe, subscribeRoster, dispose, login, logout, rejoin, setBody, setZone, setHub, setMuted, setHealth, sendNpc, sendPose, mayDrive, ownCharacter, characterOf, serverNow, remotes, state, get npcFrame() { return npcFrame; } };
+  BL.net = { start, subscribe, subscribeRoster, subscribeChat, dispose, login, logout, rejoin, setBody, setZone, setHub, setMuted, setHealth, sendNpc, sendChat, sendPose, mayDrive, ownCharacter, characterOf, serverNow, remotes, state, CHAT_MAX, CHAT_KEEP, get npcFrame() { return npcFrame; } };
 })();

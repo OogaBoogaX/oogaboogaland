@@ -3919,6 +3919,65 @@ const hubSheetPersistence = { name: "side panel persistence", why: "rule: a firs
     && restored.open === "true" && restored.tab === "bananas" && restored.panel
     && closed.open === "false" && closed.tab === "bananas" && !closed.saved.open && closed.saved.tab === "bananas", JSON.stringify({ first, opened, restored, closed }));
 } };
+const hubChat = { name: "ooga chat", why: "rule: Ooga Chat shows only with a backend, asks a signed-out visitor to sign in, keeps the last 100 lines as plain text, never pulls a reader back down, and Enter sends while Escape only leaves the input", run: async (b) => {
+  // No backend in the suite: a saved chat tab falls back to the roster and the tab stays hidden.
+  await b.evaluate(`localStorage.setItem("oogaboogaland.sheet.v1", JSON.stringify({ open: true, tab: "chat" }))`);
+  await b.open(hubPage(src, "pos=0"));
+  await untilReady(b);
+  const none = await b.evaluate(`({ hidden: document.getElementById("chat-tab").hidden, tab: document.querySelector("[data-tab][aria-selected='true']").dataset.tab, offline: BL.net.sendChat("hi") })`);
+  const r = await b.evaluate(`(() => {
+    const C = BL.chat, $ = (id) => document.getElementById(id), tab = $("chat-tab"), input = $("chat-input"), send = $("chat-send"), log = $("chat-log");
+    const out = {};
+    C.account({ backend: true, me: null, room: "off" });
+    tab.click();
+    out.signedOut = !tab.hidden && !$("chat-panel").hidden && input.disabled && send.disabled && !$("chat-login").hidden && document.activeElement !== input;
+    C.account({ backend: true, me: { id: 9, login: "Tester", display: "Tester" }, room: "live" });
+    tab.click();
+    out.saved = JSON.parse(localStorage.getItem("oogaboogaland.sheet.v1")).tab;
+    out.focused = document.activeElement === input || !matchMedia("(pointer: fine)").matches;
+    const line = (i) => ({ id: i + 1, at: 0, login: i % 2 ? "tester" : "peer", name: i % 2 ? "Tester" : "Peer", text: "line " + i });
+    const history = [];
+    for (let i = 0; i < 120; i++) history.push(line(i));
+    C.heard(history, true);
+    out.history = [log.childElementCount, log.firstElementChild.lastChild.textContent];
+    for (let i = 120; i < 150; i++) C.heard([i === 149 ? { ...line(i), text: '<img src=x onerror="window.__chatInjected=1">' } : line(i)], false);
+    const last = log.lastElementChild;
+    out.capped = [log.childElementCount, log.firstElementChild.lastChild.textContent, C.stats.lines];
+    out.text = last.lastChild.textContent === '<img src=x onerror="window.__chatInjected=1">' && !log.querySelector("img") && !window.__chatInjected && last.dataset.own === "true";
+    out.followed = log.scrollHeight - log.scrollTop - log.clientHeight <= 1;
+    log.scrollTop = 0;
+    C.heard([line(150)], false);
+    out.reading = [log.scrollTop, log.childElementCount, log.firstElementChild.lastChild.textContent];
+    log.scrollTop = log.scrollHeight;
+    C.heard([line(151)], false);
+    out.refollowed = log.scrollHeight - log.scrollTop - log.clientHeight <= 1;
+    C.heard([], true);
+    C.heard([line(150), line(151), line(152)], true);
+    out.rejoined = [log.childElementCount, log.firstElementChild.lastChild.textContent, log.lastElementChild.lastChild.textContent];
+    input.value = "a".repeat(161);
+    input.dispatchEvent(new Event("input"));
+    out.over = [send.disabled, $("chat-left").textContent];
+    input.value = "  hello <b>  ";
+    input.dispatchEvent(new Event("input"));
+    out.ready = [send.disabled, $("chat-left").textContent];
+    window.__chatSent = [];
+    window.__chatSend = BL.net.sendChat;
+    BL.net.sendChat = (text) => (window.__chatSent.push(text), true);
+    input.focus();
+    return out;
+  })()`);
+  await b.key("Enter");
+  const sent = await b.evaluate(`(() => { const input = document.getElementById("chat-input"); return { sent: window.__chatSent, cleared: input.value === "" && document.getElementById("chat-send").disabled && document.getElementById("chat-left").textContent === "160" }; })()`);
+  await b.key("Escape");
+  const escaped = await b.evaluate(`(() => { BL.net.sendChat = window.__chatSend; const out = { blurred: document.activeElement !== document.getElementById("chat-input"), open: document.getElementById("sheet").dataset.open === "true", tab: document.querySelector("[data-tab][aria-selected='true']").dataset.tab }; BL.chat.account({ backend: false, me: null, room: "off" }); localStorage.removeItem("oogaboogaland.sheet.v1"); return out; })()`);
+  record("ooga chat: hidden without a backend, signed out asks to sign in, the last 100 lines kept as text, a reader not pulled down, a rejoin to a room that forgot keeps the page's lines, Enter sends and Escape leaves the input",
+    none.hidden && none.tab === "roster" && none.offline === false && r.signedOut && r.saved === "chat" && r.focused
+    && r.history[0] === 100 && r.history[1] === "line 20" && r.capped[0] === 100 && r.capped[1] === "line 50" && r.capped[2] === 100 && r.text && r.followed
+    && r.reading[0] === 0 && r.reading[1] === 100 && r.reading[2] === "line 51" && r.refollowed
+    && r.rejoined[0] === 100 && r.rejoined[1] === "line 53" && r.rejoined[2] === "line 152"
+    && r.over[0] && r.over[1] === "-1" && !r.ready[0] && r.ready[1] === "153"
+    && sent.sent.length === 1 && sent.sent[0] === "  hello <b>  " && sent.cleared && escaped.blurred && escaped.open && escaped.tab === "chat", JSON.stringify({ none, r, sent, escaped }));
+} };
 const hubBlockHeight = { name: "header clock and block height", why: "rule: the single-digit clock is centered from its visible glyphs with a time zone, and the shared chain reading is shown beneath it", run: async (b) => {
   const before = await b.evaluate(`(() => { const clock = document.getElementById("world-clock"), label = clock.querySelector("svg").getAttribute("aria-label"), text = label.replace(/^Ooga Booga time /, ""), cells = [...text].reduce((sum, ch) => sum + (ch === " " ? 2 : 4), -1), zone = (new Intl.DateTimeFormat("en-US", { timeZoneName: "short" }).formatToParts(new Date()).find(part => part.type === "timeZoneName")?.value || "UTC").toUpperCase().replaceAll("−", "-"); return { height: document.getElementById("world-block-height").textContent, bananas: !!document.getElementById("world-banana-count"), label, namedImage: !clock.hasAttribute("aria-label") && clock.querySelector("svg").getAttribute("role") === "img", text, zone, cells, viewWidth: clock.querySelector("svg").viewBox.baseVal.width, cssWidth: parseFloat(clock.style.width) }; })()`);
   await b.evaluate(`BL.mempool.emit({ type: "block", height: 900123, txCount: 3210 })`);
@@ -7925,7 +7984,7 @@ scene("hub", { label: "birds-eye combat", query: "solo=1&character=portlandhodl&
 scene("hub", { label: "birds-eye combat projection and targets", query: "solo=1&character=portlandhodl&weapon=1&mode=shoulder&combat=1", steps: [hubBirdsEyeProjection, hubBirdsEyeTargets, hubCombatReplay] });
 scene("hub", { label: "birds-eye lower floors", query: "solo=1&character=portlandhodl&weapon=1&mode=shoulder&combat=1", steps: [hubBirdsEyeFloors] });
 scene("hub", { label: "mirror", steps: [hubJumbotron, hubMatrix, hubMirror] });
-scene("hub", { label: "side panel", query: "pos=0", steps: [hubSheetPersistence] });
+scene("hub", { label: "side panel", query: "pos=0", steps: [hubSheetPersistence, hubChat] });
 scene("hub", { label: "clock and block height", query: "pos=0&time=0900", steps: [hubBlockHeight, hubDestinationNames] });
 scene("hub", { label: "canvas2d", query: "canvas2d=1", steps: [canvasTour] });
 scene("hub", { query: "pos=0", opts: PHONE_SIZE, steps: [phone("hub", { required: ["#joy-move", "#joy-look", "#sheet-toggle", "#sheet-bananas"], sheet: true })] });
@@ -9887,16 +9946,38 @@ const menuShellChecks = BL => {
 };
 
 
-const integrationChecks = async BL => {
+// net.js in a sandbox: a canned /api/me and fake sockets that record what the page sends.
+const netFixture=(BL,response)=>{
   const source=readFileSync(join(root,"src/js/net.js"),"utf8");
-  const fixture=(response)=>{
-    const sockets=[],sent=[],events=new Map();let calls=0,tick=1000;
-    class Socket {static OPEN=1;constructor(){this.readyState=1;sockets.push(this);}send(v){sent.push(typeof v==="string"?JSON.parse(v):v);}close(){this.readyState=3;}}
-    const voice={setPeers:()=>{},restart:()=>{},stop:()=>{}};
-    const context={window:{BL:{characters:BL.characters,contributors:BL.contributors,voice},setTimeout:()=>1,clearTimeout(){},setInterval:()=>1,clearInterval(){}},document:{hidden:false,addEventListener:(k,v)=>events.set(k,v),removeEventListener:k=>events.delete(k)},location:{protocol:"https:",host:"fixture.invalid"},fetch:async()=>{calls++;return response();},AbortSignal,WebSocket:Socket,performance:{now:()=>tick+=200},Date,ArrayBuffer};
-    runInNewContext(source,context);
-    return {net:context.window.BL.net,sockets,sent,events,get calls(){return calls;}};
-  };
+  const sockets=[],sent=[],events=new Map();let calls=0,tick=1000;
+  class Socket {static OPEN=1;constructor(){this.readyState=1;sockets.push(this);}send(v){sent.push(typeof v==="string"?JSON.parse(v):v);}close(){this.readyState=3;}}
+  const voice={setPeers:()=>{},restart:()=>{},stop:()=>{}};
+  const context={window:{BL:{characters:BL.characters,contributors:BL.contributors,donations:BL.donations,voice},setTimeout:()=>1,clearTimeout(){},setInterval:()=>1,clearInterval(){}},document:{hidden:false,addEventListener:(k,v)=>events.set(k,v),removeEventListener:k=>events.delete(k)},location:{protocol:"https:",host:"fixture.invalid"},fetch:async()=>{calls++;return response();},AbortSignal,WebSocket:Socket,performance:{now:()=>tick+=200},Date,ArrayBuffer};
+  runInNewContext(source,context);
+  return {net:context.window.BL.net,sockets,sent,events,get calls(){return calls;}};
+};
+// Ooga Chat's wire on the page: what it sends, and the lines it hands on (chat.js keeps and shows them).
+const chatNetChecks = async BL => {
+  const f=netFixture(BL,()=>({ok:true,headers:{get:()=>"application/json"},json:async()=>({player:{id:71,login:"Tester",display:"Tester"}})}));
+  const heard=[];f.net.subscribeChat((lines,replace)=>heard.push({ids:lines.map(l=>l.id),replace,keys:lines.map(l=>Object.keys(l).join())}));
+  const before=f.net.sendChat("too early");
+  await f.net.start();const ws=f.sockets[0],message=v=>ws.onmessage({data:JSON.stringify(v)});
+  message({t:"welcome",you:{id:71},players:[],now:Date.now()});
+  const history=[];for(let i=0;i<130;i++)history.push({id:i+1,at:i,login:"peer",name:"Peer",text:"line "+i,extra:"dropped"});
+  history.push({id:"bad",login:"peer",text:"no id"});
+  message({t:"chat-history",messages:history});
+  message({t:"chat",id:500,at:1,login:"peer",text:"x".repeat(400)});
+  message({t:"chat",id:501,login:7,text:"bad login"});
+  const sends=[f.net.sendChat("  hi <b>there</b>  "),f.net.sendChat("   "),f.net.sendChat("🍌🍌"),f.net.sendChat("a".repeat(f.net.CHAT_MAX)),f.net.sendChat("a".repeat(f.net.CHAT_MAX+1))];
+  const chats=f.sent.filter(m=>m.t==="chat");
+  record("ooga chat wire: lines only while live, sanitized as donations are and CHAT_MAX at most; history replaces with the last CHAT_KEEP well-formed lines; a malformed line is dropped",
+    f.net.CHAT_MAX===160&&f.net.CHAT_KEEP===100&&before===false&&sends.join()==="true,false,false,true,false"&&chats.length===2&&chats[0].text==="hi bthereb"&&Object.keys(chats[0]).join()==="t,text"&&chats[1].text.length===160
+    &&heard.length===2&&heard[0].replace&&heard[0].ids.length===99&&heard[0].ids[0]===32&&heard[0].ids.at(-1)===130&&heard[0].keys.every(k=>k==="id,at,login,name,text")
+    &&!heard[1].replace&&heard[1].ids.join()==="500",JSON.stringify({before,sends,chats:chats.map(m=>m.text.length),heard:heard.map(h=>({n:h.ids.length,first:h.ids[0],last:h.ids.at(-1),replace:h.replace}))}));
+  f.net.dispose();
+};
+const integrationChecks = async BL => {
+  const fixture=(response)=>netFixture(BL,response);
   for(const kind of ["html","404","failure"]){
     const f=fixture(()=>{if(kind==="failure")throw Error("offline");return {ok:kind!=="404",headers:{get:()=>"text/html"}};});
     await f.net.start();await f.net.start();f.net.setZone("dsb-outside");f.net.setBody("YellowBrokeIt");f.net.sendPose(-45,40,-43,0);
@@ -10091,6 +10172,7 @@ const unitChecks = async () => {
   }
   if(ARGS.includes("stackchain-unit")){stackchainChecks(BL);menuShellChecks(BL);return;}
   if(ARGS.includes("dsb-menus-unit")){stackchainChecks(BL);memeFactoryChecks(BL);menuShellChecks(BL);maxisChecks(BL);rulersChecks(BL);inkChecks(BL);bigBitcoinChecks(BL);return;}
+  await chatNetChecks(BL);
   exteriorEnrichmentChecks(BL);
   if(ARGS.includes("exterior-unit"))return;
   maxisChecks(BL);

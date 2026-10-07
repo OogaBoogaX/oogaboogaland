@@ -336,6 +336,8 @@
         <button type="button" role="tab" data-tab="roster" aria-selected="true"><span data-sign>Ooga Boogas</span></button>
         <button type="button" role="tab" data-tab="loot" aria-selected="false" id="loot-tab" hidden><span
             data-sign>Loot</span> <span class="tab-count" id="loot-count" hidden></span></button>
+        <button type="button" role="tab" data-tab="chat" aria-selected="false" id="chat-tab" aria-controls="chat-panel" hidden><span
+            data-sign>Ooga Chat</span></button>
       </div>
       <section class="panel" data-panel="roster" role="tabpanel">
         <ul id="roster" class="roster"></ul>
@@ -370,6 +372,15 @@
         </div>
         <p class="help empty" id="inventory-empty">Open a loot crate to earn swag, then assign it to a caveman.</p>
         <ul id="inventory" class="loot"></ul>
+      </section>
+      <section class="panel" data-panel="chat" id="chat-panel" role="tabpanel" aria-labelledby="chat-tab" hidden>
+        <ol class="chat-log" id="chat-log" role="log" aria-live="polite" aria-relevant="additions" aria-label="Island chat" tabindex="0"></ol>
+        <p class="help chat-status" id="chat-status"><span id="chat-status-text"></span> <button type="button" class="link" data-action="account-login" id="chat-login" hidden>Sign in with GitHub</button></p>
+        <form class="chat-form" id="chat-form" autocomplete="off">
+          <input type="text" id="chat-input" aria-label="Say something to everyone on the island" aria-describedby="chat-left" maxlength="320" enterkeyhint="send" spellcheck="true" disabled>
+          <span class="chat-left" id="chat-left">160</span>
+          <button type="submit" class="chat-send" id="chat-send" disabled>Send</button>
+        </form>
       </section>
       <footer class="sheet-foot">
         <span class="quality" id="quality" aria-live="polite"></span>
@@ -1616,6 +1627,7 @@ Then run npm run build and ONLY=characters node test/run.mjs.</pre>
   <script src="js/hud.js"></script>
   <script src="js/net.js"></script>
   <script src="js/voice.js"></script>
+  <script src="js/chat.js"></script>
   <script src="js/fx.js"></script>
   <script src="js/camera-cover.js"></script>
   <script src="js/crew.js"></script>
