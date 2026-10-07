@@ -14,11 +14,14 @@
 // is told how many pages follow it (`host { id, followers }`) so a lone host sends no frames, and who is
 // in voice or muted goes out (`vstate`) only when it changes, as health does (`hp`). The last voice list
 // each player was sent lives in its attachment (`sent`), so a woken room still knows what every page holds.
+// Chat: each line is named from the session, rate limited per player, sent to every socket and kept in a
+// ring of the last CHAT_KEEP in memory alone, which a joiner gets after `welcome`. Nothing stores it: a room
+// that hibernates, restarts or is redeployed wakes with an empty ring, and the lines are gone.
 
 import { DurableObject } from "cloudflare:workers";
 import {
   CLOSE_KICK, CLOSE_PROTOCOL, MAX_PLAYERS, MOVE_HZ, STALE_MS, SWEEP_MS, TICK_HZ,
-  NPC_FRAME_MAX, NPC_HZ, OUTSIDE, HP_HZ, VOICE_TRACK, castIndex, electHost, npcFollowers, claimRefusal, parseClientMessage, playerFromHeaders, spawnPoint, takeToken, voicePeers,
+  NPC_FRAME_MAX, NPC_HZ, OUTSIDE, HP_HZ, VOICE_TRACK, CHAT_HZ, CHAT_BURST, chatLog, castIndex, electHost, npcFollowers, claimRefusal, parseClientMessage, playerFromHeaders, spawnPoint, takeToken, voicePeers,
 } from "./protocol.js";
 import { sfuClient } from "./sfu.js";
 import CAST_ROWS from "./characters.gen.json";
@@ -36,6 +39,8 @@ export class Room extends DurableObject {
     this.hostId = 0;
     this.followers = 0;
     this.lastNpc = null;
+    this.chat = chatLog();
+    this.chatId = 0;
     ctx.setWebSocketAutoResponse(new WebSocketRequestResponsePair("ping", "pong"));
     // The pile's sound loop started once, for good: every page plays it at (now - loopEpoch), so all
     // hear the same crackle at the same moment. Stored, so a woken or redeployed room keeps the phase.
@@ -54,7 +59,7 @@ export class Room extends DurableObject {
   }
 
   record(ws, a) {
-    return { ws, voice: { pub: null, sub: null, track: null, gen: 0 }, muted: false, hp: 100, ko: false, sent: null, zone: OUTSIDE, inHub: false, joinedAt: Date.now(), ...a, bucket: { tokens: MOVE_HZ, at: Date.now() }, npcBucket: { tokens: NPC_HZ, at: Date.now() }, hpBucket: { tokens: HP_HZ, at: Date.now() }, seenAt: Date.now() };
+    return { ws, voice: { pub: null, sub: null, track: null, gen: 0 }, muted: false, hp: 100, ko: false, sent: null, zone: OUTSIDE, inHub: false, joinedAt: Date.now(), ...a, bucket: { tokens: MOVE_HZ, at: Date.now() }, npcBucket: { tokens: NPC_HZ, at: Date.now() }, hpBucket: { tokens: HP_HZ, at: Date.now() }, chatBucket: { tokens: CHAT_BURST, at: Date.now() }, seenAt: Date.now() };
   }
 
   attachment(p) {
@@ -108,6 +113,8 @@ export class Room extends DurableObject {
     const others = [];
     for (const o of this.players.values()) if (o !== p) others.push(this.view(o));
     this.send(server, { t: "welcome", you: this.view(p), players: others, tickHz: TICK_HZ, now: Date.now(), loopEpoch: this.loopEpoch, host: this.hostId, followers: this.followers });
+    // A message of its own after welcome, so a page that does not know chat ignores it; empty after the room slept.
+    this.send(server, { t: "chat-history", messages: this.chat.list() });
     this.broadcast({ t: "join", p: this.view(p) }, server);
     this.updateVoice();
     await this.ensureSweep();
@@ -163,6 +170,10 @@ export class Room extends DurableObject {
       if (msg.on === p.muted) return;
       p.muted = msg.on;
       this.voiceState(p);
+    } else if (msg.t === "chat") {
+      // Nothing in the attachment changes.
+      this.say(p, msg.text);
+      return;
     } else if (msg.t === "body") {
       if (msg.name === p.body) return;
       const refusal = claimRefusal(CAST, p.login, msg.name, this.players.values(), p.contributor);
@@ -240,6 +251,17 @@ export class Room extends DurableObject {
     const ps = [];
     for (const p of this.players.values()) ps.push(p.id, p.x, p.y, p.z, p.yaw);
     this.broadcast({ t: "state", now: Date.now(), ps });
+  }
+
+  // A line from a player, named by the session's login and display name; over the rate it is dropped.
+  say(p, text) {
+    if (!takeToken(p.chatBucket, CHAT_HZ, p.seenAt, CHAT_BURST)) return;
+    const at = Date.now();
+    // Ids follow the clock and only grow, so a restarted room does not reuse one, as voice counts do not.
+    this.chatId = Math.max(at, this.chatId + 1);
+    const line = { id: this.chatId, at, login: p.login, name: p.display, text };
+    this.chat.push(line);
+    this.broadcast({ t: "chat", ...line });
   }
 
   // Also after any page's `hub` flag changes: the host sends frames only while someone follows.
