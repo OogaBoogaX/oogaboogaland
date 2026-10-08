@@ -3,5 +3,15 @@
   "lane": "manual",
   "openedOn": "2026-10-08",
   "round": "54573fc9687811278e451d116f73762d8d98b838",
-  "entries": []
+  "entries": [
+    {
+      "pr": 185,
+      "head": "ac29ff9bc7cb264fc98db5a6f19aaf770e02f306",
+      "author": "hotpixelgroup",
+      "path": "src/characters/hotpixelgroup.js",
+      "base": "3b50564ba59f433e7e8142dc0ac66aa87ad24a2a",
+      "hash": "d91e740f3fb27a9d5e3bff524457285326841b48dfa298cd8eb62d307fccd4fe",
+      "lane": "manual"
+    }
+  ]
 }
