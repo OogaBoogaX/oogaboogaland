@@ -6,7 +6,8 @@
 // Cost: a line heard while the panel is not showing only joins a capped array, and the rows are drawn in one
 // batch when it shows; while it shows a line adds a row and drops the oldest past CHAT_KEEP. The log follows
 // new lines only while it is scrolled to its foot, so reading back is never yanked. No timers, no frame work.
-// Enter sends; Escape leaves the input with the sheet open. Keys typed in the sheet never reach a scene
+// Enter sends one pending line; its echo clears an unchanged draft, a refusal or disconnect keeps it.
+// Escape leaves the input with the sheet open. Keys typed in the sheet never reach a scene
 // (controls.js, director.js). On a phone the sheet rises above the keyboard while the input has focus.
 // Exports account (fed `BL.net.state`), heard (fed the room's lines) and stats.
 (() => {
@@ -24,11 +25,12 @@
   const form = $("chat-form"), input = $("chat-input"), left = $("chat-left"), sendButton = $("chat-send");
   const viewport = window.visualViewport, fine = window.matchMedia("(pointer: fine)");
   const lines = [];
-  let showing = false, drawn = true, live = false, me = "", composing = false;
+  let showing = false, drawn = true, live = false, me = "", composing = false, pending = null, notice = "";
 
   const row = (line) => {
     const li = document.createElement("li"), name = document.createElement("span"), text = document.createElement("span");
     li.className = "chat-row";
+    li.dataset.id = String(line.id);
     if (line.login.toLowerCase() === me) li.dataset.own = "true";
     if (line.at) li.title = TIME.format(line.at);
     name.className = "chat-name";
@@ -38,18 +40,43 @@
     li.append(name, text);
     return li;
   };
-  const redraw = () => {
+  const redraw = (follow = true) => {
+    const top = log.getBoundingClientRect().top, oldTop = log.scrollTop;
+    let anchor = null, offset = 0;
+    if (!follow) for (const child of log.children) {
+      const rect = child.getBoundingClientRect();
+      if (rect.bottom > top) { anchor = child.dataset.id; offset = rect.top - top; break; }
+    }
     const rows = document.createDocumentFragment();
     for (const line of lines) rows.append(row(line));
     log.replaceChildren(rows);
-    log.scrollTop = log.scrollHeight;
+    if (follow) log.scrollTop = log.scrollHeight;
+    else {
+      log.scrollTop = oldTop;
+      for (const child of log.children) if (child.dataset.id === anchor) {
+        log.scrollTop += child.getBoundingClientRect().top - top - offset;
+        break;
+      }
+    }
     drawn = true;
   };
   const atFoot = () => log.scrollHeight - log.scrollTop - log.clientHeight <= FOLLOW_PX;
 
   // From the room: one new line, or (joined) everything it holds on a join. A join merges by id rather
   // than replacing, so a socket that reconnects to a room which slept and forgot keeps what this page saw.
-  const heard = (list, joined) => {
+  const heard = (list, joined, rejected) => {
+    if (rejected) {
+      pending = null;
+      notice = "Wait a moment, then send again.";
+      update();
+      return;
+    }
+    if (!joined && pending && list.some((line) => line.login.toLowerCase() === me && line.text === pending.text)) {
+      if (input.value === pending.draft) input.value = "";
+      pending = null;
+      notice = "";
+      update();
+    }
     if (joined) {
       const seen = new Set(lines.map((line) => line.id));
       for (const line of list) if (!seen.has(line.id)) lines.push(line);
@@ -62,7 +89,7 @@
       return;
     }
     if (joined || !drawn) {
-      redraw();
+      redraw(!drawn || atFoot());
       return;
     }
     const follow = atFoot();
@@ -85,12 +112,15 @@
     const length = BL.donations.sanitize(input.value, Infinity).length;
     left.textContent = String(CHAT_MAX - length);
     left.dataset.over = String(length > CHAT_MAX);
-    sendButton.disabled = !live || !length || length > CHAT_MAX;
+    sendButton.disabled = !live || !!pending || !length || length > CHAT_MAX;
+    status.hidden = live && !notice;
+    if (live) statusText.textContent = notice;
   };
   const account = ({ backend, me: player, room }) => {
     tab.hidden = !backend;
     me = player ? player.login.toLowerCase() : "";
     live = !!player && room === "live";
+    if (!live) { pending = null; notice = ""; }
     input.disabled = !live;
     input.placeholder = live ? "Say something" : "";
     signIn.hidden = !!player;
@@ -100,8 +130,11 @@
   };
 
   const submit = () => {
-    if (sendButton.disabled || !net.sendChat(input.value)) return;
-    input.value = "";
+    if (sendButton.disabled) return;
+    const draft = input.value;
+    pending = { draft, text: BL.donations.sanitize(draft, Infinity) };
+    notice = "";
+    if (!net.sendChat(draft)) pending = null;
     update();
   };
   form.addEventListener("submit", (e) => {

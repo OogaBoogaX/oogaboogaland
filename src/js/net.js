@@ -30,8 +30,8 @@
 // `setHealth` reports the driven Ooga's health (on a change, at most HP_MS apart), which other pages draw over
 // it; remote records carry `hp` and `ko`.
 // Ooga Chat: `sendChat` sends a line (sanitized as donation messages are, CHAT_MAX characters at most) while the
-// room is live; `subscribeChat` hears the room's lines as `fn(lines, replace)`: one new line, or on every
-// (re)join the lines the room still holds, which replace whatever the page had. The room names each line's
+// room is live; `subscribeChat` hears the room's lines as `fn(lines, joined, rejected)`: one new line, or on every
+// (re)join the lines the room still holds, which chat.js merges; a rejection keeps the draft. The room names each line's
 // speaker; the page keeps nothing (chat.js shows them).
 // Exports start, subscribe, subscribeRoster, subscribeChat, dispose, login, logout, rejoin, setBody, setZone, setHub, setMuted, setHealth, sendNpc,
 // sendChat, npcFrame, sendPose, mayDrive, ownCharacter, characterOf, serverNow, remotes, state, CHAT_MAX and CHAT_KEEP.
@@ -121,8 +121,8 @@
   const chatLine = (m) => m && Number.isSafeInteger(m.id) && typeof m.login === "string" && typeof m.text === "string"
     ? { id: m.id, at: Number.isFinite(m.at) ? m.at : 0, login: m.login, name: typeof m.name === "string" && m.name ? m.name : m.login, text: m.text.slice(0, CHAT_MAX) }
     : null;
-  const chatHeard = (lines, replace) => {
-    for (const fn of chatSubscribers) fn(lines, replace);
+  const chatHeard = (lines, replace, rejected = false) => {
+    for (const fn of chatSubscribers) fn(lines, replace, rejected);
   };
 
   const onMessage = (e) => {
@@ -204,6 +204,8 @@
     } else if (msg.t === "chat") {
       const line = chatLine(msg);
       if (line) chatHeard([line], false);
+    } else if (msg.t === "chat-rejected") {
+      chatHeard([], false, true);
     } else if (msg.t === "chat-history") {
       if (!Array.isArray(msg.messages)) return;
       const lines = [];
@@ -393,7 +395,7 @@
   // One line of Ooga Chat; false when it was not sent (not live, empty, or too long once sanitized).
   const sendChat = (text) => {
     const line = BL.donations.sanitize(text, Infinity);
-    if (state.room !== "live" || !line || line.length > CHAT_MAX) return false;
+    if (state.room !== "live" || !ws || ws.readyState !== WebSocket.OPEN || !line || line.length > CHAT_MAX) return false;
     send(JSON.stringify({ t: "chat", text: line }));
     return true;
   };

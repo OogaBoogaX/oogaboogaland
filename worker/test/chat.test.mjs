@@ -159,12 +159,15 @@ test("room: a joiner gets exactly the last CHAT_KEEP lines in order; ids only gr
   assert.ok(history.every((m, i) => !i || m.id > history[i - 1].id));
 });
 
-test("room: over the rate a line is dropped and the socket stays", async () => {
+test("room: over the rate a line is refused to its sender and the socket stays", async () => {
   const { room, join } = host();
   const r = room();
   const a = await join(r, 1, "ooga", "Ooga");
+  const b = await join(r, 2, "booga", "Booga");
   for (let i = 0; i < 10; i++) r.webSocketMessage(a, chat(`spam ${i}`));
   assert.equal(said(a).length, CHAT_BURST);
+  assert.equal(a.sent.filter((m) => m.t === "chat-rejected").length, 10 - CHAT_BURST);
+  assert.equal(b.sent.filter((m) => m.t === "chat-rejected").length, 0);
   assert.equal(a.closed, null);
   assert.ok(r.players.has(1));
 });

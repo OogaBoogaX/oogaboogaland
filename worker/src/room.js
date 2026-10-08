@@ -253,9 +253,12 @@ export class Room extends DurableObject {
     this.broadcast({ t: "state", now: Date.now(), ps });
   }
 
-  // A line from a player, named by the session's login and display name; over the rate it is dropped.
+  // A line from a player, named by the session's login and display name; over the rate its sender is told.
   say(p, text) {
-    if (!takeToken(p.chatBucket, CHAT_HZ, p.seenAt, CHAT_BURST)) return;
+    if (!takeToken(p.chatBucket, CHAT_HZ, p.seenAt, CHAT_BURST)) {
+      this.send(p.ws, { t: "chat-rejected" });
+      return;
+    }
     const at = Date.now();
     // Ids follow the clock and only grow, so a restarted room does not reuse one, as voice counts do not.
     this.chatId = Math.max(at, this.chatId + 1);

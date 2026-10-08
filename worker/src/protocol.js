@@ -19,6 +19,7 @@
 //                 voice { peers, gens }      whom to hear, and each one's publication count (a new count is a
 //                                            microphone published again, to be pulled again)
 //                 chat { id, at, login, name, text }  a line someone said, to everyone, the sender too
+//                 chat-rejected             a line exceeded the rate; the sender keeps its draft
 //                 chat-history { messages }  after welcome: the lines the room still holds, oldest first
 // Zones: `<group>` or `<group>.<place>`. Voice is shared within a group; who is shown is matched on the whole
 // name, since a place inside a group can have coordinates of its own (the Factory's tunnel on the island and
