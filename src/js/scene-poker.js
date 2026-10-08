@@ -330,7 +330,7 @@
   const liveGeometry = set => { if (room) for (const t of room.tables) t.agent.liveGeometry(set); if (avatar) set.add(avatar.headOpen).add(avatar.headClosed); if (remotes) remotes.liveGeometry(set); };
   const stats = () => { let allNodes = 0, visibleNodes = 0; const walk = n => { allNodes++; for (const c of n.children) walk(c); }; walk(root); S.traverseVisible(root, () => visibleNodes++); return { allNodes, visibleNodes, targets: input.targetCount, tweens: S.tweenCount(), ...fx.stats(), ...(remotes ? remotes.stats() : {}) }; };
   // Voice zone: the Ember Den, a portal of its own off the Bifrost chamber.
-  const scene = { id: "poker", voiceZone: "ember-den", enter, update, overlay: dt => fx.drawOverlay(dt, extra), onKey, leave, liveGeometry, stats, renderOpts,
+  const scene = { id: "poker", voiceZone: "ember-den", micKey: true, enter, update, overlay: dt => fx.drawOverlay(dt, extra), onKey, leave, liveGeometry, stats, renderOpts,
     onDonation() {}, onLootCleared() {}, root: null, camera: null, input: null, debug: null,
     agent: null, agentView: null, agentControls: null, agentHandoff: null, get inMotion() { return !!room; } };
   BL.scenes.poker = scene;

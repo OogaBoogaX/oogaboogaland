@@ -369,6 +369,8 @@
   let stateTimer = 0, hintTimer = 0, meterTimer = 0, now = 0, hour = 12, unsubscribeActivity = null, unsubscribeAccount = null, ownOogaClaimed = false;
   // How far under the Mempool island's ground the view is, 0 to 1: its sun and its storm stay outside.
   let poolShade = 0, poolUnder = 0;
+  // The driven Ooga's own footsteps, heard by this page alone (footsteps.js).
+  let footsteps = null;
   let weather = null, unsubscribeMempool = null, unsubscribeChain = null, mempoolIsland = null, timechainIsland = null, bifrostIsle = null;
   // The two boards across the hole from the vine bridge, one reading the chain and one reading the
   // weather. Each holds its canvas, its panel node and the reading it last drew, so a snapshot saying
@@ -7104,6 +7106,7 @@
       const cave = crew.list[i];
       if (cave.root.visible) floatPose(cave, cave.root.position.y - cave.baseY, cave.bodyHeight, cave.phase, elapsed);
     }
+    footsteps.update(crew.player);
     npcSync.update(dt);
     shareDrivenOoga(dt);
     remotes.update(dt);
@@ -9093,6 +9096,7 @@
     shared.renderOpts = RENDER_OPTS;
     fx = shared.fx = fxMod.create(shared);
     weather = weatherMod.create({ root, renderer, camera, heightAt: mempoolIsland.rainAt, fx, onRain: mempoolIsland.rainHit, centre: mempoolIsland.centre });
+    footsteps = BL.footsteps.create();
     // The snapshot outlives the visit, so a re-entered hub opens in the weather it left.
     weather.apply(chain.snapshot);
     mempoolIsland.water.apply(chain.snapshot);
@@ -9627,6 +9631,7 @@
         get timechainIsland() { return timechainIsland; },
         get factory() { return factoryMouth && factoryMouth.hall ? factoryMouth.hall.debug : null; },
         get bifrost() { return bifrostIsle; },
+        get footsteps() { return footsteps; },
         slots: pile.slots, drops: pile.drops, core: pile.core, shell: pile.shell, delivery: pile.delivery, spillEffect: pile.spillEffect, cavemen: crew.cavemen, crates: crates.list, lab: null, hud, applyAllSwag: crew.applyAllSwag, renderLocker: crew.renderLocker, demoTip, setPileLevel: pile.setLevel, refreshStates: crew.refreshStates, trimPool: fx.trimPool,
         get shown() {
           return pile.shown;
@@ -9900,6 +9905,7 @@
     if (chainSign && chainSign.node.geometry) renderer.releaseGeometry(chainSign.node.geometry);
     chainSign = null;
     weather.dispose();
+    footsteps.dispose();
     mempoolIsland.water.dispose();
     mempoolIsland.paintings.dispose();
     mempoolIsland.wildlife.dispose();
@@ -10025,7 +10031,7 @@
     // Drop every per-visit ref but the cached island.
     terrainRampRoof = pathNode = altar = lawn = life = hud = hooks = input = pilot = fx = cameraCover = bananaCover = solids = rockGuides = objectGuides = sightGuides = bananaGuides = pileGuides = platformGuides = mirrorGuides = pile = crew = crates = critters = clock = presets = mirrorCave = matrixCave = matrixControl = gateRain = fire = headquarters = positionDebug = dockStairs = overlayCanvas = null;
     beasts.clear();
-    magazine = magazineState = breakables = weather = mempoolIsland = timechainIsland = clankers = clankerPlay = null;
+    magazine = magazineState = breakables = weather = footsteps = mempoolIsland = timechainIsland = clankers = clankerPlay = null;
     hubScene.input = hubScene.debug = null;
     return { targets: count };
   };
@@ -10051,6 +10057,7 @@
   const hubScene = {
     // The island reports its own zone as soon as an Ooga is driven (see `zoneOf`); until then it is nowhere.
     voiceZone: "none",
+    micKey: true,
     id: "hub", enter, update, overlay, onDonation, onKey, onLootCleared, renderOpts: RENDER_OPTS, leave, stats, liveGeometry,
     root: null, camera: null, input: null, debug: null,
     get inMotion() {

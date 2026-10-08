@@ -1518,6 +1518,29 @@ body[data-active-scene="arcade"] .magazine-hud {
   transform: translate(-50%, 0);
 }
 
+/* The microphone's note: stays while muted in voice, under the clock, clear of the act button and the toasts. */
+.mic-note {
+  position: absolute;
+  left: 50%;
+  top: calc(52px + var(--safe-top));
+  transform: translateX(-50%);
+  padding: 6px 12px;
+  background: var(--tablet);
+  border: 2px solid var(--stone-dk);
+  border-radius: 6px;
+  box-shadow: var(--tablet-shadow);
+  color: var(--paper);
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.mic-note[data-muted="true"] {
+  color: #ffb3a6;
+  border-color: var(--danger);
+}
+
 .tooltip {
   position: fixed;
   top: 0;

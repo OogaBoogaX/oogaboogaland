@@ -9493,6 +9493,26 @@ const vacancyChecks = async BL => {
 };
 
 // Rule: exterior dressing must preserve the exact support surface and usable routes at every tier.
+// rule: the visitor hears only their own Ooga's footsteps (#181): one on each foot plant of the driven Ooga's walk,
+// none standing, in the air, on a ladder or afloat, and none for an Ooga it does not drive.
+const footstepChecks = BL => {
+  const F = BL.footsteps.create(), mine = { act: { phase: 0 }, hop: 0, ladder: { plane: null }, poolSwimming: false }, other = { act: { phase: 0 }, hop: 0, ladder: null };
+  // One second of frames: `walker` walks at the player's cycle rate (10 radians a second), `driven` is the Ooga handed to it.
+  const second = (walker, driven) => { for (let i = 0; i < 60; i++) { walker.act.phase += 10 / 60; F.update(driven); } return F.steps; };
+  const rows = { undriven: second(other, null) };
+  F.update(mine);
+  rows.walked = second(mine, mine);
+  mine.act.phase = 0; F.update(mine);
+  rows.stopped = F.steps;
+  mine.hop = 0.4; rows.airborne = second(mine, mine); mine.hop = 0;
+  mine.ladder.plane = {}; rows.ladder = second(mine, mine); mine.ladder.plane = null;
+  mine.poolSwimming = true; rows.afloat = second(mine, mine); mine.poolSwimming = false;
+  rows.otherWalks = second(other, mine);
+  rows.handedOver = (F.update(other), F.steps);
+  rows.silent = !F.open;
+  F.dispose();
+  record("footsteps: only the driven Ooga's own foot plants step, never standing, airborne, climbing, afloat or another's", rows.undriven === 0 && rows.walked === 3 && rows.stopped === 3 && rows.airborne === 3 && rows.ladder === 3 && rows.afloat === 3 && rows.otherWalks === 3 && rows.handedOver === 3 && rows.silent, JSON.stringify(rows));
+};
 const exteriorEnrichmentChecks = BL => {
   const S=BL.scene,root=S.createNode(),land=BL.dsbGeography.build(),renderer={kind:"webgl2",quality:"high"},camera=S.createCamera();camera.position.y=110;
   const nature=BL.dsbNature.create({root,land,renderer,camera,weather:{state:{wind:{strength:.2}}}}),detail=BL.dsbExterior.create({root,land,nature});
@@ -10158,6 +10178,7 @@ const unitChecks = async () => {
   }
   if(ARGS.includes("stackchain-unit")){stackchainChecks(BL);menuShellChecks(BL);return;}
   if(ARGS.includes("dsb-menus-unit")){stackchainChecks(BL);memeFactoryChecks(BL);menuShellChecks(BL);maxisChecks(BL);rulersChecks(BL);inkChecks(BL);bigBitcoinChecks(BL);return;}
+  footstepChecks(BL);
   exteriorEnrichmentChecks(BL);
   if(ARGS.includes("exterior-unit"))return;
   maxisChecks(BL);
