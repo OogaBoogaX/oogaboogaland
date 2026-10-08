@@ -6,7 +6,7 @@
 //                 { t: "hub", on }               this page shows the island and is visible (host candidates)
 //                 { t: "mute", on }              this page muted its own microphone, for everyone's roster
 //                 { t: "hp", v, ko }             the driven Ooga's health (0-100) and whether it is knocked out
-//                 { t: "chat", text }            a line for Ooga Chat (see Chat below)
+//                 { t: "chat", text, clientId? }            a line for Ooga Chat (see Chat below)
 //                 binary                         the NPC host's frame of every Ooga's pose, relayed as is
 // Room → client:  welcome { you, players, tickHz, now, loopEpoch }, join { p }, leave { id, reason },
 //                 body { id, name }, state { now, ps: [id, x, y, z, yaw, ...] }, kick { reason },
@@ -19,7 +19,8 @@
 //                 voice { peers, gens }      whom to hear, and each one's publication count (a new count is a
 //                                            microphone published again, to be pulled again)
 //                 chat { id, at, login, name, text }  a line someone said, to everyone, the sender too
-//                 chat-rejected             a line exceeded the rate; the sender keeps its draft
+//                 chat-ack { clientId }     the sender's line was accepted, including a recognized retry
+//                 chat-rejected { clientId?, reason }  refused; rate retries keep the same id
 //                 chat-history { messages }  after welcome: the lines the room still holds, oldest first
 // Zones: `<group>` or `<group>.<place>`. Voice is shared within a group; who is shown is matched on the whole
 // name, since a place inside a group can have coordinates of its own (the Factory's tunnel on the island and
@@ -60,6 +61,8 @@ export const NPC_HZ = 20;
 export const CLOSE_PROTOCOL = 4400;
 export const CHAT_MAX = 160;
 export const CHAT_KEEP = 100;
+// Accepted retry ids survive reconnects while this room instance holds them; oldest ids expire at the cap.
+export const CHAT_RETRY_KEEP = CHAT_KEEP * MAX_PLAYERS;
 // About one line a second per player, three in a burst.
 export const CHAT_HZ = 1;
 export const CHAT_BURST = 3;
@@ -107,7 +110,10 @@ export const parseClientMessage = (text) => {
   if (msg.t === "chat") {
     if (typeof msg.text !== "string") return null;
     const line = sanitizeChat(msg.text);
-    return line && line.length <= CHAT_MAX ? { t: "chat", text: line } : null;
+    if (!line || line.length > CHAT_MAX) return null;
+    if (msg.clientId === undefined) return { t: "chat", text: line };
+    return typeof msg.clientId === "string" && msg.clientId.length > 0 && msg.clientId.length <= 64 && !/[^\w-]/.test(msg.clientId)
+      ? { t: "chat", text: line, clientId: msg.clientId } : null;
   }
   return null;
 };

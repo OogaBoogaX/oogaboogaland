@@ -7,7 +7,7 @@ import { runInNewContext } from "node:vm";
 import * as protocol from "../src/protocol.js";
 import { sfuClient } from "../src/sfu.js";
 
-const { CHAT_BURST, CHAT_FRAME_MAX, CHAT_HZ, CHAT_KEEP, CHAT_MAX, MESSAGE_MAX, chatLog, parseClientMessage, sanitizeChat, takeToken } = protocol;
+const { CHAT_BURST, CHAT_FRAME_MAX, CHAT_HZ, CHAT_KEEP, CHAT_MAX, CHAT_RETRY_KEEP, MESSAGE_MAX, chatLog, parseClientMessage, sanitizeChat, takeToken } = protocol;
 const chat = (text) => JSON.stringify({ t: "chat", text });
 
 test("a chat line is sanitized text of 1 to CHAT_MAX characters; anything else is ignored, never fatal", () => {
@@ -203,4 +203,90 @@ test("room: a room that slept or restarted wakes with no lines, and the players 
   woken.webSocketMessage(a, chat("after"));
   assert.equal(said(b).at(-1).text, "after");
   assert.ok(said(b).at(-1).id > said(a)[0].id, "ids keep growing across the restart");
+});
+
+const requestLine = (clientId, text = "same words") => JSON.stringify({ t: "chat", clientId, text });
+const receipts = (ws, type = "chat-ack") => ws.sent.filter((m) => m.t === type);
+
+test("chat retry ids are bounded strings, separate from the server's line id", () => {
+  assert.deepEqual(parseClientMessage(requestLine("retry-1")), { t: "chat", text: "same words", clientId: "retry-1" });
+  for (const bad of ["", "a".repeat(65), "bad:id", "bad\n", 42, null, {}]) assert.equal(parseClientMessage(requestLine(bad)), null);
+});
+
+test("room: lost acknowledgement then reconnect retry broadcasts once and spends no retry token", async () => {
+  const { room, join } = host(), r = room();
+  const a = await join(r, 1, "ooga", "Ooga"), b = await join(r, 2, "booga", "Booga");
+  const send = a.send;
+  a.send = function (text) { if (JSON.parse(text).t !== "chat-ack") send.call(this, text); };
+  r.webSocketMessage(a, requestLine("lost-ack"));
+  assert.equal(receipts(a).length, 0, "acceptance happened but its acknowledgement never reached the sender");
+  assert.equal(said(b).length, 1);
+  a.close(1000, "disconnect after acceptance"); r.webSocketClose(a);
+  const retry = await join(r, 1, "ooga", "Ooga"), bucket = r.players.get(1).chatBucket;
+  bucket.tokens = 0; bucket.at = Date.now() + 60000;
+  r.webSocketMessage(retry, requestLine("lost-ack"));
+  assert.equal(said(b).length, 1);
+  assert.equal(said(retry).length, 0);
+  assert.equal(bucket.tokens, 0, "recognized retry bypasses the limiter without mutating it");
+  assert.deepEqual(receipts(retry), [{ t: "chat-ack", clientId: "lost-ack" }]);
+  assert.equal(r.chat.size, 1);
+});
+
+test("room: disconnect before acceptance leaves the retried id available for one new line", async () => {
+  const { room, join } = host(), r = room();
+  const a = await join(r, 1, "ooga", "Ooga");
+  a.close(1000, "disconnect before arrival"); r.webSocketClose(a);
+  const retry = await join(r, 1, "ooga", "Ooga");
+  r.webSocketMessage(retry, requestLine("not-arrived"));
+  assert.equal(said(retry).length, 1);
+  assert.equal(r.players.get(1).chatBucket.tokens, CHAT_BURST - 1);
+  assert.equal(receipts(retry)[0].clientId, "not-arrived");
+});
+
+test("room: identical text with new ids and matching ids from different senders remain distinct", async () => {
+  const { room, join } = host(), r = room();
+  const a = await join(r, 1, "ooga", "Ooga"), b = await join(r, 2, "booga", "Booga");
+  r.webSocketMessage(a, requestLine("first"));
+  r.webSocketMessage(a, requestLine("second"));
+  r.webSocketMessage(b, requestLine("first"));
+  assert.equal(said(a).length, 3);
+  assert.deepEqual(said(a).map((m) => m.login), ["ooga", "ooga", "booga"]);
+  assert.equal(r.chatAccepted.size, 3);
+  r.webSocketMessage(a, requestLine("first", "changed words"));
+  assert.equal(said(a).length, 3);
+  assert.deepEqual(receipts(a, "chat-rejected").at(-1), { t: "chat-rejected", clientId: "first", reason: "conflict" });
+});
+
+test("room: a rate refusal is correlated and may later accept the same id", async () => {
+  const { room, join } = host(), r = room(), a = await join(r, 1, "ooga", "Ooga");
+  const bucket = r.players.get(1).chatBucket;
+  bucket.tokens = 0; bucket.at = Date.now() + 60000;
+  r.webSocketMessage(a, requestLine("limited"));
+  assert.deepEqual(receipts(a, "chat-rejected").at(-1), { t: "chat-rejected", clientId: "limited", reason: "rate" });
+  assert.equal(r.chatAccepted.size, 0);
+  bucket.tokens = CHAT_BURST; bucket.at = Date.now();
+  r.webSocketMessage(a, requestLine("limited"));
+  assert.equal(said(a).length, 1);
+  assert.equal(receipts(a)[0].clientId, "limited");
+});
+
+test("room: retry memory is bounded, evicts oldest accepted ids, and resets with the room", async () => {
+  const { room, join } = host(), r = room(), a = await join(r, 1, "ooga", "Ooga");
+  const bucket = r.players.get(1).chatBucket;
+  for (let i = 0; i <= CHAT_RETRY_KEEP; i++) {
+    bucket.tokens = CHAT_BURST; bucket.at = Date.now();
+    r.webSocketMessage(a, requestLine("cache-" + i));
+  }
+  assert.equal(r.chatAccepted.size, CHAT_RETRY_KEEP);
+  assert.ok(!r.chatAccepted.has("1:cache-0"));
+  const count = said(a).length;
+  r.webSocketMessage(a, requestLine("cache-1"));
+  assert.equal(said(a).length, count, "a retained id still suppresses a retry");
+  r.webSocketMessage(a, requestLine("cache-0"));
+  assert.equal(said(a).length, count + 1, "an evicted id is a new send; no durable guarantee");
+  const woken = room();
+  assert.equal(woken.chatAccepted.size, 0);
+  const retry = await join(woken, 1, "ooga", "Ooga");
+  woken.webSocketMessage(retry, requestLine("cache-1"));
+  assert.equal(said(retry).length, 1);
 });

@@ -6,7 +6,8 @@
 // Cost: a line heard while the panel is not showing only joins a capped array, and the rows are drawn in one
 // batch when it shows; while it shows a line adds a row and drops the oldest past CHAT_KEEP. The log follows
 // new lines only while it is scrolled to its foot, so reading back is never yanked. No timers, no frame work.
-// Enter sends one pending line; its echo clears an unchanged draft, a refusal or disconnect keeps it.
+// Enter sends one pending line with a stable retry id; its acknowledgement clears an unchanged draft.
+// A refusal or disconnect keeps the draft and id, unless the player edits it into a different message.
 // Escape leaves the input with the sheet open. Keys typed in the sheet never reach a scene
 // (controls.js, director.js). On a phone the sheet rises above the keyboard while the input has focus.
 // Exports account (fed `BL.net.state`), heard (fed the room's lines) and stats.
@@ -64,18 +65,20 @@
 
   // From the room: one new line, or (joined) everything it holds on a join. A join merges by id rather
   // than replacing, so a socket that reconnects to a room which slept and forgot keeps what this page saw.
-  const heard = (list, joined, rejected) => {
-    if (rejected) {
-      pending = null;
-      notice = "Wait a moment, then send again.";
+  const heard = (list, joined, receipt) => {
+    if (receipt) {
+      if (!pending || receipt.clientId !== pending.clientId) return;
+      if (receipt.accepted) {
+        if (input.value === pending.draft) input.value = "";
+        pending = null;
+        notice = "";
+      } else {
+        pending.awaiting = false;
+        if (receipt.conflict) pending = null;
+        notice = "Wait a moment, then send again.";
+      }
       update();
       return;
-    }
-    if (!joined && pending && list.some((line) => line.login.toLowerCase() === me && line.text === pending.text)) {
-      if (input.value === pending.draft) input.value = "";
-      pending = null;
-      notice = "";
-      update();
     }
     if (joined) {
       const seen = new Set(lines.map((line) => line.id));
@@ -112,7 +115,7 @@
     const length = BL.donations.sanitize(input.value, Infinity).length;
     left.textContent = String(CHAT_MAX - length);
     left.dataset.over = String(length > CHAT_MAX);
-    sendButton.disabled = !live || !!pending || !length || length > CHAT_MAX;
+    sendButton.disabled = !live || !!(pending && pending.awaiting) || !length || length > CHAT_MAX;
     status.hidden = live && !notice;
     if (live) statusText.textContent = notice;
   };
@@ -120,7 +123,7 @@
     tab.hidden = !backend;
     me = player ? player.login.toLowerCase() : "";
     live = !!player && room === "live";
-    if (!live) { pending = null; notice = ""; }
+    if (!live) { if (pending) pending.awaiting = false; notice = ""; }
     input.disabled = !live;
     input.placeholder = live ? "Say something" : "";
     signIn.hidden = !!player;
@@ -132,9 +135,12 @@
   const submit = () => {
     if (sendButton.disabled) return;
     const draft = input.value;
-    pending = { draft, text: BL.donations.sanitize(draft, Infinity) };
+    const text = BL.donations.sanitize(draft, Infinity);
+    if (!pending || pending.text !== text) pending = { clientId: window.crypto.randomUUID(), text };
+    pending.draft = draft;
+    pending.awaiting = true;
     notice = "";
-    if (!net.sendChat(draft)) pending = null;
+    if (!net.sendChat(draft, pending.clientId)) pending.awaiting = false;
     update();
   };
   form.addEventListener("submit", (e) => {

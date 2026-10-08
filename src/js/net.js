@@ -30,7 +30,7 @@
 // `setHealth` reports the driven Ooga's health (on a change, at most HP_MS apart), which other pages draw over
 // it; remote records carry `hp` and `ko`.
 // Ooga Chat: `sendChat` sends a line (sanitized as donation messages are, CHAT_MAX characters at most) while the
-// room is live; `subscribeChat` hears the room's lines as `fn(lines, joined, rejected)`: one new line, or on every
+// room is live; `subscribeChat` hears the room's lines as `fn(lines, joined, receipt)`: one new line, or on every
 // (re)join the lines the room still holds, which chat.js merges; a rejection keeps the draft. The room names each line's
 // speaker; the page keeps nothing (chat.js shows them).
 // Exports start, subscribe, subscribeRoster, subscribeChat, dispose, login, logout, rejoin, setBody, setZone, setHub, setMuted, setHealth, sendNpc,
@@ -46,6 +46,7 @@
   const BACKOFF_MS = 500, BACKOFF_MAX_MS = 15000;
   // The room's own limits (worker/src/protocol.js): characters in a line, lines it holds.
   const CHAT_MAX = 160, CHAT_KEEP = 100;
+  const chatIdValid = (id) => typeof id === "string" && id.length > 0 && id.length <= 64 && !/[^\w-]/.test(id);
   const subscribers = new Set();
   const rosterSubscribers = new Set();
   const chatSubscribers = new Set();
@@ -121,8 +122,8 @@
   const chatLine = (m) => m && Number.isSafeInteger(m.id) && typeof m.login === "string" && typeof m.text === "string"
     ? { id: m.id, at: Number.isFinite(m.at) ? m.at : 0, login: m.login, name: typeof m.name === "string" && m.name ? m.name : m.login, text: m.text.slice(0, CHAT_MAX) }
     : null;
-  const chatHeard = (lines, replace, rejected = false) => {
-    for (const fn of chatSubscribers) fn(lines, replace, rejected);
+  const chatHeard = (lines, replace, receipt = null) => {
+    for (const fn of chatSubscribers) fn(lines, replace, receipt);
   };
 
   const onMessage = (e) => {
@@ -204,8 +205,9 @@
     } else if (msg.t === "chat") {
       const line = chatLine(msg);
       if (line) chatHeard([line], false);
-    } else if (msg.t === "chat-rejected") {
-      chatHeard([], false, true);
+    } else if (msg.t === "chat-ack" || msg.t === "chat-rejected") {
+      if (chatIdValid(msg.clientId))
+        chatHeard([], false, { clientId: msg.clientId, accepted: msg.t === "chat-ack", conflict: msg.reason === "conflict" });
     } else if (msg.t === "chat-history") {
       if (!Array.isArray(msg.messages)) return;
       const lines = [];
@@ -393,10 +395,11 @@
   };
 
   // One line of Ooga Chat; false when it was not sent (not live, empty, or too long once sanitized).
-  const sendChat = (text) => {
+  const sendChat = (text, clientId) => {
     const line = BL.donations.sanitize(text, Infinity);
     if (state.room !== "live" || !ws || ws.readyState !== WebSocket.OPEN || !line || line.length > CHAT_MAX) return false;
-    send(JSON.stringify({ t: "chat", text: line }));
+    if (clientId !== undefined && !chatIdValid(clientId)) return false;
+    send(JSON.stringify({ t: "chat", text: line, ...(clientId === undefined ? {} : { clientId }) }));
     return true;
   };
 

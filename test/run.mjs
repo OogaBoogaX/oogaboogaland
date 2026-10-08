@@ -3971,20 +3971,55 @@ const hubChat = { name: "ooga chat", why: "rule: Ooga Chat shows only with a bac
     out.ready = [send.disabled, $("chat-left").textContent];
     window.__chatSent = [];
     window.__chatSend = BL.net.sendChat;
-    BL.net.sendChat = (text) => (window.__chatSent.push(text), true);
+    BL.net.sendChat = (text, clientId) => (window.__chatSent.push({ text, clientId }), true);
     const submit = () => $("chat-form").dispatchEvent(new Event("submit", { cancelable: true }));
+    const receipt = (clientId, accepted) => C.heard([], false, { clientId, accepted });
+    const reconnect = () => {
+      C.account({ backend: true, me: { id: 9, login: "Tester" }, room: "connecting" });
+      C.account({ backend: true, me: { id: 9, login: "Tester" }, room: "live" });
+    };
     submit();
+    const first = window.__chatSent.at(-1).clientId;
     out.pending = input.value === "  hello <b>  " && send.disabled;
-    C.heard([], false, true);
+    receipt("unrelated", false);
+    out.unrelated = send.disabled && $("chat-status").hidden;
+    C.heard([{ id: 200, at: 0, login: "tester", name: "Tester", text: "hello b" }], false);
+    out.echoPending = input.value === "  hello <b>  " && send.disabled;
+    receipt(first, false);
     out.rejected = input.value === "  hello <b>  " && !send.disabled && !$("chat-status").hidden && $("chat-status-text").textContent.includes("send again");
     submit();
+    out.rateRetry = window.__chatSent.at(-1).clientId === first;
     input.value = "next draft";
-    C.heard([{ id: 200, at: 0, login: "tester", name: "Tester", text: "hello b" }], false);
+    receipt(first, true);
     out.edited = input.value === "next draft" && !send.disabled;
     submit();
+    const beforeAcceptance = window.__chatSent.at(-1).clientId;
     C.account({ backend: true, me: { id: 9, login: "Tester" }, room: "connecting" });
     out.disconnected = input.value === "next draft" && send.disabled;
-    C.account({ backend: true, me: { id: 9, login: "Tester" }, room: "live" });
+    reconnect();
+    submit();
+    out.beforeAcceptance = window.__chatSent.at(-1).clientId === beforeAcceptance && input.value === "next draft";
+    receipt(beforeAcceptance, true);
+    input.value = "next draft";
+    input.dispatchEvent(new Event("input"));
+    submit();
+    const lostAck = window.__chatSent.at(-1).clientId;
+    out.identicalDistinct = lostAck !== beforeAcceptance;
+    C.heard([{ id: 201, at: 0, login: "tester", name: "Tester", text: "next draft" }], false);
+    reconnect();
+    C.heard([{ id: 201, at: 0, login: "tester", name: "Tester", text: "next draft" }], true);
+    submit();
+    out.lostAckRetry = window.__chatSent.at(-1).clientId === lostAck && input.value === "next draft";
+    reconnect();
+    input.value = "different message";
+    input.dispatchEvent(new Event("input"));
+    submit();
+    const editedId = window.__chatSent.at(-1).clientId;
+    receipt(lostAck, true);
+    receipt(lostAck, false);
+    out.changedId = editedId !== lostAck && input.value === "different message" && send.disabled && $("chat-status").hidden;
+    receipt(editedId, true);
+    out.correlatedClear = input.value === "";
     input.value = "  hello <b>  ";
     input.dispatchEvent(new Event("input"));
     window.__chatSent = [];
@@ -3993,7 +4028,7 @@ const hubChat = { name: "ooga chat", why: "rule: Ooga Chat shows only with a bac
   })()`);
   await b.key("Enter");
   const sent = await b.evaluate(`(() => { const input = document.getElementById("chat-input"); const pending = input.value === "  hello <b>  " && document.getElementById("chat-send").disabled;
-    BL.chat.heard([{ id: 201, at: 0, login: "tester", name: "Tester", text: "hello b" }], false);
+    BL.chat.heard([], false, { clientId: window.__chatSent.at(-1).clientId, accepted: true });
     return { pending, sent: window.__chatSent, cleared: input.value === "" && document.getElementById("chat-send").disabled && document.getElementById("chat-left").textContent === "160" }; })()`);
   await b.key("Escape");
   const escaped = await b.evaluate(`(() => { BL.net.sendChat = window.__chatSend; const out = { blurred: document.activeElement !== document.getElementById("chat-input"), open: document.getElementById("sheet").dataset.open === "true", tab: document.querySelector("[data-tab][aria-selected='true']").dataset.tab }; BL.chat.account({ backend: false, me: null, room: "off" }); localStorage.removeItem("oogaboogaland.sheet.v1"); return out; })()`);
@@ -4003,7 +4038,7 @@ const hubChat = { name: "ooga chat", why: "rule: Ooga Chat shows only with a bac
     && r.reading[0] === 0 && r.reading[1] === 100 && r.reading[2] === "line 51" && r.refollowed
     && r.rejoined[0] === 100 && r.rejoined[1] === "line 54" && r.rejoined[2] === "line 153" && r.emptyRejoin && r.readerRejoin && r.followRejoin
     && r.over[0] && r.over[1] === "-1" && !r.ready[0] && r.ready[1] === "153"
-    && r.pending && r.rejected && r.edited && r.disconnected && sent.pending && sent.sent.length === 1 && sent.sent[0] === "  hello <b>  " && sent.cleared && escaped.blurred && escaped.open && escaped.tab === "chat", JSON.stringify({ none, r, sent, escaped }));
+    && r.pending && r.rejected && r.edited && r.disconnected && r.unrelated && r.echoPending && r.rateRetry && r.beforeAcceptance && r.identicalDistinct && r.lostAckRetry && r.changedId && r.correlatedClear && sent.pending && sent.sent.length === 1 && sent.sent[0].text === "  hello <b>  " && /^[\w-]{36}$/.test(sent.sent[0].clientId) && sent.cleared && escaped.blurred && escaped.open && escaped.tab === "chat", JSON.stringify({ none, r, sent, escaped }));
 } };
 const hubBlockHeight = { name: "header clock and block height", why: "rule: the single-digit clock is centered from its visible glyphs with a time zone, and the shared chain reading is shown beneath it", run: async (b) => {
   const before = await b.evaluate(`(() => { const clock = document.getElementById("world-clock"), label = clock.querySelector("svg").getAttribute("aria-label"), text = label.replace(/^Ooga Booga time /, ""), cells = [...text].reduce((sum, ch) => sum + (ch === " " ? 2 : 4), -1), zone = (new Intl.DateTimeFormat("en-US", { timeZoneName: "short" }).formatToParts(new Date()).find(part => part.type === "timeZoneName")?.value || "UTC").toUpperCase().replaceAll("−", "-"); return { height: document.getElementById("world-block-height").textContent, bananas: !!document.getElementById("world-banana-count"), label, namedImage: !clock.hasAttribute("aria-label") && clock.querySelector("svg").getAttribute("role") === "img", text, zone, cells, viewWidth: clock.querySelector("svg").viewBox.baseVal.width, cssWidth: parseFloat(clock.style.width) }; })()`);
@@ -9986,7 +10021,7 @@ const netFixture=(BL,response)=>{
 // Ooga Chat's wire on the page: what it sends, and the lines it hands on (chat.js keeps and shows them).
 const chatNetChecks = async BL => {
   const f=netFixture(BL,()=>({ok:true,headers:{get:()=>"application/json"},json:async()=>({player:{id:71,login:"Tester",display:"Tester"}})}));
-  let rejected=0;const heard=[];f.net.subscribeChat((lines,replace,refused)=>{if(refused){rejected++;return;}heard.push({ids:lines.map(l=>l.id),replace,keys:lines.map(l=>Object.keys(l).join())});});
+  const receipts=[];const heard=[];f.net.subscribeChat((lines,replace,receipt)=>{if(receipt){receipts.push(receipt);return;}heard.push({ids:lines.map(l=>l.id),replace,keys:lines.map(l=>Object.keys(l).join())});});
   const before=f.net.sendChat("too early");
   await f.net.start();const ws=f.sockets[0],message=v=>ws.onmessage({data:JSON.stringify(v)});
   message({t:"welcome",you:{id:71},players:[],now:Date.now()});
@@ -9996,12 +10031,20 @@ const chatNetChecks = async BL => {
   message({t:"chat",id:500,at:1,login:"peer",text:"x".repeat(400)});
   message({t:"chat",id:501,login:7,text:"bad login"});
   const sends=[f.net.sendChat("  hi <b>there</b>  "),f.net.sendChat("   "),f.net.sendChat("🍌🍌"),f.net.sendChat("a".repeat(f.net.CHAT_MAX)),f.net.sendChat("a".repeat(f.net.CHAT_MAX+1))];
-  message({t:"chat-rejected"});
+  message({t:"chat-rejected",clientId:"retry-1",reason:"rate"});
   const chats=f.sent.filter(m=>m.t==="chat");
   record("ooga chat wire: lines only while live, sanitized as donations are and CHAT_MAX at most; history replaces with the last CHAT_KEEP well-formed lines; a malformed line is dropped",
     f.net.CHAT_MAX===160&&f.net.CHAT_KEEP===100&&before===false&&sends.join()==="true,false,false,true,false"&&chats.length===2&&chats[0].text==="hi bthereb"&&Object.keys(chats[0]).join()==="t,text"&&chats[1].text.length===160
-    &&rejected===1&&heard.length===2&&heard[0].replace&&heard[0].ids.length===99&&heard[0].ids[0]===32&&heard[0].ids.at(-1)===130&&heard[0].keys.every(k=>k==="id,at,login,name,text")
+    &&receipts.length===1&&!receipts[0].accepted&&receipts[0].clientId==="retry-1"&&heard.length===2&&heard[0].replace&&heard[0].ids.length===99&&heard[0].ids[0]===32&&heard[0].ids.at(-1)===130&&heard[0].keys.every(k=>k==="id,at,login,name,text")
     &&!heard[1].replace&&heard[1].ids.join()==="500",JSON.stringify({before,sends,chats:chats.map(m=>m.text.length),heard:heard.map(h=>({n:h.ids.length,first:h.ids[0],last:h.ids.at(-1),replace:h.replace}))}));
+  const retries = [f.net.sendChat("same", "retry-1"), f.net.sendChat("same", "retry-1"), f.net.sendChat("same", "bad:id")];
+  message({t:"chat-ack",clientId:"retry-1"});
+  message({t:"chat-ack",clientId:42});
+  message({t:"chat-rejected"});
+  const retryFrames = f.sent.filter(m=>m.clientId==="retry-1");
+  ws.readyState = 3;
+  record("ooga chat wire: stable retry ids are sent unchanged and receipts preserve their correlation; invalid ids and closed sockets cannot send",
+    retries.join()==="true,true,false"&&retryFrames.length===2&&retryFrames.every(m=>m.text==="same")&&receipts.length===2&&receipts[1].accepted&&receipts[1].clientId==="retry-1"&&!f.net.sendChat("closed", "retry-1"),JSON.stringify({retries,retryFrames,receipts}));
   f.net.dispose();
 };
 const integrationChecks = async BL => {

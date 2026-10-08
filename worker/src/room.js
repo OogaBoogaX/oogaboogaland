@@ -21,7 +21,7 @@
 import { DurableObject } from "cloudflare:workers";
 import {
   CLOSE_KICK, CLOSE_PROTOCOL, MAX_PLAYERS, MOVE_HZ, STALE_MS, SWEEP_MS, TICK_HZ,
-  NPC_FRAME_MAX, NPC_HZ, OUTSIDE, HP_HZ, VOICE_TRACK, CHAT_HZ, CHAT_BURST, chatLog, castIndex, electHost, npcFollowers, claimRefusal, parseClientMessage, playerFromHeaders, spawnPoint, takeToken, voicePeers,
+  NPC_FRAME_MAX, NPC_HZ, OUTSIDE, HP_HZ, VOICE_TRACK, CHAT_HZ, CHAT_BURST, CHAT_RETRY_KEEP, chatLog, castIndex, electHost, npcFollowers, claimRefusal, parseClientMessage, playerFromHeaders, spawnPoint, takeToken, voicePeers,
 } from "./protocol.js";
 import { sfuClient } from "./sfu.js";
 import CAST_ROWS from "./characters.gen.json";
@@ -41,6 +41,7 @@ export class Room extends DurableObject {
     this.lastNpc = null;
     this.chat = chatLog();
     this.chatId = 0;
+    this.chatAccepted = new Map();
     ctx.setWebSocketAutoResponse(new WebSocketRequestResponsePair("ping", "pong"));
     // The pile's sound loop started once, for good: every page plays it at (now - loopEpoch), so all
     // hear the same crackle at the same moment. Stored, so a woken or redeployed room keeps the phase.
@@ -172,7 +173,7 @@ export class Room extends DurableObject {
       this.voiceState(p);
     } else if (msg.t === "chat") {
       // Nothing in the attachment changes.
-      this.say(p, msg.text);
+      this.say(p, msg.text, msg.clientId);
       return;
     } else if (msg.t === "body") {
       if (msg.name === p.body) return;
@@ -254,17 +255,29 @@ export class Room extends DurableObject {
   }
 
   // A line from a player, named by the session's login and display name; over the rate its sender is told.
-  say(p, text) {
+  say(p, text, clientId) {
+    // Scope retry ids to the authenticated account, never to a socket or client-supplied identity.
+    const key = clientId === undefined ? null : `${p.id}:${clientId}`;
+    if (key && this.chatAccepted.has(key)) {
+      this.send(p.ws, this.chatAccepted.get(key) === text
+        ? { t: "chat-ack", clientId } : { t: "chat-rejected", clientId, reason: "conflict" });
+      return;
+    }
     if (!takeToken(p.chatBucket, CHAT_HZ, p.seenAt, CHAT_BURST)) {
-      this.send(p.ws, { t: "chat-rejected" });
+      this.send(p.ws, { t: "chat-rejected", ...(clientId === undefined ? {} : { clientId }), reason: "rate" });
       return;
     }
     const at = Date.now();
     // Ids follow the clock and only grow, so a restarted room does not reuse one, as voice counts do not.
     this.chatId = Math.max(at, this.chatId + 1);
     const line = { id: this.chatId, at, login: p.login, name: p.display, text };
+    if (key) {
+      this.chatAccepted.set(key, text);
+      if (this.chatAccepted.size > CHAT_RETRY_KEEP) this.chatAccepted.delete(this.chatAccepted.keys().next().value);
+    }
     this.chat.push(line);
     this.broadcast({ t: "chat", ...line });
+    if (key) this.send(p.ws, { t: "chat-ack", clientId });
   }
 
   // Also after any page's `hub` flag changes: the host sends frames only while someone follows.
