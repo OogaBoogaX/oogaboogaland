@@ -87,7 +87,7 @@ test("the chat bucket: CHAT_BURST at once, then CHAT_HZ a second, never banking 
 });
 
 // The real Room, on a mocked Durable Object host.
-const host = () => {
+const host = (clock = Date) => {
   const accepted = [];
   const socket = () => ({
     sent: [], closed: null, store: null,
@@ -104,7 +104,7 @@ const host = () => {
   const context = {
     ...protocol, sfuClient, CAST_ROWS: [{ handle: "YellowBrokeIt", github_login: "YellowBrokeIt" }],
     DurableObject: class { constructor(ctx, env) { this.ctx = ctx; this.env = env; } },
-    WebSocketPair, Response, WebSocketRequestResponsePair: class {}, URL, Date, Map, Set, setTimeout, clearTimeout, console,
+    WebSocketPair, Response, WebSocketRequestResponsePair: class {}, URL, Date: clock, Map, Set, setTimeout, clearTimeout, console,
   };
   runInNewContext(source, context);
   const ctx = {
@@ -289,4 +289,53 @@ test("room: retry memory is bounded, evicts oldest accepted ids, and resets with
   const retry = await join(woken, 1, "ooga", "Ooga");
   woken.webSocketMessage(retry, requestLine("cache-1"));
   assert.equal(said(retry).length, 1);
+});
+
+
+test("room: immediate same-account reconnect and replacement cannot refill an exhausted chat burst", async () => {
+  const { room, join } = host({ now: () => 100000 }), r = room();
+  const a = await join(r, 1, "ooga", "Ooga"), observer = await join(r, 2, "booga", "Booga");
+  for (let i = 0; i < CHAT_BURST; i++) r.webSocketMessage(a, requestLine("burst-" + i));
+  a.close(1000, "reconnect"); r.webSocketClose(a);
+  const reconnect = await join(r, 1, "renamed", "Renamed");
+  r.webSocketMessage(reconnect, requestLine("after-reconnect"));
+  assert.deepEqual(receipts(reconnect, "chat-rejected").at(-1), { t: "chat-rejected", clientId: "after-reconnect", reason: "rate" });
+  const replacement = await join(r, 1, "renamed", "Renamed");
+  r.webSocketMessage(replacement, requestLine("after-replacement"));
+  assert.equal(receipts(replacement, "chat-rejected").at(-1).reason, "rate");
+  r.webSocketMessage(replacement, requestLine("burst-0"));
+  assert.equal(receipts(replacement).at(-1).clientId, "burst-0", "accepted retry still acknowledges an exhausted account");
+  assert.equal(said(observer).length, CHAT_BURST);
+  const bucket = r.players.get(1).chatBucket;
+  bucket.at -= 1000 / CHAT_HZ;
+  r.webSocketMessage(replacement, requestLine("after-reconnect"));
+  assert.equal(receipts(replacement).at(-1).clientId, "after-reconnect");
+  assert.equal(said(observer).length, CHAT_BURST + 1);
+});
+
+
+test("room: account buckets stay bounded, retain inactive debt, and reclaim replenished inactive entries on demand", async () => {
+  let now = 100000;
+  const { room, join } = host({ now: () => now }), r = room();
+  for (let id = 1; id <= protocol.CHAT_BUCKET_KEEP; id++) {
+    const ws = await join(r, id, "ooga", "Ooga");
+    r.webSocketMessage(ws, requestLine("spent"));
+    ws.close(1000, "left"); r.webSocketClose(ws);
+  }
+  assert.equal(r.chatBuckets.size, protocol.CHAT_BUCKET_KEEP);
+  const ws = await join(r, 1000, "new", "New");
+  r.webSocketMessage(ws, requestLine("waiting"));
+  assert.equal(receipts(ws, "chat-rejected").at(-1).reason, "rate", "capacity never evicts outstanding debt");
+  assert.equal(r.chatBuckets.size, protocol.CHAT_BUCKET_KEEP);
+  now += 1000 / CHAT_HZ;
+  r.webSocketMessage(ws, requestLine("waiting"));
+  assert.equal(receipts(ws).at(-1).clientId, "waiting");
+  assert.equal(r.chatBuckets.size, 1, "inactive replenished accounts were reclaimed without a timer");
+  const active = r.players.get(1000).chatBucket;
+  now += 10000;
+  await join(r, 1001, "other", "Other");
+  assert.equal(r.chatBuckets.get(1000), active, "active buckets stay registered even when replenished");
+  const woken = room();
+  assert.equal(woken.chatBuckets.size, 2, "wake rebuilds only connected accounts");
+  assert.equal(woken.players.get(1000).chatBucket.tokens, CHAT_BURST, "no durable rate debt after hibernation");
 });

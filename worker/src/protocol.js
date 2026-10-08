@@ -66,6 +66,8 @@ export const CHAT_RETRY_KEEP = CHAT_KEEP * MAX_PLAYERS;
 // About one line a second per player, three in a burst.
 export const CHAT_HZ = 1;
 export const CHAT_BURST = 3;
+// Active accounts plus bounded reconnect debt, held only while the room is awake.
+export const CHAT_BUCKET_KEEP = MAX_PLAYERS * 2;
 // The page sends `{"t":"chat","text":…}` with its text already sanitized, under MESSAGE_MAX; the margin is
 // for a page that sends it raw (every character escaped as \uXXXX is six).
 export const CHAT_PREFIX = '{"t":"chat",';
