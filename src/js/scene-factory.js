@@ -1603,7 +1603,7 @@
       // Keep the visitor's weapons and magazines across the doorway. The
       // factory has no banana pile, so its private pile level stays zero.
       playerWorld = { level: 0, weapons: world.weapons, magazine: world.magazine };
-      const shared = { root, input, hud, game, world: playerWorld, playerName, fx, viewYaw: 0, outsideActors: () => remotes ? remotes.actors() : NO_ACTORS, outsideActorHeight: BL.remotePlayers.BODY_HEIGHT, groundAt: groundFor, walkable: walkableFor, flyable: flyableFor, ceilingAt: ceilingFor, ladders: LAYOUT.ladders, onBodyMove: resolveLanding, clipProjectileTarget, absorbProjectile, reloadPolicy, useNear: (x, z, reach) => {
+      const shared = { root, input, hud, game, world: playerWorld, playerName, fx, viewYaw: 0, outsideActors: () => remotes ? remotes.actors() : NO_ACTORS, outsideActorHeight: BL.remotePlayers.BODY_HEIGHT, groundAt: groundFor, walkable: walkableFor, flyable: flyableFor, ceilingAt: ceilingFor, ladders: LAYOUT.ladders, onBodyMove: resolveLanding, clipProjectileTarget, absorbProjectile, reloadPolicy, useNear: (x, z, reach, feet) => {
         if (nearKiosk(x, z, reach, feet)) return true;
         // Space talks to the guide only within arm's reach; further away it stays a jump.
         const p = greeter && greeter.root.position;
