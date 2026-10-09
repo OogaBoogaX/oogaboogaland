@@ -6184,13 +6184,18 @@ const factoryWalking = { name: "factory walking", why: "regression: Factory move
   })()`);
   record("factory rebalancer: walk onto and off the low drum; a shallow console overlap allows walking out while deeper movement stays blocked", rebalancer.onto > 0.5 && Math.abs(rebalancer.peak - (rebalancer.height + 0.56)) < 1e-5 && Math.abs(rebalancer.off - rebalancer.height) < 1e-5 && rebalancer.overlapped && rebalancer.inwardBlocked && rebalancer.escaped > 0.5 && rebalancer.clear && rebalancer.grounded, JSON.stringify(rebalancer));
 } };
-const factoryGreeter = { name: "factory greeter", why: "rule: the guide's four tours complete and return, menu controls and cancellation work, and device detail respects quality and visit ownership", run: async (b) => {
-  const near = await b.evaluate(`(() => {
-    const B = __ooga, a = B.cavemen.get("portlandhodl");
+const factoryGreeter = { name: "factory greeter", why: "rule: the guide notices a visitor on the balcony and flies over to offer tours, a decline sends her back to work for the visit, a visitor can walk up to her at a station, the four tours complete and send her back to work, her flight clears the hall, and device detail respects quality and visit ownership", run: async (b) => {
+  // A fresh visit: an earlier step may already have had her offer and be declined, so come back in once if so.
+  if (await b.evaluate(`__ooga.factory.greeter.state.offered`)) { await tourGo(b, "lab"); await tourGo(b, "factory"); }
+  const arrival = await b.evaluate(`(() => {
+    const B = __ooga, g = B.factory.greeter, s = g.state, a = B.cavemen.get("portlandhodl");
     if (B.crew.player !== a) B.pilot.possess(a);
-    B.pilot.navigate({ position: { x: -2, y: 5, z: 25.5 }, yaw: 0, pitch: 0, dist: 6 });
-    B.advance(0.2, 1 / 60);
-    return { label: document.getElementById("act").textContent, scene: B.scene };
+    B.pilot.navigate({ position: { x: 0, y: 5, z: 27 }, yaw: 0, pitch: 0, dist: 6 });
+    const phases = [s.phase];
+    for (let t = 0; t < 20 && s.phase !== "offer"; t += 1 / 30) { B.advance(1 / 30, 1 / 30); if (phases[phases.length - 1] !== s.phase) phases.push(s.phase); }
+    const p = a.root.position, q = g.root.position;
+    return { phases, scene: B.scene, label: document.getElementById("act").textContent,
+      gap: Math.hypot(q.x - p.x, q.z - p.z), lift: q.y - (p.y - a.baseY) };
   })()`);
   await b.key(" ");
   const menu = await b.evaluate(`(() => ({ open: !document.querySelector(".greeter-menu").hidden,
@@ -6201,49 +6206,128 @@ const factoryGreeter = { name: "factory greeter", why: "rule: the guide's four t
   await b.key("ArrowDown");
   const selected = await b.evaluate(`__ooga.factory.greeter.state.selection`);
   await b.key("Escape");
-  const dismissed = await b.evaluate(`(() => ({ scene: __ooga.scene, hidden: document.querySelector(".greeter-menu").hidden }))()`);
-  await b.key(" ");
-  await b.key("Enter");
-  const started = await b.evaluate(`(() => ({ phase: __ooga.factory.greeter.state.phase,
-    tour: __ooga.factory.greeter.state.tour, stop: !document.querySelector(".greeter-stop").hidden }))()`);
-  const ended = await b.evaluate(`(() => {
-    document.querySelector(".greeter-stop").click(); __ooga.advance(0.5, 1 / 60);
-    return { phase: __ooga.factory.greeter.state.phase, scene: __ooga.scene };
+  // Declined, she goes back to work and stays at it while the visitor stands on the balcony. The long waits step
+  // coarsely: every stepped frame renders, and Canvas 2D renders slowly.
+  const declined = await b.evaluate(`(() => {
+    const B = __ooga, s = B.factory.greeter.state, seen = new Set();
+    const first = { scene: B.scene, hidden: document.querySelector(".greeter-menu").hidden, phase: s.phase, said: s.spoken };
+    for (let t = 0; t < 25; t += 0.25) { B.advance(0.25, 0.25); seen.add(s.phase); }
+    return { ...first, seen: [...seen] };
   })()`);
-  record("factory greeter: the act button opens four tours, arrows select, Escape closes the menu, and End tour returns Tess without leaving the cave",
-    near.scene === "factory" && near.label === "TALK TO TESS" && menu.open && menu.choices === 4 && menu.fits && menu.phase === "menu"
-      && selected === 1 && dismissed.scene === "factory" && dismissed.hidden && started.phase === "walk"
-      && started.tour === "payments" && started.stop && ended.phase === "idle" && ended.scene === "factory",
-    JSON.stringify({ near, menu, selected, dismissed, started, ended }));
+  // The visitor walks up to her at a station near the floor instead.
+  const met = await b.evaluate(`(() => {
+    const B = __ooga, g = B.factory.greeter, s = g.state, a = B.crew.player, F = BL.factoryModels, names = Object.keys(BL.factoryGreeter.FLIGHT.AIR);
+    const front = ["core", "forge", "switchboard", "rebalancer", "treasury", "lineC", "lineD"];
+    for (let t = 0; t < 90 && !(s.phase === "work" && s.stage !== "fly" && front.includes(names[s.site])); t += 0.2) B.advance(0.2, 0.2);
+    const q = g.root.position, x = q.x + 1.2, z = q.z;
+    B.pilot.navigate({ position: { x, y: F.supportAt(x, z, q.y - 0.5), z }, yaw: 0, pitch: 0, dist: 6 });
+    a.root.rotation.y = Math.atan2(q.x - x, q.z - z);
+    B.advance(0.1, 1 / 30);
+    return { site: names[s.site], phase: s.phase, label: document.getElementById("act").textContent };
+  })()`);
+  await b.key(" ");
+  const opened = await b.evaluate(`__ooga.factory.greeter.state.phase`);
+  await b.key("Enter");
+  const started = await b.evaluate(`(() => { const s = __ooga.factory.greeter.state;
+    return { phase: s.phase, tour: s.tour, said: s.spoken, stop: !document.querySelector(".greeter-stop").hidden }; })()`);
+  const ended = await b.evaluate(`(() => {
+    const B = __ooga, s = B.factory.greeter.state;
+    document.querySelector(".greeter-stop").click();
+    for (let t = 0; t < 40 && s.phase !== "work"; t += 0.2) B.advance(0.2, 0.2);
+    return { phase: s.phase, scene: B.scene, said: s.spoken, stop: document.querySelector(".greeter-stop").hidden };
+  })()`);
+  record("factory greeter: she notices the visitor on the balcony and flies over to offer tours, Space opens four, arrows select, Escape declines and she keeps to her work, and walked up to at a station she starts a tour that End tour ends",
+    arrival.scene === "factory" && ["notice", "approach", "offer"].every(p => arrival.phases.includes(p)) && arrival.label === "TALK TO TESS"
+      && arrival.gap < 3 && arrival.lift > 0.6 && arrival.lift < 2.2
+      && menu.open && menu.choices === 4 && menu.fits && menu.phase === "menu" && selected === 1
+      && declined.scene === "factory" && declined.hidden && declined.phase === "work" && declined.said === "declined"
+      && declined.seen.length === 1 && declined.seen[0] === "work"
+      && met.label === "TALK TO TESS" && opened === "menu" && started.phase === "gather" && started.tour === "payments"
+      && started.said === "gather" && started.stop && ended.phase === "work" && ended.scene === "factory" && ended.stop,
+    JSON.stringify({ arrival, menu, selected, declined, met, opened, started, ended }));
   const tours = await b.evaluate(`(() => {
-    const B = __ooga, g = B.factory.greeter, a = B.crew.player, rows = [];
-    const follow = () => {
-      // Keep the visitor beside the guide without occupying her next step. Existing floor checks
-      // independently prove the widest visitor can reach these stairs, bridges and landings.
-      a.root.position.x = g.root.position.x + 2;
-      a.root.position.z = g.root.position.z;
-      a.root.position.y = g.root.position.y - 1.05 + a.baseY;
-    };
+    const B = __ooga, g = B.factory.greeter, a = B.crew.player, s = g.state, rows = [];
+    // Keep the visitor on the floor the tour measures from, beside it. Existing floor checks independently prove
+    // the widest visitor can reach these stairs, bridges and landings.
+    const follow = () => { a.root.position.x = s.anchor.x + 1.6; a.root.position.z = s.anchor.z + 0.6; a.root.position.y = s.anchor.y + a.baseY; };
     let elapsed = 0;
     for (const id of Object.keys(BL.factoryGreeter.TOURS)) {
-      follow(); g.greet();
+      for (let i = 0; i < 3000 && !(s.phase === "work" && s.stage !== "fly"); i++) g.update(0.04, elapsed += 0.04);
+      const q = g.root.position;
+      a.root.position.x = q.x + 1.2; a.root.position.z = q.z; a.root.position.y = q.y - 1.6 + a.baseY;
+      g.greet();
       const choices = [...document.querySelectorAll(".greeter-choice")];
       choices.find(button => button.textContent === BL.factoryGreeter.TOURS[id].title).click();
       const stops = new Set(), lines = new Set(); let returned = false;
       for (let i = 0; i < 18000; i++) {
         follow(); g.update(0.04, elapsed += 0.04);
-        if (g.state.phase === "talk") stops.add(g.state.waypoint);
-        lines.add(g.state.spoken);
-        if (g.state.phase === "idle") { returned = true; break; }
+        if (s.phase === "talk") stops.add(s.waypoint);
+        lines.add(s.spoken);
+        if (s.phase === "work") { returned = true; break; }
       }
       rows.push({ id, returned, stops: [...stops], expected: Object.keys(BL.factoryGreeter.TOURS[id].stops).map(Number),
-        blocked: lines.has("blocked"), position: { x: g.root.position.x, z: g.root.position.z } });
+        abandoned: lines.has("abandoned") || lines.has("cancelled") });
     }
     return rows;
   })()`);
-  record("factory greeter: all four tours advance hands-free through every stop and return along stairs and bridges to the entrance post",
-    tours.length === 4 && tours.every(row => row.returned && !row.blocked && row.expected.every(stop => row.stops.includes(stop))
-      && Math.hypot(row.position.x + 2, row.position.z - 23.6) < 0.025), JSON.stringify(tours));
+  record("factory greeter: all four tours lead hands-free through every stop, showing each station, and send her back to work",
+    tours.length === 4 && tours.every(row => row.returned && !row.abandoned && row.expected.every(stop => row.stops.includes(stop))), JSON.stringify(tours));
+  // Her flight against what the hall draws: every surface of every visible mesh, sampled into a quarter-metre grid,
+  // less the actors who walk about and the particles. The air legs keep wide of it, the tours' legs at LEAD over the
+  // floor, their stops' rises and the docks keep her radius clear, and every working beam lands on its station.
+  const flight = await b.evaluate(`(() => {
+    const B = __ooga, G = BL.factoryGreeter, F = G.FLIGHT, root = BL.scenes.factory.root, skip = new Set([B.factory.greeter.root]);
+    for (const c of B.crew.cavemen.values()) skip.add(c.root);
+    for (const c of B.factory.scene.crew) skip.add(c.agent.root);
+    const R = 0.25, X0 = -24, Y0 = -1, Z0 = -23, NX = 192, NY = 112, NZ = 220, grid = new Uint8Array(NX * NY * NZ);
+    const cell = (x, y, z) => { const i = Math.floor((x - X0) / R), j = Math.floor((y - Y0) / R), k = Math.floor((z - Z0) / R); return i < 0 || j < 0 || k < 0 || i >= NX || j >= NY || k >= NZ ? -1 : (k * NY + j) * NX + i; };
+    const walk = (n) => {
+      if (skip.has(n) || n.visible === false) return;
+      const g = n.geometry, particle = g && n.sightHidden && g.castShadow === false && g.faces.length <= 64;
+      if (g && g.faces.length && !n.instanceData && !particle) {
+        const m = n.world, v = g.verts, w = new Float32Array(v.length);
+        for (let a = 0; a < v.length; a += 3) { w[a] = m[0] * v[a] + m[4] * v[a + 1] + m[8] * v[a + 2] + m[12]; w[a + 1] = m[1] * v[a] + m[5] * v[a + 1] + m[9] * v[a + 2] + m[13]; w[a + 2] = m[2] * v[a] + m[6] * v[a + 1] + m[10] * v[a + 2] + m[14]; }
+        for (const f of g.faces) for (let t = 1; t + 1 < f.i.length; t++) {
+          const a = f.i[0] * 3, b = f.i[t] * 3, c = f.i[t + 1] * 3;
+          const nu = Math.max(1, Math.ceil(Math.hypot(w[b] - w[a], w[b + 1] - w[a + 1], w[b + 2] - w[a + 2]) / 0.15)), nv = Math.max(1, Math.ceil(Math.hypot(w[c] - w[a], w[c + 1] - w[a + 1], w[c + 2] - w[a + 2]) / 0.15));
+          for (let u = 0; u <= nu; u++) for (let q = 0; q <= nv; q++) {
+            const e = u / nu, r = q / nv; if (e + r > 1.0001) break;
+            const at = cell(w[a] + (w[b] - w[a]) * e + (w[c] - w[a]) * r, w[a + 1] + (w[b + 1] - w[a + 1]) * e + (w[c + 1] - w[a + 1]) * r, w[a + 2] + (w[b + 2] - w[a + 2]) * e + (w[c + 2] - w[a + 2]) * r);
+            if (at >= 0) grid[at] = 1;
+          }
+        }
+      }
+      for (const c of n.children) walk(c);
+    };
+    walk(root);
+    const near = (x, y, z) => { let best = 2; const ci = Math.floor((x - X0) / R), cj = Math.floor((y - Y0) / R), ck = Math.floor((z - Z0) / R);
+      for (let k = ck - 5; k <= ck + 5; k++) for (let j = cj - 5; j <= cj + 5; j++) for (let i = ci - 5; i <= ci + 5; i++) {
+        if (i < 0 || j < 0 || k < 0 || i >= NX || j >= NY || k >= NZ) return 0;
+        if (grid[(k * NY + j) * NX + i]) best = Math.min(best, Math.hypot(X0 + (i + 0.5) * R - x, Y0 + (j + 0.5) * R - y, Z0 + (k + 0.5) * R - z));
+      } return best; };
+    const leg = (a, b) => { const n = Math.max(1, Math.ceil(Math.hypot(b[0] - a[0], b[1] - a[1], b[2] - a[2]) / 0.2)); let worst = 2;
+      for (let s = 0; s <= n; s++) worst = Math.min(worst, near(a[0] + (b[0] - a[0]) * s / n, a[1] + (b[1] - a[1]) * s / n, a[2] + (b[2] - a[2]) * s / n)); return worst; };
+    const names = Object.keys(F.AIR), air = F.LEGS.map(([a, b]) => leg(F.AIR[a], F.AIR[b])), lead = [], stops = [], docks = [];
+    for (const tour of Object.values(G.TOURS)) {
+      const at = (w, rise = 0) => [w[0], w[1] + F.LEAD + rise, w[2]];
+      tour.route.forEach((w, i) => {
+        if (i) lead.push(leg(at(tour.route[i - 1]), at(w)));
+        docks.push(leg(at(w), F.AIR[names[tour.docks[i]]]));
+        const s = tour.show[i];
+        if (s) stops.push(s[0] ? Math.min(leg(at(w), at(w, s[0])), leg(at(w, s[0]), s[1])) : leg(at(w), s[1]));
+      });
+    }
+    const beams = Object.entries(F.WORK).map(([name, aim]) => {
+      const p = F.AIR[name], d = Math.hypot(aim[0] - p[0], aim[1] - p[1], aim[2] - p[2]);
+      for (let s = 0.3; s <= d + 0.6; s += 0.05) if (grid[cell(p[0] + (aim[0] - p[0]) * s / d, p[1] + (aim[1] - p[1]) * s / d, p[2] + (aim[2] - p[2]) * s / d)] === 1) return Math.abs(s - d);
+      return Infinity;
+    });
+    const min = (list) => +Math.min(...list).toFixed(2);
+    return { radius: F.RADIUS, air: min(air), lead: min(lead), stops: min(stops), docks: min(docks), beams: +Math.max(...beams).toFixed(2) };
+  })()`);
+  record("factory greeter: her flight keeps clear of everything the hall draws, and each working beam lands on its station",
+    flight.air >= flight.radius + 0.3 && flight.lead >= flight.radius + 0.08 && flight.stops >= flight.radius + 0.08
+      && flight.docks >= flight.radius + 0.08 && flight.beams <= 0.5, JSON.stringify(flight));
   const detail = await b.evaluate(`(() => {
     const B = __ooga, g = B.factory.greeter, camera = B.camera, head = g.root.children[0].children[0];
     const original = { ...camera.position }, quality = B.renderer.quality, set = new Set(); g.liveGeometry(set);

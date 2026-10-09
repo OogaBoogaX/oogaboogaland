@@ -1,5 +1,6 @@
-// The factory's floating guide, Tess. One visit owns the rig, the on-screen tour menu and the feed subscription.
-// Dialogue is data for later speech. The tour observes events; it never drives the node or the visitor.
+// The factory's guide, Tess: a flying companion who works the hall's stations with a beam from her eye, flies over to
+// greet a visitor who comes in, and leads the tours. One visit owns the rig, the on-screen tour menu and the feed
+// subscription. Dialogue is data for later speech. The tour observes events; it never drives the node or the visitor.
 (() => {
   "use strict";
   const BL = window.BL = window.BL || {};
@@ -7,14 +8,18 @@
   const { quat, damp } = BL.math;
   const { cached, lathe, turn, shaded, torus, forwardLathe, moved, turnedZ, bevelBox, prism } = models;
   const { createNode, addChild, removeChild } = BL.scene;
-  // Flink's head was seven voxels wide, centred three voxels above its pivot, at 16 voxels per metre of height.
-  const DEMO = "obl.factory.demo.v1", HEIGHT = 1.05, BASE = HEIGHT * (5 / 16 + 0.5 + 3 / 16), TAU = Math.PI * 2;
-  const NAME = "Tess";
+  // Flink's head was seven voxels wide at 16 voxels per metre of height; Tess is half again as big, so she reads
+  // across a hall 46 m wide.
+  const DEMO = "obl.factory.demo.v1", HEIGHT = 1.05, SCALE = 1.5, TAU = Math.PI * 2;
+  const NAME = "Tess", TALK = `TALK TO ${NAME.toUpperCase()}`;
   const LINES = {
     greeting: "Hi! I'm Tess, your factory guide. Want a look round?",
     greetingDemo: "Hi! I'm Tess. This node is a demo one today.",
     noOogaDemo: "Demo node today! Pick an Ooga on the island.",
     noOoga: "No Ooga, no tour! Pick one on the island.",
+    comeCloser: "Come closer and I'll show you round!",
+    declined: "No problem! Come find me if you want a tour.",
+    gather: "Tours start at the balcony. Follow me!",
     menu: "Four tours! Pick one.",
     follow: "Follow me! Lines, the core, the switchboard.",
     channels: "Lines are channels to peers. A payment can hop node to node.",
@@ -40,7 +45,7 @@
     channelActiveReport: "An active channel was reported. Balances stay private.",
     channelClosingReport: "A closing was reported. Not closed until closed arrives.",
     channelClosedReport: "A closed channel was reported. That is all it says.",
-    channelDone: "Forge plus lines — that is the dance. Back to my post!",
+    channelDone: "Forge plus lines — that is the dance. Back to work for me!",
     liquidity: "Channels need liquidity that moves. Capacity alone says little.",
     rebalancer: "The rebalancer shifts liquidity so lines keep working.",
     rebalanceHour: "Reports group by the hour. The spin is a picture, not a timestamp.",
@@ -62,11 +67,10 @@
     summary: "Summaries describe activity. Not diagnosis, not balances.",
     noSummary: "No summary supplied. We invent no counts.",
     healthDone: "State and signal answer different questions. Tour done!",
-    done: "That is forwarding! Wander free — I'll wait by the stairs.",
+    done: "That is forwarding! Back to work — come find me anytime.",
     warning: "Still coming? I'll hover here.",
-    abandoned: "Lost my visitor! Back to post.",
-    cancelled: "All good. I'll fly back!",
-    blocked: "Path blocked. Back to post."
+    abandoned: "Lost my visitor! Back to work.",
+    cancelled: "All good. Back to work!"
   };
   // The shared bubble is single-line. Bake short speech beats once, preserving full voice-ready lines.
   const SPEECH = {};
@@ -80,44 +84,100 @@
     if (beat) beats.push(beat);
     SPEECH[id] = beats;
   }
-  // Her post floats on the balcony's left at the head of the grand stairway, clear of its lantern post and the
-  // arrival path, so the visitor walks up to her. Explicit waypoints use the broad arrival stairs and the left
-  // pit-to-core stairs, not ladders. y is the expected support at the waypoint; the actual step uses the hall's
-  // collision functions.
+  // Her flight. Clear-air waypoints over the hall and the legs between them, every leg at least 0.8 m from any surface
+  // the hall draws (the factory suite measures it). A work site is a waypoint she hovers at, with the point on its
+  // station her beam lands on. She is found working at a site near the front, so she reaches the balcony quickly.
+  const AIR = {
+    core: [3, 8.5, 1], forge: [0, 2.5, 5], lineA: [-11, 12.5, -10], lineB: [12, 12.5, -10], lineC: [-12, 7.5, 0],
+    lineD: [13, 7.5, 0], switchboard: [-10, 5.5, 8], rebalancer: [12, 5.5, 6], treasury: [10, 5.5, 20],
+    lookout: [-16, 23.5, -10], balcony: [0, 7.5, 23], front: [0, 10, 12], left: [-7, 10, 5], right: [7, 10, 5],
+    pit: [0, 5.5, 7], backA: [-10, 14.5, -8], backB: [10, 14.5, -8], mid: [-4, 9.5, -1], high: [-12, 19, -7],
+    tower: [-14, 22.5, -10], rightLow: [11, 7.5, 0]
+  };
+  const LEGS = [
+    ["lineD", "rightLow"], ["lookout", "tower"], ["lineA", "backA"], ["lineB", "backB"], ["forge", "pit"], ["backA", "high"],
+    ["high", "tower"], ["core", "right"], ["switchboard", "left"], ["left", "mid"], ["front", "pit"], ["rebalancer", "right"],
+    ["right", "rightLow"], ["core", "pit"], ["core", "mid"], ["lineC", "left"], ["core", "rightLow"], ["lineC", "mid"],
+    ["left", "pit"], ["right", "pit"], ["pit", "mid"], ["front", "left"], ["front", "right"], ["switchboard", "pit"],
+    ["backA", "mid"], ["forge", "switchboard"], ["core", "left"], ["balcony", "front"], ["core", "front"],
+    ["switchboard", "front"], ["rebalancer", "pit"], ["core", "backB"], ["lineC", "high"], ["treasury", "front"],
+    ["front", "mid"], ["left", "high"], ["switchboard", "balcony"], ["backA", "backB"], ["core", "treasury"],
+    ["rebalancer", "balcony"]
+  ];
+  const WORK = {
+    core: [1.91, 8.5, -2.01], forge: [0, 1.19, 0.96], lineA: [-11, 11.2, -13.52], lineB: [11.34, 11.84, -11.77],
+    lineC: [-12.88, 6.24, -3.53], lineD: [12.62, 6.25, -3.51], switchboard: [-12.53, 3.6, 5.47],
+    rebalancer: [13.95, 4.52, 4.24], treasury: [12.79, 4.7, 20], lookout: [-16, 22.51, -13.04]
+  };
+  const FRONT = ["core", "forge", "switchboard", "rebalancer", "treasury", "lineC", "lineD"];
+  // A tour flies its route LEAD metres over the floor, between the waypoints' supports, and the visitor walks it. The
+  // routes use the broad arrival stairs and the left pit-to-core stairs, not ladders; the bend at the foot of the grand
+  // stairway keeps her off its lanterns. At a stop she flies out to show its station: `show` is the rise off the
+  // route, where she hovers and where her beam lands. Every waypoint has a dock, the air waypoint she rises to when a
+  // tour ends there. Tours share fixed approach points but own their stops. No runtime route building or event history.
+  const LEAD = 2.2;
   const ROUTE = [
-    [-2, 5, 23.6], [-0.8, 5, 22.9], [0, 5, 22], [0, 0, 13],
+    [-2, 5, 23.6], [-0.8, 5, 22.9], [0, 5, 22], [0, 0, 13], [0, 0, 11.4],
     [-4.8, 0, 9], [-6.5, 0, 8.5], [-4.8, 0, 9], [-4.8, 0, 7.5],
     [-4.8, 5, 1.3], [-4.8, 5, 0.1], [-4.8, 5, 1.3], [-4.8, 0, 7.5], [-7, 0, 8.5]
   ];
-  const STOPS = { 5: ["channels"], 9: ["core", "privacy"], 12: ["outcomes", "observation", "source", "history", "done"] };
-  // Tours share fixed approach points but own their stops. No runtime route building or event history.
+  const STOPS = { 6: ["channels"], 10: ["core", "privacy"], 13: ["outcomes", "observation", "source", "history", "done"] };
   const CHANNEL_ROUTE = [
-    ...ROUTE.slice(0, 4), [-4.8, 0, 9], [-4.8, 0, 5.8], [-4.8, 0, 7.5],
+    ...ROUTE.slice(0, 5), [-4.8, 0, 9], [-4.8, 0, 5.8], [-4.8, 0, 7.5],
     [-4.8, 5, 1.3], [-4.8, 5, 0.1], [-5.6, 5, -1.6], [-6.1, 5, -3.9],
     [-6.45, 5, -3.95], [-8.5, 5, -2.5]
+  ];
+  const DOCKS = [
+    [-2, 5, 23.6, "balcony"], [-0.8, 5, 22.9, "balcony"], [0, 5, 22, "balcony"], [0, 0, 13, "pit"], [0, 0, 11.4, "pit"],
+    [-4.8, 0, 9, "pit"], [-6.5, 0, 8.5, "forge"], [-4.8, 0, 7.5, "forge"], [-4.8, 0, 5.8, "left"], [-7, 0, 8.5, "forge"],
+    [-4.8, 5, 1.3, "mid"], [-4.8, 5, 0.1, "mid"], [-5.6, 5, -1.6, "mid"], [-6.1, 5, -3.9, "lineC"],
+    [-6.45, 5, -3.95, "lineC"], [-8.5, 5, -2.5, "lineC"], [-8.9, 5, -3.5, "mid"], [-9.2, 5, -4.4, "backA"],
+    [-9.2, 10, -9.6, "lineA"], [-9.2, 10, -10.1, "lineA"], [4.8, 0, 10, "pit"], [8.5, 0, 9.5, "right"]
   ];
   const TOURS = {
     payments: { title: "PAYMENTS", follow: "follow", route: ROUTE,
       events: ["forward.settled", "forward.failed"], quiet: "quiet", stops: STOPS,
-      look: { 5: [-12.4, 7, -2], 9: [0, 8, -4], 12: [-12, 4, 6] } },
+      show: { 6: [1.5, [-8, 7.5, -0.5], [-11.67, 7.08, -1.75]], 10: [0, [-4, 7, -0.5], [-1.97, 7.51, -2.28]],
+        13: [1.5, [-10.5, 5, 8], [-12.39, 3.74, 5.47]] } },
     channels: { title: "CHANNELS", follow: "followChannels", route: CHANNEL_ROUTE,
       events: ["channel.opening", "channel.active", "channel.closing", "channel.closed"], quiet: "channelQuiet",
-      stops: { 5: ["forge", "opening", "closing", "observation", "source", "history"],
-        12: ["channelStatus", "slots", "fundsPrivate", "observation", "source", "history", "channelDone"] },
-      look: { 5: [0, 3, 0.7], 12: [-12.4, 7, -2] } },
+      stops: { 6: ["forge", "opening", "closing", "observation", "source", "history"],
+        13: ["channelStatus", "slots", "fundsPrivate", "observation", "source", "history", "channelDone"] },
+      show: { 6: [1.5, [1, 2, 4], [0.01, 2.99, 0.74]], 13: [1, [-13.5, 8, 0], [-12.24, 6.86, -2.29]] } },
     rebalancing: { title: "REBALANCING", follow: "followRebalancing",
-      route: [...ROUTE.slice(0, 4), [4.8, 0, 10], [8.5, 0, 9.5]],
+      route: [...ROUTE.slice(0, 5), [4.8, 0, 10], [8.5, 0, 9.5]],
       events: ["rebalance.succeeded", "rebalance.failed"], quiet: "rebalanceQuiet",
-      stops: { 4: ["liquidity"], 5: ["rebalancer", "rebalanceHour", "rebalancePrivate", "observation", "source", "history", "rebalanceDone"] },
-      look: { 4: [12.4, 7, -2], 5: [14, 4.5, 4.2] } },
+      stops: { 5: ["liquidity"], 6: ["rebalancer", "rebalanceHour", "rebalancePrivate", "observation", "source", "history", "rebalanceDone"] },
+      show: { 5: [1.5, [8, 8, -0.5], [11.7, 7.16, -1.76]], 6: [1.5, [11, 5, 5.5], [13.9, 4.52, 4.24]] } },
     health: { title: "NODE HEALTH", follow: "followHealth",
       route: [...CHANNEL_ROUTE, [-8.9, 5, -3.5], [-9.2, 5, -4.4], [-9.2, 10, -9.6], [-9.2, 10, -10.1]],
       events: [], quiet: "unknownNode",
-      stops: { 8: ["healthCore", "observation", "source", "history"],
-        16: ["watchtower", "signal", "summary", "healthDone"] },
-      look: { 8: [0, 8, -4], 16: [-16, 21, -14] } }
+      stops: { 9: ["healthCore", "observation", "source", "history"],
+        17: ["watchtower", "signal", "summary", "healthDone"] },
+      show: { 9: [0, [-4, 7, -0.5], [-1.97, 7.51, -2.28]], 17: [1.5, [-11.5, 19.5, -12], [-15.26, 20.75, -13.67]] } }
   };
   const TOUR_ORDER = ["payments", "channels", "rebalancing", "health"];
+  // The air waypoints by index, and the next hop from each to each over the legs (Floyd-Warshall, once a page).
+  const NODES = Object.keys(AIR), N = NODES.length, INDEX = {}, AT = new Float32Array(N * 3), NEXT = new Int8Array(N * N);
+  NODES.forEach((name, i) => { INDEX[name] = i; AT.set(AIR[name], i * 3); });
+  {
+    const D = new Float64Array(N * N).fill(Infinity);
+    for (let i = 0; i < N; i++) { D[i * N + i] = 0; NEXT[i * N + i] = i; }
+    for (const [a, b] of LEGS) {
+      const i = INDEX[a], j = INDEX[b], d = Math.hypot(AT[i * 3] - AT[j * 3], AT[i * 3 + 1] - AT[j * 3 + 1], AT[i * 3 + 2] - AT[j * 3 + 2]);
+      D[i * N + j] = D[j * N + i] = d; NEXT[i * N + j] = j; NEXT[j * N + i] = i;
+    }
+    for (let k = 0; k < N; k++) for (let i = 0; i < N; i++) for (let j = 0; j < N; j++) {
+      if (D[i * N + k] + D[k * N + j] < D[i * N + j]) { D[i * N + j] = D[i * N + k] + D[k * N + j]; NEXT[i * N + j] = NEXT[i * N + k]; }
+    }
+  }
+  const BALCONY = INDEX.balcony, SITES = Object.keys(WORK).map((name) => INDEX[name]), STARTS = FRONT.map((name) => INDEX[name]);
+  // Each tour's docks, by waypoint. A waypoint with none throws here, never mid-tour.
+  for (const tour of Object.values(TOURS)) tour.docks = Int8Array.from(tour.route, (w) => {
+    const dock = DOCKS.find((d) => d[0] === w[0] && d[1] === w[1] && d[2] === w[2]);
+    if (!dock) throw new Error(`Tess has no dock for waypoint ${w}`);
+    return INDEX[dock[3]];
+  });
   const OBSERVATIONS = {
     "forward.settled": "settled", "forward.failed": "failed",
     "channel.opening": "channelOpeningReport", "channel.active": "channelActiveReport",
@@ -126,12 +186,14 @@
   };
   const NODE_LINES = { unknown: "unknownNode", starting: "startingNode", ready: "readyNode", stopped: "stoppedNode" };
   // Tess uses the hall's smooth turned geometry, not a voxel rig. All meshes are cached; visits own only nodes.
-  // The outer diameter matches the old head's seven-cell width. Nested radii keep the three gimbals clear of
-  // one another throughout rotation, and the core and iris remain independent of their motion.
+  // The outer diameter is the old head's seven-cell width before SCALE. Nested radii keep the three gimbals clear of
+  // one another in any orientation, and the core and iris remain independent of their motion. Each ring tumbles about
+  // a diameter of its own (`axis`, in its plane), a turn every few seconds at her resting pace, which her mood speeds
+  // up or slows down; `spin` turns it slowly in its plane, so its ticks travel.
   const RINGS = [
-    { radius: 0.158, x: 0.18, y: 0.2, speed: TAU * 2 / 53, orbit: TAU * 2 / 137, color: "#79482c" },
-    { radius: 0.19, x: Math.PI / 2, y: 0.12, speed: -TAU * 2 / 71, orbit: -TAU * 2 / 173, color: "#b98852" },
-    { radius: HEIGHT * 7 / 32 - 0.012, x: 0.32, y: 1.1, speed: TAU * 2 / 89, orbit: TAU * 2 / 211, color: "#ead0a0" }
+    { radius: 0.158, x: 0.18, y: 0.2, axis: [1, 0, 0], tumble: TAU / 3.4, spin: TAU / 26.5, color: "#79482c" },
+    { radius: 0.19, x: Math.PI / 2, y: 0.12, axis: [0, 1, 0], tumble: -TAU / 4.7, spin: -TAU / 35.5, color: "#b98852" },
+    { radius: HEIGHT * 7 / 32 - 0.012, x: 0.32, y: 1.1, axis: [Math.SQRT1_2, Math.SQRT1_2, 0], tumble: TAU / 6.1, spin: TAU / 44.5, color: "#ead0a0" }
   ];
   const COPPER = "#c68a4d", GRAPHITE = "#30353b", IVORY = "#eee3c9";
   // Simplified Natural Earth 110m country map (public domain), baked at 2.5 degrees.
@@ -455,6 +517,26 @@
       armor: shaded(caps, capDetails), irisMarks: shaded([], irisMarks), rings };
   };
   const MESHES = cached(() => buildMeshes(false)), FINE_MESHES = cached(() => buildMeshes(true)), LIGHT_MESHES = cached(() => buildMeshes(false, true));
+  // Her beam, a glowing tube a metre long down +z that a visit stretches and turns from her eye to where it lands; the
+  // glint where it lands; the sparks a working beam throws; the motes she trails in flight.
+  const BEAM = cached(() => {
+    const g = forwardLathe(turn([[0, 0], [0.5, 0], [0.5, 1], [0, 1]], 8, "#ffb54a", 1));
+    g.lines.length = 0; g.castShadow = false;
+    return g;
+  });
+  const GLINT = cached(() => {
+    const g = lathe({ profile: [[0, -0.5], [0.36, -0.36], [0.5, 0], [0.36, 0.36], [0, 0.5]], segments: 8, color: "#ffe6b0", emissive: 1 });
+    g.lines.length = 0; g.castShadow = false;
+    return g;
+  });
+  const SPARKS = cached(() => ["#ffc83a", "#ff8a1f", "#fff2b8"].map((c) => models.particleGeometry(c, 0.05, 1)));
+  const MOTE = cached(() => models.particleGeometry("#ffb347", 0.04, 1));
+  // Where each work site's beam lands, by air waypoint.
+  const AIM = new Float32Array(N * 3);
+  for (const name in WORK) AIM.set(WORK[name], INDEX[name] * 3);
+  // How long she waits for a visitor who has fallen behind before calling, and before giving up: at the balcony,
+  // where a tour gathers, the walk there may be long.
+  const WAIT = { gather: [20, 45], tour: [4, 12] };
   const create = ({ parent, input, fx, feed, visitor, demoRunning, coarse, camera, quality = () => "high" }) => {
     // Prepare detail behind the scene transition, never in update. Touch and Low retain the lighter rig.
     const lightMeshes = LIGHT_MESHES(), eligible = !coarse && quality() !== "low",
@@ -462,9 +544,10 @@
       detailTiers = fineMeshes ? [meshes, fineMeshes, lightMeshes] : [lightMeshes], detailNodes = [], detailKeys = [], body = createNode(), hover = createNode(), head = createNode({ geometry: meshes.core });
     const iris = createNode({ geometry: meshes.iris }), pupil = createNode({ geometry: meshes.pupil });
     const optics = createNode(), blades = createNode({ geometry: meshes.blades });
-    const figure = { root: body, parts: { head: hover } }, rings = [], pivots = [], orientations = [], orbit = quat.create();
-    let floorY = ROUTE[0][1], flightY = floorY + BASE, greetingT = 0, speakingT = 0, yaw = 0;
-    body.position.x = ROUTE[0][0]; body.position.y = flightY; body.position.z = ROUTE[0][2];
+    const figure = { root: body, parts: { head: hover } }, rings = [], pivots = [], orientations = [], turnQ = quat.create();
+    const tumbles = Float64Array.from(RINGS, (_, i) => i * 2.1);
+    let greetingT = 0, speakingT = 0, lookYaw = 0, lookPitch = 0, tempo = 1, flare = 0, trailT = 0, sparkT = 0, legLength = 1, litGain = 1;
+    hover.scale.x = hover.scale.y = hover.scale.z = SCALE;
     addChild(body, hover); addChild(hover, head);
     addChild(head, createNode({ geometry: meshes.lens }), createNode({ geometry: meshes.housing }), optics,
       createNode({ geometry: meshes.armor }), createNode({ geometry: meshes.irisMarks }),
@@ -483,7 +566,10 @@
       if (node.geometry === meshes[key]) registerDetail(node, key);
     for (const node of optics.children) if (node.geometry === meshes.glints) registerDetail(node, "glints");
     let detailed = false, selectedTier = meshes;
-    addChild(parent, body);
+    // The beam lives in the hall's frame, not hers: it runs from her eye to wherever it lands.
+    const beam = createNode({ geometry: BEAM(), visible: false, sightHidden: true });
+    const glint = createNode({ geometry: GLINT(), visible: false, sightHidden: true });
+    addChild(parent, body); addChild(parent, beam); addChild(parent, glint);
     input.add(head, { kind: "greeter" }, { radius: HEIGHT * 7 / 32 });
     // The tour menu lives on screen, in the HUD's wood, built for the visit and removed on leave.
     const panel = document.createElement("div");
@@ -516,20 +602,82 @@
     stop.addEventListener("click", () => endTour());
     document.body.append(panel, stop);
     let tour = TOURS.payments;
-    const state = { tour: null, selection: 0, phase: "idle", waypoint: 0, line: 0, away: 0, blocked: 0, greeted: false, cooldown: 0,
+    // She is found at work at a station near the front. `perch` is the air waypoint she is at or last left, `site` the
+    // station she is working or flying to, and `at` what kind of place she is at, which says how she gets back to the
+    // air waypoints from there: a waypoint (`node`), a visitor's shoulder, a tour's route, a stop's station (`show`),
+    // or on her way (`air`). `anchor` is the floor a tour measures the visitor from.
+    const start = STARTS[Math.floor(Math.random() * STARTS.length)];
+    const state = { tour: null, selection: 0, phase: "work", stage: "beam", timer: 4 + Math.random() * 4, perch: start, site: start, at: "node",
+      offered: false, seen: 0, attending: false, ending: false, beam: 0, waypoint: 0, line: 0, away: 0,
       advance: 0, spoken: null, utterance: 0, lastEvent: null, replay: false, demo: false, observation: "quiet", snapshotDemo: false, snapshotReplay: false,
-      node: feed.reading.node, nodeDemo: false, nodeReplay: false, nodeReported: false };
-    const position = body.position;
-    const near = (range = 3.5) => {
+      node: feed.reading.node, nodeDemo: false, nodeReplay: false, nodeReported: false,
+      anchor: { x: 0, y: 0, z: 0 }, origin: { x: 0, z: 0 }, side: 1 };
+    const position = body.position, vel = { x: 0, y: 0, z: 0 }, spot = { x: 0, y: 0, z: 0 }, aim = { x: 0, y: 0, z: 0 }, lit = { x: 0, y: 0, z: 0 };
+    position.x = AT[start * 3]; position.y = AT[start * 3 + 1]; position.z = AT[start * 3 + 2];
+    // The flight path: the points she flies through in order. While she comes to a visitor the last one follows them.
+    const path = new Float32Array(3 * 32);
+    let pathCount = 0, pathAt = 0, pathSpeed = 4, pathCorner = 0.8, tracking = false;
+    const clearPath = (speed, corner) => { pathCount = pathAt = 0; pathSpeed = speed; pathCorner = corner; tracking = false; };
+    const push = (x, y, z) => { const o = pathCount++ * 3; path[o] = x; path[o + 1] = y; path[o + 2] = z; };
+    const pushAir = (from, to) => { for (let i = from; i !== to;) { i = NEXT[i * N + to]; push(AT[i * 3], AT[i * 3 + 1], AT[i * 3 + 2]); } };
+    const pushRoute = (w, rise = 0) => push(w[0], w[1] + LEAD + rise, w[2]);
+    // One step along the path: the velocity eases toward the next point at the path's speed, slowing into the last, and
+    // a point is passed within `pathCorner`, so she rounds a waypoint without stopping. True on arriving at the last.
+    const steer = (dt) => {
+      while (pathAt < pathCount - 1 && Math.hypot(path[pathAt * 3] - position.x, path[pathAt * 3 + 1] - position.y, path[pathAt * 3 + 2] - position.z) < pathCorner) pathAt++;
+      if (pathAt >= pathCount) return false;
+      const o = pathAt * 3, last = pathAt === pathCount - 1;
+      const dx = path[o] - position.x, dy = path[o + 1] - position.y, dz = path[o + 2] - position.z, d = Math.hypot(dx, dy, dz);
+      const speed = last ? Math.min(pathSpeed, d * 1.8) : pathSpeed, k = d > 1e-6 ? speed / d : 0;
+      vel.x = damp(vel.x, dx * k, 6, dt); vel.y = damp(vel.y, dy * k, 6, dt); vel.z = damp(vel.z, dz * k, 6, dt);
+      position.x += vel.x * dt; position.y += vel.y * dt; position.z += vel.z * dt;
+      if (!last || tracking || d > 0.04 || Math.hypot(vel.x, vel.y, vel.z) > 0.3) return false;
+      position.x = path[o]; position.y = path[o + 1]; position.z = path[o + 2];
+      vel.x = vel.y = vel.z = 0; pathAt = pathCount;
+      return true;
+    };
+    const feetOf = (actor) => actor.root.position.y - actor.baseY;
+    // Within `range` of her, from the visitor's chest.
+    const nearMe = (range) => {
       const actor = visitor();
       if (!actor) return false;
       const p = actor.root.position;
-      return Math.hypot(p.x - position.x, p.z - position.z, p.y - actor.baseY - floorY) <= range;
+      return Math.hypot(p.x - position.x, feetOf(actor) + (actor.bodyHeight || 1.2) * 0.7 - position.y, p.z - position.z) <= range;
+    };
+    // Within `range` of the tour's floor: under her while she leads, or the stop the visitor stands at.
+    const nearSpot = (range) => {
+      const actor = visitor();
+      if (!actor) return false;
+      const p = actor.root.position, s = state.anchor;
+      return Math.hypot(p.x - s.x, p.z - s.z, feetOf(actor) - s.y) <= range;
+    };
+    const anchorAt = (w) => { state.anchor.x = w[0]; state.anchor.y = w[1]; state.anchor.z = w[2]; };
+    const onBalcony = (actor) => {
+      const p = actor.root.position, feet = feetOf(actor);
+      return feet > 4 && feet < 6.5 && p.z > 20.5 && Math.abs(p.x) < 7;
+    };
+    const strayed = (actor) => Math.hypot(actor.root.position.x - state.origin.x, actor.root.position.z - state.origin.z) > 5;
+    // Her place with the visitor, into `spot`: ahead of them and off to the side with room, at head height, where the
+    // view over their shoulder shows her.
+    const shoulder = () => {
+      const actor = visitor(), p = actor.root.position, ax = Math.sin(actor.root.rotation.y), az = Math.cos(actor.root.rotation.y), feet = feetOf(actor);
+      spot.y = feet + (actor.bodyHeight || 1.2) * 0.8;
+      for (let tries = 0; tries < 2; tries++) {
+        spot.x = p.x - az * 1 * state.side + ax * 1.8;
+        spot.z = p.z + ax * 1 * state.side + az * 1.8;
+        if (FM.clearAt(spot.x, spot.z, feet, 0.4, spot.y + 0.4 - feet)) return;
+        state.side = -state.side;
+      }
+    };
+    const lookAt = (x, y, z) => {
+      const dx = x - position.x, dz = z - position.z;
+      lookYaw = Math.atan2(dx, dz);
+      lookPitch = -Math.min(0.7, Math.max(-0.7, Math.atan2(y - position.y, Math.hypot(dx, dz))));
     };
     const show = (phase) => {
       state.phase = phase;
       panel.hidden = phase !== "menu";
-      stop.hidden = phase !== "walk" && phase !== "talk";
+      stop.hidden = !state.tour || state.ending;
     };
     const select = (index) => {
       state.selection = (index + options.length) % options.length;
@@ -545,26 +693,81 @@
       speakingT = 1.2;
       fx.say(figure, beat, 8);
     };
-    const greet = (interacting = true) => {
-      if (state.phase === "return" || state.phase === "walk") return;
-      if (state.phase === "talk") { say(state.spoken, true); return; }
-      if (interacting && visitor() && !near()) return;
-      state.greeted = true; greetingT = 1.4;
-      if (!interacting) {
-        show("greeting");
-        say(demoRunning() ? "greetingDemo" : "greeting");
-        return;
+    const pickSite = () => {
+      let site = state.perch;
+      while (site === state.perch || site === state.site) site = SITES[Math.floor(Math.random() * SITES.length)];
+      return site;
+    };
+    // Off to work at another station, from the air waypoint she is at.
+    const flyTo = (site) => {
+      clearPath(4, 0.8); pushAir(state.perch, site);
+      state.site = site; state.at = "air"; state.stage = "fly"; show("work");
+    };
+    // Back to work from wherever a tour or a greeting left her, along legs already flown: from a stop's station down to
+    // the route, from the route to its dock, from a visitor's shoulder to the balcony; then over the air waypoints.
+    const home = () => {
+      let dock = state.perch;
+      clearPath(4, 0.8);
+      if (state.at === "show") {
+        const s = tour.show[state.waypoint], w = tour.route[state.waypoint];
+        if (s[0]) pushRoute(w, s[0]);
+        pushRoute(w);
       }
-      const actor = visitor();
-      if (!actor) { say(demoRunning() ? "noOogaDemo" : "noOoga"); return; }
-      // Talking turns the visitor's Ooga to face her, and the menu opens on screen.
-      actor.root.rotation.y = Math.atan2(position.x - actor.root.position.x, position.z - actor.root.position.z);
-      select(0);
-      show("menu");
-      say("menu");
+      if (state.at === "show" || state.at === "route") dock = tour.docks[state.waypoint];
+      else if (state.at === "shoulder") dock = BALCONY;
+      push(AT[dock * 3], AT[dock * 3 + 1], AT[dock * 3 + 2]);
+      state.perch = dock;
+      const site = pickSite();
+      pushAir(dock, site);
+      state.site = site; state.at = "air"; state.stage = "fly";
+      state.tour = null; state.ending = false; state.attending = false;
+      show("work");
+    };
+    // She notices a visitor come onto the balcony: stops work, turns to them, her rings flare; then she flies over.
+    const notice = () => { show("notice"); state.timer = 1.1; flare = 1; };
+    const approach = () => {
+      clearPath(6, 1); pushAir(state.perch, BALCONY);
+      shoulder(); push(spot.x, spot.y, spot.z); tracking = true;
+      state.at = "air"; show("approach");
+    };
+    // The visitor went off the balcony before she got there: on to the balcony's waypoint, then back to work.
+    const abandonApproach = () => {
+      const site = pickSite();
+      if (pathAt >= pathCount - 1) { clearPath(4, 0.8); push(AT[BALCONY * 3], AT[BALCONY * 3 + 1], AT[BALCONY * 3 + 2]); }
+      else { pathCount--; pathSpeed = 4; tracking = false; }
+      state.perch = BALCONY; pushAir(BALCONY, site);
+      state.site = site; state.stage = "fly"; show("work");
+    };
+    const offer = () => {
+      const p = visitor().root.position;
+      state.origin.x = p.x; state.origin.z = p.z;
+      state.offered = true; state.at = "shoulder"; state.timer = 9; greetingT = 1.4;
+      clearPath(3, 1); push(spot.x, spot.y, spot.z); tracking = true;
+      show("offer"); say(demoRunning() ? "greetingDemo" : "greeting");
+    };
+    const decline = () => { say("declined"); home(); };
+    // Talking turns the visitor's Ooga to face her, and the menu opens on screen.
+    const openMenu = () => {
+      const p = visitor().root;
+      p.rotation.y = Math.atan2(position.x - p.position.x, position.z - p.position.z);
+      state.origin.x = p.position.x; state.origin.z = p.position.z; state.attending = true;
+      select(0); show("menu"); say("menu");
+    };
+    // Closing the menu at the visitor's shoulder declines the tour; at a station she goes back to her work.
+    const closeMenu = () => {
+      if (state.at === "shoulder") decline();
+      else { state.attending = false; show("work"); }
+    };
+    const greet = () => {
+      if (!visitor()) { say(demoRunning() ? "noOogaDemo" : "noOoga"); return; }
+      if (state.phase === "talk") { say(state.spoken, true); return; }
+      if (state.phase === "offer" || state.phase === "work" && state.stage !== "fly" && nearMe(4)) { openMenu(); return; }
+      if (state.phase === "work") say("comeCloser");
     };
     const end = (line) => {
-      show("return"); state.away = state.blocked = 0; if (line) say(line);
+      if (line) say(line);
+      state.ending = true; stop.hidden = true;
+      if (state.phase === "talk" || state.phase === "gather" && state.at === "route") home();
     };
     const resolveLine = (id) => {
       if (id === "observation") return state.observation;
@@ -583,6 +786,31 @@
       state.snapshotReplay = state.tour === "health" ? nodeMetadata && state.nodeReplay : !!state.lastEvent && state.replay;
       show("talk"); say(tour.stops[state.waypoint][0]);
     };
+    // The next leg of the route, flown LEAD over the floor.
+    const lead = () => {
+      const a = tour.route[state.waypoint], b = tour.route[state.waypoint + 1];
+      clearPath(2.2, 0.3); pushRoute(b);
+      legLength = Math.hypot(b[0] - a[0], b[1] - a[1], b[2] - a[2]) || 1;
+      state.at = "route"; show("lead");
+    };
+    // At a waypoint: a stop sends her out to show its station, rising off the route first where the route is hemmed in.
+    const arrive = (index) => {
+      state.waypoint = index; state.at = "route"; anchorAt(tour.route[index]);
+      if (state.ending) { home(); return; }
+      const s = tour.show[index];
+      if (!s) { lead(); return; }
+      clearPath(3.2, 0.5);
+      if (s[0]) pushRoute(tour.route[index], s[0]);
+      push(s[1][0], s[1][1], s[1][2]);
+      show("show");
+    };
+    const back = () => {
+      const s = tour.show[state.waypoint], w = tour.route[state.waypoint];
+      clearPath(3.2, 0.5);
+      if (s[0]) pushRoute(w, s[0]);
+      pushRoute(w);
+      show("back");
+    };
     // One beat further, then one line, then the leg: NEXT on the act button and the readable pause both come here.
     const next = () => {
       if (state.phase !== "talk") return;
@@ -595,67 +823,46 @@
         if (line) { say(line); return; }
       }
       if (state.waypoint === tour.route.length - 1) end();
-      else show("walk");
+      else back();
     };
+    // A tour starts at the balcony: from the visitor's shoulder there she goes straight to the route's start; from a
+    // station she flies there and the visitor follows.
     const choose = (id) => {
-      if (!Object.hasOwn(TOURS, id) || state.phase !== "menu" || !near()) return;
+      if (!Object.hasOwn(TOURS, id) || state.phase !== "menu") return;
+      const here = state.at === "shoulder";
       tour = TOURS[id]; state.tour = id;
-      state.waypoint = 0; state.away = state.blocked = 0; state.lastEvent = null;
-      show("walk"); say(tour.follow);
+      state.waypoint = 0; state.away = 0; state.lastEvent = null; state.ending = false; state.offered = true; state.attending = false;
+      clearPath(4.5, 0.8);
+      if (!here) pushAir(state.perch, BALCONY);
+      pushRoute(tour.route[0]);
+      state.at = "air"; anchorAt(tour.route[0]);
+      show("gather"); say(here ? tour.follow : "gather");
     };
     const endTour = () => {
-      if (state.phase === "talk" || state.phase === "walk") end("cancelled");
+      if (state.tour && !state.ending) end("cancelled");
     };
-    // An open menu swallows Escape first; the cave's own Escape leaves only when no menu is up.
+    // An open menu or offer swallows Escape first; the cave's own Escape leaves only when neither is up.
     const escape = () => {
-      if (state.phase !== "menu") return false;
-      show("idle");
-      return true;
+      if (state.phase === "menu") { closeMenu(); return true; }
+      if (state.phase === "offer") { decline(); return true; }
+      return false;
     };
     const unsubscribe = feed.subscribe((e) => {
       if (e.type === "node.started" || e.type === "node.ready" || e.type === "node.stopped") {
         state.node = e.type === "node.started" ? "starting" : e.type === "node.ready" ? "ready" : "stopped";
         state.nodeReplay = e.stream === "replay"; state.nodeDemo = e.schema === DEMO; state.nodeReported = true;
       }
-      if (state.phase !== "walk" && state.phase !== "talk") return;
+      if (!state.tour || state.ending) return;
       if (!tour.events.includes(e.type)) return;
       state.lastEvent = e.type; state.replay = e.stream === "replay"; state.demo = e.schema === DEMO;
     });
-    const move = (dt, returning) => {
-      const index = returning ? state.waypoint : state.waypoint + 1, to = tour.route[index];
-      const dx = to[0] - position.x, dz = to[2] - position.z, distance = Math.hypot(dx, dz);
-      if (distance < 0.025) {
-        if (returning) {
-          if (index === 0) { show("idle"); state.tour = null; state.greeted = false; state.cooldown = 12; }
-          else state.waypoint--;
-        } else {
-          state.waypoint = index;
-          if (tour.stops[index]) talk();
-        }
-        return false;
-      }
-      const step = Math.min(distance, dt * (returning ? 3.6 : 1.65));
-      let x = position.x + dx / distance * step, z = position.z + dz / distance * step;
-      const feet = floorY, actor = visitor();
-      if (actor && Math.abs(actor.root.position.y - actor.baseY - feet) < 1.5) {
-        const p = actor.root.position, clearance = 0.45 + (actor.bodyRadius || 0.35);
-        if (Math.hypot(p.x - x, p.z - z) < clearance) {
-          // Give way sideways if the floor permits it; a narrow stair waits instead of stepping off it.
-          const side = (position.x - p.x) * -dz + (position.z - p.z) * dx >= 0 ? 1 : -1;
-          x = position.x - dz / distance * step * side;
-          z = position.z + dx / distance * step * side;
-          if (Math.hypot(p.x - x, p.z - z) <= Math.hypot(p.x - position.x, p.z - position.z)) return false;
-        }
-      }
-      if (!FM.walkable(position.x, position.z, x, z, feet, 0.3, 1.8)) {
-        state.blocked += dt;
-        if (!returning && state.blocked > 5) end("blocked");
-        return false;
-      }
-      const floor = FM.supportAt(x, z, feet);
-      yaw = Math.atan2(x - position.x, z - position.z);
-      position.x = x; position.z = z; floorY = floor; state.blocked = 0;
-      return true;
+    // A visitor out of reach of the tour: a call after a while, then she gives up.
+    const wait = (dt, limits) => {
+      if (nearSpot(6)) { state.away = 0; return; }
+      const before = state.away;
+      state.away += dt;
+      if (before < limits[0] && state.away >= limits[0]) fx.say(figure, LINES.warning, 8);
+      if (state.away >= limits[1]) end("abandoned");
     };
     const update = (dt, elapsed) => {
       // Hysteresis avoids mesh churn. Every prepared tier stays in the visit's live set.
@@ -669,94 +876,177 @@
         selectedTier = tier;
         detailed = fine;
       }
-      state.cooldown = Math.max(0, state.cooldown - dt);
       const actor = visitor();
-      if (state.phase === "idle" && !state.greeted && !state.cooldown && near(4)) greet(false);
-      if (state.phase === "greeting" || state.phase === "menu") {
-        if (!actor || !near()) show("idle");
-      }
-      if (state.phase === "talk") {
-        state.advance -= dt;
-        if (state.advance <= 0) next();
-      }
-      const touring = state.phase === "walk" || state.phase === "talk";
-      if (touring) {
-        if (!actor) end("abandoned");
-        else if (!near(6)) {
-          const before = state.away; state.away += dt;
-          if (before < 4 && state.away >= 4) fx.say(figure, LINES.warning, 8);
-          if (state.away >= 12) end("abandoned");
-        } else state.away = 0;
-      }
-      let walking = false;
-      if (state.phase === "return" || state.phase === "walk" && near(6)) {
-        // Small steps let supportAt follow every stair tread even after a slow frame.
-        let left = Math.min(dt, 0.5);
-        while (left > 0 && (state.phase === "walk" || state.phase === "return")) {
-          const step = Math.min(left, 0.04); left -= step;
-          walking = move(step, state.phase === "return") || walking;
+      switch (state.phase) {
+        case "work":
+          if (state.stage === "fly") {
+            if (steer(dt)) { state.perch = state.site; state.at = "node"; state.stage = "beam"; state.timer = 6 + Math.random() * 4; }
+            break;
+          }
+          state.attending = !!actor && nearMe(6);
+          // A visitor on the balcony gets a moment to see her at work before she notices them.
+          state.seen = !state.offered && actor && onBalcony(actor) ? state.seen + dt : 0;
+          if (state.seen > 1.6) { notice(); break; }
+          if (!state.attending && (state.timer -= dt) <= 0) {
+            if (state.stage === "beam") { state.stage = "rest"; state.timer = 0.6; }
+            else flyTo(pickSite());
+          }
+          break;
+        case "notice":
+          if (!actor || !onBalcony(actor)) { show("work"); break; }
+          if ((state.timer -= dt) <= 0) approach();
+          break;
+        case "approach":
+          if (!actor || !onBalcony(actor)) { abandonApproach(); break; }
+          shoulder();
+          path[pathCount * 3 - 3] = spot.x; path[pathCount * 3 - 2] = spot.y; path[pathCount * 3 - 1] = spot.z;
+          steer(dt);
+          if (pathAt === pathCount - 1 && Math.hypot(spot.x - position.x, spot.y - position.y, spot.z - position.z) < 0.45) offer();
+          break;
+        case "offer":
+        case "menu":
+          if (!actor || strayed(actor)) {
+            if (state.phase === "offer") decline(); else closeMenu();
+            break;
+          }
+          if (state.at === "shoulder") {
+            shoulder();
+            path[0] = spot.x; path[1] = spot.y; path[2] = spot.z;
+            steer(dt);
+          }
+          if (state.phase === "offer" && (state.timer -= dt) <= 0) decline();
+          break;
+        case "gather":
+          if (state.at === "air") {
+            if (steer(dt)) { state.at = "route"; if (state.ending) home(); }
+            break;
+          }
+          if (nearSpot(6)) {
+            if (state.spoken === "gather") say(tour.follow);
+            lead();
+          } else if (!state.ending) wait(dt, WAIT.gather);
+          break;
+        case "lead": {
+          const a = tour.route[state.waypoint], b = tour.route[state.waypoint + 1];
+          const left = Math.hypot(b[0] - position.x, b[1] + LEAD - position.y, b[2] - position.z), t = Math.min(1, Math.max(0, 1 - left / legLength));
+          state.anchor.x = position.x; state.anchor.z = position.z; state.anchor.y = a[1] + (b[1] - a[1]) * t;
+          if (!state.ending) wait(dt, WAIT.tour);
+          if (state.phase === "lead" && (state.ending || nearSpot(6)) && steer(dt)) arrive(state.waypoint + 1);
+          break;
         }
+        case "show":
+          if (!state.ending) wait(dt, WAIT.tour);
+          if (state.phase === "show" && steer(dt)) { state.at = "show"; if (state.ending) home(); else talk(); }
+          break;
+        case "talk":
+          wait(dt, WAIT.tour);
+          if (state.phase === "talk" && (state.advance -= dt) <= 0) next();
+          break;
+        case "back":
+          if (!state.ending) wait(dt, WAIT.tour);
+          if (state.phase === "back" && steer(dt)) { state.at = "route"; if (state.ending) home(); else lead(); }
+          break;
       }
-      flightY = damp(flightY, floorY + BASE, 9, dt);
-      position.y = flightY;
-      hover.position.y = Math.sin(elapsed * 1.7) * 0.018;
-      greetingT = Math.max(0, greetingT - dt); speakingT = Math.max(0, speakingT - dt);
-      // Each ring spins in its own plane while its gimbal slowly precesses about the eye. Quaternions keep
-      // three-axis turns stable; absolute scene time gives the same pose at every frame rate, without drift.
-      for (let i = 0; i < rings.length; i++) {
-        rings[i].rotation.z = (elapsed * RINGS[i].speed) % TAU;
-        quat.fromAxisAngle(orbit, 0, 1, 0, (elapsed * RINGS[i].orbit) % TAU);
-        quat.multiply(pivots[i].quaternion, orbit, orientations[i]);
-      }
-      const look = state.phase === "talk" ? tour.look[state.waypoint] : null;
-      let pitch = walking ? 0.08 : 0;
-      if (!walking && look) {
-        yaw = Math.atan2(look[0] - position.x, look[2] - position.z);
-        pitch = -Math.min(0.6, Math.max(-0.4, Math.atan2(look[1] - position.y,
-          Math.hypot(look[0] - position.x, look[2] - position.z))));
-      } else if (!walking && actor) {
+
+      // Where she looks: along her flight, at the station she works or shows, otherwise at the visitor.
+      const speed = Math.hypot(vel.x, vel.y, vel.z), cruising = speed > 0.8 && state.phase !== "offer" && state.phase !== "menu";
+      const working = state.phase === "work" && state.stage === "beam" && !state.attending;
+      let mode = 0;
+      if (working) { mode = 1; aim.x = AIM[state.site * 3]; aim.y = AIM[state.site * 3 + 1]; aim.z = AIM[state.site * 3 + 2]; }
+      else if (state.phase === "talk") { const s = tour.show[state.waypoint][2]; mode = 2; aim.x = s[0]; aim.y = s[1]; aim.z = s[2]; }
+      if (cruising) {
+        lookYaw = Math.atan2(vel.x, vel.z);
+        lookPitch = -Math.min(0.5, Math.max(-0.5, Math.atan2(vel.y, Math.hypot(vel.x, vel.z)) * 0.6));
+      } else if (mode) lookAt(aim.x, aim.y, aim.z);
+      else if (actor) {
         const p = actor.root.position;
-        yaw = Math.atan2(p.x - position.x, p.z - position.z);
-        pitch = -Math.min(0.4, Math.max(-0.4, Math.atan2(p.y - actor.baseY + 1.1 - position.y,
-          Math.hypot(p.x - position.x, p.z - position.z))));
+        lookAt(p.x, feetOf(actor) + (actor.bodyHeight || 1.2) * 0.8, p.z);
       }
-      const turnBy = Math.atan2(Math.sin(yaw - body.rotation.y), Math.cos(yaw - body.rotation.y));
+      greetingT = Math.max(0, greetingT - dt); speakingT = Math.max(0, speakingT - dt);
+      const turnBy = Math.atan2(Math.sin(lookYaw - body.rotation.y), Math.cos(lookYaw - body.rotation.y));
       body.rotation.y = (body.rotation.y + damp(0, turnBy, 8, dt)) % TAU;
-      head.rotation.x = damp(head.rotation.x, pitch + Math.sin(greetingT * 9) * greetingT * 0.05, 8, dt);
+      head.rotation.x = damp(head.rotation.x, lookPitch + Math.sin(greetingT * 9) * greetingT * 0.05, 8, dt);
       head.rotation.z = damp(head.rotation.z, Math.sin(greetingT * 7) * greetingT * 0.06
-        - (walking ? Math.max(-0.1, Math.min(0.1, turnBy * 0.12)) : 0), 6, dt);
+        - (cruising ? Math.max(-0.35, Math.min(0.35, turnBy * 0.3)) : 0), 6, dt);
+      hover.position.y = Math.sin(elapsed * 1.7) * 0.018 * SCALE;
+      // Each ring tumbles about its own diameter, at her pace: brisk in flight, busy at work, slow while she talks,
+      // and a flare when she notices someone. Quaternions keep three-axis turns stable; the angles stay bounded.
+      const pace = cruising ? 1.8 : state.phase === "offer" || state.phase === "menu" || state.phase === "talk" ? 0.5 : working ? 1.25 : 1;
+      tempo = damp(tempo, pace, 2, dt); flare = Math.max(0, flare - dt * 0.9);
+      for (let i = 0; i < rings.length; i++) {
+        const spec = RINGS[i];
+        tumbles[i] = (tumbles[i] + spec.tumble * (tempo + flare * 2.5) * dt) % TAU;
+        quat.fromAxisAngle(turnQ, spec.axis[0], spec.axis[1], spec.axis[2], tumbles[i]);
+        quat.multiply(pivots[i].quaternion, orientations[i], turnQ);
+        rings[i].rotation.z = (elapsed * spec.spin) % TAU;
+        rings[i].glow = 1 + flare * 1.6 + (working ? 0.3 + Math.sin(elapsed * 11 + i * 2) * 0.2 : 0);
+      }
       optics.position.x = damp(optics.position.x, Math.sin(turnBy) * 0.004, 9, dt);
-      optics.position.y = damp(optics.position.y, -Math.sin(pitch) * 0.004, 9, dt);
+      optics.position.y = damp(optics.position.y, -Math.sin(head.rotation.x) * 0.004, 9, dt);
       blades.rotation.z = Math.sin(elapsed * 0.4) * 0.05;
       iris.glow = 1 + Math.sin(speakingT * 18) * speakingT * 0.15;
       const blink = Math.pow(Math.max(0, Math.cos(elapsed * TAU / 7.3)), 80);
       pupil.scale.y = 1 - blink * 0.85;
+
+      // The beam, once she faces where it lands: a working one is bright, throws sparks and carries her light onto
+      // the station; a tour's is thin and soft. Her own show only: it never touches the station's lights.
+      if (mode) {
+        const yaw = body.rotation.y, pitch = head.rotation.x, cp = Math.cos(pitch);
+        const fx0 = Math.sin(yaw) * cp, fy0 = -Math.sin(pitch), fz0 = Math.cos(yaw) * cp;
+        const ex = position.x + fx0 * 0.12 * SCALE, ey = position.y + hover.position.y + fy0 * 0.12 * SCALE, ez = position.z + fz0 * 0.12 * SCALE;
+        const dx = aim.x - ex, dy = aim.y - ey, dz = aim.z - ez, length = Math.hypot(dx, dy, dz);
+        if ((fx0 * dx + fy0 * dy + fz0 * dz) / length < 0.95) mode = 0;
+        else {
+          beam.position.x = ex; beam.position.y = ey; beam.position.z = ez;
+          beam.rotation.y = Math.atan2(dx, dz); beam.rotation.x = -Math.atan2(dy, Math.hypot(dx, dz));
+          const width = mode === 1 ? 0.03 + Math.sin(elapsed * 37) * 0.006 : 0.012;
+          beam.scale.x = beam.scale.y = width; beam.scale.z = length;
+          beam.glow = mode === 1 ? 1.2 + Math.sin(elapsed * 23) * 0.2 : 0.55;
+          glint.position.x = aim.x; glint.position.y = aim.y; glint.position.z = aim.z;
+          glint.scale.x = glint.scale.y = glint.scale.z = mode === 1 ? 0.14 + Math.sin(elapsed * 29) * 0.03 : 0.06;
+          lit.x = aim.x - dx / length * 0.4; lit.y = aim.y - dy / length * 0.4; lit.z = aim.z - dz / length * 0.4;
+          litGain = 0.85 + Math.sin(elapsed * 31) * 0.15;
+          if (mode === 1 && (sparkT -= dt) <= 0) {
+            sparkT = 0.05 + Math.random() * 0.05;
+            const sparks = SPARKS();
+            fx.spawnParticle(sparks[Math.floor(Math.random() * sparks.length)], aim.x, aim.y, aim.z,
+              (Math.random() - 0.5) * 2.4, 0.6 + Math.random() * 1.6, (Math.random() - 0.5) * 2.4, 0.35 + Math.random() * 0.3, 10, 7, aim.y - 4);
+          }
+        }
+      }
+      beam.visible = glint.visible = mode > 0;
+      state.beam = mode;
+      // A faint trail of motes behind her in flight, from the shared particle pool.
+      if (speed > 1.6 && (trailT -= dt) <= 0) {
+        trailT = 0.045;
+        fx.spawnParticle(MOTE(), position.x - vel.x * 0.05 + (Math.random() - 0.5) * 0.1, position.y + hover.position.y + (Math.random() - 0.5) * 0.1,
+          position.z - vel.z * 0.05 + (Math.random() - 0.5) * 0.1, 0, 0.05, 0, 0.45, 0, 0, -100);
+      }
     };
     const act = () => {
-      if (state.phase === "walk" || state.phase === "return") return false;
+      if (!visitor()) return false;
       if (state.phase === "talk") {
-        if (!near(6)) return false;
+        if (!nearSpot(6)) return false;
         next();
         return true;
       }
-      if (!near()) return false;
-      if (state.phase === "menu") choose(TOUR_ORDER[state.selection]);
-      else greet();
-      return true;
+      if (state.phase === "menu") { choose(TOUR_ORDER[state.selection]); return true; }
+      if (state.phase === "offer" || state.phase === "work" && state.stage !== "fly" && nearMe(4)) { openMenu(); return true; }
+      return false;
     };
     // What the act button offers right now, the hub's ENTER ARCADE pattern: a label only while the act works.
     const actLabel = () => {
       if (!visitor()) return null;
-      if (state.phase === "talk") return near(6) ? "NEXT" : null;
+      if (state.phase === "talk") return nearSpot(6) ? "NEXT" : null;
       if (state.phase === "menu") return "START TOUR";
-      if (state.phase === "walk" || state.phase === "return") return null;
-      return near() ? `TALK TO ${NAME.toUpperCase()}` : null;
+      if (state.phase === "offer" || state.phase === "work" && state.stage !== "fly" && nearMe(4)) return TALK;
+      return null;
     };
     const menuKey = (e) => {
       if (state.phase !== "menu" || e.metaKey || e.ctrlKey || e.altKey) return false;
       if (e.key !== "ArrowUp" && e.key !== "ArrowDown" && e.key !== "Enter") return false;
       e.preventDefault(); e.stopImmediatePropagation();
-      if (!e.repeat && near()) {
+      if (!e.repeat) {
         if (e.key === "Enter") choose(TOUR_ORDER[state.selection]);
         else select(state.selection + (e.key === "ArrowDown" ? 1 : -1));
       }
@@ -774,7 +1064,7 @@
       window.removeEventListener("keydown", captureMenuKey, true);
       unsubscribe();
       input.remove(head);
-      removeChild(parent, body);
+      removeChild(parent, body); removeChild(parent, beam); removeChild(parent, glint);
       panel.remove(); stop.remove();
       state.lastEvent = null;
     };
@@ -785,16 +1075,24 @@
           for (const ring of tier.rings) set.add(ring);
         }
       },
-      // The light follows the eye without reading a world matrix from the previous rendered frame.
+      // Her light: on the station while she works it, otherwise her eye's small glow. It follows her without reading a
+      // world matrix from the previous rendered frame.
       light(out, offset) {
-        const yaw = body.rotation.y;
-        out[offset] = body.position.x + Math.sin(yaw) * 0.2;
-        out[offset + 1] = body.position.y + hover.position.y + 0.06;
-        out[offset + 2] = body.position.z + Math.cos(yaw) * 0.2;
-        out[offset + 3] = 0.85;
-        out[offset + 4] = 0.55 * iris.glow; out[offset + 5] = 0.32 * iris.glow; out[offset + 6] = 0.12 * iris.glow;
+        if (state.beam === 1) {
+          out[offset] = lit.x; out[offset + 1] = lit.y; out[offset + 2] = lit.z; out[offset + 3] = 3.2;
+          out[offset + 4] = litGain; out[offset + 5] = 0.58 * litGain; out[offset + 6] = 0.2 * litGain;
+        } else {
+          const yaw = body.rotation.y;
+          out[offset] = body.position.x + Math.sin(yaw) * 0.2 * SCALE;
+          out[offset + 1] = body.position.y + hover.position.y + 0.06 * SCALE;
+          out[offset + 2] = body.position.z + Math.cos(yaw) * 0.2 * SCALE;
+          out[offset + 3] = 0.85 * SCALE;
+          out[offset + 4] = 0.55 * iris.glow; out[offset + 5] = 0.32 * iris.glow; out[offset + 6] = 0.12 * iris.glow;
+        }
         out[offset + 7] = 0;
       } };
   };
-  BL.factoryGreeter = { create, LINES, TOURS, NAME };
+  // The flight's data, for the factory suite's clearance check.
+  const FLIGHT = { AIR, LEGS, WORK, LEAD, RADIUS: HEIGHT * 7 / 32 * SCALE };
+  BL.factoryGreeter = { create, LINES, TOURS, NAME, FLIGHT };
 })();
