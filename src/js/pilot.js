@@ -13,6 +13,8 @@
   const CLOSE_RATE = 12, CLOSE_SNAP = 0.001, CLOSE_PINCH_EXIT = 1.08, CLOSE_LOOK_DIST = 4;
   const AIM_ENTRY_RATE = 8, CARRY_FOCUS_TIME = 0.22;
   const OVERHEAD_TIME = 0.65, OVERHEAD_MIN = 5, OVERHEAD_ZOOM_RATE = 10, OVERHEAD_ZOOM_FAST = 18;
+  const OVERHEAD_NORTH_TIME = 0.6;
+  const overheadNorthEase = t => t * t * t * (10 + t * (-15 + 6 * t));
   const SHOT_SPREAD = 0.015, ADS_SPREAD = 0.005, SPREAD_MASS = 1 - Math.exp(-4.5);
   const TARGET_INTERVAL = 0.05, HIT_TIME = 0.16, TARGET_MARGIN = 0.035;
   const AIM_CLOSE_HIT = 0.9, AIM_SPREAD_NEAR = 6, AIM_SPREAD_MAX = 2.4;
@@ -140,6 +142,7 @@
     let overheadActive = false, overheadMix = 0, overheadExit = 0, overheadTime = 0;
     let overheadHeight = overheadDefault, overheadWanted = overheadHeight, overheadVelocity = 0, overheadYaw = 0;
     let overheadTargetYaw = 0, overheadEntryYaw = 0, overheadEntryPitch = 0, overheadEntryRadius = 0, overheadToShoulder = false, overheadNorthUp = false;
+    let overheadNorthStartYaw = 0, overheadNorthTime = 0;
     let overheadX = 0, overheadY = 0, overheadPointerMoved = false, overheadCeiling = Infinity;
     const overheadEntry = { x: 0, y: 0, z: 0 }, overheadAim = { x: 0, y: 0, z: 0 };
     const overheadRotation = quat.create(), overheadStartRotation = quat.create(), overheadViewRotation = quat.create();
@@ -224,7 +227,7 @@
     };
     let lockPending = false, aimLocked = false, softAimFocused = false, externalControl = false, externalCombat = null, unlockedAt = -Infinity;
     let savedPitch = 0, savedDist = 0, savedNear = camera.near, sightClear = null, cursorClear = null, aimSurface = null;
-    const weaponViewReady = (cave) => active && !!cave && !cave.health.stunned && !crew.sleeping && (closeWanted || !cave.camp.seat && !cave.bedTravel.mode);
+    const weaponViewReady = (cave) => active && !!cave && !cave.health.stunned && !crew.sleeping && (closeWanted || (!cave.camp.seat || cave.camp.seat.allowWeapons) && !cave.bedTravel.mode);
     const shoulderBoomPitch = (pitch) => Math.max(pitch, Math.min(0, pitch + 0.22));
     const shoulderDistance = (cave, pitch) => {
       // Keep the feet above the bottom 5% while the head stays near the
@@ -771,6 +774,7 @@
       overheadEntryPitch = Math.atan2(overheadEntry.y, Math.hypot(overheadEntry.x, overheadEntry.z));
       overheadEntryYaw = Math.hypot(overheadEntry.x, overheadEntry.z) > 1e-7 ? Math.atan2(overheadEntry.x, overheadEntry.z) : orbit.yaw;
       overheadYaw = orbit.yaw;
+      overheadNorthStartYaw = overheadYaw; overheadNorthTime = 0;
       overheadTargetYaw = overheadNorthUp
         ? overheadYaw + Math.atan2(Math.sin(-overheadYaw), Math.cos(-overheadYaw))
         : overheadYaw;
@@ -939,7 +943,17 @@
       overheadTime = Math.min(OVERHEAD_TIME, overheadTime + dt);
       const t = overheadTime / OVERHEAD_TIME;
       overheadMix = t * t * (3 - 2 * t);
-      overheadYaw = damp(overheadYaw, overheadTargetYaw, 14, dt);
+      if (overheadNorthUp) {
+        // A finite shortest-arc trajectory starts and stops with zero velocity
+        // and acceleration. Even a half turn stays below 0.25 rad per 60 Hz
+        // frame, and reaches exact north before the replay settling deadline.
+        overheadNorthTime = Math.min(OVERHEAD_NORTH_TIME, overheadNorthTime + dt);
+        overheadYaw = overheadNorthStartYaw + (overheadTargetYaw - overheadNorthStartYaw)
+          * overheadNorthEase(overheadNorthTime / OVERHEAD_NORTH_TIME);
+      } else {
+        overheadYaw = damp(overheadYaw, overheadTargetYaw, 14, dt);
+        overheadNorthStartYaw = overheadYaw; overheadNorthTime = 0;
+      }
       viewRotation(overheadRotation, 0, -1, 0, -Math.sin(overheadYaw), 0, -Math.cos(overheadYaw), overheadYaw);
       const delta = overheadHeight - overheadWanted;
       // A full-height wheel jump should not spend almost a second approaching
@@ -1076,8 +1090,12 @@
     };
     // Mouse and trackpad taps expose the same buttons. Classify the release
     // by its held duration, shared with the displayed charge and HUD button.
-    const releasePrimary = (cave, focused = null) => crew.releaseSwing(cave, false, focused,
-      !!cave && cave.weapon.meleeHeldTime < BL.crew.MELEE_TAP_TIME);
+    const releasePrimary = (cave, focused = null) => {
+      const released = crew.releaseSwing(cave, false, focused,
+        !!cave && cave.weapon.meleeHeldTime < BL.crew.MELEE_TAP_TIME);
+      if (released) syncWeaponHud();
+      return released;
+    };
     const releaseRightTap = () => {
       const now = performance.now();
       if (Number.isFinite(rightDownAt)) rightTapAt = aimView()
@@ -1172,7 +1190,7 @@
       }
     };
     const aimKey = (e) => {
-      if (externalControl || e.metaKey || e.ctrlKey || e.altKey || e.target.closest && e.target.closest("input, textarea, dialog")) return;
+      if (externalControl || e.metaKey || e.ctrlKey || e.altKey || e.target.closest && e.target.closest("input, textarea, dialog, #sheet")) return;
       // R swaps magazines whenever the AK is drawn, aimed or not: V fires it unaimed, so it empties unaimed.
       // Otherwise R stays the free camera's pitch.
       const cave = player();
@@ -1187,6 +1205,7 @@
         if (e.repeat) return;
         resumePose();
         overheadNorthUp = true;
+        overheadNorthStartYaw = overheadYaw; overheadNorthTime = 0;
         overheadPointerMoved = true;
         assistedTargetWait = 0;
         overheadTargetYaw = overheadYaw + Math.atan2(Math.sin(-overheadYaw), Math.cos(-overheadYaw));
@@ -1480,7 +1499,7 @@
     let reloadPrompt = false;
     const syncWeaponHud = () => {
       const cave = player(), weapon = cave && cave.weapon;
-      const ready = !!weapon && !crew.sleeping && !cave.camp.seat && !cave.bedTravel.mode;
+      const ready = !!weapon && !crew.sleeping && (!cave.camp.seat || cave.camp.seat.allowWeapons) && !cave.bedTravel.mode;
       const primaryReady = ready && weapon.primaryOwned;
       const secondaryReady = ready && weapon.secondaryOwned;
       if (primaryButtonCave && (primaryButtonCave !== cave || !primaryReady || !weapon.primaryEquipped)) {
@@ -1488,9 +1507,10 @@
         primaryButtonCave = null;
       }
       const reload = secondaryReady && weapon.equipped && crew.canReload(cave);
+      const meleeCharge = weapon && weapon.meleeHeld ? weapon.meleeCharge : 0;
       hud.setPrimary(primaryReady, !!weapon && !weapon.equipped, primaryReady ? cave.parts.club.geometry : null,
-        weapon ? weapon.meleeCharge : 0, !!weapon && weapon.meleeHeld,
-        weapon ? crew.meleePower(cave) : 1, !!weapon && weapon.aiming, cave ? cave.traits.name : "");
+        meleeCharge, !!weapon && weapon.meleeHeld,
+        weapon ? crew.meleePower(cave, meleeCharge) : 1, !!weapon && weapon.aiming, cave ? cave.traits.name : "");
       hud.setWeapon(secondaryReady, !!weapon && weapon.equipped, weapon ? weapon.ammo : 0, !!weapon && weapon.reloading, reload, !!weapon && weapon.unlimited);
       const count = secondaryReady && crew ? crew.magazineCount(cave) : 0, canSwap = !!crew && secondaryReady && crew.canSwapMagazine(cave);
       hud.setMagazine(count, crew ? crew.magazineAmmo(cave, 0) : 0, crew ? crew.magazineAmmo(cave, 1) : 0, canSwap,
@@ -1563,7 +1583,7 @@
         syncAim();
         if (armed() && cave.weapon.equipped) lockAim();
         if (cave.weapon.equipped) hud.hint(armed() ? "Left-click bursts · F rifle strike · zoom: tap one shot, hold for auto · 1 melee · 2 AK · scroll to change view · Space reloads or jumps / jetpacks" : "AK equipped · right-click or scroll in to aim · 1 melee · Space reloads beside the pile or jumps / jetpacks");
-        else hud.hint(armed() ? "Hold left-click to raise the club · release to strike · allow 0.2s between hits for full power · 2 AK · scroll out for navigation" : "Club equipped · right-click or scroll in to aim · 2 AK");
+        else hud.hint(armed() ? "Hold left-click to raise the club · release to strike · allow 0.2s between swings for full power · 2 AK · scroll out for navigation" : "Club equipped · right-click or scroll in to aim · 2 AK");
       } else if (action === "weapon-fire") {
         if (cave.weapon.primaryEquipped) crew.swingWeapon(cave, false, ads);
         else if (!(held ? crew.setWeaponTrigger(true, ads) : crew.fireWeapon(cave, null, ads ? 1 : undefined)) && cave.weapon.equipped && !cave.weapon.unlimited && !cave.weapon.ammo) hud.hint("Empty magazine · press Space within reach of the pile to reload");
@@ -2706,7 +2726,7 @@
       groundX = m[0] * gx + m[8] * gz + m[12]; groundZ = m[2] * gx + m[10] * gz + m[14];
       groundView += m[13]; groundTarget += m[13]; groundValid = false;
       orbit.yaw += yaw; orbit.tYaw += yaw; freeMoveYaw += yaw; lyingYaw += yaw;
-      overheadYaw += yaw; overheadTargetYaw += yaw; overheadEntryYaw += yaw; aimEntryYaw += yaw; aimBodyYaw += yaw;
+      overheadYaw += yaw; overheadTargetYaw += yaw; overheadEntryYaw += yaw; overheadNorthStartYaw += yaw; aimEntryYaw += yaw; aimBodyYaw += yaw;
       aimWeaponYaw += yaw; overheadWeaponYaw += yaw;
       quat.fromEuler(portalRotation, 0, yaw, 0);
       for (const q of portalRotations) quat.multiply(q, portalRotation, q);
@@ -2883,6 +2903,7 @@
         overheadToShoulder = false;
         overheadNorthUp = !!pose.birdsEyeNorthUp;
         overheadYaw = pose.orbit[0];
+        overheadNorthStartYaw = overheadYaw; overheadNorthTime = 0;
         overheadTargetYaw = overheadNorthUp
           ? overheadYaw + Math.atan2(Math.sin(-overheadYaw), Math.cos(-overheadYaw))
           : overheadYaw;
@@ -2971,7 +2992,7 @@
       get birdsEye() { return birdsEye(); }, get birdsEyeMix() { return camera.orthoMix || 0; }, get birdsEyeHeight() { return overheadHeight; }, get birdsEyeNorthUp() { return overheadNorthUp; },
       get birdsEyeCeiling() { return overheadCeiling; },
       get shoulderEntryMix() { return aimMix; },
-      bind, setActive, readInput, update, goPreset, navigate, transformView, enterClose, possess, release, action, modeAction, weaponAction, weaponMode, showAct, dispose, get player() {
+      bind, setActive, readInput, update, goPreset, navigate, transformView, enterClose, exitClose, possess, release, action, modeAction, weaponAction, weaponMode, showAct, dispose, get player() {
       return player();
     }, get assistedTarget() {
       if (birdsEye() && assistedTargetActive) return assistedTargetHit;
