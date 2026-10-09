@@ -1828,12 +1828,14 @@
     voiceButton.setAttribute("aria-pressed", String(voice.enabled && !voice.muted));
   };
   // The microphone's note (#181), page-level as the account line is: muted in voice, it stays until unmuted;
-  // unmuting says so for MIC_ON_MS, then it goes. `keyed` is whether M unmutes in the active scene.
+  // alone in voice (nobody here to hear, so the microphone is held off), it says so until someone comes;
+  // unmuting, or someone coming, says "Mic on" for MIC_ON_MS, then it goes. A mute outranks alone.
+  // `keyed` is whether M unmutes in the active scene.
   const MIC_ON_MS = 1500, MIC_COARSE = window.matchMedia("(pointer: coarse)").matches;
   let micShown = "", micTimer = 0;
   const showMic = (voice, keyed) => {
-    const muted = voice.muted && (voice.enabled || voice.joining);
-    const shown = muted ? keyed && !MIC_COARSE ? "Mic muted \u00b7 M to unmute" : "Mic muted \u00b7 Unmute in the panel" : voice.enabled ? "Mic on" : "";
+    const muted = voice.muted && (voice.enabled || voice.joining), alone = !muted && voice.enabled && voice.alone;
+    const shown = muted ? keyed && !MIC_COARSE ? "Mic muted \u00b7 M to unmute" : "Mic muted \u00b7 Unmute in the panel" : alone ? "Alone \u00b7 mic off" : voice.enabled ? "Mic on" : "";
     if (shown === micShown) return;
     const note = $("mic-note"), was = micShown;
     micShown = shown;
@@ -1841,7 +1843,7 @@
     micTimer = 0;
     note.textContent = shown;
     note.dataset.muted = String(muted);
-    if (muted) note.hidden = false;
+    if (muted || alone) note.hidden = false;
     else if (shown && was && !note.hidden) micTimer = window.setTimeout(() => { note.hidden = true; }, MIC_ON_MS);
     else note.hidden = true;
   };

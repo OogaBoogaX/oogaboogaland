@@ -9991,6 +9991,36 @@ const footstepChecks = BL => {
   F.dispose();
   record("footsteps: only the driven Ooga's own foot plants step, never standing, airborne, climbing, afloat or another's", rows.undriven === 0 && rows.walked === 3 && rows.stopped === 3 && rows.airborne === 3 && rows.ladder === 3 && rows.afloat === 3 && rows.otherWalks === 3 && rows.handedOver === 3 && rows.silent, JSON.stringify(rows));
 };
+// #181: alone in voice (the room lists nobody to hear) the microphone track is held off and comes back by itself
+// when someone is listed, without touching the visitor's own mute or telling the room. voice.js runs in a fixture
+// with a fake microphone, peer connection and Worker, so every state of the track is read directly.
+const voiceAloneChecks = async () => {
+  const source=readFileSync(join(root,"src/js/voice.js"),"utf8"),ops=[],netMuted=[],emits=[];
+  const track={enabled:true,stop(){}},stream={getAudioTracks:()=>[track],getTracks:()=>[track]};
+  class Pc {constructor(){this.connectionState="connected";this.iceGatheringState="complete";this.localDescription={sdp:"v=0"};}addTransceiver(){return {mid:"0"};}async createOffer(){return {};}async createAnswer(){return {};}async setLocalDescription(){}async setRemoteDescription(){}addEventListener(){}removeEventListener(){}getTransceivers(){return [];}close(){}}
+  class Audio {constructor(){this.muted=false;}pause(){}play(){return Promise.resolve();}}
+  const fetch=async(url,o)=>{const op=url.split("/").pop(),body=JSON.parse(o.body);ops.push({op,mic:track.enabled});return {ok:true,json:async()=>op==="pull"?{tracks:body.ids.map((id,i)=>({id,mid:String(i+1)}))}:{sessionDescription:{}}};};
+  const context={window:{BL:{net:{setMuted:on=>netMuted.push(on),remotes:new Map()}},setTimeout:()=>1,clearTimeout(){},setInterval:()=>1,clearInterval(){}},localStorage:{getItem:()=>null,setItem(){}},navigator:{mediaDevices:{getUserMedia:async()=>stream}},RTCPeerConnection:Pc,Audio,MediaStream:class{},fetch,Promise,JSON,Error,Map,Set,Float32Array,Math};
+  runInNewContext(source,context);
+  const V=context.window.BL.voice,settle=()=>new Promise(r=>setTimeout(r,0)),read=()=>({alone:V.stats.alone,muted:V.stats.muted,mic:track.enabled});
+  V.subscribe(st=>emits.push(st.alone));
+  const rows={};
+  await V.enable();await settle();
+  rows.joinedAlone=read();rows.joinSends=ops.map(o=>o.op+":"+o.mic).join(",");
+  V.setPeers([72],[5]);await settle();rows.oneOther=read();
+  V.setPeers([],[]);await settle();rows.aloneAgain=read();
+  V.toggle();rows.mutedAlone=read();
+  V.setPeers([72],[6]);await settle();rows.mutedWithOther=read();
+  V.setPeers([],[]);await settle();V.toggle();rows.unmutedAlone=read();
+  V.setPeers([72,73],[6,1]);await settle();rows.twoOthers=read();
+  rows.netMuted=netMuted.join(",");rows.emitted=emits.includes(true)&&emits.includes(false);
+  V.stop();rows.stopped=read();
+  const is=(r,alone,muted,mic)=>r.alone===alone&&r.muted===muted&&r.mic===mic;
+  record("voice alone: the mic is held off while the room lists nobody, back on when someone is listed, a mute stands and the room is not told",
+    is(rows.joinedAlone,true,false,false)&&rows.joinSends.split(",").every(s=>s.endsWith(":false"))&&is(rows.oneOther,false,false,true)&&is(rows.aloneAgain,true,false,false)&&
+    is(rows.mutedAlone,true,true,false)&&is(rows.mutedWithOther,false,true,false)&&is(rows.unmutedAlone,true,false,false)&&is(rows.twoOthers,false,false,true)&&
+    rows.netMuted==="false,true,false"&&rows.emitted&&!rows.stopped.alone&&!rows.stopped.muted,JSON.stringify(rows));
+};
 const exteriorEnrichmentChecks = BL => {
   const S=BL.scene,root=S.createNode(),land=BL.dsbGeography.build(),renderer={kind:"webgl2",quality:"high"},camera=S.createCamera();camera.position.y=110;
   const nature=BL.dsbNature.create({root,land,renderer,camera,weather:{state:{wind:{strength:.2}}}}),detail=BL.dsbExterior.create({root,land,nature});
@@ -11280,6 +11310,7 @@ record("character visibility source bakes: ownership wrappers share exact immuta
   if(ARGS.includes("stackchain-unit")){stackchainChecks(BL);menuShellChecks(BL);return;}
   if(ARGS.includes("dsb-menus-unit")){stackchainChecks(BL);memeFactoryChecks(BL);menuShellChecks(BL);maxisChecks(BL);rulersChecks(BL);inkChecks(BL);bigBitcoinChecks(BL);return;}
   footstepChecks(BL);
+  await voiceAloneChecks();
   exteriorEnrichmentChecks(BL);
   if(ARGS.includes("exterior-unit"))return;
   maxisChecks(BL);
