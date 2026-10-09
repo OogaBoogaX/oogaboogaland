@@ -1042,6 +1042,13 @@
       if (state.phase === "offer" || state.phase === "work" && state.stage !== "fly" && nearMe(4)) return TALK;
       return null;
     };
+    // Space acts on her when she has come to the visitor (an offer, the menu, a tour's NEXT), or within arm's reach of
+    // her at a station; otherwise it stays the visitor's own.
+    const useNear = (x, z, reach) => {
+      if (!actLabel()) return false;
+      if (state.phase === "work" && Math.hypot(x - position.x, z - position.z) > reach) return false;
+      return act();
+    };
     const menuKey = (e) => {
       if (state.phase !== "menu" || e.metaKey || e.ctrlKey || e.altKey) return false;
       if (e.key !== "ArrowUp" && e.key !== "ArrowDown" && e.key !== "Enter") return false;
@@ -1068,7 +1075,7 @@
       panel.remove(); stop.remove();
       state.lastEvent = null;
     };
-    return { root: body, state, update, greet, act, actLabel, escape, dispose,
+    return { root: body, state, update, greet, act, actLabel, useNear, escape, dispose,
       liveGeometry(set) {
         for (const tier of detailTiers) {
           for (const key of detailKeys) set.add(tier[key]);

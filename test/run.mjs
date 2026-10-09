@@ -6191,8 +6191,11 @@ const factoryGreeter = { name: "factory greeter", why: "rule: the guide notices 
     const B = __ooga, g = B.factory.greeter, s = g.state, a = B.cavemen.get("portlandhodl");
     if (B.crew.player !== a) B.pilot.possess(a);
     B.pilot.navigate({ position: { x: 0, y: 5, z: 27 }, yaw: 0, pitch: 0, dist: 6 });
-    const phases = [s.phase];
-    for (let t = 0; t < 20 && s.phase !== "offer"; t += 1 / 30) { B.advance(1 / 30, 1 / 30); if (phases[phases.length - 1] !== s.phase) phases.push(s.phase); }
+    B.advance(0.1, 1 / 30);
+    // Her own update for the waits: every stepped frame renders, and Canvas 2D renders slowly.
+    const phases = [s.phase]; let elapsed = 0;
+    for (let t = 0; t < 20 && s.phase !== "offer"; t += 1 / 30) { g.update(1 / 30, elapsed += 1 / 30); if (phases[phases.length - 1] !== s.phase) phases.push(s.phase); }
+    B.advance(1 / 30, 1 / 30);
     const p = a.root.position, q = g.root.position;
     return { phases, scene: B.scene, label: document.getElementById("act").textContent,
       gap: Math.hypot(q.x - p.x, q.z - p.z), lift: q.y - (p.y - a.baseY) };
@@ -6206,19 +6209,18 @@ const factoryGreeter = { name: "factory greeter", why: "rule: the guide notices 
   await b.key("ArrowDown");
   const selected = await b.evaluate(`__ooga.factory.greeter.state.selection`);
   await b.key("Escape");
-  // Declined, she goes back to work and stays at it while the visitor stands on the balcony. The long waits step
-  // coarsely: every stepped frame renders, and Canvas 2D renders slowly.
+  // Declined, she goes back to work and stays at it while the visitor stands on the balcony.
   const declined = await b.evaluate(`(() => {
-    const B = __ooga, s = B.factory.greeter.state, seen = new Set();
+    const B = __ooga, g = B.factory.greeter, s = g.state, seen = new Set();
     const first = { scene: B.scene, hidden: document.querySelector(".greeter-menu").hidden, phase: s.phase, said: s.spoken };
-    for (let t = 0; t < 25; t += 0.25) { B.advance(0.25, 0.25); seen.add(s.phase); }
+    for (let t = 0; t < 25; t += 0.1) { g.update(0.1, 100 + t); seen.add(s.phase); }
     return { ...first, seen: [...seen] };
   })()`);
   // The visitor walks up to her at a station near the floor instead.
   const met = await b.evaluate(`(() => {
     const B = __ooga, g = B.factory.greeter, s = g.state, a = B.crew.player, F = BL.factoryModels, names = Object.keys(BL.factoryGreeter.FLIGHT.AIR);
     const front = ["core", "forge", "switchboard", "rebalancer", "treasury", "lineC", "lineD"];
-    for (let t = 0; t < 90 && !(s.phase === "work" && s.stage !== "fly" && front.includes(names[s.site])); t += 0.2) B.advance(0.2, 0.2);
+    for (let t = 0; t < 90 && !(s.phase === "work" && s.stage !== "fly" && front.includes(names[s.site])); t += 0.1) g.update(0.1, 200 + t);
     const q = g.root.position, x = q.x + 1.2, z = q.z;
     B.pilot.navigate({ position: { x, y: F.supportAt(x, z, q.y - 0.5), z }, yaw: 0, pitch: 0, dist: 6 });
     a.root.rotation.y = Math.atan2(q.x - x, q.z - z);
@@ -6231,9 +6233,9 @@ const factoryGreeter = { name: "factory greeter", why: "rule: the guide notices 
   const started = await b.evaluate(`(() => { const s = __ooga.factory.greeter.state;
     return { phase: s.phase, tour: s.tour, said: s.spoken, stop: !document.querySelector(".greeter-stop").hidden }; })()`);
   const ended = await b.evaluate(`(() => {
-    const B = __ooga, s = B.factory.greeter.state;
+    const B = __ooga, g = B.factory.greeter, s = g.state;
     document.querySelector(".greeter-stop").click();
-    for (let t = 0; t < 40 && s.phase !== "work"; t += 0.2) B.advance(0.2, 0.2);
+    for (let t = 0; t < 40 && s.phase !== "work"; t += 0.1) g.update(0.1, 300 + t);
     return { phase: s.phase, scene: B.scene, said: s.spoken, stop: document.querySelector(".greeter-stop").hidden };
   })()`);
   record("factory greeter: she notices the visitor on the balcony and flies over to offer tours, Space opens four, arrows select, Escape declines and she keeps to her work, and walked up to at a station she starts a tour that End tour ends",
