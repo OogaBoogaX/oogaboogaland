@@ -1,7 +1,7 @@
 // Donations, simulated or real. Real mode talks to the page's API (bananapayserver, its contract in that repository's
 // docs/protocol.md): `invoice` asks it for a Lightning invoice, `note` sets the message, and `subscribe` opens its
 // socket, which pushes each donation in OBL's event shape `{ id, sats, handle, message, at }`, the pile, the
-// leaderboard and whether donations are open. Without an API the simulator plays tips now and then, as it always has,
+// leaderboard, the tally of every donation it holds with its current rate, and whether donations are open. Without an API the simulator plays tips now and then, as it always has,
 // for demos and for the suite.
 //
 // The page only ever calls its own address: its Worker passes /donations/* on to bananapayserver over a service binding
@@ -44,6 +44,10 @@
 
   // ---- real mode: the API ------------------------------------------------------------------------------------
   const isNumber = (v) => typeof v === "number" && Number.isFinite(v);
+  // A price as the API sends one: dollars a bitcoin, sats a banana, when it was fetched and whether that was the last
+  // price because a newer one could not be had.
+  const rateOf = (rate) => rate && isNumber(rate.usdPerBtc) && isNumber(rate.satsPerBanana)
+    ? { usdPerBtc: rate.usdPerBtc, satsPerBanana: rate.satsPerBanana, at: isNumber(rate.at) ? rate.at : 0, stale: !!rate.stale } : null;
   // One call to the page's own Worker: JSON in and out with the sign-in cookie. Resolves to the reply (`{}` for a
   // 204), or to `{ error }` as the API names it, `network` when it cannot be reached.
   const call = async (path, body) => {
@@ -78,7 +82,7 @@
       request: r.request,
       invoice: { id: inv.id, bolt11: inv.bolt11, expires: inv.expires },
       bananas: b && isNumber(b.exact) && isNumber(b.rounded) ? { exact: b.exact, rounded: b.rounded } : null,
-      rate: rate && isNumber(rate.usdPerBtc) && isNumber(rate.satsPerBanana) ? { usdPerBtc: rate.usdPerBtc, satsPerBanana: rate.satsPerBanana, at: isNumber(rate.at) ? rate.at : 0, stale: !!rate.stale } : null
+      rate: rateOf(rate)
     };
   };
   // Replaces the message on a request not yet paid.
@@ -87,14 +91,24 @@
   // The socket. It sends nothing (a page that does is closed), comes back with backoff, and on a reconnect asks for
   // what it missed after the last donation it played; a donation already played is skipped. `state.open` is the
   // API's last word on whether donations are open, and `state.network` the network it takes payments on, each null
-  // before it has said.
+  // before it has said. `state.tally` is its latest tally, null before the first.
   const SOCKET_MIN = 1000, SOCKET_MAX = 60000, PLAYED = 64;
-  const state = { open: null, network: null, connected: false, attempts: 0, donations: 0 };
+  const state = { open: null, network: null, connected: false, attempts: 0, donations: 0, tally: null };
   const played = new Array(PLAYED).fill(""), handlers = { donation: null, status: null, pile: null, board: null };
   let socket = null, timer = 0, backoff = SOCKET_MIN, after = "", playedAt = 0, live = false;
   const donationOf = (d) => {
     if (!d || typeof d.id !== "string" || !d.id || d.id.length > 64 || !Number.isInteger(d.sats) || d.sats <= 0 || !isNumber(d.at)) return null;
     return { id: d.id, sats: d.sats, handle: sanitize(d.handle, HANDLE_MAX), message: sanitize(d.message, MESSAGE_MAX), at: d.at };
+  };
+  // The tally: every donation the API holds, all time (`count`, `sats`, `bananas`), the latest one's sats, the last
+  // seven days in UTC hours (`[start in ms, sats, bananas]`, only hours with donations) and its current rate. A new
+  // object each time, so a reader sees a change by its identity.
+  const TALLY_HOURS = 7 * 24 + 1;
+  const tallyOf = (t) => {
+    if (!isNumber(t.count) || !isNumber(t.sats) || !isNumber(t.bananas) || !isNumber(t.last) || !Array.isArray(t.hours)) return null;
+    const hours = [];
+    for (const h of t.hours) if (hours.length < TALLY_HOURS && Array.isArray(h) && isNumber(h[0]) && isNumber(h[1]) && isNumber(h[2])) hours.push([h[0], Math.max(0, h[1]), Math.max(0, h[2])]);
+    return { count: Math.max(0, t.count), sats: Math.max(0, t.sats), bananas: Math.max(0, t.bananas), last: Math.max(0, t.last), hours, rate: rateOf(t.rate) };
   };
   const onMessage = (text) => {
     let data;
@@ -120,6 +134,9 @@
       if (handlers.pile) handlers.pile({ bananas: Math.max(0, data.bananas), eatPerHour: Math.max(0, data.eatPerHour) });
     } else if (data.type === "board" && Array.isArray(data.entries)) {
       if (handlers.board) handlers.board(data.entries.filter((e) => e && typeof e.handle === "string" && isNumber(e.bananas)).map((e) => ({ handle: sanitize(e.handle, HANDLE_MAX), bananas: e.bananas })));
+    } else if (data.type === "tally") {
+      const tally = tallyOf(data);
+      if (tally) state.tally = tally;
     }
   };
   const retry = () => {

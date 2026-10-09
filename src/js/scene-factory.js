@@ -149,7 +149,6 @@
     treasury: ["Treasury · routing fees", "The gold under the glass is the node's public capacity, visible to anyone on the Lightning network. Each forward that earns the demo node a fee sends a nugget up the belt into the crate."],
     cooker: ["Banana cooker · tips into bananas", "Every tip is cooked here: the core throws its sats across, the cooker chomps and churns, and the bananas fly out through the gate to the island."],
     kiosk: ["Donation kiosk · tip the Ooga Boogas", "Walk up and press Space, or tap it: pick an amount, pay its invoice and watch the cooker turn it into bananas.", true],
-    board: ["Banana donation board", "The tips this browser has seen, rounded and naming no one. Everyone's totals come later.", true],
     lookout: ["Watchtower · the node's signal", "The beam sweeps while the node's events are arriving. Dark means no signal: the node may be fine, but nothing is getting through."],
     study: ["Study Hall · locked", "Bananas first! The study hall opens in a later update."],
     tunnel: ["Peer tunnel", "Through here lives the peer at the other end of a line."],
@@ -821,7 +820,8 @@
       return;
     }
     s.kioskIdle.geometry = FM.kioskIdle(link, net);
-    s.boardFace.geometry = FM.boardFace(!real ? "SIMULATED · THIS BROWSER'S TIPS" : net ? `${net.toUpperCase()} TEST · THIS BROWSER'S TIPS` : "THIS BROWSER'S TIPS");
+    s.boardNote = !real ? "SIMULATED · THIS BROWSER'S TIPS" : net ? `${net.toUpperCase()} TEST · ALL DONATIONS` : "ALL DONATIONS";
+    s.boardFace.geometry = FM.boardFace(s.boardNote);
     s.net = net;
     if (s.real === real) return;
     s.real = real;
@@ -886,19 +886,67 @@
     node.back.geometry = d.back;
     node.owned = true;
   };
-  // The donations board's figures, each row a list of runs (`FM.boardValues`), repainted only when one changes; the
-  // node owns its picture and lets go of the one it replaces.
+  // The donations board's figures, each row a list of runs (`FM.boardValues`), repainted only when one changes, and
+  // whether they were; the node owns its picture and lets go of the one it replaces.
   const setFigures = (node, rows) => {
     const key = rows.map((runs) => runs.map((r) => r[0]).join("")).join("|");
-    if (node.printed === key) return;
+    if (node.printed === key) return false;
     node.printed = key;
     if (node.geometry) renderer.releaseGeometry(node.geometry);
     node.geometry = FM.boardValues(rows);
+    return true;
   };
   const sats = (n) => n.toLocaleString("en-US");
   const bananaCount = (n) => n < 1e6 ? sats(n) : gameMod.formatLarge(n);
   // A tip as the cooker's board shows it: two significant figures, then K, M and B from a thousand up.
   const rounded = (n) => { const step = 10 ** Math.max(0, Math.floor(Math.log10(n)) - 1); return gameMod.formatLarge(Math.round(n / step) * step); };
+  // Local midnight `back` days before the day of `now`, from one Date kept for it.
+  const MIDNIGHT = new Date();
+  const localMidnight = (now, back) => {
+    MIDNIGHT.setTime(now);
+    MIDNIGHT.setHours(0, 0, 0, 0);
+    MIDNIGHT.setDate(MIDNIGHT.getDate() - back);
+    return MIDNIGHT.getTime();
+  };
+  // The donations board before the API's first tally reaches a real page.
+  const NO_TALLY = [[["NO READING YET", "note"]], [["-", "note"]], [["-", "note"]], [["-", "note"]], [["-", "note"]], [["-", "note"]]];
+  // The donations board's rows. Real, the API's tally of every donation it holds, the same in every browser: its
+  // totals, today and this week counted from its UTC hours by this page's clock, its latest price for a banana (a
+  // dollar's worth of bitcoin) and the latest donation's sats. Simulated, this browser's tips (the game's tally).
+  // Rounded either way, naming no one and no time.
+  const boardRows = () => {
+    if (!donations.real) {
+      const g = game.state, [todaySats, todayBananas] = game.tipsWithin(1), [weekSats, weekBananas] = game.tipsWithin(7);
+      return [
+        [[rounded(g.totalSats), "big"], [" SATS", "unit"]],
+        [[bananaCount(g.bananas), "big"]],
+        [[rounded(todaySats), "big"], [" SATS", "unit"], [` (${bananaCount(todayBananas)}`, "note"], ["", "banana"], [")", "note"]],
+        [[rounded(weekSats), "big"], [" SATS", "unit"], [` (${bananaCount(weekBananas)}`, "note"], ["", "banana"], [")", "note"]],
+        [[String(gameMod.SATS_PER_BANANA), "big"], [" SATS = 1", "unit"], ["", "banana"]],
+        g.lastTip ? [[rounded(g.lastTip), "big"], [" SATS", "unit"]] : [["NONE YET", "note"]]
+      ];
+    }
+    const t = donations.state.tally;
+    if (!t) return NO_TALLY;
+    const now = Date.now(), today = localMidnight(now, 0), week = localMidnight(now, 6), rate = t.rate;
+    let todaySats = 0, todayBananas = 0, weekSats = 0, weekBananas = 0;
+    for (const [at, hourSats, hourBananas] of t.hours) {
+      if (at < week) continue;
+      weekSats += hourSats;
+      weekBananas += hourBananas;
+      if (at >= today) { todaySats += hourSats; todayBananas += hourBananas; }
+    }
+    const price = rate ? [[sats(Math.round(rate.satsPerBanana)), "big"], [" SATS = 1", "unit"], ["", "banana"]] : [["NO PRICE YET", "note"]];
+    if (rate && rate.stale) price.push([" (LAST KNOWN)", "note"]);
+    return [
+      [[rounded(t.sats), "big"], [" SATS", "unit"]],
+      [[bananaCount(Math.round(t.bananas)), "big"]],
+      [[rounded(todaySats), "big"], [" SATS", "unit"], [` (${bananaCount(Math.round(todayBananas))}`, "note"], ["", "banana"], [")", "note"]],
+      [[rounded(weekSats), "big"], [" SATS", "unit"], [` (${bananaCount(Math.round(weekBananas))}`, "note"], ["", "banana"], [")", "note"]],
+      price,
+      t.last ? [[rounded(t.last), "big"], [" SATS", "unit"]] : [["NONE YET", "note"]]
+    ];
+  };
   const refreshBoards = (s) => {
     const r = feed.reading, signal = feed.signal;
     setBoard(s.lookoutLabel, "WATCHTOWER\nOUTPOST", signal === "live" ? (r.stream === "replay" ? "(Catching Up)" : "(Signal: Live)") : signal === "silent" ? "(No Signal)" : "(Waiting)", true);
@@ -917,17 +965,17 @@
     // The cooker's board counts what it has cooked on this page, rounded, and never names a donor or a time.
     const c = shared.cooker;
     setData(s.cookBoard, !donations.real ? "DONATIONS (SIMULATED)" : donations.testNetwork ? "DONATIONS (TEST)" : "DONATIONS", [["Tips cooked", gameMod.formatLarge(c.tips), "count"], ["Bananas out", gameMod.formatLarge(c.bananas), "ok"], ["Last tip", c.last ? `${rounded(c.last)} sats` : "None yet", "sats"]], 1.9);
-    // The donations board: this browser's tips (the game's tally), rounded and naming no one or no time, until the
-    // backend counts everyone's.
-    const g = game.state, [todaySats, todayBananas] = game.tipsWithin(1), [weekSats, weekBananas] = game.tipsWithin(7);
-    if (s.corner) setFigures(s.boardValues, [
-      [[rounded(g.totalSats), "big"], [" SATS", "unit"]],
-      [[bananaCount(g.bananas), "big"]],
-      [[rounded(todaySats), "big"], [" SATS", "unit"], [` (${bananaCount(todayBananas)}`, "note"], ["", "banana"], [")", "note"]],
-      [[rounded(weekSats), "big"], [" SATS", "unit"], [` (${bananaCount(weekBananas)}`, "note"], ["", "banana"], [")", "note"]],
-      [[String(gameMod.SATS_PER_BANANA), "big"], [" SATS = 1", "unit"], ["", "banana"]],
-      g.lastTip ? [[rounded(g.lastTip), "big"], [" SATS", "unit"]] : [["NONE YET", "note"]]
-    ]);
+    // The donations board, on the wall and, when its figures or its face change, in the board dialog's picture.
+    if (s.corner) {
+      const rows = boardRows(), view = s.boardView;
+      if (setFigures(s.boardValues, rows) || view.painted !== s.boardNote) {
+        view.painted = s.boardNote;
+        view.note = donations.real ? "Every donation bananapayserver holds, the same in every browser. A banana is a dollar's worth of bitcoin at its latest price."
+          : "The tips this browser has seen, simulated. Each browser counts its own.";
+        FM.paintBoard(view.canvas, s.boardNote, rows);
+        view.version++;
+      }
+    }
     // The core names what it is: a demo node on simulated events, until a real node publishes.
     setBoard(s.coreLabel, "NODE CORE", r.node === "stopped" ? "(Node Stopped)" : r.contract === BL.factoryFeed.DEMO ? "(Demo Node, Simulated)" : "(Your LN Node)", true, { height: 1.6 });
   };
@@ -1172,6 +1220,9 @@
       s.boardValues = createNode({ position: { x: BD.values[0], y: BD.values[1], z: BD.values[2] } });
       addChild(s.boardFace, s.boardValues);
       addChild(boardNode, boardBody, createNode({ geometry: board.iron }), createNode({ geometry: board.trim }), createNode({ geometry: board.glow }), s.boardFace);
+      // The board as the board dialog shows it, one picture of its face and figures that `refreshBoards` paints.
+      s.boardView = { title: "Banana Donation Board", help: "", canvas: document.createElement("canvas"), count: 1, index: 0, version: 0,
+        caption: "Banana Donation Board", note: "", painted: null, wide: true, go() {} };
       s.glassCorners = [];
       for (const [u, v] of [[-1, 1], [1, 1], [-1, -1], [1, -1]]) for (let i = 0; i < 3; i++) s.glassCorners.push(G.at[i] + G.right[i] * u * G.w / 2 + G.up[i] * v * G.h / 2);
     }
@@ -1448,6 +1499,7 @@
     });
     const tipFor = (hit) => {
       const o = hit.owner, tip = TIPS[o.kind];
+      if (o.kind === "board") return COARSE ? "Banana donation board · tap to read it" : "Banana donation board · click to read it";
       if (o.kind === "greeter") return COARSE ? `${BL.factoryGreeter.NAME} the guide · tap to talk` : `${BL.factoryGreeter.NAME} the guide · Space to talk`;
       if (o.kind === "line" || o.kind === "tunnel") {
         const b = o.place, c = b.line && mock.snapshot.channels.find((ch) => ch.id === b.line);
@@ -1472,6 +1524,7 @@
         const o = hit.owner;
         if (o.kind === "exit") return leaveCave();
         if (o.kind === "kiosk") return openBooth(scene);
+        if (o.kind === "board") return hud.openBoard(scene.boardView);
         if (o.kind === "greeter") return greeter.greet();
         if (o.preset) pilot.goPreset(o.preset);
         // The kiosk's and the board's words own up to simulated or test payments, asked now: the page's Worker can turn
@@ -1992,6 +2045,7 @@
     else if (actPrompt) { actPrompt = false; pilot.showAct(); }
     stepTweens(dt);
     fx.update(dt, elapsed);
+    hud.updateBoard(elapsed);
   };
   // Over the frame: the other players' names, then the kiosk's flow on its glass.
   const drawExtra = (ctx2d, project) => {
@@ -2031,6 +2085,7 @@
     while (root.children.length) removeChild(root, root.children[root.children.length - 1]);
     const count = input.targetCount;
     input.dispose();
+    hud.closeBoard();
     hud.dispose();
     scene = shared = feed = mock = hud = hooks = input = pilot = fx = agentPlay = dust = people = avatar = playerWorld = null;
     factoryScene.input = factoryScene.debug = null;

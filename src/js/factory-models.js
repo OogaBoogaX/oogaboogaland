@@ -2138,15 +2138,20 @@
   const boardFaces = new Map();
   const boardFace = (note) => boardFaces.get(note) || boardFaces.set(note, paintBoardFace(note)).get(note);
   const paintBoardFace = (note) => {
-    const { w: W, h: H, px: P } = BOARD_FACE, canvas = document.createElement("canvas"), g = canvas.getContext("2d");
+    const { w: W, h: H, px: P } = BOARD_FACE, canvas = document.createElement("canvas");
     canvas.width = W * P;
     canvas.height = H * P;
-    const cw = canvas.width;
+    drawBoardFace(canvas.getContext("2d"), note);
+    return noShadow(picture(canvas, W, H, 0));
+  };
+  // The face at its full size from the top left of `g`: the slate, the title, the rows' icons and labels, the note.
+  const drawBoardFace = (g, note) => {
+    const cw = BOARD_FACE.w * BOARD_FACE.px, ch = BOARD_FACE.h * BOARD_FACE.px;
     g.fillStyle = BOARD_INK.slate;
-    g.fillRect(0, 0, cw, canvas.height);
+    g.fillRect(0, 0, cw, ch);
     g.strokeStyle = "#3d2b1b";
     g.lineWidth = 6;
-    g.strokeRect(9, 9, cw - 18, canvas.height - 18);
+    g.strokeRect(9, 9, cw - 18, ch - 18);
     g.fillStyle = "#0e0a07";
     g.fillRect(14, 14, cw - 28, 104);
     g.fillStyle = "rgba(196,140,52,0.55)";
@@ -2175,14 +2180,19 @@
     g.font = `500 24px ${BOARD_FONT}`;
     g.fillStyle = BOARD_INK.dim;
     g.fillText(note, cw - 60, 718);
-    return noShadow(picture(canvas, W, H, 0));
   };
   // The board's figures for its right-hand column, each row of `values` a list of [text, kind] runs ("big" or "unit"
   // in gold, "note" in white, "banana" the icon), set on its label's line and shrunk to fit the column if need be.
   const boardValues = (values) => {
-    const V = BOARD_VALUES, P = BOARD_FACE.px, canvas = document.createElement("canvas"), g = canvas.getContext("2d");
+    const V = BOARD_VALUES, P = BOARD_FACE.px, canvas = document.createElement("canvas");
     canvas.width = V.w;
     canvas.height = V.h;
+    drawBoardValues(canvas.getContext("2d"), values);
+    return noShadow(picture(canvas, V.w / P, V.h / P, 0));
+  };
+  // The figures' column from the top left of `g`, `BOARD_VALUES` in size.
+  const drawBoardValues = (g, values) => {
+    const V = BOARD_VALUES;
     g.fillStyle = BOARD_INK.slate;
     g.fillRect(0, 0, V.w, V.h);
     g.fillStyle = BOARD_INK.rule;
@@ -2219,7 +2229,17 @@
         x += g.measureText(text).width;
       }
     });
-    return noShadow(picture(canvas, V.w / P, V.h / P, 0));
+  };
+  // The whole board on `canvas` for the board dialog: the face with `note`, then the figures in their column.
+  const paintBoard = (canvas, note, values) => {
+    const w = BOARD_FACE.w * BOARD_FACE.px, h = BOARD_FACE.h * BOARD_FACE.px;
+    if (canvas.width !== w || canvas.height !== h) { canvas.width = w; canvas.height = h; }
+    const g = canvas.getContext("2d");
+    drawBoardFace(g, note);
+    g.save();
+    g.translate(BOARD_VALUES.x, BOARD_VALUES.y);
+    drawBoardValues(g, values);
+    g.restore();
   };
   const donationBoard = cached(() => {
     const v = makeVox(), rand = mulberry32(57), iron = [], glow = [], round = [], flat = [];
@@ -3466,7 +3486,7 @@
     forgeSign, forgeWave, forgeLines, forgeTrack, forgeShafts, mintCoin, COILS, teslaCoil, banner, statusLantern, peerPipes, peerMirrors, TUNNEL_SIGN, TUNNEL_POST, EXIT_Z, CONDUIT_SAMPLES, TUNNEL_THEMES, STEP, supportAt, stairCeilingAt, clearAt, walkable, resolveFall,
     hall, scaffold, coreBody, coreChamber, conduits, sat, satFailed, stationFrame, capacitor, forge, forgeFire, cart,
     switchboard, switchScreens, REB, TRE, rebalancerBase, rebalancerRing, rebalancerFlow, treasuryBody, goldPile, hopperFill, beltNugget, goldCrate, dataBoard, moveBoard,
-    COOK, KIOSK, donationCorner, cookerBody, cookerFixtures, cookerLid, cookerPort, cookerGear, cookerSats, donationKiosk, kioskScreen, kioskIdle, kioskThanks, BOARD, donationBoard, boardFace, boardValues, satCube, flyingBanana, coreRingLime,
+    COOK, KIOSK, donationCorner, cookerBody, cookerFixtures, cookerLid, cookerPort, cookerGear, cookerSats, donationKiosk, kioskScreen, kioskIdle, kioskThanks, BOARD, donationBoard, boardFace, boardValues, paintBoard, satCube, flyingBanana, coreRingLime,
     coreRing, teslaArcs, lookoutTower, lookoutLamp, lookoutOptics, lookoutBeam, LOOKOUT_BEAM, STUDY, studyHall, studyNote, studyBoard, tunnels, galleryStation, galleryCaps, label, lanterns, hardHat, hubTunnel, hubWindow, bakeWindow, windowLights, exitTunnel, outsideView,
     beam, moved, turnedY, smoothBolt, smoothBitcoin
   };
