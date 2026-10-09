@@ -2,6 +2,7 @@
 // on every change under src/. Everything outside `/src/` is the staged site as GitHub Pages serves it, so
 // /rally answers from rally.html and an unknown path from 404.html; `/src/` is the unbundled source tree,
 // which gives DevTools real file names while the same flags apply to both.
+import { previewResponse } from "./preview-response.mjs";
 import { spawn } from "node:child_process";
 import { existsSync, readFileSync, statSync, watch } from "node:fs";
 import { createServer } from "node:http";
@@ -68,9 +69,11 @@ function send(res, status, body, type) {
   res.end(body);
 }
 
-function serveFile(res, path) {
+function serveFile(req, res, path) {
   if (!existsSync(path) || !statSync(path).isFile()) return send(res, 404, "not found");
-  send(res, 200, readFileSync(path), TYPES[extname(path)] || "application/octet-stream");
+  const extension = extname(path), response = previewResponse(readFileSync(path), TYPES[extension] || "application/octet-stream", req, extension === ".mp4" || extension === ".webm");
+  res.writeHead(response.status, response.headers);
+  res.end(response.body);
 }
 
 const server = createServer((req, res) => {
@@ -81,17 +84,17 @@ const server = createServer((req, res) => {
   } catch {
     return send(res, 400, "bad request");
   }
-  if (pathname === "/") return serveFile(res, join(site, "index.html"));
-  if (pathname === "/src" || pathname === "/src/") return serveFile(res, join(src, "index.html"));
+  if (pathname === "/") return serveFile(req, res, join(site, "index.html"));
+  if (pathname === "/src" || pathname === "/src/") return serveFile(req, res, join(src, "index.html"));
   if (pathname.startsWith("/src/")) {
     // Resolve inside src/ only; a normalized path that escapes it is refused.
     const file = normalize(join(src, pathname.slice("/src/".length)));
     if (!file.startsWith(src + sep)) return send(res, 403, "forbidden");
-    return serveFile(res, file);
+    return serveFile(req, res, file);
   }
   const file = normalize(join(site, pathname));
   if (!file.startsWith(site + sep)) return send(res, 403, "forbidden");
-  for (const candidate of [file, `${file}.html`]) if (existsSync(candidate) && statSync(candidate).isFile()) return serveFile(res, candidate);
+  for (const candidate of [file, `${file}.html`]) if (existsSync(candidate) && statSync(candidate).isFile()) return serveFile(req, res, candidate);
   send(res, 404, readFileSync(join(site, "404.html")), TYPES[".html"]);
 });
 

@@ -11255,7 +11255,22 @@ const studioSessionProof = async () => {
   return {initial,connecting,listening,audible,micErrorKeepsSound,pendingPreviewRelease,previewReleaseDisabledForPublication,blocked,forbidden,discussion,rejection,stale,nextCommand,catalogueSwap,qaWaiting,invitationConsent,finishQuestion,orderedQueue,buffering,bufferingClears,metadataRecovery,latestSourceSeek,onePendingSeek,latestSeekWaits,latestSeekAfterSettlement,seekSettles,staleMetadataIgnored,disconnected,cleaned,disposed:panel.removed&&calls.unsub===3&&body.children.length===1&&video.loads>=4};
 };
 
+const studioPreviewRangeProof = async () => {
+  const {previewResponse}=await import("../scripts/preview-response.mjs"),body=Buffer.from("0123456789"),get=range=>previewResponse(body,"video/mp4",{headers:{range}},true);
+  const bounded=get("bytes=2-4"),open=get("bytes=7-"),suffix=get("bytes=-3"),clipped=get("bytes=8-99"),whole=get(),head=previewResponse(body,"video/mp4",{method:"HEAD",headers:{range:"bytes=2-4"}},true);
+  return {bounded:bounded.status===206&&bounded.body.toString()==="234"&&bounded.headers["Content-Range"]==="bytes 2-4/10"&&bounded.headers["Content-Length"]===3,
+    open:open.status===206&&open.body.toString()==="789",suffix:suffix.status===206&&suffix.body.toString()==="789",clipped:clipped.body.toString()==="89",whole:whole.status===200&&whole.body===body&&whole.headers["Accept-Ranges"]==="bytes",
+    head:head.status===200&&head.body===undefined&&head.headers["Content-Length"]===10,
+    unsatisfiable:["bytes=10-","bytes=-0"].every(r=>get(r).status===416&&get(r).headers["Content-Range"]==="bytes */10"&&get(r).body.length===0),
+    ignored:["bytes=5-2","bytes=1-2,4-5","nonsense","bytes=-","bytes=9007199254740992-"].every(r=>get(r).status===200),
+    conditional:previewResponse(body,"video/mp4",{headers:{range:"bytes=2-4","if-range":"unvalidated"}},true).status===200,
+    ordinary:previewResponse(body,"text/html",{headers:{range:"bytes=2-4"}},false).status===200,
+    empty:previewResponse(Buffer.alloc(0),"video/mp4",{headers:{range:"bytes=0-"}},true).status===416};
+};
+
 const unitChecks = async () => {
+  const previewRange=await studioPreviewRangeProof();
+  record("Studio preview: local media single-byte ranges, HEAD, bounds and ignored unsupported requests",Object.values(previewRange).every(Boolean),JSON.stringify(previewRange));
   const videoSecurity=await studioVideoSecurityProof();
   record("Studio video: forbidden dynamic uploads release textures and render fallback once per source; valid retries and static/error contracts remain intact",Object.values(videoSecurity).every(Boolean),JSON.stringify(videoSecurity));
   const catalogue=await studioCatalogueProof();
