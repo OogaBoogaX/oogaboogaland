@@ -6044,8 +6044,10 @@
       // an unsupported gorilla falls now instead of waiting at the old height.
       const liveFloor = support(e, p.x, p.z, p.y, PROP_STEP);
       const centerFloor = pointSupportAt(p.x, p.z, p.y + 0.1);
+      // Blended short-prop support can sit below the point top. Falling in
+      // place would land on that same blend every frame and prevent departure.
       if (!e.jump.active && !e.fire.rolling && Number.isFinite(liveFloor)
-        && (liveFloor < p.y - STEP || centerFloor < p.y - STEP && p.y - liveFloor <= STEP)
+        && (liveFloor < p.y - STEP || centerFloor < p.y - STEP && p.y - liveFloor <= STEP && !raisedSupport(e))
         && beginSupportFall(e, p.x, p.z, e.heading, 0, 0)) {
         updateDriven(e, dt); poseEntry(e, dt, beforeX, beforeY, beforeZ); return;
       }
