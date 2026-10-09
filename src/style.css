@@ -7947,3 +7947,9 @@ body.dsb-menu-open :is(.bottom-hud,.top-hud,#joy-move,#joy-look,#act,.weapon-hud
 .studio-session label { display:block; margin:.65rem 0; }
 .studio-session input[type=range] { width:100%; }
 .studio-session [data-error] { color:#ffc878; }
+.studio-session details { margin:.8rem 0; padding:.65rem; border:1px solid var(--border); border-radius:.4rem; }
+.studio-session summary { cursor:pointer; }
+.studio-session meter { display:block; width:100%; height:1rem; }
+.studio-session [data-audio],.studio-session [data-mic-reason],.studio-session [data-playback] { font-size:.9rem; }
+.studio-session [data-transcript] { line-height:1.5; }
+.studio-session select { max-width:100%; }

@@ -21,7 +21,7 @@ import {
   NPC_FRAME_MAX, NPC_HZ, OUTSIDE, HP_HZ, VOICE_TRACK, castIndex, electHost, npcFollowers, claimRefusal, parseClientMessage, playerFromHeaders, spawnPoint, takeToken, voicePeers,
 } from "./protocol.js";
 import { sfuClient } from "./sfu.js";
-import { STUDIO_ZONE, studioState, studioHostAllowed, studioCanSpeak, studioPosition, studioSeatAllowed } from "./studio-policy.js";
+import { STUDIO_ZONE, studioState, studioHostAllowed, studioCanSpeak, studioPosition, studioSeatAllowed, studioSource } from "./studio-policy.js";
 import CAST_ROWS from "./characters.gen.json";
 
 const CAST = castIndex(CAST_ROWS);
@@ -45,10 +45,15 @@ export class Room extends DurableObject {
     this.loopEpoch = 0;
     ctx.blockConcurrencyWhile(async () => {
       this.studio = (await ctx.storage.get("studio")) || this.studio;
+      if (!studioSource(this.studio.source)) { this.studio.source = studioState().source; this.studio.position = 0; this.studio.playing = false; this.studio.at = Date.now(); this.studio.revision++; await ctx.storage.put("studio", this.studio); }
+      this.studio.position = studioPosition(this.studio, this.studio.at);
+      const seated = id => { const p = this.players.get(id); return !!p && p.zone === STUDIO_ZONE && !!p.body && Number.isInteger(p.studioSeat) && !p.studioRevoked && !(this.studio.restrictedIds || []).includes(id); };
+      this.studio.hands = [...new Set((Array.isArray(this.studio.hands) ? this.studio.hands : []).filter(seated))].slice(0, MAX_PLAYERS);
+      this.studio.invited = this.studio.mode === "qa" ? [...new Set((Array.isArray(this.studio.invited) ? this.studio.invited : []).filter(seated))].slice(0, MAX_PLAYERS) : [];
       this.cleanupJobs = (await ctx.storage.get("voiceCleanup")) || [];
       this.loopEpoch = (await ctx.storage.get("loopEpoch")) || Date.now();
       await ctx.storage.put("loopEpoch", this.loopEpoch);
-      if (this.studio.hostId && (!this.players.has(this.studio.hostId) || this.players.get(this.studio.hostId).zone !== STUDIO_ZONE)) this.suspendStudio();
+      if (this.studio.hostId && (!this.players.has(this.studio.hostId) || this.players.get(this.studio.hostId).zone !== STUDIO_ZONE || !studioHostAllowed(env, this.studio.hostId))) this.suspendStudio();
       await this.retryCleanup();
     });
     // A woken room rebuilds its roster from the attachments its sockets carry.
@@ -148,7 +153,7 @@ export class Room extends DurableObject {
     } else if (msg.t === "pose") {
       if (!takeToken(p.bucket, MOVE_HZ, p.seenAt)) return;
       p.x = msg.x; p.y = msg.y; p.z = msg.z; p.yaw = msg.yaw;
-      if (Number.isInteger(p.studioSeat) && !studioSeatAllowed(p, p.studioSeat, this.players.values())) { delete p.studioSeat; this.studio.revision++; this.persistStudio(); this.enforceStudio(); }
+      if (Number.isInteger(p.studioSeat) && !studioSeatAllowed(p, p.studioSeat, this.players.values())) { delete p.studioSeat; this.removeStudioSpeaker(p.id); this.studio.revision++; this.persistStudio(); this.enforceStudio(); }
       this.dirty = true;
       this.scheduleFlush();
     } else if (msg.t === "hub") {
@@ -335,6 +340,7 @@ export class Room extends DurableObject {
     const voice = p.voice;
     let generation = voice.version || 0;
     const current = () => this.players.get(p.id) === p && p.voice === voice && (voice.version || 0) === generation;
+    if (this.studio && this.studio.hostId && !studioHostAllowed(this.env, this.studio.hostId)) this.suspendStudio();
     const mayPublish = () => p.zone !== STUDIO_ZONE || studioCanSpeak(this.studio, p);
     try {
       if (op === "session") {
@@ -452,7 +458,7 @@ export class Room extends DurableObject {
   sendStudio(p) {
     if (!this.studio) return;
     const seats = [...this.players.values()].filter(q => q.zone === STUDIO_ZONE && Number.isInteger(q.studioSeat)).map(q => ({ id: q.id, seat: q.studioSeat }));
-    this.send(p.ws, { t: "studio-state", state: { ...this.studio, cleanupPending: !!(this.cleanupJobs && this.cleanupJobs.length), seats, allowedHost: studioHostAllowed(this.env, p.id), canSpeak: studioCanSpeak(this.studio, p) } });
+    this.send(p.ws, { t: "studio-state", state: { ...this.studio, duration: (studioSource(this.studio.source) || {}).duration || 0, cleanupPending: !!(this.cleanupJobs && this.cleanupJobs.length), seats, allowedHost: studioHostAllowed(this.env, p.id), canSpeak: studioCanSpeak(this.studio, p) } });
   }
 
   persistStudio() {
@@ -464,16 +470,22 @@ export class Room extends DurableObject {
     this.studio.position = studioPosition(this.studio, Date.now());
     this.studio.at = Date.now(); this.studio.playing = false;
     this.studio.hostId = 0; this.studio.mode = "suspended";
+    this.studio.hands = []; this.studio.invited = [];
     this.studio.epoch++; this.studio.revision++;
     this.persistStudio();
     this.enforceStudio();
   }
 
   leaveStudio(p) {
-    if (!this.studio || (!Number.isInteger(p.studioSeat) && !p.studioRevoked && this.studio.hostId !== p.id)) return;
-    delete p.studioSeat; p.studioRevoked = false;
+    if (!this.studio || (!Number.isInteger(p.studioSeat) && !p.studioRevoked && this.studio.hostId !== p.id && !(this.studio.hands || []).includes(p.id) && !(this.studio.invited || []).includes(p.id))) return;
+    delete p.studioSeat; p.studioRevoked = false; this.removeStudioSpeaker(p.id);
     if (this.studio.hostId === p.id) this.suspendStudio();
     else { this.studio.revision++; this.persistStudio(); this.enforceStudio(); }
+  }
+
+  removeStudioSpeaker(id) {
+    this.studio.hands = (this.studio.hands || []).filter(value => value !== id);
+    this.studio.invited = (this.studio.invited || []).filter(value => value !== id);
   }
 
   studioCommand(p, msg) {
@@ -491,36 +503,51 @@ export class Room extends DurableObject {
     if (p.zone !== STUDIO_ZONE) return reply("Enter the Studio first");
     if (msg.revision !== undefined && msg.revision !== s.revision) return reply("Studio state changed; try again");
     const host = p.id === s.hostId;
+    if (host && !studioHostAllowed(this.env, p.id)) { this.suspendStudio(); return reply("Studio hosting is disabled for this account"); }
     if (msg.action === "seat") {
       if (!studioSeatAllowed(p, msg.seat, this.players.values())) return reply("Seat unavailable or too far away");
       p.studioSeat = msg.seat;
-    } else if (msg.action === "stand") delete p.studioSeat;
+    } else if (msg.action === "stand") { delete p.studioSeat; this.removeStudioSpeaker(p.id); }
+    else if (msg.action === "raise") {
+      if (s.mode !== "qa" || !p.body || !Number.isInteger(p.studioSeat) || p.studioRevoked || (s.restrictedIds || []).includes(p.id) || host) return reply("Only an unrestricted seated attendee may raise a hand during Q&A");
+      if (!(s.invited || []).includes(p.id)) s.hands = [...new Set((s.hands || []).concat(p.id))];
+    } else if (msg.action === "lower") this.removeStudioSpeaker(p.id);
     else if (msg.action === "claim") {
       if (!studioHostAllowed(this.env, p.id) || (s.hostId && !host)) return reply("An approved host must claim an available session");
-      s.hostId = p.id; s.mode = "discussion"; s.epoch++; s.restrictedIds = []; p.studioRevoked = false;
+      s.hostId = p.id; s.mode = "discussion"; s.epoch++; s.restrictedIds = []; s.hands = []; s.invited = []; p.studioRevoked = false;
     } else {
       if (!host) return reply("Only the Studio host may do that");
       s.position = studioPosition(s, Date.now()); s.at = Date.now();
       if (msg.action === "release") { this.suspendStudio(); return reply(); }
-      if (msg.action === "mode") s.mode = msg.mode;
-      if (msg.action === "play") { s.playing = true; if (s.position >= 12) s.position = 0; }
+      if (msg.action === "mode") { s.mode = msg.mode; s.hands = []; s.invited = []; }
+      if (msg.action === "play") { const source = studioSource(s.source); if (!source) return reply("Select a reviewed Studio video first"); s.playing = true; if (s.position >= source.duration) s.position = 0; }
       if (msg.action === "pause") s.playing = false;
-      if (msg.action === "seek") s.position = msg.position;
+      if (msg.action === "seek") { const source = studioSource(s.source); if (!source || msg.position > source.duration) return reply("Position exceeds the selected video"); s.position = msg.position; }
       if (msg.action === "volume") s.volume = msg.volume;
-      if (msg.action === "source") { s.source = "sample"; s.position = 0; s.playing = false; }
+      if (msg.action === "source") { if (!studioSource(msg.source)) return reply("Choose a reviewed Studio video"); s.source = msg.source; s.position = 0; s.playing = false; }
       if (msg.action === "transfer") {
         const q = this.players.get(msg.id);
-        if (!q || q.zone !== STUDIO_ZONE || !studioHostAllowed(this.env, q.id)) return reply("Choose an approved host inside the Studio");
+        if (!q || q.zone !== STUDIO_ZONE || !studioHostAllowed(this.env, q.id) || q.studioRevoked || (s.restrictedIds || []).includes(q.id)) return reply("Choose an unrestricted approved host inside the Studio; restore speaking first if needed");
         this.background(this.clearVoiceKind(p, "pub")); this.background(this.clearVoiceKind(q, "pub"));
         this.send(p.ws, { t: "studio-mic-revoked" }); this.send(q.ws, { t: "studio-mic-revoked" });
-        s.hostId = q.id; q.studioRevoked = false; s.epoch++; s.playing = false;
+        s.hostId = q.id; q.studioRevoked = false; s.epoch++; s.playing = false; s.hands = []; s.invited = [];
+      }
+      if (msg.action === "invite") {
+        const q = this.players.get(msg.id);
+        if (s.mode !== "qa" || !q || q === p || q.zone !== STUDIO_ZONE || !q.body || !Number.isInteger(q.studioSeat) || q.studioRevoked || (s.restrictedIds || []).includes(q.id) || !(s.hands || []).includes(q.id)) return reply("Invite an unrestricted seated attendee from the Q&A queue");
+        s.hands = s.hands.filter(id => id !== q.id); s.invited = [...new Set((s.invited || []).concat(q.id))];
+      }
+      if (msg.action === "restore") {
+        const q = this.players.get(msg.id);
+        if (!q || q === p || q.zone !== STUDIO_ZONE) return reply("Choose an attendee inside the Studio");
+        s.restrictedIds = (s.restrictedIds || []).filter(id => id !== q.id); q.studioRevoked = false; q.ws.serializeAttachment(this.attachment(q));
       }
       if (msg.action === "revoke") {
         const q = this.players.get(msg.id);
         if (!q || q === p || q.zone !== STUDIO_ZONE) return reply("Choose an attendee inside the Studio");
         if ((s.restrictedIds || []).length >= 64 && !s.restrictedIds.includes(q.id)) return reply("Session moderation limit reached; release and reclaim to start a new session");
         s.restrictedIds = [...new Set((s.restrictedIds || []).concat(q.id))];
-        q.studioRevoked = true; q.ws.serializeAttachment(this.attachment(q));
+        this.removeStudioSpeaker(q.id); q.studioRevoked = true; q.ws.serializeAttachment(this.attachment(q));
       }
     }
     s.revision++;

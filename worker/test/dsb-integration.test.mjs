@@ -25,7 +25,7 @@ const roomClass = () => {
   const source = readFileSync(new URL("../src/room.js", import.meta.url), "utf8")
     .replace(/import\s+[\s\S]*?from\s+"[^"]+";/g, "")
     .replace("export class Room", "class Room") + "\nglobalThis.Room = Room;";
-  const context = { ...protocol, ...studio, DurableObject: class {}, sfuClient, CAST_ROWS: [{ handle: "YellowBrokeIt", github_login: "YellowBrokeIt" }], Date, Map, Set, Response, Promise, setTimeout, clearTimeout };
+  const context = { ...protocol, ...studio, DurableObject: class { constructor(ctx, env) { this.ctx = ctx; this.env = env; } }, WebSocketRequestResponsePair: class {}, sfuClient, CAST_ROWS: [{ handle: "YellowBrokeIt", github_login: "YellowBrokeIt" }], Date, Map, Set, Response, Promise, setTimeout, clearTimeout };
   runInNewContext(source, context);
   return context.Room;
 };
@@ -256,4 +256,79 @@ test("inspection retention never closes successful MIDs twice and partial result
   room.sfu.closeTracks = async () => ({});
   await room.queueClose("malformed", ["2"]);
   assert.deepEqual([...room.cleanupJobs[0].mids], ["2"], "missing acknowledgements retain ownership");
+});
+
+test("reviewed catalogue rejects arbitrary sources and playback uses each clip's duration", () => {
+  assert.deepEqual(studio.STUDIO_SOURCES.map(row => row.id), ["sample", "sample-quiet"]);
+  const sample = studio.STUDIO_SOURCES[0];
+  for (const changed of [{ url: "https://unapproved.invalid/video.mp4" }, { url: "/media/../secret.mp4" }, { duration: Infinity }, { duration: -1 }, { captions: "https://unapproved.invalid/captions.vtt" }]) assert.deepEqual(studio.validateStudioCatalogue([{ ...sample, ...changed }]), []);
+  assert.deepEqual(studio.validateStudioCatalogue([sample, sample]), []);
+  assert.equal(protocol.parseClientMessage(JSON.stringify({ t: "studio", action: "source", source: "https://unapproved.invalid/video.mp4" })), null);
+  const { room, add } = studioRoom(), host = add(1);
+  room.studioCommand(host, { action: "claim" });
+  room.studioCommand(host, { action: "source", source: "sample-quiet" });
+  assert.equal(room.studio.source, "sample-quiet");
+  room.studioCommand(host, { action: "seek", position: 10 }); assert.equal(room.studio.position, 0);
+  room.studioCommand(host, { action: "seek", position: 8 }); assert.equal(room.studio.position, 8);
+  room.studioCommand(host, { action: "play" }); assert.equal(room.studio.position, 0);
+  assert.equal(studio.studioPosition({ ...room.studio, position: 7, at: 1000, playing: true }, 4000), 8);
+});
+
+test("explicit empty or malformed host configuration fails closed, including an existing host", async () => {
+  assert.equal(studio.studioHostAllowed({}, 321615163), false, "missing configuration never grants an implicit host");
+  for (const value of ["", " ", "1,bad", "1,", "0,1", "-1,1", "1.0", "9007199254740992", 1]) assert.equal(studio.studioHostAllowed({ STUDIO_HOST_IDS: value }, 1), false);
+  assert.equal(studio.studioHostAllowed({ STUDIO_HOST_IDS: "1, 3" }, 3), true);
+  const { room, add, call } = studioRoom(), host = add(1);
+  room.studio.hostId = 1; room.studio.mode = "presentation";
+  room.env.STUDIO_HOST_IDS = "";
+  room.studioCommand(host, { action: "play" }); assert.equal(room.studio.hostId, 0); assert.equal(room.studio.playing, false);
+  room.studio.hostId = 1; room.studio.mode = "presentation";
+  assert.equal((await call(host, "session", { kind: "pub" })).status, 403); assert.equal(room.studio.mode, "suspended");
+});
+
+test("Q&A requires a raised hand and host invitation, with explicit restoration and fresh mic consent", async () => {
+  const { room, add, call } = studioRoom(), host = add(1), speaker = add(2), next = add(3);
+  const command = (p, msg) => { p.studioBucket = null; room.studioCommand(p, msg); };
+  command(host, { action: "claim" }); command(speaker, { action: "seat", seat: 0 });
+  command(host, { action: "mode", mode: "qa" });
+  assert.equal(studio.studioCanSpeak(room.studio, speaker), false);
+  assert.equal((await call(speaker, "session", { kind: "pub" })).status, 403);
+  command(host, { action: "invite", id: 2 }); assert.deepEqual([...room.studio.invited], []);
+  command(speaker, { action: "raise" }); command(speaker, { action: "raise" }); assert.deepEqual([...room.studio.hands], [2]);
+  command(speaker, { action: "invite", id: 2 }); assert.equal(studio.studioCanSpeak(room.studio, speaker), false);
+  command(host, { action: "invite", id: 2 }); assert.equal(studio.studioCanSpeak(room.studio, speaker), true); assert.equal(speaker.voice.pub, null);
+  assert.deepEqual([...room.studio.hands], []);
+  command(speaker, { action: "lower" }); assert.equal(studio.studioCanSpeak(room.studio, speaker), false);
+  command(speaker, { action: "raise" }); command(host, { action: "invite", id: 2 });
+  command(host, { action: "revoke", id: 2 }); assert.deepEqual([...room.studio.invited], []); assert.equal(studio.studioCanSpeak(room.studio, speaker), false);
+  command(speaker, { action: "restore", id: 2 }); assert.equal(studio.studioCanSpeak(room.studio, speaker), false);
+  command(host, { action: "restore", id: 2 }); assert.equal(speaker.studioRevoked, false); assert.equal(studio.studioCanSpeak(room.studio, speaker), false, "restore does not invite or activate a mic");
+  command(speaker, { action: "raise" }); command(host, { action: "invite", id: 2 });
+  command(speaker, { action: "stand" }); assert.deepEqual([...room.studio.invited], []); assert.deepEqual([...room.studio.hands], []);
+  command(speaker, { action: "seat", seat: 0 }); command(speaker, { action: "raise" }); command(host, { action: "invite", id: 2 });
+  command(host, { action: "revoke", id: 3 }); command(host, { action: "transfer", id: 3 }); assert.equal(room.studio.hostId, 1, "revoked target requires explicit restore before transfer");
+  command(host, { action: "restore", id: 3 }); command(host, { action: "transfer", id: 3 }); assert.equal(room.studio.hostId, next.id); assert.deepEqual([...room.studio.invited], []); assert.deepEqual([...room.studio.hands], []);
+});
+
+test("Studio wake migrates old snapshots, clamps catalogue edits and rechecks configured host permissions", async () => {
+  const Room = roomClass();
+  const wake = async (saved, ids) => {
+    const pending = [];
+    const attachments = [
+      { id: 1, login: "synthetic-host", zone: studio.STUDIO_ZONE, body: "synthetic-host" },
+      { id: 2, login: "synthetic-attendee", zone: studio.STUDIO_ZONE, body: "synthetic-attendee", studioSeat: 0 }
+    ];
+    const sockets = attachments.map(a => ({ deserializeAttachment: () => a, serializeAttachment() {}, send() {} }));
+    const ctx = { setWebSocketAutoResponse() {}, getWebSockets: () => sockets, blockConcurrencyWhile: fn => pending.push(fn()), waitUntil: p => pending.push(p), storage: { get: async key => key === "studio" ? structuredClone(saved) : null, put: async () => {} } };
+    const room = new Room(ctx, { STUDIO_HOST_IDS: ids }); await Promise.all(pending); return room;
+  };
+  const legacy = { ...studio.studioState(1000), hostId: 1, mode: "presentation", source: "sample-quiet", position: 99, playing: false };
+  delete legacy.hands; delete legacy.invited;
+  const disabled = await wake(legacy, "");
+  assert.equal(disabled.studio.hostId, 0); assert.equal(disabled.studio.mode, "suspended"); assert.equal(disabled.studio.position, 8);
+  assert.deepEqual([...disabled.studio.hands], []); assert.deepEqual([...disabled.studio.invited], []);
+  const qa = await wake({ ...studio.studioState(1000), hostId: 1, mode: "qa", hands: [99], invited: [2, 99] }, "1");
+  assert.deepEqual([...qa.studio.hands], []); assert.deepEqual([...qa.studio.invited], [2]); assert.equal(studio.studioCanSpeak(qa.studio, qa.players.get(2)), true);
+  const removed = await wake({ ...legacy, source: "removed-video", playing: true }, "1");
+  assert.equal(removed.studio.source, studio.STUDIO_SOURCES[0].id); assert.equal(removed.studio.playing, false); assert.equal(removed.studio.position, 0);
 });
