@@ -2036,6 +2036,7 @@ void main() {
       }
       gl.deleteBuffer(rec.ibo);
       if (rec.imageTexture) { gl.deleteTexture(rec.imageTexture); imageTextures--; rec.imageTexture = null; }
+      rec.imageElement = null; rec.imageBlocked = null;
       if (rec.rippleBodyTexture) { gl.deleteTexture(rec.rippleBodyTexture); rippleBodyTextures--; rec.rippleBodyTexture = null; }
       rec.rippleBodyState = null;
       rec.nodes.length = 0;
@@ -2681,7 +2682,7 @@ void main() {
       e.preventDefault();
       lost = true;
       imageTextures = rippleBodyTextures = 0;
-      for (const rec of records.values()) { rec.imageTexture = rec.rippleBodyTexture = rec.rippleBodyState = null; }
+      for (const rec of records.values()) { rec.imageTexture = rec.rippleBodyTexture = rec.rippleBodyState = null; rec.imageElement = null; }
       forgetMirror();
     };
     const onRestored = () => {
@@ -2736,6 +2737,7 @@ void main() {
           gl.bindTexture(gl.TEXTURE_2D, rec.imageTexture);
           gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, image);
           if (dynamic) {
+            rec.imageElement = image;
             rec.imageTime = image.currentTime;
             rec.imageSource = image.currentSrc;
             rec.imageWidth = image.videoWidth; rec.imageHeight = image.videoHeight;
@@ -2749,11 +2751,12 @@ void main() {
           gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
         } else {
           gl.bindTexture(gl.TEXTURE_2D, rec.imageTexture || res.matrixTexture);
-          if (dynamic && ready && rec.imageTexture && (rec.imageTime !== image.currentTime || rec.imageSource !== image.currentSrc
+          if (dynamic && ready && rec.imageTexture && (rec.imageElement !== image || rec.imageTime !== image.currentTime || rec.imageSource !== image.currentSrc
               || rec.imageWidth !== image.videoWidth || rec.imageHeight !== image.videoHeight)) {
             if (rec.imageWidth !== image.videoWidth || rec.imageHeight !== image.videoHeight)
               gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, image);
             else gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, gl.RGBA, gl.UNSIGNED_BYTE, image);
+            rec.imageElement = image;
             rec.imageTime = image.currentTime;
             rec.imageSource = image.currentSrc;
             rec.imageWidth = image.videoWidth; rec.imageHeight = image.videoHeight;
@@ -2764,7 +2767,7 @@ void main() {
         // Keep the accessible player usable, and do not repeat the same forbidden upload each frame.
         if (!dynamic || error.name !== "SecurityError") throw error;
         if (rec.imageTexture) { gl.deleteTexture(rec.imageTexture); imageTextures--; rec.imageTexture = null; }
-        rec.imageBlocked = image; rec.imageBlockedSource = source;
+        rec.imageElement = null; rec.imageBlocked = image; rec.imageBlockedSource = source;
         surface.mediaErrorCode = "video-security"; ready = false;
         gl.bindTexture(gl.TEXTURE_2D, res.matrixTexture);
       }

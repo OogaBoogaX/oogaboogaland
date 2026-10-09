@@ -121,8 +121,10 @@
     listen(q("[data-preflight]"),"click",()=>{void BL.voice.preflight(deviceSelect.value).then(()=>{if(active)void refreshDevices();});});
     listen(q("[data-cancel-preflight]"),"click",()=>BL.voice.cancelPreflight());listen(deviceSelect,"change",()=>{micRequestGeneration++;micRequested=false;void BL.voice.selectDevice(deviceSelect.value);});
     listen(q("[data-captions]"),"click",()=>{captions=!captions;if(video.textTracks)for(const track of video.textTracks)track.mode=captions?"showing":"disabled";reflect();});
-    listen(video,"loadedmetadata",reconcile);listen(video,"error",()=>{if(active)reflect();});
-    for(const event of ["waiting","stalled"])listen(video,event,()=>{buffering=true;if(active)reflect();});for(const event of ["playing","canplay","seeked"])listen(video,event,()=>{buffering=false;if(active)reflect();});
+    // Metadata can precede a seekable decoded frame. Reapply the latest timeline when
+    // decoding/seek settlement becomes ready; do not depend on the scene polling clock.
+    for(const event of ["loadedmetadata","loadeddata","durationchange"])listen(video,event,reconcile);listen(video,"error",()=>{if(active)reflect();});
+    for(const event of ["waiting","stalled"])listen(video,event,()=>{buffering=true;if(active)reflect();});for(const event of ["playing","canplay","seeked"])listen(video,event,()=>{buffering=false;if(active){reconcile();reflect();}});
     listen(document,"visibilitychange",()=>{if(active&&!document.hidden){reconcile();reflect();}});
     const close=()=>{if(dialog.open){dialog.close();BL.dsbMenuShell?.present(dialog,false);onOpen(false);returnFocus?.focus();returnFocus=null;}};
     const leave=()=>{
@@ -136,7 +138,7 @@
       update:dt=>{if(!active)return;const talking=state?.hostId&&(isHost()?BL.voice.stats.speaking:BL.voice.speaking?.(state.hostId));const target=talking?0.35:1;programGain+=(target-programGain)*(1-Math.exp(-Math.min(dt,.1)/(talking?0.08:0.45)));if(state)video.volume=Math.max(0,Math.min(1,state.volume*programGain*personalProgram));elapsed+=dt;if(elapsed>.5){elapsed=0;reconcile();reflect();}},
       setMuted:on=>{muted=!!on;video.muted=muted||!soundEnabled;},
       get isOpen(){return dialog.open;},get playing(){return active&&!video.paused;},
-      get stats(){return {active,open:dialog.open,soundEnabled,soundState:soundState(),buffering,mode:state?.mode||null,source:selectedSource,position:video.currentTime||0,media:active?1:0};},
+      get stats(){return {active,epoch:state?.epoch??null,revision:state?.revision??null,anchorPosition:state?.position??null,open:dialog.open,soundEnabled,soundState:soundState(),buffering,mode:state?.mode||null,source:selectedSource,position:video.currentTime||0,media:active?1:0};},
       dispose:()=>{leave();disposed=true;events.abort();unsubscribe();unsubscribeAccount();unsubscribeVoice();dialog.remove();}
     };
   };

@@ -11094,17 +11094,19 @@ const studioVideoSecurityProof = async () => {
     createTexture:()=>++texture,deleteTexture:()=>calls.deletes++,generateMipmap:()=>calls.mipmaps++,uniform1i:(key,value)=>{if(key==="ready")calls.ready.push(value);},drawArraysInstanced:()=>calls.draws++,
     texImage2D:()=>{calls.uploads++;if(failure)throw Object.assign(Error("synthetic upload failure"),{name:failure});},texSubImage2D:()=>{calls.uploads++;if(failure)throw Object.assign(Error("synthetic update failure"),{name:failure});}};
   const context={gl,programs:{image:{prog:"image",u:{uReady:"ready"}},mesh:{prog:"mesh"}},res:{matrixTexture:"fallback"},viewProj:[],mirrorViewProj:[],applyCutaway:noop,cutawayMaxY:1e6};
-  runInNewContext("let imageTextures=0;"+source.slice(start,end)+";globalThis.draw=drawImageSurface;globalThis.textures=()=>imageTextures;",context);
-  const image={readyState:2,seeking:false,videoWidth:320,videoHeight:180,currentTime:0,currentSrc:"file:///synthetic.mp4"},surface={dynamic:true,asset:{load:()=>image},rect:[0,0,7,3.5]},rec={geometry:{imageSurface:surface},mesh:{vao:{},count:6}};
+  runInNewContext("let imageTextures=0;"+source.slice(start,end)+";globalThis.draw=drawImageSurface;globalThis.textures=()=>imageTextures;globalThis.resetTextureCount=()=>{imageTextures=0;};",context);
+  let image={readyState:2,seeking:false,videoWidth:320,videoHeight:180,currentTime:0,currentSrc:"file:///synthetic.mp4"};const surface={dynamic:true,asset:{load:()=>image},rect:[0,0,7,3.5]},rec={geometry:{imageSurface:surface},mesh:{vao:{},count:6}};
   context.draw(rec,1,true);const fallback=rec.imageTexture===null&&context.textures()===0&&calls.deletes===1&&calls.draws===1&&calls.ready.at(-1)===0&&surface.mediaErrorCode==="video-security";
   context.draw(rec,1,true);const suppressed=calls.uploads===1&&calls.draws===2;
   image.currentSrc="https://same-origin.invalid/media/reviewed.mp4";failure="";context.draw(rec,1,true);const retry=calls.uploads===2&&context.textures()===1&&calls.ready.at(-1)===1&&!surface.mediaErrorCode;
+  const uploadsBeforeReplacement=calls.uploads;image={...image};context.draw(rec,1,true);const replacementIdentity=calls.uploads===uploadsBeforeReplacement+1;context.draw(rec,1,true);const replacementStable=calls.uploads===uploadsBeforeReplacement+1;
   image.currentTime=1;failure="SecurityError";context.draw(rec,1,true);const updateCleanup=context.textures()===0&&calls.deletes===2&&calls.ready.at(-1)===0;
+  failure="";rec.imageTexture=null;rec.imageBlocked=null;context.resetTextureCount();const beforeRestore=calls.uploads;context.draw(rec,1,true);const restoredUpload=calls.uploads===beforeRestore+1&&calls.ready.at(-1)===1;
   failure="TypeError";image.currentSrc="https://same-origin.invalid/media/other.mp4";let nonSecurity=false;try{context.draw(rec,1,true);}catch(error){nonSecurity=error.name==="TypeError";}
   const staticImage={complete:true,naturalWidth:320},staticRec={geometry:{imageSurface:{asset:{load:()=>staticImage},rect:[0,0,7,3.5]}},mesh:{vao:{},count:6}};
   failure="";context.draw(staticRec,1,true);const staticUnchanged=calls.mipmaps===1&&calls.ready.at(-1)===1;
   failure="SecurityError";staticRec.imageTexture=null;let staticRejects=false;try{context.draw(staticRec,1,true);}catch(error){staticRejects=error.name==="SecurityError";}
-  return {fallback,suppressed,retry,updateCleanup,nonSecurity,staticUnchanged,staticRejects};
+  return {fallback,suppressed,retry,replacementIdentity,replacementStable,updateCleanup,restoredUpload,nonSecurity,staticUnchanged,staticRejects};
 };
 
 const studioCatalogueProof = async () => {
@@ -11179,7 +11181,9 @@ const studioVoiceLifecycleProof = async () => {
 // The real controller runs against a bounded DOM/media double: no permission prompts or SFU.
 const studioSessionProof = async () => {
   class Element {
-    constructor(){this.children=[];this.dataset={};this.handlers=new Map();this.nodes=new Map();this.value="";this.open=false;this.paused=true;this.readyState=1;this.currentTime=0;this.plays=0;this.loads=0;}
+    constructor(){this.children=[];this.dataset={};this.handlers=new Map();this.nodes=new Map();this.value="";this.open=false;this.paused=true;this.readyState=1;this._currentTime=0;this.plays=0;this.loads=0;}
+    get currentTime(){return this._currentTime;}
+    set currentTime(value){if(!this.asyncMetadata||this.readyState>=2)this._currentTime=value;}
     setAttribute(k,v){this[k]=v;}
     removeAttribute(k){delete this[k];}
     appendChild(e){this.children.push(e);}
@@ -11190,7 +11194,7 @@ const studioSessionProof = async () => {
     fire(k){this.handlers.get(k)?.({target:this,preventDefault(){}});}
     play(){this.plays++;if(this.blocked)return Promise.reject(Error("gesture"));this.paused=false;return Promise.resolve();}
     pause(){this.paused=true;}
-    load(){this.loads++;}
+    load(){this.loads++;if(this.asyncMetadata){this.readyState=0;this._currentTime=0;}}
     showModal(){this.open=true;}
     close(){this.open=false;}
     focus(){}
@@ -11231,11 +11235,14 @@ const studioSessionProof = async () => {
   panel.querySelector("[data-lower]").fire("click");const finishQuestion=!panel.querySelector("[data-lower]").hidden&&panel.querySelector("[data-lower]").textContent==="Finish question"&&calls.commands.at(-1).action==="lower";
   net.state.selfId=1;net.remotes.set(3,{id:3,zone:"dsb-studio",display:"Second"});net.remotes.set(4,{id:4,zone:"dsb-studio",display:"First"});accept({t:"studio",state:{...snapshot,revision:7,mode:"qa",hands:[4,3]}});const queueOptions=panel.querySelector("[data-participant]").children;const orderedQueue=queueOptions[0].value==="4"&&queueOptions[0].textContent.includes("queue 1")&&queueOptions[1].value==="3"&&queueOptions[1].textContent.includes("queue 2");
   video.fire("waiting");const buffering=session.stats.buffering;video.fire("canplay");const bufferingClears=!session.stats.buffering;
+  video.asyncMetadata=true;accept({t:"studio",state:{...snapshot,revision:8,source:"sample-quiet",playing:false,position:4}});video.readyState=1;video.fire("loadedmetadata");const metadataPending=video.currentTime===0;
+  video.readyState=2;video.fire("canplay");const metadataRecovery=metadataPending&&video.currentTime===4;
+  accept({t:"studio",state:{...snapshot,revision:9,source:"sample",playing:false,position:6}});video.readyState=1;video.fire("loadedmetadata");video.readyState=2;video.fire("loadeddata");const latestSourceSeek=video.currentTime===6;
   net.state.room="off";account();const disconnected=video.paused;
-  net.state.room="live";session.leave();const cleaned=!room.screen.geometry.imageSurface&&video.paused&&video.muted&&!video.src&&session.stats.media===0;
+  net.state.room="live";session.leave();video.readyState=2;video.fire("canplay");const staleMetadataIgnored=video.currentTime===0;const cleaned=!room.screen.geometry.imageSurface&&video.paused&&video.muted&&!video.src&&session.stats.media===0;
   for(let i=0;i<3;i++){session.enter(room);session.leave();}
   session.dispose();accept({t:"studio",state:snapshot});
-  return {initial,connecting,listening,audible,micErrorKeepsSound,pendingPreviewRelease,previewReleaseDisabledForPublication,blocked,forbidden,discussion,rejection,stale,nextCommand,catalogueSwap,qaWaiting,invitationConsent,finishQuestion,orderedQueue,buffering,bufferingClears,disconnected,cleaned,disposed:panel.removed&&calls.unsub===3&&body.children.length===1&&video.loads>=4};
+  return {initial,connecting,listening,audible,micErrorKeepsSound,pendingPreviewRelease,previewReleaseDisabledForPublication,blocked,forbidden,discussion,rejection,stale,nextCommand,catalogueSwap,qaWaiting,invitationConsent,finishQuestion,orderedQueue,buffering,bufferingClears,metadataRecovery,latestSourceSeek,staleMetadataIgnored,disconnected,cleaned,disposed:panel.removed&&calls.unsub===3&&body.children.length===1&&video.loads>=4};
 };
 
 const unitChecks = async () => {
@@ -13076,18 +13083,20 @@ scene("dsb",{label:"studio checkpoint phone",query:"&view=studio-door&weather=st
 const dsbSharedSessionCheckpoint={name:"dsb shared session checkpoint",why:"contract: one consenting shared player backs an in-world screen and accessible native dialog; synthetic snapshots, receive-only voice and repeated cleanup survive both renderers",run:async b=>{
   await b.evaluate(`(()=>{const B=__ooga,D=B.dsb;D.interiors.review("dsb-studio",true);for(let i=0;i<24;i++)BL.scenes.dsb.update(1/60,i/60);D.studioSession.dispose();
     const oldNet=BL.net,oldVoice=BL.voice,calls={listen:0,enable:0,stop:0,drop:0},check=window.__sharedStudio={oldNet,oldVoice,calls};
-    BL.net={...oldNet,state:{...oldNet.state,room:"live",selfId:901,me:{display:"Synthetic host"}},remotes:new Map(),serverNow:()=>5000,studioCommand:(action,fields)=>{check.command={action,...fields};return true;},subscribeStudio:fn=>{check.accept=fn;return()=>{};},subscribe:()=>()=>{}};
+    BL.net={...oldNet,state:{...oldNet.state,studio:null,room:"live",selfId:901,me:{display:"Synthetic host"}},remotes:new Map(),serverNow:()=>5000,studioCommand:(action,fields)=>{check.command={action,...fields};return true;},subscribeStudio:fn=>{check.accept=fn;return()=>{};},subscribe:()=>()=>{}};
     BL.voice={...oldVoice,stats:{...oldVoice.stats,publishing:false,muted:false,ready:false,enabled:false},devices:async()=>[],subscribe:()=>()=>{},listen:()=>{calls.listen++;BL.voice.stats.ready=BL.voice.stats.enabled=true;return Promise.resolve();},enable:()=>{calls.enable++;return Promise.resolve();},stop:()=>{calls.stop++;BL.voice.stats.ready=BL.voice.stats.enabled=false;},dropMic:()=>calls.drop++};
     check.room=D.interiors.active.room;check.controller=BL.studioSession.create();check.controller.enter(check.room);check.video=document.querySelector(".studio-session video");
+    check.mediaEvents=[];for(const event of ["loadedmetadata","loadeddata","canplay","seeking","seeked"])check.video.addEventListener(event,()=>{if(check.mediaEvents.length<16)check.mediaEvents.push({event,ready:check.video.readyState,position:check.video.currentTime,seeking:check.video.seeking,revision:check.controller.stats.revision});});
+    check.oldUpdate=BL.scenes.dsb.update;BL.scenes.dsb.update=(dt,time)=>{check.oldUpdate(dt,time);check.controller.update(dt);};
     check.snapshot={epoch:1,revision:1,source:"sample",hands:[],invited:[],seats:[],hostId:901,allowedHost:true,canSpeak:false,mode:"presentation",volume:.7,position:2,at:5000,playing:false};check.accept({t:"studio",state:check.snapshot});})()`);
-  // Poll only decoding readiness, capped at two seconds; the bundled sample is synthetic and local.
-  for(let i=0;i<20&&!await b.evaluate('__sharedStudio.video.readyState>=2&&!__sharedStudio.video.seeking');i++)await b.sleep(100);
-  const ready=await b.evaluate('({ready:__sharedStudio.video.readyState,width:__sharedStudio.video.videoWidth,position:__sharedStudio.video.currentTime,muted:__sharedStudio.video.muted,media:document.querySelectorAll(".studio-session video").length,same:__sharedStudio.room.screen.geometry.imageSurface.asset.load()===__sharedStudio.video,kind:__ooga.renderer.kind})');
-  record("Shared Studio: local synthetic video decodes once and supplies the in-world screen while sound remains consent-gated",ready.ready>=2&&ready.width===320&&Math.abs(ready.position-2)<.1&&ready.muted&&ready.media===1&&ready.same,JSON.stringify(ready));
+  // Await decoded media AND the accepted timeline, capped at two seconds; no arbitrary sleeps.
+  for(let i=0;i<20&&!await b.evaluate('__sharedStudio.video.readyState>=2&&!__sharedStudio.video.seeking&&Math.abs(__sharedStudio.video.currentTime-2)<.1');i++)await b.sleep(100);
+  const ready=await b.evaluate('({ready:__sharedStudio.video.readyState,width:__sharedStudio.video.videoWidth,position:__sharedStudio.video.currentTime,muted:__sharedStudio.video.muted,media:document.querySelectorAll(".studio-session video").length,same:__sharedStudio.room.screen.geometry.imageSurface.asset.load()===__sharedStudio.video,kind:__ooga.renderer.kind,controller:__sharedStudio.controller.stats,events:__sharedStudio.mediaEvents})');
+  record("Shared Studio: local synthetic video decodes once and supplies the in-world screen while sound remains consent-gated",ready.ready>=2&&ready.width===320&&Math.abs(ready.position-2)<.1&&ready.muted&&ready.media===1&&ready.same&&ready.controller.epoch===1&&ready.controller.revision===1&&ready.controller.anchorPosition===2,JSON.stringify(ready));
   await b.evaluate(`(()=>{const C=__sharedStudio;C.draws=0;C.uploads=0;C.originalDraw=CanvasRenderingContext2D.prototype.drawImage;CanvasRenderingContext2D.prototype.drawImage=function(image,...args){if(image===C.video)C.draws++;return C.originalDraw.call(this,image,...args);};
     C.originalUpload=WebGL2RenderingContext.prototype.texImage2D;C.originalSub=WebGL2RenderingContext.prototype.texSubImage2D;WebGL2RenderingContext.prototype.texImage2D=function(...args){const result=C.originalUpload.apply(this,args);if(args.at(-1)===C.video)C.uploads++;return result;};WebGL2RenderingContext.prototype.texSubImage2D=function(...args){const result=C.originalSub.apply(this,args);if(args.at(-1)===C.video)C.uploads++;return result;};C.snapshot={...C.snapshot,revision:2,position:3};C.accept({t:"studio",state:C.snapshot});
     __ooga.pilot.navigate({position:{x:0,y:0,z:-4},yaw:0,pitch:.1,dist:3});__ooga.advance(.1);})()`);
-  for(let i=0;i<20&&await b.evaluate("__sharedStudio.video.seeking");i++)await b.sleep(50);
+  for(let i=0;i<20&&!await b.evaluate("__sharedStudio.video.readyState>=2&&!__sharedStudio.video.seeking&&Math.abs(__sharedStudio.video.currentTime-3)<.1");i++)await b.sleep(100);
   await b.evaluate('(()=>{const C=__sharedStudio,camera=BL.scene.createCamera({far:60});Object.assign(camera.position,{x:0,y:4.45,z:-8});Object.assign(camera.target,{x:0,y:4.45,z:-16.28});__ooga.renderer.render(C.room.root,camera,C.room.lighting);})()');
   const drawing=await b.evaluate('({draws:__sharedStudio.draws,uploads:__sharedStudio.uploads,kind:__ooga.renderer.kind,texture:__ooga.renderer.stats.imageTextures})');
   record("Shared Studio: active renderer consumes real decoded video frames",drawing.kind==="canvas2d"?drawing.draws>0:drawing.uploads>0,JSON.stringify(drawing));
@@ -13105,7 +13114,7 @@ const dsbSharedSessionCheckpoint={name:"dsb shared session checkpoint",why:"cont
   await b.evaluate(`(()=>{const C=__sharedStudio;BL.net.state.selfId=902;C.snapshot={...C.snapshot,revision:4,mode:"qa",canSpeak:false,seats:[{id:902,seat:0}]};C.accept({t:"studio",state:C.snapshot});document.querySelector(".studio-session [data-raise]").click();C.raised=C.command.action==="raise";C.snapshot={...C.snapshot,revision:5,canSpeak:true,invited:[902]};C.accept({t:"studio",state:C.snapshot});})()`);
   const qa=await b.evaluate('({raised:__sharedStudio.raised,micDisabled:document.querySelector(".studio-session [data-mic]").disabled,enabled:__sharedStudio.calls.enable,finish:document.querySelector(".studio-session [data-lower]").textContent})');
   record("Shared Studio: a Q&A invitation enables the explicit join control without activating the microphone",qa.raised&&!qa.micDisabled&&qa.enabled===0&&qa.finish==="Finish question",JSON.stringify(qa));
-  await b.evaluate(`(()=>{const C=__sharedStudio;C.controller.close();C.controller.leave();C.clean=!C.room.screen.geometry.imageSurface&&C.video.paused&&!C.video.getAttribute("src");for(let i=0;i<3;i++){C.controller.enter(C.room);C.controller.leave();}C.controller.dispose();BL.net=C.oldNet;BL.voice=C.oldVoice;CanvasRenderingContext2D.prototype.drawImage=C.originalDraw;WebGL2RenderingContext.prototype.texImage2D=C.originalUpload;WebGL2RenderingContext.prototype.texSubImage2D=C.originalSub;})()`);
+  await b.evaluate(`(()=>{const C=__sharedStudio;C.controller.close();C.controller.leave();C.clean=!C.room.screen.geometry.imageSurface&&C.video.paused&&!C.video.getAttribute("src");for(let i=0;i<3;i++){C.controller.enter(C.room);C.controller.leave();}C.controller.dispose();BL.scenes.dsb.update=C.oldUpdate;BL.net=C.oldNet;BL.voice=C.oldVoice;CanvasRenderingContext2D.prototype.drawImage=C.originalDraw;WebGL2RenderingContext.prototype.texImage2D=C.originalUpload;WebGL2RenderingContext.prototype.texSubImage2D=C.originalSub;})()`);
   const clean=await b.evaluate('({clean:__sharedStudio.clean,dialogs:document.querySelectorAll(".studio-session").length,screen:!!__sharedStudio.room.screen.geometry.imageSurface,media:__sharedStudio.controller.stats.media,calls:__sharedStudio.calls})');
   record("Shared Studio: repeated enter/leave releases media source, screen binding, dialog and voice",clean.clean&&clean.dialogs===0&&!clean.screen&&clean.media===0&&clean.calls.stop>=4,JSON.stringify(clean));
   await b.evaluate('delete window.__sharedStudio');
