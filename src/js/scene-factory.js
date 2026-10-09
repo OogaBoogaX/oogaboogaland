@@ -162,7 +162,7 @@
   let shared = null, feed = null, mock = null, unsubscribe = null, leaving = false, dust = null;
   // The Ooga the visitor walked in as: one playable actor from the shared crew, and the world it carries.
   let people = null, avatar = null, playerWorld = null;
-  let scene = null, greeter = null, greeterPrompt = false;
+  let scene = null, greeter = null, actPrompt = false;
   const targets = [];
   const SAT_POS = { x: 0, y: 0, z: 0 }, SAT_ROT = { x: 0, y: 0, z: 0 }, SAT_SCALE = { x: 1, y: 1, z: 1 };
   const SAT_M = mat4.create();
@@ -1575,7 +1575,7 @@
     unsubscribe = feed.subscribe(onEvent);
     refreshBoards(scene);
     leaving = false;
-    greeterPrompt = false;
+    actPrompt = false;
     greeter = BL.factoryGreeter.create({ parent: root, input, fx, feed,
       visitor: () => people && people.player === avatar ? avatar : null,
       demoRunning: () => feed.reading.contract === "obl.factory.demo.v1" || feed.reading.contract === null && !!shared.mock, coarse: COARSE });
@@ -1955,11 +1955,12 @@
       refreshBoards(s);
     }
     greeter.update(dt, elapsed);
-    // The act button talks to the foreman in reach, starts the picked tour or skips a line ahead, the way the
-    // hub shows ENTER ARCADE by its door; the pilot's own label returns once the offer is gone.
-    const actLabel = avatar && greeter.actLabel();
-    if (actLabel) { hud.setAct(actLabel); greeterPrompt = true; }
-    else if (greeterPrompt) { greeterPrompt = false; pilot.showAct(); }
+    // The act button talks to the foreman in reach, starts the picked tour or skips a line ahead, or, within the
+    // kiosk's hint reach, donates, the way the hub shows ENTER ARCADE by its door; the pilot's own label returns once
+    // the offer is gone. The foreman comes first, as the button tries him before the kiosk.
+    const actLabel = avatar && (greeter.actLabel() || (s.booth.near && !s.booth.mode && people.player === avatar ? "DONATE!" : null));
+    if (actLabel) { hud.setAct(actLabel); actPrompt = true; }
+    else if (actPrompt) { actPrompt = false; pilot.showAct(); }
     stepTweens(dt);
     fx.update(dt, elapsed);
   };
