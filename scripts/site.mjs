@@ -22,6 +22,8 @@ const { site, name, list } = routes;
 
 rmSync(out, { recursive: true, force: true });
 mkdirSync(join(out, "cards"), { recursive: true });
+mkdirSync(join(out, "media"), { recursive: true });
+copyFileSync(join(root, "src/media/studio-sample.mp4"), join(out, "media/studio-sample.mp4"));
 
 let shell = readFileSync(join(root, "oogaboogaland.html"), "utf8");
 if (process.argv.includes("--audio-assets")) shell = externalizeAudio(shell, root, out);

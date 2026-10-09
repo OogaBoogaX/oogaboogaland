@@ -2720,24 +2720,44 @@ void main() {
     };
     const drawImageSurface = (rec, count, cameraPass) => {
       const surface = rec.geometry.imageSurface, image = surface.asset.load(), p = programs.image;
+      const dynamic = surface.dynamic === true;
+      const ready = dynamic ? image.readyState >= 2 && !image.seeking && image.videoWidth > 0 && image.videoHeight > 0
+        && image.videoWidth <= 1280 && image.videoHeight <= 720 : image.complete && image.naturalWidth;
       gl.activeTexture(gl.TEXTURE6);
-      if (!rec.imageTexture && image.complete && image.naturalWidth) {
+      if (!rec.imageTexture && ready) {
         rec.imageTexture = gl.createTexture();
         imageTextures++;
         gl.bindTexture(gl.TEXTURE_2D, rec.imageTexture);
         gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, image);
-        // Mipmapped, so lettering seen from across a hall stays legible instead of sparkling.
-        gl.generateMipmap(gl.TEXTURE_2D);
-        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
+        if (dynamic) {
+          rec.imageTime = image.currentTime;
+          rec.imageSource = image.currentSrc;
+          rec.imageWidth = image.videoWidth; rec.imageHeight = image.videoHeight;
+        } else {
+          // Mipmapped, so lettering seen from across a hall stays legible instead of sparkling.
+          gl.generateMipmap(gl.TEXTURE_2D);
+        }
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, dynamic ? gl.LINEAR : gl.LINEAR_MIPMAP_LINEAR);
         gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
         gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
         gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-      } else gl.bindTexture(gl.TEXTURE_2D, rec.imageTexture || res.matrixTexture);
+      } else {
+        gl.bindTexture(gl.TEXTURE_2D, rec.imageTexture || res.matrixTexture);
+        if (dynamic && ready && rec.imageTexture && (rec.imageTime !== image.currentTime || rec.imageSource !== image.currentSrc
+            || rec.imageWidth !== image.videoWidth || rec.imageHeight !== image.videoHeight)) {
+          if (rec.imageWidth !== image.videoWidth || rec.imageHeight !== image.videoHeight)
+            gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, image);
+          else gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, gl.RGBA, gl.UNSIGNED_BYTE, image);
+          rec.imageTime = image.currentTime;
+          rec.imageSource = image.currentSrc;
+          rec.imageWidth = image.videoWidth; rec.imageHeight = image.videoHeight;
+        }
+      }
       gl.useProgram(p.prog);
       gl.uniformMatrix4fv(p.u.uViewProj, false, cameraPass ? viewProj : mirrorViewProj);
       gl.uniform4fv(p.u.uRect, surface.rect);
       gl.uniform1i(p.u.uImage, 6);
-      gl.uniform1i(p.u.uReady, rec.imageTexture ? 1 : 0);
+      gl.uniform1i(p.u.uReady, rec.imageTexture && (!dynamic || ready) ? 1 : 0);
       applyCutaway(p, rec.geometry);
       gl.uniform1f(p.u.uClipMaxY, Math.min(rec.geometry.cutawayPreserve ? 1e6 : cutawayMaxY, rec.geometry.clipMaxY ?? 1e6));
       gl.bindVertexArray(rec.mesh.vao);

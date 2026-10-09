@@ -38,6 +38,7 @@ const handleVoice = async (request, env, url) => {
   if (!(await allowed(env.VOICE_LIMITER, String(found.player.id)))) return text("Too many voice requests", 429);
   const op = url.pathname.slice("/api/voice/".length);
   const headers = new Headers({ "content-type": "application/json", "x-player-id": String(found.player.id) });
+  headers.set("x-room-token", request.headers.get("x-room-token") || "");
   return env.ROOM.getByName(ROOM_NAME).fetch(new Request(new URL(`/voice/${op}`, url), { method: "POST", headers, body: request.body }));
 };
 

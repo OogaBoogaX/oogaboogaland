@@ -1489,7 +1489,9 @@
     };
     const drawImageSurface = (node) => {
       const surface = node.geometry.imageSurface, asset = surface.asset, image = asset.load();
-      if (!image.complete || !image.naturalWidth) return;
+      const dynamic = surface.dynamic === true;
+      if (dynamic ? image.readyState < 2 || image.seeking || !image.videoWidth || !image.videoHeight : !image.complete || !image.naturalWidth) return;
+      const imageWidth = dynamic ? image.videoWidth : asset.width, imageHeight = dynamic ? image.videoHeight : asset.height;
       mat4.multiply(imageView, view, node.world);
       const rect = surface.rect, z = node.geometry.verts[2], m = imageView;
       // Front-on screens are exactly affine; oblique screens use at most
@@ -1501,16 +1503,16 @@
         imageVertices[at] = m[0] * px + m[4] * py + m[8] * z + m[12];
         imageVertices[at + 1] = m[1] * px + m[5] * py + m[9] * z + m[13];
         imageVertices[at + 2] = m[2] * px + m[6] * py + m[10] * z + m[14];
-        imageVertices[at + 3] = asset.width * x / columns;
-        imageVertices[at + 4] = asset.height * y / rows;
+        imageVertices[at + 3] = imageWidth * x / columns;
+        imageVertices[at + 4] = imageHeight * y / rows;
       }
       ctx.save(); ctx.clip();
       if (!oblique && imageVertices[2] < -near && imageVertices[7] < -near && imageVertices[12] < -near && imageVertices[17] < -near) {
         const scale = lastF / projectedDepth(-imageVertices[2]), x = width / 2 + imageVertices[0] * scale, y = height / 2 - imageVertices[1] * scale;
-        ctx.transform((imageVertices[5] - imageVertices[0]) * scale / asset.width,
-          -(imageVertices[6] - imageVertices[1]) * scale / asset.width,
-          (imageVertices[10] - imageVertices[0]) * scale / asset.height,
-          -(imageVertices[11] - imageVertices[1]) * scale / asset.height, x, y);
+        ctx.transform((imageVertices[5] - imageVertices[0]) * scale / imageWidth,
+          -(imageVertices[6] - imageVertices[1]) * scale / imageWidth,
+          (imageVertices[10] - imageVertices[0]) * scale / imageHeight,
+          -(imageVertices[11] - imageVertices[1]) * scale / imageHeight, x, y);
         ctx.drawImage(image, 0, 0);
         ctx.restore();
         return;

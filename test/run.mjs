@@ -11083,7 +11083,96 @@ const reviewCrowdAndFallbackProof = async () => {
   return {clear,filtered,blocked,hidden,above,cpu,gpu,fetches,gaps};
 };
 
+// Exercise the shipped voice lifecycle with deferred permissions/signaling and no real devices/network.
+const studioVoiceLifecycleProof = async () => {
+  const source=await readFile(join(root,"src/js/voice.js"),"utf8");
+  const fixture=()=>{
+    const calls=[],streams=[],timers=new Map();let timerId=0,gum=0,permission=null,publishResponse=null;
+    class Peer {
+      constructor(){this.connectionState="connected";this.iceGatheringState="complete";this.localDescription=null;this.handlers=new Map();}
+      addEventListener(k,fn){this.handlers.set(k,fn);}
+      removeEventListener(k){this.handlers.delete(k);}
+      addTransceiver(track){this.track=track;return {mid:"0"};}
+      createOffer(){return Promise.resolve({type:"offer",sdp:"synthetic"});}
+      setLocalDescription(d){this.localDescription=d;return Promise.resolve();}
+      setRemoteDescription(){return Promise.resolve();}
+      getTransceivers(){return [];}
+      close(){this.connectionState="closed";}
+    }
+    const makeStream=()=>{const track={enabled:true,stops:0,stop(){this.stops++;}},stream={track,getTracks:()=>[track],getAudioTracks:()=>[track]};streams.push(stream);return stream;};
+    const win={BL:{net:{state:{connectionToken:"synthetic"},remotes:new Map(),setMuted:on=>calls.push({op:"mute",on})}},setTimeout:fn=>{timers.set(++timerId,fn);return timerId;},clearTimeout:id=>timers.delete(id),setInterval:fn=>{timers.set(++timerId,fn);return timerId;},clearInterval:id=>timers.delete(id)};
+    const context={window:win,localStorage:{getItem:()=>null,setItem(){}},AbortController,RTCPeerConnection:Peer,navigator:{mediaDevices:{getUserMedia:()=>{gum++;return permission||Promise.resolve(makeStream());}}},
+      fetch:async(url,options)=>{const op=url.split("/").at(-1);calls.push({op,body:JSON.parse(options.body)});if(op==="publish"&&publishResponse)return publishResponse;return {ok:true,json:async()=>({sessionDescription:{type:"answer",sdp:"synthetic"}})};}};
+    runInNewContext(source,context);
+    return {voice:win.BL.voice,calls,streams,timers,get gum(){return gum;},makeStream,deferPermission(){permission=new Promise(resolve=>{this.resolvePermission=resolve;});},deferPublish(){publishResponse=new Promise(resolve=>{this.resolvePublish=()=>resolve({ok:true,json:async()=>({sessionDescription:{type:"answer",sdp:"synthetic"}})});});}};
+  };
+  const drain=async()=>{for(let i=0;i<40;i++)await Promise.resolve();};
+  const listener=fixture();await listener.voice.listen();await listener.voice.restart();await drain();
+  const receiveOnly=listener.gum===0&&listener.voice.stats.enabled&&!listener.voice.stats.publishing&&listener.calls.filter(c=>c.op==="session").every(c=>c.body.kind==="sub");listener.voice.dispose();await drain();
+  const late=fixture();late.deferPermission();const opening=late.voice.enable();late.voice.stop();const lateStream=late.makeStream();late.resolvePermission(lateStream);await opening;await drain();
+  const permissionCancelled=lateStream.track.stops===1&&!late.voice.stats.publishing&&!late.voice.stats.enabled&&!late.calls.some(c=>c.op==="publish");late.voice.dispose();
+  const rejoin=fixture();await rejoin.voice.enable();rejoin.voice.dropMic();await drain();const revoked=rejoin.streams[0].track.stops===1&&!rejoin.voice.stats.publishing&&rejoin.voice.stats.muted;
+  await rejoin.voice.enable();const explicitUnmute=revoked&&rejoin.gum===2&&rejoin.voice.stats.publishing&&!rejoin.voice.stats.muted&&rejoin.streams[1].track.enabled;
+  rejoin.voice.toggle();const mutedBefore=rejoin.voice.stats.muted;await rejoin.voice.restart();await drain();
+  const restartMute=mutedBefore&&rejoin.voice.stats.publishing&&rejoin.voice.stats.muted&&!rejoin.streams[1].track.enabled&&rejoin.gum===2;rejoin.voice.dispose();await drain();
+  const stale=fixture();stale.deferPublish();const publishing=stale.voice.enable();await drain();const reachedPublish=stale.calls.some(c=>c.op==="publish");stale.voice.dropMic();stale.resolvePublish();await publishing;await drain();
+  const publishCancelled=reachedPublish&&!stale.voice.stats.publishing&&!stale.calls.some(c=>c.op==="live")&&stale.streams[0].track.stops===1;stale.voice.dispose();await drain();
+  const stopped=fixture();stopped.deferPublish();const stoppedPublish=stopped.voice.enable();await drain();stopped.voice.stop();stopped.resolvePublish();await stoppedPublish;await drain();
+  const stopCancelled=!stopped.voice.stats.publishing&&!stopped.voice.stats.enabled&&!stopped.calls.some(c=>c.op==="live")&&stopped.streams[0].track.stops===1;stopped.voice.dispose();await drain();
+  return {receiveOnly,permissionCancelled,explicitUnmute,restartMute,publishCancelled,stopCancelled,timersReleased:[listener,late,rejoin,stale,stopped].every(f=>f.timers.size===0)};
+};
+
+// The real controller runs against a bounded DOM/media double: no permission prompts or SFU.
+const studioSessionProof = async () => {
+  class Element {
+    constructor(){this.children=[];this.dataset={};this.handlers=new Map();this.nodes=new Map();this.value="";this.open=false;this.paused=true;this.readyState=1;this.currentTime=0;this.plays=0;this.loads=0;}
+    setAttribute(k,v){this[k]=v;}
+    removeAttribute(k){delete this[k];}
+    appendChild(e){this.children.push(e);}
+    replaceChildren(){this.children=[];}
+    querySelector(k){if(!this.nodes.has(k))this.nodes.set(k,new Element());return this.nodes.get(k);}
+    addEventListener(k,fn){this.handlers.set(k,fn);}
+    fire(k){this.handlers.get(k)?.({target:this,preventDefault(){}});}
+    play(){this.plays++;if(this.blocked)return Promise.reject(Error("gesture"));this.paused=false;return Promise.resolve();}
+    pause(){this.paused=true;}
+    load(){this.loads++;}
+    showModal(){this.open=true;}
+    close(){this.open=false;}
+    focus(){}
+    remove(){this.removed=true;}
+  }
+  const body=new Element(),doc=new Element();Object.assign(doc,{body,createElement:()=>new Element(),activeElement:new Element(),hidden:false});
+  const calls={listen:0,enable:0,stop:0,drop:0,unsub:0,rejected:0,commands:[]};let accept,account;
+  const net={state:{room:"live",selfId:1,me:{display:"Synthetic host"}},remotes:new Map(),serverNow:()=>5000,
+    subscribeStudio:fn=>{accept=fn;return()=>calls.unsub++;},subscribe:fn=>{account=fn;return()=>calls.unsub++;},
+    studioCommand:(action,fields)=>{calls.commands.push({action,...fields});return true;}};
+  const voice={stats:{publishing:false,muted:false},subscribe:()=>()=>calls.unsub++,listen:()=>{calls.listen++;return Promise.resolve();},enable:()=>{calls.enable++;return Promise.resolve();},stop:()=>calls.stop++,dropMic:()=>calls.drop++};
+  const ctx={window:{BL:{net,voice}},document:doc,AbortController,location:{protocol:"https:"}};
+  runInNewContext(await readFile(join(root,"src/js/studio-session.js"),"utf8"),ctx);
+  const session=ctx.window.BL.studioSession.create({onSeatRejected:()=>calls.rejected++}),room={screen:{geometry:{}}};session.enter(room);
+  const panel=body.children[0],video=panel.querySelector("video"),snapshot={epoch:1,revision:2,seats:[],hostId:1,mode:"presentation",allowedHost:true,canSpeak:false,position:1,playing:true,at:4000,volume:.7};
+  accept({t:"studio",state:snapshot});await Promise.resolve();await Promise.resolve();
+  const initial=video.muted&&video.currentTime===2&&calls.listen===0&&calls.enable===0&&room.screen.geometry.imageSurface.asset.load()===video;
+  panel.querySelector("[data-sound]").fire("click");await Promise.resolve();
+  const listening=calls.listen===1&&calls.enable===0&&!video.muted;
+  panel.querySelector("[data-mic]").fire("click");const forbidden=calls.enable===0;
+  accept({t:"studio",state:{...snapshot,revision:3,mode:"discussion",canSpeak:true,playing:false}});
+  panel.querySelector("[data-mic]").fire("click");const discussion=calls.enable===1;
+  session.seat("audience-0");accept({t:"studio-result",action:"seat",ok:false,error:"occupied"});
+  const rejection=calls.rejected===1&&panel.querySelector("[data-error]").textContent==="occupied"&&calls.commands.at(-1).revision===3;
+  accept({t:"studio",state:snapshot});const stale=session.stats.mode==="discussion";
+  net.state.room="off";account();const disconnected=video.paused;
+  net.state.room="live";session.leave();const cleaned=!room.screen.geometry.imageSurface&&video.paused&&video.muted&&!video.src&&session.stats.media===0;
+  for(let i=0;i<3;i++){session.enter(room);session.leave();}
+  session.dispose();accept({t:"studio",state:snapshot});
+  return {initial,listening,forbidden,discussion,rejection,stale,disconnected,cleaned,disposed:panel.removed&&calls.unsub===3&&body.children.length===1&&video.loads===4};
+};
+
 const unitChecks = async () => {
+  const voiceLifecycle=await studioVoiceLifecycleProof();
+  record("Studio voice lifecycle: receive-only restart, cancelled permission/publication, explicit unmute and muted restart",Object.values(voiceLifecycle).every(Boolean),JSON.stringify(voiceLifecycle));
+  const studio=await studioSessionProof();
+  record("Studio session: receive-only consent, speaking policy, rejected seats, stale snapshots, disconnect and repeated cleanup",Object.values(studio).every(Boolean),JSON.stringify(studio));
   const reviewCrowd=await reviewCrowdAndFallbackProof();
   record("review crowd: recovery fetches outside actors once per edge and tests only nearby bodies; one station helper handles height and visibility; CPU fallback draws original joints only",["clear","filtered","blocked","hidden","above","cpu","gpu"].every(k=>reviewCrowd[k]),JSON.stringify(reviewCrowd));
   const movementReview = await reviewMovementProof();
@@ -12909,6 +12998,37 @@ const dsbStudioCheckpoint = {name:"dsb studio checkpoint",why:"playthrough: Stud
 scene("dsb",{label:"studio checkpoint",query:"&view=studio-door&weather=storm&time=1200",steps:[dsbStudioCheckpoint]});
 scene("dsb",{label:"studio checkpoint phone",query:"&view=studio-door&weather=storm&time=1200",opts:{w:390,h:844,mobile:true},steps:[dsbStudioCheckpoint]});
 
+
+const dsbSharedSessionCheckpoint={name:"dsb shared session checkpoint",why:"contract: one consenting shared player backs an in-world screen and accessible native dialog; synthetic snapshots, receive-only voice and repeated cleanup survive both renderers",run:async b=>{
+  await b.evaluate(`(()=>{const B=__ooga,D=B.dsb;D.interiors.review("dsb-studio",true);for(let i=0;i<24;i++)BL.scenes.dsb.update(1/60,i/60);D.studioSession.dispose();
+    const oldNet=BL.net,oldVoice=BL.voice,calls={listen:0,enable:0,stop:0,drop:0},check=window.__sharedStudio={oldNet,oldVoice,calls};
+    BL.net={state:{room:"live",selfId:901,me:{display:"Synthetic host"}},remotes:new Map(),serverNow:()=>5000,studioCommand:()=>true,subscribeStudio:fn=>{check.accept=fn;return()=>{};},subscribe:()=>()=>{}};
+    BL.voice={stats:{publishing:false,muted:false},subscribe:()=>()=>{},listen:()=>{calls.listen++;return Promise.resolve();},enable:()=>{calls.enable++;return Promise.resolve();},stop:()=>calls.stop++,dropMic:()=>calls.drop++};
+    check.room=D.interiors.active.room;check.controller=BL.studioSession.create();check.controller.enter(check.room);check.video=document.querySelector(".studio-session video");
+    check.snapshot={epoch:1,revision:1,seats:[],hostId:901,allowedHost:true,canSpeak:false,mode:"presentation",volume:.7,position:2,at:5000,playing:false};check.accept({t:"studio",state:check.snapshot});})()`);
+  // Poll only decoding readiness, capped at two seconds; the bundled sample is synthetic and local.
+  for(let i=0;i<20&&!await b.evaluate('__sharedStudio.video.readyState>=2&&!__sharedStudio.video.seeking');i++)await b.sleep(100);
+  const ready=await b.evaluate('({ready:__sharedStudio.video.readyState,width:__sharedStudio.video.videoWidth,position:__sharedStudio.video.currentTime,muted:__sharedStudio.video.muted,media:document.querySelectorAll(".studio-session video").length,same:__sharedStudio.room.screen.geometry.imageSurface.asset.load()===__sharedStudio.video,kind:__ooga.renderer.kind})');
+  record("Shared Studio: local synthetic video decodes once and supplies the in-world screen while sound remains consent-gated",ready.ready>=2&&ready.width===320&&Math.abs(ready.position-2)<.1&&ready.muted&&ready.media===1&&ready.same,JSON.stringify(ready));
+  await b.evaluate(`(()=>{const C=__sharedStudio;C.draws=0;C.uploads=0;C.originalDraw=CanvasRenderingContext2D.prototype.drawImage;CanvasRenderingContext2D.prototype.drawImage=function(image,...args){if(image===C.video)C.draws++;return C.originalDraw.call(this,image,...args);};
+    C.originalUpload=WebGL2RenderingContext.prototype.texImage2D;C.originalSub=WebGL2RenderingContext.prototype.texSubImage2D;WebGL2RenderingContext.prototype.texImage2D=function(...args){if(args.at(-1)===C.video)C.uploads++;return C.originalUpload.apply(this,args);};WebGL2RenderingContext.prototype.texSubImage2D=function(...args){if(args.at(-1)===C.video)C.uploads++;return C.originalSub.apply(this,args);};C.snapshot={...C.snapshot,revision:2,position:3};C.accept({t:"studio",state:C.snapshot});
+    __ooga.pilot.navigate({position:{x:0,y:0,z:-4},yaw:0,pitch:.1,dist:3});__ooga.advance(.1);})()`);
+  await b.sleep(100);
+  const drawing=await b.evaluate('({draws:__sharedStudio.draws,uploads:__sharedStudio.uploads,kind:__ooga.renderer.kind,texture:__ooga.renderer.stats.imageTextures})');
+  record("Shared Studio: active renderer consumes real decoded video frames",drawing.kind==="canvas2d"?drawing.draws>0:drawing.uploads>0,JSON.stringify(drawing));
+  await b.evaluate('__sharedStudio.controller.open()');
+  const fallback=await b.evaluate('(()=>{const d=document.querySelector(".studio-session");return {open:d.open,label:d.getAttribute("aria-label"),native:d.querySelector("video").hasAttribute("playsinline"),sound:d.querySelector("[data-sound]").textContent,micDisabled:d.querySelector("[data-mic]").disabled};})()');
+  record("Shared Studio: accessible dialog exposes explicit sound consent and disallows audience mic during presentation",fallback.open&&!!fallback.label&&fallback.native&&fallback.sound==="Enable Studio sound"&&fallback.micDisabled,JSON.stringify(fallback));
+  await b.evaluate('document.querySelector(".studio-session [data-sound]").click()');
+  const consent=await b.evaluate('({calls:__sharedStudio.calls,muted:__sharedStudio.video.muted})');
+  record("Shared Studio: sound consent starts receive-only listening without requesting a microphone",consent.calls.listen===1&&consent.calls.enable===0&&!consent.muted,JSON.stringify(consent));
+  await b.evaluate(`(()=>{const C=__sharedStudio;C.controller.close();C.controller.leave();C.clean=!C.room.screen.geometry.imageSurface&&C.video.paused&&!C.video.getAttribute("src");for(let i=0;i<3;i++){C.controller.enter(C.room);C.controller.leave();}C.controller.dispose();BL.net=C.oldNet;BL.voice=C.oldVoice;CanvasRenderingContext2D.prototype.drawImage=C.originalDraw;WebGL2RenderingContext.prototype.texImage2D=C.originalUpload;WebGL2RenderingContext.prototype.texSubImage2D=C.originalSub;})()`);
+  const clean=await b.evaluate('({clean:__sharedStudio.clean,dialogs:document.querySelectorAll(".studio-session").length,screen:!!__sharedStudio.room.screen.geometry.imageSurface,media:__sharedStudio.controller.stats.media,calls:__sharedStudio.calls})');
+  record("Shared Studio: repeated enter/leave releases media source, screen binding, dialog and voice",clean.clean&&clean.dialogs===0&&!clean.screen&&clean.media===0&&clean.calls.stop>=4,JSON.stringify(clean));
+  await b.evaluate('delete window.__sharedStudio');
+}};
+for(const fallback of [false,true])scene("dsb",{label:"shared session "+(fallback?"canvas2d":"webgl2"),query:"&overview=1&weather=clear&time=1200"+(fallback?"&canvas2d=1":""),exclusive:true,steps:[dsbSharedSessionCheckpoint]});
+scene("dsb",{label:"shared session phone",query:"&overview=1&weather=clear&time=1200",opts:{w:390,h:844,mobile:true},exclusive:true,steps:[dsbSharedSessionCheckpoint]});
 
 const dsbIntegrationCheckpoint={name:"dsb integration checkpoint",why:"contract: global account UI, venue zones and direct return survive desktop and mobile scene transitions",run:async b=>{
   const step=()=>b.evaluate('for(let i=0;i<36;i++)BL.scenes.dsb.update(1/60,i/60)');
