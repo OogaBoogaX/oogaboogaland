@@ -12,6 +12,15 @@
       "base": "3b50564ba59f433e7e8142dc0ac66aa87ad24a2a",
       "hash": "d91e740f3fb27a9d5e3bff524457285326841b48dfa298cd8eb62d307fccd4fe",
       "lane": "manual"
+    },
+    {
+      "pr": 190,
+      "head": "781cfd99d6060d7da25aa0283ab329706861f6f4",
+      "author": "l0n0",
+      "path": "src/characters/l0n0.js",
+      "base": null,
+      "hash": "33972940a39d4b97d95cf6cc596c250e81b50b7188ee65b7e43e30c9c5b7326d",
+      "lane": "manual"
     }
   ]
 }
