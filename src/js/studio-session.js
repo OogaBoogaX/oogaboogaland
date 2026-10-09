@@ -77,7 +77,11 @@
     const reconcile=()=>{
       if(!active||!state||disposed)return;loadSource();syncSound();
       const duration=currentSource().duration,position=Math.max(0,Math.min(duration,state.position+(state.playing?(BL.net.serverNow()-state.at)/1000:0)));
-      if(video.readyState>=1&&Math.abs(video.currentTime-position)>.45)video.currentTime=position;
+      // Allow an asynchronous seek to settle before correcting drift again. Reassigning
+      // during metadata/canplay/scene callbacks can restart decoding indefinitely.
+      // seeked reconciles against the latest server state, including commands received
+      // while the previous seek was in flight.
+      if(video.readyState>=1&&!video.seeking&&Math.abs(video.currentTime-position)>.45)video.currentTime=position;
       video.volume=Math.max(0,Math.min(1,state.volume*programGain*personalProgram));
       if(state.playing&&position<duration){
         if(video.paused&&!attempting&&!playBlocked){attempting=true;const token=visit,generation=playGeneration;video.play().catch(()=>{if(active&&token===visit&&generation===playGeneration){playBlocked=true;reflect();}}).finally(()=>{if(token===visit&&generation===playGeneration)attempting=false;});}

@@ -11183,7 +11183,8 @@ const studioSessionProof = async () => {
   class Element {
     constructor(){this.children=[];this.dataset={};this.handlers=new Map();this.nodes=new Map();this.value="";this.open=false;this.paused=true;this.readyState=1;this._currentTime=0;this.plays=0;this.loads=0;}
     get currentTime(){return this._currentTime;}
-    set currentTime(value){if(!this.asyncMetadata||this.readyState>=2)this._currentTime=value;}
+    set currentTime(value){if(this.asyncSeek){this.seekAssignments=(this.seekAssignments||0)+1;this.pendingSeek=value;this.seeking=true;this.readyState=1;}else if(!this.asyncMetadata||this.readyState>=2)this._currentTime=value;}
+    settleSeek(){this._currentTime=this.pendingSeek;this.seeking=false;this.readyState=2;this.fire("seeked");}
     setAttribute(k,v){this[k]=v;}
     removeAttribute(k){delete this[k];}
     appendChild(e){this.children.push(e);}
@@ -11238,11 +11239,20 @@ const studioSessionProof = async () => {
   video.asyncMetadata=true;accept({t:"studio",state:{...snapshot,revision:8,source:"sample-quiet",playing:false,position:4}});video.readyState=1;video.fire("loadedmetadata");const metadataPending=video.currentTime===0;
   video.readyState=2;video.fire("canplay");const metadataRecovery=metadataPending&&video.currentTime===4;
   accept({t:"studio",state:{...snapshot,revision:9,source:"sample",playing:false,position:6}});video.readyState=1;video.fire("loadedmetadata");video.readyState=2;video.fire("loadeddata");const latestSourceSeek=video.currentTime===6;
+  video.asyncSeek=true;video.readyState=2;video.seeking=false;video.seekAssignments=0;
+  accept({t:"studio",state:{...snapshot,revision:10,playing:false,position:2}});
+  for(let i=0;i<8;i++){session.update(.6);video.fire("canplay");video.fire("loadeddata");}
+  const onePendingSeek=video.seekAssignments===1&&video.pendingSeek===2;
+  accept({t:"studio",state:{...snapshot,revision:11,playing:false,position:3}});
+  const latestSeekWaits=video.seekAssignments===1;
+  video.settleSeek();const latestSeekAfterSettlement=video.seekAssignments===2&&video.pendingSeek===3;
+  video.settleSeek();const seekSettles=video.currentTime===3&&!video.seeking&&video.seekAssignments===2;
+  video.asyncSeek=false;
   net.state.room="off";account();const disconnected=video.paused;
   net.state.room="live";session.leave();video.readyState=2;video.fire("canplay");const staleMetadataIgnored=video.currentTime===0;const cleaned=!room.screen.geometry.imageSurface&&video.paused&&video.muted&&!video.src&&session.stats.media===0;
   for(let i=0;i<3;i++){session.enter(room);session.leave();}
   session.dispose();accept({t:"studio",state:snapshot});
-  return {initial,connecting,listening,audible,micErrorKeepsSound,pendingPreviewRelease,previewReleaseDisabledForPublication,blocked,forbidden,discussion,rejection,stale,nextCommand,catalogueSwap,qaWaiting,invitationConsent,finishQuestion,orderedQueue,buffering,bufferingClears,metadataRecovery,latestSourceSeek,staleMetadataIgnored,disconnected,cleaned,disposed:panel.removed&&calls.unsub===3&&body.children.length===1&&video.loads>=4};
+  return {initial,connecting,listening,audible,micErrorKeepsSound,pendingPreviewRelease,previewReleaseDisabledForPublication,blocked,forbidden,discussion,rejection,stale,nextCommand,catalogueSwap,qaWaiting,invitationConsent,finishQuestion,orderedQueue,buffering,bufferingClears,metadataRecovery,latestSourceSeek,onePendingSeek,latestSeekWaits,latestSeekAfterSettlement,seekSettles,staleMetadataIgnored,disconnected,cleaned,disposed:panel.removed&&calls.unsub===3&&body.children.length===1&&video.loads>=4};
 };
 
 const unitChecks = async () => {

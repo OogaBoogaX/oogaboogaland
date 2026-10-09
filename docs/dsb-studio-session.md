@@ -72,3 +72,11 @@ Classification: the two code gaps and fixture lifecycle/observation defects are 
 ### Single authorized repaired-head HTTP attempt
 
 At feature commit `f5925c28ed845c976112d2313677ddbdd565d6d1`, the local server failed to bind `127.0.0.1:8097` with sandbox `EPERM`. The browser reached its page-readiness deadline before any feature assertion. The runner was interrupted (exit 130) when its built-in driver retry was announced. No browser rerun followed. This infrastructure failure establishes nothing about the previous three initial-position and two WebGL-upload failures; all five remain unverified. Exact evidence is in `docs/dsb-studio-http-repaired-attempt.json`. A future authorized attempt must confirm an escalated loopback server is listening before launching Chrome and disable the runner’s internal retry.
+
+### Pending-seek diagnosis and local repair
+
+The next authorized, reachable-HTTP run at feature `f5925c28` passed 227/230 checks: both WebGL upload checks passed, while all three initial-position assertions still failed. Their captured epoch/revision/anchor were correct; currentTime remained zero, readyState was one, and repeated seeking events were observed. Exact evidence remains in `docs/dsb-studio-http-repaired-once.json`.
+
+A bounded asynchronous-media regression running the real controller establishes repeated currentTime assignment during an in-flight seek: readiness events and polling repeatedly restart a pending operation. Four new assertions fail before the fix and pass after guarding `!video.seeking`. The regression also proves that a newer authoritative position received mid-seek waits, then applies on settlement. Independent read-only review confirms the guard. This is an established controller defect; its role as the sole cause of the browser failures remains unverified.
+
+The local preview server has no byte-range handling, and both MP4 assets place moov after mdat. These concrete fixture characteristics may also affect metadata-preload seeking; neither is established as the runtime cause. See `docs/dsb-studio-seek-diagnosis.json`. No additional server/browser attempt was made, and no publication was attempted after the approval rejection.
