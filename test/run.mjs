@@ -2430,8 +2430,11 @@ const RATES = [1 / 20];
 // One Ooga per character file; the generated bundle is rebuilt so every run sees new files.
 writeCharacters();
 const CAST = readdirSync(join(root, "src", "characters")).filter((f) => f.endsWith(".js")).length;
-const src = `file://${join(root, "src", "index.html")}`;
-const dist = `file://${join(root, "oogaboogaland.html")}`;
+// HTTP media acceptance needs a real same-origin server, never a relaxed file security flag.
+const testOrigin = process.env.TEST_ORIGIN ? new URL(process.env.TEST_ORIGIN) : null;
+if (testOrigin && (testOrigin.protocol !== "http:" || !["127.0.0.1", "localhost", "[::1]"].includes(testOrigin.hostname) || testOrigin.username || testOrigin.password || testOrigin.pathname !== "/" || testOrigin.search || testOrigin.hash)) throw new Error("TEST_ORIGIN must be a loopback HTTP origin");
+const src = testOrigin ? `${testOrigin.origin}/src/index.html` : `file://${join(root, "src", "index.html")}`;
+const dist = testOrigin ? `${testOrigin.origin}/` : `file://${join(root, "oogaboogaland.html")}`;
 // Checks pin the clock at noon (hour=12, day=80) unless they ask for another hour.
 const clock = (query = "") => `${query.includes("hour=") ? "" : "&hour=12"}${query.includes("day=") ? "" : "&day=80"}${query ? "&" + query : ""}`;
 const page = (base, query) => `${base}?debug=1&nosim=1&scene=lab${clock(query)}`;
@@ -13073,7 +13076,7 @@ scene("dsb",{label:"studio checkpoint phone",query:"&view=studio-door&weather=st
 const dsbSharedSessionCheckpoint={name:"dsb shared session checkpoint",why:"contract: one consenting shared player backs an in-world screen and accessible native dialog; synthetic snapshots, receive-only voice and repeated cleanup survive both renderers",run:async b=>{
   await b.evaluate(`(()=>{const B=__ooga,D=B.dsb;D.interiors.review("dsb-studio",true);for(let i=0;i<24;i++)BL.scenes.dsb.update(1/60,i/60);D.studioSession.dispose();
     const oldNet=BL.net,oldVoice=BL.voice,calls={listen:0,enable:0,stop:0,drop:0},check=window.__sharedStudio={oldNet,oldVoice,calls};
-    BL.net={...oldNet,state:{...oldNet.state,room:"live",selfId:901,me:{display:"Synthetic host"}},remotes:new Map(),serverNow:()=>5000,studioCommand:()=>true,subscribeStudio:fn=>{check.accept=fn;return()=>{};},subscribe:()=>()=>{}};
+    BL.net={...oldNet,state:{...oldNet.state,room:"live",selfId:901,me:{display:"Synthetic host"}},remotes:new Map(),serverNow:()=>5000,studioCommand:(action,fields)=>{check.command={action,...fields};return true;},subscribeStudio:fn=>{check.accept=fn;return()=>{};},subscribe:()=>()=>{}};
     BL.voice={...oldVoice,stats:{...oldVoice.stats,publishing:false,muted:false,ready:false,enabled:false},devices:async()=>[],subscribe:()=>()=>{},listen:()=>{calls.listen++;BL.voice.stats.ready=BL.voice.stats.enabled=true;return Promise.resolve();},enable:()=>{calls.enable++;return Promise.resolve();},stop:()=>{calls.stop++;BL.voice.stats.ready=BL.voice.stats.enabled=false;},dropMic:()=>calls.drop++};
     check.room=D.interiors.active.room;check.controller=BL.studioSession.create();check.controller.enter(check.room);check.video=document.querySelector(".studio-session video");
     check.snapshot={epoch:1,revision:1,source:"sample",hands:[],invited:[],seats:[],hostId:901,allowedHost:true,canSpeak:false,mode:"presentation",volume:.7,position:2,at:5000,playing:false};check.accept({t:"studio",state:check.snapshot});})()`);
@@ -13094,6 +13097,14 @@ const dsbSharedSessionCheckpoint={name:"dsb shared session checkpoint",why:"cont
   await b.evaluate('document.querySelector(".studio-session [data-sound]").click()');
   const consent=await b.evaluate('({calls:__sharedStudio.calls,muted:__sharedStudio.video.muted})');
   record("Shared Studio: sound consent starts receive-only listening without requesting a microphone",consent.calls.listen===1&&consent.calls.enable===0&&!consent.muted,JSON.stringify(consent));
+  await b.evaluate(`(()=>{const C=__sharedStudio;document.querySelector(".studio-session [data-next]").click();C.next=C.command;C.snapshot={...C.snapshot,revision:3,source:"sample-quiet",position:1};C.accept({t:"studio",state:C.snapshot});document.querySelector(".studio-session [data-captions]").click();document.querySelector(".studio-session [data-program-level]").value="0";document.querySelector(".studio-session [data-program-level]").dispatchEvent(new Event("input"));})()`);
+  for(let i=0;i<20&&!await b.evaluate('__sharedStudio.video.readyState>=2&&!__sharedStudio.video.seeking');i++)await b.sleep(100);
+  for(let i=0;i<20&&!await b.evaluate('__sharedStudio.video.querySelector("track").readyState===2');i++)await b.sleep(50);
+  const selected=await b.evaluate('(()=>{const C=__sharedStudio,d=document.querySelector(".studio-session"),track=C.video.querySelector("track");return {next:C.next.action==="source"&&C.next.source==="sample-quiet",source:C.controller.stats.source,duration:C.video.duration,seek:d.querySelector("[data-seek]").max,captions:track.readyState,mode:track.track.mode,cues:track.track.cues?.length||0,transcript:d.querySelector("[data-transcript]").textContent,volume:C.video.volume};})()');
+  record("Shared Studio: reviewed source selection decodes its duration, loads real captions/transcript and respects personal silence",selected.next&&selected.source==="sample-quiet"&&selected.duration===8&&selected.seek==="8"&&selected.captions===2&&selected.mode==="showing"&&selected.cues>0&&selected.transcript.includes("220 Hz")&&selected.volume===0,JSON.stringify(selected));
+  await b.evaluate(`(()=>{const C=__sharedStudio;BL.net.state.selfId=902;C.snapshot={...C.snapshot,revision:4,mode:"qa",canSpeak:false,seats:[{id:902,seat:0}]};C.accept({t:"studio",state:C.snapshot});document.querySelector(".studio-session [data-raise]").click();C.raised=C.command.action==="raise";C.snapshot={...C.snapshot,revision:5,canSpeak:true,invited:[902]};C.accept({t:"studio",state:C.snapshot});})()`);
+  const qa=await b.evaluate('({raised:__sharedStudio.raised,micDisabled:document.querySelector(".studio-session [data-mic]").disabled,enabled:__sharedStudio.calls.enable,finish:document.querySelector(".studio-session [data-lower]").textContent})');
+  record("Shared Studio: a Q&A invitation enables the explicit join control without activating the microphone",qa.raised&&!qa.micDisabled&&qa.enabled===0&&qa.finish==="Finish question",JSON.stringify(qa));
   await b.evaluate(`(()=>{const C=__sharedStudio;C.controller.close();C.controller.leave();C.clean=!C.room.screen.geometry.imageSurface&&C.video.paused&&!C.video.getAttribute("src");for(let i=0;i<3;i++){C.controller.enter(C.room);C.controller.leave();}C.controller.dispose();BL.net=C.oldNet;BL.voice=C.oldVoice;CanvasRenderingContext2D.prototype.drawImage=C.originalDraw;WebGL2RenderingContext.prototype.texImage2D=C.originalUpload;WebGL2RenderingContext.prototype.texSubImage2D=C.originalSub;})()`);
   const clean=await b.evaluate('({clean:__sharedStudio.clean,dialogs:document.querySelectorAll(".studio-session").length,screen:!!__sharedStudio.room.screen.geometry.imageSurface,media:__sharedStudio.controller.stats.media,calls:__sharedStudio.calls})');
   record("Shared Studio: repeated enter/leave releases media source, screen binding, dialog and voice",clean.clean&&clean.dialogs===0&&!clean.screen&&clean.media===0&&clean.calls.stop>=4,JSON.stringify(clean));

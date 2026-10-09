@@ -28,6 +28,9 @@ const TYPES = {
   ".jpg": "image/jpeg",
   ".xml": "application/xml; charset=utf-8",
   ".txt": "text/plain; charset=utf-8",
+  ".mp4": "video/mp4",
+  ".webm": "video/webm",
+  ".vtt": "text/vtt; charset=utf-8",
   ".ico": "image/x-icon",
 };
 
