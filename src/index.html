@@ -374,10 +374,21 @@
         <ul id="inventory" class="loot"></ul>
       </section>
       <section class="panel" data-panel="chat" id="chat-panel" role="tabpanel" aria-labelledby="chat-tab" hidden>
-        <ol class="chat-log" id="chat-log" role="log" aria-live="polite" aria-relevant="additions" aria-label="Island chat" tabindex="0"></ol>
+        <ol class="chat-log" id="chat-log" role="log" aria-live="off" aria-label="Island chat" tabindex="0"></ol>
         <p class="help chat-status" id="chat-status"><span id="chat-status-text"></span> <button type="button" class="link" data-action="account-login" id="chat-login" hidden>Sign in with GitHub</button></p>
+        <p class="help chat-retention">Shared while the room is awake. Your page keeps up to 100 lines until reload or sign-out. No chat database.</p>
+        <div id="chat-identity" hidden>
+          <p class="help">Signed in as <strong id="chat-account-login"></strong></p>
+          <form class="chat-display-form" id="chat-display-form" autocomplete="off">
+            <label for="chat-display">Display name</label>
+            <input id="chat-display" type="text" minlength="3" maxlength="24" aria-describedby="chat-display-status">
+            <button type="submit" class="link" id="chat-display-save">Save name</button>
+          </form>
+          <p class="help" id="chat-display-status" role="status" aria-live="polite"></p>
+        </div>
+        <span class="chat-announcement" id="chat-announcement" role="status" aria-live="polite" aria-atomic="true"></span>
         <form class="chat-form" id="chat-form" autocomplete="off">
-          <input type="text" id="chat-input" aria-label="Say something to everyone on the island" aria-describedby="chat-left" maxlength="320" enterkeyhint="send" spellcheck="true" disabled>
+          <input type="text" id="chat-input" aria-label="Say something to everyone on the island" aria-describedby="chat-left chat-status-text" maxlength="320" enterkeyhint="send" spellcheck="true" disabled>
           <span class="chat-left" id="chat-left">160</span>
           <button type="submit" class="chat-send" id="chat-send" disabled>Send</button>
         </form>

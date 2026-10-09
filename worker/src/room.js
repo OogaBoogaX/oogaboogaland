@@ -15,7 +15,7 @@
 // in voice or muted goes out (`vstate`) only when it changes, as health does (`hp`). The last voice list
 // each player was sent lives in its attachment (`sent`), so a woken room still knows what every page holds.
 // Chat: each line is named from the session, rate limited per account across awake-room reconnects, sent to every socket and kept in a
-// ring of the last CHAT_KEEP in memory alone, which a joiner gets after `welcome`. Nothing stores it: a room
+// ring of the last CHAT_KEEP in memory alone, which a joiner gets after `welcome`. No durable chat storage: a room
 // that hibernates, restarts or is redeployed wakes with an empty ring, and the lines are gone.
 
 import { DurableObject } from "cloudflare:workers";
@@ -23,6 +23,8 @@ import {
   CLOSE_KICK, CLOSE_PROTOCOL, MAX_PLAYERS, MOVE_HZ, STALE_MS, SWEEP_MS, TICK_HZ,
   NPC_FRAME_MAX, NPC_HZ, OUTSIDE, HP_HZ, VOICE_TRACK, CHAT_HZ, CHAT_BURST, CHAT_BUCKET_KEEP, CHAT_RETRY_KEEP, chatLog, castIndex, electHost, npcFollowers, claimRefusal, parseClientMessage, playerFromHeaders, spawnPoint, takeToken, voicePeers,
 } from "./protocol.js";
+import { sha256Hex } from "./crypto.js";
+import { getPlayer } from "./db.js";
 import { sfuClient } from "./sfu.js";
 import CAST_ROWS from "./characters.gen.json";
 
@@ -188,8 +190,7 @@ export class Room extends DurableObject {
       this.voiceState(p);
     } else if (msg.t === "chat") {
       // Nothing in the attachment changes.
-      this.say(p, msg.text, msg.clientId);
-      return;
+      return this.say(p, msg.text, msg.clientId);
     } else if (msg.t === "body") {
       if (msg.name === p.body) return;
       const refusal = claimRefusal(CAST, p.login, msg.name, this.players.values(), p.contributor);
@@ -270,11 +271,15 @@ export class Room extends DurableObject {
   }
 
   // A line from a player, named by the session's login and display name; over the rate its sender is told.
-  say(p, text, clientId) {
+  async say(p, text, clientId) {
     // Scope retry ids to the authenticated account, never to a socket or client-supplied identity.
     const key = clientId === undefined ? null : `${p.id}:${clientId}`;
+    // Only the fingerprint outlives the visible ring. After the async hash, the identity check,
+    // dedup lookup and acceptance run synchronously, so simultaneous retries cannot both accept.
+    const fingerprint = key ? await sha256Hex(text) : null;
+    if (this.players.get(p.id) !== p) return;
     if (key && this.chatAccepted.has(key)) {
-      this.send(p.ws, this.chatAccepted.get(key) === text
+      this.send(p.ws, this.chatAccepted.get(key) === fingerprint
         ? { t: "chat-ack", clientId } : { t: "chat-rejected", clientId, reason: "conflict" });
       return;
     }
@@ -288,7 +293,7 @@ export class Room extends DurableObject {
     this.chatId = Math.max(at, this.chatId + 1);
     const line = { id: this.chatId, at, login: p.login, name: p.display, text };
     if (key) {
-      this.chatAccepted.set(key, text);
+      this.chatAccepted.set(key, fingerprint);
       if (this.chatAccepted.size > CHAT_RETRY_KEEP) this.chatAccepted.delete(this.chatAccepted.keys().next().value);
     }
     this.chat.push(line);
@@ -441,6 +446,14 @@ export class Room extends DurableObject {
   async alarm() {
     const now = Date.now();
     for (const p of [...this.players.values()]) {
+      // The existing operator D1 ban also ends active presence at the next successful sweep.
+      // Retry on a later alarm if D1 is unavailable; never infer a ban from a failed read.
+      if (this.env.DB) {
+        let player;
+        try { player = await getPlayer(this.env.DB, p.id); } catch { /* Retry the account check next sweep; stale eviction still applies. */ }
+        if (this.players.get(p.id) !== p) continue;
+        if (player !== undefined && (!player || player.banned_at)) { this.evict(p, "revoked"); continue; }
+      }
       const pinged = this.ctx.getWebSocketAutoResponseTimestamp(p.ws);
       const last = Math.max(p.seenAt, pinged ? pinged.getTime() : 0);
       if (now - last > STALE_MS) this.evict(p, "stale");

@@ -857,7 +857,7 @@ body[data-active-scene="arcade"] .magazine-hud {
 }
 
 .chat-log:empty::before {
-  content: "Nobody has said anything yet. Nothing said here is kept.";
+  content: "Nobody has said anything yet.";
   display: block;
   padding: 12px 0;
   color: var(--muted);
@@ -886,6 +886,13 @@ body[data-active-scene="arcade"] .magazine-hud {
   letter-spacing: 0.1em;
   text-transform: uppercase;
 }
+
+.chat-login-name { margin-right: 8px; color: var(--muted); font-size: 10px; overflow-wrap: anywhere; }
+.chat-display-form { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }
+.chat-display-form input { min-width: 0; flex: 1; width: 100px; }
+.chat-display-form label { font-size: 10px; }
+.panel .chat-retention { flex: none; margin: 0; }
+.chat-announcement { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 
 .chat-row[data-own="true"] .chat-name {
   color: var(--ok);

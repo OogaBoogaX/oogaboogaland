@@ -4207,11 +4207,15 @@ const hubChat = { name: "ooga chat", why: "rule: Ooga Chat shows only with a bac
     const line = (i) => ({ id: i + 1, at: 0, login: i % 2 ? "tester" : "peer", name: i % 2 ? "Tester" : "Peer", text: "line " + i });
     const history = [];
     for (let i = 0; i < 120; i++) history.push(line(i));
+    const announcementBeforeHistory = $("chat-announcement").textContent;
     C.heard(history, true);
+    out.announcements = log.getAttribute("aria-live") === "off" && $("chat-announcement").textContent === announcementBeforeHistory;
     out.history = [log.childElementCount, log.firstElementChild.lastChild.textContent];
     for (let i = 120; i < 150; i++) C.heard([i === 149 ? { ...line(i), text: '<img src=x onerror="window.__chatInjected=1">' } : line(i)], false);
+    out.announcements &&= $("chat-announcement").textContent.includes("@tester");
     const last = log.lastElementChild;
     out.capped = [log.childElementCount, log.firstElementChild.lastChild.textContent, C.stats.lines];
+    out.login = last.querySelector(".chat-login-name")?.textContent === "@tester";
     out.text = last.lastChild.textContent === '<img src=x onerror="window.__chatInjected=1">' && !log.querySelector("img") && !window.__chatInjected && last.dataset.own === "true";
     out.followed = log.scrollHeight - log.scrollTop - log.clientHeight <= 1;
     log.scrollTop = 0;
@@ -4235,7 +4239,9 @@ const hubChat = { name: "ooga chat", why: "rule: Ooga Chat shows only with a bac
     input.value = "a".repeat(161);
     input.dispatchEvent(new Event("input"));
     out.over = [send.disabled, $("chat-left").textContent];
-    input.value = "  hello <b>  ";
+    input.value = "hello 🍌"; input.dispatchEvent(new Event("input"));
+    out.policy = send.disabled && $("chat-status-text").textContent.includes("unsupported");
+    input.value = "  hello b  ";
     input.dispatchEvent(new Event("input"));
     out.ready = [send.disabled, $("chat-left").textContent];
     window.__chatSent = [];
@@ -4249,13 +4255,13 @@ const hubChat = { name: "ooga chat", why: "rule: Ooga Chat shows only with a bac
     };
     submit();
     const first = window.__chatSent.at(-1).clientId;
-    out.pending = input.value === "  hello <b>  " && send.disabled;
+    out.pending = input.value === "  hello b  " && send.disabled;
     receipt("unrelated", false);
     out.unrelated = send.disabled && $("chat-status").hidden;
     C.heard([{ id: 200, at: 0, login: "tester", name: "Tester", text: "hello b" }], false);
-    out.echoPending = input.value === "  hello <b>  " && send.disabled;
+    out.echoPending = input.value === "  hello b  " && send.disabled;
     receipt(first, false);
-    out.rejected = input.value === "  hello <b>  " && !send.disabled && !$("chat-status").hidden && $("chat-status-text").textContent.includes("send again");
+    out.rejected = input.value === "  hello b  " && !send.disabled && !$("chat-status").hidden && $("chat-status-text").textContent.includes("send again");
     submit();
     out.rateRetry = window.__chatSent.at(-1).clientId === first;
     input.value = "next draft";
@@ -4289,14 +4295,25 @@ const hubChat = { name: "ooga chat", why: "rule: Ooga Chat shows only with a bac
     out.changedId = editedId !== lostAck && input.value === "different message" && send.disabled && $("chat-status").hidden;
     receipt(editedId, true);
     out.correlatedClear = input.value === "";
-    input.value = "  hello <b>  ";
+    input.value = "identical"; input.dispatchEvent(new Event("input")); submit();
+    const revisionId = window.__chatSent.at(-1).clientId;
+    input.value = "different"; input.dispatchEvent(new Event("input"));
+    input.value = "identical"; input.dispatchEvent(new Event("input")); receipt(revisionId, true);
+    out.revision = input.value === "identical";
+    input.focus(); input.dispatchEvent(new CompositionEvent("compositionstart"));
+    input.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true, isComposing: true }));
+    out.ime = document.activeElement === input; input.dispatchEvent(new CompositionEvent("compositionend"));
+    C.account({ backend: true, me: null, room: "off", logoutEpoch: 1 });
+    out.logout = input.value === "" && log.childElementCount === 0 && C.stats.lines === 0;
+    C.account({ backend: true, me: { id: 9, login: "Tester" }, room: "live", logoutEpoch: 1 });
+    input.value = "  hello b  ";
     input.dispatchEvent(new Event("input"));
     window.__chatSent = [];
     input.focus();
     return out;
   })()`);
   await b.key("Enter");
-  const sent = await b.evaluate(`(() => { const input = document.getElementById("chat-input"); const pending = input.value === "  hello <b>  " && document.getElementById("chat-send").disabled;
+  const sent = await b.evaluate(`(() => { const input = document.getElementById("chat-input"); const pending = input.value === "  hello b  " && document.getElementById("chat-send").disabled;
     BL.chat.heard([], false, { clientId: window.__chatSent.at(-1).clientId, accepted: true });
     return { pending, sent: window.__chatSent, cleared: input.value === "" && document.getElementById("chat-send").disabled && document.getElementById("chat-left").textContent === "160" }; })()`);
   await b.key("Escape");
@@ -4307,7 +4324,7 @@ const hubChat = { name: "ooga chat", why: "rule: Ooga Chat shows only with a bac
     && r.reading[0] === 0 && r.reading[1] === 100 && r.reading[2] === "line 51" && r.refollowed
     && r.rejoined[0] === 100 && r.rejoined[1] === "line 54" && r.rejoined[2] === "line 153" && r.emptyRejoin && r.readerRejoin && r.followRejoin
     && r.over[0] && r.over[1] === "-1" && !r.ready[0] && r.ready[1] === "153"
-    && r.pending && r.rejected && r.edited && r.disconnected && r.unrelated && r.echoPending && r.rateRetry && r.beforeAcceptance && r.identicalDistinct && r.lostAckRetry && r.changedId && r.correlatedClear && sent.pending && sent.sent.length === 1 && sent.sent[0].text === "  hello <b>  " && /^[\w-]{36}$/.test(sent.sent[0].clientId) && sent.cleared && escaped.blurred && escaped.open && escaped.tab === "chat", JSON.stringify({ none, r, sent, escaped }));
+    && r.announcements && r.login && r.policy && r.revision && r.ime && r.logout && r.pending && r.rejected && r.edited && r.disconnected && r.unrelated && r.echoPending && r.rateRetry && r.beforeAcceptance && r.identicalDistinct && r.lostAckRetry && r.changedId && r.correlatedClear && sent.pending && sent.sent.length === 1 && sent.sent[0].text === "  hello b  " && /^[\w-]{36}$/.test(sent.sent[0].clientId) && sent.cleared && escaped.blurred && escaped.open && escaped.tab === "chat", JSON.stringify({ none, r, sent, escaped }));
 } };
 const hubBlockHeight = { name: "header clock and block height", why: "rule: the single-digit clock is centered from its visible glyphs with a time zone, and the shared chain reading is shown beneath it", run: async (b) => {
   const before = await b.evaluate(`(() => { const clock = document.getElementById("world-clock"), label = clock.querySelector("svg").getAttribute("aria-label"), text = label.replace(/^Ooga Booga time /, ""), cells = [...text].reduce((sum, ch) => sum + (ch === " " ? 2 : 4), -1), zone = (new Intl.DateTimeFormat("en-US", { timeZoneName: "short" }).formatToParts(new Date()).find(part => part.type === "timeZoneName")?.value || "UTC").toUpperCase().replaceAll("−", "-"); return { height: document.getElementById("world-block-height").textContent, bananas: !!document.getElementById("world-banana-count"), label, namedImage: !clock.hasAttribute("aria-label") && clock.querySelector("svg").getAttribute("role") === "img", text, zone, cells, viewWidth: clock.querySelector("svg").viewBox.baseVal.width, cssWidth: parseFloat(clock.style.width) }; })()`);
@@ -10559,11 +10576,53 @@ const netFixture=(BL,response)=>{
   const sockets=[],sent=[],events=new Map();let calls=0,tick=1000;
   class Socket {static OPEN=1;constructor(){this.readyState=1;sockets.push(this);}send(v){sent.push(typeof v==="string"?JSON.parse(v):v);}close(){this.readyState=3;}}
   const voice={setPeers:()=>{},restart:()=>{},stop:()=>{}};
-  const context={window:{BL:{characters:BL.characters,contributors:BL.contributors,donations:BL.donations,voice},setTimeout:()=>1,clearTimeout(){},setInterval:()=>1,clearInterval(){}},document:{hidden:false,addEventListener:(k,v)=>events.set(k,v),removeEventListener:k=>events.delete(k)},location:{protocol:"https:",host:"fixture.invalid"},fetch:async()=>{calls++;return response();},AbortSignal,WebSocket:Socket,performance:{now:()=>tick+=200},Date,ArrayBuffer};
+  const context={window:{BL:{characters:BL.characters,contributors:BL.contributors,donations:BL.donations,voice},setTimeout:()=>1,clearTimeout(){},setInterval:()=>1,clearInterval(){}},document:{hidden:false,addEventListener:(k,v)=>events.set(k,v),removeEventListener:k=>events.delete(k)},location:{protocol:"https:",host:"fixture.invalid"},fetch:async(...args)=>{calls++;return response(...args);},AbortSignal,WebSocket:Socket,performance:{now:()=>tick+=200},Date,ArrayBuffer};
   runInNewContext(source,context);
   return {net:context.window.BL.net,sockets,sent,events,get calls(){return calls;}};
 };
 // Ooga Chat's wire on the page: what it sends, and the lines it hands on (chat.js keeps and shows them).
+// Execute the real chat controller with a small DOM and a controllable acknowledgement clock.
+const chatClientChecks = async () => {
+  const nodes = new Map(), timers = new Map(); let timerId = 0, uuid = 0;
+  const element = () => ({ value: "", textContent: "", dataset: {}, hidden: false, disabled: false, children: [], style: { setProperty() {}, removeProperty() {} }, handlers: {},
+    addEventListener(type, fn) { this.handlers[type] = fn; }, append(...items) { this.children.push(...items); }, replaceChildren(...items) { this.children = items; },
+    focus() { document.activeElement = this; }, get childElementCount() { return this.children.length; } });
+  const document = { activeElement: null, getElementById(id) { if (!nodes.has(id)) nodes.set(id, element()); return nodes.get(id); }, createElement: element };
+  const sent = [], window = { BL: { net: { CHAT_MAX: 160, CHAT_KEEP: 100, subscribe() {}, subscribeChat() {}, sendChat(text, clientId) { sent.push({ text, clientId }); return true; } }, donations: { sanitize: (text, max) => String(text || "").replace(/[^\w .,!?'@#:-]/g, "").trim().slice(0, max) } }, crypto: { randomUUID: () => "id-" + ++uuid }, matchMedia: () => ({ matches: true }), setTimeout(fn) { timers.set(++timerId, fn); return timerId; }, clearTimeout(id) { timers.delete(id); } };
+  runInNewContext(await readFile(join(root, "src/js/chat.js"), "utf8"), { window, document, MutationObserver: class { observe() {} }, Intl });
+  const C = window.BL.chat, input = nodes.get("chat-input"), send = nodes.get("chat-send"), status = nodes.get("chat-status-text"), edit = text => { input.value = text; input.handlers.input(); }, submit = () => nodes.get("chat-form").handlers.submit({ preventDefault() {} }), receipt = id => C.heard([], false, { clientId: id, accepted: true });
+  C.account({ backend: true, me: { id: 1, login: "Tester" }, room: "live" });
+  edit("hello"); submit(); const first = sent.at(-1)?.clientId, waiting = send.disabled;
+  for (const fn of [...timers.values()]) fn();
+  const uncertain = !send.disabled && status.textContent.includes("uncertain"); submit(); const stable = sent.at(-1)?.clientId === first;
+  edit("other"); edit("hello"); receipt(first); const revision = input.value === "hello";
+  edit("new"); submit(); const second = sent.at(-1)?.clientId; receipt(first); const late = send.disabled && input.value === "new"; receipt(second);
+  edit("unsupported 🍌"); const policy = send.disabled && status.textContent.includes("unsupported");
+  C.heard([{ id: 1, login: "tester", name: "Display", text: "hello" }], true);
+  C.account({ backend: true, me: null, room: "off", logoutEpoch: 1 }); receipt(second);
+  record("ooga chat client: lost receipts time out to a stable retry; edited identical drafts and newer sends survive old receipts; explicit logout clears local text and unsupported characters are explained", waiting && uncertain && stable && revision && late && policy && input.value === "" && C.stats.lines === 0 && timers.size === 0, JSON.stringify({ waiting, uncertain, stable, revision, late, policy, lines: C.stats.lines, timers: timers.size }));
+};
+const chatAccountChecks = async BL => {
+  const requests = [], player = { id: 71, login: "Tester", display: "Tester" };
+  let release = null;
+  const f = netFixture(BL, async (url, options = {}) => {
+    requests.push({ url, ...options });
+    if (options.method === "PATCH" && JSON.parse(options.body).display === "Delayed") await new Promise(resolve => { release = resolve; });
+    return { ok: true, headers: { get: () => "application/json" }, json: async () => ({ player: { ...player, display: options.method === "PATCH" ? JSON.parse(options.body).display : player.display } }) };
+  });
+  await f.net.start();
+  const before = f.calls, invalid = await f.net.setDisplay("bad 🍌"), blocked = !invalid.ok && f.calls === before;
+  const changed = await f.net.setDisplay("New Name"), renamed = changed.ok && f.net.state.me.display === "New Name" && f.sockets.length === 2 && requests.at(-1).method === "PATCH" && f.net.state.logoutEpoch === 0;
+  const delayed = f.net.setDisplay("Delayed"); await Promise.resolve();
+  await f.net.logout(); release(); const stale = await delayed;
+  record("ooga account: display updates use the existing PATCH API and fresh room connection; unsupported characters make no request; explicit logout clears identity and a late edit cannot revive it", blocked && renamed && !stale.ok && f.net.state.me === null && f.net.state.room === "off" && f.net.state.logoutEpoch === 1, JSON.stringify({ blocked, renamed, stale, epoch: f.net.state.logoutEpoch }));
+  const revoked = netFixture(BL, () => ({ ok: true, headers: { get: () => "application/json" }, json: async () => ({ player }) }));
+  await revoked.net.start();
+  revoked.sockets[0].onmessage({ data: JSON.stringify({ t: "kick", reason: "revoked" }) });
+  revoked.net.rejoin();
+  record("ooga account: revoked kick stops reconnect and clears authenticated identity", revoked.net.state.me === null && revoked.net.state.room === "revoked" && revoked.sockets.length === 1 && !revoked.net.sendChat("blocked"));
+  revoked.net.dispose();
+};
 const chatNetChecks = async BL => {
   const f=netFixture(BL,()=>({ok:true,headers:{get:()=>"application/json"},json:async()=>({player:{id:71,login:"Tester",display:"Tester"}})}));
   const receipts=[];const heard=[];f.net.subscribeChat((lines,replace,receipt)=>{if(receipt){receipts.push(receipt);return;}heard.push({ids:lines.map(l=>l.id),replace,keys:lines.map(l=>Object.keys(l).join())});});
@@ -11364,7 +11423,7 @@ record("character visibility source bakes: ownership wrappers share exact immuta
     }
     renderer.dispose();I.dispose();W.dispose();document.createElement=oldCreate;console.log("Exported "+rows.length+" actual Canvas water review views to "+out);return;
   }
-  if(ARGS.includes("chat-unit")){await chatNetChecks(BL);return;}
+  if(ARGS.includes("chat-unit")){await chatNetChecks(BL);await chatClientChecks();await chatAccountChecks(BL);return;}
   if(ARGS.includes("integration-unit")){await reviewCaptureChecks();await integrationChecks(BL);return;}
   if(ARGS.includes("svrn-unit")){svrnChecks(BL);menuShellChecks(BL);return;}
   if(ARGS.includes("vacancy-unit")){await vacancyChecks(BL);return;}
@@ -11413,6 +11472,8 @@ record("character visibility source bakes: ownership wrappers share exact immuta
   if(ARGS.includes("stackchain-unit")){stackchainChecks(BL);menuShellChecks(BL);return;}
   if(ARGS.includes("dsb-menus-unit")){stackchainChecks(BL);memeFactoryChecks(BL);menuShellChecks(BL);maxisChecks(BL);rulersChecks(BL);inkChecks(BL);bigBitcoinChecks(BL);return;}
   await chatNetChecks(BL);
+  await chatClientChecks();
+  await chatAccountChecks(BL);
   exteriorEnrichmentChecks(BL);
   if(ARGS.includes("exterior-unit"))return;
   maxisChecks(BL);

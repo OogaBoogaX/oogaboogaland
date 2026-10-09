@@ -33,7 +33,7 @@
 // room is live; `subscribeChat` hears the room's lines as `fn(lines, joined, receipt)`: one new line, or on every
 // (re)join the lines the room still holds, which chat.js merges; a rejection keeps the draft. The room names each line's
 // speaker; the page keeps nothing (chat.js shows them).
-// Exports start, subscribe, subscribeRoster, subscribeChat, dispose, login, logout, rejoin, setBody, setZone, setHub, setMuted, setHealth, sendNpc,
+// Exports start, subscribe, subscribeRoster, subscribeChat, dispose, login, logout, setDisplay, rejoin, setBody, setZone, setHub, setMuted, setHealth, sendNpc,
 // sendChat, npcFrame, sendPose, mayDrive, ownCharacter, characterOf, serverNow, remotes, state, CHAT_MAX and CHAT_KEEP.
 (() => {
   "use strict";
@@ -53,7 +53,7 @@
   const remotes = new Map();
   // room: "off" (signed out or no backend), "connecting", "live", "paused" (hidden a while), or a kick that
 // stopped it ("replaced", "full").
-  const state = { backend: false, me: null, started: false, room: "off", selfId: 0, online: 0, released: null, loopEpoch: 0, zone: "outside", body: null, hostId: 0, followers: 0, npcVersion: 0 };
+  const state = { backend: false, me: null, logoutEpoch: 0, started: false, room: "off", selfId: 0, online: 0, released: null, loopEpoch: 0, zone: "outside", body: null, hostId: 0, followers: 0, npcVersion: 0 };
   let ws = null, retry = 0, retryTimer = 0, pingTimer = 0, hiddenTimer = 0, stopped = false;
   let npcFrame = null, inHub = false, hubSent = null;
   let zone = "outside", body = null, muted = false, hpSent = 100, koSent = false, hpAt = 0, poseAt = 0, px = NaN, py = NaN, pz = NaN, pyaw = NaN;
@@ -222,6 +222,8 @@
       state.released = { name: String(msg.name), reason: String(msg.reason) };
       emit();
     } else if (msg.t === "kick") {
+      // Revoked access stops reconnecting; the operator may later restore access.
+      if (msg.reason === "revoked") state.me = null;
       // replaced and full stop here; stale reconnects like any drop.
       if (msg.reason !== "stale") stopped = true;
       close(msg.reason === "stale" ? "connecting" : msg.reason);
@@ -303,7 +305,31 @@
     stopped = true;
     window.clearTimeout(retryTimer);
     state.me = null;
+    state.logoutEpoch++;
     close("off");
+  };
+
+  // Existing account API; rejoin with fresh authenticated headers so future lines use the new name.
+  const setDisplay = async (display) => {
+    const player = state.me;
+    if (!state.backend || !player) return { ok: false, error: "Sign in first." };
+    const clean = String(display).trim();
+    if (clean.length < 3 || clean.length > 24 || /[^\w .,!?'@#:-]/.test(clean))
+      return { ok: false, error: "Use 3–24 letters A–Z, digits, spaces or _ . , ! ? ' @ # : -" };
+    try {
+      const res = await fetch("/api/me", { method: "PATCH", credentials: "same-origin", headers: { "content-type": "application/json" }, body: JSON.stringify({ display: clean }), signal: AbortSignal.timeout(6000) });
+      const data = await res.json();
+      if (!res.ok) return { ok: false, error: "Name could not be saved. Try again." };
+      const updated = accept(data.player);
+      if (!updated || updated.id !== player.id || state.me !== player) return { ok: false, error: "Account changed. Try again." };
+      state.me = updated;
+      const rejoinHere = !stopped;
+      close(rejoinHere ? "connecting" : state.room);
+      if (rejoinHere) { window.clearTimeout(retryTimer); retryTimer = 0; connect(); }
+      return { ok: true };
+    } catch {
+      return { ok: false, error: "Name could not be saved. Try again." };
+    }
   };
 
   // After a `replaced` or `full` kick, the visitor chooses to play here again.
@@ -467,5 +493,5 @@
     close("off");
   };
 
-  BL.net = { start, subscribe, subscribeRoster, subscribeChat, dispose, login, logout, rejoin, setBody, setZone, setHub, setMuted, setHealth, sendNpc, sendChat, sendPose, mayDrive, ownCharacter, characterOf, serverNow, remotes, state, CHAT_MAX, CHAT_KEEP, get npcFrame() { return npcFrame; } };
+  BL.net = { start, subscribe, subscribeRoster, subscribeChat, dispose, login, logout, setDisplay, rejoin, setBody, setZone, setHub, setMuted, setHealth, sendNpc, sendChat, sendPose, mayDrive, ownCharacter, characterOf, serverNow, remotes, state, CHAT_MAX, CHAT_KEEP, get npcFrame() { return npcFrame; } };
 })();
