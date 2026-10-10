@@ -8,6 +8,10 @@
   // The tallest shootable meadow rocks reach 1.11; a prop step must clear their real mesh.
   const SCALE = 1, SPEED = 2.7, CHILL_SPEED = 0.9, STEP = 0.52, PROP_STEP = 1.16, JUMP_BUFFER = 0.18, PLAYER_SMASH_RECOVER = 0.12;
   const RAGE_SPEED = 12, RAGE_STEP = 0.1;
+  // The hub shares this scope for route, live-body and captive sweeps. Derive
+  // it from the held capture so release and possession restore normal collision.
+  const rageCarrying = entry => !!(entry?.active && !entry.controlled && entry.rage.active
+    && entry.motion.dragging && entry.capture?.autonomous && entry.capture.cave);
   const CHILL_REST_SECONDS = 120, CHILL_REST_VARIATION = 120;
   // Measured full-size gallop envelope. Airborne and floor-pound poses reserve
   // their larger envelopes before beginning the animation.
@@ -95,9 +99,9 @@
     // flee a fire, which would send its gorilla home over the bridge and straight back. One standing in for an
     // Ooga somebody else is driving is away, not asleep.
     const sleeps = (cave) => crew.stateOf(cave) === "sleeping" && !cave.remoteControlled;
-    const enteringCave = e => !e.controlled && e.mode === "working" && e.phase === "travel"
+    const enteringCave = e => !e.controlled && !e.rage.active && e.mode === "working" && e.phase === "travel"
       && (e.route === "apron" || e.route === "enter");
-    const labWorker = e => !e.controlled && e.mode === "working"
+    const labWorker = e => !e.controlled && !e.rage.active && e.mode === "working"
       && (e.route === "exit" && e.fromSite === labSite || e.site === labSite && (e.motion.lab || e.planningLab));
     const labSpeed = e => e.lab.yielding ? 0.65 : e.route === "exit" ? SPEED : 1.1;
     const enteringAisle = (e) => e.phase === "travel" && e.route === "enter"
@@ -249,7 +253,7 @@
     const actorLanding = (e, x, y, z) => (!e.debugMove.active || y > ctx.debugMinY)
       // Underground platforms can extend beyond the top island footprint.
       // A real floor beneath the centre also admits their inward handoff.
-      && (landing(x, y, z) || Number.isFinite(y) && Math.abs(pointSupportAt(x, z, y + 0.02) - y) < 0.05);
+      && (landing(x, y, z) || Number.isFinite(y) && Math.abs(pointSupportAt(x, z, y + 0.02, e) - y) < 0.05);
     // A cave departure can fly over the reserved apron. Its destination is
     // outside that zone, and scenery/peer clearance still certifies the arc.
     const staticClear = (e, x, y, z, nx = x, ny = y, nz = z, fromHeading = e.heading, toHeading = fromHeading) =>
@@ -415,10 +419,15 @@
       e.motion.labBench = null;
     };
     const syncLab = (e) => {
-      const p = e.root.position, inside = insideLab(p.x, p.y, p.z), wasInside = e.motion.lab;
+      const p = e.root.position, raging = e.rage.active;
+      // Location still supplies collision geometry, but rage owns the pose
+      // and job until it ends, including while crossing the lab threshold.
+      const inside = !raging && insideLab(p.x, p.y, p.z), wasInside = e.motion.lab;
+      e.motion.rage = raging;
       e.motion.lab = inside;
-      e.motion.labRunIn = e.route === "enter" && e.site === labSite && !e.entryTurn;
+      e.motion.labRunIn = !raging && e.route === "enter" && e.site === labSite && !e.entryTurn;
       e.motion.labSqueeze = false;
+      if (raging) e.biped = false;
       if (inside) {
         e.parked = false; e.biped = !e.motion.labRunIn; e.lounge = "";
         if (!wasInside && !e.controlled && !e.actionControlled) e.pound = e.beat = e.stand = e.recover = 0;
@@ -1848,7 +1857,7 @@
         drive: { x: 0, z: 0, climbAxis: 0, climbSide: 0, heading: NaN, climbExitHeading: NaN, climbExitLook: NaN, climbTurnTimer: 0,
           run: false, jumpHeld: false, jumpDown: false, jumpPressed: false, jumpBuffer: 0, jumps: 0, avoidSide: 0, avoidHeading: 0, avoidTime: 0,
           cancelled: false, vx: 0, vy: 0, vz: 0, airborne: false, passiveFall: false, wallRelease: false, grounded: true, resume: false, motionRecover: 0, motionEnvelope: false },
-        motion: { poundCharge: 0, takeoff: 0, landing: 0, supportOffset: 0, supportEntry: null, swim: 0,
+        motion: { poundCharge: 0, takeoff: 0, landing: 0, supportOffset: 0, supportEntry: null, swim: 0, rage: false,
           groundRects: { flat: { x: 0, y: 0, z: 0, heading: 0 }, angled: { x: 0, y: 0, z: 0, heading: 0, groundX: 0, groundZ: 0, steep: false, walkable: true } },
           walkPhase: NaN, roll: 0, rollAngle: 0, rollSide: 0, smash: false, dragging: false, throwProgress: 0,
           climbGripX: NaN, climbGripY: NaN, climbGripZ: NaN, climbGripStride: 0, climbGripDirection: 0, climbGripSide: 0, climbGripRelease: 0,
@@ -1907,7 +1916,7 @@
       const e = byOwner.get(cave);
       if (!e || !sites[index]) return;
       if (e === debugShuttle && index !== labSite) return;
-      if (e.controlled || e.drive.airborne || e.climb.active || e.debugMove.active) { e.pendingSite = index; return; }
+      if (e.controlled || e.rage.active || e.drive.airborne || e.climb.active || e.debugMove.active) { e.pendingSite = index; return; }
       // Reloading never evicts a gorilla whose next shift is in this cave.
       if (e.site === index) return;
       if (!e.active) { e.site = index; return; }
@@ -1929,13 +1938,23 @@
         || (wall ? wallContactShare(e, x, y, z, e.heading) < WALL_ENTER_SHARE
           || !climbClear(e, x, y, z, x, y, z, e.heading) : !landing(x, y, z))
         || e.phase === "work" && caveAt(x, y, z, AIR_RADIUS) !== e.site) return false;
-      const duration = running ? distance / SPEED : Math.max(vault ? 1 : 0.52, distance / (vault ? 2.4 : 3.3));
+      let duration = running ? distance / SPEED : Math.max(vault ? 1 : 0.52, distance / (vault ? 2.4 : 3.3));
+      const rageAscent = running && e.rageTraversal && y > p.y;
+      if (rageAscent) {
+        // Rage approaches can use the full jump reach to a high landing. Do not
+        // stretch that arc to the ordinary stroll speed. The longest legal
+        // flight rises to the maximum apex, then descends to this landing.
+        const rise = y - p.y, apexTime = Math.sqrt(2 * ROOF_JUMP_HEIGHT / GRAVITY);
+        duration = clamp(duration, Math.sqrt(2 * rise / GRAVITY),
+          apexTime + Math.sqrt(2 * (ROOF_JUMP_HEIGHT - rise) / GRAVITY));
+      }
       if (running) {
-        // Keep horizontal running speed and a gravity-shaped arc. Reject
+        // Keep a gravity-shaped arc at the chosen running speed. Reject
         // landings above the apex or beyond the bounded running-jump height.
         const velocity = (y - p.y) / duration + GRAVITY * duration * 0.5;
-        if (velocity <= 0 || velocity - GRAVITY * duration > 0
-          || velocity * velocity / (2 * GRAVITY) > ROOF_JUMP_HEIGHT) return false;
+        const tolerance = rageAscent ? 1e-9 : 0;
+        if (velocity <= 0 || velocity - GRAVITY * duration > tolerance
+          || velocity * velocity / (2 * GRAVITY) > ROOF_JUMP_HEIGHT + tolerance) return false;
         lift = GRAVITY * duration * duration / 8;
       }
       // A voluntary jump must not bypass the fireplace detour just because
@@ -1978,7 +1997,7 @@
       for (let distance = 2; distance <= MAX_JUMP; distance += 0.4) {
         const x = p.x + sx * distance, z = p.z + sz * distance, y = ctx.surfaceAt(x, z);
         if (roofAt(x, y, z) !== destination
-          || Math.abs(pointSupportAt(x, z, y + 0.02) - y) > 0.05) continue;
+          || Math.abs(pointSupportAt(x, z, y + 0.02, e) - y) > 0.05) continue;
         if (prepareJump(e, x, y, z, 0, false, true)) {
           e.roam.runUp = 0; e.motion.takeoff = 1; return true;
         }
@@ -2033,7 +2052,12 @@
         // Reservations prevent a new leap from crossing an existing route.
         // In flight, sweep the actual bodies: conservative future corridors
         // must not pin an already-airborne clanker in both directions.
-        if (staticClear(e, p.x, p.y, p.z, POINT.x, POINT.y, POINT.z)) { moved = true; break; }
+        if (staticClear(e, p.x, p.y, p.z, POINT.x, POINT.y, POINT.z)
+          // Admit the actual next animated hand/captive pose before advancing
+          // the arc cursor. A refusal reverses through the same checked arc.
+          && (!rageCarrying(e) || ctx.rageJumpPoseClear?.(e, dt, POINT.x, POINT.y, POINT.z,
+            Math.hypot(jump.toX - jump.fromX, jump.toZ - jump.fromZ) / jump.duration,
+            next !== 1 && !(next === 0 && jump.reverse)) !== false)) { moved = true; break; }
         // Moving actors can temporarily obstruct either end. Recheck both
         // directions, so a blocked retreat can resume a now-clear landing.
         jump.reverse = !jump.reverse;
@@ -2049,6 +2073,14 @@
           d.vy = Math.min(0, ((jump.toY - jump.fromY) + jump.lift * 4 * (1 - jump.progress * 2)) / jump.duration);
           d.airborne = d.resume = d.motionEnvelope = true; d.passiveFall = d.grounded = false; d.motionRecover = 0.6;
           jump.active = false; e.motion.takeoff = 0;
+          if (e.rage.active) {
+            // A refused rage arc needs the same checked outward recovery as
+            // a released wall grip. Keep the flying pose if its held body
+            // cannot yet fit the passive-fall pose at this height.
+            d.wallRelease = true;
+            d.passiveFall = !rageCarrying(e) || ctx.rageJumpPoseClear?.(e, dt, p.x, p.y, p.z, 0, false) !== false;
+            e.climb.airAttachAfter = Infinity;
+          }
         }
         return;
       }
@@ -2711,7 +2743,7 @@
       // A destination without a picked normal still names a surface point.
       // Leading knuckles can rest several treads above that point on stairs;
       // their footprint height must not turn the tread into a wall command.
-      d.wallTarget = normal ? Number.isFinite(d.normalHeading) : Math.abs(pointSupportAt(x, z, y) - y) > 0.75;
+      d.wallTarget = normal ? Number.isFinite(d.normalHeading) : Math.abs(pointSupportAt(x, z, y, e) - y) > 0.75;
       d.wallPending = d.wallTarget; d.wallFinal = false;
       d.normalized = false; d.normalizeAt = 0; d.normalizeScore = Infinity;
       d.hops = d.candidate = d.visitedCount = d.visitedNext = d.failedCount = d.failedNext = 0;
@@ -2972,7 +3004,7 @@
       const clearance = platform ? Math.max(0, platform.radius - radius) : 0;
       for (let reach = firstReach; reach <= lastReach; reach += 0.3) {
         const tx = x + sx * reach, tz = z + sz * reach;
-        const floor = pointSupportAt(tx, tz, platform ? platform.y + 0.05 : y + 1.05);
+        const floor = pointSupportAt(tx, tz, platform ? platform.y + 0.05 : y + 1.05, e);
         if (!Number.isFinite(floor) || floor > y + 1.05 || !platform && y - floor > 2.4
           // A descent cannot enter a floor above its feet. Just below the
           // rim, that floor is the roof we left, not a window landing.
@@ -3007,6 +3039,9 @@
     };
     const beginPlatformEntry = (e) => {
       const p = e.root.position, c = e.climb, d = e.drive, m = e.motion;
+      // A released wall grip must also clear balcony openings before an
+      // airborne catch can mount them again.
+      if (d.airborne && elapsed < c.airAttachAfter) return false;
       if (!ctx.platformEntryAt || !ctx.platformEntryAt(p.x, p.y, p.z, WALL_POINT)) return false;
       const heading = WALL_POINT.heading;
       if (!openingLanding(e, p.x, p.y, p.z, heading, WALL_POINT)) return false;
@@ -3169,7 +3204,7 @@
         // Keeping any climb blend at the landing leaves the hands on the lintel.
         m.climb = m.climbBlend = 1 - clamp(inward / 0.8, 0, 1);
         if (remaining - advance < 0.03 && Math.abs(y - c.freeTargetY) < 0.03) {
-          if (Math.abs(pointSupportAt(p.x, p.z, p.y + 0.1) - c.freeTargetY) > 0.12) {
+          if (Math.abs(pointSupportAt(p.x, p.z, p.y + 0.1, e) - c.freeTargetY) > 0.12) {
             dropRectangleClimb(e, false); return;
           }
           const settle = m.climb;
@@ -3208,7 +3243,7 @@
         return;
       }
       if (e.controlled && !c.handoffDirection && vertical < 0 && !side) {
-        const floor = pointSupportAt(p.x - sx * 0.6, p.z - sz * 0.6, p.y + 0.2);
+        const floor = pointSupportAt(p.x - sx * 0.6, p.z - sz * 0.6, p.y + 0.2, e);
         if (Number.isFinite(floor) && floor <= p.y && p.y - floor <= 1.2) {
           dropRectangleClimb(e); c.airAttachAfter = Infinity; return;
         }
@@ -3312,7 +3347,7 @@
         // of continuing vertically through the ground plane.
         if (!e.controlled && !e.debugMove.active && !side) {
           const x = p.x - sx * 0.6, z = p.z - sz * 0.6;
-          const floor = pointSupportAt(x, z, p.y + 0.2);
+          const floor = pointSupportAt(x, z, p.y + 0.2, e);
           // On a jagged face the last handhold can end just above clear
           // grass. Release into a short outward fall rather than holding a
           // stationary wall pose until the recovery timer relocates the Ooga.
@@ -3429,7 +3464,7 @@
         // below the outward side, release the grip and let gravity finish the
         // descent instead of holding the same rejected wall step indefinitely.
         const x = p.x - sx * 1.5, z = p.z - sz * 1.5;
-        const floor = pointSupportAt(x, z, p.y + 0.02);
+        const floor = pointSupportAt(x, z, p.y + 0.02, e);
         if (Number.isFinite(floor) && floor <= p.y && floor >= p.y - 12
           && actorLanding(e, x, floor, z)
           && chillCaveClear(p.x, p.y, p.z, x, floor, z, true)
@@ -4976,8 +5011,8 @@
       const edgeLeap = runningEdge && !backing && p.y - currentFloor <= STEP;
       // Do not enter flight while a walking pad still has roof support.
       const terrainEdge = p.y - currentFloor <= STEP && floor < p.y - STEP
-        && pointSupportAt(x, z, p.y + 0.1) < p.y - STEP;
-      const landingFloor = terrainEdge ? pointSupportAt(x, z, p.y + 0.1) : floor;
+        && pointSupportAt(x, z, p.y + 0.1, e) < p.y - STEP;
+      const landingFloor = terrainEdge ? pointSupportAt(x, z, p.y + 0.1, e) : floor;
       const backwardStepOff = backing && floor < p.y - STEP
         && (p.y - currentFloor <= STEP || Math.abs(support(e, p.x, p.z, p.y, STEP) - p.y) <= 0.2);
       // A run over terrain gets the Ooga's short ledge hop. Walking off a
@@ -5368,8 +5403,8 @@
       const ramp = walkingRampAt(x, p.y, z, heading);
       if (ramp) drop = Math.max(drop, BL.wallPanels.RAMP_STEP);
       if (allowFall && d.run && !ramp && drop <= STEP
-        && pointSupportAt(p.x, p.z, p.y + 0.1) >= p.y - STEP
-        && pointSupportAt(x, z, p.y + 0.1) < p.y - STEP
+        && pointSupportAt(p.x, p.z, p.y + 0.1, e) >= p.y - STEP
+        && pointSupportAt(x, z, p.y + 0.1, e) < p.y - STEP
         && beginSupportFall(e, x, z, heading, d.vx, d.vz, d.run)) return true;
       const y = support(e, x, z, p.y, PROP_STEP, heading);
       if (!Number.isFinite(y) || y < p.y - drop) {
@@ -5429,6 +5464,16 @@
         }
       }
       return false;
+    };
+    const rageFallClear = (e, dt, x, y, z, heading, speed, landed = false) => {
+      if (!e.drive.wallRelease || !rageCarrying(e)) return true;
+      const p = e.root.position, previousHeading = e.heading, landing = e.motion.landing;
+      if (ctx.rageCarryClear && !ctx.rageCarryClear(e, p.x, p.y, p.z, x, y, z, previousHeading, heading)) return false;
+      e.heading = heading;
+      if (landed) e.motion.landing = e.drive.passiveFall ? 0 : 1;
+      try {
+        return ctx.rageJumpPoseClear?.(e, dt, x, y, z, speed, !landed && !e.drive.passiveFall) !== false;
+      } finally { e.heading = previousHeading; e.motion.landing = landing; }
     };
     const updateDriven = (e, dt) => {
       const d = e.drive, p = e.root.position, m = e.motion;
@@ -5559,6 +5604,7 @@
           && !occupied(e, x, p.y, z, true, facing) && !occupied(e, x, y, z, true, facing)
           && staticClear(e, p.x, p.y, p.z, x, p.y, z, e.heading, facing)
           && staticClear(e, x, p.y, z, x, y, z, facing, facing)) valid = true;
+        if (valid && !rageFallClear(e, dt, x, y, z, facing, Math.hypot(x - oldX, z - oldZ) / dt, landing)) valid = false;
         if (valid) {
           p.x = x; p.y = y; p.z = z; e.heading = facing;
           if (landing) {
@@ -5580,7 +5626,9 @@
             // actual terrain and prop sweep, then let gravity continue.
             || d.passiveFall && ctx.climbClear && ctx.climbClear(e,
               p.x, p.y + 0.85, p.z, p.x, y + 0.85, p.z,
-              0.12, 0.5, false, false, true, true))) p.y = y;
+              0.12, 0.5, false, false, true, true))
+            && rageFallClear(e, dt, p.x, y, p.z, e.heading, Math.hypot(p.x - oldX, p.z - oldZ) / dt,
+              Number.isFinite(ownFloor) && Math.abs(y - ownFloor) < 0.02 && d.vy <= 0)) p.y = y;
           else if (d.vy > 0) d.vy = 0;
           if (p.y === beforeFall && d.vy < 0 && (!Number.isFinite(ownFloor) || ownFloor < p.y - 0.5)
             && ctx.climbClear) {
@@ -5596,12 +5644,15 @@
                 || !ctx.climbClear(e, p.x, p.y + 0.85, p.z, tx, p.y + 0.85, tz,
                   0.12, 0.5, false, false, true, false)
                 || !ctx.climbClear(e, tx, p.y + 0.85, tz, tx, y + 0.85, tz,
-                  0.12, 0.5, false, false, true, true)) continue;
+                  0.12, 0.5, false, false, true, true)
+                || !rageFallClear(e, dt, tx, y, tz, e.heading, Math.hypot(tx - oldX, tz - oldZ) / dt,
+                  Number.isFinite(ownFloor) && Math.abs(y - ownFloor) < 0.02 && d.vy <= 0)) continue;
               p.x = tx; p.y = y; p.z = tz;
               break;
             }
           }
-          if (Number.isFinite(ownFloor) && Math.abs(p.y - ownFloor) < 0.02 && d.vy <= 0) {
+          if (Number.isFinite(ownFloor) && Math.abs(p.y - ownFloor) < 0.02 && d.vy <= 0
+            && rageFallClear(e, dt, p.x, p.y, p.z, e.heading, Math.hypot(p.x - oldX, p.z - oldZ) / dt, true)) {
             if (d.airborne) { d.motionRecover = d.passiveFall ? 0 : 0.6; m.landing = d.passiveFall ? 0 : 1; }
             d.airborne = d.passiveFall = false; d.grounded = true; d.vy = d.jumps = 0;
             d.wallRelease = false;
@@ -6083,7 +6134,7 @@
           ? ctx.terrainSupportAt(e, x, z, y, STEP, fromHeading) : groundAt(x, z, y);
         // A tall object has no wall descent to reserve. Prove a clear fall
         // onto real land, then let the normal gravity controller take over.
-        // A captive is released/replanned before taking an airborne route.
+        // A captive instead needs the explicitly swept jump/climb route.
         if (e.motion.dragging || y - terrain <= 0.02 || !actorLanding(e, nx, ny, nz)
           || !propStepClear(e, x, y, z, nx, ny, nz, fromHeading, heading)) return false;
       }
@@ -6117,7 +6168,8 @@
       return drivenGroundStep(e, x, z, heading, PROP_STEP, falling);
     };
     const rageWalk = (e, dt, x, y, z, heading) => {
-      const p = e.root.position, startX = p.x, startZ = p.z;
+      const p = e.root.position, r = e.rage, startX = p.x, startZ = p.z;
+      if (elapsed >= r.slideUntil) r.slideSide = 0;
       const distance = Math.hypot(x - p.x, z - p.z), step = Math.min(distance, dt * RAGE_SPEED);
       const count = Math.max(1, Math.ceil(step / RAGE_STEP)), tick = dt / count;
       let moved = false;
@@ -6131,8 +6183,24 @@
           // its own support when translation with the old facing is clear.
           || Math.abs(facing - e.heading) > 1e-6 && rageGroundStep(e, nx, nz, e.heading)) moved = true;
         else {
-          if (Math.abs(facing - e.heading) > 1e-6 && rageGroundStep(e, p.x, p.z, facing)) moved = true;
-          break;
+          // Slide the same posed body around a trunk without first swinging
+          // its captive into it. Retain the successful side until the direct
+          // route has stayed clear; every candidate still sweeps live solids.
+          let slid = false;
+          const side = r.slideSide || (e.index & 1 ? -1 : 1);
+          for (let attempt = 0; remaining > 1e-7 && attempt < 4; attempt++) {
+            const sign = attempt < 2 ? side : -side, tangent = attempt & 1;
+            const along = tangent ? 0.15 : 0.5, across = tangent ? 0.9886859966642595 : 0.8660254037844386;
+            const reach = Math.min(travel, remaining * along), sx = dx / remaining, sz = dz / remaining;
+            if (rageGroundStep(e, p.x + (sx * along + sz * across * sign) * reach,
+              p.z + (sz * along - sx * across * sign) * reach, e.heading)) {
+              r.slideSide = sign; r.slideUntil = elapsed + 0.75; moved = slid = true; break;
+            }
+          }
+          if (!slid) {
+            if (Math.abs(facing - e.heading) > 1e-6 && rageGroundStep(e, p.x, p.z, facing)) moved = true;
+            break;
+          }
         }
         if (e.drive.airborne) break;
       }
@@ -6140,38 +6208,119 @@
       return moved;
     };
     const rageTraverse = (e, x, y, z) => {
-      if (!e.motion.dragging || e.climb.active || e.jump.active || e.drive.airborne) return false;
-      const p = e.root.position, heading = Math.atan2(x - p.x, z - p.z);
+      if (e.climb.active || e.jump.active || e.drive.airborne) return false;
+      const p = e.root.position, carrying = e.motion.dragging, heading = Math.atan2(x - p.x, z - p.z);
+      if (!carrying && y <= p.y + 0.75) return false;
       setGoal(e, x, y, z);
       e.rageTraversal = true;
       try {
-        if (tryClimb(e, heading, y < p.y - 0.8)) return true;
-        const sx = Math.sin(heading), sz = Math.cos(heading);
-        for (let distance = 4; distance >= 1; distance -= 0.5) {
-          const nx = p.x + sx * distance, nz = p.z + sz * distance;
-          const ny = support(e, nx, nz, p.y + PROP_STEP, PROP_STEP, heading);
-          if (Number.isFinite(ny) && (prepareJump(e, nx, ny, nz, 0, false, true)
-            || prepareJump(e, nx, ny, nz))) return true;
+        let takeoffClear = true;
+        if (carrying && ctx.rageJumpPoseClear) {
+          // rage.update poses the takeoff immediately, before updateJump's
+          // first arc step. Prove that transition without activating a jump
+          // or changing its counters/envelope on refusal.
+          const takeoff = e.motion.takeoff;
+          e.motion.takeoff = 1;
+          takeoffClear = ctx.rageJumpPoseClear(e, e.motion.labDt, p.x, p.y, p.z, e.speed, true) !== false;
+          e.motion.takeoff = takeoff;
         }
-        return false;
+        const sx = Math.sin(heading), sz = Math.cos(heading), remaining = Math.hypot(x - p.x, y - p.y, z - p.z);
+        const reach = Math.min(MAX_JUMP, Math.hypot(x - p.x, z - p.z) + 1);
+        const ceiling = carrying ? p.y + PROP_STEP : Math.min(p.y + ROOF_JUMP_HEIGHT, y);
+        // Prefer a real landing toward the target, including below a held
+        // captive. The existing jump proof certifies the full gravity arc.
+        for (let distance = reach; takeoffClear && distance >= 1; distance -= 0.5) {
+          const nx = p.x + sx * distance, nz = p.z + sz * distance;
+          const ny = support(e, nx, nz, ceiling, 0.02, heading);
+          if (!Number.isFinite(ny) || !carrying && ny <= p.y + 0.5
+            || Math.hypot(x - nx, y - ny, z - nz) >= remaining - 0.35
+            || Math.abs(pointSupportAt(nx, nz, ny + 0.02, e) - ny) > 0.1) continue;
+          if (prepareJump(e, nx, ny, nz, 0, false, true) || prepareJump(e, nx, ny, nz)) {
+            e.climb.searchPending = e.climb.searchDeferred = e.climb.claimPending = false;
+            e.motion.takeoff = 1; return true;
+          }
+        }
+        return carrying && tryClimb(e, heading, y < p.y - 0.8);
       } finally { e.rageTraversal = false; }
     };
+    const resetRageWarp = e => {
+      // Both endpoint hooks certify and commit the pair's destination.
+      // Clear old movement without releasing the newly captured Ooga.
+      clearWallSearch(e); releasePortal(e); releaseLab(e);
+      if (climbTurn === e.index) climbTurn = -1;
+      if (labEscape === e) { e.stuck.escapeLeft = 0; labEscape = null; }
+      const c = e.climb, d = e.drive, m = e.motion, jump = e.jump, p = e.root.position;
+      c.active = c.free = c.lipBypass = c.mountPending = c.holdPose = c.waitRelease = false;
+      c.searchPending = c.searchDeferred = c.claimPending = c.crestPending = c.claimRetreat = false;
+      c.openingExit = c.openingStagePending = c.departurePlanning = c.peerCheck = false;
+      c.debugStuck = c.debugTraverse = false; c.debugRole = -1;
+      c.count = c.index = c.claimOrder = c.claimOwnerOrder = c.searchCursor = c.handoffDirection = 0;
+      c.retry = c.airAttachAfter = c.blocked = 0; c.claimFor = c.autoTo = -1;
+      jump.active = jump.reverse = jump.wall = jump.caveExit = false; jump.progress = jump.blocked = 0;
+      d.x = d.z = d.vx = d.vy = d.vz = d.climbAxis = d.climbSide = d.jumps = 0;
+      d.jumpHeld = d.jumpDown = d.jumpPressed = d.airborne = d.passiveFall = d.resume = d.motionEnvelope = false;
+      d.run = d.wallRelease = d.cancelled = false; d.grounded = true;
+      d.jumpBuffer = d.motionRecover = d.climbTurnTimer = d.avoidTime = d.avoidSide = 0;
+      d.heading = d.climbExitHeading = d.climbExitLook = NaN;
+      m.takeoff = m.landing = m.climb = m.climbDirection = m.climbSide = m.mantle = m.openingSettle = 0;
+      m.climbBlend = m.climbGripX = m.climbGripY = m.climbGripZ = NaN;
+      m.climbGripRelease = m.supportOffset = m.swim = m.groom = m.poundCharge = 0;
+      m.verifyGrip = m.workExit = e.actionControlled = m.smash = false;
+      e.debugMove.active = e.debugMove.wallPending = false;
+      e.roam.count = e.roam.index = 0; e.roam.departPending = e.roam.propDeparture = false;
+      e.lounge = ""; e.loungePartner = null; e.loungeDepart = e.parked = e.biped = e.hasSlot = false;
+      e.speed = e.rest = e.pound = e.beat = e.stand = e.recover = e.blocked = e.retry = e.backoutLeft = 0;
+      e.phase = "rage"; e.route = ""; e.entryTurn = e.exitFootprint = e.rageTraversal = false;
+      e.footprintMode = "walk"; m.walkGait = "gallop"; m.walkPhase = NaN;
+      setGoal(e, p.x, p.y, p.z); syncLab(e);
+      // Match the hub's settled destination and hull-preview pose passes.
+      m.workExit = true;
+      e.gorilla.poseManaged(2, p.x, p.y, p.z, e.heading, 0, false, false, "", m);
+      e.gorilla.poseManaged(2, p.x, p.y, p.z, e.heading, 0, false, false, "", m);
+      m.workExit = false;
+      e.compact = e.gorilla.compact;
+      e.radius = Math.max(WALK_RADIUS, e.gorilla.bodyRadius + 0.1);
+      e.height = Math.max(WALK_HEIGHT, e.gorilla.bodyHeight + 0.04);
+      return true;
+    };
+    const rageWarpTarget = (e, target) => !!ctx.rageWarpTarget && ctx.rageWarpTarget(e, target) && resetRageWarp(e);
+    const rageWarpHome = e => !!ctx.rageWarpHome && ctx.rageWarpHome(e) && resetRageWarp(e);
     if (ctx.rageLandAt) rage = BL.clankerRage.create({ list, crew, debugRage: ctx.debugRage,
       landAt: ctx.rageLandAt, floorAt: (e, x, z, y, heading) => support(e, x, z, y, PROP_STEP, heading),
       legClear: rageLegClear, edgeAt: ctx.rageEdgeAt, edgeHeading: ctx.rageEdgeHeading, edgeGoal: ctx.rageEdgeGoal,
-      walk: rageWalk, traverse: rageTraverse,
-      huntRange: ctx.rageHuntRange,
+      walk: rageWalk, traverse: rageTraverse, warpRequired: ctx.rageWarpRequired, warpTarget: rageWarpTarget,
+      warpHome: ctx.rageWarpHome ? rageWarpHome : null,
+      huntRange: ctx.rageHuntRange, huntJumpRange: MAX_JUMP, huntJumpHeight: ROOF_JUMP_HEIGHT,
       captureEligible: ctx.rageCaptureEligible, approach: ctx.rageApproach, grab: ctx.rageGrab, captive: ctx.rageCaptive,
       release: ctx.rageRelease, throw: ctx.rageThrow, throwing: e => !!e.capture?.throwing,
       traversing: e => e.climb.active || e.jump.active || e.drive.airborne || e.drive.resume,
       suspended: e => e.motion.swim > 0 || e.fire.burning || e.fire.rolling || e.fire.rollRecover > 0
         || e.loungeDepart || e.recover > 0 && !e.motion.dragging,
+      retarget: e => {
+        const c = e.climb;
+        clearWallSearch(e);
+        e.debugMove.active = e.debugMove.wallPending = false;
+        c.searchPending = c.searchDeferred = c.claimPending = c.crestPending = c.claimRetreat = false;
+        c.claimOrder = c.searchCursor = 0; c.claimFor = c.autoTo = -1;
+        c.debugStuck = c.debugTraverse = c.waitRelease = false; c.debugRole = -1;
+        if (climbTurn === e.index) climbTurn = -1;
+        // Both rail and free climbs share this release into the checked fall
+        // controller. Keep the root in place and leave existing flights alone.
+        if (c.active && !e.jump.active && !e.drive.airborne) {
+          dropRectangleClimb(e, false);
+          // Landing rearms automatic grips. Until then, neither a wall nor
+          // a lower balcony should resume the abandoned climb.
+          c.airAttachAfter = Infinity;
+        }
+      },
       begin: e => {
         clearWallSearch(e); releasePortal(e); releaseLab(e);
+        if (labEscape === e) { e.stuck.escapeLeft = 0; labEscape = null; }
         e.debugMove.active = false; e.roam.count = e.roam.index = 0; e.roam.departPending = false;
         if (e.lounge) leaveLounge(e);
         e.phase = "rage"; e.route = ""; e.rest = e.pound = e.beat = e.stand = 0; e.hasSlot = false;
         e.motion.groom = e.motion.poundCharge = 0; e.parked = false;
+        syncLab(e);
       },
       end: (e, debug) => {
         e.speed = 0; e.biped = false; e.motion.walkGait = "";
@@ -6182,14 +6331,17 @@
         // Debug can also interrupt a worker; resume its ordinary task when
         // the shared movement controller next reaches supported ground.
         if (debug) e.drive.resume = true;
+        syncLab(e);
       }
     });
     const updateEntry = (e, dt) => {
-      const p = e.root.position, beforeX = p.x, beforeY = p.y, beforeZ = p.z;
-      const beforeSupportOffset = e.motion.supportOffset;
       // Expiry, health and account/activity cancellation precede regeneration
       // and every movement controller, including swimming or climbing.
       if (rage) rage.check(e, elapsed);
+      // A certified cliff warp during check starts a new local movement step;
+      // its final pose must not sweep or roll back to the previous location.
+      const p = e.root.position, beforeX = p.x, beforeY = p.y, beforeZ = p.z;
+      const beforeSupportOffset = e.motion.supportOffset;
       if (e.health.delay > 0) e.health.delay = Math.max(0, e.health.delay - dt);
       else if (e.health.value < e.health.max) e.health.value = Math.min(e.health.max, e.health.value + BL.crew.HEALTH_REGEN_RATE * dt);
       e.motion.labDt = dt;
@@ -6229,6 +6381,11 @@
       if (ctx.fireContact && ctx.fireContact(e, p.x, p.y, p.z)) ignite(e);
       updateFire(e, dt);
       if (rage && e.rage.active && e.fire.burning) rage.check(e, elapsed);
+      if (rage && e.rage.active && e.rage.warpWaiting) {
+        // Failed endpoint admission keeps the last coherent pose in place.
+        // In particular, do not resume an old climb or jump toward the rim.
+        e.speed = 0; return;
+      }
       if (e.climb.active) {
         // Shift doubles distance, not the size of a single grip/stone sweep.
         // Two half-frame proofs keep the fast climb as reliable as the walk.
@@ -6245,7 +6402,7 @@
       // the grounded handoff. Re-read live support before any idle/work logic;
       // an unsupported gorilla falls now instead of waiting at the old height.
       const liveFloor = support(e, p.x, p.z, p.y, PROP_STEP);
-      const centerFloor = pointSupportAt(p.x, p.z, p.y + 0.1);
+      const centerFloor = pointSupportAt(p.x, p.z, p.y + 0.1, e);
       // Blended short-prop support can sit below the point top. Falling in
       // place would land on that same blend every frame and prevent departure.
       if (!e.jump.active && !e.fire.rolling && Number.isFinite(liveFloor)
@@ -6257,20 +6414,30 @@
         && liveFloor >= p.y - STEP && liveFloor <= p.y + PROP_STEP) setSupportY(e, liveFloor, p.x, p.z, e.heading, dt * 3);
       if (e.fire.rolling || escapeForRoll(e, dt)) { poseEntry(e, dt, beforeX, beforeY, beforeZ); return; }
       if (fleeFire(e, dt)) { poseEntry(e, dt, beforeX, beforeY, beforeZ); return; }
-      if (rage && e.rage.active && !e.loungeDepart && !e.recover && !e.motion.swim) {
-        e.phase = "rage"; e.biped = false; e.footprintMode = "walk";
-        e.compact = e.gorilla.compact;
-        e.radius = Math.max(WALK_RADIUS, e.gorilla.bodyRadius + 0.1);
-        e.height = Math.max(WALK_HEIGHT, e.gorilla.bodyHeight + 0.04);
-        e.motion.walkGait = "gallop";
-        if (rage.update(e, dt, elapsed)) {
-          const posed = poseEntry(e, dt, beforeX, beforeY, beforeZ) !== false;
-          if (!posed) e.motion.supportOffset = beforeSupportOffset;
-          rage.poseResult(e, dt, elapsed, posed);
-          // A held grab claims new body contact before the crew's floor pass
-          // can step the target onto this frame's moving gorilla mesh.
-          rage.contact(e, elapsed); return;
+      if (rage && e.rage.active) {
+        e.phase = "rage"; e.biped = false;
+        let advanced = false;
+        // Physical transitions retain their controllers, but must not fall
+        // through to a queued cave job while the chase is temporarily paused.
+        if (e.jump.active) updateJump(e, dt);
+        else if (e.loungeDepart) departLounge(e, dt);
+        else if (e.recover > 0) {
+          e.recover = Math.max(0, e.recover - dt); e.speed = 0;
+          if (!e.recover) e.actionControlled = e.motion.smash = false;
+        } else {
+          e.footprintMode = "walk"; e.compact = e.gorilla.compact;
+          e.radius = Math.max(WALK_RADIUS, e.gorilla.bodyRadius + 0.1);
+          e.height = Math.max(WALK_HEIGHT, e.gorilla.bodyHeight + 0.04);
+          e.motion.walkGait = "gallop";
+          advanced = rage.update(e, dt, elapsed);
+          if (!advanced) e.speed = 0;
         }
+        const posed = poseEntry(e, dt, beforeX, beforeY, beforeZ) !== false;
+        if (!posed) e.motion.supportOffset = beforeSupportOffset;
+        if (advanced) rage.poseResult(e, dt, elapsed, posed);
+        // A held grab claims new body contact before the crew's floor pass
+        // can step the target onto this frame's moving gorilla mesh.
+        rage.contact(e, elapsed); return;
       }
       if (separateSurfacePeers(e, dt)) { poseEntry(e, dt, beforeX, beforeY, beforeZ); return; }
       if (e.motion.lab && e.lab.item >= 0 && (e.mode !== e.owner.state || e.pendingSite >= 0 && e.pendingSite !== e.site)) {
@@ -6635,11 +6802,11 @@
       climbFrameBudget = 2; climbTurn = -1;
       for (let i = 0; i < list.length; i++) {
         list[i].climb.searchBudget = 2;
-        pendingClimbSearch(list[i]);
+        if (!list[i].rage.warpWaiting) pendingClimbSearch(list[i]);
       }
       for (let i = 0; i < list.length; i++) {
         const index = (climbNext + i) % list.length, e = list[index], c = e.climb;
-        if (!e.active || c.active || !c.searchPending || c.retry > remaining || e.recover > 0 || e.jump.active || e.drive.airborne
+        if (!e.active || e.rage.warpWaiting || c.active || !c.searchPending || c.retry > remaining || e.recover > 0 || e.jump.active || e.drive.airborne
           || e.pound || e.beat || e.parked || e.fire.rolling) continue;
         if (e.controlled ? Math.hypot(e.drive.x, e.drive.z) <= 0.05 : Math.hypot(e.goalX - e.root.position.x, e.goalZ - e.root.position.z) <= 0.18) continue;
         climbTurn = index; climbNext = (index + 1) % list.length;
@@ -6749,5 +6916,5 @@
       possess, release, respawn, control, cancelInput, smash, smashPower, quickSmash, chestBeat, ignite, dropRoll, supportRemoved,
       get player() { return player; } };
   };
-  BL.clankers = { create, WALK_RADIUS, WALK_HEIGHT, PROP_STEP, RAGE_SPEED };
+  BL.clankers = { create, rageCarrying, WALK_RADIUS, WALK_HEIGHT, PROP_STEP, RAGE_SPEED };
 })();

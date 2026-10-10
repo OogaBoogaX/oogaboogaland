@@ -606,7 +606,7 @@
         catchT: 0,
         yawn: 0,
         yawnAt: 12 + i * 4.3 + Math.random() * 20,
-        leap: { vx: 0, vz: 0, land: 0, thrown: false },
+        leap: { vx: 0, vz: 0, land: 0, thrown: false, rageThrown: false },
         highlightTarget: 0,
         highlight: 0,
         nextBuildAt: 8 + i * 2.5 + Math.random() * 6,
@@ -2749,7 +2749,7 @@
       cave.traffic.moving = cave.traffic.waiting = false;
       if (cave.pathing) { cave.pathing.tx = NaN; cave.pathing.index = cave.pathing.count; }
       cave.hop = cave.hopV = cave.rocketJumpTime = 0; cave.rocketJumpHeld = false;
-      cave.leap.vx = cave.leap.vz = cave.leap.land = 0; cave.leap.thrown = false;
+      cave.leap.vx = cave.leap.vz = cave.leap.land = 0; cave.leap.thrown = cave.leap.rageThrown = false;
       cave.riding.support = null;
       if (cave.jet) {
         cave.jet.thrust = cave.jet.spending = false; cave.jet.power = 0; cave.jet.flame.visible = false;
@@ -2921,9 +2921,14 @@
           const weight = (FIRE_FLEE_CLEAR - rememberedDistance) / Math.max(0.04, rememberedDistance * rememberedDistance);
           panic.escapeX += dx * weight; panic.escapeZ += dz * weight;
         }
+        const canFleeRage = gorillas && !cave.humanControlled && !cave.remoteControlled
+          && !cave.puppet && !cave.grabbedBy && !cave.health.stunned && !cave.leap.thrown;
         if (gorillas) for (let otherIndex = 0; otherIndex < gorillas.length; otherIndex++) {
           const other = gorillas[otherIndex], at = otherIndex * 4;
-          if (!other.active || !other.root.visible || !other.fire.burning) { gorillaMemory[at + 3] = 0; continue; }
+          // Rage shares the remembered flee direction, never ignition or
+          // drop-and-roll. runCamp stands resting NPCs and runs on grounded feet.
+          const raging = canFleeRage && other.rage?.active;
+          if (!other.active || !other.root.visible || !other.fire.burning && !raging) { gorillaMemory[at + 3] = 0; continue; }
           const q = other.root.position, floor = q.y;
           const floorReach = Math.max(0.8, Math.min(cave.bodyHeight, other.height) * 0.65);
           if (Math.abs(feet - floor) > floorReach) { gorillaMemory[at + 3] = 0; continue; }
@@ -4616,6 +4621,7 @@
           l.flat.depth = cave.bodyRadius * 2; l.vertical.height = cave.bodyHeight;
           clearShoulder(cave);
           cave.hopV = 0; cave.leap.vx = cave.leap.vz = cave.leap.land = 0;
+          cave.leap.thrown = cave.leap.rageThrown = false;
           break;
         }
       }
@@ -4738,7 +4744,7 @@
       else cave.jumps = Math.max(1, cave.jumps);
       if (cave.hop === 0 && (leap.vx || leap.vz || leap.thrown)) {
         leap.vx = leap.vz = 0;
-        leap.thrown = false;
+        leap.thrown = leap.rageThrown = false;
         leap.land = 0.25;
         ctx.fx.burst(p.x, p.y + 0.05, p.z, 6, LAND_DUST, 1.2);
       }
@@ -4929,7 +4935,7 @@
           // A thrown Ooga keeps the launch velocity over open water.
           runPlayer(cave, dt, false);
           if (cave.root.position.y - cave.baseY >= (ctx.seaY ?? ctx.abyssRespawnY)) return;
-          cave.leap.thrown = false;
+          cave.leap.thrown = cave.leap.rageThrown = false;
         } else {
           // Releasing possession must not strand an Ooga beneath the world.
           cave.root.position.y = groundY(cave) + cave.hop;
@@ -4949,6 +4955,7 @@
         startMeal(cave);
         return;
       }
+      if (cave.leap.thrown) { runPlayer(cave, dt, false); return; }
       if (runRoofEscape(cave, dt)) return;
       if (cave.hop > 0 || cave.hopV > 0) { runPlayer(cave, dt, false); return; }
       if (workSites && cave.state === "working" && cave.cheer > 0) {
@@ -5506,6 +5513,7 @@
       cave.cloudSupport = null;
       cave.jumps = 0;
       cave.leap.vx = cave.leap.vz = cave.leap.land = 0;
+      cave.leap.thrown = cave.leap.rageThrown = false;
       cave.cheer = cave.catchT = cave.yawn = 0;
       if (cave.jet) {
         cave.jet.thrust = false;
