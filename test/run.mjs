@@ -1792,6 +1792,48 @@ const { terrainSightProbe } = (() => {
       const a = [opening.x - sx * distance, opening.y + (random() - 0.5) * 2, opening.z - sz * distance], b = [opening.x + sx * distance, opening.y + (random() - 0.5) * 2, opening.z + sz * distance];
       if (!island.rockMaterialAt(...a)) rays.push({ kind: "window passage", a, b });
     }
+    // Keep the uncached shipped query as the oracle. Changing near-plane starts, camera origins and
+    // endpoints must never turn an uncertain/removed blocker into a cached invisible opening.
+    const witness = new Int32Array(rays.length).fill(-1), witnessBytes = witness.byteLength;
+    let witnessQueries = 0;
+    const compareWitness = (a, b, slot) => {
+      const expected = island.sightClearAt(...a, ...b), actual = island.sightClearAt(...a, ...b, witness, slot);
+      witnessQueries++;
+      if (actual !== expected && failures.length < 8) failures.push({ kind: "voxel witness mismatch", a, b, slot, actual, expected });
+    };
+    for (let slot = 0; slot < rays.length; slot++) {
+      const { a, b } = rays[slot];
+      compareWitness(a, b, slot);
+      for (const t of [0, 0.001, 0.25, 0.75, 1 - 1e-10, 1]) compareWitness(a.map((v, axis) => v + (b[axis] - v) * t), b, slot);
+      compareWitness(b, a, slot);
+      compareWitness(a.map(v => v + 0.1), b.map(v => v - 0.1), slot);
+    }
+    // Randomized voxel occupancy in a remote patch exercises mutations independently of authored
+    // windows/ramps. Restore construction data even when a comparison throws.
+    const source = island.cutawaySource, edits = [], unit = source.unit, origin = source.origin;
+    const cell = [8, source.sy - 8, 8], point = (x, y, z) => [origin.x + x * unit, origin.y + y * unit, origin.z + z * unit];
+    const witnessHitsBefore = island.sightCacheStats.hits;
+    try {
+      for (let x = cell[0] - 2; x <= cell[0] + 2; x++) for (let y = cell[1] - 2; y <= cell[1] + 2; y++) for (let z = cell[2] - 2; z <= cell[2] + 2; z++) {
+        const at = (x * source.sy + y) * source.sz + z;
+        edits.push([at, source.data[at]]); source.data[at] = random() < 0.35 ? 1 : 0;
+      }
+      const occupied = (cell[0] * source.sy + cell[1]) * source.sz + cell[2];
+      source.data[occupied] = 1;
+      const a = point(cell[0] + 0.5, cell[1] + 0.5, cell[2] + 0.5), b = point(cell[0] + 0.8, cell[1] + 0.5, cell[2] + 0.5);
+      compareWitness(a, b, 0); compareWitness(a, b, 0);
+      source.data[occupied] = 0; compareWitness(a, b, 0); source.data[occupied] = 1;
+      for (let n = 0; n < 400; n++) {
+        const a = point(...cell.map(v => v + (random() - 0.5) * 7)), b = point(...cell.map(v => v + (random() - 0.5) * 7));
+        compareWitness(a, b, 0); compareWitness(a, b, 0);
+      }
+      for (const delta of [-1e-9, 0, 1e-9]) for (const axis of [0, 1, 2]) {
+        const a = point(...cell.map((v, i) => v + (i === axis ? -2 : delta))), b = point(...cell.map((v, i) => v + (i === axis ? 3 : delta)));
+        compareWitness(a, b, 0); compareWitness(a, b, 0);
+        compareWitness(a, a, 0);
+      }
+    } finally { for (const [at, value] of edits) source.data[at] = value; }
+    const witnessHits = island.sightCacheStats.hits - witnessHitsBefore;
     let certifiedRays = 0;
     for (const ray of rays) {
       const actual = island.sightClearAt(...ray.a, ...ray.b), reverse = island.sightClearAt(...ray.b, ...ray.a);
@@ -1870,7 +1912,7 @@ const { terrainSightProbe } = (() => {
       && !!island.rockMaterialAt(seam[0], seam[1], seam[2] - 1e-6) && !!island.rockMaterialAt(seam[0], seam[1], seam[2] + 1e-6)
       && !island.sightClearAt(-28.79, -1.625, 4.75, -28.83, -1.625, 4.75);
     const floor = island.headquarters.basement.floor, outside = island.sightClearAt(80, 2, 80, 80, 5, 80), throughIsland = !island.sightClearAt(0, 20, 0, 0, -50, 0), shaft = island.sightClearAt(0, floor - 0.1, 0, 0, -50, 0);
-    return { counts, rays: rays.length, certifiedRays, clearBoxes, boxRays, boxPoints, solidBoxes, solidPoints, fragmentWindows, fragmentBoxes, fragmentAirBoxes, fragmentPoints, failures, seamCovered, outside, throughIsland, shaft };
+    return { witnessQueries, witnessHits, witnessBytes, counts, rays: rays.length, certifiedRays, clearBoxes, boxRays, boxPoints, solidBoxes, solidPoints, fragmentWindows, fragmentBoxes, fragmentAirBoxes, fragmentPoints, failures, seamCovered, outside, throughIsland, shaft };
   };
   return { terrainSightProbe };
 })();
@@ -12176,6 +12218,7 @@ record("character visibility source bakes: ownership wrappers share exact immuta
   }
   {
     const terrain = terrainSightProbe();
+    record("terrain camera voxel witnesses: near-plane suffixes, moving eyes, reversed rays, voxel mutations and boundary tangencies agree with uncached traversal in fixed storage", terrain.witnessQueries > 10000 && terrain.witnessHits > 100 && terrain.witnessBytes === terrain.rays * 4 && terrain.failures.length === 0, JSON.stringify({ queries: terrain.witnessQueries, hits: terrain.witnessHits, bytes: terrain.witnessBytes, failures: terrain.failures }));
     for (const backend of backends) {
       record(`camera sight guides ${backend}: exact terrain rays agree with rendered faces, dense occupancy and reverse traversal`, Object.values(terrain.counts).length === 4 && Object.values(terrain.counts).every((count) => count === 120) && terrain.rays > 1400 && terrain.failures.length === 0 && terrain.seamCovered && terrain.outside && terrain.throughIsland && terrain.shaft, JSON.stringify(terrain));
       record(`camera sight guides ${backend}: empty terrain box certificates agree with independent occupancy and rays`, terrain.certifiedRays > 100 && terrain.clearBoxes > 300 && terrain.boxRays === terrain.clearBoxes * 8 && terrain.boxPoints === terrain.clearBoxes * 27 && terrain.solidBoxes > 100 && terrain.solidPoints === terrain.solidBoxes * 27 && terrain.failures.length === 0, JSON.stringify({ certifiedRays: terrain.certifiedRays, clearBoxes: terrain.clearBoxes, boxRays: terrain.boxRays, boxPoints: terrain.boxPoints, solidBoxes: terrain.solidBoxes, solidPoints: terrain.solidPoints, failures: terrain.failures }));
@@ -12247,6 +12290,19 @@ record("character visibility source bakes: ownership wrappers share exact immuta
     const ooga = P.PRESETS[0].stack, shield = home(ooga), flipped = home(ooga, { flip: true }), bare = home(ooga, { chute: false });
     record("orbit flight: from low orbit the pod comes home alone, shield first runs cooler than flipped, the chute lands it soft and no chute breaks it on the sea", shield.pod && !shield.failure && shield.landing === "soft" && shield.chute === "open" && shield.peakHeat > 0 && flipped.peakHeat > shield.peakHeat * 1.5 && bare.failure === "splat", JSON.stringify({ shield, flipped, bare }));
   }
+  {
+    const contexts = rockGuides.contexts.slice(), storage = contexts.map(context => context.surfaceVoxelWitness);
+    const bytes = storage.reduce((sum, array) => sum + array.byteLength, 0), expected = contexts.reduce((sum, context) => sum + context.surfaceGroupCount * 4, 0);
+    rockGuides.resetSurface();
+    const stable = contexts.every((context, i) => context.surfaceVoxelWitness === storage[i]);
+    rockGuides.dispose();
+    const released = contexts.every(context => context.surfaceVoxelWitness === null) && rockGuides.stats.surfaceWitnessBytes === 0;
+    const fresh = BL.rockGuides.create({ island, sealed: [] });
+    const renewed = fresh.stats.surfaceWitnessBytes === bytes && fresh.contexts.every((context, i) => context.surfaceVoxelWitness !== storage[i] && context.surfaceVoxelWitness.every(value => value === -1));
+    fresh.dispose();
+    record("terrain camera witnesses: one four-byte slot per authored sample stays bounded and is released and rearmed across visits", bytes === expected && bytes > 0 && stable && released && renewed, JSON.stringify({ bytes, expected, stable, released, renewed }));
+  }
+
 };
 
 
