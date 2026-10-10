@@ -7875,6 +7875,35 @@ scene("hub", { label: "gorilla traversal", query: "status=chillin&gorillamove=1"
       traversals.push({ kind, x: e.root.position.x, maxY, airborne, stopped, maxVisibleStep });
       solids.remove(node); S.removeChild(root, node); solids.sync();
     }
+    // An intact production crate must let an NPC leave its blended support.
+    let intactProp;
+    {
+      const intactCrate = S.createNode({ geometry: BL.hubModels.woodCrate(), position: { x: 12, y: B.island.surfaceAt(12, 0), z: 0 } });
+      const crateBounds = S.boundsOf(intactCrate.geometry);
+      intactCrate.gorillaSteps = [[...crateBounds.min, ...crateBounds.max]]; intactCrate.gorillaStepAll = true;
+      S.addChild(root, intactCrate); solids.add(intactCrate); S.updateWorld(root); solids.sync();
+      setup(7, 0); C.release();
+      const crateY = solids.supportAt(12, 0, 50, 50, 0.45);
+      Object.assign(e.root.position, { x: 12, y: crateY, z: 0 });
+      Object.assign(e, { active: true, controlled: false, mode: "chilling", phase: "chill", route: "", lounge: "", loungeDepart: false,
+        parked: false, biped: false, recover: 0, rest: 0, heading: Math.PI / 2, speed: 0, goalX: 12, goalY: crateY, goalZ: 0,
+        footprintMode: "walk", compact: e.gorilla.compact, radius: BL.clankers.WALK_RADIUS, height: BL.clankers.WALK_HEIGHT });
+      e.owner.state = "chilling"; e.root.visible = true;
+      Object.assign(e.drive, { airborne: false, passiveFall: false, grounded: true, resume: false, vx: 0, vy: 0, vz: 0 });
+      e.jump.active = e.fire.burning = e.fire.rolling = false;
+      Object.assign(e.climb, { active: false, searchPending: false, searchDeferred: false, claimPending: false, crestPending: false, retry: 0, searchCursor: 0 });
+      Object.assign(e.roam, { count: 0, index: 0, wall: false, nextChoice: 1000, lastPose: "", transition: 0, progressTime: 0,
+        targetX: NaN, targetY: NaN, targetZ: NaN });
+      e.stuck.x = e.stuck.y = e.stuck.z = NaN; e.stuck.time = e.stuck.taskTime = 0; e.stuck.taskActive = false; e.stuck.reason = "";
+      e.gorilla.poseManaged(2, 12, crateY, 0, e.heading, 0, false, false, "", e.motion);
+      const recoveries = e.stuck.recoveries;
+      advance(null, 0.5);
+      const assignedExit = Math.hypot(e.goalX - 12, e.goalZ) > 2;
+      for (let frame = 0; frame < 6 * 60; frame++) C.update(1 / 60);
+      intactProp = { crateY, assignedExit, x: e.root.position.x, y: e.root.position.y, z: e.root.position.z,
+        airborne: e.drive.airborne, groundError: Math.abs(e.root.position.y - C.supportAt(e, e.root.position.x, e.root.position.z, e.root.position.y, BL.clankers.PROP_STEP, e.heading)), stuck: e.stuck.time, reason: e.stuck.reason, recoveries: e.stuck.recoveries - recoveries };
+      solids.remove(intactCrate); S.removeChild(root, intactCrate); solids.sync();
+    }
     const escapeRock = S.createNode({ geometry: BL.hubModels.rock(0), position: { x: 12, y: B.island.surfaceAt(12, 0), z: 0 } });
     S.addChild(root, escapeRock); solids.add(escapeRock); S.updateWorld(root); solids.sync();
     C.release();
@@ -7980,9 +8009,11 @@ scene("hub", { label: "gorilla traversal", query: "status=chillin&gorillamove=1"
     const detour = { detoured, crossed, arrived: Math.hypot(e.root.position.x - 17, e.root.position.z - 10) < 0.18,
       recoveries: e.stuck.recoveries - recoveries, grounded: !e.climb.active && !e.jump.active && !e.drive.airborne };
     solids.remove(screen); S.removeChild(root, screen); solids.sync();
-    return { traversals, raisedProp, jumps, canopy, detour };
+    return { traversals, intactProp, raisedProp, jumps, canopy, detour };
   })()`);
   const props = state.traversals.every(row => row.x > 16 && row.maxY >= 0.75 && row.maxY <= 1.05 && !row.airborne && !row.stopped && row.maxVisibleStep < 0.25);
+  const intactProp = state.intactProp.assignedExit && Math.hypot(state.intactProp.x - 12, state.intactProp.z) > 1.5
+    && state.intactProp.groundError < 0.05 && !state.intactProp.airborne && !state.intactProp.recoveries && state.intactProp.reason !== "relocated";
   const raisedProp = state.raisedProp.rockY > 0.8 && state.raisedProp.assignedExit && state.raisedProp.groundError < 0.05
     && Math.hypot(state.raisedProp.x - 12, state.raisedProp.z) > 1.5 && !state.raisedProp.airborne && state.raisedProp.stuck < 0.65;
   const jump = state.jumps.every(row => {
@@ -7995,7 +8026,7 @@ scene("hub", { label: "gorilla traversal", query: "status=chillin&gorillamove=1"
   });
   const canopy = state.canopy.lowFrames > 0 && state.canopy.envelopeCleared && !state.canopy.bipedFrames && state.canopy.movingFrames > 10 && state.canopy.endX < state.canopy.startX - 1;
   const detour = state.detour.detoured && state.detour.arrived && !state.detour.crossed && !state.detour.recoveries && state.detour.grounded;
-  record("gorilla traversal: crates, barrels and rocks keep a continuous grounded gallop, an autonomous gorilla leaves a destroyed raised prop, fresh presses jump immediately and once more in air without held repeats or cancellation exploits, low cover permits an all-fours retreat, and a stalled stroller walks around tall scenery", props && raisedProp && jump && canopy && detour, JSON.stringify(state));
+  record("gorilla traversal: crates, barrels and rocks keep a continuous grounded gallop, an autonomous gorilla leaves intact crates and destroyed raised props without relocation, fresh presses jump immediately and once more in air without held repeats or cancellation exploits, low cover permits an all-fours retreat, and a stalled stroller walks around tall scenery", props && intactProp && raisedProp && jump && canopy && detour, JSON.stringify(state));
 } }, { name: "gorilla camera modes", why: "regression: controlled gorillas lacked first-person and birds-eye cameras, carry/combat camera controls, and a combat crosshair", run: async (b) => {
   const state = await b.evaluate(`(() => {
     const B = __ooga, P = B.clankerPlay, C = B.clankers, e = C.list.find(e => e.owner.traits.name === "portlandhodl");
