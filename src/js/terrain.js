@@ -2256,9 +2256,32 @@
     // most columns hold neither, so rays cross them on voxels alone.
     const sightColumnWork = new Uint8Array(SX * SZ);
     for (let i = 0; i < SX * SZ; i++) if (windowColumns[i] || rampCollision[i] || basementCollision[i]) sightColumnWork[i] = 1;
-    const sightClearAt = (x, y, z, toX, toY, toZ) => {
+    const sightCacheStats = { queries: 0, hits: 0 };
+    const sightClearAt = (x, y, z, toX, toY, toZ, witness = null, slot = 0) => {
       const dx = toX - x, dy = toY - y, dz = toZ - z;
       if (Math.abs(dx) + Math.abs(dy) + Math.abs(dz) < 1e-12) return rockMaterialAt(x, y, z) === null;
+      if (witness) {
+        sightCacheStats.queries++;
+        const at = witness[slot];
+        // Only actual, still-occupied voxels certify a hit. Shrink the cell and require a positive
+        // interval well above the DDA tolerance: tangencies, tiny spans and partial rock fall through.
+        // Rechecking occupancy and the current segment makes this independent of camera/terrain epochs.
+        if (at >= 0 && at < data.length && data[at]) {
+          const gz = at % SZ, gy = Math.floor(at / SZ) % SY, gx = Math.floor(at / (SY * SZ));
+          let enter = 0, exit = 1;
+          for (let axis = 0; axis < 3 && enter < exit; axis++) {
+            const start = axis === 0 ? x : axis === 1 ? y : z, speed = axis === 0 ? dx : axis === 1 ? dy : dz;
+            const min = (axis === 0 ? ORIGIN.x + gx * UNIT : axis === 1 ? ORIGIN.y + gy * UNIT : ORIGIN.z + gz * UNIT) + UNIT * 1e-7, max = min + UNIT * (1 - 2e-7);
+            if (!speed) { if (start <= min || start >= max) exit = enter; }
+            else {
+              const a = (min - start) / speed, b = (max - start) / speed;
+              enter = Math.max(enter, Math.min(a, b)); exit = Math.min(exit, Math.max(a, b));
+            }
+          }
+          if (exit - enter > 1e-7) { sightCacheStats.hits++; return false; }
+        }
+        witness[slot] = -1;
+      }
       let lo = 0, hi = 1;
       for (let axis = 0; axis < 3; axis++) {
         const start = axis === 0 ? x : axis === 1 ? y : z, speed = axis === 0 ? dx : axis === 1 ? dy : dz, min = axis === 0 ? ORIGIN.x : axis === 1 ? ORIGIN.y : ORIGIN.z, max = min + (axis === 0 ? SX : axis === 1 ? SY : SZ) * UNIT;
@@ -2276,7 +2299,10 @@
       for (let step = 0; step < SX + SY + SZ + 3; step++) {
         const end = Math.min(tx, ty, tz, hi), column = gx * SZ + gz;
         if (end > t + 1e-12) {
-          if (data[(gx * SY + gy) * SZ + gz]) return false;
+          if (data[(gx * SY + gy) * SZ + gz]) {
+            if (witness) witness[slot] = (gx * SY + gy) * SZ + gz;
+            return false;
+          }
           if (column !== previousColumn && sightColumnWork[column]) {
             const columnEnd = Math.min(tx, tz, hi), a = y + dy * t, b = y + dy * columnEnd, minY = Math.min(a, b), maxY = Math.max(a, b), pieces = windowColumns[column];
             if (pieces) for (const piece of pieces) {
@@ -2400,6 +2426,7 @@
       rockCaveAt,
       rockCaveBytes: rockCaves.bytes,
       sightClearAt,
+      sightCacheStats,
       sightBoxClearAt,
       sightBoxSolidAt,
       sightGrid: new Float64Array([UNIT, ORIGIN.x, ORIGIN.y, ORIGIN.z]),
