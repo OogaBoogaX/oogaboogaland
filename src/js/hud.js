@@ -1822,7 +1822,7 @@
     // Voice: join, then mute and unmute; a failure says why on the button until the next try.
     const voice = BL.voice.stats, voiceButton = $("account-voice");
     voiceButton.hidden = room !== "live";
-    voiceButton.textContent = voice.joining ? "Joining voice" : voice.error && !voice.enabled ? `Voice: ${voice.error}` : !voice.enabled ? "Join voice" : voice.muted ? "Unmute" : "Mute";
+    voiceButton.textContent = voice.joining ? "Joining voice" : (voice.error || voice.micError) && !voice.enabled ? `Voice: ${voice.error || voice.micError}` : !voice.enabled ? "Join voice" : voice.muted ? "Unmute" : "Mute";
     voiceButton.setAttribute("aria-pressed", String(voice.enabled && !voice.muted));
   };
   // The roster's marks are page-level too: whichever scene's roster is up, each signed-in player's row

@@ -1,0 +1,14 @@
+{
+  "featureCommit": "f5925c28ed845c976112d2313677ddbdd565d6d1",
+  "command": "TEST_ORIGIN=http://127.0.0.1:8097 ONLY='shared session' VERBOSE=1 node test/run.mjs dsb",
+  "result": "Infrastructure-blocked; interrupted with exit 130; no feature assertion results",
+  "serverError": "listen EPERM: operation not permitted 127.0.0.1:8097",
+  "browserLog": "RETRY dsb shared session checkpoint \u00b7 page readiness deadline: {\"frames\":0,\"curtain\":false}  \u00b7 running the session again on a fresh Chrome\n",
+  "retry": "Runner announced its built-in driver retry; interrupted immediately upon observing that announcement. No completed retry result.",
+  "previousFailuresResolved": [],
+  "limits": [
+    "No initial-seek or WebGL upload assertion reached; all five previous failures remain unverified",
+    "No live SFU, physical device, audible output or full-room acceptance",
+    "No further browser attempt under this authorization"
+  ]
+}

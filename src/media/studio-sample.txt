@@ -1,0 +1,5 @@
+Studio color study — original synthetic demonstration
+Duration: 12 seconds.
+Moving synthetic color fields accompany a quiet generated 440 Hz tone.
+There is no speech, music, third-party imagery or recording.
+Released under this repository's Unlicense.

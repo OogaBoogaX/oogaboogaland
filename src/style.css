@@ -7938,3 +7938,18 @@ body.dsb-menu-open :is(.bottom-hud,.top-hud,#joy-move,#joy-look,#act,.weapon-hud
   .svrn-grid { grid-template-columns: 1fr; }
   .svrn-content { padding: 14px; }
 }
+
+.studio-session { width:min(42rem,calc(100vw - 2rem)); max-height:85vh; overflow:auto; background:#211b25; color:var(--fg); border:1px solid #aa8054; border-radius:.75rem; padding:1.2rem; }
+.studio-session::backdrop { background:rgba(0,0,0,.65); }
+.studio-session header,.studio-controls { display:flex; align-items:center; justify-content:space-between; gap:.6rem; flex-wrap:wrap; }
+.studio-session video { display:block; width:100%; aspect-ratio:2/1; background:#080809; }
+.studio-session button,.studio-session select { padding:.55rem .7rem; margin:.2rem; }
+.studio-session label { display:block; margin:.65rem 0; }
+.studio-session input[type=range] { width:100%; }
+.studio-session [data-error] { color:#ffc878; }
+.studio-session details { margin:.8rem 0; padding:.65rem; border:1px solid var(--border); border-radius:.4rem; }
+.studio-session summary { cursor:pointer; }
+.studio-session meter { display:block; width:100%; height:1rem; }
+.studio-session [data-audio],.studio-session [data-mic-reason],.studio-session [data-playback] { font-size:.9rem; }
+.studio-session [data-transcript] { line-height:1.5; }
+.studio-session select { max-width:100%; }

@@ -2036,6 +2036,7 @@ void main() {
       }
       gl.deleteBuffer(rec.ibo);
       if (rec.imageTexture) { gl.deleteTexture(rec.imageTexture); imageTextures--; rec.imageTexture = null; }
+      rec.imageElement = null; rec.imageBlocked = null;
       if (rec.rippleBodyTexture) { gl.deleteTexture(rec.rippleBodyTexture); rippleBodyTextures--; rec.rippleBodyTexture = null; }
       rec.rippleBodyState = null;
       rec.nodes.length = 0;
@@ -2681,7 +2682,7 @@ void main() {
       e.preventDefault();
       lost = true;
       imageTextures = rippleBodyTextures = 0;
-      for (const rec of records.values()) { rec.imageTexture = rec.rippleBodyTexture = rec.rippleBodyState = null; }
+      for (const rec of records.values()) { rec.imageTexture = rec.rippleBodyTexture = rec.rippleBodyState = null; rec.imageElement = null; }
       forgetMirror();
     };
     const onRestored = () => {
@@ -2720,24 +2721,61 @@ void main() {
     };
     const drawImageSurface = (rec, count, cameraPass) => {
       const surface = rec.geometry.imageSurface, image = surface.asset.load(), p = programs.image;
+      const dynamic = surface.dynamic === true;
+      let ready = dynamic ? image.readyState >= 2 && !image.seeking && image.videoWidth > 0 && image.videoHeight > 0
+        && image.videoWidth <= 1280 && image.videoHeight <= 720 : image.complete && image.naturalWidth;
+      const source = dynamic ? image.currentSrc || image.src : "";
+      if (dynamic && rec.imageBlocked && (rec.imageBlocked !== image || rec.imageBlockedSource !== source)) {
+        rec.imageBlocked = null; rec.imageBlockedSource = ""; surface.mediaErrorCode = "";
+      }
+      if (dynamic && rec.imageBlocked) ready = false;
       gl.activeTexture(gl.TEXTURE6);
-      if (!rec.imageTexture && image.complete && image.naturalWidth) {
-        rec.imageTexture = gl.createTexture();
-        imageTextures++;
-        gl.bindTexture(gl.TEXTURE_2D, rec.imageTexture);
-        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, image);
-        // Mipmapped, so lettering seen from across a hall stays legible instead of sparkling.
-        gl.generateMipmap(gl.TEXTURE_2D);
-        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
-        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
-        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-      } else gl.bindTexture(gl.TEXTURE_2D, rec.imageTexture || res.matrixTexture);
+      try {
+        if (!rec.imageTexture && ready) {
+          rec.imageTexture = gl.createTexture();
+          imageTextures++;
+          gl.bindTexture(gl.TEXTURE_2D, rec.imageTexture);
+          gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, image);
+          if (dynamic) {
+            rec.imageElement = image;
+            rec.imageTime = image.currentTime;
+            rec.imageSource = image.currentSrc;
+            rec.imageWidth = image.videoWidth; rec.imageHeight = image.videoHeight;
+          } else {
+            // Mipmapped, so lettering seen from across a hall stays legible instead of sparkling.
+            gl.generateMipmap(gl.TEXTURE_2D);
+          }
+          gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, dynamic ? gl.LINEAR : gl.LINEAR_MIPMAP_LINEAR);
+          gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+          gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+          gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+        } else {
+          gl.bindTexture(gl.TEXTURE_2D, rec.imageTexture || res.matrixTexture);
+          if (dynamic && ready && rec.imageTexture && (rec.imageElement !== image || rec.imageTime !== image.currentTime || rec.imageSource !== image.currentSrc
+              || rec.imageWidth !== image.videoWidth || rec.imageHeight !== image.videoHeight)) {
+            if (rec.imageWidth !== image.videoWidth || rec.imageHeight !== image.videoHeight)
+              gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, image);
+            else gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, gl.RGBA, gl.UNSIGNED_BYTE, image);
+            rec.imageElement = image;
+            rec.imageTime = image.currentTime;
+            rec.imageSource = image.currentSrc;
+            rec.imageWidth = image.videoWidth; rec.imageHeight = image.videoHeight;
+          }
+        }
+      } catch (error) {
+        // Opaque file previews and media without CORS may play natively but cannot enter WebGL.
+        // Keep the accessible player usable, and do not repeat the same forbidden upload each frame.
+        if (!dynamic || error.name !== "SecurityError") throw error;
+        if (rec.imageTexture) { gl.deleteTexture(rec.imageTexture); imageTextures--; rec.imageTexture = null; }
+        rec.imageElement = null; rec.imageBlocked = image; rec.imageBlockedSource = source;
+        surface.mediaErrorCode = "video-security"; ready = false;
+        gl.bindTexture(gl.TEXTURE_2D, res.matrixTexture);
+      }
       gl.useProgram(p.prog);
       gl.uniformMatrix4fv(p.u.uViewProj, false, cameraPass ? viewProj : mirrorViewProj);
       gl.uniform4fv(p.u.uRect, surface.rect);
       gl.uniform1i(p.u.uImage, 6);
-      gl.uniform1i(p.u.uReady, rec.imageTexture ? 1 : 0);
+      gl.uniform1i(p.u.uReady, rec.imageTexture && (!dynamic || ready) ? 1 : 0);
       applyCutaway(p, rec.geometry);
       gl.uniform1f(p.u.uClipMaxY, Math.min(rec.geometry.cutawayPreserve ? 1e6 : cutawayMaxY, rec.geometry.clipMaxY ?? 1e6));
       gl.bindVertexArray(rec.mesh.vao);

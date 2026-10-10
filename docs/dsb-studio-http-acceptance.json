@@ -1,0 +1,52 @@
+{
+  "featureCommit": "5277b0b2abaf3637c7e86787ceb8b4c730bcfd03",
+  "command": "TEST_ORIGIN=http://127.0.0.1:8097 ONLY='shared session' VERBOSE=1 node test/run.mjs dsb",
+  "serving": "PORT=8097 node scripts/serve.mjs; loopback only; /src/index.html and /media/* same origin",
+  "headers": {
+    "page": "200 text/html; charset=utf-8",
+    "mp4": "200 video/mp4",
+    "captions": "200 text/vtt; charset=utf-8",
+    "transcript": "200 text/plain; charset=utf-8"
+  },
+  "summary": "225/230 passed; 206 unit checks + 24 emitted browser checks; five browser failures",
+  "failures": {
+    "initialPosition": "All three variants decoded 320px video readyState4 at position0, expected2 seconds",
+    "frameUpload": "Both WebGL variants observed0 successful uploads; Canvas observed385 draws"
+  },
+  "signaling": "Synthetic Room state/commands and voice mocks; no live SFU/accounts",
+  "browserResults": [
+    "FAIL Shared Studio: local synthetic video decodes once and supplies the in-world screen while sound remains consent-gated \u00b7 {\"ready\":4,\"width\":320,\"position\":0,\"muted\":true,\"media\":1,\"same\":true,\"kind\":\"webgl2\"}",
+    "FAIL Shared Studio: active renderer consumes real decoded video frames \u00b7 {\"draws\":0,\"uploads\":0,\"kind\":\"webgl2\",\"texture\":1}",
+    "PASS Shared Studio: accessible dialog exposes explicit sound consent and disallows audience mic during presentation \u00b7 {\"open\":true,\"label\":\"DSB Studio shared session\",\"native\":true,\"sound\":\"Enable Studio sound\",\"micDisabled\":true}",
+    "PASS Shared Studio: sound consent starts receive-only listening without requesting a microphone \u00b7 {\"calls\":{\"listen\":1,\"enable\":0,\"stop\":0,\"drop\":0},\"muted\":false}",
+    "PASS Shared Studio: reviewed source selection decodes its duration, loads real captions/transcript and respects personal silence \u00b7 {\"next\":true,\"source\":\"sample-quiet\",\"duration\":8,\"seek\":\"8\",\"captions\":2,\"mode\":\"showing\",\"cues\":1,\"transcript\":\"A different synthetic color animation accompanies a softer generated 220 Hz tone for eight seconds. There is no speech, music or recorded imagery.\",\"volume\":0}",
+    "PASS Shared Studio: a Q&A invitation enables the explicit join control without activating the microphone \u00b7 {\"raised\":true,\"micDisabled\":false,\"enabled\":0,\"finish\":\"Finish question\"}",
+    "PASS Shared Studio: repeated enter/leave releases media source, screen binding, dialog and voice \u00b7 {\"clean\":true,\"dialogs\":0,\"screen\":false,\"media\":0,\"calls\":{\"listen\":1,\"enable\":0,\"stop\":4,\"drop\":0}}",
+    "PASS dsb shared session checkpoint: clean console \u00b7 2.3s ",
+    "TIME dsb shared session checkpoint \u00b7 launch 1.1s \u00b7 boot 1.9s \u00b7 body 0.4s \u00b7 wall 3.4s \u00b7 checks 8 \u00b7 watchdog clear",
+    "FAIL Shared Studio: local synthetic video decodes once and supplies the in-world screen while sound remains consent-gated \u00b7 {\"ready\":4,\"width\":320,\"position\":0,\"muted\":true,\"media\":1,\"same\":true,\"kind\":\"canvas2d\"}",
+    "PASS Shared Studio: active renderer consumes real decoded video frames \u00b7 {\"draws\":385,\"uploads\":0,\"kind\":\"canvas2d\",\"texture\":0}",
+    "PASS Shared Studio: accessible dialog exposes explicit sound consent and disallows audience mic during presentation \u00b7 {\"open\":true,\"label\":\"DSB Studio shared session\",\"native\":true,\"sound\":\"Enable Studio sound\",\"micDisabled\":true}",
+    "PASS Shared Studio: sound consent starts receive-only listening without requesting a microphone \u00b7 {\"calls\":{\"listen\":1,\"enable\":0,\"stop\":0,\"drop\":0},\"muted\":false}",
+    "PASS Shared Studio: reviewed source selection decodes its duration, loads real captions/transcript and respects personal silence \u00b7 {\"next\":true,\"source\":\"sample-quiet\",\"duration\":8,\"seek\":\"8\",\"captions\":2,\"mode\":\"showing\",\"cues\":1,\"transcript\":\"A different synthetic color animation accompanies a softer generated 220 Hz tone for eight seconds. There is no speech, music or recorded imagery.\",\"volume\":0}",
+    "PASS Shared Studio: a Q&A invitation enables the explicit join control without activating the microphone \u00b7 {\"raised\":true,\"micDisabled\":false,\"enabled\":0,\"finish\":\"Finish question\"}",
+    "PASS Shared Studio: repeated enter/leave releases media source, screen binding, dialog and voice \u00b7 {\"clean\":true,\"dialogs\":0,\"screen\":false,\"media\":0,\"calls\":{\"listen\":1,\"enable\":0,\"stop\":4,\"drop\":0}}",
+    "PASS dsb shared session checkpoint: clean console \u00b7 5.8s ",
+    "TIME dsb shared session checkpoint \u00b7 launch 0.5s \u00b7 boot 4.5s \u00b7 body 1.2s \u00b7 wall 6.2s \u00b7 checks 8 \u00b7 watchdog clear",
+    "FAIL Shared Studio: local synthetic video decodes once and supplies the in-world screen while sound remains consent-gated \u00b7 {\"ready\":4,\"width\":320,\"position\":0,\"muted\":true,\"media\":1,\"same\":true,\"kind\":\"webgl2\"}",
+    "FAIL Shared Studio: active renderer consumes real decoded video frames \u00b7 {\"draws\":0,\"uploads\":0,\"kind\":\"webgl2\",\"texture\":1}",
+    "PASS Shared Studio: accessible dialog exposes explicit sound consent and disallows audience mic during presentation \u00b7 {\"open\":true,\"label\":\"DSB Studio shared session\",\"native\":true,\"sound\":\"Enable Studio sound\",\"micDisabled\":true}",
+    "PASS Shared Studio: sound consent starts receive-only listening without requesting a microphone \u00b7 {\"calls\":{\"listen\":1,\"enable\":0,\"stop\":0,\"drop\":0},\"muted\":false}",
+    "PASS Shared Studio: reviewed source selection decodes its duration, loads real captions/transcript and respects personal silence \u00b7 {\"next\":true,\"source\":\"sample-quiet\",\"duration\":8,\"seek\":\"8\",\"captions\":2,\"mode\":\"showing\",\"cues\":1,\"transcript\":\"A different synthetic color animation accompanies a softer generated 220 Hz tone for eight seconds. There is no speech, music or recorded imagery.\",\"volume\":0}",
+    "PASS Shared Studio: a Q&A invitation enables the explicit join control without activating the microphone \u00b7 {\"raised\":true,\"micDisabled\":false,\"enabled\":0,\"finish\":\"Finish question\"}",
+    "PASS Shared Studio: repeated enter/leave releases media source, screen binding, dialog and voice \u00b7 {\"clean\":true,\"dialogs\":0,\"screen\":false,\"media\":0,\"calls\":{\"listen\":1,\"enable\":0,\"stop\":4,\"drop\":0}}",
+    "PASS dsb shared session checkpoint: clean console \u00b7 2.1s ",
+    "TIME dsb shared session checkpoint \u00b7 launch 0.5s \u00b7 boot 1.7s \u00b7 body 0.4s \u00b7 wall 2.6s \u00b7 checks 8 \u00b7 watchdog clear"
+  ],
+  "limits": [
+    "No browser retry after this failed HTTP run",
+    "Position/frame readiness versus implementation failure remains unresolved; metadata/seek event timing is a hypothesis, not a verified cause",
+    "Native panel/captions/consent/cleanup passed; specific texture-security fallback is unit-covered, not revalidated in browser",
+    "Real SFU, physical mobile, audible output and full-room performance untested"
+  ]
+}

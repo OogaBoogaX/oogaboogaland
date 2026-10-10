@@ -29,10 +29,16 @@
   const subs = new Map();
   // Each wanted voice's publication count from the room: a new count is a microphone published again.
   const wantedGen = new Map();
-  const stats = { enabled: false, muted: false, speaking: false, joining: false, peers: 0, hearing: 0, error: "" };
+  const stats = { enabled: false, muted: false, speaking: false, joining: false, peers: 0, hearing: 0, error: "", micError: "", publishing: false, blocked: false, ready: false, preflight: false, preflightPending: false, permission: "unknown", deviceId: "", receiveLevel: 1, micLevel: 0, receiveState: "off" };
+  Object.defineProperty(stats, "receiveError", { enumerable: true, get: () => stats.error });
   const samples = new Float32Array(SAMPLES);
   const mutedLogins = new Set();
   let mic = null, pubPc = null, subPc = null, desired = [], queue = Promise.resolve();
+  let lifecycle = 0, micGeneration = 0, microphoneWanted = false;
+  let cleanup = Promise.resolve(), receiverOpening = null;
+  const requests = new Set();
+  const current = (token) => { if (token !== lifecycle) throw new Error("voice operation cancelled"); };
+  const abortRequests = () => { for (const controller of requests) controller.abort(); requests.clear(); };
   let audio = null, micMeter = null, speakTimer = 0, changed = false;
   // Each connection's own pending restart after a drop, so one connection's change never cancels the other's.
   const dropTimers = new Map();
@@ -87,12 +93,14 @@
   };
 
   // One read of a meter; true when its speaking flag changed.
-  const listen = (m) => {
+  const readMeter = (m) => {
     if (!m) return false;
     m.analyser.getFloatTimeDomainData(samples);
     let sum = 0;
     for (let i = 0; i < SAMPLES; i++) sum += samples[i] * samples[i];
-    const loud = Math.sqrt(sum / SAMPLES) > SPEAK_ON;
+    const level = Math.sqrt(sum / SAMPLES);
+    if (m === micMeter) stats.micLevel = level;
+    const loud = level > SPEAK_ON;
     m.quiet = loud ? 0 : m.quiet + 1;
     const speaking = loud || m.speaking && m.quiet < SPEAK_HOLD;
     if (speaking === m.speaking) return false;
@@ -100,23 +108,42 @@
     return true;
   };
   const listenSub = (s) => {
-    if (listen(s.meter)) changed = true;
+    if (readMeter(s.meter)) changed = true;
   };
   const poll = () => {
     changed = false;
-    listen(micMeter);
+    readMeter(micMeter);
     subs.forEach(listenSub);
-    const self = !!(micMeter && micMeter.speaking) && !stats.muted;
+    const self = stats.publishing && !!(micMeter && micMeter.speaking) && !stats.muted;
     if (self !== stats.speaking) {
       stats.speaking = self;
       changed = true;
     }
-    if (changed) emit();
+    if (changed || stats.preflight) emit();
   };
 
+  const PLAY_BLOCKED = "Press Enable sound to hear voices";
+  const reflectBlocked = () => {
+    stats.blocked = [...subs.values()].some((sub) => sub.blocked && sub.el.srcObject);
+    if (stats.blocked) stats.error = PLAY_BLOCKED;
+    else if (stats.error === PLAY_BLOCKED) stats.error = "";
+    emit();
+  };
+  const playSub = (sub) => {
+    const token = lifecycle, stream = sub.el.srcObject;
+    if (!stream) return;
+    sub.el.play().then(() => {
+      if (token !== lifecycle || sub.el.srcObject !== stream) return;
+      sub.blocked = false; reflectBlocked();
+    }).catch(() => {
+      if (token !== lifecycle || sub.el.srcObject !== stream) return;
+      sub.blocked = true; reflectBlocked();
+    });
+  };
   const silence = (s) => {
     s.el.pause();
-    s.el.srcObject = null;
+    s.el.srcObject = null; s.blocked = false;
+    reflectBlocked();
     if (s.meter) s.meter.source.disconnect();
     s.meter = null;
   };
@@ -128,16 +155,22 @@
     return !rec || !mutedLogins.has(rec.login.toLowerCase());
   };
 
-  const api = async (op, body) => {
-    const res = await fetch(`/api/voice/${op}`, {
-      method: "POST",
-      credentials: "same-origin",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(body || {}),
-    });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(data.error || `voice ${op} ${res.status}`);
-    return data;
+  const api = async (op, body, token = lifecycle) => {
+    current(token);
+    const controller = new AbortController();
+    requests.add(controller);
+    const timeout = window.setTimeout(() => controller.abort(), CONNECT_MS);
+    try {
+      const res = await fetch(`/api/voice/${op}`, {
+        method: "POST", credentials: "same-origin", signal: controller.signal,
+        headers: { "content-type": "application/json", "x-room-token": BL.net.state.connectionToken || "" },
+        body: JSON.stringify(body || {}),
+      });
+      const data = await res.json().catch(() => ({}));
+      current(token);
+      if (!res.ok) throw new Error(data.error || `voice ${op} ${res.status}`);
+      return data;
+    } finally { window.clearTimeout(timeout); requests.delete(controller); }
   };
 
   // Either connection failing, or staying disconnected past DROP_GRACE_MS, after it was up: start voice over, which
@@ -145,6 +178,7 @@
   const watch = (pc) => {
     pc.addEventListener("connectionstatechange", () => {
       if (pc !== pubPc && pc !== subPc) return;
+      if (pc === subPc) { stats.receiveState = pc.connectionState; emit(); }
       window.clearTimeout(dropTimers.get(pc));
       dropTimers.delete(pc);
       if (pc.connectionState === "failed") restart();
@@ -157,30 +191,36 @@
 
   // The microphone's session and connection, announced only once connected; one more try on a fresh session
   // when the first connection does not come up.
-  const publish = async () => {
+  const publish = async (token, generation) => {
+    await cleanup;
+    const valid = () => { current(token); if (!microphoneWanted || generation !== micGeneration) throw new Error("microphone cancelled"); };
     for (let attempt = 0; ; attempt++) {
-      await api("session", { kind: "pub" });
-      pubPc = new RTCPeerConnection(ICE);
-      const tx = pubPc.addTransceiver(mic.getAudioTracks()[0], { direction: "sendonly" });
-      await pubPc.setLocalDescription(await pubPc.createOffer());
-      await gathered(pubPc);
-      const pub = await api("publish", { sdp: pubPc.localDescription.sdp, mid: tx.mid });
-      await pubPc.setRemoteDescription(pub.sessionDescription);
+      valid();
+      await api("session", { kind: "pub" }, token); valid();
+      const pc = new RTCPeerConnection(ICE);
+      pubPc = pc;
       try {
-        await connected(pubPc);
-        break;
+        const tx = pc.addTransceiver(mic.getAudioTracks()[0], { direction: "sendonly" });
+        const offer = await pc.createOffer(); valid();
+        await pc.setLocalDescription(offer); valid();
+        await gathered(pc); valid();
+        const pub = await api("publish", { sdp: pc.localDescription.sdp, mid: tx.mid }, token); valid();
+        await pc.setRemoteDescription(pub.sessionDescription); valid();
+        await connected(pc); valid();
+        watch(pc);
+        await api("live", null, token); valid();
+        return;
       } catch (err) {
-        pubPc.close();
-        pubPc = null;
+        pc.close(); if (pubPc === pc) pubPc = null;
+        valid();
         if (attempt) throw err;
       }
     }
-    watch(pubPc);
-    await api("live");
   };
 
   const teardown = () => {
     window.clearTimeout(retryTimer);
+    retried = false;
     for (const timer of dropTimers.values()) window.clearTimeout(timer);
     dropTimers.clear();
     window.clearInterval(speakTimer);
@@ -190,54 +230,159 @@
     if (pubPc) pubPc.close();
     if (subPc) subPc.close();
     pubPc = subPc = null;
-    stats.enabled = false;
+    stats.enabled = false; stats.ready = false; stats.receiveState = "off";
+    stats.blocked = false;
+    if (stats.error === PLAY_BLOCKED) stats.error = "";
+    stats.publishing = false;
     stats.speaking = false;
     stats.peers = stats.hearing = 0;
   };
 
-  const enable = async () => {
-    if (stats.enabled || stats.joining) return;
-    // Made inside the Join click and kept through a restart, which has no gesture; closed in `stop`.
+  const activate = () => {
     if (!audio && window.AudioContext) audio = new AudioContext();
     if (audio) audio.resume().catch(() => {});
-    stats.joining = true;
-    stats.error = "";
-    emit();
+    for (const s of subs.values()) playSub(s);
+  };
+
+  // Listening does not acquire or publish a microphone. Both entry points run inside a gesture.
+  const listen = async () => {
+    activate();
+    if (stats.enabled || stats.joining) return;
+    const token = lifecycle;
+    stats.joining = true; stats.error = ""; emit();
     try {
-      mic = mic || await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
+      await openReceiver(token);
+      if (token !== lifecycle) return;
+      stats.enabled = true; stats.ready = true;
+      window.clearInterval(speakTimer);
+      speakTimer = window.setInterval(poll, SPEAK_MS);
+      schedule();
+    } catch {
+      if (token === lifecycle) { stats.error = "voice unavailable"; teardown(); }
+    } finally {
+      if (token === lifecycle) { stats.joining = false; emit(); }
+    }
+  };
+  const micConstraints = () => ({ audio: { echoCancellation: true, noiseSuppression: true,
+    autoGainControl: true, ...(stats.deviceId ? { deviceId: { exact: stats.deviceId } } : {}) } });
+  const devices = async () => {
+    const list = await navigator.mediaDevices.enumerateDevices();
+    return list.filter((device) => device.kind === "audioinput").map((device) => ({ deviceId: device.deviceId, label: device.label }));
+  };
+  // Hardware preview is local only: it never calls the SFU or grants publication consent.
+  const preflight = async (deviceId = stats.deviceId) => {
+    if (stats.publishing || stats.joining) return false;
+    cancelPreflight();
+    stats.deviceId = String(deviceId || "");
+    activate();
+    const token = lifecycle, generation = ++micGeneration;
+    stats.permission = "requesting"; stats.preflightPending = true; stats.micError = ""; emit();
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia(micConstraints());
+      if (token !== lifecycle || generation !== micGeneration) {
+        for (const track of stream.getTracks()) track.stop(); return false;
+      }
+      mic = stream; micMeter = meter(stream);
+      stats.preflight = true; stats.preflightPending = false; stats.permission = "granted";
+      window.clearInterval(speakTimer); speakTimer = window.setInterval(poll, SPEAK_MS);
+      emit(); return true;
+    } catch (err) {
+      if (token === lifecycle && generation === micGeneration) {
+        stats.preflightPending = false;
+        stats.permission = err.name === "NotAllowedError" ? "denied" : "unknown";
+        stats.micError = err.name === "NotAllowedError" ? "microphone blocked" : "microphone unavailable"; emit();
+      }
+      return false;
+    }
+  };
+  const cancelPreflight = () => {
+    if (stats.publishing || microphoneWanted) return;
+    micGeneration++;
+    if (mic) for (const track of mic.getTracks()) track.stop();
+    mic = null;
+    if (micMeter) micMeter.source.disconnect();
+    micMeter = null; stats.preflight = false; stats.preflightPending = false; stats.micLevel = 0;
+    if (stats.permission === "requesting") stats.permission = "unknown";
+    if (!stats.enabled) { window.clearInterval(speakTimer); speakTimer = 0; }
+    emit();
+  };
+  const selectDevice = async (deviceId) => {
+    if (stats.publishing || microphoneWanted) dropMic();
+    return preflight(deviceId);
+  };
+  const setReceiveLevel = (value) => {
+    const level = Number(value);
+    if (!Number.isFinite(level)) return;
+    stats.receiveLevel = Math.max(0, Math.min(1, level));
+    for (const sub of subs.values()) sub.el.volume = stats.receiveLevel;
+    emit();
+  };
+  const enable = async (preserveMute = false) => {
+    activate();
+    if (stats.joining || stats.publishing) return;
+    const token = lifecycle, generation = ++micGeneration;
+    stats.joining = true; stats.micError = ""; microphoneWanted = true; stats.permission = "requesting"; stats.preflight = false; stats.preflightPending = false;
+    if (!preserveMute) stats.muted = false;
+    emit();
+    let openingReceiver = false;
+    try {
+      const stream = mic || await navigator.mediaDevices.getUserMedia(micConstraints());
+      if (token !== lifecycle || generation !== micGeneration || !microphoneWanted) { for (const track of stream.getTracks()) track.stop(); return; }
+      mic = stream; stats.permission = "granted";
+      for (const track of mic.getAudioTracks()) track.enabled = !stats.muted;
       micMeter = micMeter || meter(mic);
-      await publish();
-      await openReceiver();
-      stats.enabled = true;
-      // A restart after a reconnect keeps the visitor's mute.
+      await publish(token, generation);
+      if (token !== lifecycle || generation !== micGeneration || !microphoneWanted) return;
+      stats.publishing = true;
+      if (!subPc) { openingReceiver = true; await openReceiver(token); }
+      if (token !== lifecycle) return;
+      stats.enabled = true; stats.ready = true;
       setMuted(stats.muted);
       window.clearInterval(speakTimer);
       speakTimer = window.setInterval(poll, SPEAK_MS);
       schedule();
     } catch (err) {
-      stats.error = err.name === "NotAllowedError" ? "microphone blocked" : "voice unavailable";
-      teardown();
+      if (token === lifecycle && generation === micGeneration) {
+        stats.permission = err.name === "NotAllowedError" ? "denied" : "unknown";
+        if (openingReceiver) stats.error = "voice unavailable";
+        else stats.micError = err.name === "NotAllowedError" ? "microphone blocked" : "microphone unavailable or not permitted";
+        dropMic();
+      }
+    } finally {
+      if (token === lifecycle && generation === micGeneration) { stats.joining = false; emit(); }
     }
-    stats.joining = false;
-    emit();
   };
 
   // The receiving side: a fresh session and connection, every remote voice pulled into it anew. Also the
   // recovery when the SFU refuses a pull on a receive session it calls disconnected.
-  const openReceiver = async () => {
+  const openReceiver = (token = lifecycle) => {
+    if (receiverOpening && receiverOpening.token === token) return receiverOpening.promise;
+    const opening = { token, promise: null };
+    opening.promise = createReceiver(token).finally(() => {
+      if (receiverOpening === opening) receiverOpening = null;
+    });
+    receiverOpening = opening;
+    return opening.promise;
+  };
+  const createReceiver = async (token) => {
+    await cleanup;
+    current(token);
     for (const s of subs.values()) silence(s);
     subs.clear();
     if (subPc) subPc.close();
     subPc = null;
-    await api("session", { kind: "sub" });
-    subPc = new RTCPeerConnection(ICE);
-    watch(subPc);
-    subPc.addEventListener("track", (e) => {
+    await api("session", { kind: "sub" }, token);
+    current(token);
+    const pc = new RTCPeerConnection(ICE);
+    subPc = pc; stats.receiveState = "idle";
+    watch(pc);
+    pc.addEventListener("track", (e) => {
+      if (token !== lifecycle || pc !== subPc) return;
       for (const s of subs.values()) {
         if (s.mid !== e.transceiver.mid) continue;
         s.el.srcObject = new MediaStream([e.track]);
         s.meter = meter(s.el.srcObject);
-        s.el.play().catch(() => {});
+        playSub(s);
       }
       countHearing();
     });
@@ -252,34 +397,54 @@
 
   // The footer's button: join, then mute and unmute.
   const toggle = () => {
-    if (!stats.enabled) enable();
+    if (!stats.publishing) enable();
     else setMuted(!stats.muted);
   };
 
   // Leaving voice for good (sign-out, another tab took over): the microphone is released too.
   const stop = () => {
-    const was = stats.enabled;
-    teardown();
+    lifecycle++; micGeneration++; abortRequests(); microphoneWanted = false;
+    const was = stats.enabled || stats.joining || !!pubPc || !!subPc;
+    stats.joining = false; teardown();
     if (mic) for (const t of mic.getTracks()) t.stop();
-    mic = null;
+    mic = null; stats.preflight = false; stats.preflightPending = false; stats.micLevel = 0;
+    if (stats.permission === "requesting") stats.permission = "unknown";
     if (micMeter) micMeter.source.disconnect();
     micMeter = null;
     if (audio) audio.close().catch(() => {});
     audio = null;
-    stats.muted = false;
+    stats.muted = false; stats.micError = "";
     BL.net.setMuted(false);
     desired = [];
     wantedGen.clear();
-    if (was) api("leave").catch(() => {});
+    if (was) cleanup = api("leave").catch(() => {});
     emit();
   };
 
-  // After a reconnect the room has forgotten this page's sessions: start over, keeping the microphone.
+  // Revocation releases hardware while keeping receive-only audio available.
+  const dropMic = () => {
+    micGeneration++; microphoneWanted = false; stats.joining = false;
+    if (mic) for (const track of mic.getTracks()) track.stop();
+    mic = null; stats.preflight = false; stats.preflightPending = false; stats.micLevel = 0;
+    if (stats.permission === "requesting") stats.permission = "unknown";
+    if (micMeter) micMeter.source.disconnect();
+    micMeter = null;
+    if (pubPc) pubPc.close();
+    pubPc = null; stats.publishing = false; stats.speaking = false;
+    stats.muted = true; BL.net.setMuted(true);
+    cleanup = api("unpublish").catch(() => {});
+    emit();
+  };
   const restart = async () => {
     if (!stats.enabled) return;
-    teardown();
-    await api("leave").catch(() => {});
-    await enable();
+    const wanted = microphoneWanted;
+    const token = ++lifecycle; micGeneration++; abortRequests();
+    teardown(); stats.joining = false;
+    cleanup = api("leave", null, token).catch(() => {});
+    await cleanup;
+    if (token !== lifecycle) return;
+    if (wanted && microphoneWanted) await enable(true);
+    else await listen();
   };
 
   // Whom the room wants heard, and each one's publication count (`gens`; none from an older room).
@@ -295,38 +460,42 @@
   // one disconnected) before the button says voice is unavailable; the room's next change tries again.
   let retried = false, retryTimer = 0;
   const schedule = () => {
-    queue = queue.then(apply).then(() => {
+    const token = lifecycle;
+    queue = queue.then(() => { current(token); return apply(token); }).then(() => {
+      if (token !== lifecycle) return;
       retried = false;
-      if (!stats.error) return;
-      stats.error = "";
-      emit();
+      if (!stats.error || stats.blocked) return;
+      stats.error = ""; emit();
     }, () => {
-      if (!stats.enabled) return;
+      if (token !== lifecycle || !stats.enabled) return;
       if (!retried) {
         retried = true;
         window.clearTimeout(retryTimer);
         retryTimer = window.setTimeout(() => {
-          queue = queue.then(openReceiver).catch(() => {});
+          if (token !== lifecycle || !stats.enabled) return;
+          queue = queue.then(() => openReceiver(token)).catch(() => {});
           schedule();
         }, RETRY_MS);
         return;
       }
-      stats.error = "voice unavailable";
-      emit();
+      stats.error = "voice unavailable"; emit();
     });
   };
 
   // Close whom the room no longer wants heard, and anyone whose microphone was published again; pull whom it
   // newly wants; renegotiate when the SFU asks. A wanted voice the pull did not deliver fails the change, so
   // it is retried rather than left silent.
-  const apply = async () => {
+  const apply = async (token) => {
+    current(token);
     if (!stats.enabled || !subPc) return;
+    const pc = subPc;
+    const valid = () => { current(token); if (pc !== subPc) throw new Error("receiver replaced"); };
     const want = new Set(desired);
     const mids = [];
     for (const [id, s] of subs) {
       if (want.has(id) && s.gen === wantedGen.get(id)) continue;
       silence(s);
-      const tx = subPc.getTransceivers().find((t) => t.mid === s.mid);
+      const tx = pc.getTransceivers().find((t) => t.mid === s.mid);
       try {
         if (tx) tx.stop();
       } catch {
@@ -335,25 +504,29 @@
       mids.push(s.mid);
       subs.delete(id);
     }
-    if (mids.length) await api("close", { mids });
+    if (mids.length) { await api("close", { mids }, token); valid(); }
     const add = desired.filter((id) => !subs.has(id));
     if (add.length) {
-      const res = await api("pull", { ids: add });
+      stats.receiveState = pc.connectionState === "connected" ? "connected" : "connecting"; emit();
+      const res = await api("pull", { ids: add }, token); valid();
       for (const t of res.tracks) {
         if (t.errorCode || t.id === null) continue;
         const el = new Audio();
+        el.volume = stats.receiveLevel;
         el.autoplay = true;
         el.muted = !heard(t.id);
-        subs.set(t.id, { mid: t.mid, el, meter: null, gen: wantedGen.get(t.id) });
+        subs.set(t.id, { mid: t.mid, el, meter: null, blocked: false, gen: wantedGen.get(t.id) });
       }
       if (res.requiresImmediateRenegotiation && res.sessionDescription) {
-        await subPc.setRemoteDescription(res.sessionDescription);
-        await subPc.setLocalDescription(await subPc.createAnswer());
-        await gathered(subPc);
-        await api("renegotiate", { sdp: subPc.localDescription.sdp });
+        await pc.setRemoteDescription(res.sessionDescription); valid();
+        const answer = await pc.createAnswer(); valid();
+        await pc.setLocalDescription(answer); valid();
+        await gathered(pc); valid();
+        await api("renegotiate", { sdp: pc.localDescription.sdp }, token); valid();
       }
       for (const id of add) if (!subs.has(id) && want.has(id)) throw new Error("voice pull incomplete");
     }
+    if (!subs.size && pc.connectionState === "new") stats.receiveState = "idle";
     if (stats.peers !== subs.size) {
       stats.peers = subs.size;
       emit();
@@ -409,5 +582,5 @@
   // For the feed panel and debugging: whom the room wants heard, whom this page pulled, and both connections.
   const inspect = () => ({ desired: desired.slice(), pulled: [...subs.keys()], publish: pubPc ? pubPc.connectionState : "none", receive: subPc ? subPc.connectionState : "none" });
 
-  BL.voice = { enable, toggle, restart, stop, setPeers, subscribe, dispose, inspect, speaking, muteLocal, mutedLocally, stats };
+  BL.voice = { preflight, cancelPreflight, devices, selectDevice, setInputDevice: selectDevice, setReceiveLevel, setOutputGain: setReceiveLevel, enable, listen, dropMic, toggle, restart, stop, setPeers, subscribe, dispose, inspect, speaking, muteLocal, mutedLocally, stats };
 })();
