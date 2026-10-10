@@ -14,7 +14,7 @@ PR ownership check are described in [Contributor onboarding](contributor-onboard
 | Worker | `worker/src/index.js` | runs only for `/auth/*`, `/api/*` and `/room` (`run_worker_first`); everything else is the static page |
 | D1 `oogaboogaland` | `worker/migrations/` | `players` (GitHub id, login, display name) and `sessions` (token hash, expiry) |
 | Page modules | `src/js/net.js` (`BL.net`), `src/js/remote-players.js` | the account and the room socket; the other visitors on the island. The sheet footer shows the account and the online count through `hud.showAccount` |
-| Room | `worker/src/room.js` (Durable Object `Room`) | one socket per signed-in player, presence and poses |
+| Room | `worker/src/room.js` (Durable Object `Room`) | one socket per signed-in player, presence and poses, and Ooga Chat |
 
 ## Signing in
 
@@ -53,9 +53,12 @@ A signed-in visitor holds one WebSocket to `/room` for the page life. The Worker
 | client → room | `{ t: "hub", on }` | this page shows the island in a visible tab: it can host the NPCs and receives their frames |
 | client → room | `{ t: "mute", on }` | this page muted or unmuted its own microphone, for everyone's roster |
 | client → room | `{ t: "hp", v, ko }` | the driven Ooga's health (0-100, in steps of 4) and whether it is knocked out; only on a change, 4 a second at most |
+| client → room | `{ t: "chat", text }` | an Ooga Chat line (see Ooga Chat); the room names the speaker |
 | client → room | binary | the NPC host's frame: Ooga poses, gear, status and work, then its events (see The crew in step) |
 | client → room | `"ping"` every 10 s | answered `"pong"` without waking the room |
 | room → client | `welcome { you, players, tickHz, now, loopEpoch, host, followers }` | on connect: everyone else, their last pose, whether each is in voice (`voice`) and muted (`muted`), and their health (`hp`, `ko`) |
+| room → client | `chat-history { messages }` | right after `welcome`: the chat lines the room still holds, oldest first, at most 100 |
+| room → client | `chat { id, at, login, name, text }` | a chat line, to everyone (the speaker too) |
 | room → client | `join { p }`, `leave { id, reason }`, `body { id, name }` | the roster changing |
 | room → client | `state { now, ps }` | at most 15 a second while poses arrive, none while nobody moves: `ps` is flat `id, x, y, z, yaw` runs |
 | room → client | `host { id, followers }` | the page that runs the NPCs now (0 for none) and how many pages follow it; binary frames from it follow while any do |
@@ -65,7 +68,7 @@ A signed-in visitor holds one WebSocket to `/room` for the page life. The Worker
 | room → client | `release { name, reason }` | a claim refused (`not-yours`, `owner-here`, `taken`, `unknown`) or an Ooga taken back by its arriving owner |
 | room → client | `kick { reason }`, then close 4000 | `replaced` (a newer tab), `stale` (90 s silent, swept once a minute), `full` (32 players) |
 
-Frames the room cannot read close with 4400; out-of-bounds poses and unknown types are ignored. The pure rules are in `worker/src/protocol.js` with their checks in `worker/test/`.
+Frames the room cannot read close with 4400, as does any frame over 256 characters except a chat line; out-of-bounds poses, unknown types and unusable chat lines are ignored. The pure rules are in `worker/src/protocol.js` with their checks in `worker/test/`.
 
 ### Zones
 
@@ -131,9 +134,31 @@ Signed-in players can talk (`src/js/voice.js`, `worker/src/room.js`, `worker/src
 
 The place is reported by the page, as positions are; a tampered page could claim another place to listen there, but only as a signed-in player whose login the room knows.
 
+## Ooga Chat
+
+One conversation for every signed-in player on the island, in the sheet's last tab (`src/js/chat.js`, `worker/src/room.js`, the `CHAT_*` rules in `worker/src/protocol.js`).
+
+- **Who sees it.** The tab shows only where a backend answered `/api/me`. Signed out, the log still shows and the input is off, with the footer's **Sign in with GitHub** beside it. Choosing the tab focuses the input on a mouse or trackpad, not on a touch screen, so a phone keyboard does not cover the log until asked for.
+- **Names come from the session.** Every row shows the editable display name alongside the authenticated `@login`, so a display name does not stand in for identity. The chat panel edits the display name through the existing same-origin `PATCH /api/me` (3–24 supported characters); success reconnects the room using fresh authenticated headers. Whatever identity a page puts in a chat frame is dropped. Existing rows keep the name used when sent.
+- **Text.** Kept to the donations note's characters (letters, digits, `_`, space and `.,!?'@#:-`; `src/js/donations.js`), trimmed, 1–160 characters (`CHAT_MAX`). The input explicitly flags unsupported characters and blocks sending until corrected; the server still drops unusable frames softly. Letters here mean A–Z/a–z; emoji and other Unicode letters are not supported. The shared donation sanitizer is unchanged. A chat frame may run to 1,024 characters so a long paste is dropped softly; longer ones are not read. Rows are text, never HTML.
+- **Rate.** Each authenticated account has a bucket of 3 lines refilled at 1 a second (`CHAT_BURST`, `CHAT_HZ`), retained across disconnects and tab replacement while the room remains awake; lines over it are refused with `chat-rejected { clientId, reason }` and the socket stays. The input keeps its draft until the room acknowledges its outgoing `clientId` with `chat-ack`, allows one pending send, and preserves edits made while waiting; a refusal asks the player to retry. A disconnect also keeps the draft.
+  The bucket map holds at most 64 accounts (`CHAT_BUCKET_KEEP`). Joins and sends needing a bucket opportunistically remove fully replenished inactive entries; if the map is full, a new account is rate-refused until space is available, rather than evicting an account with outstanding debt. No cleanup timer or durable storage is added. Hibernation, restart or redeploy resets all buckets, so this is awake-room anti-spam hardening, not a durable account quota. The outer `/room` connection limiter still allows at most 20 connections per minute per account.
+- **Retries.** The page retains a random outgoing `clientId` across a disconnect or rate refusal and reuses it when the same sanitized draft is sent again. Editing into a different message or sending an identical text after acknowledgement creates a new id. Acknowledgements and refusals only affect their matching pending id. The room remembers the newest 3,200 accepted `(authenticated player id, clientId)` pairs and SHA-256 text digests in memory across socket reconnects; a recognized retry is acknowledged without another broadcast or rate-limit token. Reusing an accepted id for different text is refused. Oldest entries expire at the cap; sleep/hibernation, restart or redeploy clears them, and reloading the page loses its retry id. This prevents recognized retries, not durable exactly-once delivery after reset or eviction.
+- **Ephemeral retention.** The room keeps the last 100 lines (`CHAT_KEEP`) in memory only, never in storage or D1, and sends them to each joiner. The room sleeps when nothing has happened for a short while, even with players connected (hibernation), and waking clears that memory, so a quiet island's history is soon gone. A page keeps every line it has seen up to 100, merged by id with what a rejoin brings, until it reloads or explicitly signs out. Successful sign-out clears this page’s transcript, draft and pending retry; temporary disconnects preserve them. The retry map keeps digests rather than older full message text; digests are not encrypted history and may be guessed for predictable messages. Other connected pages keep their own transcript until their reload or sign-out. Line ids follow the room's clock, so a woken room does not reuse one.
+- **Delivery and input.** One bounded 10-second timer runs only for an outgoing line awaiting a receipt. Timeout reports uncertain delivery and enables a retry with the same id; it does not claim failure or automatically resend. A matching late receipt can resolve that send, but cannot clear a later edited draft (including edits back to identical text). The transcript is not a live region: only new visible live lines and status transitions are announced, never reconnect history or old rows drawn on opening. Enter sends and Escape leaves the input outside IME composition; keyboard focus stays in the sheet, and its inputs do not drive the game.
+- **Cost.** No frame work: a line heard while the tab is not showing only joins a capped list, drawn in one batch when it shows. The log follows new lines only while scrolled to its foot, including on reconnect; a reader keeps the same visible line when history merges. There are no idle chat timers; the pending receipt timer is cleared on resolution, disconnect or sign-out.
+
+### Validation boundary (2026-10-09 follow-up)
+
+The same-account immediate-reconnect regression failed before the account bucket change and passes after it. Mocked Room tests cover socket replacement, natural refill, capacity refusal, opportunistic cleanup, wake/reset and accepted-id retry acknowledgement. The page's deterministic chat checks cover drafts and receipts; these do not prove real OAuth or device behavior.
+
+On 2026-10-08, a read-only staging check returned HTTP 200 for `/` and `/api/me`, with `player: null`; the served page contained neither the chat tab marker nor `chat-ack`, so it does not validate this PR's chat implementation. No deployment or sign-in was performed. Real GitHub sign-in/callback, authenticated room reconnection and tab takeover still require the PR on staging and an existing authorized test account. Two-account delivery and scroll/focus behavior need a second consenting test participant in a controlled session; do not send test chat into an occupied public room. A physical iOS/Android phone is needed for software-keyboard opening/closing, visual viewport and safe-area behavior, touch focus, rotation and background/resume. Desktop phone emulation cannot close that gap. The focused local Google Chrome suite uses canned identities and transport, not real OAuth or other players. Actual screen-reader announcement/focus acceptance still needs a user with their screen reader; DOM assertions do not prove what it speaks.
+
 ## Banning
 
-A ban refuses the next sign-in and the next room connection; a socket already open stays until it drops (a deploy drops them all).
+A ban refuses the next sign-in and the next room connection. The existing once-a-minute room alarm also checks each connected account in D1 and kicks a banned or deleted account with `revoked`; active chat, presence and room voice eligibility end at the next successful sweep (normally within a minute). A failed D1 read leaves that account connected and retries on the next sweep, so an outage can extend that interval. The check uses the existing operator D1 ban below: no player-facing moderation endpoint or new permission system. It adds at most one player read per connected account per sweep and no new timer.
+
+This is account-level revocation, not per-session revocation: deleting session rows alone (including signing out all sessions) refuses subsequent HTTP requests and reconnects but does not end another already-open socket. An already-established SFU connection is not forcibly closed by the ban check; the room drops the player and removes its voice eligibility from peers, whose clients stop receiving it. Revoking SFU credentials or immediately terminating media independently of cooperating clients would need a separate service-supported design.
 
 ```sh
 cd worker

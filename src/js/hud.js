@@ -57,7 +57,7 @@
   const readSheetState = () => {
     try {
       const state = JSON.parse(localStorage.getItem(SHEET_STATE_KEY));
-      return state && typeof state.open === "boolean" && ["bananas", "roster", "loot"].includes(state.tab) ? state : null;
+      return state && typeof state.open === "boolean" && ["bananas", "roster", "loot", "chat"].includes(state.tab) ? state : null;
     } catch { return null; }
   };
   const writeSheetState = (open, tab) => {
@@ -296,7 +296,8 @@
     el.crateHelp.hidden = !lootEnabled;
     el.worldLootHint.hidden = !lootEnabled;
     const savedSheet = readSheetState();
-    const sheetTab = savedSheet && (savedSheet.tab !== "loot" || lootEnabled) ? savedSheet.tab : "roster";
+    // Ooga Chat has a tab only where a backend answered (chat.js), which the director learns before any scene.
+    const sheetTab = savedSheet && (savedSheet.tab !== "loot" || lootEnabled) && (savedSheet.tab !== "chat" || BL.net.state.backend) ? savedSheet.tab : "roster";
     for (const tab of el.tabs) tab.setAttribute("aria-selected", String(tab.dataset.tab === sheetTab));
     for (const panel of el.panels) panel.hidden = panel.dataset.panel !== sheetTab;
     el.sheet.dataset.open = String(!!savedSheet?.open);

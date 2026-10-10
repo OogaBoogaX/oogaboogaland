@@ -14,12 +14,17 @@
 // is told how many pages follow it (`host { id, followers }`) so a lone host sends no frames, and who is
 // in voice or muted goes out (`vstate`) only when it changes, as health does (`hp`). The last voice list
 // each player was sent lives in its attachment (`sent`), so a woken room still knows what every page holds.
+// Chat: each line is named from the session, rate limited per account across awake-room reconnects, sent to every socket and kept in a
+// ring of the last CHAT_KEEP in memory alone, which a joiner gets after `welcome`. No durable chat storage: a room
+// that hibernates, restarts or is redeployed wakes with an empty ring, and the lines are gone.
 
 import { DurableObject } from "cloudflare:workers";
 import {
   CLOSE_KICK, CLOSE_PROTOCOL, MAX_PLAYERS, MOVE_HZ, STALE_MS, SWEEP_MS, TICK_HZ,
-  NPC_FRAME_MAX, NPC_HZ, OUTSIDE, HP_HZ, VOICE_TRACK, castIndex, electHost, npcFollowers, claimRefusal, parseClientMessage, playerFromHeaders, spawnPoint, takeToken, voicePeers,
+  NPC_FRAME_MAX, NPC_HZ, OUTSIDE, HP_HZ, VOICE_TRACK, CHAT_HZ, CHAT_BURST, CHAT_BUCKET_KEEP, CHAT_RETRY_KEEP, chatLog, castIndex, electHost, npcFollowers, claimRefusal, parseClientMessage, playerFromHeaders, spawnPoint, takeToken, voicePeers,
 } from "./protocol.js";
+import { sha256Hex } from "./crypto.js";
+import { getPlayer } from "./db.js";
 import { sfuClient } from "./sfu.js";
 import CAST_ROWS from "./characters.gen.json";
 
@@ -36,6 +41,10 @@ export class Room extends DurableObject {
     this.hostId = 0;
     this.followers = 0;
     this.lastNpc = null;
+    this.chat = chatLog();
+    this.chatId = 0;
+    this.chatAccepted = new Map();
+    this.chatBuckets = new Map();
     ctx.setWebSocketAutoResponse(new WebSocketRequestResponsePair("ping", "pong"));
     // The pile's sound loop started once, for good: every page plays it at (now - loopEpoch), so all
     // hear the same crackle at the same moment. Stored, so a woken or redeployed room keeps the phase.
@@ -54,7 +63,21 @@ export class Room extends DurableObject {
   }
 
   record(ws, a) {
-    return { ws, voice: { pub: null, sub: null, track: null, gen: 0 }, muted: false, hp: 100, ko: false, sent: null, zone: OUTSIDE, inHub: false, joinedAt: Date.now(), ...a, bucket: { tokens: MOVE_HZ, at: Date.now() }, npcBucket: { tokens: NPC_HZ, at: Date.now() }, hpBucket: { tokens: HP_HZ, at: Date.now() }, seenAt: Date.now() };
+    return { ws, voice: { pub: null, sub: null, track: null, gen: 0 }, muted: false, hp: 100, ko: false, sent: null, zone: OUTSIDE, inHub: false, joinedAt: Date.now(), ...a, bucket: { tokens: MOVE_HZ, at: Date.now() }, npcBucket: { tokens: NPC_HZ, at: Date.now() }, hpBucket: { tokens: HP_HZ, at: Date.now() }, chatBucket: this.chatBucketFor(a.id, Date.now()), seenAt: Date.now() };
+  }
+
+  // Retain account debt across socket records, only while awake. Reclaim fully replenished
+  // inactive accounts on demand; at capacity refuse new debt rather than evict depleted buckets.
+  chatBucketFor(id, now) {
+    for (const [account, bucket] of this.chatBuckets) {
+      if (!this.players.has(account) && bucket.tokens + (now - bucket.at) * CHAT_HZ / 1000 >= CHAT_BURST) this.chatBuckets.delete(account);
+    }
+    let bucket = this.chatBuckets.get(id);
+    if (!bucket && this.chatBuckets.size < CHAT_BUCKET_KEEP) {
+      bucket = { tokens: CHAT_BURST, at: now };
+      this.chatBuckets.set(id, bucket);
+    }
+    return bucket || null;
   }
 
   attachment(p) {
@@ -108,6 +131,8 @@ export class Room extends DurableObject {
     const others = [];
     for (const o of this.players.values()) if (o !== p) others.push(this.view(o));
     this.send(server, { t: "welcome", you: this.view(p), players: others, tickHz: TICK_HZ, now: Date.now(), loopEpoch: this.loopEpoch, host: this.hostId, followers: this.followers });
+    // A message of its own after welcome, so a page that does not know chat ignores it; empty after the room slept.
+    this.send(server, { t: "chat-history", messages: this.chat.list() });
     this.broadcast({ t: "join", p: this.view(p) }, server);
     this.updateVoice();
     await this.ensureSweep();
@@ -163,6 +188,9 @@ export class Room extends DurableObject {
       if (msg.on === p.muted) return;
       p.muted = msg.on;
       this.voiceState(p);
+    } else if (msg.t === "chat") {
+      // Nothing in the attachment changes.
+      return this.say(p, msg.text, msg.clientId);
     } else if (msg.t === "body") {
       if (msg.name === p.body) return;
       const refusal = claimRefusal(CAST, p.login, msg.name, this.players.values(), p.contributor);
@@ -240,6 +268,37 @@ export class Room extends DurableObject {
     const ps = [];
     for (const p of this.players.values()) ps.push(p.id, p.x, p.y, p.z, p.yaw);
     this.broadcast({ t: "state", now: Date.now(), ps });
+  }
+
+  // A line from a player, named by the session's login and display name; over the rate its sender is told.
+  async say(p, text, clientId) {
+    // Scope retry ids to the authenticated account, never to a socket or client-supplied identity.
+    const key = clientId === undefined ? null : `${p.id}:${clientId}`;
+    // Only the fingerprint outlives the visible ring. After the async hash, the identity check,
+    // dedup lookup and acceptance run synchronously, so simultaneous retries cannot both accept.
+    const fingerprint = key ? await sha256Hex(text) : null;
+    if (this.players.get(p.id) !== p) return;
+    if (key && this.chatAccepted.has(key)) {
+      this.send(p.ws, this.chatAccepted.get(key) === fingerprint
+        ? { t: "chat-ack", clientId } : { t: "chat-rejected", clientId, reason: "conflict" });
+      return;
+    }
+    if (!p.chatBucket) p.chatBucket = this.chatBucketFor(p.id, p.seenAt);
+    if (!p.chatBucket || !takeToken(p.chatBucket, CHAT_HZ, p.seenAt, CHAT_BURST)) {
+      this.send(p.ws, { t: "chat-rejected", ...(clientId === undefined ? {} : { clientId }), reason: "rate" });
+      return;
+    }
+    const at = Date.now();
+    // Ids follow the clock and only grow, so a restarted room does not reuse one, as voice counts do not.
+    this.chatId = Math.max(at, this.chatId + 1);
+    const line = { id: this.chatId, at, login: p.login, name: p.display, text };
+    if (key) {
+      this.chatAccepted.set(key, fingerprint);
+      if (this.chatAccepted.size > CHAT_RETRY_KEEP) this.chatAccepted.delete(this.chatAccepted.keys().next().value);
+    }
+    this.chat.push(line);
+    this.broadcast({ t: "chat", ...line });
+    if (key) this.send(p.ws, { t: "chat-ack", clientId });
   }
 
   // Also after any page's `hub` flag changes: the host sends frames only while someone follows.
@@ -387,6 +446,14 @@ export class Room extends DurableObject {
   async alarm() {
     const now = Date.now();
     for (const p of [...this.players.values()]) {
+      // The existing operator D1 ban also ends active presence at the next successful sweep.
+      // Retry on a later alarm if D1 is unavailable; never infer a ban from a failed read.
+      if (this.env.DB) {
+        let player;
+        try { player = await getPlayer(this.env.DB, p.id); } catch { /* Retry the account check next sweep; stale eviction still applies. */ }
+        if (this.players.get(p.id) !== p) continue;
+        if (player !== undefined && (!player || player.banned_at)) { this.evict(p, "revoked"); continue; }
+      }
       const pinged = this.ctx.getWebSocketAutoResponseTimestamp(p.ws);
       const last = Math.max(p.seenAt, pinged ? pinged.getTime() : 0);
       if (now - last > STALE_MS) this.evict(p, "stale");

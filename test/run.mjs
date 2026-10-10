@@ -2864,7 +2864,7 @@ const orbitFlow = async (b) => {
 const SCENES = ["hub", "lab", "race", "drop", "orbit", "mine", "dsb", "factory", "bifrost", "poker", "arcade", "skee", "hoops", "shy", "claw", "hockey", "billiards", "darts", "pinball", "ride", "invaders", "snake", "pong", "stampede", "flap", "breaker", "dash", "stacker"];
 const LANES = Number(process.env.LANES) || 8;
 const ARGS = process.argv.slice(2);
-for (const a of ARGS) if (!SCENES.includes(a) && !["unit", "integration-unit", "svrn-unit", "svrn-review", "vacancy-unit", "portal-unit", "water-baseline", "water-review", "water-unit", "stackchain-review", "stackchain-unit", "dsb-menus-unit", "maxis-unit", "exterior-unit", "rulers-unit", "ink-unit", "big-unit", "perf", "full", "poker-protocol"].includes(a)) throw new Error(`Unknown argument "${a}" (unit | perf | full | poker-protocol | ${SCENES.join(" | ")})`);
+for (const a of ARGS) if (!SCENES.includes(a) && !["unit", "chat-unit", "integration-unit", "svrn-unit", "svrn-review", "vacancy-unit", "portal-unit", "water-baseline", "water-review", "water-unit", "stackchain-review", "stackchain-unit", "dsb-menus-unit", "maxis-unit", "exterior-unit", "rulers-unit", "ink-unit", "big-unit", "perf", "full", "poker-protocol"].includes(a)) throw new Error(`Unknown argument "${a}" (unit | perf | full | poker-protocol | ${SCENES.join(" | ")})`);
 const ONLY = process.env.ONLY || ""; // Optional comma-separated substrings within the requested scenes.
 const onlyMatches = value => ONLY.split(",").some(part => value.includes(part));
 const FULL = ARGS.includes("full");
@@ -4187,6 +4187,144 @@ const hubSheetPersistence = { name: "side panel persistence", why: "rule: a firs
     && opened.open === "true" && opened.tab === "bananas" && opened.saved?.open && opened.saved.tab === "bananas"
     && restored.open === "true" && restored.tab === "bananas" && restored.panel
     && closed.open === "false" && closed.tab === "bananas" && !closed.saved.open && closed.saved.tab === "bananas", JSON.stringify({ first, opened, restored, closed }));
+} };
+const hubChat = { name: "ooga chat", why: "rule: Ooga Chat shows only with a backend, asks a signed-out visitor to sign in, keeps the last 100 lines as plain text, never pulls a reader back down, and Enter sends while Escape only leaves the input", run: async (b) => {
+  // No backend in the suite: a saved chat tab falls back to the roster and the tab stays hidden.
+  await b.evaluate(`localStorage.setItem("oogaboogaland.sheet.v1", JSON.stringify({ open: true, tab: "chat" }))`);
+  await b.open(hubPage(src, "pos=0"));
+  await untilReady(b);
+  const none = await b.evaluate(`({ hidden: document.getElementById("chat-tab").hidden, tab: document.querySelector("[data-tab][aria-selected='true']").dataset.tab, offline: BL.net.sendChat("hi") })`);
+  const r = await b.evaluate(`(() => {
+    const C = BL.chat, $ = (id) => document.getElementById(id), tab = $("chat-tab"), input = $("chat-input"), send = $("chat-send"), log = $("chat-log");
+    const out = {};
+    C.account({ backend: true, me: null, room: "off" });
+    tab.click();
+    out.signedOut = !tab.hidden && !$("chat-panel").hidden && input.disabled && send.disabled && !$("chat-login").hidden && document.activeElement !== input;
+    C.account({ backend: true, me: { id: 9, login: "Tester", display: "Tester" }, room: "live" });
+    tab.click();
+    out.saved = JSON.parse(localStorage.getItem("oogaboogaland.sheet.v1")).tab;
+    out.focused = document.activeElement === input || !matchMedia("(pointer: fine)").matches;
+    const line = (i) => ({ id: i + 1, at: 0, login: i % 2 ? "tester" : "peer", name: i % 2 ? "Tester" : "Peer", text: "line " + i });
+    const history = [];
+    for (let i = 0; i < 120; i++) history.push(line(i));
+    const announcementBeforeHistory = $("chat-announcement").textContent;
+    C.heard(history, true);
+    out.announcements = log.getAttribute("aria-live") === "off" && $("chat-announcement").textContent === announcementBeforeHistory;
+    out.history = [log.childElementCount, log.firstElementChild.lastChild.textContent];
+    for (let i = 120; i < 150; i++) C.heard([i === 149 ? { ...line(i), text: '<img src=x onerror="window.__chatInjected=1">' } : line(i)], false);
+    out.announcements &&= $("chat-announcement").textContent.includes("@tester");
+    const last = log.lastElementChild;
+    out.capped = [log.childElementCount, log.firstElementChild.lastChild.textContent, C.stats.lines];
+    out.login = last.querySelector(".chat-login-name")?.textContent === "@tester";
+    out.text = last.lastChild.textContent === '<img src=x onerror="window.__chatInjected=1">' && !log.querySelector("img") && !window.__chatInjected && last.dataset.own === "true";
+    out.followed = log.scrollHeight - log.scrollTop - log.clientHeight <= 1;
+    log.scrollTop = 0;
+    C.heard([line(150)], false);
+    out.reading = [log.scrollTop, log.childElementCount, log.firstElementChild.lastChild.textContent];
+    log.scrollTop = log.scrollHeight;
+    C.heard([line(151)], false);
+    out.refollowed = log.scrollHeight - log.scrollTop - log.clientHeight <= 1;
+    log.scrollTop = 100;
+    const anchor = Array.from(log.children).find((child) => child.getBoundingClientRect().bottom > log.getBoundingClientRect().top);
+    const anchorTop = anchor.getBoundingClientRect().top;
+    C.heard([], true);
+    out.emptyRejoin = log.scrollTop === 100;
+    C.heard([line(150), line(151), line(152)], true);
+    const restored = Array.from(log.children).find((child) => child.dataset.id === anchor.dataset.id);
+    out.readerRejoin = Math.abs(restored.getBoundingClientRect().top - anchorTop) < 1;
+    log.scrollTop = log.scrollHeight;
+    C.heard([line(153)], true);
+    out.followRejoin = log.scrollHeight - log.scrollTop - log.clientHeight <= 1;
+    out.rejoined = [log.childElementCount, log.firstElementChild.lastChild.textContent, log.lastElementChild.lastChild.textContent];
+    input.value = "a".repeat(161);
+    input.dispatchEvent(new Event("input"));
+    out.over = [send.disabled, $("chat-left").textContent];
+    input.value = "hello 🍌"; input.dispatchEvent(new Event("input"));
+    out.policy = send.disabled && $("chat-status-text").textContent.includes("unsupported");
+    input.value = "  hello b  ";
+    input.dispatchEvent(new Event("input"));
+    out.ready = [send.disabled, $("chat-left").textContent];
+    window.__chatSent = [];
+    window.__chatSend = BL.net.sendChat;
+    BL.net.sendChat = (text, clientId) => (window.__chatSent.push({ text, clientId }), true);
+    const submit = () => $("chat-form").dispatchEvent(new Event("submit", { cancelable: true }));
+    const receipt = (clientId, accepted) => C.heard([], false, { clientId, accepted });
+    const reconnect = () => {
+      C.account({ backend: true, me: { id: 9, login: "Tester" }, room: "connecting" });
+      C.account({ backend: true, me: { id: 9, login: "Tester" }, room: "live" });
+    };
+    submit();
+    const first = window.__chatSent.at(-1).clientId;
+    out.pending = input.value === "  hello b  " && send.disabled;
+    receipt("unrelated", false);
+    out.unrelated = send.disabled && $("chat-status").hidden;
+    C.heard([{ id: 200, at: 0, login: "tester", name: "Tester", text: "hello b" }], false);
+    out.echoPending = input.value === "  hello b  " && send.disabled;
+    receipt(first, false);
+    out.rejected = input.value === "  hello b  " && !send.disabled && !$("chat-status").hidden && $("chat-status-text").textContent.includes("send again");
+    submit();
+    out.rateRetry = window.__chatSent.at(-1).clientId === first;
+    input.value = "next draft";
+    receipt(first, true);
+    out.edited = input.value === "next draft" && !send.disabled;
+    submit();
+    const beforeAcceptance = window.__chatSent.at(-1).clientId;
+    C.account({ backend: true, me: { id: 9, login: "Tester" }, room: "connecting" });
+    out.disconnected = input.value === "next draft" && send.disabled;
+    reconnect();
+    submit();
+    out.beforeAcceptance = window.__chatSent.at(-1).clientId === beforeAcceptance && input.value === "next draft";
+    receipt(beforeAcceptance, true);
+    input.value = "next draft";
+    input.dispatchEvent(new Event("input"));
+    submit();
+    const lostAck = window.__chatSent.at(-1).clientId;
+    out.identicalDistinct = lostAck !== beforeAcceptance;
+    C.heard([{ id: 201, at: 0, login: "tester", name: "Tester", text: "next draft" }], false);
+    reconnect();
+    C.heard([{ id: 201, at: 0, login: "tester", name: "Tester", text: "next draft" }], true);
+    submit();
+    out.lostAckRetry = window.__chatSent.at(-1).clientId === lostAck && input.value === "next draft";
+    reconnect();
+    input.value = "different message";
+    input.dispatchEvent(new Event("input"));
+    submit();
+    const editedId = window.__chatSent.at(-1).clientId;
+    receipt(lostAck, true);
+    receipt(lostAck, false);
+    out.changedId = editedId !== lostAck && input.value === "different message" && send.disabled && $("chat-status").hidden;
+    receipt(editedId, true);
+    out.correlatedClear = input.value === "";
+    input.value = "identical"; input.dispatchEvent(new Event("input")); submit();
+    const revisionId = window.__chatSent.at(-1).clientId;
+    input.value = "different"; input.dispatchEvent(new Event("input"));
+    input.value = "identical"; input.dispatchEvent(new Event("input")); receipt(revisionId, true);
+    out.revision = input.value === "identical";
+    input.focus(); input.dispatchEvent(new CompositionEvent("compositionstart"));
+    input.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true, isComposing: true }));
+    out.ime = document.activeElement === input; input.dispatchEvent(new CompositionEvent("compositionend"));
+    C.account({ backend: true, me: null, room: "off", logoutEpoch: 1 });
+    out.logout = input.value === "" && log.childElementCount === 0 && C.stats.lines === 0;
+    C.account({ backend: true, me: { id: 9, login: "Tester" }, room: "live", logoutEpoch: 1 });
+    input.value = "  hello b  ";
+    input.dispatchEvent(new Event("input"));
+    window.__chatSent = [];
+    input.focus();
+    return out;
+  })()`);
+  await b.key("Enter");
+  const sent = await b.evaluate(`(() => { const input = document.getElementById("chat-input"); const pending = input.value === "  hello b  " && document.getElementById("chat-send").disabled;
+    BL.chat.heard([], false, { clientId: window.__chatSent.at(-1).clientId, accepted: true });
+    return { pending, sent: window.__chatSent, cleared: input.value === "" && document.getElementById("chat-send").disabled && document.getElementById("chat-left").textContent === "160" }; })()`);
+  await b.key("Escape");
+  const escaped = await b.evaluate(`(() => { BL.net.sendChat = window.__chatSend; const out = { blurred: document.activeElement !== document.getElementById("chat-input"), open: document.getElementById("sheet").dataset.open === "true", tab: document.querySelector("[data-tab][aria-selected='true']").dataset.tab }; BL.chat.account({ backend: false, me: null, room: "off" }); localStorage.removeItem("oogaboogaland.sheet.v1"); return out; })()`);
+  record("ooga chat: hidden without a backend, signed out asks to sign in, the last 100 lines kept as text, a reader not pulled down, a rejoin to a room that forgot keeps the page's lines, Enter sends and Escape leaves the input",
+    none.hidden && none.tab === "roster" && none.offline === false && r.signedOut && r.saved === "chat" && r.focused
+    && r.history[0] === 100 && r.history[1] === "line 20" && r.capped[0] === 100 && r.capped[1] === "line 50" && r.capped[2] === 100 && r.text && r.followed
+    && r.reading[0] === 0 && r.reading[1] === 100 && r.reading[2] === "line 51" && r.refollowed
+    && r.rejoined[0] === 100 && r.rejoined[1] === "line 54" && r.rejoined[2] === "line 153" && r.emptyRejoin && r.readerRejoin && r.followRejoin
+    && r.over[0] && r.over[1] === "-1" && !r.ready[0] && r.ready[1] === "153"
+    && r.announcements && r.login && r.policy && r.revision && r.ime && r.logout && r.pending && r.rejected && r.edited && r.disconnected && r.unrelated && r.echoPending && r.rateRetry && r.beforeAcceptance && r.identicalDistinct && r.lostAckRetry && r.changedId && r.correlatedClear && sent.pending && sent.sent.length === 1 && sent.sent[0].text === "  hello b  " && /^[\w-]{36}$/.test(sent.sent[0].clientId) && sent.cleared && escaped.blurred && escaped.open && escaped.tab === "chat", JSON.stringify({ none, r, sent, escaped }));
 } };
 const hubBlockHeight = { name: "header clock and block height", why: "rule: the single-digit clock is centered from its visible glyphs with a time zone, and the shared chain reading is shown beneath it", run: async (b) => {
   const before = await b.evaluate(`(() => { const clock = document.getElementById("world-clock"), label = clock.querySelector("svg").getAttribute("aria-label"), text = label.replace(/^Ooga Booga time /, ""), cells = [...text].reduce((sum, ch) => sum + (ch === " " ? 2 : 4), -1), zone = (new Intl.DateTimeFormat("en-US", { timeZoneName: "short" }).formatToParts(new Date()).find(part => part.type === "timeZoneName")?.value || "UTC").toUpperCase().replaceAll("−", "-"); return { height: document.getElementById("world-block-height").textContent, bananas: !!document.getElementById("world-banana-count"), label, namedImage: !clock.hasAttribute("aria-label") && clock.querySelector("svg").getAttribute("role") === "img", text, zone, cells, viewWidth: clock.querySelector("svg").viewBox.baseVal.width, cssWidth: parseFloat(clock.style.width) }; })()`);
@@ -8441,7 +8579,7 @@ scene("hub", { label: "reset storage race", steps: [{ name: "reset storage race"
     record("browser reset: the same pooled browser clears final timer and pagehide writes before the next task", reused && kept.marker === null && kept.timer === null && kept.pagehide === null, JSON.stringify({ reused, ...kept }));
   } finally { next?.close(true); first?.close(true); rmSync(dir, { recursive: true, force: true }); }
 } }] });
-scene("hub", { label: "side panel", query: "pos=0", steps: [hubSheetPersistence] });
+scene("hub", { label: "side panel", query: "pos=0", steps: [hubSheetPersistence, hubChat] });
 scene("hub", { label: "clock and block height", query: "pos=0&time=0900", steps: [hubBlockHeight, hubDestinationNames] });
 scene("hub", { label: "canvas2d", query: "canvas2d=1", steps: [canvasTour] });
 scene("hub", { query: "pos=0", opts: PHONE_SIZE, steps: [phone("hub", { required: ["#joy-move", "#joy-look", "#sheet-toggle", "#sheet-bananas"], sheet: true })] });
@@ -10463,16 +10601,89 @@ const menuShellChecks = BL => {
 };
 
 
-const integrationChecks = async BL => {
+// net.js in a sandbox: a canned /api/me and fake sockets that record what the page sends.
+const netFixture=(BL,response)=>{
   const source=readFileSync(join(root,"src/js/net.js"),"utf8");
-  const fixture=(response)=>{
-    const sockets=[],sent=[],events=new Map();let calls=0,tick=1000;
-    class Socket {static OPEN=1;constructor(){this.readyState=1;sockets.push(this);}send(v){sent.push(typeof v==="string"?JSON.parse(v):v);}close(){this.readyState=3;}}
-    const voice={setPeers:()=>{},restart:()=>{},stop:()=>{}};
-    const context={window:{BL:{characters:BL.characters,contributors:BL.contributors,voice},setTimeout:()=>1,clearTimeout(){},setInterval:()=>1,clearInterval(){}},document:{hidden:false,addEventListener:(k,v)=>events.set(k,v),removeEventListener:k=>events.delete(k)},location:{protocol:"https:",host:"fixture.invalid"},fetch:async()=>{calls++;return response();},AbortSignal,WebSocket:Socket,performance:{now:()=>tick+=200},Date,ArrayBuffer};
-    runInNewContext(source,context);
-    return {net:context.window.BL.net,sockets,sent,events,get calls(){return calls;}};
-  };
+  const sockets=[],sent=[],events=new Map();let calls=0,tick=1000;
+  class Socket {static OPEN=1;constructor(){this.readyState=1;sockets.push(this);}send(v){sent.push(typeof v==="string"?JSON.parse(v):v);}close(){this.readyState=3;}}
+  const voice={setPeers:()=>{},restart:()=>{},stop:()=>{}};
+  const context={window:{BL:{characters:BL.characters,contributors:BL.contributors,donations:BL.donations,voice},setTimeout:()=>1,clearTimeout(){},setInterval:()=>1,clearInterval(){}},document:{hidden:false,addEventListener:(k,v)=>events.set(k,v),removeEventListener:k=>events.delete(k)},location:{protocol:"https:",host:"fixture.invalid"},fetch:async(...args)=>{calls++;return response(...args);},AbortSignal,WebSocket:Socket,performance:{now:()=>tick+=200},Date,ArrayBuffer};
+  runInNewContext(source,context);
+  return {net:context.window.BL.net,sockets,sent,events,get calls(){return calls;}};
+};
+// Ooga Chat's wire on the page: what it sends, and the lines it hands on (chat.js keeps and shows them).
+// Execute the real chat controller with a small DOM and a controllable acknowledgement clock.
+const chatClientChecks = async () => {
+  const nodes = new Map(), timers = new Map(); let timerId = 0, uuid = 0;
+  const element = () => ({ value: "", textContent: "", dataset: {}, hidden: false, disabled: false, children: [], style: { setProperty() {}, removeProperty() {} }, handlers: {},
+    addEventListener(type, fn) { this.handlers[type] = fn; }, append(...items) { this.children.push(...items); }, replaceChildren(...items) { this.children = items; },
+    focus() { document.activeElement = this; }, get childElementCount() { return this.children.length; } });
+  const document = { activeElement: null, getElementById(id) { if (!nodes.has(id)) nodes.set(id, element()); return nodes.get(id); }, createElement: element };
+  const sent = [], window = { BL: { net: { CHAT_MAX: 160, CHAT_KEEP: 100, subscribe() {}, subscribeChat() {}, sendChat(text, clientId) { sent.push({ text, clientId }); return true; } }, donations: { sanitize: (text, max) => String(text || "").replace(/[^\w .,!?'@#:-]/g, "").trim().slice(0, max) } }, crypto: { randomUUID: () => "id-" + ++uuid }, matchMedia: () => ({ matches: true }), setTimeout(fn) { timers.set(++timerId, fn); return timerId; }, clearTimeout(id) { timers.delete(id); } };
+  runInNewContext(await readFile(join(root, "src/js/chat.js"), "utf8"), { window, document, MutationObserver: class { observe() {} }, Intl });
+  const C = window.BL.chat, input = nodes.get("chat-input"), send = nodes.get("chat-send"), status = nodes.get("chat-status-text"), edit = text => { input.value = text; input.handlers.input(); }, submit = () => nodes.get("chat-form").handlers.submit({ preventDefault() {} }), receipt = id => C.heard([], false, { clientId: id, accepted: true });
+  C.account({ backend: true, me: { id: 1, login: "Tester" }, room: "live" });
+  edit("hello"); submit(); const first = sent.at(-1)?.clientId, waiting = send.disabled;
+  for (const fn of [...timers.values()]) fn();
+  const uncertain = !send.disabled && status.textContent.includes("uncertain"); submit(); const stable = sent.at(-1)?.clientId === first;
+  edit("other"); edit("hello"); receipt(first); const revision = input.value === "hello";
+  edit("new"); submit(); const second = sent.at(-1)?.clientId; receipt(first); const late = send.disabled && input.value === "new"; receipt(second);
+  edit("unsupported 🍌"); const policy = send.disabled && status.textContent.includes("unsupported");
+  C.heard([{ id: 1, login: "tester", name: "Display", text: "hello" }], true);
+  C.account({ backend: true, me: null, room: "off", logoutEpoch: 1 }); receipt(second);
+  record("ooga chat client: lost receipts time out to a stable retry; edited identical drafts and newer sends survive old receipts; explicit logout clears local text and unsupported characters are explained", waiting && uncertain && stable && revision && late && policy && input.value === "" && C.stats.lines === 0 && timers.size === 0, JSON.stringify({ waiting, uncertain, stable, revision, late, policy, lines: C.stats.lines, timers: timers.size }));
+};
+const chatAccountChecks = async BL => {
+  const requests = [], player = { id: 71, login: "Tester", display: "Tester" };
+  let release = null;
+  const f = netFixture(BL, async (url, options = {}) => {
+    requests.push({ url, ...options });
+    if (options.method === "PATCH" && JSON.parse(options.body).display === "Delayed") await new Promise(resolve => { release = resolve; });
+    return { ok: true, headers: { get: () => "application/json" }, json: async () => ({ player: { ...player, display: options.method === "PATCH" ? JSON.parse(options.body).display : player.display } }) };
+  });
+  await f.net.start();
+  const before = f.calls, invalid = await f.net.setDisplay("bad 🍌"), blocked = !invalid.ok && f.calls === before;
+  const changed = await f.net.setDisplay("New Name"), renamed = changed.ok && f.net.state.me.display === "New Name" && f.sockets.length === 2 && requests.at(-1).method === "PATCH" && f.net.state.logoutEpoch === 0;
+  const delayed = f.net.setDisplay("Delayed"); await Promise.resolve();
+  await f.net.logout(); release(); const stale = await delayed;
+  record("ooga account: display updates use the existing PATCH API and fresh room connection; unsupported characters make no request; explicit logout clears identity and a late edit cannot revive it", blocked && renamed && !stale.ok && f.net.state.me === null && f.net.state.room === "off" && f.net.state.logoutEpoch === 1, JSON.stringify({ blocked, renamed, stale, epoch: f.net.state.logoutEpoch }));
+  const revoked = netFixture(BL, () => ({ ok: true, headers: { get: () => "application/json" }, json: async () => ({ player }) }));
+  await revoked.net.start();
+  revoked.sockets[0].onmessage({ data: JSON.stringify({ t: "kick", reason: "revoked" }) });
+  revoked.net.rejoin();
+  record("ooga account: revoked kick stops reconnect and clears authenticated identity", revoked.net.state.me === null && revoked.net.state.room === "revoked" && revoked.sockets.length === 1 && !revoked.net.sendChat("blocked"));
+  revoked.net.dispose();
+};
+const chatNetChecks = async BL => {
+  const f=netFixture(BL,()=>({ok:true,headers:{get:()=>"application/json"},json:async()=>({player:{id:71,login:"Tester",display:"Tester"}})}));
+  const receipts=[];const heard=[];f.net.subscribeChat((lines,replace,receipt)=>{if(receipt){receipts.push(receipt);return;}heard.push({ids:lines.map(l=>l.id),replace,keys:lines.map(l=>Object.keys(l).join())});});
+  const before=f.net.sendChat("too early");
+  await f.net.start();const ws=f.sockets[0],message=v=>ws.onmessage({data:JSON.stringify(v)});
+  message({t:"welcome",you:{id:71},players:[],now:Date.now()});
+  const history=[];for(let i=0;i<130;i++)history.push({id:i+1,at:i,login:"peer",name:"Peer",text:"line "+i,extra:"dropped"});
+  history.push({id:"bad",login:"peer",text:"no id"});
+  message({t:"chat-history",messages:history});
+  message({t:"chat",id:500,at:1,login:"peer",text:"x".repeat(400)});
+  message({t:"chat",id:501,login:7,text:"bad login"});
+  const sends=[f.net.sendChat("  hi <b>there</b>  "),f.net.sendChat("   "),f.net.sendChat("🍌🍌"),f.net.sendChat("a".repeat(f.net.CHAT_MAX)),f.net.sendChat("a".repeat(f.net.CHAT_MAX+1))];
+  message({t:"chat-rejected",clientId:"retry-1",reason:"rate"});
+  const chats=f.sent.filter(m=>m.t==="chat");
+  record("ooga chat wire: lines only while live, sanitized as donations are and CHAT_MAX at most; history replaces with the last CHAT_KEEP well-formed lines; a malformed line is dropped",
+    f.net.CHAT_MAX===160&&f.net.CHAT_KEEP===100&&before===false&&sends.join()==="true,false,false,true,false"&&chats.length===2&&chats[0].text==="hi bthereb"&&Object.keys(chats[0]).join()==="t,text"&&chats[1].text.length===160
+    &&receipts.length===1&&!receipts[0].accepted&&receipts[0].clientId==="retry-1"&&heard.length===2&&heard[0].replace&&heard[0].ids.length===99&&heard[0].ids[0]===32&&heard[0].ids.at(-1)===130&&heard[0].keys.every(k=>k==="id,at,login,name,text")
+    &&!heard[1].replace&&heard[1].ids.join()==="500",JSON.stringify({before,sends,chats:chats.map(m=>m.text.length),heard:heard.map(h=>({n:h.ids.length,first:h.ids[0],last:h.ids.at(-1),replace:h.replace}))}));
+  const retries = [f.net.sendChat("same", "retry-1"), f.net.sendChat("same", "retry-1"), f.net.sendChat("same", "bad:id")];
+  message({t:"chat-ack",clientId:"retry-1"});
+  message({t:"chat-ack",clientId:42});
+  message({t:"chat-rejected"});
+  const retryFrames = f.sent.filter(m=>m.clientId==="retry-1");
+  ws.readyState = 3;
+  record("ooga chat wire: stable retry ids are sent unchanged and receipts preserve their correlation; invalid ids and closed sockets cannot send",
+    retries.join()==="true,true,false"&&retryFrames.length===2&&retryFrames.every(m=>m.text==="same")&&receipts.length===2&&receipts[1].accepted&&receipts[1].clientId==="retry-1"&&!f.net.sendChat("closed", "retry-1"),JSON.stringify({retries,retryFrames,receipts}));
+  f.net.dispose();
+};
+const integrationChecks = async BL => {
+  const fixture=(response)=>netFixture(BL,response);
   for(const kind of ["html","404","failure"]){
     const f=fixture(()=>{if(kind==="failure")throw Error("offline");return {ok:kind!=="404",headers:{get:()=>"text/html"}};});
     await f.net.start();await f.net.start();f.net.setZone("dsb-outside");f.net.setBody("YellowBrokeIt");f.net.sendPose(-45,40,-43,0);
@@ -11243,6 +11454,7 @@ record("character visibility source bakes: ownership wrappers share exact immuta
     }
     renderer.dispose();I.dispose();W.dispose();document.createElement=oldCreate;console.log("Exported "+rows.length+" actual Canvas water review views to "+out);return;
   }
+  if(ARGS.includes("chat-unit")){await chatNetChecks(BL);await chatClientChecks();await chatAccountChecks(BL);return;}
   if(ARGS.includes("integration-unit")){await reviewCaptureChecks();await integrationChecks(BL);return;}
   if(ARGS.includes("svrn-unit")){svrnChecks(BL);menuShellChecks(BL);return;}
   if(ARGS.includes("vacancy-unit")){await vacancyChecks(BL);return;}
@@ -11290,6 +11502,9 @@ record("character visibility source bakes: ownership wrappers share exact immuta
   }
   if(ARGS.includes("stackchain-unit")){stackchainChecks(BL);menuShellChecks(BL);return;}
   if(ARGS.includes("dsb-menus-unit")){stackchainChecks(BL);memeFactoryChecks(BL);menuShellChecks(BL);maxisChecks(BL);rulersChecks(BL);inkChecks(BL);bigBitcoinChecks(BL);return;}
+  await chatNetChecks(BL);
+  await chatClientChecks();
+  await chatAccountChecks(BL);
   exteriorEnrichmentChecks(BL);
   if(ARGS.includes("exterior-unit"))return;
   maxisChecks(BL);
