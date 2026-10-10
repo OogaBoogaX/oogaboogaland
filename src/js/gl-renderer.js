@@ -24,9 +24,9 @@
   // Scenes fill up to POINT_LIGHT_CAPACITY lights in priority order; each tier draws only its first `lights`.
   const POINT_LIGHT_CAPACITY = 32;
   const QUALITY = {
-    high: { dpr: 1.5, msaa: 2, shadow: 2048, bloom: true, shafts: true, mirror: 1024, environment: 128, environmentCadence: 1, lights: 32 },
-    medium: { dpr: 1.25, msaa: 2, shadow: 1024, bloom: true, shafts: true, mirror: 768, environment: 96, environmentCadence: 2, lights: 20 },
-    low: { dpr: 1, msaa: 0, shadow: 512, bloom: false, shafts: false, mirror: 512, environment: 64, environmentCadence: 4, lights: 10 }
+    high: { dpr: 1.5, msaa: 2, shadow: 2048, bloom: true, shafts: true, mirror: 1024, mirrorCadence: 1, prepass: true, environment: 128, environmentCadence: 1, lights: 32 },
+    medium: { dpr: 1.25, msaa: 2, shadow: 1024, bloom: true, shafts: true, mirror: 768, mirrorCadence: 2, prepass: true, environment: 96, environmentCadence: 2, lights: 20 },
+    low: { dpr: 1, msaa: 0, shadow: 512, bloom: false, shafts: false, mirror: 512, mirrorCadence: 3, prepass: true, environment: 64, environmentCadence: 4, lights: 10 }
   };
   const INSTANCE_FLOATS = 20;
   const NO_OBJECT_CLIP = new Float32Array([0, 0, 0, -1]);
@@ -114,6 +114,8 @@ mat4 rigMatrix(mat4 ordinary) {
 `;
   const MESH_VS = `#version 300 es
 precision highp float;
+// The depth pre-pass draws these vertices through its own program; invariance keeps both programs' depths equal.
+invariant gl_Position;
 layout(location=0) in vec3 aPos;
 layout(location=1) in vec3 aNormal;
 layout(location=2) in vec4 aColor;
@@ -713,6 +715,19 @@ float roadDetail() {
   speck *= 1.0 - smoothstep(0.22, 0.34, length(f));
   return 0.9 + bleach * 0.2 + speck;
 }
+// Marching squares on the road grid: each tile corner takes the share of road among the four tiles meeting there
+// (from the eight-neighbour mask in the first instance parameter, stored as 1 + mask); the tile keeps what lies
+// inside the bilinear half line, so staircases read as straight diagonals and curves. True for the cut part.
+bool roadCut() {
+  float nl = dot(vLocalNormal, vLocalNormal);
+  if (nl <= 20.0 || nl >= 30.0) return false;
+  int mask = int(vParams.x + 0.5) - 1;
+  float ex = float(mask & 1) , wx = float((mask >> 1) & 1), nz = float((mask >> 2) & 1), sz = float((mask >> 3) & 1);
+  float ne = float((mask >> 4) & 1), nw = float((mask >> 5) & 1), se = float((mask >> 6) & 1), sw = float((mask >> 7) & 1);
+  vec2 u = clamp(vLocal.xz / 0.125 + 0.5, 0.0, 1.0);
+  float c00 = (1.0 + wx + sz + sw) * 0.25, c10 = (1.0 + ex + sz + se) * 0.25, c01 = (1.0 + wx + nz + nw) * 0.25, c11 = (1.0 + ex + nz + ne) * 0.25;
+  return mix(mix(c00, c10, u.x), mix(c01, c11, u.x), u.y) < 0.5;
+}
 vec3 lavaShade(out vec3 bright) {
   vec2 q = vWorld.xz * 0.35 + vec2(uWindTime * 0.05, uWindTime * 0.02);
   float n = vnoise(q) * 0.65 + vnoise(q * 2.7 - uWindTime * 0.08) * 0.35;
@@ -751,21 +766,27 @@ float matrixPermanentAt(vec3 point, float caveIndex) {
   float ceiling = aperture.y + (room && !throat ? 1.0 : 0.0);
   return depth >= -0.000001 && depth <= bounds.w + voxelReach && abs(across) <= halfWidth + 0.000001 && height >= -0.000001 && height <= ceiling + 0.000001 ? 1.0 : 0.0;
 }
-void main() {
+// Every cut a fragment takes, also the whole of the depth pre-pass's shader, so both passes keep the same pixels.
+bool clipped() {
   vWorld = uProjective > 0.5 ? vWorldH.xyz / vWorldH.w : vWorldH.xyz;
-  if (vWorld.y < uClipMinY || dot(uObjectClip, vec4(vWorld, 1.0)) > 0.0 || abs(dot(uObjectSlab.xyz, vWorld) + uObjectSlab.w) > 1.0 || cutaway(vWorld, vSmokeOpacity)) discard;
+  if (vWorld.y < uClipMinY || dot(uObjectClip, vec4(vWorld, 1.0)) > 0.0 || abs(dot(uObjectSlab.xyz, vWorld) + uObjectSlab.w) > 1.0 || cutaway(vWorld, vSmokeOpacity)) return true;
   if (uLakeOcclude.w > 0.0 && uEye.y > uLakeOcclude.y && vWorld.y < uLakeOcclude.y) {
     vec3 towardEye = viewTowardEye(vWorld);
     if (towardEye.y > 0.0) {
       vec2 crossing = vWorld.xz + towardEye.xz * ((uLakeOcclude.y - vWorld.y) / towardEye.y);
-      if (distance(crossing, uLakeOcclude.xz) < uLakeOcclude.w) discard;
+      if (distance(crossing, uLakeOcclude.xz) < uLakeOcclude.w) return true;
     }
   }
+  if (vParams.z > 5.5) return portalDistance(vPortalUV, step(6.5, vParams.z)) > vParams.w;
+  return roadCut();
+}
+void main() {
+  if (clipped()) discard;
+#ifndef PLAIN
   if (vParams.z > 5.5) {
     vec2 p = vPortalUV;
     float rectangular = step(6.5, vParams.z);
     float time = vParams.x, surge = vParams.y, radius = portalDistance(p, rectangular);
-    if (radius > vParams.w) discard;
     float height = portalHeight(p, time, surge, rectangular);
     vec2 gradient = vec2(portalHeight(p + vec2(0.003, 0.0), time, surge, rectangular) - height,
       portalHeight(p + vec2(0.0, 0.003), time, surge, rectangular) - height) / (0.003 * vPortalView.w);
@@ -793,11 +814,18 @@ void main() {
     oBright = vec4(liquid * (0.2 + crest * 0.35 + caustic * 0.4 + rim * 0.2) * (1.0 - fog), 1.0);
     return;
   }
+#endif
   vec3 n = normalize(vNormal);
   vec3 base = vColor.rgb;
   // Mode 5 keeps its own palette in the Matrix; clouds are mode 4.
   float nativeMode = step(4.5, vParams.z);
   float cloud = step(3.5, vParams.z) * (1.0 - nativeMode);
+#ifdef PLAIN
+  // No Matrix this frame and no special faces in the mesh: the plain variant compiles all of it away.
+  float fog = smoothstep(uFogRange.x, uFogRange.y, distance(vWorld, uEye));
+  const float front = 0.0;
+  const vec3 matrixColorResult = vec3(0.0), matrixBrightResult = vec3(0.0);
+#else
   float wholeLiving = step(1.5, vParams.z) * (1.0 - step(2.5, vParams.z));
   float emissiveLiving = step(2.5, vParams.z) * (1.0 - cloud) * (1.0 - nativeMode) * step(0.001, vColor.a);
   float living = max(wholeLiving, emissiveLiving);
@@ -896,24 +924,14 @@ void main() {
       return;
     }
   }
+#endif
   float ember = clamp(-vParams.x, 0.0, 1.0);
   float detail = 0.72 + dot(base, vec3(0.2126, 0.7152, 0.0722)) * 0.28;
   vec3 heat = vec3(1.0, 0.12 + ember * 0.85, 0.01 + ember * ember * ember * 0.74) * detail;
   base = mix(base, heat, ember * 0.9);
   float emissive = max(clamp(vColor.a * max(0.0, vParams.x), 0.0, 1.0), ember * 0.9);
   base *= mix(voxelDetail(), 1.0, max(emissive, cloud));
-  if (dot(vLocalNormal, vLocalNormal) > 20.0 && dot(vLocalNormal, vLocalNormal) < 30.0) {
-    // Marching squares on the road grid: each tile corner takes the share of road among the four tiles meeting
-    // there (from the eight-neighbour mask in the first instance parameter, stored as 1 + mask); the tile keeps
-    // what lies inside the bilinear half line, so staircases read as straight diagonals and curves.
-    int mask = int(vParams.x + 0.5) - 1;
-    float ex = float(mask & 1) , wx = float((mask >> 1) & 1), nz = float((mask >> 2) & 1), sz = float((mask >> 3) & 1);
-    float ne = float((mask >> 4) & 1), nw = float((mask >> 5) & 1), se = float((mask >> 6) & 1), sw = float((mask >> 7) & 1);
-    vec2 u = clamp(vLocal.xz / 0.125 + 0.5, 0.0, 1.0);
-    float c00 = (1.0 + wx + sz + sw) * 0.25, c10 = (1.0 + ex + sz + se) * 0.25, c01 = (1.0 + wx + nz + nw) * 0.25, c11 = (1.0 + ex + nz + ne) * 0.25;
-    if (mix(mix(c00, c10, u.x), mix(c01, c11, u.x), u.y) < 0.5) discard;
-    base *= roadDetail();
-  }
+  if (dot(vLocalNormal, vLocalNormal) > 20.0 && dot(vLocalNormal, vLocalNormal) < 30.0) base *= roadDetail();
   vec3 lightFactor = lightFactorAt(n);
   // Clouds are lit like cartoon cumulus: sky fill everywhere, the sun on every face that sees it, no hard shade.
   if (cloud > 0.5) lightFactor = uSky * 0.85 + uSun * uDirectStrength * (0.4 + 0.45 * max(dot(n, uLightDir), 0.0)) + vec3(0.18) * uDirectStrength;
@@ -928,11 +946,15 @@ void main() {
   vec3 surfaceBright = vec3(0.0);
   float nl = dot(vLocalNormal, vLocalNormal);
   float lakeAlpha = 1.0;
+#ifdef PLAIN
+  const bool lake = false;
+#else
   bool lake = nl > 30.0 && nl < 42.0;
   if (nl > 45.0 && nl < 55.0) col = dsbWaterShade(surfaceBright);
   else if (lake) col = lakeShade(col, surfaceBright, lakeAlpha);
   else if (nl > 12.0 && nl < 20.0) col = lavaShade(surfaceBright);
   else if (nl > 6.0 && nl < 12.0) col = waterShade(col, n, surfaceBright);
+#endif
   vec3 normalColor = clamp(mix(col, uFog, fog), 0.0, 1.0);
   vec3 normalBright = clamp((col * (emissive * 0.9 + vParams.y * 0.5 + tip * 0.85) + surfaceBright) * (1.0 - fog), 0.0, 1.0);
   float glassAlpha = uGlass < 1.0 ? clamp(uGlass + pow(1.0 - abs(dot(n, normalize(uEye - vWorld))), 2.0) * 0.55, 0.0, 1.0) : 1.0;
@@ -997,6 +1019,9 @@ void main() {
     [/\bparams\b/g, "aParams"],
     ["layout(location=7) in vec4 aParams;\n\n", "layout(location=7) in vec4 aParams;\n"]);
   const ORDINARY_MESH_FS = derive(MESH_FS, ["flat in vec4 vVoxel;", "uniform vec4 uVoxel;"], [/\bvVoxel\b/g, "uVoxel"]);
+  // The camera's depth pre-pass: the mesh shader's cuts and nothing else, the rest compiled away.
+  const DEPTH_MESH_FS = ORDINARY_MESH_FS.slice(0, ORDINARY_MESH_FS.indexOf("void main() {")) + "void main() {\n  if (clipped()) discard;\n}";
+  const MESH_UNIFORMS = ["uRigCount", "uRigPass", "uRigMatrices", "uRigParams", "uRigVoxels", "uRigVisibility", "uViewProj", "uLightViewProj", "uEye", "uViewDirection", "uLightDir", "uSky", "uGround", "uSun", "uDirectStrength", "uAmbientFloor", "uDiffuseFloor", "uShadowStrength", "uShadowFloor", "uShadowBias", "uShadow", "uShadowTexel", "uLights", "uLightCount", "uSpotLight", "uFog", "uFogRange", "uMatrixParams", "uMatrixOrigin", "uMatrixGlyph", "uMatrixCave", "uMatrixCaves", "uMatrixCaveBounds", "uMatrixCaveNear", "uMatrixPermanentCave", "uMatrixPermanentPlane", "uMatrixPermanentAperture", "uMatrixLivingGlobal", "uMatrixGlyphTex", "uMatrixSamples", "uClipMinY", "uClipMaxY", "uObjectClip", "uObjectSlab", "uProjective", "uMatrixGlyphOpacity", "uGlassOpacity", "uVoxel", "uWindTime", "uSway", "uSwing", "uGlass", "uLightBeam", "uLakeWaveCount", "uLakeWaves", "uLakeSurface", "uLakeSuction", "uLakeFlowEnabled", "uLakeFlowU", "uLakeFlowV", "uLakeCharge", "uLakeChargeRise", "uLakeChargeCenter", "uLakeOcclude", "uLakeWaveEnd", "uLakeBodyShape", "uLakeBodyBend", "uDSBSurface", "uDSBDepth", "uDSBEnvironment"];
   const ORDINARY_SHADOW_VS = derive(SHADOW_VS, [RIG_GLSL, ""], ["rigMatrix(mat4(aM0, aM1, aM2, aM3))", "mat4(aM0, aM1, aM2, aM3)"],
     ["layout(location=6) in vec4 aM3;\n\n", "layout(location=6) in vec4 aM3;\n"]);
   const LINE_VS = `#version 300 es
@@ -1569,7 +1594,7 @@ void main() {
     // PROTOTYPE: a scene at sea level can switch off the hub's dropped haze horizon (`hazeDrop: 0`).
     let skyHaze=1;
     const res = { programs: {}, fbo: null, shadow: null, bloom: null, quadVao: null, matrixTexture: null };
-    const mirror = { node: null, record: null, geometry: null, program: null, programReady: false, fb: null, tex: null, depth: null, width: 0, height: 0, renderWidth: 0, renderHeight: 0, portal: false, reveal: 0, frontFacing: false, walkThrough: false, captureValid: false, bodyTex: null, bodyState: null, bodyVersion: -1, shards: 0 };
+    const mirror = { node: null, record: null, geometry: null, program: null, programReady: false, fb: null, tex: null, depth: null, width: 0, height: 0, renderWidth: 0, renderHeight: 0, portal: false, reveal: 0, frontFacing: false, walkThrough: false, captureValid: false, bodyTex: null, bodyState: null, bodyVersion: -1, shards: 0, query: null, queryPending: false, occluded: false, frame: 0 };
     const environment = { program: null, ready: false, fb: null, tex: null, depth: null, size: 0, next: 0, valid: 0, frame: 0, origin: new Float32Array(3) };
     // Reflectors: plain planar mirrors a scene may hold several of (the factory's peer shields), each with a capture
     // of its own, drawn with the mirror's program and their ripples. The mirror above stays the one mirror with
@@ -1649,7 +1674,9 @@ void main() {
       const meshFragment = matrixSampling ? ORDINARY_MESH_FS.replace("#version 300 es", "#version 300 es\n#extension GL_OES_shader_multisample_interpolation : require\n#define MATRIX_SAMPLE_INTERPOLATION") : ORDINARY_MESH_FS;
       res.programs = {
         image: compile(IMAGE_VS, IMAGE_FS, ["uViewProj", "uRect", "uImage", "uReady", "uClipMaxY"]),
-        mesh: compile(ORDINARY_MESH_VS, meshFragment, ["uRigCount", "uRigPass", "uRigMatrices", "uRigParams", "uRigVoxels", "uRigVisibility", "uViewProj", "uLightViewProj", "uEye", "uViewDirection", "uLightDir", "uSky", "uGround", "uSun", "uDirectStrength", "uAmbientFloor", "uDiffuseFloor", "uShadowStrength", "uShadowFloor", "uShadowBias", "uShadow", "uShadowTexel", "uLights", "uLightCount", "uSpotLight", "uFog", "uFogRange", "uMatrixParams", "uMatrixOrigin", "uMatrixGlyph", "uMatrixCave", "uMatrixCaves", "uMatrixCaveBounds", "uMatrixCaveNear", "uMatrixPermanentCave", "uMatrixPermanentPlane", "uMatrixPermanentAperture", "uMatrixLivingGlobal", "uMatrixGlyphTex", "uMatrixSamples", "uClipMinY", "uClipMaxY", "uObjectClip", "uObjectSlab", "uProjective", "uMatrixGlyphOpacity", "uGlassOpacity", "uVoxel", "uWindTime", "uSway", "uSwing", "uGlass", "uLightBeam", "uLakeWaveCount", "uLakeWaves", "uLakeSurface", "uLakeSuction", "uLakeFlowEnabled", "uLakeFlowU", "uLakeFlowV", "uLakeCharge", "uLakeChargeRise", "uLakeChargeCenter", "uLakeOcclude", "uLakeWaveEnd", "uLakeBodyShape", "uLakeBodyBend", "uDSBSurface", "uDSBDepth", "uDSBEnvironment"]),
+        mesh: compile(ORDINARY_MESH_VS, meshFragment, MESH_UNIFORMS),
+        depth: compile(ORDINARY_MESH_VS, DEPTH_MESH_FS, MESH_UNIFORMS),
+        plain: compile(ORDINARY_MESH_VS, meshFragment.replace("#version 300 es", "#version 300 es\n#define PLAIN"), MESH_UNIFORMS),
         shadow: compile(ORDINARY_SHADOW_VS, SHADOW_FS, ["uRigCount", "uRigPass", "uRigMatrices", "uRigVisibility", "uLightViewProj", "uClipMinY", "uClipMaxY", "uObjectClip"]),
         line: compile(LINE_VS, LINE_FS, ["uViewProj", "uViewport", "uWidth", "uClipMaxY", "uObjectClip"]),
         sky: compile(QUAD_VS, SKY_FS, ["uInvViewProj", "uHorizon", "uZenith", "uSun", "uSunDir", "uMoonDir", "uMoonSunDir", "uStarMatrix", "uStars", "uTime", "uHazeDrop", "uClouds", "uSea", "uSeaEye"]),
@@ -1870,6 +1897,9 @@ void main() {
       }
       mirror.bodyTex = mirror.bodyState = null;
       mirror.bodyVersion = -1;
+      if (mirror.query) gl.deleteQuery(mirror.query);
+      mirror.query = null;
+      mirror.queryPending = mirror.occluded = false;
       mirror.node = mirror.record = mirror.geometry = null;
       mirror.portal = mirror.frontFacing = mirror.walkThrough = false;
       mirrorDebug.active = false;
@@ -1887,10 +1917,10 @@ void main() {
       environment.fb = environment.tex = environment.depth = null;
       environment.size = environment.valid = environment.next = environment.frame = 0;
       mirrorDebug.environmentFaces = mirrorDebug.environmentSize = mirrorDebug.environmentResources = 0;
-      mirror.node = mirror.record = mirror.geometry = mirror.program = mirror.fb = mirror.tex = mirror.depth = mirror.bodyTex = mirror.bodyState = null;
+      mirror.node = mirror.record = mirror.geometry = mirror.program = mirror.fb = mirror.tex = mirror.depth = mirror.bodyTex = mirror.bodyState = mirror.query = null;
       reflectorTargets.clear();
       mirror.bodyVersion = -1;
-      mirror.programReady = false;
+      mirror.programReady = mirror.queryPending = mirror.occluded = false;
       mirror.width = mirror.height = mirror.renderWidth = mirror.renderHeight = 0;
       mirrorDebug.width = mirrorDebug.height = mirrorDebug.textureWidth = mirrorDebug.textureHeight = mirrorDebug.samples = 0;
       mirror.portal = mirror.frontFacing = mirror.walkThrough = mirror.captureValid = false;
@@ -2127,7 +2157,7 @@ void main() {
         out[o++] = e;
         if (source) { out[o++] = source[b]; out[o++] = source[b + 1]; out[o++] = source[b + 2]; }
       };
-      for (const f of faces) {
+      const writeFace = (f) => {
         // Newell's method, stable when leading vertices coincide.
         let nx = 0, ny = 0, nz = 0;
         for (let k = 0, m = f.i.length; k < m; k++) {
@@ -2159,10 +2189,22 @@ void main() {
           put(f.i[k], nx, ny, nz, f.color, e);
           put(f.i[k + 1], nx, ny, nz, f.color, e);
         }
+      };
+      // Faces the plain shader variant can draw (no special water, no Matrix cave or glyph tags) lead, so a camera
+      // pass draws that range through it and the rest through the full shader. Blended meshes keep their face order.
+      const special = (f) => f.water || f.lake || f.matrixCave || f.matrixLocalGlyphSurface || f.matrixWorldGlyphSurface || f.matrixPermanentFallback;
+      let plainCount = 0;
+      if (dataOnly || geometry.glass || geometry.glassOpacity || geometry.matrixGlyph || geometry.matrixRevealBacking) {
+        for (const f of faces) writeFace(f);
+      } else {
+        for (const f of faces) if (!special(f)) writeFace(f);
+        plainCount = o / stride;
+        for (const f of faces) if (special(f)) writeFace(f);
       }
       if (dataOnly) return { data: out, voxel: gridded ? voxel : null };
       const part = makePart(out, stride, source ? [[0, 3], [1, 3], [2, 4], [9, 3]] : [[0, 3], [1, 3], [2, 4]], ibo);
       part.voxel = gridded ? voxel : null;
+      part.plainCount = plainCount;
       return part;
     };
     const buildRigPart = (rig, ibo) => {
@@ -2213,7 +2255,7 @@ void main() {
       let rec = records.get(geometry);
       if (!rec) {
         const ibo = gl.createBuffer();
-        rec = { geometry, ibo, capacity: 0, mesh: geometry.meshRig ? buildRigPart(geometry.meshRig, ibo) : buildMeshPart(geometry, ibo), line: buildLinePart(geometry, ibo), nodes: [], spheres: new Float64Array(4), count: 0, drawCount: 0, cameraHiddenCount: 0, active: false, data: null, batch: null, batchVersion: -1, lightVisible: true, mirrorVisible: true, imageTexture: null, rippleBodyTexture: null, rippleBodyState: null, rippleBodyVersion: -1, shadowChanged: 0, shadowSettle: SHADOW_SETTLE, shadowCount: -1, shadowClip: NaN, shadowStatic: false, shadowBake: -1 };
+        rec = { geometry, ibo, capacity: 0, mesh: geometry.meshRig ? buildRigPart(geometry.meshRig, ibo) : buildMeshPart(geometry, ibo), line: buildLinePart(geometry, ibo), nodes: [], spheres: new Float64Array(4), count: 0, drawCount: 0, cameraHiddenCount: 0, active: false, data: null, batch: null, batchVersion: -1, lightVisible: true, mirrorVisible: true, living: false, imageTexture: null, rippleBodyTexture: null, rippleBodyState: null, rippleBodyVersion: -1, shadowChanged: 0, shadowSettle: SHADOW_SETTLE, shadowCount: -1, shadowClip: NaN, shadowStatic: false, shadowBake: -1 };
         records.set(geometry, rec);
       }
       return rec;
@@ -2411,6 +2453,8 @@ void main() {
         gl.uniform4fv(program.u.uRigVoxels, rig.voxels);
       }
     };
+    // Matrix modes 2 and 3: an instance the wave can take wherever it stands, so its record needs the full shader.
+    const isLiving = (mode) => mode > 1.5 && mode < 3.5;
     const uploadInstances = (rec) => {
       const need = rec.count * INSTANCE_FLOATS;
       if (rec.batch) {
@@ -2430,6 +2474,8 @@ void main() {
           // whole reserved pool on restore.
           if (need > 0) gl.bufferSubData(gl.ARRAY_BUFFER, 0, rec.batch.instanceData, 0, need);
           rec.batchVersion = rec.batch.instanceVersion;
+          rec.living = false;
+          for (let o = 18; o < need && !rec.living; o += INSTANCE_FLOATS) rec.living = isLiving(rec.batch.instanceData[o]);
           rec.shadowChanged = shadowFrame;
         }
         return;
@@ -2440,7 +2486,7 @@ void main() {
       // The buffer mirrors rec.data exactly, so an unchanged block (static props, resting crew) needs no upload.
       const d = rec.data;
       // One moving node in a shared record uploads only its own span.
-      let lo = need, hi = 0, moved = false;
+      let lo = need, hi = 0, moved = false, living = false;
       for (let i = 0; i < rec.count; i++) {
         const n = rec.nodes[i], w = n.world;
         const o = i * INSTANCE_FLOATS;
@@ -2458,6 +2504,7 @@ void main() {
         if (d[o + 16] !== glow) { d[o + 16] = glow; dirty = true; }
         if (d[o + 17] !== highlight) { d[o + 17] = highlight; dirty = true; }
         if (d[o + 18] !== mode) { d[o + 18] = mode; dirty = true; }
+        if (isLiving(mode)) living = true;
         const reveal = portal ? Math.fround(n.portalReveal) : 0;
         if (d[o + 19] !== reveal) { d[o + 19] = reveal; dirty = true; }
         if (dirty) {
@@ -2465,6 +2512,7 @@ void main() {
           if (o + INSTANCE_FLOATS > hi) hi = o + INSTANCE_FLOATS;
         }
       }
+      rec.living = living;
       // Shadow depth reads only the transform, so glow and mode changes leave a caster static.
       if (moved) rec.shadowChanged = shadowFrame;
       if (rec.capacity < d.length) {
@@ -2718,7 +2766,7 @@ void main() {
         program.cutCount = count;
       }
     };
-    const drawImageSurface = (rec, count, cameraPass) => {
+    const drawImageSurface = (rec, count, cameraPass, resume) => {
       const surface = rec.geometry.imageSurface, image = surface.asset.load(), p = programs.image;
       gl.activeTexture(gl.TEXTURE6);
       if (!rec.imageTexture && image.complete && image.naturalWidth) {
@@ -2743,7 +2791,7 @@ void main() {
       gl.bindVertexArray(rec.mesh.vao);
       gl.drawArraysInstanced(gl.TRIANGLES, 0, rec.mesh.count, count);
       gl.activeTexture(gl.TEXTURE0);
-      gl.useProgram(programs.mesh.prog);
+      gl.useProgram(resume.prog);
     };
     const drawGlass = (cull) => {
       let any = false;
@@ -2766,19 +2814,33 @@ void main() {
       gl.disable(gl.BLEND);
     };
     // The camera pass draws only the in-frustum front of each record; shadow and mirror draw all.
+    // 1 draws only the records the plain variant can shade, -1 only the others, 0 all.
+    let plainFilter = 0;
     const drawParts = (kind, useProgram, excludeMirror = false, cull = false, matrixStage = 0) => {
+      // The depth pre-pass's and the plain variant's programs take every per-draw setting the mesh program does.
+      const meshPass = useProgram === "mesh" || useProgram === "depth" || useProgram === "plain";
       for (const rec of activeRecords) {
         if (rec.geometry.mirrorRippleOnly) continue;
         applyCutaway(programs[useProgram], rec.geometry);
         if (excludeMirror && (rec === mirror.record || rec.geometry.mirrorSource)) continue;
         if (rec.geometry.reflector && (reflectorPass === null || rec === reflectorPass)) continue;
-        if (useProgram === "mesh" && !rec.geometry.glass !== !glassPass) continue;
+        if (meshPass && !rec.geometry.glass !== !glassPass) continue;
         if (glassPass) {
           gl.uniform1f(programs.mesh.u.uGlass, rec.geometry.glass);
           gl.uniform1f(programs.mesh.u.uLightBeam, rec.geometry.lightBeam || 0);
         }
         const part = rec[kind], n = rec.batch && rec.batch.drawInstanceCount !== undefined ? rec.drawCount : cull ? rec.drawCount : rec.count;
         if (!part || !n) continue;
+        let first = 0, count = part.count;
+        if (plainFilter) {
+          const g = rec.geometry, plain = rec.living || g.matrixCave || g.portalSurface || g.lakeBody || g.imageSurface ? 0 : part.plainCount;
+          if (plainFilter > 0) count = plain;
+          else {
+            first = plain;
+            count -= plain;
+          }
+          if (!count) continue;
+        }
         if (cull && rec.offscreen) continue;
         if (kind === "mesh" && useProgram === "shadow" && rec.geometry.castShadow === false) continue;
         if (useProgram === "shadow" ? !rec.lightVisible || shadowSubset && rec.shadowStatic !== (shadowSubset === 1) : !cull && !rec.mirrorVisible) continue;
@@ -2789,11 +2851,11 @@ void main() {
         }
         if (rigMode && kind === "mesh") applyRig(program, rec, useProgram === "shadow" ? 2 : cull ? 1 : 3);
         if (useProgram === "shadow") shadowDraws++;
-        if (kind === "mesh" && useProgram === "mesh") {
+        if (kind === "mesh" && meshPass) {
           const stage = rec.geometry.matrixRevealBacking ? 1 : rec.geometry.matrixGlyph ? 2 : rec.geometry.glassOpacity ? 3 : 0;
           if (stage !== matrixStage) continue;
-          if (rec.geometry.imageSurface) { drawImageSurface(rec, n, cull); continue; }
-          const mesh = programs.mesh, glyph = stage === 1 ? 3 : stage === 2 ? 1 : rec.geometry.matrixLocalGlyphSurface ? 2 : 0, cave = rec.geometry.matrixCave || 0;
+          if (rec.geometry.imageSurface) { drawImageSurface(rec, n, cull, program); continue; }
+          const mesh = program, glyph = stage === 1 ? 3 : stage === 2 ? 1 : rec.geometry.matrixLocalGlyphSurface ? 2 : 0, cave = rec.geometry.matrixCave || 0;
           if (glyph !== mesh.matrixGlyph) {
             gl.uniform1f(mesh.u.uMatrixGlyph, glyph);
             mesh.matrixGlyph = glyph;
@@ -2810,7 +2872,7 @@ void main() {
           }
         }
         if (kind === "mesh") {
-          if (useProgram === "mesh") {
+          if (meshPass) {
             const body = rec.geometry.lakeBody;
             if (body && body[2] > 0) {
               gl.uniform4f(program.u.uLakeBodyShape, body[0], body[1], body[2], body[3]);
@@ -2877,26 +2939,26 @@ void main() {
             program.clipMaxY = maximumY;
           }
           const voxel = rec.mesh.voxel;
-          if (useProgram === "mesh" && voxel !== program.voxel) {
+          if (meshPass && voxel !== program.voxel) {
             if (voxel) gl.uniform4fv(program.u.uVoxel, voxel);
             else gl.uniform4f(program.u.uVoxel, 0, 0, 0, 0);
             program.voxel = voxel;
           }
           const sway = rec.geometry.sway || 0, swing = rec.geometry.swing || 0;
-          if (useProgram === "mesh" && sway !== program.sway) {
+          if (meshPass && sway !== program.sway) {
             gl.uniform1f(program.u.uSway, sway);
             program.sway = sway;
           }
-          if (useProgram === "mesh" && swing !== program.swing) {
+          if (meshPass && swing !== program.swing) {
             gl.uniform1f(program.u.uSwing, swing);
             program.swing = swing;
           }
           const projective = rec.geometry.projective ? 1 : 0, slab = rec.geometry.clipSlab || NO_OBJECT_SLAB;
-          if (useProgram === "mesh" && projective !== program.projective) {
+          if (meshPass && projective !== program.projective) {
             gl.uniform1f(program.u.uProjective, projective);
             program.projective = projective;
           }
-          if (useProgram === "mesh" && (slab !== program.objectSlab || rec.geometry.lakeFlow)) {
+          if (meshPass && (slab !== program.objectSlab || rec.geometry.lakeFlow)) {
             gl.uniform4fv(program.u.uObjectSlab, slab);
             program.objectSlab = slab;
           }
@@ -2914,13 +2976,13 @@ void main() {
         }
         // Surface overlays stay above their backing at distant zooms in both color passes; shadow depth and later
         // ordinary meshes stay unchanged.
-        const offset = kind === "mesh" && useProgram === "mesh" && rec.geometry.depthOffset;
+        const offset = kind === "mesh" && meshPass && rec.geometry.depthOffset;
         if (offset) {
           gl.enable(gl.POLYGON_OFFSET_FILL);
           gl.polygonOffset(0, -4);
         }
         gl.bindVertexArray(part.vao);
-        gl.drawArraysInstanced(gl.TRIANGLES, 0, part.count, n);
+        gl.drawArraysInstanced(gl.TRIANGLES, first, count, n);
         if (offset) gl.disable(gl.POLYGON_OFFSET_FILL);
       }
     };
@@ -3093,7 +3155,16 @@ void main() {
         gl.bindTexture(gl.TEXTURE_2D, mirror.tex);
         gl.uniform1i(pg.u.uReflection, 2);
         gl.bindVertexArray(part.vao);
+        const query = !mirror.queryPending;
+        if (query) {
+          if (!mirror.query) mirror.query = gl.createQuery();
+          gl.beginQuery(gl.ANY_SAMPLES_PASSED_CONSERVATIVE, mirror.query);
+        }
         gl.drawArraysInstanced(gl.TRIANGLES, 0, part.count, rec.count);
+        if (query) {
+          gl.endQuery(gl.ANY_SAMPLES_PASSED_CONSERVATIVE);
+          mirror.queryPending = true;
+        }
         mirrorDebug.surfaceDrawn = true;
       }
       // Every shard reflects its own physical orientation through this shared
@@ -3333,8 +3404,11 @@ void main() {
       gl.uniform1i(programs.mesh.u.uDSBSurface,7);
       gl.uniform1i(programs.mesh.u.uDSBDepth,8);
       const fogColor = fog || NO_FOG, fogA = fog ? fogNear : FOG_OFF, fogB = fog ? fogFar : FOG_OFF + 1;
+      const windTime = performance.now() * 0.001 % 3600;
+      gl.useProgram(programs.plain.prog);
+      gl.uniform1f(programs.plain.u.uWindTime, windTime);
       gl.useProgram(programs.mesh.prog);
-      gl.uniform1f(programs.mesh.u.uWindTime, performance.now() * 0.001 % 3600);
+      gl.uniform1f(programs.mesh.u.uWindTime, windTime);
       if (canvas.clientWidth !== width || canvas.clientHeight !== height) resize();
       const f = res.fbo, sh = res.shadow, pg = programs;
       const skyOn = !!(horizon && zenith);
@@ -3472,7 +3546,17 @@ void main() {
         if (mirror.portal) {
           skipMirrorPass("portal-open");
         } else if (prepareMirrorCamera(camera)) {
+          // The last pane the camera drew lost every pixel to depth (rock, a cave wall): its capture is unseen, and the
+          // pane keeps the one it has until a query finds it showing again.
+          if (mirror.queryPending && gl.getQueryParameter(mirror.query, gl.QUERY_RESULT_AVAILABLE)) {
+            mirror.occluded = !gl.getQueryParameter(mirror.query, gl.QUERY_RESULT);
+            mirror.queryPending = false;
+          }
           if (!ensureMirrorProgram()) skipMirrorPass("shader-pending");
+          else if (mirror.occluded && mirror.captureValid) skipMirrorPass("occluded");
+          // A mirror under a twenty-fifth of the view re-captures on the tier's cadence: the whole scene's draws for a
+          // few hundred pixels, where a frame-old reflection does not show. Nearer, it captures every frame.
+          else if (mirror.captureValid && mirror.frame++ % settings.mirrorCadence && mirror.renderWidth * mirror.renderHeight * 25 < pw * ph) skipMirrorPass("cadence");
           else renderMirrorCapture(clear, sky, ground, direct, directStrength, ambientFloor, diffuseFloor, shadowStrength, shadowFloor, shadowBias, lx, ly, lz, sh, lights, nLights, skyOn, fogColor, fogA, fogB, matrix, spotLight);
         }
         if (mirror.shards && ensureShardProgram()) {
@@ -3542,43 +3626,78 @@ void main() {
       gl.clearColor(clear[0], clear[1], clear[2], 1);
       gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
       gl.clearBufferfv(gl.COLOR, 1, ZERO4);
-      gl.useProgram(pg.mesh.prog);
-      gl.uniformMatrix4fv(pg.mesh.u.uViewProj, false, viewProj);
-      gl.uniformMatrix4fv(pg.mesh.u.uLightViewProj, false, lightViewProj);
-      gl.uniform3f(pg.mesh.u.uEye, camera.position.x, camera.position.y, camera.position.z);
-      applyViewDirection(pg.mesh, proj, view);
-      gl.uniform3f(pg.mesh.u.uLightDir, lx, ly, lz);
-      gl.uniform3fv(pg.mesh.u.uSky, sky);
-      gl.uniform3fv(pg.mesh.u.uGround, ground);
-      gl.uniform3fv(pg.mesh.u.uSun, direct);
-      gl.uniform1f(pg.mesh.u.uDirectStrength, directStrength);
-      gl.uniform1f(pg.mesh.u.uAmbientFloor, ambientFloor);
-      gl.uniform1f(pg.mesh.u.uDiffuseFloor, diffuseFloor);
-      gl.uniform1f(pg.mesh.u.uShadowStrength, shadowStrength);
-      gl.uniform1f(pg.mesh.u.uShadowFloor, shadowFloor);
-      gl.uniform1f(pg.mesh.u.uShadowBias, shadowBias);
-      gl.uniform1f(pg.mesh.u.uShadowTexel, 1 / sh.size);
-      gl.activeTexture(gl.TEXTURE0);
-      gl.bindTexture(gl.TEXTURE_2D, sh.tex);
-      gl.uniform1i(pg.mesh.u.uShadow, 0);
-      bindMatrixTexture(pg.mesh);
-      if (lights) gl.uniform4fv(pg.mesh.u.uLights, lights);
-      gl.uniform1i(pg.mesh.u.uLightCount, nLights);
-      gl.uniform4fv(pg.mesh.u.uSpotLight, spotLight);
-      gl.uniform3fv(pg.mesh.u.uFog, fogColor);
-      gl.uniform2f(pg.mesh.u.uFogRange, fogA, fogB);
-      gl.uniform4f(pg.mesh.u.uMatrixParams, matrix ? matrix.active : 0, matrix ? matrix.radius : 0, matrix ? matrix.time : time, matrix ? matrix.density : 0);
-      gl.uniform1i(pg.mesh.u.uMatrixSamples, Math.max(1, f.samples));
-      if (matrix) gl.uniform3fv(pg.mesh.u.uMatrixOrigin, matrix.origin);
-      else gl.uniform3f(pg.mesh.u.uMatrixOrigin, 0, 0, 0);
-      gl.uniform4fv(pg.mesh.u.uMatrixCaves, matrix && matrix.caves || NO_MATRIX_CAVES);
-      gl.uniform4fv(pg.mesh.u.uMatrixCaveBounds, matrix && matrix.caveBounds || NO_MATRIX_CAVES);
-      gl.uniform1f(pg.mesh.u.uMatrixCaveNear, matrix && matrix.caveBounds ? matrix.caveNear : FOG_OFF);
-      gl.uniform1f(pg.mesh.u.uMatrixPermanentCave, matrix ? matrix.permanentCave || 0 : 0);
-      gl.uniform4fv(pg.mesh.u.uMatrixPermanentPlane, matrix && matrix.permanentPlane || NO_MATRIX_PLANE);
-      gl.uniform4fv(pg.mesh.u.uMatrixPermanentAperture, matrix && matrix.permanentAperture || DEFAULT_MATRIX_APERTURE);
-      gl.uniform1f(pg.mesh.u.uMatrixLivingGlobal, matrix ? matrix.livingGlobal ?? 1 : 1);
+      // With no Matrix wave running, meshes the mirror cave's standing Matrix cannot reach (no cave or glyph faces, no
+      // cave of their own, no living instances) and with no special water shade through the plain variant: the mesh
+      // shader with all of that compiled out. Both take the frame's settings, the full one last.
+      const plainFrame = !rigMode && !(matrix && matrix.active > 0);
+      for (let k = plainFrame ? 0 : 1; k < 2; k++) {
+        const mp = k ? pg.mesh : pg.plain;
+        gl.useProgram(mp.prog);
+        gl.uniformMatrix4fv(mp.u.uViewProj, false, viewProj);
+        gl.uniformMatrix4fv(mp.u.uLightViewProj, false, lightViewProj);
+        gl.uniform3f(mp.u.uEye, camera.position.x, camera.position.y, camera.position.z);
+        applyViewDirection(mp, proj, view);
+        gl.uniform3f(mp.u.uLightDir, lx, ly, lz);
+        gl.uniform3fv(mp.u.uSky, sky);
+        gl.uniform3fv(mp.u.uGround, ground);
+        gl.uniform3fv(mp.u.uSun, direct);
+        gl.uniform1f(mp.u.uDirectStrength, directStrength);
+        gl.uniform1f(mp.u.uAmbientFloor, ambientFloor);
+        gl.uniform1f(mp.u.uDiffuseFloor, diffuseFloor);
+        gl.uniform1f(mp.u.uShadowStrength, shadowStrength);
+        gl.uniform1f(mp.u.uShadowFloor, shadowFloor);
+        gl.uniform1f(mp.u.uShadowBias, shadowBias);
+        gl.uniform1f(mp.u.uShadowTexel, 1 / sh.size);
+        gl.activeTexture(gl.TEXTURE0);
+        gl.bindTexture(gl.TEXTURE_2D, sh.tex);
+        gl.uniform1i(mp.u.uShadow, 0);
+        bindMatrixTexture(mp);
+        if (lights) gl.uniform4fv(mp.u.uLights, lights);
+        gl.uniform1i(mp.u.uLightCount, nLights);
+        gl.uniform4fv(mp.u.uSpotLight, spotLight);
+        gl.uniform3fv(mp.u.uFog, fogColor);
+        gl.uniform2f(mp.u.uFogRange, fogA, fogB);
+        gl.uniform4f(mp.u.uMatrixParams, matrix ? matrix.active : 0, matrix ? matrix.radius : 0, matrix ? matrix.time : time, matrix ? matrix.density : 0);
+        gl.uniform1i(mp.u.uMatrixSamples, Math.max(1, f.samples));
+        if (matrix) gl.uniform3fv(mp.u.uMatrixOrigin, matrix.origin);
+        else gl.uniform3f(mp.u.uMatrixOrigin, 0, 0, 0);
+        gl.uniform4fv(mp.u.uMatrixCaves, matrix && matrix.caves || NO_MATRIX_CAVES);
+        gl.uniform4fv(mp.u.uMatrixCaveBounds, matrix && matrix.caveBounds || NO_MATRIX_CAVES);
+        gl.uniform1f(mp.u.uMatrixCaveNear, matrix && matrix.caveBounds ? matrix.caveNear : FOG_OFF);
+        gl.uniform1f(mp.u.uMatrixPermanentCave, matrix ? matrix.permanentCave || 0 : 0);
+        gl.uniform4fv(mp.u.uMatrixPermanentPlane, matrix && matrix.permanentPlane || NO_MATRIX_PLANE);
+        gl.uniform4fv(mp.u.uMatrixPermanentAperture, matrix && matrix.permanentAperture || DEFAULT_MATRIX_APERTURE);
+        gl.uniform1f(mp.u.uMatrixLivingGlobal, matrix ? matrix.livingGlobal ?? 1 : 1);
+      }
+      // Depth first, then the opaque pass shades under EQUAL with depth writes off: the same vertex shader, invariant,
+      // so the depths match, and with no write a shader that may discard keeps the early depth test (written, the
+      // driver tests late and shades every hidden fragment). Each pixel is shaded once. Rigs keep their own programs.
+      const prepass = settings.prepass && !rigMode;
+      if (prepass) {
+        const dp = pg.depth;
+        gl.useProgram(dp.prog);
+        gl.uniformMatrix4fv(dp.u.uViewProj, false, viewProj);
+        gl.uniform3f(dp.u.uEye, camera.position.x, camera.position.y, camera.position.z);
+        applyViewDirection(dp, proj, view);
+        gl.uniform1f(dp.u.uWindTime, windTime);
+        gl.colorMask(false, false, false, false);
+        drawParts("mesh", "depth", true, true);
+        gl.colorMask(true, true, true, true);
+        gl.depthFunc(gl.EQUAL);
+        gl.depthMask(false);
+        gl.useProgram(pg.mesh.prog);
+      }
+      if (plainFrame) {
+        gl.useProgram(pg.plain.prog);
+        plainFilter = 1;
+        drawParts("mesh", "plain", true, true);
+        gl.useProgram(pg.mesh.prog);
+        plainFilter = -1;
+      }
       drawParts("mesh", "mesh", true, true);
+      plainFilter = 0;
+      gl.depthFunc(gl.LESS);
+      gl.depthMask(true);
       drawMirrorSurface(camera);
       drawReflectors(camera);
       if (skyOn) drawSky(invViewProj, camera.position.y);
