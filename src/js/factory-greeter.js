@@ -657,17 +657,32 @@
       return feet > 4 && feet < 6.5 && p.z > 20.5 && Math.abs(p.x) < 7;
     };
     const strayed = (actor) => Math.hypot(actor.root.position.x - state.origin.x, actor.root.position.z - state.origin.z) > 5;
-    // Her place with the visitor, into `spot`: ahead of them and off to the side with room, at head height, where the
-    // view over their shoulder shows her.
-    const shoulder = () => {
-      const actor = visitor(), p = actor.root.position, ax = Math.sin(actor.root.rotation.y), az = Math.cos(actor.root.rotation.y), feet = feetOf(actor);
-      spot.y = feet + (actor.bodyHeight || 1.2) * 0.8;
-      for (let tries = 0; tries < 2; tries++) {
-        spot.x = p.x - az * 1 * state.side + ax * 1.8;
-        spot.z = p.z + ax * 1 * state.side + az * 1.8;
-        if (FM.clearAt(spot.x, spot.z, feet, 0.4, spot.y + 0.4 - feet)) return;
-        state.side = -state.side;
+    // Whether she clears the hall's floors and what stands on them, from the visitor's feet up to her top, at every step
+    // of the leg from (ax, ay, az) to (bx, by, bz).
+    const legClear = (ax, ay, az, bx, by, bz, feet) => {
+      const steps = Math.max(1, Math.ceil(Math.hypot(bx - ax, by - ay, bz - az) / 0.25));
+      for (let i = 0; i <= steps; i++) {
+        const t = i / steps;
+        if (!FM.clearAt(ax + (bx - ax) * t, az + (bz - az) * t, feet, 0.4, ay + (by - ay) * t + 0.4 - feet)) return false;
       }
+      return true;
+    };
+    // Her place with the visitor, into `spot`: ahead of them and off to the side with room, at head height, where the
+    // view over their shoulder shows her; with no room either side, over their head. A place is taken only when it and
+    // the leg to it from (fx, fy, fz) clear the hall; with none, `spot` keeps the last place that did, and this is false.
+    const shoulder = (fx, fy, fz) => {
+      const actor = visitor(), p = actor.root.position, ax = Math.sin(actor.root.rotation.y), az = Math.cos(actor.root.rotation.y);
+      const feet = feetOf(actor), height = actor.bodyHeight || 1.2;
+      for (let tries = 0; tries < 3; tries++) {
+        const side = tries === 0 ? state.side : -state.side, over = tries === 2;
+        const x = over ? p.x : p.x - az * side + ax * 1.8, z = over ? p.z : p.z + ax * side + az * 1.8;
+        const y = over ? feet + height + 0.7 : feet + height * 0.8;
+        if (!legClear(fx, fy, fz, x, y, z, feet)) continue;
+        if (!over) state.side = side;
+        spot.x = x; spot.y = y; spot.z = z;
+        return true;
+      }
+      return false;
     };
     const lookAt = (x, y, z) => {
       const dx = x - position.x, dz = z - position.z;
@@ -723,11 +738,13 @@
       state.tour = null; state.ending = false; state.attending = false;
       show("work");
     };
-    // She notices a visitor come onto the balcony: stops work, turns to them, her rings flare; then she flies over.
-    const notice = () => { show("notice"); state.timer = 1.1; flare = 1; };
+    // She notices a visitor come onto the balcony: stops work, turns to them, her rings flare; then she flies over. That
+    // uses the visit's greeting, whatever happens next: walked off, waved off or taken, it does not come again.
+    const notice = () => { state.offered = true; show("notice"); state.timer = 1.1; flare = 1; };
+    // To the balcony's waypoint, then to the place beside the visitor that `shoulder` found from there.
     const approach = () => {
       clearPath(6, 1); pushAir(state.perch, BALCONY);
-      shoulder(); push(spot.x, spot.y, spot.z); tracking = true;
+      push(spot.x, spot.y, spot.z); tracking = true;
       state.at = "air"; show("approach");
     };
     // The visitor went off the balcony before she got there: on to the balcony's waypoint, then back to work.
@@ -741,7 +758,7 @@
     const offer = () => {
       const p = visitor().root.position;
       state.origin.x = p.x; state.origin.z = p.z;
-      state.offered = true; state.at = "shoulder"; state.timer = 9; greetingT = 1.4;
+      state.at = "shoulder"; state.timer = 9; greetingT = 1.4;
       clearPath(3, 1); push(spot.x, spot.y, spot.z); tracking = true;
       show("offer"); say(demoRunning() ? "greetingDemo" : "greeting");
     };
@@ -841,10 +858,13 @@
     const endTour = () => {
       if (state.tour && !state.ending) end("cancelled");
     };
-    // An open menu or offer swallows Escape first; the cave's own Escape leaves only when neither is up.
+    // Escape waves her off while she comes to the visitor or offers, and closes an open menu, before the cave's own
+    // Escape leaves.
     const escape = () => {
       if (state.phase === "menu") { closeMenu(); return true; }
       if (state.phase === "offer") { decline(); return true; }
+      if (state.phase === "notice") { say("declined"); show("work"); return true; }
+      if (state.phase === "approach") { say("declined"); abandonApproach(); return true; }
       return false;
     };
     const unsubscribe = feed.subscribe((e) => {
@@ -894,15 +914,23 @@
           break;
         case "notice":
           if (!actor || !onBalcony(actor)) { show("work"); break; }
-          if ((state.timer -= dt) <= 0) approach();
+          // She comes over once there is a place beside the visitor with room, and gives up if none comes.
+          if ((state.timer -= dt) <= 0) {
+            if (shoulder(AT[BALCONY * 3], AT[BALCONY * 3 + 1], AT[BALCONY * 3 + 2])) approach();
+            else if (state.timer < -6) show("work");
+          }
           break;
-        case "approach":
+        case "approach": {
           if (!actor || !onBalcony(actor)) { abandonApproach(); break; }
-          shoulder();
-          path[pathCount * 3 - 3] = spot.x; path[pathCount * 3 - 2] = spot.y; path[pathCount * 3 - 1] = spot.z;
+          // The last leg runs from the balcony's waypoint, or from where she is once she is on it.
+          const final = pathAt >= pathCount - 1;
+          if (final ? shoulder(position.x, position.y, position.z) : shoulder(AT[BALCONY * 3], AT[BALCONY * 3 + 1], AT[BALCONY * 3 + 2])) {
+            path[pathCount * 3 - 3] = spot.x; path[pathCount * 3 - 2] = spot.y; path[pathCount * 3 - 1] = spot.z;
+          }
           steer(dt);
           if (pathAt === pathCount - 1 && Math.hypot(spot.x - position.x, spot.y - position.y, spot.z - position.z) < 0.45) offer();
           break;
+        }
         case "offer":
         case "menu":
           if (!actor || strayed(actor)) {
@@ -910,8 +938,7 @@
             break;
           }
           if (state.at === "shoulder") {
-            shoulder();
-            path[0] = spot.x; path[1] = spot.y; path[2] = spot.z;
+            if (shoulder(position.x, position.y, position.z)) { path[0] = spot.x; path[1] = spot.y; path[2] = spot.z; }
             steer(dt);
           }
           if (state.phase === "offer" && (state.timer -= dt) <= 0) decline();

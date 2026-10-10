@@ -6184,21 +6184,48 @@ const factoryWalking = { name: "factory walking", why: "regression: Factory move
   })()`);
   record("factory rebalancer: walk onto and off the low drum; a shallow console overlap allows walking out while deeper movement stays blocked", rebalancer.onto > 0.5 && Math.abs(rebalancer.peak - (rebalancer.height + 0.56)) < 1e-5 && Math.abs(rebalancer.off - rebalancer.height) < 1e-5 && rebalancer.overlapped && rebalancer.inwardBlocked && rebalancer.escaped > 0.5 && rebalancer.clear && rebalancer.grounded, JSON.stringify(rebalancer));
 } };
-const factoryGreeter = { name: "factory greeter", why: "rule: the guide notices a visitor on the balcony and flies over to offer tours, a decline sends her back to work for the visit, a visitor can walk up to her at a station, the four tours complete and send her back to work, her flight clears the hall, and device detail respects quality and visit ownership", run: async (b) => {
-  // A fresh visit: an earlier step may already have had her offer and be declined, so come back in once if so.
-  if (await b.evaluate(`__ooga.factory.greeter.state.offered`)) { await tourGo(b, "lab"); await tourGo(b, "factory"); }
+const factoryGreeter = { name: "factory greeter", why: "rule: the guide notices a visitor on the balcony and flies over to offer tours, only to places the hall's clearance passes, and once per visit; Escape or a decline sends her back to work; a visitor can walk up to her at a station; the four tours complete and send her back to work; her flight clears the hall; and device detail respects quality and visit ownership", run: async (b) => {
+  // A fresh visit: an earlier step may already have had her notice the visitor, so come back in once if so.
+  const fresh = async () => { if (await b.evaluate(`__ooga.factory.greeter.state.offered`)) { await tourGo(b, "lab"); await tourGo(b, "factory"); } };
+  await fresh();
+  // regression: with no room either side of the visitor, she flew to a place that had failed the hall's clearance.
+  // The visitor stands by the gate facing it, where neither side passes; she comes over their head instead, and every
+  // place she flies through near them, and where she stops, passes. Her own update steps the waits: every stepped
+  // frame renders, and Canvas 2D renders slowly.
   const arrival = await b.evaluate(`(() => {
-    const B = __ooga, g = B.factory.greeter, s = g.state, a = B.cavemen.get("portlandhodl");
+    const B = __ooga, g = B.factory.greeter, s = g.state, a = B.cavemen.get("portlandhodl"), F = BL.factoryModels;
     if (B.crew.player !== a) B.pilot.possess(a);
+    const h = a.bodyHeight, sides = (x, z, yaw) => [1, -1].map(side => F.clearAt(x - Math.cos(yaw) * side + Math.sin(yaw) * 1.8, z + Math.sin(yaw) * side + Math.cos(yaw) * 1.8, 5, 0.4, h * 0.8 + 0.4));
+    let pose = null;
+    for (let z = 26; z <= 29.5 && !pose; z += 0.5) for (let x = -2.5; x <= 2.5 && !pose; x += 0.5) for (let k = 0; k < 16 && !pose; k++) {
+      const yaw = k / 16 * Math.PI * 2;
+      if (Math.abs(F.supportAt(x, z, 5.05) - 5) < 0.05 && F.clearAt(x, z, 5, a.bodyRadius, h) && F.clearAt(x, z, 5, 0.4, h + 1.1) && !sides(x, z, yaw).some(Boolean)) pose = { x, z, yaw };
+    }
+    if (!pose) return { pose };
+    // The view's yaw turns the Ooga half round from it.
+    B.pilot.navigate({ position: { x: pose.x, y: 5, z: pose.z }, yaw: pose.yaw - Math.PI, pitch: 0, dist: 6 });
+    B.advance(0.1, 1 / 30);
+    const p = a.root.position, feet = p.y - a.baseY, phases = [s.phase], blocked = !sides(p.x, p.z, a.root.rotation.y).some(Boolean);
+    let elapsed = 0, near = 0, struck = 0;
+    for (let t = 0; t < 25 && s.phase !== "offer"; t += 1 / 30) {
+      g.update(1 / 30, elapsed += 1 / 30);
+      if (phases[phases.length - 1] !== s.phase) phases.push(s.phase);
+      const q = g.root.position;
+      if (s.phase === "approach" && Math.hypot(q.x - p.x, q.z - p.z) < 4) { near++; if (!F.clearAt(q.x, q.z, feet, 0.4, q.y + 0.4 - feet)) struck++; }
+    }
+    B.advance(1 / 30, 1 / 30);
+    const q = g.root.position;
+    return { pose, blocked, phases, near, struck, scene: B.scene, label: document.getElementById("act").textContent,
+      clear: F.clearAt(q.x, q.z, feet, 0.4, q.y + 0.4 - feet), lift: q.y - feet, over: Math.hypot(q.x - p.x, q.z - p.z) < 0.6 };
+  })()`);
+  // A step into the balcony's open middle, facing the core: she moves to the visitor's side, still clear.
+  const beside = await b.evaluate(`(() => {
+    const B = __ooga, g = B.factory.greeter, s = g.state, a = B.crew.player, F = BL.factoryModels;
     B.pilot.navigate({ position: { x: 0, y: 5, z: 27 }, yaw: 0, pitch: 0, dist: 6 });
     B.advance(0.1, 1 / 30);
-    // Her own update for the waits: every stepped frame renders, and Canvas 2D renders slowly.
-    const phases = [s.phase]; let elapsed = 0;
-    for (let t = 0; t < 20 && s.phase !== "offer"; t += 1 / 30) { g.update(1 / 30, elapsed += 1 / 30); if (phases[phases.length - 1] !== s.phase) phases.push(s.phase); }
-    B.advance(1 / 30, 1 / 30);
-    const p = a.root.position, q = g.root.position;
-    return { phases, scene: B.scene, label: document.getElementById("act").textContent,
-      gap: Math.hypot(q.x - p.x, q.z - p.z), lift: q.y - (p.y - a.baseY) };
+    for (let t = 0; t < 3; t += 1 / 30) g.update(1 / 30, 50 + t);
+    const p = a.root.position, q = g.root.position, feet = p.y - a.baseY;
+    return { phase: s.phase, gap: Math.hypot(q.x - p.x, q.z - p.z), clear: F.clearAt(q.x, q.z, feet, 0.4, q.y + 0.4 - feet) };
   })()`);
   await b.key(" ");
   const menu = await b.evaluate(`(() => ({ open: !document.querySelector(".greeter-menu").hidden,
@@ -6216,6 +6243,49 @@ const factoryGreeter = { name: "factory greeter", why: "rule: the guide notices 
     for (let t = 0; t < 25; t += 0.1) { g.update(0.1, 100 + t); seen.add(s.phase); }
     return { ...first, seen: [...seen] };
   })()`);
+  record("factory greeter: she notices the visitor on the balcony and flies over to offer tours, over their head where neither side has room and beside them where it does, only through places the hall's clearance passes; Space opens four, arrows select, and Escape declines and she keeps to her work",
+    !!arrival.pose && arrival.blocked && arrival.scene === "factory" && ["notice", "approach", "offer"].every(p => arrival.phases.includes(p))
+      && arrival.label === "TALK TO TESS" && arrival.near > 0 && arrival.struck === 0 && arrival.clear && arrival.over && arrival.lift > 1.2
+      && beside.phase === "offer" && beside.gap > 1.5 && beside.clear
+      && menu.open && menu.choices === 4 && menu.fits && menu.phase === "menu" && selected === 1
+      && declined.scene === "factory" && declined.hidden && declined.phase === "work" && declined.said === "declined"
+      && declined.seen.length === 1 && declined.seen[0] === "work",
+    JSON.stringify({ arrival, beside, menu, selected, declined }));
+  // Two more visits, each with its greeting fresh, and both stopped while she is on her way over.
+  const flyingOver = `(() => {
+    const B = __ooga, g = B.factory.greeter, s = g.state, a = B.cavemen.get("portlandhodl");
+    if (B.crew.player !== a) B.pilot.possess(a);
+    B.pilot.navigate({ position: { x: 0, y: 5, z: 27 }, yaw: 0, pitch: 0, dist: 6 });
+    B.advance(0.1, 1 / 30);
+    let elapsed = 0;
+    for (let t = 0; t < 20 && s.phase !== "approach"; t += 1 / 30) g.update(1 / 30, elapsed += 1 / 30);
+    for (let i = 0; i < 10; i++) g.update(1 / 30, elapsed += 1 / 30);
+    return s.phase;
+  })()`;
+  const staysAtWork = `(() => { const g = __ooga.factory.greeter, s = g.state, seen = new Set(); for (let t = 0; t < 15; t += 0.1) { g.update(0.1, 400 + t); seen.add(s.phase); } return [...seen]; })()`;
+  await fresh();
+  const waved = { flying: await b.evaluate(flyingOver) };
+  await b.key("Escape");
+  Object.assign(waved, await b.evaluate(`(() => { const s = __ooga.factory.greeter.state; return { scene: __ooga.scene, phase: s.phase, said: s.spoken }; })()`));
+  waved.after = await b.evaluate(staysAtWork);
+  // regression: walking off the balcony while she flew over left the visit's greeting unused, and back on the balcony
+  // she came over again.
+  await fresh();
+  const walked = { flying: await b.evaluate(flyingOver) };
+  walked.off = await b.evaluate(`(() => {
+    const B = __ooga, g = B.factory.greeter, s = g.state;
+    B.pilot.navigate({ position: { x: 0, y: 0, z: 13 }, yaw: 0, pitch: 0, dist: 6 });
+    B.advance(0.1, 1 / 30);
+    for (let t = 0; t < 2; t += 0.1) g.update(0.1, 500 + t);
+    return s.phase;
+  })()`);
+  await b.evaluate(`(() => { __ooga.pilot.navigate({ position: { x: 0, y: 5, z: 27 }, yaw: 0, pitch: 0, dist: 6 }); __ooga.advance(0.1, 1 / 30); })()`);
+  walked.after = await b.evaluate(staysAtWork);
+  record("factory greeter: Escape while she flies over waves her off without leaving the cave, and walking off the balcony while she flies over and back brings no second greeting that visit",
+    waved.flying === "approach" && waved.scene === "factory" && waved.phase === "work" && waved.said === "declined"
+      && waved.after.length === 1 && waved.after[0] === "work"
+      && walked.flying === "approach" && walked.off === "work" && walked.after.length === 1 && walked.after[0] === "work",
+    JSON.stringify({ waved, walked }));
   // The visitor walks up to her at a station near the floor instead.
   const met = await b.evaluate(`(() => {
     const B = __ooga, g = B.factory.greeter, s = g.state, a = B.crew.player, F = BL.factoryModels, names = Object.keys(BL.factoryGreeter.FLIGHT.AIR);
@@ -6238,15 +6308,10 @@ const factoryGreeter = { name: "factory greeter", why: "rule: the guide notices 
     for (let t = 0; t < 40 && s.phase !== "work"; t += 0.1) g.update(0.1, 300 + t);
     return { phase: s.phase, scene: B.scene, said: s.spoken, stop: document.querySelector(".greeter-stop").hidden };
   })()`);
-  record("factory greeter: she notices the visitor on the balcony and flies over to offer tours, Space opens four, arrows select, Escape declines and she keeps to her work, and walked up to at a station she starts a tour that End tour ends",
-    arrival.scene === "factory" && ["notice", "approach", "offer"].every(p => arrival.phases.includes(p)) && arrival.label === "TALK TO TESS"
-      && arrival.gap < 3 && arrival.lift > 0.6 && arrival.lift < 2.2
-      && menu.open && menu.choices === 4 && menu.fits && menu.phase === "menu" && selected === 1
-      && declined.scene === "factory" && declined.hidden && declined.phase === "work" && declined.said === "declined"
-      && declined.seen.length === 1 && declined.seen[0] === "work"
-      && met.label === "TALK TO TESS" && opened === "menu" && started.phase === "gather" && started.tour === "payments"
+  record("factory greeter: walked up to at a station, she opens the menu on Space, starts a tour on Enter, and End tour sends her back to work",
+    met.label === "TALK TO TESS" && opened === "menu" && started.phase === "gather" && started.tour === "payments"
       && started.said === "gather" && started.stop && ended.phase === "work" && ended.scene === "factory" && ended.stop,
-    JSON.stringify({ arrival, menu, selected, declined, met, opened, started, ended }));
+    JSON.stringify({ met, opened, started, ended }));
   const tours = await b.evaluate(`(() => {
     const B = __ooga, g = B.factory.greeter, a = B.crew.player, s = g.state, rows = [];
     // Keep the visitor on the floor the tour measures from, beside it. Existing floor checks independently prove
