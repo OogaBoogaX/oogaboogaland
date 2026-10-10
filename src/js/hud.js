@@ -368,7 +368,7 @@
       }
       li.append(presence, name, age, state);
       el.roster.append(li);
-      rosterRows.set(contributor.name, { li, presence, state, age, contributor, rosterIndex, online: false, sceneOnline: false, netOnline: false, nextOnline: false, placedStamp: stampOf(contributor), host, voice, look: "", login: "", hostOn: false, blocked: false, nextLook: "", nextLogin: "", nextHost: false });
+      rosterRows.set(contributor.name, { li, presence, state, age, contributor, rosterIndex, online: false, sceneOnline: false, netOnline: false, nextOnline: false, placedStamp: stampOf(contributor), host, voice, look: "", login: "", hostOn: false, blocked: false, self: false, nextLook: "", nextLogin: "", nextHost: false, nextSelf: false });
     }
     if (!awayRow.parentElement) el.roster.append(awayRow);
     updateAwayButton();
@@ -376,7 +376,9 @@
       const button = e.target.closest(".roster-voice");
       if (!button || button.disabled) return;
       button.blur();
-      BL.voice.muteLocal(button.dataset.login, button.getAttribute("aria-pressed") !== "true");
+      // The visitor's own mark mutes and unmutes their microphone; anyone else's mutes them for this visitor.
+      if (button.dataset.self === "true") BL.voice.toggle();
+      else BL.voice.muteLocal(button.dataset.login, button.getAttribute("aria-pressed") !== "true");
     });
     on(awayButton, "click", () => {
       showAway = !showAway;
@@ -1825,6 +1827,26 @@
     voiceButton.textContent = voice.joining ? "Joining voice" : voice.error && !voice.enabled ? `Voice: ${voice.error}` : !voice.enabled ? "Join voice" : voice.muted ? "Unmute" : "Mute";
     voiceButton.setAttribute("aria-pressed", String(voice.enabled && !voice.muted));
   };
+  // The microphone's note (#181), page-level as the account line is: muted in voice, it stays until unmuted;
+  // alone in voice (nobody here to hear, so the microphone is held off), it says so until someone comes;
+  // unmuting, or someone coming, says "Mic on" for MIC_ON_MS, then it goes. A mute outranks alone.
+  // `keyed` is whether M unmutes in the active scene.
+  const MIC_ON_MS = 1500, MIC_COARSE = window.matchMedia("(pointer: coarse)").matches;
+  let micShown = "", micTimer = 0;
+  const showMic = (voice, keyed) => {
+    const muted = voice.muted && (voice.enabled || voice.joining), alone = !muted && voice.enabled && voice.alone;
+    const shown = muted ? keyed && !MIC_COARSE ? "Mic muted \u00b7 M to unmute" : "Mic muted \u00b7 Unmute in the panel" : alone ? "Alone \u00b7 mic off" : voice.enabled ? "Mic on" : "";
+    if (shown === micShown) return;
+    const note = $("mic-note"), was = micShown;
+    micShown = shown;
+    window.clearTimeout(micTimer);
+    micTimer = 0;
+    note.textContent = shown;
+    note.dataset.muted = String(muted);
+    if (muted || alone) note.hidden = false;
+    else if (shown && was && !note.hidden) micTimer = window.setTimeout(() => { note.hidden = true; }, MIC_ON_MS);
+    else note.hidden = true;
+  };
   // The roster's marks are page-level too: whichever scene's roster is up, each signed-in player's row
   // (their own Ooga, else the one they drive) shows the host dot and their voice. The director hands every
   // room and voice change here; only marks that changed are touched, and rows never move for them.
@@ -1836,17 +1858,20 @@
   };
   const paintMarks = (row) => {
     const blocked = !!row.nextLogin && BL.voice.mutedLocally(row.nextLogin);
-    if (row.look !== row.nextLook || row.login !== row.nextLogin || row.blocked !== blocked) {
+    if (row.look !== row.nextLook || row.login !== row.nextLogin || row.blocked !== blocked || row.self !== row.nextSelf) {
       row.look = row.nextLook;
       row.login = row.nextLogin;
       row.blocked = blocked;
+      row.self = row.nextSelf;
       const button = row.voice;
       button.hidden = !row.look;
       button.dataset.voice = row.look;
       button.dataset.login = row.login;
-      button.disabled = !row.login;
+      button.dataset.self = String(row.self);
+      button.disabled = !row.login && !row.self;
       button.setAttribute("aria-pressed", String(blocked));
-      const words = !row.look ? "" : `${VOICE_WORDS[row.look]}${blocked ? ". Muted for you: click to unmute" : row.login ? ". Click to mute for you" : ""}`;
+      const words = !row.look ? "" : row.self ? row.look === "muted" ? "Your microphone is muted: click to unmute" : "Your microphone: click to mute"
+        : `${VOICE_WORDS[row.look]}${blocked ? ". Muted for you: click to unmute" : row.login ? ". Click to mute for you" : ""}`;
       button.title = words;
       button.setAttribute("aria-label", words);
     }
@@ -1865,7 +1890,7 @@
     if (!liveRows) return;
     for (const row of liveRows.values()) {
       row.nextLook = row.nextLogin = "";
-      row.nextHost = row.nextOnline = false;
+      row.nextHost = row.nextOnline = row.nextSelf = false;
     }
     const net = BL.net.state, voice = BL.voice.stats;
     if (net.room === "live" && net.me) {
@@ -1873,7 +1898,10 @@
       for (const rec of BL.net.remotes.values()) markOnline(rec.login, rec.body);
       const self = voiceRowOf(net.me.login, net.body);
       if (self) {
-        if (voice.enabled) self.nextLook = voice.muted ? "muted" : voice.speaking ? "speaking" : "on";
+        if (voice.enabled) {
+          self.nextLook = voice.muted ? "muted" : voice.speaking ? "speaking" : "on";
+          self.nextSelf = true;
+        }
         if (net.hostId === net.selfId) self.nextHost = true;
       }
       for (const rec of BL.net.remotes.values()) {
@@ -1893,5 +1921,5 @@
       liveOnline(row);
     }
   };
-  BL.hud = { create, renderIcon, signLettering, showAccount, showVoices, STATE_LABELS, statusFor };
+  BL.hud = { create, renderIcon, signLettering, showAccount, showMic, showVoices, STATE_LABELS, statusFor };
 })();

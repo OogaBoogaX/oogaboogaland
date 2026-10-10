@@ -45,6 +45,8 @@ Who drives which Ooga:
 
 Players driving an Ooga can also talk: **Join voice** at the foot of the panel asks for your microphone, then becomes **Mute**. You hear everyone driving an Ooga in the same place as you, all at the same volume: out on the island, in HQ, or inside the same cave. Step into a cave and you hear only who is in there with you.
 
+While you are in voice, **M** mutes and unmutes your microphone on the island, in the lab, the Lightning Factory, ₿IFRÖST and the Ember Den (in Ooga Arcade and the games, M still mutes their sound), and a note stays on screen while you are muted. Your own speaker mark in the roster does the same. When nobody else in voice is in the same place as you, your microphone stays off (the note says "Alone · mic off") and turns back on by itself when someone joins; if you muted yourself, you stay muted. Walking your Ooga on the island, you hear your own footsteps; nobody else hears them.
+
 Ownership goes by GitHub login, not by name. These rules apply on the signed-in site; the plain GitHub Pages build has no accounts and every Ooga is free there. How it works: `docs/auth-and-presence.md`.
 
 ## Timechain Sphere

@@ -14,6 +14,11 @@
 // The room's lists carry each voice's publication count, so a microphone published again (its owner
 // reconnected or restarted) is pulled again rather than left on a dead track; a connection that fails or stays
 // dropped after it was up starts voice over on its own, and a pull that misses a wanted voice is retried.
+// Alone (#181): while the room's list of whom to hear is empty, nobody here can hear this page either (the room
+// lists exactly the players driving an Ooga in the same place with a live microphone, and lets a page pull only
+// those), so the microphone track is held off as a mute holds it (`stats.alone`), and comes back by itself when the
+// room lists someone. It is still published, so the room can tell others this page is here to be heard. Alone is
+// not a mute: the room is not told, and a visitor's own mute stands whoever comes and goes.
 // Exports enable, toggle, restart, stop, setPeers, subscribe, dispose, inspect, speaking, muteLocal, mutedLocally and stats.
 (() => {
   "use strict";
@@ -29,7 +34,7 @@
   const subs = new Map();
   // Each wanted voice's publication count from the room: a new count is a microphone published again.
   const wantedGen = new Map();
-  const stats = { enabled: false, muted: false, speaking: false, joining: false, peers: 0, hearing: 0, error: "" };
+  const stats = { enabled: false, muted: false, alone: false, speaking: false, joining: false, peers: 0, hearing: 0, error: "" };
   const samples = new Float32Array(SAMPLES);
   const mutedLogins = new Set();
   let mic = null, pubPc = null, subPc = null, desired = [], queue = Promise.resolve();
@@ -106,7 +111,7 @@
     changed = false;
     listen(micMeter);
     subs.forEach(listenSub);
-    const self = !!(micMeter && micMeter.speaking) && !stats.muted;
+    const self = !!(micMeter && micMeter.speaking) && !stats.muted && !stats.alone;
     if (self !== stats.speaking) {
       stats.speaking = self;
       changed = true;
@@ -206,6 +211,7 @@
     try {
       mic = mic || await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
       micMeter = micMeter || meter(mic);
+      gate();
       await publish();
       await openReceiver();
       stats.enabled = true;
@@ -219,6 +225,7 @@
       teardown();
     }
     stats.joining = false;
+    gate();
     emit();
   };
 
@@ -243,9 +250,15 @@
     });
   };
 
+  // The microphone sends only when this visitor has not muted it and the room lists someone to hear it.
+  const gate = () => {
+    stats.alone = (stats.enabled || stats.joining) && desired.length === 0;
+    if (mic) for (const t of mic.getAudioTracks()) t.enabled = !stats.muted && !stats.alone;
+  };
+
   const setMuted = (on) => {
     stats.muted = on;
-    if (mic) for (const t of mic.getAudioTracks()) t.enabled = !on;
+    gate();
     BL.net.setMuted(on);
     emit();
   };
@@ -266,7 +279,7 @@
     micMeter = null;
     if (audio) audio.close().catch(() => {});
     audio = null;
-    stats.muted = false;
+    stats.muted = stats.alone = false;
     BL.net.setMuted(false);
     desired = [];
     wantedGen.clear();
@@ -288,6 +301,9 @@
     wantedGen.clear();
     for (let i = 0; i < ids.length; i++) wantedGen.set(ids[i], gens ? gens[i] : 0);
     for (const [id, s] of subs) s.el.muted = !heard(id);
+    const was = stats.alone;
+    gate();
+    if (stats.alone !== was) emit();
     schedule();
   };
 
