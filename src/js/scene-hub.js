@@ -187,10 +187,10 @@
   const ALTAR_HEIGHT = 0.34, ALTAR_BLOCK_WIDTH = 0.2, ALTAR_BLOCK_ARC = 0.3, ALTAR_RING_GAP = 0.02, ALTAR_MAX_BLOCKS = 512;
   const RIPEN = 25, TREE_CHANCE = 0.5, BUSH_CHANCE = 0.25;
   const PROP_TIPS = { tree: "Tree · shake it", bush: "Bush · rustle it", rock: "Rock · hit to break", crate: "Box · hit to break", barrel: "Barrel · hit to break", flower: "Flowers", torch: "Torch · warm", firepit: "Fire pit", bedroll: "Somebody's bed", ladder: "Ladder · wobbly", dock: "Dock · creaky", magazine: "Spare magazine · walk into it to collect", poolbridge: "Vine bridge · to the Mempool island", poolsign: "Mempool Rainforest · the way down is through the hill", poolpainting: "Wall painting · tap to read it closely", chainsign: "The chain, at a glance · tap to read it", weathersign: "Reading the weather · tap for the key", poolrock: "Mossy rock", poolfern: "Fern · rustle it", poollog: "Fallen log · something lives in it", jaguar: "Jaguar · do not poke", monkey: "Monkey · it watches you", toucan: "Toucan · big beak", canopy: "Rainforest tree · shake it", jumbotron: "Oogatron · OogaBoogaX on the big screen · tap the screen for a close-up", palm: "Palm · shake it", bifrostbridge: "Bifröst · the bridge to ₿IFRÖST", bifrostgate: "₿IFRÖST · walk an Ooga through the field", heimdall: "Heimdall · keeper of the bridge", gate: null };
-  const RETICLE_PROPS = new Set(["tree", "bush", "rock", "crate", "barrel", "flower", "torch", "firepit", "ladder", "poolsign", "poolpainting", "chainsign", "weathersign", "poolfern", "poollog", "jaguar", "monkey", "toucan", "canopy", "jumbotron", "palm", "timechainentrance", "timechainboard", "timechainchair", "timechainbeer", "bifrostgate", "heimdall"]);
+  const RETICLE_PROPS = new Set(["tree", "bush", "rock", "crate", "barrel", "flower", "torch", "firepit", "totem", "ladder", "poolsign", "poolpainting", "chainsign", "weathersign", "poolfern", "poollog", "jaguar", "monkey", "toucan", "canopy", "jumbotron", "palm", "timechainentrance", "timechainboard", "timechainchair", "timechainbeer", "bifrostgate", "heimdall"]);
   const workCave = (slot) => slot.repo && (slot.status === "open" || slot.status === "mirror");
   const MATRIX_LIVING_PROPS = new Set(["tree"]);
-  const SOLID_PROPS = new Set(["tree", "rock", "crate", "barrel", "firepit", "dock", "jumbotron", "poolbridge", "poolrock", "canopy"]);
+  const SOLID_PROPS = new Set(["tree", "rock", "crate", "barrel", "firepit", "dock", "jumbotron", "totem", "poolbridge", "poolrock", "canopy"]);
   const CLANKER_STEP_PROPS = new Set(["rock", "crate", "barrel", "poolrock"]);
   const BUSH_WORDS = ["Something rustles.", "A beetle. Ooga leaves it.", "Just a bush."];
   const PALM_WORDS = ["Coconuts. Ooga wanted bananas.", "A coconut thuds down. Ooga dodges.", "The fronds swish."];
@@ -5334,6 +5334,7 @@
         if (o.prop === "timechainboard") return "Timechain display · tap to expand";
         if (o.prop === "timechainchair") return "Sani's recliner · tap to spin and spill the glass";
         if (o.prop === "timechainbeer") return "500 ml beer · tap to chug";
+        if (o.prop === "totem") return totemTip(o.totem);
         return PROP_TIPS[o.prop] || "";
       case "piece":
         return PIECES[o.piece] ? PIECES[o.piece][0] : "";
@@ -5451,6 +5452,9 @@
       case "rock":
         fx.burst(x, 0.6, z, 6, [CHIP], 1.4);
         hud.toast("Solid rock. Ow.");
+        break;
+      case "totem":
+        pokeTotem(o);
         break;
       case "palm":
         if (!wobble(o.node, 0.05)) return;
@@ -7074,20 +7078,20 @@
     go: (i) => jumbotron.goToView(i)
   };
   const openJumbotron = () => hud.openBoard(jumbotronBoard);
-  // Contribution fireworks: shells rise from the jumbotron and burst in the
-  // board's stat colors. Queued with absolute scene-clock times and stepped in
-  // update(), so a waiting shell costs nothing per frame.
+  // Contribution fireworks: shells rise from the jumbotron (or `from`, a totem's
+  // top) and burst in the board's stat colors. Queued with absolute scene-clock
+  // times and stepped in update(), so a waiting shell costs nothing per frame.
   const fireworksShells = [];
-  const launchFireworks = (strength = 1) => {
-    if (!jumbotronSpot || !fx) return 0;
+  const launchFireworks = (strength = 1, from = jumbotronSpot) => {
+    if (!from || !fx) return 0;
     const shells = Math.min(6, 2 + Math.min(4, strength | 0));
     for (let i = 0; i < shells; i++) {
       fireworksShells.push({
         at: now + i * 0.38 + Math.random() * 0.2,
         phase: "launch",
-        x: jumbotronSpot.x + (Math.random() - 0.5) * 2.6,
-        y: jumbotronSpot.y,
-        z: jumbotronSpot.z + (Math.random() - 0.5) * 1.4,
+        x: from.x + (Math.random() - 0.5) * 2.6,
+        y: from.y,
+        z: from.z + (Math.random() - 0.5) * 1.4,
         rise: 2.2 + Math.random() * 1.4
       });
     }
@@ -7108,6 +7112,126 @@
         fireworksShells.splice(i, 1);
       }
     }
+  };
+  // The four repository totems round the meadow, 60 degrees apart from east-south-east to west, so the work caves'
+  // fronts, the gate and the landing view stay clear, each with its faces toward the pile. Fire burns in their six
+  // eyes, each flame a node on the arcade's one `blaze` geometry. Eyes and runes go by how lately the repository
+  // changed (`totemFeed`): always a small fire and a soft warm glow breathing slowly, blazing for a fresh change and
+  // easing back over TOTEM_FADE, and a change seen during the visit flares them brightest for TOTEM_FLARE seconds with
+  // sparks.
+  // Each also casts a soft warm light from its middle that follows them, its own lamp kind so the tiers'
+  // nearest-first choice treats it like any other lamp.
+  // TOTEM_CLEAR keeps a totem off the paths; TOTEM_ROOM keeps the scattered props off its stones and name board.
+  const TOTEM_DEGREES = [110, 170, 230, 290], TOTEM_RADIUS = 17, TOTEM_CLEAR = 2.2, TOTEM_ROOM = 3.2;
+  const TOTEM_FADE = 6 * 3600000, TOTEM_FLARE = 6, TOTEM_CHEER = 14;
+  const totems = [];
+  let totemUnsub = null;
+  const totemAge = (i) => {
+    const changed = BL.totemFeed.state.repos[i].changedAt;
+    if (!changed) return "";
+    const minutes = Math.max(0, Math.round((Date.now() - changed) / 60000));
+    return minutes < 60 ? `${minutes} min ago` : minutes < 2880 ? `${Math.round(minutes / 60)} h ago` : `${Math.round(minutes / 1440)} days ago`;
+  };
+  // A caveman's "Ooga booga!" in the browser's own speech, deep and slow: only once the visitor has touched the page
+  // (browsers refuse speech before that), never with the island's sound muted, and only in a voice on this device, so
+  // no text leaves it. The deep male voices go first where the device has them.
+  const OOGA_VOICES = ["Ralph", "Fred", "Daniel", "Alex"];
+  const shoutOoga = () => {
+    const speech = window.speechSynthesis;
+    if (!speech || weather.muted || navigator.userActivation && !navigator.userActivation.hasBeenActive) return;
+    const voices = speech.getVoices().filter((v) => v.localService && /^en/i.test(v.lang));
+    const voice = OOGA_VOICES.map((name) => voices.find((v) => v.name.startsWith(name))).find(Boolean) || voices[0];
+    if (!voice) return;
+    const line = new SpeechSynthesisUtterance("Oooga! Boooga!");
+    line.voice = voice;
+    line.pitch = 0.1;
+    line.rate = 0.7;
+    speech.cancel();
+    speech.speak(line);
+  };
+  // A change landing during the visit: the eyes and runes flare, sparks fly from the eyes, fireworks go up from the
+  // totem's top, the Oogas awake within TOTEM_CHEER cheer and shout its word (never the one being driven), a deep
+  // voice shouts "Ooga booga!", and one notice names the repository.
+  const flareTotem = (i) => {
+    const o = totems[i], p = o.owner.node.position, repo = BL.totemFeed.REPOS[i];
+    o.flare = 1;
+    fx.burst(p.x, p.y + BL.totemModels.APEX - 0.85, p.z, 14, [SPARK], 1.8);
+    launchFireworks(3, o.top);
+    for (const cave of crew.cavemen.values()) {
+      if (cave === pilot.player || cave.build || cave.state === "sleeping") continue;
+      const c = cave.root.position;
+      if (Math.hypot(c.x - p.x, c.z - p.z) > TOTEM_CHEER) continue;
+      cave.cheer = 1.6;
+      fx.say(cave, fnv1a(`${repo.word}/${cave.traits.name}`) % 2 ? `${repo.word}!` : "OOGA!", 1.8);
+    }
+    shoutOoga();
+    hud.toast(`${repo.name} just changed · the ${repo.word} totem blazes`);
+  };
+  const buildTotems = () => {
+    const M = BL.totemModels, feed = BL.totemFeed;
+    TOTEM_DEGREES.forEach((deg, i) => {
+      const spot = spotAt(deg, TOTEM_RADIUS, TOTEM_CLEAR);
+      if (!spot) throw new Error(`No meadow spot for the ${feed.REPOS[i].name} totem`);
+      const ry = Math.atan2(-spot.x, -spot.z);
+      claim(spot.x, spot.z, TOTEM_ROOM);
+      const node = place(M.body(i), spot.x, spot.z, ry);
+      const runes = createNode({ geometry: M.glyphs(i), glow: 0 });
+      runes.sightHidden = true;
+      addChild(node, runes);
+      const flames = M.EYES.map(([x, y, z, size]) => {
+        const flame = createNode({ position: { x, y, z }, scale: { x: size, y: size, z: size }, geometry: BL.arcadeModels.blaze(), sightHidden: true });
+        addChild(node, flame);
+        return { node: flame, size };
+      });
+      const owner = addProp("totem", node, spot.x, spot.z, 0);
+      // The broad sphere would take in half the meadow; a tap counts only on the stones, the pole or the wings.
+      const P = node.position, cos = Math.cos(ry), sin = Math.sin(ry);
+      owner.totem = i;
+      owner.pickRay = (ray) => {
+        const ox = ray.ox - P.x, oz = ray.oz - P.z;
+        return M.hit(ox * cos - oz * sin, ray.oy - P.y, ox * sin + oz * cos, ray.dx * cos - ray.dz * sin, ray.dy, ray.dx * sin + ray.dz * cos);
+      };
+      const light = { r: 0, g: 0, b: 0, radius: 0, glow: 0, hide: false };
+      addLamp({ glow: 0, flare: 0, visible: true }, light, spot.x, 1.5, spot.z, true, 0, `totem:${i}`).always = true;
+      totems.push({ owner, runes, flames, light, flare: 0, top: { x: spot.x, y: M.APEX, z: spot.z } });
+    });
+    totemUnsub = feed.subscribe((event) => {
+      if (event.fresh) flareTotem(event.index);
+    });
+  };
+  const updateTotems = (dt, elapsed) => {
+    const at = Date.now(), repos = BL.totemFeed.state.repos;
+    for (let i = 0; i < totems.length; i++) {
+      const o = totems[i], changed = repos[i].changedAt;
+      const fade = changed ? Math.max(0, 1 - (at - changed) / TOTEM_FADE) : 0;
+      o.flare = Math.max(0, o.flare - dt / TOTEM_FLARE);
+      const lit = Math.max(fade * fade, o.flare), breath = 0.5 + 0.5 * Math.sin(elapsed * 1.8 + i * 1.7);
+      // Highlight past 2.4 would carry the warm tint beyond its colour, so the flare tops out there.
+      o.runes.glow = 0.35 + 0.1 * breath + 0.55 * lit;
+      o.runes.highlight = 0.25 + 0.2 * breath + 1.6 * lit + 0.35 * o.flare;
+      const power = 0.45 + 0.1 * breath + 0.8 * lit;
+      o.light.radius = 4 + 2.5 * lit;
+      o.light.r = power; o.light.g = 0.62 * power; o.light.b = 0.3 * power;
+      // The eye fires: small and flickering at rest, half as tall again lit, and taller still in a flare.
+      const fire = 0.6 + 0.6 * lit + 0.3 * o.flare;
+      for (let k = 0; k < o.flames.length; k++) {
+        const f = o.flames[k], flick = Math.sin(elapsed * 11 + k * 2.3 + i) * 0.08 + Math.sin(elapsed * 17.3 + k * 1.1) * 0.05;
+        f.node.scale.x = f.node.scale.z = f.size * fire;
+        f.node.scale.y = f.size * fire * (1 + flick);
+      }
+    }
+  };
+  const totemTip = (i) => {
+    const age = totemAge(i), repo = BL.totemFeed.REPOS[i];
+    return age ? `${repo.name} totem · changed ${age} · tap to see the change` : `${repo.name} totem · tap to see its changes`;
+  };
+  // A tap opens the repository's latest change on GitHub in a new tab, as the lab's link opens its site.
+  const pokeTotem = (o) => {
+    const p = o.node.position;
+    fx.burst(p.x, p.y + 1.6, p.z, 8, [DUST], 1.2);
+    // Straight to the latest change once GitHub has answered, the repository's commits until then.
+    const repo = BL.totemFeed.REPOS[o.totem], url = BL.totemFeed.state.repos[o.totem].url;
+    window.open(url || `https://github.com/${repo.repo}/commits`, "_blank", "noopener,noreferrer");
   };
   const update = (dt, elapsed) => {
     if (lawn && lawn.version !== island.path.version) layLawn();
@@ -7136,6 +7260,7 @@
       jumbotron.update(elapsed, renderer);
     }
     updateChainSign(elapsed);
+    updateTotems(dt, elapsed);
     hud.updateBoard(elapsed);
     if (fireworksShells.length) updateFireworks();
     const next = daylight.phaseAt(hour);
@@ -9193,6 +9318,7 @@
         } else if (event.type === "contribution") launchFireworks(event.delta);
       });
     }
+    buildTotems();
     meadowDressing(firePos);
     buildPilePosts();
     plantPalms();
@@ -9758,7 +9884,7 @@
         get shown() {
           return pile.shown;
         },
-        terrainSections, caveSections, cutawayPaths: CUTAWAY_PATH_STATE, terrainRampRoof, get cutawayTravelRamp() { return cutawayTravelRamp; }, get cutawayTravelChannel() { return cutawayTravelChannel; }, get cutawayTravelStation() { return cutawayTravelStation; }, island, mouths: island.mouths, labels, camera, weather, chain, beasts, pokeBeast, useProp, refreshChainSign, get chainSign() { return chainSign; }, get poolIsland() { return mempoolIsland; }, cameraPose: POSITION_POSE, crew, fx, controls: pilot.controls, props, altar, path: island.path.debug, headquarters, jumbotron, fireworks: launchFireworks, get fireworksPending() { return fireworksShells.length; }, get npcSync() { return npcSync; }, clankers, clankerPlay, cloudFloorAt,
+        terrainSections, caveSections, cutawayPaths: CUTAWAY_PATH_STATE, terrainRampRoof, get cutawayTravelRamp() { return cutawayTravelRamp; }, get cutawayTravelChannel() { return cutawayTravelChannel; }, get cutawayTravelStation() { return cutawayTravelStation; }, island, mouths: island.mouths, labels, camera, weather, chain, beasts, pokeBeast, useProp, refreshChainSign, get chainSign() { return chainSign; }, get poolIsland() { return mempoolIsland; }, cameraPose: POSITION_POSE, crew, fx, controls: pilot.controls, props, altar, path: island.path.debug, headquarters, jumbotron, totems: { list: totems, flare: flareTotem }, fireworks: launchFireworks, get fireworksPending() { return fireworksShells.length; }, get npcSync() { return npcSync; }, clankers, clankerPlay, cloudFloorAt,
         scenery: {
           get candidateCount() { return scenery.length; },
           get visibleCount() { return sceneryVisible; },
@@ -10111,6 +10237,12 @@
       oogatronUnsub();
       oogatronUnsub = null;
     }
+    if (totemUnsub) {
+      totemUnsub();
+      totemUnsub = null;
+    }
+    if (window.speechSynthesis) window.speechSynthesis.cancel();
+    totems.length = 0;
     fireworksShells.length = 0;
     jumbotronSpot = null;
     if (jumbotron) {
