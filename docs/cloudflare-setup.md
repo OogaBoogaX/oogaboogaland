@@ -17,6 +17,7 @@ The two share code and nothing else: each has its own D1 database, room, OAuth A
 | Rate limiters | `AUTH_LIMITER` 10 sign-ins a minute per IP; `ROOM_LIMITER` 20 room connections and `VOICE_LIMITER` 120 voice calls a minute per player | `ratelimits` (staging namespaces 2001–2003, production 1001–1003) |
 | Durable Object | `Room`, one named `island` | `durable_objects`, `migrations` |
 | Cron | daily 04:00 UTC, purges expired sessions | `triggers` |
+| Service binding | `DONATIONS` → `bananapayserver-staging`'s `PageApi` (staging only; production binds `bananapayserver-production` once it is deployed) | `services`, with `/donations/*` in `run_worker_first`. The bound Worker must exist before a deploy carries the binding |
 | Vars | `SITE_ORIGIN`, `GITHUB_CLIENT_ID`, `REALTIME_APP_ID` | `vars` |
 | Worker secrets | `GITHUB_CLIENT_SECRET`, `REALTIME_SECRET` | `wrangler secret put` |
 | Realtime SFU app | `oogaboogaland-staging`, `oogaboogaland-production` | Realtime → Serverless SFU |

@@ -5,6 +5,7 @@ import { cookieNames, parseCookies, serializeCookie } from "../src/cookies.js";
 import { randomToken, sameString, sha256Hex } from "../src/crypto.js";
 import { isExpired, needsTouch, publicPlayer, sanitizeDisplay, TOUCH_SECONDS } from "../src/db.js";
 import { fromSite, safeNext } from "../src/http.js";
+import { handleApi } from "../src/api.js";
 
 test("tokens are 32 random bytes in base64url and never repeat", () => {
   const a = randomToken(), b = randomToken();
@@ -72,4 +73,10 @@ test("the page never receives the avatar url or ban fields", () => {
   assert.deepEqual(p, { id: 1, login: "ooga", display: "ooga", look: { bald: true }, createdAt: 5 });
   assert.equal(publicPlayer({ id: 1, login: "o", look: "[1]" }).look, null);
   assert.equal(publicPlayer({ id: 1, login: "o", look: "{bad" }).look, null);
+});
+
+test("the page takes real donations only from a Worker with the bananapayserver binding", async () => {
+  const me = async (env) => (await handleApi(new Request("https://site.test/api/me"), { SITE_ORIGIN: "https://site.test", ...env }, new URL("https://site.test/api/me"))).json();
+  assert.deepEqual(await me({}), { player: null, character: null, donations: false });
+  assert.deepEqual(await me({ DONATIONS: {} }), { player: null, character: null, donations: true });
 });

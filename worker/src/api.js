@@ -1,5 +1,7 @@
 // /api/*: who is signed in, their display name, and deleting the account.
-// Signed out, /api/me answers 200 with `player: null`, so a signed-out page logs nothing.
+// Signed out, /api/me answers 200 with `player: null`, so a signed-out page logs nothing. Its `donations` says
+// whether this Worker reaches bananapayserver (the `DONATIONS` binding), which turns the page's real donations on
+// through its own address; without the binding the page stays simulated.
 
 import { cookieNames, isSecureOrigin, serializeCookie } from "./cookies.js";
 import { deletePlayer, getPlayer, publicPlayer, sanitizeDisplay, updateDisplay } from "./db.js";
@@ -11,7 +13,7 @@ const BODY_MAX = 1024;
 const me = async (request, env) => {
   const found = await getSessionFromRequest(request, env);
   if (request.method === "GET") return json({ player: found ? publicPlayer(found.player) : null,
-    character: found ? await contributorFor(found.player.login) : null });
+    character: found ? await contributorFor(found.player.login) : null, donations: !!env.DONATIONS });
   if (!fromSite(request, env.SITE_ORIGIN)) return json({ error: "forbidden" }, 403);
   if (!found) return json({ error: "unauthenticated" }, 401);
 

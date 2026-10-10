@@ -11,7 +11,7 @@ PR ownership check are described in [Contributor onboarding](contributor-onboard
 | Piece | Where | Job |
 |---|---|---|
 | Static site | `_site/` (the page as `index.html` and each `<route>.html`), staged by `npm run build:site` | the whole game, served by the Worker's assets binding with the headers in `worker/_headers` |
-| Worker | `worker/src/index.js` | runs only for `/auth/*`, `/api/*` and `/room` (`run_worker_first`); everything else is the static page |
+| Worker | `worker/src/index.js` | runs only for `/auth/*`, `/api/*` and `/room` (`run_worker_first`), and on staging `/donations/*`, which `worker/src/donations.js` passes on to bananapayserver with the signed-in donor; everything else is the static page |
 | D1 `oogaboogaland` | `worker/migrations/` | `players` (GitHub id, login, display name) and `sessions` (token hash, expiry) |
 | Page modules | `src/js/net.js` (`BL.net`), `src/js/remote-players.js` | the account and the room socket; the other visitors on the island. The sheet footer shows the account and the online count through `hud.showAccount` |
 | Room | `worker/src/room.js` (Durable Object `Room`) | one socket per signed-in player, presence and poses |
@@ -26,7 +26,7 @@ PR ownership check are described in [Contributor onboarding](contributor-onboard
 
 ## Being signed in
 
-- `GET /api/me` answers `{ "player": null }` or `{ "player": { id, login, display, look, createdAt } }`, always 200, so a signed-out page logs nothing. `avatar_url` stays server-side while the content policy blocks GitHub images.
+- `GET /api/me` answers `{ "player": null, "donations": false }` or `{ "player": { id, login, display, look, createdAt }, "donations": false }`, always 200, so a signed-out page logs nothing. `avatar_url` stays server-side while the content policy blocks GitHub images. `donations` is true once the Worker has its bananapayserver binding (`DONATIONS`): the page then takes real donations through its own address (`donations.useOrigin`), and until then stays simulated.
 - The session is touched at most once every ten minutes, so reading it is not a write per request.
 - `PATCH /api/me` with `{ "display": "…" }` sets the in-game name: the character set of `donations.sanitize`, 3–24 characters.
 - A cron at 04:00 UTC deletes expired sessions; they are refused on read before that anyway.

@@ -185,6 +185,11 @@
     e.currentTarget.blur();
     if (active && active.id !== "hub") go("hub");
   });
+  // In real mode the island's donation dialog sends a tip to the Lightning Factory's kiosk (hud.js closes the dialog):
+  // from any other scene to the Factory, which opens the kiosk on arrival; in the Factory its own `kiosk` action does.
+  document.querySelector('[data-action="kiosk"]').addEventListener("click", () => {
+    if (active && active.id !== "factory") go("factory", "kiosk");
+  });
   const agentPlay = BL.agent.createPlay();
   const ctx = { renderer, canvas: sceneCanvas, overlay: overlayCanvas, game, world, go, lootEnabled: LOOT_ENABLED, testBananas: TEST_BANANAS, agentPlay, from: null, place: null };
   const sceneSections = [...document.querySelectorAll("[data-scene]")];
@@ -346,6 +351,9 @@
     elapsed += dt;
     if (transition) stepTransition(dt);
     sceneTime += dt;
+    // In real mode the API owns the pile, so every browser shows the same one: its last count less what has been
+    // eaten since it arrived, in whole bananas.
+    if (pileFeed.at) world.level = Math.min(pileMod.MAX_BANANAS, Math.max(0, Math.floor(pileFeed.bananas - pileFeed.eatPerHour * (performance.now() - pileFeed.at) / 36e5)));
     active.update(dt, sceneTime);
     if (POSITION_DEBUG && active.id !== "hub" && elapsed >= positionDebugNext) {
       positionDebugNext = elapsed + 0.1;
@@ -490,7 +498,20 @@
     mempool.setHidden(true);
     chain.setHidden(true);
   }
-  const unsubscribeDonations = donations.subscribe((donation) => { if (active) active.onDonation(donation); }, { identity: () => game.state });
+  // Each donation goes to the active scene with the API's banana count (null when simulated); in real mode the pile
+  // follows the API's. The page's own Worker turns real mode on in the account's look at /api/me, so the subscription
+  // waits for that look (bounded, as the boot's wait is) and a page about to go real never plays a simulated tip. A
+  // donation pushed while the first scene is still being built has no scene to land in.
+  const pileFeed = { bananas: 0, eatPerHour: 0, at: 0 };
+  let unsubscribeDonations = null;
+  accountReady.then(() => {
+    if (destroyed) return;
+    if (net.state.donations) donations.useOrigin();
+    unsubscribeDonations = donations.subscribe((donation, bananas) => { if (active) active.onDonation(donation, bananas); }, {
+      identity: () => game.state,
+      onPile: ({ bananas, eatPerHour }) => Object.assign(pileFeed, { bananas, eatPerHour, at: performance.now() })
+    });
+  });
   // The feed panel: the Konami code toggles a page-wide readout of the socket, its counters and its last events.
   // It subscribes and ticks only while open, and its text nodes change only with their value.
   const KONAMI = ["ArrowUp", "ArrowUp", "ArrowDown", "ArrowDown", "ArrowLeft", "ArrowRight", "ArrowLeft", "ArrowRight", "b", "a"];
@@ -617,7 +638,7 @@
     destroyed = true;
     window.cancelAnimationFrame(raf);
     window.clearInterval(housekeepTimer);
-    unsubscribeDonations();
+    if (unsubscribeDonations) unsubscribeDonations();
     unsubscribeBlockFeed();
     unsubscribeBlockHeight();
     feedPanel.close();

@@ -18,6 +18,15 @@
 //   Foundry's hourly summary, which is labelled as Foundry's.
 // - The rebalancer spins for a rebalance, and never touches a line.
 // - The treasury's gold is the node's public capacity; its belt carries each of the demo node's fees to the crate.
+// - The banana cooker takes the tips, which are not the node's events and never ride a line: the core flashes green
+//   and throws a tip's lime sats across the hall (in through the way out while the node is stopped), the jaw swallows
+//   them, the cooker chews, and the bananas slide down its chute and fly out through the gate to the island, where the
+//   level already counts them. Its board counts tips and bananas for the page, labelled simulated, and never names a
+//   donor or a time. The rebalancer, the treasury and the cooker stand in a row on one platform along the right wall.
+// - The donation kiosk built into the right wall at the walkway's end runs the whole simulated donation on its screen
+//   (`factory-kiosk.js`): an amount, its quote in bananas, an invoice with its QR and expiry, the wait and the payment,
+//   which sends the view round to watch the cooker take that very tip. A tip from the island's dialog turns the view to
+//   the show too.
 // - The watchtower's beam sweeps while the feed is live and goes dark when it falls silent: that is "no
 //   signal", which is not the same as the node stopping.
 // - The galleries under the vault hold the lines past the featured four; the study hall is locked for now.
@@ -27,7 +36,7 @@
 (() => {
   "use strict";
   const BL = window.BL = window.BL || {};
-  const { math, models, contributors, game: gameMod, hud: hudMod, interact: interactMod, pilot: pilotMod, fx: fxMod } = BL;
+  const { math, models, contributors, donations, qr, pile: pileMod, game: gameMod, hud: hudMod, interact: interactMod, pilot: pilotMod, fx: fxMod } = BL;
   const FM = BL.factoryModels;
   const { clamp, mat4 } = math;
   const { createNode, addChild, removeChild, createCamera, stepTweens, tweenCount, traverseVisible } = BL.scene;
@@ -56,8 +65,13 @@
     lineA: bay(0), lineB: bay(1), lineC: bay(2), lineD: bay(3),
     forge: view(0, 2.2, 1.5, 0.75, 0.22, 10),
     switchboard: view(-12, 4, 6, 0.55, 0.22, 9),
-    rebalancer: view(14, 4.6, 4.2, -0.8, 0.3, 10),
-    treasury: view(13.5, 5, 20, -0.3, 0.25, 10),
+    rebalancer: view(14, 4.6, 5, -0.8, 0.3, 10),
+    // The nav's Treasury frames the whole platform: the rebalancer, the treasury and the cooker in a row.
+    treasury: view(13.2, 3.6, 12.6, -0.7, 0.52, 15.5),
+    cooker: view(13.75, 4, 19.9, -1.45, 0.28, 9),
+    // After a tip from the dialog: from over the kiosk, down on the cooker's jaw with the core beyond it, the bananas
+    // flying off to the left toward the way out.
+    show: view(11.2, 5.7, 18.2, 0.848, 0.38, 12),
     lookout: view(-16, 19, -14, 0.7, 0.15, 14),
     study: view(19, 8.6, 12, -Math.PI / 2 + 0.2, 0.2, 11),
     galleries: view(4, 17, -16, 0, 0.14, 17)
@@ -100,6 +114,30 @@
   // forward's stream, of a very large one's, of a failed forward, and the lead sat, whose arrival sets off the surge.
   const SATS_FOR = { dust: 1, small: 1, medium: 2, large: 10, very_large: 18 };
   const BIG = 1, HUGE = 2, FAILED = 4, LEAD = 8;
+  // The banana cooker's show. Each tip waits its turn in a short ring as a batch of lime cubes, one a banana: with the
+  // node running the core flashes green and throws them from its chamber's side, CUBE_GAP apart after LIME_LEAD; with
+  // it stopped they come in through the way out. The jaw springs open to catch them, gulping as each lands, and snaps
+  // shut once the last is in; the cooker chews CHOMPS times over CHURN, and the bananas leave by the chute FRUIT_GAP
+  // apart, each sliding down it for SLIDE and thrown from its lip to the gate's shield, which ripples as it goes through.
+  // Every throw falls under gravity SHOW_G. The kiosk's screen thanks the tipper while the cooker works and for THANKS
+  // after. The jaw's spring steps at most LID_STEP, so it holds at any frame rate.
+  const TIP_RING = 8, CUBE_CAP = 32, FRUIT_CAP = 32, CUBE_GAP = 0.12, FRUIT_GAP = 0.16, LIME_LEAD = 0.45, GATE_LEAD = 0.2, CHURN = 2.6, SLIDE = 0.34;
+  const CHOMPS = 4, THANKS = 3, LID_STEP = 1 / 120;
+  const CATCH = 1, CLOSE = 2, COOKING = 3, FRUIT_SCALE = 0.62, SHOW_G = 9, LIME = [0.45, 1, 0.3];
+  // The kiosk while a visitor works it: the view glides in square to its glass (AT_KIOSK) over EASE, the glass filling
+  // FILL_H of the view's height or FILL_W of its width, and back out (LEAVING); after a payment it glides over
+  // WATCH_EASE to the show (WATCHING), where the cooker takes the tip WATCH_LEAD into the glide, and comes back
+  // WATCH_AFTER after the last banana is out.
+  const AT_KIOSK = 1, LEAVING = 2, WATCHING = 3, EASE = 0.8, WATCH_EASE = 1.6, WATCH_LEAD = 0.7, WATCH_AFTER = 2, FILL_H = 0.76, FILL_W = 0.92;
+  // How near the kiosk the walking visitor is told how to use it: the reach Space uses it from (the crew's REACH + 0.6).
+  const KIOSK_HINT = 2.2;
+  const SPARKS_LIME = ["#b6ff5a", "#e8ffb0", "#6fe03a"].map((c) => models.particleGeometry(c, 0.1, 1));
+  const SMOKE = models.particleGeometry("#b9b1a6", 0.3, 0.1);
+  // A throw from s to e over an apex at height `apex`, solved once a visit.
+  const toss = (sx, sy, sz, ex, ey, ez, apex) => {
+    const vy = Math.sqrt(2 * SHOW_G * (apex - sy)), T = vy / SHOW_G + Math.sqrt(2 * (apex - ey) / SHOW_G);
+    return { sx, sy, sz, ex, ey, ez, vy, T };
+  };
   const TIPS = {
     core: ["Node core · this Lightning node", "The node core is the Lightning node itself: lit while it runs, dark when it stops."],
     line: ["Line · a Lightning channel", "Each line is a channel to one peer. Blue flashes when a payment passes through it, orange when one fails."],
@@ -109,6 +147,8 @@
     switchboard: ["Switchboard · routing", "Every payment the node passes on for someone else is a forward. The screens light as they go through."],
     rebalancer: ["Rebalancer · moving liquidity", "Rebalancing moves sats between channels so lines keep working. It is shown by the hour, never for one line."],
     treasury: ["Treasury · routing fees", "The gold under the glass is the node's public capacity, visible to anyone on the Lightning network. Each forward that earns the demo node a fee sends a nugget up the belt into the crate."],
+    cooker: ["Banana cooker · tips into bananas", "Every tip is cooked here: the core throws its sats across, the cooker chomps and churns, and the bananas fly out through the gate to the island."],
+    kiosk: ["Donation kiosk · tip the Ooga Boogas", "Walk up and press Space, or tap it: pick an amount, pay its invoice and watch the cooker turn it into bananas.", true],
     lookout: ["Watchtower · the node's signal", "The beam sweeps while the node's events are arriving. Dark means no signal: the node may be fine, but nothing is getting through."],
     study: ["Study Hall · locked", "Bananas first! The study hall opens in a later update."],
     tunnel: ["Peer tunnel", "Through here lives the peer at the other end of a line."],
@@ -122,7 +162,7 @@
   // The Ooga the visitor walked in as: one playable actor from the shared crew, and the world it carries.
   let people = null, avatar = null, playerWorld = null, unsubscribeAccount = null, remotes = null;
   const NO_ACTORS = [];
-  let scene = null, greeter = null, greeterPrompt = false;
+  let scene = null, greeter = null, actPrompt = false;
   // On the Worker's page the island's driving rules hold in here too, and the Ooga driven is reported to the
   // room every frame, so signed-in players in the hall hear each other (voice needs a driven Ooga).
   const mayPossess = (cave) => BL.net.mayDrive(cave.traits.name, contributors.stateFor(cave.contributor) === "working");
@@ -139,6 +179,20 @@
   const targets = [];
   const SAT_POS = { x: 0, y: 0, z: 0 }, SAT_ROT = { x: 0, y: 0, z: 0 }, SAT_SCALE = { x: 1, y: 1, z: 1 };
   const SAT_M = mat4.create();
+  // The cooker's own scratch: the sats' loop leaves SAT_ROT.x and .z at 0 and relies on it.
+  const SHOW_POS = { x: 0, y: 0, z: 0 }, SHOW_ROT = { x: 0, y: 0, z: 0 }, SHOW_SCALE = { x: 1, y: 1, z: 1 }, SHOW_M = mat4.create();
+  // Where a throw is `t` seconds in, into SHOW_POS: (ax, ay, az) offsets its start, fading out, and (bx, by, bz) its end.
+  const flight = (A, t, ax, ay, az, bx, by, bz) => {
+    const u = t / A.T, v = 1 - u;
+    SHOW_POS.x = A.sx + (A.ex - A.sx) * u + ax * v + bx * u;
+    SHOW_POS.y = A.sy + A.vy * t - 0.5 * SHOW_G * t * t + ay * v + by * u;
+    SHOW_POS.z = A.sz + (A.ez - A.sz) * u + az * v + bz * u;
+  };
+  const putShow = (data, at, highlight) => {
+    mat4.fromTRS(SHOW_M, SHOW_POS, SHOW_ROT, SHOW_SCALE);
+    data.set(SHOW_M, at);
+    data[at + 16] = 1; data[at + 17] = highlight; data[at + 18] = 0; data[at + 19] = 0;
+  };
   const PEER_ROTATION = math.quat.create();
 
   // The dressing: crates and coal by the forge, a gauge by the switchboard, and vines over the way
@@ -175,13 +229,15 @@
       const lx = s * 3.3, lz = 0.8, c = Math.cos(t.turn), sn = Math.sin(t.turn);
       lamps.push(["hang", t.x + lx * c + lz * sn, t.y + 5.9, t.z - lx * sn + lz * c]);
     }
-    // Two from the study hall's header, which faces -x.
+    // Two from the study hall's header, which faces -x, two on chains either side of the donation kiosk, and two from
+    // the ends of the donations board's top beam.
     for (const [lx, ly, lz] of FM.STUDY.lamps) lamps.push(["hang", L.study.x - lz, L.study.y + ly, L.study.z + lx]);
+    if (FM.donationCorner()) for (const [x, y, z] of [...FM.KIOSK.hooks, ...FM.BOARD.hooks]) lamps.push(["hang", x, y, z]);
     lamps.push(["post", L.switchboard.x + 3.1, L.switchboard.y, L.switchboard.z - 1.9, Math.PI]);
     // Two from the arms at the ends of each forge shaft's header.
     for (const [x, z] of FM.SHAFTS) for (const s of [-1, 1]) lamps.push(["hang", x + s * 1.7, 2.76, z - 0.2]);
-    // Two from each of the rebalancer's and the treasury's signs.
-    for (const [d, spots] of [[L.rebalancer, FM.REB.lamps], [L.treasury, FM.TRE.lamps]]) for (const [x, y, z] of spots) lamps.push(["hang", d.x + x, d.y + y, d.z + z]);
+    // Two from each of the rebalancer's, the treasury's and the cooker's signs.
+    for (const [d, spots] of [[L.rebalancer, FM.REB.lamps], [L.treasury, FM.TRE.lamps], [L.cooker, FM.COOK.lamps]]) for (const [x, y, z] of spots) lamps.push(["hang", d.x + x, d.y + y, d.z + z]);
     const [[w0, w1, a0], [s0, , s1]] = L.walk;
     onRail(w0, a0 + 0.1, w1, a0 + 0.1, e.y, [0.2, 0.5, 0.8]);
     onRail(s0 + 0.1, a0, s0 + 0.1, s1, e.y, [0.1, 0.3, 0.5, 0.7, 0.9]);
@@ -340,6 +396,458 @@
     fx.burst(c.x, c.chamber[1] + 4.4, c.z, flags & HUGE ? 26 : 16, SURGE_SPARKS, 3);
   };
 
+  // A tip's cubes wait their turn; with the ring full they join the last tip's.
+  const cook = (s, n, sats) => {
+    if (s.tipCount < TIP_RING) {
+      const i = (s.tipHead + s.tipCount++) % TIP_RING;
+      s.tipN[i] = n;
+      s.tipSats[i] = sats;
+    } else {
+      const last = (s.tipHead + TIP_RING - 1) % TIP_RING;
+      s.tipN[last] += n;
+      s.tipSats[last] += sats;
+    }
+  };
+  // The core taking a tip: one lime ring climbs the chamber, fatter and slower than a surge's white three.
+  const limeFrame = (s, dt) => {
+    s.lime = Math.max(0, s.lime - dt * 0.8);
+    if (s.limeT < 0) return;
+    const p = (s.limeT += dt) / 1.1, r = s.limeRing, lo = LAYOUT.core.chamber[0], hi = LAYOUT.core.chamber[1];
+    r.visible = p < 1;
+    if (!r.visible) { s.limeT = -1; return; }
+    r.position.y = lo - 0.2 + (hi - lo + 0.8) * p * (2 - p);
+    r.scale.x = r.scale.z = 1 + 0.2 * Math.sin(p * Math.PI);
+    r.scale.y = 1 + 0.9 * (1 - p);
+  };
+  // The cooker, once a frame: a waiting tip starts when the cooker is idle, its cubes fly into the open jaw, the jaw
+  // shuts and the cooker chews, and the bananas leave by the chute for the gate. The tally counts a tip as the jaw
+  // shuts on it and each banana as it goes through the shield.
+  const cookerFrame = (s, dt, elapsed, running) => {
+    const c = s.cook, q = s.cubes, f = s.fruit, ey = LAYOUT.entrance.y, ripples = s.gate.phase.ripples;
+    if (c.phase === 0 && s.tipCount) {
+      c.owed = c.batch = s.tipN[s.tipHead];
+      c.caught = 0;
+      c.sats = s.tipSats[s.tipHead];
+      s.tipHead = (s.tipHead + 1) % TIP_RING;
+      s.tipCount--;
+      c.src = running ? 0 : 1;
+      c.gap = running ? LIME_LEAD : GATE_LEAD;
+      c.phase = CATCH;
+      if (running) {
+        s.lime = 1;
+        s.limeT = 0;
+        fx.burst(s.tossCore.sx, s.tossCore.sy, s.tossCore.sz, 14, SPARKS_LIME, 2.6);
+      }
+      nudge(s, s.cookCrew);
+    }
+    // The cubes leave CUBE_GAP apart; with the pool full, one goes straight into the pot.
+    if (c.owed > 0 && (c.gap -= dt) <= 0) {
+      c.owed--;
+      c.gap = CUBE_GAP;
+      let i = 0;
+      while (i < CUBE_CAP && q.t[i] >= 0) i++;
+      if (i === CUBE_CAP) c.load++;
+      else {
+        const gate = c.src === 1, A = gate ? s.tossGate : s.tossCore;
+        q.t[i] = 0;
+        q.src[i] = c.src;
+        q.spin[i] = Math.random() * 6.28;
+        q.jx[i] = (Math.random() - 0.5) * (gate ? 2.4 : 0.5);
+        q.jy[i] = (Math.random() - 0.5) * (gate ? 1.2 : 0.5);
+        q.jz[i] = gate ? 0 : (Math.random() - 0.5) * 0.5;
+        if (gate) ripples.pulse(A.sx + q.jx[i], A.sy + q.jy[i] - ey, 0);
+        else {
+          s.lime = Math.max(s.lime, 0.7);
+          fx.spawnParticle(SPARKS_LIME[i % 3], A.sx, A.sy, A.sz, (Math.random() - 0.5) * 1.2, 0.6 + Math.random(), (Math.random() - 0.5) * 1.2, 0.6);
+        }
+      }
+    }
+    // In the air: tumbling, shrinking into the mouth over the last stretch, each landing with a gulp.
+    const cd = s.cubeNode.instanceData;
+    let n = 0, flying = 0;
+    for (let i = 0; i < CUBE_CAP; i++) {
+      if (q.t[i] < 0) continue;
+      const A = q.src[i] ? s.tossGate : s.tossCore, t = q.t[i] += dt;
+      if (t >= A.T) { q.t[i] = -1; c.load++; c.caught++; c.kick = 1; continue; }
+      flying++;
+      flight(A, t, q.jx[i], q.jy[i], q.jz[i], 0, 0, 0);
+      SHOW_ROT.x = q.spin[i] + t * 7; SHOW_ROT.y = q.spin[i] + t * 4; SHOW_ROT.z = 0;
+      const k = Math.min(1, (A.T - t) / 0.25);
+      SHOW_SCALE.x = SHOW_SCALE.y = SHOW_SCALE.z = 0.2 + 0.8 * k * k * (3 - 2 * k);
+      putShow(cd, n++ * 20, 0);
+    }
+    s.cubeNode.instanceCount = n;
+    s.cubeNode.visible = n > 0;
+    s.cubeNode.instanceVersion++;
+    // The jaw on a spring: it opens wide with a wobble while cubes are owed or flying, dips as each lands, and snaps
+    // shut once the last is in, with a gulp; shut, the cooker chews.
+    if (c.phase === CATCH && c.owed === 0 && flying === 0) c.phase = CLOSE;
+    const wide = c.phase === CATCH, k = wide ? 60 : 320, damp = wide ? 8.5 : 8;
+    for (let h = dt; h > 1e-6; h -= LID_STEP) {
+      const e = Math.min(h, LID_STEP);
+      c.lidV += (k * ((wide ? 1 : 0) - c.lid) - damp * c.lidV) * e;
+      c.lid += c.lidV * e;
+      if (c.lid < 0) c.lid = c.lidV = 0;
+    }
+    c.kick = Math.max(0, c.kick - dt * 5);
+    c.gulp = Math.max(0, c.gulp - dt * 3);
+    c.spit = Math.max(0, c.spit - dt * 8);
+    const chomp = c.phase === COOKING ? Math.sin(Math.PI * CHOMPS * (1 - c.t / CHURN)) ** 2 : 0;
+    s.lid.rotation.z = -(FM.COOK.open * c.lid * (1 - 0.12 * c.kick) + 0.2 * chomp);
+    // The sats it has caught heap on its tongue until it swallows them; it squashes as it gulps, chews and spits.
+    s.heap.visible = (wide || c.phase === CLOSE) && c.caught > 0 && c.lid > 0.15;
+    if (s.heap.visible) s.heap.scale.x = s.heap.scale.y = s.heap.scale.z = (0.4 + 0.6 * Math.min(1, c.caught / Math.max(1, c.batch))) * Math.min(1, c.lid * 1.4);
+    const squash = 0.05 * c.kick + 0.08 * c.gulp + 0.035 * c.spit + 0.025 * chomp;
+    s.chest.scale.y = 1 - squash;
+    s.chest.scale.x = s.chest.scale.z = 1 + squash * 0.5;
+    if (c.phase === CLOSE && c.lid <= 0) {
+      c.phase = COOKING;
+      c.t = CHURN;
+      c.gulp = 1;
+      shared.cooker.tips++;
+      shared.cooker.last = c.sats;
+      s.refreshAt = 0;
+      const lip = s.lidLip;
+      for (let k = 0; k < 6; k++) fx.spawnParticle(SPARKS[k % 3], lip.x, lip.y, lip.z + (Math.random() - 0.5) * 1.6, -0.5 - Math.random(), 1 + Math.random(), (Math.random() - 0.5) * 2, 0.7, 6, 3.2, LAYOUT.cooker.y);
+    }
+    if (c.phase === COOKING && (c.t -= dt) <= 0) {
+      c.phase = 0;
+      c.out += c.load;
+      c.load = 0;
+      c.outGap = 0;
+    }
+    // The churn: gears, a shudder, the porthole lit, smoke up the stack, and the treasury's light borrowed to pulse here.
+    const churn = c.phase === COOKING;
+    c.heat += ((churn ? 1 : 0) - c.heat) * Math.min(1, dt * (churn ? 4 : 1.5));
+    c.spin += ((churn ? 7 : 0) - c.spin) * Math.min(1, dt * 2.5);
+    const ga = s.gears[0], gb = s.gears[1], G = FM.COOK.gears;
+    ga.rotation.x = (ga.rotation.x + c.spin * dt) % (Math.PI * 2);
+    gb.rotation.x = -ga.rotation.x * G[0][4] / G[1][4] + Math.PI / G[1][4];
+    s.chest.position.x = churn ? Math.sin(elapsed * 41) * 0.012 : 0;
+    const port = FM.cookerPort(), pg = (churn ? Math.sin(elapsed * 23) > -0.6 : c.kick > 0.3) ? port.lit : port.dim;
+    if (s.port.geometry !== pg) s.port.geometry = pg;
+    if (churn && (c.smoke -= dt) <= 0) {
+      c.smoke = 0.08;
+      const p = fx.spawnParticle(SMOKE, s.stackTop.x + (Math.random() - 0.5) * 0.12, s.stackTop.y, s.stackTop.z + (Math.random() - 0.5) * 0.12, (Math.random() - 0.5) * 0.3, 0.9 + Math.random() * 0.5, (Math.random() - 0.5) * 0.3, 1.8 + Math.random() * 0.7, 1.2);
+      if (p) p.smoke = true;
+    }
+    const Lt = RENDER_OPTS.lights, B = LIGHT_BASE, o = LIGHT.treasury * 8, h = c.heat < 1e-3 ? 0 : c.heat, beat = h * (0.8 + 0.35 * Math.sin(elapsed * 13)), P = s.cookLight;
+    Lt[o] = B[o] + (P.x - B[o]) * h; Lt[o + 1] = B[o + 1] + (P.y - B[o + 1]) * h; Lt[o + 2] = B[o + 2] + (P.z - B[o + 2]) * h;
+    Lt[o + 4] = B[o + 4] * (1 - h) + 1.3 * beat; Lt[o + 5] = B[o + 5] * (1 - h) + 0.75 * beat; Lt[o + 6] = B[o + 6] * (1 - h) + 0.25 * beat;
+    // Bananas out by the chute FRUIT_GAP apart: each slides down it, is thrown from its lip to the shield and ripples it
+    // going through. With the pool full, the next waits its turn.
+    if (c.out > 0 && (c.outGap -= dt) <= 0) {
+      let i = 0;
+      while (i < FRUIT_CAP && f.t[i] >= 0) i++;
+      if (i < FRUIT_CAP) {
+        c.out--;
+        c.outGap = FRUIT_GAP;
+        f.t[i] = 0;
+        f.jx[i] = (Math.random() - 0.5) * 2.2;
+        f.jy[i] = (Math.random() - 0.5) * 1.1;
+        f.spin[i] = Math.random() * 6.28;
+      }
+    }
+    const fd = s.fruitNode.instanceData, A = s.tossOut, H = s.hatchW;
+    let m = 0;
+    for (let i = 0; i < FRUIT_CAP; i++) {
+      if (f.t[i] < 0) continue;
+      const t = f.t[i] += dt;
+      if (t < SLIDE) {
+        const k = t / SLIDE, u = k * k;
+        SHOW_POS.x = H.x + (A.sx - H.x) * u; SHOW_POS.y = H.y + (A.sy - H.y) * u; SHOW_POS.z = H.z + (A.sz - H.z) * u;
+        SHOW_SCALE.x = SHOW_SCALE.y = SHOW_SCALE.z = FRUIT_SCALE * Math.min(1, 0.4 + k * 2);
+      } else if (t - SLIDE >= A.T) {
+        f.t[i] = -1;
+        ripples.pulse(A.ex + f.jx[i], A.ey + f.jy[i] - ey, 0);
+        shared.cooker.bananas++;
+        continue;
+      } else {
+        // Off the lip: the cooker spits, and a puff of steam follows it out.
+        if (t - dt < SLIDE) {
+          c.spit = 1;
+          const p = fx.spawnParticle(SMOKE, A.sx, A.sy + 0.1, A.sz, (Math.random() - 0.5) * 0.4, 0.5 + Math.random() * 0.3, (Math.random() - 0.5) * 0.4, 0.8, 0.9);
+          if (p) p.smoke = true;
+        }
+        flight(A, t - SLIDE, 0, 0, 0, f.jx[i], f.jy[i], 0);
+        SHOW_SCALE.x = SHOW_SCALE.y = SHOW_SCALE.z = FRUIT_SCALE;
+      }
+      SHOW_ROT.x = 0; SHOW_ROT.y = s.outYaw; SHOW_ROT.z = f.spin[i] + t * 9;
+      putShow(fd, m++ * 20, 0.35);
+    }
+    s.fruitNode.instanceCount = m;
+    s.fruitNode.visible = m > 0;
+    s.fruitNode.instanceVersion++;
+    // The kiosk: its screen thanks the tipper in place of its attract screen while the cooker works and a moment
+    // after, and its lights breathe, quicker and brighter then.
+    s.thanks = c.phase || s.tipCount || c.out || m ? THANKS : Math.max(0, s.thanks - dt);
+    if (!s.corner) return;
+    const thanking = s.thanks > 0;
+    s.kioskThanks.visible = thanking;
+    s.kioskIdle.visible = !thanking;
+    s.kioskGlow.glow = thanking ? 1.3 + 0.25 * Math.sin(elapsed * 9) : 0.92 + 0.08 * Math.sin(elapsed * 2.2);
+  };
+  // Leaving mid-show, the tips still on their way count as cooked and their bananas as gone out to the island, where
+  // the level already holds them.
+  const settleCooker = (s) => {
+    const c = s.cook, t = shared.cooker;
+    let bananas = c.owed + c.load + c.out, tips = c.phase === CATCH || c.phase === CLOSE ? 1 : 0;
+    for (let i = 0; i < CUBE_CAP; i++) if (s.cubes.t[i] >= 0) bananas++;
+    for (let i = 0; i < FRUIT_CAP; i++) if (s.fruit.t[i] >= 0) bananas++;
+    for (let k = 0; k < s.tipCount; k++) {
+      const i = (s.tipHead + k) % TIP_RING;
+      bananas += s.tipN[i];
+      t.last = s.tipSats[i];
+      tips++;
+    }
+    if (tips && !s.tipCount) t.last = c.sats;
+    t.tips += tips;
+    t.bananas += bananas;
+  };
+
+  // The show for the checks: bananas still to come out of the cooker (waiting, owed, in the pot), those in the air,
+  // and the page's tally.
+  const cookerStats = (s) => {
+    const c = s.cook;
+    let queued = c.owed + c.load + c.out;
+    for (let k = 0; k < s.tipCount; k++) queued += s.tipN[(s.tipHead + k) % TIP_RING];
+    return { phase: c.phase, queued, cubes: s.cubeNode.instanceCount, bananas: s.fruitNode.instanceCount, out: shared.cooker.bananas, tips: shared.cooker.tips };
+  };
+
+  // ---- the kiosk, while a visitor works it ------------------------------------------------------------------------
+  // The view glides in square to the kiosk's glass and holds there, the visitor's Ooga and the side sheet out of the
+  // way, while the kiosk's flow is laid over the glass and takes the taps and keys; leaving, it glides back and hands
+  // the controls back. A paid tip waits on the screen for the visitor to watch it: the view then glides round to the
+  // show, the cooker takes the tip on the way, and the view comes back once the bananas are out or the visitor moves.
+  // Poses are an eye and a heading, eased by smoothstep with the heading turning the short way round.
+  const pose = () => ({ x: 0, y: 0, z: 0, yaw: 0, pitch: 0 });
+  const readPose = (out) => {
+    const p = camera.position, t = camera.target, dx = t.x - p.x, dy = t.y - p.y, dz = t.z - p.z;
+    out.x = p.x; out.y = p.y; out.z = p.z;
+    out.yaw = Math.atan2(dx, dz);
+    out.pitch = Math.atan2(dy, Math.hypot(dx, dz));
+  };
+  const copyPose = (out, a) => { out.x = a.x; out.y = a.y; out.z = a.z; out.yaw = a.yaw; out.pitch = a.pitch; };
+  const putPose = (a, b, k) => {
+    const e = k * k * (3 - 2 * k), yaw = a.yaw + Math.atan2(Math.sin(b.yaw - a.yaw), Math.cos(b.yaw - a.yaw)) * e;
+    const pitch = a.pitch + (b.pitch - a.pitch) * e, cp = Math.cos(pitch), p = camera.position, t = camera.target;
+    p.x = a.x + (b.x - a.x) * e; p.y = a.y + (b.y - a.y) * e; p.z = a.z + (b.z - a.z) * e;
+    t.x = p.x + Math.sin(yaw) * cp; t.y = p.y + Math.sin(pitch); t.z = p.z + Math.cos(yaw) * cp;
+  };
+  // Square on to the glass, from as far out as keeps it within FILL_H of the view's height and FILL_W of its width.
+  const glassPose = (out) => {
+    const G = FM.KIOSK.glass, N = G.normal, t = 2 * Math.tan(camera.fov / 2);
+    const d = Math.max(G.h / (FILL_H * t), G.w / (FILL_W * t * renderer.size.width / renderer.size.height));
+    out.x = G.at[0] + N[0] * d; out.y = G.at[1] + N[1] * d; out.z = G.at[2] + N[2] * d;
+    out.yaw = Math.atan2(-N[0], -N[2]);
+    out.pitch = Math.asin(-N[1]);
+  };
+  // Where the show is watched from: the `show` preset's eye and heading.
+  const SHOW_VIEW = (() => {
+    const v = PRESETS.show, cp = Math.cos(v.pitch);
+    return { x: v.target.x + Math.sin(v.yaw) * cp * v.dist, y: v.target.y + Math.sin(v.pitch) * v.dist, z: v.target.z + Math.cos(v.yaw) * cp * v.dist, yaw: v.yaw + Math.PI, pitch: -v.pitch };
+  })();
+  const glide = (b, mode, ease) => {
+    b.mode = mode;
+    b.t = 0;
+    b.ease = ease;
+    readPose(b.from);
+  };
+  // The visitor's Ooga and the side sheet step out of the screen's way, and back.
+  const boothAside = (s, aside) => {
+    const b = s.booth;
+    if (b.hidden === aside) return;
+    b.hidden = aside;
+    if (avatar) avatar.root.visible = !aside;
+    if (aside) {
+      b.sheet = hud.el.sheet.dataset.open;
+      hud.el.sheet.dataset.open = "false";
+    } else hud.el.sheet.dataset.open = b.sheet;
+  };
+  // The Ooga's controls (the act button, the aim's reticle and the equipment by the title) stay hidden while the kiosk
+  // has the view, and come back as they were.
+  const boothHud = (s, held) => {
+    const b = s.booth, reticle = document.getElementById("weapon-reticle"), equipment = document.getElementById("equipment-hud");
+    if (held) {
+      b.act = hud.el.act.hidden;
+      b.reticle = reticle.hidden;
+      b.equipment = equipment.hidden;
+      hud.el.act.hidden = reticle.hidden = equipment.hidden = true;
+    } else {
+      hud.el.act.hidden = b.act;
+      reticle.hidden = b.reticle;
+      equipment.hidden = b.equipment;
+    }
+  };
+  // The visitor's paid tip, into the cooker.
+  const releaseTip = (s) => {
+    const b = s.booth;
+    if (!b.held) return;
+    cook(s, b.held, b.heldSats);
+    b.held = b.heldSats = 0;
+  };
+  const openBooth = (s) => {
+    const b = s.booth;
+    if (b.mode) return;
+    readPose(b.home);
+    glide(b, AT_KIOSK, EASE);
+    glassPose(b.to);
+    // The screen needs the mouse: an aim's pointer lock lets it go, so the cursor shows and clicks land where it is.
+    pilot.setExternalControl(true);
+    if (document.pointerLockElement) document.exitPointerLock();
+    pilot.controls.clearPointer();
+    boothAside(s, true);
+    boothHud(s, true);
+    b.flow.start();
+    hud.tooltip.hide();
+    hud.hint(COARSE ? "Tap the screen · tap beside it to step away" : "Click or type on the screen · Enter goes on · Esc goes back");
+  };
+  const leaveBooth = (s) => {
+    const b = s.booth;
+    if (!b.mode || b.mode === LEAVING) return;
+    releaseTip(s);
+    b.flow.stop();
+    boothAside(s, false);
+    glide(b, LEAVING, EASE);
+    copyPose(b.to, b.home);
+  };
+  const watchBooth = (s) => {
+    const b = s.booth;
+    b.flow.stop();
+    boothAside(s, false);
+    glide(b, WATCHING, WATCH_EASE);
+    copyPose(b.to, SHOW_VIEW);
+    b.after = WATCH_AFTER;
+    hud.hint(COARSE ? "Watch the cooker · tap to walk on" : "Watch the cooker · any key or click to walk on");
+  };
+  // At once, for a preset or the scene's leave: the tip cooked, the Ooga back and the controls handed back.
+  const endBooth = (s) => {
+    const b = s.booth;
+    if (!b.mode) return;
+    releaseTip(s);
+    b.flow.stop();
+    boothAside(s, false);
+    boothHud(s, false);
+    b.mode = 0;
+    pilot.setExternalControl(false);
+  };
+  // Per frame, after the pilot: the flow's clocks and the glide. Watching, the cooker takes the tip WATCH_LEAD into
+  // the glide, and the view comes back WATCH_AFTER after the show or when the visitor moves. Walking up to the kiosk,
+  // the visitor is told how to use it, once each time they come within reach.
+  const boothFrame = (s, dt) => {
+    const b = s.booth;
+    if (s.corner && !b.mode && avatar && people.player === avatar) {
+      const p = avatar.root.position, U = FM.KIOSK.use;
+      const near = Math.abs(feetOf() - LAYOUT.kiosk.y) < 0.6 && Math.hypot(p.x - U[0], p.z - U[1]) < KIOSK_HINT;
+      if (near && !b.near) hud.hint(COARSE ? "Donation kiosk · tap it or the act button to donate" : "Donation kiosk · press Space to donate");
+      b.near = near;
+    }
+    if (!b.mode) return;
+    b.clock += dt;
+    b.flow.update(dt);
+    if (b.mode === AT_KIOSK) glassPose(b.to);
+    b.t = Math.min(1, b.t + dt / b.ease);
+    if (b.mode === WATCHING) {
+      if (b.held && b.t >= WATCH_LEAD) releaseTip(s);
+      const c = s.cook, done = !b.held && !c.phase && !s.tipCount && !c.out && !s.fruitNode.instanceCount, a = pilot.controls.read();
+      if (b.t >= 1 && (done && (b.after -= dt) <= 0 || Math.hypot(a.x, a.y) > 0.05)) leaveBooth(s);
+    }
+    putPose(b.from, b.to, b.t);
+    if (b.mode === LEAVING && b.t >= 1) {
+      boothHud(s, false);
+      b.mode = 0;
+      pilot.setExternalControl(false);
+    }
+  };
+  // At the kiosk, keys go to its screen once the view is in; watching, any key walks on. Space and Backspace never
+  // reach the page, and keys with a modifier are left to the browser.
+  const boothKey = (s, e) => {
+    const b = s.booth;
+    if (e.metaKey || e.ctrlKey || e.altKey) return false;
+    if (e.key === " " || e.key === "Backspace") e.preventDefault();
+    if (b.mode === WATCHING) leaveBooth(s);
+    else if (b.mode === AT_KIOSK && b.t >= 1) b.flow.key(e);
+    return true;
+  };
+  // The kiosk's flow laid over its glass: the four corners projected, one affine map fitted to them (the view is
+  // square on, so it is all but exact), the pixels unsmoothed, and what moves drawn over them. `BOOTH_MAP` keeps the
+  // map for taps. Allocation-free.
+  const BOOTH_MAP = { ux: 0, uy: 0, vx: 0, vy: 0, ex: 0, ey: 0, ok: false }, BOOTH_CORNER = [0, 1, 2, 3].map(() => ({ x: 0, y: 0, depth: 0 }));
+  const drawBooth = (ctx) => {
+    const s = scene, b = s.booth, M = BOOTH_MAP, C = s.glassCorners;
+    M.ok = false;
+    if (b.mode !== AT_KIOSK) return;
+    for (let k = 0; k < 4; k++) if (!renderer.project(C[k * 3], C[k * 3 + 1], C[k * 3 + 2], BOOTH_CORNER[k])) return;
+    const flow = b.flow, W = flow.W, H = flow.H, p = BOOTH_CORNER[0], q = BOOTH_CORNER[1], r = BOOTH_CORNER[2], u = BOOTH_CORNER[3];
+    M.ux = (q.x - p.x + u.x - r.x) / (2 * W); M.uy = (q.y - p.y + u.y - r.y) / (2 * W);
+    M.vx = (r.x - p.x + u.x - q.x) / (2 * H); M.vy = (r.y - p.y + u.y - q.y) / (2 * H);
+    M.ex = (p.x + q.x + r.x + u.x) / 4 - (M.ux * W + M.vx * H) / 2; M.ey = (p.y + q.y + r.y + u.y) / 4 - (M.uy * W + M.vy * H) / 2;
+    M.ok = true;
+    flow.paint();
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    ctx.setTransform(M.ux * dpr, M.uy * dpr, M.vx * dpr, M.vy * dpr, M.ex * dpr, M.ey * dpr);
+    ctx.imageSmoothingEnabled = false;
+    ctx.drawImage(flow.canvas, 0, 0);
+    ctx.imageSmoothingEnabled = true;
+    flow.animate(ctx, b.clock);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  };
+  // A tap or click: on the screen, its button; beside it, the visitor steps away (or, paid, goes to watch); watching,
+  // it walks on.
+  const boothTap = (s, at) => {
+    const b = s.booth, M = BOOTH_MAP;
+    if (b.mode === WATCHING) return leaveBooth(s);
+    if (b.mode !== AT_KIOSK || b.t < 1 || !M.ok) return;
+    const det = M.ux * M.vy - M.vx * M.uy, dx = at.x - M.ex, dy = at.y - M.ey;
+    const u = (dx * M.vy - dy * M.vx) / det, v = (dy * M.ux - dx * M.uy) / det;
+    if (u >= 0 && v >= 0 && u <= b.flow.W && v <= b.flow.H) b.flow.tap(u, v);
+    else if (b.flow.state === "paid") watchBooth(s);
+    else leaveBooth(s);
+  };
+
+  // Whatever shows donations as real or simulated, for the mode they are in now: the kiosk's attract picture (this
+  // visit's donation link as its QR, the one the dialog shows, or in real mode, with no fixed link, this site's own
+  // Factory address, which opens the cave on a phone), its screen flow (simulated, each invoice a fresh donation request
+  // and its payment this visitor's tip in the backend's shape; real, the API's invoices) with the screens' way out to
+  // the show and back to the walk, and the donations board's face. Set in `enter`, and again from `update` when the
+  // page's Worker turns real mode on after the visit has begun, when a visitor at the kiosk starts over on the new flow,
+  // or when the API names a test network, which only the pictures need: the flow reads it as it goes.
+  const showMode = (s) => {
+    const real = donations.real, net = donations.testNetwork, link = real ? `${location.origin}/lightning` : s.donationLink, b = s.booth;
+    if (!s.corner) {
+      s.real = real;
+      s.net = net;
+      return;
+    }
+    s.kioskIdle.geometry = FM.kioskIdle(link, net);
+    s.boardNote = !real ? "SIMULATED · THIS BROWSER'S TIPS" : net ? `${net.toUpperCase()} TEST · ALL DONATIONS` : "ALL DONATIONS";
+    s.boardFace.geometry = FM.boardFace(s.boardNote);
+    s.net = net;
+    if (s.real === real) return;
+    s.real = real;
+    b.flow = BL.factoryKiosk.create({
+      link: () => link,
+      real,
+      invoice: (sats, anon) => donations.invoice({ sats, message: game.state.message, anon }),
+      open: () => donations.state.open,
+      testNetwork: () => donations.testNetwork,
+      account: () => BL.net.state,
+      signIn: () => BL.net.login(),
+      request: () => donations.createRequest(game.state),
+      bananasFor: gameMod.bananasFor,
+      price: () => BL.chain.snapshot.priceUsd,
+      copy: (text) => {
+        if (navigator.clipboard) navigator.clipboard.writeText(text).catch(() => {});
+        hud.toast(real ? "Invoice copied" : "Invoice copied · payments are simulated in this build");
+      },
+      pay: (id, sats) => onDonation(tipEvent(id, sats)),
+      release: () => releaseTip(s),
+      watch: () => watchBooth(s),
+      close: () => leaveBooth(s)
+    });
+    if (b.mode === AT_KIOSK) b.flow.start();
+  };
+
   // A label hung at (x, y, z) under `parent`: the lettered face and the board behind it, which `setBoard` fills.
   const labelNode = (parent, x, y, z, turn = 0) => {
     const node = createNode({ position: { x, y, z }, rotation: { x: 0, y: turn, z: 0 } });
@@ -378,7 +886,67 @@
     node.back.geometry = d.back;
     node.owned = true;
   };
+  // The donations board's figures, each row a list of runs (`FM.boardValues`), repainted only when one changes, and
+  // whether they were; the node owns its picture and lets go of the one it replaces.
+  const setFigures = (node, rows) => {
+    const key = rows.map((runs) => runs.map((r) => r[0]).join("")).join("|");
+    if (node.printed === key) return false;
+    node.printed = key;
+    if (node.geometry) renderer.releaseGeometry(node.geometry);
+    node.geometry = FM.boardValues(rows);
+    return true;
+  };
   const sats = (n) => n.toLocaleString("en-US");
+  const bananaCount = (n) => n < 1e6 ? sats(n) : gameMod.formatLarge(n);
+  // A tip as the cooker's board shows it: two significant figures, then K, M and B from a thousand up.
+  const rounded = (n) => { const step = 10 ** Math.max(0, Math.floor(Math.log10(n)) - 1); return gameMod.formatLarge(Math.round(n / step) * step); };
+  // Local midnight `back` days before the day of `now`, from one Date kept for it.
+  const MIDNIGHT = new Date();
+  const localMidnight = (now, back) => {
+    MIDNIGHT.setTime(now);
+    MIDNIGHT.setHours(0, 0, 0, 0);
+    MIDNIGHT.setDate(MIDNIGHT.getDate() - back);
+    return MIDNIGHT.getTime();
+  };
+  // The donations board before the API's first tally reaches a real page.
+  const NO_TALLY = [[["NO READING YET", "note"]], [["-", "note"]], [["-", "note"]], [["-", "note"]], [["-", "note"]], [["-", "note"]]];
+  // The donations board's rows. Real, the API's tally of every donation it holds, the same in every browser: its
+  // totals, today and this week counted from its UTC hours by this page's clock, its latest price for a banana (a
+  // dollar's worth of bitcoin) and the latest donation's sats. Simulated, this browser's tips (the game's tally).
+  // Rounded either way, naming no one and no time.
+  const boardRows = () => {
+    if (!donations.real) {
+      const g = game.state, [todaySats, todayBananas] = game.tipsWithin(1), [weekSats, weekBananas] = game.tipsWithin(7);
+      return [
+        [[rounded(g.totalSats), "big"], [" SATS", "unit"]],
+        [[bananaCount(g.bananas), "big"]],
+        [[rounded(todaySats), "big"], [" SATS", "unit"], [` (${bananaCount(todayBananas)}`, "note"], ["", "banana"], [")", "note"]],
+        [[rounded(weekSats), "big"], [" SATS", "unit"], [` (${bananaCount(weekBananas)}`, "note"], ["", "banana"], [")", "note"]],
+        [[String(gameMod.SATS_PER_BANANA), "big"], [" SATS = 1", "unit"], ["", "banana"]],
+        g.lastTip ? [[rounded(g.lastTip), "big"], [" SATS", "unit"]] : [["NONE YET", "note"]]
+      ];
+    }
+    const t = donations.state.tally;
+    if (!t) return NO_TALLY;
+    const now = Date.now(), today = localMidnight(now, 0), week = localMidnight(now, 6), rate = t.rate;
+    let todaySats = 0, todayBananas = 0, weekSats = 0, weekBananas = 0;
+    for (const [at, hourSats, hourBananas] of t.hours) {
+      if (at < week) continue;
+      weekSats += hourSats;
+      weekBananas += hourBananas;
+      if (at >= today) { todaySats += hourSats; todayBananas += hourBananas; }
+    }
+    const price = rate ? [[sats(Math.round(rate.satsPerBanana)), "big"], [" SATS = 1", "unit"], ["", "banana"]] : [["NO PRICE YET", "note"]];
+    if (rate && rate.stale) price.push([" (LAST KNOWN)", "note"]);
+    return [
+      [[rounded(t.sats), "big"], [" SATS", "unit"]],
+      [[bananaCount(Math.round(t.bananas)), "big"]],
+      [[rounded(todaySats), "big"], [" SATS", "unit"], [` (${bananaCount(Math.round(todayBananas))}`, "note"], ["", "banana"], [")", "note"]],
+      [[rounded(weekSats), "big"], [" SATS", "unit"], [` (${bananaCount(Math.round(weekBananas))}`, "note"], ["", "banana"], [")", "note"]],
+      price,
+      t.last ? [[rounded(t.last), "big"], [" SATS", "unit"]] : [["NONE YET", "note"]]
+    ];
+  };
   const refreshBoards = (s) => {
     const r = feed.reading, signal = feed.signal;
     setBoard(s.lookoutLabel, "WATCHTOWER\nOUTPOST", signal === "live" ? (r.stream === "replay" ? "(Catching Up)" : "(Signal: Live)") : signal === "silent" ? "(No Signal)" : "(Waiting)", true);
@@ -394,6 +962,20 @@
     setBoard(s.switchLabel, "SWITCHBOARD", summary, false);
     const shown = s.placeOf.size, total = r.channels ?? snap.channelCount;
     setBoard(s.galleryLabel, "MORE CHANNELS", `${Math.max(0, total - 4)} lines, ${Math.max(0, total - shown)} not shown`, false);
+    // The cooker's board counts what it has cooked on this page, rounded, and never names a donor or a time.
+    const c = shared.cooker;
+    setData(s.cookBoard, !donations.real ? "DONATIONS (SIMULATED)" : donations.testNetwork ? "DONATIONS (TEST)" : "DONATIONS", [["Tips cooked", gameMod.formatLarge(c.tips), "count"], ["Bananas out", gameMod.formatLarge(c.bananas), "ok"], ["Last tip", c.last ? `${rounded(c.last)} sats` : "None yet", "sats"]], 1.9);
+    // The donations board, on the wall and, when its figures or its face change, in the board dialog's picture.
+    if (s.corner) {
+      const rows = boardRows(), view = s.boardView;
+      if (setFigures(s.boardValues, rows) || view.painted !== s.boardNote) {
+        view.painted = s.boardNote;
+        view.note = donations.real ? "Every donation bananapayserver holds, the same in every browser. A banana is a dollar's worth of bitcoin at its latest price."
+          : "The tips this browser has seen, simulated. Each browser counts its own.";
+        FM.paintBoard(view.canvas, s.boardNote, rows);
+        view.version++;
+      }
+    }
     // The core names what it is: a demo node on simulated events, until a real node publishes.
     setBoard(s.coreLabel, "NODE CORE", r.node === "stopped" ? "(Node Stopped)" : r.contract === BL.factoryFeed.DEMO ? "(Demo Node, Simulated)" : "(Your LN Node)", true, { height: 1.6 });
   };
@@ -404,10 +986,15 @@
     go("hub");
   };
   const onKey = (e) => {
+    if (scene.booth.mode) return boothKey(scene, e);
     if ((e.key === "x" || e.key === "X") && !e.repeat && pilot.modeAction("mode-toggle")) return true;
     if ((e.key === "1" || e.key === "2") && pilot.weaponMode(Number(e.key))) return true;
     if (e.key === "g" || e.key === "G") return pilot.weaponAction("weapon-toggle");
     if (e.key === "v" || e.key === "V") return pilot.weaponAction("weapon-fire");
+    if (e.key === "l" || e.key === "L") {
+      demoTip(120000);
+      return true;
+    }
     if (e.key === "Escape") {
       // The guide's open menu swallows Escape first; only with none up does Escape leave the cave.
       if (greeter && greeter.escape()) return true;
@@ -416,7 +1003,31 @@
     }
     return false;
   };
-  const onDonation = () => {};
+  // A tip, wherever the visitor stands in the hall: counted at once, its bananas on the shared level, thanked, and
+  // queued for the cooker, which turns it into those bananas before everyone's eyes.
+  // In real mode `counted` is the API's `{ exact, rounded }`: the donation counts its exact bananas (the pile itself
+  // follows the API's), and the cooker still cooks the game's one to twelve, a show of them.
+  const onDonation = (donation, counted = null) => {
+    game.recordDonation(donation, counted && counted.exact);
+    const bananas = gameMod.bananasFor(donation.sats), shown = counted ? counted.rounded : bananas;
+    world.level = Math.min(pileMod.MAX_BANANAS, world.level + (counted ? counted.exact : bananas));
+    const who = donation.handle ? `@${donation.handle}` : "anon";
+    hud.toast(`+${gameMod.formatLarge(donation.sats)} sats · ${gameMod.formatLarge(shown)} banana${shown === 1 ? "" : "s"} · ${who}`);
+    fx.showTicker(`THANKS ${donation.handle ? "@" + donation.handle.toUpperCase() : "ANON"} · ${gameMod.formatLarge(shown)} BANANAS`, 4.5);
+    hud.setStats(game.state);
+    // The visitor's own tip, paid at the kiosk, waits on its screen until they turn to watch it cook.
+    const b = scene.booth;
+    if (b.flow && b.flow.receive(donation.id, counted, donation.handle)) {
+      b.held += bananas;
+      b.heldSats += donation.sats;
+    } else cook(scene, bananas, donation.sats);
+  };
+  // A tip from this visitor, in the shape the backend will push. A demo tip is the simulation's alone: in real mode it
+  // would put a tip nobody paid on the boards.
+  const tipEvent = (id, sats) => ({ id, sats, handle: donations.sanitize(game.state.handle, donations.HANDLE_MAX), message: donations.sanitize(game.state.message, donations.MESSAGE_MAX), at: Date.now() });
+  const demoTip = (sats) => {
+    if (!donations.real) onDonation(tipEvent(`demo-${Date.now()}`, sats));
+  };
   const onLootCleared = () => {};
 
   const build = () => {
@@ -430,7 +1041,16 @@
       carts: [], inQueue: 0, inGap: 0, outQueue: 0, mintT: -1, coinD: -1, coinV: 0, trail: 0,
       flash: 0, flashKind: 0, waveT: -1, signTurn: 0, signPulse: 0, shaftGlow: [0, 0], shafts: [],
       // A big forward's surge through the node, and how long since it began (-1 idle).
-      surge: 0, surgeT: -1
+      surge: 0, surgeT: -1,
+      // The cooker: the core's green for a tip and its ring's time (-1 idle), the tips waiting their turn (bananas and
+      // sats each), and the show in hand: its stage, the jaw, a gulp's kick, the churn's time, what is in the pot,
+      // cubes still to throw and from where, bananas still to send out, the gears, the heat and the smoke.
+      lime: 0, limeT: -1, tipHead: 0, tipCount: 0, tipN: new Uint16Array(TIP_RING), tipSats: new Float64Array(TIP_RING),
+      thanks: 0, cook: { phase: 0, lid: 0, lidV: 0, kick: 0, gulp: 0, spit: 0, t: 0, load: 0, batch: 0, caught: 0, owed: 0, gap: 0, src: 0, sats: 0, out: 0, outGap: 0, spin: 0, heat: 0, smoke: 0 },
+      // The kiosk while a visitor works it: the glide, its poses (from, to, and the walking view to come back to), the
+      // visitor's paid tip held for the show, the states of the sheet and the Ooga's controls while put away, and the
+      // flow, which enter makes.
+      booth: { mode: 0, t: 0, ease: EASE, after: 0, clock: 0, near: false, hidden: false, sheet: "", act: true, reticle: true, equipment: false, held: 0, heldSats: 0, from: pose(), to: pose(), home: pose(), flow: null }
     };
     const hall = FM.hall(), cond = FM.conduits();
     s.ceiling = createNode({ geometry: hall.ceiling });
@@ -558,6 +1178,54 @@
     setBoard(labelNode(trNode, tsx, tsy, tsz), "TREASURY", "(Routing Fees)", true, { height: 1.15 });
     s.feeBoard = labelNode(trNode, tbl[0], tbl[1], tbl[2]);
     s.statsBoard = labelNode(trNode, tbr[0], tbr[1], tbr[2]);
+    // The cooker: a chest that squashes as it gulps and chews, holding its jaw on the hinge, the porthole, the gears and
+    // the heap of caught sats; the stack, chute and sign stand still round it, and the board of donations hangs under
+    // the sign.
+    const ck = L.cooker, COOK = FM.COOK, ckGeo = FM.cookerBody(), fix = FM.cookerFixtures(), ckNode = createNode({ position: { x: ck.x, y: ck.y, z: ck.z } });
+    s.chest = createNode();
+    const ckBody = createNode({ geometry: ckGeo.body });
+    s.lid = createNode({ position: { x: COOK.hinge[0], y: COOK.hinge[1], z: COOK.hinge[2] }, geometry: FM.cookerLid() });
+    s.port = createNode({ position: { x: COOK.port[0], y: COOK.port[1], z: COOK.port[2] }, rotation: { x: 0, y: -Math.PI / 2, z: 0 }, geometry: FM.cookerPort().dim });
+    s.gears = COOK.gears.map(([x, y, z, r, teeth]) => createNode({ position: { x, y, z }, geometry: FM.cookerGear(r, teeth) }));
+    s.heap = createNode({ position: { x: COOK.mouth[0], y: COOK.rim + 0.12, z: COOK.mouth[2] }, geometry: FM.cookerSats(), visible: false });
+    addChild(s.chest, ckBody, createNode({ geometry: ckGeo.glow }), s.lid, s.port, s.heap, ...s.gears);
+    addChild(ckNode, s.chest, createNode({ geometry: fix.body }), createNode({ geometry: fix.glow }));
+    const [csx, csy, csz] = COOK.sign, [cbx, cby, cbz] = COOK.board;
+    setBoard(labelNode(ckNode, csx + 0.45, csy, csz), "BANANA COOKER", "(Tips Into Bananas)", true, { height: 1 });
+    s.cookBoard = labelNode(ckNode, cbx, cby, cbz);
+    // The donation corner, where it stands (`FM.donationCorner`).
+    s.corner = FM.donationCorner();
+    let kioskNode = null, kioskBody = null, boardNode = null, boardBody = null;
+    if (s.corner) {
+      // The donation kiosk in the right wall at the walkway's end, facing back along it: its timber, its iron and lit
+      // parts, and the screen leaning back, showing its attract screen (enter hangs this visit's), or its thanks while
+      // the cooker works. The glass's corners in the cave's frame, for laying the flow over it.
+      const K = FM.KIOSK, G = K.glass, kiosk = FM.donationKiosk(), screen = FM.kioskScreen(), kp = L.kiosk;
+      kioskNode = createNode({ position: { x: kp.x, y: kp.y, z: kp.z }, rotation: { x: 0, y: kp.turn, z: 0 } });
+      kioskBody = createNode({ geometry: kiosk.timber });
+      const [sx0, sy0, sz0] = K.screen;
+      s.kioskScreen = createNode({ position: { x: sx0, y: sy0, z: sz0 }, rotation: { x: K.lean, y: 0, z: 0 } });
+      s.kioskIdle = createNode({ position: { x: 0, y: 0, z: G.z } });
+      s.kioskThanks = createNode({ position: { x: 0, y: 0, z: G.z }, geometry: FM.kioskThanks(), visible: false });
+      addChild(s.kioskScreen, createNode({ geometry: screen.frame }), createNode({ geometry: screen.glass }), s.kioskIdle, s.kioskThanks);
+      s.kioskGlow = createNode({ geometry: kiosk.glow });
+      addChild(kioskNode, kioskBody, createNode({ geometry: kiosk.iron }), s.kioskGlow, s.kioskScreen);
+      s.kiosk = kioskNode;
+      // The donations board between the study hall and the kiosk: its timber, iron, candles and ivy, the face painted once
+      // and its figures, which `refreshBoards` paints.
+      const BD = FM.BOARD, board = FM.donationBoard(), bp = L.board;
+      boardNode = createNode({ position: { x: bp.x, y: bp.y, z: bp.z }, rotation: { x: 0, y: bp.turn, z: 0 } });
+      boardBody = createNode({ geometry: board.timber });
+      s.boardFace = createNode({ position: { x: BD.face[0], y: BD.face[1], z: BD.face[2] } });
+      s.boardValues = createNode({ position: { x: BD.values[0], y: BD.values[1], z: BD.values[2] } });
+      addChild(s.boardFace, s.boardValues);
+      addChild(boardNode, boardBody, createNode({ geometry: board.iron }), createNode({ geometry: board.trim }), createNode({ geometry: board.glow }), s.boardFace);
+      // The board as the board dialog shows it, one picture of its face and figures that `refreshBoards` paints.
+      s.boardView = { title: "Banana Donation Board", help: "", canvas: document.createElement("canvas"), count: 1, index: 0, version: 0,
+        caption: "Banana Donation Board", note: "", painted: null, wide: true, go() {} };
+      s.glassCorners = [];
+      for (const [u, v] of [[-1, 1], [1, 1], [-1, -1], [1, -1]]) for (let i = 0; i < 3; i++) s.glassCorners.push(G.at[i] + G.right[i] * u * G.w / 2 + G.up[i] * v * G.h / 2);
+    }
     // The watchtower on the top deck: tower, lamp and the beam that sweeps round it.
     const lkNode = createNode({ position: { x: lk.x, y: lk.y, z: lk.z } });
     s.lamp = createNode({ position: { x: 0, y: lk.tower + 1, z: 0 }, rotation: { x: 0, y: 0, z: FM.LOOKOUT_BEAM.pitch }, geometry: FM.lookoutLamp().on });
@@ -579,7 +1247,27 @@
     const lesson = FM.studyBoard(), lessonNode = createNode({ position: { x: bx, y: by, z: bz }, rotation: { x: bLean, y: 0, z: 0 } });
     addChild(lessonNode, createNode({ geometry: lesson.back }), createNode({ geometry: lesson.face }));
     addChild(stNode, noteNode, lessonNode);
-    addChild(root, switchNode, rebNode, trNode, lkNode, stNode);
+    addChild(root, switchNode, rebNode, trNode, ckNode, lkNode, stNode);
+    if (s.corner) addChild(root, kioskNode, boardNode);
+    // The cooker's flying things, each an instanced batch of fixed capacity on its own geometry: the tips' cubes and the
+    // bananas; and the lime ring that climbs the core as it takes a tip.
+    s.cubeNode = createNode({ geometry: { ...FM.satCube() }, instanceData: new Float32Array(CUBE_CAP * 20), instanceCount: 0, instanceVersion: 0, fixedInstanceCapacity: true, sightHidden: true, visible: false });
+    s.fruitNode = createNode({ geometry: { ...FM.flyingBanana() }, instanceData: new Float32Array(FRUIT_CAP * 20), instanceCount: 0, instanceVersion: 0, fixedInstanceCapacity: true, sightHidden: true, visible: false });
+    s.limeRing = createNode({ position: { x: L.core.x, y: 0, z: L.core.z }, geometry: FM.coreRingLime(), visible: false, sightHidden: true });
+    addChild(root, s.cubeNode, s.fruitNode, s.limeRing);
+    s.cubes = { t: new Float32Array(CUBE_CAP).fill(-1), src: new Uint8Array(CUBE_CAP), jx: new Float32Array(CUBE_CAP), jy: new Float32Array(CUBE_CAP), jz: new Float32Array(CUBE_CAP), spin: new Float32Array(CUBE_CAP) };
+    s.fruit = { t: new Float32Array(FRUIT_CAP).fill(-1), jx: new Float32Array(FRUIT_CAP), jy: new Float32Array(FRUIT_CAP), spin: new Float32Array(FRUIT_CAP) };
+    // The throws: from the chamber's side facing the cooker, and in through the way out, into the mouth; from the
+    // chute's lip to the gate's shield.
+    const core = L.core, mx = ck.x + COOK.mouth[0], my = ck.y + COOK.mouth[1], mz = ck.z + COOK.mouth[2], bearing = Math.atan2(mz - core.z, mx - core.x), shieldZ = HALL.front - 0.6;
+    s.tossCore = toss(core.x + Math.cos(bearing) * 2.9, 9, core.z + Math.sin(bearing) * 2.9, mx, my, mz, 11.2);
+    s.tossGate = toss(0, LAYOUT.entrance.y + 1.6, shieldZ - 0.2, mx, my, mz, 9);
+    s.tossOut = toss(ck.x + COOK.lip[0], ck.y + COOK.lip[1], ck.z + COOK.lip[2], 0, LAYOUT.entrance.y + 2.1, shieldZ, 9);
+    s.outYaw = Math.atan2(s.tossOut.ex - s.tossOut.sx, s.tossOut.ez - s.tossOut.sz);
+    s.hatchW = { x: ck.x + COOK.hatch[0], y: ck.y + COOK.hatch[1] - 0.02, z: ck.z + COOK.hatch[2] };
+    s.stackTop = { x: ck.x + COOK.stack[0], y: ck.y + COOK.stackTop + 0.1, z: ck.z + COOK.stack[1] };
+    s.cookLight = { x: ck.x - 1.2, y: ck.y + 2.2, z: ck.z + 0.4 };
+    s.lidLip = { x: ck.x - COOK.w / 2 - 0.05, y: ck.y + COOK.h + 0.05, z: ck.z };
     // Sats riding the conduits: one instanced batch of fixed capacity.
     // Two batches: gold sats, and red ones for a failed forward's sats coming back.
     const satGeo = { ...FM.sat() }, redGeo = { ...FM.satFailed() };
@@ -605,6 +1293,11 @@
     target(switchBody, "switchboard", "switchboard", 3);
     target(rebBody, "rebalancer", "rebalancer", 2.8);
     target(trBody, "treasury", "treasury", 3);
+    target(ckBody, "cooker", "cooker", 2.2);
+    if (s.corner) {
+      target(kioskBody, "kiosk", null, 1.6);
+      target(boardBody, "board", null, 2.4);
+    }
     target(lkBody, "lookout", "lookout", 3.5);
     target(stBody, "study", "study", 3.2);
     s.tunnels.forEach((t, i) => target(t.stone, "tunnel", ["lineA", "lineB", "lineC", "lineD"][i], 3, { place: s.bays[i] }));
@@ -650,6 +1343,7 @@
     worker(L.switchboard.x, L.switchboard.y, L.switchboard.z + 0.9, 0.8, L.switchboard.w, L.switchboard.d, Math.PI);
     s.rebalanceCrew = worker(L.rebalancer.x + FM.REB.operator[0], L.rebalancer.y, L.rebalancer.z + FM.REB.operator[1], 0.25, L.rebalancer.w, L.rebalancer.d, Math.PI);
     worker(L.treasury.x + FM.TRE.operator[0], L.treasury.y, L.treasury.z + FM.TRE.operator[1], 0.6, L.treasury.w, L.treasury.d);
+    s.cookCrew = worker(L.cooker.x + FM.COOK.operator[0], L.cooker.y, L.cooker.z + FM.COOK.operator[1], 0.35, L.cooker.w, L.cooker.d, -Math.PI / 2);
     worker(L.lookout.x + 1.8, L.lookout.y, L.lookout.z + 1.6, 0.8, L.lookout.w, L.lookout.d);
   };
 
@@ -757,6 +1451,14 @@
     return !!hit && hit.cross(ax, ay, az, bx, by, bz, dt);
   };
   const feetOf = () => avatar ? avatar.root.position.y - avatar.baseY : 0;
+  // Space by the kiosk steps up to its screen, as a tap on it does.
+  const nearKiosk = (x, z, reach, feet) => {
+    if (!scene.corner) return false;
+    const [ux, uz] = FM.KIOSK.use;
+    if (Math.abs(feet - LAYOUT.kiosk.y) > 0.6 || Math.hypot(x - ux, z - uz) > reach) return false;
+    openBooth(scene);
+    return true;
+  };
   const peerPassage = (p) => {
     for (const t of LAYOUT.tunnels) {
       const dx = p.x - t.x, dz = p.z - t.z, c = Math.cos(t.turn), sn = Math.sin(t.turn);
@@ -797,6 +1499,7 @@
     });
     const tipFor = (hit) => {
       const o = hit.owner, tip = TIPS[o.kind];
+      if (o.kind === "board") return COARSE ? "Banana donation board · tap to read it" : "Banana donation board · click to read it";
       if (o.kind === "greeter") return COARSE ? `${BL.factoryGreeter.NAME} the guide · tap to talk` : `${BL.factoryGreeter.NAME} the guide · Space to talk`;
       if (o.kind === "line" || o.kind === "tunnel") {
         const b = o.place, c = b.line && mock.snapshot.channels.find((ch) => ch.id === b.line);
@@ -804,37 +1507,89 @@
       }
       return tip ? tip[0] : "";
     };
+    // While a visitor works the kiosk, its screen takes the taps and the view stays put.
+    const { onOrbit, onZoom, onDoubleTap } = pilot.hooks;
     Object.assign(hooks, {
+      ...pilot.hooks,
       onHover: (hit, p) => {
-        if (hit) hud.tooltip.show(tipFor(hit), p.x, p.y);
+        if (hit && !scene.booth.mode) hud.tooltip.show(tipFor(hit), p.x, p.y);
         else hud.tooltip.hide();
       },
-      onHoverMove: (hit, p) => hud.tooltip.show(tipFor(hit), p.x, p.y),
-      onTap: (hit) => {
+      onHoverMove: (hit, p) => {
+        if (!scene.booth.mode) hud.tooltip.show(tipFor(hit), p.x, p.y);
+      },
+      onTap: (hit, p) => {
+        if (scene.booth.mode) return boothTap(scene, p);
         if (!hit) return;
         const o = hit.owner;
         if (o.kind === "exit") return leaveCave();
+        if (o.kind === "kiosk") return openBooth(scene);
+        if (o.kind === "board") return hud.openBoard(scene.boardView);
         if (o.kind === "greeter") return greeter.greet();
         if (o.preset) pilot.goPreset(o.preset);
-        const tip = TIPS[o.kind];
-        if (tip) hud.toast(tip[1]);
+        // The kiosk's and the board's words own up to simulated or test payments, asked now: the page's Worker can turn
+        // real mode on after the visit has begun.
+        const tip = TIPS[o.kind], net = donations.testNetwork;
+        if (tip) hud.toast(!tip[2] || donations.real && !net ? tip[1] : `${tip[1]} ${net ? `Payments here are on ${net}, a test network, with coins that have no value.` : "Payments are simulated in this build."}`);
       },
-      ...pilot.hooks
+      onOrbit: (dx, dy) => {
+        if (!scene.booth.mode) onOrbit(dx, dy);
+        else if (scene.booth.mode === WATCHING && (dx || dy)) leaveBooth(scene);
+      },
+      onZoom: (factor, gesture, px, py) => {
+        if (!scene.booth.mode) onZoom(factor, gesture, px, py);
+        else if (scene.booth.mode === WATCHING) leaveBooth(scene);
+      },
+      onDoubleTap: (hit, p) => {
+        if (scene.booth.mode) boothTap(scene, p);
+        else onDoubleTap(hit, p);
+      }
     });
-    hud.onPreset(pilot.goPreset);
+    hud.onPreset((name) => {
+      endBooth(scene);
+      pilot.goPreset(name);
+    });
     hud.onAction((action) => {
-      if (action === "leave") leaveCave();
-      else if (action === "reset-view") pilot.goPreset("entrance");
+      // A tip from the dialog closes it and turns the view to the show, so the tipper watches it cook.
+      if (action === "tip" || action === "tip-legendary") {
+        demoTip(action === "tip" ? 1200 : 120000);
+        hud.closeFeed();
+        endBooth(scene);
+        pilot.goPreset("show");
+      }
+      // In real mode the dialog sends the tip to the kiosk: the view glides on to its glass from wherever it is.
+      else if (action === "kiosk" && scene.corner && scene.booth.mode !== AT_KIOSK) {
+        endBooth(scene);
+        openBooth(scene);
+      }
+      else if (action === "reset") { game.resetAll(); location.reload(); }
+      else if (action === "leave") leaveCave();
+      else if (action === "reset-view") {
+        endBooth(scene);
+        pilot.goPreset("entrance");
+      }
       else if (action === "act") { if (!greeter || !greeter.act()) pilot.action(); }
       else if (action.startsWith("mode-")) pilot.modeAction(action);
       else if (action.startsWith("weapon-") || action === "magazine-swap") pilot.weaponAction(action);
     });
+    // Tips from the hall: the island's donation dialog, its link and the visitor's name and message.
+    const donationRequest = donations.createRequest(game.state);
+    qr.drawTo(hud.el.qr, donationRequest.url, { quiet: 3, dark: "#000000", light: "#f3efe4" });
+    hud.setDonationUrl(donationRequest.url);
+    hud.setIdentity(game.state);
+    hud.onIdentityChange(({ handle, message }) => {
+      game.setIdentity({ handle: donations.sanitize(handle, donations.HANDLE_MAX), message: donations.sanitize(message, donations.MESSAGE_MAX) });
+      hud.setIdentity(game.state);
+    });
+    hud.setStats(game.state);
     fx = fxMod.create({ root, input, hooks, hud, game, world, renderer, camera, overlay: ctx.overlay, tickerAt: { x: 0, y: 14, z: -4 } });
     dust = BL.dressing.motes({ count: 240, span: 22, low: 0.5, high: 16 });
     addChild(root, dust.node);
     const dressed = dressing(), lit = lighting();
     addChild(root, ...BL.dressing.nodes(dressed, { glow: 1 }), createNode({ geometry: lit.frame }), createNode({ geometry: lit.glass, sightHidden: true }));
     scene = build();
+    scene.donationLink = donationRequest.url;
+    showMode(scene);
     hireCrew(scene);
     // Whoever walked in stays themselves: their Ooga stands on the balcony facing the core, under the visitor's
     // control. A page that opens here takes `character=` instead, as the island does. With nobody, the view stays
@@ -848,7 +1603,8 @@
       // Keep the visitor's weapons and magazines across the doorway. The
       // factory has no banana pile, so its private pile level stays zero.
       playerWorld = { level: 0, weapons: world.weapons, magazine: world.magazine };
-      const shared = { root, input, hud, game, world: playerWorld, playerName, fx, viewYaw: 0, outsideActors: () => remotes ? remotes.actors() : NO_ACTORS, outsideActorHeight: BL.remotePlayers.BODY_HEIGHT, groundAt: groundFor, walkable: walkableFor, flyable: flyableFor, ceilingAt: ceilingFor, ladders: LAYOUT.ladders, onBodyMove: resolveLanding, clipProjectileTarget, absorbProjectile, reloadPolicy, useNear: (x, z, reach) => {
+      const shared = { root, input, hud, game, world: playerWorld, playerName, fx, viewYaw: 0, outsideActors: () => remotes ? remotes.actors() : NO_ACTORS, outsideActorHeight: BL.remotePlayers.BODY_HEIGHT, groundAt: groundFor, walkable: walkableFor, flyable: flyableFor, ceilingAt: ceilingFor, ladders: LAYOUT.ladders, onBodyMove: resolveLanding, clipProjectileTarget, absorbProjectile, reloadPolicy, useNear: (x, z, reach, feet) => {
+        if (nearKiosk(x, z, reach, feet)) return true;
         // Space talks to the guide only within arm's reach; further away it stays a jump.
         const p = greeter && greeter.root.position;
         return !!p && Math.hypot(x - p.x, z - p.z) <= reach ? greeter.act() : false;
@@ -891,18 +1647,20 @@
     unsubscribe = feed.subscribe(onEvent);
     refreshBoards(scene);
     leaving = false;
-    greeterPrompt = false;
+    actPrompt = false;
     greeter = BL.factoryGreeter.create({ parent: root, input, fx, feed,
       visitor: () => people && people.player === avatar ? avatar : null,
       demoRunning: () => feed.reading.contract === "obl.factory.demo.v1" || feed.reading.contract === null && !!shared.mock, coarse: COARSE, camera, quality: () => renderer.quality });
     // With no Ooga the visitor cannot talk to the guide: a hint points them to the island to pick one.
     if (!avatar) hud.hint(`${BL.factoryGreeter.NAME} the guide gives tours here — pick an Ooga on the island first`);
+    // Sent from the island's dialog to tip: on to the kiosk's glass at the first frame, once the pilot has placed the view.
+    scene.toKiosk = ctx.place === "kiosk" && scene.corner;
 
     factoryScene.root = root;
     factoryScene.camera = camera;
     factoryScene.input = input;
     factoryScene.debug = {
-      hud, camera, controls: pilot.controls, pilot, crew: people, cavemen: people ? people.cavemen : null,
+      hud, camera, controls: pilot.controls, pilot, crew: people, cavemen: people ? people.cavemen : null, demoTip, fx,
       factory: { node: shared, feed, mock, greeter, get scene() { return scene; }, simulate(seconds, dt = 1 / 30) { for (let t = 0; t < seconds; t += dt) shared.tick(dt); } }
     };
   };
@@ -1082,6 +1840,12 @@
     pilot.readInput(dt);
     if (people) people.update(dt, elapsed);
     pilot.update(dt);
+    if (s.real !== donations.real || s.net !== donations.testNetwork) showMode(s);
+    if (s.toKiosk) {
+      s.toKiosk = false;
+      openBooth(s);
+    }
+    boothFrame(s, dt);
     // The Ooga driven here goes to the room with where it stands and its health; other players here are shown.
     const drivenHere = people && people.player;
     BL.net.setBody(drivenHere ? drivenHere.traits.name : null);
@@ -1135,13 +1899,14 @@
     // The core: eased toward lit while the node runs, flickering as it starts, dark when it has stopped.
     const want = node === "ready" ? 1 : node === "starting" ? 0.45 + Math.sin(elapsed * 23) * 0.25 : 0;
     s.glow += (want - s.glow) * Math.min(1, dt * 3);
-    const cc = FM.coreChamber(), chamberGeo = s.glow > 0.35 ? s.surge > 0.45 ? cc.surge : cc.lit : cc.dark;
+    const cc = FM.coreChamber(), chamberGeo = s.glow > 0.35 ? s.surge > 0.45 ? cc.surge : s.lime > 0.4 ? cc.lime : cc.lit : cc.dark;
     if (s.chamber.geometry !== chamberGeo) s.chamber.geometry = chamberGeo;
     surgeFrame(s, dt);
+    limeFrame(s, dt);
     glowNear(elapsed);
     const L = RENDER_OPTS.lights, B = LIGHT_BASE;
-    const pulse = 0.85 + Math.sin(elapsed * 2.1) * 0.08, co = LIGHT.core * 8, white = Math.min(1, s.surge);
-    for (let k = 4; k < 7; k++) L[co + k] = (B[co + k] * (1 - white * 0.5) + white * 0.5) * (0.12 + s.glow * pulse + s.surge * 2.2);
+    const pulse = 0.85 + Math.sin(elapsed * 2.1) * 0.08, co = LIGHT.core * 8, white = Math.min(1, s.surge), lime = Math.min(1, s.lime) * (1 - white);
+    for (let k = 4; k < 7; k++) L[co + k] = ((B[co + k] * (1 - white * 0.5) + white * 0.5) * (1 - lime) + LIME[k - 4] * lime) * (0.12 + s.glow * pulse + s.surge * 2.2 + lime * 1.2);
     // The forge: hot while a line is opened or closed; carts come up to it and coins go down from it.
     s.forgeHeat = Math.max(0, s.forgeHeat - dt);
     const ff = FM.forgeFire(), fire = s.forgeHeat > 0 || s.flash > 0 ? ff.hot : ff.warm;
@@ -1212,6 +1977,8 @@
     const capacityScale = Math.min(0.9, (0.6 + Math.log10(Math.max(1e6, mock.snapshot.capacity) / 1e6) * 0.35) * 0.8);
     s.pile.scale.x = s.pile.scale.z = capacityScale;
     s.pile.scale.y = capacityScale * 0.9;
+    // The cooker, on the tips its board counts.
+    cookerFrame(s, dt, elapsed, running);
     // The watchtower: the beam sweeps while the feed is live; silent, the lamp goes out.
     const live = signal === "live";
     const ll = FM.lookoutLamp(), lampGeo = live ? ll.on : ll.off;
@@ -1270,24 +2037,33 @@
     }
     greeter.update(dt, elapsed);
     greeter.light(RENDER_OPTS.lights, LIGHT.tess * 8);
-    // The act button talks to the guide in reach, starts the picked tour or skips a line ahead, the way the
-    // hub shows ENTER ARCADE by its door; the pilot's own label returns once the offer is gone.
-    const actLabel = avatar && greeter.actLabel();
-    if (actLabel) { hud.setAct(actLabel); greeterPrompt = true; }
-    else if (greeterPrompt) { greeterPrompt = false; pilot.showAct(); }
+    // The act button talks to the guide in reach, starts the picked tour or skips a line ahead, or, within the
+    // kiosk's hint reach, donates, the way the hub shows ENTER ARCADE by its door; the pilot's own label returns once
+    // the offer is gone. The guide comes first, as the button tries the guide before the kiosk.
+    const actLabel = avatar && (greeter.actLabel() || (s.booth.near && !s.booth.mode && people.player === avatar ? "DONATE!" : null));
+    if (actLabel) { hud.setAct(actLabel); actPrompt = true; }
+    else if (actPrompt) { actPrompt = false; pilot.showAct(); }
     stepTweens(dt);
     fx.update(dt, elapsed);
+    hud.updateBoard(elapsed);
   };
-  const drawExtra = (ctx2d, project) => remotes.drawNames(ctx2d, project);
+  // Over the frame: the other players' names, then the kiosk's flow on its glass.
+  const drawExtra = (ctx2d, project) => {
+    remotes.drawNames(ctx2d, project);
+    drawBooth(ctx2d);
+  };
   const overlay = (dt) => fx.drawOverlay(dt, drawExtra);
 
   const leave = () => {
+    // A visitor at the kiosk steps away first, and a tip of theirs still on its screen goes into the cooker.
+    endBooth(scene);
     // Whoever walked in walks back out as themselves: the island takes the same Ooga back at this mouth.
     if (avatar) world.pilot = avatar.traits.name;
     greeter.dispose();
     greeter = null;
     unsubscribe();
     unsubscribe = null;
+    settleCooker(scene);
     unsubscribeAccount();
     unsubscribeAccount = null;
     BL.net.setBody(null);
@@ -1309,6 +2085,7 @@
     while (root.children.length) removeChild(root, root.children[root.children.length - 1]);
     const count = input.targetCount;
     input.dispose();
+    hud.closeBoard();
     hud.dispose();
     scene = shared = feed = mock = hud = hooks = input = pilot = fx = agentPlay = dust = people = avatar = playerWorld = null;
     factoryScene.input = factoryScene.debug = null;
@@ -1316,7 +2093,7 @@
   };
   // Geometry kept off the graph but swapped in when something flashes, so it stays on the GPU.
   const liveGeometry = (set) => {
-    for (const pair of [FM.coreChamber(), FM.forgeFire(), FM.forgeSign(), FM.forgeWave(), FM.switchScreens(), FM.rebalancerRing(), FM.rebalancerFlow(), FM.lookoutLamp(), FM.galleryCaps(), FM.capacitor().blue, FM.capacitor().orange]) {
+    for (const pair of [FM.coreChamber(), FM.forgeFire(), FM.forgeSign(), FM.forgeWave(), FM.switchScreens(), FM.rebalancerRing(), FM.rebalancerFlow(), FM.lookoutLamp(), FM.galleryCaps(), FM.capacitor().blue, FM.capacitor().orange, FM.cookerPort()]) {
       for (const k in pair) set.add(pair[k]);
     }
     for (const sh of FM.forgeShafts()) set.add(sh.glow.dim).add(sh.glow.bright);
@@ -1333,7 +2110,7 @@
     let nodes = 0;
     traverseVisible(root, () => nodes++);
     const all = (n) => 1 + n.children.reduce((sum, c) => sum + all(c), 0);
-    return { visibleNodes: nodes, allNodes: all(root), tweens: tweenCount(), targets: input.targetCount, ...fx.stats(), ...(remotes ? remotes.stats() : {}), feed: feed ? { ...feed.counts } : null };
+    return { visibleNodes: nodes, allNodes: all(root), tweens: tweenCount(), targets: input.targetCount, ...fx.stats(), ...(remotes ? remotes.stats() : {}), feed: feed ? { ...feed.counts } : null, cooker: scene ? cookerStats(scene) : null };
   };
 
   const factoryScene = {

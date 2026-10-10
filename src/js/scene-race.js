@@ -594,14 +594,16 @@
   };
   const onGesture = () => audio.unlock();
 
-  const onDonation = (donation) => {
-    game.recordDonation(donation);
-    const bananas = gameMod.bananasFor(donation.sats);
-    world.level = Math.min(pileMod.MAX_BANANAS, world.level + bananas);
+  // In real mode `counted` is the API's `{ exact, rounded }`: the tally counts the exact bananas and the toasts the
+  // rounded ones (the pile itself follows the API's).
+  const onDonation = (donation, counted = null) => {
+    game.recordDonation(donation, counted && counted.exact);
+    const bananas = gameMod.bananasFor(donation.sats), shown = counted ? counted.rounded : bananas;
+    world.level = Math.min(pileMod.MAX_BANANAS, world.level + (counted ? counted.exact : bananas));
     const who = donation.handle ? `@${donation.handle}` : "anon";
     const loot = lootEnabled ? game.lootFor(donation) : null;
-    hud.toast(`+${gameMod.formatLarge(donation.sats)} sats · ${bananas} banana${bananas > 1 ? "s" : ""} · ${who}${loot ? ` · ${loot.tier} ${loot.item.name}` : ""}`);
-    fx.showTicker(`THANKS ${donation.handle ? "@" + donation.handle.toUpperCase() : "ANON"} · ${bananas} BANANAS`, 4.5);
+    hud.toast(`+${gameMod.formatLarge(donation.sats)} sats · ${gameMod.formatLarge(shown)} banana${shown === 1 ? "" : "s"} · ${who}${loot ? ` · ${loot.tier} ${loot.item.name}` : ""}`);
+    fx.showTicker(`THANKS ${donation.handle ? "@" + donation.handle.toUpperCase() : "ANON"} · ${gameMod.formatLarge(shown)} BANANAS`, 4.5);
     const p = racers.player;
     if (p) fx.burst(p.x, p.y + 1.6, p.z, 20, CONFETTI, 2.2);
     // Set taken to 0.01, not 0: race-items' countdown branch must run once to make the banana visible again.
@@ -713,7 +715,10 @@
     renderLocker();
     hud.toast("Loot locker cleared");
   };
-  const demoTip = (sats) => onDonation({ id: `demo-${Date.now()}`, sats, handle: game.state.handle, message: game.state.message, at: Date.now() });
+  // A demo tip is the simulation's alone: in real mode it would count a tip nobody paid.
+  const demoTip = (sats) => {
+    if (!donations.real) onDonation({ id: `demo-${Date.now()}`, sats, handle: game.state.handle, message: game.state.message, at: Date.now() });
+  };
   const onKey = (e) => {
     if (e.key === "Escape") {
       if (phase === "racing") pause(true);
