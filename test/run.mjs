@@ -34,6 +34,264 @@ const emptyPeerPreviewProof = async () => {
   }
   return {cases,samples,callbacks,failures};
 };
+// Rule: exercise the actual bounded rage state machine with a small physical
+// adapter. Collision and the rendered carry are covered by the hub regressions.
+const gorillaRageProof = async () => {
+  const listeners = new Set(), net = { state: { resolved: true, me: null }, subscribe(fn) { listeners.add(fn); return () => listeners.delete(fn); } };
+  const context = { window: { BL: { net } } };
+  for (const name of ["math", "scene"]) runInNewContext(await readFile(join(root, "src/js/" + name + ".js"), "utf8"), context);
+  runInNewContext(await readFile(join(root, "src/js/clanker-rage.js"), "utf8"), context);
+  const R = context.window.BL.clankerRage, S = context.window.BL.scene, rows = {};
+  const fixture = (debugRage = false) => {
+    net.state.resolved = true; net.state.me = null;
+    const caves = Array.from({ length: 4 }, (_, i) => ({ id: i, state: "chilling", available: true, baseY: 0, root: { position: { x: i * 0.25, y: 0, z: 0 } }, grabbedBy: null }));
+    const list = Array.from({ length: 2 }, (_, i) => ({ active: true, controlled: false, mode: "chilling", owner: caves[i], health: { value: 200 },
+      root: S.createNode({ position: { x: 0, y: 0, z: i * 0.25 }, matrixNative: false, matrixLiving: true, scorch: 0.4, ember: 0.6 }),
+      heading: 0, rage: R.state(), held: null, suspended: false }));
+    for (const e of list) {
+      const hips = S.createNode(); S.addChild(e.root, hips);
+      for (let i = 0; i < 6; i++) S.addChild(hips, S.createNode());
+    }
+    const stats = { begins: 0, ends: 0, releases: 0, throws: 0, lastCharge: 0, legs: 0, maxLegs: 0 }, held = new Set(), constraints = { blocked: false, stationary: false, contactBlock: null, edgeMin: 2.5, delayedThrow: false, splitLand: false, corridor: false };
+    const release = e => { if (e.held) { e.held.grabbedBy = null; held.delete(e.held); e.held = null; e.throwing = false; stats.releases++; } };
+    const manager = R.create({ list, debugRage, crew: { list: caves, stateOf: c => c.state },
+      begin: () => stats.begins++, end: () => stats.ends++, landAt: x => constraints.splitLand ? x > 1.5 ? 2 : x > 0.5 ? 0 : 1 : 1, floorAt: () => 0,
+      captureEligible: (_e, c) => c.available && !c.grabbedBy,
+      legClear: (_e, _x, _y, _z, nx, _ny, nz) => { stats.legs++; return !constraints.blocked
+        && (!constraints.corridor || nx >= 0 && nx <= constraints.edgeMin && Math.abs(nz) <= 0.1)
+        && (!constraints.contactBlock || Math.hypot(nx - constraints.contactBlock.x, nz - constraints.contactBlock.z) >= 2.25); },
+      edgeAt: (_e, x, _y, _z, out) => { out.dx = 1; out.dz = 0; return x >= constraints.edgeMin; },
+      edgeHeading: (_e, out) => { out.dx = 1; out.dz = 0; },
+      edgeGoal: (_e, out) => { out.goalX = constraints.edgeMin; out.goalY = out.goalZ = 0; },
+      suspended: e => e.suspended, captive: e => e.held, throwing: e => !!e.throwing, release,
+      grab: (e, c) => {
+        if (!c.available || c.grabbedBy || e.held || Math.hypot(c.root.position.x - e.root.position.x, c.root.position.z - e.root.position.z) > 1.2) return false;
+        c.grabbedBy = e; e.held = c; held.add(c); return true;
+      },
+      walk: (e, dt, x, y, z, heading) => {
+        if (constraints.stationary) return true;
+        const p = e.root.position, distance = Math.hypot(x - p.x, z - p.z), step = Math.min(distance, dt * 5);
+        if (distance) { p.x += (x - p.x) * step / distance; p.z += (z - p.z) * step / distance; }
+        p.y = y; e.heading = heading; return true;
+      },
+      throw: (e, _dx, _dz, charge) => { if (!e.held) return false; e.throwing = true; stats.lastCharge = charge; stats.throws++;
+        if (!constraints.delayedThrow) { e.held.available = false; release(e); } return true; }
+    });
+    let now = 0, serial = 0;
+    return { list, caves, manager, stats, held, constraints,
+      hits(e, count, shooter = caves[0]) { for (let i = 0; i < count; i++) manager.bananaHit(e, shooter, ++serial); return serial; },
+      at(time, dt = 0) { now = time; stats.legs = 0; manager.frame(now); for (const e of list) manager.update(e, dt, now); stats.maxLegs = Math.max(stats.maxLegs, stats.legs); },
+      tick(dt) { this.at(now + dt, dt); }, launch(e) { if (e.held) { e.held.available = false; release(e); } }, dispose() { manager.dispose(); }
+    };
+  };
+  {
+    const f = fixture(); rows.debugGate = !f.manager.debugRage(f.list[0]) && !f.list[0].rage.active; f.dispose();
+  }
+  {
+    const f = fixture(true), [a, b] = f.list;
+    const selected = f.manager.debugRage(a); f.at(0.1); const captive = a.held;
+    const switched = f.manager.debugRage(b);
+    rows.debugSelection = selected && !!captive && switched && !a.rage.active && !a.root.matrixHighlight
+      && !a.held && !captive.grabbedBy && b.rage.active && b.rage.debug;
+    f.at(120); rows.debugNoExpiry = b.rage.active && b.rage.debug && b.rage.expires === Infinity;
+    net.state.me = { id: "fixture" }; for (const changed of listeners) changed();
+    rows.debugAccountCleanup = !b.rage.active && !b.rage.debug && !b.held && !b.root.matrixHighlight;
+    f.dispose();
+  }
+  {
+    const f = fixture(true), e = f.list[0];
+    f.caves[0].available = f.caves[1].available = false;
+    f.caves[2].root.position.x = 34; f.caves[3].root.position.x = 36;
+    f.manager.debugRage(e); f.at(0.1);
+    rows.debugNearbyNonshooters = e.rage.target === f.caves[2] && !e.rage.agitators.some(Boolean) && R.DEBUG_RANGE === 35;
+    f.caves[2].available = false; f.tick(1 / 60);
+    rows.debugNearbyNonshooters &&= e.rage.target === null;
+    f.dispose();
+  }
+  {
+    const f = fixture(), e = f.list[0];
+    const serial = f.hits(e, 41), before = e.rage.count === 41 && !e.rage.active;
+    f.manager.bananaHit(e, f.caves[1], serial);
+    const duplicate = e.rage.count === 41 && !e.rage.active;
+    f.hits(e, 1, f.caves[1]);
+    const activated = e.rage.active && e.rage.target === f.caves[1] && e.rage.count === 0 && e.rage.expires === 60;
+    const parts = e.root.children[0].children, native = S.createNode({ matrixNative: true, matrixHighlight: true });
+    rows.highlight = e.root.matrixHighlight && S.matrixModeOf(e.root) === 2.25 && parts.every(p => S.matrixModeOf(p) === 2.25)
+      && S.matrixModeOf(native) === 5 && e.root.scorch === 0.4 && e.root.ember === 0.6;
+    f.at(1); const expires = e.rage.expires; f.hits(e, 80);
+    rows.boundary = before && duplicate && activated && e.rage.expires === expires && e.rage.count === 0;
+    f.at(59.999); const lasts = e.rage.active;
+    const health = e.health.value; f.at(60);
+    rows.expiry = lasts && !e.rage.active && !e.rage.count && !e.held && e.health.value === health;
+    rows.highlightRestored = !e.root.matrixHighlight && S.matrixModeOf(e.root) === 2 && parts.every(p => S.matrixModeOf(p) === 2)
+      && e.root.children.length === 1 && parts.length === 6 && e.root.scorch === 0.4 && e.root.ember === 0.6;
+    f.manager.bananaHit(e, f.caves[0], serial);
+    rows.replayAfterReset = !e.rage.count && !e.rage.active;
+    f.hits(e, 41); const fresh = e.rage.count === 41 && !e.rage.active; f.hits(e, 1);
+    rows.freshHistory = fresh && e.rage.active;
+    f.dispose();
+  }
+  {
+    const f = fixture(), e = f.list[0]; f.hits(e, 42); f.at(0.1, 0.1);
+    const grab = e.rage.grabHeld && e.rage.throwHeld && e.rage.throwCharge === 0 && e.rage.phase === "edge" && e.held;
+    e.root.position.x = 2.5; e.rage.countPath = e.rage.index = 1;
+    f.tick(0.5);
+    const charging = e.rage.grabHeld && e.rage.throwHeld && e.rage.throwCharge === 0.5 && !f.stats.throws && e.held;
+    f.tick(0.5);
+    const releasedClick = e.rage.grabHeld && !e.rage.throwHeld && e.rage.phase === "throw"
+      && f.stats.throws === 1 && f.stats.lastCharge === 1;
+    f.tick(1 / 60);
+    const releasedGrab = !e.rage.grabHeld && e.rage.phase === "hunt";
+    f.tick(1 / 60);
+    rows.grabThrowOrder = !!grab && !!charging && releasedClick && releasedGrab && !e.rage.grabHeld;
+    f.dispose();
+  }
+  {
+    const f = fixture(), e = f.list[0]; f.constraints.delayedThrow = true;
+    f.hits(e, 42); f.at(0.1, 0.1); e.root.position.x = 2.5; e.rage.countPath = e.rage.index = 1;
+    f.tick(1); const stillHeld = e.held && e.rage.grabHeld && !e.rage.throwHeld && e.rage.phase === "throw";
+    f.tick(1 / 60); const throughSwing = e.held && e.rage.grabHeld && e.rage.phase === "throw";
+    f.launch(e); f.tick(1 / 60);
+    rows.throwHoldsGrab = !!stillHeld && !!throughSwing && !e.held && !e.rage.grabHeld && e.rage.phase === "hunt";
+    f.dispose();
+  }
+  {
+    const f = fixture(), e = f.list[0]; f.constraints.delayedThrow = true;
+    f.hits(e, 42); f.at(0.1, 0.1); e.root.position.x = 2.5; e.rage.countPath = e.rage.index = 1;
+    f.tick(1); e.throwing = false; f.tick(1 / 60);
+    rows.blockedLaunchRetainsGrip = e.held === f.caves[0] && e.rage.phase === "edge"
+      && e.rage.grabHeld && e.rage.throwHeld && e.rage.throwCharge === 1;
+    f.dispose();
+  }
+  {
+    const f = fixture(), e = f.list[0];
+    f.hits(e, 20, f.caves[0]); f.hits(e, 22, f.caves[1]);
+    f.caves[1].available = false; f.at(0.1);
+    rows.agitatorsOnly = e.rage.agitators[0] && e.rage.agitators[1] && !e.rage.agitators[2]
+      && e.rage.target === f.caves[0] && e.held === f.caves[0];
+    f.dispose();
+  }
+  {
+    const f = fixture(), e = f.list[0], captive = f.caves[0], dt = 0.1;
+    Object.assign(f.constraints, { edgeMin: 80, corridor: true, delayedThrow: true });
+    f.hits(e, 42); f.at(dt, dt);
+    let retained = e.held === captive && e.rage.grabHeld && e.rage.throwHeld,
+      monotonic = true, bounded = true, straight = true, charging = true, pendingMoves = 0, pendingDistance = 0, charge = 0;
+    // The search extends several checked prefixes before finding the edge.
+    // Cross a completed leg while it is pending, then finish the real walk.
+    for (let i = 0; i < 240 && !f.stats.throws; i++) {
+      const before = { ...e.root.position }; f.tick(dt);
+      const p = e.root.position, distance = Math.hypot(p.x - before.x, p.y - before.y, p.z - before.z);
+      monotonic &&= p.x >= before.x - 1e-9;
+      bounded &&= distance <= dt * 5 + 1e-9 && p.x <= 80 + 1e-9;
+      straight &&= Math.abs(p.z) < 1e-9 && Math.abs(p.y) < 1e-9;
+      retained &&= e.held === captive && captive.grabbedBy === e && e.rage.grabHeld;
+      charging &&= e.rage.throwCharge >= charge && (e.rage.phase === "throw" ? !e.rage.throwHeld : e.rage.throwHeld);
+      charge = e.rage.throwCharge;
+      if (e.rage.pending && distance > 1e-9) { pendingMoves++; pendingDistance += distance; }
+    }
+    const thrown = f.stats.throws === 1 && f.stats.lastCharge === 1 && e.rage.phase === "throw"
+      && Math.abs(e.root.position.x - 80) < 1e-9 && charge === 1;
+    for (let i = 0; i < 3; i++) {
+      f.tick(dt); retained &&= e.held === captive && e.rage.grabHeld && !e.rage.throwHeld && e.rage.phase === "throw";
+    }
+    f.launch(e); f.tick(dt);
+    rows.carryWhilePlanning = retained && monotonic && bounded && straight && charging && thrown
+      && pendingMoves >= 4 && pendingDistance > 1.25 && !e.held && !e.rage.grabHeld && e.rage.phase === "hunt";
+    f.dispose();
+  }
+  {
+    const f = fixture(), e = f.list[0], target = f.caves[0];
+    target.root.position.x = 3.75; f.constraints.contactBlock = target.root.position;
+    f.hits(e, 42); f.at(0.1, 1 / 60);
+    rows.contactRoute = e.rage.countPath > 1 && e.rage.phase === "hunt"
+      && Math.hypot(e.rage.path[3] - target.root.position.x, e.rage.path[5] - target.root.position.z) >= 2.25;
+    f.dispose();
+  }
+  {
+    const f = fixture(), e = f.list[0]; f.constraints.splitLand = true;
+    f.caves[0].root.position.x = 3.75;
+    f.hits(e, 42); f.at(0.1, 1 / 60);
+    rows.bridgeRoute = e.rage.target === f.caves[0] && e.rage.countPath > 1
+      && e.rage.path[3] > 0.5 && e.rage.path[3] < 1.5;
+    f.dispose();
+  }
+  {
+    const f = fixture(), e = f.list[0]; f.hits(e, 41); f.at(60); f.hits(e, 1);
+    rows.rollingExpiry = e.rage.count === 1 && !e.rage.active;
+    f.dispose();
+  }
+  {
+    const f = fixture(), e = f.list[0]; f.hits(e, 41); e.health.value = 0; f.hits(e, 1);
+    rows.zeroBeforeActivation = !e.rage.active && !e.rage.count && e.health.value === 0;
+    e.health.value = 37; f.hits(e, 42); f.at(0.1); e.health.value = 0; f.at(0.1);
+    rows.zeroCancels = !e.rage.active && !e.rage.count && !e.held && e.health.value === 0;
+    f.dispose();
+  }
+  for (const kind of ["working", "sleeping", "controlled", "pending", "signed-in"]) {
+    const f = fixture(), e = f.list[0]; f.hits(e, 20);
+    const invalidate = () => {
+      if (kind === "controlled") e.controlled = true;
+      else if (kind === "pending") net.state.resolved = false;
+      else if (kind === "signed-in") net.state.me = { id: "fixture" };
+      else e.owner.state = kind;
+    };
+    invalidate();
+    f.at(0.1); f.hits(e, 42);
+    rows[kind] = !e.rage.active && !e.rage.count;
+    e.controlled = false; e.owner.state = "chilling"; net.state.resolved = true; net.state.me = null;
+    f.hits(e, 42); f.at(0.15); const captive = e.held;
+    invalidate(); f.at(0.2);
+    rows[kind] &&= !!captive && !e.rage.active && !e.rage.count && !captive.grabbedBy && !e.held;
+    f.dispose();
+  }
+  for (const phase of ["hunt", "edge", "throw"]) {
+    const f = fixture(), e = f.list[0]; f.hits(e, 42); f.at(0.1);
+    const captive = e.held; e.rage.phase = phase;
+    net.state.me = { id: "fixture" }; for (const changed of listeners) changed();
+    rows["account-" + phase] = !!captive && !captive.grabbedBy && !e.held && !e.rage.active && !e.rage.count && !e.rage.countPath && !e.rage.pending
+      && !e.root.matrixHighlight && S.matrixModeOf(e.root.children[0].children[0]) === 2;
+    f.dispose();
+  }
+  {
+    const f = fixture(), e = f.list[0]; f.hits(e, 42); f.at(0.1); const captive = e.held;
+    f.constraints.blocked = true; f.tick(1 / 30);
+    rows.noCliffRoute = !!captive && e.held === captive && captive.grabbedBy === e && e.rage.active
+      && e.rage.phase === "edge" && e.rage.grabHeld && e.rage.throwHeld;
+    f.dispose();
+  }
+  {
+    const f = fixture(), e = f.list[0]; f.hits(e, 42); f.at(0.1); const captive = e.held, expiry = e.rage.expires;
+    e.suspended = true; f.at(0.2);
+    rows.physicalPriority = !!captive && !e.held && !captive.grabbedBy && e.rage.active && e.rage.expires === expiry && !e.rage.countPath;
+    f.at(60); rows.physicalPriority &&= !e.rage.active;
+    f.dispose();
+  }
+  {
+    const f = fixture(), e = f.list[0], target = f.caves[0]; target.root.position.x = 10;
+    f.hits(e, 42); Object.assign(e.rage, { countPath: 1, index: 0, goalX: 10, goalZ: 0 });
+    e.rage.path.set([0, 0.75, 0]); f.tick(1 / 60);
+    rows.liveWaypointSupport = e.rage.index === 1 && e.root.position.x > 0 && e.root.position.y === 0;
+    f.dispose();
+  }
+  {
+    const f = fixture(), e = f.list[0], target = f.caves[0]; target.root.position.x = 10;
+    f.hits(e, 42); Object.assign(e.rage, { countPath: 1, index: 0, goalX: 10, goalZ: 0 });
+    e.rage.path.set([1.25, 0, 0]); f.constraints.stationary = true;
+    for (let i = 0; i < 6; i++) f.tick(0.1);
+    rows.noProgressReplans = e.rage.active && !e.rage.countPath && e.rage.planAt > 0.6 && e.root.position.x === 0;
+    f.dispose();
+  }
+  {
+    const f = fixture(), [a, b] = f.list; f.hits(a, 42, f.caves[0]); f.hits(b, 42, f.caves[1]);
+    f.at(0.1, 0.1);
+    rows.simultaneous = a.rage.active && b.rage.active && a.held === f.caves[0] && b.held === f.caves[1] && a.held !== b.held && f.held.size === 2;
+    for (let i = 0; i < 300 && f.stats.throws < 3; i++) f.tick(1 / 30);
+    rows.repeatedThrows = f.stats.throws >= 2 && f.stats.maxLegs <= 96;
+    f.dispose(); rows.disposal = !f.held.size && f.list.every(e => !e.rage.active && !e.rage.count && !e.rage.pending && !e.root.matrixHighlight) && listeners.size === 0;
+  }
+  return rows;
+};
 // A portal rebase mid north-up ease must not jump the camera: the shift line must carry the
 // ease's start yaw too, so the trajectory after the rebase equals the one before, plus the rebase.
 const northRebaseProof = async () => {
@@ -4722,7 +4980,7 @@ const hubAk = { name: "hub ak", why: "regression: R did nothing unless the playe
   record("hub ak: V fires a burst of three from the magazine, an empty magazine fires nothing, the bananas hit, and R swaps in the full spare without aiming", aimed && start.ammo === 6 && one.ammo === 3 && two.ammo === 0 && dry.shots === two.shots && hit && !swapped.aiming && swapped.ammo === 30 && swapped.spares.every((n) => n === 0), JSON.stringify({ aimed, start, one, two, dry, hit, swapped }));
 } };
 const JET_STATE = `(() => { const c = window.__ooga.crew.player, J = window.__ooga.jetpack; return { worn: !!c.jet, owned: J.owned, fuel: +c.jetFuel.toFixed(3), feet: +(c.root.position.y - c.baseY).toFixed(2), pickup: !!(J.pickup && J.pickup.host), toast: (document.getElementById("toast") || {}).textContent }; })()`;
-const hubJetpack = { name: "hub jetpack", why: "rule: every Ooga permanently owns a J-toggleable jetpack, while abyss respawns remove only loaded and spare AK ammo", run: async (b) => {
+const hubJetpack = { name: "hub jetpack", why: "rule: every Ooga permanently owns a J-toggleable jetpack, fueled steering recovers from thrown momentum, and abyss respawns remove only loaded and spare AK ammo", run: async (b) => {
   await b.evaluate(`(() => { const B = window.__ooga; B.pilot.navigate({ position: { x: -8, y: B.crew.player.root.position.y, z: 16 }, yaw: -Math.PI / 2, pitch: 0.3, dist: 5 }); B.advance(0.4, 1 / 60); })()`);
   await tapKey(b, "j");
   const off = await b.evaluate(JET_STATE);
@@ -4753,6 +5011,92 @@ const hubJetpack = { name: "hub jetpack", why: "rule: every Ooga permanently own
     && lost.toast === "Spare magazines and loaded AK-47 ammo lost to the abyss", JSON.stringify({ off, on, up, down, fell, lost, permanent }));
   record("hub jetpack: breakables and clouds contain no jetpack pickup, stun keeps the pack, and dropped magazines carry a +1 MAG tag", !permanent.rewardHasJetpack && permanent.wornAfterStun
     && permanent.drops.length === 1 && permanent.drops[0].kind === "magazine" && permanent.drops[0].label === "+1 MAG", JSON.stringify(permanent));
+  const recovery = [];
+  for (const dt of [1 / 30, 1 / 60]) for (const mode of ["passive", "brake", "empty"]) recovery.push(await b.evaluate(`((dt, mode) => {
+    const B = __ooga, C = B.clankers, S = BL.scene, c = B.cavemen.get("portlandhodl");
+    const e = C.list.find(entry => entry.owner === c), board = B.jumbotron.node;
+    const key = (type, name, code) => window.dispatchEvent(new KeyboardEvent(type, { key: name, code, bubbles: true, cancelable: true }));
+    key("keyup", "w", "KeyW"); key("keyup", " ", "Space");
+    B.pilot.release(true); B.clankerPlay.release(); C.release(); BL.scenes.hub.debug.selectDebugGorilla(null);
+    for (const entry of C.list) {
+      C.debugRage(entry, false); C.cancelDebugMove(entry);
+      entry.owner.override = entry.owner.state = entry === e ? "chilling" : "away";
+      entry.owner.bedTravel.mode = "";
+      entry.controlled = entry.drive.airborne = entry.climb.active = entry.fire.rolling = false;
+      entry.active = entry.root.visible = entry === e;
+    }
+    for (const cave of B.cavemen.values()) cave.root.visible = cave === c;
+    for (const prop of B.props) prop.node.visible = prop.node === board;
+    B.crew.prepareDragged(c); c.root.quaternion = null; c.root.rotation.x = c.root.rotation.z = 0;
+    c.camp.seat = null; c.camp.burning = c.camp.rolling = c.camp.panic.active = c.roofEscape.active = false;
+    Object.assign(c.health, { value: BL.crew.HEALTH_MAX, delay: 0, stunned: false, recovering: false });
+    c.hop = c.hopV = c.jumps = 0; c.jetFuel = 1; c.jetRecovering = false;
+    B.crew.wearJetpack(c, BL.hubModels.jetpack(), BL.hubModels.jetFlame());
+    const fx = Math.sin(board.rotation.y), fz = Math.cos(board.rotation.y);
+    const x = board.position.x + fx * 20, z = board.position.z + fz * 20;
+    const victimX = board.position.x + fx * 17.5, victimZ = board.position.z + fz * 17.5;
+    B.pilot.possess(c);
+    // Face back toward the island before the throw. The measured return
+    // displacement below also proves that W actually opposes the launch.
+    B.pilot.navigate({ position: { x: victimX, y: B.island.surfaceAt(victimX, victimZ), z: victimZ }, yaw: 0, pitch: 0.3, dist: 5 });
+    const y = C.supportAt(e, x, z, B.island.surfaceAt(x, z), BL.clankers.PROP_STEP, board.rotation.y + Math.PI);
+    Object.assign(e.root.position, { x, y, z });
+    Object.assign(e, { active: true, controlled: false, mode: "chilling", phase: "chill", route: "", fromSite: -1,
+      pendingSite: -1, lounge: "", loungeDepart: false, loungeRoof: false, parked: false, biped: false,
+      recover: 0, rest: 0, heading: board.rotation.y + Math.PI, speed: 0, pound: 0, beat: 0, stand: 0,
+      footprintMode: "walk", radius: BL.clankers.WALK_RADIUS, height: BL.clankers.WALK_HEIGHT });
+    Object.assign(e.drive, { airborne: false, passiveFall: false, grounded: true, resume: false, vx: 0, vy: 0, vz: 0, motionRecover: 0, motionEnvelope: false });
+    e.jump.active = e.climb.active = e.fire.burning = e.fire.rolling = false; e.fire.rollRecover = 0;
+    Object.assign(e.motion, { climb: 0, climbBlend: NaN, mantle: 0, roll: 0, charge: 0, supportOffset: 0,
+      landing: 0, takeoff: 0, lab: false, labRunIn: false, labWork: "", smash: false, dragging: false, throwProgress: 0 });
+    e.health.value = e.health.max;
+    e.gorilla.poseManaged(2, x, y, z, e.heading, 0, false, false, "", e.motion);
+    S.updateWorld(BL.scenes.hub.root); B.headquarters.solids.props.sync(); B.headquarters.solids.companions.sync();
+    const selected = C.debugRage(e, true);
+    let held = 0, charged = false;
+    try {
+      for (let frame = 0; frame < Math.round(8 / dt) && !c.leap.thrown; frame++) {
+        B.advance(dt, dt);
+        if (c.grabbedBy === e) { held++; charged ||= e.capture.throwing && e.capture.charge === 1; }
+      }
+      if (!c.leap.thrown) return { dt, mode, selected, held, charged, launched: false, phase: e.rage.phase, blocked: e.capture.blocked };
+      C.debugRage(e, false);
+      c.jetFuel = mode === "empty" ? 0 : 1; c.jetRecovering = false;
+      const p = c.root.position, initial = { x: p.x, z: p.z, vx: c.leap.vx, vz: c.leap.vz, vy: c.hopV };
+      const speed = Math.hypot(initial.vx, initial.vz), ux = initial.vx / speed, uz = initial.vz / speed;
+      if (mode !== "passive") { key("keydown", "w", "KeyW"); key("keydown", " ", "Space"); }
+      let first = null, maxChange = 0, drift = 0, peak = 0, tailStart = 0, powered = false, thrust = false, airborne = true;
+      let previousVx = initial.vx, previousVz = initial.vz;
+      const frames = Math.round(1.1 / dt), tailFrame = frames - Math.round(0.25 / dt);
+      for (let frame = 0; frame < frames; frame++) {
+        if (frame === tailFrame) tailStart = (p.x - initial.x) * ux + (p.z - initial.z) * uz;
+        B.advance(dt, dt);
+        const vx = c.leap.vx, vz = c.leap.vz, distance = (p.x - initial.x) * ux + (p.z - initial.z) * uz;
+        if (!first) first = { velocity: vx * ux + vz * uz, vy: c.hopV };
+        maxChange = Math.max(maxChange, Math.hypot(vx - previousVx, vz - previousVz));
+        drift = Math.max(drift, Math.hypot(vx - initial.vx, vz - initial.vz));
+        peak = Math.max(peak, distance); powered ||= c.jet.power > 0; thrust ||= c.jet.thrust;
+        airborne &&= c.leap.thrown && c.hop > 0;
+        previousVx = vx; previousVz = vz;
+      }
+      const distance = (p.x - initial.x) * ux + (p.z - initial.z) * uz;
+      return { dt, mode, selected, held, charged, launched: true, initial, first, maxChange, drift, peak, distance,
+        tailDistance: distance - tailStart, velocity: c.leap.vx * ux + c.leap.vz * uz, targetSpeed: BL.crew.JET_SPEED,
+        fuel: c.jetFuel, powered, thrust, airborne, identity: B.pilot.player === c && B.crew.player === c };
+    } catch (caught) { return { dt, mode, selected, held, charged, error: { message: String(caught), stack: caught.stack || "" } }; }
+    finally {
+      key("keyup", "w", "KeyW"); key("keyup", " ", "Space"); B.crew.thrust(false); C.debugRage(e, false);
+    }
+  })(${dt}, ${JSON.stringify(mode)})`).catch(error => ({ dt, mode, error: String(error) })));
+  const braking = recovery.filter(row => row.mode === "brake");
+  record("hub jetpack: real gorilla throws retain passive momentum, fueled opposite input brakes and reverses at 30/60 Hz without clipping upward velocity, and an empty tank cannot thrust",
+    recovery.length === 6 && recovery.every(row => !row.error && row.selected && row.held > 1 && row.charged && row.launched && row.identity && row.airborne
+      && (row.mode === "brake" ? row.first.velocity > 0 && row.first.velocity < Math.hypot(row.initial.vx, row.initial.vz)
+        && row.first.vy > row.initial.vy - 1 && row.maxChange < 21 * row.dt && Math.abs(row.velocity + row.targetSpeed) < 0.05
+        && row.tailDistance < -0.5 && row.distance < row.peak - 0.5 && row.powered && row.thrust && row.fuel > 0 && row.fuel < 1
+        : row.drift < 1e-6 && !row.powered && !row.thrust && row.fuel === (row.mode === "empty" ? 0 : 1)))
+      && braking.length === 2 && Math.abs(braking[0].distance - braking[1].distance) < 0.08 && Math.abs(braking[0].peak - braking[1].peak) < 0.08,
+    JSON.stringify(recovery));
 } };
 
 const hubBirdsEye = { name: "birds-eye combat camera", why: "regression: horizontal aim rotates the view around a centerline reticle, zoom retains forward targets, and carry handoffs preserve valid cursors and camera distance", run: async (b) => {
@@ -7826,7 +8170,242 @@ scene("hub", { label: "gorilla lab carry jump", query: "character=gorilla-portla
     state.lab && state.ran && state.grabbed && state.first && state.peak > 0.5 && state.second && state.charged && state.heldThroughRelease
       && state.thrownInAir && state.smashUnchanged, JSON.stringify(state));
 } }] });
-scene("hub", { label: "gorilla traversal", query: "status=chillin&gorillamove=1", steps: [{ name: "gorilla prop traversal", why: "regression: low props interrupted the gallop, jump input delayed takeoff, and a stale motion envelope trapped gorillas beneath trees", run: async (b) => {
+scene("hub", { label: "gorilla rage throw", query: "status=chillin&gorillarage=1", steps: [{ name: "gorilla rage throw", why: "playthrough: an autonomous gorilla must retain its captive while dragging and charging, then launch it over the real Oogatron and off the island before hunting another Ooga", run: async (b) => {
+  const states = [];
+  for (const [dt, fixture] of [[1 / 30, "plain"], [1 / 60, "plain"], [1 / 30, "crate"], [1 / 60, "barrel"], [1 / 30, "rock-left"], [1 / 60, "rock-right"]]) states.push(await b.evaluate(`((dt, fixture) => {
+    const B = __ooga, C = B.clankers, H = BL.scenes.hub.debug, S = BL.scene, root = BL.scenes.hub.root;
+    const solids = B.headquarters.solids.props, companions = B.headquarters.solids.companions;
+    const c = B.cavemen.get("portlandhodl"), second = B.cavemen.get("w-s-bitcoin"), e = C.list.find(entry => entry.owner === c);
+    B.pilot.release(true); B.clankerPlay.release(); C.release(); H.selectDebugGorilla(null);
+    for (const entry of C.list) {
+      C.debugRage(entry, false); C.cancelDebugMove(entry);
+      entry.owner.override = entry.owner.state = entry === e || entry.owner === second ? "chilling" : "away";
+      entry.owner.bedTravel.mode = "";
+      entry.controlled = entry.drive.airborne = entry.climb.active = entry.fire.rolling = false;
+      entry.active = entry.root.visible = entry === e || entry.owner === second;
+      if (entry !== e && entry.active) {
+        Object.assign(entry.root.position, { x: -15, y: B.island.surfaceAt(-15, -12), z: -12 });
+        entry.recover = 1000; entry.lounge = ""; entry.loungeDepart = false;
+      }
+    }
+    for (const cave of B.cavemen.values()) cave.root.visible = cave === c || cave === second;
+    // Keep the actual cabinet and terrain in the flight path. The contact
+    // cases add one real solid beside the approach or beneath the target.
+    for (const prop of B.props) prop.node.visible = prop.node === B.jumbotron.node;
+    const board = B.jumbotron.node, fx = Math.sin(board.rotation.y), fz = Math.cos(board.rotation.y);
+    const stage = (distance, side = 0) => ({ x: board.position.x + fx * distance + fz * side,
+      z: board.position.z + fz * distance - fx * side });
+    const side = fixture === "plain" ? 0 : 4;
+    const offset = fixture === "plain" ? 0 : 1.5;
+    const start = stage(20 + offset, side), victim = stage(17.5 + offset, side), next = stage(14, 6);
+    let contactProp = null;
+    if (fixture !== "plain") {
+      const geometry = fixture === "crate" ? BL.hubModels.woodCrate(2)
+        : fixture.startsWith("rock-") ? BL.hubModels.breakableRock() : BL.hubModels.barrel(1);
+      const bounds = S.boundsOf(geometry);
+      const nearSide = fixture === "rock-left" ? 1 : -1;
+      const at = fixture === "crate" ? victim : stage(17.5 + offset,
+        side + nearSide * (Math.max(Math.abs(bounds.min[0]), Math.abs(bounds.max[0])) + 0.9));
+      contactProp = S.createNode({ geometry, position: { x: at.x, y: B.island.surfaceAt(at.x, at.z), z: at.z } });
+      contactProp.gorillaSteps = [[...bounds.min, ...bounds.max]]; contactProp.gorillaStepAll = true;
+      S.addChild(root, contactProp); solids.add(contactProp); S.updateWorld(root); solids.sync();
+      if (fixture === "crate") {
+        // The crate's rails stand above its centre lid. Put ordinary body
+        // support on that real rail as well as the wider rendered feet.
+        const shell = S.boundsOf(geometry.collisionGeometry), rail = shell.max[0] - 0.27;
+        victim.x += fz * rail; victim.z -= fx * rail;
+      }
+    }
+    const propFloor = solids.supportAt(victim.x, victim.z, Infinity, 0, 0.3);
+    let initialFloor = Math.max(B.island.surfaceAt(victim.x, victim.z), propFloor);
+    for (const [cave, at] of [[c, victim], [second, next]]) {
+      B.crew.prepareDragged(cave); cave.root.quaternion = null; cave.walk = null; cave.bedTravel.mode = "";
+      cave.root.rotation.x = cave.root.rotation.z = 0;
+      cave.override = cave.state = "chilling"; cave.root.visible = true;
+      cave.camp.seat = null; cave.camp.burning = cave.camp.rolling = cave.camp.panic.active = cave.roofEscape.active = false;
+      cave.health.stunned = false; cave.hop = cave.hopV = cave.jumps = 0;
+      cave.act.kind = "idle"; cave.act.until = Infinity;
+      Object.assign(cave.root.position, { x: at.x, y: (cave === c ? initialFloor : B.island.surfaceAt(at.x, at.z)) + cave.baseY, z: at.z });
+    }
+    if (fixture === "crate") {
+      S.updateWorld(root);
+      const footPoint = new Float64Array(3);
+      let lift = 0;
+      for (const name of ["legR", "legL"]) {
+        const foot = c.parts[name], bounds = S.boundsOf(foot.geometry);
+        const low = [Infinity, Infinity, Infinity], high = [-Infinity, -Infinity, -Infinity];
+        for (let corner = 0; corner < 8; corner++) {
+          BL.math.mat4.transformPoint(footPoint, foot.world, bounds[corner & 1 ? "max" : "min"][0],
+            bounds[corner & 2 ? "max" : "min"][1], bounds[corner & 4 ? "max" : "min"][2]);
+          for (let axis = 0; axis < 3; axis++) { low[axis] = Math.min(low[axis], footPoint[axis]); high[axis] = Math.max(high[axis], footPoint[axis]); }
+        }
+        const floor = solids.supportAt((low[0] + high[0]) / 2, (low[2] + high[2]) / 2, Infinity, 0,
+          Math.hypot(high[0] - low[0], high[2] - low[2]) / 2);
+        lift = Math.max(lift, floor - low[1]);
+      }
+      c.root.position.y += lift; initialFloor += lift;
+    }
+    const elevated = initialFloor - B.island.surfaceAt(victim.x, victim.z);
+    const y = C.supportAt(e, start.x, start.z, B.island.surfaceAt(start.x, start.z), BL.clankers.PROP_STEP, board.rotation.y + Math.PI);
+    Object.assign(e.root.position, { x: start.x, y, z: start.z });
+    Object.assign(e, { active: true, controlled: false, mode: "chilling", phase: "chill", route: "", fromSite: -1,
+      pendingSite: -1, lounge: "", loungeDepart: false, loungeRoof: false, parked: false, biped: false,
+      recover: 0, rest: 0, heading: board.rotation.y + Math.PI, speed: 0, pound: 0, beat: 0, stand: 0,
+      footprintMode: "walk", radius: BL.clankers.WALK_RADIUS, height: BL.clankers.WALK_HEIGHT });
+    Object.assign(e.drive, { airborne: false, passiveFall: false, grounded: true, resume: false, vx: 0, vy: 0, vz: 0, motionRecover: 0, motionEnvelope: false });
+    e.jump.active = e.climb.active = e.fire.burning = e.fire.rolling = false; e.fire.rollRecover = 0;
+    Object.assign(e.motion, { climb: 0, climbBlend: NaN, mantle: 0, roll: 0, charge: 0, supportOffset: 0,
+      landing: 0, takeoff: 0, lab: false, labRunIn: false, labWork: "", smash: false, dragging: false, throwProgress: 0 });
+    e.health.value = e.health.max; e.stuck.recoveries = 0;
+    e.gorilla.poseManaged(2, start.x, y, start.z, e.heading, 0, false, false, "", e.motion);
+    S.updateWorld(root); solids.sync(); companions.sync();
+    const point = new Float64Array(3), boardBounds = S.boundsOf(board.geometry);
+    BL.math.mat4.transformPoint(point, board.world, 0, boardBounds.max[1], 0);
+    const boardTop = point[1], parts = ["legR", "legL", "torso", "armR", "armL", "head"].map(name => c.parts[name]);
+    // Use the rendered body bounds to identify an already blocked limb, or
+    // a small proposed translation into a prop, without replacing live movement.
+    const blockedParts = (actor, dx = 0, dy = 0, dz = 0) => {
+      const blocked = [];
+      for (const name of ["legR", "legL", "torso", "armR", "armL", "head"]) {
+        const part = actor.parts[name], bounds = S.boundsOf(part.geometry);
+        const low = [Infinity, Infinity, Infinity], high = [-Infinity, -Infinity, -Infinity];
+        for (let corner = 0; corner < 8; corner++) {
+          BL.math.mat4.transformPoint(point, part.world, bounds[corner & 1 ? "max" : "min"][0],
+            bounds[corner & 2 ? "max" : "min"][1], bounds[corner & 4 ? "max" : "min"][2]);
+          for (let axis = 0; axis < 3; axis++) { low[axis] = Math.min(low[axis], point[axis]); high[axis] = Math.max(high[axis], point[axis]); }
+        }
+        const x = (low[0] + high[0]) / 2, y = low[1] + 0.025, z = (low[2] + high[2]) / 2;
+        const radius = Math.hypot(high[0] - low[0], high[2] - low[2]) / 2, height = high[1] - y;
+        if (!solids.segmentClear(x, y, z, x + dx, y + dy, z + dz, radius, height)) blocked.push({ name, low, high });
+      }
+      return blocked;
+    };
+    const initialClearance = { target: blockedParts(c), second: blockedParts(second), gorilla: blockedParts(e.gorilla),
+      targetBody: solids.clearAt(victim.x, initialFloor + 0.025, victim.z, 0.3, c.bodyHeight) };
+    const bodyBottom = () => {
+      let bottom = Infinity;
+      for (const part of parts) {
+        const b = S.boundsOf(part.geometry);
+        for (let corner = 0; corner < 8; corner++) {
+          BL.math.mat4.transformPoint(point, part.world, b[corner & 1 ? "max" : "min"][0], b[corner & 2 ? "max" : "min"][1], b[corner & 4 ? "max" : "min"][2]);
+          bottom = Math.min(bottom, point[1]);
+        }
+      }
+      return bottom;
+    };
+    const selected = H.selectDebugGorilla(e), history = [], contactBlocks = [];
+    let grabbed = false, held = 0, windup = 0, retained = true, dropped = false, launched = false, resumed = false;
+    let dragDistance = 0, maxCharge = 0, crossingBottom = null, leftLand = false, lastPhase = "", lastTarget = "", lastBlocked = "", launch = null;
+    let previousX = e.root.position.x, previousZ = e.root.position.z;
+    let previousDepth = (c.root.position.x - board.position.x) * fx + (c.root.position.z - board.position.z) * fz;
+    let release = null, frame = 0, grabHeld = true, rodeBeforeCapture = false, maximumUnsupportedRise = 0;
+    const initialFeetGap = initialFloor - e.root.position.y;
+    let contactFeetGap = null, closestContact = null, droppedAt = null, error = null;
+    let end = null, alive = false, recoveries = 0;
+    const updateCrew = B.crew.update;
+    // Observe the real launch before this frame's gravity and collision move
+    // the Ooga. Do not infer the release angle from the stored aim direction.
+    B.crew.update = (...args) => {
+      if (!release && c.leap.thrown) {
+        const p = c.root.position, vx = c.leap.vx, vy = c.hopV, vz = c.leap.vz;
+        release = { frame, x: p.x, y: p.y, z: p.z, vx, vy, vz, charge: e.capture.charge,
+          angle: Math.atan2(vy, Math.hypot(vx, vz)) * 180 / Math.PI, speed: Math.hypot(vx, vy, vz) };
+      }
+      return updateCrew.apply(B.crew, args);
+    };
+    try { for (; frame < Math.round(20 / dt); frame++) {
+      const feetBefore = c.root.position.y - c.baseY;
+      B.advance(dt, dt);
+      const r = e.rage, capture = e.capture, p = e.root.position, q = c.root.position;
+      const holding = capture.cave === c && c.grabbedBy === e;
+      if (!release && (r.target === c || holding)) grabHeld &&= r.grabHeld;
+      if (!grabbed && !holding) {
+        const feet = q.y - c.baseY;
+        const floor = Math.max(B.island.surfaceAt(q.x, q.z), solids.supportAt(q.x, q.z, Infinity, 0, 0.3));
+        const back = companions.supportAt(q.x, q.z, feet, 0.05, 0.3);
+        const distance = Math.hypot(q.x - p.x, q.z - p.z);
+        if (r.target === c && (!closestContact || distance < closestContact.distance)) closestContact = { frame, distance, feet, floor, back,
+          gap: feet - p.y, x: p.x, y: p.y, z: p.z, target: r.target?.traits.name || null, grabHeld: r.grabHeld,
+          blocked: capture.blocked, blockedPart: capture.blockedPart, blockedStage: capture.blockedStage };
+        const blockedKey = [capture.blocked, capture.blockedPart, capture.blockedStage].join(":");
+        if (r.target === c && blockedKey !== lastBlocked && contactBlocks.length < 12) {
+          contactBlocks.push({ frame, blocked: capture.blocked, blockedPart: capture.blockedPart, blockedStage: capture.blockedStage, distance, feet, gap: feet - p.y,
+            x: p.x, y: p.y, z: p.z, heading: e.heading, approachInset: r.approachInset });
+          lastBlocked = blockedKey;
+        }
+        maximumUnsupportedRise = Math.max(maximumUnsupportedRise, feet - floor);
+        rodeBeforeCapture ||= feet > floor + 0.1 && Math.abs(back - feet) < 0.05;
+      }
+      const target = r.target?.traits.name || null;
+      if (r.phase !== lastPhase || target !== lastTarget) {
+        history.push({ frame, phase: r.phase, target, x: p.x, y: p.y, z: p.z }); lastPhase = r.phase; lastTarget = target;
+      }
+      if (holding) {
+        if (!grabbed) contactFeetGap = feetBefore - p.y;
+        if (grabbed) dragDistance += Math.hypot(p.x - previousX, p.z - previousZ);
+        grabbed = true; held++; retained &&= r.grabHeld && e.motion.dragging;
+        maxCharge = Math.max(maxCharge, r.throwCharge);
+        if (capture.throwing) { windup++; retained &&= !r.throwHeld && r.grabHeld; }
+      }
+      if (grabbed && !holding && !launched) {
+        if (release) { launched = true; launch = release; }
+        else {
+          dropped = true; droppedAt = { frame, phase: r.phase, grabHeld: r.grabHeld, throwing: capture.throwing,
+            captive: capture.cave?.traits.name || null, x: q.x, y: q.y - c.baseY, z: q.z };
+        }
+      }
+      if (launched) {
+        const depth = (q.x - board.position.x) * fx + (q.z - board.position.z) * fz;
+        if (previousDepth > 0 && depth <= 0) crossingBottom = bodyBottom();
+        leftLand ||= depth < 0 && !B.island.onLand(q.x, q.z) && c.leap.thrown;
+        resumed ||= r.phase === "hunt" && r.target === second;
+        previousDepth = depth;
+      }
+      previousX = p.x; previousZ = p.z;
+      if (dropped || leftLand && resumed) break;
+    } } catch (caught) {
+      error = { message: String(caught), stack: caught.stack || "", frame };
+    } finally {
+      B.crew.update = updateCrew;
+      try {
+        const arm = e.gorilla.parts.armL, armBounds = S.boundsOf(arm.geometry);
+        BL.math.mat4.transformPoint(point, arm.world, armBounds.center[0], armBounds.min[1] + 0.08, armBounds.center[2]);
+        const gripY = point[1], p = e.root.position, steps = [];
+        if (e.capture.cave && !launched) for (let direction = 0; direction < 8; direction++) {
+          const dx = Math.sin(direction * Math.PI / 4) * 0.1, dz = Math.cos(direction * Math.PI / 4) * 0.1;
+          const ny = C.supportAt(e, p.x + dx, p.z + dz, p.y, BL.clankers.PROP_STEP, e.heading);
+          steps.push({ direction, support: ny, rise: ny - p.y,
+            dragClear: H.rageDragClear(e, p.x, p.y, p.z, p.x + dx, ny, p.z + dz, e.heading, e.heading),
+            propBlockedParts: Number.isFinite(ny) ? blockedParts(e.capture.cave, dx, ny - p.y, dz).map(part => part.name) : null });
+        }
+        end = { phase: e.rage.phase, route: e.route, count: e.rage.countPath, index: e.rage.index, pending: e.rage.pending,
+          blocked: e.rage.blocked, reason: e.rage.reason, target: e.rage.target?.traits.name || null,
+          capture: { cave: e.capture.cave?.traits.name || null, autonomous: e.capture.autonomous, throwing: e.capture.throwing, blocked: e.capture.blocked,
+            blockedPart: e.capture.blockedPart, blockedStage: e.capture.blockedStage,
+            time: e.capture.time, charge: e.capture.charge, grabbedBy: c.grabbedBy?.owner.traits.name || null },
+          steps, gripY, x: e.root.position.x, y: e.root.position.y, z: e.root.position.z,
+          victim: { x: c.root.position.x, y: c.root.position.y - c.baseY, z: c.root.position.z, thrown: c.leap.thrown } };
+        alive = e.rage.active && e.rage.debug; recoveries = e.stuck.recoveries;
+      } finally {
+        try { H.selectDebugGorilla(null); }
+        finally { if (contactProp) { solids.remove(contactProp); S.removeChild(root, contactProp); solids.sync(); } }
+      }
+    }
+    const cleared = !e.rage.active && !e.rage.debug && !e.capture.cave && !e.root.matrixHighlight;
+    return { dt, fixture, error, elevated, initialClearance, initialFeetGap, contactFeetGap, closestContact, contactBlocks, droppedAt, grabHeld, rodeBeforeCapture, maximumUnsupportedRise,
+      selected, boardTop, grabbed, held, windup, retained, dropped, dragDistance, maxCharge, launched, launch,
+      crossingBottom, leftLand, resumed, alive, recoveries, cleared, history, end };
+  })(${dt}, ${JSON.stringify(fixture)})`).catch(error => ({ dt, fixture, error: { message: String(error), stack: error.stack || "" } })));
+  record("gorilla rage throw: real autonomous capture holds G through dragging and charged windup, launches over the Oogatron and off the island, then targets another nearby Ooga",
+    states.length === 6 && states.every(state => !state.error && state.selected && state.grabbed && state.held > 1 && state.windup > 1 && state.retained && !state.dropped
+      && !state.initialClearance.target.length && !state.initialClearance.second.length && !state.initialClearance.gorilla.length && state.initialClearance.targetBody
+      && state.grabHeld && !state.rodeBeforeCapture && (state.fixture !== "crate" || state.elevated > 0.7)
+      && state.dragDistance > 1.5 && state.maxCharge === 1 && state.launched && state.launch.charge === 1
+      && Math.abs(state.launch.angle - 45) <= 1 && Math.abs(state.launch.speed - 18) < 1e-6
+      && state.crossingBottom > state.boardTop && state.leftLand && state.resumed && state.alive && !state.recoveries && state.cleared),
+    JSON.stringify(states));
+} }] });
+scene("hub", { label: "gorilla traversal", query: "status=chillin&gorillamove=1", steps: [{ name: "gorilla prop traversal", why: "regression: a box lost its supporting contact before the collision body cleared its side, low props interrupted the gallop, and a stale motion envelope trapped gorillas beneath trees", run: async (b) => {
   const state = await b.evaluate(`(() => {
     const B = __ooga, S = BL.scene, root = BL.scenes.hub.root, C = B.clankers, e = C.list.find(e => e.owner.traits.name === "portlandhodl"), solids = B.headquarters.solids.props;
     B.pilot.release(true);
@@ -7901,6 +8480,110 @@ scene("hub", { label: "gorilla traversal", query: "status=chillin&gorillamove=1"
         airborne: e.drive.airborne, groundError: Math.abs(e.root.position.y - C.supportAt(e, e.root.position.x, e.root.position.z, e.root.position.y, BL.clankers.PROP_STEP, e.heading)), stuck: e.stuck.time, reason: e.stuck.reason, recoveries: e.stuck.recoveries - recoveries };
       solids.remove(intactCrate); S.removeChild(root, intactCrate); solids.sync();
     }
+    // A running crossing never exercises the stationary support-to-side transition.
+    // Stop on the same bare solid used above, turn, then leave each face and corner.
+    const departures = [], destroyed = [];
+    const box = S.createNode({ geometry: BL.hubModels.woodCrate(), position: { x: 12, y: B.island.surfaceAt(12, 0), z: 0 } });
+    const beside = S.createNode({ geometry: BL.models.box({ w: 0.5, h: 3, d: 4, color: BL.math.hexToRgb("#454545") }) });
+    S.addChild(root, box); S.addChild(root, beside); solids.add(box); solids.add(beside);
+    const onBox = (controlled, heading, dt) => {
+      C.cancelDebugMove(e); setup(7, 0, heading + Math.PI / 2); C.release();
+      box.visible = true; S.updateWorld(root); solids.sync();
+      const y = solids.supportAt(12, 0, 50, 50, 0.45);
+      Object.assign(e.root.position, { x: 12, y, z: 0 });
+      Object.assign(e, { active: true, controlled: false, mode: "chilling", phase: "chill", route: "", fromSite: -1,
+        lounge: "", loungeDepart: false, loungeRoof: false, parked: false, recover: controlled ? 0 : 0.3, rest: 120,
+        heading: heading + Math.PI / 2, speed: 0, goalX: 12, goalY: y, goalZ: 0 });
+      Object.assign(e.roam, { count: 0, index: 0, wall: false, detour: false, departPending: false, propDeparture: false,
+        nextChoice: Infinity, targetX: NaN, targetY: NaN, targetZ: NaN, progressTime: 0 });
+      e.owner.override = e.owner.state = "chilling"; e.drive.resume = e.drive.airborne = false;
+      e.stuck.recoveries = 0;
+      e.gorilla.poseManaged(2, 12, y, 0, e.heading, 0, false, false, "", e.motion);
+      if (controlled) C.possess(e);
+      for (let frame = 0; frame < Math.ceil(0.25 / dt); frame++) {
+        if (controlled) C.control({ x: 0, z: 0, heading });
+        C.update(dt);
+      }
+      return y;
+    };
+    for (const controlled of [false, true]) for (let side = 0; side < 8; side++) {
+      const heading = side * Math.PI / 4, dx = Math.sin(heading), dz = Math.cos(heading), dt = [1 / 30, 1 / 60, 1 / 120][side % 3];
+      Object.assign(beside.position, { x: 12 + dz * 3, y: box.position.y + 1.5, z: -dx * 3 }); beside.rotation.y = heading;
+      const y = onBox(controlled, heading, dt), start = { ...e.root.position };
+      if (!controlled) {
+        e.rest = e.recover = 0; e.goalX = 12 + dx * 4; e.goalY = box.position.y; e.goalZ = dz * 4;
+      }
+      let largestStep = 0, previous = { ...e.root.position }, previousVisibleY = e.root.position.y + e.gorilla.root.children[0].position.y;
+      for (let t = 0; t < 6; t += dt) {
+        if (controlled) C.control({ x: dx, z: dz, heading, run: false });
+        C.update(dt);
+        const p = e.root.position;
+        const visibleY = p.y + e.gorilla.root.children[0].position.y;
+        largestStep = Math.max(largestStep, Math.hypot(p.x - previous.x, visibleY - previousVisibleY, p.z - previous.z));
+        previousVisibleY = visibleY;
+        Object.assign(previous, p);
+        if (Math.hypot(p.x - 12, p.z) > 3 && !e.drive.airborne) break;
+      }
+      const p = e.root.position;
+      departures.push({ controlled, side, dt, y, stopped: Math.hypot(start.x - 12, start.z) < 0.1 && Math.abs(start.y - y) < 0.1,
+        distance: Math.hypot(p.x - 12, p.z), along: (p.x - 12) * dx + p.z * dz, largestStep,
+        groundError: Math.abs(p.y - C.supportAt(e, p.x, p.z, p.y, BL.clankers.PROP_STEP, e.heading)),
+        airborne: e.drive.airborne, recoveries: e.stuck.recoveries });
+    }
+    beside.visible = false;
+    // Exercise the same support departure with the faster autonomous gallop.
+    // Only the clanker advances: its eligible target stays at a fixed, clear point.
+    const rageDepartures = [], serialBefore = e.rage.serial, serialsBefore = e.rage.serials.slice(), target = e.owner;
+    B.crew.prepareDragged(target); target.camp.seat = null; target.camp.rolling = target.camp.burning = false;
+    target.root.quaternion = null; target.root.visible = true; target.bedTravel.mode = "";
+    for (const kind of ["crate", "pebble"]) {
+      solids.remove(box);
+      box.geometry = kind === "crate" ? BL.hubModels.woodCrate() : BL.hubModels.rock(0);
+      Object.assign(box.scale, kind === "crate" ? { x: 1, y: 1, z: 1 } : { x: 0.45, y: 0.18, z: 0.45 });
+      solids.add(box);
+      for (let side = 0; side < 8; side++) {
+        const heading = side * Math.PI / 4, dx = Math.sin(heading), dz = Math.cos(heading), dt = [1 / 30, 1 / 60, 1 / 120][side % 3];
+        const y = onBox(false, heading, dt);
+        e.recover = e.rest = 0; e.heading = heading;
+        Object.assign(target.root.position, { x: 12 + dx * 6, y: B.island.surfaceAt(12 + dx * 6, dz * 6) + target.baseY, z: dz * 6 });
+        S.updateWorld(root);
+        for (let hit = 0; hit < 42; hit++) C.bananaHit(e, target, e.rage.serial + 1);
+        let peakSpeed = 0, largestStep = 0, moving = 0, quadruped = true, previous = { ...e.root.position };
+        let previousVisibleY = e.root.position.y + e.gorilla.root.children[0].position.y;
+        for (let t = 0; t < 6; t += dt) {
+          C.update(dt);
+          const p = e.root.position, travel = Math.hypot(p.x - previous.x, p.z - previous.z);
+          peakSpeed = Math.max(peakSpeed, travel / dt);
+          const visibleY = p.y + e.gorilla.root.children[0].position.y;
+          largestStep = Math.max(largestStep, Math.hypot(travel, visibleY - previousVisibleY)); previousVisibleY = visibleY;
+          if (travel > 1e-5) { moving++; quadruped &&= !e.biped && e.gorilla.debug.gait === "gallop"; }
+          Object.assign(previous, p);
+          if (Math.hypot(p.x - 12, p.z) > 3 && !e.drive.airborne) break;
+        }
+        const p = e.root.position;
+        rageDepartures.push({ kind, side, dt, y, active: e.rage.active, moving, quadruped, peakSpeed, largestStep,
+          distance: Math.hypot(p.x - 12, p.z), along: (p.x - 12) * dx + p.z * dz,
+          groundError: Math.abs(p.y - C.supportAt(e, p.x, p.z, p.y, BL.clankers.PROP_STEP, e.heading)),
+          airborne: e.drive.airborne, recoveries: e.stuck.recoveries });
+        C.possess(e); C.release();
+      }
+    }
+    // Synthetic impact identities must not hide the later real-projectile check.
+    e.rage.serial = serialBefore; e.rage.serials.set(serialsBefore); target.root.visible = false;
+    solids.remove(box); box.geometry = BL.hubModels.woodCrate(); Object.assign(box.scale, { x: 1, y: 1, z: 1 }); solids.add(box);
+    for (const controlled of [false, true]) {
+      const dt = 1 / 60, y = onBox(controlled, 0, dt);
+      box.visible = false; S.updateWorld(root); solids.sync();
+      let fell = false, largestStep = 0, previous = e.root.position.y;
+      for (let frame = 0; frame < 180; frame++) {
+        if (controlled) C.control({ x: 0, z: 0 });
+        C.update(dt); fell ||= e.drive.airborne;
+        largestStep = Math.max(largestStep, Math.abs(e.root.position.y - previous)); previous = e.root.position.y;
+      }
+      destroyed.push({ controlled, fell, drop: y - e.root.position.y, largestStep, airborne: e.drive.airborne,
+        groundError: Math.abs(e.root.position.y - C.supportAt(e, e.root.position.x, e.root.position.z, e.root.position.y, BL.clankers.PROP_STEP, e.heading)), recoveries: e.stuck.recoveries });
+    }
+    solids.remove(box); solids.remove(beside); S.removeChild(root, box); S.removeChild(root, beside); solids.sync();
     const escapeRock = S.createNode({ geometry: BL.hubModels.rock(0), position: { x: 12, y: B.island.surfaceAt(12, 0), z: 0 } });
     S.addChild(root, escapeRock); solids.add(escapeRock); S.updateWorld(root); solids.sync();
     C.release();
@@ -8006,7 +8689,7 @@ scene("hub", { label: "gorilla traversal", query: "status=chillin&gorillamove=1"
     const detour = { detoured, crossed, arrived: Math.hypot(e.root.position.x - 17, e.root.position.z - 10) < 0.18,
       recoveries: e.stuck.recoveries - recoveries, grounded: !e.climb.active && !e.jump.active && !e.drive.airborne };
     solids.remove(screen); S.removeChild(root, screen); solids.sync();
-    return { traversals, intactProp, raisedProp, jumps, canopy, detour };
+    return { traversals, intactProp, departures, rageDepartures, rageSpeed: BL.clankers.RAGE_SPEED, destroyed, raisedProp, jumps, canopy, detour };
   })()`);
   const props = state.traversals.every(row => row.x > 16 && row.maxY >= 0.75 && row.maxY <= 1.05 && !row.airborne && !row.stopped && row.maxVisibleStep < 0.25);
   const intactProp = state.intactProp.assignedExit && Math.hypot(state.intactProp.x - 12, state.intactProp.z) > 1.5
@@ -8023,7 +8706,91 @@ scene("hub", { label: "gorilla traversal", query: "status=chillin&gorillamove=1"
   });
   const canopy = state.canopy.lowFrames > 0 && state.canopy.envelopeCleared && !state.canopy.bipedFrames && state.canopy.movingFrames > 10 && state.canopy.endX < state.canopy.startX - 1;
   const detour = state.detour.detoured && state.detour.arrived && !state.detour.crossed && !state.detour.recoveries && state.detour.grounded;
-  record("gorilla traversal: crates, barrels and rocks keep a continuous grounded gallop, an autonomous gorilla leaves intact crates and destroyed raised props without relocation, fresh presses jump immediately and once more in air without held repeats or cancellation exploits, low cover permits an all-fours retreat, and a stalled stroller walks around tall scenery", props && intactProp && raisedProp && jump && canopy && detour, JSON.stringify(state));
+  const departures = state.departures.length === 16 && state.departures.every(row => row.y > 0.5 && row.stopped
+    && row.distance > 2.5 && row.along > 2 && row.largestStep < 0.3 && row.groundError < 0.05 && !row.airborne && !row.recoveries);
+  const destroyed = state.destroyed.length === 2 && state.destroyed.every(row => row.fell && row.drop > 0.5
+    && row.largestStep < 0.3 && row.groundError < 0.05 && !row.airborne && !row.recoveries);
+  const rage = state.rageSpeed === 12 && state.rageDepartures.length === 16 && state.rageDepartures.every(row => row.active
+    && row.distance > 3 && row.along > 2.5 && row.moving > 0 && row.quadruped && row.peakSpeed > 10
+    && row.peakSpeed <= state.rageSpeed + 1e-5 && row.largestStep < state.rageSpeed * row.dt + 0.15
+    && row.groundError < 0.05 && !row.airborne && !row.recoveries);
+  record("gorilla traversal: crates, barrels and rocks keep a grounded gallop; an autonomous gorilla leaves intact production crates without relocation; ordinary and controlled gorillas leave every box face and corner, rage departs crates and pebbles on four limbs at 12 m/s, and destroyed support falls normally; jumps, low cover and scenery detours retain their behavior", props && intactProp && departures && rage && destroyed && raisedProp && jump && canopy && detour, JSON.stringify(state));
+} }, { name: "gorilla rage contacts", why: "rule: only real banana impacts may count, and an autonomous ground capture must preserve visitor ownership and restore controls on every release", run: async (b) => {
+  const state = await b.evaluate(`(() => {
+    const B = __ooga, C = B.clankers, H = BL.scenes.hub.debug, S = BL.scene, c = B.cavemen.get("portlandhodl");
+    const e = C.list.find(entry => entry.owner === c), other = C.list.find(entry => entry.owner.traits.name === "w-s-bitcoin");
+    B.pilot.release(true); B.clankerPlay.release(); C.release();
+    for (const entry of C.list) {
+      entry.owner.override = entry.owner.state = entry === e ? "chilling" : "away";
+      entry.active = entry.root.visible = entry === e;
+    }
+    for (const cave of B.cavemen.values()) cave.root.visible = cave === c;
+    for (const prop of B.props) prop.node.visible = false;
+    Object.assign(e.root.position, { x: -8, y: 0, z: 8 });
+    Object.assign(e, { active: true, mode: "chilling", phase: "chill", route: "", fromSite: -1, controlled: false,
+      lounge: "", loungeDepart: false, parked: false, biped: false, recover: 1000, heading: 0, speed: 0, goalX: -8, goalY: 0, goalZ: 8 });
+    e.jump.active = e.climb.active = e.drive.airborne = e.drive.resume = e.fire.burning = e.fire.rolling = false;
+    e.health.value = e.health.max; e.health.delay = 0;
+    Object.assign(e.motion, { lab: false, climb: 0, climbBlend: NaN, mantle: 0, roll: 0, supportOffset: 0, landing: 0, takeoff: 0 });
+    e.gorilla.poseManaged(2, -8, 0, 8, 0, 0, false, false, "", e.motion);
+    c.override = c.state = "chilling"; c.root.visible = true; c.root.quaternion = null; c.walk = null; c.bedTravel.mode = "";
+    c.camp.seat = null; c.camp.burning = c.camp.rolling = c.camp.panic.active = c.roofEscape.active = false;
+    c.health.stunned = false; c.hop = c.hopV = c.jumps = c.leap.vx = c.leap.vz = 0;
+    c.act.kind = "idle"; c.act.until = Infinity;
+    B.pilot.possess(c, true); B.crew.relocatePlayer({ x: -8, y: 0, z: 13 }, Math.PI);
+    B.crew.configureWeapon(c, 2, "unlimited");
+    S.updateWorld(BL.scenes.hub.root); B.headquarters.solids.props.sync();
+    const torso = e.gorilla.parts.torso, bounds = S.boundsOf(torso.geometry), at = new Float64Array(3);
+    BL.math.mat4.transformPoint(at, torso.world, bounds.center[0], bounds.center[1], bounds.center[2]);
+    const target = { x: at[0], y: at[1], z: at[2] }, startHealth = e.health.value;
+    const fired = B.crew.fireWeapon(c, target, 1); B.advance(0.35, 1 / 60);
+    const counted = e.rage.count === 1 && e.health.value < startHealth;
+    const count = e.rage.count, origin = { x: 0, y: 0, z: 0 }; B.crew.weaponOrigin(origin, c);
+    B.crew.showShot(c, origin.x, origin.y, origin.z, target.x, target.y, target.z);
+    B.advance(0.35, 1 / 60); C.damage(e, 1);
+    const excluded = e.rage.count === count;
+    const wave = B.renderOpts.matrix, waveBefore = [wave.active, wave.livingGlobal, wave.permanentCave];
+    for (let serial = 1000; serial < 1041; serial++) C.bananaHit(e, c, serial);
+    const active = e.rage.active && e.rage.target === c;
+    const body = ["armL", "armR", "legL", "legR", "torso", "head"].map(name => e.gorilla.parts[name]);
+    const highlighted = e.root.matrixHighlight && body.every(part => S.matrixModeOf(part) === 2.25)
+      && waveBefore.every((value, i) => value === [wave.active, wave.livingGlobal, wave.permanentCave][i]);
+    const hand = new Float64Array(3);
+    const placeForGrab = () => {
+      e.recover = 0; e.biped = false; e.speed = 0;
+      e.gorilla.poseManaged(2, e.root.position.x, e.root.position.y, e.root.position.z, e.heading, 0, false, false, "", e.motion);
+      S.updateWorld(BL.scenes.hub.root);
+      const arm = e.gorilla.parts.armL, b = S.boundsOf(arm.geometry);
+      BL.math.mat4.transformPoint(hand, arm.world, b.center[0], b.min[1] + 0.08, b.center[2]);
+      B.crew.relocatePlayer({ x: hand[0], y: e.root.position.y, z: hand[2] }, e.heading);
+      S.updateWorld(BL.scenes.hub.root);
+    };
+    placeForGrab();
+    const camera = { ...B.camera.position };
+    const grabbed = H.rageGrab(e, c), identity = B.pilot.player === c && B.crew.player === c
+      && Math.hypot(B.camera.position.x - camera.x, B.camera.position.y - camera.y, B.camera.position.z - camera.z) < 1e-6;
+    other.rage.active = true;
+    const exclusive = !H.rageGrab(other, c) && !H.rageGrab(e, e.owner) && e.capture.cave === c;
+    other.rage.active = false;
+    const jump = B.crew.jumpPlayer(), shot = B.crew.fireWeapon(c, target, 1), tomato = B.crew.throwTomato();
+    B.crew.thrust(true); B.crew.holdRocketJump(true);
+    const suppressed = !jump && !shot && !tomato && !c.jet?.thrust && !c.rocketJumpHeld && c.grabbedBy === e;
+    const dropped = H.rageRelease(e) && !c.grabbedBy && !e.capture.cave && !e.motion.dragging
+      && B.pilot.player === c && B.crew.player === c && !c.root.quaternion && Math.abs(c.root.rotation.x) < 1e-6;
+    placeForGrab();
+    const preparing = H.rageGrab(e, c) && H.rageThrow(e, 0, 1, 1) && e.capture.throwing
+      && Math.abs(e.capture.aim.dy - Math.hypot(e.capture.aim.dx, e.capture.aim.dz)) < 1e-6;
+    const account = BL.net.state.me; BL.net.state.me = { id: "fixture" }; C.update(1 / 60);
+    const cancelled = !e.rage.active && !e.capture.cave && !c.grabbedBy && !c.leap.thrown
+      && B.pilot.player === c && B.crew.player === c && !e.root.matrixHighlight && body.every(part => S.matrixModeOf(part) === 2);
+    BL.net.state.me = account;
+    B.crew.configureWeapon(c, 2, "unlimited"); c.weapon.cooldown = 0;
+    const restored = B.crew.fireWeapon(c, { x: c.root.position.x, y: c.root.position.y + 2, z: c.root.position.z + 5 }, 1);
+    B.crew.clearProjectiles(); B.pilot.release(true);
+    return { fired, counted, excluded, active, highlighted, grabbed, identity, exclusive, suppressed, dropped, preparing, cancelled, restored };
+  })()`);
+  record("gorilla rage contacts: a physical banana counts once while replay and generic damage do not; a clear ground grab preserves visitor ownership, suppresses conflicting controls, rejects duplicate captors and restores controls on drop and signed-in throw cancellation",
+    Object.values(state).every(Boolean), JSON.stringify(state));
 } }, { name: "gorilla camera modes", why: "regression: controlled gorillas lacked first-person and birds-eye cameras, carry/combat camera controls, and a combat crosshair", run: async (b) => {
   const state = await b.evaluate(`(() => {
     const B = __ooga, P = B.clankerPlay, C = B.clankers, e = C.list.find(e => e.owner.traits.name === "portlandhodl");
@@ -8162,18 +8929,47 @@ scene("hub", { label: "gorilla traversal", query: "status=chillin&gorillamove=1"
     }
     if (!validStart) return { fixture: false, reason: "No supported clear roof start", requestedStart };
     S.updateWorld(root);
-    const moveTo = (hit) => {
+    const moveTo = (hit, dt = 1 / 30, controlled = false, reached = hit) => {
       const from = { ...e.root.position }, recoveries = e.stuck.recoveries;
-      const accepted = C.debugMove(e, hit.x, hit.y, hit.z, hit.normal);
-      let seconds = 0, maxStep = 0, climbing = 0, verticalExcursion = 0, overlap = null, stayedHanging = e.climb.active;
-      let px = from.x, py = from.y, pz = from.z;
-      while (accepted && seconds < 45 && e.debugMove.status !== "arrived" && e.debugMove.status !== "blocked") {
-        B.advance(1 / 30, 1 / 30); seconds += 1 / 30;
+      const accepted = controlled ? C.possess(e) : C.debugMove(e, hit.x, hit.y, hit.z, hit.normal);
+      let seconds = 0, maxStep = 0, climbing = 0, verticalExcursion = 0, overlap = null, stayedHanging = e.climb.active, gripFrames = 0, lostGrip = null;
+      let controlStatus = "climbing", px = from.x, py = from.y, pz = from.z, lastFace = null;
+      const face = { node: null, owner: null, x: 0, y: 0, z: 0, normal: { x: 0, y: 0, z: 0 } };
+      const depth = { samples: 0, ascending: { inward: 0, outward: 0 }, descending: { inward: 0, outward: 0 }, sideways: { inward: 0, outward: 0 } };
+      const status = () => controlled ? controlStatus : e.debugMove.status;
+      while (accepted && seconds < 45 && status() !== "arrived" && status() !== "blocked") {
+        if (controlled) {
+          const p = e.root.position, sx = Math.sin(e.climb.heading), sz = Math.cos(e.climb.heading);
+          const side = (reached.x - p.x) * sz - (reached.z - p.z) * sx, vertical = reached.y - p.y;
+          if (!e.climb.active) { controlStatus = "blocked"; break; }
+          if (Math.abs(side) < 0.12 && Math.abs(vertical) < 0.12) { controlStatus = "arrived"; break; }
+          C.control({ climbSide: Math.max(-1, Math.min(1, side)), climbAxis: Math.max(-1, Math.min(1, vertical)), run: dt === 1 / 120 });
+        }
+        B.advance(dt, dt); seconds += dt;
         const p = e.root.position;
         maxStep = Math.max(maxStep, Math.hypot(p.x - px, p.y - py, p.z - pz));
         verticalExcursion = Math.max(verticalExcursion, Math.abs(p.y - from.y));
         px = p.x; py = p.y; pz = p.z;
         if (e.climb.active) climbing++; else stayedHanging = false;
+        if (e.climb.active && e.gorilla.debug.climbing > 0.98 && !e.climb.mountPending && !e.climb.handoffDirection) {
+          const mask = e.gorilla.climbHandContactMask(), required = 3 & ~(Number.isFinite(e.motion.climbGripX) ? e.motion.climbGripRelease : 0);
+          gripFrames++;
+          if (!lostGrip && (mask & required) !== required) lostGrip = { seconds, mask, required, x: p.x, y: p.y, z: p.z };
+          // Measure the actual rendered face, independently of the controller's
+          // root corrections. A same-plane traverse must not be described as
+          // inward/outward depth coverage merely because its palms held on.
+          const sx = Math.sin(e.climb.heading), sz = Math.cos(e.climb.heading);
+          if (ray.ray(face, p.x - sx * 2, p.y + 1.1, p.z - sz * 2, sx, 0, sz, 6) && Math.abs(face.normal.y) < 0.2) {
+            depth.samples++;
+            if (lastFace && sx * lastFace.sx + sz * lastFace.sz > 0.98) {
+              const delta = (face.x - lastFace.x) * sx + (face.z - lastFace.z) * sz;
+              const direction = Math.abs(e.motion.climbDirection) >= Math.abs(e.motion.climbSide) && Math.abs(e.motion.climbDirection) > 0.001
+                ? e.motion.climbDirection > 0 ? "ascending" : "descending" : "sideways";
+              if (Math.abs(delta) > 0.025) depth[direction][delta > 0 ? "inward" : "outward"]++;
+            }
+            lastFace = { x: face.x, z: face.z, sx, sz };
+          } else lastFace = null;
+        } else lastFace = null;
         S.updateWorld(e.root, root.world);
         if (!overlap) S.traverseVisible(e.root, node => {
           if (overlap || !node.geometry) return;
@@ -8191,8 +8987,10 @@ scene("hub", { label: "gorilla traversal", query: "status=chillin&gorillamove=1"
         });
       }
       const p = e.root.position, dx = p.x - hit.x, dz = p.z - hit.z;
-      return { accepted, seconds, from, target: { x: hit.x, y: hit.y, z: hit.z }, end: { ...p },
-        status: e.debugMove.status, reason: e.debugMove.reason, climbing, hanging: e.climb.active, stayedHanging,
+      if (controlled) C.cancelInput();
+      return { accepted, seconds, dt, controlled, depth, gripFrames, lostGrip, from, target: { x: hit.x, y: hit.y, z: hit.z }, end: { ...p },
+        status: status(), reason: controlled ? controlStatus === "blocked" ? "Controlled climb detached" : "" : e.debugMove.reason,
+        climbing, hanging: e.climb.active, stayedHanging,
         lateral: Math.abs((p.x - from.x) * cr - (p.z - from.z) * sr), drop: from.y - p.y, verticalExcursion,
         tangentError: Math.abs(dx * hit.normal.z - dz * hit.normal.x), outwardGap: dx * hit.normal.x + dz * hit.normal.z,
         verticalError: Math.abs(p.y - hit.y), maxStep, overlap, recoveries: e.stuck.recoveries - recoveries };
@@ -8204,21 +9002,31 @@ scene("hub", { label: "gorilla traversal", query: "status=chillin&gorillamove=1"
     const p = e.root.position, sideX = (p.x - mouth.x) * cr - (p.z - mouth.z) * sr - 2.8;
     const secondHit = first.status === "arrived" && first.hanging && ray.ray(sideways,
       mouth.x + cr * sideX + sr * 8, target.y, mouth.z - sr * sideX + cr * 8, -sr, 0, -cr, 20);
-    const second = secondHit ? moveTo(sideways) : null;
-    C.cancelDebugMove(e);
+    const second = secondHit ? moveTo(sideways, 1 / 60) : null;
+    const third = second && second.status === "arrived" && second.hanging ? moveTo(target, 1 / 120) : null;
+    // Possession retains this real hanging state. Repeat the destinations
+    // already reached above through public climbing inputs in both directions,
+    // including the running controller's two grip proofs per rendered frame.
+    const controlled = [];
+    if (third && third.status === "arrived" && third.hanging) {
+      controlled.push(moveTo(sideways, 1 / 60, true, second.end));
+      if (controlled[0].status === "arrived" && controlled[0].hanging) controlled.push(moveTo(target, 1 / 120, true, third.end));
+    }
+    C.release(); C.cancelDebugMove(e);
     // Campaign curated-0002 reached this c11 rim with both fists above its
     // stone. Check the actual rendered palms throughout a grip cycle, separate
     // from the planner's arrival status and its collision-envelope samples.
     Object.assign(e.motion, { climb: 1, climbBlend: 1, climbDirection: -0.6255252611070319,
-      climbSide: -0.6255252611070318, mantle: 0, supportOffset: 0 });
+      climbSide: -0.6255252611070318, mantle: 0, supportOffset: 0,
+      climbGripX: NaN, climbGripY: NaN, climbGripZ: NaN, climbGripRelease: 0 });
     const grips = [], gripHit = { node: null, owner: null, x: 0, y: 0, z: 0, normal: { x: 0, y: 0, z: 0 } }; let poseMs = 0, previewMs = 0;
-    for (let sample = 0; sample < 13; sample++) {
+    for (const dt of [1 / 30, 1 / 60, 1 / 120]) for (let sample = 0; sample < 13; sample++) {
       e.motion.climbStride = -4.118063882033883 + sample * 0.1;
       const now = performance.now();
       e.gorilla.poseManaged(2, -9.302193461208958, 4.39795073400838, -18.257134086425605, Math.PI, 0, false, false, "", e.motion);
       poseMs += performance.now() - now;
       const previewStart = performance.now(), p = e.root.position;
-      const previewClear = e.gorilla.climbPoseClear(1 / 30, p.x, p.y, p.z, Math.PI, e.motion, solid, clearProps, e);
+      const previewClear = e.gorilla.climbPoseClear(dt, p.x, p.y, p.z, Math.PI, e.motion, solid, clearProps, e);
       previewMs += performance.now() - previewStart;
       S.updateWorld(e.root, root.world);
       let gap = Infinity, overlap = null;
@@ -8238,21 +9046,26 @@ scene("hub", { label: "gorilla traversal", query: "status=chillin&gorillamove=1"
           else if (ray.ray(gripHit, x, y, z, 0, 0, -1, 3)) gap = Math.min(gap, gripHit.distance);
         }
       });
-      grips.push({ gap: Number.isFinite(gap) ? gap : null, overlap, previewClear });
+      grips.push({ dt, gap: Number.isFinite(gap) ? gap : null, overlap, previewClear });
     }
     return { fixture: start.y > 3 && Math.abs(target.normal.y) < 0.2,
-      first, secondFixture: !!secondHit && Math.abs(sideways.normal.y) < 0.2, second, grips, poseMs, previewMs };
+      first, secondFixture: !!secondHit && Math.abs(sideways.normal.y) < 0.2, second, third, controlled, grips, poseMs, previewMs };
   })()`);
   const safeArrival = row => row && row.accepted && row.status === "arrived" && row.hanging && row.climbing > 15
     && row.tangentError <= 0.8 && row.outwardGap > 0.3 && row.outwardGap < 2 && row.verticalError < 0.5
-    && row.maxStep < 0.22 && !row.overlap && !row.recoveries;
+    && row.maxStep < 0.22 && row.gripFrames > 0 && !row.lostGrip && !row.overlap && !row.recoveries;
   record("gorilla wall destination: a roof gorilla reaches the clicked lower lateral wall grip through continuous climbing without relocation or terrain penetration",
     state.fixture && safeArrival(state.first) && state.first.lateral > 3.5 && state.first.drop > 1.5, JSON.stringify(state.first || state));
-  record("gorilla wall destination: a second click moves the hanging gorilla sideways along the wall without dismounting, teleporting or entering stone",
+  record("gorilla wall destination: sideways orders in both directions keep the rendered supporting grips through 30, 60 and 120 Hz movement without dismounting, teleporting or entering stone",
     state.secondFixture && safeArrival(state.second) && state.second.stayedHanging
-    && state.second.lateral > 1.2 && state.second.verticalExcursion < 0.7, JSON.stringify(state.second || state));
+    && state.second.lateral > 1.2 && state.second.verticalExcursion < 0.7
+    && safeArrival(state.third) && state.third.stayedHanging && state.third.lateral > 1.2 && state.third.verticalExcursion < 0.7,
+    JSON.stringify({ second: state.second, third: state.third }));
+  record("gorilla wall destination: possession repeats both hanging lateral destinations through climb input, including running, with continuous rendered grips and no relocation or penetration",
+    state.controlled?.length === 2 && state.controlled.every(row => safeArrival(row) && row.stayedHanging
+      && row.lateral > 1.2 && row.verticalExcursion < 0.7 && row.depth.samples > 0), JSON.stringify(state.controlled));
   record("gorilla wall grip: lowered hands contact the uneven cave rim throughout their cycle without any rendered mesh penetrating stone",
-    state.grips?.length === 13 && state.grips.every(row => row.gap !== null && row.gap < 0.5 && !row.overlap && row.previewClear),
+    state.grips?.length === 39 && state.grips.every(row => row.gap !== null && row.gap < 0.5 && !row.overlap && row.previewClear),
     JSON.stringify({ grips: state.grips, poseMs: state.poseMs, previewMs: state.previewMs }));
   const labTransition = await b.evaluate(`(() => {
     const B = __ooga, S = BL.scene, e = B.clankers.list.find(e => e.owner.traits.name === "portlandhodl"), root = BL.scenes.hub.root;
@@ -8414,7 +9227,7 @@ scene("poker", { opts: PHONE_SIZE, steps: [phone("poker", { card: '[data-intro="
   record("poker phone: nine seat choices and two private cards fit the panel", r.fits && r.seats === 9 && r.cards === 2, JSON.stringify(r));
   if (process.env.POKER_SHOTS) await b.screenshot(join(process.env.POKER_SHOTS, "poker-phone.png"));
 } }] });
-scene("hub", { label: "weapons", query: "character=portlandhodl&weapon=2&mag=1&ammo=6&jetpack=1", steps: [hubAk, hubMelee, hubJetpack] });
+scene("hub", { label: "weapons", query: "character=portlandhodl&weapon=2&mag=1&ammo=6&jetpack=1&gorillarage=1", steps: [hubAk, hubMelee, hubJetpack] });
 scene("hub", { label: "birds-eye combat", query: "solo=1&character=portlandhodl&weapon=1&mode=shoulder&combat=1", steps: [hubBirdsEye] });
 scene("hub", { label: "birds-eye combat projection and targets", query: "solo=1&character=portlandhodl&weapon=1&mode=shoulder&combat=1", steps: [hubBirdsEyeProjection, hubBirdsEyeTargets, hubCombatReplay] });
 scene("hub", { label: "birds-eye lower floors", query: "solo=1&character=portlandhodl&weapon=1&mode=shoulder&combat=1", steps: [hubBirdsEyeFloors] });
@@ -10469,21 +11282,22 @@ const integrationChecks = async BL => {
     const sockets=[],sent=[],events=new Map();let calls=0,tick=1000;
     class Socket {static OPEN=1;constructor(){this.readyState=1;sockets.push(this);}send(v){sent.push(typeof v==="string"?JSON.parse(v):v);}close(){this.readyState=3;}}
     const voice={setPeers:()=>{},restart:()=>{},stop:()=>{}};
-    const context={window:{BL:{characters:BL.characters,contributors:BL.contributors,voice},setTimeout:()=>1,clearTimeout(){},setInterval:()=>1,clearInterval(){}},document:{hidden:false,addEventListener:(k,v)=>events.set(k,v),removeEventListener:k=>events.delete(k)},location:{protocol:"https:",host:"fixture.invalid"},fetch:async()=>{calls++;return response();},AbortSignal,WebSocket:Socket,performance:{now:()=>tick+=200},Date,ArrayBuffer};
+    const context={window:{BL:{characters:BL.characters,contributors:BL.contributors,voice},setTimeout:()=>1,clearTimeout(){},setInterval:()=>1,clearInterval(){}},document:{hidden:false,addEventListener:(k,v)=>events.set(k,v),removeEventListener:k=>events.delete(k)},location:{protocol:"https:",host:"fixture.invalid",search:""},fetch:async()=>{calls++;return response();},AbortSignal,WebSocket:Socket,performance:{now:()=>tick+=200},Date,ArrayBuffer,URLSearchParams};
     runInNewContext(source,context);
     return {net:context.window.BL.net,sockets,sent,events,get calls(){return calls;}};
   };
   for(const kind of ["html","404","failure"]){
-    const f=fixture(()=>{if(kind==="failure")throw Error("offline");return {ok:kind!=="404",headers:{get:()=>"text/html"}};});
+    const f=fixture(()=>{if(kind==="failure")throw Error("offline");return {ok:kind!=="404",status:kind==="404"?404:200,headers:{get:()=>"text/html"}};});
+    const pending=!f.net.state.resolved;
     await f.net.start();await f.net.start();f.net.setZone("dsb-outside");f.net.setBody("YellowBrokeIt");f.net.sendPose(-45,40,-43,0);
-    record("integration static: "+kind+" backend stays single-player after one attempt",f.calls===1&&!f.net.state.backend&&f.net.state.room==="off"&&f.sockets.length===0&&f.net.remotes.size===0);
+    record("integration static: "+kind+" backend stays single-player after one attempt, and account status resolves only for a confirmed absent backend",pending&&f.net.state.resolved===(kind!=="failure")&&f.calls===1&&!f.net.state.backend&&f.net.state.room==="off"&&f.sockets.length===0&&f.net.remotes.size===0);
     f.net.dispose();
   }
   const f=fixture(()=>({ok:true,headers:{get:()=>"application/json"},json:async()=>({player:{id:71,login:"YellowBrokeIt",display:"Yellow"}})}));
   await f.net.start();const ws=f.sockets[0],message=v=>ws.onmessage({data:JSON.stringify(v)});
   message({t:"welcome",you:{id:71},players:[{id:72,login:"peer",body:"w-s-bitcoin",zone:"dsb-svrn",x:1,y:0,z:2,yaw:0}],now:Date.now()});
   f.net.setZone("dsb-studio");f.net.setBody("YellowBrokeIt");f.net.sendPose(-45,40,-43,1);
-  record("integration network: account, owned body, DSB zone and pose share one room",f.sockets.length===1&&f.net.ownCharacter()?.handle==="YellowBrokeIt"&&f.net.mayDrive("w-s-bitcoin",false)!==null&&f.sent.some(m=>m.t==="zone"&&m.name==="dsb-studio")&&f.sent.some(m=>m.t==="body"&&m.name==="YellowBrokeIt")&&f.sent.some(m=>m.t==="pose"&&m.x===-45));
+  record("integration network: resolved account, owned body, DSB zone and pose share one room",f.net.state.resolved&&f.sockets.length===1&&f.net.ownCharacter()?.handle==="YellowBrokeIt"&&f.net.mayDrive("w-s-bitcoin",false)!==null&&f.sent.some(m=>m.t==="zone"&&m.name==="dsb-studio")&&f.sent.some(m=>m.t==="body"&&m.name==="YellowBrokeIt")&&f.sent.some(m=>m.t==="pose"&&m.x===-45));
   message({t:"zone",id:72,name:"dsb-outside"});
   record("integration network: remote zones change through the shared wire contract",f.net.remotes.get(72).zone==="dsb-outside");
   message({t:"join",p:{id:71,login:"YellowBrokeIt",body:"YellowBrokeIt",zone:"dsb-outside"}});
@@ -11115,6 +11929,8 @@ const reviewCrowdAndFallbackProof = async () => {
 };
 
 const unitChecks = async () => {
+  const rage = await gorillaRageProof();
+  record("gorilla rage: distinct rolling hits, only agitating Oogas targeted, held capture through planning and swing, bounded throws, exact expiry, zero health and account/lifecycle cancellation", Object.values(rage).every(Boolean), JSON.stringify(rage));
   const reviewCrowd=await reviewCrowdAndFallbackProof();
   record("review crowd: recovery fetches outside actors once per edge and tests only nearby bodies; one station helper handles height and visibility; CPU fallback draws original joints only",["clear","filtered","blocked","hidden","above","cpu","gpu"].every(k=>reviewCrowd[k]),JSON.stringify(reviewCrowd));
   const movementReview = await reviewMovementProof();
