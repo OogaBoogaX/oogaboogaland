@@ -849,9 +849,9 @@
       // factory has no banana pile, so its private pile level stays zero.
       playerWorld = { level: 0, weapons: world.weapons, magazine: world.magazine };
       const shared = { root, input, hud, game, world: playerWorld, playerName, fx, viewYaw: 0, outsideActors: () => remotes ? remotes.actors() : NO_ACTORS, outsideActorHeight: BL.remotePlayers.BODY_HEIGHT, groundAt: groundFor, walkable: walkableFor, flyable: flyableFor, ceilingAt: ceilingFor, ladders: LAYOUT.ladders, onBodyMove: resolveLanding, clipProjectileTarget, absorbProjectile, reloadPolicy, useNear: (x, z, reach) => {
-        // Space talks to the guide only within arm's reach; further away it stays a jump.
-        const p = greeter && greeter.root.position;
-        return !!p && Math.hypot(x - p.x, z - p.z) <= reach ? greeter.act() : false;
+        // Space talks to the guide when she offers it (she flies, so she judges her reach); on a ladder, or anywhere
+        // else, it stays the visitor's own.
+        return !!greeter && !(avatar && avatar.ladder && avatar.ladder.plane) && greeter.useNear(x, z, reach);
       } };
       shared.onModelChange = () => {
         if (!avatar) return;
