@@ -804,6 +804,7 @@
   const bifrostScene = {
     // Voice zone: the Bifrost group, which the isle and its bridge share (`bifrost`).
     voiceZone: "bifrost.chamber",
+    micKey: true,
     id: "bifrost", enter, update, overlay, onDonation, onKey, onLootCleared, renderOpts: RENDER_OPTS, leave, stats, liveGeometry,
     root: null, camera: null, input: null, debug: null, agent: null, agentView: null, agentControls: null, agentHandoff: null,
     get inMotion() {

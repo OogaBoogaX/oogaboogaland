@@ -30,7 +30,7 @@ const roomClass = () => {
 };
 test("room broadcasts DSB zone changes, persists them and keeps ownership enforcement", () => {
   const Room = roomClass(), room = Object.create(Room.prototype), sent = [];
-  room.players = new Map(); room.voiceSig = new Map();
+  room.players = new Map(); room.chatBuckets = new Map(); room.voiceSig = new Map();
   let attachment;
   const ws = { deserializeAttachment: () => ({ id: 1 }), serializeAttachment: value => { attachment = value; }, send: text => sent.push(JSON.parse(text)) };
   const player = room.record(ws, { id: 1, login: "YellowBrokeIt", display: "Yellow", body: "YellowBrokeIt", x: -45, y: 40, z: -43, yaw: 0 });
@@ -53,13 +53,13 @@ test("voice lists survive the room sleeping and follow a microphone published ag
   const wake = () => {
     const room = Object.create(Room.prototype);
     room.sfu = {};
-    room.players = new Map();
+    room.players = new Map(); room.chatBuckets = new Map();
     for (const id of [1, 2]) if (stores[id].a) room.players.set(id, room.record(sockets[id], stores[id].a));
     return room;
   };
   const room = Object.create(Room.prototype);
   room.sfu = {};
-  room.players = new Map();
+  room.players = new Map(); room.chatBuckets = new Map();
   for (const id of [1, 2]) {
     const p = room.record(sockets[id], { id, login: `p${id}`, display: `p${id}`, body: `ooga-${id}`, zone: "factory.hall", x: 0, y: 0, z: 0, yaw: 0 });
     p.voice = { pub: `pub${id}`, sub: `sub${id}`, track: "mic", gen: 10 + id };
