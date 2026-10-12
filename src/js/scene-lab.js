@@ -570,6 +570,7 @@
   const labScene = {
     // Voice zone: the EntropyLab group, which its cave on the island shares (`lab`).
     voiceZone: "lab.hall",
+    micKey: true,
     id: "lab", enter, update, overlay, onDonation, onKey, onLootCleared, renderOpts: RENDER_OPTS, leave, stats, liveGeometry,
     root: null, camera: null, input: null, debug: null, agent: null, agentView: null, agentControls: null, agentHandoff: null, summonAgent: null,
     get inMotion() {
