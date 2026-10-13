@@ -664,6 +664,7 @@
     gauge: ["Gauge", "spark", ["The needle twitches.", "Pressure high. Ooga fine."]],
     rubble: ["Rubble", "chip", ["Loose rocks.", "Ooga kicks a pebble."]],
     bench: ["Log bench", "dust", ["A good log for sitting."]],
+    cabinet: ["Arcade cabinet", "spark", ["PRESS START. Ooga presses everything.", "The games are inside. Ooga points."]],
     vine: ["Vines", "leaf", ["The vines swing.", "Rustle rustle."]],
     boards: ["Boarded up · coming soon", "dust", ["Boarded up. Coming soon.", "Ooga peeks through a gap. Dark."]]
   };
@@ -1690,15 +1691,15 @@
   const sealedCaveVariant = (id) => id === "c3" ? 1 : id === "c10" ? 2 : 0;
   // Every cave wears its own facade from the shared voxel kit: two lantern posts, a string over the lintel,
   // vines off the rim, and the theme's own things either side of the path (lab dice and flasks, the mirror's glyph
-  // monoliths, the Lightning Factory's coil and coal, Ooga Arcade's stores and log bench, on its right only, as the
-  // Lightning Factory's right side fills its left). A slot without a theme wears none: the sealed caves, and the
+  // monoliths, the Lightning Factory's coil and coal, Ooga Arcade's two cabinets, hard against the left of its
+  // door and facing the island's centre: the Mempool stairs start at the right jamb and the Lightning Factory's right side fills the ground further left). A slot without a theme wears none: the sealed caves, and the
   // Headquarters ramps that run down a cutting rather than into a cliff. Each mouth bakes to one solid, one hanging and one glowing mesh, memoised per island
   // so a revisit only places nodes. Pieces are [kind, x, z, quarter turns, variant, lift] in the mouth's frame.
   const THEMES = {
     lab: { glass: 1, icon: "die", string: ["bulb", 1], pieces: [["flaskBench", -5.3, 1.1], ["die", -4.1, 2.8, 0, 1], ["die", -3.5, 3.6, 1, 3], ["die", -4.1, 2.8, 1, 4, 0.5], ["terminal", 5.2, 1.0], ["die", 4.3, 3.2, 1, 2], ["banner", -6.7, 0.7, 0, 1]] },
     matrix: { glass: 2, icon: "glyph", string: ["bulb", 2], pieces: [["monolith", -5.0, 0.9, 0, 0], ["monolith", 5.0, 0.9, 0, 1], ["runeStone", -4.2, 2.8, 0, 0], ["runeStone", 4.4, 2.9, 0, 1], ["banner", 6.5, 0.8, 0, 2], ["banner", -6.5, 0.8, 0, 2], ["rubble", -6.3, 2.6, 0, 1]] },
     lightning: { glass: 0, icon: "bolt", string: ["hanging", 0, [0.3, 0.7]], boards: true, pieces: [["coalCrate", -5.1, 0.8, 0, 3], ["crate", -5.4, 2.1, 1, 0], ["crate", -5.4, 2.1, 0, 1, 0.75], ["barrel", -4.3, 2.9, 0, 1], ["rubble", -6.4, 0.9, 0, 1], ["gauge", 5.0, 0.9], ["cart", 5.7, 2.4, 1], ["banner", 6.6, 0.8, 0, 0], ["coil", 3.8, 3.4], ["coalCrate", 6.4, 3.4, 0, 1]] },
-    arcade: { glass: 0, icon: "banana", string: ["hanging", 0, [0.12, 0.5, 0.88]], inside: [["barrel", -2.4, -1.9, 0, 0], ["crate", 2.4, -2.0, 1, 0], ["barrel", 2.4, -2.0, 0, 1, 0.75]], ceiling: [[-2.35, 2.35, -1.5, -5.8, 3.0, [0.35, 0.8]]], pieces: [["crate", 5.2, 1.0, 0, 0], ["crate", 5.2, 1.0, 1, 1, 0.75], ["barrel", 4.4, 2.8, 0, 0], ["bench", 5.8, 3.5], ["rubble", 6.4, 2.3, 0, 1], ["banner", 6.6, 0.8, 0, 3]] }
+    arcade: { glass: 0, icon: "banana", string: ["hanging", 0, [0.12, 0.5, 0.88]], inside: [["barrel", -2.4, -1.9, 0, 0], ["crate", 2.4, -2.0, 1, 0], ["barrel", 2.4, -2.0, 0, 1, 0.75]], ceiling: [[-2.35, 2.35, -1.5, -5.8, 3.0, [0.35, 0.8]]], pieces: [["cabinet", -3.6, 1.0, 0, 0], ["cabinet", -2.9, 2.2, 0, 1]] }
   };
   const THEME_ICON = (slot) => slot.id === "c1" ? "favicon" : THEMES[slot.theme]?.icon || null;
   const trackCaveSign = (node, slot, mouth) => {

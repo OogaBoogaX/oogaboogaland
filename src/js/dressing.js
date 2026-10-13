@@ -2,7 +2,7 @@
 // writing through `box` and `put` into separate solid, hanging, decorative glow and lantern glow layers: general (`lanternPost`, `crate`, `coalCrate`,
 // `barrel`, `cart`, `banner`, `gauge`, `rubble`, `bracket`, `hanging`, `bulb`), lab (`die`,
 // `flaskBench`, `terminal`, `chalkboard`), the mirror (`monolith`, `runeStone`), lightning (`coil`,
-// `boards`), plus `bench`, `vine` and `banner(v)` carrying each cave's emblem from `hubModels.SIGN_ICONS`.
+// `boards`), the arcade (`cabinet`), plus `bench`, `vine` and `banner(v)` carrying each cave's emblem from `hubModels.SIGN_ICONS`.
 //
 // `set()` places pieces by quarter turns (`put`), strings sagging cables with lamps (`cable`) and `build`s
 // everything placed into one `solid`, one `hang`, decorative `glow` and lantern `lampGlow` mesh plus the `lights` its lanterns
@@ -64,6 +64,7 @@
   // several times cheaper to fill and probe than string-keyed voxel maps.
   const KEY = (x, y, z) => ((x + 2048) * 4096 + (y + 2048)) * 4096 + (z + 2048);
   const BOLT = ["...##", "..##.", ".##..", "#####", "..##.", ".##..", "##..."];
+  const INVADER = ["..#..#..", "...##...", "..####..", ".#.##.#.", "########", "#.####.#", "#.#..#.#", "...##..."];
   // A piece is three flat lists of x, y, z, colour per layer, built by its author through `put`.
   const author = (build) => {
     const layers = [[], [], [], []];
@@ -269,6 +270,23 @@
     bench: () => author((put, box) => {
       for (const cx of [-8, 7]) for (let y = 0; y <= 5; y++) disc((x, yy, z) => put(SOLID, x, yy, z, y === 5 ? 1 : 2), 2.4, y, cx, 0);
       box(SOLID, -12, 11, 6, 8, -2, 1, (x, y) => y === 8 ? 1 : 2);
+    }),
+    // Ooga Arcade: a cabinet with a lit screen and a coconut for a stick (0 timber, 1 stone).
+    cabinet: (v) => author((put, box) => {
+      const BODY = v & 1 ? [20, 21, 22] : [0, 1, 2], SCREEN = [30, 40][v & 1], PAINT = v & 1 ? 18 : 19;
+      const side = (x, y, z) => (x === -6 || x === 5) && (z === -5 || z === 4) ? BODY[2] : (y >> 2) & 1 ? BODY[1] : BODY[0];
+      box(SOLID, -6, 5, 0, 11, -5, 4, side);
+      box(SOLID, -6, 5, 12, 13, -5, 6, BODY[2]);
+      box(SOLID, -3, -3, 14, 15, 4, 4, 5);
+      put(SOLID, -3, 16, 4, 48);
+      put(SOLID, 1, 14, 4, 19);
+      put(SOLID, 3, 14, 4, 18);
+      box(SOLID, -6, 5, 14, 23, -5, 2, side);
+      for (let x = -6; x <= 5; x++) for (let y = 14; y <= 23; y++) {
+        const lit = x >= -4 && x <= 3 && y >= 15 && y <= 22 && INVADER[22 - y][x + 4] === "#";
+        put(lit ? GLOW : SOLID, x, y, 3, lit ? SCREEN : x < -4 || x > 3 || y < 15 || y > 22 ? BODY[2] : 36);
+      }
+      box(SOLID, -6, 5, 24, 27, -5, 4, (x, y, z) => y === 27 ? BODY[2] : z === 4 && (x + y) % 3 === 0 ? 16 : PAINT);
     }),
     vine: (v) => author((put) => {
       const rand = mulberry32(800 + v);
