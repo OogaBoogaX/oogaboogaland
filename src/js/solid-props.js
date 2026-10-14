@@ -69,14 +69,29 @@
     let wideCount = 0, queryStamp = 0, cellItems = new Int32Array(64), wide = new Int32Array(64), candidates = new Int32Array(64), stamps = new Int32Array(64);
     const cellStart = new Int32Array(GRID_CELLS + 1), cellFill = new Int32Array(GRID_CELLS);
     // Refresh only registered meshes and their ancestors, once per sync; the scene's normal render traversal
-    // handles every unrelated node.
+    // handles every unrelated node. Registered nodes' local/world are written only here and by that traversal,
+    // from exactly the shadowed inputs, so while the shadow still matches the matrices hold what a recompute
+    // would write and the fromTRS/multiply is skipped.
+    const transformState = () => ({ stamp: 0, active: false, version: 0, parent: null, parentVersion: -1, values: new Float64Array(13) });
     const refreshWorld = (node) => {
-      const stamp = transforms.get(node);
-      if (stamp === generation) return true;
-      if (stamp === -generation) return false;
+      let state = transforms.get(node);
+      if (!state) { state = transformState(); transforms.set(node, state); }
+      if (state.stamp === generation) return state.active;
+      state.stamp = generation;
       const active = node.visible && (!node.parent || refreshWorld(node.parent));
-      transforms.set(node, active ? generation : -generation);
+      state.active = active;
       if (!active) return false;
+      const values = state.values, p = node.position, r = node.rotation, s = node.scale, q = node.quaternion;
+      const parentVersion = node.parent ? transforms.get(node.parent).version : 0;
+      const changed = !state.version || state.parent !== node.parent || state.parentVersion !== parentVersion
+        || values[0] !== p.x || values[1] !== p.y || values[2] !== p.z || values[3] !== s.x || values[4] !== s.y || values[5] !== s.z
+        || values[6] !== r.x || values[7] !== r.y || values[8] !== r.z || values[9] !== (q ? q[0] : 0) || values[10] !== (q ? q[1] : 0)
+        || values[11] !== (q ? q[2] : 0) || values[12] !== (q ? q[3] : 0);
+      if (!changed) return true;
+      values[0] = p.x; values[1] = p.y; values[2] = p.z; values[3] = s.x; values[4] = s.y; values[5] = s.z;
+      values[6] = r.x; values[7] = r.y; values[8] = r.z; values[9] = q ? q[0] : 0; values[10] = q ? q[1] : 0;
+      values[11] = q ? q[2] : 0; values[12] = q ? q[3] : 0;
+      state.parent = node.parent; state.parentVersion = parentVersion; state.version++;
       if (node.quaternion) mat4.fromTQS(node.local, node.position, node.quaternion, node.scale);
       else mat4.fromTRS(node.local, node.position, node.rotation, node.scale);
       if (node.parent) mat4.multiply(node.world, node.parent.world, node.local);

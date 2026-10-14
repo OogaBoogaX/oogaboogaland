@@ -244,6 +244,9 @@
         el.garageCup.textContent = `${cup.medal.toUpperCase()} CUP · ${cup.points} pts`;
       }
     };
+    // The track's outline is fixed between track builds, so the Path2D is kept and only remade when its
+    // key changes (the map's points, size or origin); stroking the same vertices rasterizes identically.
+    let mapPath = null, mapKeyPts = null, mapKeySize = 0, mapKeyX0 = 0, mapKeyY0 = 0;
     const minimap = (ctx, track, list, player, w, h) => {
       const size = Math.min(coarse ? 100 : MAP_SIZE, w * 0.28), x0 = MAP_PAD + 8, y0 = coarse ? mapTop : h - size - 30, pts = track.mapPts;
       ctx.save();
@@ -253,14 +256,20 @@
       ctx.strokeStyle = "rgba(243,239,228,0.85)";
       ctx.lineWidth = 3;
       ctx.lineJoin = "round";
-      ctx.beginPath();
-      for (let i = 0; i < pts.length; i += 2) {
-        const px = x0 + pts[i] * size, py = y0 + pts[i + 1] * size;
-        if (i === 0) ctx.moveTo(px, py);
-        else ctx.lineTo(px, py);
+      if (pts !== mapKeyPts || size !== mapKeySize || x0 !== mapKeyX0 || y0 !== mapKeyY0) {
+        mapKeyPts = pts;
+        mapKeySize = size;
+        mapKeyX0 = x0;
+        mapKeyY0 = y0;
+        mapPath = new Path2D();
+        for (let i = 0; i < pts.length; i += 2) {
+          const px = x0 + pts[i] * size, py = y0 + pts[i + 1] * size;
+          if (i === 0) mapPath.moveTo(px, py);
+          else mapPath.lineTo(px, py);
+        }
+        mapPath.closePath();
       }
-      ctx.closePath();
-      ctx.stroke();
+      ctx.stroke(mapPath);
       for (let i = 0; i < list.length; i++) {
         const r = list[i];
         track.mapPoint(r.x, r.z, MAP_POINT);

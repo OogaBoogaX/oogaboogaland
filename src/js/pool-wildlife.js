@@ -496,7 +496,7 @@
         tree: null, branch: null, log: null, perch: null, asleep: false, swimming: false,
         look: 0, lookYaw: 0, peck: 0, snarl: 0,
         bodyY: rig.body.at[1], pitch: 0, front: 0, back: 0, headPitch: 0, headYaw: 0, wing: 0,
-        wx: 0, wy: 0, wz: 0, owner: null
+        wx: 0, wy: 0, wz: 0, owner: null, settleX: 0, settleZ: 0, settleDone: false
       };
       list.push(a);
     }
@@ -508,11 +508,16 @@
         a.swimming = false;
         // A reserved tree/log is still a ground trip until the animal actually mounts it.
         if (a.state !== "glide" && a.state !== "wallUp" && a.state !== "wallOver" && (a.state === "walk" || a.tree && !a.onBranch || !a.tree && !a.log && !a.perch)) {
-          const ground = groundAt(a.x, a.z);
-          const water = a.kind === "monkey" && ctx.waterAt ? ctx.waterAt(a.x, a.z) : -Infinity;
-          a.swimming = water > ground + SWIM_DEPTH;
-          const next = a.swimming ? water - SWIM_DEPTH : ground > -Infinity ? a.base + clamp(ground - a.base, -SETTLE * dt, SETTLE * dt) : a.base;
-          if (terrainClear(a, a.x, a.base, a.z, a.x, next, a.z)) a.base = next;
+          // The ground never moves: once a settled animal's base has converged the query is repeated only after
+          // a step took it somewhere. Monkeys always query live, since the lake rises around them and they swim.
+          if (a.kind === "monkey" || !a.settleDone || a.x !== a.settleX || a.z !== a.settleZ) {
+            const ground = groundAt(a.x, a.z);
+            const water = a.kind === "monkey" && ctx.waterAt ? ctx.waterAt(a.x, a.z) : -Infinity;
+            a.swimming = water > ground + SWIM_DEPTH;
+            const next = a.swimming ? water - SWIM_DEPTH : ground > -Infinity ? a.base + clamp(ground - a.base, -SETTLE * dt, SETTLE * dt) : a.base;
+            if (terrainClear(a, a.x, a.base, a.z, a.x, next, a.z)) a.base = next;
+            if (a.kind !== "monkey") { a.settleDone = ground === -Infinity || a.base === ground; a.settleX = a.x; a.settleZ = a.z; }
+          }
         }
         pose(a, dt, time);
         toWorld(a.x, a.z, WORLD);

@@ -37,6 +37,14 @@
   let sceneCanvas = $("scene");
   const overlayCanvas = $("overlay");
   const overlayCtx = overlayCanvas.getContext("2d");
+  // The overlay's CSS size, read on resize rather than in drawFade: a read there follows the HUD
+  // writes of the scenes' overlays and forces a synchronous layout every faded frame (as in fx.js).
+  let overlayCssW = overlayCanvas.clientWidth, overlayCssH = overlayCanvas.clientHeight;
+  const overlayObserver = new ResizeObserver(() => {
+    overlayCssW = overlayCanvas.clientWidth;
+    overlayCssH = overlayCanvas.clientHeight;
+  });
+  overlayObserver.observe(overlayCanvas);
   const qualityLabel = $("quality");
   const curtain = $("curtain");
   const worldBlock = $("world-block"), worldBlockHeight = $("world-block-height");
@@ -275,11 +283,11 @@
     fade = 1 - Math.min(1, transition.t / FADE);
     if (fade === 0) transition = null;
   };
-  // Fills in CSS pixels (clientWidth/clientHeight), not backing-store pixels.
+  // Fills in CSS pixels (clientWidth/clientHeight, cached above), not backing-store pixels.
   const drawFade = () => {
     overlayCtx.globalAlpha = fade;
     overlayCtx.fillStyle = "#000000";
-    overlayCtx.fillRect(0, 0, overlayCanvas.clientWidth, overlayCanvas.clientHeight);
+    overlayCtx.fillRect(0, 0, overlayCssW, overlayCssH);
     overlayCtx.globalAlpha = 1;
   };
 
@@ -629,6 +637,7 @@
     destroyed = true;
     window.cancelAnimationFrame(raf);
     window.clearInterval(housekeepTimer);
+    overlayObserver.disconnect();
     unsubscribeDonations();
     unsubscribeBlockFeed();
     unsubscribeBlockHeight();

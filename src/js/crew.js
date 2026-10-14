@@ -2892,6 +2892,11 @@
     };
     const updateFireThreats = () => {
       const gorillas = ctx.fireThreats ? ctx.fireThreats() : null;
+      // With nothing burning anywhere the pair loops can only clear memory flags; a fill says the same, since a
+      // remembered position is read only behind a live flag and a flag is always set together with its position.
+      let burning = false;
+      for (let i = 0; i < crewList.length; i++) if (crewList[i].camp.burning) { burning = true; break; }
+      if (!burning && gorillas) for (let i = 0; i < gorillas.length; i++) if (gorillas[i].fire.burning) { burning = true; break; }
       for (let caveIndex = 0; caveIndex < crewList.length; caveIndex++) {
         const cave = crewList[caveIndex];
         const panic = cave.camp.panic, memory = panic.memory, gorillaMemory = panic.gorillaMemory, p = cave.root.position;
@@ -2900,6 +2905,7 @@
         panic.escapeX = panic.escapeZ = 0;
         if (cave === player || !cave.root.visible || cave.state === "away") { memory.fill(0); gorillaMemory.fill(0); continue; }
         if (cave.camp.rolling) continue;
+        if (!burning) { memory.fill(0); gorillaMemory.fill(0); continue; }
         const reach = panic.active ? FIRE_FLEE_CLEAR : FIRE_FLEE_REACH, feet = p.y - cave.baseY;
         let nearest = Infinity;
         for (let otherIndex = 0; otherIndex < crewList.length; otherIndex++) {
@@ -3103,6 +3109,9 @@
     const updateCampEffects = (cave, dt) => {
       const c = cave.camp;
       c.cooldown = Math.max(0, c.cooldown - dt);
+      // Nothing hot: with fadeTime out the fade factor is exactly 0 and heat is 0 unlit, so every write below
+      // only reproduces the zeros already on the parts, and the puff gate turns the same state away on its own.
+      if (!c.burning && !c.rolling && c.fadeTime === 0 && c.smokeTime === 0) return;
       if (c.burning && !c.rolling) {
         c.burnAge += dt;
         updateFireSpread(cave);

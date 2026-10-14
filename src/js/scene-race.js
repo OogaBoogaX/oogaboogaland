@@ -145,7 +145,9 @@
         w.z[i] = (Math.random() - 0.5) * WEATHER_RANGE * 2;
       }
       const sway = w.snow ? Math.sin(sceneTime * 1.3 + w.phase[i]) * 0.6 : 0;
-      raceTrack.writeInstance(data, i * 20, w.snow ? sceneTime + w.phase[i] : 0, 1, cx + w.x[i] + sway, cy + w.y[i], cz + w.z[i], 1);
+      // Rain stands bolt upright, so its fixed yaw comes precomputed as the exact cos(0)/sin(0) pair.
+      if (w.snow) raceTrack.writeInstance(data, i * 20, sceneTime + w.phase[i], 1, cx + w.x[i] + sway, cy + w.y[i], cz + w.z[i], 1);
+      else raceTrack.writeInstance(data, i * 20, 0, 1, cx + w.x[i] + sway, cy + w.y[i], cz + w.z[i], 1, 1, 0);
     }
     w.node.instanceVersion++;
   };
@@ -625,13 +627,16 @@
   };
   const simulate = (dt) => {
     accumulator = Math.min(accumulator + dt, FIXED * MAX_SUBSTEPS);
-    let first = true;
+    let first = true, stepped = false;
     while (accumulator >= FIXED) {
       accumulator -= FIXED;
       racers.substep(FIXED);
       items.update(FIXED, sceneTime, first);
       first = false;
+      stepped = true;
     }
+    // The pickups' spin, bob and pad glow are posed once a frame, from the last substep's spinT.
+    if (stepped) items.pose();
   };
   const update = (dt, elapsed) => {
     sceneTime = elapsed;
@@ -879,12 +884,13 @@
           get phase() {
             return phase;
           },
-          selection, startRace, startCup, nextRace, toGarage, pause, finishRace, cup, simulate: (seconds) => {
+          selection, startRace, startCup, nextRace, toGarage, pause, finishRace, cup,           simulate: (seconds) => {
             for (let t = 0; t < seconds; t += FIXED) {
               sceneTime += FIXED;
               racers.substep(FIXED);
               items.update(FIXED, sceneTime);
             }
+            items.pose();
           },
           get cam() {
             return cam;

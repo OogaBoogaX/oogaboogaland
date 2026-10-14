@@ -48,16 +48,41 @@
     let role = "solo", sendIn = 0, sinceSent = 0, sentFloats = -1, seen = -1, frames = 0, events = [];
 
     const driven = (cave) => cave === crew.player || !!cave.remoteControlled;
-    const holders = (cave) => [cave.parts.armL, cave.parts.armR, cave.root, cave.sleepWeapons];
-    const holderCode = (cave, node) => {
-      const h = holders(cave);
+    const holders = list.map((cave) => [cave.parts.armL, cave.parts.armR, cave.root, cave.sleepWeapons]);
+    const holderCode = (i, node) => {
+      const h = holders[i];
       for (let c = 0; c < h.length; c++) if (node.parent === h[c]) return c;
       return 4;
     };
 
     // Host: what happens once, recorded for the next frame. Only Oogas the frame carries count.
-    const record = (event) => {
-      if (role === "host" && events.length < EVENTS_MAX) events.push(event);
+    // Records are pooled per kind and rewritten in place; the fixed key order per kind keeps the JSON identical.
+    const pools = { say: [], z: [], b: [], shot: [], plan: [], hit: [] };
+    const used = { say: 0, z: 0, b: 0, shot: 0, plan: 0, hit: 0 };
+    const takeEvent = (k) => {
+      const pool = pools[k];
+      let e = pool[used[k]];
+      if (!e) {
+        if (k === "say") e = { k: "say", i: 0, text: "", dur: 0 };
+        else if (k === "z") e = { k: "z", i: 0, x: 0, y: 0, z: 0 };
+        else if (k === "b") e = { k: "b", kind: "", x: 0, y: 0, z: 0, count: 0, speed: 0 };
+        else if (k === "shot") e = { k: "shot", i: 0, a: [0, 0, 0, 0, 0, 0] };
+        else if (k === "plan") e = { k: "plan", i: 0, site: 0 };
+        else e = { k: "hit", i: 0 };
+        pool.push(e);
+      }
+      used[k]++;
+      return e;
+    };
+    const resetEvents = () => {
+      for (const k in used) used[k] = 0;
+      events.length = 0;
+    };
+    const record = (kind) => {
+      if (role !== "host" || events.length >= EVENTS_MAX) return null;
+      const e = takeEvent(kind);
+      events.push(e);
+      return e;
     };
     const npcIndex = (cave) => {
       const i = cave ? index.get(cave) : undefined;
@@ -67,30 +92,48 @@
     const recordingFx = Object.create(fx);
     recordingFx.say = (cave, text, dur) => {
       const i = npcIndex(cave);
-      if (i >= 0) record({ k: "say", i, text: String(text).slice(0, SAY_MAX), dur });
+      if (i >= 0) {
+        const e = record("say");
+        if (e) { e.i = i; e.text = String(text).slice(0, SAY_MAX); e.dur = dur; }
+      }
       return fx.say(cave, text, dur);
     };
     recordingFx.zzzAt = (x, y, z, cave) => {
       const i = npcIndex(cave);
-      if (i >= 0) record({ k: "z", i, x, y, z });
+      if (i >= 0) {
+        const e = record("z");
+        if (e) { e.i = i; e.x = x; e.y = y; e.z = z; }
+      }
       return fx.zzzAt(x, y, z, cave);
     };
     recordingFx.burst = (x, y, z, count, geos, speed) => {
       const kind = geos === BL.crew.LAND_DUST ? "dust" : geos === BL.crew.JET_SPARKS ? "sparks" : "";
-      if (kind) record({ k: "b", kind, x, y, z, count, speed });
+      if (kind) {
+        const e = record("b");
+        if (e) { e.kind = kind; e.x = x; e.y = y; e.z = z; e.count = count; e.speed = speed; }
+      }
       return fx.burst(x, y, z, count, geos, speed);
     };
     const recordShot = (cave, from, to) => {
       const i = npcIndex(cave);
-      if (i >= 0) record({ k: "shot", i, a: [from.x, from.y, from.z, to.x, to.y, to.z] });
+      if (i >= 0) {
+        const e = record("shot");
+        if (e) { e.i = i; e.a[0] = from.x; e.a[1] = from.y; e.a[2] = from.z; e.a[3] = to.x; e.a[4] = to.y; e.a[5] = to.z; }
+      }
     };
     const recordPlan = (cave, site) => {
       const i = npcIndex(cave);
-      if (i >= 0) record({ k: "plan", i, site });
+      if (i >= 0) {
+        const e = record("plan");
+        if (e) { e.i = i; e.site = site; }
+      }
     };
     const recordHit = (cave) => {
       const i = npcIndex(cave);
-      if (i >= 0) record({ k: "hit", i });
+      if (i >= 0) {
+        const e = record("hit");
+        if (e) e.i = i;
+      }
     };
 
     const writeQuat = (o, q) => {
@@ -120,10 +163,10 @@
       if (writeQuat(o + 39, p.head.quaternion)) flags |= F_HEAD_Q;
       out[o + 43] = p.torso.scale.y; out[o + 44] = p.torso.rotation.x; out[o + 45] = p.torso.rotation.z;
       writeXYZ(o + 46, p.armL.position); writeXYZ(o + 49, p.armR.position);
-      out[o + 52] = holderCode(cave, p.club); writeXYZ(o + 53, p.club.position); writeXYZ(o + 56, p.club.rotation);
+      out[o + 52] = holderCode(i, p.club); writeXYZ(o + 53, p.club.position); writeXYZ(o + 56, p.club.rotation);
       if (p.club.visible) flags |= F_CLUB;
       if (writeQuat(o + 59, p.club.quaternion)) flags |= F_CLUB_Q;
-      out[o + 63] = holderCode(cave, p.gun); writeXYZ(o + 64, p.gun.position); writeXYZ(o + 67, p.gun.rotation);
+      out[o + 63] = holderCode(i, p.gun); writeXYZ(o + 64, p.gun.position); writeXYZ(o + 67, p.gun.rotation);
       if (p.gun.visible) flags |= F_GUN;
       if (writeQuat(o + 70, p.gun.quaternion)) flags |= F_GUN_Q;
       let mask = 0;
@@ -170,7 +213,7 @@
       sentFloats = floats;
       sinceSent = 0;
       const tail = events.length ? encoder.encode(JSON.stringify(events)) : null;
-      events = [];
+      resetEvents();
       outHeader[0] = FORMAT; outHeader[1] = signature; outHeader[2] = k; outHeader[3] = tail ? tail.length : 0;
       if (!tail) {
         net.sendNpc(new Uint8Array(out.buffer, 0, bytes));
@@ -206,7 +249,7 @@
       for (let k = 0; k < count; k++) {
         const o = HEADER + k * RECORD, i = f[o];
         if (!(i >= 0 && i < n)) continue;
-        target.set(f.subarray(o, o + RECORD), i * RECORD);
+        for (let j = 0; j < RECORD; j++) target[i * RECORD + j] = f[o + j];
         if (!have[i]) fresh[i] = 1;
         have[i] = 1;
       }
@@ -220,7 +263,7 @@
       }
       if (!Array.isArray(list_)) return;
       // Poses first, then the events, so a shot leaves from where the rifle now is.
-      pendingEvents = list_.slice(0, EVENTS_MAX);
+      pendingEvents = list_;
     };
     let pendingEvents = null;
 
@@ -245,9 +288,9 @@
       v.x += (t[o] - v.x) * k; v.y += (t[o + 1] - v.y) * k; v.z += (t[o + 2] - v.z) * k;
     };
     // Gear hangs where the host has it: a hand, the back sling (the root) or the bed's weapons.
-    const holdIn = (cave, node, code) => {
+    const holdIn = (i, node, code) => {
       if (!(code >= 0 && code <= 3)) return false;
-      const want = holders(cave)[code];
+      const want = holders[i][code];
       if (node.parent === want) return false;
       if (node.parent) removeChild(node.parent, node);
       addChild(want, node);
@@ -281,8 +324,8 @@
       easeXYZ(p.armL.position, t, o + 46, k);
       easeXYZ(p.armR.position, t, o + 49, k);
       // Gear: a change of holder moves the node, and the mirror and outlines learn the new shape.
-      let moved = holdIn(cave, p.club, t[o + 52]);
-      moved = holdIn(cave, p.gun, t[o + 63]) || moved;
+      let moved = holdIn(i, p.club, t[o + 52]);
+      moved = holdIn(i, p.gun, t[o + 63]) || moved;
       const gearK = moved ? 1 : k;
       p.club.visible = (flags & F_CLUB) !== 0;
       easeXYZ(p.club.position, t, o + 53, gearK); easeAngles(p.club.rotation, t, o + 56, gearK);
@@ -346,14 +389,14 @@
         sendIn = 0;
         sentFloats = -1;
         seen = -1;
-        events = [];
+        resetEvents();
       }
       if (role === "host") {
         // Nobody follows: nothing to send, and nothing saved up for later.
         if (!st.followers) {
           sendIn = 0;
           sentFloats = -1;
-          events.length = 0;
+          resetEvents();
           return;
         }
         sinceSent += dt;
@@ -381,14 +424,14 @@
       if (pendingEvents) {
         const replaying = pendingEvents;
         pendingEvents = null;
-        for (let e = 0; e < replaying.length; e++) if (replaying[e] && typeof replaying[e] === "object") replay(replaying[e]);
+        for (let e = 0; e < Math.min(replaying.length, EVENTS_MAX); e++) if (replaying[e] && typeof replaying[e] === "object") replay(replaying[e]);
       }
     };
 
     const dispose = () => {
       release();
       role = "solo";
-      events = [];
+      resetEvents();
     };
 
     return { update, dispose, fx: recordingFx, recordShot, recordPlan, recordHit, get role() { return role; }, get frames() { return frames; } };

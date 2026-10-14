@@ -566,6 +566,13 @@
     let lastSwitchAt = 0;
     let resetRotation = false;
     let dirty = true;
+    // One full slide cycle of built screens: a rotation back reuses the quads instead of re-scanning
+    // the 1200x540 bitmap and re-uploading. swapGeometry still releases the outgoing screen's GPU
+    // record; a re-attached entry's is rebuilt on demand, and dispose releases every cached entry.
+    const CACHED_SCREENS = 8;
+    const geometryCache = new Map();
+    // Bumped with every accepted live payload, so a cached screen can never outlive its data.
+    let dataGeneration = 0;
     // All canvases use one minute-aligned age sample, even when painted at different times or paused on RECENT.
     let recentNow = Math.floor(Date.now() / 60000) * 60000;
     // World->local for board taps, cached: the cabinet never moves once placed.
@@ -682,7 +689,16 @@
     let version = 0;
     const refresh = (renderer) => {
       renderBoard();
-      swapGeometry(screenNode, screenGeometryFrom(ctx, curved), renderer);
+      // A slide's pixels are fixed by its view, its params, the data generation and the curved flag;
+      // the recent slide's ages also follow the minute-aligned clock, so its key carries it.
+      const key = `${view.name}|${JSON.stringify(view.params)}|${dataGeneration}|${curved}|${view.name === "recent" ? recentNow : 0}`;
+      let geometry = geometryCache.get(key);
+      if (!geometry) {
+        geometry = screenGeometryFrom(ctx, curved);
+        if (geometryCache.size >= CACHED_SCREENS) geometryCache.delete(geometryCache.keys().next().value);
+        geometryCache.set(key, geometry);
+      }
+      swapGeometry(screenNode, geometry, renderer);
       dirty = false;
       version++;
     };
@@ -924,6 +940,7 @@
         }
         model = next;
         cycleViews = buildCycle(model);
+        dataGeneration++;
         // A repo view whose repo vanished falls back inside renderRepo.
         dirty = true;
         return true;
@@ -950,10 +967,13 @@
       },
       dispose(renderer) {
         if (renderer && renderer.releaseGeometry) {
+          // releaseGeometry is idempotent; the attached screen is one of the cached entries.
+          for (const geometry of geometryCache.values()) renderer.releaseGeometry(geometry);
           if (screenNode.geometry) renderer.releaseGeometry(screenNode.geometry);
           if (chromeNode.geometry) renderer.releaseGeometry(chromeNode.geometry);
           if (node.geometry) renderer.releaseGeometry(node.geometry);
         }
+        geometryCache.clear();
         screenNode.geometry = null;
         chromeNode.geometry = null;
         node.geometry = null;

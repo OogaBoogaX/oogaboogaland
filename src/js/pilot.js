@@ -920,8 +920,8 @@
       // Assistance may choose an item's centre, but never move the pointer.
       const visible = !overheadPointerMoved || projectAim(point);
       positionReticle(overheadX, overheadY);
-      reticle.dataset.close = "false";
-      reticle.dataset.occluded = String(!visible);
+      if (reticle.dataset.close !== "false") reticle.dataset.close = "false";
+      if (reticle.dataset.occluded !== String(!visible)) reticle.dataset.occluded = String(!visible);
       if (reticleRadius !== AIM_RETICLE_RADIUS) {
         reticleRadius = AIM_RETICLE_RADIUS;
         reticle.style.setProperty("--reticle-radius", `${AIM_RETICLE_RADIUS}px`);
@@ -1311,8 +1311,19 @@
       }
       for (const child of node.children) includeHeadPart(child);
     };
+    // Distance past which hiding work is provably idle: hats and floating swag
+    // keep the head subtree within ~3.5 m of the root even on the tallest Ooga
+    // (height 1.16) under step lift, and the widest near-plane corner (near
+    // 0.5 m at MAX_FOV on an ultrawide) reaches ~1.3 m beyond the eye, so
+    // neither can touch the head from 6 m out. Judged fresh each frame from
+    // the placed camera; a hidden head never skips, so it always restores.
+    const HEAD_HIDE_RANGE = 6;
     const syncHeadVisibility = (cave) => {
       if (!cave) { restoreHead(); return; }
+      if (!hiddenHead) {
+        const dx = camera.position.x - cave.root.position.x, dy = camera.position.y - cave.root.position.y, dz = camera.position.z - cave.root.position.z;
+        if (dx * dx + dy * dy + dz * dz > HEAD_HIDE_RANGE * HEAD_HIDE_RANGE) return;
+      }
       // The near plane can expose interior faces before the eye enters.
       // Include the whole head subtree so hats and masks cannot flash either.
       updateWorld(cave.root, cave.root.parent ? cave.root.parent.world : undefined);

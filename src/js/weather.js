@@ -71,6 +71,10 @@
   const DROP_MIN = 0.7, DROP_MAX = 4, DROP_LIFT = 0.7;
   const RAIN_FALL = 11, RAIN_FALL_PER_SIZE = 3;
   const SPLASH_SIZE = 1.4;
+  // A drop falls straight down, and under it only the water level can move: pool-water.js bounds that to
+  // RATE 0.16 m/s, ~0.43 m over a drop's ~2.7 s life. Its cached landing height is re-read once the drop
+  // falls within GROUND_GUARD of it; above that, a fresh read could not change whether it lands.
+  const GROUND_GUARD = 1;
   const WIND_MAX = 9, WIND_TURN = 0.05;
   const FLASH_MAX = 0.85, FLASH_TAU = 0.12, BOLT_SHOW = 0.25, BOLT_RANGE = 21, BOLT_HEIGHT = 26, BOLT_VARIANTS = 8;
   const THUNDER_DELAY_MIN = 0.5, THUNDER_DELAY_SPREAD = 1;
@@ -207,6 +211,7 @@
     const node = createNode({ geometry: rainDrop(), instanceData: new Float32Array(cap * 20), instanceCount: 0, drawInstanceCount: 0, instanceVersion: 0, fixedInstanceCapacity: true });
     const x = new Float32Array(cap), y = new Float32Array(cap), z = new Float32Array(cap);
     const w = new Float32Array(cap), h = new Float32Array(cap), vy = new Float32Array(cap);
+    const g = new Float32Array(cap);
     let count = 0;
     let flash = 0, flashT = -1, boltT = -1, thunderAt = -1, strikes = 0, thunders = 0, boltVariant = -1;
     // Everything the feed sets is a target; the live value walks there so nothing snaps.
@@ -332,6 +337,7 @@
       w[i] = presentation ? size * .45 : size;
       h[i] = (0.8 + size * 0.35) * (presentation ? .55 : 1);
       vy[i] = RAIN_FALL + RAIN_FALL_PER_SIZE * size;
+      g[i] = heightAt(x[i], z[i]);
     };
     // The feed's standing view of the chain. Targets only; `update` walks the live values there, and judges
     // for itself whether the arrivals it was told about are still worth believing.
@@ -454,7 +460,8 @@
       const floorY = t.y - RECYCLE_BELOW;
       for (let i = 0; i < count; i++) {
         y[i] -= vy[i] * dt;
-        const ground = heightAt(x[i], z[i]);
+        let ground = g[i];
+        if (y[i] <= ground + GROUND_GUARD) ground = g[i] = heightAt(x[i], z[i]);
         if (y[i] <= ground || y[i] < floorY) {
           if (onRain && dt > 0 && y[i] <= ground) onRain(x[i], ground, z[i], w[i], wet);
           if (fx && w[i] >= SPLASH_SIZE && y[i] <= ground) fx.burst(x[i], y[i] + 0.05, z[i], 2, SPLASH, 0.9);
@@ -462,7 +469,7 @@
           if (count > target) {
             count--;
             x[i] = x[count]; y[i] = y[count]; z[i] = z[count];
-            w[i] = w[count]; h[i] = h[count]; vy[i] = vy[count];
+            w[i] = w[count]; h[i] = h[count]; vy[i] = vy[count]; g[i] = g[count];
             i--;
             continue;
           }
