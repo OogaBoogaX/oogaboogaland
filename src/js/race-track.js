@@ -110,8 +110,10 @@
     } else if (out.normals) while (out.normals.length < out.verts.length) out.normals.push(0);
     for (const f of geo.faces) out.faces.push({ i: f.i.map((k) => k + base), color: f.color, emissive: f.emissive });
   };
-  const writeInstance = (data, o, yaw, s, x, y, z, glow = 1) => {
-    const c = Math.cos(yaw) * s, sn = Math.sin(yaw) * s;
+  // cos/sin may come precomputed (a fixed yaw cached by the caller, or 1/0 for an upright one), which is
+  // bit-identical: 1 is cos(0) and 0 is sin(0) exactly, and the products were the same multiply.
+  const writeInstance = (data, o, yaw, s, x, y, z, glow = 1, cos, sin) => {
+    const c = (cos === undefined ? Math.cos(yaw) : cos) * s, sn = (sin === undefined ? Math.sin(yaw) : sin) * s;
     data[o] = c; data[o + 1] = 0; data[o + 2] = -sn; data[o + 3] = 0;
     data[o + 4] = 0; data[o + 5] = s; data[o + 6] = 0; data[o + 7] = 0;
     data[o + 8] = sn; data[o + 9] = 0; data[o + 10] = c; data[o + 11] = 0;
@@ -796,7 +798,7 @@
       }
       geometries.push(raceModels.torchStand(), raceModels.torchFlame());
     }
-    const spectators = { node: null, x: new Float32Array(SPECTATOR_CAP), y: new Float32Array(SPECTATOR_CAP), z: new Float32Array(SPECTATOR_CAP), yaw: new Float32Array(SPECTATOR_CAP), phase: new Float32Array(SPECTATOR_CAP), count: 0 };
+    const spectators = { node: null, x: new Float32Array(SPECTATOR_CAP), y: new Float32Array(SPECTATOR_CAP), z: new Float32Array(SPECTATOR_CAP), yaw: new Float32Array(SPECTATOR_CAP), cos: new Float32Array(SPECTATOR_CAP), sin: new Float32Array(SPECTATOR_CAP), phase: new Float32Array(SPECTATOR_CAP), count: 0 };
     const standsGeo = geometry();
     if (theme.spectators) {
       const spots = [];
@@ -832,7 +834,11 @@
         spectators.x[i] = spots[i].x;
         spectators.y[i] = spots[i].y;
         spectators.z[i] = spots[i].z;
+        // The yaw is fixed at spawn, so its cos and sin are too - computed from the stored float32 yaw,
+        // the very value the per-frame write used to re-derive them from.
         spectators.yaw[i] = spots[i].yaw;
+        spectators.cos[i] = Math.cos(spectators.yaw[i]);
+        spectators.sin[i] = Math.sin(spectators.yaw[i]);
         spectators.phase[i] = rand() * Math.PI * 2;
       }
       spectators.count = count;
@@ -944,7 +950,7 @@
         const data = spectators.node.instanceData;
         for (let i = 0; i < spectators.count; i++) {
           const hop = Math.max(0, Math.sin(elapsed * 6 + spectators.phase[i])) * 0.18;
-          writeInstance(data, i * 20, spectators.yaw[i], 1, spectators.x[i], spectators.y[i] + hop, spectators.z[i], 1);
+          writeInstance(data, i * 20, spectators.yaw[i], 1, spectators.x[i], spectators.y[i] + hop, spectators.z[i], 1, spectators.cos[i], spectators.sin[i]);
         }
         spectators.node.instanceVersion++;
       }

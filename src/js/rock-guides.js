@@ -10,6 +10,9 @@
   const BL = window.BL = window.BL || {};
   const LIMIT = 96, EPS = 1e-5, RADIUS = 12, FADE_START = 10.5, FADE_SECONDS = 0.25, SURFACE_PATCH = 0.6;
   const OUTDOOR_CHUNK = 6, OUTDOOR_PATCH = 1.5;
+  // The wall classifications are world-anchored, so motion-only re-derivation shares the sibling
+  // contour pass's rate; a frame of lag never shows. Occlusion and perception epochs re-derive at once.
+  const SURFACE_RECOMPUTE_HZ = 30;
   // Wall geometry is a pure function of the memoised island: one shared build, never written.
   // Fade and camera state are per visit.
   const BUILDS = new WeakMap(), round = (n) => Math.round(n / EPS);
@@ -762,7 +765,9 @@
     }
     contexts.push(BL.holeGuides.create({ island }));
     for (const context of contexts) {
+      context.surfaceVoxelWitness = new Int32Array(context.surfaceGroupCount).fill(-1);
       context.surfacePerception = -1;
+      context.surfaceCompute = Infinity;
       for (const wall of context.walls) { wall.cameraReady = false; wall.surfaceWitness = -1; }
     }
     // The observer can see through a doorway into a second space.
@@ -777,7 +782,7 @@
     let offset = 0;
     for (const entry of unique.values()) for (let n = 0; n < 6; n++) all.lines[offset++] = entry.context.lines[entry.i + n];
     unique.clear();
-    const stats = { contexts: contexts.length, surfaceContexts: built.surfaceContexts, frontageContexts: built.frontageContexts, caveContexts: caves.contexts.length, lines: total, uniqueLines: all.count, surfaces: contexts.reduce((sum, context) => sum + context.surfaceCount, 0), surfacePatches: contexts.reduce((sum, context) => sum + context.surfaceGroupCount, 0), windowReveals: built.windowReveals, limit: LIMIT, tested: built.tested, creases: built.creases, surfaceRays: 0, surfaceCertificates: 0 };
+    const stats = { contexts: contexts.length, surfaceContexts: built.surfaceContexts, frontageContexts: built.frontageContexts, caveContexts: caves.contexts.length, lines: total, uniqueLines: all.count, surfaces: contexts.reduce((sum, context) => sum + context.surfaceCount, 0), surfacePatches: contexts.reduce((sum, context) => sum + context.surfaceGroupCount, 0), windowReveals: built.windowReveals, limit: LIMIT, tested: built.tested, creases: built.creases, surfaceRays: 0, surfaceCertificates: 0, surfaceWitnessBytes: contexts.reduce((sum, context) => sum + context.surfaceVoxelWitness.byteLength, 0) };
     const updateSurfaceBranch = (context, wall, node, p, fx, fy, fz, near, objectClear, actor) => {
       const b = node.bounds;
       let hidden = ((fx < 0 ? b[0] : b[3]) - p.x) * fx + ((fy < 0 ? b[1] : b[4]) - p.y) * fy + ((fz < 0 ? b[2] : b[5]) - p.z) * fz <= near;
@@ -800,7 +805,7 @@
         for (let n = node.start; n < node.end; n++) {
           const group = order[n], at = group * 3, x = samples[at], y = samples[at + 1], z = samples[at + 2], dx = x - p.x, dy = y - p.y, dz = z - p.z;
           const depth = dx * fx + dy * fy + dz * fz, start = near / depth;
-          context.surfaceHidden[group] = depth <= near ? 1 : !island.sightClearAt(p.x + dx * start, p.y + dy * start, p.z + dz * start, x, y, z);
+          context.surfaceHidden[group] = depth <= near ? 1 : !island.sightClearAt(p.x + dx * start, p.y + dy * start, p.z + dz * start, x, y, z, context.surfaceVoxelWitness, group);
           if (!context.surfaceHidden[group] && objectClear && (context.kind === "cave" || context.kind === "sealed")) context.surfaceHidden[group] = !objectClear(p.x + dx * start, p.y + dy * start, p.z + dz * start, x, y, z, actor, null, true);
           stats.surfaceRays += depth > near ? 1 : 0;
         }
@@ -850,17 +855,29 @@
         perceiveBranch(context, wall, node.right, ex, ey, ez);
       }
     };
-    const updateSurface = (context, ex, ey, ez, camera, dt, actor = null, objectClear = null, occlusion = 0, perception = occlusion) => {
+    const updateSurface = (context, ex, ey, ez, camera, dt, actor = null, objectClear = null, occlusion = 0, perception = occlusion, recomputeHz = 0) => {
       if (!context) return null;
       surfacesActive = true;
       const center = actor ? actor.root.position : null, px = center ? center.x : ex, py = center ? center.y : ey, pz = center ? center.z : ez;
       const eye = context.surfaceEye, position = context.surfacePosition, eyeMoved = context.surfaceActor !== actor || !Number.isFinite(eye[0])
         || Math.hypot(ex - eye[0], ey - eye[1], ez - eye[2]) > 0.025 || Math.hypot(px - position[0], py - position[1], pz - position[2]) > 0.025;
-      const occlusionChanged = context.surfaceOcclusion !== occlusion, moved = eyeMoved || context.surfacePerception !== perception;
+      const occlusionChanged = context.surfaceOcclusion !== occlusion, perceptionChanged = context.surfacePerception !== perception, moved = eyeMoved || perceptionChanged;
       context.surfaceOcclusion = occlusion;
+      const p = camera.position, target = camera.target, cameraEye = context.surfaceCamera, view = context.surfaceView;
+      const length = Math.hypot(target.x - p.x, target.y - p.y, target.z - p.z), fx = (target.x - p.x) / length, fy = (target.y - p.y) / length, fz = (target.z - p.z) / length;
+      // Passing bodies affect the camera's cave rays, but never the actor's
+      // perception of a wall. Keep those invalidation epochs independent.
+      const cameraMoved = (eyeMoved || occlusionChanged) && (context.kind === "cave" || context.kind === "sealed") || !Number.isFinite(cameraEye[0]) || Math.hypot(p.x - cameraEye[0], p.y - cameraEye[1], p.z - cameraEye[2]) > 0.025
+        || context.windows?.length && (p.x !== cameraEye[0] || p.y !== cameraEye[1] || p.z !== cameraEye[2])
+        || Math.abs(fx - view[0]) + Math.abs(fy - view[1]) + Math.abs(fz - view[2]) > 0.001 || view[3] !== camera.near;
+      // Motion alone re-derives within the rate budget; occlusion and perception epochs are
+      // classification inputs and re-derive at once, as does the first call of an armed context.
+      if (recomputeHz > 0) context.surfaceCompute += Math.max(0, dt);
+      const derive = !recomputeHz || occlusionChanged || perceptionChanged || context.surfaceCompute >= 1 / recomputeHz;
+      if (derive && (moved || cameraMoved)) context.surfaceCompute = 0;
       const walls = context.walls, centers = context.surfaceCenters, wallGroups = context.surfaceWallGroups, outdoor = context.kind === "surface" && context.source.slopeSide === undefined;
       const wholeSection = !outdoor && (context.kind === "surface" || context.kind === "front" || context.kind === "cave" || context.kind === "sealed" || context.kind === "hole");
-      if (moved) {
+      if (moved && derive) {
         context.surfaceActor = actor; context.surfacePerception = perception;
         // Whole sections need one reachable witness.
         // Mark untested samples separately so a later prop movement can safely search past it.
@@ -942,14 +959,7 @@
         }
         if (!outdoor) for (const wall of walls) wall.target = wall.perceived ? Math.max(0, Math.min(1, (RADIUS - wall.distance) / (RADIUS - FADE_START))) : 0;
       }
-      const p = camera.position, target = camera.target, cameraEye = context.surfaceCamera, view = context.surfaceView;
-      const length = Math.hypot(target.x - p.x, target.y - p.y, target.z - p.z), fx = (target.x - p.x) / length, fy = (target.y - p.y) / length, fz = (target.z - p.z) / length;
-      // Passing bodies affect the camera's cave rays, but never the actor's
-      // perception of a wall. Keep those invalidation epochs independent.
-      const cameraMoved = (eyeMoved || occlusionChanged) && (context.kind === "cave" || context.kind === "sealed") || !Number.isFinite(cameraEye[0]) || Math.hypot(p.x - cameraEye[0], p.y - cameraEye[1], p.z - cameraEye[2]) > 0.025
-        || context.windows?.length && (p.x !== cameraEye[0] || p.y !== cameraEye[1] || p.z !== cameraEye[2])
-        || Math.abs(fx - view[0]) + Math.abs(fy - view[1]) + Math.abs(fz - view[2]) > 0.001 || view[3] !== camera.near;
-      if (cameraMoved) {
+      if (cameraMoved && derive) {
         cameraEye[0] = p.x; cameraEye[1] = p.y; cameraEye[2] = p.z;
         view[0] = fx; view[1] = fy; view[2] = fz; view[3] = camera.near;
         context.surfaceHidden.fill(0);
@@ -961,7 +971,7 @@
         updateSurfaceBranch(context, wall, wall.surfaceTree, p, fx, fy, fz, camera.near, objectClear, actor);
         wall.cameraReady = true;
       }
-      if (cameraMoved) {
+      if (cameraMoved && derive) {
         if (context.apertures) {
           context.apertures.update(camera, !context.contains(p.x, p.y, p.z, 0, false));
           if (!context.apertures.count) context.surfaceAperture.fill(0);
@@ -1030,7 +1040,7 @@
       if (changed) context.surfaceVersion++;
       return context;
     };
-    const updateSurfaces = (ex, ey, ez, camera, dt, actor = null, objectClear = null, occlusion = 0, perception = occlusion) => {
+    const updateSurfaces = (ex, ey, ez, camera, dt, actor = null, objectClear = null, occlusion = 0, perception = occlusion, recomputeHz = SURFACE_RECOMPUTE_HZ) => {
       stats.surfaceRays = stats.surfaceCertificates = 0;
       const center = actor ? actor.root.position : null, px = center ? center.x : ex, py = center ? center.y : ey, pz = center ? center.z : ez;
       // Fixed authored registry; broad-phase rejection keeps the nearby view from becoming a whole-island pass.
@@ -1040,7 +1050,8 @@
           const b = wall.bounds, dx = Math.max(b[0] - px, 0, px - b[3]), dy = Math.max(b[1] - py, 0, py - b[4]), dz = Math.max(b[2] - pz, 0, pz - b[5]);
           if (dx * dx + dy * dy + dz * dz < RADIUS * RADIUS) { nearby = true; break; }
         }
-        if (nearby) updateSurface(context, ex, ey, ez, camera, dt, actor, objectClear, occlusion, perception);
+        if (nearby) updateSurface(context, ex, ey, ez, camera, dt, actor, objectClear, occlusion, perception, recomputeHz);
+        else context.surfaceCompute = Infinity;
       }
       return contexts;
     };
@@ -1053,10 +1064,11 @@
         context.surfaceActive = context.surfaceWholeActive = 0;
         context.surfaceEye.fill(NaN); context.surfaceCamera.fill(NaN);
         context.surfaceOcclusion = context.surfacePerception = -1;
+        context.surfaceVoxelWitness.fill(-1);
         for (const wall of context.walls) { wall.phase = wall.target = 0; wall.surfaceWitness = -1; }
       }
     };
-    const dispose = () => { contexts.length = 0; all.count = stats.contexts = stats.surfaceContexts = stats.frontageContexts = stats.caveContexts = stats.lines = stats.uniqueLines = stats.surfaces = stats.surfacePatches = stats.windowReveals = 0; };
+    const dispose = () => { for (const context of contexts) context.surfaceVoxelWitness = null; stats.surfaceWitnessBytes = 0; contexts.length = 0; all.count = stats.contexts = stats.surfaceContexts = stats.frontageContexts = stats.caveContexts = stats.lines = stats.uniqueLines = stats.surfaces = stats.surfacePatches = stats.windowReveals = 0; };
     return { select, updateSurface, updateSurfaces, resetSurface, dispose, stats, contexts, all };
   };
   BL.rockGuides = { create };

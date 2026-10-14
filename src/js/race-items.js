@@ -62,12 +62,12 @@
       for (const s of track.spawns.bananas) {
         const node = createNode({ position: { x: s.x, y: s.y + 0.55, z: s.z }, rotation: { x: 0.4, y: 0, z: 0.9 }, scale: { x: 0.5, y: 0.5, z: 0.5 }, geometry: bananaGeo, glow: 1.2 });
         addChild(root, node);
-        bananas.push({ node, x: s.x, y: s.y, z: s.z, taken: 0, phase: fnv1a(`${s.x}/${s.z}`) % 7 });
+        bananas.push({ node, x: s.x, y: s.y, z: s.z, taken: 0, phase: fnv1a(`${s.x}/${s.z}`) % 7, backAt: -1, tookAt: 0 });
       }
       for (const s of track.spawns.crates) {
         const node = createNode({ position: { x: s.x, y: s.y + 0.2, z: s.z }, geometry: raceModels.itemCrate() });
         addChild(root, node);
-        crates.push({ node, x: s.x, y: s.y, z: s.z, taken: 0, phase: fnv1a(`${s.z}/${s.x}`) % 5 });
+        crates.push({ node, x: s.x, y: s.y, z: s.z, taken: 0, phase: fnv1a(`${s.z}/${s.x}`) % 5, backAt: -1, tookAt: 0 });
       }
       for (const s of track.spawns.pads) {
         const node = createNode({ position: { x: s.x, y: s.y + 0.01, z: s.z }, rotation: { x: 0, y: s.heading, z: 0 }, geometry: raceModels.boostPad() });
@@ -215,16 +215,18 @@
         const b = bananas[i];
         if (b.taken > 0) {
           b.taken -= dt;
-          if (b.taken <= 0) b.node.visible = true;
+          if (b.taken <= 0) {
+            b.node.visible = true;
+            b.backAt = spinT;
+          }
           continue;
         }
-        b.node.rotation.y = spinT * 2.4 + b.phase;
-        b.node.position.y = b.y + 0.55 + Math.sin(spinT * 3 + b.phase) * 0.08;
         for (let k = 0; k < list.length; k++) {
           const r = list[k];
           if (r.respawn > 0 || Math.abs(r.y - b.y) > 1.5) continue;
           if ((r.x - b.x) ** 2 + (r.z - b.z) ** 2 < 1.3) {
             b.taken = BANANA_RESPAWN;
+            b.tookAt = spinT;
             b.node.visible = false;
             if (r.bananas < METER_MAX) r.bananas++;
             if (r.bananas >= METER_MAX) r.meterFull = true;
@@ -237,16 +239,18 @@
         const c = crates[i];
         if (c.taken > 0) {
           c.taken -= dt;
-          if (c.taken <= 0) c.node.visible = true;
+          if (c.taken <= 0) {
+            c.node.visible = true;
+            c.backAt = spinT;
+          }
           continue;
         }
-        c.node.rotation.y = spinT * 1.6 + c.phase;
-        c.node.position.y = c.y + 0.25 + Math.sin(spinT * 2 + c.phase) * 0.1;
         for (let k = 0; k < list.length; k++) {
           const r = list[k];
           if (r.respawn > 0 || r.item || Math.abs(r.y - c.y) > 1.5) continue;
           if ((r.x - c.x) ** 2 + (r.z - c.z) ** 2 < 1.6) {
             c.taken = CRATE_RESPAWN;
+            c.tookAt = spinT;
             c.node.visible = false;
             r.item = rollItem(r, `${elapsed.toFixed(2)}/${r.index}`);
             if (events.onCrate) events.onCrate(r, r.item);
@@ -256,7 +260,6 @@
       }
       for (let i = 0; i < pads.length; i++) {
         const p = pads[i];
-        p.node.glow = 0.8 + Math.sin(spinT * 5 + p.phase) * 0.3;
         for (let k = 0; k < list.length; k++) {
           const r = list[k];
           if (r.respawn > 0 || r.airborne || Math.abs(r.y - p.y) > 1) continue;
@@ -354,6 +357,41 @@
         writeSkid(r.x - sx, r.y, r.z - sz, yaw);
       }
     };
+    // The pickups' spin and bob and the pads' glow are pure presentation: as skid marks are laid on the
+    // first substep only, these are posed once a frame after the substeps with the same expressions the
+    // substeps used, so the rendered values are identical either way. `tookAt` and `backAt` keep the two
+    // edges exact: a taken pickup holds the take substep's pose (written before the take was seen), and a
+    // respawn that landed on the frame's last substep was never substep-written at all.
+    const pose = () => {
+      for (let i = 0; i < bananas.length; i++) {
+        const b = bananas[i];
+        if (b.taken > 0 || b.backAt === spinT) {
+          if (b.taken > 0) {
+            b.node.rotation.y = b.tookAt * 2.4 + b.phase;
+            b.node.position.y = b.y + 0.55 + Math.sin(b.tookAt * 3 + b.phase) * 0.08;
+          }
+          continue;
+        }
+        b.node.rotation.y = spinT * 2.4 + b.phase;
+        b.node.position.y = b.y + 0.55 + Math.sin(spinT * 3 + b.phase) * 0.08;
+      }
+      for (let i = 0; i < crates.length; i++) {
+        const c = crates[i];
+        if (c.taken > 0 || c.backAt === spinT) {
+          if (c.taken > 0) {
+            c.node.rotation.y = c.tookAt * 1.6 + c.phase;
+            c.node.position.y = c.y + 0.25 + Math.sin(c.tookAt * 2 + c.phase) * 0.1;
+          }
+          continue;
+        }
+        c.node.rotation.y = spinT * 1.6 + c.phase;
+        c.node.position.y = c.y + 0.25 + Math.sin(spinT * 2 + c.phase) * 0.1;
+      }
+      for (let i = 0; i < pads.length; i++) {
+        const p = pads[i];
+        p.node.glow = 0.8 + Math.sin(spinT * 5 + p.phase) * 0.3;
+      }
+    };
     const dispose = () => {
       for (const b of bananas) removeChild(root, b.node);
       for (const c of crates) removeChild(root, c.node);
@@ -365,7 +403,7 @@
       bananas.length = crates.length = pads.length = rocks.length = peels.length = boulders.length = 0;
     };
     const stats = () => ({ pickups: bananas.length + crates.length, rocksLive: rocks.filter((r) => r.live).length, peelsLive: peels.filter((p) => p.live).length, skids: skids.filled });
-    return { setTrack, clear, use, update, dispose, stats, events, bananas, crates, pads, rocks, peels, boulders, skids, METER_MAX, ITEMS };
+    return { setTrack, clear, use, update, pose, dispose, stats, events, bananas, crates, pads, rocks, peels, boulders, skids, METER_MAX, ITEMS };
   };
   BL.raceItems = { create, ITEMS, METER_MAX, SKID_CAP, ROCK_CAP, PEEL_CAP };
 })();

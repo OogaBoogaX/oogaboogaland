@@ -898,6 +898,20 @@
       return true;
     };
 
+    // The autosave's scratch tree: `s` keeps the same keys, at the same lengths, from creation on, so
+    // `snapshot` refills one fixed tree in place (same key order, same values, only `save`'s stringify
+    // ever reads it) instead of building the run's worth of objects and arrays as garbage every time.
+    const saveKeys = [];
+    const saveScratch = {};
+    for (const key of Object.keys(s)) {
+      if (key === "rand") continue;
+      saveKeys.push(key);
+      const v = s[key];
+      if (ArrayBuffer.isView(v)) saveScratch[key] = new Array(v.length);
+      else if (Array.isArray(v)) saveScratch[key] = v.map(() => ({}));
+      else saveScratch[key] = v;
+    }
+
     const sim = {
       state: s,
       tick(dt) {
@@ -1300,14 +1314,14 @@
         return true;
       },
       // The run as plain data: typed arrays as arrays, the fault and log rings as their fields, and the
-      // dice as their state; `rand` itself is left out and rebuilt by `restore`.
+      // dice as their state; `rand` itself is left out and rebuilt by `restore`. Refills `saveScratch`
+      // in place: an elementwise copy reads the same numbers Array.from did, so the JSON is unchanged.
       snapshot() {
-        const out = {};
-        for (const key of Object.keys(s)) {
-          const v = s[key];
-          if (key === "rand") continue;
-          if (ArrayBuffer.isView(v)) out[key] = Array.from(v);
-          else if (Array.isArray(v)) out[key] = v.map((e) => ({ ...e }));
+        const out = saveScratch;
+        for (let k = 0; k < saveKeys.length; k++) {
+          const key = saveKeys[k], v = s[key], dst = out[key];
+          if (ArrayBuffer.isView(v)) for (let i = 0; i < v.length; i++) dst[i] = v[i];
+          else if (Array.isArray(v)) for (let i = 0; i < v.length; i++) Object.assign(dst[i], v[i]);
           else out[key] = v;
         }
         return out;

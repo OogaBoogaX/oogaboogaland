@@ -88,7 +88,12 @@
   const CAVE_SIGN_Y = 3.5 - RIM_SEAM_DROP + hubModels.CAVE_SIGN_HEIGHT * 0.5 + 0.32;
   const CAVE_SIGN_Z = PORTAL_Z + 0.055;
   const CAVE_LIGHT_Z = 0.52;
-  // RENDER_OPTS sky, light and lamp values are resampled from the clock every frame.
+  // RENDER_OPTS sky, light and lamp values are resampled from the clock only when an input drifts past a
+  // sun-angle budget: 6e-4 of an hour turns the sun about 0.009 degrees, under a pixel at any view. DAY_STASH
+  // holds the sampled fields that weather and the Mempool shelter then shade in place later in the frame,
+  // so a reused sample restores them before those run; every other sampled field simply holds.
+  const DAY_RESAMPLE_HOUR = 6e-4, DAY_RESAMPLE_DAY = DAY_RESAMPLE_HOUR / 24, DAY_RESAMPLE_MS = DAY_RESAMPLE_HOUR * 3600000;
+  const DAY_STASH = { directStrength: 0, ambientFloor: 0, clear: new Float32Array(3), horizon: new Float32Array(3), zenith: new Float32Array(3), sky: new Float32Array(3), ground: new Float32Array(3), direct: new Float32Array(3) };
   const RENDER_OPTS = {
     clear: new Float32Array(3), horizon: new Float32Array(3), zenith: new Float32Array(3), sky: new Float32Array(3), ground: new Float32Array(3), sun: new Float32Array(3), direct: new Float32Array(3),
     light: { x: 0.55, y: 0.78, z: -0.25 }, sunDirection: { x: 0, y: 1, z: 0 }, moon: { x: 0, y: 1, z: 0 }, moonSun: { x: 0, y: -1, z: 0 }, celestialPole: { x: 0, y: Math.sin(20 * DEG), z: -Math.cos(20 * DEG) }, starMatrix: new Float32Array(9),
@@ -405,6 +410,8 @@
   const JETPACK_HUD_STATE = { owned: false, equipped: false, fuel: 1, blocked: false };
   let enteringTween = null, factoryDeparting = false, bifrostDeparting = false;
   let stateTimer = 0, hintTimer = 0, meterTimer = 0, now = 0, hour = 12, unsubscribeActivity = null, unsubscribeAccount = null, ownOogaClaimed = false;
+  // The daylight inputs as last sampled; sampledDay starts at a never-true 0 so the first frame always samples.
+  let sampledHour = 0, sampledDay = 0, sampledLatitude = NaN, sampledContinuousDay = 0, sampledUtcMs = 0;
   // How far under the Mempool island's ground the view is, 0 to 1: its sun and its storm stay outside.
   let poolShade = 0, poolUnder = 0;
   // The driven Ooga's own footsteps, heard by this page alone (footsteps.js).
@@ -608,6 +615,11 @@
   const cloudObstacles = [];
   let cloudRandom = null;
   const lamps = [];
+  // updateLamps' selection and light array are a pure function of these inputs; an exact hit reuses
+  // last frame's written LIGHT_CAPACITY entries. Position joins target because the headquarters
+  // basement reads both. Invalidated in leave; NaN fields never compare equal.
+  const LAMP_SEL_KEY = { tx: NaN, ty: NaN, tz: NaN, px: NaN, py: NaN, pz: NaN, torch: NaN, lampFactor: NaN, poolShade: NaN, poolUnder: NaN, lanternsOn: false, cave: 0, limit: -1 };
+  let lampSelValid = false;
   const entranceLights = [];
   const fireSeats = [];
   const fireHazards = [];
@@ -1562,13 +1574,17 @@
       if (lit && !l.lit && spark) fx.burst(l.x, l.y, l.z, 5, [SPARK], 1.3);
       l.lit = lit;
       l.k = k;
-      const flicker = Math.sin(elapsed * 11 + i * 2.3) * 0.15;
-      node.glow = (l.nightOnly ? 0 : LAMP_OFF) + k * (l.kind.glow * (1 + (l.pileProfile ? RENDER_OPTS.lampFactor * PILE_POST_NIGHT_BOOST * 0.25 : 0)) + flicker) + node.flare * 1.5;
+      if (k === 0 && node.flare <= 0) {
+        // k times a finite factor is exactly 0, so the glow is this constant; skip the flicker sample.
+        const steady = l.nightOnly ? 0 : LAMP_OFF;
+        if (node.glow !== steady) node.glow = steady;
+      } else {
+        const flicker = Math.sin(elapsed * 11 + i * 2.3) * 0.15;
+        node.glow = (l.nightOnly ? 0 : LAMP_OFF) + k * (l.kind.glow * (1 + (l.pileProfile ? RENDER_OPTS.lampFactor * PILE_POST_NIGHT_BOOST * 0.25 : 0)) + flicker) + node.flare * 1.5;
+      }
       if (node.flare > 0) node.flare = Math.max(0, node.flare - dt * 2);
       // kind.hide: the node is hidden while unlit, so a cold fire shows no flame at all.
       if (l.kind.hide) node.visible = lit;
-      l.selected = false;
-      l.approximated = false;
       // A lamp with a reach lights a place shut in under the Mempool island's rock, and every light costs every
       // pixel. It counts while the view is under that ground (`poolShade`) or follows a walker who is, the roof
       // cut open over them (`poolUnder`), and fades out over `fade` metres as the view leaves its reach, measured
@@ -1581,61 +1597,77 @@
       if (l.debug) {
         l.debug.factor = k;
         l.debug.lit = lit;
-        l.debug.selected = false;
-        l.debug.approximated = false;
       }
     }
-    // Keep the lit central pile posts in every tier; fill the remaining slots
-    // with the lamps nearest the view.
-    for (; count < limit; count++) {
-      let nearest = null, distance = Infinity;
+    // The selection below is a pure function of the key: an exact hit reuses the written array, and
+    // the lamps' selected/approximated flags keep describing it. Twilight moves torch and lampFactor
+    // every frame, so day/night transitions are misses, as is a quality tier's new limit.
+    const key = LAMP_SEL_KEY;
+    const keyHit = lampSelValid
+      && key.tx === camera.target.x && key.ty === camera.target.y && key.tz === camera.target.z
+      && key.px === camera.position.x && key.py === camera.position.y && key.pz === camera.position.z
+      && key.torch === RENDER_OPTS.torch && key.lampFactor === RENDER_OPTS.lampFactor
+      && key.poolShade === poolShade && key.poolUnder === poolUnder
+      && key.lanternsOn === lanternsOn && key.cave === cameraCaveIndex && key.limit === limit;
+    if (!keyHit) {
+      for (let i = 0; i < lamps.length; i++) {
+        const l = lamps[i];
+        l.selected = false;
+        l.approximated = false;
+        if (l.debug) { l.debug.selected = false; l.debug.approximated = false; }
+      }
+      // Keep the lit central pile posts in every tier; fill the remaining slots
+      // with the lamps nearest the view.
+      for (; count < limit; count++) {
+        let nearest = null, distance = Infinity;
+        for (let i = 0; i < lamps.length; i++) {
+          const l = lamps[i];
+          if (!l.lit || !l.light || l.selected || l.far) continue;
+          const dx = l.x - camera.target.x, dy = l.y - camera.target.y, dz = l.z - camera.target.z;
+          const score = l.pileProfile ? -32 : dx * dx + dy * dy + dz * dz - (l.centerLight ? 16 : 0);
+          if (score < distance) { nearest = l; distance = score; }
+        }
+        if (!nearest) break;
+        const l = nearest, kind = l.kind, boost = 1 + (l.pileProfile ? RENDER_OPTS.lampFactor * PILE_POST_NIGHT_BOOST : 0);
+        l.selected = true;
+        if (l.debug) l.debug.selected = true;
+        LIGHTING_DEBUG.selectedIds[count] = l.id;
+        const o = count * 8;
+        lights[o] = l.x;
+        lights[o + 1] = l.y;
+        lights[o + 2] = l.z;
+        lights[o + 3] = kind.radius + (l.pileProfile ? RENDER_OPTS.lampFactor * PILE_POST_NIGHT_REACH : 0);
+        lights[o + 4] = kind.r * l.k * boost * l.gain;
+        lights[o + 5] = kind.g * l.k * boost * l.gain;
+        lights[o + 6] = kind.b * l.k * boost * l.gain;
+        lights[o + 7] = l.pileProfile ? 1 : 0;
+      }
       for (let i = 0; i < lamps.length; i++) {
         const l = lamps[i];
         if (!l.lit || !l.light || l.selected || l.far) continue;
-        const dx = l.x - camera.target.x, dy = l.y - camera.target.y, dz = l.z - camera.target.z;
-        const score = l.pileProfile ? -32 : dx * dx + dy * dy + dz * dz - (l.centerLight ? 16 : 0);
-        if (score < distance) { nearest = l; distance = score; }
+        l.approximated = true;
+        if (l.debug) l.debug.approximated = true;
+        if (approximated < LIGHT_CAPACITY) LIGHTING_DEBUG.approximatedIds[approximated] = l.id;
+        approximated++;
       }
-      if (!nearest) break;
-      const l = nearest, kind = l.kind, boost = 1 + (l.pileProfile ? RENDER_OPTS.lampFactor * PILE_POST_NIGHT_BOOST : 0);
-      l.selected = true;
-      if (l.debug) l.debug.selected = true;
-      LIGHTING_DEBUG.selectedIds[count] = l.id;
-      const o = count * 8;
-      lights[o] = l.x;
-      lights[o + 1] = l.y;
-      lights[o + 2] = l.z;
-      lights[o + 3] = kind.radius + (l.pileProfile ? RENDER_OPTS.lampFactor * PILE_POST_NIGHT_REACH : 0);
-      lights[o + 4] = kind.r * l.k * boost * l.gain;
-      lights[o + 5] = kind.g * l.k * boost * l.gain;
-      lights[o + 6] = kind.b * l.k * boost * l.gain;
-      lights[o + 7] = l.pileProfile ? 1 : 0;
+      for (let i = count; i < LIGHT_CAPACITY; i++) LIGHTING_DEBUG.selectedIds[i] = null;
+      for (let i = approximated; i < LIGHT_CAPACITY; i++) LIGHTING_DEBUG.approximatedIds[i] = null;
+      RENDER_OPTS.lightCount = count;
+      LIGHTING_DEBUG.registeredLampCount = registered;
+      LIGHTING_DEBUG.activeFullLightCount = count;
+      LIGHTING_DEBUG.approximatedLightCount = approximated;
+      LIGHTING_DEBUG.configuredLightCapacity = limit;
+      LIGHTING_DEBUG.selectedCount = count;
+      LIGHTING_DEBUG.approximatedCount = approximated;
+      LIGHTING_DEBUG.tier = webgl ? renderer.quality : "canvas2d";
     }
-    for (let i = 0; i < lamps.length; i++) {
-      const l = lamps[i];
-      if (!l.lit || !l.light || l.selected || l.far) continue;
-      l.approximated = true;
-      if (l.debug) l.debug.approximated = true;
-      if (approximated < LIGHT_CAPACITY) LIGHTING_DEBUG.approximatedIds[approximated] = l.id;
-      approximated++;
-    }
-    for (let i = count; i < LIGHT_CAPACITY; i++) LIGHTING_DEBUG.selectedIds[i] = null;
-    for (let i = approximated; i < LIGHT_CAPACITY; i++) LIGHTING_DEBUG.approximatedIds[i] = null;
-    RENDER_OPTS.lightCount = count;
-    LIGHTING_DEBUG.registeredLampCount = registered;
-    LIGHTING_DEBUG.activeFullLightCount = count;
-    LIGHTING_DEBUG.approximatedLightCount = approximated;
-    LIGHTING_DEBUG.configuredLightCapacity = limit;
-    LIGHTING_DEBUG.selectedCount = count;
-    LIGHTING_DEBUG.approximatedCount = approximated;
-    LIGHTING_DEBUG.tier = webgl ? renderer.quality : "canvas2d";
     if (headquarters) {
       // The underground hearth stays lit for the windowless common room.
       // Its emissive flame still breathes with the same flicker as the campfire.
       const hearth = headquarters.hearth;
       hearth.node.glow = LAMP_OFF + LAMP.fire.glow + Math.sin(elapsed * 11 + hearth.phase) * 0.15;
     }
-    if (headquarters && camera.position.y < -1 && cameraCaveIndex && CAMERA_OPENINGS[cameraCaveIndex - 1].headquarters) {
+    if (!keyHit && headquarters && camera.position.y < -1 && cameraCaveIndex && CAMERA_OPENINGS[cameraCaveIndex - 1].headquarters) {
       const underground = headquarters.sources;
       // The upper hearth cannot cast through the rock into the basement.
       const below = camera.position.y < island.headquarters.floor;
@@ -1662,6 +1694,14 @@
       }
       for (let i = total; i < LIGHT_CAPACITY; i++) LIGHTING_DEBUG.selectedIds[i] = null;
       RENDER_OPTS.lightCount = LIGHTING_DEBUG.activeFullLightCount = LIGHTING_DEBUG.selectedCount = total;
+    }
+    if (!keyHit) {
+      key.tx = camera.target.x; key.ty = camera.target.y; key.tz = camera.target.z;
+      key.px = camera.position.x; key.py = camera.position.y; key.pz = camera.position.z;
+      key.torch = RENDER_OPTS.torch; key.lampFactor = RENDER_OPTS.lampFactor;
+      key.poolShade = poolShade; key.poolUnder = poolUnder;
+      key.lanternsOn = lanternsOn; key.cave = cameraCaveIndex; key.limit = limit;
+      lampSelValid = true;
     }
   };
   const buildFire = () => {
@@ -1803,6 +1843,8 @@
   };
   const movePilePosts = () => {
     if (!pilePosts.length) return;
+    // The posts' light positions change even while the camera and daylight stay fixed.
+    lampSelValid = false;
     // A shared radius keeps the same three angles as the ring changes. Check the actual half-metre
     // post bases against the rasterized road, not the broad NPC work-area reservations.
     let radius = island.path.debug.ringOuterRadius + 0.8;
@@ -7901,8 +7943,11 @@
         r.node.highlight = lit * 2.2;
       }
       const lit = Math.max(o.live * (0.3 + 0.7 * sum / o.runes.length), o.flare), power = (0.45 + 0.1 * breath + 0.8 * lit) * glowPower;
-      o.lamp.always = glowPower > 0;
-      o.light.radius = o.lamp.always ? 4 + 2.5 * glowPower : 0;
+      const always = glowPower > 0, radius = always ? 4 + 2.5 * glowPower : 0;
+      // Animated light inputs can change under a stationary camera, including when a merge's glow expires.
+      if (o.lamp.always !== always || o.light.radius !== radius || o.light.r !== power) lampSelValid = false;
+      o.lamp.always = always;
+      o.light.radius = radius;
       o.light.r = power; o.light.g = 0.62 * power; o.light.b = 0.3 * power;
       // The eye fires leap as the pattern passes their height, taller still in a flare; they go out between merges.
       for (let k = 0; k < o.flames.length; k++) {
@@ -7932,7 +7977,26 @@
     now = elapsed;
     if (timechainIsland && !timechainIsland.boards && Math.hypot(camera.position.x - timechainIsland.place.x, camera.position.z - timechainIsland.place.z) < BL.timechainModels.SITE.radius + TIMECHAIN_NEAR) addTimechainBoards();
     hour = clock.read();
-    daylight.sample(hour, RENDER_OPTS, clock.dayOfYear, islandLatitude, clock.continuousDay, clock.utcMs);
+    // The ephemeris turns the sun 0.0042 deg/s of island time (a 6e-4-hour budget is 2.16 s and misses no
+    // pixel), so it resamples only when an input drifts; a fast debug clock misses the budget every frame,
+    // a frozen one hits from the second frame on.
+    if (clock.dayOfYear !== sampledDay || islandLatitude !== sampledLatitude || Math.abs(hour - sampledHour) >= DAY_RESAMPLE_HOUR
+      || Math.abs(clock.continuousDay - sampledContinuousDay) >= DAY_RESAMPLE_DAY || Math.abs(clock.utcMs - sampledUtcMs) >= DAY_RESAMPLE_MS) {
+      daylight.sample(hour, RENDER_OPTS, clock.dayOfYear, islandLatitude, clock.continuousDay, clock.utcMs);
+      sampledHour = hour; sampledDay = clock.dayOfYear; sampledLatitude = islandLatitude; sampledContinuousDay = clock.continuousDay; sampledUtcMs = clock.utcMs;
+      DAY_STASH.directStrength = RENDER_OPTS.directStrength; DAY_STASH.ambientFloor = RENDER_OPTS.ambientFloor;
+      for (let i = 0; i < 3; i++) {
+        DAY_STASH.clear[i] = RENDER_OPTS.clear[i]; DAY_STASH.horizon[i] = RENDER_OPTS.horizon[i]; DAY_STASH.zenith[i] = RENDER_OPTS.zenith[i];
+        DAY_STASH.sky[i] = RENDER_OPTS.sky[i]; DAY_STASH.ground[i] = RENDER_OPTS.ground[i]; DAY_STASH.direct[i] = RENDER_OPTS.direct[i];
+      }
+    } else {
+      // Weather and the shelter below shade the sampled colours in place; a held sample restores them.
+      RENDER_OPTS.directStrength = DAY_STASH.directStrength; RENDER_OPTS.ambientFloor = DAY_STASH.ambientFloor;
+      for (let i = 0; i < 3; i++) {
+        RENDER_OPTS.clear[i] = DAY_STASH.clear[i]; RENDER_OPTS.horizon[i] = DAY_STASH.horizon[i]; RENDER_OPTS.zenith[i] = DAY_STASH.zenith[i];
+        RENDER_OPTS.sky[i] = DAY_STASH.sky[i]; RENDER_OPTS.ground[i] = DAY_STASH.ground[i]; RENDER_OPTS.direct[i] = DAY_STASH.direct[i];
+      }
+    }
     RENDER_OPTS.time = elapsed;
     // Under the Mempool island's ground the storm is muffled and the daylight shut out: no shadow reaches that
     // island, so its tunnels would otherwise stand in full sun. The fires and the water light them instead.
@@ -10102,7 +10166,7 @@
       guides = sightGuides.update(player, null, objects, camera, aspect, dt, objectsEnabled, rockSection, SIGHT_RECOMPUTE_HZ);
       // Keep a separate cap pass so split objects stay legible in fruit.
       // It must not change the visibility rules in the clear part of the view.
-      const fruitGuides = bananaGuides.update(bananaEnabled ? player : null, null, objects, camera, aspect, dt, bananaEnabled, true);
+      const fruitGuides = bananaGuides.update(bananaEnabled ? player : null, null, objects, camera, aspect, dt, bananaEnabled, true, SIGHT_RECOMPUTE_HZ);
       if (objectsEnabled || bananaEnabled) {
         const structure = ensureRockGuides().select(p.x, p.y - player.baseY, p.z, camera.position.x, camera.position.y, camera.position.z), observer = guides.observer;
         const surfaces = rockGuides.updateSurfaces(observer[19], observer[20], observer[21], camera, dt, player, objectGuides.perceptionClear, objects.occlusionVersion, objects.perceptionVersion);
@@ -11323,6 +11387,9 @@
     closedCaveZones.length = 0;
     cloudHit = null;
     RENDER_OPTS.lightCount = 0;
+    // The next visit's first frame rebuilds the lamp selection and resamples the clock.
+    lampSelValid = false;
+    sampledDay = 0;
     RENDER_OPTS.cutawayMaxY = 1e6;
     MATRIX_WORLD.active = MATRIX_WORLD.direction = MATRIX_WORLD.radius = MATRIX_WORLD.permanentCave = 0;
     cameraCaveIndex = 0;

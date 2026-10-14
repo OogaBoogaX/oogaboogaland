@@ -17,10 +17,20 @@
   // Sleep marks span 11px to 23px, so the whole font range is a fixed table instead of per-frame strings.
   const ZZZ_FONTS = [];
   for (let size = 11; size <= 23; size++) ZZZ_FONTS[size] = `${size}px ui-monospace, monospace`;
-  const drawBubble = (ctx, text, x, y, alpha, topSpace = 0) => {
+  // A bubble's text and font are fixed once it is said, so its width is measured there, not on every
+  // painted frame. The scratch context carries the same font drawBubble draws with, so its metrics match.
+  let measureCtx = null;
+  const measureBubble = (text) => {
+    if (!measureCtx) {
+      measureCtx = document.createElement("canvas").getContext("2d");
+      measureCtx.font = "bold 10px ui-monospace, monospace";
+    }
+    return measureCtx.measureText(text).width;
+  };
+  const drawBubble = (ctx, text, x, y, alpha, topSpace = 0, tw) => {
     ctx.globalAlpha = alpha;
     ctx.font = "bold 10px ui-monospace, monospace";
-    const tw = ctx.measureText(text).width;
+    if (tw === undefined) tw = ctx.measureText(text).width;
     const px = 3;
     const bw = Math.ceil((tw + 28) / px) * px;
     const bh = 11 * px;
@@ -155,16 +165,17 @@
       const existing = bubbles.find((b) => b.cave === cave);
       if (existing) {
         existing.text = text;
+        existing.tw = measureBubble(text);
         existing.t = 0;
         existing.dur = dur;
         return;
       }
       if (bubbles.length >= MAX_BUBBLES) bubbles.shift();
-      bubbles.push({ cave, text, t: 0, dur });
+      bubbles.push({ cave, text, t: 0, dur, tw: measureBubble(text) });
     };
     const sayAt = (x, y, z, text, dur = 2) => {
       if (bubbles.length >= MAX_BUBBLES) bubbles.shift();
-      bubbles.push({ at: { x, y, z }, text, t: 0, dur });
+      bubbles.push({ at: { x, y, z }, text, t: 0, dur, tw: measureBubble(text) });
     };
     const zzzAt = (x, y, z, cave = null) => {
       zzz.push({ x, y, z, cave, t: 0 });
@@ -202,12 +213,12 @@
     sizeObserver.observe(overlay);
     const projectRaw = (x, y, z) => renderer.project(x, y, z, SCREEN);
     const project = (x, y, z) => !overlayVisible || overlayVisible(x, y, z) ? projectRaw(x, y, z) : null;
-    const drawSpeech = (ctx, text, x, y, alpha, cave = null) => {
+    const drawSpeech = (ctx, text, x, y, alpha, cave = null, tw) => {
       if (cave) {
         if (!visibility.anchor(cave, speechScreen)) return;
         x = speechScreen.x; y = speechScreen.y;
       }
-      const top = drawBubble(ctx, text, x, y, alpha, hud ? hud.tooltip.speechSpace(cave) : 0);
+      const top = drawBubble(ctx, text, x, y, alpha, hud ? hud.tooltip.speechSpace(cave) : 0, tw);
       if (hud) hud.tooltip.aboveSpeech(cave, top);
     };
     // drawExtra paints between the bubbles and the ticker.
@@ -247,6 +258,7 @@
         }
         ctx.restore();
       }
+      ctx.fillStyle = "#ffb347";
       for (let i = zzz.length - 1; i >= 0; i--) {
         const p = zzz[i];
         p.t += dt;
@@ -259,7 +271,6 @@
         const pos = project(p.x, y, p.z);
         if (!pos) continue;
         ctx.globalAlpha = (1 - p.t / 2.4) * 0.8;
-        ctx.fillStyle = "#ffb347";
         ctx.font = ZZZ_FONTS[Math.round(11 + p.t * 5)];
         ctx.fillText("z", pos.x + Math.sin(p.t * 3) * 6, pos.y);
       }
@@ -274,7 +285,7 @@
         const pos = b.cave ? speechScreen : project(b.at.x, b.at.y, b.at.z);
         if (!pos) continue;
         const fade = Math.min(1, b.t / 0.2, (b.dur - b.t) / 0.3);
-        drawSpeech(ctx, b.text, pos.x, pos.y, fade, b.cave);
+        drawSpeech(ctx, b.text, pos.x, pos.y, fade, b.cave, b.tw);
       }
       drawExtra(ctx, project, drawSpeech);
       if (hud) hud.tooltip.update();

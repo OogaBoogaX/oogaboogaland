@@ -14,6 +14,11 @@
     const pointers = new Map();
     const ray = { ox: 0, oy: 0, oz: 0, dx: 0, dy: 0, dz: 0 };
     const hoverHit = { node: null, owner: null, distance: Infinity };
+    // Scratch for the per-frame hover path only: every consumer reads the
+    // answer synchronously (tooltip hooks take primitives out of it). The
+    // gesture path keeps its own pick result, which `gesture` retains.
+    const hoverPick = { node: null, owner: null, t: 0 };
+    const hoverPoint = { x: -1, y: -1 };
     const C = new Float32Array(3);
     const aimView = BL.math.mat4.create(), aimInverse = BL.math.mat4.create(), aimUp = { x: 0, y: 1, z: 0 };
     let hoverX = -1, hoverY = -1, hoverDirty = false, hovered = null;
@@ -48,7 +53,7 @@
       m[0] * m[0] + m[1] * m[1] + m[2] * m[2],
       m[4] * m[4] + m[5] * m[5] + m[6] * m[6],
       m[8] * m[8] + m[9] * m[9] + m[10] * m[10]));
-    const pick = (px, py, ignoreCave = null, currentView = false) => {
+    const pickInto = (out, px, py, ignoreCave = null, currentView = false) => {
       if (currentView) {
         BL.math.mat4.lookAt(aimView, camera.position, camera.target, camera.up || aimUp);
         BL.math.mat4.rayFromView(ray, aimView, renderer.size.width, renderer.size.height, camera.fov, camera.position, px, py, camera.orthoMix, camera.orthoHeight);
@@ -82,11 +87,16 @@
           best = t;
         }
       }
-      return best ? { node: best.node, owner: best.owner, t: bestT } : null;
+      if (!best) return null;
+      out.node = best.node;
+      out.owner = best.owner;
+      out.t = bestT;
+      return out;
     };
+    const pick = (px, py, ignoreCave = null, currentView = false) => pickInto({}, px, py, ignoreCave, currentView);
     const acceptHover = owner => !hoverIgnored || owner.cave !== hoverIgnored;
     const pickHover = (px, py) => {
-      if (!preciseHover) return pick(px, py, hoverIgnored);
+      if (!preciseHover) return pickInto(hoverPick, px, py, hoverIgnored);
       renderer.ray(px, py, camera, ray);
       return weaponTargets.ray(hoverHit, ray.ox, ray.oy, ray.oz, ray.dx, ray.dy, ray.dz,
         camera.far, null, acceptHover, true) ? hoverHit : null;
@@ -333,10 +343,12 @@
       const node = hit ? hit.node : null;
       if (node !== hovered) {
         hovered = node;
-        call("onHover", hit, { x: hoverX, y: hoverY });
+        hoverPoint.x = hoverX; hoverPoint.y = hoverY;
+        call("onHover", hit, hoverPoint);
         if (!busy) canvas.style.cursor = hit ? "pointer" : "grab";
       } else if (hit) {
-        call("onHoverMove", hit, { x: hoverX, y: hoverY });
+        hoverPoint.x = hoverX; hoverPoint.y = hoverY;
+        call("onHoverMove", hit, hoverPoint);
       }
     };
     const reset = () => {

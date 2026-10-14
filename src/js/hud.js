@@ -315,13 +315,17 @@
     };
     let toastTimer = 0, toastHideTimer = 0, hintTimer = 0, hintHideTimer = 0, copyTimer = 0;
     const rosterRows = new Map();
-    let showAway = false, awayCount = 0;
+    let showAway = false, awayCount = 0, awayShownCount = -1, awayShownShow = null;
     const awayRow = document.createElement("li"), awayButton = document.createElement("button");
     awayRow.className = "roster-away";
     awayButton.type = "button";
     awayButton.setAttribute("aria-expanded", "false");
     awayRow.append(awayButton);
+    // countAway rescans on every roster state flip and online toggle; skip the writes until they change.
     const updateAwayButton = () => {
+      if (awayCount === awayShownCount && showAway === awayShownShow) return;
+      awayShownCount = awayCount;
+      awayShownShow = showAway;
       awayRow.hidden = awayCount === 0;
       awayButton.textContent = `${showAway ? "Hide" : "Show"} away (${awayCount})`;
     };
@@ -1503,6 +1507,11 @@
     let tipText = "", tipState = "", tipHealth = -1, tipHealthMax = -1, tipW = 0, tipH = 0, tipCave = null, tipName = false, tipLeft = NaN, tipTop = NaN;
     let tipVisibility = null, tipSpeechTop = Infinity;
     const tipScreen = { x: 0, y: 0, depth: 0 };
+    // A tooltip's box depends only on its text, its name/no-status-dot classes (the health bar rides
+    // on the name class) and the viewport width (the name class's max-width), so a tooltip measured
+    // before never needs the offset reads' forced layout again. A 0x0 read is a drag-hid tooltip
+    // (body.orbit-dragging / mine-dragging): never cached, so the first real hover measures again.
+    const tipSizeCache = new Map();
     const placeTooltip = (left, top) => {
       left = Math.round(left); top = Math.round(top);
       if (left === tipLeft && top === tipTop) return;
@@ -1532,8 +1541,18 @@
           tipText = text;
           tipState = "";
           el.tooltipText.textContent = text;
-          tipW = el.tooltip.offsetWidth;
-          tipH = el.tooltip.offsetHeight;
+          const size = tipSizeCache.get(`${tipName}\0${noStatusDot}\0${window.innerWidth}\0${text}`);
+          if (size) {
+            tipW = size.w;
+            tipH = size.h;
+          } else {
+            tipW = el.tooltip.offsetWidth;
+            tipH = el.tooltip.offsetHeight;
+            if (tipW || tipH) {
+              if (tipSizeCache.size >= 64) tipSizeCache.clear();
+              tipSizeCache.set(`${tipName}\0${noStatusDot}\0${window.innerWidth}\0${text}`, { w: tipW, h: tipH });
+            }
+          }
         }
         if (cave) {
           tooltip.update();
@@ -1812,21 +1831,35 @@
   // The account line in the sheet's foot is page-level: shown only when a backend answered, and
   // the director hands every change of `BL.net.state` here, whichever scene is active.
   const ROOM_WORDS = { replaced: "open in another tab", full: "island full" };
+  // Net and voice emits re-run this several times a second with the same outcome; last-written
+  // records keep an unchanged textContent from re-invalidating the line.
+  let accountBackend = null, accountMe = null, accountName = null, accountWords = null, accountWordsHidden = null;
+  let accountRejoinHidden = null, accountVoiceHidden = null, accountVoiceWords = null, accountVoicePressed = null;
   const showAccount = ({ backend, me, room, online }) => {
-    $("account").hidden = !backend;
-    $("account-name").textContent = me ? me.display : "";
-    $("account-name").hidden = !me;
-    $("account-login").hidden = !!me;
-    $("account-logout").hidden = !me;
+    const hasMe = !!me;
+    if (!!backend !== accountBackend) { accountBackend = !!backend; $("account").hidden = !backend; }
+    const name = me ? me.display : "";
+    if (name !== accountName) { accountName = name; $("account-name").textContent = name; }
+    if (hasMe !== accountMe) {
+      accountMe = hasMe;
+      $("account-name").hidden = !me;
+      $("account-login").hidden = !!me;
+      $("account-logout").hidden = !me;
+    }
     const words = room === "live" ? `${online} online` : ROOM_WORDS[room] || "";
-    $("account-room").textContent = words;
-    $("account-room").hidden = !me || !words;
-    $("account-rejoin").hidden = !me || !ROOM_WORDS[room];
+    if (words !== accountWords) { accountWords = words; $("account-room").textContent = words; }
+    const wordsHidden = !me || !words;
+    if (wordsHidden !== accountWordsHidden) { accountWordsHidden = wordsHidden; $("account-room").hidden = wordsHidden; }
+    const rejoinHidden = !me || !ROOM_WORDS[room];
+    if (rejoinHidden !== accountRejoinHidden) { accountRejoinHidden = rejoinHidden; $("account-rejoin").hidden = rejoinHidden; }
     // Voice: join, then mute and unmute; a failure says why on the button until the next try.
     const voice = BL.voice.stats, voiceButton = $("account-voice");
-    voiceButton.hidden = room !== "live";
-    voiceButton.textContent = voice.joining ? "Joining voice" : voice.error && !voice.enabled ? `Voice: ${voice.error}` : !voice.enabled ? "Join voice" : voice.muted ? "Unmute" : "Mute";
-    voiceButton.setAttribute("aria-pressed", String(voice.enabled && !voice.muted));
+    const voiceHidden = room !== "live";
+    if (voiceHidden !== accountVoiceHidden) { accountVoiceHidden = voiceHidden; voiceButton.hidden = voiceHidden; }
+    const voiceWords = voice.joining ? "Joining voice" : voice.error && !voice.enabled ? `Voice: ${voice.error}` : !voice.enabled ? "Join voice" : voice.muted ? "Unmute" : "Mute";
+    if (voiceWords !== accountVoiceWords) { accountVoiceWords = voiceWords; voiceButton.textContent = voiceWords; }
+    const pressed = String(voice.enabled && !voice.muted);
+    if (pressed !== accountVoicePressed) { accountVoicePressed = pressed; voiceButton.setAttribute("aria-pressed", pressed); }
   };
   // The microphone's note (#181), page-level as the account line is: muted in voice, it stays until unmuted;
   // alone in voice (nobody here to hear, so the microphone is held off), it says so until someone comes;

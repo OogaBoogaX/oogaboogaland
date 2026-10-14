@@ -581,6 +581,10 @@
     const picks = sequences.map((sequence) => ({ kind: "poolblock", node: sequence.cube, sequence }));
     const queuedHeights = new Float64Array(QUEUE), queuedLabels = new Array(QUEUE).fill("");
     let queued = 0, queueHead = 0, dropped = 0, started = 0, sequenceClock = 0, lastStart = -BLOCK_GAP;
+    // The parked gate: with the flood drained to its bed and no block or preview pending, the falls, drips
+    // and charge zeroing below write byte-identical values every frame, so the first parked frame writes
+    // them and later parked frames skip. clipLake holds the level the membrane clips were last cut at.
+    let parked = false, stillParked = false, chargeNewest = false, clipLake = NaN;
 
     // The reading and the level. `reading` is false until any backlog figure has been seen at all.
     let target = L.WATER.low, level = L.WATER.low, shown = L.WATER.low, floodY = HYDRO.PARK, stage = 0, reading = false, observedAt = 0, vsize = 0, status = "unavailable", preview = null, settle = false;
@@ -813,7 +817,10 @@
     const updateCharge = (reach) => {
       let newest = null;
       for (const seq of sequences) if (seq.active && seq.t < chargeEnd + CHARGE.fade && (!newest || seq.order > newest.order)) newest = seq;
+      chargeNewest = newest !== null;
       if (!newest) {
+        // Parked before and still parked: the zeroes and the hidden mist stand from the first parked frame.
+        if (stillParked) return;
         chargePool[1] = chargeRamp[1] = chargeBend[1] = chargeRing[1] = 0;
         waves.suction[3] = 0;
         for (const dot of mist) dot.node.visible = false;
@@ -876,15 +883,19 @@
       waves.surface[0] = origin.x; waves.surface[1] = origin.z; waves.surface[2] = reach; waves.surface[3] = elapsed;
       lakeOcclude[0] = origin.x; lakeOcclude[1] = origin.y + lake;
       lakeOcclude[2] = origin.z; lakeOcclude[3] = Math.min(reach, L.LAKE_R);
-      site.membrane.glow = bright;
-      site.membrane.smokeOpacity = surfaceNode.visible ? 1 : 0;
-      site.membrane.geometry.clipMaxY = origin.y + lake;
-      site.membraneRock.geometry.clipMinY = origin.y + lake + 0.018;
-      // Posts end at the higher of the live waterline and the bowl's curved edge, so their submerged
-      // ends cannot show through the translucent underside when the lake is low.
-      const postBottom = origin.y + Math.max(lake, L.membraneY(BL.poolModels.CHAIN_BOARD.r + 0.3) + 0.06);
-      site.boardLegs.geometry.clipMinY = postBottom;
-      site.infoLeg.geometry.clipMinY = postBottom;
+      // The membrane and post clips depend on the lake level alone; cut them again only when it moved.
+      if (lake !== clipLake) {
+        clipLake = lake;
+        site.membrane.glow = bright;
+        site.membrane.smokeOpacity = surfaceNode.visible ? 1 : 0;
+        site.membrane.geometry.clipMaxY = origin.y + lake;
+        site.membraneRock.geometry.clipMinY = origin.y + lake + 0.018;
+        // Posts end at the higher of the live waterline and the bowl's curved edge, so their submerged
+        // ends cannot show through the translucent underside when the lake is low.
+        const postBottom = origin.y + Math.max(lake, L.membraneY(BL.poolModels.CHAIN_BOARD.r + 0.3) + 0.06);
+        site.boardLegs.geometry.clipMinY = postBottom;
+        site.infoLeg.geometry.clipMinY = postBottom;
+      }
       floodNode.visible = floodY > HYDRO.PARK + 0.01;
       floodNode.position.y = floodY;
       floodNode.glow = bright;
@@ -907,43 +918,54 @@
       // Hide only rays that pass through the lake; the exposed collector stays visible from outside.
       rillNode.glow = bright * (floodNode.visible ? 0.8 : 0.5);
       for (const node of tailNodes) node.glow = rillNode.glow;
-      // Fill the trench's steps, but let the actual banks covering its mouth narrow the falling sheet.
-      for (const fall of falls) {
-        const half = channelHalf(floodY);
-        fall.stream.visible = floodNode.visible;
-        fall.stream.position.y = floodY;
-        fall.stream.glow = bright;
-        fall.widthClip[0] = fall.vx / half; fall.widthClip[1] = 0;
-        fall.widthClip[2] = fall.vz / half; fall.widthClip[3] = fall.acrossOffset / half;
-        let left = fall.mouth.length / 2, right = left;
-        while (left > 0 && fall.mouth[left - 1] < floodY - 0.02) left--;
-        while (right < fall.mouth.length && fall.mouth[right] < floodY - 0.02) right++;
-        const width = Math.min(FALL_WIDTH, (right - left) * fall.mouthStep);
-        const centre = -fall.mouthHalf + (left + right) * fall.mouthStep / 2;
-        fall.wetWidth = width; fall.wetCentre = centre;
-        if (fall.inner) {
-          const wetHalf = Math.max(0.025, width / 2);
-          fall.widthClip[0] = fall.vx / wetHalf; fall.widthClip[2] = fall.vz / wetHalf;
-          fall.widthClip[3] = (fall.acrossOffset - centre) / wetHalf;
-          fall.stream.visible = floodNode.visible && width > 0.05;
+      // The falls and drips below read only the parked flood height and constant colouring once the flood
+      // has drained, and the drip nodes hang under invisible sheets; with a charged front and queued or
+      // running blocks also absent, one parked frame writes all of it and later parked frames skip it.
+      // A block, preview or fill call lands in these legs the same frame, before anything visible changes.
+      let seqActive = false;
+      for (const seq of sequences) if (seq.active) { seqActive = true; break; }
+      const atPark = floodY === HYDRO.PARK && fill === null && preview === null && !seqActive && queued === 0 && !chargeNewest;
+      stillParked = atPark && parked;
+      parked = atPark;
+      if (!stillParked) {
+        // Fill the trench's steps, but let the actual banks covering its mouth narrow the falling sheet.
+        for (const fall of falls) {
+          const half = channelHalf(floodY);
+          fall.stream.visible = floodNode.visible;
+          fall.stream.position.y = floodY;
+          fall.stream.glow = bright;
+          fall.widthClip[0] = fall.vx / half; fall.widthClip[1] = 0;
+          fall.widthClip[2] = fall.vz / half; fall.widthClip[3] = fall.acrossOffset / half;
+          let left = fall.mouth.length / 2, right = left;
+          while (left > 0 && fall.mouth[left - 1] < floodY - 0.02) left--;
+          while (right < fall.mouth.length && fall.mouth[right] < floodY - 0.02) right++;
+          const width = Math.min(FALL_WIDTH, (right - left) * fall.mouthStep);
+          const centre = -fall.mouthHalf + (left + right) * fall.mouthStep / 2;
+          fall.wetWidth = width; fall.wetCentre = centre;
+          if (fall.inner) {
+            const wetHalf = Math.max(0.025, width / 2);
+            fall.widthClip[0] = fall.vx / wetHalf; fall.widthClip[2] = fall.vz / wetHalf;
+            fall.widthClip[3] = (fall.acrossOffset - centre) / wetHalf;
+            fall.stream.visible = floodNode.visible && width > 0.05;
+          }
+          fall.node.visible = floodNode.visible && floodY > fall.lip + 0.02 && width > 0.05;
+          fall.node.position.x = fall.ux * fall.outlet + fall.uz * centre;
+          fall.node.position.z = fall.uz * fall.outlet - fall.ux * centre;
+          fall.node.position.y = floodY;
+          fall.node.scale.x = Math.max(0.001, width);
+          if (fall.inner) fall.node.scale.y = Math.max(0.1, floodY - fall.floor + L.RILL.depth - 0.03) / fall.length;
+          fall.node.glow = bright;
+          for (const residual of fall.residuals) {
+            residual.visible = !fall.node.visible;
+            residual.glow = bright * 0.5;
+          }
+          fall.flow[7] = fall.outlet + origin.y + floodY;
         }
-        fall.node.visible = floodNode.visible && floodY > fall.lip + 0.02 && width > 0.05;
-        fall.node.position.x = fall.ux * fall.outlet + fall.uz * centre;
-        fall.node.position.z = fall.uz * fall.outlet - fall.ux * centre;
-        fall.node.position.y = floodY;
-        fall.node.scale.x = Math.max(0.001, width);
-        if (fall.inner) fall.node.scale.y = Math.max(0.1, floodY - fall.floor + L.RILL.depth - 0.03) / fall.length;
-        fall.node.glow = bright;
-        for (const residual of fall.residuals) {
-          residual.visible = !fall.node.visible;
-          residual.glow = bright * 0.5;
+        for (let i = 0; i < drips.length; i++) {
+          const d = drips[i], t = (elapsed * d.speed + d.seed) % 1;
+          d.node.position.y = d.top - t * t * 2.6;
+          d.node.glow = bright * (1 - t * 0.75);
         }
-        fall.flow[7] = fall.outlet + origin.y + floodY;
-      }
-      for (let i = 0; i < drips.length; i++) {
-        const d = drips[i], t = (elapsed * d.speed + d.seed) % 1;
-        d.node.position.y = d.top - t * t * 2.6;
-        d.node.glow = bright * (1 - t * 0.75);
       }
       sequenceClock += dt;
       for (const seq of sequences) {
