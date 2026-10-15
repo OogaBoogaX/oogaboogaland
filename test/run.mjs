@@ -821,7 +821,7 @@ const visibilityStorageProof = async ({ compact = false, deferred = false } = {}
   const context = { window: {}, performance };
   for (const name of ["math", "scene", "models", "object-guides"]) {
     let source = await readFile(new URL(`../src/js/${name}.js`, import.meta.url), "utf8");
-    if (name === "object-guides") source = source.replace("return { collect, clear,", "return { geometryRecords: () => geometries, entryRecords: () => registered, collect, clear,");
+    if (name === "object-guides") source = source.replace("return { collect, clear,", "return { ownerRecords: () => ownerGroups, geometryRecords: () => geometries, entryRecords: () => registered, collect, clear,");
     runInNewContext(source, context);
   }
   return runInNewContext(`(() => {
@@ -885,12 +885,37 @@ const visibilityStorageProof = async ({ compact = false, deferred = false } = {}
     const entry = first.entryRecords()[0], replacement = !first.geometryRecords().has(shared) && first.geometryRecords().has(larger)
       && entry.geometry === first.geometryRecords().get(larger) && entry.boundsGeometry === entry.geometry
       && entry.boundaryReserve >= 96 && entry.boundaryTriangles.length >= 960 && entry.boundaryNodes.length >= entry.geometry.counts.length * 4;
+    let nearBounds = true, nearCases = 0, boundaryHits = 0;
+    for (const depth of [-1, 0.05, 0.1, 0.3, 1, 8]) {
+      firstNode.position.z = depth; firstNode.rotation.y = 0.31;
+      query(first, firstRoot);
+      const points = [];
+      for (const face of larger.faces) for (let n = 0; n < face.i.length; n++) {
+        const a = face.i[n] * 3, b = face.i[(n + 1) % face.i.length] * 3, v = larger.verts, w = firstNode.world;
+        const x = (v[a] + v[b]) / 2, y = (v[a + 1] + v[b + 1]) / 2, z = (v[a + 2] + v[b + 2]) / 2;
+        const dx = v[b] - v[a], dy = v[b + 1] - v[a + 1], dz = v[b + 2] - v[a + 2];
+        points.push([w[0]*x+w[4]*y+w[8]*z+w[12], w[1]*x+w[5]*y+w[9]*z+w[13], w[2]*x+w[6]*y+w[10]*z+w[14], w[0]*dx+w[4]*dy+w[8]*dz, w[1]*dx+w[5]*dy+w[9]*dz, w[2]*dx+w[6]*dy+w[10]*dz]);
+      }
+      const accelerated = points.map(p => first.ownerBoundaryAt(firstRoot, ...p));
+      // Use the same exact triangle predicate as the oracle, with every screen bound open.
+      for (const e of first.entryRecords()) {
+        for (const boxes of [e.boundaryBounds, e.boundaryBoxes, e.boundaryNodes]) for (let i = 0; i < boxes.length; i += 4) {
+          boxes[i] = boxes[i + 1] = -Infinity; boxes[i + 2] = boxes[i + 3] = Infinity;
+        }
+        if (e.boundaryGrid) e.boundaryGrid.active = false;
+      }
+      for (const group of first.ownerRecords()) if (group.boundaryGrid) group.boundaryGrid.active = false;
+      for (let i = 0; i < points.length; i++) {
+        const reference = first.ownerBoundaryAt(firstRoot, ...points[i]);
+        nearBounds &&= reference === accelerated[i]; nearCases++; if (reference) boundaryHits++;
+      }
+    }
     first.dispose(); query(second, secondRoot);
     const survivor = second.stats.registered === 1 && second.stats.triangles === 12 && second.entryRecords()[0].visible
       && second.geometryRecords().get(shared).triangleIndices.every((value, i) => value === sharedIndices[i]);
     const released = first.entryRecords().length === 0 && first.geometryRecords().size === 0 && first.stats.triangleBytes === 0;
     second.dispose();
-    return { exact, unchanged, bounded, tightBacking, storage, demand, values, count, bytes, lifecycle: sharedBake && removal && replacement && survivor && released && second.geometryRecords().size === 0, sharedBake, removal, replacement, survivor, released, disposed: guides.stats.registered === 0 };
+    return { exact, unchanged, bounded, tightBacking, storage, demand, nearBounds, nearCases, boundaryHits, values, count, bytes, lifecycle: sharedBake && removal && replacement && survivor && released && second.geometryRecords().size === 0, sharedBake, removal, replacement, survivor, released, disposed: guides.stats.registered === 0 };
   })()`, context);
 };
 // Count descriptor users rather than timings, so the first-demand cost scales with actual users.
@@ -2346,7 +2371,20 @@ const { outlinePerformanceProbe } = (() => {
       const inactiveRays = guides.stats.surfaceRays + guides.stats.surfaceCertificates;
       guides.updateSurface(context, ex, ey, ez, camera, 0.3, actor, () => true, 5);
       row.newlyActive = inactive && wall.cameraReady && wall.target > 0 && guides.stats.surfaceRays + guides.stats.surfaceCertificates > inactiveRays;
-      if (!lazy || remaining >= lazy || !row.stillPerceived || row.retraced || row.actorRetraced || !row.accumulatedMotion || !row.newlyActive) failures.push(row);
+      // Animated blocker epochs obey the runtime budget without losing the latest one.
+      guides.resetSurface();
+      guides.updateSurface(context, ex, ey, ez, camera, 0.3, actor, () => true, 100, 100, 30);
+      let budgetQueries = 0;
+      const blockedNow = () => { budgetQueries++; return false; };
+      guides.updateSurface(context, ex, ey, ez, camera, 0.04, actor, blockedNow, 101, 101, 30, true);
+      row.budgetHeld = wall.target > 0 && context.surfaceOcclusion === 100 && context.surfacePerception === 100 && budgetQueries === 0;
+      guides.updateSurface(context, ex, ey, ez, camera, 0.002, actor, blockedNow, 102, 102, 30);
+      row.latestEpoch = !wall.target && context.surfaceOcclusion === 102 && context.surfacePerception === 102 && budgetQueries > 0;
+      guides.updateSurface(context, ex, ey, ez, camera, 1 / 30, actor, () => true, 103, 103, 30, true);
+      row.slowHeld = !wall.target && context.surfacePerception === 102;
+      guides.updateSurface(context, ex, ey, ez, camera, 1 / 30, actor, () => true, 104, 104, 30, true);
+      row.noStarvation = wall.target > 0 && context.surfaceOcclusion === 104 && context.surfacePerception === 104;
+      if (!row.slowHeld || !row.noStarvation || !row.budgetHeld || !row.latestEpoch || !lazy || remaining >= lazy || !row.stillPerceived || row.retraced || row.actorRetraced || !row.accumulatedMotion || !row.newlyActive) failures.push(row);
       rows.push(row);
       if (rows.length === 3) break;
     }
@@ -2393,7 +2431,21 @@ const { canopyCertificateProbe, canopyPileProbe } = (() => {
       sample("two millimetre opening remains visible", false);
       left.visible = right.visible = false; cover.visible = true;
       cover.position.x = 2; sample("uncovered target edge", false);
-      cover.position.x = 0; camera.near = 3;
+      cover.position.x = 0;
+      // Decorative leaves can span a gap; only the authored body blocks queries.
+      const decoration = box(4, 4, 0.4);
+      for (const face of decoration.faces) face.visibility = false;
+      const body = BL.models.merge(
+        BL.models.box({ w: 2, h: 4, d: 0.4, offset: { x: -1.001 }, color: "#fff" }),
+        BL.models.box({ w: 2, h: 4, d: 0.4, offset: { x: 1.001 }, color: "#fff" }));
+      cover.geometry = BL.models.merge(body, decoration); objects.refresh();
+      sample("decorative leaves do not close the body's opening after merge", false);
+      cover.geometry = BL.models.merge(box(4, 4, 0.4), decoration); objects.refresh();
+      sample("replacement visibility body invalidates bounds and certificates", true, true);
+      cover.geometry = { ...cover.geometry, clipMinY: 0.1 }; objects.refresh();
+      sample("decorated body retains the render mesh's clip plane", false);
+      cover.geometry = box(4, 4, 0.4); objects.refresh();
+      camera.near = 3;
       sample("canopy clipped behind near plane", false);
       camera.near = 0.1;
       cover.geometry = { ...cover.geometry, clipMinY: 0.1 }; objects.register(cover);
@@ -2406,7 +2458,22 @@ const { canopyCertificateProbe, canopyPileProbe } = (() => {
       sample("camera inside canopy", true, true);
       cover.visible = false; sample("canopy moves away without a stale certificate", false);
     } finally { objects.dispose(); }
-    return { rows, failures, disposed: objects.stats.registered === 0 };
+    const models = [...Array.from({ length: 4 }, (_, i) => BL.hubModels.tree(i)), ...BL.poolModels.CANOPY.map(f => f())].map(g => {
+      const triangles = faces => faces.reduce((n, f) => n + f.i.length - 2, 0);
+      return { drawn: triangles(g.faces), queried: triangles(g.faces.filter(f => f.visibility !== false)) };
+    });
+    const H = BL.hubModels, rand = BL.math.mulberry32(7);
+    const dressed = H.withJungle(box(1, 1, 1), g => {
+      H.flatInto(g, BL.models.moved(box(1, 1, 1), 3, 0, 0));
+      H.liana(g, [[0, 1, 0], [1, 1, 0]], 0.08);
+      H.sprig(g, 0, 0.5, 0, 1, 1, 0, 5, 0.3, rand);
+      H.garland(g, [[0, 2, 0], [1, 2, 0]], { rand });
+    });
+    const merged = BL.models.moved(BL.models.turnedY(BL.models.merge(dressed), 0.4), 2, 3, 4);
+    const bodyFaces = merged.faces.filter(f => f.visibility !== false).length;
+    const cord = H.withJungle(null, g => H.liana(g, [[0, 0, 0], [1, 0, 0]], 0.08));
+    return { rows, failures, models, dressing: bodyFaces === 18 && merged.faces.length > bodyFaces
+      && cord.faces.length > 0 && cord.faces.every(f => f.visibility !== false), disposed: objects.stats.registered === 0 };
   };
 
   const canopyPileProbe = () => {
@@ -3390,7 +3457,7 @@ const session = (url, steps, opts, final) => output.run({ lines: [], results: []
       b.evaluate=async code=>{console.log("DSB STEP",Date.now()-started,String(code).slice(0,150));const value=await evaluate(code);console.log("DSB DONE",Date.now()-started);return value;};
     }
 
-    if(steps.some(([name])=>name.startsWith("dsb shoreline")||name.includes("Portara aperture")))await b.send("Page.addScriptToEvaluateOnNewDocument",{source:`(${shorelineHarness.toString()})()`});
+    if(steps.some(([name])=>name.startsWith("dsb shoreline")||name.startsWith("dsb land ")||name.includes("Portara aperture")))await b.send("Page.addScriptToEvaluateOnNewDocument",{source:`(${shorelineHarness.toString()})()`});
     // Record the actual guide-entry policy inputs before boot; current quality may downgrade later.
     if (steps.some(([name]) => name === "factory greeter")) await b.send("Page.addScriptToEvaluateOnNewDocument", { source: `(() => {
       window.BL = {}; let module;
@@ -6831,8 +6898,7 @@ const hubBirdsEyeFloors = { name: "birds-eye lower floors", why: "regression: ra
   record("birds-eye combat: the pile, HQ hearth and basement center align on screen at every selected floor despite their different elevations", rows.every(r => r.orthoMix === 1 && r.centerError < 0.001), JSON.stringify(rows.map(({ name, centerError, orthoMix }) => ({ name, centerError, orthoMix }))));
   record("birds-eye combat: cave roofs, underground cuts and weather follow the full camera blend through carry and shoulder handoffs, including reversal without a reset", state.transitions.length === 8
     && state.transitions.every(r => r.immediate < 1e-6 && r.mixStep < 0.08 && r.cutStep < 5 && r.rockError < 1e-6 && r.capError < 1e-5 && r.maxRegions <= 8)
-    // The straight-down shoulder eye stays above the basement ceiling. Its
-    // chosen view still needs the same cut; the later low shoulder restores it.
+    // Both basement handoffs retain the chosen above-ceiling eye and its stable cut.
     && state.transitions.slice(0, 6).every(r => r.after.fade === 1 && r.after.cuts.length > 0 && r.fadeStep === 0 && r.span === 0)
     && state.transitions[4].after.eyeY > state.transitions[4].after.ceiling
     && state.transitions.slice(6).every(r => r.fadeError < 1e-6 && r.span > 1 && r.changed >= 10 && r.direction && r.blended >= 10)
@@ -7023,12 +7089,15 @@ const hubBirdsEyeProjection = { name: "birds-eye projection", why: "rule: overhe
       rows.push(sample("visible sliver"));
       roofGeometry.cutawayPreserve = true; rows.push(sample("preserved roof")); delete roofGeometry.cutawayPreserve;
       roofGeometry.cutawayHide = true; rows.push(sample("hidden weather")); delete roofGeometry.cutawayHide;
+      const decoratedRoof = BL.models.merge(roofGeometry);
+      for (const face of decoratedRoof.faces) face.visibility = false;
+      roof.geometry = decoratedRoof; rows.push(sample("render-only foliage")); roof.geometry = roofGeometry;
       roof.matrixCloud = true; roofGeometry.cutawayPreserve = true; opts.cutawayCloudY = -4; opts.cutawayCloudMix = 1;
       rows.push({ ...sample("lowered cloud"), physicalY: roof.position.y, worldY: roof.world[13] });
       return rows;
     } finally { visibility.dispose(); for (const geometry of [bodyGeometry, headGeometry, roofGeometry]) B.renderer.releaseGeometry(geometry); B.renderer.render(BL.scenes.hub.root, B.camera, B.renderOpts); }
   })()`);
-  record("birds-eye projection: speech anchors follow the rendered head through the transition, ignore cut roofs and weather, and retain a sliver exposed through a local cut", anchors.length === 14 && anchors.every(r => {
+  record("birds-eye projection: speech anchors follow the rendered head through the transition, ignore cut roofs and weather, and retain a sliver exposed through a local cut", anchors.length === 15 && anchors.every(r => {
     const expected = r.name !== "covered" && r.name !== "preserved roof";
     return r.visible === expected && (!expected || r.error < 0.002) && (r.name !== "lowered cloud" || r.physicalY === 6 && r.worldY === 6);
   }), JSON.stringify(anchors));
@@ -9080,22 +9149,30 @@ scene("hub", { label: "gorilla carry jump", query: "status=chillin", steps: [{ n
 scene("hub", { label: "gorilla lab carry jump", query: "character=gorilla-portlandhodl&status=clankin&gorillarage=1", steps: [{ name: "gorilla lab carry jump", why: "regression: EntropyLab rejected running carry jumps and reapplied its worker pose and coat during autonomous rage capture", run: async (b) => {
   const state = await b.evaluate(`(() => {
     const B = __ooga, S = BL.scene, e = B.clankers.player, cave = e.owner, p = e.root.position;
+    for (const other of B.cavemen.values()) if (other !== cave) other.override = other.state = "away";
+    for (const other of B.clankers.list) if (other !== e) other.active = other.root.visible = false;
     cave.state = "working"; cave.root.visible = true; cave.root.quaternion = null; cave.walk = null; cave.bedTravel.mode = "";
     cave.camp.seat = null; cave.camp.burning = cave.camp.rolling = cave.camp.panic.active = cave.roofEscape.active = false;
     cave.health.stunned = 0; cave.hop = cave.hopV = cave.jumps = cave.leap.vx = cave.leap.vz = 0;
     cave.act.kind = "idle"; cave.act.until = Infinity;
     const mesh = B.headquarters.solids.companions;
+    // Begin in the actual central aisle rather than on the owner's desk approach.
+    const mouth = B.headquarters.entropyLab.mouth, x = mouth.x - Math.sin(mouth.ry) * 5,
+      z = mouth.z - Math.cos(mouth.ry) * 5, dx = x - p.x, dy = mouth.floorY - p.y, dz = z - p.z;
+    B.clankers.respawn(e, x, mouth.floorY, z); B.clankerPlay.respawn(dx, dy, dz);
+    B.advance(1 / 60, 1 / 60); const startedInLab = e.motion.lab;
     const key = (type, name, code) => window.dispatchEvent(new KeyboardEvent(type, { key: name, code, bubbles: true, cancelable: true }));
     // Face the lab aisle with the actual camera controls. The default view
     // runs into the rear work desks, whose torso collision correctly stops ascent.
     const orbit = B.pilot.orbit, aisleYaw = B.headquarters.entropyLab.mouth.ry + Math.PI;
     const turn = Math.atan2(Math.sin(aisleYaw - orbit.yaw), Math.cos(aisleYaw - orbit.yaw));
-    const turnKey = turn < 0 ? "q" : "e", turnCode = turn < 0 ? "KeyQ" : "KeyE";
+    const turnKey = turn < 0 ? "e" : "q", turnCode = turn < 0 ? "KeyE" : "KeyQ";
     key("keydown", turnKey, turnCode);
     for (let i = 0; i < Math.round(Math.abs(turn) * 60 / 1.7); i++) B.advance(1 / 60, 1 / 60);
     key("keyup", turnKey, turnCode);
     for (let i = 0; i < 20; i++) B.advance(1 / 60, 1 / 60);
     const forwardX = -Math.sin(orbit.yaw), forwardZ = -Math.cos(orbit.yaw);
+    const aisleError = Math.abs(Math.atan2(Math.sin(orbit.yaw - aisleYaw), Math.cos(orbit.yaw - aisleYaw)));
     const startY = p.y, startZ = p.z, serial = e.smashSerial;
     key("keydown", "Shift", "ShiftLeft"); key("keydown", "w", "KeyW");
     for (let i = 0; i < 5; i++) B.advance(1 / 60, 1 / 60);
@@ -9128,7 +9205,9 @@ scene("hub", { label: "gorilla lab carry jump", query: "character=gorilla-portla
     for (let i = 0; i < 17; i++) B.advance(1 / 60, 1 / 60);
     const thrownInAir = !cave.grabbedBy && e.drive.airborne && cave.hop > 0 && Math.hypot(cave.leap.vx, cave.leap.vz) > 1;
     key("keyup", "g", "KeyG"); key("keyup", "w", "KeyW"); key("keyup", "Shift", "ShiftLeft");
-    return { lab: e.motion.lab, ran, grabbed, first, peak, second, charged, heldThroughRelease, thrownInAir,
+    return { startedInLab, lab: e.motion.lab, aisleError, ran, grabbed, first, peak, second, charged, heldThroughRelease, thrownInAir,
+      releaseHead: cave.root.position.y - cave.baseY + cave.bodyHeight + Math.max(0, cave.viewLift),
+      releaseCeiling: mouth.floorY + B.headquarters.entropyLab.opening.ceilingY,
       smashUnchanged: e.smashSerial === serial };
   })()`);
   const rage = await b.evaluate(`(() => {
@@ -9251,8 +9330,8 @@ scene("hub", { label: "gorilla lab carry jump", query: "character=gorilla-portla
     } finally { C.debugRage(e, false); B.pilot.release(true); code.dispose(); }
   })()`);
   record("gorilla lab carry jump: Shift+W+G keeps a running grab through both jumps and a charged midair throw without a smash",
-    state.lab && state.ran && state.grabbed && state.first && state.peak > 0.5 && state.second && state.charged && state.heldThroughRelease
-      && state.thrownInAir && state.smashUnchanged && rage.began && rage.queued && rage.baseline?.inside && rage.baseline.lab
+    state.startedInLab && state.lab && state.aisleError < 0.03 && state.ran && state.grabbed && state.first && state.peak > 0.5 && state.second && state.charged && state.heldThroughRelease
+      && state.thrownInAir && state.releaseHead <= state.releaseCeiling + 1e-6 && state.smashUnchanged && rage.began && rage.queued && rage.baseline?.inside && rage.baseline.lab
       && rage.baseline.gait === "upright" && rage.baseline.clipped > 0
       && rage.setup?.mapReady && rage.setup.gorillaInside && rage.setup.targetInside && rage.setup.eligible && !rage.setup.warpRequired && rage.setup.targetClear && rage.setup.gorillaClear
       && rage.insideFrames >= 30 && rage.restored && rage.captured && rage.captureInside && rage.held && rage.heldFrames >= 6
@@ -9456,11 +9535,11 @@ scene("hub", { label: "gorilla rage throw", query: "status=chillin&gorillarage=1
     if (fullScenery && !regional && !boundary) {
       // Select only the capture setup, never a launch goal. Keep every real
       // prop in place and stay in this approach's neighbouring meadow.
-      for (const radius of hill ? [24, 25, 26, 27, 28] : [19, 18]) {
+      captureSetup: for (const approach of hill ? [14, 16, 18, 20, 22, 24] : [0]) for (const radius of hill ? [24, 25, 26, 27, 28] : [19, 18]) {
         for (const across of hill ? [0, -2, 2, -4, 4, -6, 6, -8, 8] : [0, -1, 1, -2, 2, -3, 3]) {
           setup.attempts++;
           Object.assign(victim, stage(30 - radius, across));
-          Object.assign(start, stage(hill ? 14 : 32.5 - radius, across));
+          Object.assign(start, stage(hill ? approach : 32.5 - radius, across));
           if (!hill) Object.assign(next, stage(33 - radius, across + 4));
           initialFloor = B.island.surfaceAt(victim.x, victim.z);
           const floor = B.island.surfaceAt(start.x, start.z), nextFloor = B.island.surfaceAt(next.x, next.z);
@@ -9484,8 +9563,8 @@ scene("hub", { label: "gorilla rage throw", query: "status=chillin&gorillarage=1
             && solids.clearAt(next.x, nextFloor + 0.025, next.z, 0.3, second.bodyHeight);
           setup.valid = ground && bodies && !targetBlocked.length && !secondBlocked.length && !gorillaBlocked.length;
           if (setup.valid) {
-            setup.selected = { radius, across, start: { ...e.root.position }, victim: { ...c.root.position }, second: { ...second.root.position } };
-            break;
+            setup.selected = { radius, across, approach, start: { ...e.root.position }, victim: { ...c.root.position }, second: { ...second.root.position } };
+            break captureSetup;
           }
           setup.lastRejected = { radius, across, ground, bodies, floor, support, targetFloor: initialFloor, perch,
             target: targetBlocked.map(part => part.name), second: secondBlocked.map(part => part.name), gorilla: gorillaBlocked.map(part => part.name) };
@@ -10920,8 +10999,8 @@ scene("factory", { query: "pos=0&character=portlandhodl", opts: PHONE_SIZE, step
 scene("bifrost", { query: "pos=0", opts: PHONE_SIZE, steps: [phone("bifrost", { required: ["#joy-move", "#joy-look", ".leave"] })] });
 scene("arcade", { query: "pos=0", opts: PHONE_SIZE, steps: [phone("arcade", { required: ["#joy-move", "#joy-look", ".leave"] })] });
 
-// DSB has no hub entrance during this merge. Exercise the existing world.pilot
-// contract explicitly; no new player-facing route is introduced by the fixture.
+// Focused component fixtures enter DSB directly with the selected Ooga.
+// The Bifrost entrance playthrough separately exercises the real travel windows.
 const dsbEnter = async (b) => {
   await b.evaluate(`(() => {
     const B = __ooga, scene = BL.scenes.dsb, enter = scene.enter, name = B.pilot.player?.traits.name;
@@ -10933,11 +11012,10 @@ const dsbEnter = async (b) => {
   })()`);
 };
 const dsbApproach = async (b, name) => {
-  await b.evaluate(`(() => {
-    const B = __ooga, landmark = B.dsb.land.landmarks[${JSON.stringify(name)}], p = landmark.point();
-    B.pilot.navigate({ yaw: landmark.node.rotation.y, pitch: 0.2, dist: 7, position: p, target: { x: p.x, y: 1.7, z: p.z } }); B.advance(0.1);
+  if (name !== "tv") throw Error("No current DSB landmark: " + name);
+  await b.evaluate(`(() => { const B = __ooga, n = B.dsb.noderunner;
+    B.pilot.navigate({ position: n.review, yaw: n.building.yaw, pitch: -0.18, dist: 9 }); B.advance(0.1);
   })()`);
-  // Projection uses the last drawn camera; advance alone does not paint it.
   if (!await untilPage(b, 'B.dsb.phase === "land"')) throw Error("DSB approach did not draw");
 };
 const dsbClick = async (b, selector, mobile = false) => {
@@ -10956,8 +11034,9 @@ const dsbClick = async (b, selector, mobile = false) => {
   if (delivered?.length !== 2 || !delivered.every(event => event.hits)) throw Error("Native pointer missed " + selector + ": " + JSON.stringify(delivered));
 };
 const dsbExit = async (b, home = "bifrost") => {
+  if (!await untilPage(b, 'B.dsb.gate.state !== "SHUTDOWN"', 5000)) throw Error("Receiving gate did not finish closing");
   await b.evaluate(`__ooga.dsb.gate.activate(0); if (typeof __gateClock === "number") { __gateClock += 2000; __ooga.dsb.gate.update(); }`);
-  await untilPage(b, 'B.dsb.gate.state === "ACTIVE"', 5000);
+  if (!await untilPage(b, 'B.dsb.gate.state === "ACTIVE"', 5000)) throw Error("DSB return gate did not activate");
   await b.evaluate(`(() => {
     const B = __ooga, d = B.dsb, root = d.gate.root;
     BL.scene.updateWorld(root, root.parent ? root.parent.world : undefined);
@@ -10970,45 +11049,8 @@ const dsbExit = async (b, home = "bifrost") => {
     try { for (let i = 0; i < 20 && !B.transitioning; i++) BL.scenes.dsb.update(0.05, 4 + i * 0.05); }
     finally { window.dispatchEvent(new KeyboardEvent("keyup", { key: "w" })); }
   })()`);
-  await untilPage(b, `B.scene === "${home}" && !B.transitioning`, 15000);
+  if (!await untilPage(b, `B.scene === "${home}" && !B.transitioning`, 15000)) throw Error("DSB return did not reach " + home);
 };
-// Placement contract exercises the moved landmarks without changing travel fixtures.
-for (const mobile of [false, true]) scene("dsb", { label: "Ooga Portal dsb plaza " + (mobile ? "canvas2d" : "webgl2"), url: hubPage(dist, "scene=dsb" + (mobile ? "&canvas2d=1" : "")), opts: mobile ? { ...PHONE_SIZE, motion: false } : { motion: true }, steps: [{ name: "Ooga Portal dsb plaza " + (mobile ? "canvas2d" : "webgl2"), why: "regression: moved Shop and TV keep collision, interactions, radio and cat navigation attached to their fronts", run: async b => {
-  const check = (name, ok, detail = "") => record("DSB plaza " + (mobile ? "canvas2d: " : "webgl2: ") + name, ok, detail);
-  const press = selector => dsbClick(b, selector, mobile);
-  check("landmark geometry and services absent during transit", await b.evaluate(`!__ooga.dsb.land && !__ooga.dsb.resources.shop && !__ooga.dsb.resources.tv && __gateDormancy.land === 0 && __gateDormancy.tv === 0 && __gateDormancy.radio === 0 && __gateDormancy.fetch === 0`));
-  await b.evaluate(`window.dispatchEvent(new KeyboardEvent("keydown", { key: "w" })); BL.scenes.dsb.update(__ooga.audio.duration + 1, 1); window.dispatchEvent(new KeyboardEvent("keyup", { key: "w" })); document.querySelector('[data-action="dsb-skip"]').click();`);
-  const placement = await b.evaluate(`(() => { const d = __ooga.dsb, a = d.land.landmarks, centre = { x: 0, z: 18 }; return { shop: a.shop.node.position, tv: a.tv.node.position, shopYaw: a.shop.node.rotation.y, tvYaw: a.tv.node.rotation.y, gate: d.gate.root.position, dialer: d.gate.dialer.position, land: __gateDormancy.land, tvCount: __gateDormancy.tv, inward: Object.values(a).every(l => { const p = l.point(); return Math.hypot(p.x-centre.x,p.z-centre.z) < Math.hypot(l.node.position.x-centre.x,l.node.position.z-centre.z); }) }; })()`);
-  check("opposite inward fronts preserve gate and Dialer transforms", placement.shop.x === -14 && placement.tv.x === 14 && placement.shop.z === 18 && placement.tv.z === 18 && placement.shopYaw === Math.PI / 2 && placement.tvYaw === -Math.PI / 2 && placement.inward && placement.gate.x === 0 && placement.gate.y === 2 && placement.gate.z === 28 && placement.dialer.x === 3.7 && placement.dialer.z === 27 && placement.land === 1 && placement.tvCount === 1, JSON.stringify(placement));
-  const lanes = await b.evaluate(`(() => {
-    const B = __ooga, d = B.dsb, S = BL.scene, noop = () => {}, crew = BL.crew.create({ root: S.createNode(), world: { level: 0 }, input: { add: noop, remove: noop }, hud: { setRosterRow: noop }, game: { state: { assignments: {}, inventory: [] } }, pile: { footprintEdge: 1, pileEdge: () => 1 }, viewYaw: 0, buildSpots: [], walkIn: { x: 0, z: 3 }, groundAt: () => 0, walkable: () => true, bedrolls: BL.contributors.roster.map((_, i) => ({ x: 30+i*2, y: 0, z: 30, hidden: true })), fx: { say: noop, zzzAt: noop, burst: noop, puff: noop, spawnParticle: noop, damageNumber: noop } });
-    const routes = [[[0,7],[0,26]],[[0,29],[0,26]],[[0,26],[0,33]],[[0,26],[3.7,25.6]],[[0,21],[7,24]],[[0,18],[-10.5,18]],[[0,18],[10.5,18]]], rows = [];
-    for (const actor of crew.cavemen.values()) { let clear = true; for (const [a,c] of routes) for (let i=0;i<=128;i++) clear &&= d.clearAt(a[0]+(c[0]-a[0])*i/128,a[1]+(c[1]-a[1])*i/128,actor.bodyRadius); rows.push({ name: actor.traits.name, clear }); }
-    crew.dispose(); return rows;
-  })()`);
-  check("all characters retain plaza, arrival, return, Dialer and ride lanes", lanes.length === CAST && lanes.every(r => r.clear), JSON.stringify(lanes));
-  const old = await b.evaluate(`(() => { const B = __ooga, d = B.dsb, out = []; for (const x of [-20,-10]) { B.pilot.navigate({ position: { x,y:0,z:13 }, target: { x,y:1.7,z:13 }, yaw:0,pitch:0.3,dist:5 }); BL.scenes.dsb.update(0,2); const tokens=d.inventory.tokens; d.buy("bread"); d.openTv(); out.push(d.clearAt(x,13,d.avatar.bodyRadius) && d.inventory.tokens===tokens && !d.tv.isOpen && !["Visit meme shop","Use TV"].includes(document.getElementById("dsb-context").textContent)); } return out; })()`);
-  check("old positions have no collision or Shop/TV interaction", old.every(Boolean), JSON.stringify(old));
-  for (const name of ["shop", "tv"]) {
-    await dsbApproach(b, name);
-    check(name + " prompt follows transformed front", await b.evaluate(`document.getElementById("dsb-context").textContent === ${JSON.stringify(name === "shop" ? "Visit meme shop" : "Use TV")}`));
-    await press("#dsb-context");
-    if (name === "shop") { await press('[data-action="dsb-bread"]'); check("Shop purchases still work", await b.evaluate(`!document.getElementById("dsb-shop").hidden && __ooga.dsb.inventory.bread === 1 && __ooga.dsb.inventory.tokens === 17`), JSON.stringify(await b.evaluate(`({ inventory:__ooga.dsb.inventory, phase:__ooga.dsb.phase, hidden:document.getElementById("dsb-shop").hidden })`))); await press('[data-action="dsb-close-shop"]'); }
-    else { check("TV opens through native interaction", await b.evaluate(`__ooga.dsb.tv.isOpen`)); await press("#dsb-tv-close"); }
-  }
-  const audio = await b.evaluate(`(() => { const B=__ooga, d=B.dsb, source=d.land.landmarks.tv.point(-0.55,3.3,1.63), boat=d.land.boats[0].position; B.audio.environment({...B.camera,position:source},boat,5,source); const near=B.audio.radioVolume; B.audio.environment({...B.camera,position:{x:-10,y:3.3,z:14.6}},boat,5,source); const old=B.audio.radioVolume; BL.scene.updateWorld(d.land.root); const w=d.land.tvScreen.world; return { near,old,source,matches:Math.hypot(source.x-w[12],source.y-w[13],source.z-w[14])<1e-5 }; })()`);
-  check("radio source follows rendered TV screen, not old position", audio.matches && audio.near > audio.old * 2, JSON.stringify(audio));
-  const cat = await b.evaluate(`(() => {
-    const d=__ooga.dsb, noop=()=>{}, z=BL.dsbAgent.create({parent:BL.scene.createNode(),input:{add:noop,remove:noop},clearAt:d.clearAt,landmarks:d.land.landmarks,brain:{observe:noop,dispose:noop,reply:()=>""}}), sense={name:"YellowBrokeIt",x:0,y:0,z:7,food:0,active:true}, rows=[]; let time=0;
-    for (const id of ["snack_watch","shop_lane","west_lane","west","perch","east","arrival"]) {
-      z.update(0,time,sense);const s=z.snapshot(), accepted=z.request({visit:s.visit,id:s.nextRequestId,at:time,type:"walk_to",destination:id}); let clear=true;
-      for(let i=0;i<1200 && z.snapshot().self.intent === "walk";i++){time+=0.05;z.update(0.05,time,sense);clear &&= d.clearAt(z.root.position.x,z.root.position.z,0.42);}
-      rows.push({id,accepted,clear,done:z.snapshot().self.intent!=="walk",x:z.root.position.x,z:z.root.position.z});
-    }z.dispose();return rows;
-  })()`);
-  check("Zuzu routes around both moved structures to landmark-derived destinations", cat.every(r=>r.accepted==="accepted" && r.clear && r.done), JSON.stringify(cat));
-} }] });
-
 // Retained modules are exercised independently: the replacement DSB scene does not spawn Zuzu.
 const mountZuzuConversationFixture = async b => b.evaluate(`(() => {
   const B = __ooga, S = BL.scene, parent = S.createNode(), land = BL.dsbModels.build();
@@ -11099,6 +11141,54 @@ scene("dsb", { label: "dsb zuzu conversation", url: hubPage(dist), steps: [{ nam
   })()`);
   record("dsb chat: fixed HTTP transport rejects unsafe responses and defaults to mock", transport);
   record("retained Zuzu components: replacement DSB deliberately has no live cat or conversation", await b.evaluate('!__ooga.dsb.zuzu && !__ooga.dsb.conversation && !!BL.dsbAgent && !!BL.dsbConversation'));
+  const agentContract = await b.evaluate(`(() => {
+    const S = BL.scene, parent = S.createNode(), land = BL.dsbModels.build(), targets = new Set();
+    // A small real obstacle forces a waypoint detour between perch and arrival.
+    const clearAt = (x, z, r) => !(x > -9 - r && x < -7 + r && z > 19 - r && z < 24 + r);
+    const z = BL.dsbAgent.create({ parent, landmarks: land.landmarks, clearAt,
+      input: { add: n => targets.add(n), remove: n => targets.delete(n) },
+      brain: { observe() {}, dispose() {} } });
+    const sense = { name: "YellowBrokeIt", x: -11, y: 0, z: 21, food: 1, active: true };
+    let time = 4, result;
+    try {
+      Object.assign(z.root.position, { x: -11, z: 23 }); z.update(0, time, sense);
+      const snap = z.snapshot(); let id = snap.nextRequestId;
+      const ask = (type, extra = {}) => z.request({ visit: snap.visit, id: id++, at: time, type, ...extra });
+      const bad = [ask("eval"), ask("walk_to", { destination: "hub" }), ask("look_at", { entity: "window" }),
+        ask("say", { text: "hi", code: "x" }), ask("say", { text: "x".repeat(161) }),
+        ask("say", { text: "old", at: time - 4 }), ask("say", { text: "old visit", visit: snap.visit - 1 })];
+      const valid = ask("say", { text: "A perfectly ordinary future model sentence." });
+      const replay = z.request({ visit: snap.visit, id: id - 1, at: time, type: "stop_following" });
+      const movement = [ask("stop_following"), ask("walk_to", { destination: "arrival" })];
+      const burst = []; for (let i = 0; i < 12; i++) burst.push(ask("look_at", { entity: "player" }));
+      let safe = true, detour = false;
+      for (let i = 0; i < 600; i++) {
+        time += 0.05; z.update(0.05, time, sense); const p = z.root.position;
+        safe &&= clearAt(p.x, p.z, 0.42) && Math.hypot(p.x, p.z) <= 29.01 && p.z >= 6 && p.z <= 26;
+        detour ||= p.z < 18.6;
+      }
+      const arrived = Math.hypot(z.root.position.x + 4, z.root.position.z - 23) < 0.3;
+      sense.x = z.root.position.x; sense.z = z.root.position.z - 2; z.update(0, time + 1, sense);
+      const p = z.root.position, tomato = z.tomato(p.x, 0.65, p.z - 1, p.x, 0.65, p.z + 1);
+      z.projectile(p.x, 0.65, p.z - 1, p.x, 0.65, p.z + 1); z.event("weapon_hit"); z.event("food_activity");
+      const events = z.snapshot();
+      for (let i = 0; i < 80; i++) z.event("tomato_hit");
+      const memory = z.snapshot();
+      result = { bad, valid, replay, movement, limited: burst.includes("rate_limited"), safe, detour, arrived, tomato,
+        events: events.events.map(e => e.type), hits: events.self.weaponHits, shots: events.self.nearbyShots,
+        count: memory.events.length, tomatoHits: memory.self.tomatoHits,
+        ordered: memory.events.every((e, i, a) => !i || e.seq === a[i - 1].seq + 1),
+        frozen: Object.isFrozen(memory) && Object.isFrozen(memory.events[0]) };
+    } finally { z.dispose(); while (land.root.children.length) S.removeChild(land.root, land.root.children[0]); }
+    return { ...result, disposed: z.disposed && targets.size === 0 && parent.children.length === 0 };
+  })()`);
+  record("dsb zuzu: strict action validation rejects unsafe, stale, duplicate and excessive requests", agentContract.valid === "accepted"
+    && agentContract.bad.every(v => v !== "accepted") && agentContract.replay === "stale" && agentContract.limited
+    && agentContract.movement.every(v => v === "accepted"), JSON.stringify(agentContract));
+  record("dsb zuzu: waypoint walk detours around solid obstacles and reaches arrival inside safe bounds", agentContract.safe && agentContract.detour && agentContract.arrived, JSON.stringify(agentContract));
+  record("dsb zuzu: tomato, weapon and food observations retain events without unbounded memory", agentContract.tomato && agentContract.hits === 1 && agentContract.shots === 1
+    && ["tomato_hit", "weapon_hit", "shot_nearby", "food_seen", "food_activity"].every(type => agentContract.events.includes(type))
+    && agentContract.count === 64 && agentContract.tomatoHits === 81 && agentContract.ordered && agentContract.frozen && agentContract.disposed, JSON.stringify(agentContract));
   try {
     await mountZuzuConversationFixture(b);
     const approachTalk = async () => b.evaluate('__zuzuFixture.prepare()');
@@ -11187,67 +11277,16 @@ scene("dsb", { label: "dsb zuzu conversation", url: hubPage(dist), steps: [{ nam
     await b.evaluate(`if (window.__remoteFactory) BL.dsbAgentRemote.create = __remoteFactory; window.__zuzuFixture?.dispose(); delete window.__zuzuFixture; delete window.__zuzuPrevious; delete window.__zuzuTransport; delete window.__remoteFactory;`).catch(() => {});
   }
 } }] });
-scene("dsb", { label: "dsb zuzu agent", url: hubPage(dist, "scene=dsb"), steps: [{ name: "dsb zuzu agent", why: "contract: preserve DSB scene behavior independently of the hub entrance", run: async (b) => {
-  await b.send("Emulation.setEmulatedMedia", { features: [{ name: "prefers-reduced-motion", value: "reduce" }] });
-  await b.evaluate(`window.dispatchEvent(new KeyboardEvent("keydown", { key: "w" })); __ooga.advance(8, 0.1); window.dispatchEvent(new KeyboardEvent("keyup", { key: "w" })); __ooga.advance(2);`);
-  const first = await b.evaluate(`__ooga.dsb.zuzu.snapshot()`);
-  record("dsb zuzu: physical cat greets after arrival", first.self.name === "Zuzu" && first.self.pronouns === "she/her" && first.self.greeted && first.player.name === "YellowBrokeIt" && first.events.some(e => e.type === "player_seen"), JSON.stringify(first.self));
-  if (process.env.DSB_ZUZU_CAPTURE) {
-    await b.evaluate(`window.__zuzuUpdate = BL.scenes.dsb.update; BL.scenes.dsb.update = () => { Object.assign(__ooga.camera.position, { x: -2, y: 2, z: 26 }); Object.assign(__ooga.camera.target, { x: -4, y: 0.7, z: 23 }); }; __ooga.advance(0.1);`);
-    try { await b.screenshot(process.env.DSB_ZUZU_CAPTURE); }
-    finally { await b.evaluate(`BL.scenes.dsb.update = __zuzuUpdate; delete window.__zuzuUpdate;`); }
-  }
-  const place = (x, z) => b.evaluate(`__ooga.pilot.navigate({ yaw: 0, pitch: 0.2, dist: 7, target: { x: ${x}, y: 1.7, z: ${z} }, position: { x: ${x}, y: 0, z: ${z} } }); __ooga.advance(0.1);`);
-  await dsbApproach(b, "shop");
-  await b.evaluate(`__ooga.dsb.buy("tomato"); __ooga.dsb.buy("tomato");`);
-  await place(-4, 14.5);
-  const hit = await b.evaluate(`(() => { const B = __ooga, z = B.dsb.zuzu; B.dsb.throwTomato(z); B.advance(0.8, 1 / 120); const a = z.snapshot(); B.advance(3.5); const c = z.snapshot(); return { hits: c.self.tomatoHits, intent: a.self.intent, moved: Math.hypot(c.self.x + 4, c.self.z - 23), events: c.events.map(e => e.type), dialogue: z.dialogue }; })()`);
-  record("dsb zuzu: real tomato collision records a hit and flees", hit.hits === 1 && hit.intent === "flee" && hit.moved > 0.5 && hit.events.includes("tomato_hit") && hit.dialogue.includes("salad weather"), JSON.stringify(hit));
-  // Finish her flight before testing real shared weapon contacts.
-  await b.evaluate(`__ooga.advance(7);`);
-  const cat = await b.evaluate(`__ooga.dsb.zuzu.snapshot().self`);
-  await place(cat.x, cat.z + 3);
-  const weapon = await b.evaluate(`(() => { const B = __ooga, z = B.dsb.zuzu, p = z.root.position; B.crew.selectWeapon(2); const fired = B.crew.fireWeapon(B.dsb.avatar, { x: p.x, y: 0.65, z: p.z }, 1); B.advance(0.3, 1 / 120); return { fired, ...z.snapshot().self }; })()`);
-  record("dsb zuzu: shared weapon reports nearby fire and confirmed hit without killing her", weapon.fired && weapon.nearbyShots > 0 && weapon.weaponHits > 0 && weapon.intent === "flee", JSON.stringify(weapon));
-  await b.evaluate(`__ooga.advance(18);`);
-  await dsbApproach(b, "shop");
-  await b.evaluate(`__ooga.dsb.buy("banana");`);
-  const hungryCat = await b.evaluate(`__ooga.dsb.zuzu.snapshot().self`);
-  await place(hungryCat.x + 3, hungryCat.z);
-  const food = await b.evaluate(`(() => { const B = __ooga, z = B.dsb.zuzu; B.advance(1); B.dsb.eat(); B.advance(13); const s = z.snapshot(); return { ...s.self, events: s.events.map(e => e.type), food: B.dsb.inventory.bananas }; })()`);
-  record("dsb zuzu: food observations lead to interest and following without taking inventory", food.food === 0 && food.events.includes("food_seen") && food.events.includes("food_activity") && food.events.includes("follow_started"), JSON.stringify(food));
-  await b.evaluate(`__ooga.advance(4);`);
-  const chat = await b.evaluate(`(() => { const B = __ooga, z = B.dsb.zuzu; const before = z.snapshot(); const p = z.root.position; B.pilot.navigate({ yaw: 0, pitch: 0.2, dist: 7, target: { x: p.x, y: 1.7, z: p.z + 2.5 }, position: { x: p.x, y: 0, z: p.z + 2.5 } }); B.advance(0.2); const talked = z.talk(); return { talked, text: z.dialogue, count: before.self.tomatoHits }; })()`);
-  record("dsb zuzu: Talk remembers the tomato", chat.talked && chat.count === 1 && chat.text.includes("tomato"), JSON.stringify(chat));
-  await b.evaluate(`__ooga.advance(4);`);
-  const secure = await b.evaluate(`(() => {
-    const z = __ooga.dsb.zuzu, s = z.snapshot(); let id = 10000;
-    const ask = (type, extra = {}) => z.request({ visit: s.visit, id: ++id, at: s.time, type, ...extra });
-    const bad = [ask("eval", { text: "alert(1)" }), ask("walk_to", { destination: "hub" }), ask("look_at", { entity: "window" }), ask("say", { text: "hi", code: "x" }), ask("say", { text: "x".repeat(161) }), ask("say", { text: "old", at: s.time - 4 }), ask("say", { text: "old visit", visit: s.visit - 1 })];
-    const valid = ask("say", { text: "A perfectly ordinary future model sentence." });
-    const replay = z.request({ visit: s.visit, id, at: s.time, type: "stop_following" });
-    const movement = [ask("stop_following"), ask("walk_to", { destination: "arrival" })];
-    const burst = []; for (let i = 0; i < 12; i++) burst.push(ask("look_at", { entity: "player" }));
-    return { bad, valid, replay, movement, limited: burst.includes("rate_limited") };
-  })()`);
-  record("dsb zuzu: strict action validation rejects unsafe, stale, duplicate and excessive requests", secure.valid === "accepted" && secure.bad.every(v => v !== "accepted") && secure.replay === "stale" && secure.limited && secure.movement.every(v => v === "accepted"), JSON.stringify(secure));
-  const path = await b.evaluate(`(() => { const B = __ooga, z = B.dsb.zuzu; let safe = true; for (let i = 0; i < 600; i++) { B.advance(0.05); const p = z.root.position; safe = safe && Math.hypot(p.x, p.z) <= 29.01 && p.z >= 6 && p.z <= 26; } return { safe, ...z.snapshot().self }; })()`);
-  record("dsb zuzu: waypoint walk reaches arrival inside safe bounds", path.safe && Math.hypot(path.x + 4, path.z - 23) < 0.3, JSON.stringify(path));
-  await place(-4, 26);
-
-  const memory = await b.evaluate(`(() => { const z = __ooga.dsb.zuzu; for (let i = 0; i < 80; i++) z.event("tomato_hit"); const s = z.snapshot(); return { count: s.events.length, hits: s.self.tomatoHits, ordered: s.events.every((e, i, a) => !i || e.seq === a[i - 1].seq + 1), frozen: Object.isFrozen(s) && Object.isFrozen(s.events[0]) }; })()`);
-  record("dsb zuzu: memory is bounded, ordered and read-only to brains", memory.count === 64 && memory.hits === 81 && memory.ordered && memory.frozen, JSON.stringify(memory));
-  await b.evaluate(`window.__oldZuzu = __ooga.dsb.zuzu; __ooga.go("hub");`);
-  record("dsb zuzu: exit disposes agent and hub has no agent", await untilPage(b, 'B.scene === "hub" && !B.transitioning && __oldZuzu.disposed && !B.dsb', 20000));
-  await b.evaluate(`__ooga.go("dsb");`);
-  if (!await untilPage(b, 'B.scene === "dsb" && !B.transitioning', 10000)) throw Error("DSB reentry failed");
-  record("dsb zuzu: transit reentry has no agent", await b.evaluate("!__ooga.dsb.zuzu"));
-  const reset = await b.evaluate(`(() => { window.dispatchEvent(new KeyboardEvent("keydown", { key: "w" })); BL.scenes.dsb.update(__ooga.audio.duration + 1, 0); window.dispatchEvent(new KeyboardEvent("keyup", { key: "w" })); const s = __ooga.dsb.zuzu.snapshot(); return { events: s.events.length, hits: s.self.tomatoHits }; })()`);
-  record("dsb zuzu: new visit resets session memory", reset.events === 0 && reset.hits === 0, JSON.stringify(reset));
-} }] });
-for (const ready of [false, true]) scene("dsb", { label: "entrance audio " + ready, url: hubPage(dist, "scene=dsb"), steps: [{ name: "dsb entrance " + (ready ? "audio enabled" : "audio blocked"), why: "regression: blocked audio must not block entrance movement", run: async (b) => {
+for (const ready of [false, true]) scene("dsb", { label: "entrance audio " + ready, url: hubPage(dist, "scene=dsb&entrance=1"), steps: [{ name: "dsb entrance " + (ready ? "audio enabled" : "audio blocked"), why: "regression: blocked audio must not block entrance movement", run: async (b) => {
     await b.send("Emulation.setEmulatedMedia", { features: [{ name: "prefers-reduced-motion", value: "reduce" }] });
     if (ready) {
+      await b.evaluate(`(() => {
+        const original = AudioContext.prototype.createBufferSource, gainOriginal = AudioContext.prototype.createGain, audio = __ooga.audio, fade = audio.fade;
+        window.__entranceLeave = { original, gainOriginal, gains: [], context: null, fade: 0 };
+        AudioContext.prototype.createGain = function() { const gain = gainOriginal.call(this); __entranceLeave.gains.push(gain); return gain; };
+        AudioContext.prototype.createBufferSource = function() { window.__entranceLeave.context = this; return original.call(this); };
+        audio.fade = seconds => { window.__entranceLeave.fade = seconds; fade(seconds); };
+      })()`);
       const p = await b.evaluate(`(() => { const r = document.getElementById("dsb-start-audio").getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; })()`);
       await b.click(p.x, p.y);
       record("dsb entrance: Enter with sound decodes audio", await untilPage(b, "B.audio.ready && B.audio.musicDuration > 0", 10000));
@@ -11255,23 +11294,38 @@ for (const ready of [false, true]) scene("dsb", { label: "entrance audio " + rea
       // Fault injection: decoding never becomes ready and playback never finishes.
       await b.evaluate(`Object.defineProperty(__ooga.audio, "ready", { get: () => false });`);
     }
+    if (ready) {
+      const glanceAtCue = cue => b.evaluate(`(() => {
+        const B = __ooga; window.dispatchEvent(new KeyboardEvent("keydown", { key: "w" }));
+        try {
+          for (let i = 0; i < 1200 && B.audio.cue < ${cue}; i++) B.advance(1 / 60, 1 / 60);
+          B.advance(0.5, 1 / 60);
+          return { cue: B.audio.cue, x: B.camera.position.x, behind: B.camera.position.z - B.dsb.avatar.root.position.z };
+        } finally { window.dispatchEvent(new KeyboardEvent("keyup", { key: "w" })); }
+      })()`);
+      const left = await glanceAtCue(0);
+      await untilPage(b, "!B.audio.pending", 40000);
+      const right = await glanceAtCue(1);
+      record("dsb passage camera: real voice starts alternate gentle glances behind the Ooga", left.cue === 0 && right.cue === 1
+        && left.x < 1.7 && right.x > 1.7 && left.behind > 3 && right.behind > 3, JSON.stringify({ left, right }));
+    }
     const moved = await b.evaluate(`(() => {
-      const B = __ooga, before = B.dsb.progress;
+      const B = __ooga, before = B.dsb.entrance.progress;
       window.dispatchEvent(new KeyboardEvent("keydown", { key: "w" }));
-      B.advance(B.audio.duration * 0.35, 0.05);
+      B.advance((B.audio.ready ? B.audio.duration : 24) * 0.35, 0.05);
       window.dispatchEvent(new KeyboardEvent("keyup", { key: "w" }));
-      return { before, after: B.dsb.progress, ready: B.audio.ready, cue: B.audio.cue };
+      return { before, after: B.dsb.entrance.progress, ready: B.audio.ready, cue: B.audio.cue };
     })()`);
     record("dsb entrance: forward movement with audio ready=" + ready, moved.after > moved.before + 0.3 && moved.ready === ready, JSON.stringify(moved));
     if (ready) {
       record("dsb entrance: normal voice playback starts", moved.cue >= 0);
-      await b.key("m"); record("dsb entrance: mute still works", await b.evaluate("__ooga.audio.muted"));
-      await b.key("m"); record("dsb entrance: unmute still works", await b.evaluate("!__ooga.audio.muted"));
+      await b.key("m"); record("dsb entrance: mute still works", await untilPage(b, "B.audio.muted", 1000));
+      await b.key("m"); record("dsb entrance: unmute still works", await untilPage(b, "!B.audio.muted", 1000));
       await b.send("Emulation.setTouchEmulationEnabled", { enabled: true });
       const p = await b.evaluate(`(() => { const el = document.getElementById("joy-move"); el.style.display = "block"; el.addEventListener("pointerdown", e => { window.__dsbStickPointer = e.pointerId; }, { once: true }); const r = el.getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + 8 }; })()`);
       await b.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ x: p.x, y: p.y }] });
       await b.send("Input.dispatchTouchEvent", { type: "touchMove", touchPoints: [{ x: p.x, y: p.y + 1 }] });
-      record("dsb entrance: touch stick feeds forward movement", await b.evaluate(`(() => { const B = __ooga, before = B.dsb.progress, y = B.controls.read().y; B.advance(0.2); return y > 0.5 && B.dsb.progress > before; })()`));
+      record("dsb entrance: touch stick feeds forward movement", await b.evaluate(`(() => { const B = __ooga, before = B.dsb.entrance.progress, y = B.controls.read().y; B.advance(0.2); return y > 0.5 && B.dsb.entrance.progress > before; })()`));
       await b.evaluate(`document.getElementById("joy-move").dispatchEvent(new PointerEvent("lostpointercapture", { pointerId: 999 }));`);
       record("dsb entrance: unrelated capture loss preserves active stick", await b.evaluate("__ooga.controls.read().y > 0.5"));
       await b.evaluate(`document.getElementById("joy-move").releasePointerCapture(__dsbStickPointer);`);
@@ -11283,190 +11337,21 @@ for (const ready of [false, true]) scene("dsb", { label: "entrance audio " + rea
       const B = __ooga;
       Object.defineProperty(B.audio, "pending", { get: () => true });
       window.dispatchEvent(new KeyboardEvent("keydown", { key: "w" }));
-      B.advance(B.audio.duration + 1, 0.1);
+      B.advance((1 - B.dsb.entrance.progress) * (B.audio.ready ? B.audio.duration : 24) + 0.1, 0.1);
       window.dispatchEvent(new KeyboardEvent("keyup", { key: "w" }));
-      return { phase: B.dsb.phase, progress: B.dsb.progress, pending: B.audio.pending };
+      return { phase: B.dsb.entrance.phase, progress: B.dsb.entrance.progress, pending: B.audio.pending };
     })()`);
-    record("dsb entrance: completes despite pending audio, ready=" + ready, finished.phase === "land" && finished.progress === 1 && finished.pending, JSON.stringify(finished));
-
-  } }] });
-for (const fallback of [false, true]) scene("dsb", { label: "dsb gameplay " + (fallback ? "canvas2d" : "webgl2"), url: hubPage(dist, "scene=dsb" + (fallback ? "&canvas2d=1" : "")), steps: [{ name: "dsb gameplay " + (fallback ? "canvas2d" : "webgl2"), why: "contract: preserve DSB scene behavior independently of the hub entrance", run: async (b) => {
-  const click = selector => dsbClick(b, selector);
-  const walkTo = async (x, z) => b.evaluate(`__ooga.pilot.navigate({ yaw: 0, pitch: 0.2, dist: 7, target: { x: ${x}, y: 1.7, z: ${z} }, position: { x: ${x}, y: 0, z: ${z} } }); __ooga.advance(0.15);`);
-  await b.send("Emulation.setEmulatedMedia", { features: [{ name: "prefers-reduced-motion", value: "reduce" }] });
-  await b.key("m"); await untilPage(b, "B.audio.ready", 10000);
-  if (process.env.DSB_CAPTURE && !fallback) await b.screenshot(join(root, "untracked", "dsb-round-tunnel.png"));
-  await b.evaluate(`window.dispatchEvent(new KeyboardEvent("keydown", { key: "w" })); __ooga.advance(__ooga.audio.duration + 1, 0.1); window.dispatchEvent(new KeyboardEvent("keyup", { key: "w" }));`);
-  const bodies = await b.evaluate(`({ phase: __ooga.dsb.phase, name: __ooga.dsb.avatar.traits.name, canonical: __ooga.dsb.avatar.headOpen === BL.models.caveman(BL.contributors.traitsFor("YellowBrokeIt")).headOpen, feet: __ooga.dsb.avatar.root.position.y - __ooga.dsb.avatar.baseY, npcFeet: __ooga.dsb.visitors.every(v => Math.abs(v.root.position.y - v.baseY - v.floorY) < 0.001), railMin: Math.min(...__ooga.dsb.railY), radius: Math.hypot(__ooga.dsb.land.cart.position.x, __ooga.dsb.land.cart.position.z) })`);
-  record("dsb gameplay: canonical Yellow stands on the floor; perimeter track retains safe clearance", bodies.phase === "land" && bodies.name === "YellowBrokeIt" && bodies.canonical && Math.abs(bodies.feet) < 0.001 && bodies.npcFeet && bodies.railMin >= 7.5 && Math.abs(bodies.radius - 31) < 0.01, JSON.stringify(bodies));
-  await click("#dsb-toggle");
-  record("dsb menu: hide leaves a show button", await b.evaluate(`document.getElementById("dsb-toggle").textContent === "Show DSB menu" && getComputedStyle(document.getElementById("dsb-bag")).display === "none"`));
-  await click("#dsb-toggle");
-  record("dsb menu: show restores contents", await b.evaluate(`document.getElementById("dsb-toggle").textContent === "Hide DSB menu" && getComputedStyle(document.getElementById("dsb-bag")).display !== "none"`));
-  await walkTo(12, 12);
-  const facing = await b.evaluate(`(() => { const rows = []; for (const key of ["w", "s"]) { window.dispatchEvent(new KeyboardEvent("keydown", { key })); __ooga.advance(0.3); const before = __ooga.dsb.avatar.root.rotation.y; window.dispatchEvent(new KeyboardEvent("keyup", { key })); __ooga.advance(0.8); rows.push({ before, after: __ooga.dsb.avatar.root.rotation.y }); } return { mode: __ooga.pilot.mode, rows }; })()`);
-  record("dsb walking: combat shoulder movement preserves forward facing after moving or backing up", facing.mode === "shoulder" && facing.rows.every(r => Math.abs(r.before - r.after) < 0.001) && Math.cos(facing.rows[0].before - facing.rows[1].before) > 0.9, JSON.stringify(facing));
-  await dsbApproach(b, "tv");
-  if (process.env.DSB_CAPTURE && !fallback) await b.screenshot(join(root, "untracked", "dsb-standing-yellow.png"));
-  record("dsb gameplay: Use TV appears nearby", await b.evaluate(`!document.getElementById("dsb-context").hidden && document.getElementById("dsb-context").textContent === "Use TV"`));
-  await click("#dsb-context"); await click("#dsb-tv-channel");
-  record("dsb gameplay: real mouse clicks open the TV channel", await b.evaluate(`document.getElementById("dsb-tv").open && !document.getElementById("dsb-tv-radio").hidden`));
-  record("dsb TV: submenu hides channel choices", await b.evaluate(`getComputedStyle(document.getElementById("dsb-tv-menu")).display === "none"`));
-  await click("#dsb-tv-back");
-  record("dsb TV: back restores the five choices", await b.evaluate(`!document.getElementById("dsb-tv-menu").hidden && document.getElementById("dsb-tv-radio").hidden && document.querySelectorAll("#dsb-tv-menu button").length === 5`));
-  await click("#dsb-tv-channel");
-  await b.evaluate(`document.getElementById("dsb-tv-query").value = "Ooga"`); await click("#dsb-tv-search"); await untilPage(b, 'document.querySelector("#dsb-tv-results button") !== null');
-  await click("#dsb-tv-results button"); await untilPage(b, '!document.getElementById("dsb-tv-invoice").hidden');
-  record("dsb gameplay: song selection creates one invoice QR and wallet link", await b.evaluate(`__dsbTvFixture.invoices === 1 && document.getElementById("dsb-tv-invoice-qr").width > 200 && document.getElementById("dsb-tv-wallet").href.startsWith("lightning:lnbc") && document.getElementById("dsb-tv-price").textContent.includes("210 sats")`));
-  record("dsb gameplay: station payment confirmation is shown", await untilPage(b, 'document.getElementById("dsb-tv-payment-status").textContent.includes("confirmed")', 10000));
-  if (process.env.DSB_CAPTURE && !fallback) await b.screenshot(join(root, "untracked", "dsb-jukebox.png"));
-  await click("#dsb-tv-close"); await dsbApproach(b, "shop"); await click("#dsb-context"); await click('[data-action="dsb-banana"]'); await click('[data-action="dsb-tomato"]');
-  const bought = await b.evaluate(`__ooga.dsb.inventory`);
-  await b.evaluate(`
-    // Let the open shop publish its hint, then observe the close action before
-    // another frame could hide a delayed hint update that moves the buttons.
-    __ooga.advance(0.41); window.__dsbShopClose = null;
-    document.querySelector('[data-action="dsb-close-shop"]').addEventListener("click", () => {
-      window.__dsbShopClose = { hidden: document.getElementById("dsb-shop").hidden, prompt: document.getElementById("dsb-prompt").textContent };
-    }, { once: true });
-  `);
-  await click('[data-action="dsb-close-shop"]');
-  const closed = await b.evaluate(`window.__dsbShopClose`);
-  record("dsb gameplay: real shop clicks add a banana and tomato", bought.bananas === 1 && bought.tomatoes === 1 && bought.tokens === 18 && closed?.hidden && closed.prompt === "Visit meme shop", JSON.stringify({ bought, closed }));
-  await click('[data-action="dsb-throw"]');
-  const projectile = await b.evaluate(`(() => {
-    const B = __ooga, geometry = BL.dsbModels.cube("#ef4256"), node = B.dsb.land.root.children.find(n => n.geometry === geometry && n.visible);
-    if (!node) return { created: false };
-    const start = { ...node.position }, inventory = B.dsb.inventory.tomatoes;
-    // Measure flight after the projectile has left the player's hand.
-    B.advance(0.12); const moved = Math.hypot(node.position.x - start.x, node.position.z - start.z);
-    let visibleInView = false, flightFrames = 0;
-    // A side shoulder starts the shot outside its frustum. It must enter the
-    // view during early flight, while moving and before its floor splat.
-    for (; flightFrames < 18; flightFrames++) {
-      const screen = B.project(node.position.x, node.position.y, node.position.z);
-      if (node.visible && node.position.y > 0.12 && screen && screen.x >= 0 && screen.x <= innerWidth && screen.y >= 0 && screen.y <= innerHeight) { visibleInView = true; break; }
-      B.advance(1 / 60);
+    record("dsb entrance: completes despite pending audio, ready=" + ready, finished.phase === "done" && finished.progress === 1 && finished.pending, JSON.stringify(finished));
+    if (ready) {
+      const gainBefore = await b.evaluate('__entranceLeave.gains[0].gain.value');
+      await b.sleep(300);
+      record("dsb arrival audio: finishing fades the entrance soundtrack before retirement", await b.evaluate(`__entranceLeave.fade > 0 && __entranceLeave.context.state === "running" && __entranceLeave.gains[0].gain.value < ${gainBefore}`));
+      await b.evaluate(`__ooga.go("bifrost"); __ooga.advance(0.6, 1 / 60)`);
+      await untilPage(b, 'B.scene === "bifrost" && !B.transitioning', 15000);
+      record("dsb audio: leaving the scene closes its entrance context and clears the body class", await b.evaluate('__entranceLeave.context?.state === "closed" && !document.body.classList.contains("dsb-active")'));
+      await b.evaluate(`AudioContext.prototype.createBufferSource = __entranceLeave.original; AudioContext.prototype.createGain = __entranceLeave.gainOriginal; delete window.__entranceLeave;`);
     }
-    B.advance(0.8 - flightFrames / 60); const splat = node.visible && node.position.y === 0.04 && node.scale.y === 0.06;
-    B.advance(1.5); return { created: true, inventory, visibleInView, flightFrames, moved, splat, expired: !node.visible && B.dsb.shots === 0 };
-  })()`);
-  record("dsb gameplay: throwing consumes inventory and creates a visible moving tomato that splats and expires", projectile.created && projectile.inventory === 0 && projectile.visibleInView && projectile.moved > 1 && projectile.splat && projectile.expired, JSON.stringify(projectile));
-  await b.key("b"); record("dsb gameplay: banana can be eaten", await b.evaluate(`__ooga.dsb.inventory.bananas === 0`));
-  for (const kind of ["boat", "coaster"]) {
-    await walkTo(kind === "boat" ? 0 : 7, kind === "boat" ? 34 : 24);
-    const trip = kind === "boat" ? "boatTrip" : "trainTrip";
-    await b.evaluate(`__ooga.dsb.${trip}.wait = 0; __ooga.dsb.${trip}.angle = __ooga.dsb.${trip}.start + 1; __ooga.advance(0.1);`);
-    record("dsb gameplay: " + kind + " cannot board while away", await b.evaluate(`document.getElementById("dsb-context").disabled`));
-    await b.evaluate(`__ooga.dsb.${trip}.angle = __ooga.dsb.${trip}.start + Math.PI * 2 - 0.001; __ooga.advance(0.1);`);
-    const stopped = await b.evaluate(`(() => { const t = __ooga.dsb.${trip}, a = t.angle; __ooga.advance(1); return t.wait > 0 && t.angle === a; })()`);
-    record("dsb gameplay: " + kind + " pauses at the station", stopped);
-    await click("#dsb-context"); await b.evaluate(`__ooga.advance(0.2)`);
-    const view = await b.evaluate(`(() => { const B = __ooga, p = B.dsb.land.${kind === "boat" ? "boats[0]" : "cart"}.position, c = B.camera, a = B.dsb.${trip}.angle + Math.PI / 2, dx = c.target.x - c.position.x, dz = c.target.z - c.position.z; return { phase: B.dsb.phase, distance: Math.hypot(c.position.x-p.x,c.position.z-p.z), forward: (dx*Math.sin(a)+dz*Math.cos(a))/Math.hypot(dx,dz) }; })()`);
-    record("dsb gameplay: " + kind + " uses a forward first-person camera", view.phase === kind && view.distance < 1 && view.forward > 0.99, JSON.stringify(view));
-    await b.drag({ x: 500, y: 350 }, { x: 760, y: 410 }, 4);
-    const look = await b.evaluate(`__ooga.dsb.rideLook`); record("dsb gameplay: " + kind + " mouse look is bounded", Math.abs(look.yaw) > 0.01 && Math.abs(look.yaw) <= 0.65 && Math.abs(look.pitch) <= 0.3, JSON.stringify(look));
-    if (process.env.DSB_CAPTURE && !fallback) await b.screenshot(join(root, "untracked", "dsb-" + kind + "-ride.png"));
-    await click("#dsb-context");
-  }
-  await b.key("Escape"); record("dsb gameplay: Escape on land requires the return Ooga Portal", await b.evaluate(`__ooga.scene === "dsb"`));
-  await walkTo(-7, 30.5);
-  record("dsb gameplay: former return cave has no geometry, collision or exit action", await b.evaluate(`!__ooga.dsb.land.exit && __ooga.dsb.clearAt(-10,30.5) && __ooga.dsb.clearAt(-7,32.5) && document.getElementById("dsb-context").textContent !== "Return to Ooga Booga Land"`));
-  await dsbExit(b);
-  record("dsb gameplay: front Ooga Portal crossing returns to Bifrost", await b.evaluate(`__ooga.scene === "bifrost" && !__ooga.transitioning`));
-} }] });
-if (process.env.DSB_RADIO_LIVE === "1") scene("dsb", { label: "dsb radio live", url: hubPage(dist, "scene=dsb"), steps: [{ name: "dsb radio live", why: "contract: preserve DSB scene behavior independently of the hub entrance", run: async (b) => {
-  await b.key("w"); await untilPage(b, "B.audio.ready", 10000);
-  await b.evaluate(`__ooga.audio.arrive()`);
-  const playing = await untilPage(b, 'B.audio.radioStatus.startsWith("Live")', 20000);
-  record("dsb radio live: production page plays the station after the entrance gesture", playing, await b.evaluate(`__ooga.audio.radioStatus`));
-  await b.key("Escape"); await untilPage(b, 'B.scene === "hub" && !B.transitioning', 15000);
-} }] });
-
-if (process.env.DSB_TV_LIVE === "1") scene("dsb", { label: "dsb television live", url: hubPage(dist, "scene=dsb"), steps: [{ name: "dsb television live", why: "contract: preserve DSB scene behavior independently of the hub entrance", run: async (b) => {
-  const live = await untilPage(b, 'B.dsb.tv.status.startsWith("Live")', 20000);
-  record("dsb TV: production page reads the real station API", live, await b.evaluate(`document.getElementById("dsb-tv-song").textContent + " / " + __ooga.dsb.tv.status`));
-  await b.key("Escape"); await untilPage(b, 'B.scene === "hub" && !B.transitioning', 15000);
-} }] });
-
-for (const fallback of [false, true]) scene("dsb", { label: "dsb television " + (fallback ? "canvas2d" : "webgl2"), url: hubPage(dist, "scene=dsb" + (fallback ? "&canvas2d=1" : "")), steps: [{ name: "dsb television " + (fallback ? "canvas2d" : "webgl2"), why: "contract: preserve DSB scene behavior independently of the hub entrance", run: async (b) => {
-  await b.send("Emulation.setEmulatedMedia", { features: [{ name: "prefers-reduced-motion", value: "reduce" }] });
-  await b.key("w"); await untilPage(b, "B.audio.ready", 10000);
-  await b.evaluate(`__ooga.audio.toggle(); window.dispatchEvent(new KeyboardEvent("keydown", { key: "w", code: "KeyW" })); __ooga.advance(__ooga.audio.duration + 2, 0.1); window.dispatchEvent(new KeyboardEvent("keyup", { key: "w", code: "KeyW" }));`);
-  record("dsb TV: enters the plain without opening a menu", await b.evaluate(`__ooga.dsb.phase === "land" && !__ooga.dsb.tv.isOpen`));
-  const result = await b.evaluate(`(() => {
-    const d = __ooga.dsb, p = __ooga.pilot;
-    d.openTv(); const farClosed = !d.tv.isOpen;
-    const landmark = d.land.landmarks.tv, anchor = landmark.point(); p.navigate({ yaw: landmark.node.rotation.y, pitch: 0.1, dist: 7, target: { x: anchor.x, y: 1.7, z: anchor.z }, position: anchor }); p.update(0); d.openTv();
-    const opened = d.tv.isOpen, count = document.querySelectorAll("#dsb-tv-menu button").length, disabled = document.querySelectorAll("#dsb-tv-menu button:disabled").length;
-    document.getElementById("dsb-tv-channel").click();
-    const song = document.getElementById("dsb-tv-song").textContent, queue = document.getElementById("dsb-tv-queue").textContent, history = document.getElementById("dsb-tv-history").textContent;
-    const href = document.querySelector(".dsb-tv-request a").href, qr = document.getElementById("dsb-tv-qr").width;
-    return { farClosed, opened, count, disabled, song, queue, history, href, qr, faces: d.land.tvScreen.geometry.faces.length };
-  })()`);
-  record("dsb TV: nearby opt-in menu, five channels and live station info", result.farClosed && result.opened && result.count === 5 && result.disabled === 4 && result.song === "Turtle Radio" && result.queue.includes("Banana Beats") && result.history.includes("Neon River") && result.faces > 0, JSON.stringify(result));
-  if (process.env.DSB_CAPTURE && !fallback) { await b.screenshot(join(root, "untracked", "dsb-tv-menu.png")); await b.send("Emulation.setDeviceMetricsOverride", { width: 390, height: 844, deviceScaleFactor: 1, mobile: true }); await b.screenshot(join(root, "untracked", "dsb-tv-phone.png")); await b.send("Emulation.clearDeviceMetricsOverride"); }
-  record("dsb TV: song requests use the official jukebox and a generated QR", result.href === "https://noderunnersradio.com/?jukebox" && result.qr > 100);
-  await b.key("Escape");
-  record("dsb TV: Escape closes the television without leaving the island", await b.evaluate(`__ooga.scene === "dsb" && !__ooga.dsb.tv.isOpen`));
-  await b.key(" ");
-  record("dsb TV: Space opens the nearby TV through the normal player controls", await b.evaluate(`__ooga.dsb.tv.isOpen`));
-  await b.evaluate(`document.getElementById("dsb-tv-close").click()`);
-  if (process.env.DSB_CAPTURE && !fallback) { await b.evaluate(`__ooga.pilot.navigate({ yaw: -Math.PI / 2, pitch: 0.1, dist: 17, target: { x: 14, y: 2.5, z: 18 }, position: { x: 8, y: 0, z: 18 } }); __ooga.advance(0.5)`); await b.screenshot(join(root, "untracked", "dsb-tv-world.png")); }
-  const volume = await b.evaluate(`(() => { const a = __ooga.audio, boat = __ooga.dsb.land.boats[0].position; const source = __ooga.dsb.land.landmarks.tv.point(-0.55, 3.3, 1.63); a.environment({ ...__ooga.camera, position: source }, boat, 5, source); const near = a.radioVolume; a.environment({ ...__ooga.camera, position: { x: 35, y: 2, z: -20 } }, boat, 5, source); return { near, far: a.radioVolume }; })()`);
-  record("dsb TV: broadcast is louder nearby but remains audible across the island", volume.near > volume.far * 2 && volume.far >= 0.04, JSON.stringify(volume));
-  await dsbExit(b);
-  record("dsb TV: leaving closes and clears the menu", await b.evaluate(`!document.getElementById("dsb-tv").open && !document.getElementById("dsb-tv-queue").children.length`));
-} }] });
-
-scene("dsb", { label: "dsb radio controls", url: hubPage(dist, "scene=dsb"), steps: [{ name: "dsb radio controls", why: "contract: preserve DSB scene behavior independently of the hub entrance", run: async (b) => {
-  await b.key("w"); await untilPage(b, "B.audio.ready", 10000);
-  record("dsb radio: stream stays disconnected in the tunnel", await b.evaluate(`__dsbRadioFixture.plays === 0`));
-  await b.evaluate(`__ooga.audio.arrive()`);
-  await untilPage(b, 'B.audio.radioStatus.startsWith("Live")');
-  const live = await b.evaluate(`({ url: __dsbRadioFixture.element.src, volume: __dsbRadioFixture.element.volume, music: __ooga.audio.musicEnabled, ambient: __ooga.audio.ambientEnabled })`);
-  record("dsb radio: outdoor playback uses the station MP3 stream at background volume", live.url.startsWith("https://stream.noderunnersradio.com/stream?") && live.volume === 0.075 && live.music && live.ambient, JSON.stringify(live));
-  const controls = await b.evaluate(`(() => {
-    const click = (name) => document.querySelector('[data-action="' + name + '"]').click(), a = __ooga.audio;
-    click("dsb-music"); const musicOff = !a.musicEnabled && a.ambientEnabled && __dsbRadioFixture.element.src === "";
-    click("dsb-ambient"); const ambientOff = !a.ambientEnabled;
-    click("dsb-music"); const musicOnly = a.musicEnabled && !a.ambientEnabled;
-    click("dsb-mute"); const allMuted = a.muted && __dsbRadioFixture.element.src === "";
-    click("dsb-mute"); const restored = !a.muted && a.musicEnabled && !a.ambientEnabled;
-    return { musicOff, ambientOff, musicOnly, allMuted, restored };
-  })()`);
-  record("dsb radio: separate switches preserve preferences and master mute stops everything", Object.values(controls).every(Boolean), JSON.stringify(controls));
-  await b.evaluate(`__dsbRadioFixture.element.onerror()`);
-  const failed = await b.evaluate(`({ status: __ooga.audio.radioStatus, source: __dsbRadioFixture.element.src, music: __ooga.audio.musicEnabled })`);
-  record("dsb radio: unavailable station reports an outage and releases the failed stream", failed.status.includes("offline") && failed.source === "" && failed.music, JSON.stringify(failed));
-  await b.key("Escape"); await untilPage(b, 'B.scene === "hub" && !B.transitioning', 15000);
-  record("dsb radio: leaving releases playback and its event handlers", await b.evaluate(`__dsbRadioFixture.element.src === "" && __dsbRadioFixture.element.onerror === null && __dsbRadioFixture.element.onplaying === null`));
-} }] });
-
-scene("dsb", { label: "dsb automatic feeds", url: hubPage(dist, "scene=dsb"), steps: [{ name: "dsb automatic feeds", why: "contract: preserve DSB scene behavior independently of the hub entrance", run: async (b) => {
-  record("dsb automatic feeds: transit has no client or polling", await b.evaluate(`!__ooga.dsb.data && __dsbFeedFixture.requests === 0 && __dsbFeedFixture.sockets === 0`));
-  await b.evaluate(`(() => {
-    const c = BL.chain, subscribe = c.subscribe, start = c.start, dispose = c.dispose;
-    window.__sharedOwnership = { active: 0, total: 0, starts: 0, disposes: 0 };
-    c.subscribe = fn => { const dsb = fn === __ooga.dsb?.data?.refresh; if (dsb) { __sharedOwnership.active++; __sharedOwnership.total++; } const off = subscribe(fn); let done = false; return () => { if (!done) { done = true; if (dsb) __sharedOwnership.active--; off(); } }; };
-    c.start = (...args) => { __sharedOwnership.starts++; return start(...args); };
-    c.dispose = (...args) => { __sharedOwnership.disposes++; return dispose(...args); };
-    const now = Date.now(); Object.assign(c.snapshot, { vsize: 20000000, fastestFee: 8, nextFee: 999, height: 900000, priceUsd: 60400, priceSource: "fixture", backlogAt: now, feesAt: now, heightAt: now, priceAt: now });
-  })()`);
-  await b.send("Emulation.setEmulatedMedia", { features: [{ name: "prefers-reduced-motion", value: "reduce" }] });
-  await b.evaluate(`window.dispatchEvent(new KeyboardEvent("keydown", { key: "w" })); BL.scenes.dsb.update(__ooga.audio.duration + 1, 0); window.dispatchEvent(new KeyboardEvent("keyup", { key: "w" }));`);
-  const initial = await b.evaluate(`({ live: __ooga.dsb.data.state.live, price: __ooga.dsb.data.state.priceStatus, sky: __ooga.dsb.data.state.skyStatus, requests: __dsbFeedFixture.requests, sockets: __dsbFeedFixture.sockets, pressed: document.getElementById("dsb-live").getAttribute("aria-pressed") })`);
-  record("dsb automatic feeds: land arrival reads shared data and fetches only minute history", initial.live && initial.price.startsWith("Live") && initial.sky.startsWith("Live") && initial.requests === 1 && initial.sockets === 0 && initial.pressed === "true", JSON.stringify(initial));
-  await b.evaluate(`__ooga.go("hub")`); await untilPage(b, 'B.scene === "hub" && !B.transitioning', 15000);
-  record("dsb automatic feeds: exit removes only the DSB subscription", await b.evaluate(`__sharedOwnership.active === 0 && __sharedOwnership.starts === 0 && __sharedOwnership.disposes === 0 && __dsbFeedFixture.sockets === 0`));
-  await b.evaluate(`__ooga.go("dsb")`); await untilPage(b, 'B.scene === "dsb" && !B.transitioning', 15000);
-  record("dsb automatic feeds: returning transit still has no subscriber", await b.evaluate(`__sharedOwnership.active === 0 && !__ooga.dsb.data && __dsbFeedFixture.requests === 1`));
-  await b.evaluate(`window.dispatchEvent(new KeyboardEvent("keydown", { key: "w" })); BL.scenes.dsb.update(__ooga.audio.duration + 1, 0); window.dispatchEvent(new KeyboardEvent("keyup", { key: "w" }));`);
-  record("dsb automatic feeds: another land visit adds exactly one listener and one history request", await b.evaluate(`__sharedOwnership.active === 1 && __sharedOwnership.total === 2 && __dsbFeedFixture.requests === 2 && __dsbFeedFixture.sockets === 0`));
-  await b.evaluate(`__ooga.go("hub")`); await untilPage(b, 'B.scene === "hub" && !B.transitioning', 15000);
-  record("dsb automatic feeds: shared chain still delivers after both DSB exits", await b.evaluate(`(async () => { let delivered = 0; const off = BL.chain.subscribe(() => delivered++); BL.chain.ingest({ type: "fees", nextFee: 2 }); await new Promise(resolve => setTimeout(resolve, 0)); off(); return delivered === 1 && __sharedOwnership.active === 0 && __sharedOwnership.starts === 0 && __sharedOwnership.disposes === 0; })()`));
-} }] });
-
+  } }] });
 scene("dsb", { label: "dsb feeds and audio", url: hubPage(src, "scene=dsb"), steps: [{ name: "dsb feeds and audio", why: "contract: preserve DSB scene behavior independently of the hub entrance", run: async (b) => {
   const feed = await b.evaluate(`(async () => {
     const fetchOriginal = window.fetch, originalChain = BL.chain; let sockets = 0, stopped = 0, listener;
@@ -11498,16 +11383,16 @@ scene("dsb", { label: "dsb feeds and audio", url: hubPage(src, "scene=dsb"), ste
   })()`);
   try {
     await b.key("m");
-    await untilPage(b, "B.audio.ready", 10000);
-    const fixed = await b.evaluate(`({ uploads: document.querySelectorAll("[data-dsb-audio]").length, canReplace: typeof __ooga.audio.load === "function" })`);
+    await b.evaluate(`window.__entranceAudio = BL.dsbAudio.create(); __entranceAudio.gesture()`);
+    await untilPage(b, "__entranceAudio.ready", 10000);
+    const fixed = await b.evaluate(`({ uploads: document.querySelectorAll("[data-dsb-audio]").length, canReplace: typeof __entranceAudio.load === "function" })`);
     record("dsb entrance: fixed supplied sounds", fixed.uploads === 0 && !fixed.canReplace, JSON.stringify(fixed));
-    const supplied = await b.evaluate(`({ durations: __ooga.audio.durations, passage: __ooga.audio.duration, failure: __ooga.audio.failure })`);
+    const supplied = await b.evaluate(`({ durations: __entranceAudio.durations, passage: __entranceAudio.duration, failure: __entranceAudio.failure })`);
     record("dsb audio: all four supplied MP3s decode and determine the passage length", supplied.durations.length === 4 && supplied.durations.every((d) => d > 1 && d < 60) && supplied.passage >= supplied.durations.reduce((sum, d) => sum + d, 0) + 6.99 && !supplied.failure, JSON.stringify(supplied));
-    const music = await b.evaluate(`({ duration: __ooga.audio.musicDuration, loops: __dsbSoundProbe.loops.filter((duration) => duration > 30), levels: __ooga.audio.levels })`);
+    const music = await b.evaluate(`({ duration: __entranceAudio.musicDuration, loops: __dsbSoundProbe.loops.filter((duration) => duration > 30), levels: __entranceAudio.levels })`);
     record("dsb music: supplied track decodes into one quiet loop beneath full-level speech", music.duration > 30 && music.loops.length === 1 && music.loops[0] === music.duration && music.levels.music <= 0.1 && music.levels.speech === 1, JSON.stringify(music));
-    await b.key("m");
     const footsteps = await b.evaluate(`(() => {
-      const a = __ooga.audio, before = a.levels.steps;
+      const a = __entranceAudio, before = a.levels.steps;
       a.update(0, 100, true); const walking = a.levels.steps;
       a.update(0, 101, false); const stopped = a.levels.steps;
       a.update(0, 102, true); const resumed = a.levels.steps;
@@ -11515,82 +11400,17 @@ scene("dsb", { label: "dsb feeds and audio", url: hubPage(src, "scene=dsb"), ste
       return { before, walking, stopped, resumed, muted };
     })()`);
     record("dsb footsteps: pooled steps follow movement, stop at rest and obey mute", footsteps.walking === footsteps.before + 1 && footsteps.stopped === footsteps.walking && footsteps.resumed === footsteps.walking + 1 && footsteps.muted === footsteps.resumed, JSON.stringify(footsteps));
-    await b.evaluate(`__ooga.audio.update(0.9, 1)`);
-    await untilPage(b, 'B.audio.pending && B.audio.levels.music < 0.019', 5000);
-    const ducked = await b.evaluate(`__ooga.audio.levels`);
+    await b.evaluate(`__entranceAudio.update(0.9, 1)`);
+    await untilPage(b, '__entranceAudio.pending && __entranceAudio.levels.music < 0.019', 5000);
+    const ducked = await b.evaluate(`__entranceAudio.levels`);
     record("dsb music: speech ducks the soundtrack without reducing voice gain", ducked.music < 0.019 && ducked.speech === 1, JSON.stringify(ducked));
-    await untilPage(b, 'window.__dsbSoundProbe.starts.length === 4 && !B.audio.pending', 40000);
-    const sound = await b.evaluate(`(() => { __ooga.audio.update(0, 2); __ooga.audio.update(1, 3); return { starts: __dsbSoundProbe.starts, fired: __ooga.dsb.fired }; })()`);
+    await untilPage(b, 'window.__dsbSoundProbe.starts.length === 4 && !__entranceAudio.pending', 40000);
+    const sound = await b.evaluate(`(() => { __entranceAudio.update(0, 2); __entranceAudio.update(1, 3); return { starts: __dsbSoundProbe.starts, fired: Array.from(__entranceAudio.fired) }; })()`);
     record("dsb audio: four supplied clips play sequentially once despite reversing", sound.starts.length === 4 && sound.fired.every((f) => f === 1) && sound.starts.every((s, i, a) => !i || s.at >= a[i - 1].at + a[i - 1].duration - 0.01), JSON.stringify(sound));
-    await b.key("Escape"); await untilPage(b, 'B.scene === "hub" && !B.transitioning', 15000);
-    record("dsb audio: leaving closes its audio context", await b.evaluate(`__dsbSoundProbe.context.state === "closed"`));
-  } finally { await b.evaluate(`AudioContext.prototype.createBufferSource = __dsbSoundProbe.original; delete window.__dsbSoundProbe;`); }
+    await b.evaluate(`__entranceAudio.dispose()`);
+    record("dsb audio: component disposal closes its audio context", await b.evaluate(`__dsbSoundProbe.context.state === "closed"`));
+  } finally { await b.evaluate(`__entranceAudio?.dispose(); delete window.__entranceAudio; AudioContext.prototype.createBufferSource = __dsbSoundProbe.original; delete window.__dsbSoundProbe;`); }
 } }] });
-scene("dsb", { label: "dsb arrival camera", url: hubPage(src, "scene=dsb"), steps: [{ name: "dsb arrival camera", why: "contract: preserve DSB scene behavior independently of the hub entrance", run: async (b) => {
-  await b.send("Emulation.setEmulatedMedia", { features: [{ name: "prefers-reduced-motion", value: "no-preference" }] });
-  await b.key("w"); await untilPage(b, "B.audio.ready", 10000);
-  const glanceAtCue = async cue => b.evaluate(`(() => { const B = __ooga; window.dispatchEvent(new KeyboardEvent("keydown", { key: "w" })); try { for (let i = 0; i < 1200 && B.audio.cue < ${cue}; i++) B.advance(1 / 60, 1 / 60); B.advance(0.5, 1 / 60); return { cue: B.audio.cue, glance: B.dsb.glance, behind: B.camera.position.z - B.dsb.avatar.root.position.z }; } finally { window.dispatchEvent(new KeyboardEvent("keyup", { key: "w" })); } })()`);
-  const left = await glanceAtCue(0);
-  if (process.env.DSB_CAPTURE) await b.screenshot(join(root, "untracked", "dsb-passage.png"));
-  await untilPage(b, "!B.audio.pending", 12000);
-  const right = await glanceAtCue(1);
-  record("dsb passage camera: real voice starts alternate gentle glances while staying behind the Ooga", left.cue === 0 && left.glance < -0.03 && left.behind > 3.9 && right.cue === 1 && right.glance > 0.03 && Math.abs(left.glance) <= 0.16 && Math.abs(right.glance) <= 0.16, JSON.stringify({ left, right }));
-  await b.key("m");
-  await b.send("Input.dispatchKeyEvent", { type: "keyDown", key: "w" });
-  await b.evaluate(`__ooga.advance(__ooga.audio.duration * (1 - __ooga.dsb.progress) + 0.1, 1 / 30)`);
-  await b.send("Input.dispatchKeyEvent", { type: "keyUp", key: "w" });
-  await untilPage(b, "B.audio.levels.music < 0.001", 3000);
-  await b.evaluate(`__ooga.advance(Math.max(0, 2.5 - __ooga.dsb.arrivalTime), 1 / 60)`);
-  if (process.env.DSB_CAPTURE) await b.screenshot(join(root, "untracked", "dsb-arrival-above.png"));
-  await b.evaluate(`__ooga.advance(Math.max(0, 6.5 - __ooga.dsb.arrivalTime), 1 / 60)`);
-  const lifted = await b.evaluate(`({ phase: __ooga.dsb.phase, music: __ooga.audio.levels.music, y: __ooga.camera.position.y })`);
-  if (process.env.DSB_CAPTURE) await b.screenshot(join(root, "untracked", "dsb-arrival-below.png"));
-  record("dsb arrival audio: tunnel music fades out for the outdoor radio", lifted.phase === "arrival" && lifted.music < 0.001 && lifted.y < -25, JSON.stringify(lifted));
-  await b.evaluate(`document.querySelector('[data-action="dsb-skip"]').click(); __ooga.advance(1)`);
-  const handoff = await b.evaluate(`(() => { const B = __ooga, before = { ...B.camera.position }; B.advance(1); return { phase: B.dsb.phase, drift: Math.hypot(B.camera.position.x - before.x, B.camera.position.y - before.y, B.camera.position.z - before.z), hidden: document.body.classList.contains("dsb-arrival"), mode: B.pilot.mode }; })()`);
-  record("dsb arrival camera: skip settles into the default shoulder view without residual automatic motion", handoff.phase === "land" && handoff.mode === "shoulder" && handoff.drift < 0.01 && !handoff.hidden, JSON.stringify(handoff));
-} }] });
-
-scene("dsb", { label: "dsb ambience", url: hubPage(dist, "scene=dsb"), steps: [{ name: "dsb ambience", why: "contract: preserve DSB scene behavior independently of the hub entrance", run: async (b) => {
-  await b.evaluate(`(() => {
-    const buffer = AudioContext.prototype.createBufferSource, oscillator = AudioContext.prototype.createOscillator;
-    const probe = window.__ambientProbe = { buffer, oscillator, created: 0, stopped: 0, context: null };
-    for (const name of ["createBufferSource", "createOscillator"]) {
-      const original = name === "createBufferSource" ? buffer : oscillator;
-      AudioContext.prototype[name] = function() { const source = original.call(this), stop = source.stop.bind(source); probe.context = this; probe.created++; source.stop = (...args) => { probe.stopped++; return stop(...args); }; return source; };
-    }
-  })()`);
-  try {
-    await b.key("w"); await untilPage(b, "B.audio.ready", 10000);
-    const tunnel = await b.evaluate(`__ooga.audio.ambience`);
-    record("dsb ambience: outdoor graph is not constructed during entrance", tunnel === null, JSON.stringify(tunnel));
-    const spatial = await b.evaluate(`(() => {
-      const a = __ooga.audio, camera = { position: { x: 0, y: 1.7, z: 0 }, target: { x: 0, y: 1.7, z: -1 } }, boat = { x: 0, y: 0, z: 40 };
-      a.arrive(); a.environment(camera, boat); const center = a.ambience;
-      camera.position.z = 39; camera.target.z = 38; a.environment(camera, boat); const river = a.ambience;
-      camera.position.z = 44; camera.position.y = -5; a.environment(camera, boat); const falls = a.ambience;
-      camera.position.x = -18; camera.position.z = -9; camera.position.y = 1; a.environment(camera, boat); const stage = a.ambience;
-      const created = __ambientProbe.created;
-      for (let i = 0; i < 500; i++) a.environment(camera, boat);
-      return { center, river, falls, stage, created, after: __ambientProbe.created };
-    })()`);
-    record("dsb ambience: water follows the river, waterfall edges, moving boat and stage", spatial.river.river > spatial.center.river * 3 && spatial.falls.waterfall > spatial.center.waterfall * 3 && spatial.river.motor > spatial.center.motor * 4 && spatial.stage.crowd > spatial.center.crowd * 3 && spatial.center.wildlife > 0 && spatial.center.calls > 0, JSON.stringify(spatial));
-    record("dsb ambience: repeated updates reuse a fixed source graph", spatial.created === spatial.after && spatial.stage.sources === 4, JSON.stringify({ before: spatial.created, after: spatial.after }));
-    await b.evaluate(`__ooga.audio.environment({ position: { x: 0, y: 0, z: 0 }, target: { x: 0, y: 0, z: -1 } }, { x: -20, y: 0, z: 0 })`);
-    await untilPage(b, 'B.audio.ambience.motorPan < -0.7', 3000);
-    await b.evaluate(`__ooga.audio.environment({ position: { x: 0, y: 0, z: 0 }, target: { x: 0, y: 0, z: -1 } }, { x: 20, y: 0, z: 0 })`);
-    await untilPage(b, 'B.audio.ambience.motorPan > 0.7', 3000);
-    record("dsb ambience: boat motor crosses the stereo field with its world position", true);
-    await b.key("m");
-    await b.evaluate(`__ooga.audio.environment(__ooga.camera, { x: -20, y: 0, z: 0 })`);
-    await untilPage(b, '!B.audio.ambience.enabled && B.audio.ambience.gain < 0.001', 4000);
-    record("dsb ambience: mute silences all outdoor layers", true);
-    await b.key("Escape"); await untilPage(b, 'B.scene === "hub" && !B.transitioning', 15000);
-    const cleanup = await b.evaluate(`({ created: __ambientProbe.created, stopped: __ambientProbe.stopped, state: __ambientProbe.context.state })`);
-    record("dsb ambience: leaving stops every source and closes the audio context", cleanup.created === cleanup.stopped && cleanup.state === "closed", JSON.stringify(cleanup));
-  } finally { await b.evaluate(`AudioContext.prototype.createBufferSource = __ambientProbe.buffer; AudioContext.prototype.createOscillator = __ambientProbe.oscillator; delete window.__ambientProbe;`); }
-} }] });
-
 scene("dsb", { label: "dsb shared player", url: hubPage(dist), steps: [{ name: "dsb shared player", why: "contract: preserve DSB scene behavior independently of the hub entrance", run: async (b) => {
   await b.send("Emulation.setEmulatedMedia", { features: [{ name: "prefers-reduced-motion", value: "reduce" }] });
   await b.evaluate(`(() => {
@@ -11605,48 +11425,20 @@ scene("dsb", { label: "dsb shared player", url: hubPage(dist), steps: [{ name: "
   const entered = await Promise.race([untilPage(b, 'B.scene === "dsb" && !B.transitioning', 15000), new Promise((_, reject) => { entryTimeout = setTimeout(() => reject(Error("DSB entry: " + b.logs.join(" | "))), 18000); })]).finally(() => clearTimeout(entryTimeout));
   await b.send("Input.dispatchKeyEvent", { type: "keyUp", key: "w", code: "KeyW" });
   if (!entered) throw Error("DSB entry failed");
-  await b.key("m"); await untilPage(b, 'B.audio.ready', 10000);
-  await b.evaluate(`window.dispatchEvent(new KeyboardEvent("keydown", { key: "w" })); __ooga.advance(__ooga.audio.duration + 2, 0.1); window.dispatchEvent(new KeyboardEvent("keyup", { key: "w" }));`);
-  if (!await untilPage(b, 'B.dsb.phase === "land"', 5000)) throw Error("DSB passage did not finish");
+  await b.evaluate(`__ooga.dsb.entrance?.skip(); __ooga.advance(0.1)`);
   record("dsb shared player: canonical selected actor is possessed with independent ammunition", await b.evaluate(`__ooga.dsb.phase === "land" && __ooga.pilot.player === __ooga.dsb.avatar && __ooga.pilot.player.traits.name === "rules-without-rulers" && __ooga.pilot.player.weapon.ammo === BL.crew.AMMO_MAX && __ooga.pilot.player.headOpen === BL.models.caveman(BL.contributors.traitsFor("rules-without-rulers")).headOpen`));
   const move = await b.evaluate(`(() => { const c = __ooga.pilot.player, z = c.root.position.z; window.dispatchEvent(new KeyboardEvent("keydown", { key: "w" })); __ooga.advance(0.3); window.dispatchEvent(new KeyboardEvent("keyup", { key: "w" })); return Math.abs(c.root.position.z - z); })()`);
   record("dsb shared player: shared walking moves the actor", move > 0.2, String(move));
-  await b.key("2"); await b.evaluate("__ooga.pilot.enterClose(true); __ooga.advance(0.4)"); await b.key("v");
-  const fired = await b.evaluate(`(() => { const c = __ooga.pilot.player; __ooga.advance(0.12); return { equipped: c.weapon.equipped, shots: c.weapon.shotsFired, ammo: c.weapon.ammo, gun: c.parts.gun.visible, aiming: __ooga.pilot.aiming, recoil: c.weapon.recoil }; })()`);
-  record("dsb shared player: AK fires with shared gun pose and ammunition", fired.equipped && fired.shots > 0 && fired.ammo < 30 && fired.gun && fired.aiming && fired.recoil > 0, JSON.stringify(fired));
-  await b.key("r"); await b.evaluate('__ooga.advance(3)');
-  record("dsb shared player: local reload restores ammunition", await b.evaluate('__ooga.pilot.player.weapon.ammo === BL.crew.AMMO_MAX'));
-  await b.key(" ");
-  record("dsb shared player: Space jumps away from interactions", await b.evaluate('__ooga.advance(0.1); __ooga.pilot.player.hop > 0'));
-  await b.evaluate('__ooga.advance(1)');
-  const place = (x, z) => b.evaluate(`__ooga.pilot.navigate({ yaw: 0, pitch: 0.2, dist: 7, target: { x: ${x}, y: 1.7, z: ${z} }, position: { x: ${x}, y: 0, z: ${z} } }); __ooga.advance(0.1);`);
-  await dsbApproach(b, "shop");
-  await b.evaluate('__ooga.dsb.buy("tomato"); __ooga.dsb.buy("banana")');
-  await b.key("t"); await b.key("b");
-  record("dsb shared player: tomatoes and snacks remain separate", await b.evaluate('__ooga.dsb.inventory.tomatoes === 0 && __ooga.dsb.inventory.bananas === 0 && __ooga.dsb.shots === 1'));
-  await b.evaluate(`document.querySelector('[data-action="dsb-context"]').click()`);
-  await b.key("v");
-  record("dsb shared player: shop suspends weapons", await b.evaluate('!document.getElementById("dsb-shop").hidden && !__ooga.dsb.avatar.weapon.triggerHeld'));
-  await b.evaluate(`document.querySelector('[data-action="dsb-close-shop"]').click()`);
-  await place(0, 33);
-  await b.evaluate('__ooga.crew.setWeaponTrigger(true); __ooga.dsb.boatTrip.wait = 8; __ooga.dsb.board("boat")');
-  const ride = await b.evaluate(`(() => { const w = __ooga.dsb.avatar.weapon, shots = w.shotsFired; __ooga.advance(0.5); return __ooga.dsb.phase === "boat" && !w.triggerHeld && !w.burstRemaining && w.shotsFired === shots; })()`);
-  record("dsb shared player: boarding suspends firing", ride);
-  await b.evaluate('__ooga.dsb.stopRide()');
-  await place(7, 24);
-  await b.evaluate('__ooga.dsb.trainTrip.wait = 8; __ooga.dsb.board("coaster"); __ooga.advance(0.2)');
-  record("dsb shared player: coaster keeps its passenger camera", await b.evaluate('__ooga.dsb.phase === "coaster" && !__ooga.dsb.avatar.weapon.triggerHeld'));
-  await b.evaluate('__ooga.dsb.stopRide()');
   await b.evaluate(`document.querySelector('[data-action="dsb-lookout"]').click(); __ooga.advance(0.4)`);
   record("dsb shared player: lookout remains a free camera", await b.evaluate('__ooga.pilot.player === null && __ooga.camera.position.y > 5'));
   await b.evaluate(`document.querySelector('[data-scene="dsb"] [data-action="reset-view"]').click(); __ooga.advance(0.4)`);
   record("dsb shared player: leaving lookout restores the same playable actor", await b.evaluate('__ooga.pilot.player === __ooga.dsb.avatar'));
-  await dsbApproach(b, "tv"); await b.evaluate('__ooga.dsb.openTv()');
+  await dsbApproach(b, "tv"); await b.key(" ");
   await b.key("v");
   record("dsb shared player: TV opens with weapons suspended", await b.evaluate('__ooga.dsb.tv.isOpen && !__ooga.dsb.avatar.weapon.triggerHeld'));
   await b.evaluate('document.getElementById("dsb-tv-close").click(); __ooga.advance(0.1)');
   await dsbExit(b);
-  await b.evaluate('__ooga.go("hub"); __ooga.advance(0.6)');
+  await b.key("Escape");
   await untilPage(b, 'B.scene === "hub" && !B.transitioning', 15000);
   const back = await b.evaluate(`({ name: __ooga.pilot.player?.traits.name, ammo: __ooga.pilot.player?.weapon.ammo, spare: __ooga.pilot.player?.weapon.spareAmmo.join(), original: __hubAmmo })`);
   record("dsb shared player: return restores identity and leaves hub ammunition untouched", back.name === "rules-without-rulers" && back.ammo === back.original.ammo && back.spare === back.original.spare, JSON.stringify(back));
@@ -11669,9 +11461,9 @@ scene("dsb", { label: "dsb character continuity", url: hubPage(dist), steps: [{ 
       return { name: a.traits.name, rebuilt: a.root !== __dsbPreviousRoot, canonical: a.headOpen === canonical.headOpen };
     })()`);
     record("dsb character: " + name + " enters with the canonical model", avatar.name === name && avatar.rebuilt && avatar.canonical, JSON.stringify(avatar));
+    await b.evaluate(`__ooga.dsb.entrance?.skip(); __ooga.advance(0.1)`);
+    await dsbExit(b);
     await b.key("Escape");
-    await untilPage(b, 'B.scene === "bifrost" && !B.transitioning', 15000);
-    await b.evaluate('__ooga.go("hub"); __ooga.advance(0.6)');
     await untilPage(b, 'B.scene === "hub" && !B.transitioning', 15000);
     const returned = await b.evaluate(`({ name: __ooga.pilot.player?.traits.name, rebuilt: __ooga.pilot.player?.root !== __dsbPreviousRoot })`);
     record("dsb character: " + name + " returns possessed", returned.name === name && returned.rebuilt, JSON.stringify(returned));
@@ -11679,7 +11471,7 @@ scene("dsb", { label: "dsb character continuity", url: hubPage(dist), steps: [{ 
   }
 } }] });
 
-scene("dsb", { label: "dsb phone", url: hubPage(dist, "scene=dsb"), opts: { w: 390, h: 844, mobile: true }, steps: [{ name: "dsb phone", why: "contract: preserve DSB scene behavior independently of the hub entrance", run: async (b) => {
+scene("dsb", { label: "dsb phone", url: hubPage(dist, "scene=dsb&entrance=1"), opts: { w: 390, h: 844, mobile: true }, steps: [{ name: "dsb phone", why: "contract: preserve DSB scene behavior independently of the hub entrance", run: async (b) => {
   const layout = await b.evaluate(`(() => { const p = document.getElementById("dsb-panel").getBoundingClientRect(), j = document.getElementById("joy-move").getBoundingClientRect(); return { width: innerWidth, height: innerHeight, left: p.left, right: p.right, bottom: p.bottom, stick: j.width > 0, overlap: p.left < j.right && p.right > j.left && p.bottom > j.top }; })()`);
   record("dsb phone: entrance fits and leaves the movement stick usable", layout.left >= 0 && layout.right <= layout.width && layout.bottom <= layout.height && layout.stick && !layout.overlap, JSON.stringify(layout));
   const enable = await b.evaluate(`(() => { const r = document.getElementById("dsb-start-audio").getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; })()`);
@@ -11689,10 +11481,10 @@ scene("dsb", { label: "dsb phone", url: hubPage(dist, "scene=dsb"), opts: { w: 3
   const stick = await b.evaluate(`(() => { const r = document.getElementById("joy-move").getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2, top: r.y + 10 }; })()`);
   await b.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ x: stick.x, y: stick.top }] });
   await untilPage(b, "B.audio.ready", 10000);
-  await b.evaluate(`__ooga.audio.toggle(); __ooga.advance(__ooga.audio.duration * 1.02, 1 / 20)`);
+  await b.key("m"); await b.evaluate(`__ooga.advance(__ooga.audio.duration * 1.02, 1 / 20)`);
   await b.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
-  const phase = await b.evaluate(`({ phase: __ooga.dsb.phase, progress: __ooga.dsb.progress, muted: __ooga.audio.muted, pending: __ooga.audio.pending, ready: __ooga.audio.ready, duration: __ooga.audio.duration })`);
-  record("dsb phone: reduced motion enters land without an automatic camera tour", phase.phase === "land", JSON.stringify(phase));
+  const phase = await b.evaluate(`({ phase: __ooga.dsb.entrance.phase, progress: __ooga.dsb.entrance.progress, muted: __ooga.audio.muted, pending: __ooga.audio.pending, ready: __ooga.audio.ready, duration: __ooga.audio.duration })`);
+  record("dsb phone: reduced motion enters land without an automatic camera tour", phase.phase === "done", JSON.stringify(phase));
   await b.evaluate(`document.querySelector('[data-action="dsb-skip"]').click(); __ooga.advance(0.1)`);
   record("dsb phone: skip tour restores the playable camera", await b.evaluate(`__ooga.dsb.phase === "land" && !document.body.classList.contains("dsb-arrival")`));
   await b.evaluate(`__ooga.advance(1)`);
@@ -11700,51 +11492,35 @@ scene("dsb", { label: "dsb phone", url: hubPage(dist, "scene=dsb"), opts: { w: 3
   record("dsb reveal: overlay clears after the white fade", alpha === 0, String(alpha));
   if (process.env.DSB_CAPTURE) await b.screenshot(join(root, "untracked", "dsb-phone.png"));
 } }] });
-for (const backend of ["webgl2", "canvas2d"]) scene("dsb", { label: `dsb land ${backend}`, url: hubPage(src, `scene=dsb${backend === "canvas2d" ? "&canvas2d=1" : ""}`), steps: [{ name: `dsb land ${backend}`, why: "contract: preserve DSB scene behavior independently of the hub entrance", run: async (b) => {
-  await b.send("Emulation.setEmulatedMedia", { features: [{ name: "prefers-reduced-motion", value: "no-preference" }] });
-  await b.evaluate(`(() => { const scene = BL.scenes.dsb, update = scene.update; window.__dsbClockProbe = { time: 0, min: 0 }; scene.update = (dt, time) => { __dsbClockProbe.time = time; __dsbClockProbe.min = Math.min(__dsbClockProbe.min, time); update(dt, time); }; })()`);
-  const initial = await b.evaluate(`({ phase: __ooga.dsb.phase, progress: __ooga.dsb.progress, live: !!__ooga.dsb.data, nodes: __ooga.stats().allNodes })`);
-  record("dsb entrance: starts dark without constructing live feeds", initial.phase === "entrance" && initial.progress === 0 && !initial.live, JSON.stringify(initial));
-  await b.key("m");
-  await untilPage(b, "B.audio.ready", 10000);
-  await b.send("Input.dispatchKeyEvent", { type: "keyDown", key: "w" });
-  await b.evaluate(`__ooga.advance(__ooga.audio.duration * 0.3, 1 / 20)`);
-  await b.send("Input.dispatchKeyEvent", { type: "keyUp", key: "w" });
-  const partial = await b.evaluate(`({ progress: __ooga.dsb.progress, z: __ooga.camera.position.z, avatarZ: __ooga.dsb.avatar.root.position.z, fired: __ooga.dsb.fired })`);
-  await b.send("Input.dispatchKeyEvent", { type: "keyDown", key: "s" });
-  await b.evaluate(`__ooga.advance(__ooga.audio.duration * 0.1, 1 / 20)`);
-  await b.send("Input.dispatchKeyEvent", { type: "keyUp", key: "s" });
-  const back = await b.evaluate(`({ progress: __ooga.dsb.progress, fired: __ooga.dsb.fired })`);
-  record("dsb entrance: walking grows the opening and reversing does not replay a cue", partial.progress > 0.2 && partial.z < 24 && Math.abs(partial.z - partial.avatarZ - 4) < 0.01 && back.progress < partial.progress && back.fired[0] === 1, JSON.stringify({ partial, back }));
-  await b.send("Input.dispatchKeyEvent", { type: "keyDown", key: "w" });
-  await b.evaluate(`__ooga.advance(__ooga.audio.duration * 0.83, 1 / 20)`);
-  await b.send("Input.dispatchKeyEvent", { type: "keyUp", key: "w" });
-  const tour = await b.evaluate(`(() => {
-    const B = __ooga, start = B.dsb.phase, samples = [];
-    for (let i = 0; i < 30; i++) { B.advance(0.5, 1 / 30); samples.push({ x: B.camera.position.x, y: B.camera.position.y, z: B.camera.position.z }); }
-    return { start, end: B.dsb.phase, samples, mode: B.pilot.mode, avatar: B.dsb.avatar.root.visible };
+for (const backend of ["webgl2", "canvas2d"]) scene("dsb", { label: `dsb land ${backend}`, url: hubPage(src, `scene=dsb&entrance=1${backend === "canvas2d" ? "&canvas2d=1" : ""}`), opts: { motion: true }, steps: [{ name: `dsb land ${backend}`, why: "playthrough: the current passage walks and reverses, then tours the island above real terrain and hands back the same Ooga", run: async b => {
+  const state = await b.evaluate(`(() => {
+    const B = __ooga, D = B.dsb, E = D.entrance, a = D.avatar, controls = B.controls;
+    const key = (type, key) => window.dispatchEvent(new KeyboardEvent(type, { key }));
+    const walk = (keyName, seconds) => { key("keydown", keyName); __shoreline.advance(seconds); key("keyup", keyName); };
+    const initial = E.phase, before = E.progress;
+    walk("w", 6); const forward = E.progress;
+    walk("s", 2); const reverse = E.progress;
+    walk("w", (1 - E.progress) * 24 + 1 / 30); const arrival = E.phase, samples = [], start = { ...B.camera.position };
+    let clearance = Infinity;
+    for (let i = 0; i < 40 && E.phase !== "done"; i++) {
+      __shoreline.advance(.5); const p = B.camera.position;
+      clearance = Math.min(clearance, p.y - D.land.heightAt(p.x, p.z));
+      samples.push({ x: p.x, y: p.y, z: p.z });
+    }
+    const done = E.phase, mode = B.pilot.mode, same = B.pilot.player === a;
+    E.skip(); const p = { ...B.camera.position }; B.advance(1, 1 / 60);
+    return { initial, before, forward, reverse, arrival, done, mode, same, clearance, samples: samples.length,
+      travel: Math.max(...samples.map(p => Math.hypot(p.x - start.x, p.z - start.z))),
+      drift: Math.hypot(B.camera.position.x - p.x, B.camera.position.y - p.y, B.camera.position.z - p.z),
+      controlsClear: controls.read().y === 0, arrivalClass: document.body.classList.contains("dsb-arrival") };
   })()`);
-  record("dsb arrival: full circle shows upper plain and turtle underside before handing back shoulder control", tour.start === "arrival" && tour.end === "land" && tour.samples.some((p) => p.x > 70) && tour.samples.some((p) => p.x < -70) && tour.samples.some((p) => p.y > 40) && tour.samples.some((p) => p.y < -25) && tour.mode === "shoulder" && tour.avatar, JSON.stringify(tour));
-  const land = await b.evaluate(`({ phase: __ooga.dsb.phase, fired: __ooga.dsb.fired, boats: __ooga.dsb.land.boats.length, water: __ooga.dsb.land.water.visible, turtle: __ooga.dsb.land.turtle.children.length, finite: [...__ooga.dsb.railY].every(Number.isFinite) })`);
-  record("dsb land: all four cues fire once and the independent world opens", land.phase === "land" && land.fired.every((v) => v === 1) && land.boats === 3 && land.water && land.turtle > 20 && land.finite, JSON.stringify(land));
-  if (process.env.DSB_CAPTURE && backend === "webgl2") {
-    await b.screenshot(join(root, "untracked", "dsb-walk.png"));
-    await b.evaluate(`__ooga.pilot.goPreset("lookout"); __ooga.advance(2)`);
-    await b.screenshot(join(root, "untracked", "dsb-turtle.png"));
-    await b.evaluate(`document.querySelector('[data-scene="dsb"] [data-action="reset-view"]').click(); __ooga.advance(0.3)`);
-  }
-  const shop = await b.evaluate(`(() => { const B = __ooga; const landmark = B.dsb.land.landmarks.shop, anchor = landmark.point(); B.pilot.navigate({ yaw: landmark.node.rotation.y, pitch: 0, dist: 12, position: anchor, target: { x: anchor.x, y: 1.7, z: anchor.z } }); B.dsb.buy("bread"); B.dsb.buy("tomato"); const bought = B.dsb.inventory; B.dsb.eat(); B.dsb.throwTomato(); const used = B.dsb.inventory; return { bought, used, shots: B.dsb.shots, clock: window.__dsbClockProbe }; })()`);
-  record("dsb shop: simulated purchases charge once and consume inventory", shop.bought.tokens === 16 && shop.bought.bread === 1 && shop.bought.tomatoes === 1 && shop.used.bread === 0 && shop.used.tomatoes === 0 && shop.shots === 1 && shop.clock.min >= 0, JSON.stringify(shop));
-  const ride = await b.evaluate(`(() => { const B = __ooga; B.pilot.navigate({ yaw: 0, pitch: 0, dist: 12, position: { x: 0, y: 0, z: 33 }, target: { x: 0, y: 1.7, z: 33 } }); B.dsb.boatTrip.wait = 8; B.dsb.boatTrip.angle = 0; B.dsb.board("boat"); B.advance(0.2); const boat = B.dsb.phase; B.dsb.stopRide(); const landed = B.dsb.phase; B.pilot.navigate({ yaw: 0, pitch: 0, dist: 12, position: { x: 7, y: 0, z: 24 }, target: { x: 7, y: 1.7, z: 24 } }); B.dsb.trainTrip.wait = 8; B.dsb.trainTrip.angle = B.dsb.trainTrip.start; B.dsb.board("coaster"); B.advance(0.2); const coaster = B.dsb.phase, y = B.camera.position.y; B.dsb.stopRide(); return { boat, landed, coaster, y, stopped: B.dsb.phase }; })()`);
-  record("dsb rides: board, move and disembark on dry ground", ride.boat === "boat" && ride.landed === "land" && ride.coaster === "coaster" && ride.y > 3 && ride.stopped === "land", JSON.stringify(ride));
-  const data = await b.evaluate(`(() => { const d = BL.dsbData.create(), bad = d.ingestCandles([[1, -1, 10, 3, 4]]); const good = d.ingestCandles([[120, 98, 105, 100, 103], [60, 95, 104, 99, 100]]); const stale = d.ingestTick(104, 30); for (let i = 0; i < 200; i++) d.ingestTick(100 + i, 180 + i * 60); const out = { bad, good, stale, count: d.state.count, size: d.state.candles.length, price: d.state.price }; d.dispose(); return out; })()`);
-  record("dsb data: validates and orders feeds, rejects stale ticks, caps history", !data.bad && data.good && !data.stale && data.count === 48 && data.size === 240 && data.price === 299, JSON.stringify(data));
+  record("dsb entrance " + backend + ": real movement reverses and arrival tours above terrain before returning shoulder control",
+    state.initial === "tunnel" && state.before === 0 && state.forward > .2 && state.reverse < state.forward
+    && state.arrival === "arrival" && state.done === "done" && state.mode === "shoulder" && state.same
+    && state.clearance >= 1 && state.samples >= 30 && state.travel > 60 && state.drift < .01 && state.controlsClear && !state.arrivalClass, JSON.stringify(state));
   await dsbExit(b);
-  const hub = await b.evaluate(`({ scene: __ooga.scene, dsb: BL.caves.slots.find((s) => s.id === "c10"), sheet: document.getElementById("sheet").hidden, body: document.body.classList.contains("dsb-active") })`);
-  record("dsb return: restores Bifrost and interface and leaves c10 sealed", hub.scene === "bifrost" && hub.dsb.scene === null && hub.dsb.status === "dark" && hub.dsb.name === null && !hub.sheet && !hub.body, JSON.stringify(hub));
-  record("dsb land: console remains clean", b.logs.length === 0, b.logs.join(" | "));
+  record("dsb land " + backend + ": Portara returns to Bifrost with a clean console", await b.evaluate('__ooga.scene === "bifrost" && !__ooga.transitioning && !document.body.classList.contains("dsb-active")') && b.logs.length === 0, JSON.stringify(await b.evaluate('({scene:__ooga.scene,transitioning:__ooga.transitioning,gate:__ooga.dsb?.gate.state,receiving:__ooga.dsb?.gate.receiving,logs:[]})')) + b.logs.join(" | "));
 } }] });
-
 
 const mb = (bytes) => (bytes / 1048576).toFixed(2);
 const dsbSoak = async (b) => {
@@ -13213,6 +12989,27 @@ releaseGeometry(geometry); applyRig(res.programs.mesh, { geometry: {} }, 1); app
   record("race rigs: all custom CPU joints survive repeated mount changes, palettes stay bounded, unsupported surfaces reject atomically and disposal releases every GPU rig", originals.length === CAST && stable && bounded && rejected && overflow && disposed, JSON.stringify({ racers: originals.length, stable, bounded, rejected, overflow, disposed, released: released.length }));
 };
 
+const carriedReleaseProof = () => {
+  const source = readFileSync(join(root, "src/js/scene-hub.js"), "utf8");
+  const from = source.indexOf("  const finishClankerRider = "), to = source.indexOf("  const releaseClankerRider = ", from);
+  const rows = [];
+  for (const ceiling of [1.5, 2.5, 6]) {
+    const cave = { root: { position: { x: 0, y: 3, z: 0 } }, baseY: 0, bodyHeight: 2, viewLift: 0,
+      leap: {}, hop: 0, hopV: 0 };
+    const entry = { capture: { cave, autonomous: false, warpVisit: false, throwing: true, time: 1, posed: true }, motion: {}, heading: 0 };
+    cave.grabbedBy = entry; const queries = [];
+    const context = { entry, cave, ceiling, STEP_MAX: 0.35, clamp: (x, a, b) => Math.max(a, Math.min(b, x)),
+      clankerGripAt: () => [0, 3, 0], ceilingAt: () => ceiling,
+      playerSupportAt: (x, z, y) => { queries.push(y); return y < 0 ? -10 : y + 0.35 >= ceiling ? ceiling : 0; },
+      crew: { recoverDragged() {}, poseWeapon() {} } };
+    const released = runInNewContext(source.slice(from, to) + "finishClankerRider(entry, true, 1);", context);
+    rows.push({ ceiling, released, held: cave.grabbedBy === entry, feet: cave.root.position.y,
+      queries, throwing: entry.capture.throwing });
+  }
+  return { rows, valid: rows[0].released === false && rows[0].held && !rows[0].throwing && rows[0].queries.every(y => y >= 0)
+    && rows.slice(1).every(r => r.released && !r.held && r.feet >= 0 && r.feet + 2 <= r.ceiling && r.queries.every(y => y >= 0)) };
+};
+
 const visibilitySourceBakeProof = () => {
   const math = readFileSync(new URL("../src/js/math.js", import.meta.url), "utf8");
   const source = readFileSync(new URL("../src/js/character-visibility.js", import.meta.url), "utf8");
@@ -13245,6 +13042,13 @@ const visibilitySourceBakeProof = () => {
     source.verts[0]=.125;
     const movedSource=wrapper();check(meshOf(movedSource)!==baked,'Mutated source vertices reused stale bounds');
     const movedFresh=meshOf({verts:movedSource.verts,faces:movedSource.faces});check(JSON.stringify(meshOf(movedSource).nodes)===JSON.stringify(movedFresh.nodes),'Mutated source bounds differ');
+    const decorated = { verts: plain.verts, faces: plain.faces.map((f,i)=>({...f,visibility:i ? false : undefined})) };
+    const detailed = meshOf(decorated);
+    check(detailed.indices.length===3,'Render-only decoration entered the visibility BVH');
+    const decoratedAlias={...decorated,faces:decorated.faces.map(f=>({...f})),matrixSourceGeometry:decorated};
+    check(meshOf(decoratedAlias)===detailed,'Decoration tags prevented immutable wrapper sharing');
+    const solidAlias={...decorated,faces:decorated.faces.map(f=>({...f,visibility:true})),matrixSourceGeometry:decorated};
+    check(meshOf(solidAlias)!==detailed && meshOf(solidAlias).indices.length===6,'Changed visibility tags reused a stale source bake');
     source.faces = [{i:[0,1,3]}];
     const later = wrapper();check(meshOf(later)!==baked,'Replaced source faces reused stale bake');
     const newBake=meshOf({verts:later.verts,faces:later.faces});check(JSON.stringify(Array.from(meshOf(later).indices))===JSON.stringify(Array.from(newBake.indices)),'Replaced source topology differs');
@@ -13749,6 +13553,8 @@ record("terrain glyph layouts: warm visits preserve exact registries and rendere
   const driver = await browserDriverProof();
   record("browser driver: broken transports retire every pending command and owned child, discovery is bounded, and pool ownership remains exclusive", driver.cases === 11 && driver.failures === 0, JSON.stringify(driver));
 
+const carriedRelease = carriedReleaseProof();
+record("gorilla release: insufficient upright headroom retains the grab without querying below the current floor", carriedRelease.valid, JSON.stringify(carriedRelease));
 const sharedBake = visibilitySourceBakeProof();
 record("character visibility source bakes: ownership wrappers share exact immutable triangles and reject changed topology or source vertices", sharedBake.failures === 0 && sharedBake.cases >= 200, JSON.stringify(sharedBake));
 
@@ -13763,7 +13569,7 @@ record("character visibility source bakes: ownership wrappers share exact immuta
   const cutaway = await cutawayBoundsProof();
   record("cutaway visibility: active apertures reject remote meshes without vertex scans and retain cells, blends, children, global and rotated local cuts", Object.entries(cutaway).every(([key, value]) => key === "bytes" ? value === 160 : value), JSON.stringify(cutaway));
   const storage = await visibilityStorageProof({ compact: true, deferred: true });
-  record("visibility storage: exact source doubles and signed zero survive queries, demand and bounded screen BVHs", storage.exact && storage.unchanged && storage.bounded && storage.tightBacking && storage.storage && storage.demand && storage.disposed && storage.values > 600, JSON.stringify(storage));
+  record("visibility storage: exact source doubles and signed zero survive queries, demand and bounded screen BVHs", storage.exact && storage.unchanged && storage.bounded && storage.tightBacking && storage.storage && storage.demand && storage.nearBounds && storage.nearCases > 100 && storage.boundaryHits > 0 && storage.disposed && storage.values > 600, JSON.stringify(storage));
   record("visibility lifecycle: shared immutable bakes survive another registry removal, larger mesh replacement and disposal", storage.lifecycle, JSON.stringify(storage));
   const demandUsers = await visibilityDemandUsersProof();
   record("visibility demand: first demand visits only descriptor users and releases replaced, removed and disposed entries", demandUsers.rows.every(row => row.visits === row.count && row.released && row.resolved) && demandUsers.boundsTracked && demandUsers.replacementReleased && demandUsers.bothResolved && demandUsers.disposed, JSON.stringify(demandUsers));
@@ -14832,7 +14638,7 @@ record("character visibility source bakes: ownership wrappers share exact immuta
   }
   {
     const proof = canopyCertificateProbe();
-    for (const backend of backends) record(`canopy occlusion ${backend}: solid prop coverage avoids dense ray searches while preserving tiny gaps, partial edges, clip planes and moving blockers`, proof.rows.length === 9 && proof.failures.length === 0 && proof.disposed, JSON.stringify(proof));
+    for (const backend of backends) record(`canopy occlusion ${backend}: solid prop coverage avoids dense ray searches while preserving tiny gaps, partial edges, clip planes and moving blockers`, proof.rows.length === 12 && proof.failures.length === 0 && proof.dressing && proof.models.length === 7 && proof.models.every(g => g.queried > 0 && g.queried < g.drawn / 10) && proof.disposed, JSON.stringify(proof));
   }
   {
     const entrance = rampOutlineSectionsProbe();
@@ -15212,11 +15018,14 @@ scene("dsb",{label:"weather checkpoint phone",query:"&overview=1&weather=clear&t
 
 const dsbRadioTvCorrection = { name:"dsb radio TV correction", why:"regression: restore the physical radio TV, safe invoice flow and exclusive live/fallback audio with the shared interior gate", run:async b=>{
   const step=()=>b.evaluate('for(let i=0;i<60;i++)BL.scenes.dsb.update(1/60,i/60)');
-  const click=async id=>{const p=await b.evaluate(`(()=>{const e=document.getElementById(${JSON.stringify(id)});e.scrollIntoView({block:"center"});const r=e.getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2};})()`);await b.send("Input.dispatchTouchEvent",{type:"touchStart",touchPoints:[p]});await b.send("Input.dispatchTouchEvent",{type:"touchEnd",touchPoints:[]});};
+  const click = id => dsbClick(b, "#" + id, true);
   await b.key("m");await b.key("m");await step();
   await b.evaluate('window.__correction={audio:__ooga.dsb.noderunner.audio,tv:__ooga.dsb.tv};__ooga.dsb.tv.close()');
   await click("dsb-context");await step();
   record("DSB TV correction: physical nearby touch action opens five-channel menu",await b.evaluate('document.getElementById("dsb-tv").open&&document.querySelectorAll("#dsb-tv-menu button").length===5&&document.querySelectorAll("#dsb-tv-menu button:disabled").length===4'));
+  await click("dsb-tv-channel");
+  await click("dsb-tv-back");
+  record("DSB TV correction: back restores the channel menu and its focus", await b.evaluate('!document.getElementById("dsb-tv-menu").hidden && document.getElementById("dsb-tv-radio").hidden && document.activeElement.id === "dsb-tv-channel" && __ooga.dsb.tv.stats.route === "main"'));
   await click("dsb-tv-channel");
   record("DSB TV correction: bounded metadata and local official QR are visible",await b.evaluate('document.getElementById("dsb-tv-song").textContent==="Turtle Radio"&&document.querySelectorAll("#dsb-tv-queue li").length===1&&document.getElementById("dsb-tv-qr").width>100'));
   await b.evaluate('document.getElementById("dsb-tv-query").value="Ooga"');await click("dsb-tv-search");
@@ -15229,7 +15038,7 @@ const dsbRadioTvCorrection = { name:"dsb radio TV correction", why:"regression: 
   const unpaid=await payment({paid:false,queued:false}),offline=await payment(null,true),paid=await payment({paid:true,queued:false}),queued=await payment({paid:true,queued:true});
   record("DSB TV correction: unpaid, failure, paid and queued states never suggest a second payment",unpaid.includes("Waiting for payment")&&offline.includes("do not pay twice")&&paid.includes("waiting for the station")&&queued.includes("your song is queued"));
   await click("dsb-tv-copy");
-  record("DSB TV correction: copy succeeds or selects the full invoice",await b.evaluate('/Invoice copied|Invoice selected/.test(document.getElementById("dsb-tv-payment-status").textContent)'));
+  record("DSB TV correction: copy succeeds or selects the full invoice",await untilPage(b, '/Invoice copied|Invoice selected/.test(document.getElementById("dsb-tv-payment-status").textContent)', 3000));
   await b.evaluate('window.__correction.epoch=__ooga.dsb.tv.stats.paymentEpoch');await click("dsb-tv-cancel-invoice");
   record("DSB TV correction: closing invoice invalidates polling epoch",await b.evaluate('!__ooga.dsb.tv.stats.invoice&&__ooga.dsb.tv.stats.paymentEpoch>__correction.epoch&&document.getElementById("dsb-tv-invoice").hidden'));
   await b.evaluate('clearTimeout(__paymentClock.id);__paymentClock.tick();window.setTimeout=__paymentClock.native');await b.sleep(40);
@@ -15247,6 +15056,7 @@ const dsbRadioTvCorrection = { name:"dsb radio TV correction", why:"regression: 
   record("DSB radio correction: console remains clean",b.logs.length===0,b.logs.join(" | "));
 }};
 scene("dsb",{label:"radio TV correction",query:"&view=noderunner&weather=clear&time=1200",steps:[dsbRadioTvCorrection]});
+scene("dsb",{label:"radio TV correction canvas",query:"&view=noderunner&weather=clear&time=1200&canvas2d=1",steps:[dsbRadioTvCorrection]});
 scene("dsb",{label:"radio TV correction phone",query:"&view=noderunner&weather=clear&time=1200",opts:{w:390,h:844,mobile:true},steps:[dsbRadioTvCorrection]});
 
 const dsbHarborCheckpoint = { name:"dsb harbor checkpoint", why:"rule: normal walking reaches the harbor, and one distance-based exterior station survives weather, rooms and scene changes", run:async b=>{

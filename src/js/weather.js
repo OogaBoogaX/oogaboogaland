@@ -40,7 +40,7 @@
   const { clamp, lerp, mulberry32 } = math;
 
   // Tier-scaled populations: the batch is one draw call at any size, the cost is the simulation.
-  const CAP = { high: 1100, medium: 720, low: 380 }, CAP_CANVAS = 160;
+  const CAP = { high: 1100, medium: 720, low: 260 }, CAP_CANVAS = 160;
   // The weather is a cell standing over one place, not a curtain that follows the camera. It falls
   // inside FIELD_R of its centre and the sky only greys for a camera close enough to be under it.
   const FIELD_R = 25, FIELD_TOP = 20, FIELD_SPREAD = 7, RECYCLE_BELOW = 8;
@@ -64,7 +64,7 @@
   // A rainforest is never without cloud, so the deck is always there: CLOUD_FLOOR of it stands even
   // under a clear sky and the weather only thickens and darkens it. Every node shares one cached
   // geometry, so the whole deck is a single instanced draw call whatever its size.
-  const CLOUD = { high: 64, medium: 46, low: 28 }, CLOUD_CANVAS = 16;
+  const CLOUD = { high: 64, medium: 46, low: 22 }, CLOUD_CANVAS = 16;
   const CLOUD_R = 34, CLOUD_LIFT = 3.2, CLOUD_DRIFT = 0.06, CLOUD_EASE = 0.7;
   const CLOUD_FLOOR = 0.62, CLOUD_TIERS = 3;
   // Drops grow with the rain: fine in a drizzle, fat in a downpour.

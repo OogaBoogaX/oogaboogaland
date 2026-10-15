@@ -483,7 +483,10 @@
         // A wall in front of the orbit eye is an obstruction to navigation,
         // not an instruction to turn the character back toward that wall.
         orbit.yaw = orbit.tYaw = aimBodyYaw + aimBodyHeadYaw + Math.PI;
-        orbit.pitch = orbit.tPitch = aimBodyPitch;
+        // A near-body cursor hit keeps the actor's facing, but an overhead
+        // exit must retain the displayed viewing angle instead of sinking to its head angle.
+        orbit.pitch = orbit.tPitch = overheadExit
+          ? clamp(Math.atan2(-dy, Math.hypot(dx, dz)), TRAILING_PITCH[0], TRAILING_PITCH[1]) : aimBodyPitch;
       } else if (aimAtCursor) {
         const h = cave.traits.height, p = cave.root.position;
         const x = cursorPoint.x - p.x, z = cursorPoint.z - p.z, horizontal = Math.hypot(x, z);
@@ -2781,6 +2784,15 @@
       orbit.dist = orbit.tDist = destination.dist;
       if (cave) {
         crew.relocatePlayer(position, destination.yaw + Math.PI);
+        if (birdsEye()) {
+          // Navigation is a new arrival: an old floor's cursor anchor must
+          // not pull the next shoulder handoff back toward that upper level.
+          overheadAim.x = cave.root.position.x;
+          overheadAim.y = cave.root.position.y - cave.baseY;
+          overheadAim.z = cave.root.position.z;
+          overheadPointerMoved = false;
+          assistedTargetWait = 0;
+        }
         followTarget.x = position.x;
         followTarget.y = position.y + follow.y;
         followTarget.z = position.z;

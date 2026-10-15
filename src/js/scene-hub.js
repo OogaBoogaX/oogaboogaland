@@ -3333,12 +3333,14 @@
     if (inner >= MEADOW_OUTER) return false;
     const bounds = BL.scene.boundsOf(owner.node.geometry), height = bounds.max[1] - bounds.min[1];
     // Random probes keep ordinary respawns varied. If they miss every safe
-    // spot, a bounded spiral covers the meadow rather than retrying clusters.
-    for (let attempt = 0; attempt < 336; attempt++) {
+    // spot, a bounded spiral covers the meadow. The last reserved position is
+    // the final fallback, still subject to every live collision/occupancy check.
+    for (let attempt = 0; attempt <= 336; attempt++) {
       const fallback = attempt - 80;
       const angle = fallback < 0 ? Math.random() * Math.PI * 2 : fallback * 2.399963229728653;
       const distance = Math.sqrt(lerp(inner * inner, MEADOW_OUTER * MEADOW_OUTER, fallback < 0 ? Math.random() : (fallback + 0.5) / 256));
-      const x = Math.sin(angle) * distance, z = Math.cos(angle) * distance;
+      const x = attempt === 336 ? owner.x : Math.sin(angle) * distance;
+      const z = attempt === 336 ? owner.z : Math.cos(angle) * distance;
       if (island.surfaceAt(x, z) !== 0 || island.path.overlaps(x, z, radius) || nearMouth(x, z, radius + 3.5) || !workSceneryClear(x, z, radius)) continue;
       let clear = true;
       for (let i = 0; i < 16 && clear; i++) {
@@ -3347,9 +3349,11 @@
           || island.surfaceAt(x + Math.cos(a) * radius * 0.5, z + Math.sin(a) * radius * 0.5) !== 0) clear = false;
       }
       // Keep dormant scenery's reservation too: a shrinking pile may reveal it.
+      // Use the same footprints as initial placement; adding the live-body
+      // clearance again exhausts otherwise valid gaps in a dressed meadow.
       for (let i = 0; i < claimed.length && clear; i++) {
         const c = claimed[i];
-        if (c !== owner.reservation && Math.hypot(c.x - x, c.z - z) < c.r + radius) clear = false;
+        if (c !== owner.reservation && Math.hypot(c.x - x, c.z - z) < c.r + owner.footprint) clear = false;
       }
       if (!clear || !island.clearAt(x, 0.01, z, radius, height)
         || !solids.clearAt(x, 0.01, z, radius, height, owner.node)) continue;
@@ -4223,6 +4227,17 @@
       rec.throwing = false; rec.time = 0; entry.motion.throwProgress = 0;
       return false;
     }
+    const heldHeight = rec.autonomous && !throwing ? rec.safeY : handY;
+    const ceiling = throwing ? ceilingAt(p.x, p.z, heldHeight, cave) : Infinity;
+    const height = throwing ? Math.min(heldHeight, ceiling - cave.bodyHeight - Math.max(0, cave.viewLift)) : heldHeight;
+    // Keep the roof outside the support query's step allowance.
+    const supportY = Math.min(heldHeight, ceiling - STEP_MAX - 1e-6);
+    // Query support before lowering the release. An upright body that cannot
+    // fit here stays held, rather than querying through this floor to a lower level.
+    if (throwing && height < playerSupportAt(p.x, p.z, supportY, supportY, cave, false, true, rec.autonomous)) {
+      rec.throwing = false; rec.time = 0; entry.motion.throwProgress = 0;
+      return false;
+    }
     rec.cave = null; rec.throwing = false; rec.posed = false;
     entry.motion.dragging = false; entry.motion.throwProgress = 0;
     if (rec.warpVisit) {
@@ -4238,7 +4253,9 @@
     // Retain the latest clear standing point through a drag, jump or swing;
     // cancellation returns there even while the held body is off the floor.
     if (rec.autonomous && !throwing) { p.x = rec.safeX; p.y = rec.safeY + cave.baseY; p.z = rec.safeZ; }
-    const height = rec.autonomous && !throwing ? rec.safeY : handY;
+    // The held body is horizontal; standing it up at the same ankle height
+    // can put its head through a low roof. Fit it below that ceiling before
+    // asking for support, or the voxel query can choose the roof as its floor.
     cave.leap.rageThrown = throwing && rec.autonomous;
     const floor = playerSupportAt(p.x, p.z, height, height, cave, false, true, cave.leap.rageThrown);
     cave.hop = Math.max(0, height - floor);
@@ -9080,7 +9097,10 @@
     }
     // Upright scientists stand on their feet. An arm reaching a keyboard is
     // not a foot landing on that desk, even though it belongs to the body sweep.
-    if (entry.motion.lab && !entry.drive.airborne && !entry.gorilla.motionActive) {
+    // Keep that foot support in upright flight too: a descending arm cannot
+    // land the jumping body on a neighbouring bench before its feet get there.
+    if (entry.motion.lab && (!entry.drive.airborne && !entry.gorilla.motionActive
+      || entry.drive.airborne && !entry.drive.passiveFall)) {
       const floor = island.supportAt(x, z, y, Math.min(step, STEP_MAX), ABYSS_FLOOR, 0.45);
       return props ? Math.max(floor, solids.supportAt(x, z, y, step, 0.45, null, null, true, accept, entry.rage.active), solids.gorillaStepAt(x, z, y, step)) : floor;
     }
@@ -10163,13 +10183,15 @@
       const objectsEnabled = viewEligible && !cutawayPool && (exteriorRamp || rockSection || !actorVisible);
       const bananaEnabled = bananaCover.state.cameraInPile;
       occluded = cutawayPool ? viewEligible && !actorVisible : objectsEnabled;
+      const contourUpdates = sightGuides.state.updates;
       guides = sightGuides.update(player, null, objects, camera, aspect, dt, objectsEnabled, rockSection, SIGHT_RECOMPUTE_HZ);
       // Keep a separate cap pass so split objects stay legible in fruit.
       // It must not change the visibility rules in the clear part of the view.
       const fruitGuides = bananaGuides.update(bananaEnabled ? player : null, null, objects, camera, aspect, dt, bananaEnabled, true, SIGHT_RECOMPUTE_HZ);
       if (objectsEnabled || bananaEnabled) {
         const structure = ensureRockGuides().select(p.x, p.y - player.baseY, p.z, camera.position.x, camera.position.y, camera.position.z), observer = guides.observer;
-        const surfaces = rockGuides.updateSurfaces(observer[19], observer[20], observer[21], camera, dt, player, objectGuides.perceptionClear, objects.occlusionVersion, objects.perceptionVersion);
+        // Keep wall derivation off a frame that just rebuilt object contours.
+        const surfaces = rockGuides.updateSurfaces(observer[19], observer[20], observer[21], camera, dt, player, objectGuides.perceptionClear, objects.occlusionVersion, objects.perceptionVersion, SIGHT_RECOMPUTE_HZ, guides.updates !== contourUpdates);
         guides.structures = objectsEnabled ? surfaces : null; guides.structure = objectsEnabled ? structure : null;
         fruitGuides.structures = bananaEnabled ? surfaces : null; fruitGuides.structure = bananaEnabled ? structure : null;
       } else { guides.structure = fruitGuides.structure = null; guides.structures = fruitGuides.structures = null; if (rockGuides) rockGuides.resetSurface(); }
