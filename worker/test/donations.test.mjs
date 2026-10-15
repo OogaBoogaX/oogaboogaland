@@ -2,6 +2,7 @@
 // receives, and a stand-in D1 answers the session lookup. No network.
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { handleDonations } from "../src/donations.js";
 
 const SITE = "https://site.test";
@@ -24,6 +25,15 @@ const call = (path, { method = "POST", headers = {}, body } = {}) => {
   return [request, new URL(request.url)];
 };
 const json = { "content-type": "application/json" };
+
+test("regression: a production deploy keeps the donation binding and routes donation calls before assets", () => {
+  const source = readFileSync(new URL("../../wrangler.production.jsonc", import.meta.url), "utf8");
+  const config = JSON.parse(source.replace(/^\s*\/\/.*$/gm, ""));
+  assert.deepEqual(config.services.find((s) => s.binding === "DONATIONS"), {
+    binding: "DONATIONS", service: "bananapayserver-production", entrypoint: "PageApi"
+  });
+  assert.ok(config.assets.run_worker_first.includes("/donations/*"));
+});
 
 test("an invoice goes on with the page's body and type alone, the signed-in donor and the visitor's address", async () => {
   const DONATIONS = binding();

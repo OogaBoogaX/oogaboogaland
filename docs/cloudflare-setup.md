@@ -50,6 +50,10 @@ The zone `oogabooga.land` is in this account. Production serves the apex as a Wo
 
 Both `cloudflare-staging.yml` and `cloudflare-production.yml` run by hand on `rock`: Actions → Deploy Cloudflare staging (or production) → Run workflow. Merging does not deploy either Worker. Each takes a fresh jumbotron snapshot, runs `npm run build:site` and the Worker's checks, applies D1 migrations and deploys. Every deploy drops live sockets, and clients reconnect on their own. These workflows are the normal deploy path: keep Workers Builds (a Worker's Settings → Build) disconnected and don't deploy from the dashboard, or a second deploy can replace the Worker and drop its secrets. If GitHub Actions is unavailable, the README documents the emergency laptop deployment procedure.
 
+Production's `DONATIONS` binding to `bananapayserver-production`'s `PageApi` and `/donations/*` in `assets.run_worker_first` must be committed to `rock` before deploying; a live-only binding is replaced by the checked-out config. The Worker's donation checks enforce both before the workflow deploys.
+
+On `bananapayserver-production`, keep `PILE_START=0` and `PILE_EAT_PER_HOUR=0` as Cloudflare secrets, set with `wrangler secret put` in that repository. Normal Wrangler deploys preserve secrets absent from the config, so these settings stay out of `vars` and need no deploy-time reset. Donation records and donor totals live in its D1 database, and the corrected pile lives in its existing Durable Object namespace; keep both resource identities and migrations intact. `PILE_START` initializes a new pile only, so never use it to re-credit a donation already recorded.
+
 ## Local development
 
 ```sh
