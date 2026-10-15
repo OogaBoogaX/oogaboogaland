@@ -76,15 +76,19 @@ export const launch = async ({ w = 1440, h = 900, mobile = false, perf = false, 
   ];
   const state = { alive: true, pooled: false, released: false, destroyed: false, key: keyOf({ w, h, mobile, perf, motion }) };
   let startupError = null, stopTransport = null, entry = null;
+  let stopped;
+  const closed = new Promise(resolve => { stopped = resolve; });
   let chrome;
   try { chrome = spawn(CHROME, args, { stdio: "ignore" }); }
   catch (err) { removeProfile(profile); throw driverError(`Chrome could not launch at ${CHROME}: ${err.message}`); }
   chrome.on("error", err => {
     startupError = err; state.alive = false;
+    stopped();
     stopTransport?.();
   });
   chrome.on("exit", () => {
     state.alive = false;
+    stopped();
     stopTransport?.();
   });
   const logs = [];
@@ -105,6 +109,7 @@ export const launch = async ({ w = 1440, h = 900, mobile = false, perf = false, 
   }
   if (!page || !state.alive) {
     chrome.kill("SIGKILL");
+    await closed;
     removeProfile(profile);
     throw driverError(`Chrome did not start at ${CHROME}${startupError ? ": " + startupError.message : ""}`);
   }
@@ -135,6 +140,7 @@ export const launch = async ({ w = 1440, h = 900, mobile = false, perf = false, 
     } catch (err) {
       if (attempt === 4) {
         chrome.kill("SIGKILL");
+        await closed;
         removeProfile(profile);
         throw err;
       }
@@ -165,15 +171,17 @@ export const launch = async ({ w = 1440, h = 900, mobile = false, perf = false, 
   // keep rendering while a retry uses a new Chrome. Reject all commands now,
   // without depending on a close event from an already wedged socket.
   const destroy = (now = false) => {
-    if (state.destroyed) { if (now) removeProfile(profile); return; }
+    if (state.destroyed) { if (now) removeProfile(profile); return closed; }
     state.destroyed = true; state.alive = false;
-    if (entry) live.delete(entry);
+    // Keep retiring children owned until exit, so dispose() also drains an earlier close().
+    closed.then(() => { if (entry) live.delete(entry); });
     for (const reply of pending.values()) reply.fail(driverError("DevTools transport retired: Chrome is gone"));
     pending.clear();
     try { ws.close(); } catch {}
     chrome.kill(); chrome.kill("SIGKILL");
     if (now) removeProfile(profile);
     else setTimeout(() => removeProfile(profile), 500).unref();
+    return closed;
   };
   stopTransport = () => destroy();
   ws.onclose = () => destroy();
@@ -222,7 +230,7 @@ export const launch = async ({ w = 1440, h = 900, mobile = false, perf = false, 
     await applyMedia();
   } catch (err) {
     // This Chrome is not in `live` yet, so nothing else would ever reap it.
-    destroy(true);
+    await destroy(true);
     throw err;
   }
   const evaluate = async (expression) => {
@@ -294,8 +302,7 @@ export const launch = async ({ w = 1440, h = 900, mobile = false, perf = false, 
     logs.length = 0; // Clear in place: the runner holds this same array.
   };
   const close = (force = false) => {
-    if (state.pooled && !force) release(api);
-    else destroy();
+    return state.pooled && !force ? release(api) : destroy();
   };
   const api = { send, on, evaluate, mouse, drag, click, key, focus, screenshot, open, close, sleep, logs };
   entry = { api, state, reset, destroy, resetting: null };
@@ -341,17 +348,18 @@ export const release = (browser) => {
   const entry = internals.get(browser);
   if (!entry) return;
   if (!entry.state.pooled || !entry.state.alive) return entry.destroy();
-  if (entry.state.released) return;
+  if (entry.state.released) return entry.resetting;
   entry.state.released = true;
-  // The runner does not await close(), so the reset runs on its own and acquire() waits on entry.resetting.
+  // Callers may release without awaiting; acquire() also waits on the same reset promise.
   entry.resetting = entry.reset().catch(() => entry.destroy());
   idle.push(entry);
   while (idle.length > MAX_IDLE) idle.shift().destroy();
+  return entry.resetting;
 };
 
 export const dispose = async () => {
   idle.length = 0;
-  for (const entry of [...live]) entry.destroy();
+  await Promise.all([...live].map(entry => entry.destroy()));
 };
 export const closeAll = dispose;
 

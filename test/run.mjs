@@ -2859,7 +2859,7 @@ const { contributorActivityProbe } = (() => {
 const { npcLaneSpacingProbe, npcLaneCornerProbe, npcLaneCurveProbe, npcLabLaneProbe, npcRingJunctionProbe } = (() => {
   // Real crew walkers share a simple trail, isolating lane choice and following
   // distance from scenery, spawn timing, and the cave's firing formation.
-  const npcLaneSpacingProbe = ({ dt = 1 / 60 } = {}) => {
+  const npcLaneSpacingProbe = ({ dt = 1 / 60, oscillating = false } = {}) => {
     const BL = window.BL, S = BL.scene, root = S.createNode(), targets = new Set(), noop = () => {};
     const island = { path: { version: 0, debug: { active: false, ringCenterRadius: 0 }, centerlines: [[{ x: 0, z: -10 }, { x: 0, z: 10 }]] },
       surfaceAt: () => 0, isPath: (x, z) => Math.abs(x) < 1 && Math.abs(z) <= 10 };
@@ -2874,7 +2874,7 @@ const { npcLaneSpacingProbe, npcLaneCornerProbe, npcLaneCurveProbe, npcLabLanePr
     const actors = [...crew.cavemen.values()], a = actors[0], b = actors[1], rows = [];
     let time = 0, result;
     const place = (cave, x, z, tx, tz) => {
-      cave.state = "working"; cave.root.visible = true; cave.root.quaternion = null;
+      cave.override = cave.state = "working"; cave.root.visible = true; cave.root.quaternion = null;
       Object.assign(cave.root.position, { x, y: cave.baseY, z });
       cave.walk = { tx, tz, speed: 1.7, phase: 0, heading: Math.atan2(tx - x, tz - z), to: "spot" };
       cave.act.kind = "wander"; Object.assign(cave.act.spot, { x: tx, z: tz, ry: 0 });
@@ -2886,16 +2886,35 @@ const { npcLaneSpacingProbe, npcLaneCornerProbe, npcLaneCurveProbe, npcLabLanePr
     };
     try {
       for (const cave of actors) { cave.root.visible = false; cave.state = "away"; cave.bedTravel.mode = ""; }
-      for (const name of ["opposing", "following", "tied", "branching"]) {
+      for (const name of oscillating ? ["oscillating"] : ["opposing", "following", "tied", "branching"]) {
         place(a, name === "tied" ? 0.35 : 0, -6, 0, 6);
         place(b, name === "tied" ? -0.35 : 0, name === "opposing" ? 6 : name === "tied" ? -6 : -6.75, 0, name === "opposing" ? -6 : 6);
         let frames = 0, gap = Infinity, waitFrames = 0, resumedGap = 0, laneError = 0, laneSamples = 0, laneRight = true;
         let waiting = false, branched = false, branchReleased = false, deadlocked = false, maxHop = 0, maxStep = 0, jumps = 0;
         const oldJumps = a.avoidance.navigation.jumps + b.avoidance.navigation.jumps;
-        const duration = name === "opposing" ? 12 : 3;
+        const duration = name === "opposing" || oscillating ? 12 : 3;
+        if (oscillating) {
+          // A real queue leader whose local avoidance jitters without opening
+          // a gap must not reset the follower's progress timer every frame.
+          a.puppet = true;
+          b.root.position.z = -7.1;
+        }
+        let stall = 0, maximumStall = 0;
+        const resets = b.progress.resets;
         while (frames++ < Math.ceil(duration / dt) && (a.walk || b.walk)) {
           const ax = a.root.position.x, az = a.root.position.z, bx = b.root.position.x, bz = b.root.position.z;
+          if (oscillating) {
+            const p = a.root.position, target = -6 + Math.sin(frames * dt * 8) * 0.05;
+            // The authored leader uses the shipped sweep too; a fixture
+            // must not move it into a follower that is already passing.
+            const z = crew.actorClear(p.x, p.z, p.x, target, 0, a.bodyHeight) ? target : p.z;
+            a.shoulder.motionZ = (z - p.z) / dt;
+            p.z = z;
+          }
           crew.update(dt, time += dt); S.updateWorld(root);
+          const step = Math.hypot(b.root.position.x - bx, b.root.position.z - bz);
+          stall = b.walk && step < 0.001 ? stall + dt : 0;
+          maximumStall = Math.max(maximumStall, stall);
           const separation = Math.hypot(a.root.position.x - b.root.position.x, a.root.position.z - b.root.position.z);
           gap = Math.min(gap, separation);
           maxStep = Math.max(maxStep, Math.hypot(a.root.position.x - ax, a.root.position.z - az), Math.hypot(b.root.position.x - bx, b.root.position.z - bz));
@@ -2913,7 +2932,7 @@ const { npcLaneSpacingProbe, npcLaneCornerProbe, npcLaneCurveProbe, npcLabLanePr
         }
         jumps = a.avoidance.navigation.jumps + b.avoidance.navigation.jumps - oldJumps;
         rows.push({ name, frames, gap, waiting, waitSeconds: waitFrames * dt, resumedGap, branched, branchReleased, deadlocked,
-          maxHop, maxStep, jumps, laneRight, laneError, laneSamples, arrived: !a.walk && !b.walk });
+          maxHop, maxStep, jumps, laneRight, laneError, laneSamples, maximumStall, resets: b.progress.resets - resets, passed: b.root.position.z > a.root.position.z + 1, arrived: !a.walk && !b.walk });
       }
       result = { dt, rows };
     } finally { crew.dispose(); if (result) result.disposed = targets.size === 0 && root.children.length === 0; }
@@ -3562,7 +3581,7 @@ const session = (url, steps, opts, final) => output.run({ lines: [], results: []
     else record(steps[0][0], false, failure(err));
   } finally {
     clearTimeout(watchdog);
-    if (b && !overran) b.close();
+    if (b) await b.close(overran);
     const s = (ms) => (ms / 1000).toFixed(1);
     if (VERBOSE) lines.push(`TIME ${steps.map((step) => step[0]).join(" + ")} · launch ${s(started - t0)}s · boot ${s(ready - started)}s · body ${s(Date.now() - ready)}s · wall ${s(Date.now()-t0)}s · checks ${run.results.length} · watchdog ${overran?"FIRED":"clear"}${b?.renderer?" · renderer "+b.renderer:""}`);
   }
@@ -4410,6 +4429,12 @@ const labLanes = async (b) => {
 
 };
 const workCaveTrips = async (b) => {
+  for (const dt of [1 / 20, 1 / 60]) {
+    const queue = await b.evaluate(`(${npcLaneSpacingProbe.toString()})(${JSON.stringify({ dt, oscillating: true })})`);
+    record(`work movement cave trips: ${1 / dt}Hz followers pass an oscillating leader without overlap, jumps or relocation`,
+      queue.disposed && queue.rows.length === 1 && queue.rows.every(row => row.waiting && row.passed && row.maximumStall < 5
+        && row.gap >= 0.68 - 1e-6 && row.maxStep <= 1.7 * dt + 1e-6 && row.maxHop === 0 && row.jumps === 0 && row.resets === 0), JSON.stringify(queue));
+  }
   const r = await b.evaluate(`(() => {
     const B = __ooga, S = BL.scene, scene = BL.scenes.hub, dt = 1 / 20;
     const update = scene.update; scene.update = () => {}; B.pilot.release(true); B.setPileLevel(100000);
@@ -9146,7 +9171,7 @@ scene("hub", { label: "gorilla carry jump", query: "status=chillin", steps: [{ n
     state.grabbed && state.pendingRecovery && state.tookOff && state.grip < 0.04 && state.secondJump && state.charged
       && state.heldThroughRelease && state.thrownInAir && state.smashUnchanged, JSON.stringify(state));
 } }] });
-scene("hub", { label: "gorilla lab carry jump", query: "character=gorilla-portlandhodl&status=clankin&gorillarage=1", steps: [{ name: "gorilla lab carry jump", why: "regression: EntropyLab rejected running carry jumps and reapplied its worker pose and coat during autonomous rage capture", run: async (b) => {
+scene("hub", { label: "gorilla lab carry jump", exclusive: true, query: "character=gorilla-portlandhodl&status=clankin&gorillarage=1", steps: [{ name: "gorilla lab carry jump", why: "regression: EntropyLab rejected running carry jumps and reapplied its worker pose and coat during autonomous rage capture", run: async (b) => {
   const state = await b.evaluate(`(() => {
     const B = __ooga, S = BL.scene, e = B.clankers.player, cave = e.owner, p = e.root.position;
     for (const other of B.cavemen.values()) if (other !== cave) other.override = other.state = "away";
@@ -13081,7 +13106,7 @@ const browserDriverProof = async () => {
         on(name, fn) { handlers.set(name, fn); },
         listenerCount(name) { return handlers.has(name) ? 1 : 0; },
         emit(name, ...args) { handlers.get(name)?.(...args); },
-        kill(signal) { this.kills.push(signal || "SIGTERM"); return true; }
+        kill(signal) { this.kills.push(signal || "SIGTERM"); if (signal === "SIGKILL" && mode !== "delayed-exit") queueMicrotask(() => this.emit("exit", 0)); return true; }
       };
       children.push(child);
       if (mode === "spawn-error") queueMicrotask(() => {
@@ -13188,6 +13213,23 @@ const browserDriverProof = async () => {
     await flush();
     rows.push({ name: "duplicate close cannot publish two pool entries", pass: first !== second && f.children.length === 2 });
     first.close(true); second.close(true); await f.dispose();
+  }
+  {
+    const f = fixture("delayed-exit"), browser = await f.launch();
+    let closed = false, disposed = false;
+    const closing = browser.close(true).then(() => { closed = true; });
+    const disposing = f.dispose().then(() => { disposed = true; });
+    await flush();
+    const waiting = !closed && !disposed;
+    f.children[0].emit("exit", 0); await closing; await disposing;
+    rows.push({ name: "close waits for child exit", pass: waiting && closed && disposed });
+  }
+  {
+    const f = fixture("delayed-exit"); await f.launch();
+    let disposed = false; const disposing = f.dispose().then(() => { disposed = true; });
+    await flush(); const waiting = !disposed;
+    f.children[0].emit("exit", 0); await disposing;
+    rows.push({ name: "dispose drains live children", pass: waiting && disposed });
   }
   return { cases: rows.length, failures: rows.filter(row => !row.pass).length, rows };
 };
@@ -13551,7 +13593,7 @@ record("terrain glyph layouts: warm visits preserve exact registries and rendere
   const rigDisposal = await raceRigDisposalProof();
   record("race rig disposal: pending and linked variants release owned shaders and programs exactly once without context-loss support", rigDisposal.every(r => !r.programs && !r.shaders && !r.duplicateDeletes && r.arraysCleared && r.aliasesReleased), JSON.stringify(rigDisposal));
   const driver = await browserDriverProof();
-  record("browser driver: broken transports retire every pending command and owned child, discovery is bounded, and pool ownership remains exclusive", driver.cases === 11 && driver.failures === 0, JSON.stringify(driver));
+  record("browser driver: broken transports retire every pending command and owned child, discovery is bounded, and pool ownership remains exclusive", driver.cases === 13 && driver.failures === 0, JSON.stringify(driver));
 
 const carriedRelease = carriedReleaseProof();
 record("gorilla release: insufficient upright headroom retains the grab without querying below the current floor", carriedRelease.valid, JSON.stringify(carriedRelease));
@@ -15428,6 +15470,9 @@ const runTasks = async () => {
     while (queue.length) await queue.shift().run();
   };
   await Promise.all(Array.from({ length: LANES }, lane));
+  // Pool resets and killed children can still own GPU resources after their last check.
+  // Drain them before the exclusive sessions, including when POOL=1 was requested.
+  await dispose();
   // Strict travel deadlines and CPU-heavy Canvas playthroughs must observe
   // their own frame delivery, rather than other Chrome renderers or heap snapshots.
   // Preserve every assertion, frame and watchdog while ordinary scenes keep their lanes.
