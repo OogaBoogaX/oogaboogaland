@@ -770,6 +770,7 @@
   // high on the clump take the light greens and low ones the dark.
   const leafy = (geo, cx, cy, cz, rx, ry, rz, tones, rand, count, size) => {
     puff(geo, cx, cy, cz, rx * 0.84, ry * 0.84, rz * 0.84, [tones[0], tones[0], tones[0], tones[0]], rand, 4, 7);
+    const detailStart = geo.faces.length;
     const golden = Math.PI * (3 - Math.sqrt(5));
     for (let k = 0; k < count; k++) {
       const y = 1 - (k + 0.5) / count * 1.6, rr = Math.sqrt(Math.max(0, 1 - y * y)), a = k * golden + rand() * 0.5;
@@ -793,6 +794,7 @@
         pointedLeaf(geo, px, py, pz, axX, axY, axZ, wX / wl, wY / wl, wZ / wl, dx, dy, dz, len, light, dark);
       }
     }
+    if (geo.foliageVisibility === false) for (let i = detailStart; i < geo.faces.length; i++) geo.faces[i].visibility = false;
     return geo;
   };
   // A five-petal flower lying on a clump's surface facing out along n, with a round centre.
@@ -920,14 +922,16 @@
   };
   // A vine through `points` ([x, y, z] each) tapering from radius r0 to r1 in six-sided smooth segments, written into
   // a `withJungle` geometry. "#2f5424" is the darker vine the Mempool bridge slings under its deck. A repeated point
-  // (two runs joined at a post) adds nothing.
-  const liana = (geo, points, r0 = 0.04, r1 = r0, color = JUNGLE_VINE) => {
-    const rgb = rgbOf(color), n = points.length - 1;
+  // (two runs joined at a post) adds nothing. Structural cords remain visibility blockers;
+  // decorative garlands pass `visibility: false` through the final argument.
+  const liana = (geo, points, r0 = 0.04, r1 = r0, color = JUNGLE_VINE, visibility = true) => {
+    const rgb = rgbOf(color), n = points.length - 1, from = geo.faces.length;
     for (let i = 0; i < n; i++) {
       const a = points[i], b = points[i + 1];
       if (Math.hypot(b[0] - a[0], b[1] - a[1], b[2] - a[2]) < 1e-6) continue;
       limb(geo, a[0], a[1], a[2], b[0], b[1], b[2], r0 + (r1 - r0) * i / n, r0 + (r1 - r0) * (i + 1) / n, 6, rgb);
     }
+    if (!visibility) for (let i = from; i < geo.faces.length; i++) geo.faces[i].visibility = false;
     return padNormals(geo);
   };
   // The points of a vine slung from a to b in `steps` segments, sagging `sag` at its middle.
@@ -939,7 +943,7 @@
   // round that direction and lit by it tipped up, as if from out of a plant; `tones` dark to light. About 12
   // triangles a leaf, written into a `withJungle` geometry.
   const sprig = (geo, x, y, z, dx, dy, dz, count, size, rand, tones = JUNGLE_LEAVES) => {
-    const dl = Math.hypot(dx, dy, dz) || 1, rgb = tones.map(rgbOf);
+    const dl = Math.hypot(dx, dy, dz) || 1, rgb = tones.map(rgbOf), from = geo.faces.length;
     dx /= dl; dy /= dl; dz /= dl;
     const ny0 = Math.abs(dy) * 0.5 + 0.55, nl = Math.hypot(dx, ny0, dz), nx = dx / nl, ny = ny0 / nl, nz = dz / nl;
     // A frame across the direction to spread the leaves in.
@@ -959,6 +963,8 @@
       const band = 1 + Math.floor(rand() * (rgb.length - 1));
       pointedLeaf(geo, x, y, z, ax, ay, az, wx / wl, wy / wl, wz / wl, nx, ny, nz, size * (0.8 + rand() * 0.4), rgb[band], rgb[band - 1]);
     }
+    // Only leaf cards are decorative; solids added by the same grow callback remain blockers.
+    for (let i = from; i < geo.faces.length; i++) geo.faces[i].visibility = false;
     return geo;
   };
   // A leafy vine along `points`, as the Mempool bridge's rails: sprigs of two or three leaves every `every` metres
@@ -966,7 +972,7 @@
   // holds them level, 1 straight down. Garlands for beams, signs, rails and cabinet tops, and the cords of a net.
   // `rand` (a `mulberry32`) is required, as for `sprig`: seed each garland its own so no two hang alike.
   const garland = (geo, points, { r = 0.035, color = JUNGLE_VINE, every = 0.3, size = 0.24, droop = 0.6, out = null, rand, tones = JUNGLE_LEAVES } = {}) => {
-    liana(geo, points, r, r * 0.8, color);
+    liana(geo, points, r, r * 0.8, color, false);
     let run = 0, next = every / 2;
     for (let i = 0; i < points.length - 1; i++) {
       const a = points[i], b = points[i + 1], tx = b[0] - a[0], ty = b[1] - a[1], tz = b[2] - a[2], len = Math.hypot(tx, ty, tz);
@@ -1103,7 +1109,7 @@
     return merge(...parts);
   };
   const cartoonTree = (i, rand, shell) => {
-    const geo = { verts: [], faces: [], lines: [], smooth: true, normals: [] }, tones = CANOPIES[i].map(hexToRgb);
+    const geo = { verts: [], faces: [], lines: [], smooth: true, normals: [], foliageVisibility: false }, tones = CANOPIES[i].map(hexToRgb);
     limb(geo, 0, -0.1, 0, 0.05, 2.1, 0.02, 0.24, 0.14, 8, BARK[0]);
     limb(geo, 0.05, 1.55, 0, 0.62, 1.95, 0.02, 0.09, 0.05, 6, BARK[1]);
     if (i % 2) limb(geo, 0, 1.5, -0.1, -0.7, 1.9, -0.3, 0.08, 0.05, 6, BARK[1]);
@@ -1176,7 +1182,7 @@
   // Bushes: leafy clumps on the voxel bushes' own ellipsoids. The first two flower (peach and pink, then yellow and
   // purple), the third carries round red berries.
   const bush = variants((i) => {
-    const rand = mulberry32(7 + i), geo = { verts: [], faces: [], lines: [], normals: [] }, tones = ["#3a6e24", "#56902f", "#6fae3a", "#8ccb4b"].map(hexToRgb);
+    const rand = mulberry32(7 + i), geo = { verts: [], faces: [], lines: [], normals: [], foliageVisibility: false }, tones = ["#3a6e24", "#56902f", "#6fae3a", "#8ccb4b"].map(hexToRgb);
     for (const [cx, cy, cz, rx, ry, rz] of CLUMPS[i]) leafy(geo, cx * QUARTER, cy * 0.8 * QUARTER, cz * QUARTER, rx * 1.12 * QUARTER, ry * 0.82 * QUARTER, rz * 1.12 * QUARTER, tones, rand, Math.round(10 + rx * rz * 3.2), 0.17);
     const [cx, cy, cz, rx, ry, rz] = CLUMPS[i][0];
     for (let n = 0; n < (i === 2 ? 9 : 6); n++) {

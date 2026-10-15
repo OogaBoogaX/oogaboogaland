@@ -855,14 +855,13 @@
         perceiveBranch(context, wall, node.right, ex, ey, ez);
       }
     };
-    const updateSurface = (context, ex, ey, ez, camera, dt, actor = null, objectClear = null, occlusion = 0, perception = occlusion, recomputeHz = 0) => {
+    const updateSurface = (context, ex, ey, ez, camera, dt, actor = null, objectClear = null, occlusion = 0, perception = occlusion, recomputeHz = 0, defer = false) => {
       if (!context) return null;
       surfacesActive = true;
       const center = actor ? actor.root.position : null, px = center ? center.x : ex, py = center ? center.y : ey, pz = center ? center.z : ez;
       const eye = context.surfaceEye, position = context.surfacePosition, eyeMoved = context.surfaceActor !== actor || !Number.isFinite(eye[0])
         || Math.hypot(ex - eye[0], ey - eye[1], ez - eye[2]) > 0.025 || Math.hypot(px - position[0], py - position[1], pz - position[2]) > 0.025;
       const occlusionChanged = context.surfaceOcclusion !== occlusion, perceptionChanged = context.surfacePerception !== perception, moved = eyeMoved || perceptionChanged;
-      context.surfaceOcclusion = occlusion;
       const p = camera.position, target = camera.target, cameraEye = context.surfaceCamera, view = context.surfaceView;
       const length = Math.hypot(target.x - p.x, target.y - p.y, target.z - p.z), fx = (target.x - p.x) / length, fy = (target.y - p.y) / length, fz = (target.z - p.z) / length;
       // Passing bodies affect the camera's cave rays, but never the actor's
@@ -870,10 +869,16 @@
       const cameraMoved = (eyeMoved || occlusionChanged) && (context.kind === "cave" || context.kind === "sealed") || !Number.isFinite(cameraEye[0]) || Math.hypot(p.x - cameraEye[0], p.y - cameraEye[1], p.z - cameraEye[2]) > 0.025
         || context.windows?.length && (p.x !== cameraEye[0] || p.y !== cameraEye[1] || p.z !== cameraEye[2])
         || Math.abs(fx - view[0]) + Math.abs(fy - view[1]) + Math.abs(fz - view[2]) > 0.001 || view[3] !== camera.near;
-      // Motion alone re-derives within the rate budget; occlusion and perception epochs are
-      // classification inputs and re-derive at once, as does the first call of an armed context.
+      // Moving blockers change epochs too. Keep all motion within the rate
+      // budget, retaining unapplied epochs until the next derivation. A fresh
+      // actor/context still derives immediately.
       if (recomputeHz > 0) context.surfaceCompute += Math.max(0, dt);
-      const derive = !recomputeHz || occlusionChanged || perceptionChanged || context.surfaceCompute >= 1 / recomputeHz;
+      const fresh = context.surfaceActor !== actor || !Number.isFinite(eye[0]) || !Number.isFinite(cameraEye[0]);
+      const derive = !recomputeHz || fresh || context.surfaceCompute >= 1 / recomputeHz
+        && (!defer || context.surfaceCompute >= 2 / recomputeHz);
+      if (derive) context.surfaceOcclusion = occlusion;
+      // Defer at most one interval, even when a slow frame rebuilds contours every time.
+      // A deferred pass keeps its elapsed budget and pending epochs.
       if (derive && (moved || cameraMoved)) context.surfaceCompute = 0;
       const walls = context.walls, centers = context.surfaceCenters, wallGroups = context.surfaceWallGroups, outdoor = context.kind === "surface" && context.source.slopeSide === undefined;
       const wholeSection = !outdoor && (context.kind === "surface" || context.kind === "front" || context.kind === "cave" || context.kind === "sealed" || context.kind === "hole");
@@ -1040,7 +1045,7 @@
       if (changed) context.surfaceVersion++;
       return context;
     };
-    const updateSurfaces = (ex, ey, ez, camera, dt, actor = null, objectClear = null, occlusion = 0, perception = occlusion, recomputeHz = SURFACE_RECOMPUTE_HZ) => {
+    const updateSurfaces = (ex, ey, ez, camera, dt, actor = null, objectClear = null, occlusion = 0, perception = occlusion, recomputeHz = SURFACE_RECOMPUTE_HZ, defer = false) => {
       stats.surfaceRays = stats.surfaceCertificates = 0;
       const center = actor ? actor.root.position : null, px = center ? center.x : ex, py = center ? center.y : ey, pz = center ? center.z : ez;
       // Fixed authored registry; broad-phase rejection keeps the nearby view from becoming a whole-island pass.
@@ -1050,7 +1055,7 @@
           const b = wall.bounds, dx = Math.max(b[0] - px, 0, px - b[3]), dy = Math.max(b[1] - py, 0, py - b[4]), dz = Math.max(b[2] - pz, 0, pz - b[5]);
           if (dx * dx + dy * dy + dz * dz < RADIUS * RADIUS) { nearby = true; break; }
         }
-        if (nearby) updateSurface(context, ex, ey, ez, camera, dt, actor, objectClear, occlusion, perception, recomputeHz);
+        if (nearby) updateSurface(context, ex, ey, ez, camera, dt, actor, objectClear, occlusion, perception, recomputeHz, defer);
         else context.surfaceCompute = Infinity;
       }
       return contexts;

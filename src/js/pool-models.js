@@ -666,7 +666,7 @@
   // and lianas hanging from the clumps' undersides as smooth cords.
   const canopy = (seed, height, spread) => cached(() => {
     const lean = (mulberry32(seed)() - 0.5) * 0.25, top = height + 0.1, cx = lean * height;
-    const rand = mulberry32(seed + 500), geo = { verts: [], faces: [], lines: [], smooth: true, normals: [] };
+    const rand = mulberry32(seed + 500), geo = { verts: [], faces: [], lines: [], smooth: true, normals: [], foliageVisibility: false };
     limb(geo, 0, -0.1, 0, cx * 0.8, height * 0.8, 0, 0.34, 0.2, 8, TRUNK);
     limb(geo, cx * 0.8, height * 0.8, 0, cx, top - 0.2, 0, 0.2, 0.12, 8, TRUNK);
     for (let k = 0; k < 4; k++) {
@@ -700,6 +700,7 @@
       const t = 0.3 + k * 0.19, a = dressRand() * Math.PI * 2, x = cx * t + Math.cos(a) * 0.2, z = Math.sin(a) * 0.2;
       sprig(geo, x, height * t, z, Math.cos(a), 0.6, Math.sin(a), 7, 0.5 + dressRand() * 0.15, dressRand, JUNGLE);
     }
+    for (let i = canopyEnd; i < geo.faces.length; i++) geo.faces[i].visibility = false;
     geo.normals = Float32Array.from(geo.normals);
     geo.sway = 0.0006;
     // Where the wildlife climbs and perches, in the tree's own frame: the trunk's lean at the top, its height, the

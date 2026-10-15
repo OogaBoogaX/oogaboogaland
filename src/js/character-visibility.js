@@ -17,7 +17,7 @@
     const source = geometry.matrixSourceGeometry;
     if (source && !source.matrixSourceGeometry && source !== geometry && source.verts === geometry.verts && source.faces.length === geometry.faces.length) {
       let same = true;
-      for (let i = 0; i < source.faces.length; i++) if (source.faces[i].i !== geometry.faces[i].i) { same = false; break; }
+      for (let i = 0; i < source.faces.length; i++) if (source.faces[i].i !== geometry.faces[i].i || source.faces[i].visibility !== geometry.faces[i].visibility) { same = false; break; }
       if (same) {
         mesh = meshOf(source, true);
         const snapshot = sourceVertices.get(source);
@@ -27,6 +27,7 @@
         // bake merely because the new wrapper agrees with the new source.
         let at = 0;
         for (let f = 0; same && f < source.faces.length; f++) {
+          if (source.faces[f].visibility === false) continue;
           const indices = source.faces[f].i;
           for (let i = 1; same && i + 1 < indices.length; i++) {
             same = mesh.indices[at++] === indices[0] * 3
@@ -38,10 +39,10 @@
     }
     const vertices = geometry.verts, nodes = [];
     let count = 0;
-    for (const face of geometry.faces) if (face.i.length > 2) count += face.i.length - 2;
+    for (const face of geometry.faces) if (face.visibility !== false && face.i.length > 2) count += face.i.length - 2;
     const indices = new Uint32Array(count * 3), boxes = new Float64Array(count * 6), order = new Uint32Array(count);
     let n = 0;
-    for (const face of geometry.faces) for (let i = 1; i + 1 < face.i.length; i++) {
+    for (const face of geometry.faces) if (face.visibility !== false) for (let i = 1; i + 1 < face.i.length; i++) {
       const a = face.i[0] * 3, b = face.i[i] * 3, c = face.i[i + 1] * 3;
       indices[n * 3] = a; indices[n * 3 + 1] = b; indices[n * 3 + 2] = c; order[n] = n;
       for (let axis = 0; axis < 3; axis++) boxes[n * 6 + axis] = Math.min(vertices[a + axis], vertices[b + axis], vertices[c + axis]);
@@ -484,7 +485,7 @@
           const geometry = pending[pending.length - 1];
           if (meshes.has(geometry)) { pending.pop(); continue; }
           let triangles = 0;
-          for (const face of geometry.faces) if (face.i.length > 2) triangles += face.i.length - 2;
+          for (const face of geometry.faces) if (face.visibility !== false && face.i.length > 2) triangles += face.i.length - 2;
           const estimated = triangles * msPerTriangle + 1;
           if (estimated > 8) { pending.pop(); continue; }
           if (estimated > deadline.timeRemaining()) break;
