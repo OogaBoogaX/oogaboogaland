@@ -3407,7 +3407,10 @@
     };
     const following = (cave, other, gap) => {
       const a = cave.traffic, b = other.traffic;
-      if (!b.moving || !shoulderNeighbor(cave, other) || waitingFor(other, cave)) return false;
+      // Once recovery has found a safe step, let the shoulder pass finish
+      // instead of immediately joining the same oscillating queue again.
+      if (cave.progress.escaped || cave.shoulder.phase && cave.shoulder.other === other
+        || !b.moving || !shoulderNeighbor(cave, other) || waitingFor(other, cave)) return false;
       // A yielding nonworker is stationary traffic, not the leader of a worker
       // queue. Following it can close a cycle with the worker it yielded to.
       if (cave.state === "working" && other.state !== "working" && (b.waiting || b.crossing === cave || a.fx * b.fx + a.fz * b.fz < 0.95)) return false;
@@ -3423,7 +3426,8 @@
     };
     const crossingSoon = (cave, other, holding = false) => {
       const a = cave.traffic, b = other.traffic;
-      if (!b.moving || !shoulderNeighbor(cave, other) || waitingFor(other, cave)) return false;
+      if (cave.progress.escaped || cave.shoulder.phase && cave.shoulder.other === other
+        || !b.moving || !shoulderNeighbor(cave, other) || waitingFor(other, cave)) return false;
       const workerFirst = cave.state !== "working" && other.state === "working";
       if (cave.state === "working" && other.state !== "working" || !workerFirst && other.index >= cave.index) return false;
       const dot = a.fx * b.fx + a.fz * b.fz;
@@ -3687,10 +3691,8 @@
       if (!Number.isFinite(progress.x) || Math.hypot(p.x - progress.x, p.z - progress.z) >= 0.45) {
         progress.x = p.x; progress.z = p.z; progress.stalled = progress.motionless = progress.retry = 0; progress.replanned = progress.escaped = false; return;
       }
-      const leader = cave.traffic.leader || cave.traffic.crossing;
-      if (cave.traffic.waiting && leader && Math.hypot(leader.shoulder.motionX, leader.shoulder.motionZ) > 0.08) {
-        progress.stalled = progress.motionless = 0; progress.replanned = progress.escaped = false; return;
-      }
+      // A leader can move back and forth without opening a gap. Measure this
+      // walker's progress even in a queue, so a safe lateral step can free it.
       progress.stalled += dt;
       progress.motionless = Math.hypot(p.x - fromX, p.z - fromZ) > 1e-5 ? 0 : progress.motionless + dt;
       // Failed recovery jumps count as stalled travel, but neither replanning
@@ -3713,7 +3715,8 @@
         ctx.fx.say(cave, "COMING THROUGH!", 1.8);
         if (travel.mode === "walk" && ctx.bedRoute) startBedRoute(cave, travel.toBed ? cave.bedroll : travel.bed, travel.toBed);
       }
-      if (progress.stalled < 8) return;
+      // A queue may try a swept detour, but waiting never permits relocation.
+      if (progress.stalled < 8 || cave.traffic.waiting) return;
       progress.retry -= dt;
       if (progress.retry > 0) return;
       progress.retry = 4;
