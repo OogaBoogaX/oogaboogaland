@@ -160,6 +160,9 @@
     if (world.factoryNode) return world.factoryNode;
     const L = BL.factoryModels.LAYOUT, n = world.factoryNode = {
       clock: Date.now(), feed: null, mock: null, bays: [], stands: [], placeOf: new Map(), at: null, version: 0,
+      // The banana cooker's tally for the page, beside the node and never in its feed: tips cooked, bananas sent out
+      // through the gate, and the last tip's sats, for its board.
+      cooker: { tips: 0, bananas: 0, last: 0 },
       indexOf: (line) => n.placeOf.get(line) || null,
       // Through the properties, so a stubbed `mock.update` holds the show still.
       tick(dt) {

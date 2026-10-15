@@ -153,7 +153,9 @@
       camera.position.x = (tall ? 0.8 : 1.7) + Math.sin(glance) * 3; camera.position.y = Y0 + (tall ? 2.5 : 2.1); camera.position.z = a.z + (tall ? 5.4 : 3.7);
       camera.target.x = (tall ? -0.2 : -0.5) - Math.sin(glance) * 2; camera.target.y = Y0 + 0.9; camera.target.z = a.z - 6;
       dress(time, dt);
-      if (sound.hidden !== (audio.ready || !window.AudioContext)) sound.hidden = !sound.hidden;
+      // Audio may finish loading between pointer events. Keep this row's space so Skip cannot move under a click.
+      const visibility = audio.ready || !window.AudioContext ? "hidden" : "";
+      if (sound.style.visibility !== visibility) sound.style.visibility = visibility;
     };
     const fly = (dt) => {
       flight += dt;
@@ -223,6 +225,7 @@
       if (phase !== "done") { show(false); hud("land"); pilot.setExternalControl(false); }
       S.removeChild(root, group); while (group.children.length) S.removeChild(group, group.children[group.children.length - 1]);
     };
+    sound.hidden = false;
     document.addEventListener("visibilitychange", onVisibility); hud("entrance");
     return { group, opts, audio, update, overlay, action, onKey, skip, dispose, get phase() { return phase; }, get progress() { return progress; }, get flight() { return flight; } };
   };

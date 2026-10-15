@@ -1665,8 +1665,9 @@
     } else hud.toast(`Block ${event.height} went to someone else`);
   };
 
-  const onDonation = (donation) => {
-    game.recordDonation(donation);
+  // The tally counts the API's exact bananas in real mode (`counted`); the mine's money stays the game's.
+  const onDonation = (donation, counted = null) => {
+    game.recordDonation(donation, counted && counted.exact);
     const bananas = gameMod.bananasFor(donation.sats) * 400;
     s.bananas += bananas;
     hud.toast(`+${money(bananas)} bananas from ${donation.handle ? "@" + donation.handle : "anon"}`);

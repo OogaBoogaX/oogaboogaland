@@ -1,11 +1,13 @@
 // The Worker in front of Ooga Booga Land: the built page from static assets, GitHub sign-in under
-// /auth/*, the account API under /api/*, voice signalling under /api/voice/*, and /room, the island's
-// live socket. Only those paths run
-// this code (`run_worker_first` in wrangler.<env>.jsonc); every other path is served straight from _site.
+// /auth/*, the account API under /api/*, voice signalling under /api/voice/*, /room, the island's
+// live socket, and /donations/*, passed on to bananapayserver over the DONATIONS binding. Only those
+// paths run this code (`run_worker_first` in wrangler.<env>.jsonc); every other path is served
+// straight from _site.
 
 import { handleApi } from "./api.js";
 import { handleAuth } from "./auth.js";
 import { purgeExpiredSessions } from "./db.js";
+import { handleDonations } from "./donations.js";
 import { allowed, fromSite, getSessionFromRequest, text } from "./http.js";
 import { contributorFor } from "./contributor-access.js";
 
@@ -48,6 +50,7 @@ export default {
     if (url.pathname.startsWith("/api/voice/")) return handleVoice(request, env, url);
     if (url.pathname.startsWith("/api/")) return handleApi(request, env, url);
     if (url.pathname === "/room") return handleRoom(request, env);
+    if (url.pathname.startsWith("/donations/")) return handleDonations(request, env, url);
     return env.ASSETS.fetch(request);
   },
 

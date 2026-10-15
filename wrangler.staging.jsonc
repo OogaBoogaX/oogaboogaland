@@ -13,7 +13,7 @@
     "html_handling": "drop-trailing-slash",
     "not_found_handling": "404-page",
     // Only these paths run the Worker (worker/src/index.js); every other path is served straight from _site.
-    "run_worker_first": ["/auth/*", "/api/*", "/room"]
+    "run_worker_first": ["/auth/*", "/api/*", "/room", "/donations/*"]
   },
   "vars": {
     // Redirects, cookies and the Origin check all use this origin.
@@ -32,6 +32,9 @@
       "migrations_dir": "worker/migrations"
     }
   ],
+  // bananapayserver's staging Worker, on signet: /donations/* goes to its PageApi entrypoint, and /api/me tells the
+  // page donations are on. Deploy bananapayserver-staging first; production binds bananapayserver-production later.
+  "services": [{ "binding": "DONATIONS", "service": "bananapayserver-staging", "entrypoint": "PageApi" }],
   "durable_objects": {
     "bindings": [{ "name": "ROOM", "class_name": "Room" }]
   },

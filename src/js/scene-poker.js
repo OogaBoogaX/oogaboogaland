@@ -6,7 +6,7 @@
     direct: [0.88, 0.77, 0.58], directStrength: 0.38, ambientFloor: 0.48, sun: { x: 0.2, y: 1, z: 0.3 },
     shadowCenter: { x: 0, y: 1.5, z: 0 }, shadowExtent: 35, bloomStrength: 0.24,
     lights: new Float32Array(BL.glRenderer.POINT_LIGHT_CAPACITY * 8), lightCount: 13 };
-  let root, camera, input, hud, panel, pilot, fx, people, avatar, room, mirror, world, session, go;
+  let root, camera, input, hud, panel, pilot, fx, people, avatar, room, mirror, game, world, session, go;
   let leaving = false, timer = 0, selected = 0, pendingStand = false, seatTable = -1, shownCountdown = -1;
   const targets = [], snapshots = new Array(10);
   let HERO = "local-player", connecting = false, unsubscribeAccount = null, remotes = null;
@@ -185,7 +185,7 @@
     } catch (error) { panel.notice(error.message); }
   };
   const enter = ctx => {
-    world = ctx.world; go = ctx.go; leaving = false; timer = 0; HERO = "local-player"; connecting = false;
+    game = ctx.game; world = ctx.world; go = ctx.go; leaving = false; timer = 0; HERO = "local-player"; connecting = false;
     if (ctx.from === "bifrost") document.querySelector('[data-intro="poker"]').hidden = true;
     session = world.poker || (world.poker = { tables: Array.from({ length: 10 }, () => R.create()), selected: 0, pendingStand: false });
     if (!session.autoDeal) session.autoDeal = new Array(10).fill(true);
@@ -323,7 +323,7 @@
     document.body.removeAttribute("data-poker-seated");
     document.body.removeAttribute("data-poker-table-view");
     scene.input = scene.debug = null;
-    hud = panel = pilot = fx = people = avatar = room = mirror = input = session = world = go = null;
+    hud = panel = pilot = fx = people = avatar = room = mirror = input = session = game = world = go = null;
     snapshots.fill(null);
     return { targets: count };
   };
@@ -331,7 +331,10 @@
   const stats = () => { let allNodes = 0, visibleNodes = 0; const walk = n => { allNodes++; for (const c of n.children) walk(c); }; walk(root); S.traverseVisible(root, () => visibleNodes++); return { allNodes, visibleNodes, targets: input.targetCount, tweens: S.tweenCount(), ...fx.stats(), ...(remotes ? remotes.stats() : {}) }; };
   // Voice zone: the Ember Den, a portal of its own off the Bifrost chamber.
   const scene = { id: "poker", voiceZone: "ember-den", micKey: true, enter, update, overlay: dt => fx.drawOverlay(dt, extra), onKey, leave, liveGeometry, stats, renderOpts,
-    onDonation() {}, onLootCleared() {}, root: null, camera: null, input: null, debug: null,
+    onDonation(donation, counted = null) {
+      game.recordDonation(donation, counted && counted.exact);
+      world.level = Math.min(BL.pile.MAX_BANANAS, world.level + (counted ? counted.exact : BL.game.bananasFor(donation.sats)));
+    }, onLootCleared() {}, root: null, camera: null, input: null, debug: null,
     agent: null, agentView: null, agentControls: null, agentHandoff: null, get inMotion() { return !!room; } };
   BL.scenes.poker = scene;
 })();
