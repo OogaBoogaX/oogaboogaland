@@ -862,7 +862,10 @@
     }
     return false;
   };
-  const onDonation = () => {};
+  const onDonation = (donation, counted = null) => {
+    game.recordDonation(donation, counted && counted.exact);
+    world.level = Math.min(BL.pile.MAX_BANANAS, world.level + (counted ? counted.exact : BL.game.bananasFor(donation.sats)));
+  };
   const onLootCleared = () => {};
 
   // Point lights, most important first so the lowest tier (ten) keeps them, warm lamp light first and the games'

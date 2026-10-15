@@ -2,7 +2,8 @@
 // at /api/me on start; a signed-in visitor then holds one socket to /room for the page life. A page with
 // no backend behind it (GitHub Pages, a file, `npm run serve`) gets no JSON from /api/me and stays as it
 // always was: `backend` false, nothing shown, no socket. Like the live feeds it stays off under nosim and
-// can be disabled with net=0; the director starts it.
+// can be disabled with net=0; the director starts it. The same look says whether the Worker takes real
+// donations (`state.donations`), which the director hands to donations.js.
 //
 // The room answers who else is on the island: `remotes` (id → { login, display, body, zone, voice, muted, x, y, z, yaw }),
 // updated in place from its snapshots (up to 15 a second while anyone moves). A scene reports the Ooga the visitor drives with `setBody`
@@ -54,7 +55,7 @@
   // room: "off" (signed out or no backend), "connecting", "live", "paused" (hidden a while), or a kick that
 // stopped it ("replaced", "full").
   const offline = new URLSearchParams(location.search);
-  const state = { backend: false, me: null, logoutEpoch: 0, started: false,
+  const state = { backend: false, me: null, donations: false, logoutEpoch: 0, started: false,
     resolved: offline.has("nosim") || offline.get("net") === "0" || location.protocol !== "http:" && location.protocol !== "https:",
     room: "off", selfId: 0, online: 0, released: null, loopEpoch: 0, zone: "outside", body: null, hostId: 0, followers: 0, npcVersion: 0 };
   let ws = null, retry = 0, retryTimer = 0, pingTimer = 0, hiddenTimer = 0, stopped = false;
@@ -287,6 +288,7 @@
       if (!data || !("player" in data)) return;
       state.backend = true;
       state.me = accept(data.player);
+      state.donations = data.donations === true;
       state.resolved = data.player === null || !!state.me;
       if (state.me) BL.contributors.addTemporary(data.character, state.me.login);
     } catch {

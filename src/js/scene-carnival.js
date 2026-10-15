@@ -1214,11 +1214,15 @@
     return { visibleNodes: nodes, allNodes: all(root), tweens: tweenCount(), targets: input.targetCount, ...fx.stats() };
   };
 
+  const onDonation = (donation, counted = null) => {
+    game.recordDonation(donation, counted && counted.exact);
+    world.level = Math.min(BL.pile.MAX_BANANAS, world.level + (counted ? counted.exact : BL.game.bananasFor(donation.sats)));
+  };
   const SCENES = {};
   BL.scenes = BL.scenes || {};
   for (const id of Object.keys(KINDS)) {
     SCENES[id] = BL.scenes[id] = {
-      id, enter: (ctx) => enter(ctx, id), update, overlay, onDonation: () => {}, onKey, onLootCleared: () => {}, renderOpts: RENDER_OPTS,
+      id, enter: (ctx) => enter(ctx, id), update, overlay, onDonation, onKey, onLootCleared: () => {}, renderOpts: RENDER_OPTS,
       leave: leaveScene, stats, liveGeometry, root: null, camera: null, input: null, debug: null, agent: null, agentView: null, agentControls: null, agentHandoff: null,
       get inMotion() { return phase === "play" || phase === "count"; }
     };
