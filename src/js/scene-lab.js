@@ -61,7 +61,7 @@
 
   // One visit's state: made in enter(), dropped in leave().
   let renderer, game, world, go, lootEnabled, testBananas, root, camera, lab, hud, hooks, input, pilot, fx, pile, crew, crates, pulseNodes, agent, agentPlay;
-  let stateTimer = 0, hintTimer = 0, meterTimer = 0, unsubscribeActivity = null, dust = null, remotes = null;
+  let stateTimer = 0, hintTimer = 0, meterTimer = 0, unsubscribeActivity = null, dust = null, remotes = null, footsteps = null;
   const NO_ACTORS = [];
   const propTargets = [];
   const addProp = (node, owner, opts) => {
@@ -309,6 +309,7 @@
       BL.net.setHealth(drivenHere.health.value, drivenHere.health.stunned);
     }
     remotes.update(dt);
+    footsteps.update(drivenHere);
     dust.update(elapsed, pilot.orbit.target.x, pilot.orbit.target.z);
     meterTimer -= dt;
     if (meterTimer <= 0) {
@@ -420,6 +421,8 @@
     crew = shared.crew = crewMod.create(shared);
     // Other signed-in players in the lab, as the Oogas they drive (the crew's own copy steps away meanwhile).
     remotes = BL.remotePlayers.create({ root, crew });
+    // The driven Ooga's own footsteps, heard by this page alone (footsteps.js).
+    footsteps = BL.footsteps.create();
     mark("cavemen");
     crates = shared.crates = cratesMod.create(shared);
     pilot.bind(shared);
@@ -546,6 +549,8 @@
     pile.dispose();
     remotes.dispose();
     remotes = null;
+    footsteps.dispose();
+    footsteps = null;
     crew.dispose();
     if (agent) agent.dispose();
     fx.dispose();
