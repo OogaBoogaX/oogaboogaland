@@ -1483,6 +1483,109 @@ body[data-active-scene="arcade"] .magazine-hud {
   padding-right: 28px;
 }
 
+/* Free Hardware Wallets: the store's choice of its two devices, and the line over the room while one is carried. */
+.wallet-picks {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.wallet-pick {
+  display: grid;
+  justify-items: center;
+  align-content: start;
+  gap: 6px;
+  padding: 10px 6px 9px;
+  border: 2px solid var(--stone-dk);
+  border-radius: 7px 6px 8px 6px;
+  background: var(--tablet);
+  box-shadow: var(--tablet-shadow);
+  color: var(--paper);
+  font: inherit;
+  text-align: center;
+  cursor: pointer;
+}
+
+.wallet-pick b {
+  font-size: 13px;
+  letter-spacing: 0.06em;
+}
+
+.wallet-face {
+  width: 84px;
+  height: 84px;
+}
+
+.wallet-pick:hover,
+.wallet-pick.virtual-hover,
+.wallet-pick:focus-visible {
+  border-color: var(--accent);
+  outline: none;
+}
+
+.wallet-pick[aria-pressed="true"] {
+  border-color: var(--accent);
+  background: linear-gradient(160deg, #6a5034, #3a2e22);
+  color: var(--accent-text);
+}
+
+.wallet-actions {
+  grid-template-columns: 1fr;
+}
+
+.wallet-carry {
+  position: absolute;
+  left: 50%;
+  top: calc(52px + var(--safe-top));
+  transform: translateX(-50%);
+  z-index: 6;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 4px 8px;
+  max-width: calc(100vw - 32px - var(--safe-left) - var(--safe-right));
+  margin: 0;
+  padding: 6px 8px 6px 12px;
+  background: var(--tablet);
+  border: 2px solid var(--accent);
+  border-radius: 7px 6px 8px 6px;
+  box-shadow: var(--tablet-shadow);
+  color: var(--paper);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-align: center;
+}
+
+/* On touch screens the top holds the scene's buttons: the line sits over the act button, between the sticks. */
+@media (pointer: coarse) {
+  .wallet-carry {
+    top: auto;
+    bottom: calc(172px + var(--safe-bottom));
+    max-width: min(420px, calc(100vw - 32px - var(--safe-left) - var(--safe-right)));
+  }
+}
+
+.wallet-throw {
+  min-height: 32px;
+  padding: 0 14px;
+  border: 2px solid var(--wood-edge);
+  border-radius: 6px;
+  background: linear-gradient(#e2a04a, var(--accent));
+  color: var(--ink);
+  font: inherit;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  box-shadow: 0 3px 0 var(--nail);
+  cursor: pointer;
+}
+
+.wallet-throw:hover,
+.wallet-throw.virtual-hover {
+  background: linear-gradient(#f0b05a, #e2a04a);
+}
+
 .loot-assign:disabled {
   opacity: 0.5;
   cursor: not-allowed;

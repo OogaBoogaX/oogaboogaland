@@ -11,7 +11,9 @@
   const slots = [
     { ...slot("c11", 11, "lab", "open", "EntropyLab", "oogaboogax/entropylab"), theme: "lab" },
     slot("c10", 10),
-    slot("c9", 9),
+    // Free Hardware Wallets: a little store whose vending machine gives devices away (scene-wallets.js). Like the
+    // arcade's, its torches glow without casting light of their own.
+    { ...slot("c9", 9, "wallets", "open", "Free Hardware Wallets"), glowOnly: true, theme: "wallets" },
     slot("c730", 7.25, null, "headquarters", "Headquarters"),
     { ...slot("c1", 1, null, "mirror", "Ooga Booga Land", "oogaboogax/oogaboogaland"), theme: "matrix" },
     { ...slot("c2", 2, "factory", "open", "Lightning Factory", "oogaboogax/lightningfoundry"), additionalRepo: "oogaboogax/bananapayserver", theme: "lightning" },

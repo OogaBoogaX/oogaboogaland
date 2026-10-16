@@ -158,6 +158,7 @@
         <p data-scene="factory" hidden>Lightning Factory</p>
         <p data-scene="bifrost" hidden>₿IFRÖST</p>
         <p data-scene="arcade" hidden>Ooga Arcade</p>
+        <p data-scene="wallets" hidden>Free Hardware Wallets</p>
         <p data-scene="skee" hidden>Ooga Arcade · Thro-ball</p>
         <p data-scene="hoops" hidden>Ooga Arcade · Hoop Shot</p>
         <p data-scene="shy" hidden>Ooga Arcade · Coconut Toss</p>
@@ -275,6 +276,11 @@
         <button type="button" data-preset="skee">Thro</button>
         <button type="button" data-preset="shy">Coconuts</button>
         <button type="button" data-action="arcade-mute">Sound</button>
+        <button type="button" class="leave" data-action="leave">Leave<span> cave</span></button>
+      </nav>
+      <nav class="presets" aria-label="Free Hardware Wallets" data-scene="wallets" hidden>
+        <button type="button" data-preset="store">Store</button>
+        <button type="button" data-preset="machine">Machine</button>
         <button type="button" class="leave" data-action="leave">Leave<span> cave</span></button>
       </nav>
       <nav class="presets" aria-label="Race" data-scene="race" hidden>
@@ -786,6 +792,9 @@
         <p class="help">Every game pays tickets. Trade for loot!</p>
         <div class="actions"><button type="button" class="prize-close">Ooga done</button></div>
       </section>
+    </div>
+    <div class="wallets-ui" data-scene="wallets" hidden>
+      <p class="wallet-carry" id="wallet-carry" hidden><span id="wallet-carry-text"></span> <button type="button" class="wallet-throw" data-action="wallet-throw" title="Throw it (T)">Throw</button></p>
     </div>
     <div class="race carnival" id="carnival" hidden>
       <div class="carnival-flash" id="carnival-flash" aria-hidden="true"></div>
@@ -1487,6 +1496,20 @@ Then run npm run build and ONLY=characters node test/run.mjs.</pre>
         <button type="button" data-action="recipe-copy">Copy prompt</button>
       </div>
     </dialog>
+    <dialog class="modal wallet-modal" id="wallet-shop" aria-label="Free hardware wallets">
+      <div class="panel-head">
+        <h2><span data-sign>Free wallets</span></h2>
+        <button type="button" class="modal-close" data-action="wallet-close" aria-label="Close">&times;</button>
+      </div>
+      <p class="help">Pick one. Free. Totally legit.</p>
+      <div class="wallet-picks" aria-label="Pick a free hardware wallet">
+        <button type="button" class="wallet-pick" data-wallet="1" aria-pressed="true"><svg class="wallet-face" viewBox="0 0 16 16" shape-rendering="crispEdges" aria-hidden="true"><path fill="#f6f1e4" d="M3 2h10v1H3zM2 3h2v1H2zM12 3h2v1H12zM2 4h2v1H2zM12 4h2v1H12zM2 5h2v1H2zM12 5h2v1H12zM2 6h2v1H2zM12 6h2v1H12zM2 7h5v1H2zM9 7h5v1H9zM2 8h4v1H2zM10 8h4v1H10zM2 9h4v1H2zM10 9h4v1H10zM2 10h5v1H2zM9 10h5v1H9zM2 11h12v1H2zM2 12h2v1H2zM6 12h1v1H6zM9 12h1v1H9zM12 12h2v1H12zM2 13h2v1H2zM6 13h1v1H6zM9 13h1v1H9zM12 13h2v1H12zM2 14h12v1H2z" /><path fill="#3aa0ff" d="M2 0h2v1H2zM1 1h4v1H1zM1 2h2v1H1z" /><path fill="#ff5ab0" d="M12 0h2v1H12zM11 1h4v1H11zM13 2h2v1H13z" /><path fill="#121416" d="M4 3h8v1H4zM4 4h1v1H4zM11 4h1v1H11zM4 5h1v1H4zM11 5h1v1H11zM4 6h8v1H4z" /><path fill="#46ff72" d="M5 4h6v1H5zM5 5h6v1H5z" /><path fill="#ff2a2a" d="M7 7h2v1H7zM6 8h4v1H6zM6 9h4v1H6zM7 10h2v1H7z" /><path fill="#ff4b3a" d="M4 12h2v1H4z" /><path fill="#ffd23a" d="M7 12h2v1H7z" /><path fill="#3aa0ff" d="M10 12h2v1H10z" /><path fill="#46c85a" d="M4 13h2v1H4z" /><path fill="#c06cff" d="M7 13h2v1H7z" /><path fill="#ff8a1f" d="M10 13h2v1H10z" /></svg><b>ClownCard</b></button>
+        <button type="button" class="wallet-pick" data-wallet="0" aria-pressed="false"><svg class="wallet-face" viewBox="0 0 24 12" shape-rendering="crispEdges" aria-hidden="true"><path fill="#ff8a1f" d="M0 1h20v1H0zM0 2h20v1H0zM0 3h2v1H0zM19 3h1v1H19zM0 4h2v1H0zM19 4h1v1H19zM0 5h2v1H0zM19 5h1v1H19zM0 6h2v1H0zM19 6h1v1H19zM0 7h2v1H0zM19 7h1v1H19zM0 8h2v1H0zM19 8h1v1H19zM0 9h2v1H0zM19 9h1v1H19z" /><path fill="#c96a14" d="M0 10h20v1H0z" /><path fill="#c9ced6" d="M20 2h3v1H20zM20 3h4v1H20zM20 4h4v1H20zM20 5h4v1H20zM20 6h4v1H20zM20 7h4v1H20zM20 8h4v1H20zM20 9h3v1H20z" /><path fill="#121416" d="M2 3h17v1H2zM2 4h1v1H2zM5 4h2v1H5zM10 4h1v1H10zM12 4h1v1H12zM14 4h1v1H14zM18 4h1v1H18zM2 5h1v1H2zM4 5h1v1H4zM6 5h1v1H6zM8 5h3v1H8zM12 5h1v1H12zM14 5h2v1H14zM17 5h2v1H17zM2 6h1v1H2zM5 6h2v1H5zM9 6h2v1H9zM13 6h3v1H13zM17 6h2v1H17zM2 7h1v1H2zM4 7h1v1H4zM6 7h1v1H6zM8 7h3v1H8zM12 7h1v1H12zM14 7h2v1H14zM17 7h2v1H17zM2 8h1v1H2zM4 8h1v1H4zM6 8h1v1H6zM10 8h1v1H10zM12 8h1v1H12zM14 8h2v1H14zM17 8h2v1H17zM2 9h17v1H2z" /><path fill="#ff5a46" d="M3 4h2v1H3zM7 4h3v1H7zM11 4h1v1H11zM13 4h1v1H13zM15 4h3v1H15zM3 5h1v1H3zM5 5h1v1H5zM7 5h1v1H7zM11 5h1v1H11zM13 5h1v1H13zM16 5h1v1H16zM3 6h2v1H3zM7 6h2v1H7zM11 6h2v1H11zM16 6h1v1H16zM3 7h1v1H3zM5 7h1v1H5zM7 7h1v1H7zM11 7h1v1H11zM13 7h1v1H13zM16 7h1v1H16zM3 8h1v1H3zM5 8h1v1H5zM7 8h3v1H7zM11 8h1v1H11zM13 8h1v1H13zM16 8h1v1H16z" /></svg><b>Rektdger</b></button>
+      </div>
+      <div class="actions wallet-actions">
+        <button type="button" data-action="wallet-take">Take</button>
+      </div>
+    </dialog>
     <dialog class="chalk-modal" id="chalk-modal" aria-labelledby="chalk-title">
       <div class="chalk-head">
         <h2 id="chalk-title">EntropyLab chalkboard</h2>
@@ -1660,6 +1683,7 @@ Then run npm run build and ONLY=characters node test/run.mjs.</pre>
   <script src="js/mirror-guides.js"></script>
   <script src="js/crates.js"></script>
   <script src="js/critters.js"></script>
+  <script src="js/wallet-bombs.js"></script>
   <script src="js/weather.js"></script>
   <script src="js/race-models.js"></script>
   <script src="js/drop-models.js"></script>
@@ -1700,6 +1724,7 @@ Then run npm run build and ONLY=characters node test/run.mjs.</pre>
   <script src="js/arcade-games.js"></script>
   <script src="js/retro-games.js"></script>
   <script src="js/scene-arcade.js"></script>
+  <script src="js/scene-wallets.js"></script>
   <script src="js/carnival-audio.js"></script>
   <script src="js/scene-carnival.js"></script>
   <script src="js/race-track.js"></script>

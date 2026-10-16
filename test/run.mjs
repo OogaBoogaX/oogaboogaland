@@ -3684,7 +3684,7 @@ const orbitFlow = async (b) => {
 // `node test/run.mjs race mine` runs the global unit tier plus those scenes; `full` runs every scene and the
 // perf floor; `perf` runs the perf floor alone; `unit` (or nothing) runs only the global tier.
 // Eight lanes saturate a 16-core box (measured 2026-09-20); raising it only adds heat.
-const SCENES = ["hub", "lab", "race", "drop", "orbit", "mine", "dsb", "factory", "bifrost", "poker", "arcade", "skee", "hoops", "shy", "claw", "hockey", "billiards", "darts", "pinball", "ride", "invaders", "snake", "pong", "stampede", "flap", "breaker", "dash", "stacker"];
+const SCENES = ["hub", "lab", "race", "drop", "orbit", "mine", "dsb", "factory", "bifrost", "poker", "arcade", "wallets", "skee", "hoops", "shy", "claw", "hockey", "billiards", "darts", "pinball", "ride", "invaders", "snake", "pong", "stampede", "flap", "breaker", "dash", "stacker"];
 const LANES = Number(process.env.LANES) || 8;
 const ARGS = process.argv.slice(2);
 for (const a of ARGS) if (!SCENES.includes(a) && !["unit", "chat-unit", "integration-unit", "svrn-unit", "svrn-review", "vacancy-unit", "portal-unit", "water-baseline", "water-review", "water-unit", "stackchain-review", "stackchain-unit", "dsb-menus-unit", "maxis-unit", "exterior-unit", "rulers-unit", "ink-unit", "big-unit", "perf", "full", "poker-protocol"].includes(a)) throw new Error(`Unknown argument "${a}" (unit | perf | full | poker-protocol | ${SCENES.join(" | ")})`);
@@ -4552,7 +4552,7 @@ const npcPaths = (backend) => [`NPC paths ${backend}`, async (b) => {
 
 // The games' rules and saves in Node, under the same localStorage the page uses: the mine's seeded sim,
 // every game's stored best, the tickets a machine spends and the jackpot wheel's odds.
-const GAME_SOURCES = ["math", "donations", "rocket-parts", "mine-rigs", "mine-sim", "game"];
+const GAME_SOURCES = ["math", "donations", "rocket-parts", "mine-rigs", "mine-sim", "game", "wallet-bombs"];
 const gameRulesChecks = async () => {
   const store = new Map();
   const context = { window: {}, URLSearchParams, location: { search: "" }, localStorage: { getItem: (k) => store.get(k) ?? null, setItem: (k, v) => store.set(k, String(v)), removeItem: (k) => store.delete(k) } };
@@ -4613,6 +4613,18 @@ const gameRulesChecks = async () => {
     wallet.addTickets(1);
     const spent = wallet.spendTickets(20) && wallet.state.arcade.tickets === 0 && make().state.arcade.tickets === 0;
     record("tickets: a spend refuses when the tickets fall short or the cost is no whole number above nothing, spending nothing, and one that goes through is saved", short && malformed && spent, JSON.stringify({ short, malformed, spent }));
+  }
+  {
+    // Free Hardware Wallets: a blast sets off every live device within the chain radius of any device going off,
+    // never a spent one or one out of reach, and the merged blast widens by the square root and hits by the count.
+    const W = BL.walletBombs, R = W.CHAIN_RADIUS, xs = new Float32Array([0, R * 0.9, R * 1.8, R * 5, R * 0.5]), zs = new Float32Array(5);
+    const live = new Uint8Array([1, 1, 1, 1, 0]), out = new Uint8Array(5);
+    const n = W.chainFrom(xs, zs, live, 5, 0, out);
+    const chained = n === 3 && out[0] && out[1] && out[2] && !out[3] && !out[4];
+    const alone = W.chainFrom(xs, zs, live, 5, 3, out) === 1 && !out[0];
+    const one = W.blastOf(1), four = W.blastOf(4), many = W.blastOf(100);
+    const scaled = one.radius === W.BASE_RADIUS && Math.abs(four.radius - 2 * W.BASE_RADIUS) < 1e-9 && four.power === 4 * W.BASE_POWER && many.power === W.POWER_CAP * W.BASE_POWER;
+    record("wallet bombs: a blast chains through every live device in reach, never a spent or distant one, and the merged blast scales by count with a capped hit", chained && alone && scaled && W.BOMB_CAP === 16 && W.FUSE === 21, JSON.stringify({ n, chained, alone, scaled }));
   }
   {
     // The jackpot wheel, from arcade-models.js on the builders it loads with: the house wins slowly, and every
@@ -7427,6 +7439,93 @@ const phone = (id, { card = null, play = null, required, sheet = false }) => ({ 
   record(`${id} phone: ${card ? "the title card reads in touch words and its go button starts the game, then " : ""}nothing is clipped, wrapped by accident or off screen, and every control is under a thumb${sheet ? ", with the sheet open too" : ""}`, ok, JSON.stringify(seen));
 } });
 
+// ---- Walk-in caves: the way back out ----
+// Whoever is inside a walk-in cave, walked in from the island or opened straight by its address, steps out of its
+// doorway back onto the island driven, shown and standing at its mouth in view. `setup` runs inside first (a device
+// taken into the hands, say).
+const caveWayOut = (id, mouth, setup = "") => ({ name: `${id} way out`, why: "regression: a cave opened by its address took in an Ooga away from the island, which the island could not hand back, so the visitor stepped out of the doorway driving nobody and saw no Ooga", run: async (b) => {
+  const inside = await b.evaluate(`(() => { const B = window.__ooga, p = B.pilot.player; ${setup} B.advance(0.3, 1 / 30); return p && { who: p.traits.name, away: window.BL.contributors.stateFor(p.contributor) === "away" }; })()`);
+  // The Ooga faces the back wall with the view behind it, so S walks it straight out of the doorway.
+  await holdKey(b, "s", 3.5);
+  const left = await untilPage(b, 'B.scene === "hub" && !B.transitioning', 20000);
+  const out = await b.evaluate(`(() => {
+    const B = window.__ooga, p = B.pilot.player, m = B.island.mouths.find((mouth) => mouth.id === "${mouth}");
+    if (!p) return { scene: B.scene, who: null };
+    let shown = true;
+    for (let n = p.root; n; n = n.parent) shown = shown && n.visible;
+    const at = p.root.position, s = B.project(at.x, at.y + 0.8, at.z, {}), w = innerWidth, h = innerHeight;
+    return { scene: B.scene, who: p.traits.name, shown, state: B.crew.stateOf(p), fromMouth: Math.hypot(at.x - m.x, at.z - m.z), onScreen: !!s && s.x > 0 && s.x < w && s.y > 0 && s.y < h };
+  })()`);
+  record(`${id} way out: stepping out of the doorway brings the Ooga inside back onto the island, driven, shown and in view at the mouth`, inside && !inside.away && left && out.who === inside.who && out.shown && out.state !== "away" && out.fromMouth < 14 && out.onScreen, JSON.stringify({ inside, left, out }));
+} });
+// ---- Free Hardware Wallets ----
+// The store from the visitor's side, with real taps and keys: the machine opens the choice of the two devices, Take
+// puts the chosen one in the driven Ooga's hands, a tap on the floor walks it there and sets it down exactly there,
+// the Throw button and T throw, a tap on one on the floor walks over and picks it up, and devices set down together
+// go off as one blast. Ends with no device left.
+const WALLETS = `const B = window.__ooga, S = window.BL.scenes.wallets.debug.store, W = B.walletBombs;`;
+const walletsTap = async (b, x, y, z) => { const p = await b.evaluate(`window.__ooga.project(${x}, ${y}, ${z}, {})`); await b.click(p.x, p.y); };
+const walletsUntil = (b, cond) => b.evaluate(`(() => { ${WALLETS} for (let i = 0; i < 120 && !(${cond}); i++) B.advance(0.1, 1 / 30); return !!(${cond}); })()`);
+const walletsStoreFlow = async (b) => {
+  const out = {};
+  const m = await b.evaluate(`(() => { ${WALLETS} B.advance(0.3, 1 / 30); return S.machine; })()`);
+  await walletsTap(b, m.x, 1.3, m.z + 0.55);
+  out.dialog = await b.evaluate(`(() => { ${WALLETS} const d = document.getElementById("wallet-shop"); return { open: S.shopOpen, names: [...d.querySelectorAll(".wallet-pick")].map((n) => n.textContent.trim()).join(), help: d.querySelector(".help").textContent, surprise: !/explod|second|beep|bomb/i.test(d.textContent), take: d.querySelector('[data-action="wallet-take"]').textContent }; })()`);
+  await b.evaluate(`document.querySelector('#wallet-shop [data-wallet="1"]').click(); document.querySelector('#wallet-shop [data-action="wallet-take"]').click(); window.__ooga.advance(0.2, 1 / 30)`);
+  out.carried = await b.evaluate(`(() => { ${WALLETS} const d = W.list()[0], t = document.getElementById("toast"); return { held: W.stats().walletsHeld, look: d && d.look, closed: !S.shopOpen, line: S.carryLine, hint: t.hidden ? null : t.textContent }; })()`);
+  await walletsTap(b, -1.2, 0, -3.4);
+  out.walked = await walletsUntil(b, "!S.walking");
+  out.placed = await b.evaluate(`(() => { ${WALLETS} const d = W.list()[0]; return { state: d.state, off: Math.hypot(d.x + 1.2, d.z + 3.4), line: S.carryLine }; })()`);
+  await walletsUntil(b, "W.stats().walletsHeld === 0 && !W.refusal()");
+  await walletsTap(b, m.x, 1.3, m.z + 0.55);
+  await b.evaluate(`document.querySelector('#wallet-shop [data-wallet="0"]').click(); document.querySelector('#wallet-shop [data-action="wallet-take"]').click(); window.__ooga.advance(0.2, 1 / 30)`);
+  out.second = await b.evaluate(`(() => { ${WALLETS} return W.list().map((d) => d.look + ":" + d.state).join(); })()`);
+  // Thrown toward the open side of the room (it flies about five metres).
+  await b.evaluate(`(() => { window.__ooga.pilot.player.root.rotation.y = Math.PI / 2; document.querySelector('#wallet-carry [data-action="wallet-throw"]').click(); })()`);
+  out.thrown = await b.evaluate(`(() => { ${WALLETS} const flying = W.list().some((d) => d.state === "flying"); B.advance(1.6, 1 / 30); return { flying, landed: W.list().filter((d) => d.state === "dropped").length }; })()`);
+  const far = await b.evaluate(`(() => { ${WALLETS} const d = W.list().find((e) => e.look === "rektdger"); return d; })()`);
+  await walletsTap(b, far.x, far.y + 0.1, far.z);
+  out.pickedUp = await walletsUntil(b, "W.stats().walletsHeld === 1");
+  await walletsTap(b, -0.4, 0, -3.3);
+  await walletsUntil(b, "!S.walking");
+  out.pair = await b.evaluate(`(() => { ${WALLETS} const [a, c] = W.list(); return { placed: W.stats().walletsPlaced, apart: Math.hypot(a.x - c.x, a.z - c.z) }; })()`);
+  await walletsUntil(b, "!W.refusal()");
+  await walletsTap(b, m.x, 1.3, m.z + 0.55);
+  await b.evaluate(`document.querySelector('#wallet-shop [data-action="wallet-take"]').click(); window.__ooga.advance(0.2, 1 / 30)`);
+  await b.key("t");
+  out.keyThrow = await b.evaluate(`(() => { ${WALLETS} return W.stats().walletsHeld === 0 && W.list().some((d) => d.state === "flying"); })()`);
+  out.blast = await b.evaluate(`(() => { ${WALLETS} B.advance(1.6, 1 / 30); const before = W.stats(); W.timer(0.05); B.advance(0.4, 1 / 30); const after = W.stats(); return { blasts: after.walletBlasts - before.walletBlasts, chained: after.walletsChained - before.walletsChained, left: after.wallets, scorches: after.scorches }; })()`);
+  out.ok = out.dialog.open && out.dialog.names === "ClownCard,Rektdger" && out.dialog.help === "Pick one. Free. Totally legit." && out.dialog.surprise && out.dialog.take === "Take"
+    && out.carried.held === 1 && out.carried.look === "clowncard" && out.carried.closed && out.carried.line === "Carrying ClownCard · 21 s · Click the ground to place ·" && out.carried.hint === "Press T to throw · Click the ground to place"
+    && out.walked && out.placed.state === "dropped" && out.placed.off < 0.05 && out.placed.line === null && out.second === "clowncard:dropped,rektdger:carried"
+    && out.thrown.flying && out.thrown.landed === 2 && out.pickedUp && out.pair.placed === 2 && out.pair.apart < 1.2 && out.keyThrow
+    && out.blast.chained >= 2 && out.blast.blasts <= 2 && out.blast.blasts + out.blast.chained >= 4 && out.blast.left === 0;
+  return out;
+};
+const walletsStore = { name: "wallets store", why: "playthrough: a tap on the machine offers ClownCard and Rektdger by name alone, Take hands one over with its countdown line and, on a desktop, the keys, a tap on the floor sets it down there, Throw and T throw, a far one is walked to and picked up, and devices set down together go off as one blast", run: async (b) => {
+  const r = await walletsStoreFlow(b);
+  record("wallets store: the machine opens the choice of ClownCard and Rektdger, Take hands one over, a floor tap sets it down exactly there, Throw and T throw it, a far one is picked up, and two set down together go off as one blast", r.ok, JSON.stringify(r));
+} };
+// From the island: the visitor's Ooga walks into the 9 o'clock mouth and Space takes it into the store, the whole
+// store flow plays, and Escape brings the same Ooga back out at the mouth.
+const hubWalletsDoor = { name: "hub wallets door", why: "playthrough: Free Hardware Wallets is a real cave, walked into from the island, its store played through, and left back to the island as the same Ooga", run: async (b) => {
+  const at = await b.evaluate(`(() => { const B = window.__ooga, a = B.cavemen.get("portlandhodl"), m = B.island.mouths.find((mouth) => mouth.id === "c9"), ax = Math.sin(m.ry), az = Math.cos(m.ry); if (B.crew.player !== a) B.pilot.possess(a); const x = m.x - ax * 2.6, z = m.z - az * 2.6; B.pilot.navigate({ position: { x, y: m.floorY, z }, yaw: m.ry, pitch: 0.2, dist: 6 }); B.advance(0.5, 1 / 30); const p = a.root.position; return { off: Math.hypot(p.x - x, p.z - z), act: document.querySelector("#act") ? document.querySelector("#act").textContent : null }; })()`);
+  await b.key(" ");
+  const entered = await untilPage(b, 'B.scene === "wallets" && !B.transitioning', 20000);
+  const inside = await b.evaluate(`(() => { const p = window.__ooga.pilot.player; return p && p.traits.name; })()`);
+  const store = await walletsStoreFlow(b);
+  await b.key("Escape");
+  const left = await untilPage(b, 'B.scene === "hub" && !B.transitioning', 20000);
+  const out = await b.evaluate(`(() => { const B = window.__ooga, p = B.pilot.player, m = B.island.mouths.find((mouth) => mouth.id === "c9"); return { scene: B.scene, who: p && p.traits.name, fromMouth: p ? Math.hypot(p.root.position.x - m.x, p.root.position.z - m.z) : null }; })()`);
+  record("hub wallets door: the Ooga walks into the 9 o'clock mouth, Space takes it into the store, the store plays through, and Escape brings the same Ooga back out at the mouth", entered && inside === "portlandhodl" && store.ok && left && out.scene === "hub" && out.who === "portlandhodl" && out.fromMouth < 14, JSON.stringify({ at, entered, inside, store, out }));
+} };
+// On a phone: the choice with both portraits and Take, then the carry line with its Throw button beside the sticks.
+const walletsPhone = phone("wallets", { play: `(() => { const S = window.BL.scenes.wallets.debug.store; S.open(); return S.shopOpen; })()`, required: ['#wallet-shop [data-wallet="1"]', '#wallet-shop [data-wallet="0"]', '#wallet-shop [data-action="wallet-take"]'] });
+const walletsPhoneCarrying = { name: "wallets phone carrying", why: "rule: every scene is readable and playable on a phone, nothing clipped and every control under a thumb", run: async (b) => {
+  await b.evaluate(`(() => { const S = window.BL.scenes.wallets.debug.store; S.take(); window.__ooga.advance(1, 1 / 60); })()`);
+  const bad = await b.evaluate(PHONE(["#joy-move", "#joy-look", ".leave", "#wallet-carry .wallet-throw"]));
+  record("wallets phone carrying: the carry line and its Throw button sit on screen under a thumb beside the sticks, nothing clipped", bad.length === 0, JSON.stringify(bad));
+} };
 // ---- The Lightning Factory ----
 // The demo node is held still so an event handed to the feed is the only thing moving; events use the demo
 // contract and a node of their own, so their sequence numbers never meet the demo node's.
@@ -11072,6 +11171,11 @@ scene("bifrost", { label: "dsb round trip", query: "character=portlandhodl", ste
 scene("bifrost", { label: "poker round trip", query: "character=portlandhodl", steps: [bifrostPoker] });
 scene("bifrost", { label: "canvas2d", url: hubPage(src, "canvas2d=1"), steps: [bifrostCanvas] });
 scene("arcade", { query: "character=portlandhodl", steps: [arcadeWalking, arcadeMachine, arcadePlay, trip("arcade")] });
+// Each wallets session stands alone so none nears the 120 s session deadline on a slow machine.
+scene("wallets", { query: "character=portlandhodl&pos=0", steps: [walletsStore] });
+scene("wallets", { label: "round trip", query: "character=portlandhodl&pos=0", steps: [trip("wallets")] });
+scene("hub", { label: "wallets door", query: "character=portlandhodl&pos=0", steps: [hubWalletsDoor] });
+scene("wallets", { label: "way out", query: "pos=0", steps: [caveWayOut("wallets", "c9", "window.BL.scenes.wallets.debug.store.take();")] });
 scene("skee", { steps: [carnivalPlay("skee", 0.5), trip("skee")] });
 scene("hoops", { steps: [carnivalPlay("hoops", 0.2), trip("hoops")] });
 scene("shy", { steps: [carnivalPlay("shy", 0.7), trip("shy")] });
@@ -11189,6 +11293,7 @@ scene("mine", { query: "pos=0", opts: PHONE_SIZE, steps: [phone("mine", { card: 
 scene("factory", { query: "pos=0&character=portlandhodl", opts: PHONE_SIZE, steps: [phone("factory", { required: ["#joy-move", "#joy-look", ".leave"] }), factoryGreeter] });
 scene("bifrost", { query: "pos=0", opts: PHONE_SIZE, steps: [phone("bifrost", { required: ["#joy-move", "#joy-look", ".leave"] })] });
 scene("arcade", { query: "pos=0", opts: PHONE_SIZE, steps: [phone("arcade", { required: ["#joy-move", "#joy-look", ".leave"] })] });
+scene("wallets", { query: "pos=0&character=portlandhodl", opts: PHONE_SIZE, steps: [walletsPhone, walletsPhoneCarrying] });
 
 // Focused component fixtures enter DSB directly with the selected Ooga.
 // The Bifrost entrance playthrough separately exercises the real travel windows.
