@@ -462,6 +462,8 @@
       window.BL.voice.toggle();
       return;
     }
+    // Every scene's B shortcut adds demo bananas; ordinary visits leave donations to the feed.
+    if (key === "b" && !DEBUG) return;
     active.onKey(e);
   };
   const onVisibility = () => {

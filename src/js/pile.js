@@ -501,7 +501,8 @@
           slot.node.visible = false;
           if (ctx.untrackMirrorObject) ctx.untrackMirrorObject(slot.node);
           slot.tween = null;
-          world.level += slot.bananaValue;
+          // Real deliveries are a show: the server's pile message already owns the balance.
+          if (!BL.donations.real) world.level += slot.bananaValue;
           slot.bananaValue = 0;
           syncPile(true);
           if (!outstandingValue()) {
@@ -590,7 +591,8 @@
       if (additions >= 2) ctx.crew.rush();
     };
     const deliverBananas = (amount) => {
-      const room = MAX_BANANAS - Math.floor(world.level) - outstandingValue();
+      // A full server-owned pile still shows incoming fruit without reserving balance for it.
+      const room = MAX_BANANAS - (BL.donations.real ? 0 : Math.floor(world.level)) - outstandingValue();
       const additions = Math.max(0, Math.min(room, Math.floor(Number(amount) || 0)));
       if (!additions) return 0;
       delivery.pendingValue += additions;

@@ -1,4 +1,5 @@
 import { AsyncLocalStorage } from "node:async_hooks";
+import { createServer } from "node:http";
 import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { readFile, writeFile } from "node:fs/promises";
 import { runInNewContext } from "node:vm";
@@ -3551,6 +3552,7 @@ const session = (url, steps, opts, final) => output.run({ lines: [], results: []
         close() { if (!this.closed) { this.closed = true; __dsbFeedFixture.closed++; } }
       };
     })()` });
+    if (opts.initScript) await b.send("Page.addScriptToEvaluateOnNewDocument", { source: opts.initScript });
     await b.open(url);
     await b.focus(true);
     await untilReady(b, opts.readyMs);
@@ -4770,6 +4772,71 @@ const play = (id, what, code) => ({ name: `${id} playthrough`, why: "playthrough
   const r = await b.evaluate(code);
   record(`${id} playthrough: ${what}`, r.ok, JSON.stringify(r));
 } });
+// The account really boots signed out over HTTP; only the donation socket is a stand-in, so no payment is made.
+const signedOutDonationWire = () => {
+  const sockets = [];
+  window.__donationWire = { sockets, message: data => sockets[0].onmessage({ data: JSON.stringify(data) }) };
+  window.WebSocket = class {
+    constructor(url) {
+      this.url = url;
+      sockets.push(this);
+      queueMicrotask(() => {
+        this.onopen();
+        this.onmessage({ data: JSON.stringify({ type: "status", open: true, network: "mainnet" }) });
+        this.onmessage({ data: JSON.stringify({ type: "pile", bananas: 20.75, eatPerHour: 0 }) });
+      });
+    }
+    close() {}
+  };
+};
+const signedOutDonation = { name: "signed-out donation", why: "regression: real falling fruit and the cooker must animate for signed-out viewers without adding to the server-owned pile", run: async (b) => {
+  const r = await b.evaluate(`(() => {
+    const B = __ooga, D = BL.donations, wire = __donationWire, factory = B.scene === "factory";
+    B.advance(0.1, 1 / 30);
+    const before = { level: B.level, donations: B.game.state.donations, landed: factory ? B.stats().cooker.out : B.stats().dropsLanded };
+    const paid = { type: "donation", donation: { id: "signed-out-paid", sats: 4000, handle: "donor", message: "", at: Date.now() }, bananas: { exact: 5.25, rounded: 5 } };
+    wire.message(paid); wire.message(paid);
+    const immediate = B.level;
+    wire.message({ type: "pile", bananas: 26, eatPerHour: 0 });
+    let balanceChanges = 0, visible = 0, falling = 0;
+    const heights = new Map();
+    for (let i = 0; i < (factory ? 450 : 150); i++) {
+      B.advance(1 / 30, 1 / 30);
+      if (B.level !== 26) balanceChanges++;
+      if (!factory) for (const slot of B.drops) if (slot.moving && slot.node.visible) {
+        visible++;
+        if (heights.has(slot) && slot.node.position.y < heights.get(slot)) falling++;
+        heights.set(slot, slot.node.position.y);
+      }
+    }
+    const landed = (factory ? B.stats().cooker.out : B.stats().dropsLanded) - before.landed;
+    return { real: D.real, signedOut: BL.net.state.backend && BL.net.state.me === null, sockets: wire.sockets.map(s => s.url),
+      before, immediate, balanceChanges, visible, falling, landed, expected: BL.game.bananasFor(4000),
+      donations: B.game.state.donations - before.donations, level: B.level, factory };
+  })()`);
+  record(`${r.factory ? "factory" : "pile"} real donation: a signed-out viewer receives one payment, sees its bananas animate and land, and never locally credits the server balance`,
+    r.real && r.signedOut && r.sockets.length === 1 && r.sockets[0].endsWith("/donations/socket")
+      && r.before.level === 20 && r.immediate === 20 && r.balanceChanges === 0 && r.level === 26
+      && r.donations === 1 && r.landed === r.expected && (r.factory || r.visible > 0 && r.falling > 0), JSON.stringify(r));
+} };
+for (const id of ["hub", "lab", "factory"]) {
+  if (ONLY && !onlyMatches(signedOutDonation.name)) continue;
+  tasks.push({ name: `${id} signed-out donation`, scene: id, perf: false, run: async () => {
+    const html = await readFile(join(root, "oogaboogaland.html"));
+    const server = createServer((req, res) => {
+      const account = req.url === "/api/me";
+      res.setHeader("content-type", account ? "application/json" : "text/html; charset=utf-8");
+      res.end(account ? JSON.stringify({ player: null, character: null, donations: true }) : html);
+    });
+    await new Promise((resolve, reject) => { server.once("error", reject); server.listen(0, "127.0.0.1", resolve); });
+    try {
+      await fold(`http://127.0.0.1:${server.address().port}/?debug=1&scene=${id}&mempool=0&chain=0&oogatron=0&totems=0&hour=12&day=80`,
+        [[signedOutDonation.name, signedOutDonation.run]], { initScript: `(${signedOutDonationWire.toString()})()` });
+    } finally {
+      await new Promise(resolve => server.close(resolve));
+    }
+  } });
+}
 // `stat` names the scene's count of bananas delivered, read from stats(): drops landed on the pile, or the bananas the
 // factory's cooker sent out through its exit shield. `seconds` covers the scene's whole show.
 const donation = (id, { stat = "dropsLanded", seconds = 6, where = "lands its bananas on the pile" } = {}) => ({ name: `${id} donation`, why: "playthrough: a donation is counted and becomes its bananas; regression: pile lamps keep their lights when the pile changes", run: async (b) => {
