@@ -3686,7 +3686,7 @@ const orbitFlow = async (b) => {
 // `node test/run.mjs race mine` runs the global unit tier plus those scenes; `full` runs every scene and the
 // perf floor; `perf` runs the perf floor alone; `unit` (or nothing) runs only the global tier.
 // Eight lanes saturate a 16-core box (measured 2026-09-20); raising it only adds heat.
-const SCENES = ["hub", "lab", "race", "drop", "orbit", "mine", "dsb", "factory", "bifrost", "poker", "arcade", "skee", "hoops", "shy", "claw", "hockey", "billiards", "darts", "pinball", "ride", "invaders", "snake", "pong", "stampede", "flap", "breaker", "dash", "stacker"];
+const SCENES = ["hub", "lab", "race", "drop", "orbit", "mine", "dsb", "factory", "bifrost", "poker", "arcade", "rescue", "skee", "hoops", "shy", "claw", "hockey", "billiards", "darts", "pinball", "ride", "invaders", "snake", "pong", "stampede", "flap", "breaker", "dash", "stacker"];
 const LANES = Number(process.env.LANES) || 8;
 const ARGS = process.argv.slice(2);
 for (const a of ARGS) if (!SCENES.includes(a) && !["unit", "chat-unit", "integration-unit", "svrn-unit", "svrn-review", "vacancy-unit", "portal-unit", "water-baseline", "water-review", "water-unit", "stackchain-review", "stackchain-unit", "dsb-menus-unit", "maxis-unit", "exterior-unit", "rulers-unit", "ink-unit", "big-unit", "perf", "full", "poker-protocol"].includes(a)) throw new Error(`Unknown argument "${a}" (unit | perf | full | poker-protocol | ${SCENES.join(" | ")})`);
@@ -4554,7 +4554,7 @@ const npcPaths = (backend) => [`NPC paths ${backend}`, async (b) => {
 
 // The games' rules and saves in Node, under the same localStorage the page uses: the mine's seeded sim,
 // every game's stored best, the tickets a machine spends and the jackpot wheel's odds.
-const GAME_SOURCES = ["math", "donations", "rocket-parts", "mine-rigs", "mine-sim", "game"];
+const GAME_SOURCES = ["math", "donations", "rocket-parts", "mine-rigs", "mine-sim", "game", "dogs"];
 const gameRulesChecks = async () => {
   const store = new Map();
   const context = { window: {}, URLSearchParams, location: { search: "" }, localStorage: { getItem: (k) => store.get(k) ?? null, setItem: (k, v) => store.set(k, String(v)), removeItem: (k) => store.delete(k) } };
@@ -4615,6 +4615,29 @@ const gameRulesChecks = async () => {
     wallet.addTickets(1);
     const spent = wallet.spendTickets(20) && wallet.state.arcade.tickets === 0 && make().state.arcade.tickets === 0;
     record("tickets: a spend refuses when the tickets fall short or the cost is no whole number above nothing, spending nothing, and one that goes through is saved", short && malformed && spent, JSON.stringify({ short, malformed, spent }));
+  }
+  {
+    // Free Puppies Rescue: one dog an Ooga and no more than a full roster, a full island losing its oldest poop,
+    // scoops counted, hunger from full to hungry to empty on its clock, and a bad save entry dropped alone.
+    const { RESCUE } = BL.game, dogs = BL.dogs;
+    store.clear();
+    const g = BL.game.create({ catalog: [] }), r = g.state.rescue;
+    const adopted = !!g.adoptDog("portlandhodl", "Rex", 1) && !g.adoptDog("portlandhodl", "Max", 2) && !g.adoptDog("w-s-bitcoin", "Max", 9);
+    for (let i = 0; r.dogs.length < RESCUE.dogs + 5 && i < RESCUE.dogs + 5; i++) g.adoptDog(`ooga-${i}`, "Pup", i % RESCUE.breeds);
+    const capped = r.dogs.length === RESCUE.dogs && !g.adoptDog("late-ooga", "Pup", 0);
+    for (let i = 0; i < RESCUE.poops + 4; i++) g.dropPoop(i, 0, -i);
+    const ring = r.poops.length === RESCUE.poops * 3 && r.poops[0] === 4 && r.poops[r.poops.length - 3] === RESCUE.poops + 3;
+    const scooped = g.scoopPoop(0) && r.poops[0] === 5 && r.scooped === 1 && !g.scoopPoop(RESCUE.poops) && r.scooped === 1;
+    const fed = g.releaseDog("ooga-0") && !g.releaseDog("ooga-0") && (r.dogs[0].hunger = 0.9, g.feedDog("portlandhodl")) && r.dogs[0].hunger === 0;
+    const hungry = dogs.hungerAfter(0, dogs.HUNGRY * dogs.HUNGER_SECONDS - 1) < dogs.HUNGRY && dogs.hungerAfter(0, dogs.HUNGRY * dogs.HUNGER_SECONDS + 1) >= dogs.HUNGRY
+      && dogs.hungerAfter(0.99, 1e6) === 1;
+    const again = BL.game.create({ catalog: [] }).state.rescue;
+    const kept = again.dogs.length === RESCUE.dogs - 1 && again.dogs[0].name === "Rex" && again.poops.length === r.poops.length && again.scooped === 1;
+    const saved = JSON.parse(store.get("oogaboogaland.v1"));
+    saved.rescue.dogs[0].breed = 7; saved.rescue.dogs[1].owner = saved.rescue.dogs[2].owner; saved.rescue.dogs[3].hunger = 2; saved.rescue.poops.push("x", 1, 2);
+    store.set("oogaboogaland.v1", JSON.stringify(saved));
+    const bad = BL.game.create({ catalog: [] }).state.rescue, dropped = bad.dogs.length === RESCUE.dogs - 4 && !bad.poops.length && bad.scooped === 1;
+    record("rescue: one dog an Ooga up to a full roster, a full island loses its oldest poop, scoops count, hunger runs full to hungry to empty, and a bad save entry is dropped alone", adopted && capped && ring && scooped && fed && hungry && kept && dropped, JSON.stringify({ adopted, capped, ring, scooped, fed, hungry, kept, dropped }));
   }
   {
     // The jackpot wheel, from arcade-models.js on the builders it loads with: the house wins slowly, and every
@@ -7494,6 +7517,134 @@ const phone = (id, { card = null, play = null, required, sheet = false }) => ({ 
   record(`${id} phone: ${card ? "the title card reads in touch words and its go button starts the game, then " : ""}nothing is clipped, wrapped by accident or off screen, and every control is under a thumb${sheet ? ", with the sheet open too" : ""}`, ok, JSON.stringify(seen));
 } });
 
+// ---- Walk-in caves: the way back out ----
+// Whoever is inside a walk-in cave, walked in from the island or opened straight by its address, steps out of its
+// doorway back onto the island driven, shown and standing at its mouth in view. `setup` runs inside first (a device
+// taken into the hands, say).
+const caveWayOut = (id, mouth, setup = "") => ({ name: `${id} way out`, why: "regression: a cave opened by its address took in an Ooga away from the island, which the island could not hand back, so the visitor stepped out of the doorway driving nobody and saw no Ooga", run: async (b) => {
+  const inside = await b.evaluate(`(() => { const B = window.__ooga, p = B.pilot.player; ${setup} B.advance(0.3, 1 / 30); return p && { who: p.traits.name, away: window.BL.contributors.stateFor(p.contributor) === "away" }; })()`);
+  // The Ooga faces the back wall with the view behind it, so S walks it straight out of the doorway.
+  await holdKey(b, "s", 3.5);
+  const left = await untilPage(b, 'B.scene === "hub" && !B.transitioning', 20000);
+  const out = await b.evaluate(`(() => {
+    const B = window.__ooga, p = B.pilot.player, m = B.island.mouths.find((mouth) => mouth.id === "${mouth}");
+    if (!p) return { scene: B.scene, who: null };
+    let shown = true;
+    for (let n = p.root; n; n = n.parent) shown = shown && n.visible;
+    const at = p.root.position, s = B.project(at.x, at.y + 0.8, at.z, {}), w = innerWidth, h = innerHeight;
+    return { scene: B.scene, who: p.traits.name, shown, state: B.crew.stateOf(p), fromMouth: Math.hypot(at.x - m.x, at.z - m.z), onScreen: !!s && s.x > 0 && s.x < w && s.y > 0 && s.y < h };
+  })()`);
+  record(`${id} way out: stepping out of the doorway brings the Ooga inside back onto the island, driven, shown and in view at the mouth`, inside && !inside.away && left && out.who === inside.who && out.shown && out.state !== "away" && out.fromMouth < 14 && out.onScreen, JSON.stringify({ inside, left, out }));
+} });
+// ---- Free Puppies Rescue ----
+// The yard from the visitor's side, with real taps: a tap on a dog house opens the adoption with all six breeds, a
+// puppy adopted for an Ooga out on the island runs out of the door, one adopted for the Ooga walked in follows it as it
+// walks, one dog an Ooga, and the island's goal counts them.
+const RESCUE = `const B = window.__ooga, R = window.BL.scenes.rescue.debug, D = B.dogs;`;
+const rescueTap = async (b, x, y, z) => { const p = await b.evaluate(`window.__ooga.project(${x}, ${y}, ${z}, {})`); await b.click(p.x, p.y); };
+const rescueAdoptFlow = async (b, who) => {
+  const out = {};
+  out.waiting = await b.evaluate(`(() => { ${RESCUE} B.advance(0.5, 1 / 30); return D.waiting().map((d) => d.breed).sort().join(); })()`);
+  const house = await b.evaluate(`window.BL.scenes.rescue.debug.rescue.houses[1]`);
+  await rescueTap(b, house[0], 0.7, house[1] + 0.3);
+  out.dialog = await b.evaluate(`(() => { const d = document.getElementById("adopt"); return { open: d.open, pups: d.querySelectorAll(".adopt-pup").length, owner: document.getElementById("adopt-owner").value }; })()`);
+  // First a puppy for an Ooga out on the island: it runs out of the door.
+  out.away = await b.evaluate(`(() => { ${RESCUE} const sel = document.getElementById("adopt-owner"), other = [...sel.options].find((o) => o.value !== "${who}"); sel.value = other.value; document.querySelector('#adopt .adopt-pup[data-breed="5"]').click(); document.querySelector('#adopt [data-action="adopt-go"]').click(); B.advance(0.2, 1 / 30); const state = D.state(other.value); B.advance(4, 1 / 30); return { owner: other.value, state, gone: D.dog(other.value) === null, saved: B.game.state.rescue.dogs.some((d) => d.owner === other.value), goal: R.rescue.goal }; })()`);
+  await rescueTap(b, house[0], 0.7, house[1] + 0.3);
+  out.mine = await b.evaluate(`(() => { ${RESCUE} document.getElementById("adopt-owner").value = "${who}"; document.querySelector('#adopt .adopt-pup[data-breed="1"]').click(); document.querySelector('#adopt [data-action="adopt-go"]').click(); B.advance(1, 1 / 30); const twice = !D.adopt("${who}", 0, "Max"); return { state: D.state("${who}"), breed: D.dog("${who}").breed, twice, closed: !document.getElementById("adopt").open, goal: R.rescue.goal }; })()`);
+  await holdKey(b, "a", 1);
+  out.walked = await b.evaluate(`(() => { ${RESCUE} B.advance(1.2, 1 / 30); const d = D.dog("${who}"), p = B.pilot.player.root.position; return { state: d.state, off: Math.hypot(d.x - p.x, d.z - p.z), moved: Math.hypot(p.x, p.z + 1) }; })()`);
+  out.ok = out.waiting === "bulldog,corgi,dalmatian,labrador,pitbull,shiba" && out.dialog.open && out.dialog.pups === 6 && out.dialog.owner === who
+    && out.away.state === "out" && out.away.gone && out.away.saved && out.mine.state === "follow" && out.mine.breed === "dalmatian" && out.mine.twice && out.mine.closed
+    && /^2 \/ \d+ Oogas have a dog$/.test(out.mine.goal) && out.walked.state === "follow" && out.walked.off < 2.5 && out.walked.moved > 1;
+  return out;
+};
+const rescueYard = { name: "rescue yard", why: "playthrough: a tap on a dog house opens the adoption of six breeds, a puppy for an Ooga out on the island runs out of the door, the walked-in Ooga's puppy follows it, one dog an Ooga, and the goal counts them", run: async (b) => {
+  const r = await rescueAdoptFlow(b, "portlandhodl");
+  record("rescue yard: six breeds wait; a dog house opens the adoption; a puppy for an Ooga on the island runs out of the door; the walked-in Ooga's puppy follows it; one dog an Ooga; the goal counts both", r.ok, JSON.stringify(r));
+} };
+// From the island: into the 10 o'clock mouth with Space, a puppy adopted inside, and back out with Escape, where it
+// keeps following its Ooga across the island, sits hungry, eats one banana, poops and is scooped, within the cap.
+const hubRescueDoor = { name: "hub rescue door", why: "playthrough: Free Puppies Rescue is a real cave; the puppy adopted in it follows its Ooga there and on out across the island, sits hungry, eats a banana, poops and is scooped, within the poop cap", run: async (b) => {
+  const at = await b.evaluate(`(() => { const B = window.__ooga, a = B.cavemen.get("portlandhodl"), m = B.island.mouths.find((mouth) => mouth.id === "c10"), ax = Math.sin(m.ry), az = Math.cos(m.ry); if (B.crew.player !== a) B.pilot.possess(a); const x = m.x - ax * 2.6, z = m.z - az * 2.6; B.pilot.navigate({ position: { x, y: m.floorY, z }, yaw: m.ry, pitch: 0.2, dist: 6 }); B.setPileLevel(50); B.advance(0.5, 1 / 30); const p = a.root.position; return { off: Math.hypot(p.x - x, p.z - z), act: document.querySelector("#act") ? document.querySelector("#act").textContent : null }; })()`);
+  await b.key(" ");
+  const entered = await untilPage(b, 'B.scene === "rescue" && !B.transitioning', 20000);
+  const inside = await rescueAdoptFlow(b, "portlandhodl");
+  await b.key("Escape");
+  const left = await untilPage(b, 'B.scene === "hub" && !B.transitioning', 20000);
+  const back = await b.evaluate(`(() => { const B = window.__ooga, D = B.dogs, p = B.pilot.player; B.advance(1, 1 / 30); const d = D.dog("portlandhodl"); return { scene: B.scene, who: p && p.traits.name, state: d && d.state, off: d ? Math.hypot(d.x - p.root.position.x, d.z - p.root.position.z) : null }; })()`);
+  await holdKey(b, "w", 1.5);
+  const r = await b.evaluate(`(() => {
+    const B = __ooga, D = B.dogs, a = B.cavemen.get("portlandhodl");
+    B.advance(1.2, 1 / 30);
+    const d = D.dog("portlandhodl"), p = a.root.position, following = Math.hypot(d.x - p.x, d.z - p.z) < 2.5 && d.state === "follow";
+    D.hunger("portlandhodl", 0.95); B.advance(0.4, 1 / 30);
+    const sat = D.state("portlandhodl") === "sit", pile = B.level;
+    const fed = D.feed("portlandhodl") && D.dog("portlandhodl").hunger === 0 && D.state("portlandhodl") === "eat" && B.level === pile - 1;
+    B.advance(3, 1 / 30);
+    const poops = D.stats().poops; D.poop(1); B.advance(2, 1 / 30);
+    const pooped = D.stats().poops === poops + 1 && D.state("portlandhodl") === "follow";
+    const scooped = D.scoop(D.stats().poops - 1) && D.stats().poops === poops;
+    D.poop(120);
+    return { following, sat, fed, pooped, scooped, capped: D.stats().poops === 96, stats: D.stats() };
+  })()`);
+  record("hub rescue door: Space takes the Ooga into the rescue, the puppy adopted there follows it, and back out on the island it follows on, sits hungry, eats one banana, poops and is scooped, within the poop cap",
+    entered && inside.ok && left && back.scene === "hub" && back.who === "portlandhodl" && back.state === "follow" && back.off < 2.5 && Object.entries(r).every(([k, v]) => k === "stats" || v), JSON.stringify({ at, entered, inside, back, r }));
+} };
+// The island's strays from the visitor's side: they roam both islands in every breed, a click on one opens the
+// adoption with that very dog chosen, and Adopt takes it in to follow the driven Ooga.
+const hubStrays = { name: "hub strays", why: "playthrough: strays roam the island and the Mempool island in every breed, and a click on one adopts that very dog for the driven Ooga, which it then follows", run: async (b) => {
+  const start = await b.evaluate(`(() => {
+    const B = window.__ooga, D = B.dogs, M = B.poolIsland, a = B.cavemen.get("portlandhodl");
+    if (B.crew.player !== a) B.pilot.possess(a);
+    // Carrying, not aiming: there a click taps what it lands on instead of shooting.
+    if (a.weapon.aiming) B.pilot.modeAction("mode-toggle");
+    B.advance(0.5, 1 / 30);
+    const list = D.strays();
+    const pool = list.filter((s) => Math.hypot(s.x - M.place.x, s.z - M.place.z) < M.layout.R + 2).length;
+    return { n: list.length, pool, breeds: new Set(list.map((s) => s.breed)).size, home: list.every((s) => Math.hypot(s.x - s.home[0], s.z - s.home[2]) < 4.5), cap: window.BL.dogs.STRAY_CAP };
+  })()`);
+  // The driven Ooga stands beside the first stray on the home island, the view over its shoulder at it.
+  const at = await b.evaluate(`(() => {
+    const B = window.__ooga, D = B.dogs, M = B.poolIsland, s = D.strays().find((e) => Math.hypot(e.x - M.place.x, e.z - M.place.z) > M.layout.R + 2);
+    D.hold(true);
+    B.pilot.navigate({ position: { x: s.x + 2.4, y: s.y, z: s.z + 1.2 }, yaw: Math.atan2(2.4, 1.2) + 0.35, pitch: 0.25, dist: 5 });
+    B.advance(1, 1 / 30);
+    const t = D.strays().find((e) => e.slot === s.slot), p = B.project(t.x, t.y + 0.28, t.z, {});
+    return { slot: s.slot, breed: s.breed, x: p && p.x, y: p && p.y, w: innerWidth, h: innerHeight };
+  })()`);
+  await b.click(at.x, at.y);
+  const dialog = await b.evaluate(`(() => { const d = document.getElementById("adopt"), pup = d.querySelector('.adopt-pup[aria-pressed="true"]'); return { open: d.open, breed: pup ? window.BL.dogs.BREEDS[Number(pup.dataset.breed)].id : null, owner: document.getElementById("adopt-owner").value }; })()`);
+  await b.evaluate(`document.querySelector('#adopt [data-action="adopt-go"]').click()`);
+  const adopted = await b.evaluate(`(() => { const B = window.__ooga, D = B.dogs; D.hold(false); B.advance(0.3, 1 / 30); const d = D.dog("portlandhodl"); return { closed: !document.getElementById("adopt").open, breed: d && d.breed, state: d && d.state, n: D.strays().length, still: D.strays().some((e) => e.slot === ${at.slot}) }; })()`);
+  await holdKey(b, "w", 1.5);
+  const follows = await b.evaluate(`(() => { const B = window.__ooga, D = B.dogs, p = B.cavemen.get("portlandhodl").root.position; B.advance(1.2, 1 / 30); const d = D.dog("portlandhodl"); return !!d && d.state === "follow" && Math.hypot(d.x - p.x, d.z - p.z) < 2.5; })()`);
+  record("hub strays: strays roam both islands in every breed, a click on one opens the adoption with that dog chosen, and Adopt makes it follow the driven Ooga",
+    start.n >= 3 && start.n <= start.cap && start.pool >= 1 && start.breeds === Math.min(6, start.n) && start.home
+    && dialog.open && dialog.breed === at.breed && dialog.owner === "portlandhodl"
+    && adopted.closed && adopted.breed === at.breed && adopted.state === "follow" && adopted.n === start.n - 1 && !adopted.still
+    && follows, JSON.stringify({ start, at, dialog, adopted, follows }));
+} };
+// The strays' own life, in a session of its own so each stays short: a newcomer takes an adopted stray's home
+// STRAY_RESPAWN (45) seconds later, a stray poops into the island's piles, and they sleep at home by night and wake by day.
+const hubStrayLife = { name: "hub stray life", why: "playthrough: a newcomer fills an adopted stray's place, strays poop into the island's piles, and they sleep at home by night and wake by day", run: async (b) => {
+  const adopted = await b.evaluate(`(() => {
+    const B = window.__ooga, D = B.dogs, a = B.cavemen.get("portlandhodl");
+    if (B.crew.player !== a) B.pilot.possess(a);
+    B.advance(0.5, 1 / 30);
+    const n = D.strays().length, s = D.strays()[0], breed = window.BL.dogs.BREEDS.findIndex((e) => e.id === s.breed);
+    const entry = D.adopt("portlandhodl", breed, "Rex", s.slot);
+    return { n, taken: !!entry && D.strays().length === n - 1 && !D.strays().some((e) => e.slot === s.slot) };
+  })()`);
+  const refilled = await b.evaluate(`(() => { const B = window.__ooga, D = B.dogs; B.advance(46, 1 / 10); return D.strays().length; })()`);
+  const pooped = await b.evaluate(`(() => { const B = window.__ooga, D = B.dogs, poops = D.stats().poops; D.strayPoop(D.strays()[0].slot); B.advance(3, 1 / 10); return D.stats().poops === poops + 1; })()`);
+  const asleep = await b.evaluate(`(() => { const B = window.__ooga, D = B.dogs; B.setHour(23); B.advance(20, 1 / 10); return D.strays().every((e) => e.mood === "sleep" && Math.hypot(e.x - e.home[0], e.z - e.home[2]) < 0.5); })()`);
+  const woke = await b.evaluate(`(() => { const B = window.__ooga, D = B.dogs; B.setHour(12); B.advance(4, 1 / 10); return D.strays().every((e) => e.mood !== "sleep"); })()`);
+  record("hub stray life: a newcomer takes an adopted stray's home, strays poop, and they sleep at home by night and wake by day",
+    adopted.n >= 3 && adopted.taken && refilled === adopted.n && pooped && asleep && woke, JSON.stringify({ adopted, refilled, pooped, asleep, woke }));
+} };
+// On a phone: the adoption with its six puppies, the name, the Ooga and Adopt.
+const rescuePhone = phone("rescue", { play: `(() => { window.BL.scenes.rescue.debug.rescue.open(); return document.getElementById("adopt").open; })()`, required: ['#adopt .adopt-pup[data-breed="0"]', '#adopt .adopt-pup[data-breed="5"]', "#adopt-name", "#adopt-owner", '#adopt [data-action="adopt-go"]'] });
 // ---- The Lightning Factory ----
 // The demo node is held still so an event handed to the feed is the only thing moving; events use the demo
 // contract and a node of their own, so their sequence numbers never meet the demo node's.
@@ -11139,6 +11290,13 @@ scene("bifrost", { label: "dsb round trip", query: "character=portlandhodl", ste
 scene("bifrost", { label: "poker round trip", query: "character=portlandhodl", steps: [bifrostPoker] });
 scene("bifrost", { label: "canvas2d", url: hubPage(src, "canvas2d=1"), steps: [bifrostCanvas] });
 scene("arcade", { query: "character=portlandhodl", steps: [arcadeWalking, arcadeMachine, arcadePlay, trip("arcade")] });
+// Each rescue session stands alone so none nears the 120 s session deadline on a slow machine.
+scene("rescue", { query: "character=portlandhodl&pos=0", steps: [rescueYard] });
+scene("rescue", { label: "round trip", query: "character=portlandhodl&pos=0", steps: [trip("rescue")] });
+scene("hub", { label: "rescue door", query: "character=portlandhodl&pos=0", steps: [hubRescueDoor] });
+scene("hub", { label: "strays", query: "character=portlandhodl&pos=0", steps: [hubStrays] });
+scene("hub", { label: "stray life", query: "character=portlandhodl&pos=0", steps: [hubStrayLife] });
+scene("rescue", { label: "way out", query: "pos=0", steps: [caveWayOut("rescue", "c10")] });
 scene("skee", { steps: [carnivalPlay("skee", 0.5), trip("skee")] });
 scene("hoops", { steps: [carnivalPlay("hoops", 0.2), trip("hoops")] });
 scene("shy", { steps: [carnivalPlay("shy", 0.7), trip("shy")] });
@@ -11256,6 +11414,7 @@ scene("mine", { query: "pos=0", opts: PHONE_SIZE, steps: [phone("mine", { card: 
 scene("factory", { query: "pos=0&character=portlandhodl", opts: PHONE_SIZE, steps: [phone("factory", { required: ["#joy-move", "#joy-look", ".leave"] }), factoryGreeter] });
 scene("bifrost", { query: "pos=0", opts: PHONE_SIZE, steps: [phone("bifrost", { required: ["#joy-move", "#joy-look", ".leave"] })] });
 scene("arcade", { query: "pos=0", opts: PHONE_SIZE, steps: [phone("arcade", { required: ["#joy-move", "#joy-look", ".leave"] })] });
+scene("rescue", { query: "pos=0&character=portlandhodl", opts: PHONE_SIZE, steps: [rescuePhone] });
 
 // Focused component fixtures enter DSB directly with the selected Ooga.
 // The Bifrost entrance playthrough separately exercises the real travel windows.

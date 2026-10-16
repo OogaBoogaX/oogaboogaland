@@ -2,7 +2,8 @@
 // writing through `box` and `put` into separate solid, hanging, decorative glow and lantern glow layers: general (`lanternPost`, `crate`, `coalCrate`,
 // `barrel`, `cart`, `banner`, `gauge`, `rubble`, `bracket`, `hanging`, `bulb`), lab (`die`,
 // `flaskBench`, `terminal`, `chalkboard`), the mirror (`monolith`, `runeStone`), lightning (`coil`,
-// `boards`), the arcade (`cabinet`), plus `bench`, `vine` and `banner(v)` carrying each cave's emblem from `hubModels.SIGN_ICONS`.
+// `boards`), the arcade (`cabinet`), the puppy rescue (`kennel`, `foodBowl`), plus `bench`, `vine` and `banner(v)` carrying
+// each cave's emblem from `hubModels.SIGN_ICONS`.
 //
 // `set()` places pieces by quarter turns (`put`), strings sagging cables with lamps (`cable`) and `build`s
 // everything placed into one `solid`, one `hang`, decorative `glow` and lantern `lampGlow` mesh plus the `lights` its lanterns
@@ -52,7 +53,8 @@
     "#f5d142", "#4f9a38", // 49 banana, 50 vine
     "#e9d7a0", "#d8c184", // 51 sand, 52 sand dark
     "#d9a441", "#5a3a1a", // 53 leopard tan, 54 leopard spot
-    BANANA_ART.ink.D, BANANA_ART.ink.Y, BANANA_ART.ink.G // 55-57 ammo banana outline, fruit, stem
+    BANANA_ART.ink.D, BANANA_ART.ink.Y, BANANA_ART.ink.G, // 55-57 ammo banana outline, fruit, stem
+    "#4f8fd8", "#7a4a22" // 58 water, 59 kibble
   ];
   const EMISSIVE = { 9: 1, 10: 1, 11: 0.9, 30: 1, 31: 1, 32: 1, 37: 1, 40: 1 };
   // Lantern glass by variant (amber, teal, green, red) and the light each casts; the fifth is a bolt's yellow.
@@ -318,6 +320,36 @@
         const x0 = Math.floor((rand() - 0.5) * 10), z0 = Math.floor((rand() - 0.5) * 10), y0 = n > 2 ? 2 + Math.floor(rand() * 2) : 0;
         box(SOLID, x0, x0 + w, y0, y0 + h, z0, z0 + d, (x, y) => y === y0 + h && rand() < 0.55 ? (rand() < 0.5 ? 23 : 24) : rand() < 0.25 ? 21 : rand() < 0.2 ? 22 : 20);
       }
+    }),
+    // Free Puppies Rescue: a plank dog house with a gable roof (0 red, 1 green, 2 teal, 3 yellow) and a dark door
+    // facing +z, and a bowl of kibble (0) or water (1).
+    kennel: (v) => author((put, box) => {
+      const ROOF = [19, 17, 41, 18][v];
+      const door = (x, y) => x >= -3 && x <= 2 && (y <= 8 || (y === 9 && x >= -2 && x <= 1));
+      box(SOLID, -9, 8, 0, 0, -9, 8, 2);
+      for (let x = -8; x <= 7; x++) for (let y = 1; y <= 11; y++) for (let z = -8; z <= 7; z++) {
+        if (x > -8 && x < 7 && z > -8 && z < 7 || z === 7 && door(x, y)) continue;
+        put(SOLID, x, y, z, (x === -8 || x === 7) && (z === -8 || z === 7) ? 2 : plank(x, y, z, 1, 11, 1));
+      }
+      // The doorway is dark one plank in.
+      box(SOLID, -3, 2, 1, 9, 6, 6, (x, y) => door(x, y) ? 36 : 2);
+      for (let k = 0; k <= 9; k++) {
+        const y = 11 + k, half = 10 - k;
+        for (let z = -10; z <= 9; z++) {
+          for (const x of [-half, -half + 1, half - 2, half - 1]) put(SOLID, x, y, z, k === 9 ? 2 : ROOF);
+          if (z === -8 || z === 7) for (let x = -half + 2; x <= half - 3; x++) put(SOLID, x, y, z, plank(x, y, z, 11, 20, 1));
+        }
+      }
+      // A bone over the door.
+      box(SOLID, -3, 2, 14, 14, 8, 8, 16);
+      for (const x of [-4, 3]) for (const y of [13, 15]) put(SOLID, x, y, 8, 16);
+    }),
+    foodBowl: (v) => author((put) => {
+      for (let y = 0; y <= 2; y++) disc((x, yy, z, d) => {
+        if (y < 2 || d > 2.4) put(SOLID, x, yy, z, d > 2.9 ? 6 : 4);
+        else put(SOLID, x, yy, z, v ? 58 : 59);
+      }, 3.6, y);
+      if (!v) for (const [x, z] of [[-1, 0], [0, -1], [1, 1]]) put(SOLID, x, 3, z, 59);
     }),
     // A plain pole the cables start from on walls; it carries a small lantern of its own.
     bracket: () => author((put, box) => {

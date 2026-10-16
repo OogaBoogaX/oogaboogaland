@@ -234,7 +234,7 @@
   };
 
   // One visit's state: created in enter, dropped in leave.
-  let jumbotronSpot, oogatronUnsub, renderer, game, world, go, lootEnabled, testBananas, root, camera, overlayCanvas, island, terrainRampRoof, pathNode, altar, hud, hooks, input, pilot, fx, cameraCover, bananaCover, solids, rockGuides, objectGuides, sightGuides, bananaGuides, pileGuides, platformGuides, mirrorGuides, pile, crew, crates, critters, clock, presets, entering, mirrorCave, matrixCave, matrixControl, gateRain, fire, headquarters, dockStairs, jumbotron, positionDebug, remotes, npcSync;
+  let jumbotronSpot, oogatronUnsub, renderer, game, world, go, lootEnabled, testBananas, root, camera, overlayCanvas, island, terrainRampRoof, pathNode, altar, hud, hooks, input, pilot, fx, cameraCover, bananaCover, solids, rockGuides, objectGuides, sightGuides, bananaGuides, pileGuides, platformGuides, mirrorGuides, pile, crew, crates, critters, dogs, clock, presets, entering, mirrorCave, matrixCave, matrixControl, gateRain, fire, headquarters, dockStairs, jumbotron, positionDebug, remotes, npcSync;
   let magazine, magazineState, breakables, clankers, clankerPlay, clankerMeshes, clankerPartOwners, grabSupportEntry = null, entropyLab, chalkboard, factoryMouth = null, arcadeMouth = null, glCanvas = null;
   const dragHand = new Float64Array(3), dragFoot = new Float64Array(3);
   const THROW_SWING_TIME = 0.28, THROW_SETTLE_TIME = 0.2, THROW_CARRY_SPEED_MAX = 8;
@@ -639,6 +639,10 @@
   const matrixInteriors = [];
   const matrixGates = [];
   const sealedCaves = [];
+  // Every other open cave's doorway, walked into as Ooga Arcade's is: act within MOUTH_REACH of a point MOUTH_ACTION_Z
+  // inside it goes in.
+  const caveDoors = [];
+  const doorOf = (scene) => caveDoors.find((door) => door.slot.scene === scene);
   let sceneryVisible = 0, sceneryRadiusCulled = 0, sceneryPathCulled = 0, sceneryFixedCulled = 0, sceneryReflows = 0;
   const addTarget = (node, owner, opts) => {
     input.add(node, owner, opts);
@@ -678,7 +682,9 @@
     bench: ["Log bench", "dust", ["A good log for sitting."]],
     cabinet: ["Arcade cabinet", "spark", ["PRESS START. Ooga presses everything.", "The games are inside. Ooga points."]],
     vine: ["Vines", "leaf", ["The vines swing.", "Rustle rustle."]],
-    boards: ["Boarded up · coming soon", "dust", ["Boarded up. Coming soon.", "Ooga peeks through a gap. Dark."]]
+    boards: ["Boarded up · coming soon", "dust", ["Boarded up. Coming soon.", "Ooga peeks through a gap. Dark."]],
+    kennel: ["Kennel · the puppies wait inside", "dust", ["Yip yip! The puppies are inside.", "Ooga hears happy barking in the cave."]],
+    foodBowl: ["Food bowl", "dust", ["Crunch crunch. Empty again.", "A bowl for the rescue's dogs."]]
   };
   const PIECE_BURST = { spark: SPARK, dust: DUST, chip: CHIP, leaf: LEAF };
   const pokePiece = (o) => {
@@ -1739,6 +1745,8 @@
     lab: { glass: 1, icon: "die", string: ["bulb", 1], pieces: [["flaskBench", -5.3, 1.1], ["die", -4.1, 2.8, 0, 1], ["die", -3.5, 3.6, 1, 3], ["die", -4.1, 2.8, 1, 4, 0.5], ["terminal", 5.2, 1.0], ["die", 4.3, 3.2, 1, 2], ["banner", -6.7, 0.7, 0, 1]] },
     matrix: { glass: 2, icon: "glyph", string: ["bulb", 2], pieces: [["monolith", -5.0, 0.9, 0, 0], ["monolith", 5.0, 0.9, 0, 1], ["runeStone", -4.2, 2.8, 0, 0], ["runeStone", 4.4, 2.9, 0, 1], ["banner", 6.5, 0.8, 0, 2], ["banner", -6.5, 0.8, 0, 2], ["rubble", -6.3, 2.6, 0, 1]] },
     lightning: { glass: 0, icon: "bolt", string: ["hanging", 0, [0.3, 0.7]], boards: true, pieces: [["coalCrate", -5.1, 0.8, 0, 3], ["crate", -5.4, 2.1, 1, 0], ["crate", -5.4, 2.1, 0, 1, 0.75], ["barrel", -4.3, 2.9, 0, 1], ["rubble", -6.4, 0.9, 0, 1], ["gauge", 5.0, 0.9], ["cart", 5.7, 2.4, 1], ["banner", 6.6, 0.8, 0, 0], ["coil", 3.8, 3.4], ["coalCrate", 6.4, 3.4, 0, 1]] },
+    // Free Puppies Rescue: a dog house and bowls by the door, and one more dog house in the dark inside.
+    rescue: { glass: 0, icon: "paw", string: ["bulb", 0], inside: [["kennel", 0, -4.4, 0, 1]], pieces: [["kennel", -4.6, 1.5, 0, 0], ["foodBowl", -3.3, 2.5, 0, 0], ["foodBowl", 4.0, 1.9, 0, 1]] },
     arcade: { glass: 0, icon: "banana", string: ["hanging", 0, [0.12, 0.5, 0.88]], inside: [["barrel", -2.4, -1.9, 0, 0], ["crate", 2.4, -2.0, 1, 0], ["barrel", 2.4, -2.0, 0, 1, 0.75]], ceiling: [[-2.35, 2.35, -1.5, -5.8, 3.0, [0.35, 0.8]]], pieces: [["cabinet", -3.6, 1.0, 0, 0], ["cabinet", -2.9, 2.2, 0, 1]] }
   };
   const THEME_ICON = (slot) => slot.id === "c1" ? "favicon" : THEMES[slot.theme]?.icon || null;
@@ -1819,6 +1827,61 @@
     });
     chalkboard.attach(boardGroup, 0, 0, 0);
     claim(wx, wz, 0.8);
+  };
+  // The rescue's door, three metres into the 10 o'clock mouth: adopted dogs go home through it and nap behind it.
+  const rescueDoor = () => {
+    const m = island.mouths.find((mouth) => mouth.id === "c10"), x = m.x - Math.sin(m.ry) * 3, z = m.z - Math.cos(m.ry) * 3;
+    return { x, y: m.floorY, z, spots: new Float32Array(0), wander: 0, bedRadius: 0, door: [x, z] };
+  };
+  // Where the strays live, seeded so every page has the same homes: open grass on the home island off its paths and away
+  // from the pile, and the ring path round the Mempool island's lake, two on the home island for one over there, in
+  // the order the strays take them.
+  const strayHomes = () => {
+    const rand = BL.math.mulberry32(5281), cap = BL.dogs.STRAY_CAP, out = new Float32Array(cap * 3), M = mempoolIsland, L = M.layout;
+    for (let k = 0, tries = 0; k < cap; tries++) {
+      if (tries > 4000) throw new Error("No room for the strays' homes");
+      let x, z, y;
+      if (k % 3 === 2) {
+        const a = rand() * Math.PI * 2, r = L.RING.lowland + 0.3 + rand() * (L.RING.path - L.RING.lowland - 0.6), lx = Math.sin(a) * r, lz = Math.cos(a) * r;
+        if (!L.onIsland(lx, lz, 1)) continue;
+        x = M.worldX(lx, lz); z = M.worldZ(lx, lz); y = M.groundAt(x, z);
+      } else {
+        const a = rand() * Math.PI * 2, r = 9 + rand() * (MEADOW - 11);
+        x = Math.cos(a) * r; z = Math.sin(a) * r;
+        if (!island.isGrassAt(x, z)) continue;
+        y = island.surfaceAt(x, z);
+      }
+      if (!(y > -100) || !navigationClearAt(x, y + 1e-5, z, 0.5, 0.7)) continue;
+      out[k * 3] = x; out[k * 3 + 1] = y; out[k * 3 + 2] = z;
+      k++;
+    }
+    return out;
+  };
+  // A stray tapped on the island opens the adoption with that very dog chosen, for the driven Ooga if it has no dog
+  // yet; Adopt takes it in (or, with another breed chosen, brings a puppy of that breed out of the rescue).
+  let adoptingStray = -1;
+  const adoptStray = (slot, breed) => {
+    const owners = contributors.activeRoster.filter((c) => !dogs.hasDog(c.name)).map((c) => ({ name: c.name, display: c.display }));
+    if (!owners.length) {
+      hud.toast("Every Ooga on the island has a dog!");
+      return;
+    }
+    const player = pilot.player, mine = player && !dogs.hasDog(player.traits.name) ? player.traits.name : owners[0].name;
+    adoptingStray = slot;
+    hud.tooltip.hide();
+    hud.openAdopt({ breeds: BL.dogs.BREEDS, faces: BL.dogs.FACES, faceInk: BL.dogs.FACE_INK, breed, owners, owner: mine, name: BL.dogs.nameFor(mine) });
+  };
+  const confirmStray = () => {
+    const choice = hud.adoptChoice(), entry = dogs.adopt(choice.owner, choice.breed, choice.name, adoptingStray);
+    if (!entry) {
+      hud.toast("That Ooga already has a dog.");
+      return null;
+    }
+    hud.closeAdopt();
+    adoptingStray = -1;
+    const who = contributors.roster.find((c) => c.name === entry.owner);
+    hud.toast(`${entry.name} the ${BL.dogs.BREEDS[entry.breed].name} now follows ${who ? who.display : entry.owner}!`);
+    return entry;
   };
   const dressMouth = (slot, m, group) => {
     // The Canvas 2D fallback keeps the plain island, but the writable board remains available.
@@ -2192,6 +2255,7 @@
         const shelves = createNode({ position: { x, y: 0, z: back }, geometry });
         addChild(group, shelves); solids.add(shelves);
       }
+      caveDoors.push({ slot, x: m.x + ax * MOUTH_ACTION_Z, y: m.floorY + 1.1, z: m.z + az * MOUTH_ACTION_Z });
     } else if (slot.status === "mirror") {
       // Sit inside the rim so the cave floor ends behind the reflection.
       const node = createNode({ position: { x: 0, y: 1.5, z: 0.5 }, geometry: hubModels.mirrorPanel(), mirror: true, mirrorWalkThrough: true, mirrorReveal: 0 });
@@ -6036,6 +6100,10 @@
         return PROP_TIPS[o.prop] || "";
       case "piece":
         return PIECES[o.piece] ? PIECES[o.piece][0] : "";
+      case "dog":
+        return dogs.tooltip(o.dog);
+      case "poop":
+        return "Dog poop · tap to scoop";
       default:
         return "";
     }
@@ -6314,6 +6382,10 @@
       if (nearest) return nearest;
     }
     if (arcadeMouth && actionWithinReach(x, y, z, arcadeMouth.x, arcadeMouth.y, arcadeMouth.z, MOUTH_REACH)) return arcadeMouth;
+    for (let i = 0; i < caveDoors.length; i++) {
+      const door = caveDoors[i];
+      if (actionWithinReach(x, y, z, door.x, door.y, door.z, MOUTH_REACH)) return door;
+    }
     return null;
   };
   const useNearbyAction = (action) => {
@@ -6602,6 +6674,14 @@
           chalkboard.open({ x: bounds.left + p.x, y: bounds.top + p.y });
         }
         else pokePiece(o);
+        break;
+      case "dog": {
+        const breed = dogs.tap(o.dog);
+        if (breed >= 0) adoptStray(o.dog, breed);
+        break;
+      }
+      case "poop":
+        dogs.scoop(o.poop);
         break;
       case "clanker":
         hud.toast(tooltipFor(hit));
@@ -6898,6 +6978,9 @@
         const label = matrixControl.pressed ? "pull the lever down" : "push the lever up";
         hud.hint(COARSE ? `Tap to ${label}` : `Press Space or tap to ${label}`);
         if (player) hud.setAct(matrixControl.pressed ? "PULL DOWN" : "PUSH UP");
+      } else if (action !== arcadeMouth) {
+        hud.hint(COARSE ? "Tap ENTER to go in" : `Press Space to enter ${action.slot.name}`);
+        if (player) hud.setAct("ENTER");
       } else {
         hud.hint(COARSE ? "Tap ENTER ARCADE to go in" : "Press Space to enter Ooga Arcade");
         if (player) hud.setAct("ENTER ARCADE");
@@ -7093,8 +7176,8 @@
       setVec(target, island.gate.x, GATE_VIEW.target.y, island.gate.z);
       pitch = player ? 0 : 0.2;
       dist = player ? 10 : 12;
-    } else if (name === "lab" || name === "mirror" || name === "factory" || name === "arcade") {
-      const id = name === "lab" ? "c11" : name === "factory" ? "c2" : name === "arcade" ? "c3" : "c1", m = island.mouths.find((mouth) => mouth.id === id);
+    } else if (name === "lab" || name === "mirror" || name === "factory" || name === "arcade" || doorOf(name)) {
+      const id = name === "lab" ? "c11" : name === "factory" ? "c2" : name === "arcade" ? "c3" : name === "mirror" ? "c1" : doorOf(name).slot.id, m = island.mouths.find((mouth) => mouth.id === id);
       yaw = m.ry;
       // Leave enough distance to frame the sign above the mouth, including
       // arrivals viewed from the controlled character's first-person eye.
@@ -8149,6 +8232,7 @@
     dockStairs.update(dt, pilot.player);
     updateRoomSigns(dt);
     pile.update(dt);
+    dogs.update(dt, elapsed, RENDER_OPTS.day);
     const player = pilot.player;
     if (player && !pilot.poseHeld && player.root.position.y - player.baseY < ABYSS_RESPAWN_Y && abyssAt(player.root.position.x, player.root.position.z, player.root.position.y - player.baseY)) {
       loseAbyssAmmo(player);
@@ -8331,6 +8415,7 @@
     crew.drawQuotes(ctx2d, project, drawBubble);
     remotes.drawNames(ctx2d, project);
     breakables.drawOverlay(ctx2d);
+    dogs.drawOverlay(ctx2d, project);
     if (debugSelectedGorilla) {
       const entry = debugSelectedGorilla, move = entry.debugMove, p = entry.root.position;
       ctx2d.save();
@@ -10755,6 +10840,16 @@
       },
     });
     shared.fx = npcSync.fx;
+    // A dog walks the home island's support and, off its edge, the Mempool island's ground at its level (not the
+    // chamber's under the lake).
+    const dogGround = (x, z, y) => {
+      const floor = island.supportAt(x, z, y, 0.9, ABYSS_FLOOR, 0);
+      if (floor > -100 || !mempoolIsland.overAt(x, z)) return floor;
+      const top = mempoolIsland.groundAt(x, z);
+      return Math.abs(top - y) < 2.5 ? top : floor;
+    };
+    dogs = BL.dogs.create({ root, game, crew, pile, fx, hud, yard: rescueDoor(), island: true, total: crew.list.length, addTarget, pickGeometry: PICK_GEOMETRY,
+      groundAt: dogGround, strays: { homes: strayHomes(), renderer, clearAt: (x, y, z) => navigationClearAt(x, y + 1e-5, z, 0.35, 0.6) } });
     const workPlanned = shared.workPlanned, workHit = shared.workHit;
     shared.workPlanned = (cave, site) => {
       npcSync.recordPlan(cave, site);
@@ -10951,6 +11046,9 @@
       else if (action === "jetpack-toggle") toggleJetpack();
       else if (action.startsWith("weapon-") || action === "magazine-swap") pilot.weaponAction(action);
       else if (action === "reset-view") pilot.goPreset("pile");
+      // The island's dog goal leads into Free Puppies Rescue; Adopt in the dialog a stray opened takes it in.
+      else if (action === "adopt-open") enterCave(caves.slots.find((slot) => slot.scene === "rescue"));
+      else if (action === "adopt-go") confirmStray();
     });
     meterTimer = 0;
     crew.refreshStates(true);
@@ -10958,8 +11056,9 @@
     let initialCharacter = ctx.from === null && preloadedCharacter ? contributors.activeRoster.find((entry) => entry.name.toLowerCase() === preloadedCharacter) : null;
     if (ctx.from === null && (preloadedJetpackWear || preloadedEquipment) && !params.has("character") && !initialCharacter) initialCharacter = contributors.activeRoster.find((entry) => crew.stateOf(crew.cavemen.get(entry.name)) === "working") || contributors.activeRoster[0];
     const initialGorilla = initialCharacter && preloadedGorilla ? crew.cavemen.get(initialCharacter.name) : null;
-    // The Ooga that went into DSB, the Lightning Factory, ₿IFRÖST or Ooga Arcade comes back out as the one played.
-    const handsBack = ctx.from === "dsb" || ctx.from === "factory" || ctx.from === "bifrost" || ctx.from === "arcade";
+    // The Ooga that went into DSB, the Lightning Factory, ₿IFRÖST, Ooga Arcade or another open cave comes back out as
+    // the one played.
+    const handsBack = ctx.from === "dsb" || ctx.from === "factory" || ctx.from === "bifrost" || ctx.from === "arcade" || !!doorOf(ctx.from);
     const returningCharacter = handsBack ? world.pilot : null;
     if (handsBack) world.pilot = null;
     if (initialGorilla) {
@@ -10984,7 +11083,7 @@
     unsubscribeAccount = BL.net.subscribe(onAccountChange);
     const initialFirstPerson = ctx.from === null && preloadedFirstPerson && !initialGorilla;
     if (initialFirstPerson) pilot.enterClose(true);
-    if (returningCharacter) navigate(ctx.from === "factory" || ctx.from === "bifrost" || ctx.from === "arcade" ? ctx.from : "pile");
+    if (returningCharacter) navigate(ctx.from === "factory" || ctx.from === "bifrost" || ctx.from === "arcade" || doorOf(ctx.from) ? ctx.from : "pile");
     else if (ctx.from === "bifrost" && !ctx.place) navigate("bifrost");
     else if (!crew.sleeping && !initialGorilla && (ctx.place || preloadedView || initialCharacter || initialFirstPerson)) navigate(ctx.place || preloadedView || "pile");
     if (initialCharacter && !initialGorilla && preloadedJetpack) {
@@ -11033,6 +11132,7 @@
         get factory() { return factoryMouth && factoryMouth.hall ? factoryMouth.hall.debug : null; },
         get bifrost() { return bifrostIsle; },
         get footsteps() { return footsteps; },
+        get dogs() { return dogs.debug; },
         slots: pile.slots, drops: pile.drops, core: pile.core, shell: pile.shell, delivery: pile.delivery, spillEffect: pile.spillEffect, cavemen: crew.cavemen, crates: crates.list, lab: null, hud, applyAllSwag: crew.applyAllSwag, renderLocker: crew.renderLocker, demoTip, setPileLevel: pile.setLevel, refreshStates: crew.refreshStates, trimPool: fx.trimPool,
         get shown() {
           return pile.shown;
@@ -11357,6 +11457,9 @@
     npcSync.dispose();
     remotes.dispose();
     remotes = npcSync = null;
+    hud.closeAdopt();
+    adoptingStray = -1;
+    dogs.dispose();
     crew.dispose();
     critters.dispose();
     fx.dispose();
@@ -11406,7 +11509,7 @@
     }
     for (const node of targets) input.remove(node);
     for (const node of placed) removeChild(root, node);
-    targets.length = placed.length = claimed.length = scenery.length = sceneryClaims.length = matrixInteriors.length = matrixGates.length = sealedCaves.length = clouds.length = cloudObstacles.length = lamps.length = pilePosts.length = entranceLights.length = fireSeats.length = sleepers.length = labels.length = signDetails.length = spots.length = chillSpots.length = headquartersRimLintels.length = climbMasonry.length = props.length = 0;
+    targets.length = placed.length = claimed.length = scenery.length = sceneryClaims.length = matrixInteriors.length = matrixGates.length = sealedCaves.length = caveDoors.length = clouds.length = cloudObstacles.length = lamps.length = pilePosts.length = entranceLights.length = fireSeats.length = sleepers.length = labels.length = signDetails.length = spots.length = chillSpots.length = headquartersRimLintels.length = climbMasonry.length = props.length = 0;
     cloudRandom = null;
     fireHazards.length = 0;
     clankerFireReachable = null;
@@ -11441,7 +11544,7 @@
     input.dispose();
     hud.dispose();
     // Drop every per-visit ref but the cached island.
-    terrainRampRoof = pathNode = altar = lawn = life = hud = hooks = input = pilot = fx = cameraCover = bananaCover = solids = rockGuides = objectGuides = sightGuides = bananaGuides = pileGuides = platformGuides = mirrorGuides = pile = crew = crates = critters = clock = presets = mirrorCave = matrixCave = matrixControl = gateRain = fire = headquarters = positionDebug = dockStairs = overlayCanvas = null;
+    terrainRampRoof = pathNode = altar = lawn = life = hud = hooks = input = pilot = fx = cameraCover = bananaCover = solids = rockGuides = objectGuides = sightGuides = bananaGuides = pileGuides = platformGuides = mirrorGuides = pile = crew = crates = critters = dogs = clock = presets = mirrorCave = matrixCave = matrixControl = gateRain = fire = headquarters = positionDebug = dockStairs = overlayCanvas = null;
     beasts.clear();
     magazine = magazineState = breakables = weather = footsteps = mempoolIsland = timechainIsland = clankers = clankerPlay = null;
     hubScene.input = hubScene.debug = null;
@@ -11464,7 +11567,7 @@
     let nodes = 0;
     traverseVisible(root, () => nodes++);
     const all = (n) => 1 + n.children.reduce((sum, c) => sum + all(c), 0);
-    return { visibleNodes: nodes, allNodes: all(root), tweens: tweenCount(), targets: input.targetCount, ...fx.stats(), ...crates.stats(), ...crew.stats(), ...pile.stats(), ...critters.stats(), ...mempoolIsland.water.stats(), ...breakables.stats(), ...weather.stats(), ...remotes.stats() };
+    return { visibleNodes: nodes, allNodes: all(root), tweens: tweenCount(), targets: input.targetCount, ...fx.stats(), ...crates.stats(), ...crew.stats(), ...pile.stats(), ...critters.stats(), ...dogs.stats(), ...mempoolIsland.water.stats(), ...breakables.stats(), ...weather.stats(), ...remotes.stats() };
   };
   const hubScene = {
     // The island reports its own zone as soon as an Ooga is driven (see `zoneOf`); until then it is nowhere.

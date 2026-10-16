@@ -1306,6 +1306,7 @@ body[data-active-scene="arcade"] .magazine-hud {
 }
 
 .field input,
+.field select,
 .loot-assign,
 .chat-form input {
   width: 100%;
@@ -1320,6 +1321,7 @@ body[data-active-scene="arcade"] .magazine-hud {
 }
 
 .field input:focus-visible,
+.field select:focus-visible,
 .loot-assign:focus-visible,
 .chat-form input:focus-visible {
   border-color: var(--accent);
@@ -1481,6 +1483,96 @@ body[data-active-scene="arcade"] .magazine-hud {
   background-size: 5px 5px;
   background-repeat: no-repeat;
   padding-right: 28px;
+}
+
+/* Free Puppies Rescue: the island's goal over the roster, which opens the adoption dialog. */
+.dog-goal {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  margin: 0 0 8px;
+  padding: 7px 10px;
+  border: 2px solid var(--stone-dk);
+  border-radius: 7px 6px 8px 6px;
+  background: var(--tablet);
+  box-shadow: var(--tablet-shadow);
+  color: var(--paper);
+  font: inherit;
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  text-align: left;
+  cursor: pointer;
+}
+
+.dog-goal:hover,
+.dog-goal.virtual-hover,
+.dog-goal:focus-visible {
+  border-color: var(--accent);
+  outline: none;
+}
+
+.paw-icon {
+  flex: none;
+  width: 14px;
+  height: 14px;
+}
+
+.adopt-pups {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+  margin-top: 12px;
+}
+
+.adopt-pup {
+  display: grid;
+  justify-items: center;
+  gap: 4px;
+  padding: 6px 2px 5px;
+  border: 2px solid var(--stone-dk);
+  border-radius: 7px 6px 8px 6px;
+  background: var(--tablet);
+  box-shadow: var(--tablet-shadow);
+  color: var(--paper);
+  font: inherit;
+  font-size: 9px;
+  letter-spacing: 0.06em;
+  cursor: pointer;
+}
+
+.adopt-pup canvas {
+  width: 40px;
+  height: 40px;
+  image-rendering: pixelated;
+}
+
+.adopt-pup[aria-pressed="true"] {
+  border-color: var(--accent);
+  background: linear-gradient(160deg, #6a5034, #3a2e22);
+  color: var(--accent-text);
+}
+
+.field select {
+  color: var(--paper);
+  font: inherit;
+  appearance: none;
+  -webkit-appearance: none;
+  background-image: linear-gradient(45deg, transparent 50%, var(--muted) 50%), linear-gradient(135deg, var(--muted) 50%, transparent 50%), var(--tablet);
+  background-position: calc(100% - 16px) 16px, calc(100% - 11px) 16px, 0 0;
+  background-size: 5px 5px, 5px 5px, auto;
+  background-repeat: no-repeat;
+  padding-right: 28px;
+}
+
+.adopt-actions {
+  grid-template-columns: 1fr;
+}
+
+.adopt-goal {
+  display: flex;
+  align-items: center;
+  gap: 6px;
 }
 
 .loot-assign:disabled {

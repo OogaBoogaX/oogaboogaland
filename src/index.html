@@ -158,6 +158,7 @@
         <p data-scene="factory" hidden>Lightning Factory</p>
         <p data-scene="bifrost" hidden>₿IFRÖST</p>
         <p data-scene="arcade" hidden>Ooga Arcade</p>
+        <p data-scene="rescue" hidden>Free Puppies Rescue</p>
         <p data-scene="skee" hidden>Ooga Arcade · Thro-ball</p>
         <p data-scene="hoops" hidden>Ooga Arcade · Hoop Shot</p>
         <p data-scene="shy" hidden>Ooga Arcade · Coconut Toss</p>
@@ -277,6 +278,11 @@
         <button type="button" data-action="arcade-mute">Sound</button>
         <button type="button" class="leave" data-action="leave">Leave<span> cave</span></button>
       </nav>
+      <nav class="presets" aria-label="Free Puppies Rescue" data-scene="rescue" hidden>
+        <button type="button" data-preset="yard">Yard</button>
+        <button type="button" data-action="adopt-open">Adopt</button>
+        <button type="button" class="leave" data-action="leave">Leave<span> cave</span></button>
+      </nav>
       <nav class="presets" aria-label="Race" data-scene="race" hidden>
         <button type="button" data-action="garage" id="race-garage-btn">Garage</button>
         <button type="button" data-action="mute" id="race-mute" aria-label="Mute sound" aria-pressed="false">Sound</button>
@@ -340,6 +346,7 @@
             data-sign>Ooga Chat</span></button>
       </div>
       <section class="panel" data-panel="roster" role="tabpanel">
+        <button type="button" class="dog-goal" data-action="adopt-open" data-scene="hub"><svg class="paw-icon" viewBox="0 0 7 7" shape-rendering="crispEdges" aria-hidden="true"><path fill="#ff9cb4" d="M2 0h1v1H2zM4 0h1v1H4zM0 1h1v2H0zM2 1h1v1H2zM4 1h1v1H4zM6 1h1v2H6zM2 3h3v1H2zM1 4h5v2H1zM2 6h1v1H2zM4 6h1v1H4z" /></svg><span id="dog-goal-text"></span></button>
         <ul id="roster" class="roster"></ul>
         <p class="help" data-scene="hub"><span id="world-loot-hint" hidden>Something is hidden out there.</span></p>
         <button type="button" class="feed-open" data-action="feed"><span data-sign>Feed the Ooga Boogas</span></button>
@@ -1487,6 +1494,20 @@ Then run npm run build and ONLY=characters node test/run.mjs.</pre>
         <button type="button" data-action="recipe-copy">Copy prompt</button>
       </div>
     </dialog>
+    <dialog class="modal adopt-modal" id="adopt" aria-label="Adopt a puppy">
+      <div class="panel-head">
+        <h2><span data-sign>Adopt a puppy</span></h2>
+        <button type="button" class="modal-close" data-action="adopt-close" aria-label="Close">&times;</button>
+      </div>
+      <p class="help adopt-intro">Free Puppies Rescue. Every Ooga needs a dog! Dogs eat bananas from the pile, and they poop.</p>
+      <div class="adopt-pups" id="adopt-pups" aria-label="Pick a puppy"></div>
+      <label class="field"><span>Puppy name</span><input id="adopt-name" type="text" maxlength="16" autocomplete="off" spellcheck="false"></label>
+      <label class="field"><span>Give it to</span><select id="adopt-owner"></select></label>
+      <div class="actions adopt-actions">
+        <button type="button" data-action="adopt-go">Adopt</button>
+      </div>
+      <p class="help adopt-goal"><svg class="paw-icon" viewBox="0 0 7 7" shape-rendering="crispEdges" aria-hidden="true"><path fill="#ff9cb4" d="M2 0h1v1H2zM4 0h1v1H4zM0 1h1v2H0zM2 1h1v1H2zM4 1h1v1H4zM6 1h1v2H6zM2 3h3v1H2zM1 4h5v2H1zM2 6h1v1H2zM4 6h1v1H4z" /></svg><span id="adopt-goal"></span></p>
+    </dialog>
     <dialog class="chalk-modal" id="chalk-modal" aria-labelledby="chalk-title">
       <div class="chalk-head">
         <h2 id="chalk-title">EntropyLab chalkboard</h2>
@@ -1660,6 +1681,7 @@ Then run npm run build and ONLY=characters node test/run.mjs.</pre>
   <script src="js/mirror-guides.js"></script>
   <script src="js/crates.js"></script>
   <script src="js/critters.js"></script>
+  <script src="js/dogs.js"></script>
   <script src="js/weather.js"></script>
   <script src="js/race-models.js"></script>
   <script src="js/drop-models.js"></script>
@@ -1700,6 +1722,7 @@ Then run npm run build and ONLY=characters node test/run.mjs.</pre>
   <script src="js/arcade-games.js"></script>
   <script src="js/retro-games.js"></script>
   <script src="js/scene-arcade.js"></script>
+  <script src="js/scene-rescue.js"></script>
   <script src="js/carnival-audio.js"></script>
   <script src="js/scene-carnival.js"></script>
   <script src="js/race-track.js"></script>

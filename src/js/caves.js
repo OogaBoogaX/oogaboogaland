@@ -10,7 +10,9 @@
   // `theme` picks the facade the hub dresses the mouth with; `soon` marks a sealed cave that already wears one.
   const slots = [
     { ...slot("c11", 11, "lab", "open", "EntropyLab", "oogaboogax/entropylab"), theme: "lab" },
-    slot("c10", 10),
+    // Free Puppies Rescue: the kennel yard where puppies wait to be adopted (scene-rescue.js, dogs.js). Like the
+    // arcade's, its torches glow without casting light of their own.
+    { ...slot("c10", 10, "rescue", "open", "Free Puppies Rescue"), glowOnly: true, theme: "rescue" },
     slot("c9", 9),
     slot("c730", 7.25, null, "headquarters", "Headquarters"),
     { ...slot("c1", 1, null, "mirror", "Ooga Booga Land", "oogaboogax/oogaboogaland"), theme: "matrix" },

@@ -280,7 +280,9 @@
       qrUrl: $("qr-url"),
       feed: $("feed"),
       recipe: $("recipe"),
-      recipeText: $("recipe-text")
+      recipeText: $("recipe-text"),
+      adopt: $("adopt"), adoptPups: $("adopt-pups"), adoptName: $("adopt-name"), adoptOwner: $("adopt-owner"), adoptGoal: $("adopt-goal"),
+      dogGoal: $("dog-goal-text")
     };
     const favicon = new Image();
     favicon.onload = () => {
@@ -1364,6 +1366,61 @@
       e.preventDefault();
       closeRecipe();
     });
+    // Free Puppies Rescue's adoption: a portrait button for each breed, painted once from its pixel face, the
+    // Oogas still without a dog, and a name, which falls back to the suggested one.
+    const PUP_PX = 4;
+    let adoptBreed = 0;
+    const pickPup = (breed) => {
+      adoptBreed = breed;
+      for (const b of el.adoptPups.children) b.setAttribute("aria-pressed", String(Number(b.dataset.breed) === breed));
+    };
+    const openAdopt = ({ breeds, faces, faceInk, breed, owners, owner, name }) => {
+      if (!el.adoptPups.children.length) breeds.forEach((b, i) => {
+        const button = document.createElement("button"), canvas = document.createElement("canvas"), label = document.createElement("span");
+        button.type = "button";
+        button.className = "adopt-pup";
+        button.dataset.breed = String(i);
+        canvas.width = canvas.height = faces[i].length * PUP_PX;
+        const ctx = canvas.getContext("2d");
+        faces[i].forEach((row, y) => {
+          for (let x = 0; x < row.length; x++) {
+            if (!(row[x] in faceInk)) continue;
+            ctx.fillStyle = b.ink[faceInk[row[x]]];
+            ctx.fillRect(x * PUP_PX, y * PUP_PX, PUP_PX, PUP_PX);
+          }
+        });
+        label.textContent = b.name;
+        button.append(canvas, label);
+        on(button, "click", () => {
+          button.blur();
+          pickPup(i);
+        });
+        el.adoptPups.append(button);
+      });
+      el.adoptOwner.replaceChildren(...owners.map((o) => Object.assign(document.createElement("option"), { value: o.name, textContent: o.display })));
+      el.adoptOwner.value = owner;
+      el.adoptName.value = "";
+      el.adoptName.placeholder = name;
+      pickPup(breed);
+      if (!el.adopt.open) el.adopt.showModal();
+    };
+    // Focus left in the closed dialog would keep the director from passing keys on (W A S D among them).
+    const closeAdopt = () => {
+      if (el.adopt.open) el.adopt.close();
+      if (el.adopt.contains(document.activeElement)) document.activeElement.blur();
+    };
+    const adoptChoice = () => ({ breed: adoptBreed, owner: el.adoptOwner.value, name: BL.donations.sanitize(el.adoptName.value, 16) || el.adoptName.placeholder });
+    // The island's goal: how many Oogas have a dog, and the poop scooped so far.
+    const setDogGoal = (have, total, scooped) => {
+      const text = `${have} / ${total} Oogas have a dog${scooped ? ` · ${scooped} scooped` : ""}`;
+      el.dogGoal.textContent = text;
+      el.adoptGoal.textContent = text;
+    };
+    on(el.adopt, "keydown", (e) => {
+      if (e.key !== "Escape" || e.target === el.adoptOwner) return;
+      e.preventDefault();
+      closeAdopt();
+    });
     // Every popup closes when the visitor presses outside it, in every scene: a modal dialog on its
     // backdrop (the press lands on the dialog itself, outside its box), a card or a pause box anywhere
     // else on the page. The island's dialogs are registered here; a scene adds its own.
@@ -1382,6 +1439,7 @@
     }, true);
     dismissOutside(el.feed, closeFeed);
     dismissOutside(el.recipe, closeRecipe);
+    dismissOutside(el.adopt, closeAdopt);
     dismissOutside(el.board, () => mainBoard.close());
     // The prompt is written to be pasted, so it leaves in one click.
     const copyRecipe = (button) => {
@@ -1489,6 +1547,7 @@
         actionHandler && actionHandler("kiosk");
       }
       else if (b.dataset.action === "recipe-close") closeRecipe();
+      else if (b.dataset.action === "adopt-close") closeAdopt();
       else if (b.dataset.action === "recipe-copy") copyRecipe(b);
       else if (b.dataset.action === "intro-go") b.closest("[data-intro]").hidden = true;
       else if (b === el.modeDestination) {
@@ -1842,12 +1901,14 @@
       setJetpack(false, false, 0);
       closeFeed();
       closeRecipe();
+      closeAdopt();
+      el.adoptPups.replaceChildren();
       closeBoard(true);
       mainBoard.dispose();
       el.board.classList.remove("board-floating");
       el.board.removeAttribute("style");
     };
-    return { el, openFeed, closeFeed, openRecipe, closeRecipe, dismissOutside, openBoard, closeBoard, updateBoard, restoreBoards, setRosterRow, setMeter, setStats, setAct, setMode, setOwnOoga, setGorilla, setGorillaSmashPower, setDetachedView, fadeDetachedName, setAreaLabel, setPrimary, setWeapon, setMagazine, setJetpack, setSubtitle, onAction, toast, tooltip, hint, hideHint, letterSign, selectTab, onPreset, onIdentityChange, setIdentity, setDonationUrl, onAssign, onUnassign, renderInventory, dispose };
+    return { el, openFeed, closeFeed, openRecipe, closeRecipe, openAdopt, closeAdopt, adoptChoice, setDogGoal, dismissOutside, openBoard, closeBoard, updateBoard, restoreBoards, setRosterRow, setMeter, setStats, setAct, setMode, setOwnOoga, setGorilla, setGorillaSmashPower, setDetachedView, fadeDetachedName, setAreaLabel, setPrimary, setWeapon, setMagazine, setJetpack, setSubtitle, onAction, toast, tooltip, hint, hideHint, letterSign, selectTab, onPreset, onIdentityChange, setIdentity, setDonationUrl, onAssign, onUnassign, renderInventory, dispose };
   };
   // The account line in the sheet's foot is page-level: shown only when a backend answered, and
   // the director hands every change of `BL.net.state` here, whichever scene is active.
