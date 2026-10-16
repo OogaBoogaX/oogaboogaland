@@ -523,7 +523,8 @@
   // Each donation goes to the active scene with the API's banana count (null when simulated); in real mode the pile
   // follows the API's. The page's own Worker turns real mode on in the account's look at /api/me, so the subscription
   // waits for that look (bounded, as the boot's wait is) and a page about to go real never plays a simulated tip. A
-  // donation pushed before the first scene is ready still counts in the saved tally.
+  // donation pushed before the first scene is ready still counts in the saved tally. An on-chain tip the visitor left
+  // the kiosk waiting on says it was theirs, in whatever scene they are, in place of the scene's own toast.
   const pileFeed = { bananas: 0, eatPerHour: 0, at: 0 };
   let unsubscribeDonations = null;
   accountReady.then(() => {
@@ -532,6 +533,10 @@
     unsubscribeDonations = donations.subscribe((donation, bananas) => {
       if (active) active.onDonation(donation, bananas);
       else game.recordDonation(donation, bananas && bananas.exact);
+      if (donations.waited(donation.id)) {
+        const n = bananas && bananas.rounded;
+        window.BL.hud.toast(`Your on-chain tip confirmed · ${gameMod.formatLarge(donation.sats)} sats${n ? ` · ${gameMod.formatLarge(n)} banana${n === 1 ? "" : "s"}` : ""}`);
+      }
     }, {
       identity: () => game.state,
       onPile: ({ bananas, eatPerHour }) => Object.assign(pileFeed, { bananas, eatPerHour, at: performance.now() })
