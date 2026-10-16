@@ -7498,9 +7498,11 @@ const phone = (id, { card = null, play = null, required, sheet = false }) => ({ 
 // The demo node is held still so an event handed to the feed is the only thing moving; events use the demo
 // contract and a node of their own, so their sequence numbers never meet the demo node's.
 const FACTORY_EVENT = `const F = window.BL.factoryFeed, X = window.__ooga.factory, stamp = () => { const d = new Date(); d.setUTCSeconds(0, 0); return d.toISOString(); }; window.__factorySeq = window.__factorySeq || 0; const send = (type, payload) => { const n = ++window.__factorySeq; return X.feed.accept({ schema: F.DEMO, id: "aaaaaaaa-bbbb-4ccc-8ddd-" + String(n).padStart(12, "0"), seq: n, bucket: stamp(), node: "probe", origin: "observed", stream: "live", type, payload }); }; X.mock.update = () => {};`;
-// Holds whichever of W A S D moves the camera-relative way nearest (dx, dz) in the world, for `seconds`.
+// Whichever of W A S D moves the camera-relative way nearest (dx, dz) in the world.
+const keyToward = (b, dx, dz) => b.evaluate(`(() => { const c = window.__ooga.camera, fx = c.target.x - c.position.x, fz = c.target.z - c.position.z, l = Math.hypot(fx, fz), f = [fx / l, fz / l], r = [-f[1], f[0]], d = [${dx}, ${dz}]; const score = { w: f[0] * d[0] + f[1] * d[1], s: -(f[0] * d[0] + f[1] * d[1]), d: -(r[0] * d[0] + r[1] * d[1]), a: r[0] * d[0] + r[1] * d[1] }; return Object.entries(score).sort((p, q) => q[1] - p[1])[0][0]; })()`);
+// Holds that key for `seconds`.
 const walkToward = async (b, dx, dz, seconds) => {
-  const k = await b.evaluate(`(() => { const c = window.__ooga.camera, fx = c.target.x - c.position.x, fz = c.target.z - c.position.z, l = Math.hypot(fx, fz), f = [fx / l, fz / l], r = [-f[1], f[0]], d = [${dx}, ${dz}]; const score = { w: f[0] * d[0] + f[1] * d[1], s: -(f[0] * d[0] + f[1] * d[1]), d: -(r[0] * d[0] + r[1] * d[1]), a: r[0] * d[0] + r[1] * d[1] }; return Object.entries(score).sort((p, q) => q[1] - p[1])[0][0]; })()`);
+  const k = await keyToward(b, dx, dz);
   await holdKey(b, k, seconds);
   return k;
 };
@@ -8312,12 +8314,15 @@ const bifrostDsb = { name: "bifrost dsb round trip", why: "playthrough: the same
 const bifrostPoker = { name: "bifrost poker round trip", why: "playthrough: the same Ooga walks through the poker window straight into the poker room, and the room's mirror brings it back into the chamber before that window", run: async (b) => {
   await b.evaluate(`(() => { const B = window.__ooga, r = window.BL.bifrostModels.HALL.r - 1.6, w = B.bifrost.scene.windows.find((w) => w.row.scene === "poker"), x = w.sn * r, z = w.c * r; B.pilot.navigate({ position: { x, y: 0, z }, target: { x: x + w.sn * 4, y: 1, z: z + w.c * 4 }, yaw: Math.atan2(w.sn, w.c) + Math.PI, pitch: 0.2, dist: 5 }); B.advance(0.5, 1 / 60); window.__pokerWindow = [w.sn, w.c]; })()`);
   const inKey = await b.evaluate(`window.__pokerWindow`);
-  const k = await walkToward(b, inKey[0], inKey[1], 0.1);
-  await b.send("Input.dispatchKeyEvent", { type: "keyDown", key: k, text: k, code: "Key" + k.toUpperCase() });
-  const there = await b.evaluate(`(() => { const B = window.__ooga; let started = -1, arrived = -1;
+  // The walk up and the crossing run in one evaluation, the key held across fixed steps alone, so no frame the page
+  // draws between DevTools calls (a slow one, as when the first footstep opens its sound) carries the Ooga on early.
+  const k = await keyToward(b, inKey[0], inKey[1]);
+  const there = await b.evaluate(`(() => { const B = window.__ooga, key = (down) => window.dispatchEvent(new KeyboardEvent(down ? "keydown" : "keyup", { key: "${k}", code: "Key${k.toUpperCase()}", bubbles: true }));
+    let started = -1, arrived = -1;
+    key(true);
     for (let i = 0; i < 180 && arrived < 0; i++) { B.advance(1 / 60, 1 / 60); if (started < 0 && B.transitioning) started = i; if (B.scene === "poker") arrived = i; }
+    key(false);
     return { scene: B.scene, ooga: B.crew && B.crew.player ? B.crew.player.traits.name : null, steps: arrived - started, started }; })()`);
-  await b.send("Input.dispatchKeyEvent", { type: "keyUp", key: k, code: "Key" + k.toUpperCase() });
   if (there.scene === "poker") {
     // The poker scene's debug handle carries no camera, so the key that walks toward its mirror (+z) on screen is read
     // from the scene's own.

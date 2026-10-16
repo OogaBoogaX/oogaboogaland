@@ -160,7 +160,7 @@
   // The page's one factory node (`world.factoryNode`), and its feed and demo node.
   let shared = null, feed = null, mock = null, unsubscribe = null, leaving = false, dust = null;
   // The Ooga the visitor walked in as: one playable actor from the shared crew, and the world it carries.
-  let people = null, avatar = null, playerWorld = null, unsubscribeAccount = null, remotes = null;
+  let people = null, avatar = null, playerWorld = null, unsubscribeAccount = null, remotes = null, footsteps = null;
   const NO_ACTORS = [];
   let scene = null, greeter = null, actPrompt = false;
   // On the Worker's page the island's driving rules hold in here too, and the Ooga driven is reported to the
@@ -1632,6 +1632,8 @@
     unsubscribeAccount = BL.net.subscribe(accountChanged);
     // Other signed-in players in the hall, as the Oogas they drive.
     remotes = BL.remotePlayers.create({ root, crew: people });
+    // The driven Ooga's own footsteps, heard by this page alone (footsteps.js).
+    footsteps = BL.footsteps.create();
     lightUp();
     LIGHT_BASE.set(RENDER_OPTS.lights);
 
@@ -1857,6 +1859,7 @@
       BL.net.setHealth(drivenHere.health.value, drivenHere.health.stunned);
     }
     remotes.update(dt);
+    footsteps.update(drivenHere);
     // Cut the vault and inward-leaning walls away so the outer decks stay visible.
     // Restore them only after the birdseye blend fully returns, including reversals.
     s.ceiling.visible = s.walls.visible = !pilot.birdsEye && pilot.birdsEyeMix === 0;
@@ -2080,6 +2083,8 @@
     pilot.dispose();
     remotes.dispose();
     remotes = null;
+    footsteps.dispose();
+    footsteps = null;
     if (people) people.dispose();
     fx.dispose();
     for (const node of targets) input.remove(node);

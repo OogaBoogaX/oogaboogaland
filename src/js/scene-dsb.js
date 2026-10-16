@@ -57,7 +57,7 @@
   let root,camera,land,pilot,crew,avatar,hud,input,fx,gate,game,world,go,overlayCanvas,panel,context,leaving=false,overview=false;
   let jetpackBeforeInterior=false;
   const VOICE_ZONES={"dsb-studio":"dsb-studio","maxis-club":"dsb-maxis","without-rulers":"dsb-without-rulers","proof-of-ink":"dsb-proof-of-ink","big-bitcoin":"dsb-big-bitcoin","meme-factory":"dsb-meme-factory","stackchain-magazine":"dsb-stackchain","svrn-society":"dsb-svrn"};
-  let remotes=null,unsubscribeAccount=null;
+  let remotes=null,unsubscribeAccount=null,footsteps=null;
   const voiceZone=()=>VOICE_ZONES[interiors?.active?.room.id]||"dsb-outside";
   const mayPossess=cave=>BL.net.mayDrive(cave.traits.name,BL.contributors.stateFor(cave.contributor)==="working");
   const jetpackAllowed=()=>!interiors?.active;
@@ -232,6 +232,7 @@
     crew.setJetpackOwnership(avatar,true,BL.hubModels.jetpack(),BL.hubModels.jetFlame());
     crew.wearJetpack(avatar,BL.hubModels.jetpack(),BL.hubModels.jetFlame());
     remotes=BL.remotePlayers.create({root,crew,visible:rec=>rec.zone===voiceZone()&&(!entrance||entrance.phase==="done")});
+    footsteps=BL.footsteps.create(); // The driven Ooga's own footsteps, heard by this page alone (footsteps.js).
     hud.el.sheet.addEventListener("focusin",sheetFocus);
     Object.assign(avatar.root.position,{x:-45,y:land.heightAt(-45,-43)+avatar.baseY,z:-43});avatar.root.rotation.y=0;
     Object.assign(hooks,pilot.hooks);hud.onAction(action);hud.onPreset(()=>overviewView());
@@ -450,13 +451,13 @@
     if(context.textContent!==label)context.textContent=label;
     context.classList.toggle("ink-context-browse",!!inkRoom()&&!!zone&&!nearbySeat&&!door);
     if(inkLayoutPending&&inkRoom()){inkLayoutPending=false;layoutInkBrowse();}
-    sharePresence();remotes.update(dt);
+    sharePresence();remotes.update(dt);footsteps.update(crew.player);
     context.hidden=!!avatar.camp.seat||overview||interiors.transitioning||gate.isOpen||menuOpen()||(!studioLabel&&!nearTv()&&!door&&(interiors.active||!nearGate()));fx.update(dt);
   };
   const leave=()=>{
     if(crew.player)world.pilot=avatar.traits.name;
     unsubscribeAccount();unsubscribeAccount=null;BL.net.setBody(null);BL.net.setZone("scene-transition");
-    hud.el.sheet.removeEventListener("focusin",sheetFocus);remotes.dispose();remotes=null;
+    hud.el.sheet.removeEventListener("focusin",sheetFocus);remotes.dispose();remotes=null;footsteps.dispose();footsteps=null;
     inkLayoutObserver.disconnect();inkLayoutObserver=null;window.removeEventListener("resize",requestInkLayout);
     context.classList.remove("ink-context-browse");
     memeMenu.dispose();memeMenu=null;

@@ -135,7 +135,7 @@
   };
 
   let renderer, canvas, game, world, go, root, camera, hud, hooks, input, pilot, fx, agentPlay = null;
-  let people = null, avatar = null, playerWorld = null, scene = null, leaving = false, dust = null, pictureTries = 0, pictureWait = 0, unsubscribeAccount = null, remotes = null;
+  let people = null, avatar = null, playerWorld = null, scene = null, leaving = false, dust = null, pictureTries = 0, pictureWait = 0, unsubscribeAccount = null, remotes = null, footsteps = null;
   const NO_ACTORS = [];
   // On the Worker's page the island's driving rules hold in here too, and the Ooga driven is reported to the
   // room every frame, so signed-in players in the chamber hear each other (voice needs a driven Ooga).
@@ -569,6 +569,8 @@
     unsubscribeAccount = BL.net.subscribe(accountChanged);
     // Other signed-in players in the chamber, as the Oogas they drive.
     remotes = BL.remotePlayers.create({ root, crew: people });
+    // The driven Ooga's own footsteps, heard by this page alone (footsteps.js).
+    footsteps = BL.footsteps.create();
     lightUp(scene);
     leaving = false;
 
@@ -809,6 +811,7 @@
       BL.net.setHealth(drivenHere.health.value, drivenHere.health.stunned);
     }
     remotes.update(dt);
+    footsteps.update(drivenHere);
     mechanism(s, dt, elapsed);
     heavens(s, dt, elapsed);
     // The way out's field hums and shows the outline of whoever walks through it.
@@ -896,6 +899,8 @@
     scene.gate.phase.dispose();
     remotes.dispose();
     remotes = null;
+    footsteps.dispose();
+    footsteps = null;
     if (people) people.dispose();
     fx.dispose();
     pilot.dispose();
