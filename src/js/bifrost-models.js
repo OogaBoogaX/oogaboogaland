@@ -698,21 +698,47 @@
 
   // What the open dome looks up into, all on a sphere `r` round the hall and emissive, so the hall's lamps never light
   // it: the scene's own sky pass paints the night's gradient, its moon and twinkling stars behind; over them a field of
-  // brighter stars (`stars`), a galaxy's band of soft violet and teal haze (`band`, glass so its puffs blend), and the
-  // planets, each shaded on its sunward side (`planets`, each built round its own middle with where it stands). A few
-  // shooting stars (`meteors`) are laid out ready, each where it streaks and along which way (`dir`), for the scene to
-  // light one now and then. `sparse` is Canvas 2D's lighter sky. The beam from the ₿ rises to `beam`.
+  // brighter stars (`stars`, and in `twinkle` the ones the scene dims now and then, a group at a time, the big ones
+  // round, each in a soft halo of its colour in the matching group of `halos`), a galaxy's band of soft violet and teal
+  // clouds (`band`, glass so its clouds blend), and the planets (`planets`, see `sky`). The brightest stars glint
+  // (`glints`: where each stands and how big, for the scene to hang the one `glint` on). A few shooting stars (`meteors`)
+  // are laid out ready, each where it streaks and along which way (`dir`), for the scene to light one now and then.
+  // `sparse` is Canvas 2D's lighter sky: its band's clouds plain quads and its planets still but for their moons. The
+  // beam from the ₿ rises to `beam`.
   const SKY = { r: 320, beam: 180, sun: [0.6, 0.35, 0.72], band: [0.8, 0.25, 0.55] };
+  const TWINKLE = 6, TWINKLE_EMISSIVE = 0.7;
+  // Stars' colours, white, blue-white, gold and red, and their halos'.
+  const STAR_TONES = ["#f4f6ff", "#bcd4ff", "#ffe6b0", "#ffb8a0"], STAR_HALOS = ["#9ab8ff", "#6f9cff", "#ffc35c", "#ff7a52"];
   const unit = (x, y, z) => { const l = Math.hypot(x, y, z); return [x / l, y / l, z / l]; };
-  // A flat quad `w` by `h` facing the hall's middle at the point `d` (a unit direction) times `r`, turned `spin` about it.
-  const facingIn = (geo, d, r, w, h, spin, color, emissive) => {
+  // Two ways across the sky at the unit direction `d`, square to it and to each other, turned `spin` about it.
+  const skyPlane = (d, spin) => {
     const [dx, dy, dz] = d, up = Math.abs(dy) > 0.95 ? [1, 0, 0] : [0, 1, 0];
     let ax = up[1] * dz - up[2] * dy, ay = up[2] * dx - up[0] * dz, az = up[0] * dy - up[1] * dx;
     const al = Math.hypot(ax, ay, az); ax /= al; ay /= al; az /= al;
     const bx = dy * az - dz * ay, by = dz * ax - dx * az, bz = dx * ay - dy * ax, c = Math.cos(spin), s = Math.sin(spin);
-    const ux = (ax * c + bx * s) * w / 2, uy = (ay * c + by * s) * w / 2, uz = (az * c + bz * s) * w / 2;
-    const vx = (bx * c - ax * s) * h / 2, vy = (by * c - ay * s) * h / 2, vz = (bz * c - az * s) * h / 2, cx = dx * r, cy = dy * r, cz = dz * r;
+    return [ax * c + bx * s, ay * c + by * s, az * c + bz * s, bx * c - ax * s, by * c - ay * s, bz * c - az * s];
+  };
+  // A flat quad `w` by `h` facing the hall's middle at the point `d` (a unit direction) times `r`, turned `spin` about it.
+  const facingIn = (geo, d, r, w, h, spin, color, emissive) => {
+    const [ax, ay, az, bx, by, bz] = skyPlane(d, spin);
+    const ux = ax * w / 2, uy = ay * w / 2, uz = az * w / 2, vx = bx * h / 2, vy = by * h / 2, vz = bz * h / 2, cx = d[0] * r, cy = d[1] * r, cz = d[2] * r;
     return facing(geo, [[cx - ux - vx, cy - uy - vy, cz - uz - vz], [cx + ux - vx, cy + uy - vy, cz + uz - vz], [cx + ux + vx, cy + uy + vy, cz + uz + vz], [cx - ux + vx, cy - uy + vy, cz - uz + vz]], color, emissive, 0, 0, 0);
+  };
+  // A soft cloud `w` by `h` where `facingIn` would lay its quad: a bright heart and two rings round it, each darker,
+  // so on glass over the night it fades out at its edge instead of ending in one.
+  // `steps` [from, to, darkness] are its heart and rings in halves of `w` and `h`; a heart alone is a round dot.
+  const PUFF = [[0, 0.45, 0], [0.45, 0.85, 0.5], [0.85, 1.3, 0.82]], DOT = [[0, 1, 0]];
+  const puffIn = (geo, d, r, w, h, spin, color, emissive, steps = PUFF) => {
+    const [ax, ay, az, bx, by, bz] = skyPlane(d, spin), n = 10, cx = d[0] * r, cy = d[1] * r, cz = d[2] * r;
+    const at = (k, s) => {
+      const t = k / n * TAU, u = Math.cos(t) * s * w / 2, v = Math.sin(t) * s * h / 2;
+      return [cx + ax * u + bx * v, cy + ay * u + by * v, cz + az * u + bz * v];
+    };
+    facing(geo, Array.from({ length: n }, (_, k) => at(k, steps[0][1])), color, emissive, 0, 0, 0);
+    for (let j = 1; j < steps.length; j++) {
+      const [s0, s1, dark] = steps[j], col = blend(color, "#000000", dark);
+      for (let k = 0; k < n; k++) facing(geo, [at(k, s0), at(k + 1, s0), at(k + 1, s1), at(k, s1)], col, emissive, 0, 0, 0);
+    }
   };
   // A planet `r` across, banded from pole to pole in `bands` and shaded toward `sun`, its night side dim, turned so its
   // pole leans by `tilt`; `rings` [inner, outer, colours] if it has them. It is shaded upright against the sun turned back
@@ -748,13 +774,86 @@
     if (tilt) turnedZ(out, tilt);
     return noShadow(out);
   };
+  // A planet that turns, built upright for the scene to lean by its `tilt` and spin about its pole: banded as `planet`
+  // is, with ragged edges to its bands and `marks(lat, lon)` painting its features (a colour, or nothing), but unshaded,
+  // since its day and night stay toward the sun while it turns: `shade` lays them over it. Its rings come apart band by
+  // band (`rings`, each with how fast it goes round, radians a second), clumped and spoked, the inner ones faster, as
+  // rings go; they are lit for the sun turned back by the tilt.
+  const RING_TURN = 0.11;
+  const turning = ({ r, bands, tilt = 0, rings = null, rows = 16, segments = 32, seed, ragged = 0.12, marks = null }) => {
+    const rand = mulberry32(seed), geo = geometry(), n = bands.length, P = [];
+    for (let i = 0; i <= rows; i++) {
+      const lat = -Math.PI / 2 + Math.PI * i / rows, row = [];
+      for (let k = 0; k < segments; k++) { const lon = k / segments * TAU; row.push([Math.cos(lat) * Math.cos(lon), Math.sin(lat), Math.cos(lat) * Math.sin(lon)]); }
+      P.push(row);
+    }
+    for (let i = 0; i < rows; i++) for (let k = 0; k < segments; k++) {
+      const k2 = (k + 1) % segments, q = [P[i][k], P[i][k2], P[i + 1][k2], P[i + 1][k]], f = (i + 0.5) / rows * n;
+      let b = Math.min(n - 1, Math.floor(f));
+      if (rand() < ragged) b = Math.max(0, Math.min(n - 1, b + (f - b < 0.5 ? -1 : 1)));
+      const color = (marks && marks(-Math.PI / 2 + Math.PI * (i + 0.5) / rows, (k + 0.5) / segments * TAU, rand)) || bands[b];
+      face(geo, q.map(([x, y, z]) => pushVert(geo, x * r, y * r, z * r)).reverse(), hexToRgb(color), { emissive: 1 });
+    }
+    const out = { body: noShadow(geo), rings: [] };
+    if (rings) {
+      const [r0, r1, colours] = rings, m = colours.length, [ux, uy] = unit(...SKY.sun), lit = 0.35 + 0.65 * Math.abs(uy * Math.cos(tilt) - ux * Math.sin(tilt));
+      for (let b = 0; b < m; b++) {
+        const ring = geometry(), ra = r0 + (r1 - r0) * b / m, rb = r0 + (r1 - r0) * (b + 0.85) / m;
+        for (let k = 0; k < 48; k++) {
+          const a0 = k / 48 * TAU, a1 = (k + 1) / 48 * TAU, clump = (0.78 + 0.32 * rand()) * (rand() < 0.12 ? 0.55 : 1);
+          const pts = [[ra, a0], [rb, a0], [rb, a1], [ra, a1]].map(([rr, a]) => [Math.cos(a) * rr, 0, Math.sin(a) * rr]);
+          const col = hexToRgb(colours[b]).map((v) => Math.min(255, Math.round(v * lit * clump)));
+          face(ring, pts.map(([x, y, z]) => pushVert(ring, x, y, z)), col, { emissive: 1 });
+          face(ring, pts.map(([x, y, z]) => pushVert(ring, x, y, z)).reverse(), col, { emissive: 1 });
+        }
+        out.rings.push({ geometry: noShadow(ring), rate: RING_TURN * Math.pow(ra / r0, -1.5) });
+      }
+    }
+    return out;
+  };
+  // Day and night over a turning planet a unit across: shells a little over it, each a band round the sun's way, glass
+  // that dims the planet under it the more the further from the sun (`SHADE`: from and to, radians off the sun, and how
+  // dark), so it shows whole under the sun and a sixth on its night side, as `planet` shades a still one. Glass darkens
+  // further at its rim, which would eat a crescent's lit edge, so every vertex is given the normal `toward` the hall
+  // from the planet, square to the view, and each shell dims by its own darkness alone.
+  const SHADE = [[0.7, 1.05, 0.22], [1.05, 1.4, 0.45], [1.4, 1.7, 0.68], [1.7, Math.PI, 0.84]];
+  const shade = (toward) => {
+    const u = unit(...SKY.sun), [ax, ay, az, bx, by, bz] = skyPlane(u, 0), n = 24, R = 1.015;
+    const at = (t, k) => {
+      const a = k / n * TAU, c = Math.cos(t), s = Math.sin(t), ca = Math.cos(a) * s, sa = Math.sin(a) * s;
+      return [(u[0] * c + ax * ca + bx * sa) * R, (u[1] * c + ay * ca + by * sa) * R, (u[2] * c + az * ca + bz * sa) * R];
+    };
+    return SHADE.map(([t0, t1, dark]) => {
+      const geo = geometry(), rows = Math.max(1, Math.round((t1 - t0) / 0.12));
+      for (let j = 0; j < rows; j++) for (let k = 0; k < n; k++) {
+        const ta = t0 + (t1 - t0) * j / rows, tb = t0 + (t1 - t0) * (j + 1) / rows, q = [at(ta, k), at(ta, k + 1), at(tb, k + 1), at(tb, k)];
+        facing(geo, q, "#03040c", 1, (q[0][0] + q[2][0]) * 2, (q[0][1] + q[2][1]) * 2, (q[0][2] + q[2][2]) * 2);
+      }
+      geo.glass = dark;
+      geo.normals = Array.from({ length: geo.verts.length }, (_, i) => toward[i % 3]);
+      return noShadow(geo);
+    });
+  };
+  // A moon `a` from its planet's middle going round it `rate` radians a second from `phase`: through `u` and `v`, two
+  // ways square to each other, `v` tipped `incline` toward the third.
+  const orbit = (geometry, a, rate, phase, u, v, incline = 0) => {
+    const w = [u[1] * v[2] - u[2] * v[1], u[2] * v[0] - u[0] * v[2], u[0] * v[1] - u[1] * v[0]], c = Math.cos(incline), s = Math.sin(incline);
+    return { geometry, a, rate, phase, u, v: [v[0] * c + w[0] * s, v[1] * c + w[1] * s, v[2] * c + w[2] * s] };
+  };
   const sky = variants((sparse) => {
-    const rand = mulberry32(2140 + sparse), R = SKY.r, stars = geometry(), band = geometry();
-    // Stars, thicker toward the zenith the dome frames; a few big and coloured.
+    const rand = mulberry32(2140 + sparse), R = SKY.r, stars = geometry(), band = geometry(), glints = [];
+    const twinkle = Array.from({ length: TWINKLE }, () => geometry()), halos = Array.from({ length: TWINKLE }, () => geometry());
+    // Stars, thicker toward the zenith the dome frames; a few big and coloured, round, in a halo of their colour, deeper
+    // than the star. Every big star and one in four of the rest twinkle, dealt round the groups; the biggest also glint.
     for (let i = 0; i < (sparse ? 260 : 1100); i++) {
       const y = 0.1 + 0.9 * Math.sqrt(rand()), a = rand() * TAU, s = Math.sqrt(1 - y * y), big = rand() < 0.06, size = big ? 1.4 + rand() * 1.2 : 0.45 + rand() * 0.6;
-      const tone = rand(), color = tone < 0.6 ? "#f4f6ff" : tone < 0.8 ? "#bcd4ff" : tone < 0.93 ? "#ffe6b0" : "#ffb8a0";
-      facingIn(stars, [Math.cos(a) * s, y, Math.sin(a) * s], R, size, size, rand() * TAU, color, 1);
+      const tone = rand(), hue = tone < 0.6 ? 0 : tone < 0.8 ? 1 : tone < 0.93 ? 2 : 3, color = STAR_TONES[hue], d = [Math.cos(a) * s, y, Math.sin(a) * s];
+      const twinkles = big || i % 4 === 0, spin = rand() * TAU;
+      if (big) {
+        puffIn(twinkle[i % TWINKLE], d, R, size, size, spin, color, TWINKLE_EMISSIVE, DOT);
+        puffIn(halos[i % TWINKLE], d, R * 1.004, size * 3.6, size * 3.6, spin, STAR_HALOS[hue], TWINKLE_EMISSIVE);
+      } else facingIn(twinkles ? twinkle[i % TWINKLE] : stars, d, R, size, size, spin, color, twinkles ? TWINKLE_EMISSIVE : 1);
+      if (big && size > 2.4 && y > 0.45) glints.push({ bearing: Math.atan2(d[0], d[2]), elevation: Math.asin(y), size });
     }
     // The galaxy's band: a great circle across the sky tipped toward the dome, soft puffs along it.
     const [nx, ny, nz] = unit(...SKY.band), ex = unit(ny, -nx, 0), fx = [ny * ex[2] - nz * ex[1], nz * ex[0] - nx * ex[2], nx * ex[1] - ny * ex[0]];
@@ -764,9 +863,9 @@
       const d = unit(ex[0] * Math.cos(a) + fx[0] * Math.sin(a) + nx * off, ex[1] * Math.cos(a) + fx[1] * Math.sin(a) + ny * off, ex[2] * Math.cos(a) + fx[2] * Math.sin(a) + nz * off);
       if (d[1] < 0.05) continue;
       const w = 30 + rand() * 50;
-      facingIn(band, d, R * 1.02, w, w * (0.5 + rand() * 0.5), rand() * TAU, hazes[Math.floor(rand() * hazes.length)], 0.7);
+      (sparse ? facingIn : puffIn)(band, d, R * 1.02, w, w * (0.5 + rand() * 0.5), rand() * TAU, hazes[Math.floor(rand() * hazes.length)], 0.7);
     }
-    band.glass = 0.16;
+    band.glass = sparse ? 0.16 : 0.3;
     // Bright knots and a dust of stars in the band.
     for (let i = 0; i < (sparse ? 60 : 320); i++) {
       const a = rand() * TAU, off = (rand() - 0.5) * 0.18;
@@ -775,15 +874,54 @@
       const size = 0.35 + rand() * 0.7;
       facingIn(stars, d, R * 0.99, size, size, rand() * TAU, rand() < 0.5 ? "#e8ddff" : "#c8f0ff", 1);
     }
+    // The planets, each built round its own middle with where it stands (`at`), how big (`r`) and its moons (`moons`,
+    // each shaded for the sun where it hangs, so it goes round by moving alone; see `orbit`). A turning one carries its
+    // `body`, `tilt`, `turn` (radians a second), `rings` and the `shade` shells to hang over it, a unit across; a still
+    // one, as all of them are on Canvas 2D, is one shaded `geometry`, rings and all.
     const at = (x, y, z, r) => { const d = unit(x, y, z); return { x: d[0] * r, y: d[1] * r, z: d[2] * r }; };
+    // A moon's ways round a planet at `p`: `u` out from the hall through it and `v` level across, so it passes in front
+    // of its planet and behind it.
+    const across = (p) => { const u = unit(p.x, p.y, p.z); return [u, unit(u[2], 0, -u[0])]; };
+    const moon = (r, bands) => planet({ r, bands, rows: 6, segments: 10 });
+    const turns = (p, options) => ({ ...turning(options), shade: shade(unit(-p.x, -p.y, -p.z)) });
+    const GIANT = { r: 26, tilt: 0.38, bands: ["#8a5a2e", "#c9955a", "#e8cf9a", "#b8783e", "#f0dcae", "#a8703a", "#d9b27a", "#7a4a26"], rings: [36, 60, ["#c8a878", "#e6d2a8", "#9a8060", "#dcc294", "#b89a70"]] };
+    const RED = { r: 8, bands: ["#6a2a1e", "#a8432a", "#c8603a", "#a8432a", "#7a301e"], rows: 10, segments: 16 };
+    const ICE = { r: 12, bands: ["#9ad4e8", "#c8ecf8", "#7ab8d8", "#e8f8ff", "#8ac4e0"], rows: 10, segments: 18 };
+    const giantAt = at(0.35, 0.72, -0.62, 250), redAt = at(-0.55, 0.5, -0.67, 280), iceAt = at(-0.18, 0.84, 0.5, 300);
+    const [redU, redV] = across(redAt), [iceU, iceV] = across(iceAt), ringU = [Math.cos(GIANT.tilt), Math.sin(GIANT.tilt), 0];
     const planets = [
-      // A ringed giant in amber and cream, high over the far side of the dome.
-      { at: at(0.35, 0.72, -0.62, 250), geometry: planet({ r: 26, tilt: 0.38, bands: ["#8a5a2e", "#c9955a", "#e8cf9a", "#b8783e", "#f0dcae", "#a8703a", "#d9b27a", "#7a4a26"], rings: [36, 60, ["#c8a878", "#e6d2a8", "#9a8060", "#dcc294", "#b89a70"]] }) },
-      // A small red world.
-      { at: at(-0.55, 0.5, -0.67, 280), geometry: planet({ r: 8, bands: ["#6a2a1e", "#a8432a", "#c8603a", "#a8432a", "#7a301e"], rows: 10, segments: 16 }) },
-      // An ice world with a moon of its own.
-      { at: at(-0.18, 0.84, 0.5, 300), geometry: planet({ r: 12, bands: ["#9ad4e8", "#c8ecf8", "#7ab8d8", "#e8f8ff", "#8ac4e0"], rows: 10, segments: 18 }) },
-      { at: at(-0.08, 0.86, 0.5, 300), geometry: planet({ r: 3, bands: ["#9a9aa8", "#c8c8d4", "#8a8a98"], rows: 6, segments: 10 }) }
+      // A ringed giant in amber and cream, high over the far side of the dome: a great red storm and white ovals ride
+      // its belts round, and two moons go round it in its rings' plane, one inside the rings, crossing its face and
+      // passing behind it, the other outside them.
+      {
+        at: giantAt, r: GIANT.r, tilt: GIANT.tilt, turn: 0.05,
+        moons: [orbit(moon(3.2, ["#8a8070", "#b8ac94", "#7a7062"]), 31, 0.15, 0.6, ringU, [0, 0, 1]), orbit(moon(2.2, ["#c8d4dc", "#e8eef2", "#a8b8c4"]), 88, 0.055, 3.4, ringU, [0, 0, 1], -0.09)],
+        ...(sparse ? { geometry: planet(GIANT) } : turns(giantAt, { ...GIANT, rows: 20, segments: 40, seed: 2144, marks: (lat, lon, rand) => {
+          const dl = (lat + 0.42) / 0.2, dn = Math.atan2(Math.sin(lon - 1), Math.cos(lon - 1)) / 0.45, e = dl * dl + dn * dn;
+          if (e < 0.45) return "#b4442a";
+          if (e < 1.1) return "#d87a4c";
+          if (Math.abs(lat - 0.5) < 0.1 && Math.sin(lon * 3 + 0.5) > 0.92) return "#f8eedc";
+          return rand() < 0.02 ? "#f2e2be" : null;
+        } }))
+      },
+      // A small red world turning under white caps, its dark lands going round, with two little moons close in.
+      {
+        at: redAt, r: RED.r, tilt: 0, turn: 0.09,
+        moons: [orbit(moon(1.3, ["#6a5a50", "#8a7a6c", "#5a4a40"]), 15, 0.32, 1.2, redU, redV, 0.3), orbit(moon(0.9, ["#7a6a5c", "#9a8a7a", "#6a5a4c"]), 23, 0.17, 4, redU, redV, -0.2)],
+        ...(sparse ? { geometry: planet(RED) } : turns(redAt, { ...RED, rows: 12, segments: 20, seed: 2145, marks: (lat, lon, rand) => {
+          if (Math.abs(lat) > 1.2) return "#f4efe8";
+          return Math.sin(lon * 2 + 1) * Math.cos(lat * 3) > 0.45 && rand() < 0.8 ? "#5e2418" : null;
+        } }))
+      },
+      // An ice world, its storm a pale swirl going round, and its moon crossing its face and passing behind it.
+      {
+        at: iceAt, r: ICE.r, tilt: 0.2, turn: 0.06,
+        moons: [orbit(moon(3, ["#9a9aa8", "#c8c8d4", "#8a8a98"]), 30, 0.12, 2.2, iceU, iceV, 0.12)],
+        ...(sparse ? { geometry: planet(ICE) } : turns(iceAt, { ...ICE, tilt: 0.2, rows: 12, segments: 22, seed: 2146, marks: (lat, lon) => {
+          const dl = (lat - 0.3) / 0.22, dn = Math.atan2(Math.sin(lon - 2), Math.cos(lon - 2)) / 0.4, e = dl * dl + dn * dn;
+          return e < 0.5 ? "#ffffff" : e < 1.2 ? "#5a9ac4" : null;
+        } }))
+      }
     ];
     // Shooting stars: a bright head trailing a thinning tail, each laid along its own way across the upper sky.
     const meteors = [];
@@ -799,7 +937,53 @@
       }
       meteors.push({ geometry: noShadow(geo), dir, len: len * 1.6 });
     }
-    return { stars: noShadow(stars), band: noShadow(band), planets, meteors };
+    for (const halo of halos) halo.glass = 0.35;
+    return { stars: noShadow(stars), twinkle: twinkle.map(noShadow), halos: halos.map(noShadow), band: noShadow(band), planets, meteors, glints, glint: glint() };
+  });
+  // The ₿ ship that cruises the sky, a unit long with its nose on +z: a white hull with an orange nose and tail, four
+  // orange fins, a ₿ medallion on each flank and a dark engine bell (`body`); its flame, based at 0 and burning toward
+  // -z, for the scene to flicker behind the bell (`flame`); and a puff of its exhaust, a unit across (`puff`).
+  const SHIP_ORANGE = "#f7931a";
+  const starship = cached(() => {
+    const parts = [
+      forward(lathe({ profile: [[0, -0.42], [0.12, -0.41], [0.16, -0.3], [0.17, -0.06], [0.16, 0.12], [0.12, 0.27], [0.06, 0.37], [0, 0.44]], segments: 12, color: (t) => t < 0.15 || t > 0.6 ? SHIP_ORANGE : "#eef2f6", emissive: 0.5 })),
+      forward(lathe({ profile: [[0.04, -0.41], [0.06, -0.42], [0.12, -0.53], [0.09, -0.53]], segments: 10, color: "#3a3f48", emissive: 0.2 }))
+    ];
+    const fins = geometry();
+    for (let k = 0; k < 4; k++) {
+      const a = Math.PI / 4 + k * Math.PI / 2, x = Math.cos(a), y = Math.sin(a), tx = -y, ty = x;
+      const pts = [[0.15, -0.12], [0.15, -0.4], [0.33, -0.47], [0.3, -0.3]].map(([r, z]) => [x * r, y * r, z]);
+      facing(fins, pts, SHIP_ORANGE, 0.5, x * 0.24 + tx, y * 0.24 + ty, -0.3);
+      facing(fins, pts, SHIP_ORANGE, 0.5, x * 0.24 - tx, y * 0.24 - ty, -0.3);
+    }
+    parts.push(fins);
+    for (const side of [1, -1]) {
+      const mark = geometry();
+      btcPlates(mark, 0.13, 0, 0, 0.0115, "#ffffff", 0.9);
+      parts.push(moved(turnedY(merge(disc(0.1, 0.02, SHIP_ORANGE, 0.6), mark), side * Math.PI / 2), side * 0.168, 0, 0.02));
+    }
+    return {
+      body: noShadow(merge(...parts)),
+      flame: noShadow(forward(lathe({ profile: [[0.085, 0], [0.06, -0.18], [0.03, -0.3], [0, -0.38]], segments: 8, color: (t) => t < 0.3 ? "#fff3c0" : t < 0.6 ? "#ffb347" : "#ff6a1a", emissive: 1 }))),
+      puff: noShadow(ball(0.5, "#ffb347", 1))
+    };
+  });
+  // A bright star's glint: four long spikes and four short ones round a white heart, a unit across, facing the hall's
+  // middle from just inside the stars at +z, so a node turned to a star's bearing and elevation hangs it there and
+  // scales and spins it in its own plane.
+  const glint = cached(() => {
+    const geo = geometry(), z = SKY.r * 0.985;
+    const spike = (a, len, w, color) => {
+      const c = Math.cos(a), s = Math.sin(a);
+      facing(geo, [[c * len, s * len, z], [-s * w, c * w, z], [-c * len, -s * len, z], [s * w, -c * w, z]], color, TWINKLE_EMISSIVE, 0, 0, 0);
+    };
+    spike(0, 1, 0.07, "#e8f0ff");
+    spike(Math.PI / 2, 1, 0.07, "#e8f0ff");
+    spike(Math.PI / 4, 0.4, 0.05, "#b8ccff");
+    spike(-Math.PI / 4, 0.4, 0.05, "#b8ccff");
+    facing(geo, Array.from({ length: 8 }, (_, k) => [Math.cos(k / 8 * TAU) * 0.12, Math.sin(k / 8 * TAU) * 0.12, z]), "#ffffff", TWINKLE_EMISSIVE, 0, 0, 0);
+    geo.glass = 0.65;
+    return noShadow(geo);
   });
 
   // ---- the furniture ------------------------------------------------------------------------------------
@@ -1291,7 +1475,7 @@
   BL.bifrostModels = {
     HALL, ENTRY, WINDOW, WINDOW_TOP, FRAME, CORE, WINDOWS, SLOTS, PILLARS, PILLAR_R, NAME, MIRROR_Z, COURT, BENCHES, BENCH_R, PLANTERS, PLANTER_R, PLANTER_TOP,
     frameOf, inArch, lookOf, hall, pillars, tunnel, entryField, archStone, archGlow, RIM_STEPS, portalRim, hanger, passage, pictureQuad, standIn, mirror, name,
-    SKY, sky, coreBase, coreGlyph, coreRings, coreBeam, shockwave, CHARGE_STEPS, charged, courtPosts, bench, planter, lighting, dressing, fieldSheet, fieldSparkles, archRing, banner,
+    SKY, TWINKLE_EMISSIVE, sky, starship, coreBase, coreGlyph, coreRings, coreBeam, shockwave, CHARGE_STEPS, charged, courtPosts, bench, planter, lighting, dressing, fieldSheet, fieldSparkles, archRing, banner,
     supportAt, clearAt, walkable, word, GLYPHS, gateWindow,
     PALETTE: { STONE, STONE_DK, STONE_LT, BRONZE, BRONZE_DK, BRASS, GOLD, GOLD_DK, TIMBER, TIMBER_DK, FIELD, FIELD_LT, FIELD_DK, PASSAGE, CLOTH },
     facing, archOutline, archEdge, archAt, archNeon, ball, disc, hoop, banners, blend

@@ -69,6 +69,14 @@
   // How fast the heavens turn (radians a second: a turn in a little over an hour), how long a shooting star lasts, and
   // how long between them.
   const SKY_TURN = 0.0015, METEOR_LIFE = 0.8, METEOR_GAP = [3, 9];
+  // Twinkling stars rest as bright as the rest and dip by `TWINKLE_DIP` of their glow; a glint stretches to `GLINT`
+  // times its star's size.
+  const TWINKLE_FULL = 1 / BM.TWINKLE_EMISSIVE, TWINKLE_DIP = 1.08, GLINT = 4;
+  // The ₿ ship: how long it is, how fast it goes (metres a second), how far from the hall the middle of its way bends,
+  // how long it rests between trips, the share of a trip it takes to flash out of a star or into one, and its exhaust:
+  // how many puffs, how often, how long each lasts and how big it starts.
+  // It calls at the stars within `reach` (radians) of its home port, the ringed giant, which the SKY view frames.
+  const SHIP = { size: 11, speed: 24, bend: 90, rest: [4, 10], warp: 0.06, puffs: 16, every: 0.07, life: 1.1, puff: 1.6, reach: 0.85 };
   // Tooltip and tap words; a window's tooltip is its world's name and the first.
   const TIPS = {
     core: ["₿IFRÖST · the mechanism", "The heart of ₿IFRÖST. It turns for now; one day it may do more."],
@@ -292,12 +300,59 @@
       addChild(root, node);
       return { node, t: 1, reach };
     });
-    // The sky over the open dome, lighter on Canvas 2D: stars, the galaxy's band, the planets and the shooting stars
-    // waiting their turn, all on one node that turns the heavens.
+    // The sky over the open dome, lighter on Canvas 2D: stars, the twinkling ones and their halos a group to a node, the
+    // galaxy's band, the planets, the glints on the brightest stars and the shooting stars waiting their turn, all on
+    // one node that turns the heavens. A turning planet leans on a node of its own, its body and each band of its rings
+    // spinning on it at their own pace (`spins`), with its day and night over it, fixed toward the sun; its moons go
+    // round it (`moons`).
     const night = BM.sky(renderer.kind === "canvas2d" ? 1 : 0);
     s.sky = createNode();
-    addChild(s.sky, createNode({ geometry: night.stars, sightHidden: true }), createNode({ geometry: night.band, sightHidden: true }));
-    for (const p of night.planets) addChild(s.sky, createNode({ position: { x: p.at.x, y: p.at.y, z: p.at.z }, geometry: p.geometry, sightHidden: true }));
+    s.twinkle = night.twinkle.map((geometry) => createNode({ geometry, sightHidden: true }));
+    s.halos = night.halos.map((geometry) => createNode({ geometry, sightHidden: true }));
+    addChild(s.sky, createNode({ geometry: night.stars, sightHidden: true }), ...s.twinkle, ...s.halos, createNode({ geometry: night.band, sightHidden: true }));
+    s.spins = []; s.moons = [];
+    for (const p of night.planets) {
+      const planet = createNode({ position: { x: p.at.x, y: p.at.y, z: p.at.z } });
+      if (p.body) {
+        const lean = createNode({ rotation: { x: 0, y: 0, z: p.tilt } });
+        for (const [geometry, rate] of [[p.body, p.turn], ...p.rings.map((ring) => [ring.geometry, ring.rate])]) {
+          const node = createNode({ geometry, sightHidden: true });
+          addChild(lean, node);
+          s.spins.push({ node, rate });
+        }
+        addChild(planet, lean);
+        for (const geometry of p.shade) addChild(planet, createNode({ geometry, scale: { x: p.r, y: p.r, z: p.r }, sightHidden: true }));
+      } else addChild(planet, createNode({ geometry: p.geometry, sightHidden: true }));
+      for (const m of p.moons) {
+        const node = createNode({ geometry: m.geometry, sightHidden: true });
+        addChild(planet, node);
+        s.moons.push({ node, a: m.a, rate: m.rate, phase: m.phase, u: m.u, v: m.v });
+      }
+      addChild(s.sky, planet);
+    }
+    s.glints = night.glints.map((g, i) => {
+      const node = createNode({ geometry: night.glint, rotation: { x: -g.elevation, y: g.bearing, z: 0 }, sightHidden: true });
+      addChild(s.sky, node);
+      return { node, size: g.size * GLINT, rate: 0.3 + 0.07 * (i % 5), phase: i * 2.4, flare: 0 };
+    });
+    // The ₿ ship cruises from its home port, the ringed giant, out to the glinting stars round it and back: out from
+    // behind the giant or out of a star's flash, across the sky under its trail of exhaust, and into a star, which
+    // flashes, or home behind the giant; then it rests and sets off again. With no star near, it goes round the planets.
+    const craft = BM.starship(), R = BM.SKY.r * 0.95;
+    s.ship = createNode({ geometry: craft.body, visible: false, sightHidden: true });
+    s.flame = createNode({ geometry: craft.flame, position: { x: 0, y: 0, z: -0.53 }, sightHidden: true });
+    addChild(s.ship, s.flame);
+    s.puffs = Array.from({ length: SHIP.puffs }, () => {
+      const node = createNode({ geometry: craft.puff, visible: false, sightHidden: true });
+      addChild(s.sky, node);
+      return { node, t: 1 };
+    });
+    addChild(s.sky, s.ship);
+    s.ports = night.planets.map((p) => ({ x: p.at.x, y: p.at.y, z: p.at.z, glint: null }));
+    const home = s.ports[0], homeAt = Math.hypot(home.x, home.y, home.z), near = Math.cos(SHIP.reach);
+    s.stars = night.glints.map((g, i) => ({ x: Math.sin(g.bearing) * Math.cos(g.elevation) * R, y: Math.sin(g.elevation) * R, z: Math.cos(g.bearing) * Math.cos(g.elevation) * R, glint: s.glints[i] }))
+      .filter((p) => (p.x * home.x + p.y * home.y + p.z * home.z) / (R * homeAt) > near);
+    s.voyage = { from: null, to: s.ports[0], bend: { x: 0, y: 0, z: 0 }, t: 1, time: 1, rest: SHIP.rest[0], puff: 0, port: 1, star: 0 };
     s.meteors = night.meteors.map((m) => {
       const node = createNode({ geometry: m.geometry, visible: false, sightHidden: true });
       addChild(s.sky, node);
@@ -643,11 +698,84 @@
     L[6] = (CORE_GLOW[2] + (c[2] - CORE_GLOW[2]) * m) * lift;
   };
 
+  // The ₿ ship's trip: a quadratic from where it sets off, bent toward the hall through `bend`, to where it is going,
+  // eased in and out, its nose along the way it flies and rocking a little, its flame flickering; it flashes out of a
+  // star and into one, the star flaring each time. Its exhaust puffs shrink away where they were left.
+  const sail = (s, dt, elapsed) => {
+    for (let i = 0; i < s.puffs.length; i++) {
+      const p = s.puffs[i];
+      if (p.t >= 1) continue;
+      p.t = Math.min(1, p.t + dt / SHIP.life);
+      p.node.scale.x = p.node.scale.y = p.node.scale.z = SHIP.puff * (1 - p.t);
+      p.node.glow = 1 - 0.6 * p.t;
+      p.node.visible = p.t < 1;
+    }
+    const v = s.voyage, ship = s.ship;
+    if (v.t >= 1) {
+      v.rest -= dt;
+      if (v.rest > 0) return;
+      v.from = v.to;
+      v.to = v.from.glint ? s.ports[0] : s.stars.length ? s.stars[v.star++ % s.stars.length] : s.ports[v.port++ % s.ports.length];
+      const mx = v.from.x + v.to.x, my = v.from.y + v.to.y, mz = v.from.z + v.to.z, ml = SHIP.bend / Math.hypot(mx, my, mz);
+      v.bend.x = mx * ml; v.bend.y = my * ml; v.bend.z = mz * ml;
+      v.time = (Math.hypot(v.bend.x - v.from.x, v.bend.y - v.from.y, v.bend.z - v.from.z) + Math.hypot(v.to.x - v.bend.x, v.to.y - v.bend.y, v.to.z - v.bend.z)) / SHIP.speed;
+      v.t = 0;
+      if (v.from.glint) v.from.glint.flare = 1;
+      ship.visible = true;
+    }
+    v.t = Math.min(1, v.t + dt / v.time);
+    const t = v.t, u = t * t * (3 - 2 * t), a = (1 - u) * (1 - u), b = 2 * u * (1 - u), c = u * u, f = v.from, e = v.to, m = v.bend, p = ship.position;
+    p.x = a * f.x + b * m.x + c * e.x; p.y = a * f.y + b * m.y + c * e.y; p.z = a * f.z + b * m.z + c * e.z;
+    const dx = (1 - u) * (m.x - f.x) + u * (e.x - m.x), dy = (1 - u) * (m.y - f.y) + u * (e.y - m.y), dz = (1 - u) * (m.z - f.z) + u * (e.z - m.z), dl = Math.hypot(dx, dy, dz);
+    ship.rotation.y = Math.atan2(dx, dz);
+    ship.rotation.x = -Math.asin(dy / dl);
+    ship.rotation.z = 0.3 * Math.sin(elapsed * 1.3);
+    const k = Math.min(1, f.glint ? t / SHIP.warp : 1, e.glint ? (1 - t) / SHIP.warp : 1);
+    ship.scale.x = ship.scale.y = ship.scale.z = SHIP.size * k;
+    s.flame.scale.x = s.flame.scale.y = 0.85 + 0.3 * Math.random();
+    s.flame.scale.z = 0.7 + 0.6 * Math.random();
+    v.puff -= dt;
+    if (v.puff <= 0 && k > 0.5) {
+      v.puff = SHIP.every;
+      for (let i = 0; i < s.puffs.length; i++) {
+        const q = s.puffs[i];
+        if (q.t < 1) continue;
+        const back = 0.6 * SHIP.size / dl;
+        q.node.position.x = p.x - dx * back; q.node.position.y = p.y - dy * back; q.node.position.z = p.z - dz * back;
+        q.t = 0; q.node.visible = true;
+        break;
+      }
+    }
+    if (t >= 1) {
+      ship.visible = false;
+      if (e.glint) e.glint.flare = 1;
+      v.rest = SHIP.rest[0] + Math.random() * (SHIP.rest[1] - SHIP.rest[0]);
+    }
+  };
+
   // The heavens turn slowly overhead, and the sky pass's stars with them, while the moon stays where the hall's light
-  // comes from; now and then a shooting star streaks down its way and fades.
-  const heavens = (s, dt) => {
+  // comes from; stars twinkle a group at a time with their halos, the brightest glint, the ₿ ship sails, the turning
+  // planets and their rings spin, moons go round their planets, and now and then a shooting star streaks down its way
+  // and fades.
+  const heavens = (s, dt, elapsed) => {
     const a = (s.sky.rotation.y += dt * SKY_TURN), c = Math.cos(a), sn = Math.sin(a), M = RENDER_OPTS.starMatrix;
     M[0] = c; M[2] = sn; M[6] = -sn; M[8] = c;
+    for (let i = 0; i < s.twinkle.length; i++) {
+      const u = Math.sin(elapsed * (1.1 + 0.29 * i) + i * 2.1) * Math.sin(elapsed * (0.37 + 0.07 * i) + i), d = u * u;
+      s.twinkle[i].glow = s.halos[i].glow = TWINKLE_FULL - TWINKLE_DIP * d * d;
+    }
+    for (let i = 0; i < s.glints.length; i++) {
+      const g = s.glints[i], u = 0.5 + 0.5 * Math.sin(elapsed * g.rate + g.phase), k = u * u * u * u, f = g.flare = Math.max(0, g.flare - dt * 1.2);
+      g.node.scale.x = g.node.scale.y = g.size * (0.3 + 0.9 * k + 2.2 * f);
+      g.node.rotation.z = 0.25 * Math.sin(elapsed * 0.1 + g.phase);
+      g.node.glow = 1 + (TWINKLE_FULL - 1) * Math.max(k, f);
+    }
+    sail(s, dt, elapsed);
+    for (let i = 0; i < s.spins.length; i++) s.spins[i].node.rotation.y += dt * s.spins[i].rate;
+    for (let i = 0; i < s.moons.length; i++) {
+      const m = s.moons[i], t = elapsed * m.rate + m.phase, x = Math.cos(t) * m.a, y = Math.sin(t) * m.a, p = m.node.position;
+      p.x = m.u[0] * x + m.v[0] * y; p.y = m.u[1] * x + m.v[1] * y; p.z = m.u[2] * x + m.v[2] * y;
+    }
     s.meteorWait -= dt;
     if (s.meteorWait <= 0) {
       s.meteorWait = METEOR_GAP[0] + Math.random() * (METEOR_GAP[1] - METEOR_GAP[0]);
@@ -682,7 +810,7 @@
     }
     remotes.update(dt);
     mechanism(s, dt, elapsed);
-    heavens(s, dt);
+    heavens(s, dt, elapsed);
     // The way out's field hums and shows the outline of whoever walks through it.
     const g = s.gate;
     g.phase.update(dt, elapsed);
