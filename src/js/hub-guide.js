@@ -38,6 +38,7 @@
     done: "That's the island! Off you go, and come find me any time.",
     newsDone: "That's what's new! Have fun out there.",
     cancelled: "All good. Back to work!",
+    newsOnchain: "The kiosk takes tips on-chain now, as well as over Lightning, and tells you when yours confirms.",
     newsDonations: "New in the Factory: a donation kiosk. Your sats come out as bananas!",
     newsArcadeFront: "Ooga Arcade has a brand-new front.",
     newsTotems: "The totems now light up for a day after Bitcoin Core, BTCPay, LND or CLN merge a PR.",
@@ -67,8 +68,10 @@
     { id: "mempool", title: "Mempool island", eye: [24, 14, 4], look: [46, 6, 16], lines: ["mempool", "mempoolWeather", "mempoolLake", "mempoolBlock", "mempoolChamber"] }
   ];
   // What is new on the island, newest first: the day it shipped, the stop it is shown at (none for what is everywhere)
-  // and her line. A new feature worth showing a returning visitor is one entry here.
+  // and her line. A new feature worth showing a returning visitor is one entry here, added at the top: a visitor's news
+  // is everything listed above the newest entry they were last offered.
   const NEWS = [
+    { date: "2026-10-16", at: "factory", line: "newsOnchain" },
     { date: "2026-10-15", at: "factory", line: "newsDonations" },
     { date: "2026-10-13", at: "arcade", line: "newsArcadeFront" },
     { date: "2026-10-12", at: "totems", line: "newsTotems" },
@@ -115,10 +118,17 @@
   });
   // A tour is a list of legs, each a stop (-1: where the visitor is) with its title and lines.
   const ISLAND = STOPS.map((stop, i) => ({ stop: i, title: stop.title, lines: stop.lines }));
-  // What is new since `since` (ms; null: the newest few), as legs: what is everywhere first, said where the visitor is,
-  // then each place in the island tour's order, the newest of its news first.
-  const newsSince = (since) => {
-    const fresh = since === null ? NEWS.slice(0, FIRST_NEWS) : NEWS.filter((n) => Date.parse(`${n.date}T23:59:59Z`) > since);
+  // What is new after `seen`, the newest entry she last offered (its `line` and `date`; null for none yet, which gets the
+  // newest few): every entry listed above it, so one added later the same day still counts. If that entry has left the
+  // list, every entry dated after it.
+  const freshAfter = (seen) => {
+    if (!seen) return NEWS.slice(0, FIRST_NEWS);
+    const at = NEWS.findIndex((n) => n.line === seen.line);
+    return at >= 0 ? NEWS.slice(0, at) : NEWS.filter((n) => n.date > seen.date);
+  };
+  // News as legs: what is everywhere first, said where the visitor is, then each place in the island tour's order, the
+  // newest of its news first.
+  const legsOf = (fresh) => {
     const legs = [], here = fresh.filter((n) => !n.at).map((n) => n.line);
     if (here.length) legs.push({ stop: -1, title: "All over the island", lines: here });
     STOPS.forEach((stop, i) => {
@@ -127,7 +137,9 @@
     });
     return legs;
   };
-  // This browser's visits by signed-in login (ms). Kept in localStorage only; anything unreadable there counts as none.
+  // The newest entry offered to each signed-in login in this browser. Kept in localStorage only; anything unreadable there
+  // counts as none.
+  const DAY = /^\d{4}-\d{2}-\d{2}$/;
   const visits = () => {
     try {
       const saved = JSON.parse(localStorage.getItem(VISITS) || "{}");
@@ -135,28 +147,29 @@
     } catch { /* Unreadable: no visits. */ }
     return {};
   };
-  // A login's last visit, or null for none. A visit counts once she has offered its news, so news a visitor was too
-  // busy to be offered waits for the next.
-  const lastVisit = (login) => {
-    const last = visits()[login];
-    return Number.isFinite(last) ? last : null;
+  // The newest entry a login was offered, or null for none. News counts as seen once she has offered it, so news a
+  // visitor was too busy to be offered waits for the next visit.
+  const lastSeen = (login) => {
+    const seen = visits()[login];
+    return seen && typeof seen.line === "string" && typeof seen.date === "string" && DAY.test(seen.date) ? seen : null;
   };
-  const markVisit = (login, now) => {
+  const markSeen = (login, entry) => {
     const all = visits();
-    all[login] = now;
+    all[login] = { line: entry.line, date: entry.date };
     try { localStorage.setItem(VISITS, JSON.stringify(all)); } catch { /* A private window keeps no visits. */ }
   };
-  // Under debug, `tessnews=YYYY-MM-DD` plays the signed-in greeting as if the visitor's last visit were that day.
+  // Under debug, `tessnews=YYYY-MM-DD` plays the signed-in greeting as if the visitor's last visit were that day: the
+  // news from that day on.
   const DEBUG_NEWS = (() => {
-    const params = new URLSearchParams(location.search);
-    return params.get("debug") === "1" && params.has("tessnews") ? Date.parse(`${params.get("tessnews")}T00:00:00Z`) : NaN;
+    const params = new URLSearchParams(location.search), day = params.get("tessnews");
+    return params.get("debug") === "1" && day && DAY.test(day) ? day : null;
   })();
 
   const create = ({ parent, input, fx, camera, pilot, visitor, world, hud, busy, coarse, quality, landing }) => {
     const rig = BL.tess.create({ parent, input, fx, camera, kind: "tess", coarse, quality }), position = rig.position;
     const state = { phase: "work", stage: "beam", timer: 3, site: 0, seen: 0, again: false, kind: "island", legs: ISLAND, welcome: null,
       stop: -1, line: 0, arrived: false, closing: null, holding: false, beats: null, utterance: 0, advance: 0, glide: 0, glideTime: GLIDE,
-      login: null, still: landing, settle: SETTLE, driven: null };
+      login: null, newest: null, still: landing, settle: SETTLE, driven: null };
     const spot = { x: 0, y: 0, z: 0 }, home = pose(), from = pose(), to = pose();
     position.x = WORK[0].at[0]; position.y = WORK[0].at[1]; position.z = WORK[0].at[2];
     // The offer and the tour's controls live on screen, in the HUD's wood, built for the visit and removed on leave.
@@ -238,25 +251,24 @@
       spot.x = e.x + fx0 / f * 4.2 + rx / r * 1.5; spot.y = e.y + fy0 / f * 4.2 - 0.35; spot.z = e.z + fz0 / f * 4.2 + rz / r * 1.5;
     };
     // Who the visitor is, once the page knows: the signed-in account, or none.
-    const account = () => Number.isFinite(DEBUG_NEWS) ? { login: "you", display: "you" } : BL.net.state.me;
+    const account = () => DEBUG_NEWS ? { login: "you", display: "you" } : BL.net.state.me;
     // The visit's one greeting: the island tour for a visitor who is not signed in; for a signed-in one, what is new
     // since their last visit here, or no greeting at all when nothing is.
     const greet = () => {
       world.tessGreeted = true;
       const me = account();
       if (!me) { state.kind = "island"; state.legs = ISLAND; state.welcome = null; notice(); return; }
-      const since = Number.isFinite(DEBUG_NEWS) ? DEBUG_NEWS : lastVisit(me.login);
-      const legs = newsSince(since);
-      if (!legs.length) return;
-      const count = legs.reduce((sum, leg) => sum + leg.lines.length, 0);
-      state.kind = "news"; state.legs = legs; state.login = Number.isFinite(DEBUG_NEWS) ? null : me.login;
+      const fresh = DEBUG_NEWS ? NEWS.filter((n) => n.date >= DEBUG_NEWS) : freshAfter(lastSeen(me.login));
+      if (!fresh.length) return;
+      const count = fresh.length;
+      state.kind = "news"; state.legs = legsOf(fresh); state.login = DEBUG_NEWS ? null : me.login; state.newest = fresh[0];
       state.welcome = BL.tess.beats({ text: `Welcome back, ${me.display || me.login}! ${count === 1 ? "One new thing" : `${count} new things`} since you were last here. Want to see?` }).text;
       notice();
     };
     const notice = () => { rig.flare(); show("notice"); state.timer = 1.1; };
     const approach = () => { placeBy(); flyTo(spot.x, spot.y, spot.z, 6, true); show("approach"); };
     const offer = (beats) => {
-      if (state.kind === "news" && state.login) { markVisit(state.login, Date.now()); state.login = null; }
+      if (state.kind === "news" && state.login) { markSeen(state.login, state.newest); state.login = null; }
       state.timer = OFFER_TIME;
       rig.clearPath(3, 1); rig.push(spot.x, spot.y, spot.z); rig.track();
       rig.nod(); show("offer"); speak(beats);
@@ -371,7 +383,7 @@
           }
           // A newcomer gets a moment to look round, and to see her at work, before she notices them; she waits until
           // the page knows whether they are signed in.
-          state.seen = world.tessGreeted || !state.still || busy() || !BL.net.state.resolved && !Number.isFinite(DEBUG_NEWS) ? 0 : state.seen + dt;
+          state.seen = world.tessGreeted || !state.still || busy() || !BL.net.state.resolved && !DEBUG_NEWS ? 0 : state.seen + dt;
           if (state.seen > NOTICE_AFTER) { greet(); if (state.phase !== "work") break; }
           if ((state.timer -= dt) <= 0) {
             if (state.stage === "beam") { state.stage = "rest"; state.timer = 0.6; }
@@ -447,5 +459,5 @@
     };
     return { root: rig.root, state, update, escape, tap, dispose, liveGeometry: rig.liveGeometry };
   };
-  BL.hubGuide = { create, NAME, LINES, STOPS, NEWS, newsSince };
+  BL.hubGuide = { create, NAME, LINES, STOPS, NEWS, freshAfter, legsOf };
 })();
