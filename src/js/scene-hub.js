@@ -11279,8 +11279,10 @@
     }
     if (ctx.from === null && pilot.mode === "first-person") pilot.focusAim();
     if (POSITION_DEBUG) updatePositionDebug(true);
-    // Tess greets a newcomer once a page and shows them round; nothing she does starts while the island is busy.
+    // Tess greets a newcomer once a page and shows them round; nothing she does starts while the island is busy. She
+    // greets only a visit that lands on the island's own view, not one sent to a place or walked back out of a cave.
     islandGuide = BL.hubGuide.create({ parent: root, input, fx, camera, pilot, visitor: () => crew.player, world, hud, coarse: COARSE,
+      landing: !ctx.place && !preloadedView && !returningCharacter && ctx.from !== "bifrost",
       quality: () => renderer.quality, busy: () => chalkboard.openNow || clankerPlay.active || factoryDeparting || bifrostDeparting });
     hubScene.debug.tess = islandGuide;
     mark("visibility-start");

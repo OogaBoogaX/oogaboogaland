@@ -357,6 +357,8 @@
   });
   const SPARKS = cached(() => ["#ffc83a", "#ff8a1f", "#fff2b8"].map((c) => models.particleGeometry(c, 0.05, 1)));
   const MOTE = cached(() => models.particleGeometry("#ffb347", 0.04, 1));
+  // Her sparks and motes at once, at most: a working beam keeps about 13 in the air and a fast flight about 10.
+  const FLECKS = 24;
   // The shared bubble is single-line. Bake a guide's lines into short speech beats once, keeping the full lines for
   // voice.
   const beats = (lines) => {
@@ -412,6 +414,36 @@
     const beam = createNode({ geometry: BEAM(), visible: false, sightHidden: true });
     const glint = createNode({ geometry: GLINT(), visible: false, sightHidden: true });
     addChild(parent, body); addChild(parent, beam); addChild(parent, glint);
+    // Her sparks and motes come from her own pool, made with her, never the scene's particles: the place's node count
+    // stays the same while she works, and its bursts never wait on hers. The ring reuses the one thrown longest ago.
+    const flecks = [];
+    for (let i = 0; i < FLECKS; i++) {
+      const node = createNode({ visible: false, sightHidden: true });
+      addChild(parent, node);
+      flecks.push({ node, vx: 0, vy: 0, vz: 0, life: 0, spin: 0, gravity: 0, floor: 0 });
+    }
+    let fleckAt = 0;
+    const fleck = (geometry, x, y, z, vx, vy, vz, life, spin, gravity, floor) => {
+      const f = flecks[fleckAt], node = f.node;
+      fleckAt = (fleckAt + 1) % FLECKS;
+      node.geometry = geometry; node.visible = true;
+      node.position.x = x; node.position.y = y; node.position.z = z;
+      node.scale.x = node.scale.y = node.scale.z = 1;
+      f.vx = vx; f.vy = vy; f.vz = vz; f.life = life; f.spin = spin; f.gravity = gravity; f.floor = floor;
+    };
+    // They fly as the scene's particles do: falling, bouncing off their floor, tumbling, shrinking at the end.
+    const stepFlecks = (dt) => {
+      for (let i = 0; i < FLECKS; i++) {
+        const f = flecks[i], node = f.node;
+        if (f.life <= 0) continue;
+        if ((f.life -= dt) <= 0) { node.visible = false; continue; }
+        f.vy -= f.gravity * dt;
+        node.position.x += f.vx * dt; node.position.y += f.vy * dt; node.position.z += f.vz * dt;
+        if (node.position.y < f.floor) { node.position.y = f.floor; f.vy *= -0.3; f.vx *= 0.7; f.vz *= 0.7; }
+        node.rotation.x += f.spin * dt; node.rotation.z += f.spin * 0.7 * dt;
+        node.scale.x = node.scale.y = node.scale.z = Math.min(1, f.life / 0.4);
+      }
+    };
     input.add(head, { kind }, { radius: HEIGHT * 7 / 32 });
     const position = body.position, vel = { x: 0, y: 0, z: 0 }, lit = { x: 0, y: 0, z: 0 };
     // The flight path: the points she flies through in order. While she comes to someone the last one follows them.
@@ -456,6 +488,7 @@
       // The beam she shows: the mode she asked for, once she faces where it lands.
       get shown() { return shown; },
       update(dt, elapsed) {
+        stepFlecks(dt);
         // Hysteresis avoids mesh churn. Every prepared tier stays in the visit's live set.
         const distance = camera ? Math.hypot(camera.position.x - position.x,
           camera.position.y - position.y, camera.position.z - position.z) : Infinity;
@@ -522,17 +555,17 @@
             if (mode === 1 && (sparkT -= dt) <= 0) {
               sparkT = 0.05 + Math.random() * 0.05;
               const sparks = SPARKS();
-              fx.spawnParticle(sparks[Math.floor(Math.random() * sparks.length)], aim.x, aim.y, aim.z,
+              fleck(sparks[Math.floor(Math.random() * sparks.length)], aim.x, aim.y, aim.z,
                 (Math.random() - 0.5) * 2.4, 0.6 + Math.random() * 1.6, (Math.random() - 0.5) * 2.4, 0.35 + Math.random() * 0.3, 10, 7, aim.y - 4);
             }
           }
         }
         beam.visible = glint.visible = mode > 0;
         shown = mode;
-        // A faint trail of motes behind her in flight, from the shared particle pool.
+        // A faint trail of motes behind her in flight.
         if (speed > 1.6 && (trailT -= dt) <= 0) {
           trailT = 0.045;
-          fx.spawnParticle(MOTE(), position.x - vel.x * 0.05 + (Math.random() - 0.5) * 0.1, position.y + hover.position.y + (Math.random() - 0.5) * 0.1,
+          fleck(MOTE(), position.x - vel.x * 0.05 + (Math.random() - 0.5) * 0.1, position.y + hover.position.y + (Math.random() - 0.5) * 0.1,
             position.z - vel.z * 0.05 + (Math.random() - 0.5) * 0.1, 0, 0.05, 0, 0.45, 0, 0, -100);
         }
       },
@@ -561,6 +594,7 @@
       dispose() {
         input.remove(head);
         removeChild(parent, body); removeChild(parent, beam); removeChild(parent, glint);
+        for (let i = 0; i < FLECKS; i++) removeChild(parent, flecks[i].node);
       }
     };
     return rig;

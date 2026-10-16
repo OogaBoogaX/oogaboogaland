@@ -1,6 +1,7 @@
 // Tess on the island (her rig is `tess.js`). She works the island's own machines with her beam; a few seconds after a
-// visitor lands she notices them and comes to them, in front of their view and to one side, or ahead of the Ooga they
-// drive. A visitor who is not signed in gets a quick look round the island; a signed-in one, once the page knows who
+// visitor lands, while they are still taking in the view they landed on, she notices them and comes to them, in front
+// of their view and to one side, or ahead of the Ooga they drive. One who moves the view or their Ooga first is busy
+// with the island, and she leaves them be. A visitor who is not signed in gets a quick look round the island; a signed-in one, once the page knows who
 // they are, gets what is new since their last visit in this browser, and nothing at all when nothing is. A tour stops
 // at each landmark: the view glides there each time the visitor goes on (the camera moves only on input), and she flies
 // ahead and points her soft beam at it. She greets once a page; after that a tap on her brings the island tour. The
@@ -95,6 +96,9 @@
     { at: [-2.8, 5.2, 17], aim: [-4.6, 4.2, 19.3] }
   ];
   const NOTICE_AFTER = 2.5, OFFER_TIME = 12, GLIDE = 1.8, RETURN = 1.2, VISITS = "ooga-tess-visits";
+  // The view counts as moved past half a metre or about three degrees, after a second to settle on arrival and on an
+  // Ooga handed to the visitor (the island hands a signed-in contributor their own).
+  const SETTLE = 1, MOVED = 0.5, TURNED = 0.05;
   const pose = () => ({ x: 0, y: 0, z: 0, yaw: 0, pitch: 0 });
   // A stop's view: its eye, heading at its look.
   const viewOf = (stop, out) => {
@@ -123,18 +127,24 @@
     });
     return legs;
   };
-  // This browser's last visit by a signed-in login (ms, or null for none), and now recorded as the latest. Kept in
-  // localStorage only; anything unreadable there counts as no visit.
-  const lastVisit = (login, now) => {
-    let visits = {};
+  // This browser's visits by signed-in login (ms). Kept in localStorage only; anything unreadable there counts as none.
+  const visits = () => {
     try {
       const saved = JSON.parse(localStorage.getItem(VISITS) || "{}");
-      if (saved && typeof saved === "object" && !Array.isArray(saved)) visits = saved;
-    } catch { visits = {}; }
-    const last = Number.isFinite(visits[login]) ? visits[login] : null;
-    visits[login] = now;
-    try { localStorage.setItem(VISITS, JSON.stringify(visits)); } catch { /* A private window keeps no visits. */ }
-    return last;
+      if (saved && typeof saved === "object" && !Array.isArray(saved)) return saved;
+    } catch { /* Unreadable: no visits. */ }
+    return {};
+  };
+  // A login's last visit, or null for none. A visit counts once she has offered its news, so news a visitor was too
+  // busy to be offered waits for the next.
+  const lastVisit = (login) => {
+    const last = visits()[login];
+    return Number.isFinite(last) ? last : null;
+  };
+  const markVisit = (login, now) => {
+    const all = visits();
+    all[login] = now;
+    try { localStorage.setItem(VISITS, JSON.stringify(all)); } catch { /* A private window keeps no visits. */ }
   };
   // Under debug, `tessnews=YYYY-MM-DD` plays the signed-in greeting as if the visitor's last visit were that day.
   const DEBUG_NEWS = (() => {
@@ -142,10 +152,11 @@
     return params.get("debug") === "1" && params.has("tessnews") ? Date.parse(`${params.get("tessnews")}T00:00:00Z`) : NaN;
   })();
 
-  const create = ({ parent, input, fx, camera, pilot, visitor, world, hud, busy, coarse, quality }) => {
+  const create = ({ parent, input, fx, camera, pilot, visitor, world, hud, busy, coarse, quality, landing }) => {
     const rig = BL.tess.create({ parent, input, fx, camera, kind: "tess", coarse, quality }), position = rig.position;
     const state = { phase: "work", stage: "beam", timer: 3, site: 0, seen: 0, again: false, kind: "island", legs: ISLAND, welcome: null,
-      stop: -1, line: 0, arrived: false, closing: null, holding: false, beats: null, utterance: 0, advance: 0, glide: 0, glideTime: GLIDE };
+      stop: -1, line: 0, arrived: false, closing: null, holding: false, beats: null, utterance: 0, advance: 0, glide: 0, glideTime: GLIDE,
+      login: null, still: landing, settle: SETTLE, driven: null };
     const spot = { x: 0, y: 0, z: 0 }, home = pose(), from = pose(), to = pose();
     position.x = WORK[0].at[0]; position.y = WORK[0].at[1]; position.z = WORK[0].at[2];
     // The offer and the tour's controls live on screen, in the HUD's wood, built for the visit and removed on leave.
@@ -234,17 +245,18 @@
       world.tessGreeted = true;
       const me = account();
       if (!me) { state.kind = "island"; state.legs = ISLAND; state.welcome = null; notice(); return; }
-      const since = Number.isFinite(DEBUG_NEWS) ? DEBUG_NEWS : lastVisit(me.login, Date.now());
+      const since = Number.isFinite(DEBUG_NEWS) ? DEBUG_NEWS : lastVisit(me.login);
       const legs = newsSince(since);
       if (!legs.length) return;
       const count = legs.reduce((sum, leg) => sum + leg.lines.length, 0);
-      state.kind = "news"; state.legs = legs;
+      state.kind = "news"; state.legs = legs; state.login = Number.isFinite(DEBUG_NEWS) ? null : me.login;
       state.welcome = BL.tess.beats({ text: `Welcome back, ${me.display || me.login}! ${count === 1 ? "One new thing" : `${count} new things`} since you were last here. Want to see?` }).text;
       notice();
     };
     const notice = () => { rig.flare(); show("notice"); state.timer = 1.1; };
     const approach = () => { placeBy(); flyTo(spot.x, spot.y, spot.z, 6, true); show("approach"); };
     const offer = (beats) => {
+      if (state.kind === "news" && state.login) { markVisit(state.login, Date.now()); state.login = null; }
       state.timer = OFFER_TIME;
       rig.clearPath(3, 1); rig.push(spot.x, spot.y, spot.z); rig.track();
       rig.nod(); show("offer"); speak(beats);
@@ -255,6 +267,19 @@
       const p = camera.position, t = camera.target, dx = t.x - p.x, dy = t.y - p.y, dz = t.z - p.z;
       out.x = p.x; out.y = p.y; out.z = p.z;
       out.yaw = Math.atan2(dx, dz); out.pitch = Math.atan2(dy, Math.hypot(dx, dz));
+    };
+    // Whether the visitor is still on the view they landed on. The camera moves only on input, and follows the Ooga
+    // they drive, so a moved view is a visitor who has started on the island. Once moved, it stays so for the visit.
+    const landed = pose(), looking = pose();
+    const watchStill = (dt) => {
+      const actor = visitor();
+      if (actor !== state.driven) { state.driven = actor; state.settle = SETTLE; }
+      if (state.settle > 0) { state.settle -= dt; readPose(landed); return; }
+      readPose(looking);
+      let turn = Math.abs(looking.yaw - landed.yaw);
+      if (turn > Math.PI) turn = 2 * Math.PI - turn;
+      if (Math.hypot(looking.x - landed.x, looking.y - landed.y, looking.z - landed.z) > MOVED || turn > TURNED
+        || Math.abs(looking.pitch - landed.pitch) > TURNED) state.still = false;
     };
     const putPose = (a, b, k) => {
       const e = k * k * (3 - 2 * k), yaw = a.yaw + Math.atan2(Math.sin(b.yaw - a.yaw), Math.cos(b.yaw - a.yaw)) * e;
@@ -334,6 +359,10 @@
     window.addEventListener("keydown", captureKey, true);
     const update = (dt, elapsed) => {
       const actor = visitor();
+      if (state.still && (state.phase === "work" || state.phase === "notice" || state.phase === "approach")) watchStill(dt);
+      // A greeting she started is dropped, without a word, when the visitor gets going first; one they asked for by a
+      // tap is not.
+      if (!state.still && !state.again && (state.phase === "notice" || state.phase === "approach")) { world.tessGreeted = false; toWork(); }
       switch (state.phase) {
         case "work":
           if (state.stage === "fly") {
@@ -342,7 +371,7 @@
           }
           // A newcomer gets a moment to look round, and to see her at work, before she notices them; she waits until
           // the page knows whether they are signed in.
-          state.seen = world.tessGreeted || busy() || !BL.net.state.resolved && !Number.isFinite(DEBUG_NEWS) ? 0 : state.seen + dt;
+          state.seen = world.tessGreeted || !state.still || busy() || !BL.net.state.resolved && !Number.isFinite(DEBUG_NEWS) ? 0 : state.seen + dt;
           if (state.seen > NOTICE_AFTER) { greet(); if (state.phase !== "work") break; }
           if ((state.timer -= dt) <= 0) {
             if (state.stage === "beam") { state.stage = "rest"; state.timer = 0.6; }
