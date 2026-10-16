@@ -213,7 +213,11 @@
     }
     return false;
   };
-  const onDonation = () => {};
+  // A payment can arrive while the visitor is inside: counted and onto the pile like everywhere else.
+  const onDonation = (donation, counted = null) => {
+    game.recordDonation(donation, counted && counted.exact);
+    world.level = Math.min(BL.pile.MAX_BANANAS, world.level + (counted ? counted.exact : BL.game.bananasFor(donation.sats)));
+  };
   const onLootCleared = () => {};
 
   const lightUp = () => {
