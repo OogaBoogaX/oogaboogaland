@@ -18,6 +18,23 @@
   const TIER_RANK = { legendary: 0, epic: 1, rare: 2, common: 3 };
   const BANANA_COUNT = new Intl.NumberFormat("en-US", { maximumFractionDigits: 0 });
   const MESSAGE_FADE_MS = 300;
+  // The page's one toast, which every scene's HUD and the director share: a new one replaces the last.
+  let toastTimer = 0, toastHideTimer = 0;
+  const toast = (text) => {
+    const box = $("toast");
+    window.clearTimeout(toastTimer);
+    window.clearTimeout(toastHideTimer);
+    box.textContent = text;
+    box.hidden = false;
+    $("message-stack").append(box);
+    box.classList.add("show");
+    toastTimer = window.setTimeout(() => {
+      box.classList.remove("show");
+      toastHideTimer = window.setTimeout(() => {
+        if (!box.classList.contains("show")) box.hidden = true;
+      }, MESSAGE_FADE_MS);
+    }, 2800);
+  };
   const SHEET_STATE_KEY = "oogaboogaland.sheet.v1";
   const BOARD_STATE_KEY = "oogaboogaland.oogatron.windows.v1";
   const MAX_FLOATING_BOARDS = 12;
@@ -321,7 +338,7 @@
       target.addEventListener(type, fn, opts);
       listeners.push(() => target.removeEventListener(type, fn, opts));
     };
-    let toastTimer = 0, toastHideTimer = 0, hintTimer = 0, hintHideTimer = 0, copyTimer = 0;
+    let hintTimer = 0, hintHideTimer = 0, copyTimer = 0;
     const rosterRows = new Map();
     let showAway = false, awayCount = 0, awayShownCount = -1, awayShownShow = null;
     const awayRow = document.createElement("li"), awayButton = document.createElement("button");
@@ -1511,20 +1528,6 @@
       const panel = document.getElementById(b.dataset.fold);
       panel.dataset.folded = String(panel.dataset.folded !== "true");
     });
-    const toast = (text) => {
-      window.clearTimeout(toastTimer);
-      window.clearTimeout(toastHideTimer);
-      el.toast.textContent = text;
-      el.toast.hidden = false;
-      el.messageStack.append(el.toast);
-      el.toast.classList.add("show");
-      toastTimer = window.setTimeout(() => {
-        el.toast.classList.remove("show");
-        toastHideTimer = window.setTimeout(() => {
-          if (!el.toast.classList.contains("show")) el.toast.hidden = true;
-        }, MESSAGE_FADE_MS);
-      }, 2800);
-    };
     let tipText = "", tipState = "", tipHealth = -1, tipHealthMax = -1, tipW = 0, tipH = 0, tipCave = null, tipName = false, tipLeft = NaN, tipTop = NaN;
     let tipVisibility = null, tipSpeechTop = Infinity;
     const tipScreen = { x: 0, y: 0, depth: 0 };
@@ -1976,5 +1979,5 @@
       liveOnline(row);
     }
   };
-  BL.hud = { create, renderIcon, signLettering, showAccount, showMic, showVoices, STATE_LABELS, statusFor };
+  BL.hud = { create, renderIcon, signLettering, showAccount, showMic, showVoices, toast, STATE_LABELS, statusFor };
 })();

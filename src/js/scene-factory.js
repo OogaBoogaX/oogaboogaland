@@ -829,6 +829,8 @@
       link: () => link,
       real,
       invoice: (sats, anon) => donations.invoice({ sats, message: game.state.message, anon }),
+      onchain: (request) => donations.onchain(request),
+      waitFor: (id) => donations.waitFor(id),
       open: () => donations.state.open,
       testNetwork: () => donations.testNetwork,
       account: () => BL.net.state,
@@ -836,9 +838,9 @@
       request: () => donations.createRequest(game.state),
       bananasFor: gameMod.bananasFor,
       price: () => BL.chain.snapshot.priceUsd,
-      copy: (text) => {
+      copy: (text, what = "Invoice") => {
         if (navigator.clipboard) navigator.clipboard.writeText(text).catch(() => {});
-        hud.toast(real ? "Invoice copied" : "Invoice copied · payments are simulated in this build");
+        hud.toast(real ? `${what} copied` : `${what} copied · payments are simulated in this build`);
       },
       pay: (id, sats) => onDonation(tipEvent(id, sats)),
       release: () => releaseTip(s),

@@ -16,6 +16,12 @@
 // waiting for and thanks the donor it names. The scene holds that tip's bananas until the visitor asks to watch, or
 // HOLD runs out.
 //
+// A real quote offers the invoice by Lightning or on-chain, whatever the amount: ON-CHAIN asks the API for an address on
+// the same invoice (`hooks.onchain`), shown as a `bitcoin:` QR for its amount (more than the invoice when the store adds
+// a network fee) and the invoice's expiry, while the Lightning invoice stays good behind the quote. Once the visitor
+// says it is sent, the screen says the bananas cook when it confirms and lets them go; the donation arrives under the
+// invoice's id like any other, whenever it confirms, and is thanked if the visitor is still there.
+//
 // `create(hooks)` returns the flow: `start`, `stop`, `key(e)`, `tap(u, v)` in the canvas's pixels,
 // `receive(id, bananas, handle)`, `update(dt)`, `paint()`, which repaints only after a change, and `animate(ctx, time)`,
 // which draws what moves (the wait's spinner) in the canvas's pixels over the painted screen. `state`, `sats`,
@@ -61,6 +67,8 @@
     }
   };
   const sats = (n) => n.toLocaleString("en-US");
+  // Sats as bitcoin, without trailing zeros, for a payment URI and its label.
+  const btc = (n) => (n / 1e8).toFixed(8).replace(/0+$/, "").replace(/\.$/, "");
   const clock = (t) => {
     const s = Math.max(0, Math.ceil(t));
     return `${String(Math.floor(s / 60)).padStart(2, "0")}:${String(s % 60).padStart(2, "0")}`;
@@ -201,18 +209,19 @@
   };
 
   // ---- the flow -------------------------------------------------------------------------------------------------
-  // `hooks`: link() for what the attract screen's QR holds, bananasFor(sats), price() in dollars or 0, copy(text),
+  // `hooks`: link() for what the attract screen's QR holds, bananasFor(sats), price() in dollars or 0, copy(text, what),
   // release() when HOLD runs out, watch() and close(); simulated, request() for a new donation request ({ id, url })
   // and pay(id, sats) when a payment settles; in real mode, `real`, invoice(sats, anon), which resolves to the API's
   // reply or `{ error }`, open(), the API's word on whether donations are open (null before it has said),
   // testNetwork(), the test network payments are on or "" for mainnet, account(), the page's account (`backend`, and
-  // `me` when signed in), and signIn().
+  // `me` when signed in), signIn(), onchain(request), which resolves to the API's `{ address, sats }` or `{ error }`, and
+  // waitFor(id) for an invoice left with its on-chain address shown and nothing received.
   const create = (hooks) => {
     const canvas = document.createElement("canvas"), g = canvas.getContext("2d"), idleCode = BL.qr.encode(hooks.link()), real = !!hooks.real;
     canvas.width = W;
     canvas.height = H;
     let dirty = true, shown = -1, buttons = [], ticket = 0, shownOpen = null, shownNet = "";
-    const flow = { canvas, W, H, open: false, state: "idle", digits: "", sats: 0, bananas: 0, invoice: null, reply: null, error: "", left: 0, settle: 0, hold: 0, anon: false, who: "" };
+    const flow = { canvas, W, H, open: false, state: "idle", digits: "", sats: 0, bananas: 0, invoice: null, reply: null, error: "", left: 0, settle: 0, hold: 0, anon: false, who: "", chain: null, chainNote: null };
     const set = (state) => {
       flow.state = state;
       dirty = true;
@@ -253,6 +262,11 @@
       shown = -1;
       set("invoice");
     };
+    // Moving on from an invoice whose on-chain address was shown, with nothing received for it: the page waits on it, so
+    // its donation can tell the visitor it was theirs whenever it confirms.
+    const letGo = () => {
+      if (flow.chain && flow.state !== "paid") hooks.waitFor(flow.invoice.id);
+    };
     // Real mode: the API's invoice for this amount, then `next`. A reply that finds the visitor gone on is dropped.
     const ask = (next) => {
       const t = ++ticket;
@@ -264,12 +278,33 @@
           flow.error = r.error;
           return set(r.error === "amount" ? "amount" : "problem");
         }
+        letGo();
         flow.reply = r;
         flow.bananas = r.bananas ? r.bananas.rounded : 0;
         flow.invoice = { id: r.invoice.id, code: BL.qr.encode(`lightning:${r.invoice.bolt11.toUpperCase()}`), bolt: r.invoice.bolt11, expires: r.invoice.expires };
+        flow.chain = flow.chainNote = null;
         flow.left = r.invoice.expires - Date.now() / 1000;
         shown = -1;
         set(next);
+      });
+    };
+    // Real mode: the address to pay this invoice on-chain, asked for once an invoice. A refusal goes back to the quote
+    // with a note saying why, where Lightning still pays, and an invoice already expired shows so.
+    const CHAIN_NOTES = { closed: "ON-CHAIN IS UNAVAILABLE NOW: PAY BY LIGHTNING", busy: "TOO MANY TRIES: WAIT A MINUTE OR PAY BY LIGHTNING" };
+    const askChain = () => {
+      const t = ++ticket;
+      flow.chainNote = null;
+      set("chaining");
+      hooks.onchain(flow.reply.request).then((r) => {
+        if (t !== ticket || flow.state !== "chaining") return;
+        if (r.error === "expired") return set("expired");
+        if (r.error) {
+          flow.chainNote = CHAIN_NOTES[r.error] || "COULDN'T GET AN ADDRESS: PAY BY LIGHTNING";
+          return set("quote");
+        }
+        flow.chain = { address: r.address, sats: r.sats, code: BL.qr.encode(`bitcoin:${r.address}?amount=${btc(r.sats)}`) };
+        shown = -1;
+        set("chain");
       });
     };
     const act = (a) => {
@@ -295,6 +330,7 @@
       if (s === "problem" && a === "back") return set("amount");
       if (s === "quote") {
         if (a === "create") return real ? set("invoice") : invoice();
+        if (a === "chain" && real) return flow.chain ? set("chain") : askChain();
         if (a === "back") return set("amount");
         // The API made this invoice under the login or without it, so hiding the name asks for a new one.
         if (a === "anon") {
@@ -312,6 +348,19 @@
         if (a === "copy") return hooks.copy(flow.invoice.bolt);
         if (a === "back") return set("quote");
       }
+      if (s === "chaining" && a === "back") {
+        ticket++;
+        return set("quote");
+      }
+      if (s === "chain") {
+        if (a === "copy") return hooks.copy(flow.chain.address, "Address");
+        if (a === "sent") return set("confirming");
+        if (a === "back") return set("quote");
+      }
+      if (s === "confirming") {
+        if (a === "done") return hooks.close();
+        if (a === "back") return set("chain");
+      }
       if (s === "waiting" && (a === "cancel" || a === "back")) return set("invoice");
       if (s === "paid" && (a === "watch" || a === "back")) return hooks.watch();
       if (s === "expired") {
@@ -320,12 +369,12 @@
       }
     };
     // Keys, as the screen's buttons: Enter or Space the main one, Escape back (or out, from the attract screen), the
-    // digits, Backspace and Delete on the keypad, A to hide or show the donor's name on a real quote, C to copy and R to
-    // regenerate an invoice.
+    // digits, Backspace and Delete on the keypad, A to hide or show the donor's name and O to pay on-chain on a real
+    // quote, C to copy and R to regenerate an invoice, and C to copy the on-chain address.
     flow.key = (e) => {
       const k = e.key, s = flow.state;
       if (k === "Escape") return s === "idle" ? hooks.close() : act("back");
-      if (k === "Enter" || k === " ") return act({ idle: "start", amount: "go", quote: "create", invoice: real ? "" : "pay", paid: "watch", expired: "regen", problem: "back" }[s] || "");
+      if (k === "Enter" || k === " ") return act({ idle: "start", amount: "go", quote: "create", invoice: real ? "" : "pay", chain: "sent", confirming: "done", paid: "watch", expired: "regen", problem: "back" }[s] || "");
       if (s === "amount") {
         if (k.length === 1 && k >= "0" && k <= "9") return act(k);
         if (k === "Backspace") return act("rub");
@@ -333,7 +382,8 @@
       }
       if (k === "Backspace") return act("back");
       if (s === "quote" && real && (k === "a" || k === "A") && hooks.account().me) return act("anon");
-      if (s === "invoice" && (k === "c" || k === "C")) return act("copy");
+      if (s === "quote" && (k === "o" || k === "O")) return act("chain");
+      if ((s === "invoice" || s === "chain") && (k === "c" || k === "C")) return act("copy");
       if ((s === "invoice" || s === "expired") && (k === "r" || k === "R")) return act("regen");
     };
     // A tap at (u, v) on the canvas: the button under it, or on the attract screen anywhere.
@@ -345,22 +395,25 @@
       ticket++;
       flow.open = true;
       flow.digits = flow.error = flow.who = "";
-      flow.invoice = flow.reply = null;
+      flow.invoice = flow.reply = flow.chain = flow.chainNote = null;
       flow.anon = false;
       quote();
       set("idle");
     };
     flow.stop = () => {
       ticket++;
+      letGo();
       flow.open = false;
-      flow.invoice = flow.reply = null;
+      flow.invoice = flow.reply = flow.chain = flow.chainNote = null;
       set("idle");
     };
     // A donation event: true when it is this invoice's payment, which the screen then thanks, naming the donor the
-    // donation names (none for an anonymous tip), with the API's count when it sent one.
+    // donation names (none for an anonymous tip), with the API's count when it sent one. An on-chain payment can arrive
+    // after the invoice has expired.
+    const RECEIVING = ["quote", "invoice", "waiting", "chaining", "chain", "confirming", "expired"];
     flow.receive = (id, bananas = null, handle = "") => {
       const s = flow.state;
-      if (!flow.invoice || id !== flow.invoice.id || s !== "invoice" && s !== "waiting" && s !== "quote" && s !== "expired") return false;
+      if (!flow.invoice || id !== flow.invoice.id || !RECEIVING.includes(s)) return false;
       if (bananas) flow.bananas = bananas.rounded;
       flow.who = handle;
       flow.hold = HOLD;
@@ -378,7 +431,7 @@
         shownNet = hooks.testNetwork();
         dirty = true;
       }
-      if (s === "invoice" || s === "waiting" || real && s === "quote") {
+      if (s === "invoice" || s === "waiting" || s === "chain" || real && s === "quote") {
         flow.left = real ? flow.invoice.expires - Date.now() / 1000 : flow.left - dt;
         if (flow.left <= 0) return set("expired");
         const tick = Math.ceil(flow.left);
@@ -413,7 +466,8 @@
     flow.animate = (g, time) => {
       const s = flow.state;
       if (s === "waiting") spin(g, 120, 142, 34, 9, time);
-      else if (s === "quoting") spin(g, W / 2, 226, 30, 8, time);
+      else if (s === "quoting" || s === "chaining") spin(g, W / 2, 226, 30, 8, time);
+      else if (s === "confirming") spin(g, W / 2, 166, 30, 8, time);
       else if (s === "invoice" && real) spin(g, 200, 335, 9, 4, time);
     };
     // A real quote's last row: who the tip is from, and the way to change that, as one wide button. A login too long for
@@ -489,7 +543,8 @@
           banana(g, 66, 244, 17, INK.gold);
           write(g, `${sats(bananas.rounded)} BANANA${bananas.rounded === 1 ? "" : "S"}`, 96, 212, 4, INK.gold);
         } else write(g, "COUNTED WHEN PAID", 42, 214, 2, INK.gold);
-        if (!rate) write(g, "NO PRICE YET: THE BANANAS ARE COUNTED LATER", W / 2, 276, 1, INK.red, "center");
+        if (flow.chainNote) write(g, flow.chainNote, W / 2, 276, 1, INK.red, "center");
+        else if (!rate) write(g, "NO PRICE YET: THE BANANAS ARE COUNTED LATER", W / 2, 276, 1, INK.red, "center");
         else if (rate.stale) {
           const at = new Date(rate.at);
           write(g, `OLD PRICE: THE LAST ONE, FROM ${String(at.getHours()).padStart(2, "0")}:${String(at.getMinutes()).padStart(2, "0")}`, W / 2, 276, 1, INK.red, "center");
@@ -500,8 +555,10 @@
         const { backend, me } = hooks.account();
         if (me) fromRow(flow.anon ? "ANONYMOUS" : `FROM @${me.login}`, flow.anon ? "SHOW MY NAME" : "GO ANONYMOUS", "anon");
         else if (backend) fromRow("ANONYMOUS", "SIGN IN TO USE YOUR NAME", "signin");
-        button(30, 326, 120, 52, "< BACK", "", "back");
-        button(160, 326, 210, 52, "SHOW INVOICE", "primary", "create");
+        // How to pay: the Lightning invoice already made, or an address for it on-chain.
+        button(30, 326, 84, 52, "< BACK", "", "back");
+        button(122, 326, 120, 52, "LIGHTNING", "primary", "create");
+        button(250, 326, 120, 52, "ON-CHAIN", "", "chain");
         closeButton();
       } else if (s === "quote") {
         face(g, "CONFIRM DONATION");
@@ -558,6 +615,51 @@
         }
         const net = shownNet.toUpperCase();
         write(g, !real ? "PAYMENTS ARE SIMULATED IN THIS BUILD" : net ? `TEST INVOICE ON ${net} · PAY WITH A ${net} WALLET` : "PAY WITH ANY LIGHTNING WALLET", W / 2, 378, 1, net ? INK.amber : INK.dim, "center");
+      } else if (s === "chaining") {
+        face(g, "PAY ON-CHAIN");
+        write(g, `${sats(flow.sats)} SATS`, W / 2, 110, 4, INK.gold, "center");
+        write(g, "GETTING AN ADDRESS...", W / 2, 162, 2, INK.white, "center");
+        button(130, 320, 140, 48, "< BACK", "", "back");
+      } else if (s === "chain") {
+        // The address for this invoice, its amount (with the store's network fee, when it adds one) and the invoice's
+        // clock: the payment has to be sent before it runs out, though it may confirm later.
+        const c = flow.chain;
+        face(g, "SEND BITCOIN ON-CHAIN");
+        qrBox(g, 20, 42, 200, c.code, false);
+        write(g, "SEND EXACTLY", 232, 48, 1, INK.dim);
+        write(g, sats(c.sats), 232, 60, 2, INK.white);
+        write(g, "SATS", 232, 78, 1, INK.dim);
+        write(g, `${btc(c.sats)} BTC`, 232, 92, 1, INK.white);
+        if (c.sats > flow.sats) write(g, "WITH THE NETWORK FEE", 232, 104, 1, INK.dim);
+        write(g, "SEND BEFORE", 232, 122, 1, INK.dim);
+        write(g, clock(flow.left), 232, 134, 4, flow.left <= 60 ? INK.red : INK.gold);
+        write(g, "BANANAS", 232, 176, 1, INK.dim);
+        banana(g, 244, 206, 10, INK.gold);
+        write(g, flow.reply.bananas ? sats(flow.bananas) : "LATER", 262, 190, 2, INK.gold);
+        write(g, "SCAN WITH YOUR BITCOIN WALLET", 120, 250, 1, INK.white, "center");
+        panel(g, 20, 266, 316, 32);
+        write(g, `${c.address.slice(0, 16)}...${c.address.slice(-8)}`.toUpperCase(), 30, 279, 1, INK.white);
+        button(344, 266, 36, 32, "", "", "copy");
+        g.strokeStyle = INK.white;
+        g.lineWidth = 1.5;
+        g.strokeRect(355.5, 273.5, 9, 11);
+        g.strokeRect(359.5, 276.5, 9, 11);
+        button(20, 312, 150, 46, "< BACK", "", "back");
+        button(178, 312, 202, 46, "I'VE SENT IT", "primary", "sent");
+        closeButton();
+        const net = shownNet.toUpperCase();
+        write(g, net ? `TEST ADDRESS ON ${net} · USE A ${net} WALLET` : "THE BANANAS COOK ONCE IT CONFIRMS", W / 2, 378, 1, net ? INK.amber : INK.dim, "center");
+      } else if (s === "confirming") {
+        // Sent: nothing to do but wait for a block, which needn't keep the visitor here.
+        face(g, "SENT ON-CHAIN");
+        write(g, "YOUR BANANAS COOK", W / 2, 64, 3, INK.white, "center");
+        write(g, "ONCE IT CONFIRMS", W / 2, 92, 3, INK.white, "center");
+        write(g, flow.reply.bananas ? `${sats(flow.chain.sats)} SATS · ${sats(flow.bananas)} BANANA${flow.bananas === 1 ? "" : "S"}` : `${sats(flow.chain.sats)} SATS`, W / 2, 218, 2, INK.gold, "center");
+        write(g, "THAT TAKES A BLOCK OR MORE. YOU CAN LEAVE:", W / 2, 250, 1, INK.dim, "center");
+        write(g, "THE COOKER STARTS WHEN IT CONFIRMS.", W / 2, 264, 1, INK.dim, "center");
+        button(30, 326, 120, 52, "< ADDRESS", "", "back");
+        button(160, 326, 210, 52, "DONE", "primary", "done");
+        closeButton();
       } else if (s === "paid") {
         face(g, "PAYMENT RECEIVED!", INK.gold, INK.paid);
         banana(g, W / 2, 118, 44, INK.gold);
@@ -572,6 +674,7 @@
         face(g, "INVOICE EXPIRED", INK.red);
         write(g, "THIS INVOICE TIMED OUT.", W / 2, 150, 2, INK.white, "center");
         write(g, "MAKE A NEW ONE TO DONATE.", W / 2, 186, 1, INK.dim, "center");
+        if (flow.chain) write(g, "SENT ON-CHAIN? IT STILL COUNTS ONCE IT CONFIRMS.", W / 2, 222, 1, INK.gold, "center");
         button(30, 326, 120, 52, "< BACK", "", "back");
         button(160, 326, 210, 52, "NEW INVOICE", "primary", "regen");
         closeButton();
