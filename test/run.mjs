@@ -4669,21 +4669,26 @@ const donationClientChecks = async () => {
     empty && tally && boards && legacyBoard && replay && heard && unlit && received.length === 2 && received[0].bananas.exact === 0.25 && received[1].bananas.exact === 0 && received[1].bananas.rounded === 0 && sockets[1].closed && !D.state.connected,
     JSON.stringify({ empty, tally, boards, legacyBoard, replay, heard, unlit, received }));
 
-  let now = Date.now();
+  let now = Date.now(), detailsOpen = false;
   const kioskContext = { window: { BL: { jumbotron: { text: { GLYPH_W: 5, GLYPH_H: 7, TRACKING: 1 } }, qr: { encode: () => ({ size: 1, modules: [1] }) } } },
     document: { createElement: () => ({ getContext: () => ({}) }) }, Date: class extends Date { static now() { return now; } } };
   runInNewContext(await readFile(new URL("../src/js/factory-kiosk.js", import.meta.url), "utf8"), kioskContext);
   const F = kioskContext.window.BL.factoryKiosk.create({ real: true, link: () => "/lightning", bananasFor: () => 1,
     invoice: async () => ({ request: "request", invoice: { id: "invoice", bolt11: "lntbs1", expires: now / 1000 + 10 }, bananas: { exact: 0.25, rounded: 0 }, rate: null }),
-    open: () => true, testNetwork: () => "signet", account: () => ({ backend: true, me: null }), release: () => {} });
+    open: () => true, testNetwork: () => "signet", account: () => ({ backend: true, me: null }), release: () => {},
+    editDetails: () => { detailsOpen = true; }, closeDetails: () => { detailsOpen = false; } });
   const quote = async () => { F.start(); for (const key of ["Enter", "1", "Enter"]) F.key({ key }); await Promise.resolve(); };
   await quote();
-  const quoted = F.state === "quote" && F.receive("invoice", { exact: 0.25, rounded: 0 }, "tester") && F.state === "paid" && F.who === "tester";
+  const fractionalQuote = F.bananas === 0.25;
+  F.key({ key: "A" });
+  const editing = detailsOpen;
+  const quoted = F.state === "quote" && F.receive("invoice", { exact: 1.75, rounded: 2 }, "tester", 1800) && F.state === "paid" && F.who === "tester";
+  const fractionalPaid = F.bananas === 1.75 && F.sats === 1800 && editing && !detailsOpen;
   await quote(); now += 11000; F.update(0.1);
   const expired = F.state === "expired", late = F.receive("invoice", { exact: 0.25, rounded: 0 }, "tester") && F.state === "paid";
   await quote(); now += 11000; F.update(0.1); F.key({ key: "Escape" });
   const back = F.state === "amount";
-  record("donation kiosk: a real invoice expires on its quote screen, Back returns to the amount, and a confirmed payment is recognized on the quote or after expiry", quoted && expired && late && back, JSON.stringify({ quoted, expired, late, back }));
+  record("donation kiosk: real quotes preserve fractional bananas, settlement uses the donation's actual amount, an invoice expires on its quote screen, Back returns to the amount, and payment is recognized on the quote or after expiry", fractionalQuote && fractionalPaid && quoted && expired && late && back, JSON.stringify({ fractionalQuote, fractionalPaid, quoted, expired, late, back }));
   const waits = [];
   const G = kioskContext.window.BL.factoryKiosk.create({ real: true, link: () => "/lightning", bananasFor: () => 1,
     invoice: async () => ({ request: "request", invoice: { id: "unlit", bolt11: null, expires: now / 1000 + 900 }, bananas: { exact: 0.25, rounded: 0 }, rate: null }),
@@ -4701,6 +4706,50 @@ const donationClientChecks = async () => {
   G.stop();
   const waited = waits.join() === "unlit";
   record("donation kiosk: an invoice without its Lightning half pays on-chain from the quote, a seen payment short of it asks for what is left and a whole one waits for its block without offering payment again, and leaving waits on the invoice", chainOnly && short && whole && noRepay && waited, JSON.stringify({ chainOnly, short, whole, noRepay, waited, state: G.state }));
+
+  const elements = new Map(), frames = new Map(), invoices = [], popupWaits = [];
+  for (const id of ["donation-popup", "donation-screen", "donation-handle", "donation-message", "donation-close",
+    "donation-details", "donation-details-form", "donation-details-handle", "donation-details-message", "donation-details-close"]) elements.set(id, {
+    listeners: new Map(), open: false, value: "", disabled: false,
+    addEventListener(type, fn) { this.listeners.set(type, fn); }, removeEventListener(type) { this.listeners.delete(type); },
+    showModal() { this.open = true; }, close() { this.open = false; }, focus() {}, getContext: () => ({})
+  });
+  Object.assign(kioskContext, { location: { origin: "https://site.test" }, navigator: {}, performance: { now: () => now },
+    requestAnimationFrame: (fn) => { const id = now++; frames.set(id, fn); return id; }, cancelAnimationFrame: (id) => frames.delete(id) });
+  kioskContext.document.getElementById = id => elements.get(id);
+  const K = kioskContext.window.BL, factoryCreate = K.factoryKiosk.create;
+  let popupFlow;
+  K.factoryKiosk.create = hooks => (popupFlow = factoryCreate(hooks));
+  K.game = { bananasFor: () => 1 };
+  K.net = { state: { backend: true, me: null }, login() {} };
+  K.donations = { state: { open: true }, testNetwork: "signet", sanitize: D.sanitize, HANDLE_MAX: D.HANDLE_MAX, MESSAGE_MAX: D.MESSAGE_MAX,
+    invoice: async options => { invoices.push(options); return { request: "request", invoice: { id: "popup", bolt11: "lntbs1", expires: now / 1000 + 900 }, bananas: { exact: 0.25, rounded: 0 }, rate: null }; },
+    onchain: async () => ({ address: "tb1qexampleaddress0000", sats: 1000 }), waitFor: id => popupWaits.push(id) };
+  runInNewContext(await readFile(new URL("../src/js/donation-popup.js", import.meta.url), "utf8"), kioskContext);
+  const popup = K.donationPopup.create({ state: { message: "hello" } }), dialog = elements.get("donation-popup");
+  const popupQuote = async () => { popup.open(); for (const key of ["1", "Enter"]) popupFlow.key({ key }); await Promise.resolve(); };
+  await popupQuote();
+  const anonymous = dialog.open && popupFlow.state === "quote" && invoices[0].sats === 1 && invoices[0].message === "hello" && invoices[0].handle === "anon";
+  const other = !popup.receive({ id: "other", handle: "someone" }, { exact: 1, rounded: 1 }) && dialog.open;
+  const settled = popup.receive({ id: "popup", handle: "" }, { exact: 0.25, rounded: 0 }) && !dialog.open && frames.size === 0;
+  K.net.state.me = { login: "tester" };
+  await popupQuote();
+  const signedIn = elements.get("donation-handle").value === "tester" && invoices.at(-1).handle === "tester";
+  popupFlow.key({ key: "A" });
+  elements.get("donation-details-handle").value = "another-name";
+  elements.get("donation-details-message").value = "m".repeat(281);
+  elements.get("donation-details-form").listeners.get("submit")({ preventDefault() {} });
+  await Promise.resolve();
+  const edited = invoices.at(-1).handle === "another-name" && invoices.at(-1).message.length === 280;
+  popupFlow.key({ key: "O" }); await Promise.resolve();
+  const popupSeen = popup.seen("popup", 1000, 1000, 0) && popupFlow.state === "confirming";
+  elements.get("donation-close").listeners.get("click")();
+  const leftWaiting = popupWaits.join() === "popup" && !dialog.open && frames.size === 0;
+  popup.open(); popupFlow.key({ key: "1" }); popupFlow.key({ key: "Enter" });
+  popup.dispose(); await Promise.resolve();
+  const disposed = popupFlow.state === "idle" && !dialog.open && frames.size === 0 && [...elements.values()].every(e => e.listeners.size === 0);
+  record("donation popup: signed-out visitors can quote a payment, unrelated donations keep its invoice open, its settlement reveals the scene immediately, an on-chain payment can be left waiting, and disposal cancels frames, listeners and late replies",
+    anonymous && signedIn && edited && other && settled && popupSeen && leftWaiting && disposed, JSON.stringify({ anonymous, signedIn, edited, other, settled, popupSeen, leftWaiting, disposed }));
 };
 const wallPerformance = async (b) => {
   await b.send("Emulation.setDeviceMetricsOverride", { width: 1920, height: 1080, deviceScaleFactor: 2, mobile: false });
@@ -8071,7 +8120,7 @@ const factoryShields = { name: "factory peer portals", why: "rule: paired peer m
 // passed off as routing. The demo node is held still and its conduits emptied, so anything moving is the tip's, and
 // the exit shield's hum is stopped, so its ripple count is crossings alone. The kiosk is tapped with the view free, as
 // the room sign is, and its screen is worked with the keys the way a visitor works it.
-const factoryCooker = { name: "factory cooker", why: "rule: a tip in the factory, paid at the kiosk or arriving from anywhere, is counted once and cooked in plain sight: the kiosk runs the whole simulated donation and holds the visitor's bananas until they watch, no sat of it rides a line or lights a bay, the core never surges for it, each banana leaves through the exit shield, the board names no tipper and no time, a stopped node's cubes come in from outside, and a burst stays inside the cooker's pools", run: async (b) => {
+const factoryCooker = { name: "factory cooker", why: "rule: a tip in the factory, paid at the kiosk or arriving from anywhere, is counted once and cooked in plain sight: the kiosk runs the whole simulated donation and holds the visitor's bananas until they watch, no sat of it rides a line or lights a bay, the core never surges for it, each banana leaves through the ceiling tube, the board names no tipper and no time, a stopped node's cubes come in from outside, and a burst stays inside the cooker's pools", run: async (b) => {
   const at = await b.evaluate(`(() => { const B = window.__ooga; ${FACTORY_EVENT} const s = X.scene, q = s.sats;
     for (let t = 0; t < 10 && q.bay.some((v) => v >= 0); t += 0.25) B.advance(0.25, 1 / 20);
     s.gate.hum = Infinity;
@@ -8085,13 +8134,19 @@ const factoryCooker = { name: "factory cooker", why: "rule: a tip in the factory
     return { mode: s.booth.mode, state: f.state, sats: f.sats, bananas: f.bananas, invoice: f.invoice ? f.invoice.id : null, qr: f.invoice ? f.invoice.code.size : 0, left: f.left, held: s.booth.held }; })()`);
   await b.evaluate(`window.__ooga.advance(1, 1 / 30)`);
   const opened = await screen();
-  for (const k of ["Enter", "1", "2", "0", "0"]) await b.key(k);
+  await b.key("Enter"); await b.key("A");
+  await b.evaluate(`(() => {
+    document.getElementById("donation-details-handle").value = "tester";
+    document.getElementById("donation-details-message").value = "zebra 12:34";
+    document.getElementById("donation-details-form").requestSubmit();
+  })()`);
+  for (const k of ["1", "2", "0", "0"]) await b.key(k);
   const typed = await screen();
   await b.key("Enter");
   const quoted = await screen();
   await b.key("Enter");
   const invoiced = await b.evaluate(`(() => { const B = window.__ooga, s = B.factory.scene;
-    window.__tipFrom = { level: B.level, donations: B.game.state.donations, hits: s.gate.phase.ripples.hits };
+    window.__tipFrom = { level: B.level, donations: B.game.state.donations, hits: s.gate.phase.ripples.hits, out: B.stats().cooker.out };
     B.advance(2, 1 / 30); const f = s.booth.flow; return { state: f.state, invoice: f.invoice ? f.invoice.id : null, qr: f.invoice ? f.invoice.code.size : 0, left: f.left }; })()`);
   await b.key("Enter");
   const paid = await b.evaluate(`(() => { const B = window.__ooga, G = window.BL.game, s = B.factory.scene, f = s.booth.flow, from = window.__tipFrom;
@@ -8103,7 +8158,7 @@ const factoryCooker = { name: "factory cooker", why: "rule: a tip in the factory
   const r = await b.evaluate(`(() => { const B = window.__ooga, G = window.BL.game, s = B.factory.scene, q = s.sats, g = s.gate.phase.ripples, from = window.__tipFrom;
     const n = G.bananasFor(1200), l0 = from.level, h0 = from.hits, watching = s.booth.mode;
     const busy = () => { const c = B.stats().cooker; return c.cubes + c.bananas + c.queued > 0; };
-    let routed = 0, lit = 0, surged = false, recounted = false, first = null;
+    let routed = 0, lit = 0, surged = false, recounted = false, first = null, vertical = 0, drift = 0, high = 0;
     for (let t = 0; t < 20 && (t < 2.5 || busy()); t += 1 / 20) {
       B.advance(1 / 20, 1 / 20);
       for (let i = 0; i < q.bay.length; i++) if (q.bay[i] >= 0) routed++;
@@ -8112,10 +8167,18 @@ const factoryCooker = { name: "factory cooker", why: "rule: a tip in the factory
       surged = surged || s.surgeT >= 0;
       recounted = recounted || B.level !== l0 + n;
       const c = s.cubeNode; if (!first && c.instanceCount) first = { x: c.instanceData[12], y: c.instanceData[13], z: c.instanceData[14] };
+      for (let i = 0, m = 0; i < s.fruit.t.length; i++) if (s.fruit.t[i] >= 0) {
+        const at = m++ * 20;
+        if (s.fruit.t[i] < 0.34) continue;
+        const d = s.fruitNode.instanceData;
+        vertical++; drift = Math.max(drift, Math.hypot(d[at + 12] - s.tossOut.sx, d[at + 14] - s.tossOut.sz));
+        high = Math.max(high, d[at + 13]);
+      }
     }
     B.advance(3.5, 1 / 20);
     const printed = s.cookBoard.printed, wall = s.boardValues.printed;
-    return { n, watching, back: s.booth.mode, counted: { level: B.level - l0 }, routed, lit, surged, recounted, first, core: window.BL.factoryModels.LAYOUT.core, rippled: g.hits - h0,
+    return { n, watching, back: s.booth.mode, counted: { level: B.level - l0 }, routed, lit, surged, recounted, first, core: window.BL.factoryModels.LAYOUT.core, rippled: g.hits - h0, out: B.stats().cooker.out - from.out,
+      vertical, drift, high, intake: window.BL.factoryModels.LAYOUT.cooker.y + window.BL.factoryModels.COOK.intakeY,
       board: { printed, wall, rounded: printed.includes(G.formatLarge(1200)) && wall.endsWith(G.formatLarge(1200) + " SATS"), named: /tester|zebra/i.test(printed + wall), timed: /\\d{1,2}:\\d{2}/.test(printed + wall) } };
   })()`);
   record("factory kiosk: tapping the kiosk in the right wall puts its screen in view, and the whole simulated donation runs on it from the keys: an amount typed in, its quote in bananas, an invoice with its QR and expiry, the wait and the payment, which counts the tip once under the visitor's handle and holds its bananas until the visitor turns to watch, then hands the view back",
@@ -8123,11 +8186,12 @@ const factoryCooker = { name: "factory cooker", why: "rule: a tip in the factory
     && invoiced.state === "invoice" && !!invoiced.invoice && invoiced.qr > 0 && invoiced.left > 290 && paid.waiting === "waiting" && paid.state === "paid"
     && paid.level === paid.n && paid.donations === 1 && paid.handle === "tester" && paid.held === paid.n && paid.idle && r.watching === 3 && r.back === 0,
     JSON.stringify({ opened, typed, quoted, invoiced, paid, watching: r.watching, back: r.back }));
-  record("factory cooker: a tip's bananas count once, the moment it arrives, and each leaves through the exit shield; no sat of it rides a line or lights a bay, and the core never surges for it", r.counted.level === r.n && !r.recounted && r.rippled === r.n && r.routed === 0 && r.lit === 0 && !r.surged, JSON.stringify(r));
+  record("factory cooker: a tip's bananas count once, the moment it arrives, and each leaves through the ceiling tube; no sat of it rides a line or lights a bay, and the core never surges for it", r.counted.level === r.n && !r.recounted && r.rippled === 0 && r.out === r.n && r.routed === 0 && r.lit === 0 && !r.surged, JSON.stringify(r));
+  record("factory cooker: bananas rise vertically from the chute into the overhead intake", r.vertical > 0 && r.drift < 0.001 && r.high > r.intake, JSON.stringify({ samples: r.vertical, drift: r.drift, high: r.high, intake: r.intake }));
   record("factory cooker: the cooker's board and the donations board on the wall show the last tip rounded and never the tipper's handle, message or a time", r.board.rounded && !r.board.named && !r.board.timed, JSON.stringify(r.board));
   const stopped = await b.evaluate(`(() => { const B = window.__ooga; ${FACTORY_EVENT} const s = X.scene, g = s.gate.phase.ripples, G = window.BL.game, shield = window.BL.factoryModels.HALL.front - 0.6;
     send("node.stopped"); B.advance(0.5, 1 / 20);
-    const reading = X.feed.reading.node, n = G.bananasFor(120000), h0 = g.hits;
+    const reading = X.feed.reading.node, n = G.bananasFor(120000), h0 = g.hits, out0 = B.stats().cooker.out;
     B.demoTip(120000);
     let first = null;
     for (let t = 0; t < 30; t += 1 / 20) {
@@ -8136,10 +8200,10 @@ const factoryCooker = { name: "factory cooker", why: "rule: a tip in the factory
       const o = B.stats().cooker; if (t > 1 && o.cubes + o.bananas + o.queued === 0) break;
     }
     send("node.ready"); B.advance(0.5, 1 / 20);
-    return { reading, n, first, shield, rippled: g.hits - h0 };
+    return { reading, n, first, shield, rippled: g.hits - h0, out: B.stats().cooker.out - out0 };
   })()`);
   const core = r.core, fromCore = !!r.first && Math.hypot(r.first.x - core.x, r.first.z - core.z) < core.radius + 2 && r.first.y > core.chamber[0] - 1 && r.first.y < core.chamber[1] + 1;
-  record("factory cooker: a running node tosses a tip's sat cubes from the core's chamber; one that reads stopped takes them in through the exit shield instead, which ripples for each cube in and each banana out", fromCore && stopped.reading === "stopped" && !!stopped.first && stopped.first.z > stopped.shield - 1.5 && stopped.rippled === 2 * stopped.n, JSON.stringify({ running: r.first, stopped }));
+  record("factory cooker: a running node tosses a tip's sat cubes from the core's chamber; one that reads stopped takes them in through the exit shield instead, which ripples for each incoming cube while bananas leave through the ceiling", fromCore && stopped.reading === "stopped" && !!stopped.first && stopped.first.z > stopped.shield - 1.5 && stopped.rippled === stopped.n && stopped.out === stopped.n, JSON.stringify({ running: r.first, stopped }));
   const burst = await b.evaluate(`(() => { const B = window.__ooga, G = window.BL.game, s = B.factory.scene, q = s.sats, per = G.bananasFor(120000);
     const cap = { cubes: s.cubeNode.instanceData.length / 20, bananas: s.fruitNode.instanceData.length / 20 }, tips = Math.ceil((Math.max(cap.cubes, cap.bananas) + 1) / per), n = tips * per;
     const bare = () => { const t = B.stats(); return t.allNodes - t.particles - t.pool; }, nodes = bare(), l0 = B.level, out0 = B.stats().cooker.out;
@@ -11167,7 +11231,7 @@ scene("drop", { steps: [dropStart, dropSteering, play("drop", "a jump lands on t
 scene("orbit", { steps: [{ name: "orbit flow", why: "regression: the spacewalk air bonus was missing from the flight log", run: orbitFlow }, orbitSteering, orbitMissed, orbitEscape, trip("orbit")] });
 scene("mine", { steps: [mineResume, trip("mine"), mineControls] });
 scene("factory", { query: "character=portlandhodl", steps: [factoryWalking, factoryGreeter, factoryLadders, factoryRailingJump, factoryWeapons, factoryForward, factoryForge, factoryShields, trip("factory")] });
-scene("factory", { label: "cooker", query: "character=portlandhodl", steps: [donation("factory", { stat: "cooker.out", seconds: 14, where: "the cooker sends its bananas out through the exit shield" }), factoryCooker, trip("factory")] });
+scene("factory", { label: "cooker", query: "character=portlandhodl", steps: [donation("factory", { stat: "cooker.out", seconds: 14, where: "the cooker sends its bananas up through the ceiling tube" }), factoryCooker, trip("factory")] });
 scene("factory", { label: "entrance", url: hubPage(src, "character=portlandhodl"), steps: [factoryFloor, factoryEntrance] });
 scene("factory", { label: "canvas2d", query: "canvas2d=1&character=portlandhodl", steps: [factoryCanvas, factoryGreeter] });
 scene("bifrost", { url: hubPage(src, "solo=1&character=portlandhodl"), steps: [bifrostEntrance, bifrostWalking, bifrostExit, trip("bifrost")] });
@@ -14556,6 +14620,21 @@ record("character visibility source bakes: ownership wrappers share exact immuta
   globalThis.__ooga = { island, headquarters: { rockGuides } };
 
   const backends = ["webgl2"];
+
+  {
+    const M = BL.models, S = BL.scene, root = S.createNode();
+    const roof = M.box({ w: 4, h: 0.25, d: 4, color: "#ffffff", offset: { y: 1 } });
+    const floor = M.box({ w: 4, h: 0.2, d: 4, color: "#ffffff" });
+    const geometry = M.cutCylinder(M.merge(roof, floor), 0, 0, 0.3, 0.5), node = S.createNode({ geometry });
+    S.addChild(root, node); S.updateWorld(root);
+    const contacts = BL.weaponTargets.create([{ node, owner: {} }]), out = {}, rows = [];
+    contacts.register(node);
+    for (const [x, z, y] of [[0, 0, 0.1], [0.1, -0.1, 0.1], [0.4, 0, 1.125], [0, -0.4, 1.125]]) {
+      const hit = contacts.ray(out, x, 3, z, 0, -1, 0, 5, null);
+      rows.push({ x, z, hit, y: hit ? out.y : null, correct: !!hit && Math.abs(out.y - y) < 1e-5 });
+    }
+    record("roof tube aperture: rays through the bore see the floor beneath it while adjacent roof stays solid", rows.every(row => row.correct), JSON.stringify(rows));
+  }
 
   {
     const S = BL.scene, root = S.createNode(), box = x => BL.models.box({ w: 0.25, h: 0.25, d: 0.25, offset: { x }, color: "#ffffff" });
