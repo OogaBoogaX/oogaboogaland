@@ -33,7 +33,6 @@
   const latitudeParam = DEBUG ? parseFloat(params.get("latitude")) : NaN;
   const islandLatitude = Number.isFinite(latitudeParam) ? Math.max(-90, Math.min(90, latitudeParam)) : daylight.ISLAND_LATITUDE_DEG;
   const SEED = 1;
-  const METER_CAPACITY = 60;
   const FIXED = 1 / 120, MAX_SUBSTEPS = 4;
   // Climb: a roll along the roof, then a helix round the island up to jump height, blended from the straight run.
   // The jump sits well above the first ring, so there is time in the air to line up on the column.
@@ -102,7 +101,7 @@
   let phase = "board", jumpOpenUntil = 0, callStage = 0, markNear = 0, accumulator = 0, sceneTime = 0, flightTime = 0, landedAt = 0, score = 0, ringsHit = 0, pulled = false, jumpOpen = false, result = null;
   // The pull altitude and the sink at touchdown, for the bonuses they earn.
   let pullAlt = 0, landSink = 0, life = null;
-  let meterTimer = 0, stateTimer = 0, hintTimer = 0;
+  let stateTimer = 0, hintTimer = 0;
   const placed = [];
   const clouds = [];
   const rings = [];
@@ -654,9 +653,6 @@
     audio.unlock();
     quieted = false;
   };
-  const updateMeter = () => {
-    hud.setMeter(world.level, METER_CAPACITY, phase === "air" ? `${ringsHit} of ${RING_COUNT} rings` : "stable");
-  };
   const update = (dt, elapsed) => {
     sceneTime = elapsed;
     if (life) { life.gulls.update(elapsed); life.boats.update(elapsed); }
@@ -766,11 +762,6 @@
       dhud.setAlt(planeState.alt);
       dhud.setSpeed(0);
     }
-    meterTimer -= dt;
-    if (meterTimer <= 0) {
-      meterTimer = 0.25;
-      updateMeter();
-    }
   };
   const NO_EXTRA = () => { };
   const overlay = (dt) => fx.drawOverlay(dt, NO_EXTRA);
@@ -794,7 +785,6 @@
       renderLocker();
     }
     hud.setStats(game.state);
-    meterTimer = 0;
   };
   const renderLocker = () => hud.renderInventory(game.state.inventory, game.assignedTo, () => null);
 
@@ -997,7 +987,6 @@
     hud.setStats(game.state);
     hud.el.sheet.dataset.open = "false";
     dhud.el.help.textContent = COARSE ? "Left stick pitches and rolls · right stick turns · the button jumps, pulls and flares" : "W S pitch · A D roll · Q E turn · Space jumps, pulls the chute · S flares · drag to look";
-    meterTimer = 0;
     toBoard();
     stateTimer = window.setInterval(() => {
       for (const c of contributors.activeRoster) hud.setRosterRow(c.name, contributors.stateFor(c), contributors.ageLabel(c));

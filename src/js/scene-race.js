@@ -14,7 +14,6 @@
   const { createNode, addChild, removeChild, createCamera, stepTweens, tweenCount, traverseVisible } = BL.scene;
   const { CONFETTI } = fxMod;
   const COARSE = window.matchMedia("(pointer: coarse)").matches;
-  const METER_CAPACITY = 60;
   const FIXED = 1 / 120, MAX_SUBSTEPS = 4;
   const COUNTDOWN = 3.4, RESULTS_AFTER = 1.4;
   const CHASE = { dist: 6.4, up: 2.1, ahead: 2.2, lookUp: 1.1, distMin: 3.5, distMax: 11, yawRate: 7, eyeRate: 14, targetRate: 18 };
@@ -62,7 +61,7 @@
   let home = "hub";
   let renderer, game, world, go, lootEnabled, testBananas, root, camera, hud, rhud, hooks, input, fx, controls, track, racers, items, audio, weather, agent;
   let phase = "garage", countdown = 0, accumulator = 0, sceneTime = 0, finishedAt = 0;
-  let meterTimer = 0, stateTimer = 0, hintTimer = 0;
+  let stateTimer = 0, hintTimer = 0;
   // revAt is the countdown time the throttle was first held through; -1 while it is off.
   let revAt = -1, crowdSwell = 0, driftTaught = 0;
   const cam = { yaw: 0, offset: 0, dist: CHASE.dist, shake: 0, lookBack: false, x: 0, y: 0, z: 0, tx: 0, ty: 0, tz: 0, warm: false, garageYaw: 0, garageLift: 0 };
@@ -615,13 +614,9 @@
       renderLocker();
     }
     hud.setStats(game.state);
-    meterTimer = 0;
   };
   const renderLocker = () => hud.renderInventory(game.state.inventory, game.assignedTo, () => null);
 
-  const updateMeter = () => {
-    hud.setMeter(world.level, METER_CAPACITY, phase === "racing" ? `${racers.rankLabel(racers.player.rank)} of ${racers.racers.length}` : "stable");
-  };
   const tooltipFor = (hit) => {
     const o = hit.owner;
     if (o.kind === "racer") return BL.characters.displayOf(o.racer.name);
@@ -699,11 +694,6 @@
       rhud.setBoost(p.drift.active ? Math.min(1, p.drift.charge / 2.2) : 0, p.drift.active && p.drift.tier >= 3, p.drift.active ? p.drift.tier : 0);
       rhud.setPips(p.bananas, p.meterFull);
       rhud.setSpeed(Math.abs(p.speed) * 2.6);
-    }
-    meterTimer -= dt;
-    if (meterTimer <= 0) {
-      meterTimer = 0.25;
-      updateMeter();
     }
   };
   const drawExtra = (ctx2d) => {
@@ -853,7 +843,6 @@
     hud.el.sheet.dataset.open = "false";
     rhud.el.joyLook.hidden = true;
     rhud.el.help.textContent = COARSE ? "Drag to look round the garage · left stick steers · hold Drift · tap Throw" : "Drag to look round the garage · W A S D or arrows drive · hold Space to drift, tap to hop · E throws · Q looks back · Escape pauses";
-    meterTimer = 0;
     phase = "garage";
     cam.garageYaw = cam.garageLift = 0;
     toGarage();

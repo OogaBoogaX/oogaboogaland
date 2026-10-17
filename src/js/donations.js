@@ -2,8 +2,8 @@
 // docs/protocol.md): `invoice` asks it for a Lightning invoice, `note` sets the message, `onchain` adds an address to
 // pay that invoice on-chain, and `subscribe` opens its socket, which pushes each donation in OBL's event shape
 // `{ id, sats, handle, message, at }`, the pile, the leaderboard, the tally of every donation it holds with its current
-// rate, and whether donations are open. Without an API the simulator plays tips now and then, as it always has, for
-// demos and for the suite.
+// rate, whether donations are open, and each on-chain payment seen before its block. Without an API the simulator plays
+// tips now and then, as it always has, for demos and for the suite.
 //
 // The page only ever calls its own address: its Worker passes /donations/* on to bananapayserver over a service binding
 // and names the donor from its own GitHub sign-in, so the page never names one. Real mode starts once that Worker says
@@ -69,7 +69,8 @@
     return data && typeof data === "object" && !Array.isArray(data) ? data : { error: "invalid" };
   };
   // An invoice for `sats`, with the message if there is one: `{ request, invoice: { id, bolt11, expires }, bananas,
-  // rate }` checked field by field (`bananas` and `rate` null when there has never been a price), or `{ error }`.
+  // rate }` checked field by field (`bananas` and `rate` null when there has never been a price, `bolt11` null when the
+  // API couldn't make the Lightning half in time, and the invoice can still be paid on-chain), or `{ error }`.
   // `request` stays in memory, never in an address.
   const invoice = async ({ sats, message = "", anon = false }) => {
     const body = { sats }, text = sanitize(message, MESSAGE_MAX);
@@ -78,10 +79,10 @@
     const r = await call("/donations/invoice", body);
     if (r.error) return r;
     const inv = r.invoice, b = r.bananas, rate = r.rate;
-    if (typeof r.request !== "string" || !inv || typeof inv.id !== "string" || typeof inv.bolt11 !== "string" || !isNumber(inv.expires)) return { error: "invalid" };
+    if (typeof r.request !== "string" || !inv || typeof inv.id !== "string" || typeof inv.bolt11 !== "string" && inv.bolt11 != null || !isNumber(inv.expires)) return { error: "invalid" };
     return {
       request: r.request,
-      invoice: { id: inv.id, bolt11: inv.bolt11, expires: inv.expires },
+      invoice: { id: inv.id, bolt11: inv.bolt11 || null, expires: inv.expires },
       bananas: b && isNumber(b.exact) && isNumber(b.rounded) ? { exact: b.exact, rounded: b.rounded } : null,
       rate: rateOf(rate)
     };
@@ -97,13 +98,14 @@
     return { address: r.address, sats: r.sats };
   };
   // The invoices the kiosk let the visitor go from with an on-chain address shown and nothing received, kept for the
-  // page life so the donation, whenever it confirms, can say it was theirs: `waitFor(id)`, and `waited(id)`, true once
-  // when that invoice's donation comes. Past WAIT_MAX the oldest is dropped.
+  // page life so the payment, when it is seen and when it confirms, can say it was theirs: `waitFor(id)`,
+  // `waitingOn(id)`, and `waited(id)`, true once when that invoice's donation comes. Past WAIT_MAX the oldest is dropped.
   const WAIT_MAX = 16, waiting = new Set();
   const waitFor = (id) => {
     waiting.add(id);
     if (waiting.size > WAIT_MAX) waiting.delete(waiting.values().next().value);
   };
+  const waitingOn = (id) => waiting.has(id);
   const waited = (id) => waiting.delete(id);
 
   // The socket. It sends nothing (a page that does is closed), comes back with backoff, and on a reconnect asks for
@@ -111,13 +113,22 @@
   // API's last word on whether donations are open, and `state.network` the network it takes payments on, each null
   // before it has said. `state.tally` is its latest tally, null before the first.
   const SOCKET_MIN = 1000, SOCKET_MAX = 60000, PLAYED = 64;
-  const state = { open: null, network: null, connected: false, attempts: 0, donations: 0, tally: null };
-  const played = new Array(PLAYED).fill(""), handlers = { donation: null, status: null, pile: null, board: null };
+  const state = { open: null, network: null, connected: false, attempts: 0, donations: 0, tally: null, board: null, boardSats: null };
+  const readers = new Set();
+  const notify = () => { for (const reader of readers) reader(); };
+  const subscribeState = (reader) => {
+    readers.add(reader);
+    return () => readers.delete(reader);
+  };
+  const played = new Array(PLAYED).fill(""), handlers = { donation: null, status: null, pile: null, board: null, seen: null };
   let socket = null, timer = 0, backoff = SOCKET_MIN, after = "", playedAt = 0, live = false;
   const donationOf = (d) => {
     if (!d || typeof d.id !== "string" || !d.id || d.id.length > 64 || !Number.isInteger(d.sats) || d.sats <= 0 || !isNumber(d.at)) return null;
     return { id: d.id, sats: d.sats, handle: sanitize(d.handle, HANDLE_MAX), message: sanitize(d.message, MESSAGE_MAX), at: d.at };
   };
+  const boardOf = (entries) => entries.slice(0, 256)
+    .filter((e) => e && typeof e.handle === "string" && isNumber(e.bananas) && e.bananas >= 0)
+    .map((e) => ({ handle: sanitize(e.handle, HANDLE_MAX), bananas: e.bananas, sats: Number.isSafeInteger(e.sats) && e.sats >= 0 ? e.sats : null }));
   // The tally: every donation the API holds, all time (`count`, `sats`, `bananas`), the latest one's sats, the last
   // seven days in UTC hours (`[start in ms, sats, bananas]`, only hours with donations) and its current rate. A new
   // object each time, so a reader sees a change by its identity.
@@ -141,6 +152,7 @@
       state.open = data.open;
       if (NETWORKS.includes(data.network)) state.network = data.network;
       if (handlers.status) handlers.status(data.open);
+      notify();
     } else if (data.type === "donation") {
       const donation = donationOf(data.donation), b = data.bananas;
       if (!donation || played.includes(donation.id)) return;
@@ -152,10 +164,19 @@
     } else if (data.type === "pile" && isNumber(data.bananas) && isNumber(data.eatPerHour)) {
       if (handlers.pile) handlers.pile({ bananas: Math.max(0, data.bananas), eatPerHour: Math.max(0, data.eatPerHour) });
     } else if (data.type === "board" && Array.isArray(data.entries)) {
-      if (handlers.board) handlers.board(data.entries.filter((e) => e && typeof e.handle === "string" && isNumber(e.bananas)).map((e) => ({ handle: sanitize(e.handle, HANDLE_MAX), bananas: e.bananas })));
+      // Independent rankings: the sat leaders may be outside the banana leaders. Older APIs
+      // have no satsEntries; never estimate their historical sats from today's price.
+      state.board = boardOf(data.entries);
+      state.boardSats = Array.isArray(data.satsEntries) ? boardOf(data.satsEntries) : null;
+      if (handlers.board) handlers.board(state.board);
+      notify();
     } else if (data.type === "tally") {
       const tally = tallyOf(data);
-      if (tally) state.tally = tally;
+      if (tally) { state.tally = tally; notify(); }
+    } else if (data.type === "seen" && typeof data.id === "string" && data.id && Number.isInteger(data.sats) && data.sats > 0 && Number.isInteger(data.due) && data.due > 0 && Number.isInteger(data.left) && data.left >= 0) {
+      // An on-chain payment seen before its block: everything received on that invoice so far, its amount, and what
+      // is left to send, the network fee for a second payment included (0 once it is all there).
+      if (handlers.seen) handlers.seen(data.id, data.sats, data.due, data.left);
     }
   };
   const retry = () => {
@@ -223,10 +244,10 @@
     connect();
   };
   // Each donation reaches `onDonation(donation, bananas)`, `bananas` the API's `{ exact, rounded }` in real mode and
-  // null from the simulator. In real mode `onStatus(open)`, `onPile({ bananas, eatPerHour })` and
-  // `onBoard(entries)` follow the socket too.
-  const subscribe = (onDonation, { identity: who = () => ({}), onStatus = null, onPile = null, onBoard = null } = {}) => {
-    Object.assign(handlers, { donation: onDonation, status: onStatus, pile: onPile, board: onBoard });
+  // null from the simulator. In real mode `onStatus(open)`, `onPile({ bananas, eatPerHour })`, `onBoard(entries)` and
+  // `onSeen(id, sats, due, left)` follow the socket too; a seen payment may come twice.
+  const subscribe = (onDonation, { identity: who = () => ({}), onStatus = null, onPile = null, onBoard = null, onSeen = null } = {}) => {
+    Object.assign(handlers, { donation: onDonation, status: onStatus, pile: onPile, board: onBoard, seen: onSeen });
     identity = who;
     subscribed = true;
     begin();
@@ -249,6 +270,7 @@
   const useOrigin = () => {
     if (real || location.protocol !== "https:" && location.protocol !== "http:") return;
     real = true;
+    notify();
     if (!subscribed) return;
     window.clearTimeout(simTimer);
     simTimer = 0;
@@ -257,5 +279,5 @@
   // The test network real donations are paid on (signet on staging), or "" for mainnet, before the API has said, and
   // when simulated.
   const testNetwork = () => real && state.network && state.network !== "mainnet" ? state.network : "";
-  BL.donations = { config, get real() { return real; }, get testNetwork() { return testNetwork(); }, state, useOrigin, createRequest, invoice, note, onchain, waitFor, waited, subscribe, sanitize, HANDLE_MAX, MESSAGE_MAX };
+  BL.donations = { config, get real() { return real; }, get testNetwork() { return testNetwork(); }, state, useOrigin, createRequest, invoice, note, onchain, waitFor, waitingOn, waited, subscribe, subscribeState, sanitize, HANDLE_MAX, MESSAGE_MAX };
 })();

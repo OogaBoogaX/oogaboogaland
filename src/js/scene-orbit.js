@@ -40,7 +40,6 @@
   const latitudeParam = DEBUG ? parseFloat(params.get("latitude")) : NaN;
   const islandLatitude = Number.isFinite(latitudeParam) ? Math.max(-90, Math.min(90, latitudeParam)) : daylight.ISLAND_LATITUDE_DEG;
   const SEED = 1;
-  const METER_CAPACITY = 60;
   const FIXED = 1 / 120, MAX_SUBSTEPS = 4;
   // Space in GREEN [.55,.86] frees the clamps, GOLD [.66,.78] is perfect; early staggers, late strains, full pops.
   const COUNT_T = 3, SPOOL_T = 2.6, GREEN = [0.55, 0.86], GOLD = [0.66, 0.78], EARLY = { boost: 0.55, t: 2.2, kick: -0.3 }, LATE_HEAT = 0.3;
@@ -119,7 +118,7 @@
   // REEL holds where the sky hook reels the flight from (x0,y0,z0) and to (x1,y1,z1).
   const REEL = { x0: 0, y0: 0, z0: 0, x1: 0, y1: 0, z1: 0 };
   let orbited = false, spaceCalled = false, stagesDropped = 0, chuteCalled = false, warnAt = 0, flipAt = 0, leanHinted = false, result = null, failure = null, score = 0;
-  let meterTimer = 0, stateTimer = 0, hintTimer = 0;
+  let stateTimer = 0, hintTimer = 0;
   const placed = [];
   const debris = [];
   const fireballs = [];
@@ -1638,11 +1637,6 @@
     updateAudio(lit);
     fx.update(dt);
     stepTweens(dt);
-    meterTimer -= dt;
-    if (meterTimer <= 0) {
-      meterTimer = 0.25;
-      hud.setMeter(world.level, METER_CAPACITY, phase === "build" ? "stable" : flight && orbited ? "in low orbit" : "flying");
-    }
   };
   // World markers: green where the flight goes, orange where the shield faces, plus home.
   const MARKER = { x: 0, y: 0 };
@@ -1833,7 +1827,6 @@
       renderLocker();
     }
     hud.setStats(game.state);
-    meterTimer = 0;
   };
   const renderLocker = () => hud.renderInventory(game.state.inventory, game.assignedTo, () => null);
 
@@ -2030,7 +2023,6 @@
       : "Space does each step · G autopilot · V spacewalk\nW S push · A D steer";
     document.getElementById("orbit-help").textContent = COARSE ? "Tap a part to add it · hold and drag it onto the rocket" : "Tap or drag a part onto the rocket · drag a row off to remove it";
     if (COARSE) rhud.el.evaBtn.querySelector("small").textContent = "the button";
-    meterTimer = 0;
     cam.buildYaw = -0.64;
     cam.buildPitch = 0.18;
     cam.buildZoom = 1;
