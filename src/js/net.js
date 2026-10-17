@@ -302,10 +302,11 @@
     connect();
   };
 
-  // Sign-in is a full navigation through GitHub; the Worker brings the visitor back to this path.
-  const login = () => {
+  // Sign-in is a full navigation through GitHub; the Worker brings the visitor back to this path, or to `next`
+  // (a scene without an address of its own, such as the Ember Den's `/?scene=poker`).
+  const login = (next = location.pathname + location.search) => {
     if (!state.backend) return;
-    location.assign(`/auth/login?next=${encodeURIComponent(location.pathname + location.search)}`);
+    location.assign(`/auth/login?next=${encodeURIComponent(next)}`);
   };
 
   const logout = async () => {
