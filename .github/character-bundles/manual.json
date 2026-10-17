@@ -1,25 +1,16 @@
 {
   "version": 1,
   "lane": "manual",
-  "openedOn": "2026-10-08",
-  "round": "54573fc9687811278e451d116f73762d8d98b838",
+  "openedOn": "2026-10-16",
+  "round": "646cf813e4cddaacc0b8bf4026900d5c373713b6",
   "entries": [
     {
-      "pr": 185,
-      "head": "ac29ff9bc7cb264fc98db5a6f19aaf770e02f306",
-      "author": "hotpixelgroup",
-      "path": "src/characters/hotpixelgroup.js",
-      "base": "3b50564ba59f433e7e8142dc0ac66aa87ad24a2a",
-      "hash": "d91e740f3fb27a9d5e3bff524457285326841b48dfa298cd8eb62d307fccd4fe",
-      "lane": "manual"
-    },
-    {
-      "pr": 190,
-      "head": "781cfd99d6060d7da25aa0283ab329706861f6f4",
-      "author": "l0n0",
-      "path": "src/characters/l0n0.js",
+      "pr": 215,
+      "head": "7cff982927c9d8e5a51bacadb41c43e099c3fa19",
+      "author": "johnstackton21m",
+      "path": "src/characters/johnstackton21m.js",
       "base": null,
-      "hash": "33972940a39d4b97d95cf6cc596c250e81b50b7188ee65b7e43e30c9c5b7326d",
+      "hash": "d49aa270603513fd46e6754baf559d37965295158b3b362b694a3972ead1e937",
       "lane": "manual"
     }
   ]
