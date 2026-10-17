@@ -7,6 +7,8 @@
   const { clearTweens, tweenCount } = scene;
   const params = new URLSearchParams(location.search);
   const DEBUG = params.has("debug");
+  // Local play-tests can run the donation show without emitting a paid event or changing the tally.
+  const TEST_DONATIONS = params.get("testdonations") === "1" && ["localhost", "127.0.0.1", "[::1]"].includes(location.hostname);
   // A game still being built sets `wip: true` on its scene and stays unregistered, so nothing can enter it
   // and its cave seals, unless the page opts in: ?wip=<scene id> opens that game and lands in it, wip=1 opens
   // every one. No debug needed, so anyone can play a shared link. Its saves are left alone for the day it opens.
@@ -75,6 +77,7 @@
   };
   showQuality();
   const game = gameMod.create({ catalog: models.SWAG });
+  window.BL.donationPopup = window.BL.donationPopup.create(game);
   window.BL.hud.setDonationStats(game.state);
   // world survives scene swaps: banana level, equipment ownership, and the Ooga handed from hub to scene.
   const world = { level: START_BANANAS, pilot: null, mirrorBroken: false };
@@ -193,11 +196,6 @@
     e.preventDefault();
     e.currentTarget.blur();
     if (active && active.id !== "hub") go("hub");
-  });
-  // In real mode the island's donation dialog sends a tip to the Lightning Factory's kiosk (hud.js closes the dialog):
-  // from any other scene to the Factory, which opens the kiosk on arrival; in the Factory its own `kiosk` action does.
-  document.querySelector('[data-action="kiosk"]').addEventListener("click", () => {
-    if (active && active.id !== "factory") go("factory", "kiosk");
   });
   const agentPlay = BL.agent.createPlay();
   const ctx = { renderer, canvas: sceneCanvas, overlay: overlayCanvas, game, world, go, lootEnabled: LOOT_ENABLED, testBananas: TEST_BANANAS, agentPlay, from: null, place: null };
@@ -433,6 +431,15 @@
       konamiAt = 0;
       feedPanel.toggle();
     }
+    if (TEST_DONATIONS && key === "l" && !e.metaKey && !e.ctrlKey && !e.altKey && !e.shiftKey) {
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      if (transition) return;
+      const shown = active.previewDonation && active.previewDonation();
+      window.BL.hud.toast(shown ? "Test donation animation · real totals unchanged"
+        : active.previewDonation ? "Waiting for the local donation backend" : "Enter the mainland or Lightning Factory to preview a donation");
+      return;
+    }
     if (LOOT_ENABLED && e.shiftKey && (e.key === "Delete" || e.key === "Backspace")) {
       e.preventDefault();
       game.clearLoot();
@@ -532,6 +539,7 @@
     if (destroyed) return;
     if (net.state.donations) donations.useOrigin();
     unsubscribeDonations = donations.subscribe((donation, bananas) => {
+      window.BL.donationPopup.receive(donation, bananas);
       if (active) active.onDonation(donation, bananas);
       else game.recordDonation(donation, bananas && bananas.exact);
       window.BL.hud.setDonationStats(game.state);
@@ -544,6 +552,7 @@
       // An on-chain payment seen before its block: the active scene shows it where it can (the kiosk that made the
       // invoice), and otherwise one the visitor left the kiosk waiting on says it is on its way, or what is still owed.
       onSeen: (id, sats, due, left) => {
+        if (window.BL.donationPopup.seen(id, sats, due, left)) return;
         if (active && active.onSeen && active.onSeen(id, sats, due, left)) return;
         if (donations.waitingOn(id)) window.BL.hud.toast(left ? `Your on-chain tip arrived short · send ${gameMod.formatLarge(left)} more sats to the same address` : "Your on-chain tip is on its way · waiting for a block");
       },
@@ -681,6 +690,7 @@
     unsubscribeBlockFeed();
     unsubscribeBlockHeight();
     feedPanel.close();
+    window.BL.donationPopup.dispose();
     router.dispose();
     mempool.dispose();
     chain.dispose();

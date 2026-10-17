@@ -118,7 +118,7 @@
   // node running the core flashes green and throws them from its chamber's side, CUBE_GAP apart after LIME_LEAD; with
   // it stopped they come in through the way out. The jaw springs open to catch them, gulping as each lands, and snaps
   // shut once the last is in; the cooker chews CHOMPS times over CHURN, and the bananas leave by the chute FRUIT_GAP
-  // apart, each sliding down it for SLIDE and thrown from its lip to the gate's shield, which ripples as it goes through.
+  // apart, each sliding down it for SLIDE and launched straight up into the ceiling tube.
   // Every throw falls under gravity SHOW_G. The kiosk's screen thanks the tipper while the cooker works and for THANKS
   // after. The jaw's spring steps at most LID_STEP, so it holds at any frame rate.
   const TIP_RING = 8, CUBE_CAP = 32, FRUIT_CAP = 32, CUBE_GAP = 0.12, FRUIT_GAP = 0.16, LIME_LEAD = 0.45, GATE_LEAD = 0.2, CHURN = 2.6, SLIDE = 0.34;
@@ -147,7 +147,7 @@
     switchboard: ["Switchboard · routing", "Every payment the node passes on for someone else is a forward. The screens light as they go through."],
     rebalancer: ["Rebalancer · moving liquidity", "Rebalancing moves sats between channels so lines keep working. It is shown by the hour, never for one line."],
     treasury: ["Treasury · routing fees", "The gold under the glass is the node's public capacity, visible to anyone on the Lightning network. Each forward that earns the demo node a fee sends a nugget up the belt into the crate."],
-    cooker: ["Banana cooker · tips into bananas", "Every tip is cooked here: the core throws its sats across, the cooker chomps and churns, and the bananas fly out through the gate to the island."],
+    cooker: ["Banana cooker · tips into bananas", "Every tip is cooked here: the core throws its sats across, the cooker chomps and churns, and bananas shoot up the ceiling tube to the island's pile."],
     kiosk: ["Donation kiosk · tip the Ooga Boogas", "Walk up and press Space, or tap it: pick an amount, pay its invoice and watch the cooker turn it into bananas.", true],
     lookout: ["Watchtower · the node's signal", "The beam sweeps while the node's events are arriving. Dark means no signal: the node may be fine, but nothing is getting through."],
     study: ["Study Hall · locked", "Bananas first! The study hall opens in a later update."],
@@ -420,8 +420,8 @@
     r.scale.y = 1 + 0.9 * (1 - p);
   };
   // The cooker, once a frame: a waiting tip starts when the cooker is idle, its cubes fly into the open jaw, the jaw
-  // shuts and the cooker chews, and the bananas leave by the chute for the gate. The tally counts a tip as the jaw
-  // shuts on it and each banana as it goes through the shield.
+  // shuts and the cooker chews, and bananas launch from the chute into the ceiling tube. The tally counts a tip as the jaw
+  // shuts on it and each banana as it enters the tube.
   const cookerFrame = (s, dt, elapsed, running) => {
     const c = s.cook, q = s.cubes, f = s.fruit, ey = LAYOUT.entrance.y, ripples = s.gate.phase.ripples;
     if (c.phase === 0 && s.tipCount) {
@@ -534,8 +534,8 @@
     const Lt = RENDER_OPTS.lights, B = LIGHT_BASE, o = LIGHT.treasury * 8, h = c.heat < 1e-3 ? 0 : c.heat, beat = h * (0.8 + 0.35 * Math.sin(elapsed * 13)), P = s.cookLight;
     Lt[o] = B[o] + (P.x - B[o]) * h; Lt[o + 1] = B[o + 1] + (P.y - B[o + 1]) * h; Lt[o + 2] = B[o + 2] + (P.z - B[o + 2]) * h;
     Lt[o + 4] = B[o + 4] * (1 - h) + 1.3 * beat; Lt[o + 5] = B[o + 5] * (1 - h) + 0.75 * beat; Lt[o + 6] = B[o + 6] * (1 - h) + 0.25 * beat;
-    // Bananas out by the chute FRUIT_GAP apart: each slides down it, is thrown from its lip to the shield and ripples it
-    // going through. With the pool full, the next waits its turn.
+    // Bananas out by the chute FRUIT_GAP apart, launched vertically into the overhead intake.
+    // With the pool full, the next waits its turn.
     if (c.out > 0 && (c.outGap -= dt) <= 0) {
       let i = 0;
       while (i < FRUIT_CAP && f.t[i] >= 0) i++;
@@ -559,7 +559,6 @@
         SHOW_SCALE.x = SHOW_SCALE.y = SHOW_SCALE.z = FRUIT_SCALE * Math.min(1, 0.4 + k * 2);
       } else if (t - SLIDE >= A.T) {
         f.t[i] = -1;
-        ripples.pulse(A.ex + f.jx[i], A.ey + f.jy[i] - ey, 0);
         shared.cooker.bananas++;
         continue;
       } else {
@@ -569,7 +568,8 @@
           const p = fx.spawnParticle(SMOKE, A.sx, A.sy + 0.1, A.sz, (Math.random() - 0.5) * 0.4, 0.5 + Math.random() * 0.3, (Math.random() - 0.5) * 0.4, 0.8, 0.9);
           if (p) p.smoke = true;
         }
-        flight(A, t - SLIDE, 0, 0, 0, f.jx[i], f.jy[i], 0);
+        const u = (t - SLIDE) / A.T;
+        SHOW_POS.x = A.sx; SHOW_POS.y = A.sy + (A.ey - A.sy) * u; SHOW_POS.z = A.sz;
         SHOW_SCALE.x = SHOW_SCALE.y = SHOW_SCALE.z = FRUIT_SCALE;
       }
       SHOW_ROT.x = 0; SHOW_ROT.y = s.outYaw; SHOW_ROT.z = f.spin[i] + t * 9;
@@ -828,21 +828,26 @@
     b.flow = BL.factoryKiosk.create({
       link: () => link,
       real,
-      invoice: (sats, anon) => donations.invoice({ sats, message: game.state.message, anon }),
+      startDetails: () => { b.details = BL.donationPopup.defaults(); },
+      details: () => b.details,
+      closeDetails: () => BL.donationPopup.cancelDetails(),
+      editDetails: (done) => BL.donationPopup.editDetails(b.details, (value) => {
+        b.details = value;
+        done();
+      }),
+      invoice: (sats) => donations.invoice({ sats, ...b.details }),
       onchain: (request) => donations.onchain(request),
       waitFor: (id) => donations.waitFor(id),
       open: () => donations.state.open,
       testNetwork: () => donations.testNetwork,
-      account: () => BL.net.state,
-      signIn: () => BL.net.login(),
-      request: () => donations.createRequest(game.state),
+      request: () => donations.createRequest(b.details),
       bananasFor: gameMod.bananasFor,
       price: () => BL.chain.snapshot.priceUsd,
       copy: (text, what = "Invoice") => {
         if (navigator.clipboard) navigator.clipboard.writeText(text).catch(() => {});
         hud.toast(real ? `${what} copied` : `${what} copied · payments are simulated in this build`);
       },
-      pay: (id, sats) => onDonation(tipEvent(id, sats)),
+      pay: (id, sats) => onDonation({ ...tipEvent(id, sats), ...b.details }),
       release: () => releaseTip(s),
       watch: () => watchBooth(s),
       close: () => leaveBooth(s)
@@ -899,7 +904,9 @@
     return true;
   };
   const sats = (n) => n.toLocaleString("en-US");
-  const bananaCount = (n) => n < 1e6 ? sats(n) : gameMod.formatLarge(n);
+  const BANANA_COUNT = new Intl.NumberFormat("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const RATE_COUNT = new Intl.NumberFormat("en-US", { maximumFractionDigits: 2 });
+  const bananaCount = (n) => BANANA_COUNT.format(n);
   // A tip as the cooker's board shows it: two significant figures, then K, M and B from a thousand up.
   const rounded = (n) => { const step = 10 ** Math.max(0, Math.floor(Math.log10(n)) - 1); return gameMod.formatLarge(Math.round(n / step) * step); };
   // Local midnight `back` days before the day of `now`, from one Date kept for it.
@@ -915,7 +922,8 @@
   // The donations board's rows. Real, the API's tally of every donation it holds, the same in every browser: its
   // totals, today and this week counted from its UTC hours by this page's clock, its latest price for a banana (a
   // dollar's worth of bitcoin) and the latest donation's sats. Simulated, this browser's tips (the game's tally).
-  // Rounded either way, naming no one and no time.
+  // Real amounts retain the recorded fractions and sats; the current rate never revalues earlier donations.
+  // Neither mode names a donor or a time.
   const boardRows = () => {
     if (!donations.real) {
       const g = game.state, [todaySats, todayBananas] = game.tipsWithin(1), [weekSats, weekBananas] = game.tipsWithin(7);
@@ -938,15 +946,15 @@
       weekBananas += hourBananas;
       if (at >= today) { todaySats += hourSats; todayBananas += hourBananas; }
     }
-    const price = rate ? [[sats(Math.round(rate.satsPerBanana)), "big"], [" SATS = 1", "unit"], ["", "banana"]] : [["NO PRICE YET", "note"]];
+    const price = rate ? [[RATE_COUNT.format(rate.satsPerBanana), "big"], [" SATS ≈ 1", "unit"], ["", "banana"]] : [["NO PRICE YET", "note"]];
     if (rate && rate.stale) price.push([" (LAST KNOWN)", "note"]);
     return [
-      [[rounded(t.sats), "big"], [" SATS", "unit"]],
-      [[bananaCount(Math.round(t.bananas)), "big"]],
-      [[rounded(todaySats), "big"], [" SATS", "unit"], [` (${bananaCount(Math.round(todayBananas))}`, "note"], ["", "banana"], [")", "note"]],
-      [[rounded(weekSats), "big"], [" SATS", "unit"], [` (${bananaCount(Math.round(weekBananas))}`, "note"], ["", "banana"], [")", "note"]],
+      [[sats(t.sats), "big"], [" SATS", "unit"]],
+      [[bananaCount(t.bananas), "big"]],
+      [[sats(todaySats), "big"], [" SATS", "unit"], [` (${bananaCount(todayBananas)}`, "note"], ["", "banana"], [")", "note"]],
+      [[sats(weekSats), "big"], [" SATS", "unit"], [` (${bananaCount(weekBananas)}`, "note"], ["", "banana"], [")", "note"]],
       price,
-      t.last ? [[rounded(t.last), "big"], [" SATS", "unit"]] : [["NONE YET", "note"]]
+      t.last ? [[sats(t.last), "big"], [" SATS", "unit"]] : [["NONE YET", "note"]]
     ];
   };
   const refreshBoards = (s) => {
@@ -964,15 +972,18 @@
     setBoard(s.switchLabel, "SWITCHBOARD", summary, false);
     const shown = s.placeOf.size, total = r.channels ?? snap.channelCount;
     setBoard(s.galleryLabel, "MORE CHANNELS", `${Math.max(0, total - 4)} lines, ${Math.max(0, total - shown)} not shown`, false);
-    // The cooker's board counts what it has cooked on this page, rounded, and never names a donor or a time.
-    const c = shared.cooker;
-    setData(s.cookBoard, !donations.real ? "DONATIONS (SIMULATED)" : donations.testNetwork ? "DONATIONS (TEST)" : "DONATIONS", [["Tips cooked", gameMod.formatLarge(c.tips), "count"], ["Bananas out", gameMod.formatLarge(c.bananas), "ok"], ["Last tip", c.last ? `${rounded(c.last)} sats` : "None yet", "sats"]], 1.9);
+    // A real page shows the shared donation totals here too, rather than this visit's animation counters.
+    const c = shared.cooker, t = donations.state.tally;
+    const cooked = !donations.real
+      ? [["Tips cooked", gameMod.formatLarge(c.tips), "count"], ["Bananas out", gameMod.formatLarge(c.bananas), "ok"], ["Last tip", c.last ? `${rounded(c.last)} sats` : "None yet", "sats"]]
+      : [["Donations", t ? sats(t.count) : "No reading yet", "count"], ["Bananas donated", t ? bananaCount(t.bananas) : "-", "ok"], ["Last tip", t ? t.last ? `${sats(t.last)} sats` : "None yet" : "-", "sats"]];
+    setData(s.cookBoard, !donations.real ? "DONATIONS (SIMULATED)" : donations.testNetwork ? "DONATIONS (TEST)" : "DONATIONS", cooked, 1.9);
     // The donations board, on the wall and, when its figures or its face change, in the board dialog's picture.
     if (s.corner) {
       const rows = boardRows(), view = s.boardView;
       if (setFigures(s.boardValues, rows) || view.painted !== s.boardNote) {
         view.painted = s.boardNote;
-        view.note = donations.real ? "Every donation bananapayserver holds, the same in every browser. A banana is a dollar's worth of bitcoin at its latest price."
+        view.note = donations.real ? "Every donation recorded by the shared feed. Banana totals use each donation's own recorded exchange rate; the current rate applies to new invoices."
           : "The tips this browser has seen, simulated. Each browser counts its own.";
         FM.paintBoard(view.canvas, s.boardNote, rows);
         view.version++;
@@ -1017,11 +1028,13 @@
     hud.toast(`+${gameMod.formatLarge(donation.sats)} sats · ${gameMod.formatLarge(shown)} banana${shown === 1 ? "" : "s"} · ${who}`);
     fx.showTicker(`THANKS ${donation.handle ? "@" + donation.handle.toUpperCase() : "ANON"} · ${gameMod.formatLarge(shown)} BANANAS`, 4.5);
     hud.setStats(game.state);
-    // The visitor's own tip, paid at the kiosk, waits on its screen until they turn to watch it cook.
+    // A real kiosk payment turns toward the cooker immediately, staying inside the Factory.
+    // The demo keeps its paid screen so the visitor can walk through the flow at their own pace.
     const b = scene.booth;
-    if (b.flow && b.flow.receive(donation.id, counted, donation.handle)) {
+    if (b.flow && b.flow.receive(donation.id, counted, donation.handle, donation.sats)) {
       b.held += bananas;
       b.heldSats += donation.sats;
+      if (donations.real) watchBooth(scene);
     } else cook(scene, bananas, donation.sats);
   };
   // A tip from this visitor, in the shape the backend will push. A demo tip is the simulation's alone: in real mode it
@@ -1029,6 +1042,11 @@
   const tipEvent = (id, sats) => ({ id, sats, handle: donations.sanitize(game.state.handle, donations.HANDLE_MAX), message: donations.sanitize(game.state.message, donations.MESSAGE_MAX), at: Date.now() });
   const demoTip = (sats) => {
     if (!donations.real) onDonation(tipEvent(`demo-${Date.now()}`, sats));
+  };
+  const previewDonation = () => {
+    if (!donations.real) return false;
+    cook(scene, 12, 4800);
+    return true;
   };
   // An on-chain payment seen before its block: true when the kiosk holding its invoice shows it.
   const onSeen = (id, sats, due, left) => !!(scene.booth.flow && scene.booth.flow.seen(id, sats, due, left));
@@ -1262,12 +1280,12 @@
     s.cubes = { t: new Float32Array(CUBE_CAP).fill(-1), src: new Uint8Array(CUBE_CAP), jx: new Float32Array(CUBE_CAP), jy: new Float32Array(CUBE_CAP), jz: new Float32Array(CUBE_CAP), spin: new Float32Array(CUBE_CAP) };
     s.fruit = { t: new Float32Array(FRUIT_CAP).fill(-1), jx: new Float32Array(FRUIT_CAP), jy: new Float32Array(FRUIT_CAP), spin: new Float32Array(FRUIT_CAP) };
     // The throws: from the chamber's side facing the cooker, and in through the way out, into the mouth; from the
-    // chute's lip to the gate's shield.
+    // chute's lip straight up into the ceiling intake.
     const core = L.core, mx = ck.x + COOK.mouth[0], my = ck.y + COOK.mouth[1], mz = ck.z + COOK.mouth[2], bearing = Math.atan2(mz - core.z, mx - core.x), shieldZ = HALL.front - 0.6;
     s.tossCore = toss(core.x + Math.cos(bearing) * 2.9, 9, core.z + Math.sin(bearing) * 2.9, mx, my, mz, 11.2);
     s.tossGate = toss(0, LAYOUT.entrance.y + 1.6, shieldZ - 0.2, mx, my, mz, 9);
-    s.tossOut = toss(ck.x + COOK.lip[0], ck.y + COOK.lip[1], ck.z + COOK.lip[2], 0, LAYOUT.entrance.y + 2.1, shieldZ, 9);
-    s.outYaw = Math.atan2(s.tossOut.ex - s.tossOut.sx, s.tossOut.ez - s.tossOut.sz);
+    s.tossOut = { sx: ck.x + COOK.lip[0], sy: ck.y + COOK.lip[1], sz: ck.z + COOK.lip[2], ey: ck.y + COOK.intakeY + 0.7, T: 0.9 };
+    s.outYaw = 0;
     s.hatchW = { x: ck.x + COOK.hatch[0], y: ck.y + COOK.hatch[1] - 0.02, z: ck.z + COOK.hatch[2] };
     s.stackTop = { x: ck.x + COOK.stack[0], y: ck.y + COOK.stackTop + 0.1, z: ck.z + COOK.stack[1] };
     s.cookLight = { x: ck.x - 1.2, y: ck.y + 2.2, z: ck.z + 0.4 };
@@ -2126,7 +2144,7 @@
     // Voice zone: the Factory group, which its tunnel on the island shares (`factory`).
     voiceZone: "factory.hall",
     micKey: true,
-    id: "factory", enter, update, overlay, onDonation, onSeen, onKey, onLootCleared, renderOpts: RENDER_OPTS, leave, stats, liveGeometry,
+    id: "factory", enter, update, overlay, onDonation, previewDonation, onSeen, onKey, onLootCleared, renderOpts: RENDER_OPTS, leave, stats, liveGeometry,
     root: null, camera: null, input: null, debug: null, agent: null, agentView: null, agentControls: null, agentHandoff: null,
     get inMotion() {
       return !!scene;

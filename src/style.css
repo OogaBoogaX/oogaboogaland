@@ -1312,6 +1312,25 @@ body[data-active-scene="arcade"] .magazine-hud {
   background: rgba(0, 0, 0, 0.6);
 }
 
+.donation-popup {
+  width: 440px;
+  max-height: calc(100dvh - 32px);
+  overflow: auto;
+}
+
+#donation-screen {
+  display: block;
+  width: 100%;
+  height: auto;
+  image-rendering: pixelated;
+  border-radius: 6px;
+}
+
+#donation-screen:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
+
 .modal h2 {
   margin: 0 0 12px;
   font-size: 14px;
@@ -1622,10 +1641,6 @@ body[data-active-scene="arcade"] .magazine-hud {
   margin-top: 14px;
 }
 
-.actions.feed-go {
-  grid-template-columns: 1fr;
-}
-
 .actions button {
   min-height: 38px;
   padding: 0 10px;
@@ -1778,7 +1793,7 @@ body[data-active-scene="arcade"] .magazine-hud {
   cursor: not-allowed;
 }
 
-/* The drawer's foot: the account and voice on the left, the renderer and the demo reset quietly on the right. */
+/* The drawer's foot: account and voice controls above a separate, centred renderer and demo-reset row. */
 .sheet-foot {
   display: flex;
   flex-wrap: wrap;
@@ -1881,9 +1896,10 @@ body[data-active-scene="arcade"] .magazine-hud {
 
 .sheet-foot-meta {
   display: inline-flex;
+  flex: 0 0 100%;
   align-items: center;
+  justify-content: center;
   gap: 10px;
-  margin-left: auto;
 }
 
 @media (pointer: coarse) {

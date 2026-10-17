@@ -87,3 +87,16 @@ test("another site, an unknown path, an oversized body, a missing binding and a 
   assert.deepEqual(await answer("/donations/invoice", {}), [503, "closed"]);
   assert.deepEqual(await answer("/donations/invoice", { DONATIONS: binding(true), DB: db }), [503, "closed"]);
 });
+
+
+test("custom display handles and 280-character messages pass separately from account identity", async () => {
+  for (const cookie of ["", "__Host-obl_session=tok"]) {
+    const DONATIONS = binding(), body = { sats: 1000, handle: "custom-donor", message: "m".repeat(280) };
+    const [request, url] = call("/donations/invoice", { headers: { ...json, cookie }, body: JSON.stringify(body) });
+    const res = await handleDonations(request, { SITE_ORIGIN: SITE, DONATIONS, DB: db }, url);
+    assert.equal(res.status, 201);
+    const [passed, donor] = DONATIONS.calls[0].args;
+    assert.deepEqual(await passed.json(), body);
+    assert.deepEqual(donor, cookie ? { id: 4242, login: "ooga-dev" } : null);
+  }
+});

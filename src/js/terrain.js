@@ -420,8 +420,9 @@
     return result.length >= 3 ? result : null;
   };
   const ISLANDS = new Map();
-  const island = ({ seed = 1 } = {}) => {
-    const hit = ISLANDS.get(seed);
+  const island = ({ seed = 1, roofHole = null } = {}) => {
+    const cacheKey = roofHole ? `${seed}:${roofHole.id}:${roofHole.x}:${roofHole.z}:${roofHole.radius}` : seed;
+    const hit = ISLANDS.get(cacheKey);
     if (hit) return hit;
     const rand = mulberry32(seed);
     const noise = valueNoise(rand);
@@ -2103,6 +2104,16 @@
     const geometry = gridGeometry(grid, { unit: UNIT, palette: PALETTE, origin: ORIGIN, matrixCaves,
       floorRooms: [...headquartersRooms, ...basement.rooms], cutawayPathKeys, cutawayPathBottoms, cutawayWindowMask: birdseyeWindowMask,
       cutawayWindowTops: birdseyeWindowTops, cutawayWindowCeilings: birdseyeWindowCeilings });
+    let roofOpening = null;
+    const roofMouth = roofHole && mouths.find(m => m.id === roofHole.id);
+    if (roofMouth) {
+      const sr = Math.sin(roofMouth.ry), cr = Math.cos(roofMouth.ry);
+      const x = roofMouth.x + cr * roofHole.x + sr * roofHole.z, z = roofMouth.z - sr * roofHole.x + cr * roofHole.z;
+      const top = surfaceAt(x, z);
+      roofOpening = { x, z, radius: roofHole.radius, y: top - 0.4, bottom: top - 1.3 };
+      // A centimetre of clearance hides the voxel edge behind the rotated iron liner.
+      BL.models.cutCylinder(geometry, x, z, roofHole.radius + 0.01, roofOpening.bottom);
+    }
     const rampOffset = geometry.verts.length / 3;
     const rampFaceOffset = geometry.faces.length;
     for (const v of rampGeometry.verts) geometry.verts.push(v);
@@ -2402,6 +2413,7 @@
     };
     const built = {
       geometry,
+      roofOpening,
       // Shared construction data is read-only to rendering. The cap builder
       // fills only actual solid cells and the continuous window/ramp remnants.
       cutawaySource: { data, sx: SX, sy: SY, sz: SZ, unit: UNIT, origin: ORIGIN, palette: PALETTE, windows: windowColumns, cutawayPaths,
@@ -2448,7 +2460,7 @@
       unit: UNIT,
       pathUnit: PATH_UNIT
     };
-    ISLANDS.set(seed, built);
+    ISLANDS.set(cacheKey, built);
     return built;
   };
   BL.terrain = { makeGrid, gridGeometry, compactVertices, island, segmentBoxClear, cutawaySourceFromVox, PALETTE, MAX_HEIGHT, TIMECHAIN, POOL_APPROACH };

@@ -18,6 +18,7 @@
   const TIER_RANK = { legendary: 0, epic: 1, rare: 2, common: 3 };
   const BANANA_COUNT = new Intl.NumberFormat("en-US", { maximumFractionDigits: 0 });
   const DONATED_COUNT = new Intl.NumberFormat("en-US", { maximumFractionDigits: 2 });
+  const DONOR_BANANAS = new Intl.NumberFormat("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   let donorUnit = "bananas";
   let donationStats = null, liveDonors = null;
   const setDonationStats = (stats) => {
@@ -227,14 +228,6 @@
       lootTab: $("loot-tab"),
       lootCount: $("loot-count"),
       crateHelp: $("crate-help"),
-      feedKiosk: $("feed-kiosk"),
-      feedAccount: $("feed-account"),
-      feedTest: $("feed-test"),
-      feedTips: $("feed-tips"),
-      feedGo: $("feed-go"),
-      feedHelp: $("feed-help"),
-      feedSimulated: $("feed-simulated"),
-      handleField: $("handle-field"),
       worldLootHint: $("world-loot-hint"),
       subtitle: $("subtitle"),
       actions: [...document.querySelectorAll("[data-action]")],
@@ -534,7 +527,7 @@
         rank.className = "banana-rank"; rank.textContent = String(i + 1).padStart(2, "0");
         name.className = "banana-donor"; name.textContent = entry.handle ? `@${entry.handle}` : "Anonymous";
         if (!entry.handle) name.dataset.anon = "true";
-        amount.className = "banana-amount"; amount.textContent = (donorUnit === "sats" ? BANANA_COUNT : DONATED_COUNT).format(entry[donorUnit]);
+        amount.className = "banana-amount"; amount.textContent = (donorUnit === "sats" ? BANANA_COUNT : DONOR_BANANAS).format(entry[donorUnit]);
         row.append(rank, name, amount); el.bananaLeaders.append(row);
       }
       el.bananaEmpty.hidden = ranked.length > 0;
@@ -940,16 +933,10 @@
     const onAction = (fn) => {
       actionHandler = fn;
     };
-    // Real donations are paid at the Lightning Factory's kiosk, so in real mode the dialog sends the visitor there, and
-    // the simulated link, the typed handle (the API names a donor from their sign-in) and the demo tips step aside.
+    // Real payments use the same invoice flow as the Factory without leaving the current scene.
     const openFeed = () => {
+      if (BL.donations.real) return BL.donationPopup.open();
       if (el.feed.open) return;
-      const real = BL.donations.real;
-      el.qr.hidden = el.qrUrl.hidden = el.handleField.hidden = el.feedTips.hidden = el.feedSimulated.hidden = real;
-      el.feedKiosk.hidden = el.feedGo.hidden = !real;
-      el.feedAccount.hidden = !BL.net.state.backend;
-      el.feedTest.hidden = !BL.donations.testNetwork;
-      el.feedHelp.hidden = real && el.crateHelp.hidden;
       el.feed.showModal();
     };
     const closeFeed = () => {
@@ -1553,10 +1540,6 @@
       b.blur();
       if (b.dataset.action === "feed") openFeed();
       else if (b.dataset.action === "feed-close") closeFeed();
-      else if (b.dataset.action === "kiosk") {
-        closeFeed();
-        actionHandler && actionHandler("kiosk");
-      }
       else if (b.dataset.action === "recipe-close") closeRecipe();
       else if (b.dataset.action === "recipe-copy") copyRecipe(b);
       else if (b.dataset.action === "intro-go") b.closest("[data-intro]").hidden = true;

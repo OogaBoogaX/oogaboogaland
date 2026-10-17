@@ -6,7 +6,7 @@
 // tips now and then, as it always has, for demos and for the suite.
 //
 // The page only ever calls its own address: its Worker passes /donations/* on to bananapayserver over a service binding
-// and names the donor from its own GitHub sign-in, so the page never names one. Real mode starts once that Worker says
+// and names the donor from its own GitHub sign-in, while the page supplies the editable display handle. Real mode starts once that Worker says
 // it has the binding (`useOrigin`, which the director calls when the account's look at /api/me reports `donations`), so
 // staging and production each find their own with nothing stamped into the build. The socket's status says which
 // network the payments are on: anything but mainnet is a test (`testNetwork`), and the page labels it so.
@@ -23,7 +23,7 @@
   };
   // GitHub usernames run to 39 characters; the API's copy of the contract holds the same.
   const HANDLE_MAX = 39;
-  const MESSAGE_MAX = 80;
+  const MESSAGE_MAX = 280;
   const sanitize = (text, max) => String(text || "").replace(/[^\w .,!?'@#:-]/g, "").trim().slice(0, max);
   const randomId = () => {
     const bytes = new Uint8Array(6);
@@ -72,11 +72,20 @@
   // rate }` checked field by field (`bananas` and `rate` null when there has never been a price, `bolt11` null when the
   // API couldn't make the Lightning half in time, and the invoice can still be paid on-chain), or `{ error }`.
   // `request` stays in memory, never in an address.
-  const invoice = async ({ sats, message = "", anon = false }) => {
+  const invoice = async ({ sats, handle, message = "", anon = false }) => {
     const body = { sats }, text = sanitize(message, MESSAGE_MAX);
+    if (handle !== undefined) body.handle = sanitize(handle, HANDLE_MAX).replace(/^@+/, "").trim() || "anon";
     if (text) body.message = text;
     if (anon) body.anon = true;
-    const r = await call("/donations/invoice", body);
+    let r = await call("/donations/invoice", body);
+    // Keep default-name payments working during the coordinated backend rollout. An older
+    // server rejects the new handle key; never silently discard a custom name or long message.
+    if (r.error === "invalid" && body.handle !== undefined) {
+      const defaultHandle = BL.net?.state.me?.login || "anon";
+      if (body.handle !== defaultHandle || text.length > 80) return { error: "details" };
+      delete body.handle;
+      r = await call("/donations/invoice", body);
+    }
     if (r.error) return r;
     const inv = r.invoice, b = r.bananas, rate = r.rate;
     if (typeof r.request !== "string" || !inv || typeof inv.id !== "string" || typeof inv.bolt11 !== "string" && inv.bolt11 != null || !isNumber(inv.expires)) return { error: "invalid" };

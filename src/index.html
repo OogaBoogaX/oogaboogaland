@@ -1490,6 +1490,27 @@
         <button type="button" data-action="leave">Exit Game</button>
       </section>
     </div>
+    <dialog class="modal donation-popup" id="donation-popup" aria-labelledby="donation-title">
+      <div class="panel-head">
+        <h2 id="donation-title"><span data-sign>Feed the Ooga Boogas</span></h2>
+        <button type="button" class="modal-close" id="donation-close" aria-label="Close donation">&times;</button>
+      </div>
+      <canvas id="donation-screen" width="400" height="400" tabindex="0" aria-label="Donation screen. Type an amount, press Enter to continue, O for on-chain, C to copy, and Escape to go back."></canvas>
+      <label class="field"><span>Donation handle</span><input id="donation-handle" type="text" maxlength="39" autocomplete="off" spellcheck="false" placeholder="anon"></label>
+      <label class="field"><span>Banana message (up to 280 characters)</span><input id="donation-message" type="text" maxlength="280" autocomplete="off" placeholder="Optional message"></label>
+      <p class="help">Pay with Lightning or on-chain. Your bananas arrive from the Factory when the payment confirms.</p>
+    </dialog>
+    <dialog class="modal" id="donation-details" aria-labelledby="donation-details-title">
+      <form method="dialog" id="donation-details-form">
+        <div class="panel-head">
+          <h2 id="donation-details-title"><span data-sign>Donation details</span></h2>
+          <button type="button" class="modal-close" id="donation-details-close" aria-label="Cancel changes">&times;</button>
+        </div>
+        <label class="field"><span>Donation handle</span><input id="donation-details-handle" type="text" maxlength="39" autocomplete="off" spellcheck="false" placeholder="anon"></label>
+        <label class="field"><span>Banana message (up to 280 characters)</span><input id="donation-details-message" type="text" maxlength="280" autocomplete="off" placeholder="Optional message"></label>
+        <div class="actions"><button type="submit">Save details</button></div>
+      </form>
+    </dialog>
     <dialog class="modal" id="feed" aria-label="Feed the Ooga Boogas">
       <div class="panel-head">
         <h2><span data-sign>Feed the Ooga Boogas</span></h2>
@@ -1497,23 +1518,14 @@
       </div>
       <canvas id="qr" width="0" height="0" aria-label="Donation QR code"></canvas>
       <p class="qr-url" id="qr-url"></p>
-      <div id="feed-kiosk" hidden>
-        <p class="help">Tips are paid with any Lightning wallet at the kiosk in the Lightning Factory, where the cooker
-          turns them into bananas.</p>
-        <p class="help" id="feed-account" hidden>Signed in with GitHub, your tips carry your name; signed out, they are
-          anonymous.</p>
-        <p class="help" id="feed-test" hidden>This is a test site: tips here are paid on a Bitcoin test network, with
-          coins that have no value.</p>
-      </div>
       <label class="field" id="handle-field"><span>Your handle</span><input id="handle" type="text" maxlength="39"
           autocomplete="off" spellcheck="false" placeholder="anon" autofocus></label>
-      <label class="field"><span>Banana message</span><input id="message" type="text" maxlength="80" autocomplete="off"
+      <label class="field"><span>Banana message (up to 280 characters)</span><input id="message" type="text" maxlength="280" autocomplete="off"
           placeholder="shown when your banana is eaten"></label>
       <div class="actions" id="feed-tips">
         <button type="button" data-action="tip">Tip 1.2K sats</button>
         <button type="button" data-action="tip-legendary">Tip 120K sats</button>
       </div>
-      <div class="actions feed-go" id="feed-go" hidden><button type="button" data-action="kiosk">Go to the kiosk</button></div>
       <p class="help" id="feed-help"><span id="feed-simulated">Payments are simulated in this build.</span><span
           id="crate-help" hidden> Crates drop at 1K, 5K, 21K and 100K sats.</span></p>
     </dialog>
@@ -1656,6 +1668,7 @@ Then run npm run build and ONLY=characters node test/run.mjs.</pre>
   <script src="js/gl-renderer.js"></script>
   <script src="js/canvas-renderer.js"></script>
   <script src="js/models.js"></script>
+  <script src="js/banana-icon.js"></script>
   <script src="js/convex.js"></script>
   <script src="js/terrain.js"></script>
   <script src="js/terrain-cutaway.js"></script>
@@ -1741,6 +1754,7 @@ Then run npm run build and ONLY=characters node test/run.mjs.</pre>
   <script src="js/factory-feed.js"></script>
   <script src="js/factory-mock.js"></script>
   <script src="js/factory-kiosk.js"></script>
+  <script src="js/donation-popup.js"></script>
   <script src="js/factory-models.js"></script>
   <script src="js/factory-window.js"></script>
   <script src="js/factory-greeter.js"></script>

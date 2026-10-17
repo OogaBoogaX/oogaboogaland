@@ -2184,7 +2184,18 @@
       // The Lightning Factory's tunnel: timber sets and lamps down to a phase shield like the lab's, set further in.
       const tunnel = BL.factoryModels.hubTunnel();
       addChild(group, createNode({ geometry: tunnel.timber }), createNode({ geometry: tunnel.glow, sightHidden: true }));
-      factoryMouth = { slot, mouth: m, group, opening: rim.geometry.openingBounds, phase: null };
+      const tube = BL.factoryModels.ROOF_TUBE, sr = Math.sin(m.ry), cr = Math.cos(m.ry);
+      const tx = m.x + cr * tube.x + sr * tube.z, tz = m.z - sr * tube.x + cr * tube.z;
+      const base = island.surfaceAt(tx, tz) - 0.35;
+      const outlet = createNode({ position: { x: tube.x, y: base - m.floorY, z: tube.z }, geometry: BL.factoryModels.bananaOutlet() });
+      addChild(group, outlet);
+      solids.add(outlet);
+      if (island.roofOpening) {
+        const shaft = createNode({ position: { x: tube.x, y: base - m.floorY, z: tube.z }, geometry: BL.factoryModels.outletShaft(base - island.roofOpening.bottom) });
+        addChild(group, shaft); solids.add(shaft);
+      }
+      factoryMouth = { slot, mouth: m, group, opening: rim.geometry.openingBounds, phase: null,
+        deliverySource: { x: tx, y: base + tube.height, z: tz } };
     } else if (slot.status === "open") {
       const geometry = hubModels.caveShelves(), back = -6.5 - BL.scene.boundsOf(geometry).min[2];
       for (const x of [-1.3, 1.3]) {
@@ -8203,6 +8214,7 @@
     syncMatrixInside(player);
     // The factory's window follows the eye, so it moves once the camera is final for the frame.
     if (factoryMouth && factoryMouth.hall) factoryMouth.hall.update(dt, camera, RENDER_OPTS);
+    if (factoryMouth && factoryMouth.roofWindow) factoryMouth.roofWindow.update(dt, camera, RENDER_OPTS);
     if (bifrostIsle) updateBifrostWindow(dt);
     updateMatrixWorld(dt, elapsed);
     updateMatrixControl(dt, player);
@@ -10218,6 +10230,11 @@
   const demoTip = (sats) => {
     if (!donations.real) onDonation({ id: `demo-${Date.now()}`, sats, handle: game.state.handle, message: game.state.message, at: Date.now() });
   };
+  const previewDonation = () => {
+    if (!donations.real) return false;
+    pile.deliverBananas(12);
+    return true;
+  };
   const addTestBananas = (amount) => {
     pile.deliverBananas(amount);
     hud.toast(`+${amount} test bananas`);
@@ -10290,7 +10307,8 @@
     solids = BL.solidProps.create();
     clock = daylight.createClock({ hour: hourParam, daylen: daylenParam, day: dayParam, time: timeParam, now: new Date() });
     phase = null;
-    island = terrain.island({ seed: SEED });
+    const factorySlot = caves.slots.find(slot => slot.status === "open" && slot.scene === "factory");
+    island = terrain.island({ seed: SEED, roofHole: factorySlot ? { id: factorySlot.id, ...BL.factoryModels.ROOF_TUBE } : null });
     cutawayPathBounds = buildCutawayPathBounds(island.cutawayPaths);
     guideSegmentClear.boxGrid = POOL_SEAMS[0].boxGrid = POOL_SEAMS[1].boxGrid = island.sightGrid;
     buildCameraRamps();
@@ -10469,6 +10487,7 @@
     critters = crittersMod.create({ root, renderer, flowers: scenery.filter((o) => o.prop === "flower" && o.active), fire: firePos, secondaryFire: { x: 0, y: island.headquarters.floor, z: 0 }, meadowRadius: MEADOW, heightAt: island.surfaceAt });
     mark("props");
     const shared = { root, input, hooks, hud, game, world, renderer, camera, overlay: ctx.overlay, overlayVisible: matrixOverlayVisible, zzzVisible: sleepMarksVisible, tickerAt: TICKER_AT, buildSpots: buildSpotsList, walkIn: WALK_IN, clampDrag, viewYaw: PILE_VIEW.yaw, bedrolls, pileScale: PILE_SCALE, pileY: ALTAR_HEIGHT + 0.02, matrixLivingPile: true, onLayout: layoutPile, crateRadius: () => Math.max(4.4, altar.platformRadius + 0.8), groundAt: playerSupportAt, prepareCloudSupport, cloudAt, ceilingAt, wanderSpot, walkable, flyable, glideJetCeiling, useNear, abyssAt, abyssRespawnY: ABYSS_RESPAWN_Y, seaY: SEA_Y, jetpackAllowed, reticleTarget, phase: () => phase };
+    shared.deliverySource = factoryMouth ? factoryMouth.deliverySource : null;
     shared.reloadSlotRadius = () => island.path.debug.ringLoadingRadius;
     shared.reloadRadius = () => island.path.debug.ringCenterRadius;
     shared.reloadHeight = ALTAR_HEIGHT;
@@ -10545,6 +10564,13 @@
     if (factoryMouth) {
       Object.assign(factoryMouth, { phase: BL.labPhase.create(factoryMouth.group, factoryMouth.mouth, factoryMouth.opening, BL.factoryModels.SHIELD_Z, BL.factoryWindow.TINT), hum: 0, node: BL.factoryFeed.node(world) });
       factoryMouth.hall = renderer.kind === "webgl2" ? BL.factoryWindow.create({ group: factoryMouth.group, mouth: factoryMouth.mouth, node: factoryMouth.node }) : null;
+      if (factoryMouth.hall && island.roofOpening) {
+        const roof = island.roofOpening;
+        const group = createNode({ position: { x: roof.x, y: roof.y - BL.factoryWindow.AXIS, z: roof.z }, rotation: { x: -Math.PI / 2, y: factoryMouth.mouth.ry, z: 0 } });
+        addChild(root, group); placed.push(group);
+        factoryMouth.roofWindow = BL.factoryWindow.create({ group, mouth: factoryMouth.mouth, node: factoryMouth.node, roof });
+        factoryMouth.hall.debug.roof = factoryMouth.roofWindow.debug;
+      }
     }
     // ₿IFRÖST's field crests in the chamber's blue, and on WebGL shows the chamber through it; Heimdall keeps the bridge.
     if (bifrostIsle) {
@@ -11364,6 +11390,7 @@
     entropyLab = null;
     if (factoryMouth) {
       if (factoryMouth.hall) factoryMouth.hall.dispose();
+      if (factoryMouth.roofWindow) factoryMouth.roofWindow.dispose();
       factoryMouth.phase.dispose();
     }
     factoryMouth = arcadeMouth = null;
@@ -11457,7 +11484,7 @@
     // The island reports its own zone as soon as an Ooga is driven (see `zoneOf`); until then it is nowhere.
     voiceZone: "none",
     micKey: true,
-    id: "hub", enter, update, overlay, onDonation, onKey, onLootCleared, renderOpts: RENDER_OPTS, leave, stats, liveGeometry,
+    id: "hub", enter, update, overlay, onDonation, previewDonation, onKey, onLootCleared, renderOpts: RENDER_OPTS, leave, stats, liveGeometry,
     root: null, camera: null, input: null, debug: null,
     get inMotion() {
       // Sani sits nearly always; only a spinning chair needs full rate behind another window.
