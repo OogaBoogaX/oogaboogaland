@@ -2578,6 +2578,20 @@ body[data-active-scene="arcade"] .magazine-hud {
   transform: translateX(-50%);
 }
 
+/* Tess's island offer and tour: the two choices share a row, and on tour the panel sits low, clear of the landmarks. */
+.greeter-row {
+  display: flex;
+  gap: 6px;
+}
+
+.greeter-row .greeter-choice {
+  flex: 1;
+}
+
+.greeter-menu.greeter-tour {
+  bottom: calc(14px + var(--safe-bottom));
+}
+
 .race {
   position: absolute;
   inset: 0;

@@ -409,6 +409,8 @@
   const CLANKER_CAVITY = { floor: 0, ceiling: 0, caveIndex: 0 };
   const JETPACK_HUD_STATE = { owned: false, equipped: false, fuel: 1, blocked: false };
   let enteringTween = null, factoryDeparting = false, bifrostDeparting = false;
+  // Tess, the island's guide, for the visit (`hub-guide.js`).
+  let islandGuide = null;
   let stateTimer = 0, hintTimer = 0, meterTimer = 0, now = 0, hour = 12, unsubscribeActivity = null, unsubscribeAccount = null, ownOogaClaimed = false;
   // The daylight inputs as last sampled; sampledDay starts at a never-true 0 so the first frame always samples.
   let sampledHour = 0, sampledDay = 0, sampledLatitude = NaN, sampledContinuousDay = 0, sampledUtcMs = 0;
@@ -6008,6 +6010,8 @@
   const tooltipFor = (hit) => {
     const o = hit.owner;
     switch (o.kind) {
+      case "tess":
+        return COARSE ? `${BL.hubGuide.NAME} the guide · tap for a tour` : `${BL.hubGuide.NAME} the guide · click for a tour`;
       case "caveman":
         return o.cave.traits.name === "SaniExp" && timechainIsland?.seat.active ? "Sani · tap to spin his chair" : o.cave.traits.display;
       case "clanker":
@@ -6592,6 +6596,9 @@
     if (!hit) return;
     const o = hit.owner;
     switch (o.kind) {
+      case "tess":
+        islandGuide.tap();
+        break;
       case "caveman":
         if (o.cave.traits.name === "SaniExp" && timechainIsland?.seat.active) spinTimechainChair();
         else crew.pokeCave(o.cave);
@@ -8193,6 +8200,8 @@
     if (chalkboard.openNow) { /* Keep the exact camera and controlled actor pose until the board closes. */ }
     else if (clankerPlay.active) clankerPlay.update(dt);
     else pilot.update(dt);
+    // Tess moves after the view is set, so a tour's glide has the last word on it.
+    islandGuide.update(dt, elapsed);
     for (let i = 0; i < signDetails.length; i++) {
       const sign = signDetails[i], dx = camera.position.x - sign.x, dy = camera.position.y - sign.y, dz = camera.position.z - sign.z;
       const limit = sign.node.geometry === sign.pixels ? 20 : 16;
@@ -10036,6 +10045,8 @@
   };
   const characterUiOccluded = (cave) => {
     if (cave.root.cameraHidden) return true;
+    // A speaker the outline registry walks past (Tess, who moves every frame) is left to the overlay's own test.
+    if (cave.root.sightHidden) return false;
     if (RENDER_OPTS.birdsEyeCutaway) return cave.root.position.y - cave.baseY >= cutawayHeightAt(cave.root.position.x, cave.root.position.z);
     // Input-time tooltips may run before this frame's transforms are rendered.
     // Use rock certificates only during the overlay, after updating providers;
@@ -10246,6 +10257,7 @@
       }
       return;
     }
+    if (e.key === "Escape" && islandGuide.escape()) { e.preventDefault(); return; }
     if (e.key === "Escape" && debugSelectedGorilla) { selectDebugGorilla(null); e.preventDefault(); return; }
     if (clankerPlay.active) return;
     if ((e.key === "x" || e.key === "X") && !e.repeat && pilot.modeAction("mode-toggle")) return;
@@ -11267,6 +11279,12 @@
     }
     if (ctx.from === null && pilot.mode === "first-person") pilot.focusAim();
     if (POSITION_DEBUG) updatePositionDebug(true);
+    // Tess greets a newcomer once a page and shows them round; nothing she does starts while the island is busy. She
+    // greets only a visit that lands on the island's own view, not one sent to a place or walked back out of a cave.
+    islandGuide = BL.hubGuide.create({ parent: root, input, fx, camera, pilot, visitor: () => crew.player, world, hud, coarse: COARSE,
+      landing: !ctx.place && !preloadedView && !returningCharacter && ctx.from !== "bifrost",
+      quality: () => renderer.quality, busy: () => chalkboard.openNow || clankerPlay.active || factoryDeparting || bifrostDeparting });
+    hubScene.debug.tess = islandGuide;
     mark("visibility-start");
     fx.warmVisibility(crew);
     fx.warmBlockers();
@@ -11284,6 +11302,8 @@
     poolBlockHovered = poolBlockHoverIgnore = null;
     POOL_BLOCK_HIT.node = POOL_BLOCK_HIT.owner = null;
     selectDebugGorilla(null);
+    islandGuide.dispose();
+    islandGuide = null;
     debugMovementTerrain = DEBUG_MOVE_HIT.node = DEBUG_MOVE_HIT.owner = null;
     DEBUG_GORILLA_HIT.node = DEBUG_GORILLA_HIT.owner = null;
     chalkboard.dispose();
@@ -11448,6 +11468,7 @@
     return { targets: count };
   };
   const liveGeometry = (set) => {
+    if (islandGuide) islandGuide.liveGeometry(set);
     mempoolIsland.water.liveGeometry(set);
     pile.liveGeometry(set);
     breakables.liveGeometry(set);
