@@ -313,98 +313,147 @@
     </header>
 
     <aside class="sheet" id="sheet" data-open="false">
-      <button type="button" class="sheet-toggle sheet-toggle-bananas" id="sheet-bananas"
-        aria-label="Bananas and project metrics">
-        <svg class="banana-icon" viewBox="0 0 9 9" shape-rendering="crispEdges" aria-hidden="true">
-          <path fill="#211b14" d="M0 0h1v5H0zM2 0h1v2H2zM3 2h1v2H3zM4 4h1v1H4zM1 5h1v2H1zM5 5h1v1H5zM6 6h1v1H6zM2 7h2v1H2zM7 7h1v1H7zM4 8h4v1H4z" />
-          <path fill="#ffd84a" d="M1 2h2v2H1zM1 4h3v1H1zM2 5h3v1H2zM2 6h4v1H2zM4 7h3v1H4z" />
-          <path fill="#789a3b" d="M1 0h1v2H1z" />
-        </svg>
-      </button>
-      <button type="button" class="sheet-toggle" id="sheet-toggle" aria-label="Toggle panel">
-        <svg class="caveman-icon" viewBox="0 0 7 9" shape-rendering="crispEdges" aria-hidden="true">
-          <path fill="#2b1b10" d="M1 0h5v1H1zM0 1h7v2H0zM0 3h1v2H0zM6 3h1v2H6z" />
-          <path fill="#c98a5b" d="M1 3h5v3H1zM2 6h3v1H2z" />
-          <path fill="#141414" d="M2 3h1v1H2zM4 3h1v1H4z" />
-          <path fill="#4a2c14" d="M1 6h1v1H1zM5 6h1v1H5zM1 7h5v1H1zM2 8h3v1H2z" />
-          <path fill="#f2efe4" d="M1 8h1v1H1zM5 8h1v1H5z" />
-        </svg>
-      </button>
-      <div class="tabs" role="tablist">
-        <button type="button" role="tab" data-tab="bananas" aria-selected="false"><span
-            data-sign>Bananas</span></button>
-        <button type="button" role="tab" data-tab="roster" aria-selected="true"><span data-sign>Ooga Boogas</span></button>
-        <button type="button" role="tab" data-tab="loot" aria-selected="false" id="loot-tab" hidden><span
-            data-sign>Loot</span> <span class="tab-count" id="loot-count" hidden></span></button>
-        <button type="button" role="tab" data-tab="chat" aria-selected="false" id="chat-tab" aria-controls="chat-panel" hidden><span
-            data-sign>Ooga Chat</span></button>
-      </div>
-      <section class="panel" data-panel="roster" role="tabpanel">
-        <ul id="roster" class="roster"></ul>
-        <p class="help" data-scene="hub"><span id="world-loot-hint" hidden>Something is hidden out there.</span></p>
+      <nav class="sheet-panels" role="tablist" aria-label="Island panels">
+        <button type="button" class="sheet-toggle sheet-toggle-bananas" id="sheet-bananas" role="tab"
+          data-tab="bananas" aria-selected="false" aria-controls="bananas-panel" aria-label="Bananas and top donors">
+          <svg class="banana-icon" viewBox="0 0 9 9" shape-rendering="crispEdges" aria-hidden="true">
+            <path fill="#211b14" d="M0 0h1v5H0zM2 0h1v2H2zM3 2h1v2H3zM4 4h1v1H4zM1 5h1v2H1zM5 5h1v1H5zM6 6h1v1H6zM2 7h2v1H2zM7 7h1v1H7zM4 8h4v1H4z" />
+            <path fill="#ffd84a" d="M1 2h2v2H1zM1 4h3v1H1zM2 5h3v1H2zM2 6h4v1H2zM4 7h3v1H4z" />
+            <path fill="#789a3b" d="M1 0h1v2H1z" />
+          </svg>
+        </button>
+        <button type="button" class="sheet-toggle" id="sheet-toggle" role="tab" data-tab="roster"
+          aria-selected="true" aria-controls="roster-panel" aria-label="Ooga Boogas">
+          <svg class="caveman-icon" viewBox="0 0 7 9" shape-rendering="crispEdges" aria-hidden="true">
+            <path fill="#2b1b10" d="M1 0h5v1H1zM0 1h7v2H0zM0 3h1v2H0zM6 3h1v2H6z" />
+            <path fill="#c98a5b" d="M1 3h5v3H1zM2 6h3v1H2z" />
+            <path fill="#141414" d="M2 3h1v1H2zM4 3h1v1H4z" />
+            <path fill="#4a2c14" d="M1 6h1v1H1zM5 6h1v1H5zM1 7h5v1H1zM2 8h3v1H2z" />
+            <path fill="#f2efe4" d="M1 8h1v1H1zM5 8h1v1H5z" />
+          </svg>
+        </button>
+        <button type="button" class="sheet-toggle sheet-toggle-loot" role="tab" data-tab="loot"
+          aria-selected="false" id="loot-tab" aria-controls="loot-panel" aria-label="Swag locker" hidden>
+          <svg viewBox="0 0 9 9" shape-rendering="crispEdges" aria-hidden="true">
+            <path fill="#2b1b10" d="M0 2h9v7H0zM1 0h7v2H1z" />
+            <path fill="#d6a45f" d="M1 3h7v5H1zM2 1h5v1H2z" />
+            <path fill="#5c4425" d="M1 4h7v1H1zM4 3h1v5H4z" />
+            <path fill="#f3efe4" d="M4 4h1v2H4z" />
+          </svg><span class="tab-count" id="loot-count" hidden></span>
+        </button>
+        <button type="button" class="sheet-toggle sheet-toggle-chat" role="tab" data-tab="chat"
+          aria-selected="false" id="chat-tab" aria-controls="chat-panel" aria-label="Ooga Chat" hidden>
+          <svg viewBox="0 0 9 9" shape-rendering="crispEdges" aria-hidden="true">
+            <path fill="#2b1b10" d="M0 0h9v7H5v1H4v1H1V7H0z" />
+            <path fill="#f3efe4" d="M1 1h7v5H4v1H3v1H2V6H1z" />
+            <path fill="#5c4425" d="M2 3h1v1H2zM4 3h1v1H4zM6 3h1v1H6z" />
+          </svg>
+        </button>
+      </nav>
+      <section class="panel" data-panel="roster" id="roster-panel" role="tabpanel" aria-labelledby="sheet-toggle">
+        <header class="panel-title">
+          <h2><span data-sign>Ooga Boogas</span></h2>
+          <span class="panel-chip" id="roster-count" data-tone="idle"></span>
+        </header>
+        <ul id="roster" class="roster slab" aria-label="Ooga Boogas"></ul>
+        <p class="help roster-hint" data-scene="hub"><span id="world-loot-hint" hidden>Something is hidden out there.</span></p>
         <button type="button" class="feed-open" data-action="feed"><span data-sign>Feed the Ooga Boogas</span></button>
       </section>
-      <section class="panel" data-panel="bananas" role="tabpanel" hidden>
-        <section class="meter" aria-label="Banana supply">
-          <span class="meter-label">Bananas</span>
-          <span class="meter-bar" role="progressbar" aria-label="Supply level" aria-valuemin="0" aria-valuemax="100"><span class="meter-fill"
-              id="meter-fill"></span></span>
-          <span class="meter-count" id="meter-count">0</span>
-          <span class="meter-forecast" id="meter-forecast"></span>
-        </section>
-        <div class="stats" aria-label="Your stats">
-          <div class="stat"><b id="stat-donations">0</b><span>donations</span></div>
-          <div class="stat"><b id="stat-sats">0</b><span>sats</span></div>
+      <section class="panel" data-panel="bananas" id="bananas-panel" role="tabpanel" aria-labelledby="sheet-bananas" hidden>
+        <header class="panel-title">
+          <h2><span data-sign>Bananas donated</span></h2>
+          <span class="panel-chip" id="banana-source" data-tone="idle">Demo</span>
+        </header>
+        <div class="slab banana-slab">
+          <section class="banana-total" aria-label="Total bananas donated, all time">
+            <div class="banana-hero">
+              <svg class="banana-hero-icon" viewBox="0 0 9 9" shape-rendering="crispEdges" aria-hidden="true">
+                <path fill="#211b14" d="M0 0h1v5H0zM2 0h1v2H2zM3 2h1v2H3zM4 4h1v1H4zM1 5h1v2H1zM5 5h1v1H5zM6 6h1v1H6zM2 7h2v1H2zM7 7h1v1H7zM4 8h4v1H4z" />
+                <path fill="#ffd84a" d="M1 2h2v2H1zM1 4h3v1H1zM2 5h3v1H2zM2 6h4v1H2zM4 7h3v1H4z" />
+                <path fill="#789a3b" d="M1 0h1v2H1z" />
+              </svg>
+              <strong id="banana-total">0</strong>
+              <span class="banana-hero-label">bananas · all time</span>
+            </div>
+            <dl class="banana-totals">
+              <div><dt>Donations</dt><dd id="stat-donations">0</dd></div>
+              <div><dt>Sats donated</dt><dd id="stat-sats">0</dd></div>
+            </dl>
+          </section>
+          <section class="banana-board" aria-labelledby="banana-board-title">
+            <div class="banana-board-head">
+              <h3 class="slab-head" id="banana-board-title"><span data-sign>Top donors</span></h3>
+              <div class="banana-units" role="group" aria-label="Rank donors by">
+                <button type="button" data-donor-unit="bananas" aria-pressed="true">Bananas</button>
+                <button type="button" data-donor-unit="sats" aria-pressed="false">Sats</button>
+              </div>
+            </div>
+            <div class="banana-board-labels" aria-hidden="true"><span>#</span><span>Donor</span><span id="banana-board-unit">Bananas</span></div>
+            <ol class="banana-leaders" id="banana-leaders" aria-label="Top donors by bananas"></ol>
+            <p class="banana-empty" id="banana-empty">No donations yet. Feed the first Ooga!</p>
+          </section>
+          <p class="banana-board-note" id="banana-board-note">Demo donations saved in this browser.</p>
         </div>
-        <div class="stats metrics" id="project-metrics" aria-label="Project metrics">
-          <div class="stat"><b data-metric="commits">&ndash;</b><span>commits</span></div>
-          <div class="stat"><b data-metric="contributors">7</b><span>contributors</span></div>
-          <div class="stat"><b data-metric="issues">&ndash;</b><span>open issues</span></div>
-          <div class="stat"><b data-metric="stars">&ndash;</b><span>stars</span></div>
-        </div>
-        <p class="help">Live numbers come with the GitHub link.</p>
         <button type="button" class="feed-open" data-action="feed"><span data-sign>Feed the Ooga Boogas</span></button>
       </section>
-      <section class="panel" data-panel="loot" role="tabpanel" hidden>
-        <div class="panel-head">
+      <section class="panel" data-panel="loot" id="loot-panel" role="tabpanel" aria-labelledby="loot-tab" hidden>
+        <header class="panel-title">
           <h2><span data-sign>Swag locker</span></h2>
           <button type="button" class="link" data-action="clear-loot">Clear</button>
-        </div>
+        </header>
         <p class="help empty" id="inventory-empty">Open a loot crate to earn swag, then assign it to a caveman.</p>
         <ul id="inventory" class="loot"></ul>
       </section>
       <section class="panel" data-panel="chat" id="chat-panel" role="tabpanel" aria-labelledby="chat-tab" hidden>
-        <ol class="chat-log" id="chat-log" role="log" aria-live="off" aria-label="Island chat" tabindex="0"></ol>
-        <p class="help chat-status" id="chat-status"><span id="chat-status-text"></span> <button type="button" class="link" data-action="account-login" id="chat-login" hidden>Sign in with GitHub</button></p>
-        <p class="help chat-retention">Shared while the room is awake. Your page keeps up to 100 lines until reload or sign-out. No chat database.</p>
-        <div id="chat-identity" hidden>
-          <p class="help">Signed in as <strong id="chat-account-login"></strong></p>
+        <header class="panel-title">
+          <h2><span data-sign>Ooga Chat</span></h2>
+          <span class="panel-chip" id="chat-room" data-tone="idle">Offline</span>
+        </header>
+        <details class="chat-about">
+          <summary aria-label="About Ooga Chat" title="About Ooga Chat">?</summary>
+          <p class="chat-retention">Shared while the room is awake. Your page keeps up to 100 lines until reload or sign-out. No chat database.</p>
+        </details>
+        <div class="chat-identity" id="chat-identity" hidden>
           <form class="chat-display-form" id="chat-display-form" autocomplete="off">
-            <label for="chat-display">Display name</label>
-            <input id="chat-display" type="text" minlength="3" maxlength="24" aria-describedby="chat-display-status">
-            <button type="submit" class="link" id="chat-display-save">Save name</button>
+            <label for="chat-display">Name</label>
+            <input id="chat-display" type="text" minlength="3" maxlength="24" aria-describedby="chat-display-status chat-account-login">
+            <button type="submit" class="chat-display-save" id="chat-display-save">Save</button>
           </form>
-          <p class="help" id="chat-display-status" role="status" aria-live="polite"></p>
+          <span class="chat-account" title="Your GitHub account">signed in as <strong id="chat-account-login"></strong></span>
+          <p class="chat-display-status" id="chat-display-status" role="status" aria-live="polite"></p>
         </div>
+        <ol class="chat-log slab" id="chat-log" role="log" aria-live="off" aria-label="Island chat" tabindex="0"></ol>
+        <p class="help chat-status" id="chat-status"><span id="chat-status-text"></span></p>
         <span class="chat-announcement" id="chat-announcement" role="status" aria-live="polite" aria-atomic="true"></span>
         <form class="chat-form" id="chat-form" autocomplete="off">
-          <input type="text" id="chat-input" aria-label="Say something to everyone on the island" aria-describedby="chat-left chat-status-text" maxlength="320" enterkeyhint="send" spellcheck="true" disabled>
-          <span class="chat-left" id="chat-left">160</span>
+          <span class="chat-field">
+            <input type="text" id="chat-input" aria-label="Say something to everyone on the island" aria-describedby="chat-left chat-status-text" maxlength="320" enterkeyhint="send" spellcheck="true" disabled>
+            <span class="chat-left" id="chat-left" title="Characters left">160</span>
+          </span>
           <button type="submit" class="chat-send" id="chat-send" disabled>Send</button>
         </form>
       </section>
       <footer class="sheet-foot">
-        <span class="quality" id="quality" aria-live="polite"></span>
         <span class="account" id="account" hidden>
-          <span class="account-name" id="account-name" hidden></span>
-          <button type="button" class="link" data-action="account-login" id="account-login">Sign in with GitHub</button>
-          <span class="account-room" id="account-room" hidden></span>
-          <button type="button" class="link" data-action="account-rejoin" id="account-rejoin" hidden>Play here</button>
-          <button type="button" class="link" data-action="account-voice" id="account-voice" aria-pressed="false" hidden>Join voice</button>
-          <button type="button" class="link" data-action="account-logout" id="account-logout" hidden>Sign out</button>
+          <span class="account-who">
+            <span class="account-name" id="account-name" hidden></span>
+            <span class="account-room" id="account-room" hidden></span>
+          </span>
+          <span class="account-actions">
+            <button type="button" class="foot-button foot-primary" data-action="account-login" id="account-login">Sign in with GitHub</button>
+            <button type="button" class="foot-button foot-primary" data-action="account-rejoin" id="account-rejoin" hidden>Play here</button>
+            <button type="button" class="foot-button" data-action="account-voice" id="account-voice" aria-pressed="false" hidden>Join voice</button>
+            <button type="button" class="link" data-action="account-logout" id="account-logout" hidden>Sign out</button>
+          </span>
         </span>
-        <button type="button" class="link" data-action="reset">Reset demo</button>
+        <span class="sheet-foot-meta">
+          <span class="quality" id="quality" aria-live="polite"></span>
+          <button type="button" class="link" data-action="reset">Reset demo</button>
+        </span>
       </footer>
+      <div class="sheet-resize" id="sheet-resize" role="separator" tabindex="0" aria-label="Resize panel height"
+        aria-orientation="horizontal" aria-valuemin="240" aria-valuemax="1000" aria-valuenow="520"
+        title="Drag to resize · Up grows · Down shrinks · double-click to reset"></div>
     </aside>
 
     <div id="weapon-reticle" class="weapon-reticle" aria-hidden="true" hidden>

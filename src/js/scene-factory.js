@@ -1030,6 +1030,8 @@
   const demoTip = (sats) => {
     if (!donations.real) onDonation(tipEvent(`demo-${Date.now()}`, sats));
   };
+  // An on-chain payment seen before its block: true when the kiosk holding its invoice shows it.
+  const onSeen = (id, sats, due, left) => !!(scene.booth.flow && scene.booth.flow.seen(id, sats, due, left));
   const onLootCleared = () => {};
 
   const build = () => {
@@ -2124,7 +2126,7 @@
     // Voice zone: the Factory group, which its tunnel on the island shares (`factory`).
     voiceZone: "factory.hall",
     micKey: true,
-    id: "factory", enter, update, overlay, onDonation, onKey, onLootCleared, renderOpts: RENDER_OPTS, leave, stats, liveGeometry,
+    id: "factory", enter, update, overlay, onDonation, onSeen, onKey, onLootCleared, renderOpts: RENDER_OPTS, leave, stats, liveGeometry,
     root: null, camera: null, input: null, debug: null, agent: null, agentView: null, agentControls: null, agentHandoff: null,
     get inMotion() {
       return !!scene;

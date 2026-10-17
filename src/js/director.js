@@ -75,6 +75,7 @@
   };
   showQuality();
   const game = gameMod.create({ catalog: models.SWAG });
+  window.BL.hud.setDonationStats(game.state);
   // world survives scene swaps: banana level, equipment ownership, and the Ooga handed from hub to scene.
   const world = { level: START_BANANAS, pilot: null, mirrorBroken: false };
   const debugMagazines = DEBUG ? (params.get("mag") === "2" ? 2 : params.get("mag") === "1" ? 1 : 0) : 0;
@@ -533,12 +534,19 @@
     unsubscribeDonations = donations.subscribe((donation, bananas) => {
       if (active) active.onDonation(donation, bananas);
       else game.recordDonation(donation, bananas && bananas.exact);
+      window.BL.hud.setDonationStats(game.state);
       if (donations.waited(donation.id)) {
         const n = bananas && bananas.rounded;
         window.BL.hud.toast(`Your on-chain tip confirmed · ${gameMod.formatLarge(donation.sats)} sats${n ? ` · ${gameMod.formatLarge(n)} banana${n === 1 ? "" : "s"}` : ""}`);
       }
     }, {
       identity: () => game.state,
+      // An on-chain payment seen before its block: the active scene shows it where it can (the kiosk that made the
+      // invoice), and otherwise one the visitor left the kiosk waiting on says it is on its way, or what is still owed.
+      onSeen: (id, sats, due, left) => {
+        if (active && active.onSeen && active.onSeen(id, sats, due, left)) return;
+        if (donations.waitingOn(id)) window.BL.hud.toast(left ? `Your on-chain tip arrived short · send ${gameMod.formatLarge(left)} more sats to the same address` : "Your on-chain tip is on its way · waiting for a block");
+      },
       onPile: ({ bananas, eatPerHour }) => Object.assign(pileFeed, { bananas, eatPerHour, at: performance.now() })
     });
   });

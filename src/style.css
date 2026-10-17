@@ -310,71 +310,6 @@ body[data-active-scene="hub"] .home-link {
   pointer-events: none;
 }
 
-.meter {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px 10px;
-  margin-bottom: 10px;
-  padding: 8px 14px;
-  background: var(--tablet);
-  border: 2px solid var(--stone-dk);
-  border-radius: 9px 7px 10px 8px;
-  box-shadow: var(--tablet-shadow);
-}
-
-.meter-label {
-  color: var(--accent-text);
-  font-size: 10.5px;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-}
-
-.meter-bar {
-  flex: 1 1 90px;
-  min-width: 90px;
-  height: 8px;
-  border-radius: 999px;
-  overflow: hidden;
-  background: rgba(0, 0, 0, 0.45);
-  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.6);
-}
-
-.meter-fill {
-  display: block;
-  height: 100%;
-  width: 0%;
-  background: var(--ok);
-  transition: width 0.45s ease, background-color 0.4s ease;
-}
-
-.meter-fill[data-level="mid"] {
-  background: var(--warn);
-}
-
-.meter-fill[data-level="low"] {
-  background: var(--danger);
-}
-
-.meter-count {
-  min-width: 3ch;
-  text-align: right;
-  font-weight: 600;
-}
-
-.meter-forecast {
-  flex-basis: 100%;
-  color: var(--muted);
-  font-size: 10.5px;
-  letter-spacing: 0.06em;
-  white-space: nowrap;
-}
-
-.metrics {
-  margin-top: 8px;
-  grid-template-columns: 1fr 1fr;
-}
-
 .presets {
   grid-column: 3;
   display: flex;
@@ -389,7 +324,6 @@ body[data-active-scene="hub"] .home-link {
 }
 
 .presets button,
-.tabs button,
 .sheet-toggle {
   cursor: pointer;
   -webkit-tap-highlight-color: transparent;
@@ -439,10 +373,12 @@ body[data-active-scene="hub"] .home-link {
 }
 
 .sheet {
+  --sheet-chat-top: 207px;
+  --sheet-chat-left: 216px;
   position: absolute;
-  top: calc(62px + var(--safe-top));
+  top: calc(52px + var(--safe-top));
   right: calc(16px + var(--safe-right));
-  height: 520px;
+  height: var(--sheet-height, 520px);
   max-height: calc(100% - 90px - var(--safe-top) - var(--safe-bottom));
   width: 380px;
   max-width: calc(100vw - 32px - var(--safe-left) - var(--safe-right));
@@ -453,6 +389,7 @@ body[data-active-scene="hub"] .home-link {
   border-radius: var(--radius);
   box-shadow: 0 6px 0 rgba(0, 0, 0, 0.35), 0 10px 30px rgba(0, 0, 0, 0.35);
   color: var(--paper);
+  padding-bottom: 14px;
   transition: transform 0.28s ease;
 }
 
@@ -697,8 +634,8 @@ body[data-active-scene="arcade"] .magazine-hud {
 
 .sheet-toggle {
   position: absolute;
-  top: 61px;
-  left: -41px;
+  top: 71px;
+  left: -47px;
   width: 44px;
   height: 64px;
   margin-top: 0;
@@ -706,77 +643,64 @@ body[data-active-scene="arcade"] .magazine-hud {
   border: 3px solid var(--wood-edge);
   border-right: 0;
   border-radius: 8px 0 0 8px;
-  background: linear-gradient(90deg, var(--plank), var(--wood));
+  background: linear-gradient(90deg, var(--wood), var(--wood-dk));
   box-shadow: 0 4px 0 rgba(0, 0, 0, 0.35);
 }
 
 .sheet-toggle-bananas {
-  top: -3px;
+  top: 7px;
   margin-top: 0;
   height: 56px;
-}
-
-.sheet-toggle .banana-icon {
-  display: block;
-  width: 100%;
-  height: auto;
-  filter: drop-shadow(0 1px 0 rgba(0, 0, 0, 0.5));
-}
-
-.sheet-toggle .caveman-icon {
-  display: block;
-  width: 100%;
-  height: auto;
-  filter: drop-shadow(0 1px 0 rgba(0, 0, 0, 0.5));
 }
 
 .sheet-toggle:hover,
 .sheet-toggle.virtual-hover,
 .sheet-toggle:focus-visible {
-  background: linear-gradient(90deg, #b8844a, var(--plank));
+  background: linear-gradient(90deg, var(--plank), var(--wood));
   outline: none;
 }
 
-.tabs {
-  display: flex;
-  gap: 6px;
-  padding: 10px 12px 0;
-  border-bottom: 2px solid var(--wood-edge);
-  flex: none;
+.sheet-panels { display: contents; }
+.sheet-toggle-loot { top: 143px; height: 56px; }
+.sheet-toggle-chat { top: var(--sheet-chat-top); height: 56px; }
+.sheet:has(.sheet-toggle-loot[hidden]) { --sheet-chat-top: 143px; --sheet-chat-left: 144px; }
+.sheet-toggle svg { display: block; width: 100%; height: auto; filter: drop-shadow(0 1px 0 rgba(0, 0, 0, 0.5)); }
+.sheet[data-open="true"] .sheet-toggle[aria-selected="true"] { background: linear-gradient(90deg, #b8844a, var(--plank)); }
+.sheet-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: -3px; }
+.sheet-toggle .tab-count { position: absolute; bottom: 3px; right: 3px; margin: 0; }
+
+.sheet-resize {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -3px;
+  height: 16px;
+  cursor: ns-resize;
+  touch-action: none;
+  user-select: none;
 }
 
-.tabs button {
-  flex: 1;
-  min-height: 38px;
-  margin-bottom: -2px;
-  border: 2px solid transparent;
-  border-bottom: 0;
-  border-radius: 6px 6px 0 0;
-  background: transparent;
-  color: rgba(243, 239, 228, 0.55);
-  font-size: 17px;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-  transition: color 0.15s ease;
+/* Two carved grooves for a grip, warming to amber under the pointer or the keyboard. */
+.sheet-resize::after {
+  content: "";
+  display: block;
+  width: 44px;
+  height: 6px;
+  margin: 5px auto;
+  background: linear-gradient(var(--wood-edge) 0 2px, transparent 2px 4px, var(--wood-edge) 4px 6px);
+  filter: drop-shadow(0 1px 0 rgba(255, 255, 255, 0.15));
 }
 
-/* With Ooga Chat's tab and the loot tab that makes four: the lettering shrinks so none is pushed out of the sheet. */
-.tabs:has(> [data-tab="loot"]:not([hidden])):has(> [data-tab="chat"]:not([hidden])) button {
-  font-size: 12.5px;
+.sheet-resize:hover::after,
+.sheet-resize:focus-visible::after { background: linear-gradient(var(--accent-text) 0 2px, transparent 2px 4px, var(--accent-text) 4px 6px); }
+.sheet-resize:focus-visible { outline: 2px solid var(--accent); outline-offset: -3px; }
+.sheet[data-open="false"] .sheet-resize { display: none; }
+
+@media (prefers-reduced-motion: reduce) {
+  .sheet,
+  .sheet-toggle { transition: none !important; }
 }
 
-.tabs button:hover,
-.tabs button.virtual-hover {
-  color: rgba(243, 239, 228, 0.85);
-}
-
-.tabs button[aria-selected="true"] {
-  color: var(--paper);
-  border-color: var(--wood-edge);
-  background: var(--wood-dk);
-}
-
-.tabs button:focus-visible,
 .presets button:focus-visible,
 .actions button:focus-visible,
 .link:focus-visible {
@@ -798,57 +722,367 @@ body[data-active-scene="arcade"] .magazine-hud {
   letter-spacing: 0;
 }
 
+/* The island's panels share one shape: a carved title with a status chip, one stone slab that scrolls and
+   takes every extra pixel of the drawer's height, and the panel's action pinned under it. The panel itself
+   scrolls only when the drawer is shorter than its fixed parts (a phone's keyboard up). */
 .panel {
   flex: 1;
   min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
   overflow: auto;
-  padding: 14px 16px;
+  padding: 12px 14px 10px;
   overscroll-behavior: contain;
   scrollbar-width: thin;
   scrollbar-color: rgba(0, 0, 0, 0.35) transparent;
 }
 
-/* The roster scrolls; its call to action does not scroll away with it. A long cast used to push
-   Feed the Ooga Boogas past the bottom of the sheet, where it could only be reached by scrolling. */
-.panel[data-panel="roster"] {
+.panel > .help { flex: none; margin: 0; }
+
+.panel-title {
+  flex: none;
   display: flex;
-  flex-direction: column;
-  overflow: hidden;
-}
-
-.panel[data-panel="roster"] > .roster {
-  flex: 1 1 auto;
-  min-height: 0;
-  overflow: auto;
-  overscroll-behavior: contain;
-}
-
-.panel[data-panel="roster"] > .feed-open {
-  margin-top: auto;
-}
-
-/* Ooga Chat: the log scrolls on the roster's tablet, with the input pinned under it. */
-.panel[data-panel="chat"] {
-  display: flex;
-  flex-direction: column;
+  align-items: center;
   gap: 8px;
-  overflow: auto;
+  min-height: 22px;
 }
 
-.chat-log {
-  flex: 1 1 auto;
-  min-height: 0;
-  overflow: auto;
-  overscroll-behavior: contain;
-  scrollbar-width: thin;
-  scrollbar-color: rgba(0, 0, 0, 0.35) transparent;
-  list-style: none;
-  margin: 0;
-  padding: 2px 10px;
+.panel .panel-title h2 {
+  margin: 0 auto 0 0;
+  font-size: 13px;
+  line-height: 1;
+  white-space: nowrap;
+  filter: drop-shadow(0 1px 0 rgba(0, 0, 0, 0.6));
+}
+
+.panel-chip {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 7px;
+  border: 1px solid rgba(243, 239, 228, 0.22);
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.28);
+  color: rgba(243, 239, 228, 0.72);
+  font-size: 9px;
+  line-height: 14px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.panel-chip:empty { display: none; }
+
+.panel-chip[data-tone="live"]::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--ok);
+  box-shadow: 0 0 5px rgba(34, 197, 94, 0.55);
+}
+
+.panel-chip[data-tone="live"] { color: #bfeccb; border-color: rgba(34, 197, 94, 0.38); }
+.panel-chip[data-tone="test"] { color: #ffd84a; border-color: rgba(255, 216, 74, 0.45); background: rgba(255, 216, 74, 0.08); }
+.panel-chip[data-tone="wait"] { color: var(--accent-text); border-color: rgba(216, 137, 43, 0.42); }
+.panel-chip[data-tone="closed"] { color: #ffb4a6; border-color: rgba(229, 83, 61, 0.45); }
+
+.slab {
   background: var(--tablet);
   border: 2px solid var(--stone-dk);
   border-radius: 9px 7px 10px 8px;
   box-shadow: var(--tablet-shadow);
+}
+
+.panel > .slab {
+  flex: 1 1 auto;
+  min-height: 96px;
+  overflow: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(0, 0, 0, 0.45) transparent;
+}
+
+.slab-head {
+  margin: 0;
+  color: var(--accent-text);
+  font-size: 10px;
+  line-height: 1;
+  white-space: nowrap;
+  filter: drop-shadow(0 1px 0 rgba(0, 0, 0, 0.6));
+}
+
+.panel > .feed-open { flex: none; margin-top: 0; }
+
+.roster-hint:not(:has(> :not([hidden]))) { display: none; }
+
+/* Bananas: the all-time total on top, its count and sats beneath, then the top ten in the same slab. */
+.banana-slab {
+  display: flex;
+  flex-direction: column;
+  padding: 12px 12px 10px;
+}
+
+.banana-hero {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  column-gap: 10px;
+  align-items: center;
+}
+
+.banana-hero-icon {
+  grid-row: span 2;
+  width: 34px;
+  height: 34px;
+  filter: drop-shadow(0 2px 0 rgba(0, 0, 0, 0.45));
+}
+
+.banana-hero > strong {
+  color: var(--accent-text);
+  font-size: clamp(26px, 7vw, 34px);
+  font-weight: 700;
+  line-height: 1.05;
+  font-variant-numeric: tabular-nums;
+  text-shadow: 0 2px 0 rgba(0, 0, 0, 0.45);
+  overflow-wrap: anywhere;
+}
+
+.banana-hero-label,
+.banana-totals dt,
+.banana-board-labels {
+  color: rgba(243, 239, 228, 0.58);
+  font-size: 9px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.banana-totals {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin: 12px 0 0;
+  padding-top: 10px;
+}
+
+.banana-totals,
+.banana-board {
+  border-top: 1px solid rgba(0, 0, 0, 0.4);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
+}
+
+.banana-totals div { min-width: 0; }
+
+.banana-totals dd {
+  margin: 3px 0 0;
+  color: var(--paper);
+  font-size: 14px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+
+.banana-board { margin-top: 12px; padding-top: 12px; }
+
+.banana-board-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.banana-units {
+  display: inline-flex;
+  flex: none;
+  padding: 2px;
+  border: 1px solid rgba(0, 0, 0, 0.5);
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.3);
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.4);
+}
+
+.banana-units button {
+  min-height: 24px;
+  padding: 0 9px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: rgba(243, 239, 228, 0.66);
+  font-size: 9.5px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.banana-units button[aria-pressed="true"] {
+  background: linear-gradient(#e2a04a, var(--accent));
+  color: var(--ink);
+  box-shadow: 0 1px 0 rgba(0, 0, 0, 0.45);
+}
+
+.banana-units button:not([aria-pressed="true"]):hover,
+.banana-units button.virtual-hover:not([aria-pressed="true"]) {
+  background: rgba(255, 255, 255, 0.07);
+  color: var(--paper);
+}
+
+.banana-units button:focus-visible { outline: 2px solid var(--accent-text); outline-offset: 1px; }
+
+.banana-board-labels,
+.banana-leaders li {
+  display: grid;
+  grid-template-columns: 2.5ch minmax(0, 1fr) auto;
+  column-gap: 10px;
+  align-items: baseline;
+}
+
+.banana-board-labels { margin-top: 10px; padding: 0 2px 5px; }
+.banana-board-labels span:last-child { text-align: right; }
+
+.banana-leaders { margin: 0; padding: 0; list-style: none; }
+
+.banana-leaders li {
+  padding: 6px 2px;
+  border-top: 1px solid rgba(0, 0, 0, 0.35);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.035);
+  font-size: 12px;
+}
+
+.banana-rank { color: rgba(243, 239, 228, 0.5); font-size: 10px; font-variant-numeric: tabular-nums; }
+.banana-leaders li:nth-child(-n + 3) .banana-rank { color: var(--accent-text); }
+.banana-donor { min-width: 0; color: var(--paper); overflow-wrap: anywhere; }
+.banana-donor[data-anon="true"] { color: rgba(243, 239, 228, 0.55); font-style: italic; }
+.banana-amount { color: var(--paper); font-weight: 600; font-variant-numeric: tabular-nums; text-align: right; white-space: nowrap; }
+.banana-leaders li:first-child .banana-amount { color: var(--accent-text); }
+
+.banana-empty {
+  margin: 0;
+  padding: 14px 0 6px;
+  color: rgba(243, 239, 228, 0.62);
+  font-size: 10.5px;
+  text-align: center;
+}
+
+.banana-board-note {
+  margin: auto 0 0;
+  padding-top: 12px;
+  color: rgba(243, 239, 228, 0.48);
+  font-size: 9.5px;
+  line-height: 1.45;
+}
+
+@media (pointer: coarse) {
+  .banana-units button { min-height: 40px; padding: 0 12px; }
+}
+
+/* Ooga Chat: the log takes the height, the composer is pinned under it, and the account's name and the
+   room's memory sit above it in one line each. */
+.panel[data-panel="chat"] { position: relative; }
+.panel[data-panel="chat"] > .panel-title { padding-right: 30px; }
+
+/* The about mark sits in the title's corner; what it opens drops into the flow under the title. */
+.chat-about { flex: none; margin-top: -10px; }
+.chat-about[open] { margin-top: 0; }
+
+.chat-about summary {
+  position: absolute;
+  top: 12px;
+  right: 14px;
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border: 1px solid rgba(243, 239, 228, 0.28);
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.25);
+  color: rgba(243, 239, 228, 0.72);
+  font-size: 11px;
+  line-height: 1;
+  list-style: none;
+  cursor: pointer;
+}
+
+.chat-about summary::-webkit-details-marker { display: none; }
+.chat-about[open] summary,
+.chat-about summary:hover { border-color: var(--accent); color: var(--accent-text); }
+.chat-about summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+.chat-retention {
+  margin: 0;
+  padding: 7px 10px;
+  border-left: 2px solid var(--accent);
+  border-radius: 0 6px 6px 0;
+  background: rgba(0, 0, 0, 0.25);
+  color: rgba(243, 239, 228, 0.72);
+  font-size: 10px;
+  line-height: 1.5;
+}
+
+.chat-identity {
+  flex: none;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 4px 10px;
+}
+
+.chat-display-form { display: flex; align-items: center; gap: 6px; min-width: 0; }
+
+.chat-display-form label {
+  flex: none;
+  color: rgba(243, 239, 228, 0.58);
+  font-size: 9px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.chat-display-form input {
+  flex: 1;
+  width: 80px;
+  min-width: 0;
+  min-height: 30px;
+  padding: 0 8px;
+  border: 1px solid rgba(0, 0, 0, 0.5);
+  border-radius: 5px;
+  background: rgba(0, 0, 0, 0.28);
+  color: var(--paper);
+  font-size: 12px;
+  outline: none;
+}
+
+.chat-display-form input:focus-visible { border-color: var(--accent); }
+.chat-display-form input:disabled { opacity: 0.55; }
+
+.chat-display-save {
+  flex: none;
+  min-height: 30px;
+  padding: 0 9px;
+  border: 1px solid var(--wood-edge);
+  border-radius: 5px;
+  background: linear-gradient(var(--plank), var(--wood));
+  color: var(--paper);
+  font-size: 9.5px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  text-shadow: 0 1px 0 rgba(0, 0, 0, 0.5);
+  cursor: pointer;
+}
+
+.chat-display-save:hover:not(:disabled),
+.chat-display-save:focus-visible { background: linear-gradient(#b8844a, var(--plank)); outline: none; }
+.chat-display-save:focus-visible { box-shadow: 0 0 0 2px var(--accent); }
+.chat-display-save:disabled { opacity: 0.5; cursor: default; }
+
+.chat-account { color: rgba(243, 239, 228, 0.5); font-size: 9.5px; text-align: right; overflow-wrap: anywhere; }
+.chat-account strong { color: rgba(243, 239, 228, 0.82); font-weight: 500; }
+.chat-display-status { grid-column: 1 / -1; margin: 0; color: var(--accent-text); font-size: 10px; }
+.chat-display-status:empty { display: none; }
+
+.chat-log {
+  list-style: none;
+  margin: 0;
+  padding: 2px 10px;
 }
 
 .chat-log:focus-visible {
@@ -859,44 +1093,55 @@ body[data-active-scene="arcade"] .magazine-hud {
 .chat-log:empty::before {
   content: "Nobody has said anything yet.";
   display: block;
-  padding: 12px 0;
-  color: var(--muted);
-  font-size: 10px;
+  padding: 14px 0;
+  color: rgba(243, 239, 228, 0.55);
+  font-size: 10.5px;
   text-align: center;
 }
 
 .chat-row {
-  padding: 6px 0;
-  border-bottom: 1px solid rgba(0, 0, 0, 0.35);
-  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.04);
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  column-gap: 6px;
+  align-items: baseline;
+  padding: 7px 0;
+  border-top: 1px solid rgba(0, 0, 0, 0.35);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.035);
+}
+
+.chat-row:first-child { border-top: 0; box-shadow: none; }
+
+.chat-name {
+  min-width: 0;
+  color: var(--accent-text);
+  font-size: 11px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.chat-login-name { min-width: 0; color: rgba(243, 239, 228, 0.45); font-size: 9.5px; overflow-wrap: anywhere; }
+.chat-time { color: rgba(243, 239, 228, 0.42); font-size: 9px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+.chat-text {
+  grid-column: 1 / -1;
+  margin-top: 2px;
+  color: var(--paper);
   font-size: 12px;
   line-height: 1.45;
   overflow-wrap: anywhere;
 }
 
-.chat-row:last-child {
-  border-bottom: 0;
-  box-shadow: none;
+/* The visitor's own lines: a green rule down their edge and a green name. */
+.chat-row[data-own="true"] {
+  margin-left: -10px;
+  padding-left: 8px;
+  border-left: 2px solid rgba(34, 197, 94, 0.7);
+  background: linear-gradient(90deg, rgba(34, 197, 94, 0.07), transparent 60%);
 }
 
-.chat-name {
-  margin-right: 8px;
-  color: var(--accent-text);
-  font-size: 9.5px;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-}
+.chat-row[data-own="true"] .chat-name { color: #8fe3a8; }
 
-.chat-login-name { margin-right: 8px; color: var(--muted); font-size: 10px; overflow-wrap: anywhere; }
-.chat-display-form { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }
-.chat-display-form input { min-width: 0; flex: 1; width: 100px; }
-.chat-display-form label { font-size: 10px; }
-.panel .chat-retention { flex: none; margin: 0; }
 .chat-announcement { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
-
-.chat-row[data-own="true"] .chat-name {
-  color: var(--ok);
-}
 
 .panel .chat-status {
   flex: none;
@@ -906,13 +1151,16 @@ body[data-active-scene="arcade"] .magazine-hud {
 .chat-form {
   display: flex;
   flex: none;
-  align-items: center;
+  align-items: stretch;
   gap: 8px;
 }
+
+.chat-field { position: relative; display: flex; flex: 1; min-width: 0; }
 
 .chat-form input {
   flex: 1;
   min-width: 0;
+  padding-right: 46px;
 }
 
 .chat-form input:disabled {
@@ -920,12 +1168,14 @@ body[data-active-scene="arcade"] .magazine-hud {
 }
 
 .chat-left {
-  flex: none;
-  min-width: 3ch;
-  color: rgba(243, 239, 228, 0.62);
+  position: absolute;
+  top: 50%;
+  right: 10px;
+  transform: translateY(-50%);
+  color: rgba(243, 239, 228, 0.5);
   font-size: 10px;
   font-variant-numeric: tabular-nums;
-  text-align: right;
+  pointer-events: none;
 }
 
 .chat-left[data-over="true"] {
@@ -935,7 +1185,7 @@ body[data-active-scene="arcade"] .magazine-hud {
 .chat-send {
   flex: none;
   min-height: 38px;
-  padding: 0 12px;
+  padding: 0 14px;
   border: 2px solid var(--wood-edge);
   border-radius: 6px;
   background: linear-gradient(#e2a04a, var(--accent));
@@ -953,9 +1203,20 @@ body[data-active-scene="arcade"] .magazine-hud {
   outline: none;
 }
 
+.chat-send:focus-visible { box-shadow: 0 3px 0 var(--nail), 0 0 0 2px var(--accent-text); }
+
 .chat-send:disabled {
   opacity: 0.5;
   cursor: default;
+}
+
+@media (pointer: coarse) {
+  .chat-send,
+  .chat-form input { min-height: 44px; }
+  .chat-display-form input,
+  .chat-display-save { min-height: 40px; }
+  .chat-about summary { width: 30px; height: 30px; top: 8px; right: 10px; }
+  .panel[data-panel="chat"] > .panel-title { padding-right: 36px; }
 }
 
 .panel h2 {
@@ -1104,17 +1365,17 @@ body[data-active-scene="arcade"] .magazine-hud {
   text-transform: uppercase;
 }
 
+/* One row an Ooga: presence, name, the player's marks, activity age and state, each in a column of its own
+   so a long name wraps inside its cell and a mark or state coming and going never moves the others. */
 .roster {
   display: grid;
-  grid-template-columns: 8px minmax(0, 1fr) max-content max-content;
+  grid-template-columns: 8px minmax(0, 1fr) 26px max-content 6.5ch;
+  grid-auto-rows: max-content;
   column-gap: 8px;
+  align-content: start;
   list-style: none;
   margin: 0;
   padding: 2px 10px;
-  background: var(--tablet);
-  border: 2px solid var(--stone-dk);
-  border-radius: 9px 7px 10px 8px;
-  box-shadow: var(--tablet-shadow);
 }
 
 .roster li {
@@ -1123,50 +1384,73 @@ body[data-active-scene="arcade"] .magazine-hud {
   grid-template-columns: subgrid;
   column-gap: 8px;
   align-items: center;
-  padding: 7px 0;
-  border-bottom: 1px solid rgba(0, 0, 0, 0.35);
-  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.04);
+  min-height: 22px;
+  padding: 6px 0;
+  border-top: 1px solid rgba(0, 0, 0, 0.35);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.035);
+  font-size: 12px;
 }
 
-.roster li:last-child {
-  border-bottom: 0;
+.roster li:first-child {
+  border-top: 0;
   box-shadow: none;
 }
 
 .roster-away button {
   grid-column: 1 / -1;
   width: 100%;
+  min-height: 30px;
+  border: 1px dashed rgba(243, 239, 228, 0.24);
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.18);
+  color: rgba(243, 239, 228, 0.7);
+  font-size: 9.5px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.roster-away button:hover,
+.roster-away button.virtual-hover {
+  border-color: var(--accent);
+  color: var(--paper);
+}
+
+.roster-away button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+@media (pointer: coarse) {
+  .roster-away button { min-height: 44px; }
 }
 
 .roster-presence {
   width: 8px;
   height: 8px;
   border-radius: 50%;
-  background: var(--muted);
+  background: rgba(166, 166, 162, 0.45);
+  box-shadow: inset 0 1px 0 rgba(0, 0, 0, 0.35);
 }
 
 .roster-presence[data-online="true"] {
   background: var(--ok);
+  box-shadow: 0 0 5px rgba(34, 197, 94, 0.55);
 }
 
 .roster-name {
   min-width: 0;
+  color: var(--paper);
   overflow-wrap: anywhere;
 }
 
-/* A signed-in player's marks follow the name inside its cell, so the roster's columns stay as they are:
-   the host's black dot, then their voice (grey in voice, green speaking, red muted at their end; the
-   slash is this visitor's own mute, which a click on the mark toggles). */
+/* A signed-in player's marks keep a column of their own after the name: the host's black dot, then their
+   voice (grey in voice, green speaking, red muted at their end; the slash is this visitor's own mute,
+   which a click on the mark toggles). */
 .roster-marks {
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  margin-left: 6px;
-  vertical-align: middle;
   white-space: nowrap;
 }
 
-.roster-marks:not(:has(> :not([hidden]))),
 .roster-host[hidden],
 .roster-voice[hidden] {
   display: none;
@@ -1237,7 +1521,7 @@ body[data-active-scene="arcade"] .magazine-hud {
 }
 
 .roster-age {
-  color: var(--muted);
+  color: rgba(243, 239, 228, 0.55);
   font-size: 10px;
   font-variant-numeric: tabular-nums;
   text-align: right;
@@ -1272,6 +1556,12 @@ body[data-active-scene="arcade"] .magazine-hud {
   color: var(--accent-text);
   border-color: rgba(216, 137, 43, 0.4);
   background: rgba(216, 137, 43, 0.08);
+}
+
+.roster .roster-state {
+  min-width: 0;
+  padding: 2px 0;
+  font-size: 9px;
 }
 
 #qr {
@@ -1488,37 +1778,117 @@ body[data-active-scene="arcade"] .magazine-hud {
   cursor: not-allowed;
 }
 
+/* The drawer's foot: the account and voice on the left, the renderer and the demo reset quietly on the right. */
 .sheet-foot {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
-  gap: 10px;
-  padding: 8px 16px;
+  gap: 6px 12px;
+  padding: 8px 14px;
   border-top: 2px solid var(--wood-edge);
+  background: rgba(0, 0, 0, 0.16);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.07);
   flex: none;
 }
 
 .account {
   display: flex;
-  align-items: baseline;
+  flex: 1 1 auto;
+  align-items: center;
   flex-wrap: wrap;
-  gap: 4px 10px;
+  gap: 6px 10px;
   min-width: 0;
 }
 
+.account-who {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.account-who:not(:has(> :not([hidden]))) { display: none; }
+
 .account-name {
+  min-width: 0;
+  color: var(--paper);
+  font-size: 11px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.account[data-live="true"] .account-name::before {
+  content: "";
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  margin-right: 6px;
+  border-radius: 50%;
+  background: var(--ok);
+  box-shadow: 0 0 5px rgba(34, 197, 94, 0.55);
+  vertical-align: 1px;
+}
+
+.account-room {
+  color: rgba(243, 239, 228, 0.6);
+  font-size: 9.5px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.account-actions {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+}
+
+.foot-button {
+  min-height: 28px;
+  padding: 0 10px;
+  border: 2px solid var(--wood-edge);
+  border-radius: 6px;
+  background: linear-gradient(var(--plank), var(--wood));
   color: var(--paper);
   font-size: 9.5px;
   letter-spacing: 0.1em;
   text-transform: uppercase;
-  overflow-wrap: anywhere;
+  text-shadow: 0 1px 0 rgba(0, 0, 0, 0.5);
+  box-shadow: 0 2px 0 var(--nail);
+  white-space: nowrap;
+  cursor: pointer;
 }
 
-.account-room {
-  color: var(--accent-text);
-  font-size: 9.5px;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
+.foot-button:hover,
+.foot-button.virtual-hover,
+.foot-button:focus-visible { background: linear-gradient(#b8844a, var(--plank)); outline: none; }
+.foot-button:focus-visible { box-shadow: 0 2px 0 var(--nail), 0 0 0 2px var(--accent); }
+
+.foot-primary {
+  background: linear-gradient(#e2a04a, var(--accent));
+  color: var(--ink);
+  text-shadow: none;
+}
+
+.foot-primary:hover,
+.foot-primary.virtual-hover,
+.foot-primary:focus-visible { background: linear-gradient(#f0b05a, #e2a04a); }
+
+/* In voice with the microphone live, the voice button wears the presence green. */
+.foot-button[aria-pressed="true"] { border-color: rgba(34, 197, 94, 0.75); }
+
+.sheet-foot-meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  margin-left: auto;
+}
+
+@media (pointer: coarse) {
+  .foot-button { min-height: 40px; }
+  .sheet-foot .link { min-height: 40px; }
 }
 
 .quality {
@@ -4705,7 +5075,6 @@ body.orbit-dragging #tooltip {
 
 @media (prefers-reduced-motion: reduce) {
 
-  .meter-fill,
   .toast,
   .hint {
     transition: none;
@@ -4755,20 +5124,6 @@ body.orbit-dragging #tooltip {
     font-size: 10.5px;
   }
 
-  .meter {
-    justify-self: end;
-    gap: 8px;
-    padding: 6px 10px;
-  }
-
-  .meter-label {
-    display: none;
-  }
-
-  .meter-bar {
-    width: 84px;
-  }
-
   .presets {
     grid-column: 1 / -1;
     justify-content: center;
@@ -4811,8 +5166,8 @@ body.orbit-dragging #tooltip {
     bottom: var(--chat-keyboard, 0px);
     width: 100%;
     max-width: none;
-    height: 52vh;
-    max-height: min(52vh, max(0px, calc(var(--chat-viewport, 100vh) - 42px - var(--safe-top))));
+    height: var(--sheet-height, 52vh);
+    max-height: max(0px, calc(var(--chat-viewport, 100vh) - 74px - var(--safe-top)));
     border-radius: var(--radius) var(--radius) 0 0;
     border-bottom: 0;
     padding-bottom: var(--safe-bottom);
@@ -4843,7 +5198,7 @@ body.orbit-dragging #tooltip {
     border: 3px solid var(--wood-edge);
     border-bottom: 0;
     border-radius: 8px 8px 0 0;
-    background: linear-gradient(var(--plank), var(--wood));
+    background: linear-gradient(var(--wood), var(--wood-dk));
   }
 
   .sheet-toggle-bananas {
@@ -4853,21 +5208,13 @@ body.orbit-dragging #tooltip {
     padding: 4px 18px 0;
   }
 
-  .tabs button {
-    min-height: 38px;
-    font-size: min(17px, 4vw);
-  }
-
-  .tabs:has(> [data-tab="loot"]:not([hidden])):has(> [data-tab="chat"]:not([hidden])) button {
-    font-size: min(12.5px, 3.3vw);
-  }
-
   .panel {
     padding: 12px 14px;
   }
 
   /* Under 16px a phone zooms the page into the input. */
-  .chat-form input {
+  .chat-form input,
+  .chat-display-form input {
     font-size: 16px;
   }
 
@@ -5040,34 +5387,13 @@ body.orbit-dragging #tooltip {
 
   .panel[data-panel="roster"] > .roster li {
     grid-column: auto;
-    grid-template-columns: 8px minmax(0, 1fr) max-content max-content;
+    grid-template-columns: 8px minmax(0, 1fr) 26px max-content 6.5ch;
   }
 
   .panel[data-panel="roster"] > .roster li.roster-away {
     grid-column: 1 / -1;
   }
 
-  .panel[data-panel="bananas"] {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    align-content: start;
-    gap: 12px;
-  }
-
-  .panel[data-panel="bananas"] > .meter {
-    grid-column: 1 / -1;
-    margin-bottom: 0;
-  }
-
-  .panel[data-panel="bananas"] > .stats,
-  .panel[data-panel="bananas"] > .help {
-    margin-top: 0;
-  }
-
-  .panel[data-panel="bananas"] > .feed-open {
-    align-self: end;
-    margin-top: 0;
-  }
 }
 
 /* Keep full-size weapon readouts on phones; spares move onto their own row. */
@@ -5110,8 +5436,8 @@ body.orbit-dragging #tooltip {
     right: 0;
     bottom: var(--chat-keyboard, 0px);
     width: 330px;
-    height: 72vh;
-    max-height: min(72vh, max(0px, calc(var(--chat-viewport, 100vh) - 42px - var(--safe-top))));
+    height: var(--sheet-height, 72vh);
+    max-height: max(0px, calc(var(--chat-viewport, 100vh) - 74px - var(--safe-top)));
     border-radius: var(--radius) 0 0 0;
     border-bottom: 0;
     transition: transform 0.28s ease;
@@ -5131,7 +5457,7 @@ body.orbit-dragging #tooltip {
     border: 3px solid var(--wood-edge);
     border-bottom: 0;
     border-radius: 8px 8px 0 0;
-    background: linear-gradient(var(--plank), var(--wood));
+    background: linear-gradient(var(--wood), var(--wood-dk));
   }
 
   .presets {
@@ -8113,4 +8439,12 @@ body.dsb-menu-open :is(.bottom-hud,.top-hud,#joy-move,#joy-look,#act,.weapon-hud
   .svrn-menu nav button { flex: 1 0 42%; }
   .svrn-grid { grid-template-columns: 1fr; }
   .svrn-content { padding: 14px; }
+}
+
+/* Bottom-anchored drawers grow upward, with the resize grip just inside their top edge. */
+@media (max-width: 720px), (max-height: 500px) and (orientation: landscape) {
+  .sheet { padding-top: 12px; }
+  .sheet-resize { top: -3px; bottom: auto; }
+  .sheet-toggle-loot { top: -39px; left: 144px; height: 42px; }
+  .sheet-toggle-chat { top: -39px; left: var(--sheet-chat-left); height: 42px; }
 }

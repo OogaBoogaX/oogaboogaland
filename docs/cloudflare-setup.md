@@ -64,3 +64,22 @@ npm run dev                             # http://localhost:8787, with the stagin
 ```
 
 The local OAuth App has homepage `http://localhost:8787` and callback `http://localhost:8787/auth/callback`. `npm run dev` builds `_site/` and passes `--local-upstream localhost:8787`, so the Origin check sees the local address. Local D1 and the room live in `.wrangler/` and never touch staging.
+
+To show production donation totals and the leaderboard with the local page, sign in to
+Wrangler and run this from the repository root:
+
+```sh
+npm --prefix worker run dev:live-donations
+```
+
+Open `http://localhost:8787`. `wrangler.local-donations.jsonc` serves the current local build
+and connects only `DONATIONS` remotely, to `bananapayserver-production`'s `PageApi`. Sign-in
+and the room use local storage; optional local OAuth and voice credentials still come from
+`.dev.vars`. Viewing totals does not require sign-in. The donation kiosk in this preview
+uses real production invoices. Use this config only with `wrangler dev`, never deploy it.
+If using local sign-in, first apply its local schema with
+`wrangler d1 migrations apply DB --local --config wrangler.local-donations.jsonc`.
+
+The feed reflects the currently deployed backend. The independent sats leaderboard requires
+bananapayserver's donor-sats migration and updated feed to be deployed; starting this local
+preview does not deploy either.

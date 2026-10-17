@@ -7,6 +7,7 @@
   "license": "Unlicense",
   "scripts": {
     "dev": "npm --prefix .. run build:site && wrangler dev --config ../wrangler.staging.jsonc --port 8787 --local-upstream localhost:8787",
+    "dev:live-donations": "npm --prefix .. run build:site && wrangler dev --config ../wrangler.local-donations.jsonc --ip 127.0.0.1 --port 8787 --local-upstream localhost:8787",
     "deploy:staging": "npm --prefix .. run build:site && wrangler d1 migrations apply DB --remote --config ../wrangler.staging.jsonc && wrangler deploy --config ../wrangler.staging.jsonc",
     "deploy:production": "npm --prefix .. run build:site && wrangler d1 migrations apply DB --remote --config ../wrangler.production.jsonc && wrangler deploy --config ../wrangler.production.jsonc",
     "migrate:local": "wrangler d1 migrations apply DB --local --config ../wrangler.staging.jsonc",
