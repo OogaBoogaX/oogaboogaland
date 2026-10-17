@@ -111,13 +111,22 @@
   // API's last word on whether donations are open, and `state.network` the network it takes payments on, each null
   // before it has said. `state.tally` is its latest tally, null before the first.
   const SOCKET_MIN = 1000, SOCKET_MAX = 60000, PLAYED = 64;
-  const state = { open: null, network: null, connected: false, attempts: 0, donations: 0, tally: null };
+  const state = { open: null, network: null, connected: false, attempts: 0, donations: 0, tally: null, board: null, boardSats: null };
+  const readers = new Set();
+  const notify = () => { for (const reader of readers) reader(); };
+  const subscribeState = (reader) => {
+    readers.add(reader);
+    return () => readers.delete(reader);
+  };
   const played = new Array(PLAYED).fill(""), handlers = { donation: null, status: null, pile: null, board: null };
   let socket = null, timer = 0, backoff = SOCKET_MIN, after = "", playedAt = 0, live = false;
   const donationOf = (d) => {
     if (!d || typeof d.id !== "string" || !d.id || d.id.length > 64 || !Number.isInteger(d.sats) || d.sats <= 0 || !isNumber(d.at)) return null;
     return { id: d.id, sats: d.sats, handle: sanitize(d.handle, HANDLE_MAX), message: sanitize(d.message, MESSAGE_MAX), at: d.at };
   };
+  const boardOf = (entries) => entries.slice(0, 256)
+    .filter((e) => e && typeof e.handle === "string" && isNumber(e.bananas) && e.bananas >= 0)
+    .map((e) => ({ handle: sanitize(e.handle, HANDLE_MAX), bananas: e.bananas, sats: Number.isSafeInteger(e.sats) && e.sats >= 0 ? e.sats : null }));
   // The tally: every donation the API holds, all time (`count`, `sats`, `bananas`), the latest one's sats, the last
   // seven days in UTC hours (`[start in ms, sats, bananas]`, only hours with donations) and its current rate. A new
   // object each time, so a reader sees a change by its identity.
@@ -141,6 +150,7 @@
       state.open = data.open;
       if (NETWORKS.includes(data.network)) state.network = data.network;
       if (handlers.status) handlers.status(data.open);
+      notify();
     } else if (data.type === "donation") {
       const donation = donationOf(data.donation), b = data.bananas;
       if (!donation || played.includes(donation.id)) return;
@@ -152,10 +162,15 @@
     } else if (data.type === "pile" && isNumber(data.bananas) && isNumber(data.eatPerHour)) {
       if (handlers.pile) handlers.pile({ bananas: Math.max(0, data.bananas), eatPerHour: Math.max(0, data.eatPerHour) });
     } else if (data.type === "board" && Array.isArray(data.entries)) {
-      if (handlers.board) handlers.board(data.entries.filter((e) => e && typeof e.handle === "string" && isNumber(e.bananas)).map((e) => ({ handle: sanitize(e.handle, HANDLE_MAX), bananas: e.bananas })));
+      // Independent rankings: the sat leaders may be outside the banana leaders. Older APIs
+      // have no satsEntries; never estimate their historical sats from today's price.
+      state.board = boardOf(data.entries);
+      state.boardSats = Array.isArray(data.satsEntries) ? boardOf(data.satsEntries) : null;
+      if (handlers.board) handlers.board(state.board);
+      notify();
     } else if (data.type === "tally") {
       const tally = tallyOf(data);
-      if (tally) state.tally = tally;
+      if (tally) { state.tally = tally; notify(); }
     }
   };
   const retry = () => {
@@ -249,6 +264,7 @@
   const useOrigin = () => {
     if (real || location.protocol !== "https:" && location.protocol !== "http:") return;
     real = true;
+    notify();
     if (!subscribed) return;
     window.clearTimeout(simTimer);
     simTimer = 0;
@@ -257,5 +273,5 @@
   // The test network real donations are paid on (signet on staging), or "" for mainnet, before the API has said, and
   // when simulated.
   const testNetwork = () => real && state.network && state.network !== "mainnet" ? state.network : "";
-  BL.donations = { config, get real() { return real; }, get testNetwork() { return testNetwork(); }, state, useOrigin, createRequest, invoice, note, onchain, waitFor, waited, subscribe, sanitize, HANDLE_MAX, MESSAGE_MAX };
+  BL.donations = { config, get real() { return real; }, get testNetwork() { return testNetwork(); }, state, useOrigin, createRequest, invoice, note, onchain, waitFor, waited, subscribe, subscribeState, sanitize, HANDLE_MAX, MESSAGE_MAX };
 })();

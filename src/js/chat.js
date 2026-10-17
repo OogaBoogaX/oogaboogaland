@@ -22,9 +22,9 @@
   const TIME = new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit" });
   const $ = (id) => document.getElementById(id);
   const sheet = $("sheet"), tab = $("chat-tab"), panel = $("chat-panel"), log = $("chat-log");
-  const status = $("chat-status"), statusText = $("chat-status-text"), signIn = $("chat-login");
+  const status = $("chat-status"), statusText = $("chat-status-text");
   const form = $("chat-form"), input = $("chat-input"), left = $("chat-left"), sendButton = $("chat-send");
-  const announcement = $("chat-announcement");
+  const announcement = $("chat-announcement"), roomChip = $("chat-room");
   const announce = (text) => { if (announcement && announcement.textContent !== text) announcement.textContent = text; };
   const viewport = window.visualViewport, fine = window.matchMedia("(pointer: fine)");
   const lines = [];
@@ -34,18 +34,25 @@
   const stopWaiting = () => { window.clearTimeout(ackTimer); ackTimer = 0; if (pending) pending.awaiting = false; };
 
   const row = (line) => {
-    const li = document.createElement("li"), name = document.createElement("span"), text = document.createElement("span"), login = document.createElement("span");
+    const li = document.createElement("li"), name = document.createElement("span"), text = document.createElement("span"), login = document.createElement("span"), time = document.createElement("time");
     li.className = "chat-row";
     li.dataset.id = String(line.id);
     if (line.login.toLowerCase() === me) li.dataset.own = "true";
-    if (line.at) li.title = TIME.format(line.at);
+    if (line.at) {
+      li.title = TIME.format(line.at);
+      time.className = "chat-time";
+      time.dateTime = new Date(line.at).toISOString();
+      time.textContent = li.title;
+    }
     name.className = "chat-name";
     name.textContent = line.name;
     text.className = "chat-text";
     text.textContent = line.text;
     login.className = "chat-login-name";
     login.textContent = "@" + line.login;
-    li.append(name, login, text);
+    li.append(name, login);
+    if (line.at) li.append(time);
+    li.append(text);
     return li;
   };
   const redraw = (follow = true) => {
@@ -152,8 +159,12 @@
     if (!live) { stopWaiting(); notice = ""; }
     input.disabled = !live;
     input.placeholder = live ? "Say something" : "";
-    signIn.hidden = !!player;
     status.hidden = live;
+    const chip = live ? "Live" : !player ? "Signed out" : room === "connecting" ? "Joining" : room === "paused" ? "Paused" : "Offline";
+    if (roomChip.textContent !== chip) {
+      roomChip.textContent = chip;
+      roomChip.dataset.tone = live ? "live" : room === "connecting" ? "wait" : "idle";
+    }
     statusText.textContent = room === "revoked" ? ROOM_WORDS.revoked : !player ? (logoutEpoch ? "Signed out. Local chat and draft cleared. Sign in to chat." : "Sign in to chat with everyone on the island.") : ROOM_WORDS[room] || "";
     update();
   };
