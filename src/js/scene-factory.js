@@ -128,7 +128,7 @@
   // FILL_H of the view's height or FILL_W of its width, and back out (LEAVING); after a payment it glides over
   // WATCH_EASE to the show (WATCHING), where the cooker takes the tip WATCH_LEAD into the glide, and comes back
   // WATCH_AFTER after the last banana is out.
-  const AT_KIOSK = 1, LEAVING = 2, WATCHING = 3, EASE = 0.8, WATCH_EASE = 1.6, WATCH_LEAD = 0.7, WATCH_AFTER = 2, FILL_H = 0.76, FILL_W = 0.92;
+  const AT_KIOSK = 1, LEAVING = 2, WATCHING = 3, EASE = 0.8, WATCH_EASE = 1.6, WATCH_LEAD = 0.7, WATCH_AFTER = 2, FILL_H = 0.66, FILL_W = 0.92;
   // How near the kiosk the walking visitor is told how to use it: the reach Space uses it from (the crew's REACH + 0.6).
   const KIOSK_HINT = 2.2;
   const SPARKS_LIME = ["#b6ff5a", "#e8ffb0", "#6fe03a"].map((c) => models.particleGeometry(c, 0.1, 1));
@@ -828,26 +828,28 @@
     b.flow = BL.factoryKiosk.create({
       link: () => link,
       real,
-      startDetails: () => { b.details = BL.donationPopup.defaults(); },
-      details: () => b.details,
-      closeDetails: () => BL.donationPopup.cancelDetails(),
-      editDetails: (done) => BL.donationPopup.editDetails(b.details, (value) => {
-        b.details = value;
-        done();
-      }),
-      invoice: (sats) => donations.invoice({ sats, ...b.details }),
+      startDetails: () => BL.donationPopup.attachDetails(b.flow, BL.donationPopup.defaults(), true),
+      details: () => BL.donationPopup.details(),
+      closeDetails: () => BL.donationPopup.detachDetails(b.flow),
+      editDetails: () => BL.donationPopup.focusDetails(),
+      detailsState: (flow) => BL.donationPopup.detailsState(flow),
+      invoice: (sats, value) => donations.invoice({ sats, ...value }),
+      note: (request, value, changedHandle) => donations.note(request, value.message, changedHandle ? value.handle : undefined),
       onchain: (request) => donations.onchain(request),
       waitFor: (id) => donations.waitFor(id),
       open: () => donations.state.open,
       testNetwork: () => donations.testNetwork,
-      request: () => donations.createRequest(b.details),
+      limits: () => donations.state.limits,
+      rate: () => BL.donationRate.current || donations.state.tally?.rate,
+      watchRate: () => BL.donationRate.watch(),
+      request: () => donations.createRequest(BL.donationPopup.details()),
       bananasFor: gameMod.bananasFor,
       price: () => BL.chain.snapshot.priceUsd,
       copy: (text, what = "Invoice") => {
         if (navigator.clipboard) navigator.clipboard.writeText(text).catch(() => {});
         hud.toast(real ? `${what} copied` : `${what} copied · payments are simulated in this build`);
       },
-      pay: (id, sats) => onDonation({ ...tipEvent(id, sats), ...b.details }),
+      pay: (id, sats) => onDonation({ ...tipEvent(id, sats), ...BL.donationPopup.details() }),
       release: () => releaseTip(s),
       watch: () => watchBooth(s),
       close: () => leaveBooth(s)
@@ -1049,7 +1051,7 @@
     return true;
   };
   // An on-chain payment seen before its block: true when the kiosk holding its invoice shows it.
-  const onSeen = (id, sats, due, left) => !!(scene.booth.flow && scene.booth.flow.seen(id, sats, due, left));
+  const onSeen = (id, sats, due, left, pricing) => !!(scene.booth.flow && scene.booth.flow.seen(id, sats, due, left, pricing));
   const onLootCleared = () => {};
 
   const build = () => {

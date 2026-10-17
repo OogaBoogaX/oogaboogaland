@@ -17,7 +17,7 @@
   const $ = (id) => document.getElementById(id);
   const TIER_RANK = { legendary: 0, epic: 1, rare: 2, common: 3 };
   const BANANA_COUNT = new Intl.NumberFormat("en-US", { maximumFractionDigits: 0 });
-  const DONATED_COUNT = new Intl.NumberFormat("en-US", { maximumFractionDigits: 2 });
+  const DONATED_COUNT = new Intl.NumberFormat("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   const DONOR_BANANAS = new Intl.NumberFormat("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   let donorUnit = "bananas";
   let donationStats = null, liveDonors = null;
@@ -224,6 +224,8 @@
       bananaTotal: $("banana-total"), bananaSource: $("banana-source"),
       bananaLeaders: $("banana-leaders"), bananaEmpty: $("banana-empty"),
       bananaBoardUnit: $("banana-board-unit"), bananaBoardNote: $("banana-board-note"),
+      bananaPanel: $("bananas-panel"), bananaRateLabel: $("banana-rate-label"),
+      bananaBtcPrice: $("banana-btc-price"), bananaExchange: $("banana-exchange"),
       donorUnits: [...document.querySelectorAll("[data-donor-unit]")],
       lootTab: $("loot-tab"),
       lootCount: $("loot-count"),
@@ -498,9 +500,45 @@
       if (showOnline(row)) placeRosterRow(row);
     };
     showVoices();
+    // Value the donated sats at the current price; donor rankings retain their receipt prices.
+    const showBananaRate = () => {
+      if (document.hidden || el.bananaPanel.hidden || el.sheet.dataset.open !== "true") return;
+      const live = BL.donationRate.current, saved = BL.donations.state.tally?.rate;
+      const rate = live && (!saved || live.at >= saved.at) ? live : saved;
+      const tally = BL.donations.real ? BL.donations.state.tally : donationStats;
+      const totalSats = tally ? BL.donations.real ? tally.sats : tally.totalSats : null;
+      const total = totalSats === 0 ? DONATED_COUNT.format(0) : totalSats !== null && rate
+        ? DONATED_COUNT.format(totalSats / 1e8 * rate.usdPerBtc) : "—";
+      const tone = !rate ? "wait" : rate.stale ? "stale" : rate.live ? "live" : "idle";
+      const label = tone === "live" ? "LIVE BTCUSD" : tone === "stale" ? "STALE BTCUSD" : "BTCUSD";
+      const price = rate ? `$${DONOR_BANANAS.format(rate.usdPerBtc)}` : "—";
+      const exchange = rate ? `≈ ${DONOR_BANANAS.format(1e8 / rate.usdPerBtc)} sats` : "— sats";
+      if (el.bananaRateLabel.dataset.tone !== tone) el.bananaRateLabel.dataset.tone = tone;
+      if (el.bananaRateLabel.textContent !== label) el.bananaRateLabel.textContent = label;
+      if (el.bananaBtcPrice.textContent !== price) el.bananaBtcPrice.textContent = price;
+      if (el.bananaExchange.textContent !== exchange) el.bananaExchange.textContent = exchange;
+      if (el.bananaTotal.textContent !== total) el.bananaTotal.textContent = total;
+    };
+    let stopBananaRate = null;
+    const watchBananaRate = () => {
+      const visible = !document.hidden && !el.bananaPanel.hidden && el.sheet.dataset.open === "true";
+      if (visible && !stopBananaRate) stopBananaRate = BL.donationRate.watch(showBananaRate);
+      else if (!visible && stopBananaRate) { stopBananaRate(); stopBananaRate = null; }
+      if (visible) showBananaRate();
+    };
+    const bananaRateObserver = new MutationObserver(watchBananaRate);
+    bananaRateObserver.observe(el.bananaPanel, { attributes: true, attributeFilter: ["hidden"] });
+    bananaRateObserver.observe(el.sheet, { attributes: true, attributeFilter: ["data-open"] });
+    on(document, "visibilitychange", watchBananaRate);
+    listeners.push(() => {
+      bananaRateObserver.disconnect();
+      if (stopBananaRate) stopBananaRate();
+    });
+    watchBananaRate();
     let shownTally, shownBoard, shownReal, shownNetwork, shownOpen;
     const refreshDonors = (force = false) => {
       const { real, state, testNetwork } = BL.donations;
+      showBananaRate();
       if (!force && shownTally === state.tally && shownBoard === state.board && shownReal === real && shownNetwork === testNetwork && shownOpen === state.open) return;
       shownTally = state.tally; shownBoard = state.board; shownReal = real; shownNetwork = testNetwork; shownOpen = state.open;
       const tally = real ? state.tally : donationStats;
@@ -511,7 +549,6 @@
       el.bananaSource.textContent = tone === "idle" ? "Demo" : tone === "test" ? `Test · ${testNetwork}` : tone === "wait" ? "Loading" : tone === "closed" ? "Closed" : "Live";
       el.bananaSource.title = tone === "idle" ? "Demo donations saved in this browser" : tone === "test" ? `Test donations on ${testNetwork}, not real bitcoin`
         : tone === "wait" ? "Waiting for the island’s donation feed" : tone === "closed" ? "Donations are closed for now" : "The island’s donation feed";
-      el.bananaTotal.textContent = tally ? DONATED_COUNT.format(tally.bananas) : "—";
       el.statDonations.textContent = tally ? BANANA_COUNT.format(real ? tally.count : tally.donations) : "—";
       el.statSats.textContent = tally ? BANANA_COUNT.format(real ? tally.sats : tally.totalSats) : "—";
       const entries = real ? donorUnit === "sats" ? state.boardSats : state.board : donationStats?.donors;
@@ -535,8 +572,8 @@
         : real && !entries ? "Loading the donor leaderboard…"
         : real ? "No donations yet. Feed the first Ooga!" : "New demo donations will appear here.";
       el.bananaBoardNote.textContent = !real ? "Demo donations in this browser only. Earlier tips have no donor history."
-        : testNetwork ? `Test donations on ${testNetwork}. Amounts as recorded when each was paid.`
-        : "All time, as recorded when each donation was paid.";
+        : testNetwork ? `Test donations on ${testNetwork}. Leaderboard values are recorded when paid.`
+        : "Leaderboard totals use each donation's recorded value.";
       el.bananaBoardUnit.textContent = donorUnit === "sats" ? "Sats" : "Bananas";
       el.bananaLeaders.setAttribute("aria-label", `Top donors by ${donorUnit}`);
       for (const button of el.donorUnits) button.setAttribute("aria-pressed", String(button.dataset.donorUnit === donorUnit));

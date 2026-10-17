@@ -14,7 +14,7 @@
   "use strict";
   const BL = window.BL = window.BL || {};
   const NETWORKS = ["mainnet", "testnet", "signet", "regtest"];
-  let real = false;
+  let real = false, invoiceMessageMax = 80;
   const config = {
     serverUrl: "https://btcpay.example.org",
     storeId: "REPLACE_WITH_STORE_ID",
@@ -89,15 +89,24 @@
     if (r.error) return r;
     const inv = r.invoice, b = r.bananas, rate = r.rate;
     if (typeof r.request !== "string" || !inv || typeof inv.id !== "string" || typeof inv.bolt11 !== "string" && inv.bolt11 != null || !isNumber(inv.expires)) return { error: "invalid" };
+    invoiceMessageMax = body.handle === undefined ? 80 : MESSAGE_MAX;
     return {
       request: r.request,
       invoice: { id: inv.id, bolt11: inv.bolt11 || null, expires: inv.expires },
       bananas: b && isNumber(b.exact) && isNumber(b.rounded) ? { exact: b.exact, rounded: b.rounded } : null,
-      rate: rateOf(rate)
+      rate: rateOf(rate),
+      pricing: r.pricing === "receipt" ? "receipt" : "invoice",
+      lightning: ["available", "limit", "unavailable"].includes(r.lightning) ? r.lightning : inv.bolt11 ? "available" : "unavailable"
     };
   };
   // Replaces the message on a request not yet paid.
-  const note = (request, message) => call("/donations/note", { request, message: sanitize(message, MESSAGE_MAX) });
+  const note = (request, message, handle) => {
+    const body = { request, message: sanitize(message, MESSAGE_MAX) };
+    // Older servers accept notes but silently cap them at 80 characters. Never claim a long edit saved there.
+    if (body.message.length > invoiceMessageMax) return Promise.resolve({ error: "invalid" });
+    if (handle !== undefined) body.handle = sanitize(handle, HANDLE_MAX).replace(/^@+/, "").trim() || "anon";
+    return call("/donations/note", body);
+  };
   // Switches a request's invoice to on-chain as well: `{ address, sats }`, the address and what to send there (more than
   // the invoice when the store adds a network fee), checked, or `{ error }` (`expired` once the invoice has).
   const onchain = async (request) => {
@@ -122,7 +131,11 @@
   // API's last word on whether donations are open, and `state.network` the network it takes payments on, each null
   // before it has said. `state.tally` is its latest tally, null before the first.
   const SOCKET_MIN = 1000, SOCKET_MAX = 60000, PLAYED = 64;
-  const state = { open: null, network: null, connected: false, attempts: 0, donations: 0, tally: null, board: null, boardSats: null };
+  const state = { open: null, network: null, connected: false, attempts: 0, donations: 0, tally: null, board: null, boardSats: null, limits: null };
+  const limitsOf = (v) => v && Number.isSafeInteger(v.minSats) && v.minSats > 0
+    && Number.isSafeInteger(v.maxSats) && v.maxSats >= v.minSats
+    && Number.isSafeInteger(v.lightningMaxSats) && v.lightningMaxSats > 0 && v.lightningMaxSats <= v.maxSats
+    ? { minSats: v.minSats, maxSats: v.maxSats, lightningMaxSats: v.lightningMaxSats } : null;
   const readers = new Set();
   const notify = () => { for (const reader of readers) reader(); };
   const subscribeState = (reader) => {
@@ -160,6 +173,8 @@
     if (data.type === "status" && typeof data.open === "boolean") {
       state.open = data.open;
       if (NETWORKS.includes(data.network)) state.network = data.network;
+      const limits = limitsOf(data.limits);
+      if (data.limits === null || limits) state.limits = limits;
       if (handlers.status) handlers.status(data.open);
       notify();
     } else if (data.type === "donation") {
@@ -185,7 +200,10 @@
     } else if (data.type === "seen" && typeof data.id === "string" && data.id && Number.isInteger(data.sats) && data.sats > 0 && Number.isInteger(data.due) && data.due > 0 && Number.isInteger(data.left) && data.left >= 0) {
       // An on-chain payment seen before its block: everything received on that invoice so far, its amount, and what
       // is left to send, the network fee for a second payment included (0 once it is all there).
-      if (handlers.seen) handlers.seen(data.id, data.sats, data.due, data.left);
+      const p = data.pricing, b = p?.bananas;
+      const pricing = data.left === 0 && p && isNumber(p.receivedAt) && p.receivedAt > 0
+        ? { receivedAt: p.receivedAt, rate: rateOf(p.rate), bananas: b && isNumber(b.exact) && isNumber(b.rounded) && b.exact >= 0 && b.rounded >= 0 ? { exact: b.exact, rounded: b.rounded } : null } : null;
+      if (handlers.seen) handlers.seen(data.id, data.sats, data.due, data.left, pricing);
     }
   };
   const retry = () => {

@@ -4642,6 +4642,10 @@ const donationClientChecks = async () => {
   const stop = D.subscribe((d, bananas) => received.push({ d, bananas }), { onSeen: (...a) => seen.push(a) });
   const message = data => sockets.at(-1).onmessage({ data: JSON.stringify(data) });
   message({ type: "status", open: true, network: "signet" });
+  message({ type: "status", open: true, limits: { minSats: 1, maxSats: 2000, lightningMaxSats: 1000 } });
+  const advertisedLimits = D.state.limits?.lightningMaxSats === 1000;
+  message({ type: "status", open: true, limits: { minSats: 1, maxSats: 2000, lightningMaxSats: 3000 } });
+  const validatedLimits = D.state.limits?.lightningMaxSats === 1000;
   message({ type: "tally", count: 0, sats: 0, bananas: 0, last: null, hours: [], rate: null });
   const empty = D.state.tally?.count === 0 && D.state.tally.last === 0 && D.testNetwork === "signet";
   message({ type: "tally", count: 1, sats: 1000, bananas: 0.25, last: 1000, hours: [[Date.now(), 1000, 0.25]], rate: null });
@@ -4661,13 +4665,13 @@ const donationClientChecks = async () => {
   message({ ...paid, donation: { ...paid.donation, id: "unpriced" }, bananas: null });
   message({ type: "seen", id: "chain", sats: 400, due: 1000, left: 615 });
   message({ type: "seen", id: "chain", sats: 400, due: 1000 });
-  const heard = seen.length === 1 && seen[0].join() === "chain,400,1000,615";
+  const heard = seen.length === 1 && seen[0].slice(0, 4).join() === "chain,400,1000,615" && seen[0][4] === null;
   const fallback = await D.invoice({ sats: 1000 });
   const unlit = fallback.invoice?.id === "invoice" && fallback.invoice.bolt11 === null;
   stop();
   record("donation socket: empty and fractional tallies are accepted, malformed tallies keep the last reading, banana and sat rankings stay independent, older boards never invent sats, replay counts a payment once, an unpriced payment counts no bananas, a seen on-chain payment is passed on and a malformed one isn't, an invoice without its Lightning half is accepted, and unsubscribe closes the socket",
-    empty && tally && boards && legacyBoard && replay && heard && unlit && received.length === 2 && received[0].bananas.exact === 0.25 && received[1].bananas.exact === 0 && received[1].bananas.rounded === 0 && sockets[1].closed && !D.state.connected,
-    JSON.stringify({ empty, tally, boards, legacyBoard, replay, heard, unlit, received }));
+    advertisedLimits && validatedLimits && empty && tally && boards && legacyBoard && replay && heard && unlit && received.length === 2 && received[0].bananas.exact === 0.25 && received[1].bananas.exact === 0 && received[1].bananas.rounded === 0 && sockets[1].closed && !D.state.connected,
+    JSON.stringify({ advertisedLimits, validatedLimits, empty, tally, boards, legacyBoard, replay, heard, unlit, received }));
 
   let now = Date.now(), detailsOpen = false;
   const kioskContext = { window: { BL: { jumbotron: { text: { GLYPH_W: 5, GLYPH_H: 7, TRACKING: 1 } }, qr: { encode: () => ({ size: 1, modules: [1] }) } } },
@@ -4707,14 +4711,92 @@ const donationClientChecks = async () => {
   const waited = waits.join() === "unlit";
   record("donation kiosk: an invoice without its Lightning half pays on-chain from the quote, a seen payment short of it asks for what is left and a whole one waits for its block without offering payment again, and leaving waits on the invoice", chainOnly && short && whole && noRepay && waited, JSON.stringify({ chainOnly, short, whole, noRepay, waited, state: G.state }));
 
-  const elements = new Map(), frames = new Map(), invoices = [], popupWaits = [];
+  let liveRate = { usdPerBtc: 100000, satsPerBanana: 1000, at: now, stale: false }, watching = 0;
+  const live = kioskContext.window.BL.factoryKiosk.create({ real: true, link: () => "/lightning", bananasFor: () => 1,
+    invoice: async () => ({ request: "request", pricing: "receipt", invoice: { id: "floating", bolt11: "lntbs1", expires: now / 1000 + 900 }, bananas: { exact: 1, rounded: 1 }, rate: liveRate }),
+    onchain: async () => ({ address: "tb1qexampleaddress0000", sats: 1000 }), waitFor() {},
+    open: () => true, testNetwork: () => "", rate: () => liveRate, watchRate: () => { watching++; return () => watching--; } });
+  live.start(); for (const key of ["Enter", "1", "0", "0", "0", "Enter"]) live.key({ key }); await Promise.resolve();
+  const first = live.bananas === 1, fixedInvoice = live.invoice;
+  live.key({ key: "Enter" });
+  liveRate = { usdPerBtc: 90000, satsPerBanana: 1111, at: ++now, stale: false }; live.update(0.1);
+  const qrFloating = live.state === "invoice" && live.bananas === 0.9 && live.invoice === fixedInvoice;
+  live.key({ key: "Escape" }); live.key({ key: "O" }); await Promise.resolve();
+  const fixedChainCode = live.chain.code;
+  liveRate = { usdPerBtc: 80000, satsPerBanana: 1250, at: ++now, stale: false }; live.update(0.1);
+  const chainFloating = live.bananas === 0.8 && live.chain.code === fixedChainCode;
+  live.key({ key: "Escape" });
+  live.seen("floating", 1000, 1000, 0, { receivedAt: now, rate: liveRate, bananas: { exact: 0.8, rounded: 1 } });
+  liveRate = { usdPerBtc: 120000, satsPerBanana: 833, at: ++now, stale: false }; live.update(0.1);
+  const frozen = live.state === "confirming" && live.bananas === 0.8 && live.rate.usdPerBtc === 80000;
+  live.receive("floating", { exact: 0.8, rounded: 1 }, "donor", 1000); live.update(0.1);
+  const credited = live.bananas === 0.8;
+  live.stop();
+  record("donation pricing: estimates float on both QR screens without replacing either payment code, full receipt freezes even from the quote, settlement keeps its recorded bananas, and closing releases the rate feed",
+    first && qrFloating && chainFloating && frozen && credited && watching === 0, JSON.stringify({ first, qrFloating, chainFloating, frozen, credited, watching }));
+
+  const priceSockets = [], priceTimers = new Map(), priceListeners = new Map();
+  let priceClock = 1000, nextPriceTimer = 0;
+  const rateContext = { window: { BL: {}, setTimeout: fn => { const id = ++nextPriceTimer; priceTimers.set(id, fn); return id; }, clearTimeout: id => priceTimers.delete(id) },
+    document: { hidden: false, addEventListener: (name, fn) => priceListeners.set(name, fn), removeEventListener: name => priceListeners.delete(name) },
+    Date: { now: () => priceClock }, WebSocket: class { constructor(url) { this.url = url; priceSockets.push(this); } close() { this.closed = true; } } };
+  runInNewContext(await readFile(new URL("../src/js/donation-rate.js", import.meta.url), "utf8"), rateContext);
+  const rateNotices = [];
+  const rates = rateContext.window.BL.donationRate, offOne = rates.watch(value => rateNotices.push(value && { ...value })), offTwo = rates.watch();
+  priceSockets[0].onmessage({ data: JSON.stringify({ weightedPrice: "90000.12" }) });
+  const sharedRate = priceSockets.length === 1 && rates.current.usdPerBtc === 90000.12 && !rates.current.stale
+    && rates.current.live && rates.current.satsPerBanana > 1111 && rates.current.satsPerBanana < 1112
+    && rateNotices.at(-1)?.usdPerBtc === 90000.12;
+  priceSockets[0].onmessage({ data: JSON.stringify({ weightedPrice: "-1" }) });
+  const validRate = rates.current.usdPerBtc === 90000.12;
+  rateContext.document.hidden = true; priceListeners.get("visibilitychange")();
+  const hiddenRate = priceSockets[0].closed && rates.current.stale && priceTimers.size === 0 && rateNotices.at(-1)?.stale;
+  rateContext.document.hidden = false; priceListeners.get("visibilitychange")();
+  priceClock++; priceSockets[1].onmessage({ data: JSON.stringify({ weightedPrice: "91000" }) });
+  const noticeCount = rateNotices.length;
+  offOne(); priceClock++; priceSockets[1].onmessage({ data: JSON.stringify({ weightedPrice: "92000" }) });
+  const retainedRate = !priceSockets[1].closed && rateNotices.length === noticeCount;
+  offTwo(); offTwo();
+  record("donation rate: watchers share one socket, receive live and stale updates until released, reject invalid prices, pause while hidden, reconnect when visible, and close the last socket and its timers exactly once",
+    sharedRate && validRate && hiddenRate && retainedRate && priceSockets[1].closed && priceListeners.size === 0 && priceTimers.size === 0,
+    JSON.stringify({ sharedRate, validRate, hiddenRate, retainedRate, listeners: priceListeners.size, timers: priceTimers.size }));
+
+  const drawn = [], blankGlyph = [0, 0, 0, 0, 0, 0, 0];
+  kioskContext.window.BL.jumbotron.text.glyphOf = ch => { drawn.push(ch); return blankGlyph; };
+  const paintContext = new Proxy({}, { get: () => () => {} });
+  kioskContext.document.createElement = () => ({ getContext: () => paintContext });
+  let capCalls = 0;
+  const caps = { minSats: 1, maxSats: 2100000000000000, lightningMaxSats: 1000 };
+  const capped = kioskContext.window.BL.factoryKiosk.create({ real: true, link: () => "/lightning", bananasFor: () => 1,
+    limits: () => caps, open: () => true, testNetwork: () => "",
+    invoice: async () => { capCalls++; return { request: "request", lightning: "limit", invoice: { id: "chain-only", bolt11: null, expires: now / 1000 + 900 }, rate: null, bananas: null }; },
+    onchain: async () => ({ address: "tb1qexampleaddress0000", sats: 1001 }), waitFor() {} });
+  capped.start(); for (const key of ["Enter", "1", "0", "0", "1"]) capped.key({ key });
+  capped.update(0.1); capped.paint();
+  const capWarning = drawn.join("").includes("OVER LIGHTNING LIMIT");
+  capped.tap(200, 360); await Promise.resolve(); capped.paint();
+  const capContinue = capped.state === "quote" && capCalls === 1;
+  capped.tap(180, 350);
+  const lightningDisabled = capped.state === "quote" && capCalls === 1;
+  capped.tap(300, 350); await Promise.resolve();
+  const capOnchain = capped.state === "chain";
+  capped.stop(); capped.start(); for (const key of ["Enter", ..."2100000000000001"]) capped.key({ key });
+  capped.key({ key: "Enter" });
+  const overallCap = capped.state === "amount" && capCalls === 1;
+  capped.stop();
+  record("donation limits: amounts above Lightning warn before Continue, keep on-chain available, disable the Lightning button, and still reject invalid Bitcoin amounts",
+    capWarning && capContinue && lightningDisabled && capOnchain && overallCap, JSON.stringify({ capWarning, capContinue, lightningDisabled, capOnchain, overallCap }));
+
+  const elements = new Map(), frames = new Map(), detailTimers = new Map(), invoices = [], notes = [], popupWaits = [];
   for (const id of ["donation-popup", "donation-screen", "donation-handle", "donation-message", "donation-close",
-    "donation-details", "donation-details-form", "donation-details-handle", "donation-details-message", "donation-details-close"]) elements.set(id, {
+    "donation-fields", "factory-donation-fields", "donation-details-status"]) elements.set(id, {
     listeners: new Map(), open: false, value: "", disabled: false,
     addEventListener(type, fn) { this.listeners.set(type, fn); }, removeEventListener(type) { this.listeners.delete(type); },
-    showModal() { this.open = true; }, close() { this.open = false; }, focus() {}, getContext: () => ({})
+    showModal() { this.open = true; }, close() { this.open = false; }, focus() { this.focused = true; },
+    select() { this.selected = true; }, scrollIntoView() {}, append() {}, insertBefore() {}, querySelector: () => ({}), getContext: () => ({})
   });
   Object.assign(kioskContext, { location: { origin: "https://site.test" }, navigator: {}, performance: { now: () => now },
+    setTimeout: fn => { const id = now++; detailTimers.set(id, fn); return id; }, clearTimeout: id => detailTimers.delete(id),
     requestAnimationFrame: (fn) => { const id = now++; frames.set(id, fn); return id; }, cancelAnimationFrame: (id) => frames.delete(id) });
   kioskContext.document.getElementById = id => elements.get(id);
   const K = kioskContext.window.BL, factoryCreate = K.factoryKiosk.create;
@@ -4724,6 +4806,7 @@ const donationClientChecks = async () => {
   K.net = { state: { backend: true, me: null }, login() {} };
   K.donations = { state: { open: true }, testNetwork: "signet", sanitize: D.sanitize, HANDLE_MAX: D.HANDLE_MAX, MESSAGE_MAX: D.MESSAGE_MAX,
     invoice: async options => { invoices.push(options); return { request: "request", invoice: { id: "popup", bolt11: "lntbs1", expires: now / 1000 + 900 }, bananas: { exact: 0.25, rounded: 0 }, rate: null }; },
+    note: async (request, message, handle) => { notes.push({ request, message, handle }); return {}; },
     onchain: async () => ({ address: "tb1qexampleaddress0000", sats: 1000 }), waitFor: id => popupWaits.push(id) };
   runInNewContext(await readFile(new URL("../src/js/donation-popup.js", import.meta.url), "utf8"), kioskContext);
   const popup = K.donationPopup.create({ state: { message: "hello" } }), dialog = elements.get("donation-popup");
@@ -4736,20 +4819,35 @@ const donationClientChecks = async () => {
   await popupQuote();
   const signedIn = elements.get("donation-handle").value === "tester" && invoices.at(-1).handle === "tester";
   popupFlow.key({ key: "A" });
-  elements.get("donation-details-handle").value = "another-name";
-  elements.get("donation-details-message").value = "m".repeat(281);
-  elements.get("donation-details-form").listeners.get("submit")({ preventDefault() {} });
-  await Promise.resolve();
-  const edited = invoices.at(-1).handle === "another-name" && invoices.at(-1).message.length === 280;
+  const focused = elements.get("donation-handle").focused && elements.get("donation-handle").selected;
+  const originalInvoice = popupFlow.invoice, invoiceCount = invoices.length;
+  elements.get("donation-handle").value = "another-name";
+  elements.get("donation-message").value = "m".repeat(281);
+  elements.get("donation-fields").listeners.get("input")();
+  await [...detailTimers.values()][0]();
+  const edited = focused && notes.at(-1).handle === "another-name" && notes.at(-1).message.length === 280
+    && notes.at(-1).request === "request" && popupFlow.invoice === originalInvoice && invoices.length === invoiceCount;
+  popupFlow.key({ key: "Enter" });
+  elements.get("donation-message").value = "updated while the QR is shown";
+  elements.get("donation-fields").listeners.get("input")();
+  await [...detailTimers.values()][0]();
+  const invoiceEdited = popupFlow.state === "invoice" && notes.at(-1).handle === undefined
+    && notes.at(-1).message === "updated while the QR is shown" && popupFlow.invoice === originalInvoice;
+  popupFlow.key({ key: "R" });
+  popupFlow.key({ key: "Escape" });
+  const lightningBack = popupFlow.state === "quote" && popupFlow.invoice === originalInvoice && invoices.length === invoiceCount;
+  popupFlow.key({ key: "Enter" });
+  const sameLightning = popupFlow.state === "invoice" && popupFlow.invoice === originalInvoice && invoices.length === invoiceCount;
+  popupFlow.key({ key: "Escape" });
   popupFlow.key({ key: "O" }); await Promise.resolve();
   const popupSeen = popup.seen("popup", 1000, 1000, 0) && popupFlow.state === "confirming";
   elements.get("donation-close").listeners.get("click")();
   const leftWaiting = popupWaits.join() === "popup" && !dialog.open && frames.size === 0;
   popup.open(); popupFlow.key({ key: "1" }); popupFlow.key({ key: "Enter" });
   popup.dispose(); await Promise.resolve();
-  const disposed = popupFlow.state === "idle" && !dialog.open && frames.size === 0 && [...elements.values()].every(e => e.listeners.size === 0);
-  record("donation popup: signed-out visitors can quote a payment, unrelated donations keep its invoice open, its settlement reveals the scene immediately, an on-chain payment can be left waiting, and disposal cancels frames, listeners and late replies",
-    anonymous && signedIn && edited && other && settled && popupSeen && leftWaiting && disposed, JSON.stringify({ anonymous, signedIn, edited, other, settled, popupSeen, leftWaiting, disposed }));
+  const disposed = popupFlow.state === "idle" && !dialog.open && frames.size === 0 && detailTimers.size === 0 && [...elements.values()].every(e => e.listeners.size === 0);
+  record("donation popup: signed-out visitors can quote a payment, edits save automatically on the same invoice, Lightning returns to its quote without replacing the invoice, unrelated donations keep its invoice open, its settlement reveals the scene immediately, an on-chain payment can be left waiting, and disposal cancels frames, timers, listeners and late replies",
+    anonymous && signedIn && edited && invoiceEdited && lightningBack && sameLightning && other && settled && popupSeen && leftWaiting && disposed, JSON.stringify({ anonymous, signedIn, edited, invoiceEdited, lightningBack, sameLightning, other, settled, popupSeen, leftWaiting, disposed }));
 };
 const wallPerformance = async (b) => {
   await b.send("Emulation.setDeviceMetricsOverride", { width: 1920, height: 1080, deviceScaleFactor: 2, mobile: false });
@@ -8136,9 +8234,11 @@ const factoryCooker = { name: "factory cooker", why: "rule: a tip in the factory
   const opened = await screen();
   await b.key("Enter"); await b.key("A");
   await b.evaluate(`(() => {
-    document.getElementById("donation-details-handle").value = "tester";
-    document.getElementById("donation-details-message").value = "zebra 12:34";
-    document.getElementById("donation-details-form").requestSubmit();
+    document.getElementById("donation-handle").value = "tester";
+    document.getElementById("donation-message").value = "zebra 12:34";
+    document.getElementById("donation-message").dispatchEvent(new Event("input", { bubbles: true }));
+    document.getElementById("donation-message").dispatchEvent(new Event("change", { bubbles: true }));
+    document.getElementById("donation-handle").blur();
   })()`);
   for (const k of ["1", "2", "0", "0"]) await b.key(k);
   const typed = await screen();
