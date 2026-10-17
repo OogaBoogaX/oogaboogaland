@@ -6,7 +6,7 @@
   "use strict";
   const BL = window.BL = window.BL || {};
   const $ = (id) => document.getElementById(id);
-  const SUFFIX = ["st", "nd", "rd", "th", "th", "th", "th", "th"];
+  const { suffixOf } = BL.racers;
   const MAP_SIZE = 132, MAP_PAD = 10;
   const MAP_POINT = { x: 0, y: 0 };
   const SPEED_LINES = 26;
@@ -48,6 +48,18 @@
       selection[kind] = key;
       mark(kind);
       if (onPick) onPick(kind, key);
+    };
+    // A signed-in visitor with an Ooga races it, as they drive only it on the island: their row stands alone
+    // in the Ooga column (moved last, so it keeps no divider) and the help stops offering a pick. `null`
+    // brings every row back.
+    const help = el.garage.querySelector(".garage-head .help"), PICK_HELP = help.textContent;
+    const lockRacer = (name) => {
+      for (const [key, b] of buttons.racer) b.parentElement.hidden = !!name && key !== name;
+      help.textContent = name ? PICK_HELP.replace("an Ooga, ", "") : PICK_HELP;
+      if (!name) return;
+      el.racers.append(buttons.racer.get(name).parentElement);
+      selection.racer = name;
+      mark("racer");
     };
     const row = (kind, key, build) => {
       const li = document.createElement("li");
@@ -149,7 +161,7 @@
       if (rank === lastRank) return;
       lastRank = rank;
       el.rank.firstChild.data = String(rank);
-      el.rankSuffix.textContent = SUFFIX[rank - 1] || "th";
+      el.rankSuffix.textContent = suffixOf(rank);
       el.field.textContent = `/${field}`;
     };
     const setLap = (lap, laps) => {
@@ -224,6 +236,11 @@
       li.append(name, value);
       return li;
     };
+    // Centres a row in a box that scrolls; a box that does not scroll keeps its place.
+    const reveal = (box, row) => {
+      const top = row.getBoundingClientRect().top - box.getBoundingClientRect().top + box.scrollTop;
+      box.scrollTop = top - (box.clientHeight - row.offsetHeight) / 2;
+    };
     // rows: this race; standings: cup points so far; next: label for the next-race button, or null.
     const results = (rows, summary, { note = "", standings = null, next = null } = {}) => {
       el.podium.replaceChildren(...rows.map((r) => podiumRow(r, r.finished ? `${r.estimated ? "≈ " : ""}${formatTime(r.time)}` : "DNF")));
@@ -236,6 +253,11 @@
       el.summary.textContent = summary;
       refreshTracks();
       show("results");
+      // The tables can be longer than the card, so each opens at the visitor's row, and so does the card.
+      const you = el.podium.querySelector(".you");
+      reveal(el.podium, you);
+      if (standings) reveal(el.standings, el.standings.querySelector(".you"));
+      reveal(el.results, you);
     };
     const setCup = (cup) => {
       el.garageCup.hidden = !cup;
@@ -324,7 +346,7 @@
       buttons.track.clear();
       trackRows.clear();
     };
-    return { el, selection, buildGarage, refreshTracks, show, setRank, setLap, setTime, setItem, setBoost, setPips, setSpeed, center, notice, results, setCup, minimap, speedLines, formatTime, medalFor, dispose };
+    return { el, selection, buildGarage, lockRacer, refreshTracks, show, setRank, setLap, setTime, setItem, setBoost, setPips, setSpeed, center, notice, results, setCup, minimap, speedLines, formatTime, medalFor, dispose };
   };
   BL.raceHud = { create, formatTime, medalFor };
 })();
