@@ -2,13 +2,14 @@
   "use strict";
   const BL = window.BL;
   const create = (changed, notice) => {
-    let worker = null, identity = "", revision = 0, fairness = null, connected = false, failed = false;
+    let worker = null, identity = "", revision = 0, fairness = null, connected = false, failed = false, watching = 0;
     const snapshots = Array.from({ length: 10 }, () => BL.pokerRules.create().snapshot());
     const phases = new Array(10).fill("idle");
     const tables = snapshots.map((_, i) => ({ snapshot: () => snapshots[i], get version() { return revision; }, get playing() { return !["idle", "complete", "aborted"].includes(phases[i]); } }));
-    const action = (name, value, expectedVersion) => { if (!connected || failed) throw new Error("Live tables are not connected"); worker.postMessage({ type: "action", name, value, expectedVersion }); };
+    const action = (name, value, expectedVersion) => { if (!connected || failed) throw new Error("Live tables are not connected"); if (name === "watch") watching = value; worker.postMessage({ type: "action", name, value, expectedVersion }); };
     const connect = async table => {
       if (worker) return;
+      watching = table;
       if (!/^https?:$/.test(location.protocol)) throw new Error("Live tables are available when this floor is served by the poker service");
       const r = await fetch("/poker/api/health", { cache: "no-store" });
       if (!r.ok || !(await r.json()).experimental) throw new Error("Live tables are unavailable at this address");
@@ -31,7 +32,9 @@
       };
       worker.postMessage({ type: "connect", table });
     };
-    return { tables, connect, action, get identity() { return identity; }, get fairness() { return fairness; }, get connected() { return connected && !failed; },
+    // The connection status the table view reads (poker-hud.js): live once connected, failed once stopped.
+    return { kind: "protocol", tables, connect, action, get identity() { return identity; }, get fairness() { return fairness; }, get connected() { return connected && !failed; },
+      get connection() { return failed ? "failed" : connected ? "live" : "connecting"; }, get busy() { return false; }, get deadline() { return null; }, get table() { return watching; },
       dispose() { worker?.terminate(); worker = null; connected = false; } };
   };
   BL.pokerLive = { create };

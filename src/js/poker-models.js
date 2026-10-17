@@ -158,6 +158,24 @@
     cache.set(theme.id, built); return built;
   };
   const card = c => BL.pokerCards.geometry(c);
+  // Banana chips: a hand of `n` (1-6) bananas fanned from one stem, lying on the felt from y = 0. A seat's stack, its
+  // bet and the pot each show the hand their size earns.
+  const BUNCH_MAX = 6, bunches = [];
+  const bunch = n => {
+    n = Math.max(1, Math.min(BUNCH_MAX, n));
+    if (bunches[n]) return bunches[n];
+    const hand = [];
+    for (let k = 0; k < n; k++) {
+      const b = M.merge(M.bananaGeometry()), v = b.verts;
+      for (let i = 0; i < v.length; i++) v[i] *= 0.3;
+      M.turnedX(b, Math.PI / 2);
+      M.moved(b, 0.138, 0, 0);
+      M.turnedY(b, (k - (n - 1) / 2) * 0.3);
+      M.moved(b, -0.1, 0.028 + k * 0.012, 0);
+      hand.push(b);
+    }
+    return (bunches[n] = M.merge(...hand));
+  };
   const build = (id = "gatsby") => {
     const theme = BL.pokerThemes.get(id), g = geometry(theme.id), root = S.createNode(), environment = S.createNode(), tables = [];
     S.addChild(root, environment);
@@ -169,14 +187,19 @@
       const pinstripe = node(g.pinstripe); pinstripe.scale.x = 4.02; pinstripe.scale.z = 2.44;
       const base = node(g.base);
       S.addChild(group, base, top, rim, felt, pinstripe);
-      const chairs = [], chips = [], backs = [];
+      const chairs = [], chips = [], backs = [], bets = [];
       for (const s of SEATS) {
         const chair = node(g.chair, s.x, 0, s.z); chair.rotation.y = s.yaw; chairs.push(chair); S.addChild(group, chair);
-        const pile = node(g.chip, s.x * 0.65, 1.39, s.z * 0.59); pile.visible = false; chips.push(pile); S.addChild(group, pile);
+        // The stack lies beside its cards, to the player's left, so a hand of bananas never covers them.
+        const l = Math.hypot(s.x, s.z), side = 0.78;
+        const pile = node(g.chip, s.x * 0.6 - s.z / l * side, 1.39, s.z * 0.6 + s.x / l * side); pile.rotation.y = s.yaw; pile.visible = false; chips.push(pile); S.addChild(group, pile);
         const cards = S.createNode({ position: { x: s.x * 0.57, y: 1.4, z: s.z * 0.57 }, rotation: { x: 0, y: s.yaw, z: 0 } });
         S.addChild(cards, node(g.back, -0.26), node(g.back, 0.26, 0.015)); cards.visible = false; backs.push(cards); S.addChild(group, cards);
+        // This round's bet, pushed out toward the pot.
+        const bet = node(bunch(1), s.x * 0.4, 1.38, s.z * 0.4); bet.rotation.y = s.yaw; bet.visible = false; bets.push(bet); S.addChild(group, bet);
       }
       const board = Array.from({ length: 5 }, (_, j) => { const n = node(g.back, (j - 2) * 0.72, 1.41); n.visible = false; S.addChild(group, n); return n; });
+      const pot = node(bunch(3), 0, 1.38, -1.1); pot.visible = false; S.addChild(group, pot);
       const button = node(g.button); S.addChild(group, button); button.visible = false;
       const label = BL.poolModels.carve(String(i + 1).padStart(2, "0"), { cell: 0.14, color: "#e5c984" });
       S.addChild(group, node(label.geometry, -label.width / 2, 1.17, 3.18));
@@ -187,7 +210,7 @@
       S.addChild(group, agent.root);
       const dealCard = node(g.back, 0, 1.5, -2.4); dealCard.visible = false; S.addChild(group, dealCard);
       S.addChild(root, group);
-      tables.push({ root: group, base, top, rim, felt, pinstripe, chairs, chips, backs, board, button, agent, dealCard, actors: new Array(SEATS.length).fill(null), version: -1, pulse: 0 });
+      tables.push({ root: group, base, top, rim, felt, pinstripe, chairs, chips, backs, bets, pot, board, button, agent, dealCard, actors: new Array(SEATS.length).fill(null), version: -1, pulse: 0 });
     }
     let current = null;
     const setTheme = id => {
@@ -236,5 +259,5 @@
     }
     return true;
   };
-  BL.pokerModels = { TABLES, SEATS, EXIT_Z, geometry, card, build, walkable };
+  BL.pokerModels = { TABLES, SEATS, EXIT_Z, BUNCH_MAX, geometry, card, bunch, build, walkable };
 })();

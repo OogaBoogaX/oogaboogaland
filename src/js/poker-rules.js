@@ -1,8 +1,12 @@
 // Play-chip Hold'em. Local practice uses a private shuffled deck. The sealed
 // variant deals public encrypted-deck positions and never receives a whole deck.
+// The dealer variant is the live tables' (worker/src/poker-den.js, which loads this file too): its seats can be
+// taken mid-hand for the next deal, a seat can sit out, and `dump` hands its whole state, deck included, to the
+// dealer's own storage so a hand outlives the dealer sleeping or a deploy. A dump never leaves the dealer.
 (() => {
   "use strict";
-  const BL = window.BL = window.BL || {};
+  const scope = typeof window === "undefined" ? globalThis : window;
+  const BL = scope.BL = scope.BL || {};
   const SEATS = 9, BUY_IN = 1000, SMALL = 5, BIG = 10;
   const LABELS = ["High card", "Pair", "Two pair", "Three of a kind", "Straight", "Flush", "Full house", "Four of a kind", "Straight flush"];
   const word = new Uint32Array(1);
@@ -73,11 +77,17 @@
     }
     return { awards, pots };
   };
-  const create = (sealed = false, initial = null) => {
+  const create = (sealed = false, initial = null, { late = false, saved = null } = {}) => {
     const seats = new Array(SEATS).fill(null);
     let deck = [], cursor = 0, board = [], phase = "waiting", turn = -1, dealer = -1;
     let currentBet = 0, lastRaise = BIG, hand = 0, version = 0, lastPot = 0, result = null, history = [], smallBlind = -1, bigBlind = -1;
     let known = new Map(), before = null, beforeDealer = -1;
+    // The dealer's own dump, read back from its storage: trusted as written.
+    if (saved) {
+      const s = JSON.parse(JSON.stringify(saved));
+      s.seats.forEach((p, i) => { seats[i] = p; });
+      ({ deck, cursor, board, phase, turn, dealer, currentBet, lastRaise, hand, version, lastPot, result, history, smallBlind, bigBlind } = s);
+    }
     if (initial) {
       if (!sealed || !Array.isArray(initial.seats) || initial.seats.length !== SEATS || !Number.isInteger(initial.dealer) || initial.dealer < -1 || initial.dealer >= SEATS || !Number.isSafeInteger(initial.hand) || initial.hand < 0 || !Number.isSafeInteger(initial.version) || initial.version < 0) throw new Error("Invalid table checkpoint");
       const ids = new Set();
@@ -133,34 +143,43 @@
       turn = next(from, s => s.inHand && !s.folded && s.stack > 0 && (!s.acted || s.roundBet < currentBet));
       if (turn < 0) { street(); if (playing() && phase !== "reveal") advance(dealer); }
     };
-    const join = (id, name, bot = false, index = -1) => {
-      if (playing()) throw new Error("Take a seat between hands");
+    // A dealer table seats a newcomer mid-hand for the next deal; the others seat only between hands.
+    const join = (id, name, bot = false, index = -1, stack = BUY_IN) => {
+      if (playing() && !late) throw new Error("Take a seat between hands");
       if (typeof id !== "string" || !id.length || seats.some(s => s && s.id === id)) throw new Error("Player already seated or invalid");
       if (index === -1) index = seats.indexOf(null);
       if (!Number.isInteger(index) || index < 0 || index >= SEATS || seats[index]) throw new Error("No free seat");
-      seats[index] = { id, name: String(name).slice(0, 32), bot: !!bot, stack: BUY_IN, cards: [], inHand: false, folded: false, roundBet: 0, totalBet: 0, acted: false, lastActedBet: 0, lastAction: "" };
+      if (!Number.isSafeInteger(stack) || stack < 0) throw new Error("Invalid stack");
+      seats[index] = { id, name: String(name).slice(0, 32), bot: !!bot, stack, cards: [], inHand: false, folded: false, roundBet: 0, totalBet: 0, acted: false, lastActedBet: 0, lastAction: "", out: false };
       log(`${seats[index].name} takes seat ${index + 1}`); return index;
     };
+    // A seat dealt out of the running hand has no chips in it, so a dealer table lets it go at once.
     const leave = id => {
       const i = seats.findIndex(s => s && s.id === id);
       if (i < 0) return;
-      if (playing()) throw new Error("Stand between hands; your committed chips stay in this hand");
+      if (playing() && (!late || seats[i].inHand)) throw new Error("Stand between hands; your committed chips stay in this hand");
       log(`${seats[i].name} stands`); seats[i] = null;
     };
     const refill = id => {
-      if (playing()) throw new Error("Refill between hands");
       const s = seats.find(s => s && s.id === id);
+      if (playing() && (!late || s?.inHand)) throw new Error("Refill between hands");
       if (!s || s.stack >= BUY_IN) return;
       s.stack = BUY_IN; log(`${s.name} refills free play chips`);
     };
+    // Sitting out keeps the seat and its stack and skips the next deals until the player is back.
+    const setOut = (id, on) => {
+      const s = seats.find(s => s && s.id === id);
+      if (!s || !!s.out === !!on) return;
+      s.out = !!on; log(`${s.name} ${on ? "sits out" : "is back"}`);
+    };
     const start = () => {
       if (playing()) throw new Error("A hand is already running");
-      if (seats.filter(s => s && s.stack > 0).length < 2) throw new Error("At least two funded players are needed");
+      if (seats.filter(s => s && s.stack > 0 && !s.out).length < 2) throw new Error("At least two funded players are needed");
       const fresh = sealed ? Array.from({ length: 52 }, (_, i) => i) : shuffledDeck(); // Fail before mutating any hand or balance.
       before = seats.map(s => s?.stack ?? null); beforeDealer = dealer; known = new Map();
       deck = fresh; cursor = 0; board = []; result = null; lastPot = 0; hand++; phase = "preflop";
       currentBet = BIG; lastRaise = BIG;
-      for (const s of seats) if (s) { s.cards = []; s.inHand = s.stack > 0; s.folded = false; s.roundBet = s.totalBet = 0; s.acted = false; s.lastActedBet = 0; s.lastAction = ""; }
+      for (const s of seats) if (s) { s.cards = []; s.inHand = s.stack > 0 && !s.out; s.folded = false; s.roundBet = s.totalBet = 0; s.acted = false; s.lastActedBet = 0; s.lastAction = ""; }
       dealer = next(dealer, s => s.inHand);
       let at = dealer;
       for (let round = 0; round < 2; round++) for (let n = 0; n < contenders().length; n++) { at = next(at, s => s.inHand); seats[at].cards.push(deck[cursor++]); }
@@ -197,11 +216,15 @@
     const snapshot = (viewer = null) => ({
       phase, turn, dealer, smallBlind, bigBlind, currentBet, hand, version, pot: pot(), lastPot, board: sealed ? board.map(c => known.get(c) ?? null) : board.slice(), history: history.slice(),
       result: result ? { revealed: result.revealed, names: result.names.slice(), awards: result.awards.slice(), pots: result.pots.map(p => ({ ...p, winners: p.winners.slice() })) } : null,
-      seats: seats.map(s => s ? { id: s.id, name: s.name, bot: s.bot, stack: s.stack, inHand: s.inHand, folded: s.folded, roundBet: s.roundBet, totalBet: s.totalBet, lastAction: s.lastAction,
+      seats: seats.map(s => s ? { id: s.id, name: s.name, bot: s.bot, stack: s.stack, inHand: s.inHand, folded: s.folded, roundBet: s.roundBet, totalBet: s.totalBet, lastAction: s.lastAction, out: !!s.out,
         cards: s.id === viewer || phase === "showdown" && result?.revealed && s.inHand && !s.folded ? s.cards.map(c => sealed ? known.get(c) ?? null : c) : s.cards.map(() => null) } : null),
       legal: legal(viewer)
     });
     const api = { join, leave, refill, start, act, snapshot, get version() { return version; }, get playing() { return playing(); } };
+    if (late) Object.assign(api, {
+      setOut,
+      dump: () => JSON.parse(JSON.stringify({ seats, deck, cursor, board, phase, turn, dealer, currentBet, lastRaise, hand, version, lastPot, result, history, smallBlind, bigBlind }))
+    });
     if (sealed) Object.assign(api, {
       checkpoint: () => ({ seats: seats.map(s => s && ({ id: s.id, name: s.name, stack: s.stack })), dealer, hand, version }),
       plan: () => ({ holes: seats.map(s => s?.inHand ? { id: s.id, positions: s.cards.slice(), folded: s.folded } : null), board: board.slice(), reveal: phase === "reveal" }),
@@ -235,5 +258,6 @@
     else if (l.call && !strong && roll < (l.call > own.stack / 3 ? 65 : 18)) table.act(id, "fold");
     else table.act(id, l.check ? "check" : "call");
   };
-  BL.pokerRules = { SEATS, BUY_IN, SMALL, BIG, randomInt, shuffledDeck, evaluate, settle, create: () => create(), createSealed: initial => create(true, initial), botAction, cardName };
+  BL.pokerRules = { SEATS, BUY_IN, SMALL, BIG, randomInt, shuffledDeck, evaluate, settle, create: () => create(), createSealed: initial => create(true, initial),
+    createDealer: (saved = null) => create(false, null, { late: true, saved }), botAction, cardName };
 })();

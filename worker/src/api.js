@@ -7,6 +7,7 @@ import { cookieNames, isSecureOrigin, serializeCookie } from "./cookies.js";
 import { deletePlayer, getPlayer, publicPlayer, sanitizeDisplay, updateDisplay } from "./db.js";
 import { fromSite, getSessionFromRequest, json, text } from "./http.js";
 import { contributorFor } from "./contributor-access.js";
+import { DEN_NAME } from "./poker-protocol.js";
 
 const BODY_MAX = 1024;
 
@@ -34,6 +35,15 @@ const me = async (request, env) => {
 
   if (request.method === "DELETE") {
     await deletePlayer(env.DB, found.player.id);
+    // The Ember Den keeps the account's poker bananas and maybe a seat; they go with it, after its sessions, so no
+    // new socket can bring them back meanwhile. A den that cannot be reached does not hold the account back.
+    if (env.POKER) {
+      try {
+        await env.POKER.getByName(DEN_NAME).forget(found.player.id);
+      } catch (err) {
+        console.error("poker den forget failed", err);
+      }
+    }
     const clear = serializeCookie(cookieNames(env.SITE_ORIGIN).session, "", { maxAge: 0, secure: isSecureOrigin(env.SITE_ORIGIN) });
     return new Response(null, { status: 204, headers: { "set-cookie": clear, "cache-control": "no-store" } });
   }

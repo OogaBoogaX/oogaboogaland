@@ -11,10 +11,11 @@ PR ownership check are described in [Contributor onboarding](contributor-onboard
 | Piece | Where | Job |
 |---|---|---|
 | Static site | `_site/` (the page as `index.html` and each `<route>.html`), staged by `npm run build:site` | the whole game, served by the Worker's assets binding with the headers in `worker/_headers` |
-| Worker | `worker/src/index.js` | runs only for `/auth/*`, `/api/*` and `/room` (`run_worker_first`), and on staging `/donations/*`, which `worker/src/donations.js` passes on to bananapayserver with the signed-in donor; everything else is the static page |
+| Worker | `worker/src/index.js` | runs only for `/auth/*`, `/api/*`, `/room` and `/poker` (`run_worker_first`), and on staging `/donations/*`, which `worker/src/donations.js` passes on to bananapayserver with the signed-in donor; everything else is the static page |
 | D1 `oogaboogaland` | `worker/migrations/` | `players` (GitHub id, login, display name) and `sessions` (token hash, expiry) |
 | Page modules | `src/js/net.js` (`BL.net`), `src/js/remote-players.js` | the account and the room socket; the other visitors on the island. The sheet footer shows the account and the online count through `hud.showAccount` |
 | Room | `worker/src/room.js` (Durable Object `Room`) | one socket per signed-in player, presence and poses, and Ooga Chat |
+| Ember Den dealer | `worker/src/poker-den.js` (Durable Object `PokerDen`, one named `ember-den`) | the live poker tables: one socket per signed-in player in the room, the deal, turn clocks and each account's poker bananas (see The Ember Den's live tables) |
 
 ## Signing in
 
@@ -39,7 +40,7 @@ PR ownership check are described in [Contributor onboarding](contributor-onboard
 
 ## What is stored
 
-For a signed-in player: GitHub id, login, avatar URL, the chosen display name, sign-in and last-seen times, and for each session its token hash, times and the first 120 characters of the user agent. Nothing for visitors who never sign in. No GitHub token is ever stored.
+For a signed-in player: GitHub id, login, avatar URL, the chosen display name, sign-in and last-seen times, and for each session its token hash, times and the first 120 characters of the user agent. Once they join the Ember Den's live tables, the dealer's own storage also keeps their poker bananas (a count and the day of their last free top-up) and, while they sit, their seat; `DELETE /api/me` deletes those too. Nothing for visitors who never sign in. No GitHub token is ever stored.
 
 ## Presence
 
@@ -50,6 +51,7 @@ A signed-in visitor holds one WebSocket to `/room` for the page life. The Worker
 | client → room | `{ t: "body", name }` | the Ooga being driven, by name; `null` when free roaming or outside the hub |
 | client → room | `{ t: "pose", x, y, z, yaw }` | that Ooga's feet and heading, at most 10 a second from the page, 20 allowed |
 | client → room | `{ t: "zone", name }` | where that Ooga is (see Zones below): voice is shared within its group, players are shown within the same zone |
+| client → room | `{ t: "poker-voice", table }` | in the Ember Den, the table (0-9) whose voice this player hears and speaks into while it is open, or `null` for the floor's; a zone change resets it |
 | client → room | `{ t: "hub", on }` | this page shows the island in a visible tab: it can host the NPCs and receives their frames |
 | client → room | `{ t: "mute", on }` | this page muted or unmuted its own microphone, for everyone's roster |
 | client → room | `{ t: "hp", v, ko }` | the driven Ooga's health (0-100, in steps of 4) and whether it is knocked out; only on a change, 4 a second at most |
@@ -127,6 +129,7 @@ Signed-in players can talk (`src/js/voice.js`, `worker/src/room.js`, `worker/src
 
 - **Join voice** in the sheet footer asks for the microphone, then becomes **Mute** / **Unmute**; a failure says why on the button.
 - **Who hears whom: the same zone group** (see Zones). Players driving an Ooga hear each other while they are in the same group, and nobody outside it. Within a group every voice plays at the same volume, however far apart the Oogas stand. A player not driving an Ooga, in a game or nowhere (`none`) is out of voice. Every scene with an Ooga to drive keeps the driving rules, reports the Ooga driven there every frame with its pose and health (`net.setBody`, `sendPose`, `setHealth`) and clears it in `leave`. On the island, an Ooga taken over where it already stands inside a cave counts as in that cave, not only one that walked in through the mouth.
+- **The Ember Den's tables.** In `ember-den`, players also need the same table open to hear each other (`poker-voice`): opening a table, to play or to watch, joins its voice, and walking the floor returns to the floor's. Everyone stays visible on the floor whichever voice they are in.
 - Each page opens two peer connections, one publishing its microphone (the browser offers, the SFU answers) and one receiving (the SFU offers, the browser answers). Every SFU call goes page → Worker (`POST /api/voice/{session,publish,live,pull,renegotiate,close,leave}`, same-site and signed in, 120 a minute) → room → SFU. Only the room holds the secret; a page never sees another player's session.
 - A microphone is announced only after its publishing connection is up (`live`): pulling a publication before it connects fails. The room recomputes who hears whom whenever it can change, sends `voice { peers, gens }` when a list changes, and re-checks it on every `pull`, so a page cannot pull a voice it may not hear. The last list each player got is kept in its socket's attachment (`sent`), so a room that slept still sends a list that has just gone empty; it used to assume one had been sent, which left a page hearing a player who had gone, or deaf to one who came back. Each microphone that goes live gets a new count (`gens`), so a page re-pulls a player who published again rather than staying on their dead track. Each page applies one change at a time; a change that fails, or a pull that misses a wanted voice, is retried once on a fresh receive session before the button says voice is unavailable. The first publish gets a second try, and a connection that fails or stays dropped five seconds after it was up starts voice over on its own.
 - **Alone, the microphone is off** (#181). The page's `voice` list is exactly whom it may hear, and since everyone in voice publishes, it is also everyone who could hear it: while that list is empty the page holds its microphone track off as a mute does (`stats.alone` in `voice.js`), still published so a newcomer is listed and pulls it, and turns it back on when the room lists someone. It is a client-side gate: the room is not told and needs no change, and a visitor's own mute stands. The note under the clock says "Alone · mic off".
@@ -134,6 +137,22 @@ Signed-in players can talk (`src/js/voice.js`, `worker/src/room.js`, `worker/src
 - **The roster shows it.** In the Ooga Boogas panel each signed-in player's row (their own Ooga, else the one they drive) carries a voice mark after the name: grey while in voice, green while speaking, red with a cross when they muted their microphone. The room's NPC host has a black dot. Speaking is measured on each page (an analyser on its own microphone and on every voice it receives), so it shows only for this visitor and the voices they hear; others show grey or red. A click on another player's mark mutes them for this visitor alone (a slash) and again unmutes them: kept by GitHub login in this browser's localStorage (`oogaboogaland.voice-muted`), never sent anywhere. Their voice is still received, only not played.
 
 The place is reported by the page, as positions are; a tampered page could claim another place to listen there, but only as a signed-in player whose login the room knows.
+
+## The Ember Den's live tables
+
+A signed-in visitor who joins the live tables in the Ember Den holds a second socket, to `/poker`, while they play or watch there (`src/js/poker-net.js`). The Worker checks the site's origin, the session and `POKER_LIMITER` (20 connections a minute per player), sets the `x-player-*` headers as it does for the room, and hands the upgrade to the Durable Object `PokerDen` named `ember-den` (`worker/src/poker-den.js`), which deals all ten tables. Its messages and limits are in `worker/src/poker-protocol.js`; how the tables play is in `docs/banana-poker.md`.
+
+| Direction | Message | Meaning |
+|---|---|---|
+| client → den | `{ t: "sit", table, seat }` | take a seat (`-1` for the first free one), mid-hand too: dealt in next hand. All of the account's poker bananas come to the table |
+| client → den | `{ t: "stand" }` | leave the seat, at once when out of the running hand, otherwise folding at its next turn and leaving when the hand ends; the stack goes back to the account |
+| client → den | `{ t: "act", a, n, v }` | fold, check, call or raise to the round total `n`, with the table version `v` the page saw: a version from before the current turn is refused |
+| client → den | `{ t: "deal" }`, `{ t: "out", on }`, `{ t: "topup" }` | deal now; sit out, or be dealt in again (which also takes back a leave asked for mid-hand); the free daily top-up to 1,000 |
+| den → client | `welcome { you, now, wallet, tables }` | on connect: the account, its bananas off the tables and every table's view |
+| den → client | `table { i, s, now }` | a table changed: its view for this page, with `deadline` (the acting player's clock) and `dealAt` (the next deal), both in the den's milliseconds |
+| den → client | `wallet`, `notice`, `error`, `kick` | the account's bananas changed; something the dealer did for the player; a refused request and why; `replaced` (a newer tab), `full` (64 sockets, though a seated player is always let back in), `stale` (silent 90 s; the page reconnects) or `revoked` (the account was banned or deleted) |
+
+A view is the rules engine's `snapshot(viewer)`, the viewer named from the session: the viewer's own cards where they sit, nulls for every other hidden card. The deck and the hole cards never leave the object; its storage holds each table (deck included) and each account's bananas (`w:<id>`), written together whenever a hand moves them. One alarm, for the earliest turn clock, deal or stand-up, does the timing, so the den sleeps whenever no table waits on anything. A page that goes away sits out at once and stands up two minutes later between hands, its stack back in its bananas; a seat whose socket dropped in a deploy, unheard, is treated the same at the next deal, and so is a socket silent for 90 seconds, which the den sweeps once a minute while anyone is there, as the island room does, letting a banned or deleted account go at the same sweep. `DELETE /api/me` calls the den's `forget`, which closes the account's socket, deletes its bananas and frees its seat (after the running hand if its chips are in it, paying it nothing).
 
 ## Ooga Chat
 
