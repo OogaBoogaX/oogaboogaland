@@ -2,7 +2,8 @@
 // writing through `box` and `put` into separate solid, hanging, decorative glow and lantern glow layers: general (`lanternPost`, `crate`, `coalCrate`,
 // `barrel`, `cart`, `banner`, `gauge`, `rubble`, `bracket`, `hanging`, `bulb`), lab (`die`,
 // `flaskBench`, `terminal`, `chalkboard`), the mirror (`monolith`, `runeStone`), lightning (`coil`,
-// `boards`), the arcade (`cabinet`), plus `bench`, `vine` and `banner(v)` carrying each cave's emblem from `hubModels.SIGN_ICONS`.
+// `boards`), the arcade (`cabinet`), the free hardware wallets (`deviceCrate`, `walletVendor`), plus
+// `bench`, `vine` and `banner(v)` carrying each cave's emblem from `hubModels.SIGN_ICONS`.
 //
 // `set()` places pieces by quarter turns (`put`), strings sagging cables with lamps (`cable`) and `build`s
 // everything placed into one `solid`, one `hang`, decorative `glow` and lantern `lampGlow` mesh plus the `lights` its lanterns
@@ -52,7 +53,8 @@
     "#f5d142", "#4f9a38", // 49 banana, 50 vine
     "#e9d7a0", "#d8c184", // 51 sand, 52 sand dark
     "#d9a441", "#5a3a1a", // 53 leopard tan, 54 leopard spot
-    BANANA_ART.ink.D, BANANA_ART.ink.Y, BANANA_ART.ink.G // 55-57 ammo banana outline, fruit, stem
+    BANANA_ART.ink.D, BANANA_ART.ink.Y, BANANA_ART.ink.G, // 55-57 ammo banana outline, fruit, stem
+    "#ff8a1f" // 58 device orange
   ];
   const EMISSIVE = { 9: 1, 10: 1, 11: 0.9, 30: 1, 31: 1, 32: 1, 37: 1, 40: 1 };
   // Lantern glass by variant (amber, teal, green, red) and the light each casts; the fifth is a bolt's yellow.
@@ -317,6 +319,51 @@
         const w = 3 + Math.floor(rand() * 5), h = 2 + Math.floor(rand() * 4), d = 3 + Math.floor(rand() * 5);
         const x0 = Math.floor((rand() - 0.5) * 10), z0 = Math.floor((rand() - 0.5) * 10), y0 = n > 2 ? 2 + Math.floor(rand() * 2) : 0;
         box(SOLID, x0, x0 + w, y0, y0 + h, z0, z0 + d, (x, y) => y === y0 + h && rand() < 0.55 ? (rand() < 0.5 ? 23 : 24) : rand() < 0.25 ? 21 : rand() < 0.2 ? 22 : 20);
+      }
+    }),
+    // Free Hardware Wallets: a crate of parody devices, and a vending machine (body 0 red, 1 teal) whose window
+    // glows with rows of devices, set on a stone plinth in a bark timber frame under a mossy plank roof hung with vines.
+    deviceCrate: (v) => author((put, box) => {
+      crateShell(box, 9, true, v);
+      for (let x = -5; x <= 4; x++) for (let z = -5; z <= 4; z++) {
+        const stick = (x + z * 3 + v) % 4 === 0;
+        put(SOLID, x, 8, z, stick ? 58 : (x + z) & 1 ? 16 : 25);
+        if (stick && (x & 1)) put(GLOW, x, 9, z, 31);
+      }
+    }),
+    walletVendor: (v) => author((put, box) => {
+      const BODY = v ? 41 : 19, rand = mulberry32(58);
+      const stone = (x, y, z) => y === 3 && rand() < 0.35 ? 23 : rand() < 0.3 ? 21 : rand() < 0.25 ? 22 : 20;
+      const bark = (x, y, z) => (x + y * 3 + z) % 5 === 0 ? 3 : (y & 3) === 0 ? 0 : 2;
+      box(SOLID, -11, 10, 0, 3, -8, 8, stone);
+      box(SOLID, -8, 7, 4, 31, -6, 5, (x, y, z) => y >= 29 ? 18 : (x === -8 || x === 7) && z === 5 ? 16 : BODY);
+      box(SOLID, -6, 5, 13, 28, 6, 6, 36);
+      for (let row = 0; row < 4; row++) for (let col = 0; col < 4; col++) {
+        const x = -5 + col * 3, y = 14 + row * 4, card = (row + col) & 1;
+        box(GLOW, x, x + 1, y, y + (card ? 1 : 0), 7, 7, card ? 35 : 39);
+        put(GLOW, x, y + 2, 7, row === 3 && col === 1 ? 32 : 31);
+      }
+      // The tray the free wallet drops into, and the coin slot beside it.
+      box(SOLID, -5, 4, 6, 9, 6, 6, 36);
+      box(SOLID, -5, 4, 5, 5, 6, 7, 6);
+      box(SOLID, 3, 4, 10, 11, 6, 7, 6);
+      // Four bark posts, a plank lintel and a mossy plank roof over the machine.
+      for (const x of [-11, 9]) for (const z of [-8, 7]) box(SOLID, x, x + 1, 4, 34, z, z + 1, bark);
+      box(SOLID, -12, 11, 32, 33, 7, 8, (x, y, z) => plank(x, y, z, -12, 11, 0));
+      box(SOLID, -12, 11, 32, 33, -8, -7, (x, y, z) => plank(x, y, z, -12, 11, 0));
+      for (let z = -10; z <= 10; z++) for (let x = -13; x <= 12; x++) {
+        const y = 35 + (z < 0 ? 1 : 0);
+        put(SOLID, x, y, z, rand() < 0.3 ? (rand() < 0.5 ? 23 : 24) : plank(x, y, z, -10, 10, 2));
+      }
+      // Vines slung under the roof's front edge and hanging down the posts.
+      for (let x = -12; x <= 11; x++) {
+        const sag = Math.round(2 - Math.abs(x + 0.5) / 6);
+        put(HANG, x, 33 - sag, 10, 50);
+        if (x % 3 === 0) put(HANG, x, 32 - sag, 10, rand() < 0.5 ? 23 : 24);
+      }
+      for (const [x, len] of [[-12, 14], [-10, 8], [11, 17], [9, 6]]) for (let k = 0; k < len; k++) {
+        put(HANG, x, 34 - k, 10, 50);
+        if (k % 3 === 1) put(HANG, x + (k & 2 ? 1 : -1), 34 - k, 10, rand() < 0.5 ? 23 : 24);
       }
     }),
     // A plain pole the cables start from on walls; it carries a small lantern of its own.

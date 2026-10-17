@@ -638,6 +638,10 @@
   const matrixInteriors = [];
   const matrixGates = [];
   const sealedCaves = [];
+  // Every other open cave's doorway, walked into as Ooga Arcade's is: act within MOUTH_REACH of a point MOUTH_ACTION_Z
+  // inside it goes in.
+  const caveDoors = [];
+  const doorOf = (scene) => caveDoors.find((door) => door.slot.scene === scene);
   let sceneryVisible = 0, sceneryRadiusCulled = 0, sceneryPathCulled = 0, sceneryFixedCulled = 0, sceneryReflows = 0;
   const addTarget = (node, owner, opts) => {
     input.add(node, owner, opts);
@@ -677,7 +681,8 @@
     bench: ["Log bench", "dust", ["A good log for sitting."]],
     cabinet: ["Arcade cabinet", "spark", ["PRESS START. Ooga presses everything.", "The games are inside. Ooga points."]],
     vine: ["Vines", "leaf", ["The vines swing.", "Rustle rustle."]],
-    boards: ["Boarded up · coming soon", "dust", ["Boarded up. Coming soon.", "Ooga peeks through a gap. Dark."]]
+    boards: ["Boarded up · coming soon", "dust", ["Boarded up. Coming soon.", "Ooga peeks through a gap. Dark."]],
+    deviceCrate: ["Crate of free wallets", "dust", ["Something inside is ticking.", "Ooga hears beeping. Many beeping."]]
   };
   const PIECE_BURST = { spark: SPARK, dust: DUST, chip: CHIP, leaf: LEAF };
   const pokePiece = (o) => {
@@ -1738,6 +1743,8 @@
     lab: { glass: 1, icon: "die", string: ["bulb", 1], pieces: [["flaskBench", -5.3, 1.1], ["die", -4.1, 2.8, 0, 1], ["die", -3.5, 3.6, 1, 3], ["die", -4.1, 2.8, 1, 4, 0.5], ["terminal", 5.2, 1.0], ["die", 4.3, 3.2, 1, 2], ["banner", -6.7, 0.7, 0, 1]] },
     matrix: { glass: 2, icon: "glyph", string: ["bulb", 2], pieces: [["monolith", -5.0, 0.9, 0, 0], ["monolith", 5.0, 0.9, 0, 1], ["runeStone", -4.2, 2.8, 0, 0], ["runeStone", 4.4, 2.9, 0, 1], ["banner", 6.5, 0.8, 0, 2], ["banner", -6.5, 0.8, 0, 2], ["rubble", -6.3, 2.6, 0, 1]] },
     lightning: { glass: 0, icon: "bolt", string: ["hanging", 0, [0.3, 0.7]], boards: true, pieces: [["coalCrate", -5.1, 0.8, 0, 3], ["crate", -5.4, 2.1, 1, 0], ["crate", -5.4, 2.1, 0, 1, 0.75], ["barrel", -4.3, 2.9, 0, 1], ["rubble", -6.4, 0.9, 0, 1], ["gauge", 5.0, 0.9], ["cart", 5.7, 2.4, 1], ["banner", 6.6, 0.8, 0, 0], ["coil", 3.8, 3.4], ["coalCrate", 6.4, 3.4, 0, 1]] },
+    // Free Hardware Wallets: crates of devices by the door, and the store's vending machine glowing inside.
+    wallets: { glass: 3, icon: "wallet", string: ["bulb", 3], inside: [["walletVendor", 0, -4.2, 0, 0]], pieces: [["deviceCrate", -4.4, 1.4, 0, 1], ["deviceCrate", -5.3, 2.6, 1, 2], ["barrel", 4.6, 1.5, 0, 0]] },
     arcade: { glass: 0, icon: "banana", string: ["hanging", 0, [0.12, 0.5, 0.88]], inside: [["barrel", -2.4, -1.9, 0, 0], ["crate", 2.4, -2.0, 1, 0], ["barrel", 2.4, -2.0, 0, 1, 0.75]], ceiling: [[-2.35, 2.35, -1.5, -5.8, 3.0, [0.35, 0.8]]], pieces: [["cabinet", -3.6, 1.0, 0, 0], ["cabinet", -2.9, 2.2, 0, 1]] }
   };
   const THEME_ICON = (slot) => slot.id === "c1" ? "favicon" : THEMES[slot.theme]?.icon || null;
@@ -2191,6 +2198,7 @@
         const shelves = createNode({ position: { x, y: 0, z: back }, geometry });
         addChild(group, shelves); solids.add(shelves);
       }
+      caveDoors.push({ slot, x: m.x + ax * MOUTH_ACTION_Z, y: m.floorY + 1.1, z: m.z + az * MOUTH_ACTION_Z });
     } else if (slot.status === "mirror") {
       // Sit inside the rim so the cave floor ends behind the reflection.
       const node = createNode({ position: { x: 0, y: 1.5, z: 0.5 }, geometry: hubModels.mirrorPanel(), mirror: true, mirrorWalkThrough: true, mirrorReveal: 0 });
@@ -6313,6 +6321,10 @@
       if (nearest) return nearest;
     }
     if (arcadeMouth && actionWithinReach(x, y, z, arcadeMouth.x, arcadeMouth.y, arcadeMouth.z, MOUTH_REACH)) return arcadeMouth;
+    for (let i = 0; i < caveDoors.length; i++) {
+      const door = caveDoors[i];
+      if (actionWithinReach(x, y, z, door.x, door.y, door.z, MOUTH_REACH)) return door;
+    }
     return null;
   };
   const useNearbyAction = (action) => {
@@ -6897,6 +6909,9 @@
         const label = matrixControl.pressed ? "pull the lever down" : "push the lever up";
         hud.hint(COARSE ? `Tap to ${label}` : `Press Space or tap to ${label}`);
         if (player) hud.setAct(matrixControl.pressed ? "PULL DOWN" : "PUSH UP");
+      } else if (action !== arcadeMouth) {
+        hud.hint(COARSE ? "Tap ENTER to go in" : `Press Space to enter ${action.slot.name}`);
+        if (player) hud.setAct("ENTER");
       } else {
         hud.hint(COARSE ? "Tap ENTER ARCADE to go in" : "Press Space to enter Ooga Arcade");
         if (player) hud.setAct("ENTER ARCADE");
@@ -7092,8 +7107,8 @@
       setVec(target, island.gate.x, GATE_VIEW.target.y, island.gate.z);
       pitch = player ? 0 : 0.2;
       dist = player ? 10 : 12;
-    } else if (name === "lab" || name === "mirror" || name === "factory" || name === "arcade") {
-      const id = name === "lab" ? "c11" : name === "factory" ? "c2" : name === "arcade" ? "c3" : "c1", m = island.mouths.find((mouth) => mouth.id === id);
+    } else if (name === "lab" || name === "mirror" || name === "factory" || name === "arcade" || doorOf(name)) {
+      const id = name === "lab" ? "c11" : name === "factory" ? "c2" : name === "arcade" ? "c3" : name === "mirror" ? "c1" : doorOf(name).slot.id, m = island.mouths.find((mouth) => mouth.id === id);
       yaw = m.ry;
       // Leave enough distance to frame the sign above the mouth, including
       // arrivals viewed from the controlled character's first-person eye.
@@ -10946,8 +10961,9 @@
     let initialCharacter = ctx.from === null && preloadedCharacter ? contributors.activeRoster.find((entry) => entry.name.toLowerCase() === preloadedCharacter) : null;
     if (ctx.from === null && (preloadedJetpackWear || preloadedEquipment) && !params.has("character") && !initialCharacter) initialCharacter = contributors.activeRoster.find((entry) => crew.stateOf(crew.cavemen.get(entry.name)) === "working") || contributors.activeRoster[0];
     const initialGorilla = initialCharacter && preloadedGorilla ? crew.cavemen.get(initialCharacter.name) : null;
-    // The Ooga that went into DSB, the Lightning Factory, ₿IFRÖST or Ooga Arcade comes back out as the one played.
-    const handsBack = ctx.from === "dsb" || ctx.from === "factory" || ctx.from === "bifrost" || ctx.from === "arcade";
+    // The Ooga that went into DSB, the Lightning Factory, ₿IFRÖST, Ooga Arcade or another open cave comes back out as
+    // the one played.
+    const handsBack = ctx.from === "dsb" || ctx.from === "factory" || ctx.from === "bifrost" || ctx.from === "arcade" || !!doorOf(ctx.from);
     const returningCharacter = handsBack ? world.pilot : null;
     if (handsBack) world.pilot = null;
     if (initialGorilla) {
@@ -10972,7 +10988,7 @@
     unsubscribeAccount = BL.net.subscribe(onAccountChange);
     const initialFirstPerson = ctx.from === null && preloadedFirstPerson && !initialGorilla;
     if (initialFirstPerson) pilot.enterClose(true);
-    if (returningCharacter) navigate(ctx.from === "factory" || ctx.from === "bifrost" || ctx.from === "arcade" ? ctx.from : "pile");
+    if (returningCharacter) navigate(ctx.from === "factory" || ctx.from === "bifrost" || ctx.from === "arcade" || doorOf(ctx.from) ? ctx.from : "pile");
     else if (ctx.from === "bifrost" && !ctx.place) navigate("bifrost");
     else if (!crew.sleeping && !initialGorilla && (ctx.place || preloadedView || initialCharacter || initialFirstPerson)) navigate(ctx.place || preloadedView || "pile");
     if (initialCharacter && !initialGorilla && preloadedJetpack) {
@@ -11393,7 +11409,7 @@
     }
     for (const node of targets) input.remove(node);
     for (const node of placed) removeChild(root, node);
-    targets.length = placed.length = claimed.length = scenery.length = sceneryClaims.length = matrixInteriors.length = matrixGates.length = sealedCaves.length = clouds.length = cloudObstacles.length = lamps.length = pilePosts.length = entranceLights.length = fireSeats.length = sleepers.length = labels.length = signDetails.length = spots.length = chillSpots.length = headquartersRimLintels.length = climbMasonry.length = props.length = 0;
+    targets.length = placed.length = claimed.length = scenery.length = sceneryClaims.length = matrixInteriors.length = matrixGates.length = sealedCaves.length = caveDoors.length = clouds.length = cloudObstacles.length = lamps.length = pilePosts.length = entranceLights.length = fireSeats.length = sleepers.length = labels.length = signDetails.length = spots.length = chillSpots.length = headquartersRimLintels.length = climbMasonry.length = props.length = 0;
     cloudRandom = null;
     fireHazards.length = 0;
     clankerFireReachable = null;

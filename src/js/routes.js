@@ -35,6 +35,8 @@
         description: "A Lightning node at work as a factory in a tiered cavern, run by gorillas in hard hats: forwards ride the conduits through the glowing core." },
       { path: "oogaarcade", scene: "arcade", title: "Ooga Arcade",
         description: "A torchlit cave of arcade cabinets, one for every Ooga game: walk up to Ooga Rally, Drop, Orbit or Mine and play." },
+      { path: "freewallets", scene: "wallets", title: "Free Hardware Wallets",
+        description: "A little store in the 9 o'clock cave gives hardware wallets away. Take one, carry it, set it down or throw it: sixty seconds later it explodes." },
       { path: "sphere", scene: "hub", place: "timechain", image: "sphere", title: "Timechain Sphere",
         description: "Sani's walk-in sphere, its six inner walls lit with live Timechain Index data: BTC distribution, balances, UTXO sizes, ETF and exchange holdings." }
     ]
