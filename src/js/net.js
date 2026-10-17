@@ -50,6 +50,8 @@
   const chatIdValid = (id) => typeof id === "string" && id.length > 0 && id.length <= 64 && !/[^\w-]/.test(id);
   const subscribers = new Set();
   const rosterSubscribers = new Set();
+  const studioSubscribers = new Set();
+  const studioEmit = message => { for (const fn of studioSubscribers) fn(message); };
   const chatSubscribers = new Set();
   const remotes = new Map();
   // room: "off" (signed out or no backend), "connecting", "live", "paused" (hidden a while), or a kick that
@@ -88,6 +90,7 @@
 
   const setRoom = (room) => {
     state.room = room;
+    if (room !== "live") { state.studio = null; state.connectionToken = ""; studioEmit({t:"studio-state",state:null}); }
     state.online = room === "live" ? remotes.size + 1 : 0;
     emit();
   };
@@ -143,7 +146,16 @@
     } catch {
       return;
     }
-    if (msg.t === "state") {
+    if (msg.t === "studio-mic-revoked") {
+      BL.voice.dropMic();
+    } else if (msg.t === "studio-state") {
+      const previous = state.studio, incoming = msg.state;
+      if (previous && incoming && (incoming.epoch < previous.epoch || (incoming.epoch === previous.epoch && incoming.revision < previous.revision))) return;
+      state.studio = incoming;
+      studioEmit(msg);
+    } else if (msg.t === "studio-result") {
+      studioEmit(msg);
+    } else if (msg.t === "state") {
       clockSample(msg.now);
       const ps = msg.ps;
       for (let i = 0; i + 4 < ps.length; i += 5) {
@@ -159,6 +171,7 @@
       state.hostId = Number.isSafeInteger(msg.host) ? msg.host : 0;
       state.followers = Number.isSafeInteger(msg.followers) ? msg.followers : 0;
       state.selfId = msg.you.id;
+      state.connectionToken = typeof msg.connectionToken === "string" ? msg.connectionToken : "";
       remotes.clear();
       for (const p of msg.players) upsert(p);
       setRoom("live");
@@ -493,6 +506,13 @@
     return () => chatSubscribers.delete(fn);
   };
 
+  const subscribeStudio = fn => { studioSubscribers.add(fn); return () => studioSubscribers.delete(fn); };
+  const studioCommand = (action, fields = {}) => {
+    if (state.room !== "live") return false;
+    send(JSON.stringify({...fields, t:"studio", action}));
+    return true;
+  };
+
   const dispose = () => {
     document.removeEventListener("visibilitychange", onVisibility);
     stopped = true;
@@ -500,9 +520,10 @@
     window.clearTimeout(hiddenTimer);
     subscribers.clear();
     rosterSubscribers.clear();
+    studioSubscribers.clear();
     chatSubscribers.clear();
     close("off");
   };
 
-  BL.net = { start, subscribe, subscribeRoster, subscribeChat, dispose, login, logout, setDisplay, rejoin, setBody, setZone, setHub, setMuted, setHealth, sendNpc, sendChat, sendPose, mayDrive, ownCharacter, characterOf, serverNow, remotes, state, CHAT_MAX, CHAT_KEEP, get npcFrame() { return npcFrame; } };
+  BL.net = { subscribeStudio, studioCommand, start, subscribe, subscribeRoster, subscribeChat, dispose, login, logout, setDisplay, rejoin, setBody, setZone, setHub, setMuted, setHealth, sendNpc, sendChat, sendPose, mayDrive, ownCharacter, characterOf, serverNow, remotes, state, CHAT_MAX, CHAT_KEEP, get npcFrame() { return npcFrame; } };
 })();

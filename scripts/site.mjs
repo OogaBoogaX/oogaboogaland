@@ -22,6 +22,16 @@ const { site, name, list } = routes;
 
 rmSync(out, { recursive: true, force: true });
 mkdirSync(join(out, "cards"), { recursive: true });
+mkdirSync(join(out, "media"), { recursive: true });
+// Stage only catalogue-reviewed assets; never proxy or fetch a supplied media URL.
+const mediaContext = {};
+vm.runInNewContext(readFileSync(join(root, "src/js/studio-catalogue.js"), "utf8"), mediaContext);
+const mediaFiles = new Set();
+for (const source of mediaContext.BL.studioMedia.sources) for (const path of [source.url, source.captions, source.transcript]) {
+  if (!/^\/media\/[a-z0-9][a-z0-9._-]*\.(mp4|webm|vtt|txt)$/.test(path)) throw new Error("Invalid reviewed Studio asset path");
+  mediaFiles.add(path.slice(7));
+}
+for (const file of mediaFiles) copyFileSync(join(root, "src/media", file), join(out, "media", file));
 
 let shell = readFileSync(join(root, "oogaboogaland.html"), "utf8");
 if (process.argv.includes("--audio-assets")) shell = externalizeAudio(shell, root, out);

@@ -1,3 +1,4 @@
+import { parseStudioCommand, studioCanSpeak, STUDIO_ZONE } from "./studio-policy.js";
 // The room's wire format and the limits it enforces, as pure functions the tests can reach.
 //
 // Client → room:  { t: "pose", x, y, z, yaw }   the driven Ooga's feet and heading, at most MOVE_HZ
@@ -95,6 +96,7 @@ export const parseClientMessage = (text) => {
   if (!msg || typeof msg !== "object" || Array.isArray(msg)) return false;
   // Only chat earns the longer frame: a repeated key could make a chat-prefixed frame parse as anything.
   if (text.length > MESSAGE_MAX && msg.t !== "chat") return false;
+  if (msg.t === "studio") return parseStudioCommand(msg);
   if (msg.t === "pose") {
     const { x, y, z, yaw } = msg;
     if (!finite(x) || !finite(y) || !finite(z) || !finite(yaw)) return null;
@@ -212,13 +214,13 @@ export const zoneGroup = (zone) => {
 };
 
 /** Map of player id → sorted ids that player should hear. */
-export const voicePeers = (players) => {
+export const voicePeers = (players, studio = null) => {
   const out = new Map();
   for (const p of players) {
     const ids = [];
     const group = zoneGroup(p.zone);
-    if (p.body && p.voice && p.voice.sub && group !== NOWHERE) {
-      for (const q of players) if (q !== p && q.body && zoneGroup(q.zone) === group && q.voice && q.voice.track) ids.push(q.id);
+    if ((p.body || (studio && p.zone === STUDIO_ZONE)) && p.voice && p.voice.sub && group !== NOWHERE) {
+      for (const q of players) if (q !== p && (q.body || (studio && q.zone === STUDIO_ZONE)) && zoneGroup(q.zone) === group && q.voice && q.voice.track && (!studio || q.zone !== STUDIO_ZONE || studioCanSpeak(studio, q))) ids.push(q.id);
       ids.sort((a, b) => a - b);
     }
     out.set(p.id, ids);

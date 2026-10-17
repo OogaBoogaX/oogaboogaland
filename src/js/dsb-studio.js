@@ -126,6 +126,11 @@
     const hostSeat={x:4.2,y:1.25,z:-15.2,ry:0,viewYaw:Math.PI,floor:.6,walkAt:{x:6.85,z:-13.5},sitter:null,allowWeapons:true,lockMovement:true};
     seats.push(hostSeat,...guestSeats);
     const stageSeats=[...guestSeats,hostSeat];
+    seats.forEach((seat,id)=>{seat.studioId=id;});
+    // One live media surface, facing the audience; the native panel uses the same video.
+    block(root,"#16151c",0,4.45,-16.4,7.4,3.9,.18);
+    const screenGeometry={verts:[-3.5,-1.75,0,3.5,-1.75,0,3.5,1.75,0,-3.5,1.75,0],faces:[{i:[0,1,2,3],color:[0,0,0],emissive:0}],lines:[],castShadow:false};
+    const screen=createNode({geometry:screenGeometry,position:{x:0,y:4.45,z:-16.28}});addChild(root,screen);
     solids.push([2.415,5.985,-14.35,-12.65,1.64],[3.3,5.1,-15.85,-14.6]);
     prop("mic",8,.65,-11.8);const stool=prop("stool",8.8,.6,-13.8);stool.scale.y=.65;
     for(const side of [-1,1]){
@@ -153,7 +158,7 @@
     const lights=new Float32Array(BL.glRenderer.POINT_LIGHT_CAPACITY*8);
     lights.set([5,4.4,-12,11,1.35,.85,.42,0,-5,4.4,-12,10,1.15,.72,.4,0,1,4.8,14,5,.65,.36,.16,0]);
     const lighting={clear:[.04,.03,.045],sky:[.34,.27,.26],ground:[.22,.16,.17],direct:[.66,.5,.35],directStrength:.24,ambientFloor:.29,sun:{x:.3,y:.9,z:.4},shadowCenter:{x:0,y:3,z:0},shadowExtent:22,shadowStrength:.2,bloomStrength:.3,fog:[.04,.03,.045],fogNear:55,fogFar:85,lights,lightCount:3};
-    return {id:"dsb-studio",root,seats,hostSeat,stageSeats,solids,lighting,groundAt:floor,ceiling:6.4,spawnYaw:0,followDistance:3,
+    return {id:"dsb-studio",root,seats,screen,hostSeat,stageSeats,solids,lighting,groundAt:floor,ceiling:6.4,spawnYaw:0,followDistance:3,
       spawn:{x:0,y:3,z:17},exit:{x:0,y:3,z:18.1},jukeboxAt:{x:-1.3,y:3,z:14.3},jukeboxSource:{x:-2.5,y:4.2,z:14.3},
       bounds:{minX:-15.15,maxX:15.15,minZ:-16.25,maxZ:18.5},
       tomatoContact:(ax,ay,az,p,seat)=>{

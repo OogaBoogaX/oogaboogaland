@@ -1,0 +1,62 @@
+{
+  "productDefect": "CurrentTime reassigned during an in-flight asynchronous seek by scene and ready-event reconciliation",
+  "fix": "Guard !video.seeking; seeked applies latest authoritative position",
+  "nonBrowserRegression": {
+    "before": "four asynchronous seek assertions false",
+    "after": "all30controllerassertions true",
+    "cases": [
+      "one assignment whilepending despite repeated update/canplay/loadeddata",
+      "new revision waits for pendingseek",
+      "seeked applies latestposition",
+      "finalseek settles without rescheduling"
+    ]
+  },
+  "independentReview": "voice_review confirms guard; no browser/server used",
+  "fixtureProperties": [
+    {
+      "file": "src/media/studio-sample.mp4",
+      "bytes": 557977,
+      "atoms": [
+        {
+          "type": "ftyp",
+          "offset": 0,
+          "size": 28
+        },
+        {
+          "type": "mdat",
+          "offset": 28,
+          "size": 549294
+        },
+        {
+          "type": "moov",
+          "offset": 549322,
+          "size": 8655
+        }
+      ]
+    },
+    {
+      "file": "src/media/studio-quiet.mp4",
+      "bytes": 341371,
+      "atoms": [
+        {
+          "type": "ftyp",
+          "offset": 0,
+          "size": 28
+        },
+        {
+          "type": "mdat",
+          "offset": 28,
+          "size": 335140
+        },
+        {
+          "type": "moov",
+          "offset": 335168,
+          "size": 6203
+        }
+      ]
+    }
+  ],
+  "previewServer": "scripts/serve.mjs servesHTTP200 fullfiles with no byteRange orAcceptRanges",
+  "uncertainty": "Deterministic test proves controllerdefect but not that it is solecause of allthreebrowserfailures; byteRange/metadata placement couldcontribute",
+  "browserResultPreserved": "docs/dsb-studio-http-repaired-once.json remains227/230; no rerun"
+}
