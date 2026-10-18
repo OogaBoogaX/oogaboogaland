@@ -67,11 +67,21 @@ const keyOf = ({ w = 1440, h = 900, mobile = false, perf = false, motion = false
 // Starting several fresh profiles together competes with each other's renderer/GPU startup.
 // Queue just that work; running sessions still share the runner's lanes and keep their absolute deadline.
 let startup = Promise.resolve();
-export const launch = (opts = {}) => {
-  const next = startup.then(() => startChrome(opts));
+export const launch = (opts = {}) => new Promise((resolve, reject) => {
+  // Admission has its own bound: a queued session has no Chrome to kill yet.
+  // Expired requests must never spawn after the startup ahead of them finishes.
+  let expired = false;
+  const timer = setTimeout(() => {
+    expired = true;
+    reject(driverError(`Chrome startup queue got no slot in ${SETUP_MS / 1000} s`));
+  }, SETUP_MS);
+  const next = startup.then(() => {
+    clearTimeout(timer);
+    if (!expired) return startChrome(opts);
+  });
   startup = next.then(() => {}, () => {});
-  return next;
-};
+  next.then(resolve, reject);
+});
 const startChrome = async ({ w = 1440, h = 900, mobile = false, perf = false, motion = false } = {}) => {
   // Fresh profile per launch, so storage never leaks between runs.
   const profile = mkdtempSync(join(tmpdir(), "ooga-test-"));

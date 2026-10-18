@@ -610,6 +610,8 @@
       }
       for (let n = 0; n < registered.length; n++) {
         const entry = registered[n], node = entry.node, geometry = geometries.get(node.geometry), w = node.world;
+        // Initialized hidden entries cannot block rays; reappearing ones refresh through the shown transition.
+        if (!entry.shown && entry.source === node.geometry && entry.boundsGeometry === geometry && !visible(node)) continue;
         let worldChanged = false;
         for (let i = 0; i < 16; i++) if (entry.world[i] !== w[i]) { worldChanged = true; entry.world[i] = w[i]; }
         // Scale and vertical bounds follow the matrix and geometry only; visibility is still read every frame.

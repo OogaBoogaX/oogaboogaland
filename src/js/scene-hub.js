@@ -8458,7 +8458,15 @@
   // Outline contrast is global.
   // Material within rock follows the same cave ownership and radial front as the rendered stone surfaces.
   const CAMERA_GLYPHS = { coverageAt: cameraGlyphCoverage, version: 0, time: 0, radius: -1, active: -1, permanentCave: -1 };
-  const guideSegmentClear = (x, y, z, toX, toY, toZ) => island.sightClearAt(x, y, z, toX, toY, toZ);
+  const guideWitness = new Int32Array([-1]);
+  const guideSegmentClear = (x, y, z, toX, toY, toZ) => {
+    const previous = guideWitness[0];
+    const clear = island.sightClearAt(x, y, z, toX, toY, toZ, guideWitness);
+    // Clear rays must not evict a useful blocker. The terrain rechecks this voxel's
+    // current occupancy and intersection with every segment before using it.
+    if (clear) guideWitness[0] = previous;
+    return clear;
+  };
   guideSegmentClear.boxClear = (minX, minY, minZ, maxX, maxY, maxZ) => island.sightBoxClearAt(minX, minY, minZ, maxX, maxY, maxZ);
   guideSegmentClear.boxSolid = (minX, minY, minZ, maxX, maxY, maxZ) => island.sightBoxSolidAt(minX, minY, minZ, maxX, maxY, maxZ);
   // Sight for someone on or under the Mempool island, asked only for the walker's own rim: both islands' rock
@@ -10368,6 +10376,7 @@
     phase = null;
     const factorySlot = caves.slots.find(slot => slot.status === "open" && slot.scene === "factory");
     island = terrain.island({ seed: SEED, roofHole: factorySlot ? { id: factorySlot.id, ...BL.factoryModels.ROOF_TUBE } : null });
+    guideWitness[0] = -1;
     cutawayPathBounds = buildCutawayPathBounds(island.cutawayPaths);
     guideSegmentClear.boxGrid = POOL_SEAMS[0].boxGrid = POOL_SEAMS[1].boxGrid = island.sightGrid;
     buildCameraRamps();
