@@ -1,5 +1,9 @@
 # Banana Poker: experimental encrypted-deck service
 
+The live tables on oogabooga.land are dealt by the Worker's dealer instead (see Live tables in
+[banana-poker.md](banana-poker.md)). This protocol is what the lobby's **Join live tables** connects to when the page
+is served by `npm run poker:serve`, where players need no trust in a dealer.
+
 This is working source for an experimental mental-poker service and client,
 not a cryptographic audit or production security certification. It extends the
 existing ten-table floor; five cave themes, suited gorilla dealers, nine seats

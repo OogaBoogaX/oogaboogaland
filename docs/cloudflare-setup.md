@@ -14,8 +14,8 @@ The two share code and nothing else: each has its own D1 database, room, OAuth A
 | Thing | Name | Set where |
 |---|---|---|
 | D1 database | `oogaboogaland-staging`, `oogaboogaland-production` | `d1_databases` (`database_id`), migrations in `worker/migrations` |
-| Rate limiters | `AUTH_LIMITER` 10 sign-ins a minute per IP; `ROOM_LIMITER` 20 room connections and `VOICE_LIMITER` 120 voice calls a minute per player | `ratelimits` (staging namespaces 2001–2003, production 1001–1003) |
-| Durable Object | `Room`, one named `island` | `durable_objects`, `migrations` |
+| Rate limiters | `AUTH_LIMITER` 10 sign-ins a minute per IP; `ROOM_LIMITER` 20 room connections, `VOICE_LIMITER` 120 voice calls and `POKER_LIMITER` 20 Ember Den connections a minute per player | `ratelimits` (staging namespaces 2001–2004, production 1001–1004) |
+| Durable Objects | `Room`, one named `island`; `PokerDen`, one named `ember-den`, the live poker tables' dealer (migration `v2`) | `durable_objects`, `migrations` |
 | Cron | daily 04:00 UTC, purges expired sessions | `triggers` |
 | Service binding | `DONATIONS` → `bananapayserver-staging`'s `PageApi` on staging, `bananapayserver-production`'s on production | `services`, with `/donations/*` in `run_worker_first`. The bound Worker must exist before a deploy carries the binding |
 | Vars | `SITE_ORIGIN`, `GITHUB_CLIENT_ID`, `REALTIME_APP_ID` | `vars` |
@@ -63,7 +63,7 @@ npm run migrate:local
 npm run dev                             # http://localhost:8787, with the staging config
 ```
 
-The local OAuth App has homepage `http://localhost:8787` and callback `http://localhost:8787/auth/callback`. `npm run dev` builds `_site/` and passes `--local-upstream localhost:8787`, so the Origin check sees the local address. Local D1 and the room live in `.wrangler/` and never touch staging.
+The local OAuth App has homepage `http://localhost:8787` and callback `http://localhost:8787/auth/callback`. Playing the Ember Den's live tables locally takes two players signed in from two browser profiles (a private window counts), each with its own GitHub account; voice also needs the Realtime values above. `npm run dev` builds `_site/` and passes `--local-upstream localhost:8787`, so the Origin check sees the local address. Local D1 and the room live in `.wrangler/` and never touch staging.
 
 To show production donation totals and the leaderboard with the local page, sign in to
 Wrangler and run this from the repository root:
