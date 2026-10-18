@@ -552,15 +552,17 @@
     let m = 0;
     for (let i = 0; i < FRUIT_CAP; i++) {
       if (f.t[i] < 0) continue;
+      // Draw the final step inside the intake before returning this slot to the pool.
+      if (f.t[i] - SLIDE >= A.T) {
+        f.t[i] = -1;
+        shared.cooker.bananas++;
+        continue;
+      }
       const t = f.t[i] += dt;
       if (t < SLIDE) {
         const k = t / SLIDE, u = k * k;
         SHOW_POS.x = H.x + (A.sx - H.x) * u; SHOW_POS.y = H.y + (A.sy - H.y) * u; SHOW_POS.z = H.z + (A.sz - H.z) * u;
         SHOW_SCALE.x = SHOW_SCALE.y = SHOW_SCALE.z = FRUIT_SCALE * Math.min(1, 0.4 + k * 2);
-      } else if (t - SLIDE >= A.T) {
-        f.t[i] = -1;
-        shared.cooker.bananas++;
-        continue;
       } else {
         // Off the lip: the cooker spits, and a puff of steam follows it out.
         if (t - dt < SLIDE) {
@@ -568,7 +570,7 @@
           const p = fx.spawnParticle(SMOKE, A.sx, A.sy + 0.1, A.sz, (Math.random() - 0.5) * 0.4, 0.5 + Math.random() * 0.3, (Math.random() - 0.5) * 0.4, 0.8, 0.9);
           if (p) p.smoke = true;
         }
-        const u = (t - SLIDE) / A.T;
+        const u = Math.min(1, (t - SLIDE) / A.T);
         SHOW_POS.x = A.sx; SHOW_POS.y = A.sy + (A.ey - A.sy) * u; SHOW_POS.z = A.sz;
         SHOW_SCALE.x = SHOW_SCALE.y = SHOW_SCALE.z = FRUIT_SCALE;
       }

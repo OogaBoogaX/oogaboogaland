@@ -8532,7 +8532,7 @@ body.dsb-menu-open :is(.bottom-hud,.top-hud,#joy-move,#joy-look,#act,.weapon-hud
 /* Bottom-anchored drawers grow upward, with the resize grip just inside their top edge. */
 @media (max-width: 720px), (max-height: 500px) and (orientation: landscape) {
   .sheet { padding-top: 12px; }
-  .sheet-resize { top: -3px; bottom: auto; }
+  .sheet-resize { top: 3px; bottom: auto; }
   .sheet-toggle-loot { top: -39px; left: 144px; height: 42px; }
   .sheet-toggle-chat { top: -39px; left: var(--sheet-chat-left); height: 42px; }
 }
