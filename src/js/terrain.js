@@ -2321,8 +2321,10 @@
               if (sightConvexHit(windowSightPlanes, piece.sightOffset, piece.sightCount, x, y, z, dx, dy, dz, t, columnEnd, windowSightRefs)) return false;
             }
             for (let layer = 0; layer < 2; layer++) {
-              const range = layer ? basementCollision[column] : rampCollision[column], base = layer ? (((basementCavities[column] >> 4) & 63) - 64) * UNIT : (((lowerCavities[column] >> 4) & 63) - 32) * UNIT;
-              if (!range || maxY <= base + 1e-9) continue;
+              const range = layer ? basementCollision[column] : rampCollision[column];
+              if (!range) continue;
+              const base = layer ? (((basementCavities[column] >> 4) & 63) - 64) * UNIT : (((lowerCavities[column] >> 4) & 63) - 32) * UNIT;
+              if (maxY <= base + 1e-9) continue;
               const bottom = dy ? (base - y) / dy : 0, start = dy > 0 ? Math.max(t, bottom) : t, finish = dy < 0 ? Math.min(columnEnd, bottom) : columnEnd;
               if (start >= finish - 1e-12) continue;
               for (let n = 0; n < (range & 3); n++) {
@@ -2335,10 +2337,9 @@
           }
         }
         if (end >= hi - 1e-12) break;
-        if (tx <= end + 1e-12) { gx += sx; tx += stepX; }
-        if (ty <= end + 1e-12) { gy += sy; ty += stepY; }
-        if (tz <= end + 1e-12) { gz += sz; tz += stepZ; }
-        if (gx < 0 || gx >= SX || gy < 0 || gy >= SY || gz < 0 || gz >= SZ) break;
+        if (tx <= end + 1e-12) { gx += sx; tx += stepX; if (gx < 0 || gx >= SX) break; }
+        if (ty <= end + 1e-12) { gy += sy; ty += stepY; if (gy < 0 || gy >= SY) break; }
+        if (tz <= end + 1e-12) { gz += sz; tz += stepZ; if (gz < 0 || gz >= SZ) break; }
         t = end;
       }
       return true;

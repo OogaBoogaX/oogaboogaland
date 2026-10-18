@@ -881,23 +881,36 @@ const visibilityStorageProof = async ({ compact = false, deferred = false } = {}
     const sharedIndices = second.geometryRecords().get(shared).triangleIndices.slice();
     S.removeChild(firstRoot, removed); first.refresh(); query(first, firstRoot);
     const removal = first.entryRecords().length === 1 && first.entryRecords().every(entry => entry.node !== removed);
-    const larger = M.merge(...Array.from({ length: 8 }, (_, i) => M.box({ w: 0.2, h: 1, d: 0.3, offset: { x: i * 0.25 }, color: "#fff" })));
+    const larger = M.merge(...Array.from({ length: 8 }, (_, i) => M.box({ w: 0.2, h: 1, d: 0.3, offset: { x: i * 0.25 }, color: "#fff" })),
+      { verts: [-1, -0.7, 0, 1.8, 0.71, 0.04, 1.8, 0.72, 0.04], faces: [{ i: [0, 1, 2], color: [255, 255, 255] }], lines: [] });
     firstNode.geometry = larger; first.refresh(); query(first, firstRoot);
     const entry = first.entryRecords()[0], replacement = !first.geometryRecords().has(shared) && first.geometryRecords().has(larger)
       && entry.geometry === first.geometryRecords().get(larger) && entry.boundsGeometry === entry.geometry
       && entry.boundaryReserve >= 96 && entry.boundaryTriangles.length >= 960 && entry.boundaryNodes.length >= entry.geometry.counts.length * 4;
-    let nearBounds = true, nearCases = 0, boundaryHits = 0;
+    let nearBounds = true, nearCases = 0, boundaryHits = 0, gridQueries = 0;
     for (const depth of [-1, 0.05, 0.1, 0.3, 1, 8]) {
-      firstNode.position.z = depth; firstNode.rotation.y = 0.31;
+      firstNode.position.z = depth;
+      Object.assign(firstNode.rotation, { x: 0.17, y: 0.31, z: 0.23 });
+      Object.assign(firstNode.scale, { x: 1.3, y: 0.7, z: 1.1 });
       query(first, firstRoot);
       const points = [];
-      for (const face of larger.faces) for (let n = 0; n < face.i.length; n++) {
+      for (const face of larger.faces) for (let n = 0; n < face.i.length; n++) for (const t of [0, 0.0001, 0.25, 0.2501, 0.5, 0.5001, 0.75, 0.7501, 0.9999, 1]) {
         const a = face.i[n] * 3, b = face.i[(n + 1) % face.i.length] * 3, v = larger.verts, w = firstNode.world;
-        const x = (v[a] + v[b]) / 2, y = (v[a + 1] + v[b + 1]) / 2, z = (v[a + 2] + v[b + 2]) / 2;
+        const x = v[a] + (v[b] - v[a]) * t, y = v[a + 1] + (v[b + 1] - v[a + 1]) * t, z = v[a + 2] + (v[b + 2] - v[a + 2]) * t;
         const dx = v[b] - v[a], dy = v[b + 1] - v[a + 1], dz = v[b + 2] - v[a + 2];
-        points.push([w[0]*x+w[4]*y+w[8]*z+w[12], w[1]*x+w[5]*y+w[9]*z+w[13], w[2]*x+w[6]*y+w[10]*z+w[14], w[0]*dx+w[4]*dy+w[8]*dz, w[1]*dx+w[5]*dy+w[9]*dz, w[2]*dx+w[6]*dy+w[10]*dz]);
+        const direction = [w[0]*dx+w[4]*dy+w[8]*dz, w[1]*dx+w[5]*dy+w[9]*dz, w[2]*dx+w[6]*dy+w[10]*dz];
+        points.push([w[0]*x+w[4]*y+w[8]*z+w[12], w[1]*x+w[5]*y+w[9]*z+w[13], w[2]*x+w[6]*y+w[10]*z+w[14], ...direction]);
       }
-      const accelerated = points.map(p => first.ownerBoundaryAt(firstRoot, ...p));
+      const clearBoundaryHits = () => {
+        for (const e of first.entryRecords()) e.boundaryHits.fill(-1);
+        for (const group of first.ownerRecords()) group.boundaryEntries.fill(null);
+      };
+      const beforeGrid = first.stats.boundaryGridQueries;
+      const accelerated = points.map(p => { clearBoundaryHits(); return first.ownerBoundaryAt(firstRoot, ...p); });
+      // Adjacent queries retain their hit hints in play; verify that path against the same exact oracle.
+      const coherent = points.map(p => first.ownerBoundaryAt(firstRoot, ...p));
+      const reversed = points.slice().reverse().map(p => first.ownerBoundaryAt(firstRoot, ...p)).reverse();
+      gridQueries += first.stats.boundaryGridQueries - beforeGrid;
       // Use the same exact triangle predicate as the oracle, with every screen bound open.
       for (const e of first.entryRecords()) {
         for (const boxes of [e.boundaryBounds, e.boundaryBoxes, e.boundaryNodes]) for (let i = 0; i < boxes.length; i += 4) {
@@ -907,16 +920,62 @@ const visibilityStorageProof = async ({ compact = false, deferred = false } = {}
       }
       for (const group of first.ownerRecords()) if (group.boundaryGrid) group.boundaryGrid.active = false;
       for (let i = 0; i < points.length; i++) {
+        clearBoundaryHits();
         const reference = first.ownerBoundaryAt(firstRoot, ...points[i]);
-        nearBounds &&= reference === accelerated[i]; nearCases++; if (reference) boundaryHits++;
+        nearBounds &&= reference === accelerated[i] && reference === coherent[i] && reference === reversed[i]; nearCases++; if (reference) boundaryHits++;
       }
     }
+    nearBounds &&= gridQueries > 0;
     first.dispose(); query(second, secondRoot);
     const survivor = second.stats.registered === 1 && second.stats.triangles === 12 && second.entryRecords()[0].visible
       && second.geometryRecords().get(shared).triangleIndices.every((value, i) => value === sharedIndices[i]);
     const released = first.entryRecords().length === 0 && first.geometryRecords().size === 0 && first.stats.triangleBytes === 0;
     second.dispose();
-    return { exact, unchanged, bounded, tightBacking, storage, demand, nearBounds, nearCases, boundaryHits, values, count, bytes, lifecycle: sharedBake && removal && replacement && survivor && released && second.geometryRecords().size === 0, sharedBake, removal, replacement, survivor, released, disposed: guides.stats.registered === 0 };
+    // Hidden entries may defer transform work, but reappearing nodes must agree
+    // with a fresh registry after movement, clipping, parent hiding or replacement.
+    const hiddenRoot = S.createNode(), hiddenGeometry = M.box({ w: 1, h: 2, d: 1, color: "#fff" });
+    hiddenGeometry.clipMinY = -Infinity; hiddenGeometry.clipMaxY = Infinity;
+    const hiddenNode = S.createNode({ geometry: hiddenGeometry, position: { x: 0, y: 0, z: 8 } });
+    S.addChild(root, hiddenRoot); S.addChild(hiddenRoot, hiddenNode);
+    const hidden = B.objectGuides.create({ roots: [hiddenRoot], crew: { cavemen: new Map() } }), hiddenCases = [];
+    const hiddenSnapshot = q => {
+      S.updateWorld(hiddenRoot); q.collect(actor, 0, 0, 8, camera, 1.6);
+      const rays = [], contours = [], v = hiddenNode.geometry.verts, w = hiddenNode.world;
+      for (const x of [-2, -0.5, 0, 0.5, 2]) for (const y of [-0.75, -0.1, 0.3, 0.8, 1.5])
+        rays.push(q.ownerClear(hiddenRoot, x, y, 0, x, y, 12), q.cameraClear(x, y, 0, x, y, 12, actor));
+      for (const face of hiddenNode.geometry.faces) for (let n = 0; n < face.i.length; n++) {
+        const a = face.i[n] * 3, b = face.i[(n + 1) % face.i.length] * 3;
+        const x = (v[a] + v[b]) / 2, y = (v[a + 1] + v[b + 1]) / 2, z = (v[a + 2] + v[b + 2]) / 2;
+        const dx = v[b] - v[a], dy = v[b + 1] - v[a + 1], dz = v[b + 2] - v[a + 2];
+        contours.push(q.ownerBoundaryAt(hiddenRoot, w[0]*x+w[4]*y+w[8]*z+w[12], w[1]*x+w[5]*y+w[9]*z+w[13], w[2]*x+w[6]*y+w[10]*z+w[14], w[0]*dx+w[4]*dy+w[8]*dz, w[1]*dx+w[5]*dy+w[9]*dz, w[2]*dx+w[6]*dy+w[10]*dz));
+      }
+      const e = q.entryRecords()[0];
+      return { shown: e.shown, visible: e.visible, rays, contours, lines: Array.from(q.result.lines.subarray(0, q.result.count * 6)),
+        bounds: e.shown ? [e.x, e.y, e.z, e.radius, e.hx, e.hy, e.hz, e.clipMinY, e.worldMinY, e.worldMaxY, ...e.world, ...e.inverse] : [] };
+    };
+    const compareHidden = (name, shown) => {
+      const actual = hiddenSnapshot(hidden), reference = B.objectGuides.create({ roots: [hiddenRoot], crew: { cavemen: new Map() } });
+      try {
+        const expected = hiddenSnapshot(reference);
+        hiddenCases.push({ name, pass: JSON.stringify(actual) === JSON.stringify(expected) && actual.shown === shown
+          && (shown ? actual.rays.includes(false) && actual.rays.includes(true) : actual.rays.every(Boolean)) });
+      } finally { reference.dispose(); }
+    };
+    compareHidden("visible", true);
+    hiddenNode.visible = false; compareHidden("hidden", false);
+    Object.assign(hiddenNode.position, { x: 0.7, y: 0.2, z: 7.5 });
+    Object.assign(hiddenNode.rotation, { x: 0.2, y: 0.4 }); Object.assign(hiddenNode.scale, { x: 1.2, y: 0.8, z: 1.1 });
+    hiddenGeometry.clipMinY = 0.1; hiddenGeometry.clipMaxY = 0.75; compareHidden("hidden moved and clipped", false);
+    hiddenNode.visible = true; compareHidden("shown after movement and clipping", true);
+    hiddenRoot.visible = false; compareHidden("parent hidden", false);
+    Object.assign(hiddenNode.position, { x: -0.5, y: 0.3 }); hiddenGeometry.clipMinY = -0.2; hiddenGeometry.clipMaxY = 0.2;
+    compareHidden("hidden parent with moved and clipped child", false);
+    hiddenNode.geometry = M.box({ w: 1.6, h: 1.4, d: 1.2, color: "#fff" });
+    hiddenNode.geometry.clipMinY = 0; hiddenNode.geometry.clipMaxY = 0.5;
+    hidden.register(hiddenNode, hiddenRoot); compareHidden("geometry replaced while parent hidden", false);
+    hiddenRoot.visible = true; compareHidden("shown with replacement geometry", true);
+    const hiddenTransitions = hiddenCases.every(row => row.pass); hidden.dispose();
+    return { exact, unchanged, bounded, tightBacking, storage, demand, nearBounds, nearCases, boundaryHits, gridQueries, values, count, bytes, lifecycle: sharedBake && removal && replacement && survivor && released && second.geometryRecords().size === 0 && hiddenTransitions, sharedBake, removal, replacement, survivor, released, hiddenTransitions, hiddenCases, disposed: guides.stats.registered === 0 };
   })()`, context);
 };
 // Count descriptor users rather than timings, so the first-demand cost scales with actual users.
@@ -2558,11 +2617,24 @@ const { terrainSightProbe } = (() => {
     // Keep the uncached shipped query as the oracle. Changing near-plane starts, camera origins and
     // endpoints must never turn an uncertain/removed blocker into a cached invisible opening.
     const witness = new Int32Array(rays.length).fill(-1), witnessBytes = witness.byteLength;
-    let witnessQueries = 0;
+    const retained = new Int32Array([-1]);
+    let witnessQueries = 0, retainedQueries = 0, retainedHits = 0, retainedReused = false, retainedRemoved = false;
+    // All rays also share one retained blocker, as the hub's guide rays do. The
+    // oracle still runs without a witness, including after a clear ray or mutation.
+    const compareRetained = (a, b, expected = island.sightClearAt(...a, ...b)) => {
+      const previous = retained[0], hits = island.sightCacheStats.hits;
+      const actual = island.sightClearAt(...a, ...b, retained);
+      if (actual) retained[0] = previous;
+      retainedQueries++; retainedHits += island.sightCacheStats.hits - hits;
+      if (actual !== expected && failures.length < 8) failures.push({ kind: "retained voxel witness mismatch", a, b, actual, expected });
+      return actual;
+    };
     const compareWitness = (a, b, slot) => {
       const expected = island.sightClearAt(...a, ...b), actual = island.sightClearAt(...a, ...b, witness, slot);
       witnessQueries++;
       if (actual !== expected && failures.length < 8) failures.push({ kind: "voxel witness mismatch", a, b, slot, actual, expected });
+      compareRetained(a, b, expected);
+      return actual;
     };
     for (let slot = 0; slot < rays.length; slot++) {
       const { a, b } = rays[slot];
@@ -2575,7 +2647,7 @@ const { terrainSightProbe } = (() => {
     // windows/ramps. Restore construction data even when a comparison throws.
     const source = island.cutawaySource, edits = [], unit = source.unit, origin = source.origin;
     const cell = [8, source.sy - 8, 8], point = (x, y, z) => [origin.x + x * unit, origin.y + y * unit, origin.z + z * unit];
-    const witnessHitsBefore = island.sightCacheStats.hits;
+    const witnessHitsBefore = island.sightCacheStats.hits, retainedHitsBefore = retainedHits;
     try {
       for (let x = cell[0] - 2; x <= cell[0] + 2; x++) for (let y = cell[1] - 2; y <= cell[1] + 2; y++) for (let z = cell[2] - 2; z <= cell[2] + 2; z++) {
         const at = (x * source.sy + y) * source.sz + z;
@@ -2585,7 +2657,13 @@ const { terrainSightProbe } = (() => {
       source.data[occupied] = 1;
       const a = point(cell[0] + 0.5, cell[1] + 0.5, cell[2] + 0.5), b = point(cell[0] + 0.8, cell[1] + 0.5, cell[2] + 0.5);
       compareWitness(a, b, 0); compareWitness(a, b, 0);
-      source.data[occupied] = 0; compareWitness(a, b, 0); source.data[occupied] = 1;
+      const clear = compareRetained([80, 2, 80], [80, 5, 80]), kept = retained[0], hits = retainedHits;
+      const blocked = !compareRetained(a, b);
+      retainedReused = clear && kept === occupied && blocked && retainedHits > hits;
+      source.data[occupied] = 0;
+      const removed = compareWitness(a, b, 0);
+      retainedRemoved = removed && retained[0] === occupied;
+      source.data[occupied] = 1;
       for (let n = 0; n < 400; n++) {
         const a = point(...cell.map(v => v + (random() - 0.5) * 7)), b = point(...cell.map(v => v + (random() - 0.5) * 7));
         compareWitness(a, b, 0); compareWitness(a, b, 0);
@@ -2596,7 +2674,12 @@ const { terrainSightProbe } = (() => {
         compareWitness(a, a, 0);
       }
     } finally { for (const [at, value] of edits) source.data[at] = value; }
-    const witnessHits = island.sightCacheStats.hits - witnessHitsBefore;
+    // Preserve the original witness-hit requirement independently of the extra
+    // shared-slot queries, so their hits cannot make the existing check pass.
+    const witnessHits = island.sightCacheStats.hits - witnessHitsBefore - (retainedHits - retainedHitsBefore);
+    const retainedBytes = retained.byteLength;
+    if ((retainedBytes !== 4 || retainedQueries < witnessQueries || !retainedReused || !retainedRemoved) && failures.length < 8)
+      failures.push({ kind: "retained voxel witness reuse", retainedBytes, retainedQueries, witnessQueries, retainedReused, retainedRemoved });
     let certifiedRays = 0;
     for (const ray of rays) {
       const actual = island.sightClearAt(...ray.a, ...ray.b), reverse = island.sightClearAt(...ray.b, ...ray.a);
@@ -2675,7 +2758,7 @@ const { terrainSightProbe } = (() => {
       && !!island.rockMaterialAt(seam[0], seam[1], seam[2] - 1e-6) && !!island.rockMaterialAt(seam[0], seam[1], seam[2] + 1e-6)
       && !island.sightClearAt(-28.79, -1.625, 4.75, -28.83, -1.625, 4.75);
     const floor = island.headquarters.basement.floor, outside = island.sightClearAt(80, 2, 80, 80, 5, 80), throughIsland = !island.sightClearAt(0, 20, 0, 0, -50, 0), shaft = island.sightClearAt(0, floor - 0.1, 0, 0, -50, 0);
-    return { witnessQueries, witnessHits, witnessBytes, counts, rays: rays.length, certifiedRays, clearBoxes, boxRays, boxPoints, solidBoxes, solidPoints, fragmentWindows, fragmentBoxes, fragmentAirBoxes, fragmentPoints, failures, seamCovered, outside, throughIsland, shaft };
+    return { witnessQueries, witnessHits, witnessBytes, retainedQueries, retainedHits, retainedBytes, retainedReused, retainedRemoved, counts, rays: rays.length, certifiedRays, clearBoxes, boxRays, boxPoints, solidBoxes, solidPoints, fragmentWindows, fragmentBoxes, fragmentAirBoxes, fragmentPoints, failures, seamCovered, outside, throughIsland, shaft };
   };
   return { terrainSightProbe };
 })();
@@ -3685,9 +3768,10 @@ const orbitFlow = async (b) => {
 // ---- Selection and the caps ----
 // `node test/run.mjs race mine` runs the global unit tier plus those scenes; `full` runs every scene and the
 // perf floor; `perf` runs the perf floor alone; `unit` (or nothing) runs only the global tier.
-// Eight lanes saturate a 16-core box (measured 2026-09-20); raising it only adds heat.
+// Two lanes limit concurrent WebGL boot pressure; four produced long startups
+// and a GPU context loss during the full suite.
 const SCENES = ["hub", "lab", "race", "drop", "orbit", "mine", "dsb", "factory", "bifrost", "poker", "arcade", "skee", "hoops", "shy", "claw", "hockey", "billiards", "darts", "pinball", "ride", "invaders", "snake", "pong", "stampede", "flap", "breaker", "dash", "stacker"];
-const LANES = Number(process.env.LANES) || 8;
+const LANES = Number(process.env.LANES) || 2;
 const ARGS = process.argv.slice(2);
 for (const a of ARGS) if (!SCENES.includes(a) && !["unit", "chat-unit", "integration-unit", "svrn-unit", "svrn-review", "vacancy-unit", "portal-unit", "water-baseline", "water-review", "water-unit", "stackchain-review", "stackchain-unit", "dsb-menus-unit", "maxis-unit", "exterior-unit", "rulers-unit", "ink-unit", "big-unit", "perf", "full", "poker-protocol"].includes(a)) throw new Error(`Unknown argument "${a}" (unit | perf | full | poker-protocol | ${SCENES.join(" | ")})`);
 const ONLY = process.env.ONLY || ""; // Optional comma-separated substrings within the requested scenes.
@@ -5576,9 +5660,9 @@ const hubDestinationNames = { name: "destination accessible names", why: "regres
   record("destinations: every visible place label is included in the actual browser accessibility name", rows.every(row => row.label === row.expected && row.names.length === 1 && row.names[0].toLowerCase().includes(row.label.toLowerCase())), JSON.stringify(rows));
 } };
 const hubWalking = { name: "hub walking", why: "regression: steering keys came out mirrored, and the removed hub Agent could still be summoned", run: async (b) => {
-  // Keep each directional check in the same clear patch as walking speed changes.
+  // Use the running check's clear patch: seeded scenery now places a rock at the old (-8, 8) start.
   const duration = await b.evaluate(`2 / BL.pilot.WALK.speed`);
-  const ooga = await walkKeys(b, "portlandhodl", -8, 8, [0, 2.2], duration);
+  const ooga = await walkKeys(b, "portlandhodl", -5, 5, [0, 2.2], duration);
   const running = await b.evaluate(`(() => {
     const B = __ooga, a = B.cavemen.get("portlandhodl"), P = B.pilot, rows = [];
     const key = (type, key, code, location = 0, shiftKey = false) => window.dispatchEvent(new KeyboardEvent(type, { key, code, location, shiftKey }));
@@ -5638,8 +5722,10 @@ const hubMapNavigation = { name: "hub map navigation", why: "regression: the map
     window.dispatchEvent(new KeyboardEvent("keyup", { key: "s", code: "KeyS" })); B.advance(0.1, 1 / 60);
     const departed = { distance: Math.hypot(a.root.position.x - start.x, a.root.position.z - start.z), label: label.textContent, visible: label.classList.contains("show") };
     const areas = [];
-    for (const name of ["underground", "basement", "timechain"]) {
-      P.goPreset(name);
+    // HQ and Basement are map destinations, not detached camera presets.
+    for (const [name, clicks] of [["underground", 2], ["basement", 1], ["timechain", 0]]) {
+      if (clicks) for (let i = 0; i < clicks; i++) map.click();
+      else P.goPreset(name);
       B.advance(0.1, 1 / 60); H.fadeDetachedName(true); B.advance(0.1, 1 / 60);
       areas.push({ name, label: label.textContent });
     }
@@ -6154,18 +6240,20 @@ const oogatronPopups = { name: "oogatron popups", why: "rule: Oogatron windows k
   }
   record(`Oogatron ${mode}: restored windows still close normally`, (await read()).length === 0);
 } };
-// The healthiest prop with a level approach: the first meadow rock can sit
-// beside a raised island ledge, which puts a teleported actor above its surface.
+// The healthiest prop with a level, clear approach: nearby ledges or seeded
+// scenery must not lift the visitor or obstruct the shoulder view.
 const nextTo = (prop, gap, yaw = "-Math.PI / 2", pitch = 0.3) => `(() => {
   const B = window.__ooga, a = B.cavemen.get("portlandhodl");
   if (B.crew.player !== a) B.pilot.possess(a);
   const r = B.headquarters.breakables.list.filter(r => r.owner.prop === "${prop}" && r.owner.active && !r.broken && !r.reveal)
     .sort((a, b) => b.health - a.health).find(r => {
-      const t = r.owner.node.position;
-      return Math.abs(B.island.supportAt(t.x - ${gap}, t.z, t.y + 0.1, a.bodyRadius) - t.y) < 1e-6;
+      const t = r.owner.node.position, x = t.x - ${gap}, step = BL.pilot.WALK.step;
+      // Use the visitor's actual terrain/prop support and 0.3 m walking footprint.
+      return Math.abs(B.headquarters.solids.supportAt(x, t.z, t.y, t.y, a) - t.y) < 1e-6
+        && B.headquarters.solids.props.clearAt(x, t.y + step, t.z, 0.3, Math.max(0, a.bodyHeight - step));
     });
-  if (!r) throw new Error("No level approach to ${prop}");
-  window.__target = r;
+  if (!r) throw new Error("No level, clear approach to ${prop}");
+  window.__target = r; delete window.__targetBrokenAt;
   const t = r.owner.node.position;
   B.pilot.navigate({ position: { x: t.x - ${gap}, y: t.y, z: t.z }, yaw: ${yaw}, pitch: ${pitch}, dist: 4 });
   B.advance(0.3, 1 / 60); return r.health;
@@ -6176,6 +6264,18 @@ const hubMelee = { name: "hub melee", why: "rule: a ready swing does five damage
   // The preceding AK check deliberately leaves carry mode. These contacts
   // exercise the ordinary shoulder reticle, including the recovery aim below.
   await b.evaluate(`(() => { const B = __ooga, P = B.pilot; if (!P.aiming) P.modeAction("mode-toggle"); if (P.birdsEye) P.hooks.onZoom(0.001); B.advance(1, 1 / 60); })()`);
+  // Start the respawn clock at the breaking contact, including real frames
+  // and swing recovery that pass before the explicit respawn polling below.
+  await b.evaluate(`(() => {
+    const B = __ooga, props = B.headquarters.breakables;
+    window.__breakableHit = props.hit;
+    props.hit = function(...args) {
+      const r = args[1]?.owner?.breakable, broken = r?.broken;
+      const result = window.__breakableHit.apply(this, args);
+      if (r === window.__target && !broken && r.broken) window.__targetBrokenAt = B.renderOpts.time;
+      return result;
+    };
+  })()`);
   for (const [prop, gap] of [["crate", 0.9], ["barrel", 0.9], ["rock", 1.175]]) {
     const health = await b.evaluate(nextTo(prop, gap));
     let n = 0;
@@ -6186,6 +6286,7 @@ const hubMelee = { name: "hub melee", why: "rule: a ready swing does five damage
     }
     swings[prop] = { health, n };
   }
+  await b.evaluate(`__ooga.headquarters.breakables.hit = window.__breakableHit; delete window.__breakableHit`);
   const back = await b.evaluate(`(() => {
     const r = window.__target, B = window.__ooga, a = B.crew.player, origin = { ...r.owner.node.position };
     const distance = () => Math.hypot(a.root.position.x - origin.x, a.root.position.z - origin.z);
@@ -6194,9 +6295,9 @@ const hubMelee = { name: "hub melee", why: "rule: a ready swing does five damage
     // navigation without advancing uncounted time before the same timed loop.
     B.pilot.navigate({ position: { x: -8, y: 0, z: 16 }, yaw: -Math.PI / 2, pitch: 0.3, dist: 5 });
     const clearedDistance = distance();
-    for (let t = 0; t < 65; t++) {
-      B.advance(1, 1 / 30);
-      if (!r.broken && !r.reveal) return { t: t + 1, health: r.health, active: r.owner.active,
+    for (let i = 0; i < 650; i++) {
+      B.advance(0.1, 1 / 30);
+      if (!r.broken && !r.reveal) return { t: B.renderOpts.time - window.__targetBrokenAt, health: r.health, active: r.owner.active,
         occupiedDistance, clearedDistance, footprint: r.owner.footprint, bodyRadius: a.bodyRadius };
     }
     return null;
@@ -7264,7 +7365,7 @@ const hubBirdsEyeFloors = { name: "birds-eye lower floors", why: "regression: ra
     const clouds = [], weather = [];
     // Relief windows include an ordinary front mesh as well as projective
     // batches. Neither is part of the weather deck.
-    const reliefRoots = [D.factory?.batches.hall.parent, D.bifrost?.window?.root];
+    const reliefRoots = [D.factory?.batches.hall.parent, D.factory?.roof?.batches.hall.parent, D.bifrost?.window?.root];
     const visit = n => { if (reliefRoots.includes(n)) return; if (n.geometry?.cutawayPreserve) clouds.push(n); if (n.geometry?.cutawayHide) weather.push(n); for (const child of n.children) visit(child); };
     visit(BL.scenes.hub.root);
     const immutable = I.geometry === geometry && I.geometry.verts === verts && verts.every((v, i) => v === originalVerts[i]) && source.data === data && data.every((v, i) => v === originalData[i]);
@@ -7861,7 +7962,19 @@ const factoryWalking = { name: "factory walking", why: "regression: Factory move
 } };
 const factoryGreeter = { name: "factory greeter", why: "rule: the guide notices a visitor on the balcony and flies over to offer tours, only to places the hall's clearance passes, and once per visit; Escape or a decline sends her back to work; a visitor can walk up to her at a station; the four tours complete and send her back to work; her flight clears the hall; and device detail respects quality and visit ownership", run: async (b) => {
   // A fresh visit: an earlier step may already have had her notice the visitor, so come back in once if so.
-  const fresh = async () => { if (await b.evaluate(`__ooga.factory.greeter.state.offered`)) { await tourGo(b, "lab"); await tourGo(b, "factory"); } };
+  // Keep the visitor released until the observing evaluate possesses them;
+  // browser frames between commands must not consume her notice phase.
+  const fresh = async () => {
+    const offered = await b.evaluate(`(() => { __ooga.pilot.release(true); return __ooga.factory.greeter.state.offered; })()`);
+    if (offered) {
+      await tourGo(b, "lab");
+      await b.evaluate(`(() => {
+        const B = __ooga; B.go("factory");
+        for (let i = 0; i < 150 && (B.transitioning || B.scene !== "factory"); i++) B.advance(1 / 30, 1 / 30);
+        B.pilot.release(true); B.advance(0.3, 1 / 30); B.housekeep();
+      })()`);
+    }
+  };
   await fresh();
   // regression: with no room either side of the visitor, she flew to a place that had failed the hall's clearance.
   // The visitor stands by the gate facing it, where neither side passes; she comes over their head instead, and every
@@ -8924,7 +9037,10 @@ scene("hub", { label: "timechain resident", steps: [{ name: "timechain resident"
   record("timechain: an empty half-litre triggers a walk, visible refill and return, independent of frame rate and paused by control", beer.returned && beer.paused && beer.resumed && [beer.slow, beer.fast].every(s => s.empty && s.filling && s.walked && s.increasing && s.streamOff && s.mode === "work" && s.litres === 0.5 && s.sips === 5 && s.refills === 1) && Math.abs(beer.slow.elapsed - beer.fast.elapsed) < 1e-7, JSON.stringify(beer));
   record("timechain: chair clicks spill the glass, cup clicks chug it at mouth level, and cleanup restores a half-litre glass", [beer.chug, beer.spin].every(s => s.triggered && s.phases.includes("fill") && s.phases.includes("return") && s.mode === "work" && s.litres === 0.5 && s.refills === 1 && s.streamOff) && beer.chug.phases.includes("chug") && beer.chug.drinkArm > -2 && beer.chug.cleaned === 0 && beer.chug.replaced === 0 && beer.spin.phases.includes("clean") && beer.spin.phases.includes("discard") && beer.spin.cleaned === 1 && beer.spin.replaced === 1 && !beer.spin.broken && beer.spin.shardsHidden, JSON.stringify({ chug: beer.chug, spin: beer.spin }));
 } }] });
-scene("hub", { label: "chilling", query: "status=chillin&pos=0", steps: [{ name: "chilling Ooga placement", why: "regression: chilling Oogas spawned beside the banana pile and 2140data spun his nunchaku as a permanent idle stance", run: async (b) => {
+scene("hub", { label: "chilling", query: "status=chillin&pos=0",
+  // This placement order exhausted the old 36-point pool before the last Ooga could settle.
+  opts: { initScript: `Math.random = (() => { let a = 3; return () => { let t = a += 0x6D2B79F5; t = Math.imul(t ^ t >>> 15, t | 1); t ^= t + Math.imul(t ^ t >>> 7, t | 61); return ((t ^ t >>> 14) >>> 0) / 4294967296; }; })();` },
+  steps: [{ name: "chilling Ooga placement", why: "regression: chilling Oogas spawned beside the banana pile and 2140data spun his nunchaku as a permanent idle stance", run: async (b) => {
   const state = await b.evaluate(`(() => { const B = __ooga, inner = B.path.ringOuterRadius + 1.5, rows = [...B.cavemen.values()].map(c => ({ name: c.traits.name, state: c.state, radius: Math.hypot(c.root.position.x, c.root.position.z), snack: c.parts.snack.visible })); const c = B.cavemen.get("2140data"); B.advance(2, 1 / 60); return { inner, rows, spin: c.parts.chukTrail.some(n => n.visible), clubYaw: c.parts.club.rotation.y }; })()`);
   record("chilling Oogas: every Ooga rests beyond the banana ring without eating, and 2140data carries rather than continuously spins his nunchaku", state.rows.every(c => c.state === "chilling" && c.radius >= state.inner && !c.snack) && !state.spin && Math.abs(state.clubYaw) < 1e-6, JSON.stringify(state));
   const seated = await b.evaluate(`(() => {
@@ -12197,6 +12313,13 @@ scene("dsb", { label: "lifecycle", exclusive: true, url: hubPage(src), steps: [{
 
 scene("factory", { label: "lifecycle", exclusive: true, url: hubPage(src), steps: [{ name: "factory lifecycle", why: "contract: repeated factory visits, each left with a tip's show in the air, release the hall's listeners, nodes and GPU resources while retaining one bounded shared node", run: async (b) => {
   const { rendered, settled, snapshot, travel, heapDetail, within } = await dsbSoak(b);
+  // Compare the same roster and work sites even when an activity expires during the soak.
+  // Only classification uses this instant; scene animation and the Factory feed keep their clocks.
+  await b.evaluate(`(() => {
+    const C = BL.contributors, at = Date.now(), stateFor = C.stateFor, hasRecentActivity = C.hasRecentActivity;
+    C.stateFor = contributor => stateFor(contributor, at);
+    C.hasRecentActivity = (contributor, repo) => hasRecentActivity(contributor, repo, at);
+  })()`);
   // Keep resource comparisons at one tier, as in the other lifecycle soaks.
   await b.evaluate('__ooga.renderer.setQuality("low")');
   // Replay can become live after the first snapshot. These four static signal labels are intentionally
@@ -12219,9 +12342,28 @@ scene("factory", { label: "lifecycle", exclusive: true, url: hubPage(src), steps
   })()`);
   // A legendary tip two seconds before each departure, so every visit leaves with cubes or bananas in the air.
   const tip = (id) => b.evaluate(`(() => { const B = window.__ooga; window.BL.scenes.factory.onDonation({ id: "${id}", sats: 120000, handle: "soak", message: "", at: Date.now() }); B.advance(2, 1 / 30); const c = B.stats().cooker; return c.cubes + c.bananas + c.queued; })()`);
+  // Each window lazily uploads its finite batch geometries as the feed lights a tank or sends a sat.
+  // Warm the same existing batches before both snapshots, so a different feed phase cannot look like a leak.
+  // Zero-count batches create their mesh record but draw no instances; restore visibility and redraw immediately.
+  const warmWindowBatches = () => b.evaluate(`(() => {
+    const B = window.__ooga, windows = [B.factory, B.factory.roof];
+    const batches = windows.flatMap(w => Object.values(w.batches));
+    const nodes = windows.map(w => w.batches.hall.parent).concat(batches), visible = nodes.map(n => n.visible);
+    const scene = BL.scenes.hub;
+    let warmed = false, restored = false;
+    try {
+      for (const n of nodes) n.visible = true;
+      warmed = B.renderer.render(scene.root, scene.camera, scene.renderOpts);
+    } finally {
+      nodes.forEach((n, i) => { n.visible = visible[i]; });
+      restored = B.renderer.render(scene.root, scene.camera, scene.renderOpts);
+    }
+    return { windows: windows.length, batches: batches.length, empty: batches.filter(n => n.instanceCount === 0).length,
+      warmed, restored: restored && nodes.every((n, i) => n.visible === visible[i]) };
+  })()`);
   // Warm both scenes and the cooker's show, so the counts below start from a visit made after the instrumenting.
   await travel("factory"); await tip("soak-warm"); await travel("lab"); await travel("hub"); await settled(); await rendered(2);
-  const before = await snapshot(), visits = [];
+  const beforeWindows = await warmWindowBatches(), before = await snapshot(), visits = [];
   for (let i = 0; i < 6; i++) {
     await travel("factory");
     // One listener belongs to the hall and one to Tess; both leave with the scene.
@@ -12237,10 +12379,12 @@ scene("factory", { label: "lifecycle", exclusive: true, url: hubPage(src), steps
     })()`);
     visits.push({ ...visit, hall, away, lighter, inFlight });
   }
-  const after = await snapshot(), same = (key) => before.stats[key] === after.stats[key];
-  record("soak: factory cycles: one bounded node survives six round trips, each left mid-show, the hall's subscription released, without retaining scene nodes, targets or DOM", visits.every((v) => v.same && v.hall === 2 && v.away === 0 && v.lighter && v.subscriptions === 1 && v.lines <= v.places && v.inFlight > 0)
+  const afterWindows = await warmWindowBatches(), after = await snapshot(), same = (key) => before.stats[key] === after.stats[key];
+  record("soak: factory cycles: both snapshots warm all bounded window batches and restore their visibility", [beforeWindows, afterWindows].every(w => w.windows === 2 && w.batches === 18 && w.warmed && w.restored), JSON.stringify({ before: beforeWindows, after: afterWindows }));
+  // The hub's entrance and roof windows each own one subscription.
+  record("soak: factory cycles: one bounded node survives six round trips, each left mid-show, the hall's subscription released, without retaining scene nodes, targets or DOM", visits.every((v) => v.same && v.hall === 2 && v.away === 0 && v.lighter && v.subscriptions === 2 && v.lines <= v.places && v.inFlight > 0)
     && same("allNodes") && same("targets") && same("dom") && after.stats.tweens === 0, JSON.stringify({ visits, before: before.stats, after: after.stats }));
-  record("soak: factory cycles: GPU records, listeners and retained heap remain bounded", Math.abs(after.stats.gl.records - before.stats.gl.records) <= 3 && before.nodes === after.nodes && before.listeners === after.listeners && within(before, after, 0.1), heapDetail(before, after));
+  record("soak: factory cycles: GPU records, listeners and retained heap remain bounded", Math.abs(after.stats.gl.records - before.stats.gl.records) <= 3 && before.nodes === after.nodes && before.listeners === after.listeners && within(before, after, 0.1), heapDetail(before, after) + `, GPU ${before.stats.gl.records} -> ${after.stats.gl.records}, DOM ${before.nodes} -> ${after.nodes}, listeners ${before.listeners} -> ${after.listeners}`);
 } }] });
 
 // Node tier: pure computation over window.BL under a minimal DOM shim, calling the same probe functions.
@@ -13558,15 +13702,17 @@ const raceRigChecks = async () => {
   let overflow = false;
   try { renderer.createRig(Array.from({ length: 10 }, () => rejectNodes[0])); } catch { overflow = true; }
   const rendererSource = await readFile(new URL("../src/js/gl-renderer.js", import.meta.url), "utf8");
-  // Ordinary shaders must retain the pre-rig programs exactly. These fixed
-  // hashes come from fabdec255, not from deriving a second copy of the new code.
+  // Pin the ordinary programs independently of the rig derivation. Update these
+  // snapshots only for intentional shared shader changes, preserving byte equality.
   runInNewContext(rendererSource.replace("  BL.glRenderer =", "  window.__ordinaryRigProof = [ORDINARY_MESH_VS, ORDINARY_MESH_FS, ORDINARY_SHADOW_VS];\n  BL.glRenderer ="), context);
   const ordinaryHashes = context.window.__ordinaryRigProof.map(shader => createHash("sha256").update(shader).digest("hex"));
   const expectedOrdinaryHashes = [
     // Depth pre-pass "no image change" rendering core: the shared vertex and fragment
     // bytes the depth-only and plain variants derive from, plus the untouched shadow path.
     "6bed3532a26c98c3e5a9218674dbe75c789324168104f6b0eb7fb5c88872a012",
-    "b82d02f44814bebe09d97cfdfb32fb21ac0e1373411e4ba5de06a59065a6fa2c",
+    // 487d99ac909f added uObjectSlab2 for the Factory roof bore; removing its
+    // declaration and clipping predicate restores the previous b82d02f4 hash.
+    "f5f71f7931156d9329b39a13997433e2146fa367cee44e5ceb44ace6038a2be3",
     "37030f053de422aa157f017ceedef0812ed57a17c9e1b2af4aab017c0b645364"
   ];
   record("race rig strategy: ordinary mesh, fragment and shadow shader bytes retain the pre-rig fast path", ordinaryHashes.every((hash, i) => hash === expectedOrdinaryHashes[i]), JSON.stringify(ordinaryHashes));
@@ -13679,7 +13825,7 @@ const browserDriverProof = async () => {
         kill(signal) { this.kills.push(signal || "SIGTERM"); if (signal === "SIGKILL" && mode !== "delayed-exit") queueMicrotask(() => this.emit("exit", 0)); return true; }
       };
       children.push(child);
-      if (mode === "spawn-error") queueMicrotask(() => {
+      if (mode === "spawn-error" || mode === "first-spawn-error" && children.length === 1) queueMicrotask(() => {
         if (child.listenerCount("error")) child.emit("error", new Error("synthetic ENOENT"));
         else child.unhandledError = true;
       });
@@ -13690,6 +13836,8 @@ const browserDriverProof = async () => {
       close() { this.closed = true; } // A wedged transport deliberately never emits a close event.
       send(raw) {
         const message = JSON.parse(raw);
+        if (mode === "setup-held" && message.method === "Runtime.enable") return;
+        if (mode === "first-media-held" && sockets[0] === this && message.method === "Emulation.setEmulatedMedia") return;
         if (message.method.startsWith("Synthetic.hang")) return;
         if (message.method === "Synthetic.throw") throw new Error("synthetic send failure");
         const value = message.params?.expression?.includes("location.href") ? mode !== "reset-not-blank" : 1;
@@ -13725,6 +13873,63 @@ const browserDriverProof = async () => {
     };
   };
   const rows = [];
+  {
+    const f = fixture("setup-held"), first = f.launch(), second = f.launch();
+    await flush();
+    const queued = f.children.length === 1 && f.sockets.length === 1;
+    f.sockets[0].onmessage({ data: JSON.stringify({ id: 1, result: {} }) });
+    const a = await first; await flush();
+    const resumed = f.children.length === 2 && f.sockets.length === 2;
+    f.sockets[1].onmessage({ data: JSON.stringify({ id: 1, result: {} }) });
+    const b = await second;
+    rows.push({ name: "fresh startup queue retains exclusive setup", pass: queued && resumed && a !== b });
+    await f.dispose();
+  }
+  {
+    const f = fixture("setup-held"), first = f.launch();
+    await flush();
+    const before = new Set(f.timers);
+    let error = null;
+    const expired = f.launch().catch(err => { error = err; });
+    const admission = [...f.timers].find(timer => !before.has(timer) && timer.ms === 10000 && timer.active);
+    if (admission) { admission.active = false; f.timers.delete(admission); admission.fn(); }
+    await flush();
+    const bounded = !!admission && !!error?.driver && error.message === "Chrome startup queue got no slot in 10 s"
+      && f.children.length === 1 && f.children[0].kills.length === 0;
+    f.sockets[0].onmessage({ data: JSON.stringify({ id: 1, result: {} }) });
+    await first; await flush();
+    const skipped = f.children.length === 1;
+    // Drain an unexpected admission too, so the regression fails instead of hanging.
+    if (!skipped) f.sockets[1].onmessage({ data: JSON.stringify({ id: 1, result: {} }) });
+    await expired;
+    const next = f.launch(); await flush();
+    f.sockets.at(-1).onmessage({ data: JSON.stringify({ id: 1, result: {} }) });
+    const browser = await next;
+    rows.push({ name: "expired startup admissions never spawn and leave later requests usable", pass: bounded && skipped && f.children.length === 2 && !!browser });
+    await f.dispose();
+  }
+  {
+    const f = fixture("first-spawn-error");
+    let error = null;
+    const first = f.launch().catch(err => { error = err.message; }), second = f.launch();
+    await first; const browser = await second;
+    rows.push({ name: "failed startup releases queue after cleanup", pass: !!error && error.includes("synthetic ENOENT")
+      && f.children.length === 2 && f.children[0].kills.includes("SIGKILL") && f.removed.includes("synthetic-profile-1") && !!browser });
+    await f.dispose();
+  }
+  {
+    const f = fixture("first-media-held");
+    let error = null;
+    const first = f.launch().catch(err => { error = err.message; });
+    await flush();
+    const second = f.launch();
+    const bounded = f.children.length === 1 && ![...f.timers].some(timer => timer.active && timer.ms === 90000);
+    f.fire(10000); await first; const browser = await second;
+    rows.push({ name: "stalled startup emulation releases queue within setup deadline", pass: bounded
+      && !!error && error.startsWith("Emulation.setEmulatedMedia got no reply in 10 s") && f.children.length === 2
+      && f.children[0].kills.includes("SIGKILL") && f.removed.includes("synthetic-profile-1") && !!browser });
+    await f.dispose();
+  }
   for (const event of ["timeout", "send-throw", "socket-close", "process-exit"]) {
     const f = fixture(), browser = await f.launch();
     let first = "pending", second = "pending";
@@ -14163,7 +14368,7 @@ record("terrain glyph layouts: warm visits preserve exact registries and rendere
   const rigDisposal = await raceRigDisposalProof();
   record("race rig disposal: pending and linked variants release owned shaders and programs exactly once without context-loss support", rigDisposal.every(r => !r.programs && !r.shaders && !r.duplicateDeletes && r.arraysCleared && r.aliasesReleased), JSON.stringify(rigDisposal));
   const driver = await browserDriverProof();
-  record("browser driver: broken transports retire every pending command and owned child, discovery is bounded, and pool ownership remains exclusive", driver.cases === 13 && driver.failures === 0, JSON.stringify(driver));
+  record("browser driver: broken transports retire every pending command and owned child, discovery is bounded, and pool ownership remains exclusive", driver.cases === 17 && driver.failures === 0, JSON.stringify(driver));
 
 const carriedRelease = carriedReleaseProof();
 record("gorilla release: insufficient upright headroom retains the grab without querying below the current floor", carriedRelease.valid, JSON.stringify(carriedRelease));
@@ -14182,7 +14387,7 @@ record("character visibility source bakes: ownership wrappers share exact immuta
   record("cutaway visibility: active apertures reject remote meshes without vertex scans and retain cells, blends, children, global and rotated local cuts", Object.entries(cutaway).every(([key, value]) => key === "bytes" ? value === 160 : value), JSON.stringify(cutaway));
   const storage = await visibilityStorageProof({ compact: true, deferred: true });
   record("visibility storage: exact source doubles and signed zero survive queries, demand and bounded screen BVHs", storage.exact && storage.unchanged && storage.bounded && storage.tightBacking && storage.storage && storage.demand && storage.nearBounds && storage.nearCases > 100 && storage.boundaryHits > 0 && storage.disposed && storage.values > 600, JSON.stringify(storage));
-  record("visibility lifecycle: shared immutable bakes survive another registry removal, larger mesh replacement and disposal", storage.lifecycle, JSON.stringify(storage));
+  record("visibility lifecycle: shared bakes survive removal and replacement; hidden transforms, clips and geometry restore exact queries", storage.lifecycle, JSON.stringify(storage));
   const demandUsers = await visibilityDemandUsersProof();
   record("visibility demand: first demand visits only descriptor users and releases replaced, removed and disposed entries", demandUsers.rows.every(row => row.visits === row.count && row.released && row.resolved) && demandUsers.boundsTracked && demandUsers.replacementReleased && demandUsers.bothResolved && demandUsers.disposed, JSON.stringify(demandUsers));
   await distributionAudioChecks();
