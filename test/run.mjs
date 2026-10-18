@@ -4441,6 +4441,8 @@ const workCaveTrips = async (b) => {
     const B = __ooga, S = BL.scene, scene = BL.scenes.hub, dt = 1 / 20;
     const update = scene.update; scene.update = () => {}; B.pilot.release(true); B.setPileLevel(100000);
     const actors = B.crew.list.filter(c => c.state === "working");
+    const repos = ["oogaboogax/entropylab", "oogaboogax/oogaboogaland", "oogaboogax/lightningfoundry"];
+    const sites = repos.map(repo => B.crew.workSites.findIndex(site => site.repo === repo));
     const rows = actors.map(c => ({ name: c.contributor.name, outbound: [0, 0, 0], returned: [0, 0, 0],
       phase: "", stall: 0, maximumStall: 0, maximumStep: 0, missingRoutes: 0,
       resets: c.progress.resets, jumps: c.avoidance.navigation.jumps }));
@@ -4449,14 +4451,16 @@ const workCaveTrips = async (b) => {
       for (; frames < 6000; frames++) {
         for (let i = 0; i < actors.length; i++) {
           const c = actors[i], row = rows[i], p = c.root.position;
+          const site = sites.indexOf(c.work.site);
+          if (site < 0 && (c.work.phase === "shoot" || c.work.phase === "reload")) throw new Error("Worker visited a cave outside this fixture");
           if (c.work.phase === "shoot" && row.phase !== "shoot") {
-            row.outbound[c.work.site]++;
+            row.outbound[site]++;
             // Shorten shooting, leaving outbound, return, reload and the
             // companion handoff on the actual scene update path.
             c.weapon.ammo = 0; c.weapon.spareAmmo.fill(0);
             c.work.emptyTime = 0.5; c.work.rest = 0; c.work.plannedSite = -1;
           }
-          if (c.work.phase === "reload" && row.phase !== "reload") row.returned[c.work.site]++;
+          if (c.work.phase === "reload" && row.phase !== "reload") row.returned[site]++;
           row.phase = c.work.phase; row.x = p.x; row.z = p.z;
         }
         update(dt, time += dt); S.updateWorld(scene.root);
@@ -4478,11 +4482,11 @@ const workCaveTrips = async (b) => {
         rows[i].resets = actors[i].progress.resets - rows[i].resets;
         rows[i].jumps = actors[i].avoidance.navigation.jumps - rows[i].jumps;
       }
-      return { frames, rows, sites: B.crew.workSites.map(site => site.repo) };
+      return { frames, rows, sites: sites.map(index => B.crew.workSites[index]?.repo) };
     } finally { scene.update = update; }
   })()`);
   record("work movement cave trips: five workers retain path routes and finish repeated trips to lab, OBL and LF without stuck loops, jumps or relocation",
-    r.sites.length === 3 && r.rows.length === 5 && r.rows.every(row => row.outbound.every(n => n >= 2)
+    r.sites.length === 3 && r.sites.every(Boolean) && r.rows.length === 5 && r.rows.every(row => row.outbound.every(n => n >= 2)
       && row.returned.every(n => n >= 2) && row.maximumStall < 5 && row.maximumStep <= 2.8 / 20 + 1e-6
       && row.missingRoutes === 0 && row.resets === 0 && row.jumps === 0), JSON.stringify(r));
   const rejoin = await b.evaluate(`(() => {
@@ -5958,12 +5962,12 @@ const hubMatrix = { name: "hub matrix", why: "rule: the room lever raises the mi
     regions: D.caveSections.map(entry => { const room = rooms.get(entry.region.id); return { id: entry.region.id, width: entry.region.halfWidth, depth: entry.region.halfDepth, expectedWidth: room.w / 2 + 0.45, expectedDepth: (room.to + 1.6) / 2 }; }),
     sealed: B.matrixGate.sealed.map(entry => ({ id: entry.mouth.id, visible: entry.node.visible, stop: entry.stopZ }))
   }; })()`);
-  // Open and mirror caves carry a bird's-eye roof region; the sealed c9 and c10 carry a seal.
-  record("hub caves: every ordinary carved chamber feeds complete Matrix surfaces, fitted bird's-eye roof regions and the two sealed caves' seals", carved.caves.length === 6 && [...new Set(carved.caves.map(cave => cave.id))].sort().join() === "c1,c10,c11,c2,c3,c9"
+  // Open and mirror caves carry a bird's-eye roof region; the sealed c9 carries a seal.
+  record("hub caves: every ordinary carved chamber feeds complete Matrix surfaces, fitted bird's-eye roof regions and the sealed cave's seal", carved.caves.length === 6 && [...new Set(carved.caves.map(cave => cave.id))].sort().join() === "c1,c10,c11,c2,c3,c9"
     && carved.caves.every(cave => cave.terrain > 0 && cave.counts.floor > 0 && cave.counts.ceiling > 0 && cave.counts.wall > 0)
-    && carved.regions.length === 4 && carved.regions.map(region => region.id).sort().join() === "c1,c11,c2,c3"
+    && carved.regions.length === 5 && carved.regions.map(region => region.id).sort().join() === "c1,c10,c11,c2,c3"
     && carved.regions.every(region => Math.abs(region.width - region.expectedWidth) < 1e-7 && Math.abs(region.depth - region.expectedDepth) < 1e-7)
-    && carved.sealed.length === 2 && carved.sealed.map(entry => entry.id).sort().join() === "c10,c9" && carved.sealed.every(entry => entry.visible && Number.isFinite(entry.stop)), JSON.stringify(carved));
+    && carved.sealed.length === 1 && carved.sealed.map(entry => entry.id).sort().join() === "c9" && carved.sealed.every(entry => entry.visible && Number.isFinite(entry.stop)), JSON.stringify(carved));
 } };
 const hubMirror = { name: "hub mirror", why: "rule: 500 damage shatters the mirror, unlocks its gate and ends the glyph hint; a short scene trip preserves the broken mirror before its repair delay", run: async (b) => {
   const r = await b.evaluate(`(() => { const B = window.__ooga, M = B.mirrorCave, g = M.gate, w = M.node.world, G = B.matrixGate, m = M.mouth; const A = { x: m.x + Math.sin(m.ry) * 1.5, y: m.floorY, z: m.z + Math.cos(m.ry) * 1.5 }, E = { x: m.x - Math.sin(m.ry), y: m.floorY + 1.6, z: m.z - Math.cos(m.ry) }, dh = Math.hypot(E.x - A.x, E.z - A.z); B.pilot.navigate({ position: A, yaw: Math.atan2(E.x - A.x, E.z - A.z), pitch: Math.atan2(E.y - (A.y + 1.53), dh), dist: dh }); B.advance(1, 1 / 60); const before = { broken: M.damage.broken, locked: g.locked, hint: M.guides.state.doorway }; M.damage.hit(499, w[12], w[13], w[14]); B.advance(1 / 60, 1 / 60); const whole = { broken: M.damage.broken, locked: g.locked }; M.damage.hit(1, w[12], w[13], w[14]); B.advance(1 / 60, 1 / 60); const u0 = M.guides.state.doorwayUpdates; B.advance(1, 1 / 60); const after = { broken: M.damage.broken, shattered: M.shattered, locked: g.locked, reveal: M.node.mirrorReveal, hint: M.guides.state.doorway, frozen: M.guides.state.doorwayUpdates === u0 }; B.go("lab"); let n = 0; while ((B.transitioning || B.scene !== "pool") && n++ < 600) B.advance(1 / 30, 1 / 30); B.go("hub"); n = 0; while ((B.transitioning || B.scene !== "hub") && n++ < 600) B.advance(1 / 30, 1 / 30); B.advance(0.5, 1 / 60); const N = B.mirrorCave; return { before, whole, after, back: { broken: N.damage.broken, shattered: N.shattered, locked: N.gate.locked, reveal: N.node.mirrorReveal, hint: N.guides.state.doorway } }; })()`);
@@ -11674,7 +11678,7 @@ scene("dsb", { label: "dsb zuzu conversation", url: hubPage(dist), steps: [{ nam
     const sources = name => policy.split(";").map(s => s.trim().split(/\\s+/)).find(s => s[0] === name).slice(1).sort().join("|");
     return sources("connect-src") === ["'self'", "https:", "wss:"].sort().join("|") && sources("worker-src") === "'self'" && sources("media-src") === ["https://stream.noderunnersradio.com", "https://hodlerhiq.net"].sort().join("|") && !policy.includes("unsafe-");
   })()`));
-  record("dsb registry: c10 stays sealed and DSB is internally addressable without a cave", await b.evaluate(`(BL.caves.slots.find(s => s.id === "c10").status === "dark" && BL.caves.slots.find(s => s.id === "c10").scene === null) && !BL.caves.slots.some(s => s.scene === "dsb") && !!BL.scenes.dsb`));
+  record("dsb registry: c10 is B.C.A.'s hub office and DSB is internally addressable without a cave", await b.evaluate(`(BL.caves.slots.find(s => s.id === "c10").status === "open" && BL.caves.slots.find(s => s.id === "c10").scene === null && BL.caves.slots.find(s => s.id === "c10").place === "bca") && !BL.caves.slots.some(s => s.scene === "dsb") && !!BL.scenes.dsb`));
   record("dsb compatibility: hub keeps the Agent module without spawning a standalone gorilla", await b.evaluate(`__ooga.scene === "hub" && !__ooga.agent && !!BL.agent && !!BL.characters.get("rules-without-rulers") && Object.hasOwn(__ooga, "agent") && Object.hasOwn(__ooga, "dsb") && !__ooga.dsb`));
   await b.evaluate(`(() => {
     const B = __ooga, cave = B.cavemen.get("rules-without-rulers");
@@ -14772,7 +14776,7 @@ record("character visibility source bakes: ownership wrappers share exact immuta
       const hiddenGear = !oldest.sleepWeapons.visible && !item.visible && oldest.parts.gun.parent === oldest.sleepWeapons;
       const roofSleep = crew.list.filter(c => c.bedroll?.outdoor).every(c => c.bedTravel.mode === "rest" && c.root.visible && c.root.position.y >= 8
         && c.root.quaternion && c.parts.head.geometry === c.headClosed);
-      const savedNet = BL.net;
+      const savedNet = BL.net, savedSites = crew.workSites;
       let sync, sharedGear = false;
       try {
         BL.net = { state: { room: "live", hostId: "host", selfId: "host", followers: 1, npcVersion: 1 }, sendNpc(bytes) { this.npcFrame = bytes.slice().buffer; } };
@@ -14785,7 +14789,44 @@ record("character visibility source bakes: ownership wrappers share exact immuta
         sync.update(0.3);
         sharedGear = !item.visible && !oldest.sleepWeapons.visible && !jetNode.visible && oldest.remoteOutdoorSleep;
         oldest.jet = savedJet;
-      } finally { if (sync) sync.dispose(); BL.net = savedNet; }
+        sync.dispose();
+        // Site indexes mean the same cave only when the ordered catalog matches.
+        crew.workSites = [{ mouth: { id: "c11" } }, { mouth: { id: "c10" } }];
+        BL.net.state.selfId = "host";
+        let plans = 0;
+        const options = { crew, fx: {}, onPlan: () => plans++, onHit: noop, onModelChange: noop };
+        sync = BL.npcSync.create(options);
+        sync.update(0.3); sync.recordPlan(oldest, 1); sync.update(0.3);
+        const matchingFrame = BL.net.npcFrame;
+        sync.dispose();
+        crew.workSites.reverse();
+        sync = BL.npcSync.create(options); sync.update(0.3);
+        const mismatchedFrame = BL.net.npcFrame;
+        sync.dispose();
+        BL.net.npcFrame = matchingFrame;
+        BL.net.state.selfId = "follower"; BL.net.state.npcVersion++;
+        sync = BL.npcSync.create(options); sync.update(0.3);
+        const rejected = sync.frames === 0 && plans === 0 && crew.list.every(c => !c.puppet);
+        sync.dispose();
+        crew.workSites = [{ mouth: { id: "c11" } }, { mouth: { id: "c10" } }];
+        sync = BL.npcSync.create(options); sync.update(0.3);
+        const accepted = sync.frames === 1 && plans === 1 && oldest.puppet;
+        BL.net.npcFrame = mismatchedFrame; BL.net.state.npcVersion++;
+        sync.update(0.3);
+        const cleared = sync.frames === 1 && plans === 1 && crew.list.every(c => !c.puppet);
+        BL.net.npcFrame = matchingFrame; BL.net.state.npcVersion++;
+        sync.update(0.3);
+        const resumed = sync.frames === 2 && plans === 2 && oldest.puppet;
+        // A host message leaves the old binary frame cached; it must not reclaim the crew.
+        BL.net.state.hostId = "other"; sync.update(0.3);
+        const releasedHost = sync.frames === 2 && plans === 2 && crew.list.every(c => !c.puppet);
+        BL.net.npcFrame = mismatchedFrame; BL.net.state.npcVersion++;
+        sync.update(0.3);
+        const rejectedHost = sync.frames === 2 && plans === 2 && crew.list.every(c => !c.puppet);
+        record("NPC sync: matching site order accepts poses and events; incompatible catalogs and host changes release stale poses",
+          accepted && rejected && cleared && resumed && releasedHost && rejectedHost,
+          JSON.stringify({ accepted, rejected, cleared, resumed, releasedHost, rejectedHost }));
+      } finally { if (sync) sync.dispose(); crew.workSites = savedSites; BL.net = savedNet; }
       newest.contributor.lastContributionAt = now;
       crew.refreshStates(); crew.update(1.1, 1.1);
       const priority = bed.sleeper === next && crew.list.filter(c => c.bedroll === bed).length === 1;
