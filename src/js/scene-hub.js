@@ -3651,8 +3651,9 @@
       if (slot.status === "dark" || slot.status === "mirror" && MIRROR_GATE_CLOSED) continue;
       spots.push({ x: m.apron.x, z: m.apron.z, ry: Math.atan2(m.x - m.apron.x, m.z - m.apron.z) });
     }
-    const rand = mulberry32(SEED + 5);
-    for (let n = 0, tries = 0; n < WANDER_COUNT && tries < 1500; tries++) {
+    // Leave spare destinations when the roster outgrows the original meadow pool.
+    const rand = mulberry32(SEED + 5), count = Math.max(WANDER_COUNT, contributors.activeRoster.length * 2);
+    for (let n = 0, tries = 0; n < count && tries < 1500; tries++) {
       const { x, z } = polar(rand() * 360, Math.sqrt(lerp(WANDER_INNER * WANDER_INNER, MEADOW_OUTER * MEADOW_OUTER, rand())));
         if (island.surfaceAt(x, z) !== 0 || nearMouth(x, z, 3) || npcClosedCaveAt(x, z) || !free(x, z, 0.9)) continue;
       spots.push({ x, z, ry: NaN });
@@ -8425,7 +8426,7 @@
       ctx2d.restore();
     }
   };
-  const cameraPlatformAt = (x, y, z) => y >= 0 && y <= ALTAR_HEIGHT && Math.hypot(x, z) <= altar.platformRadius;
+  const cameraPlatformAt = (x, y, z) => y >= 0 && y <= ALTAR_HEIGHT && Math.abs(x) <= altar.platformRadius && Math.abs(z) <= altar.platformRadius && Math.hypot(x, z) <= altar.platformRadius;
   // One solid mask spans both islands, the dais and fruit contact. A cheap extent check keeps the
   // Mempool grid out of the HUB's per-pixel rock texture pass.
   const cameraPoolNear = (x, z) => {
@@ -8444,16 +8445,21 @@
       && bananaCover.segmentClear(x, y, z, toX, toY, toZ);
   };
   const cameraGlyphCoverage = (x, y, z) => {
-    const caveIndex = island.rockCaveAt(x, y, z);
-    if (caveIndex && caveIndex === MATRIX_WORLD.permanentCave) {
-      const plane = MATRIX_WORLD.permanentPlane, aperture = MATRIX_WORLD.permanentAperture, at = (caveIndex - 1) * 4;
+    let caveIndex = 0, resolved = false;
+    if (MATRIX_WORLD.permanentCave) {
+      const plane = MATRIX_WORLD.permanentPlane, aperture = MATRIX_WORLD.permanentAperture, at = (MATRIX_WORLD.permanentCave - 1) * 4;
       const depth = -(plane[0] * x + plane[1] * y + plane[2] * z + plane[3]), bounds = MATRIX_WORLD.caveBounds, caves = MATRIX_WORLD.caves;
-      const across = caves[at + 1] * (x - bounds[at]) - caves[at] * (z - bounds[at + 2]), height = y - bounds[at + 1];
-      const room = depth > aperture[2] + 2.5 - aperture[3], throat = depth <= aperture[2];
-      const half = throat ? aperture[0] : aperture[0] + (room ? 0.5 : 0) + aperture[3], ceiling = aperture[1] + (room && !throat ? 1 : 0);
-      if (depth >= -1e-6 && depth <= bounds[at + 3] + aperture[3] && Math.abs(across) <= half + 1e-6 && height >= -1e-6 && height <= ceiling + 1e-6) return 1;
+      if (depth >= -1e-6 && depth <= bounds[at + 3] + aperture[3]) {
+        const across = caves[at + 1] * (x - bounds[at]) - caves[at] * (z - bounds[at + 2]), height = y - bounds[at + 1];
+        const room = depth > aperture[2] + 2.5 - aperture[3], throat = depth <= aperture[2];
+        const half = throat ? aperture[0] : aperture[0] + (room ? 0.5 : 0) + aperture[3], ceiling = aperture[1] + (room && !throat ? 1 : 0);
+        if (Math.abs(across) <= half + 1e-6 && height >= -1e-6 && height <= ceiling + 1e-6) {
+          caveIndex = island.rockCaveAt(x, y, z); resolved = true;
+          if (caveIndex === MATRIX_WORLD.permanentCave) return 1;
+        }
+      }
     }
-    return matrixCoverage(x, z, caveIndex);
+    return MATRIX_WORLD.active ? matrixCoverage(x, z, resolved ? caveIndex : island.rockCaveAt(x, y, z)) : 0;
   };
   // Outline contrast is global.
   // Material within rock follows the same cave ownership and radial front as the rendered stone surfaces.
