@@ -5561,14 +5561,15 @@ const hubBlockHeight = { name: "header clock and block height", why: "rule: the 
 const hubDestinationNames = { name: "destination accessible names", why: "regression: each visible destination label must occur in the button's accessible name", run: async (b) => {
   const rows = [];
   await b.send("Accessibility.enable");
-  for (const preset of ["pile", "lab", "mirror", "underground", "basement", "mempool"]) {
-    const label = await b.evaluate(`(() => { document.querySelector('[data-detached-preset="${preset}"]').click(); __ooga.advance(0.1, 1 / 60); return document.getElementById("detached-destination-name").textContent; })()`);
+  await b.evaluate(`__ooga.pilot.goPreset("pile"); __ooga.advance(0.1, 1 / 60)`);
+  for (const [preset, expected] of [["lab", "Lab"], ["mirror", "Mirror"], ["underground", "HQ"], ["basement", "Basement"], ["mempool", "Mempool"], ["pile", "Pile"]]) {
+    const label = await b.evaluate(`(() => { document.getElementById("destination-hud").click(); __ooga.advance(0.1, 1 / 60); return document.getElementById("detached-destination-name").textContent; })()`);
     const tree = await b.send("Accessibility.getFullAXTree");
     const names = tree.result.nodes.filter(node => node.role?.value === "button" && node.name?.value.includes("Ooga Booga Land destinations")).map(node => node.name.value);
-    rows.push({ preset, label, names });
+    rows.push({ preset, expected, label, names });
   }
   await b.evaluate(`__ooga.pilot.goPreset("pile"); __ooga.advance(0.1, 1 / 60)`);
-  record("destinations: every visible place label is included in the actual browser accessibility name", rows.every(row => row.label && row.names.length === 1 && row.names[0].toLowerCase().includes(row.label.toLowerCase())), JSON.stringify(rows));
+  record("destinations: every visible place label is included in the actual browser accessibility name", rows.every(row => row.label === row.expected && row.names.length === 1 && row.names[0].toLowerCase().includes(row.label.toLowerCase())), JSON.stringify(rows));
 } };
 const hubWalking = { name: "hub walking", why: "regression: steering keys came out mirrored, and the removed hub Agent could still be summoned", run: async (b) => {
   // Keep each directional check in the same clear patch as walking speed changes.
@@ -5603,49 +5604,46 @@ const hubWalking = { name: "hub walking", why: "regression: steering keys came o
   await b.key("Escape");
   record("hub walking: W A S D walk an Ooga away, left, back and right on screen from two camera angles, and Right Shift+A does not restore the removed hub Agent", allWalk(ooga) && !agent, JSON.stringify({ ooga, agent }));
 } };
-const hubMapNavigation = { name: "hub map navigation", why: "regression: the map could not advance after Lab, locked cursor dot clicks cycled the whole button, and departing arrivals lost their location label", run: async (b) => {
+const hubMapNavigation = { name: "hub map navigation", why: "regression: the map could not advance after Lab and departing arrivals lost their location label", run: async (b) => {
   const r = await b.evaluate(`(() => {
     const B = __ooga, P = B.pilot, H = B.hud, a = B.cavemen.get("portlandhodl");
     const map = document.getElementById("destination-hud"), label = document.getElementById("detached-destination-name");
-    const dot = name => map.querySelector('[data-detached-preset="' + name + '"]');
-    const selected = () => map.querySelector('[data-current="true"]')?.dataset.detachedPreset;
     const rows = [];
     for (const mode of ["detached", "carry", "combat", "first-person"]) {
       P.goPreset("pile"); if (mode !== "detached") P.possess(a);
       if (mode === "combat" && !P.aiming) P.modeAction("mode-toggle");
       if (mode === "first-person") P.enterClose(true);
       P.controls.reset();
-      dot("lab").click(); B.advance(0.1, 1 / 60);
-      const lab = selected() === "lab" && label.textContent === "Lab" && !map.hidden;
-      // This is the event target/coordinate pair used by the locked cursor.
-      const rect = dot("lab").getBoundingClientRect();
-      map.dispatchEvent(new MouseEvent("click", { bubbles: true, detail: 1, clientX: rect.left + rect.width / 2, clientY: rect.top + rect.height / 2 }));
-      const cursorDot = selected() === "lab";
       map.click(); B.advance(0.1, 1 / 60);
-      const mirror = selected() === "mirror" && label.textContent === "Mirror";
+      const lab = label.textContent === "Lab" && !map.hidden;
+      // This is the event target/coordinate pair used by the locked cursor.
+      const rect = map.getBoundingClientRect();
+      map.dispatchEvent(new MouseEvent("click", { bubbles: true, detail: 1, clientX: rect.left + rect.width / 2, clientY: rect.top + rect.height / 2 }));
+      B.advance(0.1, 1 / 60);
+      const mirror = label.textContent === "Mirror";
       const cycle = [];
-      for (const next of ["underground", "basement", "mempool", "pile"]) { map.click(); B.advance(0.1, 1 / 60); cycle.push(selected() === next); }
-      rows.push({ mode, lab, cursorDot, mirror, cycle, possession: mode === "detached" ? !P.player : P.player === a });
+      for (const next of ["HQ", "Basement", "Mempool", "Pile"]) { map.click(); B.advance(0.1, 1 / 60); cycle.push(label.textContent === next); }
+      rows.push({ mode, lab, mirror, cycle, possession: mode === "detached" ? !P.player : P.player === a });
     }
     P.goPreset("pile"); P.possess(a); if (P.aiming) P.modeAction("mode-toggle");
-    dot("lab").click(); B.advance(0.1, 1 / 60);
+    map.click(); B.advance(0.1, 1 / 60);
     P.hooks.onOrbit(10, 0); P.hooks.onZoom(1.05); B.advance(0.1, 1 / 60);
-    const looking = selected() === "lab" && label.textContent === "Lab";
+    const looking = label.textContent === "Lab";
     const start = { ...a.root.position };
     window.dispatchEvent(new KeyboardEvent("keydown", { key: "s", code: "KeyS" })); B.advance(1, 1 / 60);
     window.dispatchEvent(new KeyboardEvent("keyup", { key: "s", code: "KeyS" })); B.advance(0.1, 1 / 60);
-    const departed = { distance: Math.hypot(a.root.position.x - start.x, a.root.position.z - start.z), label: label.textContent, selected: selected() || null, visible: label.classList.contains("show") };
+    const departed = { distance: Math.hypot(a.root.position.x - start.x, a.root.position.z - start.z), label: label.textContent, visible: label.classList.contains("show") };
     const areas = [];
     for (const name of ["underground", "basement", "timechain"]) {
-      if (name === "timechain") P.goPreset(name); else dot(name).click();
+      P.goPreset(name);
       B.advance(0.1, 1 / 60); H.fadeDetachedName(true); B.advance(0.1, 1 / 60);
       areas.push({ name, label: label.textContent });
     }
     P.release(true); P.goPreset("pile");
     return { rows, looking, departed, areas };
   })()`);
-  record("hub map: native and locked-cursor Lab clicks remain usable, the map cycles through Mirror, HQ, Basement, Mempool and Pile in every view, and possession is retained", r.rows.every(row => row.lab && row.cursorDot && row.mirror && row.cycle.every(Boolean) && row.possession), JSON.stringify(r.rows));
-  record("hub map: looking keeps the arrival label; actual travel clears its dot and shows HUB, and underground and sphere arrivals resolve to their broader areas", r.looking && r.departed.distance > 1.5 && r.departed.label === "HUB" && r.departed.selected === null && r.departed.visible
+  record("hub map: native and locked-cursor clicks cycle through Lab, Mirror, HQ, Basement, Mempool and Pile in every view, and possession is retained", r.rows.every(row => row.lab && row.mirror && row.cycle.every(Boolean) && row.possession), JSON.stringify(r.rows));
+  record("hub map: looking keeps the arrival label; actual travel shows HUB, and underground and sphere arrivals resolve to their broader areas", r.looking && r.departed.distance > 1.5 && r.departed.label === "HUB" && r.departed.visible
     && r.areas.map(row => row.label).join(",") === "HQ,B1,SPHERE", JSON.stringify({ looking: r.looking, departed: r.departed, areas: r.areas }));
 } };
 const hubRainforestSteps = { name: "rainforest bridge steps", why: "regression: diagonal treads and the bridge abutment caught walkers, and hanging vine tails protruded through the stair rock", run: async (b) => {
@@ -6021,6 +6019,136 @@ const hubJumbotron = { name: "hub jumbotron", why: "rule: the island rotation st
   const orgBoards = ["commits", "prs", "reviews", "comments", "issues"].map((t) => "org · " + t);
   record("hub jumbotron: the island rotates org activity, readers filter repositories, and attributed users appear once with saved alias selections restored", r.count === 7 && r.captions[0] === "Recent activity" && r.captions[1] === "Org totals" && orgBoards.every((c, i) => r.captions[2 + i] === c) && r.wrapped === "Recent activity" && r.filtered && r.ownerOnly && r.restoredOwner, JSON.stringify(r));
   record("hub jumbotron: a draft PR draws a different ticker row than the same PR undrafted", r.differs, JSON.stringify({ differs: r.differs }));
+} };
+const oogatronPopups = { name: "oogatron popups", why: "rule: Oogatron windows keep their displays apart during mouse or touch drags and remember their independent controls and layout after reload", run: async (b) => {
+  const mobile = await b.evaluate("matchMedia('(pointer: coarse)').matches"), mode = mobile ? "phone" : "desktop";
+  const read = () => b.evaluate(`Array.from(document.querySelectorAll('.board-floating[open]'), node => {
+    const screen = node.querySelector('.board-screen'), r = node.getBoundingClientRect(), s = screen.getBoundingClientRect(), style = getComputedStyle(node);
+    const visible = selector => { const e = node.querySelector(selector); return e.getClientRects().length > 0 && getComputedStyle(e).visibility !== 'hidden'; };
+    return { id: node.id, caption: node.querySelector('.board-caption').textContent,
+      head: visible('.panel-head'), foot: visible('.board-nav'), resize: visible('.board-resize'),
+      expanded: screen.getAttribute('aria-expanded'), x: r.x, y: r.y, width: r.width, height: r.height,
+      fits: r.x >= 0 && r.y >= 0 && r.right <= innerWidth + 1
+        && s.width > 0 && s.height > 0 && s.x >= r.x && s.y >= r.y && s.right <= r.right + 1 && s.bottom <= innerHeight + 1,
+      screenX: s.x, screenY: s.y, screenWidth: s.width, screenHeight: s.height,
+      transparent: style.backgroundColor === 'rgba(0, 0, 0, 0)' && style.backgroundImage === 'none' && style.boxShadow === 'none',
+      through: ['.panel-head', '.board-nav'].every(selector => {
+        const rect = node.querySelector(selector).getBoundingClientRect();
+        return !node.contains(document.elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2));
+      }) };
+  })`);
+  const point = (id, selector, x = 0.5, y = 0.5) => b.evaluate(`(() => {
+    const e = document.getElementById(${JSON.stringify(id)}).querySelector(${JSON.stringify(selector)}), r = e.getBoundingClientRect();
+    const x = r.x + r.width * ${x}, y = r.y + r.height * ${y};
+    if (!e.contains(document.elementFromPoint(x, y))) throw Error('Popup control is covered: ' + ${JSON.stringify(selector)});
+    return { x, y };
+  })()`);
+  const press = async (id, selector, x, y) => {
+    const p = await point(id, selector, x, y);
+    if (!mobile) return b.click(p.x, p.y);
+    const down = b.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [p], timestamp: Date.now() / 1000 });
+    await b.sleep(40);
+    await Promise.all([down, b.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [], timestamp: Date.now() / 1000 })]);
+  };
+  const move = async (id, x, y, blocked = false) => {
+    const from = await point(id, ".panel-head", 0.2, 0.05), state = (await read()).find(row => row.id === id);
+    const to = { x: from.x + x - state.x, y: from.y + y - state.y };
+    const steps = blocked ? 1 : 4;
+    if (!mobile) await b.drag(from, to, steps);
+    else {
+      await b.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [from] });
+      for (let i = 1; i <= steps; i++) await b.send("Input.dispatchTouchEvent", { type: "touchMove", touchPoints: [{ x: from.x + (to.x - from.x) * i / steps, y: from.y + (to.y - from.y) * i / steps }] });
+      await b.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+    }
+    const moved = (await read()).find(row => row.id === id);
+    if (!blocked) record(`Oogatron ${mode}: window moves through its header`, Math.abs(moved.x - x) < 1 && Math.abs(moved.y - y) < 1, JSON.stringify(moved));
+    return moved;
+  };
+  const open = async () => {
+    await b.evaluate(`(() => { const D = BL.scenes.hub.debug; D.jumbotron.goToView(0); D.useProp(D.props.find(p => p.prop === 'jumbotron')); })()`);
+    const rows = await read(), id = rows.at(-1).id;
+    await press(id, ".board-pause");
+    return id;
+  };
+  const stateIs = (rows, expected) => rows.length === 2 && new Set(rows.map(row => row.caption)).size === 2 && rows.every(row => {
+    const hidden = expected[row.caption];
+    return typeof hidden === "boolean" && row.head === !hidden && row.foot === !hidden && row.resize === !hidden
+      && row.expanded === String(!hidden) && row.fits && (!hidden || row.transparent && row.through);
+  });
+  const first = await open();
+  await move(first, mobile ? 0 : 40, 80);
+  await press(first, ".board-screen", 0.03, 0.03);
+  const hidden = (await read())[0];
+  await press(first, ".board-screen", 0.97, 0.97);
+  const shown = (await read())[0];
+  record(`Oogatron ${mode}: screen corners make both sections transparent and restore them without moving or enlarging the screen`,
+    !hidden.head && !hidden.foot && hidden.transparent && hidden.through && shown.head && shown.foot && shown.resize
+      && ["x", "y", "width", "height", "screenX", "screenY", "screenWidth", "screenHeight"].every(key => hidden[key] === shown[key]),
+    JSON.stringify({ hidden, shown }));
+  await press(first, ".board-screen");
+  const second = await open();
+  await press(second, ".board-nav [data-action='board-next']");
+  await move(second, mobile ? 0 : 760, mobile ? 400 : 80);
+  for (let pass = 0; pass < 2; pass++) {
+    const expected = { "Recent activity": pass === 0, "Org totals": pass === 1 };
+    if (pass) for (const row of await read()) await press(row.id, ".board-screen");
+    const before = await read();
+    const saved = await untilPage(b, `(() => {
+      const state = JSON.parse(localStorage.getItem('oogaboogaland.oogatron.windows.v1'));
+      return state?.windows.length === 2 && state.windows.every(row => row.paused && row.controlsHidden === (row.screen.name === ${JSON.stringify(pass === 0 ? "recent" : "totals")}));
+    })()`);
+    record(`Oogatron ${mode}: independent settings ${pass + 1} are visible and saved`, saved && stateIs(before, expected), JSON.stringify(before));
+    await b.open(await b.evaluate("location.href"));
+    await untilReady(b);
+    const after = await read();
+    const geometry = after.every(row => {
+      const prior = before.find(entry => entry.caption === row.caption);
+      return prior && ["x", "y", "width", "height", "screenX", "screenY", "screenWidth", "screenHeight"].every(key => Math.abs(row[key] - prior[key]) < 1);
+    });
+    record(`Oogatron ${mode}: reload ${pass + 1} restores each window's visibility and layout`, stateIs(after, expected) && geometry, JSON.stringify(after));
+    if (process.env.OOGATRON_SHOTS) await b.screenshot(join(process.env.OOGATRON_SHOTS, `oogatron-${mode}-${pass + 1}.png`));
+  }
+  if (!mobile) {
+    const row = (await read()).find(row => row.caption === "Recent activity");
+    await b.evaluate(`document.getElementById(${JSON.stringify(row.id)}).querySelector('.board-screen').focus()`);
+    await b.key("Enter");
+    const hidden = (await read()).find(entry => entry.id === row.id);
+    await b.key(" ");
+    const shown = (await read()).find(entry => entry.id === row.id);
+    record("Oogatron desktop: Enter and Space toggle the focused screen", !hidden.head && !hidden.foot && shown.head && shown.foot, JSON.stringify({ hidden, shown }));
+  }
+  const neighbours = await read(), moving = neighbours.find(row => row.caption === "Recent activity"), fixed = neighbours.find(row => row.caption === "Org totals");
+  const viewport = await b.evaluate("({ width: innerWidth, height: innerHeight })");
+  const stopped = await move(moving.id, mobile ? moving.x : viewport.width - moving.width, mobile ? viewport.height : moving.y, true);
+  const separate = stopped.screenX + stopped.screenWidth <= fixed.screenX + 0.02 || fixed.screenX + fixed.screenWidth <= stopped.screenX + 0.02
+    || stopped.screenY + stopped.screenHeight <= fixed.screenY + 0.02 || fixed.screenY + fixed.screenHeight <= stopped.screenY + 0.02;
+  const gap = mobile ? fixed.screenY - stopped.screenY - stopped.screenHeight : fixed.screenX - stopped.screenX - stopped.screenWidth;
+  record(`Oogatron ${mode}: a fast drag stops at the other black display with transparent controls`, separate && Math.abs(gap) < 1 && !fixed.head, JSON.stringify({ stopped, fixed }));
+  if (!mobile) {
+    await b.evaluate(`document.getElementById(${JSON.stringify(stopped.id)}).querySelector('.board-resize').focus()`);
+    await b.key("ArrowRight");
+    const resized = (await read()).find(row => row.id === stopped.id);
+    record("Oogatron desktop: resizing cannot grow the black display into its neighbour", resized.width === stopped.width && resized.x === stopped.x && resized.y === stopped.y, JSON.stringify(resized));
+  }
+  await move(moving.id, moving.x, moving.y);
+  await press(fixed.id, ".board-screen");
+  await press(fixed.id, "[data-action='board-close']");
+  const edge = (await read()).find(row => row.caption === "Recent activity"), viewportHeight = await b.evaluate("innerHeight");
+  await move(edge.id, edge.x, viewportHeight - (edge.screenY - edge.y + edge.screenHeight));
+  await press(edge.id, ".board-screen");
+  const docked = (await read()).find(row => row.caption === edge.caption);
+  await b.open(await b.evaluate("location.href"));
+  await untilReady(b);
+  const restoredEdge = (await read()).find(row => row.caption === edge.caption);
+  record(`Oogatron ${mode}: the display reaches the bottom edge with the footer below it and stays there after reload`,
+    [docked, restoredEdge].every(row => row && row.fits && !row.head && !row.foot && row.transparent
+      && Math.abs(row.screenY + row.screenHeight - viewportHeight) < 1 && row.y + row.height > viewportHeight
+      && row.width === edge.width && row.screenHeight === edge.screenHeight), JSON.stringify({ docked, restoredEdge }));
+  for (const row of await read()) {
+    if (!row.head) await press(row.id, ".board-screen");
+    await press(row.id, "[data-action='board-close']");
+  }
+  record(`Oogatron ${mode}: restored windows still close normally`, (await read()).length === 0);
 } };
 // The healthiest prop with a level approach: the first meadow rock can sit
 // beside a raised island ledge, which puts a teleported actor above its surface.
@@ -11422,6 +11550,8 @@ scene("hub", { label: "birds-eye combat", query: "solo=1&character=portlandhodl&
 scene("hub", { label: "birds-eye combat projection and targets", query: "solo=1&character=portlandhodl&weapon=1&mode=shoulder&combat=1", steps: [hubBirdsEyeProjection, hubBirdsEyeTargets, hubCombatReplay] });
 scene("hub", { label: "birds-eye lower floors", query: "solo=1&character=portlandhodl&weapon=1&mode=shoulder&combat=1", steps: [hubBirdsEyeFloors] });
 scene("hub", { label: "mirror", steps: [hubJumbotron, hubMatrix, hubMirror] });
+scene("hub", { label: "oogatron popups", url: hubPage(dist, "pos=0"), steps: [oogatronPopups] });
+scene("hub", { label: "oogatron popups phone", url: hubPage(dist, "pos=0"), opts: PHONE_SIZE, steps: [oogatronPopups] });
 scene("hub", { label: "reset storage race", steps: [{ name: "reset storage race", why: "regression: a page timer or pagehide storage write once survived the pooled browser reset and leaked state into the next task", run: async () => {
   const dir = mkdtempSync(join(tmpdir(), "ooga-reset-")), fixture = join(dir, "index.html");
   writeFileSync(fixture, "<!doctype html><title>Reset storage fixture</title>");

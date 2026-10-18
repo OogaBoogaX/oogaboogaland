@@ -2444,34 +2444,9 @@ body[data-active-scene="arcade"] .magazine-hud {
   position: absolute;
   left: 50%;
   top: 2px;
-  width: 32px;
-  height: 32px;
+  width: 44px;
+  height: 44px;
   transform: translateX(-50%);
-}
-
-.detached-destinations {
-  position: absolute;
-  left: 0;
-  right: 0;
-  top: 38px;
-  display: flex;
-  justify-content: center;
-  gap: 5px;
-  pointer-events: auto;
-}
-
-.detached-dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: #77736d;
-  box-shadow: 0 1px 0 rgba(0, 0, 0, 0.65);
-  transition: background-color 0.4s ease-out;
-}
-
-.detached-dot[data-current="true"] {
-  background: var(--accent);
-  transition-duration: 0s;
 }
 
 .detached-destination-name {
@@ -3625,6 +3600,23 @@ body[data-active-scene="arcade"] .magazine-hud {
   border-radius: 0;
   box-shadow: none;
   object-fit: contain;
+  cursor: pointer;
+}
+
+.board-floating.board-controls-hidden[open] {
+  background: transparent;
+  box-shadow: none;
+  pointer-events: none;
+}
+
+.board-floating.board-controls-hidden .panel-head,
+.board-floating.board-controls-hidden .board-nav,
+.board-floating.board-controls-hidden .board-resize {
+  visibility: hidden;
+}
+
+.board-floating.board-controls-hidden .board-screen {
+  pointer-events: auto;
 }
 
 .board-floating .board-nav {
