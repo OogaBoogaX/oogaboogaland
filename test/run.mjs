@@ -881,23 +881,36 @@ const visibilityStorageProof = async ({ compact = false, deferred = false } = {}
     const sharedIndices = second.geometryRecords().get(shared).triangleIndices.slice();
     S.removeChild(firstRoot, removed); first.refresh(); query(first, firstRoot);
     const removal = first.entryRecords().length === 1 && first.entryRecords().every(entry => entry.node !== removed);
-    const larger = M.merge(...Array.from({ length: 8 }, (_, i) => M.box({ w: 0.2, h: 1, d: 0.3, offset: { x: i * 0.25 }, color: "#fff" })));
+    const larger = M.merge(...Array.from({ length: 8 }, (_, i) => M.box({ w: 0.2, h: 1, d: 0.3, offset: { x: i * 0.25 }, color: "#fff" })),
+      { verts: [-1, -0.7, 0, 1.8, 0.71, 0.04, 1.8, 0.72, 0.04], faces: [{ i: [0, 1, 2], color: [255, 255, 255] }], lines: [] });
     firstNode.geometry = larger; first.refresh(); query(first, firstRoot);
     const entry = first.entryRecords()[0], replacement = !first.geometryRecords().has(shared) && first.geometryRecords().has(larger)
       && entry.geometry === first.geometryRecords().get(larger) && entry.boundsGeometry === entry.geometry
       && entry.boundaryReserve >= 96 && entry.boundaryTriangles.length >= 960 && entry.boundaryNodes.length >= entry.geometry.counts.length * 4;
-    let nearBounds = true, nearCases = 0, boundaryHits = 0;
+    let nearBounds = true, nearCases = 0, boundaryHits = 0, gridQueries = 0;
     for (const depth of [-1, 0.05, 0.1, 0.3, 1, 8]) {
-      firstNode.position.z = depth; firstNode.rotation.y = 0.31;
+      firstNode.position.z = depth;
+      Object.assign(firstNode.rotation, { x: 0.17, y: 0.31, z: 0.23 });
+      Object.assign(firstNode.scale, { x: 1.3, y: 0.7, z: 1.1 });
       query(first, firstRoot);
       const points = [];
-      for (const face of larger.faces) for (let n = 0; n < face.i.length; n++) {
+      for (const face of larger.faces) for (let n = 0; n < face.i.length; n++) for (const t of [0, 0.0001, 0.25, 0.2501, 0.5, 0.5001, 0.75, 0.7501, 0.9999, 1]) {
         const a = face.i[n] * 3, b = face.i[(n + 1) % face.i.length] * 3, v = larger.verts, w = firstNode.world;
-        const x = (v[a] + v[b]) / 2, y = (v[a + 1] + v[b + 1]) / 2, z = (v[a + 2] + v[b + 2]) / 2;
+        const x = v[a] + (v[b] - v[a]) * t, y = v[a + 1] + (v[b + 1] - v[a + 1]) * t, z = v[a + 2] + (v[b + 2] - v[a + 2]) * t;
         const dx = v[b] - v[a], dy = v[b + 1] - v[a + 1], dz = v[b + 2] - v[a + 2];
-        points.push([w[0]*x+w[4]*y+w[8]*z+w[12], w[1]*x+w[5]*y+w[9]*z+w[13], w[2]*x+w[6]*y+w[10]*z+w[14], w[0]*dx+w[4]*dy+w[8]*dz, w[1]*dx+w[5]*dy+w[9]*dz, w[2]*dx+w[6]*dy+w[10]*dz]);
+        const direction = [w[0]*dx+w[4]*dy+w[8]*dz, w[1]*dx+w[5]*dy+w[9]*dz, w[2]*dx+w[6]*dy+w[10]*dz];
+        points.push([w[0]*x+w[4]*y+w[8]*z+w[12], w[1]*x+w[5]*y+w[9]*z+w[13], w[2]*x+w[6]*y+w[10]*z+w[14], ...direction]);
       }
-      const accelerated = points.map(p => first.ownerBoundaryAt(firstRoot, ...p));
+      const clearBoundaryHits = () => {
+        for (const e of first.entryRecords()) e.boundaryHits.fill(-1);
+        for (const group of first.ownerRecords()) group.boundaryEntries.fill(null);
+      };
+      const beforeGrid = first.stats.boundaryGridQueries;
+      const accelerated = points.map(p => { clearBoundaryHits(); return first.ownerBoundaryAt(firstRoot, ...p); });
+      // Adjacent queries retain their hit hints in play; verify that path against the same exact oracle.
+      const coherent = points.map(p => first.ownerBoundaryAt(firstRoot, ...p));
+      const reversed = points.slice().reverse().map(p => first.ownerBoundaryAt(firstRoot, ...p)).reverse();
+      gridQueries += first.stats.boundaryGridQueries - beforeGrid;
       // Use the same exact triangle predicate as the oracle, with every screen bound open.
       for (const e of first.entryRecords()) {
         for (const boxes of [e.boundaryBounds, e.boundaryBoxes, e.boundaryNodes]) for (let i = 0; i < boxes.length; i += 4) {
@@ -907,16 +920,18 @@ const visibilityStorageProof = async ({ compact = false, deferred = false } = {}
       }
       for (const group of first.ownerRecords()) if (group.boundaryGrid) group.boundaryGrid.active = false;
       for (let i = 0; i < points.length; i++) {
+        clearBoundaryHits();
         const reference = first.ownerBoundaryAt(firstRoot, ...points[i]);
-        nearBounds &&= reference === accelerated[i]; nearCases++; if (reference) boundaryHits++;
+        nearBounds &&= reference === accelerated[i] && reference === coherent[i] && reference === reversed[i]; nearCases++; if (reference) boundaryHits++;
       }
     }
+    nearBounds &&= gridQueries > 0;
     first.dispose(); query(second, secondRoot);
     const survivor = second.stats.registered === 1 && second.stats.triangles === 12 && second.entryRecords()[0].visible
       && second.geometryRecords().get(shared).triangleIndices.every((value, i) => value === sharedIndices[i]);
     const released = first.entryRecords().length === 0 && first.geometryRecords().size === 0 && first.stats.triangleBytes === 0;
     second.dispose();
-    return { exact, unchanged, bounded, tightBacking, storage, demand, nearBounds, nearCases, boundaryHits, values, count, bytes, lifecycle: sharedBake && removal && replacement && survivor && released && second.geometryRecords().size === 0, sharedBake, removal, replacement, survivor, released, disposed: guides.stats.registered === 0 };
+    return { exact, unchanged, bounded, tightBacking, storage, demand, nearBounds, nearCases, boundaryHits, gridQueries, values, count, bytes, lifecycle: sharedBake && removal && replacement && survivor && released && second.geometryRecords().size === 0, sharedBake, removal, replacement, survivor, released, disposed: guides.stats.registered === 0 };
   })()`, context);
 };
 // Count descriptor users rather than timings, so the first-demand cost scales with actual users.
@@ -3685,9 +3700,10 @@ const orbitFlow = async (b) => {
 // ---- Selection and the caps ----
 // `node test/run.mjs race mine` runs the global unit tier plus those scenes; `full` runs every scene and the
 // perf floor; `perf` runs the perf floor alone; `unit` (or nothing) runs only the global tier.
-// Eight lanes saturate a 16-core box (measured 2026-09-20); raising it only adds heat.
+// Four lanes leave room for Chrome's renderer/GPU processes; eight overloaded
+// fresh startups and page readiness with the current scene workload.
 const SCENES = ["hub", "lab", "race", "drop", "orbit", "mine", "dsb", "factory", "bifrost", "poker", "arcade", "skee", "hoops", "shy", "claw", "hockey", "billiards", "darts", "pinball", "ride", "invaders", "snake", "pong", "stampede", "flap", "breaker", "dash", "stacker"];
-const LANES = Number(process.env.LANES) || 8;
+const LANES = Number(process.env.LANES) || 4;
 const ARGS = process.argv.slice(2);
 for (const a of ARGS) if (!SCENES.includes(a) && !["unit", "chat-unit", "integration-unit", "svrn-unit", "svrn-review", "vacancy-unit", "portal-unit", "water-baseline", "water-review", "water-unit", "stackchain-review", "stackchain-unit", "dsb-menus-unit", "maxis-unit", "exterior-unit", "rulers-unit", "ink-unit", "big-unit", "perf", "full", "poker-protocol"].includes(a)) throw new Error(`Unknown argument "${a}" (unit | perf | full | poker-protocol | ${SCENES.join(" | ")})`);
 const ONLY = process.env.ONLY || ""; // Optional comma-separated substrings within the requested scenes.
@@ -5638,8 +5654,10 @@ const hubMapNavigation = { name: "hub map navigation", why: "regression: the map
     window.dispatchEvent(new KeyboardEvent("keyup", { key: "s", code: "KeyS" })); B.advance(0.1, 1 / 60);
     const departed = { distance: Math.hypot(a.root.position.x - start.x, a.root.position.z - start.z), label: label.textContent, visible: label.classList.contains("show") };
     const areas = [];
-    for (const name of ["underground", "basement", "timechain"]) {
-      P.goPreset(name);
+    // HQ and Basement are map destinations, not detached camera presets.
+    for (const [name, clicks] of [["underground", 2], ["basement", 1], ["timechain", 0]]) {
+      if (clicks) for (let i = 0; i < clicks; i++) map.click();
+      else P.goPreset(name);
       B.advance(0.1, 1 / 60); H.fadeDetachedName(true); B.advance(0.1, 1 / 60);
       areas.push({ name, label: label.textContent });
     }
@@ -6176,6 +6194,18 @@ const hubMelee = { name: "hub melee", why: "rule: a ready swing does five damage
   // The preceding AK check deliberately leaves carry mode. These contacts
   // exercise the ordinary shoulder reticle, including the recovery aim below.
   await b.evaluate(`(() => { const B = __ooga, P = B.pilot; if (!P.aiming) P.modeAction("mode-toggle"); if (P.birdsEye) P.hooks.onZoom(0.001); B.advance(1, 1 / 60); })()`);
+  // Start the respawn clock at the breaking contact, including real frames
+  // and swing recovery that pass before the explicit respawn polling below.
+  await b.evaluate(`(() => {
+    const B = __ooga, props = B.headquarters.breakables;
+    window.__breakableHit = props.hit;
+    props.hit = function(...args) {
+      const r = args[1]?.owner?.breakable, broken = r?.broken;
+      const result = window.__breakableHit.apply(this, args);
+      if (r === window.__target && !broken && r.broken) window.__targetBrokenAt = B.renderOpts.time;
+      return result;
+    };
+  })()`);
   for (const [prop, gap] of [["crate", 0.9], ["barrel", 0.9], ["rock", 1.175]]) {
     const health = await b.evaluate(nextTo(prop, gap));
     let n = 0;
@@ -6186,6 +6216,7 @@ const hubMelee = { name: "hub melee", why: "rule: a ready swing does five damage
     }
     swings[prop] = { health, n };
   }
+  await b.evaluate(`__ooga.headquarters.breakables.hit = window.__breakableHit; delete window.__breakableHit`);
   const back = await b.evaluate(`(() => {
     const r = window.__target, B = window.__ooga, a = B.crew.player, origin = { ...r.owner.node.position };
     const distance = () => Math.hypot(a.root.position.x - origin.x, a.root.position.z - origin.z);
@@ -6194,9 +6225,9 @@ const hubMelee = { name: "hub melee", why: "rule: a ready swing does five damage
     // navigation without advancing uncounted time before the same timed loop.
     B.pilot.navigate({ position: { x: -8, y: 0, z: 16 }, yaw: -Math.PI / 2, pitch: 0.3, dist: 5 });
     const clearedDistance = distance();
-    for (let t = 0; t < 65; t++) {
-      B.advance(1, 1 / 30);
-      if (!r.broken && !r.reveal) return { t: t + 1, health: r.health, active: r.owner.active,
+    for (let i = 0; i < 650; i++) {
+      B.advance(0.1, 1 / 30);
+      if (!r.broken && !r.reveal) return { t: B.renderOpts.time - window.__targetBrokenAt, health: r.health, active: r.owner.active,
         occupiedDistance, clearedDistance, footprint: r.owner.footprint, bodyRadius: a.bodyRadius };
     }
     return null;
@@ -7264,7 +7295,7 @@ const hubBirdsEyeFloors = { name: "birds-eye lower floors", why: "regression: ra
     const clouds = [], weather = [];
     // Relief windows include an ordinary front mesh as well as projective
     // batches. Neither is part of the weather deck.
-    const reliefRoots = [D.factory?.batches.hall.parent, D.bifrost?.window?.root];
+    const reliefRoots = [D.factory?.batches.hall.parent, D.factory?.roof?.batches.hall.parent, D.bifrost?.window?.root];
     const visit = n => { if (reliefRoots.includes(n)) return; if (n.geometry?.cutawayPreserve) clouds.push(n); if (n.geometry?.cutawayHide) weather.push(n); for (const child of n.children) visit(child); };
     visit(BL.scenes.hub.root);
     const immutable = I.geometry === geometry && I.geometry.verts === verts && verts.every((v, i) => v === originalVerts[i]) && source.data === data && data.every((v, i) => v === originalData[i]);
@@ -7861,7 +7892,19 @@ const factoryWalking = { name: "factory walking", why: "regression: Factory move
 } };
 const factoryGreeter = { name: "factory greeter", why: "rule: the guide notices a visitor on the balcony and flies over to offer tours, only to places the hall's clearance passes, and once per visit; Escape or a decline sends her back to work; a visitor can walk up to her at a station; the four tours complete and send her back to work; her flight clears the hall; and device detail respects quality and visit ownership", run: async (b) => {
   // A fresh visit: an earlier step may already have had her notice the visitor, so come back in once if so.
-  const fresh = async () => { if (await b.evaluate(`__ooga.factory.greeter.state.offered`)) { await tourGo(b, "lab"); await tourGo(b, "factory"); } };
+  // Keep the visitor released until the observing evaluate possesses them;
+  // browser frames between commands must not consume her notice phase.
+  const fresh = async () => {
+    const offered = await b.evaluate(`(() => { __ooga.pilot.release(true); return __ooga.factory.greeter.state.offered; })()`);
+    if (offered) {
+      await tourGo(b, "lab");
+      await b.evaluate(`(() => {
+        const B = __ooga; B.go("factory");
+        for (let i = 0; i < 150 && (B.transitioning || B.scene !== "factory"); i++) B.advance(1 / 30, 1 / 30);
+        B.pilot.release(true); B.advance(0.3, 1 / 30); B.housekeep();
+      })()`);
+    }
+  };
   await fresh();
   // regression: with no room either side of the visitor, she flew to a place that had failed the hall's clearance.
   // The visitor stands by the gate facing it, where neither side passes; she comes over their head instead, and every
@@ -12238,7 +12281,8 @@ scene("factory", { label: "lifecycle", exclusive: true, url: hubPage(src), steps
     visits.push({ ...visit, hall, away, lighter, inFlight });
   }
   const after = await snapshot(), same = (key) => before.stats[key] === after.stats[key];
-  record("soak: factory cycles: one bounded node survives six round trips, each left mid-show, the hall's subscription released, without retaining scene nodes, targets or DOM", visits.every((v) => v.same && v.hall === 2 && v.away === 0 && v.lighter && v.subscriptions === 1 && v.lines <= v.places && v.inFlight > 0)
+  // The hub's entrance and roof windows each own one subscription.
+  record("soak: factory cycles: one bounded node survives six round trips, each left mid-show, the hall's subscription released, without retaining scene nodes, targets or DOM", visits.every((v) => v.same && v.hall === 2 && v.away === 0 && v.lighter && v.subscriptions === 2 && v.lines <= v.places && v.inFlight > 0)
     && same("allNodes") && same("targets") && same("dom") && after.stats.tweens === 0, JSON.stringify({ visits, before: before.stats, after: after.stats }));
   record("soak: factory cycles: GPU records, listeners and retained heap remain bounded", Math.abs(after.stats.gl.records - before.stats.gl.records) <= 3 && before.nodes === after.nodes && before.listeners === after.listeners && within(before, after, 0.1), heapDetail(before, after));
 } }] });
@@ -13558,15 +13602,17 @@ const raceRigChecks = async () => {
   let overflow = false;
   try { renderer.createRig(Array.from({ length: 10 }, () => rejectNodes[0])); } catch { overflow = true; }
   const rendererSource = await readFile(new URL("../src/js/gl-renderer.js", import.meta.url), "utf8");
-  // Ordinary shaders must retain the pre-rig programs exactly. These fixed
-  // hashes come from fabdec255, not from deriving a second copy of the new code.
+  // Pin the ordinary programs independently of the rig derivation. Update these
+  // snapshots only for intentional shared shader changes, preserving byte equality.
   runInNewContext(rendererSource.replace("  BL.glRenderer =", "  window.__ordinaryRigProof = [ORDINARY_MESH_VS, ORDINARY_MESH_FS, ORDINARY_SHADOW_VS];\n  BL.glRenderer ="), context);
   const ordinaryHashes = context.window.__ordinaryRigProof.map(shader => createHash("sha256").update(shader).digest("hex"));
   const expectedOrdinaryHashes = [
     // Depth pre-pass "no image change" rendering core: the shared vertex and fragment
     // bytes the depth-only and plain variants derive from, plus the untouched shadow path.
     "6bed3532a26c98c3e5a9218674dbe75c789324168104f6b0eb7fb5c88872a012",
-    "b82d02f44814bebe09d97cfdfb32fb21ac0e1373411e4ba5de06a59065a6fa2c",
+    // 487d99ac909f added uObjectSlab2 for the Factory roof bore; removing its
+    // declaration and clipping predicate restores the previous b82d02f4 hash.
+    "f5f71f7931156d9329b39a13997433e2146fa367cee44e5ceb44ace6038a2be3",
     "37030f053de422aa157f017ceedef0812ed57a17c9e1b2af4aab017c0b645364"
   ];
   record("race rig strategy: ordinary mesh, fragment and shadow shader bytes retain the pre-rig fast path", ordinaryHashes.every((hash, i) => hash === expectedOrdinaryHashes[i]), JSON.stringify(ordinaryHashes));
@@ -13679,7 +13725,7 @@ const browserDriverProof = async () => {
         kill(signal) { this.kills.push(signal || "SIGTERM"); if (signal === "SIGKILL" && mode !== "delayed-exit") queueMicrotask(() => this.emit("exit", 0)); return true; }
       };
       children.push(child);
-      if (mode === "spawn-error") queueMicrotask(() => {
+      if (mode === "spawn-error" || mode === "first-spawn-error" && children.length === 1) queueMicrotask(() => {
         if (child.listenerCount("error")) child.emit("error", new Error("synthetic ENOENT"));
         else child.unhandledError = true;
       });
@@ -13690,6 +13736,8 @@ const browserDriverProof = async () => {
       close() { this.closed = true; } // A wedged transport deliberately never emits a close event.
       send(raw) {
         const message = JSON.parse(raw);
+        if (mode === "setup-held" && message.method === "Runtime.enable") return;
+        if (mode === "first-media-held" && sockets[0] === this && message.method === "Emulation.setEmulatedMedia") return;
         if (message.method.startsWith("Synthetic.hang")) return;
         if (message.method === "Synthetic.throw") throw new Error("synthetic send failure");
         const value = message.params?.expression?.includes("location.href") ? mode !== "reset-not-blank" : 1;
@@ -13725,6 +13773,39 @@ const browserDriverProof = async () => {
     };
   };
   const rows = [];
+  {
+    const f = fixture("setup-held"), first = f.launch(), second = f.launch();
+    await flush();
+    const queued = f.children.length === 1 && f.sockets.length === 1;
+    f.sockets[0].onmessage({ data: JSON.stringify({ id: 1, result: {} }) });
+    const a = await first; await flush();
+    const resumed = f.children.length === 2 && f.sockets.length === 2;
+    f.sockets[1].onmessage({ data: JSON.stringify({ id: 1, result: {} }) });
+    const b = await second;
+    rows.push({ name: "fresh startup queue retains exclusive setup", pass: queued && resumed && a !== b });
+    await f.dispose();
+  }
+  {
+    const f = fixture("first-spawn-error");
+    let error = null;
+    const first = f.launch().catch(err => { error = err.message; }), second = f.launch();
+    await first; const browser = await second;
+    rows.push({ name: "failed startup releases queue after cleanup", pass: !!error && error.includes("synthetic ENOENT")
+      && f.children.length === 2 && f.children[0].kills.includes("SIGKILL") && f.removed.includes("synthetic-profile-1") && !!browser });
+    await f.dispose();
+  }
+  {
+    const f = fixture("first-media-held");
+    let error = null;
+    const first = f.launch().catch(err => { error = err.message; }), second = f.launch();
+    await flush();
+    const bounded = f.children.length === 1 && ![...f.timers].some(timer => timer.active && timer.ms === 90000);
+    f.fire(10000); await first; const browser = await second;
+    rows.push({ name: "stalled startup emulation releases queue within setup deadline", pass: bounded
+      && !!error && error.startsWith("Emulation.setEmulatedMedia got no reply in 10 s") && f.children.length === 2
+      && f.children[0].kills.includes("SIGKILL") && f.removed.includes("synthetic-profile-1") && !!browser });
+    await f.dispose();
+  }
   for (const event of ["timeout", "send-throw", "socket-close", "process-exit"]) {
     const f = fixture(), browser = await f.launch();
     let first = "pending", second = "pending";
@@ -14163,7 +14244,7 @@ record("terrain glyph layouts: warm visits preserve exact registries and rendere
   const rigDisposal = await raceRigDisposalProof();
   record("race rig disposal: pending and linked variants release owned shaders and programs exactly once without context-loss support", rigDisposal.every(r => !r.programs && !r.shaders && !r.duplicateDeletes && r.arraysCleared && r.aliasesReleased), JSON.stringify(rigDisposal));
   const driver = await browserDriverProof();
-  record("browser driver: broken transports retire every pending command and owned child, discovery is bounded, and pool ownership remains exclusive", driver.cases === 13 && driver.failures === 0, JSON.stringify(driver));
+  record("browser driver: broken transports retire every pending command and owned child, discovery is bounded, and pool ownership remains exclusive", driver.cases === 16 && driver.failures === 0, JSON.stringify(driver));
 
 const carriedRelease = carriedReleaseProof();
 record("gorilla release: insufficient upright headroom retains the grab without querying below the current floor", carriedRelease.valid, JSON.stringify(carriedRelease));
