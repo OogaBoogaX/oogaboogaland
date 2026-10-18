@@ -1689,8 +1689,18 @@
       // Both rays and every triangle share these limits; this query has no callbacks.
       boundarySpan = endDepth - near;
       boundaryFirstDepth = near + boundarySpan * 1e-5; boundaryLastDepth = endDepth - boundarySpan * 1e-5;
-      return endDepth > near && ownerHit(group, (rx + px) / depth, (ry + py) / depth, 0)
-        !== ownerHit(group, (rx - px) / depth, (ry - py) / depth, 1);
+      if (!(endDepth > near)) return false;
+      const left = ownerHit(group, (rx + px) / depth, (ry + py) / depth, 0);
+      const sx = (rx - px) / depth, sy = (ry - py) / depth;
+      if (left) {
+        // The first ray already validated this entry. Test its triangle directly for the adjacent ray.
+        const entry = group.boundaryEntries[0], triangle = entry.boundaryHits[0], b = entry.boundaryBounds, boxes = entry.boundaryBoxes, at = triangle * 4;
+        if (!(sx < b[0] || sx > b[2] || sy < b[1] || sy > b[3] || sx < boxes[at] || sx > boxes[at + 2] || sy < boxes[at + 1] || sy > boxes[at + 3]) && boundaryTriangle(entry, triangle * 10, sx, sy)) {
+          group.boundaryEntries[1] = entry; entry.boundaryHits[1] = triangle;
+          return false;
+        }
+      }
+      return left !== ownerHit(group, sx, sy, 1);
     };
     const refresh = () => {
       // Registration boundaries size every reused buffer from actual scene contents; the frame path never grows
