@@ -73,7 +73,8 @@
             .filter((value) => typeof value === "string" && value.length <= 256
               && (kind !== "types" || ["commit", "pr", "review", "merge", "issue", "comment"].includes(value))))] : null;
         }
-        windows.push({ x: entry.x, y: entry.y, width: entry.width, paused: entry.paused, screen: { name: screen.name, params }, filters, rollup: entry.rollup === true });
+        windows.push({ x: entry.x, y: entry.y, width: entry.width, paused: entry.paused, screen: { name: screen.name, params }, filters, rollup: entry.rollup === true,
+          controlsHidden: entry.controlsHidden === true });
       }
       return { windows, lastUsed: Number.isInteger(state.lastUsed) ? state.lastUsed : -1,
         lastWidth: Number.isFinite(state.lastWidth) && state.lastWidth > 0 ? state.lastWidth : 440 };
@@ -247,9 +248,7 @@
       ownOogaFace: $("own-ooga-face-icon"),
       ownOogaHealth: $("own-ooga-health"),
       ownOogaHealthFill: $("own-ooga-health-fill"),
-      modeDestinations: $("detached-destinations"),
       modeDestinationName: $("detached-destination-name"),
-      modeDestinationDots: [...document.querySelectorAll("[data-detached-preset]")],
       primary: $("primary-hud"),
       primaryIcon: $("primary-icon"),
       primaryStrength: $("primary-strength"),
@@ -612,7 +611,6 @@
       detachedNameShown = false;
       detachedSelectionShown = false;
       showAreaLabel();
-      for (const dot of el.modeDestinationDots) dot.dataset.current = "false";
     };
     const setAreaLabel = (name, position = null) => {
       areaLabel = name;
@@ -626,7 +624,6 @@
       destinationAnchored = !!position;
       if (position) { destinationX = position.x; destinationY = position.y; destinationZ = position.z; }
       detachedSelectionShown = true;
-      for (const dot of el.modeDestinationDots) dot.dataset.current = String(dot.dataset.detachedPreset === name);
       if (!announce) return;
       el.modeDestinationName.textContent = DETACHED_NAMES[name];
       detachedNameShown = true;
@@ -1019,6 +1016,9 @@
         node.id += `-${floatingId}`;
         for (const child of node.querySelectorAll("[id]")) child.id += `-${floatingId}`;
         node.setAttribute("aria-labelledby", el.boardTitle.id);
+        el.boardScreen.tabIndex = 0;
+        el.boardScreen.setAttribute("role", "button");
+        el.boardScreen.setAttribute("aria-label", "Toggle Oogatron header and footer");
       }
       el.boardFilter.setAttribute("aria-controls", el.boardFilterMenu.id);
       el.boardFilterRepos.setAttribute("aria-controls", el.boardFilterList.id);
@@ -1036,6 +1036,7 @@
       // `updateBoard` repaints whenever the open board's version moves.
       // A `floating` board also supplies `paused` and `setPaused`, and keeps island input available.
       let board = null, boardShown = -1, boardDots = -1;
+      let controlsHidden = saved?.controlsHidden === true;
       let filterTab = "repos", filterShown = -1;
       const filterTabs = [el.boardFilterRepos, el.boardFilterUsers, el.boardFilterTypes];
       const typeLabels = { commit: "Commits", pr: "Pull requests", review: "Reviews", merge: "Merges", issue: "Issues", comment: "Comments" };
@@ -1091,6 +1092,13 @@
       const boardRatio = 550 / 368;
       const width = saved?.width ?? lastBoard?.width ?? lastBoardWidth;
       const boardWindow = { x: saved?.x ?? 0, y: saved?.y ?? 0, width, height: width / boardRatio, placed: !!saved };
+      const boardBounds = { left: 0, top: 0, right: 0, bottom: 0 };
+      const overlapsBoard = (a, b) => a.left < b.right && a.right > b.left && a.top < b.bottom && a.bottom > b.top;
+      const readBoardBounds = () => {
+        const r = el.boardScreen.getBoundingClientRect();
+        boardBounds.left = r.left; boardBounds.top = r.top;
+        boardBounds.right = r.right; boardBounds.bottom = r.bottom;
+      };
       const interactBoard = () => {
         if (!floatingId) return;
         lastBoard = controller;
@@ -1104,6 +1112,29 @@
         stackBoards();
         scheduleBoardSave();
       };
+      const paintBoardControls = () => {
+        el.board.classList.toggle("board-controls-hidden", controlsHidden);
+        el.boardScreen.setAttribute("aria-expanded", String(!controlsHidden));
+        el.boardScreen.title = controlsHidden ? "Show header and footer" : "Hide header and footer";
+      };
+      const toggleBoardControls = () => {
+        if (!board?.floating) return;
+        interactBoard();
+        controlsHidden = !controlsHidden;
+        showFilters(false);
+        paintBoardControls();
+        scheduleBoardSave();
+      };
+      on(el.boardScreen, "click", () => {
+        if (!board?.floating) return;
+        toggleBoardControls();
+        el.boardScreen.blur();
+      });
+      on(el.boardScreen, "keydown", (e) => {
+        if (!board?.floating || e.key !== "Enter" && e.key !== " ") return;
+        e.preventDefault(); e.stopPropagation();
+        if (!e.repeat) toggleBoardControls();
+      });
       let boardPointer = -1, boardHandle = null, boardResizing = false;
       let boardStartX = 0, boardStartY = 0, boardStartLeft = 0, boardStartTop = 0, boardStartWidth = 0;
       const layoutBoard = () => {
@@ -1112,17 +1143,92 @@
         b.width = Math.min(maxWidth, Math.max(Math.min(260, maxWidth), b.width));
         b.height = b.width / boardRatio;
         b.x = Math.max(0, Math.min(w - b.width, b.x));
-        b.y = Math.max(0, Math.min(h - b.height, b.y));
         el.board.style.width = `${b.width}px`;
         el.board.style.height = `${b.height}px`;
         el.board.style.left = `${b.x}px`;
-        el.board.style.top = `${b.y}px`;
         el.board.style.setProperty("--board-scale", String(Math.min(b.width, 550) / 440));
+        // The footer may sit below the viewport; keep the black display itself in view.
+        const screenBottom = el.boardScreen.getBoundingClientRect().bottom - el.board.getBoundingClientRect().top;
+        b.y = Math.max(0, Math.min(h - screenBottom, b.y));
+        el.board.style.top = `${b.y}px`;
+        readBoardBounds();
         if (!el.boardFilterMenu.hidden) positionFilters();
       };
+      const moveBoard = (x, y) => {
+        const b = boardWindow, left = b.x, top = b.y;
+        const r = { ...boardBounds };
+        b.x = x; b.y = y;
+        layoutBoard();
+        let dx = b.x - left, dy = b.y - top, movedX = 0, movedY = 0;
+        // Sweep the black display, then slide along contact. A fast pointer must
+        // not jump through a neighbour, and transparent controls are not walls.
+        for (let pass = 0; pass < 3 && (dx || dy); pass++) {
+          let time = 1, stopX = false, stopY = false;
+          for (const popup of floatingBoards) {
+            if (popup === controller) continue;
+            const other = popup.bounds;
+            // Old or overcrowded layouts must still allow an overlap to separate.
+            if (overlapsBoard(r, other)) continue;
+            const l = r.left + movedX, t = r.top + movedY, right = r.right + movedX, bottom = r.bottom + movedY;
+            if (!dx && (right <= other.left || l >= other.right) || !dy && (bottom <= other.top || t >= other.bottom)) continue;
+            const enterX = dx > 0 ? (other.left - right) / dx : dx < 0 ? (other.right - l) / dx : -Infinity;
+            const leaveX = dx > 0 ? (other.right - l) / dx : dx < 0 ? (other.left - right) / dx : Infinity;
+            const enterY = dy > 0 ? (other.top - bottom) / dy : dy < 0 ? (other.bottom - t) / dy : -Infinity;
+            const leaveY = dy > 0 ? (other.bottom - t) / dy : dy < 0 ? (other.top - bottom) / dy : Infinity;
+            const enter = Math.max(enterX, enterY), leave = Math.min(leaveX, leaveY);
+            if (enter < 0 || enter > time || enter >= leave) continue;
+            if (enter < time) { stopX = false; stopY = false; }
+            time = enter;
+            stopX ||= enterX >= enterY;
+            stopY ||= enterY >= enterX;
+          }
+          // Leave a subpixel clearance so layout rounding cannot turn contact
+          // into an existing overlap on the next pointer event.
+          const travelX = dx * time, travelY = dy * time;
+          movedX += travelX - (stopX ? Math.sign(travelX) * Math.min(0.02, Math.abs(travelX)) : 0);
+          movedY += travelY - (stopY ? Math.sign(travelY) * Math.min(0.02, Math.abs(travelY)) : 0);
+          dx = stopX ? 0 : dx * (1 - time);
+          dy = stopY ? 0 : dy * (1 - time);
+        }
+        b.x = left + movedX; b.y = top + movedY;
+        el.board.style.left = `${b.x}px`; el.board.style.top = `${b.y}px`;
+        readBoardBounds();
+      };
       const resizeBoard = (width) => {
-        const maxWidth = Math.min(window.innerWidth - boardWindow.x, (window.innerHeight - boardWindow.y) * boardRatio);
+        const before = { ...boardWindow }, bounds = { ...boardBounds };
+        const maxWidth = window.innerWidth - boardWindow.x;
         boardWindow.width = Math.min(maxWidth, Math.max(Math.min(260, maxWidth), width));
+        layoutBoard();
+        for (const popup of floatingBoards) {
+          if (popup === controller || overlapsBoard(bounds, popup.bounds) || !overlapsBoard(boardBounds, popup.bounds)) continue;
+          boardWindow.x = before.x; boardWindow.y = before.y; boardWindow.width = before.width;
+          layoutBoard();
+          break;
+        }
+      };
+      const placeBoard = () => {
+        if (!floatingBoards.some(popup => popup !== controller && overlapsBoard(boardBounds, popup.bounds))) return;
+        const b = boardWindow, width = boardBounds.right - boardBounds.left, height = boardBounds.bottom - boardBounds.top;
+        const offsetX = boardBounds.left - b.x, offsetY = boardBounds.top - b.y;
+        const maxX = window.innerWidth - b.width, maxY = window.innerHeight - offsetY - height;
+        const xs = [b.x, 0, maxX], ys = [b.y, 0, maxY];
+        for (const popup of floatingBoards) {
+          if (popup === controller) continue;
+          xs.push(popup.bounds.left - width - offsetX - 0.02, popup.bounds.right - offsetX + 0.02);
+          ys.push(popup.bounds.top - height - offsetY - 0.02, popup.bounds.bottom - offsetY + 0.02);
+        }
+        const candidate = { left: 0, top: 0, right: 0, bottom: 0 };
+        let best = Infinity, bestX = b.x, bestY = b.y;
+        for (const x of xs) for (const y of ys) {
+          if (x < 0 || x > maxX || y < 0 || y > maxY) continue;
+          const distance = (x - b.x) ** 2 + (y - b.y) ** 2;
+          if (distance >= best) continue;
+          candidate.left = x + offsetX; candidate.top = y + offsetY;
+          candidate.right = candidate.left + width; candidate.bottom = candidate.top + height;
+          if (floatingBoards.some(popup => popup !== controller && overlapsBoard(candidate, popup.bounds))) continue;
+          best = distance; bestX = x; bestY = y;
+        }
+        b.x = bestX; b.y = bestY;
         layoutBoard();
       };
       const finishBoardPointer = () => {
@@ -1164,9 +1270,7 @@
           const dx = e.clientX - boardStartX, dy = e.clientY - boardStartY;
           resizeBoard(boardStartWidth + (dx + dy / boardRatio) / (1 + 1 / (boardRatio * boardRatio)));
         } else {
-          boardWindow.x = boardStartLeft + e.clientX - boardStartX;
-          boardWindow.y = boardStartTop + e.clientY - boardStartY;
-          layoutBoard();
+          moveBoard(boardStartLeft + e.clientX - boardStartX, boardStartTop + e.clientY - boardStartY);
         }
       });
       const endBoardPointer = (e) => {
@@ -1179,7 +1283,7 @@
       on(el.board, "lostpointercapture", endBoardPointer);
       on(window, "blur", finishBoardPointer);
       on(window, "resize", () => {
-        if (board?.floating) { layoutBoard(); scheduleBoardSave(); }
+        if (board?.floating) { layoutBoard(); placeBoard(); scheduleBoardSave(); }
       });
       on(el.boardResize, "keydown", (e) => {
         let step;
@@ -1243,6 +1347,7 @@
         el.board.classList.toggle("board-caption-above", !!board.captionAbove);
         el.board.classList.toggle("board-carousel", !!board.carousel);
         if (board.floating) {
+          paintBoardControls();
           boardCenter.prepend(el.boardCaption);
           el.boardHead.insertBefore(el.boardDots, el.boardHead.lastElementChild);
         } else if (board.carousel) {
@@ -1270,7 +1375,6 @@
             boardWindow.y = (window.innerHeight - boardWindow.height) / 2 + offset;
             boardWindow.placed = true;
           }
-          layoutBoard();
         } else {
           el.board.removeAttribute("style");
         }
@@ -1282,6 +1386,7 @@
             document.activeElement?.blur();
           } else el.board.showModal();
         }
+        if (board.floating) { layoutBoard(); placeBoard(); }
       };
       const closeBoard = () => {
         finishBoardPointer();
@@ -1392,9 +1497,10 @@
       });
       const controller = {
         open: openBoard, close: closeBoard, update: updateBoard,
+        bounds: boardBounds,
         setLayer(layer) { el.board.style.zIndex = String(layer); },
         get width() { return boardWindow.width; },
-        snapshot() { return { x: boardWindow.x, y: boardWindow.y, width: boardWindow.width, screen: board.view, paused: board.paused, filters: board.filters, rollup: board.rollup }; },
+        snapshot() { return { x: boardWindow.x, y: boardWindow.y, width: boardWindow.width, screen: board.view, paused: board.paused, filters: board.filters, rollup: board.rollup, controlsHidden }; },
         dispose() {
           closeBoard();
           for (const off of boardListeners) off();
@@ -1581,11 +1687,7 @@
       else if (b.dataset.action === "recipe-copy") copyRecipe(b);
       else if (b.dataset.action === "intro-go") b.closest("[data-intro]").hidden = true;
       else if (b === el.modeDestination) {
-        // The locked virtual cursor dispatches to the enclosing button.
-        // Resolve the dot at its screen coordinates as well as native targets.
-        const dot = e.target.closest("[data-detached-preset]")
-          || (e.detail > 0 ? document.elementFromPoint(e.clientX, e.clientY)?.closest("[data-detached-preset]") : null);
-        actionHandler && actionHandler("mode-preset", dot ? dot.dataset.detachedPreset : nextDetachedView());
+        actionHandler && actionHandler("mode-preset", nextDetachedView());
       }
       else if (b.dataset.action === "account-login") BL.net.login();
       else if (b.dataset.action === "account-logout") BL.net.logout();
