@@ -7,7 +7,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { tmpdir } from "node:os";
 import { createHash, webcrypto } from "node:crypto";
-import { externalizeAudio } from "../scripts/distribution-audio.mjs";
+import { IMAGE_MODULES, externalizeAudio, externalizeImages } from "../scripts/distribution-audio.mjs";
 import { launch, acquire, dispose, driverError } from "./browser.mjs";
 import { writeCharacters } from "../scripts/characters.mjs";
 const emptyPeerPreviewProof = async () => {
@@ -13631,6 +13631,19 @@ const distributionAudioChecks = async () => {
     record("distribution audio: exact MP3 assets replace embedded text and the final script retains its literal bytes and strict CSP hash",
       descriptor.external && urls.length === 5 && urls.every((url, i) => /^\/audio\/dsb-[a-f0-9]{64}\.mp3$/.test(url) && readFileSync(join(out, url)).equals(Buffer.from(encoded[i], "base64")))
       && staged.includes(`script-src 'sha256-${hash(updated)}'`) && updated.endsWith(script.slice(script.indexOf("const literal"))) && !updated.includes(encoded[0]), "staged recording/CSP mismatch");
+    // The DSB rooms' pictures: every data URI becomes a same-origin file of the same bytes, and the modules still evaluate.
+    const modules = IMAGE_MODULES.map(name => readFileSync(join(root, `src/js/${name}.js`), "utf8").trim()).join("\n");
+    const pictures = [...modules.matchAll(/data:image\/(jpeg|png|webp);base64,([A-Za-z0-9+/=]+)/g)];
+    const art = `\nwindow.BL = {};\n${modules}\nconst literal = "$& $$ $' $` + "`" + `";\n`;
+    const artHtml = `<meta content="default-src 'none'; script-src 'sha256-${hash(art)}'; img-src 'self' data:"><script>${art}</script>`;
+    const artStaged = externalizeImages(artHtml, root, out), artUpdated = artStaged.match(/<script>([\s\S]*?)<\/script>/)[1];
+    const artContext = { window: { BL: {} } };
+    runInNewContext(artUpdated, artContext);
+    const artUrls = [...artUpdated.matchAll(/\/art\/[a-z-]+-[a-f0-9]{64}\.(jpg|png|webp)/g)].map(m => m[0]);
+    record("distribution pictures: exact image files replace the DSB rooms' data URIs and the final script keeps its literal bytes and strict CSP hash",
+      pictures.length > 0 && artUrls.length === pictures.length && artUrls.every((url, i) => readFileSync(join(out, url)).equals(Buffer.from(pictures[i][2], "base64")))
+      && !/data:image\//.test(artUpdated) && artContext.window.BL.stackchainArt["article-0"].image.startsWith("/art/")
+      && artStaged.includes(`script-src 'sha256-${hash(artUpdated)}'`) && artUpdated.endsWith(art.slice(art.indexOf("const literal"))), "staged pictures/CSP mismatch");
   } finally { rmSync(out, { recursive: true, force: true }); }
 };
 const qualityFramebufferChecks = async () => {

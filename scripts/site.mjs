@@ -4,15 +4,18 @@
 // title, description, canonical address and preview card, and the router opens the rally from the path.
 // Each is the whole built page with its own head. 404.html sends a miscased or slash-ended route
 // (/OogaRally/) to its address and anything else home; sitemap.xml and robots.txt list the routes, and
-// cards/ holds the card images from `npm run cards`; a route without an `image` uses home's.
+// cards/ holds the card images from `npm run cards`; a route without an `image` uses home's. `--audio-assets`
+// and `--image-assets` write the DSB recordings and the DSB rooms' pictures as same-origin files under audio/
+// and art/ and point the page at them (scripts/distribution-audio.mjs); the deploys and `npm run serve` pass
+// both, and the page built without them stays whole for direct-file use.
 import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import vm from "node:vm";
-import { externalizeAudio } from "./distribution-audio.mjs";
+import { externalizeAudio, externalizeImages } from "./distribution-audio.mjs";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
-const out = resolve(root, process.argv[2] || "untracked/site");
+const out = resolve(root, process.argv.slice(2).find((arg) => !arg.startsWith("--")) || "untracked/site");
 await import("./build.mjs");
 
 const context = { window: {} };
@@ -25,6 +28,7 @@ mkdirSync(join(out, "cards"), { recursive: true });
 
 let shell = readFileSync(join(root, "oogaboogaland.html"), "utf8");
 if (process.argv.includes("--audio-assets")) shell = externalizeAudio(shell, root, out);
+if (process.argv.includes("--image-assets")) shell = externalizeImages(shell, root, out);
 if (shell.split("</title>").length !== 2 || shell.split("</head>").length !== 2) throw new Error("oogaboogaland.html: expected one <title> and one </head>");
 
 const esc = (text) => text.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");

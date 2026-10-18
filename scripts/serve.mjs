@@ -26,6 +26,8 @@ const TYPES = {
   ".svg": "image/svg+xml",
   ".png": "image/png",
   ".jpg": "image/jpeg",
+  ".webp": "image/webp",
+  ".mp3": "audio/mpeg",
   ".xml": "application/xml; charset=utf-8",
   ".txt": "text/plain; charset=utf-8",
   ".ico": "image/x-icon",
@@ -41,7 +43,7 @@ function rebuild() {
   }
   building = new Promise((resolve) => {
     const started = Date.now();
-    const child = spawn(process.execPath, [build], { cwd: root, stdio: "inherit" });
+    const child = spawn(process.execPath, [build, site, "--audio-assets", "--image-assets"], { cwd: root, stdio: "inherit" });
     child.on("exit", (code) => {
       if (code !== 0) console.log(`build failed (exit ${code}); serving the previous page`);
       else console.log(`rebuilt in ${Date.now() - started} ms`);
