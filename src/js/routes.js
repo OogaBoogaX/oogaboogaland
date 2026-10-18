@@ -31,6 +31,8 @@
         description: "Walk through ₿IFRÖST to DSB Land: a river boat, the Bitcoin coaster riding the live price, the Meme Shop and NodeRunner TV." },
       { path: "entropylab", scene: "hub", place: "lab", image: "entropylab", title: "EntropyLab",
         description: "The EntropyLab cave, where donated bananas feed the voxel cavemen who stand for its contributors." },
+      { path: "bca", scene: "hub", place: "bca", title: "B.C.A.",
+        description: "Banana Certified Accounting: two suited gorillas at walnut desks count every banana on abacuses. Count bananas. Keep receipts. Build in public." },
       { path: "lightning", scene: "factory", image: "lightning", title: "Lightning Factory",
         description: "A Lightning node at work as a factory in a tiered cavern, run by gorillas in hard hats: forwards ride the conduits through the glowing core." },
       { path: "oogaarcade", scene: "arcade", title: "Ooga Arcade",

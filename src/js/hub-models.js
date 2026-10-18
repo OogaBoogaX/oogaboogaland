@@ -134,7 +134,8 @@
     bolt: ["...##", "..##.", ".##..", "#####", "..##.", ".##..", "##..."],
     die: ["#####", "#...#", "#.#.#", "#...#", "#.#.#", "#...#", "#####"],
     glyph: ["#.##.", "##..#", ".#.#.", "#..##", ".##.#", "#.#..", "##.##"],
-    banana: ["....#", "...##", "..##.", ".##..", "##...", "#....", "....."]
+    banana: ["....#", "...##", "..##.", ".##..", "##...", "#....", "....."],
+    abacus: ["#####", "##..#", "#.#.#", "#..##", "##..#", "#####", "#...#"]
   };
   // The sign emblems: 7x7 art in named inks, ringed in a dark outline worked out from the art itself.
   const SIGN_BADGES = {
@@ -146,7 +147,9 @@
     banana: { ink: { "#": "#f5d142", "+": "#fff3a0", "S": "#6b4a26" }, rows: [".....S.", ".....##", "....+#.", "...+##.", "..+##..", "#+##...", ".##...."] },
     joystick: { ink: { "R": "#e0452b", "+": "#ff9c86", "H": "#efe6d2", "#": "#c9ced6" }, rows: ["..+RR..", "..RRR..", "...H...", "...H...", "...H...", "#######", ".#####."] },
     chute: { ink: { "#": "#e0452b", "+": "#f2efe8", "L": "#f2efe8", "S": "#f5d142" }, rows: ["..###..", ".#+#+#.", "#+#+#+#", "L.....L", ".L...L.", "..LSL..", "...S..."] },
-    rocket: { ink: { "#": "#f2efe8", "R": "#e0452b", "W": "#7fe0ff", "F": "#ffb02e" }, rows: ["...R...", "..RRR..", "..#W#..", "..###..", ".R###R.", "R.#F#.R", "...F..."] }
+    rocket: { ink: { "#": "#f2efe8", "R": "#e0452b", "W": "#7fe0ff", "F": "#ffb02e" }, rows: ["...R...", "..RRR..", "..#W#..", "..###..", ".R###R.", "R.#F#.R", "...F..."] },
+    // B.C.A.: a walnut abacus whose beads are bananas and ivory, on brass rods.
+    abacus: { ink: { "W": "#8a5a32", "-": "#d9b45a", "Y": "#f5d142", "I": "#f2efe8" }, rows: ["WWWWWWW", "WYY--IW", "W-IY-YW", "WI--YYW", "WYI--IW", "WWWWWWW", "W.....W"] }
   };
   const BADGE_OUTLINE = "#2a1a0c", BADGE_CELLS = 9;
   const BADGE_CELL = SIGN_CELL * 5 / 7, BADGE_GAP = SIGN_CELL * 2;

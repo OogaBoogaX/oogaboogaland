@@ -30,7 +30,7 @@ npm run watch   # the same, rebuilding on every change under src/
 
 Roster colours show activity across every OogaBoogaX repo: yellow worked in the last hour, orange in the last day, gray asleep. Working Oogas load bananas at the pile and shoot them into their project's cave, where their gorilla companions build. HQ's ramps lead down to a basement of beds.
 
-Around the rim: **EntropyLab** (11 o'clock), the **Lightning Factory** (2), **Ooga Arcade** (3), where a cabinet opens each game, the **Mempool island** (4) and the **Timechain Sphere** (southwest). Every game opens on a title card; **Enter** starts, **Escape** leaves.
+Around the rim: **EntropyLab** (11 o'clock), **B.C.A.** (10), Banana Certified Accounting, where suited gorillas count bananas on abacuses, the **Lightning Factory** (2), **Ooga Arcade** (3), where a cabinet opens each game, the **Mempool island** (4) and the **Timechain Sphere** (southwest). Every game opens on a title card; **Enter** starts, **Escape** leaves.
 
 ## Playing together
 
@@ -69,7 +69,7 @@ The mempool is the Mempool island: transactions arriving make its weather (six s
 
 ## Debug
 
-Each game and cave has an address to share, with its own preview card: `/oogarally`, `/oogadrop`, `/oogaorbit`, `/oogamine`, `/mempool`, `/dsb`, `/entropylab`, `/lightning` and `/sphere`. They work on the site and under `npm run serve`, and as `oogaboogaland.html#/oogarally` when the file is opened from disk; routes live in `src/js/routes.js`, and `npm run cards` recaptures the cards. `?scene=lab`, `race`, `drop`, `orbit`, `mine` or `dsb` opens that scene; `?nosim=1` silences the simulator and every feed; `?canvas2d=1` forces the Canvas 2D fallback; `?debug=1` exposes `window.__ooga`. AGENTS.md lists every flag and fixture.
+Each game and cave has an address to share, with its own preview card: `/oogarally`, `/oogadrop`, `/oogaorbit`, `/oogamine`, `/mempool`, `/dsb`, `/entropylab`, `/bca`, `/lightning` and `/sphere`. They work on the site and under `npm run serve`, and as `oogaboogaland.html#/oogarally` when the file is opened from disk; routes live in `src/js/routes.js`, and `npm run cards` recaptures the cards. `?scene=lab`, `race`, `drop`, `orbit`, `mine` or `dsb` opens that scene; `?nosim=1` silences the simulator and every feed; `?canvas2d=1` forces the Canvas 2D fallback; `?debug=1` exposes `window.__ooga`. AGENTS.md lists every flag and fixture.
 
 With `debug=1&totemglow=1`, keep all four repository totems' animated glow patterns at full strength, including continuous pulses on the rings between heads and soft pulses across their painted details. This also works with `nosim=1`. Add `time=2200` to see them at night. The flag leaves repository timestamps and celebrations unchanged.
 
@@ -79,12 +79,18 @@ With `debug=1&poolblock=1`, trigger one block-cube drop from the bottom of the l
 
 With `debug=1`, contributor states follow activity timestamps; debug mode alone does not reseed or override them. Pass `status=clankin`, `status=chillin` or `status=sleepin` to pin everyone to one state, or repeat `ooga=<handle>:<mode>[:<caves>]` to set individual owners to `clank`, `chill` or `sleep`. Once any `ooga` flag is present, unlisted owners and omitted/invalid modes sleep, including maintainers and Sani. This fixture overrides `status=` and live activity for the visit. GitHub logins also work. Repeating an owner replaces its earlier setting. The companion gorillas follow their owners' modes.
 
-Clanking requires a comma-separated cave list: `lab` for EntropyLab, `obl` for Ooga Booga Land, and `lf` for Lightning Factory. Cave IDs (`c11`, `c1`, `c2`) and repository names (`oogaboogax/entropylab`, `oogaboogax/oogaboogaland`, `oogaboogax/lightningfoundry`) also work. Historical Lightning Factory/Foundry names and `bananapayserver` resolve to LF. Unknown caves are ignored; a clank entry with no valid caves sleeps. Workers cycle through only their listed caves. `&ooga=` makes everyone sleep. In normal play, recent contributions to either `lightningfoundry` or `bananapayserver` send the Ooga and its Clanker to the Lightning Factory cave.
+Clanking requires a comma-separated cave list: `lab` for EntropyLab, `bca` for B.C.A., `obl` for Ooga Booga Land, and `lf` for Lightning Factory. Cave IDs (`c11`, `c10`, `c1`, `c2`) and repository names (`oogaboogax/entropylab`, `oogaboogax/bananacertifiedaccounting`, `oogaboogax/oogaboogaland`, `oogaboogax/lightningfoundry`) also work. Historical Lightning Factory/Foundry names and `bananapayserver` resolve to LF. Unknown caves are ignored; a clank entry with no valid caves sleeps. Workers cycle through only their listed caves. `&ooga=` makes everyone sleep. In normal play, recent contributions to either `lightningfoundry` or `bananapayserver` send the Ooga and its Clanker to the Lightning Factory cave.
 
 Example: five clanking owners, five chilling owners, and everyone else sleeping. w-s-bitcoin visits all three repositories, portlandhodl visits lab/OBL, DrNeski visits lab/LF, bc1gui visits the lab, and 2140data visits OBL. Append this query to the built page's address:
 
 ```text
 ?debug=1&nosim=1&ooga=w-s-bitcoin:clank:lab,obl,lf&ooga=portlandhodl:clank:lab,obl&ooga=DrNeski:clank:lab,lf&ooga=bc1gui:clank:lab&ooga=2140data:clank:obl&ooga=SaniExp:chill&ooga=MrHodlX:chill&ooga=Holo-Elfstone:chill&ooga=Tmmmemcee:chill&ooga=YellowBrokeIt:chill
+```
+
+B.C.A. seats two gorillas at its desks and stands a third at a wait spot until one frees. Three owners clanking only there show it:
+
+```text
+?debug=1&nosim=1&ooga=w-s-bitcoin:clank:bca&ooga=portlandhodl:clank:bca&ooga=DrNeski:clank:bca
 ```
 
 In the hub, `?debug=1&character=gorilla-SaniExp` starts controlling SaniExp's gorilla. `clanker-SaniExp` is an equivalent selection, and both prefixes work with `solo=1`. A sleeping selected contributor is woken for this debug visit. Click the canvas to focus combat controls.

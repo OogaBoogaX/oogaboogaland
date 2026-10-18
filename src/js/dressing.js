@@ -2,7 +2,7 @@
 // writing through `box` and `put` into separate solid, hanging, decorative glow and lantern glow layers: general (`lanternPost`, `crate`, `coalCrate`,
 // `barrel`, `cart`, `banner`, `gauge`, `rubble`, `bracket`, `hanging`, `bulb`), lab (`die`,
 // `flaskBench`, `terminal`, `chalkboard`), the mirror (`monolith`, `runeStone`), lightning (`coil`,
-// `boards`), the arcade (`cabinet`), plus `bench`, `vine` and `banner(v)` carrying each cave's emblem from `hubModels.SIGN_ICONS`.
+// `boards`), the arcade (`cabinet`), B.C.A. (`abacus`, `ledger`), plus `bench`, `vine` and `banner(v)` carrying each cave's emblem as pixel art.
 //
 // `set()` places pieces by quarter turns (`put`), strings sagging cables with lamps (`cable`) and `build`s
 // everything placed into one `solid`, one `hang`, decorative `glow` and lantern `lampGlow` mesh plus the `lights` its lanterns
@@ -32,7 +32,7 @@
   // Keep decorative uprights distinct inside a merged solid. Structures,
   // workbenches and short stepping props retain their ordinary collision.
   const RAGE_PASS = 64;
-  const RAGE_PASS_PIECES = new Set(["lanternPost", "banner", "chalkboard", "monolith", "coil", "gauge"]);
+  const RAGE_PASS_PIECES = new Set(["lanternPost", "banner", "chalkboard", "monolith", "coil", "gauge", "abacus"]);
   const PALETTE = [
     "#8a5a32", "#a8703e", "#5c3a1e", "#43291a", // 0 wood, 1 wood light, 2 wood dark, 3 plank gap
     "#4a4d52", "#2c2e33", "#6f737a", // 4 iron, 5 iron dark, 6 iron light
@@ -52,7 +52,8 @@
     "#f5d142", "#4f9a38", // 49 banana, 50 vine
     "#e9d7a0", "#d8c184", // 51 sand, 52 sand dark
     "#d9a441", "#5a3a1a", // 53 leopard tan, 54 leopard spot
-    BANANA_ART.ink.D, BANANA_ART.ink.Y, BANANA_ART.ink.G // 55-57 ammo banana outline, fruit, stem
+    BANANA_ART.ink.D, BANANA_ART.ink.Y, BANANA_ART.ink.G, // 55-57 ammo banana outline, fruit, stem
+    "#25324a", "#c79a3e", "#5b3a24" // 58 navy cloth, 59 brass, 60 walnut
   ];
   const EMISSIVE = { 9: 1, 10: 1, 11: 0.9, 30: 1, 31: 1, 32: 1, 37: 1, 40: 1 };
   // Lantern glass by variant (amber, teal, green, red) and the light each casts; the fifth is a bolt's yellow.
@@ -65,6 +66,336 @@
   const KEY = (x, y, z) => ((x + 2048) * 4096 + (y + 2048)) * 4096 + (z + 2048);
   const BOLT = ["...##", "..##.", ".##..", "#####", "..##.", ".##..", "##..."];
   const INVADER = ["..#..#..", "...##...", "..####..", ".#.##.#.", "########", "#.####.#", "#.#..#.#", "...##..."];
+  // EntropyLab reference sampled at 48 x 72: quarter-size pixels preserve the leaf, liquid and die.
+  const LAB_BANNER = [
+    "................................................",
+    "................................................",
+    "....................................#...........",
+    ".................................####...........",
+    "..............................#######...........",
+    "............................#########...........",
+    "...........................#########............",
+    "..........................##########............",
+    ".........................###########............",
+    "........................####.######.............",
+    "........................###.######..............",
+    ".......................###..#####...............",
+    ".......................###.#####................",
+    ".......................###.####.................",
+    ".......................##..##...................",
+    ".......................##.......................",
+    ".......................##.......................",
+    ".......................##.......................",
+    ".................#.....##.......................",
+    "..#################....##....#################..",
+    "..##...................##...................##..",
+    ".##....................##....................##.",
+    ".##....................##....................##.",
+    "..##...................##...................##..",
+    "..###..................##..................###..",
+    "...##..................##..................##...",
+    "....##.................##.................##....",
+    "....##.................##.................##....",
+    "....##.................##.................##....",
+    "....##..####...........##.................##....",
+    "....##..######.........##.................##....",
+    "....##..########.......##.................##....",
+    "....##..#########......##.................##....",
+    "....##..###########....##.................##....",
+    "....##..############...##.................##....",
+    "....##..#############...#.................##....",
+    "....##..##############....................##....",
+    "....##..###############...............##..##....",
+    "....##..#################............###..##....",
+    "....##..#####################....#######..##....",
+    "....##..################################..##....",
+    "....##..################################..##....",
+    "....##..##############....##############..##....",
+    "....##..############.......#############..##....",
+    "....##..###########...####...###########..##....",
+    "....##..#########...########...#########..##....",
+    "....##..#######...#####..#####...#######..##....",
+    "....##..######...######..######...######..##....",
+    "....##..######.....##########.....######..##....",
+    "....##..######..##...######...##..######..##....",
+    "....##..######..####...##...####..######..##....",
+    "....##..######....####....######..######..##....",
+    "....##..######..#.#####..#######..######..##....",
+    "....##..######..####..#..#..####..######..##....",
+    "....##..######..####..#..#.#####..######..##....",
+    "....##..######..#######..#######..######..##....",
+    "....##..######....#####..####..#..######..##....",
+    "....##..######..#.#####..####..#..######..##....",
+    "....##..######..####..#..#######..######..##....",
+    "....##..#######...###.#..#####...#######..##....",
+    "....##..#########...###..###...#########..##....",
+    ".....#...##########...#..#...##########...#.....",
+    ".....##..###########.......############..##.....",
+    ".....##...############...#############...#......",
+    "......##...##########################...##......",
+    ".......##....######################....##.......",
+    "........##............................##........",
+    ".........###........................###.........",
+    "..........############################..........",
+    ".............######################.............",
+    "................................................",
+    "................................................"
+  ];
+  // The other standards share its grid: the Lightning Factory's leaning bolt, sharp at both ends, its left face
+  // lit and its right in orange, among three gears; Ooga Booga Land's favicon mark and cross in the glyph's green,
+  // code falling past it; and B.C.A.'s brass abacus, ivory heaven beads over banana beads counted to 2140.
+  const FACTORY_BANNER = [
+    "................................................",
+    "................................................",
+    "................................................",
+    "................................................",
+    "..................................O.............",
+    ".................................H..............",
+    "................................HO..............",
+    "...............LS...............HO..............",
+    "..........LS..LGS..............HOO..............",
+    "..........LGLLGGS.............HYO...............",
+    "..........LGGGGGGLLLS........HYOO...............",
+    "..........LGGGGGGGGGS........HYOO...............",
+    ".......LLLGGGSSSGGGS........HYOOO...............",
+    "......SSGGGGS...SGGS.......HYOOO................",
+    "........LGGS.RRR.LGGLLS...HYYOOO................",
+    "........LGGS.RRR.LGGGGS...HYOOOO................",
+    "........LGGS.RRR.LGGSSS..HYYOOOO................",
+    "......SLGGGGS...LGGS....HYYOOOO.................",
+    ".......SSSGGGLLLGGGS...HYYYOOOO.................",
+    "..........LGGGGGGGGGS..HYYOOOOO.................",
+    "..........LGGGGGGSSSS.HYYYOOOOO.................",
+    "..........LGSSGGS....HYYYOOOOO..................",
+    ".....LLS..SS..SGS...HYYYYOOOOO..................",
+    ".....LGS.......SS...HYYYOOOOOO..................",
+    "..LS.LGS.LS........HYYYYOOOOOO..................",
+    "..LGLSSSLGS.......HYYYYOOOOOOO..................",
+    "..SGS...LGS......HYYYYYOOOOOO...................",
+    "...LS.R.LS.......HYYYYOOOOOOO...................",
+    "..LGS...LGS.....HYYYYYOOOOOOO...................",
+    "..LGSLLLSGS....HYYYYYOOOOOOOO........OOOOO......",
+    "..SS.LGS.SS...HYYYYYOOOOOOOO.OOOOOOOOOOOOO......",
+    ".....LGS......HYYYYYOOOOOOOOOOOOOOOOOOOOO.......",
+    ".....SSS.....HYYYYYOOOOOOOOOOOOOOOOOOOOO........",
+    "............HYYYYYYOOOOOOOOOOOOOOOOOOOO.........",
+    "............HYYYYYOOOOOOOOOOOOOOOOOOOOO.........",
+    "...........HYYYYYYOOOOOOOOOOOYOOOOOOOO..........",
+    "..........HYYYYYYOOOOOYYYYYYYYOOOOOOO...........",
+    ".........HYYYYYYYYYYYYYYYYYYYOOOOOOO............",
+    ".........HYYYYYYYYYYYYYYYYYYYOOOOOOO............",
+    "........HYYYYYYYYYYYYYYYYYYYOOOOOOO.............",
+    ".......HYYYYYYYYYYYYYYYYYYYYOOOOOO..............",
+    "......HYYYYYYYYYYYY.HYYYYYYOOOOOOO..............",
+    "......HYYYY........HYYYYYYYOOOOOO...............",
+    "...................HYYYYYYOOOOOO................",
+    "...................HYYYYYOOOOOO.................",
+    "...................HYYYYYOOOOOO.................",
+    "..................HYYYYYOOOOOO.....LS...........",
+    "..................HYYYYYOOOOO......LGS...LS.....",
+    "..................HYYYYOOOOO.......LGGS.LGS.....",
+    "..................HYYYYOOOOO..LLS.LGGGGLGGS.....",
+    "..................HYYYOOOOO...SGGLGGGGGGGGS.....",
+    ".................HYYYYOOOO.....LGGGGGGGGGGGLLS..",
+    ".................HYYYOOOO......LGGGGSSSGGGGGGGS.",
+    ".................HYYYOOOO......LGGGS...SGGGGGS..",
+    ".................HYYOOOO....LLLGGGS.RRR.LGGGS...",
+    "................HYYYDDD.....LGGGGGS.RRR.LGGGS...",
+    "................HYYDDD......SSSGGGS.RRR.LGGGS...",
+    "................HYYDDD.........LGGGS...LGGGGGS..",
+    "................HYDDD..........LGGGGLLLGGGGGGGS.",
+    "...............HYYDD...........LGGGGGGGGGGGSSS..",
+    "...............HYDD...........LGGSGGGGGGGGS.....",
+    "...............HYDD...........SSS.SGGGGSGGS.....",
+    "...............HDD.................LGGS.SGS.....",
+    "..............HYD..................LGS...SS.....",
+    "..............HD...................SS...........",
+    "..............HD................................",
+    "..............D.................................",
+    ".............D..................................",
+    "................................................",
+    "................................................",
+    "................................................",
+    "................................................"
+  ];
+  const MATRIX_BANNER = [
+    "................................................",
+    "................................................",
+    "..kk.....kk..........................kk.....kk..",
+    "..kk.................................kk.........",
+    ".........kk.................................kk..",
+    "..kk.....kk..........................cc.....kk..",
+    "............................................kk..",
+    "..kk.....cc..........................GG.........",
+    "..kk.................................GG.....kk..",
+    "..kk.....GG.....................................",
+    "............................................cc..",
+    "..cc.....WW.................................cc..",
+    "................................................",
+    "..cc........................................cc..",
+    "..cc........................................cc..",
+    ".......................Hd.......................",
+    "..GG.................HHGGHd.................cc..",
+    "..GG...............HHGGGGGGHd...................",
+    ".................HHGGGGGGGGGGHd.............GG..",
+    "..GG...........HHGGGGGGGGGGGGGGHd...........GG..",
+    ".............HHGGGGGGGGGGGGGGGGGGHd.........GG..",
+    "..WW.......HHGGGGGGGGGGGGGGGGGGGGGGHd...........",
+    "..WW.....HHGGGGGGGGGGGGGGGGGGGGGGGGGGHd.....GG..",
+    "........HGGGGGGGGGGGddddddddGGGGGGGGGGGd........",
+    "......HHGGGGGGGGGGGd........dGGGGGGGGGGGHd..WW..",
+    "......HGGGGGGGGGGGd..........dGGGGGGGGGGGd......",
+    "......ddddGGGGGGGd............HGGGGGGGdddd......",
+    "..........ddGGGGGd............dGGGGGdd..........",
+    "............ddGGd..............dGGdd............",
+    "..............dd................dd..............",
+    ".....................hhhhhy.....................",
+    ".....................hYYYYy.....................",
+    ".....................hYYYYy.....................",
+    ".....HHHHd........hhhYYYYYYhhy........HHHHd.....",
+    "....HGGGGGd.......hYYYYYYYYYYy.......HGGGGGd....",
+    "...HGGGGGGGd......hYYYYYYYYYYy......HGGGGGGGd...",
+    "...HGGGGGGGd......hYYYYYYYYYYy......HGGGGGGGd...",
+    "...HGGGGGGGd......hYYYYYYYYYYy......HGGGGGGGd...",
+    "...HGGGGGGGd......yyyYYYYYYyyy......HGGGGGGGd...",
+    "...dGGGGGGGd.........hYYYYy.........HGGGGGGGd...",
+    "....HGGGGGGGd........hYYYYy........HGGGGGGGd....",
+    "....dGGGGGGGGd.......yyyyyy.......HGGGGGGGGd....",
+    ".....HGGGGGGGGHd................HHGGGGGGGGd.....",
+    ".....dGGGGGGGGGGd..............HGGGGGGGGGGd.....",
+    "......HGGGGGGGGGGd............HGGGGGGGGGGd......",
+    "......HGGGGGGGGGGd............HGGGGGGGGGGd......",
+    "......HGGGGGGGGGGGd..........HGGGGGGGGGGGd......",
+    "......HGGGGGGGGGGGGd........HGGGGGGGGGGGGd......",
+    "......dGGGGGGGGGGGGGHHHHHHHHGGGGGGGGGGGGGd......",
+    ".......dGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGd.......",
+    "........dddddGGGGGGGGGGGGGGGGGGGGGGddddd........",
+    ".............ddGGGGGGGGGGGGGGGGGGdd.............",
+    ".....kk........ddGGGGGGGGGGGGGGdd...............",
+    ".....kk..........ddGGGGGGGGGGdd.................",
+    "...................ddGGGGGGdd...........kk......",
+    ".....kk..............ddGGdd.....................",
+    ".......................dd...............kk......",
+    ".....cc.................................kk......",
+    ".....cc.........................................",
+    "........................................cc......",
+    ".....GG.................................cc......",
+    ".....GG.................................cc......",
+    "................................................",
+    ".....GG.................................cc......",
+    "................................................",
+    "........................................GG......",
+    "........................................GG......",
+    "................................................",
+    "........................................WW......",
+    "................................................",
+    "................................................",
+    "................................................"
+  ];
+  const BCA_BANNER = [
+    "................................................",
+    "................................................",
+    "................................................",
+    "................................................",
+    "................................................",
+    "..bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbw..",
+    "..bBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBw..",
+    "..bBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBw..",
+    "..bBBBwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwBBBw..",
+    "..bBBw....r........r........r........r....bBBw..",
+    "..bBBw..IIIII....IIIII....IIIII....IIIII..bBBw..",
+    "..bBBw.IIIIIII..IIIIIII..IIIIIII..IIIIIII.bBBw..",
+    "..bBBwiIIIIIIIiiIIIIIIIiiIIIIIIIiiIIIIIIIibBBw..",
+    "..bBBw.iIIIIIi..iIIIIIi..iIIIIIi..iIIIIIi.bBBw..",
+    "..bBBw..iiiii....iiiii....iiiii....iiiii..bBBw..",
+    "..bBBw....r........r........r........r....bBBw..",
+    "..bBBw....r........r........r........r....bBBw..",
+    "..bBBw....r........r........r........r....bBBw..",
+    "..bBBw....r........r........r........r....bBBw..",
+    "..bBBw....r........r........r........r....bBBw..",
+    "..bBBw....r........r........r........r....bBBw..",
+    "..bBBw....r........r........r........r....bBBw..",
+    "..bBBBbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbBBBw..",
+    "..bBBBBBBBIBBBBBBBBIBBBBBBBBIBBBBBBBBIBBBBBBBw..",
+    "..bBBBwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwBBBw..",
+    "..bBBw....r........r........r........r....bBBw..",
+    "..bBBwS...r...YS...r...YS...r...Y....r....bBBw..",
+    "..bBBwoY..r..YooY..r..YooY..r..Yo....r....bBBw..",
+    "..bBBw.oYYYYYo..oYYYYYo..oYYYYYo.....r....bBBw..",
+    "..bBBw..ooooo....ooooo....ooooo......r....bBBw..",
+    "..bBBw....r........r........r........r....bBBw..",
+    "..bBBw....r........r........r........r....bBBw..",
+    "..bBBwS...r...Y....r....S...r...Y....r....bBBw..",
+    "..bBBwoY..r..Yo....r....oY..r..Yo....r....bBBw..",
+    "..bBBw.oYYYYYo.....r.....oYYYYYo.....r....bBBw..",
+    "..bBBw..ooooo......r......ooooo......r....bBBw..",
+    "..bBBw....r........r........r........r....bBBw..",
+    "..bBBw....r........r........r........r....bBBw..",
+    "..bBBw....r........r....S...r...Y....r....bBBw..",
+    "..bBBw....r........r....oY..r..YoS...r...YbBBw..",
+    "..bBBw....r........r.....oYYYYYo.oY..r..YobBBw..",
+    "..bBBw....r........r......ooooo...oYYYYYo.bBBw..",
+    "..bBBw....r........r........r......ooooo..bBBw..",
+    "..bBBw....r........r........r........r....bBBw..",
+    "..bBBw....r........r....S...r...Y....r....bBBw..",
+    "..bBBw....r....S...r...YoY..r..YoS...r...YbBBw..",
+    "..bBBw....r....oY..r..Yo.oYYYYYo.oY..r..YobBBw..",
+    "..bBBw....r.....oYYYYYo...ooooo...oYYYYYo.bBBw..",
+    "..bBBw....r......ooooo......r......ooooo..bBBw..",
+    "..bBBw....r........r........r........r....bBBw..",
+    "..bBBw....r........r........r........r....bBBw..",
+    "..bBBwS...r...YS...r...Y....r....S...r...YbBBw..",
+    "..bBBwoY..r..YooY..r..Yo....r....oY..r..YobBBw..",
+    "..bBBw.oYYYYYo..oYYYYYo.....r.....oYYYYYo.bBBw..",
+    "..bBBw..ooooo....ooooo......r......ooooo..bBBw..",
+    "..bBBw....r........r........r........r....bBBw..",
+    "..bBBw....r........r........r........r....bBBw..",
+    "..bBBwS...r...YS...r...Y....r....S...r...YbBBw..",
+    "..bBBwoY..r..YooY..r..Yo....r....oY..r..YobBBw..",
+    "..bBBw.oYYYYYo..oYYYYYo.....r.....oYYYYYo.bBBw..",
+    "..bBBw..ooooo....ooooo......r......ooooo..bBBw..",
+    "..bBBw....r........r........r........r....bBBw..",
+    "..bBBBbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbBBBw..",
+    "..bBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBw..",
+    "..bBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBw..",
+    "..wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww..",
+    "................................................",
+    "................................................",
+    "................................................",
+    "................................................",
+    "................................................",
+    "................................................"
+  ];
+  // Each variant's art and inks: `ink` paints the cloth, `glow` lights up and bakes into the glow mesh.
+  const BANNER_ART = [
+    [FACTORY_BANNER, { G: "#6f737a", L: "#b9bec6", S: "#4a4d52", R: "#2c2e33", Y: "#ffd23a", H: "#fff1b0", O: "#f29a1e", D: "#e2681c" }],
+    [LAB_BANNER, { "#": "#f2efe8" }],
+    [MATRIX_BANNER, {}, { G: "#46ff72", H: "#b8ffcb", d: "#1fa84a", Y: "#ffd66b", y: "#d9a42a", h: "#fff1b0", W: "#d8ffe2", c: "#1e8a44", k: "#155a2e" }],
+    null,
+    [BCA_BANNER, { B: "#c79a3e", b: "#e9c46e", w: "#7a5634", r: "#8a6a3e", I: "#efe6cc", i: "#c9bc98", Y: "#f5d142", o: "#c9a227", S: "#6b4a26" }]
+  ];
+  const bannerPaint = BL.models.variants((v) => {
+    const [rows, ink, glow = {}] = BANNER_ART[v], pixel = U / 4;
+    const hang = { verts: [], faces: [], lines: [] }, lit = { verts: [], faces: [], lines: [] }, colors = {};
+    for (const ch in ink) colors[ch] = hexToRgb(ink[ch]);
+    for (const ch in glow) colors[ch] = hexToRgb(glow[ch]);
+    // Row runs keep the finer paint small. Its off-grid plane leaves the cloth's block detail intact.
+    const x0 = -6 * U, y0 = 21 * U, z = 2 * U + 1 / 256;
+    for (let r = 0; r < rows.length; r++) {
+      const row = rows[r], y = y0 + (rows.length - 1 - r) * pixel;
+      for (let c = 0; c < row.length;) {
+        const ch = row[c];
+        if (ch === ".") { c++; continue; }
+        if (!colors[ch]) throw new Error(`Banner ${v} has no ink "${ch}"`);
+        const start = c;
+        while (c < row.length && row[c] === ch) c++;
+        const geo = glow[ch] ? lit : hang, a = x0 + start * pixel, b = x0 + c * pixel, i = geo.verts.length / 3;
+        geo.verts.push(a, y, z, b, y, z, b, y + pixel, z, a, y + pixel, z);
+        geo.faces.push({ i: [i, i + 1, i + 2, i + 3], color: colors[ch], emissive: glow[ch] ? 1 : 0 });
+      }
+    }
+    return { hang: hang.faces.length ? hang : null, glow: lit.faces.length ? lit : null };
+  });
   // A piece is three flat lists of x, y, z, colour per layer, built by its author through `put`.
   const author = (build) => {
     const layers = [[], [], [], []];
@@ -164,24 +495,30 @@
         if (d <= 3.2) put(SOLID, x, y, wz, d < 1.2 ? 6 : 5);
       }
     }),
-    // A cave's standard: 0 bolt, 1 die, 2 glyph, 3 banana.
-    banner: (v) => author((put, box) => {
-      const CLOTH = [14, 41, 36, 42][v], EDGE = [15, 33, 37, 18][v];
-      const EMBLEM = [["bolt", 18], ["die", 33], ["glyph", 37], null][v];
-      box(SOLID, -3, 2, 0, 1, -3, 2, 2);
-      box(SOLID, -1, 0, 2, 45, -1, 0, 2);
-      box(SOLID, -1, 0, 46, 47, -1, 0, v === 2 ? 37 : 6);
-      box(HANG, -9, 8, 43, 44, -1, 0, 0);
-      for (let x = -8; x <= 7; x++) {
-        const bottom = 14 + ((x * 7) % 3 + 3) % 3 * 2;
-        for (let y = bottom; y <= 42; y++) put(HANG, x, y, 1, x === -8 || x === 7 ? EDGE : CLOTH);
+    // A cave's standard: 0 bolt and cog, 1 sprouting beaker, 2 favicon, 3 banana, 4 abacus; the art is `BANNER_ART`'s.
+    banner: (v) => {
+      const piece = author((put, box) => {
+        const CLOTH = [14, 14, 36, 42, 58][v], EDGE = [15, 15, 37, 18, 59][v];
+        box(SOLID, -3, 2, 0, 1, -3, 2, 2);
+        box(SOLID, -1, 0, 2, 45, -1, 0, 2);
+        box(SOLID, -1, 0, 46, 47, -1, 0, v === 2 ? 37 : 6);
+        box(HANG, -9, 8, 43, 44, -1, 0, 0);
+        for (let x = -8; x <= 7; x++) {
+          const bottom = 14 + ((x * 7) % 3 + 3) % 3 * 2;
+          for (let y = bottom; y <= 42; y++) put(HANG, x, y, 1, x === -8 || x === 7 ? EDGE : CLOTH);
+        }
+        if (v === 3) for (let row = 0; row < 15; row++) for (let col = 0; col < 15; col++) {
+          const ink = BANANA_ART.rows[Math.floor(row * 9 / 15)][Math.floor(col * 9 / 15)];
+          if (ink !== ".") put(HANG, col - 7, 36 - row, 2, ink === "D" ? 55 : ink === "Y" ? 56 : 57);
+        }
+      });
+      if (BANNER_ART[v]) {
+        const paint = bannerPaint(v);
+        piece.paint = paint.hang;
+        piece.glowPaint = paint.glow;
       }
-      if (EMBLEM) icon(put, v === 2 ? GLOW : HANG, ICONS[EMBLEM[0]], -5, 22, 2, 2, EMBLEM[1]);
-      if (v === 3) for (let row = 0; row < 15; row++) for (let col = 0; col < 15; col++) {
-        const ink = BANANA_ART.rows[Math.floor(row * 9 / 15)][Math.floor(col * 9 / 15)];
-        if (ink !== ".") put(HANG, col - 7, 36 - row, 2, ink === "D" ? 55 : ink === "Y" ? 56 : 57);
-      }
-    }),
+      return piece;
+    },
     // EntropyLab: a big die, a bench of glowing flasks, a terminal, a chalkboard of scribbles.
     die: () => author((put) => {
       for (let x = -4; x <= 3; x++) for (let y = 0; y <= 7; y++) for (let z = -4; z <= 3; z++) {
@@ -287,6 +624,39 @@
         put(lit ? GLOW : SOLID, x, y, 3, lit ? SCREEN : x < -4 || x > 3 || y < 15 || y > 22 ? BODY[2] : 36);
       }
       box(SOLID, -6, 5, 24, 27, -5, 4, (x, y, z) => y === 27 ? BODY[2] : z === 4 && (x + y) % 3 === 0 ? 16 : PAINT);
+    }),
+    // B.C.A.: a standing abacus of banana and ivory beads on brass rods, and a lectern with the open ledger and
+    // a spike of receipts.
+    abacus: () => author((put, box) => {
+      for (const x of [-14, 13]) {
+        box(SOLID, x - 1, x + 1, 0, 1, -4, 3, 2);
+        box(SOLID, x, x, 2, 33, -1, 0, 60);
+      }
+      for (const y of [8, 32]) box(SOLID, -13, 12, y, y + 1, -1, 0, 60);
+      for (let r = 0; r < 5; r++) {
+        const y = 12 + r * 4;
+        box(HANG, -13, 12, y, y, 0, 0, 59);
+        // Four beads pushed left and a few right, a different count on each rod: someone was counting.
+        const left = 2 + (r * 3) % 4, right = 1 + (r * 2) % 3;
+        for (let b = 0; b < left + right; b++) {
+          const x0 = b < left ? -12 + b * 3 : 10 - (b - left) * 3;
+          box(SOLID, x0, x0 + 1, y - 1, y + 1, -1, 1, (r + b) % 3 ? 49 : 16);
+        }
+      }
+    }),
+    ledger: () => author((put, box) => {
+      box(SOLID, -5, 4, 0, 1, -4, 3, 60);
+      box(SOLID, -1, 0, 2, 15, -1, 0, 60);
+      for (let z = -5; z <= 4; z++) {
+        const y = 16 + Math.round((z + 5) * 0.4);
+        box(SOLID, -7, 6, y, y, z, z, 60);
+        box(SOLID, -6, 5, y + 1, y + 1, z, z, (x) => x === 0 || x === -1 ? 2 : 16);
+        if (z % 2 === 0) for (let x = -5; x <= 4; x++) if (x < -1 || x > 0) if ((x + z) % 3) put(HANG, x, y + 2, z, (x + z) % 5 ? 3 : 17);
+      }
+      box(SOLID, 5, 5, 20, 21, -5, -5, 59);
+      box(SOLID, 8, 9, 0, 0, -3, -2, 59);
+      box(HANG, 8, 8, 1, 9, -3, -3, 6);
+      for (let y = 2; y <= 7; y += 2) box(HANG, 7, 10, y, y, -4 + (y & 2 ? 0 : 1), -1, 16);
     }),
     vine: (v) => author((put) => {
       const rand = mulberry32(800 + v);
@@ -417,7 +787,7 @@
   };
   const set = () => {
     // Mesh pieces placed so far: kind, then the cell origin and quarter turns.
-    const meshes = [];
+    const meshes = [], paintParts = [], glowParts = [];
     // Layers 3 and 4 hold what hangs from a cable (lantern bodies and other glow); 5 and 6 hold lantern glass.
     // The hanging layers swing without moving the cable or the posts.
     const layers = [new Map(), new Map(), new Map(), new Map(), new Map(), new Map(), new Map()], lights = [];
@@ -454,6 +824,13 @@
           (oz * U) + (q === 1 || q === 2 ? -z0 : z1)]);
       }
       if (mesh) meshes.push(kind, ox, oy, oz, q, variant);
+      for (const [art, parts] of [[piece.paint, paintParts], [piece.glowPaint, glowParts]]) {
+        if (!art) continue;
+        const paint = { verts: art.verts.slice(), faces: art.faces, lines: art.lines };
+        BL.models.turnedY(paint, q * Math.PI / 2);
+        BL.models.moved(paint, ox * U, oy * U, oz * U);
+        parts.push(paint);
+      }
       for (let layer = 0; layer < 4; layer++) {
         const list = piece[layer];
         for (let i = 0; i < list.length; i += 4) {
@@ -552,7 +929,18 @@
           }
         }
       }
-      const out = { solid, hang: bake(HANG), glow: bake(GLOW), swing: bake(3), swingGlow: bake(4), lampGlow: bake(5), swingLampGlow: bake(6), lights: Float32Array.from(lights), picks: picks.splice(0) };
+      let hang = bake(HANG), glow = bake(GLOW);
+      if (paintParts.length) {
+        if (hang) paintParts.unshift(hang);
+        hang = merge(...paintParts);
+        paintParts.length = 0;
+      }
+      if (glowParts.length) {
+        if (glow) glowParts.unshift(glow);
+        glow = noShadow(merge(...glowParts));
+        glowParts.length = 0;
+      }
+      const out = { solid, hang, glow, swing: bake(3), swingGlow: bake(4), lampGlow: bake(5), swingLampGlow: bake(6), lights: Float32Array.from(lights), picks: picks.splice(0) };
       for (const layer of layers) layer.clear();
       lights.length = steps.length = 0;
       return out;

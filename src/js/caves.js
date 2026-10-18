@@ -1,7 +1,8 @@
 // The eight cave slots round the island and the gate. Each slot has a clock position, status, scene, name
 // and repository, plus `theme` for the facade the hub dresses it with and `soon` for a sealed cave that
 // already wears one (c2 is the Lightning Factory). The director seals a slot whose scene is `wip` and
-// closed.
+// closed. A slot with no scene of its own but a `place` is a room inside the hub, reached by the hub's
+// `navigate` view of that name (B.C.A. at c10).
 (() => {
   "use strict";
   const BL = window.BL = window.BL || {};
@@ -10,7 +11,9 @@
   // `theme` picks the facade the hub dresses the mouth with; `soon` marks a sealed cave that already wears one.
   const slots = [
     { ...slot("c11", 11, "lab", "open", "EntropyLab", "oogaboogax/entropylab"), theme: "lab" },
-    slot("c10", 10),
+    // Banana Certified Accounting: an office in the hub itself, so it has no scene to seal. Like the arcade, its
+    // torches and lantern glow without casting light on the lowest tier.
+    { ...slot("c10", 10, null, "open", "B.C.A.", "oogaboogax/bananacertifiedaccounting"), place: "bca", glowOnly: true, theme: "bca", title: "Banana Certified Accounting" },
     slot("c9", 9),
     slot("c730", 7.25, null, "headquarters", "Headquarters"),
     { ...slot("c1", 1, null, "mirror", "Ooga Booga Land", "oogaboogax/oogaboogaland"), theme: "matrix" },
