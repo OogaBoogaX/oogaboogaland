@@ -17,7 +17,8 @@
     slot("c730", 7.25, null, "headquarters", "Headquarters"),
     { ...slot("c1", 1, null, "mirror", "Ooga Booga Land", "oogaboogax/oogaboogaland"), theme: "matrix" },
     { ...slot("c2", 2, "factory", "open", "Lightning Factory", "oogaboogax/lightningfoundry"), additionalRepo: "oogaboogax/bananapayserver", theme: "lightning" },
-    { ...slot("c3", 3, "arcade", "open", "Ooga Arcade"), theme: "arcade" },
+    // Its sign links its repository; with no work there yet it is no work site (`repo`).
+    { ...slot("c3", 3, "arcade", "open", "Ooga Arcade"), link: "oogaboogax/oogaarcade", theme: "arcade" },
     slot("c5", 4.75, null, "headquarters", "Headquarters")
   ];
   BL.caves = { slots, gate: { name: "The old gate" } };

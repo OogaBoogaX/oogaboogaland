@@ -1789,15 +1789,16 @@
   };
   const THEME_ICON = (slot) => slot.id === "c1" ? "favicon" : THEMES[slot.theme]?.icon || null;
   const trackCaveSign = (node, slot, mouth) => {
-    signDetails.push({ node, solid: node.geometry, pixels: hubModels.caveSign(slot.name, THEME_ICON(slot), true),
+    signDetails.push({ node, solid: node.geometry, pixels: hubModels.caveSign(slot.name, THEME_ICON(slot), true, true),
       x: mouth.x + Math.sin(mouth.ry) * node.position.z, y: mouth.floorY + node.position.y,
       z: mouth.z + Math.cos(mouth.ry) * node.position.z });
   };
   const addCaveSignTarget = (node, slot, mouth) => {
-    if (!slot.repo) return;
+    const repo = slot.repo || slot.link;
+    if (!repo) return;
     const sr = Math.sin(mouth.ry), cr = Math.cos(mouth.ry), front = node.position.z + BL.scene.boundsOf(node.geometry).max[2];
     const x = mouth.x + sr * front, y = mouth.floorY + node.position.y, z = mouth.z + cr * front;
-    const owner = { kind: "cave-sign", slot, priority: 2, weaponType: "none" };
+    const owner = { kind: "cave-sign", slot, repo, priority: 2, weaponType: "none" };
     owner.pickRay = (ray) => {
       const facing = ray.dx * sr + ray.dz * cr;
       if (facing >= -1e-6) return Infinity;
@@ -1981,7 +1982,7 @@
     if (slot.theme === "lab") placeChalkboard(m, group);
     // Headquarters and a sealed cave that is coming soon still hang their name over the door.
     if (slot.status !== "open" && slot.status !== "mirror" && slot.name) {
-      const sign = createNode({ position: { x: 0, y: CAVE_SIGN_Y, z: CAVE_SIGN_Z }, geometry: hubModels.caveSign(slot.name, THEME_ICON(slot)) });
+      const sign = createNode({ position: { x: 0, y: CAVE_SIGN_Y, z: CAVE_SIGN_Z }, geometry: hubModels.caveSign(slot.name, THEME_ICON(slot), false, true) });
       addChild(group, sign);
       trackCaveSign(sign, slot, m);
     }
@@ -2442,7 +2443,7 @@
     }
     if (slot.status === "open" || slot.status === "mirror") {
       const signZ = slot.scene === "arcade" ? 0.055 : CAVE_SIGN_Z;
-      const sign = createNode({ position: { x: 0, y: CAVE_SIGN_Y, z: signZ }, geometry: hubModels.caveSign(slot.name, THEME_ICON(slot)), matrixEmissiveLiving: true, sightHidden: slot.scene === "lab" });
+      const sign = createNode({ position: { x: 0, y: CAVE_SIGN_Y, z: signZ }, geometry: hubModels.caveSign(slot.name, THEME_ICON(slot), false, true), matrixEmissiveLiving: true, sightHidden: slot.scene === "lab" });
       addChild(group, sign);
       trackCaveSign(sign, slot, m);
       addCaveSignTarget(sign, slot, m);
@@ -6862,7 +6863,7 @@
         else hud.toast(tooltipFor(hit));
         break;
       case "cave-sign":
-        window.open(`https://github.com/${o.slot.repo}`, "_blank", "noopener,noreferrer");
+        window.open(`https://github.com/${o.repo}`, "_blank", "noopener,noreferrer");
         break;
       case "gate":
         hud.toast(tooltipFor(hit));

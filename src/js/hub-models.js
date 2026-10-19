@@ -182,10 +182,11 @@
   // below, the name raised in faintly glowing cream on one dark stained panel so it reads day and night and
   // from across the island (solid letters and one panel, nothing thin enough to break up at distance), the
   // cave's badge before it (badge and name centred as one group) and iron plates on the corners. A second
-  // cached version leaves small gaps between square letter cells for close views. The front face sits at SIGN_FRONT and nothing reaches behind
+  // cached version leaves small gaps between square letter cells for close views. `lit` makes the name and the
+  // badge glow outright, as the island's cave mouths hang them. The front face sits at SIGN_FRONT and nothing reaches behind
   // z = -0.07, so it hangs where the old board did.
-  const caveSign = (text = "EntropyLab", iconName = null, pixels = false) => {
-    const key = `${text}|${iconName || ""}|${pixels ? "pixels" : "solid"}`;
+  const caveSign = (text = "EntropyLab", iconName = null, pixels = false, lit = false) => {
+    const key = `${text}|${iconName || ""}|${pixels ? "pixels" : "solid"}${lit ? "|lit" : ""}`;
     const hit = SIGN_CACHE.get(key);
     if (hit) return hit;
     let cells = -1;
@@ -201,7 +202,7 @@
     // The badge leads the name; the pair is centred together, so the name moves right by half the badge and its gap.
     const shift = iconName ? (iconW + BADGE_GAP) * 0.5 : 0;
     const half = CAVE_SIGN_HEIGHT * 0.5, plankH = (CAVE_SIGN_HEIGHT - 0.04) / 3, depth = 0.3, mid = SIGN_FRONT - depth / 2;
-    const geos = [];
+    const geos = [], ink = lit ? 1 : 0.25, badgeGlow = lit ? 1 : 0.35;
     // Posts first, so the planks cover them and only their ends show.
     for (const side of [-1, 1]) geos.push(bevelBox({ w: 0.2, h: CAVE_SIGN_HEIGHT + 0.44, d: 0.2, color: "#6b4524", offset: { x: side * (width * 0.5 - 0.42), y: 0.02, z: 0.03 } }));
     [[0.07, 0.03], [-0.05, -0.04], [0.11, 0.02]].forEach(([grow, shift], k) => {
@@ -211,7 +212,7 @@
     geos.push(bevelBox({ w: textW + (iconName ? iconW + BADGE_GAP : 0) + 0.14, h: 0.52 + 2 * SIGN_CELL, d: 0.035,
       color: "#3f2513", bevel: 0.012, offset: { x: 0, y: 0, z: SIGN_FRONT + 0.0125 } }));
     // Letters as solid horizontal runs of whole cells, touching row to row, so a glyph is one clean shape.
-    const run = (x0, y, n) => geos.push(box({ w: SIGN_CELL * n, h: SIGN_CELL, d: 0.07, color: SIGN_INK, emissive: 0.25, offset: { x: x0 + SIGN_CELL * (n - 1) * 0.5, y, z: SIGN_FRONT + 0.03 } }));
+    const run = (x0, y, n) => geos.push(box({ w: SIGN_CELL * n, h: SIGN_CELL, d: 0.07, color: SIGN_INK, emissive: ink, offset: { x: x0 + SIGN_CELL * (n - 1) * 0.5, y, z: SIGN_FRONT + 0.03 } }));
     let cursor = shift - textW * 0.5;
     for (const ch of text) {
       if (ch === " ") {
@@ -224,7 +225,7 @@
         for (let col = 0; col < line.length; col++) {
           if (line[col] !== "1") continue;
           if (pixels) {
-            geos.push(box({ w: SIGN_CELL * 0.84, h: SIGN_CELL * 0.84, d: 0.07, color: SIGN_INK, emissive: 0.25,
+            geos.push(box({ w: SIGN_CELL * 0.84, h: SIGN_CELL * 0.84, d: 0.07, color: SIGN_INK, emissive: ink,
               offset: { x: cursor + (col + 0.5) * SIGN_CELL, y: (2 - row) * SIGN_CELL, z: SIGN_FRONT + 0.03 } }));
             continue;
           }
@@ -242,7 +243,7 @@
         const cell = iconW / FAVICON_ROWS.length;
         for (let row = 0; row < FAVICON_ROWS.length; row++) for (let col = 0; col < FAVICON_ROWS[row].length; col++) {
           const color = FAVICON_INK[FAVICON_ROWS[row][col]];
-          if (color) geos.push(box({ w: cell, h: cell, d: 0.07, color, emissive: 0.35,
+          if (color) geos.push(box({ w: cell, h: cell, d: 0.07, color, emissive: badgeGlow,
             offset: { x: left + (col + 0.5) * cell, y: (7.5 - row) * cell, z: SIGN_FRONT + 0.03 } }));
         }
       } else {
@@ -251,7 +252,7 @@
         for (const cell of badge) { top = Math.min(top, cell[1]); bottom = Math.max(bottom, cell[1]); }
         const center = (top + bottom) * 0.5;
         for (const [col, row, color, proud] of badge) {
-          geos.push(box({ w: BADGE_CELL, h: BADGE_CELL, d: proud ? 0.07 : 0.045, color, emissive: proud ? 0.35 : 0,
+          geos.push(box({ w: BADGE_CELL, h: BADGE_CELL, d: proud ? 0.07 : 0.045, color, emissive: proud ? badgeGlow : 0,
             offset: { x: left + (col + 0.5) * BADGE_CELL, y: (center - row) * BADGE_CELL, z: SIGN_FRONT + (proud ? 0.03 : 0.0175) } }));
         }
       }

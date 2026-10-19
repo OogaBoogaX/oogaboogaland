@@ -594,7 +594,7 @@
         for (let x = -8; x <= 7; x++) {
           const bottom = 14 + ((x * 7) % 3 + 3) % 3 * 2;
           for (let y = bottom; y <= 42; y++) {
-            const stripe = x === -8 || x === 7 || v === 0 && (x === -7 || x === 6);
+            const stripe = x === -8 || x === 7;
             put(stripe ? GLOW : HANG, x, y, 1, stripe ? EDGE : CLOTH);
           }
         }
