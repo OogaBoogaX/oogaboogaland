@@ -1869,7 +1869,7 @@
   // the foot up while the gauge's needle climbs from green into the red, the crown spits a few arcs, the charge goes
   // out and the needle falls back, and the coil stands dark a moment before the next. Only these nodes move; the
   // mouth's baked meshes stay as they are. Times in seconds; the dial runs 0 (green) to 1 (red).
-  const COIL = { cycle: 9, rest: 0.7, charge: 6.2, hold: 0.6, burst: 0.45, fall: 0.7, low: 0.06, high: 0.92 };
+  const COIL = { cycle: 9.9, rest: 0.7, charge: 6.2, hold: 0.6, burst: 1.35, fall: 0.7, low: 0.06, high: 0.92 };
   const COIL_SPARKS = [SPARK];
   let coilCharge = null;
   const buildCoilCharge = (group, rig, m) => {
@@ -1918,7 +1918,7 @@
       climb = 1;
       flash = true;
       dial = 0.97;
-      level = 1.4 + Math.sin(elapsed * 60) * 0.3;
+      level = 1.4 + Math.sin(elapsed * 20) * 0.3;
     } else if (t >= done) {
       const k = Math.min(1, (t - done) / COIL.fall);
       dial = 0.97 - (0.97 - COIL.low) * (1 - (1 - k) * (1 - k));
@@ -1931,8 +1931,8 @@
     }
     c.crown.visible = climb >= (n + 0.5) / (n + 1);
     c.crown.glow = flash ? 1.3 : 0.8 + Math.sin(elapsed * 23) * 0.2;
-    // The arcs crackle between their two sets every twentieth of a second.
-    const side = Math.floor(elapsed * 20) & 1;
+    // The arcs crackle between their two sets every 0.15 s.
+    const side = Math.floor(elapsed / 0.15) & 1;
     c.arcs[0].visible = flash && side === 0;
     c.arcs[1].visible = flash && side === 1;
     if (flash && !c.fired) fx.burst(c.x, c.y, c.z, 6, COIL_SPARKS, 1.6);

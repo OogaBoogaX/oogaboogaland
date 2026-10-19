@@ -55,7 +55,7 @@
     BANANA_ART.ink.D, BANANA_ART.ink.Y, BANANA_ART.ink.G, // 55-57 ammo banana outline, fruit, stem
     "#25324a", "#c79a3e", "#5b3a24" // 58 navy cloth, 59 brass, 60 walnut
   ];
-  const EMISSIVE = { 9: 1, 10: 1, 11: 0.9, 19: 1, 30: 1, 31: 1, 32: 1, 33: 1, 37: 1, 40: 1, 59: 1 };
+  const EMISSIVE = { 9: 1, 10: 1, 11: 0.9, 17: 1, 18: 1, 19: 1, 30: 1, 31: 1, 32: 1, 33: 1, 37: 1, 40: 1, 59: 1 };
   // Lantern glass by variant (amber, teal, green, red) and the light each casts; the fifth is a bolt's yellow.
   const GLASS = [9, 30, 31, 32];
   const LIGHT_RGB = [[1, 0.7, 0.36], [0.45, 1, 0.92], [0.5, 1, 0.55], [1, 0.31, 0.2], [1, 0.9, 0.35]];
@@ -673,20 +673,36 @@
       for (let y = 4; y <= 30; y++) disc((x, yy, z) => put(SOLID, x, yy, z, y % 3 === 0 ? 39 : 5), y % 3 === 0 ? 3.2 : 2.3, y);
       crown(put, HANG, 39, 34);
     }),
-    // The coil's charge, baked apart by `coilRig`: 0 one band's glow, 1 the crown's, 2 and 3 two sets of short
-    // arcs from the crown.
+    // The coil's charge, baked apart by `coilRig`: 0 one band's glow, 1 the crown's, 2 and 3 two sets of long arcs
+    // from the crown, each jagged, sagging a little as it reaches out and forking partway.
     coilCharge: (v) => author((put) => {
       if (v === 0) disc((x, y, z) => put(GLOW, x, y, z, 11), 3.2, 0);
       else if (v === 1) crown(put, GLOW, 11, 0);
       else {
         const rand = mulberry32(v * 7);
-        for (let arc = 0; arc < 4; arc++) {
-          const a = (arc + (v - 2) * 0.5 + rand() * 0.4) * Math.PI / 2, dx = Math.cos(a), dz = Math.sin(a);
-          let y = 33 + Math.floor(rand() * 3);
-          for (let k = 3; k <= 8; k++) {
-            y += rand() < 0.5 ? 1 : -1;
-            put(GLOW, Math.round(dx * k), y, Math.round(dz * k), 10);
+        // One stretch of arc, `len` cells from (x0, y, z0) along angle `a`, wandering up, down and sideways; a step
+        // that climbs or drops keeps the cell it left, so the arc stays one unbroken line. Returns where it ends.
+        const zap = (x0, y, z0, a, len) => {
+          const dx = Math.cos(a), dz = Math.sin(a);
+          let side = 0, x = x0, z = z0;
+          for (let k = 1; k <= len; k++) {
+            const r = rand(), was = y;
+            y += r < 0.3 ? 1 : r < 0.6 ? 0 : -1;
+            if (rand() < 0.3) side += rand() < 0.5 ? 1 : -1;
+            x = Math.round(x0 + dx * k - dz * side);
+            z = Math.round(z0 + dz * k + dx * side);
+            if (y !== was) put(GLOW, x, was, z, 10);
+            put(GLOW, x, y, z, 10);
           }
+          return [x, y, z];
+        };
+        // Four arcs leave the crown's rim, run five to eight cells, then split: one branch reaches on to about
+        // twenty cells out, the other breaks off shorter.
+        for (let arc = 0; arc < 4; arc++) {
+          const a = (arc + (v - 2) * 0.5 + rand() * 0.4) * Math.PI / 2, run = 5 + Math.floor(rand() * 4);
+          const [x, y, z] = zap(Math.round(Math.cos(a) * 3), 33 + Math.floor(rand() * 3), Math.round(Math.sin(a) * 3), a, run);
+          zap(x, y, z, a + 0.3, 19 - run);
+          zap(x, y, z, a - 0.6, 6 + Math.floor(rand() * 3));
         }
       }
     }),
@@ -773,7 +789,7 @@
       for (let a = 0; a <= 20; a++) {
         const t = a / 20, ang = Math.PI * (1 - t);
         const x = Math.round(Math.cos(ang) * 4.6 - 0.5), y = Math.round(Math.sin(ang) * 4.6) + 26;
-        put(SOLID, x, y, 3, t < 0.45 ? 17 : t < 0.75 ? 18 : 19);
+        put(GLOW, x, y, 3, t < 0.45 ? 17 : t < 0.75 ? 18 : 19);
       }
     }),
     rubble: (v) => author((put, box) => {
