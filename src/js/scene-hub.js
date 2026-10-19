@@ -1788,6 +1788,21 @@
       x: mouth.x + Math.sin(mouth.ry) * node.position.z, y: mouth.floorY + node.position.y,
       z: mouth.z + Math.cos(mouth.ry) * node.position.z });
   };
+  const addCaveSignTarget = (node, slot, mouth) => {
+    if (!slot.repo) return;
+    const sr = Math.sin(mouth.ry), cr = Math.cos(mouth.ry), front = node.position.z + BL.scene.boundsOf(node.geometry).max[2];
+    const x = mouth.x + sr * front, y = mouth.floorY + node.position.y, z = mouth.z + cr * front;
+    const owner = { kind: "cave-sign", slot, priority: 2, weaponType: "none" };
+    owner.pickRay = (ray) => {
+      const facing = ray.dx * sr + ray.dz * cr;
+      if (facing >= -1e-6) return Infinity;
+      const t = ((x - ray.ox) * sr + (z - ray.oz) * cr) / facing;
+      const side = (ray.ox + ray.dx * t - x) * cr - (ray.oz + ray.dz * t - z) * sr;
+      return t > 0 && Math.abs(side) <= node.geometry.signWidth * 0.5
+        && Math.abs(ray.oy + ray.dy * t - y) <= node.geometry.signHeight * 0.5 ? t : Infinity;
+    };
+    addTarget(node, owner);
+  };
   const mouthDressing = (slot, m) => {
     let byIsland = DRESSED.get(island);
     if (!byIsland) DRESSED.set(island, byIsland = new Map());
@@ -2363,6 +2378,7 @@
       const sign = createNode({ position: { x: 0, y: CAVE_SIGN_Y, z: signZ }, geometry: hubModels.caveSign(slot.name, THEME_ICON(slot)), matrixEmissiveLiving: true, sightHidden: slot.scene === "lab" });
       addChild(group, sign);
       trackCaveSign(sign, slot, m);
+      addCaveSignTarget(sign, slot, m);
       const halfW = sign.geometry.signWidth * 0.5, halfH = sign.geometry.signHeight * 0.5;
       const x = m.x + ax * sign.position.z, y = m.floorY + sign.position.y, z = m.z + az * sign.position.z;
       const tx = Math.cos(m.ry), tz = -Math.sin(m.ry);
@@ -6174,6 +6190,8 @@
         return `${o.crate.loot.tier} crate · tap to open`;
       case "cave":
         return o.slot.status === "open" ? o.slot.scene === "lab" ? `${o.slot.name} · island workshop` : o.slot.title ? `${o.slot.name} · ${o.slot.title}` : `${o.slot.name} · tap to enter` : o.slot.status === "headquarters" ? "Headquarters · walk down the ramp" : o.slot.status === "mirror" ? `${o.slot.name} · mirror` : o.slot.status === "sleeping" ? "A project sleeps here · zzz" : o.slot.soon ? `${o.slot.name} · coming soon` : "An empty cave";
+      case "cave-sign":
+        return `${o.slot.name} · open GitHub repo in a new tab`;
       case "gate":
         return bifrostIsle ? "₿IFRÖST · Bifröst starts here" : `${caves.gate.name} · leads nowhere yet`;
       case "matrix-button":
@@ -6260,7 +6278,7 @@
   };
   const reticleTarget = (hit) => {
     const o = hit.owner;
-    if (hit.node === mirrorCave.node || o.kind === "room-sign" || o.kind === "matrix-button" || o.kind === "matrix-gate"
+    if (hit.node === mirrorCave.node || o.kind === "cave-sign" || o.kind === "room-sign" || o.kind === "matrix-button" || o.kind === "matrix-gate"
       || o.kind === "lab-link" || o.kind === "piece") return "object";
     if (o.kind === "cave") return o.slot.status === "open" ? "object" : "none";
     if (o.kind === "prop" && (o.breakable || RETICLE_PROPS.has(o.prop))) return "object";
@@ -6787,6 +6805,9 @@
       case "cave":
         if (o.slot.status === "open") enterCave(o.slot);
         else hud.toast(tooltipFor(hit));
+        break;
+      case "cave-sign":
+        window.open(`https://github.com/${o.slot.repo}`, "_blank", "noopener,noreferrer");
         break;
       case "gate":
         hud.toast(tooltipFor(hit));
