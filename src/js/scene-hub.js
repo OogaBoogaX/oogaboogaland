@@ -407,6 +407,8 @@
   const CLANKER_CAVITY = { floor: 0, ceiling: 0, caveIndex: 0 };
   const JETPACK_HUD_STATE = { owned: false, equipped: false, fuel: 1, blocked: false };
   let enteringTween = null, factoryDeparting = false, bifrostDeparting = false;
+  // Tess, the island's guide, for the visit (`hub-guide.js`).
+  let islandGuide = null;
   let stateTimer = 0, hintTimer = 0, now = 0, hour = 12, unsubscribeActivity = null, unsubscribeAccount = null, ownOogaClaimed = false;
   // The daylight inputs as last sampled; sampledDay starts at a never-true 0 so the first frame always samples.
   let sampledHour = 0, sampledDay = 0, sampledLatitude = NaN, sampledContinuousDay = 0, sampledUtcMs = 0;
@@ -623,6 +625,8 @@
   const fireHazards = [];
   let clankerFireReachable = null;
   const workZones = [];
+  // Every open cave's doorway, { x, z, sr, cr }, kept clear of the meadow's props (`entranceClear`).
+  const entranceZones = [];
   const closedCaveZones = [];
   const sleepers = [];
   const labels = [];
@@ -1519,19 +1523,29 @@
     for (const m of island.mouths) if (Math.hypot(m.x - x, m.z - z) < d) return true;
     return false;
   };
-  // The full roster can gather at a repository. Reserve the firing rows and
-  // the two-corner pedestrian detour, including later breakable respawns.
+  // A repository's crowd fills a fan of firing rows four abreast (`position` in the work sites: rows from 4.8 m out,
+  // 1.35 m apart, each side set back by 0.32 of its distance from the axis, out to 4.15 m). Keep the first
+  // WORK_CLEAR_ROWS of them clear of scenery, including later breakable respawns; a bigger crowd takes the next free
+  // places among the props, and `entranceClear` keeps the doorway itself open. Reserving every row the whole roster
+  // could fill (twelve for 46 Oogas) and a walking detour round them emptied the north of the meadow.
+  const WORK_CLEAR_ROWS = 2;
   const workSceneryClear = (x, z, radius) => {
-    const row = Math.max(0, Math.ceil(contributors.activeRoster.length / 4) - 1);
-    const front = 2.8 + row * 1.35 + 4.15 * 0.16, margin = radius + PLAYER_RADIUS;
-    const sideNear = 3.4 + 0.9, sideFar = Math.max(3.4, 4.15 + 0.8) + 0.9;
-    const frontNear = 5.8 + 0.9, frontFar = Math.max(5.8, front + 0.8) + 0.9;
+    const row = Math.max(0, Math.min(WORK_CLEAR_ROWS, Math.ceil(contributors.activeRoster.length / 4)) - 1);
+    const front = 4.8 + row * 1.35 + 4.15 * 0.32, margin = radius + PLAYER_RADIUS;
     for (let i = 0; i < workZones.length; i++) {
       const zone = workZones[i], dx = x - zone.x, dz = z - zone.z;
       const across = Math.abs(dx * zone.cr - dz * zone.sr), along = dx * zone.sr + dz * zone.cr;
       if (across < 4.15 + margin && along > 2.8 - margin && along < front + margin) return false;
-      if (across > sideNear - margin && across < sideFar + margin && along > 2.8 - margin && along < frontFar + margin) return false;
-      if (across < sideFar + margin && along > frontNear - margin && along < frontFar + margin) return false;
+    }
+    return true;
+  };
+  // Bushes, rocks, crates and barrels stand back from every open cave's doorway, the arcade's included:
+  // ENTRANCE_HALF either side of its axis and ENTRANCE_DEPTH out from its mouth.
+  const ENTRANCE_HALF = 4, ENTRANCE_DEPTH = 7;
+  const entranceClear = (x, z, radius) => {
+    for (let i = 0; i < entranceZones.length; i++) {
+      const zone = entranceZones[i], dx = x - zone.x, dz = z - zone.z;
+      if (Math.abs(dx * zone.cr - dz * zone.sr) < ENTRANCE_HALF + radius && dx * zone.sr + dz * zone.cr < ENTRANCE_DEPTH + radius) return false;
     }
     return true;
   };
@@ -2036,27 +2050,39 @@
     lawn.node.instanceVersion++;
     lawn.version = island.path.version;
   };
-  // Palms: a pair beside every dressed mouth, groves of one to three along the meadow's edge under the cliffs and
-  // on the cliff tops. Each is its own node on one of three shared geometries, so the wind bends every crown on
-  // its own phase for three draws; each claims its own slot, so nothing else stands in its trunk or crown.
+  // Palms: single palms spread evenly across the meadow, from beside the pile's ring out to the cliffs, and groves
+  // of one to three on the cliff tops. Each is its own node on one of three shared geometries, so the wind bends
+  // every crown on its own phase for three draws; each claims its own slot, so nothing else stands in its trunk or
+  // crown. The meadow's keep out of every open cave's doorway, off every gorilla's run between caves (the straight
+  // line one walks from a work cave's doorway to another's apron), off the foot of the Mempool island's stair, where
+  // every bedtime walk ends, and out of the south, where the totems and the Oogatron face the pile; the first frame
+  // the north pass, one each side where it fits. A trunk stands PALM_PATH off every path; one the pile's ring path
+  // grows to is removed.
+  const PALM_COUNT = 8, PALM_CANDIDATES = 400, PALM_GAP = 5, PALM_INNER = 6, PALM_OUTER = MEADOW_OUTER - 2.5;
+  const PALM_RUN_CLEAR = 3, PALM_STAIR_CLEAR = 6, PALM_SOUTH = 45 * DEG, PALM_PATH = 0.9;
+  // The visit's meadow palms, { owner, reservation }, for the ring to take back.
+  const meadowPalms = [];
   const plantPalms = () => {
     if (renderer.kind === "canvas2d") return;
     const rand = mulberry32(fnv1a("palms"));
     let n = 0;
-    const plant = (x, z) => {
+    // Level ground off the paths and stairs, with nothing else claimed where the trunk would stand.
+    const stands = (x, z) => {
       const y = island.surfaceAt(x, z);
-      // Leave the meadow palms out of the totems' clearing beside the jumbotron approach.
-      if (y === 0 && Math.hypot(x + 5.2, z - 17.5) < 3.6) return false;
-      if (nearPath(x, z, 1.1) || island.overlapsStairs(x, z, 2) || !free(x, z, 1.2)) return false;
+      if (nearPath(x, z, PALM_PATH) || island.overlapsStairs(x, z, 2) || !free(x, z, 1.2)) return false;
       // Level ground only: every side within a quarter metre of the foot.
       for (let i = 0; i < 4; i++) if (Math.abs(island.surfaceAt(x + Math.cos(i * 1.571) * 0.6, z + Math.sin(i * 1.571) * 0.6) - y) > 0.26) return false;
+      return true;
+    };
+    const plant = (x, z) => {
+      if (!stands(x, z)) return null;
+      const y = island.surfaceAt(x, z);
       const node = createNode({ geometry: BL.dressing.palm(n++ % 3), position: { x, y, z }, rotation: { x: 0, y: rand() * Math.PI * 2, z: 0 }, sightHidden: true });
       addChild(root, node);
       placed.push(node);
-      addProp("palm", node, x, z, 1.6);
+      const owner = addProp("palm", node, x, z, 1.6);
       solids.add(node);
-      claim(x, z, 1.2);
-      return true;
+      return { owner, reservation: claim(x, z, 1.2) };
     };
     // A grove: up to `size` palms round a centre a trunk-and-crown apart (2.9 m), each standing only where it fits.
     const grove = (cx, cz, size, fits) => {
@@ -2073,22 +2099,51 @@
       const r = rand();
       return r < 0.25 ? 1 : r < 0.65 ? 2 : 3;
     };
-    for (const m of island.mouths) {
-      const slot = caves.slots.find((candidate) => candidate.id === m.id);
-      if (!THEMES[slot.theme]) continue;
-      const sr = Math.sin(m.ry), cr = Math.cos(m.ry);
-      for (const lx of [-7.6, 7.6]) {
-        let planted = 0;
-        for (const lz of [1.4, 4.4, 2.9]) if (planted < 2 && plant(m.x + cr * (lx + Math.sign(lx) * (lz - 1.4) * 0.3) + sr * lz, m.z - sr * (lx + Math.sign(lx) * (lz - 1.4) * 0.3) + cr * lz)) planted++;
+    // The gorillas' runs join every pair of work caves, from either cave's doorway step or apron (2.6 m and 5.5 m
+    // out, where clankers.js walks a gorilla out and in) to either of the other's.
+    const ends = caves.slots.filter(workCave).map((slot) => {
+      const m = island.mouths.find((entry) => entry.id === slot.id), sr = Math.sin(m.ry), cr = Math.cos(m.ry);
+      return [2.6, 5.5].map((d) => ({ x: m.x + sr * d, z: m.z + cr * d }));
+    });
+    // Where a bed trip leaves the meadow (clankerBeds' first point).
+    const foot = poolModels.SITE.approachFrom - 0.8, footX = poolModels.DIR.x * foot, footZ = poolModels.DIR.z * foot;
+    const runs = [];
+    for (let i = 0; i < ends.length; i++) for (let j = i + 1; j < ends.length; j++)
+      for (const a of ends[i]) for (const b of ends[j]) runs.push(a, b);
+    const offRuns = (x, z) => {
+      for (let i = 0; i < runs.length; i += 2) {
+        const a = runs[i], dx = runs[i + 1].x - a.x, dz = runs[i + 1].z - a.z;
+        const t = clamp(((x - a.x) * dx + (z - a.z) * dz) / (dx * dx + dz * dz), 0, 1);
+        if (Math.hypot(a.x + dx * t - x, a.z + dz * t - z) < PALM_RUN_CLEAR) return false;
       }
-    }
-    const meadowEdge = (x, z) => !nearMouth(x, z, 6) && island.surfaceAt(x, z) === 0;
-    for (let deg = 5; deg < 360; deg += 38) {
-      const size = groveSize();
-      for (let k = 0; k < 4; k++) {
-        const p = polar(deg + (rand() - 0.5) * 12, MEADOW_OUTER - 3 - rand() * 3.5);
-        if (grove(p.x, p.z, size, meadowEdge)) break;
+      return true;
+    };
+    // Nothing within PALM_SOUTH of due south, the meadow between the Headquarters mouths: the clearing before the
+    // totems and the Oogatron's board.
+    const meadowFits = (x, z) => island.surfaceAt(x, z) === 0 && !nearMouth(x, z, 6) && entranceClear(x, z, 1.2) && offRuns(x, z)
+      && Math.hypot(x - footX, z - footZ) >= PALM_STAIR_CLEAR && Math.atan2(Math.abs(x), z) >= PALM_SOUTH && stands(x, z);
+    // The north end: a palm either side of the pass, from the meadow's edge, the only ground there beyond the runs.
+    const northPalm = (side) => {
+      for (let deg = 14; deg >= 6; deg--) for (let r = MEADOW_OUTER; r >= MEADOW_OUTER - 1.5; r -= 0.25) {
+        const p = polar(side * deg, r);
+        if (meadowFits(p.x, p.z)) { meadowPalms.push(plant(p.x, p.z)); return; }
       }
+    };
+    northPalm(-1);
+    northPalm(1);
+    // Best candidate: of PALM_CANDIDATES seeded spots each time, the fitting one farthest from the palms already
+    // standing, so they spread evenly at every distance from the pile, none nearer another than PALM_GAP. The radius
+    // is drawn uniformly, not by area, so the inner meadow holds its share.
+    for (let k = meadowPalms.length; k < PALM_COUNT; k++) {
+      let x = 0, z = 0, best = PALM_GAP;
+      for (let c = 0; c < PALM_CANDIDATES; c++) {
+        const p = polar(rand() * 360, lerp(PALM_INNER, PALM_OUTER, rand()));
+        let gap = Infinity;
+        for (const { owner } of meadowPalms) gap = Math.min(gap, Math.hypot(owner.x - p.x, owner.z - p.z));
+        if (gap > best && meadowFits(p.x, p.z)) { best = gap; x = p.x; z = p.z; }
+      }
+      if (best === PALM_GAP) break;
+      meadowPalms.push(plant(x, z));
     }
     // Along the cliff tops, where they break the skyline.
     const cliffTop = (x, z) => island.surfaceAt(x, z) > 2.5 && !nearMouth(x, z, 5);
@@ -2100,6 +2155,21 @@
         if (planted) { placedTop += planted; break; }
       }
     }
+  };
+  // The pile's ring path widens as the pile grows: a meadow palm it comes within PALM_PATH of is removed for the
+  // rest of the visit, its pick, prop, solid and claim with it. The next visit plants only where the ring leaves room.
+  const clearRingPalms = () => {
+    const reach = island.path.debug.ringOuterRadius + PALM_PATH;
+    let removed = false;
+    for (let i = meadowPalms.length - 1; i >= 0; i--) {
+      const { owner, reservation } = meadowPalms[i];
+      if (Math.hypot(owner.x, owner.z) >= reach) continue;
+      meadowPalms.splice(i, 1);
+      input.remove(owner.node); drop(targets, owner.node); drop(props, owner); drop(claimed, reservation);
+      solids.remove(owner.node); removeChild(root, owner.node); drop(placed, owner.node);
+      removed = true;
+    }
+    if (removed && clankers) clankers.supportRemoved();
   };
   // The sea far below and the islands on it, standing well out past the clouds.
   const SEA_Y = -70;
@@ -3211,6 +3281,7 @@
     spots.push({ x: foot - 1.1, z: LADDER_Z, ry: Math.PI / 2 });
   };
   // Rejection sampling: scatter props, keeping off paths and mouths.
+  const SPREAD_CANDIDATES = 40, SPREAD_TRIES = 1500;
   const scatter = () => {
     const rand = mulberry32(SEED);
     const routeOverlaps = (x, z, radius) => island.path.overlaps(x, z, radius) || island.overlapsStairs(x, z, radius);
@@ -3256,12 +3327,40 @@
       scenery.push(owner);
       return node;
     };
+    const meadowAt = () => polar(rand() * 360, Math.sqrt(lerp(MEADOW_INNER * MEADOW_INNER, MEADOW_OUTER * MEADOW_OUTER, rand())));
+    const meadowSpot = (x, z, radius) => island.surfaceAt(x, z) <= 0 && !nearMouth(x, z, 3.5) && workSceneryClear(x, z, radius)
+      && candidateFree(x, z, radius) && free(x, z, radius) && !routeOverlaps(x, z, radius);
+    const meadowTurn = (square) => square ? Math.floor(rand() * 4) * Math.PI / 2 + (rand() - 0.5) * 0.4 : rand() * Math.PI * 2;
     const meadow = (count, radius, kind, geometryAt, square = false) => {
       for (let n = 0, tries = 0; n < count && tries < 1500; tries++) {
-        const { x, z } = polar(rand() * 360, Math.sqrt(lerp(MEADOW_INNER * MEADOW_INNER, MEADOW_OUTER * MEADOW_OUTER, rand())));
-        if (island.surfaceAt(x, z) > 0 || nearMouth(x, z, 3.5) || !workSceneryClear(x, z, radius) || !candidateFree(x, z, radius) || !free(x, z, radius) || routeOverlaps(x, z, radius)) continue;
-        addScenery(geometryAt(n), x, z, square ? Math.floor(rand() * 4) * Math.PI / 2 + (rand() - 0.5) * 0.4 : rand() * Math.PI * 2, 0, kind, radius);
+        const { x, z } = meadowAt();
+        if (!meadowSpot(x, z, radius)) continue;
+        addScenery(geometryAt(n), x, z, meadowTurn(square), 0, kind, radius);
         n++;
+      }
+    };
+    // Best candidate: each prop takes, of SPREAD_CANDIDATES seeded spots, the fitting one farthest from those already
+    // standing, clear of every open cave's doorway, drawing on to SPREAD_TRIES while none fits. The kinds are dealt
+    // in turn by their share, the one furthest behind next, so each spreads as evenly as the whole.
+    const spread = (kinds) => {
+      const spots = [];
+      let left = 0;
+      for (const k of kinds) { k.n = 0; left += k.count; }
+      for (; left > 0; left--) {
+        let next = null;
+        for (const k of kinds) if (k.n < k.count && (!next || (k.n + 0.5) / k.count < (next.n + 0.5) / next.count)) next = k;
+        let x = 0, z = 0, best = -1;
+        for (let c = 0; c < SPREAD_TRIES && (c < SPREAD_CANDIDATES || best < 0); c++) {
+          const p = meadowAt();
+          let gap = Infinity;
+          for (let i = 0; i < spots.length; i += 2) gap = Math.min(gap, Math.hypot(spots[i] - p.x, spots[i + 1] - p.z));
+          if (gap > best && entranceClear(p.x, p.z, next.radius) && meadowSpot(p.x, p.z, next.radius)) { best = gap; x = p.x; z = p.z; }
+        }
+        if (best >= 0) {
+          addScenery(next.geometryAt(next.n), x, z, meadowTurn(next.square), 0, next.kind, next.radius);
+          spots.push(x, z);
+        }
+        next.n++;
       }
     };
     const cliff = (count, radius, minHeight, kind, geometryAt, grove = false) => {
@@ -3307,10 +3406,12 @@
     };
     cliff(40, 1.4, 3, "tree", (n) => hubModels.tree(n % 4 === 3 ? 3 : n % 3), true);
     cliff(30, 1, 0.5, "bush", (n) => hubModels.bush(n % 3));
-    meadow(30, 0.7, "bush", (n) => hubModels.bush(n % 3));
-    meadow(8, 0.9, "rock", () => hubModels.breakableRock());
-    meadow(10, 0.7, "crate", () => hubModels.woodCrate(2), true);
-    meadow(8, 0.6, "barrel", () => hubModels.barrel(1));
+    spread([
+      { kind: "bush", count: 30, radius: 0.7, geometryAt: (n) => hubModels.bush(n % 3) },
+      { kind: "rock", count: 8, radius: 0.9, geometryAt: () => hubModels.breakableRock() },
+      { kind: "crate", count: 10, radius: 0.7, geometryAt: () => hubModels.woodCrate(2), square: true },
+      { kind: "barrel", count: 8, radius: 0.6, geometryAt: () => hubModels.barrel(1) }
+    ]);
     meadow(50, 0.35, "flower", () => hubModels.flowerTuft());
     meadow(18, 0.3, "grass", () => hubModels.grass());
   };
@@ -3392,7 +3493,8 @@
       const distance = Math.sqrt(lerp(inner * inner, MEADOW_OUTER * MEADOW_OUTER, fallback < 0 ? Math.random() : (fallback + 0.5) / 256));
       const x = attempt === 336 ? owner.x : Math.sin(angle) * distance;
       const z = attempt === 336 ? owner.z : Math.cos(angle) * distance;
-      if (island.surfaceAt(x, z) !== 0 || island.path.overlaps(x, z, radius) || nearMouth(x, z, radius + 3.5) || !workSceneryClear(x, z, radius)) continue;
+      if (island.surfaceAt(x, z) !== 0 || island.path.overlaps(x, z, radius) || nearMouth(x, z, radius + 3.5) || !workSceneryClear(x, z, radius)
+        || !entranceClear(x, z, radius)) continue;
       let clear = true;
       for (let i = 0; i < 16 && clear; i++) {
         const a = i * Math.PI / 8;
@@ -6062,6 +6164,8 @@
   const tooltipFor = (hit) => {
     const o = hit.owner;
     switch (o.kind) {
+      case "tess":
+        return COARSE ? `${BL.hubGuide.NAME} the guide · tap for a tour` : `${BL.hubGuide.NAME} the guide · click for a tour`;
       case "caveman":
         return o.cave.traits.name === "SaniExp" && timechainIsland?.seat.active ? "Sani · tap to spin his chair" : o.cave.traits.display;
       case "clanker":
@@ -6654,12 +6758,15 @@
       TAP_RAY.ox + TAP_RAY.dx * depth, TAP_RAY.oy + TAP_RAY.dy * depth, TAP_RAY.oz + TAP_RAY.dz * depth);
   };
   const onTap = (hit, p) => {
-    if (factoryDeparting || bifrostDeparting) return;
+    if (factoryDeparting || bifrostDeparting || islandGuide.holding) return;
     if (gorillaBehindBillboard(hit, p)) return;
     if (debugMovementTap(hit, p)) return;
     if (!hit) return;
     const o = hit.owner;
     switch (o.kind) {
+      case "tess":
+        islandGuide.tap();
+        break;
       case "caveman":
         if (o.cave.traits.name === "SaniExp" && timechainIsland?.seat.active) spinTimechainChair();
         else crew.pokeCave(o.cave);
@@ -8355,6 +8462,8 @@
     if (chalkboard.openNow) { /* Keep the exact camera and controlled actor pose until the board closes. */ }
     else if (clankerPlay.active) clankerPlay.update(dt);
     else pilot.update(dt);
+    // Tess moves after the view is set, so a tour's glide has the last word on it.
+    islandGuide.update(dt, elapsed);
     for (let i = 0; i < signDetails.length; i++) {
       const sign = signDetails[i], dx = camera.position.x - sign.x, dy = camera.position.y - sign.y, dz = camera.position.z - sign.z;
       const limit = sign.node.geometry === sign.pixels ? 20 : 16;
@@ -10290,6 +10399,8 @@
   };
   const characterUiOccluded = (cave) => {
     if (cave.root.cameraHidden) return true;
+    // A speaker the outline registry walks past (Tess, who moves every frame) is left to the overlay's own test.
+    if (cave.root.sightHidden) return false;
     if (RENDER_OPTS.birdsEyeCutaway) return cave.root.position.y - cave.baseY >= cutawayHeightAt(cave.root.position.x, cave.root.position.z);
     // Input-time tooltips may run before this frame's transforms are rendered.
     // Use rock certificates only during the overlay, after updating providers;
@@ -10506,6 +10617,9 @@
       }
       return;
     }
+    if (e.key === "Escape" && islandGuide.escape()) { e.preventDefault(); return; }
+    // While Tess's tour holds the view the island's keys wait, actor switches (T) among them; Enter and → are hers.
+    if (islandGuide.holding) return;
     if (e.key === "Escape" && debugSelectedGorilla) { selectDebugGorilla(null); e.preventDefault(); return; }
     if (e.key === "Escape") {
       if (!e.repeat) { if (clankerPlay.active) clankerPlay.escape(); else pilot.escape(); }
@@ -10644,7 +10758,7 @@
       CAMERA_GLYPHS.version++;
       const changed = island.path.setRadius(altar.platformRadius);
       island.path.apply(pathNode);
-      if (changed) { movePilePosts(); reflowScenery(); invalidateRageThrowMap(); }
+      if (changed) { movePilePosts(); clearRingPalms(); reflowScenery(); invalidateRageThrowMap(); }
     };
     layoutPile(pileMod.visualFootprintFor(world.level, PILE_SCALE));
     // While ₿IFRÖST is open its arch stands over the pass in the old gate's place, at the head of Bifröst; its stone is
@@ -10683,6 +10797,7 @@
       if (workCave(slot)) {
         workZones.push({ x: m.x, z: m.z, floor: m.floorY, sr: Math.sin(m.ry), cr: Math.cos(m.ry), active: false, half: 3.4, front: 5.8 });
       }
+      if (slot.status === "open" || slot.status === "mirror" || slot.status === "headquarters") entranceZones.push({ x: m.x, z: m.z, sr: Math.sin(m.ry), cr: Math.cos(m.ry) });
 
       if (slot.scene) presets[slot.scene] = mouthView(m);
       else if (slot.place) presets[slot.place] = mouthView(m);
@@ -11214,15 +11329,17 @@
       ...pilot.hooks,
       hoverIgnore: () => clankerPlay.firstPerson ? clankerPlay.player : pilot.hooks.hoverIgnore(),
       onOrbit: (dx, dy) => {
+        if (islandGuide.holding) return;
         if (clankerPlay.active) clankerPlay.orbit(dx, dy);
         else pilot.hooks.onOrbit(dx, dy);
       },
       onZoom: (factor, gesture, px, py) => {
+        if (islandGuide.holding) return;
         if (clankerPlay.active) clankerPlay.zoom(factor, gesture);
         else pilot.hooks.onZoom(factor, gesture, px, py);
       },
       onDoubleTap: (hit, p) => {
-        if (factoryDeparting || bifrostDeparting) return;
+        if (factoryDeparting || bifrostDeparting || islandGuide.holding) return;
         if (gorillaBehindBillboard(hit, p)) return;
         if (hit && hit.owner.kind === "clanker") {
           if (selectGorilla(hit.owner.entry)) selectDebugGorilla(null);
@@ -11237,11 +11354,11 @@
     entering = false;
     enteringTween = null;
     now = 0;
-    hud.onPreset(name => { if (!factoryDeparting && !bifrostDeparting) navigate(name); });
+    hud.onPreset(name => { if (!factoryDeparting && !bifrostDeparting && !islandGuide.holding) navigate(name); });
     hud.setDetachedView("pile");
     hud.setDestinations(["pile", "lab", "mirror", "underground", "basement", "mempool", "factory", "arcade", "bca", "gate", "bifrost", "timechain"]);
     hud.onAction((action, value) => {
-      if (factoryDeparting || bifrostDeparting) return false;
+      if (factoryDeparting || bifrostDeparting || islandGuide.holding) return false;
       if (action === "mode-retake") {
         if (pilot.player || clankerPlay.active) return;
         const last = hud.retakeActor;
@@ -11579,6 +11696,12 @@
     }
     if (ctx.from === null && pilot.mode === "first-person") pilot.focusAim();
     if (POSITION_DEBUG) updatePositionDebug(true);
+    // Tess greets a newcomer once a page and shows them round; nothing she does starts while the island is busy. She
+    // greets only a visit that lands on the island's own view, not one sent to a place or walked back out of a cave.
+    islandGuide = BL.hubGuide.create({ parent: root, input, fx, camera, pilot, visitor: () => crew.player, world, hud, coarse: COARSE,
+      landing: !ctx.place && !preloadedView && !returningCharacter && ctx.from !== "bifrost",
+      quality: () => renderer.quality, busy: () => chalkboard.openNow || clankerPlay.active || factoryDeparting || bifrostDeparting });
+    hubScene.debug.tess = islandGuide;
     mark("visibility-start");
     fx.warmVisibility(crew);
     fx.warmBlockers();
@@ -11597,6 +11720,8 @@
     poolBlockHovered = poolBlockHoverIgnore = null;
     POOL_BLOCK_HIT.node = POOL_BLOCK_HIT.owner = null;
     selectDebugGorilla(null);
+    islandGuide.dispose();
+    islandGuide = null;
     debugMovementTerrain = DEBUG_MOVE_HIT.node = DEBUG_MOVE_HIT.owner = null;
     DEBUG_GORILLA_HIT.node = DEBUG_GORILLA_HIT.owner = null;
     chalkboard.dispose();
@@ -11721,11 +11846,11 @@
     }
     for (const node of targets) input.remove(node);
     for (const node of placed) removeChild(root, node);
-    targets.length = placed.length = claimed.length = scenery.length = sceneryClaims.length = matrixInteriors.length = matrixGates.length = sealedCaves.length = clouds.length = cloudObstacles.length = lamps.length = pilePosts.length = entranceLights.length = fireSeats.length = sleepers.length = labels.length = signDetails.length = spots.length = chillSpots.length = headquartersRimLintels.length = climbMasonry.length = props.length = 0;
+    targets.length = placed.length = claimed.length = scenery.length = sceneryClaims.length = matrixInteriors.length = matrixGates.length = sealedCaves.length = clouds.length = cloudObstacles.length = lamps.length = pilePosts.length = entranceLights.length = fireSeats.length = sleepers.length = labels.length = signDetails.length = spots.length = chillSpots.length = headquartersRimLintels.length = climbMasonry.length = props.length = meadowPalms.length = 0;
     cloudRandom = null;
     fireHazards.length = 0;
     clankerFireReachable = null;
-    workZones.length = 0;
+    workZones.length = entranceZones.length = 0;
     closedCaveZones.length = 0;
     cloudHit = null;
     RENDER_OPTS.lightCount = 0;
@@ -11763,6 +11888,7 @@
     return { targets: count };
   };
   const liveGeometry = (set) => {
+    if (islandGuide) islandGuide.liveGeometry(set);
     mempoolIsland.water.liveGeometry(set);
     pile.liveGeometry(set);
     breakables.liveGeometry(set);

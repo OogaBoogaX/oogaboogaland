@@ -3516,7 +3516,8 @@
       carryCursor.endAim();
       if (crew && player()) {
         crew.stopBurst(player()); crew.stopReload(player(), true); crew.releaseSwing(player(), true);
-        crew.steer(0, 0, 0, 0, 0);
+        // Held propulsion lets go too: readInput, which would see its key released, does not run while inactive.
+        crew.steer(0, 0, 0, 0, 0); crew.thrust(false); crew.holdRocketJump(false);
       }
       reticle.hidden = !value || !armed();
     };
