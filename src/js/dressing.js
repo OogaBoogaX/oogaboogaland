@@ -44,7 +44,7 @@
     "#6d6a66", "#85817b", "#56534f", "#6d8a3a", "#86a24a", // 20 stone, 21 stone light, 22 stone dark, 23 moss, 24 moss light
     "#b89a68", "#9a7f52", // 25 burlap, 26 burlap dark
     "#7fb23d", "#9ccc4a", "#5f9632", // 27 grass, 28 grass tip, 29 grass dark
-    "#7ff5e6", "#7dff96", "#ff5a46", // 30 teal glass, 31 green glass, 32 red lamp
+    "#7ff5e6", "#7dff96", "#d9442b", // 30 teal glass, 31 green glass, 32 red lamp (Ooga Arcade's banner red)
     "#f2efe8", "#2f4a3a", "#e6eee4", // 33 white paint, 34 chalkboard, 35 chalk
     "#141816", "#46ff72", "#b9bec6", "#c77a3a", "#c08cff", // 36 obsidian, 37 glyph, 38 chrome, 39 copper, 40 violet glass
     "#1f6f6a", "#6a4424", // 41 teal cloth, 42 brown cloth
@@ -58,7 +58,7 @@
   const EMISSIVE = { 9: 1, 10: 1, 11: 0.9, 19: 1, 30: 1, 31: 1, 32: 1, 33: 1, 37: 1, 40: 1, 59: 1 };
   // Lantern glass by variant (amber, teal, green, red) and the light each casts; the fifth is a bolt's yellow.
   const GLASS = [9, 30, 31, 32];
-  const LIGHT_RGB = [[1, 0.7, 0.36], [0.45, 1, 0.92], [0.5, 1, 0.55], [1, 0.38, 0.3], [1, 0.9, 0.35]];
+  const LIGHT_RGB = [[1, 0.7, 0.36], [0.45, 1, 0.92], [0.5, 1, 0.55], [1, 0.31, 0.2], [1, 0.9, 0.35]];
   const ICONS = BL.hubModels.SIGN_ICONS;
   const RGB = PALETTE.map(hexToRgb);
   // A cell packs into one number (12 bits an axis, offset to stay positive): a set's layers are numeric maps,
