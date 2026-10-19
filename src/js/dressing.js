@@ -366,7 +366,7 @@
     "................................................",
     "................................................"
   ];
-  // Ooga Arcade's cabinet under a marquee of chase lights round a coconut invader, a banana on its screen,
+  // Ooga Arcade's cabinet under a marquee of chase lights round a coconut invader, the shared ammo banana on its screen,
   // a coconut stick and two buttons on its deck, and a lit coin slot.
   const ARCADE_BANNER = [
     "................................................",
@@ -389,23 +389,23 @@
     "........OTTTKKKKKKKKKKKKKKKKKKKKKKKKTTTd........",
     "........OTTTKEEEEEEEEEEEEEEEEEEEEEEKTTTd........",
     "........OTTTKESSSSSSSSSSSSSSSSSSSSEKTTTd........",
-    "........OTTTKESsssssssssssssDnDssSEKTTTd........",
-    "........OTTTKESSSSSSSSSSSSSDnnnDSSEKTTTd........",
-    "........OTTTKESSSSSSSSSSSSSDnnnDSSEKTTTd........",
-    "...W....OTTTKESsssssssssssDhnnnDsSEKTTTd........",
-    "..WWW...OTTTKESSSSSSSSSSSDhhBBooDSEKTTTd........",
-    "...W....OTTTKESSSSSSSSSSSDhhBBooDSEKTTTd........",
-    "........OTTTKESsssssssssDhhBBBooDSEKTTTd........",
-    "........OTTTKESSSSSSSSSDhhBBBBooDSEKTTTd........",
-    "........OTTTKESSSSSSSDDhhhBBBooDSSEKTTTd........",
-    "........OTTTKESsssssDhhhBBBBBooDsSEKTTTd........",
-    "........OTTTKESSSSDDhhhBBBBBoooDSSEKTTTd........",
-    "........OTTTKESDDDhhhBBBBBBoooDSSSEKTTTd........",
-    "........OTTTKESnnBBBBBBBBBoooDsssSEKTTTd....W...",
-    "........OTTTKESDDooBBBBoooooDSSSSSEKTTTd...WWW..",
-    "........OTTTKESSSDDooooooooDSSSSSSEKTTTd....W...",
-    "........OTTTKESssssDDDDDDDDssssssSEKTTTd........",
-    "........OTTTKESSSSSSSSSSSSSSSSSSSSEKTTTd........",
+    "........OTTTKESSSSSSSSSSSSSSSSSSSSSKTTTd........",
+    "........OTTTKESssssssssssssssssssssKTTTd........",
+    "........OTTTKESSSSSSSSSSSSSSSSSSSSSKTTTd........",
+    "...W....OTTTKESSSSSSSSSSSSSSSSSSSSSKTTTd........",
+    "..WWW...OTTTKESssssssssssssssssssssKTTTd........",
+    "...W....OTTTKESSSSSSSSSSSSSSSSSSSSSKTTTd........",
+    "........OTTTKESSSSSSSSSSSSSSSSSSSSSKTTTd........",
+    "........OTTTKESssssssssssssssssssssKTTTd........",
+    "........OTTTKESSSSSSSSSSSSSSSSSSSSSKTTTd........",
+    "........OTTTKESSSSSSSSSSSSSSSSSSSSSKTTTd........",
+    "........OTTTKESssssssssssssssssssssKTTTd........",
+    "........OTTTKESSSSSSSSSSSSSSSSSSSSSKTTTd........",
+    "........OTTTKESSSSSSSSSSSSSSSSSSSSSKTTTd....W...",
+    "........OTTTKESssssssssssssssssssssKTTTd...WWW..",
+    "........OTTTKESSSSSSSSSSSSSSSSSSSSSKTTTd....W...",
+    "........OTTTKESSSSSSSSSSSSSSSSSSSSSKTTTd........",
+    "........OTTTKESssssssssssssssssssssKTTTd........",
     "........OTTTKEEEEEEEEEEEEEEEEEEEEEEKTTTd........",
     "........OTTTKKKKKKKKKKKKKKKKKKKKKKKKTTTd........",
     "........OTTTKKKccCCKKKKKKKKKKKKKKKKKTTTd........",
@@ -441,13 +441,21 @@
     "......TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT......",
     "......dddddddddddddddddddddddddddddddddddd......",
     "................................................"
-  ];
+  ].map((row, r) => {
+    if (r < 21 || r > 35) return row;
+    const pixels = row.split(""), art = BANANA_ART.rows[Math.floor((r - 21) * 9 / 15)];
+    for (let c = 0; c < 15; c++) {
+      const ink = art[Math.floor(c * 9 / 15)];
+      if (ink !== ".") pixels[17 + c] = ink === "D" ? "P" : ink === "Y" ? "F" : "V";
+    }
+    return pixels.join("");
+  });
   // Each variant's art and inks: `ink` paints the cloth, `glow` lights up and bakes into the glow mesh.
   const BANNER_ART = [
     [FACTORY_BANNER, {}, { G: "#6f737a", L: "#b9bec6", S: "#4a4d52", R: "#2c2e33", Y: "#ffd23a", H: "#fff1b0", O: "#f29a1e", D: "#e2681c" }],
     [LAB_BANNER, {}, { "#": "#f2efe8" }],
     [MATRIX_BANNER, {}, { G: "#46ff72", H: "#b8ffcb", d: "#1fa84a", Y: "#ffd66b", y: "#d9a42a", h: "#fff1b0", W: "#d8ffe2", c: "#1e8a44", k: "#155a2e" }],
-    [ARCADE_BANNER, {}, { O: "#e0a35a", T: "#a8703e", d: "#5c3a1e", K: "#2b1a10", M: "#d9442b", m: "#a8321e", Y: "#ffd23a", W: "#fff1b0", E: "#7ff5e6", S: "#164a46", s: "#1d5c57", D: "#211b14", B: "#f5d142", h: "#fff3a0", o: "#d9a42a", n: "#6b4a26", C: "#8a5a32", c: "#c9925a", L: "#c9ced6", R: "#e0452b" }],
+    [ARCADE_BANNER, {}, { O: "#e0a35a", T: "#a8703e", d: "#5c3a1e", K: "#2b1a10", M: "#d9442b", m: "#a8321e", Y: "#ffd23a", W: "#fff1b0", E: "#7ff5e6", S: "#164a46", s: "#1d5c57", P: BANANA_ART.ink.D, F: BANANA_ART.ink.Y, V: BANANA_ART.ink.G, C: "#8a5a32", c: "#c9925a", L: "#c9ced6", R: "#e0452b" }],
     [BCA_BANNER, {}, { B: "#c79a3e", b: "#e9c46e", w: "#7a5634", r: "#8a6a3e", I: "#efe6cc", i: "#c9bc98", Y: "#f5d142", o: "#c9a227", S: "#6b4a26" }]
   ];
   const bannerPaint = BL.models.variants((v) => {
