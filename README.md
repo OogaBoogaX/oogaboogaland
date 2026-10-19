@@ -57,7 +57,7 @@ Sani's hangout: a walk-in sphere whose six inner walls show live [Timechain Inde
 ## Games
 
 - **The Ember Den:** walk through its window in ₿IFRÖST, beside DSB Land's, straight into a room of ten poker tables, nine seats each, suited gorilla dealers and five cave themes. Local practice plus an experimental encrypted-deck multiplayer service (`npm run poker:serve`), private dealing and downloadable hand verification. Free play chips, no payments or rake. See [status](docs/banana-poker.md) and [protocol and service instructions](docs/poker-protocol.md).
-- **Ooga Rally:** three laps on one of three tracks. **W** go, **S** brake, **A D** steer, hold **Space** to drift and release to boost, **E** throws your item. Win gold in the Cup to open Mirror.
+- **Ooga Rally:** three laps on one of three tracks against fourteen rivals drawn from the roster, fresh each time you come back to the garage. **W** go, **S** brake, **A D** steer, hold **Space** to drift and release to boost, **E** throws your item. Win gold in the Cup to open Mirror.
 - **Ooga Drop:** jump from the plane, fly through eight hoops (**W S** pitch, **A D** roll, **Q E** turn), **Space** pulls the chute, land on the pile.
 - **Ooga Orbit:** build a rocket, launch, reach the Sky Top at 500 up, spacewalk to measure the space rock (**V**), then fall home shield first and chute onto the pad.
 - **Ooga Mine:** a mining tycoon about margin. Place gear, watch power, heat and the halving, put out fires, and mine 21 coin within the hour. **W A S D** walk, **Space** works, **V** looks round, **P** pauses; the run saves as you go.
