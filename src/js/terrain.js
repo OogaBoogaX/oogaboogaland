@@ -4,22 +4,41 @@
   const { mulberry32, hexToRgb, clamp } = BL.math;
   // Compact completed terrain positions without rounding collision or sight boundaries.
   // Faces and lines retain their order and metadata; the first exact position owns each index.
+  // Vertices that are the same number three times over (`Object.is`: -0 stays apart from 0, NaN meets NaN) share one
+  // slot, in first-seen order. An open-addressed table over the coordinates' bit patterns keeps this off the string
+  // and garbage paths: the island hands it two thirds of a million corners at every boot.
+  const compactBits = new Float64Array(3), compactWords = new Uint32Array(compactBits.buffer);
   const compactVertices = (geometry) => {
-    const source = geometry.verts, vertices = [], indices = new Uint32Array(source.length / 3), shared = new Map();
-    for (let i = 0; i < source.length; i += 3) {
+    const source = geometry.verts, count = source.length / 3, indices = new Uint32Array(count), vertices = new Float64Array(source.length);
+    let size = 16;
+    while (size < count * 2) size *= 2;
+    const slots = new Int32Array(size).fill(-1), wrap = size - 1;
+    let unique = 0;
+    for (let i = 0, n = 0; i < source.length; i += 3, n++) {
       const x = source[i], y = source[i + 1], z = source[i + 2];
-      const key = (Object.is(x, -0) ? "-0" : x) + "," + (Object.is(y, -0) ? "-0" : y) + "," + (Object.is(z, -0) ? "-0" : z);
-      let index = shared.get(key);
-      if (index === undefined) {
-        index = vertices.length / 3;
-        shared.set(key, index);
-        vertices.push(x, y, z);
+      compactBits[0] = x !== x ? NaN : x;
+      compactBits[1] = y !== y ? NaN : y;
+      compactBits[2] = z !== z ? NaN : z;
+      let hash = Math.imul(compactWords[0] ^ compactWords[1], 0x9E3779B1) ^ Math.imul(compactWords[2] ^ compactWords[3], 0x85EBCA77) ^ Math.imul(compactWords[4] ^ compactWords[5], 0xC2B2AE3D);
+      hash ^= hash >>> 15;
+      hash = Math.imul(hash, 0x2C1B3C6D);
+      hash ^= hash >>> 12;
+      let slot = hash & wrap, index = slots[slot];
+      while (index >= 0 && !(Object.is(vertices[index * 3], x) && Object.is(vertices[index * 3 + 1], y) && Object.is(vertices[index * 3 + 2], z))) {
+        slot = (slot + 1) & wrap;
+        index = slots[slot];
       }
-      indices[i / 3] = index;
+      if (index < 0) {
+        slots[slot] = index = unique++;
+        vertices[index * 3] = x;
+        vertices[index * 3 + 1] = y;
+        vertices[index * 3 + 2] = z;
+      }
+      indices[n] = index;
     }
     for (const face of geometry.faces) for (let i = 0; i < face.i.length; i++) face.i[i] = indices[face.i[i]];
     for (const line of geometry.lines) for (let i = 0; i < line.i.length; i++) line.i[i] = indices[line.i[i]];
-    geometry.verts = new Float64Array(vertices);
+    geometry.verts = vertices.slice(0, unique * 3);
   };
   // Dense voxel grid; value 0 and out-of-bounds are both empty.
   const makeGrid = (sx, sy, sz) => {
