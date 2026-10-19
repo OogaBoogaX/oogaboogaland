@@ -151,7 +151,7 @@
   };
   const PHASE_TOASTS = { dawn: "Dawn breaks over the island", morning: "Morning on the island", noon: "High noon", dusk: "Dusk settles over the island", night: "Night. The torches are lit.", midnight: "Midnight. The island sleeps." };
   // Lamp colours and reach; a lamp's flame reads through node.glow.
-  const LAMP = { torch: { r: 1.0, g: 0.62, b: 0.25, radius: 6, glow: 0.85, hide: false }, fire: { r: 1.0, g: 0.55, b: 0.2, radius: 9, glow: 0.9, hide: true }, lantern: { r: 1.0, g: 0.8, b: 0.45, radius: 4, glow: 0.9, hide: false }, arcade: { r: 1, g: 0.31, b: 0.2, radius: 4, glow: 0.9, hide: false }, arch: { r: 1.0, g: 0.62, b: 0.3, radius: 8, glow: 0.9, hide: false } };
+  const LAMP = { torch: { r: 1.0, g: 0.62, b: 0.25, radius: 6, glow: 0.85, hide: false }, fire: { r: 1.0, g: 0.55, b: 0.2, radius: 9, glow: 0.9, hide: true }, lantern: { r: 1.0, g: 0.8, b: 0.45, radius: 4, glow: 0.9, hide: false }, arch: { r: 1.0, g: 0.62, b: 0.3, radius: 8, glow: 0.9, hide: false } };
   const LIGHT_CAPACITY = BL.glRenderer.POINT_LIGHT_CAPACITY;
   const LIGHTING_DEBUG = {
     registeredLampCount: 0, activeFullLightCount: 0, approximatedLightCount: 0,
@@ -159,7 +159,6 @@
     tier: "high", selectedIds: new Array(LIGHT_CAPACITY).fill(null), approximatedIds: new Array(LIGHT_CAPACITY).fill(null)
   };
   const LAMP_STAGGER = 0.12, LAMP_RAMP = 0.4, LAMP_OFF = 0.12;
-  const CAVE_TORCH_GAP = 0.12;
   const FIRE_DEGREES = [130, 125, 135, 120, 140, 115, 145], FIRE_RADIUS = 11.5, FIRE_SEATS = 6, FIRE_SEAT_RADIUS = 1.8;
   const FIRE_CONTACT_RADIUS = 0.65, FIRE_AVOID_RADIUS = 1.25, FIRE_BOTTOM = 0.12, FIRE_TOP = 0.85;
   const NIGHT = 0.5, FIRE_SEAT_CHANCE = 0.5;
@@ -620,7 +619,6 @@
   // basement reads both. Invalidated in leave; NaN fields never compare equal.
   const LAMP_SEL_KEY = { tx: NaN, ty: NaN, tz: NaN, px: NaN, py: NaN, pz: NaN, torch: NaN, lampFactor: NaN, poolShade: NaN, poolUnder: NaN, lanternsOn: false, cave: 0, limit: -1 };
   let lampSelValid = false;
-  const entranceLights = [];
   const fireSeats = [];
   const fireHazards = [];
   let clankerFireReachable = null;
@@ -2443,23 +2441,6 @@
       sleepers.push({ x: m.x + ax * 0.8, y: 4.4, z: m.z + az * 0.8, timer: sleepers.length * 0.7 });
     }
     if (slot.status === "open" || slot.status === "mirror") {
-      const torchGeometry = hubModels.torch();
-      const torchZ = rim.position.z + rim.geometry.frontZ - torchGeometry.backZ + CAVE_TORCH_GAP;
-      for (let i = 0; i < 2; i++) {
-        const side = i ? "right" : "left", localX = (i ? 1 : -1) * rim.geometry.jambCenterX;
-        const torch = createNode({ position: { x: localX, y: 0, z: torchZ }, geometry: torchGeometry, flare: 0, matrixEmissiveLiving: true });
-        addChild(group, torch);
-        const tx = m.x + ax * torchZ + Math.cos(m.ry) * localX;
-        const ty = m.floorY + torchGeometry.flameY;
-        const tz = m.z + az * torchZ - Math.sin(m.ry) * localX;
-        const id = `${slot.id}:torch:${side}`;
-        const lamp = addLamp(torch, LAMP.torch, tx, ty, tz, !slot.glowOnly, i, id);
-        const debug = { id, caveId: slot.id, kind: "torch", side, localPosition: [localX, torchGeometry.flameY, torchZ], worldPosition: [tx, ty, tz], registered: !slot.glowOnly, factor: 0, lit: false, selected: false, approximated: false, rimFront: rim.position.z + rim.geometry.frontZ, fixtureBack: torchZ + torchGeometry.backZ, gap: CAVE_TORCH_GAP };
-        lamp.debug = debug;
-        entranceLights.push(debug);
-        claim(tx, tz, 0.5);
-        addProp("torch", torch, tx, tz, 0.7);
-      }
       const signZ = slot.scene === "arcade" ? 0.055 : CAVE_SIGN_Z;
       const sign = createNode({ position: { x: 0, y: CAVE_SIGN_Y, z: signZ }, geometry: hubModels.caveSign(slot.name, THEME_ICON(slot)), matrixEmissiveLiving: true, sightHidden: slot.scene === "lab" });
       addChild(group, sign);
@@ -2478,18 +2459,6 @@
         ]
       });
       if (mirrorCave && mirrorCave.slot === slot) mirrorCave.sign = sign;
-      const lantern = createNode({ position: { x: halfW + 0.34, y: sign.position.y + halfH + 0.14, z: signZ }, geometry: hubModels.lantern(slot.scene === "arcade" ? 1 : 0) });
-      addChild(group, lantern);
-      const lx = lantern.position.x, ly = lantern.position.y - 0.27, lz = lantern.position.z;
-      const wx = m.x + Math.cos(m.ry) * lx + ax * lz;
-      const wy = m.floorY + ly;
-      const wz = m.z - Math.sin(m.ry) * lx + az * lz;
-      const id = `${slot.id}:lantern:right`;
-      const lamp = addLamp(lantern, slot.scene === "arcade" ? LAMP.arcade : LAMP.lantern, wx, wy, wz, !slot.glowOnly, 2, id);
-      lamp.nightOnly = true;
-      const debug = { id, caveId: slot.id, kind: "lantern", side: "right", localPosition: [lx, ly, lz], worldPosition: [wx, wy, wz], registered: !slot.glowOnly, factor: 0, lit: false, selected: false, approximated: false, rimFront: null, fixtureBack: null, gap: null };
-      lamp.debug = debug;
-      entranceLights.push(debug);
     }
     dressMouth(slot, m, group);
     addChild(root, group);
@@ -11754,7 +11723,6 @@
         pilot,
         renderOpts: RENDER_OPTS,
         lamps,
-        entranceLights,
         lighting: LIGHTING_DEBUG,
         fireSeats,
         get critters() {
@@ -11954,7 +11922,7 @@
     }
     for (const node of targets) input.remove(node);
     for (const node of placed) removeChild(root, node);
-    targets.length = placed.length = claimed.length = scenery.length = sceneryClaims.length = matrixInteriors.length = matrixGates.length = sealedCaves.length = clouds.length = cloudObstacles.length = lamps.length = pilePosts.length = entranceLights.length = fireSeats.length = sleepers.length = labels.length = signDetails.length = spots.length = chillSpots.length = headquartersRimLintels.length = climbMasonry.length = props.length = meadowPalms.length = 0;
+    targets.length = placed.length = claimed.length = scenery.length = sceneryClaims.length = matrixInteriors.length = matrixGates.length = sealedCaves.length = clouds.length = cloudObstacles.length = lamps.length = pilePosts.length = fireSeats.length = sleepers.length = labels.length = signDetails.length = spots.length = chillSpots.length = headquartersRimLintels.length = climbMasonry.length = props.length = meadowPalms.length = 0;
     cloudRandom = null;
     fireHazards.length = 0;
     clankerFireReachable = null;

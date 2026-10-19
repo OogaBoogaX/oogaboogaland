@@ -1,5 +1,5 @@
 // Hub props; each builder returns one cached geometry shared by every instance: cave rim, gate, shelves,
-// sign, lantern, trees, bushes, grass, rocks, barrels, torches, fire pit, clouds, dock and the critter
+// sign, trees, bushes, grass, rocks, barrels, torches, fire pit, clouds, dock and the critter
 // bodies.
 //
 // `SIGN_GLYPHS` is the blocky 3x5 alphabet every carved sign in the world is cut from, the Mempool cave's
@@ -309,8 +309,6 @@
     // The grippable stone uses the same occupied slabs as the rendered voxels.
     // Keeping this small table avoids triangle queries in every wall probe.
     geo.climbBoxes = new Float32Array(climbBoxes);
-    geo.jambCenterX = 2.75;
-    geo.frontZ = 0;
     geo.openingBounds = { minX: -2.5, maxX: 2.5, floorY: 0, ceilingY: 3, minZ: -0.5, maxZ: 0 };
     return geo;
   });
@@ -1443,8 +1441,6 @@
       box({ w: 0.26, h: 0.26, d: 0.26, color: "#ffb13b", emissive: 1, offset: { y: 1.36 } })
     );
     geo.castShadow = false;
-    geo.backZ = -0.13;
-    geo.flameY = 1.36;
     return geo;
   });
   // A grass tuft, cartoon rather than voxel: seven tapered blades fanning out from one root, each a three-sided
@@ -1479,14 +1475,6 @@
   // The lawn's instanced batch takes the same tuft as its own geometry object, so it never shares a GPU record
   // with the scattered tufts.
   const lawnTuft = cached(() => ({ ...grassTuft() }));
-  // Lantern hangs below the origin; the origin is its hook.
-  const lantern = variants((v) => noShadow(merge(
-    box({ w: 0.06, h: 0.08, d: 0.06, color: "#3a2a18", offset: { y: -0.04 } }),
-    box({ w: 0.24, h: 0.04, d: 0.24, color: "#2b2521", offset: { y: -0.1 } }),
-    ...[[-0.105, -0.105], [0.105, -0.105], [-0.105, 0.105], [0.105, 0.105]].map(([x, z]) => box({ w: 0.03, h: 0.3, d: 0.03, color: "#2b2521", offset: { x, y: -0.27, z } })),
-    box({ w: 0.24, h: 0.04, d: 0.24, color: "#2b2521", offset: { y: -0.44 } }),
-    box({ w: 0.13, h: 0.16, d: 0.13, color: v === 1 ? "#d9442b" : "#ffd27a", emissive: 1, offset: { y: -0.27 } })
-  )));
   // Firepit geometry only; the flame is fireFlame.
   const firepit = cached(() => {
     const rand = mulberry32(131);
@@ -1598,5 +1586,5 @@
       ...[-0.8, 0.8].map(brace)
     );
   });
-  BL.hubModels = { SIGN_GLYPHS, SIGN_ICONS, AMMO_BANANA, jetpack, jetFlame, caveMouthRim, mirrorPanel, matrixPrisonBars, sealedCaveFace, matrixLeverPlate, matrixLeverLights, matrixLeverHub, matrixLeverArm, matrixLeverGrip, matrixLeverLabels, matrixGlyph, caveSign, postSign, CAVE_SIGN_WIDTH, CAVE_SIGN_HEIGHT, gate, caveShelves, entropyLab, bedroll, tree, bush, rock, breakableRock, voxelRock, puff, leafy, pointedLeaf, flower, FLOWER_INKS, limb, padNormals, flatInto, canopySupport, withJungle, liana, sagPoints, sprig, garland, bamboo, lashing, log, thatch, altarSlab, altarBlock, woodCrate, barrel, flowerTuft, torch, grass, lawnTuft, lantern, firepit, fireFlame, butterfly, firefly, ember, vine, cloud, ladder, dock, TREE_HEIGHT };
+  BL.hubModels = { SIGN_GLYPHS, SIGN_ICONS, AMMO_BANANA, jetpack, jetFlame, caveMouthRim, mirrorPanel, matrixPrisonBars, sealedCaveFace, matrixLeverPlate, matrixLeverLights, matrixLeverHub, matrixLeverArm, matrixLeverGrip, matrixLeverLabels, matrixGlyph, caveSign, postSign, CAVE_SIGN_WIDTH, CAVE_SIGN_HEIGHT, gate, caveShelves, entropyLab, bedroll, tree, bush, rock, breakableRock, voxelRock, puff, leafy, pointedLeaf, flower, FLOWER_INKS, limb, padNormals, flatInto, canopySupport, withJungle, liana, sagPoints, sprig, garland, bamboo, lashing, log, thatch, altarSlab, altarBlock, woodCrate, barrel, flowerTuft, torch, grass, lawnTuft, firepit, fireFlame, butterfly, firefly, ember, vine, cloud, ladder, dock, TREE_HEIGHT };
 })();
