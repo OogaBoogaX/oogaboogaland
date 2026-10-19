@@ -55,7 +55,7 @@
     BANANA_ART.ink.D, BANANA_ART.ink.Y, BANANA_ART.ink.G, // 55-57 ammo banana outline, fruit, stem
     "#25324a", "#c79a3e", "#5b3a24" // 58 navy cloth, 59 brass, 60 walnut
   ];
-  const EMISSIVE = { 9: 1, 10: 1, 11: 0.9, 30: 1, 31: 1, 32: 1, 37: 1, 40: 1, 49: 1, 59: 1 };
+  const EMISSIVE = { 9: 1, 10: 1, 11: 0.9, 19: 1, 30: 1, 31: 1, 32: 1, 33: 1, 37: 1, 40: 1, 59: 1 };
   // Lantern glass by variant (amber, teal, green, red) and the light each casts; the fifth is a bolt's yellow.
   const GLASS = [9, 30, 31, 32];
   const LIGHT_RGB = [[1, 0.7, 0.36], [0.45, 1, 0.92], [0.5, 1, 0.55], [1, 0.38, 0.3], [1, 0.9, 0.35]];
@@ -574,7 +574,7 @@
     // A cave's standard: 0 bolt and cog, 1 sprouting beaker, 2 favicon, 3 arcade cabinet, 4 abacus; the art is `BANNER_ART`'s.
     banner: (v) => {
       const piece = author((put, box) => {
-        const CLOTH = [14, 14, 36, 42, 58][v], EDGE = [11, 30, 37, 49, 59][v];
+        const CLOTH = [14, 14, 36, 42, 58][v], EDGE = [11, 33, 37, 19, 59][v];
         box(SOLID, -3, 2, 0, 1, -3, 2, 2);
         box(SOLID, -1, 0, 2, 45, -1, 0, 2);
         box(SOLID, -1, 0, 46, 47, -1, 0, v === 2 ? 37 : 6);
