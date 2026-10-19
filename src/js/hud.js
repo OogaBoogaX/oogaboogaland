@@ -9,10 +9,12 @@
   // Signed-in players online lead the roster, ahead of every activity.
   const ONLINE_RANK = -1;
   const stampOf = (contributor) => contributor.lastContributionAt || contributor.lastCommitAt;
-  // Tooltip dots retain their human-presence color without changing NPC activity.
+  // Local control is online only while signed in; remote presence remains independent.
   const statusFor = (cave) => {
     const actor = cave.tooltipOwner || cave;
-    return actor.humanControlled ? "online" : actor.state === "away" ? "chilling" : actor.state;
+    const online = cave.remoteControlled || actor.remoteControlled
+      || !!BL.net.state.me && (cave.controlled || actor.humanControlled);
+    return online ? "online" : actor.state === "away" ? "chilling" : actor.state;
   };
   const $ = (id) => document.getElementById(id);
   const TIER_RANK = { legendary: 0, epic: 1, rare: 2, common: 3 };
@@ -24,6 +26,24 @@
   const setDonationStats = (stats) => {
     donationStats = stats;
     if (liveDonors) liveDonors(true);
+  };
+  const currentDonationRate = () => {
+    const live = BL.donationRate.current, saved = BL.donations.state.tally?.rate;
+    return live && (!saved || live.at >= saved.at) ? live : saved;
+  };
+  let valuedSats, valuedPrice, donatedValueText = "";
+  // The panel and pile label share today's value, including precision and
+  // missing-price handling. Cache formatting for the pile's overlay loop.
+  const donationValueText = () => {
+    const tally = BL.donations.real ? BL.donations.state.tally : donationStats;
+    const sats = tally ? BL.donations.real ? tally.sats : tally.totalSats : null;
+    const price = currentDonationRate()?.usdPerBtc;
+    if (!donatedValueText || sats !== valuedSats || price !== valuedPrice) {
+      valuedSats = sats; valuedPrice = price;
+      donatedValueText = sats === 0 ? DONATED_COUNT.format(0) : sats !== null && price
+        ? DONATED_COUNT.format(sats / 1e8 * price) : "—";
+    }
+    return donatedValueText;
   };
   const MESSAGE_FADE_MS = 300;
   // The page's one toast, which every scene's HUD and the director share: a new one replaces the last.
@@ -413,7 +433,7 @@
       }
       li.append(presence, name, marks, age, state);
       el.roster.append(li);
-      rosterRows.set(contributor.name, { li, presence, state, age, contributor, rosterIndex, online: false, sceneOnline: false, netOnline: false, nextOnline: false, placedStamp: stampOf(contributor), host, voice, look: "", login: "", hostOn: false, blocked: false, self: false, nextLook: "", nextLogin: "", nextHost: false, nextSelf: false });
+      rosterRows.set(contributor.name, { li, presence, state, age, contributor, rosterIndex, online: false, sceneOnline: false, remoteOnline: false, netOnline: false, nextOnline: false, placedStamp: stampOf(contributor), host, voice, look: "", login: "", hostOn: false, blocked: false, self: false, nextLook: "", nextLogin: "", nextHost: false, nextSelf: false });
     }
     if (!awayRow.parentElement) el.roster.append(awayRow);
     updateAwayButton();
@@ -455,10 +475,10 @@
         if (row.li.nextElementSibling !== before) el.roster.insertBefore(row.li, before);
       } else if (el.roster.lastElementChild !== row.li) el.roster.append(row.li);
     };
-    // Online is the scene's word (its driven and remote Oogas) or the room's (any signed-in player's own Ooga or
-    // the one they drive); a change repaints the dot and moves the row.
+    // A scene's local driver needs a signed-in account; remote drivers and the room's
+    // signed-in identities remain online independently. A change repaints the dot and moves the row.
     const showOnline = (row) => {
-      const online = row.sceneOnline || row.netOnline;
+      const online = row.sceneOnline && !!BL.net.state.me || row.remoteOnline || row.netOnline;
       if (row.online === online) return false;
       row.online = online;
       row.presence.dataset.online = online ? "true" : "false";
@@ -468,7 +488,7 @@
       countAway();
       return true;
     };
-    const setRosterRow = (name, _stateKey, _ageText, online = false) => {
+    const setRosterRow = (name, _stateKey, _ageText, online = false, remoteOnline = false) => {
       const row = rosterRows.get(name);
       if (!row) return;
       // Gameplay can put an Ooga to work or sleep; this board follows the
@@ -485,6 +505,7 @@
       }
       if (row.age.firstChild.data !== ageText) row.age.firstChild.data = ageText;
       row.sceneOnline = online;
+      row.remoteOnline = remoteOnline;
       if (showOnline(row)) moved = true;
       const stamp = stampOf(row.contributor);
       if (row.placedStamp !== stamp) {
@@ -502,12 +523,7 @@
     // Value the donated sats at the current price; donor rankings retain their receipt prices.
     const showBananaRate = () => {
       if (document.hidden || el.bananaPanel.hidden || el.sheet.dataset.open !== "true") return;
-      const live = BL.donationRate.current, saved = BL.donations.state.tally?.rate;
-      const rate = live && (!saved || live.at >= saved.at) ? live : saved;
-      const tally = BL.donations.real ? BL.donations.state.tally : donationStats;
-      const totalSats = tally ? BL.donations.real ? tally.sats : tally.totalSats : null;
-      const total = totalSats === 0 ? DONATED_COUNT.format(0) : totalSats !== null && rate
-        ? DONATED_COUNT.format(totalSats / 1e8 * rate.usdPerBtc) : "—";
+      const rate = currentDonationRate(), total = donationValueText();
       const tone = !rate ? "wait" : rate.stale ? "stale" : rate.live ? "live" : "idle";
       const label = tone === "live" ? "LIVE BTCUSD" : tone === "stale" ? "STALE BTCUSD" : "BTCUSD";
       const price = rate ? `$${DONOR_BANANAS.format(rate.usdPerBtc)}` : "—";
@@ -518,12 +534,17 @@
       if (el.bananaExchange.textContent !== exchange) el.bananaExchange.textContent = exchange;
       if (el.bananaTotal.textContent !== total) el.bananaTotal.textContent = total;
     };
-    let stopBananaRate = null;
+    let stopBananaRate = null, pileValueVisible = false;
     const watchBananaRate = () => {
-      const visible = !document.hidden && !el.bananaPanel.hidden && el.sheet.dataset.open === "true";
+      const visible = !document.hidden && (pileValueVisible || !el.bananaPanel.hidden && el.sheet.dataset.open === "true");
       if (visible && !stopBananaRate) stopBananaRate = BL.donationRate.watch(showBananaRate);
       else if (!visible && stopBananaRate) { stopBananaRate(); stopBananaRate = null; }
       if (visible) showBananaRate();
+    };
+    const setPileValueVisible = (visible) => {
+      if (pileValueVisible === visible) return;
+      pileValueVisible = visible;
+      watchBananaRate();
     };
     const bananaRateObserver = new MutationObserver(watchBananaRate);
     bananaRateObserver.observe(el.bananaPanel, { attributes: true, attributeFilter: ["hidden"] });
@@ -594,9 +615,22 @@
       el.act.textContent = label;
     };
     let actionHandler = null;
-    const DETACHED_PRESETS = ["pile", "lab", "mirror", "underground", "basement", "mempool"];
-    const DETACHED_NAMES = { pile: "Pile", lab: "Lab", mirror: "Mirror", underground: "HQ", basement: "Basement", mempool: "Mempool" };
+    const DETACHED_NAMES = { pile: "Pile", lab: "Lab", mirror: "Mirror", underground: "HQ", basement: "Basement", mempool: "Mempool", factory: "LN Factory", arcade: "Ooga Arcade", bca: "B.C.A.", gate: "North gate", bifrost: "₿IFRÖST", timechain: "TC Sphere" };
+    let destinationNames = [];
+    let destinationIndex = -1;
     let detachedPreset = "pile", detachedNameShown = false, detachedSelectionShown = false, areaLabel = "";
+    const setDestinations = (names) => {
+      destinationNames = names.filter(name => DETACHED_NAMES[name]);
+      destinationIndex = destinationNames.indexOf(detachedPreset);
+      el.modeDestination.hidden = !modeVisible || !destinationNames.length;
+    };
+    const cycleDestinations = () => {
+      if (!destinationNames.length || !actionHandler) return;
+      // A refused arrival must not trap the next press at the same place.
+      // Only a successful navigation updates the displayed destination.
+      destinationIndex = (destinationIndex + 1) % destinationNames.length;
+      actionHandler("mode-preset", destinationNames[destinationIndex]);
+    };
     let destinationAnchored = false, destinationX = 0, destinationY = 0, destinationZ = 0;
     const showAreaLabel = () => {
       if (el.modeDestinationName.textContent !== areaLabel) el.modeDestinationName.textContent = areaLabel;
@@ -621,6 +655,7 @@
     const setDetachedView = (name, announce = false, position = null) => {
       if (!DETACHED_NAMES[name]) return;
       detachedPreset = name;
+      destinationIndex = destinationNames.indexOf(name);
       destinationAnchored = !!position;
       if (position) { destinationX = position.x; destinationY = position.y; destinationZ = position.z; }
       detachedSelectionShown = true;
@@ -629,52 +664,50 @@
       detachedNameShown = true;
       el.modeDestinationName.classList.add("show");
     };
-    const nextDetachedView = () => DETACHED_PRESETS[(DETACHED_PRESETS.indexOf(detachedPreset) + 1) % DETACHED_PRESETS.length];
     let gorillaEntry = null, gorillaView = "orbit", gorillaCombat = false;
     let modeName = "", modeGeometry = null, modeSelected = false, modeCombat = false, modeView = "detached", modeHealth = -1, modeHealthMax = 0, modeGorilla = false;
-    let modeCave = null, modeVisible = true, ownOoga = null, ownPortraitCave = null, ownGeometry = null, ownPortraitGeometry = null, ownHealth = -1, ownHealthMax = 0;
-    const syncOwnOoga = () => {
-      const shown = modeVisible && !!ownOoga && ownOoga !== modeCave;
+    let modeCave = null, modeVisible = true, retakePortraitActor = null, retakeGeometry = null, retakePortraitGeometry = null, retakeHealth = -1, retakeHealthMax = 0;
+    const retake = { actor: null, gorilla: false };
+    const syncRetakeActor = () => {
+      const actor = retake.actor;
+      const shown = modeVisible && !!actor && !modeCave && !gorillaEntry;
       if (el.ownOoga.hidden === shown) el.ownOoga.hidden = !shown;
       if (!shown) return;
-      const geometry = ownOoga.parts.head.geometry, portraitGeometry = ownOoga.portraitHead;
-      if (ownOoga !== ownPortraitCave || geometry !== ownGeometry || portraitGeometry !== ownPortraitGeometry) {
-        renderFaceIcon(el.ownOogaFace, ownOoga);
+      const cave = retake.gorilla ? actor.owner : actor, gorilla = retake.gorilla ? actor.gorilla : null;
+      const geometry = gorilla ? gorilla.parts.head.geometry : cave.parts.head.geometry;
+      const portraitGeometry = gorilla ? geometry : cave.portraitHead;
+      if (actor !== retakePortraitActor || geometry !== retakeGeometry || portraitGeometry !== retakePortraitGeometry) {
+        renderFaceIcon(el.ownOogaFace, cave, gorilla);
         el.ownOoga.dataset.portrait = "face-crop";
-        if (ownOoga !== ownPortraitCave) {
-          const label = `Return to ${ownOoga.traits.display}, your Ooga`;
+        if (actor !== retakePortraitActor) {
+          const name = cave.traits.display;
+          const label = gorilla ? `Return to ${name}'s gorilla` : `Return to ${name}, Ooga`;
           el.ownOoga.setAttribute("aria-label", label);
           el.ownOoga.title = label;
+          el.ownOoga.dataset.gorilla = String(!!gorilla);
+          el.ownOogaHealth.setAttribute("aria-label", `${gorilla ? "Gorilla" : "Ooga"} health: ${name}`);
         }
-        ownPortraitCave = ownOoga;
-        ownGeometry = geometry;
-        ownPortraitGeometry = portraitGeometry;
+        retakePortraitActor = actor;
+        retakeGeometry = geometry;
+        retakePortraitGeometry = portraitGeometry;
       }
-      const source = ownOoga.health, max = source ? source.max : BL.crew.HEALTH_MAX;
+      const source = actor.health, max = source ? source.max : BL.crew.HEALTH_MAX;
       const health = source ? Math.max(0, Math.min(max, source.value)) : max;
-      if (health !== ownHealth || max !== ownHealthMax) {
-        ownHealth = health; ownHealthMax = max;
+      if (health !== retakeHealth || max !== retakeHealthMax) {
+        retakeHealth = health; retakeHealthMax = max;
         el.ownOogaHealthFill.style.transform = `scaleY(${health / max})`;
         el.ownOogaHealth.setAttribute("aria-valuemax", String(max));
         el.ownOogaHealth.setAttribute("aria-valuenow", String(Math.ceil(health)));
       }
     };
-    const setOwnOoga = (cave) => {
-      if (cave !== ownOoga) {
-        ownOoga = cave;
-        if (!cave) {
-          ownPortraitCave = ownGeometry = ownPortraitGeometry = null;
-          ownHealth = -1; ownHealthMax = 0;
-          el.ownOogaFace.width = ICON_PX;
-        }
-      }
-      syncOwnOoga();
-    };
+    // Legacy account updates never replace the last actor successfully controlled.
+    const setOwnOoga = () => syncRetakeActor();
     const setMode = (cave, combat = false, view = cave ? "orbit" : "detached", visible = true) => {
       const gorilla = gorillaEntry ? gorillaEntry.gorilla : null;
       modeCave = gorilla ? null : cave;
       modeVisible = visible;
-      syncOwnOoga();
+      if (gorillaEntry || cave) { retake.actor = gorillaEntry || cave; retake.gorilla = !!gorillaEntry; }
+      syncRetakeActor();
       if (gorilla) { cave = gorillaEntry.owner; combat = gorillaCombat; view = gorillaView; visible = true; }
       const selected = !!cave, name = selected ? cave.traits.name : "", shown = selected ? cave.traits.display : "";
       if (!visible) fadeDetachedName(true);
@@ -682,7 +715,8 @@
       const stateChanged = combat !== modeCombat || view !== modeView;
       const showMode = visible && selected;
       if (el.mode.hidden === showMode) el.mode.hidden = !showMode;
-      if (el.modeDestination.hidden === visible) el.modeDestination.hidden = !visible;
+      const showDestinations = visible && destinationNames.length > 0;
+      if (el.modeDestination.hidden === showDestinations) el.modeDestination.hidden = !showDestinations;
       const geometry = selected ? (gorilla ? gorilla.parts.head.geometry : cave.parts.head.geometry) : null;
       if (selected && (identityChanged || geometry !== modeGeometry)) {
         renderFaceIcon(el.modeFace, cave, gorilla);
@@ -938,7 +972,7 @@
       el.jetpackFuelValue.firstChild.data = `${percent}%`;
     };
     const setGorilla = (entry, view = "orbit", combat = false) => {
-      if (entry === gorillaEntry && view === gorillaView && combat === gorillaCombat) { syncOwnOoga(); return; }
+      if (entry === gorillaEntry && view === gorillaView && combat === gorillaCombat) { syncRetakeActor(); return; }
       if (entry !== gorillaEntry) finishPrimary(true);
       gorillaEntry = entry;
       gorillaView = view;
@@ -1497,6 +1531,7 @@
       });
       const controller = {
         open: openBoard, close: closeBoard, update: updateBoard,
+        escape() { if (!el.boardFilterMenu.hidden) showFilters(false); else closeBoard(); },
         bounds: boardBounds,
         setLayer(layer) { el.board.style.zIndex = String(layer); },
         get width() { return boardWindow.width; },
@@ -1686,9 +1721,7 @@
       else if (b.dataset.action === "recipe-close") closeRecipe();
       else if (b.dataset.action === "recipe-copy") copyRecipe(b);
       else if (b.dataset.action === "intro-go") b.closest("[data-intro]").hidden = true;
-      else if (b === el.modeDestination) {
-        actionHandler && actionHandler("mode-preset", nextDetachedView());
-      }
+      else if (b === el.modeDestination) cycleDestinations();
       else if (b.dataset.action === "account-login") BL.net.login();
       else if (b.dataset.action === "account-logout") BL.net.logout();
       else if (b.dataset.action === "account-rejoin") BL.net.rejoin();
@@ -1838,6 +1871,35 @@
       el.sheet.dataset.open = String(open);
       writeSheetState(open, selectedSheetTab(), sheetHeight);
     };
+    // Registered before actor controls: a popup or the sheet takes one Escape
+    // before cursor capture or possession can change. Dialogs keep their own
+    // nested Escape actions (for example a board's filter menu).
+    on(window, "keydown", (e) => {
+      if (e.key !== "Escape" || e.metaKey || e.ctrlKey || e.altKey || e.isComposing) return;
+      if (e.repeat) { e.preventDefault(); e.stopImmediatePropagation(); return; }
+      // Chat owns IME state and first returns focus from its editor to its tab.
+      if (e.target.id === "chat-input" || e.target.id === "chat-display") return;
+      if (document.querySelector("dialog:modal") || e.target.closest && e.target.closest("dialog[open]")) return;
+      let closed = false;
+      if (floatingBoards.length) {
+        floatingBoards[floatingBoards.length - 1].escape();
+        closed = true;
+      } else {
+        for (let i = outside.length - 1; i >= 0; i--) {
+          const entry = outside[i], node = entry.node;
+          if (node.tagName === "DIALOG" ? !node.open : node.hidden || !node.getClientRects().length) continue;
+          entry.close();
+          closed = true;
+          break;
+        }
+      }
+      if (!closed && el.sheet.dataset.open === "true" && el.sheet.getClientRects().length) {
+        if (el.sheet.contains(document.activeElement)) document.activeElement.blur();
+        setSheetOpen(false);
+        closed = true;
+      }
+      if (closed) { e.preventDefault(); e.stopImmediatePropagation(); }
+    }, true);
     const selectTab = (name) => {
       for (const t of el.tabs) {
         t.setAttribute("aria-selected", String(t.dataset.tab === name));
@@ -1937,6 +1999,7 @@
     listeners.push(() => sheetObserver.disconnect());
     showSheetHeight();
     let presetHandler = null;
+    for (const b of el.presets) if (!b.closest(".hub-presets")) b.title = "Camera viewpoint · releases character control";
     for (const b of el.presets) on(b, "click", () => {
       b.blur();
       presetHandler && presetHandler(b.dataset.preset);
@@ -2089,7 +2152,10 @@
       tooltip.hide();
       clearModeHold();
       modePointer = -1;
-      setOwnOoga(null);
+      retake.actor = null; retake.gorilla = false;
+      retakePortraitActor = retakeGeometry = retakePortraitGeometry = null;
+      retakeHealth = -1; retakeHealthMax = 0;
+      el.ownOogaFace.width = ICON_PX;
       setGorilla(null);
       setMode(null, false, "detached", false);
       setPrimary(false, false, null);
@@ -2101,11 +2167,13 @@
       closeFeed();
       closeRecipe();
       closeBoard(true);
+      destinationNames = [];
+      destinationIndex = -1;
       mainBoard.dispose();
       el.board.classList.remove("board-floating");
       el.board.removeAttribute("style");
     };
-    return { el, openFeed, closeFeed, openRecipe, closeRecipe, dismissOutside, openBoard, closeBoard, updateBoard, restoreBoards, setRosterRow, setStats, setAct, setMode, setOwnOoga, setGorilla, setGorillaSmashPower, setDetachedView, fadeDetachedName, setAreaLabel, setPrimary, setWeapon, setMagazine, setJetpack, setSubtitle, onAction, toast, tooltip, hint, hideHint, letterSign, selectTab, onPreset, onIdentityChange, setIdentity, setDonationUrl, onAssign, onUnassign, renderInventory, dispose };
+    return { el, openFeed, closeFeed, openRecipe, closeRecipe, dismissOutside, openBoard, closeBoard, updateBoard, restoreBoards, setRosterRow, setStats, setAct, setMode, setDestinations, setOwnOoga, get retakeActor() { return retake.actor ? retake : null; }, setGorilla, setGorillaSmashPower, setDetachedView, fadeDetachedName, setAreaLabel, setPrimary, setWeapon, setMagazine, setJetpack, setSubtitle, onAction, toast, tooltip, hint, hideHint, letterSign, selectTab, onPreset, onIdentityChange, setIdentity, setDonationUrl, setPileValueVisible, onAssign, onUnassign, renderInventory, dispose };
   };
   // The account line in the sheet's foot is page-level: shown only when a backend answered, and
   // the director hands every change of `BL.net.state` here, whichever scene is active.
@@ -2166,11 +2234,11 @@
   // The roster's marks are page-level too: whichever scene's roster is up, each signed-in player's row
   // (their own Ooga, else the one they drive) shows the host dot and their voice. The director hands every
   // room and voice change here; only marks that changed are touched, and rows never move for them.
-  let liveRows = null, liveOnline = null;
+  let liveRows = null, liveOnline = null, liveSignedIn = false;
   const VOICE_WORDS = { on: "In voice", speaking: "Speaking", muted: "Muted their microphone" };
   const voiceRowOf = (login, body) => {
     const character = BL.net.characterOf(login);
-    return character && liveRows.get(character.handle) || body && liveRows.get(body) || null;
+    return character && liveRows.get(character.handle) || body && liveRows.get(BL.net.bodyName(body)) || null;
   };
   const paintMarks = (row) => {
     const blocked = !!row.nextLogin && BL.voice.mutedLocally(row.nextLogin);
@@ -2196,9 +2264,9 @@
       row.host.hidden = !row.hostOn;
     }
   };
-  // A signed-in player is online on their own Ooga's row and on the row of the Ooga they drive.
+  // A signed-in player is online on their own Ooga's row and on the row of the actor's Ooga.
   const markOnline = (login, body) => {
-    const character = BL.net.characterOf(login), own = character && liveRows.get(character.handle), driven = body && liveRows.get(body);
+    const character = BL.net.characterOf(login), own = character && liveRows.get(character.handle), driven = body && liveRows.get(BL.net.bodyName(body));
     if (own) own.nextOnline = true;
     if (driven) driven.nextOnline = true;
   };
@@ -2209,6 +2277,8 @@
       row.nextHost = row.nextOnline = row.nextSelf = false;
     }
     const net = BL.net.state, voice = BL.voice.stats;
+    const signedIn = !!net.me, accountChanged = signedIn !== liveSignedIn;
+    liveSignedIn = signedIn;
     if (net.room === "live" && net.me) {
       markOnline(net.me.login, net.body);
       for (const rec of BL.net.remotes.values()) markOnline(rec.login, rec.body);
@@ -2232,10 +2302,10 @@
     }
     for (const row of liveRows.values()) {
       paintMarks(row);
-      if (row.netOnline === row.nextOnline) continue;
+      if (row.netOnline === row.nextOnline && !accountChanged) continue;
       row.netOnline = row.nextOnline;
       liveOnline(row);
     }
   };
-  BL.hud = { create, renderIcon, signLettering, showAccount, showMic, showVoices, setDonationStats, toast, STATE_LABELS, statusFor };
+  BL.hud = { create, renderIcon, signLettering, showAccount, showMic, showVoices, setDonationStats, donationValueText, toast, STATE_LABELS, statusFor };
 })();

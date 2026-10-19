@@ -566,7 +566,7 @@
       climb: 0, climbBlend: 0, climbPose: NaN, climbStride: 0, climbDirection: 0, climbSide: 0,
       climbArmBaseL: 0, climbArmBaseR: 0, climbFitArms: 0,
       climbGripX: NaN, climbGripY: NaN, climbGripZ: NaN, climbGripRelease: 0,
-      walkLegLiftR: 0, walkLegLiftL: 0,
+      walkLegLiftR: 0, walkLegLiftL: 0, walkArmFitR: 0, walkArmFitL: 0,
       groom: 0, groomBlend: 0, groomSide: 1, groomTime: 0, sitLook: 0, sitShift: 0,
       lab: false, labRunIn: false, coatSplit: false, labWork: "", labPhase: 0, labSide: 1, labReach: 0, labReachGrip: geos.labFlask.labGripY, labPreviewItem: false, labSqueeze: false, labDie: false, labRoll: 0,
       labPalmLift: 0, labBench: null, labTouchArm: false, labTouchSide: 1,
@@ -865,6 +865,10 @@
           // previous lift into damping accumulates it while a wall stays near.
           leg.position.y -= l.side < 0 ? state.walkLegLiftR : state.walkLegLiftL;
           if (l.side < 0) state.walkLegLiftR = 0; else state.walkLegLiftL = 0;
+          // Keep the hand's collision correction out of the next idle pose:
+          // otherwise damping lowers it until the fitter snaps it up again.
+          arm.rotation.x -= l.side < 0 ? state.walkArmFitR : state.walkArmFitL;
+          if (l.side < 0) state.walkArmFitR = 0; else state.walkArmFitL = 0;
           // Ordinary lab steps leave room between the coat and forearms.
           arm.position.x = damp(arm.position.x, l.side * ((laboratory ? 0.66 : state.suit && (state.biped || seat > 0) ? 0.62 : squeeze ? 0.4 : SHOULDER_X) * (1 - climbing) + 0.38 * climbing), 12, dt);
           // Counter the torso's tilt during each lift so the hands and toes
@@ -1519,7 +1523,10 @@
       }
       for (let side = 0; side < 2; side++) {
         if (state.dragging && side === 1) continue;
-        fitWalkArm(side ? parts.armL : parts.armR, side);
+        const arm = side ? parts.armL : parts.armR, angle = arm.rotation.x;
+        fitWalkArm(arm, side);
+        if (side) state.walkArmFitL = arm.rotation.x - angle;
+        else state.walkArmFitR = arm.rotation.x - angle;
       }
     };
     // A high grip can reach over a stepped rim into empty air. Lower each arm

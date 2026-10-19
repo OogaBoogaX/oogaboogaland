@@ -387,7 +387,7 @@
   ));
   const matrixLeverLabels = cached(() => {
     const parts = [], cell = 0.022;
-    for (const [text, y] of [["ON", 0.37], ["OFF", -0.37]]) {
+    for (const [text, y] of [["OFF", 0.37], ["ON", -0.37]]) {
       const width = (text.length * 4 - 1) * cell;
       for (let i = 0; i < text.length; i++) {
         const glyph = SIGN_GLYPHS[text[i]];

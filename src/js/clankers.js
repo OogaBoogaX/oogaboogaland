@@ -1999,6 +1999,7 @@
       }
     };
     const activate = (e, atPosition = false) => {
+      if (e.remoteControlled) return;
       if (rage) rage.cancel(e, "respawn");
       if (ctx.rageRelease) ctx.rageRelease(e);
       clearWallSearch(e);
@@ -2103,7 +2104,7 @@
           departPending: false, departAt: 0, departX: 0, departY: 0, departZ: 0, riseAdmitted: false,
           wallFailedX: NaN, wallFailedZ: NaN, wallFailedUntil: 0,
           levelOnlyUntil: 0, planAt: 0, progressTime: 0, progressX: NaN, progressZ: NaN, progressDistance: Infinity, progressTurn: Infinity, progressCursor: -1, progressClaim: 0, backoutX: NaN, backoutZ: NaN, alignTime: 0, failedX: NaN, failedZ: NaN, failedUntil: 0 },
-        controlled: false, pendingSite: -1, actionControlled: false,
+        controlled: false, remoteControlled: false, pendingSite: -1, actionControlled: false,
         debugMove: { active: false, cancelled: false, status: "", reason: "", target: { x: 0, y: 0, z: 0 },
           goal: { x: 0, y: 0, z: 0, heading: NaN }, candidate: 0, hops: 0, normalized: false,
           normalizeAt: 0, normalizeScore: Infinity, wallTarget: false, wallPending: false, wallFinal: false,
@@ -2178,7 +2179,7 @@
     };
     const plan = (cave, index) => {
       const e = byOwner.get(cave);
-      if (!e || !sites[index]) return;
+      if (!e || e.remoteControlled || !sites[index]) return;
       if (e === debugShuttle && index !== labSite) return;
       if (e.controlled || e.rage.active || e.drive.airborne || e.climb.active || e.debugMove.active || e.office.stage) { e.pendingSite = index; return; }
       // Reloading never evicts a gorilla whose next shift is in this cave.
@@ -5170,6 +5171,7 @@
     };
     const entryFor = (value) => value === undefined ? player : typeof value === "number" ? list[value]
       : value && value.gorilla ? value : byOwner.get(value);
+    const sleeping = (e = player) => !!e && (e.sleep.stage === "asleep" || e.sleep.stage === "settle");
     const resumeEntry = (e) => {
       e.drive.resume = false; e.hasSlot = false;
       if (e.debugMove.active) { e.phase = e.route === "exit" ? "leave" : "chill"; resetDebugRoute(e); return; }
@@ -5203,9 +5205,44 @@
       if (!player) return false;
       const e = player;
       cancelInput(); player = null; e.controlled = false;
+      if (sleeping(e)) { e.drive.resume = false; return true; }
+      if (e.sleep.slot >= 0 && !sleeps(e.owner)) releaseBed(e);
       e.drive.resume = true;
       if (!e.drive.airborne && !e.fire.rolling && !e.climb.active) resumeEntry(e);
       return true;
+    };
+    // The room owns this companion while its player is elsewhere. Free its AI
+    // reservations before hiding it; the remote pool supplies the one visible rig.
+    const setRemote = (name, on) => {
+      if (disposed) return;
+      const e = byOwner.get(crew.cavemen.get(name));
+      if (!e || e.remoteControlled === on) return;
+      if (on) {
+        if (player === e) release();
+        if (rage) rage.cancel(e, "remote");
+        if (ctx.rageRelease) ctx.rageRelease(e);
+        releasePortal(e); releaseLab(e); releaseOffice(e); releaseBed(e);
+        clearWallSearch(e);
+        e.remoteControlled = true;
+        e.active = e.root.visible = e.hasSlot = e.jump.active = false;
+        e.debugMove.active = e.debugMove.cancelled = false;
+        e.climb.active = e.climb.searchPending = e.climb.claimPending = e.climb.crestPending = false;
+        e.drive.airborne = e.drive.resume = false;
+        e.overflow = false;
+        if (e.tracked && ctx.untrack) ctx.untrack(e);
+        e.tracked = false;
+      } else {
+        e.remoteControlled = false;
+        e.retry = 0;
+        if (alive(e.owner)) activate(e);
+      }
+    };
+    const createRemote = (name, rec) => {
+      const rig = BL.agent.create({ managed: true, groundAt: () => rec.y, scale: SCALE,
+        coatClip, suitClip, suitColor: fnv1a(`office/${name}`) % BL.agent.SUIT_COLORS });
+      rig.root.matrixNative = false;
+      rig.root.matrixLiving = true;
+      return rig;
     };
     const respawn = (e, x = 0, y = 0, z = 0) => {
       if (rage) rage.cancel(e, "respawn");
@@ -5221,15 +5258,58 @@
       }
       activate(e, e.controlled);
     };
+    const travelRefusal = () => {
+      const e = player;
+      if (!e || !e.controlled || e.remoteControlled || !e.active || !e.root.visible) return "Choose a gorilla before travelling.";
+      if (sleeping(e)) return "Wake your gorilla before travelling.";
+      if (e.lounge || e.loungeDepart || e.office.stage || e.motion.officeSeat > 0) return "Stand up before travelling.";
+      const c = e.climb, d = e.drive;
+      if (c.active || c.mountPending || c.waitRelease || c.openingExit || c.openingStagePending || c.handoffDirection
+        || d.climbTurnTimer > 0 || e.motion.openingSettle > 0) return "Finish climbing before travelling.";
+      if (d.airborne || e.jump.active || !d.grounded) return "Land before travelling.";
+      if (e.capture?.cave || e.motion.dragging) return "Let go of the Ooga before travelling.";
+      if (e.fire.rolling || e.fire.requested || e.fire.rollRecover > 0) return "Finish rolling before travelling.";
+      if (e.pound > 0 || e.beat > 0 || e.stand > 0 || e.recover > 0 || e.actionControlled || e.motion.smash
+        || e.motion.poundCharge > 0 || e.motion.throwProgress > 0 || e.gorilla.smashActive || d.motionRecover > 0
+        || d.jumpHeld || d.jumpPressed || d.jumpBuffer > 0) return "Finish your action before travelling.";
+      return null;
+    };
+    // The scene validates the destination before this location-only handoff.
+    // Health, fire, ownership and facing survive travel unchanged.
+    const travel = (position) => {
+      if (!position || !Number.isFinite(position.x) || !Number.isFinite(position.y) || !Number.isFinite(position.z)
+        || travelRefusal()) return false;
+      const e = player, p = e.root.position, d = e.drive, m = e.motion;
+      cancelInput();
+      clearWallSearch(e); releasePortal(e); releaseLab(e); releaseOffice(e); releaseBed(e);
+      if (labEscape === e) { e.stuck.escapeLeft = 0; labEscape = null; }
+      e.roam.count = e.roam.index = 0; e.roam.departPending = e.roam.propDeparture = false;
+      e.backoutLeft = e.speed = e.rest = e.blocked = e.retry = 0;
+      e.phase = "controlled"; e.route = ""; e.hasSlot = false; e.pendingSite = -1;
+      d.vx = d.vy = d.vz = d.jumps = 0;
+      d.airborne = d.passiveFall = d.resume = d.wallRelease = d.motionEnvelope = false; d.grounded = true;
+      m.takeoff = m.landing = m.supportOffset = m.climb = m.climbDirection = m.climbSide = m.mantle = 0;
+      m.climbBlend = m.climbGripX = m.climbGripY = m.climbGripZ = NaN; m.climbGripRelease = 0;
+      m.verifyGrip = m.workExit = false;
+      p.x = position.x; p.y = position.y; p.z = position.z;
+      setGoal(e, p.x, p.y, p.z);
+      syncLab(e); syncOffice(e);
+      e.gorilla.poseManaged(0, p.x, p.y, p.z, e.heading, 0, false, e.biped, "", m);
+      e.radius = Math.max(WALK_RADIUS, e.gorilla.bodyRadius + 0.1);
+      e.height = Math.max(WALK_HEIGHT, e.gorilla.bodyHeight + 0.04);
+      labEnvelope(e);
+      return true;
+    };
     const possess = (value) => {
       const e = entryFor(value);
-      if (!e || !e.active || !e.root.visible) return false;
+      if (!e || e.remoteControlled || !e.active || !e.root.visible) return false;
       if (player === e) return true;
       if (rage) rage.cancel(e, "possession");
       if (ctx.rageRelease) ctx.rageRelease(e);
       release(); player = e; e.controlled = true; e.drive.resume = false;
-      // A hand on a sleeper wakes it. Its bed stays its own while its Ooga sleeps on.
-      if (e.sleep.stage) { e.sleep.stage = ""; e.gorilla.chest.scale.y = 1; e.exitFootprint = false; }
+      const asleep = sleeping(e);
+      // Selecting a settled sleeper keeps its bed and pose until an explicit wake.
+      if (e.sleep.stage && !asleep) { e.sleep.stage = ""; e.gorilla.chest.scale.y = 1; e.exitFootprint = false; }
       e.fire.panic.active = false;
       cancelDebugMove(e);
       e.climb.debugStuck = false;
@@ -5241,6 +5321,11 @@
       d.x = d.z = 0; d.heading = e.heading; d.run = d.jumpHeld = d.jumpDown = d.jumpPressed = d.cancelled = false; d.jumpBuffer = 0;
       d.avoidSide = d.avoidTime = 0;
       d.vx = d.vy = d.vz = 0; d.airborne = e.jump.active;
+      if (asleep) {
+        d.airborne = false; d.grounded = true; d.jumps = 0;
+        e.speed = 0; e.phase = "sleep"; e.route = "";
+        return true;
+      }
       if (e.jump.active) {
         const j = e.jump, direction = j.reverse ? -1 : 1;
         d.vx = (j.toX - j.fromX) / j.duration * direction;
@@ -5255,8 +5340,23 @@
       e.phase = "controlled"; e.route = ""; e.exitFootprint = true;
       return true;
     };
+    const wake = () => {
+      if (!sleeping()) return false;
+      const e = player;
+      e.sleep.stage = ""; e.gorilla.chest.scale.y = 1;
+      e.lounge = ""; e.loungeDepart = false; e.recover = Math.max(e.recover, 1.2);
+      e.footprintMode = "walk"; e.phase = "controlled"; e.route = ""; e.exitFootprint = true;
+      // The wake press is consumed; holding it must not turn into a jump.
+      cancelInput();
+      return true;
+    };
     const control = (input) => {
       if (!player || !input) return false;
+      if (sleeping()) {
+        if (input.jumpPressed) wake();
+        else cancelInput();
+        return true;
+      }
       const d = player.drive;
       d.x = Number.isFinite(input.x) ? clamp(input.x, -1, 1) : 0;
       d.z = Number.isFinite(input.z) ? clamp(input.z, -1, 1) : 0;
@@ -5367,7 +5467,7 @@
     const smashPower = (charge = 0, combo = quickSmash(player)) => (2.5 + 2.5 * clamp(charge, 0, 1)) * (combo ? 0.25 : 1);
     const smash = (charge = 0, combo = quickSmash(player), power = smashPower(charge, combo)) => {
       const e = player;
-      if (!e || e.climb.active || e.fire.rolling || e.parked || e.beat || e.pound > 0 && !e.poundHit) return false;
+      if (!e || sleeping(e) || e.climb.active || e.fire.rolling || e.parked || e.beat || e.pound > 0 && !e.poundHit) return false;
       if (e.recover > 0 && !combo) return false;
       if (ctx.canSmash ? !ctx.canSmash(e) : !expandGesture(e, 2.25)) return false;
       const duration = e.gorilla.pound(e.drive.airborne, charge, combo);
@@ -5380,7 +5480,7 @@
     };
     const chestBeat = () => {
       const e = player;
-      if (!e || e.climb.active || e.fire.rolling || e.drive.airborne || e.recover > 0 || e.parked || e.pound || e.beat) return false;
+      if (!e || sleeping(e) || e.climb.active || e.fire.rolling || e.drive.airborne || e.recover > 0 || e.parked || e.pound || e.beat) return false;
       if (!expandGesture(e, 1.55)) return false;
       const p = e.root.position;
       e.speed = e.drive.vx = e.drive.vz = 0;
@@ -6208,8 +6308,8 @@
     // home; beds are dealt for the day by a hash of the roster's names (`bedsToday`), so the choice is random,
     // reproducible, the same on every page, and never reshuffled under a sleeper. Stages: "go" along the path, "settle" turning onto the bed, "asleep", then "return" back
     // along the path once its Ooga wakes, after which the ordinary work and chill machinery takes over.
-    // A hand on it wins: possession wakes it where it lies, and a release while its Ooga still sleeps walks it
-    // back to bed from where it stands.
+    // Selection keeps a settled sleeper in bed until Space wakes it. A release while its Ooga still sleeps
+    // walks an awakened gorilla back to bed from where it stands.
     const SLEEP_POSES = ["left", "right", "back"], SLEEP_REACH = 1.1, SLEEP_ARRIVE = 0.3, SLEEP_STALL = 25, SLEEP_MARK = 1.9, DAY_MS = 86400000;
     // Who sleeps where today: every gorilla's bed, worked out once a day from the roster's names alone. Each takes
     // the first bed still free in its own shuffled order, in roster order, so the answer never depends on who
@@ -6351,6 +6451,7 @@
       }
       if (s.stage === "asleep") {
         e.speed = 0;
+        if (e.controlled) e.lounge = s.pose;
         // Slow breath in the chest, and a mark of sleep from its mouth now and then.
         e.gorilla.chest.scale.y = 1 + Math.sin(elapsed * 1.4 + e.index) * 0.018;
         if ((s.mark -= dt) <= 0 && ctx.sleep.mark) {
@@ -6611,6 +6712,7 @@
       }
     });
     const updateEntry = (e, dt) => {
+      if (e.remoteControlled) return;
       // Expiry, health and account/activity cancellation precede regeneration
       // and every movement controller, including swimming or climbing.
       if (rage) rage.check(e, elapsed);
@@ -6632,6 +6734,7 @@
       if (e.controlled || e.mode !== "chilling" || e.fire.burning) e.motion.groom = 0;
       if (e.controlled || e.fire.burning) e.loungeDepart = false;
       e.parkFor = Math.max(0, e.parkFor - dt);
+      if (e.controlled && sleeping(e)) { updateSleep(e, dt, beforeX, beforeY, beforeZ); return; }
       // An Ooga asleep sends its gorilla to bed, not away. "busy" lets the rest of this update walk it out of a
       // room or put its work down first; with no bed to be had it is hidden as it always was.
       const bedtime = ctx.sleep && sleeps(e.owner) && !e.controlled && !e.drive.airborne && !e.fire.rolling && !e.fire.burning && !e.climb.active
@@ -7086,7 +7189,7 @@
       climbFrameBudget = 2; climbTurn = -1;
       for (let i = 0; i < list.length; i++) {
         list[i].climb.searchBudget = 2;
-        if (!list[i].rage.warpWaiting) pendingClimbSearch(list[i]);
+        if (!list[i].remoteControlled && !list[i].rage.warpWaiting) pendingClimbSearch(list[i]);
       }
       for (let i = 0; i < list.length; i++) {
         const index = (climbNext + i) % list.length, e = list[index], c = e.climb;
@@ -7112,7 +7215,7 @@
         }
         for (let i = 0; i < list.length; i++) {
           updateEntry(list[i], step);
-          if (!list[i].rage.active) recoverStall(list[i], step);
+          if (!list[i].remoteControlled && !list[i].rage.active) recoverStall(list[i], step);
         }
       }
     };
@@ -7197,7 +7300,7 @@
     };
     return { list, sync, update, target, companionTarget, hit, damage, bananaHit, debugRage, plan, startLabShuttle, debugMove, cancelDebugMove, stats, liveGeometry, dispose, contactAt,
       debugLoungeSpots,
-      possess, release, respawn, control, cancelInput, smash, smashPower, quickSmash, chestBeat, ignite, dropRoll, supportRemoved,
+      possess, release, sleeping, wake, setRemote, createRemote, respawn, travelRefusal, travel, control, cancelInput, smash, smashPower, quickSmash, chestBeat, ignite, dropRoll, supportRemoved,
       get player() { return player; } };
   };
   BL.clankers = { create, rageCarrying, WALK_RADIUS, WALK_HEIGHT, PROP_STEP, RAGE_SPEED };

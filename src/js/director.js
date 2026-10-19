@@ -376,6 +376,12 @@
       firstDraw = true;
       mark("drawn");
       openCurtain();
+      if (params.get("signin") === "contributor-required") {
+        window.BL.hud.toast("Sign-in is for contributors with their own Ooga. Keep exploring signed out.");
+        params.delete("signin");
+        const back = new URL(location.href); back.searchParams.delete("signin");
+        history.replaceState(history.state, "", back.pathname + back.search + back.hash);
+      }
     }
     if (!drawn && renderer.failure && !params.has("canvas2d")) {
       console.warn("WebGL2 programs failed, reloading with the Canvas 2D fallback", renderer.failure);
@@ -413,8 +419,7 @@
     if (!active) return;
     if (e.key === "Shift" && (e.code === "ShiftRight" || e.location === 2)) rightShift = true;
     if (e.repeat) return;
-    const typing = e.target && (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA");
-    if (typing || (e.target && e.target.closest && e.target.closest("dialog, #sheet"))) return;
+    if (window.BL.controls.uiKey(e)) return;
     const intro = openIntro();
     if (intro) {
       // Registered at boot, before any scene's controls, so this keeps the key from them too.

@@ -3,7 +3,9 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { handleDonations } from "../src/donations.js";
+import { routeFixture } from "./routes.mjs";
+
+const { handleDonations } = routeFixture();
 
 const SITE = "https://site.test";
 const FAR = 4102444800;
@@ -56,6 +58,14 @@ test("a visitor who isn't signed in gives as nobody, and a note or an on-chain s
     await handleDonations(request, env, url);
   }
   assert.deepEqual(DONATIONS.calls.map((c) => [c.name, c.args.length, c.args.at(-1)]), [["invoice", 3, "203.0.113.7"], ["note", 2, "203.0.113.7"], ["onchain", 2, "203.0.113.7"]]);
+  assert.equal(DONATIONS.calls[0].args[1], null);
+});
+
+test("an old nonowner session cannot attach a signed-in donor identity to an invoice", async () => {
+  const routes = routeFixture({ cast: [] }), DONATIONS = binding();
+  const [request, url] = call("/donations/invoice", { headers: { ...json, cookie: "__Host-obl_session=tok" }, body: "{}" });
+  const response = await routes.handleDonations(request, { SITE_ORIGIN: SITE, DONATIONS, DB: db }, url);
+  assert.equal(response.status, 201);
   assert.equal(DONATIONS.calls[0].args[1], null);
 });
 
