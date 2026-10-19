@@ -1497,10 +1497,10 @@
         <h2 id="donation-title"><span data-sign>Feed the Ooga Boogas</span></h2>
         <button type="button" class="modal-close" id="donation-close" aria-label="Close donation">&times;</button>
       </div>
-      <canvas id="donation-screen" width="400" height="400" tabindex="0" aria-label="Donation screen. Type an amount, press Enter to continue, O for on-chain, C to copy, and Escape to go back."></canvas>
+      <canvas id="donation-screen" width="400" height="400" tabindex="0" aria-label="Donation screen. Type an amount, press Enter to continue, A for your name and message, O for on-chain, C to copy, and Escape to go back."></canvas>
       <div id="donation-fields">
-        <label class="field"><span>Donation handle</span><input id="donation-handle" type="text" maxlength="39" autocomplete="off" spellcheck="false" placeholder="anon"></label>
-        <label class="field"><span>Banana message (up to 280 characters)</span><input id="donation-message" type="text" maxlength="280" autocomplete="off" placeholder="Optional message"></label>
+        <label class="field"><span>Donation handle</span><input id="donation-handle" type="text" maxlength="39" tabindex="-1" autocomplete="off" spellcheck="false" placeholder="anon"></label>
+        <label class="field"><span>Banana message (up to 280 characters)</span><input id="donation-message" type="text" maxlength="280" tabindex="-1" autocomplete="off" placeholder="Optional message"></label>
         <div class="donation-details-actions">
           <span id="donation-details-status" role="status"></span>
         </div>

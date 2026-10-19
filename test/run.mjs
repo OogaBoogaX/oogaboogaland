@@ -4803,19 +4803,26 @@ const donationClientChecks = async () => {
   const F = kioskContext.window.BL.factoryKiosk.create({ real: true, link: () => "/lightning", bananasFor: () => 1,
     invoice: async () => ({ request: "request", invoice: { id: "invoice", bolt11: "lntbs1", expires: now / 1000 + 10 }, bananas: { exact: 0.25, rounded: 0 }, rate: null }),
     open: () => true, testNetwork: () => "signet", account: () => ({ backend: true, me: null }), release: () => {},
-    editDetails: () => { detailsOpen = true; }, closeDetails: () => { detailsOpen = false; } });
+    editDetails: (field) => { detailsOpen = !!field; }, closeDetails: () => { detailsOpen = false; } });
   const quote = async () => { F.start(); for (const key of ["Enter", "1", "Enter"]) F.key({ key }); await Promise.resolve(); };
+  F.start(); F.key({ key: "Enter" }); F.key({ key: "A" }); F.update(0.1);
+  const fromAmount = F.state === "details" && detailsOpen;
+  F.key({ key: "Escape" });
+  const backToAmount = fromAmount && F.state === "amount" && !detailsOpen;
   await quote();
   const fractionalQuote = F.bananas === 0.25;
   F.key({ key: "A" });
-  const editing = detailsOpen;
-  const quoted = F.state === "quote" && F.receive("invoice", { exact: 1.75, rounded: 2 }, "tester", 1800) && F.state === "paid" && F.who === "tester";
+  const editing = detailsOpen && F.state === "details";
+  F.key({ key: "Escape" });
+  const doneEditing = F.state === "quote" && !detailsOpen;
+  F.key({ key: "A" });
+  const quoted = F.state === "details" && F.receive("invoice", { exact: 1.75, rounded: 2 }, "tester", 1800) && F.state === "paid" && F.who === "tester";
   const fractionalPaid = F.bananas === 1.75 && F.sats === 1800 && editing && !detailsOpen;
   await quote(); now += 11000; F.update(0.1);
   const expired = F.state === "expired", late = F.receive("invoice", { exact: 0.25, rounded: 0 }, "tester") && F.state === "paid";
   await quote(); now += 11000; F.update(0.1); F.key({ key: "Escape" });
   const back = F.state === "amount";
-  record("donation kiosk: real quotes preserve fractional bananas, settlement uses the donation's actual amount, an invoice expires on its quote screen, Back returns to the amount, and payment is recognized on the quote or after expiry", fractionalQuote && fractionalPaid && quoted && expired && late && back, JSON.stringify({ fractionalQuote, fractionalPaid, quoted, expired, late, back }));
+  record("donation kiosk: real quotes preserve fractional bananas, the name and message open on a screen of their own from the amount or the quote and close back there, settlement uses the donation's actual amount, an invoice expires on its quote screen, Back returns to the amount, and payment is recognized while editing the details or after expiry", fractionalQuote && fractionalPaid && backToAmount && doneEditing && quoted && expired && late && back, JSON.stringify({ fractionalQuote, fractionalPaid, backToAmount, doneEditing, quoted, expired, late, back }));
   const waits = [];
   const G = kioskContext.window.BL.factoryKiosk.create({ real: true, link: () => "/lightning", bananasFor: () => 1,
     invoice: async () => ({ request: "request", invoice: { id: "unlit", bolt11: null, expires: now / 1000 + 900 }, bananas: { exact: 0.25, rounded: 0 }, rate: null }),
@@ -4833,6 +4840,39 @@ const donationClientChecks = async () => {
   G.stop();
   const waited = waits.join() === "unlit";
   record("donation kiosk: an invoice without its Lightning half pays on-chain from the quote, a seen payment short of it asks for what is left and a whole one waits for its block without offering payment again, and leaving waits on the invoice", chainOnly && short && whole && noRepay && waited, JSON.stringify({ chainOnly, short, whole, noRepay, waited, state: G.state }));
+
+  // A DONE reply may outlive the editor that requested it: the factory reuses its flow between visits,
+  // and a short on-chain payment can leave and reopen the editor without replacing the invoice.
+  let deferredDetails = { handle: "tester", message: "saved" }, finishNote;
+  const deferred = kioskContext.window.BL.factoryKiosk.create({ real: true, link: () => "/lightning", bananasFor: () => 1,
+    invoice: async () => ({ request: "request", invoice: { id: "deferred", bolt11: "lntbs1", expires: now / 1000 + 900 }, bananas: { exact: 1, rounded: 1 }, rate: null }),
+    onchain: async () => ({ address: "tb1qexampleaddress0000", sats: 1000 }), waitFor() {},
+    note: () => new Promise(resolve => { finishNote = resolve; }), details: () => ({ ...deferredDetails }), editDetails() {},
+    open: () => true, testNetwork: () => "signet" });
+  const deferredQuote = async () => { deferred.start(); for (const key of ["Enter", "1", "Enter"]) deferred.key({ key }); await Promise.resolve(); };
+  await deferredQuote();
+  deferred.key({ key: "A" });
+  deferredDetails.message = "old visit"; deferred.detailsChanged();
+  const oldDone = deferred.key({ key: "Enter" });
+  deferred.stop(); deferred.start(); deferred.key({ key: "Enter" }); deferred.key({ key: "A" });
+  deferredDetails.message = "new visit"; deferred.detailsChanged();
+  finishNote({}); await oldDone;
+  const reopenedVisit = deferred.state === "details" && deferredDetails.message === "new visit" && deferred.savedDetails === null;
+  await deferred.key({ key: "Enter" });
+  const newDone = deferred.state === "amount";
+  await deferredQuote();
+  await deferred.key({ key: "O" }); deferred.key({ key: "Escape" }); deferred.key({ key: "A" });
+  deferredDetails.message = "same invoice"; deferred.detailsChanged();
+  const invoiceDone = deferred.key({ key: "Enter" }), pendingInvoice = deferred.invoice;
+  const interrupted = deferred.seen("deferred", 400, 1000, 615) && deferred.state === "chain";
+  deferred.key({ key: "Escape" }); deferred.key({ key: "A" });
+  finishNote({}); await invoiceDone;
+  const reopenedInvoice = deferred.state === "details" && deferred.invoice === pendingInvoice && !deferred.detailsDirty;
+  await deferred.key({ key: "Enter" });
+  const currentDone = deferred.state === "quote";
+  deferred.stop();
+  record("donation details: a late DONE save cannot dismiss a new visit's editor or a reopened editor for the same invoice, and the current DONE still returns to its screen",
+    reopenedVisit && newDone && interrupted && reopenedInvoice && currentDone, JSON.stringify({ reopenedVisit, newDone, interrupted, reopenedInvoice, currentDone }));
 
   let liveRate = { usdPerBtc: 100000, satsPerBanana: 1000, at: now, stale: false }, watching = 0;
   const live = kioskContext.window.BL.factoryKiosk.create({ real: true, link: () => "/lightning", bananasFor: () => 1,
@@ -4932,12 +4972,13 @@ const donationClientChecks = async () => {
     capWarning && capContinue && lightningDisabled && capOnchain && overallCap, JSON.stringify({ capWarning, capContinue, lightningDisabled, capOnchain, overallCap }));
 
   const elements = new Map(), frames = new Map(), detailTimers = new Map(), invoices = [], notes = [], popupWaits = [];
+  let noteFails = 0;
   for (const id of ["donation-popup", "donation-screen", "donation-handle", "donation-message", "donation-close",
     "donation-fields", "factory-donation-fields", "donation-details-status"]) elements.set(id, {
     listeners: new Map(), open: false, value: "", disabled: false,
     addEventListener(type, fn) { this.listeners.set(type, fn); }, removeEventListener(type) { this.listeners.delete(type); },
     showModal() { this.open = true; }, close() { this.open = false; }, focus() { this.focused = true; },
-    select() { this.selected = true; }, scrollIntoView() {}, append() {}, insertBefore() {}, querySelector: () => ({}), getContext: () => ({})
+    select() { this.selected = true; }, setSelectionRange() {}, scrollIntoView() {}, append() {}, insertBefore() {}, querySelector: () => ({}), getContext: () => ({})
   });
   Object.assign(kioskContext, { location: { origin: "https://site.test" }, navigator: {}, performance: { now: () => now },
     setTimeout: fn => { const id = now++; detailTimers.set(id, fn); return id; }, clearTimeout: id => detailTimers.delete(id),
@@ -4950,7 +4991,7 @@ const donationClientChecks = async () => {
   K.net = { state: { backend: true, me: null }, login() {} };
   K.donations = { state: { open: true }, testNetwork: "signet", sanitize: D.sanitize, HANDLE_MAX: D.HANDLE_MAX, MESSAGE_MAX: D.MESSAGE_MAX,
     invoice: async options => { invoices.push(options); return { request: "request", invoice: { id: "popup", bolt11: "lntbs1", expires: now / 1000 + 900 }, bananas: { exact: 0.25, rounded: 0 }, rate: null }; },
-    note: async (request, message, handle) => { notes.push({ request, message, handle }); return {}; },
+    note: async (request, message, handle) => { notes.push({ request, message, handle }); return noteFails-- > 0 ? { error: "busy" } : {}; },
     onchain: async () => ({ address: "tb1qexampleaddress0000", sats: 1000 }), waitFor: id => popupWaits.push(id) };
   runInNewContext(await readFile(new URL("../src/js/donation-popup.js", import.meta.url), "utf8"), kioskContext);
   const popup = K.donationPopup.create({ state: { message: "hello" } }), dialog = elements.get("donation-popup");
@@ -4963,14 +5004,33 @@ const donationClientChecks = async () => {
   await popupQuote();
   const signedIn = elements.get("donation-handle").value === "tester" && invoices.at(-1).handle === "tester";
   popupFlow.key({ key: "A" });
-  const focused = elements.get("donation-handle").focused && elements.get("donation-handle").selected;
+  const fieldKey = (key, target) => elements.get("donation-fields").listeners.get("keydown")({ key, target, stopPropagation() {}, preventDefault() {} });
+  fieldKey("Tab", elements.get("donation-handle"));
+  const focused = elements.get("donation-handle").focused && elements.get("donation-handle").selected && elements.get("donation-message").focused;
   const originalInvoice = popupFlow.invoice, invoiceCount = invoices.length;
   elements.get("donation-handle").value = "another-name";
   elements.get("donation-message").value = "m".repeat(281);
   elements.get("donation-fields").listeners.get("input")();
   await [...detailTimers.values()][0]();
-  const edited = focused && notes.at(-1).handle === "another-name" && notes.at(-1).message.length === 280
+  const edited = focused && popupFlow.state === "details" && notes.at(-1).handle === "another-name" && notes.at(-1).message.length === 280
     && notes.at(-1).request === "request" && popupFlow.invoice === originalInvoice && invoices.length === invoiceCount;
+  noteFails = 1;
+  elements.get("donation-message").value = "kept until saved";
+  elements.get("donation-fields").listeners.get("input")();
+  elements.get("donation-screen").focused = false;
+  await popupFlow.key({ key: "Enter" });
+  const failedStays = popupFlow.state === "details" && !!popupFlow.detailsError && !elements.get("donation-screen").focused;
+  await popupFlow.key({ key: "Enter" });
+  const detailsDone = failedStays && popupFlow.state === "quote" && notes.at(-1).message === "kept until saved" && elements.get("donation-screen").focused;
+  popupFlow.key({ key: "A" });
+  noteFails = 1;
+  elements.get("donation-message").value = "never saved";
+  elements.get("donation-fields").listeners.get("input")();
+  await popupFlow.key({ key: "Enter" });
+  const failedAgain = popupFlow.state === "details" && !!popupFlow.detailsError;
+  popupFlow.key({ key: "Escape" });
+  const keptSaved = failedAgain && popupFlow.state === "quote" && !popupFlow.detailsError
+    && elements.get("donation-message").value === "kept until saved" && popup.details().message === "kept until saved";
   popupFlow.key({ key: "Enter" });
   elements.get("donation-message").value = "updated while the QR is shown";
   elements.get("donation-fields").listeners.get("input")();
@@ -4990,8 +5050,8 @@ const donationClientChecks = async () => {
   popup.open(); popupFlow.key({ key: "1" }); popupFlow.key({ key: "Enter" });
   popup.dispose(); await Promise.resolve();
   const disposed = popupFlow.state === "idle" && !dialog.open && frames.size === 0 && detailTimers.size === 0 && [...elements.values()].every(e => e.listeners.size === 0);
-  record("donation popup: signed-out visitors can quote a payment, edits save automatically on the same invoice, Lightning returns to its quote without replacing the invoice, unrelated donations keep its invoice open, its settlement reveals the scene immediately, an on-chain payment can be left waiting, and disposal cancels frames, timers, listeners and late replies",
-    anonymous && signedIn && edited && invoiceEdited && lightningBack && sameLightning && other && settled && popupSeen && leftWaiting && disposed, JSON.stringify({ anonymous, signedIn, edited, invoiceEdited, lightningBack, sameLightning, other, settled, popupSeen, leftWaiting, disposed }));
+  record("donation popup: signed-out visitors can quote a payment, edits on the details screen save automatically on the same invoice, Tab goes between its fields, a failed save keeps the screen with its error until it is tried again or given up on for the details the invoice holds, and a saved one goes back to the quote with the keys on the popup's screen, Lightning returns to its quote without replacing the invoice, unrelated donations keep its invoice open, its settlement reveals the scene immediately, an on-chain payment can be left waiting, and disposal cancels frames, timers, listeners and late replies",
+    anonymous && signedIn && edited && detailsDone && keptSaved && invoiceEdited && lightningBack && sameLightning && other && settled && popupSeen && leftWaiting && disposed, JSON.stringify({ anonymous, signedIn, edited, detailsDone, keptSaved, invoiceEdited, lightningBack, sameLightning, other, settled, popupSeen, leftWaiting, disposed }));
 };
 const wallPerformance = async (b) => {
   await b.send("Emulation.setDeviceMetricsOverride", { width: 1920, height: 1080, deviceScaleFactor: 2, mobile: false });
@@ -9290,6 +9350,53 @@ const factoryShields = { name: "factory peer portals", why: "rule: paired peer m
     && Math.abs(row.after.feet - row.before.feet) < 0.25 && row.cameraChange < 0.25 && row.sameMode && row.walkedOut && row.stayedOut && row.returned && row.supported)
     && r.rows[1].air && r.rows[1].after.feet > 0, JSON.stringify(r));
 } };
+const donationDetails = { name: "donation details", why: "regression: clicking KEEP SAVED blurred a changed native field, retried its failed autosave and saved the edits the visitor was discarding", run: async (b) => {
+  await b.evaluate(`(() => {
+    const D = BL.donations, K = BL.factoryKiosk, fields = document.getElementById("donation-fields");
+    const probe = window.__donationDetails = { invoice: D.invoice, note: D.note, open: D.state.open, create: K.create, notes: 0, changes: 0 };
+    probe.changed = event => { if (event.isTrusted) probe.changes++; };
+    fields.addEventListener("change", probe.changed);
+    D.state.open = true;
+    D.invoice = async () => ({ request: "details-test", invoice: { id: "details-test", bolt11: "lntbs1", expires: Date.now() / 1000 + 900 }, bananas: { exact: 1, rounded: 1 }, rate: null });
+    D.note = async () => { probe.notes++; return { error: "busy" }; };
+    K.create = hooks => (probe.flow = probe.create(hooks));
+    BL.donationPopup.open();
+    K.create = probe.create;
+  })()`);
+  try {
+    await b.key("1"); await b.key("Enter");
+    await untilPage(b, 'window.__donationDetails.flow.state === "quote"');
+    await b.key("A"); await b.key("Tab");
+    await b.send("Input.insertText", { text: "discard this edit" });
+    const failed = await untilPage(b, '!!window.__donationDetails.flow.detailsError');
+    const before = await b.evaluate(`(() => {
+      const p = __donationDetails, canvas = document.getElementById("donation-screen"), r = canvas.getBoundingClientRect();
+      p.flow.paint();
+      return { focused: document.activeElement.id, notes: p.notes, changes: p.changes, saved: p.flow.savedDetails.message,
+        x: r.left + 110 * r.width / canvas.width, y: r.top + 352 * r.height / canvas.height };
+    })()`);
+    await b.click(before.x, before.y);
+    const after = await b.evaluate(`(() => {
+      const p = __donationDetails;
+      return { state: p.flow.state, notes: p.notes, changes: p.changes, message: document.getElementById("donation-message").value,
+        focused: document.activeElement.id, error: p.flow.detailsError, saving: p.flow.detailsSaving };
+    })()`);
+    record("donation details: clicking KEEP SAVED after a failed autosave commits the native field's change event without retrying, restores the saved message and returns focus to the quote",
+      failed && before.focused === "donation-message" && before.notes === 1 && before.changes === 0
+      && after.changes === 1 && after.notes === 1 && after.state === "quote" && after.message === before.saved
+      && after.focused === "donation-screen" && !after.error && !after.saving, JSON.stringify({ failed, before, after }));
+  } finally {
+    await b.evaluate(`(() => {
+      const p = __donationDetails;
+      BL.donationPopup.close();
+      document.getElementById("donation-fields").removeEventListener("change", p.changed);
+      BL.donations.invoice = p.invoice; BL.donations.note = p.note; BL.donations.state.open = p.open;
+      BL.factoryKiosk.create = p.create;
+      delete window.__donationDetails;
+    })()`);
+  }
+} };
+
 // The banana cooker: a tip is counted once, the moment it arrives, and cooked where the visitor can watch it, never
 // passed off as routing. The demo node is held still and its conduits emptied, so anything moving is the tip's, and
 // the exit shield's hum is stopped, so its ripple count is crossings alone. The kiosk is tapped with the view free, as
@@ -9316,6 +9423,7 @@ const factoryCooker = { name: "factory cooker", why: "rule: a tip in the factory
     document.getElementById("donation-message").dispatchEvent(new Event("change", { bubbles: true }));
     document.getElementById("donation-handle").blur();
   })()`);
+  await b.key("Escape");
   for (const k of ["1", "2", "0", "0"]) await b.key(k);
   const typed = await screen();
   await b.key("Enter");
@@ -12954,7 +13062,7 @@ scene("drop", { steps: [dropStart, dropSteering, play("drop", "a jump lands on t
 scene("orbit", { steps: [{ name: "orbit flow", why: "regression: the spacewalk air bonus was missing from the flight log", run: orbitFlow }, orbitSteering, orbitMissed, orbitEscape, trip("orbit")] });
 scene("mine", { steps: [mineResume, trip("mine"), mineControls] });
 scene("factory", { query: "character=portlandhodl", steps: [factoryWalking, factoryGreeter, factoryLadders, factoryRailingJump, factoryWeapons, factoryForward, factoryForge, factoryShields, trip("factory")] });
-scene("factory", { label: "cooker", query: "character=portlandhodl", steps: [donation("factory", { stat: "cooker.out", seconds: 14, where: "the cooker sends its bananas up through the ceiling tube" }), factoryCooker, trip("factory")] });
+scene("factory", { label: "cooker", query: "character=portlandhodl", steps: [donation("factory", { stat: "cooker.out", seconds: 14, where: "the cooker sends its bananas up through the ceiling tube" }), donationDetails, factoryCooker, trip("factory")] });
 scene("factory", { label: "entrance", url: hubPage(src, "character=portlandhodl"), steps: [factoryFloor, factoryEntrance] });
 scene("factory", { label: "canvas2d", query: "canvas2d=1&character=portlandhodl", steps: [factoryCanvas, factoryGreeter] });
 scene("bifrost", { url: hubPage(src, "solo=1&character=portlandhodl"), steps: [bifrostEntrance, bifrostWalking, bifrostExit, trip("bifrost")] });
