@@ -10,8 +10,12 @@
 // pushes, `{ id, sats, handle, message, at }` under the invoice's id. In real mode (`hooks.real`, the page's API in
 // use) the amount, once confirmed, asks the API for its invoice at once (`hooks.invoice`): the quote shows the API's
 // bananas and rate, the invoice its bolt11 as a `lightning:` QR and its own expiry, and nothing settles but the
-// socket. Both kiosks offer an editable display handle and message, initially the signed-in login or anon. Changing
-// the details updates that invoice in place, keeping its payment code. Receipt-priced invoices
+// socket. Both kiosks show who the tip is from and its message on the amount and the quote, and edit them on a screen
+// of their own (`details`): the name, initially the signed-in login or anon, and the message, typed into the page's two
+// hidden fields (`hooks.typing()`) and drawn here in the screen's letters with a caret. From the amount, the next CONTINUE
+// asks for the invoice with them; from the quote, they update that invoice in place, keeping its payment code, and the
+// screen waits for that save before it closes. A failed save keeps it up with its error, to try again or to keep the
+// details the invoice holds (`hooks.restoreDetails`). Receipt-priced invoices
 // follow the live rate until full payment is detected; legacy invoices retain their quoted rate. Either
 // way the scene hands every donation back through `receive(id, bananas, handle)`, which takes the one this invoice is
 // waiting for and thanks the donor it names. The scene holds that tip's bananas until the visitor asks to watch, or
@@ -61,7 +65,8 @@
     ">": [0b01000, 0b00100, 0b00010, 0b00001, 0b00010, 0b00100, 0b01000],
     "<": [0b00010, 0b00100, 0b01000, 0b10000, 0b01000, 0b00100, 0b00010],
     "≈": [0, 0b01000, 0b10101, 0b00010, 0b01000, 0b10101, 0b00010],
-    "@": [0b01110, 0b10001, 0b10111, 0b10101, 0b10111, 0b10000, 0b01111]
+    "@": [0b01110, 0b10001, 0b10111, 0b10101, 0b10111, 0b10000, 0b01111],
+    "#": [0b01010, 0b01010, 0b11111, 0b01010, 0b11111, 0b01010, 0b01010]
   };
   const glyph = (ch) => EXTRA[ch] || T.glyphOf(ch);
   const width = (text, s) => text.length ? (text.length * (GW + TR) - TR) * s : 0;
@@ -259,14 +264,16 @@
   // and pay(id, sats) when a payment settles; in real mode, `real`, invoice(sats), which resolves to the API's
   // reply or `{ error }`, open(), the API's word on whether donations are open (null before it has said),
   // testNetwork(), the test network payments are on or "" for mainnet, details() for the editable handle/message,
-  // startDetails() and editDetails() for the shared form, outerClose when the popup supplies its own X,
+  // startDetails() for the shared fields, editDetails(field) to type in "handle" or "message" (null to stop), typing()
+  // for what is typed there ({ handle, message, field, start, end, max }), restoreDetails(value) to put saved details
+  // back in the fields, outerClose when the popup supplies its own X,
   // onchain(request), which resolves to the API's `{ address, sats }` or `{ error }`, and
   // waitFor(id) for an invoice left with its on-chain address shown and nothing received.
   const create = (hooks) => {
     const canvas = document.createElement("canvas"), g = canvas.getContext("2d"), idleCode = BL.qr.encode(hooks.link()), real = !!hooks.real;
     canvas.width = W;
     canvas.height = H;
-    let dirty = true, shown = -1, buttons = [], ticket = 0, shownOpen = null, shownNet = "", saving = null, saveQueued = false, unwatchRate = null, rateAt = 0, rateStale = false;
+    let dirty = true, shown = -1, buttons = [], ticket = 0, detailsVisit = 0, detailsFrom = "quote", shownOpen = null, shownNet = "", saving = null, saveQueued = false, unwatchRate = null, rateAt = 0, rateStale = false;
     const flow = { canvas, W, H, open: false, state: "idle", digits: "", sats: 0, bananas: 0, invoice: null, reply: null, error: "", left: 0, settle: 0, hold: 0, who: "", chain: null, chainNote: null, got: 0, due: 0, rest: 0, savedDetails: null, detailsDirty: false, detailsSaving: false, detailsError: "", limits: null };
     const bananaAmount = () => real ? BANANAS.format(flow.bananas) : sats(flow.bananas);
     flow.rate = flow.frozenPricing = null;
@@ -298,7 +305,10 @@
       }
       writeFit(g, r ? `${priceLabel()} · 1 BANANA ≈ ${RATE.format(1e8 / r.usdPerBtc)} SATS` : priceLabel(), x, y, 1, color, width, align);
     };
+    // Leaving the details screen, by any way, takes the typing out of the fields.
     const set = (state) => {
+      if (flow.state === "details" && state !== "details" && hooks.editDetails) hooks.editDetails(null);
+      if (state === "details" && flow.state !== "details") detailsVisit++;
       flow.state = state;
       dirty = true;
     };
@@ -307,13 +317,18 @@
       dirty = true;
       if (hooks.detailsState) hooks.detailsState(flow);
     };
+    // The page's fields moved what the details screen shows (the focus or the caret): repaint.
+    flow.typed = () => { dirty = true; };
+    // Edits update the invoice in place only from the quote on: from the amount, the next CONTINUE asks for a new one
+    // with them, so an older invoice (the visitor came back from its quote) is left alone.
+    const onInvoice = () => flow.state !== "amount" && !(flow.state === "details" && detailsFrom === "amount");
     flow.detailsChanged = () => {
       flow.detailsDirty = !!flow.savedDetails && !sameDetails(hooks.details(), flow.savedDetails);
       flow.detailsError = "";
       detailsState();
     };
     flow.saveDetails = () => {
-      if (!flow.open || !flow.invoice || !flow.savedDetails || flow.state === "paid") return Promise.resolve({});
+      if (!flow.open || !flow.invoice || !flow.savedDetails || flow.state === "paid" || !onInvoice()) return Promise.resolve({});
       if (saving) { saveQueued = true; return saving; }
       const value = hooks.details(), previous = flow.savedDetails, invoice = flow.invoice;
       if (sameDetails(value, previous)) { flow.detailsChanged(); return Promise.resolve({}); }
@@ -453,7 +468,30 @@
     const act = (a) => {
       if (a === "close") return hooks.close();
       const s = flow.state;
-      if (a === "details" && s !== "paid" && hooks.editDetails) return hooks.editDetails();
+      // The name and message, edited on a screen of their own from the amount or the quote, and back there when done.
+      if ((s === "amount" || s === "quote") && a === "details" && hooks.editDetails) {
+        detailsFrom = s;
+        set("details");
+        return hooks.editDetails("handle");
+      }
+      if (s === "details") {
+        if (a === "name" || a === "message") return hooks.editDetails(a === "name" ? "handle" : "message");
+        // Edits to an invoice are saved before the screen that opened them shows them: a failed save keeps this one,
+        // its error up, for the visitor to retry (Enter, or DONE) before paying.
+        // Back after a failed save gives up on the edits: the fields take the details the invoice holds again.
+        if (a === "back" && flow.detailsError && flow.savedDetails && hooks.restoreDetails) {
+          hooks.restoreDetails(flow.savedDetails);
+          return set(detailsFrom);
+        }
+        if (a === "done" || a === "back") {
+          if (!hooks.details || !onInvoice()) return set(detailsFrom);
+          const visit = detailsVisit;
+          return flow.saveDetails().then(() => {
+            // The reply belongs to this editor opening, even if the same invoice was opened again meanwhile.
+            if (visit === detailsVisit && flow.state === "details" && !flow.detailsError && !flow.detailsDirty) set(detailsFrom);
+          });
+        }
+      }
       if (s === "idle" && a === "start" && !closed()) return set("amount");
       if (s === "amount") {
         if (a.length === 1 && a >= "0" && a <= "9") {
@@ -509,19 +547,20 @@
       }
     };
     // Keys, as the screen's buttons: Enter or Space the main one, Escape back (or out, from the attract screen), the
-    // digits, Backspace and Delete on the keypad, A to edit the donation details and O to pay on-chain on a real
-    // quote, C to copy the invoice or on-chain address, and R to replace an expired invoice.
+    // digits, Backspace and Delete on the keypad, A to edit the name and message on the amount or a quote, O to pay
+    // on-chain on a quote, C to copy the invoice or on-chain address, and R to replace an expired invoice. While a field
+    // has the typing, the page's fields take the keys instead.
     flow.key = (e) => {
       const k = e.key, s = flow.state;
       if (k === "Escape") return s === "idle" ? hooks.close() : act("back");
-      if (k === "Enter" || k === " ") return act({ idle: "start", amount: "go", quote: "create", invoice: real ? "" : "pay", chain: "sent", confirming: "done", paid: "watch", expired: "regen", problem: "back" }[s] || "");
+      if (k === "Enter" || k === " ") return act({ idle: "start", amount: "go", quote: "create", details: "done", invoice: real ? "" : "pay", chain: "sent", confirming: "done", paid: "watch", expired: "regen", problem: "back" }[s] || "");
       if (s === "amount") {
         if (k.length === 1 && k >= "0" && k <= "9") return act(k);
         if (k === "Backspace") return act("rub");
         if (k === "Delete") return act("clear");
       }
       if (k === "Backspace") return act("back");
-      if (s !== "paid" && (k === "a" || k === "A")) return act("details");
+      if ((s === "amount" || s === "quote") && (k === "a" || k === "A")) return act("details");
       if (s === "quote" && (k === "o" || k === "O")) return act("chain");
       if ((s === "invoice" || s === "chain") && (k === "c" || k === "C")) return act("copy");
       if (s === "expired" && (k === "r" || k === "R")) return act("regen");
@@ -562,7 +601,7 @@
     // A donation event: true when it is this invoice's payment, which the screen then thanks, naming the donor the
     // donation names (none for an anonymous tip), with the API's count when it sent one. An on-chain payment can arrive
     // after the invoice has expired.
-    const RECEIVING = ["quote", "invoice", "waiting", "chaining", "chain", "confirming", "expired"];
+    const RECEIVING = ["quote", "details", "invoice", "waiting", "chaining", "chain", "confirming", "expired"];
     flow.receive = (id, bananas = null, handle = "", paidSats = null) => {
       const s = flow.state;
       if (!flow.invoice || id !== flow.invoice.id || !RECEIVING.includes(s)) return false;
@@ -606,7 +645,7 @@
         shownNet = hooks.testNetwork();
         dirty = true;
       }
-      if (s === "invoice" || s === "waiting" || s === "chain" || real && s === "quote") {
+      if (s === "invoice" || s === "waiting" || s === "chain" || real && (s === "quote" || s === "details" && detailsFrom === "quote")) {
         flow.left = real ? flow.invoice.expires - Date.now() / 1000 : flow.left - dt;
         if (flow.left <= 0) return set("expired");
         const tick = Math.ceil(flow.left);
@@ -644,17 +683,39 @@
       else if (s === "quoting" || s === "chaining") spin(g, W / 2, 226, 30, 8, time);
       else if (s === "confirming") spin(g, W / 2, 166, 30, 8, time);
       else if (s === "invoice" && real) spin(g, 200, 335, 9, 4, time);
+      else if (s === "details" && CARET.h && (time * 2 | 0) % 2 === 0) {
+        g.fillStyle = INK.gold;
+        g.fillRect(CARET.x, CARET.y, 2, CARET.h);
+      }
     };
-    // A quote's last row: who the tip is from, and the way to change that, as one wide button. A login too long for
-    // the row at the big size drops to the small one, and then loses its FROM.
-    const fromRow = (name, change, a) => {
-      const y = 288, h = 30, room = 324 - width(change, 1) - 10;
-      panel(g, 30, y, 340, h, INK.amber);
-      buttons.push({ x: 30, y, w: 340, h, act: a });
-      const s = width(name, 2) <= room ? 2 : 1;
-      const text = width(name, s) <= room ? name : name.slice(0, Math.max(1, Math.floor(room / (GW + TR)) - 3)) + "...";
-      write(g, text, 38, y + Math.round((h - GH * s) / 2), s, INK.gold);
-      write(g, change, 362, y + Math.round((h - GH) / 2), 1, INK.amber, "right");
+    // `text` at scale `s`, cut to `room` pixels with an ellipsis when it would run over.
+    const clip = (text, s, room) => width(text, s) <= room ? text : text.slice(0, Math.max(1, Math.floor(room / ((GW + TR) * s)) - 3)) + "...";
+    // The amount's and the quote's row, as wide as the panels around it: who the tip is from and its message, as one
+    // button that opens them. A name too long for the big size drops to the small one.
+    const detailsRow = (y, x = 30, w = 340, h = 34) => {
+      const room = w - 16 - width("EDIT", 1) - 10, value = hooks.details();
+      panel(g, x, y, w, h, INK.amber);
+      buttons.push({ x, y, w, h, act: "details" });
+      const name = `FROM @${value.handle || "anon"}`, s = width(name, 2) <= room ? 2 : 1;
+      write(g, clip(name, s, room), x + 8, y + 4, s, INK.gold);
+      write(g, value.message ? clip(value.message, 1, room) : "NO MESSAGE", x + 8, y + h - 12, 1, value.message ? INK.white : INK.dim);
+      write(g, "EDIT", x + w - 8, y + Math.round((h - GH) / 2), 1, INK.amber, "right");
+    };
+    // The details screen's message, wrapped at word breaks into MSG_COLS columns (hard breaks when that would need
+    // more than MSG_LINES lines): each line's start written into MSG_STARTS, the text's end after the last, and the
+    // count returned. CARET is where the caret blinks, drawn by `animate`; no height when nothing has the typing.
+    const MSG_COLS = 54, MSG_LINES = 7, MSG_STARTS = new Int16Array(MSG_LINES + 1), CARET = { x: 0, y: 0, h: 0 };
+    const wrap = (text, words = true) => {
+      let lines = 0, start = 0;
+      MSG_STARTS[0] = 0;
+      while (text.length - start > MSG_COLS) {
+        if (lines === MSG_LINES - 1) return words ? wrap(text, false) : lines;
+        const cut = words ? text.lastIndexOf(" ", start + MSG_COLS) : -1;
+        start = cut > start ? cut + 1 : start + MSG_COLS;
+        MSG_STARTS[++lines] = start;
+      }
+      MSG_STARTS[++lines] = text.length;
+      return lines;
     };
     // Repaints after a change only.
     flow.paint = () => {
@@ -694,23 +755,25 @@
           writeFit(g, flow.sats < min ? `MIN ${sats(min)} SATS` : `MAX ${sats(max)} SATS`, W / 2, 332, 1, INK.red, 320, "center");
         }
         else if (overLightning()) write(g, "OVER LIGHTNING LIMIT · ON-CHAIN ONLY", W / 2, 332, 1, INK.amber, "center");
+        // The keypad, short enough to leave the name and message their row above CONTINUE.
         const keys = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "clear", "0", "rub"];
         keys.forEach((k, i) => {
-          const x = 44 + (i % 3) * 106, y = 120 + Math.floor(i / 3) * 54;
-          button(x, y, 100, 46, k === "clear" ? "CLEAR" : k === "rub" ? "" : k, "", k, k.length === 1 ? 3 : 2);
+          const x = 44 + (i % 3) * 106, y = 118 + Math.floor(i / 3) * 42, mid = y + 18;
+          button(x, y, 100, 36, k === "clear" ? "CLEAR" : k === "rub" ? "" : k, "", k, k.length === 1 ? 3 : 2);
           if (k === "rub") {
             g.fillStyle = INK.white;
             g.beginPath();
-            g.moveTo(x + 30, y + 23);
-            g.lineTo(x + 40, y + 13);
-            g.lineTo(x + 70, y + 13);
-            g.lineTo(x + 70, y + 33);
-            g.lineTo(x + 40, y + 33);
+            g.moveTo(x + 30, mid);
+            g.lineTo(x + 40, mid - 10);
+            g.lineTo(x + 70, mid - 10);
+            g.lineTo(x + 70, mid + 10);
+            g.lineTo(x + 40, mid + 10);
             g.closePath();
             g.fill();
-            write(g, "X", x + 56, y + 20, 1, INK.panel, "center");
+            write(g, "X", x + 56, mid - 3, 1, INK.panel, "center");
           }
         });
+        if (hooks.details) detailsRow(292, 44, 312);
         button(100, 348, 200, 40, "CONTINUE >", valid() ? "primary" : "off", "go");
         closeButton();
       } else if (s === "quote" && real) {
@@ -736,7 +799,7 @@
           const at = new Date(rate.at);
           write(g, `OLD PRICE: THE LAST ONE, FROM ${String(at.getHours()).padStart(2, "0")}:${String(at.getMinutes()).padStart(2, "0")}`, W / 2, 276, 1, INK.red, "center");
         }
-        if (hooks.details) fromRow(`FROM @${hooks.details().handle || "anon"}`, "EDIT DETAILS", "details");
+        if (hooks.details) detailsRow(286);
         // How to pay: the Lightning invoice already made, or an address for it on-chain.
         button(30, 326, 84, 52, "< BACK", "", "back");
         button(122, 326, 120, 52, "LIGHTNING", canLightning() ? "primary" : "off", "create");
@@ -755,9 +818,52 @@
         write(g, "YOU WILL MAKE", 42, 186, 1, INK.dim);
         if (hooks.bananasFor(flow.sats + 400) === flow.bananas) write(g, `MAX ${flow.bananas} PER TIP`, 358, 186, 1, INK.dim, "right");
         bananaRow(g, `${flow.bananas} BANANA${flow.bananas > 1 ? "S" : ""}`, 48, 212, 34, 4, 262);
-        if (hooks.details) fromRow(`FROM @${hooks.details().handle || "anon"}`, "EDIT DETAILS", "details");
+        if (hooks.details) detailsRow(286);
         button(30, 326, 120, 52, "< BACK", "", "back");
         button(160, 326, 210, 52, "CREATE INVOICE", "primary", "create");
+        closeButton();
+      } else if (s === "details") {
+        // The name and the message as the page's fields hold them, the one with the typing framed in amber: the name's
+        // selection lit (all of it on arrival, to type over), the caret where the field has it, and the save's word.
+        const t = hooks.typing(), named = t.field === "handle", noted = t.field === "message";
+        CARET.h = 0;
+        face(g, "NAME AND MESSAGE");
+        write(g, "NAME", 30, 46, 1, INK.dim);
+        panel(g, 30, 58, 340, 40, named ? INK.amber : INK.line);
+        buttons.push({ x: 30, y: 58, w: 340, h: 40, act: "name" });
+        const name = `@${t.handle}`, ns = width(name, 2) <= 324 ? 2 : 1, ny = 58 + Math.round((40 - GH * ns) / 2), step = (GW + TR) * ns;
+        if (t.handle) write(g, name, 38, ny, ns, INK.gold);
+        else {
+          write(g, "@", 38, ny, ns, INK.gold);
+          if (!named) write(g, "ANON", 38 + step, ny, ns, INK.dim);
+        }
+        if (named && t.end > t.start) {
+          g.fillStyle = INK.amber;
+          g.fillRect(38 + (t.start + 1) * step - ns, ny - ns, (t.end - t.start) * step + ns, (GH + 2) * ns);
+          write(g, name.slice(t.start + 1, t.end + 1), 38 + (t.start + 1) * step, ny, ns, INK.dark);
+        } else if (named) {
+          CARET.x = 38 + (t.start + 1) * step - ns; CARET.y = ny - ns; CARET.h = (GH + 2) * ns;
+        }
+        write(g, "MESSAGE (OPTIONAL)", 30, 110, 1, INK.dim);
+        write(g, `${t.message.length}/${t.max}`, 370, 110, 1, INK.dim, "right");
+        panel(g, 30, 122, 340, 90, noted ? INK.amber : INK.line);
+        buttons.push({ x: 30, y: 122, w: 340, h: 90, act: "message" });
+        const lines = wrap(t.message);
+        if (t.message) for (let i = 0; i < lines; i++) write(g, t.message.slice(MSG_STARTS[i], MSG_STARTS[i + 1]).trimEnd(), 38, 130 + i * 11, 1, INK.white);
+        else if (!noted) write(g, "TAP TO ADD A MESSAGE", 38, 130, 1, INK.dim);
+        if (noted) {
+          let line = lines - 1;
+          while (line > 0 && t.start < MSG_STARTS[line]) line--;
+          CARET.x = 38 + (t.start - MSG_STARTS[line]) * (GW + TR) - 1; CARET.y = 129 + line * 11; CARET.h = GH + 2;
+        }
+        const word = !onInvoice() ? "" : flow.detailsSaving ? "SAVING..." : flow.detailsError ? flow.detailsError.toUpperCase()
+          : flow.detailsDirty ? "CHANGES SAVE AUTOMATICALLY" : flow.invoice && flow.savedDetails ? "SAVED WITH YOUR INVOICE" : "";
+        writeFit(g, word, W / 2, 222, 1, flow.detailsError ? INK.red : INK.dim, 340, "center");
+        write(g, "YOUR NAME AND MESSAGE GO WITH YOUR TIP", W / 2, 244, 1, INK.dim, "center");
+        if (flow.detailsError && onInvoice()) {
+          button(30, 326, 160, 52, "< KEEP SAVED", "", "back");
+          button(198, 326, 172, 52, "TRY AGAIN", "primary", "done");
+        } else button(30, 326, 340, 52, "DONE", "primary", "done");
         closeButton();
       } else if (s === "invoice" || s === "waiting") {
         const waiting = s === "waiting";
