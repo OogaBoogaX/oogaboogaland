@@ -3690,9 +3690,9 @@ const untilPage = (b, cond, ms = 6000) => b.evaluate(`new Promise((resolve) => {
 
 
 const raceTracks = ["race tracks", async (b) => {
-  const built = await b.evaluate(`(() => { const B = window.__ooga, T = window.BL.raceTrack, out = {}; for (const def of T.TRACKS) { const t0 = performance.now(); document.querySelector('[data-track="' + def.id + '"]').click(); const ms = performance.now() - t0; const t = B.track, S = t.samples, n = t.count; let maxStep = 0, gapNearCheck = false; for (let i = 0; i < n; i++) { const q = (i + 1) % n; if (S.surface[i] !== T.SURF.gap && S.surface[q] !== T.SURF.gap) maxStep = Math.max(maxStep, Math.abs(S.y[q] - S.y[i])); } for (const c of t.checkpoints) for (let k = 0; k < 30; k++) if (S.surface[(c + k) % n] === T.SURF.gap) gapNearCheck = true; const resident = new Set(); let placedFaces = 0; for (const sector of t.sectors) for (const node of sector.node.children) if (node.geometry) { resident.add(node.geometry); placedFaces += node.geometry.faces.length; } const faces = [...resident].reduce((sum, geo) => sum + geo.faces.length, 0); const h0 = t.heightAt(t.grid[0].x, t.grid[0].z, -1); out[def.id] = { ms: Math.round(ms), samples: n, length: Math.round(t.length), sectors: t.sectors.length, chunks: t.terrainNodes.length, checkpoints: t.checkpoints.length, first: t.checkpoints[0], gapNearCheck, maxStep: +maxStep.toFixed(2), faces, placedFaces, bananas: t.spawns.bananas.length, crates: t.spawns.crates.length, pads: t.spawns.pads.length, map: t.mapPts.length, grid: t.grid.length, gridHeight: Math.abs(h0 - t.grid[0].y) < 1e-6, torches: t.torches.length, spectators: t.spectators.count, records: B.renderer.stats.records, sky: !!(t.renderOpts.horizon && t.renderOpts.zenith) }; } return out; })()`);
+  const built = await b.evaluate(`(() => { const B = window.__ooga, T = window.BL.raceTrack, out = {}; for (const def of T.TRACKS) { const t0 = performance.now(); document.querySelector('[data-track="' + def.id + '"]').click(); const ms = performance.now() - t0; const t = B.track, S = t.samples, n = t.count; let maxStep = 0, gapNearCheck = false; for (let i = 0; i < n; i++) { const q = (i + 1) % n; if (S.surface[i] !== T.SURF.gap && S.surface[q] !== T.SURF.gap) maxStep = Math.max(maxStep, Math.abs(S.y[q] - S.y[i])); } for (const c of t.checkpoints) for (let k = 0; k < 30; k++) if (S.surface[(c + k) % n] === T.SURF.gap) gapNearCheck = true; const resident = new Set(); let placedFaces = 0; for (const sector of t.sectors) for (const node of sector.node.children) if (node.geometry) { resident.add(node.geometry); placedFaces += node.geometry.faces.length; } const faces = [...resident].reduce((sum, geo) => sum + geo.faces.length, 0); const h0 = t.heightAt(t.grid[0].x, t.grid[0].z, -1); out[def.id] = { ms: Math.round(ms), samples: n, length: Math.round(t.length), sectors: t.sectors.length, chunks: t.terrainNodes.length, checkpoints: t.checkpoints.length, first: t.checkpoints[0], gapNearCheck, maxStep: +maxStep.toFixed(2), faces, placedFaces, bananas: t.spawns.bananas.length, crates: t.spawns.crates.length, pads: t.spawns.pads.length, map: t.mapPts.length, grid: t.grid.length, field: window.BL.racers.FIELD, gridHeight: Math.abs(h0 - t.grid[0].y) < 1e-6, torches: t.torches.length, spectators: t.spectators.count, records: B.renderer.stats.records, sky: !!(t.renderOpts.horizon && t.renderOpts.zenith) }; } return out; })()`);
   for (const [id, t] of Object.entries(built)) {
-    record(`race tracks: ${id} builds fast into culled sectors with checkpoints clear of its gaps`, t.ms < 900 && t.samples > 300 && t.length > 600 && t.sectors >= 12 && t.chunks > 20 && t.checkpoints === 8 && t.first === 0 && !t.gapNearCheck && t.maxStep < 0.8 && t.faces > 15000 && t.faces < 120000 && t.bananas >= 30 && t.crates >= 6 && t.pads >= 2 && t.map >= 100 && t.grid === Math.max(8, CAST) && t.gridHeight && t.spectators > 12 && t.records < 320, JSON.stringify(t));
+    record(`race tracks: ${id} builds fast into culled sectors with checkpoints clear of its gaps`, t.ms < 900 && t.samples > 300 && t.length > 600 && t.sectors >= 12 && t.chunks > 20 && t.checkpoints === 8 && t.first === 0 && !t.gapNearCheck && t.maxStep < 0.8 && t.faces > 15000 && t.faces < 120000 && t.bananas >= 30 && t.crates >= 6 && t.pads >= 2 && t.map >= 100 && t.grid === Math.max(8, Math.min(t.field, CAST)) && t.gridHeight && t.spectators > 12 && t.records < 320, JSON.stringify(t));
   }
   record("race tracks: the two outdoor tracks carry a sky and the gorge lights its torches", built.bay.sky && built.peak.sky && !built.gorge.sky && built.gorge.torches >= 20 && built.bay.torches === 0, JSON.stringify({ bay: built.bay.sky, gorge: [built.gorge.sky, built.gorge.torches], peak: built.peak.sky }));
   const swapped = await b.evaluate(`(() => { const B = window.__ooga, track = id => { document.querySelector('[data-track="' + id + '"]').click(); B.advance(1 / 60, 1 / 60); B.housekeep(); return { records: B.renderer.stats.records, nodes: B.stats().allNodes, pool: B.stats().pool, particles: B.stats().particles }; }; const before = track("bay"); track("peak"); const after = track("bay"); return { before, after }; })()`);
@@ -5152,7 +5152,7 @@ const donation = (id, { stat = "dropsLanded", seconds = 6, where = "lands its ba
 } });
 // Every track of the cup under the autopilot: all racers finish in order, the points and the cup medal
 // are the standings', and every track keeps a best. Ties share a place, so the saved medal may be any of theirs.
-const cupRun = `(() => { const B = window.__ooga, R = B.race, T = window.BL.raceTrack.TRACKS, rounds = []; R.startCup(); for (let i = 0; i < T.length; i++) { if (i) R.nextRace(); const P = B.racers; P.start(); P.autopilot = true; R.simulate(300); P.autopilot = false; rounds.push({ track: R.selection.track, all: P.order.every((r) => r.finished), ranked: P.order.every((r, k) => r.rank === k + 1 && (!k || P.order[k - 1].finishTime <= r.finishTime)) }); R.finishRace(); } const pts = Array.from(R.cup.points), you = pts[B.racers.player.index], lo = pts.filter((p) => p > you).length + 1, hi = pts.filter((p) => p >= you).length, stored = B.game.state.race.cup, place = stored ? ["gold", "silver", "bronze"].indexOf(stored.medal) + 1 : 0; const saved = stored ? stored.points === you && place >= lo && place <= hi : hi > 3; return { ok: R.cup.done && R.phase === "finished" && rounds.every((r) => r.all && r.ranked) && saved && T.every((t) => B.game.state.race.best[t.id]), rounds, you, lo, hi, stored }; })()`;
+const cupRun = `(() => { const B = window.__ooga, R = B.race, T = window.BL.raceTrack.TRACKS, rounds = []; R.startCup(); for (let i = 0; i < T.length; i++) { if (i) R.nextRace(); const P = B.racers; P.start(); P.autopilot = true; R.simulate(300); P.autopilot = false; rounds.push({ track: R.selection.track, field: P.racers.map((r) => r.name).join(), all: P.order.every((r) => r.finished), ranked: P.order.every((r, k) => r.rank === k + 1 && (!k || P.order[k - 1].finishTime <= r.finishTime)) }); R.finishRace(); } const pts = Array.from(R.cup.points), you = pts[B.racers.player.index], lo = pts.filter((p) => p > you).length + 1, hi = pts.filter((p) => p >= you).length, stored = B.game.state.race.cup, place = stored ? ["gold", "silver", "bronze"].indexOf(stored.medal) + 1 : 0; const saved = stored ? stored.points === you && place >= lo && place <= hi : hi > 3; return { ok: R.cup.done && R.phase === "finished" && B.racers.racers.length === Math.min(window.BL.racers.FIELD, B.racers.all.length) && rounds.every((r) => r.all && r.ranked && r.field === rounds[0].field) && saved && T.every((t) => B.game.state.race.best[t.id]), rounds, you, lo, hi, stored }; })()`;
 // The diver starts 40 up and 56 back along its heading from the target; its glide carries it onto it.
 const dropRun = `(() => { const B = window.__ooga, D = B.drop; D.jumpNow(); const T = B.course.target, d = B.diver.state, h = Math.atan2(T.x, T.z); B.diver.place(T.x - Math.sin(h) * 56, T.y + 40, T.z - Math.cos(h) * 56, h); B.diver.jump(0, 0, 0, h); let pulled = false; for (let t = 0; t < 120 && D.phase !== "results"; t += 0.25) { if (!pulled && D.phase === "air" && d.p.y < T.y + 75) { D.deploy(); pulled = true; } D.simulate(0.25); } const r = D.result, best = B.game.state.drop.best; return { ok: D.phase === "results" && !!r && r.score > 0 && r.medal === window.BL.dropHud.medalFor(r.score) && !!best && best.score === r.score, phase: D.phase, result: r && { score: r.score, landing: r.landing, medal: r.medal } }; })()`;
 // Eight GPU rigs for two minutes, out to the island mid-run and a reload: the run comes back as saved and
@@ -5210,7 +5210,7 @@ const raceRigs = { name: "race rig poses", why: "regression: the full custom dri
     const matrices = rigs.map(rig => rig?.matrices);
     for (const id of ["bay", "gorge", "peak", "bay"]) {
       document.querySelector('[data-track="' + id + '"]').click(); B.advance(1 / 60, 1 / 60); B.housekeep();
-      rows.push({ id, records: B.renderer.stats.records, racers: B.racers.racers.length });
+      rows.push({ id, records: B.renderer.stats.records, racers: B.racers.all.length });
     }
     for (const mount of ["run", "dino", "kart"]) {
       document.querySelector('[data-mount="' + mount + '"]').click(); B.advance(1 / 60, 1 / 60);
@@ -5257,12 +5257,12 @@ const raceRigContext = { name: "race rig context restoration", why: "regression:
         for (let j = 0; j < rig.nodes.length; j++) for (let k = 0; k < 16; k++) exact &&= rig.matrices[j * 16 + k] === Math.fround(rig.nodes[j].world[k]);
         voxelsFinite &&= Array.from(rig.voxels).every((value, j) => Number.isFinite(value) && value === entry.voxelValues[j]);
       }
-      const result = { lost, restored, contextLost: gl.isContextLost(), before, records: B.renderer.stats.records, drawn: B.renderer.stats.drawn, ready: B.renderer.ready, failure: B.renderer.failure, framesBefore: frames, framesAfter: B.renderedFrames, racers: saved.length, buffers, vaos, identities, exact, voxelsFinite, error: gl.getError() };
+      const result = { lost, restored, contextLost: gl.isContextLost(), before, records: B.renderer.stats.records, drawn: B.renderer.stats.drawn, ready: B.renderer.ready, failure: B.renderer.failure, framesBefore: frames, framesAfter: B.renderedFrames, racers: saved.length, field: window.BL.racers.FIELD, buffers, vaos, identities, exact, voxelsFinite, error: gl.getError() };
       cleanup(); resolve(result);
     };
     canvas.addEventListener("webglcontextlost", onLost); canvas.addEventListener("webglcontextrestored", onRestored); ext.loseContext();
   })`);
-  record("race rigs: a real WebGL context loss rebuilds GPU records for the full cast within the unchanged cap while preserving CPU sources and joint palettes", r.lost && r.restored && !r.contextLost && r.ready && !r.failure && r.drawn > 0 && r.records > 0 && r.records < 320 && r.before < 320 && r.racers === CAST && r.buffers >= CAST * 2 && r.vaos >= CAST && r.identities && r.exact && r.voxelsFinite && r.error === 0, JSON.stringify(r));
+  record("race rigs: a real WebGL context loss rebuilds GPU records for the whole field within the unchanged cap while preserving CPU sources and joint palettes", r.lost && r.restored && !r.contextLost && r.ready && !r.failure && r.drawn > 0 && r.records > 0 && r.records < 320 && r.before < 320 && r.racers === Math.min(r.field, CAST) && r.buffers >= CAST * 2 && r.vaos >= CAST && r.identities && r.exact && r.voxelsFinite && r.error === 0, JSON.stringify(r));
 } };
 const racePause = { name: "race pause", why: "rule: Escape pauses the race and nothing moves until it is pressed again", run: async (b) => {
   await b.evaluate(`(() => { const B = window.__ooga; ${EV} B.race.startRace(); B.advance(3.6, 1 / 60); ev("keydown", "w"); B.advance(1, 1 / 60); })()`);
@@ -5272,8 +5272,36 @@ const racePause = { name: "race pause", why: "rule: Escape pauses the race and n
   const going = await b.evaluate(`(() => { const B = window.__ooga, p = B.racers.player, x = p.x, z = p.z, phase = B.race.phase; B.advance(0.5, 1 / 60); window.dispatchEvent(new KeyboardEvent("keyup", { key: "w" })); return { phase, moved: Math.hypot(p.x - x, p.z - z) }; })()`);
   record("race pause: Escape pauses with the pause panel up and no racer or clock moving, and Escape again drives on", held.phase === "paused" && held.panel && held.moved === 0 && held.clock === 0 && going.phase === "racing" && going.moved > 1, JSON.stringify({ held, going }));
 } };
+// A signed-in contributor drives only their own Ooga on the island, so the garage holds them to it. The account
+// is set on the page's own `BL.net.state`, as /api/me leaves it before a garage opens; signing out clears it.
+const raceOwn = { name: "race own ooga", why: "rule: a signed-in visitor with an Ooga races only it, and signing out brings the picker back", run: async (b) => {
+  const r = await b.evaluate(`(() => { const B = window.__ooga, R = B.race, P = B.racers, net = window.BL.net;
+    const rows = () => [...document.querySelectorAll("#garage-racers li")].filter((li) => !li.hidden).map((li) => li.querySelector("button").dataset.racer);
+    const before = R.selection.racer, c = window.BL.characters.all().find((c) => c.handle !== before && P.all.some((r) => r.name === c.handle));
+    net.state.me = { id: 1, login: c.github || c.handle, display: c.handle };
+    R.toGarage();
+    const signedIn = { rows: rows(), picked: R.selection.racer, player: P.player.name, last: P.racers[P.racers.length - 1] === P.player, help: document.getElementById("garage-pick-ooga").hidden };
+    net.state.me = null;
+    R.toGarage();
+    const signedOut = { rows: rows().length, help: !document.getElementById("garage-pick-ooga").hidden };
+    document.querySelector('#garage-racers [data-racer="' + before + '"]').click();
+    return { own: c.handle, signedIn, signedOut, restored: P.player.name === before };
+  })()`);
+  record("race own ooga: a signed-in visitor's garage offers only their own Ooga and races it, and signing out offers every Ooga again", r.signedIn.rows.length === 1 && r.signedIn.rows[0] === r.own && r.signedIn.picked === r.own && r.signedIn.player === r.own && r.signedIn.last && r.signedIn.help && r.signedOut.rows === CAST && r.signedOut.help && r.restored, JSON.stringify(r));
+} };
+// Picking judges a racer's head and torso by their ancestors, so an Ooga off the field must hang, body and all,
+// under its hidden racer node; one never seated once floated detached and visible at a stale place.
+const raceBench = { name: "race bench", why: "regression: Oogas never drawn into the field stayed pickable at stale transforms", run: async (b) => {
+  const r = await b.evaluate(`(() => { const P = window.__ooga.racers, field = new Set(P.racers);
+    const bench = P.all.filter((r) => !field.has(r));
+    return { built: P.all.length, field: field.size, bench: bench.length, detached: P.all.filter((r) => r.cave.root.parent !== r.node).map((r) => r.name).slice(0, 5), shownOff: bench.filter((r) => r.node.visible).length, hiddenOn: P.racers.filter((r) => !r.node.visible).length };
+  })()`);
+  record("race bench: every Ooga's body hangs under its racer, and only the field is shown", r.built === CAST && r.bench === CAST - r.field && r.bench > 0 && r.detached.length === 0 && r.shownOff === 0 && r.hiddenOn === 0, JSON.stringify(r));
+} };
 const raceMirror = { name: "race mirror", why: "rule: a gold cup opens the mirror tracks, and steering stays true on them", run: async (b) => {
-  const r = await b.evaluate(`(() => { const B = window.__ooga, R = B.race, btn = document.getElementById("garage-mirror"); R.toGarage(); const locked = btn.hidden; document.querySelector('[data-action="race-mirror"]').click(); const stayed = !R.selection.mirror; B.game.recordCup(1, 70); R.startRace(); R.finishRace(); const shown = !btn.hidden; btn.click(); return { locked, stayed, shown, mirror: R.selection.mirror && B.track.mirror }; })()`);
+  // The autopilot's cup before this can win gold against a field of fifteen, so the save starts without a
+  // cup, as a fresh visitor's does (in memory and in storage alike), and a race lets the garage read it.
+  const r = await b.evaluate(`(() => { const B = window.__ooga, R = B.race, btn = document.getElementById("garage-mirror"); B.game.state.race.cup = null; localStorage.setItem("oogaboogaland.v1", JSON.stringify(B.game.state)); R.startRace(); R.finishRace(); R.toGarage(); const locked = btn.hidden; document.querySelector('[data-action="race-mirror"]').click(); const stayed = !R.selection.mirror; B.game.recordCup(1, 70); R.startRace(); R.finishRace(); const shown = !btn.hidden; btn.click(); return { locked, stayed, shown, mirror: R.selection.mirror && B.track.mirror }; })()`);
   const px = await b.evaluate(raceSteer(["a", "d"]));
   record("race mirror: the mirror button stays shut until a gold cup, then opens the mirrored track, where A and D still steer left and right on screen", r.locked && r.stayed && r.shown && r.mirror && px.a < -50 && px.d > 50, JSON.stringify({ ...r, px }));
 } };
@@ -11570,11 +11598,11 @@ scene("race", { label:"optional rig link fallback",url:hubPage(src),steps:[{name
   })()`);
   try {
     const ready=await untilPage(b,'B.scene==="race"&&!B.transitioning&&B.renderer.rigFailed&&B.renderedFrames>2',15000);
-    const r=await b.evaluate(`(()=>{const B=__ooga;return {kind:B.renderer.kind,failure:B.renderer.failure,rigFailed:B.renderer.rigFailed,ready:B.renderer.ready,drawn:B.renderer.stats.drawn,racers:B.racers.racers.length,original:B.racers.racers.every(r=>r.node.geometry.meshRig.nodes.every(n=>n.geometry.faces.length>0&&n.meshRigSource===r.node.geometry.meshRig)),faults:__rigFault.pending.size};})()`);
+    const r=await b.evaluate(`(()=>{const B=__ooga;return {kind:B.renderer.kind,failure:B.renderer.failure,rigFailed:B.renderer.rigFailed,ready:B.renderer.ready,drawn:B.renderer.stats.drawn,racers:B.racers.all.length,original:B.racers.all.every(r=>r.node.geometry.meshRig.nodes.every(n=>n.geometry.faces.length>0&&n.meshRigSource===r.node.geometry.meshRig)),faults:__rigFault.pending.size};})()`);
     record("race optional rig: forced link failure keeps WebGL rendering the full original cast",ready&&r.kind==="webgl2"&&!r.failure&&r.rigFailed&&r.ready&&r.drawn>0&&r.racers===CAST&&r.original&&r.faults>0,JSON.stringify(r));
   } finally {await b.evaluate('(()=>{const f=__rigFault;f.gl.createProgram=f.create;f.gl.getProgramParameter=f.parameter;delete window.__rigFault;})()');}
 }}]});
-scene("race", { query: "rain=0", steps: [raceStart, { name: "race tracks", why: "regression: the 12-slot grid spawned a free banana on Banana Bay", run: async (b) => { await b.evaluate(`window.__ooga.race.toGarage()`); await raceTracks[1](b); } }, raceRigs, raceRigContext, racePause, play("race", "a whole cup under the autopilot: every racer finishes in order, the cup medal and every track's best are saved", cupRun), raceMirror, raceAgain, trip("race")] });
+scene("race", { query: "rain=0&draw=0", steps: [raceStart, raceOwn, raceBench, { name: "race tracks", why: "regression: the 12-slot grid spawned a free banana on Banana Bay", run: async (b) => { await b.evaluate(`window.__ooga.race.toGarage()`); await raceTracks[1](b); } }, raceRigs, raceRigContext, racePause, play("race", "a whole cup under the autopilot: one drawn field of fifteen runs every race and finishes in order, the cup medal and every track's best are saved", cupRun), raceMirror, raceAgain, trip("race")] });
 scene("drop", { steps: [dropStart, dropSteering, play("drop", "a jump lands on the target, scores its own medal and is saved as the best", dropRun), dropCrash, trip("drop")] });
 scene("orbit", { steps: [{ name: "orbit flow", why: "regression: the spacewalk air bonus was missing from the flight log", run: orbitFlow }, orbitSteering, orbitMissed, orbitEscape, trip("orbit")] });
 scene("mine", { steps: [mineResume, trip("mine"), mineControls] });
@@ -11699,7 +11727,7 @@ scene("hub", { label: "clock and block height", query: "pos=0&time=0900", steps:
 scene("hub", { label: "canvas2d", query: "canvas2d=1", steps: [canvasTour] });
 scene("hub", { query: "pos=0", opts: PHONE_SIZE, steps: [phone("hub", { required: ["#joy-move", "#joy-look", "#sheet-toggle", "#sheet-bananas"], sheet: true })] });
 scene("lab", { query: "pos=0", opts: PHONE_SIZE, steps: [phone("lab", { required: ["#joy-move", "#joy-look", ".leave"] })] });
-scene("race", { query: "pos=0&rain=0", opts: PHONE_SIZE, steps: [phone("race", { card: '[data-intro="race"]', play: "window.__ooga.race.startRace()", required: ["#joy-move", "#act", "#item-btn", "#race-garage-btn", ".leave"] })] });
+scene("race", { query: "pos=0&rain=0&draw=0", opts: PHONE_SIZE, steps: [phone("race", { card: '[data-intro="race"]', play: "window.__ooga.race.startRace()", required: ["#joy-move", "#act", "#item-btn", "#race-garage-btn", ".leave"] })] });
 scene("drop", { query: "pos=0", opts: PHONE_SIZE, steps: [phone("drop", { card: '[data-intro="drop"]', play: "window.__ooga.drop.start()", required: ["#joy-move", "#joy-look", "#act", ".leave"] })] });
 scene("orbit", { query: "pos=0", opts: PHONE_SIZE, steps: [phone("orbit", { card: '[data-intro="orbit"]', play: "window.__ooga.orbit.launch()", required: ["#joy-move", "#act", ".leave"] })] });
 scene("mine", { query: "pos=0", opts: PHONE_SIZE, steps: [phone("mine", { card: "#mine-intro", required: ["#joy-move", "#joy-look", "#act", "#mine-view-btn", "#mine-pause-btn", "#mine-mute", ".leave"] })] });
@@ -13682,10 +13710,10 @@ const raceRigChecks = async () => {
   const renderer = { createRig: BL.glRenderer.createRig, releaseGeometry: geometry => released.push(geometry) };
   const track = BL.raceTrack.build(BL.raceTrack.TRACKS[0], { renderer, slots: CAST, rain: false, hour: 12 });
   const racers = BL.racers.create({ root: scene, track, renderer, input: { add() {}, remove() {} }, fx: null });
-  const originals = racers.racers.map(racer => ({ node: racer.node, geometry: racer.node.geometry, rig: racer.node.geometry.meshRig, joints: racer.node.geometry.meshRig.nodes.slice(), sources: racer.node.geometry.meshRig.sources.slice() }));
+  const originals = racers.all.map(racer => ({ node: racer.node, geometry: racer.node.geometry, rig: racer.node.geometry.meshRig, joints: racer.node.geometry.meshRig.nodes.slice(), sources: racer.node.geometry.meshRig.sources.slice() }));
   let stable = true;
   for (const mount of ["kart", "run", "dino", "kart", "dino", "run", "kart"]) {
-    racers.setup({ track, playerName: racers.racers[0].name, playerMount: mount, lapCount: 3 });
+    racers.setup({ track, playerName: racers.all[0].name, playerMount: mount, lapCount: 3 });
     BL.scene.updateWorld(scene);
     for (const entry of originals) stable &&= entry.node.geometry === entry.geometry && entry.rig.nodes.length === 9 && entry.rig.sources.every((source, i) => source === entry.sources[i] && entry.rig.nodes[i].geometry === source && entry.rig.nodes[i].meshRigSource === entry.rig);
   }
