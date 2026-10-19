@@ -1478,12 +1478,12 @@
   // with the scattered tufts.
   const lawnTuft = cached(() => ({ ...grassTuft() }));
   // Lantern hangs below the origin; the origin is its hook.
-  const lantern = cached(() => noShadow(merge(
+  const lantern = variants((v) => noShadow(merge(
     box({ w: 0.06, h: 0.08, d: 0.06, color: "#3a2a18", offset: { y: -0.04 } }),
     box({ w: 0.24, h: 0.04, d: 0.24, color: "#2b2521", offset: { y: -0.1 } }),
     ...[[-0.105, -0.105], [0.105, -0.105], [-0.105, 0.105], [0.105, 0.105]].map(([x, z]) => box({ w: 0.03, h: 0.3, d: 0.03, color: "#2b2521", offset: { x, y: -0.27, z } })),
     box({ w: 0.24, h: 0.04, d: 0.24, color: "#2b2521", offset: { y: -0.44 } }),
-    box({ w: 0.13, h: 0.16, d: 0.13, color: "#ffd27a", emissive: 1, offset: { y: -0.27 } })
+    box({ w: 0.13, h: 0.16, d: 0.13, color: v === 1 ? "#ff5a46" : "#ffd27a", emissive: 1, offset: { y: -0.27 } })
   )));
   // Firepit geometry only; the flame is fireFlame.
   const firepit = cached(() => {

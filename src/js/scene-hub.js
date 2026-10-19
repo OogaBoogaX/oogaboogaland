@@ -151,7 +151,7 @@
   };
   const PHASE_TOASTS = { dawn: "Dawn breaks over the island", morning: "Morning on the island", noon: "High noon", dusk: "Dusk settles over the island", night: "Night. The torches are lit.", midnight: "Midnight. The island sleeps." };
   // Lamp colours and reach; a lamp's flame reads through node.glow.
-  const LAMP = { torch: { r: 1.0, g: 0.62, b: 0.25, radius: 6, glow: 0.85, hide: false }, fire: { r: 1.0, g: 0.55, b: 0.2, radius: 9, glow: 0.9, hide: true }, lantern: { r: 1.0, g: 0.8, b: 0.45, radius: 4, glow: 0.9, hide: false }, arch: { r: 1.0, g: 0.62, b: 0.3, radius: 8, glow: 0.9, hide: false } };
+  const LAMP = { torch: { r: 1.0, g: 0.62, b: 0.25, radius: 6, glow: 0.85, hide: false }, fire: { r: 1.0, g: 0.55, b: 0.2, radius: 9, glow: 0.9, hide: true }, lantern: { r: 1.0, g: 0.8, b: 0.45, radius: 4, glow: 0.9, hide: false }, arcade: { r: 1, g: 0.38, b: 0.3, radius: 4, glow: 0.9, hide: false }, arch: { r: 1.0, g: 0.62, b: 0.3, radius: 8, glow: 0.9, hide: false } };
   const LIGHT_CAPACITY = BL.glRenderer.POINT_LIGHT_CAPACITY;
   const LIGHTING_DEBUG = {
     registeredLampCount: 0, activeFullLightCount: 0, approximatedLightCount: 0,
@@ -1754,7 +1754,7 @@
     lab: { glass: 1, icon: "die", banners: [[-1, 1], [1, 1]], string: ["bulb", 1], pieces: [["flaskBench", -5.3, 1.1], ["die", -4.1, 2.8, 0, 1], ["die", -3.5, 3.6, 1, 3], ["die", -4.1, 2.8, 1, 4, 0.5], ["terminal", 5.2, 1.0], ["die", 4.3, 3.2, 1, 2]] },
     matrix: { glass: 2, icon: "glyph", banners: [[1, 2], [-1, 2]], string: ["bulb", 2], pieces: [["monolith", -5.0, 0.9, 0, 0], ["monolith", 5.0, 0.9, 0, 1], ["runeStone", -4.2, 2.8, 0, 0], ["runeStone", 4.4, 2.9, 0, 1], ["rubble", -6.3, 2.6, 0, 1]] },
     lightning: { glass: 0, icon: "bolt", banners: [[-1, 0], [1, 0]], string: ["hanging", 0, [0.3, 0.7]], boards: true, pieces: [["coalCrate", -5.1, 0.8, 0, 3], ["crate", -5.4, 2.1, 1, 0], ["crate", -5.4, 2.1, 0, 1, 0.75], ["barrel", -4.3, 2.9, 0, 1], ["rubble", -6.4, 0.9, 0, 1], ["gauge", 5.0, 0.9], ["cart", 5.7, 2.4, 1], ["coil", 3.8, 3.4], ["coalCrate", 6.4, 3.4, 0, 1]] },
-    arcade: { glass: 0, icon: "banana", banners: [[-1, 3], [1, 3]], string: ["hanging", 0, [0.12, 0.5, 0.88]], inside: [["barrel", -2.4, -1.9, 0, 0], ["crate", 2.4, -2.0, 1, 0], ["barrel", 2.4, -2.0, 0, 1, 0.75]], ceiling: [[-2.35, 2.35, -1.5, -5.8, 3.0, [0.35, 0.8]]], pieces: [["cabinet", -3.6, 1.0, 0, 0], ["cabinet", -2.9, 2.2, 0, 1]] },
+    arcade: { glass: 3, ceilingGlass: 0, icon: "banana", banners: [[-1, 3], [1, 3]], string: ["hanging", 3, [0.12, 0.5, 0.88]], inside: [["barrel", -2.4, -1.9, 0, 0], ["crate", 2.4, -2.0, 1, 0], ["barrel", 2.4, -2.0, 0, 1, 0.75]], ceiling: [[-2.35, 2.35, -1.5, -5.8, 3.0, [0.35, 0.8]]], pieces: [["cabinet", -3.6, 1.0, 0, 0], ["cabinet", -2.9, 2.2, 0, 1]] },
     bca: { glass: 0, icon: "abacus", banners: [[-1, 4], [1, 4]], string: ["hanging", 0, [0.2, 0.5, 0.8]], ceiling: [[-1.6, 1.6, -2.2, -5.6, 3.1, [0.5]]], pieces: [["abacus", -5.0, 1.0], ["ledger", 5.0, 1.0, 2]] }
   };
   // Themes choose only [side, variant]. The whole standard stays behind and outside the lanterns,
@@ -1841,8 +1841,8 @@
     // Inside the mouth the floor is the cave's own, level with the doorway.
     for (const [kind, lx, lz, turns = 0, variant = 0, lift = 0] of theme.inside || []) set.put(kind, lx, lift, lz, turns, variant);
     for (const [ax, bx, az, bz, y, lamps] of theme.ceiling || []) {
-      set.cable(ax, y, az, ax, y, bz, 0.15, lamps, "hanging", theme.glass);
-      set.cable(bx, y, az, bx, y, bz, 0.15, lamps, "hanging", theme.glass);
+      set.cable(ax, y, az, ax, y, bz, 0.15, lamps, "hanging", theme.ceilingGlass ?? theme.glass);
+      set.cable(bx, y, az, bx, y, bz, 0.15, lamps, "hanging", theme.ceilingGlass ?? theme.glass);
     }
     baked = { ...set.build(), ground };
     byIsland.set(slot.id, baked);
@@ -2392,14 +2392,14 @@
         ]
       });
       if (mirrorCave && mirrorCave.slot === slot) mirrorCave.sign = sign;
-      const lantern = createNode({ position: { x: halfW + 0.34, y: sign.position.y + halfH + 0.14, z: signZ }, geometry: hubModels.lantern() });
+      const lantern = createNode({ position: { x: halfW + 0.34, y: sign.position.y + halfH + 0.14, z: signZ }, geometry: hubModels.lantern(slot.scene === "arcade" ? 1 : 0) });
       addChild(group, lantern);
       const lx = lantern.position.x, ly = lantern.position.y - 0.27, lz = lantern.position.z;
       const wx = m.x + Math.cos(m.ry) * lx + ax * lz;
       const wy = m.floorY + ly;
       const wz = m.z - Math.sin(m.ry) * lx + az * lz;
       const id = `${slot.id}:lantern:right`;
-      const lamp = addLamp(lantern, LAMP.lantern, wx, wy, wz, !slot.glowOnly, 2, id);
+      const lamp = addLamp(lantern, slot.scene === "arcade" ? LAMP.arcade : LAMP.lantern, wx, wy, wz, !slot.glowOnly, 2, id);
       lamp.nightOnly = true;
       const debug = { id, caveId: slot.id, kind: "lantern", side: "right", localPosition: [lx, ly, lz], worldPosition: [wx, wy, wz], registered: !slot.glowOnly, factor: 0, lit: false, selected: false, approximated: false, rimFront: null, fixtureBack: null, gap: null };
       lamp.debug = debug;
