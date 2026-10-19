@@ -1,7 +1,7 @@
 // The one set-dressing kit every scene draws from. `KIT` pieces are voxel functions on a 1/16 grid, each
 // writing through `box` and `put` into separate solid, hanging, decorative glow and lantern glow layers: general (`lanternPost`, `crate`, `coalCrate`,
 // `barrel`, `cart`, `banner`, `gauge`, `rubble`, `bracket`, `hanging`, `bulb`), lab (`die`,
-// `flaskBench`, `terminal`, `chalkboard`), the mirror (`monolith`, `runeStone`), lightning (`coil`,
+// `flaskBench`, `terminal`, `chalkboard`), the mirror (`monolith`, `runeStone`), lightning (`coil` and its `coilCharge`,
 // `boards`), the arcade (`cabinet`), B.C.A. (`abacus`, `ledger`), plus `bench`, `vine` and `banner(v)` carrying each cave's emblem as pixel art.
 //
 // `set()` places pieces by quarter turns (`put`), strings sagging cables with lamps (`cable`) and `build`s
@@ -516,6 +516,10 @@
       if (d <= r) fn(cx + x, y, cz + z, d);
     }
   };
+  // The coil's crown: seven stacked discs swelling to its middle at `y`.
+  const crown = (put, layer, color, y) => {
+    for (let k = -3; k <= 3; k++) disc((x, yy, z) => put(layer, x, yy, z, color), 3.6 - Math.abs(k) * 0.9, y + k);
+  };
   const plank = (x, y, z, lo, hi, axis) => {
     const t = axis === 0 ? x : axis === 1 ? y : z;
     return (t - lo) % 4 === 3 && t !== hi ? 3 : ((t - lo) >> 2) & 1 ? 1 : 0;
@@ -662,18 +666,27 @@
       box(SOLID, -6, 5, 0, 10, -4, 3, (x, y) => y === 10 ? 21 : 20);
       icon(put, GLOW, ICONS.glyph, -3, 2, 4, 1, 37);
     }),
-    // The Lightning Factory: a coil with a glowing crown and arcs leaping from it.
+    // The Lightning Factory: a coil of copper bands under a copper crown, dark until a scene charges it with
+    // `coilRig`'s parts.
     coil: () => author((put, box) => {
       box(SOLID, -5, 4, 0, 3, -5, 4, (x, y) => y === 3 ? 6 : 5);
       for (let y = 4; y <= 30; y++) disc((x, yy, z) => put(SOLID, x, yy, z, y % 3 === 0 ? 39 : 5), y % 3 === 0 ? 3.2 : 2.3, y);
-      for (let y = 31; y <= 37; y++) disc((x, yy, z) => put(GLOW, x, yy, z, 11), 3.6 - Math.abs(y - 34) * 0.9, y);
-      const rand = mulberry32(3);
-      for (let arc = 0; arc < 3; arc++) {
-        let x = 0, y = 34, z = 0;
-        const dx = [1, -1, 0][arc], dz = [0, 1, -1][arc];
-        for (let k = 0; k < 9; k++) {
-          x += dx * 1; z += dz * 1; y += rand() < 0.5 ? 1 : -1;
-          put(GLOW, x + dx * 3, y, z + dz * 3, 11);
+      crown(put, HANG, 39, 34);
+    }),
+    // The coil's charge, baked apart by `coilRig`: 0 one band's glow, 1 the crown's, 2 and 3 two sets of short
+    // arcs from the crown.
+    coilCharge: (v) => author((put) => {
+      if (v === 0) disc((x, y, z) => put(GLOW, x, y, z, 11), 3.2, 0);
+      else if (v === 1) crown(put, GLOW, 11, 0);
+      else {
+        const rand = mulberry32(v * 7);
+        for (let arc = 0; arc < 4; arc++) {
+          const a = (arc + (v - 2) * 0.5 + rand() * 0.4) * Math.PI / 2, dx = Math.cos(a), dz = Math.sin(a);
+          let y = 33 + Math.floor(rand() * 3);
+          for (let k = 3; k <= 8; k++) {
+            y += rand() < 0.5 ? 1 : -1;
+            put(GLOW, Math.round(dx * k), y, Math.round(dz * k), 10);
+          }
         }
       }
     }),
@@ -762,7 +775,6 @@
         const x = Math.round(Math.cos(ang) * 4.6 - 0.5), y = Math.round(Math.sin(ang) * 4.6) + 26;
         put(SOLID, x, y, 3, t < 0.45 ? 17 : t < 0.75 ? 18 : 19);
       }
-      for (let i = 0; i <= 4; i++) put(SOLID, Math.round(i * 0.8) - 1, 26 + Math.round(i * 0.9), 3, 5);
     }),
     rubble: (v) => author((put, box) => {
       const rand = mulberry32(211 + v * 13);
@@ -1041,6 +1053,23 @@
     box(HANG, -1, 1, -2, -2, -1, 1, 4);
     box(LAMP_GLOW, -1, 1, -5, -3, -1, 1, GLASS[v]);
   });
+  // The Lightning Factory coil's moving parts, baked once a page apart from any set, so a scene can charge the coil
+  // without rebuilding its mouth: one band's glow (a node over each of `bands`, the coil's copper bands in kit cells
+  // from its foot), the crown's (centred at `crownY`), two sets of arcs to flicker between, and the gauge's needle,
+  // pointing up from `pivot`, in kit cells from the gauge's origin. The band and crown are centred on their middles.
+  let coilParts = null;
+  const coilRig = () => {
+    if (coilParts) return coilParts;
+    const glow = (v) => set().put("coilCharge", 0, 0, 0, 0, v).build().glow;
+    const bands = [];
+    for (let y = 4; y <= 30; y++) if (y % 3 === 0) bands.push(y);
+    const needle = noShadow(merge(
+      BL.models.box({ w: U, h: 4.2 * U, d: 0.7 * U, color: PALETTE[5], offset: { y: 1.6 * U, z: 0.4 * U } }),
+      BL.models.box({ w: 1.6 * U, h: 1.6 * U, d: U, color: PALETTE[59], offset: { z: 0.55 * U } })));
+    coilParts = { band: BL.models.moved(glow(0), 0, -U / 2, 0), crown: BL.models.moved(glow(1), 0, -U / 2, 0),
+      arcs: [glow(2), glow(3)], needle, bands, crownY: 34.5, pivot: [0, 26.5, 3] };
+    return coilParts;
+  };
   // Dust in lamplight: a fixed field of glowing motes that drifts and wraps round a moving centre (the view's
   // target), so there is always air to see near the camera and no mote is ever created or dropped. One draw.
   let moteGeometry = null;
@@ -1365,5 +1394,5 @@
     }
     const geometry=merge(...bits);studioCache.set(kind,geometry);return geometry;
   };
-  BL.dressing = { U, PALETTE, KIT, LIGHT_RGB, studio, set, motes, palm, islet, nodes, flock, fleet };
+  BL.dressing = { U, PALETTE, KIT, LIGHT_RGB, studio, set, coilRig, motes, palm, islet, nodes, flock, fleet };
 })();

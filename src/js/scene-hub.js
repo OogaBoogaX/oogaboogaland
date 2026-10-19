@@ -1569,7 +1569,7 @@
   const addLamp = (node, kind, x, y, z, light = true, order = lamps.length, id = `lamp:${lamps.length}`) => {
     node.glow = LAMP_OFF;
     node.flare = 0;
-    const lamp = { node, kind, x, y, z, light, order, id, k: 0, lit: false, selected: false, approximated: false, debug: null, reach: 0, fade: 1, fromX: x, fromY: y, fromZ: z, gain: 1, far: false };
+    const lamp = { node, kind, x, y, z, light, order, id, k: 0, lit: false, selected: false, approximated: false, debug: null, reach: 0, fade: 1, fromX: x, fromY: y, fromZ: z, gain: 1, far: false, slot: 0 };
     lamps.push(lamp);
     return lamp;
   };
@@ -1645,6 +1645,7 @@
         if (!nearest) break;
         const l = nearest, kind = l.kind, boost = 1 + (l.pileProfile ? RENDER_OPTS.lampFactor * PILE_POST_NIGHT_BOOST : 0);
         l.selected = true;
+        l.slot = count;
         if (l.debug) l.debug.selected = true;
         LIGHTING_DEBUG.selectedIds[count] = l.id;
         const o = count * 8;
@@ -1675,6 +1676,12 @@
       LIGHTING_DEBUG.selectedCount = count;
       LIGHTING_DEBUG.approximatedCount = approximated;
       LIGHTING_DEBUG.tier = webgl ? renderer.quality : "canvas2d";
+    }
+    // The coil's lamp follows its charge every frame, so a held selection still repaints its slot.
+    const coilLamp = coilCharge && coilCharge.lamp;
+    if (coilLamp && coilLamp.selected) {
+      const o = coilLamp.slot * 8, s = coilLamp.k * coilLamp.gain * coilCharge.level;
+      lights[o + 4] = coilLamp.kind.r * s; lights[o + 5] = coilLamp.kind.g * s; lights[o + 6] = coilLamp.kind.b * s;
     }
     if (headquarters) {
       // The underground hearth stays lit for the windowless common room.
@@ -1810,7 +1817,7 @@
     if (baked) return baked;
     const theme = THEMES[slot.theme];
     const sr = Math.sin(m.ry), cr = Math.cos(m.ry);
-    const set = BL.dressing.set(), ground = [];
+    const set = BL.dressing.set(), ground = [], rig = {};
     // Floor props stay on the apron; banners stand on the raised rock shoulders behind the lamps.
     const stand = (kind, lx, lz, turns = 0, variant = 0, lift = 0) => {
       const x = m.x + cr * lx + sr * lz, z = m.z - sr * lx + cr * lz;
@@ -1818,6 +1825,8 @@
       const y = island.surfaceAt(x, z) - m.floorY;
       if (Math.abs(y) > 0.9 && kind !== "banner") return;
       set.put(kind, lx, y + lift, lz, turns, variant);
+      // The coil and its gauge charge on a loop of their own (`coilCharge`).
+      if (kind === "coil" || kind === "gauge") rig[kind] = [lx, y + lift, lz, turns];
       if (!lift) ground.push(lx, lz);
     };
     stand("lanternPost", -CAVE_LANTERN_X, CAVE_LANTERN_Z, 0, theme.glass);
@@ -1844,7 +1853,7 @@
       set.cable(ax, y, az, ax, y, bz, 0.15, lamps, "hanging", theme.ceilingGlass ?? theme.glass);
       set.cable(bx, y, az, bx, y, bz, 0.15, lamps, "hanging", theme.ceilingGlass ?? theme.glass);
     }
-    baked = { ...set.build(), ground };
+    baked = { ...set.build(), ground, rig };
     byIsland.set(slot.id, baked);
     return baked;
   };
@@ -1857,6 +1866,81 @@
       else if (node.geometry === baked.glow || node.geometry === baked.swingGlow) addLamp(node, LAMP.lantern, x, y, z, false, 0, `${id}:${lamps.length}`).always = true;
       else if (node.geometry === baked.lampGlow || node.geometry === baked.swingLampGlow) addLamp(node, LAMP.lantern, x, y, z, false, 0, `${id}:${lamps.length}`).nightOnly = true;
     }
+  };
+  // The Lightning Factory's coil charges on a loop of its own, run by scene time alone: its copper bands light from
+  // the foot up while the gauge's needle climbs from green into the red, the crown spits a few arcs, the charge goes
+  // out and the needle falls back, and the coil stands dark a moment before the next. Only these nodes move; the
+  // mouth's baked meshes stay as they are. Times in seconds; the dial runs 0 (green) to 1 (red).
+  const COIL = { cycle: 9, rest: 0.7, charge: 6.2, hold: 0.6, burst: 0.45, fall: 0.7, low: 0.06, high: 0.92 };
+  const COIL_SPARKS = [SPARK];
+  let coilCharge = null;
+  const buildCoilCharge = (group, rig, m) => {
+    const parts = BL.dressing.coilRig(), U = BL.dressing.U;
+    // A piece's own frame, on the kit's grid where the set put it.
+    const frame = ([x, y, z, turns]) => {
+      const node = createNode({ position: { x: Math.round(x / U) * U, y: Math.round(y / U) * U, z: Math.round(z / U) * U }, rotation: { x: 0, y: turns * Math.PI / 2, z: 0 } });
+      addChild(group, node);
+      return node;
+    };
+    const part = (parent, geometry, x, y, z, lit) => {
+      const node = createNode({ geometry, position: { x, y, z }, sightHidden: true, matrixEmissiveLiving: lit, visible: !lit });
+      addChild(parent, node);
+      return node;
+    };
+    // Each glow sits a little proud of the copper it lights, so neither fights the other's faces.
+    const coil = frame(rig.coil);
+    const bands = parts.bands.map((y) => {
+      const node = part(coil, parts.band, 0, (y + 0.5) * U, 0, true);
+      node.scale.x = node.scale.z = 1.12;
+      node.scale.y = 1.3;
+      return node;
+    });
+    const crown = part(coil, parts.crown, 0, parts.crownY * U, 0, true);
+    crown.scale.x = crown.scale.y = crown.scale.z = 1.06;
+    const arcs = parts.arcs.map((geometry) => part(coil, geometry, 0, 0, 0, true));
+    const needle = rig.gauge ? part(frame(rig.gauge), parts.needle, parts.pivot[0] * U, parts.pivot[1] * U, parts.pivot[2] * U, false) : null;
+    const sr = Math.sin(m.ry), cr = Math.cos(m.ry), p = coil.position;
+    coilCharge = { bands, crown, arcs, needle, lamp: null, level: 0, fired: false,
+      x: m.x + cr * p.x + sr * p.z, y: m.floorY + p.y + parts.crownY * U, z: m.z - sr * p.x + cr * p.z };
+  };
+  const updateCoilCharge = (elapsed) => {
+    const c = coilCharge, t = elapsed % COIL.cycle;
+    const held = COIL.rest + COIL.charge, burst = held + COIL.hold, done = burst + COIL.burst;
+    // climb: how far up the coil the charge has lit, 0 to 1; dial: the needle's place; level: the lamp's.
+    let climb = 0, dial = COIL.low, level = 0, flash = false;
+    if (t >= COIL.rest && t < held) {
+      climb = (t - COIL.rest) / COIL.charge;
+      dial = COIL.low + (COIL.high - COIL.low) * climb;
+      level = 0.15 + 0.55 * climb;
+    } else if (t >= held && t < burst) {
+      climb = 1;
+      dial = COIL.high + Math.sin(elapsed * 47) * 0.02;
+      level = 0.75 + Math.sin(elapsed * 31) * 0.1;
+    } else if (t >= burst && t < done) {
+      climb = 1;
+      flash = true;
+      dial = 0.97;
+      level = 1.4 + Math.sin(elapsed * 60) * 0.3;
+    } else if (t >= done) {
+      const k = Math.min(1, (t - done) / COIL.fall);
+      dial = 0.97 - (0.97 - COIL.low) * (1 - (1 - k) * (1 - k));
+    }
+    const n = c.bands.length;
+    for (let i = 0; i < n; i++) {
+      const band = c.bands[i];
+      band.visible = climb >= (i + 0.5) / (n + 1);
+      band.glow = flash ? 1.3 : 0.55 + 0.45 * climb + Math.sin(elapsed * 9 + i * 1.7) * 0.12;
+    }
+    c.crown.visible = climb >= (n + 0.5) / (n + 1);
+    c.crown.glow = flash ? 1.3 : 0.8 + Math.sin(elapsed * 23) * 0.2;
+    // The arcs crackle between their two sets every twentieth of a second.
+    const side = Math.floor(elapsed * 20) & 1;
+    c.arcs[0].visible = flash && side === 0;
+    c.arcs[1].visible = flash && side === 1;
+    if (flash && !c.fired) fx.burst(c.x, c.y, c.z, 6, COIL_SPARKS, 1.6);
+    c.fired = flash;
+    if (c.needle) c.needle.rotation.z = Math.PI / 2 - dial * Math.PI;
+    c.level = level;
   };
   const CHALKBOARD_X = 6.75, CHALKBOARD_Z = 2.15, CHALKBOARD_YAW = -0.57;
   let chalkboardDressing = null;
@@ -1895,6 +1979,7 @@
     const sr = Math.sin(m.ry), cr = Math.cos(m.ry), g = baked.ground, lit = baked.lights;
     for (let i = 0; i < lit.length; i += 4) dressingLights.push(m.x + cr * lit[i] + sr * lit[i + 2], m.floorY + lit[i + 1], m.z - sr * lit[i] + cr * lit[i + 2], lit[i + 3]);
     addPieceTargets(baked.picks, (lx, ly, lz, kind) => lz < 0.3 && kind !== "banner" ? null : { x: m.x + cr * lx + sr * lz, y: m.floorY + ly, z: m.z - sr * lx + cr * lz });
+    if (baked.rig.coil) buildCoilCharge(group, baked.rig, m);
     if (slot.theme === "lab") placeChalkboard(m, group);
     // Headquarters and a sealed cave that is coming soon still hang their name over the door.
     if (slot.status !== "open" && slot.status !== "mirror" && slot.name) {
@@ -1984,6 +2069,7 @@
     for (let i = 0; i < dressingLights.length; i += 4) {
       const lamp = addLamp({ glow: 0, flare: 0, visible: true }, DRESSING_LAMPS[dressingLights[i + 3]], dressingLights[i], dressingLights[i + 1], dressingLights[i + 2], true, (i / 4) % 5, `dressing:${i / 4}`);
       lamp.nightOnly = dressingLights[i + 3] !== 4;
+      if (!lamp.nightOnly && coilCharge) coilCharge.lamp = lamp;
     }
     dressingLights.length = 0;
   };
@@ -8321,6 +8407,7 @@
     mempoolIsland.water.update(dt, elapsed, Date.now());
     mempoolIsland.paintings.update(dt);
     updateTotems(dt, elapsed);
+    if (coilCharge) updateCoilCharge(elapsed);
     updateLamps(dt, elapsed, phase !== null);
     if (jumbotron) {
       jumbotron.update(elapsed, renderer);
@@ -11840,7 +11927,7 @@
       factoryMouth.phase.dispose();
     }
     if (bcaMouth) bcaMouth.phase.dispose();
-    factoryMouth = arcadeMouth = bcaMouth = null;
+    factoryMouth = arcadeMouth = bcaMouth = coilCharge = null;
     if (bifrostIsle) {
       if (bifrostIsle.window) bifrostIsle.window.dispose();
       bifrostIsle.phase.dispose();
