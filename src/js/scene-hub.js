@@ -159,7 +159,6 @@
     tier: "high", selectedIds: new Array(LIGHT_CAPACITY).fill(null), approximatedIds: new Array(LIGHT_CAPACITY).fill(null)
   };
   const LAMP_STAGGER = 0.12, LAMP_RAMP = 0.4, LAMP_OFF = 0.12;
-  const CAVE_TORCH_GAP = 0.12;
   const FIRE_DEGREES = [130, 125, 135, 120, 140, 115, 145], FIRE_RADIUS = 11.5, FIRE_SEATS = 6, FIRE_SEAT_RADIUS = 1.8;
   const FIRE_CONTACT_RADIUS = 0.65, FIRE_AVOID_RADIUS = 1.25, FIRE_BOTTOM = 0.12, FIRE_TOP = 0.85;
   const NIGHT = 0.5, FIRE_SEAT_CHANCE = 0.5;
@@ -618,9 +617,8 @@
   // updateLamps' selection and light array are a pure function of these inputs; an exact hit reuses
   // last frame's written LIGHT_CAPACITY entries. Position joins target because the headquarters
   // basement reads both. Invalidated in leave; NaN fields never compare equal.
-  const LAMP_SEL_KEY = { tx: NaN, ty: NaN, tz: NaN, px: NaN, py: NaN, pz: NaN, torch: NaN, lampFactor: NaN, poolShade: NaN, poolUnder: NaN, lanternsOn: false, cave: 0, limit: -1 };
+  const LAMP_SEL_KEY = { tx: NaN, ty: NaN, tz: NaN, px: NaN, py: NaN, pz: NaN, torch: NaN, lampFactor: NaN, poolShade: NaN, poolUnder: NaN, lanternsOn: false, coilActive: false, cave: 0, limit: -1 };
   let lampSelValid = false;
-  const entranceLights = [];
   const fireSeats = [];
   const fireHazards = [];
   let clankerFireReachable = null;
@@ -1569,7 +1567,7 @@
   const addLamp = (node, kind, x, y, z, light = true, order = lamps.length, id = `lamp:${lamps.length}`) => {
     node.glow = LAMP_OFF;
     node.flare = 0;
-    const lamp = { node, kind, x, y, z, light, order, id, k: 0, lit: false, selected: false, approximated: false, debug: null, reach: 0, fade: 1, fromX: x, fromY: y, fromZ: z, gain: 1, far: false };
+    const lamp = { node, kind, x, y, z, light, order, id, k: 0, lit: false, selected: false, approximated: false, debug: null, reach: 0, fade: 1, fromX: x, fromY: y, fromZ: z, gain: 1, far: false, slot: 0 };
     lamps.push(lamp);
     return lamp;
   };
@@ -1579,11 +1577,12 @@
     const limit = webgl ? BL.glRenderer.QUALITY[renderer.quality].lights : 6;
     const phaseNow = daylight.phaseAt(hour);
     const lanternsOn = phaseNow === "dusk" || phaseNow === "night" || phaseNow === "midnight";
+    const coilLamp = coilCharge && coilCharge.lamp, coilActive = !!coilLamp && coilCharge.level > 0.02;
     let count = 0, approximated = 0, registered = 0;
     for (let i = 0; i < lamps.length; i++) {
       const l = lamps[i], node = l.node;
       if (l.light) registered++;
-      const k = l.always ? 1 : l.nightOnly ? (lanternsOn ? 1 : 0)
+      const k = l === coilLamp ? (coilActive ? 1 : 0) : l.always ? 1 : l.nightOnly ? (lanternsOn ? 1 : 0)
         : Math.min(1, Math.max(0, (RENDER_OPTS.torch - l.order * LAMP_STAGGER) / LAMP_RAMP));
       const lit = k > 0.05;
       if (lit && !l.lit && spark) fx.burst(l.x, l.y, l.z, 5, [SPARK], 1.3);
@@ -1623,7 +1622,7 @@
       && key.px === camera.position.x && key.py === camera.position.y && key.pz === camera.position.z
       && key.torch === RENDER_OPTS.torch && key.lampFactor === RENDER_OPTS.lampFactor
       && key.poolShade === poolShade && key.poolUnder === poolUnder
-      && key.lanternsOn === lanternsOn && key.cave === cameraCaveIndex && key.limit === limit;
+      && key.lanternsOn === lanternsOn && key.coilActive === coilActive && key.cave === cameraCaveIndex && key.limit === limit;
     if (!keyHit) {
       for (let i = 0; i < lamps.length; i++) {
         const l = lamps[i];
@@ -1645,6 +1644,7 @@
         if (!nearest) break;
         const l = nearest, kind = l.kind, boost = 1 + (l.pileProfile ? RENDER_OPTS.lampFactor * PILE_POST_NIGHT_BOOST : 0);
         l.selected = true;
+        l.slot = count;
         if (l.debug) l.debug.selected = true;
         LIGHTING_DEBUG.selectedIds[count] = l.id;
         const o = count * 8;
@@ -1675,6 +1675,11 @@
       LIGHTING_DEBUG.selectedCount = count;
       LIGHTING_DEBUG.approximatedCount = approximated;
       LIGHTING_DEBUG.tier = webgl ? renderer.quality : "canvas2d";
+    }
+    // The coil's lamp follows its charge every frame, so a held selection still repaints its slot.
+    if (coilLamp && coilLamp.selected) {
+      const o = coilLamp.slot * 8, s = coilLamp.k * coilLamp.gain * coilCharge.level;
+      lights[o + 4] = coilLamp.kind.r * s; lights[o + 5] = coilLamp.kind.g * s; lights[o + 6] = coilLamp.kind.b * s;
     }
     if (headquarters) {
       // The underground hearth stays lit for the windowless common room.
@@ -1715,7 +1720,7 @@
       key.px = camera.position.x; key.py = camera.position.y; key.pz = camera.position.z;
       key.torch = RENDER_OPTS.torch; key.lampFactor = RENDER_OPTS.lampFactor;
       key.poolShade = poolShade; key.poolUnder = poolUnder;
-      key.lanternsOn = lanternsOn; key.cave = cameraCaveIndex; key.limit = limit;
+      key.lanternsOn = lanternsOn; key.coilActive = coilActive; key.cave = cameraCaveIndex; key.limit = limit;
       lampSelValid = true;
     }
   };
@@ -1744,17 +1749,19 @@
   };
   // Mouth local frame: +z leads out of the cave.
   const sealedCaveVariant = (id) => id === "c3" ? 1 : id === "c10" ? 2 : 0;
-  // Every cave wears its own facade from the shared voxel kit: two lantern posts, a string over the lintel,
+  // Every cave wears its own facade from the shared voxel kit: two lantern posts with a banner behind each, a string over the lintel,
   // vines off the rim, and the theme's own things either side of the path (lab dice and flasks, the mirror's glyph
   // monoliths, the Lightning Factory's coil and coal, Ooga Arcade's two cabinets, hard against the left of its
   // door and facing the island's centre: the Mempool stairs start at the right jamb and the Lightning Factory's right side fills the ground further left). A slot without a theme wears none: the sealed caves, and the
   // Headquarters ramps that run down a cutting rather than into a cliff. Each mouth bakes to one solid, one hanging and one glowing mesh, memoised per island
   // so a revisit only places nodes. Pieces are [kind, x, z, quarter turns, variant, lift] in the mouth's frame.
+  // A `ceiling` run is two cables into the room, [left x, right x, from z, to z, height, lamp places, lamp kind], the kind a
+  // hanging lantern unless named (EntropyLab's white strip lights).
   const THEMES = {
-    lab: { glass: 1, icon: "die", banners: [[-1, 1]], string: ["bulb", 1], pieces: [["flaskBench", -5.3, 1.1], ["die", -4.1, 2.8, 0, 1], ["die", -3.5, 3.6, 1, 3], ["die", -4.1, 2.8, 1, 4, 0.5], ["terminal", 5.2, 1.0], ["die", 4.3, 3.2, 1, 2]] },
+    lab: { glass: 4, icon: "die", banners: [[-1, 1], [1, 1]], string: ["bulb", 4], ceiling: [[-1.6, 1.6, -1.5, -5.6, 3.0, [0.3, 0.72], "tube"]], pieces: [["flaskBench", -5.3, 1.1], ["die", -4.1, 2.8, 0, 1], ["die", -3.5, 3.6, 1, 3], ["die", -4.1, 2.8, 1, 4, 0.5], ["terminal", 5.2, 1.0], ["die", 4.3, 3.2, 1, 2]] },
     matrix: { glass: 2, icon: "glyph", banners: [[1, 2], [-1, 2]], string: ["bulb", 2], pieces: [["monolith", -5.0, 0.9, 0, 0], ["monolith", 5.0, 0.9, 0, 1], ["runeStone", -4.2, 2.8, 0, 0], ["runeStone", 4.4, 2.9, 0, 1], ["rubble", -6.3, 2.6, 0, 1]] },
-    lightning: { glass: 0, icon: "bolt", banners: [[1, 0]], string: ["hanging", 0, [0.3, 0.7]], boards: true, pieces: [["coalCrate", -5.1, 0.8, 0, 3], ["crate", -5.4, 2.1, 1, 0], ["crate", -5.4, 2.1, 0, 1, 0.75], ["barrel", -4.3, 2.9, 0, 1], ["rubble", -6.4, 0.9, 0, 1], ["gauge", 5.0, 0.9], ["cart", 5.7, 2.4, 1], ["coil", 3.8, 3.4], ["coalCrate", 6.4, 3.4, 0, 1]] },
-    arcade: { glass: 0, icon: "banana", string: ["hanging", 0, [0.12, 0.5, 0.88]], inside: [["barrel", -2.4, -1.9, 0, 0], ["crate", 2.4, -2.0, 1, 0], ["barrel", 2.4, -2.0, 0, 1, 0.75]], ceiling: [[-2.35, 2.35, -1.5, -5.8, 3.0, [0.35, 0.8]]], pieces: [["cabinet", -3.6, 1.0, 0, 0], ["cabinet", -2.9, 2.2, 0, 1]] },
+    lightning: { glass: 0, icon: "bolt", banners: [[-1, 0], [1, 0]], string: ["hanging", 0, [0.3, 0.7]], boards: true, pieces: [["coalCrate", -5.1, 0.8, 0, 3], ["crate", -5.4, 2.1, 1, 0], ["crate", -5.4, 2.1, 0, 1, 0.75], ["barrel", -4.3, 2.9, 0, 1], ["rubble", -6.4, 0.9, 0, 1], ["gauge", 5.0, 0.9], ["cart", 5.7, 2.4, 1], ["coil", 3.8, 3.4], ["coalCrate", 6.4, 3.4, 0, 1]] },
+    arcade: { glass: 3, icon: "invader", banners: [[-1, 3], [1, 3]], string: ["hanging", 3, [0.12, 0.5, 0.88]], inside: [["barrel", -2.4, -1.9, 0, 0], ["crate", 2.4, -2.0, 1, 0], ["barrel", 2.4, -2.0, 0, 1, 0.75]], ceiling: [[-2.35, 2.35, -1.5, -5.8, 3.0, [0.35, 0.8]]], pieces: [["cabinet", -3.6, 1.0, 0, 0], ["cabinet", -2.9, 2.2, 0, 1]] },
     bca: { glass: 0, icon: "abacus", banners: [[-1, 4], [1, 4]], string: ["hanging", 0, [0.2, 0.5, 0.8]], ceiling: [[-1.6, 1.6, -2.2, -5.6, 3.1, [0.5]]], pieces: [["abacus", -5.0, 1.0], ["ledger", 5.0, 1.0, 2]] }
   };
   // Themes choose only [side, variant]. The whole standard stays behind and outside the lanterns,
@@ -1784,15 +1791,16 @@
   };
   const THEME_ICON = (slot) => slot.id === "c1" ? "favicon" : THEMES[slot.theme]?.icon || null;
   const trackCaveSign = (node, slot, mouth) => {
-    signDetails.push({ node, solid: node.geometry, pixels: hubModels.caveSign(slot.name, THEME_ICON(slot), true),
+    signDetails.push({ node, solid: node.geometry, pixels: hubModels.caveSign(slot.name, THEME_ICON(slot), true, true),
       x: mouth.x + Math.sin(mouth.ry) * node.position.z, y: mouth.floorY + node.position.y,
       z: mouth.z + Math.cos(mouth.ry) * node.position.z });
   };
   const addCaveSignTarget = (node, slot, mouth) => {
-    if (!slot.repo) return;
+    const repo = slot.repo || slot.link;
+    if (!repo) return;
     const sr = Math.sin(mouth.ry), cr = Math.cos(mouth.ry), front = node.position.z + BL.scene.boundsOf(node.geometry).max[2];
     const x = mouth.x + sr * front, y = mouth.floorY + node.position.y, z = mouth.z + cr * front;
-    const owner = { kind: "cave-sign", slot, priority: 2, weaponType: "none" };
+    const owner = { kind: "cave-sign", slot, repo, priority: 2, weaponType: "none" };
     owner.pickRay = (ray) => {
       const facing = ray.dx * sr + ray.dz * cr;
       if (facing >= -1e-6) return Infinity;
@@ -1810,7 +1818,7 @@
     if (baked) return baked;
     const theme = THEMES[slot.theme];
     const sr = Math.sin(m.ry), cr = Math.cos(m.ry);
-    const set = BL.dressing.set(), ground = [];
+    const set = BL.dressing.set(), ground = [], rig = {};
     // Floor props stay on the apron; banners stand on the raised rock shoulders behind the lamps.
     const stand = (kind, lx, lz, turns = 0, variant = 0, lift = 0) => {
       const x = m.x + cr * lx + sr * lz, z = m.z - sr * lx + cr * lz;
@@ -1818,6 +1826,8 @@
       const y = island.surfaceAt(x, z) - m.floorY;
       if (Math.abs(y) > 0.9 && kind !== "banner") return;
       set.put(kind, lx, y + lift, lz, turns, variant);
+      // The coil and its gauge charge on a loop of their own (`coilCharge`).
+      if (kind === "coil" || kind === "gauge") rig[kind] = [lx, y + lift, lz, turns];
       if (!lift) ground.push(lx, lz);
     };
     stand("lanternPost", -CAVE_LANTERN_X, CAVE_LANTERN_Z, 0, theme.glass);
@@ -1840,11 +1850,11 @@
     if (theme.boards && slot.status === "dark") set.put("boards", 0, 0.2, 1.06);
     // Inside the mouth the floor is the cave's own, level with the doorway.
     for (const [kind, lx, lz, turns = 0, variant = 0, lift = 0] of theme.inside || []) set.put(kind, lx, lift, lz, turns, variant);
-    for (const [ax, bx, az, bz, y, lamps] of theme.ceiling || []) {
-      set.cable(ax, y, az, ax, y, bz, 0.15, lamps, "hanging", theme.glass);
-      set.cable(bx, y, az, bx, y, bz, 0.15, lamps, "hanging", theme.glass);
+    for (const [ax, bx, az, bz, y, lamps, lamp = "hanging"] of theme.ceiling || []) {
+      set.cable(ax, y, az, ax, y, bz, 0.15, lamps, lamp, theme.glass);
+      set.cable(bx, y, az, bx, y, bz, 0.15, lamps, lamp, theme.glass);
     }
-    baked = { ...set.build(), ground };
+    baked = { ...set.build(), ground, rig };
     byIsland.set(slot.id, baked);
     return baked;
   };
@@ -1857,6 +1867,86 @@
       else if (node.geometry === baked.glow || node.geometry === baked.swingGlow) addLamp(node, LAMP.lantern, x, y, z, false, 0, `${id}:${lamps.length}`).always = true;
       else if (node.geometry === baked.lampGlow || node.geometry === baked.swingLampGlow) addLamp(node, LAMP.lantern, x, y, z, false, 0, `${id}:${lamps.length}`).nightOnly = true;
     }
+  };
+  // The Lightning Factory's coil charges in runs of its own, timed by scene time alone: its copper bands light from
+  // the foot up while the gauge's needle climbs from green into the red, the crown spits long arcs, the charge goes
+  // out and the needle falls back, and the coil stands dark, cooling, for one to three runs' length (picked afresh
+  // each time) before the next. Only these nodes move; the mouth's baked meshes stay as they are. Times in seconds
+  // (`lead` the dark before a visit's first run, `crackle` each set of arcs' turn); the dial runs 0 (green) to 1 (red).
+  const COIL = { lead: 2.1, charge: 18.6, hold: 1.8, burst: 4.05, fall: 2.1, crackle: 0.45, low: 0.06, high: 0.92 };
+  const COIL_RUN = COIL.charge + COIL.hold + COIL.burst + COIL.fall;
+  const COIL_SPARKS = [SPARK];
+  let coilCharge = null;
+  const buildCoilCharge = (group, rig, m) => {
+    const parts = BL.dressing.coilRig(), U = BL.dressing.U;
+    // A piece's own frame, on the kit's grid where the set put it.
+    const frame = ([x, y, z, turns]) => {
+      const node = createNode({ position: { x: Math.round(x / U) * U, y: Math.round(y / U) * U, z: Math.round(z / U) * U }, rotation: { x: 0, y: turns * Math.PI / 2, z: 0 } });
+      addChild(group, node);
+      return node;
+    };
+    const part = (parent, geometry, x, y, z, lit) => {
+      const node = createNode({ geometry, position: { x, y, z }, sightHidden: true, matrixEmissiveLiving: lit, visible: !lit });
+      addChild(parent, node);
+      return node;
+    };
+    // Each glow sits a little proud of the copper it lights, so neither fights the other's faces.
+    const coil = frame(rig.coil);
+    const bands = parts.bands.map((y) => {
+      const node = part(coil, parts.band, 0, (y + 0.5) * U, 0, true);
+      node.scale.x = node.scale.z = 1.12;
+      node.scale.y = 1.3;
+      return node;
+    });
+    const crown = part(coil, parts.crown, 0, parts.crownY * U, 0, true);
+    crown.scale.x = crown.scale.y = crown.scale.z = 1.06;
+    const arcs = parts.arcs.map((geometry) => part(coil, geometry, 0, 0, 0, true));
+    const needle = rig.gauge ? part(frame(rig.gauge), parts.needle, parts.pivot[0] * U, parts.pivot[1] * U, parts.pivot[2] * U, false) : null;
+    const sr = Math.sin(m.ry), cr = Math.cos(m.ry), p = coil.position;
+    coilCharge = { bands, crown, arcs, needle, lamp: null, level: 0, fired: false, start: COIL.lead, cool: COIL_RUN * (1 + 2 * Math.random()),
+      x: m.x + cr * p.x + sr * p.z, y: m.floorY + p.y + parts.crownY * U, z: m.z - sr * p.x + cr * p.z };
+  };
+  const updateCoilCharge = (elapsed) => {
+    const c = coilCharge;
+    // A run and its cooldown over, the next run starts and draws its own cooldown.
+    while (elapsed - c.start >= COIL_RUN + c.cool) {
+      c.start += COIL_RUN + c.cool;
+      c.cool = COIL_RUN * (1 + 2 * Math.random());
+    }
+    const t = elapsed - c.start, held = COIL.charge, burst = held + COIL.hold, done = burst + COIL.burst;
+    // climb: how far up the coil the charge has lit, 0 to 1; dial: the needle's place; level: the lamp's.
+    let climb = 0, dial = COIL.low, level = 0, flash = false;
+    if (t >= 0 && t < held) {
+      climb = t / COIL.charge;
+      dial = COIL.low + (COIL.high - COIL.low) * climb;
+      level = 0.15 + 0.55 * climb;
+    } else if (t >= held && t < burst) {
+      climb = 1;
+      dial = COIL.high + Math.sin(elapsed * 16) * 0.02;
+      level = 0.75 + Math.sin(elapsed * 10) * 0.1;
+    } else if (t >= burst && t < done) {
+      flash = true;
+      dial = 0.97;
+    } else if (t >= done && t < COIL_RUN) {
+      const k = Math.min(1, (t - done) / COIL.fall);
+      dial = 0.97 - (0.97 - COIL.low) * (1 - (1 - k) * (1 - k));
+    }
+    const n = c.bands.length;
+    for (let i = 0; i < n; i++) {
+      const band = c.bands[i];
+      band.visible = climb >= (i + 0.5) / (n + 1);
+      band.glow = flash ? 1.3 : 0.55 + 0.45 * climb + Math.sin(elapsed * 3 + i * 1.7) * 0.12;
+    }
+    c.crown.visible = climb >= (n + 0.5) / (n + 1);
+    c.crown.glow = flash ? 1.3 : 0.8 + Math.sin(elapsed * 8) * 0.2;
+    // The arcs crackle between their two sets.
+    const side = Math.floor(elapsed / COIL.crackle) & 1;
+    c.arcs[0].visible = flash && side === 0;
+    c.arcs[1].visible = flash && side === 1;
+    if (flash && !c.fired) fx.burst(c.x, c.y, c.z, 6, COIL_SPARKS, 1.6);
+    c.fired = flash;
+    if (c.needle) c.needle.rotation.z = Math.PI / 2 - dial * Math.PI;
+    c.level = level;
   };
   const CHALKBOARD_X = 6.75, CHALKBOARD_Z = 2.15, CHALKBOARD_YAW = -0.57;
   let chalkboardDressing = null;
@@ -1895,10 +1985,11 @@
     const sr = Math.sin(m.ry), cr = Math.cos(m.ry), g = baked.ground, lit = baked.lights;
     for (let i = 0; i < lit.length; i += 4) dressingLights.push(m.x + cr * lit[i] + sr * lit[i + 2], m.floorY + lit[i + 1], m.z - sr * lit[i] + cr * lit[i + 2], lit[i + 3]);
     addPieceTargets(baked.picks, (lx, ly, lz, kind) => lz < 0.3 && kind !== "banner" ? null : { x: m.x + cr * lx + sr * lz, y: m.floorY + ly, z: m.z - sr * lx + cr * lz });
+    if (baked.rig.coil) buildCoilCharge(group, baked.rig, m);
     if (slot.theme === "lab") placeChalkboard(m, group);
     // Headquarters and a sealed cave that is coming soon still hang their name over the door.
     if (slot.status !== "open" && slot.status !== "mirror" && slot.name) {
-      const sign = createNode({ position: { x: 0, y: CAVE_SIGN_Y, z: CAVE_SIGN_Z }, geometry: hubModels.caveSign(slot.name, THEME_ICON(slot)) });
+      const sign = createNode({ position: { x: 0, y: CAVE_SIGN_Y, z: CAVE_SIGN_Z }, geometry: hubModels.caveSign(slot.name, THEME_ICON(slot), false, true) });
       addChild(group, sign);
       trackCaveSign(sign, slot, m);
     }
@@ -1983,7 +2074,8 @@
     for (let i = 0; i < lit.length; i += 4) dressingLights.push(lit[i], lit[i + 1], lit[i + 2], lit[i + 3]);
     for (let i = 0; i < dressingLights.length; i += 4) {
       const lamp = addLamp({ glow: 0, flare: 0, visible: true }, DRESSING_LAMPS[dressingLights[i + 3]], dressingLights[i], dressingLights[i + 1], dressingLights[i + 2], true, (i / 4) % 5, `dressing:${i / 4}`);
-      lamp.nightOnly = dressingLights[i + 3] !== 4;
+      lamp.nightOnly = dressingLights[i + 3] !== BL.dressing.COIL_LIGHT;
+      if (!lamp.nightOnly && coilCharge) coilCharge.lamp = lamp;
     }
     dressingLights.length = 0;
   };
@@ -2357,25 +2449,8 @@
       sleepers.push({ x: m.x + ax * 0.8, y: 4.4, z: m.z + az * 0.8, timer: sleepers.length * 0.7 });
     }
     if (slot.status === "open" || slot.status === "mirror") {
-      const torchGeometry = hubModels.torch();
-      const torchZ = rim.position.z + rim.geometry.frontZ - torchGeometry.backZ + CAVE_TORCH_GAP;
-      for (let i = 0; i < 2; i++) {
-        const side = i ? "right" : "left", localX = (i ? 1 : -1) * rim.geometry.jambCenterX;
-        const torch = createNode({ position: { x: localX, y: 0, z: torchZ }, geometry: torchGeometry, flare: 0, matrixEmissiveLiving: true });
-        addChild(group, torch);
-        const tx = m.x + ax * torchZ + Math.cos(m.ry) * localX;
-        const ty = m.floorY + torchGeometry.flameY;
-        const tz = m.z + az * torchZ - Math.sin(m.ry) * localX;
-        const id = `${slot.id}:torch:${side}`;
-        const lamp = addLamp(torch, LAMP.torch, tx, ty, tz, !slot.glowOnly, i, id);
-        const debug = { id, caveId: slot.id, kind: "torch", side, localPosition: [localX, torchGeometry.flameY, torchZ], worldPosition: [tx, ty, tz], registered: !slot.glowOnly, factor: 0, lit: false, selected: false, approximated: false, rimFront: rim.position.z + rim.geometry.frontZ, fixtureBack: torchZ + torchGeometry.backZ, gap: CAVE_TORCH_GAP };
-        lamp.debug = debug;
-        entranceLights.push(debug);
-        claim(tx, tz, 0.5);
-        addProp("torch", torch, tx, tz, 0.7);
-      }
       const signZ = slot.scene === "arcade" ? 0.055 : CAVE_SIGN_Z;
-      const sign = createNode({ position: { x: 0, y: CAVE_SIGN_Y, z: signZ }, geometry: hubModels.caveSign(slot.name, THEME_ICON(slot)), matrixEmissiveLiving: true, sightHidden: slot.scene === "lab" });
+      const sign = createNode({ position: { x: 0, y: CAVE_SIGN_Y, z: signZ }, geometry: hubModels.caveSign(slot.name, THEME_ICON(slot), false, true), matrixEmissiveLiving: true, sightHidden: slot.scene === "lab" });
       addChild(group, sign);
       trackCaveSign(sign, slot, m);
       addCaveSignTarget(sign, slot, m);
@@ -2392,18 +2467,6 @@
         ]
       });
       if (mirrorCave && mirrorCave.slot === slot) mirrorCave.sign = sign;
-      const lantern = createNode({ position: { x: halfW + 0.34, y: sign.position.y + halfH + 0.14, z: signZ }, geometry: hubModels.lantern() });
-      addChild(group, lantern);
-      const lx = lantern.position.x, ly = lantern.position.y - 0.27, lz = lantern.position.z;
-      const wx = m.x + Math.cos(m.ry) * lx + ax * lz;
-      const wy = m.floorY + ly;
-      const wz = m.z - Math.sin(m.ry) * lx + az * lz;
-      const id = `${slot.id}:lantern:right`;
-      const lamp = addLamp(lantern, LAMP.lantern, wx, wy, wz, !slot.glowOnly, 2, id);
-      lamp.nightOnly = true;
-      const debug = { id, caveId: slot.id, kind: "lantern", side: "right", localPosition: [lx, ly, lz], worldPosition: [wx, wy, wz], registered: !slot.glowOnly, factor: 0, lit: false, selected: false, approximated: false, rimFront: null, fixtureBack: null, gap: null };
-      lamp.debug = debug;
-      entranceLights.push(debug);
     }
     dressMouth(slot, m, group);
     addChild(root, group);
@@ -6807,7 +6870,7 @@
         else hud.toast(tooltipFor(hit));
         break;
       case "cave-sign":
-        window.open(`https://github.com/${o.slot.repo}`, "_blank", "noopener,noreferrer");
+        window.open(`https://github.com/${o.repo}`, "_blank", "noopener,noreferrer");
         break;
       case "gate":
         hud.toast(tooltipFor(hit));
@@ -8321,6 +8384,7 @@
     mempoolIsland.water.update(dt, elapsed, Date.now());
     mempoolIsland.paintings.update(dt);
     updateTotems(dt, elapsed);
+    if (coilCharge) updateCoilCharge(elapsed);
     updateLamps(dt, elapsed, phase !== null);
     if (jumbotron) {
       jumbotron.update(elapsed, renderer);
@@ -11667,7 +11731,6 @@
         pilot,
         renderOpts: RENDER_OPTS,
         lamps,
-        entranceLights,
         lighting: LIGHTING_DEBUG,
         fireSeats,
         get critters() {
@@ -11840,7 +11903,7 @@
       factoryMouth.phase.dispose();
     }
     if (bcaMouth) bcaMouth.phase.dispose();
-    factoryMouth = arcadeMouth = bcaMouth = null;
+    factoryMouth = arcadeMouth = bcaMouth = coilCharge = null;
     if (bifrostIsle) {
       if (bifrostIsle.window) bifrostIsle.window.dispose();
       bifrostIsle.phase.dispose();
@@ -11867,7 +11930,7 @@
     }
     for (const node of targets) input.remove(node);
     for (const node of placed) removeChild(root, node);
-    targets.length = placed.length = claimed.length = scenery.length = sceneryClaims.length = matrixInteriors.length = matrixGates.length = sealedCaves.length = clouds.length = cloudObstacles.length = lamps.length = pilePosts.length = entranceLights.length = fireSeats.length = sleepers.length = labels.length = signDetails.length = spots.length = chillSpots.length = headquartersRimLintels.length = climbMasonry.length = props.length = meadowPalms.length = 0;
+    targets.length = placed.length = claimed.length = scenery.length = sceneryClaims.length = matrixInteriors.length = matrixGates.length = sealedCaves.length = clouds.length = cloudObstacles.length = lamps.length = pilePosts.length = fireSeats.length = sleepers.length = labels.length = signDetails.length = spots.length = chillSpots.length = headquartersRimLintels.length = climbMasonry.length = props.length = meadowPalms.length = 0;
     cloudRandom = null;
     fireHazards.length = 0;
     clankerFireReachable = null;
