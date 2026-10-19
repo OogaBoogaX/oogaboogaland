@@ -617,7 +617,7 @@
   // updateLamps' selection and light array are a pure function of these inputs; an exact hit reuses
   // last frame's written LIGHT_CAPACITY entries. Position joins target because the headquarters
   // basement reads both. Invalidated in leave; NaN fields never compare equal.
-  const LAMP_SEL_KEY = { tx: NaN, ty: NaN, tz: NaN, px: NaN, py: NaN, pz: NaN, torch: NaN, lampFactor: NaN, poolShade: NaN, poolUnder: NaN, lanternsOn: false, cave: 0, limit: -1 };
+  const LAMP_SEL_KEY = { tx: NaN, ty: NaN, tz: NaN, px: NaN, py: NaN, pz: NaN, torch: NaN, lampFactor: NaN, poolShade: NaN, poolUnder: NaN, lanternsOn: false, coilActive: false, cave: 0, limit: -1 };
   let lampSelValid = false;
   const fireSeats = [];
   const fireHazards = [];
@@ -1577,11 +1577,12 @@
     const limit = webgl ? BL.glRenderer.QUALITY[renderer.quality].lights : 6;
     const phaseNow = daylight.phaseAt(hour);
     const lanternsOn = phaseNow === "dusk" || phaseNow === "night" || phaseNow === "midnight";
+    const coilLamp = coilCharge && coilCharge.lamp, coilActive = !!coilLamp && coilCharge.level > 0.02;
     let count = 0, approximated = 0, registered = 0;
     for (let i = 0; i < lamps.length; i++) {
       const l = lamps[i], node = l.node;
       if (l.light) registered++;
-      const k = l.always ? 1 : l.nightOnly ? (lanternsOn ? 1 : 0)
+      const k = l === coilLamp ? (coilActive ? 1 : 0) : l.always ? 1 : l.nightOnly ? (lanternsOn ? 1 : 0)
         : Math.min(1, Math.max(0, (RENDER_OPTS.torch - l.order * LAMP_STAGGER) / LAMP_RAMP));
       const lit = k > 0.05;
       if (lit && !l.lit && spark) fx.burst(l.x, l.y, l.z, 5, [SPARK], 1.3);
@@ -1621,7 +1622,7 @@
       && key.px === camera.position.x && key.py === camera.position.y && key.pz === camera.position.z
       && key.torch === RENDER_OPTS.torch && key.lampFactor === RENDER_OPTS.lampFactor
       && key.poolShade === poolShade && key.poolUnder === poolUnder
-      && key.lanternsOn === lanternsOn && key.cave === cameraCaveIndex && key.limit === limit;
+      && key.lanternsOn === lanternsOn && key.coilActive === coilActive && key.cave === cameraCaveIndex && key.limit === limit;
     if (!keyHit) {
       for (let i = 0; i < lamps.length; i++) {
         const l = lamps[i];
@@ -1676,7 +1677,6 @@
       LIGHTING_DEBUG.tier = webgl ? renderer.quality : "canvas2d";
     }
     // The coil's lamp follows its charge every frame, so a held selection still repaints its slot.
-    const coilLamp = coilCharge && coilCharge.lamp;
     if (coilLamp && coilLamp.selected) {
       const o = coilLamp.slot * 8, s = coilLamp.k * coilLamp.gain * coilCharge.level;
       lights[o + 4] = coilLamp.kind.r * s; lights[o + 5] = coilLamp.kind.g * s; lights[o + 6] = coilLamp.kind.b * s;
@@ -1720,7 +1720,7 @@
       key.px = camera.position.x; key.py = camera.position.y; key.pz = camera.position.z;
       key.torch = RENDER_OPTS.torch; key.lampFactor = RENDER_OPTS.lampFactor;
       key.poolShade = poolShade; key.poolUnder = poolUnder;
-      key.lanternsOn = lanternsOn; key.cave = cameraCaveIndex; key.limit = limit;
+      key.lanternsOn = lanternsOn; key.coilActive = coilActive; key.cave = cameraCaveIndex; key.limit = limit;
       lampSelValid = true;
     }
   };
@@ -1925,10 +1925,8 @@
       dial = COIL.high + Math.sin(elapsed * 16) * 0.02;
       level = 0.75 + Math.sin(elapsed * 10) * 0.1;
     } else if (t >= burst && t < done) {
-      climb = 1;
       flash = true;
       dial = 0.97;
-      level = 1.4 + Math.sin(elapsed * 7) * 0.3;
     } else if (t >= done && t < COIL_RUN) {
       const k = Math.min(1, (t - done) / COIL.fall);
       dial = 0.97 - (0.97 - COIL.low) * (1 - (1 - k) * (1 - k));
