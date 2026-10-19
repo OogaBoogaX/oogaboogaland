@@ -165,7 +165,7 @@
   let scene = null, greeter = null, actPrompt = false;
   // On the Worker's page the island's driving rules hold in here too, and the Ooga driven is reported to the
   // room every frame, so signed-in players in the hall hear each other (voice needs a driven Ooga).
-  const mayPossess = (cave) => BL.net.mayDrive(cave.traits.name, contributors.stateFor(cave.contributor) === "working");
+  const mayPossess = (cave) => BL.net.mayDrive(cave.traits.name);
   const accountChanged = () => {
     if (!avatar) return;
     const released = BL.net.state.released;
@@ -762,13 +762,17 @@
     }
   };
   // At the kiosk, keys go to its screen once the view is in; watching, any key walks on. Space and Backspace never
-  // reach the page, and keys with a modifier are left to the browser.
+  // reach the page, nor does a character key the screen takes, so one that moves the typing into a field (A opens the
+  // name) never types itself there. Keys with a modifier, and the browser's own (F5, F11), are left to the browser.
   const boothKey = (s, e) => {
     const b = s.booth;
     if (e.metaKey || e.ctrlKey || e.altKey) return false;
     if (e.key === " " || e.key === "Backspace") e.preventDefault();
     if (b.mode === WATCHING) leaveBooth(s);
-    else if (b.mode === AT_KIOSK && b.t >= 1) b.flow.key(e);
+    else if (b.mode === AT_KIOSK && b.t >= 1) {
+      if (e.key.length === 1) e.preventDefault();
+      b.flow.key(e);
+    }
     return true;
   };
   // The kiosk's flow laid over its glass: the four corners projected, one affine map fitted to them (the view is
@@ -833,7 +837,9 @@
       startDetails: () => BL.donationPopup.attachDetails(b.flow, BL.donationPopup.defaults(), true),
       details: () => BL.donationPopup.details(),
       closeDetails: () => BL.donationPopup.detachDetails(b.flow),
-      editDetails: () => BL.donationPopup.focusDetails(),
+      editDetails: (field) => BL.donationPopup.focusDetails(field),
+      typing: () => BL.donationPopup.typing(),
+      restoreDetails: (value) => BL.donationPopup.restoreDetails(value),
       detailsState: (flow) => BL.donationPopup.detailsState(flow),
       invoice: (sats, value) => donations.invoice({ sats, ...value }),
       note: (request, value, changedHandle) => donations.note(request, value.message, changedHandle ? value.handle : undefined),
@@ -1004,6 +1010,7 @@
   };
   const onKey = (e) => {
     if (scene.booth.mode) return boothKey(scene, e);
+    if (e.key === "0" && !e.repeat && !e.metaKey && !e.ctrlKey && !e.altKey) return pilot.resetCamera();
     if ((e.key === "x" || e.key === "X") && !e.repeat && pilot.modeAction("mode-toggle")) return true;
     if ((e.key === "1" || e.key === "2") && pilot.weaponMode(Number(e.key))) return true;
     if (e.key === "g" || e.key === "G") return pilot.weaponAction("weapon-toggle");
@@ -1013,9 +1020,9 @@
       return true;
     }
     if (e.key === "Escape") {
-      // The guide's open menu swallows Escape first; only with none up does Escape leave the cave.
+      // The guide closes before the cursor, the Ooga and the cave are left.
       if (greeter && greeter.escape()) return true;
-      leaveCave();
+      if (!pilot.escape()) leaveCave();
       return true;
     }
     return false;
@@ -1590,10 +1597,7 @@
       }
       else if (action === "reset") { game.resetAll(); location.reload(); }
       else if (action === "leave") leaveCave();
-      else if (action === "reset-view") {
-        endBooth(scene);
-        pilot.goPreset("entrance");
-      }
+      else if (action === "reset-view") pilot.resetCamera();
       else if (action === "act") { if (!greeter || !greeter.act()) pilot.action(); }
       else if (action.startsWith("mode-")) pilot.modeAction(action);
       else if (action.startsWith("weapon-") || action === "magazine-swap") pilot.weaponAction(action);
@@ -1622,8 +1626,10 @@
     // free.
     const asked = ctx.from === null ? new URLSearchParams(location.search).get("character")?.trim().toLowerCase() : null;
     const named = asked ? contributors.roster.find((c) => c.name.toLowerCase() === asked) : null;
-    const picked = named || world.pilot && contributors.roster.find((c) => c.name === world.pilot) || null;
-    const playerName = picked && !BL.net.mayDrive(picked.name, contributors.stateFor(picked) === "working") ? picked.name : null;
+    const returningOwn = pilot.loginViewRestored && BL.net.ownCharacter();
+    const picked = returningOwn ? contributors.roster.find(c => c.name === returningOwn.handle)
+      : named || world.pilot && contributors.roster.find((c) => c.name === world.pilot) || null;
+    const playerName = picked && !BL.net.mayDrive(picked.name) ? picked.name : null;
     world.pilot = null;
     if (playerName) {
       // Keep the visitor's weapons and magazines across the doorway. The
@@ -1645,11 +1651,15 @@
       world.magazine = playerWorld.magazine;
       pilot.bind(shared);
       avatar = people.cavemen.get(playerName);
+      if (pilot.loginViewRestored) {
+        Object.assign(avatar.root.position, { x: ARRIVAL.position.x, y: ARRIVAL.position.y + avatar.baseY, z: ARRIVAL.position.z });
+        avatar.root.rotation.y = ARRIVAL.yaw + Math.PI;
+      }
       pilot.possess(avatar);
       people.selectWeapon(avatar.weapon.selectedSlot, avatar);
       // An arrival, as on the island: the Ooga stands a step inside the gate facing the core and the view starts
       // settled over its shoulder, never sweeping in from wherever the new camera began.
-      pilot.navigate(ARRIVAL);
+      if (!pilot.loginViewRestored) pilot.navigate(ARRIVAL);
       scene.gate.phase.body.track(avatar.root, avatar.traits.height * 2, Math.max(avatar.headOpen.verts.length, avatar.headClosed.verts.length));
       for (const t of scene.tunnels) t.body.track(avatar.root, avatar.traits.height * 2, Math.max(avatar.headOpen.verts.length, avatar.headClosed.verts.length));
     }
@@ -1682,7 +1692,7 @@
     // With no Ooga the visitor cannot talk to the guide: a hint points them to the island to pick one.
     if (!avatar) hud.hint(`${BL.factoryGreeter.NAME} the guide gives tours here — pick an Ooga on the island first`);
     // Sent from the island's dialog to tip: on to the kiosk's glass at the first frame, once the pilot has placed the view.
-    scene.toKiosk = ctx.place === "kiosk" && scene.corner;
+    scene.toKiosk = !pilot.loginViewRestored && ctx.place === "kiosk" && scene.corner;
 
     factoryScene.root = root;
     factoryScene.camera = camera;
@@ -1914,12 +1924,12 @@
     for (let i = 0; i < s.crew.length; i++) s.crew[i].agent.update(dt);
     // Out through the gate: walked into it, or flown into it with the free view.
     if (!leaving) {
-      const p = avatar ? avatar.root.position : camera.position, y = p.y - (avatar ? avatar.baseY : 0) - LAYOUT.entrance.y;
+      const driven = pilot.player, p = driven ? driven.root.position : camera.position, y = p.y - (driven ? driven.baseY : 0) - LAYOUT.entrance.y;
       const inOpening = p.x >= GATE_OPENING.minX && p.x <= GATE_OPENING.maxX && y >= GATE_OPENING.floorY - 0.12 && y < GATE_OPENING.ceilingY;
-      if (avatar) {
+      if (driven) {
         if (inOpening && p.z > HALL.front - 1.3) leaveCave();
         else peerPortal(s, previousX, previousY, previousZ);
-      } else {
+      } else if (!avatar) {
         const a = pilot.controls.read();
         if (inOpening && Math.hypot(a.x, a.y) > 0.05 && p.z > HALL.front - 2.2) leaveCave();
       }
@@ -2087,7 +2097,8 @@
     // A visitor at the kiosk steps away first, and a tip of theirs still on its screen goes into the cooker.
     endBooth(scene);
     // Whoever walked in walks back out as themselves: the island takes the same Ooga back at this mouth.
-    if (avatar) world.pilot = avatar.traits.name;
+    world.pilotDetached = !pilot.player;
+    world.pilot = pilot.player ? pilot.player.traits.name : null;
     greeter.dispose();
     greeter = null;
     unsubscribe();

@@ -283,8 +283,7 @@
         <button type="button" class="leave" data-action="leave">Leave<span> cave</span></button>
       </nav>
       <nav class="presets" aria-label="DSB Land" data-scene="dsb" hidden>
-        <button type="button" data-action="dsb-lookout">Island overview</button>
-        <button type="button" data-action="reset-view">Walk</button>
+        <button type="button" data-action="dsb-lookout" title="Camera viewpoint · releases character control">Island overview</button>
         <button type="button" data-action="dsb-mute" id="dsb-mute" aria-pressed="false">Mute</button>
       </nav>
       <nav class="presets" aria-label="₿IFRÖST" data-scene="bifrost" hidden>
@@ -450,7 +449,7 @@
             <span class="account-name" id="account-name" hidden></span>
           </span>
           <span class="account-actions">
-            <button type="button" class="foot-button foot-primary" data-action="account-login" id="account-login">Sign in with GitHub</button>
+            <button type="button" class="foot-button foot-primary" data-action="account-login" id="account-login" aria-label="Contributor sign-in with GitHub" title="Contributors can sign in with GitHub to control their own Ooga and gorilla.">Contributor sign-in</button>
             <button type="button" class="foot-button foot-primary" data-action="account-rejoin" id="account-rejoin" hidden>Play here</button>
             <button type="button" class="foot-button" data-action="account-voice" id="account-voice" aria-pressed="false" hidden>Join voice</button>
             <button type="button" class="link" data-action="account-logout" id="account-logout" hidden>Sign out</button>
@@ -477,15 +476,15 @@
     <div class="equipment-hud" id="equipment-hud">
       <div class="weapon-equipment-row">
       <button type="button" class="mode-hud" id="destination-hud" data-action="mode-preset" data-selected="false"
-        aria-labelledby="detached-destination-name destination-hud-label" title="Ooga Booga Land destinations" hidden>
+        aria-labelledby="detached-destination-name destination-hud-label" title="Map · cycle destinations" hidden>
         <img class="freeroam-icon" id="freeroam-icon" alt="" aria-hidden="true">
         <span class="detached-destination-name" id="detached-destination-name" aria-live="polite"></span>
-        <span id="destination-hud-label" hidden>Ooga Booga Land destinations. Press to cycle places</span>
+        <span id="destination-hud-label" hidden>Map. Cycle destinations</span>
       </button>
       <button type="button" class="mode-hud" id="own-ooga-hud" data-action="mode-retake" data-selected="true"
-        aria-label="Return to your Ooga" title="Return to your Ooga" hidden>
+        aria-label="Return to your last character" title="Return to your last character" hidden>
         <canvas class="mode-face-icon" id="own-ooga-face-icon" width="48" height="48" aria-hidden="true"></canvas>
-        <span class="mode-health" id="own-ooga-health" role="progressbar" aria-label="Your Ooga's health" aria-valuemin="0" aria-valuemax="25" aria-valuenow="25"><span id="own-ooga-health-fill"></span></span>
+        <span class="mode-health" id="own-ooga-health" role="progressbar" aria-label="Last character's health" aria-valuemin="0" aria-valuemax="25" aria-valuenow="25"><span id="own-ooga-health-fill"></span></span>
       </button>
       <button type="button" class="mode-hud" id="mode-hud" data-action="mode-toggle" data-selected="false" data-shooter="false"
         aria-label="Character controls" title="Character controls" hidden>
@@ -674,8 +673,8 @@
         <div class="garage-head">
           <h2><span data-sign>Ooga Rally</span> <span class="garage-medal garage-cup" id="garage-cup" hidden></span>
           </h2>
-          <p class="help">Pick an Ooga, a ride and a track. Three laps against the crew, or all three tracks for the
-            Cup.</p>
+          <p class="help">Pick <span id="garage-pick-ooga">an Ooga, </span>a ride and a track. Three laps against the
+            crew, or all three tracks for the Cup.</p>
         </div>
         <div class="garage-columns">
           <div class="garage-col">
@@ -1498,10 +1497,10 @@
         <h2 id="donation-title"><span data-sign>Feed the Ooga Boogas</span></h2>
         <button type="button" class="modal-close" id="donation-close" aria-label="Close donation">&times;</button>
       </div>
-      <canvas id="donation-screen" width="400" height="400" tabindex="0" aria-label="Donation screen. Type an amount, press Enter to continue, O for on-chain, C to copy, and Escape to go back."></canvas>
+      <canvas id="donation-screen" width="400" height="400" tabindex="0" aria-label="Donation screen. Type an amount, press Enter to continue, A for your name and message, O for on-chain, C to copy, and Escape to go back."></canvas>
       <div id="donation-fields">
-        <label class="field"><span>Donation handle</span><input id="donation-handle" type="text" maxlength="39" autocomplete="off" spellcheck="false" placeholder="anon"></label>
-        <label class="field"><span>Banana message (up to 280 characters)</span><input id="donation-message" type="text" maxlength="280" autocomplete="off" placeholder="Optional message"></label>
+        <label class="field"><span>Donation handle</span><input id="donation-handle" type="text" maxlength="39" tabindex="-1" autocomplete="off" spellcheck="false" placeholder="anon"></label>
+        <label class="field"><span>Banana message (up to 280 characters)</span><input id="donation-message" type="text" maxlength="280" tabindex="-1" autocomplete="off" placeholder="Optional message"></label>
         <div class="donation-details-actions">
           <span id="donation-details-status" role="status"></span>
         </div>
@@ -1757,6 +1756,8 @@ Then run npm run build and ONLY=characters node test/run.mjs.</pre>
   <script src="js/donation-popup.js"></script>
   <script src="js/factory-models.js"></script>
   <script src="js/factory-window.js"></script>
+  <script src="js/tess.js"></script>
+  <script src="js/hub-guide.js"></script>
   <script src="js/factory-greeter.js"></script>
   <script src="js/scene-factory.js"></script>
   <script src="js/arcade-models.js"></script>

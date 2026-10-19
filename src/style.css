@@ -1365,36 +1365,20 @@ body[data-active-scene="arcade"] .magazine-hud {
   overflow: auto;
 }
 
-#factory-donation-fields {
+/* The kiosk draws the name and message on its own screen. These fields only take the typing, so they stay in the
+   page, focusable, a phone's keyboard able to open on them, but out of sight; 16px keeps iOS from zooming in. */
+#donation-fields {
   position: fixed;
-  z-index: 30;
-  left: 50%;
-  bottom: calc(12px + var(--safe-bottom));
-  width: min(680px, calc(100% - 32px));
-  transform: translateX(-50%);
+  left: 0;
+  bottom: 0;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  opacity: 0;
+  pointer-events: none;
 }
 
-#factory-donation-fields #donation-fields {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 2fr);
-  gap: 4px 12px;
-  padding: 8px 12px;
-  border: 2px solid var(--wood-edge);
-  border-radius: 8px;
-  background: var(--wood);
-  box-shadow: 0 3px 0 var(--nail);
-}
-
-#factory-donation-fields .field { margin-top: 0; }
-#factory-donation-fields .donation-details-actions { grid-column: 1 / -1; }
-
-.donation-details-actions {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  color: var(--paper);
-  font-size: 11px;
-}
+#donation-fields input { font-size: 16px; }
 
 #donation-screen {
   display: block;
@@ -3019,6 +3003,32 @@ body[data-active-scene="arcade"] .magazine-hud {
   transform: translateX(-50%);
 }
 
+/* Tess's island offer and tour: the two choices share a row, and on tour the panel sits low, clear of the landmarks but above the toasts and the drawer's pull tabs. */
+.greeter-row {
+  display: flex;
+  gap: 6px;
+}
+
+.greeter-row .greeter-choice {
+  flex: 1;
+  white-space: nowrap;
+}
+
+/* While her tour holds the view the touch sticks do nothing, so they step aside for her panel. */
+body.tess-touring #joy-move,
+body.tess-touring #joy-look {
+  visibility: hidden;
+}
+
+/* On tour the heading is two lines on purpose: where in the tour, then the stop's name. */
+.greeter-menu.greeter-tour .greeter-menu-title {
+  white-space: pre-line;
+}
+
+.greeter-menu.greeter-tour {
+  bottom: calc(60px + var(--safe-bottom));
+}
+
 .race {
   position: absolute;
   inset: 0;
@@ -4093,6 +4103,24 @@ body[data-active-scene="arcade"] .magazine-hud {
 
 .race-podium li.you {
   color: #f5c542;
+}
+
+/* A race's table and, in a cup, the standings under it can outgrow the window: the card holds to it and
+   its tables give up their height, each scrolling on its own (the HUD opens them at the visitor's row). A
+   window too short for that scrolls the card instead. */
+#race-results:not([hidden]) {
+  display: flex;
+  flex-direction: column;
+  max-height: calc(100% - 32px - var(--safe-top) - var(--safe-bottom));
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+@media (min-height: 600px) {
+  #race-results .race-podium {
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
 }
 
 .race-pause .actions {

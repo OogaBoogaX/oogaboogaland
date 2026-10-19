@@ -836,12 +836,10 @@
       cave.parts.gun.visible = false;
       cave.yawn = 0;
     };
-    // Online (the green dot) is a player driving this Ooga: a signed-in player elsewhere (`remoteControlled`,
-    // set by the hub's remote-player pool while it shows them), or this visitor, when the scene's
-    // `localOnline` says this page counts (signed in, on a page with accounts); without it, any driver does.
+    // Keep local control separate from remote presence; the HUD applies the current account
+    // to local drivers so sign-in and sign-out repaint every scene's green dot immediately.
     const refreshRosterRow = (cave) => {
-      const local = cave.humanControlled && (!ctx.localOnline || ctx.localOnline());
-      hud.setRosterRow(cave.traits.name, cave.state, contributors.ageLabel(cave.contributor), local || !!cave.remoteControlled);
+      hud.setRosterRow(cave.traits.name, cave.state, contributors.ageLabel(cave.contributor), cave.humanControlled, !!cave.remoteControlled);
     };
     let player = null;
     const magazineCount = (cave = player) => cave ? cave.weapon.spareAmmo.length : 0;
@@ -3485,13 +3483,13 @@
       }
       return false;
     };
-    const outsideClear = (fromX, fromZ, x, z, y, height) => {
+    const outsideClear = (fromX, fromZ, x, z, y, height, radius = 0) => {
       const bodies = ctx.outsideActors && ctx.outsideActors();
       if (!bodies) return true;
       for (let i = 0; i < bodies.length; i++) {
         const body = bodies[i];
-        if (y >= body.y + ctx.outsideActorHeight || y + height <= body.y) continue;
-        if (!gapClear(fromX, fromZ, x, z, body, OUTSIDE_GAP)) return false;
+        if (y >= body.y + (body.height || ctx.outsideActorHeight) || y + height <= body.y) continue;
+        if (!gapClear(fromX, fromZ, x, z, body, Math.max(OUTSIDE_GAP, (body.radius || 0) + radius))) return false;
       }
       return true;
     };
@@ -3511,7 +3509,7 @@
         if (!gapClear(p.x, p.z, x, z, other.root.position)) return false;
       }
       // Walking bodies the scene owns rather than the roster keep the same gap.
-      return outsideClear(p.x, p.z, x, z, p.y - cave.baseY, cave.bodyHeight);
+      return outsideClear(p.x, p.z, x, z, p.y - cave.baseY, cave.bodyHeight, cave.bodyRadius);
     };
     // The same gap from the other side: a scene's own walker against the whole crew.
     const actorClear = (fromX, fromZ, x, z, y, height) => {
@@ -3636,7 +3634,7 @@
       }
       // Bodies the scene owns are obstacles like any other: the walker's own
       // avoidance steers around them rather than through them.
-      if (!outsideClear(p.x, p.z, x, z, feet, cave.bodyHeight)) return false;
+      if (!outsideClear(p.x, p.z, x, z, feet, cave.bodyHeight, cave.bodyRadius)) return false;
       return shoulderClear(cave, x, z) && npcWalkable(p.x, p.z, x, z, feet, cave.bodyHeight, cave)
         && groundAt(x, z, feet, feet, cave) >= feet - STEP - 1e-7;
     };
@@ -3727,7 +3725,7 @@
         const y = groundAt(x, z, feet, feet, cave);
         if (!Number.isFinite(y) || Math.abs(y - feet) > STEP || ctx.abyssAt && ctx.abyssAt(x, z, y, cave)
           || ctx.npcLandingAllowed && !ctx.npcLandingAllowed(x, y, z, cave.bodyHeight, cave)
-          || !npcWalkable(x, z, x, z, y, cave.bodyHeight, cave) || !outsideClear(x, z, x, z, y, cave.bodyHeight)) continue;
+          || !npcWalkable(x, z, x, z, y, cave.bodyHeight, cave) || !outsideClear(x, z, x, z, y, cave.bodyHeight, cave.bodyRadius)) continue;
         let occupied = false;
         for (let i = 0; i < crewList.length; i++) {
           const other = crewList[i], q = other.root.position, floor = q.y - other.baseY;
@@ -3808,7 +3806,7 @@
       const outside = ctx.outsideActors && ctx.outsideActors();
       if (outside) for (let n = 0; n < outside.length; n++) {
         const body = outside[n];
-        if (Math.hypot(body.x - x, body.z - z) <= distance + OUTSIDE_GAP) recoveryOutside[recoveryOutsideCount++] = body;
+        if (Math.hypot(body.x - x, body.z - z) <= distance + Math.max(OUTSIDE_GAP, (body.radius || 0) + cave.bodyRadius)) recoveryOutside[recoveryOutsideCount++] = body;
       }
       // A coarse edge can cross a deep corner before reaching a higher tread.
       // Follow the same short, supported steps as the walker, not the line
@@ -3818,8 +3816,8 @@
         const nx = fromX + dx * along, nz = fromZ + dz * along;
         for (let n = 0; n < recoveryOutsideCount; n++) {
           const body = recoveryOutside[n];
-          if (y < body.y + ctx.outsideActorHeight && y + cave.bodyHeight > body.y
-            && !gapClear(x, z, nx, nz, body, OUTSIDE_GAP)) return NaN;
+          if (y < body.y + (body.height || ctx.outsideActorHeight) && y + cave.bodyHeight > body.y
+            && !gapClear(x, z, nx, nz, body, Math.max(OUTSIDE_GAP, (body.radius || 0) + cave.bodyRadius))) return NaN;
         }
         for (let n = 0; n < recoveryBodyCount; n++) {
           const other = recoveryBodies[n], floor = other.root.position.y - other.baseY;
@@ -3871,6 +3869,12 @@
     const jumpWalker = (cave, tx, tz) => {
       const nav = cave.avoidance.navigation, p = cave.root.position, feet = p.y - cave.baseY;
       if (inBananas(cave) || nav.jumpCandidate >= 8) { nav.mode = 0; cave.avoidance.stalled = -1; return; }
+      // The search spans frames: traffic or scenery can clear before it fails.
+      // Recheck the supported ground route before committing to an escape jump.
+      if (Number.isFinite(recoveryHeight(cave, p.x, p.z, feet, tx, tz, NAV_STEP))) {
+        nav.mode = 0; cave.avoidance.stalled = 0; cave.avoidance.best = Infinity; cave.avoidance.active = false;
+        return;
+      }
       for (let otherIndex = 0; otherIndex < crewList.length; otherIndex++) {
         const other = crewList[otherIndex];
         if (!shoulderNeighbor(cave, other)) continue;
@@ -4565,7 +4569,7 @@
       const height = cave.bodyHeight + Math.max(0, cave.viewLift);
       // On foot, the scene's own walkers are bodies to walk round, not through.
       if (!flying && cave.hop <= 0 && (!shoulderClear(cave, toX, toZ)
-        || !outsideClear(fromX, fromZ, toX, toZ, y, height))) return false;
+        || !outsideClear(fromX, fromZ, toX, toZ, y, height, cave.bodyRadius))) return false;
       return flying || cave.hop > 0
         ? flyable(fromX, fromZ, toX, toZ, y, height, cave) && groundAt(toX, toZ, y, y, cave) <= y
         : walkable(fromX, fromZ, toX, toZ, y, height, cave);
@@ -5237,7 +5241,7 @@
       const p = cave.root.position;
       const dealt = power * 4;
       health.value = Math.max(0, health.value - dealt);
-      if (showDamage) fx.damageNumber(p.x, p.y - cave.baseY + cave.bodyHeight + 0.15, p.z, dealt);
+      if (showDamage) ctx.fx.damageNumber(p.x, p.y - cave.baseY + cave.bodyHeight + 0.15, p.z, dealt);
       health.delay = HEALTH_REGEN_DELAY;
       if (health.value <= 0) {
         health.stunned = true;
