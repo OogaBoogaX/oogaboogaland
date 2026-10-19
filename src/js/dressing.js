@@ -55,7 +55,7 @@
     BANANA_ART.ink.D, BANANA_ART.ink.Y, BANANA_ART.ink.G, // 55-57 ammo banana outline, fruit, stem
     "#25324a", "#c79a3e", "#5b3a24" // 58 navy cloth, 59 brass, 60 walnut
   ];
-  const EMISSIVE = { 9: 1, 10: 1, 11: 0.9, 30: 1, 31: 1, 32: 1, 37: 1, 40: 1 };
+  const EMISSIVE = { 9: 1, 10: 1, 11: 0.9, 30: 1, 31: 1, 32: 1, 37: 1, 40: 1, 49: 1, 55: 1, 56: 1, 57: 1, 59: 1 };
   // Lantern glass by variant (amber, teal, green, red) and the light each casts; the fifth is a bolt's yellow.
   const GLASS = [9, 30, 31, 32];
   const LIGHT_RGB = [[1, 0.7, 0.36], [0.45, 1, 0.92], [0.5, 1, 0.55], [1, 0.38, 0.3], [1, 0.9, 0.35]];
@@ -368,11 +368,11 @@
   ];
   // Each variant's art and inks: `ink` paints the cloth, `glow` lights up and bakes into the glow mesh.
   const BANNER_ART = [
-    [FACTORY_BANNER, { G: "#6f737a", L: "#b9bec6", S: "#4a4d52", R: "#2c2e33", Y: "#ffd23a", H: "#fff1b0", O: "#f29a1e", D: "#e2681c" }],
-    [LAB_BANNER, { "#": "#f2efe8" }],
+    [FACTORY_BANNER, {}, { G: "#6f737a", L: "#b9bec6", S: "#4a4d52", R: "#2c2e33", Y: "#ffd23a", H: "#fff1b0", O: "#f29a1e", D: "#e2681c" }],
+    [LAB_BANNER, {}, { "#": "#f2efe8" }],
     [MATRIX_BANNER, {}, { G: "#46ff72", H: "#b8ffcb", d: "#1fa84a", Y: "#ffd66b", y: "#d9a42a", h: "#fff1b0", W: "#d8ffe2", c: "#1e8a44", k: "#155a2e" }],
     null,
-    [BCA_BANNER, { B: "#c79a3e", b: "#e9c46e", w: "#7a5634", r: "#8a6a3e", I: "#efe6cc", i: "#c9bc98", Y: "#f5d142", o: "#c9a227", S: "#6b4a26" }]
+    [BCA_BANNER, {}, { B: "#c79a3e", b: "#e9c46e", w: "#7a5634", r: "#8a6a3e", I: "#efe6cc", i: "#c9bc98", Y: "#f5d142", o: "#c9a227", S: "#6b4a26" }]
   ];
   const bannerPaint = BL.models.variants((v) => {
     const [rows, ink, glow = {}] = BANNER_ART[v], pixel = U / 4;
@@ -498,18 +498,21 @@
     // A cave's standard: 0 bolt and cog, 1 sprouting beaker, 2 favicon, 3 banana, 4 abacus; the art is `BANNER_ART`'s.
     banner: (v) => {
       const piece = author((put, box) => {
-        const CLOTH = [14, 14, 36, 42, 58][v], EDGE = [15, 15, 37, 18, 59][v];
+        const CLOTH = [14, 14, 36, 42, 58][v], EDGE = [11, 30, 37, 49, 59][v];
         box(SOLID, -3, 2, 0, 1, -3, 2, 2);
         box(SOLID, -1, 0, 2, 45, -1, 0, 2);
         box(SOLID, -1, 0, 46, 47, -1, 0, v === 2 ? 37 : 6);
         box(HANG, -9, 8, 43, 44, -1, 0, 0);
         for (let x = -8; x <= 7; x++) {
           const bottom = 14 + ((x * 7) % 3 + 3) % 3 * 2;
-          for (let y = bottom; y <= 42; y++) put(HANG, x, y, 1, x === -8 || x === 7 ? EDGE : CLOTH);
+          for (let y = bottom; y <= 42; y++) {
+            const stripe = x === -8 || x === 7 || v === 0 && (x === -7 || x === 6);
+            put(stripe ? GLOW : HANG, x, y, 1, stripe ? EDGE : CLOTH);
+          }
         }
         if (v === 3) for (let row = 0; row < 15; row++) for (let col = 0; col < 15; col++) {
           const ink = BANANA_ART.rows[Math.floor(row * 9 / 15)][Math.floor(col * 9 / 15)];
-          if (ink !== ".") put(HANG, col - 7, 36 - row, 2, ink === "D" ? 55 : ink === "Y" ? 56 : 57);
+          if (ink !== ".") put(GLOW, col - 7, 36 - row, 2, ink === "D" ? 55 : ink === "Y" ? 56 : 57);
         }
       });
       if (BANNER_ART[v]) {
