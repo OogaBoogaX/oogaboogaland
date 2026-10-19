@@ -1755,8 +1755,10 @@
   // door and facing the island's centre: the Mempool stairs start at the right jamb and the Lightning Factory's right side fills the ground further left). A slot without a theme wears none: the sealed caves, and the
   // Headquarters ramps that run down a cutting rather than into a cliff. Each mouth bakes to one solid, one hanging and one glowing mesh, memoised per island
   // so a revisit only places nodes. Pieces are [kind, x, z, quarter turns, variant, lift] in the mouth's frame.
+  // A `ceiling` run is two cables into the room, [left x, right x, from z, to z, height, lamp places, lamp kind], the kind a
+  // hanging lantern unless named (EntropyLab's white strip lights).
   const THEMES = {
-    lab: { glass: 1, icon: "die", banners: [[-1, 1], [1, 1]], string: ["bulb", 1], pieces: [["flaskBench", -5.3, 1.1], ["die", -4.1, 2.8, 0, 1], ["die", -3.5, 3.6, 1, 3], ["die", -4.1, 2.8, 1, 4, 0.5], ["terminal", 5.2, 1.0], ["die", 4.3, 3.2, 1, 2]] },
+    lab: { glass: 4, icon: "die", banners: [[-1, 1], [1, 1]], string: ["bulb", 4], ceiling: [[-1.6, 1.6, -1.5, -5.6, 3.0, [0.3, 0.72], "tube"]], pieces: [["flaskBench", -5.3, 1.1], ["die", -4.1, 2.8, 0, 1], ["die", -3.5, 3.6, 1, 3], ["die", -4.1, 2.8, 1, 4, 0.5], ["terminal", 5.2, 1.0], ["die", 4.3, 3.2, 1, 2]] },
     matrix: { glass: 2, icon: "glyph", banners: [[1, 2], [-1, 2]], string: ["bulb", 2], pieces: [["monolith", -5.0, 0.9, 0, 0], ["monolith", 5.0, 0.9, 0, 1], ["runeStone", -4.2, 2.8, 0, 0], ["runeStone", 4.4, 2.9, 0, 1], ["rubble", -6.3, 2.6, 0, 1]] },
     lightning: { glass: 0, icon: "bolt", banners: [[-1, 0], [1, 0]], string: ["hanging", 0, [0.3, 0.7]], boards: true, pieces: [["coalCrate", -5.1, 0.8, 0, 3], ["crate", -5.4, 2.1, 1, 0], ["crate", -5.4, 2.1, 0, 1, 0.75], ["barrel", -4.3, 2.9, 0, 1], ["rubble", -6.4, 0.9, 0, 1], ["gauge", 5.0, 0.9], ["cart", 5.7, 2.4, 1], ["coil", 3.8, 3.4], ["coalCrate", 6.4, 3.4, 0, 1]] },
     arcade: { glass: 3, icon: "invader", banners: [[-1, 3], [1, 3]], string: ["hanging", 3, [0.12, 0.5, 0.88]], inside: [["barrel", -2.4, -1.9, 0, 0], ["crate", 2.4, -2.0, 1, 0], ["barrel", 2.4, -2.0, 0, 1, 0.75]], ceiling: [[-2.35, 2.35, -1.5, -5.8, 3.0, [0.35, 0.8]]], pieces: [["cabinet", -3.6, 1.0, 0, 0], ["cabinet", -2.9, 2.2, 0, 1]] },
@@ -1848,9 +1850,9 @@
     if (theme.boards && slot.status === "dark") set.put("boards", 0, 0.2, 1.06);
     // Inside the mouth the floor is the cave's own, level with the doorway.
     for (const [kind, lx, lz, turns = 0, variant = 0, lift = 0] of theme.inside || []) set.put(kind, lx, lift, lz, turns, variant);
-    for (const [ax, bx, az, bz, y, lamps] of theme.ceiling || []) {
-      set.cable(ax, y, az, ax, y, bz, 0.15, lamps, "hanging", theme.glass);
-      set.cable(bx, y, az, bx, y, bz, 0.15, lamps, "hanging", theme.glass);
+    for (const [ax, bx, az, bz, y, lamps, lamp = "hanging"] of theme.ceiling || []) {
+      set.cable(ax, y, az, ax, y, bz, 0.15, lamps, lamp, theme.glass);
+      set.cable(bx, y, az, bx, y, bz, 0.15, lamps, lamp, theme.glass);
     }
     baked = { ...set.build(), ground, rig };
     byIsland.set(slot.id, baked);
@@ -1866,11 +1868,13 @@
       else if (node.geometry === baked.lampGlow || node.geometry === baked.swingLampGlow) addLamp(node, LAMP.lantern, x, y, z, false, 0, `${id}:${lamps.length}`).nightOnly = true;
     }
   };
-  // The Lightning Factory's coil charges on a loop of its own, run by scene time alone: its copper bands light from
-  // the foot up while the gauge's needle climbs from green into the red, the crown spits a few arcs, the charge goes
-  // out and the needle falls back, and the coil stands dark a moment before the next. Only these nodes move; the
-  // mouth's baked meshes stay as they are. Times in seconds; the dial runs 0 (green) to 1 (red).
-  const COIL = { cycle: 9.9, rest: 0.7, charge: 6.2, hold: 0.6, burst: 1.35, fall: 0.7, low: 0.06, high: 0.92 };
+  // The Lightning Factory's coil charges in runs of its own, timed by scene time alone: its copper bands light from
+  // the foot up while the gauge's needle climbs from green into the red, the crown spits long arcs, the charge goes
+  // out and the needle falls back, and the coil stands dark, cooling, for one to three runs' length (picked afresh
+  // each time) before the next. Only these nodes move; the mouth's baked meshes stay as they are. Times in seconds
+  // (`lead` the dark before a visit's first run, `crackle` each set of arcs' turn); the dial runs 0 (green) to 1 (red).
+  const COIL = { lead: 2.1, charge: 18.6, hold: 1.8, burst: 4.05, fall: 2.1, crackle: 0.45, low: 0.06, high: 0.92 };
+  const COIL_RUN = COIL.charge + COIL.hold + COIL.burst + COIL.fall;
   const COIL_SPARKS = [SPARK];
   let coilCharge = null;
   const buildCoilCharge = (group, rig, m) => {
@@ -1899,28 +1903,33 @@
     const arcs = parts.arcs.map((geometry) => part(coil, geometry, 0, 0, 0, true));
     const needle = rig.gauge ? part(frame(rig.gauge), parts.needle, parts.pivot[0] * U, parts.pivot[1] * U, parts.pivot[2] * U, false) : null;
     const sr = Math.sin(m.ry), cr = Math.cos(m.ry), p = coil.position;
-    coilCharge = { bands, crown, arcs, needle, lamp: null, level: 0, fired: false,
+    coilCharge = { bands, crown, arcs, needle, lamp: null, level: 0, fired: false, start: COIL.lead, cool: COIL_RUN * (1 + 2 * Math.random()),
       x: m.x + cr * p.x + sr * p.z, y: m.floorY + p.y + parts.crownY * U, z: m.z - sr * p.x + cr * p.z };
   };
   const updateCoilCharge = (elapsed) => {
-    const c = coilCharge, t = elapsed % COIL.cycle;
-    const held = COIL.rest + COIL.charge, burst = held + COIL.hold, done = burst + COIL.burst;
+    const c = coilCharge;
+    // A run and its cooldown over, the next run starts and draws its own cooldown.
+    while (elapsed - c.start >= COIL_RUN + c.cool) {
+      c.start += COIL_RUN + c.cool;
+      c.cool = COIL_RUN * (1 + 2 * Math.random());
+    }
+    const t = elapsed - c.start, held = COIL.charge, burst = held + COIL.hold, done = burst + COIL.burst;
     // climb: how far up the coil the charge has lit, 0 to 1; dial: the needle's place; level: the lamp's.
     let climb = 0, dial = COIL.low, level = 0, flash = false;
-    if (t >= COIL.rest && t < held) {
-      climb = (t - COIL.rest) / COIL.charge;
+    if (t >= 0 && t < held) {
+      climb = t / COIL.charge;
       dial = COIL.low + (COIL.high - COIL.low) * climb;
       level = 0.15 + 0.55 * climb;
     } else if (t >= held && t < burst) {
       climb = 1;
-      dial = COIL.high + Math.sin(elapsed * 47) * 0.02;
-      level = 0.75 + Math.sin(elapsed * 31) * 0.1;
+      dial = COIL.high + Math.sin(elapsed * 16) * 0.02;
+      level = 0.75 + Math.sin(elapsed * 10) * 0.1;
     } else if (t >= burst && t < done) {
       climb = 1;
       flash = true;
       dial = 0.97;
-      level = 1.4 + Math.sin(elapsed * 20) * 0.3;
-    } else if (t >= done) {
+      level = 1.4 + Math.sin(elapsed * 7) * 0.3;
+    } else if (t >= done && t < COIL_RUN) {
       const k = Math.min(1, (t - done) / COIL.fall);
       dial = 0.97 - (0.97 - COIL.low) * (1 - (1 - k) * (1 - k));
     }
@@ -1928,12 +1937,12 @@
     for (let i = 0; i < n; i++) {
       const band = c.bands[i];
       band.visible = climb >= (i + 0.5) / (n + 1);
-      band.glow = flash ? 1.3 : 0.55 + 0.45 * climb + Math.sin(elapsed * 9 + i * 1.7) * 0.12;
+      band.glow = flash ? 1.3 : 0.55 + 0.45 * climb + Math.sin(elapsed * 3 + i * 1.7) * 0.12;
     }
     c.crown.visible = climb >= (n + 0.5) / (n + 1);
-    c.crown.glow = flash ? 1.3 : 0.8 + Math.sin(elapsed * 23) * 0.2;
-    // The arcs crackle between their two sets every 0.15 s.
-    const side = Math.floor(elapsed / 0.15) & 1;
+    c.crown.glow = flash ? 1.3 : 0.8 + Math.sin(elapsed * 8) * 0.2;
+    // The arcs crackle between their two sets.
+    const side = Math.floor(elapsed / COIL.crackle) & 1;
     c.arcs[0].visible = flash && side === 0;
     c.arcs[1].visible = flash && side === 1;
     if (flash && !c.fired) fx.burst(c.x, c.y, c.z, 6, COIL_SPARKS, 1.6);
@@ -2067,7 +2076,7 @@
     for (let i = 0; i < lit.length; i += 4) dressingLights.push(lit[i], lit[i + 1], lit[i + 2], lit[i + 3]);
     for (let i = 0; i < dressingLights.length; i += 4) {
       const lamp = addLamp({ glow: 0, flare: 0, visible: true }, DRESSING_LAMPS[dressingLights[i + 3]], dressingLights[i], dressingLights[i + 1], dressingLights[i + 2], true, (i / 4) % 5, `dressing:${i / 4}`);
-      lamp.nightOnly = dressingLights[i + 3] !== 4;
+      lamp.nightOnly = dressingLights[i + 3] !== BL.dressing.COIL_LIGHT;
       if (!lamp.nightOnly && coilCharge) coilCharge.lamp = lamp;
     }
     dressingLights.length = 0;

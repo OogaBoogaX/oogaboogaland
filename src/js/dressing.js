@@ -1,13 +1,13 @@
 // The one set-dressing kit every scene draws from. `KIT` pieces are voxel functions on a 1/16 grid, each
 // writing through `box` and `put` into separate solid, hanging, decorative glow and lantern glow layers: general (`lanternPost`, `crate`, `coalCrate`,
 // `barrel`, `cart`, `banner`, `gauge`, `rubble`, `bracket`, `hanging`, `bulb`), lab (`die`,
-// `flaskBench`, `terminal`, `chalkboard`), the mirror (`monolith`, `runeStone`), lightning (`coil` and its `coilCharge`,
+// `flaskBench`, `terminal`, `chalkboard`, the `tube` strip light), the mirror (`monolith`, `runeStone`), lightning (`coil` and its `coilCharge`,
 // `boards`), the arcade (`cabinet`), B.C.A. (`abacus`, `ledger`), plus `bench`, `vine` and `banner(v)` carrying each cave's emblem as pixel art.
 //
 // `set()` places pieces by quarter turns (`put`), strings sagging cables with lamps (`cable`) and `build`s
 // everything placed into one `solid`, one `hang`, decorative `glow` and lantern `lampGlow` mesh plus the `lights` its lanterns
 // cast; lamps hung by `cable` bake into swinging body and glow meshes. Lantern glass (amber,
-// teal, green, red) is the variant and sets the light's colour in `LIGHT_RGB`. `nodes(baked, opts)` makes a
+// teal, green, red, white) is the variant and sets the light's colour in `LIGHT_RGB`. `nodes(baked, opts)` makes a
 // baked set's nodes. A theme's `inside` list and `ceiling` lamp runs in scene-hub.js furnish the room behind
 // a mouth from the kit's pieces.
 //
@@ -56,9 +56,11 @@
     "#25324a", "#c79a3e", "#5b3a24" // 58 navy cloth, 59 brass, 60 walnut
   ];
   const EMISSIVE = { 9: 1, 10: 1, 11: 0.9, 17: 1, 18: 1, 19: 1, 30: 1, 31: 1, 32: 1, 33: 1, 37: 1, 40: 1, 59: 1 };
-  // Lantern glass by variant (amber, teal, green, red) and the light each casts; the fifth is a bolt's yellow.
-  const GLASS = [9, 30, 31, 32];
-  const LIGHT_RGB = [[1, 0.7, 0.36], [0.45, 1, 0.92], [0.5, 1, 0.55], [1, 0.31, 0.2], [1, 0.9, 0.35]];
+  // Lantern glass by variant (amber, teal, green, red, and EntropyLab's white, its banners' paint) and the light
+  // each casts; the last light, `COIL_LIGHT`, is the Lightning Factory coil's yellow.
+  const GLASS = [9, 30, 31, 32, 33];
+  const LIGHT_RGB = [[1, 0.7, 0.36], [0.45, 1, 0.92], [0.5, 1, 0.55], [1, 0.31, 0.2], [1, 0.99, 0.96], [1, 0.9, 0.35]];
+  const COIL_LIGHT = 5;
   const ICONS = BL.hubModels.SIGN_ICONS;
   const RGB = PALETTE.map(hexToRgb);
   // A cell packs into one number (12 bits an axis, offset to stay positive): a set's layers are numeric maps,
@@ -808,7 +810,7 @@
     })
   };
   // Where a piece's lantern glass sits, in voxel units of the piece: the point its light comes from.
-  const LIGHTS = { lanternPost: [16, 32.5, 0], hanging: [1, -7.5, 1], coil: [0, 34, 0] };
+  const LIGHTS = { lanternPost: [16, 32.5, 0], hanging: [1, -7.5, 1], tube: [0.5, -4.5, 0.5], coil: [0, 34, 0] };
   const pieces = new Map();
   const pieceOf = (kind, variant) => {
     const key = kind + ":" + variant;
@@ -911,7 +913,7 @@
       if (!p) return;
       const x = q === 0 ? p[0] : q === 1 ? p[2] : q === 2 ? -p[0] : -p[2];
       const z = q === 0 ? p[2] : q === 1 ? -p[0] : q === 2 ? -p[2] : p[0];
-      lights.push((ox + x) * U, (oy + p[1]) * U, (oz + z) * U, kind === "coil" ? 4 : variant);
+      lights.push((ox + x) * U, (oy + p[1]) * U, (oz + z) * U, kind === "coil" ? COIL_LIGHT : variant);
     };
     // Later pieces overwrite earlier voxels in the same cell; the hang layer never overwrites a solid one.
     const write = (layer, x, y, z, c, ragePass = false) => {
@@ -1062,6 +1064,13 @@
   KIT.hanging = (v) => author((put, box) => {
     box(HANG, 0, 0, -3, -1, 0, 0, 5);
     lantern(put, box, 1, -4, 1, GLASS[v]);
+  });
+  // A lab's strip light: a dark housing on a short rod with its tube glowing under it, lengthwise along z, the way
+  // a ceiling run of cable carries it into a cave.
+  KIT.tube = (v) => author((put, box) => {
+    box(HANG, 0, 0, -2, -1, 0, 0, 5);
+    box(HANG, -1, 1, -3, -3, -6, 6, 4);
+    box(LAMP_GLOW, -1, 1, -4, -4, -5, 5, GLASS[v]);
   });
   // A festoon bulb: small enough to string across a doorway without closing it.
   KIT.bulb = (v) => author((put, box) => {
@@ -1410,5 +1419,5 @@
     }
     const geometry=merge(...bits);studioCache.set(kind,geometry);return geometry;
   };
-  BL.dressing = { U, PALETTE, KIT, LIGHT_RGB, studio, set, coilRig, motes, palm, islet, nodes, flock, fleet };
+  BL.dressing = { U, PALETTE, KIT, LIGHT_RGB, COIL_LIGHT, studio, set, coilRig, motes, palm, islet, nodes, flock, fleet };
 })();
