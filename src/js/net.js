@@ -6,16 +6,18 @@
 // donations (`state.donations`), which the director hands to donations.js.
 //
 // The room answers who else is on the island: `remotes` (id → { login, display, body, zone, voice, muted, x, y, z, yaw }),
-// updated in place from its snapshots (up to 15 a second while anyone moves). A scene reports the Ooga the visitor drives with `setBody`
+// updated in place from its snapshots (up to 15 a second while anyone moves). A scene reports the actor the visitor drives with `setBody`
 // (null when none) and its feet and heading with `sendPose`, which throttles itself. A newer tab of the
 // same account kicks this one with `replaced`: it stops reconnecting until `rejoin`. `setZone` reports
 // the place the driven Ooga is in (out on the island, HQ, a cave), which decides who hears whom.
 //
 // Who drives which Ooga, on the page served by the Worker (`mayDrive`; the room enforces the same
 // ownership through its own copy of the cast): a signed-in contributor drives only their own Ooga, and
-// nobody else drives it while they are here; everyone else, signed in or not, drives an Ooga only while
-// its owner is away, nobody else holds it, and it is not working. Ownership keys on the GitHub login
+// nobody else drives it while they are here. Signed-out visitors can drive available bundled Oogas
+// locally, including working ones; temporary contributors must sign in. Ownership keys on the GitHub login
 // alone (`github`, else the handle). A claim the room refuses, or an owner arriving, lands as `released`.
+// A body is its Ooga's canonical handle, or `gorilla:<handle>` for that Ooga's companion. Signed-in
+// visitors drive only their own gorilla; signed-out pages can still play companions locally.
 // The NPC host: the room elects one page showing the island (`setHub`, which also counts a hidden tab
 // out) to run the Oogas for everyone. `state.hostId` names it; the host sends its binary pose frames with
 // `sendNpc`, and every other page reads the latest one from `npcFrame` (with `state.npcVersion` counting).
@@ -27,15 +29,18 @@
 // sound loop started, so every page can play the same moment of it.
 // The roster's marks (who is in voice, muted, the host) follow `subscribeRoster`, which also fires on a
 // body or voice change; `subscribe` stays for the account and the room. `setMuted` tells the room this
-// page muted its microphone, and `state.body` is the Ooga this page reports driving.
-// `setHealth` reports the driven Ooga's health (on a change, at most HP_MS apart), which other pages draw over
+// page muted its microphone, and `state.body` is the actor this page reports driving.
+// `setHealth` reports the driven actor's health (on a change, at most HP_MS apart), which other pages draw over
 // it; remote records carry `hp` and `ko`.
+// Gorilla poses optionally add `g`: flags (air, biped, climb, run, lab, office, sleep), speed, climb stride,
+// climb direction, climb side and swim. Each remote reuses its six values; ordinary poses keep their format.
 // Ooga Chat: `sendChat` sends a line (sanitized as donation messages are, CHAT_MAX characters at most) while the
 // room is live; `subscribeChat` hears the room's lines as `fn(lines, joined, receipt)`: one new line, or on every
 // (re)join the lines the room still holds, which chat.js merges; a rejection keeps the draft. The room names each line's
 // speaker; the page keeps nothing (chat.js shows them).
 // Exports start, subscribe, subscribeRoster, subscribeChat, dispose, login, logout, setDisplay, rejoin, setBody, setZone, setHub, setMuted, setHealth, sendNpc,
-// sendChat, npcFrame, sendPose, mayDrive, ownCharacter, characterOf, serverNow, remotes, state, CHAT_MAX and CHAT_KEEP.
+// sendChat, npcFrame, sendPose, mayDrive, mayDriveGorilla, ownCharacter, characterOf, gorillaBody, bodyName,
+// bodyKind, serverNow, remotes, state, CHAT_MAX and CHAT_KEEP.
 (() => {
   "use strict";
   const BL = window.BL = window.BL || {};
@@ -47,6 +52,13 @@
   const BACKOFF_MS = 500, BACKOFF_MAX_MS = 15000;
   // The room's own limits (worker/src/protocol.js): characters in a line, lines it holds.
   const CHAT_MAX = 160, CHAT_KEEP = 100;
+  const GORILLA_PREFIX = "gorilla:";
+  const bodyKind = (name) => name ? name.startsWith(GORILLA_PREFIX) ? "gorilla" : "ooga" : null;
+  const bodyName = (name) => name && name.startsWith(GORILLA_PREFIX) ? name.slice(GORILLA_PREFIX.length) : name;
+  const gorillaBody = (name) => {
+    const character = BL.characters.get(name);
+    return GORILLA_PREFIX + (character ? character.handle : name);
+  };
   const chatIdValid = (id) => typeof id === "string" && id.length > 0 && id.length <= 64 && !/[^\w-]/.test(id);
   const subscribers = new Set();
   const rosterSubscribers = new Set();
@@ -57,10 +69,12 @@
   const offline = new URLSearchParams(location.search);
   const state = { backend: false, me: null, donations: false, logoutEpoch: 0, started: false,
     resolved: offline.has("nosim") || offline.get("net") === "0" || location.protocol !== "http:" && location.protocol !== "https:",
-    room: "off", selfId: 0, online: 0, released: null, loopEpoch: 0, zone: "outside", body: null, hostId: 0, followers: 0, npcVersion: 0 };
+    room: "off", selfId: 0, online: 0, released: null, loopEpoch: 0, zone: "outside", body: null, bodyKind: null, bodyName: null, hostId: 0, followers: 0, npcVersion: 0 };
   let ws = null, retry = 0, retryTimer = 0, pingTimer = 0, hiddenTimer = 0, stopped = false;
   let npcFrame = null, inHub = false, hubSent = null;
   let zone = "outside", body = null, muted = false, hpSent = 100, koSent = false, hpAt = 0, poseAt = 0, px = NaN, py = NaN, pz = NaN, pyaw = NaN;
+  const gSent = new Float64Array(6);
+  let gKnown = false;
   let clockOffset = 0, clockKnown = false;
   // A server timestamp minus the arrival time is the true offset less the trip; the largest such
   // sample is the one that travelled fastest, so it is the best estimate yet.
@@ -107,12 +121,31 @@
     send(on ? '{"t":"hub","on":true}' : '{"t":"hub","on":false}');
   };
 
+  const readGorillaPose = (rec, values, offset = 0) => {
+    if (rec.bodyKind !== "gorilla" || !Array.isArray(values) || values.length < offset + 6) return;
+    for (let i = 0; i < 6; i++) if (!Number.isFinite(values[offset + i])) return;
+    const flags = values[offset];
+    if (!Number.isInteger(flags) || flags < 0 || flags > 127) return;
+    const g = rec.gData || (rec.gData = new Float64Array(6));
+    g[0] = flags;
+    g[1] = Math.max(-20, Math.min(20, values[offset + 1]));
+    g[2] = Math.max(-1e6, Math.min(1e6, values[offset + 2]));
+    g[3] = Math.max(-1, Math.min(1, values[offset + 3]));
+    g[4] = Math.max(-1, Math.min(1, values[offset + 4]));
+    g[5] = Math.max(0, Math.min(1, values[offset + 5]));
+    rec.g = g;
+  };
+
   const upsert = (p) => {
     if (!p || !Number.isSafeInteger(p.id) || p.id === state.selfId) return;
-    const rec = remotes.get(p.id) || { id: p.id, login: "", display: "", body: null, zone: "outside", voice: false, muted: false, hp: 100, ko: false, x: 0, y: 0, z: 0, yaw: 0 };
+    const rec = remotes.get(p.id) || { id: p.id, login: "", display: "", body: null, bodyKind: null, bodyName: null, zone: "outside", voice: false, muted: false, hp: 100, ko: false, x: 0, y: 0, z: 0, yaw: 0, g: null, gData: null };
     rec.login = String(p.login);
     rec.display = String(p.display || p.login);
     rec.body = typeof p.body === "string" ? p.body : null;
+    rec.bodyKind = bodyKind(rec.body);
+    rec.bodyName = bodyName(rec.body);
+    rec.g = null;
+    if (Array.isArray(p.g) && p.g.length === 6) readGorillaPose(rec, p.g);
     rec.zone = typeof p.zone === "string" ? p.zone : "outside";
     rec.voice = p.voice === true;
     rec.hp = Number.isFinite(p.hp) ? p.hp : 100;
@@ -151,6 +184,11 @@
         if (!rec) continue;
         rec.x = ps[i + 1]; rec.y = ps[i + 2]; rec.z = ps[i + 3]; rec.yaw = ps[i + 4];
       }
+      const gs = msg.gs;
+      if (Array.isArray(gs)) for (let i = 0; i + 6 < gs.length; i += 7) {
+        const rec = remotes.get(gs[i]);
+        if (rec) readGorillaPose(rec, gs, i + 1);
+      }
     } else if (msg.t === "welcome") {
       retry = 0;
       clockKnown = false;
@@ -162,7 +200,7 @@
       remotes.clear();
       for (const p of msg.players) upsert(p);
       setRoom("live");
-      // A reconnect picks up where the page is: the Ooga still driven and where it stands, and voice,
+      // A reconnect picks up where the page is: the actor still driven and where it stands, and voice,
       // whose sessions the room forgot with the old socket.
       sendZone();
       sendBody();
@@ -174,6 +212,7 @@
       BL.voice.restart();
       poseAt = 0;
       px = NaN;
+      gKnown = false;
     } else if (msg.t === "join") {
       upsert(msg.p);
       setRoom("live");
@@ -184,6 +223,9 @@
       const rec = remotes.get(msg.id);
       if (rec) {
         rec.body = typeof msg.name === "string" ? msg.name : null;
+        rec.bodyKind = bodyKind(rec.body);
+        rec.bodyName = bodyName(rec.body);
+        rec.g = null;
         rec.hp = 100;
         rec.ko = false;
       }
@@ -302,6 +344,7 @@
   // Sign-in is a full navigation through GitHub; the Worker brings the visitor back to this path.
   const login = () => {
     if (!state.backend) return;
+    if (BL.pilot && BL.pilot.saveLoginView) BL.pilot.saveLoginView();
     location.assign(`/auth/login?next=${encodeURIComponent(location.pathname + location.search)}`);
   };
 
@@ -404,9 +447,13 @@
   const setBody = (name) => {
     if (name === body) return;
     body = state.body = name;
+    state.bodyKind = bodyKind(name);
+    state.bodyName = bodyName(name);
+    poseAt = 0; px = NaN;
+    gKnown = false;
     sendBody();
-    // The room starts another Ooga at full health.
-    hpSent = 100; koSent = false;
+    // The room starts another actor at full health.
+    hpSent = 100; koSent = false; hpAt = 0;
     rosterChanged();
   };
 
@@ -440,8 +487,8 @@
     return true;
   };
 
-  // Throttled to POSE_MS and skipped while nothing moved, so a standing Ooga costs nothing.
-  const sendPose = (x, y, z, yaw) => {
+  // Throttled to POSE_MS and skipped while nothing moved; a changed gorilla pose also earns a report.
+  const sendPose = (x, y, z, yaw, g = null) => {
     if (state.room !== "live") return;
     const now = performance.now();
     if (now - poseAt < POSE_MS) return;
@@ -449,10 +496,20 @@
     x = Math.max(-BOUND_XZ, Math.min(BOUND_XZ, x));
     z = Math.max(-BOUND_XZ, Math.min(BOUND_XZ, z));
     y = Math.max(BOUND_Y_MIN, Math.min(BOUND_Y_MAX, y));
-    if (Math.abs(x - px) < 0.005 && Math.abs(y - py) < 0.005 && Math.abs(z - pz) < 0.005 && Math.abs(yaw - pyaw) < 0.01) return;
+    if (state.bodyKind !== "gorilla") g = null;
+    if (g) for (let i = 0; i < 6; i++) if (!Number.isFinite(g[i])) { g = null; break; }
+    let changed = !!g && !gKnown;
+    if (g && !changed) for (let i = 0; i < 6; i++) if (g[i] !== gSent[i]) { changed = true; break; }
+    if (!changed && Math.abs(x - px) < 0.005 && Math.abs(y - py) < 0.005 && Math.abs(z - pz) < 0.005 && Math.abs(yaw - pyaw) < 0.01) return;
     poseAt = now;
     px = x; py = y; pz = z; pyaw = yaw;
-    send(`{"t":"pose","x":${x.toFixed(3)},"y":${y.toFixed(3)},"z":${z.toFixed(3)},"yaw":${yaw.toFixed(3)}}`);
+    let extra = "";
+    if (g) {
+      for (let i = 0; i < 6; i++) gSent[i] = g[i];
+      gKnown = true;
+      extra = `,"g":[${g[0]},${g[1].toFixed(3)},${g[2].toFixed(3)},${g[3].toFixed(3)},${g[4].toFixed(3)},${g[5].toFixed(3)}]`;
+    }
+    send(`{"t":"pose","x":${x.toFixed(3)},"y":${y.toFixed(3)},"z":${z.toFixed(3)},"yaw":${yaw.toFixed(3)}${extra}}`);
   };
 
   const loginOf = (character) => (character.github || character.handle).toLowerCase();
@@ -464,20 +521,32 @@
   const ownCharacter = () => state.me && characterOf(state.me.login);
 
   /** null when this visitor may drive the Ooga named `name`; otherwise the words that say why not. */
-  const mayDrive = (name, working) => {
+  const mayDrive = (name) => {
     if (!state.backend) return null;
     const owner = BL.characters.get(name);
+    if (state.me) return owner && ownCharacter() === owner ? null : "Drive your own Ooga";
     if (!owner || owner.handle.toLowerCase() !== String(name).toLowerCase()) return null;
     const who = owner.display || owner.handle;
-    if (owner.temporary && (!state.me || state.me.login.toLowerCase() !== owner.handle)) return "Sign in to drive your Ooga";
-    const mine = ownCharacter();
-    if (mine) return mine === owner ? null : "Contributors drive only their own Ooga";
+    if (owner.temporary) return "Sign in to drive your Ooga";
     const ownerLogin = loginOf(owner), wanted = owner.handle.toLowerCase();
     for (const rec of remotes.values()) {
       if (rec.login.toLowerCase() === ownerLogin) return `${who} is here and drives this Ooga`;
       if (rec.body && rec.body.toLowerCase() === wanted) return `Someone is already driving ${who}`;
     }
-    return working ? `${who} is working: pick a resting or sleeping Ooga` : null;
+    return null;
+  };
+
+  const mayDriveGorilla = (name) => {
+    if (!state.backend) return null;
+    const owner = BL.characters.get(name);
+    if (state.me) return owner && ownCharacter() === owner ? null : "Drive your own gorilla";
+    if (!owner) return null;
+    const who = owner.display || owner.handle, ownerLogin = loginOf(owner), wanted = gorillaBody(owner.handle).toLowerCase();
+    for (const rec of remotes.values()) {
+      if (rec.login.toLowerCase() === ownerLogin) return `${who} is here and drives this gorilla`;
+      if (rec.body && rec.body.toLowerCase() === wanted) return `Someone is already driving ${who}'s gorilla`;
+    }
+    return owner.temporary ? "Sign in to drive your gorilla" : null;
   };
 
   const subscribe = (fn) => {
@@ -504,5 +573,5 @@
     close("off");
   };
 
-  BL.net = { start, subscribe, subscribeRoster, subscribeChat, dispose, login, logout, setDisplay, rejoin, setBody, setZone, setHub, setMuted, setHealth, sendNpc, sendChat, sendPose, mayDrive, ownCharacter, characterOf, serverNow, remotes, state, CHAT_MAX, CHAT_KEEP, get npcFrame() { return npcFrame; } };
+  BL.net = { start, subscribe, subscribeRoster, subscribeChat, dispose, login, logout, setDisplay, rejoin, setBody, setZone, setHub, setMuted, setHealth, sendNpc, sendChat, sendPose, mayDrive, mayDriveGorilla, ownCharacter, characterOf, gorillaBody, bodyName, bodyKind, serverNow, remotes, state, CHAT_MAX, CHAT_KEEP, get npcFrame() { return npcFrame; } };
 })();

@@ -9,7 +9,6 @@ import { handleAuth } from "./auth.js";
 import { purgeExpiredSessions } from "./db.js";
 import { handleDonations } from "./donations.js";
 import { allowed, fromSite, getSessionFromRequest, text } from "./http.js";
-import { contributorFor } from "./contributor-access.js";
 
 export { Room } from "./room.js";
 
@@ -27,7 +26,7 @@ const handleRoom = async (request, env) => {
   headers.set("x-player-id", String(found.player.id));
   headers.set("x-player-login", found.player.login);
   headers.set("x-player-display", found.player.display || found.player.login);
-  if (await contributorFor(found.player.login)) headers.set("x-player-contributor", "1");
+  headers.set("x-player-contributor", "1");
   return env.ROOM.getByName(ROOM_NAME).fetch(new Request(request, { headers }));
 };
 
