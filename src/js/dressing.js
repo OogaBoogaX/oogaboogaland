@@ -1,13 +1,13 @@
 // The one set-dressing kit every scene draws from. `KIT` pieces are voxel functions on a 1/16 grid, each
 // writing through `box` and `put` into separate solid, hanging, decorative glow and lantern glow layers: general (`lanternPost`, `crate`, `coalCrate`,
 // `barrel`, `cart`, `banner`, `gauge`, `rubble`, `bracket`, `hanging`, `bulb`), lab (`die`,
-// `flaskBench`, `terminal`, `chalkboard`), the mirror (`monolith`, `runeStone`), lightning (`coil`,
+// `flaskBench`, `terminal`, `chalkboard`, the `tube` strip light), the mirror (`monolith`, `runeStone`), lightning (`coil` and its `coilCharge`,
 // `boards`), the arcade (`cabinet`), B.C.A. (`abacus`, `ledger`), plus `bench`, `vine` and `banner(v)` carrying each cave's emblem as pixel art.
 //
 // `set()` places pieces by quarter turns (`put`), strings sagging cables with lamps (`cable`) and `build`s
 // everything placed into one `solid`, one `hang`, decorative `glow` and lantern `lampGlow` mesh plus the `lights` its lanterns
 // cast; lamps hung by `cable` bake into swinging body and glow meshes. Lantern glass (amber,
-// teal, green, red) is the variant and sets the light's colour in `LIGHT_RGB`. `nodes(baked, opts)` makes a
+// teal, green, red, white) is the variant and sets the light's colour in `LIGHT_RGB`. `nodes(baked, opts)` makes a
 // baked set's nodes. A theme's `inside` list and `ceiling` lamp runs in scene-hub.js furnish the room behind
 // a mouth from the kit's pieces.
 //
@@ -44,7 +44,7 @@
     "#6d6a66", "#85817b", "#56534f", "#6d8a3a", "#86a24a", // 20 stone, 21 stone light, 22 stone dark, 23 moss, 24 moss light
     "#b89a68", "#9a7f52", // 25 burlap, 26 burlap dark
     "#7fb23d", "#9ccc4a", "#5f9632", // 27 grass, 28 grass tip, 29 grass dark
-    "#7ff5e6", "#7dff96", "#ff5a46", // 30 teal glass, 31 green glass, 32 red lamp
+    "#7ff5e6", "#7dff96", "#d9442b", // 30 teal glass, 31 green glass, 32 red lamp (Ooga Arcade's banner red)
     "#f2efe8", "#2f4a3a", "#e6eee4", // 33 white paint, 34 chalkboard, 35 chalk
     "#141816", "#46ff72", "#b9bec6", "#c77a3a", "#c08cff", // 36 obsidian, 37 glyph, 38 chrome, 39 copper, 40 violet glass
     "#1f6f6a", "#6a4424", // 41 teal cloth, 42 brown cloth
@@ -55,10 +55,12 @@
     BANANA_ART.ink.D, BANANA_ART.ink.Y, BANANA_ART.ink.G, // 55-57 ammo banana outline, fruit, stem
     "#25324a", "#c79a3e", "#5b3a24" // 58 navy cloth, 59 brass, 60 walnut
   ];
-  const EMISSIVE = { 9: 1, 10: 1, 11: 0.9, 30: 1, 31: 1, 32: 1, 37: 1, 40: 1 };
-  // Lantern glass by variant (amber, teal, green, red) and the light each casts; the fifth is a bolt's yellow.
-  const GLASS = [9, 30, 31, 32];
-  const LIGHT_RGB = [[1, 0.7, 0.36], [0.45, 1, 0.92], [0.5, 1, 0.55], [1, 0.38, 0.3], [1, 0.9, 0.35]];
+  const EMISSIVE = { 9: 1, 10: 1, 11: 0.9, 17: 1, 18: 1, 19: 1, 30: 1, 31: 1, 32: 1, 33: 1, 37: 1, 40: 1, 59: 1 };
+  // Lantern glass by variant (amber, teal, green, red, and EntropyLab's white, its banners' paint) and the light
+  // each casts; the last light, `COIL_LIGHT`, is the Lightning Factory coil's yellow.
+  const GLASS = [9, 30, 31, 32, 33];
+  const LIGHT_RGB = [[1, 0.7, 0.36], [0.45, 1, 0.92], [0.5, 1, 0.55], [1, 0.31, 0.2], [1, 0.99, 0.96], [1, 0.9, 0.35]];
+  const COIL_LIGHT = 5;
   const ICONS = BL.hubModels.SIGN_ICONS;
   const RGB = PALETTE.map(hexToRgb);
   // A cell packs into one number (12 bits an axis, offset to stay positive): a set's layers are numeric maps,
@@ -141,78 +143,78 @@
     "................................................",
     "................................................"
   ];
-  // The other standards share its grid: the Lightning Factory's leaning bolt, sharp at both ends, its left face
-  // lit and its right in orange, among three gears; Ooga Booga Land's favicon mark and cross in the glyph's green,
+  // The other standards share its grid: the Lightning Factory's bolt, its left faces lit and its right in orange,
+  // over the ring of one large gear; Ooga Booga Land's favicon mark and cross in the glyph's green,
   // code falling past it; and B.C.A.'s brass abacus, ivory heaven beads over banana beads counted to 2140.
   const FACTORY_BANNER = [
     "................................................",
     "................................................",
     "................................................",
     "................................................",
-    "..................................O.............",
-    ".................................H..............",
-    "................................HO..............",
-    "...............LS...............HO..............",
-    "..........LS..LGS..............HOO..............",
-    "..........LGLLGGS.............HYO...............",
-    "..........LGGGGGGLLLS........HYOO...............",
-    "..........LGGGGGGGGGS........HYOO...............",
-    ".......LLLGGGSSSGGGS........HYOOO...............",
-    "......SSGGGGS...SGGS.......HYOOO................",
-    "........LGGS.RRR.LGGLLS...HYYOOO................",
-    "........LGGS.RRR.LGGGGS...HYOOOO................",
-    "........LGGS.RRR.LGGSSS..HYYOOOO................",
-    "......SLGGGGS...LGGS....HYYOOOO.................",
-    ".......SSSGGGLLLGGGS...HYYYOOOO.................",
-    "..........LGGGGGGGGGS..HYYOOOOO.................",
-    "..........LGGGGGGSSSS.HYYYOOOOO.................",
-    "..........LGSSGGS....HYYYOOOOO..................",
-    ".....LLS..SS..SGS...HYYYYOOOOO..................",
-    ".....LGS.......SS...HYYYOOOOOO..................",
-    "..LS.LGS.LS........HYYYYOOOOOO..................",
-    "..LGLSSSLGS.......HYYYYOOOOOOO..................",
-    "..SGS...LGS......HYYYYYOOOOOO...................",
-    "...LS.R.LS.......HYYYYOOOOOOO...................",
-    "..LGS...LGS.....HYYYYYOOOOOOO...................",
-    "..LGSLLLSGS....HYYYYYOOOOOOOO........OOOOO......",
-    "..SS.LGS.SS...HYYYYYOOOOOOOO.OOOOOOOOOOOOO......",
-    ".....LGS......HYYYYYOOOOOOOOOOOOOOOOOOOOO.......",
-    ".....SSS.....HYYYYYOOOOOOOOOOOOOOOOOOOOO........",
-    "............HYYYYYYOOOOOOOOOOOOOOOOOOOO.........",
-    "............HYYYYYOOOOOOOOOOOOOOOOOOOOO.........",
-    "...........HYYYYYYOOOOOOOOOOOYOOOOOOOO..........",
-    "..........HYYYYYYOOOOOYYYYYYYYOOOOOOO...........",
-    ".........HYYYYYYYYYYYYYYYYYYYOOOOOOO............",
-    ".........HYYYYYYYYYYYYYYYYYYYOOOOOOO............",
-    "........HYYYYYYYYYYYYYYYYYYYOOOOOOO.............",
-    ".......HYYYYYYYYYYYYYYYYYYYYOOOOOO..............",
-    "......HYYYYYYYYYYYY.HYYYYYYOOOOOOO..............",
-    "......HYYYY........HYYYYYYYOOOOOO...............",
-    "...................HYYYYYYOOOOOO................",
-    "...................HYYYYYOOOOOO.................",
-    "...................HYYYYYOOOOOO.................",
-    "..................HYYYYYOOOOOO.....LS...........",
-    "..................HYYYYYOOOOO......LGS...LS.....",
-    "..................HYYYYOOOOO.......LGGS.LGS.....",
-    "..................HYYYYOOOOO..LLS.LGGGGLGGS.....",
-    "..................HYYYOOOOO...SGGLGGGGGGGGS.....",
-    ".................HYYYYOOOO.....LGGGGGGGGGGGLLS..",
-    ".................HYYYOOOO......LGGGGSSSGGGGGGGS.",
-    ".................HYYYOOOO......LGGGS...SGGGGGS..",
-    ".................HYYOOOO....LLLGGGS.RRR.LGGGS...",
-    "................HYYYDDD.....LGGGGGS.RRR.LGGGS...",
-    "................HYYDDD......SSSGGGS.RRR.LGGGS...",
-    "................HYYDDD.........LGGGS...LGGGGGS..",
-    "................HYDDD..........LGGGGLLLGGGGGGGS.",
-    "...............HYYDD...........LGGGGGGGGGGGSSS..",
-    "...............HYDD...........LGGSGGGGGGGGS.....",
-    "...............HYDD...........SSS.SGGGGSGGS.....",
-    "...............HDD.................LGGS.SGS.....",
-    "..............HYD..................LGS...SS.....",
-    "..............HD...................SS...........",
-    "..............HD................................",
-    "..............D.................................",
-    ".............D..................................",
+    "................................................",
+    "................................................",
+    "................................................",
+    "................................................",
+    "................................................",
+    "................................................",
+    "................................................",
+    "................................................",
+    "................................................",
+    "................................................",
+    "................................................",
+    "................LLS..........LLS................",
+    "..............LLGGGS........LGGGLS..............",
+    ".............LGGGGGS........LGGGGGS.............",
+    ".............LGGGGGGS......LGGGGGGS.............",
+    ".............SGGGGGGGLLLLLLGGGGGGGS.............",
+    "..............LGGGGGGGGGGGGGGGGGGS..............",
+    "..............LGGGGSSSSRRRRRRRRRGS..............",
+    ".............LGGGSSGGGRRHHHHHHHRGGS.............",
+    "............LGGSSGGGGSRHYYYYYOORSGGS............",
+    "...........LGGSSGGSSS..HYYYYYORRSSGGS...........",
+    ".....LLS..LGGSGGGS....HYYYYYOORGGGSGGS..LLS.....",
+    "....LGGGLLGGSGGGS.....HYYYYYO..SGGGSGGLLGGGS....",
+    "....LGGGGGGSSGGS.....HYYYYYOO...SGGSSGGGGGGS....",
+    "...LGGGGGGGSGGS......HYYYYYO.....SGGSGGGGGGGS...",
+    "...LGGGGGGSGGS......HYYYYYOO......SGGSGGGGGGS...",
+    "...SGGGGGGSGS.......HYYYYYO........LGSGGGGGGS...",
+    "....SSGGGSGGS......HYYYYYOO........LGGSGGGSS....",
+    "......SGGSGGS......HYYYYYO.........SGGSGGS......",
+    ".......LGSGS......HYYYYYYHHHHHO.....LGSGS.......",
+    ".......LGSGS......HYYYYYYYYYYOO.....LGSGS.......",
+    ".......LGSGS.....HYYYYYYYYYYOO......LGSGS.......",
+    ".......LGSGS.....OOOOHYYYYYOO.......LGSGS.......",
+    ".......LGSGS.........HYYYYOO........LGSGS.......",
+    ".......LGSGS.........HYYYYO.........LGSGS.......",
+    "......LGGSGGS.......HYYYYOO........LGGSGGS......",
+    "....LLGGGSGGS.......HYYYOO.........LGGSGGGLS....",
+    "...LGGGGGGSGS.......HYYYO..........LGSGGGGGGS...",
+    "...LGGGGGGSGGS.....HYYYOO.........LGGSGGGGGGS...",
+    "...SGGGGGGGSGGS....HYYOO.........LGGSGGGGGGGS...",
+    "....LGGGGGGSSGGS...HYYO.........LGGSSGGGGGGS....",
+    "....SGGGSSGGSGGGS.HYYOO........LGGGSGGSSGGGS....",
+    ".....SSS..SGGSGGGRHYOO........LGGGSGGS..SSS.....",
+    "...........SGGSSRRHYO......LLLGGSSGGS...........",
+    "............SGGSRHODRRLLLLLGGGGSSGGS............",
+    ".............SGGRHDRRGGGGGGGGSSGGGS.............",
+    "..............LGRDRRSSSSSSSSSGGGGS..............",
+    "..............LGRRRGGGGGGGGGGGGGGS..............",
+    ".............LGGGGGGGSSSSSSGGGGGGGS.............",
+    ".............LGGGGGGS......SGGGGGGS.............",
+    ".............SGGGGGS........LGGGGGS.............",
+    "..............SSGGGS........SGGGSS..............",
+    "................SSS..........SSS................",
+    "................................................",
+    "................................................",
+    "................................................",
+    "................................................",
+    "................................................",
+    "................................................",
+    "................................................",
+    "................................................",
+    "................................................",
+    "................................................",
+    "................................................",
     "................................................",
     "................................................",
     "................................................",
@@ -366,13 +368,97 @@
     "................................................",
     "................................................"
   ];
+  // Ooga Arcade's cabinet under a marquee of chase lights round a coconut invader, the shared ammo banana on its screen,
+  // a coconut stick and two buttons on its deck, and a lit coin slot.
+  const ARCADE_BANNER = [
+    "................................................",
+    "................................................",
+    ".....OOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOO.....",
+    ".....OMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMO.....",
+    ".....OMMYMMYMMYMMMMMMMMMMMMMMMMMYMMYMMYMMMO.....",
+    ".....OMMMMMMMMMMMMMMMMWMMWMMMMMMMMMMMMMMMMO.....",
+    ".....OMMMMMMMMMMMMMMMMMWWMMMMMMMMMMMMMMMMMO.....",
+    ".....OMMYMMMMMMMMMMMMMWWWWMMMMMMMMMMMMMYMMO.....",
+    ".....OMMMMMMMMMMMMMMMWMWWMWMMMMMMMMMMMMMMMO.....",
+    ".....OMMMMMMMMMMMMMMWWWWWWWWMMMMMMMMMMMMMMO.....",
+    ".....OMMYMMMMMMMMMMMWMWWWWMWMMMMMMMMMMMYMMO.....",
+    ".....OMMMMMMMMMMMMMMWMWMMWMWMMMMMMMMMMMMMMO.....",
+    ".....OMMMMMMMMMMMMMMMMMWWMMMMMMMMMMMMMMMMMO.....",
+    ".....OMMYMMYMMYMMMMMMMMMMMMMMMMMYMMYMMYMMMO.....",
+    ".....OmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmO.....",
+    ".....OOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOO.....",
+    "........OTTTKKKKKKKKKKKKKKKKKKKKKKKKTTTd........",
+    "........OTTTKKKKKKKKKKKKKKKKKKKKKKKKTTTd........",
+    "........OTTTKEEEEEEEEEEEEEEEEEEEEEEKTTTd........",
+    "........OTTTKESSSSSSSSSSSSSSSSSSSSEKTTTd........",
+    "........OTTTKESSSSSSSSSSSSSSSSSSSSSKTTTd........",
+    "........OTTTKESssssssssssssssssssssKTTTd........",
+    "........OTTTKESSSSSSSSSSSSSSSSSSSSSKTTTd........",
+    "...W....OTTTKESSSSSSSSSSSSSSSSSSSSSKTTTd........",
+    "..WWW...OTTTKESssssssssssssssssssssKTTTd........",
+    "...W....OTTTKESSSSSSSSSSSSSSSSSSSSSKTTTd........",
+    "........OTTTKESSSSSSSSSSSSSSSSSSSSSKTTTd........",
+    "........OTTTKESssssssssssssssssssssKTTTd........",
+    "........OTTTKESSSSSSSSSSSSSSSSSSSSSKTTTd........",
+    "........OTTTKESSSSSSSSSSSSSSSSSSSSSKTTTd........",
+    "........OTTTKESssssssssssssssssssssKTTTd........",
+    "........OTTTKESSSSSSSSSSSSSSSSSSSSSKTTTd........",
+    "........OTTTKESSSSSSSSSSSSSSSSSSSSSKTTTd....W...",
+    "........OTTTKESssssssssssssssssssssKTTTd...WWW..",
+    "........OTTTKESSSSSSSSSSSSSSSSSSSSSKTTTd....W...",
+    "........OTTTKESSSSSSSSSSSSSSSSSSSSSKTTTd........",
+    "........OTTTKESssssssssssssssssssssKTTTd........",
+    "........OTTTKEEEEEEEEEEEEEEEEEEEEEEKTTTd........",
+    "........OTTTKKKKKKKKKKKKKKKKKKKKKKKKTTTd........",
+    "........OTTTKKKccCCKKKKKKKKKKKKKKKKKTTTd........",
+    "........OTTTKKcccCCCKKKKKKKKKKKKKKKKTTTd........",
+    "........OTTTKKcCCCCCKKKKKKKKKKKKKKKKTTTd........",
+    "........OTTTKKKCCCCKKKKKKKKKKKKKKKKKTTTd........",
+    "........OTTTKKKKLLKKKKKKKRRKKKYYKKKKTTTd........",
+    "........OTTTKKKKLLKKKKKKRRRRKYYYYKKKTTTd........",
+    ".....OOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOO.....",
+    ".....TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT.....",
+    ".....TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT.....",
+    ".....TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT.....",
+    ".....TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT.....",
+    ".....TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT.....",
+    ".....TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT.....",
+    ".....dddddddddddddddddddddddddddddddddddddd.....",
+    "........OTTTKKKKKKKKKKKKKKKKKKKKKKKKTTTd........",
+    "........OTTTKKKKKKKKKKKKKKKKKKKKKKKKTTTd....W...",
+    "........OTTTKKKKKKKKKKKKKKKKKKKKKKKKTTTd...WWW..",
+    "........OTTTKKKKTTTTTTTTTTTTTTTTKKKKTTTd....W...",
+    "........OTTTKKKKTKKKKKKKKKKKKKKTKKKKTTTd........",
+    "........OTTTKKKKTKKKRRRRRRRRKKKTKKKKTTTd........",
+    "........OTTTKKKKTKKKRRRYYRRRKKKTKKKKTTTd........",
+    "...W....OTTTKKKKTKKKRRRYYRRRKKKTKKKKTTTd........",
+    "..WWW...OTTTKKKKTKKKRRRYYRRRKKKTKKKKTTTd........",
+    "...W....OTTTKKKKTKKKRRRYYRRRKKKTKKKKTTTd........",
+    "........OTTTKKKKTKKKRRRYYRRRKKKTKKKKTTTd........",
+    "........OTTTKKKKTKKKRRRRRRRRKKKTKKKKTTTd........",
+    "........OTTTKKKKTKKKKKKKKKKKKKKTKKKKTTTd........",
+    "........OTTTKKKKTTTTTTTTTTTTTTTTKKKKTTTd........",
+    "........OTTTKKKKKKKKKKKKKKKKKKKKKKKKTTTd........",
+    "........OTTTKKKKKKKKKKKKKKKKKKKKKKKKTTTd........",
+    "......TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT......",
+    "......dddddddddddddddddddddddddddddddddddd......",
+    "................................................"
+  ].map((row, r) => {
+    if (r < 21 || r > 35) return row;
+    const pixels = row.split(""), art = BANANA_ART.rows[Math.floor((r - 21) * 9 / 15)];
+    for (let c = 0; c < 15; c++) {
+      const ink = art[Math.floor(c * 9 / 15)];
+      if (ink !== ".") pixels[17 + c] = ink === "D" ? "P" : ink === "Y" ? "F" : "V";
+    }
+    return pixels.join("");
+  });
   // Each variant's art and inks: `ink` paints the cloth, `glow` lights up and bakes into the glow mesh.
   const BANNER_ART = [
-    [FACTORY_BANNER, { G: "#6f737a", L: "#b9bec6", S: "#4a4d52", R: "#2c2e33", Y: "#ffd23a", H: "#fff1b0", O: "#f29a1e", D: "#e2681c" }],
-    [LAB_BANNER, { "#": "#f2efe8" }],
+    [FACTORY_BANNER, {}, { G: "#6f737a", L: "#b9bec6", S: "#4a4d52", R: "#2c2e33", Y: "#ffd23a", H: "#fff1b0", O: "#f29a1e", D: "#e2681c" }],
+    [LAB_BANNER, {}, { "#": "#f2efe8" }],
     [MATRIX_BANNER, {}, { G: "#46ff72", H: "#b8ffcb", d: "#1fa84a", Y: "#ffd66b", y: "#d9a42a", h: "#fff1b0", W: "#d8ffe2", c: "#1e8a44", k: "#155a2e" }],
-    null,
-    [BCA_BANNER, { B: "#c79a3e", b: "#e9c46e", w: "#7a5634", r: "#8a6a3e", I: "#efe6cc", i: "#c9bc98", Y: "#f5d142", o: "#c9a227", S: "#6b4a26" }]
+    [ARCADE_BANNER, {}, { O: "#e0a35a", T: "#a8703e", d: "#5c3a1e", K: "#2b1a10", M: "#d9442b", m: "#a8321e", Y: "#ffd23a", W: "#fff1b0", E: "#7ff5e6", S: "#164a46", s: "#1d5c57", P: BANANA_ART.ink.D, F: BANANA_ART.ink.Y, V: BANANA_ART.ink.G, C: "#8a5a32", c: "#c9925a", L: "#c9ced6", R: "#e0452b" }],
+    [BCA_BANNER, {}, { B: "#c79a3e", b: "#e9c46e", w: "#7a5634", r: "#8a6a3e", I: "#efe6cc", i: "#c9bc98", Y: "#f5d142", o: "#c9a227", S: "#6b4a26" }]
   ];
   const bannerPaint = BL.models.variants((v) => {
     const [rows, ink, glow = {}] = BANNER_ART[v], pixel = U / 4;
@@ -431,6 +517,10 @@
       const d = Math.hypot(x + 0.5, z + 0.5);
       if (d <= r) fn(cx + x, y, cz + z, d);
     }
+  };
+  // The coil's crown: seven stacked discs swelling to its middle at `y`.
+  const crown = (put, layer, color, y) => {
+    for (let k = -3; k <= 3; k++) disc((x, yy, z) => put(layer, x, yy, z, color), 3.6 - Math.abs(k) * 0.9, y + k);
   };
   const plank = (x, y, z, lo, hi, axis) => {
     const t = axis === 0 ? x : axis === 1 ? y : z;
@@ -495,21 +585,20 @@
         if (d <= 3.2) put(SOLID, x, y, wz, d < 1.2 ? 6 : 5);
       }
     }),
-    // A cave's standard: 0 bolt and cog, 1 sprouting beaker, 2 favicon, 3 banana, 4 abacus; the art is `BANNER_ART`'s.
+    // A cave's standard: 0 bolt over a gear, 1 sprouting beaker, 2 favicon, 3 arcade cabinet, 4 abacus; the art is `BANNER_ART`'s.
     banner: (v) => {
       const piece = author((put, box) => {
-        const CLOTH = [14, 14, 36, 42, 58][v], EDGE = [15, 15, 37, 18, 59][v];
+        const CLOTH = [14, 14, 36, 42, 58][v], EDGE = [11, 33, 37, 19, 59][v];
         box(SOLID, -3, 2, 0, 1, -3, 2, 2);
         box(SOLID, -1, 0, 2, 45, -1, 0, 2);
         box(SOLID, -1, 0, 46, 47, -1, 0, v === 2 ? 37 : 6);
         box(HANG, -9, 8, 43, 44, -1, 0, 0);
         for (let x = -8; x <= 7; x++) {
           const bottom = 14 + ((x * 7) % 3 + 3) % 3 * 2;
-          for (let y = bottom; y <= 42; y++) put(HANG, x, y, 1, x === -8 || x === 7 ? EDGE : CLOTH);
-        }
-        if (v === 3) for (let row = 0; row < 15; row++) for (let col = 0; col < 15; col++) {
-          const ink = BANANA_ART.rows[Math.floor(row * 9 / 15)][Math.floor(col * 9 / 15)];
-          if (ink !== ".") put(HANG, col - 7, 36 - row, 2, ink === "D" ? 55 : ink === "Y" ? 56 : 57);
+          for (let y = bottom; y <= 42; y++) {
+            const stripe = x === -8 || x === 7;
+            put(stripe ? GLOW : HANG, x, y, 1, stripe ? EDGE : CLOTH);
+          }
         }
       });
       if (BANNER_ART[v]) {
@@ -579,18 +668,43 @@
       box(SOLID, -6, 5, 0, 10, -4, 3, (x, y) => y === 10 ? 21 : 20);
       icon(put, GLOW, ICONS.glyph, -3, 2, 4, 1, 37);
     }),
-    // The Lightning Factory: a coil with a glowing crown and arcs leaping from it.
+    // The Lightning Factory: a coil of copper bands under a copper crown, dark until a scene charges it with
+    // `coilRig`'s parts.
     coil: () => author((put, box) => {
       box(SOLID, -5, 4, 0, 3, -5, 4, (x, y) => y === 3 ? 6 : 5);
       for (let y = 4; y <= 30; y++) disc((x, yy, z) => put(SOLID, x, yy, z, y % 3 === 0 ? 39 : 5), y % 3 === 0 ? 3.2 : 2.3, y);
-      for (let y = 31; y <= 37; y++) disc((x, yy, z) => put(GLOW, x, yy, z, 11), 3.6 - Math.abs(y - 34) * 0.9, y);
-      const rand = mulberry32(3);
-      for (let arc = 0; arc < 3; arc++) {
-        let x = 0, y = 34, z = 0;
-        const dx = [1, -1, 0][arc], dz = [0, 1, -1][arc];
-        for (let k = 0; k < 9; k++) {
-          x += dx * 1; z += dz * 1; y += rand() < 0.5 ? 1 : -1;
-          put(GLOW, x + dx * 3, y, z + dz * 3, 11);
+      crown(put, HANG, 39, 34);
+    }),
+    // The coil's charge, baked apart by `coilRig`: 0 one band's glow, 1 the crown's, 2 and 3 two sets of long arcs
+    // from the crown, each jagged, sagging a little as it reaches out and forking partway.
+    coilCharge: (v) => author((put) => {
+      if (v === 0) disc((x, y, z) => put(GLOW, x, y, z, 11), 3.2, 0);
+      else if (v === 1) crown(put, GLOW, 11, 0);
+      else {
+        const rand = mulberry32(v * 7);
+        // One stretch of arc, `len` cells from (x0, y, z0) along angle `a`, wandering up, down and sideways; a step
+        // that climbs or drops keeps the cell it left, so the arc stays one unbroken line. Returns where it ends.
+        const zap = (x0, y, z0, a, len) => {
+          const dx = Math.cos(a), dz = Math.sin(a);
+          let side = 0, x = x0, z = z0;
+          for (let k = 1; k <= len; k++) {
+            const r = rand(), was = y;
+            y += r < 0.3 ? 1 : r < 0.6 ? 0 : -1;
+            if (rand() < 0.3) side += rand() < 0.5 ? 1 : -1;
+            x = Math.round(x0 + dx * k - dz * side);
+            z = Math.round(z0 + dz * k + dx * side);
+            if (y !== was) put(GLOW, x, was, z, 10);
+            put(GLOW, x, y, z, 10);
+          }
+          return [x, y, z];
+        };
+        // Four arcs leave the crown's rim, run five to eight cells, then split: one branch reaches on to about
+        // twenty cells out, the other breaks off shorter.
+        for (let arc = 0; arc < 4; arc++) {
+          const a = (arc + (v - 2) * 0.5 + rand() * 0.4) * Math.PI / 2, run = 5 + Math.floor(rand() * 4);
+          const [x, y, z] = zap(Math.round(Math.cos(a) * 3), 33 + Math.floor(rand() * 3), Math.round(Math.sin(a) * 3), a, run);
+          zap(x, y, z, a + 0.3, 19 - run);
+          zap(x, y, z, a - 0.6, 6 + Math.floor(rand() * 3));
         }
       }
     }),
@@ -677,9 +791,8 @@
       for (let a = 0; a <= 20; a++) {
         const t = a / 20, ang = Math.PI * (1 - t);
         const x = Math.round(Math.cos(ang) * 4.6 - 0.5), y = Math.round(Math.sin(ang) * 4.6) + 26;
-        put(SOLID, x, y, 3, t < 0.45 ? 17 : t < 0.75 ? 18 : 19);
+        put(GLOW, x, y, 3, t < 0.45 ? 17 : t < 0.75 ? 18 : 19);
       }
-      for (let i = 0; i <= 4; i++) put(SOLID, Math.round(i * 0.8) - 1, 26 + Math.round(i * 0.9), 3, 5);
     }),
     rubble: (v) => author((put, box) => {
       const rand = mulberry32(211 + v * 13);
@@ -697,7 +810,7 @@
     })
   };
   // Where a piece's lantern glass sits, in voxel units of the piece: the point its light comes from.
-  const LIGHTS = { lanternPost: [16, 32.5, 0], hanging: [1, -7.5, 1], coil: [0, 34, 0] };
+  const LIGHTS = { lanternPost: [16, 32.5, 0], hanging: [1, -7.5, 1], tube: [0.5, -4.5, 0.5], coil: [0, 34, 0] };
   const pieces = new Map();
   const pieceOf = (kind, variant) => {
     const key = kind + ":" + variant;
@@ -800,7 +913,7 @@
       if (!p) return;
       const x = q === 0 ? p[0] : q === 1 ? p[2] : q === 2 ? -p[0] : -p[2];
       const z = q === 0 ? p[2] : q === 1 ? -p[0] : q === 2 ? -p[2] : p[0];
-      lights.push((ox + x) * U, (oy + p[1]) * U, (oz + z) * U, kind === "coil" ? 4 : variant);
+      lights.push((ox + x) * U, (oy + p[1]) * U, (oz + z) * U, kind === "coil" ? COIL_LIGHT : variant);
     };
     // Later pieces overwrite earlier voxels in the same cell; the hang layer never overwrites a solid one.
     const write = (layer, x, y, z, c, ragePass = false) => {
@@ -952,12 +1065,36 @@
     box(HANG, 0, 0, -3, -1, 0, 0, 5);
     lantern(put, box, 1, -4, 1, GLASS[v]);
   });
+  // A lab's strip light: a dark housing on a short rod with its tube glowing under it, lengthwise along z, the way
+  // a ceiling run of cable carries it into a cave.
+  KIT.tube = (v) => author((put, box) => {
+    box(HANG, 0, 0, -2, -1, 0, 0, 5);
+    box(HANG, -1, 1, -3, -3, -6, 6, 4);
+    box(LAMP_GLOW, -1, 1, -4, -4, -5, 5, GLASS[v]);
+  });
   // A festoon bulb: small enough to string across a doorway without closing it.
   KIT.bulb = (v) => author((put, box) => {
     box(HANG, 0, 0, -1, -1, 0, 0, 5);
     box(HANG, -1, 1, -2, -2, -1, 1, 4);
     box(LAMP_GLOW, -1, 1, -5, -3, -1, 1, GLASS[v]);
   });
+  // The Lightning Factory coil's moving parts, baked once a page apart from any set, so a scene can charge the coil
+  // without rebuilding its mouth: one band's glow (a node over each of `bands`, the coil's copper bands in kit cells
+  // from its foot), the crown's (centred at `crownY`), two sets of arcs to flicker between, and the gauge's needle,
+  // pointing up from `pivot`, in kit cells from the gauge's origin. The band and crown are centred on their middles.
+  let coilParts = null;
+  const coilRig = () => {
+    if (coilParts) return coilParts;
+    const glow = (v) => set().put("coilCharge", 0, 0, 0, 0, v).build().glow;
+    const bands = [];
+    for (let y = 4; y <= 30; y++) if (y % 3 === 0) bands.push(y);
+    const needle = noShadow(merge(
+      BL.models.box({ w: U, h: 4.2 * U, d: 0.7 * U, color: PALETTE[5], offset: { y: 1.6 * U, z: 0.4 * U } }),
+      BL.models.box({ w: 1.6 * U, h: 1.6 * U, d: U, color: PALETTE[59], offset: { z: 0.55 * U } })));
+    coilParts = { band: BL.models.moved(glow(0), 0, -U / 2, 0), crown: BL.models.moved(glow(1), 0, -U / 2, 0),
+      arcs: [glow(2), glow(3)], needle, bands, crownY: 34.5, pivot: [0, 26.5, 3] };
+    return coilParts;
+  };
   // Dust in lamplight: a fixed field of glowing motes that drifts and wraps round a moving centre (the view's
   // target), so there is always air to see near the camera and no mote is ever created or dropped. One draw.
   let moteGeometry = null;
@@ -1282,5 +1419,5 @@
     }
     const geometry=merge(...bits);studioCache.set(kind,geometry);return geometry;
   };
-  BL.dressing = { U, PALETTE, KIT, LIGHT_RGB, studio, set, motes, palm, islet, nodes, flock, fleet };
+  BL.dressing = { U, PALETTE, KIT, LIGHT_RGB, COIL_LIGHT, studio, set, coilRig, motes, palm, islet, nodes, flock, fleet };
 })();
