@@ -3003,6 +3003,32 @@ body[data-active-scene="arcade"] .magazine-hud {
   transform: translateX(-50%);
 }
 
+/* Tess's island offer and tour: the two choices share a row, and on tour the panel sits low, clear of the landmarks but above the toasts and the drawer's pull tabs. */
+.greeter-row {
+  display: flex;
+  gap: 6px;
+}
+
+.greeter-row .greeter-choice {
+  flex: 1;
+  white-space: nowrap;
+}
+
+/* While her tour holds the view the touch sticks do nothing, so they step aside for her panel. */
+body.tess-touring #joy-move,
+body.tess-touring #joy-look {
+  visibility: hidden;
+}
+
+/* On tour the heading is two lines on purpose: where in the tour, then the stop's name. */
+.greeter-menu.greeter-tour .greeter-menu-title {
+  white-space: pre-line;
+}
+
+.greeter-menu.greeter-tour {
+  bottom: calc(60px + var(--safe-bottom));
+}
+
 .race {
   position: absolute;
   inset: 0;

@@ -5869,6 +5869,92 @@ const hubWalking = { name: "hub walking", why: "regression: steering keys came o
   await b.key("Escape");
   record("hub walking: W A S D walk an Ooga away, left, back and right on screen from two camera angles, and Right Shift+A does not restore the removed hub Agent", allWalk(ooga) && !agent, JSON.stringify({ ooga, agent }));
 } };
+// Tess on the island: a fresh, unmoved landing with an Ooga gets her offer, and the tour takes the controls cleanly.
+const hubGuide = { name: "hub guide", why: "regression: Tess's offer showed only its first speech bubble, she stopped shots aimed past her, an Ooga walking or flying as her tour began went on through it, and T before or during her tour let the gorilla and tour share control", run: async (b) => {
+  const guide = await b.evaluate(`(() => {
+    const B = __ooga, P = B.pilot, a = B.cavemen.get("portlandhodl"), G = BL.scenes.hub.debug.tess, s = G.state;
+    const key = (type, key, code) => window.dispatchEvent(new KeyboardEvent(type, { key, code, bubbles: true, cancelable: true }));
+    const at = () => ({ x: a.root.position.x, z: a.root.position.z }), from = (p) => Math.hypot(a.root.position.x - p.x, a.root.position.z - p.z);
+    for (let t = 0; t < 12 && s.phase !== "offer"; t += 1 / 30) B.advance(1 / 30, 1 / 30);
+    const offered = s.phase === "offer", bubbles = offered ? s.beats.length : 0;
+    // A shot aimed straight at her, where she hovers by the Ooga, passes her; a tap there reaches her.
+    const root = BL.scenes.hub.debug.tess.root, head = root.children[0].children[0];
+    BL.scene.updateWorld(root, root.parent.world);
+    const C = B.camera.position, m = head.world, dx = m[12] - C.x, dy = m[13] - C.y, dz = m[14] - C.z, l = Math.hypot(dx, dy, dz);
+    const shot = {}, poke = {};
+    B.input.weaponTargets.ray(shot, C.x, C.y, C.z, dx / l, dy / l, dz / l, 60, a);
+    B.input.weaponTargets.ray(poke, C.x, C.y, C.z, dx / l, dy / l, dz / l, 60, a, null, true);
+    const shotTess = shot.owner?.kind === "tess", pokeTess = poke.owner?.kind === "tess";
+    let reached = 0;
+    for (let t = 0; t < 10 && offered && s.phase === "offer" && reached < bubbles - 1; t += 1 / 30) { B.advance(1 / 30, 1 / 30); reached = Math.max(reached, s.utterance); }
+    // W held as Enter starts the tour, then let go.
+    const start = at();
+    key("keydown", "w", "KeyW"); B.advance(0.4, 1 / 60);
+    const walked = from(start);
+    key("keydown", "Enter", "Enter"); key("keyup", "Enter", "Enter");
+    const touring = s.phase === "tour";
+    key("keyup", "w", "KeyW");
+    const held = at(); B.advance(3, 1 / 30);
+    const drift = from(held);
+    // T during the tour, from a signed-in owner whose gorilla is at hand, switches nothing; Escape ends the tour, and
+    // control comes home with the view: T switches to the gorilla and back, and W walks.
+    const canvas = document.getElementById("scene"), play = BL.scenes.hub.debug.clankerPlay;
+    const press = (k, code) => { canvas.dispatchEvent(new KeyboardEvent("keydown", { key: k, code, bubbles: true, cancelable: true })); canvas.dispatchEvent(new KeyboardEvent("keyup", { key: k, code, bubbles: true, cancelable: true })); };
+    const account = BL.net.state.me, backend = BL.net.state.backend, character = BL.characters.get("portlandhodl");
+    const gorilla = BL.scenes.hub.debug.clankers.list.find((e) => e.owner === a);
+    let pair;
+    try {
+      BL.net.state.backend = true; BL.net.state.me = { id: 71, login: character.github || character.handle, display: "Guide fixture" };
+      press("t", "KeyT"); B.advance(0.3, 1 / 30);
+      const kept = P.player === a && !play.active && s.holding;
+      press("Escape", "Escape");
+      for (let t = 0; t < 8 && s.holding; t += 1 / 30) B.advance(1 / 30, 1 / 30);
+      const ended = !s.holding && P.player === a && !play.active;
+      press("t", "KeyT"); B.advance(0.3, 1 / 30);
+      const toGorilla = play.active && play.player === gorilla;
+      press("t", "KeyT"); B.advance(0.6, 1 / 30);
+      const back = P.player === a && !play.active;
+      // T before Enter must leave the gorilla in control. Accept between frames so the offer must recheck who owns it.
+      for (let t = 0; t < 12 && s.phase !== "work"; t += 1 / 30) B.advance(1 / 30, 1 / 30);
+      G.tap();
+      for (let t = 0; t < 15 && s.phase !== "offer"; t += 1 / 30) B.advance(1 / 30, 1 / 30);
+      const offerBeforeSwitch = s.phase === "offer";
+      press("t", "KeyT");
+      const switched = play.active && play.player === gorilla;
+      press("Enter", "Enter");
+      const declinedBusy = s.phase === "work" && !s.holding && play.player === gorilla && !P.player
+        && document.querySelector(".greeter-menu").hidden && !document.body.classList.contains("tess-touring");
+      press("t", "KeyT"); B.advance(0.6, 1 / 30);
+      pair = { gorillaReady: !!gorilla && gorilla.active && gorilla.root.visible, kept, ended, toGorilla, back,
+        offerBeforeSwitch, switched, declinedBusy, retaken: P.player === a && !play.active };
+    } finally { BL.net.state.me = account; BL.net.state.backend = backend; }
+    const returned = !s.holding, after = at();
+    key("keydown", "w", "KeyW"); B.advance(0.4, 1 / 60); key("keyup", "w", "KeyW");
+    const again = from(after);
+    // A second tour, by a tap: Space held to climb on the jetpack as Enter starts it, then let go.
+    for (let t = 0; t < 12 && s.phase !== "work"; t += 1 / 30) B.advance(1 / 30, 1 / 30);
+    G.tap();
+    for (let t = 0; t < 15 && s.phase !== "offer"; t += 1 / 30) B.advance(1 / 30, 1 / 30);
+    const reoffered = s.phase === "offer";
+    key("keydown", " ", "Space"); B.advance(0.5, 1 / 60);
+    const climbing = !!a.jet && a.jet.thrust;
+    key("keydown", "Enter", "Enter"); key("keyup", "Enter", "Enter");
+    key("keyup", " ", "Space");
+    const y = a.root.position.y, fuel = a.jetFuel;
+    B.advance(3, 1 / 30);
+    const rose = a.root.position.y - y, burned = fuel - a.jetFuel, thrusting = !!a.jet && a.jet.thrust;
+    document.querySelector(".greeter-menu .greeter-row button:last-child").click();
+    for (let t = 0; t < 8 && s.holding; t += 1 / 30) B.advance(1 / 30, 1 / 30);
+    return { offered, bubbles, reached, shotTess, pokeTess, walked, touring, drift, returned, again, driving: P.player === a, pair,
+      reoffered, climbing, rose: +rose.toFixed(3), burned: +burned.toFixed(4), thrusting, released: !s.holding };
+  })()`);
+  record("hub guide: Tess's offer to an Ooga standing on landing says every speech bubble of its line", guide.offered && guide.bubbles > 1 && guide.reached === guide.bubbles - 1, JSON.stringify(guide));
+  record("hub guide: a shot aimed straight at Tess passes her, while a tap there still reaches her", !guide.shotTess && guide.pokeTess, JSON.stringify(guide));
+  record("hub guide: an Ooga walking as the tour starts stands through it once W is let go, and walks again when the tour ends", guide.walked > 0.3 && guide.touring && guide.drift < 0.05 && guide.returned && guide.again > 0.3 && guide.driving, JSON.stringify(guide));
+  record("hub guide: during a tour T switches no actor for a signed-in owner, Escape ends the tour, and afterwards T switches to the gorilla and back", !!guide.pair && guide.pair.gorillaReady && guide.pair.kept && guide.pair.ended && guide.pair.toGorilla && guide.pair.back, JSON.stringify(guide.pair));
+  record("hub guide: switching to a gorilla before accepting an offer leaves it in control, closes the offer, and allows switching back", !!guide.pair && guide.pair.offerBeforeSwitch && guide.pair.switched && guide.pair.declinedBusy && guide.pair.retaken, JSON.stringify(guide.pair));
+  record("hub guide: a jetpack climbing as a tour starts lets go once Space is released, rising no more and spending no fuel through the tour", guide.reoffered && guide.climbing && !guide.thrusting && guide.rose <= 0 && guide.burned <= 0 && guide.released, JSON.stringify(guide));
+} };
 const hubMapNavigation = { name: "hub map navigation", why: "regression: choosing a destination or resetting the camera must preserve the controlled actor and view family", run: async (b) => {
   const r = await b.evaluate(`(() => {
     const B = __ooga, P = B.pilot, H = B.hud, a = B.cavemen.get("portlandhodl");
@@ -9353,12 +9439,14 @@ const factoryShields = { name: "factory peer portals", why: "rule: paired peer m
 const donationDetails = { name: "donation details", why: "regression: clicking KEEP SAVED blurred a changed native field, retried its failed autosave and saved the edits the visitor was discarding", run: async (b) => {
   await b.evaluate(`(() => {
     const D = BL.donations, K = BL.factoryKiosk, fields = document.getElementById("donation-fields");
-    const probe = window.__donationDetails = { invoice: D.invoice, note: D.note, open: D.state.open, create: K.create, notes: 0, changes: 0 };
+    const probe = window.__donationDetails = { invoice: D.invoice, note: D.note, open: D.state.open, create: K.create, rate: BL.donationRate, notes: 0, changes: 0 };
     probe.changed = event => { if (event.isTrusted) probe.changes++; };
     fields.addEventListener("change", probe.changed);
     D.state.open = true;
     D.invoice = async () => ({ request: "details-test", invoice: { id: "details-test", bolt11: "lntbs1", expires: Date.now() / 1000 + 900 }, bananas: { exact: 1, rounded: 1 }, rate: null });
     D.note = async () => { probe.notes++; return { error: "busy" }; };
+    // This fixture controls the invoice and save response; its unused price feed must not open a live socket.
+    BL.donationRate = { current: null, watch: () => () => {} };
     K.create = hooks => (probe.flow = probe.create(hooks));
     BL.donationPopup.open();
     K.create = probe.create;
@@ -9392,6 +9480,7 @@ const donationDetails = { name: "donation details", why: "regression: clicking K
       document.getElementById("donation-fields").removeEventListener("change", p.changed);
       BL.donations.invoice = p.invoice; BL.donations.note = p.note; BL.donations.state.open = p.open;
       BL.factoryKiosk.create = p.create;
+      BL.donationRate = p.rate;
       delete window.__donationDetails;
     })()`);
   }
@@ -13156,6 +13245,8 @@ scene("poker", { opts: PHONE_SIZE, steps: [phone("poker", { card: '[data-intro="
   if (process.env.POKER_SHOTS) await b.screenshot(join(process.env.POKER_SHOTS, "poker-phone.png"));
 } }] });
 scene("hub", { label: "weapons", query: "character=portlandhodl&weapon=2&mag=1&ammo=6&jetpack=1&gorillarage=1", steps: [hubAk, hubMelee, hubJetpack] });
+// Her greeting comes once a page, to a fresh landing nothing has moved, so the guide has its own page.
+scene("hub", { label: "guide", query: "character=portlandhodl&jetpack=1", steps: [hubGuide] });
 // Native pointer-lock assertions need sole focus; another browser lane can
 // steal capture and spend this long scenario's deadline waiting for it back.
 scene("hub", { label: "birds-eye combat", query: "solo=1&character=portlandhodl&weapon=1&mode=shoulder&combat=1", exclusive: true, steps: [hubBirdsEye] });
