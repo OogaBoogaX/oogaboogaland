@@ -31,6 +31,16 @@ if (!sources.length) throw new Error("index.html: no script tags found");
 // scripts/site.mjs finds a deferred module in the page.
 export const block = (src) => `// ---- ${src} ----\n${read(src).trim().replace(/\r\n/g, "\n")}`.replace(/<\/script/gi, "<\\/script");
 const js = sources.map(block).join("\n\n");
+// A module tagged `data-early` runs where it stands, before the page's one script arrives (the loading curtain's
+// line). Its block opens as `<script data-early>`, so the distribution steps still find the page's script as the
+// first `<script>`, and its hash follows that script's in the policy, which they rewrite.
+const early = [];
+html = html.replace(/^([ \t]*)<script src="([^"]+)" data-early><\/script>\r?\n/gm, (_, indent, src) => {
+  const code = `\n${block(src)}\n`;
+  if (code.includes("<!--")) throw new Error(`${src}: a literal <!-- would open script-data-escaped state`);
+  early.push(sha256(code));
+  return `${indent}<script data-early>${code}</script>\n`;
+});
 let first = true;
 html = html.replace(scriptTag, () => {
   if (!first) return "";
@@ -43,7 +53,7 @@ const csp = /content="(default-src 'none'; script-src [^"]*)"/;
 if (!csp.test(html)) throw new Error("index.html: CSP meta not found");
 html = html.replace(csp, (_, policy) => {
   const updated = policy
-    .replace(/script-src [^;]+/, `script-src ${sha256(`\n${js}\n`)}`)
+    .replace(/script-src [^;]+/, `script-src ${[sha256(`\n${js}\n`), ...early].join(" ")}`)
     .replace(/style-src [^;]+/, `style-src ${sha256(`\n${css}\n`)}`);
   return `content="${updated}"`;
 });
