@@ -170,6 +170,30 @@ test("voice zones: a group shares voice across its places; nobody is heard from 
   assert.equal(parseClientMessage('{"t":"zone","name":".hall"}'), null);
 });
 
+test("Sphere rooms isolate voice by number and doorway frames are strictly bounded", async () => {
+  const { voicePeers } = await import("../src/protocol.js");
+  const on = { pub: "p", sub: "s", track: "mic" };
+  const p = (id, zone) => ({ id, body: `ooga-${id}`, zone, voice: on });
+  const peers = voicePeers([p(1, "sphere-1"), p(2, "sphere-1"), p(3, "sphere-2"), p(4, "sphere"), p(5, "sphere-9")]);
+  assert.deepEqual(peers.get(1), [2]);
+  assert.deepEqual(peers.get(2), [1]);
+  assert.deepEqual(peers.get(3), []);
+  assert.deepEqual(peers.get(4), []);
+  assert.deepEqual(peers.get(5), []);
+
+  assert.deepEqual(parseClientMessage('{"t":"door","op":"ask","dir":"in","room":7}'), { t: "door", op: "ask", dir: "in", room: 7 });
+  assert.deepEqual(parseClientMessage('{"t":"door","op":"go","cycle":"abc_123"}'), { t: "door", op: "go", cycle: "abc_123" });
+  assert.deepEqual(parseClientMessage('{"t":"door","op":"done","cycle":"abc-123"}'), { t: "door", op: "done", cycle: "abc-123" });
+  assert.deepEqual(parseClientMessage('{"t":"door","op":"cancel","extra":true}'), { t: "door", op: "cancel" });
+  assert.deepEqual(parseClientMessage('{"t":"door","op":"pass","door":"sphere-9","dir":"out"}'), { t: "door", op: "pass", door: "sphere-9", dir: "out" });
+  for (const bad of [
+    { t: "door", op: "ask", dir: "in", room: 0 }, { t: "door", op: "ask", dir: "side", room: 1 },
+    { t: "door", op: "go", cycle: "bad cycle" }, { t: "door", op: "done", cycle: "x".repeat(65) },
+    { t: "door", op: "pass", door: "sphere-10", dir: "in" }, { t: "door", op: "pass", door: "sphere-1", dir: "side" },
+    { t: "door", op: "open" },
+  ]) assert.equal(parseClientMessage(JSON.stringify(bad)), null, JSON.stringify(bad));
+});
+
 test("health: a driven Ooga's health is clamped to 0-100 and needs its knocked-out flag", async () => {
   const { parseClientMessage } = await import("../src/protocol.js");
   assert.deepEqual(parseClientMessage('{"t":"hp","v":63.6,"ko":false}'), { t: "hp", v: 64, ko: false });
@@ -177,6 +201,23 @@ test("health: a driven Ooga's health is clamped to 0-100 and needs its knocked-o
   assert.deepEqual(parseClientMessage('{"t":"hp","v":250,"ko":false}'), { t: "hp", v: 100, ko: false });
   assert.equal(parseClientMessage('{"t":"hp","v":"50","ko":false}'), null);
   assert.equal(parseClientMessage('{"t":"hp","v":50}'), null);
+});
+
+// Contract: spectators keep floor visibility while hearing only the table they selected.
+test("Ember Den voice separates ten tables and the walking floor without changing zones", async () => {
+  const { voicePeers } = await import("../src/protocol.js");
+  const player = (id, pokerVoice) => ({ id, pokerVoice, zone: "ember-den", body: `fixture-${id}`, voice: { sub: "receive", track: "mic" } });
+  const players = [player(1, 0), player(2, 0), player(3, 1), player(4, null), player(5, null), player(6, 9)];
+  const peers = voicePeers(players);
+  assert.deepEqual(peers.get(1), [2]);
+  assert.deepEqual(peers.get(3), []);
+  assert.deepEqual(peers.get(4), [5]);
+  assert.deepEqual(peers.get(6), []);
+  players[2].pokerVoice = 0;
+  assert.deepEqual(voicePeers(players).get(3), [1, 2]);
+  assert.ok(players.every(p => p.zone === "ember-den"));
+  for (const table of [null, 0, 9]) assert.deepEqual(parseClientMessage(JSON.stringify({ t: "poker-voice", table })), { t: "poker-voice", table });
+  for (const table of [-1, 10, 0.5, "0", undefined]) assert.equal(parseClientMessage(JSON.stringify({ t: "poker-voice", table })), null);
 });
 
 test("NPC host: the page longest in the room among those showing the island; nobody when none does", async () => {

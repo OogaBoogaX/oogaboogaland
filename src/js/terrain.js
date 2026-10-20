@@ -281,7 +281,8 @@
   const MASTER_PATH_CENTER = 2;
   const GATE_Z = -(RADIUS - 2), PASS_HALF = 2.5, PASS_TOP = 5, TRAIL_HALF = 1;
   const STAIR_TERRACE = { from: MEADOW, top: 2.5, halfWidth: 1.8, blend: 1.5 };
-  const TIMECHAIN = { bearing: 8.25 / 12 * Math.PI * 2, ...STAIR_TERRACE };
+  // The final terrace is as wide as the Sphere's six-metre portal and bridge deck.
+  const TIMECHAIN = { bearing: 8.25 / 12 * Math.PI * 2, ...STAIR_TERRACE, halfWidth: 3 };
   const TIMECHAIN_X = Math.sin(TIMECHAIN.bearing), TIMECHAIN_Z = -Math.cos(TIMECHAIN.bearing);
   // Deeper treads keep the diagonal voxel risers within an Ooga's step clearance. Reach the full height
   // half a metre before the bridge so its underside cannot block the final rise onto the deck.

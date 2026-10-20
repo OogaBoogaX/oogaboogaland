@@ -67,7 +67,9 @@ Ownership goes by GitHub login, not by name. These rules apply on the signed-in 
 
 ## Timechain Sphere
 
-Sani's hangout: a walk-in sphere whose six inner walls show live [Timechain Index](https://timechainindex.com) data (BTC distribution, address balances, UTXO sizes, ETF and exchange holdings, top holders). The walls load once you come near and refresh every five minutes. Tap a wall for a close-up and its source; tap Sani to spin his chair. Holdings are on-chain balances and API attributions, not proof of ownership. `timechain=0` turns the feed off.
+Nine rooms behind one door. Walk an Ooga over the bridge and press **Space** at the keypad beside the doors (or tap it): choose one room, **1**–**9**, with the number keys or the buttons, then **Enter**; **Back** or **Escape** lets go without going anywhere. Rooms 1–3 are normal sized, 4–6 half as big again and 7–9 twice the size; the doorway, furniture and controls stay human sized. The doors part, your Ooga walks in and the view moves into its eyes: inside it is first person only, with no weapons or jetpack. **Space** at the Exit button beside the doors walks you back out onto the bridge.
+
+Signed in, a room is shared with everyone who picks the same number (you see and hear each other there, and nobody else); signed out, it is a solo copy just for you. Each room has a wall of live block and mining charts drawn from [mempool.space](https://mempool.space)'s public API (mempool and fees, difficulty, the last 144 blocks, miner dominance, block production, hashrate and difficulty), each naming its source, its window and how current it is; tap one for a close-up. The holdings desk shows the [Timechain Index](https://timechainindex.com) readings (BTC distribution, address balances, UTXO sizes, ETF and exchange holdings, top holders); holdings are on-chain balances and API attributions, not proof of ownership. Sani sits in his recliner in every room: tap him to spin his chair. Each room has its own address, `/sphere-1` … `/sphere-9`. `timechain=0` turns the room feeds off.
 
 ## Games
 
