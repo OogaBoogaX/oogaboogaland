@@ -66,10 +66,10 @@ export const createPokerGateway = (sessionFor = getSessionFromRequest, forward =
   if (request.signal.aborted) abort();
   const timer = setTimeout(abort, method === "POST" ? 55000 : 25000);
   try {
-    const response = await forward(target, { method, headers, body, redirect: "error", signal: controller.signal });
+    const response = await forward(target, { method, headers, body, redirect: "manual", signal: controller.signal });
     const script = url.pathname === "/poker/worker.js" && response.ok;
     const type = script ? "text/javascript" : "application/json";
-    if (!response.headers.get("content-type")?.startsWith(type) || response.status < 200 || response.status >= 500) throw new Error("Invalid service response");
+    if (!response.headers.get("content-type")?.startsWith(type) || response.status < 200 || response.status >= 300) throw new Error("Invalid service response");
     const bytes = await bounded(response.body, 16 * 1024 * 1024);
     return new Response(bytes, { status: response.status, headers: {
       "content-type": type + "; charset=utf-8", "cache-control": "no-store",

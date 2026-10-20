@@ -3,6 +3,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { Worker } from "node:worker_threads";
+import { webcrypto } from "node:crypto";
 import { runInNewContext } from "node:vm";
 import { createPokerGateway } from "../src/poker.js";
 import { createPokerServer } from "../../server/poker/server.mjs";
@@ -24,7 +25,7 @@ test("poker gateway derives identity and strips cookies and spoofed service head
   } }), env);
   assert.equal(response.status, 200);
   assert.equal(call.url, "https://relay.example/poker/api/command");
-  assert.equal(call.redirect, "error");
+  assert.equal(call.redirect, "manual");
   assert.equal(call.headers.get("cookie"), null);
   assert.equal(call.headers.get("x-player-id"), "101");
   assert.equal(call.headers.get("x-player-login"), "player-one");
@@ -100,6 +101,28 @@ test("account sessions reconnect the same key, reject identity/token substitutio
   } finally { identity.dispose(); other.dispose(); await s.close(); }
 });
 
+test("a command wakes only viewers polling its table", async () => {
+  const s = await startService(), viewer = C.player(), player = C.player();
+  const quietController = new AbortController();
+  try {
+    const a = await (await s.post("/poker/api/session", await proof(viewer), s.headers())).json();
+    const b = await (await s.post("/poker/api/session", await proof(player), s.headers(202))).json();
+    const h = s.headers(101, a.token, a.instance);
+    const state = async table => (await (await fetch(`${s.origin}/poker/api/state?table=${table}`, { headers: h })).json());
+    const zero = await state(0), one = await state(1);
+    let quietReturned = false;
+    const quiet = fetch(`${s.origin}/poker/api/state?table=0&after=${zero.revision}`, { headers: h, signal: quietController.signal })
+      .then(() => { quietReturned = true; }, error => { if (error.name !== "AbortError") throw error; });
+    const active = fetch(`${s.origin}/poker/api/state?table=1&after=${one.revision}`, { headers: s.headers(202, b.token, b.instance), signal: AbortSignal.timeout(3000) });
+    await new Promise(resolve => setTimeout(resolve, 30));
+    const joined = await s.post("/poker/api/command", await signed(player, 1, 1, "join", { name: "Player 202" }), s.headers(202, b.token, b.instance));
+    assert.equal(joined.status, 200);
+    assert.equal((await (await active).json()).revision, one.revision + 1);
+    assert.equal(quietReturned, false);
+    quietController.abort(); await quiet;
+  } finally { quietController.abort(); viewer.dispose(); player.dispose(); await s.close(); }
+});
+
 test("restored crypto keys keep identity and reject zero and noncanonical secrets", async () => {
   const original = C.player(), restored = C.player(original.checkpoint());
   try {
@@ -149,12 +172,38 @@ test("live UI waits for its own action acknowledgment and blocks bets during rec
     live.action("raise", 100, 8);
     assert.equal(transport.sent.filter(m => m.type === "action").length, 2);
     assert.equal(transport.sent.at(-1).requestId, 2);
-    transport.deliver({ type: "fatal", message: "fixture stop" });
+    transport.deliver({ type: "fatal", message: "fixture stop", recovery: true });
     assert.equal(live.connection, "failed");
     assert.equal(live.connected, false);
+    assert.equal(live.recoveryError, true);
+    live.action("discard");
+    assert.equal(transport.sent.at(-1).type, "discard");
+    transport.deliver({ type: "discarded", message: "Recovery discarded" });
+    assert.equal(live.recoveryError, false);
+    assert.equal(notices.at(-1), "Recovery discarded");
     state(2); assert.equal(live.connection, "failed", "late state cannot revive a stopped worker");
   } finally { live.dispose(); }
   assert.equal(transport.closed, true);
+});
+
+test("unreadable private recovery is discarded only after an explicit request", async () => {
+  const messages = []; let cleared = false, sessionRequests = 0;
+  const context = { crypto: webcrypto, TextEncoder, TextDecoder, setTimeout, clearTimeout, AbortController,
+    postMessage: message => messages.push(message), fetch: async path => {
+      if (path !== "/poker/api/health") { sessionRequests++; throw new Error("must not register a damaged identity"); }
+      return { ok: true, json: async () => ({ protocol: C.DOMAIN, instance: "ab".repeat(32), account: "101" }) };
+    } };
+  context.self = context;
+  runInNewContext("self.window=self;\n" + source + "\n" + readFileSync(new URL("../../src/js/poker-worker.js", import.meta.url), "utf8"), context);
+  context.BL.pokerRecovery = { open: async () => ({ load: async () => ({ version: 0 }), clear: async () => { cleared = true; }, close() {} }) };
+  await context.onmessage({ data: { type: "connect", table: 0, account: "101" } });
+  assert.equal(messages.at(-1).type, "fatal");
+  assert.equal(messages.at(-1).recovery, true);
+  assert.equal(cleared, false);
+  assert.equal(sessionRequests, 0);
+  await context.onmessage({ data: { type: "discard" } });
+  assert.equal(cleared, true);
+  assert.equal(messages.at(-1).type, "discarded");
 });
 
 // Regression: actual worker code must retry identical signed bytes after the relay accepts a key

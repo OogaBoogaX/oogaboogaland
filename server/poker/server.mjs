@@ -15,7 +15,7 @@ export function createPokerServer(options = {}) {
   const clock = options.clock || Date.now, timeout = options.timeout || 90000;
   const changedAt = tables.map(() => clock()), cooldowns = new Map();
   const archives = tables.map(() => []);
-  let revision = 0;
+  const revisions = new Uint32Array(tables.length);
   const page = options.page || (() => readFileSync(root + "oogaboogaland.html"));
   const worker = "self.window = self;\n" + source + "\n" + readFileSync(root + "src/js/poker-recovery.js", "utf8") + "\n" + readFileSync(root + "src/js/poker-worker.js", "utf8");
   const headers = { "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff", "Referrer-Policy": "no-referrer", "Cross-Origin-Resource-Policy": "same-origin" };
@@ -27,10 +27,10 @@ export function createPokerServer(options = {}) {
     if (record) {
       audit = { protocol: record.protocol, table, initial: record.initial, root: record.root, offset, events: record.events };
     }
-    return { instance, revision, table, tables: tables.map(t => t.summary()), phase: view.phase, audit, previous: hand && (hand !== match.handNonce || !record) ? archives[table].find(r => r.events[0].request.data.nonce === hand) || null : null, seq: match.state().counters.find(([id]) => id === session.publicKey)?.[1] || 0,
+    return { instance, revision: revisions[table], table, tables: tables.map(t => t.summary()), phase: view.phase, audit, previous: hand && (hand !== match.handNonce || !record) ? archives[table].find(r => r.events[0].request.data.nonce === hand) || null : null, seq: match.state().counters.find(([id]) => id === session.publicKey)?.[1] || 0,
       deadline: match.active ? changedAt[table] + timeout : null };
   };
-  const wake = () => { revision++; for (const finish of [...waiters.values()]) finish(); };
+  const wake = table => { revisions[table]++; for (const waiter of waiters.values()) if (waiter.table === table) waiter.finish(); };
   const archive = i => { const record = tables[i].export(); if (record && !archives[i].some(r => r.root === record.root)) { archives[i].push(record); if (archives[i].length > 3) archives[i].shift(); } };
   const queue = (table, fn) => { const promise = queues[table].then(fn); queues[table] = promise.catch(() => {}); return promise; };
   const readJSON = async req => {
@@ -51,12 +51,12 @@ export function createPokerServer(options = {}) {
         const offender = expected.find(Boolean) || null;
         await t.cancel("timeout", offender); archive(i);
         for (const id of expected.filter(Boolean)) { cooldowns.set(id, clock() + 60000); t.evictIdle(id); }
-        wake();
+        wake(i);
       });
     }
     for (const [token, session] of sessions) if (clock() - session.lastSeen > timeout) {
       for (let i = 0; i < tables.length; i++) if (!tables[i].active && tables[i].summary().state.seats.some(s => s?.id === session.publicKey)) {
-        await queue(i, async () => { if (!tables[i].active) { archive(i); tables[i].evictIdle(session.publicKey); wake(); } });
+        await queue(i, async () => { if (!tables[i].active) { archive(i); tables[i].evictIdle(session.publicKey); wake(i); } });
       }
       if (clock() - session.lastSeen > 30 * 60 * 1000 && !tables.some(t => t.active && t.state().context?.members.some(m => m.id === session.publicKey))) { sessions.delete(token); publicKeys.delete(session.publicKey); accounts.delete(session.account); cooldowns.delete(session.publicKey); }
     }
@@ -105,17 +105,17 @@ export function createPokerServer(options = {}) {
       session.tokens = Math.min(30, session.tokens + Math.max(0, clock() - session.refreshed) / 1000 * 5); session.refreshed = clock();
       if (session.tokens < 1) { send(res, 429, { error: "Please slow down" }); return; } session.tokens--;
       if (req.method === "GET" && url.pathname === "/poker/api/state") {
-        const table = Number(url.searchParams.get("table")), from = Number(url.searchParams.get("from") || 0), after = Number(url.searchParams.get("after") || -1), hand = url.searchParams.get("hand") || "";
+        const table = Number(url.searchParams.get("table")), from = Number(url.searchParams.get("from") || 0), after = Number(url.searchParams.get("after") ?? -1), hand = url.searchParams.get("hand") || "";
         if (!Number.isInteger(table) || table < 0 || table >= 10 || !Number.isInteger(from) || from < 0 || from > 513) throw new Error("Invalid table cursor");
         // A proof check awaits hashes while mutating the match. Read behind that table's queue,
         // so the record and counters always describe the same fully accepted command.
         const answer = () => queue(table, () => send(res, 200, publicState(session, table, from, hand)));
-        if (after !== revision) { await answer(); return; }
-        if (waiters.has(token)) waiters.get(token)();
+        if (after !== revisions[table]) { await answer(); return; }
+        if (waiters.has(token)) waiters.get(token).finish();
         let timer;
-        const finish = () => { clearTimeout(timer); waiters.delete(token); answer().catch(() => send(res, 503, { error: "Table state unavailable" })); };
-        waiters.set(token, finish); timer = setTimeout(finish, 20000);
-        res.on("close", () => { clearTimeout(timer); if (waiters.get(token) === finish) waiters.delete(token); }); return;
+        const finish = () => { clearTimeout(timer); if (waiters.get(token)?.finish === finish) waiters.delete(token); answer().catch(() => send(res, 503, { error: "Table state unavailable" })); };
+        waiters.set(token, { table, finish }); timer = setTimeout(finish, 20000);
+        res.on("close", () => { clearTimeout(timer); if (waiters.get(token)?.finish === finish) waiters.delete(token); }); return;
       }
       if (req.method === "POST" && url.pathname === "/poker/api/command") {
         const body = await readJSON(req), i = body?.table;
@@ -129,7 +129,7 @@ export function createPokerServer(options = {}) {
           if (["start", "join", "leave", "refill"].includes(body.op) && !t.active) {
             archive(i);
           }
-          await t.submit(body); if (t.revision !== before) { changedAt[i] = clock(); wake(); }
+          await t.submit(body); if (t.revision !== before) { changedAt[i] = clock(); wake(i); }
         }));
         session.commands = submitted.catch(() => {}); await submitted;
         send(res, 200, { accepted: true }); return;
@@ -139,7 +139,7 @@ export function createPokerServer(options = {}) {
   });
   server.requestTimeout = 30000; server.headersTimeout = 10000; server.maxConnections = 512;
   const timer = setInterval(() => { sweep().catch(() => {}); }, 1000); timer.unref();
-  server.on("close", () => { clearInterval(timer); for (const finish of [...waiters.values()]) finish(); sessions.clear(); publicKeys.clear(); accounts.clear(); });
+  server.on("close", () => { clearInterval(timer); for (const waiter of waiters.values()) waiter.finish(); sessions.clear(); publicKeys.clear(); accounts.clear(); });
   return { server, tables, sweep };
 }
 

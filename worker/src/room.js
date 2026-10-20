@@ -31,6 +31,7 @@ import { sfuClient } from "./sfu.js";
 import CAST_ROWS from "./characters.gen.json";
 
 const CAST = castIndex(CAST_ROWS);
+const POKER_VOICE_HZ = 1, POKER_VOICE_BURST = 4;
 
 export class Room extends DurableObject {
   constructor(ctx, env) {
@@ -77,7 +78,7 @@ export class Room extends DurableObject {
   }
 
   record(ws, a) {
-    return { ws, voice: { pub: null, sub: null, track: null, gen: 0 }, muted: false, hp: 100, ko: false, g: null, sent: null, zone: OUTSIDE, pokerVoice: null, inHub: false, joinedAt: Date.now(), door: null, passes: [], ...a, bucket: { tokens: MOVE_HZ, at: Date.now() }, npcBucket: { tokens: NPC_HZ, at: Date.now() }, hpBucket: { tokens: HP_HZ, at: Date.now() }, doorBucket: { tokens: DOOR_BURST, at: Date.now() }, chatBucket: this.chatBucketFor(a.id, Date.now()), seenAt: Date.now() };
+    return { ws, voice: { pub: null, sub: null, track: null, gen: 0 }, muted: false, hp: 100, ko: false, g: null, sent: null, zone: OUTSIDE, pokerVoice: null, inHub: false, joinedAt: Date.now(), door: null, passes: [], ...a, bucket: { tokens: MOVE_HZ, at: Date.now() }, npcBucket: { tokens: NPC_HZ, at: Date.now() }, hpBucket: { tokens: HP_HZ, at: Date.now() }, doorBucket: { tokens: DOOR_BURST, at: Date.now() }, pokerVoiceBucket: { tokens: POKER_VOICE_BURST, at: Date.now() }, chatBucket: this.chatBucketFor(a.id, Date.now()), seenAt: Date.now() };
   }
 
   // Retain account debt across socket records, only while awake. Reclaim fully replenished
@@ -326,6 +327,7 @@ export class Room extends DurableObject {
       if (p.inHub && p.id !== this.hostId && this.lastNpc) this.send(p.ws, this.lastNpc);
     } else if (msg.t === "zone") {
       if (msg.name === p.zone) return;
+      if (msg.name === "ember-den" && !takeToken(p.pokerVoiceBucket, POKER_VOICE_HZ, p.seenAt, POKER_VOICE_BURST)) return;
       if (msg.name !== DOOR_ZONE) this.cancelDoor(p);
       if (msg.name !== p.zone) this.clearPasses(p);
       p.zone = msg.name;
@@ -337,6 +339,7 @@ export class Room extends DurableObject {
       this.replayDoor(p);
     } else if (msg.t === "poker-voice") {
       if (p.zone !== "ember-den" || msg.table === p.pokerVoice) return;
+      if (!takeToken(p.pokerVoiceBucket, POKER_VOICE_HZ, p.seenAt, POKER_VOICE_BURST)) return;
       p.pokerVoice = msg.table;
       p.sent = null;
       this.updateVoice();

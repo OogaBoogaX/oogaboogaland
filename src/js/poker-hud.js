@@ -273,8 +273,11 @@
       by("connection").textContent = connection === "practice" ? "Practice · on your device" : connection === "failed" ? "Connection stopped" : connection === "reconnecting" ? "Reconnecting · waiting for table" : connection === "connecting" ? "Connecting to live tables…" : ["betting", "complete"].includes(live.phase) ? "Connected · shuffle checked" : "Connected · " + (fairName[live.phase] || "waiting for players");
       by("reconnect").hidden = connection !== "failed";
       by("reconnect-floor").hidden = connection !== "failed";
+      by("reconnect").disabled = by("reconnect-floor").disabled = viewBusy || !!live?.recoveryError;
       by("connect").hidden = !!live; by("practice").hidden = !live;
       by("forget").hidden = !live?.recoverable;
+      by("discard").hidden = !live?.recoveryError;
+      by("discard").disabled = !!live?.discarding;
       by("nickname").disabled = !!live?.recoverable;
       by("connect").disabled = viewBusy;
       el.querySelector('[data-poker-action="quick"]').disabled = viewBusy;

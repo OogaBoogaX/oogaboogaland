@@ -33,10 +33,14 @@
       async load() {
         const saved = await transaction("readonly", store => store.get(account));
         if (!saved) return null;
-        key = saved.key;
-        if (!key || key.extractable || key.algorithm.name !== "AES-GCM") throw new Error("Invalid recovery key");
-        const bytes = await crypto.subtle.decrypt({ name: "AES-GCM", iv: saved.iv, additionalData: aad }, key, saved.box);
-        return JSON.parse(new TextDecoder().decode(bytes));
+        try {
+          key = saved.key;
+          if (!key || key.extractable || key.algorithm.name !== "AES-GCM") throw new Error("Invalid recovery key");
+          const bytes = await crypto.subtle.decrypt({ name: "AES-GCM", iv: saved.iv, additionalData: aad }, key, saved.box);
+          return JSON.parse(new TextDecoder().decode(bytes));
+        } catch {
+          const error = new Error("Saved poker recovery is unreadable"); error.recovery = true; throw error;
+        }
       },
       async save(value) {
         if (!key) key = await crypto.subtle.generateKey({ name: "AES-GCM", length: 256 }, false, ["encrypt", "decrypt"]);

@@ -20,11 +20,11 @@ test("every DSB venue isolates voice from other venues, hub and Bifrost", () => 
 });
 
 // Execute the real room methods with a minimal Cloudflare host, sockets and SFU mocked.
-const roomClass = () => {
+const roomClass = (date = Date) => {
   const source = readFileSync(new URL("../src/room.js", import.meta.url), "utf8")
     .replace(/import\s+[\s\S]*?from\s+"[^"]+";/g, "")
     .replace("export class Room", "class Room") + "\nglobalThis.Room = Room;";
-  const context = { ...protocol, DurableObject: class {}, sfuClient, CAST_ROWS: [{ handle: "YellowBrokeIt", github_login: "YellowBrokeIt" }], Date, Map, Set, setTimeout, clearTimeout };
+  const context = { ...protocol, DurableObject: class {}, sfuClient, CAST_ROWS: [{ handle: "YellowBrokeIt", github_login: "YellowBrokeIt" }], Date: date, Map, Set, setTimeout, clearTimeout };
   runInNewContext(source, context);
   return context.Room;
 };
@@ -138,4 +138,25 @@ test("room scopes poker voice to Ember Den and clears it on departure", () => {
   send({ t: "zone", name: "outside" });
   assert.equal(attachment.pokerVoice, null);
   send({ t: "zone", name: "ember-den" }); assert.equal(player.pokerVoice, null);
+});
+
+test("rapid poker voice switching cannot repeatedly rebuild peer lists", () => {
+  class FixedDate extends Date { static now() { return 1000; } }
+  const Room = roomClass(FixedDate), room = Object.create(Room.prototype);
+  room.players = new Map(); room.chatBuckets = new Map();
+  let updates = 0;
+  room.updateVoice = () => { updates++; };
+  room.broadcast = () => {};
+  room.cancelDoor = room.clearPasses = room.replayDoor = () => {};
+  const ws = { deserializeAttachment: () => ({ id: 1 }), serializeAttachment() {}, send() {} };
+  const player = room.record(ws, { id: 1, login: "YellowBrokeIt", body: "YellowBrokeIt", zone: "outside" });
+  room.players.set(1, player);
+  const send = message => room.webSocketMessage(ws, JSON.stringify(message));
+  send({ t: "zone", name: "ember-den" });
+  for (const table of [0, 1, 2, 3]) send({ t: "poker-voice", table });
+  assert.equal(player.pokerVoice, 2);
+  assert.equal(updates, 4);
+  send({ t: "zone", name: "outside" });
+  send({ t: "zone", name: "ember-den" });
+  assert.equal(player.zone, "outside", "re-entering cannot bypass the voice limit");
 });

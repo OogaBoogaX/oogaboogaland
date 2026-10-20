@@ -5,12 +5,12 @@
   const C = self.BL.pokerCrypto, M = self.BL.pokerMatch;
   let identity, handKey, keyHand = "", token = "", table = 0, mirror = null, record = null, lastRecord = null;
   let running = false, fatal = false, controller = null, revision = -1, seq = 0, latest = null;
-  let connecting = false, storage = null, instance = "", account = null, display = null, pending = null;
+  let connecting = false, storage = null, instance = "", account = null, display = null, pending = null, recoveryInvalid = false;
   let activeAction = 0, acknowledged = 0;
   const finishAction = () => { if (!pending && activeAction) { acknowledged = activeAction; activeAction = 0; } };
   const actions = [];
   const post = (type, value) => self.postMessage({ type, ...value });
-  const stop = message => { fatal = true; running = false; controller?.abort(); storage?.close(); storage = null; handKey?.dispose(); identity?.dispose(); post("fatal", { message }); };
+  const stop = (message, recovery = false) => { fatal = true; running = false; controller?.abort(); storage?.close(); storage = null; handKey?.dispose(); identity?.dispose(); post("fatal", { message, recovery }); };
   const persist = async () => {
     if (!storage) return;
     try {
@@ -195,7 +195,14 @@
   };
   self.onmessage = async event => {
     const request = event.data;
-    if (request?.type === "connect" && !running && !connecting && !fatal) {
+    if (request?.type === "discard" && fatal && recoveryInvalid && account) {
+      let opened;
+      try {
+        opened = await self.BL.pokerRecovery.open(account); await opened.clear(); recoveryInvalid = false;
+        post("discarded", { message: "Unreadable recovery discarded. Reconnect to start fresh; the previous hand cannot be recovered." });
+      } catch { post("fatal", { message: "Could not discard recovery on this device. Check browser storage and try again.", recovery: true }); }
+      finally { opened?.close(); }
+    } else if (request?.type === "connect" && !running && !connecting && !fatal) {
       connecting = true;
       try {
         C.ready();
@@ -205,25 +212,27 @@
         instance = health.instance; account = health.account; table = request.table || 0;
         let saved = null;
         if (account) { storage = await self.BL.pokerRecovery.open(account); saved = await storage.load(); }
-        if (saved && (saved.version !== 1 || !Number.isInteger(saved.table) || saved.table < 0 || saved.table >= 10 || !Number.isSafeInteger(saved.seq) || saved.seq < 0)) throw new Error("Invalid recovery checkpoint");
-        identity = C.player(saved?.identity ?? null);
-        if (saved && identity.publicKey !== saved.publicKey) throw new Error("Recovered identity does not match");
-        if (saved?.instance === instance) {
-          table = saved.table; seq = saved.seq; keyHand = saved.keyHand; record = saved.record; lastRecord = saved.lastRecord; pending = saved.pending;
-          if (saved.hand) handKey = C.player(saved.hand);
-          if (record) { if (record.table !== table) throw new Error("Wrong recovered table"); mirror = await M.replay(record); }
-          if (pending) {
-            const { signature, ...value } = JSON.parse(pending);
-            if (value.signer !== identity.publicKey || value.table !== table || value.seq !== seq + 1 || !await C.signatureValid(identity.publicKey, "command", value, signature)) throw new Error("Invalid saved move");
-          }
-        } else if (saved) post("notice", { message: "Poker service restarted. Its previous hands and free-chip balances ended; starting a new session." });
+        try {
+          if (saved && (saved.version !== 1 || !Number.isInteger(saved.table) || saved.table < 0 || saved.table >= 10 || !Number.isSafeInteger(saved.seq) || saved.seq < 0)) throw new Error("Invalid recovery checkpoint");
+          identity = C.player(saved?.identity ?? null);
+          if (saved && identity.publicKey !== saved.publicKey) throw new Error("Recovered identity does not match");
+          if (saved?.instance === instance) {
+            table = saved.table; seq = saved.seq; keyHand = saved.keyHand; record = saved.record; lastRecord = saved.lastRecord; pending = saved.pending;
+            if (saved.hand) handKey = C.player(saved.hand);
+            if (record) { if (record.table !== table) throw new Error("Wrong recovered table"); mirror = await M.replay(record); }
+            if (pending) {
+              const { signature, ...value } = JSON.parse(pending);
+              if (value.signer !== identity.publicKey || value.table !== table || value.seq !== seq + 1 || !await C.signatureValid(identity.publicKey, "command", value, signature)) throw new Error("Invalid saved move");
+            }
+          } else if (saved) post("notice", { message: "Poker service restarted. Its previous hands and free-chip balances ended; starting a new session." });
+        } catch (error) { if (saved) error.recovery = true; throw error; }
         await persist(); // The signing key must survive a reload before it is registered remotely.
         const nonce = C.nonce();
         const answer = await jsonFetch("/poker/api/session", { method: "POST", body: JSON.stringify({ publicKey: identity.publicKey, nonce, signature: await identity.sign("connect", nonce) }) });
         if (answer.instance !== instance || answer.account !== account || answer.publicKey !== identity.publicKey) throw new Error("Poker session changed while connecting; reload");
         token = answer.token; display = answer.display; running = true; post("connected", { identity: identity.publicKey, table }); loop();
         if (storage) post("notice", { message: "Recovery saved on this device. Reload and reconnect before the 90-second hand deadline." });
-      } catch (error) { stop(error.message); }
+      } catch (error) { recoveryInvalid = !!error.recovery; stop(recoveryInvalid ? "Saved poker recovery is unreadable. Discard it to start fresh; the current hand will be lost." : error.message, recoveryInvalid); }
       finally { connecting = false; }
     } else if (request?.type === "action" && running && !fatal) {
       if (actions.length >= 4) { post("notice", { message: "Please wait for your previous action" }); return; }

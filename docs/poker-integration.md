@@ -18,12 +18,16 @@ practice and the Ember Den's appearance remain available.
 2. Generate a 32-byte random secret, encoded as 64 lowercase hex characters.
    Set it as `POKER_SERVICE_TOKEN` in the Node host's secret manager and with
    `wrangler secret put POKER_SERVICE_TOKEN --config wrangler.staging.jsonc`
-   for the site Worker. Never put the value in git or a browser setting.
+   for the staging Worker, and separately with
+   `wrangler secret put POKER_SERVICE_TOKEN --config wrangler.production.jsonc`
+   for the production Worker. Never put either value in git or a browser setting.
 3. Set the Node process's `POKER_ORIGIN` to the exact site's `SITE_ORIGIN`.
    Configure `POKER_HOST` and `POKER_PORT` for the host; non-loopback listening
    requires both `POKER_ORIGIN` and `POKER_SERVICE_TOKEN`.
-4. Set the Worker's `POKER_SERVICE_URL` variable to the service's HTTPS origin,
-   with no credentials, path, query, fragment or redirect. It must differ from
+4. Replace the empty `POKER_SERVICE_URL` in each `wrangler.*.jsonc` with that
+   environment's service HTTPS origin. Wrangler deploy uses these files as the
+   source of truth; a dashboard-only variable is removed by the next deploy.
+   Use no credentials, path, query, fragment or redirect. The URL must differ from
    the site's origin. Keep staging and production services/secrets separate.
 5. Verify on staging before considering the equivalent production settings.
    This PR neither supplies hosting/secrets nor deploys anything.
@@ -69,6 +73,10 @@ the relay. Verified completion/cancellation removes the private hand key from
 the next checkpoint. Public receipts remain exportable without private keys.
 **Leave seat** between hands, then **Forget recovery on this device** deletes that
 account's local checkpoint. Clearing the site's browser storage also removes it.
+If a checkpoint cannot be decrypted or verified, live play stops and the lobby
+offers **Discard unreadable recovery · lose current hand**. That explicit action
+deletes only this account's local checkpoint; reconnect starts with a new key
+and cannot recover the interrupted hand.
 Signing out stops the live worker; it does not delete recovery needed to sign
 back in before a hand expires. Account deletion on the server does not remotely
 erase browser storage; use Forget recovery first if that is desired.

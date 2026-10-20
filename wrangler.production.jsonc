@@ -19,8 +19,9 @@
     "run_worker_first": ["/auth/*", "/api/*", "/poker/*", "/room", "/donations/*"]
   },
   "vars": {
-    // Optional poker: set POKER_SERVICE_URL to the HTTPS service origin and POKER_SERVICE_TOKEN as a secret.
-    // Missing either leaves live poker disabled. See docs/poker-integration.md.
+    // Optional poker: replace the empty URL with the production HTTPS service origin and set POKER_SERVICE_TOKEN as a secret.
+    // An empty URL leaves live poker disabled. See docs/poker-integration.md.
+    "POKER_SERVICE_URL": "",
     // Redirects, cookies and the Origin check all use this origin.
     "SITE_ORIGIN": "https://oogabooga.land",
     // The production GitHub OAuth App (callback <SITE_ORIGIN>/auth/callback).
@@ -44,7 +45,7 @@
     "bindings": [{ "name": "ROOM", "class_name": "Room" }]
   },
   "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Room"] }],
-  // Namespaces are per account: production counts in 1001-1003, staging in 2001-2003.
+  // Namespaces are per account: production counts in 1001-1004, staging in 2001-2004.
   "ratelimits": [
     // Poker API and worker delivery per signed-in account.
     { "name": "POKER_LIMITER", "namespace_id": "1004", "simple": { "limit": 240, "period": 60 } },
