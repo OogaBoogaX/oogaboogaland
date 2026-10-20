@@ -67,7 +67,6 @@
     abandoned: "Lost my visitor! Back to work.",
     cancelled: "All good. Back to work!"
   };
-  const SPEECH = BL.tess.beats(LINES);
   // Her flight. Clear-air waypoints over the hall and the legs between them, every leg at least 0.8 m from any surface
   // the hall draws (the factory suite measures it). A work site is a waypoint she hovers at, with the point on its
   // station her beam lands on. She is found working at a site near the front, so she reaches the balcony quickly.
@@ -119,26 +118,40 @@
     [-9.2, 10, -9.6, "lineA"], [-9.2, 10, -10.1, "lineA"], [4.8, 0, 10, "pit"], [8.5, 0, 9.5, "right"]
   ];
   const TOURS = {
-    payments: { title: "PAYMENTS", follow: "follow", route: ROUTE,
+    payments: {
+      title: "PAYMENTS", follow: "follow", route: ROUTE,
       events: ["forward.settled", "forward.failed"], quiet: "quiet", stops: STOPS,
-      show: { 6: [1.5, [-8, 7.5, -0.5], [-11.67, 7.08, -1.75]], 10: [0, [-4, 7, -0.5], [-1.97, 7.51, -2.28]],
-        13: [1.5, [-10.5, 5, 8], [-12.39, 3.74, 5.47]] } },
-    channels: { title: "CHANNELS", follow: "followChannels", route: CHANNEL_ROUTE,
+      show: {
+        6: [1.5, [-8, 7.5, -0.5], [-11.67, 7.08, -1.75]], 10: [0, [-4, 7, -0.5], [-1.97, 7.51, -2.28]],
+        13: [1.5, [-10.5, 5, 8], [-12.39, 3.74, 5.47]]
+      }
+    },
+    channels: {
+      title: "CHANNELS", follow: "followChannels", route: CHANNEL_ROUTE,
       events: ["channel.opening", "channel.active", "channel.closing", "channel.closed"], quiet: "channelQuiet",
-      stops: { 6: ["forge", "opening", "closing", "observation", "source", "history"],
-        13: ["channelStatus", "slots", "fundsPrivate", "observation", "source", "history", "channelDone"] },
-      show: { 6: [1.5, [1, 2, 4], [0.01, 2.99, 0.74]], 13: [1, [-13.5, 8, 0], [-12.24, 6.86, -2.29]] } },
-    rebalancing: { title: "REBALANCING", follow: "followRebalancing",
+      stops: {
+        6: ["forge", "opening", "closing", "observation", "source", "history"],
+        13: ["channelStatus", "slots", "fundsPrivate", "observation", "source", "history", "channelDone"]
+      },
+      show: { 6: [1.5, [1, 2, 4], [0.01, 2.99, 0.74]], 13: [1, [-13.5, 8, 0], [-12.24, 6.86, -2.29]] }
+    },
+    rebalancing: {
+      title: "REBALANCING", follow: "followRebalancing",
       route: [...ROUTE.slice(0, 5), [4.8, 0, 10], [8.5, 0, 9.5]],
       events: ["rebalance.succeeded", "rebalance.failed"], quiet: "rebalanceQuiet",
       stops: { 5: ["liquidity"], 6: ["rebalancer", "rebalanceHour", "rebalancePrivate", "observation", "source", "history", "rebalanceDone"] },
-      show: { 5: [1.5, [8, 8, -0.5], [11.7, 7.16, -1.76]], 6: [1.5, [11, 5, 5.5], [13.9, 4.52, 4.24]] } },
-    health: { title: "NODE HEALTH", follow: "followHealth",
+      show: { 5: [1.5, [8, 8, -0.5], [11.7, 7.16, -1.76]], 6: [1.5, [11, 5, 5.5], [13.9, 4.52, 4.24]] }
+    },
+    health: {
+      title: "NODE HEALTH", follow: "followHealth",
       route: [...CHANNEL_ROUTE, [-8.9, 5, -3.5], [-9.2, 5, -4.4], [-9.2, 10, -9.6], [-9.2, 10, -10.1]],
       events: [], quiet: "unknownNode",
-      stops: { 9: ["healthCore", "observation", "source", "history"],
-        17: ["watchtower", "signal", "summary", "healthDone"] },
-      show: { 9: [0, [-4, 7, -0.5], [-1.97, 7.51, -2.28]], 17: [1.5, [-11.5, 19.5, -12], [-15.26, 20.75, -13.67]] } }
+      stops: {
+        9: ["healthCore", "observation", "source", "history"],
+        17: ["watchtower", "signal", "summary", "healthDone"]
+      },
+      show: { 9: [0, [-4, 7, -0.5], [-1.97, 7.51, -2.28]], 17: [1.5, [-11.5, 19.5, -12], [-15.26, 20.75, -13.67]] }
+    }
   };
   const TOUR_ORDER = ["payments", "channels", "rebalancing", "health"];
   // The air waypoints by index, and the next hop from each to each over the legs (Floyd-Warshall, once a page).
@@ -214,11 +227,13 @@
     // air waypoints from there: a waypoint (`node`), a visitor's shoulder, a tour's route, a stop's station (`show`),
     // or on her way (`air`). `anchor` is the floor a tour measures the visitor from.
     const start = STARTS[Math.floor(Math.random() * STARTS.length)];
-    const state = { tour: null, selection: 0, phase: "work", stage: "beam", timer: 4 + Math.random() * 4, perch: start, site: start, at: "node",
+    const state = {
+      tour: null, selection: 0, phase: "work", stage: "beam", timer: 4 + Math.random() * 4, perch: start, site: start, at: "node",
       offered: false, seen: 0, attending: false, ending: false, beam: 0, waypoint: 0, line: 0, away: 0,
-      advance: 0, spoken: null, utterance: 0, lastEvent: null, replay: false, demo: false, observation: "quiet", snapshotDemo: false, snapshotReplay: false,
+      spoken: null, lastEvent: null, replay: false, demo: false, observation: "quiet", snapshotDemo: false, snapshotReplay: false,
       node: feed.reading.node, nodeDemo: false, nodeReplay: false, nodeReported: false,
-      anchor: { x: 0, y: 0, z: 0 }, origin: { x: 0, z: 0 }, side: 1 };
+      anchor: { x: 0, y: 0, z: 0 }, origin: { x: 0, z: 0 }, side: 1
+    };
     const position = rig.position, spot = { x: 0, y: 0, z: 0 };
     position.x = AT[start * 3]; position.y = AT[start * 3 + 1]; position.z = AT[start * 3 + 2];
     const clearPath = rig.clearPath, push = rig.push, steer = rig.steer;
@@ -281,14 +296,11 @@
       state.selection = (index + options.length) % options.length;
       for (let i = 0; i < options.length; i++) options[i].classList.toggle("sel", i === state.selection);
     };
-    // One anchored bubble replaces the previous line and follows the guide, including her return. Each spoken
-    // beat also arms the tour's auto-advance: after a readable pause the next line comes on its own.
-    const say = (id, repeat = false) => {
-      if (!repeat || state.spoken !== id) state.utterance = 0;
+    // One anchored bubble replaces the previous line and follows the guide, including her return. On a tour, once a
+    // line is said through, the next comes on its own.
+    const say = (id) => {
       state.spoken = id;
-      const beat = SPEECH[id][state.utterance];
-      state.advance = 1.6 + beat.length * 0.06;
-      rig.say(beat);
+      rig.say(LINES[id]);
     };
     const pickSite = () => {
       let site = state.perch;
@@ -359,7 +371,7 @@
     };
     const greet = () => {
       if (!visitor()) { say(demoRunning() ? "noOogaDemo" : "noOoga"); return; }
-      if (state.phase === "talk") { say(state.spoken, true); return; }
+      if (state.phase === "talk") { if (!rig.next()) next(); return; }
       if (state.phase === "offer" || state.phase === "work" && state.stage !== "fly" && nearMe(4)) { openMenu(); return; }
       if (state.phase === "work") say("comeCloser");
     };
@@ -410,12 +422,9 @@
       pushRoute(w);
       show("back");
     };
-    // One beat further, then one line, then the leg: NEXT on the act button and the readable pause both come here.
+    // The stop's next line, then the leg: a line said through and NEXT on its last bubble both come here.
     const next = () => {
       if (state.phase !== "talk") return;
-      if (state.utterance + 1 < SPEECH[state.spoken].length) {
-        state.utterance++; say(state.spoken, true); return;
-      }
       const lines = tour.stops[state.waypoint];
       while (++state.line < lines.length) {
         const line = resolveLine(lines[state.line]);
@@ -537,7 +546,7 @@
           break;
         case "talk":
           wait(dt, WAIT.tour);
-          if (state.phase === "talk" && (state.advance -= dt) <= 0) next();
+          if (state.phase === "talk" && rig.said) next();
           break;
         case "back":
           if (!state.ending) wait(dt, WAIT.tour);
@@ -562,7 +571,8 @@
       if (!visitor()) return false;
       if (state.phase === "talk") {
         if (!nearSpot(6)) return false;
-        next();
+        // Each bubble of her line first, then the next line.
+        if (!rig.next()) next();
         return true;
       }
       if (state.phase === "menu") { choose(TOUR_ORDER[state.selection]); return true; }

@@ -123,19 +123,21 @@
     const startY = die.position.y;
     const r0 = { ...die.rotation };
     const final = models.dieRotationFor(result, r0.y + 1.7);
-    addTween({ dur: 0.7, ease: ease.linear, update: (k) => {
-      die.position.y = startY + Math.sin(k * Math.PI) * 0.6;
-      die.rotation.x = r0.x + k * Math.PI * 4;
-      die.rotation.z = r0.z + k * Math.PI * 2;
-      die.rotation.y = r0.y + k * 1.7;
-    }, done: () => {
-      Object.assign(die.rotation, final);
-      die.position.y = startY;
-      die.rolling = false;
-      die.lastRoll = result;
-      const w = die.world;
-      fx.sayAt(w[12], w[13] + die.dieSize * 0.5 + 0.2, w[14], `Rolled ${result}`, 1.8);
-    } });
+    addTween({
+      dur: 0.7, ease: ease.linear, update: (k) => {
+        die.position.y = startY + Math.sin(k * Math.PI) * 0.6;
+        die.rotation.x = r0.x + k * Math.PI * 4;
+        die.rotation.z = r0.z + k * Math.PI * 2;
+        die.rotation.y = r0.y + k * 1.7;
+      }, done: () => {
+        Object.assign(die.rotation, final);
+        die.position.y = startY;
+        die.rolling = false;
+        die.lastRoll = result;
+        const w = die.world;
+        fx.sayAt(w[12], w[13] + die.dieSize * 0.5 + 0.2, w[14], `Rolled ${result}`, 1.8);
+      }
+    });
   };
   const flipCard = (card) => {
     if (card.flipping) return;
@@ -306,8 +308,8 @@
     footsteps.update(drivenHere);
     dust.update(elapsed, pilot.orbit.target.x, pilot.orbit.target.z);
   };
-  const drawExtra = (ctx2d, project, drawBubble) => {
-    crew.drawQuotes(ctx2d, project, drawBubble);
+  const drawExtra = (ctx2d, project) => {
+    crew.drawDrops(ctx2d, project);
     remotes.drawNames(ctx2d, project);
   };
   const overlay = (dt) => fx.drawOverlay(dt, drawExtra);

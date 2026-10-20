@@ -60,7 +60,6 @@
     newsFactory: "The Lightning Factory opened: a Lightning node at work.",
     newsTimechain: "The Timechain Sphere opened out west. Walk inside!"
   };
-  const SPEECH = BL.tess.beats(LINES);
   // The island tour, one stop a landmark: where the view looks from (`eye`) and at (`look`), and the lines she says
   // there. She hovers between the view and the landmark, off to its right, and her beam lands on `look`.
   const STOPS = [
@@ -135,8 +134,14 @@
       SPOTS[i][2] = stop.eye[2] + dz * 0.5 + dx / d * side;
     });
   };
-  // A tour is a list of legs, each a stop (-1: where the visitor is) with its title and lines.
-  const ISLAND = STOPS.map((stop, i) => ({ stop: i, title: stop.title, lines: stop.lines }));
+  // A tour is a list of legs, each a stop (-1: where the visitor is) with its title and what she says there: its
+  // lines, each starting a new bubble, and the line each bubble belongs to (`lineAt`), for her beam.
+  const legOf = (stop, title, ids) => ({ stop, title, text: ids.map((id) => LINES[id]).join("\n"),
+    lineAt: ids.flatMap((id) => BL.fx.beatsOf(LINES[id]).map(() => id)) });
+  const ISLAND = STOPS.map((stop, i) => legOf(i, stop.title, stop.lines));
+  // Lines about something beside a stop's landmark: while she says one she faces the middle of what the place hands
+  // her under that name (`targets`) and points a beam at each of them at once, then goes back to the landmark.
+  const POINT_AT = { totems: "totems", newsTotems: "totems" };
   // What is new after `seen`, the newest entry last answered (its `line` and `date`; null for none yet, which gets the
   // newest few): every entry listed above it, so one added later the same day still counts. If that entry has left the
   // list, every entry dated after it.
@@ -149,10 +154,10 @@
   // newest of its news first.
   const legsOf = (fresh) => {
     const legs = [], here = fresh.filter((n) => !n.at).map((n) => n.line);
-    if (here.length) legs.push({ stop: -1, title: "All over the island", lines: here });
+    if (here.length) legs.push(legOf(-1, "All over the island", here));
     STOPS.forEach((stop, i) => {
       const lines = fresh.filter((n) => n.at === stop.id).map((n) => n.line);
-      if (lines.length) legs.push({ stop: i, title: stop.title, lines });
+      if (lines.length) legs.push(legOf(i, stop.title, lines));
     });
     return legs;
   };
@@ -192,11 +197,13 @@
     return params.get("debug") === "1" && day && DAY.test(day) ? day : null;
   })();
 
-  const create = ({ parent, input, fx, camera, pilot, visitor, world, hud, busy, coarse, quality, landing }) => {
+  const create = ({ parent, input, fx, camera, pilot, visitor, world, hud, busy, coarse, quality, landing, targets = {} }) => {
     const rig = BL.tess.create({ parent, input, fx, camera, kind: "tess", coarse, quality }), position = rig.position;
-    const state = { phase: "work", stage: "beam", timer: 3, site: 0, seen: 0, again: false, kind: "island", legs: ISLAND, welcome: null,
-      stop: -1, line: 0, arrived: false, closing: null, holding: false, tourGuest: false, beats: null, utterance: 0, advance: 0, glide: 0, glideTime: GLIDE,
-      login: null, newest: null, still: landing, settle: SETTLE, driven: null };
+    const state = {
+      phase: "work", stage: "beam", timer: 3, site: 0, seen: 0, again: false, kind: "island", legs: ISLAND, welcome: null,
+      stop: -1, arrived: false, closing: null, holding: false, tourGuest: false, glide: 0, glideTime: GLIDE,
+      login: null, newest: null, still: landing, settle: SETTLE, driven: null
+    };
     const spot = { x: 0, y: 0, z: 0 }, home = pose(), from = pose(), to = pose();
     position.x = WORK[0].at[0]; position.y = WORK[0].at[1]; position.z = WORK[0].at[2];
     // The offer and the tour's controls live on screen, in the HUD's wood, built for the visit and removed on leave.
@@ -227,26 +234,22 @@
         help.textContent = coarse ? "Tap to choose" : "Enter starts · Esc closes";
       } else if (phase === "tour") {
         heading.textContent = `${news ? "What's new" : "Island tour"} · ${state.stop + 1} / ${state.legs.length}\n${state.legs[state.stop].title}`;
-        go.textContent = state.stop === state.legs.length - 1 ? "Finish" : "Next"; skip.textContent = "End tour";
+        label(); skip.textContent = "End tour";
         help.textContent = coarse ? "Tap to go on" : "Enter or → goes on · Esc ends";
       }
     };
-    // One line, a speech beat at a time: the next beat comes after a readable pause.
-    const speak = (beats) => {
-      state.beats = beats; state.utterance = 0;
-      state.advance = 1.6 + beats[0].length * 0.06;
-      rig.say(beats[0]);
+    // Next goes on through what she says at a stop before it moves on: Finish only on the last stop's last bubble.
+    const label = () => {
+      go.textContent = state.stop === state.legs.length - 1 && !(state.arrived && rig.more) ? "Finish" : "Next";
     };
-    const say = (id) => speak(SPEECH[id]);
-    // The next beat of what she is saying, after its readable pause; false once the line is done.
-    const nextBeat = (dt) => {
-      if ((state.advance -= dt) > 0) return true;
-      if (state.utterance + 1 >= state.beats.length) return false;
-      state.utterance++;
-      state.advance = 1.6 + state.beats[state.utterance].length * 0.06;
-      rig.say(state.beats[state.utterance]);
-      return true;
-    };
+    const say = (id) => rig.say(LINES[id]);
+    // What she says at a stop, a bubble at a time: each goes on by itself, Next skips ahead, and the last stays up
+    // until the tour moves on.
+    const tell = () => { rig.say(state.legs[state.stop].text, true); label(); };
+    // Flying to the visitor or a tour's stop she keeps her own pace `base` close by, and goes faster from far off, so
+    // the trip takes about COME_TIME however far out the view is.
+    const COME_TIME = 2.5, COME_MAX = 60;
+    const pace = (base, x, y, z) => Math.max(base, Math.min(COME_MAX, Math.hypot(x - position.x, y - position.y, z - position.z) / COME_TIME));
     // A flight to (x, y, z) over an arc: up from where she is, over, and down onto it.
     const flyTo = (x, y, z, speed, track = false) => {
       const d = Math.hypot(x - position.x, z - position.z), rise = Math.max(2, Math.min(8, d * 0.25));
@@ -289,16 +292,16 @@
       if (!fresh.length) return;
       const count = fresh.length;
       state.kind = "news"; state.legs = legsOf(fresh); state.login = DEBUG_NEWS ? null : me.login; state.newest = fresh[0];
-      state.welcome = BL.tess.beats({ text: `Welcome back, ${me.display || me.login}! ${count === 1 ? "One new thing" : `${count} new things`} since you were last here. Want to see?` }).text;
+      state.welcome = `Welcome back, ${me.display || me.login}! ${count === 1 ? "One new thing" : `${count} new things`} since you were last here. Want to see?`;
       notice();
     };
     const notice = () => { rig.flare(); show("notice"); state.timer = 1.1; };
-    const approach = () => { placeBy(); flyTo(spot.x, spot.y, spot.z, 6, true); show("approach"); };
-    const offer = (beats) => {
+    const approach = () => { placeBy(); flyTo(spot.x, spot.y, spot.z, pace(6, spot.x, spot.y, spot.z), true); show("approach"); };
+    const offer = (text) => {
       state.timer = OFFER_TIME;
       state.tourGuest = state.kind === "island" && !account();
       rig.clearPath(3, 1); rig.push(spot.x, spot.y, spot.z); rig.track();
-      rig.nod(); show("offer"); speak(beats);
+      rig.nod(); show("offer"); rig.say(text);
     };
     // The view's pose, read and written as an eye and a heading, eased by smoothstep with the heading turning the
     // short way round.
@@ -335,15 +338,15 @@
     // visitor is keeps the view and her by them, and she starts at once.
     const visit = (index) => {
       const leg = state.legs[index];
-      state.stop = index; state.line = 0; state.arrived = leg.stop < 0;
+      state.stop = index; state.arrived = leg.stop < 0;
       if (leg.stop >= 0) {
         glideTo(VIEWS[leg.stop], GLIDE);
         const s = SPOTS[leg.stop];
-        flyTo(s[0], s[1], s[2], 10);
-        state.advance = Infinity;
+        flyTo(s[0], s[1], s[2], pace(10, s[0], s[1], s[2]));
+        rig.hush();
       } else glideTo(home, GLIDE);
       show("tour");
-      if (state.arrived) say(leg.lines[0]);
+      if (state.arrived) tell();
     };
     // The tour takes the view and the pilot as the island's chalkboard does: inactive, the pilot lets go of held keys
     // and stops the driven Ooga's steering, fire and swing, so nothing walks on through the tour. Both come back, with
@@ -370,9 +373,10 @@
     };
     // The view glides home and she flies back to the visitor, and says her last line once she is there.
     const endTour = (line) => {
+      rig.hush();
       glideTo(home, RETURN);
       state.closing = line; state.arrived = false;
-      placeBy(); flyTo(spot.x, spot.y, spot.z, 10, true);
+      placeBy(); flyTo(spot.x, spot.y, spot.z, pace(10, spot.x, spot.y, spot.z), true);
       show("returning");
     };
     // An answer to her offer, Show me or Not now, counts its news as seen, or the island tour as answered; an offer she
@@ -389,6 +393,8 @@
         answered(); startTour();
       }
       else if (state.phase === "tour") {
+        // What she is saying here comes first, a bubble at a time.
+        if (state.arrived && rig.next()) { label(); return; }
         if (state.stop === state.legs.length - 1) endTour(state.kind === "news" ? "newsDone" : "done");
         else visit(state.stop + 1);
       }
@@ -403,12 +409,14 @@
       if (state.phase === "offer" || state.phase === "tour") { back(); return true; }
       return state.phase === "returning" && state.holding;
     };
-    // A tap on her at work brings her over with the island tour.
+    // A tap on her at work brings her over with the island tour; her rings flare and she nods at once, so the tap
+    // shows before she arrives.
     const tap = () => {
       if (state.phase !== "work" || busy()) return;
       world.tessGreeted = true;
       state.kind = "island"; state.legs = ISLAND; state.again = true;
-      placeBy(); flyTo(spot.x, spot.y, spot.z, 6, true);
+      rig.flare(); rig.nod();
+      placeBy(); flyTo(spot.x, spot.y, spot.z, pace(6, spot.x, spot.y, spot.z), true);
       show("approach");
     };
     const captureKey = (e) => {
@@ -447,14 +455,14 @@
         case "approach":
           placeBy(); rig.setLast(spot.x, spot.y, spot.z); rig.steer(dt);
           if (rig.lastPoint && Math.hypot(spot.x - position.x, spot.y - position.y, spot.z - position.z) < 0.5) {
-            offer(state.welcome || SPEECH[state.again ? "again" : "greeting"]);
+            offer(state.welcome || LINES[state.again ? "again" : "greeting"]);
             state.again = false; state.welcome = null;
           }
           break;
         case "offer":
           placeBy(); rig.setLast(spot.x, spot.y, spot.z); rig.steer(dt);
-          nextBeat(dt);
-          if ((state.timer -= dt) <= 0) { say("declined"); toWork(); }
+          // Her offer stands for a while once she has finished asking.
+          if (rig.said && (state.timer -= dt) <= 0) { say("declined"); toWork(); }
           break;
         case "tour": {
           // Where the visitor is, she keeps by them; at a stop, she flies there and starts once she is nearly in place.
@@ -463,21 +471,17 @@
           rig.steer(dt);
           if (!state.arrived && rig.lastPoint && Math.hypot(SPOTS[at][0] - position.x, SPOTS[at][1] - position.y, SPOTS[at][2] - position.z) < 1.5) {
             state.arrived = true;
-            say(state.legs[state.stop].lines[0]);
+            tell();
           }
-          // The leg's lines go on by themselves; the view moves on only when the visitor does.
-          if (state.arrived && !nextBeat(dt)) {
-            const lines = state.legs[state.stop].lines;
-            if (state.line + 1 < lines.length) say(lines[++state.line]);
-            else state.advance = Infinity;
-          }
+          // Once she has said it all, the tour goes on by itself: to the next stop, or home after the last.
+          else if (state.arrived && rig.said) forward();
           break;
         }
         case "returning":
           placeBy(); rig.setLast(spot.x, spot.y, spot.z); rig.steer(dt);
           if (!state.arrived) {
             if (rig.lastPoint && Math.hypot(spot.x - position.x, spot.y - position.y, spot.z - position.z) < 1.5) { state.arrived = true; say(state.closing); }
-          } else if (!nextBeat(dt)) toWork();
+          } else if (rig.said) toWork();
           break;
       }
       // The view: gliding to a stop, held there, and gliding home, written after the pilot's own every frame; home, it is
@@ -492,7 +496,17 @@
       const working = state.phase === "work" && state.stage === "beam", at = state.phase === "tour" ? state.legs[state.stop].stop : -1;
       rig.mode = working ? 1 : at >= 0 && rig.onLastLeg ? 2 : 0;
       if (working) { const a = WORK[state.site].aim; rig.aim.x = a[0]; rig.aim.y = a[1]; rig.aim.z = a[2]; }
-      else if (rig.mode === 2) { const a = STOPS[at].look; rig.aim.x = a[0]; rig.aim.y = a[1]; rig.aim.z = a[2]; }
+      else if (rig.mode === 2) {
+        // At a stop, the landmark; through a line about something beside it, a beam to each of those at once.
+        const speech = rig.speech, line = state.arrived && speech ? state.legs[state.stop].lineAt[speech.beat] : null;
+        const list = line && POINT_AT[line] ? targets[POINT_AT[line]] : null;
+        rig.aims = list && list.length ? list : null;
+        if (rig.aims) {
+          let x = 0, y = 0, z = 0;
+          for (let i = 0; i < list.length; i++) { x += list[i].x; y += list[i].y; z += list[i].z; }
+          rig.aim.x = x / list.length; rig.aim.y = y / list.length; rig.aim.z = z / list.length;
+        } else { const a = STOPS[at].look; rig.aim.x = a[0]; rig.aim.y = a[1]; rig.aim.z = a[2]; }
+      }
       rig.steady = state.phase === "offer" || state.phase === "tour" && at < 0;
       rig.calm = rig.steady || state.phase === "tour";
       rig.watching = state.phase !== "work";
@@ -506,7 +520,7 @@
       rig.dispose();
       panel.remove();
     };
-    return { root: rig.root, state, update, escape, tap, dispose, liveGeometry: rig.liveGeometry, get holding() { return state.holding; } };
+    return { root: rig.root, state, update, escape, tap, dispose, liveGeometry: rig.liveGeometry, get holding() { return state.holding; }, get speech() { return rig.speech; } };
   };
   BL.hubGuide = { create, NAME, LINES, STOPS, NEWS, freshAfter, legsOf };
 })();
