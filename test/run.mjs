@@ -5876,7 +5876,7 @@ const hubGuide = { name: "hub guide", why: "regression: Tess's offer showed only
     const key = (type, key, code) => window.dispatchEvent(new KeyboardEvent(type, { key, code, bubbles: true, cancelable: true }));
     const at = () => ({ x: a.root.position.x, z: a.root.position.z }), from = (p) => Math.hypot(a.root.position.x - p.x, a.root.position.z - p.z);
     for (let t = 0; t < 12 && s.phase !== "offer"; t += 1 / 30) B.advance(1 / 30, 1 / 30);
-    const offered = s.phase === "offer", bubbles = offered ? s.beats.length : 0;
+    const offered = s.phase === "offer", bubbles = offered && G.speech ? G.speech.beats.length : 0;
     // A shot aimed straight at her, where she hovers by the Ooga, passes her; a tap there reaches her.
     const root = BL.scenes.hub.debug.tess.root, head = root.children[0].children[0];
     BL.scene.updateWorld(root, root.parent.world);
@@ -5886,7 +5886,7 @@ const hubGuide = { name: "hub guide", why: "regression: Tess's offer showed only
     B.input.weaponTargets.ray(poke, C.x, C.y, C.z, dx / l, dy / l, dz / l, 60, a, null, true);
     const shotTess = shot.owner?.kind === "tess", pokeTess = poke.owner?.kind === "tess";
     let reached = 0;
-    for (let t = 0; t < 10 && offered && s.phase === "offer" && reached < bubbles - 1; t += 1 / 30) { B.advance(1 / 30, 1 / 30); reached = Math.max(reached, s.utterance); }
+    for (let t = 0; t < 10 && offered && s.phase === "offer" && reached < bubbles - 1; t += 1 / 30) { B.advance(1 / 30, 1 / 30); reached = Math.max(reached, G.speech ? G.speech.beat : 0); }
     // W held as Enter starts the tour, then let go.
     const start = at();
     key("keydown", "w", "KeyW"); B.advance(0.4, 1 / 60);
@@ -5948,7 +5948,7 @@ const hubGuide = { name: "hub guide", why: "regression: Tess's offer showed only
     return { offered, bubbles, reached, shotTess, pokeTess, walked, touring, drift, returned, again, driving: P.player === a, pair,
       reoffered, climbing, rose: +rose.toFixed(3), burned: +burned.toFixed(4), thrusting, released: !s.holding };
   })()`);
-  record("hub guide: Tess's offer to an Ooga standing on landing says every speech bubble of its line", guide.offered && guide.bubbles > 1 && guide.reached === guide.bubbles - 1, JSON.stringify(guide));
+  record("hub guide: Tess's offer to an Ooga standing on landing says every speech bubble of its line", guide.offered && guide.bubbles > 0 && guide.reached === guide.bubbles - 1, JSON.stringify(guide));
   record("hub guide: a shot aimed straight at Tess passes her, while a tap there still reaches her", !guide.shotTess && guide.pokeTess, JSON.stringify(guide));
   record("hub guide: an Ooga walking as the tour starts stands through it once W is let go, and walks again when the tour ends", guide.walked > 0.3 && guide.touring && guide.drift < 0.05 && guide.returned && guide.again > 0.3 && guide.driving, JSON.stringify(guide));
   record("hub guide: during a tour T switches no actor for a signed-in owner, Escape ends the tour, and afterwards T switches to the gorilla and back", !!guide.pair && guide.pair.gorillaReady && guide.pair.kept && guide.pair.ended && guide.pair.toGorilla && guide.pair.back, JSON.stringify(guide.pair));

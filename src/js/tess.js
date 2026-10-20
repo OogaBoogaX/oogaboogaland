@@ -5,7 +5,7 @@
   "use strict";
   const BL = window.BL = window.BL || {};
   const { models } = BL;
-  const { quat, damp } = BL.math;
+  const { quat, damp, hexToRgb } = BL.math;
   const { cached, lathe, turn, shaded, torus, forwardLathe, moved, turnedZ, bevelBox, prism } = models;
   const { createNode, addChild, removeChild } = BL.scene;
   // Flink's head was seven voxels wide at 16 voxels per metre of height; Tess is half again as big, so she reads
@@ -226,12 +226,16 @@
   const buildMeshes = (fine, light = false) => {
     const segments = light ? 12 : fine ? 240 : 48, ringSegments = light ? 24 : fine ? 192 : 96;
     // Fasteners and glints are below seven millimetres across; dense globe tessellation adds no visible detail here.
-    const sphere = (r, color) => lathe({ profile: Array.from({ length: 7 }, (_, i) =>
-      [Math.sin(i / 6 * Math.PI) * r, -Math.cos(i / 6 * Math.PI) * r]), segments: 12, color });
+    const sphere = (r, color) => lathe({
+      profile: Array.from({ length: 7 }, (_, i) =>
+        [Math.sin(i / 6 * Math.PI) * r, -Math.cos(i / 6 * Math.PI) * r]), segments: 12, color
+    });
     const globeRows = light ? 18 : fine ? 160 : 72, globeSegments = light ? 36 : fine ? 320 : 144;
-    const globe = lathe({ profile: Array.from({ length: globeRows + 1 }, (_, i) =>
-      [Math.sin(i / globeRows * Math.PI) * 0.105, -Math.cos(i / globeRows * Math.PI) * 0.105]),
-      segments: globeSegments, color: GRAPHITE });
+    const globe = lathe({
+      profile: Array.from({ length: globeRows + 1 }, (_, i) =>
+        [Math.sin(i / globeRows * Math.PI) * 0.105, -Math.cos(i / globeRows * Math.PI) * 0.105]),
+      segments: globeSegments, color: GRAPHITE
+    });
     const earthColors = [BL.math.hexToRgb(GRAPHITE), BL.math.hexToRgb("#f7931a"), BL.math.hexToRgb("#b96110")];
     for (let i = 0; i < globe.faces.length; i++) {
       // Sample the same baked map at cell centres for the small Low/touch globe; preserve longitude and latitude.
@@ -243,9 +247,9 @@
     }
     const core = shaded([globe, forwardLathe(torus(0.097, 0.003, COPPER, 0, segments, light ? 4 : fine ? 16 : 8))]);
     const lens = shaded([moved(forwardLathe(turn([[0.069, 0], [0.072, 0.009], [0.065, 0.018],
-      [0.047, 0.022], [0.043, 0.016], [0.043, 0], [0.069, 0]], segments, COPPER)), 0, 0, 0.083)]);
+    [0.047, 0.022], [0.043, 0.016], [0.043, 0], [0.069, 0]], segments, COPPER)), 0, 0, 0.083)]);
     const iris = shaded([moved(forwardLathe(turn([[0.044, 0], [0.04, 0.006], [0.026, 0.007],
-      [0.026, 0], [0.044, 0]], segments, "#ffab35", 0.8)), 0, 0, 0.105)]);
+    [0.026, 0], [0.044, 0]], segments, "#ffab35", 0.8)), 0, 0, 0.105)]);
     const pupil = shaded([moved(forwardLathe(turn([[0.026, 0], [0.023, 0.007], [0, 0.011]],
       segments, "#171c23")), 0, 0, 0.108)]);
     const caps = [], capDetails = [], irisMarks = [], blades = [];
@@ -253,7 +257,7 @@
     // shading, so averaged normals follow the finished shell rather than a scaled box.
     const plate = (color, lift) => {
       const g = turn([[0.033, 0], [0.04, 0.003], [0.041, 0.008], [0.038, 0.017],
-        [0.029, 0.027], [0.014, 0.031], [0, 0.032]], segments, color);
+      [0.029, 0.027], [0.014, 0.031], [0, 0.032]], segments, color);
       for (let i = 0; i < g.verts.length; i += 3) { g.verts[i] *= 1.25; g.verts[i + 2] *= 0.6; }
       return moved(g, 0, 0.075 + lift, 0.02);
     };
@@ -263,16 +267,24 @@
         turnedZ(plate(IVORY, 0), a));
       for (const x of [-0.021, 0.021]) {
         caps.push(turnedZ(moved(sphere(0.003, COPPER), x, 0.103, 0.037), a));
-        capDetails.push(turnedZ(bevelBox({ w: 0.003, h: 0.001, d: 0.001, bevel: 0.0002,
-          color: GRAPHITE, offset: { x, y: 0.105, z: 0.039 } }), a));
+        capDetails.push(turnedZ(bevelBox({
+          w: 0.003, h: 0.001, d: 0.001, bevel: 0.0002,
+          color: GRAPHITE, offset: { x, y: 0.105, z: 0.039 }
+        }), a));
       }
-      for (let j = 0; j < 3; j++) capDetails.push(turnedZ(bevelBox({ w: 0.011, h: 0.0015, d: 0.002,
-        bevel: 0.0005, color: GRAPHITE, offset: { x: (j - 1) * 0.014, y: 0.087, z: 0.044 } }), a));
-      capDetails.push(turnedZ(bevelBox({ w: 0.027, h: 0.003, d: 0.002, bevel: 0.001,
-        color: "#ffc16b", emissive: 0.35, offset: { y: 0.074, z: 0.047 } }), a));
+      for (let j = 0; j < 3; j++) capDetails.push(turnedZ(bevelBox({
+        w: 0.011, h: 0.0015, d: 0.002,
+        bevel: 0.0005, color: GRAPHITE, offset: { x: (j - 1) * 0.014, y: 0.087, z: 0.044 }
+      }), a));
+      capDetails.push(turnedZ(bevelBox({
+        w: 0.027, h: 0.003, d: 0.002, bevel: 0.001,
+        color: "#ffc16b", emissive: 0.35, offset: { y: 0.074, z: 0.047 }
+      }), a));
     }
-    for (let i = 0; i < 24; i += light ? 4 : 1) irisMarks.push(turnedZ(bevelBox({ w: 0.0015, h: 0.013, d: 0.002,
-      bevel: 0.0004, color: COPPER, offset: { y: 0.055, z: 0.106 } }), i * TAU / 24));
+    for (let i = 0; i < 24; i += light ? 4 : 1) irisMarks.push(turnedZ(bevelBox({
+      w: 0.0015, h: 0.013, d: 0.002,
+      bevel: 0.0004, color: COPPER, offset: { y: 0.055, z: 0.106 }
+    }), i * TAU / 24));
     // Overlapping tapered vanes resolve the iris as a mechanism, with dark seams between its warm blades.
     for (let i = 0; i < 18; i++) blades.push(moved(turnedZ(prism([
       [-0.002, 0.027], [0.004, 0.03], [0.008, 0.041], [-0.002, 0.043]
@@ -282,20 +294,20 @@
       moved(forwardLathe(torus(0.05, 0.0015, "#efc48a", 0, light ? 12 : fine ? 320 : 64, light ? 4 : fine ? 16 : 8)), 0, 0, 0.11),
       forwardLathe(torus(0.103, 0.002, "#171c23", 0, light ? 12 : fine ? 320 : 64, light ? 4 : fine ? 16 : 8)),
       moved(forwardLathe(turn([[0.033, 0], [0.033, 0.006], [0.026, 0.01], [0.026, 0],
-        [0.033, 0]], light ? 12 : fine ? 320 : 64, GRAPHITE)), 0, 0, 0.112)
+      [0.033, 0]], light ? 12 : fine ? 320 : 64, GRAPHITE)), 0, 0, 0.112)
     ]);
     const glints = shaded([moved(sphere(0.0035, "#fff4ce"), -0.009, 0.009, 0.121),
-      moved(sphere(0.0014, "#c3d9e7"), 0.01, -0.006, 0.12)]);
+    moved(sphere(0.0014, "#c3d9e7"), 0.01, -0.006, 0.12)]);
 
     const rings = RINGS.map((ring) => {
       const r = ring.radius, round = [], marks = [];
       const band = (inner, outer, depth, color, emissive = 0) => {
         const bevel = Math.min(0.0008, depth * 0.4, (outer - inner) * 0.2);
         return forwardLathe(turn(light ? [[inner, -depth], [outer, -depth], [outer, depth], [inner, depth], [inner, -depth]] : [
-        [inner + bevel, -depth], [outer - bevel, -depth], [outer, -depth + bevel],
-        [outer, depth - bevel], [outer - bevel, depth], [inner + bevel, depth],
-        [inner, depth - bevel], [inner, -depth + bevel], [inner + bevel, -depth]
-      ], ringSegments, color, emissive));
+          [inner + bevel, -depth], [outer - bevel, -depth], [outer, -depth + bevel],
+          [outer, depth - bevel], [outer - bevel, depth], [inner + bevel, depth],
+          [inner, depth - bevel], [inner, -depth + bevel], [inner + bevel, -depth]
+        ], ringSegments, color, emissive));
       };
       // Copper binds the inner edge; the outer rail glows Bitcoin orange. Four slots pierce the wood.
       round.push(band(r - 0.012, r - 0.008, 0.01, COPPER), band(r + 0.008, r + 0.012, 0.01, "#f7931a", 1));
@@ -320,34 +332,51 @@
       for (let i = 0; i < 48; i += light ? 4 : 1) {
         if (i % 12 === 0) continue;
         const a = i * TAU / 48;
-        marks.push(turnedZ(bevelBox({ w: 0.001, h: i % 4 ? 0.005 : 0.008, d: 0.0008,
-          bevel: 0.0002, color: "#523622", offset: { y: r, z: 0.0085 } }), a));
+        marks.push(turnedZ(bevelBox({
+          w: 0.001, h: i % 4 ? 0.005 : 0.008, d: 0.0008,
+          bevel: 0.0002, color: "#523622", offset: { y: r, z: 0.0085 }
+        }), a));
         if (i % 4 === 2) {
           for (const z of [-0.0085, 0.0085]) {
-            marks.push(turnedZ(bevelBox({ w: 0.007, h: 0.006, d: 0.0008, bevel: 0.0005,
-              color: "#50311e", offset: { y: r, z } }), a));
-            marks.push(turnedZ(bevelBox({ w: 0.005, h: 0.004, d: 0.0008, bevel: 0.0005,
-              color: COPPER, offset: { y: r, z: z * 1.08 } }), a));
+            marks.push(turnedZ(bevelBox({
+              w: 0.007, h: 0.006, d: 0.0008, bevel: 0.0005,
+              color: "#50311e", offset: { y: r, z }
+            }), a));
+            marks.push(turnedZ(bevelBox({
+              w: 0.005, h: 0.004, d: 0.0008, bevel: 0.0005,
+              color: COPPER, offset: { y: r, z: z * 1.08 }
+            }), a));
           }
         }
         if (i % 12 === 6) round.push(turnedZ(moved(sphere(0.0018, COPPER), 0, r, 0.01), a));
       }
       if (fine) for (let i = 0; i < 192; i++) {
         const a = i * TAU / 192;
-        marks.push(turnedZ(bevelBox({ w: 0.00035, h: 0.0025, d: 0.0004,
-          bevel: 0.0001, color: COPPER, offset: { y: r - 0.005, z: 0.0087 } }), a));
+        marks.push(turnedZ(bevelBox({
+          w: 0.00035, h: 0.0025, d: 0.0004,
+          bevel: 0.0001, color: COPPER, offset: { y: r - 0.005, z: 0.0087 }
+        }), a));
       }
       return shaded(round, marks);
     });
-    return { core, lens, iris, pupil, housing, glints, blades: shaded([], blades),
-      armor: shaded(caps, capDetails), irisMarks: shaded([], irisMarks), rings };
+    return {
+      core, lens, iris, pupil, housing, glints, blades: shaded([], blades),
+      armor: shaded(caps, capDetails), irisMarks: shaded([], irisMarks), rings
+    };
   };
   const MESHES = cached(() => buildMeshes(false)), FINE_MESHES = cached(() => buildMeshes(true)), LIGHT_MESHES = cached(() => buildMeshes(false, true));
-  // Her beam, a glowing tube a metre long down +z that a visit stretches and turns from her eye to where it lands; the
-  // glint where it lands; the sparks a working beam throws; the motes she trails in flight.
+  // Her beam, a glowing ribbon a metre long down +z and a metre across, that a visit stretches from her eye to where
+  // it lands and rolls about its length to face the camera: a white-hot middle in gold, amber at its edges, every band
+  // emissive so the bloom haloes it in its own colour. Both faces, so it shows on Canvas 2D too. The glint where it
+  // lands; the sparks a working beam throws; the motes she trails in flight.
+  const BEAM_BANDS = [[-0.5, -0.3, "#ff8a1f"], [-0.3, -0.12, "#ffc860"], [-0.12, 0.12, "#fffaf0"], [0.12, 0.3, "#ffc860"], [0.3, 0.5, "#ff8a1f"]];
   const BEAM = cached(() => {
-    const g = forwardLathe(turn([[0, 0], [0.5, 0], [0.5, 1], [0, 1]], 8, "#ffb54a", 1));
-    g.lines.length = 0; g.castShadow = false;
+    const g = { verts: [], faces: [], lines: [], castShadow: false };
+    for (const [a, b, color] of BEAM_BANDS) {
+      const o = g.verts.length / 3, rgb = hexToRgb(color);
+      g.verts.push(a, 0, 0, a, 0, 1, b, 0, 1, b, 0, 0);
+      g.faces.push({ i: [o, o + 1, o + 2, o + 3], color: rgb, emissive: 1 }, { i: [o + 3, o + 2, o + 1, o], color: rgb, emissive: 1 });
+    }
     return g;
   });
   const GLINT = cached(() => {
@@ -357,27 +386,14 @@
   });
   const SPARKS = cached(() => ["#ffc83a", "#ff8a1f", "#fff2b8"].map((c) => models.particleGeometry(c, 0.05, 1)));
   const MOTE = cached(() => models.particleGeometry("#ffb347", 0.04, 1));
+  // Beams she can point at once, one to each of a few things side by side.
+  const BEAMS = 4;
   // Her sparks and motes at once, at most: a working beam keeps about 13 in the air and a fast flight about 10.
   const FLECKS = 24;
-  // The shared bubble is single-line. Bake a guide's lines into short speech beats once, keeping the full lines for
-  // voice.
-  const beats = (lines) => {
-    const speech = {};
-    for (const id in lines) {
-      const out = [], words = lines[id].split(" ");
-      let beat = "";
-      for (const word of words) {
-        if (beat && beat.length + word.length + 1 > 44) { out.push(beat); beat = ""; }
-        beat += (beat ? " " : "") + word;
-      }
-      if (beat) out.push(beat);
-      speech[id] = out;
-    }
-    return speech;
-  };
   // One Tess for a visit, under `parent`, picked as `kind`. The place she guides moves her through this rig: a flight
   // path she steers along (`clearPath`, `push`, `steer`, the last point following someone while `track`ed), her beam
-  // (`mode` 1 working, 2 pointing, landing on `aim`), whom she watches when she is not flying or beaming (`watching`
+  // (`mode` 1 working, 2 pointing, landing on `aim`, or split to each of up to BEAMS `aims` round the `aim` she
+  // faces), whom she watches when she is not flying or beaming (`watching`
   // and `watch`), and her moods: `calm` while she talks, `steady` while she keeps by someone, so she does not turn to
   // her flight. Outline registries walk past her, as she moves every frame.
   const create = ({ parent, input, fx, camera, kind, coarse, quality = () => "high" }) => {
@@ -387,7 +403,8 @@
       detailTiers = fineMeshes ? [meshes, fineMeshes, lightMeshes] : [lightMeshes], detailNodes = [], detailKeys = [], body = createNode(), hover = createNode(), head = createNode({ geometry: meshes.core });
     const iris = createNode({ geometry: meshes.iris }), pupil = createNode({ geometry: meshes.pupil });
     const optics = createNode(), blades = createNode({ geometry: meshes.blades });
-    const figure = { root: body, parts: { head: hover } }, rings = [], pivots = [], orientations = [], turnQ = quat.create();
+    // Her bubble stands over her eye, not the rings, whose top moves as they tumble.
+    const figure = { root: body, parts: { head } }, rings = [], pivots = [], orientations = [], turnQ = quat.create();
     const tumbles = Float64Array.from(RINGS, (_, i) => i * 2.1);
     let greetingT = 0, speakingT = 0, lookYaw = 0, lookPitch = 0, tempo = 1, flare = 0, trailT = 0, sparkT = 0, litGain = 1, shown = 0;
     body.sightHidden = true;
@@ -410,10 +427,29 @@
       if (node.geometry === meshes[key]) registerDetail(node, key);
     for (const node of optics.children) if (node.geometry === meshes.glints) registerDetail(node, "glints");
     let detailed = false, selectedTier = meshes, priming = fineMeshes ? 2 : 0;
-    // The beam lives in the scene's frame, not hers: it runs from her eye to wherever it lands.
-    const beam = createNode({ geometry: BEAM(), visible: false, sightHidden: true });
-    const glint = createNode({ geometry: GLINT(), visible: false, sightHidden: true });
-    addChild(parent, body); addChild(parent, beam); addChild(parent, glint);
+    // Her beams live in the scene's frame, not hers: each runs from her eye to wherever it lands, a glint there.
+    const beams = [], glints = [];
+    for (let i = 0; i < BEAMS; i++) {
+      beams.push(createNode({ geometry: BEAM(), visible: false, sightHidden: true }));
+      glints.push(createNode({ geometry: GLINT(), visible: false, sightHidden: true }));
+    }
+    addChild(parent, body, ...beams, ...glints);
+    // Beam `i` from her eye at (ex, ey, ez) to (x, y, z), rolled so the ribbon's face turns to the camera: its width
+    // square to the beam and the view.
+    const lay = (i, ex, ey, ez, x, y, z, width, glow, size) => {
+      const beam = beams[i], glint = glints[i], dx = x - ex, dy = y - ey, dz = z - ez;
+      const by = Math.atan2(dx, dz), bx = -Math.atan2(dy, Math.hypot(dx, dz));
+      beam.position.x = ex; beam.position.y = ey; beam.position.z = ez;
+      beam.rotation.y = by; beam.rotation.x = bx;
+      if (camera) {
+        const vx = camera.position.x - ex, vy = camera.position.y - ey, vz = camera.position.z - ez, sx = Math.sin(bx);
+        beam.rotation.z = Math.atan2(-(Math.cos(by) * vx - Math.sin(by) * vz), Math.sin(by) * sx * vx + Math.cos(bx) * vy + Math.cos(by) * sx * vz);
+      }
+      beam.scale.x = width; beam.scale.z = Math.hypot(dx, dy, dz); beam.glow = glow;
+      glint.position.x = x; glint.position.y = y; glint.position.z = z;
+      glint.scale.x = glint.scale.y = glint.scale.z = size;
+      beam.visible = glint.visible = true;
+    };
     // Her sparks and motes come from her own pool, made with her, never the scene's particles: the place's node count
     // stays the same while she works, and its bursts never wait on hers. The ring reuses the one thrown longest ago.
     const flecks = [];
@@ -457,7 +493,7 @@
     };
     const rig = {
       root: body, figure, position, vel,
-      mode: 0, aim: { x: 0, y: 0, z: 0 }, calm: false, steady: false, watching: false, watch: { x: 0, y: 0, z: 0 },
+      mode: 0, aim: { x: 0, y: 0, z: 0 }, aims: null, calm: false, steady: false, watching: false, watch: { x: 0, y: 0, z: 0 },
       clearPath(speed, corner) { pathCount = pathAt = 0; pathSpeed = speed; pathCorner = corner; tracking = false; },
       push(x, y, z) { const o = pathCount++ * 3; path[o] = x; path[o + 1] = y; path[o + 2] = z; },
       // The last point follows someone: she never settles on it, and `steer` never reports arriving.
@@ -482,7 +518,14 @@
         vel.x = vel.y = vel.z = 0; pathAt = pathCount;
         return true;
       },
-      say(text) { speakingT = 1.2; fx.say(figure, text, 8); },
+      // A line in her bubble, through the shared speech: a long one goes a bubble at a time, on its own or on `next`.
+      // `hold` keeps the last up until she says another or is `hush`ed.
+      say(text, hold = false) { speakingT = 1.2; fx.say(figure, text, 8, hold); },
+      next() { return fx.next(figure); },
+      get more() { return fx.more(figure); },
+      get said() { return fx.said(figure); },
+      get speech() { return fx.speech(figure); },
+      hush() { fx.hush(figure); },
       // A greeting's tilt of the eye, and the rings' flare when she notices someone.
       nod() { greetingT = 1.4; },
       flare() { flare = 1; },
@@ -540,6 +583,7 @@
 
         // The beam, once she faces where it lands: a working one is bright, throws sparks and carries her light onto
         // what she works; a pointing one is thin and soft. Her own show only: it never touches what it lands on.
+        let laid = 0;
         if (mode) {
           const yaw = body.rotation.y, pitch = head.rotation.x, cp = Math.cos(pitch);
           const fx0 = Math.sin(yaw) * cp, fy0 = -Math.sin(pitch), fz0 = Math.cos(yaw) * cp;
@@ -547,13 +591,10 @@
           const dx = aim.x - ex, dy = aim.y - ey, dz = aim.z - ez, length = Math.hypot(dx, dy, dz);
           if ((fx0 * dx + fy0 * dy + fz0 * dz) / length < 0.95) mode = 0;
           else {
-            beam.position.x = ex; beam.position.y = ey; beam.position.z = ez;
-            beam.rotation.y = Math.atan2(dx, dz); beam.rotation.x = -Math.atan2(dy, Math.hypot(dx, dz));
-            const width = mode === 1 ? 0.03 + Math.sin(elapsed * 37) * 0.006 : 0.012;
-            beam.scale.x = beam.scale.y = width; beam.scale.z = length;
-            beam.glow = mode === 1 ? 1.2 + Math.sin(elapsed * 23) * 0.2 : 0.55;
-            glint.position.x = aim.x; glint.position.y = aim.y; glint.position.z = aim.z;
-            glint.scale.x = glint.scale.y = glint.scale.z = mode === 1 ? 0.14 + Math.sin(elapsed * 29) * 0.03 : 0.06;
+            const width = mode === 1 ? 0.07 + Math.sin(elapsed * 37) * 0.012 : 0.05, glow = mode === 1 ? 1.2 + Math.sin(elapsed * 23) * 0.2 : 0.85;
+            const size = mode === 1 ? 0.14 + Math.sin(elapsed * 29) * 0.03 : 0.06, aims = mode === 2 ? rig.aims : null;
+            if (aims) for (let i = 0; i < aims.length && i < BEAMS; i++) lay(laid++, ex, ey, ez, aims[i].x, aims[i].y, aims[i].z, width, glow, size);
+            else lay(laid++, ex, ey, ez, aim.x, aim.y, aim.z, width, glow, size);
             lit.x = aim.x - dx / length * 0.4; lit.y = aim.y - dy / length * 0.4; lit.z = aim.z - dz / length * 0.4;
             litGain = 0.85 + Math.sin(elapsed * 31) * 0.15;
             if (mode === 1 && (sparkT -= dt) <= 0) {
@@ -564,7 +605,7 @@
             }
           }
         }
-        beam.visible = glint.visible = mode > 0;
+        for (let i = laid; i < BEAMS; i++) beams[i].visible = glints[i].visible = false;
         shown = mode;
         // A faint trail of motes behind her in flight.
         if (speed > 1.6 && (trailT -= dt) <= 0) {
@@ -597,11 +638,12 @@
       },
       dispose() {
         input.remove(head);
-        removeChild(parent, body); removeChild(parent, beam); removeChild(parent, glint);
+        removeChild(parent, body);
+        for (let i = 0; i < BEAMS; i++) { removeChild(parent, beams[i]); removeChild(parent, glints[i]); }
         for (let i = 0; i < FLECKS; i++) removeChild(parent, flecks[i].node);
       }
     };
     return rig;
   };
-  BL.tess = { create, beats, HEIGHT, SCALE, RADIUS };
+  BL.tess = { create, HEIGHT, SCALE, RADIUS };
 })();

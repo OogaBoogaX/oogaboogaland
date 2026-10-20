@@ -429,10 +429,12 @@
   };
   let positionDebugNext = 0, positionDebugJSON = "", positionDebugState = "";
   function createPositionPose() {
-    return { version: 1, character: "", mode: "detached", closeWanted: false, combat: false, birdsEyeNorthUp: false, position: [0, 0, 0], target: [0, 0, -1], direction: [0, 0, -1], up: [0, 1, 0], fov: 48 * Math.PI / 180,
+    return {
+      version: 1, character: "", mode: "detached", closeWanted: false, combat: false, birdsEyeNorthUp: false, position: [0, 0, 0], target: [0, 0, -1], direction: [0, 0, -1], up: [0, 1, 0], fov: 48 * Math.PI / 180,
       actor: [0, 0, 0], body: [0, 0, 0], head: [0, 0, 0], bodyQuaternion: [0, 0, 0, 1], headQuaternion: [0, 0, 0, 1], bodyRolled: false, headRolled: false,
       orbit: [0, 0.62, 6, 0, 0, 0], headOffset: [0, 0, 0], headOrbit: false, shoulderSide: 0.6, closeMix: 0, ads: 0,
-      selectedSlot: 1, ammo: 30, unlimited: false, magazines: [0, 0], magazineCount: 0, aimYaw: 0, aimPitch: 0, jetpack: false, fuel: 1, hop: 0, hopV: 0, lift: 0 };
+      selectedSlot: 1, ammo: 30, unlimited: false, magazines: [0, 0], magazineCount: 0, aimYaw: 0, aimPitch: 0, jetpack: false, fuel: 1, hop: 0, hopV: 0, lift: 0
+    };
   }
   function readPositionPose(value) {
     if (!value || value.length > 8192) return null;
@@ -537,7 +539,7 @@
       url.searchParams.set("pose", positionDebugJSON);
     }
     const value = url.href;
-    if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(value).catch(() => {});
+    if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(value).catch(() => { });
     else {
       const field = document.createElement("textarea");
       field.value = value;
@@ -734,8 +736,10 @@
   const buildCaveRain = (slot, m, group, caveIndex) => {
     // Falling ceiling glyphs belong to the upper caves only.
     // HQ keeps surface glyphs through both ramp systems and floors, with no airborne rain batches.
-    if (slot.status === "headquarters") return { streams: [], nodes: [], perGlyphCapacity: 0, capacity: 0, bufferBytes: 0,
-      spacing: MATRIX_RAIN_GAP, activeGlyphCount: 0, brightTipCount: 0, updates: 0, densityRankLimit: 0 };
+    if (slot.status === "headquarters") return {
+      streams: [], nodes: [], perGlyphCapacity: 0, capacity: 0, bufferBytes: 0,
+      spacing: MATRIX_RAIN_GAP, activeGlyphCount: 0, brightTipCount: 0, updates: 0, densityRankLimit: 0
+    };
     const canvas = renderer.kind === "canvas2d", limit = canvas ? 18 : 48, trainLength = canvas ? 9 : 14;
     const cr = Math.cos(m.ry), sr = Math.sin(m.ry), rand = mulberry32(fnv1a(`${slot.id}:rain`));
     const streams = [], nodes = [], obstacles = [], column = { caveIndex: 0, floor: 0, ceiling: 0 };
@@ -778,17 +782,21 @@
       }
       const seed = fnv1a(`${slot.id}:rain:${streams.length}`), yaw = m.ry + (rand() - 0.5) * 0.18;
       const period = maxY - minY + (trainLength - 1) * MATRIX_RAIN_GAP;
-      streams.push({ x, z, minY, maxY, yaw, cr: Math.cos(yaw), sr: Math.sin(yaw), period, trainLength, seed,
+      streams.push({
+        x, z, minY, maxY, yaw, cr: Math.cos(yaw), sr: Math.sin(yaw), period, trainLength, seed,
         speed: MATRIX_STREAM_SPEED_MIN + rand() * MATRIX_STREAM_SPEED_RANGE, phase: rand() * period, brightness: 0.62 + rand() * 0.32,
-        rank: canvas ? 0 : streams.length % 8, distance: matrixTravelDistance(x, z, caveIndex), blocked });
+        rank: canvas ? 0 : streams.length % 8, distance: matrixTravelDistance(x, z, caveIndex), blocked
+      });
     }
     const perGlyphCapacity = streams.length * Math.ceil(trainLength / MATRIX_TYPES);
     for (let glyph = 0; glyph < MATRIX_TYPES; glyph++) {
       const node = createNode({ geometry: { ...hubModels.matrixGlyph(glyph), matrixCave: caveIndex }, instanceData: new Float32Array(perGlyphCapacity * 20), instanceCount: 0, drawInstanceCount: 0, instanceVersion: 0, fixedInstanceCapacity: true });
       addChild(root, node); placed.push(node); nodes.push(node);
     }
-    return { streams, nodes, perGlyphCapacity, capacity: perGlyphCapacity * MATRIX_TYPES, bufferBytes: perGlyphCapacity * MATRIX_TYPES * 80,
-      spacing: MATRIX_RAIN_GAP, activeGlyphCount: 0, brightTipCount: 0, updates: 0, densityRankLimit: 0 };
+    return {
+      streams, nodes, perGlyphCapacity, capacity: perGlyphCapacity * MATRIX_TYPES, bufferBytes: perGlyphCapacity * MATRIX_TYPES * 80,
+      spacing: MATRIX_RAIN_GAP, activeGlyphCount: 0, brightTipCount: 0, updates: 0, densityRankLimit: 0
+    };
   };
   // The Matrix curtain in the gate's opening, `half` either side of its middle and up to just under `top`.
   const buildGateRain = (gate, half, top) => {
@@ -799,18 +807,22 @@
       const x = gate.position.x + lerp(-half, half, (column + 0.5) / columns);
       const z = gate.position.z + (depths === 1 ? 0 : depth ? 0.18 : -0.18);
       const seed = fnv1a(`old-gate:rain:${streams.length}`), period = maxY - minY + (trainLength - 1) * MATRIX_RAIN_GAP;
-      streams.push({ x, z, minY, maxY, yaw: 0, cr: 1, sr: 0, period, trainLength, seed,
+      streams.push({
+        x, z, minY, maxY, yaw: 0, cr: 1, sr: 0, period, trainLength, seed,
         speed: MATRIX_STREAM_SPEED_MIN + rand() * MATRIX_STREAM_SPEED_RANGE, phase: rand() * period, brightness: 0.62 + rand() * 0.32,
-        rank: canvas ? 0 : streams.length % 8, distance: matrixTravelDistance(x, z), blocked: [] });
+        rank: canvas ? 0 : streams.length % 8, distance: matrixTravelDistance(x, z), blocked: []
+      });
     }
     const perGlyphCapacity = streams.length * Math.ceil(trainLength / MATRIX_TYPES);
     for (let glyph = 0; glyph < MATRIX_TYPES; glyph++) {
       const node = createNode({ geometry: { ...hubModels.matrixGlyph(glyph) }, instanceData: new Float32Array(perGlyphCapacity * 20), instanceCount: 0, drawInstanceCount: 0, instanceVersion: 0, fixedInstanceCapacity: true });
       addChild(root, node); placed.push(node); nodes.push(node);
     }
-    return { streams, nodes, perGlyphCapacity, capacity: perGlyphCapacity * MATRIX_TYPES, bufferBytes: perGlyphCapacity * MATRIX_TYPES * 80,
+    return {
+      streams, nodes, perGlyphCapacity, capacity: perGlyphCapacity * MATRIX_TYPES, bufferBytes: perGlyphCapacity * MATRIX_TYPES * 80,
       spacing: MATRIX_RAIN_GAP, activeGlyphCount: 0, brightTipCount: 0, updates: 0, densityRankLimit: 0,
-      minX: gate.position.x - half, maxX: gate.position.x + half, minY, maxY, minZ: gate.position.z - 0.18, maxZ: gate.position.z + 0.18 };
+      minX: gate.position.x - half, maxX: gate.position.x + half, minY, maxY, minZ: gate.position.z - 0.18, maxZ: gate.position.z + 0.18
+    };
   };
   const updateCaveRain = (rain, elapsed, visible, densityRankLimit, permanent = false) => {
     rain.activeGlyphCount = rain.brightTipCount = 0;
@@ -1791,9 +1803,11 @@
   };
   const THEME_ICON = (slot) => slot.id === "c1" ? "favicon" : THEMES[slot.theme]?.icon || null;
   const trackCaveSign = (node, slot, mouth) => {
-    signDetails.push({ node, solid: node.geometry, pixels: hubModels.caveSign(slot.name, THEME_ICON(slot), true, true),
+    signDetails.push({
+      node, solid: node.geometry, pixels: hubModels.caveSign(slot.name, THEME_ICON(slot), true, true),
       x: mouth.x + Math.sin(mouth.ry) * node.position.z, y: mouth.floorY + node.position.y,
-      z: mouth.z + Math.cos(mouth.ry) * node.position.z });
+      z: mouth.z + Math.cos(mouth.ry) * node.position.z
+    });
   };
   const addCaveSignTarget = (node, slot, mouth) => {
     const repo = slot.repo || slot.link;
@@ -1903,8 +1917,10 @@
     const arcs = parts.arcs.map((geometry) => part(coil, geometry, 0, 0, 0, true));
     const needle = rig.gauge ? part(frame(rig.gauge), parts.needle, parts.pivot[0] * U, parts.pivot[1] * U, parts.pivot[2] * U, false) : null;
     const sr = Math.sin(m.ry), cr = Math.cos(m.ry), p = coil.position;
-    coilCharge = { bands, crown, arcs, needle, lamp: null, level: 0, fired: false, start: COIL.lead, cool: COIL_RUN * (1 + 2 * Math.random()),
-      x: m.x + cr * p.x + sr * p.z, y: m.floorY + p.y + parts.crownY * U, z: m.z - sr * p.x + cr * p.z };
+    coilCharge = {
+      bands, crown, arcs, needle, lamp: null, level: 0, fired: false, start: COIL.lead, cool: COIL_RUN * (1 + 2 * Math.random()),
+      x: m.x + cr * p.x + sr * p.z, y: m.floorY + p.y + parts.crownY * U, z: m.z - sr * p.x + cr * p.z
+    };
   };
   const updateCoilCharge = (elapsed) => {
     const c = coilCharge;
@@ -2109,8 +2125,10 @@
       const pickNode = createNode({ geometry: PICK_GEOMETRY });
       const owner = { kind: "piece", piece: "lanternPost", variant: 0, node: pickNode, x: 0, y: 0, z: 0, next: 0, weaponType: "none" };
       addTarget(pickNode, owner, { radius: Math.max(0.35, pick[5]) });
-      pilePosts.push({ degrees, node, claim: claim(Infinity, Infinity, 0.7), lamp,
-        light: [light[0], light[1], light[2]], pick: { node: pickNode, owner, offset: [pick[2], pick[3], pick[4]] } });
+      pilePosts.push({
+        degrees, node, claim: claim(Infinity, Infinity, 0.7), lamp,
+        light: [light[0], light[1], light[2]], pick: { node: pickNode, owner, offset: [pick[2], pick[3], pick[4]] }
+      });
     }
     movePilePosts();
   };
@@ -2329,8 +2347,10 @@
       }
       boxes.push(box);
     }
-    climbMasonry.push({ node, x: mouth.x, y, z: mouth.z, sr, cr, offsetZ: node.position.z,
-      boxes, minX, minY, minZ, maxX, maxY, maxZ });
+    climbMasonry.push({
+      node, x: mouth.x, y, z: mouth.z, sr, cr, offsetZ: node.position.z,
+      boxes, minX, minY, minZ, maxX, maxY, maxZ
+    });
   };
   const buildMouth = (slot, m) => {
     const ax = Math.sin(m.ry), az = Math.cos(m.ry);
@@ -2383,9 +2403,11 @@
         addTarget(display.node, { kind: "lab-link", priority: 2, weaponType: "none" });
       }
       const sr = Math.sin(m.ry), cr = Math.cos(m.ry);
-      const stations = lab.stations.map((station) => ({ ...station,
+      const stations = lab.stations.map((station) => ({
+        ...station,
         x: m.x + cr * station.x + sr * station.z, y: m.floorY + (station.y || 0),
-        z: m.z - sr * station.x + cr * station.z, heading: m.ry + station.heading }));
+        z: m.z - sr * station.x + cr * station.z, heading: m.ry + station.heading
+      }));
       for (const item of lab.equipment) {
         const p = item.pickup, x = p.x, z = p.z;
         p.x = m.x + cr * x + sr * z; p.y += m.floorY; p.z = m.z - sr * x + cr * z;
@@ -2406,8 +2428,10 @@
         const shaft = createNode({ position: { x: tube.x, y: base - m.floorY, z: tube.z }, geometry: BL.factoryModels.outletShaft(base - island.roofOpening.bottom) });
         addChild(group, shaft); solids.add(shaft);
       }
-      factoryMouth = { slot, mouth: m, group, opening: rim.geometry.openingBounds, phase: null,
-        deliverySource: { x: tx, y: base + tube.height, z: tz } };
+      factoryMouth = {
+        slot, mouth: m, group, opening: rim.geometry.openingBounds, phase: null,
+        deliverySource: { x: tx, y: base + tube.height, z: tz }
+      };
     } else if (slot.status === "open" && slot.place === "bca") {
       // B.C.A.'s office behind its veil: two desks, their chairs, abacuses and screens, shelves and the firm's plaque.
       const office = BL.bcaModels.office(m);
@@ -2544,11 +2568,12 @@
       addChild(root, node);
       placed.push(node);
       const side = dimensions.width / 2 + 0.5;
-      mattresses.push({ roomIndex: i, basement: level === basement, corner: "rear-left", room: cave, node, ...geometry.mattress,
+      mattresses.push({
+        roomIndex: i, basement: level === basement, corner: "rear-left", room: cave, node, ...geometry.mattress,
         x: node.position.x, y: cave.floor, z: node.position.z, sr: -sx, cr: cx, sleeper: null, sleep: dimensions,
         window: island.headquarters.windows.find((window) => window.kind === "room" && window.roomIndex === i && window.basement === (level === basement)), sightFrame: -1, sightVisible: false,
         collisionBoxes: new Float64Array([-dimensions.width / 2, 0, -dimensions.depth / 2, dimensions.width / 2, dimensions.surface, dimensions.depth / 2,
-          -0.45, dimensions.surface, dimensions.pillowZ - 0.25, 0.45, dimensions.pillowTop, dimensions.pillowZ + 0.25]),
+        -0.45, dimensions.surface, dimensions.pillowZ - 0.25, 0.45, dimensions.pillowTop, dimensions.pillowZ + 0.25]),
         walkAt: { x: node.position.x + cx * side, y: cave.floor, z: node.position.z + sx * side }
       });
     }
@@ -2572,8 +2597,12 @@
       const fitted = (distance, geometry) => {
         const half = Math.min(0.35, distance * 0.3), point = at(distance), from = at(distance - half), to = at(distance + half);
         const tx = to.x - from.x, ty = to.y - from.y, tz = to.z - from.z, horizontal = Math.hypot(tx, tz) || 1;
-        return { point, node: createNode({ position: { x: point.x, y: point.y + 0.035, z: point.z }, rotation: { x: Math.atan2(-ty, horizontal), y: Math.atan2(tx, tz), z: 0 },
-          scale: { x: 0.72, y: 0.72, z: 0.72 }, geometry, visible: false, depthBias: 0.35 }) };
+        return {
+          point, node: createNode({
+            position: { x: point.x, y: point.y + 0.035, z: point.z }, rotation: { x: Math.atan2(-ty, horizontal), y: Math.atan2(tx, tz), z: 0 },
+            scale: { x: 0.72, y: 0.72, z: 0.72 }, geometry, visible: false, depthBias: 0.35
+          })
+        };
       };
       const labelDistance = Math.min(0.85, ramp.length * 0.12), arrowDistance = Math.min(1.85, ramp.length * 0.24);
       const labelMark = fitted(labelDistance, null);
@@ -2749,9 +2778,11 @@
     addProp("poolbridge", site.bridge, worldX(0, place.bridgeLocalZ + S.span / 2), worldZ(0, place.bridgeLocalZ + S.span / 2), S.width);
     addLamp(site.bridge, LAMP.lantern, worldX(0, place.bridgeLocalZ), place.y + 3.4, worldZ(0, place.bridgeLocalZ), false, 0, "poolbridge:lanterns").nightOnly = true;
     atNode("poolsign", site.sign, site.sign.geometry.signWidth * 0.55);
-    signDetails.push({ node: site.sign, solid: site.sign.geometry, pixels: hubModels.caveSign("Mempool Rainforest", null, true),
+    signDetails.push({
+      node: site.sign, solid: site.sign.geometry, pixels: hubModels.caveSign("Mempool Rainforest", null, true),
       x: worldX(site.sign.position.x, site.sign.position.z), y: place.y + site.sign.position.y,
-      z: worldZ(site.sign.position.x, site.sign.position.z) });
+      z: worldZ(site.sign.position.x, site.sign.position.z)
+    });
     // Centre the board across the pool on the bridge's axis, facing the crossing with trees behind it.
     // Its face and lettering stay curved around the pool's centre at this same radius.
     const B = P.CHAIN_BOARD, boardBearing = Math.PI;
@@ -2910,7 +2941,7 @@
     const rand = mulberry32(4242);
     const geometryFor = (kind) => kind === "canopy" ? P.CANOPY[(rand() * P.CANOPY.length) | 0]()
       : kind === "bush" ? P.shrub() : kind === "poolfern" ? P.fern() : kind === "flower" ? P.flowers()
-      : kind === "poolrock" ? P.mossRock() : P.log();
+        : kind === "poolrock" ? P.mossRock() : P.log();
     const inner = L.RING.lowland * L.RING.lowland, outer = (S.isletR + 0.8) * (S.isletR + 0.8), trunks = [];
     const level = (x, z, reach, ground) => L.groundAt(x + reach, z) === ground && L.groundAt(x - reach, z) === ground && L.groundAt(x, z + reach) === ground && L.groundAt(x, z - reach) === ground;
     // Planted, not scattered: trees at the back corners of every nest and behind it, so each clearing lies under
@@ -2974,8 +3005,10 @@
     // seed leaves the established trunks, animal perches and small forest scatter where they were.
     const foliageRand = mulberry32(6417), undergrowth = P.UNDERGROWTH.map((build) => build()), thickets = [];
     const plantThicket = (geometry, x, ground, z, width, height, turn) => {
-      const node = createNode({ position: { x, y: ground, z }, rotation: { x: 0, y: turn, z: 0 },
-        scale: { x: width, y: height, z: width }, geometry, sightHidden: true });
+      const node = createNode({
+        position: { x, y: ground, z }, rotation: { x: 0, y: turn, z: 0 },
+        scale: { x: width, y: height, z: width }, geometry, sightHidden: true
+      });
       addChild(site.node, node);
       atNode("bush", node, geometry.plantRadius * width);
       thickets.push({ x, y: ground, z, r: geometry.plantRadius * width, h: geometry.plantHeight * height });
@@ -3273,7 +3306,7 @@
     // The arch at the head of Bifröst comes on right after the gate, its sparks at a tower's lantern; its light is its own
     // lamp, ranked after the fire's.
     const c = site.cloud, court = site.arrival, at = [[p.x, p.floorY + 2, p.z], [court.x, court.y + 1.5, court.z], [court.x, court.y + 1.5, court.z],
-      [(c.head.x + c.end.x) / 2, c.y + 1.6, (c.head.z + c.end.z) / 2], [c.head.x, c.y + 1.6, c.head.z]];
+    [(c.head.x + c.end.x) / 2, c.y + 1.6, (c.head.z + c.end.z) / 2], [c.head.x, c.y + 1.6, c.head.z]];
     site.lamps.forEach((node, i) => {
       const lamp = addLamp(node, LAMP.lantern, at[i][0], at[i][1], at[i][2], false, i);
       if (i === 1 || i === 3 || i === 4) lamp.nightOnly = true;
@@ -3836,7 +3869,7 @@
     const rand = mulberry32(SEED + 5), count = Math.max(WANDER_COUNT, contributors.activeRoster.length * 2);
     for (let n = 0, tries = 0; n < count && tries < 1500; tries++) {
       const { x, z } = polar(rand() * 360, Math.sqrt(lerp(WANDER_INNER * WANDER_INNER, MEADOW_OUTER * MEADOW_OUTER, rand())));
-        if (island.surfaceAt(x, z) !== 0 || nearMouth(x, z, 3) || npcClosedCaveAt(x, z) || !free(x, z, 0.9)) continue;
+      if (island.surfaceAt(x, z) !== 0 || nearMouth(x, z, 3) || npcClosedCaveAt(x, z) || !free(x, z, 0.9)) continue;
       spots.push({ x, z, ry: NaN });
       n++;
     }
@@ -4247,9 +4280,11 @@
       && y >= column.floor - STEP_MAX && y < column.ceiling) return false;
     return !(island.cavityAt(p.x, p.z, column, 0, y) && y >= column.floor - STEP_MAX && y < column.ceiling);
   };
-  const RAGE_WARP_MOTION = { lab: false, rage: true, workExit: true, supportOffset: 0, supportEntry: null,
+  const RAGE_WARP_MOTION = {
+    lab: false, rage: true, workExit: true, supportOffset: 0, supportEntry: null,
     dragging: true, throwProgress: 0, walkGait: "gallop", walkPhase: NaN,
-    groundRects: { flat: {}, angled: {} } };
+    groundRects: { flat: {}, angled: {} }
+  };
   let rageWarpInitial = false, rageWarpGripChecked = false, rageWarpGripClear = false;
   const rageWarpTransitionClear = (entry, x, y, z, nx, ny, nz, radius, height, actors, riders, toRadius, toHeight) => {
     if (!clankerWalkTransitionClear(entry, x, y, z, nx, ny, nz, radius, height, actors, riders, toRadius, toHeight)) return false;
@@ -4660,7 +4695,7 @@
       rec.safeX, rec.safeY + 0.025, rec.safeZ, p.x, handY + 0.025, p.z, PLAYER_RADIUS, cave.bodyHeight)
       : captureSegmentClear(entry, cave, rec.safeX, rec.safeY + 0.025, rec.safeZ,
         rec.safeX, returnY, rec.safeZ, PLAYER_RADIUS, cave.bodyHeight) && captureSegmentClear(entry, cave,
-        rec.safeX, returnY, rec.safeZ, p.x, returnY, p.z, PLAYER_RADIUS, cave.bodyHeight));
+          rec.safeX, returnY, rec.safeZ, p.x, returnY, p.z, PLAYER_RADIUS, cave.bodyHeight));
     if (!capturePoseClear(entry, cave, rec, endpointOnly)) { rec.blocked = "body"; return false; }
     if (!releaseClear) { rec.blocked = "return"; return false; }
     rec.blocked = "";
@@ -5027,7 +5062,7 @@
     document.body.appendChild(field);
     field.select();
     let copied = false;
-    try { copied = document.execCommand("copy"); } catch (_) {}
+    try { copied = document.execCommand("copy"); } catch (_) { }
     field.remove();
     return copied;
   };
@@ -5840,14 +5875,18 @@
         }
         let centerTop = -Infinity;
         for (let j = 0; j < tops.length; j += 5) if (tops[j] <= 0 && tops[j + 2] >= 0 && tops[j + 1] <= 0 && tops[j + 3] >= 0) centerTop = Math.max(centerTop, tops[j + 4]);
-        surface = { tops: new Float64Array(tops), bounds: new Float64Array(bounds), centerTop,
-          fullBounds: new Float64Array([...full.min, ...full.max]) };
+        surface = {
+          tops: new Float64Array(tops), bounds: new Float64Array(bounds), centerTop,
+          fullBounds: new Float64Array([...full.min, ...full.max])
+        };
         surfaces.set(node.geometry, surface);
       }
-      const cloud = { node, speed: 0.4 + rand() * 0.4, beside, tops: surface.tops, bounds: surface.bounds,
+      const cloud = {
+        node, speed: 0.4 + rand() * 0.4, beside, tops: surface.tops, bounds: surface.bounds,
         fullBounds: surface.fullBounds, centerTop: surface.centerTop, dx: 0, dz: 0, wrapped: false,
         goalSide: 0, goalY: 0, planTimer: i / CLOUD_COUNT, bestTime: 0, bestCost: 0, bestSide: 0, bestY: 0,
-        age: 0, life: 0, size: 1, stalled: 0, blocked: 0 };
+        age: 0, life: 0, size: 1, stalled: 0, blocked: 0
+      };
       placeCloud(cloud, true);
       cloud.planTimer = i / CLOUD_COUNT;
       addChild(root, node);
@@ -6146,7 +6185,7 @@
     const age = s.at ? Math.round((Date.now() - s.at) / 1000) : 0;
     return !s.height ? "Waiting for Bitcoin data."
       : s.live ? `Block ${s.height} is the latest. Rain follows new transactions arriving in vB/s; the mempool holds the transactions still waiting, in MvB. A new block can shrink that queue after the next backlog update. Fees affect which transactions are likely to get in first.`
-      : `Last updated ${age > 90 ? `${Math.round(age / 60)} minutes` : `${age} seconds`} ago. These numbers may be out of date until the feed responds again.`;
+        : `Last updated ${age > 90 ? `${Math.round(age / 60)} minutes` : `${age} seconds`} ago. These numbers may be out of date until the feed responds again.`;
   };
   const rowPage = (i, caption, under, note, detailLabel = null) => ({
     caption,
@@ -6781,8 +6820,10 @@
       if (!node.geometry?.faces.length || node.instanceData || node.cameraHidden || node.smokeOpacity === 0 || seen.has(node)) return;
       for (let parent = node.parent; parent; parent = parent.parent) if (parent.smokeOpacity === 0) return;
       seen.add(node);
-      const pickNode = mutable ? createNode({ parent: node,
-        geometry: { ...node.geometry, faces: node.geometry.faces.slice() } }) : node;
+      const pickNode = mutable ? createNode({
+        parent: node,
+        geometry: { ...node.geometry, faces: node.geometry.faces.slice() }
+      }) : node;
       picks.push({ node: pickNode, owner: { terrain }, radius: 0 });
     };
     add(debugMovementTerrain, true);
@@ -8744,8 +8785,8 @@
     if (net.body) return rec.zone === net.zone;
     return BL.remotePlayers.onIsland(rec.zone);
   };
-  const drawExtra = (ctx2d, project, drawBubble) => {
-    crew.drawQuotes(ctx2d, project, drawBubble);
+  const drawExtra = (ctx2d, project) => {
+    crew.drawDrops(ctx2d, project);
     remotes.drawNames(ctx2d, project);
     breakables.drawOverlay(ctx2d);
     if (debugSelectedGorilla) {
@@ -9102,7 +9143,7 @@
     let near = false;
     for (const other of clankers.list) if (other !== entry && other.active
       && Math.hypot(other.root.position.x - nx, other.root.position.z - nz)
-        < 2 * (entry.root.scale.x + other.root.scale.x) + Math.hypot(nx - x, nz - z)) { near = true; break; }
+      < 2 * (entry.root.scale.x + other.root.scale.x) + Math.hypot(nx - x, nz - z)) { near = true; break; }
     if (!near && !(entry.capture?.cave && entry.capture.autonomous)) return true;
     const from = CLANKER_PEER_FROM, g = entry.gorilla, copy = from.gorilla;
     from.x = x; from.y = y; from.z = z; from.heading = heading;
@@ -9423,7 +9464,7 @@
       const a = (i + 1) % 3, b = (i + 2) % 3, c = (j + 1) % 3, d = (j + 2) % 3;
       if (Math.abs(local[b] * rotation[a * 3 + j] - local[a] * rotation[b * 3 + j])
         > extent[a] * absolute[b * 3 + j] + extent[b] * absolute[a * 3 + j]
-          + half[c] * absolute[i * 3 + d] + half[d] * absolute[i * 3 + c]) return false;
+        + half[c] * absolute[i * 3 + d] + half[d] * absolute[i * 3 + c]) return false;
     }
     return true;
   };
@@ -9722,8 +9763,10 @@
     }
     return along >= 3.25;
   };
-  const CLANKER_REST_SLOPE = { supportEntry: null, lab: false,
-    groundRects: { flat: {}, angled: { walkable: false, uneven: Infinity, groundX: 0, groundZ: 0 } } };
+  const CLANKER_REST_SLOPE = {
+    supportEntry: null, lab: false,
+    groundRects: { flat: {}, angled: { walkable: false, uneven: Infinity, groundX: 0, groundZ: 0 } }
+  };
   const clankerRestSiteClear = (entry, x, y, z, heading) => {
     if (!clankerFireClear(entry, x, y, z, x, y, z, heading, heading)) return false;
     const slope = CLANKER_REST_SLOPE, angled = slope.groundRects.angled;
@@ -10017,7 +10060,7 @@
   const rageMappedLand = land => land === 1 || land === 2 || land === 5;
   const rageExteriorFloor = (land, x, z) => land === 1 ? island.surfaceAt(x, z)
     : land === 2 ? mempoolIsland.place.y + mempoolIsland.layout.groundAt(mempoolIsland.localX(x, z), mempoolIsland.localZ(x, z))
-    : land === 3 ? timechainIsland.place.y : land === 4 ? bifrostIsle.site.groundAt(x, z) : -Infinity;
+      : land === 3 ? timechainIsland.place.y : land === 4 ? bifrostIsle.site.groundAt(x, z) : -Infinity;
   const RAGE_EDGE_RAYS = 48, RAGE_EDGE_NEAR = 1.2;
   const RAGE_EDGE_INSETS = [4.5, 8, 12, 16];
   const RAGE_HOME_RADII = [14, 12, 10, 8];
@@ -10027,8 +10070,10 @@
   const RAGE_MAP_BOTTOM = 0.75, RAGE_MAP_TOP = 5.5;
   // Fixed meadow, rainforest and bridge launch pads. Clearance is baked once
   // per visit, in shared slices, before any gorilla chooses its nearest pad.
-  const rageThrowMap = { spots: [], ready: false, cursor: 0, step: 0, validCount: 0,
-    frameChecks: 0, maxFrameChecks: 0, liveProofs: 0, x: 0, y: 0, z: 0, outside: false };
+  const rageThrowMap = {
+    spots: [], ready: false, cursor: 0, step: 0, validCount: 0,
+    frameChecks: 0, maxFrameChecks: 0, liveProofs: 0, x: 0, y: 0, z: 0, outside: false
+  };
   const resetRageThrowMap = (build = true) => {
     const map = rageThrowMap;
     map.spots.length = 0; map.ready = !build; map.cursor = map.step = map.validCount = 0;
@@ -10038,9 +10083,11 @@
       const angle = ray * Math.PI * 2 / RAGE_MAP_RAYS, dx = Math.sin(angle), dz = Math.cos(angle);
       for (let inset = 0; inset < RAGE_HOME_RADII.length; inset++) {
         const radius = RAGE_HOME_RADII[inset];
-        map.spots.push({ ray, inset, land: 1, x: dx * radius, y: 0, z: dz * radius, dx, dz,
+        map.spots.push({
+          ray, inset, land: 1, x: dx * radius, y: 0, z: dz * radius, dx, dz,
           bottom: RAGE_MAP_BOTTOM,
-          edgeX: 0, edgeZ: 0, valid: false });
+          edgeX: 0, edgeZ: 0, valid: false
+        });
       }
     }
     const M = mempoolIsland, S = poolModels.SITE;
@@ -10049,9 +10096,11 @@
       const dx = sx * M.cos + sz * M.sin, dz = -sx * M.sin + sz * M.cos;
       for (let inset = 0; inset < RAGE_POOL_RADII.length; inset++) {
         const radius = RAGE_POOL_RADII[inset], lx = sx * radius, lz = sz * radius;
-        map.spots.push({ ray: RAGE_MAP_RAYS + ray, inset, land: 2,
+        map.spots.push({
+          ray: RAGE_MAP_RAYS + ray, inset, land: 2,
           x: M.worldX(lx, lz), y: M.place.y + M.layout.groundAt(lx, lz), z: M.worldZ(lx, lz), dx, dz,
-          bottom: RAGE_MAP_BOTTOM, edgeX: 0, edgeZ: 0, valid: false });
+          bottom: RAGE_MAP_BOTTOM, edgeX: 0, edgeZ: 0, valid: false
+        });
       }
     }
     for (let side = 0; side < 2; side++) {
@@ -10062,8 +10111,10 @@
         // The sagged deck rises within the stance footprint. Use its highest
         // supporting plank so the bake does not reject the floor itself.
         const y = solids.supportAt(x, z, M.place.y + 0.15, 0, BL.clankers.WALK_RADIUS);
-        map.spots.push({ ray: RAGE_MAP_RAYS + 12 + side, inset, land: 5, x, y, z,
-          dx: sign * M.cos, dz: -sign * M.sin, bottom: 1.15, edgeX: 0, edgeZ: 0, valid: false });
+        map.spots.push({
+          ray: RAGE_MAP_RAYS + 12 + side, inset, land: 5, x, y, z,
+          dx: sign * M.cos, dz: -sign * M.sin, bottom: 1.15, edgeX: 0, edgeZ: 0, valid: false
+        });
       }
     }
   };
@@ -10401,19 +10452,23 @@
     }
   };
   const registerClanker = (entry) => {
-    entry.capture = { entry, cave: null, autonomous: false, player: false, throwing: false, posed: false, aimed: false,
+    entry.capture = {
+      entry, cave: null, autonomous: false, player: false, throwing: false, posed: false, aimed: false,
       blocked: "", blockedPart: "", blockedStage: "", warpSpot: -1, warpVisit: false,
       warpAnkleX: 0, warpAnkleY: 0, warpAnkleZ: 0, warpFromX: 0, warpFromY: 0, warpFromZ: 0, warpFromHeading: 0,
       flightRadius: PLAYER_RADIUS, flightBottom: 0, flightTop: 0,
       time: 0, charge: 0, x: 0, z: 0, safeX: 0, safeY: 0, safeZ: 0, side: 0, behind: 0,
       aim: { ox: 0, oy: 0, oz: 0, dx: 0, dy: 0, dz: 0 },
-      bounds: new Float64Array(BODY_PARTS_SOLID.length * 6), nextBounds: new Float64Array(BODY_PARTS_SOLID.length * 6) };
+      bounds: new Float64Array(BODY_PARTS_SOLID.length * 6), nextBounds: new Float64Array(BODY_PARTS_SOLID.length * 6)
+    };
     clankerCaptures.push(entry.capture);
     entry.renderParts = [];
     entry.fireFX.spread = new Float32Array(CLANKER_BURN_PARTS.length);
     entry.fireFX.burning = false;
-    entry.combat = { left: math.mat4.create(), right: math.mat4.create(), hit: false, hitOwner: null, groundChecked: false,
-      serial: -1, lastHitAt: -Infinity, powerSpent: false };
+    entry.combat = {
+      left: math.mat4.create(), right: math.mat4.create(), hit: false, hitOwner: null, groundChecked: false,
+      serial: -1, lastHitAt: -Infinity, powerSpent: false
+    };
     const visit = (node, region = "body") => {
       if (node === entry.gorilla.parts.head) region = "head";
       if (node.geometry) {
@@ -10426,8 +10481,10 @@
     visit(entry.root);
     clankerMeshes.add(entry.root);
   };
-  const CLANKER_TALL_OBSTACLE = { node: null, minAlong: 0, maxAlong: 0, minAcross: 0, maxAcross: 0,
-    minContactAcross: 0, maxContactAcross: 0 };
+  const CLANKER_TALL_OBSTACLE = {
+    node: null, minAlong: 0, maxAlong: 0, minAcross: 0, maxAcross: 0,
+    minContactAcross: 0, maxContactAcross: 0
+  };
   const clankerTallObstacleAhead = (entry, dx, dz) => {
     const p = entry.root.position, step = BL.clankers.PROP_STEP, aboveStep = p.y + step + 0.02;
     return solids.shoulderAt(p.x, aboveStep, p.z, dx, dz, 0.025,
@@ -10462,8 +10519,12 @@
       // Side-wall pockets leave the doorway and rear shelves free. A build
       // grows only while its complete footprint is clear of the companions.
       const x = (side ? 1 : -1) * 2.25, z = -4.7;
-      const node = createNode({ geometry, visible: false, matrixLiving: true, position: { x: place.mouth.x + place.cr * x + place.sr * z,
-        y: place.mouth.floorY, z: place.mouth.z - place.sr * x + place.cr * z }, rotation: { x: 0, y: place.mouth.ry, z: 0 }, scale: { x: 0.65, y: 0.01, z: 0.65 } });
+      const node = createNode({
+        geometry, visible: false, matrixLiving: true, position: {
+          x: place.mouth.x + place.cr * x + place.sr * z,
+          y: place.mouth.floorY, z: place.mouth.z - place.sr * x + place.cr * z
+        }, rotation: { x: 0, y: place.mouth.ry, z: 0 }, scale: { x: 0.65, y: 0.01, z: 0.65 }
+      });
       addChild(root, node); solids.add(node);
       trackMirrorObject(node, 1.2);
       clankerEquipment.push({ node, site, radius, height: bounds.max[1] * 0.65, progress: 0 });
@@ -10620,7 +10681,7 @@
         || !island.clearAt(eye.x, eye.y - radius, eye.z, radius, radius * 2)
         || !entranceSegmentClear(eye.x, eye.y, eye.z, eye.x, eye.y, eye.z, radius)
         || cameraPoolNear(eye.x, eye.z)
-          && !mempoolIsland.boxClear(eye.x - radius, eye.y - radius, eye.z - radius, eye.x + radius, eye.y + radius, eye.z + radius);
+        && !mempoolIsland.boxClear(eye.x - radius, eye.y - radius, eye.z - radius, eye.x + radius, eye.y + radius, eye.z + radius);
     }
     if (player) {
       const p = player.root.position, aspect = renderer.size.width / Math.max(1, renderer.size.height);
@@ -10812,9 +10873,11 @@
     input = interactMod.create({ canvas: ctx.canvas, renderer, camera, hooks, preciseHover: true });
     presets = { pile: PILE_VIEW, gate: GATE_VIEW };
     pilot = pilotMod.create({ renderer, canvas: ctx.canvas, camera, hud, presets, landing: "pile", pitch: [PITCH_MIN, PITCH_MAX], dist: [DIST_MIN, DIST_MAX], follow: FOLLOW, fly: FLY, clampTarget, clampCamera, observeOrbit: position => clampCamera(position, 0), ceilingAt, birdsEyeMin: BIRDS_EYE_MIN, birdsEyeCeiling, releaseView: releaseCameraView, enterFreeView: enterFreeCameraView, coarse: COARSE, onFreeAction: freeAction, jetpackStatus: jetpackHudStatus, mayPossess: mayDriveOoga, close: { ...CLOSE_VIEW, maxStep: STEP_MAX, groundAt: playerSupportAt, visualGroundAt: visualSupportAt, sleepEyeFloorAt, cloudAt, zone: () => playerCaveIndex } });
-    chalkboard = BL.chalkboard.create({ renderer,
+    chalkboard = BL.chalkboard.create({
+      renderer,
       onOpen: () => { pilot.setActive(false); pilot.controls.reset(); input.reset(); hud.tooltip.hide(); },
-      onClose: () => { pilot.setActive(true); pilot.controls.reset(); input.reset(); } });
+      onClose: () => { pilot.setActive(true); pilot.controls.reset(); input.reset(); }
+    });
     terrainRampRoof = BL.terrainCutaway.createRampRoof(island.cutawaySource, island.geometry, renderer.releaseGeometry);
     debugMovementTerrain = place(terrainRampRoof.baseGeometry, 0, 0, 0, 0);
     addChild(root, terrainRampRoof.node);
@@ -10827,8 +10890,10 @@
       // Cave local -z points into the mountain. Include the entrance lintel
       // and a wall thickness around the authored room, leaving adjacent hills.
       const back = -room.to - 0.45, front = 1.15, center = (back + front) / 2;
-      const region = { id: mouth.id, x: mouth.x + sin * center, z: mouth.z + cos * center, cos, sin,
-        halfWidth: Math.max(room.w / 2, 2.5) + 0.45, halfDepth: (front - back) / 2, y: mouth.floorY + 2.85 };
+      const region = {
+        id: mouth.id, x: mouth.x + sin * center, z: mouth.z + cos * center, cos, sin,
+        halfWidth: Math.max(room.w / 2, 2.5) + 0.45, halfDepth: (front - back) / 2, y: mouth.floorY + 2.85
+      };
       addTerrainSection(island.cutawaySource, root, 0, region);
     }
     // The path geometry never changes after the island builds; reuse its tagged copy on every visit.
@@ -11109,8 +11174,10 @@
     bananaCover = BL.bananaCover.create({ overlay: ctx.overlay, pile, renderOpts: RENDER_OPTS, renderer, floor: ALTAR_HEIGHT, lightVisibleAt: bananaLightVisibleAt });
     headquarters.bananaCover = bananaCover;
     solids.sync();
-    shared.npcPaths = headquarters.npcPaths = BL.npcPaths.create({ island, walkable: npcWalkable, pointAllowed: (x, z) => !npcClosedCaveAt(x, z) && !npcRampRoofAt(x, island.surfaceAt(x, z), z),
-      surfaceAt: (x, z, y) => island.supportAt(x, z, y, 1e-6, null, PLAYER_RADIUS) });
+    shared.npcPaths = headquarters.npcPaths = BL.npcPaths.create({
+      island, walkable: npcWalkable, pointAllowed: (x, z) => !npcClosedCaveAt(x, z) && !npcRampRoofAt(x, island.surfaceAt(x, z), z),
+      surfaceAt: (x, z, y) => island.supportAt(x, z, y, 1e-6, null, PLAYER_RADIUS)
+    });
     const sleepNavigation = headquarters.sleepNavigation = BL.headquartersSleep.create({ island, beds: bedrolls, walkable: sleepRouteClear, surfaceRoute: shared.npcPaths.route });
     shared.outdoorBedrolls = headquarters.outdoorBeds = BL.headquartersSleep.outdoorBeds(mempoolIsland,
       (x, y, z) => physicalClearAt(x, y, z, 0.15, 1.5, null) && propSegmentClear(x, y, z, x, y, z, 0.15, 1.5, null));
@@ -11220,16 +11287,18 @@
     shared.outsideActors = () => remotes.actors();
     shared.outsideActorHeight = REMOTE_BODY_HEIGHT;
     crew = shared.crew = crewMod.create(shared);
-    remotes = BL.remotePlayers.create({ root, crew, visible: remoteShown,
+    remotes = BL.remotePlayers.create({
+      root, crew, visible: remoteShown,
       createGorilla: (name, rec) => clankers.createRemote(name, rec),
       hideGorilla: (name, on) => {
         if (on && clankerPlay && clankerPlay.player?.owner.traits.name === name) clankerPlay.release();
         clankers.setRemote(name, on);
       }, posed: (cave, feet) => {
-      const p = cave.root.position, height = cave.bodyHeight || 1.4;
-      floatPose(cave, feet, height, 0, now);
-      mempoolIsland.wake(cave.root, p.x, feet, p.z, height, 0.35);
-    } });
+        const p = cave.root.position, height = cave.bodyHeight || 1.4;
+        floatPose(cave, feet, height, 0, now);
+        mempoolIsland.wake(cave.root, p.x, feet, p.z, height, 0.35);
+      }
+    });
     // Signed-in pages keep the crew in step: one runs it for everyone, the others follow its frames. The
     // crew's effects, shots and work hooks pass through the sync, which notes them while this page hosts;
     // a following page replays them into the same effects and gorillas.
@@ -11282,13 +11351,15 @@
     mark("cavemen");
     crates = shared.crates = cratesMod.create(shared);
     pilot.bind(shared);
-    breakables = headquarters.breakables = BL.breakables.create({ root, input, renderer, fx, crew,
+    breakables = headquarters.breakables = BL.breakables.create({
+      root, input, renderer, fx, crew,
       collectReward: collectBreakableReward, deactivate: deactivateBreakable, relocate: relocateBreakable,
       onAmmoPickup: (added, remaining) => {
         pilot.showAct();
         hud.toast(remaining ? `+${added} ammo · ${remaining} left` : "Magazine collected");
       },
-      trackMirrorObject, untrackMirrorObject });
+      trackMirrorObject, untrackMirrorObject
+    });
     for (const owner of scenery) breakables.register(owner);
     clankerMeshes = BL.solidProps.create();
     clankerPartOwners = new WeakMap();
@@ -11300,10 +11371,14 @@
       const sr = Math.sin(mouth.ry), cr = Math.cos(mouth.ry);
       // Reserve cave interiors at every lower level, leaving the roof above
       // the room ceiling available. Working and controlled gorillas bypass it.
-      chillZones.push({ x: mouth.x, z: mouth.z, sr, cr, half: room.w / 2 + 0.6,
-        from: -room.to - 0.6, to: 0.5, top: mouth.floorY + room.h - 0.1 });
-      if (slot.status !== "dark") chillZones.push({ x: mouth.x, z: mouth.z, sr, cr,
-        half: 3.5, from: -0.5, to: 6.5, top: mouth.floorY + 2.6 });
+      chillZones.push({
+        x: mouth.x, z: mouth.z, sr, cr, half: room.w / 2 + 0.6,
+        from: -room.to - 0.6, to: 0.5, top: mouth.floorY + room.h - 0.1
+      });
+      if (slot.status !== "dark") chillZones.push({
+        x: mouth.x, z: mouth.z, sr, cr,
+        half: 3.5, from: -0.5, to: 6.5, top: mouth.floorY + 2.6
+      });
       const x = mouth.x - Math.sin(mouth.ry) * 4.8, z = mouth.z - Math.cos(mouth.ry) * 4.8;
       const y = island.surfaceAt(x, z);
       if (!Number.isFinite(y)) continue;
@@ -11326,11 +11401,14 @@
       const distance = Math.hypot(a.x - b.x, a.z - b.z);
       if (!active(a) || !active(b) || distance > 16) continue;
       const x = (a.x + b.x) * 0.5, z = (a.z + b.z) * 0.5, radius = Math.hypot(x, z);
-      chillZones.push({ x, z, sr: -x / radius, cr: -z / radius,
-        half: distance * 0.5 + 1.5, from: -2, to: 9, top: Infinity });
+      chillZones.push({
+        x, z, sr: -x / radius, cr: -z / radius,
+        half: distance * 0.5 + 1.5, from: -2, to: 9, top: Infinity
+      });
     }
     const labSiteIndex = shared.workSites.findIndex(site => site.mouth === entropyLab.mouth);
-    clankers = BL.clankers.create({ root, crew, sites: shared.workSites, loungeRoofs, loungeAreas, climbRoofs, chillZones, descentWalls,
+    clankers = BL.clankers.create({
+      root, crew, sites: shared.workSites, loungeRoofs, loungeAreas, climbRoofs, chillZones, descentWalls,
       rageLandAt, rageEdgeAt, rageEdgeHeading, rageEdgeGoal, rageApproach, rageWarpRequired, rageWarpTarget, rageWarpPose, rageWarpHome, rageGrab, rageCaptive, rageRelease, rageThrow, rageDragClear, rageCarryClear, rageCaptureEligible, rageJumpPoseClear,
       rageHuntRange: entry => entry.radius + BODY_RADIUS + 0.35,
       sleep: clankerBeds(),
@@ -11354,7 +11432,8 @@
       onPound: poundClankerEquipment,
       fireContact: clankerFireContact, fireReachable: shared.fireReachable, fireClear: clankerFireClear,
       canSmash: canClankerSmash, supportAt: clankerSupportAt, terrainSupportAt: clankerTerrainSupportAt,
-      track: (entry) => trackMirrorObject(entry.root, 3.6, 4248), untrack: (entry) => untrackMirrorObject(entry.root) });
+      track: (entry) => trackMirrorObject(entry.root, 3.6, 4248), untrack: (entry) => untrackMirrorObject(entry.root)
+    });
     shared.fireThreats = () => clankers.list;
     for (const entry of clankers.list) {
       entry.netBody = BL.net.gorillaBody(entry.owner.traits.name);
@@ -11362,7 +11441,8 @@
       registerClanker(entry);
     }
     resetRageThrowMap();
-    clankerPlay = BL.clankerPlay.create({ canvas: ctx.canvas, camera, pilot, hud, clankers, input, renderer, reticleTarget,
+    clankerPlay = BL.clankerPlay.create({
+      canvas: ctx.canvas, camera, pilot, hud, clankers, input, renderer, reticleTarget,
       grabOoga: grabClankerRider, releaseOoga: releaseClankerRider,
       mayPossess: entry => BL.net.mayDriveGorilla(entry.owner.traits.name),
       sightClear: shared.fireReachable, aimCeiling: entry => birdsEyeCeiling(entry, true), constrainCamera: constrainClankerCamera,
@@ -11373,7 +11453,8 @@
           mempoolIsland ? mempoolIsland.floatAt(x, z, y, 0, 0) : ABYSS_FLOOR);
         return floor > ABYSS_FLOOR ? floor : NaN;
       },
-      birdsEyeMin: GORILLA_BIRDS_EYE_MIN, maxDistance: DIST_MAX });
+      birdsEyeMin: GORILLA_BIRDS_EYE_MIN, maxDistance: DIST_MAX
+    });
     createClankerEquipment(shared.workSites);
     clankers.equipment = clankerEquipment;
     clankers.sites = shared.workSites;
@@ -11518,7 +11599,8 @@
     }
     hud.setStats(game.state);
     pile.syncPile(true);
-    pileGuides = headquarters.pileGuides = BL.pileGuides.create({ pile, altar,
+    pileGuides = headquarters.pileGuides = BL.pileGuides.create({
+      pile, altar,
       cameraClear: (ax, ay, az, bx, by, bz) => guideSegmentClear(ax, ay, az, bx, by, bz) && objectGuides.cameraClear(ax, ay, az, bx, by, bz, preparingGuideActor || controlledGuideActor(), pile.core),
       cameraBoundsState: (minX, minY, minZ, maxX, maxY, maxZ, propsOnly) => objectGuides.cameraBoundsState(minX, minY, minZ, maxX, maxY, maxZ, preparingGuideActor || controlledGuideActor(), pile.core, guideSegmentClear, propsOnly),
       occlusionVersion: () => objectGuides.result.occlusionVersion
@@ -11782,9 +11864,13 @@
     if (POSITION_DEBUG) updatePositionDebug(true);
     // Tess greets a newcomer once a page and shows them round; nothing she does starts while the island is busy. She
     // greets only a visit that lands on the island's own view, not one sent to a place or walked back out of a cave.
-    islandGuide = BL.hubGuide.create({ parent: root, input, fx, camera, pilot, visitor: () => crew.player, world, hud, coarse: COARSE,
+    islandGuide = BL.hubGuide.create({
+      parent: root, input, fx, camera, pilot, visitor: () => crew.player, world, hud, coarse: COARSE,
       landing: !ctx.place && !preloadedView && !returningCharacter && ctx.from !== "bifrost",
-      quality: () => renderer.quality, busy: () => chalkboard.openNow || clankerPlay.active || factoryDeparting || bifrostDeparting });
+      quality: () => renderer.quality, busy: () => chalkboard.openNow || clankerPlay.active || factoryDeparting || bifrostDeparting,
+      // What her beam sweeps across on the totems' line: their eyes, west to east.
+      targets: { totems: totems.map((t) => { const p = t.owner.node.position; return { x: p.x, y: p.y + t.eyeTop, z: p.z }; }).sort((a, b) => a.x - b.x) }
+    });
     hubScene.debug.tess = islandGuide;
     mark("visibility-start");
     fx.warmVisibility(crew);
