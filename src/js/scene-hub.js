@@ -169,7 +169,7 @@
   const NUDGES = [0, -2, 2, -4, 4, -6, 6, -8, 8];
   const PATH_GEOMETRY = new WeakMap();
   const CAVE_TERRAIN_LAYOUTS = new WeakMap();
-  const TIMECHAIN_NEAR = 25, TIMECHAIN_OUTER_PERIOD = 180;
+  const TIMECHAIN_OUTER_PERIOD = 180;
   const DRESSED = new WeakMap();
   const DRESSING_LAMPS = BL.dressing.LIGHT_RGB.map(([r, g, b]) => ({ r, g, b, radius: 5.5, glow: 0.9, hide: false }));
   const dressingLights = [];
@@ -183,7 +183,7 @@
   const DOCK_DEG = 75, LADDER_Z = -3.6, LADDER_LEAN = 0.65;
   const CLOUD_COUNT = 30, CLOUD_WRAP = 60, CLOUD_NEAR = 36;
   const CLOUD_GAP = 0.35, CLOUD_LOOK = 36, CLOUD_PLAN_STEP = 2;
-  const CLOUD_SIDE_RATE = 0.7, CLOUD_RISE_RATE = 0.55;
+  const CLOUD_SIDE_RATE = 0.7, CLOUD_RISE_RATE = 0.55, CLOUD_SUPPORT_EPSILON = 0.01;
   const CLOUD_FADE = 2.5, CLOUD_STALL = 1.5, CLOUD_NO_PROGRESS = 24, CLOUD_CLEAR_RUN = 8;
   const CLOUD_SIDE_OFFSETS = [0, -7, 7, -14, 14, -24, 24];
   const CLOUD_HEIGHT_OFFSETS = [0, -6, 6, -12, 12];
@@ -191,7 +191,7 @@
   const ALTAR_HEIGHT = 0.34, ALTAR_BLOCK_WIDTH = 0.2, ALTAR_BLOCK_ARC = 0.3, ALTAR_RING_GAP = 0.02, ALTAR_MAX_BLOCKS = 512;
   const RIPEN = 25, TREE_CHANCE = 0.5, BUSH_CHANCE = 0.25;
   const PROP_TIPS = { tree: "Tree · shake it", bush: "Bush · rustle it", rock: "Rock · hit to break", crate: "Box · hit to break", barrel: "Barrel · hit to break", flower: "Flowers", torch: "Torch · warm", firepit: "Fire pit", bedroll: "Somebody's bed", ladder: "Ladder · wobbly", dock: "Dock · creaky", magazine: "Spare magazine · walk into it to collect", poolbridge: "Vine bridge · to the Mempool island", poolsign: "Mempool Rainforest · the way down is through the hill", poolpainting: "Wall painting · tap to read it closely", chainsign: "The chain, at a glance · tap to read it", weathersign: "Reading the weather · tap for the key", poolrock: "Mossy rock", poolfern: "Fern · rustle it", poollog: "Fallen log · something lives in it", jaguar: "Jaguar · do not poke", monkey: "Monkey · it watches you", toucan: "Toucan · big beak", canopy: "Rainforest tree · shake it", jumbotron: "Oogatron · OogaBoogaX on the big screen · tap the screen for a close-up", palm: "Palm · shake it", bifrostbridge: "Bifröst · the bridge to ₿IFRÖST", bifrostgate: "₿IFRÖST · walk an Ooga through the field", heimdall: "Heimdall · keeper of the bridge", gate: null };
-  const RETICLE_PROPS = new Set(["tree", "bush", "rock", "crate", "barrel", "flower", "torch", "firepit", "totem", "ladder", "poolsign", "poolpainting", "chainsign", "weathersign", "poolfern", "poollog", "jaguar", "monkey", "toucan", "canopy", "jumbotron", "palm", "timechainentrance", "timechainboard", "timechainchair", "timechainbeer", "bifrostgate", "heimdall"]);
+  const RETICLE_PROPS = new Set(["tree", "bush", "rock", "crate", "barrel", "flower", "torch", "firepit", "totem", "ladder", "poolsign", "poolpainting", "chainsign", "weathersign", "poolfern", "poollog", "jaguar", "monkey", "toucan", "canopy", "jumbotron", "palm", "timechainentrance", "timechainkeypad", "bifrostgate", "heimdall"]);
   const workCave = (slot) => slot.repo && (slot.status === "open" || slot.status === "mirror");
   const MATRIX_LIVING_PROPS = new Set(["tree"]);
   const SOLID_PROPS = new Set(["tree", "rock", "crate", "barrel", "firepit", "dock", "jumbotron", "totem", "poolbridge", "poolrock", "canopy"]);
@@ -3248,29 +3248,27 @@
     // A mark of sleep is the Oogas' own, shown wherever it can be seen: it belongs to no Ooga's bed.
     return { slots, path, mark: (x, y, z) => fx.zzzAt(x, y, z, null) };
   };
+  // The Timechain Sphere off the southwest rim: the ball, its bridge and its doorway, whose keypad and crossing
+  // (timechain-gate.js) open its nine rooms, a scene of their own. Only the outside is the island's.
   const buildTimechainIsland = () => {
     const T = BL.timechainModels, site = T.build(island), p = site.place;
-    const cos = Math.cos(p.ry), sin = Math.sin(p.ry);
+    const cos = Math.cos(p.ry), sin = Math.sin(p.ry), worldX = (x, z) => p.x + x * cos + z * sin, worldZ = (x, z) => p.z - x * sin + z * cos;
     addChild(root, site.node);
     placed.push(site.node);
-    for (const node of [site.ground, site.shell, site.entrance, site.bridge, site.chair]) solids.add(node);
+    for (const node of [site.shell, site.entrance, site.bridge, site.plug]) solids.add(node);
     // Match the visible grass tiles, not the bounding sphere around the cliff.
-    for (const [kind, node, radius] of [["timechainentrance", site.entrance, 3], ["timechainbridge", site.bridge, 1.5], ["timechainchair", site.chair, 1.5]]) {
+    for (const [kind, node, radius] of [["timechainentrance", site.entrance, 3], ["timechainbridge", site.bridge, T.SITE.width / 2 + 0.2], ["timechainkeypad", site.keypad, 0.6]]) {
       const x = node.position.x, z = node.position.z;
-      addProp(kind, node, p.x + x * cos + z * sin, p.z - x * sin + z * cos, radius);
+      addProp(kind, node, worldX(x, z), worldZ(x, z), radius);
     }
-    presets.timechain = { yaw: p.ry, pitch: 0.03, dist: 3, target: { x: p.x, y: p.y + 4.4, z: p.z } };
+    for (const key of site.keys) addTarget(key.node, { kind: "sphere-key", key: key.key, priority: 2 }, { radius: key.key.length === 1 ? 0.055 : 0.09 });
+    // From the bridge, square to the doors with the keypad in view.
+    presets.timechain = { yaw: p.ry, pitch: 0.1, dist: 9, target: { x: worldX(0.6, 13.2), y: p.y + 2.2, z: worldZ(0.6, 13.2) } };
     const claimGround = () => {
       claim(p.x, p.z, T.SITE.radius + 1);
-      for (let r = p.approachFrom - 1; r <= p.rim; r += 1) claim(T.DIR.x * r, T.DIR.z * r, 2.4);
+      for (let r = p.approachFrom - 1; r <= p.rim; r += 1) claim(T.DIR.x * r, T.DIR.z * r, T.SITE.width / 2 + 0.9);
     };
-    const hangout = [[-2, -1], [-2, 2], [1, 1]].map(([x, z]) => ({ x: p.x + x * cos + z * sin, z: p.z - x * sin + z * cos, ry: p.ry }));
-    const x = site.chair.position.x, z = site.chair.position.z;
-    const seat = { x: p.x + x * cos + z * sin, z: p.z - x * sin + z * cos, angle: Math.PI, speed: 0, phase: 0, active: false };
-    const beer = BL.timechainBeer.create(site);
-    solids.add(beer.dispenser); solids.add(beer.cabinet); solids.add(beer.bin);
-    addProp("timechainbeer", beer.mug, site.chair.position.x - 0.95, site.chair.position.z, 0.3);
-    return { site, place: p, cos, sin, boards: null, seat, beer, claimGround, hangout, residentPlaced: false, show: T.show(site) };
+    return { site, place: p, cos, sin, worldX, worldZ, claimGround, show: T.show(site), gate: null, residentInside: false };
   };
   // ₿IFRÖST's arch dressed where its stone stands as the gate, off the outlines: its gold, vines and banners' rods and
   // marks, the banners' cloth, its lit name, runes and crystals, and its lanterns' glass, which comes back with the
@@ -3322,55 +3320,28 @@
     };
     return { site, group, claimGround, phase: null, window: null, heimdall: null, hum: 0 };
   };
-  // The Sphere's walls and their feed (six slow API calls, then polls, each repainting a wall) wait until the camera
-  // comes near, so a visit that never goes there never pays for them. They sit on the shell's inner face, which keeps
-  // its outline, so they stay out of the outline registry.
-  const addTimechainBoards = () => {
-    const T = timechainIsland, p = T.place, cos = Math.cos(p.ry), sin = Math.sin(p.ry);
-    const boards = BL.timechainBoards.create(T.site.node, renderer, () => { timechainVersion++; });
-    boards.entries.forEach((entry, index) => {
-      const node = entry.node, x = node.position.x, z = node.position.z;
-      node.sightHidden = entry.panel.sightHidden = true;
-      const owner = addProp("timechainboard", node, p.x + x * cos + z * sin, p.z - x * sin + z * cos, 15);
-      owner.boardIndex = index; owner.weaponType = "none"; owner.pickRay = ray => boards.pickScreen(ray, index);
-    });
-    T.boards = boards;
-  };
-  const spinTimechainChair = () => {
-    if (timechainIsland?.seat.active) timechainIsland.beer.act("spin", timechainIsland.seat);
-  };
-  const chugTimechainGlass = () => {
-    if (timechainIsland?.seat.active) timechainIsland.beer.act("chug", timechainIsland.seat);
-  };
-  const timechainResidentPose = (cave, dt) => {
+  // Sani lives in the Sphere's rooms, in his recliner (timechain-interior.js), so on the island he is inside its
+  // closed ball, out of sight, whatever his activity says. Driven, borrowed by someone else, away, or on a debug
+  // visit that sets states by hand, he comes back out, on the bridge before its doors.
+  const timechainResidentPose = (cave) => {
     if (!timechainIsland || cave.traits.name !== "SaniExp") return false;
-    const T = timechainIsland, s = T.seat, parts = cave.parts;
-    if (cave.state === "away" || cave === pilot?.player || contributors.debugState || contributors.debugRoster) {
-      T.beer.pause();
-      if (s.active) {
-        s.active = false; cave.root.rotation.x = cave.root.rotation.z = 0;
-        parts.legR.rotation.x = parts.legL.rotation.x = 0;
-        parts.armR.rotation.x = parts.armL.rotation.x = -0.2;
-        parts.head.rotation.x = 0;
+    const T = timechainIsland;
+    if (cave.state === "away" || cave === pilot?.player || cave.remoteControlled || contributors.debugState || contributors.debugRoster) {
+      if (T.residentInside) {
+        T.residentInside = false;
+        const W = BL.timechainModels.SPOTS.WAIT;
+        cave.root.position.x = T.worldX(W.x, W.z + 1.2); cave.root.position.z = T.worldZ(W.x, W.z + 1.2);
+        cave.root.position.y = T.place.y + cave.baseY;
+        cave.root.rotation.y = T.place.ry + Math.PI;
+        cave.root.visible = cave === pilot?.player || cave.state === "chilling" || cave.state === "working";
       }
       return false;
     }
-    const h = cave.traits.height;
-    s.active = true; s.phase = (s.phase + dt * 7) % (Math.PI * 2);
+    T.residentInside = true;
     cave.walk = null; cave.hop = cave.hopV = cave.cheer = cave.catchT = 0;
     cave.act.kind = "idle"; cave.act.until = Infinity;
-    cave.root.visible = true; cave.root.quaternion = null;
-    cave.root.position.x = s.x; cave.root.position.z = s.z; cave.root.position.y = T.place.y + 0.88 * h;
-    cave.root.rotation.x = -0.23; cave.root.rotation.z = 0; cave.root.rotation.y = T.place.ry + s.angle;
-    T.site.chair.scale.x = T.site.chair.scale.y = T.site.chair.scale.z = h;
-    parts.legR.rotation.x = parts.legL.rotation.x = -1.05;
-    parts.armR.quaternion = parts.armL.quaternion = null;
-    parts.armR.rotation.x = -0.95 + Math.sin(s.phase) * 0.035;
-    parts.armL.rotation.x = -0.95 - Math.sin(s.phase) * 0.035;
-    parts.armR.rotation.z = -0.12; parts.armL.rotation.z = 0.12;
-    parts.head.rotation.x = 0.28;
-    parts.club.visible = parts.gun.visible = parts.snack.visible = false;
-    T.beer.update(cave, s, dt);
+    cave.root.visible = false;
+    cave.root.position.x = T.place.x; cave.root.position.z = T.place.z; cave.root.position.y = T.place.y + cave.baseY;
     return true;
   };
   // Dock over the drop and ladder on the bluff
@@ -3895,21 +3866,6 @@
     return !npcRampRoofAt(s.x, feet, s.z) && !npcClosedCaveAt(s.x, s.z, feet, height) && !npcPileAt(s.x, feet, s.z, height) && !npcWorkZoneAt(cave, s.x, feet, s.z) && npcFireClear(s.x, feet, s.z, s.x, feet, s.z, height) && walkable(s.x, s.z, s.x, s.z, feet, height, cave);
   };
   const wanderSpot = (out, cave = null) => {
-    if (timechainIsland && cave?.traits.name === "SaniExp" && cave.override === "chilling" && !contributors.debugState && !contributors.debugRoster) {
-      const p = timechainIsland.place, pos = cave.root.position, dir = BL.timechainModels.DIR;
-      if (timechainIsland.residentPlaced && Math.hypot(pos.x - p.x, pos.z - p.z) > BL.timechainModels.SITE.radius - 2) {
-        const along = pos.x * dir.x + pos.z * dir.z, across = Math.abs(pos.x * dir.z - pos.z * dir.x);
-        const radius = along < p.approachFrom || across > 1 ? p.approachFrom - 0.5 : along < p.rim - 0.5 ? p.rim : Math.hypot(p.x, p.z) - p.bridgeZ + 1;
-        out.x = dir.x * radius; out.z = dir.z * radius; out.ry = p.ry + Math.PI;
-        out.sit = false;
-        return true;
-      }
-      const home = timechainIsland.hangout[cave.act.trips % timechainIsland.hangout.length];
-      timechainIsland.residentPlaced = true;
-      out.x = home.x; out.z = home.z; out.ry = home.ry;
-      out.sit = false;
-      return true;
-    }
     const chilling = cave?.state === "chilling";
     let s = (chilling && Math.random() < 0.6 || RENDER_OPTS.stars > NIGHT && Math.random() < FIRE_SEAT_CHANCE) ? freeSeat() : null;
     if (s && !npcWanderPointClear(s, cave)) s = null;
@@ -4961,8 +4917,12 @@
     const grounded = cave.hop === 0 && cave.hopV <= 0;
     const height = cave.bodyHeight + Math.max(0, cave.viewLift);
     if (previous && grounded && !previous.wrapped && previous.node.visible && previous.node.parent === root) {
-      const x = p.x + previous.dx, z = p.z + previous.dz, floor = Math.max(feet, cloudFloorAt(x, z, feet, STEP_MAX, height, cave));
-      if (flyable(p.x, p.z, x, z, feet, height, cave) && physicalClearAt(x, floor, z, PLAYER_RADIUS, height, cave) && island.voxelSegmentClearAt(p.x, feet, p.z, x, floor, z, PLAYER_RADIUS, height)) {
+      const x = p.x + previous.dx, z = p.z + previous.dz;
+      const floor = cloudFloorAt(x, z, feet, STEP_MAX, height, cave);
+      // A remembered cloud can now be above, below or beside the Ooga. Carry only when its same top surface still
+      // touches the feet; proximity elsewhere in the cloud must never add horizontal motion.
+      const onTop = cloudHit === previous && Math.abs(floor - feet) <= Math.abs(previous.dy) + CLOUD_SUPPORT_EPSILON;
+      if (onTop && flyable(p.x, p.z, x, z, feet, height, cave) && physicalClearAt(x, floor, z, PLAYER_RADIUS, height, cave) && island.voxelSegmentClearAt(p.x, feet, p.z, x, floor, z, PLAYER_RADIUS, height)) {
         p.x = x; p.z = z;
       }
     }
@@ -5842,7 +5802,7 @@
       cloud.life = lerp(55, 145, rand());
       cloud.size = initial ? 1 : 0.01;
       cloud.node.scale.x = cloud.node.scale.y = cloud.node.scale.z = cloud.size;
-      cloud.stalled = cloud.blocked = cloud.dx = cloud.dz = 0;
+      cloud.stalled = cloud.blocked = cloud.dx = cloud.dy = cloud.dz = 0;
       cloud.planTimer = 0;
       cloud.wrapped = !initial;
       return;
@@ -5883,7 +5843,7 @@
       }
       const cloud = {
         node, speed: 0.4 + rand() * 0.4, beside, tops: surface.tops, bounds: surface.bounds,
-        fullBounds: surface.fullBounds, centerTop: surface.centerTop, dx: 0, dz: 0, wrapped: false,
+        fullBounds: surface.fullBounds, centerTop: surface.centerTop, dx: 0, dy: 0, dz: 0, wrapped: false,
         goalSide: 0, goalY: 0, planTimer: i / CLOUD_COUNT, bestTime: 0, bestCost: 0, bestSide: 0, bestY: 0,
         age: 0, life: 0, size: 1, stalled: 0, blocked: 0
       };
@@ -5924,6 +5884,7 @@
       cloud.blocked = (cloud.beside ? p.z - z : p.x - x) < cloud.speed * dt * 0.25 ? cloud.blocked + dt : 0;
       if (cloud.stalled >= CLOUD_STALL || cloud.blocked >= CLOUD_NO_PROGRESS) { placeCloud(cloud); planCloud(cloud); continue; }
       cloud.dx = cloud.wrapped ? 0 : p.x - x;
+      cloud.dy = cloud.wrapped ? 0 : p.y - y;
       cloud.dz = cloud.wrapped ? 0 : p.z - z;
     }
   };
@@ -6285,7 +6246,7 @@
       case "tess":
         return COARSE ? `${BL.hubGuide.NAME} the guide · tap for a tour` : `${BL.hubGuide.NAME} the guide · click for a tour`;
       case "caveman":
-        return o.cave.traits.name === "SaniExp" && timechainIsland?.seat.active ? "Sani · tap to spin his chair" : o.cave.traits.display;
+        return o.cave.traits.display;
       case "clanker":
         return `🦍 ${o.entry.owner.traits.display}`;
       case "crate":
@@ -6302,14 +6263,14 @@
         return "Glyph gate · tap or press Space nearby to open";
       case "room-sign":
         return "Room sign · tap to copy hash";
+      case "sphere-key":
+        return o.key === "back" ? "Back · return to room choice" : o.key === "enter" ? "Enter · open selected room" : `Room ${o.key} · select`;
       case "lab-link":
         return "EntropyLab · open website in a new tab";
       case "prop":
-        if (o.prop === "timechainentrance") return "Timechain Sphere - enter the observatory";
+        if (o.prop === "timechainentrance") return "Timechain Sphere · nine rooms, chosen at the keypad";
         if (o.prop === "timechainbridge") return "Wooden bridge · to Timechain Sphere";
-        if (o.prop === "timechainboard") return "Timechain display · tap to expand";
-        if (o.prop === "timechainchair") return "Sani's recliner · tap to spin and spill the glass";
-        if (o.prop === "timechainbeer") return "500 ml beer · tap to chug";
+        if (o.prop === "timechainkeypad") return COARSE ? "Room keypad · walk up and tap to choose a room" : "Room keypad · walk up and press Space to choose a room";
         if (o.prop === "totem") return totemTip(o.totem);
         return PROP_TIPS[o.prop] || "";
       case "piece":
@@ -6380,7 +6341,7 @@
   };
   const reticleTarget = (hit) => {
     const o = hit.owner;
-    if (hit.node === mirrorCave.node || o.kind === "cave-sign" || o.kind === "room-sign" || o.kind === "matrix-button" || o.kind === "matrix-gate"
+    if (hit.node === mirrorCave.node || o.kind === "cave-sign" || o.kind === "room-sign" || o.kind === "sphere-key" || o.kind === "matrix-button" || o.kind === "matrix-gate"
       || o.kind === "lab-link" || o.kind === "piece") return "object";
     if (o.kind === "cave") return o.slot.status === "open" ? "object" : "none";
     if (o.kind === "prop" && (o.breakable || RETICLE_PROPS.has(o.prop))) return "object";
@@ -6505,8 +6466,16 @@
         navigate("timechain");
         break;
       case "timechainbridge":
-        hud.toast("Timechain Island · Sani's hangout. Walk across the wooden bridge.");
+        hud.toast("Timechain Island · walk across the wooden bridge to the Sphere's doors.");
         break;
+      case "timechainkeypad": {
+        const gate = timechainIsland.gate, player = pilot.player, at = player && player.root.position;
+        if (gate.busy) break;
+        if (!player) hud.toast("Only an Ooga can go in. Double-tap one, then walk it up to the keypad.");
+        else if (!gate.nearKeypad(at.x, at.y - player.baseY + 1.1, at.z)) hud.toast("Walk up to the keypad beside the doors.");
+        else gate.engage();
+        break;
+      }
       case "bifrostbridge":
         hud.toast("Bifröst hums underfoot. ₿IFRÖST is across.");
         break;
@@ -6515,15 +6484,6 @@
         break;
       case "heimdall":
         bifrostIsle.heimdall.poke();
-        break;
-      case "timechainboard":
-        openTimechainBoard(o.boardIndex);
-        break;
-      case "timechainchair":
-        spinTimechainChair();
-        break;
-      case "timechainbeer":
-        chugTimechainGlass();
         break;
       case "weathersign":
         openPoolBoard(weatherBoard);
@@ -6594,6 +6554,7 @@
       if (nearest) return nearest;
     }
     if (arcadeMouth && actionWithinReach(x, y, z, arcadeMouth.x, arcadeMouth.y, arcadeMouth.z, MOUTH_REACH)) return arcadeMouth;
+    if (player && timechainIsland.gate && timechainIsland.gate.nearKeypad(x, y, z)) return timechainIsland.gate.action;
     return null;
   };
   const useNearbyAction = (action) => {
@@ -6606,6 +6567,7 @@
       action.localOpen = action.open = action.raising = true;
       hud.toast("The glyph gate rises.");
     } else if (action === matrixControl) toggleMatrixControl();
+    else if (action === timechainIsland.gate.action) timechainIsland.gate.engage();
     else enterCave(action.slot);
   };
   const freeAction = () => {
@@ -6890,8 +6852,7 @@
         islandGuide.tap();
         break;
       case "caveman":
-        if (o.cave.traits.name === "SaniExp" && timechainIsland?.seat.active) spinTimechainChair();
-        else crew.pokeCave(o.cave);
+        crew.pokeCave(o.cave);
         break;
       case "piece":
         if (o.piece === "chalkboard") {
@@ -6922,6 +6883,16 @@
       case "room-sign":
         tapRoomSign(o.roomSign);
         break;
+      case "sphere-key": {
+        const gate = timechainIsland.gate, player = pilot.player, at = player && player.root.position;
+        if (!player) hud.toast("Only an Ooga can go in. Double-tap one, then walk it up to the keypad.");
+        else if (!gate.busy && !gate.nearKeypad(at.x, at.y - player.baseY + 1.1, at.z)) hud.toast("Walk up to the keypad beside the doors.");
+        else {
+          if (!gate.busy) gate.engage();
+          gate.press(o.key);
+        }
+        break;
+      }
       case "lab-link":
         window.open("https://entropylab.online", "_blank", "noopener,noreferrer");
         break;
@@ -7195,6 +7166,9 @@
         const label = matrixControl.pressed ? "push the lever up to turn off the Matrix" : "pull the lever down to turn on the Matrix";
         hud.hint(COARSE ? `Tap to ${label}` : `Press Space or tap to ${label}`);
         if (player) hud.setAct(matrixControl.pressed ? "PUSH UP" : "PULL DOWN");
+      } else if (action === timechainIsland.gate.action) {
+        hud.hint(COARSE ? "Tap USE KEYPAD to choose a room" : "Space · Use keypad to choose a room");
+        hud.setAct("USE KEYPAD");
       } else {
         hud.hint(COARSE ? "Tap ENTER ARCADE to go in" : "Press Space to enter Ooga Arcade");
         if (player) hud.setAct("ENTER ARCADE");
@@ -7361,7 +7335,7 @@
   const navigationClearAt = (x, y, z, radius, height) => {
     if (!physicalClearAt(x, y, z, radius, height)) return false;
     for (const prop of props) {
-      if (!prop.active || prop.prop === "gate" || prop.prop === "timechainboard" || prop.prop === "bifrostgate" || prop.prop === "bifrostbridge" || !prop.node.geometry) continue;
+      if (!prop.active || prop.prop === "gate" || prop.prop === "bifrostgate" || prop.prop === "bifrostbridge" || prop.prop === "timechainbridge" || !prop.node.geometry) continue;
       const b = BL.scene.boundsOf(prop.node.geometry), m = prop.node.world;
       const cx = (b.min[0] + b.max[0]) / 2, cy = (b.min[1] + b.max[1]) / 2, cz = (b.min[2] + b.max[2]) / 2;
       const hx = (b.max[0] - b.min[0]) / 2, hy = (b.max[1] - b.min[1]) / 2, hz = (b.max[2] - b.min[2]) / 2;
@@ -7407,13 +7381,13 @@
       pitch = player ? 0.06 : 0.16;
       dist = player ? 8 : 12;
     } else if (name === "timechain" && timechainIsland) {
-      const site = timechainIsland.place;
+      // On the bridge, square to the closed doors with the keypad in reach; a free view looks at them from further out.
+      const T = timechainIsland, site = T.place;
       yaw = site.ry;
-      // Arrive on the bridge side of the control console, not inside its buttons.
-      x = site.x + Math.sin(yaw) * 4.8; z = site.z + Math.cos(yaw) * 4.8;
-      setVec(target, site.x, site.y + 0.8, site.z);
-      pitch = player ? 0.2 : 0.08;
-      dist = player ? 6 : 10;
+      x = T.worldX(0.4, 15.4); z = T.worldZ(0.4, 15.4);
+      setVec(target, T.worldX(0.4, 12.7), site.y + 2.1, T.worldZ(0.4, 12.7));
+      pitch = player ? 0.1 : 0.06;
+      dist = player ? 5 : 9;
     } else if (name === "bifrost" && bifrostIsle) {
       // Down the stairs from ₿IFRÖST's gate: an Ooga walks on out toward the bridge and the island, seen from over the
       // gate's flight behind it (far enough back that the view keeps its pitch and clears the terraces); a free view looks
@@ -7447,7 +7421,7 @@
       else {
         p.x = x + Math.cos(yaw) * offset + Math.sin(yaw) * depth;
         p.z = z - Math.sin(yaw) * offset + Math.cos(yaw) * depth;
-        p.y = name === "timechain" ? timechainIsland.place.y : name === "mempool" ? mempoolIsland.place.y + mempoolIsland.layout.FLOOR : name === "bifrost" ? bifrostIsle.site.arrival.y : underground ? (basement ? island.headquarters.basement.floor : island.headquarters.floor) : island.surfaceAt(p.x, p.z);
+        p.y = name === "timechain" ? timechainIsland.place.y + BL.timechainModels.SITE.bridgeFloor : name === "mempool" ? mempoolIsland.place.y + mempoolIsland.layout.FLOOR : name === "bifrost" ? bifrostIsle.site.arrival.y : underground ? (basement ? island.headquarters.basement.floor : island.headquarters.floor) : island.surfaceAt(p.x, p.z);
       }
       if (name !== "timechain" && name !== "bifrost" && name !== "mempool" && !island.onLand(p.x, p.z)) continue;
       if (player) {
@@ -7538,7 +7512,7 @@
     const p = player ? player.root.position : pilot.closeWanted ? camera.position : pilot.orbit.target;
     const feet = p.y - (gorilla ? 0 : player ? player.baseY : pilot.closeWanted ? CLOSE_VIEW.eyeHeight : 0);
     let area = "HUB";
-    if (timechainIsland && Math.hypot(p.x - timechainIsland.place.x, p.z - timechainIsland.place.z) < BL.timechainModels.SITE.radius) area = "SPHERE";
+    if (timechainIsland && onSphere(p.x, p.z)) area = "SPHERE";
     else if (mempoolIsland && mempoolIsland.overAt(p.x, p.z)) area = mempoolIsland.coveredAt(p.x, feet + 0.5, p.z) ? "MEMPOOL" : "RAINFOREST";
     else {
       const hq = island.headquarters, y = feet + 0.08;
@@ -8154,23 +8128,6 @@
     if (first) hud.setSubtitle("an island of caves");
     if (!first) hud.toast(PHASE_TOASTS[next]);
   };
-  // The Timechain Sphere's walls in the shared board dialog: a page a wall, its source in the note.
-  let timechainVersion = 0;
-  const timechainBoard = {
-    title: "Timechain Sphere", help: "Six walls of chain data. Arrow keys flip the boards.", wide: true,
-    get canvas() { return timechainIsland.boards.entries[timechainIsland.boards.index].canvas; },
-    get count() { return BL.timechainData.TITLES.length; }, get index() { return timechainIsland.boards.index; },
-    get caption() { return BL.timechainData.TITLES[timechainIsland.boards.index]; },
-    // The wall already shows the reading; the note only says where it comes from.
-    get note() { return `Source: ${timechainIsland.boards.data[timechainIsland.boards.index].source}`; },
-    get version() { return timechainVersion; },
-    go: (i) => timechainIsland.boards.select(i)
-  };
-  const openTimechainBoard = (index) => {
-    timechainIsland.boards.select(index);
-    timechainVersion++;
-    hud.openBoard(timechainBoard);
-  };
   // The jumbotron's close-up in the shared board dialog, read straight off the board as it pages and repaints.
   const jumbotronBoard = {
     title: "Oogatron", help: "OogaBoogaX on the big screen. Arrow keys flip the boards.", note: "", floating: true,
@@ -8387,7 +8344,6 @@
     if (lawn && lawn.version !== island.path.version) layLawn();
     if (life) { life.gulls.update(elapsed); life.shore.update(elapsed); life.boats.update(elapsed); }
     now = elapsed;
-    if (timechainIsland && !timechainIsland.boards && Math.hypot(camera.position.x - timechainIsland.place.x, camera.position.z - timechainIsland.place.z) < BL.timechainModels.SITE.radius + TIMECHAIN_NEAR) addTimechainBoards();
     hour = clock.read();
     // The ephemeris turns the sun 0.0042 deg/s of island time (a 6e-4-hour budget is 2.16 s and misses no
     // pixel), so it resamples only when an input drifts; a fast debug clock misses the budget every frame,
@@ -8512,12 +8468,9 @@
     updateClankerEffects(dt);
     if (timechainIsland) {
       timechainIsland.site.turn((elapsed % TIMECHAIN_OUTER_PERIOD) * Math.PI * 2 / TIMECHAIN_OUTER_PERIOD);
-      const s = timechainIsland.seat, decay = Math.exp(-1.15 * dt);
-      s.angle = (s.angle + s.speed * (1 - decay) / 1.15) % (Math.PI * 2);
-      s.speed *= decay;
-      if (s.speed < 0.005) s.speed = 0;
-      timechainIsland.site.swivel.rotation.y = s.angle;
       timechainIsland.show(dt);
+      // The doorway's walks steer the Ooga before the crew moves it.
+      timechainIsland.gate.update(dt);
     }
     crew.update(dt, elapsed);
     for (let i = 0; i < crew.list.length; i++) {
@@ -8588,6 +8541,8 @@
     if (chalkboard.openNow) { /* Keep the exact camera and controlled actor pose until the board closes. */ }
     else if (clankerPlay.active) clankerPlay.update(dt);
     else pilot.update(dt);
+    // The doorway's views (the keypad's, the swoop into the eyes and back out) take over from the pilot's.
+    timechainIsland.gate.view(dt);
     // Tess moves after the view is set, so a tour's glide has the last word on it.
     islandGuide.update(dt, elapsed);
     for (let i = 0; i < signDetails.length; i++) {
@@ -8625,6 +8580,8 @@
   const selectOoga = (cave) => {
     if (!cave || crew.cavemen.get(cave.traits.name) !== cave) { hud.toast("That Ooga is not available here"); return false; }
     if (cave === pilot.player) return true;
+    // The Timechain Sphere's doorway holds its Ooga from the keypad until it is through.
+    if (timechainIsland.gate && timechainIsland.gate.busy) { hud.toast("Finish at the Timechain Sphere's doors first"); return false; }
     const refusal = mayDriveOoga(cave);
     if (refusal) { hud.toast(refusal); return false; }
     if (cave.remoteControlled) { hud.toast(`Someone is already driving ${cave.traits.display}`); return false; }
@@ -11351,6 +11308,19 @@
     mark("cavemen");
     crates = shared.crates = cratesMod.create(shared);
     pilot.bind(shared);
+    // The doorway draws the island once from inside the passage for the way back out (`renderView`), sets the
+    // sphere's heartbeat going while a room readies slowly (`show`), and hands a crossing the island's own meshes to
+    // keep on the GPU while the visit lasts (`keep`).
+    const keepGeometry = () => {
+      const kept = new Set(), walk = (node) => { if (node.geometry) kept.add(node.geometry); for (const child of node.children) walk(child); };
+      walk(root);
+      liveGeometry(kept);
+      return kept;
+    };
+    timechainIsland.gate = BL.timechainGate.create({ site: timechainIsland.site, place: timechainIsland.place, pilot, crew, hud, camera, renderer, canvas: glCanvas, world, go, equipJetpack,
+      show: timechainIsland.show, renderView: (view) => renderer.render(root, view, RENDER_OPTS), keep: keepGeometry });
+    // A room's address opened signed in, with no visit of this tab's own to repeat, comes here with the room chosen.
+    if (timechainIsland.gate.preselected) hud.toast(`Room ${timechainIsland.gate.preselected} is chosen at the keypad · walk up to it and press Enter to go in`);
     breakables = headquarters.breakables = BL.breakables.create({
       root, input, renderer, fx, crew,
       collectReward: collectBreakableReward, deactivate: deactivateBreakable, relocate: relocateBreakable,
@@ -11512,7 +11482,6 @@
           return;
         }
         if (debugMovementTap(hit, p)) return;
-        if (hit && (hit.owner.prop === "timechainchair" || hit.owner.cave?.traits.name === "SaniExp" && timechainIsland?.seat.active)) { spinTimechainChair(); return; }
         if (hit && hit.owner.kind === "caveman") { selectOoga(hit.owner.cave); return; }
         pilot.hooks.onDoubleTap(hit, p);
       }
@@ -11554,7 +11523,7 @@
     if (ctx.from === null && !pilot.loginViewRestored && (preloadedJetpackWear || preloadedEquipment) && !params.has("character") && !initialCharacter) initialCharacter = contributors.activeRoster.find((entry) => crew.stateOf(crew.cavemen.get(entry.name)) === "working") || contributors.activeRoster[0];
     const initialGorilla = initialCharacter && preloadedGorilla ? crew.cavemen.get(initialCharacter.name) : null;
     // The Ooga that went into DSB, the Lightning Factory, ₿IFRÖST or Ooga Arcade comes back out as the one played.
-    const handsBack = ctx.from === "dsb" || ctx.from === "factory" || ctx.from === "bifrost" || ctx.from === "arcade" || ctx.from === "lab";
+    const handsBack = ctx.from === "dsb" || ctx.from === "factory" || ctx.from === "bifrost" || ctx.from === "arcade" || ctx.from === "lab" || ctx.from === "timechain";
     const returningCharacter = handsBack ? world.pilot : null;
     if (handsBack) world.pilot = null;
     if (initialGorilla) {
@@ -11580,7 +11549,11 @@
     unsubscribeAccount = BL.net.subscribe(onAccountChange);
     const initialFirstPerson = ctx.from === null && preloadedFirstPerson && !initialGorilla && !pilot.loginViewRestored;
     if (initialFirstPerson) pilot.enterClose(true);
-    if (returningCharacter) navigate(ctx.from === "factory" || ctx.from === "bifrost" || ctx.from === "arcade" ? ctx.from : "pile", false, false);
+    // Out of a Timechain room: behind the Sphere's curtain, to walk out through its doors.
+    const sphereExit = ctx.from === "timechain" ? world.sphereExit : null;
+    world.sphereExit = null;
+    if (returningCharacter && sphereExit && pilot.player) timechainIsland.gate.arrive(sphereExit);
+    else if (returningCharacter) navigate(ctx.from === "factory" || ctx.from === "bifrost" || ctx.from === "arcade" ? ctx.from : ctx.from === "timechain" ? "timechain" : "pile", false, false);
     else if (ctx.from === "bifrost" && !ctx.place) navigate("bifrost", false, false);
     else if (!pilot.loginViewRestored && !crew.sleeping && !initialGorilla && (ctx.place || preloadedView || initialCharacter || initialFirstPerson)) navigate(ctx.place || preloadedView || "pile", false, false);
     if (initialCharacter && !initialGorilla && preloadedJetpack) {
@@ -11909,8 +11882,7 @@
     unsubscribeMempool = null;
     unsubscribeChain();
     unsubscribeChain = null;
-    if (timechainIsland.boards) timechainIsland.boards.dispose();
-    timechainIsland.beer.dispose();
+    timechainIsland.gate.dispose();
     hud.closeBoard(true);
     if (chainSign && chainSign.node.geometry) renderer.releaseGeometry(chainSign.node.geometry);
     chainSign = null;
@@ -12071,6 +12043,7 @@
     for (const item of clankerEquipment) set.add(item.node.geometry);
     for (const cave of crew.cavemen.values()) set.add(cave.headOpen).add(cave.headClosed);
     remotes.liveGeometry(set);
+    if (timechainIsland && timechainIsland.gate) timechainIsland.gate.liveGeometry(set);
   };
   const stats = () => {
     let nodes = 0;
@@ -12085,8 +12058,8 @@
     id: "hub", enter, update, overlay, onDonation, previewDonation, onKey, onLootCleared, renderOpts: RENDER_OPTS, leave, stats, liveGeometry,
     root: null, camera: null, input: null, debug: null,
     get inMotion() {
-      // Sani sits nearly always; only a spinning chair needs full rate behind another window.
-      if (timechainIsland && timechainIsland.seat.speed > 0) return true;
+      // A crossing through the Timechain Sphere's doors keeps full rate, so its walk and swoop finish smoothly.
+      if (timechainIsland && timechainIsland.gate.busy) return true;
       if (pile.inMotion || fx.inMotion || breakables.inMotion || weather.active || mempoolIsland.water.active || magazine && magazine.revealed || MATRIX_WORLD.active || mirrorGuides.state.doorway || mirrorCave.damage.active || mirrorCave.ripples.active || mirrorCave.body.active || entropyLab.phase.ripples.active || entropyLab.phase.body.contacts || entropyLab.phase.body.active) return true;
       if (bcaMouth && (bcaMouth.phase.ripples.active || bcaMouth.phase.body.contacts || bcaMouth.phase.body.active)) return true;
       for (const sign of headquarters.roomSigns) if (sign.velocity || sign.node.rotation.x) return true;

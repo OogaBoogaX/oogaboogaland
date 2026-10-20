@@ -38,9 +38,18 @@
 // room is live; `subscribeChat` hears the room's lines as `fn(lines, joined, receipt)`: one new line, or on every
 // (re)join the lines the room still holds, which chat.js merges; a rejection keeps the draft. The room names each line's
 // speaker; the page keeps nothing (chat.js shows them).
-// Exports start, subscribe, subscribeRoster, subscribeChat, dispose, login, logout, setDisplay, rejoin, setBody, setZone, setHub, setMuted, setHealth, sendNpc,
-// sendChat, npcFrame, sendPose, mayDrive, mayDriveGorilla, ownCharacter, characterOf, gorillaBody, bodyName,
-// bodyKind, serverNow, remotes, state, CHAT_MAX and CHAT_KEEP.
+// The Timechain Sphere's doorway (docs/timechain-sphere/doorway-contract.md): a room that knows it says so in `welcome`
+// (`features` holds "door", `state.doorway`). `askDoor(dir, room)` asks for the shared doorway after a crossing is
+// prepared, at most one request at a time; the room answers `wait` or `grant { cycle, exp }`, the page starts its
+// crossing with `goDoor(cycle)` (the room then tells everyone `transit { cycle, actor, door, dir, at, exp }`) and ends
+// it with `doneDoor(cycle)`, or gives it back with `cancelDoor()`. `passDoor(door, dir)` announces a walk through a
+// room's own doors, which nobody reserves. `subscribeDoor` hears all of it, and `{ t: "door", op: "lost" }` when the
+// socket goes. Without the feature these send nothing and return false, and the sphere crosses on this page alone.
+// `recheck` looks at /api/me again after a look that went unanswered (the keypad's Retry), bounded as the first.
+// `setPokerVoice(table)` scopes Ember Den voice to one table, or the floor when null, without moving the body.
+// Exports start, recheck, subscribe, subscribeRoster, subscribeChat, subscribeDoor, dispose, login, logout, setDisplay, rejoin, setBody, setZone, setPokerVoice, setHub,
+// setMuted, setHealth, sendNpc, sendChat, npcFrame, sendPose, askDoor, goDoor, doneDoor, cancelDoor, passDoor, mayDrive, mayDriveGorilla,
+// ownCharacter, characterOf, gorillaBody, bodyName, bodyKind, serverNow, remotes, state, CHAT_MAX and CHAT_KEEP.
 (() => {
   "use strict";
   const BL = window.BL = window.BL || {};
@@ -60,7 +69,9 @@
     return GORILLA_PREFIX + (character ? character.handle : name);
   };
   const chatIdValid = (id) => typeof id === "string" && id.length > 0 && id.length <= 64 && !/[^\w-]/.test(id);
+  const DOOR_NAME = /^[a-z0-9-]{1,24}$/;
   const subscribers = new Set();
+  const doorSubscribers = new Set();
   const rosterSubscribers = new Set();
   const chatSubscribers = new Set();
   const remotes = new Map();
@@ -69,13 +80,14 @@
   const offline = new URLSearchParams(location.search);
   const state = { backend: false, me: null, donations: false, logoutEpoch: 0, started: false,
     resolved: offline.has("nosim") || offline.get("net") === "0" || location.protocol !== "http:" && location.protocol !== "https:",
-    room: "off", selfId: 0, online: 0, released: null, loopEpoch: 0, zone: "outside", body: null, bodyKind: null, bodyName: null, hostId: 0, followers: 0, npcVersion: 0 };
+    room: "off", selfId: 0, online: 0, released: null, loopEpoch: 0, zone: "outside", body: null, bodyKind: null, bodyName: null, hostId: 0, followers: 0, npcVersion: 0, doorway: false };
   let ws = null, retry = 0, retryTimer = 0, pingTimer = 0, hiddenTimer = 0, stopped = false;
   let npcFrame = null, inHub = false, hubSent = null;
   let zone = "outside", body = null, muted = false, hpSent = 100, koSent = false, hpAt = 0, poseAt = 0, px = NaN, py = NaN, pz = NaN, pyaw = NaN;
   const gSent = new Float64Array(6);
-  let gKnown = false;
+  let gKnown = false, poseHasG = false;
   let clockOffset = 0, clockKnown = false;
+  let pokerVoice = null;
   // A server timestamp minus the arrival time is the true offset less the trip; the largest such
   // sample is the one that travelled fastest, so it is the best estimate yet.
   const clockSample = (serverMs) => {
@@ -112,6 +124,7 @@
 
   const sendBody = () => send(JSON.stringify({ t: "body", name: body }));
   const sendZone = () => send(JSON.stringify({ t: "zone", name: zone }));
+  const sendPokerVoice = () => { if (zone === "ember-den") send(JSON.stringify({ t: "poker-voice", table: pokerVoice })); };
   const sendMute = () => send(muted ? '{"t":"mute","on":true}' : '{"t":"mute","on":false}');
   // What the room hears is "showing the island now": the hub scene, in a visible tab.
   const sendHub = () => {
@@ -162,6 +175,13 @@
   const chatHeard = (lines, replace, receipt = null) => {
     for (const fn of chatSubscribers) fn(lines, replace, receipt);
   };
+  const doorHeard = (event) => {
+    for (const fn of doorSubscribers) fn(event);
+  };
+  // Only well-formed doorway words reach the page.
+  const transitOf = (m) => m && chatIdValid(m.cycle) && Number.isSafeInteger(m.actor) && typeof m.door === "string" && DOOR_NAME.test(m.door)
+    && (m.dir === "in" || m.dir === "out") && Number.isFinite(m.at) && Number.isFinite(m.exp)
+    ? { t: "transit", cycle: m.cycle, actor: m.actor, door: m.door, dir: m.dir, at: m.at, exp: m.exp } : null;
 
   const onMessage = (e) => {
     if (e.data instanceof ArrayBuffer) {
@@ -197,22 +217,32 @@
       state.hostId = Number.isSafeInteger(msg.host) ? msg.host : 0;
       state.followers = Number.isSafeInteger(msg.followers) ? msg.followers : 0;
       state.selfId = msg.you.id;
+      state.doorway = Array.isArray(msg.features) && msg.features.includes("door");
       remotes.clear();
       for (const p of msg.players) upsert(p);
       setRoom("live");
+      const transit = transitOf(msg.transit);
+      if (transit && transit.actor !== state.selfId) doorHeard(transit);
       // A reconnect picks up where the page is: the actor still driven and where it stands, and voice,
       // whose sessions the room forgot with the old socket.
-      sendZone();
       sendBody();
+      // Restore the actor before admitting it to the destination zone. A reconnect therefore cannot briefly
+      // appear, or become voice-eligible, in a room without its last bounded pose.
+      const restoredPose = body && Number.isFinite(px) && Number.isFinite(py) && Number.isFinite(pz) && Number.isFinite(pyaw);
+      if (restoredPose) {
+        const extra = state.bodyKind === "gorilla" && poseHasG ? `,"g":[${gSent[0]},${gSent[1].toFixed(3)},${gSent[2].toFixed(3)},${gSent[3].toFixed(3)},${gSent[4].toFixed(3)},${gSent[5].toFixed(3)}]` : "";
+        send(`{"t":"pose","x":${px.toFixed(3)},"y":${py.toFixed(3)},"z":${pz.toFixed(3)},"yaw":${pyaw.toFixed(3)}${extra}}`);
+      }
+      sendZone();
+      sendPokerVoice();
       if (muted) sendMute();
       // A fresh room record starts at full health; the next report sends ours if it differs.
       hpSent = 100; koSent = false; hpAt = 0;
       hubSent = null;
       sendHub();
       BL.voice.restart();
-      poseAt = 0;
-      px = NaN;
-      gKnown = false;
+      if (restoredPose) poseAt = performance.now();
+      else { poseAt = 0; px = NaN; gKnown = poseHasG = false; }
     } else if (msg.t === "join") {
       upsert(msg.p);
       setRoom("live");
@@ -262,6 +292,16 @@
         if (line) lines.push(line);
       }
       chatHeard(lines, true);
+    } else if (msg.t === "door") {
+      if (msg.op === "grant" && chatIdValid(msg.cycle) && Number.isFinite(msg.exp)) doorHeard({ t: "door", op: "grant", cycle: msg.cycle, exp: msg.exp });
+      else if (msg.op === "started" && chatIdValid(msg.cycle) && Number.isFinite(msg.exp)) doorHeard({ t: "door", op: "started", cycle: msg.cycle, exp: msg.exp });
+      else if (msg.op === "wait") doorHeard({ t: "door", op: "wait", ahead: Number.isSafeInteger(msg.ahead) && msg.ahead >= 0 ? msg.ahead : 0 });
+      else if (msg.op === "denied") doorHeard({ t: "door", op: "denied", reason: typeof msg.reason === "string" ? msg.reason.slice(0, 32) : "" });
+    } else if (msg.t === "transit") {
+      const transit = transitOf(msg);
+      if (transit && transit.actor !== state.selfId) doorHeard(transit);
+    } else if (msg.t === "transit-end") {
+      if (chatIdValid(msg.cycle)) doorHeard({ t: "transit-end", cycle: msg.cycle });
     } else if (msg.t === "voice") {
       if (Array.isArray(msg.peers)) BL.voice.setPeers(msg.peers, Array.isArray(msg.gens) ? msg.gens : null);
     } else if (msg.t === "release") {
@@ -287,6 +327,9 @@
     remotes.clear();
     state.hostId = 0;
     state.followers = 0;
+    // Any request for the doorway went with the socket.
+    if (state.doorway) doorHeard({ t: "door", op: "lost" });
+    state.doorway = false;
     npcFrame = null;
     hubSent = null;
     // Out of the room for good (signed out, another tab, full): voice goes with it.
@@ -315,30 +358,41 @@
     ws.onclose = () => close("connecting");
   };
 
-  const start = async () => {
-    if (state.started) return;
-    state.started = true;
-    if (location.protocol !== "https:" && location.protocol !== "http:") return;
-    state.resolved = false;
+  // One look at the account; true when it found a backend to join.
+  const look = async () => {
     try {
       const res = await fetch("/api/me", { credentials: "same-origin", headers: { accept: "application/json" }, signal: AbortSignal.timeout(6000) });
       // A static host's 404/HTML response establishes that no account exists
       // here. A timeout or failed account service does not establish sign-out.
-      if (res.status === 404 || res.ok && !(res.headers.get("content-type") || "").startsWith("application/json")) { state.resolved = true; return; }
-      if (!res.ok) return;
+      if (res.status === 404 || res.ok && !(res.headers.get("content-type") || "").startsWith("application/json")) { state.resolved = true; return false; }
+      if (!res.ok) return false;
       const data = await res.json();
-      if (!data || !("player" in data)) return;
+      if (!data || !("player" in data)) return false;
       state.backend = true;
       state.me = accept(data.player);
       state.donations = data.donations === true;
       state.resolved = data.player === null || !!state.me;
       if (state.me) BL.contributors.addTemporary(data.character, state.me.login);
     } catch {
-      return;
+      return false;
     } finally {
       emit();
     }
-    connect();
+    return true;
+  };
+  const start = async () => {
+    if (state.started) return;
+    state.started = true;
+    if (location.protocol !== "https:" && location.protocol !== "http:") return;
+    state.resolved = false;
+    if (await look()) connect();
+  };
+  // Again, only while the first look went unanswered; never more than one at a time.
+  let rechecking = null;
+  const recheck = () => {
+    if (state.resolved || !state.started) return Promise.resolve(state);
+    if (!rechecking) rechecking = look().then((found) => { if (found) connect(); rechecking = null; return state; });
+    return rechecking;
   };
 
   // Sign-in is a full navigation through GitHub; the Worker brings the visitor back to this path.
@@ -409,9 +463,17 @@
     if (name === zone) return;
     const moved = !sameGroup(name, zone);
     zone = state.zone = name;
+    pokerVoice = null;
     poseAt = 0; px = NaN;
     if (moved) BL.voice.setPeers([]);
     sendZone();
+  };
+  // Voice changes without moving or hiding anybody on the shared floor.
+  const setPokerVoice = table => {
+    if (zone !== "ember-den" || table !== null && (!Number.isInteger(table) || table < 0 || table >= 10) || pokerVoice === table) return;
+    pokerVoice = table;
+    BL.voice.setPeers([]);
+    sendPokerVoice();
   };
 
   // The hub says when it shows the island; a hidden tab stops counting until it is looked at again.
@@ -450,7 +512,7 @@
     state.bodyKind = bodyKind(name);
     state.bodyName = bodyName(name);
     poseAt = 0; px = NaN;
-    gKnown = false;
+    gKnown = poseHasG = false;
     sendBody();
     // The room starts another actor at full health.
     hpSent = 100; koSent = false; hpAt = 0;
@@ -489,8 +551,12 @@
 
   // Throttled to POSE_MS and skipped while nothing moved; a changed gorilla pose also earns a report.
   const sendPose = (x, y, z, yaw, g = null) => {
-    if (state.room !== "live") return;
     const now = performance.now();
+    if (state.bodyKind === "gorilla" && g && g.length === 6) {
+      let valid = true;
+      for (let i = 0; i < 6; i++) if (!Number.isFinite(g[i])) { valid = false; break; }
+      if (valid) poseHasG = true;
+    }
     if (now - poseAt < POSE_MS) return;
     // The room drops a pose outside its bounds, which would freeze this Ooga on other pages: hold it at the edge.
     x = Math.max(-BOUND_XZ, Math.min(BOUND_XZ, x));
@@ -500,17 +566,34 @@
     if (g) for (let i = 0; i < 6; i++) if (!Number.isFinite(g[i])) { g = null; break; }
     let changed = !!g && !gKnown;
     if (g && !changed) for (let i = 0; i < 6; i++) if (g[i] !== gSent[i]) { changed = true; break; }
+    // Even when the complete pose is unchanged, remember that its cached locomotion is valid for reconnect.
+    if (g) poseHasG = true;
     if (!changed && Math.abs(x - px) < 0.005 && Math.abs(y - py) < 0.005 && Math.abs(z - pz) < 0.005 && Math.abs(yaw - pyaw) < 0.01) return;
     poseAt = now;
     px = x; py = y; pz = z; pyaw = yaw;
+    poseHasG = !!g;
     let extra = "";
     if (g) {
       for (let i = 0; i < 6; i++) gSent[i] = g[i];
       gKnown = true;
       extra = `,"g":[${g[0]},${g[1].toFixed(3)},${g[2].toFixed(3)},${g[3].toFixed(3)},${g[4].toFixed(3)},${g[5].toFixed(3)}]`;
     }
-    send(`{"t":"pose","x":${x.toFixed(3)},"y":${y.toFixed(3)},"z":${z.toFixed(3)},"yaw":${yaw.toFixed(3)}${extra}}`);
+    if (state.room === "live") send(`{"t":"pose","x":${x.toFixed(3)},"y":${y.toFixed(3)},"z":${z.toFixed(3)},"yaw":${yaw.toFixed(3)}${extra}}`);
   };
+
+  // The doorway: each sends only to a live room that knows it, and says whether it did.
+  const doorSend = (text) => {
+    if (state.room !== "live" || !state.doorway || !ws || ws.readyState !== WebSocket.OPEN) return false;
+    ws.send(text);
+    return true;
+  };
+  const askDoor = (dir, room) => (dir === "in" || dir === "out") && Number.isInteger(room) && room >= 1 && room <= 9
+    && doorSend(JSON.stringify({ t: "door", op: "ask", dir, room }));
+  const goDoor = (cycle) => chatIdValid(cycle) && doorSend(JSON.stringify({ t: "door", op: "go", cycle }));
+  const doneDoor = (cycle) => chatIdValid(cycle) && doorSend(JSON.stringify({ t: "door", op: "done", cycle }));
+  const cancelDoor = () => doorSend('{"t":"door","op":"cancel"}');
+  const passDoor = (door, dir) => typeof door === "string" && DOOR_NAME.test(door) && (dir === "in" || dir === "out")
+    && doorSend(JSON.stringify({ t: "door", op: "pass", door, dir }));
 
   const loginOf = (character) => (character.github || character.handle).toLowerCase();
   // The character whose GitHub login this is; a handle that only looks like the login does not count.
@@ -561,6 +644,10 @@
     chatSubscribers.add(fn);
     return () => chatSubscribers.delete(fn);
   };
+  const subscribeDoor = (fn) => {
+    doorSubscribers.add(fn);
+    return () => doorSubscribers.delete(fn);
+  };
 
   const dispose = () => {
     document.removeEventListener("visibilitychange", onVisibility);
@@ -570,8 +657,9 @@
     subscribers.clear();
     rosterSubscribers.clear();
     chatSubscribers.clear();
+    doorSubscribers.clear();
     close("off");
   };
 
-  BL.net = { start, subscribe, subscribeRoster, subscribeChat, dispose, login, logout, setDisplay, rejoin, setBody, setZone, setHub, setMuted, setHealth, sendNpc, sendChat, sendPose, mayDrive, mayDriveGorilla, ownCharacter, characterOf, gorillaBody, bodyName, bodyKind, serverNow, remotes, state, CHAT_MAX, CHAT_KEEP, get npcFrame() { return npcFrame; } };
+  BL.net = { start, recheck, subscribe, subscribeRoster, subscribeChat, subscribeDoor, dispose, login, logout, setDisplay, rejoin, setBody, setZone, setPokerVoice, setHub, setMuted, setHealth, sendNpc, sendChat, sendPose, askDoor, goDoor, doneDoor, cancelDoor, passDoor, mayDrive, mayDriveGorilla, ownCharacter, characterOf, gorillaBody, bodyName, bodyKind, serverNow, remotes, state, CHAT_MAX, CHAT_KEEP, get npcFrame() { return npcFrame; } };
 })();

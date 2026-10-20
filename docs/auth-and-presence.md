@@ -83,7 +83,8 @@ Where a signed-in player is decides whom they hear and see. A zone is `<group>` 
 | Kind | Zone | Where |
 |---|---|---|
 | The island | `outside` | the main island, from the hub (`island.onLand`) |
-| A bridged land | `sphere`, `rainforest`, `bifrost`, `bifrost.chamber` | the Timechain Sphere from the foot of its bridge; the Mempool rainforest from the foot of its vine bridge, with its chamber and tunnels; the Bifrost isle and bridge, and the chamber behind the arch |
+| A bridged land | `sphere`, `rainforest`, `bifrost`, `bifrost.chamber` | the Timechain Sphere's bridge, doorway and passage from the foot of its bridge; the Mempool rainforest from the foot of its vine bridge, with its chamber and tunnels; the Bifrost isle and bridge, and the chamber behind the arch |
+| A Timechain room | `sphere-1` … `sphere-9` | one of the Sphere's nine rooms, signed in (never dotted, so each is its own voice group, apart from `sphere`); a solo visit signed out reports `none` with no body. The doorway's reservation and transit messages are in `docs/timechain-sphere/doorway-contract.md` |
 | A cave or a portal | `lab`, `lab.hall`, `bca`, `factory`, `factory.hall`, `arcade`, `arcade.hall`, `mirror`, `hq`, `ember-den`, `dsb-outside`, `dsb-<venue>` | EntropyLab's cave (and the debug-only lab scene), B.C.A.'s office, the Lightning Factory's tunnel and hall, Ooga Arcade's mouth and hall, the Mirror cave, HQ (every entrance), the Ember Den off the Bifrost chamber, DSB Land outside and each of its venues |
 | Nowhere | `none` | off the island's edge (a cloud, flying or falling past the rim), or between scenes: hears and is heard by nobody, shown to nobody |
 

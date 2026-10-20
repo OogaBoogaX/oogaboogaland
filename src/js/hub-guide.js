@@ -18,10 +18,10 @@
     crew: "Every Ooga stands for one of the crew's contributors.",
     jumbotron: "The jumbotron shows the crew's activity, live.",
     totems: "The totems light up when Bitcoin Core, BTCPay, LND or CLN merge a PR.",
-    timechain: "Out west, the Timechain Sphere: Sani's walk-in ball of light.",
-    timechainWalls: "Its six inner walls light up with live Timechain Index data.",
-    timechainBoards: "Bitcoin's distribution, address balances, UTXO sizes, ETF and exchange holdings, and the top ten holders.",
-    timechainSani: "Sani's inside in his recliner. Walk in over the bridge, and tap him to spin his chair!",
+    timechain: "Out west, the Timechain Sphere: nine rooms behind one door.",
+    timechainWalls: "Walk over the bridge and pick a room at the keypad: 1 to 3 are normal sized, 4 to 6 bigger, 7 to 9 biggest.",
+    timechainBoards: "Inside, a wall of live block and mining charts, and the holdings desk.",
+    timechainSani: "Sani's in every room in his recliner. Signed in, you share a room with whoever picks the same number.",
     bca: "B.C.A., Banana Certified Accounting: the island's own accounting office.",
     bcaInside: "Gorillas walk in through its veil, put on suits and count the bananas at two walnut desks.",
     bcaMotto: "Abacuses, ledger screens, filing cabinets. Their motto: count bananas, keep receipts, build in public.",
@@ -41,6 +41,7 @@
     done: "That's the island! Off you go, and come find me any time.",
     newsDone: "That's what's new! Have fun out there.",
     cancelled: "All good. Back to work!",
+    newsSphereRooms: "The Timechain Sphere has nine rooms now. Pick one at the keypad by its doors!",
     newsBca: "New at 10 o'clock: B.C.A., Banana Certified Accounting. Suited gorillas count the bananas!",
     newsMainland: "You can tip from right here now, no trip to the Factory. Your bananas fly out of its roof tube onto the pile!",
     newsPanels: "The Bananas, Oogas and Chat panels have one new look, and the Bananas panel ranks the top donors.",
@@ -77,6 +78,7 @@
   // and her line. A new feature worth showing a returning visitor is one entry here, added at the top: a visitor's news
   // is everything listed above the newest entry they were last offered.
   const NEWS = [
+    { date: "2026-10-19", at: "timechain", line: "newsSphereRooms" },
     { date: "2026-10-18", at: "bca", line: "newsBca" },
     { date: "2026-10-17", at: "pile", line: "newsMainland" },
     { date: "2026-10-17", at: null, line: "newsPanels" },
