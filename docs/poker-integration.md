@@ -30,7 +30,7 @@ practice and the Ember Den's appearance remain available.
    Use no credentials, path, query, fragment or redirect. The URL must differ from
    the site's origin. Keep staging and production services/secrets separate.
 5. Verify on staging before considering the equivalent production settings.
-   This PR neither supplies hosting/secrets nor deploys anything.
+   The repository does not supply hosting or secrets for the Node service.
 
 Only five routes are proxied: the private worker script, health, session, state
 and command. Every request requires Ooga's current session and same-origin
