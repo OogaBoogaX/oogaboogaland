@@ -340,13 +340,39 @@
   const clamp255 = (v) => Math.max(0, Math.min(255, Math.round(v)));
   const shade = (hex, k) => hexToRgb(hex).map((v) => clamp255(v * k));
   const mixRgb = (a, b, t) => a.map((v, i) => clamp255(v + (b[i] - v) * t));
+  // Builder caches remember which scenes used them. Leaving a scene drops the ones that only it used (`release`), so a
+  // visit's meshes are rebuilt on the next visit instead of staying resident for the page; renderer.releaseUnused
+  // frees their GPU side. A hand-rolled cache joins with `track(drop)` and calls `use()` on every read.
+  const scopedCaches = new Set();
+  let cacheScope = null;
+  const track = (drop) => {
+    const entry = { scenes: new Set(), last: undefined, drop, use: () => {
+      if (entry.last === cacheScope) return;
+      entry.last = cacheScope;
+      if (cacheScope !== null) entry.scenes.add(cacheScope);
+      scopedCaches.add(entry);
+    } };
+    return entry;
+  };
+  const setScope = (id) => { cacheScope = id; };
+  const release = (id, keep) => {
+    for (const entry of scopedCaches) {
+      if (!entry.scenes.has(id) || keep.some((k) => entry.scenes.has(k))) continue;
+      entry.drop();
+      entry.scenes.clear();
+      entry.last = undefined;
+      scopedCaches.delete(entry);
+    }
+  };
   const cached = (build) => {
     let value = null;
-    return () => value || (value = build());
+    const entry = track(() => { value = null; });
+    return () => { entry.use(); return value || (value = build()); };
   };
   const variants = (build) => {
     const cache = [];
-    return (i = 0) => cache[i] || (cache[i] = build(i));
+    const entry = track(() => { cache.length = 0; });
+    return (i = 0) => { entry.use(); return cache[i] || (cache[i] = build(i)); };
   };
   const noShadow = (geo) => {
     geo.castShadow = false;
@@ -1579,5 +1605,5 @@
     }
     glass.push(box({ w: W, h: tall, d: W, color: tint, emissive: 1, offset: { x, y: mid, z } }));
   };
-  BL.models = { beam, forwardLathe, turn, shaded, torus, along, chain, railParts, columnParts, deckGrid, deckPosts, deckParts, stairParts, lanternParts, LANTERN_GLASS, geometry, pushVert, face, cutCylinder, voxCoords, box, bevelBox, panel, lathe, glassVessel, attachGlassShell, tube, ring, polyline, merge, forward, moved, turnedX, turnedY, turnedZ, prism, cached, variants, noShadow, makeVox, voxelGeometry, voxelFaces, banana, bananaGeometry, bananaTileGeometry, bananaPileCoreGeometry, bananaPileRadiusScale, bananaPileHeightOffset, BANANA_AMMO_SCALE, BANANA_PILE_PROFILE, particleGeometry, spareMagazine, caveman, CLUB_PALETTE, GOLD_CLUB_PALETTE, labRoom, buildableGeos, crate, die, dieRotationFor, SWAG, TIER_COLORS };
+  BL.models = { beam, forwardLathe, turn, shaded, torus, along, chain, railParts, columnParts, deckGrid, deckPosts, deckParts, stairParts, lanternParts, LANTERN_GLASS, geometry, pushVert, face, cutCylinder, voxCoords, box, bevelBox, panel, lathe, glassVessel, attachGlassShell, tube, ring, polyline, merge, forward, moved, turnedX, turnedY, turnedZ, prism, cached, variants, track, setScope, release, noShadow, makeVox, voxelGeometry, voxelFaces, banana, bananaGeometry, bananaTileGeometry, bananaPileCoreGeometry, bananaPileRadiusScale, bananaPileHeightOffset, BANANA_AMMO_SCALE, BANANA_PILE_PROFILE, particleGeometry, spareMagazine, caveman, CLUB_PALETTE, GOLD_CLUB_PALETTE, labRoom, buildableGeos, crate, die, dieRotationFor, SWAG, TIER_COLORS };
 })();

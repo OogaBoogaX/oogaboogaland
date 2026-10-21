@@ -48,7 +48,9 @@
   // Every lot's centre and half-size, for the stone courts the terrain paints around them.
   const PLOTS=[...properties,...hillside].map(q=>[q[1],q[2],Math.max(q[3],q[4])/2]).concat([[-61,27,5.5],[-48,25,3.5],[-35,26,4],[-68,38,3]]);
   let cached;
+  const scoped = M.track(() => { cached = undefined; });
   const build = () => {
+    scoped.use();
     if(!cached) {
       const heights=new Float32Array(N*N), geo={verts:[],faces:[],lines:[]}, shore={};
       for(let j=0;j<N;j++)for(let i=0;i<N;i++) {

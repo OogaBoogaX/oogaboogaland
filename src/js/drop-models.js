@@ -4,7 +4,7 @@
   const BL = window.BL = window.BL || {};
   const { hexToRgb } = BL.math;
   const { createNode, addChild } = BL.scene;
-  const { box, bevelBox, lathe, merge } = BL.models;
+  const { box, bevelBox, lathe, merge, cached } = BL.models;
   const { kartWheel, yToZ, turn } = BL.raceModels, { moved } = BL.models;
   const { postSign, puff, limb, flatInto } = BL.hubModels;
   const { mulberry32 } = BL.math;
@@ -15,10 +15,6 @@
     for (let i = 0; i < part.verts.length; i++) geo.verts.push(part.verts[i]);
     for (const f of part.faces) geo.faces.push({ ...f, i: f.i.map((k) => k + base) });
     return geo;
-  };
-  const cached = (build) => {
-    let value = null;
-    return () => value || (value = build());
   };
   const noShadow = (geo) => {
     geo.castShadow = false;
