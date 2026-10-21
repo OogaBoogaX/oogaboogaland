@@ -677,7 +677,7 @@
     // Where the falls pour, and their lips over the rim.
     for (const f of P.falls) light.push(put(fallLip(), f.x, 0, f.z, f.ry));
     const bannerMarks = noShadow(merge(...marks));
-    bannerMarks.depthOffset = true;
+    bannerMarks.depthOffset = bannerMarks.surfaceOverlay = true;
     return {
       props: merge(...props), bannerMarks, flags: noShadow(paving), flowers: noShadow(merge(...blooms)), glass: noShadow(merge(...glass)), fire: noShadow(merge(...fires)),
       light: noShadow(merge(...light)), shell, foliage, falls: P.falls

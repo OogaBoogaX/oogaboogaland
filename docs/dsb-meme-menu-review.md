@@ -35,7 +35,7 @@ The twelve contributor portraits are Gregzaj, RD, yellow, Chairforce, Labrahodl,
 | Without Rulers fixtures | `shirts`, `hoodies`, `hats`, `art`, `bip85`, `samourai`, `slavery`, `cartel`, `2140`; fallback `home` |
 | Proof of Ink fixtures | `apparel`, `shirts`, `hats`, `fine-arts`, `collabs`, `stackchain-magazine`, `proof-of-work`; fallback `featured` |
 | BIG BITCOIN press / research / merch | `news`, `research`, `merch`; lobby, boardroom and control room fallback `overview` |
-| DSB Studio jukebox | DSB Spaces only. Seating/stage/ticket booth receive no fictitious menu pages. |
+| DSB Studio jukebox | None: decoration since the DSB Spaces player was removed (2026-10-21). Seating/stage/ticket booth receive no fictitious menu pages. |
 | Noderunner shared physical TV | `main`; explicit Radio target → `radio`; explicit Request target → `jukebox` and request-input focus |
 
 Nakamoto and Last Hash remain accessible in Proof of Ink's original catalog. No separate labeled physical fixtures were present to justify new zones. Archive/production/boardroom/control zones do not manufacture public categories.
