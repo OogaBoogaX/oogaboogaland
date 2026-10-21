@@ -204,6 +204,8 @@ Reached through **₿IFRÖST** beyond the north pass. Walk through the DSB windo
 
 Inside: a river boat and the **Bitcoin coaster** (ride on the live price), the **Meme Shop** (demo tokens for snacks and tomatoes), and **NodeRunner TV**, whose radio takes song requests paid over Lightning from your own wallet. **Turtle view** shows the whole land. A direct visit is `?scene=dsb`.
 
+On the beach in the Chora's lower row, **Free Hardware Wallets** (VAC 2) gives away a ClownCard or a Rektdger from its vending machine (**Space** at it, or a tap). Click or tap the ground to set a carried one down, **Y** or the **Throw** button to throw it.
+
 ### Zuzu
 
 Zuzu is DSB Land's physical black cat. Approach her and choose **Talk to Zuzu** for a compact free-form conversation panel. Replies are currently clearly labelled local mocks, with deterministic fallback; no real AI provider is connected. Conversation history resets when leaving DSB. The provider-neutral backend foundation is documented in [server/zuzu/README.md](server/zuzu/README.md); it is not deployed or bundled into the game.

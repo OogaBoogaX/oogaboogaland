@@ -8617,6 +8617,34 @@ body.dsb-menu-open :is(.bottom-hud,.top-hud,#joy-move,#joy-look,#act,.weapon-hud
   .svrn-content { padding: 14px; }
 }
 
+/* Free Hardware Wallets' machine: two devices as pictures and names, in the shared DSB shell. */
+.wallets-menu { color: #2a1d17; background: #f6efe1; border: 2px solid #c8352a; border-radius: 6px; }
+.wallets-menu header { display: flex; justify-content: space-between; align-items: center; gap: 16px; color: #fff4df; background: #c8352a; border-bottom: 3px solid #f2c14e; }
+.wallets-menu h2 { font-size: clamp(20px,3vw,28px); margin: 3px 0; letter-spacing: .06em; }
+.wallets-menu small { color: #ffd66b; }
+.wallets-menu button { font: inherit; color: #2a1d17; background: #fff9ee; border: 2px solid #d8b9a0; border-radius: 4px; padding: 8px 12px; cursor: pointer; }
+.wallets-menu header button { color: #fff4df; background: #a32a21; border-color: #f2c14e; }
+.wallets-menu button:hover,.wallets-menu button[aria-pressed="true"] { background: #fde7b0; border-color: #d8892b; }
+.wallets-menu :focus-visible { outline: 3px solid #d8892b; outline-offset: 2px; }
+.wallets-content { padding: 18px 20px 20px; }
+.wallets-picks { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 12px; margin-bottom: 14px; }
+.wallets-pick { display: grid; justify-items: center; align-content: start; gap: 8px; min-width: 0; padding: 14px 8px 12px; }
+.wallets-pick canvas { max-width: 100%; height: 72px; image-rendering: pixelated; }
+.wallets-pick b { font-size: 15px; letter-spacing: .06em; }
+.wallets-menu .wallets-take { width: 100%; color: #fff4df; background: #c8352a; border-color: #a32a21; font-weight: 600; letter-spacing: .08em; }
+.wallets-menu .wallets-take:hover { background: #a32a21; }
+@media (max-width:600px) {
+  .wallets-menu header button { flex: none; }
+  .wallets-content { padding: 14px; }
+}
+/* The line over the view while a device is carried, with the Throw button beside it. */
+.wallet-carry { position: fixed; left: 50%; top: calc(64px + var(--safe-top)); transform: translateX(-50%); z-index: 15; display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 4px 8px; max-width: calc(100vw - 32px); margin: 0; padding: 6px 8px 6px 12px; color: #fff4df; background: #2a1d17e6; border: 2px solid #f2c14e; border-radius: 6px; font: 12px system-ui; letter-spacing: .03em; text-align: center; }
+.wallet-carry[hidden] { display: none; }
+.wallet-throw { min-height: 36px; padding: 0 14px; color: #2a1d17; background: linear-gradient(#ffcf6b,#e2a04a); border: 2px solid #8a5a32; border-radius: 6px; font: 600 12px system-ui; letter-spacing: .06em; cursor: pointer; }
+.wallet-throw:hover { background: linear-gradient(#ffd98a,#f0b05a); }
+/* On touch screens the top holds the scene's buttons: the line sits over the act button, between the sticks. */
+@media (pointer: coarse) { .wallet-carry { top: auto; bottom: calc(172px + var(--safe-bottom)); max-width: min(420px, calc(100vw - 32px)); } }
+
 /* Bottom-anchored drawers grow upward, with the resize grip just inside their top edge. */
 @media (max-width: 720px), (max-height: 500px) and (orientation: landscape) {
   .sheet { padding-top: 12px; }
