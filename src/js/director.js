@@ -190,7 +190,11 @@
     if (!next) throw new Error(`Unknown scene "${id}"`);
     if (transition) return false;
     transition = { next, place, out: true, t: 0, instant, ready: true, redirect: null, failed: null };
-    if (next.prepare) settle(transition, next.prepare(place, ctx));
+    if (next.prepare) {
+      window.BL.models.setScope(next.id);
+      settle(transition, next.prepare(place, ctx));
+      window.BL.models.setScope(active ? active.id : null);
+    }
     return true;
   };
   const router = routerMod.create(scenes, window.BL.routes, go);
@@ -222,6 +226,7 @@
     window.BL.net.setBody(null);
     // The scene's own zone (`voiceZone`), else one of its own; the island and DSB Land report theirs as they go.
     window.BL.net.setZone(next.voiceZone || (next.id === "dsb" ? "dsb-outside" : `scene-${next.id}`));
+    window.BL.models.setScope(next.id);
     next.enter(ctx);
     activeMeshRigs = next.renderOpts?.meshRigs === true;
     active = next;
@@ -267,6 +272,8 @@
     clearTweens();
     if (DEBUG && tweenCount()) throw new Error(`${tweenCount()} tweens survived clearTweens`);
     enter(next, place);
+    // The builder caches only the scene just left used go too; the island's stay, since every route passes through it.
+    if (leaving.id !== "hub") window.BL.models.release(leaving.id, ["hub", next.id]);
     renderer.releaseUnused(liveGeometry());
     if (DEBUG && renderer.stats.records > live.size) throw new Error(`${next.id}: ${renderer.stats.records} GPU records for ${live.size} live geometries`);
   };
@@ -642,6 +649,7 @@
     let first = Object.hasOwn(scenes, sceneId) ? scenes[sceneId] : scenes[Object.keys(scenes)[0]], place = routed && routed.place;
     if (first.prepare) {
       try {
+        window.BL.models.setScope(first.id);
         const redirect = await first.prepare(place, ctx);
         if (redirect) ({ next: first, place } = landing({ redirect }));
       } catch {

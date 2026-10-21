@@ -4,8 +4,8 @@
   const BL = window.BL = window.BL || {};
   const { createNode, addChild } = BL.scene;
   const { box, lathe, merge } = BL.models;
-  const geometries = new Map();
-  const cached = (key, build) => { if (!geometries.has(key)) geometries.set(key, build()); return geometries.get(key); };
+  const geometries = new Map(), scoped = BL.models.track(() => geometries.clear());
+  const cached = (key, build) => { scoped.use(); if (!geometries.has(key)) geometries.set(key, build()); return geometries.get(key); };
   const C = { ground: "#403054", stone: "#251c39", yellow: "#ffdf38", purple: "#a453ee", cyan: "#49ddd9", water: "#414dad", green: "#55b78d" };
   const cube = (color, emissive = 0) => cached(`dsb-cube-${color}-${emissive}`, () => box({ color, emissive }));
   const block = (parent, color, x, y, z, w, h, d, emissive = 0) => {

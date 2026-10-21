@@ -27,9 +27,13 @@ const sources = tags.map((m) => m[1]);
 export const deferred = new Map();
 for (const [, src, group] of tags) if (group) deferred.set(group, [...(deferred.get(group) || []), src]);
 if (!sources.length) throw new Error("index.html: no script tags found");
+// Escape everything above U+00FF: one such character makes V8 keep the whole inlined source as two-byte UTF-16,
+// doubling its resident size. \uXXXX means the same in strings, templates, regexes and identifiers, and it runs
+// after trim(), which strips a leading byte-order mark.
+const latin1 = (code) => code.replace(/[^\x00-\xff]/g, (ch) => `\\u${ch.charCodeAt(0).toString(16).padStart(4, "0")}`);
 // Escape </script inside inlined JS: a literal closing tag would end the block early. `block` is also how
 // scripts/site.mjs finds a deferred module in the page.
-export const block = (src) => `// ---- ${src} ----\n${read(src).trim().replace(/\r\n/g, "\n")}`.replace(/<\/script/gi, "<\\/script");
+export const block = (src) => latin1(`// ---- ${src} ----\n${read(src).trim().replace(/\r\n/g, "\n")}`).replace(/<\/script/gi, "<\\/script");
 const js = sources.map(block).join("\n\n");
 // A module tagged `data-early` runs where it stands, before the page's one script arrives (the loading curtain's
 // line). Its block opens as `<script data-early>`, so the distribution steps still find the page's script as the

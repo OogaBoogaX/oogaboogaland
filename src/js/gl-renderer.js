@@ -1592,11 +1592,12 @@ void main() {
     const activeRecords = [];
     let activeCount = 0;
     // scene.js's three ancestor-flag walks, memoised per render: the flags they read are set by scene updates and
-    // stay frozen while a frame renders. Walking up to a cached ancestor serves every descendant of that chain.
-    const modeMemo = new Map(), cameraMemo = new Map(), cutawayMemo = new Map();
+    // stay frozen while a frame renders. Walking up to a cached ancestor serves every descendant of that chain. The
+    // memo lives on the node, stamped with the render it belongs to, so a render starts with one increment.
+    let memoFrame = 0;
     const matrixModeOf = (node) => {
-      let mode = modeMemo.get(node);
-      if (mode !== undefined) return mode;
+      if (node.modeFrame === memoFrame) return node.modeMemo;
+      let mode;
       if (node.matrixNative) mode = 5;
       else if (node.matrixLiving) mode = 2;
       else if (node.matrixCloud) mode = 4;
@@ -1604,17 +1605,22 @@ void main() {
         const ancestor = node.parent ? matrixModeOf(node.parent) : 0;
         mode = ancestor === 5 || ancestor === 2 || ancestor === 4 ? ancestor : node.matrixEmissiveLiving || node.matrixSignLiving ? 3 : ancestor;
       }
-      modeMemo.set(node, mode);
+      node.modeFrame = memoFrame;
+      node.modeMemo = mode;
       return mode;
     };
     const hiddenFromCamera = (node) => {
-      let hidden = cameraMemo.get(node);
-      if (hidden === undefined) cameraMemo.set(node, hidden = !!(node.cameraHidden || node.parent && hiddenFromCamera(node.parent)));
+      if (node.cameraFrame === memoFrame) return node.cameraMemo;
+      const hidden = !!(node.cameraHidden || node.parent && hiddenFromCamera(node.parent));
+      node.cameraFrame = memoFrame;
+      node.cameraMemo = hidden;
       return hidden;
     };
     const hiddenFromCutaway = (node) => {
-      let hidden = cutawayMemo.get(node);
-      if (hidden === undefined) cutawayMemo.set(node, hidden = !!(node.cutawayWholeHidden || node.parent && hiddenFromCutaway(node.parent)));
+      if (node.cutawayFrame === memoFrame) return node.cutawayMemo;
+      const hidden = !!(node.cutawayWholeHidden || node.parent && hiddenFromCutaway(node.parent));
+      node.cutawayFrame = memoFrame;
+      node.cutawayMemo = hidden;
       return hidden;
     };
     let dsbGPU=null;
@@ -3436,9 +3442,7 @@ void main() {
     const render = (root, camera, opts = {}, meshRigs = opts.meshRigs === true) => {
       if (lost || !pollPrograms()) return false;
       // The scene's ancestor flags (matrix modes, camera/cutaway hides) were settled by the scene's update.
-      modeMemo.clear();
-      cameraMemo.clear();
-      cutawayMemo.clear();
+      memoFrame++;
       rigMode = !!meshRigs && !!rigPrograms && !rigFailure;
       if (rigMode && !pollRigPrograms()) { if (rigFailure) rigMode = false; else return false; }
       programs = rigMode ? rigPrograms : res.programs;
