@@ -4,18 +4,33 @@
   const { mulberry32, hexToRgb, clamp } = BL.math;
   // Compact completed terrain positions without rounding collision or sight boundaries.
   // Faces and lines retain their order and metadata; the first exact position owns each index.
+  // Positions are matched on their exact 64-bit patterns (so -0 stays apart from 0) in an open-addressed table,
+  // instead of a string key per vertex.
   const compactVertices = (geometry) => {
-    const source = geometry.verts, vertices = [], indices = new Uint32Array(source.length / 3), shared = new Map();
-    for (let i = 0; i < source.length; i += 3) {
-      const x = source[i], y = source[i + 1], z = source[i + 2];
-      const key = (Object.is(x, -0) ? "-0" : x) + "," + (Object.is(y, -0) ? "-0" : y) + "," + (Object.is(z, -0) ? "-0" : z);
-      let index = shared.get(key);
-      if (index === undefined) {
-        index = vertices.length / 3;
-        shared.set(key, index);
-        vertices.push(x, y, z);
+    const count = geometry.verts.length / 3, source = Float64Array.from(geometry.verts), bits = new Uint32Array(source.buffer);
+    const vertices = [], indices = new Uint32Array(count);
+    let size = 1;
+    while (size < count * 2) size *= 2;
+    const table = new Int32Array(size).fill(-1), mask = size - 1;
+    for (let v = 0; v < count; v++) {
+      const at = v * 6;
+      let hash = 0;
+      for (let k = 0; k < 6; k++) hash = Math.imul(hash ^ bits[at + k], 0x9e3779b1) >>> 0;
+      let slot = (hash ^ hash >>> 15) & mask, index = -1;
+      for (;;) {
+        const first = table[slot];
+        if (first < 0) break;
+        const other = first * 6;
+        if (bits[other] === bits[at] && bits[other + 1] === bits[at + 1] && bits[other + 2] === bits[at + 2]
+          && bits[other + 3] === bits[at + 3] && bits[other + 4] === bits[at + 4] && bits[other + 5] === bits[at + 5]) { index = indices[first]; break; }
+        slot = slot + 1 & mask;
       }
-      indices[i / 3] = index;
+      if (index < 0) {
+        index = vertices.length / 3;
+        table[slot] = v;
+        vertices.push(source[v * 3], source[v * 3 + 1], source[v * 3 + 2]);
+      }
+      indices[v] = index;
     }
     for (const face of geometry.faces) for (let i = 0; i < face.i.length; i++) face.i[i] = indices[face.i[i]];
     for (const line of geometry.lines) for (let i = 0; i < line.i.length; i++) line.i[i] = indices[line.i[i]];

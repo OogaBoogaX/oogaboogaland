@@ -2503,6 +2503,27 @@ void main() {
     };
     // Matrix modes 2 and 3: an instance the wave can take wherever it stands, so its record needs the full shader.
     const isLiving = (mode) => mode > 1.5 && mode < 3.5;
+    // With no Matrix wave running, the full shader adds to living instances only the standing (permanent) Matrix, and
+    // only where one stands inside a cave's footprint (the shader's box from each mouth: 7 m deep, 3.35 m either side,
+    // 4.15 m up). A living record whose instances' cull spheres all clear every footprint shades through the plain
+    // variant like any other mesh: the island's cliff trees, which are living for the wave, no longer pay for the full
+    // shader in every ordinary frame.
+    const livingClear = (rec, matrix) => {
+      if (!matrix || !(matrix.permanentCave > 0)) return true;
+      if (rec.batch || !matrix.caves || !matrix.caveBounds) return false;
+      const caves = matrix.caves, bounds = matrix.caveBounds, s = rec.spheres;
+      for (let n = 0; n < rec.count; n++) {
+        const x = s[n * 4], y = s[n * 4 + 1], z = s[n * 4 + 2], r = s[n * 4 + 3];
+        for (let i = 0; i < caves.length / 4; i++) {
+          const sr = caves[i * 4], cr = caves[i * 4 + 1], o = i * 4;
+          if (!sr && !cr) continue;
+          const depth = caves[o + 2] - (x * sr + z * cr), across = (x - bounds[o]) * cr - (z - bounds[o + 2]) * sr, height = y - bounds[o + 1];
+          if (depth - r <= bounds[o + 3] && (i + 1 === matrix.permanentCave || depth + r >= 0)
+            && Math.abs(across) - r <= 3.35 && height + r >= 0 && height - r <= 4.15) return false;
+        }
+      }
+      return true;
+    };
     const uploadInstances = (rec) => {
       const need = rec.count * INSTANCE_FLOATS;
       if (rec.batch) {
@@ -2892,7 +2913,7 @@ void main() {
         if (!part || !n) continue;
         let first = 0, count = part.count;
         if (plainFilter) {
-          const plain = rec.living || g.matrixCave || g.portalSurface || g.lakeBody || g.imageSurface ? 0 : part.plainCount;
+          const plain = rec.living && !rec.livingClear || g.matrixCave || g.portalSurface || g.lakeBody || g.imageSurface ? 0 : part.plainCount;
           if (plainFilter > 0) count = plain;
           else {
             first = plain;
@@ -3586,6 +3607,7 @@ void main() {
         if (rec.offscreen) culled += rec.drawCount; else drawn += rec.drawCount;
         if (rec.geometry.mirrorSource && !rec.offscreen) mirror.shards += rec.drawCount;
         uploadForRender(rec);
+        rec.livingClear = rec.living && livingClear(rec, matrix);
       }
       // A matrix that moved since last frame (a following shadow centre) draws everything as before; a steady one
       // bakes the static casters once, then each frame copies them in and draws only the moving ones.
