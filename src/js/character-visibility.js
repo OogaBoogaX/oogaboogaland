@@ -405,13 +405,15 @@
       return false;
     };
     let headMinX = Infinity, headMaxX = -Infinity, headTop = Infinity;
+    // The head's own vertices, not its bounding-box corners: seen from above, a box's far top corner (pushed back by
+    // the nose, beard and hair) projects well above the skull and left a gap under the name and speech.
     const projectHead = (node) => {
       if (!node.visible || node.cameraHidden) return;
       const entry = records.get(node)?.[0];
       if (entry && entry.frame === frame) {
-        const b = entry.bounds, m = entry.camera;
-        for (let i = 0; i < 8; i++) {
-          const x = i & 1 ? b.max[0] : b.min[0], y = i & 2 ? b.max[1] : b.min[1], z = i & 4 ? b.max[2] : b.min[2];
+        const v = entry.geometry.verts, m = entry.camera;
+        for (let i = 0; i < v.length; i += 3) {
+          const x = v[i], y = v[i + 1], z = v[i + 2];
           const depth = -(m[2] * x + m[6] * y + m[10] * z + m[14]);
           if (depth < near) continue;
           const span = projectionDepth(depth);

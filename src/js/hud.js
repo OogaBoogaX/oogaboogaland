@@ -1726,6 +1726,7 @@
       else if (b.dataset.action === "account-logout") BL.net.logout();
       else if (b.dataset.action === "account-rejoin") BL.net.rejoin();
       else if (b.dataset.action === "account-voice") BL.voice.toggle();
+      else if (b.dataset.action === "account-voice-leave") BL.voice.stop();
       else actionHandler && actionHandler(b.dataset.action);
     });
     // A game's side panels fold away and come back from a tab on the screen's edge: a `data-fold`
@@ -1736,7 +1737,7 @@
       panel.dataset.folded = String(panel.dataset.folded !== "true");
     });
     let tipText = "", tipState = "", tipHealth = -1, tipHealthMax = -1, tipW = 0, tipH = 0, tipCave = null, tipName = false, tipLeft = NaN, tipTop = NaN;
-    let tipVisibility = null, tipSpeechTop = Infinity;
+    let tipVisibility = null, tipSpeechTop = Infinity, tipSpeechAlpha = 0;
     const tipScreen = { x: 0, y: 0, depth: 0 };
     // A tooltip's box depends only on its text, its name/no-status-dot classes (the health bar rides
     // on the name class) and the viewport width (the name class's max-width), so a tooltip measured
@@ -1751,7 +1752,7 @@
     };
     const tooltip = {
       show: (text, x, y, cave = null, noStatusDot = false, above = false) => {
-        if (cave !== tipCave) tipSpeechTop = Infinity;
+        if (cave !== tipCave) { tipSpeechTop = Infinity; tipSpeechAlpha = 0; }
         tipCave = cave;
         const name = !!cave;
         const changed = text !== tipText || name !== tipName || el.tooltip.classList.contains("tooltip--no-status-dot") !== noStatusDot;
@@ -1799,7 +1800,7 @@
         if (!visibility) tooltip.hide();
       },
       beginFrame: () => {
-        tipSpeechTop = Infinity;
+        tipSpeechTop = Infinity; tipSpeechAlpha = 0;
         tooltip.update(false);
       },
       update: (place = true) => {
@@ -1822,13 +1823,15 @@
         }
         el.tooltip.hidden = !tipVisibility.anchor(tipCave, tipScreen);
         if (el.tooltip.hidden || !place) return;
-        const top = Math.min(tipScreen.y - 8, tipSpeechTop - 6) - tipH;
+        // The name rests on the head and rises over a bubble only as far as the bubble shows, so a bubble fading
+        // in or out never leaves it hanging over empty space.
+        const rest = tipScreen.y - 2, top = rest + (Math.min(rest, tipSpeechTop - 6) - rest) * tipSpeechAlpha - tipH;
         placeTooltip(Math.max(8, Math.min(window.innerWidth - tipW - 8, tipScreen.x - tipW / 2)), Math.max(8, top));
       },
       // The name sits above speech; reserve room for both near the top edge.
       speechSpace: (cave) => cave && cave === tipCave && !el.tooltip.hidden ? tipH + 6 : 0,
-      aboveSpeech: (cave, top) => {
-        if (cave && cave === tipCave) tipSpeechTop = Math.min(tipSpeechTop, top);
+      aboveSpeech: (cave, top, alpha = 1) => {
+        if (cave && cave === tipCave && top < tipSpeechTop) { tipSpeechTop = top; tipSpeechAlpha = Math.max(0, Math.min(1, alpha)); }
       },
       hide: () => {
         tipCave = null;
@@ -2181,7 +2184,7 @@
   // Net and voice emits re-run this several times a second with the same outcome; last-written
   // records keep an unchanged textContent from re-invalidating the line.
   let accountBackend = null, accountMe = null, accountName = null, accountWords = null, accountWordsHidden = null;
-  let accountLive = null, accountRejoinHidden = null, accountVoiceHidden = null, accountVoiceWords = null, accountVoicePressed = null;
+  let accountLive = null, accountRejoinHidden = null, accountVoiceHidden = null, accountVoiceWords = null, accountVoicePressed = null, accountLeaveHidden = null;
   const showAccount = ({ backend, me, room, online }) => {
     const hasMe = !!me;
     if (!!backend !== accountBackend) { accountBackend = !!backend; $("account").hidden = !backend; }
@@ -2202,7 +2205,8 @@
     if (wordsHidden !== accountWordsHidden) { accountWordsHidden = wordsHidden; $("account-room").hidden = wordsHidden; }
     const rejoinHidden = !me || !ROOM_WORDS[room];
     if (rejoinHidden !== accountRejoinHidden) { accountRejoinHidden = rejoinHidden; $("account-rejoin").hidden = rejoinHidden; }
-    // Voice: join, then mute and unmute; a failure says why on the button until the next try.
+    // Voice: join, then mute and unmute beside Leave voice, which hangs up and releases the microphone without
+    // signing out; a failure says why on the button until the next try. Leave waits out a join in progress.
     const voice = BL.voice.stats, voiceButton = $("account-voice");
     const voiceHidden = room !== "live";
     if (voiceHidden !== accountVoiceHidden) { accountVoiceHidden = voiceHidden; voiceButton.hidden = voiceHidden; }
@@ -2210,6 +2214,8 @@
     if (voiceWords !== accountVoiceWords) { accountVoiceWords = voiceWords; voiceButton.textContent = voiceWords; }
     const pressed = String(voice.enabled && !voice.muted);
     if (pressed !== accountVoicePressed) { accountVoicePressed = pressed; voiceButton.setAttribute("aria-pressed", pressed); }
+    const leaveHidden = voiceHidden || !voice.enabled;
+    if (leaveHidden !== accountLeaveHidden) { accountLeaveHidden = leaveHidden; $("account-voice-leave").hidden = leaveHidden; }
   };
   // The microphone's note (#181), page-level as the account line is: muted in voice, it stays until unmuted;
   // alone in voice (nobody here to hear, so the microphone is held off), it says so until someone comes;

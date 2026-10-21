@@ -313,7 +313,7 @@
     };
     const paintSpeech = (ctx, text, x, y, alpha, cave, tw, more, bob) => {
       const top = drawBubble(ctx, text, x, y, alpha, hud ? hud.tooltip.speechSpace(cave) : 0, tw, more, bob);
-      if (hud) hud.tooltip.aboveSpeech(cave, top);
+      if (hud) hud.tooltip.aboveSpeech(cave, top, alpha);
     };
     // drawExtra paints between the bubbles and the ticker.
     const drawOverlay = (dt, drawExtra) => {
