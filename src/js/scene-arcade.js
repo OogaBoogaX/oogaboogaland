@@ -16,7 +16,8 @@
   "use strict";
   const BL = window.BL = window.BL || {};
   const { math, models, contributors, hud: hudMod, interact: interactMod, pilot: pilotMod, fx: fxMod } = BL;
-  const AM = BL.arcadeModels, AG = BL.arcadeGames;
+  // The games' rules and the hall's sound are deferred on a hosted page and arrive in `prepare`.
+  const AM = BL.arcadeModels;
   const { clamp } = math;
   const { createNode, addChild, removeChild, createCamera, stepTweens, tweenCount, traverseVisible, boundsOf } = BL.scene;
   const { HALL, STAGE, MEZZ, GAMES, LAYOUT, CAB, SCREEN, FRAMES, FPS } = AM;
@@ -133,18 +134,19 @@
     return set.build();
   });
 
+  // Each way out holds only once the director has taken it: `go` refuses while another transition runs.
   const leaveCave = () => {
     if (leaving) return;
-    leaving = true;
-    go("hub");
+    leaving = go("hub");
   };
   // Into a game; a carnival machine names which of its kind (`place`), and the game comes back to it.
   const open = (id, place = null) => {
     if (leaving) return;
-    leaving = openingGame = true;
-    go(id, place);
+    if (go(id, place)) leaving = openingGame = true;
   };
   const play = (i) => open(GAMES[i].id);
+  // The game's deferred code did not arrive: the visitor stays in the hall, and its cabinets and way out work again.
+  const stay = () => { leaving = openingGame = false; };
 
   // The line under each loop: the visitor's best in that game, or a call to play. A retro game's best is an arcade one.
   const bestOf = (id) => {
@@ -320,22 +322,22 @@
       return station;
     };
     const F = LAYOUT.frames;
-    LAYOUT.hoops.forEach((p, i) => machine(p, AM.hoopMachine(), AG.hoopShot, "hoops", [-0.82, 0.82, -3.75, -0.15], i, i === 1, [0.62, 0.78, -0.13]));
-    LAYOUT.skee.forEach((p, i) => machine(p, AM.skeeLane(), AG.skeeball, "skee", [-0.62, 0.62, -6.5, -0.09], i, i === 1, [0.42, 0.72, -0.12]));
-    machine(LAYOUT.shy, AM.coconutShy(), AG.coconutShy, "shy", [-1.9, 1.9, -4.3, -0.35], 0, false);
+    LAYOUT.hoops.forEach((p, i) => machine(p, AM.hoopMachine(), BL.arcadeGames.hoopShot, "hoops", [-0.82, 0.82, -3.75, -0.15], i, i === 1, [0.62, 0.78, -0.13]));
+    LAYOUT.skee.forEach((p, i) => machine(p, AM.skeeLane(), BL.arcadeGames.skeeball, "skee", [-0.62, 0.62, -6.5, -0.09], i, i === 1, [0.42, 0.72, -0.12]));
+    machine(LAYOUT.shy, AM.coconutShy(), BL.arcadeGames.coconutShy, "shy", [-1.9, 1.9, -4.3, -0.35], 0, false);
     // The claws' blocks reach half-way to the posts either side of their bays, so the narrow gaps between the booths,
     // their scoreboards and the posts are closed rather than squeezed into. The air hockey table's scoreboards stand on
     // posts beyond its far end, wider than the table, and the pool tables' behind theirs: a block of their own.
-    F.claw.forEach((p, i) => machine(p, AM.clawBooth(i), AG.clawGame, "claw", [-1.4, 1.4, -1.52, -0.28], i, i === 0));
-    F.pinball.forEach((p, i) => { const t = AM.pinball(i); machine(p, { body: t.body, glow: t.lit, glass: t.glass, dz: -1.05 }, AG.pinballGame, "pinball", [-0.43, 0.43, -1.84, -0.2], i, i === 0); });
-    F.hockey.forEach((p, i) => { const a = AM.airHockey(); machine(p, { body: a.body, glow: a.lit, dz: -1.75, turn: Math.PI / 2 }, AG.airHockey, "hockey", [-0.65, 0.65, -2.95, -0.55], i, i === 0); blocks.push(blockOf(p, -1.1, 1.15, -3.25, -3.06)); });
-    F.pool.forEach((p, i) => { const t = AM.poolTable(i); machine(p, { body: t.body, glow: t.glow, lamp: t.lamp, dz: -1.35 }, AG.poolGame, "billiards", [-1.35, 1.35, -2.08, -0.62], i, false); blocks.push(blockOf(p, -1.03, 1.0, -2.35, -2.08)); });
-    F.darts.forEach((p, i) => machine(p, { body: AM.dartBoard(), dz: -AM.DART.oche, dy: AM.DART.y, oche: true }, AG.dartsGame, "darts", null, i, false));
+    F.claw.forEach((p, i) => machine(p, AM.clawBooth(i), BL.arcadeGames.clawGame, "claw", [-1.4, 1.4, -1.52, -0.28], i, i === 0));
+    F.pinball.forEach((p, i) => { const t = AM.pinball(i); machine(p, { body: t.body, glow: t.lit, glass: t.glass, dz: -1.05 }, BL.arcadeGames.pinballGame, "pinball", [-0.43, 0.43, -1.84, -0.2], i, i === 0); });
+    F.hockey.forEach((p, i) => { const a = AM.airHockey(); machine(p, { body: a.body, glow: a.lit, dz: -1.75, turn: Math.PI / 2 }, BL.arcadeGames.airHockey, "hockey", [-0.65, 0.65, -2.95, -0.55], i, i === 0); blocks.push(blockOf(p, -1.1, 1.15, -3.25, -3.06)); });
+    F.pool.forEach((p, i) => { const t = AM.poolTable(i); machine(p, { body: t.body, glow: t.glow, lamp: t.lamp, dz: -1.35 }, BL.arcadeGames.poolGame, "billiards", [-1.35, 1.35, -2.08, -0.62], i, false); blocks.push(blockOf(p, -1.03, 1.0, -2.35, -2.08)); });
+    F.darts.forEach((p, i) => machine(p, { body: AM.dartBoard(), dz: -AM.DART.oche, dy: AM.DART.y, oche: true }, BL.arcadeGames.dartsGame, "darts", null, i, false));
     // Each board hangs at a walker's height on the back wall between two columns: in the way across its hide from the
     // rock to the columns' faces, so nobody walks into it and a walker sliding along the columns catches on none.
     const boardBox = boundsOf(AM.dartBoard());
     for (const p of F.darts) blocks.push([p.x + boardBox.min[0], p.x + boardBox.max[0], HALL.back, columnFace, ...FLOOR_FEET]);
-    F.ride.forEach((p, i) => machine(p, { body: AM.ride(i).base }, AG.rideGame, "ride", [-0.7, 0.7, -0.88, 0.98], i, false));
+    F.ride.forEach((p, i) => machine(p, { body: AM.ride(i).base }, BL.arcadeGames.rideGame, "ride", [-0.7, 0.7, -0.88, 0.98], i, false));
     // The doorway's token changer and ticket muncher (each in the way as far as it stands, the muncher shallower),
     // and the prize queue's ropes.
     LAYOUT.changers.forEach((p, i) => {
@@ -375,7 +377,7 @@
     // The prize counter by the doorway: the case of prizes, the sign and the ticket balance on a board.
     const pc = AM.prizeCounter(), prizes = framed(LAYOUT.prizes), prizeBody = createNode({ geometry: pc.body }), prizeLit = createNode({ geometry: pc.lit, sightHidden: true });
     addChild(prizes, prizeBody, createNode({ geometry: pc.glass, sightHidden: true }), prizeLit, signNode("Prizes", "banana", 1.8, 0, 4.1, -1));
-    ticketBoard = AG.scoreboard(prizes, "TICKETS", 5, "#ffb347", { x: 1.2, y: 2.55, z: 0.1 }, true);
+    ticketBoard = BL.arcadeGames.scoreboard(prizes, "TICKETS", 5, "#ffb347", { x: 1.2, y: 2.55, z: 0.1 }, true);
     ticketBoard.show(game.state.arcade.tickets);
     addChild(root, prizes);
     target(prizeBody, { kind: "prizes" }, 2.2);
@@ -1981,12 +1983,13 @@
   const arcadeScene = {
     // Voice zone: the Arcade group, which its mouth on the island shares (`arcade`).
     voiceZone: "arcade.hall",
-    id: "arcade", enter, update, overlay, onDonation, onKey, onLootCleared, renderOpts: RENDER_OPTS, leave, stats, liveGeometry,
+    id: "arcade", enter, update, overlay, onDonation, onKey, onLootCleared, renderOpts: RENDER_OPTS, stay, leave, stats, liveGeometry,
     root: null, camera: null, input: null, debug: null, agent: null, agentView: null, agentControls: null, agentHandoff: null,
     get inMotion() {
       return false;
     }
   };
+  arcadeScene.prepare = () => { const loading = BL.deferred.load("arcade"); return loading ? loading.then(() => null) : null; };
   BL.scenes = BL.scenes || {};
   BL.scenes.arcade = arcadeScene;
 })();

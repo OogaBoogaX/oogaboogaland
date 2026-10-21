@@ -178,7 +178,9 @@
   };
   // A scene may `prepare(place, ctx)` before it is built (the Timechain Sphere's rooms: their code, deferred on a
   // hosted page, and whose visit it is). It answers null to go ahead, `{ scene, place }` to arrive there instead, or a
-  // promise of either; the screen holds dark until it settles, and a rejection fades back in where the visitor was.
+  // promise of either; the screen holds dark until it settles, and a rejection fades back in where the visitor was. The
+  // scene there is told (`stay`) once the fade is done and a new transition can start, so it can put back what it set
+  // up to leave; until then its departure still holds, and a press during the fade is refused rather than lost.
   const settle = (t, answer) => {
     if (answer && typeof answer.then === "function") {
       t.ready = false;
@@ -283,12 +285,17 @@
     window.BL.hud.toast("That place could not be opened · try again");
     router.abandon();
   };
+  const settled = () => {
+    const failed = transition.failed;
+    transition = null;
+    if (failed && active && active.stay) active.stay();
+  };
   const stepTransition = (dt) => {
     if (transition.instant) {
       if (!transition.ready) return;
       if (transition.failed) abandon();
       else { const { next, place } = landing(transition); swap(next, place); }
-      transition = null;
+      settled();
       fade = 0;
       return;
     }
@@ -303,7 +310,7 @@
       return;
     }
     fade = 1 - Math.min(1, transition.t / FADE);
-    if (fade === 0) transition = null;
+    if (fade === 0) settled();
   };
   // Fills in CSS pixels (clientWidth/clientHeight, cached above), not backing-store pixels.
   const drawFade = () => {
