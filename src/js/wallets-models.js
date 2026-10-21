@@ -2,9 +2,9 @@
 // till, the display cases, the neon, the camera, the tape. Immutable shared meshes.
 (() => {
   "use strict";
-  const BL=window.BL,M=BL.models,S=BL.scene,cache=new Map();
+  const BL=window.BL,M=BL.models,S=BL.scene,cache=new Map(),scoped=M.track(()=>cache.clear());
   const geometry=(kind,variant=0)=>{
-    const key=kind+":"+variant;if(cache.has(key))return cache.get(key);
+    scoped.use();const key=kind+":"+variant;if(cache.has(key))return cache.get(key);
     const parts=[],b=(c,x,y,z,w,h,d,e=0)=>parts.push(M.box({color:c,w,h,d,emissive:e,offset:{x,y,z}}));
     const dark="#17191c",steel="#9aa3ab",orange="#ff8a1f",cream="#f6f1e4",card="#c49a6c",tape="#e0cfa4",red="#c8352a";
     // A taped shipping carton standing on (x, y, z), turned by a, with a red handling mark on its front.

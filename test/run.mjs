@@ -15354,6 +15354,11 @@ const walletsChecks = BL => {
   record("Wallets pools: scorches, fireballs and devices stay within their fixed caps",T.stats().scorches<=W.SCORCH_CAP&&T.stats().fireballs<=4&&T.spawn(W.BOMB_CAP+4,flat.x,flat.z+20).length===W.BOMB_CAP&&targets.size===W.BOMB_CAP,JSON.stringify(T.stats()));
   sys.dispose();const left=Wd.root.children.length;I.dispose();Wd.dispose();
   record("Wallets disposal: every batch and pick target leaves with the visit",targets.size===0&&left===children,JSON.stringify({targets:targets.size,left,children}));
+  // The kit's and the devices' meshes join the builder caches that leaving DSB Land drops.
+  const scopes=BL.models,kitOf=BL.walletsModels.geometry,lookOf=BL.walletBombs.geometryOf;scopes.setScope("dsb");
+  const crate=kitOf("crate"),look=lookOf(0),cratesShared=kitOf("crate")===crate&&lookOf(0)===look;scopes.release("dsb",["hub"]);
+  const cratesRebuilt=kitOf("crate")!==crate&&lookOf(0)!==look;scopes.setScope(null);
+  record("Wallets caches: the kit's and the devices' meshes are shared within a visit and dropped when DSB Land is left",cratesShared&&cratesRebuilt);
   walletsMenuChecks(BL);
 };
 // The machine through a minimal DOM: ClownCard and Rektdger as pictures and names alone, Take hands over the chosen one.

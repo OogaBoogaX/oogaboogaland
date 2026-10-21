@@ -63,10 +63,8 @@
 
   // The two parody looks, drawn larger than life so they read at a distance. Faces marked emissive are the screen,
   // the REKT on it, the LED and the clown nose, which blink by the instance glow.
-  const geometryOf = (() => {
-    const cache = [];
-    return (look) => cache[look] || (cache[look] = build(look));
-  })();
+  // Like the other builder caches here, they are dropped when the scenes that used them are left.
+  const geometryOf = BL.models.variants((look) => build(look));
   const build = (look) => {
     const { box, merge } = BL.models;
     if (look === 0) {
@@ -102,37 +100,31 @@
     }
     return merge(...parts);
   };
-  const scorchGeometry = (() => {
-    let geo = null;
-    return () => geo || (geo = (() => {
-      const { makeVox, voxelGeometry } = BL.models;
-      const v = makeVox(), rand = BL.math.mulberry32(919);
-      for (let x = -9; x <= 8; x++) for (let z = -9; z <= 8; z++) {
-        const d = Math.hypot(x + 0.5, z + 0.5);
-        if (d > 8.6 || d > 6.5 && rand() < 0.5) continue;
-        v.set(x, 0, z, d < 3 ? 0 : rand() < 0.3 ? 2 : 1);
-      }
-      const g = voxelGeometry(v, { unit: 1 / 16, palette: ["#141210", "#2b2724", "#3d3a36"], origin: { x: 0, y: 0, z: 0 } });
-      g.castShadow = false;
-      return g;
-    })());
-  })();
+  const scorchGeometry = BL.models.cached(() => {
+    const { makeVox, voxelGeometry } = BL.models;
+    const v = makeVox(), rand = BL.math.mulberry32(919);
+    for (let x = -9; x <= 8; x++) for (let z = -9; z <= 8; z++) {
+      const d = Math.hypot(x + 0.5, z + 0.5);
+      if (d > 8.6 || d > 6.5 && rand() < 0.5) continue;
+      v.set(x, 0, z, d < 3 ? 0 : rand() < 0.3 ? 2 : 1);
+    }
+    const g = voxelGeometry(v, { unit: 1 / 16, palette: ["#141210", "#2b2724", "#3d3a36"], origin: { x: 0, y: 0, z: 0 } });
+    g.castShadow = false;
+    return g;
+  });
   // The blast's ball of fire: a glowing voxel blob, yellow at its heart and orange outside, grown and shrunk by scale.
-  const fireballGeometry = (() => {
-    let geo = null;
-    return () => geo || (geo = (() => {
-      const { makeVox, voxelGeometry } = BL.models;
-      const v = makeVox(), rand = BL.math.mulberry32(733);
-      for (let x = -6; x <= 5; x++) for (let y = -6; y <= 5; y++) for (let z = -6; z <= 5; z++) {
-        const d = Math.hypot(x + 0.5, y + 0.5, z + 0.5);
-        if (d > 6 || d > 4.8 && rand() < 0.45) continue;
-        v.set(x, y, z, d < 3.5 ? 0 : rand() < 0.5 ? 1 : 2);
-      }
-      const g = voxelGeometry(v, { unit: 1 / 16, palette: ["#fff1b0", "#ffb02e", "#ff6a1f"], emissive: { 0: 1, 1: 1, 2: 1 } });
-      g.castShadow = false;
-      return g;
-    })());
-  })();
+  const fireballGeometry = BL.models.cached(() => {
+    const { makeVox, voxelGeometry } = BL.models;
+    const v = makeVox(), rand = BL.math.mulberry32(733);
+    for (let x = -6; x <= 5; x++) for (let y = -6; y <= 5; y++) for (let z = -6; z <= 5; z++) {
+      const d = Math.hypot(x + 0.5, y + 0.5, z + 0.5);
+      if (d > 6 || d > 4.8 && rand() < 0.45) continue;
+      v.set(x, y, z, d < 3.5 ? 0 : rand() < 0.5 ? 1 : 2);
+    }
+    const g = voxelGeometry(v, { unit: 1 / 16, palette: ["#fff1b0", "#ffb02e", "#ff6a1f"], emissive: { 0: 1, 1: 1, 2: 1 } });
+    g.castShadow = false;
+    return g;
+  });
   // One instance: rotation Ry(yaw) Rz(roll), scaled by s, at (x, y, z), with its glow.
   const writeInstance = (data, o, yaw, roll, s, x, y, z, glow) => {
     const cy = Math.cos(yaw), sy = Math.sin(yaw), cr = Math.cos(roll), sr = Math.sin(roll);
@@ -143,20 +135,17 @@
     data[o + 16] = glow; data[o + 17] = 0; data[o + 18] = 0; data[o + 19] = 0;
   };
   // The soft ring a device on the ground glows in, so it is easy to find: device orange, lit from within.
-  const haloGeometry = (() => {
-    let geo = null;
-    return () => geo || (geo = (() => {
-      const { makeVox, voxelGeometry } = BL.models;
-      const v = makeVox();
-      for (let x = -10; x <= 9; x++) for (let z = -10; z <= 9; z++) {
-        const d = Math.hypot(x + 0.5, z + 0.5);
-        if (d >= 7.4 && d <= 9.4) v.set(x, 0, z, d > 8.5 ? 1 : 0);
-      }
-      const g = voxelGeometry(v, { unit: 1 / 16, palette: ["#ffb02e", "#ff8a1f"], origin: { x: 0, y: 0, z: 0 }, emissive: { 0: 0.9, 1: 0.6 } });
-      g.castShadow = false;
-      return g;
-    })());
-  })();
+  const haloGeometry = BL.models.cached(() => {
+    const { makeVox, voxelGeometry } = BL.models;
+    const v = makeVox();
+    for (let x = -10; x <= 9; x++) for (let z = -10; z <= 9; z++) {
+      const d = Math.hypot(x + 0.5, z + 0.5);
+      if (d >= 7.4 && d <= 9.4) v.set(x, 0, z, d > 8.5 ? 1 : 0);
+    }
+    const g = voxelGeometry(v, { unit: 1 / 16, palette: ["#ffb02e", "#ff8a1f"], origin: { x: 0, y: 0, z: 0 }, emissive: { 0: 0.9, 1: 0.6 } });
+    g.castShadow = false;
+    return g;
+  });
 
   // `groundAt(x, z, feet)` is the floor wherever the visitor is, `bounds()` the walls of the room they are in (null
   // outside), which a thrown device bounces back off; `muted()` says whether DSB's sound is off.
