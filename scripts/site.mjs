@@ -26,6 +26,11 @@ rmSync(out, { recursive: true, force: true });
 mkdirSync(join(out, "cards"), { recursive: true });
 
 let shell = readFileSync(join(root, "oogaboogaland.html"), "utf8");
+if (process.argv.includes("--worker-page")) {
+  const tag = '<html lang="en">';
+  if (!shell.includes(tag)) throw new Error("oogaboogaland.html: expected <html lang=\"en\">");
+  shell = shell.replace(tag, '<html lang="en" data-worker-page="1">');
+}
 if (process.argv.includes("--audio-assets")) shell = externalizeAudio(shell, root, out);
 shell = externalizeModules(shell, out, deferred, block);
 if (shell.split("</title>").length !== 2 || shell.split("</head>").length !== 2) throw new Error("oogaboogaland.html: expected one <title> and one </head>");

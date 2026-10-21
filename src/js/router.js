@@ -48,6 +48,13 @@
       else if (boot) history.replaceState(state, "", entry.path || current() ? urlOf(entry) : location.href);
       else history.pushState(state, "", urlOf(entry));
     };
+    // Closing a place's popup leaves its scene in place and makes a reload stay there.
+    const dismissPlace = (scene, place) => {
+      if (at.scene !== scene || at.place !== place) return;
+      at = routeOf(scene, null);
+      document.title = routes.title(at);
+      history.replaceState({ scene, place: at.place }, "", urlOf(at));
+    };
     // Back and Forward travel through `go`, so they fade and keep the leave contract like any other trip.
     // Our entries always change scene; a hash edited by hand to another place in the same scene (only from
     // disk, where a changed path would load a new page anyway) boots again there.
@@ -64,7 +71,7 @@
       popped = false;
       history.replaceState({ scene: at.scene, place: at.place }, "", urlOf(at));
     };
-    return { current, arrive, abandon, dispose };
+    return { current, arrive, dismissPlace, abandon, dispose };
   };
-  BL.router = { create };
+  BL.router = { create, served: SERVED };
 })();
