@@ -244,13 +244,15 @@
       statSats: $("stat-sats"),
       bananaTotal: $("banana-total"), bananaSource: $("banana-source"),
       bananaLeaders: $("banana-leaders"), bananaEmpty: $("banana-empty"),
+      bananaRecent: $("banana-recent-list"), bananaRecentEmpty: $("banana-recent-empty"),
+      bananaRecentBar: $("banana-recent-bar"), bananaRecentBarLabel: $("banana-recent-bar-label"),
+      donationMessageLabel: $("donation-message-label"),
       bananaBoardUnit: $("banana-board-unit"), bananaBoardNote: $("banana-board-note"),
       bananaPanel: $("bananas-panel"), bananaRateLabel: $("banana-rate-label"),
       bananaBtcPrice: $("banana-btc-price"), bananaExchange: $("banana-exchange"),
       donorUnits: [...document.querySelectorAll("[data-donor-unit]")],
       lootTab: $("loot-tab"),
       lootCount: $("loot-count"),
-      crateHelp: $("crate-help"),
       worldLootHint: $("world-loot-hint"),
       subtitle: $("subtitle"),
       actions: [...document.querySelectorAll("[data-action]")],
@@ -315,11 +317,6 @@
       presets: [...document.querySelectorAll("[data-preset]")],
       inventory: $("inventory"),
       inventoryEmpty: $("inventory-empty"),
-      handle: $("handle"),
-      message: $("message"),
-      qr: $("qr"),
-      qrUrl: $("qr-url"),
-      feed: $("feed"),
       recipe: $("recipe"),
       recipeText: $("recipe-text")
     };
@@ -342,7 +339,6 @@
     };
     favicon.src = document.querySelector('link[rel="icon"][sizes="64x64"]').href;
     el.lootTab.hidden = !lootEnabled;
-    el.crateHelp.hidden = !lootEnabled;
     el.worldLootHint.hidden = !lootEnabled;
     const savedSheet = readSheetState();
     let sheetHeight = Number.isFinite(savedSheet?.height) && savedSheet.height >= 1 && savedSheet.height <= 10000 ? savedSheet.height : null;
@@ -555,12 +551,47 @@
       if (stopBananaRate) stopBananaRate();
     });
     watchBananaRate();
-    let shownTally, shownBoard, shownReal, shownNetwork, shownOpen;
+    // A fixed pool, so the DOM never grows with donations.
+    const recentRows = Array.from({ length: BL.donations.RECENT_MAX }, () => {
+      const li = document.createElement("li"), name = document.createElement("span"), label = document.createTextNode("");
+      const badge = document.createElement("span"), amount = document.createElement("strong"), message = document.createElement("p");
+      // Every text node exists from the start, so filling a row later adds nothing to the DOM.
+      const amountText = document.createTextNode(""), messageText = document.createTextNode("");
+      name.className = "banana-recent-name";
+      badge.className = "banana-verified";
+      badge.textContent = "✓";
+      badge.title = "Signed in with GitHub using this donor name";
+      badge.setAttribute("role", "img");
+      badge.setAttribute("aria-label", "GitHub name confirmed");
+      badge.hidden = true;
+      amount.className = "banana-amount";
+      message.className = "banana-recent-message";
+      message.hidden = true;
+      name.append(label, badge);
+      amount.append(amountText);
+      message.append(messageText);
+      li.append(name, amount, message);
+      li.hidden = true;
+      el.bananaRecent.append(li);
+      return { li, name, label, badge, amountText, message, messageText };
+    });
+    // The recent list's checkbox keeps it to tips at or above the message bar, remembered in this browser.
+    const RECENT_BAR_KEY = "ooga-recent-bar";
+    let recentBarOnly = false;
+    try { recentBarOnly = localStorage.getItem(RECENT_BAR_KEY) === "1"; } catch { /* no storage: shown unfiltered */ }
+    el.bananaRecentBar.checked = recentBarOnly;
+    on(el.bananaRecentBar, "change", () => {
+      recentBarOnly = el.bananaRecentBar.checked;
+      try { localStorage.setItem(RECENT_BAR_KEY, recentBarOnly ? "1" : "0"); } catch { /* kept for this visit alone */ }
+      refreshDonors(true);
+      el.bananaRecentBar.blur();
+    });
+    let shownTally, shownBoard, shownRecent, shownReal, shownNetwork, shownOpen, shownBar;
     const refreshDonors = (force = false) => {
-      const { real, state, testNetwork } = BL.donations;
+      const { real, state, testNetwork, messageMinSats: bar } = BL.donations;
       showBananaRate();
-      if (!force && shownTally === state.tally && shownBoard === state.board && shownReal === real && shownNetwork === testNetwork && shownOpen === state.open) return;
-      shownTally = state.tally; shownBoard = state.board; shownReal = real; shownNetwork = testNetwork; shownOpen = state.open;
+      if (!force && shownTally === state.tally && shownBoard === state.board && shownRecent === state.recent && shownReal === real && shownNetwork === testNetwork && shownOpen === state.open && shownBar === bar) return;
+      shownTally = state.tally; shownBoard = state.board; shownRecent = state.recent; shownReal = real; shownNetwork = testNetwork; shownOpen = state.open; shownBar = bar;
       const tally = real ? state.tally : donationStats;
       // The chip says whose figures these are: this browser's demo, a test network's, the feed still loading,
       // donations closed, or the island's live feed.
@@ -591,6 +622,27 @@
       el.bananaEmpty.textContent = missingSats ? "Sat totals are not available from the donation feed yet."
         : real && !entries ? "Loading the donor leaderboard…"
         : real ? "No donations yet. Feed the first Ooga!" : "New demo donations will appear here.";
+      // The recent list: the newest first, its orange check only on the API's word that the donor's GitHub login
+      // matched the name, into the fixed rows.
+      const all = real ? state.recent || [] : donationStats?.recentDonations || [];
+      const recent = recentBarOnly ? all.filter((entry) => entry.sats >= bar) : all;
+      el.bananaRecentBarLabel.textContent = `${BANANA_COUNT.format(bar)} sats and up only`;
+      el.donationMessageLabel.textContent = `Banana message (up to 280 characters, with a tip of ${BANANA_COUNT.format(bar)} sats or more)`;
+      for (let i = 0; i < recentRows.length; i++) {
+        const row = recentRows[i], entry = recent[i];
+        row.li.hidden = !entry;
+        if (!entry) continue;
+        row.label.data = entry.handle ? `@${entry.handle}` : "Anonymous";
+        row.name.dataset.anon = String(!entry.handle);
+        row.badge.hidden = !(real && entry.verified);
+        row.amountText.data = (donorUnit === "sats" ? BANANA_COUNT : DONOR_BANANAS).format(entry[donorUnit]);
+        const message = BL.donations.carried(entry.sats, entry.message);
+        row.message.hidden = !message;
+        row.messageText.data = message;
+      }
+      el.bananaRecentEmpty.hidden = recent.length > 0;
+      el.bananaRecentEmpty.textContent = recentBarOnly && all.length ? `None of the latest tips reached ${BANANA_COUNT.format(bar)} sats.`
+        : real ? "Recent donations will appear here as they arrive." : "New demo donations will appear here.";
       el.bananaBoardNote.textContent = !real ? "Demo donations in this browser only. Earlier tips have no donor history."
         : testNetwork ? `Test donations on ${testNetwork}. Leaderboard values are recorded when paid.`
         : "Leaderboard totals use each donation's recorded value.";
@@ -1001,20 +1053,15 @@
     const onAction = (fn) => {
       actionHandler = fn;
     };
-    // Real payments use the same invoice flow as the Factory without leaving the current scene.
+    // The Worker build marks its pages so a failed account lookup cannot turn a real tip into a demo.
+    const workerPage = document.documentElement.dataset.workerPage === "1";
     const openFeed = () => {
-      if (BL.donations.real) return BL.donationPopup.open();
-      if (el.feed.open) return;
-      el.feed.showModal();
+      if (!BL.donations.real && (workerPage || BL.net.state.backend)) {
+        toast("Donations are unavailable right now. Try again shortly.");
+        return;
+      }
+      BL.donationPopup.open(!BL.donations.real);
     };
-    const closeFeed = () => {
-      if (el.feed.open) el.feed.close();
-    };
-    on(el.feed, "keydown", (e) => {
-      if (e.key !== "Escape") return;
-      e.preventDefault();
-      closeFeed();
-    });
     const floatingBoards = [];
     const stackBoards = () => {
       for (let i = 0; i < floatingBoards.length; i++) floatingBoards[i].setLayer(20 + i);
@@ -1614,9 +1661,9 @@
         entry.close();
       }
     }, true);
-    dismissOutside(el.feed, closeFeed);
     dismissOutside(el.recipe, closeRecipe);
     dismissOutside(el.board, () => mainBoard.close());
+    dismissOutside($("donation-popup"), () => BL.donationPopup.closeOutside());
     // The prompt is written to be pasted, so it leaves in one click.
     const copyRecipe = (button) => {
       const text = el.recipeText.textContent;
@@ -1717,7 +1764,6 @@
       if (b === el.mode && e.detail !== 0) return;
       b.blur();
       if (b.dataset.action === "feed") openFeed();
-      else if (b.dataset.action === "feed-close") closeFeed();
       else if (b.dataset.action === "recipe-close") closeRecipe();
       else if (b.dataset.action === "recipe-copy") copyRecipe(b);
       else if (b.dataset.action === "intro-go") b.closest("[data-intro]").hidden = true;
@@ -1726,6 +1772,7 @@
       else if (b.dataset.action === "account-logout") BL.net.logout();
       else if (b.dataset.action === "account-rejoin") BL.net.rejoin();
       else if (b.dataset.action === "account-voice") BL.voice.toggle();
+      else if (b.dataset.action === "account-voice-leave") BL.voice.stop();
       else actionHandler && actionHandler(b.dataset.action);
     });
     // A game's side panels fold away and come back from a tab on the screen's edge: a `data-fold`
@@ -1736,7 +1783,7 @@
       panel.dataset.folded = String(panel.dataset.folded !== "true");
     });
     let tipText = "", tipState = "", tipHealth = -1, tipHealthMax = -1, tipW = 0, tipH = 0, tipCave = null, tipName = false, tipLeft = NaN, tipTop = NaN;
-    let tipVisibility = null, tipSpeechTop = Infinity;
+    let tipVisibility = null, tipSpeechTop = Infinity, tipSpeechAlpha = 0;
     const tipScreen = { x: 0, y: 0, depth: 0 };
     // A tooltip's box depends only on its text, its name/no-status-dot classes (the health bar rides
     // on the name class) and the viewport width (the name class's max-width), so a tooltip measured
@@ -1751,7 +1798,7 @@
     };
     const tooltip = {
       show: (text, x, y, cave = null, noStatusDot = false, above = false) => {
-        if (cave !== tipCave) tipSpeechTop = Infinity;
+        if (cave !== tipCave) { tipSpeechTop = Infinity; tipSpeechAlpha = 0; }
         tipCave = cave;
         const name = !!cave;
         const changed = text !== tipText || name !== tipName || el.tooltip.classList.contains("tooltip--no-status-dot") !== noStatusDot;
@@ -1799,7 +1846,7 @@
         if (!visibility) tooltip.hide();
       },
       beginFrame: () => {
-        tipSpeechTop = Infinity;
+        tipSpeechTop = Infinity; tipSpeechAlpha = 0;
         tooltip.update(false);
       },
       update: (place = true) => {
@@ -1822,13 +1869,15 @@
         }
         el.tooltip.hidden = !tipVisibility.anchor(tipCave, tipScreen);
         if (el.tooltip.hidden || !place) return;
-        const top = Math.min(tipScreen.y - 8, tipSpeechTop - 6) - tipH;
+        // The name rests on the head and rises over a bubble only as far as the bubble shows, so a bubble fading
+        // in or out never leaves it hanging over empty space.
+        const rest = tipScreen.y - 2, top = rest + (Math.min(rest, tipSpeechTop - 6) - rest) * tipSpeechAlpha - tipH;
         placeTooltip(Math.max(8, Math.min(window.innerWidth - tipW - 8, tipScreen.x - tipW / 2)), Math.max(8, top));
       },
       // The name sits above speech; reserve room for both near the top edge.
       speechSpace: (cave) => cave && cave === tipCave && !el.tooltip.hidden ? tipH + 6 : 0,
-      aboveSpeech: (cave, top) => {
-        if (cave && cave === tipCave) tipSpeechTop = Math.min(tipSpeechTop, top);
+      aboveSpeech: (cave, top, alpha = 1) => {
+        if (cave && cave === tipCave && top < tipSpeechTop) { tipSpeechTop = top; tipSpeechAlpha = Math.max(0, Math.min(1, alpha)); }
       },
       hide: () => {
         tipCave = null;
@@ -2007,20 +2056,6 @@
     const onPreset = (fn) => {
       presetHandler = fn;
     };
-    let identityHandler = null;
-    const onIdentityChange = (fn) => {
-      identityHandler = fn;
-    };
-    const emitIdentity = () => identityHandler && identityHandler({ handle: el.handle.value, message: el.message.value });
-    on(el.handle, "change", emitIdentity);
-    on(el.message, "change", emitIdentity);
-    const setIdentity = ({ handle, message }) => {
-      el.handle.value = handle || "";
-      el.message.value = message || "";
-    };
-    const setDonationUrl = (url) => {
-      el.qrUrl.textContent = url;
-    };
     let assignHandler = null, unassignHandler = null;
     const onAssign = (fn) => {
       assignHandler = fn;
@@ -2144,6 +2179,7 @@
       if (liveDonors === refreshDonors) liveDonors = null;
       el.roster.replaceChildren();
       el.bananaLeaders.replaceChildren();
+      el.bananaRecent.replaceChildren();
       el.inventory.replaceChildren();
       el.toast.classList.remove("show");
       el.toast.hidden = true;
@@ -2164,7 +2200,6 @@
       setWeapon(false, false, 0);
       setMagazine(0, 0, 0, false);
       setJetpack(false, false, 0);
-      closeFeed();
       closeRecipe();
       closeBoard(true);
       destinationNames = [];
@@ -2173,7 +2208,7 @@
       el.board.classList.remove("board-floating");
       el.board.removeAttribute("style");
     };
-    return { el, openFeed, closeFeed, openRecipe, closeRecipe, dismissOutside, openBoard, closeBoard, updateBoard, restoreBoards, setRosterRow, setStats, setAct, setMode, setDestinations, setOwnOoga, get retakeActor() { return retake.actor ? retake : null; }, setGorilla, setGorillaSmashPower, setDetachedView, fadeDetachedName, setAreaLabel, setPrimary, setWeapon, setMagazine, setJetpack, setSubtitle, onAction, toast, tooltip, hint, hideHint, letterSign, selectTab, onPreset, onIdentityChange, setIdentity, setDonationUrl, setPileValueVisible, onAssign, onUnassign, renderInventory, dispose };
+    return { el, openFeed, openRecipe, closeRecipe, dismissOutside, openBoard, closeBoard, updateBoard, restoreBoards, setRosterRow, setStats, setAct, setMode, setDestinations, setOwnOoga, get retakeActor() { return retake.actor ? retake : null; }, setGorilla, setGorillaSmashPower, setDetachedView, fadeDetachedName, setAreaLabel, setPrimary, setWeapon, setMagazine, setJetpack, setSubtitle, onAction, toast, tooltip, hint, hideHint, letterSign, selectTab, onPreset, setPileValueVisible, onAssign, onUnassign, renderInventory, dispose };
   };
   // The account line in the sheet's foot is page-level: shown only when a backend answered, and
   // the director hands every change of `BL.net.state` here, whichever scene is active.
@@ -2181,7 +2216,7 @@
   // Net and voice emits re-run this several times a second with the same outcome; last-written
   // records keep an unchanged textContent from re-invalidating the line.
   let accountBackend = null, accountMe = null, accountName = null, accountWords = null, accountWordsHidden = null;
-  let accountLive = null, accountRejoinHidden = null, accountVoiceHidden = null, accountVoiceWords = null, accountVoicePressed = null;
+  let accountLive = null, accountRejoinHidden = null, accountVoiceHidden = null, accountVoiceWords = null, accountVoicePressed = null, accountLeaveHidden = null;
   const showAccount = ({ backend, me, room, online }) => {
     const hasMe = !!me;
     if (!!backend !== accountBackend) { accountBackend = !!backend; $("account").hidden = !backend; }
@@ -2202,7 +2237,8 @@
     if (wordsHidden !== accountWordsHidden) { accountWordsHidden = wordsHidden; $("account-room").hidden = wordsHidden; }
     const rejoinHidden = !me || !ROOM_WORDS[room];
     if (rejoinHidden !== accountRejoinHidden) { accountRejoinHidden = rejoinHidden; $("account-rejoin").hidden = rejoinHidden; }
-    // Voice: join, then mute and unmute; a failure says why on the button until the next try.
+    // Voice: join, then mute and unmute beside Leave voice, which hangs up and releases the microphone without
+    // signing out; a failure says why on the button until the next try. Leave waits out a join in progress.
     const voice = BL.voice.stats, voiceButton = $("account-voice");
     const voiceHidden = room !== "live";
     if (voiceHidden !== accountVoiceHidden) { accountVoiceHidden = voiceHidden; voiceButton.hidden = voiceHidden; }
@@ -2210,6 +2246,8 @@
     if (voiceWords !== accountVoiceWords) { accountVoiceWords = voiceWords; voiceButton.textContent = voiceWords; }
     const pressed = String(voice.enabled && !voice.muted);
     if (pressed !== accountVoicePressed) { accountVoicePressed = pressed; voiceButton.setAttribute("aria-pressed", pressed); }
+    const leaveHidden = voiceHidden || !voice.enabled;
+    if (leaveHidden !== accountLeaveHidden) { accountLeaveHidden = leaveHidden; $("account-voice-leave").hidden = leaveHidden; }
   };
   // The microphone's note (#181), page-level as the account line is: muted in voice, it stays until unmuted;
   // alone in voice (nobody here to hear, so the microphone is held off), it says so until someone comes;

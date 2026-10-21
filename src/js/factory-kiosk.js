@@ -44,7 +44,7 @@
   const RATE = new Intl.NumberFormat("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   // An amount's bounds, an invoice's life, a simulated payment's settling, and how long the paid screen holds the
   // visitor's bananas back from the cooker before it cooks them anyway.
-  const MIN = 400, MAX = 1000000, EXPIRY = 300, SETTLE = 2.4, HOLD = 12;
+  const MIN = 69, MAX = 1000000, EXPIRY = 300, SETTLE = 2.4, HOLD = 12;
   const INK = {
     bg: "#090c10", panel: "#121a22", line: "#2b3440", gold: "#ffd24a", amber: "#ffb81c", white: "#f3efe4", dim: "#8d96a3",
     green: "#7fe83a", paid: "#07160c", red: "#ff6a4a", dark: "#1b1206", off: "#262c34", coin: "#f7931a", coinDk: "#b8650c"
@@ -68,7 +68,23 @@
     "@": [0b01110, 0b10001, 0b10111, 0b10101, 0b10111, 0b10000, 0b01111],
     "#": [0b01010, 0b01010, 0b11111, 0b01010, 0b11111, 0b01010, 0b01010]
   };
-  const glyph = (ch) => EXTRA[ch] || T.glyphOf(ch);
+  // The shared board font has capitals only. Donation names and messages need the case they were typed with.
+  const LOWER = {
+    a: [0, 0, 14, 1, 15, 17, 15], b: [16, 16, 22, 25, 17, 17, 30],
+    c: [0, 0, 14, 17, 16, 17, 14], d: [1, 1, 13, 19, 17, 17, 15],
+    e: [0, 0, 14, 17, 31, 16, 14], f: [6, 9, 8, 28, 8, 8, 8],
+    g: [0, 0, 15, 17, 15, 1, 14], h: [16, 16, 22, 25, 17, 17, 17],
+    i: [4, 0, 12, 4, 4, 4, 14], j: [2, 0, 6, 2, 2, 18, 12],
+    k: [16, 16, 18, 20, 24, 20, 18], l: [12, 4, 4, 4, 4, 4, 14],
+    m: [0, 0, 26, 21, 21, 21, 21], n: [0, 0, 22, 25, 17, 17, 17],
+    o: [0, 0, 14, 17, 17, 17, 14], p: [0, 0, 30, 17, 30, 16, 16],
+    q: [0, 0, 15, 17, 15, 1, 1], r: [0, 0, 22, 25, 16, 16, 16],
+    s: [0, 0, 15, 16, 14, 1, 30], t: [8, 8, 28, 8, 8, 9, 6],
+    u: [0, 0, 17, 17, 17, 19, 13], v: [0, 0, 17, 17, 17, 10, 4],
+    w: [0, 0, 17, 17, 21, 21, 10], x: [0, 0, 17, 10, 4, 10, 17],
+    y: [0, 0, 17, 17, 15, 1, 14], z: [0, 0, 31, 2, 4, 8, 31]
+  };
+  const glyph = (ch) => EXTRA[ch] || LOWER[ch] || T.glyphOf(ch);
   const width = (text, s) => text.length ? (text.length * (GW + TR) - TR) * s : 0;
   const write = (g, text, x, y, s, color, align = "left") => {
     g.fillStyle = color;
@@ -309,8 +325,10 @@
     const set = (state) => {
       if (flow.state === "details" && state !== "details" && hooks.editDetails) hooks.editDetails(null);
       if (state === "details" && flow.state !== "details") detailsVisit++;
+      const changed = flow.state !== state;
       flow.state = state;
       dirty = true;
+      if (changed && hooks.onState) hooks.onState(state);
     };
     const sameDetails = (a, b) => a.handle === b.handle && a.message === b.message;
     const detailsState = () => {
@@ -323,14 +341,14 @@
     // with them, so an older invoice (the visitor came back from its quote) is left alone.
     const onInvoice = () => flow.state !== "amount" && !(flow.state === "details" && detailsFrom === "amount");
     flow.detailsChanged = () => {
-      flow.detailsDirty = !!flow.savedDetails && !sameDetails(hooks.details(), flow.savedDetails);
+      flow.detailsDirty = !!flow.savedDetails && !sameDetails(taken(), flow.savedDetails);
       flow.detailsError = "";
       detailsState();
     };
     flow.saveDetails = () => {
       if (!flow.open || !flow.invoice || !flow.savedDetails || flow.state === "paid" || !onInvoice()) return Promise.resolve({});
       if (saving) { saveQueued = true; return saving; }
-      const value = hooks.details(), previous = flow.savedDetails, invoice = flow.invoice;
+      const value = taken(), previous = flow.savedDetails, invoice = flow.invoice;
       if (sameDetails(value, previous)) { flow.detailsChanged(); return Promise.resolve({}); }
       if (!real) { flow.savedDetails = value; flow.detailsChanged(); return Promise.resolve({}); }
       flow.detailsSaving = true; flow.detailsError = "";
@@ -347,7 +365,7 @@
           saveQueued = false;
         } else {
           flow.savedDetails = value;
-          flow.detailsDirty = !sameDetails(hooks.details(), value);
+          flow.detailsDirty = !sameDetails(taken(), value);
         }
         detailsState();
         if (saveQueued && flow.detailsDirty && !reply.error) {
@@ -391,12 +409,21 @@
     const limits = () => real && hooks.limits ? hooks.limits() : null;
     const overLightning = () => real && limits() && flow.sats > limits().lightningMaxSats;
     const canLightning = () => !!flow.invoice?.bolt && !overLightning();
-    const valid = () => real ? Number.isSafeInteger(flow.sats) && flow.sats >= (limits()?.minSats || 1)
+    const valid = () => real ? Number.isSafeInteger(flow.sats) && flow.sats >= (limits()?.minSats || MIN)
       && flow.sats <= (limits()?.maxSats || Number.MAX_SAFE_INTEGER) : flow.sats >= MIN && flow.sats <= MAX;
     const closed = () => real && hooks.open() === false;
+    // The fewest sats a tip needs to carry a message. Below it the details screen offers the name alone, and every
+    // request goes out without a message, as the API would drop it.
+    const messageMin = () => hooks.messageMinSats ? hooks.messageMinSats() : BL.donations.MESSAGE_MIN_SATS;
+    flow.messageOk = () => flow.sats >= messageMin();
+    const taken = () => {
+      const value = hooks.details ? hooks.details() : { handle: "", message: "" };
+      value.message = BL.donations.carried(flow.sats, value.message, messageMin());
+      return value;
+    };
     const invoice = () => {
-      const r = hooks.request(), id = r.id.replace(/[^0-9a-z]/gi, "");
-      if (hooks.details) flow.savedDetails = hooks.details();
+      const value = taken(), r = hooks.request(value), id = r.id.replace(/[^0-9a-z]/gi, "");
+      if (hooks.details) flow.savedDetails = value;
       flow.invoice = { id: r.id, url: r.url, code: BL.qr.encode(r.url), bolt: `lnbc${flow.sats * 10}n1p${id}` };
       flow.left = EXPIRY;
       shown = -1;
@@ -410,7 +437,7 @@
     };
     // Real mode: the API's invoice for this amount, then `next`. A reply that finds the visitor gone on is dropped.
     const ask = (next) => {
-      const t = ++ticket, value = hooks.details ? hooks.details() : { handle: "", message: "" };
+      const t = ++ticket, value = hooks.details ? taken() : { handle: "", message: "" };
       saving = null; saveQueued = false;
       flow.detailsSaving = false;
       flow.error = "";
@@ -475,7 +502,9 @@
         return hooks.editDetails("handle");
       }
       if (s === "details") {
-        if (a === "name" || a === "message") return hooks.editDetails(a === "name" ? "handle" : "message");
+        if (a === "history" && hooks.toggleHistory) return hooks.toggleHistory();
+        if (a.startsWith("history-") && hooks.chooseHistory) return hooks.chooseHistory(Number(a.slice(8)));
+        if (a === "name" || a === "message" && flow.messageOk()) return hooks.editDetails(a === "name" ? "handle" : "message");
         // Edits to an invoice are saved before the screen that opened them shows them: a failed save keeps this one,
         // its error up, for the visitor to retry (Enter, or DONE) before paying.
         // Back after a failed save gives up on the edits: the fields take the details the invoice holds again.
@@ -522,7 +551,7 @@
           flow.settle = SETTLE;
           return set("waiting");
         }
-        if (a === "copy") return hooks.copy(flow.invoice.bolt);
+        if (a === "copy") return hooks.copy(hooks.demo ? flow.invoice.url : flow.invoice.bolt);
         if (a === "back") return set("quote");
       }
       if (s === "chaining" && a === "back") {
@@ -693,12 +722,12 @@
     // The amount's and the quote's row, as wide as the panels around it: who the tip is from and its message, as one
     // button that opens them. A name too long for the big size drops to the small one.
     const detailsRow = (y, x = 30, w = 340, h = 34) => {
-      const room = w - 16 - width("EDIT", 1) - 10, value = hooks.details();
+      const room = w - 16 - width("EDIT", 1) - 10, value = taken();
       panel(g, x, y, w, h, INK.amber);
       buttons.push({ x, y, w, h, act: "details" });
       const name = `FROM @${value.handle || "anon"}`, s = width(name, 2) <= room ? 2 : 1;
       write(g, clip(name, s, room), x + 8, y + 4, s, INK.gold);
-      write(g, value.message ? clip(value.message, 1, room) : "NO MESSAGE", x + 8, y + h - 12, 1, value.message ? INK.white : INK.dim);
+      write(g, value.message ? clip(value.message, 1, room) : flow.messageOk() ? "NO MESSAGE" : `ADD A MESSAGE FROM ${sats(messageMin())} SATS`, x + 8, y + h - 12, 1, value.message ? INK.white : INK.dim);
       write(g, "EDIT", x + w - 8, y + Math.round((h - GH) / 2), 1, INK.amber, "right");
     };
     // The details screen's message, wrapped at word breaks into MSG_COLS columns (hard breaks when that would need
@@ -751,7 +780,7 @@
         if (real) rateLine(W / 2, 106, 320);
         if (flow.error === "amount") write(g, "THAT AMOUNT ISN'T ACCEPTED. TRY ANOTHER.", W / 2, 332, 1, INK.red, "center");
         else if (flow.digits && !valid()) {
-          const min = real ? limits()?.minSats || 1 : MIN, max = real ? limits()?.maxSats || Number.MAX_SAFE_INTEGER : MAX;
+          const min = real ? (limits()?.minSats || MIN) : MIN, max = real ? limits()?.maxSats || Number.MAX_SAFE_INTEGER : MAX;
           writeFit(g, flow.sats < min ? `MIN ${sats(min)} SATS` : `MAX ${sats(max)} SATS`, W / 2, 332, 1, INK.red, 320, "center");
         }
         else if (overLightning()) write(g, "OVER LIGHTNING LIMIT · ON-CHAIN ONLY", W / 2, 332, 1, INK.amber, "center");
@@ -828,10 +857,12 @@
         const t = hooks.typing(), named = t.field === "handle", noted = t.field === "message";
         CARET.h = 0;
         face(g, "NAME AND MESSAGE");
+        const names = hooks.history ? hooks.history() : null, hasHistory = hooks.historyCount && hooks.historyCount();
         write(g, "NAME", 30, 46, 1, INK.dim);
+        if (names?.length) write(g, "DOWN THEN TAB", 370, 46, 1, INK.dim, "right");
         panel(g, 30, 58, 340, 40, named ? INK.amber : INK.line);
         buttons.push({ x: 30, y: 58, w: 340, h: 40, act: "name" });
-        const name = `@${t.handle}`, ns = width(name, 2) <= 324 ? 2 : 1, ny = 58 + Math.round((40 - GH * ns) / 2), step = (GW + TR) * ns;
+        const name = `@${t.handle}`, ns = width(name, 2) <= 288 ? 2 : 1, ny = 58 + Math.round((40 - GH * ns) / 2), step = (GW + TR) * ns;
         if (t.handle) write(g, name, 38, ny, ns, INK.gold);
         else {
           write(g, "@", 38, ny, ns, INK.gold);
@@ -844,14 +875,23 @@
         } else if (named) {
           CARET.x = 38 + (t.start + 1) * step - ns; CARET.y = ny - ns; CARET.h = (GH + 2) * ns;
         }
+        if (hooks.history) {
+          g.fillStyle = hasHistory ? INK.gold : INK.dim;
+          g.beginPath();
+          g.moveTo(343, names ? 82 : 73); g.lineTo(357, names ? 82 : 73); g.lineTo(350, names ? 73 : 82);
+          g.closePath(); g.fill();
+          if (hasHistory) buttons.unshift({ x: 334, y: 58, w: 36, h: 40, act: "history" });
+        }
+        const withMessage = flow.messageOk();
         write(g, "MESSAGE (OPTIONAL)", 30, 110, 1, INK.dim);
-        write(g, `${t.message.length}/${t.max}`, 370, 110, 1, INK.dim, "right");
+        if (withMessage) write(g, `${t.message.length}/${t.max}`, 370, 110, 1, INK.dim, "right");
         panel(g, 30, 122, 340, 90, noted ? INK.amber : INK.line);
-        buttons.push({ x: 30, y: 122, w: 340, h: 90, act: "message" });
-        const lines = wrap(t.message);
-        if (t.message) for (let i = 0; i < lines; i++) write(g, t.message.slice(MSG_STARTS[i], MSG_STARTS[i + 1]).trimEnd(), 38, 130 + i * 11, 1, INK.white);
+        if (withMessage) buttons.push({ x: 30, y: 122, w: 340, h: 90, act: "message" });
+        const lines = withMessage ? wrap(t.message) : 0;
+        if (!withMessage) write(g, `MESSAGES COME WITH TIPS OF ${sats(messageMin())} SATS OR MORE`, 38, 130, 1, INK.dim);
+        else if (t.message) for (let i = 0; i < lines; i++) write(g, t.message.slice(MSG_STARTS[i], MSG_STARTS[i + 1]).trimEnd(), 38, 130 + i * 11, 1, INK.white);
         else if (!noted) write(g, "TAP TO ADD A MESSAGE", 38, 130, 1, INK.dim);
-        if (noted) {
+        if (noted && withMessage) {
           let line = lines - 1;
           while (line > 0 && t.start < MSG_STARTS[line]) line--;
           CARET.x = 38 + (t.start - MSG_STARTS[line]) * (GW + TR) - 1; CARET.y = 129 + line * 11; CARET.h = GH + 2;
@@ -865,9 +905,19 @@
           button(198, 326, 172, 52, "TRY AGAIN", "primary", "done");
         } else button(30, 326, 340, 52, "DONE", "primary", "done");
         closeButton();
+        if (names) {
+          const top = 99, row = 18, count = Math.min(names.length, 12);
+          panel(g, 30, top, 340, Math.max(24, count * row), INK.amber);
+          if (!count) write(g, "NO PREVIOUS NAMES", 38, top + 8, 1, INK.dim);
+          for (let i = 0; i < count; i++) {
+            if (i % 2) { g.fillStyle = INK.dark; g.fillRect(32, top + i * row, 336, row); }
+            writeFit(g, `@${names[i]}`, 38, top + i * row + 6, 1, INK.gold, 318);
+            buttons.unshift({ x: 30, y: top + i * row, w: 340, h: row, act: `history-${i}` });
+          }
+        }
       } else if (s === "invoice" || s === "waiting") {
         const waiting = s === "waiting";
-        face(g, waiting ? "WAITING FOR PAYMENT..." : "PAY LIGHTNING INVOICE");
+        face(g, waiting ? "WAITING FOR PAYMENT..." : hooks.demo ? "SIMULATED DONATION" : "PAY LIGHTNING INVOICE");
         qrBox(g, 20, 42, 200, v.code, waiting);
         write(g, "AMOUNT", 232, 48, 1, INK.dim);
         write(g, sats(flow.sats), 232, 60, 2, INK.white);
@@ -887,9 +937,9 @@
           write(g, "YOUR DONATION WILL TRIGGER THE BANANA COOKER WHEN PAID.", 48, 283, 1, INK.white);
           button(130, 320, 140, 48, "X CANCEL", "", "cancel");
         } else {
-          write(g, "SCAN WITH YOUR WALLET", 120, 250, 1, INK.white, "center");
+          write(g, hooks.demo ? "SHARE THIS DEMO LINK" : "SCAN WITH YOUR WALLET", 120, 250, 1, INK.white, "center");
           panel(g, 20, 266, 316, 32);
-          write(g, `${v.bolt.slice(0, 18)}...${v.bolt.slice(-5)}`.toUpperCase(), 30, 279, 1, INK.white);
+          write(g, hooks.demo ? "THIS PAGE'S /DONATE LINK" : `${v.bolt.slice(0, 18)}...${v.bolt.slice(-5)}`.toUpperCase(), 30, 279, 1, INK.white);
           button(344, 266, 36, 32, "", "", "copy");
           g.strokeStyle = INK.white;
           g.lineWidth = 1.5;
@@ -903,7 +953,7 @@
           closeButton();
         }
         const net = shownNet.toUpperCase();
-        write(g, !real ? "PAYMENTS ARE SIMULATED IN THIS BUILD" : net ? `TEST INVOICE ON ${net} · PAY WITH A ${net} WALLET` : "PAY WITH ANY LIGHTNING WALLET", W / 2, 378, 1, net ? INK.amber : INK.dim, "center");
+        write(g, hooks.demo ? "DEMO ONLY · NO BITCOIN WILL BE SENT" : !real ? "PAYMENTS ARE SIMULATED IN THIS BUILD" : net ? `TEST INVOICE ON ${net} · PAY WITH A ${net} WALLET` : "PAY WITH ANY LIGHTNING WALLET", W / 2, 378, 1, net ? INK.amber : INK.dim, "center");
       } else if (s === "chaining") {
         face(g, "PAY ON-CHAIN", INK.gold, INK.bg, true);
         write(g, `${sats(flow.sats)} SATS`, W / 2, 110, 4, INK.gold, "center");

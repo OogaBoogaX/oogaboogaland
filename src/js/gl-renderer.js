@@ -1540,6 +1540,18 @@ void main() {
   col += (fract(sin(dot(gl_FragCoord.xy, vec2(12.9898, 78.233))) * 43758.5453) - 0.5) / 255.0;
   oColor = vec4(col, 1.0);
 }`;
+  // Apple's tile-based GPUs remove hidden surfaces in hardware, so the depth prepass only adds a second submission
+  // of every opaque draw: on an M1 Pro, skipping it raised every tier 10-20% (low 64 to 77 fps, medium 55 to 62, high
+  // 45 to 51 at the landing view). Only a named Apple silicon GPU counts: Chrome's "ANGLE (Apple, ANGLE Metal Renderer:
+  // Apple M1 Pro, ...)", Firefox's "Apple M1, or similar". Safari answers "Apple GPU" whatever the hardware, and
+  // Chrome's Metal backend on an Intel or AMD Mac also says "ANGLE (Apple, ...)", so those keep the prepass.
+  const APPLE_SILICON = /\bApple M\d+\b/;
+  const tileBasedGpu = (renderer, unmasked) => {
+    const named = String(renderer);
+    if (named !== "WebKit WebGL") return APPLE_SILICON.test(named);
+    const real = unmasked();
+    return real != null && APPLE_SILICON.test(String(real));
+  };
   const isSupported = () => {
     try {
       const probe = document.createElement("canvas");
@@ -1557,6 +1569,12 @@ void main() {
     const DRAW_BOTH = [gl.COLOR_ATTACHMENT0, gl.COLOR_ATTACHMENT1];
     let settings = QUALITY[quality] || QUALITY.high;
     let qualityName = QUALITY[quality] ? quality : "high";
+    // Firefox names the GPU in RENDERER (and warns about the debug extension); Chrome and Safari mask it there and
+    // answer through the extension.
+    const tileBased = tileBasedGpu(gl.getParameter(gl.RENDERER), () => {
+      const info = gl.getExtension("WEBGL_debug_renderer_info");
+      return info ? gl.getParameter(info.UNMASKED_RENDERER_WEBGL) : null;
+    });
     let width = 0, height = 0, dpr = 1, pw = 0, ph = 0;
     let lost = false;
     const size = { width: 0, height: 0 };
@@ -1592,11 +1610,12 @@ void main() {
     const activeRecords = [];
     let activeCount = 0;
     // scene.js's three ancestor-flag walks, memoised per render: the flags they read are set by scene updates and
-    // stay frozen while a frame renders. Walking up to a cached ancestor serves every descendant of that chain.
-    const modeMemo = new Map(), cameraMemo = new Map(), cutawayMemo = new Map();
+    // stay frozen while a frame renders. Walking up to a cached ancestor serves every descendant of that chain. The
+    // memo lives on the node, stamped with the render it belongs to, so a render starts with one increment.
+    let memoFrame = 0;
     const matrixModeOf = (node) => {
-      let mode = modeMemo.get(node);
-      if (mode !== undefined) return mode;
+      if (node.modeFrame === memoFrame) return node.modeMemo;
+      let mode;
       if (node.matrixNative) mode = 5;
       else if (node.matrixLiving) mode = 2;
       else if (node.matrixCloud) mode = 4;
@@ -1604,17 +1623,22 @@ void main() {
         const ancestor = node.parent ? matrixModeOf(node.parent) : 0;
         mode = ancestor === 5 || ancestor === 2 || ancestor === 4 ? ancestor : node.matrixEmissiveLiving || node.matrixSignLiving ? 3 : ancestor;
       }
-      modeMemo.set(node, mode);
+      node.modeFrame = memoFrame;
+      node.modeMemo = mode;
       return mode;
     };
     const hiddenFromCamera = (node) => {
-      let hidden = cameraMemo.get(node);
-      if (hidden === undefined) cameraMemo.set(node, hidden = !!(node.cameraHidden || node.parent && hiddenFromCamera(node.parent)));
+      if (node.cameraFrame === memoFrame) return node.cameraMemo;
+      const hidden = !!(node.cameraHidden || node.parent && hiddenFromCamera(node.parent));
+      node.cameraFrame = memoFrame;
+      node.cameraMemo = hidden;
       return hidden;
     };
     const hiddenFromCutaway = (node) => {
-      let hidden = cutawayMemo.get(node);
-      if (hidden === undefined) cutawayMemo.set(node, hidden = !!(node.cutawayWholeHidden || node.parent && hiddenFromCutaway(node.parent)));
+      if (node.cutawayFrame === memoFrame) return node.cutawayMemo;
+      const hidden = !!(node.cutawayWholeHidden || node.parent && hiddenFromCutaway(node.parent));
+      node.cutawayFrame = memoFrame;
+      node.cutawayMemo = hidden;
       return hidden;
     };
     let dsbGPU=null;
@@ -2497,6 +2521,27 @@ void main() {
     };
     // Matrix modes 2 and 3: an instance the wave can take wherever it stands, so its record needs the full shader.
     const isLiving = (mode) => mode > 1.5 && mode < 3.5;
+    // With no Matrix wave running, the full shader adds to living instances only the standing (permanent) Matrix, and
+    // only where one stands inside a cave's footprint (the shader's box from each mouth: 7 m deep, 3.35 m either side,
+    // 4.15 m up). A living record whose instances' cull spheres all clear every footprint shades through the plain
+    // variant like any other mesh: the island's cliff trees, which are living for the wave, no longer pay for the full
+    // shader in every ordinary frame.
+    const livingClear = (rec, matrix) => {
+      if (!matrix || !(matrix.permanentCave > 0)) return true;
+      if (rec.batch || !matrix.caves || !matrix.caveBounds) return false;
+      const caves = matrix.caves, bounds = matrix.caveBounds, s = rec.spheres;
+      for (let n = 0; n < rec.count; n++) {
+        const x = s[n * 4], y = s[n * 4 + 1], z = s[n * 4 + 2], r = s[n * 4 + 3];
+        for (let i = 0; i < caves.length / 4; i++) {
+          const sr = caves[i * 4], cr = caves[i * 4 + 1], o = i * 4;
+          if (!sr && !cr) continue;
+          const depth = caves[o + 2] - (x * sr + z * cr), across = (x - bounds[o]) * cr - (z - bounds[o + 2]) * sr, height = y - bounds[o + 1];
+          if (depth - r <= bounds[o + 3] && (i + 1 === matrix.permanentCave || depth + r >= 0)
+            && Math.abs(across) - r <= 3.35 && height + r >= 0 && height - r <= 4.15) return false;
+        }
+      }
+      return true;
+    };
     const uploadInstances = (rec) => {
       const need = rec.count * INSTANCE_FLOATS;
       if (rec.batch) {
@@ -2886,7 +2931,7 @@ void main() {
         if (!part || !n) continue;
         let first = 0, count = part.count;
         if (plainFilter) {
-          const plain = rec.living || g.matrixCave || g.portalSurface || g.lakeBody || g.imageSurface ? 0 : part.plainCount;
+          const plain = rec.living && !rec.livingClear || g.matrixCave || g.portalSurface || g.lakeBody || g.imageSurface ? 0 : part.plainCount;
           if (plainFilter > 0) count = plain;
           else {
             first = plain;
@@ -3436,9 +3481,7 @@ void main() {
     const render = (root, camera, opts = {}, meshRigs = opts.meshRigs === true) => {
       if (lost || !pollPrograms()) return false;
       // The scene's ancestor flags (matrix modes, camera/cutaway hides) were settled by the scene's update.
-      modeMemo.clear();
-      cameraMemo.clear();
-      cutawayMemo.clear();
+      memoFrame++;
       rigMode = !!meshRigs && !!rigPrograms && !rigFailure;
       if (rigMode && !pollRigPrograms()) { if (rigFailure) rigMode = false; else return false; }
       programs = rigMode ? rigPrograms : res.programs;
@@ -3582,6 +3625,7 @@ void main() {
         if (rec.offscreen) culled += rec.drawCount; else drawn += rec.drawCount;
         if (rec.geometry.mirrorSource && !rec.offscreen) mirror.shards += rec.drawCount;
         uploadForRender(rec);
+        rec.livingClear = rec.living && livingClear(rec, matrix);
       }
       // A matrix that moved since last frame (a following shadow centre) draws everything as before; a steady one
       // bakes the static casters once, then each frame copies them in and draws only the moving ones.
@@ -3769,7 +3813,7 @@ void main() {
       // Depth first, then the opaque pass shades under EQUAL with depth writes off: the same vertex shader, invariant,
       // so the depths match, and with no write a shader that may discard keeps the early depth test (written, the
       // driver tests late and shades every hidden fragment). Each pixel is shaded once. Rigs keep their own programs.
-      const prepass = settings.prepass && !rigMode;
+      const prepass = settings.prepass && !rigMode && !tileBased;
       if (prepass) {
         const dp = pg.depth;
         gl.useProgram(dp.prog);
@@ -3965,6 +4009,7 @@ void main() {
     init();
     return {
       kind: "webgl2",
+      tileBased,
       render,
       resize,
       project,
@@ -3999,5 +4044,5 @@ void main() {
       }
     };
   };
-  BL.glRenderer = { createRenderer, createRig, isSupported, QUALITY, POINT_LIGHT_CAPACITY };
+  BL.glRenderer = { createRenderer, createRig, isSupported, tileBasedGpu, QUALITY, POINT_LIGHT_CAPACITY };
 })();

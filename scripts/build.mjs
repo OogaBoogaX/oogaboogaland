@@ -1,4 +1,6 @@
-// Builds one self-contained page; module order comes from src/index.html.
+// Builds one self-contained page; module order comes from src/index.html. A module tagged `data-defer="<group>"` is
+// inlined here like any other, so the portable page and file:// keep working; `deferred` names each group's modules,
+// which scripts/site.mjs moves out of the hosted pages into one same-origin file that loads only when needed.
 import { createHash } from "node:crypto";
 import { gzipSync } from "node:zlib";
 import { readFileSync, writeFileSync } from "node:fs";
@@ -19,11 +21,30 @@ if (!cssMatch) throw new Error("index.html: stylesheet link not found");
 const css = read(cssMatch[1]).trim().replace(/\r\n/g, "\n");
 html = html.replace(cssTag, `<style>\n${css}\n</style>`);
 
-const scriptTag = /^[ \t]*<script src="([^"]+)"><\/script>\r?\n/gm;
-const sources = [...html.matchAll(scriptTag)].map((m) => m[1]);
+const scriptTag = /^[ \t]*<script src="([^"]+)"(?: data-defer="([a-z-]+)")?><\/script>\r?\n/gm;
+const tags = [...html.matchAll(scriptTag)];
+const sources = tags.map((m) => m[1]);
+export const deferred = new Map();
+for (const [, src, group] of tags) if (group) deferred.set(group, [...(deferred.get(group) || []), src]);
 if (!sources.length) throw new Error("index.html: no script tags found");
-// Escape </script inside inlined JS: a literal closing tag would end the block early.
-const js = sources.map((src) => `// ---- ${src} ----\n${read(src).trim().replace(/\r\n/g, "\n")}`).join("\n\n").replace(/<\/script/gi, "<\\/script");
+// Escape everything above U+00FF: one such character makes V8 keep the whole inlined source as two-byte UTF-16,
+// doubling its resident size. \uXXXX means the same in strings, templates, regexes and identifiers, and it runs
+// after trim(), which strips a leading byte-order mark.
+const latin1 = (code) => code.replace(/[^\x00-\xff]/g, (ch) => `\\u${ch.charCodeAt(0).toString(16).padStart(4, "0")}`);
+// Escape </script inside inlined JS: a literal closing tag would end the block early. `block` is also how
+// scripts/site.mjs finds a deferred module in the page.
+export const block = (src) => latin1(`// ---- ${src} ----\n${read(src).trim().replace(/\r\n/g, "\n")}`).replace(/<\/script/gi, "<\\/script");
+const js = sources.map(block).join("\n\n");
+// A module tagged `data-early` runs where it stands, before the page's one script arrives (the loading curtain's
+// line). Its block opens as `<script data-early>`, so the distribution steps still find the page's script as the
+// first `<script>`, and its hash follows that script's in the policy, which they rewrite.
+const early = [];
+html = html.replace(/^([ \t]*)<script src="([^"]+)" data-early><\/script>\r?\n/gm, (_, indent, src) => {
+  const code = `\n${block(src)}\n`;
+  if (code.includes("<!--")) throw new Error(`${src}: a literal <!-- would open script-data-escaped state`);
+  early.push(sha256(code));
+  return `${indent}<script data-early>${code}</script>\n`;
+});
 let first = true;
 html = html.replace(scriptTag, () => {
   if (!first) return "";
@@ -36,7 +57,7 @@ const csp = /content="(default-src 'none'; script-src [^"]*)"/;
 if (!csp.test(html)) throw new Error("index.html: CSP meta not found");
 html = html.replace(csp, (_, policy) => {
   const updated = policy
-    .replace(/script-src [^;]+/, `script-src ${sha256(`\n${js}\n`)}`)
+    .replace(/script-src [^;]+/, `script-src ${[sha256(`\n${js}\n`), ...early].join(" ")}`)
     .replace(/style-src [^;]+/, `style-src ${sha256(`\n${css}\n`)}`);
   return `content="${updated}"`;
 });

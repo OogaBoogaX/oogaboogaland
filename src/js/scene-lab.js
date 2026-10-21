@@ -1,7 +1,7 @@
 (() => {
   "use strict";
   const BL = window.BL = window.BL || {};
-  const { math, models, contributors, donations, qr, game: gameMod, hud: hudMod, interact: interactMod, pilot: pilotMod, fx: fxMod, crew: crewMod, pile: pileMod, crates: cratesMod } = BL;
+  const { math, models, contributors, donations, game: gameMod, hud: hudMod, interact: interactMod, pilot: pilotMod, fx: fxMod, crew: crewMod, pile: pileMod, crates: cratesMod } = BL;
   const { clamp, lerp, ease, fnv1a, randomInt } = math;
   const { createNode, addChild, removeChild, createCamera, addTween, stepTweens, tweenCount, traverseVisible } = BL.scene;
   const { DROP_HEIGHT } = pileMod;
@@ -123,19 +123,21 @@
     const startY = die.position.y;
     const r0 = { ...die.rotation };
     const final = models.dieRotationFor(result, r0.y + 1.7);
-    addTween({ dur: 0.7, ease: ease.linear, update: (k) => {
-      die.position.y = startY + Math.sin(k * Math.PI) * 0.6;
-      die.rotation.x = r0.x + k * Math.PI * 4;
-      die.rotation.z = r0.z + k * Math.PI * 2;
-      die.rotation.y = r0.y + k * 1.7;
-    }, done: () => {
-      Object.assign(die.rotation, final);
-      die.position.y = startY;
-      die.rolling = false;
-      die.lastRoll = result;
-      const w = die.world;
-      fx.sayAt(w[12], w[13] + die.dieSize * 0.5 + 0.2, w[14], `Rolled ${result}`, 1.8);
-    } });
+    addTween({
+      dur: 0.7, ease: ease.linear, update: (k) => {
+        die.position.y = startY + Math.sin(k * Math.PI) * 0.6;
+        die.rotation.x = r0.x + k * Math.PI * 4;
+        die.rotation.z = r0.z + k * Math.PI * 2;
+        die.rotation.y = r0.y + k * 1.7;
+      }, done: () => {
+        Object.assign(die.rotation, final);
+        die.position.y = startY;
+        die.rolling = false;
+        die.lastRoll = result;
+        const w = die.world;
+        fx.sayAt(w[12], w[13] + die.dieSize * 0.5 + 0.2, w[14], `Rolled ${result}`, 1.8);
+      }
+    });
   };
   const flipCard = (card) => {
     if (card.flipping) return;
@@ -306,8 +308,8 @@
     footsteps.update(drivenHere);
     dust.update(elapsed, pilot.orbit.target.x, pilot.orbit.target.z);
   };
-  const drawExtra = (ctx2d, project, drawBubble) => {
-    crew.drawQuotes(ctx2d, project, drawBubble);
+  const drawExtra = (ctx2d, project) => {
+    crew.drawDrops(ctx2d, project);
     remotes.drawNames(ctx2d, project);
   };
   const overlay = (dt) => fx.drawOverlay(dt, drawExtra);
@@ -433,15 +435,6 @@
       crew.applyAllSwag();
       crew.renderLocker();
     });
-    const donationRequest = donations.createRequest(game.state);
-    qr.drawTo(hud.el.qr, donationRequest.url, { quiet: 3, dark: "#000000", light: "#f3efe4" });
-    mark("qr");
-    hud.setDonationUrl(donationRequest.url);
-    hud.setIdentity(game.state);
-    hud.onIdentityChange(({ handle, message }) => {
-      game.setIdentity({ handle: donations.sanitize(handle, donations.HANDLE_MAX), message: donations.sanitize(message, donations.MESSAGE_MAX) });
-      hud.setIdentity(game.state);
-    });
 
     Object.assign(hooks, {
       onHover: (hit, p) => {
@@ -465,9 +458,7 @@
     }
     hud.onPreset(pilot.goPreset);
     hud.onAction((action, value) => {
-      if (action === "tip") demoTip(1200);
-      else if (action === "tip-legendary") demoTip(120000);
-      else if (action === "clear-loot") clearLoot();
+      if (action === "clear-loot") clearLoot();
       else if (action === "reset") resetDemo();
       else if (action === "act") pilot.action();
       else if (action === "mode-preset") {

@@ -81,9 +81,10 @@
     if (glow) glow.castShadow = false;
     return { stone: M.merge(...stone), veins: glow };
   };
-  const cache = new Map();
+  const cache = new Map(), scoped = M.track(() => cache.clear());
   const geometry = (id = "gatsby") => {
     const theme = BL.pokerThemes.get(id), cave = theme.id !== "gatsby";
+    scoped.use();
     if (cache.has(theme.id)) return cache.get(theme.id);
     const shell = [], dressed = BL.dressing.set();
     // The same floor footprint supports either the club or geological wall

@@ -230,6 +230,7 @@ test("room: the existing sweep removes a silent old guest even with fresh automa
   r.ctx.getWebSocketAutoResponseTimestamp = () => new Date();
   const alarms = [];
   r.ctx.storage.setAlarm = async at => alarms.push(at);
+  r.sweepAt = 0;
   await r.alarm();
   assert.equal(guest.closed.reason, "revoked");
   assert.equal(owner.closed, null);
@@ -480,6 +481,7 @@ test("room: operator ban and deleted account revoke open sockets at the existing
   await r.webSocketMessage(c, JSON.stringify({ t: "revoke", id: 1 }));
   assert.ok(r.players.has(1));
   rows.get(1).banned_at = 1; rows.delete(2);
+  r.sweepAt = 0;
   await r.alarm();
   assert.equal(a.closed.reason, "revoked"); assert.equal(b.closed.reason, "revoked");
   assert.equal(c.closed, null); assert.deepEqual(queries.sort(), [1, 2, 3]);
@@ -497,10 +499,12 @@ test("room: a failed ban read retries on the next alarm and preserves stale evic
   r.ctx.getWebSocketAutoResponseTimestamp = () => null;
   const active = await join(r, 1, "ooga", "Ooga"), stale = await join(r, 2, "old", "Old");
   r.players.get(2).seenAt -= protocol.STALE_MS + 1;
+  r.sweepAt = 0;
   await r.alarm();
   assert.equal(active.closed, null, "a database failure is not a ban");
   assert.equal(stale.closed.reason, "stale", "existing stale sweep still runs on database failure");
   failed = false;
+  r.sweepAt = 0;
   await r.alarm();
   assert.equal(active.closed.reason, "revoked");
 });

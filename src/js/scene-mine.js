@@ -48,7 +48,7 @@
 (() => {
   "use strict";
   const BL = window.BL = window.BL || {};
-  const { math, models, mineRigs: R, mineSim, mineModels: MM, mineHud, mineAudio, mineCrew, donations, qr, daylight, contributors,
+  const { math, models, mineRigs: R, mineSim, mineModels: MM, mineHud, mineAudio, mineCrew, donations, daylight, contributors,
     game: gameMod, hud: hudMod, interact: interactMod, pilot: pilotMod, fx: fxMod } = BL;
   const { clamp, mat4 } = math;
   const { createNode, addChild, removeChild, createCamera, stepTweens, tweenCount, traverseVisible } = BL.scene;
@@ -2200,10 +2200,6 @@
     });
     hud.onPreset(pilot.goPreset);
     hud.onAction(onAction);
-    const donationRequest = donations.createRequest(game.state);
-    qr.drawTo(hud.el.qr, donationRequest.url, { quiet: 3, dark: "#000000", light: "#f3efe4" });
-    hud.setDonationUrl(donationRequest.url);
-    hud.setIdentity(game.state);
     hud.setStats(game.state);
     hud.el.sheet.dataset.open = "false";
 

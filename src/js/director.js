@@ -50,13 +50,6 @@
   const qualityLabel = $("quality");
   const curtain = $("curtain");
   const worldBlock = $("world-block"), worldBlockHeight = $("world-block-height");
-  const SAYINGS = [
-    "growing the island…", "counting the bananas…", "waking the Oogas…", "polishing the rocks…", "herding the clouds…",
-    "lighting the torches…", "packing the leaf chutes…", "lashing sticks into a rocket…", "filling barrels with banana mash…",
-    "warming up the Fire Pot…", "sweeping the rope bridge…", "feeding the fireflies…", "teaching cavemen to drive…",
-    "hiding the jetpack…", "tightening the Vine Knots…", "fluffing the leaf beds…"
-  ];
-  $("curtain-saying").textContent = SAYINGS[Math.floor(Math.random() * SAYINGS.length)];
   const worldClock = $("world-clock");
   let renderer = null;
   if (!params.has("canvas2d")) {
@@ -77,7 +70,12 @@
   };
   showQuality();
   const game = gameMod.create({ catalog: models.SWAG });
-  window.BL.donationPopup = window.BL.donationPopup.create(game);
+  window.BL.donationPopup = window.BL.donationPopup.create(game, (donation) => {
+    if (donations.real) return;
+    if (active) active.onDonation(donation);
+    else game.recordDonation(donation);
+    window.BL.hud.setDonationStats(game.state);
+  });
   window.BL.hud.setDonationStats(game.state);
   // world survives scene swaps: banana level, equipment ownership, and the Ooga handed from hub to scene.
   const world = { level: START_BANANAS, pilot: null, mirrorBroken: false };
@@ -183,14 +181,31 @@
     worldClock.dateTime = `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}`;
     clockSvg.setAttribute("aria-label", `${Number.isFinite(clockTime) || clockDaylen > 0 ? "Ooga Booga time" : "Local time"} ${text}`);
   };
+  // A scene may `prepare(place, ctx)` before it is built (the Timechain Sphere's rooms: their code, deferred on a
+  // hosted page, and whose visit it is). It answers null to go ahead, `{ scene, place }` to arrive there instead, or a
+  // promise of either; the screen holds dark until it settles, and a rejection fades back in where the visitor was. The
+  // scene there is told (`stay`) once the fade is done and a new transition can start, so it can put back what it set
+  // up to leave; until then its departure still holds, and a press during the fade is refused rather than lost.
+  const settle = (t, answer) => {
+    if (answer && typeof answer.then === "function") {
+      t.ready = false;
+      answer.then((redirect) => { t.redirect = redirect || null; t.ready = true; }, (error) => { t.failed = error || new Error("Not ready"); t.ready = true; });
+    } else t.redirect = answer || null;
+  };
   const go = (id, place = null, instant = false) => {
     const next = scenes[id];
     if (!next) throw new Error(`Unknown scene "${id}"`);
     if (transition) return false;
-    transition = { next, place, out: true, t: 0, instant };
+    transition = { next, place, out: true, t: 0, instant, ready: true, redirect: null, failed: null };
+    if (next.prepare) {
+      window.BL.models.setScope(next.id);
+      settle(transition, next.prepare(place, ctx));
+      window.BL.models.setScope(active ? active.id : null);
+    }
     return true;
   };
   const router = routerMod.create(scenes, window.BL.routes, go);
+  window.BL.donationPopup.onClose(() => router.dismissPlace("hub", "donate"));
   // The logo is the site's home link: from any scene it goes back to the island, as a website's logo goes home.
   document.querySelector(".home-link").addEventListener("click", (e) => {
     e.preventDefault();
@@ -219,6 +234,7 @@
     window.BL.net.setBody(null);
     // The scene's own zone (`voiceZone`), else one of its own; the island and DSB Land report theirs as they go.
     window.BL.net.setZone(next.voiceZone || (next.id === "dsb" ? "dsb-outside" : `scene-${next.id}`));
+    window.BL.models.setScope(next.id);
     next.enter(ctx);
     activeMeshRigs = next.renderOpts?.meshRigs === true;
     active = next;
@@ -264,28 +280,43 @@
     clearTweens();
     if (DEBUG && tweenCount()) throw new Error(`${tweenCount()} tweens survived clearTweens`);
     enter(next, place);
+    // The builder caches only the scene just left used go too; the island's stay, since every route passes through it.
+    if (leaving.id !== "hub") window.BL.models.release(leaving.id, ["hub", next.id]);
     renderer.releaseUnused(liveGeometry());
     if (DEBUG && renderer.stats.records > live.size) throw new Error(`${next.id}: ${renderer.stats.records} GPU records for ${live.size} live geometries`);
   };
+  // Where a settled transition lands: its own scene, or where its preparation redirected it.
+  const landing = (t) => t.redirect ? { next: scenes[t.redirect.scene], place: t.redirect.place ?? null } : { next: t.next, place: t.place };
+  const abandon = () => {
+    window.BL.hud.toast("That place could not be opened · try again");
+    router.abandon();
+  };
+  const settled = () => {
+    const failed = transition.failed;
+    transition = null;
+    if (failed && active && active.stay) active.stay();
+  };
   const stepTransition = (dt) => {
     if (transition.instant) {
-      const { next, place } = transition;
-      swap(next, place);
-      transition = null;
+      if (!transition.ready) return;
+      if (transition.failed) abandon();
+      else { const { next, place } = landing(transition); swap(next, place); }
+      settled();
       fade = 0;
       return;
     }
     transition.t += dt;
     if (transition.out) {
       fade = Math.min(1, transition.t / FADE);
-      if (fade < 1) return;
-      swap(transition.next, transition.place);
+      if (fade < 1 || !transition.ready) return;
+      if (transition.failed) abandon();
+      else { const { next, place } = landing(transition); swap(next, place); }
       transition.out = false;
       transition.t = 0;
       return;
     }
     fade = 1 - Math.min(1, transition.t / FADE);
-    if (fade === 0) transition = null;
+    if (fade === 0) settled();
   };
   // Fills in CSS pixels (clientWidth/clientHeight, cached above), not backing-store pixels.
   const drawFade = () => {
@@ -544,6 +575,7 @@
     if (destroyed) return;
     if (net.state.donations) donations.useOrigin();
     unsubscribeDonations = donations.subscribe((donation, bananas) => {
+      if (donations.receivedOwnInvoice(donation.id)) game.rememberHandle(donation.handle);
       window.BL.donationPopup.receive(donation, bananas);
       if (active) active.onDonation(donation, bananas);
       else game.recordDonation(donation, bananas && bananas.exact);
@@ -628,8 +660,21 @@
     // net.start is bounded; an unavailable backend leaves the static island usable.
     await accountReady;
     if (destroyed) return;
+    let first = Object.hasOwn(scenes, sceneId) ? scenes[sceneId] : scenes[Object.keys(scenes)[0]], place = routed && routed.place;
+    if (first.prepare) {
+      try {
+        window.BL.models.setScope(first.id);
+        const redirect = await first.prepare(place, ctx);
+        if (redirect) ({ next: first, place } = landing({ redirect }));
+      } catch {
+        first = scenes[Object.keys(scenes)[0]];
+        place = null;
+        window.BL.hud.toast("That place could not be opened · here is the island");
+      }
+      if (destroyed) return;
+    }
     const built = performance.now();
-    enter(Object.hasOwn(scenes, sceneId) ? scenes[sceneId] : scenes[Object.keys(scenes)[0]], routed && routed.place);
+    enter(first, place);
     mark("ready");
     tierFromBoot(performance.now() - built);
     raf = window.requestAnimationFrame(frame);
@@ -681,7 +726,7 @@
         return world.level;
       }
     };
-    for (const key of ["slots", "drops", "core", "shell", "delivery", "spillEffect", "cavemen", "crates", "lab", "headquarters", "hud", "applyAllSwag", "renderLocker", "demoTip", "setPileLevel", "refreshStates", "trimPool", "shown", "island", "mouths", "labels", "camera", "cameraCave", "crew", "fx", "controls", "props", "altar", "path", "scenery", "jetpack", "magazine", "mirrorCave", "matrixCave", "matrixGate", "pilot", "renderOpts", "lamps", "entranceLights", "lighting", "fireSeats", "critters", "storm", "daylight", "setHour", "track", "racers", "items", "race", "audio", "weather", "drop", "diver", "plane", "course", "jumbotron", "totems", "fireworks", "fireworksPending", "orbit", "flight", "site", "agent", "poolIsland", "mine", "dsb", "clankers", "clankerPlay", "factory", "bifrost", "arcade", "carnival", "npcSync", "cloudFloorAt", "footsteps"]) {
+    for (const key of ["slots", "drops", "core", "shell", "delivery", "spillEffect", "cavemen", "crates", "lab", "headquarters", "hud", "applyAllSwag", "renderLocker", "demoTip", "setPileLevel", "refreshStates", "trimPool", "shown", "island", "mouths", "labels", "camera", "cameraCave", "crew", "fx", "controls", "props", "altar", "path", "scenery", "jetpack", "magazine", "mirrorCave", "matrixCave", "matrixGate", "pilot", "renderOpts", "lamps", "lighting", "fireSeats", "critters", "storm", "daylight", "setHour", "track", "racers", "items", "race", "audio", "weather", "drop", "diver", "plane", "course", "jumbotron", "totems", "fireworks", "fireworksPending", "orbit", "flight", "site", "agent", "poolIsland", "mine", "dsb", "clankers", "clankerPlay", "factory", "bifrost", "arcade", "carnival", "npcSync", "cloudFloorAt", "footsteps", "timechain"]) {
       Object.defineProperty(ooga, key, { get: () => active.debug && active.debug[key], enumerable: true });
     }
     window.__ooga = ooga;

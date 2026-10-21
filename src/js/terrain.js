@@ -4,41 +4,37 @@
   const { mulberry32, hexToRgb, clamp } = BL.math;
   // Compact completed terrain positions without rounding collision or sight boundaries.
   // Faces and lines retain their order and metadata; the first exact position owns each index.
-  // Vertices that are the same number three times over (`Object.is`: -0 stays apart from 0, NaN meets NaN) share one
-  // slot, in first-seen order. An open-addressed table over the coordinates' bit patterns keeps this off the string
-  // and garbage paths: the island hands it two thirds of a million corners at every boot.
-  const compactBits = new Float64Array(3), compactWords = new Uint32Array(compactBits.buffer);
+  // Positions are matched on their exact 64-bit patterns (so -0 stays apart from 0) in an open-addressed table,
+  // instead of a string key per vertex.
   const compactVertices = (geometry) => {
-    const source = geometry.verts, count = source.length / 3, indices = new Uint32Array(count), vertices = new Float64Array(source.length);
-    let size = 16;
+    const count = geometry.verts.length / 3, source = Float64Array.from(geometry.verts), bits = new Uint32Array(source.buffer);
+    const vertices = [], indices = new Uint32Array(count);
+    let size = 1;
     while (size < count * 2) size *= 2;
-    const slots = new Int32Array(size).fill(-1), wrap = size - 1;
-    let unique = 0;
-    for (let i = 0, n = 0; i < source.length; i += 3, n++) {
-      const x = source[i], y = source[i + 1], z = source[i + 2];
-      compactBits[0] = x !== x ? NaN : x;
-      compactBits[1] = y !== y ? NaN : y;
-      compactBits[2] = z !== z ? NaN : z;
-      let hash = Math.imul(compactWords[0] ^ compactWords[1], 0x9E3779B1) ^ Math.imul(compactWords[2] ^ compactWords[3], 0x85EBCA77) ^ Math.imul(compactWords[4] ^ compactWords[5], 0xC2B2AE3D);
-      hash ^= hash >>> 15;
-      hash = Math.imul(hash, 0x2C1B3C6D);
-      hash ^= hash >>> 12;
-      let slot = hash & wrap, index = slots[slot];
-      while (index >= 0 && !(Object.is(vertices[index * 3], x) && Object.is(vertices[index * 3 + 1], y) && Object.is(vertices[index * 3 + 2], z))) {
-        slot = (slot + 1) & wrap;
-        index = slots[slot];
+    const table = new Int32Array(size).fill(-1), mask = size - 1;
+    for (let v = 0; v < count; v++) {
+      const at = v * 6;
+      let hash = 0;
+      for (let k = 0; k < 6; k++) hash = Math.imul(hash ^ bits[at + k], 0x9e3779b1) >>> 0;
+      let slot = (hash ^ hash >>> 15) & mask, index = -1;
+      for (;;) {
+        const first = table[slot];
+        if (first < 0) break;
+        const other = first * 6;
+        if (bits[other] === bits[at] && bits[other + 1] === bits[at + 1] && bits[other + 2] === bits[at + 2]
+          && bits[other + 3] === bits[at + 3] && bits[other + 4] === bits[at + 4] && bits[other + 5] === bits[at + 5]) { index = indices[first]; break; }
+        slot = slot + 1 & mask;
       }
       if (index < 0) {
-        slots[slot] = index = unique++;
-        vertices[index * 3] = x;
-        vertices[index * 3 + 1] = y;
-        vertices[index * 3 + 2] = z;
+        index = vertices.length / 3;
+        table[slot] = v;
+        vertices.push(source[v * 3], source[v * 3 + 1], source[v * 3 + 2]);
       }
-      indices[n] = index;
+      indices[v] = index;
     }
     for (const face of geometry.faces) for (let i = 0; i < face.i.length; i++) face.i[i] = indices[face.i[i]];
     for (const line of geometry.lines) for (let i = 0; i < line.i.length; i++) line.i[i] = indices[line.i[i]];
-    geometry.verts = vertices.slice(0, unique * 3);
+    geometry.verts = new Float64Array(vertices);
   };
   // Dense voxel grid; value 0 and out-of-bounds are both empty.
   const makeGrid = (sx, sy, sz) => {
@@ -300,7 +296,8 @@
   const MASTER_PATH_CENTER = 2;
   const GATE_Z = -(RADIUS - 2), PASS_HALF = 2.5, PASS_TOP = 5, TRAIL_HALF = 1;
   const STAIR_TERRACE = { from: MEADOW, top: 2.5, halfWidth: 1.8, blend: 1.5 };
-  const TIMECHAIN = { bearing: 8.25 / 12 * Math.PI * 2, ...STAIR_TERRACE };
+  // The final terrace is as wide as the Sphere's six-metre portal and bridge deck.
+  const TIMECHAIN = { bearing: 8.25 / 12 * Math.PI * 2, ...STAIR_TERRACE, halfWidth: 3 };
   const TIMECHAIN_X = Math.sin(TIMECHAIN.bearing), TIMECHAIN_Z = -Math.cos(TIMECHAIN.bearing);
   // Deeper treads keep the diagonal voxel risers within an Ooga's step clearance. Reach the full height
   // half a metre before the bridge so its underside cannot block the final rise onto the deck.
@@ -313,7 +310,8 @@
     verts: [-PATH_UNIT / 2, 0, -PATH_UNIT / 2, PATH_UNIT / 2, 0, -PATH_UNIT / 2, PATH_UNIT / 2, 0, PATH_UNIT / 2, -PATH_UNIT / 2, 0, PATH_UNIT / 2],
     faces: [{ i: [0, 3, 2, 1], color: PALETTE[P.path], emissive: 0 }],
     lines: [],
-    depthOffset: true
+    depthOffset: true,
+    surfaceOverlay: true
   };
   const UNDER_BANDS = [P.dirt, P.stoneDark, P.dirt, P.stone];
   const undersideDepthAt = (radius) => Math.max(0, UNDER_SPHERE_CENTER + Math.sqrt(Math.max(0, UNDER_SPHERE_RADIUS * UNDER_SPHERE_RADIUS - radius * radius)));

@@ -7,7 +7,8 @@ import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { tmpdir } from "node:os";
 import { createHash, webcrypto } from "node:crypto";
-import { IMAGE_MODULES, externalizeAudio, externalizeImages } from "../scripts/distribution-audio.mjs";
+import { externalizeAudio } from "../scripts/distribution-audio.mjs";
+import { PICTURE_MODULES, externalizeModules, externalizePictures } from "../scripts/distribution-modules.mjs";
 import { launch, acquire, dispose, driverError } from "./browser.mjs";
 import { writeCharacters } from "../scripts/characters.mjs";
 const emptyPeerPreviewProof = async () => {
@@ -3637,9 +3638,6 @@ const session = (url, steps, opts, final) => output.run({ lines: [], results: []
       window.__dsbFeedFixture = { requests: 0, sockets: 0, closed: 0 };
       window.fetch = async (url, options) => {
         if (window.__gateDormancy) __gateDormancy.fetch++;
-        // Menu/layout gates must not depend on the live public archive. Studio
-        // still installs its playback fixture and counts requests independently.
-        if (String(url).startsWith("https://hodlerhiq.net/index.php?rest_route=/wp/v2/pages/")) return new Response(JSON.stringify({content:{rendered:[1,2,3].map(i=>'<div data-mediafile="https://hodlerhiq.net/wp-content/uploads/2026/fixture-'+i+'.mp3"><span class="player_song_name" data-albumname="2026-01-0'+i+'">Space '+i+'</span></div>').join("")}}));
         if (String(url).startsWith("https://noderunnersradio.com/")) {
           window.__dsbTvFixture = window.__dsbTvFixture || { invoices: 0, searches: 0 }; let value;
           if (url.includes("/api/search")) { __dsbTvFixture.searches++; value = { results: [{ title: "Banana Beats", artist: "Ooga", source: "library", sats: 21 }] }; }
@@ -3794,7 +3792,7 @@ const orbitFlow = async (b) => {
 // perf floor; `perf` runs the perf floor alone; `unit` (or nothing) runs only the global tier.
 // Two lanes limit concurrent WebGL boot pressure; four produced long startups
 // and a GPU context loss during the full suite.
-const SCENES = ["hub", "lab", "race", "drop", "orbit", "mine", "dsb", "factory", "bifrost", "poker", "arcade", "skee", "hoops", "shy", "claw", "hockey", "billiards", "darts", "pinball", "ride", "invaders", "snake", "pong", "stampede", "flap", "breaker", "dash", "stacker"];
+const SCENES = ["hub", "lab", "race", "drop", "orbit", "mine", "dsb", "factory", "bifrost", "timechain", "poker", "arcade", "skee", "hoops", "shy", "claw", "hockey", "billiards", "darts", "pinball", "ride", "invaders", "snake", "pong", "stampede", "flap", "breaker", "dash", "stacker"];
 const LANES = Number(process.env.LANES) || 2;
 const ARGS = process.argv.slice(2);
 for (const a of ARGS) if (!SCENES.includes(a) && !["unit", "chat-unit", "integration-unit", "svrn-unit", "svrn-review", "vacancy-unit", "portal-unit", "water-baseline", "water-review", "water-unit", "stackchain-review", "stackchain-unit", "dsb-menus-unit", "maxis-unit", "exterior-unit", "rulers-unit", "ink-unit", "big-unit", "perf", "full", "poker-protocol"].includes(a)) throw new Error(`Unknown argument "${a}" (unit | perf | full | poker-protocol | ${SCENES.join(" | ")})`);
@@ -4717,7 +4715,8 @@ const gameRulesChecks = async () => {
     // The donations board's tally: two tips today and one the day before, kept through a reload, the week holding all
     // three; a malformed day is dropped alone.
     const day = 864e5, now = Date.now();
-    for (const [sats, ago] of [[4000, 0], [1200, 0], [800, 1]]) g.recordDonation({ id: `t${sats}`, sats, handle: "", message: "", at: now - ago * day });
+    for (const [sats, ago] of [[4000, 0], [1200, 0], [800, 1]]) g.recordDonation({ id: `t${sats}`, sats, handle: "", message: "sub-bar must clear", at: now - ago * day });
+    const newDemoQuiet = g.state.recentDonations.find((entry) => entry.id === "t800")?.message === "";
     g.recordDonation({ id: "fractional", sats: 1000, handle: "", message: "", at: now }, 0.25);
     g.recordDonation({ id: "unpriced", sats: 2000, handle: "", message: "", at: now }, 0);
     const tally = make(), tips = { today: tally.tipsWithin(1), week: tally.tipsWithin(7), bananas: tally.state.bananas, last: tally.state.lastTip };
@@ -4726,9 +4725,18 @@ const gameRulesChecks = async () => {
     store.set("oogaboogaland.v1", JSON.stringify(raw));
     const tallied = tips.today[0] === 8200 && tips.today[1] === 13.25 && tips.week[0] === 9000 && tips.week[1] === 15.25 && tips.bananas === 15.25 && tips.last === 2000
       && make().state.tipDays.length === 2;
+    const savedDemo = JSON.parse(store.get("oogaboogaland.v1"));
+    savedDemo.recentDonations = [
+      { id: "old-small", sats: 800, handle: "Old", message: "old message", at: now, bananas: 2 },
+      { id: "eligible", sats: 1000, handle: "New", message: "kept", at: now, bananas: 3 }
+    ];
+    store.set("oogaboogaland.v1", JSON.stringify(savedDemo));
+    const recentReloaded = make().state.recentDonations;
+    const recentSaved = newDemoQuiet && recentReloaded.length === 2 && recentReloaded[0].id === "old-small"
+      && recentReloaded[0].message === "" && recentReloaded[1].id === "eligible" && recentReloaded[1].message === "kept";
     store.set("oogaboogaland.v1", "{not json");
     const junk = make().state.orbit.best === null;
-    record("saves: every game's best and the donations board's tally survive a reload, a worse result or a crash landing never replaces a best, and a malformed best, day, a stored crash or a broken file is dropped alone", Object.values(bests).flat().every(Boolean) && kept && dropped && tallied && junk, JSON.stringify({ bests, kept, dropped, tips, junk }));
+    record("saves: every game's best and the donations board's tally survive a reload, a worse result or a crash landing never replaces a best, the recent list reloads every amount, and a malformed best, day, crash or broken file is dropped alone", Object.values(bests).flat().every(Boolean) && kept && dropped && tallied && recentSaved && junk, JSON.stringify({ bests, kept, dropped, tips, recentSaved, junk }));
     // Tickets spent at a machine (the jackpot wheel): refused, spending nothing, when they fall short or the cost is
     // no whole number above nothing; a spend that goes through is saved.
     const wallet = make();
@@ -4754,10 +4762,11 @@ const gameRulesChecks = async () => {
   }
 };
 const donationClientChecks = async () => {
-  const sockets = [], timers = [], received = [], seen = [];
+  const sockets = [], timers = [], received = [], seen = [], requests = [];
   const context = { window: { setTimeout: fn => { const t = { fn }; timers.push(t); return t; }, clearTimeout: () => {} },
     location: { protocol: "https:", origin: "https://site.test" },
-    fetch: async () => ({ status: 200, ok: true, json: async () => ({ request: "request", invoice: { id: "invoice", expires: 1 }, bananas: null, rate: null, lightning: "unavailable" }) }),
+    fetch: async (path, options) => { requests.push({ path, body: JSON.parse(options.body) }); return { status: 200, ok: true,
+      json: async () => ({ request: "request", invoice: { id: "invoice", expires: 1 }, bananas: null, rate: null, lightning: "unavailable" }) }; },
     WebSocket: class { constructor(url) { this.url = url; sockets.push(this); } close() { this.closed = true; } } };
   runInNewContext(await readFile(new URL("../src/js/donations.js", import.meta.url), "utf8"), context);
   const D = context.window.BL.donations;
@@ -4786,25 +4795,56 @@ const donationClientChecks = async () => {
   const replay = sockets[1].url.endsWith("?after=paid");
   message(paid);
   message({ ...paid, donation: { ...paid.donation, id: "unpriced" }, bananas: null });
+  message({ type: "recent", entries: [] });
+  const cleared = D.state.recent.length === 0;
+  message({ type: "status", open: true, limits: { minSats: 69, maxSats: 4000, lightningMaxSats: 1000, messageMinSats: 2500 } });
+  message({ type: "recent", entries: [
+    { id: "old", sats: 1200, handle: "Old", message: "old message", at: Date.now(), bananas: 1, seq: 8 },
+    { id: "new", sats: 3000, handle: "New", message: "new message", at: Date.now(), bananas: 3, seq: 9 }
+  ] });
+  // The recent list keeps every amount, whatever the bar; the bar only silences a message.
+  const raisedBar = cleared && D.state.recent.length === 2 && D.state.recent.find((e) => e.id === "old")?.message === ""
+    && D.state.recent.find((e) => e.id === "new")?.message === "new message";
+  message({ ...paid, donation: { ...paid.donation, id: "corrected", sats: 3000, message: "local", handle: "Local" }, seq: 11 });
+  message({ type: "recent", entries: [
+    { id: "old", sats: 1200, handle: "Old", message: "old message", at: Date.now(), bananas: 1, seq: 8 },
+    { id: "new", sats: 3000, handle: "New", message: "new message", at: Date.now(), bananas: 3, seq: 9 },
+    { id: "corrected", sats: 3000, handle: "Server", message: "server", at: Date.now(), bananas: 4, verified: true, seq: 11 }
+  ] });
+  const snapshot = D.state.recent.length === 3 && D.state.recent.find((e) => e.id === "corrected")?.handle === "Server"
+    && D.state.recent.find((e) => e.id === "corrected")?.message === "server"
+    && D.state.recent.find((e) => e.id === "corrected")?.verified === true;
+  message({ ...paid, donation: { ...paid.donation, id: "quiet", sats: 2000, message: "should not speak" } });
+  const quiet = received.at(-1).d.message === "" && D.state.recent.length === 4 && D.state.recent.some((e) => e.id === "quiet");
+  message({ type: "status", open: true, limits: { minSats: 69, maxSats: 4000, lightningMaxSats: 1000, messageMinSats: 3500 } });
+  const raisedLater = D.state.recent.every((e) => !e.message);
   message({ type: "seen", id: "chain", sats: 400, due: 1000, left: 615 });
   message({ type: "seen", id: "chain", sats: 400, due: 1000 });
   const heard = seen.length === 1 && seen[0].slice(0, 4).join() === "chain,400,1000,615" && seen[0][4] === null;
   const fallback = await D.invoice({ sats: 1000 });
   const unlit = fallback.invoice?.id === "invoice" && fallback.invoice.bolt11 === null;
+  await D.invoice({ sats: 2000, message: "too small" });
+  await D.note("request", "edited under bar");
+  const subBarRequest = requests.at(-2).path === "/donations/invoice" && !Object.hasOwn(requests.at(-2).body, "message")
+    && requests.at(-1).path === "/donations/note" && requests.at(-1).body.message === "";
+  await D.invoice({ sats: 4000, message: "allowed" });
+  await D.note("request", "edited above bar");
+  const overBarRequest = requests.at(-2).body.message === "allowed" && requests.at(-1).body.message === "edited above bar";
+  const owned = D.receivedOwnInvoice("invoice") && !D.receivedOwnInvoice("invoice") && !D.receivedOwnInvoice("other");
   stop();
-  record("donation socket: empty and fractional tallies are accepted, malformed tallies keep the last reading, banana and sat rankings stay independent, older boards never invent sats, replay counts a payment once, an unpriced payment counts no bananas, a seen on-chain payment is passed on and a malformed one isn't, an invoice without its Lightning half is accepted, and unsubscribe closes the socket",
-    advertisedLimits && validatedLimits && empty && tally && boards && legacyBoard && replay && heard && unlit && received.length === 2 && received[0].bananas.exact === 0.25 && received[1].bananas.exact === 0 && received[1].bananas.rounded === 0 && sockets[1].closed && !D.state.connected,
-    JSON.stringify({ advertisedLimits, validatedLimits, empty, tally, boards, legacyBoard, replay, heard, unlit, received }));
+  record("donation socket: snapshots replace stale rows and correct same-id details, a raised message bar silences live and held entries, invoice and note requests obey the bar, and replay, tally, board, on-chain and unsubscribe contracts hold",
+    advertisedLimits && validatedLimits && empty && tally && boards && legacyBoard && replay && raisedBar && snapshot && quiet && raisedLater && subBarRequest && overBarRequest && owned && heard && unlit && received.length === 4 && received[0].bananas.exact === 0.25 && received[1].bananas.exact === 0 && received[1].bananas.rounded === 0 && sockets[1].closed && !D.state.connected,
+    JSON.stringify({ advertisedLimits, validatedLimits, empty, tally, boards, legacyBoard, replay, raisedBar, snapshot, quiet, raisedLater, subBarRequest, overBarRequest, owned, heard, unlit, received }));
 
   let now = Date.now(), detailsOpen = false;
-  const kioskContext = { window: { BL: { jumbotron: { text: { GLYPH_W: 5, GLYPH_H: 7, TRACKING: 1 } }, qr: { encode: () => ({ size: 1, modules: [1] }) } } },
+  const kioskContext = { window: { BL: { jumbotron: { text: { GLYPH_W: 5, GLYPH_H: 7, TRACKING: 1 } }, qr: { encode: () => ({ size: 1, modules: [1] }) }, donations: D } },
     document: { createElement: () => ({ getContext: () => ({}) }) }, Date: class extends Date { static now() { return now; } } };
   runInNewContext(await readFile(new URL("../src/js/factory-kiosk.js", import.meta.url), "utf8"), kioskContext);
   const F = kioskContext.window.BL.factoryKiosk.create({ real: true, link: () => "/lightning", bananasFor: () => 1,
     invoice: async () => ({ request: "request", invoice: { id: "invoice", bolt11: "lntbs1", expires: now / 1000 + 10 }, bananas: { exact: 0.25, rounded: 0 }, rate: null }),
     open: () => true, testNetwork: () => "signet", account: () => ({ backend: true, me: null }), release: () => {},
     editDetails: (field) => { detailsOpen = !!field; }, closeDetails: () => { detailsOpen = false; } });
-  const quote = async () => { F.start(); for (const key of ["Enter", "1", "Enter"]) F.key({ key }); await Promise.resolve(); };
+  const quote = async () => { F.start(); for (const key of ["Enter", "6", "9", "Enter"]) F.key({ key }); await Promise.resolve(); };
   F.start(); F.key({ key: "Enter" }); F.key({ key: "A" }); F.update(0.1);
   const fromAmount = F.state === "details" && detailsOpen;
   F.key({ key: "Escape" });
@@ -4828,7 +4868,7 @@ const donationClientChecks = async () => {
     invoice: async () => ({ request: "request", invoice: { id: "unlit", bolt11: null, expires: now / 1000 + 900 }, bananas: { exact: 0.25, rounded: 0 }, rate: null }),
     onchain: async () => ({ address: "tb1qexampleaddress0000", sats: 1000 }), waitFor: (id) => waits.push(id),
     open: () => true, testNetwork: () => "signet", account: () => ({ backend: true, me: null }), release: () => {} });
-  G.start(); for (const key of ["Enter", "1", "Enter"]) G.key({ key }); await Promise.resolve();
+  G.start(); for (const key of ["Enter", "6", "9", "Enter"]) G.key({ key }); await Promise.resolve();
   G.key({ key: "Enter" }); await Promise.resolve(); await Promise.resolve();
   const chainOnly = G.state === "chain";
   const short = G.seen("unlit", 400, 1000, 615) && G.state === "chain" && G.rest === 615;
@@ -4841,6 +4881,17 @@ const donationClientChecks = async () => {
   const waited = waits.join() === "unlit";
   record("donation kiosk: an invoice without its Lightning half pays on-chain from the quote, a seen payment short of it asks for what is left and a whole one waits for its block without offering payment again, and leaving waits on the invoice", chainOnly && short && whole && noRepay && waited, JSON.stringify({ chainOnly, short, whole, noRepay, waited, state: G.state }));
 
+  const demoRequests = [];
+  const demo = kioskContext.window.BL.factoryKiosk.create({ link: () => "/donate", bananasFor: () => 1,
+    details: () => ({ handle: "Casey", message: "visible above the bar" }),
+    request: value => { demoRequests.push({ ...value }); return { id: `demo${demoRequests.length}`, url: "/donate" }; } });
+  demo.start(); for (const key of ["Enter", "6", "9", "Enter", "Enter"]) demo.key({ key });
+  const quietDemo = demo.state === "invoice" && demoRequests[0]?.message === "";
+  demo.stop(); demo.start(); for (const key of ["Enter", "1", "0", "0", "0", "Enter", "Enter"]) demo.key({ key });
+  const speakingDemo = demo.state === "invoice" && demoRequests[1]?.message === "visible above the bar";
+  record("donation kiosk: a simulated invoice QR omits a message under the bar and carries one at the bar", quietDemo && speakingDemo,
+    JSON.stringify({ quietDemo, speakingDemo, demoRequests }));
+
   // A DONE reply may outlive the editor that requested it: the factory reuses its flow between visits,
   // and a short on-chain payment can leave and reopen the editor without replacing the invoice.
   let deferredDetails = { handle: "tester", message: "saved" }, finishNote;
@@ -4849,7 +4900,7 @@ const donationClientChecks = async () => {
     onchain: async () => ({ address: "tb1qexampleaddress0000", sats: 1000 }), waitFor() {},
     note: () => new Promise(resolve => { finishNote = resolve; }), details: () => ({ ...deferredDetails }), editDetails() {},
     open: () => true, testNetwork: () => "signet" });
-  const deferredQuote = async () => { deferred.start(); for (const key of ["Enter", "1", "Enter"]) deferred.key({ key }); await Promise.resolve(); };
+  const deferredQuote = async () => { deferred.start(); for (const key of ["Enter", "1", "0", "0", "0", "Enter"]) deferred.key({ key }); await Promise.resolve(); };
   await deferredQuote();
   deferred.key({ key: "A" });
   deferredDetails.message = "old visit"; deferred.detailsChanged();
@@ -4968,8 +5019,15 @@ const donationClientChecks = async () => {
   capped.key({ key: "Enter" });
   const overallCap = capped.state === "amount" && capCalls === 1;
   capped.stop();
-  record("donation limits: amounts above Lightning warn before Continue, keep on-chain available, disable the Lightning button, and still reject invalid Bitcoin amounts",
-    capWarning && capContinue && lightningDisabled && capOnchain && overallCap, JSON.stringify({ capWarning, capContinue, lightningDisabled, capOnchain, overallCap }));
+  capped.start(); for (const key of ["Enter", "1", "Enter"]) capped.key({ key });
+  await Promise.resolve();
+  const configuredMinimum = capped.state === "quote" && capCalls === 2;
+  capped.stop(); caps.minSats = 10;
+  capped.start(); for (const key of ["Enter", "9", "Enter"]) capped.key({ key });
+  const belowConfiguredMinimum = capped.state === "amount" && capCalls === 2;
+  capped.stop();
+  record("donation limits: real amounts follow the advertised minimum, warn above Lightning, keep on-chain available, disable the Lightning button, and reject invalid Bitcoin amounts",
+    capWarning && capContinue && lightningDisabled && capOnchain && overallCap && configuredMinimum && belowConfiguredMinimum, JSON.stringify({ capWarning, capContinue, lightningDisabled, capOnchain, overallCap, configuredMinimum, belowConfiguredMinimum }));
 
   const elements = new Map(), frames = new Map(), detailTimers = new Map(), invoices = [], notes = [], popupWaits = [];
   let noteFails = 0;
@@ -4977,7 +5035,7 @@ const donationClientChecks = async () => {
     "donation-fields", "factory-donation-fields", "donation-details-status"]) elements.set(id, {
     listeners: new Map(), open: false, value: "", disabled: false,
     addEventListener(type, fn) { this.listeners.set(type, fn); }, removeEventListener(type) { this.listeners.delete(type); },
-    showModal() { this.open = true; }, close() { this.open = false; }, focus() { this.focused = true; },
+    showModal() { this.open = true; }, close() { this.open = false; }, focus() { this.focused = true; }, blur() { this.focused = false; },
     select() { this.selected = true; }, setSelectionRange() {}, scrollIntoView() {}, append() {}, insertBefore() {}, querySelector: () => ({}), getContext: () => ({})
   });
   Object.assign(kioskContext, { location: { origin: "https://site.test" }, navigator: {}, performance: { now: () => now },
@@ -4988,16 +5046,23 @@ const donationClientChecks = async () => {
   let popupFlow;
   K.factoryKiosk.create = hooks => (popupFlow = factoryCreate(hooks));
   K.game = { bananasFor: () => 1 };
+  K.chain = { snapshot: { priceUsd: 100000 } };
   K.net = { state: { backend: true, me: null }, login() {} };
-  K.donations = { state: { open: true }, testNetwork: "signet", sanitize: D.sanitize, HANDLE_MAX: D.HANDLE_MAX, MESSAGE_MAX: D.MESSAGE_MAX,
+  K.donations = { real: true, state: { open: true }, testNetwork: "signet", sanitize: D.sanitize, carried: (sats, message, bar = 1000) => D.carried(sats, message, bar),
+    HANDLE_MAX: D.HANDLE_MAX, MESSAGE_MAX: D.MESSAGE_MAX, MESSAGE_MIN_SATS: 1000, messageMinSats: 1000,
     invoice: async options => { invoices.push(options); return { request: "request", invoice: { id: "popup", bolt11: "lntbs1", expires: now / 1000 + 900 }, bananas: { exact: 0.25, rounded: 0 }, rate: null }; },
+    createRequest: () => ({ id: "demo", url: "/donate" }),
     note: async (request, message, handle) => { notes.push({ request, message, handle }); return noteFails-- > 0 ? { error: "busy" } : {}; },
     onchain: async () => ({ address: "tb1qexampleaddress0000", sats: 1000 }), waitFor: id => popupWaits.push(id) };
   runInNewContext(await readFile(new URL("../src/js/donation-popup.js", import.meta.url), "utf8"), kioskContext);
-  const popup = K.donationPopup.create({ state: { message: "hello" } }), dialog = elements.get("donation-popup");
-  const popupQuote = async () => { popup.open(); for (const key of ["1", "Enter"]) popupFlow.key({ key }); await Promise.resolve(); };
+  let identityWrites = 0;
+  const popupGame = { state: { handle: "", message: "hello", recentHandles: ["Ooga-Dev"] }, rememberHandle() {}, setIdentity(value) { identityWrites++; Object.assign(this.state, value); } };
+  const popup = K.donationPopup.create(popupGame), dialog = elements.get("donation-popup");
+  let closedCount = 0;
+  popup.onClose(() => closedCount++);
+  const popupQuote = async () => { popup.open(); for (const key of ["1", "0", "0", "0", "Enter"]) popupFlow.key({ key }); await Promise.resolve(); };
   await popupQuote();
-  const anonymous = dialog.open && popupFlow.state === "quote" && invoices[0].sats === 1 && invoices[0].message === "hello" && invoices[0].handle === "anon";
+  const anonymous = dialog.open && popupFlow.state === "quote" && invoices[0].sats === 1000 && invoices[0].message === "hello" && invoices[0].handle === "anon";
   const other = !popup.receive({ id: "other", handle: "someone" }, { exact: 1, rounded: 1 }) && dialog.open;
   const settled = popup.receive({ id: "popup", handle: "" }, { exact: 0.25, rounded: 0 }) && !dialog.open && frames.size === 0;
   K.net.state.me = { login: "tester" };
@@ -5027,10 +5092,11 @@ const donationClientChecks = async () => {
   elements.get("donation-message").value = "never saved";
   elements.get("donation-fields").listeners.get("input")();
   await popupFlow.key({ key: "Enter" });
-  const failedAgain = popupFlow.state === "details" && !!popupFlow.detailsError;
+  const failedAgain = popupFlow.state === "details" && !!popupFlow.detailsError && popupGame.state.message === "kept until saved";
   popupFlow.key({ key: "Escape" });
   const keptSaved = failedAgain && popupFlow.state === "quote" && !popupFlow.detailsError
-    && elements.get("donation-message").value === "kept until saved" && popup.details().message === "kept until saved";
+    && elements.get("donation-message").value === "kept until saved" && popup.details().message === "kept until saved"
+    && popupGame.state.message === "kept until saved";
   popupFlow.key({ key: "Enter" });
   elements.get("donation-message").value = "updated while the QR is shown";
   elements.get("donation-fields").listeners.get("input")();
@@ -5047,11 +5113,111 @@ const donationClientChecks = async () => {
   const popupSeen = popup.seen("popup", 1000, 1000, 0) && popupFlow.state === "confirming";
   elements.get("donation-close").listeners.get("click")();
   const leftWaiting = popupWaits.join() === "popup" && !dialog.open && frames.size === 0;
+  popup.open();
+  popup.closeOutside();
+  const realOutside = dialog.open;
+  for (const key of ["1", "0", "0", "0"]) popupFlow.key({ key });
+  popupFlow.key({ key: "A" });
+  popup.focusDetails("message");
+  const messageInput = elements.get("donation-message");
+  const writesBeforeInput = identityWrites, previousDefault = popupGame.state.message;
+  messageInput.value = "draft";
+  elements.get("donation-fields").listeners.get("input")({ target: messageInput });
+  messageInput.value = "";
+  elements.get("donation-fields").listeners.get("input")({ target: messageInput });
+  const deferredWrite = identityWrites === writesBeforeInput && popupGame.state.message === previousDefault;
+  elements.get("donation-fields").listeners.get("change")({ target: messageInput });
+  const clearedDefault = deferredWrite && popupGame.state.message === "" && identityWrites === writesBeforeInput + 1;
+  popup.close();
+  K.donations.real = false;
+  popup.open(true);
+  const demoAnonymous = popup.defaults().handle === "" && popup.details().handle === "";
+  const beforeDemoClose = closedCount;
+  popup.closeOutside();
+  const demoOutside = !dialog.open && closedCount === beforeDemoClose + 1;
+  K.donations.real = true;
+  const realAfterDemo = popup.defaults().handle === "tester" && popup.defaults().message === "";
+  record("donation popup: real invoices ignore backdrop dismissal, message typing defers the local save until change, a cleared real message updates the saved default, demo anonymous stays empty, demo backdrop dismissal closes once, and the next real default uses the signed-in login",
+    realOutside && clearedDefault && demoAnonymous && demoOutside && realAfterDemo,
+    JSON.stringify({ realOutside, clearedDefault, demoAnonymous, demoOutside, realAfterDemo }));
+  // A saved name completes after an explicit preview; a typed prefix survives plain Tab. A tip under the message
+  // bar goes out without a message, and its details screen offers the name alone.
+  const settle = () => new Promise((resolve) => setImmediate(resolve));
+  popup.open(); for (const key of ["1", "0", "0", "0", "Enter"]) popupFlow.key({ key }); await settle();
+  popupFlow.key({ key: "A" });
+  kioskContext.document.activeElement = elements.get("donation-handle");
+  elements.get("donation-handle").value = "oo";
+  elements.get("donation-fields").listeners.get("input")();
+  const suggested = popupFlow.state === "details" && popup.history()?.join() === "Ooga-Dev";
+  elements.get("donation-message").focused = false;
+  fieldKey("Tab", elements.get("donation-handle"));
+  const preserved = suggested && elements.get("donation-handle").value === "oo" && elements.get("donation-message").focused;
+  popup.focusDetails("handle");
+  kioskContext.document.activeElement = elements.get("donation-handle");
+  elements.get("donation-handle").value = "oo";
+  elements.get("donation-fields").listeners.get("input")();
+  fieldKey("ArrowDown", elements.get("donation-handle"));
+  fieldKey("Tab", elements.get("donation-handle"));
+  const completed = preserved && elements.get("donation-handle").value === "Ooga-Dev" && popup.history() === null;
+  popup.focusDetails("handle");
+  kioskContext.document.activeElement = elements.get("donation-handle");
+  elements.get("donation-handle").value = "oo";
+  elements.get("donation-fields").listeners.get("input")();
+  fieldKey("ArrowDown", elements.get("donation-handle"));
+  fieldKey("Escape", elements.get("donation-handle"));
+  const previewCanceled = elements.get("donation-handle").value === "oo";
+  elements.get("donation-fields").listeners.get("input")();
+  fieldKey("ArrowDown", elements.get("donation-handle"));
+  fieldKey("Enter", elements.get("donation-handle"));
+  const previewMoved = elements.get("donation-handle").value === "Ooga-Dev" && elements.get("donation-message").focused;
+  fieldKey("Enter", elements.get("donation-message"));
+  await settle();
+  const previewSaved = popupFlow.state === "quote" && popup.details().handle === "Ooga-Dev" && notes.at(-1).handle === "Ooga-Dev";
+  kioskContext.document.activeElement = null;
+  elements.get("donation-close").listeners.get("click")();
+  popupGame.setIdentity({ handle: popupGame.state.handle, message: "larger-tip note" });
+  popup.open(); for (const key of ["6", "8", "Enter"]) popupFlow.key({ key }); await settle();
+  const belowMinimum = popupFlow.state === "amount";
+  for (const key of ["Delete", "6", "9", "Enter"]) popupFlow.key({ key }); await settle();
+  const smallInvoice = belowMinimum && popupFlow.state === "quote" && invoices.at(-1).sats === 69 && invoices.at(-1).message === ""
+    && popupGame.state.message === "larger-tip note";
+  popupFlow.key({ key: "A" });
+  elements.get("donation-message").focused = false;
+  fieldKey("Tab", elements.get("donation-handle"));
+  const nameAlone = smallInvoice && popupFlow.state === "details" && !elements.get("donation-message").focused;
+  kioskContext.document.activeElement = elements.get("donation-handle");
+  elements.get("donation-handle").value = "oo";
+  elements.get("donation-fields").listeners.get("input")();
+  fieldKey("ArrowDown", elements.get("donation-handle"));
+  fieldKey("Enter", elements.get("donation-handle"));
+  await settle();
+  const nameDone = nameAlone && popupFlow.state === "quote" && elements.get("donation-handle").value === "Ooga-Dev"
+    && popup.details().handle === "Ooga-Dev" && notes.at(-1).handle === "Ooga-Dev";
+  elements.get("donation-close").listeners.get("click")();
+  record("donation popup: a typed prefix survives Tab, a preview completes with Tab or Enter, Escape cancels a preview, and a tip under the message bar has no message field or carried text",
+    completed && previewCanceled && previewMoved && previewSaved && nameDone, JSON.stringify({ suggested, preserved, completed, previewCanceled, previewMoved, previewSaved, smallInvoice, nameAlone, nameDone }));
   popup.open(); popupFlow.key({ key: "1" }); popupFlow.key({ key: "Enter" });
   popup.dispose(); await Promise.resolve();
   const disposed = popupFlow.state === "idle" && !dialog.open && frames.size === 0 && detailTimers.size === 0 && [...elements.values()].every(e => e.listeners.size === 0);
   record("donation popup: signed-out visitors can quote a payment, edits on the details screen save automatically on the same invoice, Tab goes between its fields, a failed save keeps the screen with its error until it is tried again or given up on for the details the invoice holds, and a saved one goes back to the quote with the keys on the popup's screen, Lightning returns to its quote without replacing the invoice, unrelated donations keep its invoice open, its settlement reveals the scene immediately, an on-chain payment can be left waiting, and disposal cancels frames, timers, listeners and late replies",
     anonymous && signedIn && edited && detailsDone && keptSaved && invoiceEdited && lightningBack && sameLightning && other && settled && popupSeen && leftWaiting && disposed, JSON.stringify({ anonymous, signedIn, edited, detailsDone, keptSaved, invoiceEdited, lightningBack, sameLightning, other, settled, popupSeen, leftWaiting, disposed }));
+
+  const routeLocation = { protocol: "https:", pathname: "/donate", search: "", hash: "" }, routeDocument = { title: "" };
+  const routeHistory = { state: null, url: "", replaceState(state, _title, url) {
+    this.state = state; this.url = url; routeLocation.pathname = url;
+  }, pushState() {} };
+  const routeContext = { window: { BL: {}, addEventListener() {}, removeEventListener() {} }, location: routeLocation,
+    document: routeDocument, history: routeHistory, URLSearchParams };
+  runInNewContext(await readFile(new URL("../src/js/router.js", import.meta.url), "utf8"), routeContext);
+  const routes = { list: [{ path: "", scene: "hub", place: null, title: "Home" },
+    { path: "donate", scene: "hub", place: "donate", title: "Donate" }], title: entry => entry.title };
+  const routed = routeContext.window.BL.router.create({ hub: {} }, routes, () => true);
+  routed.arrive("hub", "donate", true);
+  const enteredDonate = routeHistory.url === "/donate" && routeDocument.title === "Donate";
+  routed.dismissPlace("hub", "donate");
+  const closedDonate = routeHistory.url === "/" && routeDocument.title === "Home" && routeHistory.state.place === null;
+  record("donate route: closing its popup replaces the place with hub home, including URL, title and history state",
+    enteredDonate && closedDonate, JSON.stringify({ enteredDonate, closedDonate, url: routeHistory.url, title: routeDocument.title }));
 };
 const wallPerformance = async (b) => {
   await b.send("Emulation.setDeviceMetricsOverride", { width: 1920, height: 1080, deviceScaleFactor: 2, mobile: false });
@@ -5215,6 +5381,65 @@ for (const id of ["hub", "lab", "factory"]) {
     } finally {
       await new Promise(resolve => server.close(resolve));
     }
+  } });
+}
+// The hosted page as `npm run site` stages it: each `data-defer` group leaves the built page for its own same-origin file,
+// served here behind a switch (`refused`, path prefixes) that answers 503, as a deploy mid-flight can. The source and
+// portable pages keep every group inline, so only this page can show what a scene reads before its code arrives.
+const hostedSite = async () => {
+  const html = readFileSync(join(root, "oogaboogaland.html"), "utf8"), out = mkdtempSync(join(tmpdir(), "ooga-hosted-"));
+  const deferred = new Map();
+  for (const [, src, group] of readFileSync(join(root, "src/index.html"), "utf8").matchAll(/<script src="([^"]+)" data-defer="([a-z-]+)"><\/script>/g)) deferred.set(group, [...(deferred.get(group) || []), src]);
+  // A module's block in the built page runs from its marker to the next module's.
+  const block = (src) => { const start = html.indexOf(`// ---- ${src} ----\n`); return html.slice(start, html.indexOf("\n\n// ---- ", start + 1)); };
+  const page = externalizeModules(html, out, deferred, block), refused = [], fetched = [];
+  const server = createServer((req, res) => {
+    const path = req.url.split("?")[0];
+    if (!path.startsWith("/js/")) { res.setHeader("content-type", "text/html; charset=utf-8"); return res.end(page); }
+    fetched.push(path);
+    if (refused.some(prefix => path.startsWith(prefix))) { res.writeHead(503); return res.end(); }
+    res.setHeader("content-type", "text/javascript");
+    res.end(readFileSync(join(out, path)));
+  });
+  await new Promise((resolve, reject) => { server.once("error", reject); server.listen(0, "127.0.0.1", resolve); });
+  return { origin: `http://127.0.0.1:${server.address().port}`, refused, fetched,
+    close: async () => { await new Promise(resolve => server.close(resolve)); rmSync(out, { recursive: true, force: true }); } };
+};
+// A refused bundle is logged by the browser as a failed resource; that line is the fixture's, not the page's.
+const dropRefusals = (b) => { for (let i = b.logs.length - 1; i >= 0; i--) if (b.logs[i].includes("status of 503")) b.logs.splice(i, 1); };
+const orbitHosted = { name: "orbit hosted", why: "regression: Ooga Orbit read Ooga Drop's models at load, which a hosted page had deferred, so it threw on entry, cold and after a Drop visit", run: async (b, site) => {
+  const cold = await b.evaluate(`({ scene: __ooga.scene, frames: __ooga.renderedFrames, models: !!BL.dropModels, diver: !!BL.skydiver })`);
+  await b.evaluate(`__ooga.go("drop")`);
+  const drop = await untilPage(b, 'B.scene === "drop" && !B.transitioning', 15000);
+  await b.evaluate(`__ooga.go("orbit")`);
+  const orbit = await untilPage(b, 'B.scene === "orbit" && !B.transitioning', 15000);
+  const after = await b.evaluate(`({ scene: __ooga.scene, frames: __ooga.renderedFrames })`);
+  record("orbit hosted: a cold /oogaorbit on the hosted page boots and draws with Drop's diver still unloaded, and Orbit opens again after a Drop visit", cold.scene === "orbit" && cold.frames > 2 && cold.models && !cold.diver
+    && drop && orbit && after.scene === "orbit" && site.fetched.filter(p => p.startsWith("/js/drop-")).length === 1, JSON.stringify({ cold, drop, orbit, after, fetched: site.fetched }));
+} };
+const arcadeHostedDrop = { name: "arcade hosted drop cabinet", why: "regression: a refused Ooga Drop download left the arcade's departure flags set, so no cabinet opened again and its Leave did nothing until a reload, also when Leave was pressed during the fade back", run: async (b, site) => {
+  await b.evaluate(`(() => { const B = window.__ooga, a = B.cavemen.get("portlandhodl"), s = window.BL.arcadeModels.CABINETS[1].play; if (B.crew.player !== a) B.pilot.possess(a); a.root.position.x = s.x; a.root.position.z = s.z; B.advance(0.2, 1 / 60); })()`);
+  site.refused.push("/js/drop-");
+  await b.key(" ");
+  for (let t = 0; t < 15000 && !site.fetched.some(p => p.startsWith("/js/drop-")); t += 50) await b.sleep(50);
+  // Leave, pressed while the view fades back in (after the refusal's toast), is refused with the transition still running.
+  const pressed = await b.evaluate(`new Promise(resolve => { const t0 = performance.now(), tick = () => {
+    if (__ooga.transitioning && document.getElementById("toast").textContent.includes("could not be opened")) { document.querySelector('nav[data-scene="arcade"] .leave').click(); resolve(__ooga.transitioning); }
+    else if (performance.now() - t0 > 10000) resolve(null); else requestAnimationFrame(tick); }; tick(); })`);
+  const refused = await untilPage(b, 'B.scene === "arcade" && !B.transitioning', 15000);
+  site.refused.length = 0;
+  dropRefusals(b);
+  await b.key(" ");
+  const opened = await untilPage(b, 'B.scene === "drop" && !B.transitioning', 15000);
+  const asked = site.fetched.filter(p => p.startsWith("/js/drop-")).length;
+  record("arcade hosted: a refused Ooga Drop download fades back to the arcade, Leave pressed during that fade is refused without locking the hall, and Space at the same cabinet asks again and opens the game", pressed === true && refused && opened && asked === 2, JSON.stringify({ pressed, refused, opened, asked, fetched: site.fetched }));
+} };
+for (const [id, step, path] of [["orbit", orbitHosted, "/oogaorbit"], ["arcade", arcadeHostedDrop, "/oogaarcade"]]) {
+  if (ONLY && !onlyMatches(step.name)) continue;
+  tasks.push({ name: `${id} hosted`, scene: id, perf: false, run: async () => {
+    const site = await hostedSite();
+    try { await fold(`${site.origin}${path}?debug=1&nosim=1&net=0&hour=12&day=80&character=portlandhodl`, [[step.name, (b) => step.run(b, site)]]); }
+    finally { await site.close(); }
   } });
 }
 // `stat` names the scene's count of bananas delivered, read from stats(): drops landed on the pile, or the bananas the
@@ -5876,7 +6101,7 @@ const hubGuide = { name: "hub guide", why: "regression: Tess's offer showed only
     const key = (type, key, code) => window.dispatchEvent(new KeyboardEvent(type, { key, code, bubbles: true, cancelable: true }));
     const at = () => ({ x: a.root.position.x, z: a.root.position.z }), from = (p) => Math.hypot(a.root.position.x - p.x, a.root.position.z - p.z);
     for (let t = 0; t < 12 && s.phase !== "offer"; t += 1 / 30) B.advance(1 / 30, 1 / 30);
-    const offered = s.phase === "offer", bubbles = offered ? s.beats.length : 0;
+    const offered = s.phase === "offer", bubbles = offered && G.speech ? G.speech.beats.length : 0;
     // A shot aimed straight at her, where she hovers by the Ooga, passes her; a tap there reaches her.
     const root = BL.scenes.hub.debug.tess.root, head = root.children[0].children[0];
     BL.scene.updateWorld(root, root.parent.world);
@@ -5886,7 +6111,7 @@ const hubGuide = { name: "hub guide", why: "regression: Tess's offer showed only
     B.input.weaponTargets.ray(poke, C.x, C.y, C.z, dx / l, dy / l, dz / l, 60, a, null, true);
     const shotTess = shot.owner?.kind === "tess", pokeTess = poke.owner?.kind === "tess";
     let reached = 0;
-    for (let t = 0; t < 10 && offered && s.phase === "offer" && reached < bubbles - 1; t += 1 / 30) { B.advance(1 / 30, 1 / 30); reached = Math.max(reached, s.utterance); }
+    for (let t = 0; t < 10 && offered && s.phase === "offer" && reached < bubbles - 1; t += 1 / 30) { B.advance(1 / 30, 1 / 30); reached = Math.max(reached, G.speech ? G.speech.beat : 0); }
     // W held as Enter starts the tour, then let go.
     const start = at();
     key("keydown", "w", "KeyW"); B.advance(0.4, 1 / 60);
@@ -5948,7 +6173,7 @@ const hubGuide = { name: "hub guide", why: "regression: Tess's offer showed only
     return { offered, bubbles, reached, shotTess, pokeTess, walked, touring, drift, returned, again, driving: P.player === a, pair,
       reoffered, climbing, rose: +rose.toFixed(3), burned: +burned.toFixed(4), thrusting, released: !s.holding };
   })()`);
-  record("hub guide: Tess's offer to an Ooga standing on landing says every speech bubble of its line", guide.offered && guide.bubbles > 1 && guide.reached === guide.bubbles - 1, JSON.stringify(guide));
+  record("hub guide: Tess's offer to an Ooga standing on landing says every speech bubble of its line", guide.offered && guide.bubbles > 0 && guide.reached === guide.bubbles - 1, JSON.stringify(guide));
   record("hub guide: a shot aimed straight at Tess passes her, while a tap there still reaches her", !guide.shotTess && guide.pokeTess, JSON.stringify(guide));
   record("hub guide: an Ooga walking as the tour starts stands through it once W is let go, and walks again when the tour ends", guide.walked > 0.3 && guide.touring && guide.drift < 0.05 && guide.returned && guide.again > 0.3 && guide.driving, JSON.stringify(guide));
   record("hub guide: during a tour T switches no actor for a signed-in owner, Escape ends the tour, and afterwards T switches to the gorilla and back", !!guide.pair && guide.pair.gorillaReady && guide.pair.kept && guide.pair.ended && guide.pair.toGorilla && guide.pair.back, JSON.stringify(guide.pair));
@@ -8590,13 +8815,28 @@ const hubBirdsEyeProjection = { name: "birds-eye projection", why: "rule: overhe
       roof.geometry = decoratedRoof; rows.push(sample("render-only foliage")); roof.geometry = roofGeometry;
       roof.matrixCloud = true; roofGeometry.cutawayPreserve = true; opts.cutawayCloudY = -4; opts.cutawayCloudMix = 1;
       rows.push({ ...sample("lowered cloud"), physicalY: roof.position.y, worldY: roof.world[13] });
-      return rows;
+      // The ₿IFRÖST arch's stone carries a depth offset for its joins, yet stands free: its lintel and towers hide a
+      // speaker behind them, while one seen through the opening stays visible.
+      roof.visible = false; roof.matrixCloud = false; opts.birdsEyeCutaway = false; opts.cutawayRegionCount = 0;
+      camera.orthoMix = 0; camera.up = { x: 0, y: 1, z: 0 };
+      const landmark = BL.bifrostGate.landmark(), arch = S.createNode({ geometry: landmark.stone }); S.addChild(root, arch);
+      const small = BL.models.box({ w: 0.3, h: 0.3, d: 0.3, color: "#ffffff" }), speaker = S.createNode({ sightHidden: true }), mouth = S.createNode({ geometry: small });
+      S.addChild(speaker, mouth); S.addChild(root, speaker); actor.visible = false;
+      const archRows = [];
+      for (const [name, x, y, shown] of [["lintel", 0.75, 5.5, false], ["tower", landmark.opening.half + 0.6, 2, false], ["opening", 0, landmark.opening.spring / 2, true], ["opening off centre", 0.75, landmark.opening.spring / 2, true]]) {
+        Object.assign(camera.position, { x, y, z: 8 }); Object.assign(camera.target, { x, y, z: -3 }); Object.assign(speaker.position, { x, y, z: -3 });
+        B.renderer.render(root, camera, opts); visibility.begin();
+        archRows.push({ name, shown, visible: visibility.anchor({ root: speaker, parts: { head: mouth } }, {}) });
+      }
+      B.renderer.releaseGeometry(small);
+      return { rows, archRows };
     } finally { visibility.dispose(); for (const geometry of [bodyGeometry, headGeometry, roofGeometry]) B.renderer.releaseGeometry(geometry); B.renderer.render(BL.scenes.hub.root, B.camera, B.renderOpts); }
   })()`);
-  record("birds-eye projection: speech anchors follow the rendered head through the transition, ignore cut roofs and weather, and retain a sliver exposed through a local cut", anchors.length === 15 && anchors.every(r => {
+  record("birds-eye projection: speech anchors follow the rendered head through the transition, ignore cut roofs and weather, and retain a sliver exposed through a local cut", anchors.rows.length === 15 && anchors.rows.every(r => {
     const expected = r.name !== "covered" && r.name !== "preserved roof";
     return r.visible === expected && (!expected || r.error < 0.002) && (r.name !== "lowered cloud" || r.physicalY === 6 && r.worldY === 6);
-  }), JSON.stringify(anchors));
+  }), JSON.stringify(anchors.rows));
+  record("speech anchors: the ₿IFRÖST arch's offset stone hides a speaker behind its lintel and towers, and one seen through the opening stays visible", anchors.archRows.length === 4 && anchors.archRows.every(r => r.visible === r.shown), JSON.stringify(anchors.archRows));
 } };
 
 const hubCombatReplay = { name: "birds-eye combat replay", why: "contract: replay links preserve north-up intent and legacy combat orbit poses still migrate", run: async (b) => {
@@ -9452,7 +9692,9 @@ const donationDetails = { name: "donation details", why: "regression: clicking K
     K.create = probe.create;
   })()`);
   try {
-    await b.key("1"); await b.key("Enter");
+    // A message rides only a tip of at least the message bar.
+    for (const key of ["1", "0", "0", "0"]) await b.key(key);
+    await b.key("Enter");
     await untilPage(b, 'window.__donationDetails.flow.state === "quote"');
     await b.key("A"); await b.key("Tab");
     await b.send("Input.insertText", { text: "discard this edit" });
@@ -9494,7 +9736,7 @@ const factoryCooker = { name: "factory cooker", why: "rule: a tip in the factory
   const at = await b.evaluate(`(() => { const B = window.__ooga; ${FACTORY_EVENT} const s = X.scene, q = s.sats;
     for (let t = 0; t < 10 && q.bay.some((v) => v >= 0); t += 0.25) B.advance(0.25, 1 / 20);
     s.gate.hum = Infinity;
-    for (const [id, value] of [["handle", "tester"], ["message", "zebra 12:34"]]) { const el = document.getElementById(id); el.value = value; el.dispatchEvent(new Event("change")); }
+    B.game.setIdentity({ handle: "tester", message: "zebra 12:34" });
     B.pilot.release(true);
     const w = s.kioskScreen.world, p = { x: w[12], y: w[13], z: w[14] };
     B.pilot.navigate({ position: p, target: p, yaw: s.kiosk.rotation.y, pitch: 0.2, dist: 4 }); B.advance(0.6, 1 / 60);
@@ -9686,9 +9928,20 @@ const bifrostEntrance = { name: "bifrost entrance", why: "playthrough: an Ooga w
   record("bifrost entrance: from the pass stairs the roster's widest Ooga walks through the arch out onto the bridge's deck", arch.onDeck && Math.abs(arch.feet - arch.deck) < 0.3, JSON.stringify(arch));
   await b.evaluate(`(() => { const B = window.__ooga, p = B.bifrost.site.portal, sx = Math.sin(p.ry), sz = Math.cos(p.ry), x = p.x + sx * 0.9, z = p.z + sz * 0.9; B.pilot.navigate({ position: { x, y: p.floorY, z }, target: { x: x - sx * 6, y: p.floorY + 1, z: z - sz * 6 }, yaw: Math.atan2(sx, sz), pitch: 0.2, dist: 5 }); B.advance(0.5, 1 / 60); window.__portal = [-sx, -sz]; })()`);
   const inKey = await b.evaluate(`window.__portal`);
+  // The first crossing finds the chamber's deferred code refused, as a hosted page's bundle answering 503 would be: the
+  // view fades back to the island with the same Ooga driven and walking, and stepping out of the field and in again
+  // asks for the code once more and goes through.
+  await b.evaluate(`(() => { const load = BL.deferred.load; window.__loads = 0; BL.deferred.load = (group) => { if (group !== "dsb") return load(group); if (window.__loads++) { BL.deferred.load = load; return load(group); } return Promise.reject(new Error("503")); }; window.__portalStart = { ...__ooga.crew.player.root.position }; })()`);
   await walkToward(b, inKey[0], inKey[1], 0.8);
-  const arrived = await b.evaluate(`(() => { const B = window.__ooga; for (let i = 0; i < 240 && (B.transitioning || B.scene !== "bifrost"); i++) B.advance(1 / 30, 1 / 30); B.advance(0.3, 1 / 30); const d = B.bifrost; return { scene: B.scene, ooga: B.crew && B.crew.player ? B.crew.player.traits.name : null, pictured: !!(d && d.pictured), outside: !!(d && d.outside) }; })()`);
-  record("bifrost entrance: walking through the portal's field takes the same Ooga into the chamber, which has DSB Land's picture and the island's view back out", arrived.scene === "bifrost" && arrived.ooga === "portlandhodl" && arrived.pictured && arrived.outside, JSON.stringify(arrived));
+  const refused = await b.evaluate(`(() => { const B = window.__ooga; for (let i = 0; i < 240 && B.transitioning; i++) B.advance(1 / 30, 1 / 30); const a = B.crew.player; return { scene: B.scene, transitioning: B.transitioning, loads: window.__loads, ooga: a ? a.traits.name : null, at: a ? { x: a.root.position.x, z: a.root.position.z } : null }; })()`);
+  await walkToward(b, -inKey[0], -inKey[1], 0.5);
+  const moved = await b.evaluate(`(() => { const a = __ooga.crew.player, p = a && a.root.position; return { loads: window.__loads, scene: __ooga.scene, x: p ? p.x : null, z: p ? p.z : null }; })()`);
+  record("bifrost entrance: a refused chamber download fades back to the island with the same Ooga driven, walking again and not asking twice while it stands in the field", refused.scene === "hub" && !refused.transitioning && refused.loads === 1 && refused.ooga === "portlandhodl"
+    && moved.scene === "hub" && moved.loads === 1 && refused.at && Math.hypot(moved.x - refused.at.x, moved.z - refused.at.z) > 0.3, JSON.stringify({ refused, moved }));
+  await b.evaluate(`(() => { const B = window.__ooga, p = B.bifrost.site.portal, s = window.__portalStart, sx = Math.sin(p.ry), sz = Math.cos(p.ry); B.pilot.navigate({ position: s, target: { x: s.x - sx * 6, y: p.floorY + 1, z: s.z - sz * 6 }, yaw: Math.atan2(sx, sz), pitch: 0.2, dist: 5 }); B.advance(0.5, 1 / 60); })()`);
+  await walkToward(b, inKey[0], inKey[1], 0.8);
+  const arrived = await b.evaluate(`(() => { const B = window.__ooga; for (let i = 0; i < 240 && (B.transitioning || B.scene !== "bifrost"); i++) B.advance(1 / 30, 1 / 30); B.advance(0.3, 1 / 30); const d = B.bifrost; return { scene: B.scene, loads: window.__loads, ooga: B.crew && B.crew.player ? B.crew.player.traits.name : null, pictured: !!(d && d.pictured), outside: !!(d && d.outside) }; })()`);
+  record("bifrost entrance: walking through the portal's field takes the same Ooga into the chamber, which has DSB Land's picture and the island's view back out", arrived.scene === "bifrost" && arrived.loads === 2 && arrived.ooga === "portlandhodl" && arrived.pictured && arrived.outside, JSON.stringify(arrived));
 } };
 const walkingModeControls = async (b, scene) => {
   const state = await b.evaluate(`(() => {
@@ -9955,14 +10208,182 @@ const timechainDataChecks = async () => {
   pending[2](); pending[3](); pending[4](); await loading; late.dispose();
   record("timechain API: late sibling metadata fills and repaints the holder view without changing its fetch time", gotHeight && gotBoth && changed.filter(i => i === 5).length >= 3 && late.boards.every(b => b.asof === "2026-09-23 / BLOCK 968330"));
 };
-for (const fallback of [false, true]) scene("hub", { label: "timechain " + (fallback ? "canvas2d" : "webgl2"), exclusive: fallback, query: "solo=1&character=SaniExp&view=timechain&pos=0" + (fallback ? "&canvas2d=1" : ""), steps: [{ name: "timechain crossing", why: "playthrough: Sani can stand and walk on Timechain Island, cross both bridge shores, and fall beyond its real edge", run: async (b) => {
+// Rule: a room id is validated at every boundary, and the three sizes are one design whose doorway, arrival, button and
+// chairs keep human size while the architecture scales and the table grows to seat 4, 8 and 12.
+const timechainRoomChecks = async () => {
+  const context = { window: { BL: {} } };
+  runInNewContext(await readFile(new URL("../src/js/timechain-rooms.js", import.meta.url), "utf8"), context);
+  const R = context.window.BL.timechainRooms;
+  const good = [1, 9, "1", "5", "9"].every(v => R.parse(v) === Number(v));
+  const bad = [0, 10, 3.5, -1, "0", "03", "3a", " 3", "", "sphere-3", null, undefined, NaN, {}, [3]].every(v => R.parse(v) === null);
+  const zones = R.ROOMS.map(r => r.zone), scales = R.ROOMS.map(r => r.scale).join();
+  record("timechain rooms: only 1–9 resolve to rooms, each its own undotted zone, at 1× for 1–3, 1.5× for 4–6 and 2× for 7–9",
+    good && bad && new Set(zones).size === 9 && zones.every((z, i) => z === `sphere-${i + 1}` && !z.includes(".")) && scales === "1,1,1,1.5,1.5,1.5,2,2,2" && R.get("4").scale === 1.5 && R.get(12) === null,
+    JSON.stringify({ good, bad, zones, scales }));
+  const rows = R.SCALES.map(s => {
+    const L = R.layout(s), along = (a) => [L.doorZ - a.z, a.x];
+    const guided = Array.from({ length: 40 }, (_, i) => L.threshold.z + (L.arrival.z - L.threshold.z) * i / 39).every(z => R.clearAt(L, 0, z, 0.45, true));
+    return {
+      s, radius: L.radius, wall: L.wall, door: [L.door.halfW, L.door.height], arrival: along(L.arrival), heading: L.arrival.heading, button: [L.exitButton.y, L.doorZ - L.exitButton.z, L.exitButton.x],
+      table: [L.table.x, L.table.z, L.table.top], seats: L.chairs.length, screenW: L.screens[0].w,
+      // Evenly round the table and clear of it, far enough apart for the widest Ooga to pass between two, the aisle from
+      // the door between two of them.
+      chairs: L.chairs.every((c, i, all) => { const n = all[(i + 1) % all.length]; return Math.hypot(c.x, c.z) - 0.48 > L.table.r + 0.05 && Math.hypot(c.x - n.x, c.z - n.z) > 2.55 && !(c.z > 0 && Math.abs(c.x) < 0.43); }),
+      symmetric: Math.abs(L.screens.reduce((sum, p) => sum + p.x, 0)) < 1e-9 && Math.abs(L.ribbon.reduce((sum, p) => sum + p.x, 0)) < 1e-9 && L.screens.every((p, i) => Math.abs(p.x + L.screens[5 - i].x) < 1e-9),
+      front: L.screens.every(p => p.z < -L.radius * 0.5), doorBehind: L.doorZ > L.radius * 0.9, screensReach: Math.max(...L.screens.map(p => Math.abs(p.angle))),
+      arrivalClear: R.clearAt(L, L.arrival.x, L.arrival.z), buttonReach: R.clearAt(L, L.exitButton.x + 0.4, L.doorZ - 0.6) && Math.hypot(0.4, L.exitButton.z - L.doorZ + 0.6) < L.exitReach,
+      tableSolid: !R.clearAt(L, 0, 0) && R.clearAt(L, 0, 0, 0.35, false, L.table.top), doorShut: !R.clearAt(L, 0, L.doorZ + 1), doorGuided: R.clearAt(L, 0, L.doorZ + 1, 0.35, true), wallSolid: !R.clearAt(L, L.radius - 0.2, 0), guided,
+      gear: L.solids.slice(-3).every(o => Math.hypot(o.x, o.z) > L.radius - 2.2 && Math.hypot(o.x, o.z) < L.radius - 0.5)
+    };
+  });
+  const same = (k) => rows.every(r => JSON.stringify(r[k]) === JSON.stringify(rows[0][k]));
+  record("timechain rooms: rooms scale 1×, 1.5× and 2× around one centred doorway opposite the screens, with arrival, Exit button and chairs kept at human size, a table for 4, 8 and 12 that can be stood on, and every walk clear",
+    rows.every(r => r.radius === 9 * r.s && Math.abs(r.wall - 5.4 * r.s) < 1e-9 && Math.abs(r.screenW - 3 * r.s) < 1e-9 && r.heading === Math.PI && r.symmetric && r.front && r.doorBehind && r.screensReach < 1.4
+      && r.arrivalClear && r.buttonReach && r.tableSolid && r.doorShut && r.doorGuided && r.wallSolid && r.guided && r.gear && r.chairs)
+      && rows.map(r => r.seats).join() === "4,8,12" && ["door", "arrival", "button", "table"].every(same), JSON.stringify(rows));
+};
+// Rule: block and mining readings keep their units and windows, refuse what does not parse or chain, and the reader keeps
+// one request a dataset, backs off, honours Retry-After, keeps its last reading as STALE and cleans up.
+const hashOf = (h) => h.toString(16).padStart(64, "0");
+const TIMECHAIN_TIP = 972195, TIMECHAIN_START = 1792436861 - 160 * 600;
+const timechainBlock = (h) => ({ height: h, id: hashOf(h), previousblockhash: hashOf(h - 1), timestamp: TIMECHAIN_START + (h - TIMECHAIN_TIP + 160) * 600 - (h === TIMECHAIN_TIP - 3 ? 900 : 0),
+  tx_count: 1000 + h % 7, size: 1600000 + h % 11, weight: 3990000 - h % 13, difficulty: 140577680051919.6,
+  extras: { pool: { id: 1, name: h % 3 ? "Foundry USA" : "AntPool", slug: "x" }, totalFees: 1000000 + h % 5, reward: 313500000 + h % 5, medianFee: 1.0016402405686167, avgFeeRate: 1, virtualSize: 998485.5 } });
+const timechainPayload = (url) => {
+  const path = url.replace("https://mempool.space/api", "");
+  const page = path.match(/^\/v1\/blocks\/(\d+)$/);
+  if (page) return Array.from({ length: 15 }, (_, i) => timechainBlock(Number(page[1]) - i));
+  return {
+    "/v1/blocks": Array.from({ length: 15 }, (_, i) => timechainBlock(TIMECHAIN_TIP - i)),
+    "/mempool": { count: 45720, vsize: 25046986, total_fee: 3061203, fee_histogram: [[0.312, 65985], [0.18154803, 78335]] },
+    "/v1/fees/precise": { fastestFee: 1, halfHourFee: 0.5, hourFee: 0.136, economyFee: 0.136, minimumFee: 0.1 },
+    "/v1/fees/mempool-blocks": [{ blockSize: 1710209, blockVSize: 997943, nTx: 4634, totalFees: 252480, medianFee: 0.14115222804155578, feeRange: [0.136, 10.36] }],
+    "/v1/difficulty-adjustment": { progressPercent: 23.958333333333336, difficultyChange: 2.8768245370467405, estimatedRetargetDate: 1793332772073, remainingBlocks: 1533, remainingTime: 895856073, previousRetarget: 5.923684832227039, previousTime: 1792154251, nextRetargetHeight: 973728, timeAvg: 585227, adjustedTimeAvg: 584381 },
+    "/v1/mining/pools/24h": { pools: [{ name: "Foundry USA", blockCount: 41 }, { name: "AntPool", blockCount: 35 }, { name: "Unknown", blockCount: 3 }], blockCount: 156, lastEstimatedHashrate: 1.076488345104513e+21 },
+    "/v1/mining/pools/1w": { pools: [{ name: "Foundry USA", blockCount: 262 }, { name: "AntPool", blockCount: 232 }], blockCount: 1067, lastEstimatedHashrate: 1.076488345104513e+21 },
+    "/v1/mining/reward-stats/144": { startBlock: TIMECHAIN_TIP - 143, endBlock: TIMECHAIN_TIP, totalReward: "45228442035", totalFee: "228442035", totalTx: "576557" },
+    "/v1/mining/hashrate/1y": { hashrates: [{ timestamp: 1761004800, avgHashrate: 1.085536445332513e+21 }, { timestamp: 1760918400, avgHashrate: 1.00796196348442e+21 }], difficulty: [{ time: 1762972230, height: 923328, difficulty: 152271405447597.4, adjustment: 0.9762 }, { time: 1761732893, height: 921312, difficulty: 155973032196071.9, adjustment: 1.063 }], currentHashrate: 1.030821971631334e+21, currentDifficulty: 140577680051919.6 }
+  }[path];
+};
+const timechainBlockChecks = async () => {
+  let id = 0, failing = null;
+  const timers = new Map(), listeners = new Set(), requests = [];
+  const context = { window: { BL: {} }, URLSearchParams, location: { search: "" }, AbortController, Date, Promise,
+    document: { hidden: false, addEventListener(type, fn) { listeners.add(fn); }, removeEventListener(type, fn) { listeners.delete(fn); } },
+    setTimeout(fn, ms) { timers.set(++id, { fn, ms }); return id; }, clearTimeout(key) { timers.delete(key); } };
+  runInNewContext(await readFile(new URL("../src/js/timechain-blocks.js", import.meta.url), "utf8"), context);
+  const T = context.window.BL.timechainBlocks, P = T.parse;
+  const throws = (fn) => { try { fn(); return false; } catch { return true; } };
+  const recent = P.blocks(timechainPayload("https://mempool.space/api/v1/blocks")), mem = P.mempool(timechainPayload("https://mempool.space/api/mempool"));
+  const fees = P.fees(timechainPayload("https://mempool.space/api/v1/fees/precise")), reward = P.reward(timechainPayload("https://mempool.space/api/v1/mining/reward-stats/144"));
+  const pools = P.pools(timechainPayload("https://mempool.space/api/v1/mining/pools/24h")), rate = P.hashrate(timechainPayload("https://mempool.space/api/v1/mining/hashrate/1y"));
+  const broken = timechainPayload("https://mempool.space/api/v1/blocks"); broken[3] = { ...broken[3], id: hashOf(1) };
+  const refused = [
+    () => P.blocks(broken), () => P.blocks([{ ...timechainBlock(5), extras: { pool: { name: "X" } } }]), () => P.blocks([{ ...timechainBlock(5), weight: 4000001 }]),
+    () => P.mempool({ count: 1, vsize: 1, total_fee: 1 }), () => P.fees({ fastestFee: "1", halfHourFee: 1, hourFee: 1, economyFee: 1, minimumFee: 1 }),
+    () => P.pools({ pools: [{ name: "A", blockCount: 9 }], blockCount: 5 }), () => P.reward({ startBlock: 1, endBlock: 100, totalReward: "1", totalFee: "1", totalTx: "1" }),
+    () => P.difficulty({ progressPercent: 120 })
+  ].filter(throws).length;
+  record("timechain blocks: payloads keep their units (fees in sats, sub-satoshi rates, H/s apart from difficulty) and anything malformed, unchained or out of window is refused",
+    recent.length === 15 && recent[0].height === TIMECHAIN_TIP && recent[0].fees === 1000000 && mem.fees === 3061203 && fees.hourFee === 0.136 && reward.fees === 228442035 && reward.tx === 576557
+      && pools.pools[2].name === "Unknown" && pools.total === 156 && rate.rates[0][0] < rate.rates[1][0] && rate.current > 1e21 && rate.difficulty < 1e15 && refused === 8,
+    JSON.stringify({ refused, first: recent[0], mem, fees, reward }));
+  const chain = new Map();
+  for (let h = TIMECHAIN_TIP - 150; h <= TIMECHAIN_TIP; h++) chain.set(h, P.blocks([timechainBlock(h)])[0]);
+  const whole = T.summarize(chain, TIMECHAIN_TIP, TIMECHAIN_START + 162 * 600);
+  const cut = new Map(chain); cut.set(TIMECHAIN_TIP - 40, { ...chain.get(TIMECHAIN_TIP - 40), prev: hashOf(7) });
+  const short = new Map(chain); short.delete(TIMECHAIN_TIP - 144);
+  const unchained = T.summarize(cut, TIMECHAIN_TIP, 0), unseated = T.summarize(short, TIMECHAIN_TIP, 0);
+  record("timechain blocks: the last 144 heights sum only when every block and the one before chain by parent hash, report header-time intervals as they are and never a zero-second block",
+    whole.complete && whole.coverage === 144 && whole.first === TIMECHAIN_TIP - 143 && whole.backwards === 1 && whole.fastest > 0 && whole.slowest === 1500
+      && whole.tx === [...Array(144)].reduce((sum, _, i) => sum + 1000 + (TIMECHAIN_TIP - 143 + i) % 7, 0) && whole.pools.reduce((sum, p) => sum + p.blocks, 0) === 144
+      && !unchained.complete && unchained.broken === TIMECHAIN_TIP - 40 && !unseated.complete && unseated.coverage === 144,
+    JSON.stringify({ whole: { ...whole, intervals: undefined }, unchained, unseated }));
+  // The reader against a stand-in network: due timers fire by hand.
+  const fire = async (pred = (t) => t.ms <= 400) => {
+    for (const [key, t] of [...timers]) if (pred(t)) { timers.delete(key); t.fn(); }
+    for (let i = 0; i < 6; i++) await new Promise(resolve => setImmediate(resolve));
+  };
+  const reader = T.create({ fetch: async (url, init) => {
+    requests.push({ url, init });
+    if (failing && url.endsWith(failing)) return { ok: false, status: 429, headers: { get: (h) => h === "Retry-After" ? "300" : null } };
+    return { ok: true, json: async () => timechainPayload(url) };
+  } });
+  reader.start(); reader.start();
+  const queued = timers.size;
+  await fire();
+  const first = requests.length, once = new Set(requests.map(r => r.url)).size === requests.length;
+  for (let i = 0; i < 14 && !(reader.summary && reader.summary.complete); i++) await fire();
+  const live = T.NAMES.every(n => reader.status(n) === "LIVE") && reader.historyStatus() === "LIVE" && reader.summary.complete;
+  const pages = requests.filter(r => /\/v1\/blocks\/\d+$/.test(r.url)).length;
+  failing = "/mempool";
+  const before = reader.value("mempool");
+  for (const [key, t] of [...timers]) if (t.ms === T.DATASETS.mempool.every) { timers.delete(key); t.fn(); }
+  for (let i = 0; i < 6; i++) await new Promise(resolve => setImmediate(resolve));
+  const stale = reader.status("mempool") === "STALE" && reader.value("mempool") === before && [...timers.values()].some(t => t.ms === 300000);
+  context.document.hidden = true; for (const fn of listeners) fn();
+  const hidden = timers.size === 0 && requests.every(r => !r.init.signal || r.init.signal.aborted || true);
+  context.document.hidden = false; for (const fn of listeners) fn();
+  const resumed = timers.size > 0;
+  reader.dispose();
+  const clean = timers.size === 0 && listeners.size === 0 && requests.every(r => r.init.credentials === "omit");
+  record("timechain blocks: one request a dataset, the 144-block window paged and chained, Retry-After and STALE on failure, nothing while hidden, and nothing left after dispose",
+    queued >= T.NAMES.length && first === T.NAMES.length && once && live && pages >= 9 && pages <= 11 && stale && hidden && resumed && clean,
+    JSON.stringify({ queued, first, once, live, pages, stale, hidden, resumed, clean, requests: requests.length }));
+  const pausedContext = { ...context, location: { search: "?nosim=1" }, window: { BL: {} } };
+  runInNewContext(await readFile(new URL("../src/js/timechain-blocks.js", import.meta.url), "utf8"), pausedContext);
+  const count = requests.length, paused = pausedContext.window.BL.timechainBlocks.create({ fetch: async () => { requests.push({}); return { ok: false }; } });
+  paused.start();
+  await fire(() => true);
+  record("timechain blocks: under nosim the room's reader asks nothing and every panel reads PAUSED", requests.length === count && T.NAMES.every(n => paused.status(n) === "PAUSED"));
+  paused.dispose();
+};
+const sphereLocal = `T = BL.scenes.hub.debug.timechainIsland, SP = BL.timechainModels.SPOTS, local = (p) => (p.x - T.place.x) * T.sin + (p.z - T.place.z) * T.cos`;
+const sphereStand = (x, z) => `__ooga.pilot.navigate({ position: { x: T.worldX(${x}, ${z}), y: T.place.y, z: T.worldZ(${x}, ${z}) }, yaw: T.place.ry, pitch: 0.1, dist: 4 }); __ooga.advance(0.3, 1 / 60);`;
+// Logs every frame of a crossing from the page: the camera's pose in each side's handover frame (the island's from its
+// handover point, `handZ` in, `outZ` out; the room's from `entry` in, `exitEye` out), the last frame before and first
+// after each swap, and every held first-person frame whose camera stands off the Ooga (a third-person frame).
+const sphereLog = `(() => {
+  const H = window.__handover = { swapIn: null, swapOut: null, far: 0, farAt: null, frames: 0 };
+  const wrap = (a) => Math.atan2(Math.sin(a), Math.cos(a));
+  let last = null;
+  const step = () => {
+    try {
+      const B = __ooga, c = B.camera, p = c.position, t = c.target, dx = t.x - p.x, dz = t.z - p.z, yaw = Math.atan2(dx, dz), pitch = Math.atan2(t.y - p.y, Math.hypot(dx, dz));
+      let row = null, body = null;
+      if (B.scene === "hub") {
+        const T = BL.scenes.hub.debug.timechainIsland, g = T.gate.debug, out = g.state === "arriving" || g.state === "leaving";
+        if (g.state !== "idle") {
+          const lx = (p.x - T.place.x) * T.cos - (p.z - T.place.z) * T.sin, lz = (p.x - T.place.x) * T.sin + (p.z - T.place.z) * T.cos;
+          row = { scene: "hub", s: g.state, x: lx, dz: lz - (out ? g.outZ : g.handZ), h: wrap(yaw - T.place.ry - (out ? 0 : Math.PI)), pitch, fov: c.fov };
+          if (g.lens === "eyes" && g.glide >= 1 && g.still === 0) body = B.pilot.player;
+        }
+      } else if (B.scene === "timechain" && B.timechain && B.timechain.guide.stage) {
+        const D = B.timechain, st = D.guide.stage, out = st !== "arrive";
+        row = { scene: "room", s: st, x: p.x, dz: p.z - (out ? D.exitEye : D.layout.entry.z), h: wrap(yaw - (out ? 0 : Math.PI)), pitch, fov: c.fov };
+        body = D.avatar;
+      }
+      if (body && Math.hypot(p.x - body.root.position.x, p.z - body.root.position.z) > 0.6) { H.far++; H.farAt = row; }
+      if (row) {
+        if (last && last.scene !== row.scene) { if (row.scene === "room") H.swapIn = [last, row]; else H.swapOut = [last, row]; }
+        last = row; H.frames++;
+      }
+    } catch {}
+    H.raf = requestAnimationFrame(step);
+  };
+  H.raf = requestAnimationFrame(step);
+})()`;
+// The two sides of a swap are one view: the same eye, heading, pitch and field of view, give or take a frame's walk.
+const seamless = (pair) => !!pair && Math.abs(pair[1].x - pair[0].x) < 0.08 && Math.abs(pair[1].dz - pair[0].dz) < 0.15
+  && Math.abs(pair[1].h - pair[0].h) < 0.04 && Math.abs(pair[1].pitch - pair[0].pitch) < 0.03 && Math.abs(pair[1].fov - pair[0].fov) < 0.005;
+const sphereApproach = { name: "timechain approach", why: "playthrough: an Ooga crosses the shore and the bridge to the Sphere's closed doors, walks the grass, and the edge has no invisible floor", run: async (b) => {
   const result = await b.evaluate(`(() => {
-    const B = __ooga, T = BL.scenes.hub.debug.timechainIsland, p = T.place, S = B.headquarters.solids, c = B.pilot.player;
+    const B = __ooga, S = B.headquarters.solids, c = B.pilot.player, ${sphereLocal}, p = T.place;
     const dir = BL.timechainModels.DIR, failures = [];
+    const wait = Math.hypot(T.worldX(SP.WAIT.x, SP.WAIT.z) - p.x, T.worldZ(SP.WAIT.x, SP.WAIT.z) - p.z);
     for (const reverse of [false, true]) {
       const meadow = Math.hypot(p.x, p.z) - (B.path.ringOuterRadius + 1);
-      // Cross both shores to the arrival area, stopping before the console and recliner.
-      const start = reverse ? 4.8 : meadow, end = reverse ? meadow : 4.8;
+      const start = reverse ? wait : meadow, end = reverse ? meadow : wait;
       const count = Math.ceil(Math.abs(end - start) / 0.15);
       let x = p.x - dir.x * start, z = p.z - dir.z * start, y = S.supportAt(x, z, p.y + 0.2, p.y + 0.2, c);
       for (let i = 1; i <= count; i++) {
@@ -9973,7 +10394,6 @@ for (const fallback of [false, true]) scene("hub", { label: "timechain " + (fall
       }
     }
     const edgeX = p.x + dir.x * (BL.timechainModels.SITE.radius + 2), edgeZ = p.z + dir.z * (BL.timechainModels.SITE.radius + 2);
-    // Follow the terrain's painted centreline, including its stair bends.
     let route = null, nearest = Infinity;
     for (const line of B.island.path.centerlines) {
       const end = line[line.length - 1];
@@ -9985,123 +10405,221 @@ for (const fallback of [false, true]) scene("hub", { label: "timechain " + (fall
     for (let i = 0; route && i < route.length; i++) {
       const point = route[i], radius = Math.hypot(point.x, point.z);
       if (i) path &&= Math.hypot(point.x - route[i - 1].x, point.z - route[i - 1].z) < 0.5;
-      if (radius >= B.path.ringOuterRadius + 1 && radius < p.rim) {
-        path &&= B.island.isPath(point.x, point.z); samples++;
-      }
+      if (radius >= B.path.ringOuterRadius + 1 && radius < p.rim) { path &&= B.island.isPath(point.x, point.z); samples++; }
     }
     path &&= samples > 20 && Math.hypot(route[0].x, route[0].z) < B.path.ringOuterRadius;
-    return { name: c.traits.name, display: c.contributor.display, distance: Math.hypot(c.root.position.x - p.x, c.root.position.z - p.z), feet: c.root.position.y - c.baseY, floor: p.y, failures, path, edge: S.supportAt(edgeX, edgeZ, p.y, p.y, c), x: c.root.position.x, z: c.root.position.z };
+    const at = c.root.position;
+    return { name: c.traits.name, fromDoors: local(at) - SP.THRESHOLD, across: Math.abs((at.x - p.x) * T.cos - (at.z - p.z) * T.sin), feet: at.y - c.baseY, floor: p.y, failures, path,
+      edge: S.supportAt(edgeX, edgeZ, p.y, p.y, c), area: document.getElementById("area-label") ? document.getElementById("area-label").textContent : "", x: at.x, z: at.z };
   })()`);
-  record("timechain: Sani arrives safely, both shores are walkable and the edge has no invisible floor", result.name === "SaniExp" && result.display === "Sani" && result.distance < 5 && Math.abs(result.feet - result.floor) < 0.1 && !result.failures.length && result.edge < -50, JSON.stringify(result));
-  record("timechain: the painted path connects the meadow ring to the bridge over the terraces", result.path);
-  await holdKey(b, "d", 0.6);
+  record("timechain approach: the Ooga arrives on the bridge square to the closed doors, both shores are walkable to them and the edge has no invisible floor", result.name === "portlandhodl" && result.fromDoors > 1.5 && result.fromDoors < 4.5 && result.across < 1.2 && Math.abs(result.feet - result.floor) < 0.12 && !result.failures.length && result.edge < -50, JSON.stringify(result));
+  record("timechain approach: the painted path connects the meadow ring to the bridge over the terraces", result.path);
+  await holdKey(b, "d", 0.4);
   const moved = await b.evaluate(`(() => { const c = __ooga.pilot.player; return { x: c.root.position.x, z: c.root.position.z, feet: c.root.position.y - c.baseY }; })()`);
-  record("timechain: keyboard movement carries Sani across the grass without falling", Math.hypot(moved.x - result.x, moved.z - result.z) > 0.5 && Math.abs(moved.feet - result.floor) < 0.1, JSON.stringify(moved));
-  await b.evaluate(`(async () => {
-    const original = window.fetch, fixtures = ${JSON.stringify(TIMECHAIN_FIXTURES)};
-    window.fetch = async url => ({ ok: true, json: async () => fixtures[BL.timechainData.ENDPOINTS.indexOf(url.split('/').pop())] });
-    try { await BL.scenes.hub.debug.timechainIsland.boards.refresh(); } finally { window.fetch = original; }
+  record("timechain approach: keyboard movement carries the Ooga along the bridge without falling", Math.hypot(moved.x - result.x, moved.z - result.z) > 0.2 && Math.abs(moved.feet - result.floor) < 0.12, JSON.stringify(moved));
+} };
+const sphereThreshold = { name: "timechain threshold", why: "rule: the doorway admits only its own traveler: walking into it, closed or held open by another player's crossing, stops at the threshold", run: async (b) => {
+  const r = await b.evaluate(`(() => {
+    const B = __ooga, c = B.pilot.player, ${sphereLocal}, G = T.gate;
+    ${sphereStand("SP.WAIT.x", "SP.WAIT.z")}
+    const press = (seconds) => { window.dispatchEvent(new KeyboardEvent("keydown", { key: "w", code: "KeyW" })); B.advance(seconds, 1 / 60); window.dispatchEvent(new KeyboardEvent("keyup", { key: "w", code: "KeyW" })); B.advance(0.2, 1 / 60); };
+    press(2.5);
+    const closed = local(c.root.position), hint = document.getElementById("hint").textContent;
+    G.debug.remoteUntil = performance.now() + 60000; B.advance(1, 1 / 60);
+    const open = G.debug.open;
+    press(2.5);
+    const tailgate = local(c.root.position), doorsShown = T.site.doors[1].rotation.y;
+    G.debug.remoteUntil = 0; B.advance(1.2, 1 / 60);
+    return { closed, open, tailgate, doorsShown, shut: G.debug.open, hint, threshold: SP.THRESHOLD, plug: T.site.plug.visible, state: G.debug.state };
   })()`);
-  const boards = await b.evaluate(`(() => {
-    const D = BL.scenes.hub.debug, T = D.timechainIsland;
-    document.getElementById('sheet').hidden = true; __ooga.pilot.release(true); __ooga.pilot.goPreset('timechain');
-    return { count: T.boards.entries.length, loaded: T.boards.data.every(d => d.lines.length && d.asof && d.checked),
-      bounded: T.boards.entries.every(e => e.panel.geometry.verts.length < 100000),
-      complete: T.boards.entries.every((e, i) => e.rowCount >= T.boards.data[i].table.length && e.node.visible && e.panel.visible),
-      noTabs: !D.props.some(p => p.prop === 'timechaintab') };
+  record("timechain threshold: pressing into the doorway stops at the threshold with the keypad hint, even while another player's crossing holds the doors open", r.closed > r.threshold + 0.3 && r.tailgate > r.threshold + 0.3 && r.open === 1 && r.doorsShown > 0.15 && r.shut === 0 && r.hint.includes("Use keypad to choose a room") && r.plug && r.state === "idle", JSON.stringify(r));
+} };
+const sphereKeypad = { name: "timechain keypad", why: "rule: the keypad chooses exactly one room, holds the keys while engaged, and Back leaves without loading or asking for anything", run: async (b) => {
+  await b.evaluate(`(() => {
+    const B = __ooga, ${sphereLocal};
+    window.__sphereRequests = 0;
+    const original = window.fetch; window.__sphereFetch = original;
+    window.fetch = (...args) => { if (/mempool\\.space|timechainindex/.test(String(args[0]))) window.__sphereRequests++; return original.apply(window, args); };
+    ${sphereStand("0.7", "13.8")}
+    window.__sphereSlot = B.pilot.player.weapon.selectedSlot;
   })()`);
-  boards.pointer = [];
-  for (let index = 0; index < 6; index++) {
-    await b.evaluate(`(() => {
-      const B = __ooga, T = BL.scenes.hub.debug.timechainIsland, p = T.place, o = B.pilot.orbit;
-      const yaw = p.ry - T.boards.entries[${index}].angle;
-      Object.assign(o, { yaw, tYaw: yaw, pitch: 0.03, tPitch: 0.03, dist: 3, tDist: 3, tx: p.x, ty: p.y + 4.4, tz: p.z });
-      Object.assign(o.target, { x: p.x, y: p.y + 4.4, z: p.z }); B.advance(0.5, 1 / 60);
-    })()`);
-    await b.sleep(50);
-    const point = await b.evaluate(`(() => {
-      const m = BL.scenes.hub.debug.timechainIsland.boards.entries[${index}].node.world;
-      const p = __ooga.project(m[12] + m[4] * 5.2 - m[8] * 12.5, m[13] + m[5] * 5.2 - m[9] * 12.5, m[14] + m[6] * 5.2 - m[10] * 12.5);
-      return { x: p.x, y: p.y };
-    })()`);
-    await b.click(point.x, point.y);
-    boards.pointer.push(await b.evaluate(`(() => {
-      const T = BL.scenes.hub.debug.timechainIsland, note = document.getElementById('board-note');
-      return document.getElementById('board-modal').open && document.getElementById('board-caption').textContent === BL.timechainData.TITLES[${index}]
-        && note.textContent.includes(T.boards.data[${index}].source) && !note.textContent.includes('api.timechainindex.com');
-    })()`));
-    await b.evaluate(`document.querySelector('[data-action="board-close"]').click()`);
-  }
-  boards.independent = await b.evaluate(`(() => {
-    const T = BL.scenes.hub.debug.timechainIsland, before = T.boards.entries.map(e => e.panel.geometry);
-    BL.scenes.hub.debug.useProp(BL.scenes.hub.debug.props.find(p => p.prop === 'timechainboard' && p.boardIndex === 5));
-    document.querySelector('[data-action="board-next"]').click();
-    const wraps = document.getElementById('board-caption').textContent === BL.timechainData.TITLES[0];
-    document.querySelector('[data-action="board-close"]').click();
-    return wraps && T.boards.entries.every((e, i) => e.panel.geometry === before[i]);
-  })()`);
-  record("timechain " + (fallback ? "canvas2d" : "webgl2") + ": six complete wall sections stay visible and open their own details", boards.count === 6 && boards.loaded && boards.bounded && boards.complete && boards.noTabs && boards.independent && boards.pointer.every(Boolean), JSON.stringify(boards));
-} }, trip("hub")] });
+  await b.key(" ");
+  const engaged = await b.evaluate(`(() => { const T = BL.scenes.hub.debug.timechainIsland, G = T.gate, enter = T.site.keys.find(k => k.key === "enter").node; return { state: G.debug.state, popup: !!document.getElementById("sphere-keypad"), enter: enter.geometry.faces[0].color, act: document.getElementById("act").hidden, keys: T.site.keys.length, hint: document.getElementById("hint").textContent }; })()`);
+  // Into the Ooga's own eyes, turned to the keypad: the camera at its head, the head hidden, the keypad in mid-view.
+  const view = await b.evaluate(`(() => { const B = __ooga; B.advance(1, 1 / 60); const T = BL.scenes.hub.debug.timechainIsland, G = T.gate.debug, c = B.camera.position, a = B.pilot.player, out = {}, k = T.site.keypad.world;
+    B.renderer.project(k[12], k[13], k[14], out);
+    const dx = c.x - k[12], dz = c.z - k[14];
+    return { lens: G.lens, glide: G.glide, atBody: Math.hypot(c.x - a.root.position.x, c.z - a.root.position.z), headHidden: a.parts.head.cameraHidden, kx: out.x / B.renderer.size.width, ky: out.y / B.renderer.size.height,
+      faceOn: (dx * k[8] + dz * k[10]) / (Math.hypot(dx, dz) * Math.hypot(k[8], k[10])) }; })()`);
+  for (const k of ["1", "3", "3"]) await b.key(k);
+  const chosen = await b.evaluate(`(() => { const B = __ooga, T = BL.scenes.hub.debug.timechainIsland, G = T.gate, key = k => T.site.keys.find(v => v.key === k).node; return { selection: G.debug.selection, three: key("3").geometry.faces[0].color, one: key("1").geometry.faces[0].color, enter: key("enter").geometry.faces[0].color, readout: T.site.readout.room, readoutVisible: T.site.readout.visible, slot: B.pilot.player.weapon.selectedSlot === window.__sphereSlot, moved: B.pilot.player.root.position.x }; })()`);
+  // Enter while the room's code is held back: the keys lock and the Ooga turns to the doors; Back cancels that and
+  // turns it to the keypad again with the room still chosen, nothing prepared and the doors shut.
+  await b.evaluate(`(() => { window.__deferredLoad = BL.deferred.load; BL.deferred.load = () => new Promise(() => {}); })()`);
+  await b.key("Enter");
+  await b.key("7");
+  const preparing = await b.evaluate(`(() => { const G = BL.scenes.hub.debug.timechainIsland.gate.debug; __ooga.advance(0.4, 1 / 60); return { state: G.state, selection: G.selection, open: G.open }; })()`);
+  await b.key("Escape");
+  const cancelled = await b.evaluate(`(() => { const G = BL.scenes.hub.debug.timechainIsland.gate.debug; __ooga.advance(0.4, 1 / 60); BL.deferred.load = window.__deferredLoad; return { state: G.state, selection: G.selection, prepared: !!G.prepared, open: G.open, lens: G.lens }; })()`);
+  await b.key("Escape");
+  const left = await b.evaluate(`(() => { const B = __ooga; B.advance(0.6, 1 / 60); const T = BL.scenes.hub.debug.timechainIsland, G = T.gate; window.fetch = window.__sphereFetch;
+    return { state: G.debug.state, popup: !!document.getElementById("sphere-keypad"), act: document.getElementById("act").hidden, lens: G.debug.lens, one: T.site.keys[0].node.geometry.faces[0].color, readout: T.site.readout.visible,
+      requests: window.__sphereRequests, read: BL.timechainBlocks.cache.sets.recent.checked, visit: BL.scenes.timechain.visit, scene: B.scene, doors: G.debug.open }; })()`);
+  record("timechain keypad: Space engages the physical panel with no popup; 1 then 3 lights only 3 with black type and arms Enter, and the number keys never reach the Ooga's weapons",
+    engaged.state === "keypad" && !engaged.popup && engaged.enter.join() === "90,64,34" && engaged.act && engaged.keys === 11 && engaged.hint.includes("Choose a room")
+      && chosen.selection === 3 && chosen.three.join() === "247,147,26" && chosen.one.join() === "58,52,48" && chosen.enter.join() === "255,189,83" && chosen.readout === 3 && chosen.readoutVisible && chosen.slot, JSON.stringify({ engaged, chosen }));
+  record("timechain keypad: engaging moves the view into the Ooga's own first person, head hidden, face-on to the keypad, and no detached camera",
+    view.lens === "eyes" && view.glide === 1 && view.atBody < 0.6 && view.headHidden && view.faceOn > 0.99 && Math.abs(view.kx - 0.5) < 0.25 && Math.abs(view.ky - 0.5) < 0.3, JSON.stringify(view));
+  record("timechain keypad: Enter locks the keys while the room prepares, and Back then returns to the keypad in first person with the room still chosen",
+    preparing.state === "preparing" && preparing.selection === 3 && preparing.open === 0 && cancelled.state === "keypad" && cancelled.selection === 3 && !cancelled.prepared && cancelled.open === 0 && cancelled.lens === "eyes", JSON.stringify({ preparing, cancelled }));
+  record("timechain keypad: Escape lets go with the view back, resets the physical keys, leaves the doors shut and loads no room data",
+    left.state === "idle" && !left.popup && !left.act && left.lens === null && left.one.join() === "58,52,48" && !left.readout && left.requests === 0 && left.read === 0 && left.visit === null && left.scene === "hub" && left.doors === 0, JSON.stringify(left));
+} };
+const sphereCrossing = { name: "timechain crossing", why: "playthrough: Enter walks the same Ooga through the doors into its room in first person, and Space at the Exit button walks it back out onto the bridge", run: async (b) => {
+  await b.evaluate(`(() => { const B = __ooga, ${sphereLocal}; ${sphereStand("0.7", "13.8")} })()`);
+  await b.evaluate(sphereLog);
+  await b.key(" ");
+  await b.key("3");
+  await b.key("Enter");
+  const crossing = await untilPage(b, 'B.scene === "hub" && BL.scenes.hub.debug.timechainIsland.gate.debug.state === "crossing"', 20000);
+  const passage = await b.evaluate(`(() => { const ${sphereLocal}, G = T.gate; return { plug: T.site.plug.visible, popup: !!document.getElementById("sphere-keypad"), lens: G.debug.lens }; })()`);
+  const inside = await untilPage(b, 'B.scene === "timechain" && !B.transitioning && B.timechain.guide.stage === null', 20000);
+  const room = await b.evaluate(`(() => { const B = __ooga, D = B.timechain, a = B.pilot.player.root.position; B.advance(1.2, 1 / 60);
+    return { room: D.room.id, mode: D.visit.mode, player: B.pilot.player.traits.name, view: B.pilot.mode, doors: D.doors.open, atArrival: Math.hypot(a.x - D.layout.arrival.x, a.z - D.layout.arrival.z), hash: location.hash, zone: BL.net.state.zone }; })()`);
+  await b.evaluate(`(() => { const B = __ooga, L = B.timechain.layout; B.pilot.navigate({ position: { x: L.exitButton.x + 0.6, y: 0, z: L.doorZ - 1 }, yaw: Math.PI, pitch: 0.05, dist: 4 }); B.advance(0.3, 1 / 60); })()`);
+  await b.key(" ");
+  const out = await untilPage(b, 'B.scene === "hub" && !B.transitioning && BL.scenes.hub.debug.timechainIsland.gate.debug.state === "idle"', 25000);
+  const back = await b.evaluate(`(() => { const B = __ooga, ${sphereLocal}, G = T.gate, c = B.pilot.player; B.advance(1.2, 1 / 60);
+    return { player: c && c.traits.name, fromDoors: c ? local(c.root.position) - SP.THRESHOLD : null, doors: G.debug.open, plug: T.site.plug.visible, view: B.pilot.mode, hash: location.hash, head: c ? !c.parts.head.cameraHidden : null, zone: BL.net.state.zone }; })()`);
+  const seams = await b.evaluate(`(() => { const H = window.__handover; cancelAnimationFrame(H.raf); return { swapIn: H.swapIn, swapOut: H.swapOut, far: H.far, farAt: H.farAt, frames: H.frames }; })()`);
+  record("timechain crossing: Enter opens the doors, lifts the plug for the traveler alone and swoops into its eyes as it walks in",
+    crossing && !passage.plug && !passage.popup && passage.lens === "eyes", JSON.stringify({ crossing, passage }));
+  record("timechain crossing: the same Ooga arrives in a solo Room 3 in first person, the doors close behind it and the address names the room",
+    inside && room.room === 3 && room.mode === "solo" && room.player === "portlandhodl" && room.view === "first-person" && room.doors === 0 && room.atArrival < 0.4 && room.hash === "#/sphere-3" && room.zone === "none", JSON.stringify(room));
+  record("timechain crossing: Space at the Exit button walks it back out of the passage onto the bridge, the doors shut, the plug back and the view out of its eyes",
+    out && back.player === "portlandhodl" && back.fromDoors > 1 && back.doors === 0 && back.plug && back.view !== "first-person" && back.hash === "#/sphere" && back.head, JSON.stringify(back));
+  record("timechain crossing: from the keypad into the room and from the Exit button out to the bridge every frame is the Ooga's own eye, and each scene swap is the same view on both sides",
+    seams.frames > 30 && seams.far === 0 && seamless(seams.swapIn) && seamless(seams.swapOut), JSON.stringify(seams));
+} };
+const sphereAccount = { name: "timechain account", why: "rule: an account look that went unanswered lets the physical selected number retry or Enter continue solo and never guesses a shared room", run: async (b) => {
+  await b.evaluate(`(() => { const B = __ooga, ${sphereLocal}; BL.net.state.resolved = false; ${sphereStand("0.7", "13.8")} })()`);
+  await b.key(" ");
+  await b.key("5");
+  await b.key("Enter");
+  const asked = await b.evaluate(`(() => { const G = BL.scenes.hub.debug.timechainIsland.gate; return { state: G.debug.state, popup: !!document.getElementById("sphere-keypad"), hint: document.getElementById("hint").textContent }; })()`);
+  await b.evaluate(`BL.scenes.hub.debug.timechainIsland.gate.press("enter")`);
+  const solo = await b.evaluate(`(() => { const G = BL.scenes.hub.debug.timechainIsland.gate; return { state: G.debug.state, mode: G.debug.mode }; })()`);
+  await b.evaluate(`BL.scenes.hub.debug.timechainIsland.gate.press("back")`);
+  const cancelled = await b.evaluate(`(() => { const G = BL.scenes.hub.debug.timechainIsland.gate; return { state: G.debug.state, selection: G.debug.selection }; })()`);
+  await b.key("Escape");
+  const done = await b.evaluate(`(() => { const G = BL.scenes.hub.debug.timechainIsland.gate; BL.net.state.resolved = true; __ooga.advance(0.6, 1 / 60); return { state: G.debug.state, scene: __ooga.scene }; })()`);
+  record("timechain account: Enter with the account unanswered asks rather than guesses, physical Enter commits a solo visit, Back keeps the room chosen and Escape lets go",
+    asked.state === "account" && !asked.popup && asked.hint.includes("Enter continues solo") && solo.state === "preparing" && solo.mode === "solo"
+      && cancelled.state === "keypad" && cancelled.selection === 5 && done.state === "idle" && done.scene === "hub", JSON.stringify({ asked, solo, cancelled, done }));
+} };
+scene("hub", { label: "timechain doorway", query: "solo=1&character=portlandhodl&view=timechain&pos=0", opts: { motion: true }, steps: [sphereApproach, sphereThreshold, sphereKeypad, sphereCrossing, sphereAccount, trip("hub")] });
+scene("hub", { label: "timechain doorway canvas2d", exclusive: true, query: "solo=1&character=portlandhodl&view=timechain&pos=0&canvas2d=1", steps: [sphereApproach, sphereCrossing] });
 scene("hub", { label: "timechain resident", steps: [{ name: "timechain resident", why: "regression: Sani slept in HQ on ordinary visits, leaving his island empty", run: async (b) => {
-  const result = await b.evaluate(`(() => {
-    const B = __ooga, D = BL.scenes.hub.debug, T = D.timechainIsland, c = B.cavemen.get('SaniExp'), s = T.seat;
-    const read = () => ({ visible: c.root.visible, seated: s.active, distance: Math.hypot(c.root.position.x - s.x, c.root.position.z - s.z), lean: c.root.rotation.x, leg: c.parts.legR.rotation.x, facingScreen: Math.cos(c.root.rotation.y - T.place.ry) < -0.99 });
-    const before = read(), arm = c.parts.armR.rotation.x; c.act.until = 0; B.advance(0.25, 1 / 60);
-    const typing = c.parts.armR.rotation.x !== arm;
-    const spin = rate => {
-      T.beer.pause();
-      s.angle = s.speed = 0;
-      D.useProp(D.props.find(p => p.prop === 'timechainchair'));
-      B.advance(2, rate);
-      return { angle: s.angle, speed: s.speed, together: Math.abs(c.root.rotation.y - T.place.ry - T.site.swivel.rotation.y) < 1e-8 && T.site.laptop.parent === T.site.swivel };
-    };
-    const slow = spin(1 / 30), fast = spin(1 / 120);
-    B.advance(36, 1 / 30); const stopped = s.speed === 0, sitting = read();
-    B.pilot.possess(c); const controlled = B.pilot.player === c; B.pilot.release(true); B.refreshStates(); B.advance(1, 1 / 30);
-    const sideStations = [T.beer.dispenser, T.beer.cabinet, T.beer.bin].every(node => Math.hypot(node.position.x, node.position.z) > 11.5);
-    return { before, sitting, after: read(), typing, slow, fast, stopped, controlled, released: !B.pilot.player, centered: T.site.chair.position.x === 0 && T.site.chair.position.z > 0, sideStations };
+  const r = await b.evaluate(`(() => {
+    const B = __ooga, ${sphereLocal}, c = B.cavemen.get("SaniExp");
+    B.advance(0.5, 1 / 60);
+    const inside = { visible: c.root.visible, held: T.residentInside, fromMiddle: Math.hypot(c.root.position.x - T.place.x, c.root.position.z - T.place.z) };
+    B.pilot.possess(c); B.advance(0.3, 1 / 60);
+    const out = { driven: B.pilot.player === c, visible: c.root.visible, fromDoors: local(c.root.position) - SP.THRESHOLD };
+    B.pilot.release(true); B.refreshStates(); B.advance(0.5, 1 / 60);
+    return { inside, out, again: { visible: c.root.visible, held: T.residentInside } };
   })()`);
-  record("timechain: Sani types in his recliner, spins with his laptop independently of frame rate, and beer gear hugs the sphere wall", result.centered && result.sideStations && result.before.facingScreen && result.controlled && result.released && result.typing && result.stopped && result.slow.together && result.fast.together && result.slow.angle > 1 && Math.abs(result.slow.angle - result.fast.angle) < 1e-7 && [result.before, result.sitting, result.after].every(s => s.visible && s.seated && s.distance < 0.001 && s.lean < -0.1 && s.leg < -0.5), JSON.stringify(result));
-  const beer = await b.evaluate(`(() => {
-    const B = __ooga, D = BL.scenes.hub.debug, T = D.timechainIsland, c = B.cavemen.get('SaniExp'), beer = T.beer;
-    const cycle = rate => {
-      beer.pause(); Object.assign(beer.state, { litres: 0.5, sips: 0, refills: 0 });
-      let empty = false, filling = false, walked = false, previous = 0, increasing = true, drinkArm = 0;
-      for (let i = 0; i < 130 * rate; i++) {
-        beer.update(c, T.seat, 1 / rate);
-        const s = beer.state;
-        if (s.mode === 'chug') drinkArm = Math.min(drinkArm, c.parts.armL.rotation.x);
-        if (s.mode === 'rise') empty ||= s.litres < 0.001;
-        if (s.mode === 'walk') walked ||= Math.hypot(c.root.position.x - T.seat.x, c.root.position.z - T.seat.z) > 3;
-        if (s.mode === 'fill') {
-          filling ||= beer.stream.visible && beer.mug.parent === beer.dispenser;
-          increasing &&= s.litres >= previous; previous = s.litres;
-        }
-      }
-      return { ...beer.state, empty, filling, walked, increasing, drinkArm, streamOff: !beer.stream.visible };
-    };
-    const slow = cycle(30), fast = cycle(120);
-    B.advance(0.1, 1 / 60);
-    const returned = Math.hypot(c.root.position.x - T.seat.x, c.root.position.z - T.seat.z) < 0.001;
-    B.pilot.possess(c); B.advance(0.1, 1 / 60);
-    const paused = !beer.mug.visible && !beer.stream.visible && beer.state.elapsed === 0;
-    B.pilot.release(true); B.refreshStates(); B.advance(0.1, 1 / 60);
-    const journey = action => {
-      beer.pause(); Object.assign(beer.state, { litres: 0.5, sips: 0, refills: 0, cleaned: 0, replaced: 0 });
-      const prop = action === 'chug' ? 'timechainbeer' : 'timechainchair';
-      D.useProp(D.props.find(p => p.prop === prop));
-      const triggered = beer.state.mode === action || action === 'spin' && beer.state.mode === 'spin';
-      const phases = new Set(); let drinkArm = 0;
-      for (let i = 0; i < 40 * 60; i++) { beer.update(c, T.seat, 1 / 60); phases.add(beer.state.mode); if (beer.state.mode === 'chug') drinkArm = Math.min(drinkArm, c.parts.armL.rotation.x); }
-      return { triggered, phases: [...phases], ...beer.state, drinkArm, shardsHidden: !beer.shards.visible, streamOff: !beer.stream.visible };
-    };
-    const chug = journey('chug'), spin = journey('spin');
-    B.advance(0.1, 1 / 60);
-    return { slow, fast, returned, paused, resumed: beer.mug.visible, chug, spin };
-  })()`);
-  record("timechain: an empty half-litre triggers a walk, visible refill and return, independent of frame rate and paused by control", beer.returned && beer.paused && beer.resumed && [beer.slow, beer.fast].every(s => s.empty && s.filling && s.walked && s.increasing && s.streamOff && s.mode === "work" && s.litres === 0.5 && s.sips === 5 && s.refills === 1) && Math.abs(beer.slow.elapsed - beer.fast.elapsed) < 1e-7, JSON.stringify(beer));
-  record("timechain: chair clicks spill the glass, cup clicks chug it at mouth level, and cleanup restores a half-litre glass", [beer.chug, beer.spin].every(s => s.triggered && s.phases.includes("fill") && s.phases.includes("return") && s.mode === "work" && s.litres === 0.5 && s.refills === 1 && s.streamOff) && beer.chug.phases.includes("chug") && beer.chug.drinkArm > -2 && beer.chug.cleaned === 0 && beer.chug.replaced === 0 && beer.spin.phases.includes("clean") && beer.spin.phases.includes("discard") && beer.spin.cleaned === 1 && beer.spin.replaced === 1 && !beer.spin.broken && beer.spin.shardsHidden, JSON.stringify({ chug: beer.chug, spin: beer.spin }));
+  record("timechain resident: Sani lives in the Sphere's rooms, out of sight inside the closed ball, comes out onto the bridge when driven and goes back in when let go",
+    !r.inside.visible && r.inside.held && r.inside.fromMiddle < 0.5 && r.out.driven && r.out.visible && r.out.fromDoors > 1 && !r.again.visible && r.again.held, JSON.stringify(r));
 } }] });
+const roomPage = (room, query = "") => `${src}?debug=1&nosim=1${clock(`character=portlandhodl&pos=0${query ? "&" + query : ""}`)}#/sphere-${room}`;
+const roomGo = (room) => `(() => { const B = window.__ooga; B.go("timechain", "${room}"); for (let i = 0; i < 150 && (B.transitioning || B.scene !== "timechain" || B.timechain.room.id !== ${room}); i++) B.advance(1 / 30, 1 / 30); B.advance(0.3, 1 / 30); B.housekeep(); const s = B.stats(); return { scene: B.scene, room: B.timechain.room.id, records: B.renderer.stats.records, nodes: s.allNodes, targets: s.targets, dom: s.dom, timers: s.timers, requests: s.requests }; })()`;
+const timechainRoom = { name: "timechain room", why: "playthrough: a signed-out arrival gets a solo copy of its room, first person only, without weapons or a jetpack, its screens painted, and touches no network under nosim", run: async (b) => {
+  const painted = await untilPage(b, 'B.scene === "timechain" && B.timechain.slots.every(s => s.shown)', 20000);
+  const r = await b.evaluate(`(() => {
+    const B = __ooga, D = B.timechain, P = B.pilot, before = P.mode;
+    P.hooks.onZoom(1.6); P.hooks.onZoom(1.6); B.advance(0.3, 1 / 60);
+    const zoomed = P.mode;
+    P.modeAction("mode-toggle"); P.modeAction("mode-release"); B.advance(0.1, 1 / 60);
+    const escaped = P.escape(), cave = P.player;
+    return { room: D.room.id, scale: D.room.scale, radius: D.layout.radius, mode: D.visit.mode, zone: BL.net.state.zone, body: BL.net.state.body, chip: document.getElementById("sphere-mode").textContent,
+      subtitle: document.getElementById("sphere-subtitle").textContent, before, zoomed, after: P.mode, escaped, player: cave && cave.traits.name, jet: !!(cave && cave.jet), jetHud: document.getElementById("jetpack-hud").hidden,
+      gun: cave && !cave.parts.gun.visible && !cave.weapon.secondaryOwned, requests: B.stats().requests, paused: D.reader.status("recent"), hash: location.hash, sani: !!D.sani && D.sani.root.visible, remotes: D.remotes === null };
+  })()`);
+  record("timechain room: a signed-out arrival at /sphere-3 is a solo copy of Room 3 at 1× that publishes nothing, with its mode named and every screen painted",
+    painted && r.room === 3 && r.scale === 1 && r.radius === 9 && r.mode === "solo" && r.zone === "none" && r.body === null && r.chip.includes("Solo visit · not signed in") && r.subtitle === "Timechain Sphere · Room 3"
+      && r.hash === "#/sphere-3" && r.requests === 0 && r.paused === "PAUSED" && r.sani && r.remotes, JSON.stringify(r));
+  record("timechain room: scroll, the mode buttons and Escape all keep the eye in first person, and the Ooga carries no rifle and no jetpack",
+    [r.before, r.zoomed, r.after].every(m => m === "first-person") && r.escaped === false && r.player === "portlandhodl" && !r.jet && r.jetHud && r.gun, JSON.stringify(r));
+  await b.evaluate(`(() => { const B = __ooga, L = B.timechain.layout; B.pilot.navigate({ position: { x: 0, y: 0, z: L.arrival.z }, yaw: Math.PI, pitch: 0.05, dist: 4 }); B.advance(0.2, 1 / 60); })()`);
+  await holdKey(b, "w", 2.5);
+  const shut = await b.evaluate(`(() => { const B = __ooga, L = B.timechain.layout, p = B.pilot.player.root.position; return { z: p.z, door: L.doorZ, scene: B.scene, open: B.timechain.doors.open }; })()`);
+  record("timechain room: walking into the closed doors does nothing", shut.scene === "timechain" && shut.z < shut.door - 0.3 && shut.open === 0, JSON.stringify(shut));
+} };
+const timechainSizes = { name: "timechain sizes", why: "rule: rooms 4–6 and 7–9 are the same design at 1.5× and 2×, with the doorway, arrival and Exit button at human size and a table for 8 and 12, each its own address", run: async (b) => {
+  const rows = [];
+  for (const room of [4, 7, 3]) {
+    await b.evaluate(roomGo(room));
+    rows.push(await b.evaluate(`(() => { const B = __ooga, D = B.timechain, L = D.layout, a = B.pilot.player.root.position, w = B.pilot.player;
+      return { room: D.room.id, scale: D.room.scale, radius: L.radius, door: L.door.halfW, arrivalGap: +(L.doorZ - L.arrival.z).toFixed(6), at: +Math.hypot(a.x - L.arrival.x, a.z - L.arrival.z).toFixed(3),
+        button: [L.exitButton.y, +(L.doorZ - L.exitButton.z).toFixed(6), L.exitButton.x], table: B.timechain.built.table.position.z, chairs: B.timechain.built.chairs.length, screenW: L.screens[0].w, mode: D.visit.mode, hash: location.hash, view: B.pilot.mode, height: w.traits.height }; })()`));
+  }
+  const same = (k) => rows.every(r => JSON.stringify(r[k]) === JSON.stringify(rows[0][k]));
+  record("timechain sizes: Rooms 4 and 7 build at 1.5× and 2× around the same doorway, arrival, Exit button, table and Ooga, seating 8 and 12, solo and first person, each at its own address",
+    rows[0].scale === 1.5 && rows[1].scale === 2 && rows[2].scale === 1 && rows.map(r => r.chairs).join() === "8,12,4" && rows.every(r => r.radius === 9 * r.scale && Math.abs(r.screenW - 3 * r.scale) < 1e-9 && r.at < 0.4 && r.mode === "solo" && r.view === "first-person" && r.hash === "#/sphere-" + r.room)
+      && ["door", "arrivalGap", "button", "table", "height"].every(same), JSON.stringify(rows));
+} };
+const timechainSani = { name: "timechain sani", why: "regression: Sani's recliner spins with his laptop independently of frame rate, and his half-litre refills, spills and is cleaned up in every room", run: async (b) => {
+  const r = await b.evaluate(`(() => {
+    const B = __ooga, D = B.timechain, L = D.layout, s = D.seat, c = D.sani, beer = D.beer, lounge = D.built.lounge;
+    const spin = (rate) => { beer.pause(); s.angle = Math.PI; s.speed = 0; beer.act("spin", s); B.advance(2, rate); return { angle: s.angle, together: Math.abs(c.root.rotation.y - lounge.swivel.rotation.y) < 1e-8 && lounge.laptop.parent === lounge.swivel }; };
+    const slow = spin(1 / 30), fast = spin(1 / 120);
+    beer.pause();
+    const wall = [beer.dispenser, beer.cabinet, beer.bin].map(n => Math.hypot(lounge.node.position.x + n.position.x, lounge.node.position.z + n.position.z));
+    const cycle = (rate) => {
+      beer.pause(); Object.assign(beer.state, { litres: 0.5, sips: 0, refills: 0 });
+      let empty = false, filling = false, walked = false;
+      for (let i = 0; i < 130 * rate; i++) {
+        beer.update(c, s, 1 / rate);
+        const st = beer.state;
+        if (st.mode === "rise") empty ||= st.litres < 0.001;
+        if (st.mode === "walk") walked ||= Math.hypot(c.root.position.x - s.x, c.root.position.z - s.z) > 1;
+        if (st.mode === "fill") filling ||= beer.stream.visible && beer.mug.parent === beer.dispenser;
+      }
+      return { ...beer.state, empty, filling, walked, streamOff: !beer.stream.visible };
+    };
+    const slowCycle = cycle(30), fastCycle = cycle(120);
+    beer.pause(); Object.assign(beer.state, { litres: 0.5, sips: 0, refills: 0, cleaned: 0, replaced: 0 });
+    beer.act("spin", s);
+    const phases = new Set();
+    for (let i = 0; i < 40 * 60; i++) { beer.update(c, s, 1 / 60); phases.add(beer.state.mode); }
+    return { slow, fast, wall, radius: L.radius, slowCycle, fastCycle, spill: { phases: [...phases], ...beer.state, shardsHidden: !beer.shards.visible } };
+  })()`);
+  record("timechain sani: Sani's recliner spins with his laptop independently of frame rate, and his beer gear stands against the room's wall",
+    r.slow.together && r.fast.together && Math.abs(r.slow.angle - r.fast.angle) < 1e-7 && Math.abs(r.slow.angle - Math.PI) > 1 && r.wall.every(d => d > r.radius - 2.2 && d < r.radius - 0.5), JSON.stringify(r));
+  record("timechain sani: an empty half-litre triggers a walk and a visible refill, at any frame rate, and a spilled glass is cleaned up and replaced",
+    [r.slowCycle, r.fastCycle].every(c => c.empty && c.filling && c.walked && c.streamOff && c.mode === "work" && c.litres === 0.5 && c.sips === 5 && c.refills === 1) && Math.abs(r.slowCycle.elapsed - r.fastCycle.elapsed) < 1e-7
+      && r.spill.phases.includes("clean") && r.spill.phases.includes("discard") && r.spill.cleaned === 1 && r.spill.replaced === 1 && r.spill.mode === "work" && r.spill.shardsHidden, JSON.stringify(r));
+} };
+const timechainTrip = { name: "timechain round trip", why: "contract: a room left and entered again keeps nothing from the last visit, leaves no timer or request running, and takes a donation whenever one arrives", run: async (b) => {
+  const laps = [];
+  for (let i = 0; i < 2; i++) {
+    await tourGo(b, "hub");
+    laps.push(await b.evaluate(roomGo(3)));
+  }
+  const grew = ["records", "nodes", "targets", "dom"].filter((k) => laps[1][k] > laps[0][k] * 1.02 + 4);
+  const donated = await b.evaluate(`(() => { const B = window.__ooga, g = B.game.state, before = { donations: g.donations, sats: g.totalSats, bananas: g.bananas }; window.BL.scenes.timechain.onDonation({ id: "trip-timechain", sats: 2100, handle: "tester", message: "ooga", at: Date.now() }, { exact: 1.25, rounded: 1 }); B.advance(1, 1 / 30); return { scene: B.scene, donations: g.donations - before.donations, sats: g.totalSats - before.sats, bananas: g.bananas - before.bananas }; })()`);
+  record("timechain round trip: leaving and entering twice keeps the leave contract and holds nothing the first visit did not, with no timer or request left, and a donation mid-visit is taken",
+    laps.every(l => l.scene === "timechain" && l.room === 3 && l.timers === 0 && l.requests === 0) && grew.length === 0 && donated.scene === "timechain" && donated.donations === 1 && donated.sats === 2100 && donated.bananas === 1.25,
+    JSON.stringify({ grew, donated, first: laps[0], second: laps[1] }));
+} };
+const timechainCanvas = { name: "timechain canvas2d", why: "rule: a room boots and paints its screens on Canvas 2D", run: async (b) => {
+  const painted = await untilPage(b, 'B.scene === "timechain" && B.timechain.slots.every(s => s.shown)', 20000);
+  const r = await b.evaluate(`({ kind: __ooga.renderer.kind, drawn: __ooga.renderer.stats.drawn, room: __ooga.timechain.room.id, view: __ooga.pilot.mode })`);
+  record("timechain canvas2d: Room 8 boots at 2× and paints every screen on Canvas 2D", painted && r.kind === "canvas2d" && r.room === 8 && r.view === "first-person", JSON.stringify(r));
+} };
+scene("timechain", { url: roomPage(3), steps: [timechainRoom, timechainSizes, timechainSani, timechainTrip] });
+scene("timechain", { label: "canvas2d", url: roomPage(8, "canvas2d=1"), steps: [timechainCanvas] });
 scene("hub", { label: "chilling", query: "status=chillin&pos=0",
   // This placement order exhausted the old 36-point pool before the last Ooga could settle.
   opts: { initScript: `Math.random = (() => { let a = 3; return () => { let t = a += 0x6D2B79F5; t = Math.imul(t ^ t >>> 15, t | 1); t ^= t + Math.imul(t ^ t >>> 7, t | 61); return ((t ^ t >>> 14) >>> 0) / 4294967296; }; })();` },
@@ -13204,6 +13722,29 @@ const pokerTrip = (() => {
     }
   } };
 })();
+// A poker room opened on its own (no ₿IFRÖST visit first) whose way out cannot fetch ₿IFRÖST's deferred DSB code: the
+// first refusal comes from the Return button, the second from walking onto the mirror. The room keeps working, the
+// mirror does not ask again while the Ooga stands on it, and stepping off and back on goes through.
+const pokerExitRecovery = { name: "poker exit recovery", why: "regression: a refused way out to ₿IFRÖST left the poker room's leaving flag set, so neither its Return button nor its mirror worked again until a reload", run: async b => {
+  await b.evaluate(`(() => { const go = document.querySelector('[data-intro="poker"] .game-intro-go'); if (go && go.offsetParent) go.click();
+    const load = BL.deferred.load; window.__pokerLoads = 0; BL.deferred.load = group => { if (group !== "dsb") return load(group); if (++window.__pokerLoads > 2) { BL.deferred.load = load; return load(group); } return Promise.reject(new Error("503")); }; })()`);
+  const settle = `(() => { const B = __ooga; for (let i = 0; i < 60 && B.transitioning; i++) B.advance(1 / 30, 1 / 30); return { scene: B.scene, transitioning: B.transitioning, loads: window.__pokerLoads }; })()`;
+  await b.evaluate(`document.querySelector('[data-poker-action="exit"]').click()`);
+  const button = await b.evaluate(settle);
+  const toMirror = await b.evaluate(`(() => { const B = window.__ooga; B.pilot.navigate({ position: { x: 0, y: 0, z: 31 }, target: { x: 0, y: 1, z: 35 }, yaw: Math.PI, pitch: 0.15, dist: 4 }); B.advance(0.5, 1 / 60);
+    const c = BL.scenes.poker.camera, fx = c.target.x - c.position.x, fz = c.target.z - c.position.z, l = Math.hypot(fx, fz), f = [fx / l, fz / l], r = [-f[1], f[0]];
+    const score = { w: f[1], s: -f[1], d: -r[1], a: r[1] }; return Object.entries(score).sort((p, q) => q[1] - p[1])[0][0]; })()`);
+  const back = { w: "s", s: "w", a: "d", d: "a" }[toMirror];
+  await holdKey(b, toMirror, 2.5);
+  await b.evaluate(settle);
+  await b.evaluate(`__ooga.advance(1, 1 / 60)`);
+  const mirror = await b.evaluate(settle);
+  await holdKey(b, back, 1);
+  await holdKey(b, toMirror, 2.5);
+  const out = await b.evaluate(settle);
+  record("poker exit recovery: a cold room's refused way out to ₿IFRÖST from its Return button leaves the mirror working; a refusal there waits for the Ooga to step off, and walking back on goes through",
+    button.scene === "poker" && !button.transitioning && button.loads === 1 && mirror.scene === "poker" && !mirror.transitioning && mirror.loads === 2 && out.scene === "bifrost" && out.loads === 3, JSON.stringify({ button, mirror, out }));
+} };
 scene("poker", { query: "character=portlandhodl", steps: [{ name: "poker floor and play", why: "playthrough: a visitor walks the floor, fills a table, plays to settlement and stands without exposing hidden cards", run: async b => {
   await b.evaluate(`document.querySelector('[data-intro="poker"] .game-intro-go').click()`);
   const walking = await walkKeys(b, "portlandhodl", 0, 18, [0, 1.5], 0.45);
@@ -13234,6 +13775,7 @@ scene("poker", { query: "character=portlandhodl", steps: [{ name: "poker floor a
     await b.screenshot(join(process.env.POKER_SHOTS, "poker-floor.png"));
   }
 } }, pokerTrip] });
+scene("poker", { label: "exit recovery", query: "character=portlandhodl", steps: [pokerExitRecovery] });
 scene("poker", { label: "canvas2d", query: "canvas2d=1", steps: [{ name: "poker canvas2d", why: "rule: the floor and table controls work on the fallback renderer", run: async b => {
   await b.evaluate(`document.querySelector('[data-intro="poker"] .game-intro-go').click()`);
   const r = await b.evaluate(`(() => { const P = BL.scenes.poker.debug.poker; P.action("join"); P.action("bots"); P.action("start"); __ooga.advance(1); return { kind: __ooga.renderer.kind, phase: P.session.tables[0].snapshot().phase, nodes: __ooga.stats().visibleNodes }; })()`);
@@ -13288,6 +13830,17 @@ scene("orbit", { query: "pos=0", opts: PHONE_SIZE, steps: [phone("orbit", { card
 scene("mine", { query: "pos=0", opts: PHONE_SIZE, steps: [phone("mine", { card: "#mine-intro", required: ["#joy-move", "#joy-look", "#act", "#mine-view-btn", "#mine-pause-btn", "#mine-mute", ".leave"] })] });
 scene("factory", { query: "pos=0&character=portlandhodl", opts: PHONE_SIZE, steps: [phone("factory", { required: ["#joy-move", "#joy-look", ".leave"] }), factoryGreeter] });
 scene("bifrost", { query: "pos=0", opts: PHONE_SIZE, steps: [phone("bifrost", { required: ["#joy-move", "#joy-look", ".leave"] })] });
+scene("timechain", { url: roomPage(3), opts: PHONE_SIZE, steps: [phone("timechain", { required: ["#joy-move", "#joy-look", ".leave", "#sphere-mode"] })] });
+// The keypad's controls are its physical keys: from the first person a phone shows, each is on screen with nothing of
+// the page's over it (the hint over the view takes no pointer, so it is checked as text, not as a control).
+const sphereKeypadPhone = phone("hub", { play: `(() => { const B = __ooga, ${sphereLocal}; ${sphereStand("0.7", "13.8")} T.gate.engage(); B.advance(0.6, 1 / 60); })()`, required: [] });
+scene("hub", { label: "sphere keypad", query: "solo=1&character=portlandhodl&view=timechain&pos=0", opts: PHONE_SIZE, steps: [{ ...sphereKeypadPhone, name: "sphere keypad phone", run: async (b) => {
+  await sphereKeypadPhone.run(b);
+  const keys = await b.evaluate(`(() => { const B = __ooga, T = BL.scenes.hub.debug.timechainIsland, out = {};
+    return T.site.keys.map((k) => { const w = k.node.world; B.renderer.project(w[12], w[13], w[14], out); const hit = document.elementFromPoint(out.x, out.y);
+      return { key: k.key, x: Math.round(out.x), y: Math.round(out.y), on: out.x > 0 && out.x < innerWidth && out.y > 0 && out.y < innerHeight, free: !!hit && hit.id === "scene" }; }); })()`);
+  record("timechain keypad phone: in first person every physical key, 1–9, Back and Enter, is on screen with nothing over it", keys.length === 11 && keys.every((k) => k.on && k.free), JSON.stringify(keys));
+} }] });
 scene("arcade", { query: "pos=0", opts: PHONE_SIZE, steps: [phone("arcade", { required: ["#joy-move", "#joy-look", ".leave"] })] });
 
 // Focused component fixtures enter DSB directly with the selected Ooga.
@@ -13375,7 +13928,7 @@ scene("dsb", { label: "dsb zuzu conversation", url: hubPage(dist), steps: [{ nam
   record("dsb compatibility: built CSP preserves exactly the weather and DSB network permissions", await b.evaluate(`(() => {
     const policy = document.querySelector('meta[http-equiv="Content-Security-Policy"]').content;
     const sources = name => policy.split(";").map(s => s.trim().split(/\\s+/)).find(s => s[0] === name).slice(1).sort().join("|");
-    return sources("connect-src") === ["'self'", "https:", "wss:"].sort().join("|") && sources("worker-src") === "'self'" && sources("media-src") === ["https://stream.noderunnersradio.com", "https://hodlerhiq.net"].sort().join("|") && !policy.includes("unsafe-");
+    return sources("connect-src") === ["'self'", "https:", "wss:"].sort().join("|") && sources("worker-src") === "'self'" && sources("media-src") === "https://stream.noderunnersradio.com" && !policy.includes("unsafe-");
   })()`));
   record("dsb registry: c10 is B.C.A.'s hub office and DSB is internally addressable without a cave", await b.evaluate(`(BL.caves.slots.find(s => s.id === "c10").status === "open" && BL.caves.slots.find(s => s.id === "c10").scene === null && BL.caves.slots.find(s => s.id === "c10").place === "bca") && !BL.caves.slots.some(s => s.scene === "dsb") && !!BL.scenes.dsb`));
   record("dsb compatibility: hub keeps the Agent module without spawning a standalone gorilla", await b.evaluate(`__ooga.scene === "hub" && !__ooga.agent && !!BL.agent && !!BL.characters.get("rules-without-rulers") && Object.hasOwn(__ooga, "agent") && Object.hasOwn(__ooga, "dsb") && !__ooga.dsb`));
@@ -15314,19 +15867,18 @@ const distributionAudioChecks = async () => {
     record("distribution audio: exact MP3 assets replace embedded text and the final script retains its literal bytes and strict CSP hash",
       descriptor.external && urls.length === 5 && urls.every((url, i) => /^\/audio\/dsb-[a-f0-9]{64}\.mp3$/.test(url) && readFileSync(join(out, url)).equals(Buffer.from(encoded[i], "base64")))
       && staged.includes(`script-src 'sha256-${hash(updated)}'`) && updated.endsWith(script.slice(script.indexOf("const literal"))) && !updated.includes(encoded[0]), "staged recording/CSP mismatch");
-    // The DSB rooms' pictures: every data URI becomes a same-origin file of the same bytes, and the modules still evaluate.
-    const modules = IMAGE_MODULES.map(name => readFileSync(join(root, `src/js/${name}.js`), "utf8").trim()).join("\n");
-    const pictures = [...modules.matchAll(/data:image\/(jpeg|png|webp);base64,([A-Za-z0-9+/=]+)/g)];
-    const art = `\nwindow.BL = {};\n${modules}\nconst literal = "$& $$ $' $` + "`" + `";\n`;
-    const artHtml = `<meta content="default-src 'none'; script-src 'sha256-${hash(art)}'; img-src 'self' data:"><script>${art}</script>`;
-    const artStaged = externalizeImages(artHtml, root, out), artUpdated = artStaged.match(/<script>([\s\S]*?)<\/script>/)[1];
-    const artContext = { window: { BL: {} } };
-    runInNewContext(artUpdated, artContext);
-    const artUrls = [...artUpdated.matchAll(/\/art\/[a-z-]+-[a-f0-9]{64}\.(jpg|png|webp)/g)].map(m => m[0]);
-    record("distribution pictures: exact image files replace the DSB rooms' data URIs and the final script keeps its literal bytes and strict CSP hash",
-      pictures.length > 0 && artUrls.length === pictures.length && artUrls.every((url, i) => readFileSync(join(out, url)).equals(Buffer.from(pictures[i][2], "base64")))
-      && !/data:image\//.test(artUpdated) && artContext.window.BL.stackchainArt["article-0"].image.startsWith("/art/")
-      && artStaged.includes(`script-src 'sha256-${hash(artUpdated)}'`) && artUpdated.endsWith(art.slice(art.indexOf("const literal"))), "staged pictures/CSP mismatch");
+    // The DSB rooms' pictures leave the deferred dsb bundle as same-origin files of the same bytes; the bundle still evaluates.
+    const blocks = new Map(PICTURE_MODULES.map(src => [src, `// ---- ${src} ----\n${readFileSync(join(root, "src", src), "utf8").trim()}`]));
+    const pictures = [...blocks.values()].flatMap(text => [...text.matchAll(/data:image\/(jpeg|png|webp);base64,([A-Za-z0-9+/=]+)/g)]);
+    const body = `\nwindow.BL = {};\n${[...blocks.values()].join("\n\n")}\n`;
+    const page = `<meta content="default-src 'none'; script-src 'sha256-${hash(body)}'; img-src 'self' data:"><script>${body}</script>`;
+    const hosted = externalizeModules(page, out, new Map([["dsb", PICTURE_MODULES]]), src => blocks.get(src), (src, text) => externalizePictures(src, text, out));
+    const bundle = readFileSync(join(out, JSON.parse(hosted.match(/deferredScripts = (\{[^}]*\})/)[1]).dsb), "utf8"), art = { window: { BL: {} } };
+    runInNewContext(bundle, art);
+    const files = [...bundle.matchAll(/\/art\/[a-z-]+-[a-f0-9]{64}\.(jpg|png|webp)/g)].map(m => m[0]);
+    record("distribution pictures: the DSB rooms' data URIs leave the deferred dsb bundle as exact same-origin files, and the bundle still evaluates",
+      pictures.length > 0 && files.length === pictures.length && files.every((url, i) => readFileSync(join(out, url)).equals(Buffer.from(pictures[i][2], "base64")))
+      && !/data:image\//.test(bundle) && art.window.BL.stackchainArt["article-0"].image.startsWith("/art/"), "staged pictures mismatch");
   } finally { rmSync(out, { recursive: true, force: true }); }
 };
 const qualityFramebufferChecks = async () => {
@@ -15368,6 +15920,29 @@ const qualityFramebufferChecks = async () => {
     destroyFbo(); return { reused, replacements, resized, repeated, disposed, restored, released: liveCount() === 0 };
   })()`, { ...context, countCreated: () => created, countWrites: () => writes, isLive: handle => live.has(handle), liveCount: () => live.size });
   record("quality framebuffer: capped tiers and repeated resizes preserve identical targets, every changed attachment configuration rebuilds and disposal permits fresh restoration", Object.values(r).every(Boolean), JSON.stringify({ ...r, created, deleted, writes }));
+};
+const tileGpuChecks = async () => {
+  const source = await readFile(new URL("../src/js/gl-renderer.js", import.meta.url), "utf8");
+  const helper = source.slice(source.indexOf("  const APPLE_SILICON ="), source.indexOf("  const isSupported ="));
+  const tileBasedGpu = new Function(`${helper}; return tileBasedGpu;`)();
+  let asked = 0;
+  const unmasked = name => () => { asked++; return name; };
+  const rows = [
+    // Named Apple silicon, through Chrome's extension, ANGLE's older OpenGL form and Firefox's RENDERER.
+    ["WebKit WebGL", unmasked("ANGLE (Apple, ANGLE Metal Renderer: Apple M1 Pro, Unspecified Version)"), true],
+    ["WebKit WebGL", unmasked("ANGLE (Apple, Apple M2, OpenGL 4.1)"), true],
+    ["Apple M1, or similar", unmasked("unasked"), true],
+    // Intel and AMD, including Chrome's Metal backend, which reports the vendor as Apple.
+    ["WebKit WebGL", unmasked("ANGLE (Intel Inc., Intel(R) Iris(TM) Plus Graphics 655, OpenGL 4.1)"), false],
+    ["WebKit WebGL", unmasked("ANGLE (Apple, ANGLE Metal Renderer: Intel(R) UHD Graphics 630, Unspecified Version)"), false],
+    ["WebKit WebGL", unmasked("ANGLE (ATI Technologies Inc., AMD Radeon Pro 5500M OpenGL Engine, OpenGL 4.1)"), false],
+    ["AMD Radeon Pro 5500M, or similar", unmasked("unasked"), false],
+    // Safari's constant answer names no hardware, and a missing debug extension names nothing.
+    ["WebKit WebGL", unmasked("Apple GPU"), false],
+    ["WebKit WebGL", unmasked(null), false]
+  ].map(([renderer, info, expected]) => ({ renderer, expected, got: tileBasedGpu(renderer, info) }));
+  record("tile-based GPU: only a named Apple silicon GPU skips the depth prepass; Intel, AMD, Safari's generic \"Apple GPU\" and a missing debug extension keep it",
+    rows.every(row => row.got === row.expected) && asked === 7, JSON.stringify(rows.filter(row => row.got !== row.expected)));
 };
 const raceRigChecks = async () => {
   const context = { window: {}, location: { search: "?debug=1&rain=0" }, URLSearchParams, crypto: webcrypto };
@@ -16108,6 +16683,7 @@ record("character visibility source bakes: ownership wrappers share exact immuta
   record("peer pose previews: certified empty terrain preserves exact poses and peer rejection while omitting vertex probes", emptyPeers.cases === 291 && emptyPeers.failures === 0 && emptyPeers.samples > 0 && emptyPeers.callbacks > 0 && emptyPeers.contact.length === 4 && emptyPeers.arms.length === 8 && emptyPeers.rollback.length === 6, JSON.stringify(emptyPeers));
   await raceRigChecks();
   await qualityFramebufferChecks();
+  await tileGpuChecks();
   const north = await northTrajectoryProof();
   record("birds-eye north: worst shortest arcs stay monotonic below the frame step limit and settle before the replay deadline", north.finite && north.monotonic && north.resets && north.variableSteps && north.maxStep < 0.25 && north.residual < 0.001, JSON.stringify(north));
   const northRebase = await northRebaseProof();
@@ -16161,7 +16737,8 @@ record("character visibility source bakes: ownership wrappers share exact immuta
   globalThis.removeEventListener = () => {};
   if (!globalThis.crypto) Object.defineProperty(globalThis, "crypto", { value: { getRandomValues: (a) => a.fill(1) } });
 
-  const order = [...readFileSync(join(root, "src/index.html"), "utf8").matchAll(/<script src="js\/([^"]+)"><\/script>/g)].map((m) => m[1]);
+  // Every module the source page loads, deferred groups included: they are inline in the source tree and portable page.
+  const order = [...readFileSync(join(root, "src/index.html"), "utf8").matchAll(/<script src="js\/([^"]+)"(?: data-defer="[a-z-]+")?><\/script>/g)].map((m) => m[1]);
   const skipped = [];
   for (const file of order) {
     try {
@@ -16347,7 +16924,7 @@ record("character visibility source bakes: ownership wrappers share exact immuta
   factoryChecks(BL);
   const clearance = claimClearanceProof();
   record("hub footprint clearance: conservative rejection preserves circular boundaries, live reservations and exceptional numbers", clearance.failures === 0 && clearance.cases >= 4000, JSON.stringify(clearance));
-  await characterChecks(); await contributorActivityChecks(); await mempoolFeedChecks(); await debugActivityStatusChecks(); await soloDebugChecks(); await adaptiveQualityChecks(); await chainSnapshotChecks(); await dsbSharedDataChecks(); await timechainDataChecks(); await weatherStepChecks(); await poolLayoutChecks(); await gameRulesChecks(); await donationClientChecks(); await poolWildlifeChecks();
+  await characterChecks(); await contributorActivityChecks(); await mempoolFeedChecks(); await debugActivityStatusChecks(); await soloDebugChecks(); await adaptiveQualityChecks(); await chainSnapshotChecks(); await dsbSharedDataChecks(); await timechainDataChecks(); await timechainRoomChecks(); await timechainBlockChecks(); await weatherStepChecks(); await poolLayoutChecks(); await gameRulesChecks(); await donationClientChecks(); await poolWildlifeChecks();
 
   // Scene state built directly instead of booted; seed 1 matches scene-hub.js.
   // Sealed cave guides need the hub's seal nodes, so probes reading them stay in the browser tier.
@@ -17822,22 +18399,7 @@ const dsbVenueMenusCheckpoint={name:"dsb venue menus checkpoint",why:"rule: spat
     record(`DSB menus ${id}: exit and fresh entrance discard stale route`,await b.evaluate(`(()=>{const s=__ooga.dsb[${JSON.stringify(controller)}].stats;return (s.route||s.section||s.category)===${JSON.stringify(fallback)};})()`));
     await b.evaluate(`__ooga.dsb[${JSON.stringify(controller)}].close()`);
   }
-  await b.evaluate('(()=>{const D=__ooga.dsb,I=D.interiors;I.request(I.active.room.exit);I.update(.4);I.review("dsb-studio",true);I.update(.4);__ooga.pilot.navigate({position:I.active.room.jukeboxAt,yaw:Math.PI/2,pitch:.12,dist:3});})()');await step();
-  await b.key(" ");await step();
-  record("DSB Spaces: physical jukebox opens shared centered dialog",await b.evaluate('__ooga.dsb.spaces.isOpen&&document.querySelector(".dsb-spaces").classList.contains("dsb-menu-engaged")'));
-  const spacesLayouts=[];
-  for(const [w,h] of [[1440,900],[390,844],[844,390]]){
-    await b.send("Emulation.setDeviceMetricsOverride",{width:w,height:h,deviceScaleFactor:1,mobile:w!==1440});await step();
-    // Unlike the other venue fixtures, Spaces stays open across resizes. Game
-    // simulation does not deliver browser resize events to the shared shell.
-    // Wait for its viewport inputs, not for the layout assertion to become true.
-    const resized=await b.evaluate('new Promise(resolve=>{const p=document.querySelector(".dsb-spaces"),start=performance.now();const tick=()=>{const v=visualViewport,s=p.style,ready=Math.abs(parseFloat(s.getPropertyValue("--menu-w"))-v.width)<.01&&Math.abs(parseFloat(s.getPropertyValue("--menu-h"))-v.height)<.01&&Math.abs(parseFloat(s.getPropertyValue("--menu-x"))-v.offsetLeft-v.width/2)<.01&&Math.abs(parseFloat(s.getPropertyValue("--menu-y"))-v.offsetTop-v.height/2)<.01;if(ready||performance.now()-start>5000)resolve(ready);else requestAnimationFrame(tick);};requestAnimationFrame(tick);})');
-    const r=await b.evaluate('(()=>{const p=document.querySelector(".dsb-spaces"),r=p.getBoundingClientRect(),v=visualViewport,s=getComputedStyle(p),top=p.scrollTop;p.scrollTop=1;const scrolls=p.scrollHeight<=p.clientHeight||p.scrollTop>0;p.scrollTop=top;return {rect:{x:r.x,y:r.y,width:r.width,height:r.height},viewport:{x:v.offsetLeft,y:v.offsetTop,width:v.width,height:v.height},cx:Math.abs(r.x+r.width/2-v.offsetLeft-v.width/2),cy:Math.abs(r.y+r.height/2-v.offsetTop-v.height/2),margins:[r.x-v.offsetLeft,r.y-v.offsetTop,v.offsetLeft+v.width-r.right,v.offsetTop+v.height-r.bottom],maxHeight:parseFloat(s.maxHeight),scrollHeight:p.scrollHeight,clientHeight:p.clientHeight,scrolls,width:p.scrollWidth<=p.clientWidth+1,overflow:s.overflowY,bodyOverflow:getComputedStyle(document.body).overflowY,isolated:p.open&&document.body.classList.contains("dsb-menu-open")&&BL.dsbMenuShell.count===1&&getComputedStyle(document.getElementById("dsb-context")).visibility==="hidden"};})()');
-    spacesLayouts.push({w,h,resized,...r});
-    record(`DSB Spaces ${w}x${h}: centered and internally scrollable`,resized&&r.cx<1&&r.cy<1&&r.margins.every(n=>n>=11.5)&&r.rect.height<=r.maxHeight+.5&&r.width&&r.scrolls&&r.overflow==="auto"&&r.bodyOverflow==="hidden"&&r.isolated,JSON.stringify(spacesLayouts.at(-1)));
-  }
-  writeFileSync(join(paths,"spaces-layout.json"),JSON.stringify(spacesLayouts,null,2));
-  await b.evaluate('__ooga.dsb.spaces.close();__ooga.dsb.interiors.request(__ooga.dsb.interiors.active.room.exit);__ooga.dsb.interiors.update(.4)');
+  await b.evaluate('__ooga.dsb.interiors.request(__ooga.dsb.interiors.active.room.exit);__ooga.dsb.interiors.update(.4)');
   for(const route of ["main","radio","jukebox"])for(const [w,h] of [[1440,900],[390,844],[844,390]]){
     await b.send("Emulation.setDeviceMetricsOverride",{width:w,height:h,deviceScaleFactor:1,mobile:w!==1440});
     // Keep all simulation ticks and layout assertions together so a slow exterior
@@ -17940,14 +18502,6 @@ const dsbStudioCheckpoint = {name:"dsb studio checkpoint",why:"playthrough: Stud
   await tap("#act");await step();await step();
   const cues=await b.evaluate('__ooga.dsb.interiors.audio.stats');
   record("Studio: walking and jumping add no Studio-specific audio sources",cues.sources===3&&cues.contexts===1&&!cues.cues,JSON.stringify(cues));
-  // Playback is deterministic here; a separate live smoke checks the real public source and media.
-  await b.evaluate(`(()=>{
-    window.__studioCheck={fetch:window.fetch,play:HTMLMediaElement.prototype.play,pause:HTMLMediaElement.prototype.pause,requests:0,plays:0,active:new Set()};
-    const check=window.__studioCheck;
-    window.fetch=(url,opts)=>{if(String(url).startsWith("https://hodlerhiq.net/")){check.requests++;return Promise.resolve(new Response(JSON.stringify({content:{rendered:[1,2,3].map(i=>'<div data-mediafile="https://hodlerhiq.net/wp-content/uploads/2026/fixture-'+i+'.mp3"><span class="player_song_name" data-albumname="2026-01-0'+i+'">Space '+i+'</span></div>').join("")}})));}return check.fetch(url,opts);};
-    HTMLMediaElement.prototype.play=function(){Object.defineProperty(this,"paused",{configurable:true,value:false});check.plays++;check.active.add(this);this.dispatchEvent(new Event("play"));return Promise.resolve();};
-    HTMLMediaElement.prototype.pause=function(){Object.defineProperty(this,"paused",{configurable:true,value:true});check.active.delete(this);this.dispatchEvent(new Event("pause"));};
-  })()`);
   const listeners=async()=>{const a=await b.send("Runtime.evaluate",{expression:"document"}),r=await b.send("DOMDebugger.getEventListeners",{objectId:a.result.result.objectId});await b.send("Runtime.releaseObject",{objectId:a.result.result.objectId});return r.result.listeners.length;};
   const startListeners=await listeners();
   // Draw the shared tomato-splat geometry once before the records baseline: pooled effects upload on first visibility, not per visit.
@@ -17971,25 +18525,16 @@ const dsbStudioCheckpoint = {name:"dsb studio checkpoint",why:"playthrough: Stud
     await tap("#act");
     const stood=await b.evaluate('({seat:!!__ooga.dsb.avatar.camp.seat,close:__ooga.pilot.closeWanted,clear:__ooga.dsb.interiors.walkable(__ooga.dsb.avatar.root.position.x,__ooga.dsb.avatar.root.position.z,__ooga.dsb.avatar.root.position.x,__ooga.dsb.avatar.root.position.z,0,2,__ooga.dsb.avatar)})');
     record("Studio: touch stand "+cycle+" restores clear ground and follow camera",!stood.seat&&!stood.close&&stood.clear,JSON.stringify(stood));
-    await b.evaluate('__ooga.pilot.navigate({position:__ooga.dsb.interiors.active.room.jukeboxAt,yaw:-Math.PI/2,pitch:.12,dist:3})');await step();await tap("#dsb-context");await b.sleep(80);
-    await tap(".spaces-item");await tap(".dsb-spaces [data-next]");await tap(".dsb-spaces [data-prev]");await tap(".dsb-spaces [data-play]");
-    const paused=await b.evaluate('!__ooga.dsb.spaces.stats.playing');await tap(".dsb-spaces [data-play]");await tap(".dsb-spaces [data-close]");
-    await tap("#dsb-context");await tap(".dsb-spaces [data-close]");
-    const audio=await b.evaluate('({stats:__ooga.dsb.spaces.stats,active:__studioCheck.active.size,requests:__studioCheck.requests})');
-    record("Studio: archive "+cycle+" browses, pauses, resumes and reuses one player/cache",paused&&audio.stats.items===3&&audio.stats.playing&&audio.active===1&&audio.requests===cycle+1,JSON.stringify(audio));
-    const localized=await b.evaluate(`(()=>{const B=__ooga,D=B.dsb,R=D.interiors.active.room,plays=__studioCheck.plays,near=D.spaces.stats.gain;B.pilot.navigate({position:{x:0,y:3,z:8.5},yaw:0,pitch:.12,dist:3});BL.scenes.dsb.update(1/60,0);const far=D.spaces.stats;B.pilot.navigate({position:R.jukeboxAt,yaw:Math.PI/2,pitch:.12,dist:3});BL.scenes.dsb.update(1/60,0);return {near,far,back:D.spaces.stats,plays:__studioCheck.plays-plays};})()`);
-    record("Studio: archive "+cycle+" fades to silence in theater and returns without replay",localized.near>.9&&localized.far.gain===0&&localized.far.muted&&localized.far.playing&&localized.back.gain>.9&&!localized.back.muted&&localized.plays===0,JSON.stringify(localized));
     await b.evaluate('__ooga.pilot.navigate({position:__ooga.dsb.interiors.active.room.spawn,yaw:0,pitch:.22,dist:3})');await step();await tap("#dsb-context");
-    const end=await b.evaluate(`(()=>{const B=__ooga,D=B.dsb;return {indoor:!!D.interiors.active,seat:!!D.avatar.camp.seat,spaces:D.spaces.stats,active:__studioCheck.active.size,weather:D.weather.state.exterior,trigger:D.avatar.weapon.triggerHeld,projectiles:B.crew.stats().projectiles,rooms:D.interiors.rooms.size,dom:document.querySelectorAll(".dsb-spaces").length,records:B.renderer.stats.records};})()`);
-    record("Studio: exit "+cycle+" disposes playback, seat, projectiles and restores exterior",!end.indoor&&!end.seat&&end.spaces.media===0&&end.spaces.cached===0&&end.active===0&&end.weather&&!end.trigger&&end.projectiles===0&&end.dom===1,JSON.stringify(end));
+    const end=await b.evaluate(`(()=>{const B=__ooga,D=B.dsb;return {indoor:!!D.interiors.active,seat:!!D.avatar.camp.seat,weather:D.weather.state.exterior,trigger:D.avatar.weapon.triggerHeld,projectiles:B.crew.stats().projectiles,rooms:D.interiors.rooms.size,records:B.renderer.stats.records};})()`);
+    record("Studio: exit "+cycle+" disposes seat and projectiles and restores exterior",!end.indoor&&!end.seat&&end.weather&&!end.trigger&&end.projectiles===0,JSON.stringify(end));
     if(cycle===1)baseline=end;else if(cycle===2)record("Studio: warmed room records remain bounded",end.records<=baseline.records,JSON.stringify({baseline,end}));
   }
   record("Studio: repeated cycles retain one listener set",await listeners()===startListeners);
   const seats=await b.evaluate(`(()=>{const B=__ooga,R=B.dsb.interiors.rooms.get("dsb-studio");return R.seats.every(s=>!s.sitter);})()`);record("Studio: every seat releases occupancy",seats);
-  await b.evaluate('window.fetch=__studioCheck.fetch;HTMLMediaElement.prototype.play=__studioCheck.play;HTMLMediaElement.prototype.pause=__studioCheck.pause;__studioCheck.old=__ooga.dsb.spaces;__ooga.go("bifrost",null,true);__ooga.advance(.05);__ooga.go("dsb",null,true);__ooga.advance(.05)');
-  const fresh=await b.evaluate('({old:__studioCheck.old.stats,dialogs:document.querySelectorAll(".dsb-spaces").length,rooms:__ooga.dsb.interiors.rooms.size,seat:!!__ooga.dsb.avatar.camp.seat})');
-  record("Studio: leaving DSB and reentering creates one clean archive controller",!fresh.old.active&&fresh.old.media===0&&fresh.dialogs===1&&fresh.rooms===0&&!fresh.seat,JSON.stringify(fresh));
-  await b.evaluate('delete window.__studioCheck');
+  await b.evaluate('__ooga.go("bifrost",null,true);__ooga.advance(.05);__ooga.go("dsb",null,true);__ooga.advance(.05)');
+  const fresh=await b.evaluate('({rooms:__ooga.dsb.interiors.rooms.size,seat:!!__ooga.dsb.avatar.camp.seat})');
+  record("Studio: leaving DSB and reentering starts with no room built and no seat held",fresh.rooms===0&&!fresh.seat,JSON.stringify(fresh));
 }};
 scene("dsb",{label:"studio checkpoint",query:"&view=studio-door&weather=storm&time=1200",steps:[dsbStudioCheckpoint]});
 scene("dsb",{label:"studio checkpoint phone",query:"&view=studio-door&weather=storm&time=1200",opts:{w:390,h:844,mobile:true},steps:[dsbStudioCheckpoint]});
