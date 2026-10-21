@@ -8617,6 +8617,32 @@ body.dsb-menu-open :is(.bottom-hud,.top-hud,#joy-move,#joy-look,#act,.weapon-hud
   .svrn-content { padding: 14px; }
 }
 
+/* Free Puppies Rescue's adoption: whitewash and Aegean blue; layout and focus stay in the shared DSB shell. */
+.rescue-menu { color: #2a1d17; background: #f6efe1; border: 2px solid #2f6aa0; border-radius: 6px; }
+.rescue-menu header { display: flex; justify-content: space-between; align-items: center; gap: 16px; color: #fff4df; background: #2f6aa0; border-bottom: 3px solid #f2c14e; }
+.rescue-menu h2 { font-size: clamp(20px,3vw,28px); margin: 3px 0; letter-spacing: .06em; }
+.rescue-menu small { color: #f2c14e; }
+.rescue-menu button { font: inherit; color: #2a1d17; background: #fff9ee; border: 2px solid #9cb7cf; border-radius: 4px; padding: 8px 12px; cursor: pointer; }
+.rescue-menu header button { color: #fff4df; background: #24557f; border-color: #f2c14e; }
+.rescue-menu button:hover,.rescue-menu button[aria-pressed="true"] { background: #fde7b0; border-color: #d8892b; }
+.rescue-menu :focus-visible { outline: 3px solid #d8892b; outline-offset: 2px; }
+.rescue-content { padding: 18px 20px 20px; font-size: 16px; }
+.rescue-content > p { margin: 0 0 12px; }
+.rescue-pups { display: grid; grid-template-columns: repeat(6,minmax(0,1fr)); gap: 8px; margin-bottom: 14px; }
+.rescue-pup { display: grid; justify-items: center; gap: 4px; min-width: 0; }
+.rescue-pup canvas { width: 48px; height: 48px; image-rendering: pixelated; }
+.rescue-pup span { font-size: 12px; overflow-wrap: anywhere; }
+.rescue-field { display: grid; gap: 4px; margin: 0 0 12px; font-size: 13px; color: #24557f; }
+.rescue-field input,.rescue-field select { font: inherit; color: #2a1d17; background: #fff; border: 2px solid #9cb7cf; border-radius: 4px; padding: 8px 10px; min-width: 0; }
+.rescue-menu .rescue-adopt { width: 100%; color: #fff4df; background: #2f6aa0; border-color: #24557f; font-weight: 600; letter-spacing: .08em; }
+.rescue-menu .rescue-adopt:hover { background: #24557f; }
+.rescue-goal { margin: 14px 0 0; font-size: 13px; color: #8a5a32; }
+@media (max-width:600px) {
+  .rescue-menu header button { flex: none; }
+  .rescue-pups { grid-template-columns: repeat(3,minmax(0,1fr)); }
+  .rescue-content { padding: 14px; }
+}
+
 /* Bottom-anchored drawers grow upward, with the resize grip just inside their top edge. */
 @media (max-width: 720px), (max-height: 500px) and (orientation: landscape) {
   .sheet { padding-top: 12px; }

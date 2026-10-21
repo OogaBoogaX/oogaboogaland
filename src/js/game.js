@@ -51,7 +51,7 @@
   };
   const isString = (v, max) => typeof v === "string" && v.length <= max;
   const isEntry = (e, catalog) => e && typeof e === "object" && isString(e.id, 40) && catalog.some((c) => c.id === e.itemId) && LOOT_TIERS.some((t) => t.tier === e.tier) && isString(e.donationId, 64) && Number.isFinite(e.at);
-  const defaults = () => ({ inventory: [], assignments: {}, handle: "", message: "", handFed: 0, totalSats: 0, donations: 0, bananas: 0, lastTip: 0, tipDays: [], donors: [], race: { best: {}, cup: null }, drop: { best: null, jumps: 0 }, orbit: { best: null, build: null }, mine: { best: null }, arcade: { skee: 0, hoops: 0, shy: 0, claw: 0, hockey: 0, billiards: 0, darts: 0, pinball: 0, ride: 0, invaders: 0, snake: 0, pong: 0, stampede: 0, flap: 0, breaker: 0, dash: 0, stacker: 0, tickets: 0, prizes: [] } });
+  const defaults = () => ({ inventory: [], assignments: {}, handle: "", message: "", handFed: 0, totalSats: 0, donations: 0, bananas: 0, lastTip: 0, tipDays: [], donors: [], race: { best: {}, cup: null }, drop: { best: null, jumps: 0 }, orbit: { best: null, build: null }, mine: { best: null }, arcade: { skee: 0, hoops: 0, shy: 0, claw: 0, hockey: 0, billiards: 0, darts: 0, pinball: 0, ride: 0, invaders: 0, snake: 0, pong: 0, stampede: 0, flap: 0, breaker: 0, dash: 0, stacker: 0, tickets: 0, prizes: [] }, rescue: { dogs: [], poops: [], scooped: 0 } });
   // Ooga Arcade's carnival bests, each capped past the most its game can score (nine doubled 100s; the round games
   // run on), the retro cabinets' bests (`retro-games.js`, capped past any run), the ticket balance, and the prizes
   // (`ARCADE_PRIZES` ids) redeemed at the counter.
@@ -64,6 +64,11 @@
   const CUP_MEDALS = ["gold", "silver", "bronze"];
   const MINE_ENDINGS = ["goal", "time", "broke", "wrecked", "seized", "left"];
   const isTime = (v) => Number.isFinite(v) && v > 0 && v < 36e5;
+  // Free Puppies Rescue in DSB Land: one dog an Ooga (an Ooga's name is a login, 39 characters at most), as many dogs
+  // as a full roster has Oogas, six breeds, and the poop left all over DSB Land as x, y, z triples, oldest first.
+  const RESCUE = { dogs: 128, poops: 512, breeds: 6, name: 16, owner: 39, reach: 200 };
+  const isDog = (d) => d && typeof d === "object" && isString(d.owner, RESCUE.owner) && d.owner.length > 0 && isString(d.name, RESCUE.name) && d.name.length > 0
+    && Number.isInteger(d.breed) && d.breed >= 0 && d.breed < RESCUE.breeds && Number.isFinite(d.adoptedAt) && Number.isFinite(d.hunger) && d.hunger >= 0 && d.hunger <= 1;
   const load = (catalog) => {
     const state = defaults();
     try {
@@ -128,6 +133,15 @@
       }
       if (a && Number.isFinite(a.tickets) && a.tickets >= 0 && a.tickets <= TICKETS_MAX) state.arcade.tickets = Math.floor(a.tickets);
       if (a && Array.isArray(a.prizes)) state.arcade.prizes = ARCADE_PRIZES.filter((id) => a.prizes.includes(id));
+      const r = parsed.rescue;
+      if (r && typeof r === "object") {
+        if (Array.isArray(r.dogs)) for (const d of r.dogs) {
+          if (state.rescue.dogs.length >= RESCUE.dogs || !isDog(d) || state.rescue.dogs.some((o) => o.owner === d.owner)) continue;
+          state.rescue.dogs.push({ owner: d.owner, name: d.name, breed: d.breed, adoptedAt: d.adoptedAt, hunger: d.hunger });
+        }
+        if (Array.isArray(r.poops) && r.poops.length % 3 === 0 && r.poops.every((n) => Number.isFinite(n) && Math.abs(n) <= RESCUE.reach)) state.rescue.poops = r.poops.slice(-RESCUE.poops * 3);
+        if (Number.isFinite(r.scooped) && r.scooped >= 0 && r.scooped < 1e9) state.rescue.scooped = Math.floor(r.scooped);
+      }
     } catch {
       return defaults();
     }
@@ -309,6 +323,48 @@
       save(state);
       return true;
     };
+    // Free Puppies Rescue. An adoption is refused (null) when the Ooga already has a dog or the roster's worth is
+    // adopted; the name arrives sanitized.
+    const adoptDog = (owner, name, breed) => {
+      const dogs = state.rescue.dogs;
+      if (dogs.length >= RESCUE.dogs || dogs.some((d) => d.owner === owner)) return null;
+      const entry = { owner, name: name || "Puppy", breed, adoptedAt: Date.now(), hunger: 0 };
+      if (!isDog(entry)) return null;
+      dogs.push(entry);
+      save(state);
+      return entry;
+    };
+    const releaseDog = (owner) => {
+      const dogs = state.rescue.dogs, i = dogs.findIndex((d) => d.owner === owner);
+      if (i < 0) return false;
+      dogs.splice(i, 1);
+      save(state);
+      return true;
+    };
+    const feedDog = (owner) => {
+      const dog = state.rescue.dogs.find((d) => d.owner === owner);
+      if (!dog) return false;
+      dog.hunger = 0;
+      save(state);
+      return true;
+    };
+    // A full Chora loses its oldest pile.
+    const dropPoop = (x, y, z) => {
+      const poops = state.rescue.poops;
+      if (poops.length >= RESCUE.poops * 3) poops.splice(0, 3);
+      poops.push(Math.round(x * 100) / 100, Math.round(y * 100) / 100, Math.round(z * 100) / 100);
+      save(state);
+    };
+    const scoopPoop = (i) => {
+      const poops = state.rescue.poops;
+      if (!Number.isInteger(i) || i < 0 || i * 3 >= poops.length) return false;
+      poops.splice(i * 3, 3);
+      state.rescue.scooped += 1;
+      save(state);
+      return true;
+    };
+    // Hunger moves every frame; the dogs save it now and then and when DSB Land is left.
+    const saveRescue = () => save(state);
     const setOrbitBuild = (stack) => {
       state.orbit.build = stack.slice();
       save(state);
@@ -329,7 +385,7 @@
       if (seconds < 5400) return `${Math.round(seconds / 60)}m`;
       return `${(seconds / 3600).toFixed(1)}h`;
     };
-    return { state, countOf, lootFor: lootForVisitor, addItem, assign, unassign, itemOf, assignedTo, clearLoot, resetAll, recordDonation, tipsWithin, recordHandFed, recordRace, recordCup, recordJump, recordDrop, recordOrbit, recordMine, recordArcade, addTickets, spendTickets, redeem, setOrbitBuild, setIdentity, forecast, formatDuration };
+    return { state, countOf, lootFor: lootForVisitor, addItem, assign, unassign, itemOf, assignedTo, clearLoot, resetAll, recordDonation, tipsWithin, recordHandFed, recordRace, recordCup, recordJump, recordDrop, recordOrbit, recordMine, recordArcade, addTickets, spendTickets, redeem, adoptDog, releaseDog, feedDog, dropPoop, scoopPoop, saveRescue, setOrbitBuild, setIdentity, forecast, formatDuration };
   };
-  BL.game = { create, LOOT_TIERS, STACK_MAX, SATS_PER_BANANA, tierFor, lootFor, bananasFor, formatLarge, formatThree, formatFeeRate };
+  BL.game = { create, LOOT_TIERS, STACK_MAX, SATS_PER_BANANA, RESCUE, tierFor, lootFor, bananasFor, formatLarge, formatThree, formatFeeRate };
 })();
