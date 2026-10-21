@@ -4,41 +4,23 @@ Only DSB Studio is added to the reusable DSB interior registry. The Meme Factory
 
 ## Visit and controls
 
-The Studio exterior door uses Space / the existing action button / the contextual touch button. The room begins at elevation 3 in a dim corridor, with the archive terminal to the left and an enterable ticket booth with a corridor-facing service window to the right. A rear gallery overlooks four rows of eight audience seats and central/side stairs. Two side balconies add four sittable lounge chairs with small tables; their entrances connect to the rear landing. The lower stage has a brick sign wall, stand-up microphone and stool, two audience-facing talk-show chairs, a coffee table, mugs and rug, a separate wooden host desk with its own chair, plus a visible ceiling lighting rig.
+The Studio exterior door uses Space / the existing action button / the contextual touch button. The room begins at elevation 3 in a dim corridor, with the DSB Spaces jukebox (decoration only) to the left and an enterable ticket booth with a corridor-facing service window to the right. A rear gallery overlooks four rows of eight audience seats and central/side stairs. Two side balconies add four sittable lounge chairs with small tables; their entrances connect to the rear landing. The lower stage has a brick sign wall, stand-up microphone and stool, two audience-facing talk-show chairs, a coffee table, mugs and rug, a separate wooden host desk with its own chair, plus a visible ceiling lighting rig.
 
 Approach the front of a seat and use the same interaction to sit. Space or the single normal **STAND UP!** action button returns to the clear row aisle. Seated walking input is ignored; look, weapon selection, aiming and fire remain available. The seated view uses the existing first-person camera and restores the follow/shoulder view on standing. **T** or **Throw tomato** uses the shared crew projectile pool. Lighting is authored; there is no stage-light control.
 
 Audience and balcony seats use the existing crew seat contract with opt-in `allowWeapons` and `lockMovement`. Camp seating retains its prior behavior. All three stage chairs use that same contract. The guest chairs turn 0.3 radians (about 17°) toward the host while presenting to the audience. Each has a clear outside approach/stand point; the host uses the open right side of the desk, with its existing seated anchor behind the desk.
 
-## Public archive source
+## DSB Spaces archive (removed)
 
-Inspected on 2026-10-03. https://hodlerhiq.net/ links five DSB archive pages:
-
-| Archive | WordPress page ID |
-| --- | --- |
-| Year five | 2679 |
-| Year four | 1537 |
-| Year three | 1261 |
-| Year two | 1233 |
-| Year one | 2 |
-
-The public WordPress REST source is `https://hodlerhiq.net/index.php?rest_route=/wp/v2/pages/2679` (same route for the other IDs). Requests restrict fields to `content`. Its `content.rendered` includes playlist entries with `data-mediafile`, `.player_song_name` and `data-albumname` (episode date). No guest/speaker field is supplied, so none is fabricated. Audio URLs are HTTPS MP3 files under the site's `/wp-content/uploads/` directory.
-
-The API responds with `Access-Control-Allow-Origin: https://yellowbrokeit.github.io` when sent that Origin, including for all five archive pages. No credentials, proxy, token, feed invention or background scraping is involved. The app parses the response in an inert DOM and copies only bounded text/date/allowlisted audio URLs. It does not render remote HTML or execute remote scripts. CSP adds only `https://hodlerhiq.net` to `media-src`.
-
-Each archive is fetched on demand and cached during the current Studio visit. Up to 150 dated entries per archive are shown, searchable locally. There is a 15-second request timeout and 3 MB response guard. Failed loads show a retry/source-link message. The data source is a third-party public site and may change or be unavailable.
-
-One lazy HTML media element provides play/pause, previous/next, stop and seeking when duration is available. No extra AudioContext is created for the archive. Closing the dialog keeps playback running at the cabinet. Volume falls quadratically over four units beyond the near zone and reaches zero before the theater (z ≤ 9.2). Returning restores audibility without playing, seeking, or recreating the media element; leaving the Studio aborts requests, pauses and unloads audio, removes media listeners and clears the visit cache. Scene departure also removes the dialog and UI listeners. Existing room ambience is synthesized locally and reduced while a nearby Space is audible. Studio-only footsteps, jump/landing and tomato throw/splat sounds have been removed without replacements. The shared projectile pool and capped visual splat effects are retained. Exterior weather and Noderunner audio use the existing interior mute gates.
+Removed on 2026-10-21. The jukebox used to open a player for the DSB Spaces recordings, listed by a third-party WordPress page (`hodlerhiq.net`, a PHP endpoint) and played from that site. The project no longer calls any external PHP page, so the dialog, its fetch and its media permission (`media-src https://hodlerhiq.net`) were taken out. The cabinet and its sign stay as set dressing with no prompt. The validation notes below predate the removal.
 
 ## Rendering and lifecycle
 
-Room geometry builds lazily once per DSB scene visit. Shared dressing meshes cache each chair/prop type; repeated seats and brick colors use the renderer's existing geometry instancing. There are three non-shadow-casting point lights, no new framebuffer and no decoration updates per frame. Existing low-quality light limits comfortably include all three lights. Scene exit releases room nodes and player/seat references. Audio, pending fetches and projectiles do not cross the door transition.
+Room geometry builds lazily once per DSB scene visit. Shared dressing meshes cache each chair/prop type; repeated seats and brick colors use the renderer's existing geometry instancing. There are three non-shadow-casting point lights, no new framebuffer and no decoration updates per frame. Existing low-quality light limits comfortably include all three lights. Scene exit releases room nodes and player/seat references. Audio and projectiles do not cross the door transition.
 
 ## Correction design references
 
 The host desk adapts the broad wooden front, shallow top and host-behind-desk arrangement from the [Carson set](https://entertainment.ha.com/itm/movie-tv-memorabilia/memorabilia/johnny-carson-s-iconic-home-base-interview-desk-swivel-chair-guest-chair-guest-couch-coffee-table-and-full-array-of-set-el-total-17/a/7318-89236.s), [Leno desk](https://entertainment.ha.com/itm/movie-tv-memorabilia/props/jay-leno-s-home-base-interview-desk-from-the-tonight-show-with-jay-leno-nbc-tv-1992-2014-/a/7318-89237.s) and [Conan interview composition](https://www.newscaststudio.com/2018/01/16/conan-new-set/). It uses original block geometry, not copied set imagery.
-
-The MP3 server currently omits Access-Control-Allow-Origin, although the JSON API supplies it. Native HTML audio playback is retained: routing these MP3s into a Web Audio MediaElementSource would silence them under CORS. Browser media volume supplies the fade; the zero boundary also sets `muted`. Physical iOS Safari requires a manual attenuation check because some versions reserve media volume for hardware controls. No credentials or proxy are added.
 
 Review views (with `scene=dsb&debug=1&interior=dsb-studio`): default corridor, `studio-reveal`, `studio-balcony`, `studio-stage`, `studio-seat`, `studio-host`, `studio-booth`, `studio-mic`. Use the named `dsb-preview/index.html` deployment route.
 

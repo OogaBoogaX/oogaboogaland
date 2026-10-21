@@ -274,7 +274,7 @@
   // Painted runes keep their own batch so the depth offset never pulls the cloth forward too.
   const bannerMarks = (parts) => {
     const geo = noShadow(merge(...parts));
-    geo.depthOffset = true;
+    geo.depthOffset = geo.surfaceOverlay = true;
     return geo;
   };
   const runeBanner = (scale = 1, mark = "gate") => {

@@ -1540,6 +1540,18 @@ void main() {
   col += (fract(sin(dot(gl_FragCoord.xy, vec2(12.9898, 78.233))) * 43758.5453) - 0.5) / 255.0;
   oColor = vec4(col, 1.0);
 }`;
+  // Apple's tile-based GPUs remove hidden surfaces in hardware, so the depth prepass only adds a second submission
+  // of every opaque draw: on an M1 Pro, skipping it raised every tier 10-20% (low 64 to 77 fps, medium 55 to 62, high
+  // 45 to 51 at the landing view). Only a named Apple silicon GPU counts: Chrome's "ANGLE (Apple, ANGLE Metal Renderer:
+  // Apple M1 Pro, ...)", Firefox's "Apple M1, or similar". Safari answers "Apple GPU" whatever the hardware, and
+  // Chrome's Metal backend on an Intel or AMD Mac also says "ANGLE (Apple, ...)", so those keep the prepass.
+  const APPLE_SILICON = /\bApple M\d+\b/;
+  const tileBasedGpu = (renderer, unmasked) => {
+    const named = String(renderer);
+    if (named !== "WebKit WebGL") return APPLE_SILICON.test(named);
+    const real = unmasked();
+    return real != null && APPLE_SILICON.test(String(real));
+  };
   const isSupported = () => {
     try {
       const probe = document.createElement("canvas");
@@ -1557,6 +1569,12 @@ void main() {
     const DRAW_BOTH = [gl.COLOR_ATTACHMENT0, gl.COLOR_ATTACHMENT1];
     let settings = QUALITY[quality] || QUALITY.high;
     let qualityName = QUALITY[quality] ? quality : "high";
+    // Firefox names the GPU in RENDERER (and warns about the debug extension); Chrome and Safari mask it there and
+    // answer through the extension.
+    const tileBased = tileBasedGpu(gl.getParameter(gl.RENDERER), () => {
+      const info = gl.getExtension("WEBGL_debug_renderer_info");
+      return info ? gl.getParameter(info.UNMASKED_RENDERER_WEBGL) : null;
+    });
     let width = 0, height = 0, dpr = 1, pw = 0, ph = 0;
     let lost = false;
     const size = { width: 0, height: 0 };
@@ -3795,7 +3813,7 @@ void main() {
       // Depth first, then the opaque pass shades under EQUAL with depth writes off: the same vertex shader, invariant,
       // so the depths match, and with no write a shader that may discard keeps the early depth test (written, the
       // driver tests late and shades every hidden fragment). Each pixel is shaded once. Rigs keep their own programs.
-      const prepass = settings.prepass && !rigMode;
+      const prepass = settings.prepass && !rigMode && !tileBased;
       if (prepass) {
         const dp = pg.depth;
         gl.useProgram(dp.prog);
@@ -3991,6 +4009,7 @@ void main() {
     init();
     return {
       kind: "webgl2",
+      tileBased,
       render,
       resize,
       project,
@@ -4025,5 +4044,5 @@ void main() {
       }
     };
   };
-  BL.glRenderer = { createRenderer, createRig, isSupported, QUALITY, POINT_LIGHT_CAPACITY };
+  BL.glRenderer = { createRenderer, createRig, isSupported, tileBasedGpu, QUALITY, POINT_LIGHT_CAPACITY };
 })();

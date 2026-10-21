@@ -293,7 +293,7 @@
   const ringSector = variants((i) => {
     const L = layout(i), g = turn([[R + 0.023, -0.019], [R + 0.023, 0.019]], RING_SEGMENTS, L.design.paint, 1);
     const f = g.faces[0];
-    return noShadow(scaled({ verts: f.i.flatMap((k) => g.verts.slice(k * 3, k * 3 + 3)), faces: [{ ...f, i: [0, 1, 2, 3] }], lines: [], depthOffset: true }, L.s));
+    return noShadow(scaled({ verts: f.i.flatMap((k) => g.verts.slice(k * 3, k * 3 + 3)), faces: [{ ...f, i: [0, 1, 2, 3] }], lines: [], depthOffset: true, surfaceOverlay: true }, L.s));
   });
 
   const body = variants((i) => {
@@ -312,7 +312,7 @@
     // Keep just the face and crest paint for the glow overlay, before adding the board and foot stones.
     // The overlay shares these exact carved surfaces and is drawn only while the repository glows.
     const colors = [d.paint, d.paint2, BONE, OCHRE, RED, "#d38a22", "#a8661a"].map(hexToRgb);
-    const highlights = { verts: [], faces: [], lines: [], smooth: true, castShadow: false, depthOffset: true };
+    const highlights = { verts: [], faces: [], lines: [], smooth: true, castShadow: false, depthOffset: true, surfaceOverlay: true };
     const remap = new Map();
     for (const f of geo.faces) {
       if (!colors.some((c) => c[0] === f.color[0] && c[1] === f.color[1] && c[2] === f.color[2])) continue;
