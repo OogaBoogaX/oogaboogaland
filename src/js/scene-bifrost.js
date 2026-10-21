@@ -953,6 +953,8 @@
     voiceZone: "bifrost.chamber",
     micKey: true,
     id: "bifrost", enter, update, overlay, onDonation, onKey, onLootCleared, renderOpts: RENDER_OPTS, leave, stats, liveGeometry,
+    // The chamber's windows build their pictures from DSB's terrain and the poker room, both deferred on a hosted page.
+    prepare: () => { const loading = [BL.deferred.load("dsb"), BL.deferred.load("poker")].filter(Boolean); return loading.length ? Promise.all(loading).then(() => null) : null; },
     root: null, camera: null, input: null, debug: null, agent: null, agentView: null, agentControls: null, agentHandoff: null,
     get inMotion() {
       return !!scene;

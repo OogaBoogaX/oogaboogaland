@@ -145,6 +145,7 @@ The scene contract, as `scene-lab.js` and `scene-hub.js` implement it:
 |---|---|
 | `id` | the key in `BL.scenes` and in `?scene=` |
 | `prepare(place, ctx)` | optional; runs before `enter`, at boot and in every transition: null to go ahead, `{ scene, place }` to arrive there instead, or a promise of either (deferred code loading), while the screen holds dark; a rejection fades back to the scene being left (`router.abandon` restores the address) |
+| `stay()` | optional; a transition this scene started was abandoned because the next scene's `prepare` rejected, and the visitor stays: put back what the departure set up (its leaving flags, the pilot it stopped, a crossing that would at once start again). Called once the fade back has finished, when `go` accepts again |
 | `enter(ctx)` | build the visit; set `root`, `camera`, `input`, `debug` on the scene object |
 | `update(dt, elapsed)` | per frame, allocation-free; `elapsed` is scene time, restarting at 0 on every enter |
 | `overlay(dt)` | draw the frame's 2D overlay (`fx.drawOverlay`); the director paints the fade after it |

@@ -1,13 +1,15 @@
 (() => {
   "use strict";
-  const BL = window.BL, S = BL.scene, PM = BL.pokerModels, R = BL.pokerRules, Themes = BL.pokerThemes;
+  // The room's models, rules, cards and HUD are deferred on a hosted page and arrive in `prepare`; the themes stay
+  // in the page, since the island's BIFROST window is tinted by them.
+  const BL = window.BL, S = BL.scene, Themes = BL.pokerThemes;
   const presets = { entrance: { yaw: 0, pitch: 0.48, dist: 18, target: { x: 0, y: 1, z: 17 } } };
   const renderOpts = { clear: [0.1, 0.12, 0.09], sky: [0.62, 0.57, 0.45], ground: [0.31, 0.36, 0.27],
     direct: [0.88, 0.77, 0.58], directStrength: 0.38, ambientFloor: 0.48, sun: { x: 0.2, y: 1, z: 0.3 },
     shadowCenter: { x: 0, y: 1.5, z: 0 }, shadowExtent: 35, bloomStrength: 0.24,
     lights: new Float32Array(BL.glRenderer.POINT_LIGHT_CAPACITY * 8), lightCount: 13 };
   let root, camera, input, hud, panel, pilot, fx, people, avatar, room, mirror, game, world, session, go;
-  let leaving = false, timer = 0, selected = 0, pendingStand = false, seatTable = -1, shownCountdown = -1;
+  let leaving = false, mirrorHeld = false, timer = 0, selected = 0, pendingStand = false, seatTable = -1, shownCountdown = -1;
   const targets = [], snapshots = new Array(10);
   let HERO = "local-player", connecting = false, unsubscribeAccount = null, remotes = null, footsteps = null;
   let visit = 0, pendingLive = null;
@@ -44,14 +46,14 @@
   const modeAction = name => !leaving && !panel.focused && (seatTable < 0 || pendingStand) && pilot.modeAction(name);
   const placeInAisle = () => {
     if (!avatar) return;
-    const p = PM.TABLES[selected];
+    const p = BL.pokerModels.TABLES[selected];
     avatar.root.position.x = 0; avatar.root.position.y = avatar.baseY; avatar.root.position.z = p.z;
     avatar.root.rotation.y = Math.PI; avatar.root.visible = true;
     pilot.setActive(true); pilot.controls.reset();
     document.body.removeAttribute("data-poker-seated");
   };
   const sit = index => {
-    const p = PM.TABLES[selected], s = PM.SEATS[index];
+    const p = BL.pokerModels.TABLES[selected], s = BL.pokerModels.SEATS[index];
     avatar.root.position.x = p.x + s.x; avatar.root.position.z = p.z + s.z;
     avatar.root.position.y = avatar.baseY + 0.45; avatar.root.rotation.y = s.yaw;
     pilot.controls.reset(); pilot.setActive(false);
@@ -61,8 +63,8 @@
     const t = session.tables[i], view = room.tables[i], s = t.snapshot(i === seatTable && !pendingStand ? HERO : null);
     snapshots[i] = s; view.version = t.version; view.pulse = 0.7;
     if (s.result && completed[i] !== s.hand) { completed[i] = s.hand; nextHand[i] = 5; }
-    for (let j = 0; j < PM.SEATS.length; j++) {
-      const p = s.seats[j], slot = PM.SEATS[j];
+    for (let j = 0; j < BL.pokerModels.SEATS.length; j++) {
+      const p = s.seats[j], slot = BL.pokerModels.SEATS[j];
       view.backs[j].visible = !!p && p.inHand && !p.folded && s.phase !== "showdown";
       view.chips[j].visible = !!p && p.stack > 0;
       view.chips[j].scale.y = p ? Math.min(12, Math.max(1, Math.ceil(p.stack / 200))) : 1;
@@ -80,9 +82,9 @@
       }
       if (view.actors[j]) view.actors[j].root.visible = visibleActor;
     }
-    for (let j = 0; j < 5; j++) { view.board[j].visible = j < s.board.length && Number.isInteger(s.board[j]); if (view.board[j].visible) view.board[j].geometry = PM.card(s.board[j]); }
+    for (let j = 0; j < 5; j++) { view.board[j].visible = j < s.board.length && Number.isInteger(s.board[j]); if (view.board[j].visible) view.board[j].geometry = BL.pokerModels.card(s.board[j]); }
     view.button.visible = s.dealer >= 0;
-    if (s.dealer >= 0) { const p = PM.SEATS[s.dealer]; view.button.position.x = p.x * 0.72; view.button.position.z = p.z * 0.65; view.button.position.y = 1.4; }
+    if (s.dealer >= 0) { const p = BL.pokerModels.SEATS[s.dealer]; view.button.position.x = p.x * 0.72; view.button.position.z = p.z * 0.65; view.button.position.y = 1.4; }
   };
   const updatePanel = () => {
     panel.setLive(session.live ? { ...(session.live.fairness || { phase: "connecting" }), connection: session.live.connection, busy: session.live.busy } : null);
@@ -200,9 +202,9 @@
   };
   const enter = ctx => {
     visit++;
-    game = ctx.game; world = ctx.world; go = ctx.go; leaving = false; timer = 0; HERO = "local-player"; connecting = false;
+    game = ctx.game; world = ctx.world; go = ctx.go; leaving = mirrorHeld = false; timer = 0; HERO = "local-player"; connecting = false;
     if (ctx.from === "bifrost") document.querySelector('[data-intro="poker"]').hidden = true;
-    session = world.poker || (world.poker = { tables: Array.from({ length: 10 }, () => R.create()), selected: 0, pendingStand: false });
+    session = world.poker || (world.poker = { tables: Array.from({ length: 10 }, () => BL.pokerRules.create()), selected: 0, pendingStand: false });
     if (!session.autoDeal) session.autoDeal = new Array(10).fill(true);
     theme = Themes.get(session.theme || Themes.load());
     session.paused = !!session.paused; nextHand.fill(5); completed.fill(0); shownCountdown = -1;
@@ -224,7 +226,7 @@
     hud.onPreset(pilot.goPreset);
     hud.onAction((a, v) => { if (a === "leave") leaveFloor(); else if (a === "reset-view") pilot.resetCamera(); else if (a === "act") pilot.action(); else if (a.startsWith("mode-")) modeAction(a); });
     fx = BL.fx.create({ root, input, hooks, hud, game: ctx.game, world, renderer: ctx.renderer, camera, overlay: ctx.overlay, tickerAt: { x: 0, y: 5, z: -34 } });
-    room = PM.build(theme.id); S.addChild(root, room.root);
+    room = BL.pokerModels.build(theme.id); S.addChild(root, room.root);
     for (let i = 0; i < 10; i++) { input.add(room.tables[i].top, { kind: "poker", index: i }); targets.push(room.tables[i].top); }
     // The return mirror is set into the far wall, facing down the central aisle.
     const BM = BL.bifrostModels, face = BM.mirror(4);
@@ -246,7 +248,7 @@
     const name = [world.pilot, requested].find(n => BL.contributors.activeRoster.some(c => c.name === n && mayPick(c))) || (BL.contributors.activeRoster.find(mayPick) || BL.contributors.activeRoster[0]).name;
     world.pilot = null;
     const playerWorld = { level: 0, weapons: new Map(), magazine: { owned: false, count: 0, ammo: 0, carrier: null } };
-    const shared = { root, input, hud, game: ctx.game, world: playerWorld, playerName: name, fx, viewYaw: 0, outsideActors: () => remotes ? remotes.actors() : NO_ACTORS, outsideActorHeight: BL.remotePlayers.BODY_HEIGHT, groundAt: () => 0, walkable: PM.walkable, useNear: () => select(selected) };
+    const shared = { root, input, hud, game: ctx.game, world: playerWorld, playerName: name, fx, viewYaw: 0, outsideActors: () => remotes ? remotes.actors() : NO_ACTORS, outsideActorHeight: BL.remotePlayers.BODY_HEIGHT, groundAt: () => 0, walkable: BL.pokerModels.walkable, useNear: () => select(selected) };
     people = shared.crew = BL.crew.create(shared); pilot.bind(shared); avatar = people.cavemen.get(name);
     avatar.root.position.x = 0; avatar.root.position.y = avatar.baseY; avatar.root.position.z = 29;
     avatar.root.rotation.y = Math.PI; pilot.possess(avatar);
@@ -274,12 +276,14 @@
     remotes.update(dt);
     footsteps.update(drivenHere);
     mirror.phase.update(dt, elapsed); mirror.body.update(dt); mirror.body.time = mirror.phase.ripples.time;
-    if (!leaving && pilot.player && (seatTable < 0 || pendingStand) && Math.abs(avatar.root.position.x) < BL.bifrostModels.WINDOW.halfW
-      && avatar.root.position.z > PM.EXIT_Z) leaveFloor();
+    // A way out that could not be opened waits for the Ooga to step back off the mirror before it tries again.
+    if (!(pilot.player && (seatTable < 0 || pendingStand) && Math.abs(avatar.root.position.x) < BL.bifrostModels.WINDOW.halfW
+      && avatar.root.position.z > BL.pokerModels.EXIT_Z)) mirrorHeld = false;
+    else if (!leaving && !mirrorHeld) leaveFloor();
     // All ten table lights fit the lowest renderer tier; selected table goes first.
     const near = selected, lights = renderOpts.lights;
     for (let slot = 0; slot < 10; slot++) {
-      const i = (near + slot) % 10, p = PM.TABLES[i], o = slot * 8;
+      const i = (near + slot) % 10, p = BL.pokerModels.TABLES[i], o = slot * 8;
       lights[o] = p.x; lights[o + 1] = 5.1; lights[o + 2] = p.z; lights[o + 3] = 14;
       lights[o + 4] = theme.tableLight[0]; lights[o + 5] = theme.tableLight[1]; lights[o + 6] = theme.tableLight[2];
       const v = room.tables[i]; v.pulse = Math.max(0, v.pulse - dt);
@@ -312,7 +316,7 @@
               else session.autoDeal[i] = false;
             }
             changed = true;
-          } else if (player?.bot) R.botAction(t, player.id);
+          } else if (player?.bot) BL.pokerRules.botAction(t, player.id);
           else if (i === seatTable && pendingStand && player?.id === HERO) { const l = t.snapshot(HERO).legal; if (l) t.act(HERO, l.check ? "check" : "fold"); }
         } catch (error) { session.autoDeal[i] = false; panel.notice(error.message); }
         if (i === seatTable && pendingStand && !t.playing) { t.leave(HERO); seatTable = -1; pendingStand = false; }
@@ -352,11 +356,14 @@
   const liveGeometry = set => { if (room) for (const t of room.tables) t.agent.liveGeometry(set); if (avatar) set.add(avatar.headOpen).add(avatar.headClosed); if (remotes) remotes.liveGeometry(set); };
   const stats = () => { let allNodes = 0, visibleNodes = 0; const walk = n => { allNodes++; for (const c of n.children) walk(c); }; walk(root); S.traverseVisible(root, () => visibleNodes++); return { allNodes, visibleNodes, targets: input.targetCount, tweens: S.tweenCount(), ...fx.stats(), ...(remotes ? remotes.stats() : {}) }; };
   // Voice zone: the Ember Den, a portal of its own off the Bifrost chamber.
-  const scene = { id: "poker", voiceZone: "ember-den", micKey: true, enter, update, overlay: dt => fx.drawOverlay(dt, extra), onKey, leave, liveGeometry, stats, renderOpts,
+  // ₿IFRÖST's deferred code (DSB Land's, for its window) did not arrive: the room stays, and its ways out work again.
+  const stay = () => { leaving = false; mirrorHeld = true; };
+  const scene = { id: "poker", voiceZone: "ember-den", micKey: true, enter, update, stay, overlay: dt => fx.drawOverlay(dt, extra), onKey, leave, liveGeometry, stats, renderOpts,
     onDonation(donation, counted = null) {
       game.recordDonation(donation, counted && counted.exact);
       world.level = Math.min(BL.pile.MAX_BANANAS, world.level + (counted ? counted.exact : BL.game.bananasFor(donation.sats)));
     }, onLootCleared() {}, root: null, camera: null, input: null, debug: null,
     agent: null, agentView: null, agentControls: null, agentHandoff: null, get inMotion() { return !!room; } };
+  scene.prepare = () => { const loading = BL.deferred.load("poker"); return loading ? loading.then(() => null) : null; };
   BL.scenes.poker = scene;
 })();

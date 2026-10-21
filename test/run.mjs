@@ -8,6 +8,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { tmpdir } from "node:os";
 import { createHash, webcrypto } from "node:crypto";
 import { externalizeAudio } from "../scripts/distribution-audio.mjs";
+import { externalizeModules } from "../scripts/distribution-modules.mjs";
 import { launch, acquire, dispose, driverError } from "./browser.mjs";
 import { writeCharacters } from "../scripts/characters.mjs";
 const emptyPeerPreviewProof = async () => {
@@ -5217,6 +5218,65 @@ for (const id of ["hub", "lab", "factory"]) {
     }
   } });
 }
+// The hosted page as `npm run site` stages it: each `data-defer` group leaves the built page for its own same-origin file,
+// served here behind a switch (`refused`, path prefixes) that answers 503, as a deploy mid-flight can. The source and
+// portable pages keep every group inline, so only this page can show what a scene reads before its code arrives.
+const hostedSite = async () => {
+  const html = readFileSync(join(root, "oogaboogaland.html"), "utf8"), out = mkdtempSync(join(tmpdir(), "ooga-hosted-"));
+  const deferred = new Map();
+  for (const [, src, group] of readFileSync(join(root, "src/index.html"), "utf8").matchAll(/<script src="([^"]+)" data-defer="([a-z-]+)"><\/script>/g)) deferred.set(group, [...(deferred.get(group) || []), src]);
+  // A module's block in the built page runs from its marker to the next module's.
+  const block = (src) => { const start = html.indexOf(`// ---- ${src} ----\n`); return html.slice(start, html.indexOf("\n\n// ---- ", start + 1)); };
+  const page = externalizeModules(html, out, deferred, block), refused = [], fetched = [];
+  const server = createServer((req, res) => {
+    const path = req.url.split("?")[0];
+    if (!path.startsWith("/js/")) { res.setHeader("content-type", "text/html; charset=utf-8"); return res.end(page); }
+    fetched.push(path);
+    if (refused.some(prefix => path.startsWith(prefix))) { res.writeHead(503); return res.end(); }
+    res.setHeader("content-type", "text/javascript");
+    res.end(readFileSync(join(out, path)));
+  });
+  await new Promise((resolve, reject) => { server.once("error", reject); server.listen(0, "127.0.0.1", resolve); });
+  return { origin: `http://127.0.0.1:${server.address().port}`, refused, fetched,
+    close: async () => { await new Promise(resolve => server.close(resolve)); rmSync(out, { recursive: true, force: true }); } };
+};
+// A refused bundle is logged by the browser as a failed resource; that line is the fixture's, not the page's.
+const dropRefusals = (b) => { for (let i = b.logs.length - 1; i >= 0; i--) if (b.logs[i].includes("status of 503")) b.logs.splice(i, 1); };
+const orbitHosted = { name: "orbit hosted", why: "regression: Ooga Orbit read Ooga Drop's models at load, which a hosted page had deferred, so it threw on entry, cold and after a Drop visit", run: async (b, site) => {
+  const cold = await b.evaluate(`({ scene: __ooga.scene, frames: __ooga.renderedFrames, models: !!BL.dropModels, diver: !!BL.skydiver })`);
+  await b.evaluate(`__ooga.go("drop")`);
+  const drop = await untilPage(b, 'B.scene === "drop" && !B.transitioning', 15000);
+  await b.evaluate(`__ooga.go("orbit")`);
+  const orbit = await untilPage(b, 'B.scene === "orbit" && !B.transitioning', 15000);
+  const after = await b.evaluate(`({ scene: __ooga.scene, frames: __ooga.renderedFrames })`);
+  record("orbit hosted: a cold /oogaorbit on the hosted page boots and draws with Drop's diver still unloaded, and Orbit opens again after a Drop visit", cold.scene === "orbit" && cold.frames > 2 && cold.models && !cold.diver
+    && drop && orbit && after.scene === "orbit" && site.fetched.filter(p => p.startsWith("/js/drop-")).length === 1, JSON.stringify({ cold, drop, orbit, after, fetched: site.fetched }));
+} };
+const arcadeHostedDrop = { name: "arcade hosted drop cabinet", why: "regression: a refused Ooga Drop download left the arcade's departure flags set, so no cabinet opened again and its Leave did nothing until a reload, also when Leave was pressed during the fade back", run: async (b, site) => {
+  await b.evaluate(`(() => { const B = window.__ooga, a = B.cavemen.get("portlandhodl"), s = window.BL.arcadeModels.CABINETS[1].play; if (B.crew.player !== a) B.pilot.possess(a); a.root.position.x = s.x; a.root.position.z = s.z; B.advance(0.2, 1 / 60); })()`);
+  site.refused.push("/js/drop-");
+  await b.key(" ");
+  for (let t = 0; t < 15000 && !site.fetched.some(p => p.startsWith("/js/drop-")); t += 50) await b.sleep(50);
+  // Leave, pressed while the view fades back in (after the refusal's toast), is refused with the transition still running.
+  const pressed = await b.evaluate(`new Promise(resolve => { const t0 = performance.now(), tick = () => {
+    if (__ooga.transitioning && document.getElementById("toast").textContent.includes("could not be opened")) { document.querySelector('nav[data-scene="arcade"] .leave').click(); resolve(__ooga.transitioning); }
+    else if (performance.now() - t0 > 10000) resolve(null); else requestAnimationFrame(tick); }; tick(); })`);
+  const refused = await untilPage(b, 'B.scene === "arcade" && !B.transitioning', 15000);
+  site.refused.length = 0;
+  dropRefusals(b);
+  await b.key(" ");
+  const opened = await untilPage(b, 'B.scene === "drop" && !B.transitioning', 15000);
+  const asked = site.fetched.filter(p => p.startsWith("/js/drop-")).length;
+  record("arcade hosted: a refused Ooga Drop download fades back to the arcade, Leave pressed during that fade is refused without locking the hall, and Space at the same cabinet asks again and opens the game", pressed === true && refused && opened && asked === 2, JSON.stringify({ pressed, refused, opened, asked, fetched: site.fetched }));
+} };
+for (const [id, step, path] of [["orbit", orbitHosted, "/oogaorbit"], ["arcade", arcadeHostedDrop, "/oogaarcade"]]) {
+  if (ONLY && !onlyMatches(step.name)) continue;
+  tasks.push({ name: `${id} hosted`, scene: id, perf: false, run: async () => {
+    const site = await hostedSite();
+    try { await fold(`${site.origin}${path}?debug=1&nosim=1&net=0&hour=12&day=80&character=portlandhodl`, [[step.name, (b) => step.run(b, site)]]); }
+    finally { await site.close(); }
+  } });
+}
 // `stat` names the scene's count of bananas delivered, read from stats(): drops landed on the pile, or the bananas the
 // factory's cooker sent out through its exit shield. `seconds` covers the scene's whole show.
 const donation = (id, { stat = "dropsLanded", seconds = 6, where = "lands its bananas on the pile" } = {}) => ({ name: `${id} donation`, why: "playthrough: a donation is counted and becomes its bananas; regression: pile lamps keep their lights when the pile changes", run: async (b) => {
@@ -9686,9 +9746,20 @@ const bifrostEntrance = { name: "bifrost entrance", why: "playthrough: an Ooga w
   record("bifrost entrance: from the pass stairs the roster's widest Ooga walks through the arch out onto the bridge's deck", arch.onDeck && Math.abs(arch.feet - arch.deck) < 0.3, JSON.stringify(arch));
   await b.evaluate(`(() => { const B = window.__ooga, p = B.bifrost.site.portal, sx = Math.sin(p.ry), sz = Math.cos(p.ry), x = p.x + sx * 0.9, z = p.z + sz * 0.9; B.pilot.navigate({ position: { x, y: p.floorY, z }, target: { x: x - sx * 6, y: p.floorY + 1, z: z - sz * 6 }, yaw: Math.atan2(sx, sz), pitch: 0.2, dist: 5 }); B.advance(0.5, 1 / 60); window.__portal = [-sx, -sz]; })()`);
   const inKey = await b.evaluate(`window.__portal`);
+  // The first crossing finds the chamber's deferred code refused, as a hosted page's bundle answering 503 would be: the
+  // view fades back to the island with the same Ooga driven and walking, and stepping out of the field and in again
+  // asks for the code once more and goes through.
+  await b.evaluate(`(() => { const load = BL.deferred.load; window.__loads = 0; BL.deferred.load = (group) => { if (group !== "dsb") return load(group); if (window.__loads++) { BL.deferred.load = load; return load(group); } return Promise.reject(new Error("503")); }; window.__portalStart = { ...__ooga.crew.player.root.position }; })()`);
   await walkToward(b, inKey[0], inKey[1], 0.8);
-  const arrived = await b.evaluate(`(() => { const B = window.__ooga; for (let i = 0; i < 240 && (B.transitioning || B.scene !== "bifrost"); i++) B.advance(1 / 30, 1 / 30); B.advance(0.3, 1 / 30); const d = B.bifrost; return { scene: B.scene, ooga: B.crew && B.crew.player ? B.crew.player.traits.name : null, pictured: !!(d && d.pictured), outside: !!(d && d.outside) }; })()`);
-  record("bifrost entrance: walking through the portal's field takes the same Ooga into the chamber, which has DSB Land's picture and the island's view back out", arrived.scene === "bifrost" && arrived.ooga === "portlandhodl" && arrived.pictured && arrived.outside, JSON.stringify(arrived));
+  const refused = await b.evaluate(`(() => { const B = window.__ooga; for (let i = 0; i < 240 && B.transitioning; i++) B.advance(1 / 30, 1 / 30); const a = B.crew.player; return { scene: B.scene, transitioning: B.transitioning, loads: window.__loads, ooga: a ? a.traits.name : null, at: a ? { x: a.root.position.x, z: a.root.position.z } : null }; })()`);
+  await walkToward(b, -inKey[0], -inKey[1], 0.5);
+  const moved = await b.evaluate(`(() => { const a = __ooga.crew.player, p = a && a.root.position; return { loads: window.__loads, scene: __ooga.scene, x: p ? p.x : null, z: p ? p.z : null }; })()`);
+  record("bifrost entrance: a refused chamber download fades back to the island with the same Ooga driven, walking again and not asking twice while it stands in the field", refused.scene === "hub" && !refused.transitioning && refused.loads === 1 && refused.ooga === "portlandhodl"
+    && moved.scene === "hub" && moved.loads === 1 && refused.at && Math.hypot(moved.x - refused.at.x, moved.z - refused.at.z) > 0.3, JSON.stringify({ refused, moved }));
+  await b.evaluate(`(() => { const B = window.__ooga, p = B.bifrost.site.portal, s = window.__portalStart, sx = Math.sin(p.ry), sz = Math.cos(p.ry); B.pilot.navigate({ position: s, target: { x: s.x - sx * 6, y: p.floorY + 1, z: s.z - sz * 6 }, yaw: Math.atan2(sx, sz), pitch: 0.2, dist: 5 }); B.advance(0.5, 1 / 60); })()`);
+  await walkToward(b, inKey[0], inKey[1], 0.8);
+  const arrived = await b.evaluate(`(() => { const B = window.__ooga; for (let i = 0; i < 240 && (B.transitioning || B.scene !== "bifrost"); i++) B.advance(1 / 30, 1 / 30); B.advance(0.3, 1 / 30); const d = B.bifrost; return { scene: B.scene, loads: window.__loads, ooga: B.crew && B.crew.player ? B.crew.player.traits.name : null, pictured: !!(d && d.pictured), outside: !!(d && d.outside) }; })()`);
+  record("bifrost entrance: walking through the portal's field takes the same Ooga into the chamber, which has DSB Land's picture and the island's view back out", arrived.scene === "bifrost" && arrived.loads === 2 && arrived.ooga === "portlandhodl" && arrived.pictured && arrived.outside, JSON.stringify(arrived));
 } };
 const walkingModeControls = async (b, scene) => {
   const state = await b.evaluate(`(() => {
@@ -13469,6 +13540,29 @@ const pokerTrip = (() => {
     }
   } };
 })();
+// A poker room opened on its own (no ₿IFRÖST visit first) whose way out cannot fetch ₿IFRÖST's deferred DSB code: the
+// first refusal comes from the Return button, the second from walking onto the mirror. The room keeps working, the
+// mirror does not ask again while the Ooga stands on it, and stepping off and back on goes through.
+const pokerExitRecovery = { name: "poker exit recovery", why: "regression: a refused way out to ₿IFRÖST left the poker room's leaving flag set, so neither its Return button nor its mirror worked again until a reload", run: async b => {
+  await b.evaluate(`(() => { const go = document.querySelector('[data-intro="poker"] .game-intro-go'); if (go && go.offsetParent) go.click();
+    const load = BL.deferred.load; window.__pokerLoads = 0; BL.deferred.load = group => { if (group !== "dsb") return load(group); if (++window.__pokerLoads > 2) { BL.deferred.load = load; return load(group); } return Promise.reject(new Error("503")); }; })()`);
+  const settle = `(() => { const B = __ooga; for (let i = 0; i < 60 && B.transitioning; i++) B.advance(1 / 30, 1 / 30); return { scene: B.scene, transitioning: B.transitioning, loads: window.__pokerLoads }; })()`;
+  await b.evaluate(`document.querySelector('[data-poker-action="exit"]').click()`);
+  const button = await b.evaluate(settle);
+  const toMirror = await b.evaluate(`(() => { const B = window.__ooga; B.pilot.navigate({ position: { x: 0, y: 0, z: 31 }, target: { x: 0, y: 1, z: 35 }, yaw: Math.PI, pitch: 0.15, dist: 4 }); B.advance(0.5, 1 / 60);
+    const c = BL.scenes.poker.camera, fx = c.target.x - c.position.x, fz = c.target.z - c.position.z, l = Math.hypot(fx, fz), f = [fx / l, fz / l], r = [-f[1], f[0]];
+    const score = { w: f[1], s: -f[1], d: -r[1], a: r[1] }; return Object.entries(score).sort((p, q) => q[1] - p[1])[0][0]; })()`);
+  const back = { w: "s", s: "w", a: "d", d: "a" }[toMirror];
+  await holdKey(b, toMirror, 2.5);
+  await b.evaluate(settle);
+  await b.evaluate(`__ooga.advance(1, 1 / 60)`);
+  const mirror = await b.evaluate(settle);
+  await holdKey(b, back, 1);
+  await holdKey(b, toMirror, 2.5);
+  const out = await b.evaluate(settle);
+  record("poker exit recovery: a cold room's refused way out to ₿IFRÖST from its Return button leaves the mirror working; a refusal there waits for the Ooga to step off, and walking back on goes through",
+    button.scene === "poker" && !button.transitioning && button.loads === 1 && mirror.scene === "poker" && !mirror.transitioning && mirror.loads === 2 && out.scene === "bifrost" && out.loads === 3, JSON.stringify({ button, mirror, out }));
+} };
 scene("poker", { query: "character=portlandhodl", steps: [{ name: "poker floor and play", why: "playthrough: a visitor walks the floor, fills a table, plays to settlement and stands without exposing hidden cards", run: async b => {
   await b.evaluate(`document.querySelector('[data-intro="poker"] .game-intro-go').click()`);
   const walking = await walkKeys(b, "portlandhodl", 0, 18, [0, 1.5], 0.45);
@@ -13499,6 +13593,7 @@ scene("poker", { query: "character=portlandhodl", steps: [{ name: "poker floor a
     await b.screenshot(join(process.env.POKER_SHOTS, "poker-floor.png"));
   }
 } }, pokerTrip] });
+scene("poker", { label: "exit recovery", query: "character=portlandhodl", steps: [pokerExitRecovery] });
 scene("poker", { label: "canvas2d", query: "canvas2d=1", steps: [{ name: "poker canvas2d", why: "rule: the floor and table controls work on the fallback renderer", run: async b => {
   await b.evaluate(`document.querySelector('[data-intro="poker"] .game-intro-go').click()`);
   const r = await b.evaluate(`(() => { const P = BL.scenes.poker.debug.poker; P.action("join"); P.action("bots"); P.action("start"); __ooga.advance(1); return { kind: __ooga.renderer.kind, phase: P.session.tables[0].snapshot().phase, nodes: __ooga.stats().visibleNodes }; })()`);
@@ -16424,7 +16519,8 @@ record("character visibility source bakes: ownership wrappers share exact immuta
   globalThis.removeEventListener = () => {};
   if (!globalThis.crypto) Object.defineProperty(globalThis, "crypto", { value: { getRandomValues: (a) => a.fill(1) } });
 
-  const order = [...readFileSync(join(root, "src/index.html"), "utf8").matchAll(/<script src="js\/([^"]+)"><\/script>/g)].map((m) => m[1]);
+  // Every module the source page loads, deferred groups included: they are inline in the source tree and portable page.
+  const order = [...readFileSync(join(root, "src/index.html"), "utf8").matchAll(/<script src="js\/([^"]+)"(?: data-defer="[a-z-]+")?><\/script>/g)].map((m) => m[1]);
   const skipped = [];
   for (const file of order) {
     try {
