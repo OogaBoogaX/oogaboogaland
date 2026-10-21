@@ -1003,6 +1003,39 @@ body[data-active-scene="arcade"] .magazine-hud {
 .banana-amount { color: var(--paper); font-weight: 600; font-variant-numeric: tabular-nums; text-align: right; white-space: nowrap; }
 .banana-leaders li:first-child .banana-amount { color: var(--accent-text); }
 
+.banana-recent { margin-top: 14px; padding-top: 12px; border-top: 1px solid rgba(0, 0, 0, 0.4); }
+.banana-recent-filter { display: flex; align-items: center; gap: 6px; margin-top: 6px; font-size: 11px; color: rgba(243, 239, 228, 0.7); cursor: pointer; }
+.banana-recent-filter input { margin: 0; accent-color: var(--accent); }
+.banana-recent-list { margin: 10px 0 0; padding: 0; list-style: none; }
+.banana-recent-list li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 4px 10px;
+  align-items: baseline;
+  padding: 8px 2px;
+  border-top: 1px solid rgba(0, 0, 0, 0.35);
+  font-size: 12px;
+}
+.banana-recent-name { min-width: 0; color: var(--paper); overflow-wrap: anywhere; }
+.banana-recent-name[data-anon="true"] { color: rgba(243, 239, 228, 0.55); font-style: italic; }
+.banana-verified {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  margin-left: 5px;
+  border-radius: 50%;
+  background: var(--accent);
+  color: #211b14;
+  font-size: 11px;
+  font-style: normal;
+  font-weight: 900;
+  vertical-align: middle;
+}
+.banana-recent-message { grid-column: 1 / -1; margin: 0; color: rgba(243, 239, 228, 0.7); overflow-wrap: anywhere; line-height: 1.4; }
+.banana-recent-list li[hidden], .banana-verified[hidden], .banana-recent-message[hidden] { display: none; }
+
 .banana-empty {
   margin: 0;
   padding: 14px 0 6px;
@@ -1643,23 +1676,6 @@ body[data-active-scene="arcade"] .magazine-hud {
   min-width: 0;
   padding: 2px 0;
   font-size: 9px;
-}
-
-#qr {
-  display: block;
-  margin: 0 auto 8px;
-  width: 148px;
-  height: 148px;
-  image-rendering: pixelated;
-  border-radius: 6px;
-}
-
-.qr-url {
-  margin: 0 0 12px;
-  font-size: 9px;
-  color: var(--faint);
-  overflow-wrap: anywhere;
-  text-align: center;
 }
 
 .field {

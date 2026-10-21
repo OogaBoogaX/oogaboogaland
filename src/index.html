@@ -409,6 +409,12 @@
             <ol class="banana-leaders" id="banana-leaders" aria-label="Top donors by bananas"></ol>
             <p class="banana-empty" id="banana-empty">No donations yet. Feed the first Ooga!</p>
           </section>
+          <section class="banana-recent" aria-labelledby="banana-recent-title">
+            <h3 class="slab-head" id="banana-recent-title"><span data-sign>Most recent donations</span></h3>
+            <label class="banana-recent-filter"><input type="checkbox" id="banana-recent-bar"> <span id="banana-recent-bar-label">1,000 sats and up only</span></label>
+            <ol class="banana-recent-list" id="banana-recent-list" aria-label="Most recent donations"></ol>
+            <p class="banana-empty" id="banana-recent-empty">New donations will appear here.</p>
+          </section>
           <p class="banana-board-note" id="banana-board-note">Demo donations saved in this browser.</p>
         </div>
         <button type="button" class="feed-open" data-action="feed"><span data-sign>Feed the Ooga Boogas</span></button>
@@ -1512,10 +1518,10 @@
         <h2 id="donation-title"><span data-sign>Feed the Ooga Boogas</span></h2>
         <button type="button" class="modal-close" id="donation-close" aria-label="Close donation">&times;</button>
       </div>
-      <canvas id="donation-screen" width="400" height="400" tabindex="0" aria-label="Donation screen. Type an amount, press Enter to continue, A for your name and message, O for on-chain, C to copy, and Escape to go back."></canvas>
+      <canvas id="donation-screen" width="400" height="400" tabindex="0" aria-label="Donation screen. Type an amount, press Enter to continue, A for your name and message. In the name field, the arrow shows previous names; Down Arrow previews a suggestion, Tab or Enter accepts it, and Escape cancels it. O for on-chain, C to copy, and Escape to go back."></canvas>
       <div id="donation-fields">
         <label class="field"><span>Donation handle</span><input id="donation-handle" type="text" maxlength="39" tabindex="-1" autocomplete="off" spellcheck="false" placeholder="anon"></label>
-        <label class="field"><span>Banana message (up to 280 characters)</span><input id="donation-message" type="text" maxlength="280" tabindex="-1" autocomplete="off" placeholder="Optional message"></label>
+        <label class="field"><span id="donation-message-label">Banana message (up to 280 characters)</span><input id="donation-message" type="text" maxlength="280" tabindex="-1" autocomplete="off" placeholder="Optional message"></label>
         <div class="donation-details-actions">
           <span id="donation-details-status" role="status"></span>
         </div>
@@ -1523,24 +1529,6 @@
       <p class="help">Pay with Lightning or on-chain. Your bananas arrive from the Factory when the payment confirms.</p>
     </dialog>
     <div id="factory-donation-fields" hidden></div>
-    <dialog class="modal" id="feed" aria-label="Feed the Ooga Boogas">
-      <div class="panel-head">
-        <h2><span data-sign>Feed the Ooga Boogas</span></h2>
-        <button type="button" class="modal-close" data-action="feed-close" aria-label="Close the feed">&times;</button>
-      </div>
-      <canvas id="qr" width="0" height="0" aria-label="Donation QR code"></canvas>
-      <p class="qr-url" id="qr-url"></p>
-      <label class="field" id="handle-field"><span>Your handle</span><input id="handle" type="text" maxlength="39"
-          autocomplete="off" spellcheck="false" placeholder="anon" autofocus></label>
-      <label class="field"><span>Banana message (up to 280 characters)</span><input id="message" type="text" maxlength="280" autocomplete="off"
-          placeholder="shown when your banana is eaten"></label>
-      <div class="actions" id="feed-tips">
-        <button type="button" data-action="tip">Tip 1.2K sats</button>
-        <button type="button" data-action="tip-legendary">Tip 120K sats</button>
-      </div>
-      <p class="help" id="feed-help"><span id="feed-simulated">Payments are simulated in this build.</span><span
-          id="crate-help" hidden> Crates drop at 1K, 5K, 21K and 100K sats.</span></p>
-    </dialog>
     <dialog class="modal" id="recipe" aria-label="Add an Ooga">
       <div class="panel-head">
         <h2><span data-sign>Add an Ooga</span></h2>

@@ -15,6 +15,7 @@
   const BL = window.BL = window.BL || {};
   const NETWORKS = ["mainnet", "testnet", "signet", "regtest"];
   let real = false, invoiceMessageMax = 80;
+  const OWN_MAX = 64, ownInvoices = new Map(), ownRequestSats = new Map();
   const config = {
     serverUrl: "https://btcpay.example.org",
     storeId: "REPLACE_WITH_STORE_ID",
@@ -24,7 +25,12 @@
   // GitHub usernames run to 39 characters; the API's copy of the contract holds the same.
   const HANDLE_MAX = 39;
   const MESSAGE_MAX = 280;
+  // The fewest sats a tip needs to carry a message, so a run of tiny tips cannot speak: the page's bar, which the API's
+  // status may replace (`messageMinSats`). The recent list shows every amount, with a checkbox to keep to the bar.
+  const MESSAGE_MIN_SATS = 1000;
   const sanitize = (text, max) => String(text || "").replace(/[^\w .,!?'@#:-]/g, "").trim().slice(0, max);
+  const messageMinSats = () => state.limits?.messageMinSats ?? MESSAGE_MIN_SATS;
+  const carried = (sats, message, bar = messageMinSats()) => sats >= bar ? sanitize(message, MESSAGE_MAX) : "";
   const randomId = () => {
     const bytes = new Uint8Array(6);
     crypto.getRandomValues(bytes);
@@ -73,7 +79,7 @@
   // API couldn't make the Lightning half in time, and the invoice can still be paid on-chain), or `{ error }`.
   // `request` stays in memory, never in an address.
   const invoice = async ({ sats, handle, message = "", anon = false }) => {
-    const body = { sats }, text = sanitize(message, MESSAGE_MAX);
+    const body = { sats }, text = carried(sats, message);
     if (handle !== undefined) body.handle = sanitize(handle, HANDLE_MAX).replace(/^@+/, "").trim() || "anon";
     if (text) body.message = text;
     if (anon) body.anon = true;
@@ -90,6 +96,15 @@
     const inv = r.invoice, b = r.bananas, rate = r.rate;
     if (typeof r.request !== "string" || !inv || typeof inv.id !== "string" || typeof inv.bolt11 !== "string" && inv.bolt11 != null || !isNumber(inv.expires)) return { error: "invalid" };
     invoiceMessageMax = body.handle === undefined ? 80 : MESSAGE_MAX;
+    if (ownInvoices.has(inv.id)) ownRequestSats.delete(ownInvoices.get(inv.id));
+    ownInvoices.set(inv.id, r.request);
+    ownRequestSats.set(r.request, sats);
+    if (ownInvoices.size > OWN_MAX) {
+      const oldest = ownInvoices.keys().next().value;
+      ownRequestSats.delete(ownInvoices.get(oldest));
+      ownInvoices.delete(oldest);
+    }
+    if (ownRequestSats.size > OWN_MAX) ownRequestSats.delete(ownRequestSats.keys().next().value);
     return {
       request: r.request,
       invoice: { id: inv.id, bolt11: inv.bolt11 || null, expires: inv.expires },
@@ -101,7 +116,7 @@
   };
   // Replaces the message on a request not yet paid.
   const note = (request, message, handle) => {
-    const body = { request, message: sanitize(message, MESSAGE_MAX) };
+    const body = { request, message: carried(ownRequestSats.get(request), message) };
     // Older servers accept notes but silently cap them at 80 characters. Never claim a long edit saved there.
     if (body.message.length > invoiceMessageMax) return Promise.resolve({ error: "invalid" });
     if (handle !== undefined) body.handle = sanitize(handle, HANDLE_MAX).replace(/^@+/, "").trim() || "anon";
@@ -125,17 +140,25 @@
   };
   const waitingOn = (id) => waiting.has(id);
   const waited = (id) => waiting.delete(id);
+  // Only this page's own paid invoices enter its remembered-name suggestions, even after leaving a kiosk.
+  const receivedOwnInvoice = (id) => {
+    if (!ownInvoices.has(id)) return false;
+    ownRequestSats.delete(ownInvoices.get(id));
+    ownInvoices.delete(id);
+    return true;
+  };
 
   // The socket. It sends nothing (a page that does is closed), comes back with backoff, and on a reconnect asks for
   // what it missed after the last donation it played; a donation already played is skipped. `state.open` is the
   // API's last word on whether donations are open, and `state.network` the network it takes payments on, each null
   // before it has said. `state.tally` is its latest tally, null before the first.
-  const SOCKET_MIN = 1000, SOCKET_MAX = 60000, PLAYED = 64;
-  const state = { open: null, network: null, connected: false, attempts: 0, donations: 0, tally: null, board: null, boardSats: null, limits: null };
+  const SOCKET_MIN = 1000, SOCKET_MAX = 60000, PLAYED = 64, RECENT_MAX = 10;
+  const state = { open: null, network: null, connected: false, attempts: 0, donations: 0, tally: null, board: null, boardSats: null, recent: null, limits: null };
   const limitsOf = (v) => v && Number.isSafeInteger(v.minSats) && v.minSats > 0
     && Number.isSafeInteger(v.maxSats) && v.maxSats >= v.minSats
     && Number.isSafeInteger(v.lightningMaxSats) && v.lightningMaxSats > 0 && v.lightningMaxSats <= v.maxSats
-    ? { minSats: v.minSats, maxSats: v.maxSats, lightningMaxSats: v.lightningMaxSats } : null;
+    && (v.messageMinSats === undefined || Number.isSafeInteger(v.messageMinSats) && v.messageMinSats >= 0)
+    ? { minSats: v.minSats, maxSats: v.maxSats, lightningMaxSats: v.lightningMaxSats, messageMinSats: v.messageMinSats ?? MESSAGE_MIN_SATS } : null;
   const readers = new Set();
   const notify = () => { for (const reader of readers) reader(); };
   const subscribeState = (reader) => {
@@ -146,7 +169,21 @@
   let socket = null, timer = 0, backoff = SOCKET_MIN, after = "", playedAt = 0, live = false;
   const donationOf = (d) => {
     if (!d || typeof d.id !== "string" || !d.id || d.id.length > 64 || !Number.isInteger(d.sats) || d.sats <= 0 || !isNumber(d.at)) return null;
-    return { id: d.id, sats: d.sats, handle: sanitize(d.handle, HANDLE_MAX), message: sanitize(d.message, MESSAGE_MAX), at: d.at };
+    return { id: d.id, sats: d.sats, handle: sanitize(d.handle, HANDLE_MAX), message: carried(d.sats, d.message), at: d.at };
+  };
+  const recentOf = (d) => {
+    const donation = donationOf(d);
+    if (!donation || !isNumber(d.bananas) || d.bananas < 0) return null;
+    return { ...donation, bananas: d.bananas, verified: d.verified === true,
+      seq: Number.isSafeInteger(d.seq) && d.seq > 0 ? d.seq : 0 };
+  };
+  const insertRecent = (list, entry) => {
+    const old = list.findIndex((item) => item.id === entry.id);
+    if (old >= 0) list.splice(old, 1);
+    let at = 0;
+    while (at < list.length && (entry.seq && list[at].seq ? list[at].seq > entry.seq : list[at].at > entry.at)) at++;
+    list.splice(at, 0, entry);
+    if (list.length > RECENT_MAX) list.length = RECENT_MAX;
   };
   const boardOf = (entries) => entries.slice(0, 256)
     .filter((e) => e && typeof e.handle === "string" && isNumber(e.bananas) && e.bananas >= 0)
@@ -172,9 +209,13 @@
     backoff = SOCKET_MIN;
     if (data.type === "status" && typeof data.open === "boolean") {
       state.open = data.open;
+      if (!state.recent) state.recent = [];
       if (NETWORKS.includes(data.network)) state.network = data.network;
       const limits = limitsOf(data.limits);
       if (data.limits === null || limits) state.limits = limits;
+      if (state.recent?.some((entry) => entry.message && entry.sats < messageMinSats())) {
+        state.recent = state.recent.map((entry) => entry.message && entry.sats < messageMinSats() ? { ...entry, message: "" } : entry);
+      }
       if (handlers.status) handlers.status(data.open);
       notify();
     } else if (data.type === "donation") {
@@ -183,8 +224,29 @@
       played[playedAt] = after = donation.id;
       playedAt = (playedAt + 1) % PLAYED;
       state.donations++;
+      const counted = b && isNumber(b.exact) && isNumber(b.rounded) ? { exact: Math.max(0, b.exact), rounded: Math.max(0, b.rounded) } : { exact: 0, rounded: 0 };
+      const recent = (state.recent || []).slice();
+      insertRecent(recent, { ...donation, bananas: counted.exact, verified: data.verified === true,
+        seq: Number.isSafeInteger(data.seq) && data.seq > 0 ? data.seq : 0 });
+      state.recent = recent;
       // A paid invoice with no price counts no bananas; it must never use the simulator's conversion.
-      handlers.donation(donation, b && isNumber(b.exact) && isNumber(b.rounded) ? { exact: Math.max(0, b.exact), rounded: Math.max(0, b.rounded) } : { exact: 0, rounded: 0 });
+      handlers.donation(donation, counted);
+      notify();
+    } else if (data.type === "recent" && Array.isArray(data.entries)) {
+      const recent = [];
+      for (const raw of data.entries.slice(0, RECENT_MAX)) {
+        const entry = recentOf(raw);
+        if (entry) insertRecent(recent, entry);
+      }
+      // A snapshot wins over held rows, including a correction to the same id. Only a live row newer than
+      // its newest sequence can have arrived while the server was preparing the snapshot.
+      let newestSeq = 0;
+      for (const entry of recent) if (entry.seq > newestSeq) newestSeq = entry.seq;
+      if (recent.length && newestSeq) for (const entry of state.recent || []) {
+        if (entry.seq > newestSeq && !recent.some((item) => item.id === entry.id)) insertRecent(recent, entry);
+      }
+      state.recent = recent;
+      notify();
     } else if (data.type === "pile" && isNumber(data.bananas) && isNumber(data.eatPerHour)) {
       if (handlers.pile) handlers.pile({ bananas: Math.max(0, data.bananas), eatPerHour: Math.max(0, data.eatPerHour) });
     } else if (data.type === "board" && Array.isArray(data.entries)) {
@@ -249,12 +311,12 @@
   let simTimer = 0, identity = () => ({}), subscribed = false;
   const simulate = (delayMs) => {
     simTimer = window.setTimeout(() => {
-      const who = identity();
+      const who = identity(), sats = pickAmount();
       handlers.donation({
         id: `sim-${randomId()}`,
-        sats: pickAmount(),
+        sats,
         handle: sanitize(who.handle, HANDLE_MAX),
-        message: sanitize(who.message, MESSAGE_MAX),
+        message: carried(sats, who.message),
         at: Date.now()
       }, null);
       simulate(15e3 + Math.random() * 20e3);
@@ -306,5 +368,5 @@
   // The test network real donations are paid on (signet on staging), or "" for mainnet, before the API has said, and
   // when simulated.
   const testNetwork = () => real && state.network && state.network !== "mainnet" ? state.network : "";
-  BL.donations = { config, get real() { return real; }, get testNetwork() { return testNetwork(); }, state, useOrigin, createRequest, invoice, note, onchain, waitFor, waitingOn, waited, subscribe, subscribeState, sanitize, HANDLE_MAX, MESSAGE_MAX };
+  BL.donations = { config, get real() { return real; }, get testNetwork() { return testNetwork(); }, get messageMinSats() { return messageMinSats(); }, state, useOrigin, createRequest, invoice, note, onchain, waitFor, waitingOn, waited, receivedOwnInvoice, subscribe, subscribeState, sanitize, carried, HANDLE_MAX, MESSAGE_MAX, MESSAGE_MIN_SATS, RECENT_MAX };
 })();

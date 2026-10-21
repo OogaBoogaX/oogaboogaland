@@ -70,7 +70,12 @@
   };
   showQuality();
   const game = gameMod.create({ catalog: models.SWAG });
-  window.BL.donationPopup = window.BL.donationPopup.create(game);
+  window.BL.donationPopup = window.BL.donationPopup.create(game, (donation) => {
+    if (donations.real) return;
+    if (active) active.onDonation(donation);
+    else game.recordDonation(donation);
+    window.BL.hud.setDonationStats(game.state);
+  });
   window.BL.hud.setDonationStats(game.state);
   // world survives scene swaps: banana level, equipment ownership, and the Ooga handed from hub to scene.
   const world = { level: START_BANANAS, pilot: null, mirrorBroken: false };
@@ -200,6 +205,7 @@
     return true;
   };
   const router = routerMod.create(scenes, window.BL.routes, go);
+  window.BL.donationPopup.onClose(() => router.dismissPlace("hub", "donate"));
   // The logo is the site's home link: from any scene it goes back to the island, as a website's logo goes home.
   document.querySelector(".home-link").addEventListener("click", (e) => {
     e.preventDefault();
@@ -569,6 +575,7 @@
     if (destroyed) return;
     if (net.state.donations) donations.useOrigin();
     unsubscribeDonations = donations.subscribe((donation, bananas) => {
+      if (donations.receivedOwnInvoice(donation.id)) game.rememberHandle(donation.handle);
       window.BL.donationPopup.receive(donation, bananas);
       if (active) active.onDonation(donation, bananas);
       else game.recordDonation(donation, bananas && bananas.exact);

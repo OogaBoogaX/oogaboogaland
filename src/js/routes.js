@@ -17,6 +17,8 @@
     list: [
       { path: "", scene: "hub", image: "home", title: "an island of caves where bananas feed EntropyLab contributors",
         description: "A floating island of caves where donated bananas feed the voxel cavemen of OogaBoogaX. Race, skydive, mine and fly, under weather from the live Bitcoin mempool." },
+      { path: "donate", scene: "hub", place: "donate", title: "Feed the Ooga Boogas",
+        description: "Feed the Ooga Boogas with a donation of bananas on Ooga Booga Land." },
       { path: "oogarally", scene: "race", image: "oogarally", title: "Ooga Rally",
         description: "Kart racing round a floating island. Three tracks, three laps: podium on all of them and take the Cup." },
       { path: "oogadrop", scene: "drop", image: "oogadrop", title: "Ooga Drop",

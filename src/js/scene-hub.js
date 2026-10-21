@@ -1,7 +1,7 @@
 (() => {
   "use strict";
   const BL = window.BL = window.BL || {};
-  const { math, models, contributors, donations, qr, terrain, hubModels, headquartersModels, poolModels, caves, daylight, game: gameMod, hud: hudMod, interact: interactMod, pilot: pilotMod, fx: fxMod, crew: crewMod, pile: pileMod, crates: cratesMod, critters: crittersMod, weather: weatherMod, chain, mempool, oogatronLive } = BL;
+  const { math, models, contributors, donations, terrain, hubModels, headquartersModels, poolModels, caves, daylight, game: gameMod, hud: hudMod, interact: interactMod, pilot: pilotMod, fx: fxMod, crew: crewMod, pile: pileMod, crates: cratesMod, critters: crittersMod, weather: weatherMod, chain, mempool, oogatronLive } = BL;
   const { clamp, lerp, ease, fnv1a, mulberry32 } = math;
   const { createNode, addChild, removeChild, updateWorld, createCamera, addTween, stepTweens, tweenCount, traverseVisible } = BL.scene;
   const { JET_SPEED, JET_RISE, JET_FUEL_SECONDS, JET_MOVE_SECONDS } = crewMod;
@@ -11450,15 +11450,6 @@
       crew.applyAllSwag();
       crew.renderLocker();
     });
-    const donationRequest = donations.createRequest(game.state);
-    qr.drawTo(hud.el.qr, donationRequest.url, { quiet: 3, dark: "#000000", light: "#f3efe4" });
-    mark("qr");
-    hud.setDonationUrl(donationRequest.url);
-    hud.setIdentity(game.state);
-    hud.onIdentityChange(({ handle, message }) => {
-      game.setIdentity({ handle: donations.sanitize(handle, donations.HANDLE_MAX), message: donations.sanitize(message, donations.MESSAGE_MAX) });
-      hud.setIdentity(game.state);
-    });
 
     Object.assign(hooks, {
       onHover: showHoverTooltip,
@@ -11505,9 +11496,7 @@
         return;
       }
       if (clankerPlay.active && clankerPlay.action(action)) return;
-      if (action === "tip") demoTip(1200);
-      else if (action === "tip-legendary") demoTip(120000);
-      else if (action === "clear-loot") clearLoot();
+      if (action === "clear-loot") clearLoot();
       else if (action === "reset") resetDemo();
       else if (action === "act") pilot.action();
       else if (action === "mode-preset") {
@@ -11551,13 +11540,17 @@
     unsubscribeAccount = BL.net.subscribe(onAccountChange);
     const initialFirstPerson = ctx.from === null && preloadedFirstPerson && !initialGorilla && !pilot.loginViewRestored;
     if (initialFirstPerson) pilot.enterClose(true);
+    // The /donate route: the island's own view with the donation popup open. As a routed place it keeps Tess from
+    // greeting over the dialog.
+    const donate = ctx.place === "donate", routedPlace = donate ? null : ctx.place;
     // Out of a Timechain room: behind the Sphere's curtain, to walk out through its doors.
     const sphereExit = ctx.from === "timechain" ? world.sphereExit : null;
     world.sphereExit = null;
     if (returningCharacter && sphereExit && pilot.player) timechainIsland.gate.arrive(sphereExit);
     else if (returningCharacter) navigate(ctx.from === "factory" || ctx.from === "bifrost" || ctx.from === "arcade" ? ctx.from : ctx.from === "timechain" ? "timechain" : "pile", false, false);
-    else if (ctx.from === "bifrost" && !ctx.place) navigate("bifrost", false, false);
-    else if (!pilot.loginViewRestored && !crew.sleeping && !initialGorilla && (ctx.place || preloadedView || initialCharacter || initialFirstPerson)) navigate(ctx.place || preloadedView || "pile", false, false);
+    else if (ctx.from === "bifrost" && !routedPlace) navigate("bifrost", false, false);
+    else if (!pilot.loginViewRestored && !crew.sleeping && !initialGorilla && (routedPlace || preloadedView || initialCharacter || initialFirstPerson)) navigate(routedPlace || preloadedView || "pile", false, false);
+    if (donate) hud.openFeed();
     if (initialCharacter && !initialGorilla && preloadedJetpack) {
       grantJetpack(pilot.player, preloadedJetpackWear);
     }

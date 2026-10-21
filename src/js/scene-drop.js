@@ -20,7 +20,7 @@
   "use strict";
   const BL = window.BL = window.BL || {};
   // The diver and the drop's sound are deferred on a hosted page and arrive in `prepare`.
-  const { math, models, contributors, donations, qr, terrain, hubModels, dropModels, daylight, pile: pileMod, game: gameMod, hud: hudMod, interact: interactMod, controls: controlsMod, fx: fxMod, dropHud } = BL;
+  const { math, models, contributors, donations, terrain, hubModels, dropModels, daylight, pile: pileMod, game: gameMod, hud: hudMod, interact: interactMod, controls: controlsMod, fx: fxMod, dropHud } = BL;
   const { clamp, lerp, damp, quat, mulberry32 } = math;
   const { createNode, addChild, removeChild, createCamera, addTween, stepTweens, tweenCount, traverseVisible } = BL.scene;
   const { CONFETTI } = fxMod;
@@ -931,14 +931,6 @@
     dhud.el.mute.setAttribute("aria-pressed", String(audio.muted));
     window.addEventListener("pointerdown", onGesture);
     window.addEventListener("keydown", onGesture);
-    const donationRequest = donations.createRequest(game.state);
-    qr.drawTo(hud.el.qr, donationRequest.url, { quiet: 3, dark: "#000000", light: "#f3efe4" });
-    hud.setDonationUrl(donationRequest.url);
-    hud.setIdentity(game.state);
-    hud.onIdentityChange(({ handle, message }) => {
-      game.setIdentity({ handle: donations.sanitize(handle, donations.HANDLE_MAX), message: donations.sanitize(message, donations.MESSAGE_MAX) });
-      hud.setIdentity(game.state);
-    });
     hud.onAssign((entryId, name) => {
       if (game.assign(entryId, name)) renderLocker();
     });
@@ -973,8 +965,6 @@
       else if (action === "leave") go(home);
       else if (action === "act") act();
       else if (action === "mute") toggleMute();
-      else if (action === "tip") demoTip(1200);
-      else if (action === "tip-legendary") demoTip(120000);
       else if (action === "clear-loot") {
         game.clearLoot();
         onLootCleared();
