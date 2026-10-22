@@ -9733,7 +9733,8 @@
     if (!clankerFireClear(entry, x, y, z, x, y, z, heading, heading)) return false;
     const slope = CLANKER_REST_SLOPE, angled = slope.groundRects.angled;
     slope.supportEntry = entry;
-    clankerGroundPlaneAt(x, y, z, heading, slope, slope);
+    try { clankerGroundPlaneAt(x, y, z, heading, slope, slope); }
+    finally { slope.supportEntry = null; }
     if (!angled.walkable || Math.hypot(angled.groundX, angled.groundZ) > 0.2 || angled.uneven > 0.3) return false;
     // Walking uses centre clearance; a settled body must also leave its rear,
     // middle and front clear of props, interactive items and other actors.
@@ -12030,6 +12031,10 @@
     const count = input.targetCount;
     input.dispose();
     hud.dispose();
+    // Shared query scratch must not keep an actor (and its groundAt closure) alive past this visit.
+    CLANKER_REST_SLOPE.supportEntry = RAGE_WARP_MOTION.supportEntry = null;
+    CLANKER_HIT.node = CLANKER_HIT.owner = null;
+    viewPoseActor = grabSupportEntry = clankerSupportActor = clankerPassingEntry = preparingGuideActor = null;
     // Drop every per-visit ref but the cached island.
     terrainRampRoof = pathNode = altar = lawn = life = hud = hooks = input = pilot = fx = cameraCover = bananaCover = solids = rockGuides = objectGuides = sightGuides = bananaGuides = pileGuides = platformGuides = mirrorGuides = pile = crew = crates = critters = clock = presets = mirrorCave = matrixCave = matrixControl = gateRain = fire = headquarters = positionDebug = dockStairs = overlayCanvas = null;
     beasts.clear();

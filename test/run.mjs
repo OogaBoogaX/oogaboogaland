@@ -16635,7 +16635,28 @@ const reviewCrowdAndFallbackProof = async () => {
   return {clear,filtered,blocked,hidden,above,cpu,gpu,fetches,gaps};
 };
 
+// Regression: a rest-site probe kept its gorilla, whose groundAt closure held the departed hub's graph.
+const hubScratchChecks = async () => {
+  const source = await readFile(new URL("../src/js/scene-hub.js", import.meta.url), "utf8");
+  const start = source.indexOf("  const CLANKER_REST_SLOPE ="), end = source.indexOf("  const clankerClimbSolidAt =", start);
+  let fire = true, walkable = true, clear = true, thrown = false;
+  const failure = new Error("ground probe"), entry = {}, rows = [];
+  const probe = new Function("clankerFireClear", "clankerGroundPlaneAt", "clankerCylinderClear",
+    source.slice(start, end) + "; return { clear: clankerRestSiteClear, slope: CLANKER_REST_SLOPE };")(
+    () => fire, (_x, _y, _z, _heading, slope) => {
+      if (thrown) throw failure;
+      Object.assign(slope.groundRects.angled, { walkable, groundX: 0, groundZ: 0, uneven: 0 });
+    }, () => clear);
+  const sample = expected => rows.push(probe.clear(entry, 0, 0, 0, 0) === expected && probe.slope.supportEntry === null);
+  sample(true); walkable = false; sample(false); walkable = true; clear = false; sample(false);
+  clear = true; fire = false; sample(false); fire = true; thrown = true;
+  try { probe.clear(entry, 0, 0, 0, 0); rows.push(false); }
+  catch (error) { rows.push(error === failure && probe.slope.supportEntry === null); }
+  record("hub rest probes: valid, blocked and throwing ground queries never retain the gorilla in shared scratch", rows.every(Boolean), JSON.stringify(rows));
+};
+
 const unitChecks = async () => {
+  await hubScratchChecks();
   const rage = await gorillaRageProof();
   record("gorilla rage: distinct rolling hits, only agitating Oogas targeted, held capture through planning and swing, bounded throws, exact expiry, zero health and account/lifecycle cancellation", Object.values(rage).every(Boolean), JSON.stringify(rage));
   const reviewCrowd=await reviewCrowdAndFallbackProof();
