@@ -196,7 +196,7 @@
     const own=BL.net.ownCharacter(),carried=world.pilot||asked;
     const allowed=c=>!BL.net.mayDrive(c.name);
     const name=own?.handle||BL.contributors.roster.find(c=>c.name===carried&&allowed(c))?.name||(!BL.net.state.backend?"YellowBrokeIt":BL.contributors.roster.find(allowed)?.name||"YellowBrokeIt");world.pilot=null;
-    hud=BL.hud.create({roster:BL.contributors.roster,catalog:BL.models.SWAG,tierColors:BL.models.TIER_COLORS,renderIcon:BL.hud.renderIcon,lootEnabled:false});
+    hud=BL.hud.create({signal:ctx.signal,roster:BL.contributors.roster,catalog:BL.models.SWAG,tierColors:BL.models.TIER_COLORS,renderIcon:BL.hud.renderIcon,lootEnabled:false});
     hud.setAreaLabel("DSB LAND · MASTER LAYOUT");
     const hooks={};input=BL.interact.create({canvas:ctx.canvas,renderer:ctx.renderer,camera,hooks});
     const STEP=BL.pilot.WALK.step;
@@ -242,7 +242,7 @@
     crew.wearJetpack(avatar,BL.hubModels.jetpack(),BL.hubModels.jetFlame());
     remotes=BL.remotePlayers.create({root,crew,visible:rec=>rec.zone===voiceZone()&&(!entrance||entrance.phase==="done")});
     footsteps=BL.footsteps.create(); // The driven Ooga's own footsteps, heard by this page alone (footsteps.js).
-    hud.el.sheet.addEventListener("focusin",sheetFocus);
+    hud.el.sheet.addEventListener("focusin",sheetFocus,{signal:ctx.signal});
     Object.assign(avatar.root.position,{x:-45,y:land.heightAt(-45,-43)+avatar.baseY,z:-43});avatar.root.rotation.y=0;
     Object.assign(hooks,pilot.hooks);hud.onAction(action);hud.onPreset(()=>overviewView());
     // Shared timing/input/transport; DSB alone uses the marble's rectangular clear aperture.
@@ -330,7 +330,7 @@
     const inkButton=document.createElement("button");inkButton.type="button";inkButton.textContent="Browse Proof of Ink";inkButton.onclick=openVenue;inkTools.appendChild(inkButton);document.body.appendChild(inkTools);
     inkLayoutObserver=new ResizeObserver(requestInkLayout);
     for(const el of [document.getElementById("act"),document.querySelector(".bottom-hud"),document.documentElement])inkLayoutObserver.observe(el);
-    window.addEventListener("resize",requestInkLayout);requestInkLayout();
+    window.addEventListener("resize",requestInkLayout,{signal:ctx.signal});requestInkLayout();
     studioTools=document.createElement("div");studioTools.className="dsb-studio-tools";studioTools.hidden=true;
     const tomato=document.createElement("button");tomato.type="button";tomato.textContent="Throw tomato · T";tomato.onclick=()=>{if(seatRoom())crew.throwTomato();};studioTools.appendChild(tomato);
     document.body.appendChild(studioTools);

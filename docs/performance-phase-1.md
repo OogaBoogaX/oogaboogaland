@@ -86,3 +86,26 @@ The actual doorway creates a preview and cancels it, then a Room 1 visit returns
 The remaining 22 captured room meshes are shared actor geometry already needed by the hub. Exact SHA-256 hashes of positions, faces/materials, lines and normals match before/after at 1×, 1.5× and 2× (5,411 / 7,206 / 9,284 faces). Hashes and raw runs are in the JSON evidence. No visual difference.
 
 Validation: build and syntax checks clean; unit tier 264/264. Hosted cancelled-preview → Room 1 → hub passes DEBUG teardown and has a clean console. PR #265, #267 and #193 patches still apply cleanly. PR #263's exporter change three-way merges without conflicts in temporary files; its picture extraction and standalone bundle evaluation pass against that merged exporter. No pending PR was merged or duplicated.
+
+## 1.5 — Visit listeners and persistent sheet rows
+
+The director creates a signal per visit and aborts it after leave, including failed entry and page teardown. Scene listeners and HUD controls use that signal. HUD disposal also releases its listener closures. The page owns a bounded set of donor/recent rows and the current roster's rows, with no contributor or visit callbacks in that pool. Ordering, online/voice marks, donor units and the away toggle still update normally.
+
+Ten Factory → hub laps use the same native GC/counter procedure. `--dom` seeds three donors and records row identity through WeakRefs. The new leaderboard has ten reusable slots; unused slots stay hidden. All 46 roster rows survive the visits.
+
+| Hub after ten laps | Before | After |
+|---|---:|---:|
+| DOM nodes | 11,822 | 10,123 |
+| Detached SVGs (boot: 4) | 96 | 4 |
+| Original roster rows still attached | 0 / 46 | 46 / 46 |
+| Original donor rows still attached | 0 / 3 | 10 / 10 slots |
+| JS heap | 227.66 MiB | 230.13 MiB |
+| Backing storage | 149.44 MiB | 151.30 MiB |
+| Combined floor | 377.09 MiB | 381.44 MiB |
+| Listeners after lap 1 → lap 10 | 408 → 409 | 408 → 409 |
+
+This fixes roster SVG churn, not a demonstrated heap-floor reduction. The reported +17-listener leak does not reproduce. A follow-up without `DOM.getDetachedDomNodes` holds native listeners at **407 after lap 1 and 407 after lap 10**. DevTools' separate `getEventListeners` audit lists 403 attached application listeners at both stops, with identical targets, event types, capture settings and handler sources. The apparent 408 → 409 growth above comes from the detached-DOM inspection itself; no application handler changed. The strict listener criterion passes without that diagnostic. All 290 reported shadow roots exist at boot and are explicitly identified by Chrome as `user-agent` roots; none are application-created. The four detached template SVGs also remain from boot, so the brief's literal zero criterion is not met.
+
+The first after run timed out during a later transition without console errors. It was not used as successful evidence. A fresh run completed all ten laps; its timeout includes scene/frame diagnostics and allows 90 seconds. The before run completed under the original 30-second limit. Transition durations vary and are not speed claims.
+
+Validation: changed JavaScript parses; unit tier 264/264; focused HUD regression plus global tier 266/266. The regression uses real scene transitions, verifies the departed signal no longer fires and the incoming signal fires once, and clicks donor units and the away toggle on the reused nodes. Hosted DEBUG teardown and the completed ten-lap console are clean. PR #265 and #267 still apply; #193's changed DSB context three-way merges cleanly with these listener options. Full scene/performance acceptance remains pending. The follow-up records Chrome 155, Apple M1 Pro through ANGLE/Metal, DPR 1 and 32 GiB device memory. Raw listener lists stay untracked; committed fingerprints pin their exact equality.

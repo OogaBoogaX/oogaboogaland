@@ -82,7 +82,7 @@
   const debugMagazines = DEBUG ? (params.get("mag") === "2" ? 2 : params.get("mag") === "1" ? 1 : 0) : 0;
   world.magazine = { owned: debugMagazines > 0, count: debugMagazines, ammo: debugMagazines ? 30 : 0, carrier: null };
 
-  let active = null, activeMeshRigs = false;
+  let active = null, activeMeshRigs = false, visitController = null;
   let sceneTime = 0;
   let transition = null;
   let fade = 0;
@@ -212,7 +212,7 @@
     if (active && active.id !== "hub") go("hub");
   });
   const agentPlay = BL.agent.createPlay();
-  const ctx = { renderer, canvas: sceneCanvas, overlay: overlayCanvas, game, world, go, lootEnabled: LOOT_ENABLED, testBananas: TEST_BANANAS, agentPlay, from: null, place: null };
+  const ctx = { renderer, canvas: sceneCanvas, overlay: overlayCanvas, game, world, go, lootEnabled: LOOT_ENABLED, testBananas: TEST_BANANAS, agentPlay, from: null, place: null, signal: null };
   const sceneSections = [...document.querySelectorAll("[data-scene]")];
   // The title cards of the games that have no phase of their own for one: shown on every arrival,
   // closed by their button, Enter, Space or Escape, and nothing else reaches the scene while one shows.
@@ -234,7 +234,10 @@
     // The scene's own zone (`voiceZone`), else one of its own; the island and DSB Land report theirs as they go.
     window.BL.net.setZone(next.voiceZone || (next.id === "dsb" ? "dsb-outside" : `scene-${next.id}`));
     window.BL.models.setScope(next.id);
-    next.enter(ctx);
+    visitController = new AbortController();
+    ctx.signal = visitController.signal;
+    try { next.enter(ctx); }
+    catch (error) { visitController.abort(); throw error; }
     activeMeshRigs = next.renderOpts?.meshRigs === true;
     active = next;
     showMic();
@@ -245,7 +248,7 @@
       positionDebug.setAttribute("aria-label", "Debug scene, character and camera state. Click to copy a debug snapshot.");
       positionDebugState = "";
       positionDebugNext = 0;
-      positionDebug.addEventListener("click", copyPositionDebug);
+      positionDebug.addEventListener("click", copyPositionDebug, { signal: ctx.signal });
       updatePositionDebug(true);
     }
   };
@@ -273,7 +276,9 @@
     const leaving = active;
     wakeAudio();
     agentPlay.stop(true);
-    const left = leaving.leave();
+    let left;
+    try { left = leaving.leave(); }
+    finally { visitController.abort(); }
     if (DEBUG && leaving.root.children.length) throw new Error(`${leaving.id}.leave left ${leaving.root.children.length} nodes in its root`);
     if (DEBUG && left.targets) throw new Error(`${leaving.id}.leave left ${left.targets} input targets`);
     clearTweens();
@@ -756,8 +761,8 @@
     window.removeEventListener("blur", clearRightShift);
     document.removeEventListener("visibilitychange", onVisibility);
     positionDebug.removeEventListener("click", copyPositionDebug);
-    if (active) active.leave();
-    renderer.dispose();
+    try { if (active) active.leave(); }
+    finally { if (visitController) visitController.abort(); renderer.dispose(); }
   };
   window.addEventListener("pagehide", (e) => {
     if (!e.persisted) destroy();

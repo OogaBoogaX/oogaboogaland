@@ -378,7 +378,7 @@
     dust = BL.dressing.motes({ count: 160, span: 16, low: 0.5, high: 4.2 });
     addChild(lab.room, dust.node);
     mark("room");
-    hud = hudMod.create({ roster: contributors.activeRoster, catalog: models.SWAG, tierColors: models.TIER_COLORS, renderIcon: hudMod.renderIcon, lootEnabled });
+    hud = hudMod.create({ signal: ctx.signal, roster: contributors.activeRoster, catalog: models.SWAG, tierColors: models.TIER_COLORS, renderIcon: hudMod.renderIcon, lootEnabled });
     hud.setAreaLabel("LAB");
     hooks = {};
     input = interactMod.create({ canvas: ctx.canvas, renderer, camera, hooks });

@@ -5314,6 +5314,41 @@ const trip = (id) => ({ name: `${id} round trip`, why: "contract: a scene left a
   const donated = await b.evaluate(`(() => { const B = window.__ooga, g = B.game.state, before = { donations: g.donations, sats: g.totalSats, bananas: g.bananas }; window.BL.scenes[B.scene].onDonation({ id: "trip-${id}", sats: 2100, handle: "tester", message: "ooga", at: Date.now() }, { exact: 1.25, rounded: 1 }); B.advance(1, 1 / 30); return { scene: B.scene, donations: g.donations - before.donations, sats: g.totalSats - before.sats, bananas: g.bananas - before.bananas }; })()`);
   record(`${id} round trip: leaving and entering twice keeps the leave contract and holds nothing the first visit did not, and a donation mid-visit is taken`, grew.length === 0 && donated.scene === id && donated.donations === 1 && donated.sats === 2100 && donated.bananas === 1.25, JSON.stringify({ grew, donated, first: laps[0], second: laps[1] }));
 } });
+// Keep the real sheet controls working while their rows survive a scene's lifetime.
+const hudVisit = { name: "hub HUD lifetime", why: "regression: scene visits recreated roster SVGs and donor rows; their handlers must end on leave while the attached rows keep their identity", run: async (b) => {
+  await b.evaluate(`(() => {
+    const H = window.__hudVisit = { rows: [...document.querySelectorAll("#roster [data-name]")], leaders: [...document.getElementById("banana-leaders").children], signals: [], calls: 0 }, S = BL.scenes;
+    H.enters = [S.lab.enter, S.hub.enter];
+    for (const [i, id] of ["lab", "hub"].entries()) S[id].enter = ctx => {
+      H.signals.push(ctx.signal);
+      window.addEventListener("hud-lifetime-probe", () => H.calls++, { signal: ctx.signal });
+      return H.enters[i](ctx);
+    };
+  })()`);
+  try {
+    await tourGo(b, "lab");
+    await tourGo(b, "hub");
+    const r = await b.evaluate(`(() => {
+      const H = window.__hudVisit, B = __ooga, leaders = document.getElementById("banana-leaders");
+      window.dispatchEvent(new Event("hud-lifetime-probe"));
+      B.game.recordDonation({ id: "hud-diff", sats: 987654, handle: "hud-diff", message: "hello", at: Date.now() });
+      BL.hud.setDonationStats(B.game.state);
+      document.querySelector('[data-donor-unit="sats"]').click();
+      const visible = [...leaders.children].filter(n => !n.hidden), rows = [...document.querySelectorAll("#roster [data-name]")];
+      const away = document.querySelector(".roster-away button"), closed = away.getAttribute("aria-expanded"); away.click();
+      return { ended: H.signals[0].aborted && !H.signals[1].aborted, calls: H.calls,
+        roster: rows.length === H.rows.length && rows.every(n => H.rows.includes(n)),
+        leaders: [...leaders.children].every((n, i) => n === H.leaders[i]),
+        visible: visible.length, ranked: visible[0].querySelector(".banana-donor").textContent === "@hud-diff",
+        sats: visible[0].querySelector(".banana-amount").textContent.replace(/[^0-9]/g, "") === "987654",
+        hidden: [...leaders.children].filter(n => n.hidden).every(n => getComputedStyle(n).display === "none"),
+        away: away.getAttribute("aria-expanded") !== closed };
+    })()`);
+    record("HUD lifetime: leaving aborts the old visit's handler, the new handler fires once, reused rows retain sorting, units and the away toggle", r.ended && r.calls === 1 && r.roster && r.leaders && r.visible > 0 && r.ranked && r.sats && r.hidden && r.away, JSON.stringify(r));
+  } finally {
+    await b.evaluate(`(() => { const H = window.__hudVisit; BL.scenes.lab.enter = H.enters[0]; BL.scenes.hub.enter = H.enters[1]; delete window.__hudVisit; })()`);
+  }
+} };
 const play = (id, what, code) => ({ name: `${id} playthrough`, why: "playthrough: the game reaches its result, shown and saved", run: async (b) => {
   const r = await b.evaluate(code);
   record(`${id} playthrough: ${what}`, r.ok, JSON.stringify(r));
@@ -10141,7 +10176,7 @@ const factoryCanvas = { name: "factory canvas2d", why: "contract: the Canvas 2D 
   record("factory canvas2d: with WebGL2 unavailable the factory still boots and paints, a tip's show in the air", r.kind === "canvas2d" && r.scene === "factory" && r.colours >= 4 && r.flying > 0, JSON.stringify(r));
 } };
 
-scene("hub", { steps: [{ name: `work movement lab lanes ${1 / RATES[0]}Hz`, why: "regression: work walkers left their facing-right side of the lab lane", open: "on about 4 boots in 30 the lane targets sit on the centre or far side; unfixed", run: labLanes }, donation("hub"), hubWalking, hubMapNavigation, hubRainforestSteps, hubRoutes, hubFall, hubGrounding, trip("hub"), factoryActivityRouting] });
+scene("hub", { steps: [{ name: `work movement lab lanes ${1 / RATES[0]}Hz`, why: "regression: work walkers left their facing-right side of the lab lane", open: "on about 4 boots in 30 the lane targets sit on the centre or far side; unfixed", run: labLanes }, donation("hub"), hubWalking, hudVisit, hubMapNavigation, hubRainforestSteps, hubRoutes, hubFall, hubGrounding, trip("hub"), factoryActivityRouting] });
 scene("hub", { query: "ooga=portlandhodl:clank:lab,obl,lf&ooga=w-s-bitcoin:clank:lab,obl,lf&ooga=bc1gui:clank:lab,obl,lf&ooga=DrNeski:clank:lab,obl,lf&ooga=2140data:clank:lab,obl,lf", steps: [{ name: "work movement cave trips", why: "regression: off-lane cave traffic aimed through obstacles and started backwards detours", run: workCaveTrips }] });
 scene("hub", { label: "room sign", query: "pos=0", steps: [{ name: "room sign copies hash", why: "rule: tapping a room sign swings it and copies its displayed eight-character code with visible confirmation", run: async (b) => {
   const point = await b.evaluate(`(() => { const B = __ooga, sign = B.headquarters.roomSigns[0], n = sign.node; Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText: (value) => { window.__roomHash = value; return Promise.resolve(); } } }); window.__roomSignBefore = sign.hits; B.pilot.release(true); B.pilot.navigate({ position: { x: n.position.x, y: n.position.y, z: n.position.z }, target: { x: n.position.x, y: n.position.y - 0.2, z: n.position.z }, yaw: n.rotation.y, pitch: 0, dist: 4 }); B.advance(0.6, 1 / 60); return B.project(n.position.x, n.position.y - 0.2, n.position.z, {}); })()`);
