@@ -223,7 +223,7 @@
       g.stage = "load";
       Promise.resolve(BL.deferred.load("timechain")).then(() => {
         if (stamp !== g.prep) return null;
-        g.prepared = BL.timechainInterior.prepare(g.room.id, renderer);
+        g.prepared = BL.models.withScope("timechain", () => BL.timechainInterior.prepare(g.room.id, renderer));
         return g.prepared.ready;
       }).then(() => {
         if (stamp === g.prep) g.stage = "capture";
@@ -234,7 +234,10 @@
     const dropPrepared = () => {
       g.prep++;
       g.stage = null;
-      if (g.prepared) { g.prepared.dispose(); g.prepared = null; }
+      if (g.prepared) {
+        g.prepared.dispose(); g.prepared = null;
+        BL.models.release("timechain", ["hub"]);
+      }
       if (g.picture) { site.picture.geometry = null; renderer.releaseGeometry(g.picture); g.picture = null; }
     };
     // A canvas's frame copied out at no more than 1280 pixels across, ready to hang as a picture: both renderers take

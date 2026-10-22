@@ -360,6 +360,14 @@
     return entry;
   };
   const setScope = (id) => { cacheScope = id; };
+  // Scope one synchronous build batch. Async builders call this again after each await, without borrowing the
+  // active scene's scope while their code, images or next frame are pending.
+  const withScope = (id, build, arg) => {
+    const previous = cacheScope;
+    cacheScope = id;
+    try { return build(arg); }
+    finally { cacheScope = previous; }
+  };
   const release = (id, keep) => {
     for (const entry of scopedCaches) {
       if (!entry.scenes.has(id) || keep.some((k) => entry.scenes.has(k))) continue;
@@ -1614,5 +1622,5 @@
     }
     glass.push(box({ w: W, h: tall, d: W, color: tint, emissive: 1, offset: { x, y: mid, z } }));
   };
-  BL.models = { beam, forwardLathe, turn, shaded, torus, along, chain, railParts, columnParts, deckGrid, deckPosts, deckParts, stairParts, lanternParts, LANTERN_GLASS, geometry, pushVert, face, cutCylinder, voxCoords, box, bevelBox, panel, lathe, glassVessel, attachGlassShell, tube, ring, polyline, merge, forward, moved, turnedX, turnedY, turnedZ, prism, cached, variants, track, setScope, release, noShadow, makeVox, voxelGeometry, voxelFaces, banana, bananaGeometry, bananaTileGeometry, bananaPileCoreGeometry, bananaPileRadiusScale, bananaPileHeightOffset, BANANA_AMMO_SCALE, BANANA_PILE_PROFILE, particleGeometry, spareMagazine, caveman, CLUB_PALETTE, GOLD_CLUB_PALETTE, labRoom, buildableGeos, crate, die, dieRotationFor, SWAG, TIER_COLORS };
+  BL.models = { beam, forwardLathe, turn, shaded, torus, along, chain, railParts, columnParts, deckGrid, deckPosts, deckParts, stairParts, lanternParts, LANTERN_GLASS, geometry, pushVert, face, cutCylinder, voxCoords, box, bevelBox, panel, lathe, glassVessel, attachGlassShell, tube, ring, polyline, merge, forward, moved, turnedX, turnedY, turnedZ, prism, cached, variants, track, setScope, withScope, release, noShadow, makeVox, voxelGeometry, voxelFaces, banana, bananaGeometry, bananaTileGeometry, bananaPileCoreGeometry, bananaPileRadiusScale, bananaPileHeightOffset, BANANA_AMMO_SCALE, BANANA_PILE_PROFILE, particleGeometry, spareMagazine, caveman, CLUB_PALETTE, GOLD_CLUB_PALETTE, labRoom, buildableGeos, crate, die, dieRotationFor, SWAG, TIER_COLORS };
 })();

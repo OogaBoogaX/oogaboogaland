@@ -23,6 +23,10 @@ export function externalizeModules(html, out, deferred, block) {
       body = body.split(text).join("");
       return text;
     });
+    // Script evaluation can finish while another scene is active. Eager builders belong to the requested group;
+    // later asynchronous build batches scope themselves explicitly. Standalone data-bundle tools have no models.
+    parts.unshift(`(window.BL.models?.withScope || ((_scope, build) => build()))(${JSON.stringify(group)}, () => {`);
+    parts.push("});");
     const bundle = `${parts.join("\n\n")}\n`, name = `${group}-${hash(bundle, "hex").slice(0, 16)}.js`;
     writeFileSync(join(out, "js", name), bundle);
     named[group] = `/js/${name}`;

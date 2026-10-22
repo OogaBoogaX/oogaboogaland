@@ -198,9 +198,8 @@
     if (transition) return false;
     transition = { next, place, out: true, t: 0, instant, ready: true, redirect: null, failed: null };
     if (next.prepare) {
-      window.BL.models.setScope(next.id);
-      settle(transition, next.prepare(place, ctx));
-      window.BL.models.setScope(active ? active.id : null);
+      try { settle(transition, models.withScope(next.id, () => next.prepare(place, ctx, next.id))); }
+      catch (error) { transition.failed = error; }
     }
     return true;
   };
@@ -663,8 +662,7 @@
     let first = Object.hasOwn(scenes, sceneId) ? scenes[sceneId] : scenes[Object.keys(scenes)[0]], place = routed && routed.place;
     if (first.prepare) {
       try {
-        window.BL.models.setScope(first.id);
-        const redirect = await first.prepare(place, ctx);
+        const redirect = await models.withScope(first.id, () => first.prepare(place, ctx, first.id));
         if (redirect) ({ next: first, place } = landing({ redirect }));
       } catch {
         first = scenes[Object.keys(scenes)[0]];

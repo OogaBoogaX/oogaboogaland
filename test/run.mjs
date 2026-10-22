@@ -10208,6 +10208,59 @@ const timechainDataChecks = async () => {
   pending[2](); pending[3](); pending[4](); await loading; late.dispose();
   record("timechain API: late sibling metadata fills and repaints the holder view without changing its fetch time", gotHeight && gotBoth && changed.filter(i => i === 5).length >= 3 && late.boards.every(b => b.asof === "2026-09-23 / BLOCK 968330"));
 };
+// Regression: a rest-site probe kept its gorilla, whose groundAt closure held the departed hub's graph.
+const hubScratchChecks = async () => {
+  const source = await readFile(new URL("../src/js/scene-hub.js", import.meta.url), "utf8");
+  const start = source.indexOf("  const CLANKER_REST_SLOPE ="), end = source.indexOf("  const clankerClimbSolidAt =", start);
+  let fire = true, walkable = true, clear = true, thrown = false;
+  const failure = new Error("ground probe"), entry = {}, rows = [];
+  const probe = new Function("clankerFireClear", "clankerGroundPlaneAt", "clankerCylinderClear",
+    source.slice(start, end) + "; return { clear: clankerRestSiteClear, slope: CLANKER_REST_SLOPE };")(
+    () => fire, (_x, _y, _z, _heading, slope) => {
+      if (thrown) throw failure;
+      Object.assign(slope.groundRects.angled, { walkable, groundX: 0, groundZ: 0, uneven: 0 });
+    }, () => clear);
+  const sample = expected => rows.push(probe.clear(entry, 0, 0, 0, 0) === expected && probe.slope.supportEntry === null);
+  sample(true); walkable = false; sample(false); walkable = true; clear = false; sample(false);
+  clear = true; fire = false; sample(false); fire = true; thrown = true;
+  try { probe.clear(entry, 0, 0, 0, 0); rows.push(false); }
+  catch (error) { rows.push(error === failure && probe.slope.supportEntry === null); }
+  record("hub rest probes: valid, blocked and throwing ground queries never retain the gorilla in shared scratch", rows.every(Boolean), JSON.stringify(rows));
+};
+
+// Regression: Tess's hub-tagged cached meshes survived the last rig's departure.
+const tessCacheChecks = BL => {
+  const parent = BL.scene.createNode(), input = { add() {}, remove() {} }, fx = {};
+  const make = () => BL.tess.create({ parent, input, fx, coarse: false });
+  BL.models.setScope("tess-lifecycle");
+  const a = make(), b = make(), before = new Set(); a.liveGeometry(before);
+  const core = rig => rig.root.children[0].children[0].geometry;
+  const shared = core(a) === core(b); a.dispose();
+  const c = make(), held = core(c) === core(b); c.dispose(); b.dispose();
+  const d = make(), after = new Set(); d.liveGeometry(after);
+  const rebuilt = [...after].every(mesh => !before.has(mesh)); d.dispose();
+  BL.models.setScope(null);
+  record("Tess caches: live rigs share all tiers; the last disposal releases them and the next visit rebuilds every tier", shared && held && rebuilt && before.size === 36 && after.size === 36 && parent.children.length === 0,
+    JSON.stringify({ shared, held, rebuilt, tiers: before.size, children: parent.children.length }));
+};
+
+// Regression: one hub variant pinned every other index built by a later scene.
+const variantCacheChecks = BL => {
+  const M = BL.models, builds = new Map(), read = M.variants(i => ({ i, serial: builds.set(i, (builds.get(i) || 0) + 1).get(i) }));
+  M.setScope("hub"); const hub = read();
+  M.setScope("arcade"); const shared = read(), arcade = read(1), next = read("accent");
+  M.setScope("factory"); const held = read("accent");
+  M.release("arcade", ["hub", "factory"]);
+  M.setScope("hub"); const kept = read() === hub;
+  M.setScope("arcade"); const rebuilt = read(1) !== arcade && read(1).serial === 2;
+  const keptNext = read("accent") === next && held === next;
+  M.release("arcade", ["hub"]); M.release("factory", ["hub"]);
+  const releasedNext = read("accent") !== next;
+  M.release("arcade", []); M.release("hub", []); M.setScope(null);
+  record("variant caches: release drops scene-only indices while preserving the hub and next scene, including named indices", shared === hub && kept && rebuilt && keptNext && releasedNext,
+    JSON.stringify({ kept, rebuilt, keptNext, releasedNext }));
+};
+
 // Rule: a room id is validated at every boundary, and the three sizes are one design whose doorway, arrival, button and
 // chairs keep human size while the architecture scales and the table grows to seat 4, 8 and 12.
 const timechainRoomChecks = async () => {
@@ -10241,6 +10294,29 @@ const timechainRoomChecks = async () => {
     rows.every(r => r.radius === 9 * r.s && Math.abs(r.wall - 5.4 * r.s) < 1e-9 && Math.abs(r.screenW - 3 * r.s) < 1e-9 && r.heading === Math.PI && r.symmetric && r.front && r.doorBehind && r.screensReach < 1.4
       && r.arrivalClear && r.buttonReach && r.tableSolid && r.doorShut && r.doorGuided && r.wallSolid && r.guided && r.gear && r.chairs)
       && rows.map(r => r.seats).join() === "4,8,12" && ["door", "arrival", "button", "table"].every(same), JSON.stringify(rows));
+  // These were untracked per-size Maps and eager module constants, retained even after a preview was cancelled.
+  for (const name of ["math", "scene", "models", "jumbotron", "timechain-room-models"])
+    runInNewContext(await readFile(join(root, "src/js/" + name + ".js"), "utf8"), context);
+  const M = context.window.BL.models, RM = context.window.BL.timechainRoomModels;
+  const expected = ["41ff2b0ba1c25d90d10c7d01fe03ebdd33702a46d62966389eaa1dcee6cda89a", "16a2ba26b673e221f8f844b2c95c82ee955eb40fb73483d2a2c700ed33a6cc7d", "c9519700334ea5f7e118a2c34be7146f1fd317686993a9e8b9b270135b7588a2"];
+  const hash = geos => createHash("sha256").update(JSON.stringify(geos.map(({ verts, faces, lines, normals }) => ({ verts, faces, lines, normals })))).digest("hex");
+  M.setScope("hub");
+  const meshes = R.SCALES.map(scale => RM.geometries(scale)), hashes = meshes.map(hash);
+  M.release("timechain", ["hub"]);
+  const rebuilt = R.SCALES.map(scale => RM.geometries(scale));
+  const released = rebuilt.every((geos, i) => geos.every((g, k) => g !== meshes[i][k]) && hash(geos) === expected[i]);
+  record("timechain room caches: previews called from the hub release every size and prop without changing any geometry bytes", released && hashes.every((h, i) => h === expected[i]), JSON.stringify({ released, hashes }));
+  let serial = 0;
+  const read = M.cached(() => ({ serial: ++serial })), outer = M.cached(() => ({})), first = outer(), failure = new Error("scope probe");
+  let threw = false;
+  try { M.withScope("timechain", () => { read(); M.withScope("nested", () => { throw failure; }); }); }
+  catch (error) { threw = error === failure; }
+  const restored = first === outer();
+  const before = await Promise.resolve().then(() => M.withScope("timechain", read));
+  M.release("timechain", ["hub"]);
+  const after = M.withScope("timechain", read);
+  record("model scopes: nested failures restore the caller and explicitly scoped async continuations release independently", threw && restored && before !== after && first === outer(), JSON.stringify({ threw, restored, rebuilt: before !== after }));
+  M.release("timechain", ["hub"]); M.release("hub", []); M.setScope(null);
 };
 // Rule: block and mining readings keep their units and windows, refuse what does not parse or chain, and the reader keeps
 // one request a dataset, backs off, honours Retry-After, keeps its last reading as STALE and cleans up.
@@ -16635,61 +16711,7 @@ const reviewCrowdAndFallbackProof = async () => {
   return {clear,filtered,blocked,hidden,above,cpu,gpu,fetches,gaps};
 };
 
-// Regression: a rest-site probe kept its gorilla, whose groundAt closure held the departed hub's graph.
-const hubScratchChecks = async () => {
-  const source = await readFile(new URL("../src/js/scene-hub.js", import.meta.url), "utf8");
-  const start = source.indexOf("  const CLANKER_REST_SLOPE ="), end = source.indexOf("  const clankerClimbSolidAt =", start);
-  let fire = true, walkable = true, clear = true, thrown = false;
-  const failure = new Error("ground probe"), entry = {}, rows = [];
-  const probe = new Function("clankerFireClear", "clankerGroundPlaneAt", "clankerCylinderClear",
-    source.slice(start, end) + "; return { clear: clankerRestSiteClear, slope: CLANKER_REST_SLOPE };")(
-    () => fire, (_x, _y, _z, _heading, slope) => {
-      if (thrown) throw failure;
-      Object.assign(slope.groundRects.angled, { walkable, groundX: 0, groundZ: 0, uneven: 0 });
-    }, () => clear);
-  const sample = expected => rows.push(probe.clear(entry, 0, 0, 0, 0) === expected && probe.slope.supportEntry === null);
-  sample(true); walkable = false; sample(false); walkable = true; clear = false; sample(false);
-  clear = true; fire = false; sample(false); fire = true; thrown = true;
-  try { probe.clear(entry, 0, 0, 0, 0); rows.push(false); }
-  catch (error) { rows.push(error === failure && probe.slope.supportEntry === null); }
-  record("hub rest probes: valid, blocked and throwing ground queries never retain the gorilla in shared scratch", rows.every(Boolean), JSON.stringify(rows));
-};
-
-// Regression: Tess's hub-tagged cached meshes survived the last rig's departure.
-const tessCacheChecks = BL => {
-  const parent = BL.scene.createNode(), input = { add() {}, remove() {} }, fx = {};
-  const make = () => BL.tess.create({ parent, input, fx, coarse: false });
-  BL.models.setScope("tess-lifecycle");
-  const a = make(), b = make(), before = new Set(); a.liveGeometry(before);
-  const core = rig => rig.root.children[0].children[0].geometry;
-  const shared = core(a) === core(b); a.dispose();
-  const c = make(), held = core(c) === core(b); c.dispose(); b.dispose();
-  const d = make(), after = new Set(); d.liveGeometry(after);
-  const rebuilt = [...after].every(mesh => !before.has(mesh)); d.dispose();
-  BL.models.setScope(null);
-  record("Tess caches: live rigs share all tiers; the last disposal releases them and the next visit rebuilds every tier", shared && held && rebuilt && before.size === 36 && after.size === 36 && parent.children.length === 0,
-    JSON.stringify({ shared, held, rebuilt, tiers: before.size, children: parent.children.length }));
-};
-
-// Regression: one hub variant pinned every other index built by a later scene.
-const variantCacheChecks = BL => {
-  const M = BL.models, builds = new Map(), read = M.variants(i => ({ i, serial: builds.set(i, (builds.get(i) || 0) + 1).get(i) }));
-  M.setScope("hub"); const hub = read();
-  M.setScope("arcade"); const shared = read(), arcade = read(1), next = read("accent");
-  M.setScope("factory"); const held = read("accent");
-  M.release("arcade", ["hub", "factory"]);
-  M.setScope("hub"); const kept = read() === hub;
-  M.setScope("arcade"); const rebuilt = read(1) !== arcade && read(1).serial === 2;
-  const keptNext = read("accent") === next && held === next;
-  M.release("arcade", ["hub"]); M.release("factory", ["hub"]);
-  const releasedNext = read("accent") !== next;
-  M.release("arcade", []); M.release("hub", []); M.setScope(null);
-  record("variant caches: release drops scene-only indices while preserving the hub and next scene, including named indices", shared === hub && kept && rebuilt && keptNext && releasedNext,
-    JSON.stringify({ kept, rebuilt, keptNext, releasedNext }));
-};
-
 const unitChecks = async () => {
-  await hubScratchChecks();
   const rage = await gorillaRageProof();
   record("gorilla rage: distinct rolling hits, only agitating Oogas targeted, held capture through planning and swing, bounded throws, exact expiry, zero health and account/lifecycle cancellation", Object.values(rage).every(Boolean), JSON.stringify(rage));
   const reviewCrowd=await reviewCrowdAndFallbackProof();
@@ -16726,6 +16748,7 @@ record("character visibility source bakes: ownership wrappers share exact immuta
   await raceRigChecks();
   await qualityFramebufferChecks();
   await tileGpuChecks();
+  await hubScratchChecks();
   const north = await northTrajectoryProof();
   record("birds-eye north: worst shortest arcs stay monotonic below the frame step limit and settle before the replay deadline", north.finite && north.monotonic && north.resets && north.variableSteps && north.maxStep < 0.25 && north.residual < 0.001, JSON.stringify(north));
   const northRebase = await northRebaseProof();

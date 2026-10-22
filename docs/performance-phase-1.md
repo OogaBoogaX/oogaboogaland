@@ -65,3 +65,24 @@ The browser keeps only WeakRefs to the ten scene-only cabinet geometries and the
 The combined floor improves 4.14 MiB in these runs. This establishes collection of the unwanted variants; it does not establish the brief's ≤1 MiB total for the hub's own two cabinets and their frame sets. Those remain intentionally used. No geometry or visuals change.
 
 Validation: build/syntax checks clean; unit tier 262/262, including shared hub and incoming-scene preservation, scene-only rebuilding, default and named indices. The hosted DEBUG hub → Arcade → hub sequence has no teardown errors or console output. Return latency varies widely in these runs and is not claimed as a speed improvement; it is measured separately for task 1.7.
+
+## 1.4 — Scoped preparation and Timechain's actual retention
+
+The room cache premise needed correction: `timechain-room-models.js` used untracked per-scale Maps and eager module constants, not the tracked caches described in the audit. Its 18 structural/prop geometries therefore could not be released regardless of async scope.
+
+`models.withScope` restores the caller in `finally` around each synchronous build batch; asynchronous builders explicitly scope later batches. Director preparation uses it, and hosted chunks scope their evaluation by group. Standalone pure-data bundle tooling remains supported. Room caches are lazy tracked getters/variants that always use the Timechain scope, including when the hub asks for a preview or its live geometry. Cancelling a preview releases that scope after disposing its GPU resources. The exterior Sphere belongs to the hub and intentionally stays; it is not interior residency.
+
+The actual doorway creates a preview and cancels it, then a Room 1 visit returns to the hub. WeakRefs are taken from the built graph, with no ownership-changing getter calls during the measurement.
+
+| Retention after hub return | Before | After |
+|---|---:|---:|
+| Preview meshes still alive (18 captured) | 18 | 0 |
+| All non-image room meshes still alive (52 captured) | 40 | 22 |
+| JS heap | 216.84 MiB | 214.64 MiB |
+| Backing storage | 127.91 MiB | 127.92 MiB |
+| Combined floor | 344.75 MiB | 342.56 MiB |
+| Native listeners | 407 | 407 |
+
+The remaining 22 captured room meshes are shared actor geometry already needed by the hub. Exact SHA-256 hashes of positions, faces/materials, lines and normals match before/after at 1×, 1.5× and 2× (5,411 / 7,206 / 9,284 faces). Hashes and raw runs are in the JSON evidence. No visual difference.
+
+Validation: build and syntax checks clean; unit tier 264/264. Hosted cancelled-preview → Room 1 → hub passes DEBUG teardown and has a clean console. PR #265, #267 and #193 patches still apply cleanly. PR #263's exporter change three-way merges without conflicts in temporary files; its picture extraction and standalone bundle evaluation pass against that merged exporter. No pending PR was merged or duplicated.

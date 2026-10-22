@@ -30,7 +30,9 @@ const measure = async (tag) => {
       return { scene: B.scene, quality: B.renderer.quality, gl: B.renderer.stats, frames: B.renderedFrames, timing: B.timing,
         tess: tess ? { meshes: meshes.size, faces: [...meshes].reduce((sum, mesh) => sum + mesh.faces.length, 0) } : null,
         arcade: window.__residencyCabinets ? { cabinets: window.__residencyCabinets.filter(ref => !!ref.deref()).length,
-          frameSets: window.__residencyFrames.filter(ref => !!ref.deref()).length } : null };
+          frameSets: window.__residencyFrames.filter(ref => !!ref.deref()).length } : null,
+        timechain: { preview: window.__residencyPreview?.filter(ref => !!ref.deref()).length ?? null,
+          room: window.__residencyRoom?.filter(ref => !!ref.deref()).length ?? null } };
 
     })()`);
     const row = { tag, ...scene, usage, dom };
@@ -54,6 +56,26 @@ try {
   await b.sleep(3000);
   if (rest) console.log(JSON.stringify({ restSites: await b.evaluate("__ooga.clankers.debugLoungeSpots(__ooga.clankers.list[0]).length") }));
   await measure("boot");
+  if (process.argv.includes("--sphere")) {
+    const preview = await b.evaluate(`new Promise((resolve, reject) => {
+      const B = __ooga, T = BL.scenes.hub.debug.timechainIsland, G = T.gate, S = BL.timechainModels.SPOTS;
+      B.pilot.possess(B.crew.cavemen.get("portlandhodl"));
+      B.pilot.navigate({ position: { x: T.worldX(S.WAIT.x, S.WAIT.z), y: T.place.y, z: T.worldZ(S.WAIT.x, S.WAIT.z) }, yaw: T.place.ry, pitch: 0.1, dist: 4 });
+      G.engage(); G.choose(1); G.press("enter");
+      const start = performance.now();
+      const tick = () => {
+        const prepared = G.debug.prepared;
+        if (prepared) {
+          const geometries = new Set(), walk = node => { if(node.geometry) geometries.add(node.geometry); for(const c of node.children) walk(c); };
+          walk(prepared.built.root); window.__residencyPreview = [...geometries].map(g => new WeakRef(g));
+          G.press("back"); resolve({ meshes: geometries.size, state: G.debug.state });
+        } else if (performance.now() - start > 25000) reject(Error("Sphere preview not prepared: " + G.debug.state));
+        else requestAnimationFrame(tick);
+      }; tick();
+    })`);
+    console.log(JSON.stringify({ preview }));
+    await b.sleep(500);
+  }
   for (let i = 0; i < sequence.length; i++) {
     const [id, place] = sequence[i].split(":");
     const result = await b.evaluate(`new Promise((resolve, reject) => { const start = performance.now(); if(!__ooga.go(${JSON.stringify(id)}, ${JSON.stringify(place || null)})) { reject(Error("Transition refused")); return; } const tick = () => { if (__ooga.scene === ${JSON.stringify(id)} && !__ooga.transitioning) resolve(performance.now() - start); else if(performance.now() - start > 30000) reject(Error("Transition timed out")); else requestAnimationFrame(tick); }; requestAnimationFrame(tick); })`);
@@ -63,6 +85,10 @@ try {
       const A = BL.arcadeModels;
       window.__residencyCabinets = A.CABINETS.filter(c => c.index !== 0 && c.index !== 3).map(c => new WeakRef(A.cabinet(c.index)));
       window.__residencyFrames = [1, 2].map(i => new WeakRef(A.attractFrames(i)));
+    })()`);
+    if (id === "timechain" && process.argv.includes("--sphere")) await b.evaluate(`(() => {
+      const geometries = new Set(), walk = node => { if(node.geometry && !node.geometry.imageSurface) geometries.add(node.geometry); for(const c of node.children) walk(c); };
+      walk(BL.scenes.timechain.root); window.__residencyRoom = [...geometries].map(g => new WeakRef(g));
     })()`);
     await measure(`${i + 1}-${id}`);
     if (id === "factory" && process.argv.includes("--tess-photos")) {
