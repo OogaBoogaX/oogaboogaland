@@ -12,7 +12,7 @@
   "use strict";
   const BL = window.BL = window.BL || {};
   const { hexToRgb, mulberry32 } = BL.math;
-  const { geometry, pushVert, face, box, bevelBox, lathe, glassVessel, ring, merge, cached, variants, makeVox: vox, voxelGeometry: voxGeo, voxCoords, moved, turnedX, turnedY, turnedZ, along, prism } = BL.models;
+  const { geometry, pushVert, face, box, bevelBox, lathe, glassVessel, ring, merge, turn: turnPart, shaded, cached, variants, makeVox: vox, voxelGeometry: voxGeo, voxCoords, moved, turnedX, turnedY, turnedZ, along, prism } = BL.models;
   const blob = (v, { cx, cy, cz, rx, ry, rz, chip = 0, floor = -Infinity, rand, color }) => {
     for (let x = Math.floor(cx - rx); x <= Math.ceil(cx + rx); x++) {
       for (let y = Math.max(floor, Math.floor(cy - ry)); y <= Math.ceil(cy + ry); y++) {
@@ -1501,6 +1501,34 @@
     }
     return geometry;
   });
+  // The arcade hall's flame (`arcadeModels.blaze`), copied for the plaza's fire pit: a fat teardrop licking up to a
+  // point with three smaller tongues leaning out round its foot, the whole twisted a little as it rises, white-gold
+  // at the root through yellow and orange to red at the tips. Smooth and unshadowed, its tips sway; the hub stands
+  // it in the pit and flickers it. Built at the hall's size and scaled to the pit's.
+  const FIRE_BLAZE_INKS = ["#fff2b8", "#ffd24a", "#ffa030", "#ff6420"];
+  const fireBlaze = cached(() => {
+    const ink = (t) => FIRE_BLAZE_INKS[Math.min(3, Math.floor(t * 4))];
+    const lick = (h, r) => turnPart([[0, 0], [r * 0.72, h * 0.05], [r, h * 0.2], [r * 0.9, h * 0.38], [r * 0.62, h * 0.58], [r * 0.3, h * 0.8], [0, h]], 8, ink, 0.9);
+    const parts = [lick(0.5, 0.13)];
+    for (let k = 0; k < 3; k++) parts.push(turnedY(moved(turnedZ(lick(0.3, 0.075), -0.45), 0.05, 0.02, 0), k * 2.09 + 0.5));
+    const geo = noShadow(shaded(parts)), v = geo.verts, S = 1.8;
+    for (let i = 0; i < v.length; i += 3) {
+      const a = v[i + 1] * 1.6, c = Math.cos(a), s = Math.sin(a), x = v[i] * S, z = v[i + 2] * S;
+      v[i + 1] *= S;
+      v[i] = x * c + z * s;
+      v[i + 2] = -x * s + z * c;
+    }
+    geo.sway = 0.15;
+    // ooga ignition boxes along the scaled flame's body, as the boxed flame carried them.
+    geo.fireBoxes = new Float32Array([
+      0, 0.09, 0, 0.19, 0.09, 0.19,
+      0, 0.27, 0, 0.23, 0.09, 0.23,
+      0, 0.45, 0, 0.21, 0.09, 0.21,
+      0, 0.63, 0, 0.15, 0.09, 0.15,
+      0, 0.81, 0, 0.07, 0.09, 0.07
+    ]);
+    return geo;
+  });
   const WINGS = [["#f2c94c", "#e04a3a"], ["#f3efe4", "#6f9fca"]];
   const butterfly = variants((i) => {
     const [wing, spot] = WINGS[i];
@@ -1587,5 +1615,5 @@
       ...[-0.8, 0.8].map(brace)
     );
   });
-  BL.hubModels = { SIGN_GLYPHS, SIGN_ICONS, AMMO_BANANA, jetpack, jetFlame, caveMouthRim, mirrorPanel, matrixPrisonBars, sealedCaveFace, matrixLeverPlate, matrixLeverLights, matrixLeverHub, matrixLeverArm, matrixLeverGrip, matrixLeverLabels, matrixGlyph, caveSign, postSign, CAVE_SIGN_WIDTH, CAVE_SIGN_HEIGHT, gate, caveShelves, entropyLab, bedroll, tree, bush, rock, breakableRock, voxelRock, puff, leafy, pointedLeaf, flower, FLOWER_INKS, limb, padNormals, flatInto, canopySupport, withJungle, liana, sagPoints, sprig, garland, bamboo, lashing, log, thatch, altarSlab, altarBlock, woodCrate, barrel, flowerTuft, torch, grass, lawnTuft, firepit, fireFlame, butterfly, firefly, ember, vine, cloud, ladder, dock, TREE_HEIGHT };
+  BL.hubModels = { SIGN_GLYPHS, SIGN_ICONS, AMMO_BANANA, jetpack, jetFlame, caveMouthRim, mirrorPanel, matrixPrisonBars, sealedCaveFace, matrixLeverPlate, matrixLeverLights, matrixLeverHub, matrixLeverArm, matrixLeverGrip, matrixLeverLabels, matrixGlyph, caveSign, postSign, CAVE_SIGN_WIDTH, CAVE_SIGN_HEIGHT, gate, caveShelves, entropyLab, bedroll, tree, bush, rock, breakableRock, voxelRock, puff, leafy, pointedLeaf, flower, FLOWER_INKS, limb, padNormals, flatInto, canopySupport, withJungle, liana, sagPoints, sprig, garland, bamboo, lashing, log, thatch, altarSlab, altarBlock, woodCrate, barrel, flowerTuft, torch, grass, lawnTuft, firepit, fireFlame, fireBlaze, butterfly, firefly, ember, vine, cloud, ladder, dock, TREE_HEIGHT };
 })();

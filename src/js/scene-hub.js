@@ -231,7 +231,7 @@
   };
 
   // One visit's state: created in enter, dropped in leave.
-  let jumbotronSpot, oogatronUnsub, renderer, game, world, go, lootEnabled, testBananas, root, camera, overlayCanvas, island, terrainRampRoof, pathNode, altar, hud, hooks, input, pilot, fx, cameraCover, bananaCover, solids, rockGuides, objectGuides, sightGuides, bananaGuides, pileGuides, platformGuides, mirrorGuides, pile, crew, crates, critters, clock, presets, entering, mirrorCave, matrixCave, matrixControl, gateRain, fire, headquarters, dockStairs, jumbotron, positionDebug, remotes, npcSync;
+  let jumbotronSpot, oogatronUnsub, renderer, game, world, go, lootEnabled, testBananas, root, camera, overlayCanvas, island, terrainRampRoof, pathNode, altar, hud, hooks, input, pilot, fx, cameraCover, bananaCover, solids, rockGuides, objectGuides, sightGuides, bananaGuides, pileGuides, platformGuides, mirrorGuides, pile, crew, crates, critters, clock, presets, entering, mirrorCave, matrixCave, matrixControl, gateRain, fireBlaze, fire, headquarters, dockStairs, jumbotron, positionDebug, remotes, npcSync;
   let magazine, magazineState, breakables, clankers, clankerPlay, clankerMeshes, clankerPartOwners, grabSupportEntry = null, entropyLab, chalkboard, factoryMouth = null, arcadeMouth = null, bcaMouth = null, glCanvas = null;
   const dragHand = new Float64Array(3), dragFoot = new Float64Array(3);
   const THROW_SWING_TIME = 0.28, THROW_SETTLE_TIME = 0.2, THROW_CARRY_SPEED_MAX = 8;
@@ -1702,6 +1702,12 @@
       const hearth = headquarters.hearth;
       hearth.node.glow = LAMP_OFF + LAMP.fire.glow + Math.sin(elapsed * 11 + hearth.phase) * 0.15;
     }
+    if (fireBlaze) {
+      // The plaza's fire pit licks up and settles on its own clock, as the arcade hall's flames do.
+      const k = Math.sin(elapsed * 11) * 0.07 + Math.sin(elapsed * 17.3 + 1.1) * 0.05;
+      fireBlaze.scale.y = 1 + k;
+      fireBlaze.scale.x = fireBlaze.scale.z = 1 - k * 0.4;
+    }
     if (!keyHit && headquarters && camera.position.y < -1 && cameraCaveIndex && CAMERA_OPENINGS[cameraCaveIndex - 1].headquarters) {
       const underground = headquarters.sources;
       // The upper hearth cannot cast through the rock into the basement.
@@ -1750,8 +1756,10 @@
     }
     if (!p) throw new Error("No clear spot for the fire pit");
     const pit = place(hubModels.firepit(), p.x, p.z, 0, 0, "firepit", 1.2);
-    const flame = createNode({ geometry: hubModels.fireFlame(), matrixEmissiveLiving: true });
+    // The arcade hall's flame stands in the plaza's pit, its tips swaying and its body flickered each frame.
+    const flame = createNode({ geometry: hubModels.fireBlaze(), matrixEmissiveLiving: true, sightHidden: true });
     addChild(pit, flame);
+    fireBlaze = flame;
     fireHazards.push({ node: flame, pit, x: p.x, y: pit.position.y, z: p.z, avoidRadius: FIRE_AVOID_RADIUS });
     addLamp(flame, LAMP.fire, p.x, 0.6, p.z, true, 3, "firepit").always = true;
     claim(p.x, p.z, 1.4);
@@ -11999,6 +12007,7 @@
     targets.length = placed.length = claimed.length = scenery.length = sceneryClaims.length = matrixInteriors.length = matrixGates.length = sealedCaves.length = clouds.length = cloudObstacles.length = lamps.length = pilePosts.length = fireSeats.length = sleepers.length = labels.length = signDetails.length = spots.length = chillSpots.length = headquartersRimLintels.length = climbMasonry.length = props.length = meadowPalms.length = 0;
     cloudRandom = null;
     fireHazards.length = 0;
+    fireBlaze = null;
     clankerFireReachable = null;
     workZones.length = entranceZones.length = 0;
     closedCaveZones.length = 0;
