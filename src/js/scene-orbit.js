@@ -23,9 +23,11 @@
 (() => {
   "use strict";
   const BL = window.BL = window.BL || {};
-  const { math, models, contributors, donations, terrain, hubModels, dropModels, rocketModels, rocketParts, rocket: rocketMod, rocketHud, rocketAudio, daylight, pile: pileMod, game: gameMod, hud: hudMod, interact: interactMod, controls: controlsMod, fx: fxMod } = BL;
+  const { math, models, contributors, donations, terrain, hubModels, dropModels, rocketParts, rocket: rocketMod, daylight, pile: pileMod, game: gameMod, hud: hudMod, interact: interactMod, controls: controlsMod, fx: fxMod } = BL;
   const { clamp, lerp, damp, quat, mulberry32, fnv1a } = math;
   const { createNode, addChild, removeChild, createCamera, addTween, stepTweens, tweenCount, traverseVisible } = BL.scene;
+  // Deferred on a hosted page (the orbit group): read once `prepare` has loaded them.
+  let rocketModels, rocketHud, rocketAudio;
   const { CONFETTI } = fxMod;
   const { R, CY, GM, SEA, SPACE_ALT, ORBIT_ALT } = rocketMod;
   // TOP is the Sky Top (ORBIT_ALT) - the goal of a flight, not true orbit.
@@ -1879,6 +1881,7 @@
   };
 
   const enter = (ctx) => {
+    ({ rocketModels, rocketHud, rocketAudio } = BL);
     ({ renderer, game, world, go, lootEnabled, testBananas } = ctx);
     home = ctx.from === "arcade" ? "arcade" : "hub";
     camera = createCamera({ fov: 50, near: 0.3, far: 1600 });
@@ -2134,5 +2137,6 @@
   };
   Object.assign(orbitScene, { enter, update, overlay, onDonation, onKey, onLootCleared, leave, stats, liveGeometry });
   BL.scenes = BL.scenes || {};
+  orbitScene.prepare = () => { const loading = BL.deferred.load("orbit"); return loading ? loading.then(() => null) : null; };
   BL.scenes.orbit = orbitScene;
 })();

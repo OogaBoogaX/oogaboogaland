@@ -1,18 +1,23 @@
 // Code a hosted page fetches only once it is needed: the Timechain rooms; DSB Land (its terrain, town, interiors, menus
 // and their art, ~0.9 MB gzipped), which ₿IFRÖST's chamber also builds a picture of; the arcade's games (their rules,
 // the retro cabinets and the hall's sound), loaded by the arcade and every game in it; the poker room (all but its
-// themes, which tint the island's ₿IFRÖST window), loaded by the room and ₿IFRÖST; and Ooga Drop's diver and sound (not its
-// models, whose canopy Ooga Orbit's capsule lands under). `npm run site` moves each group's modules out of the page into
-// js/<group>-<hash>.js and names the file here (`BL.deferredScripts`, written ahead of every module); the portable
-// single-file page and the source tree carry the modules already, so `load` finds them present and answers at once
-// with null, with no request. Otherwise it adds one same-origin script (the page's policy allows 'self'), bounded by
-// TIMEOUT_MS; a failure or timeout rejects and is forgotten, so the next `load` tries again.
+// themes, which tint the island's ₿IFRÖST window), loaded by the room and ₿IFRÖST; Ooga Drop's diver and sound (not its
+// models, whose canopy Ooga Orbit's capsule lands under); Ooga Rally's tracks, racers, items, HUD and sound (not its
+// models, which Drop's and Orbit's build from); Ooga Mine's HUD, sound and crew (not its sim, whose saved run a reset
+// clears, nor its models, which the Factory's cart is built from); and Ooga Orbit's models, HUD and sound (not its
+// flight, whose constants the scene reads at load, nor its parts, which validate saves). Each game loads its group in
+// `prepare`. `npm run site` moves each group's modules out of the page into js/<group>-<hash>.js and names the file
+// here (`BL.deferredScripts`, written ahead of every module); the portable single-file page and the source tree carry
+// the modules already, so `load` finds them present and answers at once with null, with no request. Otherwise it adds
+// one same-origin script (the page's policy allows 'self'), bounded by TIMEOUT_MS; a failure or timeout rejects and is
+// forgotten, so the next `load` tries again.
 (() => {
   "use strict";
   const BL = window.BL = window.BL || {};
   const TIMEOUT_MS = 20000;
   // How each group shows it has arrived: the module that runs last in it.
-  const PRESENT = { timechain: () => !!BL.timechainInterior, dsb: () => !!BL.dsbCollision, arcade: () => !!BL.carnivalAudio, poker: () => !!BL.pokerHud, drop: () => !!BL.dropAudio };
+  const PRESENT = { timechain: () => !!BL.timechainInterior, dsb: () => !!BL.dsbCollision, arcade: () => !!BL.carnivalAudio, poker: () => !!BL.pokerHud, drop: () => !!BL.dropAudio,
+    race: () => !!BL.raceAudio, mine: () => !!BL.mineCrew, orbit: () => !!BL.rocketAudio };
   const loading = new Map();
   const load = (group) => {
     if (PRESENT[group]()) return null;
