@@ -351,6 +351,11 @@
       entry.last = cacheScope;
       if (cacheScope !== null) entry.scenes.add(cacheScope);
       scopedCaches.add(entry);
+    }, clear: () => {
+      entry.drop();
+      entry.scenes.clear();
+      entry.last = undefined;
+      scopedCaches.delete(entry);
     } };
     return entry;
   };
@@ -358,16 +363,16 @@
   const release = (id, keep) => {
     for (const entry of scopedCaches) {
       if (!entry.scenes.has(id) || keep.some((k) => entry.scenes.has(k))) continue;
-      entry.drop();
-      entry.scenes.clear();
-      entry.last = undefined;
-      scopedCaches.delete(entry);
+      entry.clear();
     }
   };
   const cached = (build) => {
     let value = null;
     const entry = track(() => { value = null; });
-    return () => { entry.use(); return value || (value = build()); };
+    const read = () => { entry.use(); return value || (value = build()); };
+    // Owners with a shorter lifetime than their scene scope can release the same tracked entry explicitly.
+    read.clear = entry.clear;
+    return read;
   };
   const variants = (build) => {
     const cache = [];

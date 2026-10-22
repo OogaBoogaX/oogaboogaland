@@ -24,7 +24,12 @@ const measure = async (tag) => {
   try {
     for (let i = 0; i < 3; i++) await b.send("HeapProfiler.collectGarbage");
     const usage = (await b.send("Runtime.getHeapUsage")).result, dom = (await b.send("Memory.getDOMCounters")).result;
-    const scene = await b.evaluate("({scene: __ooga.scene, quality: __ooga.renderer.quality, gl: __ooga.renderer.stats, frames: __ooga.renderedFrames, timing: __ooga.timing})");
+    const scene = await b.evaluate(`(() => {
+      const B = __ooga, tess = B.scene === "factory" ? B.factory.greeter : null, meshes = new Set();
+      if (tess) tess.liveGeometry(meshes);
+      return { scene: B.scene, quality: B.renderer.quality, gl: B.renderer.stats, frames: B.renderedFrames, timing: B.timing,
+        tess: tess ? { meshes: meshes.size, faces: [...meshes].reduce((sum, mesh) => sum + mesh.faces.length, 0) } : null };
+    })()`);
     const row = { tag, ...scene, usage, dom };
     rows.push(row); console.log(JSON.stringify(row));
     if (snapshots && tag !== "boot" && (!process.env.SNAPSHOT_TAG || process.env.SNAPSHOT_TAG === tag)) {
@@ -51,6 +56,21 @@ try {
     const result = await b.evaluate(`new Promise((resolve, reject) => { const start = performance.now(); if(!__ooga.go(${JSON.stringify(id)}, ${JSON.stringify(place || null)})) { reject(Error("Transition refused")); return; } const tick = () => { if (__ooga.scene === ${JSON.stringify(id)} && !__ooga.transitioning) resolve(performance.now() - start); else if(performance.now() - start > 30000) reject(Error("Transition timed out")); else requestAnimationFrame(tick); }; requestAnimationFrame(tick); })`);
     console.log(JSON.stringify({ travel: id, ms: result }));
     await b.sleep(2500); await measure(`${i + 1}-${id}`);
+    if (id === "factory" && process.argv.includes("--tess-photos")) {
+      await b.evaluate(`(() => {
+        const B = __ooga, S = BL.scenes.factory, g = B.factory.greeter;
+        window.__residencyPhoto = { update: S.update, position: { ...B.camera.position }, target: { ...B.camera.target } };
+        S.update = () => {};
+        Object.assign(B.camera.position, { x: g.root.position.x + 0.15, y: g.root.position.y + 0.12, z: g.root.position.z + 1.6 });
+        Object.assign(B.camera.target, g.root.position); g.root.visible = true;
+      })()`);
+      for (const quality of ["high", "medium", "low"]) {
+        await b.evaluate(`__ooga.renderer.setQuality(${JSON.stringify(quality)}); for(let n=0;n<3;n++) __ooga.factory.greeter.update(0,0)`);
+        await b.sleep(100); await b.screenshot(join(out, `${label}-tess-${quality}.png`));
+      }
+      await b.evaluate(`(() => { const B = __ooga, held = window.__residencyPhoto; BL.scenes.factory.update = held.update;
+        Object.assign(B.camera.position, held.position); Object.assign(B.camera.target, held.target); delete window.__residencyPhoto; })()`);
+    }
   }
 } finally {
   const evidence = { label, at: new Date().toISOString(), pageSha256: createHash("sha256").update(readFileSync(join(root, "_site/index.html"))).digest("hex"), rows, logs: b?.logs || [] };

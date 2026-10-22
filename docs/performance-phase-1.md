@@ -25,3 +25,24 @@ The idle control did not reproduce the reported leak: Factory JS heap was 242.65
 The combined reduction is 17.96 MiB; neither heap figure alone should be presented as an 18 MiB JS-heap reduction. No visual or gameplay change. `solid-props.js` has no module-level strong actor/owner cache: its geometry cache is a WeakMap and visit-owned entries are cleared by `dispose`.
 
 Validation: `node --check` on changed JavaScript; unit tier 260/260. The focused hosted hub → Factory transition passes the existing DEBUG teardown assertions with a clean console. The regression also covers accepted, blocked, fire-rejected and throwing rest probes.
+
+## 1.2 — Tess cache ownership
+
+Tess already used `models.cached`; the problem was the hub scope keeping its populated getters alive. Tracked entries now expose `clear`, and a cached getter forwards it. Tess counts live rigs and clears all seven private caches after the last rig is disposed. Multiple live rigs continue to share their tiers. The fine ring no longer builds 576 bevelled ticks only 0.35 mm wide; the larger marks, globe, animation and tier selection are unchanged.
+
+Factory always creates a Tess rig, even before she is approached. Its snapshot is therefore not a Tess-free case. The Lab after hub → Factory → Lab is the zero-instance measurement.
+
+| Measurement | Before | After |
+|---|---:|---:|
+| Lab JS heap | 212.27 MiB | 182.62 MiB |
+| Lab backing storage | 88.13 MiB | 88.07 MiB |
+| Lab combined floor | 300.40 MiB | 270.69 MiB |
+| Tess prepared faces in Factory | 212,300 | 197,324 |
+| Tess prepared geometries | 36 | 36 |
+| Lab native listeners | 371 | 371 |
+
+The combined reduction after Tess leaves is 29.71 MiB. Factory retains the live rig by design; its combined floor falls about 3.54 MiB from removing subpixel ticks. The lifetime regression proves that disposing one rig preserves another rig's shared geometry, while disposing the last releases all tiers before the next rig rebuilds them.
+
+Screenshots at high, medium and low are saved as `untracked/performance/phase-1-2-{before,after}-tess-{high,medium,low}.png`. The guide patrols between captures, so backgrounds and orientations differ; these are visual inspection images, not pixel-identical comparisons. The existing low tier is unchanged. The only geometry removed from high/medium is the fine subpixel ring ticks.
+
+Validation: build and syntax checks clean; unit tier 261/261; hosted DEBUG hub → Factory → Lab passes teardown with a clean console. Renderer interfaces and the open GPU/deferral PRs are untouched.

@@ -16655,6 +16655,22 @@ const hubScratchChecks = async () => {
   record("hub rest probes: valid, blocked and throwing ground queries never retain the gorilla in shared scratch", rows.every(Boolean), JSON.stringify(rows));
 };
 
+// Regression: Tess's hub-tagged cached meshes survived the last rig's departure.
+const tessCacheChecks = BL => {
+  const parent = BL.scene.createNode(), input = { add() {}, remove() {} }, fx = {};
+  const make = () => BL.tess.create({ parent, input, fx, coarse: false });
+  BL.models.setScope("tess-lifecycle");
+  const a = make(), b = make(), before = new Set(); a.liveGeometry(before);
+  const core = rig => rig.root.children[0].children[0].geometry;
+  const shared = core(a) === core(b); a.dispose();
+  const c = make(), held = core(c) === core(b); c.dispose(); b.dispose();
+  const d = make(), after = new Set(); d.liveGeometry(after);
+  const rebuilt = [...after].every(mesh => !before.has(mesh)); d.dispose();
+  BL.models.setScope(null);
+  record("Tess caches: live rigs share all tiers; the last disposal releases them and the next visit rebuilds every tier", shared && held && rebuilt && before.size === 36 && after.size === 36 && parent.children.length === 0,
+    JSON.stringify({ shared, held, rebuilt, tiers: before.size, children: parent.children.length }));
+};
+
 const unitChecks = async () => {
   await hubScratchChecks();
   const rage = await gorillaRageProof();
@@ -16757,6 +16773,7 @@ record("character visibility source bakes: ownership wrappers share exact immuta
     }
   }
   const BL = globalThis.BL;
+  tessCacheChecks(BL);
   if(ARGS.includes("water-baseline")){
     if(!process.env.DSB_BASELINE)throw Error("Provide the unmodified checkpoint source directory");
     for(const name of ["dsb-geography.js","dsb-olympus.js","dsb-water.js"])new Function(readFileSync(join(process.env.DSB_BASELINE,name),"utf8"))();
