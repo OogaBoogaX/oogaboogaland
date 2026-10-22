@@ -48,8 +48,11 @@
 (() => {
   "use strict";
   const BL = window.BL = window.BL || {};
-  const { math, models, mineRigs: R, mineSim, mineModels: MM, mineHud, mineAudio, mineCrew, donations, daylight, contributors,
+  const { math, models, mineRigs: R, mineSim, mineModels: MM, donations, daylight, contributors,
     game: gameMod, hud: hudMod, interact: interactMod, pilot: pilotMod, fx: fxMod } = BL;
+  // Deferred on a hosted page (the mine group): read once `prepare` has loaded them. The sim stays, since a reset clears
+  // its saved run.
+  let mineHud, mineAudio, mineCrew;
   const { clamp, mat4 } = math;
   const { createNode, addChild, removeChild, createCamera, stepTweens, tweenCount, traverseVisible } = BL.scene;
   const L = MM.LAYOUT;
@@ -2024,6 +2027,7 @@
   // ---- the visit ----
 
   const enter = (ctx) => {
+    ({ mineHud, mineAudio, mineCrew } = BL);
     ({ renderer, game, world, go } = ctx);
     home = ctx.from === "arcade" ? "arcade" : "hub";
     camera = createCamera({ fov: 58, near: 0.2, far: 120 });
@@ -2351,5 +2355,6 @@
     }
   };
   BL.scenes = BL.scenes || {};
+  mineScene.prepare = () => { const loading = BL.deferred.load("mine"); return loading ? loading.then(() => null) : null; };
   BL.scenes.mine = mineScene;
 })();

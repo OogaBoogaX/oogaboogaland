@@ -9,7 +9,9 @@
 (() => {
   "use strict";
   const BL = window.BL = window.BL || {};
-  const { math, models, contributors, donations, pile: pileMod, game: gameMod, hud: hudMod, interact: interactMod, controls: controlsMod, fx: fxMod, raceModels, raceTrack, racers: racersMod, raceItems, raceHud, raceAudio } = BL;
+  const { math, models, contributors, donations, pile: pileMod, game: gameMod, hud: hudMod, interact: interactMod, controls: controlsMod, fx: fxMod, raceModels } = BL;
+  // Deferred on a hosted page (the race group): read once `prepare` has loaded them.
+  let raceTrack, racersMod, raceItems, raceHud, raceAudio;
   const { clamp, lerp, damp } = math;
   const { createNode, addChild, removeChild, createCamera, stepTweens, tweenCount, traverseVisible } = BL.scene;
   const { CONFETTI } = fxMod;
@@ -761,6 +763,7 @@
   };
 
   const enter = (ctx) => {
+    ({ raceTrack, racers: racersMod, raceItems, raceHud, raceAudio } = BL);
     ({ renderer, game, world, go, lootEnabled, testBananas } = ctx);
     home = ctx.from === "arcade" ? "arcade" : "hub";
     camera = createCamera({ fov: 50, near: 0.3, far: 280 });
@@ -963,5 +966,6 @@
   };
   Object.assign(raceScene, { enter, update, overlay, onDonation, onKey, onLootCleared, leave, stats, liveGeometry });
   BL.scenes = BL.scenes || {};
+  raceScene.prepare = () => { const loading = BL.deferred.load("race"); return loading ? loading.then(() => null) : null; };
   BL.scenes.race = raceScene;
 })();
