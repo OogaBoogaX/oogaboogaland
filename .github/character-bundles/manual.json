@@ -12,6 +12,15 @@
       "base": null,
       "hash": "d49aa270603513fd46e6754baf559d37965295158b3b362b694a3972ead1e937",
       "lane": "manual"
+    },
+    {
+      "pr": 266,
+      "head": "6bb69c5a881ed0a80f8a4e5c56be4a737da3da89",
+      "author": "stacktoshi",
+      "path": "src/characters/stacktoshi.js",
+      "base": null,
+      "hash": "35ca6e3aa66625bf3556889f32d162e7b3ef0091606bc78589b847312d33e4ab",
+      "lane": "manual"
     }
   ]
 }
