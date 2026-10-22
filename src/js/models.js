@@ -375,9 +375,13 @@
     return read;
   };
   const variants = (build) => {
-    const cache = [];
-    const entry = track(() => { cache.length = 0; });
-    return (i = 0) => { entry.use(); return cache[i] || (cache[i] = build(i)); };
+    const cache = [], entries = [];
+    return (i = 0) => {
+      // One hub cabinet must not make every cabinet built by the Arcade a hub resident.
+      const entry = entries[i] || (entries[i] = track(() => { cache[i] = null; }));
+      entry.use();
+      return cache[i] || (cache[i] = build(i));
+    };
   };
   const noShadow = (geo) => {
     geo.castShadow = false;

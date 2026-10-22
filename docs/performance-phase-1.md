@@ -46,3 +46,22 @@ The combined reduction after Tess leaves is 29.71 MiB. Factory retains the live 
 Screenshots at high, medium and low are saved as `untracked/performance/phase-1-2-{before,after}-tess-{high,medium,low}.png`. The guide patrols between captures, so backgrounds and orientations differ; these are visual inspection images, not pixel-identical comparisons. The existing low tier is unchanged. The only geometry removed from high/medium is the fine subpixel ring ticks.
 
 Validation: build and syntax checks clean; unit tier 261/261; hosted DEBUG hub → Factory → Lab passes teardown with a clean console. Renderer interfaces and the open GPU/deferral PRs are untouched.
+
+## 1.3 — Per-index model variants
+
+`models.variants` now lazily tracks each index and clears only that index's payload. The hub's indices 0 and 3 no longer pin the other ten Arcade cabinets or attract-frame sets 1 and 2. The same change covers every `variants` user, including shared hub/scene kits in hub-models, agent, bifrost-models and race-models; callers keep their existing API and stable identities for retained indices.
+
+The browser keeps only WeakRefs to the ten scene-only cabinet geometries and the two scene-only attract-frame arrays during Arcade → hub. The native GC runs before dereferencing them, so the diagnostic does not keep them alive.
+
+| Hub after Arcade | Before | After |
+|---|---:|---:|
+| Arcade-only cabinets still alive | 10 | 0 |
+| Arcade-only attract-frame sets still alive | 2 | 0 |
+| JS heap | 228.12 MiB | 223.49 MiB |
+| Backing storage | 132.27 MiB | 132.75 MiB |
+| Combined floor | 360.38 MiB | 356.25 MiB |
+| Native listeners | 407 | 407 |
+
+The combined floor improves 4.14 MiB in these runs. This establishes collection of the unwanted variants; it does not establish the brief's ≤1 MiB total for the hub's own two cabinets and their frame sets. Those remain intentionally used. No geometry or visuals change.
+
+Validation: build/syntax checks clean; unit tier 262/262, including shared hub and incoming-scene preservation, scene-only rebuilding, default and named indices. The hosted DEBUG hub → Arcade → hub sequence has no teardown errors or console output. Return latency varies widely in these runs and is not claimed as a speed improvement; it is measured separately for task 1.7.

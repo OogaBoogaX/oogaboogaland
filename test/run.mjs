@@ -16671,6 +16671,23 @@ const tessCacheChecks = BL => {
     JSON.stringify({ shared, held, rebuilt, tiers: before.size, children: parent.children.length }));
 };
 
+// Regression: one hub variant pinned every other index built by a later scene.
+const variantCacheChecks = BL => {
+  const M = BL.models, builds = new Map(), read = M.variants(i => ({ i, serial: builds.set(i, (builds.get(i) || 0) + 1).get(i) }));
+  M.setScope("hub"); const hub = read();
+  M.setScope("arcade"); const shared = read(), arcade = read(1), next = read("accent");
+  M.setScope("factory"); const held = read("accent");
+  M.release("arcade", ["hub", "factory"]);
+  M.setScope("hub"); const kept = read() === hub;
+  M.setScope("arcade"); const rebuilt = read(1) !== arcade && read(1).serial === 2;
+  const keptNext = read("accent") === next && held === next;
+  M.release("arcade", ["hub"]); M.release("factory", ["hub"]);
+  const releasedNext = read("accent") !== next;
+  M.release("arcade", []); M.release("hub", []); M.setScope(null);
+  record("variant caches: release drops scene-only indices while preserving the hub and next scene, including named indices", shared === hub && kept && rebuilt && keptNext && releasedNext,
+    JSON.stringify({ kept, rebuilt, keptNext, releasedNext }));
+};
+
 const unitChecks = async () => {
   await hubScratchChecks();
   const rage = await gorillaRageProof();
@@ -16774,6 +16791,7 @@ record("character visibility source bakes: ownership wrappers share exact immuta
   }
   const BL = globalThis.BL;
   tessCacheChecks(BL);
+  variantCacheChecks(BL);
   if(ARGS.includes("water-baseline")){
     if(!process.env.DSB_BASELINE)throw Error("Provide the unmodified checkpoint source directory");
     for(const name of ["dsb-geography.js","dsb-olympus.js","dsb-water.js"])new Function(readFileSync(join(process.env.DSB_BASELINE,name),"utf8"))();
