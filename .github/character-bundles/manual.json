@@ -21,6 +21,15 @@
       "base": null,
       "hash": "35ca6e3aa66625bf3556889f32d162e7b3ef0091606bc78589b847312d33e4ab",
       "lane": "manual"
+    },
+    {
+      "pr": 271,
+      "head": "4c9a0701e53bc8f179dacef076293cdad11d9b9d",
+      "author": "LiranCohen",
+      "path": "src/characters/itsLiran.js",
+      "base": null,
+      "hash": "5fa0f3725a7d21ac7f8ea029252485bc1772ebec8c503bc90c2d5d0ef74c6a26",
+      "lane": "manual"
     }
   ]
 }
