@@ -2174,6 +2174,3254 @@
         }
       ],
       "logs": []
+    },
+    {
+      "label": "phase-1-6-before",
+      "completed": true,
+      "failure": null,
+      "environment": {
+        "agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/155.0.0.0 Safari/537.36",
+        "memory": 32,
+        "dpr": 1,
+        "gpu": "ANGLE (Apple, ANGLE Metal Renderer: Apple M1 Pro, Unspecified Version)"
+      },
+      "at": "2026-10-22T22:54:00.967Z",
+      "pageSha256": "9b449d4116ea66f66fa536586c935b54930f74e112172bfebc4d2c5b6e655c3b",
+      "rows": [
+        {
+          "tag": "boot",
+          "scene": "hub",
+          "quality": "high",
+          "gl": {
+            "waterTextures": 0,
+            "records": 924,
+            "active": 893,
+            "mirrorResources": 4,
+            "imageTextures": 1,
+            "rippleBodyTextures": 0,
+            "shadowResources": 4,
+            "shadowSize": 2048,
+            "shadowPassCount": 191,
+            "shadowFinite": true,
+            "shadowDraws": 96,
+            "shadowStatic": 351,
+            "shadowStaticRebuilds": 5,
+            "culled": 1062,
+            "drawn": 37367,
+            "suppressed": 0,
+            "rippleSurfaces": 1,
+            "rippleWaves": 3
+          },
+          "frames": 191,
+          "timing": {
+            "boot": 242,
+            "renderer": 261,
+            "island": 1519,
+            "props": 2491,
+            "rockGuides": 3422,
+            "pile": 3510,
+            "cavemen": 3708,
+            "guides": 3830,
+            "visibility-start": 3878,
+            "visibility": 3879,
+            "covered-view-start": 3879,
+            "covered-view": 4298,
+            "ready": 4299,
+            "frame1": 4300,
+            "drawn": 4722,
+            "frame2": 4752,
+            "frame3": 4780
+          },
+          "tess": null,
+          "arcade": null,
+          "timechain": {
+            "preview": null,
+            "room": null
+          },
+          "ui": null,
+          "usage": {
+            "usedSize": 250257916,
+            "totalSize": 254623744,
+            "embedderHeapUsedSize": 6200288,
+            "backingStorageSize": 134549259
+          },
+          "dom": {
+            "documents": 1,
+            "nodes": 10035,
+            "jsEventListeners": 407
+          },
+          "detached": null,
+          "listeners": null
+        },
+        {
+          "tag": "1-lab",
+          "scene": "lab",
+          "quality": "medium",
+          "gl": {
+            "waterTextures": 0,
+            "records": 262,
+            "active": 262,
+            "mirrorResources": 0,
+            "imageTextures": 0,
+            "rippleBodyTextures": 0,
+            "shadowResources": 4,
+            "shadowSize": 1024,
+            "shadowPassCount": 251,
+            "shadowFinite": true,
+            "shadowDraws": 169,
+            "shadowStatic": 78,
+            "shadowStaticRebuilds": 10,
+            "culled": 106,
+            "drawn": 784,
+            "suppressed": 0,
+            "rippleSurfaces": 0,
+            "rippleWaves": 0
+          },
+          "frames": 251,
+          "timing": {
+            "boot": 242,
+            "renderer": 261,
+            "island": 1519,
+            "props": 2491,
+            "rockGuides": 3422,
+            "guides": 3830,
+            "covered-view-start": 3879,
+            "covered-view": 4298,
+            "ready": 4299,
+            "frame1": 4300,
+            "drawn": 4722,
+            "frame2": 4752,
+            "frame3": 4780,
+            "room": 15697,
+            "pile": 15702,
+            "cavemen": 15720,
+            "visibility-start": 15722,
+            "visibility": 15722
+          },
+          "tess": null,
+          "arcade": null,
+          "timechain": {
+            "preview": null,
+            "room": null
+          },
+          "ui": null,
+          "usage": {
+            "usedSize": 189165428,
+            "totalSize": 192249856,
+            "embedderHeapUsedSize": 6097592,
+            "backingStorageSize": 92362471
+          },
+          "dom": {
+            "documents": 1,
+            "nodes": 9995,
+            "jsEventListeners": 371
+          },
+          "detached": null,
+          "listeners": null
+        },
+        {
+          "tag": "2-hub",
+          "scene": "hub",
+          "quality": "low",
+          "gl": {
+            "waterTextures": 0,
+            "records": 919,
+            "active": 895,
+            "mirrorResources": 4,
+            "imageTextures": 1,
+            "rippleBodyTextures": 0,
+            "shadowResources": 4,
+            "shadowSize": 512,
+            "shadowPassCount": 276,
+            "shadowFinite": true,
+            "shadowDraws": 448,
+            "shadowStatic": 0,
+            "shadowStaticRebuilds": 13,
+            "culled": 1036,
+            "drawn": 37399,
+            "suppressed": 0,
+            "rippleSurfaces": 1,
+            "rippleWaves": 3
+          },
+          "frames": 276,
+          "timing": {
+            "boot": 242,
+            "renderer": 261,
+            "ready": 4299,
+            "frame1": 4300,
+            "drawn": 4722,
+            "frame2": 4752,
+            "frame3": 4780,
+            "room": 15697,
+            "island": 28893,
+            "props": 38909,
+            "rockGuides": 41532,
+            "pile": 43810,
+            "cavemen": 44337,
+            "guides": 47188,
+            "visibility-start": 47564,
+            "visibility": 47708,
+            "covered-view-start": 47708,
+            "covered-view": 55015
+          },
+          "tess": null,
+          "arcade": null,
+          "timechain": {
+            "preview": null,
+            "room": null
+          },
+          "ui": null,
+          "usage": {
+            "usedSize": 222956456,
+            "totalSize": 226033664,
+            "embedderHeapUsedSize": 6510072,
+            "backingStorageSize": 131123474
+          },
+          "dom": {
+            "documents": 1,
+            "nodes": 10035,
+            "jsEventListeners": 407
+          },
+          "detached": null,
+          "listeners": null
+        },
+        {
+          "tag": "3-arcade",
+          "scene": "arcade",
+          "quality": "low",
+          "gl": {
+            "waterTextures": 0,
+            "records": 544,
+            "active": 337,
+            "mirrorResources": 0,
+            "imageTextures": 0,
+            "rippleBodyTextures": 0,
+            "shadowResources": 4,
+            "shadowSize": 512,
+            "shadowPassCount": 348,
+            "shadowFinite": true,
+            "shadowDraws": 91,
+            "shadowStatic": 168,
+            "shadowStaticRebuilds": 22,
+            "culled": 188,
+            "drawn": 438,
+            "suppressed": 0,
+            "rippleSurfaces": 0,
+            "rippleWaves": 0
+          },
+          "frames": 348,
+          "timing": {
+            "boot": 242,
+            "renderer": 261,
+            "ready": 4299,
+            "frame1": 4300,
+            "drawn": 4722,
+            "frame2": 4752,
+            "frame3": 4780,
+            "room": 15697,
+            "island": 28893,
+            "props": 38909,
+            "rockGuides": 41532,
+            "pile": 43810,
+            "cavemen": 44337,
+            "guides": 47188,
+            "visibility-start": 47564,
+            "visibility": 47708,
+            "covered-view-start": 47708,
+            "covered-view": 55015
+          },
+          "tess": null,
+          "arcade": null,
+          "timechain": {
+            "preview": null,
+            "room": null
+          },
+          "ui": null,
+          "usage": {
+            "usedSize": 245122052,
+            "totalSize": 251117568,
+            "embedderHeapUsedSize": 5273248,
+            "backingStorageSize": 99033956
+          },
+          "dom": {
+            "documents": 1,
+            "nodes": 9997,
+            "jsEventListeners": 375
+          },
+          "detached": null,
+          "listeners": null
+        },
+        {
+          "tag": "4-hub",
+          "scene": "hub",
+          "quality": "low",
+          "gl": {
+            "waterTextures": 0,
+            "records": 1005,
+            "active": 898,
+            "mirrorResources": 4,
+            "imageTextures": 0,
+            "rippleBodyTextures": 0,
+            "shadowResources": 4,
+            "shadowSize": 512,
+            "shadowPassCount": 365,
+            "shadowFinite": true,
+            "shadowDraws": 448,
+            "shadowStatic": 0,
+            "shadowStaticRebuilds": 24,
+            "culled": 10465,
+            "drawn": 27949,
+            "suppressed": 0,
+            "rippleSurfaces": 1,
+            "rippleWaves": 3
+          },
+          "frames": 365,
+          "timing": {
+            "boot": 242,
+            "renderer": 261,
+            "ready": 4299,
+            "frame1": 4300,
+            "drawn": 4722,
+            "frame2": 4752,
+            "frame3": 4780,
+            "room": 15697,
+            "island": 128677,
+            "props": 138110,
+            "rockGuides": 138140,
+            "pile": 138182,
+            "cavemen": 138195,
+            "guides": 138261,
+            "visibility-start": 138264,
+            "visibility": 138266,
+            "covered-view-start": 138266,
+            "covered-view": 138439
+          },
+          "tess": null,
+          "arcade": null,
+          "timechain": {
+            "preview": null,
+            "room": null
+          },
+          "ui": null,
+          "usage": {
+            "usedSize": 232114992,
+            "totalSize": 236404736,
+            "embedderHeapUsedSize": 6058344,
+            "backingStorageSize": 138090126
+          },
+          "dom": {
+            "documents": 1,
+            "nodes": 10038,
+            "jsEventListeners": 407
+          },
+          "detached": null,
+          "listeners": null
+        },
+        {
+          "tag": "5-race",
+          "scene": "race",
+          "quality": "low",
+          "gl": {
+            "waterTextures": 0,
+            "records": 424,
+            "active": 131,
+            "mirrorResources": 0,
+            "imageTextures": 0,
+            "rippleBodyTextures": 0,
+            "shadowResources": 4,
+            "shadowSize": 512,
+            "shadowPassCount": 400,
+            "shadowFinite": true,
+            "shadowDraws": 65,
+            "shadowStatic": 0,
+            "shadowStaticRebuilds": 25,
+            "culled": 100,
+            "drawn": 927,
+            "suppressed": 0,
+            "rippleSurfaces": 0,
+            "rippleWaves": 0
+          },
+          "frames": 404,
+          "timing": {
+            "boot": 242,
+            "renderer": 261,
+            "ready": 4299,
+            "frame1": 4300,
+            "drawn": 4722,
+            "frame2": 4752,
+            "frame3": 4780,
+            "room": 15697,
+            "island": 128677,
+            "props": 138110,
+            "rockGuides": 138140,
+            "pile": 138182,
+            "cavemen": 138195,
+            "guides": 138261,
+            "visibility-start": 138264,
+            "visibility": 138266,
+            "covered-view-start": 138266,
+            "covered-view": 138439,
+            "track": 192441,
+            "racers": 192445
+          },
+          "tess": null,
+          "arcade": null,
+          "timechain": {
+            "preview": null,
+            "room": null
+          },
+          "ui": null,
+          "usage": {
+            "usedSize": 208151680,
+            "totalSize": 212451328,
+            "embedderHeapUsedSize": 6370616,
+            "backingStorageSize": 98913431
+          },
+          "dom": {
+            "documents": 1,
+            "nodes": 10370,
+            "jsEventListeners": 392
+          },
+          "detached": null,
+          "listeners": null
+        },
+        {
+          "tag": "6-hub",
+          "scene": "hub",
+          "quality": "low",
+          "gl": {
+            "waterTextures": 0,
+            "records": 1002,
+            "active": 893,
+            "mirrorResources": 4,
+            "imageTextures": 1,
+            "rippleBodyTextures": 0,
+            "shadowResources": 4,
+            "shadowSize": 512,
+            "shadowPassCount": 419,
+            "shadowFinite": true,
+            "shadowDraws": 309,
+            "shadowStatic": 139,
+            "shadowStaticRebuilds": 28,
+            "culled": 1036,
+            "drawn": 37372,
+            "suppressed": 0,
+            "rippleSurfaces": 1,
+            "rippleWaves": 2
+          },
+          "frames": 423,
+          "timing": {
+            "boot": 242,
+            "renderer": 261,
+            "ready": 4299,
+            "frame1": 4300,
+            "drawn": 4722,
+            "frame2": 4752,
+            "frame3": 4780,
+            "room": 15697,
+            "track": 192441,
+            "racers": 192445,
+            "island": 220672,
+            "props": 235143,
+            "rockGuides": 237569,
+            "pile": 239685,
+            "cavemen": 239699,
+            "guides": 239762,
+            "visibility-start": 239765,
+            "visibility": 239766,
+            "covered-view-start": 239766,
+            "covered-view": 239819
+          },
+          "tess": null,
+          "arcade": null,
+          "timechain": {
+            "preview": null,
+            "room": null
+          },
+          "ui": null,
+          "usage": {
+            "usedSize": 235040140,
+            "totalSize": 239288320,
+            "embedderHeapUsedSize": 6307608,
+            "backingStorageSize": 138580179
+          },
+          "dom": {
+            "documents": 1,
+            "nodes": 10038,
+            "jsEventListeners": 407
+          },
+          "detached": null,
+          "listeners": null
+        },
+        {
+          "tag": "7-drop",
+          "scene": "drop",
+          "quality": "low",
+          "gl": {
+            "waterTextures": 0,
+            "records": 57,
+            "active": 55,
+            "mirrorResources": 0,
+            "imageTextures": 0,
+            "rippleBodyTextures": 0,
+            "shadowResources": 4,
+            "shadowSize": 512,
+            "shadowPassCount": 547,
+            "shadowFinite": true,
+            "shadowDraws": 7,
+            "shadowStatic": 19,
+            "shadowStaticRebuilds": 32,
+            "culled": 160,
+            "drawn": 46,
+            "suppressed": 0,
+            "rippleSurfaces": 0,
+            "rippleWaves": 0
+          },
+          "frames": 551,
+          "timing": {
+            "boot": 242,
+            "renderer": 261,
+            "ready": 4299,
+            "frame1": 4300,
+            "drawn": 4722,
+            "frame2": 4752,
+            "frame3": 4780,
+            "room": 15697,
+            "track": 192441,
+            "racers": 192445,
+            "island": 220672,
+            "props": 235143,
+            "rockGuides": 237569,
+            "pile": 239685,
+            "cavemen": 239699,
+            "guides": 239762,
+            "visibility-start": 239765,
+            "visibility": 239766,
+            "covered-view-start": 239766,
+            "covered-view": 239819,
+            "drop world": 260409
+          },
+          "tess": null,
+          "arcade": null,
+          "timechain": {
+            "preview": null,
+            "room": null
+          },
+          "ui": null,
+          "usage": {
+            "usedSize": 236022800,
+            "totalSize": 241074176,
+            "embedderHeapUsedSize": 6165144,
+            "backingStorageSize": 129171197
+          },
+          "dom": {
+            "documents": 1,
+            "nodes": 10296,
+            "jsEventListeners": 389
+          },
+          "detached": null,
+          "listeners": null
+        },
+        {
+          "tag": "8-hub",
+          "scene": "hub",
+          "quality": "low",
+          "gl": {
+            "waterTextures": 0,
+            "records": 903,
+            "active": 894,
+            "mirrorResources": 4,
+            "imageTextures": 1,
+            "rippleBodyTextures": 0,
+            "shadowResources": 4,
+            "shadowSize": 512,
+            "shadowPassCount": 577,
+            "shadowFinite": true,
+            "shadowDraws": 447,
+            "shadowStatic": 1,
+            "shadowStaticRebuilds": 33,
+            "culled": 1036,
+            "drawn": 37379,
+            "suppressed": 0,
+            "rippleSurfaces": 1,
+            "rippleWaves": 2
+          },
+          "frames": 581,
+          "timing": {
+            "boot": 242,
+            "renderer": 261,
+            "ready": 4299,
+            "frame1": 4300,
+            "drawn": 4722,
+            "frame2": 4752,
+            "frame3": 4780,
+            "room": 15697,
+            "track": 192441,
+            "racers": 192445,
+            "drop world": 260409,
+            "island": 274596,
+            "props": 283693,
+            "rockGuides": 284327,
+            "pile": 285630,
+            "cavemen": 286027,
+            "guides": 287986,
+            "visibility-start": 288114,
+            "visibility": 288214,
+            "covered-view-start": 288214,
+            "covered-view": 290472
+          },
+          "tess": null,
+          "arcade": null,
+          "timechain": {
+            "preview": null,
+            "room": null
+          },
+          "ui": null,
+          "usage": {
+            "usedSize": 269980500,
+            "totalSize": 275251200,
+            "embedderHeapUsedSize": 6317152,
+            "backingStorageSize": 168471277
+          },
+          "dom": {
+            "documents": 1,
+            "nodes": 10039,
+            "jsEventListeners": 407
+          },
+          "detached": null,
+          "listeners": null
+        },
+        {
+          "tag": "9-orbit",
+          "scene": "orbit",
+          "quality": "low",
+          "gl": {
+            "waterTextures": 0,
+            "records": 39,
+            "active": 36,
+            "mirrorResources": 0,
+            "imageTextures": 0,
+            "rippleBodyTextures": 0,
+            "shadowResources": 4,
+            "shadowSize": 512,
+            "shadowPassCount": 663,
+            "shadowFinite": true,
+            "shadowDraws": 6,
+            "shadowStatic": 24,
+            "shadowStaticRebuilds": 36,
+            "culled": 57,
+            "drawn": 49,
+            "suppressed": 0,
+            "rippleSurfaces": 0,
+            "rippleWaves": 0
+          },
+          "frames": 667,
+          "timing": {
+            "boot": 242,
+            "renderer": 261,
+            "ready": 4299,
+            "frame1": 4300,
+            "drawn": 4722,
+            "frame2": 4752,
+            "frame3": 4780,
+            "room": 15697,
+            "track": 192441,
+            "racers": 192445,
+            "drop world": 260409,
+            "island": 274596,
+            "props": 283693,
+            "rockGuides": 284327,
+            "pile": 285630,
+            "cavemen": 286027,
+            "guides": 287986,
+            "visibility-start": 288114,
+            "visibility": 288214,
+            "covered-view-start": 288214,
+            "covered-view": 290472,
+            "orbit world": 324818
+          },
+          "tess": null,
+          "arcade": null,
+          "timechain": {
+            "preview": null,
+            "room": null
+          },
+          "ui": null,
+          "usage": {
+            "usedSize": 239046092,
+            "totalSize": 244416512,
+            "embedderHeapUsedSize": 6656240,
+            "backingStorageSize": 129242907
+          },
+          "dom": {
+            "documents": 1,
+            "nodes": 10399,
+            "jsEventListeners": 380
+          },
+          "detached": null,
+          "listeners": null
+        },
+        {
+          "tag": "10-hub",
+          "scene": "hub",
+          "quality": "low",
+          "gl": {
+            "waterTextures": 0,
+            "records": 902,
+            "active": 893,
+            "mirrorResources": 4,
+            "imageTextures": 1,
+            "rippleBodyTextures": 0,
+            "shadowResources": 4,
+            "shadowSize": 512,
+            "shadowPassCount": 682,
+            "shadowFinite": true,
+            "shadowDraws": 446,
+            "shadowStatic": 2,
+            "shadowStaticRebuilds": 37,
+            "culled": 1036,
+            "drawn": 37378,
+            "suppressed": 0,
+            "rippleSurfaces": 1,
+            "rippleWaves": 3
+          },
+          "frames": 686,
+          "timing": {
+            "boot": 242,
+            "renderer": 261,
+            "ready": 4299,
+            "frame1": 4300,
+            "drawn": 4722,
+            "frame2": 4752,
+            "frame3": 4780,
+            "room": 15697,
+            "track": 192441,
+            "racers": 192445,
+            "drop world": 260409,
+            "orbit world": 324818,
+            "island": 360290,
+            "props": 360473,
+            "rockGuides": 360502,
+            "pile": 360544,
+            "cavemen": 360555,
+            "guides": 360614,
+            "visibility-start": 360617,
+            "visibility": 360619,
+            "covered-view-start": 360619,
+            "covered-view": 360665
+          },
+          "tess": null,
+          "arcade": null,
+          "timechain": {
+            "preview": null,
+            "room": null
+          },
+          "ui": null,
+          "usage": {
+            "usedSize": 270941552,
+            "totalSize": 275513344,
+            "embedderHeapUsedSize": 6520728,
+            "backingStorageSize": 168472582
+          },
+          "dom": {
+            "documents": 1,
+            "nodes": 10039,
+            "jsEventListeners": 407
+          },
+          "detached": null,
+          "listeners": null
+        },
+        {
+          "tag": "11-mine",
+          "scene": "mine",
+          "quality": "low",
+          "gl": {
+            "waterTextures": 0,
+            "records": 57,
+            "active": 45,
+            "mirrorResources": 0,
+            "imageTextures": 0,
+            "rippleBodyTextures": 0,
+            "shadowResources": 4,
+            "shadowSize": 512,
+            "shadowPassCount": 749,
+            "shadowFinite": true,
+            "shadowDraws": 0,
+            "shadowStatic": 26,
+            "shadowStaticRebuilds": 39,
+            "culled": 8,
+            "drawn": 166,
+            "suppressed": 0,
+            "rippleSurfaces": 0,
+            "rippleWaves": 0
+          },
+          "frames": 753,
+          "timing": {
+            "boot": 242,
+            "renderer": 261,
+            "ready": 4299,
+            "frame1": 4300,
+            "drawn": 4722,
+            "frame2": 4752,
+            "frame3": 4780,
+            "room": 15697,
+            "track": 192441,
+            "racers": 192445,
+            "drop world": 260409,
+            "orbit world": 324818,
+            "island": 360290,
+            "props": 360473,
+            "rockGuides": 360502,
+            "pile": 360544,
+            "cavemen": 360555,
+            "guides": 360614,
+            "visibility-start": 360617,
+            "visibility": 360619,
+            "covered-view-start": 360619,
+            "covered-view": 360665
+          },
+          "tess": null,
+          "arcade": null,
+          "timechain": {
+            "preview": null,
+            "room": null
+          },
+          "ui": null,
+          "usage": {
+            "usedSize": 264941584,
+            "totalSize": 269975552,
+            "embedderHeapUsedSize": 6378968,
+            "backingStorageSize": 129329824
+          },
+          "dom": {
+            "documents": 1,
+            "nodes": 10404,
+            "jsEventListeners": 383
+          },
+          "detached": null,
+          "listeners": null
+        },
+        {
+          "tag": "12-hub",
+          "scene": "hub",
+          "quality": "low",
+          "gl": {
+            "waterTextures": 0,
+            "records": 909,
+            "active": 895,
+            "mirrorResources": 4,
+            "imageTextures": 1,
+            "rippleBodyTextures": 0,
+            "shadowResources": 4,
+            "shadowSize": 512,
+            "shadowPassCount": 781,
+            "shadowFinite": true,
+            "shadowDraws": 447,
+            "shadowStatic": 1,
+            "shadowStaticRebuilds": 40,
+            "culled": 1036,
+            "drawn": 37369,
+            "suppressed": 0,
+            "rippleSurfaces": 1,
+            "rippleWaves": 3
+          },
+          "frames": 785,
+          "timing": {
+            "boot": 242,
+            "renderer": 261,
+            "ready": 4299,
+            "frame1": 4300,
+            "drawn": 4722,
+            "frame2": 4752,
+            "frame3": 4780,
+            "room": 15697,
+            "track": 192441,
+            "racers": 192445,
+            "drop world": 260409,
+            "orbit world": 324818,
+            "island": 420009,
+            "props": 426907,
+            "rockGuides": 427741,
+            "pile": 428883,
+            "cavemen": 429316,
+            "guides": 431033,
+            "visibility-start": 431135,
+            "visibility": 431170,
+            "covered-view-start": 431171,
+            "covered-view": 432941
+          },
+          "tess": null,
+          "arcade": null,
+          "timechain": {
+            "preview": null,
+            "room": null
+          },
+          "ui": null,
+          "usage": {
+            "usedSize": 274061964,
+            "totalSize": 278396928,
+            "embedderHeapUsedSize": 6706032,
+            "backingStorageSize": 168489044
+          },
+          "dom": {
+            "documents": 1,
+            "nodes": 10048,
+            "jsEventListeners": 407
+          },
+          "detached": null,
+          "listeners": null
+        },
+        {
+          "tag": "13-factory",
+          "scene": "factory",
+          "quality": "low",
+          "gl": {
+            "waterTextures": 0,
+            "records": 175,
+            "active": 172,
+            "mirrorResources": 13,
+            "imageTextures": 23,
+            "rippleBodyTextures": 0,
+            "shadowResources": 4,
+            "shadowSize": 512,
+            "shadowPassCount": 855,
+            "shadowFinite": true,
+            "shadowDraws": 20,
+            "shadowStatic": 44,
+            "shadowStaticRebuilds": 42,
+            "culled": 55,
+            "drawn": 465,
+            "suppressed": 0,
+            "rippleSurfaces": 1,
+            "rippleWaves": 2
+          },
+          "frames": 859,
+          "timing": {
+            "boot": 242,
+            "renderer": 261,
+            "ready": 4299,
+            "frame1": 4300,
+            "drawn": 4722,
+            "frame2": 4752,
+            "frame3": 4780,
+            "room": 15697,
+            "track": 192441,
+            "racers": 192445,
+            "drop world": 260409,
+            "orbit world": 324818,
+            "island": 420009,
+            "props": 426907,
+            "rockGuides": 427741,
+            "pile": 428883,
+            "cavemen": 429316,
+            "guides": 431033,
+            "visibility-start": 431135,
+            "visibility": 431170,
+            "covered-view-start": 431171,
+            "covered-view": 432941
+          },
+          "tess": {
+            "meshes": 12,
+            "faces": 5892
+          },
+          "arcade": null,
+          "timechain": {
+            "preview": null,
+            "room": null
+          },
+          "ui": null,
+          "usage": {
+            "usedSize": 279406240,
+            "totalSize": 283377664,
+            "embedderHeapUsedSize": 6679920,
+            "backingStorageSize": 130576294
+          },
+          "dom": {
+            "documents": 1,
+            "nodes": 10059,
+            "jsEventListeners": 381
+          },
+          "detached": null,
+          "listeners": null
+        },
+        {
+          "tag": "14-hub",
+          "scene": "hub",
+          "quality": "low",
+          "gl": {
+            "waterTextures": 0,
+            "records": 896,
+            "active": 895,
+            "mirrorResources": 4,
+            "imageTextures": 1,
+            "rippleBodyTextures": 0,
+            "shadowResources": 4,
+            "shadowSize": 512,
+            "shadowPassCount": 876,
+            "shadowFinite": true,
+            "shadowDraws": 448,
+            "shadowStatic": 0,
+            "shadowStaticRebuilds": 43,
+            "culled": 1036,
+            "drawn": 37369,
+            "suppressed": 0,
+            "rippleSurfaces": 1,
+            "rippleWaves": 4
+          },
+          "frames": 880,
+          "timing": {
+            "boot": 242,
+            "renderer": 261,
+            "ready": 4299,
+            "frame1": 4300,
+            "drawn": 4722,
+            "frame2": 4752,
+            "frame3": 4780,
+            "room": 15697,
+            "track": 192441,
+            "racers": 192445,
+            "drop world": 260409,
+            "orbit world": 324818,
+            "island": 457849,
+            "props": 467009,
+            "rockGuides": 467994,
+            "pile": 470396,
+            "cavemen": 471397,
+            "guides": 473848,
+            "visibility-start": 474030,
+            "visibility": 474126,
+            "covered-view-start": 474126,
+            "covered-view": 475962
+          },
+          "tess": null,
+          "arcade": null,
+          "timechain": {
+            "preview": null,
+            "room": null
+          },
+          "ui": null,
+          "usage": {
+            "usedSize": 278765056,
+            "totalSize": 283410432,
+            "embedderHeapUsedSize": 6800288,
+            "backingStorageSize": 169799580
+          },
+          "dom": {
+            "documents": 1,
+            "nodes": 10066,
+            "jsEventListeners": 407
+          },
+          "detached": null,
+          "listeners": null
+        },
+        {
+          "tag": "15-bifrost",
+          "scene": "bifrost",
+          "quality": "low",
+          "gl": {
+            "waterTextures": 0,
+            "records": 94,
+            "active": 94,
+            "mirrorResources": 7,
+            "imageTextures": 4,
+            "rippleBodyTextures": 0,
+            "shadowResources": 4,
+            "shadowSize": 512,
+            "shadowPassCount": 929,
+            "shadowFinite": true,
+            "shadowDraws": 4,
+            "shadowStatic": 25,
+            "shadowStaticRebuilds": 45,
+            "culled": 88,
+            "drawn": 261,
+            "suppressed": 0,
+            "rippleSurfaces": 2,
+            "rippleWaves": 6
+          },
+          "frames": 931,
+          "timing": {
+            "boot": 242,
+            "renderer": 261,
+            "ready": 4299,
+            "frame1": 4300,
+            "drawn": 4722,
+            "frame2": 4752,
+            "frame3": 4780,
+            "room": 15697,
+            "track": 192441,
+            "racers": 192445,
+            "drop world": 260409,
+            "orbit world": 324818,
+            "island": 457849,
+            "props": 467009,
+            "rockGuides": 467994,
+            "pile": 470396,
+            "cavemen": 471397,
+            "guides": 473848,
+            "visibility-start": 474030,
+            "visibility": 474126,
+            "covered-view-start": 474126,
+            "covered-view": 475962
+          },
+          "tess": null,
+          "arcade": null,
+          "timechain": {
+            "preview": null,
+            "room": null
+          },
+          "ui": null,
+          "usage": {
+            "usedSize": 282317104,
+            "totalSize": 287358976,
+            "embedderHeapUsedSize": 6351608,
+            "backingStorageSize": 132870042
+          },
+          "dom": {
+            "documents": 1,
+            "nodes": 10032,
+            "jsEventListeners": 371
+          },
+          "detached": null,
+          "listeners": null
+        },
+        {
+          "tag": "16-hub",
+          "scene": "hub",
+          "quality": "low",
+          "gl": {
+            "waterTextures": 0,
+            "records": 902,
+            "active": 902,
+            "mirrorResources": 1,
+            "imageTextures": 0,
+            "rippleBodyTextures": 0,
+            "shadowResources": 4,
+            "shadowSize": 512,
+            "shadowPassCount": 943,
+            "shadowFinite": true,
+            "shadowDraws": 448,
+            "shadowStatic": 0,
+            "shadowStaticRebuilds": 46,
+            "culled": 10750,
+            "drawn": 27652,
+            "suppressed": 0,
+            "rippleSurfaces": 1,
+            "rippleWaves": 4
+          },
+          "frames": 945,
+          "timing": {
+            "boot": 242,
+            "renderer": 261,
+            "ready": 4299,
+            "frame1": 4300,
+            "drawn": 4722,
+            "frame2": 4752,
+            "frame3": 4780,
+            "room": 15697,
+            "track": 192441,
+            "racers": 192445,
+            "drop world": 260409,
+            "orbit world": 324818,
+            "island": 520061,
+            "props": 539815,
+            "rockGuides": 539848,
+            "pile": 539892,
+            "cavemen": 539904,
+            "guides": 539963,
+            "visibility-start": 539965,
+            "visibility": 539967,
+            "covered-view-start": 539967,
+            "covered-view": 540158
+          },
+          "tess": null,
+          "arcade": null,
+          "timechain": {
+            "preview": null,
+            "room": null
+          },
+          "ui": null,
+          "usage": {
+            "usedSize": 281316460,
+            "totalSize": 285474816,
+            "embedderHeapUsedSize": 6839632,
+            "backingStorageSize": 178519405
+          },
+          "dom": {
+            "documents": 1,
+            "nodes": 10072,
+            "jsEventListeners": 407
+          },
+          "detached": null,
+          "listeners": null
+        },
+        {
+          "tag": "17-timechain",
+          "scene": "timechain",
+          "quality": "low",
+          "gl": {
+            "waterTextures": 0,
+            "records": 65,
+            "active": 64,
+            "mirrorResources": 0,
+            "imageTextures": 22,
+            "rippleBodyTextures": 0,
+            "shadowResources": 4,
+            "shadowSize": 512,
+            "shadowPassCount": 1018,
+            "shadowFinite": true,
+            "shadowDraws": 3,
+            "shadowStatic": 33,
+            "shadowStaticRebuilds": 48,
+            "culled": 35,
+            "drawn": 40,
+            "suppressed": 1,
+            "rippleSurfaces": 0,
+            "rippleWaves": 0
+          },
+          "frames": 1020,
+          "timing": {
+            "boot": 242,
+            "renderer": 261,
+            "ready": 4299,
+            "frame1": 4300,
+            "drawn": 4722,
+            "frame2": 4752,
+            "frame3": 4780,
+            "room": 15697,
+            "track": 192441,
+            "racers": 192445,
+            "drop world": 260409,
+            "orbit world": 324818,
+            "island": 520061,
+            "props": 539815,
+            "rockGuides": 539848,
+            "pile": 539892,
+            "cavemen": 539904,
+            "guides": 539963,
+            "visibility-start": 539965,
+            "visibility": 539967,
+            "covered-view-start": 539967,
+            "covered-view": 540158
+          },
+          "tess": null,
+          "arcade": null,
+          "timechain": {
+            "preview": null,
+            "room": null
+          },
+          "ui": null,
+          "usage": {
+            "usedSize": 249145460,
+            "totalSize": 253870080,
+            "embedderHeapUsedSize": 9048384,
+            "backingStorageSize": 138297651
+          },
+          "dom": {
+            "documents": 1,
+            "nodes": 10089,
+            "jsEventListeners": 399
+          },
+          "detached": null,
+          "listeners": null
+        },
+        {
+          "tag": "18-hub",
+          "scene": "hub",
+          "quality": "low",
+          "gl": {
+            "waterTextures": 0,
+            "records": 897,
+            "active": 883,
+            "mirrorResources": 0,
+            "imageTextures": 0,
+            "rippleBodyTextures": 0,
+            "shadowResources": 4,
+            "shadowSize": 512,
+            "shadowPassCount": 1036,
+            "shadowFinite": true,
+            "shadowDraws": 447,
+            "shadowStatic": 1,
+            "shadowStaticRebuilds": 49,
+            "culled": 10809,
+            "drawn": 27576,
+            "suppressed": 0,
+            "rippleSurfaces": 0,
+            "rippleWaves": 0
+          },
+          "frames": 1038,
+          "timing": {
+            "boot": 242,
+            "renderer": 261,
+            "ready": 4299,
+            "frame1": 4300,
+            "drawn": 4722,
+            "frame2": 4752,
+            "frame3": 4780,
+            "room": 15697,
+            "track": 192441,
+            "racers": 192445,
+            "drop world": 260409,
+            "orbit world": 324818,
+            "island": 600500,
+            "props": 615959,
+            "rockGuides": 618326,
+            "pile": 622005,
+            "cavemen": 622757,
+            "guides": 626609,
+            "visibility-start": 626736,
+            "visibility": 627167,
+            "covered-view-start": 627167,
+            "covered-view": 637829
+          },
+          "tess": null,
+          "arcade": null,
+          "timechain": {
+            "preview": null,
+            "room": null
+          },
+          "ui": null,
+          "usage": {
+            "usedSize": 281869928,
+            "totalSize": 286523392,
+            "embedderHeapUsedSize": 6891632,
+            "backingStorageSize": 180594812
+          },
+          "dom": {
+            "documents": 1,
+            "nodes": 10074,
+            "jsEventListeners": 407
+          },
+          "detached": null,
+          "listeners": null
+        },
+        {
+          "tag": "19-dsb",
+          "scene": "dsb",
+          "quality": "low",
+          "gl": {
+            "waterTextures": 2,
+            "records": 357,
+            "active": 354,
+            "mirrorResources": 0,
+            "imageTextures": 0,
+            "rippleBodyTextures": 0,
+            "shadowResources": 4,
+            "shadowSize": 512,
+            "shadowPassCount": 1053,
+            "shadowFinite": true,
+            "shadowDraws": 269,
+            "shadowStatic": 0,
+            "shadowStaticRebuilds": 50,
+            "culled": 861,
+            "drawn": 4753,
+            "suppressed": 0,
+            "rippleSurfaces": 0,
+            "rippleWaves": 0
+          },
+          "frames": 1055,
+          "timing": {
+            "boot": 242,
+            "renderer": 261,
+            "ready": 4299,
+            "frame1": 4300,
+            "drawn": 4722,
+            "frame2": 4752,
+            "frame3": 4780,
+            "room": 15697,
+            "track": 192441,
+            "racers": 192445,
+            "drop world": 260409,
+            "orbit world": 324818,
+            "island": 600500,
+            "props": 615959,
+            "rockGuides": 618326,
+            "pile": 622005,
+            "cavemen": 622757,
+            "guides": 626609,
+            "visibility-start": 626736,
+            "visibility": 627167,
+            "covered-view-start": 627167,
+            "covered-view": 637829
+          },
+          "tess": null,
+          "arcade": null,
+          "timechain": {
+            "preview": null,
+            "room": null
+          },
+          "ui": null,
+          "usage": {
+            "usedSize": 292633536,
+            "totalSize": 297566208,
+            "embedderHeapUsedSize": 6921952,
+            "backingStorageSize": 145331996
+          },
+          "dom": {
+            "documents": 1,
+            "nodes": 10067,
+            "jsEventListeners": 416
+          },
+          "detached": null,
+          "listeners": null
+        },
+        {
+          "tag": "20-hub",
+          "scene": "hub",
+          "quality": "low",
+          "gl": {
+            "waterTextures": 0,
+            "records": 898,
+            "active": 896,
+            "mirrorResources": 4,
+            "imageTextures": 1,
+            "rippleBodyTextures": 0,
+            "shadowResources": 4,
+            "shadowSize": 512,
+            "shadowPassCount": 1072,
+            "shadowFinite": true,
+            "shadowDraws": 466,
+            "shadowStatic": 0,
+            "shadowStaticRebuilds": 51,
+            "culled": 877,
+            "drawn": 37546,
+            "suppressed": 0,
+            "rippleSurfaces": 1,
+            "rippleWaves": 3
+          },
+          "frames": 1074,
+          "timing": {
+            "boot": 242,
+            "renderer": 261,
+            "ready": 4299,
+            "frame1": 4300,
+            "drawn": 4722,
+            "frame2": 4752,
+            "frame3": 4780,
+            "room": 15697,
+            "track": 192441,
+            "racers": 192445,
+            "drop world": 260409,
+            "orbit world": 324818,
+            "island": 708560,
+            "props": 719774,
+            "rockGuides": 719803,
+            "pile": 719846,
+            "cavemen": 719857,
+            "guides": 719927,
+            "visibility-start": 719931,
+            "visibility": 720126,
+            "covered-view-start": 720126,
+            "covered-view": 720175
+          },
+          "tess": null,
+          "arcade": null,
+          "timechain": {
+            "preview": null,
+            "room": null
+          },
+          "ui": null,
+          "usage": {
+            "usedSize": 298944048,
+            "totalSize": 303349760,
+            "embedderHeapUsedSize": 7287704,
+            "backingStorageSize": 186320987
+          },
+          "dom": {
+            "documents": 1,
+            "nodes": 10084,
+            "jsEventListeners": 407
+          },
+          "detached": null,
+          "listeners": null
+        }
+      ],
+      "travels": [
+        {
+          "scene": "lab",
+          "ms": 846,
+          "tasks": {
+            "max": 209,
+            "count": 26
+          }
+        },
+        {
+          "scene": "hub",
+          "ms": 30195.900000035763,
+          "tasks": {
+            "max": 26626,
+            "count": 16
+          }
+        },
+        {
+          "scene": "arcade",
+          "ms": 3133.099999964237,
+          "tasks": {
+            "max": 1062,
+            "count": 17
+          }
+        },
+        {
+          "scene": "hub",
+          "ms": 24760.900000035763,
+          "tasks": {
+            "max": 12609,
+            "count": 10
+          }
+        },
+        {
+          "scene": "race",
+          "ms": 6851.300000011921,
+          "tasks": {
+            "max": 3606,
+            "count": 23
+          }
+        },
+        {
+          "scene": "hub",
+          "ms": 22168.69999998808,
+          "tasks": {
+            "max": 19739,
+            "count": 13
+          }
+        },
+        {
+          "scene": "drop",
+          "ms": 2947.5,
+          "tasks": {
+            "max": 1312,
+            "count": 10
+          }
+        },
+        {
+          "scene": "hub",
+          "ms": 18280.5,
+          "tasks": {
+            "max": 16295,
+            "count": 16
+          }
+        },
+        {
+          "scene": "orbit",
+          "ms": 3875.5,
+          "tasks": {
+            "max": 1806,
+            "count": 13
+          }
+        },
+        {
+          "scene": "hub",
+          "ms": 4968.100000023842,
+          "tasks": {
+            "max": 1826,
+            "count": 11
+          }
+        },
+        {
+          "scene": "mine",
+          "ms": 758.3999999761581,
+          "tasks": {
+            "max": 265,
+            "count": 19
+          }
+        },
+        {
+          "scene": "hub",
+          "ms": 14460.800000011921,
+          "tasks": {
+            "max": 13333,
+            "count": 16
+          }
+        },
+        {
+          "scene": "factory",
+          "ms": 1499,
+          "tasks": {
+            "max": 496,
+            "count": 14
+          }
+        },
+        {
+          "scene": "hub",
+          "ms": 20545.30000001192,
+          "tasks": {
+            "max": 18513,
+            "count": 17
+          }
+        },
+        {
+          "scene": "bifrost",
+          "ms": 2431.100000023842,
+          "tasks": {
+            "max": 557,
+            "count": 18
+          }
+        },
+        {
+          "scene": "hub",
+          "ms": 24876,
+          "tasks": {
+            "max": 20832,
+            "count": 8
+          }
+        },
+        {
+          "scene": "timechain",
+          "ms": 1318,
+          "tasks": {
+            "max": 429,
+            "count": 19
+          }
+        },
+        {
+          "scene": "hub",
+          "ms": 40689.90000003576,
+          "tasks": {
+            "max": 37835,
+            "count": 13
+          }
+        },
+        {
+          "scene": "dsb",
+          "ms": 9705.800000011921,
+          "tasks": {
+            "max": 2433,
+            "count": 12
+          }
+        },
+        {
+          "scene": "hub",
+          "ms": 17119.899999976158,
+          "tasks": {
+            "max": 12005,
+            "count": 11
+          }
+        }
+      ],
+      "logs": []
+    },
+    {
+      "label": "phase-1-6-after",
+      "completed": true,
+      "failure": null,
+      "environment": {
+        "agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/155.0.0.0 Safari/537.36",
+        "memory": 32,
+        "dpr": 1,
+        "gpu": "ANGLE (Apple, ANGLE Metal Renderer: Apple M1 Pro, Unspecified Version)"
+      },
+      "at": "2026-10-22T23:03:10.365Z",
+      "pageSha256": "206b8533792ee74dd84ebfed93788633b0c3f212439d28bad9e62dccf1abdd39",
+      "rows": [
+        {
+          "tag": "boot",
+          "scene": "hub",
+          "quality": "high",
+          "gl": {
+            "waterTextures": 0,
+            "records": 924,
+            "active": 893,
+            "mirrorResources": 4,
+            "imageTextures": 1,
+            "rippleBodyTextures": 0,
+            "shadowResources": 4,
+            "shadowSize": 2048,
+            "shadowPassCount": 192,
+            "shadowFinite": true,
+            "shadowDraws": 96,
+            "shadowStatic": 351,
+            "shadowStaticRebuilds": 5,
+            "culled": 1062,
+            "drawn": 37365,
+            "suppressed": 0,
+            "rippleSurfaces": 1,
+            "rippleWaves": 5
+          },
+          "frames": 192,
+          "timing": {
+            "boot": 245,
+            "renderer": 281,
+            "island": 1474,
+            "props": 2471,
+            "rockGuides": 3451,
+            "pile": 3554,
+            "cavemen": 3768,
+            "guides": 3894,
+            "visibility-start": 3944,
+            "visibility": 3946,
+            "covered-view-start": 3946,
+            "covered-view": 4387,
+            "ready": 4387,
+            "frame1": 4389,
+            "drawn": 4823,
+            "frame2": 4861,
+            "frame3": 4892
+          },
+          "tess": null,
+          "arcade": null,
+          "timechain": {
+            "preview": null,
+            "room": null
+          },
+          "ui": null,
+          "usage": {
+            "usedSize": 247333672,
+            "totalSize": 253837312,
+            "embedderHeapUsedSize": 6199584,
+            "backingStorageSize": 133164898
+          },
+          "dom": {
+            "documents": 1,
+            "nodes": 10035,
+            "jsEventListeners": 407
+          },
+          "detached": null,
+          "listeners": null
+        },
+        {
+          "tag": "1-lab",
+          "scene": "lab",
+          "quality": "medium",
+          "gl": {
+            "waterTextures": 0,
+            "records": 262,
+            "active": 262,
+            "mirrorResources": 0,
+            "imageTextures": 0,
+            "rippleBodyTextures": 0,
+            "shadowResources": 4,
+            "shadowSize": 1024,
+            "shadowPassCount": 216,
+            "shadowFinite": true,
+            "shadowDraws": 247,
+            "shadowStatic": 0,
+            "shadowStaticRebuilds": 7,
+            "culled": 106,
+            "drawn": 784,
+            "suppressed": 0,
+            "rippleSurfaces": 0,
+            "rippleWaves": 0
+          },
+          "frames": 216,
+          "timing": {
+            "boot": 245,
+            "renderer": 281,
+            "island": 1474,
+            "props": 2471,
+            "rockGuides": 3451,
+            "guides": 3894,
+            "covered-view-start": 3946,
+            "covered-view": 4387,
+            "ready": 4387,
+            "frame1": 4389,
+            "drawn": 4823,
+            "frame2": 4861,
+            "frame3": 4892,
+            "room": 60377,
+            "pile": 60383,
+            "cavemen": 60405,
+            "visibility-start": 60409,
+            "visibility": 60409
+          },
+          "tess": null,
+          "arcade": null,
+          "timechain": {
+            "preview": null,
+            "room": null
+          },
+          "ui": null,
+          "usage": {
+            "usedSize": 188594548,
+            "totalSize": 191987712,
+            "embedderHeapUsedSize": 5975200,
+            "backingStorageSize": 92362711
+          },
+          "dom": {
+            "documents": 1,
+            "nodes": 9995,
+            "jsEventListeners": 371
+          },
+          "detached": null,
+          "listeners": null
+        },
+        {
+          "tag": "2-hub",
+          "scene": "hub",
+          "quality": "low",
+          "gl": {
+            "waterTextures": 0,
+            "records": 919,
+            "active": 895,
+            "mirrorResources": 4,
+            "imageTextures": 1,
+            "rippleBodyTextures": 0,
+            "shadowResources": 4,
+            "shadowSize": 512,
+            "shadowPassCount": 238,
+            "shadowFinite": true,
+            "shadowDraws": 448,
+            "shadowStatic": 0,
+            "shadowStaticRebuilds": 9,
+            "culled": 1036,
+            "drawn": 37380,
+            "suppressed": 0,
+            "rippleSurfaces": 1,
+            "rippleWaves": 3
+          },
+          "frames": 238,
+          "timing": {
+            "boot": 245,
+            "renderer": 281,
+            "ready": 4387,
+            "frame1": 4389,
+            "drawn": 4823,
+            "frame2": 4861,
+            "frame3": 4892,
+            "room": 60377,
+            "island": 78925,
+            "props": 89764,
+            "rockGuides": 91609,
+            "pile": 94078,
+            "cavemen": 94459,
+            "guides": 96046,
+            "visibility-start": 96207,
+            "visibility": 96227,
+            "covered-view-start": 96227,
+            "covered-view": 99171
+          },
+          "tess": null,
+          "arcade": null,
+          "timechain": {
+            "preview": null,
+            "room": null
+          },
+          "ui": null,
+          "usage": {
+            "usedSize": 224000156,
+            "totalSize": 226672640,
+            "embedderHeapUsedSize": 6420560,
+            "backingStorageSize": 132446549
+          },
+          "dom": {
+            "documents": 1,
+            "nodes": 10035,
+            "jsEventListeners": 407
+          },
+          "detached": null,
+          "listeners": null
+        },
+        {
+          "tag": "3-arcade",
+          "scene": "arcade",
+          "quality": "low",
+          "gl": {
+            "waterTextures": 0,
+            "records": 532,
+            "active": 326,
+            "mirrorResources": 0,
+            "imageTextures": 0,
+            "rippleBodyTextures": 0,
+            "shadowResources": 4,
+            "shadowSize": 512,
+            "shadowPassCount": 271,
+            "shadowFinite": true,
+            "shadowDraws": 259,
+            "shadowStatic": 0,
+            "shadowStaticRebuilds": 10,
+            "culled": 186,
+            "drawn": 429,
+            "suppressed": 0,
+            "rippleSurfaces": 0,
+            "rippleWaves": 0
+          },
+          "frames": 271,
+          "timing": {
+            "boot": 245,
+            "renderer": 281,
+            "ready": 4387,
+            "frame1": 4389,
+            "drawn": 4823,
+            "frame2": 4861,
+            "frame3": 4892,
+            "room": 60377,
+            "island": 78925,
+            "props": 89764,
+            "rockGuides": 91609,
+            "pile": 94078,
+            "cavemen": 94459,
+            "guides": 96046,
+            "visibility-start": 96207,
+            "visibility": 96227,
+            "covered-view-start": 96227,
+            "covered-view": 99171
+          },
+          "tess": null,
+          "arcade": null,
+          "timechain": {
+            "preview": null,
+            "room": null
+          },
+          "ui": null,
+          "usage": {
+            "usedSize": 244933676,
+            "totalSize": 250331136,
+            "embedderHeapUsedSize": 6023672,
+            "backingStorageSize": 99033255
+          },
+          "dom": {
+            "documents": 1,
+            "nodes": 9997,
+            "jsEventListeners": 375
+          },
+          "detached": null,
+          "listeners": null
+        },
+        {
+          "tag": "4-hub",
+          "scene": "hub",
+          "quality": "low",
+          "gl": {
+            "waterTextures": 0,
+            "records": 1003,
+            "active": 897,
+            "mirrorResources": 4,
+            "imageTextures": 0,
+            "rippleBodyTextures": 0,
+            "shadowResources": 4,
+            "shadowSize": 512,
+            "shadowPassCount": 286,
+            "shadowFinite": true,
+            "shadowDraws": 447,
+            "shadowStatic": 1,
+            "shadowStaticRebuilds": 13,
+            "culled": 10485,
+            "drawn": 27948,
+            "suppressed": 0,
+            "rippleSurfaces": 1,
+            "rippleWaves": 4
+          },
+          "frames": 286,
+          "timing": {
+            "boot": 245,
+            "renderer": 281,
+            "ready": 4387,
+            "frame1": 4389,
+            "drawn": 4823,
+            "frame2": 4861,
+            "frame3": 4892,
+            "room": 60377,
+            "island": 124543,
+            "props": 127150,
+            "rockGuides": 127188,
+            "pile": 127233,
+            "cavemen": 127247,
+            "guides": 127314,
+            "visibility-start": 127320,
+            "visibility": 127322,
+            "covered-view-start": 127322,
+            "covered-view": 127489
+          },
+          "tess": null,
+          "arcade": null,
+          "timechain": {
+            "preview": null,
+            "room": null
+          },
+          "ui": null,
+          "usage": {
+            "usedSize": 234946124,
+            "totalSize": 238501888,
+            "embedderHeapUsedSize": 6610192,
+            "backingStorageSize": 140046429
+          },
+          "dom": {
+            "documents": 1,
+            "nodes": 10038,
+            "jsEventListeners": 407
+          },
+          "detached": null,
+          "listeners": null
+        },
+        {
+          "tag": "5-race",
+          "scene": "race",
+          "quality": "low",
+          "gl": {
+            "waterTextures": 0,
+            "records": 422,
+            "active": 130,
+            "mirrorResources": 0,
+            "imageTextures": 0,
+            "rippleBodyTextures": 0,
+            "shadowResources": 4,
+            "shadowSize": 512,
+            "shadowPassCount": 385,
+            "shadowFinite": true,
+            "shadowDraws": 6,
+            "shadowStatic": 60,
+            "shadowStaticRebuilds": 27,
+            "culled": 98,
+            "drawn": 509,
+            "suppressed": 0,
+            "rippleSurfaces": 0,
+            "rippleWaves": 0
+          },
+          "frames": 387,
+          "timing": {
+            "boot": 245,
+            "renderer": 281,
+            "ready": 4387,
+            "frame1": 4389,
+            "drawn": 4823,
+            "frame2": 4861,
+            "frame3": 4892,
+            "room": 60377,
+            "island": 124543,
+            "props": 127150,
+            "rockGuides": 127188,
+            "pile": 127233,
+            "cavemen": 127247,
+            "guides": 127314,
+            "visibility-start": 127320,
+            "visibility": 127322,
+            "covered-view-start": 127322,
+            "covered-view": 127489,
+            "track": 138105,
+            "racers": 138110
+          },
+          "tess": null,
+          "arcade": null,
+          "timechain": {
+            "preview": null,
+            "room": null
+          },
+          "ui": null,
+          "usage": {
+            "usedSize": 208090160,
+            "totalSize": 211927040,
+            "embedderHeapUsedSize": 6739352,
+            "backingStorageSize": 98873209
+          },
+          "dom": {
+            "documents": 1,
+            "nodes": 10370,
+            "jsEventListeners": 392
+          },
+          "detached": null,
+          "listeners": null
+        },
+        {
+          "tag": "6-hub",
+          "scene": "hub",
+          "quality": "low",
+          "gl": {
+            "waterTextures": 0,
+            "records": 1005,
+            "active": 896,
+            "mirrorResources": 4,
+            "imageTextures": 1,
+            "rippleBodyTextures": 0,
+            "shadowResources": 4,
+            "shadowSize": 512,
+            "shadowPassCount": 408,
+            "shadowFinite": true,
+            "shadowDraws": 307,
+            "shadowStatic": 141,
+            "shadowStaticRebuilds": 28,
+            "culled": 1036,
+            "drawn": 37360,
+            "suppressed": 0,
+            "rippleSurfaces": 1,
+            "rippleWaves": 3
+          },
+          "frames": 410,
+          "timing": {
+            "boot": 245,
+            "renderer": 281,
+            "ready": 4387,
+            "frame1": 4389,
+            "drawn": 4823,
+            "frame2": 4861,
+            "frame3": 4892,
+            "room": 60377,
+            "track": 138105,
+            "racers": 138110,
+            "island": 149308,
+            "props": 158111,
+            "rockGuides": 160056,
+            "pile": 162945,
+            "cavemen": 164075,
+            "guides": 166469,
+            "visibility-start": 166611,
+            "visibility": 166661,
+            "covered-view-start": 166678,
+            "covered-view": 168720
+          },
+          "tess": null,
+          "arcade": null,
+          "timechain": {
+            "preview": null,
+            "room": null
+          },
+          "ui": null,
+          "usage": {
+            "usedSize": 233503620,
+            "totalSize": 236666880,
+            "embedderHeapUsedSize": 6678248,
+            "backingStorageSize": 137581221
+          },
+          "dom": {
+            "documents": 1,
+            "nodes": 10038,
+            "jsEventListeners": 407
+          },
+          "detached": null,
+          "listeners": null
+        },
+        {
+          "tag": "7-drop",
+          "scene": "drop",
+          "quality": "low",
+          "gl": {
+            "waterTextures": 0,
+            "records": 57,
+            "active": 55,
+            "mirrorResources": 0,
+            "imageTextures": 0,
+            "rippleBodyTextures": 0,
+            "shadowResources": 4,
+            "shadowSize": 512,
+            "shadowPassCount": 573,
+            "shadowFinite": true,
+            "shadowDraws": 7,
+            "shadowStatic": 19,
+            "shadowStaticRebuilds": 32,
+            "culled": 160,
+            "drawn": 46,
+            "suppressed": 0,
+            "rippleSurfaces": 0,
+            "rippleWaves": 0
+          },
+          "frames": 575,
+          "timing": {
+            "boot": 245,
+            "renderer": 281,
+            "ready": 4387,
+            "frame1": 4389,
+            "drawn": 4823,
+            "frame2": 4861,
+            "frame3": 4892,
+            "room": 60377,
+            "track": 138105,
+            "racers": 138110,
+            "island": 149308,
+            "props": 158111,
+            "rockGuides": 160056,
+            "pile": 162945,
+            "cavemen": 164075,
+            "guides": 166469,
+            "visibility-start": 166611,
+            "visibility": 166661,
+            "covered-view-start": 166678,
+            "covered-view": 168720,
+            "drop world": 175815
+          },
+          "tess": null,
+          "arcade": null,
+          "timechain": {
+            "preview": null,
+            "room": null
+          },
+          "ui": null,
+          "usage": {
+            "usedSize": 235949004,
+            "totalSize": 240812032,
+            "embedderHeapUsedSize": 6528400,
+            "backingStorageSize": 129171503
+          },
+          "dom": {
+            "documents": 1,
+            "nodes": 10296,
+            "jsEventListeners": 389
+          },
+          "detached": null,
+          "listeners": null
+        },
+        {
+          "tag": "8-hub",
+          "scene": "hub",
+          "quality": "low",
+          "gl": {
+            "waterTextures": 0,
+            "records": 907,
+            "active": 895,
+            "mirrorResources": 4,
+            "imageTextures": 1,
+            "rippleBodyTextures": 0,
+            "shadowResources": 4,
+            "shadowSize": 512,
+            "shadowPassCount": 597,
+            "shadowFinite": true,
+            "shadowDraws": 447,
+            "shadowStatic": 1,
+            "shadowStaticRebuilds": 33,
+            "culled": 1036,
+            "drawn": 37379,
+            "suppressed": 0,
+            "rippleSurfaces": 1,
+            "rippleWaves": 3
+          },
+          "frames": 599,
+          "timing": {
+            "boot": 245,
+            "renderer": 281,
+            "ready": 4387,
+            "frame1": 4389,
+            "drawn": 4823,
+            "frame2": 4861,
+            "frame3": 4892,
+            "room": 60377,
+            "track": 138105,
+            "racers": 138110,
+            "drop world": 175815,
+            "island": 185703,
+            "props": 197389,
+            "rockGuides": 199572,
+            "pile": 201754,
+            "cavemen": 202437,
+            "guides": 204639,
+            "visibility-start": 204955,
+            "visibility": 204982,
+            "covered-view-start": 204982,
+            "covered-view": 206684
+          },
+          "tess": null,
+          "arcade": null,
+          "timechain": {
+            "preview": null,
+            "room": null
+          },
+          "ui": null,
+          "usage": {
+            "usedSize": 234223688,
+            "totalSize": 238239744,
+            "embedderHeapUsedSize": 6676160,
+            "backingStorageSize": 137605795
+          },
+          "dom": {
+            "documents": 1,
+            "nodes": 10039,
+            "jsEventListeners": 407
+          },
+          "detached": null,
+          "listeners": null
+        },
+        {
+          "tag": "9-orbit",
+          "scene": "orbit",
+          "quality": "low",
+          "gl": {
+            "waterTextures": 0,
+            "records": 39,
+            "active": 36,
+            "mirrorResources": 0,
+            "imageTextures": 0,
+            "rippleBodyTextures": 0,
+            "shadowResources": 4,
+            "shadowSize": 512,
+            "shadowPassCount": 714,
+            "shadowFinite": true,
+            "shadowDraws": 6,
+            "shadowStatic": 24,
+            "shadowStaticRebuilds": 36,
+            "culled": 57,
+            "drawn": 49,
+            "suppressed": 0,
+            "rippleSurfaces": 0,
+            "rippleWaves": 0
+          },
+          "frames": 716,
+          "timing": {
+            "boot": 245,
+            "renderer": 281,
+            "ready": 4387,
+            "frame1": 4389,
+            "drawn": 4823,
+            "frame2": 4861,
+            "frame3": 4892,
+            "room": 60377,
+            "track": 138105,
+            "racers": 138110,
+            "drop world": 175815,
+            "island": 185703,
+            "props": 197389,
+            "rockGuides": 199572,
+            "pile": 201754,
+            "cavemen": 202437,
+            "guides": 204639,
+            "visibility-start": 204955,
+            "visibility": 204982,
+            "covered-view-start": 204982,
+            "covered-view": 206684,
+            "orbit world": 218513
+          },
+          "tess": null,
+          "arcade": null,
+          "timechain": {
+            "preview": null,
+            "room": null
+          },
+          "ui": null,
+          "usage": {
+            "usedSize": 239038564,
+            "totalSize": 243630080,
+            "embedderHeapUsedSize": 6311200,
+            "backingStorageSize": 129243213
+          },
+          "dom": {
+            "documents": 1,
+            "nodes": 10399,
+            "jsEventListeners": 380
+          },
+          "detached": null,
+          "listeners": null
+        },
+        {
+          "tag": "10-hub",
+          "scene": "hub",
+          "quality": "low",
+          "gl": {
+            "waterTextures": 0,
+            "records": 903,
+            "active": 893,
+            "mirrorResources": 4,
+            "imageTextures": 1,
+            "rippleBodyTextures": 0,
+            "shadowResources": 4,
+            "shadowSize": 512,
+            "shadowPassCount": 737,
+            "shadowFinite": true,
+            "shadowDraws": 446,
+            "shadowStatic": 2,
+            "shadowStaticRebuilds": 37,
+            "culled": 1036,
+            "drawn": 37379,
+            "suppressed": 0,
+            "rippleSurfaces": 1,
+            "rippleWaves": 2
+          },
+          "frames": 739,
+          "timing": {
+            "boot": 245,
+            "renderer": 281,
+            "ready": 4387,
+            "frame1": 4389,
+            "drawn": 4823,
+            "frame2": 4861,
+            "frame3": 4892,
+            "room": 60377,
+            "track": 138105,
+            "racers": 138110,
+            "drop world": 175815,
+            "orbit world": 218513,
+            "island": 230920,
+            "props": 239143,
+            "rockGuides": 239670,
+            "pile": 239721,
+            "cavemen": 239732,
+            "guides": 239793,
+            "visibility-start": 239796,
+            "visibility": 239797,
+            "covered-view-start": 239797,
+            "covered-view": 239848
+          },
+          "tess": null,
+          "arcade": null,
+          "timechain": {
+            "preview": null,
+            "room": null
+          },
+          "ui": null,
+          "usage": {
+            "usedSize": 237084588,
+            "totalSize": 241647616,
+            "embedderHeapUsedSize": 5997120,
+            "backingStorageSize": 138709596
+          },
+          "dom": {
+            "documents": 1,
+            "nodes": 10039,
+            "jsEventListeners": 407
+          },
+          "detached": null,
+          "listeners": null
+        },
+        {
+          "tag": "11-mine",
+          "scene": "mine",
+          "quality": "low",
+          "gl": {
+            "waterTextures": 0,
+            "records": 58,
+            "active": 45,
+            "mirrorResources": 0,
+            "imageTextures": 0,
+            "rippleBodyTextures": 0,
+            "shadowResources": 4,
+            "shadowSize": 512,
+            "shadowPassCount": 856,
+            "shadowFinite": true,
+            "shadowDraws": 0,
+            "shadowStatic": 26,
+            "shadowStaticRebuilds": 39,
+            "culled": 8,
+            "drawn": 166,
+            "suppressed": 0,
+            "rippleSurfaces": 0,
+            "rippleWaves": 0
+          },
+          "frames": 858,
+          "timing": {
+            "boot": 245,
+            "renderer": 281,
+            "ready": 4387,
+            "frame1": 4389,
+            "drawn": 4823,
+            "frame2": 4861,
+            "frame3": 4892,
+            "room": 60377,
+            "track": 138105,
+            "racers": 138110,
+            "drop world": 175815,
+            "orbit world": 218513,
+            "island": 230920,
+            "props": 239143,
+            "rockGuides": 239670,
+            "pile": 239721,
+            "cavemen": 239732,
+            "guides": 239793,
+            "visibility-start": 239796,
+            "visibility": 239797,
+            "covered-view-start": 239797,
+            "covered-view": 239848
+          },
+          "tess": null,
+          "arcade": null,
+          "timechain": {
+            "preview": null,
+            "room": null
+          },
+          "ui": null,
+          "usage": {
+            "usedSize": 229439284,
+            "totalSize": 234012672,
+            "embedderHeapUsedSize": 5931536,
+            "backingStorageSize": 98464262
+          },
+          "dom": {
+            "documents": 1,
+            "nodes": 10404,
+            "jsEventListeners": 383
+          },
+          "detached": null,
+          "listeners": null
+        },
+        {
+          "tag": "12-hub",
+          "scene": "hub",
+          "quality": "low",
+          "gl": {
+            "waterTextures": 0,
+            "records": 908,
+            "active": 896,
+            "mirrorResources": 4,
+            "imageTextures": 1,
+            "rippleBodyTextures": 0,
+            "shadowResources": 4,
+            "shadowSize": 512,
+            "shadowPassCount": 879,
+            "shadowFinite": true,
+            "shadowDraws": 445,
+            "shadowStatic": 3,
+            "shadowStaticRebuilds": 40,
+            "culled": 1036,
+            "drawn": 37374,
+            "suppressed": 0,
+            "rippleSurfaces": 1,
+            "rippleWaves": 4
+          },
+          "frames": 881,
+          "timing": {
+            "boot": 245,
+            "renderer": 281,
+            "ready": 4387,
+            "frame1": 4389,
+            "drawn": 4823,
+            "frame2": 4861,
+            "frame3": 4892,
+            "room": 60377,
+            "track": 138105,
+            "racers": 138110,
+            "drop world": 175815,
+            "orbit world": 218513,
+            "island": 282330,
+            "props": 299717,
+            "rockGuides": 299746,
+            "pile": 299788,
+            "cavemen": 299800,
+            "guides": 299859,
+            "visibility-start": 299862,
+            "visibility": 299864,
+            "covered-view-start": 299864,
+            "covered-view": 299914
+          },
+          "tess": null,
+          "arcade": null,
+          "timechain": {
+            "preview": null,
+            "room": null
+          },
+          "ui": null,
+          "usage": {
+            "usedSize": 238384608,
+            "totalSize": 241385472,
+            "embedderHeapUsedSize": 6265040,
+            "backingStorageSize": 137623322
+          },
+          "dom": {
+            "documents": 1,
+            "nodes": 10048,
+            "jsEventListeners": 407
+          },
+          "detached": null,
+          "listeners": null
+        },
+        {
+          "tag": "13-factory",
+          "scene": "factory",
+          "quality": "low",
+          "gl": {
+            "waterTextures": 0,
+            "records": 177,
+            "active": 174,
+            "mirrorResources": 13,
+            "imageTextures": 23,
+            "rippleBodyTextures": 0,
+            "shadowResources": 4,
+            "shadowSize": 512,
+            "shadowPassCount": 979,
+            "shadowFinite": true,
+            "shadowDraws": 20,
+            "shadowStatic": 44,
+            "shadowStaticRebuilds": 42,
+            "culled": 76,
+            "drawn": 450,
+            "suppressed": 0,
+            "rippleSurfaces": 1,
+            "rippleWaves": 4
+          },
+          "frames": 981,
+          "timing": {
+            "boot": 245,
+            "renderer": 281,
+            "ready": 4387,
+            "frame1": 4389,
+            "drawn": 4823,
+            "frame2": 4861,
+            "frame3": 4892,
+            "room": 60377,
+            "track": 138105,
+            "racers": 138110,
+            "drop world": 175815,
+            "orbit world": 218513,
+            "island": 282330,
+            "props": 299717,
+            "rockGuides": 299746,
+            "pile": 299788,
+            "cavemen": 299800,
+            "guides": 299859,
+            "visibility-start": 299862,
+            "visibility": 299864,
+            "covered-view-start": 299864,
+            "covered-view": 299914
+          },
+          "tess": {
+            "meshes": 12,
+            "faces": 5892
+          },
+          "arcade": null,
+          "timechain": {
+            "preview": null,
+            "room": null
+          },
+          "ui": null,
+          "usage": {
+            "usedSize": 243773488,
+            "totalSize": 246890496,
+            "embedderHeapUsedSize": 6264984,
+            "backingStorageSize": 99710732
+          },
+          "dom": {
+            "documents": 1,
+            "nodes": 10059,
+            "jsEventListeners": 381
+          },
+          "detached": null,
+          "listeners": null
+        },
+        {
+          "tag": "14-hub",
+          "scene": "hub",
+          "quality": "low",
+          "gl": {
+            "waterTextures": 0,
+            "records": 898,
+            "active": 898,
+            "mirrorResources": 4,
+            "imageTextures": 1,
+            "rippleBodyTextures": 0,
+            "shadowResources": 4,
+            "shadowSize": 512,
+            "shadowPassCount": 1008,
+            "shadowFinite": true,
+            "shadowDraws": 448,
+            "shadowStatic": 0,
+            "shadowStaticRebuilds": 43,
+            "culled": 1036,
+            "drawn": 37379,
+            "suppressed": 0,
+            "rippleSurfaces": 1,
+            "rippleWaves": 3
+          },
+          "frames": 1010,
+          "timing": {
+            "boot": 245,
+            "renderer": 281,
+            "ready": 4387,
+            "frame1": 4389,
+            "drawn": 4823,
+            "frame2": 4861,
+            "frame3": 4892,
+            "room": 60377,
+            "track": 138105,
+            "racers": 138110,
+            "drop world": 175815,
+            "orbit world": 218513,
+            "island": 324320,
+            "props": 333393,
+            "rockGuides": 335460,
+            "pile": 336727,
+            "cavemen": 337003,
+            "guides": 338762,
+            "visibility-start": 338861,
+            "visibility": 338919,
+            "covered-view-start": 338919,
+            "covered-view": 340678
+          },
+          "tess": null,
+          "arcade": null,
+          "timechain": {
+            "preview": null,
+            "room": null
+          },
+          "ui": null,
+          "usage": {
+            "usedSize": 239961828,
+            "totalSize": 243482624,
+            "embedderHeapUsedSize": 6397448,
+            "backingStorageSize": 137611330
+          },
+          "dom": {
+            "documents": 1,
+            "nodes": 10066,
+            "jsEventListeners": 407
+          },
+          "detached": null,
+          "listeners": null
+        },
+        {
+          "tag": "15-bifrost",
+          "scene": "bifrost",
+          "quality": "low",
+          "gl": {
+            "waterTextures": 0,
+            "records": 94,
+            "active": 94,
+            "mirrorResources": 7,
+            "imageTextures": 4,
+            "rippleBodyTextures": 0,
+            "shadowResources": 4,
+            "shadowSize": 512,
+            "shadowPassCount": 1100,
+            "shadowFinite": true,
+            "shadowDraws": 4,
+            "shadowStatic": 25,
+            "shadowStaticRebuilds": 45,
+            "culled": 88,
+            "drawn": 261,
+            "suppressed": 0,
+            "rippleSurfaces": 2,
+            "rippleWaves": 6
+          },
+          "frames": 1100,
+          "timing": {
+            "boot": 245,
+            "renderer": 281,
+            "ready": 4387,
+            "frame1": 4389,
+            "drawn": 4823,
+            "frame2": 4861,
+            "frame3": 4892,
+            "room": 60377,
+            "track": 138105,
+            "racers": 138110,
+            "drop world": 175815,
+            "orbit world": 218513,
+            "island": 324320,
+            "props": 333393,
+            "rockGuides": 335460,
+            "pile": 336727,
+            "cavemen": 337003,
+            "guides": 338762,
+            "visibility-start": 338861,
+            "visibility": 338919,
+            "covered-view-start": 338919,
+            "covered-view": 340678
+          },
+          "tess": null,
+          "arcade": null,
+          "timechain": {
+            "preview": null,
+            "room": null
+          },
+          "ui": null,
+          "usage": {
+            "usedSize": 246695116,
+            "totalSize": 250085376,
+            "embedderHeapUsedSize": 5956736,
+            "backingStorageSize": 102004400
+          },
+          "dom": {
+            "documents": 1,
+            "nodes": 10032,
+            "jsEventListeners": 371
+          },
+          "detached": null,
+          "listeners": null
+        },
+        {
+          "tag": "16-hub",
+          "scene": "hub",
+          "quality": "low",
+          "gl": {
+            "waterTextures": 0,
+            "records": 906,
+            "active": 906,
+            "mirrorResources": 1,
+            "imageTextures": 0,
+            "rippleBodyTextures": 0,
+            "shadowResources": 4,
+            "shadowSize": 512,
+            "shadowPassCount": 1127,
+            "shadowFinite": true,
+            "shadowDraws": 448,
+            "shadowStatic": 0,
+            "shadowStaticRebuilds": 46,
+            "culled": 10764,
+            "drawn": 27656,
+            "suppressed": 0,
+            "rippleSurfaces": 1,
+            "rippleWaves": 3
+          },
+          "frames": 1127,
+          "timing": {
+            "boot": 245,
+            "renderer": 281,
+            "ready": 4387,
+            "frame1": 4389,
+            "drawn": 4823,
+            "frame2": 4861,
+            "frame3": 4892,
+            "room": 60377,
+            "track": 138105,
+            "racers": 138110,
+            "drop world": 175815,
+            "orbit world": 218513,
+            "island": 359245,
+            "props": 359820,
+            "rockGuides": 359848,
+            "pile": 359891,
+            "cavemen": 359902,
+            "guides": 359966,
+            "visibility-start": 359969,
+            "visibility": 359970,
+            "covered-view-start": 359970,
+            "covered-view": 360162
+          },
+          "tess": null,
+          "arcade": null,
+          "timechain": {
+            "preview": null,
+            "room": null
+          },
+          "ui": null,
+          "usage": {
+            "usedSize": 245876584,
+            "totalSize": 248987648,
+            "embedderHeapUsedSize": 6449504,
+            "backingStorageSize": 147647987
+          },
+          "dom": {
+            "documents": 1,
+            "nodes": 10072,
+            "jsEventListeners": 407
+          },
+          "detached": null,
+          "listeners": null
+        },
+        {
+          "tag": "17-timechain",
+          "scene": "timechain",
+          "quality": "low",
+          "gl": {
+            "waterTextures": 0,
+            "records": 65,
+            "active": 64,
+            "mirrorResources": 0,
+            "imageTextures": 22,
+            "rippleBodyTextures": 0,
+            "shadowResources": 4,
+            "shadowSize": 512,
+            "shadowPassCount": 1162,
+            "shadowFinite": true,
+            "shadowDraws": 36,
+            "shadowStatic": 0,
+            "shadowStaticRebuilds": 47,
+            "culled": 35,
+            "drawn": 40,
+            "suppressed": 1,
+            "rippleSurfaces": 0,
+            "rippleWaves": 0
+          },
+          "frames": 1162,
+          "timing": {
+            "boot": 245,
+            "renderer": 281,
+            "ready": 4387,
+            "frame1": 4389,
+            "drawn": 4823,
+            "frame2": 4861,
+            "frame3": 4892,
+            "room": 60377,
+            "track": 138105,
+            "racers": 138110,
+            "drop world": 175815,
+            "orbit world": 218513,
+            "island": 359245,
+            "props": 359820,
+            "rockGuides": 359848,
+            "pile": 359891,
+            "cavemen": 359902,
+            "guides": 359966,
+            "visibility-start": 359969,
+            "visibility": 359970,
+            "covered-view-start": 359970,
+            "covered-view": 360162
+          },
+          "tess": null,
+          "arcade": null,
+          "timechain": {
+            "preview": null,
+            "room": null
+          },
+          "ui": null,
+          "usage": {
+            "usedSize": 213528660,
+            "totalSize": 216858624,
+            "embedderHeapUsedSize": 8655632,
+            "backingStorageSize": 107432009
+          },
+          "dom": {
+            "documents": 1,
+            "nodes": 10089,
+            "jsEventListeners": 399
+          },
+          "detached": null,
+          "listeners": null
+        },
+        {
+          "tag": "18-hub",
+          "scene": "hub",
+          "quality": "low",
+          "gl": {
+            "waterTextures": 0,
+            "records": 897,
+            "active": 883,
+            "mirrorResources": 0,
+            "imageTextures": 0,
+            "rippleBodyTextures": 0,
+            "shadowResources": 4,
+            "shadowSize": 512,
+            "shadowPassCount": 1187,
+            "shadowFinite": true,
+            "shadowDraws": 447,
+            "shadowStatic": 1,
+            "shadowStaticRebuilds": 49,
+            "culled": 10797,
+            "drawn": 27576,
+            "suppressed": 0,
+            "rippleSurfaces": 0,
+            "rippleWaves": 0
+          },
+          "frames": 1187,
+          "timing": {
+            "boot": 245,
+            "renderer": 281,
+            "ready": 4387,
+            "frame1": 4389,
+            "drawn": 4823,
+            "frame2": 4861,
+            "frame3": 4892,
+            "room": 60377,
+            "track": 138105,
+            "racers": 138110,
+            "drop world": 175815,
+            "orbit world": 218513,
+            "island": 373003,
+            "props": 379708,
+            "rockGuides": 380506,
+            "pile": 381737,
+            "cavemen": 382144,
+            "guides": 384060,
+            "visibility-start": 384206,
+            "visibility": 384223,
+            "covered-view-start": 384223,
+            "covered-view": 386267
+          },
+          "tess": null,
+          "arcade": null,
+          "timechain": {
+            "preview": null,
+            "room": null
+          },
+          "ui": null,
+          "usage": {
+            "usedSize": 244786176,
+            "totalSize": 247939072,
+            "embedderHeapUsedSize": 6494840,
+            "backingStorageSize": 148476589
+          },
+          "dom": {
+            "documents": 1,
+            "nodes": 10074,
+            "jsEventListeners": 407
+          },
+          "detached": null,
+          "listeners": null
+        },
+        {
+          "tag": "19-dsb",
+          "scene": "dsb",
+          "quality": "low",
+          "gl": {
+            "waterTextures": 2,
+            "records": 357,
+            "active": 354,
+            "mirrorResources": 0,
+            "imageTextures": 0,
+            "rippleBodyTextures": 0,
+            "shadowResources": 4,
+            "shadowSize": 512,
+            "shadowPassCount": 1214,
+            "shadowFinite": true,
+            "shadowDraws": 269,
+            "shadowStatic": 0,
+            "shadowStaticRebuilds": 50,
+            "culled": 861,
+            "drawn": 4753,
+            "suppressed": 0,
+            "rippleSurfaces": 0,
+            "rippleWaves": 0
+          },
+          "frames": 1214,
+          "timing": {
+            "boot": 245,
+            "renderer": 281,
+            "ready": 4387,
+            "frame1": 4389,
+            "drawn": 4823,
+            "frame2": 4861,
+            "frame3": 4892,
+            "room": 60377,
+            "track": 138105,
+            "racers": 138110,
+            "drop world": 175815,
+            "orbit world": 218513,
+            "island": 373003,
+            "props": 379708,
+            "rockGuides": 380506,
+            "pile": 381737,
+            "cavemen": 382144,
+            "guides": 384060,
+            "visibility-start": 384206,
+            "visibility": 384223,
+            "covered-view-start": 384223,
+            "covered-view": 386267
+          },
+          "tess": null,
+          "arcade": null,
+          "timechain": {
+            "preview": null,
+            "room": null
+          },
+          "ui": null,
+          "usage": {
+            "usedSize": 257577744,
+            "totalSize": 260816896,
+            "embedderHeapUsedSize": 6539608,
+            "backingStorageSize": 114466682
+          },
+          "dom": {
+            "documents": 1,
+            "nodes": 10067,
+            "jsEventListeners": 416
+          },
+          "detached": null,
+          "listeners": null
+        },
+        {
+          "tag": "20-hub",
+          "scene": "hub",
+          "quality": "low",
+          "gl": {
+            "waterTextures": 0,
+            "records": 897,
+            "active": 893,
+            "mirrorResources": 4,
+            "imageTextures": 1,
+            "rippleBodyTextures": 0,
+            "shadowResources": 4,
+            "shadowSize": 512,
+            "shadowPassCount": 1234,
+            "shadowFinite": true,
+            "shadowDraws": 466,
+            "shadowStatic": 0,
+            "shadowStaticRebuilds": 51,
+            "culled": 876,
+            "drawn": 37543,
+            "suppressed": 0,
+            "rippleSurfaces": 1,
+            "rippleWaves": 2
+          },
+          "frames": 1234,
+          "timing": {
+            "boot": 245,
+            "renderer": 281,
+            "ready": 4387,
+            "frame1": 4389,
+            "drawn": 4823,
+            "frame2": 4861,
+            "frame3": 4892,
+            "room": 60377,
+            "track": 138105,
+            "racers": 138110,
+            "drop world": 175815,
+            "orbit world": 218513,
+            "island": 406614,
+            "props": 414199,
+            "rockGuides": 415143,
+            "pile": 416094,
+            "cavemen": 416363,
+            "guides": 418447,
+            "visibility-start": 418525,
+            "visibility": 419835,
+            "covered-view-start": 419835,
+            "covered-view": 419884
+          },
+          "tess": null,
+          "arcade": null,
+          "timechain": {
+            "preview": null,
+            "room": null
+          },
+          "ui": null,
+          "usage": {
+            "usedSize": 261898968,
+            "totalSize": 265289728,
+            "embedderHeapUsedSize": 6898360,
+            "backingStorageSize": 153924618
+          },
+          "dom": {
+            "documents": 1,
+            "nodes": 10084,
+            "jsEventListeners": 407
+          },
+          "detached": null,
+          "listeners": null
+        }
+      ],
+      "travels": [
+        {
+          "scene": "lab",
+          "ms": 1870.6000000238419,
+          "tasks": {
+            "max": 684,
+            "count": 18
+          }
+        },
+        {
+          "scene": "hub",
+          "ms": 22187.900000035763,
+          "tasks": {
+            "max": 20663,
+            "count": 18
+          }
+        },
+        {
+          "scene": "arcade",
+          "ms": 1802.800000011921,
+          "tasks": {
+            "max": 499,
+            "count": 22
+          }
+        },
+        {
+          "scene": "hub",
+          "ms": 5028,
+          "tasks": {
+            "max": 3857,
+            "count": 12
+          }
+        },
+        {
+          "scene": "race",
+          "ms": 793.0999999642372,
+          "tasks": {
+            "max": 137,
+            "count": 11
+          }
+        },
+        {
+          "scene": "hub",
+          "ms": 21069.899999976158,
+          "tasks": {
+            "max": 19778,
+            "count": 10
+          }
+        },
+        {
+          "scene": "drop",
+          "ms": 2971.5,
+          "tasks": {
+            "max": 1346,
+            "count": 4
+          }
+        },
+        {
+          "scene": "hub",
+          "ms": 22884.30000001192,
+          "tasks": {
+            "max": 21450,
+            "count": 11
+          }
+        },
+        {
+          "scene": "orbit",
+          "ms": 2688.600000023842,
+          "tasks": {
+            "max": 1399,
+            "count": 5
+          }
+        },
+        {
+          "scene": "hub",
+          "ms": 12410.199999988079,
+          "tasks": {
+            "max": 9453,
+            "count": 11
+          }
+        },
+        {
+          "scene": "mine",
+          "ms": 959.4000000357628,
+          "tasks": {
+            "max": 275,
+            "count": 11
+          }
+        },
+        {
+          "scene": "hub",
+          "ms": 20102.200000047684,
+          "tasks": {
+            "max": 18008,
+            "count": 12
+          }
+        },
+        {
+          "scene": "factory",
+          "ms": 1128.300000011921,
+          "tasks": {
+            "max": 518,
+            "count": 7
+          }
+        },
+        {
+          "scene": "hub",
+          "ms": 18390.399999976158,
+          "tasks": {
+            "max": 16743,
+            "count": 16
+          }
+        },
+        {
+          "scene": "bifrost",
+          "ms": 1664.699999988079,
+          "tasks": {
+            "max": 593,
+            "count": 10
+          }
+        },
+        {
+          "scene": "hub",
+          "ms": 2429.599999964237,
+          "tasks": {
+            "max": 1309,
+            "count": 18
+          }
+        },
+        {
+          "scene": "timechain",
+          "ms": 988.8000000119209,
+          "tasks": {
+            "max": 395,
+            "count": 26
+          }
+        },
+        {
+          "scene": "hub",
+          "ms": 14922.399999976158,
+          "tasks": {
+            "max": 13786,
+            "count": 12
+          }
+        },
+        {
+          "scene": "dsb",
+          "ms": 2106,
+          "tasks": {
+            "max": 882,
+            "count": 21
+          }
+        },
+        {
+          "scene": "hub",
+          "ms": 16217.800000011921,
+          "tasks": {
+            "max": 13696,
+            "count": 15
+          }
+        }
+      ],
+      "logs": []
     }
   ],
   "timechainGolden": {

@@ -109,3 +109,24 @@ This fixes roster SVG churn, not a demonstrated heap-floor reduction. The report
 The first after run timed out during a later transition without console errors. It was not used as successful evidence. A fresh run completed all ten laps; its timeout includes scene/frame diagnostics and allows 90 seconds. The before run completed under the original 30-second limit. Transition durations vary and are not speed claims.
 
 Validation: changed JavaScript parses; unit tier 264/264; focused HUD regression plus global tier 266/266. The regression uses real scene transitions, verifies the departed signal no longer fires and the incoming signal fires once, and clicks donor units and the away toggle on the reused nodes. Hosted DEBUG teardown and the completed ten-lap console are clean. PR #265 and #267 still apply; #193's changed DSB context three-way merges cleanly with these listener options. Full scene/performance acceptance remains pending. The follow-up records Chrome 155, Apple M1 Pro through ANGLE/Metal, DPR 1 and 32 GiB device memory. Raw listener lists stay untracked; committed fingerprints pin their exact equality.
+
+## 1.6a — The tour's second island
+
+The ten-scene tour disproves the brief's one-island-cache premise. The hub calls `terrain.island` with the Factory's roof opening; Drop and Orbit call it without that opening. `ISLANDS` therefore holds two complete voxel/mesh graphs after either game is visited. The retainer is the terrain module's `ISLANDS` Map → seed-1 entry → geometry/cutaway/collision graph, independent of `models.release`.
+
+Each terrain key now has its own tracked owner. Drop → Orbit still shares the same unperforated island while it is live; their last departure drops its Map entry. The roof-open hub keeps its own key. No geometry builder, positions, faces or collision input changes.
+
+The matching tours are Lab, Arcade, Rally, Drop, Orbit, Mine, Factory, Bifrost, Timechain Room 1 and DSB, with a hub return after each. Both builds start at high and step down to low under the same governor. These are residency comparisons; the forced-GC runs' highly variable transition durations are not speed acceptance results.
+
+| Measurement | Before | After |
+|---|---:|---:|
+| Hub after Drop, combined floor | 418.14 MiB | 354.60 MiB |
+| Hub after all ten, JS heap | 285.10 MiB | 249.77 MiB |
+| Hub after all ten, backing storage | 177.69 MiB | 146.79 MiB |
+| Hub after all ten, combined floor | 462.78 MiB | 396.56 MiB |
+| Boot → final combined growth | 95.80 MiB | 33.69 MiB |
+| Final native listeners | 407 | 407 |
+
+The ten-scene reduction is 66.22 MiB. The ≤ boot + 15 MB target is still not met; the next investigation covers remaining model caches and historical hub ownership. This is one demonstrated retention fix, not a claim that task 1.6 is finished.
+
+Validation: syntax/build clean, unit tier 265/265, both full hosted DEBUG tours complete with clean consoles. The new unit check proves per-key sharing and release while retaining the roof-open hub and preserving the rebuilt game's mesh counts and sampled support heights. #265 and #267 still apply cleanly; the terrain change does not touch the other open PRs.

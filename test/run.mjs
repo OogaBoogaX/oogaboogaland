@@ -18007,6 +18007,23 @@ record("character visibility source bakes: ownership wrappers share exact immuta
     record("terrain camera witnesses: one four-byte slot per authored sample stays bounded and is released and rearmed across visits", bytes === expected && bytes > 0 && stable && released && renewed, JSON.stringify({ bytes, expected, stable, released, renewed }));
   }
 
+  {
+    const M = BL.models, factory = BL.caves.slots.find(slot => slot.scene === "factory");
+    const homeOptions = { seed: 1, roofHole: { id: factory.id, ...BL.factoryModels.ROOF_TUBE } };
+    M.setScope("hub"); const home = BL.terrain.island(homeOptions);
+    M.setScope("drop"); const bare = BL.terrain.island({ seed: 1 });
+    M.setScope("orbit"); const shared = BL.terrain.island({ seed: 1 }) === bare;
+    M.release("drop", ["hub", "orbit"]);
+    const keptNext = BL.terrain.island({ seed: 1 }) === bare;
+    M.release("orbit", ["hub"]);
+    M.setScope("hub"); const keptHome = BL.terrain.island(homeOptions) === home;
+    M.setScope("drop"); const rebuilt = BL.terrain.island({ seed: 1 });
+    const same = rebuilt.geometry.faces.length === bare.geometry.faces.length && rebuilt.geometry.verts.length === bare.geometry.verts.length
+      && [[0, 0], [12, 8], [-20, 14]].every(([x, z]) => rebuilt.surfaceAt(x, z) === bare.surfaceAt(x, z));
+    M.release("drop", ["hub"]); M.release("hub", []); M.setScope(null);
+    record("terrain residency: the roof-open hub stays cached, Drop and Orbit share their own live key, and their last departure releases that graph without changing its rebuilt shape", shared && keptNext && keptHome && rebuilt !== bare && same,
+      JSON.stringify({ shared, keptNext, keptHome, rebuilt: rebuilt !== bare, same }));
+  }
 };
 
 

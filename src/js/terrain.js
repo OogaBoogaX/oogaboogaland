@@ -440,7 +440,7 @@
   const island = ({ seed = 1, roofHole = null } = {}) => {
     const cacheKey = roofHole ? `${seed}:${roofHole.id}:${roofHole.x}:${roofHole.z}:${roofHole.radius}` : seed;
     const hit = ISLANDS.get(cacheKey);
-    if (hit) return hit;
+    if (hit) { hit.scope.use(); return hit.value; }
     const rand = mulberry32(seed);
     const noise = valueNoise(rand);
     const spoke = (angle, axis = angle) => {
@@ -2478,7 +2478,11 @@
       unit: UNIT,
       pathUnit: PATH_UNIT
     };
-    ISLANDS.set(cacheKey, built);
+    // Drop and Orbit use an unperforated island; the hub has the Factory roof opening. Track each key separately
+    // so the games' second full voxel/mesh graph does not stay resident after a return to the hub.
+    const scope = BL.models.track(() => ISLANDS.delete(cacheKey));
+    scope.use();
+    ISLANDS.set(cacheKey, { value: built, scope });
     return built;
   };
   BL.terrain = { makeGrid, gridGeometry, compactVertices, island, segmentBoxClear, cutawaySourceFromVox, PALETTE, MAX_HEIGHT, TIMECHAIN, POOL_APPROACH };
