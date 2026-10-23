@@ -1667,7 +1667,7 @@ void main() {
     const mirrorInvViewProj = mat4.create();
     const FRUSTUM = new Float32Array(24), LIGHT_FRUSTUM = new Float32Array(24), MIRROR_FRUSTUM = new Float32Array(24);
     const CENTER = new Float32Array(3), CULL = new Float64Array(4);
-    let culled = 0, drawn = 0, suppressed = 0, shadowPassCount = 0, rippleSurfaces = 0, rippleWaves = 0;
+    let culled = 0, drawn = 0, suppressed = 0, smallCulled = 0, shadowPassCount = 0, rippleSurfaces = 0, rippleWaves = 0;
     // Static casters live in a cached depth map (res.shadow.staticFb) baked under shadowBaked; the working map
     // starts each frame as a copy of it and takes only the moving casters.
     let shadowFrame = 0, shadowBake = 0, shadowBakedCount = 0, shadowStaticValid = false, shadowSubset = 0, shadowDraws = 0, shadowStaticRebuilds = 0;
@@ -2561,7 +2561,14 @@ void main() {
         if (rec.geometry.castShadow === false) continue;
         const sphere = rec.batch && rec.batch.cullSphere;
         let visible = rec.batch ? !sphere || sphereInFrustum(sphere[0], sphere[1], sphere[2], sphere[3] + CULL_MARGIN, LIGHT_FRUSTUM) : false;
-        for (let k = 0; !rec.batch && !visible && k < rec.count; k++) visible = slotInFrustum(rec.spheres, k * 4, LIGHT_FRUSTUM);
+        for (let k = 0; !rec.batch && !visible && k < rec.count; k++) {
+          const node = rec.nodes[k], o = k * 4;
+          // A marked prop's true physical bound may fall wholly outside the shadow volume even while the
+          // camera's extra one-metre cull margin overlaps it. Keep unmarked/rig/cloud bounds unchanged.
+          visible = screenCullable(node) && !node.matrixCloud
+            ? sphereInFrustum(rec.spheres[o],rec.spheres[o+1],rec.spheres[o+2],Math.min(rec.spheres[o+3],physicalRadius(node.geometry,node.world,0,false)),LIGHT_FRUSTUM)
+            : slotInFrustum(rec.spheres,o,LIGHT_FRUSTUM);
+        }
         rec.lightVisible = visible;
       }
     };
@@ -2592,6 +2599,15 @@ void main() {
         for (let k = 0; !rec.batch && !visible && k < rec.count; k++) visible = slotInFrustum(rec.spheres, k * 4, MIRROR_FRUSTUM);
         rec.mirrorVisible = visible;
       }
+    };
+    // Only explicitly marked props participate: a character's small parts and the tiny glyphs of a visible
+    // Matrix mosaic remain one authored picture. Main-camera rejection never removes shadow/mirror instances.
+    const screenStates = new WeakMap();
+    const screenCullable = (node) => {
+      const g = node.geometry;
+      return node.screenCull === true && !g.meshRig && !g.projective && !g.portalSurface && !g.imageSurface
+        && !g.reflector && !g.mirrorSource && !g.matrixGlyph && !g.matrixRevealBacking && !g.matrixLocalGlyphSurface
+        && !g.matrixSourceGeometry && !node.mirror && !node.mirrorPortal;
     };
     const physicalRadius = (g, w, o = 0, deform = true) => {
       const b = boundsOf(g), a = Math.abs(w[o]), c = Math.abs(w[o + 1]), d = Math.abs(w[o + 2]);
@@ -2626,6 +2642,25 @@ void main() {
       const minY = Math.min((ny-dy)/near,(ny-dy)/far,(ny+dy)/near,(ny+dy)/far);
       const maxY = Math.max((ny-dy)/near,(ny-dy)/far,(ny+dy)/near,(ny+dy)/far);
       return Math.max((maxX-minX)*width,(maxY-minY)*height)*0.5;
+    };
+    const screenVisible = (node, s = null, o = 0, count = 0) => {
+      if (!screenCullable(node)) return true;
+      const threshold = screenStates.get(node) === false ? 2.2 : 1.8, g = node.geometry;
+      let visible = false;
+      if (node.instanceData) {
+        // Preserve each explicit batch as one draw and one upload. Reject it only if every instance in its
+        // camera prefix is tiny; mixed batches retain their original data/order and all passes' counts.
+        const data = node.instanceData, b = boundsOf(g), cx = b.center[0], cy = b.center[1], cz = b.center[2];
+        for (let i = 0; !visible && i < count; i++) {
+          const p = i*INSTANCE_FLOATS;
+          const x = data[p]*cx+data[p+4]*cy+data[p+8]*cz+data[p+12];
+          const y = data[p+1]*cx+data[p+5]*cy+data[p+9]*cz+data[p+13];
+          const z = data[p+2]*cx+data[p+6]*cy+data[p+10]*cz+data[p+14];
+          visible = screenDiameter(x,y,z,physicalRadius(g,data,p)) >= threshold;
+        }
+      } else visible = screenDiameter(s[o],s[o+1],s[o+2],physicalRadius(g,node.world)) >= threshold;
+      if (visible !== screenStates.get(node)) screenStates.set(node,visible);
+      return visible;
     };
     const foliageStates = new WeakMap();
     const foliageGeometry = (node) => {
@@ -2684,6 +2719,10 @@ void main() {
         rec.drawCount = node.drawInstanceCount === undefined ? rec.count : Math.max(0, Math.min(rec.count, node.drawInstanceCount));
         suppressed += rec.count - rec.drawCount;
         rec.offscreen = !!node.cullSphere && !sphereInFrustum(node.cullSphere[0], node.cullSphere[1], node.cullSphere[2], node.cullSphere[3] + CULL_MARGIN);
+        if (!rec.offscreen && !screenVisible(node,null,0,rec.drawCount)) {
+          rec.offscreen = true;
+          smallCulled += rec.drawCount;
+        }
         return;
       }
       // In-frustum nodes stay in front of the culled ones by swapping into the draw region.
@@ -2699,8 +2738,9 @@ void main() {
       if (node.smokeOpacity === 0 || hiddenFromCamera(node)) {
         rec.cameraHiddenCount++;
         suppressed++;
-      } else if (slotInFrustum(rec.spheres, idx * 4, FRUSTUM)) drawSlot(rec, idx);
-      else culled++;
+      } else if (!slotInFrustum(rec.spheres, idx * 4, FRUSTUM)) culled++;
+      else if (screenVisible(node,rec.spheres,idx*4)) drawSlot(rec,idx);
+      else { culled++; smallCulled++; }
     };
     const collectRig = (node) => { if (!node.meshRigSource) collect(node); };
     const updateRig = (rec) => {
@@ -3982,7 +4022,7 @@ void main() {
       mirrorDebug.ripples = 0;
       mirrorDebug.bodyContacts = mirrorDebug.bodyWaves = 0;
       mirror.shards = mirrorDebug.shardsDrawn = 0;
-      culled = drawn = suppressed = rippleSurfaces = rippleWaves = 0;
+      culled = drawn = suppressed = smallCulled = rippleSurfaces = rippleWaves = 0;
       shadowFrame++;
       updateWorld(root, null);
       traverseVisible(root, collectForRender);
@@ -4406,7 +4446,7 @@ void main() {
       get stats() {
         let shadowFinite = true;
         for (let i = 0; i < 16; i++) if (!Number.isFinite(lightViewProj[i])) shadowFinite = false;
-        return { instanceStreamCPUBytes: instanceStream.data ? instanceStream.data.byteLength : 0, instanceStreamGPUBytes: instanceStream.buffer ? instanceStream.capacity * 4 * 6 : 0, waterTextures: dsbGPU?2:0, records: records.size, active: activeRecords.length, mirrorResources: mirrorDebug.resources, imageTextures, rippleBodyTextures, shadowResources: res.shadow ? 4 : 0, shadowSize: res.shadow ? res.shadow.size : 0, shadowPassCount, shadowFinite, shadowDraws, shadowStatic: shadowStaticValid ? shadowBakedCount : 0, shadowStaticRebuilds, culled, drawn, suppressed, rippleSurfaces, rippleWaves };
+        return { instanceStreamCPUBytes: instanceStream.data ? instanceStream.data.byteLength : 0, instanceStreamGPUBytes: instanceStream.buffer ? instanceStream.capacity * 4 * 6 : 0, waterTextures: dsbGPU?2:0, records: records.size, active: activeRecords.length, mirrorResources: mirrorDebug.resources, imageTextures, rippleBodyTextures, shadowResources: res.shadow ? 4 : 0, shadowSize: res.shadow ? res.shadow.size : 0, shadowPassCount, shadowFinite, shadowDraws, shadowStatic: shadowStaticValid ? shadowBakedCount : 0, shadowStaticRebuilds, culled, drawn, suppressed, smallCulled, rippleSurfaces, rippleWaves };
       },
       get mirror() {
         return mirrorDebug;

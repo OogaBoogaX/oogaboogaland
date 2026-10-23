@@ -1,0 +1,660 @@
+{
+  "task": "2.5",
+  "baseline": "e6c828f (same staged source as2.3final)",
+  "before": {
+    "label": "phase-2-3-final",
+    "stagedSHA256": "07d7cd88b3f79969fc49fda18c3084f033f03a073cb59b0c3bc1991eb415806b",
+    "hostRuntime": {
+      "arch": "arm64",
+      "node": "v24.19.0",
+      "chromeArchRequested": "arm64"
+    },
+    "environment": {
+      "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/155.0.0.0 Safari/537.36",
+      "gpu": "ANGLE (Apple, ANGLE Metal Renderer: Apple M1 Pro, Unspecified Version)",
+      "dpr": 1,
+      "memory": 32,
+      "scene": "hub"
+    },
+    "rows": [
+      {
+        "tier": "high",
+        "foliageLodDisabled": false,
+        "walking": false,
+        "warmSeconds": 8,
+        "intervals": [
+          {
+            "frames": 301,
+            "ms": 5016.500000000002,
+            "createdBuffers": 4,
+            "deletedBuffers": 0,
+            "uploads": 303
+          }
+        ],
+        "travel": 0,
+        "quality": "high",
+        "frames": 301,
+        "fps": 60.00199342170834,
+        "p50": 16.69999999999891,
+        "p95": 16.799999999999272,
+        "p99": 16.799999999999272,
+        "over33": 0,
+        "reclaimedMiBPerSecond": 223.2668852029026,
+        "bufferSubDataPerFrame": 1.0066445182724253,
+        "uploadBytesPerFrame": 884635.7475083056,
+        "bufferDataPerFrame": 0.013289036544850499,
+        "bufferDataBytes": 83200,
+        "copiesPerFrame": 0,
+        "copiedBytesPerFrame": 0,
+        "vertexPointersPerFrame": 1177.5116279069769,
+        "renderCpuMsPerFrame": 3.0385382060592754,
+        "createdBuffers": 4,
+        "deletedBuffers": 0,
+        "textureUpdates": 0,
+        "passes": {
+          "fb12:2048x2048": {
+            "frames": 301,
+            "draws": 28595,
+            "triangles": 90469162,
+            "maxTriangles": 300562,
+            "instances": 389193
+          },
+          "fb14:129x96": {
+            "frames": 301,
+            "draws": 38829,
+            "triangles": 579399891,
+            "maxTriangles": 1938735,
+            "instances": 11112259
+          },
+          "fb4:1440x813": {
+            "frames": 301,
+            "draws": 145834,
+            "triangles": 775825717,
+            "maxTriangles": 2591083,
+            "instances": 11265413
+          },
+          "fb6:360x203": {
+            "frames": 301,
+            "draws": 602,
+            "triangles": 602,
+            "maxTriangles": 2,
+            "instances": 602
+          },
+          "fb7:360x203": {
+            "frames": 301,
+            "draws": 602,
+            "triangles": 602,
+            "maxTriangles": 2,
+            "instances": 602
+          },
+          "fb8:180x101": {
+            "frames": 301,
+            "draws": 602,
+            "triangles": 602,
+            "maxTriangles": 2,
+            "instances": 602
+          },
+          "fb9:180x101": {
+            "frames": 301,
+            "draws": 602,
+            "triangles": 602,
+            "maxTriangles": 2,
+            "instances": 602
+          },
+          "screen:1440x813": {
+            "frames": 301,
+            "draws": 301,
+            "triangles": 301,
+            "maxTriangles": 1,
+            "instances": 301
+          }
+        },
+        "stats": {
+          "instanceStreamCPUBytes": 1101520,
+          "instanceStreamGPUBytes": 6609120,
+          "waterTextures": 0,
+          "records": 945,
+          "active": 902,
+          "mirrorResources": 4,
+          "imageTextures": 1,
+          "rippleBodyTextures": 0,
+          "shadowResources": 4,
+          "shadowSize": 2048,
+          "shadowPassCount": 794,
+          "shadowFinite": true,
+          "shadowDraws": 95,
+          "shadowStatic": 358,
+          "shadowStaticRebuilds": 5,
+          "culled": 1062,
+          "drawn": 37425,
+          "suppressed": 0,
+          "rippleSurfaces": 1,
+          "rippleWaves": 4
+        }
+      },
+      {
+        "tier": "medium",
+        "foliageLodDisabled": false,
+        "walking": false,
+        "warmSeconds": 8,
+        "intervals": [
+          {
+            "frames": 289,
+            "ms": 5016.5,
+            "createdBuffers": 4,
+            "deletedBuffers": 0,
+            "uploads": 289
+          }
+        ],
+        "travel": 0,
+        "quality": "medium",
+        "frames": 289,
+        "fps": 57.60988737167348,
+        "p50": 16.700000000000728,
+        "p95": 16.80000000000291,
+        "p99": 33.39999999999782,
+        "over33": 12,
+        "reclaimedMiBPerSecond": 130.63513045651743,
+        "bufferSubDataPerFrame": 1,
+        "uploadBytesPerFrame": 880965.5363321799,
+        "bufferDataPerFrame": 0.01730103806228374,
+        "bufferDataBytes": 294720,
+        "copiesPerFrame": 0.020761245674740483,
+        "copiedBytesPerFrame": 3.0449826989619377,
+        "vertexPointersPerFrame": 1152.6332179930796,
+        "renderCpuMsPerFrame": 2.624567476317132,
+        "createdBuffers": 4,
+        "deletedBuffers": 0,
+        "textureUpdates": 0,
+        "passes": {
+          "fb15:1024x1024": {
+            "frames": 289,
+            "draws": 28033,
+            "triangles": 76966858,
+            "maxTriangles": 301594,
+            "instances": 374255
+          },
+          "fb4:1440x813": {
+            "frames": 289,
+            "draws": 140222,
+            "triangles": 734406501,
+            "maxTriangles": 2590473,
+            "instances": 10805918
+          },
+          "fb6:360x203": {
+            "frames": 289,
+            "draws": 578,
+            "triangles": 578,
+            "maxTriangles": 2,
+            "instances": 578
+          },
+          "fb7:360x203": {
+            "frames": 289,
+            "draws": 578,
+            "triangles": 578,
+            "maxTriangles": 2,
+            "instances": 578
+          },
+          "fb8:180x101": {
+            "frames": 289,
+            "draws": 578,
+            "triangles": 578,
+            "maxTriangles": 2,
+            "instances": 578
+          },
+          "fb9:180x101": {
+            "frames": 289,
+            "draws": 578,
+            "triangles": 578,
+            "maxTriangles": 2,
+            "instances": 578
+          },
+          "screen:1440x813": {
+            "frames": 289,
+            "draws": 289,
+            "triangles": 289,
+            "maxTriangles": 1,
+            "instances": 289
+          }
+        },
+        "stats": {
+          "instanceStreamCPUBytes": 1101520,
+          "instanceStreamGPUBytes": 6609120,
+          "waterTextures": 0,
+          "records": 948,
+          "active": 902,
+          "mirrorResources": 4,
+          "imageTextures": 1,
+          "rippleBodyTextures": 0,
+          "shadowResources": 4,
+          "shadowSize": 1024,
+          "shadowPassCount": 1588,
+          "shadowFinite": true,
+          "shadowDraws": 97,
+          "shadowStatic": 358,
+          "shadowStaticRebuilds": 6,
+          "culled": 1051,
+          "drawn": 37349,
+          "suppressed": 0,
+          "rippleSurfaces": 1,
+          "rippleWaves": 3
+        }
+      },
+      {
+        "tier": "low",
+        "foliageLodDisabled": false,
+        "walking": false,
+        "warmSeconds": 8,
+        "intervals": [
+          {
+            "frames": 301,
+            "ms": 5016.4000000000015,
+            "createdBuffers": 0,
+            "deletedBuffers": 0,
+            "uploads": 301
+          }
+        ],
+        "travel": 0,
+        "quality": "low",
+        "frames": 301,
+        "fps": 60.00318953831431,
+        "p50": 16.69999999999709,
+        "p95": 16.700000000004366,
+        "p99": 16.80000000000291,
+        "over33": 0,
+        "reclaimedMiBPerSecond": 26.174905282840246,
+        "bufferSubDataPerFrame": 1,
+        "uploadBytesPerFrame": 880210.7641196013,
+        "bufferDataPerFrame": 0.0033222591362126247,
+        "bufferDataBytes": 80,
+        "copiesPerFrame": 0.023255813953488372,
+        "copiedBytesPerFrame": 3.7209302325581395,
+        "vertexPointersPerFrame": 1158.2392026578073,
+        "renderCpuMsPerFrame": 2.7392026576092867,
+        "createdBuffers": 0,
+        "deletedBuffers": 0,
+        "textureUpdates": 0,
+        "passes": {
+          "fb17:512x512": {
+            "frames": 301,
+            "draws": 29235,
+            "triangles": 8428946,
+            "maxTriangles": 28454,
+            "instances": 389833
+          },
+          "fb19:1440x813": {
+            "frames": 301,
+            "draws": 142514,
+            "triangles": 681803667,
+            "maxTriangles": 2280271,
+            "instances": 11246594
+          },
+          "screen:1440x813": {
+            "frames": 301,
+            "draws": 301,
+            "triangles": 301,
+            "maxTriangles": 1,
+            "instances": 301
+          }
+        },
+        "stats": {
+          "instanceStreamCPUBytes": 1101520,
+          "instanceStreamGPUBytes": 6609120,
+          "waterTextures": 0,
+          "records": 949,
+          "active": 903,
+          "mirrorResources": 4,
+          "imageTextures": 1,
+          "rippleBodyTextures": 0,
+          "shadowResources": 4,
+          "shadowSize": 512,
+          "shadowPassCount": 2392,
+          "shadowFinite": true,
+          "shadowDraws": 97,
+          "shadowStatic": 359,
+          "shadowStaticRebuilds": 9,
+          "culled": 1057,
+          "drawn": 37401,
+          "suppressed": 0,
+          "rippleSurfaces": 1,
+          "rippleWaves": 3
+        }
+      }
+    ],
+    "failure": null,
+    "logs": []
+  },
+  "after": {
+    "label": "phase-2-5-after",
+    "stagedSHA256": "62bd6afaebeec39b88e2ef074a11b6fac7c907266da5eae8cf33a76606249db1",
+    "hostRuntime": {
+      "arch": "arm64",
+      "node": "v24.19.0",
+      "chromeArchRequested": "arm64"
+    },
+    "environment": {
+      "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/155.0.0.0 Safari/537.36",
+      "gpu": "ANGLE (Apple, ANGLE Metal Renderer: Apple M1 Pro, Unspecified Version)",
+      "dpr": 1,
+      "memory": 32,
+      "scene": "hub"
+    },
+    "rows": [
+      {
+        "tier": "high",
+        "foliageLodDisabled": false,
+        "walking": false,
+        "warmSeconds": 8,
+        "intervals": [
+          {
+            "frames": 301,
+            "ms": 5016.4000000000015,
+            "createdBuffers": 4,
+            "deletedBuffers": 0,
+            "uploads": 303
+          }
+        ],
+        "travel": 0,
+        "quality": "high",
+        "frames": 301,
+        "fps": 60.00318953831431,
+        "p50": 16.69999999999891,
+        "p95": 16.700000000000728,
+        "p99": 16.80000000000109,
+        "over33": 0,
+        "reclaimedMiBPerSecond": 218.94833961938818,
+        "bufferSubDataPerFrame": 1.0066445182724253,
+        "uploadBytesPerFrame": 884631.7607973422,
+        "bufferDataPerFrame": 0.013289036544850499,
+        "bufferDataBytes": 83200,
+        "copiesPerFrame": 0,
+        "copiedBytesPerFrame": 0,
+        "vertexPointersPerFrame": 1177.9601328903655,
+        "renderCpuMsPerFrame": 3.2335548192955725,
+        "createdBuffers": 4,
+        "deletedBuffers": 0,
+        "textureUpdates": 0,
+        "passes": {
+          "fb12:2048x2048": {
+            "frames": 301,
+            "draws": 28595,
+            "triangles": 90469162,
+            "maxTriangles": 300562,
+            "instances": 389193
+          },
+          "fb14:129x96": {
+            "frames": 301,
+            "draws": 38829,
+            "triangles": 579392883,
+            "maxTriangles": 1938219,
+            "instances": 11112202
+          },
+          "fb4:1440x813": {
+            "frames": 301,
+            "draws": 145861,
+            "triangles": 775820197,
+            "maxTriangles": 2590531,
+            "instances": 11265398
+          },
+          "fb6:360x203": {
+            "frames": 301,
+            "draws": 602,
+            "triangles": 602,
+            "maxTriangles": 2,
+            "instances": 602
+          },
+          "fb7:360x203": {
+            "frames": 301,
+            "draws": 602,
+            "triangles": 602,
+            "maxTriangles": 2,
+            "instances": 602
+          },
+          "fb8:180x101": {
+            "frames": 301,
+            "draws": 602,
+            "triangles": 602,
+            "maxTriangles": 2,
+            "instances": 602
+          },
+          "fb9:180x101": {
+            "frames": 301,
+            "draws": 602,
+            "triangles": 602,
+            "maxTriangles": 2,
+            "instances": 602
+          },
+          "screen:1440x813": {
+            "frames": 301,
+            "draws": 301,
+            "triangles": 301,
+            "maxTriangles": 1,
+            "instances": 301
+          }
+        },
+        "stats": {
+          "instanceStreamCPUBytes": 1102320,
+          "instanceStreamGPUBytes": 6613920,
+          "waterTextures": 0,
+          "records": 945,
+          "active": 904,
+          "mirrorResources": 4,
+          "imageTextures": 1,
+          "rippleBodyTextures": 0,
+          "shadowResources": 4,
+          "shadowSize": 2048,
+          "shadowPassCount": 793,
+          "shadowFinite": true,
+          "shadowDraws": 95,
+          "shadowStatic": 358,
+          "shadowStaticRebuilds": 5,
+          "culled": 1062,
+          "drawn": 37405,
+          "suppressed": 0,
+          "smallCulled": 0,
+          "rippleSurfaces": 1,
+          "rippleWaves": 3
+        }
+      },
+      {
+        "tier": "medium",
+        "foliageLodDisabled": false,
+        "walking": false,
+        "warmSeconds": 8,
+        "intervals": [
+          {
+            "frames": 291,
+            "ms": 5016.5,
+            "createdBuffers": 4,
+            "deletedBuffers": 0,
+            "uploads": 291
+          }
+        ],
+        "travel": 0,
+        "quality": "medium",
+        "frames": 291,
+        "fps": 58.00857171334596,
+        "p50": 16.700000000000728,
+        "p95": 16.799999999999272,
+        "p99": 33.30000000000291,
+        "over33": 10,
+        "reclaimedMiBPerSecond": 131.33914190501667,
+        "bufferSubDataPerFrame": 1,
+        "uploadBytesPerFrame": 881049.8969072165,
+        "bufferDataPerFrame": 0.01718213058419244,
+        "bufferDataBytes": 294720,
+        "copiesPerFrame": 0.027491408934707903,
+        "copiedBytesPerFrame": 4.123711340206185,
+        "vertexPointersPerFrame": 1155.8969072164948,
+        "renderCpuMsPerFrame": 2.7037800685646607,
+        "createdBuffers": 4,
+        "deletedBuffers": 0,
+        "textureUpdates": 0,
+        "passes": {
+          "fb15:1024x1024": {
+            "frames": 291,
+            "draws": 28227,
+            "triangles": 77762382,
+            "maxTriangles": 301594,
+            "instances": 376845
+          },
+          "fb4:1440x813": {
+            "frames": 291,
+            "draws": 141164,
+            "triangles": 739738265,
+            "maxTriangles": 2588877,
+            "instances": 10880567
+          },
+          "fb6:360x203": {
+            "frames": 291,
+            "draws": 582,
+            "triangles": 582,
+            "maxTriangles": 2,
+            "instances": 582
+          },
+          "fb7:360x203": {
+            "frames": 291,
+            "draws": 582,
+            "triangles": 582,
+            "maxTriangles": 2,
+            "instances": 582
+          },
+          "fb8:180x101": {
+            "frames": 291,
+            "draws": 582,
+            "triangles": 582,
+            "maxTriangles": 2,
+            "instances": 582
+          },
+          "fb9:180x101": {
+            "frames": 291,
+            "draws": 582,
+            "triangles": 582,
+            "maxTriangles": 2,
+            "instances": 582
+          },
+          "screen:1440x813": {
+            "frames": 291,
+            "draws": 291,
+            "triangles": 291,
+            "maxTriangles": 1,
+            "instances": 291
+          }
+        },
+        "stats": {
+          "instanceStreamCPUBytes": 1102320,
+          "instanceStreamGPUBytes": 6613920,
+          "waterTextures": 0,
+          "records": 948,
+          "active": 902,
+          "mirrorResources": 4,
+          "imageTextures": 1,
+          "rippleBodyTextures": 0,
+          "shadowResources": 4,
+          "shadowSize": 1024,
+          "shadowPassCount": 1590,
+          "shadowFinite": true,
+          "shadowDraws": 97,
+          "shadowStatic": 358,
+          "shadowStaticRebuilds": 6,
+          "culled": 1050,
+          "drawn": 37342,
+          "suppressed": 0,
+          "smallCulled": 0,
+          "rippleSurfaces": 1,
+          "rippleWaves": 4
+        }
+      },
+      {
+        "tier": "low",
+        "foliageLodDisabled": false,
+        "walking": false,
+        "warmSeconds": 8,
+        "intervals": [
+          {
+            "frames": 301,
+            "ms": 5016.5,
+            "createdBuffers": 0,
+            "deletedBuffers": 0,
+            "uploads": 301
+          }
+        ],
+        "travel": 0,
+        "quality": "low",
+        "frames": 301,
+        "fps": 60.00199342170836,
+        "p50": 16.69999999999709,
+        "p95": 16.700000000004366,
+        "p99": 16.80000000000291,
+        "over33": 0,
+        "reclaimedMiBPerSecond": 30.43474448139499,
+        "bufferSubDataPerFrame": 1,
+        "uploadBytesPerFrame": 880255.6810631229,
+        "bufferDataPerFrame": 0.0033222591362126247,
+        "bufferDataBytes": 80,
+        "copiesPerFrame": 0,
+        "copiedBytesPerFrame": 0,
+        "vertexPointersPerFrame": 1158.2558139534883,
+        "renderCpuMsPerFrame": 2.8704318934896857,
+        "createdBuffers": 0,
+        "deletedBuffers": 0,
+        "textureUpdates": 0,
+        "passes": {
+          "fb17:512x512": {
+            "frames": 301,
+            "draws": 29235,
+            "triangles": 8428946,
+            "maxTriangles": 28454,
+            "instances": 389833
+          },
+          "fb19:1440x813": {
+            "frames": 301,
+            "draws": 145713,
+            "triangles": 684197879,
+            "maxTriangles": 2284931,
+            "instances": 11250913
+          },
+          "screen:1440x813": {
+            "frames": 301,
+            "draws": 301,
+            "triangles": 301,
+            "maxTriangles": 1,
+            "instances": 301
+          }
+        },
+        "stats": {
+          "instanceStreamCPUBytes": 1102320,
+          "instanceStreamGPUBytes": 6613920,
+          "waterTextures": 0,
+          "records": 949,
+          "active": 906,
+          "mirrorResources": 4,
+          "imageTextures": 1,
+          "rippleBodyTextures": 0,
+          "shadowResources": 4,
+          "shadowSize": 512,
+          "shadowPassCount": 2394,
+          "shadowFinite": true,
+          "shadowDraws": 97,
+          "shadowStatic": 359,
+          "shadowStaticRebuilds": 9,
+          "culled": 1036,
+          "drawn": 37424,
+          "suppressed": 0,
+          "smallCulled": 0,
+          "rippleSurfaces": 1,
+          "rippleWaves": 3
+        }
+      }
+    ],
+    "failure": null,
+    "logs": []
+  },
+  "method": "Same fixed pile camera; one focused ARM64 Chrome155 Metal/M1Pro,1440x900 DPR1;8s warmup/5s per tier. Dynamic glyph and crew state vary. Hook-derived GC numbers are not allocation evidence.",
+  "validation": {
+    "checks": "275/275 global + existing birds-eye projection family",
+    "firstRun": "New fixture incorrectly passed sky:false to RGB-valued render option; TypeError before added assertion. Removed invalid fixture options, all assertions unchanged. One retest passed.",
+    "isolated": "8 helper cases; PR193/267 source compatibility; existing extracted CPU/GPU/fallback assertions unchanged."
+  },
+  "limits": "Pile smallCulled is0 at all tiers. Main instance count remains about37.4k; >=30% target not met. Coherent glyph mosaics and mixed batches deliberately preserved."
+}

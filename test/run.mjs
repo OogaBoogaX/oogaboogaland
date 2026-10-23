@@ -8945,6 +8945,39 @@ const hubBirdsEyeProjection = { name: "birds-eye projection", why: "rule: overhe
     && state.filter(r => r.fallback).every(r => r.error < 0.002) && settled.every(r => r.aligned < 0.001 && r.parallel < 1e-6), JSON.stringify(state));
   record("birds-eye projection: rendered near and far objects follow projected positions, including a batch outside the old perspective frustum", samples.every(r => r.pixels[0]?.[0] > r.pixels[0]?.[1] + 40 && r.pixels[1]?.[2] > r.pixels[1]?.[1] + 40
     && (!r.pixels[2] || r.pixels[2][0] > r.pixels[2][1] + 40 && r.pixels[2][2] > r.pixels[2][1] + 40)) && settled.every(r => r.pixels[2]), JSON.stringify(samples.map(({ kind, mix, pixels }) => ({ kind, mix, pixels }))));
+  const culling = await b.evaluate(`(() => {
+    const B = __ooga, S = BL.scene, R = B.renderer, root = S.createNode(), rows = [];
+    const camera = S.createCamera({ near: 0.1, far: 80, orthoHeight: 10, orthoMix: 1 });
+    Object.assign(camera.position,{x:0,y:0,z:10}); Object.assign(camera.target,{x:0,y:0,z:0});
+    const geometry = BL.models.box({w:1,h:1,d:1,color:"#ff0000"});
+    const protectedGeometry = {...BL.models.box({w:1,h:1,d:1,color:"#00ff00"}),matrixGlyph:true};
+    const batchGeometry = BL.models.box({w:1,h:1,d:1,color:"#0000ff"});
+    const small = S.createNode({geometry,screenCull:true}), assembled = S.createNode({geometry});
+    const glyphs = new Float32Array(8*20), particles = new Float32Array(4*20), batch = S.createNode({geometry:batchGeometry,screenCull:true,instanceData:particles,instanceCount:4,instanceVersion:1});
+    const size = px => px*10/(Math.sqrt(3)*R.size.height);
+    const write = (data,i,px,x=0) => {const o=i*20,s=size(px);data[o]=data[o+5]=data[o+10]=s;data[o+15]=data[o+16]=1;data[o+12]=x;};
+    for(let i=0;i<8;i++)write(glyphs,i,.2,(i-4)*.2);
+    for(let i=0;i<4;i++)write(particles,i,.5,(i-2)*.3);
+    const mosaic = S.createNode({geometry:protectedGeometry,screenCull:true,instanceData:glyphs,instanceCount:8,instanceVersion:1});
+    Object.assign(assembled.scale,{x:size(.2),y:size(.2),z:size(.2)});
+    S.addChild(root,small,assembled,mosaic,batch);
+    const originalGlyphs = Array.from(glyphs), originalParticles = Array.from(particles), opts = {bloomStrength:0,shadowStrength:0,ambientFloor:1,directStrength:0};
+    try {
+      for(const pixels of [1,2,2.3,2,1.7,2,2.3]) {
+        const s=size(pixels);Object.assign(small.scale,{x:s,y:s,z:s});R.render(root,camera,opts);
+        rows.push({pixels,drawn:R.stats.drawn,smallCulled:R.stats.smallCulled});
+      }
+      // One visible individual preserves an explicit mixed batch's single draw and upload contract.
+      write(particles,2,3);batch.instanceVersion++;R.render(root,camera,opts);
+      const mixed={drawn:R.stats.drawn,smallCulled:R.stats.smallCulled,count:batch.instanceCount};
+      const preserved = root.children.every(n=>n.visible) && small.geometry===geometry && batch.instanceData===particles
+        && mosaic.instanceData===glyphs && glyphs.every((v,i)=>v===originalGlyphs[i]) && particles.every((v,i)=>i>=40&&i<60||v===originalParticles[i]);
+      return {rows,mixed,preserved,kind:R.kind};
+    } finally {for(const g of [geometry,protectedGeometry,batchGeometry])R.releaseGeometry(g);R.render(BL.scenes.hub.root,B.camera,B.renderOpts);}
+  })()`);
+  record("birds-eye projection: physical screen bounds cull only marked tiny props with hysteresis, preserve coherent glyph mosaics and assembled details, and retain an entire mixed batch", culling.kind === "webgl2"
+    && culling.rows.map(r=>r.drawn).join() === "9,9,10,10,9,9,10" && culling.rows.map(r=>r.smallCulled).join() === "5,5,4,4,5,5,4"
+    && culling.mixed.drawn === 14 && culling.mixed.smallCulled === 0 && culling.mixed.count === 4 && culling.preserved, JSON.stringify(culling));
   const anchors = await b.evaluate(`(() => {
     const B = __ooga, S = BL.scene, root = S.createNode(), actor = S.createNode({ position: { x: 4, y: 0, z: 0 } });
     const bodyGeometry = BL.models.box({ w: 1, h: 2, d: 1, color: "#999999" }), headGeometry = BL.models.box({ w: 1, h: 1, d: 1, color: "#ffffff" });
@@ -17041,7 +17074,7 @@ const reviewCrowdAndFallbackProof = async () => {
   const blocked=c.occupied(body,0,0,0);near.root.visible=false;const hidden=!c.occupied(body,0,0,0);near.root.visible=true;near.root.position.y=3;const above=!c.occupied(body,0,0,0);
   const renderer=await readFile(join(root,"src/js/gl-renderer.js"),"utf8");
   const collect=renderer.slice(renderer.indexOf("    const collect ="),renderer.indexOf("    const updateRig ="));
-  const seen=[],r={rigMode:false,hiddenFromCutaway:()=>false,cutawayFade:0,foliageGeometry:n=>n.geometry,recordFor:g=>{seen.push(g);return {active:true};},suppressed:0,CULL_MARGIN:0,sphereInFrustum:()=>true};
+  const seen=[],r={rigMode:false,hiddenFromCutaway:()=>false,cutawayFade:0,foliageGeometry:n=>n.geometry,screenVisible:()=>true,recordFor:g=>{seen.push(g);return {active:true};},suppressed:0,CULL_MARGIN:0,sphereInFrustum:()=>true};
   runInNewContext(collect+"this.collect=collect;this.collectRig=collectRig;",r);
   const geo={meshRig:{}},original={faces:[{}]},aggregate={geometry:geo,instanceData:[],instanceCount:1},part={geometry:original,meshRigSource:geo.meshRig,instanceData:[],instanceCount:1};
   r.collect(aggregate);r.collect(part);const cpu=seen.length===1&&seen[0]===original;
