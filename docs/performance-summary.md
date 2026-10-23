@@ -27,10 +27,10 @@ Every figure comes from the task note named beside it, measured in ARM64 Chrome 
 
 ## Checks the maintainer needs to see
 
-`untracked/test-ledger.json` holds these under STOP (failed in two consecutive runs; not retried):
+`untracked/test-ledger.json` holds these under STOP (failed in two consecutive runs; not retried), and one was fixed:
 
 - Failing before this work: factory greeter, gorilla rage throw, hub matrix (Chrome hangs), hub mirror (Chrome gone), timechain crossing, Ooga carry orbit, soak: dsb cycles.
-- `canvas2d tour` (hub): hangs since task 4.5, confirmed on a clean export of that commit; its synchronous loop cannot see Drop's asynchronous build arrive. A fix that yields between steps, as `tourGo` now does, is saved unapplied at `untracked/performance/canvas-tour-yield.patch`. Its second run reused the unchanged check because the first edit did not apply.
+- `canvas2d tour` (hub) hung from task 4.5 until its loop yielded a task between steps, as `tourGo` does; with that fix it passes again (every scene arrives and paints on Canvas 2D, clean console).
 
 First failures: birds-eye combat (hub, after task 4.2; gameplay code not touched here), and `hub routes`, `hub fall`, `hub grounding`, which only fail when run by name out of their session and fail identically on clean code.
 
