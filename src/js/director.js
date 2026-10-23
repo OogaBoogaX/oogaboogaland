@@ -267,7 +267,7 @@
     visit(active.root);
     active.liveGeometry(live);
     if (scenes.hub.retained) scenes.hub.cachedGeometry(live);
-    return live;
+    return BL.models.addLods(live);
   };
   // The page's first AudioContext wakes the browser's audio, about 60 ms on the main thread; every later one costs well
   // under a millisecond, closed or not. Paid once here, behind the fade, so a scene's first sound never stalls a frame;

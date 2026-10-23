@@ -1698,5 +1698,63 @@
     }
     glass.push(box({ w: W, h: tall, d: W, color: tint, emissive: 1, offset: { x, y: mid, z } }));
   };
-  BL.models = { beam, forwardLathe, turn, shaded, torus, along, chain, railParts, columnParts, deckGrid, deckPosts, deckParts, stairParts, lanternParts, LANTERN_GLASS, geometry, pushVert, face, cutCylinder, voxCoords, box, bevelBox, panel, lathe, glassVessel, attachGlassShell, tube, ring, polyline, merge, forward, moved, turnedX, turnedY, turnedZ, prism, cached, variants, scopedMap, track, setScope, withScope, release, assertReleased, noShadow, makeVox, voxelGeometry, voxelFaces, banana, bananaGeometry, bananaTileGeometry, bananaPileCoreGeometry, bananaPileRadiusScale, bananaPileHeightOffset, BANANA_AMMO_SCALE, BANANA_PILE_PROFILE, particleGeometry, spareMagazine, caveman, CLUB_PALETTE, GOLD_CLUB_PALETTE, labRoom, buildableGeos, crate, die, dieRotationFor, SWAG, TIER_COLORS };
+  // A base mesh owns its foliage alternatives. Collision and scene nodes keep the original mesh; only the
+  // WebGL collector selects one of these render meshes. Canvas continues drawing that original source.
+  const foliageLods = (high, coarse) => {
+    const medium = { ...high, ...coarse, collisionGeometry: high.collisionGeometry };
+    const b = BL.scene.boundsOf(high), lo = Array.from(b.min), hi = Array.from(b.max), c = b.center;
+    const far = { verts: [], faces: [], lines: [], sway: high.sway, foliageVisibility: false, castShadow: high.castShadow };
+    const planes = [
+      [lo[0], lo[1], c[2], hi[0], lo[1], c[2], hi[0], hi[1], c[2], lo[0], hi[1], c[2]],
+      [c[0], lo[1], lo[2], c[0], lo[1], hi[2], c[0], hi[1], hi[2], c[0], hi[1], lo[2]],
+      [lo[0], c[1], lo[2], hi[0], c[1], lo[2], hi[0], c[1], hi[2], lo[0], c[1], hi[2]]
+    ];
+    for (const plane of planes) {
+      const first = far.verts.length / 3;
+      far.verts.push(...plane);
+      far.faces.push({ i: [first, first + 1, first + 2, first + 3], color: [255, 255, 255], emissive: 0 },
+        { i: [first, first + 3, first + 2, first + 1], color: [255, 255, 255], emissive: 0 });
+    }
+    // Three orthographic silhouettes share one small atlas; normal axes select their own UV rectangle.
+    // Rasterization is deferred until a far record is first prepared, keeping geometry-only builders DOM-free.
+    far.imageSurface = { canvas: null, version: 1, atlas: true, atlasMin: lo, atlasMax: hi, source: medium,
+      rect: [lo[0], lo[1], hi[0] - lo[0], hi[1] - lo[1]], background: [0, 0, 0] };
+    high.foliageLods = { owner: high, medium, far };
+    return high;
+  };
+  const paintFoliageAtlas = (surface) => {
+    if (surface.canvas) return surface.canvas;
+    const tile = 128, canvas = document.createElement("canvas"), geo = surface.source;
+    canvas.width = tile * 3; canvas.height = tile;
+    const ctx = canvas.getContext("2d"), order = new Uint32Array(geo.faces.length), depths = new Float32Array(geo.faces.length);
+    const lo = surface.atlasMin, hi = surface.atlasMax, axes = [[0, 1, 2], [2, 1, 0], [0, 2, 1]];
+    for (let view = 0; view < 3; view++) {
+      const [u, v, depth] = axes[view], sx = (tile - 2) / Math.max(1e-6, hi[u] - lo[u]), sy = (tile - 2) / Math.max(1e-6, hi[v] - lo[v]);
+      for (let i = 0; i < geo.faces.length; i++) {
+        const ids = geo.faces[i].i;
+        let sum = 0; for (const index of ids) sum += geo.verts[index * 3 + depth];
+        order[i] = i; depths[i] = sum / ids.length;
+      }
+      order.sort((a, b) => depths[a] - depths[b]);
+      ctx.save(); ctx.beginPath(); ctx.rect(view * tile + 1, 1, tile - 2, tile - 2); ctx.clip();
+      for (const index of order) {
+        const face = geo.faces[index], color = face.color;
+        ctx.beginPath();
+        for (let i = 0; i < face.i.length; i++) {
+          const at = face.i[i] * 3, x = view * tile + 1 + (geo.verts[at + u] - lo[u]) * sx, y = 1 + (hi[v] - geo.verts[at + v]) * sy;
+          if (i) ctx.lineTo(x, y); else ctx.moveTo(x, y);
+        }
+        ctx.closePath(); ctx.fillStyle = `rgb(${color[0]},${color[1]},${color[2]})`; ctx.fill();
+      }
+      ctx.restore();
+    }
+    surface.canvas = canvas; surface.source = null;
+    return canvas;
+  };
+  // Expand liveness once per ownership walk, including hidden alternatives and a retained hub's meshes.
+  const addLods = (set) => {
+    for (const geo of set) if (geo.foliageLods?.owner === geo) { set.add(geo.foliageLods.medium); set.add(geo.foliageLods.far); }
+    return set;
+  };
+  BL.models = { foliageLods, paintFoliageAtlas, addLods, beam, forwardLathe, turn, shaded, torus, along, chain, railParts, columnParts, deckGrid, deckPosts, deckParts, stairParts, lanternParts, LANTERN_GLASS, geometry, pushVert, face, cutCylinder, voxCoords, box, bevelBox, panel, lathe, glassVessel, attachGlassShell, tube, ring, polyline, merge, forward, moved, turnedX, turnedY, turnedZ, prism, cached, variants, scopedMap, track, setScope, withScope, release, assertReleased, noShadow, makeVox, voxelGeometry, voxelFaces, banana, bananaGeometry, bananaTileGeometry, bananaPileCoreGeometry, bananaPileRadiusScale, bananaPileHeightOffset, BANANA_AMMO_SCALE, BANANA_PILE_PROFILE, particleGeometry, spareMagazine, caveman, CLUB_PALETTE, GOLD_CLUB_PALETTE, labRoom, buildableGeos, crate, die, dieRotationFor, SWAG, TIER_COLORS };
 })();

@@ -10492,6 +10492,22 @@ const variantCacheChecks = BL => {
   M.release("arcade", []); M.release("hub", []); M.setScope(null);
   record("variant caches: release drops scene-only indices while preserving the hub and next scene, including named indices", shared === hub && kept && rebuilt && keptNext && releasedNext,
     JSON.stringify({ kept, rebuilt, keptNext, releasedNext }));
+  const foliage = M.variants(() => {
+    const high = M.box({ color: "#50a044" });
+    high.collisionGeometry = M.box({ color: "#000000" });
+    return M.foliageLods(high, M.box({ color: "#50a044" }));
+  });
+  M.setScope("foliage-cache"); const source = foliage(), bytes = JSON.stringify([source.verts, source.faces]);
+  const owned = M.addLods(new Set([source])), lods = source.foliageLods;
+  const borrowed = { ...source, verts: source.verts.slice(), faces: source.faces.slice() };
+  const coherent = lods.owner === source && M.addLods(new Set([borrowed])).size === 1
+    && owned.size === 3 && owned.has(lods.medium) && owned.has(lods.far)
+    && lods.medium.collisionGeometry === source.collisionGeometry && JSON.stringify([source.verts, source.faces]) === bytes
+    && lods.far.faces.reduce((sum, f) => sum + f.i.length - 2, 0) === 12 && lods.far.imageSurface.canvas === null;
+  M.release("foliage-cache", []); M.assertReleased("foliage-cache");
+  const nextFoliage = foliage();
+  record("foliage ownership: hidden render alternatives follow their source cache, preserve collision and geometry bytes, and rebuild after release", coherent && nextFoliage !== source && nextFoliage.foliageLods !== lods);
+  M.release("foliage-cache", []); M.assertReleased("foliage-cache"); M.setScope(null);
 };
 
 // Regression: private model Maps and historical hub reads survived scene release.
@@ -16368,8 +16384,8 @@ const raceRigChecks = async () => {
     // bytes the depth-only and plain variants derive from, plus the untouched shadow path.
     "6bed3532a26c98c3e5a9218674dbe75c789324168104f6b0eb7fb5c88872a012",
     // 487d99ac909f added uObjectSlab2 for the Factory roof bore; removing its
-    // declaration plus the new canvas sampling restores the previous b82d02f4 baseline (was f5f71f79).
-    "c98cc70d4421dc879f1d45eeab7397aeae2022db23fbb4295ee0bad712178345",
+    // declaration plus the intentional canvas/foliage atlas sampling restores the previous b82d02f4 baseline (was f5f71f79).
+    "fb12fd53216aa902750f5bf315e44a6334c9b24fb58afb12f28a4f5e85233677",
     "37030f053de422aa157f017ceedef0812ed57a17c9e1b2af4aab017c0b645364"
   ];
   record("race rig strategy: ordinary mesh, fragment and shadow shader bytes retain the pre-rig fast path", ordinaryHashes.every((hash, i) => hash === expectedOrdinaryHashes[i]), JSON.stringify(ordinaryHashes));
@@ -17025,7 +17041,7 @@ const reviewCrowdAndFallbackProof = async () => {
   const blocked=c.occupied(body,0,0,0);near.root.visible=false;const hidden=!c.occupied(body,0,0,0);near.root.visible=true;near.root.position.y=3;const above=!c.occupied(body,0,0,0);
   const renderer=await readFile(join(root,"src/js/gl-renderer.js"),"utf8");
   const collect=renderer.slice(renderer.indexOf("    const collect ="),renderer.indexOf("    const updateRig ="));
-  const seen=[],r={rigMode:false,hiddenFromCutaway:()=>false,cutawayFade:0,recordFor:g=>{seen.push(g);return {active:true};},suppressed:0,CULL_MARGIN:0,sphereInFrustum:()=>true};
+  const seen=[],r={rigMode:false,hiddenFromCutaway:()=>false,cutawayFade:0,foliageGeometry:n=>n.geometry,recordFor:g=>{seen.push(g);return {active:true};},suppressed:0,CULL_MARGIN:0,sphereInFrustum:()=>true};
   runInNewContext(collect+"this.collect=collect;this.collectRig=collectRig;",r);
   const geo={meshRig:{}},original={faces:[{}]},aggregate={geometry:geo,instanceData:[],instanceCount:1},part={geometry:original,meshRigSource:geo.meshRig,instanceData:[],instanceCount:1};
   r.collect(aggregate);r.collect(part);const cpu=seen.length===1&&seen[0]===original;

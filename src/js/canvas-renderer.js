@@ -2047,7 +2047,7 @@
       releaseGeometry: () => { },
       prepareGeometry: () => true,
       createRig: () => null,
-      releaseUnused: (live) => { if (environment.source && !live.has(environment.source.geometry)) destroyEnvironment(); return 0; },
+      releaseUnused: (live) => { BL.models.addLods(live); if (environment.source && !live.has(environment.source.geometry)) destroyEnvironment(); return 0; },
       dispose: () => {
         destroyEnvironment();
         if (canvasShade) canvasShade.width = canvasShade.height = 0;

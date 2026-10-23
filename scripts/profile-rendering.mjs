@@ -1,12 +1,14 @@
 // Focused native-Chrome rendering counts, frame intervals and GC drops on the staged site.
 // Build first. PROFILE_QUERY supplies A/B flags; PROFILE_SCENE and PROFILE_VIEW select a view.
 import { createServer } from "node:http";
+import { createHash } from "node:crypto";
 import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { join, extname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { launch, dispose } from "../test/browser.mjs";
 const root = fileURLToPath(new URL("../", import.meta.url));
 const label = process.argv[2] || "render", out = join(root, "untracked/performance");
+const stagedSHA256 = createHash("sha256").update(readFileSync(join(root, "_site/index.html"))).digest("hex");
 mkdirSync(out, { recursive: true });
 const server = createServer((req, res) => {
   const path = new URL(req.url, "http://localhost").pathname;
@@ -68,11 +70,20 @@ try {
     if (!await b.evaluate(`new Promise(resolve => { const start = performance.now(); const tick = () => { if (__ooga.scene === ${JSON.stringify(process.env.PROFILE_SCENE)} && !__ooga.transitioning) resolve(true); else if (performance.now() - start > 30000) resolve(false); else setTimeout(tick, 25); }; tick(); })`)) throw Error("Travel deadline");
   }
   environment = await b.evaluate(`(() => { const gl = document.getElementById("scene").getContext("webgl2"), e = gl.getExtension("WEBGL_debug_renderer_info"); return { userAgent: navigator.userAgent, gpu: e && gl.getParameter(e.UNMASKED_RENDERER_WEBGL), dpr: devicePixelRatio, memory: navigator.deviceMemory, scene: __ooga.scene }; })()`);
+  if (process.env.PROFILE_NO_FOLIAGE_LOD === "1") await b.evaluate(`(() => {
+    BL.scene.traverseVisible(BL.scenes[__ooga.scene].root, node => {
+      const geometry = node.geometry;
+      if (geometry?.foliageLods?.owner === geometry) geometry.foliageLods = null;
+    });
+  })()`);
   await b.evaluate(`(() => { const R = __ooga.renderer, render = R.render; R.render = function() { const start = performance.now(); try { return render.apply(this, arguments); } finally { if (__renderProbe.frame) __renderProbe.frame.renderCpuMs += performance.now() - start; } }; })()`);
   for (const tier of (process.env.PROFILE_TIERS || "high,medium,low").split(",")) {
     await b.evaluate(`(() => {
       const B = __ooga, view = ${JSON.stringify(process.env.PROFILE_VIEW || "pile")}; B.renderer.setQuality(${JSON.stringify(tier)});
-      if (view === "mirror-close" || view === "board-close") {
+      if (view === "pool-overlook") {
+        const place = B.poolIsland.place;
+        B.pilot.navigate({ position: { x: place.x, y: place.y, z: place.z }, target: { x: place.x, y: place.y + 3, z: place.z }, yaw: place.ry, pitch: .55, dist: 38 });
+      } else if (view === "mirror-close" || view === "board-close") {
         const node = view === "mirror-close" ? B.mirrorCave.node : B.jumbotron.node, w = node.world;
         const x = w[12], y = w[13], z = w[14];
         B.pilot.navigate({ position: { x, y, z }, target: { x, y: y + (view === "board-close" ? 0 : .1), z }, yaw: Math.atan2(w[8], w[10]), pitch: .05, dist: view === "board-close" ? 7 : 6 });
@@ -112,11 +123,11 @@ try {
       const index = Math.floor(elapsed / 10000), bin = intervals[index] || (intervals[index] = { frames: 0, ms: 0, createdBuffers: 0, deletedBuffers: 0, uploads: 0 });
       bin.frames++; bin.ms += frame.dt; bin.createdBuffers += frame.createBuffer; bin.deletedBuffers += frame.deleteBuffer; bin.uploads += frame.bufferSubData; elapsed += frame.dt;
     }
-    const row = { tier, walking: process.env.PROFILE_WALK === "1", warmSeconds: Math.max(0, Number(process.env.PROFILE_WARM_SECONDS) || 2), intervals, travel: result.travel, quality: result.quality, frames: n, fps: n * 1000 / result.elapsed, p50: times[Math.floor(n * .5)], p95: times[Math.floor(n * .95)], p99: times[Math.floor(n * .99)], over33: times.filter(t => t > 33).length, reclaimedMiBPerSecond: result.reclaimed / 1048576 * 1000 / result.elapsed, bufferSubDataPerFrame: sum("bufferSubData") / n, uploadBytesPerFrame: sum("bufferSubDataBytes") / n, bufferDataPerFrame: sum("bufferData") / n, bufferDataBytes: sum("bufferDataBytes"), copiesPerFrame: sum("copyBufferSubData") / n, copiedBytesPerFrame: sum("copiedBytes") / n, vertexPointersPerFrame: sum("vertexAttribPointer") / n, renderCpuMsPerFrame: sum("renderCpuMs") / n, createdBuffers: sum("createBuffer"), deletedBuffers: sum("deleteBuffer"), textureUpdates: sum("texSubImage2D"), passes, stats: result.stats };
+    const row = { tier, foliageLodDisabled: process.env.PROFILE_NO_FOLIAGE_LOD === "1", walking: process.env.PROFILE_WALK === "1", warmSeconds: Math.max(0, Number(process.env.PROFILE_WARM_SECONDS) || 2), intervals, travel: result.travel, quality: result.quality, frames: n, fps: n * 1000 / result.elapsed, p50: times[Math.floor(n * .5)], p95: times[Math.floor(n * .95)], p99: times[Math.floor(n * .99)], over33: times.filter(t => t > 33).length, reclaimedMiBPerSecond: result.reclaimed / 1048576 * 1000 / result.elapsed, bufferSubDataPerFrame: sum("bufferSubData") / n, uploadBytesPerFrame: sum("bufferSubDataBytes") / n, bufferDataPerFrame: sum("bufferData") / n, bufferDataBytes: sum("bufferDataBytes"), copiesPerFrame: sum("copyBufferSubData") / n, copiedBytesPerFrame: sum("copiedBytes") / n, vertexPointersPerFrame: sum("vertexAttribPointer") / n, renderCpuMsPerFrame: sum("renderCpuMs") / n, createdBuffers: sum("createBuffer"), deletedBuffers: sum("deleteBuffer"), textureUpdates: sum("texSubImage2D"), passes, stats: result.stats };
     rows.push(row); console.log(JSON.stringify(row));
     await b.screenshot(join(out, `${label}-${tier}.png`));
   }
   if (b.logs.length) throw Error(b.logs.join(" | "));
 } catch (error) { failure = String(error.stack || error); console.error(failure); }
-finally { writeFileSync(join(out, `${label}.json`), JSON.stringify({ label, hostRuntime: { arch: process.arch, node: process.version, chromeArchRequested: process.env.CHROME_ARCH || null }, environment, rows, failure, logs: b?.logs || [] }, null, 2) + "\n"); if (b) await b.close(); await dispose(); await new Promise(resolve => server.close(resolve)); }
+finally { writeFileSync(join(out, `${label}.json`), JSON.stringify({ label, stagedSHA256, hostRuntime: { arch: process.arch, node: process.version, chromeArchRequested: process.env.CHROME_ARCH || null }, environment, rows, failure, logs: b?.logs || [] }, null, 2) + "\n"); if (b) await b.close(); await dispose(); await new Promise(resolve => server.close(resolve)); }
 if (failure) process.exitCode = 1;

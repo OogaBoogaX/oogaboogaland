@@ -772,7 +772,9 @@
   // shingled over the clump, each rosette radiating from a point on the surface and lifted out of it. Every leaf
   // takes the normal pointing out of the clump, so the mass lights softly while its outline stays leafy; rosettes
   // high on the clump take the light greens and low ones the dark.
-  const leafy = (geo, cx, cy, cz, rx, ry, rz, tones, rand, count, size) => {
+  const leafy = (geo, cx, cy, cz, rx, ry, rz, tones, rand, count, size, lod = 0) => {
+    // Consume the same recipe samples at every level, keeping surviving rosettes and later flowers in place.
+    // Coarse crowns emit fewer complete rosettes over their unchanged closed core, never arbitrary face subsets.
     puff(geo, cx, cy, cz, rx * 0.84, ry * 0.84, rz * 0.84, [tones[0], tones[0], tones[0], tones[0]], rand, 4, 7);
     const detailStart = geo.faces.length;
     const golden = Math.PI * (3 - Math.sqrt(5));
@@ -790,6 +792,7 @@
       const bx = dy * tz - dz * ty, by = dz * tx - dx * tz, bz = dx * ty - dy * tx;
       const band = Math.min(3, Math.max(1, Math.round(1.7 + dy * 1.5 + (rand() - 0.5) * 0.8))), light = tones[band], dark = tones[band - 1];
       const leaves = 5 + (rand() < 0.4 ? 1 : 0), turn0 = rand() * Math.PI * 2, len = size * (0.85 + rand() * 0.3), rise = 0.35 + rand() * 0.2;
+      if (lod && Math.floor((k + 1) * 0.22) === Math.floor(k * 0.22)) continue;
       for (let n = 0; n < leaves; n++) {
         const t = turn0 + n / leaves * Math.PI * 2, c = Math.cos(t), sn = Math.sin(t);
         const ux = tx * c + bx * sn, uy = ty * c + by * sn, uz = tz * c + bz * sn;
@@ -1112,7 +1115,7 @@
     }
     return merge(...parts);
   };
-  const cartoonTree = (i, rand, shell) => {
+  const cartoonTree = (i, rand, shell, lod = 0, collision = null) => {
     const geo = { verts: [], faces: [], lines: [], smooth: true, normals: [], foliageVisibility: false }, tones = CANOPIES[i].map(hexToRgb);
     limb(geo, 0, -0.1, 0, 0.05, 2.1, 0.02, 0.24, 0.14, 8, BARK[0]);
     limb(geo, 0.05, 1.55, 0, 0.62, 1.95, 0.02, 0.09, 0.05, 6, BARK[1]);
@@ -1120,9 +1123,9 @@
     // The bark keeps its smooth normals: zeros mean "not given" to the renderer.
     while (geo.normals.length < geo.verts.length) geo.normals.push(0);
     const canopyStart = geo.faces.length;
-    for (const [cx, cy, cz, rx, ry, rz] of CROWNS[i]) leafy(geo, cx * QUARTER, cy * QUARTER, cz * QUARTER, rx * QUARTER, ry * QUARTER, rz * QUARTER, tones, rand, Math.round(14 + rx * rz * 2.6), 0.3);
+    for (const [cx, cy, cz, rx, ry, rz] of CROWNS[i]) leafy(geo, cx * QUARTER, cy * QUARTER, cz * QUARTER, rx * QUARTER, ry * QUARTER, rz * QUARTER, tones, rand, Math.round(14 + rx * rz * 2.6), 0.3, lod);
     geo.normals = Float32Array.from(geo.normals);
-    geo.collisionGeometry = merge(shell, canopySupport(geo, canopyStart));
+    geo.collisionGeometry = collision || merge(shell, canopySupport(geo, canopyStart));
     return geo;
   };
   // Tree is TREE_HEIGHT units tall.
@@ -1165,7 +1168,8 @@
     // puffs on the voxel crown's own ellipsoids. Keep its solid shell and
     // extend landing support across every visible leaf and lower crown.
     const shell = voxGeo(solid, { unit: QUARTER, palette });
-    const geometry = cartoonTree(i, rand, shell);
+    const canopySamples = [];
+    const geometry = cartoonTree(i, () => { const value = rand(); canopySamples.push(value); return value; }, shell);
     // Crowns stir in the wind; the collision shell stays where it stands.
     geometry.sway = 0.003;
     let radius = 0, solidRadius = 0;
@@ -1176,7 +1180,9 @@
     geometry.treeSolidRadius = solidRadius;
     geometry.treeCanopyFloor = canopyFloor * QUARTER;
     geometry.treeSolidCanopyFloor = middle * QUARTER;
-    return geometry;
+    let sample = 0;
+    const coarse = cartoonTree(i, () => canopySamples[sample++], null, 1, geometry.collisionGeometry);
+    return BL.models.foliageLods(geometry, coarse);
   });
   const CLUMPS = [
     [[0, 1.0, 0, 1.9, 1.8, 1.7], [0.7, 1.4, -0.5, 1.3, 1.3, 1.2]],
@@ -1185,9 +1191,9 @@
   ];
   // Bushes: leafy clumps on the voxel bushes' own ellipsoids. The first two flower (peach and pink, then yellow and
   // purple), the third carries round red berries.
-  const bush = variants((i) => {
+  const cartoonBush = (i, lod = 0) => {
     const rand = mulberry32(7 + i), geo = { verts: [], faces: [], lines: [], normals: [], foliageVisibility: false }, tones = ["#3a6e24", "#56902f", "#6fae3a", "#8ccb4b"].map(hexToRgb);
-    for (const [cx, cy, cz, rx, ry, rz] of CLUMPS[i]) leafy(geo, cx * QUARTER, cy * 0.8 * QUARTER, cz * QUARTER, rx * 1.12 * QUARTER, ry * 0.82 * QUARTER, rz * 1.12 * QUARTER, tones, rand, Math.round(10 + rx * rz * 3.2), 0.17);
+    for (const [cx, cy, cz, rx, ry, rz] of CLUMPS[i]) leafy(geo, cx * QUARTER, cy * 0.8 * QUARTER, cz * QUARTER, rx * 1.12 * QUARTER, ry * 0.82 * QUARTER, rz * 1.12 * QUARTER, tones, rand, Math.round(10 + rx * rz * 3.2), 0.17, lod);
     const [cx, cy, cz, rx, ry, rz] = CLUMPS[i][0];
     for (let n = 0; n < (i === 2 ? 9 : 6); n++) {
       const a = rand() * Math.PI * 2, up = 0.25 + rand() * 0.6, side = Math.sqrt(1 - up * up);
@@ -1201,7 +1207,8 @@
     }
     geo.normals = Float32Array.from(geo.normals);
     return Object.assign(geo, { sway: 0.03 });
-  });
+  };
+  const bush = variants((i) => BL.models.foliageLods(cartoonBush(i), cartoonBush(i, 1)));
   // The voxel boulder the mine's crack rock is veined for; everywhere else takes the cartoon `rock`.
   const ROCK_SHAPES = [{ rx: 3.2, ry: 3.6, rz: 2.8 }, { rx: 5, ry: 3.8, rz: 4.2 }];
   const voxelRock = variants((i) => {

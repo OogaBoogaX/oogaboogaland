@@ -322,6 +322,49 @@ bool cutaway(vec3 p, float opacity) {
 bool cutaway(vec3 p) {
   return cutaway(p, 1.0);
 }`;
+  const FOLIAGE_UV_GLSL = `
+vec2 foliageUV(vec3 local, vec3 normal, vec3 lower, vec3 upper) {
+  vec3 p = (local - lower) / max(upper - lower, vec3(0.000001));
+  vec3 n = abs(normal);
+  vec2 uv; float tile;
+  if (n.y > n.x && n.y > n.z) { uv = p.xz; tile = 2.0; }
+  else if (n.x > n.z) { uv = p.zy; tile = 1.0; }
+  else { uv = p.xy; tile = 0.0; }
+  uv = (uv * 126.0 + 1.0) / 128.0;
+  return vec2((uv.x + tile) / 3.0, 1.0 - uv.y);
+}`;
+  const FOLIAGE_SHADOW_VS = `#version 300 es
+precision highp float;
+layout(location=0) in vec3 aPos;
+layout(location=1) in vec3 aNormal;
+layout(location=3) in vec4 aM0;
+layout(location=4) in vec4 aM1;
+layout(location=5) in vec4 aM2;
+layout(location=6) in vec4 aM3;
+uniform mat4 uLightViewProj;
+out vec3 vWorld;
+out vec3 vLocal;
+out vec3 vLocalNormal;
+void main() {
+  vec4 world = mat4(aM0, aM1, aM2, aM3) * vec4(aPos, 1.0);
+  vWorld = world.xyz; vLocal = aPos; vLocalNormal = aNormal;
+  gl_Position = uLightViewProj * world;
+}`;
+  const FOLIAGE_SHADOW_FS = `#version 300 es
+precision highp float;
+in vec3 vWorld;
+in vec3 vLocal;
+in vec3 vLocalNormal;
+uniform float uClipMinY;
+uniform vec4 uObjectClip;
+uniform sampler2D uCanvasImage;
+uniform vec3 uCanvasAtlasMin;
+uniform vec3 uCanvasAtlasMax;
+${FOLIAGE_UV_GLSL}
+void main() {
+  if (vWorld.y < uClipMinY || dot(uObjectClip, vec4(vWorld, 1.0)) > 0.0) discard;
+  if (texture(uCanvasImage, foliageUV(vLocal, vLocalNormal, uCanvasAtlasMin, uCanvasAtlasMax)).a <= 0.5) discard;
+}`;
   const MESH_FS = `#version 300 es
 precision highp float;
 precision highp int;
@@ -347,7 +390,13 @@ uniform vec4 uCanvasRect;
 uniform vec3 uCanvasCurve;
 uniform vec3 uCanvasBackground;
 uniform vec2 uCanvasScale;
+uniform float uCanvasAtlas;
+uniform vec3 uCanvasAtlasMin;
+uniform vec3 uCanvasAtlasMax;
+in vec3 vLocalNormal;
+${FOLIAGE_UV_GLSL}
 vec4 canvasColor() {
+  if (uCanvasAtlas > 0.5) return texture(uCanvasImage, foliageUV(vLocal, vLocalNormal, uCanvasAtlasMin, uCanvasAtlasMax));
   vec2 local = vLocal.xy;
   if (uCanvasCurve.x > 0.0) local = vec2(atan(vLocal.x, uCanvasCurve.x - vLocal.z) * uCanvasCurve.x - uCanvasCurve.y, vLocal.y - uCanvasCurve.z);
   vec2 uv = (local - uCanvasRect.xy) / uCanvasRect.zw;
@@ -355,7 +404,6 @@ vec4 canvasColor() {
   color.rgb = mix(uCanvasBackground, color.rgb, color.a);
   return color;
 }
-in vec3 vLocalNormal;
 in float vMatrixSurface;
 flat in float vMatrixCave;
 flat in float vMatrixPermanentFallback;
@@ -784,7 +832,7 @@ float matrixPermanentAt(vec3 point, float caveIndex) {
 }
 // Every cut a fragment takes, also the whole of the depth pre-pass's shader, so both passes keep the same pixels.
 bool clipped() {
-  if (uCanvasSurface > 0.5 && canvasColor().a <= 0.0) return true;
+  if (uCanvasSurface > 0.5 && canvasColor().a <= (uCanvasAtlas > 0.5 ? 0.5 : 0.0)) return true;
   vWorld = uProjective > 0.5 ? vWorldH.xyz / vWorldH.w : vWorldH.xyz;
   if (vWorld.y < uClipMinY || dot(uObjectClip, vec4(vWorld, 1.0)) > 0.0 || abs(dot(uObjectSlab.xyz, vWorld) + uObjectSlab.w) > 1.0 || abs(dot(uObjectSlab2.xyz, vWorld) + uObjectSlab2.w) > 1.0 || cutaway(vWorld, vSmokeOpacity)) return true;
   if (uLakeOcclude.w > 0.0 && uEye.y > uLakeOcclude.y && vWorld.y < uLakeOcclude.y) {
@@ -1039,7 +1087,7 @@ void main() {
   const ORDINARY_MESH_FS = derive(MESH_FS, ["flat in vec4 vVoxel;", "uniform vec4 uVoxel;"], [/\bvVoxel\b/g, "uVoxel"]);
   // The camera's depth pre-pass: the mesh shader's cuts and nothing else, the rest compiled away.
   const DEPTH_MESH_FS = ORDINARY_MESH_FS.slice(0, ORDINARY_MESH_FS.indexOf("void main() {")) + "void main() {\n  if (clipped()) discard;\n}";
-  const MESH_UNIFORMS = ["uRigCount", "uRigPass", "uRigMatrices", "uRigParams", "uRigVoxels", "uRigVisibility", "uViewProj", "uLightViewProj", "uEye", "uViewDirection", "uLightDir", "uSky", "uGround", "uSun", "uDirectStrength", "uAmbientFloor", "uDiffuseFloor", "uShadowStrength", "uShadowFloor", "uShadowBias", "uShadow", "uShadowTexel", "uLights", "uLightCount", "uSpotLight", "uFog", "uFogRange", "uMatrixParams", "uMatrixOrigin", "uMatrixGlyph", "uMatrixCave", "uMatrixCaves", "uMatrixCaveBounds", "uMatrixCaveNear", "uMatrixPermanentCave", "uMatrixPermanentPlane", "uMatrixPermanentAperture", "uMatrixLivingGlobal", "uMatrixGlyphTex", "uMatrixSamples", "uClipMinY", "uClipMaxY", "uObjectClip", "uObjectSlab", "uObjectSlab2", "uProjective", "uMatrixGlyphOpacity", "uGlassOpacity", "uVoxel", "uWindTime", "uSway", "uSwing", "uGlass", "uLightBeam", "uLakeWaveCount", "uLakeWaves", "uLakeSurface", "uLakeSuction", "uLakeFlowEnabled", "uLakeFlowU", "uLakeFlowV", "uLakeCharge", "uLakeChargeRise", "uLakeChargeCenter", "uLakeOcclude", "uLakeWaveEnd", "uLakeBodyShape", "uLakeBodyBend", "uDSBSurface", "uDSBDepth", "uDSBEnvironment", "uCanvasSurface", "uCanvasImage", "uCanvasRect", "uCanvasCurve", "uCanvasBackground", "uCanvasScale"];
+  const MESH_UNIFORMS = ["uRigCount", "uRigPass", "uRigMatrices", "uRigParams", "uRigVoxels", "uRigVisibility", "uViewProj", "uLightViewProj", "uEye", "uViewDirection", "uLightDir", "uSky", "uGround", "uSun", "uDirectStrength", "uAmbientFloor", "uDiffuseFloor", "uShadowStrength", "uShadowFloor", "uShadowBias", "uShadow", "uShadowTexel", "uLights", "uLightCount", "uSpotLight", "uFog", "uFogRange", "uMatrixParams", "uMatrixOrigin", "uMatrixGlyph", "uMatrixCave", "uMatrixCaves", "uMatrixCaveBounds", "uMatrixCaveNear", "uMatrixPermanentCave", "uMatrixPermanentPlane", "uMatrixPermanentAperture", "uMatrixLivingGlobal", "uMatrixGlyphTex", "uMatrixSamples", "uClipMinY", "uClipMaxY", "uObjectClip", "uObjectSlab", "uObjectSlab2", "uProjective", "uMatrixGlyphOpacity", "uGlassOpacity", "uVoxel", "uWindTime", "uSway", "uSwing", "uGlass", "uLightBeam", "uLakeWaveCount", "uLakeWaves", "uLakeSurface", "uLakeSuction", "uLakeFlowEnabled", "uLakeFlowU", "uLakeFlowV", "uLakeCharge", "uLakeChargeRise", "uLakeChargeCenter", "uLakeOcclude", "uLakeWaveEnd", "uLakeBodyShape", "uLakeBodyBend", "uDSBSurface", "uDSBDepth", "uDSBEnvironment", "uCanvasSurface", "uCanvasImage", "uCanvasRect", "uCanvasCurve", "uCanvasBackground", "uCanvasScale", "uCanvasAtlas", "uCanvasAtlasMin", "uCanvasAtlasMax"];
   const ORDINARY_SHADOW_VS = derive(SHADOW_VS, [RIG_GLSL, ""], ["rigMatrix(mat4(aM0, aM1, aM2, aM3))", "mat4(aM0, aM1, aM2, aM3)"],
     ["layout(location=6) in vec4 aM3;\n\n", "layout(location=6) in vec4 aM3;\n"]);
   const LINE_VS = `#version 300 es
@@ -1590,6 +1638,7 @@ void main() {
     let qualityName = QUALITY[quality] ? quality : "high";
     // The explicit A/B override applies on every GPU and tier; rigs retain their own programs.
     const prepassOverride = new URLSearchParams(location.search).get("prepass");
+    let collectNear = 0.2;
     // Firefox names the GPU in RENDERER (and warns about the debug extension); Chrome and Safari mask it there and
     // answer through the extension.
     const tileBased = tileBasedGpu(gl.getParameter(gl.RENDERER), () => {
@@ -1767,6 +1816,7 @@ void main() {
         mesh: compile(ORDINARY_MESH_VS, meshFragment, MESH_UNIFORMS),
         depth: compile(ORDINARY_MESH_VS, DEPTH_MESH_FS, MESH_UNIFORMS),
         plain: compile(ORDINARY_MESH_VS, meshFragment.replace("#version 300 es", "#version 300 es\n#define PLAIN"), MESH_UNIFORMS),
+        foliageShadow: compile(FOLIAGE_SHADOW_VS, FOLIAGE_SHADOW_FS, MESH_UNIFORMS),
         shadow: compile(ORDINARY_SHADOW_VS, SHADOW_FS, ["uRigCount", "uRigPass", "uRigMatrices", "uRigVisibility", "uLightViewProj", "uClipMinY", "uClipMaxY", "uObjectClip"]),
         line: compile(LINE_VS, LINE_FS, ["uViewProj", "uViewport", "uWidth", "uClipMaxY", "uObjectClip"]),
         sky: compile(QUAD_VS, SKY_FS, ["uInvViewProj", "uHorizon", "uZenith", "uSun", "uSunDir", "uMoonDir", "uMoonSunDir", "uStarMatrix", "uStars", "uTime", "uHazeDrop", "uClouds", "uSea", "uSeaEye"]),
@@ -2543,6 +2593,65 @@ void main() {
         rec.mirrorVisible = visible;
       }
     };
+    const physicalRadius = (g, w, o = 0, deform = true) => {
+      const b = boundsOf(g), a = Math.abs(w[o]), c = Math.abs(w[o + 1]), d = Math.abs(w[o + 2]);
+      const e = Math.abs(w[o + 4]), f = Math.abs(w[o + 5]), h = Math.abs(w[o + 6]);
+      const i = Math.abs(w[o + 8]), j = Math.abs(w[o + 9]), k = Math.abs(w[o + 10]);
+      // These bound the largest stretch even with shear. The Gram row sum stays tight for rotated scales:
+      // orthogonal columns have zero cross terms, while absolute dot products retain a safe shear bound.
+      const xx = a*a+c*c+d*d, yy = e*e+f*f+h*h, zz = i*i+j*j+k*k;
+      const xy = Math.abs(w[o]*w[o+4]+w[o+1]*w[o+5]+w[o+2]*w[o+6]);
+      const xz = Math.abs(w[o]*w[o+8]+w[o+1]*w[o+9]+w[o+2]*w[o+10]);
+      const yz = Math.abs(w[o+4]*w[o+8]+w[o+5]*w[o+9]+w[o+6]*w[o+10]);
+      const frobenius = xx+yy+zz, gram = Math.max(xx+xy+xz, yy+xy+yz, zz+xz+yz);
+      const norm = Math.max(a+c+d, e+f+h, i+j+k) * Math.max(a+e+i, c+f+j, d+h+k);
+      const wind = deform ? 1.35 * Math.max(0,g.sway || 0) * Math.max(0, b.max[1]) ** 2 + 0.066 * Math.max(0,g.swing || 0) : 0;
+      return b.radius * Math.sqrt(Math.min(frobenius, norm, gram)) + wind;
+    };
+    const screenDiameter = (x, y, z, radius) => {
+      const vx = view[0]*x+view[4]*y+view[8]*z+view[12];
+      const vy = view[1]*x+view[5]*y+view[9]*z+view[13];
+      const vz = view[2]*x+view[6]*y+view[10]*z+view[14];
+      // Keep spheres intersecting the near plane, crossing the eye, or carrying invalid bounds.
+      if (!(radius >= 0) || !Number.isFinite(radius) || -vz - radius <= collectNear) return Infinity;
+      const w = proj[11]*vz+proj[15], dw = Math.abs(proj[11])*radius;
+      const near = w-dw, far = w+dw;
+      if (!(near > 0)) return Infinity;
+      const nx = proj[0]*vx+proj[8]*vz+proj[12], ny = proj[5]*vy+proj[9]*vz+proj[13];
+      const dx = (Math.abs(proj[0])+Math.abs(proj[8]))*radius, dy = (Math.abs(proj[5])+Math.abs(proj[9]))*radius;
+      // Project the sphere's enclosing camera-space box. All four numerator/denominator combinations bound
+      // both perspective and orthographic/blended projections, including an off-axis object's depth extent.
+      const minX = Math.min((nx-dx)/near,(nx-dx)/far,(nx+dx)/near,(nx+dx)/far);
+      const maxX = Math.max((nx-dx)/near,(nx-dx)/far,(nx+dx)/near,(nx+dx)/far);
+      const minY = Math.min((ny-dy)/near,(ny-dy)/far,(ny+dy)/near,(ny+dy)/far);
+      const maxY = Math.max((ny-dy)/near,(ny-dy)/far,(ny+dy)/near,(ny+dy)/far);
+      return Math.max((maxX-minX)*width,(maxY-minY)*height)*0.5;
+    };
+    const foliageStates = new WeakMap();
+    const foliageGeometry = (node) => {
+      const g = node.geometry, lods = g.foliageLods;
+      // Explicit batches and aperture-specific wrappers retain their current source. Enrolled hub foliage is
+      // ordinary instancing; collision, picking, cutaways and cull spheres always read the untouched high mesh.
+      if (!lods || lods.owner !== g || node.instanceData || g.matrixSourceGeometry || g.clipPlane || g.clipSlab || g.clipSlab2) return g;
+      const b = boundsOf(g), w = node.world;
+      mat4.transformPoint(CENTER, w, b.center[0], b.center[1], b.center[2]);
+      const pixels = screenDiameter(CENTER[0], CENTER[1], CENTER[2], physicalRadius(g, w));
+      const lower = qualityName === "low" ? 180 : qualityName === "medium" ? 150 : 120;
+      const upper = qualityName === "low" ? 220 : qualityName === "medium" ? 185 : 150;
+      const farLower = qualityName === "low" ? 36 : qualityName === "medium" ? 30 : 24;
+      const farUpper = qualityName === "low" ? 46 : qualityName === "medium" ? 40 : 32;
+      let states = foliageStates.get(g);
+      if (!states) { states = new WeakMap(); foliageStates.set(g, states); }
+      const previous = states.get(node);
+      let level = previous;
+      if (level === undefined) level = pixels < farLower ? 2 : pixels < lower ? 1 : 0;
+      else if (level === 0) { if (pixels < lower) level = pixels < farLower ? 2 : 1; }
+      else if (pixels > upper) level = 0;
+      else if (level === 1 && pixels < farLower) level = 2;
+      else if (level === 2 && pixels > farUpper) level = 1;
+      if (level !== previous) states.set(node, level);
+      return level === 0 ? g : level === 1 ? lods.medium : lods.far;
+    };
     const collect = (node) => {
       if (!node.geometry || !rigMode && node.geometry.meshRig || hiddenFromCutaway(node) || cutawayFade === 1 && node.geometry.cutawayHide) return;
       if (node.mirror || node.mirrorPortal) {
@@ -2556,7 +2665,7 @@ void main() {
         mirrorDebug.portal = mirror.portal;
         mirrorDebug.reveal = mirror.reveal;
       }
-      const rec = recordFor(node.geometry);
+      const rec = recordFor(foliageGeometry(node));
       if (node.mirror || node.mirrorPortal) mirror.record = rec;
       if (node.geometry.reflector) {
         reflectorNodes.push(node);
@@ -3008,7 +3117,9 @@ void main() {
     };
     // One owned texture per canvas surface. Painting changes its revision; geometry and GPU buffers stay put.
     const bindCanvasSurface = (rec, program) => {
-      const surface = rec.geometry.imageSurface, canvas = surface?.canvas;
+      const surface = rec.geometry.imageSurface;
+      if (surface?.atlas && !surface.canvas) BL.models.paintFoliageAtlas(surface);
+      const canvas = surface?.canvas;
       let identity = canvas ? canvasSurfaces.get(surface) : 0;
       if (canvas && !identity) { identity = ++canvasSurfaceSerial; canvasSurfaces.set(surface, identity); }
       if (program.canvasSurfaceId !== identity || canvas && program.canvasSurfaceVersion !== surface.version) {
@@ -3017,6 +3128,8 @@ void main() {
         program.canvasSurfaceId = identity;
         program.canvasSurfaceVersion = canvas ? surface.version : -1;
         if (canvas) {
+          gl.uniform1f(program.u.uCanvasAtlas, surface.atlas ? 1 : 0);
+          if (surface.atlas) { gl.uniform3fv(program.u.uCanvasAtlasMin, surface.atlasMin); gl.uniform3fv(program.u.uCanvasAtlasMax, surface.atlasMax); }
           gl.uniform4fv(program.u.uCanvasRect, surface.rect);
           gl.uniform2f(program.u.uCanvasScale, (surface.width || canvas.width) / canvas.width, (surface.height || canvas.height) / canvas.height);
           const bg = surface.background;
@@ -3032,8 +3145,8 @@ void main() {
         imageTextures++;
         gl.bindTexture(gl.TEXTURE_2D, rec.imageTexture);
         gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, canvas);
-        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
-        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, surface.atlas ? gl.LINEAR : gl.NEAREST);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, surface.atlas ? gl.LINEAR : gl.NEAREST);
         gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
         gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
         rec.canvasWidth = canvas.width; rec.canvasHeight = canvas.height; rec.canvasVersion = surface.version;
@@ -3190,8 +3303,22 @@ void main() {
         }
         if (rigMode && kind === "mesh") applyRig(program, rec, useProgram === "shadow" ? 2 : cull ? 1 : 3);
         if (useProgram === "shadow") shadowDraws++;
+        if (useProgram === "shadow" && g.imageSurface?.atlas) {
+          // Ordinary shadow bytes stay unchanged. Only silhouette cards need their alpha-tested shadow shader.
+          const p = programs.foliageShadow;
+          gl.useProgram(p.prog);
+          gl.uniformMatrix4fv(p.u.uLightViewProj, false, lightViewProj);
+          gl.uniform1f(p.u.uClipMinY, g.clipMinY ?? -1e6);
+          gl.uniform4fv(p.u.uObjectClip, objectClip);
+          bindCanvasSurface(rec, p);
+          gl.bindVertexArray(part.vao);
+          if (part.index) gl.drawElementsInstanced(gl.TRIANGLES, count, part.index, first * part.indexSize, n);
+          else gl.drawArraysInstanced(gl.TRIANGLES, first, count, n);
+          gl.useProgram(program.prog);
+          continue;
+        }
         if (kind === "mesh" && meshPass) {
-          if (g.imageSurface && !g.imageSurface.canvas) { drawImageSurface(rec, n, cull, program); continue; }
+          if (g.imageSurface && !g.imageSurface.canvas && !g.imageSurface.atlas) { drawImageSurface(rec, n, cull, program); continue; }
           bindCanvasSurface(rec, program);
           const mesh = program, glyph = stage === 1 ? 3 : stage === 2 ? 1 : g.matrixLocalGlyphSurface ? 2 : 0, cave = g.matrixCave || 0;
           if (glyph !== mesh.matrixGlyph) {
@@ -3715,6 +3842,7 @@ void main() {
     // explicitly every frame, so snapshot callers never inherit a live rig.
     const render = (root, camera, opts = {}, meshRigs = opts.meshRigs === true) => {
       if (lost || !pollPrograms()) return false;
+      collectNear = camera.near;
       // The scene's ancestor flags (matrix modes, camera/cutaway hides) were settled by the scene's update.
       memoFrame++;
       rigMode = !!meshRigs && !!rigPrograms && !rigFailure;
@@ -4227,6 +4355,7 @@ void main() {
     };
     // Drop unreferenced buffers; they are rebuilt on demand.
     const releaseUnused = (live) => {
+      BL.models.addLods(live);
       let released = 0;
       if(dsbGPU && !live.has(dsbGPU.state.geometry)){dsbGPU.dispose();dsbGPU=null;}
       if (mirror.geometry && !live.has(mirror.geometry)) destroyMirror();
@@ -4237,12 +4366,14 @@ void main() {
       }
       for (const geometry of records.keys()) {
         if (live.has(geometry)) continue;
+        const before = records.size;
         releaseGeometry(geometry);
-        released++;
+        released += before - records.size;
       }
       return released;
     };
     const releaseGeometry = (geometry) => {
+      if (geometry.foliageLods?.owner === geometry) { releaseGeometry(geometry.foliageLods.medium); releaseGeometry(geometry.foliageLods.far); }
       destroyReflector(geometry);
       if (geometry.meshRig) for (const program of [rigPrograms?.mesh, rigPrograms?.shadow]) {
         // Null forces the next ordinary draw to reset the joint-count uniform.
