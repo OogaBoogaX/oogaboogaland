@@ -1,0 +1,432 @@
+{
+ "base": "0265192",
+ "method": "scripts/profile-residency.mjs <label> factory,hub --endpoints (forced GC), ARM64 Chrome, staged site; PROFILE_QUERY=compactGeometry=1 for the flag",
+ "heapFloors": {
+  "head": [
+   [
+    [
+     "boot",
+     "medium",
+     247484004,
+     137125157
+    ],
+    [
+     "2-hub",
+     "low",
+     248063176,
+     132759659
+    ]
+   ],
+   [
+    [
+     "boot",
+     "medium",
+     247284328,
+     136814242
+    ],
+    [
+     "2-hub",
+     "low",
+     247798252,
+     133165560
+    ]
+   ],
+   [
+    [
+     "boot",
+     "medium",
+     248025336,
+     137416085
+    ],
+    [
+     "2-hub",
+     "low",
+     248642364,
+     133043323
+    ]
+   ],
+   [
+    [
+     "boot",
+     "medium",
+     247578352,
+     137042229
+    ],
+    [
+     "2-hub",
+     "low",
+     248164888,
+     132684523
+    ]
+   ]
+  ],
+  "flagOff": [
+   [
+    [
+     "boot",
+     "medium",
+     250163728,
+     138267202
+    ],
+    [
+     "2-hub",
+     "low",
+     250687784,
+     133897032
+    ]
+   ],
+   [
+    [
+     "boot",
+     "medium",
+     249925992,
+     138117186
+    ],
+    [
+     "2-hub",
+     "low",
+     250480492,
+     133744360
+    ]
+   ],
+   [
+    [
+     "boot",
+     "high",
+     250486816,
+     138405826
+    ],
+    [
+     "2-hub",
+     "low",
+     250989632,
+     134096584
+    ]
+   ],
+   [
+    [
+     "boot",
+     "medium",
+     249993596,
+     138109154
+    ],
+    [
+     "2-hub",
+     "low",
+     250586060,
+     133743576
+    ]
+   ]
+  ],
+  "flagOn": [
+   [
+    [
+     "boot",
+     "medium",
+     215850704,
+     149291658
+    ],
+    [
+     "2-hub",
+     "low",
+     216367712,
+     144940640
+    ]
+   ],
+   [
+    [
+     "boot",
+     "medium",
+     217939404,
+     150394346
+    ],
+    [
+     "2-hub",
+     "low",
+     218564844,
+     146026640
+    ]
+   ]
+  ]
+ },
+ "bootSnapshotSelfBytes": {
+  "head": 393602033,
+  "flagOff": 391025054,
+  "note": "live objects after GC; usedSize's +2.3 MiB with the flag off is not retained data"
+ },
+ "nodeFixtures": {
+  "task": "3.3a compact geometry, default-off behind ?compactGeometry=1, rebased onto commit 0391776",
+  "machine": {
+   "arch": "arm64",
+   "node": "v24.19.0"
+  },
+  "patch": {
+   "path": "out/compact.patch",
+   "sha256": "b2a905f3e4273227ce8a87b1e7c46d404b2148abe0018f25b49ca4320fa78e83",
+   "files": [
+    "src/index.html",
+    "src/js/camera-cover.js",
+    "src/js/canvas-renderer.js",
+    "src/js/character-visibility.js",
+    "src/js/compact-geometry.js (new)",
+    "src/js/crew.js",
+    "src/js/gl-renderer.js",
+    "src/js/hub-models.js",
+    "src/js/icon-renderer.js",
+    "src/js/interact.js",
+    "src/js/mirror-body.js",
+    "src/js/models.js",
+    "src/js/object-guides.js",
+    "src/js/terrain-cutaway.js",
+    "src/js/weapon-targets.js",
+    "test/run.mjs"
+   ],
+   "excluded": [
+    "oogaboogaland.html (build output; AGENTS.md: never commit by hand)",
+    "src/js/characters.gen.js (gitignored build output)"
+   ],
+   "applyRoundTrip": "patch -p1 -F0 on a fresh copy of the pristine export reproduces the scratch tree exactly (only characters.gen.js differs, generated)"
+  },
+  "rebase": {
+   "handoffPatch": "compact-with-tests.patch (handoff ooga-phase-3-3-combined)",
+   "totalHunks": 39,
+   "appliedZeroFuzz": 38,
+   "rejectedHunks": 1,
+   "rejected": "src/js/models.js hunk 2 (foliage LOD pack): context line changed from `high.foliageLods = { medium, far };` to `high.foliageLods = { owner: high, medium, far };`; pack block re-inserted after the current line by hand",
+   "offsetHunks": [
+    "models.js hunk 1 and 3 (+24 lines, cachedSteps added since base)",
+    "test/run.mjs both hunks (+64 lines)"
+   ],
+   "addedBeyondHandoff": "src/js/icon-renderer.js (new since the patch base; draws caveman portraitHead/body icons) migrated to compact cursors like canvas-renderer, so packed character bakes never materialise legacy faces there",
+   "removedLinesAudit": {
+    "removedInMine": 55,
+    "removedInHandoff": 53,
+    "handoffRemovalsMissing": 0,
+    "removalsNotInHandoff": 2,
+    "removalsNotInHandoffAreFrom": "icon-renderer.js face loop (the deliberate addition above)",
+    "handoffAdditionsMissing": 0
+   },
+   "newerFeaturesSurvive": {
+    "terrain.js": "untouched (segmentBoxQueryClear x3)",
+    "models.js exports line": "identical to pristine (cachedSteps present)",
+    "foliageLods.owner": "kept",
+    "build-tasks.js / factory-scene-models.js / arcade-scene-models.js / scene-deferred.js": "untouched",
+    "exports/return objects of touched files": "identical except terrain-cutaway's intended finishGeometry return"
+   }
+  },
+  "flagReading": "compact-geometry.js reads new URLSearchParams(window.location.search).get(\"compactGeometry\") === \"1\" once at load, the same shape as director.js/gl-renderer.js flags (they use bare `location.search`; identical in the page). Absent flag: pack() returns the geometry untouched and nothing stores compactGeometry.",
+  "build": {
+   "command": "npm run build",
+   "result": "clean, 226 scripts"
+  },
+  "nodeCheck": {
+   "files": 15,
+   "result": "all pass (14 touched js + test/run.mjs)"
+  },
+  "unit": {
+   "command": "npm run test:unit",
+   "result": "269/269 checks passed"
+  },
+  "fixtures": {
+   "foliageNative": {
+    "script": "foliage-check.mjs (handoff, paths only adapted)",
+    "exit": 0,
+    "same": true,
+    "flagOff": true,
+    "shadersSame": true,
+    "meshes": 39,
+    "fixtures": 13,
+    "legacyMaterialised": 0
+   },
+   "characterNative": {
+    "script": "character-check.mjs (handoff, paths only adapted)",
+    "exit": 0,
+    "same": true,
+    "contributors": 46,
+    "compactMeshes": 430,
+    "compactFaces": 65219,
+    "compactBytes": 7893219,
+    "failed": []
+   },
+   "characterContracts": {
+    "script": "character-contracts.mjs (handoff)",
+    "exit": 0,
+    "flagOff": true,
+    "rebuilt": true,
+    "aliasKept": true,
+    "legacy": 0,
+    "count": 46
+   },
+   "visibilitySourceBakeProof": {
+    "script": "test-check.mjs (handoff, against the rebased test/run.mjs)",
+    "exit": 0,
+    "cases": 234,
+    "failures": 0
+   },
+   "extraIconRenderer": {
+    "script": "extra-check.mjs (new)",
+    "contributors": 46,
+    "flagOffSameAsPristine": true,
+    "flagOnSameAsPristine": true,
+    "portraitHeadCompact": true,
+    "legacyMaterialised": 0,
+    "oracle": "icon-renderer draw-command hash, head and full body"
+   },
+   "extraNewFoliage": {
+    "script": "extra-check.mjs (new)",
+    "items": "pool fern, shrub, undergrowth 0-2 (enrolled through foliageLods since the patch base)",
+    "flagOffSame": true,
+    "flagOnSame": true,
+    "allLevelsCompact": true,
+    "legacy": 0
+   },
+   "grassTuftFlagOn": {
+    "flagOffSame": true,
+    "flagOnUploadByteIdentical": false,
+    "why": "handoff packs the grass tuft (and cutaway caps) at precision 32; Float32 positions change derived normals",
+    "componentsDiffering": 474,
+    "ofComponents": 3150,
+    "maxAbsDiff": 1.7881393432617188e-07,
+    "slot": "normal"
+   }
+  },
+  "memory": {
+   "method": "fresh node --expose-gc process per variant, heapUsed + arrayBuffers delta above the loaded-module floor, base = pristine branch, candidate = rebased tree with ?compactGeometry=1; two runs each",
+   "foliage13": {
+    "baseBytes": [
+     18226888,
+     18225552
+    ],
+    "candidateBytes": [
+     10745220,
+     10724356
+    ],
+    "savedBytes": [
+     7481668,
+     7501196
+    ],
+    "reduction": [
+     0.4105,
+     0.4116
+    ],
+    "handoffSaved": 7508284
+   },
+   "characters46": {
+    "baseBytes": [
+     32868784,
+     32870096
+    ],
+    "candidateBytes": [
+     24945679,
+     24951495
+    ],
+    "savedBytes": [
+     7923105,
+     7918601
+    ],
+    "reduction": [
+     0.2411,
+     0.2409
+    ],
+    "handoffSaved": 7918137
+   },
+   "handoffComparableTotalSaved": [
+    15404773,
+    15419797
+   ],
+   "newFoliageSinceBase": {
+    "items": "fern, shrub, undergrowth x3",
+    "baseBytes": [
+     2665808,
+     2665704
+    ],
+    "candidateBytes": [
+     1330530,
+     1330498
+    ],
+    "savedBytes": [
+     1335278,
+     1335206
+    ],
+    "reduction": 0.5009
+   },
+   "caveat": "Independent Node fixtures, not a Hub heap floor. Browser heap, GPU and the <250/<200 MiB Hub targets are not measured here."
+  },
+  "notRun": [
+   "any browser/Chrome session (parent owns it)",
+   "npm test -- <scene>",
+   "GL or Canvas raster with the flag on",
+   "WebGL context loss/restore with the flag on",
+   "terrain-cutaway cap parity with the flag on (no Node fixture here)",
+   "full-Hub heap with/without the flag"
+  ]
+ },
+ "browser": [
+  {
+   "backend": "webgl",
+   "flag": "0",
+   "boot": true,
+   "scenes": {
+    "factory": true,
+    "arcade": true,
+    "race": true,
+    "drop": true,
+    "orbit": true,
+    "mine": true,
+    "lab": true,
+    "bifrost": true,
+    "dsb": true,
+    "skee": true,
+    "invaders": true
+   },
+   "enabled": false
+  },
+  {
+   "backend": "webgl",
+   "flag": "1",
+   "boot": true,
+   "scenes": {
+    "factory": true,
+    "arcade": true,
+    "race": true,
+    "drop": true,
+    "orbit": true,
+    "mine": true,
+    "lab": true,
+    "bifrost": true,
+    "dsb": true,
+    "skee": true,
+    "invaders": true
+   },
+   "enabled": true
+  },
+  {
+   "backend": "canvas2d",
+   "flag": "0",
+   "boot": true,
+   "scenes": {},
+   "enabled": false
+  },
+  {
+   "backend": "canvas2d",
+   "flag": "1",
+   "boot": true,
+   "scenes": {},
+   "enabled": true
+  }
+ ],
+ "suitesFlagOff": [
+  "unit: 270/270 checks passed in 0.6 min",
+  "race: 300/300 checks passed in 0.9 min",
+  "drop: 283/283 checks passed in 0.9 min",
+  "orbit: 291/291 checks passed in 1.0 min",
+  "mine: 281/281 checks passed in 0.9 min",
+  "arcade: 282/282 checks passed in 0.8 min",
+  "lab: 287/287 checks passed in 0.8 min",
+  "bifrost: 291/291 checks passed in 1.2 min",
+  "skee: 274/274 checks passed in 0.7 min",
+  "invaders: 274/274 checks passed in 0.8 min",
+  "factory: 313/313 checks passed in 1.1 min",
+  "hub selected steps: 316/317, canvas2d tour hung (also hangs on a clean HEAD export: task 4.5)"
+ ]
+}

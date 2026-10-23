@@ -16565,8 +16565,9 @@ const carriedReleaseProof = () => {
 const visibilitySourceBakeProof = () => {
   const math = readFileSync(new URL("../src/js/math.js", import.meta.url), "utf8");
   const source = readFileSync(new URL("../src/js/character-visibility.js", import.meta.url), "utf8");
+  const compact = readFileSync(new URL("../src/js/compact-geometry.js", import.meta.url), "utf8");
   const expose = source.slice(0, source.indexOf("  const create =")) + " window.__meshProof={meshOf,meshes};})();";
-  return runInNewContext(math + "\n" + expose + `
+  return runInNewContext(math + "\n" + compact + "\n" + expose + `
 (() => {
     const {meshOf}=window.__meshProof;
     const source={verts:new Float64Array([0,0,0, 1,0,0, 0,1,0, 0,0,1]),faces:[{i:[0,1,2]},{i:[0,2,3]}]};
@@ -16604,8 +16605,28 @@ const visibilitySourceBakeProof = () => {
     source.faces = [{i:[0,1,3]}];
     const later = wrapper();check(meshOf(later)!==baked,'Replaced source faces reused stale bake');
     const newBake=meshOf({verts:later.verts,faces:later.faces});check(JSON.stringify(Array.from(meshOf(later).indices))===JSON.stringify(Array.from(newBake.indices)),'Replaced source topology differs');
+    // Explicit immutable ownership keeps exact doubles/material data while the critical bake uses no legacy rows.
+    const C=window.BL.compactGeometry, metadata={owner:"fixture"};
+    const packed={verts:[-0,0,0, 1+Number.EPSILON,0,0, 0,1,0, 0,0,1],faces:[
+      {i:[0,1,2],color:[7,9,11,-1],emissive:.9,matrixCave:2,visibility:true,metadata},
+      {i:[0,2,3],color:[255,128,0],visibility:false,water:true}],lines:[]};
+    const original={verts:packed.verts.slice(),faces:packed.faces.slice()}, expected=meshOf(original);
+    C.pack(packed,{immutable:true,renderOnly:true,precision:64});
+    const data=C.storageOf(packed), cursor=C.createCursor(packed), actual=meshOf(packed);
+    check(data && packed.verts instanceof Float64Array && Array.isArray(packed.faces),'Compact storage lost its explicit representation');
+    check(packed.verts.every((v,i)=>Object.is(v,original.verts[i])),'Compact source doubles or signed zero changed');
+    check(JSON.stringify(Array.from(actual.indices))===JSON.stringify(Array.from(expected.indices)) && JSON.stringify(actual.nodes)===JSON.stringify(expected.nodes),'Compact visibility triangles differ');
+    const firstFace=C.readFace(packed,0,cursor);
+    check(firstFace.metadata===metadata && firstFace.matrixCave===2 && firstFace.emissive===.9 && firstFace.color.length===4 && firstFace.color[3]===-1,'Compact material metadata changed');
+    check(C.readFace(packed,1,cursor)===firstFace && cursor.visibility===false && cursor.water===true && cursor.color[0]===255,'Compact face cursor lost reuse or tags');
+    const packedAlias={...packed,matrixSourceGeometry:packed};
+    check(meshOf(packedAlias)===actual && data.legacy.size===0,'Compact source alias materialized legacy faces or failed to share');
+    const borrowed={...packed,verts:original.verts,faces:original.faces};
+    check(C.storageOf(borrowed)===null && C.readFace(borrowed,0,cursor)===original.faces[0],'Borrowed marker overrode replacement geometry');
+    const legacy=packed.faces[0];
+    check(packed.faces[0]===legacy && Object.isFrozen(legacy) && Object.isFrozen(legacy.i) && legacy.color[3]===-1 && data.legacy.size===1,'Legacy compact access is not stable and bounded');
     return { cases, failures: 0, wrapperVisits: 100, sharedSourceBVHs: 1 };
-  })()`, { window: { BL: { scene: { boundsOf() { throw Error("Unused"); } } } } });
+  })()`, { window: { location: { search: "?compactGeometry=1" }, BL: { scene: { boundsOf() { throw Error("Unused"); } } } }, URLSearchParams });
 };
 
 // Run the shipped driver with synthetic processes, discovery and sockets; never launch Chrome.
