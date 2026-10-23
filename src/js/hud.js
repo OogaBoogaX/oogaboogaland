@@ -694,6 +694,11 @@
       destinationIndex = (destinationIndex + 1) % destinationNames.length;
       actionHandler("mode-preset", destinationNames[destinationIndex]);
     };
+    const prefetchDestination = () => {
+      if (destinationNames.length) BL.deferred.prefetchScene(destinationNames[(destinationIndex + 1) % destinationNames.length]);
+    };
+    on(el.modeDestination, "pointerenter", prefetchDestination);
+    on(el.modeDestination, "focus", prefetchDestination);
     let destinationAnchored = false, destinationX = 0, destinationY = 0, destinationZ = 0;
     const showAreaLabel = () => {
       if (el.modeDestinationName.textContent !== areaLabel) el.modeDestinationName.textContent = areaLabel;
@@ -2060,6 +2065,10 @@
     showSheetHeight();
     let presetHandler = null;
     for (const b of el.presets) if (!b.closest(".hub-presets")) b.title = "Camera viewpoint · releases character control";
+    for (const b of el.presets) {
+      const prefetch = () => BL.deferred.prefetchScene(b.dataset.preset);
+      on(b, "pointerenter", prefetch); on(b, "focus", prefetch);
+    }
     for (const b of el.presets) on(b, "click", () => {
       b.blur();
       presetHandler && presetHandler(b.dataset.preset);
