@@ -430,7 +430,24 @@
       if (!e.repeat) forward();
     };
     window.addEventListener("keydown", captureKey, true);
+    // HALLOWEEN: the ghost hunt borrows her (ghost-game.js): while lent she drops whatever she was doing and `driver(rig,
+    // dt)` flies her; given back, she goes back to work.
+    let lender = null;
+    const lend = (driver) => {
+      if (driver && !lender) {
+        if (state.holding) release();
+        rig.hush();
+        rig.mode = 0; rig.aims = null;
+        show("lent");
+      } else if (!driver && lender) {
+        rig.root.visible = true;
+        rig.mode = 0;
+        toWork();
+      }
+      lender = driver;
+    };
     const update = (dt, elapsed) => {
+      if (lender) { lender(rig, dt); rig.update(dt, elapsed); return; } // HALLOWEEN
       const actor = visitor();
       if (state.still && (state.phase === "work" || state.phase === "notice" || state.phase === "approach")) watchStill(dt);
       // A greeting she started is dropped, without a word, when the visitor gets going first; one they asked for by a
@@ -522,7 +539,7 @@
       rig.dispose();
       panel.remove();
     };
-    return { root: rig.root, state, update, escape, tap, dispose, liveGeometry: rig.liveGeometry, get holding() { return state.holding; }, get speech() { return rig.speech; } };
+    return { root: rig.root, state, update, escape, tap, dispose, liveGeometry: rig.liveGeometry, lend /* HALLOWEEN */, get holding() { return state.holding; }, get speech() { return rig.speech; } };
   };
   BL.hubGuide = { create, NAME, LINES, STOPS, NEWS, freshAfter, legsOf };
 })();

@@ -1616,6 +1616,34 @@ Then run npm run build and ONLY=characters node test/run.mjs.</pre>
       </div>
     </div>
     <output class="mic-note" id="mic-note" data-muted="false" hidden></output>
+    <!-- HALLOWEEN: the ghost hunt's HUD (ghost-hud.js shows and hides it; no data-scene, or every arrival would show it). -->
+    <div class="ghost-hud" id="ghost-hud" hidden>
+      <p class="ghost-top" id="ghost-top"></p>
+      <div class="ghost-health" id="ghost-health" role="meter" aria-label="Health" aria-valuemin="0" aria-valuemax="5" hidden><i></i><i></i><i></i><i></i><i></i></div>
+      <p class="ghost-lives" id="ghost-lives"></p>
+      <div class="ghost-boss" id="ghost-boss" hidden><span class="ghost-boss-label">The boss</span><meter id="ghost-boss-bar" min="0" max="1" value="1"></meter></div>
+    </div>
+    <div class="ghost-banner" id="ghost-banner" hidden><strong id="ghost-banner-title"></strong><span id="ghost-banner-sub"></span></div>
+    <div class="ghost-flash" id="ghost-flash" hidden></div>
+    <section class="race-results game-intro ghost-lobby" id="ghost-lobby" role="dialog" aria-labelledby="ghost-lobby-title" hidden>
+      <div class="game-intro-glow" aria-hidden="true"><div class="game-intro-rays"></div></div>
+      <p class="game-intro-kicker">Halloween on the island</p>
+      <h2 class="game-intro-title" id="ghost-lobby-title"><span data-sign>Ghost Hunt</span></h2>
+      <p class="game-intro-goal" id="ghost-lobby-goal"></p>
+      <ul class="game-rules ghost-lobby-players" id="ghost-lobby-players"></ul>
+      <ul class="ghost-lobby-how" id="ghost-lobby-how" aria-label="How to play"></ul>
+      <p class="help ghost-lobby-note" id="ghost-lobby-note" hidden>Sign in to hunt with others</p>
+      <div class="actions">
+        <button type="button" class="game-intro-go" id="ghost-lobby-ready">Ready</button>
+        <button type="button" id="ghost-lobby-decline">Not this time</button>
+      </div>
+    </section>
+    <div class="ghost-player" id="ghost-player" hidden>
+      <span class="ghost-player-note" aria-hidden="true">♪</span>
+      <span class="ghost-player-title" id="ghost-player-title"></span>
+      <button type="button" class="ghost-player-skip" id="ghost-player-skip" aria-label="Next track" hidden>⏭</button>
+      <button type="button" class="ghost-player-toggle" id="ghost-player-toggle" aria-pressed="true">Music on</button>
+    </div>
     <button type="button" class="position-debug" id="position-debug"
       aria-label="Debug character and camera state. Click to copy an exact replay URL." hidden></button>
     <section class="feed-debug" id="feed-debug" aria-label="mempool.space feed" hidden>
@@ -1873,6 +1901,21 @@ Then run npm run build and ONLY=characters node test/run.mjs.</pre>
   <script src="js/poker-models.js" data-defer="poker"></script>
   <script src="js/poker-hud.js" data-defer="poker"></script>
   <script src="js/scene-poker.js"></script>
+  <!-- HALLOWEEN: the hub's ghost hunt, fetched once the island is up (scene-hub.js loadGhosts); the boss's music when round 5 begins. -->
+  <script src="js/ghost-sim.js" data-defer="halloween"></script>
+  <script src="js/ghost-art-data.js" data-defer="halloween"></script>
+  <script src="js/ghost-models.js" data-defer="halloween"></script>
+  <script src="js/ghost-audio-data.js" data-defer="halloween"></script>
+  <script src="js/ghost-audio.js" data-defer="halloween"></script>
+  <script src="js/ghost-font-data.js" data-defer="halloween"></script>
+  <script src="js/ghost-hud.js" data-defer="halloween"></script>
+  <script src="js/ghost-sync.js" data-defer="halloween"></script>
+  <script src="js/ghost-game.js" data-defer="halloween"></script>
+  <script src="js/ghost-boss-audio-data.js" data-defer="halloween-track-boss"></script>
+  <script src="js/ghost-track-colt.js" data-defer="halloween-track-colt"></script>
+  <script src="js/ghost-track-martial.js" data-defer="halloween-track-martial"></script>
+  <script src="js/ghost-track-nightmare.js" data-defer="halloween-track-nightmare"></script>
+  <script src="js/ghost-track-synthed.js" data-defer="halloween-track-synthed"></script>
   <script src="js/director.js"></script>
 </body>
 

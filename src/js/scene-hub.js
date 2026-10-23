@@ -18,6 +18,9 @@
   const DEBUG_TOTEM_GLOW = DEBUG && params.get("totemglow") === "1";
   const DEBUG_GORILLA_MOVE = DEBUG && (params.get("gorillamove") === "1" || params.get("climbers") === "1");
   const DEBUG_GORILLA_RAGE = DEBUG && params.get("gorillarage") === "1";
+  // HALLOWEEN: the ghost hunt comes with the island unless a page opts out (`halloween=0`); the suite's quiet pages
+  // (`nosim`) leave it out unless they ask for it (`halloween=1`).
+  const GHOSTS_WANTED = params.get("halloween") === "1" || params.get("halloween") !== "0" && !params.has("nosim");
   const timeParam = DEBUG ? params.get("time") : null;
   const hourParam = DEBUG ? parseFloat(params.get("hour")) : NaN;
   const daylenParam = DEBUG ? parseFloat(params.get("daylen")) : NaN;
@@ -232,6 +235,11 @@
 
   // One visit's state: created in enter, dropped in leave.
   let jumbotronSpot, oogatronUnsub, renderer, game, world, go, lootEnabled, testBananas, root, camera, overlayCanvas, island, terrainRampRoof, pathNode, altar, hud, hooks, input, pilot, fx, cameraCover, bananaCover, solids, rockGuides, objectGuides, sightGuides, bananaGuides, pileGuides, platformGuides, mirrorGuides, pile, crew, crates, critters, clock, presets, entering, mirrorCave, matrixCave, matrixControl, gateRain, fire, headquarters, dockStairs, jumbotron, positionDebug, remotes, npcSync;
+  // GAME MODE (`setGameMode`): an island event holds the island still for play while it runs.
+  let gameMode = false;
+  // HALLOWEEN: the ghost hunt (ghost-game.js) once its group has arrived, the visit it was asked for, and its walls' seal.
+  let ghosts = null, ghostLoading = false, ghostVisit = 0, ghostSeal = null, ghostClearsProps = false;
+  const GHOST_PROPS = new Set(["crate", "barrel"]);
   let magazine, magazineState, breakables, clankers, clankerPlay, clankerMeshes, clankerPartOwners, grabSupportEntry = null, entropyLab, chalkboard, factoryMouth = null, arcadeMouth = null, bcaMouth = null, glCanvas = null;
   const dragHand = new Float64Array(3), dragFoot = new Float64Array(3);
   const THROW_SWING_TIME = 0.28, THROW_SETTLE_TIME = 0.2, THROW_CARRY_SPEED_MAX = 8;
@@ -1597,7 +1605,8 @@
     for (let i = 0; i < lamps.length; i++) {
       const l = lamps[i], node = l.node;
       if (l.light) registered++;
-      const k = l === coilLamp ? (coilActive ? 1 : 0) : l.always ? 1 : l.nightOnly ? (lanternsOn ? 1 : 0)
+      // GAME MODE puts the meadow's fire pit out: no flame, no light, nothing to catch fire from.
+      const k = l === coilLamp ? (coilActive ? 1 : 0) : l === fire && gameMode ? 0 : l.always ? 1 : l.nightOnly ? (lanternsOn ? 1 : 0)
         : Math.min(1, Math.max(0, (RENDER_OPTS.torch - l.order * LAMP_STAGGER) / LAMP_RAMP));
       const lit = k > 0.05;
       if (lit && !l.lit && spark) fx.burst(l.x, l.y, l.z, 5, [SPARK], 1.3);
@@ -3532,6 +3541,7 @@
     return true;
   };
   const setSceneryActive = (o, active) => {
+    if (active && ghostClearsProps && GHOST_PROPS.has(o.prop)) return; // HALLOWEEN: boxes and barrels stay away for the hunt
     if (o.active === active) return;
     o.active = active;
     o.node.visible = active;
@@ -3692,6 +3702,7 @@
         clankers.bananaHit(hit.owner.entry, source, projectile.serial);
       return;
     }
+    if (hit.owner.kind === "halloween") { ghosts.hit(source, hit, power, isPlayerAttack(source)); return; } // HALLOWEEN
     if (hit.node === mirrorCave.node) {
       hitMirror(power, hit.x, hit.y, hit.z, source);
       return;
@@ -3742,7 +3753,7 @@
       return true;
     }
     if (!jetpackAllowed(cave)) {
-      hud.toast("No jetpacks under ground");
+      hud.toast(ghosts && ghosts.sealed ? "No jetpacks while the ghosts are out" : "No jetpacks under ground"); // HALLOWEEN: ghosts
       return false;
     }
     return equipJetpack(cave);
@@ -5082,6 +5093,7 @@
     && (!solids || solids.segmentClear(x, y, z, x, y, z, radius, height, null, radius, height, rageThrown(actor), false, false, rageThrown(actor)));
   const JETPACK_COLUMN = { caveIndex: 0, floor: 0, ceiling: 0 };
   const jetpackAllowed = (cave) => {
+    if (ghosts && ghosts.sealed) return false; // HALLOWEEN
     const p = cave.root.position, feet = p.y - cave.baseY;
     const basement = island.headquarters.basement, hole = basement.hole;
     // Keep thrust through the open shaft and its bevel until the whole body clears the lip.
@@ -5427,6 +5439,7 @@
     updateCutawayWholeVisibility();
   };
   const crossesSealedCave = (fromX, fromZ, toX, toZ, y = 0) => {
+    if (ghostSeal !== null && ghostSeal(fromX, fromZ, toX, toZ, y)) return true; // HALLOWEEN: the ghost walls
     for (let i = 0; i < sealedCaves.length; i++) {
       const sealed = sealedCaves[i], m = sealed.mouth, sr = sealed.sr, cr = sealed.cr;
       if (y < m.floorY - STEP_MAX || y > m.floorY + PORTAL_MAX_Y) continue;
@@ -6248,6 +6261,8 @@
     switch (o.kind) {
       case "tess":
         return COARSE ? `${BL.hubGuide.NAME} the guide · tap for a tour` : `${BL.hubGuide.NAME} the guide · click for a tour`;
+      case "halloween": // HALLOWEEN
+        return o.tooltip();
       case "caveman":
         return o.cave.traits.display;
       case "clanker":
@@ -6345,7 +6360,7 @@
   const reticleTarget = (hit) => {
     const o = hit.owner;
     if (hit.node === mirrorCave.node || o.kind === "cave-sign" || o.kind === "room-sign" || o.kind === "sphere-key" || o.kind === "matrix-button" || o.kind === "matrix-gate"
-      || o.kind === "lab-link" || o.kind === "piece") return "object";
+      || o.kind === "lab-link" || o.kind === "piece" || o.kind === "halloween" && o.role === "herald") return "object"; // HALLOWEEN: halloween
     if (o.kind === "cave") return o.slot.status === "open" ? "object" : "none";
     if (o.kind === "prop" && (o.breakable || RETICLE_PROPS.has(o.prop))) return "object";
     return "none";
@@ -6758,6 +6773,7 @@
   // takes it on the way in.
   const enterCave = (slot) => {
     if (slot.scene === "lab") return;
+    if (ghosts && ghosts.sealed) { hud.toast("The ghost walls hold every cave shut"); return; } // HALLOWEEN
     if (!slot.scene) { if (slot.place) navigate(slot.place); return; }
     if (entering) return;
     world.pilot = pilot.player ? pilot.player.traits.name : null;
@@ -6855,6 +6871,9 @@
     switch (o.kind) {
       case "tess":
         islandGuide.tap();
+        break;
+      case "halloween": // HALLOWEEN
+        o.tap();
         break;
       case "caveman":
         crew.pokeCave(o.cave);
@@ -7358,7 +7377,7 @@
     const travel = preserveActor && !!player, controller = gorilla ? clankerPlay : pilot;
     const close = gorilla ? clankerPlay.firstPerson : pilot.closeWanted, basement = name === "basement", underground = name === "underground" || basement;
     if (travel) {
-      const refusal = controller.travelRefusal();
+      const refusal = controller.travelRefusal() || name !== "pile" && ghosts && ghosts.refuseTravel(); // HALLOWEEN: ghosts
       if (refusal) { hud.toast(refusal); return refusal; }
     }
     const randomPile = respawn && name === "pile";
@@ -8131,7 +8150,7 @@
     const first = phase === null;
     phase = next;
     if (first) hud.setSubtitle("an island of caves");
-    if (!first) hud.toast(PHASE_TOASTS[next]);
+    if (!first && !(ghosts && ghosts.quietSky)) hud.toast(PHASE_TOASTS[next]); // HALLOWEEN: quietSky
   };
   // The jumbotron's close-up in the shared board dialog, read straight off the board as it pages and repaints.
   const jumbotronBoard = {
@@ -8148,7 +8167,7 @@
   // times and stepped in update(), so a waiting shell costs nothing per frame.
   const fireworksShells = [];
   const launchFireworks = (strength = 1, from = jumbotronSpot) => {
-    if (!from || !fx) return 0;
+    if (!from || !fx || gameMode) return 0;
     const shells = Math.min(6, 2 + Math.min(4, strength | 0));
     for (let i = 0; i < shells; i++) {
       fireworksShells.push({
@@ -8346,10 +8365,12 @@
     window.open(url || `https://github.com/${repo.repo}/pulls?q=is%3Apr+is%3Amerged`, "_blank", "noopener,noreferrer");
   };
   const update = (dt, elapsed) => {
+    if (ghosts) ghosts.unshake(camera); // HALLOWEEN: last frame's quake comes off before anything reads the camera
     if (lawn && lawn.version !== island.path.version) layLawn();
     if (life) { life.gulls.update(elapsed); life.shore.update(elapsed); life.boats.update(elapsed); }
     now = elapsed;
     hour = clock.read();
+    if (ghosts) hour = ghosts.hour(hour); // HALLOWEEN: night falls for the hunt
     // The ephemeris turns the sun 0.0042 deg/s of island time (a 6e-4-hour budget is 2.16 s and misses no
     // pixel), so it resamples only when an input drifts; a fast debug clock misses the budget every frame,
     // a frozen one hits from the second frame on.
@@ -8377,14 +8398,18 @@
     const sheltered = mempoolIsland.coveredAt(camera.position.x, camera.position.y, camera.position.z) ? 1 : 0;
     poolShade += clamp(sheltered - poolShade, -dt * 1.6, dt * 1.6);
     poolUnder += clamp((cutawayPool === 2 ? 1 : 0) - poolUnder, -dt * 1.6, dt * 1.6);
-    weather.update(dt, RENDER_OPTS, poolShade);
+    if (gameMode) RENDER_OPTS.clouds = 0;
+    else weather.update(dt, RENDER_OPTS, poolShade);
     if (poolShade > 0) {
       const keep = 1 - 0.4 * poolShade;
       RENDER_OPTS.directStrength *= 1 - 0.92 * poolShade;
       for (let i = 0; i < 3; i++) { RENDER_OPTS.sky[i] *= keep; RENDER_OPTS.ground[i] *= keep; }
     }
-    mempoolIsland.water.update(dt, elapsed, Date.now());
-    mempoolIsland.paintings.update(dt);
+    if (ghosts) ghosts.shade(RENDER_OPTS); // HALLOWEEN: the boss dims the sky
+    if (!gameMode) {
+      mempoolIsland.water.update(dt, elapsed, Date.now());
+      mempoolIsland.paintings.update(dt);
+    }
     updateTotems(dt, elapsed);
     if (coilCharge) updateCoilCharge(elapsed);
     updateLamps(dt, elapsed, phase !== null);
@@ -8398,7 +8423,7 @@
     if (next !== phase) setPhase(next);
     if (DEBUG) syncDaylightDebug(hour);
     critters.update(dt, elapsed, RENDER_OPTS.day, RENDER_OPTS.stars, fire.k, 1);
-    updateClouds(dt);
+    if (!gameMode) updateClouds(dt);
     solids.sync();
     updateRageThrowMap();
     updateSleepingSolids();
@@ -8472,7 +8497,7 @@
     clankerMeshes.sync();
     updateClankerEffects(dt);
     if (timechainIsland) {
-      timechainIsland.site.turn((elapsed % TIMECHAIN_OUTER_PERIOD) * Math.PI * 2 / TIMECHAIN_OUTER_PERIOD);
+      if (!gameMode) timechainIsland.site.turn((elapsed % TIMECHAIN_OUTER_PERIOD) * Math.PI * 2 / TIMECHAIN_OUTER_PERIOD);
       timechainIsland.show(dt);
       // The doorway's walks steer the Ooga before the crew moves it.
       timechainIsland.gate.update(dt);
@@ -8486,7 +8511,9 @@
     npcSync.update(dt);
     shareDrivenActor(dt);
     remotes.update(dt);
-    mempoolIsland.wildlife.update(dt, elapsed);
+    if (ghosts) ghosts.update(dt); // HALLOWEEN
+    else if (GHOSTS_WANTED && !ghostLoading && elapsed > 2) loadGhosts(); // HALLOWEEN
+    if (!gameMode) mempoolIsland.wildlife.update(dt, elapsed);
     for (const cave of crew.list) if (cave.root.visible) {
       const p = cave.root.position;
       mempoolIsland.wake(cave.root, p.x, p.y - cave.baseY, p.z, cave.bodyHeight, 0.35);
@@ -8577,9 +8604,13 @@
       bcaMouth.phase.body.update(dt);
       bcaMouth.phase.body.time = bcaMouth.phase.ripples.time;
     }
+    if (ghosts) ghosts.shake(camera); // HALLOWEEN: the land shakes as the ghost walls rise
   };
   // Signed-in visitors own their pair; bundled actors are available for local play when signed out.
-  const mayDriveOoga = (cave) => cave.contributor ? BL.net.mayDrive(cave.traits.name) : null;
+  const mayDriveOoga = (cave) => {
+    if (ghosts && ghosts.waiting) return "You're in the waiting room until this hunt ends"; // HALLOWEEN: the hunt's waiting room
+    return cave.contributor ? BL.net.mayDrive(cave.traits.name) : null;
+  };
   const actorTransition = {};
   // Validate a new Ooga before giving up the current actor or its camera.
   const selectOoga = (cave) => {
@@ -8590,6 +8621,7 @@
     const refusal = mayDriveOoga(cave);
     if (refusal) { hud.toast(refusal); return false; }
     if (cave.remoteControlled) { hud.toast(`Someone is already driving ${cave.traits.display}`); return false; }
+    if (ghosts) ghosts.release(cave); // HALLOWEEN: an Ooga cleared away for the hunt comes back to be driven
     if (crew.stateOf(cave) === "away" || cave.state !== "working" && cave.state !== "chilling" && cave.state !== "sleeping") {
       hud.toast(`${cave.traits.display} is in another place`);
       return false;
@@ -8650,6 +8682,81 @@
     pilot.possess(cave);
     if (crew.player === cave) hud.toast(`Welcome back, ${BL.characters.displayOf(character.handle)}: this Ooga is yours`);
   };
+  // GAME MODE: an island event (the ghost hunt today, others to come) clears the island for play and holds the
+  // scenery still while it runs: every gorilla nobody drives goes away (clankers' `setAway`), the trees stop swaying
+  // (the renderer's `windTime` held where it stood), no fireworks go up, the meadow's fire pit goes out (`updateLamps`),
+  // the Timechain Sphere stops turning, the island's clouds and the Mempool island's weather go (`weather.hold`), and
+  // the Mempool island itself is hidden and left unrun. All of it comes back when the event lets go, and in `leave`.
+  const setGameMode = (on) => {
+    on = !!on;
+    if (on === gameMode) return;
+    gameMode = on;
+    clankers.setAway(on);
+    RENDER_OPTS.windTime = on ? performance.now() * 0.001 % 3600 : NaN;
+    if (on) fireworksShells.length = 0;
+    // The act button and the hint pill under the play area (JUMP!, the controls' reminders) stand down too.
+    document.body.classList.toggle("game-mode", on);
+    for (const cloud of clouds) cloud.node.visible = !on;
+    weather.hold(on);
+    mempoolIsland.site.node.visible = !on;
+  };
+  // HALLOWEEN: the ghost hunt arrives after the island is up (data-defer="halloween", ghost-game.js) and works the island
+  // through this one adapter. A load that lands after the visit ended finds a newer `ghostVisit` and attaches nothing;
+  // one that fails waits for the next visit.
+  const loadGhosts = () => {
+    ghostLoading = true;
+    const visit = ghostVisit, loading = BL.deferred.load("halloween");
+    const attach = () => { if (visit === ghostVisit) ghosts = BL.halloween.create(ghostHub()); };
+    if (loading) loading.then(attach, () => {});
+    else attach();
+  };
+  const ghostHub = () => ({
+    root, camera, renderer, fx, hud, crew, island, npcSync, coarse: COARSE, closedZones: closedCaveZones, debug: DEBUG, params, guide: islandGuide,
+    openMouths: island.mouths.filter((m) => !sealedCaves.some((sealed) => sealed.mouth === m)),
+    addTarget, selectOoga, mayDriveOoga, zoneOf,
+    gorillaActive: () => !!(clankerPlay && clankerPlay.active),
+    gameMode: setGameMode,
+    // The waiting room: the driven Ooga let go of (the free camera to watch from), and at the end the visitor's own
+    // Ooga given back.
+    spectate: (on) => {
+      if (on) { if (pilot.player) pilot.modeAction("mode-release"); return; }
+      const own = BL.net.ownCharacter(), cave = own && crew.cavemen.get(own.handle);
+      if (cave && !pilot.player && !cave.remoteControlled) selectOoga(cave);
+    },
+    remoteUnderlying: (cave, override) => remotes.setUnderlying(cave, override),
+    // The driven Ooga's rifle out and the view in combat, as 2 and X would have it.
+    readyGun: () => {
+      if (!pilot.aiming) pilot.modeAction("mode-toggle");
+      pilot.weaponMode(2);
+    },
+    // The view held while a player's Ooga lies under its grave: the pilot let go of, as Tess's tour does, and given back.
+    holdView: (on) => {
+      pilot.setActive(!on); pilot.controls.reset(); input.reset();
+      pilot.setExternalControl(on);
+    },
+    // The banana pile at the island's middle: its platform's reach and the top of the pile as it stands now.
+    pileRadius: () => altar.platformRadius,
+    pileTop: () => pile.core.position.y + pile.core.scale.y * pileTopY,
+    setSeal: (fn) => { ghostSeal = fn; },
+    // Boxes and barrels away for the hunt (`poof` where each stood), and back where the island has room after it.
+    clearProps: (on, poof) => {
+      if (ghostClearsProps === on) return;
+      ghostClearsProps = on;
+      if (!on) { reflowScenery(); solids.sync(); return; }
+      for (const o of scenery) {
+        if (!o.breakable || !GHOST_PROPS.has(o.prop) || !o.active) continue;
+        if (poof) poof(o.node.position.x, o.node.position.y, o.node.position.z);
+        deactivateBreakable(o);
+      }
+    },
+    dropJetpack: (cave) => { crew.removeJetpack(cave); pilot.showAct(); },
+    // Nudges the driven Ooga along the ground (a ghost's knock, a wraith's pull) where it could walk.
+    pull: (cave, dx, dz) => {
+      const p = cave.root.position, feet = p.y - cave.baseY;
+      if (cave.health.stunned || !walkable(p.x, p.z, p.x + dx, p.z + dz, feet, cave.bodyHeight, cave)) return;
+      p.x += dx; p.z += dz;
+    }
+  });
   const cycleOwnActor = () => {
     const character = BL.net.ownCharacter();
     if (!character) { hud.toast("Sign in as a contributor to switch between your Ooga and gorilla"); return; }
@@ -8743,6 +8850,7 @@
   // Signed-in players are shown where this one is: the same zone while driving, every place on the island
   // while looking round free (no zone, no voice).
   const remoteShown = (rec) => {
+    if (ghosts && ghosts.down(rec.id)) return false; // HALLOWEEN: a player gone down lies under their grave
     const net = BL.net.state;
     if (net.body) return rec.zone === net.zone;
     return BL.remotePlayers.onIsland(rec.zone);
@@ -8751,6 +8859,7 @@
     crew.drawDrops(ctx2d, project);
     remotes.drawNames(ctx2d, project);
     breakables.drawOverlay(ctx2d);
+    if (ghosts) ghosts.drawOverlay(ctx2d, project); // HALLOWEEN
     if (debugSelectedGorilla) {
       const entry = debugSelectedGorilla, move = entry.debugMove, p = entry.root.position;
       ctx2d.save();
@@ -10726,6 +10835,7 @@
       }
       return;
     }
+    if (ghosts && ghosts.key(e)) { e.preventDefault(); return; } // HALLOWEEN: the ghost hunt's debug keys
     if (e.key === "Escape" && islandGuide.escape()) { e.preventDefault(); return; }
     // While Tess's tour holds the view the island's keys wait, actor switches (T) among them; Enter and → are hers.
     if (islandGuide.holding) return;
@@ -11284,7 +11394,11 @@
       npcSync.recordHit(cave);
       return workHit(cave);
     };
-    shared.onShot = (cave, from, to) => npcSync.recordShot(cave, from, to);
+    shared.onShot = (cave, from, to) => {
+      npcSync.recordShot(cave, from, to);
+      if (ghosts && cave === crew.player) ghosts.shot(from, to); // HALLOWEEN: the visitor's banana rounds sound, and the orb fires with them
+    };
+    shared.shotGeometry = () => ghosts && ghosts.hunting ? ghosts.rock : null; // HALLOWEEN: rifles fire rocks through the hunt
     BL.net.setHub(true);
     for (const cave of crew.list) crew.setJetpackOwnership(cave, true, hubModels.jetpack(), hubModels.jetFlame());
     // Sani hosts the island on ordinary visits; debug visits keep activity-derived states.
@@ -11839,11 +11953,12 @@
     islandGuide = BL.hubGuide.create({
       parent: root, input, fx, camera, pilot, visitor: () => crew.player, world, hud, coarse: COARSE,
       landing: !ctx.place && !preloadedView && !returningCharacter && ctx.from !== "bifrost",
-      quality: () => renderer.quality, busy: () => chalkboard.openNow || clankerPlay.active || factoryDeparting || bifrostDeparting,
+      quality: () => renderer.quality, busy: () => chalkboard.openNow || clankerPlay.active || factoryDeparting || bifrostDeparting || !!(ghosts && ghosts.busy), // HALLOWEEN: ghosts
       // What her beam sweeps across on the totems' line: their eyes, west to east.
       targets: { totems: totems.map((t) => { const p = t.owner.node.position; return { x: p.x, y: p.y + t.eyeTop, z: p.z }; }).sort((a, b) => a.x - b.x) }
     });
     hubScene.debug.tess = islandGuide;
+    Object.defineProperty(hubScene.debug, "halloween", { get: () => ghosts && ghosts.debug, enumerable: true }); // HALLOWEEN
     mark("visibility-start");
     fx.warmVisibility(crew);
     fx.warmBlockers();
@@ -11873,6 +11988,16 @@
     selectDebugGorilla(null);
     islandGuide.dispose();
     islandGuide = null;
+    // HALLOWEEN: the hunt goes before the crew, fx and targets it uses; a load still under way finds a newer visit.
+    ghostVisit++;
+    if (ghosts) { ghosts.dispose(); ghosts = null; }
+    ghostLoading = false;
+    ghostSeal = null;
+    ghostClearsProps = false;
+    // GAME MODE ends with the visit; the island comes back built afresh.
+    gameMode = false;
+    document.body.classList.remove("game-mode");
+    RENDER_OPTS.windTime = NaN;
     debugMovementTerrain = DEBUG_MOVE_HIT.node = DEBUG_MOVE_HIT.owner = null;
     DEBUG_GORILLA_HIT.node = DEBUG_GORILLA_HIT.owner = null;
     chalkboard.dispose();
@@ -12039,6 +12164,7 @@
   };
   const liveGeometry = (set) => {
     if (islandGuide) islandGuide.liveGeometry(set);
+    if (ghosts) ghosts.liveGeometry(set); // HALLOWEEN
     mempoolIsland.water.liveGeometry(set);
     pile.liveGeometry(set);
     breakables.liveGeometry(set);
@@ -12057,7 +12183,7 @@
     let nodes = 0;
     traverseVisible(root, () => nodes++);
     const all = (n) => 1 + n.children.reduce((sum, c) => sum + all(c), 0);
-    return { visibleNodes: nodes, allNodes: all(root), tweens: tweenCount(), targets: input.targetCount, ...fx.stats(), ...crates.stats(), ...crew.stats(), ...pile.stats(), ...critters.stats(), ...mempoolIsland.water.stats(), ...breakables.stats(), ...weather.stats(), ...remotes.stats() };
+    return { visibleNodes: nodes, allNodes: all(root), tweens: tweenCount(), targets: input.targetCount, ...fx.stats(), ...crates.stats(), ...crew.stats(), ...pile.stats(), ...critters.stats(), ...mempoolIsland.water.stats(), ...breakables.stats(), ...weather.stats(), ...remotes.stats(), ghosts: ghosts ? ghosts.stats().ghosts : 0 /* HALLOWEEN */ };
   };
   const hubScene = {
     // The island reports its own zone as soon as an Ooga is driven (see `zoneOf`); until then it is nowhere.
@@ -12068,6 +12194,7 @@
     get inMotion() {
       // A crossing through the Timechain Sphere's doors keeps full rate, so its walk and swoop finish smoothly.
       if (timechainIsland && timechainIsland.gate.busy) return true;
+      if (ghosts && ghosts.inMotion) return true; // HALLOWEEN
       if (pile.inMotion || fx.inMotion || breakables.inMotion || weather.active || mempoolIsland.water.active || magazine && magazine.revealed || MATRIX_WORLD.active || mirrorGuides.state.doorway || mirrorCave.damage.active || mirrorCave.ripples.active || mirrorCave.body.active || entropyLab.phase.ripples.active || entropyLab.phase.body.contacts || entropyLab.phase.body.active) return true;
       if (bcaMouth && (bcaMouth.phase.ripples.active || bcaMouth.phase.body.contacts || bcaMouth.phase.body.active)) return true;
       for (const sign of headquarters.roomSigns) if (sign.velocity || sign.node.rotation.x) return true;

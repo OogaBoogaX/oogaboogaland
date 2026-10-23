@@ -220,13 +220,18 @@ test("Ember Den voice separates ten tables and the walking floor without changin
   for (const table of [-1, 10, 0.5, "0", undefined]) assert.equal(parseClientMessage(JSON.stringify({ t: "poker-voice", table })), null);
 });
 
-test("NPC host: the page longest in the room among those showing the island; nobody when none does", async () => {
+test("NPC host: the sitting host while it shows the island, else the page longest in the room among those that do; nobody when none does", async () => {
   const { electHost, parseClientMessage } = await import("../src/protocol.js");
   const p = (id, joinedAt, inHub) => ({ id, joinedAt, inHub });
   assert.equal(electHost([p(1, 100, true), p(2, 50, true), p(3, 10, false)]), 2);
   assert.equal(electHost([p(1, 100, true), p(2, 100, true)]), 1, "a tie goes to the lower id");
   assert.equal(electHost([p(1, 100, false)]), 0);
   assert.equal(electHost([]), 0);
+  // A sitting host keeps the role while it shows the island, even when an older page comes back; it gives it up
+  // only by leaving or hiding.
+  assert.equal(electHost([p(1, 100, true), p(2, 50, true)], 1), 1, "an older page returning does not take hosting back");
+  assert.equal(electHost([p(1, 100, false), p(2, 50, true)], 1), 2);
+  assert.equal(electHost([p(2, 50, true)], 9), 2, "a host that has left hands over to the oldest");
   assert.deepEqual(parseClientMessage('{"t":"hub","on":true}'), { t: "hub", on: true });
   assert.equal(parseClientMessage('{"t":"hub","on":"yes"}'), null);
 });

@@ -1553,6 +1553,7 @@
       const bullet = bulletPool[bulletIdx++ % bulletPool.length], node = bullet.node;
       bullet.serial = ++bulletSerial;
       node.geometry = models.bananaGeometry(); setVec(node.scale, models.BANANA_AMMO_SCALE, models.BANANA_AMMO_SCALE, models.BANANA_AMMO_SCALE);
+      if (ctx.shotGeometry?.(cave)) { node.geometry = ctx.shotGeometry(cave); setVec(node.scale, 1, 1, 1); } // HALLOWEEN: the hunt's rocks
       bullet.duration = .22; bullet.arc = 0; bullet.tomato = false;
       const h = cave.traits.height;
       BL.scene.updateWorld(cave.root);
@@ -1576,7 +1577,7 @@
       }
       // A phase doorway consumes the round before scenery or workers behind it.
       if (ctx.clipProjectileTarget && ctx.clipProjectileTarget(from, to)) surfaceHit = false;
-      bullet.reach = surfaceHit && weaponHit.owner.kind === "clanker" ? SHOT_SURFACE_REACH : 0;
+      bullet.reach = surfaceHit && (weaponHit.owner.kind === "clanker" || weaponHit.owner.kind === "halloween") ? SHOT_SURFACE_REACH : 0; // HALLOWEEN: halloween
       if (!surfaceHit && shotClear && !shotClear(from.x, from.y, from.z, to.x, to.y, to.z)) {
         bullet.workShot = false;
         let lo = 0, hi = 1;
@@ -1601,6 +1602,7 @@
     const showShot = (cave, fx, fy, fz, tx, ty, tz) => {
       const bullet = bulletPool[bulletIdx++ % bulletPool.length], node = bullet.node;
       node.geometry = models.bananaGeometry(); setVec(node.scale, models.BANANA_AMMO_SCALE, models.BANANA_AMMO_SCALE, models.BANANA_AMMO_SCALE);
+      if (ctx.shotGeometry?.(cave)) { node.geometry = ctx.shotGeometry(cave); setVec(node.scale, 1, 1, 1); } // HALLOWEEN: the hunt's rocks
       bullet.duration = .22; bullet.arc = 0; bullet.tomato = false;
       setVec(bullet.from, fx, fy, fz);
       setVec(bullet.to, tx, ty, tz);

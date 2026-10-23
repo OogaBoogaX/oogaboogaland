@@ -48,7 +48,7 @@
 // `recheck` looks at /api/me again after a look that went unanswered (the keypad's Retry), bounded as the first.
 // `setPokerVoice(table)` scopes Ember Den voice to one table, or the floor when null, without moving the body.
 // Exports start, recheck, subscribe, subscribeRoster, subscribeChat, subscribeDoor, dispose, login, logout, setDisplay, rejoin, setBody, setZone, setPokerVoice, setHub,
-// setMuted, setHealth, sendNpc, sendChat, npcFrame, sendPose, askDoor, goDoor, doneDoor, cancelDoor, passDoor, mayDrive, mayDriveGorilla,
+// setMuted, setHealth, sendNpc, sendChat, sendGhost and subscribeGhost (HALLOWEEN), npcFrame, sendPose, askDoor, goDoor, doneDoor, cancelDoor, passDoor, mayDrive, mayDriveGorilla,
 // ownCharacter, characterOf, gorillaBody, bodyName, bodyKind, serverNow, remotes, state, CHAT_MAX and CHAT_KEEP.
 (() => {
   "use strict";
@@ -304,6 +304,8 @@
       if (chatIdValid(msg.cycle)) doorHeard({ t: "transit-end", cycle: msg.cycle });
     } else if (msg.t === "voice") {
       if (Array.isArray(msg.peers)) BL.voice.setPeers(msg.peers, Array.isArray(msg.gens) ? msg.gens : null);
+    } else if (msg.t === "ghost") {
+      if (ghostHeard) ghostHeard(msg); // HALLOWEEN
     } else if (msg.t === "release") {
       state.released = { name: String(msg.name), reason: String(msg.reason) };
       emit();
@@ -501,6 +503,16 @@
   };
   document.addEventListener("visibilitychange", onVisibility);
 
+  // HALLOWEEN: the ghost hunt's word to the room's host (ghost-sync.js): a start or a hit, relayed to the host alone.
+  let ghostHeard = null;
+  const sendGhost = (msg) => {
+    if (state.room === "live" && state.hostId && state.hostId !== state.selfId) send(JSON.stringify(msg));
+  };
+  const subscribeGhost = (fn) => {
+    ghostHeard = fn;
+    return () => { if (ghostHeard === fn) ghostHeard = null; };
+  };
+
   // The host's frame of Oogas, sent as bytes (a typed array view is sent as just its own bytes).
   const sendNpc = (view) => {
     if (ws && ws.readyState === WebSocket.OPEN && state.hostId === state.selfId) ws.send(view);
@@ -658,8 +670,9 @@
     rosterSubscribers.clear();
     chatSubscribers.clear();
     doorSubscribers.clear();
+    ghostHeard = null; // HALLOWEEN
     close("off");
   };
 
-  BL.net = { start, recheck, subscribe, subscribeRoster, subscribeChat, subscribeDoor, dispose, login, logout, setDisplay, rejoin, setBody, setZone, setPokerVoice, setHub, setMuted, setHealth, sendNpc, sendChat, sendPose, askDoor, goDoor, doneDoor, cancelDoor, passDoor, mayDrive, mayDriveGorilla, ownCharacter, characterOf, gorillaBody, bodyName, bodyKind, serverNow, remotes, state, CHAT_MAX, CHAT_KEEP, get npcFrame() { return npcFrame; } };
+  BL.net = { start, recheck, subscribe, subscribeRoster, subscribeChat, subscribeDoor, dispose, login, logout, setDisplay, rejoin, setBody, setZone, setPokerVoice, setHub, setMuted, setHealth, sendNpc, sendChat, sendGhost, subscribeGhost, sendPose, askDoor, goDoor, doneDoor, cancelDoor, passDoor, mayDrive, mayDriveGorilla, ownCharacter, characterOf, gorillaBody, bodyName, bodyKind, serverNow, remotes, state, CHAT_MAX, CHAT_KEEP, get npcFrame() { return npcFrame; } };
 })();

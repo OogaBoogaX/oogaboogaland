@@ -4761,6 +4761,224 @@ const gameRulesChecks = async () => {
     record("jackpot wheel: a spin pays back 75 to 90% of its cost on average, the jackpot is ten spins' worth, and every wedge stops under the clapper wherever the spin aims in it", V.length === 20 && ev >= cost * 0.75 && ev <= cost * 0.9 && jackpot >= cost * 10 && missed.length === 0, JSON.stringify({ ev, cost, jackpot, missed: missed.slice(0, 4) }));
   }
 };
+// HALLOWEEN: the hub's ghost hunt (ghost-sim.js), its rules run in Node with scripted players on a ring of crest spots.
+const ghostHuntChecks = async () => {
+  const context = { window: {} };
+  runInNewContext(await readFile(new URL("../src/js/ghost-sim.js", import.meta.url), "utf8"), context);
+  const G = context.window.BL.ghostSim, ST = G.STATE, T0 = 1.7e12, FRAME = 16;
+  const spots = [];
+  for (let i = 0; i < 120; i++) { const a = i / 120 * Math.PI * 2; spots.push(Math.sin(a) * 25.5, 4, -Math.cos(a) * 25.5, a); }
+  // Two players stand still; with `shoot` every ghost within 14 m of the middle and every gorilla is hit every sixth frame,
+  // the boss every fifth.
+  const play = (sim, from, until, { shoot = true, here = 2, watch = null } = {}) => {
+    let now = T0 + from;
+    while (now < T0 + until) {
+      now += FRAME;
+      sim.beginPresence();
+      if (here > 0) sim.present(1, 3, 0, 4);
+      if (here > 1) sim.present(2, -5, 0, -2);
+      sim.advance(now);
+      const frame = now / FRAME | 0;
+      if (shoot) for (const g of sim.ghosts) if (g.on && !g.dying && Math.hypot(g.x, g.z) < 14 && frame % 6 === 0) sim.hit(g.id, 2, g.id % 2 ? 1 : 2);
+      if (shoot && frame % 6 === 0) for (const b of sim.brutes) if (b.on && !b.dying) sim.hit(b.id, 2, 1);
+      if (shoot && sim.state.bossOn && frame % 5 === 0) sim.hit(0, 5, 1);
+      if (watch) watch(sim);
+      if (sim.state.state === ST.IDLE) break;
+    }
+    return now - T0;
+  };
+  // Both test players ready up in the lobby, so the walls rise as soon as they are there.
+  const begin = (seed) => { const sim = G.create({ seed, spots, lapMs: 20000 }); sim.start(T0, 1); sim.ready(1); sim.ready(2); return sim; };
+  {
+    const a = begin(7), b = begin(7);
+    play(a, 0, 120000); play(b, 0, 120000);
+    const repeated = JSON.stringify(a.snapshot()) === JSON.stringify(b.snapshot());
+    // A new host loads the old one's last frame (through JSON, as the room carries it) and runs on; the old one
+    // carries on from the same frame, so a field the snapshot forgot would part them.
+    const handed = G.create({ seed: 99, spots, lapMs: 20000 }), loaded = handed.load(JSON.parse(JSON.stringify(a.snapshot())));
+    a.load(JSON.parse(JSON.stringify(a.snapshot())));
+    const at = 120000 - 120000 % FRAME;
+    // Compared while both still hunt: a finished hunt resets to IDLE and would hide any difference.
+    play(a, at, 200000); play(handed, at, 200000);
+    const same = JSON.stringify(a.snapshot()) === JSON.stringify(handed.snapshot()), hunting = a.state.state !== ST.IDLE;
+    record("ghost hunt: a seeded hunt repeats exactly, and one picked up from its snapshot mid-way (a new host) goes on the same", repeated && loaded && same && hunting && a.state.kills > 0, JSON.stringify({ repeated, loaded, same, hunting, kills: a.state.kills }));
+  }
+  {
+    const sim = begin(11), rounds = [], drops = { 3: false, 4: false }, gorillas = [], seenBrutes = new Set();
+    let maxAlive = 0, round = 0, lapToNight = false;
+    const settings = { ghosts: 0, cap: 0, interval: 0, group: 0, speed: 0 };
+    const states = new Set();
+    const end = play(sim, 0, 3600000, { watch: (s) => {
+      const st = s.state;
+      states.add(st.state);
+      if (st.state === ST.NIGHT) lapToNight = true;
+      if (st.state === ST.ACTIVE) {
+        if (st.round !== round) { round = st.round; rounds[round] = { total: G.roundSettings(round, st.players, settings).ghosts, cap: settings.cap, max: 0 }; }
+        rounds[round].max = Math.max(rounds[round].max, s.alive());
+        rounds[round].spawned = st.spawned;
+        if (round === 3 && s.drops.some((d) => d.on && d.kind === 1)) drops[3] = true;
+        for (const b of s.brutes) if (b.on && !seenBrutes.has(b.id)) { seenBrutes.add(b.id); gorillas[round] = (gorillas[round] || 0) + 1; }
+        if (round === 4 && s.drops.some((d) => d.on && d.kind === 2)) drops[4] = true;
+      }
+      maxAlive = Math.max(maxAlive, s.alive());
+    } });
+    const tables = rounds.slice(1).every((r) => r.spawned === r.total && r.max <= r.cap);
+    const path = [ST.LAP, ST.NIGHT, ST.COUNTDOWN, ST.ACTIVE, ST.BREAK, ST.BOSS, ST.VICTORY, ST.DAWN].every((st) => states.has(st)) && !states.has(ST.DEFEAT);
+    record("ghost hunt: shooting every ghost clears each round's whole table within its cap, round 3 drops the shield and round 4 the ice, each ordinary round sends its gorillas, the sixth clears into the boss, his fall is victory and dawn hands the island back",
+      lapToNight && rounds.length === 7 && tables && drops[3] && drops[4] && gorillas.slice(1, 7).every((n, i) => n === G.CONFIG.BRUTE.perRound[i]) && path && sim.state.state === ST.IDLE && maxAlive <= G.CONFIG.MAX_GHOSTS,
+      JSON.stringify({ rounds: rounds.slice(1), drops, gorillas, states: [...states], end, maxAlive }));
+  }
+  {
+    // Two players away from the pile, shooting what comes within 8 m, until the lightning comes over it; then one walks
+    // to the pile and takes it, and nobody shoots.
+    const z = begin(11), L = G.CONFIG.LIGHTNING;
+    let now = T0, drop = null, at = { x: 8, z: 0 };
+    const tick = () => { now += FRAME; z.beginPresence(); z.present(1, at.x, 0, at.z); z.present(2, -8, 0, 0); z.advance(now); };
+    while (now < T0 + 600000 && !drop) {
+      tick();
+      if ((now / FRAME | 0) % 6 === 0) for (const g of z.ghosts) if (g.on && !g.dying && Math.min(Math.hypot(g.x - 8, g.z), Math.hypot(g.x + 8, g.z)) < 8) z.hit(g.id, 2, 1);
+      drop = z.drops.find((d) => d.on && d.kind === G.LIGHTNING_DROP) || null;
+    }
+    const where = drop && { x: drop.x, z: drop.z, round: z.state.round, state: z.state.state };
+    at = { x: 1.5, z: 0 };
+    while (now < T0 + 600000 && drop && drop.on) tick();
+    const struck = [...z.ghosts.filter((g) => g.on && !g.dying).map((g) => g.id), ...z.brutes.filter((b) => b.on && !b.dying && b.phase >= G.BRUTE_PHASE.FALL).map((b) => b.id)];
+    const end = now + L.firstMs + L.spreadMs + L.zapMs + 200;
+    let zapped = 0;
+    const seen = new Set();
+    while (now < end) {
+      tick();
+      for (const e of [...z.ghosts, ...z.brutes]) if (e.on && e.dying === G.DYING.ZAPPED && struck.includes(e.id) && !seen.has(e.id)) { seen.add(e.id); zapped++; }
+    }
+    record("ghost hunt: the lightning drop comes only over the banana pile, part way through a round, and taking it strikes every ghost and gorilla dead within its spread and zap",
+      !!where && where.x === 0 && where.z === 0 && where.state === ST.ACTIVE && struck.length > 0 && zapped === struck.length && z.state.boltBy === 1,
+      JSON.stringify({ where, struck: struck.length, zapped }));
+  }
+  {
+    // A player takes the monkeys from where they fell; they stay with them until a ghost gets them.
+    const z = begin(13);
+    let now = T0;
+    const tick = () => { now += FRAME; z.beginPresence(); z.present(1, 0, 0, 6); z.advance(now); };
+    while (now < T0 + 60000 && z.state.state !== ST.ACTIVE) tick();
+    z.debug.drop(G.MONKEY_DROP);
+    const drop = z.drops.find((d) => d.on && d.kind === G.MONKEY_DROP);
+    drop.x = 0; drop.z = 6;
+    while (now < T0 + 120000 && drop.on) tick();
+    const me = z.players.find((p) => p.id === 1), armed = me.monkeys === 1;
+    while (now < T0 + 600000 && me.seg === G.CONFIG.PLAYER_SEGMENTS) tick();
+    const lost = me.seg === G.CONFIG.PLAYER_SEGMENTS - 1 && me.monkeys === 0;
+    // Forty kills of their own bring them back; the next round's start makes them whole.
+    z.debug.kills(1, G.CONFIG.MONKEY_EVERY_KILLS);
+    const gifted = me.monkeys === 1 && z.state.pickKind === G.MONKEY_DROP && z.state.pickBy === 1;
+    z.debug.next();
+    while (now < T0 + 900000 && z.state.state !== ST.COUNTDOWN) tick();
+    const whole = me.frozenUntil > z.state.now || me.seg === G.CONFIG.PLAYER_SEGMENTS;
+    record("ghost hunt: the monkeys arm the player who takes them, the first hit takes them away, every 40 kills brings them back, and a round's start makes everyone standing whole",
+      armed && lost && gifted && whole, JSON.stringify({ armed, lost, gifted, whole, seg: me.seg, state: z.state.state }));
+  }
+  {
+    // With every ghost slot held (dying ghosts keep theirs a moment), no ghost is counted as spawned; with every drop
+    // slot full, the round's lightning waits and comes as soon as a slot frees.
+    const z = begin(17);
+    let now = T0;
+    const tick = () => { now += FRAME; z.beginPresence(); z.present(1, 0, 0, 6); z.advance(now); };
+    while (now < T0 + 60000 && z.state.state !== ST.ACTIVE) tick();
+    for (const g of z.ghosts) { g.on = true; g.dying = G.DYING.SHOT; g.dyingAt = z.state.now; }
+    const before = z.state.spawned;
+    for (let i = 0; i < 4; i++) tick();
+    const pooled = z.state.spawned === before;
+    for (const d of z.drops) { d.on = true; d.kind = 0; d.x = 15; d.z = 15; d.at = z.state.now; }
+    z.state.spawned = Math.ceil(z.settings().ghosts * G.CONFIG.LIGHTNING.at);
+    for (let i = 0; i < 6; i++) tick();
+    const waited = !z.state.lightningSent && !z.drops.some((d) => d.on && d.kind === G.LIGHTNING_DROP);
+    z.drops[0].on = false;
+    for (let i = 0; i < 6; i++) tick();
+    const came = !!z.state.lightningSent && z.drops.some((d) => d.on && d.kind === G.LIGHTNING_DROP);
+    record("ghost hunt: a full ghost pool counts no ghost as spawned, and a round's lightning waits for a free drop slot rather than being lost",
+      pooled && waited && came, JSON.stringify({ pooled, waited, came }));
+  }
+  {
+    // The lobby: player 1 wakes the ghost (its host) and readies, player 2 is there but never readies; at the lobby's
+    // end only 1 is in the hunt, and neither 2 nor a newcomer (3) gets a slot. Everyone there ready starts it at once;
+    // a host who never readies closes it even with others ready, and so does nobody ready.
+    const lobby = (seed, by) => { const sim = G.create({ seed, spots, lapMs: 20000 }); sim.start(T0, by); return sim; };
+    const run = (sim, ids, until) => {
+      let now = T0;
+      const tick = () => { now += FRAME; sim.beginPresence(); for (const id of ids) sim.present(id, id * 2, 0, 5); sim.advance(now); };
+      tick();
+      const gathering = sim.state.state === ST.GATHER;
+      while (now < T0 + until && sim.state.state === ST.GATHER) tick();
+      return { gathering, tick };
+    };
+    const a = lobby(21, 1);
+    a.ready(1);
+    const { gathering, tick } = run(a, [1, 2], G.CONFIG.GATHER_MS + 500);
+    const rosterOnly = a.state.state === ST.LAP && a.players.filter((p) => p.on).map((p) => p.id).join() === "1";
+    tick(); a.present(3, 6, 0, 5);
+    const shutOut = !a.playerById(2) && !a.playerById(3);
+    const b = lobby(22, 1);
+    b.ready(1); b.ready(2);
+    run(b, [1, 2], 1000);
+    const early = b.state.state === ST.LAP && b.state.now < 500;
+    const c = lobby(23, 0);
+    run(c, [5], G.CONFIG.GATHER_MS + 500);
+    const d = lobby(24, 1);
+    d.ready(2);
+    run(d, [1, 2], G.CONFIG.GATHER_MS + 500);
+    const closed = c.state.state === ST.IDLE && d.state.state === ST.IDLE && !d.players.some((p) => p.on);
+    record("ghost hunt: the lobby waits for players to ready up, starts at once when everyone there is, takes only the ready into the hunt (never one who did not ready or came later), and closes with no hunt when its host never readies or nobody does",
+      gathering && rosterOnly && shutOut && early && closed, JSON.stringify({ gathering, rosterOnly, shutOut, early, closed }));
+  }
+  {
+    // A player whose bar empties is down for the rest of the round however long it runs, and back whole as it ends.
+    const z = begin(19), me = () => z.players.find((p) => p.id === 1), mate = () => z.players.find((p) => p.id === 2);
+    let now = T0;
+    // Player 1 stands still where ghosts reach; player 2 is kept out of harm's way (always just hit, so nothing lands).
+    const tick = () => {
+      now += FRAME; z.beginPresence(); z.present(1, 0, 0, 6);
+      const m = z.present(2, 21, 0, 0);
+      if (m) m.invulnUntil = z.state.now + 60000;
+      z.advance(now);
+    };
+    while (now < T0 + 600000 && !(me() && me().seg === 0)) tick();
+    const downAt = z.state.now, round = z.state.round;
+    for (let i = 0; i < 2400 && z.state.state === ST.ACTIVE; i++) tick();
+    const stayed = me().seg === 0 && z.state.now - downAt > 30000 || z.state.state !== ST.ACTIVE;
+    if (z.state.state === ST.ACTIVE) z.debug.next();
+    for (let i = 0; i < 20 && z.state.state === ST.ACTIVE; i++) tick();
+    const back = me().seg === G.CONFIG.PLAYER_SEGMENTS && !(z.state.now < me().frozenUntil) && !!mate();
+    // The sixth round gives way straight to the boss: one gone down in it is back for the boss's fight.
+    z.jump(ST.ACTIVE, 6);
+    for (let i = 0; i < 24000 && !(me().seg === 0) && z.state.state === ST.ACTIVE; i++) tick();
+    const downIn6 = me().seg === 0 && z.state.round === 6;
+    z.debug.next();
+    for (let i = 0; i < 20 && z.state.state === ST.ACTIVE; i++) tick();
+    const boss = z.state.state === ST.BOSS && me().seg === G.CONFIG.PLAYER_SEGMENTS && !(z.state.now < me().frozenUntil);
+    record("ghost hunt: a player gone down stays down for the rest of the round and is back whole when it ends, the sixth's into the boss's fight",
+      round >= 1 && stayed && back && downIn6 && boss, JSON.stringify({ round, stayed, back, downIn6, boss, seg: me().seg, state: z.state.state }));
+  }
+  {
+    const lost = begin(3), states = new Set();
+    play(lost, 0, 3600000, { shoot: false, watch: (s) => states.add(s.state.state) });
+    const defeat = states.has(ST.DEFEAT) && !states.has(ST.VICTORY) && lost.state.state === ST.IDLE;
+    const empty = begin(5);
+    let outcome = 0;
+    // They gather and the walls rise; then everyone leaves the arena.
+    play(empty, 0, 1000);
+    play(empty, 1000, 3600000, { here: 0, watch: (s) => { if (s.state.state === ST.DAWN) outcome = s.state.outcome; } });
+    // A pause holds the hunt's clock and everything in it, even with nobody left, until PAUSE_MAX_MS lets it go on.
+    const held = begin(5);
+    play(held, 0, 40000);
+    const paused = held.pause(true, T0 + 40000), stood = JSON.stringify(held.ghosts.map((g) => [g.on, g.x, g.z])), heldAt = held.state.now, heldState = held.state.state;
+    play(held, 40000, 40000 + G.CONFIG.PAUSE_MAX_MS - 1000, { here: 0 });
+    const still = held.state.paused && held.state.now === heldAt && held.state.state === heldState && JSON.stringify(held.ghosts.map((g) => [g.on, g.x, g.z])) === stood;
+    let heldOutcome = 0;
+    play(held, 40000 + G.CONFIG.PAUSE_MAX_MS - 1000, 3600000, { here: 0, watch: (s) => { if (s.state.state === ST.DAWN) heldOutcome = s.state.outcome; } });
+    record("ghost hunt: every player frozen is defeat, an arena left empty ends the hunt, and a pause holds it still only until its limit",
+      defeat && outcome === G.OUTCOME.ABANDON && empty.state.state === ST.IDLE && paused && still && heldOutcome === G.OUTCOME.ABANDON && held.state.state === ST.IDLE,
+      JSON.stringify({ states: [...states], outcome, paused, still, heldOutcome }));
+  }
+};
 const donationClientChecks = async () => {
   const sockets = [], timers = [], received = [], seen = [], requests = [];
   const context = { window: { setTimeout: fn => { const t = { fn }; timers.push(t); return t; }, clearTimeout: () => {} },
@@ -16912,7 +17130,7 @@ record("character visibility source bakes: ownership wrappers share exact immuta
   factoryChecks(BL);
   const clearance = claimClearanceProof();
   record("hub footprint clearance: conservative rejection preserves circular boundaries, live reservations and exceptional numbers", clearance.failures === 0 && clearance.cases >= 4000, JSON.stringify(clearance));
-  await characterChecks(); await contributorActivityChecks(); await mempoolFeedChecks(); await debugActivityStatusChecks(); await soloDebugChecks(); await adaptiveQualityChecks(); await chainSnapshotChecks(); await dsbSharedDataChecks(); await timechainDataChecks(); await timechainRoomChecks(); await timechainBlockChecks(); await weatherStepChecks(); await poolLayoutChecks(); await gameRulesChecks(); await donationClientChecks(); await poolWildlifeChecks();
+  await characterChecks(); await contributorActivityChecks(); await mempoolFeedChecks(); await debugActivityStatusChecks(); await soloDebugChecks(); await adaptiveQualityChecks(); await chainSnapshotChecks(); await dsbSharedDataChecks(); await timechainDataChecks(); await timechainRoomChecks(); await timechainBlockChecks(); await weatherStepChecks(); await poolLayoutChecks(); await gameRulesChecks(); await ghostHuntChecks(); await donationClientChecks(); await poolWildlifeChecks();
 
   // Scene state built directly instead of booted; seed 1 matches scene-hub.js.
   // Sealed cave guides need the hub's seal nodes, so probes reading them stay in the browser tier.
