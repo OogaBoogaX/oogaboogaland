@@ -8,18 +8,16 @@
   // a cyan core. Every plate colour is registered as a pair, gloss white now and
   // brushed silver later: tint() hands models.js the second palette and crew.js
   // changes the whole body between the two.
-  // Slot numbers belong to one model build's palette, which can be released between visits.
-  const builds = new WeakMap();
+  const twins = new Map();
+  let slots = null;
   const colors = (k) => {
-    const previous = builds.get(k);
-    if (previous) return previous.slots;
-    const twins = new Map();
+    if (slots) return slots;
     const pair = (red, green) => {
       const slot = k.color(red);
       twins.set(slot, green);
       return slot;
     };
-    const slots = {
+    return slots = {
       plate: pair("#e8e8ec", "#c0c4cc"),
       light: pair("#f6f6f8", "#d8dbe0"),
       dark: pair("#c0c4cc", "#8e939c"),
@@ -37,8 +35,6 @@
       loin: k.color("#2a2a2e"),
       loinSpot: k.color("#c0c4cc")
     };
-    builds.set(k, { slots, twins });
-    return slots;
   };
   const glowOf = (C) => ({ [C.core]: 1, [C.wire]: 0.5, [C.eye]: 1, [C.light]: 0.12 });
   // Android limbs: a plate over each long bone, a dark joint at every hinge, a
@@ -245,10 +241,7 @@
         return true;
       },
       // The second colourway: the same palette with every registered plate silver.
-      tint: (k, palette) => {
-        const twins = builds.get(k).twins;
-        return palette.map((rgb, i) => twins.has(i) ? hexToRgb(twins.get(i)) : rgb);
-      },
+      tint: (k, palette) => palette.map((rgb, i) => twins.has(i) ? hexToRgb(twins.get(i)) : rgb),
       extras(k) {
         const u = k.u, origin = { x: -u, y: 0, z: -u };
         const geometry = voxelGeometry(freeVox(), { unit: u, palette: CHUK_PALETTE, origin });

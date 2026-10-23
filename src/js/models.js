@@ -778,6 +778,10 @@
   //                     voxel part is baked again under it, paired in `tint`
   // `look` flags read here: slim, bald, cleanShaven, wideEyes, hairless, noBrow, noPupils,
   // face ("nose" | "smirk" | "beard" | "none"), eyeColor, eyeGlow, hatY.
+  // A character file may keep the slot numbers its first build was given; every later build registers that
+  // character's colours in the same order first, so after a released cache rebuilds the model those numbers
+  // still name the same colours. The base palette ahead of them comes from the same traits every time.
+  const colorOrders = new WeakMap();
   const buildCaveman = (traits) => {
     const { skin, hair, height: h, belly, rand } = traits;
     const dress = traits.dress || {};
@@ -800,14 +804,18 @@
     ];
     // A character's own colours join the palette on first use.
     const colors = new Map();
+    let order = traits.dress ? colorOrders.get(traits.dress) : null;
+    if (traits.dress && !order) colorOrders.set(traits.dress, order = []);
     const color = (hex) => {
       let c = colors.get(hex);
       if (c === undefined) {
         colors.set(hex, c = palette.length);
         palette.push(hexToRgb(hex));
+        if (order) order.push(hex);
       }
       return c;
     };
+    if (order) for (let i = 0, n = order.length; i < n; i++) color(order[i]);
     const jit = (base, dark, p) => () => rand() < p ? dark : base;
     const skinJ = jit(P.skin, P.skinDk, 0.08);
     const hairJ = jit(P.hair, P.hairDk, 0.12);
