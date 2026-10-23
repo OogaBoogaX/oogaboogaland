@@ -1845,7 +1845,8 @@
         } else {
           for (let k = 1; k < rec.n; k++) ctx.lineTo(rec.pts[k * 2], rec.pts[k * 2 + 1]);
           ctx.closePath();
-          if ((!rec.matrixBacking || !rec.matrixPartial) && !(rec.mirrorNode && (rec.mirrorNode.mirrorRippleOnly || rec.mirrorNode.mirrorShard && environment.valid === 63))) {
+          // A cut-out picture (a sprite) has no face of its own behind it.
+          if ((!rec.matrixBacking || !rec.matrixPartial) && !(rec.mirrorNode && (rec.mirrorNode.mirrorRippleOnly || rec.mirrorNode.mirrorShard && environment.valid === 63)) && !(rec.imageNode && rec.imageNode.geometry.imageSurface.cutout)) {
             if (rec.smokeOpacity !== 1 && lastAlpha !== rec.smokeOpacity) { ctx.globalAlpha = rec.smokeOpacity; lastAlpha = rec.smokeOpacity; }
             if (lastFill !== rec.style) { ctx.fillStyle = rec.style; lastFill = rec.style; }
             ctx.fill();
@@ -1856,7 +1857,11 @@
           }
           if (rec.imageNode) {
             if (lastAlpha !== rec.smokeOpacity) { ctx.globalAlpha = rec.smokeOpacity; lastAlpha = rec.smokeOpacity; }
+            // Light adds onto what is behind it, as the WebGL renderer's blended pass does.
+            const additive = rec.imageNode.geometry.imageSurface.blend === "add";
+            if (additive) ctx.globalCompositeOperation = "lighter";
             drawImageSurface(rec.imageNode); rec.imageNode = null;
+            if (additive) ctx.globalCompositeOperation = "source-over";
             if (lastAlpha !== 1) { ctx.globalAlpha = 1; lastAlpha = 1; }
           }
           if (rec.matrix && (matrixDensity > 0 || rec.matrixPartial) && !rec.mirrorNode?.mirrorRippleOnly) {

@@ -2157,6 +2157,341 @@ body[data-active-scene="arcade"] .magazine-hud {
   border-color: var(--danger);
 }
 
+/* HALLOWEEN: the ghost hunt (ghost-hud.js). The round line and the visitor's bar under the clock and the hint, the
+   banners across the middle, the flash when a ghost gets you; none of it takes a pointer. */
+.ghost-hud {
+  position: absolute;
+  left: 50%;
+  top: calc(118px + var(--safe-top));
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 5px;
+  pointer-events: none;
+  max-width: calc(100vw - 32px);
+}
+
+.ghost-hud[hidden] {
+  display: none;
+}
+
+.ghost-top,
+.ghost-lives {
+  margin: 0;
+  padding: 5px 12px;
+  background: var(--tablet);
+  border: 2px solid var(--stone-dk);
+  border-radius: 6px;
+  box-shadow: var(--tablet-shadow);
+  color: #d8ffe8;
+  font-size: 12px;
+  letter-spacing: 0.06em;
+  white-space: nowrap;
+}
+
+.ghost-lives {
+  color: var(--paper);
+  font-size: 10px;
+}
+
+/* The hunt's lobby: the land's title card, lighter behind so the island shows through, its players as stone tablets. */
+.ghost-lobby {
+  pointer-events: auto;
+  z-index: 6;
+  box-shadow: 0 6px 0 rgba(0, 0, 0, 0.35), 0 10px 30px rgba(0, 0, 0, 0.35), 0 0 0 100vmax rgba(8, 6, 4, 0.3);
+}
+
+.ghost-lobby[hidden] {
+  display: none;
+}
+
+.ghost-lobby-players li {
+  grid-template-columns: 22px 1fr;
+}
+
+.ghost-lobby-mark {
+  grid-row: span 2;
+  color: var(--muted);
+  font-size: 16px;
+  font-weight: 700;
+  text-align: center;
+}
+
+.ghost-lobby-players li[data-ready] .ghost-lobby-mark {
+  color: #3ce65a;
+}
+
+.ghost-lobby-players b {
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+
+.ghost-lobby-note {
+  margin: 0 0 12px;
+}
+
+/* GAME MODE (scene-hub.js `setGameMode`): the act button and the message stack at the foot of the play area (toasts
+   and the hint pill) stand down while an island event runs; Space still jumps and uses. */
+body.game-mode #act,
+body.game-mode #message-stack {
+  display: none;
+}
+
+/* The hunt's mini player, bottom right: what is playing and the music switch. */
+.ghost-player {
+  position: absolute;
+  right: 16px;
+  bottom: calc(16px + var(--safe-bottom, 0px));
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: min(300px, calc(100vw - 32px));
+  padding: 6px 8px 6px 10px;
+  background: var(--tablet);
+  border: 2px solid var(--stone-dk);
+  border-radius: 8px;
+  box-shadow: var(--tablet-shadow);
+  color: var(--paper);
+  pointer-events: auto;
+  z-index: 4;
+}
+
+.ghost-player[hidden] {
+  display: none;
+}
+
+.ghost-player-note {
+  color: #ff8a1f;
+  font-size: 16px;
+  line-height: 1;
+}
+
+.ghost-player[data-off] .ghost-player-note {
+  color: var(--muted);
+}
+
+.ghost-player-title {
+  min-width: 0;
+  font-size: 10px;
+  line-height: 1.25;
+  letter-spacing: 0.04em;
+  overflow-wrap: anywhere;
+}
+
+.ghost-player-toggle {
+  flex: none;
+  padding: 4px 9px;
+  border: 2px solid var(--wood-edge);
+  border-radius: 6px;
+  background: linear-gradient(#f0b05a, var(--accent));
+  color: var(--ink);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.ghost-player-skip {
+  flex: none;
+  padding: 3px 7px;
+  border: 2px solid var(--wood-edge);
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.3);
+  color: var(--paper);
+  font-size: 11px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.ghost-player-skip[hidden] {
+  display: none;
+}
+
+.ghost-player[data-off] .ghost-player-toggle {
+  background: var(--wood-edge);
+  color: var(--paper);
+}
+
+/* The lobby's controls, a line of key chips under the players. */
+.ghost-lobby-how {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 6px 14px;
+  margin: 0 0 12px;
+  padding: 0;
+  list-style: none;
+  font-size: 11px;
+}
+
+.ghost-lobby-how li {
+  white-space: nowrap;
+}
+
+.ghost-lobby-how kbd {
+  display: inline-block;
+  min-width: 1.6em;
+  margin: 0 1px;
+  padding: 1px 6px;
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  border-bottom-width: 3px;
+  border-radius: 5px;
+  background: rgba(0, 0, 0, 0.25);
+  font: inherit;
+  font-size: 10.5px;
+  font-weight: 700;
+  text-align: center;
+}
+
+/* The visitor's health, a cell a hit point; at a round's start it fills back a cell at a time in an orange glow. */
+.ghost-health {
+  display: flex;
+  gap: 4px;
+  padding: 5px 7px;
+  background: var(--tablet);
+  border: 2px solid var(--stone-dk);
+  border-radius: 6px;
+  box-shadow: var(--tablet-shadow);
+}
+
+.ghost-health[hidden] {
+  display: none;
+}
+
+.ghost-health i {
+  width: 28px;
+  height: 11px;
+  border-radius: 2px;
+  background: rgba(0, 0, 0, 0.5);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.12);
+  transition: background-color 0.2s, box-shadow 0.2s;
+}
+
+.ghost-health i[data-on] {
+  background: #3ce65a;
+  box-shadow: inset 0 -3px 0 rgba(0, 0, 0, 0.25), 0 0 6px rgba(60, 230, 90, 0.55);
+}
+
+.ghost-health[data-low] i[data-on] {
+  background: #ff453a;
+  box-shadow: inset 0 -3px 0 rgba(0, 0, 0, 0.25), 0 0 6px rgba(255, 69, 58, 0.6);
+}
+
+.ghost-health.healing {
+  animation: ghost-heal 1.8s ease-out;
+}
+
+.ghost-health.healing i:nth-child(2) { transition-delay: 0.2s; }
+.ghost-health.healing i:nth-child(3) { transition-delay: 0.4s; }
+.ghost-health.healing i:nth-child(4) { transition-delay: 0.6s; }
+.ghost-health.healing i:nth-child(5) { transition-delay: 0.8s; }
+
+@keyframes ghost-heal {
+  0% { border-color: #ff8a1f; box-shadow: 0 0 0 2px #ff8a1f, 0 0 28px 10px rgba(255, 138, 31, 0.9); }
+  100% { border-color: var(--stone-dk); box-shadow: var(--tablet-shadow); }
+}
+
+.ghost-lives[data-state="frozen"] {
+  color: #c4f0ff;
+  border-color: #6fc6e8;
+}
+
+.ghost-lives[data-state="away"] {
+  color: var(--muted);
+}
+
+.ghost-boss {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 10px;
+  background: var(--tablet);
+  border: 2px solid #7a4bd8;
+  border-radius: 6px;
+  box-shadow: var(--tablet-shadow);
+}
+
+.ghost-boss[hidden] {
+  display: none;
+}
+
+.ghost-boss-label {
+  color: #e0d4ff;
+  font-size: 9px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.ghost-boss meter {
+  width: min(320px, calc(100vw - 140px));
+  height: 10px;
+}
+
+.ghost-banner {
+  position: absolute;
+  left: 50%;
+  top: 40%;
+  transform: translate(-50%, -50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0;
+  pointer-events: none;
+  text-align: center;
+  width: calc(100vw - 32px);
+  font-family: "Creepster", "Chalkduster", "Impact", fantasy, sans-serif;
+  font-weight: 400;
+}
+
+.ghost-banner[hidden] {
+  display: none;
+}
+
+.ghost-banner strong {
+  color: #e3121b;
+  font-size: clamp(52px, 12vw, 150px);
+  font-weight: 400;
+  line-height: 1;
+  letter-spacing: 0.04em;
+  text-shadow: 0 0 28px rgba(255, 20, 20, 0.55), 0 0 6px rgba(120, 0, 0, 0.9), 0 5px 0 rgba(0, 0, 0, 0.75);
+}
+
+.ghost-banner span {
+  color: #ff3a2e;
+  font-size: clamp(26px, 5vw, 64px);
+  line-height: 1.1;
+  letter-spacing: 0.06em;
+  text-shadow: 0 0 16px rgba(255, 30, 20, 0.45), 0 3px 0 rgba(0, 0, 0, 0.75);
+}
+
+.ghost-flash {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0;
+}
+
+.ghost-flash[data-kind="hurt"] {
+  background: radial-gradient(ellipse at center, transparent 45%, rgba(229, 83, 61, 0.65));
+}
+
+.ghost-flash[data-kind="hurt"].on {
+  animation: ghost-hurt 0.22s ease-out;
+}
+
+.ghost-flash[data-kind="soul"] {
+  opacity: 1;
+  background: radial-gradient(ellipse at center, transparent 40%, rgba(20, 5, 40, 0.7));
+}
+
+@keyframes ghost-hurt {
+  from { opacity: 1; }
+  to { opacity: 0; }
+}
+
 .tooltip {
   position: fixed;
   top: 0;

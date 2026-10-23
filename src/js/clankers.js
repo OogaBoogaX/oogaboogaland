@@ -107,6 +107,9 @@
     const WALL_POINT = { x: 0, y: 0, z: 0, heading: 0, radius: 0 };
     const WALL_RECTANGLE = { halfForward: 0, halfSide: 0, centerForward: 0 };
     const alive = (cave) => cave.state === "working" || cave.state === "chilling";
+    // Every gorilla nobody drives away at once (`setAway`, the hub's GAME MODE), as if its Ooga were; back after.
+    let allAway = false;
+    const setAway = (on) => { allAway = !!on; };
     // Asleep is the Ooga's standing state, by its contributions: not the moment it stirs to eat a donation or
     // flee a fire, which would send its gorilla home over the bridge and straight back. One standing in for an
     // Ooga somebody else is driving is away, not asleep.
@@ -6737,10 +6740,10 @@
       if (e.controlled && sleeping(e)) { updateSleep(e, dt, beforeX, beforeY, beforeZ); return; }
       // An Ooga asleep sends its gorilla to bed, not away. "busy" lets the rest of this update walk it out of a
       // room or put its work down first; with no bed to be had it is hidden as it always was.
-      const bedtime = ctx.sleep && sleeps(e.owner) && !e.controlled && !e.drive.airborne && !e.fire.rolling && !e.fire.burning && !e.climb.active
+      const bedtime = !allAway && ctx.sleep && sleeps(e.owner) && !e.controlled && !e.drive.airborne && !e.fire.rolling && !e.fire.burning && !e.climb.active
         ? updateSleep(e, dt, beforeX, beforeY, beforeZ) : false;
       if (bedtime === true) return;
-      if (!bedtime && !alive(e.owner) && !e.controlled && !e.drive.airborne && !e.fire.rolling && !e.climb.active) {
+      if (!bedtime && (allAway || !alive(e.owner)) && !e.controlled && !e.drive.airborne && !e.fire.rolling && !e.climb.active) {
         if (e.active) {
           releaseBed(e);
           releasePortal(e);
@@ -7300,7 +7303,7 @@
     };
     return { list, sync, update, target, companionTarget, hit, damage, bananaHit, debugRage, plan, startLabShuttle, debugMove, cancelDebugMove, stats, liveGeometry, dispose, contactAt,
       debugLoungeSpots,
-      possess, release, sleeping, wake, setRemote, createRemote, respawn, travelRefusal, travel, control, cancelInput, smash, smashPower, quickSmash, chestBeat, ignite, dropRoll, supportRemoved,
+      possess, release, sleeping, wake, setAway, setRemote, createRemote, respawn, travelRefusal, travel, control, cancelInput, smash, smashPower, quickSmash, chestBeat, ignite, dropRoll, supportRemoved,
       get player() { return player; } };
   };
   BL.clankers = { create, rageCarrying, WALK_RADIUS, WALK_HEIGHT, PROP_STEP, RAGE_SPEED };
