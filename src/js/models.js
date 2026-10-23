@@ -718,6 +718,7 @@
     const root = createNode({ position: { x: 0, y: legH, z: 0 } });
     const eyeCells = [];
     // nose: the beard's nose jitter pair; lid: closed-eye colour; headEmissive: lit head indices
+    // headGeometry: optional authored { open, closed, portrait } meshes set by skull()
     // loin: the loincloth's two colours, fur and spot unless a torso hook names its own.
     const k = { traits, h, u, rand, P, color, jit, skinJ, hairJ, leopard, vg, root, parts, armX: 0, eyeCells, nose: [P.nose, P.skin], lid: null, headEmissive: undefined, loin: null };
     // Hashed from the cell, never drawn from rand, so no character's existing draws move.
@@ -803,6 +804,7 @@
     // club(k) returns { voxels, palette, goldPalette } for a voxel item, or { default, gold }
     // geometry, plus optional rest and carry angles.
     const club = dress.club ? dress.club(k) : {};
+    k.tools = club.tools || null;
     const clubV = club.voxels || clubVoxels(rand);
     const clubOrigin = { x: -1 * u, y: -1 * u, z: -1 * u };
     const clubRest = club.rest || CLUB_REST, clubCarry = club.carry || clubRest;
@@ -903,7 +905,7 @@
     const headOrigin = { x: -3.5 * u, y: 0, z: -3 * u };
     // Dress hooks define any glowing face cells for both the head and portrait.
     const headEmissive = k.headEmissive;
-    const headOpen = vg(headVox, headOrigin, headEmissive);
+    const headOpen = k.headGeometry?.open || vg(headVox, headOrigin, headEmissive);
     // Each character may widen the central-face crop to retain a hat or hair.
     // Bounds are in the same voxel coordinates as the character's head hooks.
     const portraitVox = makeVox();
@@ -914,11 +916,11 @@
       const x = CELL[0], y = CELL[1], z = CELL[2];
       if (x >= portraitMin[0] && x <= portraitMax[0] && y >= portraitMin[1] && y <= portraitMax[1] && z >= portraitMin[2] && z <= portraitMax[2]) portraitVox.map.set(k, c);
     }
-    const portraitHead = vg(portraitVox, headOrigin, headEmissive);
+    const portraitHead = k.headGeometry?.portrait || vg(portraitVox, headOrigin, headEmissive);
     const closedVox = makeVox();
     for (const [key, c] of headVox.map) closedVox.map.set(key, c);
     for (const [x, y] of eyeCells) closedVox.set(x, y, 5, k.lid !== null ? k.lid : y === 2 ? P.skinDk : P.skin);
-    const headClosed = vg(closedVox, headOrigin, k.headEmissive);
+    const headClosed = k.headGeometry?.closed || vg(closedVox, headOrigin, k.headEmissive);
     parts.head = createNode({ position: { x: 0, y: 0.5 * h, z: 0.02 * h }, geometry: headOpen });
     const hatY = dress.hatY ? dress.hatY(k) : (traits.hatY || (traits.bald ? 6 : 9)) * u;
     parts.hat = createNode({ position: { x: 0, y: hatY, z: 0 }, scale: { x: h, y: h, z: h }, visible: false });
@@ -946,7 +948,7 @@
         tint.set(bake.geo, twin).set(twin, bake.geo);
       }
     }
-    return { root, parts, traits, headOffset: 1.1 * h, headOpen, headClosed, portraitHead, skins, clubRest, clubCarry, tint, gunHeadBounds: BL.scene.boundsOf(headOpen) };
+    return { root, parts, traits, tools: k.tools, toolIndex: 0, headOffset: 1.1 * h, headOpen, headClosed, portraitHead, skins, clubRest, clubCarry, tint, gunHeadBounds: BL.scene.boundsOf(headOpen) };
   };
   // Traits hash from the handle, so one handle always builds the same voxels.
   // Callers get fresh nodes over shared geometry: one build per contributor, GPU records survive a scene swap.
@@ -967,7 +969,31 @@
       parts[key] = Array.isArray(part) ? part.map((node) => copies.get(node)) : copies.get(part);
     }
     const skins = { club: { ...template.skins.club }, gun: { ...template.skins.gun } };
-    return { root, parts, traits, headOffset: template.headOffset, headOpen: template.headOpen, headClosed: template.headClosed, portraitHead: template.portraitHead, skins, clubRest: template.clubRest, clubCarry: template.clubCarry, tint: template.tint, gunHeadBounds: template.gunHeadBounds };
+    const model = { root, parts, traits, tools: template.tools, toolIndex: 0, headOffset: template.headOffset, headOpen: template.headOpen, headClosed: template.headClosed, portraitHead: template.portraitHead, skins, clubRest: template.clubRest, clubCarry: template.clubCarry, tint: template.tint, gunHeadBounds: template.gunHeadBounds };
+    poseTools(model, true);
+    return model;
+  };
+  // Optional character kits share meshes but keep selection and storage on each clone.
+  const poseTools = (model, held) => {
+    if (!model.tools) return;
+    const parts = model.parts;
+    if (parts.apronFlaps) {
+      parts.apronFlaps[0].rotation.x = Math.min(0, parts.legR.rotation.x) * 0.65;
+      parts.apronFlaps[1].rotation.x = Math.min(0, parts.legL.rotation.x) * 0.65;
+    }
+    for (let i = 0; i < parts.toolStowed.length; i++) parts.toolStowed[i].visible = !held || i !== model.toolIndex;
+    parts.ballHeld.visible = held && model.toolIndex === 0 && !parts.snack.visible;
+    parts.ballStowed.visible = !parts.ballHeld.visible;
+  };
+  const setTool = (model, index) => {
+    if (!model.tools || !Number.isInteger(index) || !model.tools[index]) return false;
+    model.toolIndex = index;
+    if (!model.defaultClubCarry) model.defaultClubCarry = model.clubCarry;
+    model.clubCarry = model.tools[index].carry || model.defaultClubCarry;
+    const geo = model.tools[index].geometry;
+    model.skins.club.default = model.skins.club.gold = geo;
+    model.parts.club.geometry = geo;
+    return true;
   };
   // A real die: opposite faces sum to seven. Round pip faces sit just above the
   // voxel shell so even the smallest die does not render them as square cells.
@@ -1605,5 +1631,5 @@
     }
     glass.push(box({ w: W, h: tall, d: W, color: tint, emissive: 1, offset: { x, y: mid, z } }));
   };
-  BL.models = { beam, forwardLathe, turn, shaded, torus, along, chain, railParts, columnParts, deckGrid, deckPosts, deckParts, stairParts, lanternParts, LANTERN_GLASS, geometry, pushVert, face, cutCylinder, voxCoords, box, bevelBox, panel, lathe, glassVessel, attachGlassShell, tube, ring, polyline, merge, forward, moved, turnedX, turnedY, turnedZ, prism, cached, variants, track, setScope, release, noShadow, makeVox, voxelGeometry, voxelFaces, banana, bananaGeometry, bananaTileGeometry, bananaPileCoreGeometry, bananaPileRadiusScale, bananaPileHeightOffset, BANANA_AMMO_SCALE, BANANA_PILE_PROFILE, particleGeometry, spareMagazine, caveman, CLUB_PALETTE, GOLD_CLUB_PALETTE, labRoom, buildableGeos, crate, die, dieRotationFor, SWAG, TIER_COLORS };
+  BL.models = { beam, forwardLathe, turn, shaded, torus, along, chain, railParts, columnParts, deckGrid, deckPosts, deckParts, stairParts, lanternParts, LANTERN_GLASS, geometry, pushVert, face, cutCylinder, voxCoords, box, bevelBox, panel, lathe, glassVessel, attachGlassShell, tube, ring, polyline, merge, forward, moved, turnedX, turnedY, turnedZ, prism, cached, variants, track, setScope, release, noShadow, makeVox, voxelGeometry, voxelFaces, banana, bananaGeometry, bananaTileGeometry, bananaPileCoreGeometry, bananaPileRadiusScale, bananaPileHeightOffset, BANANA_AMMO_SCALE, BANANA_PILE_PROFILE, particleGeometry, spareMagazine, caveman, setTool, poseTools, CLUB_PALETTE, GOLD_CLUB_PALETTE, labRoom, buildableGeos, crate, die, dieRotationFor, SWAG, TIER_COLORS };
 })();

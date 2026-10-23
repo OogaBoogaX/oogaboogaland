@@ -557,6 +557,9 @@
           </span>
         </span>
       </button>
+      <label class="toolbelt-hud" id="toolbelt-hud" hidden>Toolbelt
+        <select id="toolbelt-select" aria-label="Toolbelt equipment"></select>
+      </label>
       <button type="button" class="primary-hud" id="primary-hud" data-action="weapon-primary" data-equipped="false" data-charging="false"
         aria-label="Equip primary melee weapon" aria-pressed="false" title="Equip primary melee weapon (1)" hidden>
         <span class="weapon-toggle"><canvas class="primary-icon" id="primary-icon" width="48" height="48" aria-hidden="true"></canvas></span>
@@ -1722,6 +1725,7 @@ Then run npm run build and ONLY=characters node test/run.mjs.</pre>
   <script src="js/sight-guides.js"></script>
   <script src="js/caves.js"></script>
   <script src="js/characters.js"></script>
+  
   <script src="js/characters.gen.js"></script>
   <script src="js/contributors.js"></script>
   <script src="js/donations.js"></script>

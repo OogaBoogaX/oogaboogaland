@@ -86,6 +86,7 @@
   let zone = "outside", body = null, muted = false, hpSent = 100, koSent = false, hpAt = 0, poseAt = 0, px = NaN, py = NaN, pz = NaN, pyaw = NaN;
   const gSent = new Float64Array(6);
   let gKnown = false, poseHasG = false;
+  let gearTool=0,gearSlot=1,gearSent="",gearAt=0;
   let clockOffset = 0, clockKnown = false;
   let pokerVoice = null;
   // A server timestamp minus the arrival time is the true offset less the trip; the largest such
@@ -155,6 +156,7 @@
     rec.login = String(p.login);
     rec.display = String(p.display || p.login);
     rec.body = typeof p.body === "string" ? p.body : null;
+    rec.tool=Number.isInteger(p.tool)?p.tool:0;rec.slot=Number.isInteger(p.slot)?p.slot:1;
     rec.bodyKind = bodyKind(rec.body);
     rec.bodyName = bodyName(rec.body);
     rec.g = null;
@@ -240,9 +242,9 @@
       hpSent = 100; koSent = false; hpAt = 0;
       hubSent = null;
       sendHub();
-      BL.voice.restart();
+      BL.voice.restart();gearSent="";gearAt=0;
       if (restoredPose) poseAt = performance.now();
-      else { poseAt = 0; px = NaN; gKnown = poseHasG = false; }
+      else { poseAt = 0; px = NaN; gearSent=""; gearAt=0; gKnown = poseHasG = false; }
     } else if (msg.t === "join") {
       upsert(msg.p);
       setRoom("live");
@@ -253,6 +255,7 @@
       const rec = remotes.get(msg.id);
       if (rec) {
         rec.body = typeof msg.name === "string" ? msg.name : null;
+        rec.tool=0;rec.slot=1;
         rec.bodyKind = bodyKind(rec.body);
         rec.bodyName = bodyName(rec.body);
         rec.g = null;
@@ -260,6 +263,9 @@
         rec.ko = false;
       }
       rosterChanged();
+    } else if (msg.t === "equipment") {
+      const rec=remotes.get(msg.id);
+      if(rec && Number.isInteger(msg.tool) && msg.tool>=0 && msg.tool<16 && Number.isInteger(msg.slot) && msg.slot>=0 && msg.slot<=2) {rec.tool=msg.tool;rec.slot=msg.slot;}
     } else if (msg.t === "vstate") {
       const rec = remotes.get(msg.id);
       if (!rec) return;
@@ -465,7 +471,7 @@
     const moved = !sameGroup(name, zone);
     zone = state.zone = name;
     pokerVoice = null;
-    poseAt = 0; px = NaN;
+    poseAt = 0; px = NaN; gearSent=""; gearAt=0;
     if (moved) BL.voice.setPeers([]);
     sendZone();
   };
@@ -519,10 +525,10 @@
 
   const setBody = (name) => {
     if (name === body) return;
-    body = state.body = name;
+    body = state.body = name;gearSent="";gearAt=0;
     state.bodyKind = bodyKind(name);
     state.bodyName = bodyName(name);
-    poseAt = 0; px = NaN;
+    poseAt = 0; px = NaN; gearSent=""; gearAt=0;
     gKnown = poseHasG = false;
     sendBody();
     // The room starts another actor at full health.
@@ -561,6 +567,16 @@
   };
 
   // Throttled to POSE_MS and skipped while nothing moved; a changed gorilla pose also earns a report.
+  // Equipment changes travel while standing still; no packets or allocations at rest.
+  const sendEquipment = (tool,slot) => {
+    gearTool=Number.isInteger(tool)&&tool>=0&&tool<16?tool:0;
+    gearSlot=Number.isInteger(slot)&&slot>=0&&slot<=2?slot:1;
+    const code=gearTool*3+gearSlot,now=performance.now();
+    if(state.room!=="live" || !body || code===gearSent || now-gearAt<POSE_MS) return;
+    gearSent=code;gearAt=now;
+    send(JSON.stringify({t:"equipment",tool:gearTool,slot:gearSlot}));
+  };
+
   const sendPose = (x, y, z, yaw, g = null) => {
     const now = performance.now();
     if (state.bodyKind === "gorilla" && g && g.length === 6) {
@@ -679,5 +695,5 @@
     close("off");
   };
 
-  BL.net = { start, recheck, subscribe, subscribeRoster, subscribeChat, subscribeDoor, dispose, login, logout, setDisplay, rejoin, setBody, setZone, setPokerVoice, setHub, setMuted, setHealth, sendNpc, sendChat, sendGhost, subscribeGhost, sendPose, askDoor, goDoor, doneDoor, cancelDoor, passDoor, mayDrive, mayDriveGorilla, ownCharacter, ownAmong, characterOf, gorillaBody, bodyName, bodyKind, serverNow, remotes, state, CHAT_MAX, CHAT_KEEP, get npcFrame() { return npcFrame; } };
+  BL.net = { start, recheck, subscribe, subscribeRoster, subscribeChat, subscribeDoor, dispose, login, logout, setDisplay, rejoin, setBody, setZone, setPokerVoice, setHub, setMuted, setHealth, sendNpc, sendChat, sendGhost, subscribeGhost, sendPose, sendEquipment, askDoor, goDoor, doneDoor, cancelDoor, passDoor, mayDrive, mayDriveGorilla, ownCharacter, ownAmong, characterOf, gorillaBody, bodyName, bodyKind, serverNow, remotes, state, CHAT_MAX, CHAT_KEEP, get npcFrame() { return npcFrame; } };
 })();

@@ -1,0 +1,348 @@
+{
+  "base": "786ab4c1ce362dbbe753cf9902d62972d0d9e221",
+  "requirement": {
+    "fps": 55,
+    "quality": "high",
+    "width": 1920,
+    "height": 1080,
+    "dpr": 2
+  },
+  "status": "FAIL; repeated-failure STOP streak 4; no further performance fix or retry attempted",
+  "finalSourceSha256": {
+    "src/js/camera-cover.js": "c949ebef7ce21a3e6f3188f612b82e79ea9a8fe5f2de6b0e49f3d6d0442cc2d3",
+    "src/characters/SatsMason.js": "3dd04320eab4b9b0e8e8aeee7cb03a381e1d9ca8ffe1cce49025b6c0aebc2b01",
+    "src/js/satsmason-kit.js": "6b4eda5a8769eed082343f908f6a937586c5c6f25e7937866ec4dc1b73c020d6",
+    "src/js/satsmason-cues.js": "2c6082938df21c561ec72ce5909dda1183e95313c0866d0ccb69e9e471255abe",
+    "test/run.mjs": "c52b19a47ac8edd41c9912a889bea150a4d974921a1680ee7d66327b9089d558"
+  },
+  "final": [
+    {
+      "covered": false,
+      "character": "SatsMason",
+      "viewport": {
+        "width": 1920,
+        "height": 1080,
+        "dpr": 2,
+        "focused": true
+      },
+      "graphics": {
+        "renderer": "ANGLE (Apple, ANGLE Metal Renderer: Apple M3, Unspecified Version)",
+        "vendor": "Google Inc. (Apple)"
+      },
+      "fps": 23.122769948372433,
+      "p95": 68.70000000000073,
+      "max": 314.6999999999971,
+      "worst": {
+        "gap": 337.2000002861023,
+        "at": 564.7000000000007,
+        "updateMs": 274.19999980926514,
+        "renderMs": 11.5,
+        "overlayMs": 3.8000001907348633,
+        "donated": false
+      },
+      "quality": "low",
+      "cpuMs": {
+        "update": 7.271551711805936,
+        "overlay": 2.5672413932866065,
+        "renderSubmission": 3.8474137783050537,
+        "overlayMax": 5.900000095367432
+      },
+      "travel": 3.210264960001079,
+      "donated": false,
+      "particles": 0,
+      "outlined": 0,
+      "samples": 116,
+      "actorMaskFaces": 0
+    },
+    {
+      "covered": true,
+      "character": "SatsMason",
+      "viewport": {
+        "width": 1920,
+        "height": 1080,
+        "dpr": 2,
+        "focused": true
+      },
+      "graphics": {
+        "renderer": "ANGLE (Apple, ANGLE Metal Renderer: Apple M3, Unspecified Version)",
+        "vendor": "Google Inc. (Apple)"
+      },
+      "fps": 9.473808865906125,
+      "p95": 266.6999999999971,
+      "max": 318.6000000000022,
+      "worst": {
+        "gap": 306.09999990463257,
+        "at": 248,
+        "updateMs": 19.699999809265137,
+        "renderMs": 2.5999999046325684,
+        "overlayMs": 283.30000019073486,
+        "donated": false
+      },
+      "quality": "low",
+      "cpuMs": {
+        "update": 4.918750007947286,
+        "overlay": 92.48750002185504,
+        "renderSubmission": 3.664583295583725,
+        "overlayMax": 283.30000019073486
+      },
+      "travel": 3.9750813075815747,
+      "donated": true,
+      "particles": 32,
+      "outlined": 48,
+      "samples": 48,
+      "actorMaskFaces": 8195
+    }
+  ],
+  "developmentBaseline": [
+    {
+      "covered": false,
+      "character": "portlandhodl",
+      "viewport": {
+        "width": 1920,
+        "height": 1080,
+        "dpr": 2,
+        "focused": true
+      },
+      "graphics": {
+        "renderer": "ANGLE (Apple, ANGLE Metal Renderer: Apple M3, Unspecified Version)",
+        "vendor": "Google Inc. (Apple)"
+      },
+      "fps": 29.6,
+      "p95": 50.099999999998545,
+      "max": 333.3999999999942,
+      "worst": {
+        "gap": 366.30000019073486,
+        "at": 483.3000000000029,
+        "updateMs": 322.69999980926514,
+        "renderMs": 4.100000381469727,
+        "overlayMs": 4,
+        "donated": false
+      },
+      "quality": "low",
+      "cpuMs": {
+        "update": 6.181756757401131,
+        "overlay": 2.4729729568636096,
+        "renderSubmission": 3.300675675675676,
+        "overlayMax": 6.600000381469727
+      },
+      "travel": 4.298044347404131,
+      "donated": false,
+      "particles": 0,
+      "outlined": 0,
+      "samples": 148,
+      "actorMaskFaces": null
+    },
+    {
+      "covered": true,
+      "character": "portlandhodl",
+      "viewport": {
+        "width": 1920,
+        "height": 1080,
+        "dpr": 2,
+        "focused": true
+      },
+      "graphics": {
+        "renderer": "ANGLE (Apple, ANGLE Metal Renderer: Apple M3, Unspecified Version)",
+        "vendor": "Google Inc. (Apple)"
+      },
+      "fps": 15.149702986086176,
+      "p95": 83.40000000000146,
+      "max": 84,
+      "worst": {
+        "gap": 91.2000002861023,
+        "at": 399.6000000000058,
+        "updateMs": 15.699999809265137,
+        "renderMs": 3.5,
+        "overlayMs": 71.10000038146973,
+        "donated": false
+      },
+      "quality": "low",
+      "cpuMs": {
+        "update": 3.571052645382128,
+        "overlay": 58.81710526817724,
+        "renderSubmission": 2.8789473521082023,
+        "overlayMax": 74.5
+      },
+      "travel": 4.390374999999976,
+      "donated": true,
+      "particles": 26,
+      "outlined": 76,
+      "samples": 76,
+      "actorMaskFaces": null
+    },
+    {
+      "covered": false,
+      "character": "SatsMason",
+      "viewport": {
+        "width": 1920,
+        "height": 1080,
+        "dpr": 2,
+        "focused": true
+      },
+      "graphics": {
+        "renderer": "ANGLE (Apple, ANGLE Metal Renderer: Apple M3, Unspecified Version)",
+        "vendor": "Google Inc. (Apple)"
+      },
+      "fps": 29.701391380616318,
+      "p95": 50,
+      "max": 116.69999999999709,
+      "worst": {
+        "gap": 146.90000009536743,
+        "at": 2716.600000000006,
+        "updateMs": 4.300000190734863,
+        "renderMs": 4.899999618530273,
+        "overlayMs": 4.200000286102295,
+        "donated": false
+      },
+      "quality": "low",
+      "cpuMs": {
+        "update": 3.871812074776464,
+        "overlay": 3.7409396171569824,
+        "renderSubmission": 3.526845624782895,
+        "overlayMax": 29.699999809265137
+      },
+      "travel": 3.4453667201293223,
+      "donated": false,
+      "particles": 0,
+      "outlined": 0,
+      "samples": 149,
+      "actorMaskFaces": null
+    },
+    {
+      "covered": true,
+      "character": "SatsMason",
+      "viewport": {
+        "width": 1920,
+        "height": 1080,
+        "dpr": 2,
+        "focused": true
+      },
+      "graphics": {
+        "renderer": "ANGLE (Apple, ANGLE Metal Renderer: Apple M3, Unspecified Version)",
+        "vendor": "Google Inc. (Apple)"
+      },
+      "fps": 20.2,
+      "p95": 66.89999999999418,
+      "max": 83.39999999999418,
+      "worst": {
+        "gap": 91.19999980926514,
+        "at": 2650,
+        "updateMs": 2.5999999046325684,
+        "renderMs": 2.9000000953674316,
+        "overlayMs": 54.59999990463257,
+        "donated": true
+      },
+      "quality": "low",
+      "cpuMs": {
+        "update": 3.09801980764559,
+        "overlay": 42.51089113065512,
+        "renderSubmission": 2.7891088806756654,
+        "overlayMax": 63.59999990463257
+      },
+      "travel": 3.6854544941962537,
+      "donated": true,
+      "particles": 26,
+      "outlined": 101,
+      "samples": 101,
+      "actorMaskFaces": null
+    }
+  ],
+  "upstreamControl": [
+    {
+      "covered": false,
+      "character": "portlandhodl",
+      "viewport": {
+        "width": 1920,
+        "height": 1080,
+        "dpr": 2,
+        "focused": true
+      },
+      "graphics": {
+        "renderer": "ANGLE (Apple, ANGLE Metal Renderer: Apple M3, Unspecified Version)",
+        "vendor": "Google Inc. (Apple)"
+      },
+      "fps": 24.4,
+      "p95": 84.79999999999927,
+      "max": 264.8000000000011,
+      "worst": {
+        "gap": 289.40000009536743,
+        "at": 433.2999999999993,
+        "updateMs": 254.60000038146973,
+        "renderMs": 5.099999904632568,
+        "overlayMs": 4.5,
+        "donated": false
+      },
+      "quality": "low",
+      "cpuMs": {
+        "update": 6.806557350471372,
+        "overlay": 4.8565573535981725,
+        "renderSubmission": 3.7770492092507784,
+        "overlayMax": 25.300000190734863
+      },
+      "travel": 3.2515773637449272,
+      "donated": false,
+      "particles": 0,
+      "outlined": 0,
+      "samples": 122,
+      "actorMaskFaces": 0
+    },
+    {
+      "covered": true,
+      "character": "portlandhodl",
+      "viewport": {
+        "width": 1920,
+        "height": 1080,
+        "dpr": 2,
+        "focused": true
+      },
+      "graphics": {
+        "renderer": "ANGLE (Apple, ANGLE Metal Renderer: Apple M3, Unspecified Version)",
+        "vendor": "Google Inc. (Apple)"
+      },
+      "fps": 14.352350197344808,
+      "p95": 98.10000000000218,
+      "max": 133.1999999999971,
+      "worst": {
+        "gap": 127.59999990463257,
+        "at": 2583.300000000003,
+        "updateMs": 2.700000286102295,
+        "renderMs": 3.6999998092651367,
+        "overlayMs": 60.80000019073486,
+        "donated": true
+      },
+      "quality": "low",
+      "cpuMs": {
+        "update": 4.750000019868215,
+        "overlay": 59.73750003841188,
+        "renderSubmission": 3.9291666547457376,
+        "overlayMax": 87.60000038146973
+      },
+      "travel": 4.0891404313369435,
+      "donated": true,
+      "particles": 26,
+      "outlined": 72,
+      "samples": 72,
+      "actorMaskFaces": 1514
+    }
+  ],
+  "controlNotes": "Pinned upstream sources restored, no SatsMason character/assets/equipment changes. Only timing counters added to sight-guides; control source manifest retained locally.",
+  "transport": "Native Chrome: temporary 3840x2160 viewport with 200% page zoom; measured CSS viewport 1920x1080, DPR 2, focused; temporary display overrides reset. Apple M3 ANGLE Metal, AC power, Low Power Mode off.",
+  "comparisonLimits": "Serial sessions, nondeterministic NPCs, different warmup history (development baseline measured stock first, final measured SatsMason first). No controlled FPS improvement claim.",
+  "localContracts": "10/10 equipment, character, save, room relay and wall-mask contracts; added checks remain local, upstream test/run.mjs unchanged.",
+  "maskWork": {
+    "beforeFaces": 12426,
+    "afterFaces": 8195,
+    "reductionPercent": 34.04957347497184,
+    "visibleBodyUnchanged": true,
+    "minimumTestedEquipmentSilhouetteIoU": 0.970979201283447
+  },
+  "chisel": {
+    "taskId": "98aa245c-fa93-479c-ba31-7c0169139ca2",
+    "referenceTaskId": "2c7d2bca-61c8-4244-9b55-09a1e8329184",
+    "newCredits": 60,
+    "overallCredits": 735,
+    "authorisedCap": 1000,
+    "remaining": 265,
+    "tip": "Source and fitted mesh have a true pointed apex; prior mesh had a flat cap."
+  }
+}

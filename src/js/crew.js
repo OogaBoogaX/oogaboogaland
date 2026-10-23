@@ -482,7 +482,14 @@
       addChild(cave.parts.gun, cave.parts.gunFlash);
       cave.gunViewNodes = [cave.parts.armR, cave.parts.fingersR, cave.parts.gunBody, cave.parts.gunFlash, ...cave.parts.gunBananas];
       let weapon = world.weapons.get(contributor.name);
-      if (!weapon) { weapon = { equipped: false, ammo: AMMO_MAX }; world.weapons.set(contributor.name, weapon); }
+      if (!weapon) {
+        weapon = { equipped: false, ammo: AMMO_MAX };
+        if (cave.tools) {
+          const saved=game.toolFor?.(contributor.name),index=cave.tools.findIndex(tool=>tool.id===saved);
+          weapon.toolIndex=index>=0?index:0;weapon.toolHolstered=saved==="holster" || typeof saved==="string" && index<0;
+        }
+        world.weapons.set(contributor.name, weapon);
+      }
       if (weapon.primaryOwned === undefined) weapon.primaryOwned = true;
       if (weapon.secondaryOwned === undefined) weapon.secondaryOwned = true;
       weapon.ammo = Math.round(clamp(weapon.ammo, 0, AMMO_MAX));
@@ -639,6 +646,11 @@
         act: { kind: "eat", until: 0, trips: 0, sayAt: 0, said: true, phase: 0, spot: { x: 0, z: 0, ry: NaN, sit: false } },
         swagNodes: []
       });
+      if (cave.tools) {
+        BL.models.setTool(cave, Number.isInteger(weapon.toolIndex) ? weapon.toolIndex : 0);
+        cave.meleePoints=meleeExtremes(cave.parts.club.geometry);
+        cave.clubSlingProfile=clubSlingProfile(cave.parts.club.geometry);
+      }
       // A character built with its own pack wears it from the first frame and
       // uses the same flight, fuel, recovery and toggle as every other pack.
       if (cave.parts.jetpack && !cave.traits.footRockets) cave.jet = { node: cave.parts.jetpack, flame: cave.parts.jetFlame, thrust: false, spending: false, power: 0, puff: 0 };
@@ -1768,6 +1780,7 @@
       if (slot === 1 && !cave.weapon.primaryOwned || slot === 2 && !cave.weapon.secondaryOwned) return false;
       stopBurst(cave); stopReload(cave, true);
       clearGunBashThrust(cave);
+      cave.weapon.toolHolstered = slot === 0;
       cave.weapon.primaryEquipped = slot === 1;
       cave.weapon.equipped = slot === 2;
       if (slot) cave.weapon.selectedSlot = slot;
@@ -1785,6 +1798,21 @@
       cave.weapon.axeIdle = slot === 1 && cave.traits.stoneAxe ? AXE_STICK_DELAY + AXE_STICK_BLEND : 0;
       cave.parts.armR.rotation.y = cave.parts.armL.rotation.y = 0;
       poseWeapon(cave);
+      if(cave===player && cave.tools && slot!==2) game.setTool?.(cave.traits.name,slot===0?"holster":cave.tools[cave.toolIndex].id);
+      return true;
+    };
+    const selectTool = (id, cave = player) => {
+      if (!cave || !cave.tools) return false;
+      const index=cave.tools.findIndex((tool)=>tool.id===id);
+      if ((id!=="holster" && index<0) || !selectWeapon(id==="holster"?0:1,cave)) return false;
+      if(index>=0) {
+        BL.models.setTool(cave,index);
+        cave.weapon.toolIndex=index;
+        cave.meleePoints=meleeExtremes(cave.parts.club.geometry);
+        cave.clubSlingProfile=clubSlingProfile(cave.parts.club.geometry);
+      }
+      poseWeapon(cave);
+      if(cave===player) game.setTool?.(cave.traits.name,id);
       return true;
     };
     const configureWeapon = (cave, slot = 0, ammo = null, unlimited = ammo === "unlimited") => {
@@ -1983,6 +2011,11 @@
       }
       gun.ammoReloading = w.reloading;
       if (cave.sleepWeapons.visible || gun.parent === cave.sleepWeapons) {
+        if (cave.tools) {
+          parts.club.visible = false;
+          BL.models.poseTools(cave, false);
+        }
+
         cave.sleepWeapons.visible = cave.root.visible && !cave.bedroll?.outdoor;
         if (cave.bedroll?.outdoor) for (const node of cave.swagNodes) node.visible = false;
         parts.gunFlash.visible = false;
@@ -2098,6 +2131,11 @@
         if (contact !== Infinity) parts.club.position.z = contact;
       }
       parts.club.visible = w.primaryOwned && (slungClub || !drawn);
+      if (cave.tools) {
+        const held=parts.club.visible && !slungClub && !w.toolHolstered && cave.state!=="sleeping" && awakeTravel;
+        parts.club.visible=held;
+        BL.models.poseTools(cave,held);
+      }
       if (primaryReady) {
         if (returningPrimary) {
           math.quat.fromEuler(MELEE_REST_ARM, parts.armR.rotation.x, parts.armR.rotation.y, parts.armR.rotation.z);
@@ -6270,7 +6308,7 @@
       showShot, setTint, spotOccupied,
       cavemen, list: crewList, fanSlots, stateOf, stateCounts, workingCavemen, eatingCavemen, workingCount, eatingCount, feedableCavemen, refreshStates, refreshRosterRow, updateFan, rush, headWorldOf, applyAllSwag, wornBy, renderLocker, pokeCave, idleSay, drawDrops,
       throwTomato, clearProjectiles, control, release, relocatePlayer, sleepPlayer, wakePlayer, sitPlayer, standPlayer, clearHeadLook, prepareDragged, recoverDragged, ignite, dropRoll, damage, fireView, steer: steerPlayer, look: lookPlayer, elevate: elevatePlayer, playerAction, jumpPlayer, poseWeapon, wearJetpack, removeJetpack, setJetpackOwnership, thrust, holdRocketJump, update, dispose, stats,
-      actorClear, builtInJetpack, toggleTint, twirl, toggleWeapon, selectWeapon, configureWeapon, swingWeapon, bashWeapon, releaseSwing, fireWeapon, setWeaponTrigger, canFire, weaponOrigin, meleeReach, meleePower, nearReload, canReload, startReload, stopReload, stopBurst, canSwapMagazine, swapMagazine, collectMagazine, collectGroundMagazine, collectAmmo, removeMagazines, hasMagazine, magazineCount, magazineAmmo, totalAmmo, workSites,
+      actorClear, builtInJetpack, toggleTint, twirl, toggleWeapon, selectWeapon, selectTool, configureWeapon, swingWeapon, bashWeapon, releaseSwing, fireWeapon, setWeaponTrigger, canFire, weaponOrigin, meleeReach, meleePower, nearReload, canReload, startReload, stopReload, stopBurst, canSwapMagazine, swapMagazine, collectMagazine, collectGroundMagazine, collectAmmo, removeMagazines, hasMagazine, magazineCount, magazineAmmo, totalAmmo, workSites,
       get sleeping() { return !!(player && player.bedTravel.manual && player.state === "sleeping"); },
       get player() {
         return player;

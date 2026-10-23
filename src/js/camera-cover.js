@@ -90,6 +90,8 @@
     let wallContexts = new Array(32), wallVersions = new Float64Array(32), wallCount = 0, wallFaces = 0, wallCached = false, wallContrast = 0, wallRockOnly = false;
     let surfacePoints = new Float32Array(0), surfaceCorners = new Uint8Array(0), surfaceNext = new Int32Array(0);
     const view = mat4.create(), triangle = new Float64Array(9), clipped = new Float64Array(12);
+    const actorView = new Float64Array(16), projected = new Float64Array(8);
+    let actorVertices = new Float64Array(0);
     let actorDepth = new Float32Array(0), clipActor = false, actorMinX = 0, actorMinY = 0, actorMaxX = -1, actorMaxY = -1;
     let actorColumns = new Int32Array(0);
     // Search the small silhouette band nearest-first. Stable distance order
@@ -677,18 +679,32 @@
     };
     const drawNode = (node) => {
       if (!node.visible || node.cameraHidden) return;
-      const geometry = node.geometry, world = node.world;
+      const geometry = node.geometry?.cueGeometry || node.geometry, world = node.world;
+      let batch = 0;
+      // Compose once per part, retaining double precision for the near-plane clip.
+      if (geometry) for (let c = 0; c < 4; c++) for (let r = 0; r < 3; r++) {
+        actorView[c * 4 + r] = view[r] * world[c * 4] + view[4 + r] * world[c * 4 + 1]
+          + view[8 + r] * world[c * 4 + 2] + view[12 + r] * world[c * 4 + 3];
+      }
+      // Indexed wall cues share vertices across faces. Transform each position
+      // once into a reusable buffer before clipping its triangles.
+      if (geometry) {
+        const v = geometry.verts;
+        if (actorVertices.length < v.length) actorVertices = new Float64Array(v.length);
+        for (let i = 0; i < v.length; i += 3) {
+          actorVertices[i] = actorView[0] * v[i] + actorView[4] * v[i + 1] + actorView[8] * v[i + 2] + actorView[12];
+          actorVertices[i + 1] = actorView[1] * v[i] + actorView[5] * v[i + 1] + actorView[9] * v[i + 2] + actorView[13];
+          actorVertices[i + 2] = actorView[2] * v[i] + actorView[6] * v[i + 1] + actorView[10] * v[i + 2] + actorView[14];
+        }
+      }
       if (geometry) for (const face of geometry.faces) {
         // Triangles clip to at most four corners, so the scratch space stays fixed.
         for (let fan = 1; fan + 1 < face.i.length; fan++) {
           for (let n = 0; n < 3; n++) {
-            const i = face.i[n === 0 ? 0 : fan + n - 1] * 3, v = geometry.verts;
-            const x = world[0] * v[i] + world[4] * v[i + 1] + world[8] * v[i + 2] + world[12];
-            const y = world[1] * v[i] + world[5] * v[i + 1] + world[9] * v[i + 2] + world[13];
-            const z = world[2] * v[i] + world[6] * v[i + 1] + world[10] * v[i + 2] + world[14];
-            triangle[n * 3] = view[0] * x + view[4] * y + view[8] * z + view[12];
-            triangle[n * 3 + 1] = view[1] * x + view[5] * y + view[9] * z + view[13];
-            triangle[n * 3 + 2] = view[2] * x + view[6] * y + view[10] * z + view[14];
+            const i = face.i[n === 0 ? 0 : fan + n - 1] * 3;
+            triangle[n * 3] = actorVertices[i];
+            triangle[n * 3 + 1] = actorVertices[i + 1];
+            triangle[n * 3 + 2] = actorVertices[i + 2];
           }
           let count = 0;
           for (let n = 0; n < 3; n++) {
@@ -704,18 +720,32 @@
             }
           }
           if (count < 9) continue;
-          maskCtx.beginPath();
-          for (let n = 0; n < count; n += 3) {
-            const x = width / 2 - clipped[n] * focal / clipped[n + 2], y = height / 2 + clipped[n + 1] * focal / clipped[n + 2];
-            if (n) maskCtx.lineTo(x, y); else maskCtx.moveTo(x, y);
+          const corners = count / 3;
+          for (let n = 0; n < corners; n++) {
+            projected[n * 2] = width / 2 - clipped[n * 3] * focal / clipped[n * 3 + 2];
+            projected[n * 2 + 1] = height / 2 + clipped[n * 3 + 1] * focal / clipped[n * 3 + 2];
+          }
+          let area = 0;
+          for (let n = 0; n < corners; n++) {
+            const next = (n + 1) % corners;
+            area += projected[n * 2] * projected[next * 2 + 1] - projected[next * 2] * projected[n * 2 + 1];
+          }
+          // All subpaths wind the same way: overlapping front/back faces must
+          // form a union, not cancel holes in Canvas's nonzero fill rule.
+          if (!batch) maskCtx.beginPath();
+          for (let n = 0; n < corners; n++) {
+            const at = (area < 0 ? corners - 1 - n : n) * 2;
+            if (n) maskCtx.lineTo(projected[at], projected[at + 1]); else maskCtx.moveTo(projected[at], projected[at + 1]);
           }
           maskCtx.closePath();
-          maskCtx.fill();
-          maskCtx.stroke();
+          // Dense imported meshes keep every triangle, but pay for one paint
+          // per bounded batch rather than a Canvas fill/stroke per colour face.
+          if (++batch === 256) { maskCtx.fill(); maskCtx.stroke(); batch = 0; }
           if (clipActor) rasterActorDepth(count);
           state.faces++;
         }
       }
+      if (batch) { maskCtx.fill(); maskCtx.stroke(); }
       for (const child of node.children) drawNode(child);
     };
     const draw = (camera, actor, touchesRock, occluded, solidAt, materialAt, guides = null, dt = 1 / 60, contrast = 0, effect = null, actorVisibleAt = null, actorOutsideCover = false) => {
@@ -790,6 +820,7 @@
       mask.width = mask.height = rim.width = rim.height = stone.width = stone.height = concealed.width = concealed.height = concealedRim.width = concealedRim.height = visible.width = visible.height = apertureMask.width = apertureMask.height = wallLayer.width = wallLayer.height = 1;
       wallContexts.fill(null); wallCached = false; state.glyphInterior = false;
       glyphMaterial = textureMaterial = null;
+      actorVertices = new Float64Array(0);
       actorDepth = new Float32Array(0); actorColumns = new Int32Array(0); clipActor = false;
     };
     return { draw, dispose, state };

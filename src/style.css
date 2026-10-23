@@ -8967,3 +8967,8 @@ body.dsb-menu-open :is(.bottom-hud,.top-hud,#joy-move,#joy-look,#act,.weapon-hud
 @media (max-width: 720px) {
   .sphere-mode { white-space: normal; max-width: 46vw; overflow-wrap: anywhere; }
 }
+
+.toolbelt-hud { display:flex; flex-direction:column; gap:4px; width:168px; color:#eedec0; font-size:11px; pointer-events:auto; }
+.toolbelt-hud[hidden] { display:none; }
+.toolbelt-hud select { width:100%; min-height:36px; padding:6px; border:1px solid #8d7855; border-radius:6px; background:#2b2923; color:#f1e4c8; font:inherit; font-size:13px; }
+.weapon-equipment-row:has(.toolbelt-hud:not([hidden])) { flex-wrap:wrap; max-width:218px; }

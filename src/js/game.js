@@ -59,7 +59,7 @@
     if (list.length > RECENT_HANDLES) list.length = RECENT_HANDLES;
   };
   const isEntry = (e, catalog) => e && typeof e === "object" && isString(e.id, 40) && catalog.some((c) => c.id === e.itemId) && LOOT_TIERS.some((t) => t.tier === e.tier) && isString(e.donationId, 64) && Number.isFinite(e.at);
-  const defaults = () => ({ inventory: [], assignments: {}, handle: "", message: "", recentHandles: [], recentDonations: [], handFed: 0, totalSats: 0, donations: 0, bananas: 0, lastTip: 0, tipDays: [], donors: [], race: { best: {}, cup: null }, drop: { best: null, jumps: 0 }, orbit: { best: null, build: null }, mine: { best: null }, arcade: { skee: 0, hoops: 0, shy: 0, claw: 0, hockey: 0, billiards: 0, darts: 0, pinball: 0, ride: 0, invaders: 0, snake: 0, pong: 0, stampede: 0, flap: 0, breaker: 0, dash: 0, stacker: 0, tickets: 0, prizes: [] } });
+  const defaults = () => ({ inventory: [], assignments: {}, tools: {}, handle: "", message: "", recentHandles: [], recentDonations: [], handFed: 0, totalSats: 0, donations: 0, bananas: 0, lastTip: 0, tipDays: [], donors: [], race: { best: {}, cup: null }, drop: { best: null, jumps: 0 }, orbit: { best: null, build: null }, mine: { best: null }, arcade: { skee: 0, hoops: 0, shy: 0, claw: 0, hockey: 0, billiards: 0, darts: 0, pinball: 0, ride: 0, invaders: 0, snake: 0, pong: 0, stampede: 0, flap: 0, breaker: 0, dash: 0, stacker: 0, tickets: 0, prizes: [] } });
   // Ooga Arcade's carnival bests, each capped past the most its game can score (nine doubled 100s; the round games
   // run on), the retro cabinets' bests (`retro-games.js`, capped past any run), the ticket balance, and the prizes
   // (`ARCADE_PRIZES` ids) redeemed at the counter.
@@ -82,6 +82,12 @@
       if (parsed.assignments && typeof parsed.assignments === "object") {
         for (const [name, entryId] of Object.entries(parsed.assignments)) {
           if (isString(name, 40) && state.inventory.some((e) => e.id === entryId)) state.assignments[name] = entryId;
+        }
+      }
+      if (parsed.tools && typeof parsed.tools === "object" && !Array.isArray(parsed.tools)) {
+        for (const name of Object.keys(parsed.tools).slice(0,128)) {
+          if (/^[A-Za-z0-9_.-]{1,40}$/.test(name) && !["__proto__","constructor","prototype"].includes(name)
+            && typeof parsed.tools[name] === "string" && /^[a-z-]{1,24}$/.test(parsed.tools[name])) state.tools[name]=parsed.tools[name];
         }
       }
       if (isString(parsed.handle, HANDLE_MAX)) state.handle = parsed.handle;
@@ -160,6 +166,13 @@
   const create = ({ catalog }) => {
     const state = load(catalog);
     let seq = state.inventory.length;
+    const toolFor = (name) => Object.hasOwn(state.tools,name) ? state.tools[name] : null;
+    const setTool = (name,id) => {
+      if (!/^[A-Za-z0-9_.-]{1,40}$/.test(name) || ["__proto__","constructor","prototype"].includes(name)
+        || typeof id!=="string" || !/^[a-z-]{1,24}$/.test(id) || !Object.hasOwn(state.tools,name) && Object.keys(state.tools).length>=128) return false;
+      if (toolFor(name)!==id) { state.tools[name]=id;save(state); }
+      return true;
+    };
     const countOf = (itemId) => state.inventory.reduce((n, e) => n + (e.itemId === itemId), 0);
     // Full stacks never roll: a crate only carries an item the locker still has room for.
     const lootForVisitor = (donation) => lootFor(donation, catalog.filter((item) => countOf(item.id) < STACK_MAX));
@@ -352,7 +365,7 @@
       if (seconds < 5400) return `${Math.round(seconds / 60)}m`;
       return `${(seconds / 3600).toFixed(1)}h`;
     };
-    return { state, countOf, lootFor: lootForVisitor, addItem, assign, unassign, itemOf, assignedTo, clearLoot, resetAll, recordDonation, rememberHandle, tipsWithin, recordHandFed, recordRace, recordCup, recordJump, recordDrop, recordOrbit, recordMine, recordArcade, addTickets, spendTickets, redeem, setOrbitBuild, setIdentity, forecast, formatDuration };
+    return { state, toolFor, setTool, countOf, lootFor: lootForVisitor, addItem, assign, unassign, itemOf, assignedTo, clearLoot, resetAll, recordDonation, rememberHandle, tipsWithin, recordHandFed, recordRace, recordCup, recordJump, recordDrop, recordOrbit, recordMine, recordArcade, addTickets, spendTickets, redeem, setOrbitBuild, setIdentity, forecast, formatDuration };
   };
   BL.game = { create, LOOT_TIERS, STACK_MAX, SATS_PER_BANANA, tierFor, lootFor, bananasFor, formatLarge, formatThree, formatFeeRate };
 })();
