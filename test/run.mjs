@@ -3795,13 +3795,13 @@ const orbitFlow = async (b) => {
 const SCENES = ["hub", "lab", "race", "drop", "orbit", "mine", "dsb", "factory", "bifrost", "timechain", "poker", "arcade", "skee", "hoops", "shy", "claw", "hockey", "billiards", "darts", "pinball", "ride", "invaders", "snake", "pong", "stampede", "flap", "breaker", "dash", "stacker"];
 const LANES = Number(process.env.LANES) || 2;
 const ARGS = process.argv.slice(2);
-for (const a of ARGS) if (!SCENES.includes(a) && !["unit", "chat-unit", "integration-unit", "svrn-unit", "svrn-review", "vacancy-unit", "portal-unit", "water-baseline", "water-review", "water-unit", "stackchain-review", "stackchain-unit", "dsb-menus-unit", "maxis-unit", "exterior-unit", "rulers-unit", "ink-unit", "big-unit", "perf", "full", "poker-protocol"].includes(a)) throw new Error(`Unknown argument "${a}" (unit | perf | full | poker-protocol | ${SCENES.join(" | ")})`);
+for (const a of ARGS) if (!SCENES.includes(a) && !["unit", "characters", "equipment", "chat-unit", "integration-unit", "svrn-unit", "svrn-review", "vacancy-unit", "portal-unit", "water-baseline", "water-review", "water-unit", "stackchain-review", "stackchain-unit", "dsb-menus-unit", "maxis-unit", "exterior-unit", "rulers-unit", "ink-unit", "big-unit", "perf", "full", "poker-protocol"].includes(a)) throw new Error(`Unknown argument "${a}" (unit | perf | full | poker-protocol | ${SCENES.join(" | ")})`);
 const ONLY = process.env.ONLY || ""; // Optional comma-separated substrings within the requested scenes.
 const onlyMatches = value => ONLY.split(",").some(part => value.includes(part));
 const FULL = ARGS.includes("full");
 const PICKED = FULL ? SCENES : SCENES.filter((s) => ARGS.includes(s));
 const PERF = FULL || ARGS.includes("perf");
-const UNIT = !(ARGS.length === 1 && ["perf", "poker-protocol"].includes(ARGS[0]));
+const UNIT = !(ARGS.length === 1 && ["characters", "equipment", "perf", "poker-protocol"].includes(ARGS[0]));
 const PROTOCOL = FULL || ARGS.includes("poker-protocol");
 // What keeps the cruft out: every step says why it exists, or the run does not start.
 const WHY = /^(regression|playthrough|rule|contract): \S/;
@@ -3819,7 +3819,7 @@ const scene = (id, { query = "", steps, perf = false, opts = {}, label = "", url
   } });
 };
 // contributors.js reads the roster from the character files, which build on math, scene and models.
-const CONTRIBUTOR_SOURCES = ["math", "scene", "models", "caves", "contributor-identities", "activity-repos", "characters", "characters.gen", "contributors"];
+const CONTRIBUTOR_SOURCES = ["math", "scene", "models", "caves", "contributor-identities", "activity-repos", "characters", "satsmason-art", "characters.gen", "contributors"];
 const contributorActivityChecks = async () => {
   const context = { window: {}, URLSearchParams, location: { search: "" } };
   for (const name of CONTRIBUTOR_SOURCES) runInNewContext(await readFile(new URL(`../src/js/${name}.js`, import.meta.url), "utf8"), context);
@@ -3903,6 +3903,32 @@ const characterChecks = async () => {
   const BL = context.window.BL, all = BL.characters.all(), hooks = ["torso", "club", "gear", "skull", "crown", "eyes", "mark", "hatY", "headgear", "extras", "tint"];
   const rows = all.map((c) => {
     const traits = BL.contributors.traitsFor(c.handle), m = BL.models.caveman(traits);
+    // Attachments participate in the physical body and camera transforms even
+    // when their geometry is hidden by the head. Partial vectors poison both.
+    BL.scene.updateWorld(m.root);
+    const finiteNode = (node) => [...node.world].every(Number.isFinite)
+      && (!node.geometry || node.geometry.verts.every(Number.isFinite))
+      && (!node.geometry?.normals || node.geometry.normals.length === node.geometry.verts.length && node.geometry.normals.every(Number.isFinite))
+      && node.children.every(finiteNode);
+    let kit=true;
+    if(m.tools) {
+      const twin=BL.models.caveman(traits);
+      kit=m.tools.length===m.parts.toolStowed.length && !BL.models.setTool(m,-1);
+      for(let i=0;i<m.tools.length;i++) {
+        kit=BL.models.setTool(m,i) && kit;
+        BL.models.poseTools(m,true);
+        kit=kit && m.parts.club.geometry===m.tools[i].geometry && !m.parts.toolStowed[i].visible
+          && m.parts.toolStowed.every((node,j)=>node.visible===(i!==j))
+          && m.parts.ballHeld.visible===(i===0) && m.parts.ballStowed.visible===(i!==0)
+          && twin.toolIndex===0 && twin.parts.club.geometry===twin.tools[0].geometry
+          && !twin.parts.toolStowed[0].visible && !twin.parts.ballStowed.visible
+          && m.clubCarry===(m.tools[i].carry || m.defaultClubCarry) && twin.clubCarry===m.defaultClubCarry;
+      }
+      BL.models.poseTools(m,false);
+      kit=kit && m.parts.toolStowed.every(node=>node.visible) && !m.parts.ballHeld.visible && m.parts.ballStowed.visible;
+      BL.models.setTool(m,0);
+    }
+    const finite = kit && finiteNode(m.root);
     // A second colourway has to pair every voxel part both ways, heads included,
     // so crew.js changes the whole body and a second change puts it back.
     const parts = ["legR", "legL", "torso", "armR", "armL", "head"].map((key) => m.parts[key].geometry).concat([m.headOpen, m.headClosed]);
@@ -3910,12 +3936,12 @@ const characterChecks = async () => {
       : !!m.tint && parts.every((geo) => m.tint.has(geo) && m.tint.get(m.tint.get(geo)) === geo && m.tint.get(geo).faces.length === geo.faces.length);
     return { handle: c.handle, joined: c.joined > 1.7e9 && c.joined < 4e9, built: m.headOpen.faces.length > 0 && m.headClosed.faces.length > 0 && m.headOpen !== m.headClosed,
       parts: ["legR", "legL", "torso", "armR", "armL", "head", "club", "gun"].every((key) => m.parts[key]), hooks: Object.keys(c.dress || {}).every((key) => hooks.includes(key) && typeof c.dress[key] === "function"),
-      tint, voice: !c.voice || typeof c.voice.poke === "string" && Array.isArray(c.voice.idle),
+      finite, tint, voice: !c.voice || typeof c.voice.poke === "string" && Array.isArray(c.voice.idle),
       display: c.display === undefined || typeof c.display === "string" && !!c.display.trim() && c.display.length <= 39 };
   });
   const unique = new Set(all.map((c) => c.handle.toLowerCase())).size === all.length;
   const ordered = all.every((c, i) => !i || all[i - 1].joined <= c.joined);
-  record("characters: every src/characters file registers one handle, builds a whole Ooga and uses only known hooks", rows.length === CAST && CAST === BL.contributors.roster.length && unique && ordered && rows.every((r) => r.joined && r.built && r.parts && r.hooks && r.tint && r.voice && r.display), JSON.stringify(rows.filter((r) => !(r.joined && r.built && r.parts && r.hooks && r.tint && r.voice && r.display))));
+  record("characters: every src/characters file registers one handle, builds a whole Ooga and uses only known hooks", rows.length === CAST && CAST === BL.contributors.roster.length && unique && ordered && rows.every((r) => r.joined && r.built && r.parts && r.hooks && r.finite && r.tint && r.voice && r.display), JSON.stringify(rows.filter((r) => !(r.joined && r.built && r.parts && r.hooks && r.finite && r.tint && r.voice && r.display))));
 };
 // The mempool.space feed parser in Node: message shapes as the socket sends them, no socket.
 const mempoolFeedChecks = async () => {
@@ -19188,6 +19214,72 @@ const dsbIntegrationCheckpoint={name:"dsb integration checkpoint",why:"contract:
 scene("dsb",{label:"integration checkpoint",query:"&weather=clear&time=1200",steps:[dsbIntegrationCheckpoint]});
 scene("dsb",{label:"integration checkpoint phone",query:"&weather=clear&time=1200",opts:{w:390,h:844,mobile:true},steps:[dsbIntegrationCheckpoint]});
 
+
+// Rule: selected tools survive reloads, and an idle player's equipment reaches a
+// second client's real model through the room without changing the pose format.
+const equipmentChecks = async () => {
+  const store=new Map(),timers=new Map();let now=1000,nextTimer=0;
+  const context={window:{},URLSearchParams,location:{search:"",protocol:"http:",host:"localhost"},AbortSignal,performance:{now:()=>now},document:{hidden:false,addEventListener(){},removeEventListener(){}},
+    localStorage:{getItem:k=>store.get(k)??null,setItem:(k,v)=>store.set(k,String(v)),removeItem:k=>store.delete(k)}};
+  for(const name of new Set([...CONTRIBUTOR_SOURCES,...GAME_SOURCES,"remote-players"])) runInNewContext(await readFile(new URL(`../src/js/${name}.js`,import.meta.url),"utf8"),context);
+  const BL=context.window.BL,game=BL.game.create({catalog:[]});
+  game.setTool("SatsMason","trowel");
+  const saved=BL.game.create({catalog:[]}).toolFor("SatsMason")==="trowel";
+  game.setTool("SatsMason","holster");
+  const holstered=BL.game.create({catalog:[]}).toolFor("SatsMason")==="holster";
+  const safe=!game.setTool("__proto__","hammer") && !game.setTool("SatsMason","<bad>");
+  const parsed=JSON.parse(store.get("oogaboogaland.v1"));parsed.tools.SatsMason={tool:"hammer"};store.set("oogaboogaland.v1",JSON.stringify(parsed));
+  const malformed=BL.game.create({catalog:[]}).toolFor("SatsMason")===null;
+  record("equipment saves: tool and holster survive reload, while malformed entries are ignored",saved&&holstered&&safe&&malformed,JSON.stringify({saved,holstered,safe,malformed}));
+  const protocol=await import("../worker/src/protocol.js"),roomMessages=[];
+  // Execute the room class with only Cloudflare's host and SFU constructor stubbed.
+  const roomContext={...protocol,DurableObject:class{},CAST_ROWS:[{handle:"SatsMason"},{handle:"visitor"}],sfuClient:()=>({}),window:{},setTimeout:fn=>{timers.set(++nextTimer,fn);return nextTimer;},clearTimeout:id=>timers.delete(id)};
+  let roomSource=await readFile(new URL("../worker/src/room.js",import.meta.url),"utf8");
+  roomSource=roomSource.replace(/^import[\s\S]*?;\n/gm,"").replace("export class Room","class Room")+"\nwindow.Room=Room;";
+  runInNewContext(roomSource,roomContext);
+  const room=Object.create(roomContext.window.Room.prototype);room.players=new Map();room.chatBuckets=new Map();room.dirty=false;room.flushTimer=0;
+  const makeSocket=id=>({send(text){roomMessages.push({id,msg:typeof text==="string"?JSON.parse(text):text});},serializeAttachment(a){this.a=a;},deserializeAttachment(){return this.a;}});
+  const ws=makeSocket(1),other=makeSocket(2);
+  const p=room.record(ws,{id:1,login:"SatsMason",display:"SatsMason",body:"SatsMason",x:0,y:0,z:0,yaw:0});
+  const q=room.record(other,{id:2,login:"visitor",display:"Visitor",body:null,x:0,y:0,z:0,yaw:0});
+  room.players.set(1,p);room.players.set(2,q);ws.serializeAttachment(room.attachment(p));other.serializeAttachment(room.attachment(q));
+  room.webSocketMessage(ws,JSON.stringify({t:"equipment",tool:1,slot:1}));
+  const relay=roomMessages.find(r=>r.id===2&&r.msg.t==="equipment")?.msg;
+  const attached=ws.a.tool===1&&ws.a.slot===1&&room.view(p).tool===1;
+  const count=roomMessages.length;
+  room.webSocketMessage(ws,JSON.stringify({t:"equipment",tool:1,slot:1}));
+  room.webSocketMessage(other,JSON.stringify({t:"equipment",tool:4,slot:1}));
+  room.webSocketMessage(ws,JSON.stringify({t:"equipment",tool:99,slot:1}));
+  const bounded=roomMessages.length===count;
+  const sockets=[];
+  class Socket {static OPEN=1;constructor(){this.readyState=1;sockets.push(this);}send(text){this.sent.push(text);}close(){}sent=[];}
+  context.WebSocket=Socket;context.fetch=async()=>({ok:true,headers:{get:()=>"application/json"},json:async()=>({player:{id:2,login:"visitor"}})});
+  Object.assign(context.window,{setInterval:()=>1,clearInterval(){},setTimeout:()=>1,clearTimeout(){}});
+  BL.voice={restart(){},stop(){},setPeers(){}};BL.contributors.addTemporary=()=>{};
+  runInNewContext(await readFile(new URL("../src/js/net.js",import.meta.url),"utf8"),context);
+  const net=BL.net;await net.start();const socket=sockets[0];socket.onopen();
+  const welcome=()=>socket.onmessage({data:JSON.stringify({t:"welcome",you:{id:2},players:[room.view(p)],now:Date.now(),host:0,followers:0})});
+  welcome();
+  const root=BL.scene.createNode(),crew={cavemen:new Map(),player:null,refreshStates(){}};
+  const remote=BL.remotePlayers.create({root,crew});remote.update(1/60);
+  const shown=root.children[0];
+  const hammer=shown && net.remotes.get(1).tool===1;
+  room.webSocketMessage(ws,JSON.stringify({t:"equipment",tool:2,slot:1}));
+  for(const row of roomMessages.slice(count))if(row.id===2)socket.onmessage({data:JSON.stringify(row.msg)});
+  remote.update(1/60);
+  // The trowel's carry angle identifies the selected geometry through the live node.
+  const held=shown.children.flatMap(n=>n.children).find(n=>n.geometry===BL.models.caveman(BL.contributors.traitsFor("SatsMason")).tools[2].geometry && n.visible);
+  const trowel=!!held && Math.abs(held.rotation.x-1.65)<1e-6;
+  socket.onmessage({data:JSON.stringify({t:"equipment",id:1,tool:2,slot:0})});remote.update(1/60);
+  const stowed=held&&!held.visible;
+  net.setBody("SatsMason");net.sendEquipment(4,1);const sent=socket.sent.length;net.sendEquipment(4,1);
+  const quiet=socket.sent.length===sent;
+  welcome();now+=200;net.sendEquipment(4,1);
+  const resend=JSON.parse(socket.sent.at(-1)).t==="equipment"&&JSON.parse(socket.sent.at(-1)).tool===4;
+  remote.dispose();net.dispose();
+  record("equipment network: room relay, late join, stationary changes, holster, reconnect and disposal reach the remote model",!!relay&&attached&&bounded&&hammer&&trowel&&stowed&&quiet&&resend&&root.children.length===0,JSON.stringify({relay,attached,bounded,hammer,trowel,stowed,quiet,resend,left:root.children.length}));
+};
+
 const runTasks = async () => {
   const picked = tasks.filter((t) => (t.perf ? PERF : PICKED.includes(t.scene)));
   if (ONLY && (PICKED.length || PERF) && !picked.length) throw new Error(`No requested scene checks match ONLY=${ONLY}`);
@@ -19209,10 +19301,15 @@ const runTasks = async () => {
   for (const t of picked.filter((t) => !t.perf && t.exclusive)) await t.run();
   await dispose();
 };
-if (!PICKED.length && !PERF) console.log(`Global tier only. Name scenes to test them too: npm test -- ${SCENES.join(" ")} | full`);
+if (ARGS.length === 1 && ARGS[0] === "characters") console.log("Character model contracts only.");
+else if (ARGS.includes("equipment")) console.log("Equipment, character and game-save contracts only.");
+else if (!PICKED.length && !PERF) console.log(`Global tier only. Name scenes to test them too: npm test -- ${SCENES.join(" ")} | full`);
 await runTasks();
 // The shim installs browser globals in this process, so it runs after the browser lanes finish with Chrome.
 if (UNIT) await unitChecks();
+if (ARGS.length === 1 && ARGS[0] === "characters") await characterChecks();
+if (ARGS.includes("equipment") || UNIT) await equipmentChecks();
+if (ARGS.includes("equipment")) {await characterChecks();await gameRulesChecks();}
 if (PROTOCOL) await pokerProtocolChecks();
 
 // The ledger is the memory a session does not have: every failing check, how many runs in a row it has
