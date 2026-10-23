@@ -7,6 +7,7 @@
   const { JET_SPEED, JET_RISE, JET_FUEL_SECONDS, JET_MOVE_SECONDS } = crewMod;
   const { DROP_HEIGHT } = pileMod;
   const params = new URLSearchParams(location.search);
+  const LAZY_BEDDING = params.get("lazyhub") === "1";
   const SEED = 1;
   const DEG = Math.PI / 180;
   const COARSE = window.matchMedia("(pointer: coarse)").matches;
@@ -2556,7 +2557,7 @@
     solids.add(room);
     const benches = [];
     for (const x of [-2.6, 2.6]) for (const z of [-0.55, 0.55]) benches.push({ kind: "bench", x, y: floor + 0.58, z, floor, ry: Math.atan2(-x, -z), sitter: null, walkAt: { x: x - Math.sign(x) * 0.85, z } });
-    const entrances = [], lights = [], mattresses = [], roomSigns = [], rampMarkers = [];
+    const entrances = [], lights = [], mattresses = [], roomSigns = [], rampMarkers = [], lazyBeds = [];
     FLY.yMin = basement.floor - 1;
     const addEntrance = (node, roomIndex, lower, ramp = false) => {
       node.sightSolid = true;
@@ -2577,8 +2578,8 @@
       const entrance = createNode({ position: { x: cave.entrance.x, y: cave.floor, z: cave.entrance.z }, rotation: { x: 0, y: -angle, z: 0 }, scale: { x: (cave.corridorWidth ?? cave.width - 1.3) / 3.86, y: 1, z: 1 }, geometry: headquartersModels.roomEntrance(i) });
       addEntrance(entrance, i, level === basement);
       const dimensions = headquartersModels.MATTRESS, across = -(cave.width / 2 - dimensions.wallInset - dimensions.width / 2), along = cave.depth / 2 - dimensions.wallInset - dimensions.depth / 2;
-      const sx = Math.sin(angle), cx = Math.cos(angle), geometry = headquartersModels.mattress(cave);
-      const sign = createNode({ position: { x: cave.entrance.x - sx * 0.28, y: cave.floor + 3.78, z: cave.entrance.z + cx * 0.28 }, rotation: { x: 0, y: -angle, z: 0 }, geometry: headquartersModels.roomSign(cave), matrixSignLiving: true });
+      const sx = Math.sin(angle), cx = Math.cos(angle), geometry = LAZY_BEDDING ? headquartersModels.mattressPlaceholder(cave) : headquartersModels.mattress(cave);
+      const sign = createNode({ position: { x: cave.entrance.x - sx * 0.28, y: cave.floor + 3.78, z: cave.entrance.z + cx * 0.28 }, rotation: { x: 0, y: -angle, z: 0 }, geometry: headquartersModels.roomSign(cave, LAZY_BEDDING), matrixSignLiving: true });
       addChild(root, sign);
       placed.push(sign);
       const hanging = { roomIndex: i, basement: level === basement, room: cave, node: sign, sr: -sx, cr: cx, velocity: 0, hits: 0, contacts: 0 };
@@ -2596,6 +2597,7 @@
         -0.45, dimensions.surface, dimensions.pillowZ - 0.25, 0.45, dimensions.pillowTop, dimensions.pillowZ + 0.25]),
         walkAt: { x: node.position.x + cx * side, y: cave.floor, z: node.position.z + sx * side }
       });
+      if (LAZY_BEDDING) lazyBeds.push({ bed: mattresses[mattresses.length - 1], ready: false, failed: false });
     }
     for (const ramp of basement.ramps) {
       const p = ramp.entrance;
@@ -2655,7 +2657,7 @@
     // The hearth is the only shared HQ point light.
     // Windows and ramp torches stay physical/emissive; no camera-proximity light spills into an unclaimed room.
     const sources = [hearth];
-    return { node: room, entrances, mattresses, roomSigns, rampMarkers, benches, fireHazards, lights, sources, hearth, firepit, rooms: island.headquarters.rooms, windows: island.headquarters.windows, ramps: island.headquarters.ramps, openFloor: island.headquarters.room, basement, sleepMarksVisible };
+    return { node: room, entrances, mattresses, roomSigns, rampMarkers, lazyBeds, benches, fireHazards, lights, sources, hearth, firepit, rooms: island.headquarters.rooms, windows: island.headquarters.windows, ramps: island.headquarters.ramps, openFloor: island.headquarters.room, basement, sleepMarksVisible };
   };
   // An invisible one-way staircase continues from the dock into the sky. It
   // only arms from a grounded step off the outer deck: arriving from the air,
@@ -8118,6 +8120,47 @@
     window.open(url || `https://github.com/${repo.repo}/pulls?q=is%3Apr+is%3Amerged`, "_blank", "noopener,noreferrer");
   };
   let prefetchAt = 0;
+  let lazyBedJob = null;
+  const stopLazyBedding = () => {
+    const job = lazyBedJob;
+    lazyBedJob = null;
+    if (!job) return;
+    job.controller.abort();
+    if (job.handle) {
+      if (job.idle) cancelIdleCallback(job.handle);
+      else clearTimeout(job.handle);
+      job.handle = 0;
+    }
+  };
+  const updateLazyBedding = () => {
+    if (!LAZY_BEDDING || lazyBedJob || !headquarters) return;
+    const p = pilot.player ? pilot.player.root.position : camera.position;
+    let selected = null, distance = 18 * 18;
+    for (const item of headquarters.lazyBeds) {
+      if (item.ready || item.failed) continue;
+      const bed = item.bed, dx = p.x - bed.x, dy = p.y - bed.y, dz = p.z - bed.z, d = dx * dx + dy * dy + dz * dz;
+      if (d < distance) { selected = item; distance = d; }
+    }
+    if (!selected) return;
+    const job = lazyBedJob = { item: selected, controller: new AbortController(), owner: headquarters, handle: 0, idle: typeof requestIdleCallback === "function" };
+    const start = () => {
+      job.handle = 0;
+      if (lazyBedJob !== job || job.controller.signal.aborted) return;
+      const steps = headquartersModels.mattressSteps(selected.bed.room, { until: 0, budget: 8, work: 0 });
+      BL.buildTasks.run(steps, "hub", job.controller.signal).then(geometry => {
+        if (lazyBedJob !== job || job.controller.signal.aborted || headquarters !== job.owner) return;
+        const bed = selected.bed, old = bed.node.geometry;
+        bed.node.geometry = geometry;
+        Object.assign(bed, geometry.mattress);
+        selected.ready = true;
+        try { refreshObjectGuides(); }
+        finally { renderer.releaseGeometry(old); }
+      }).catch(() => { if (!job.controller.signal.aborted) selected.failed = true; }).finally(() => {
+        if (lazyBedJob === job) lazyBedJob = null;
+      });
+    };
+    job.handle = job.idle ? requestIdleCallback(start, { timeout: 250 }) : setTimeout(start, 0);
+  };
   const update = (dt, elapsed) => {
     if (ghosts) ghosts.unshake(camera); // HALLOWEEN: last frame's quake comes off before anything reads the camera
     // Four cheap proximity reads a second, without building a visit or changing its actor/account state.
@@ -8302,6 +8345,7 @@
     }
     dockStairs.update(dt, pilot.player);
     updateRoomSigns(dt);
+    updateLazyBedding();
     pile.update(dt);
     const player = pilot.player;
     if (player && !pilot.poseHeld && player.root.position.y - player.baseY < ABYSS_RESPAWN_Y && abyssAt(player.root.position.x, player.root.position.z, player.root.position.y - player.baseY)) {
@@ -10709,6 +10753,7 @@
     gameRingK = gameRingWait = 0; gameRing.scale.y = 0; gameRing.visible = false;
     for (const node of ringLanterns) node.visible = false;
     ringLanternsShown = false;
+    stopLazyBedding();
     actorTransition.sourceRoot = actorTransition.sourceHead = null;
     if (factoryMouth && factoryMouth.snap) snapFactoryView();
     if (bifrostIsle && bifrostIsle.snap) snapBifrostView();
@@ -10831,6 +10876,46 @@
       updatePositionDebug(true);
     }
     updatePoolEffectsActivity();
+  };
+  // Prepare only raw character rigs: the published crew, its stable roster order, input, health and NPC/remote
+  // registration are still created together by enter. No partly populated actor registry reaches a live scene.
+  const preparedCharacters = models.scopedMap(), characterLocations = new Map();
+  const rememberCharacterLocations = () => {
+    if (!LAZY_BEDDING || !crew) return;
+    characterLocations.clear();
+    for (const cave of crew.list) {
+      const p = cave.root.position;
+      characterLocations.set(cave.traits.name, { x: p.x, y: p.y, z: p.z });
+    }
+  };
+  const prepareHubSteps = function* (ctx) {
+    if (heldHub || ctx.from === "hub") return null;
+    preparedCharacters.clear();
+    const factory = caves.slots.find(slot => slot.status === "open" && slot.scene === "factory");
+    yield* terrain.islandSteps({ seed: SEED, roofHole: factory ? { id: factory.id, ...BL.factoryModels.ROOF_TUBE } : null }, { until: 0, budget: BL.buildTasks.SLICE_MS, work: 0 });
+    yield* poolModels.prepareSteps();
+    const roster = contributors.activeRoster, point = camera ? camera.position : PILE_VIEW.target;
+    const requested = ctx.world.pilot || params.get("character")?.trim().toLowerCase();
+    const distance = contributor => {
+      if (requested && contributor.name.toLowerCase() === requested.toLowerCase()) return -Infinity;
+      const p = characterLocations.get(contributor.name);
+      return p ? (p.x - point.x) ** 2 + (p.y - point.y) ** 2 + (p.z - point.z) ** 2 : Infinity;
+    };
+    // Last-visit positions give an exact nearest-first priority on a rebuild. Cold boot has no placed actors yet;
+    // its requested driver leads, then stable roster order. A cold spatial spawn planner remains a separate step.
+    const nearest = roster.map((contributor, index) => ({ contributor, index, distance: distance(contributor) }))
+      .sort((a, b) => a.distance - b.distance || a.index - b.index).slice(0, 10).map(row => row.contributor);
+    const first = new Set(nearest), ordered = nearest.concat(roster.filter(contributor => !first.has(contributor)));
+    for (const contributor of ordered) {
+      preparedCharacters.set(contributor.name, models.caveman(contributors.traitsFor(contributor.name)));
+      yield;
+    }
+    return null;
+  };
+  const takePreparedCharacter = (name) => {
+    const cave = preparedCharacters.get(name);
+    preparedCharacters.delete(name);
+    return cave || models.caveman(contributors.traitsFor(name));
   };
   const enter = (ctx) => {
     prefetchAt = 0;
@@ -11330,6 +11415,7 @@
     // Signed-in visitors elsewhere, as the Oogas they drive; the crew walks round them.
     shared.outsideActors = () => remotes.actors();
     shared.outsideActorHeight = REMOTE_BODY_HEIGHT;
+    if (LAZY_BEDDING) shared.characterModel = takePreparedCharacter;
     crew = shared.crew = crewMod.create(shared);
     remotes = BL.remotePlayers.create({
       root, crew, visible: remoteShown,
@@ -11952,6 +12038,8 @@
     pilot.controls.reset(); input.reset(); pilot.setActive(true);
   };
   const leave = (destroy = false) => {
+    rememberCharacterLocations();
+    stopLazyBedding();
     if (reuseHub && !destroy) return suspendHub();
     heldHub = false; heldDebug = null;
     actorTransition.sourceRoot = actorTransition.sourceHead = null;
@@ -12190,5 +12278,6 @@
     }
   };
   BL.scenes = BL.scenes || {};
+  if (LAZY_BEDDING) hubScene.buildSteps = prepareHubSteps;
   BL.scenes.hub = hubScene;
 })();

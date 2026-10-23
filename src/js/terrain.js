@@ -455,11 +455,11 @@
     return result.length >= 3 ? result : null;
   };
   const ISLANDS = new Map();
-  const islandSteps = function* ({ seed = 1, roofHole = null } = {}, slice = { until: 0, budget: BL.buildTasks.SLICE_MS, work: 0 }) {
+  const islandSteps = function* ({ seed = 1, roofHole = null } = {}, slice = { until: 0, budget: BL.buildTasks.SLICE_MS, work: 0 }, capture = null) {
     if (slice && !slice.until) { slice.work = 0; slice.until = performance.now() + slice.budget; }
     const cacheKey = roofHole ? `${seed}:${roofHole.id}:${roofHole.x}:${roofHole.z}:${roofHole.radius}` : seed;
     const hit = ISLANDS.get(cacheKey);
-    if (hit) { hit.scope.use(); return hit.value; }
+    if (hit && !capture) { hit.scope.use(); return hit.value; }
     const rand = mulberry32(seed);
     const noise = valueNoise(rand);
     const spoke = (angle, axis = angle) => {
@@ -2499,11 +2499,37 @@
     };
     // Drop and Orbit use an unperforated island; the hub has the Factory roof opening. Track each key separately
     // so the games' second full voxel/mesh graph does not stay resident after a return to the hub.
+    // Only the opt-in worker asks for this data record. Every query dependency is explicit; functions never cross
+    // the worker/IndexedDB boundary. Preserve shared array-buffer views and palette/layout object aliases.
+    if (capture) {
+      const hole = { ...basementHole }; delete hole.contains;
+      capture({ version: 1, options: { seed, roofHole }, gridData: data,
+        constants: { UNIT, SX, SY, SZ, PX, PZ, SURFACE, ORIGIN, RADIUS, MEADOW, DEPTH, RING_HALF, PATH_UNIT, PATH_CAPACITY, PATH_LIFT, GATE_Z, PASS_HALF, STAIR_TERRACE, TIMECHAIN, TIMECHAIN_X, TIMECHAIN_Z, POOL_APPROACH, POOL_X, POOL_Z, P, PALETTE, PATH_TILE, UNDER_SPHERE_CENTER, UNDER_SPHERE_RADIUS, HEADQUARTERS_CAVE, HEADQUARTERS_FLOOR, HEADQUARTERS_CEILING, HEADQUARTERS_HEIGHT, HEADQUARTERS_ROCK, HEADQUARTERS_ROOM },
+        cavities, lowerCavities, basementCavities, basementCells, basementHeights, basementCollision, rampCells, rampHeights, rampCollision, frontageCells, height, surface, land, meadow, windowColumns, windowSightPlanes, windowSightRefs, headquartersRamps, headquartersRooms, headquartersWindows, headquartersGallery, headquartersBalconies, headquartersFronts, cutawayPaths, birdseyeWindowMask, birdseyeWindowTops, birdseyeWindowCeilings, geometry, roofOpening, rampFaceOffset, rockCaves, rampSight, sightColumnWork, masterList, masterPathCount, masterPathHash, centerlines, mouths, windowFragmentCount,
+        basement: { ...basement, hole }, windowFaceCount: windowGeometry.faces.length });
+      return built;
+    }
     const scope = BL.models.track(() => ISLANDS.delete(cacheKey));
     scope.use();
     ISLANDS.set(cacheKey, { value: built, scope });
     return built;
   };
+  const islandSnapshotSteps = function* (options, slice = null) {
+    let snapshot;
+    yield* islandSteps(options, slice, value => { snapshot = value; });
+    return snapshot;
+  };
+  const islandKey = ({ seed = 1, roofHole = null } = {}) => roofHole ? `${seed}:${roofHole.id}:${roofHole.x}:${roofHole.z}:${roofHole.radius}` : seed;
+  const hasIsland = options => ISLANDS.has(islandKey(options));
+  const restoreIslandSnapshot = (snapshot, options) => {
+    const cacheKey = islandKey(options), hit = ISLANDS.get(cacheKey);
+    if (hit) { hit.scope.use(); return hit.value; }
+    if (!snapshot.options || islandKey(snapshot.options) !== cacheKey) throw new Error("Terrain snapshot options differ");
+    const built = BL.terrainSnapshot.create(snapshot);
+    const scope = BL.models.track(() => ISLANDS.delete(cacheKey));
+    scope.use(); ISLANDS.set(cacheKey, { value: built, scope });
+    return built;
+  };
   const island = (options) => finishBuild(islandSteps(options, null));
-  BL.terrain = { makeGrid, gridGeometry, compactVertices, island, islandSteps, segmentBoxClear, segmentBoxQueryClear, cutawaySourceFromVox, PALETTE, MAX_HEIGHT, TIMECHAIN, POOL_APPROACH };
+  BL.terrain = { makeGrid, gridGeometry, gridGeometrySteps, compactVertices, compactVerticesSteps, island, islandSteps, islandSnapshotSteps, hasIsland, restoreIslandSnapshot, segmentBoxClear, segmentBoxQueryClear, cutawaySourceFromVox, PALETTE, MAX_HEIGHT, TIMECHAIN, POOL_APPROACH };
 })();

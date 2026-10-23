@@ -207,7 +207,13 @@
   const settle = (t, answer) => {
     if (answer && typeof answer.then === "function") {
       t.ready = false;
-      answer.then((redirect) => { t.redirect = redirect || null; t.ready = true; }, (error) => { t.failed = error || new Error("Not ready"); t.ready = true; });
+      answer.then((redirect) => {
+        if (destroyed) { models.release(t.next.id, []); return; }
+        t.redirect = redirect || null; t.ready = true;
+      }, (error) => {
+        if (destroyed) { models.release(t.next.id, []); return; }
+        t.failed = error || new Error("Not ready"); t.ready = true;
+      });
     } else t.redirect = answer || null;
   };
   const go = (id, place = null, instant = false) => {
@@ -216,7 +222,7 @@
     if (transition) return false;
     transition = { next, place, out: true, t: 0, instant, ready: true, redirect: null, failed: null, controller: new AbortController() };
     if (next.prepare) {
-      try { settle(transition, models.withScope(next.id, () => next.prepare(place, ctx, next.id))); }
+      try { settle(transition, models.withScope(next.id, () => next.prepare(place, { ...ctx, signal: transition.controller.signal }, next.id))); }
       catch (error) { transition.failed = error; }
     }
     return true;
@@ -714,6 +720,7 @@
   // Run boot from a task after the first frame so the leaf curtain is on screen, not the previous page.
   let destroyed = false;
   const bootBuildController = new AbortController();
+  const terrainController = params.get("terrainworker") === "1" ? new AbortController() : null;
   const boot = async () => {
     // A signed-in newcomer must join before crew construction, including direct routes.
     // net.start is bounded; an unavailable backend leaves the static island usable.
@@ -721,29 +728,40 @@
     if (destroyed) return;
     const constructionCPU = window.BL.buildTasks.cpu;
     let first = Object.hasOwn(scenes, sceneId) ? scenes[sceneId] : scenes[Object.keys(scenes)[0]], place = routed && routed.place;
+    if (terrainController && ["hub", "drop", "orbit"].includes(first.id)) {
+      try {
+        const ready = window.BL.deferred.load("terrain-cache"); if (ready) await ready;
+        const factory = first.id === "hub" && window.BL.caves.slots.find(slot => slot.status === "open" && slot.scene === "factory");
+        const roofHole = factory ? { id: factory.id, ...window.BL.factoryModels.ROOF_TUBE } : null;
+        await window.BL.terrainCache.prepare({ seed: 1, roofHole }, first.id, terrainController.signal);
+      } catch { /* A rejected opt-in build uses the ordinary path unless this page was destroyed. */ }
+      if (destroyed) { models.release(first.id, []); return; }
+    }
     if (first.prepare) {
       try {
-        const redirect = await window.BL.buildTasks.measure(() => models.withScope(first.id, () => first.prepare(place, ctx, first.id)));
+        const redirect = await window.BL.buildTasks.measure(() => models.withScope(first.id, () => first.prepare(place, { ...ctx, signal: bootBuildController.signal }, first.id)));
         if (redirect) ({ next: first, place } = landing({ redirect }));
       } catch {
+        models.release(first.id, []);
+        if (destroyed) return;
         first = scenes[Object.keys(scenes)[0]];
         place = null;
         window.BL.hud.toast("That place could not be opened · here is the island");
       }
-      if (destroyed) return;
+      if (destroyed) { models.release(first.id, []); return; }
     }
     if (first.buildSteps) {
       try {
         const steps = window.BL.buildTasks.measure(() => models.withScope(first.id, () => first.buildSteps({ ...ctx, place, signal: bootBuildController.signal })));
         await window.BL.buildTasks.run(steps, first.id, bootBuildController.signal);
       } catch {
-        if (destroyed) return;
         models.release(first.id, []);
+        if (destroyed) return;
         first = scenes[Object.keys(scenes)[0]];
         place = null;
         window.BL.hud.toast("That place could not be opened · here is the island");
       }
-      if (destroyed) return;
+      if (destroyed) { models.release(first.id, []); return; }
     }
     window.BL.buildTasks.measure(() => enter(first, place));
     mark("ready");
@@ -806,6 +824,7 @@
     destroyed = true;
     bootBuildController.abort();
     transition?.controller.abort();
+    terrainController?.abort();
     window.cancelAnimationFrame(raf);
     window.clearInterval(housekeepTimer);
     overlayObserver.disconnect();
