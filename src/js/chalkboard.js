@@ -43,47 +43,40 @@
   const write = (marks) => {
     try { localStorage.setItem(KEY, JSON.stringify(marks)); } catch (_) { /* Storage may be unavailable. */ }
   };
-  const quad = (geo, x0, y0, x1, y1, z, color) => {
-    const start = geo.verts.length / 3;
-    geo.verts.push(x0, y0, z, x1, y0, z, x1, y1, z, x0, y1, z);
-    geo.faces.push({ i: [start, start + 1, start + 2, start + 3], color, emissive: 0.35 });
-  };
-  const geometryFor = (ctx) => {
-    // Sample the finished popup image, including translucent dust and erasures, so the world board matches it.
-    const pixels = ctx.getImageData(0, 0, W, H).data;
-    const geo = { verts: [], faces: [], lines: [], castShadow: false };
-    const tileW = W / GRID_W, tileH = H / GRID_H;
-    const colors = new Map(), pad = 0.006, left = -BOARD_W / 2 + pad, top = 0.75 + BOARD_H - pad;
-    const stepX = (BOARD_W - pad * 2) / GRID_W, stepY = (BOARD_H - pad * 2) / GRID_H;
-    for (let row = 0; row < GRID_H; row++) {
-      let runColor = -1, runStart = 0;
-      for (let col = 0; col <= GRID_W; col++) {
-        let key = -1;
-        if (col < GRID_W) {
-          let red = 0, green = 0, blue = 0, bright = 0;
-          for (let dy = 0; dy < tileH; dy++) for (let dx = 0; dx < tileW; dx++) {
-            const at = ((row * tileH + dy) * W + col * tileW + dx) * 4;
-            red += pixels[at]; green += pixels[at + 1]; blue += pixels[at + 2];
-            bright = Math.max(bright, pixels[at], pixels[at + 1], pixels[at + 2]);
-          }
-          const count = tileW * tileH;
-          const gain = bright > 170 ? 1.55 : 1;
-          const r = Math.min(255, Math.round(red / count * gain / 8) * 8);
-          const g = Math.min(255, Math.round(green / count * gain / 8) * 8);
-          const b = Math.min(255, Math.round(blue / count * gain / 8) * 8);
-          key = (r << 16) | (g << 8) | b;
-        }
-        if (key === runColor) continue;
-        if (runColor >= 0) {
-          let color = colors.get(runColor);
-          if (!color) { color = [runColor >> 16 & 255, runColor >> 8 & 255, runColor & 255]; colors.set(runColor, color); }
-          quad(geo, left + runStart * stepX, top - (row + 1) * stepY,
-            left + col * stepX, top - row * stepY, BOARD_FACE_Z, color);
-        }
-        runColor = key;
-        runStart = col;
-      }
+  const geometryFor = (ctx, previous = null) => {
+    const geo = previous || { verts: [], faces: [], lines: [], castShadow: false };
+    if (!geo.imageSurface) {
+      const pad = 0.006, left = -BOARD_W / 2 + pad, top = 0.75 + BOARD_H - pad;
+      const width = BOARD_W - pad * 2, height = BOARD_H - pad * 2;
+      geo.verts.push(left, top - height, BOARD_FACE_Z, left + width, top - height, BOARD_FACE_Z,
+        left + width, top, BOARD_FACE_Z, left, top, BOARD_FACE_Z);
+      geo.faces.push({ i: [0, 1, 2, 3], color: [255, 255, 255], emissive: 0.35 });
+      const canvas = document.createElement("canvas");
+      canvas.width = GRID_W; canvas.height = GRID_H;
+      const context = canvas.getContext("2d", { alpha: false });
+      geo.imageSurface = { canvas, context, image: context.createImageData(GRID_W, GRID_H),
+        version: 0, rect: [left, top - height, width, height], background: null, tessellated: false };
     }
+    // This authored transform needs the finished popup pixels: each 5x5 box uses its exact RGB mean and
+    // maximum brightness, including translucent chalk and erasures. Read back only when edits flush,
+    // keeping the raster, quad and GPU buffers for the whole board visit.
+    const pixels = ctx.getImageData(0, 0, W, H).data;
+    const surface = geo.imageSurface, target = surface.image.data, tileW = W / GRID_W, tileH = H / GRID_H;
+    for (let row = 0; row < GRID_H; row++) for (let col = 0; col < GRID_W; col++) {
+      let red = 0, green = 0, blue = 0, bright = 0;
+      for (let dy = 0; dy < tileH; dy++) for (let dx = 0; dx < tileW; dx++) {
+        const at = ((row * tileH + dy) * W + col * tileW + dx) * 4;
+        red += pixels[at]; green += pixels[at + 1]; blue += pixels[at + 2];
+        bright = Math.max(bright, pixels[at], pixels[at + 1], pixels[at + 2]);
+      }
+      const count = tileW * tileH, gain = bright > 170 ? 1.55 : 1, at = (row * GRID_W + col) * 4;
+      target[at] = Math.min(255, Math.round(red / count * gain / 8) * 8);
+      target[at + 1] = Math.min(255, Math.round(green / count * gain / 8) * 8);
+      target[at + 2] = Math.min(255, Math.round(blue / count * gain / 8) * 8);
+      target[at + 3] = 255;
+    }
+    surface.context.putImageData(surface.image, 0, 0);
+    surface.version++;
     return geo;
   };
   const create = ({ renderer, onOpen, onClose }) => {
@@ -155,9 +148,7 @@
     const syncWorld = () => {
       liveTimer = 0;
       if (!worldDirty || !node) return;
-      const old = node.geometry;
-      node.geometry = geometryFor(ctx);
-      renderer.releaseGeometry(old);
+      geometryFor(ctx, node.geometry);
       worldDirty = false;
     };
     const markWorld = () => {
@@ -417,6 +408,11 @@
       },
       dispose() {
         suspend();
+        if (node) {
+          renderer.releaseGeometry(node.geometry);
+          const canvas = node.geometry.imageSurface.canvas;
+          canvas.width = canvas.height = 0;
+        }
         node = null;
       },
       get openNow() { return dialog.open; }
