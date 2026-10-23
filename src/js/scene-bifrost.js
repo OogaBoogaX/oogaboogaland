@@ -11,7 +11,7 @@
 // button all take it back out to the island's gate.
 //
 // An open world's window shows that world itself: its models are built off the graph and photographed once a page (the
-// poker room once for each cave theme it shows), in its own light, while the screen is dark, and the picture hangs at
+// poker room once for each cave theme it shows), in its own light, after the chamber opens, and the picture hangs at
 // the end of the window's passage. Until then the window shows its row's stand-in.
 (() => {
   "use strict";
@@ -88,8 +88,8 @@
   const TAU = Math.PI * 2;
   const RING_SPIN = [0.5, -0.35, 0.25], RING_TILT = [[Math.PI / 2, 0], [1.1, 0.5], [0.4, -0.9]];
   const MIRROR_ROTATION = math.quat.create();
-  // How many times, half a second apart, a page that opens here tries to photograph the open worlds.
-  const PICTURE_TRIES = 10;
+  // Each open world gets this many attempts, half a second apart, after the chamber's arrival has finished.
+  const PICTURE_TRIES = 10, PICTURE_DELAY = 0.6;
   // How far past the way in's field the island's picture of the islet hangs, square to the tunnel, as the Lightning
   // Factory hangs its own: far enough that it lines up with the islet seen through the field from anywhere in the hall.
   const OUTSIDE_DISTANCE = 34;
@@ -136,6 +136,7 @@
 
   let renderer, canvas, game, world, go, root, camera, hud, hooks, input, pilot, fx, agentPlay = null;
   let people = null, avatar = null, playerWorld = null, scene = null, leaving = false, dust = null, pictureTries = 0, pictureWait = 0, unsubscribeAccount = null, remotes = null, footsteps = null;
+  let pictureEpoch = 0, pictureJob = 0, pictureIdle = false, pictureLoading = false, pictureIndex = 0;
   const NO_ACTORS = [];
   // On the Worker's page the island's driving rules hold in here too, and the Ooga driven is reported to the
   // room every frame, so signed-in players in the chamber hear each other (voice needs a driven Ooga).
@@ -167,9 +168,18 @@
     const shot = createCamera({ fov: 2 * Math.atan(t) * 180 / Math.PI, near: 0.5, far: 260 });
     Object.assign(shot.position, P.eye);
     Object.assign(shot.target, P.look);
+    // A source model can share meshes with the chamber or its retained hub. Only the temporary source's
+    // exclusive GPU records may go; removing a shared record would make the next frame upload it again.
+    const kept = new Set();
+    const keep = (node) => {
+      if (node.geometry) kept.add(node.geometry);
+      for (const child of node.children) keep(child);
+    };
+    keep(root); liveGeometry(kept);
+    BL.scenes.hub.cachedGeometry(kept);
     const land = P.build(look), drawn = renderer.render(land, shot, P.opts(look));
     const release = (node) => {
-      if (node.geometry) renderer.releaseGeometry(node.geometry);
+      if (node.geometry && !kept.has(node.geometry)) renderer.releaseGeometry(node.geometry);
       for (const child of node.children) release(child);
     };
     if (!drawn) {
@@ -204,22 +214,76 @@
   };
   // The open worlds of a visit, each row with its looks now, read once so the windows and their pictures agree.
   const openLooks = () => WINDOWS.filter((row) => row.kind === "travel" && BL.scenes[row.scene]).map((row) => ({ row, look: BM.lookOf(row) }));
-  // Every open world's picture; true once they all exist.
-  const takePictures = (looks) => {
-    let all = true;
-    for (const { row, look } of looks) if (!takePicture(look, SHOTS[row.scene])) all = false;
-    return all;
-  };
   // A travel window's picture: its world's photograph once there is one, the stand-in until then.
   const hangPicture = (w) => {
-    if (w.picture.owned) return;
-    const asset = world.windowViews && world.windowViews[w.look.key];
-    if (asset) {
+    if (w.picture.owned) return true;
+    const asset = world.windowViews && world.windowViews[w.look.key], image = asset && asset.load();
+    if (image && image.complete && image.naturalWidth > 0) {
       w.picture.geometry = BM.pictureQuad(asset, BM.passage().picture);
       w.picture.owned = true;
-    } else {
-      w.picture.geometry = BM.standIn(w.look.stand);
+      return true;
     }
+    w.picture.geometry = BM.standIn(w.look.stand);
+    return false;
+  };
+  // Loads and photographs are separate idle tasks. Neither belongs to prepare/enter or a displayed frame's update.
+  // Only the visit number crosses a promise, so a load completed after leaving cannot photograph another visit.
+  const stopPictures = () => {
+    pictureEpoch++;
+    if (pictureJob) {
+      if (pictureIdle) cancelIdleCallback(pictureJob);
+      else clearTimeout(pictureJob);
+    }
+    pictureJob = 0; pictureLoading = false; pictureIndex = 0; pictureTries = 0; pictureWait = 0;
+  };
+  const nextPicture = () => {
+    pictureIndex++;
+    pictureTries = pictureIndex < scene.looks.length ? PICTURE_TRIES : 0;
+    pictureWait = 0;
+  };
+  const queuePicture = (loaded = false) => {
+    const epoch = pictureEpoch;
+    const run = () => {
+      if (epoch !== pictureEpoch) return;
+      pictureJob = 0;
+      if (!scene || leaving) return;
+      if (document.hidden) { pictureWait = 0.5; return; }
+      const entry = scene.looks[pictureIndex];
+      if (!entry) { pictureTries = 0; return; }
+      const { row, look } = entry;
+      if (!loaded && !(world.windowViews && world.windowViews[look.key])) {
+        const loading = BL.deferred.load(row.scene);
+        if (loading) {
+          pictureLoading = true;
+          loading.then(() => {
+            if (epoch !== pictureEpoch || !scene || leaving) return;
+            pictureLoading = false;
+            queuePicture(true);
+          }, () => {
+            if (epoch !== pictureEpoch || !scene || leaving) return;
+            pictureLoading = false;
+            nextPicture();
+          });
+        } else queuePicture(true);
+        return;
+      }
+      if (!canPicture()) { pictureWait = 0.5; return; }
+      const pictured = models.withScope("bifrost", () => {
+        try {
+          if (!takePicture(look, SHOTS[row.scene])) return false;
+          let hung = true;
+          for (const w of scene.windows) if (w.kind === "travel" && w.look.key === look.key && !hangPicture(w)) hung = false;
+          return hung;
+        } finally {
+          // Idle work has no director render following it. Replace the source's frame before the browser presents.
+          renderer.render(root, camera, RENDER_OPTS);
+        }
+      });
+      if (pictured || --pictureTries === 0) nextPicture();
+      else pictureWait = 0.5;
+    };
+    pictureIdle = typeof requestIdleCallback === "function";
+    pictureJob = pictureIdle ? requestIdleCallback(run, { timeout: 1000 }) : setTimeout(run, 0);
   };
 
   // Back out to the island's gate, as the same Ooga.
@@ -236,7 +300,15 @@
     world.pilot = avatar.traits.name;
     if (!go(w.row.scene, null, !!w.row.instant)) return;
     leaving = true;
+    w.held = true;
     pilot.setActive(false);
+  };
+  // A first visit to a world can fail to fetch. Give control back without immediately crossing the same field again.
+  const stay = () => {
+    stopPictures();
+    pictureTries = PICTURE_TRIES; pictureWait = PICTURE_DELAY;
+    leaving = false;
+    pilot.setActive(true);
   };
   const onKey = (e) => {
     if (e.key === "0" && !e.repeat && !e.metaKey && !e.ctrlKey && !e.altKey && !leaving) return pilot.resetCamera();
@@ -389,7 +461,7 @@
         addChild(node, board);
       }
       addChild(root, node);
-      const w = { row, kind, look: open ? open.look : null, node, neon, ribs: null, rim: null, rims: null, tint: null, charge: null, sparkles: null, sn: Math.sin(f.bearing), c: Math.cos(f.bearing), phase: null, body: null, face: null, picture: null, light: -1, near: 0, hum: Math.random() * 0.3, transform: null, yaw: 0, crossings: 0 };
+      const w = { row, kind, look: open ? open.look : null, node, neon, ribs: null, rim: null, rims: null, tint: null, charge: null, sparkles: null, sn: Math.sin(f.bearing), c: Math.cos(f.bearing), phase: null, body: null, face: null, picture: null, held: false, light: -1, near: 0, hum: Math.random() * 0.3, transform: null, yaw: 0, crossings: 0 };
       if (kind === "travel") {
         const passage = BM.passage(), tint = w.look.tint;
         w.rims = Array.from({ length: BM.RIM_STEPS }, (_, k) => BM.portalRim(tint, k));
@@ -470,14 +542,12 @@
   const walkableFor = (ax, az, bx, bz, y, height, actor) => BM.walkable(ax, az, bx, bz, actor.bodyRadius || 0.35, scene.kinds);
 
   const enter = (ctx) => {
+    stopPictures();
     ({ renderer, game, world, go, agentPlay } = ctx);
     canvas = ctx.canvas;
-    // The picture comes first: rendering it moves the renderer's view, which the scene's own first frame puts back.
-    // A page that opens here takes it on its first frame instead, once the renderer is ready and the build that sets
-    // the page's quality tier is done.
-    const looks = openLooks(), pictured = ctx.from !== null && takePictures(looks);
-    pictureTries = pictured ? 0 : PICTURE_TRIES;
-    pictureWait = 0;
+    const looks = openLooks();
+    pictureTries = PICTURE_TRIES;
+    pictureWait = PICTURE_DELAY;
     camera = createCamera({ fov: 55, near: 0.3, far: 700 });
     root = createNode();
     hud = hudMod.create({ signal: ctx.signal, roster: contributors.activeRoster, catalog: models.SWAG, tierColors: models.TIER_COLORS, renderIcon: hudMod.renderIcon, lootEnabled: ctx.lootEnabled });
@@ -619,7 +689,8 @@
       const w = scene.windows[i], at = against(w, p);
       if (Math.abs(at.across) > WINDOW.halfW) continue;
       if (w.kind === "travel") {
-        if (feet <= 0.6 && at.along > WINDOW.plane) { travel(w); return; }
+        if (at.along <= WINDOW.plane) w.held = false;
+        else if (!w.held && feet <= 0.6) { travel(w); return; }
       } else {
         const from = previousX * w.sn + previousZ * w.c - HALL.r - MIRROR_Z, to = at.along - MIRROR_Z;
         if (from > 1e-7 || to < 0 || to - from < 1e-8) continue;
@@ -880,21 +951,14 @@
     }
     stepTweens(dt);
     fx.update(dt, elapsed);
-    // A page that opened here photographs the open worlds now, last, so the frame's own render puts the view back. The
-    // renderer declines to draw while a program it needs is still compiling (the mirrors' among them), so it gets a try
-    // every half second, a few seconds in all; each window hangs its picture as soon as it has one.
     pictureWait -= dt;
-    if (pictureTries > 0 && pictureWait <= 0 && canPicture()) {
-      pictureWait = 0.5;
-      if (takePictures(s.looks)) pictureTries = 0;
-      else pictureTries--;
-      for (const w of s.windows) if (w.kind === "travel") hangPicture(w);
-    }
+    if (!leaving && pictureTries > 0 && pictureWait <= 0 && !pictureJob && !pictureLoading) queuePicture();
   };
   const drawExtra = (ctx2d, project) => remotes.drawNames(ctx2d, project);
   const overlay = (dt) => fx.drawOverlay(dt, drawExtra);
 
   const leave = () => {
+    stopPictures();
     // Left by Back or Forward rather than by a way out of its own, the chamber hands the Ooga on, so the next scene
     // plays the same one; the way out to the island and a window have handed theirs over already.
     if (!leaving) {
@@ -952,9 +1016,7 @@
     // Voice zone: the Bifrost group, which the isle and its bridge share (`bifrost`).
     voiceZone: "bifrost.chamber",
     micKey: true,
-    id: "bifrost", enter, update, overlay, onDonation, onKey, onLootCleared, renderOpts: RENDER_OPTS, leave, stats, liveGeometry,
-    // The chamber's windows build their pictures from DSB's terrain and the poker room, both deferred on a hosted page.
-    prepare: () => { const loading = [BL.deferred.load("dsb"), BL.deferred.load("poker")].filter(Boolean); return loading.length ? Promise.all(loading).then(() => null) : null; },
+    id: "bifrost", enter, update, overlay, onDonation, onKey, onLootCleared, renderOpts: RENDER_OPTS, stay, leave, stats, liveGeometry,
     root: null, camera: null, input: null, debug: null, agent: null, agentView: null, agentControls: null, agentHandoff: null,
     get inMotion() {
       return !!scene;
