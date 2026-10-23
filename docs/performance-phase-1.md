@@ -160,3 +160,29 @@ Full hub release exposed a latent rebuild bug in `2140data` and `ibrihamturay-co
 Each character now keeps its slots and colourway pairs in a WeakMap keyed by the model-build context. Hooks within that build share the same slots, and a later build registers its colours again. The geometry builders, RGB values and both colourways are unchanged.
 
 The existing character check now releases each template and rebuilds all 46 characters, validating every face in both colourways. Before the fix it fails only for the two robots (266/267); afterward all 267 checks pass, with zero invalid palette faces. The policy visit check also explicitly renders the returned hub. The repeated hosted release-mode round trip now paints and finishes with a clean console.
+
+## 1.7 — Keep/reuse or release the built hub
+
+`hubcache=auto` keeps the built hub on devices reporting at least 8 GiB, or no usable memory signal; below 8 GiB it releases it. `hubcache=keep` and `hubcache=release` override either choice for measurement. The existing opening-quality policy remains separate.
+
+Keep mode retains the same root, camera, solids, cutaway sections, guide registries and actors. Its published active root becomes empty while away; input is unbound, visit listeners abort, subscriptions and timers stop, audio closes, and the guide/dialog controls pause. Transient particles, speech, sleep marks, damage numbers and tickers clear while the visibility cache and resize observer remain live. A fresh visit signal and reconciled HUD resume those objects on return. The hub's local elapsed time resumes too, and feeds/weather reconcile with the current snapshot. The director explicitly adds retained-hub geometry to the GPU ownership set, so the existing no-orphaned-record assertion still applies. Page destruction disposes the retained graph as well.
+
+Release mode takes the complete disposal path, removes the cached terrain key through scoped release, and clears global guide references to its sight grid. The incoming scene keeps only the models it actually uses. The palette prerequisite above makes rebuilding those templates safe.
+
+| Measurement | Before | Final keep policy |
+|---|---:|---:|
+| Hub return longest task, 3 laps, high | 849 / 732 / 693 ms | all <50 ms |
+| Hub root reused | 0 / 3 | 3 / 3 |
+| Whole return, including fade | 1,251 / 1,130 / 1,083 ms | 514 / 498 / 501 ms |
+
+The final task observer reports no task reaching its 50 ms reporting threshold; this means **<50 ms**, not zero work. Timing runs omit HeapProfiler and forced GC. The independent clean release-mode run measures **98.02 MiB** in Factory (86.10 MiB V8 + 11.92 MiB backing storage, medium quality), below 150 MB. Its return builds a different hub root and paints without console errors. Forced-GC transition durations are not timing evidence.
+
+After ten keep-mode Factory/hub laps, native listeners are **407 after lap 1 and 407 after lap 10**; 403 attached application listeners have identical target/type/capture/handler fingerprints (`9cf0cded…f1d6`). DOM nodes stay at 10,035 and every return reuses the original root. No retaining listener hooks are installed.
+
+The ten-scene keep-mode tour also completes with clean DEBUG ownership and console checks. Boot/final-only collection gives 367.13 → 405.20 MiB, **+38.07 MiB**, so task 1.6's ≤15 MB growth target remains unmet. Retaining the full built hub is an explicit memory/return-speed tradeoff; these results do not attribute all remaining growth. This tour uses only endpoint collections, unlike 1.6b's per-stop measurements, and the two growth figures are not a controlled percentage comparison.
+
+Validation: the full shared suite completes at **1,342/1,357** in 22 minutes. The untouched base reproduces the exact sprint distances, three rejected hill-capture fixtures in the gorilla rage check, and the Factory tours stopping at their first speech beat. No physics or tour behavior was changed to hide these baseline failures. A redundant walking playthrough added to the release-policy session was removed; the original walking check and all its thresholds remain unchanged.
+
+The new lifecycle checks exposed five idle particle nodes surviving a parked hub, so parking now clears transient FX. The single focused retest is **278/280**, including **268/268 unit checks**. Both policy/HUD checks and both canonical DSB actor returns pass: inactive input/audio stop, signals end, controls and reused rows work, the original graph returns in keep mode and release mode rebuilds it. DSB's old “rebuilt” assertion now enforces the chosen policy and canonical geometry. The DSB soak hits its 8-second scene-travel deadline, and the Factory soak its 120-second session deadline, before their resource comparisons; those resource limits remain unchanged and acceptance is still unverified. The earlier pool/record growth is not claimed fixed by a completed soak.
+
+The final timing and Factory-floor runs were repeated after transient FX cleanup. The ten-lap listener and complete-tour results above precede that cleanup. Open parent PRs remain the same five; #265 and #267 patches apply, and #193's only context overlap remains the checked DSB listener options. Additional baseline comparison of the remaining full-suite failures continues separately.

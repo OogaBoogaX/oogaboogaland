@@ -321,7 +321,7 @@
         else { g.ask = 0; g.cycle = null; g.starting = false; }
       }
     };
-    const unsubscribeDoor = BL.net.subscribeDoor(onDoor);
+    let unsubscribeDoor = BL.net.subscribeDoor(onDoor);
     // Whether this crossing should wait its turn: shared, with a room that knows the doorway.
     const reserving = () => g.mode === "shared" && BL.net.state.doorway;
     const askDoor = (dir) => {
@@ -578,7 +578,8 @@
     const dispose = () => {
       window.removeEventListener("keydown", onKey, true);
       document.removeEventListener("visibilitychange", onVisibility);
-      unsubscribeDoor();
+      if (unsubscribeDoor) unsubscribeDoor();
+      unsubscribeDoor = null;
       // Through the passage the crossing is done; anything short of that gives the doorway back.
       if (g.state === "gone" && g.cycle !== null) BL.net.doneDoor(g.cycle);
       else if (g.cycle !== null || g.ask) BL.net.cancelDoor();
@@ -586,10 +587,18 @@
       dropPrepared();
       if (crew.player) hideHead(crew.player, false);
       g.state = "idle";
+      g.ask = 0; g.cycle = null;
+    };
+    const resume = () => {
+      if (unsubscribeDoor) return;
+      unsubscribeDoor = BL.net.subscribeDoor(onDoor);
+      window.addEventListener("keydown", onKey, true);
+      document.addEventListener("visibilitychange", onVisibility);
+      show();
     };
     show();
     return {
-      action, nearKeypad, engage, update, view, arrive, dispose, onKey, liveGeometry, get preselected() { return preselect; },
+      action, nearKeypad, engage, update, view, arrive, resume, dispose, onKey, liveGeometry, get preselected() { return preselect; },
       get busy() { return g.state !== "idle"; },
       get crossing() { return g.state === "opening" || g.state === "crossing" || g.state === "gone" || g.state === "leaving" || g.state === "arriving"; },
       debug: g, choose, commit, disengage, press

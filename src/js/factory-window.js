@@ -193,7 +193,7 @@
           break;
       }
     };
-    const unsubscribe = node.feed.subscribe(onEvent);
+    let unsubscribe = node.feed.subscribe(onEvent);
 
     // The show runs whether or not the window shows it, a frame at a time, as the hall runs it.
     const step = (dt) => {
@@ -298,8 +298,10 @@
       }
     };
 
+    const suspend = () => { if (unsubscribe) unsubscribe(); unsubscribe = null; };
+    const resume = () => { if (!unsubscribe) unsubscribe = node.feed.subscribe(onEvent); };
     const dispose = () => {
-      unsubscribe();
+      suspend();
       root.visible = false;
       removeChild(group, root);
     };
@@ -313,7 +315,7 @@
       },
       batches: { hall, chamber, fire, blueLit, blueDim, orangeLit, orangeDim, sat: gold, satRed: red }
     };
-    return { root, update, dispose, debug };
+    return { root, update, suspend, resume, dispose, debug };
   };
 
   BL.factoryWindow = { create, relief, AXIS, DEPTH, TINT };

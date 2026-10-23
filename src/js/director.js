@@ -34,6 +34,10 @@
   const MEMORY_LIMITED = Number.isFinite(DEVICE_MEMORY) && DEVICE_MEMORY > 0 && DEVICE_MEMORY <= 8;
   const INITIAL_QUALITY = COARSE || MEMORY_LIMITED ? "medium" : "high";
   const $ = (id) => document.getElementById(id);
+  // One opt-in override makes both policies measurable; unknown memory keeps the built island.
+  const HUB_CACHE = params.get("hubcache") || "auto";
+  const KEEP_HUB = HUB_CACHE === "keep" || HUB_CACHE !== "release"
+    && !(Number.isFinite(DEVICE_MEMORY) && DEVICE_MEMORY > 0 && DEVICE_MEMORY < 8);
   const mark = (name) => performance.mark(`ooga:${name}`);
   mark("boot");
   let sceneCanvas = $("scene");
@@ -212,7 +216,7 @@
     if (active && active.id !== "hub") go("hub");
   });
   const agentPlay = BL.agent.createPlay();
-  const ctx = { renderer, canvas: sceneCanvas, overlay: overlayCanvas, game, world, go, lootEnabled: LOOT_ENABLED, testBananas: TEST_BANANAS, agentPlay, from: null, place: null, signal: null };
+  const ctx = { renderer, canvas: sceneCanvas, overlay: overlayCanvas, game, world, go, lootEnabled: LOOT_ENABLED, testBananas: TEST_BANANAS, agentPlay, hubPolicy: KEEP_HUB ? "keep" : "release", from: null, place: null, signal: null };
   const sceneSections = [...document.querySelectorAll("[data-scene]")];
   // The title cards of the games that have no phase of their own for one: shown on every arrival,
   // closed by their button, Enter, Space or Escape, and nothing else reaches the scene while one shows.
@@ -223,6 +227,7 @@
   // The microphone's note, which names M only in a scene whose M mutes the microphone (`micKey`).
   const showMic = () => window.BL.hud.showMic(window.BL.voice.stats, !!(active && active.micKey));
   const enter = (next, place = null) => {
+    const retainedTime = next.retained ? next.elapsed : 0;
     ctx.from = active ? active.id : null;
     ctx.place = place;
     positionDebug.removeEventListener("click", copyPositionDebug);
@@ -241,7 +246,7 @@
     activeMeshRigs = next.renderOpts?.meshRigs === true;
     active = next;
     showMic();
-    sceneTime = 0;
+    sceneTime = retainedTime;
     router.arrive(next.id, place, ctx.from === null);
     if (POSITION_DEBUG && next.id !== "hub") {
       positionDebug.hidden = false;
@@ -261,6 +266,7 @@
     live.clear();
     visit(active.root);
     active.liveGeometry(live);
+    if (scenes.hub.retained) scenes.hub.cachedGeometry(live);
     return live;
   };
   // The page's first AudioContext wakes the browser's audio, about 60 ms on the main thread; every later one costs well
@@ -284,10 +290,10 @@
     clearTweens();
     if (DEBUG && tweenCount()) throw new Error(`${tweenCount()} tweens survived clearTweens`);
     enter(next, place);
-    // The builder caches only the scene just left used go too; the island's stay, since every route passes through it.
+    // Scene-only builder caches go with the visit; only the keep policy preserves the inactive hub's owners.
     const retained = liveGeometry();
-    if (leaving.id !== "hub") {
-      models.release(leaving.id, ["hub", next.id], retained);
+    if (leaving.id !== "hub" || !KEEP_HUB) {
+      models.release(leaving.id, KEEP_HUB ? ["hub", next.id] : [next.id], retained);
       if (DEBUG && leaving.id !== next.id) models.assertReleased(leaving.id);
     }
     renderer.releaseUnused(retained);
@@ -765,7 +771,10 @@
     window.removeEventListener("blur", clearRightShift);
     document.removeEventListener("visibilitychange", onVisibility);
     positionDebug.removeEventListener("click", copyPositionDebug);
-    try { if (active) active.leave(); }
+    try {
+      if (active) active.leave(true);
+      if (scenes.hub.retained) scenes.hub.leave(true);
+    }
     finally { if (visitController) visitController.abort(); renderer.dispose(); }
   };
   window.addEventListener("pagehide", (e) => {

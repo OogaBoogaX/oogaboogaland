@@ -93,7 +93,13 @@
     const eraser = document.getElementById("chalk-eraser"), chalk = document.getElementById("chalk-chalk");
     const keyboard = document.getElementById("chalk-keyboard"), clean = document.getElementById("chalk-clean"), reset = document.getElementById("chalk-reset");
     const closeButton = document.getElementById("chalk-close");
-    const listeners = new AbortController();
+    let listeners = new AbortController();
+    const bindings = [];
+    const on = (target, type, fn, options) => {
+      const opts = { ...options }; delete opts.signal;
+      bindings.push([target, type, fn, opts]);
+      target.addEventListener(type, fn, { ...opts, signal: listeners.signal });
+    };
     const startingMarks = initial(), saved = read(KEY), legacy = saved === null ? read(OLD_KEY) : null;
     const marks = saved !== null ? saved : legacy !== null ? startingMarks.concat(legacy) : startingMarks.slice();
     const startingSegments = startingMarks.reduce((n, mark) => n + mark.p.length / 2 - 1, 0);
@@ -296,7 +302,7 @@
       changed = true;
       markWorld();
     };
-    canvas.addEventListener("pointerdown", (e) => {
+    on(canvas, "pointerdown", (e) => {
       if (tool === "k") {
         if (!e.isPrimary || e.button !== 0) return;
         e.preventDefault();
@@ -318,7 +324,7 @@
       canvas.setPointerCapture(e.pointerId);
       movePointer(e);
     }, { signal: listeners.signal });
-    canvas.addEventListener("pointermove", (e) => { movePointer(e); if (e.pointerId === activePointer) addPoint(e); }, { signal: listeners.signal });
+    on(canvas, "pointermove", (e) => { movePointer(e); if (e.pointerId === activePointer) addPoint(e); }, { signal: listeners.signal });
     const endStroke = (e) => {
       if (!stroke || e.pointerId !== activePointer) return;
       if (stroke.p.length === 2) {
@@ -335,19 +341,19 @@
       activePointer = -1;
       if (e.pointerType === "touch") pointer.classList.remove("visible");
     };
-    canvas.addEventListener("pointerup", endStroke, { signal: listeners.signal });
-    canvas.addEventListener("pointercancel", endStroke, { signal: listeners.signal });
-    canvas.addEventListener("pointerleave", () => pointer.classList.remove("visible"), { signal: listeners.signal });
-    eraser.addEventListener("click", () => select("e"), { signal: listeners.signal });
-    chalk.addEventListener("click", () => select("c"), { signal: listeners.signal });
-    keyboard.addEventListener("click", () => select(tool === "k" ? "c" : "k"), { signal: listeners.signal });
+    on(canvas, "pointerup", endStroke, { signal: listeners.signal });
+    on(canvas, "pointercancel", endStroke, { signal: listeners.signal });
+    on(canvas, "pointerleave", () => pointer.classList.remove("visible"), { signal: listeners.signal });
+    on(eraser, "click", () => select("e"), { signal: listeners.signal });
+    on(chalk, "click", () => select("c"), { signal: listeners.signal });
+    on(keyboard, "click", () => select(tool === "k" ? "c" : "k"), { signal: listeners.signal });
     const receiveText = () => {
       const value = typeInput.value;
       typeInput.value = "";
       if (tool === "k" && !animation && value) typeText(value);
     };
-    typeInput.addEventListener("input", (e) => { if (!e.isComposing) receiveText(); }, { signal: listeners.signal });
-    typeInput.addEventListener("keydown", (e) => {
+    on(typeInput, "input", (e) => { if (!e.isComposing) receiveText(); }, { signal: listeners.signal });
+    on(typeInput, "keydown", (e) => {
       if (tool !== "k" || e.isComposing) return;
       if (e.key === "Enter") {
         e.preventDefault();
@@ -355,13 +361,13 @@
         if (newTextLine()) typeHistory.push({ x, y, mark: null });
       } else if (e.key === "Backspace") { e.preventDefault(); backspaceText(); }
     }, { signal: listeners.signal });
-    typeInput.addEventListener("beforeinput", (e) => {
+    on(typeInput, "beforeinput", (e) => {
       if (tool === "k" && e.inputType === "deleteContentBackward") { e.preventDefault(); backspaceText(); }
     }, { signal: listeners.signal });
-    clean.addEventListener("click", () => startAnimation("clean"), { signal: listeners.signal });
-    reset.addEventListener("click", () => startAnimation("reset"), { signal: listeners.signal });
-    closeButton.addEventListener("click", () => dialog.close(), { signal: listeners.signal });
-    dialog.addEventListener("close", () => {
+    on(clean, "click", () => startAnimation("clean"), { signal: listeners.signal });
+    on(reset, "click", () => startAnimation("reset"), { signal: listeners.signal });
+    on(closeButton, "click", () => dialog.close(), { signal: listeners.signal });
+    on(dialog, "close", () => {
       finishAnimation();
       if (activePointer >= 0 && canvas.hasPointerCapture(activePointer)) canvas.releasePointerCapture(activePointer);
       activePointer = -1;
@@ -380,7 +386,19 @@
       flushWorld();
       onClose();
     }, { signal: listeners.signal });
+    const suspend = () => {
+      listeners.abort();
+      if (animation) { cancelAnimationFrame(animation.raf); animation = null; }
+      if (liveTimer) { clearTimeout(liveTimer); liveTimer = 0; }
+      if (dialog.open) dialog.close();
+    };
+    const resume = () => {
+      if (!listeners.signal.aborted) return;
+      listeners = new AbortController();
+      for (const [target, type, fn, opts] of bindings) target.addEventListener(type, fn, { ...opts, signal: listeners.signal });
+    };
     return {
+      suspend, resume,
       attach(parent, x, y, z, angle = 0) {
         paint();
         node = BL.scene.createNode({ position: { x, y, z }, rotation: { x: 0, y: angle, z: 0 }, geometry: geometryFor(ctx), sightHidden: true });
@@ -398,10 +416,7 @@
         dialog.showModal();
       },
       dispose() {
-        listeners.abort();
-        if (animation) { cancelAnimationFrame(animation.raf); animation = null; }
-        if (liveTimer) { clearTimeout(liveTimer); liveTimer = 0; }
-        if (dialog.open) dialog.close();
+        suspend();
         node = null;
       },
       get openNow() { return dialog.open; }

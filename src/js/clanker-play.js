@@ -150,7 +150,7 @@
     };
     const on = (node, type, callback, options) => {
       node.addEventListener(type, callback, options);
-      listeners.push(() => node.removeEventListener(type, callback, options));
+      listeners.push([node, type, callback, options]);
     };
     const consume = (event) => { event.preventDefault(); event.stopImmediatePropagation(); };
     const typing = BL.controls.uiKey;
@@ -1052,9 +1052,14 @@
     const dispose = () => {
       if (disposed) return;
       release(); disposed = true;
-      for (const off of listeners) off();
+      for (const [node, type, callback, options] of listeners) node.removeEventListener(type, callback, options);
     };
-    return { possess, release, escape, respawn, travelRefusal, travel, freeCursor, resetCamera, captureControl, readInput, update, action, orbit: moveView, zoom, cancelInput, dispose,
+    const resume = () => {
+      if (!disposed) return;
+      disposed = false;
+      for (const [node, type, callback, options] of listeners) node.addEventListener(type, callback, options);
+    };
+    return { possess, release, escape, respawn, travelRefusal, travel, freeCursor, resetCamera, captureControl, readInput, update, action, orbit: moveView, zoom, cancelInput, resume, dispose,
       get active() { return !!player; }, get player() { return player; }, get view() { return view; },
       get birdsEye() { return !!player && view === "birds-eye"; }, get birdsEyeMix() { return player ? camera.orthoMix || 0 : 0; },
       get firstPerson() { return !!player && view === "first-person"; },

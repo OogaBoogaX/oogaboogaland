@@ -2796,6 +2796,10 @@ const { autoQualityProbe } = (() => {
   const autoQualityProbe = () => {
     const source = readFileSync(new URL("../src/js/director.js", import.meta.url), "utf8");
     const controller = source.slice(source.indexOf("  const perf ="), source.indexOf("  const WARMUP"));
+    const policy = source.slice(source.indexOf("  // One opt-in override"), source.indexOf("  const mark ="));
+    const keepHub = (memory, mode = "auto") => runInNewContext(`${policy}\nKEEP_HUB`, { DEVICE_MEMORY: memory, params: new URLSearchParams({ hubcache: mode }) });
+    const hubMemory = [0.25, 1, 2, 4].every(gb => !keepHub(gb)) && [8, 16, 32, undefined, 0, NaN].every(gb => keepHub(gb))
+      && keepHub(4, "keep") && !keepHub(32, "release");
     const opening = source.slice(source.indexOf("  const COARSE ="), source.indexOf("  const $ ="));
     const initial = (deviceMemory, coarse = false) => runInNewContext(`${opening}\nINITIAL_QUALITY`, { navigator: { deviceMemory }, window: { matchMedia: () => ({ matches: coarse }) } });
     const create = (quality = "high", renderedFrames = 100, deviceMemory) => {
@@ -2836,7 +2840,7 @@ const { autoQualityProbe } = (() => {
       const slow = create("high", 100, gb); slow.boot(slow.low * 1.2);
       return limited.renderer.quality === "medium" && low.changes.length === 0 && slow.renderer.quality === "low";
     }) && [undefined, 0, NaN, 16].every((gb) => { const ample = create("high", 100, gb); ample.boot(0); return ample.changes.length === 0; });
-    return { memoryBoot, healthy: healthy.changes.length === 0, gpuBound: bound.changes[0] === "medium",
+    return { hubMemory, memoryBoot, healthy: healthy.changes.length === 0, gpuBound: bound.changes[0] === "medium",
       reactsIn: slowAt, reactsFast: slowAt <= 2500, ignoresSpikes: spike.changes.length === 0,
       bounded: bounded.changes.join("|") === "medium|low", warmup: warming.changes.length === 0,
       ignoresPauses: excluded.changes.length === 0, fallback: fallback.changes.length === 0,
@@ -5298,6 +5302,7 @@ const wallPerformance = async (b) => {
 };
 const adaptiveQualityChecks = async () => {
   const r = autoQualityProbe();
+  record("memory policy: devices below 8 GiB release the hub, 8 GiB or unknown memory retain it, and the explicit policy overrides either", r.hubMemory, JSON.stringify(r));
   record("adaptive quality: a GPU-bound machine is seen through delivered frames and loses a tier within two seconds", r.healthy && r.gpuBound && r.reactsFast, JSON.stringify(r));
   record("adaptive quality: warmup, transitions, background frames and isolated spikes do not lower quality", r.warmup && r.ignoresPauses && r.ignoresSpikes && r.fallback, JSON.stringify(r));
   record("adaptive quality: steps one tier at a time and stops at the lowest", r.bounded, JSON.stringify(r));
@@ -5311,7 +5316,7 @@ const sceneUrl = (id, query = "") => `${src}?debug=1&nosim=1${id === "hub" ? "" 
 const tourGo = (b, id) => b.evaluate(`(() => { const B = window.__ooga; B.go("${id}"); for (let i = 0; i < 150 && (B.transitioning || B.scene !== "${id}"); i++) B.advance(1 / 30, 1 / 30); B.advance(0.3, 1 / 30); B.housekeep(); const s = B.stats(); return { scene: B.scene, records: B.renderer.stats.records, nodes: s.allNodes, targets: s.targets, dom: s.dom }; })()`);
 // Away and back twice. The director's ?debug=1 leave contract throws inside advance on a broken leave,
 // and the second visit may hold no more GPU records, nodes, input targets or DOM than the first.
-const trip = (id) => ({ name: `${id} round trip`, why: "contract: a scene left and entered again keeps nothing from the last visit, and takes a donation whenever one arrives", run: async (b) => {
+const trip = (id) => ({ name: `${id} round trip`, why: "contract: inactive input is released, repeated visits stay bounded, and the active scene takes a donation whenever one arrives", run: async (b) => {
   const away = id === "hub" ? "lab" : "hub", laps = [];
   for (let i = 0; i < 2; i++) {
     await tourGo(b, away);
@@ -5327,6 +5332,10 @@ const trip = (id) => ({ name: `${id} round trip`, why: "contract: a scene left a
 const hudVisit = { name: "hub HUD lifetime", why: "regression: scene visits recreated roster SVGs and donor rows; their handlers must end on leave while the attached rows keep their identity", run: async (b) => {
   await b.evaluate(`(() => {
     const H = window.__hudVisit = { rows: [...document.querySelectorAll("#roster [data-name]")], leaders: [...document.getElementById("banana-leaders").children], signals: [], calls: 0 }, S = BL.scenes;
+    H.keep = new URLSearchParams(location.search).get("hubcache") !== "release";
+    H.root = S.hub.root; H.pilot = __ooga.pilot; H.input = S.hub.input;
+    H.solids = __ooga.headquarters.solids.props; H.guides = __ooga.headquarters.objectGuides;
+    H.roof = S.hub.debug.terrainRampRoof; H.footsteps = __ooga.footsteps;
     H.enters = [S.lab.enter, S.hub.enter];
     for (const [i, id] of ["lab", "hub"].entries()) S[id].enter = ctx => {
       H.signals.push(ctx.signal);
@@ -5336,16 +5345,27 @@ const hudVisit = { name: "hub HUD lifetime", why: "regression: scene visits recr
   })()`);
   try {
     await tourGo(b, "lab");
+    const parked = await b.evaluate(`(() => {
+      const H = __hudVisit, S = BL.scenes.hub;
+      window.dispatchEvent(new KeyboardEvent("keydown", { key: "w", code: "KeyW" }));
+      const axes = H.pilot.controls.read(), quiet = axes.x === 0 && axes.y === 0 && axes.up === 0;
+      window.dispatchEvent(new KeyboardEvent("keyup", { key: "w", code: "KeyW" }));
+      return { policy: S.retained === H.keep, empty: !S.root.children.length && !S.input && !S.debug,
+        quiet, targets: H.input.targetCount, audio: H.footsteps.open };
+    })()`);
     await tourGo(b, "hub");
     const r = await b.evaluate(`(() => {
       const H = window.__hudVisit, B = __ooga, leaders = document.getElementById("banana-leaders");
+      const painted = B.renderer.render(BL.scenes.hub.root, B.camera, B.renderOpts) && B.renderer.stats.drawn > 0;
       window.dispatchEvent(new Event("hud-lifetime-probe"));
       B.game.recordDonation({ id: "hud-diff", sats: 987654, handle: "hud-diff", message: "hello", at: Date.now() });
       BL.hud.setDonationStats(B.game.state);
       document.querySelector('[data-donor-unit="sats"]').click();
       const visible = [...leaders.children].filter(n => !n.hidden), rows = [...document.querySelectorAll("#roster [data-name]")];
       const away = document.querySelector(".roster-away button"), closed = away.getAttribute("aria-expanded"); away.click();
-      return { ended: H.signals[0].aborted && !H.signals[1].aborted, calls: H.calls,
+      const graph = BL.scenes.hub.root === H.root && B.pilot === H.pilot && B.headquarters.solids.props === H.solids
+        && B.headquarters.objectGuides === H.guides && BL.scenes.hub.debug.terrainRampRoof === H.roof;
+      return { painted, graph: graph === H.keep, ended: H.signals[0].aborted && !H.signals[1].aborted, calls: H.calls,
         roster: rows.length === H.rows.length && rows.every(n => H.rows.includes(n)),
         leaders: [...leaders.children].every((n, i) => n === H.leaders[i]),
         visible: visible.length, ranked: visible[0].querySelector(".banana-donor").textContent === "@hud-diff",
@@ -5353,7 +5373,7 @@ const hudVisit = { name: "hub HUD lifetime", why: "regression: scene visits recr
         hidden: [...leaders.children].filter(n => n.hidden).every(n => getComputedStyle(n).display === "none"),
         away: away.getAttribute("aria-expanded") !== closed };
     })()`);
-    record("HUD lifetime: leaving aborts the old visit's handler, the new handler fires once, reused rows retain sorting, units and the away toggle", r.ended && r.calls === 1 && r.roster && r.leaders && r.visible > 0 && r.ranked && r.sats && r.hidden && r.away, JSON.stringify(r));
+    record("HUD lifetime: leaving releases input and audio, the chosen policy retains or rebuilds the graph, fresh visit handlers fire once, and reused rows retain sorting, units and the away toggle", parked.policy && parked.empty && parked.quiet && parked.targets === 0 && !parked.audio && r.painted && r.graph && r.ended && r.calls === 1 && r.roster && r.leaders && r.visible > 0 && r.ranked && r.sats && r.hidden && r.away, JSON.stringify({ parked, resumed: r }));
   } finally {
     await b.evaluate(`(() => { const H = window.__hudVisit; BL.scenes.lab.enter = H.enters[0]; BL.scenes.hub.enter = H.enters[1]; delete window.__hudVisit; })()`);
   }
@@ -10186,6 +10206,8 @@ const factoryCanvas = { name: "factory canvas2d", why: "contract: the Canvas 2D 
 } };
 
 scene("hub", { steps: [{ name: `work movement lab lanes ${1 / RATES[0]}Hz`, why: "regression: work walkers left their facing-right side of the lab lane", open: "on about 4 boots in 30 the lane targets sit on the centre or far side; unfixed", run: labLanes }, donation("hub"), hubWalking, hudVisit, hubMapNavigation, hubRainforestSteps, hubRoutes, hubFall, hubGrounding, trip("hub"), factoryActivityRouting] });
+// The same ownership contract exercises complete destruction on memory-limited devices.
+scene("hub", { label: "release policy", query: "hubcache=release", steps: [hudVisit, trip("hub")] });
 scene("hub", { query: "ooga=portlandhodl:clank:lab,obl,lf&ooga=w-s-bitcoin:clank:lab,obl,lf&ooga=bc1gui:clank:lab,obl,lf&ooga=DrNeski:clank:lab,obl,lf&ooga=2140data:clank:lab,obl,lf", steps: [{ name: "work movement cave trips", why: "regression: off-lane cave traffic aimed through obstacles and started backwards detours", run: workCaveTrips }] });
 scene("hub", { label: "room sign", query: "pos=0", steps: [{ name: "room sign copies hash", why: "rule: tapping a room sign swings it and copies its displayed eight-character code with visible confirmation", run: async (b) => {
   const point = await b.evaluate(`(() => { const B = __ooga, sign = B.headquarters.roomSigns[0], n = sign.node; Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText: (value) => { window.__roomHash = value; return Promise.resolve(); } } }); window.__roomSignBefore = sign.hits; B.pilot.release(true); B.pilot.navigate({ position: { x: n.position.x, y: n.position.y, z: n.position.z }, target: { x: n.position.x, y: n.position.y - 0.2, z: n.position.z }, yaw: n.rotation.y, pitch: 0, dist: 4 }); B.advance(0.6, 1 / 60); return B.project(n.position.x, n.position.y - 0.2, n.position.z, {}); })()`);
@@ -14470,6 +14492,7 @@ scene("dsb", { label: "dsb character continuity", url: hubPage(dist), steps: [{ 
     if (!entered) throw Error("DSB scene handoff did not complete");
     const avatar = await b.evaluate(`(() => {
       const a = __ooga.dsb.avatar, canonical = BL.models.caveman(BL.contributors.traitsFor(${JSON.stringify(name)}));
+      window.__dsbHubRetained = BL.scenes.hub.retained;
       return { name: a.traits.name, rebuilt: a.root !== __dsbPreviousRoot, canonical: a.headOpen === canonical.headOpen };
     })()`);
     record("dsb character: " + name + " enters with the canonical model", avatar.name === name && avatar.rebuilt && avatar.canonical, JSON.stringify(avatar));
@@ -14477,9 +14500,11 @@ scene("dsb", { label: "dsb character continuity", url: hubPage(dist), steps: [{ 
     await dsbExit(b);
     await b.evaluate(`document.querySelector('[data-scene="bifrost"] [data-action="leave"]').click()`);
     await untilPage(b, 'B.scene === "hub" && !B.transitioning', 15000);
-    const returned = await b.evaluate(`({ name: __ooga.pilot.player?.traits.name, rebuilt: __ooga.pilot.player?.root !== __dsbPreviousRoot })`);
-    record("dsb character: " + name + " returns possessed", returned.name === name && returned.rebuilt, JSON.stringify(returned));
-    await b.evaluate('delete window.__dsbPreviousRoot');
+    // Keep mode returns the original hub actor; release mode rebuilds its canonical model.
+    const returned = await b.evaluate(`({ name: __ooga.pilot.player?.traits.name, reused: __ooga.pilot.player?.root === __dsbPreviousRoot,
+      retained: __dsbHubRetained, canonical: __ooga.pilot.player?.headOpen === BL.models.caveman(BL.contributors.traitsFor(${JSON.stringify(name)})).headOpen })`);
+    record("dsb character: " + name + " returns possessed", returned.name === name && returned.reused === returned.retained && returned.canonical, JSON.stringify(returned));
+    await b.evaluate('delete window.__dsbPreviousRoot; delete window.__dsbHubRetained');
   }
 } }] });
 
@@ -14612,7 +14637,8 @@ scene("dsb", { label: "lifecycle", exclusive: true, url: hubPage(src), steps: [{
   const after = await snapshot();
   const same = (key) => before.stats[key] === after.stats[key];
   record("soak: dsb cycles: six round trips retain node, target, tween and DOM counts", same("allNodes") && same("targets") && same("tweens") && same("dom") && after.stats.tweens === 0, JSON.stringify({ before: before.stats, after: after.stats }));
-  record("soak: dsb cycles: GPU records, listeners and heap remain bounded", Math.abs(after.stats.gl.records - before.stats.gl.records) <= 3 && before.nodes === after.nodes && before.listeners === after.listeners && within(before, after, 0.1), heapDetail(before, after));
+  record("soak: dsb cycles: GPU records, listeners and heap remain bounded", Math.abs(after.stats.gl.records - before.stats.gl.records) <= 3 && before.nodes === after.nodes && before.listeners === after.listeners && within(before, after, 0.1), heapDetail(before, after)
+    + `, GPU ${before.stats.gl.records} -> ${after.stats.gl.records}, DOM ${before.nodes} -> ${after.nodes}, listeners ${before.listeners} -> ${after.listeners}`);
 } }] });
 
 scene("factory", { label: "lifecycle", exclusive: true, url: hubPage(src), steps: [{ name: "factory lifecycle", why: "contract: repeated factory visits, each left with a tip's show in the air, release the hall's listeners, nodes and GPU resources while retaining one bounded shared node", run: async (b) => {

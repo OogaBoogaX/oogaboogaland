@@ -408,6 +408,7 @@
   let enteringTween = null, factoryDeparting = false, bifrostDeparting = false, bifrostHeld = false;
   // Tess, the island's guide, for the visit (`hub-guide.js`).
   let islandGuide = null;
+  let reuseHub = false, heldHub = false, heldDebug = null;
   let stateTimer = 0, hintTimer = 0, now = 0, hour = 12, unsubscribeActivity = null, unsubscribeAccount = null, ownOogaClaimed = false;
   // The daylight inputs as last sampled; sampledDay starts at a never-true 0 so the first frame always samples.
   let sampledHour = 0, sampledDay = 0, sampledLatitude = NaN, sampledContinuousDay = 0, sampledUtcMs = 0;
@@ -8279,9 +8280,7 @@
       const lamp = addLamp({ glow: 0, flare: 0, visible: true }, light, spot.x, L.apex * 0.35, spot.z, true, Infinity, `totem:${i}`);
       totems.push({ owner, runes, rings, features, flames, light, lamp, flare: 0, live: 0, pattern: BL.totemGlow.pattern(feed.REPOS[i].word), eyeTop: Math.max(...L.eyes.map((e) => e[1])), top: { x: spot.x, y: L.apex, z: spot.z } });
     });
-    totemUnsub = feed.subscribe((event) => {
-      if (event.fresh) flareTotem(event.index);
-    });
+    totemUnsub = feed.subscribe(onTotem);
   };
   const updateTotems = (dt, elapsed) => {
     const at = Date.now(), repos = BL.totemFeed.state.repos;
@@ -10769,7 +10768,133 @@
     }
   };
 
+  const onOogatron = (event) => {
+    if (event.type === "stats") {
+      if (jumbotron) jumbotron.refreshData(event.stats);
+      contributors.applySnapshot(event.stats);
+    } else if (event.type === "contribution") launchFireworks(event.delta);
+  };
+  const onTotem = (event) => { if (event.fresh) flareTotem(event.index); };
+  const suspendHub = () => {
+    actorTransition.sourceRoot = actorTransition.sourceHead = null;
+    if (factoryMouth && factoryMouth.snap) snapFactoryView();
+    if (bifrostIsle && bifrostIsle.snap) snapBifrostView();
+    if (factoryMouth) factoryMouth.snap = false;
+    if (bifrostIsle) bifrostIsle.snap = false;
+    if (enteringTween) enteringTween.alive = false;
+    enteringTween = null;
+    clearCutawayHidden();
+    selectDebugGorilla(null);
+    window.clearInterval(stateTimer); stateTimer = 0;
+    window.clearTimeout(hintTimer); hintTimer = 0;
+    unsubscribeActivity(); unsubscribeActivity = null;
+    unsubscribeAccount(); unsubscribeAccount = null;
+    unsubscribeMempool(); unsubscribeMempool = null;
+    unsubscribeChain(); unsubscribeChain = null;
+    if (oogatronUnsub) oogatronUnsub(); oogatronUnsub = null;
+    if (totemUnsub) totemUnsub(); totemUnsub = null;
+    if (positionDebug) {
+      positionDebug.removeEventListener("click", copyPositionDebug);
+      positionDebug.hidden = true;
+    }
+    for (let i = 0; i < clankerCaptures.length; i++) finishClankerRider(clankerCaptures[i].entry, false);
+    clankerCaptures.length = 0;
+    timechainIsland.gate.dispose();
+    islandGuide.suspend();
+    chalkboard.suspend();
+    clankerPlay.dispose();
+    remotes.dispose();
+    npcSync.dispose();
+    pilot.suspend();
+    input.suspend();
+    crew.pause();
+    weather.dispose();
+    footsteps.dispose();
+    fx.reset();
+    if (factoryMouth?.hall) factoryMouth.hall.suspend();
+    if (factoryMouth?.roofWindow) factoryMouth.roofWindow.suspend();
+    hud.dispose();
+    BL.net.setBody(null); BL.net.setHub(false); zoneHeld = null;
+    if (window.speechSynthesis) window.speechSynthesis.cancel();
+    CLANKER_REST_SLOPE.supportEntry = RAGE_WARP_MOTION.supportEntry = null;
+    CLANKER_HIT.node = CLANKER_HIT.owner = POOL_BLOCK_HIT.node = POOL_BLOCK_HIT.owner = null;
+    DEBUG_MOVE_HIT.node = DEBUG_MOVE_HIT.owner = DEBUG_GORILLA_HIT.node = DEBUG_GORILLA_HIT.owner = null;
+    viewPoseActor = grabSupportEntry = clankerSupportActor = clankerPassingEntry = preparingGuideActor = null;
+    poolBlockHovered = poolBlockHoverIgnore = null;
+    glCanvas = overlayCanvas = null;
+    heldDebug = hubScene.debug;
+    heldHub = true;
+    // The active graph is empty; the retained graph has a separate, explicit geometry owner.
+    hubScene.root = createNode(); hubScene.input = hubScene.debug = null;
+    return { targets: input.targetCount };
+  };
+  const resumeHub = (ctx) => {
+    ({ renderer, game, world, go, lootEnabled, testBananas } = ctx);
+    glCanvas = ctx.canvas; overlayCanvas = ctx.overlay;
+    heldHub = false;
+    factoryDeparting = bifrostDeparting = bifrostHeld = entering = false;
+    if (factoryMouth) factoryMouth.snap = false;
+    if (bifrostIsle) bifrostIsle.snap = false;
+    hubScene.root = root; hubScene.camera = camera; hubScene.input = input; hubScene.debug = heldDebug;
+    heldDebug = null;
+    hud.renew(ctx.signal);
+    hud.restoreBoards(jumbotronBoard);
+    hud.setDestinations(["pile", "lab", "mirror", "underground", "basement", "mempool", "factory", "arcade", "bca", "gate", "bifrost", "timechain"]);
+    input.resume(); pilot.resume(); clankerPlay.resume(); chalkboard.resume();
+    islandGuide.resume(); timechainIsland.gate.resume();
+    if (factoryMouth?.hall) factoryMouth.hall.resume();
+    if (factoryMouth?.roofWindow) factoryMouth.roofWindow.resume();
+    weather = weatherMod.create({ root, renderer, camera, heightAt: mempoolIsland.rainAt, fx, onRain: mempoolIsland.rainHit, centre: mempoolIsland.centre });
+    footsteps = BL.footsteps.create();
+    hubScene.debug.weather = weather;
+    weather.apply(chain.snapshot); mempoolIsland.water.apply(chain.snapshot);
+    mempoolIsland.paintings.refresh(chain.snapshot); refreshChainSign();
+    unsubscribeChain = chain.subscribe(onChain);
+    unsubscribeMempool = mempool.subscribe(onMempool);
+    oogatronUnsub = oogatronLive.subscribe(onOogatron);
+    totemUnsub = BL.totemFeed.subscribe(onTotem);
+    BL.net.setHub(true);
+    crew.refreshStates(true);
+    const handsBack = ctx.from === "dsb" || ctx.from === "factory" || ctx.from === "bifrost" || ctx.from === "arcade" || ctx.from === "lab" || ctx.from === "timechain";
+    const returningCharacter = handsBack ? world.pilot : null;
+    if (handsBack) world.pilot = null;
+    if (returningCharacter) {
+      const cave = crew.cavemen.get(returningCharacter);
+      if (!contributors.debugState && !contributors.debugRoster && crew.stateOf(cave) !== "working") {
+        cave.override = "working"; crew.refreshStates(true);
+      }
+      pilot.possess(cave);
+      if (ctx.from === "factory") crew.selectWeapon(cave.weapon.selectedSlot, cave);
+    }
+    ownOogaClaimed = !!world.pilotDetached; world.pilotDetached = false;
+    claimOwnOoga();
+    unsubscribeActivity = contributors.subscribe(() => crew.refreshStates());
+    unsubscribeAccount = BL.net.subscribe(onAccountChange);
+    const donate = ctx.place === "donate", routedPlace = donate ? null : ctx.place;
+    const sphereExit = ctx.from === "timechain" ? world.sphereExit : null;
+    world.sphereExit = null;
+    if (returningCharacter && sphereExit && pilot.player) timechainIsland.gate.arrive(sphereExit);
+    else if (returningCharacter) navigate(ctx.from === "factory" || ctx.from === "bifrost" || ctx.from === "arcade" ? ctx.from : ctx.from === "timechain" ? "timechain" : "pile", false, false);
+    else navigate(routedPlace || (ctx.from === "bifrost" ? "bifrost" : "pile"), false, false);
+    if (donate) hud.openFeed();
+    clankers.sync(); clankerMeshes.sync();
+    for (let i = 0; i < crew.list.length; i++) crew.refreshRosterRow(crew.list[i]);
+    if (lootEnabled) { crew.applyAllSwag(); crew.renderLocker(); }
+    hud.setStats(game.state); pile.syncPile(true);
+    stateTimer = window.setInterval(() => { crew.refreshStates(); fx.trimPool(); }, 6e4);
+    lampSelValid = false; sampledDay = 0;
+    cameraPreviousValid = false; cameraTrailPlayer = caveEntryPlayer = null;
+    cameraTrailCount = cameraTrailNext = 0;
+    pilot.update(0);
+    if (POSITION_DEBUG) {
+      positionDebug.hidden = false;
+      positionDebug.addEventListener("click", copyPositionDebug, { signal: ctx.signal });
+      updatePositionDebug(true);
+    }
+  };
   const enter = (ctx) => {
+    reuseHub = ctx.hubPolicy === "keep";
+    if (heldHub) { resumeHub(ctx); return; }
     ({ renderer, game, world, go, lootEnabled, testBananas } = ctx);
     glCanvas = ctx.canvas;
     factoryDeparting = bifrostDeparting = bifrostHeld = false;
@@ -10957,12 +11082,7 @@
       // times flow through contributors -> crew.refreshStates, which wakes a
       // sleeper into a walk out of the HQ (and the 60s state interval later
       // walks idled Oogas down to bed). A rise in org activity earns fireworks.
-      oogatronUnsub = oogatronLive.subscribe((event) => {
-        if (event.type === "stats") {
-          if (jumbotron) jumbotron.refreshData(event.stats);
-          contributors.applySnapshot(event.stats);
-        } else if (event.type === "contribution") launchFireworks(event.delta);
-      });
+      oogatronUnsub = oogatronLive.subscribe(onOogatron);
     }
     buildTotems();
     meadowDressing(firePos);
@@ -11863,7 +11983,9 @@
     if (bifrostIsle) bifrostIsle.snap = false;
     pilot.controls.reset(); input.reset(); pilot.setActive(true);
   };
-  const leave = () => {
+  const leave = (destroy = false) => {
+    if (reuseHub && !destroy) return suspendHub();
+    heldHub = false; heldDebug = null;
     actorTransition.sourceRoot = actorTransition.sourceHead = null;
     resetRageThrowMap(false);
     if (factoryMouth && factoryMouth.snap) snapFactoryView();
@@ -11883,13 +12005,13 @@
     if (enteringTween) enteringTween.alive = false;
     enteringTween = null;
     window.clearInterval(stateTimer);
-    unsubscribeActivity();
+    if (unsubscribeActivity) unsubscribeActivity();
     unsubscribeActivity = null;
-    unsubscribeAccount();
+    if (unsubscribeAccount) unsubscribeAccount();
     unsubscribeAccount = null;
-    unsubscribeMempool();
+    if (unsubscribeMempool) unsubscribeMempool();
     unsubscribeMempool = null;
-    unsubscribeChain();
+    if (unsubscribeChain) unsubscribeChain();
     unsubscribeChain = null;
     timechainIsland.gate.dispose();
     hud.closeBoard(true);
@@ -12040,6 +12162,8 @@
     beasts.clear();
     magazine = magazineState = breakables = weather = footsteps = mempoolIsland = timechainIsland = clankers = clankerPlay = null;
     hubScene.input = hubScene.debug = null;
+    island = chalkboardDressing = null;
+    guideSegmentClear.boxGrid = POOL_SEAMS[0].boxGrid = POOL_SEAMS[1].boxGrid = null;
     return { targets: count };
   };
   const liveGeometry = (set) => {
@@ -12058,6 +12182,11 @@
     remotes.liveGeometry(set);
     if (timechainIsland && timechainIsland.gate) timechainIsland.gate.liveGeometry(set);
   };
+  const cachedGeometry = (set) => {
+    if (!heldHub) return;
+    const visit = (node) => { if (node.geometry) set.add(node.geometry); for (const child of node.children) visit(child); };
+    visit(root); liveGeometry(set);
+  };
   const stats = () => {
     let nodes = 0;
     traverseVisible(root, () => nodes++);
@@ -12068,7 +12197,8 @@
     // The island reports its own zone as soon as an Ooga is driven (see `zoneOf`); until then it is nowhere.
     voiceZone: "none",
     micKey: true,
-    id: "hub", enter, update, overlay, onDonation, previewDonation, onKey, onLootCleared, renderOpts: RENDER_OPTS, stay, leave, stats, liveGeometry,
+    id: "hub", enter, update, overlay, onDonation, previewDonation, onKey, onLootCleared, renderOpts: RENDER_OPTS, stay, leave, stats, liveGeometry, cachedGeometry,
+    get retained() { return heldHub; }, get elapsed() { return now; },
     root: null, camera: null, input: null, debug: null,
     get inMotion() {
       // A crossing through the Timechain Sphere's doors keeps full rate, so its walk and swoop finish smoothly.
