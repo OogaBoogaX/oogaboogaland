@@ -30,6 +30,15 @@
       "base": null,
       "hash": "5fa0f3725a7d21ac7f8ea029252485bc1772ebec8c503bc90c2d5d0ef74c6a26",
       "lane": "manual"
+    },
+    {
+      "pr": 279,
+      "head": "d15bfc27c0d1339e8b953e70c007d3e29217ca2b",
+      "author": "SatsMason",
+      "path": "src/characters/SatsMason.js",
+      "base": null,
+      "hash": "3dd04320eab4b9b0e8e8aeee7cb03a381e1d9ca8ffe1cce49025b6c0aebc2b01",
+      "lane": "manual"
     }
   ]
 }
