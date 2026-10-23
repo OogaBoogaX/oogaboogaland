@@ -845,9 +845,9 @@ const cutawayBoundsProof = async () => {
 
 const visibilityStorageProof = async ({ compact = false, deferred = false } = {}) => {
   const context = { window: {}, performance };
-  for (const name of ["math", "scene", "models", "object-guides"]) {
+  for (const name of ["math", "scene", "models", "object-guides", "sight-guides"]) {
     let source = await readFile(new URL(`../src/js/${name}.js`, import.meta.url), "utf8");
-    if (name === "object-guides") source = source.replace("return { collect, clear,", "return { ownerRecords: () => ownerGroups, geometryRecords: () => geometries, entryRecords: () => registered, collect, clear,");
+    if (name === "object-guides") source = source.replace("return { collect, clear,", "return { contourScratchClear: () => !contoursPending && contourActor === null && contourRetained === null && contourRetainedCount === 0, ownerRecords: () => ownerGroups, geometryRecords: () => geometries, entryRecords: () => registered, collect, clear,");
     runInNewContext(source, context);
   }
   return runInNewContext(`(() => {
@@ -862,7 +862,20 @@ const visibilityStorageProof = async ({ compact = false, deferred = false } = {}
     const guides = B.objectGuides.create({ roots: [owner], crew: { cavemen: new Map() } });
     const initiallyUnbaked = guides.stats.triangles === 0 && guides.stats.samples === 0;
     const camera = S.createCamera({ near: 0.1, far: 100 }); Object.assign(camera.position, { x: 0, y: 0, z: 0 }); Object.assign(camera.target, { x: 0, y: 0, z: 8 });
-    S.updateWorld(root); guides.collect(actor, 0, 0, 8, camera, 1.6);
+    S.updateWorld(root);
+    const collected = guides.collect(actor, 0, 0, 8, camera, 1.6, [owner], 1, ${deferred});
+    let lazyContours = !${deferred} || collected.count === 0 && guides.stats.triangles === 0;
+    if (${deferred}) {
+      collected.ensureContours();
+      const version = collected.version;
+      collected.ensureContours();
+      lazyContours &&= version === collected.version && guides.contourScratchClear();
+      guides.collect(actor, 0, 0, 8, camera, 1.6, [owner], 1, true); guides.refresh();
+      lazyContours &&= guides.contourScratchClear();
+      guides.collect(actor, 0, 0, 8, camera, 1.6, [owner], 1, true);
+      guides.collect(actor, 0, 0, 8, camera, 1.6);
+      lazyContours &&= guides.contourScratchClear();
+    }
     guides.ownerBoundaryAt(owner, 0, 0.2, 8, 1, 0, 0);
     let values = 0, exact = true, tightBacking = true, bytes = 0, count = 0;
     for (const [source, geometry] of guides.geometryRecords()) {
@@ -900,7 +913,7 @@ const visibilityStorageProof = async ({ compact = false, deferred = false } = {}
     S.addChild(root, firstRoot, secondRoot);
     S.addChild(firstRoot, firstNode, removed); S.addChild(secondRoot, secondNode);
     const first = B.objectGuides.create({ roots: [firstRoot], crew: { cavemen: new Map() } }), second = B.objectGuides.create({ roots: [secondRoot], crew: { cavemen: new Map() } });
-    const query = (q, sceneRoot) => { S.updateWorld(sceneRoot); q.collect(actor, 0, 0, 8, camera, 1.6); q.ownerBoundaryAt(sceneRoot, 0, 0.2, 8, 1, 0, 0); };
+    const query = (q, sceneRoot) => { S.updateWorld(sceneRoot); q.collect(actor, 0, 0, 8, camera, 1.6, null, 0, ${deferred}); if (${deferred}) q.result.ensureContours(); q.ownerBoundaryAt(sceneRoot, 0, 0.2, 8, 1, 0, 0); };
     query(first, firstRoot); query(second, secondRoot);
     const sharedBake = first.geometryRecords().get(shared) === second.geometryRecords().get(shared);
     const sharedIndices = second.geometryRecords().get(shared).triangleIndices.slice();
@@ -964,7 +977,7 @@ const visibilityStorageProof = async ({ compact = false, deferred = false } = {}
     S.addChild(root, hiddenRoot); S.addChild(hiddenRoot, hiddenNode);
     const hidden = B.objectGuides.create({ roots: [hiddenRoot], crew: { cavemen: new Map() } }), hiddenCases = [];
     const hiddenSnapshot = q => {
-      S.updateWorld(hiddenRoot); q.collect(actor, 0, 0, 8, camera, 1.6);
+      S.updateWorld(hiddenRoot); q.collect(actor, 0, 0, 8, camera, 1.6, null, 0, ${deferred}); if (${deferred}) q.result.ensureContours();
       const rays = [], contours = [], v = hiddenNode.geometry.verts, w = hiddenNode.world;
       for (const x of [-2, -0.5, 0, 0.5, 2]) for (const y of [-0.75, -0.1, 0.3, 0.8, 1.5])
         rays.push(q.ownerClear(hiddenRoot, x, y, 0, x, y, 12), q.cameraClear(x, y, 0, x, y, 12, actor));
@@ -1000,7 +1013,37 @@ const visibilityStorageProof = async ({ compact = false, deferred = false } = {}
     hidden.register(hiddenNode, hiddenRoot); compareHidden("geometry replaced while parent hidden", false);
     hiddenRoot.visible = true; compareHidden("shown with replacement geometry", true);
     const hiddenTransitions = hiddenCases.every(row => row.pass); hidden.dispose();
-    return { exact, unchanged, bounded, tightBacking, storage, demand, nearBounds, nearCases, boundaryHits, gridQueries, values, count, bytes, lifecycle: sharedBake && removal && replacement && survivor && released && second.geometryRecords().size === 0 && hiddenTransitions, sharedBake, removal, replacement, survivor, released, hiddenTransitions, hiddenCases, disposed: guides.stats.registered === 0 };
+    // The production sight cadence must consume the latest deferred contours only when it recomputes.
+    // Compare its exact lines and owner phases against the eager registry throughout the existing motion/clip fixture.
+    if (${deferred}) {
+      const eager = B.objectGuides.create({ roots: [hiddenRoot], crew: { cavemen: new Map() } });
+      const delayed = B.objectGuides.create({ roots: [hiddenRoot], crew: { cavemen: new Map() } });
+      const sight = () => B.sightGuides.create({ segmentClear: () => true, objectClear: () => false,
+        ownerPerceived: () => true, ownerConcealed: () => true, ownerBoundary: () => true });
+      const a = sight(), b = sight();
+      let materializations = 0;
+      const ensure = delayed.result.ensureContours;
+      delayed.result.ensureContours = () => { materializations++; ensure(); };
+      const snapshot = q => JSON.stringify({ lines: Array.from(q.lines.subarray(0, q.count * 6)),
+        kinds: Array.from(q.kinds.subarray(0, q.count)), states: Array.from(q.ownerStates.subarray(0, q.ownerCount)),
+        alpha: Array.from(q.ownerAlphas.subarray(0, q.ownerCount)), retained: q.retainedCount, updates: q.updates });
+      for (let frame = 0; frame < 60; frame++) {
+        camera.position.x = Math.sin(frame * 0.1) * 0.5;
+        hiddenNode.geometry.clipMinY = frame < 30 ? 0 : 0.15;
+        S.updateWorld(hiddenRoot);
+        const x = eager.collect(actor, 0, 0, 8, camera, 1.6);
+        const y = delayed.collect(actor, 0, 0, 8, camera, 1.6, null, 0, true);
+        const enabled = frame >= 8;
+        const first = a.update(actor, null, x, camera, 1.6, 1 / 60, enabled, false, 15);
+        const second = b.update(actor, null, y, camera, 1.6, 1 / 60, enabled, false, 15);
+        lazyContours &&= snapshot(first) === snapshot(second);
+        if (!enabled) lazyContours &&= delayed.stats.triangles === 0;
+      }
+      lazyContours &&= materializations > 0 && materializations < 20;
+      delayed.refresh(); lazyContours &&= delayed.contourScratchClear();
+      eager.dispose(); delayed.dispose(); a.dispose(); b.dispose();
+    }
+    return { lazyContours, exact, unchanged, bounded, tightBacking, storage, demand, nearBounds, nearCases, boundaryHits, gridQueries, values, count, bytes, lifecycle: sharedBake && removal && replacement && survivor && released && second.geometryRecords().size === 0 && hiddenTransitions, sharedBake, removal, replacement, survivor, released, hiddenTransitions, hiddenCases, disposed: guides.stats.registered === 0 };
   })()`, context);
 };
 // Count descriptor users rather than timings, so the first-demand cost scales with actual users.
@@ -16961,7 +17004,7 @@ record("character visibility source bakes: ownership wrappers share exact immuta
   const cutaway = await cutawayBoundsProof();
   record("cutaway visibility: active apertures reject remote meshes without vertex scans and retain cells, blends, children, global and rotated local cuts", Object.entries(cutaway).every(([key, value]) => key === "bytes" ? value === 160 : value), JSON.stringify(cutaway));
   const storage = await visibilityStorageProof({ compact: true, deferred: true });
-  record("visibility storage: exact source doubles and signed zero survive queries, demand and bounded screen BVHs", storage.exact && storage.unchanged && storage.bounded && storage.tightBacking && storage.storage && storage.demand && storage.nearBounds && storage.nearCases > 100 && storage.boundaryHits > 0 && storage.disposed && storage.values > 600, JSON.stringify(storage));
+  record("visibility storage: exact source doubles and signed zero survive queries, demand and bounded screen BVHs", storage.lazyContours && storage.exact && storage.unchanged && storage.bounded && storage.tightBacking && storage.storage && storage.demand && storage.nearBounds && storage.nearCases > 100 && storage.boundaryHits > 0 && storage.disposed && storage.values > 600, JSON.stringify(storage));
   record("visibility lifecycle: shared bakes survive removal and replacement; hidden transforms, clips and geometry restore exact queries", storage.lifecycle, JSON.stringify(storage));
   const demandUsers = await visibilityDemandUsersProof();
   record("visibility demand: first demand visits only descriptor users and releases replaced, removed and disposed entries", demandUsers.rows.every(row => row.visits === row.count && row.released && row.resolved) && demandUsers.boundsTracked && demandUsers.replacementReleased && demandUsers.bothResolved && demandUsers.disposed, JSON.stringify(demandUsers));

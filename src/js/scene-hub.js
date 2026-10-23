@@ -1405,7 +1405,23 @@
     return ix >= PORTAL_MIN_X && ix <= PORTAL_MAX_X && iy >= PORTAL_MIN_Y && iy <= PORTAL_MAX_Y;
   };
   const SLEEP_SCREEN = { x: 0, y: 0, depth: 0 };
-  let sleepSightFrame = 0;
+  let sleepSightFrame = 0, sleepSightSince = Infinity;
+  const SLEEP_SIGHT_VIEW = new Float64Array(12);
+  let sleepSightMode = null, sleepSightGorilla = false;
+  const advanceSleepSight = (dt) => {
+    sleepSightSince += Math.max(0, dt);
+    const p = camera.position, t = camera.target, view = SLEEP_SIGHT_VIEW;
+    const changed = pilot.mode !== sleepSightMode || !!clankerPlay.active !== sleepSightGorilla
+      || camera.near !== view[6] || camera.fov !== view[7] || renderer.size.width !== view[8] || renderer.size.height !== view[9]
+      || +RENDER_OPTS.birdsEyeCutaway !== view[10] || +matrixCave.portal.inside !== view[11]
+      || Math.hypot(p.x - view[0], p.y - view[1], p.z - view[2]) > 1
+      || Math.hypot(t.x - view[3], t.y - view[4], t.z - view[5]) > 1;
+    if (dt !== 0 && !changed && sleepSightSince < 1 / SIGHT_RECOMPUTE_HZ) return;
+    sleepSightFrame++; sleepSightSince = 0; sleepSightMode = pilot.mode; sleepSightGorilla = !!clankerPlay.active;
+    view[0] = p.x; view[1] = p.y; view[2] = p.z; view[3] = t.x; view[4] = t.y; view[5] = t.z;
+    view[6] = camera.near; view[7] = camera.fov; view[8] = renderer.size.width; view[9] = renderer.size.height;
+    view[10] = +RENDER_OPTS.birdsEyeCutaway; view[11] = +matrixCave.portal.inside;
+  };
   const sleepSightAt = (x, y, z) => {
     if (!matrixOverlayVisible(x, y, z)) return false;
     const screen = renderer.project(x, y, z, SLEEP_SCREEN);
@@ -1437,16 +1453,21 @@
     }
     return false;
   };
-  const sleepMarksVisible = (cave, x, y, z) => {
+  const sleepMarksVisible = (cave, x, y, z, mark = null) => {
     // Nobody's sleep is seen through the Mempool island's rock: not from the tunnels and the chamber inside it,
     // and not a gorilla's in its nest from under the island or beyond its cliffs.
     if (poolShade > 0.5) return false;
     if (mempoolIsland?.billboardOccludes(camera.position.x, camera.position.y, camera.position.z, x, y, z)) return false;
-    if (!cave) return sleepSightAt(x, y, z) && mempoolIsland.sightClear(camera.position.x, camera.position.y, camera.position.z, x, y, z);
+    if (!cave) {
+      if (mark && mark.sightFrame === sleepSightFrame) return mark.sightVisible;
+      const visible = sleepSightAt(x, y, z) && mempoolIsland.sightClear(camera.position.x, camera.position.y, camera.position.z, x, y, z);
+      if (mark) { mark.sightFrame = sleepSightFrame; mark.sightVisible = visible; }
+      return visible;
+    }
     const bed = cave.bedroll;
     if (cave.state !== "sleeping" || cave.bedTravel.mode !== "rest" || !bed || bed.sleeper !== cave) return false;
-    if (bed.sightFrame === sleepSightFrame) return bed.sightVisible;
-    bed.sightFrame = sleepSightFrame;
+    if (bed.sightFrame === sleepSightFrame && bed.sightActor === cave.index) return bed.sightVisible;
+    bed.sightFrame = sleepSightFrame; bed.sightActor = cave.index;
     const head = cave.sleepHead, body = cave.root.position, room = bed.room, window = bed.window;
     bed.sightVisible = sleepSightAt(head.x, head.y, head.z) || sleepSightAt(body.x, body.y, body.z)
       || !bed.outdoor && sleepOpeningVisible(room.entrance.x, room.floor + 1.8, room.entrance.z, bed.cr, -bed.sr, (room.corridorWidth ?? room.width - 1.3) * 0.35, 1.1)
@@ -10501,7 +10522,7 @@
   let uiGuideObjects = null, uiGuidesReady = false, preparingGuideActor = null;
   const collectViewObjects = () => {
     const player = controlledGuideActor(), p = player ? player.root.position : camera.target;
-    return objectGuides.collect(player, p.x, p.y, p.z, camera, renderer.size.width / Math.max(1, renderer.size.height), sightGuides.state.retainedOwners, sightGuides.state.retainedCount);
+    return objectGuides.collect(player, p.x, p.y, p.z, camera, renderer.size.width / Math.max(1, renderer.size.height), sightGuides.state.retainedOwners, sightGuides.state.retainedCount, true);
   };
   const characterUiOccluded = (cave) => {
     if (cave.root.cameraHidden) return true;
@@ -10590,7 +10611,8 @@
   const overlay = (dt) => {
     if (poolBlockHovered) showPoolBlockTooltip();
     else if (pileHovered) showPileTooltip();
-    sleepSightFrame++;
+    // World-anchored sleeping marks share the guide visibility cadence; their particles still move every frame.
+    advanceSleepSight(dt);
     if (CAMERA_GLYPHS.radius !== MATRIX_WORLD.radius || CAMERA_GLYPHS.active !== MATRIX_WORLD.active || CAMERA_GLYPHS.permanentCave !== MATRIX_WORLD.permanentCave) {
       CAMERA_GLYPHS.radius = MATRIX_WORLD.radius; CAMERA_GLYPHS.active = MATRIX_WORLD.active; CAMERA_GLYPHS.permanentCave = MATRIX_WORLD.permanentCave;
       CAMERA_GLYPHS.version++;
@@ -10815,6 +10837,7 @@
     BL.net.setBody(null); BL.net.setHub(false); zoneHeld = null;
     if (window.speechSynthesis) window.speechSynthesis.cancel();
     CLANKER_REST_SLOPE.supportEntry = RAGE_WARP_MOTION.supportEntry = null;
+    sleepSightSince = Infinity; sleepSightMode = null; sleepSightGorilla = false; sleepSightFrame++;
     CLANKER_HIT.node = CLANKER_HIT.owner = POOL_BLOCK_HIT.node = POOL_BLOCK_HIT.owner = null;
     DEBUG_MOVE_HIT.node = DEBUG_MOVE_HIT.owner = DEBUG_GORILLA_HIT.node = DEBUG_GORILLA_HIT.owner = null;
     viewPoseActor = grabSupportEntry = clankerSupportActor = clankerPassingEntry = preparingGuideActor = null;
@@ -12153,6 +12176,7 @@
     hud.dispose();
     // Shared query scratch must not keep an actor (and its groundAt closure) alive past this visit.
     CLANKER_REST_SLOPE.supportEntry = RAGE_WARP_MOTION.supportEntry = null;
+    sleepSightSince = Infinity; sleepSightMode = null; sleepSightGorilla = false; sleepSightFrame++;
     CLANKER_HIT.node = CLANKER_HIT.owner = null;
     viewPoseActor = grabSupportEntry = clankerSupportActor = clankerPassingEntry = preparingGuideActor = null;
     // Drop every per-visit ref but the cached island.

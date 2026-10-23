@@ -267,6 +267,9 @@
       if (changed && !versionChanged && recomputeHz > 0 && sinceCompute < 1 / recomputeHz) changed = false;
       if (!changed) { if (objectsEnabled && output.fading) advanceFades(dt); return output; }
       sinceCompute = 0;
+      // A clear view and a throttled frame need no new object contours. Materialize only for this recompute,
+      // then size the source-index scratch in case emission reached a new high-water capacity.
+      if (objectsEnabled && objects.ensureContours) { objects.ensureContours(); reserve(objects, structure); }
       previous.set(observer); lastActor = cave; lastStructure = structure; lastObjects = objects.version; lastOcclusion = objects.occlusionVersion; lastNear = objects.nearVersion; lastEnabled = objectsEnabled; lastRockOnly = rockOnly;
       output.count = output.structureCount = output.objectCount = output.rays = output.actorRays = 0;
       output.index = structure ? structure.index : -1; output.basement = !!(structure && structure.basement);
