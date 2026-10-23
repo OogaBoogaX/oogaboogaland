@@ -3764,7 +3764,7 @@ const orbitFlow = async (b) => {
   const log = await b.evaluate(orbitLog);
   const stored = await b.evaluate(`JSON.parse(localStorage.getItem("oogaboogaland.v1")).orbit.best`);
   record("orbit flow: Space lets go, the pod falls shield first, Space opens the chute once it is ready and it lands softly", cleared.debris === 0 && cleared.t <= 30 && falling.phase === "descent" && falling.ready && falling.alt < 135 && falling.peakHeat < 1 && chute === "open" && log.result && !log.result.failure && log.result.orbit, JSON.stringify({ cleared, falling, chute, result: log.result }));
-  record("orbit flow: the flight log shows the total big with its medal and new best, the rows add up to it, and the best is saved", log.phase === "results" && log.shown && log.final === log.result.score && log.points === log.final && log.best === "NEW BEST" && log.medal === log.result.medal?.toUpperCase() && log.rows.some(([label]) => label === "Spacewalk") && !log.rows.some(([label]) => label === "Score") && stored && stored.score === log.final && log.exit === "Exit Game", JSON.stringify({ log, stored }));
+  record("orbit flow: the flight log shows the total big with its medal and new best, the rows add up to it, and the best is saved", log.phase === "results" && log.shown && log.final === log.result.score && log.points === log.final && log.best === "NEW BEST" && log.medal === log.result.medal?.toUpperCase() && log.rows.some(([label]) => label === "Spacewalk") && !log.rows.some(([label]) => label === "Score") && stored && stored.score === log.final && log.exit === "Back to the island", JSON.stringify({ log, stored }));
   await b.evaluate(`document.querySelector('#orbit-results [data-action="orbit-again"]').click()`);
   await b.sleep(200);
   const again = await b.evaluate(`(() => { const O = window.__ooga.orbit; return { phase: O.phase, score: O.score, results: document.getElementById("orbit-results").hidden, debris: window.__ooga.stats().debris }; })()`);
@@ -3784,7 +3784,7 @@ const orbitFlow = async (b) => {
   await b.evaluate(`document.querySelector('#orbit-results [data-action="leave"]').click()`);
   await untilPage(b, 'B.scene === "hub" && !B.transitioning', 15000);
   const left = await b.evaluate(`({ scene: window.__ooga.scene, hidden: document.getElementById("orbit").hidden })`);
-  record("orbit flow: Exit Game on the flight log returns to the island with the Orbit HUD hidden", left.scene === "hub" && left.hidden, JSON.stringify(left));
+  record("orbit flow: Back to the island on the flight log returns to the island with the Orbit HUD hidden", left.scene === "hub" && left.hidden, JSON.stringify(left));
 };
 
 // ---- Selection and the caps ----
@@ -5857,6 +5857,31 @@ const raceBench = { name: "race bench", why: "regression: Oogas never drawn into
   })()`);
   record("race bench: every Ooga's body hangs under its racer, and only the field is shown", r.built === CAST && r.bench === CAST - r.field && r.bench > 0 && r.detached.length === 0 && r.shownOff === 0 && r.hiddenOn === 0, JSON.stringify(r));
 } };
+// A signed-in contributor drives only their own Ooga on the island, so each game holds them to it on entering. The
+// account is set on the page's own `BL.net.state`, as /api/me leaves it before a scene opens; signing out clears it,
+// and the next visit hands the choice back. The signed-in visit comes from the arcade, the other from the island, so
+// the exit names each. `read` returns what the game shows; `held` judges it.
+const ownOoga = (id, read, held) => ({ name: `${id} own ooga`, why: "rule: a signed-in visitor with an Ooga plays only it, signing out hands the choice back, and the exit names where it goes", run: async (b) => {
+  const exit = `document.querySelector('nav[data-scene="${id}"] .leave').textContent`;
+  let own, signedIn, signedOut;
+  try {
+    own = await b.evaluate(`(() => { const list = window.BL.contributors.activeRoster, c = window.BL.characters.all().find((c) => c.handle !== list[0].name && list.some((r) => r.name === c.handle)); window.BL.net.state.me = { id: 1, login: c.github || c.handle, display: c.handle }; return { handle: c.handle, display: window.BL.characters.displayOf(c.handle) }; })()`);
+    await tourGo(b, "arcade");
+    await tourGo(b, id);
+    signedIn = { ...await b.evaluate(read), exit: await b.evaluate(exit) };
+  } finally {
+    await b.evaluate(`window.BL.net.state.me = null`);
+  }
+  await tourGo(b, "hub");
+  await tourGo(b, id);
+  signedOut = { ...await b.evaluate(read), exit: await b.evaluate(exit) };
+  record(`${id} own ooga: a signed-in visitor plays their own Ooga and nothing else, signing out hands the choice back, and the exit says Back to arcade from a cabinet and Back to the island from the island`, held(own, signedIn, signedOut) && signedIn.exit === "Back to arcade" && signedOut.exit === "Back to the island", JSON.stringify({ own, signedIn, signedOut }));
+} });
+const dropOwn = ownOoga("drop", `({ who: document.querySelector('#drop-oogas [aria-pressed="true"]').dataset.racer, rows: [...document.querySelectorAll("#drop-oogas li")].filter((li) => !li.hidden).length, help: !document.getElementById("drop-pick-ooga").hidden })`,
+  (own, i, o) => i.who === own.handle && i.rows === 1 && !i.help && o.rows === CAST && o.help);
+const orbitOwn = ownOoga("orbit", `({ who: document.getElementById("orbit-pilot-name").textContent, locked: document.getElementById("orbit-pilot").disabled })`,
+  (own, i, o) => i.who === own.display && i.locked && !o.locked);
+const mineOwn = ownOoga("mine", `({ who: window.__ooga.mine.crew.crew[0].name })`, (own, i) => i.who === own.handle);
 const raceMirror = { name: "race mirror", why: "rule: a gold cup opens the mirror tracks, and steering stays true on them", run: async (b) => {
   // The autopilot's cup before this can win gold against a field of fifteen, so the save starts without a
   // cup, as a fresh visitor's does (in memory and in storage alike), and a race lets the garage read it.
@@ -10316,7 +10341,7 @@ const arcadePlay = { name: "arcade play", why: "rule: a cabinet starts its game,
   await b.evaluate(`(() => { const B = window.__ooga, a = B.cavemen.get("portlandhodl"), s = window.BL.arcadeModels.CABINETS[0].play; if (B.crew.player !== a) B.pilot.possess(a); a.root.position.x = s.x; a.root.position.z = s.z; B.advance(0.2, 1 / 60); })()`);
   await b.key(" ");
   const played = await untilPage(b, 'B.scene === "race" && !B.transitioning', 15000);
-  await b.evaluate(`(() => { const go = document.querySelector('[data-intro="race"] [data-action="intro-go"]'); if (go && go.offsetParent) go.click(); document.querySelector('nav[data-scene="race"] .leave').click(); })()`);
+  const raced = await b.evaluate(`(() => { const go = document.querySelector('[data-intro="race"] [data-action="intro-go"]'); if (go && go.offsetParent) go.click(); const leave = document.querySelector('nav[data-scene="race"] .leave'), seen = { racer: window.__ooga.racers.player.name, exit: leave.textContent }; leave.click(); return seen; })()`);
   await untilPage(b, 'B.scene === "arcade" && !B.transitioning', 15000);
   const back = await b.evaluate(`(() => { const B = window.__ooga, p = B.pilot.player, s = window.BL.arcadeModels.CABINETS[0].play; return { scene: B.scene, who: p && p.traits.name, off: p ? Math.hypot(p.root.position.x - s.x, p.root.position.z - s.z) : null }; })()`);
   await b.key("Escape");
@@ -10324,7 +10349,7 @@ const arcadePlay = { name: "arcade play", why: "rule: a cabinet starts its game,
   await b.key("Escape");
   await untilPage(b, 'B.scene === "hub" && !B.transitioning', 15000);
   const out = await b.evaluate(`(() => { const B = window.__ooga, p = B.pilot.player; return { scene: B.scene, who: p && p.traits.name }; })()`);
-  record("arcade play: Space at the Rally cabinet starts Ooga Rally, leaving the race returns the same Ooga to that cabinet, and Escape detaches before returning to the island still detached", played && back.scene === "arcade" && back.who === "portlandhodl" && back.off < 0.5 && detached.scene === "arcade" && !detached.driving && out.scene === "hub" && !out.who, JSON.stringify({ played, back, detached, out }));
+  record("arcade play: Space at the Rally cabinet starts Ooga Rally with the same Ooga racing and its exit back to arcade, leaving the race returns that Ooga to the cabinet, and Escape detaches before returning to the island still detached", played && raced.racer === "portlandhodl" && raced.exit === "Back to arcade" && back.scene === "arcade" && back.who === "portlandhodl" && back.off < 0.5 && detached.scene === "arcade" && !detached.driving && out.scene === "hub" && !out.who, JSON.stringify({ played, raced, back, detached, out }));
 } };
 const arcadeMachine = { name: "arcade machine", why: "rule: Space at a carnival machine opens its game, and leaving the game brings the same Ooga back to that machine", run: async (b) => {
   await b.evaluate(`(() => { const B = window.__ooga, st = B.arcade.stations.find((s) => s.kind === "machine" && s.game.kind === "skee"), p = B.pilot.player.root.position; p.x = st.play.x; p.z = st.play.z; B.advance(0.2, 1 / 60); })()`);
@@ -13883,9 +13908,9 @@ scene("race", { label:"optional rig link fallback",url:hubPage(src),steps:[{name
   } finally {await b.evaluate('(()=>{const f=__rigFault;f.gl.createProgram=f.create;f.gl.getProgramParameter=f.parameter;delete window.__rigFault;})()');}
 }}]});
 scene("race", { query: "rain=0&draw=0", steps: [raceStart, raceOwn, raceBench, { name: "race tracks", why: "regression: the 12-slot grid spawned a free banana on Banana Bay", run: async (b) => { await b.evaluate(`window.__ooga.race.toGarage()`); await raceTracks[1](b); } }, raceRigs, raceRigContext, racePause, play("race", "a whole cup under the autopilot: one drawn field of fifteen runs every race and finishes in order, the cup medal and every track's best are saved", cupRun), raceMirror, raceAgain, trip("race")] });
-scene("drop", { steps: [dropStart, dropSteering, play("drop", "a jump lands on the target, scores its own medal and is saved as the best", dropRun), dropCrash, trip("drop")] });
-scene("orbit", { steps: [{ name: "orbit flow", why: "regression: the spacewalk air bonus was missing from the flight log", run: orbitFlow }, orbitSteering, orbitMissed, orbitEscape, trip("orbit")] });
-scene("mine", { steps: [mineResume, trip("mine"), mineControls] });
+scene("drop", { steps: [dropStart, dropSteering, play("drop", "a jump lands on the target, scores its own medal and is saved as the best", dropRun), dropCrash, trip("drop"), dropOwn] });
+scene("orbit", { steps: [{ name: "orbit flow", why: "regression: the spacewalk air bonus was missing from the flight log", run: orbitFlow }, orbitSteering, orbitMissed, orbitEscape, trip("orbit"), orbitOwn] });
+scene("mine", { steps: [mineResume, trip("mine"), mineControls, mineOwn] });
 scene("factory", { query: "character=portlandhodl", steps: [factoryWalking, factoryGreeter, factoryLadders, factoryRailingJump, factoryWeapons, factoryForward, factoryForge, factoryShields, trip("factory")] });
 scene("factory", { label: "cooker", query: "character=portlandhodl", steps: [donation("factory", { stat: "cooker.out", seconds: 14, where: "the cooker sends its bananas up through the ceiling tube" }), donationDetails, factoryCooker, trip("factory")] });
 scene("factory", { label: "entrance", url: hubPage(src, "character=portlandhodl"), steps: [factoryFloor, factoryEntrance] });

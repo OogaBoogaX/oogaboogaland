@@ -283,7 +283,7 @@
       <nav class="presets" aria-label="Race" data-scene="race" hidden>
         <button type="button" data-action="garage" id="race-garage-btn">Garage</button>
         <button type="button" data-action="mute" id="race-mute" aria-label="Mute sound" aria-pressed="false">Sound</button>
-        <button type="button" class="leave" data-action="leave">Leave<span> cave</span></button>
+        <button type="button" class="leave" data-action="leave">Back<span> to the island</span></button>
       </nav>
       <nav class="presets" aria-label="DSB Land" data-scene="dsb" hidden>
         <button type="button" data-action="dsb-lookout" title="Camera viewpoint · releases character control">Island overview</button>
@@ -309,7 +309,7 @@
         <button type="button" data-action="mine-view" id="mine-view-btn" aria-pressed="false">View</button>
         <button type="button" data-action="mine-pause" id="mine-pause-btn" aria-pressed="false">Pause</button>
         <button type="button" data-action="mute" id="mine-mute" aria-label="Mute sound" aria-pressed="false">Sound</button>
-        <button type="button" class="leave" data-action="leave">Leave<span> cave</span></button>
+        <button type="button" class="leave" data-action="leave">Back<span> to the island</span></button>
       </nav>
       <nav class="presets" aria-label="Orbit" data-scene="orbit" hidden>
         <button type="button" data-action="orbit-build" id="orbit-build-btn">Build</button>
@@ -744,7 +744,7 @@
         </ul>
         <div class="actions">
           <button type="button" class="game-intro-go" data-action="intro-go">Race!</button>
-          <button type="button" data-action="leave">Exit Game</button>
+          <button type="button" data-action="leave">Back to the island</button>
         </div>
       </section>
       <section class="race-results" id="race-results" hidden aria-label="Results">
@@ -758,7 +758,7 @@
           <button type="button" data-action="race-next" id="race-next" hidden>Next track</button>
           <button type="button" data-action="race-again">Race again</button>
           <button type="button" data-action="garage">Garage</button>
-          <button type="button" data-action="leave">Exit Game</button>
+          <button type="button" data-action="leave">Back to the island</button>
         </div>
       </section>
       <section class="race-pause" id="race-pause" hidden aria-label="Paused">
@@ -767,7 +767,7 @@
           <button type="button" data-action="race-resume">Resume</button>
           <button type="button" data-action="race-again">Restart</button>
           <button type="button" data-action="garage">Garage</button>
-          <button type="button" data-action="leave">Exit Game</button>
+          <button type="button" data-action="leave">Back to the island</button>
         </div>
       </section>
     </div>
@@ -775,8 +775,8 @@
       <section class="garage" id="drop-board" aria-label="Drop board">
         <div class="garage-head">
           <h2><span data-sign>Ooga Drop</span> <span class="garage-medal garage-cup" id="drop-medal" hidden></span></h2>
-          <p class="help">Pick an Ooga. The plane climbs, you jump, steer through the rings, pull the chute and land on the
-            target.</p>
+          <p class="help"><span id="drop-pick-ooga">Pick an Ooga. </span>The plane climbs, you jump, steer through the rings,
+            pull the chute and land on the target.</p>
         </div>
         <div class="garage-columns drop-columns">
           <div class="garage-col">
@@ -822,7 +822,7 @@
         </ul>
         <div class="actions">
           <button type="button" class="game-intro-go" data-action="intro-go">Fly!</button>
-          <button type="button" data-action="leave">Exit Game</button>
+          <button type="button" data-action="leave">Back to the island</button>
         </div>
       </section>
       <section class="race-results" id="drop-results" hidden aria-label="Drop results">
@@ -832,7 +832,7 @@
         <div class="actions">
           <button type="button" data-action="drop-again">Again</button>
           <button type="button" data-action="drop-board">Board</button>
-          <button type="button" data-action="leave">Exit Game</button>
+          <button type="button" data-action="leave">Back to the island</button>
         </div>
       </section>
     </div>
@@ -1226,7 +1226,7 @@
         </ul>
         <div class="actions">
           <button type="button" class="game-intro-go" data-action="intro-go">Build!</button>
-          <button type="button" data-action="leave">Exit Game</button>
+          <button type="button" data-action="leave">Back to the island</button>
         </div>
       </section>
       <section class="race-results" id="orbit-results" hidden aria-label="Flight log">
@@ -1241,7 +1241,7 @@
         <div class="actions">
           <button type="button" data-action="orbit-again">Fly again</button>
           <button type="button" data-action="orbit-build">Build</button>
-          <button type="button" data-action="leave">Exit Game</button>
+          <button type="button" data-action="leave">Back to the island</button>
         </div>
       </section>
     </div>
@@ -1345,7 +1345,7 @@
         </ul>
         <div class="actions">
           <button type="button" class="game-intro-go" data-action="mine-start">Start digging</button>
-          <button type="button" data-action="leave">Exit Game</button>
+          <button type="button" data-action="leave">Back to the island</button>
         </div>
       </section>
 
@@ -1361,7 +1361,7 @@
         <div class="actions">
           <button type="button" data-action="mine-again">Dig again</button>
           <button type="button" data-action="mine-keep" id="mine-keep" hidden>Keep digging</button>
-          <button type="button" data-action="leave">Exit Game</button>
+          <button type="button" data-action="leave">Back to the island</button>
         </div>
       </section>
     </div>

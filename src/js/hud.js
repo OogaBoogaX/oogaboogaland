@@ -2345,5 +2345,24 @@
       liveOnline(row);
     }
   };
-  BL.hud = { create, renderIcon, signLettering, showAccount, showMic, showVoices, setDonationStats, donationValueText, toast, STATE_LABELS, statusFor };
+  // A game's Ooga list (`rows`, name to button, each button in its own <li>) held to one Ooga, a signed-in
+  // visitor's own: its row stands alone, moved last so it keeps no divider. `null` brings every row back in order.
+  const holdRow = (list, rows, name) => {
+    for (const [key, b] of rows) {
+      b.parentElement.hidden = !!name && key !== name;
+      list.append(b.parentElement);
+    }
+    if (name) list.append(rows.get(name).parentElement);
+  };
+  // A game's exits say where they go: back to the arcade when one of its cabinets started it, else the island. A
+  // header button names the place in its span (a phone shows only "Back"); a card's button says it all.
+  const leaveTo = (scene, home) => {
+    const place = home === "arcade" ? "arcade" : "the island";
+    for (const b of document.querySelectorAll(`[data-scene="${scene}"] [data-action="leave"]`)) {
+      const span = b.querySelector("span");
+      if (span) span.textContent = ` to ${place}`;
+      else b.textContent = `Back to ${place}`;
+    }
+  };
+  BL.hud = { create, renderIcon, signLettering, showAccount, showMic, showVoices, setDonationStats, donationValueText, toast, holdRow, leaveTo, STATE_LABELS, statusFor };
 })();
