@@ -16,7 +16,7 @@
     declined: "No problem! Come find me if you want a tour.",
     gather: "Tours start at the balcony. Follow me!",
     menu: "Four tours! Pick one.",
-    follow: "Follow me! Lines, the core, the routing console.",
+    follow: "Follow me! Lines, the core, the console, Kortik.",
     channels: "Lines are channels to peers. A payment can hop node to node.",
     core: "The core is this node. It forwards payments; it mines nothing.",
     outcomes: "Settled means it went through. Failed means it did not — never why.",
@@ -62,7 +62,10 @@
     summary: "Summaries describe activity. Not diagnosis, not balances.",
     noSummary: "No summary supplied. We invent no counts.",
     healthDone: "State and signal answer different questions. Tour done!",
-    kortik: "Next door, Kortik routes all this by hand. Don't poke him!",
+    kortik: "Next door, Kortik routes all this by hand. Come and see!",
+    kortikDeck: "Kortik's Switchboard: every payment patched by hand.",
+    kortikSlow: "The core forwards in a blink. Kortik takes a little longer.",
+    kortikPoke: "Whatever you do, don't poke him.",
     done: "That is forwarding! Back to work — come find me anytime.",
     warning: "Still coming? I'll hover here.",
     abandoned: "Lost my visitor! Back to work.",
@@ -81,7 +84,7 @@
     lineD: [13, 7.5, 0], switchboard: [-10, 5.5, 8], rebalancer: [12, 5.5, 6], treasury: [10, 5.5, 20],
     lookout: [-16, 23.5, -10], balcony: [0, 7.5, 23], front: [0, 10, 12], left: [-7, 10, 5], right: [7, 10, 5],
     pit: [0, 5.5, 7], backA: [-10, 14.5, -8], backB: [10, 14.5, -8], mid: [-4, 9.5, -1], high: [-12, 19, -7],
-    tower: [-14, 22.5, -10], rightLow: [11, 7.5, 0]
+    tower: [-14, 22.5, -10], rightLow: [11, 7.5, 0], kortik: [-15.5, 7.5, 12.2]
   };
   const LEGS = [
     ["lineD", "rightLow"], ["lookout", "tower"], ["lineA", "backA"], ["lineB", "backB"], ["forge", "pit"], ["backA", "high"],
@@ -91,7 +94,7 @@
     ["backA", "mid"], ["forge", "switchboard"], ["core", "left"], ["balcony", "front"], ["core", "front"],
     ["switchboard", "front"], ["rebalancer", "pit"], ["core", "backB"], ["lineC", "high"], ["treasury", "front"],
     ["front", "mid"], ["left", "high"], ["switchboard", "balcony"], ["backA", "backB"], ["core", "treasury"],
-    ["rebalancer", "balcony"]
+    ["rebalancer", "balcony"], ["kortik", "switchboard"]
   ];
   const WORK = {
     core: [1.91, 8.5, -2.01], forge: [0, 1.19, 0.96], lineA: [-11, 11.2, -13.52], lineB: [11.34, 11.84, -11.77],
@@ -108,9 +111,14 @@
   const ROUTE = [
     [-2, 5, 23.6], [-0.8, 5, 22.9], [0, 5, 22], [0, 0, 13], [0, 0, 11.4],
     [-4.8, 0, 9], [-6.5, 0, 8.5], [-4.8, 0, 9], [-4.8, 0, 7.5],
-    [-4.8, 5, 1.3], [-4.8, 5, 0.1], [-4.8, 5, 1.3], [-4.8, 0, 7.5], [-7, 0, 8.5]
+    [-4.8, 5, 1.3], [-4.8, 5, 0.1], [-4.8, 5, 1.3], [-4.8, 0, 7.5], [-7, 0, 8.5],
+    [-9.5, 0, 13.4], [-13.4, 2.5, 13.4], [-15.6, 2.5, 12.4]
   ];
-  const STOPS = { 6: ["channels"], 10: ["core", "privacy"], 13: ["outcomes", "observation", "source", "history", "kortik", "done"] };
+  // The payments tour ends up Kortik's stair on his deck, where he greets it (`onKortik`, as she starts on him).
+  const STOPS = {
+    6: ["channels"], 10: ["core", "privacy"], 13: ["outcomes", "observation", "source", "history", "kortik"],
+    16: ["kortikDeck", "kortikSlow", "kortikPoke", "done"]
+  };
   const CHANNEL_ROUTE = [
     ...ROUTE.slice(0, 5), [-4.8, 0, 9], [-4.8, 0, 5.8], [-4.8, 0, 7.5],
     [-4.8, 5, 1.3], [-4.8, 5, 0.1], [-5.6, 5, -1.6], [-6.1, 5, -3.9],
@@ -121,7 +129,8 @@
     [-4.8, 0, 9, "pit"], [-6.5, 0, 8.5, "forge"], [-4.8, 0, 7.5, "forge"], [-4.8, 0, 5.8, "left"], [-7, 0, 8.5, "forge"],
     [-4.8, 5, 1.3, "mid"], [-4.8, 5, 0.1, "mid"], [-5.6, 5, -1.6, "mid"], [-6.1, 5, -3.9, "lineC"],
     [-6.45, 5, -3.95, "lineC"], [-8.5, 5, -2.5, "lineC"], [-8.9, 5, -3.5, "mid"], [-9.2, 5, -4.4, "backA"],
-    [-9.2, 10, -9.6, "lineA"], [-9.2, 10, -10.1, "lineA"], [4.8, 0, 10, "pit"], [8.5, 0, 9.5, "right"]
+    [-9.2, 10, -9.6, "lineA"], [-9.2, 10, -10.1, "lineA"], [4.8, 0, 10, "pit"], [8.5, 0, 9.5, "right"],
+    [-9.5, 0, 13.4, "kortik"], [-13.4, 2.5, 13.4, "kortik"], [-15.6, 2.5, 12.4, "kortik"]
   ];
   const TOURS = {
     payments: {
@@ -129,7 +138,7 @@
       events: ["forward.settled", "forward.failed"], quiet: "quiet", stops: STOPS,
       show: {
         6: [1.5, [-8, 7.5, -0.5], [-11.67, 7.08, -1.75]], 10: [0, [-4, 7, -0.5], [-1.97, 7.51, -2.28]],
-        13: [1.5, [-10.5, 5, 8], [-12.39, 3.74, 5.47]]
+        13: [1.5, [-10.5, 5, 8], [-12.39, 3.74, 5.47]], 16: [0.5, [-16.6, 5, 13.6], [-19.6, 3.9, 12.4]]
       }
     },
     channels: {
@@ -194,7 +203,7 @@
   // How long she waits for a visitor who has fallen behind before calling, and before giving up: at the balcony,
   // where a tour gathers, the walk there may be long.
   const WAIT = { gather: [20, 45], tour: [4, 12] };
-  const create = ({ parent, input, fx, feed, visitor, demoRunning, coarse, camera, quality = () => "high" }) => {
+  const create = ({ parent, input, fx, feed, visitor, demoRunning, coarse, camera, quality = () => "high", onKortik = null }) => {
     const rig = BL.tess.create({ parent, input, fx, camera, kind: "greeter", coarse, quality }), figure = rig.figure;
     let legLength = 1;
     // The tour menu lives on screen, in the HUD's wood, built for the visit and removed on leave.
@@ -307,6 +316,7 @@
     const say = (id) => {
       state.spoken = id;
       rig.say(LINES[id]);
+      if (id === "kortikDeck" && onKortik) onKortik();
     };
     const pickSite = () => {
       let site = state.perch;

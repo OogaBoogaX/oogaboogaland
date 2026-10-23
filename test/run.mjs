@@ -5518,19 +5518,111 @@ const adaptiveQualityChecks = async () => {
 // failure prints OPEN and does not fail the run.
 const sceneUrl = (id, query = "") => `${src}?debug=1&nosim=1${id === "hub" ? "" : `&scene=${id}`}${process.env.TEST_CANVAS2D==="1"?"&canvas2d=1":""}${clock(query)}`;
 const tourGo = (b, id) => b.evaluate(`(() => { const B = window.__ooga; B.go("${id}"); for (let i = 0; i < 150 && (B.transitioning || B.scene !== "${id}"); i++) B.advance(1 / 30, 1 / 30); B.advance(0.3, 1 / 30); B.housekeep(); const s = B.stats(); return { scene: B.scene, records: B.renderer.stats.records, nodes: s.allNodes, targets: s.targets, dom: s.dom }; })()`);
+const hubBedState = (fresh = false) => {
+  const B = window.__ooga, actors = B.crew.list, beds = B.headquarters.mattresses, outdoors = B.headquarters.outdoorBeds, failures = [];
+  const sphere = window.BL.scenes.hub.debug.timechainIsland;
+  // The Sphere's resident is deliberately hidden inside its closed ball,
+  // regardless of activity; its old bed reservation must still be exclusive.
+  const resident = c => sphere.residentInside && !c.root.visible && c.act.kind === "idle" && c.act.until === Infinity
+    && Math.hypot(c.root.position.x - sphere.place.x, c.root.position.z - sphere.place.z) < 1e-6
+    && Math.abs(c.root.position.y - c.baseY - sphere.place.y) < 1e-6;
+  for (const bed of [...beds, ...outdoors]) {
+    const owners = actors.filter(c => c.bedroll === bed), i = beds.includes(bed) ? beds.indexOf(bed) : "rainforest:" + outdoors.indexOf(bed);
+    if (owners.length > 1 || (bed.sleeper ? owners.length !== 1 || owners[0] !== bed.sleeper : owners.length !== 0)) failures.push({ bed: i, owners: owners.map(c => c.traits.name), sleeper: bed.sleeper?.traits.name });
+  }
+  const sleeping = actors.filter(c => c.root.visible && c.bedroll && !c.bedroll.outdoor && c.bedTravel.mode === "rest");
+  for (let i = 0; i < sleeping.length; i++) for (let j = i + 1; j < sleeping.length; j++) {
+    const a = sleeping[i].root.position, b = sleeping[j].root.position;
+    if (Math.abs(a.y - b.y) < 1 && Math.hypot(a.x - b.x, a.z - b.z) < 1) failures.push({ overlap: [sleeping[i].traits.name, sleeping[j].traits.name] });
+  }
+  const overflow = actors.filter(c => c.root.visible && c.bedroll?.outdoor);
+  for (const c of overflow) if (!outdoors.includes(c.bedroll) || c.state !== "sleeping" || c.bedTravel.mode !== "rest") failures.push({ outdoor: c.traits.name });
+  if (fresh) for (const c of actors) if (c !== B.pilot.player && c.state === "sleeping" && !resident(c) && (!c.bedroll || !c.root.visible || c.bedTravel.mode !== "rest")) failures.push({ unsettled: c.traits.name, mode: c.bedTravel.mode, visible: c.root.visible });
+  if (fresh) for (const older of sleeping) for (const newer of overflow) {
+    const a = older.contributor.lastContributionAt || older.contributor.lastCommitAt, b = newer.contributor.lastContributionAt || newer.contributor.lastCommitAt;
+    if (a < b || a === b && older.index > newer.index) failures.push({ priority: [older.traits.name, newer.traits.name] });
+  }
+  return { failures, claimed: beds.filter(bed => bed.sleeper).length, sleeping: sleeping.length, overflow: overflow.length };
+};
+// Capture the scene's real clearance rule once, without changing its construction or adding a scene visit.
+const hubSleepWire = () => {
+  const BL = window.BL = window.BL || {};
+  Object.defineProperty(BL, "headquartersSleep", { configurable: true, set(api) {
+    Object.defineProperty(BL, "headquartersSleep", { configurable: true, writable: true, value: api });
+    const outdoor = api.outdoor;
+    api.outdoor = (pool, clear, key) => {
+      api.outdoor = outdoor;
+      window.__outdoorSleep = { pool, clear };
+      return outdoor(pool, clear, key);
+    };
+  } });
+};
+const hubArrival = { name: "hub initial bed occupancy", why: "regression: initial sleepers must have exclusive beds, and transient visitors or shaken scenery must not change cached rainforest anchors", run: async b => {
+  const state = await b.evaluate(`(${hubBedState.toString()})(true)`);
+  const traffic = await b.evaluate(`(() => {
+    const B = __ooga, fixture = window.__outdoorSleep, c = B.cavemen.get("portlandhodl") || B.crew.list[0];
+    const visible = B.crew.list.map(c => c.root.visible), position = { ...c.root.position }, rotation = { ...c.root.rotation }, quaternion = c.root.quaternion;
+    const tree = B.props.find(prop => prop.prop === "canopy" && prop.active).node, treePosition = { ...tree.position }, treeRotation = { ...tree.rotation };
+    const pose = bed => bed && [bed.x, bed.y, bed.z, bed.node.rotation.y];
+    try {
+      for (const actor of B.crew.list) actor.root.visible = false;
+      const baseline = BL.headquartersSleep.outdoor(fixture.pool, fixture.clear).more();
+      if (!baseline) return { empty: true };
+      Object.assign(c.root.position, { x: baseline.x, y: baseline.y + c.baseY, z: baseline.z });
+      Object.assign(c.root.rotation, { x: 0, y: 0, z: 0 }); c.root.quaternion = null; c.root.visible = true;
+      BL.scene.updateWorld(c.root, c.root.parent.world);
+      const key = {}, occupied = BL.headquartersSleep.outdoor(fixture.pool, fixture.clear, key).more();
+      c.root.visible = false;
+      const revisited = BL.headquartersSleep.outdoor(fixture.pool, fixture.clear, key).more();
+      // Move a real canopy across this anchor and sync the live walking shell. Bed layout must still use its authored pose.
+      Object.assign(tree.position, { x: fixture.pool.localX(baseline.x, baseline.z), y: baseline.y - fixture.pool.place.y, z: fixture.pool.localZ(baseline.x, baseline.z) });
+      tree.rotation.x += 0.08; B.headquarters.solids.props.sync();
+      const y = baseline.y + 0.03, liveBlocked = !B.headquarters.solids.props.segmentClear(baseline.x, y, baseline.z, baseline.x, y, baseline.z, 0.15, 1.5);
+      const shaken = BL.headquartersSleep.outdoor(fixture.pool, fixture.clear).more();
+      return { baseline: pose(baseline), occupied: pose(occupied), revisited: pose(revisited), shaken: pose(shaken), liveBlocked,
+        fixed: liveBlocked && !!occupied && !!revisited && !!shaken && pose(baseline).every((n, i) => n === pose(occupied)[i] && n === pose(revisited)[i] && n === pose(shaken)[i]) };
+    } finally {
+      Object.assign(c.root.position, position); Object.assign(c.root.rotation, rotation); c.root.quaternion = quaternion;
+      for (let i = 0; i < B.crew.list.length; i++) B.crew.list[i].root.visible = visible[i];
+      BL.scene.updateWorld(c.root, c.root.parent.world);
+      Object.assign(tree.position, treePosition); Object.assign(tree.rotation, treeRotation); B.headquarters.solids.props.sync();
+      delete window.__outdoorSleep;
+    }
+  })()`);
+  record("hub arrival: HQ and basement beds each belong to at most one Ooga, with separate sleeping bodies", state.failures.length === 0 && traffic.fixed, JSON.stringify({ ...state, traffic }));
+} };
+const hubWorkingArrival = { name: "hub working arrival", why: "regression: working Oogas must begin at their banana pile places instead of inheriting a sleeping pose underground", run: async b => {
+  const state = await b.evaluate(`(() => {
+    const B = __ooga, actors = B.crew.list;
+    let gap = Infinity;
+    for (let i = 0; i < actors.length; i++) for (let j = i + 1; j < actors.length; j++) {
+      const a = actors[i], b = actors[j];
+      gap = Math.min(gap, Math.hypot(a.root.position.x - b.root.position.x, a.root.position.z - b.root.position.z) - a.bodyRadius - b.bodyRadius);
+    }
+    return { rows: actors.map(c => ({ name: c.traits.name, state: c.state, visible: c.root.visible, feet: c.root.position.y - c.baseY + c.restLower,
+      surface: B.island.surfaceAt(c.root.position.x, c.root.position.z), radius: Math.hypot(c.root.position.x, c.root.position.z),
+      bed: !!c.bedroll || !!c.bedTravel.mode, quaternion: !!c.root.quaternion })), gap,
+      occupiedBeds: B.headquarters.mattresses.filter(bed => bed.sleeper).length };
+  })()`);
+  // With the fixture's small pile, the whole crew fits in the 11 m arrival area.
+  // Positions are measured directly: a crowded loading slot is not an oracle.
+  record("working arrival: every Ooga starts upright beside the pile with no HQ or basement bed held", state.rows.length > 0 && state.rows.every(c => c.state === "working" && c.visible && c.surface === 0 && Math.abs(c.feet - c.surface) < 1e-6 && !c.bed && !c.quaternion && c.radius <= 11)
+    && state.gap >= -1e-6 && !state.occupiedBeds, JSON.stringify(state));
+} };
 // Away and back twice. The director's ?debug=1 leave contract throws inside advance on a broken leave,
 // and the second visit may hold no more GPU records, nodes, input targets or DOM than the first.
 const trip = (id) => ({ name: `${id} round trip`, why: "contract: a scene left and entered again keeps nothing from the last visit, and takes a donation whenever one arrives", run: async (b) => {
-  const away = id === "hub" ? "lab" : "hub", laps = [];
+  const away = id === "hub" ? "lab" : "hub", laps = [], beds = [];
   for (let i = 0; i < 2; i++) {
     await tourGo(b, away);
     laps.push(await tourGo(b, id));
+    if (id === "hub") beds.push(await b.evaluate(`(${hubBedState.toString()})()`));
   }
   if (laps.some((l) => l.scene !== id)) throw new Error(`go("${id}") landed on ${laps.map((l) => l.scene).join()}`);
   const grew = ["records", "nodes", "targets", "dom"].filter((k) => laps[1][k] > laps[0][k] * 1.02 + 4);
   // A payment can arrive in any scene: the director hands it to the active one exactly like this.
   const donated = await b.evaluate(`(() => { const B = window.__ooga, g = B.game.state, before = { donations: g.donations, sats: g.totalSats, bananas: g.bananas }; window.BL.scenes[B.scene].onDonation({ id: "trip-${id}", sats: 2100, handle: "tester", message: "ooga", at: Date.now() }, { exact: 1.25, rounded: 1 }); B.advance(1, 1 / 30); return { scene: B.scene, donations: g.donations - before.donations, sats: g.totalSats - before.sats, bananas: g.bananas - before.bananas }; })()`);
-  record(`${id} round trip: leaving and entering twice keeps the leave contract and holds nothing the first visit did not, and a donation mid-visit is taken`, grew.length === 0 && donated.scene === id && donated.donations === 1 && donated.sats === 2100 && donated.bananas === 1.25, JSON.stringify({ grew, donated, first: laps[0], second: laps[1] }));
+  record(`${id} round trip: leaving and entering twice keeps the leave contract and holds nothing the first visit did not, and a donation mid-visit is taken`, grew.length === 0 && beds.every(state => !state.failures.length) && donated.scene === id && donated.donations === 1 && donated.sats === 2100 && donated.bananas === 1.25, JSON.stringify({ grew, beds, donated, first: laps[0], second: laps[1] }));
 } });
 const play = (id, what, code) => ({ name: `${id} playthrough`, why: "playthrough: the game reaches its result, shown and saved", run: async (b) => {
   const r = await b.evaluate(code);
@@ -5601,6 +5693,81 @@ for (const id of ["hub", "lab", "factory"]) {
     }
   } });
 }
+// Real account lookup before hub construction; only the sockets and activity clock are fixtures.
+const signedInArrivalWire = (mode, staleView = true) => {
+  const fetch = window.fetch.bind(window), sockets = [];
+  window.__arrivalWire = { sockets, mode, seeded: false };
+  window.WebSocket = class {
+    static OPEN = 1;
+    constructor(url) { this.url = url; this.readyState = 0; sockets.push(this); }
+    send() {}
+    close() { this.readyState = 3; }
+  };
+  window.fetch = (url, options) => {
+    if (url === "/api/me" && !__arrivalWire.seeded) {
+      __arrivalWire.seeded = true;
+      const now = Date.now(), hour = 3600000, C = BL.contributors;
+      C.roster.forEach((c, i) => { c.lastCommitAt = c.lastContributionAt = now - 48 * hour - i * 60000; c.maintainer = false; });
+      const owner = C.roster.find(c => c.name === "portlandhodl"), away = C.roster.find(c => c !== owner);
+      owner.lastCommitAt = owner.lastContributionAt = now - ({ working: 0.5, chilling: 12, sleeping: 72, away: 31 * 24 }[mode]) * hour;
+      away.lastCommitAt = away.lastContributionAt = now - 32 * 24 * hour;
+      __arrivalWire.otherAway = away.name;
+      if (staleView) sessionStorage.setItem("ooga-login-view", JSON.stringify({ at: now, route: location.pathname + location.search,
+        context: null, eye: [6, -20, 0], target: [0, -24, 0], up: [0, 1, 0], fov: 0.7 }));
+    }
+    return fetch(url, options);
+  };
+};
+const signedInArrival = { name: "hub signed-in arrival", why: "regression: owners loaded asleep or away instead of standing beside the pile, and `view=` or saved underground views could put them back below", run: async b => {
+  const result = await b.evaluate(`(async () => {
+    const B = __ooga, W = __arrivalWire, c = B.cavemen.get("portlandhodl"), other = B.cavemen.get(W.otherAway);
+    const read = () => ({ selected: B.pilot.player === c, visible: c.root.visible, activity: BL.contributors.stateFor(c.contributor),
+      feet: c.root.position.y - c.baseY + c.restLower, radius: Math.hypot(c.root.position.x, c.root.position.z),
+      bed: !!c.bedroll || !!c.bedTravel.mode, seated: !!c.camp.seat, quaternion: !!c.root.quaternion,
+      eye: B.camera.position.y, pile: B.altar.platformRadius, otherAway: !other.root.visible && other.state === "away" });
+    const arrival = read(), beds = (${hubBedState.toString()})(true);
+    B.crew.refreshStates(); const refreshed = read();
+    B.pilot.release(true); B.crew.refreshStates();
+    const released = { detached: !B.pilot.player, state: c.state, visible: c.root.visible };
+    BL.net.state.resolved = false; await BL.net.recheck();
+    return { mode: W.mode, arrival, refreshed, released, detached: !B.pilot.player, beds };
+  })()`);
+  // The small initial pile's existing player arrival area extends to 8 m;
+  // its platform radius is not the origin of that safety boundary.
+  const atPile = state => state.selected && state.visible && state.activity === result.mode && Math.abs(state.feet) < 1e-6
+    && state.radius > state.pile && state.radius <= 8 + 1e-6 && !state.bed && !state.seated && !state.quaternion && state.eye > 0 && state.otherAway;
+  record(`signed-in ${result.mode}: the owner arrives upright at the pile, stays controlled through activity refresh and remains detached after release and another account reply`,
+    atPile(result.arrival) && atPile(result.refreshed) && result.released.detached && result.detached
+      && (result.mode !== "away" || result.released.state === "away" && !result.released.visible), JSON.stringify(result));
+  record(`sleeping overflow ${result.mode}: newest sleepers occupy separate HQ and basement beds and older sleepers have their own rainforest anchors`,
+    !result.beds.failures.length && result.beds.claimed > 0 && result.beds.overflow > 0, JSON.stringify(result.beds));
+} };
+// A signed-in link to a hub place still arrives there: /sphere-3 with no visit of this tab's own is the Sphere's doors, room 3 chosen.
+const signedInRouted = { name: "hub signed-in arrival routed", why: "regression: every signed-in load was treated as a sign-in return, so links to hub places, the Sphere's keypad among them, landed at the pile", run: async b => {
+  const r = await b.evaluate(`(() => {
+    const B = __ooga, c = B.cavemen.get("portlandhodl"), T = BL.scenes.hub.debug.timechainIsland, p = c.root.position;
+    return { scene: B.scene, path: location.pathname, selected: B.pilot.player === c, visible: c.root.visible,
+      doors: Math.hypot(p.x - T.worldX(0.4, 15.4), p.z - T.worldZ(0.4, 15.4)), pile: Math.hypot(p.x, p.z), preselected: T.gate.preselected };
+  })()`);
+  record("signed-in routed arrival: a signed-in link to /sphere-3 stands the owner at the Sphere's doors with room 3 chosen, not at the pile",
+    r.scene === "hub" && r.path === "/sphere" && r.selected && r.visible && r.doors < 3.5 && r.preselected === 3, JSON.stringify(r));
+} };
+if (!ONLY || onlyMatches(signedInArrival.name)) tasks.push({ name: "hub signed-in arrival", scene: "hub", perf: false, run: async () => {
+  const html = await readFile(join(root, "oogaboogaland.html"));
+  const server = createServer((req, res) => {
+    const account = req.url === "/api/me";
+    res.setHeader("content-type", account ? "application/json" : "text/html; charset=utf-8");
+    res.end(account ? JSON.stringify({ player: { id: 71, login: "portlandhodl", display: "Arrival fixture" }, donations: true }) : html);
+  });
+  await new Promise((resolve, reject) => { server.once("error", reject); server.listen(0, "127.0.0.1", resolve); });
+  try {
+    // Sign-in returns to the bare page; a `view=` and a saved login view must not put the owner back below.
+    for (const mode of ["working", "chilling", "sleeping", "away"]) await fold(`http://127.0.0.1:${server.address().port}/?debug=1&view=basement&mempool=0&chain=0&oogatron=0&totems=0&halloween=0&hour=12&day=80`,
+      [[signedInArrival.name, signedInArrival.run]], { initScript: `(${signedInArrivalWire.toString()})(${JSON.stringify(mode)})` });
+    await fold(`http://127.0.0.1:${server.address().port}/sphere-3?debug=1&mempool=0&chain=0&oogatron=0&totems=0&halloween=0&hour=12&day=80`,
+      [[signedInRouted.name, signedInRouted.run]], { initScript: `(${signedInArrivalWire.toString()})("sleeping", false)` });
+  } finally { await new Promise(resolve => server.close(resolve)); }
+} });
 // The hosted page as `npm run site` stages it: each `data-defer` group leaves the built page for its own same-origin file,
 // served here behind a switch (`refused`, path prefixes) that answers 503, as a deploy mid-flight can. The source and
 // portable pages keep every group inline, so only this page can show what a scene reads before its code arrives.
@@ -6280,7 +6447,7 @@ const hubDestinationNames = { name: "destination accessible names", why: "regres
     rows.every(row => row.label === row.expected && row.action === "mode-preset" && row.detached && row.removed && row.noPopup && row.named), JSON.stringify(rows));
 } };
 const hubWalking = { name: "hub walking", why: "regression: steering keys came out mirrored, and the removed hub Agent could still be summoned", run: async (b) => {
-  // Use the running check's clear patch: seeded scenery now places a rock at the old (-8, 8) start.
+  // Seeded scenery places a rock at the old (-8, 8) direction-check start.
   const duration = await b.evaluate(`2 / BL.pilot.WALK.speed`);
   const ooga = await walkKeys(b, "portlandhodl", -5, 5, [0, 2.2], duration);
   const running = await b.evaluate(`(() => {
@@ -6288,15 +6455,21 @@ const hubWalking = { name: "hub walking", why: "regression: steering keys came o
     const key = (type, key, code, location = 0, shiftKey = false) => window.dispatchEvent(new KeyboardEvent(type, { key, code, location, shiftKey }));
     const move = (combat, direction, sprint) => {
       P.controls.reset(); if (P.aiming !== combat) P.modeAction("mode-toggle");
-      P.navigate({ position: { x: -5, y: B.island.surfaceAt(-5, 5), z: 5 }, yaw: 0, pitch: 0.4, dist: 10 }); B.advance(0.4, 1 / 60);
+      // The palm beside (-5, 5) bends a sideways run; compare speed on clear straight paths.
+      P.navigate({ position: { x: -5, y: B.island.surfaceAt(-5, 3), z: 3 }, yaw: 0, pitch: 0.4, dist: 10 }); B.advance(0.4, 1 / 60);
       const p = a.root.position, x = p.x, z = p.z;
+      const start = { ...p }, reach = BL.pilot.WALK.speed * BL.pilot.WALK.run * 0.2,
+        endX = x - (direction === "a" ? reach : 0), endZ = z - (direction === "w" ? reach : 0), solids = B.headquarters.solids;
+      const pathClear = solids.walkable(x, z, endX, endZ, p.y - a.baseY, a.bodyHeight, a)
+        && !solids.inBananas(a, x, z) && !solids.inBananas(a, endX, endZ);
       if (sprint) key("keydown", "Shift", "ShiftLeft", 1, true);
       key("keydown", direction, "Key" + direction.toUpperCase(), 0, sprint);
       B.advance(0.2, 1 / 60);
       const distance = Math.hypot(p.x - x, p.z - z), keptControl = P.player === a;
       key("keyup", direction, "Key" + direction.toUpperCase(), 0, sprint);
       if (sprint) key("keyup", "Shift", "ShiftLeft", 1);
-      return { distance, keptControl, sprintReleased: P.controls.read().sprint === 0 };
+      return { distance, keptControl, sprintReleased: P.controls.read().sprint === 0, start, end: { ...p }, pathClear,
+        shoulder: { phase: a.shoulder.phase, other: a.shoulder.other?.traits.name, prop: a.shoulder.prop, yaw: a.shoulder.yaw } };
     };
     for (const combat of [false, true]) for (const direction of ["w", "a"]) rows.push({ combat, direction, walk: move(combat, direction, false), run: move(combat, direction, true) });
     key("keydown", "Shift", "ShiftLeft", 1, true); key("keydown", "Shift", "ShiftRight", 2, true); key("keyup", "Shift", "ShiftRight", 2, true);
@@ -6304,7 +6477,7 @@ const hubWalking = { name: "hub walking", why: "regression: steering keys came o
     return { rows, independent };
   })()`);
   record("hub running: Left Shift speeds up forward and sideways movement in carry and shoulder views, keeps possession, releases cleanly and survives a Right Shift keyup",
-    running.independent && running.rows.every(row => row.walk.distance > 0.5 && row.run.distance > row.walk.distance * 1.4 && row.run.distance < row.walk.distance * 1.6
+    running.independent && running.rows.every(row => row.walk.pathClear && row.run.pathClear && row.walk.distance > 0.5 && row.run.distance > row.walk.distance * 1.4 && row.run.distance < row.walk.distance * 1.6
       && row.run.keptControl && row.run.sprintReleased), JSON.stringify(running));
   const presence = await b.evaluate(`(() => {
     const B = __ooga, cave = B.pilot.player, net = BL.net.state, account = net.me, backend = net.backend, room = net.room;
@@ -6669,7 +6842,45 @@ const hubFall = { name: "hub fall", why: "rule: abyss falls return players and N
         rows.push({ mode, hadSlot: !!slot, landings,
           varied: Math.hypot(landings[1].x - landings[0].x, landings[1].z - landings[0].z) > 1e-4 });
       }
-      return { setup: true, inner, outer, fall, natural, rows };
+      // A room snapshot can precede the rendered remote pool. Keep the world
+      // still and drive the NPC abyss controller before that pool updates.
+      // Player respawn belongs to the later scene stage, covered above.
+      const net = BL.net, savedRemotes = [...net.remotes], random = Math.random,
+        puppets = B.crew.list.map(c => c.puppet), position = { ...npc.root.position }, yaw = npc.root.rotation.y, pending = [];
+      const peer = B.crew.list.find(c => c !== a && c !== npc);
+      const poolCount = BL.scenes.hub.stats().remotePlayers;
+      let time = B.renderOpts.matrix.time;
+      try {
+        net.remotes.clear(); Math.random = () => 0.125;
+        for (const c of B.crew.list) c.puppet = c !== npc;
+        const arrive = () => {
+          B.crew.prepareDragged(npc); B.crew.recoverDragged(npc);
+          npc.cloudSupport = null; npc.camp.panic.active = npc.roofEscape.active = false;
+          npc.slot = slot; npc.override = npc.state = state;
+          Object.assign(npc.bedTravel, { mode: "", plan: null, route: null, manual: false, toBed: false, bed: null });
+          Object.assign(npc.root.position, { x: 120, y: -80 + npc.baseY, z: 120 });
+          let frames = 0;
+          do { B.crew.update(1 / 60, time += 1 / 60); frames++; }
+          while (npc.root.position.y - npc.baseY < -50 && frames < 8);
+          return { ...sample(npc), frames };
+        };
+        const reference = arrive(), repeated = arrive(), stable = Math.hypot(reference.x - repeated.x, reference.z - repeated.z) < 1e-7;
+        for (const kind of ["ooga", "gorilla"]) {
+          const name = peer.traits.name, rig = B.clankers.list.find(entry => entry.owner === peer).gorilla;
+          net.remotes.set(987654321, { id: 987654321, login: "arrival-peer", display: "Arrival peer", body: kind === "gorilla" ? "gorilla:" + name : name,
+            bodyKind: kind, bodyName: name, zone: "outside", x: reference.x, y: 0, z: reference.z, yaw: 0 });
+          const landing = arrive(), peerRadius = kind === "gorilla" ? Math.max(BL.clankers.WALK_RADIUS, rig.bodyRadius) : peer.bodyRadius;
+          pending.push({ kind, stable, reference, landing,
+            gap: Math.hypot(landing.x - reference.x, landing.z - reference.z) - npc.bodyRadius - peerRadius,
+            poolUnchanged: BL.scenes.hub.stats().remotePlayers === poolCount });
+          net.remotes.clear();
+        }
+      } finally {
+        Math.random = random; net.remotes.clear(); for (const [id, rec] of savedRemotes) net.remotes.set(id, rec);
+        B.crew.list.forEach((c, i) => { c.puppet = puppets[i]; });
+        Object.assign(npc.root.position, position); npc.root.rotation.y = yaw;
+      }
+      return { setup: true, inner, outer, fall, natural, rows, pending };
     } finally {
       // Force the matching native transition again; assigning the former
       // sleeping state alone would leave the fixture's bed route attached.
@@ -6682,7 +6893,9 @@ const hubFall = { name: "hub fall", why: "rule: abyss falls return players and N
     && Math.abs(p.feet) < .025 && p.surface === 0 && p.clear && p.gap >= -1e-7 && p.yours && p.npcUndriven;
   record("hub fall: an Ooga walked off the edge falls into the abyss and is back at the pile within six seconds, still yours", r.minFeet < -50 && r.back !== null && r.back < 6 && r.onLand && r.yours
     && respawns.setup && landed(respawns.natural) && respawns.rows.length === 3
-    && respawns.rows.every(row => row.varied && row.landings.length === 2 && row.landings.every(p => p.startedBelow && p.frames <= 8 && landed(p))),
+    && respawns.rows.every(row => row.varied && row.landings.length === 2 && row.landings.every(p => p.startedBelow && p.frames <= 8 && landed(p)))
+    && respawns.pending.length === 2 && respawns.pending.every(row => row.stable && row.poolUnchanged && row.gap >= -1e-7
+      && landed(row.reference) && row.landing.frames <= 8 && landed(row.landing)),
     JSON.stringify({ ...r, respawns }));
 } };
 const hubGrounding = { name: "hub grounding", why: "regression: a placement from above landed on a drifting cloud, and a roaming gorilla read a tree crown as a floor", run: async (b) => {
@@ -10447,7 +10660,7 @@ const factoryCanvas = { name: "factory canvas2d", why: "contract: the Canvas 2D 
   record("factory canvas2d: with WebGL2 unavailable the factory still boots and paints, a tip's show in the air", r.kind === "canvas2d" && r.scene === "factory" && r.colours >= 4 && r.flying > 0, JSON.stringify(r));
 } };
 
-scene("hub", { steps: [{ name: `work movement lab lanes ${1 / RATES[0]}Hz`, why: "regression: work walkers left their facing-right side of the lab lane", open: "on about 4 boots in 30 the lane targets sit on the centre or far side; unfixed", run: labLanes }, donation("hub"), hubWalking, hubMapNavigation, hubRainforestSteps, hubRoutes, hubFall, hubGrounding, trip("hub"), factoryActivityRouting] });
+scene("hub", { opts: !ONLY || onlyMatches(hubArrival.name) ? { initScript: `(${hubSleepWire.toString()})()` } : {}, steps: [hubArrival, { name: `work movement lab lanes ${1 / RATES[0]}Hz`, why: "regression: work walkers left their facing-right side of the lab lane", open: "on about 4 boots in 30 the lane targets sit on the centre or far side; unfixed", run: labLanes }, donation("hub"), hubWalking, hubMapNavigation, hubRainforestSteps, hubRoutes, hubFall, hubGrounding, trip("hub"), factoryActivityRouting] });
 scene("hub", { query: "ooga=portlandhodl:clank:lab,obl,lf&ooga=w-s-bitcoin:clank:lab,obl,lf&ooga=bc1gui:clank:lab,obl,lf&ooga=DrNeski:clank:lab,obl,lf&ooga=2140data:clank:lab,obl,lf", steps: [{ name: "work movement cave trips", why: "regression: off-lane cave traffic aimed through obstacles and started backwards detours", run: workCaveTrips }] });
 scene("hub", { label: "room sign", query: "pos=0", steps: [{ name: "room sign copies hash", why: "rule: tapping a room sign swings it and copies its displayed eight-character code with visible confirmation", run: async (b) => {
   const point = await b.evaluate(`(() => { const B = __ooga, sign = B.headquarters.roomSigns[0], n = sign.node; Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText: (value) => { window.__roomHash = value; return Promise.resolve(); } } }); window.__roomSignBefore = sign.hits; B.pilot.release(true); B.pilot.navigate({ position: { x: n.position.x, y: n.position.y, z: n.position.z }, target: { x: n.position.x, y: n.position.y - 0.2, z: n.position.z }, yaw: n.rotation.y, pitch: 0, dist: 4 }); B.advance(0.6, 1 / 60); return B.project(n.position.x, n.position.y - 0.2, n.position.z, {}); })()`);
@@ -10807,7 +11020,7 @@ const sphereCrossing = { name: "timechain crossing", why: "playthrough: Enter wa
   record("timechain crossing: from the keypad into the room and from the Exit button out to the bridge every frame is the Ooga's own eye, and each scene swap is the same view on both sides",
     seams.frames > 30 && seams.far === 0 && seamless(seams.swapIn) && seamless(seams.swapOut), JSON.stringify(seams));
 } };
-const sphereAccount = { name: "timechain account", why: "rule: an account look that went unanswered lets the physical selected number retry or Enter continue solo and never guesses a shared room", run: async (b) => {
+const sphereAccount = { name: "timechain account", why: "regression: account Retry must keep the owned Ooga at the keypad; an unanswered account still offers a solo visit without guessing", run: async (b) => {
   await b.evaluate(`(() => { const B = __ooga, ${sphereLocal}; BL.net.state.resolved = false; ${sphereStand("0.7", "13.8")} })()`);
   await b.key(" ");
   await b.key("5");
@@ -10822,6 +11035,54 @@ const sphereAccount = { name: "timechain account", why: "rule: an account look t
   record("timechain account: Enter with the account unanswered asks rather than guesses, physical Enter commits a solo visit, Back keeps the room chosen and Escape lets go",
     asked.state === "account" && !asked.popup && asked.hint.includes("Enter continues solo") && solo.state === "preparing" && solo.mode === "solo"
       && cancelled.state === "keypad" && cancelled.selection === 5 && done.state === "idle" && done.scene === "hub", JSON.stringify({ asked, solo, cancelled, done }));
+  // Retry through the real account reader and subscriber chain while the gate owns the same Ooga.
+  // Snapshot inside the fetch and its account notification so no simulated movement hides a teleport.
+  await b.evaluate(`(() => {
+    const B = __ooga, cave = B.pilot.player, ${sphereLocal};
+    const W = window.__sphereAccount = { fetch: window.fetch, WebSocket: window.WebSocket, state: { ...BL.net.state }, calls: 0, before: null, after: null };
+    const read = () => ({ selected: B.pilot.player === cave, body: [cave.root.position.x, cave.root.position.y, cave.root.position.z],
+      eye: [B.camera.position.x, B.camera.position.y, B.camera.position.z], target: [B.camera.target.x, B.camera.target.y, B.camera.target.z],
+      mode: B.pilot.mode, lens: T.gate.debug.lens, held: B.pilot.travelRefusal() === "Finish the current interaction before travelling" });
+    window.fetch = (url, options) => {
+      if (String(url) === "/api/me") {
+        W.calls++;
+        return Promise.resolve({ ok: true, headers: { get: () => "application/json" }, json: async () => {
+          W.before = read(); return { player: { id: 274, login: "portlandhodl", display: "portlandhodl" } };
+        } });
+      }
+      if (String(url) === "/auth/logout") return Promise.resolve({ ok: true });
+      return W.fetch(url, options);
+    };
+    window.WebSocket = class { static OPEN = 1; constructor() { this.readyState = 0; } close() { this.readyState = 3; } send() {} };
+    W.unsubscribe = BL.net.subscribe(state => { if (state.me && !W.after) W.after = read(); });
+    BL.net.state.started = true; BL.net.state.resolved = false;
+    ${sphereStand("0.7", "13.8")}
+  })()`);
+  let retry, released;
+  try {
+    await b.key(" "); await b.key("5"); await b.key("Enter"); await b.key("5");
+    const answered = await untilPage(b, 'BL.net.state.resolved && BL.scenes.hub.debug.timechainIsland.gate.debug.state === "keypad"');
+    retry = await b.evaluate(`(() => { const W = window.__sphereAccount, G = BL.scenes.hub.debug.timechainIsland.gate;
+      return { calls: W.calls, before: W.before, after: W.after, state: G.debug.state, selection: G.debug.selection, login: BL.net.state.me?.login }; })()`);
+    retry.answered = answered;
+    await b.key("Escape");
+    released = await b.evaluate(`(() => { const B = __ooga, ${sphereLocal}; B.advance(0.6, 1 / 60);
+      return { state: T.gate.debug.state, selected: B.pilot.player?.traits.name, refusal: B.pilot.travelRefusal(),
+        near: Math.hypot(B.pilot.player.root.position.x - T.worldX(0.7, 13.8), B.pilot.player.root.position.z - T.worldZ(0.7, 13.8)) }; })()`);
+  } finally {
+    await b.evaluate(`(async () => { const W = window.__sphereAccount;
+      W.unsubscribe();
+      try { await BL.net.logout(); } finally {
+        Object.assign(BL.net.state, W.state); window.fetch = W.fetch; window.WebSocket = W.WebSocket;
+        BL.hud.showAccount(BL.net.state); delete window.__sphereAccount;
+      }
+    })()`);
+  }
+  const unchanged = retry.before && retry.after && ["body", "eye", "target"].every(key => retry.before[key].every((value, i) => Math.abs(value - retry.after[key][i]) < 1e-8));
+  record("timechain account: physical Retry resolves the owner without moving the held Ooga or its view, keeps the room chosen, and Escape restores control at the keypad",
+    retry.answered && retry.calls === 1 && retry.login === "portlandhodl" && retry.state === "keypad" && retry.selection === 5 && unchanged
+      && retry.before.selected && retry.after.selected && retry.before.held && retry.after.held && retry.before.mode === retry.after.mode && retry.after.lens === "eyes"
+      && released.state === "idle" && released.selected === "portlandhodl" && released.refusal === null && released.near < 2, JSON.stringify({ retry, released }));
 } };
 scene("hub", { label: "timechain doorway", query: "solo=1&character=portlandhodl&view=timechain&pos=0", opts: { motion: true }, steps: [sphereApproach, sphereThreshold, sphereKeypad, sphereCrossing, sphereAccount, trip("hub")] });
 scene("hub", { label: "timechain doorway canvas2d", exclusive: true, query: "solo=1&character=portlandhodl&view=timechain&pos=0&canvas2d=1", steps: [sphereApproach, sphereCrossing] });
@@ -10929,9 +11190,29 @@ scene("timechain", { label: "canvas2d", url: roomPage(8, "canvas2d=1"), steps: [
 scene("hub", { label: "chilling", query: "status=chillin&pos=0",
   // This placement order exhausted the old 36-point pool before the last Ooga could settle.
   opts: { initScript: `Math.random = (() => { let a = 3; return () => { let t = a += 0x6D2B79F5; t = Math.imul(t ^ t >>> 15, t | 1); t ^= t + Math.imul(t ^ t >>> 7, t | 61); return ((t ^ t >>> 14) >>> 0) / 4294967296; }; })();` },
-  steps: [{ name: "chilling Ooga placement", why: "regression: chilling Oogas spawned beside the banana pile and 2140data spun his nunchaku as a permanent idle stance", run: async (b) => {
-  const state = await b.evaluate(`(() => { const B = __ooga, inner = B.path.ringOuterRadius + 1.5, rows = [...B.cavemen.values()].map(c => ({ name: c.traits.name, state: c.state, radius: Math.hypot(c.root.position.x, c.root.position.z), snack: c.parts.snack.visible })); const c = B.cavemen.get("2140data"); B.advance(2, 1 / 60); return { inner, rows, spin: c.parts.chukTrail.some(n => n.visible), clubYaw: c.parts.club.rotation.y }; })()`);
-  record("chilling Oogas: every Ooga rests beyond the banana ring without eating, and 2140data carries rather than continuously spins his nunchaku", state.rows.every(c => c.state === "chilling" && c.radius >= state.inner && !c.snack) && !state.spin && Math.abs(state.clubYaw) < 1e-6, JSON.stringify(state));
+  steps: [{ name: "chilling Ooga placement", why: "regression: chilling Oogas must load in separate campfire rings when the inner ring fills, and 2140data must not spin his nunchaku as a permanent idle stance", run: async (b) => {
+  const state = await b.evaluate(`(() => {
+    const B = __ooga, fire = B.lamps.find(lamp => lamp.id === "firepit"), actors = B.crew.list, rings = new Map();
+    // An accepted arrival must remain a valid idle destination on later frames.
+    B.advance(2, 1 / 60);
+    const rows = actors.map(c => {
+      const p = c.root.position, radius = Math.hypot(p.x - fire.x, p.z - fire.z), ring = radius.toFixed(6);
+      rings.set(ring, (rings.get(ring) || 0) + 1);
+      return { name: c.traits.name, state: c.state, visible: c.root.visible, feet: p.y - c.baseY + c.restLower, bed: !!c.bedroll || !!c.bedTravel.mode,
+        seated: B.fireSeats.some(s => Math.hypot(s.x - p.x, s.z - p.z) < 1e-6), radius, snack: c.parts.snack.visible,
+        facing: Math.cos(c.root.rotation.y - Math.atan2(fire.x - p.x, fire.z - p.z)) };
+    });
+    let gap = Infinity;
+    for (let i = 0; i < actors.length; i++) for (let j = i + 1; j < actors.length; j++) {
+      const a = actors[i], b = actors[j];
+      gap = Math.min(gap, Math.hypot(a.root.position.x - b.root.position.x, a.root.position.z - b.root.position.z) - a.bodyRadius - b.bodyRadius);
+    }
+    const occupiedBeds = B.headquarters.mattresses.filter(bed => bed.sleeper).length, c = B.cavemen.get("2140data");
+    const innerOccupied = B.fireSeats.slice(0, 6).filter(s => actors.some(a => Math.hypot(s.x - a.root.position.x, s.z - a.root.position.z) < 1e-6)).length;
+    return { rows, rings: [...rings], gap, occupiedBeds, innerOccupied, spin: c.parts.chukTrail.some(n => n.visible), clubYaw: c.parts.club.rotation.y };
+  })()`);
+  record("chilling arrival: every Ooga rests aboveground in separate concentric campfire rings facing the fire, with empty HQ beds and no eating or permanent nunchaku spin", state.rows.every(c => c.state === "chilling" && c.visible && c.feet >= -1e-6 && !c.bed && c.seated && c.facing > 0.999 && !c.snack)
+    && state.innerOccupied === 6 && state.rings.length > 1 && state.rings.some(([, count]) => count > 1) && state.gap >= -1e-6 && !state.occupiedBeds && !state.spin && Math.abs(state.clubYaw) < 1e-6, JSON.stringify(state));
   const seated = await b.evaluate(`(() => {
     const gorilla = BL.agent.create({ managed: true, groundAt: () => 0 }), motion = { groom: 0, groomPhase: 0 };
     const parts = [gorilla.parts.head, gorilla.parts.armR, gorilla.parts.armL];
@@ -11222,7 +11503,7 @@ scene("hub", { label: "lab flask approach", query: "solo=1&character=portlandhod
     state.entered && !state.retreated && !state.queued && state.inside && state.phase === "work"
     && state.station === -1 && state.settled && !state.lateRecoveries, JSON.stringify(state));
 } }] });
-scene("hub", { label: "lab work rotation", query: "status=clankin", steps: [{ name: "lab work rotation", why: "regression: interior waiting bodies blocked equipment, permanent claims left coworkers idle, and rear departures held the doorway before reaching it", run: async (b) => {
+scene("hub", { label: "lab work rotation", query: "status=clankin", steps: [hubWorkingArrival, { name: "lab work rotation", why: "regression: interior waiting bodies blocked equipment, permanent claims left coworkers idle, and rear departures held the doorway before reaching it", run: async (b) => {
   const state = await b.evaluate(`(() => {
     const B = __ooga, C = B.clankers, lab = B.headquarters.entropyLab, m = lab.mouth, group = C.list.slice(0, 2);
     B.pilot.release(true); C.release();
@@ -15949,12 +16230,13 @@ const menuShellChecks = BL => {
 // net.js in a sandbox: a canned /api/me and fake sockets that record what the page sends.
 const netFixture=(BL,response,step=200)=>{
   const source=readFileSync(join(root,"src/js/net.js"),"utf8");
-  const sockets=[],sent=[],events=new Map();let calls=0,tick=1000;
+  const sockets=[],sent=[],events=new Map(),navigations=[];let calls=0,tick=1000,savedViews=0;
   class Socket {static OPEN=1;constructor(){this.readyState=1;sockets.push(this);}send(v){sent.push(typeof v==="string"?JSON.parse(v):v);}close(){this.readyState=3;}}
   const voice={setPeers:()=>{},restart:()=>{},stop:()=>{}};
-  const context={window:{BL:{characters:BL.characters,contributors:BL.contributors,donations:BL.donations,voice},setTimeout:()=>1,clearTimeout(){},setInterval:()=>1,clearInterval(){}},document:{hidden:false,addEventListener:(k,v)=>events.set(k,v),removeEventListener:k=>events.delete(k)},location:{protocol:"https:",host:"fixture.invalid",search:""},fetch:async(...args)=>{calls++;return response(...args);},AbortSignal,WebSocket:Socket,performance:{now:()=>tick+=step},Date,ArrayBuffer,URLSearchParams};
+  const location={protocol:"https:",host:"fixture.invalid",pathname:"/",search:"",assign:url=>navigations.push(url)},pilot={saveLoginView(){savedViews++;}};
+  const context={window:{BL:{characters:BL.characters,contributors:BL.contributors,donations:BL.donations,voice,pilot},setTimeout:()=>1,clearTimeout(){},setInterval:()=>1,clearInterval(){}},document:{hidden:false,addEventListener:(k,v)=>events.set(k,v),removeEventListener:k=>events.delete(k)},location,fetch:async(...args)=>{calls++;return response(...args);},AbortSignal,WebSocket:Socket,performance:{now:()=>tick+=step},Date,ArrayBuffer,URLSearchParams};
   runInNewContext(source,context);
-  return {net:context.window.BL.net,sockets,sent,events,advance(ms){tick+=ms;},get calls(){return calls;}};
+  return {net:context.window.BL.net,sockets,sent,events,location,navigations,advance(ms){tick+=ms;},get calls(){return calls;},get savedViews(){return savedViews;}};
 };
 // Ooga Chat's wire on the page: what it sends, and the lines it hands on (chat.js keeps and shows them).
 // Execute the real chat controller with a small DOM and a controllable acknowledgement clock.
@@ -15986,12 +16268,19 @@ const chatAccountChecks = async BL => {
     if (options.method === "PATCH" && JSON.parse(options.body).display === "Delayed") await new Promise(resolve => { release = resolve; });
     return { ok: true, headers: { get: () => "application/json" }, json: async () => ({ player: { ...player, display: options.method === "PATCH" ? JSON.parse(options.body).display : player.display } }) };
   });
+  f.location.pathname = "/factory"; f.location.search = "?view=underground"; f.net.login();
+  const noBackendLogin = f.navigations.length === 0 && f.savedViews === 0;
   await f.net.start();
+  for (const path of ["/factory", "/sphere-3", "/dsb"]) { f.location.pathname = path; f.net.login(); }
+  const loginAtHub = noBackendLogin && f.savedViews === 0 && f.navigations.length === 3 && f.navigations.every(value => {
+    const url = new URL(value, "https://fixture.invalid");
+    return url.pathname === "/auth/login" && url.searchParams.get("next") === "/";
+  });
   const before = f.calls, invalid = await f.net.setDisplay("bad 🍌"), blocked = !invalid.ok && f.calls === before;
   const changed = await f.net.setDisplay("New Name"), renamed = changed.ok && f.net.state.me.display === "New Name" && f.sockets.length === 2 && requests.at(-1).method === "PATCH" && f.net.state.logoutEpoch === 0;
   const delayed = f.net.setDisplay("Delayed"); await Promise.resolve();
   await f.net.logout(); release(); const stale = await delayed;
-  record("ooga account: display updates use the existing PATCH API and fresh room connection; unsupported characters make no request; explicit logout clears identity and a late edit cannot revive it", blocked && renamed && !stale.ok && f.net.state.me === null && f.net.state.room === "off" && f.net.state.logoutEpoch === 1, JSON.stringify({ blocked, renamed, stale, epoch: f.net.state.logoutEpoch }));
+  record("ooga account: display updates use the existing PATCH API and fresh room connection; unsupported characters make no request; explicit logout clears identity and a late edit cannot revive it", loginAtHub && blocked && renamed && !stale.ok && f.net.state.me === null && f.net.state.room === "off" && f.net.state.logoutEpoch === 1, JSON.stringify({ loginAtHub, noBackendLogin, navigations: f.navigations, savedViews: f.savedViews, blocked, renamed, stale, epoch: f.net.state.logoutEpoch }));
   const revoked = netFixture(BL, () => ({ ok: true, headers: { get: () => "application/json" }, json: async () => ({ player }) }));
   await revoked.net.start();
   revoked.sockets[0].onmessage({ data: JSON.stringify({ t: "kick", reason: "revoked" }) });
@@ -17263,16 +17552,29 @@ record("character visibility source bakes: ownership wrappers share exact immuta
     const place = BL.poolModels.spot(island, {}), L = BL.poolLayout, cos = Math.cos(place.ry), sin = Math.sin(place.ry);
     const pool = { layout: L, place, worldX: (x, z) => place.x + x * cos + z * sin,
       worldZ: (x, z) => place.z - x * sin + z * cos };
-    const beds = BL.headquartersSleep.outdoorBeds(pool);
+    const minimum = Math.max(0, BL.contributors.roster.length - island.headquarters.rooms.length - island.headquarters.basement.rooms.length);
+    let fullChecks = 0;
+    const beds = BL.headquartersSleep.outdoorBeds(pool, () => { fullChecks++; return true; }, minimum);
     const supported = beds.every(b => {
       const dx = b.x - place.x, dz = b.z - place.z, x = dx * cos - dz * sin, z = dx * sin + dz * cos;
       const along = L.rampAngle(Math.atan2(x, z)) * L.RAMP.r;
-      return b.outdoor && b.y >= place.y + L.groundAt(x, z) && along >= 3.9 && along <= 40 && Math.hypot(x, z) >= 13;
+      return b.outdoor && b.y >= place.y + L.groundAt(x, z) && along >= 0 && along <= L.RAMP.length && Math.hypot(x, z) >= 13;
     });
     const separate = beds.every((a, i) => beds.every((b, j) => i === j || Math.hypot(a.x - b.x, a.z - b.z) >= 1.79));
-    const blocked = BL.headquartersSleep.outdoorBeds(pool, () => false).length === 0;
-    record("outdoor sleep: rainforest ramp roof provides separate supported anchors and rejects blocked footprints", beds.length >= 8 && supported && separate && blocked,
-      JSON.stringify({ count: beds.length, supported, separate, blocked }));
+    const blocked = BL.headquartersSleep.outdoorBeds(pool, () => false, minimum).length === 0;
+    const key = {}; let firstChecks = 0, nextChecks = 0;
+    const first = BL.headquartersSleep.outdoor(pool, () => { firstChecks++; return true; }, key);
+    const lazy = first.beds.length === 0 && firstChecks === 0, a = first.more(), firstCost = firstChecks;
+    const next = BL.headquartersSleep.outdoor(pool, () => { nextChecks++; return true; }, key);
+    const unsearched = next.beds.length === 0 && nextChecks === 0, b = next.more();
+    const same = (a, b) => !!a && !!b && a.x === b.x && a.y === b.y && a.z === b.z && a.node.rotation.y === b.node.rotation.y;
+    a.sleeper = { name: "previous visit" };
+    const fresh = a !== b && a.node !== b.node && b.sleeper === null && same(a, b) && same(a, beds[0]);
+    const reused = nextChecks === 0 && firstChecks === firstCost, c = next.more(), nextCost = nextChecks, d = first.more();
+    const extended = nextCost > 0 && nextChecks === nextCost && firstChecks === firstCost && c !== d && same(c, d) && same(c, beds[1]);
+    const demand = lazy && unsearched && first.beds.length === 2 && next.beds.length === 2 && firstCost > 0 && firstCost < fullChecks;
+    record("outdoor sleep: rainforest provides separate supported anchors for the whole HQ overflow and rejects blocked footprints", beds.length >= Math.max(8, minimum) && supported && separate && blocked && demand && fresh && reused && extended,
+      JSON.stringify({ count: beds.length, minimum, supported, separate, blocked, demand, fresh, reused, extended, fullChecks, firstCost, nextCost }));
   }
 
   {
@@ -17629,9 +17931,24 @@ record("character visibility source bakes: ownership wrappers share exact immuta
         BL.net.npcFrame = mismatchedFrame; BL.net.state.npcVersion++;
         sync.update(0.3);
         const rejectedHost = sync.frames === 2 && plans === 2 && crew.list.every(c => !c.puppet);
+        // A cached host frame still contains the old sleeping poses when an
+        // owner arrives. Local control and remote ownership must win immediately.
+        sync.dispose();
+        const nextOverride = next.override;
+        const selected = crew.control(oldest) && crew.wakePlayer();
+        crew.relocatePlayer({ x: 7, y: 0, z: 0 }, 0);
+        next.override = "away"; next.remoteControlled = true; crew.refreshStates();
+        BL.net.state.hostId = "host"; BL.net.npcFrame = matchingFrame; BL.net.state.npcVersion++;
+        sync = BL.npcSync.create(options); sync.update(0.3);
+        const owned = selected && crew.player === oldest && !oldest.puppet && oldest.root.visible
+          && oldest.state === "chilling" && !oldest.bedroll && !oldest.bedTravel.mode && !oldest.root.quaternion
+          && oldest.root.position.x === 7 && oldest.root.position.z === 0 && oldest.root.position.y === oldest.baseY;
+        const remote = !next.puppet && next.remoteControlled && !next.root.visible && next.state === "away" && !next.bedroll;
+        sync.dispose(); crew.release();
+        next.override = nextOverride; next.remoteControlled = false; crew.refreshStates(true);
         record("NPC sync: matching site order accepts poses and events; incompatible catalogs and host changes release stale poses",
-          accepted && rejected && cleared && resumed && releasedHost && rejectedHost,
-          JSON.stringify({ accepted, rejected, cleared, resumed, releasedHost, rejectedHost }));
+          accepted && rejected && cleared && resumed && releasedHost && rejectedHost && owned && remote,
+          JSON.stringify({ accepted, rejected, cleared, resumed, releasedHost, rejectedHost, owned, remote }));
       } finally { if (sync) sync.dispose(); crew.workSites = savedSites; BL.net = savedNet; }
       newest.contributor.lastContributionAt = now;
       crew.refreshStates(); crew.update(1.1, 1.1);

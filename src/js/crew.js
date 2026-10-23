@@ -675,7 +675,9 @@
     });
     const stateOf = (cave) => {
       const activity = contributors.stateFor(cave.contributor);
-      return activity === "away" && !ctx.playerName ? "away" : cave.override || activity;
+      // A signed-in owner can arrive even after their activity expired; other away NPCs stay away.
+      return activity === "away" && !ctx.playerName && !(cave.override && (cave === player || BL.net?.ownCharacter?.()?.handle === cave.traits.name))
+        ? "away" : cave.override || activity;
     };
     const groundY = (cave) => {
       const p = cave.root.position;
@@ -703,6 +705,9 @@
         }
         if (cave.bedroll) return true;
         for (const bed of ctx.outdoorBedrolls || []) if (!bed.sleeper) { cave.bedroll = bed; bed.sleeper = cave; return true; }
+        // The scene's next fixed anchor, found only when an overflow sleeper needs it.
+        const bed = ctx.moreOutdoorBedrolls && ctx.moreOutdoorBedrolls();
+        if (bed) { cave.bedroll = bed; bed.sleeper = cave; return true; }
         return false;
       }
       cave.bedroll = bedrolls.find((bed) => !bed.sleeper) || bedrolls[cave.index % bedrolls.length];
@@ -1183,11 +1188,22 @@
       const r = cave.root;
       if (state === "working" || state === "chilling") {
         r.visible = true;
-        if (!wasAwake && state === "working") standAtSlot(cave);
-        else r.position.y = groundY(cave) + cave.hop;
+        if (!wasAwake && state === "working") {
+          if (settle && ctx.initialWorkSpot) {
+            // A crowded loading fan is a destination, not safe initial support on another Ooga's head.
+            if (!ctx.initialWorkSpot(cave, NPC_RECOVERY_SPOT)) {
+              // With no clear arrival left, the next refresh retries from away instead of stacking bodies.
+              cave.state = "away"; r.visible = false;
+              refreshRosterRow(cave);
+              return;
+            }
+            setVec(r.position, NPC_RECOVERY_SPOT.x, cave.baseY + NPC_RECOVERY_SPOT.y, NPC_RECOVERY_SPOT.z);
+            r.rotation.y = Math.atan2(-NPC_RECOVERY_SPOT.x, -NPC_RECOVERY_SPOT.z);
+          } else standAtSlot(cave);
+        } else r.position.y = groundY(cave) + cave.hop;
         if (state === "working") startMeal(cave);
         else if (wanderSpot) {
-          if (settle && wanderSpot(cave.act.spot, cave) !== false) {
+          if (settle && wanderSpot(cave.act.spot, cave, true) !== false) {
             const spot = cave.act.spot;
             setVec(r.position, spot.x, cave.baseY + groundAt(spot.x, spot.z, Infinity, Infinity, cave), spot.z);
             if (!Number.isNaN(spot.ry)) r.rotation.y = spot.ry;
@@ -1278,12 +1294,12 @@
       for (let index = 0; index < crewList.length; index++) {
         const other = crewList[index];
         if (other === cave || !other.root.visible) continue;
-        const p = other.root.position, feet = p.y - other.baseY;
-        if (feet < floor + cave.bodyHeight && feet + other.bodyHeight > floor && Math.hypot(p.x - slot.x, p.z - slot.z) < 0.68) return false;
+        const p = other.root.position, feet = p.y - other.baseY, gap = Math.max(SHOULDER_GAP, cave.bodyRadius + other.bodyRadius);
+        if (feet < floor + cave.bodyHeight && feet + other.bodyHeight > floor && Math.hypot(p.x - slot.x, p.z - slot.z) < gap) return false;
         // Reserve approaching eaters' destinations as well as their bodies; a player can still take the place first.
-        if (other !== player && other.walk?.to === "slot" && Math.hypot(other.walk.tx - slot.x, other.walk.tz - slot.z) < 0.68) return false;
+        if (other !== player && other.walk?.to === "slot" && Math.hypot(other.walk.tx - slot.x, other.walk.tz - slot.z) < gap) return false;
         if (other !== player && other.state === "working" && other.work.phase === "return" && other.work.reloadSlot
-          && other.slot && Math.hypot(other.slot.x - slot.x, other.slot.z - slot.z) < 0.68) return false;
+          && other.slot && Math.hypot(other.slot.x - slot.x, other.slot.z - slot.z) < gap) return false;
       }
       return true;
     };
@@ -3489,11 +3505,12 @@
     // moving apart is allowed, so a crowd unpicks itself instead of locking.
     // Every body the scene walks that is not on the roster: the Agent and any it
     // has called in. One array, rebuilt only when that crowd changes.
-    const spotOccupied = (cave, x, y, z) => {
+    const spotOccupied = (cave, x, y, z, nearby = false) => {
       for (let i = 0; i < crewList.length; i++) {
         const other = crewList[i], p = other.root.position, floor = p.y - other.baseY;
+        const gap = Math.max(SHOULDER_GAP, cave.bodyRadius + other.bodyRadius), distance = Math.hypot(x - p.x, z - p.z);
         if (other !== cave && other.root.visible && y < floor + other.bodyHeight && y + cave.bodyHeight > floor
-          && Math.hypot(x - p.x, z - p.z) < Math.max(SHOULDER_GAP, cave.bodyRadius + other.bodyRadius)) return true;
+          && distance < gap && (!nearby || Math.hypot(cave.root.position.x - x, cave.root.position.z - z) < Math.max(1.5, gap + distance + 0.15))) return true;
       }
       return false;
     };
@@ -3520,7 +3537,9 @@
       for (let otherIndex = 0; otherIndex < crewList.length; otherIndex++) {
         const other = crewList[otherIndex];
         if (!shoulderNeighbor(cave, other)) continue;
-        if (!gapClear(p.x, p.z, x, z, other.root.position)) return false;
+        // NPC queues keep their full body footprints; the player's deliberate shoulder pass stays unchanged.
+        const gap = cave === player ? SHOULDER_GAP : Math.max(SHOULDER_GAP, cave.bodyRadius + other.bodyRadius);
+        if (!gapClear(p.x, p.z, x, z, other.root.position, gap)) return false;
       }
       // Walking bodies the scene owns rather than the roster keep the same gap.
       return outsideClear(p.x, p.z, x, z, p.y - cave.baseY, cave.bodyHeight, cave.bodyRadius);
@@ -3542,7 +3561,7 @@
       // A deliberate turn starts a new line; returning never moves an actor without input or against a new heading.
       if (s.phase && fx * s.forwardX + fz * s.forwardZ < (npc ? 0.3 : 0.94)) { s.phase = 0; s.other = null; }
       if (!s.phase) {
-        let nearest = npc ? reach : SHOULDER_REACH, found = null, across = 0, rear = false;
+        let nearest = npc ? Infinity : SHOULDER_REACH, found = null, foundGap = SHOULDER_GAP, across = 0, rear = false;
         for (let otherIndex = 0; otherIndex < crewList.length; otherIndex++) {
           const other = crewList[otherIndex];
           if (!shoulderNeighbor(cave, other)) continue;
@@ -3551,13 +3570,16 @@
           if (npc && following(cave, other, NPC_PASS_REACH)) continue;
           const dx = other.shoulder.snapX - s.snapX, dz = other.shoulder.snapZ - s.snapZ;
           const along = dx * fx + dz * fz, side = dx * fz - dz * fx;
-          if (Math.abs(along) >= nearest || Math.abs(side) >= SHOULDER_TOUCH || dx * dx + dz * dz < SHOULDER_GAP * SHOULDER_GAP - 1e-6) continue;
+          const gap = npc ? Math.max(SHOULDER_GAP, cave.bodyRadius + other.bodyRadius) : SHOULDER_GAP;
+          const extra = gap - SHOULDER_GAP;
+          if (Math.abs(along) >= nearest || Math.abs(along) >= reach + extra || Math.abs(side) >= SHOULDER_TOUCH + extra
+            || dx * dx + dz * dz < SHOULDER_GAP * SHOULDER_GAP - 1e-6) continue;
           // A moving leader yields only to a faster walker closing from behind, not to standing or receding neighbours.
           if (along <= 0 && (along < -0.95 || (other.shoulder.snapVX - s.snapVX) * fx + (other.shoulder.snapVZ - s.snapVZ) * fz < 0.08)) continue;
-          nearest = Math.abs(along); found = other; across = side; rear = along <= 0;
+          nearest = Math.abs(along); found = other; foundGap = gap; across = side; rear = along <= 0;
         }
         const hit = s.obstacle, prop = !!ctx.shoulderObstacle && ctx.shoulderObstacle(cave, fx, fz, reach, hit)
-          && (!found || hit.minAlong < nearest - SHOULDER_GAP);
+          && (!found || hit.minAlong < nearest - foundGap);
         if (!found && !prop) return -1;
         s.phase = 1; s.other = prop ? null : found; s.prop = prop; s.rear = !prop && rear;
         s.originX = p.x; s.originZ = p.z;
@@ -3569,7 +3591,7 @@
         const side = dx * Math.cos(s.heading) - dz * Math.sin(s.heading);
         s.side = Math.abs(side) < 0.02 ? 1 : Math.sign(side);
         s.dodge = Math.abs(across) < 0.02 ? (s.rear ? -1 : 1) : Math.sign(across);
-        s.amount = prop ? clamp(1 - Math.max(hit.minContactAcross, -hit.maxContactAcross, 0) / 0.3, 0, 1) : clamp(1 - Math.abs(across) / SHOULDER_TOUCH, 0, 1);
+        s.amount = prop ? clamp(1 - Math.max(hit.minContactAcross, -hit.maxContactAcross, 0) / 0.3, 0, 1) : clamp(1 - Math.abs(across) / (SHOULDER_TOUCH + foundGap - SHOULDER_GAP), 0, 1);
         if (prop) s.propOffset = s.dodge > 0 ? hit.minAcross - 0.315 : hit.maxAcross + 0.315;
       }
       fx = s.forwardX; fz = s.forwardZ;
@@ -3592,12 +3614,14 @@
         } else if (!shoulderNeighbor(cave, s.other)) s.phase = 2;
         else {
           const q = s.other.root.position;
+          const gap = npc ? Math.max(SHOULDER_GAP, cave.bodyRadius + s.other.bodyRadius) : SHOULDER_GAP;
+          const extra = gap - SHOULDER_GAP;
           along = (q.x - p.x) * fx + (q.z - p.z) * fz;
-          if ((s.rear ? along > SHOULDER_GAP + 0.12 : along < -SHOULDER_GAP - 0.12) || Math.hypot(q.x - p.x, q.z - p.z) > (npc ? NPC_PASS_REACH : SHOULDER_REACH) + 0.5) s.phase = 2;
+          if ((s.rear ? along > gap + 0.12 : along < -gap - 0.12) || Math.hypot(q.x - p.x, q.z - p.z) > (npc ? NPC_PASS_REACH : SHOULDER_REACH) + extra + 0.5) s.phase = 2;
           else {
             const otherOffset = (q.x - s.originX) * fz - (q.z - s.originZ) * fx;
-            targetOffset = -s.dodge * Math.max(0, SHOULDER_GAP + 0.015 - s.dodge * otherOffset);
-            s.targetYaw = (s.rear ? -1 : 1) * s.side * s.amount * SHOULDER_TWIST * clamp((SHOULDER_REACH - Math.abs(along)) / 0.8, 0, 1);
+            targetOffset = -s.dodge * Math.max(0, gap + 0.015 - s.dodge * otherOffset);
+            s.targetYaw = (s.rear ? -1 : 1) * s.side * s.amount * SHOULDER_TWIST * clamp((SHOULDER_REACH + extra - Math.abs(along)) / 0.8, 0, 1);
           }
         }
       }
@@ -3815,7 +3839,7 @@
       for (let n = 0; n < crewList.length; n++) {
         const other = crewList[n];
         if (other !== cave && other.root.visible && other.state !== "away" && !other.root.quaternion && !other.camp.seat
-          && Math.hypot(other.root.position.x - x, other.root.position.z - z) <= distance + SHOULDER_GAP) recoveryBodies[recoveryBodyCount++] = other;
+          && Math.hypot(other.root.position.x - x, other.root.position.z - z) <= distance + Math.max(SHOULDER_GAP, cave.bodyRadius + other.bodyRadius)) recoveryBodies[recoveryBodyCount++] = other;
       }
       const outside = ctx.outsideActors && ctx.outsideActors();
       if (outside) for (let n = 0; n < outside.length; n++) {
@@ -3836,7 +3860,7 @@
         for (let n = 0; n < recoveryBodyCount; n++) {
           const other = recoveryBodies[n], floor = other.root.position.y - other.baseY;
           if (y < floor + other.bodyHeight - 0.05 && y + cave.bodyHeight > floor + 0.05 && Math.abs(y - floor) < STEP
-            && !gapClear(x, z, nx, nz, other.root.position)) return NaN;
+            && !gapClear(x, z, nx, nz, other.root.position, Math.max(SHOULDER_GAP, cave.bodyRadius + other.bodyRadius))) return NaN;
         }
         if (!npcWalkable(x, z, nx, nz, y, cave.bodyHeight, cave)) return NaN;
         const height = groundAt(nx, nz, y, y, cave);
@@ -4355,9 +4379,8 @@
       if (work.phase === "station") {
         // A nonworker can occupy a reserved shooting place after it was
         // selected. Walking around that body cannot reach its exact center.
-        const occupied = spotOccupied(cave, work.position.x, work.position.y, work.position.z);
-        const near = Math.hypot(cave.root.position.x - work.position.x, cave.root.position.z - work.position.z) < 1.5;
-        work.blockedTime = occupied && near ? work.blockedTime + dt : 0;
+        const occupied = spotOccupied(cave, work.position.x, work.position.y, work.position.z, true);
+        work.blockedTime = occupied ? work.blockedTime + dt : 0;
         // An occupied place re-invokes the site's position hook every 0.8 s by
         // design. It is also the place-cycling hook, so it must be total and bounded.
         if (work.blockedTime >= 0.8 && site.position) {

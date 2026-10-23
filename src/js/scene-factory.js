@@ -166,6 +166,26 @@
   let shared = null, feed = null, mock = null, unsubscribe = null, leaving = false, dust = null;
   // The Ooga the visitor walked in as: one playable actor from the shared crew, and the world it carries.
   let people = null, avatar = null, playerWorld = null, unsubscribeAccount = null, remotes = null, footsteps = null;
+  // The hall's sound (factory-audio.js): what its bed follows, written in place each frame, and where its machines,
+  // Kortik's board and the hall's other stations stand.
+  let audio = null;
+  const ROOM = { glow: 0, surge: 0, lime: 0, fire: 0, spin: 0, churn: 0, cart: null, coin: null };
+  const above = (d, up) => [d.x, d.y + up, d.z];
+  const SPOTS = {
+    core: [LAYOUT.core.x, (LAYOUT.core.chamber[0] + LAYOUT.core.chamber[1]) / 2, LAYOUT.core.z], forge: [FIRE.x, FIRE.y + 0.6, FIRE.z],
+    rebalancer: above(LAYOUT.rebalancer, 2), cooker: above(LAYOUT.cooker, 1.5), board: FM.kortikAt(0, 1.3, FM.KORTIK.seat),
+    shields: [[0, LAYOUT.entrance.y + 1.5, FM.EXIT_Z], ...LAYOUT.tunnels.map((t) => [t.x, t.y + 2, t.z])],
+    console: above(LAYOUT.switchboard, 1.5), treasury: above(LAYOUT.treasury, 1.2), lookout: above(LAYOUT.lookout, LAYOUT.lookout.tower),
+    shaftIn: [FM.SHAFTS[0][0], 0.5, FM.SHAFTS[0][1]], shaftOut: [FM.SHAFTS[1][0], 0.5, FM.SHAFTS[1][1]], gallery: [0, LEVEL.top + 4.5, HALL.back + 4.9]
+  };
+  const hearAt = (name, p, loud = 1, n = 0) => audio.cue(name, p[0], p[1], p[2], loud, n);
+  const hearNode = (name, node, up, loud = 1, n = 0) => audio.cue(name, node.position.x, node.position.y + up, node.position.z, loud, n);
+  // An event's sound at its line's bay or gallery stand, or at the forge for a line the hall does not show.
+  const hearPlace = (name, place) => { if (place) hearNode(name, place.node, 2, place.bay ? 1 : 0.6); else hearAt(name, SPOTS.forge, 0.6); };
+  // A featured line's lamp flashing as its sats arrive, striking the line's own note as the first comes in, or
+  // sputtering on a failure; each sounds again only once its lamp has gone dark, or mostly so.
+  const arrive = (b) => { if (b.flashL <= 0) hearNode("land", b.node, 2, 1, b.index); b.flashL = FLASH; };
+  const sputter = (b) => { if (b.sputter < SPUTTER * 0.5) hearNode("fail", b.node, 2); b.sputter = SPUTTER; };
   const NO_ACTORS = [];
   let scene = null, greeter = null, kortik = null, actPrompt = false;
   // On the Worker's page the island's driving rules hold in here too, and the Ooga driven is reported to the
@@ -298,9 +318,21 @@
     const s = scene, replay = e.stream === "replay", p = e.payload || {};
     const place = placeIn(s, shared.at);
     switch (e.type) {
+      case "node.started": case "node.ready": case "node.stopped":
+        if (!replay) hearAt(e.type === "node.started" ? "start" : e.type === "node.ready" ? "ready" : "stop", SPOTS.core);
+        break;
+      case "peer.count.changed": {
+        const was = s.peers;
+        s.peers = p.peer_count;
+        if (!replay && was !== null && p.peer_count !== was) hearAt(p.peer_count > was ? "peerUp" : "peerDown", SPOTS.lookout);
+        break;
+      }
+      case "activity.summary":
+        if (!replay) hearAt("summary", SPOTS.console);
+        break;
       case "channel.opening":
         s.forgeHeat = HEAT;
-        if (!replay) s.inQueue += CARTS_FOR[p.scale] || 1;
+        if (!replay) { s.inQueue += CARTS_FOR[p.scale] || 1; hearPlace("opening", place); }
         if (place && place.bay) {
           place.state = "building";
           place.build = 0;
@@ -309,6 +341,7 @@
         nudge(s, s.forgeCrew);
         break;
       case "channel.active":
+        if (!replay) hearPlace("active", place);
         if (place && place.bay) {
           place.state = "active";
           if (replay) place.build = 1;
@@ -317,11 +350,12 @@
         break;
       case "channel.closing":
         s.forgeHeat = HEAT;
+        if (!replay) hearPlace("closing", place);
         if (place && place.bay) { place.state = "dismantling"; nudge(s, place.gorilla); }
         nudge(s, s.forgeCrew);
         break;
       case "channel.closed":
-        if (!replay) s.outQueue++;
+        if (!replay) { s.outQueue++; hearPlace("closed", place); }
         if (place) {
           if (place.bay) { place.state = "empty"; place.build = 0; }
           s.placeOf.delete(place.line);
@@ -330,6 +364,7 @@
         break;
       case "forward.settled":
         if (replay) break;
+        if (s.switchBusy < FLASH * 0.3) hearAt("relay", SPOTS.console);
         s.switchBusy = FLASH;
         if (p.fee) dropNugget(s);
         forward(s, place, p.out ? placeIn(s, shared.indexOf(p.out)) : null, p.scale, false);
@@ -343,10 +378,12 @@
         s.rebHour = e.bucket.slice(11, 16);
         if (replay) break;
         s.spin = SPIN;
+        hearAt("rebalance", SPOTS.rebalancer);
         nudge(s, s.rebalanceCrew);
         break;
       case "rebalance.failed":
         s.rebFailed += p.count || 1;
+        if (!replay) hearAt("rebalanceFail", SPOTS.rebalancer);
         break;
     }
     s.dirty = true;
@@ -360,6 +397,7 @@
       return;
     }
     s.hopper = Math.min(1, s.hopper + 0.05);
+    hearAt("nugget", SPOTS.treasury);
   };
   // A worker reacts to its station's event with a chest beat, if it is not already busy.
   const nudge = (s, g) => { if (g && !g.agent.driven) g.agent.poke(); };
@@ -371,9 +409,9 @@
     const n = SATS_FOR[scale] || 1, big = scale === "large" || scale === "very_large", gap = big ? 0.06 : 0.18;
     const flags = (big ? BIG : 0) | (scale === "very_large" ? HUGE : 0) | (failed ? FAILED : 0);
     const inBay = from && from.bay ? from.index : -1, outBay = to && to.bay ? to.index : -1;
-    if (from) from.flashL = FLASH;
-    if (to && !to.bay) to[failed ? "sputter" : "flashL"] = failed ? SPUTTER : FLASH;
-    if (!from && !to) s.overflowFlash = FLASH;
+    if (from) { from.flashL = FLASH; hearNode("zip", from.node, 2, from.bay ? 1 : 0.6); }
+    if (to && !to.bay) { to[failed ? "sputter" : "flashL"] = failed ? SPUTTER : FLASH; hearNode(failed ? "fail" : "land", to.node, 1, 0.6, BL.factoryAudio.NOTES.length - 1); }
+    if (!from && !to) { s.overflowFlash = FLASH; hearAt("zip", SPOTS.gallery, 0.5); }
     if (inBay >= 0) for (let k = 0; k < n; k++) launchSat(s, inBay, 1, k * gap, failed ? inBay : outBay, flags | (k ? 0 : LEAD), failed ? outBay : -1);
     else if (outBay >= 0 && !failed) {
       for (let k = 0; k < n; k++) launchSat(s, outBay, -1, k * gap, -1, flags, -1);
@@ -402,6 +440,7 @@
   const surge = (s, flags) => {
     s.surge = flags & HUGE ? 1.5 : 1;
     s.surgeT = 0;
+    hearAt("surge", SPOTS.core, flags & HUGE ? 1.5 : 1);
     const c = LAYOUT.core;
     fx.burst(c.x, c.chamber[1] + 4.4, c.z, flags & HUGE ? 26 : 16, SURGE_SPARKS, 3);
   };
@@ -446,6 +485,7 @@
       if (running) {
         s.lime = 1;
         s.limeT = 0;
+        hearAt("lime", SPOTS.core);
         fx.burst(s.tossCore.sx, s.tossCore.sy, s.tossCore.sz, 14, SPARKS_LIME, 2.6);
       }
       nudge(s, s.cookCrew);
@@ -465,6 +505,7 @@
         q.jx[i] = (Math.random() - 0.5) * (gate ? 2.4 : 0.5);
         q.jy[i] = (Math.random() - 0.5) * (gate ? 1.2 : 0.5);
         q.jz[i] = gate ? 0 : (Math.random() - 0.5) * 0.5;
+        audio.cue("toss", A.sx, A.sy, A.sz);
         if (gate) ripples.pulse(A.sx + q.jx[i], A.sy + q.jy[i] - ey, 0);
         else {
           s.lime = Math.max(s.lime, 0.7);
@@ -478,7 +519,7 @@
     for (let i = 0; i < CUBE_CAP; i++) {
       if (q.t[i] < 0) continue;
       const A = q.src[i] ? s.tossGate : s.tossCore, t = q.t[i] += dt;
-      if (t >= A.T) { q.t[i] = -1; c.load++; c.caught++; c.kick = 1; continue; }
+      if (t >= A.T) { q.t[i] = -1; c.load++; c.caught++; c.kick = 1; hearAt("plop", SPOTS.cooker); continue; }
       flying++;
       flight(A, t, q.jx[i], q.jy[i], q.jz[i], 0, 0, 0);
       SHOW_ROT.x = q.spin[i] + t * 7; SHOW_ROT.y = q.spin[i] + t * 4; SHOW_ROT.z = 0;
@@ -503,6 +544,11 @@
     c.gulp = Math.max(0, c.gulp - dt * 3);
     c.spit = Math.max(0, c.spit - dt * 8);
     const chomp = c.phase === COOKING ? Math.sin(Math.PI * CHOMPS * (1 - c.t / CHURN)) ** 2 : 0;
+    // Each chew crunches as it bites down, at the top of its swing.
+    if (c.phase === COOKING) {
+      const bite = Math.floor(CHOMPS * (1 - c.t / CHURN) + 0.5);
+      if (bite > c.bites) { c.bites = bite; hearAt("chomp", SPOTS.cooker); }
+    }
     s.lid.rotation.z = -(FM.COOK.open * c.lid * (1 - 0.12 * c.kick) + 0.2 * chomp);
     // The sats it has caught heap on its tongue until it swallows them; it squashes as it gulps, chews and spits.
     s.heap.visible = (wide || c.phase === CLOSE) && c.caught > 0 && c.lid > 0.15;
@@ -514,6 +560,8 @@
       c.phase = COOKING;
       c.t = CHURN;
       c.gulp = 1;
+      c.bites = 0;
+      hearAt("gulp", SPOTS.cooker);
       shared.cooker.tips++;
       shared.cooker.last = c.sats;
       s.refreshAt = 0;
@@ -577,6 +625,7 @@
         // Off the lip: the cooker spits, and a puff of steam follows it out.
         if (t - dt < SLIDE) {
           c.spit = 1;
+          audio.cue("spit", A.sx, A.sy, A.sz);
           const p = fx.spawnParticle(SMOKE, A.sx, A.sy + 0.1, A.sz, (Math.random() - 0.5) * 0.4, 0.5 + Math.random() * 0.3, (Math.random() - 0.5) * 0.4, 0.8, 0.9);
           if (p) p.smoke = true;
         }
@@ -1082,7 +1131,7 @@
   const build = () => {
     const L = LAYOUT, s = {
       bays: [], gallery: [], tunnels: [], placeOf: new Map(), crew: [], sats: null,
-      forgeHeat: 0, switchBusy: 0, spin: 0, hopper: 0, glow: 0, overflowFlash: 0, beam: 0, dirty: true, refreshAt: 0,
+      forgeHeat: 0, switchBusy: 0, spin: 0, hopper: 0, glow: 0, overflowFlash: 0, beam: 0, dirty: true, refreshAt: 0, peers: null,
       forgeCrew: null, rebalanceCrew: null, rebScale: null, rebHour: null, rebFailed: 0,
       nuggets: [], nuggetT: new Float32Array(BELT_CAP).fill(-1),
       // The forge's lines: carts waiting to come up and out on the line, coins waiting to be minted and the one rolling,
@@ -1095,7 +1144,7 @@
       // sats each), and the show in hand: its stage, the jaw, a gulp's kick, the churn's time, what is in the pot,
       // cubes still to throw and from where, bananas still to send out, the gears, the heat and the smoke.
       lime: 0, limeT: -1, tipHead: 0, tipCount: 0, tipN: new Uint16Array(TIP_RING), tipSats: new Float64Array(TIP_RING),
-      thanks: 0, cook: { phase: 0, lid: 0, lidV: 0, kick: 0, gulp: 0, spit: 0, t: 0, load: 0, batch: 0, caught: 0, owed: 0, gap: 0, src: 0, sats: 0, out: 0, outGap: 0, spin: 0, heat: 0, smoke: 0 },
+      thanks: 0, cook: { phase: 0, lid: 0, lidV: 0, kick: 0, gulp: 0, spit: 0, t: 0, load: 0, batch: 0, caught: 0, owed: 0, gap: 0, src: 0, sats: 0, out: 0, outGap: 0, spin: 0, heat: 0, smoke: 0, bites: 0 },
       // The kiosk while a visitor works it: the glide, its poses (from, to, and the walking view to come back to), the
       // visitor's paid tip held for the show, the states of the sheet and the Ooga's controls while put away, and the
       // flow, which enter makes.
@@ -1603,6 +1652,7 @@
     hud.onAction((action) => {
       if (action === "reset") { game.resetAll(); location.reload(); }
       else if (action === "leave") leaveCave();
+      else if (action === "factory-mute") hud.toast(audio.setMuted(!audio.muted) ? "Sound off" : "Sound on");
       else if (action === "reset-view") pilot.resetCamera();
       else if (action === "act") { if (!greeter || !greeter.act()) pilot.action(); }
       else if (action.startsWith("mode-")) pilot.modeAction(action);
@@ -1668,6 +1718,8 @@
     remotes = BL.remotePlayers.create({ root, crew: people });
     // The driven Ooga's own footsteps, heard by this page alone (footsteps.js).
     footsteps = BL.footsteps.create();
+    // The hall's own sound: its machines at work and every event where it happens (factory-audio.js).
+    audio = BL.factoryAudio.create(SPOTS);
     lightUp();
     LIGHT_BASE.set(RENDER_OPTS.lights);
 
@@ -1688,9 +1740,11 @@
     actPrompt = false;
     greeter = BL.factoryGreeter.create({ parent: root, input, fx, feed,
       visitor: () => people && people.player === avatar ? avatar : null,
-      demoRunning: () => feed.reading.contract === "obl.factory.demo.v1" || feed.reading.contract === null && !!shared.mock, coarse: COARSE, camera, quality: () => renderer.quality });
+      demoRunning: () => feed.reading.contract === "obl.factory.demo.v1" || feed.reading.contract === null && !!shared.mock, coarse: COARSE, camera, quality: () => renderer.quality,
+      onKortik: () => kortik && kortik.tourHere() });
     // When Kortik shouts for Tess, she answers back if she is at work.
-    kortik = BL.kortik.create({ fx, onShout: () => greeter && greeter.retort() });
+    // His board's sounds come from where he sits.
+    kortik = BL.kortik.create({ fx, onShout: () => greeter && greeter.retort(), onSound: (name, n) => hearAt(name, SPOTS.board, 1, n) });
     addChild(root, kortik.node);
     // Kortik himself takes pokes; his board frames itself and says what it is, as the stations do.
     // He outranks the board he sits in, but not an Ooga or the guide nearer the view.
@@ -1707,7 +1761,7 @@
     factoryScene.input = input;
     factoryScene.debug = {
       hud, camera, controls: pilot.controls, pilot, crew: people, cavemen: people ? people.cavemen : null, demoTip, fx,
-      factory: { node: shared, feed, mock, greeter, kortik, get scene() { return scene; }, simulate(seconds, dt = 1 / 30) { for (let t = 0; t < seconds; t += dt) shared.tick(dt); } }
+      factory: { node: shared, feed, mock, greeter, kortik, get audio() { return audio; }, get scene() { return scene; }, simulate(seconds, dt = 1 / 30) { for (let t = 0; t < seconds; t += dt) shared.tick(dt); } }
     };
   };
 
@@ -1735,6 +1789,7 @@
       avatar.leap.vx = m[0] * vx + m[8] * vz; avatar.leap.vz = m[2] * vx + m[10] * vz;
       pilot.transformView(m, t.yaw);
       t.crossings++;
+      audio.cue("portal", p.x, p.y - avatar.baseY + 1.2, p.z);
       return;
     }
   };
@@ -1758,6 +1813,7 @@
       s.inQueue--;
       s.inGap = CART_GAP;
       s.shaftGlow[0] = 1;
+      hearAt("cart", SPOTS.shaftIn);
     }
     for (let i = 0; i < s.carts.length; i++) {
       const c = s.carts[i];
@@ -1785,6 +1841,7 @@
       s.mintT = 0;
       s.signTurn += Math.PI * 6;
       s.signPulse = 1;
+      hearAt("spin", SPOTS.forge);
     }
     if (s.mintT >= 0 && (s.mintT += dt) >= MINT_SPIN) {
       s.mintT = -1;
@@ -1800,6 +1857,7 @@
       if (d <= 0) {
         s.coinD = -1;
         c.visible = false;
+        hearAt("coinDrop", SPOTS.shaftOut);
       } else {
         lineAt(outLine, d, AT);
         const k = Math.min(1, 0.2 + s.coinD / 0.9);
@@ -1873,6 +1931,7 @@
   const forgeFlash = (s, kind, wave, sparks) => {
     s.flash = 1;
     s.flashKind = kind;
+    hearAt(kind ? "mint" : "forge", SPOTS.forge);
     s.waveT = 0;
     s.signPulse = 1;
     if (!kind) s.signTurn += Math.PI * 2;
@@ -1886,6 +1945,9 @@
     pilot.readInput(dt);
     if (people) people.update(dt, elapsed);
     pilot.update(dt);
+    // The hall's sound hears from the Ooga driven here, or from the view's target.
+    const ear = people && people.player, at = ear ? ear.root.position : pilot.orbit.target;
+    audio.listen(at.x, ear ? at.y - ear.baseY + 1.4 : at.y, at.z, camera.target.x - camera.position.x, camera.target.z - camera.position.z);
     if (s.real !== donations.real || s.net !== donations.testNetwork) showMode(s);
     if (s.toKiosk) {
       s.toKiosk = false;
@@ -1996,7 +2058,7 @@
     s.switchBusy = Math.max(0, s.switchBusy - dt);
     const sc = FM.switchScreens(), screens = s.switchBusy > 0 ? sc.busy : sc.calm;
     if (s.screens.geometry !== screens) s.screens.geometry = screens;
-    s.spin = Math.max(0, s.spin - dt);
+    if (s.spin > 0 && (s.spin -= dt) <= 0) { s.spin = 0; hearAt("rebalanceEnd", SPOTS.rebalancer); }
     const rr = FM.rebalancerRing(), ring = s.spin > 0 ? rr.on : rr.off, rf = FM.rebalancerFlow(), flow = s.spin > 0 ? rf.on : rf.off;
     if (s.ring.geometry !== ring) s.ring.geometry = ring;
     if (s.flow.geometry !== flow) s.flow.geometry = flow;
@@ -2011,6 +2073,7 @@
         s.nuggetT[i] = -1;
         n.visible = false;
         s.hopper = Math.min(1, s.hopper + 0.05);
+        hearAt("nugget", SPOTS.treasury);
         continue;
       }
       s.nuggetT[i] = next;
@@ -2018,7 +2081,7 @@
       n.position.z = BELT[0][2] + (BELT[1][2] - BELT[0][2]) * next;
       n.rotation.y = next * 2.4;
     }
-    if (s.hopper >= 1) s.hopper = 0;
+    if (s.hopper >= 1) { s.hopper = 0; hearAt("kerching", SPOTS.treasury); }
     s.fill.position.y = 0.1 + s.hopper * 0.55;
     // The heap under the glass grows with the public capacity, as far as the glass allows.
     const capacityScale = Math.min(0.9, (0.6 + Math.log10(Math.max(1e6, mock.snapshot.capacity) / 1e6) * 0.35) * 0.8);
@@ -2026,6 +2089,13 @@
     s.pile.scale.y = capacityScale * 0.9;
     // The cooker, on the tips its board counts.
     cookerFrame(s, dt, elapsed, running);
+    // The hall's bed: the core, the forge, the rebalancer, the cooker, and a cart or the coin on its line.
+    ROOM.glow = s.glow; ROOM.surge = Math.min(1, s.surge); ROOM.lime = Math.min(1, s.lime);
+    ROOM.fire = s.forgeHeat > 0 ? 1 : Math.min(1, s.flash); ROOM.spin = s.spin > 0 ? 1 : 0; ROOM.churn = s.cook.heat;
+    ROOM.cart = null;
+    for (let i = 0; i < s.carts.length; i++) if (s.carts[i].active) { ROOM.cart = s.carts[i].node.position; break; }
+    ROOM.coin = s.coinD >= 0 ? s.coin.position : null;
+    audio.update(dt, ROOM);
     // The watchtower: the beam sweeps while the feed is live; silent, the lamp goes out.
     const live = signal === "live";
     const ll = FM.lookoutLamp(), lampGeo = live ? ll.on : ll.off;
@@ -2046,15 +2116,15 @@
       q.t[i] += dt * q.speed[i] * q.dir[i];
       if (q.dir[i] > 0 && q.t[i] >= 1) {
         if ((q.flags[i] & (BIG | LEAD)) === (BIG | LEAD)) surge(s, q.flags[i]);
-        if (q.aim[i] >= 0) s.bays[q.aim[i]].sputter = SPUTTER;
+        if (q.aim[i] >= 0) sputter(s.bays[q.aim[i]]);
         if (q.next[i] < 0) { q.bay[i] = -1; continue; }
         q.bay[i] = q.next[i];
         q.dir[i] = -1;
         q.t[i] = 1;
       } else if (q.dir[i] < 0 && q.t[i] <= 0) {
         const b = s.bays[q.bay[i]];
-        if (q.flags[i] & FAILED) b.sputter = SPUTTER;
-        else b.flashL = FLASH;
+        if (q.flags[i] & FAILED) sputter(b);
+        else arrive(b);
         q.bay[i] = -1;
         continue;
       }
@@ -2131,6 +2201,8 @@
     remotes = null;
     footsteps.dispose();
     footsteps = null;
+    audio.dispose();
+    audio = null;
     if (people) people.dispose();
     fx.dispose();
     for (const node of targets) input.remove(node);

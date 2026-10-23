@@ -16,13 +16,15 @@
   "use strict";
   const BL = window.BL, KM = BL.kortikModels, FM = BL.factoryModels, Q = BL.math.quat;
   const { createNode, addChild } = BL.scene;
-  // What he says: one line an emote, in emote order, the katana's last, then its two afterwords.
+  // What he says: one line an emote, in emote order, the katana's last, then its two afterwords, then his welcomes for
+  // a tour Tess brings up to his deck (TOUR_LINES of them from TOUR).
   const LINES = ["Gosh, I hate Lightning!", "Another channel? Unbelievable!", "Now I have to rebalance. BY HAND!", "They never make it easy on you!",
     "Open channel. Close channel. Open channel...", "WHO moved my liquidity?!", "Another failed payment. Wonderful.",
     "And they call this the future of money!", "Tess! Make yourself useful!", "It worked? That's suspicious.", "Show-off.",
-    "Stuck HTLC. Classic.", "ENOUGH!", "Force-closed.", "Now I have to rewire all of it."];
-  const KATANA = 12, FORCED = 13, REWIRE = 14, TESS = 8;
-  const EMOTES = ["hate", "unbelievable", "rebalance", "slam", "openclose", "liquidity", "clap", "future", "tess", "suspicious", "showoff", "htlc", "katana"];
+    "Stuck HTLC. Classic.", "ENOUGH!", "Force-closed.", "Now I have to rewire all of it.",
+    "Oh good. A tour.", "Tess. I'm WORKING.", "No flash photography."];
+  const KATANA = 12, FORCED = 13, REWIRE = 14, TESS = 8, TOUR = 15, TOUR_LINES = 3;
+  const EMOTES = ["hate", "unbelievable", "rebalance", "slam", "openclose", "liquidity", "clap", "future", "tess", "suspicious", "showoff", "htlc", "katana", "tour"];
   // Poked, he gets more irritated a poke, one level to five, and cools a level every CALM seconds he is left alone. What
   // he says at each level, and once he has drawn his sword on you, as he ignores you; the PATIENCE-th poke he ignores is
   // one too many. A poke from the visitor's Ooga reaches him from POKE_REACH away.
@@ -79,7 +81,7 @@
     return out;
   };
 
-  const create = ({ fx, onShout = null }) => {
+  const create = ({ fx, onShout = null, onSound = null }) => {
     const B = KM.BOARD, S = KM.station(), L = FM.LAYOUT.kortik, K = KM.KATANA, rand = BL.math.mulberry32(0x6b6f7274);
     const ox = L.x - L.w / 2 + FM.KORTIK.face, oy = L.y, oz = L.z;
     const node = createNode({ position: { x: ox, y: oy, z: oz }, rotation: { x: 0, y: Math.PI / 2, z: 0 } });
@@ -268,13 +270,19 @@
       return s;
     };
     const go = (arm, target, travel, wait = travel, cord = -1, j = -1, v = 0) => { push(MOVE, wait, arm, target, cord, j, v).travel = travel; };
+    // A sound of his, only with the view in earshot; the scene places it at his board (`onSound`).
+    const sound = (name, amount = 0) => { if (near && onSound) onSound(name, amount); };
+    // His voice under a line, a syllable for every few letters: yelled when he is fuming or the line is in capitals.
+    const voice = (text) => sound(anger >= 4 || text === text.toUpperCase() ? "yell" : "mutter", Math.min(12, Math.max(2, Math.round(text.length / 4))));
     const say = (which) => {
       fx.say(k, LINES[which], 3.6);
+      voice(LINES[which]);
       talk = Math.min(2.4, 0.4 + LINES[which].length * 0.05);
       quiet = QUIET[0] + rand() * (QUIET[1] - QUIET[0]);
     };
     const sayText = (text) => {
       fx.say(k, text, 2.6);
+      voice(text);
       talk = Math.min(2.4, 0.4 + text.length * 0.05);
     };
     // A plug changing hands, jacks or its hole settles there from where it is, over `dur`, rising `arc` on the way.
@@ -322,6 +330,7 @@
               if (thTo !== thFrom) swing = thTo > thFrom ? 1 : -1;
               phFrom = bladePh; phTo = POSES[p + 4];
               strike = s.v;
+              if (strike) sound("slash");
               yawTarget = Math.PI + POSES[p + 5];
             }
           }
@@ -329,7 +338,7 @@
         case LOOK: lookKind = s.target; lookJack = s.jack; break;
         case LEAN: leanTarget = s.v; break;
         case ROLL: rollTarget = s.v; break;
-        case STAND: riseTarget = s.v; break;
+        case STAND: if (s.v > riseTarget) sound("creak"); riseTarget = s.v; break;
         case TILT: tiltTarget = s.v; break;
         case SCAB: scabTarget = s.v; break;
         case SWIVEL: {
@@ -340,6 +349,7 @@
         case GRAB: {
           const j = cordJack[s.cord];
           if (j >= 0) { jack[j] = IDLE; jackCord[j] = -1; jackT[j] = 0; }
+          sound(j >= 0 ? "unplug" : "lift");
           cordJack[s.cord] = -1;
           cordHeld[s.cord] = s.arm;
           settle(s.cord);
@@ -350,9 +360,10 @@
           cordJack[s.cord] = s.jack;
           jack[s.jack] = CONNECTED; jackCord[s.jack] = s.cord; jackT[s.jack] = 0;
           settle(s.cord);
+          sound("plug");
           break;
-        case DROP: cordHeld[s.cord] = -1; cordJack[s.cord] = -1; settle(s.cord); break;
-        case KEY: keyTarget[s.cord] = s.v; break;
+        case DROP: cordHeld[s.cord] = -1; cordJack[s.cord] = -1; settle(s.cord); sound("seat"); break;
+        case KEY: keyTarget[s.cord] = s.v; sound("key", s.v > 0 ? 1 : 0); break;
         case SAY:
           say(s.v);
           if (s.v === TESS) hailIn = 1.6;
@@ -368,10 +379,12 @@
           throwAt[c * 3 + 2] = fist[o + 2] + dz / l * 1.5;
           settle(c, 0.28, 0.25);
           throwT[c] = 0.45;
+          sound("throw");
           break;
         }
         case THUD: {
           mugHop = 0.36; jolt = 0.3; chaos = Math.max(chaos, 0.2);
+          sound("thud");
           const o = s.arm * 3;
           FM.kortikAt(fist[o], KM.DESK + 0.02, fist[o + 2], HALL3);
           fx.puff(HALL3[0], HALL3[1], HALL3[2], 0.3, 0.25, 0, 0.9);
@@ -380,16 +393,19 @@
         }
         case FAIL:
           failJack = s.jack; failT = 2.2;
+          sound("buzzer");
           if (jack[s.jack] === IDLE) { jack[s.jack] = CALLING; jackT[s.jack] = 0; }
           break;
         case SWORD:
           if (s.v && !swordOn) bladeFromScabbard();
+          if (!!s.v !== swordOn) sound(s.v ? "draw" : "sheathe");
           swordOn = !!s.v;
           break;
-        case FORCE: forceClose(); break;
+        case FORCE: forceClose(); sound("forced"); break;
         case MUG:
           for (let i = 0; i < 3; i++) mugFrom[i] = mugAt[i];
           mugHeld = !!s.v; mugBlend = 0;
+          sound("mug");
           break;
       }
     };
@@ -780,7 +796,17 @@
       }
       threat();
     };
-    const ACTS = [hate, unbelievable, rebalance, slam, openClose, liquidity, clap, future, tess, suspicious, showOff, htlc, katana];
+    // Tess bringing a tour up to his deck: he swivels round to them, arms folded, and lets them know. Never from the bag.
+    const tour = () => {
+      turnTo(3);
+      go(0, T_CROSS, 0.35, 0);
+      go(1, T_CROSS, 0.35, 0.4);
+      push(SAY, 0, 0, 0, -1, -1, TOUR + Math.floor(rand() * TOUR_LINES));
+      push(WAIT, 1.8);
+      go(2, T_REST, 0.4);
+      turnBack();
+    };
+    const ACTS = [hate, unbelievable, rebalance, slam, openClose, liquidity, clap, future, tess, suspicious, showOff, htlc, katana, tour];
     // The next emote: the katana now and then once he has worked up to it, otherwise the next from a shuffled bag.
     const bag = new Int8Array(KATANA);
     let bagAt = KATANA, sinceKatana = 0;
@@ -873,7 +899,7 @@
       if (live < 5 && rand() < 0.7) {
         for (let tries = 0; tries < 12; tries++) {
           const j = Math.floor(rand() * jacks);
-          if (jack[j] === IDLE) { jack[j] = CALLING; jackT[j] = 0; return; }
+          if (jack[j] === IDLE) { jack[j] = CALLING; jackT[j] = 0; sound("ring"); return; }
         }
       }
       for (let tries = 0; tries < 12; tries++) {
@@ -1226,6 +1252,7 @@
     // at the board.
     const poke = () => {
       flinch = 0.35; glare = 1.4; calmIn = CALM;
+      sound("poke");
       quiet = Math.max(quiet, 10);
       // He has snapped: nothing more gets through until the katana is out.
       if (wantReact === SNAP) return;
@@ -1240,7 +1267,7 @@
         anger = Math.min(ANGRY, anger + 1);
         peak = Math.max(peak, anger);
         if (retort <= 0) { const lines = POKES[anger - 1]; sayText(lines[Math.floor(Math.random() * lines.length)]); retort = 0.8; }
-        if (anger >= 3) steam = 2.4;
+        if (anger >= 3) { if (steam <= 0) sound("steam"); steam = 2.4; }
         if (anger >= 4) chaos = Math.max(chaos, 0.25);
         wantReact = anger;
       }
@@ -1260,8 +1287,10 @@
       if (free()) interrupt();
       return forced;
     };
+    // Tess has brought a tour up to his deck: he greets it next, unless he is past caring.
+    const tourHere = () => { if (anger < 4 && !threatened) emote("tour"); };
     return {
-      node, board, figure: [P.head, P.torso], kortik: k, update, liveGeometry, dispose, emote, poke, useNear, actLabel,
+      node, board, figure: [P.head, P.torso], kortik: k, update, liveGeometry, dispose, emote, tourHere, poke, useNear, actLabel,
       get jacks() { return jack; }, get cords() { return cordJack; }, get held() { return cordHeld; }, get near() { return near; }, get anger() { return anger; }, get threatened() { return threatened; }
     };
   };
