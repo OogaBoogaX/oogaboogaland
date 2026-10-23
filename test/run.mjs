@@ -9992,20 +9992,51 @@ const bifrostEntrance = { name: "bifrost entrance", why: "playthrough: an Ooga w
   record("bifrost entrance: from the pass stairs the roster's widest Ooga walks through the arch out onto the bridge's deck", arch.onDeck && Math.abs(arch.feet - arch.deck) < 0.3, JSON.stringify(arch));
   await b.evaluate(`(() => { const B = window.__ooga, p = B.bifrost.site.portal, sx = Math.sin(p.ry), sz = Math.cos(p.ry), x = p.x + sx * 0.9, z = p.z + sz * 0.9; B.pilot.navigate({ position: { x, y: p.floorY, z }, target: { x: x - sx * 6, y: p.floorY + 1, z: z - sz * 6 }, yaw: Math.atan2(sx, sz), pitch: 0.2, dist: 5 }); B.advance(0.5, 1 / 60); window.__portal = [-sx, -sz]; })()`);
   const inKey = await b.evaluate(`window.__portal`);
-  // The first crossing finds the chamber's deferred code refused, as a hosted page's bundle answering 503 would be: the
-  // view fades back to the island with the same Ooga driven and walking, and stepping out of the field and in again
-  // asks for the code once more and goes through.
-  await b.evaluate(`(() => { const load = BL.deferred.load; window.__loads = 0; BL.deferred.load = (group) => { if (group !== "dsb") return load(group); if (window.__loads++) { BL.deferred.load = load; return load(group); } return Promise.reject(new Error("503")); }; window.__portalStart = { ...__ooga.crew.player.root.position }; })()`);
-  await walkToward(b, inKey[0], inKey[1], 0.8);
-  const refused = await b.evaluate(`(() => { const B = window.__ooga; for (let i = 0; i < 240 && B.transitioning; i++) B.advance(1 / 30, 1 / 30); const a = B.crew.player; return { scene: B.scene, transitioning: B.transitioning, loads: window.__loads, ooga: a ? a.traits.name : null, at: a ? { x: a.root.position.x, z: a.root.position.z } : null }; })()`);
-  await walkToward(b, -inKey[0], -inKey[1], 0.5);
-  const moved = await b.evaluate(`(() => { const a = __ooga.crew.player, p = a && a.root.position; return { loads: window.__loads, scene: __ooga.scene, x: p ? p.x : null, z: p ? p.z : null }; })()`);
-  record("bifrost entrance: a refused chamber download fades back to the island with the same Ooga driven, walking again and not asking twice while it stands in the field", refused.scene === "hub" && !refused.transitioning && refused.loads === 1 && refused.ooga === "portlandhodl"
-    && moved.scene === "hub" && moved.loads === 1 && refused.at && Math.hypot(moved.x - refused.at.x, moved.z - refused.at.z) > 0.3, JSON.stringify({ refused, moved }));
-  await b.evaluate(`(() => { const B = window.__ooga, p = B.bifrost.site.portal, s = window.__portalStart, sx = Math.sin(p.ry), sz = Math.cos(p.ry); B.pilot.navigate({ position: s, target: { x: s.x - sx * 6, y: p.floorY + 1, z: s.z - sz * 6 }, yaw: Math.atan2(sx, sz), pitch: 0.2, dist: 5 }); B.advance(0.5, 1 / 60); })()`);
-  await walkToward(b, inKey[0], inKey[1], 0.8);
-  const arrived = await b.evaluate(`(() => { const B = window.__ooga; for (let i = 0; i < 240 && (B.transitioning || B.scene !== "bifrost"); i++) B.advance(1 / 30, 1 / 30); B.advance(0.3, 1 / 30); const d = B.bifrost; return { scene: B.scene, loads: window.__loads, ooga: B.crew && B.crew.player ? B.crew.player.traits.name : null, pictured: !!(d && d.pictured), outside: !!(d && d.outside) }; })()`);
-  record("bifrost entrance: walking through the portal's field takes the same Ooga into the chamber, which has DSB Land's picture and the island's view back out", arrived.scene === "bifrost" && arrived.loads === 2 && arrived.ooga === "portlandhodl" && arrived.pictured && arrived.outside, JSON.stringify(arrived));
+  // Count the critical path at enter itself: later idle preview work must not be mistaken for a blocking load.
+  await b.evaluate(`(() => {
+    const S = BL.scenes.bifrost;
+    const probe = window.__bifrostPreview = { load: BL.deferred.load, enter: S.enter, calls: [], entered: null };
+    BL.deferred.load = group => { probe.calls.push(group); return probe.load(group); };
+    S.enter = function(ctx) {
+      const start = probe.calls.length;
+      probe.enter.call(this, ctx);
+      const D = S.debug.bifrost;
+      probe.entered = {
+        criticalLoads: probe.calls.filter(group => group === "dsb" || group === "poker").length,
+        enterLoads: probe.calls.length - start, pictured: D.pictured, outside: D.outside,
+        windows: D.scene.windows.filter(w => w.kind === "travel").map(w => ({
+          scene: w.row.scene, owned: !!w.picture.owned, faces: w.picture.geometry?.faces.length || 0
+        }))
+      };
+    };
+  })()`);
+  try {
+    await walkToward(b, inKey[0], inKey[1], 0.8);
+    const arrived = await b.evaluate(`(() => {
+      const B = __ooga;
+      for (let i = 0; i < 240 && (B.transitioning || B.scene !== "bifrost"); i++) B.advance(1 / 30, 1 / 30);
+      const probe = window.__bifrostPreview; BL.scenes.bifrost.enter = probe.enter;
+      return { scene: B.scene, ooga: B.crew?.player?.traits.name || null, entered: probe.entered };
+    })()`);
+    record("bifrost entrance: the portal takes the same Ooga into the chamber with its authored stand-ins and island view, without loading either destination on the critical path",
+      arrived.scene === "bifrost" && arrived.ooga === "portlandhodl" && arrived.entered?.criticalLoads === 0
+      && arrived.entered.enterLoads === 0 && !arrived.entered.pictured && arrived.entered.outside
+      && arrived.entered.windows.length === 2 && arrived.entered.windows.every(w => !w.owned && w.faces > 0), JSON.stringify(arrived));
+    // Idle callbacks, deferred scripts and JPEG decode need real event-loop turns, rather than debug advance alone.
+    const pictured = await untilPage(b, 'B.scene === "bifrost" && !B.transitioning && B.bifrost.scene.windows.filter(w => w.kind === "travel").every(w => w.picture.owned)', 15000);
+    const previews = await b.evaluate(`(() => {
+      const B = __ooga, D = B.bifrost, calls = window.__bifrostPreview.calls;
+      return { scene: B.scene, ooga: B.crew?.player?.traits.name || null, pictured: !!D?.pictured, outside: !!D?.outside,
+        calls: { dsb: calls.filter(group => group === "dsb").length, poker: calls.filter(group => group === "poker").length },
+        windows: D.scene.windows.filter(w => w.kind === "travel").map(w => ({ scene: w.row.scene, owned: !!w.picture.owned })) };
+    })()`);
+    record("bifrost entrance: the chamber eventually hangs both destinations' photographs while preserving the same Ooga and the view back out",
+      pictured && previews.scene === "bifrost" && previews.ooga === "portlandhodl" && previews.pictured && previews.outside
+      && previews.calls.dsb > 0 && previews.calls.poker > 0 && previews.windows.length === 2
+      && previews.windows.every(w => w.owned), JSON.stringify(previews));
+  } finally {
+    await b.evaluate(`(() => { const probe = window.__bifrostPreview; if (probe) { BL.scenes.bifrost.enter = probe.enter; BL.deferred.load = probe.load; delete window.__bifrostPreview; } })()`);
+  }
 } };
 const walkingModeControls = async (b, scene) => {
   const state = await b.evaluate(`(() => {
@@ -10117,16 +10148,53 @@ const bifrostCanvas = { name: "bifrost canvas2d", why: "contract: the Canvas 2D 
 // DSB's way home while ₿IFRÖST is open: from the chamber through the DSB window, DSB Land's passage walked, and back
 // through DSB's own gate after its dialer.
 const bifrostDsb = { name: "bifrost dsb round trip", why: "playthrough: the same Ooga walks through the DSB window into DSB Land, and DSB's gate home brings it back into the chamber before the DSB window", run: async (b) => {
-  await b.evaluate(`(() => { const B = window.__ooga, r = window.BL.bifrostModels.HALL.r - 2.8, w = B.bifrost.scene.windows.find((w) => w.row.scene === "dsb"), x = w.sn * r, z = w.c * r; B.pilot.navigate({ position: { x, y: 0, z }, target: { x: x + w.sn * 4, y: 1, z: z + w.c * 4 }, yaw: Math.atan2(w.sn, w.c) + Math.PI, pitch: 0.2, dist: 5 }); B.advance(0.5, 1 / 60); window.__dsbWindow = [w.sn, w.c]; })()`);
-  const outKey = await b.evaluate(`window.__dsbWindow`);
-  await walkToward(b, outKey[0], outKey[1], 1.5);
-  const there = await b.evaluate(`(() => { const B = window.__ooga; for (let i = 0; i < 240 && (B.transitioning || B.scene !== "dsb"); i++) B.advance(1 / 30, 1 / 30); return { scene: B.scene, ooga: B.dsb ? B.dsb.avatar.traits.name : null }; })()`);
-  if (there.scene === "dsb") {
-    await b.evaluate(`(() => { window.dispatchEvent(new KeyboardEvent("keydown", { key: "w" })); BL.scenes.dsb.update(__ooga.audio.duration + 1, 1); window.dispatchEvent(new KeyboardEvent("keyup", { key: "w" })); document.querySelector('[data-action="dsb-skip"]').click(); })()`);
-    await dsbExit(b, "bifrost");
+  // Finish the optional previews before counting only the actual destination's prepare request.
+  const pictured = await untilPage(b, 'B.scene === "bifrost" && !B.transitioning && B.bifrost.scene.windows.filter(w => w.kind === "travel").every(w => w.picture.owned)', 15000);
+  if (!pictured) throw new Error("Bifrost previews did not finish before the destination failure fixture");
+  await b.evaluate(`(() => {
+    const probe = window.__bifrostDsb = { load: BL.deferred.load, calls: 0 };
+    BL.deferred.load = group => {
+      if (group !== "dsb") return probe.load(group);
+      if (++probe.calls === 1) return Promise.reject(new Error("503"));
+      return probe.load(group);
+    };
+  })()`);
+  try {
+    await b.evaluate(`(() => { const B = window.__ooga, r = window.BL.bifrostModels.HALL.r - 2.8, w = B.bifrost.scene.windows.find((w) => w.row.scene === "dsb"), x = w.sn * r, z = w.c * r; B.pilot.navigate({ position: { x, y: 0, z }, target: { x: x + w.sn * 4, y: 1, z: z + w.c * 4 }, yaw: Math.atan2(w.sn, w.c) + Math.PI, pitch: 0.2, dist: 5 }); B.advance(0.5, 1 / 60); window.__dsbWindow = [w.sn, w.c]; })()`);
+    const outKey = await b.evaluate(`window.__dsbWindow`);
+    await walkToward(b, outKey[0], outKey[1], 1.5);
+    const recovered = await untilPage(b, 'B.scene === "bifrost" && !B.transitioning && window.__bifrostDsb.calls >= 1', 15000);
+    const refused = await b.evaluate(`(() => {
+      const B = __ooga;
+      B.advance(0.5, 1 / 60);
+      const a = B.crew?.player, p = a?.root.position;
+      return { scene: B.scene, transitioning: B.transitioning, loads: window.__bifrostDsb.calls,
+        ooga: a?.traits.name || null, at: p ? { x: p.x, z: p.z } : null };
+    })()`);
+    // Walk back through the real controls to release the failed window's crossing hold, then enter it again.
+    await walkToward(b, -outKey[0], -outKey[1], 0.5);
+    const moved = await b.evaluate(`(() => {
+      const B = __ooga, a = B.crew?.player, p = a?.root.position;
+      const w = B.scene === "bifrost" && B.bifrost.scene.windows.find(w => w.row.scene === "dsb");
+      return { scene: B.scene, loads: window.__bifrostDsb.calls, ooga: a?.traits.name || null,
+        x: p?.x ?? null, z: p?.z ?? null, inside: !!p && !!w && p.x * w.sn + p.z * w.c - BL.bifrostModels.HALL.r <= BL.bifrostModels.WINDOW.plane };
+    })()`);
+    await walkToward(b, outKey[0], outKey[1], 1.5);
+    const there = await b.evaluate(`(() => { const B = window.__ooga; for (let i = 0; i < 240 && (B.transitioning || B.scene !== "dsb"); i++) B.advance(1 / 30, 1 / 30); return { scene: B.scene, ooga: B.dsb ? B.dsb.avatar.traits.name : null, loads: window.__bifrostDsb.calls }; })()`);
+    record("bifrost dsb destination: a refused download returns control to the same Ooga without another attempt in the field, and walking back then crossing retries once",
+      recovered && refused.scene === "bifrost" && !refused.transitioning && refused.loads === 1 && refused.ooga === "portlandhodl"
+      && moved.scene === "bifrost" && moved.loads === 1 && moved.ooga === "portlandhodl" && moved.inside
+      && refused.at && Math.hypot(moved.x - refused.at.x, moved.z - refused.at.z) > 0.3
+      && there.scene === "dsb" && there.ooga === "portlandhodl" && there.loads === 2, JSON.stringify({ refused, moved, there }));
+    if (there.scene === "dsb") {
+      await b.evaluate(`(() => { window.dispatchEvent(new KeyboardEvent("keydown", { key: "w" })); BL.scenes.dsb.update(__ooga.audio.duration + 1, 1); window.dispatchEvent(new KeyboardEvent("keyup", { key: "w" })); document.querySelector('[data-action="dsb-skip"]').click(); })()`);
+      await dsbExit(b, "bifrost");
+    }
+    const back = await b.evaluate(`(() => { const B = window.__ooga, d = B.scene === "bifrost" && B.bifrost, a = d && d.avatar, w = d && d.scene.windows.find((w) => w.row.scene === "dsb"), p = a && a.root.position; return { scene: B.scene, ooga: a ? a.traits.name : null, along: p ? +(p.x * w.sn + p.z * w.c - window.BL.bifrostModels.HALL.r).toFixed(2) : null, across: p ? +(p.x * w.c - p.z * w.sn).toFixed(2) : null }; })()`);
+    record("bifrost dsb round trip: walking through the DSB window takes the same Ooga into DSB Land, and DSB's gate home brings it back into the chamber, standing before the DSB window", there.scene === "dsb" && there.ooga === "portlandhodl" && back.scene === "bifrost" && back.ooga === "portlandhodl" && back.along > -3.5 && back.along < -2 && Math.abs(back.across) < 0.5, JSON.stringify({ there, back }));
+  } finally {
+    await b.evaluate(`(() => { const probe = window.__bifrostDsb; if (probe) { BL.deferred.load = probe.load; delete window.__bifrostDsb; } })()`);
   }
-  const back = await b.evaluate(`(() => { const B = window.__ooga, d = B.scene === "bifrost" && B.bifrost, a = d && d.avatar, w = d && d.scene.windows.find((w) => w.row.scene === "dsb"), p = a && a.root.position; return { scene: B.scene, ooga: a ? a.traits.name : null, along: p ? +(p.x * w.sn + p.z * w.c - window.BL.bifrostModels.HALL.r).toFixed(2) : null, across: p ? +(p.x * w.c - p.z * w.sn).toFixed(2) : null }; })()`);
-  record("bifrost dsb round trip: walking through the DSB window takes the same Ooga into DSB Land, and DSB's gate home brings it back into the chamber, standing before the DSB window", there.scene === "dsb" && there.ooga === "portlandhodl" && back.scene === "bifrost" && back.ooga === "portlandhodl" && back.along > -3.5 && back.along < -2 && Math.abs(back.across) < 0.5, JSON.stringify({ there, back }));
 } };
 // The poker room's window: from the chamber straight into the room, without the fade, as the room's mirror back does,
 // and out through that mirror before the window again. The scene changing on the step after the crossing starts is the
