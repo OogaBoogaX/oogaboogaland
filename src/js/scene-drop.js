@@ -94,6 +94,8 @@
   };
   // Module scope, so the board keeps the last pick for the page's life across visits.
   const selection = { racer: contributors.activeRoster[0]?.name || null };
+  // A signed-in visitor with an Ooga flies it, as they drive only it on the island; the board's picker is for the rest.
+  const ownDiver = () => BL.net.ownAmong(contributors.activeRoster);
 
   // One visit's state: made in enter, dropped in leave.
   // Where the game exits to: back to Ooga Arcade when a cabinet started it, otherwise the island.
@@ -289,6 +291,7 @@
 
   const toBoard = () => {
     phase = "board";
+    dhud.lockDiver(ownDiver());
     parkPlane();
     if (diver) {
       diver.place(roof.x, roof.y, roof.z, roof.ry);
@@ -833,6 +836,7 @@
   const enter = (ctx) => {
     ({ renderer, game, world, go, lootEnabled, testBananas } = ctx);
     home = ctx.from === "arcade" ? "arcade" : "hub";
+    hudMod.leaveTo("drop", home);
     camera = createCamera({ fov: 50, near: 0.4, far: 820 });
     root = createNode();
     clock = daylight.createClock({ hour: hourParam, daylen: daylenParam, day: dayParam, time: timeParam, now: new Date() });
@@ -908,6 +912,8 @@
       if (contributors.activeRoster.some((c) => c.name === world.pilot)) selection.racer = world.pilot;
       world.pilot = null;
     }
+    const own = ownDiver();
+    if (own) selection.racer = own;
     buildDiver();
     if (diver) layCourse(game.state.drop.jumps);
     else {
@@ -983,7 +989,10 @@
       for (const c of contributors.activeRoster) hud.setRosterRow(c.name, contributors.stateFor(c), contributors.ageLabel(c));
       fx.trimPool();
     }, 6e4);
-    hintTimer = window.setTimeout(() => hud.hint(COARSE ? "Pick an Ooga, then Fly!" : "Pick an Ooga, then Fly! (Enter)"), 1200);
+    hintTimer = window.setTimeout(() => {
+      const pick = ownDiver() ? "" : "Pick an Ooga, then ";
+      hud.hint(COARSE ? `${pick}Fly!` : `${pick}Fly! (Enter)`);
+    }, 1200);
     Object.assign(dropScene, {
       root, camera, input,
       debug: {

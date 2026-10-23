@@ -65,6 +65,7 @@
     lineA: bay(0), lineB: bay(1), lineC: bay(2), lineD: bay(3),
     forge: view(0, 2.2, 1.5, 0.75, 0.22, 10),
     switchboard: view(-12, 4, 6, 0.55, 0.22, 9),
+    kortik: view(-19.4, 3.6, 12.2, Math.PI / 2, 0.22, 7),
     rebalancer: view(14, 4.6, 5, -0.8, 0.3, 10),
     // The nav's Treasury frames the whole platform: the rebalancer, the treasury and the cooker in a row.
     treasury: view(13.2, 3.6, 12.6, -0.7, 0.52, 15.5),
@@ -144,7 +145,8 @@
     forge: ["On-chain forge · open and close", "Channels are opened and closed with Bitcoin transactions. Opening one feeds the forge carts of sats from the chain; closing one mints a coin that goes back down to it."],
     shaftIn: ["From the chain · opening channels", "Sats come up this shaft from the Bitcoin chain. Each channel the node opens sends carts of them into the forge, more for a bigger channel."],
     shaftOut: ["To the chain · closing channels", "When a channel closes, its sats go back to the Bitcoin chain: the forge mints them into a coin that rolls down this shaft."],
-    switchboard: ["Switchboard · routing", "Every payment the node passes on for someone else is a forward. The screens light as they go through."],
+    switchboard: ["Routing Console · routing", "Every payment the node passes on for someone else is a forward. The screens light as they go through."],
+    kortikBoard: ["Kortik's Switchboard · manual routing", "Before routing was automatic, operators patched every call through by hand. Kortik still does, and he has opinions about it."],
     rebalancer: ["Rebalancer · moving liquidity", "Rebalancing moves sats between channels so lines keep working. It is shown by the hour, never for one line."],
     treasury: ["Treasury · routing fees", "The gold under the glass is the node's public capacity, visible to anyone on the Lightning network. Each forward that earns the demo node a fee sends a nugget up the belt into the crate."],
     cooker: ["Banana cooker · tips into bananas", "Every tip is cooked here: the core throws its sats across, the cooker chomps and churns, and bananas shoot up the ceiling tube to the island's pile."],
@@ -156,13 +158,16 @@
     exit: ["The way out", "Back to the island."]
   };
 
+  // How Kortik's tooltip reads at each level of his temper.
+  const KORTIK_MOODS = ["the operator", "busy", "irritated", "fuming", "FURIOUS", "armed"];
+
   let renderer, game, world, go, root, camera, hud, hooks, input, pilot, fx, agentPlay = null;
   // The page's one factory node (`world.factoryNode`), and its feed and demo node.
   let shared = null, feed = null, mock = null, unsubscribe = null, leaving = false, dust = null;
   // The Ooga the visitor walked in as: one playable actor from the shared crew, and the world it carries.
   let people = null, avatar = null, playerWorld = null, unsubscribeAccount = null, remotes = null, footsteps = null;
   const NO_ACTORS = [];
-  let scene = null, greeter = null, actPrompt = false;
+  let scene = null, greeter = null, kortik = null, actPrompt = false;
   // On the Worker's page the island's driving rules hold in here too, and the Ooga driven is reported to the
   // room every frame, so signed-in players in the hall hear each other (voice needs a driven Ooga).
   const mayPossess = (cave) => BL.net.mayDrive(cave.traits.name);
@@ -234,6 +239,8 @@
     for (const [lx, ly, lz] of FM.STUDY.lamps) lamps.push(["hang", L.study.x - lz, L.study.y + ly, L.study.z + lx]);
     if (FM.donationCorner()) for (const [x, y, z] of [...FM.KIOSK.hooks, ...FM.BOARD.hooks]) lamps.push(["hang", x, y, z]);
     lamps.push(["post", L.switchboard.x + 3.1, L.switchboard.y, L.switchboard.z - 1.9, Math.PI]);
+    // Kortik's Switchboard's: two over its sign and two on posts at the deck's corners.
+    lamps.push(...FM.kortikLamps());
     // Two from the arms at the ends of each forge shaft's header.
     for (const [x, z] of FM.SHAFTS) for (const s of [-1, 1]) lamps.push(["hang", x + s * 1.7, 2.76, z - 0.2]);
     // Two from each of the rebalancer's, the treasury's and the cooker's signs.
@@ -251,12 +258,15 @@
     }
     for (const s of [-1, 1]) lamps.push(["chain", s * 6, 12.5, 8], ["chain", s * 13, 16.5, 3]);
     const my = e.y, mz = FM.EXIT_Z;
-    return FM.lanterns(lamps, [
+    const hung = FM.lanterns(lamps, [
       [-14, 16, -12, 14, 16, -12, 1.6, [0.2, 0.4, 0.6, 0.8]], [-18, 13.5, -8, 18, 13.5, -8, 1.4, [0.2, 0.35, 0.65, 0.8]],
-      [-20, 9, 8, -13, 9, 12, 0.6, [0.5]], [20, 9.5, 5, 13.5, 9, 7, 0.6, [0.5]],
+      [20, 9.5, 5, 13.5, 9, 7, 0.6, [0.5]],
       // Just past the rim, the mouth's own string of lamps, hung where the hub hangs it.
       [-3.05, my + 3.42, mz + 1.1, 3.05, my + 3.42, mz + 1.1, 0.3, [0.3, 0.7]]
     ]);
+    // Kortik's station lights its deck with two lanterns of its own, on the bracket by the board and on the floor.
+    for (const [x, y, z] of FM.kortikLights()) hung.lights.push(x, y, z, 6);
+    return hung;
   });
 
   // Where a line stands: one of the four featured bays, a gallery stand, or nowhere shown (the overflow count). The
@@ -985,7 +995,7 @@
     setData(s.feeBoard, "ROUTING FEES (PUBLIC)", [["Forwards settled", sats(r.settled), "count"], ["Earned a fee", sats(r.fees), "sats"], ["Hour's success", r.summary ? `${Math.round(r.summary.ratio * 100)}%` : "None yet", "ok"]], 1.9);
     setData(s.statsBoard, "NODE STATS (PUBLIC)", [["Channels", r.channels ?? snap.channelCount, "count"], ["Peers", r.peers ?? snap.peerCount, "count"], ["Total capacity", `${sats(snap.capacity)} sats`, "sats"], ["Fee policy", `${low} / ${high} ppm`, "plain"], ["Node", NODE_STATES[r.node] || "Unknown", "ok"]], 1.9);
     const summary = r.summary ? `Foundry hour: ${r.summary.count} fwd, ${Math.round(r.summary.ratio * 100)}% ok` : "(Routing & Forwarding)";
-    setBoard(s.switchLabel, "SWITCHBOARD", summary, false);
+    setBoard(s.switchLabel, "ROUTING CONSOLE", summary, false);
     const shown = s.placeOf.size, total = r.channels ?? snap.channelCount;
     setBoard(s.galleryLabel, "MORE CHANNELS", `${Math.max(0, total - 4)} lines, ${Math.max(0, total - shown)} not shown`, false);
     // A real page shows the shared donation totals here too, rather than this visit's animation counters.
@@ -1540,6 +1550,7 @@
       const o = hit.owner, tip = TIPS[o.kind];
       if (o.kind === "board") return COARSE ? "Banana donation board · tap to read it" : "Banana donation board · click to read it";
       if (o.kind === "greeter") return COARSE ? `${BL.factoryGreeter.NAME} the guide · tap to talk` : `${BL.factoryGreeter.NAME} the guide · Space to talk`;
+      if (o.kind === "kortik") return `Kortik · ${KORTIK_MOODS[kortik.anger]} · ${COARSE ? "tap" : "click"} to poke`;
       if (o.kind === "line" || o.kind === "tunnel") {
         const b = o.place, c = b.line && mock.snapshot.channels.find((ch) => ch.id === b.line);
         return o.kind === "line" ? `Channel ${b.letter}${c ? ` · peer ${c.peer}` : ""}` : `Peer tunnel${c ? ` · ${c.peer}` : ""}`;
@@ -1565,6 +1576,7 @@
         if (o.kind === "kiosk") return openBooth(scene);
         if (o.kind === "board") return hud.openBoard(scene.boardView);
         if (o.kind === "greeter") return greeter.greet();
+        if (o.kind === "kortik") return kortik.poke();
         if (o.preset) pilot.goPreset(o.preset);
         // The kiosk's and the board's words own up to simulated or test payments, asked now: the page's Worker can turn
         // real mode on after the visit has begun.
@@ -1624,9 +1636,10 @@
       playerWorld = { level: 0, weapons: world.weapons, magazine: world.magazine };
       const shared = { root, input, hud, game, world: playerWorld, playerName, fx, viewYaw: 0, outsideActors: () => remotes ? remotes.actors() : NO_ACTORS, outsideActorHeight: BL.remotePlayers.BODY_HEIGHT, groundAt: groundFor, walkable: walkableFor, flyable: flyableFor, ceilingAt: ceilingFor, ladders: LAYOUT.ladders, onBodyMove: resolveLanding, clipProjectileTarget, absorbProjectile, reloadPolicy, useNear: (x, z, reach, feet) => {
         if (nearKiosk(x, z, reach, feet)) return true;
-        // Space talks to the guide when she offers it (she flies, so she judges her reach); on a ladder, or anywhere
-        // else, it stays the visitor's own.
-        return !!greeter && !(avatar && avatar.ladder && avatar.ladder.plane) && greeter.useNear(x, z, reach);
+        // Space talks to the guide when she offers it (she flies, so she judges her reach), or pokes Kortik beside his
+        // stool; on a ladder, or anywhere else, it stays the visitor's own.
+        if (avatar && avatar.ladder && avatar.ladder.plane) return false;
+        return !!greeter && greeter.useNear(x, z, reach) || !!kortik && kortik.useNear(x, z, reach, feet);
       } };
       shared.onModelChange = () => {
         if (!avatar) return;
@@ -1676,6 +1689,14 @@
     greeter = BL.factoryGreeter.create({ parent: root, input, fx, feed,
       visitor: () => people && people.player === avatar ? avatar : null,
       demoRunning: () => feed.reading.contract === "obl.factory.demo.v1" || feed.reading.contract === null && !!shared.mock, coarse: COARSE, camera, quality: () => renderer.quality });
+    // When Kortik shouts for Tess, she answers back if she is at work.
+    kortik = BL.kortik.create({ fx, onShout: () => greeter && greeter.retort() });
+    addChild(root, kortik.node);
+    // Kortik himself takes pokes; his board frames itself and says what it is, as the stations do.
+    // He outranks the board he sits in, but not an Ooga or the guide nearer the view.
+    for (const part of kortik.figure) { input.add(part, { kind: "kortik", priority: 1, weaponType: "none" }, { radius: 0.6 }); targets.push(part); }
+    input.add(kortik.board, { kind: "kortikBoard", preset: "kortik", weaponType: "none" }, { radius: 3 });
+    targets.push(kortik.board);
     // With no Ooga the visitor cannot talk to the guide: a hint points them to the island to pick one.
     if (!avatar) hud.hint(`${BL.factoryGreeter.NAME} the guide gives tours here — pick an Ooga on the island first`);
     // Sent from the island's dialog to tip: on to the kiosk's glass at the first frame, once the pilot has placed the view.
@@ -1686,7 +1707,7 @@
     factoryScene.input = input;
     factoryScene.debug = {
       hud, camera, controls: pilot.controls, pilot, crew: people, cavemen: people ? people.cavemen : null, demoTip, fx,
-      factory: { node: shared, feed, mock, greeter, get scene() { return scene; }, simulate(seconds, dt = 1 / 30) { for (let t = 0; t < seconds; t += dt) shared.tick(dt); } }
+      factory: { node: shared, feed, mock, greeter, kortik, get scene() { return scene; }, simulate(seconds, dt = 1 / 30) { for (let t = 0; t < seconds; t += dt) shared.tick(dt); } }
     };
   };
 
@@ -2063,10 +2084,11 @@
     }
     greeter.update(dt, elapsed);
     greeter.light(RENDER_OPTS.lights, LIGHT.tess * 8);
-    // The act button talks to the guide in reach, starts the picked tour or skips a line ahead, or, within the
-    // kiosk's hint reach, donates, the way the hub shows ENTER ARCADE by its door; the pilot's own label returns once
-    // the offer is gone. The guide comes first, as the button tries the guide before the kiosk.
-    const actLabel = avatar && (greeter.actLabel() || (s.booth.near && !s.booth.mode && people.player === avatar ? "DONATE!" : null));
+    kortik.update(dt, elapsed, camera.position, avatar && people.player === avatar ? avatar.root.position : null, feetOf());
+    // The act button talks to the guide in reach, starts the picked tour or skips a line ahead, pokes Kortik from
+    // beside his stool, or, within the kiosk's hint reach, donates, the way the hub shows ENTER ARCADE by its door;
+    // the pilot's own label returns once the offer is gone. The guide comes first, as the button tries the guide first.
+    const actLabel = avatar && (greeter.actLabel() || kortik.actLabel() || (s.booth.near && !s.booth.mode && people.player === avatar ? "DONATE!" : null));
     if (actLabel) { hud.setAct(actLabel); actPrompt = true; }
     else if (actPrompt) { actPrompt = false; pilot.showAct(); }
     stepTweens(dt);
@@ -2088,6 +2110,8 @@
     world.pilot = pilot.player ? pilot.player.traits.name : null;
     greeter.dispose();
     greeter = null;
+    kortik.dispose();
+    kortik = null;
     unsubscribe();
     unsubscribe = null;
     settleCooker(scene);
@@ -2133,6 +2157,7 @@
     }
     if (avatar) set.add(avatar.headOpen).add(avatar.headClosed);
     if (greeter) greeter.liveGeometry(set);
+    if (kortik) kortik.liveGeometry(set);
     if (remotes) remotes.liveGeometry(set);
   };
   const stats = () => {

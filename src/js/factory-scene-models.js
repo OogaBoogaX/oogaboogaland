@@ -342,6 +342,8 @@ const ROCK_LT = "#75614f";
     for (const b of L.bays) { if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; } deckAt(b, "nsew"); }
     if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
     for (const d of [L.switchboard, L.platform]) { if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; } deckAt(d, "nsew"); }
+    // Kortik's switchboard stands along its west edge, where a rail would be.
+    deckAt(L.kortik, "nse");
     if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
     deckAt(L.lookout, "nsew");
     if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }

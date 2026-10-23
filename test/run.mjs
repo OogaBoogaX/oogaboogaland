@@ -3832,7 +3832,7 @@ const orbitFlow = async (b) => {
   const log = await b.evaluate(orbitLog);
   const stored = await b.evaluate(`JSON.parse(localStorage.getItem("oogaboogaland.v1")).orbit.best`);
   record("orbit flow: Space lets go, the pod falls shield first, Space opens the chute once it is ready and it lands softly", cleared.debris === 0 && cleared.t <= 30 && falling.phase === "descent" && falling.ready && falling.alt < 135 && falling.peakHeat < 1 && chute === "open" && log.result && !log.result.failure && log.result.orbit, JSON.stringify({ cleared, falling, chute, result: log.result }));
-  record("orbit flow: the flight log shows the total big with its medal and new best, the rows add up to it, and the best is saved", log.phase === "results" && log.shown && log.final === log.result.score && log.points === log.final && log.best === "NEW BEST" && log.medal === log.result.medal?.toUpperCase() && log.rows.some(([label]) => label === "Spacewalk") && !log.rows.some(([label]) => label === "Score") && stored && stored.score === log.final && log.exit === "Exit Game", JSON.stringify({ log, stored }));
+  record("orbit flow: the flight log shows the total big with its medal and new best, the rows add up to it, and the best is saved", log.phase === "results" && log.shown && log.final === log.result.score && log.points === log.final && log.best === "NEW BEST" && log.medal === log.result.medal?.toUpperCase() && log.rows.some(([label]) => label === "Spacewalk") && !log.rows.some(([label]) => label === "Score") && stored && stored.score === log.final && log.exit === "Back to the island", JSON.stringify({ log, stored }));
   await b.evaluate(`document.querySelector('#orbit-results [data-action="orbit-again"]').click()`);
   await b.sleep(200);
   const again = await b.evaluate(`(() => { const O = window.__ooga.orbit; return { phase: O.phase, score: O.score, results: document.getElementById("orbit-results").hidden, debris: window.__ooga.stats().debris }; })()`);
@@ -3852,7 +3852,7 @@ const orbitFlow = async (b) => {
   await b.evaluate(`document.querySelector('#orbit-results [data-action="leave"]').click()`);
   await untilPage(b, 'B.scene === "hub" && !B.transitioning', 15000);
   const left = await b.evaluate(`({ scene: window.__ooga.scene, hidden: document.getElementById("orbit").hidden })`);
-  record("orbit flow: Exit Game on the flight log returns to the island with the Orbit HUD hidden", left.scene === "hub" && left.hidden, JSON.stringify(left));
+  record("orbit flow: Back to the island on the flight log returns to the island with the Orbit HUD hidden", left.scene === "hub" && left.hidden, JSON.stringify(left));
 };
 
 // ---- Selection and the caps ----
@@ -4895,6 +4895,224 @@ const gameRulesChecks = async () => {
     record("jackpot wheel: a spin pays back 75 to 90% of its cost on average, the jackpot is ten spins' worth, and every wedge stops under the clapper wherever the spin aims in it", V.length === 20 && ev >= cost * 0.75 && ev <= cost * 0.9 && jackpot >= cost * 10 && missed.length === 0, JSON.stringify({ ev, cost, jackpot, missed: missed.slice(0, 4) }));
   }
 };
+// HALLOWEEN: the hub's ghost hunt (ghost-sim.js), its rules run in Node with scripted players on a ring of crest spots.
+const ghostHuntChecks = async () => {
+  const context = { window: {} };
+  runInNewContext(await readFile(new URL("../src/js/ghost-sim.js", import.meta.url), "utf8"), context);
+  const G = context.window.BL.ghostSim, ST = G.STATE, T0 = 1.7e12, FRAME = 16;
+  const spots = [];
+  for (let i = 0; i < 120; i++) { const a = i / 120 * Math.PI * 2; spots.push(Math.sin(a) * 25.5, 4, -Math.cos(a) * 25.5, a); }
+  // Two players stand still; with `shoot` every ghost within 14 m of the middle and every gorilla is hit every sixth frame,
+  // the boss every fifth.
+  const play = (sim, from, until, { shoot = true, here = 2, watch = null } = {}) => {
+    let now = T0 + from;
+    while (now < T0 + until) {
+      now += FRAME;
+      sim.beginPresence();
+      if (here > 0) sim.present(1, 3, 0, 4);
+      if (here > 1) sim.present(2, -5, 0, -2);
+      sim.advance(now);
+      const frame = now / FRAME | 0;
+      if (shoot) for (const g of sim.ghosts) if (g.on && !g.dying && Math.hypot(g.x, g.z) < 14 && frame % 6 === 0) sim.hit(g.id, 2, g.id % 2 ? 1 : 2);
+      if (shoot && frame % 6 === 0) for (const b of sim.brutes) if (b.on && !b.dying) sim.hit(b.id, 2, 1);
+      if (shoot && sim.state.bossOn && frame % 5 === 0) sim.hit(0, 5, 1);
+      if (watch) watch(sim);
+      if (sim.state.state === ST.IDLE) break;
+    }
+    return now - T0;
+  };
+  // Both test players ready up in the lobby, so the walls rise as soon as they are there.
+  const begin = (seed) => { const sim = G.create({ seed, spots, lapMs: 20000 }); sim.start(T0, 1); sim.ready(1); sim.ready(2); return sim; };
+  {
+    const a = begin(7), b = begin(7);
+    play(a, 0, 120000); play(b, 0, 120000);
+    const repeated = JSON.stringify(a.snapshot()) === JSON.stringify(b.snapshot());
+    // A new host loads the old one's last frame (through JSON, as the room carries it) and runs on; the old one
+    // carries on from the same frame, so a field the snapshot forgot would part them.
+    const handed = G.create({ seed: 99, spots, lapMs: 20000 }), loaded = handed.load(JSON.parse(JSON.stringify(a.snapshot())));
+    a.load(JSON.parse(JSON.stringify(a.snapshot())));
+    const at = 120000 - 120000 % FRAME;
+    // Compared while both still hunt: a finished hunt resets to IDLE and would hide any difference.
+    play(a, at, 200000); play(handed, at, 200000);
+    const same = JSON.stringify(a.snapshot()) === JSON.stringify(handed.snapshot()), hunting = a.state.state !== ST.IDLE;
+    record("ghost hunt: a seeded hunt repeats exactly, and one picked up from its snapshot mid-way (a new host) goes on the same", repeated && loaded && same && hunting && a.state.kills > 0, JSON.stringify({ repeated, loaded, same, hunting, kills: a.state.kills }));
+  }
+  {
+    const sim = begin(11), rounds = [], drops = { 3: false, 4: false }, gorillas = [], seenBrutes = new Set();
+    let maxAlive = 0, round = 0, lapToNight = false;
+    const settings = { ghosts: 0, cap: 0, interval: 0, group: 0, speed: 0 };
+    const states = new Set();
+    const end = play(sim, 0, 3600000, { watch: (s) => {
+      const st = s.state;
+      states.add(st.state);
+      if (st.state === ST.NIGHT) lapToNight = true;
+      if (st.state === ST.ACTIVE) {
+        if (st.round !== round) { round = st.round; rounds[round] = { total: G.roundSettings(round, st.players, settings).ghosts, cap: settings.cap, max: 0 }; }
+        rounds[round].max = Math.max(rounds[round].max, s.alive());
+        rounds[round].spawned = st.spawned;
+        if (round === 3 && s.drops.some((d) => d.on && d.kind === 1)) drops[3] = true;
+        for (const b of s.brutes) if (b.on && !seenBrutes.has(b.id)) { seenBrutes.add(b.id); gorillas[round] = (gorillas[round] || 0) + 1; }
+        if (round === 4 && s.drops.some((d) => d.on && d.kind === 2)) drops[4] = true;
+      }
+      maxAlive = Math.max(maxAlive, s.alive());
+    } });
+    const tables = rounds.slice(1).every((r) => r.spawned === r.total && r.max <= r.cap);
+    const path = [ST.LAP, ST.NIGHT, ST.COUNTDOWN, ST.ACTIVE, ST.BREAK, ST.BOSS, ST.VICTORY, ST.DAWN].every((st) => states.has(st)) && !states.has(ST.DEFEAT);
+    record("ghost hunt: shooting every ghost clears each round's whole table within its cap, round 3 drops the shield and round 4 the ice, each ordinary round sends its gorillas, the sixth clears into the boss, his fall is victory and dawn hands the island back",
+      lapToNight && rounds.length === 7 && tables && drops[3] && drops[4] && gorillas.slice(1, 7).every((n, i) => n === G.CONFIG.BRUTE.perRound[i]) && path && sim.state.state === ST.IDLE && maxAlive <= G.CONFIG.MAX_GHOSTS,
+      JSON.stringify({ rounds: rounds.slice(1), drops, gorillas, states: [...states], end, maxAlive }));
+  }
+  {
+    // Two players away from the pile, shooting what comes within 8 m, until the lightning comes over it; then one walks
+    // to the pile and takes it, and nobody shoots.
+    const z = begin(11), L = G.CONFIG.LIGHTNING;
+    let now = T0, drop = null, at = { x: 8, z: 0 };
+    const tick = () => { now += FRAME; z.beginPresence(); z.present(1, at.x, 0, at.z); z.present(2, -8, 0, 0); z.advance(now); };
+    while (now < T0 + 600000 && !drop) {
+      tick();
+      if ((now / FRAME | 0) % 6 === 0) for (const g of z.ghosts) if (g.on && !g.dying && Math.min(Math.hypot(g.x - 8, g.z), Math.hypot(g.x + 8, g.z)) < 8) z.hit(g.id, 2, 1);
+      drop = z.drops.find((d) => d.on && d.kind === G.LIGHTNING_DROP) || null;
+    }
+    const where = drop && { x: drop.x, z: drop.z, round: z.state.round, state: z.state.state };
+    at = { x: 1.5, z: 0 };
+    while (now < T0 + 600000 && drop && drop.on) tick();
+    const struck = [...z.ghosts.filter((g) => g.on && !g.dying).map((g) => g.id), ...z.brutes.filter((b) => b.on && !b.dying && b.phase >= G.BRUTE_PHASE.FALL).map((b) => b.id)];
+    const end = now + L.firstMs + L.spreadMs + L.zapMs + 200;
+    let zapped = 0;
+    const seen = new Set();
+    while (now < end) {
+      tick();
+      for (const e of [...z.ghosts, ...z.brutes]) if (e.on && e.dying === G.DYING.ZAPPED && struck.includes(e.id) && !seen.has(e.id)) { seen.add(e.id); zapped++; }
+    }
+    record("ghost hunt: the lightning drop comes only over the banana pile, part way through a round, and taking it strikes every ghost and gorilla dead within its spread and zap",
+      !!where && where.x === 0 && where.z === 0 && where.state === ST.ACTIVE && struck.length > 0 && zapped === struck.length && z.state.boltBy === 1,
+      JSON.stringify({ where, struck: struck.length, zapped }));
+  }
+  {
+    // A player takes the monkeys from where they fell; they stay with them until a ghost gets them.
+    const z = begin(13);
+    let now = T0;
+    const tick = () => { now += FRAME; z.beginPresence(); z.present(1, 0, 0, 6); z.advance(now); };
+    while (now < T0 + 60000 && z.state.state !== ST.ACTIVE) tick();
+    z.debug.drop(G.MONKEY_DROP);
+    const drop = z.drops.find((d) => d.on && d.kind === G.MONKEY_DROP);
+    drop.x = 0; drop.z = 6;
+    while (now < T0 + 120000 && drop.on) tick();
+    const me = z.players.find((p) => p.id === 1), armed = me.monkeys === 1;
+    while (now < T0 + 600000 && me.seg === G.CONFIG.PLAYER_SEGMENTS) tick();
+    const lost = me.seg === G.CONFIG.PLAYER_SEGMENTS - 1 && me.monkeys === 0;
+    // Forty kills of their own bring them back; the next round's start makes them whole.
+    z.debug.kills(1, G.CONFIG.MONKEY_EVERY_KILLS);
+    const gifted = me.monkeys === 1 && z.state.pickKind === G.MONKEY_DROP && z.state.pickBy === 1;
+    z.debug.next();
+    while (now < T0 + 900000 && z.state.state !== ST.COUNTDOWN) tick();
+    const whole = me.frozenUntil > z.state.now || me.seg === G.CONFIG.PLAYER_SEGMENTS;
+    record("ghost hunt: the monkeys arm the player who takes them, the first hit takes them away, every 40 kills brings them back, and a round's start makes everyone standing whole",
+      armed && lost && gifted && whole, JSON.stringify({ armed, lost, gifted, whole, seg: me.seg, state: z.state.state }));
+  }
+  {
+    // With every ghost slot held (dying ghosts keep theirs a moment), no ghost is counted as spawned; with every drop
+    // slot full, the round's lightning waits and comes as soon as a slot frees.
+    const z = begin(17);
+    let now = T0;
+    const tick = () => { now += FRAME; z.beginPresence(); z.present(1, 0, 0, 6); z.advance(now); };
+    while (now < T0 + 60000 && z.state.state !== ST.ACTIVE) tick();
+    for (const g of z.ghosts) { g.on = true; g.dying = G.DYING.SHOT; g.dyingAt = z.state.now; }
+    const before = z.state.spawned;
+    for (let i = 0; i < 4; i++) tick();
+    const pooled = z.state.spawned === before;
+    for (const d of z.drops) { d.on = true; d.kind = 0; d.x = 15; d.z = 15; d.at = z.state.now; }
+    z.state.spawned = Math.ceil(z.settings().ghosts * G.CONFIG.LIGHTNING.at);
+    for (let i = 0; i < 6; i++) tick();
+    const waited = !z.state.lightningSent && !z.drops.some((d) => d.on && d.kind === G.LIGHTNING_DROP);
+    z.drops[0].on = false;
+    for (let i = 0; i < 6; i++) tick();
+    const came = !!z.state.lightningSent && z.drops.some((d) => d.on && d.kind === G.LIGHTNING_DROP);
+    record("ghost hunt: a full ghost pool counts no ghost as spawned, and a round's lightning waits for a free drop slot rather than being lost",
+      pooled && waited && came, JSON.stringify({ pooled, waited, came }));
+  }
+  {
+    // The lobby: player 1 wakes the ghost (its host) and readies, player 2 is there but never readies; at the lobby's
+    // end only 1 is in the hunt, and neither 2 nor a newcomer (3) gets a slot. Everyone there ready starts it at once;
+    // a host who never readies closes it even with others ready, and so does nobody ready.
+    const lobby = (seed, by) => { const sim = G.create({ seed, spots, lapMs: 20000 }); sim.start(T0, by); return sim; };
+    const run = (sim, ids, until) => {
+      let now = T0;
+      const tick = () => { now += FRAME; sim.beginPresence(); for (const id of ids) sim.present(id, id * 2, 0, 5); sim.advance(now); };
+      tick();
+      const gathering = sim.state.state === ST.GATHER;
+      while (now < T0 + until && sim.state.state === ST.GATHER) tick();
+      return { gathering, tick };
+    };
+    const a = lobby(21, 1);
+    a.ready(1);
+    const { gathering, tick } = run(a, [1, 2], G.CONFIG.GATHER_MS + 500);
+    const rosterOnly = a.state.state === ST.LAP && a.players.filter((p) => p.on).map((p) => p.id).join() === "1";
+    tick(); a.present(3, 6, 0, 5);
+    const shutOut = !a.playerById(2) && !a.playerById(3);
+    const b = lobby(22, 1);
+    b.ready(1); b.ready(2);
+    run(b, [1, 2], 1000);
+    const early = b.state.state === ST.LAP && b.state.now < 500;
+    const c = lobby(23, 0);
+    run(c, [5], G.CONFIG.GATHER_MS + 500);
+    const d = lobby(24, 1);
+    d.ready(2);
+    run(d, [1, 2], G.CONFIG.GATHER_MS + 500);
+    const closed = c.state.state === ST.IDLE && d.state.state === ST.IDLE && !d.players.some((p) => p.on);
+    record("ghost hunt: the lobby waits for players to ready up, starts at once when everyone there is, takes only the ready into the hunt (never one who did not ready or came later), and closes with no hunt when its host never readies or nobody does",
+      gathering && rosterOnly && shutOut && early && closed, JSON.stringify({ gathering, rosterOnly, shutOut, early, closed }));
+  }
+  {
+    // A player whose bar empties is down for the rest of the round however long it runs, and back whole as it ends.
+    const z = begin(19), me = () => z.players.find((p) => p.id === 1), mate = () => z.players.find((p) => p.id === 2);
+    let now = T0;
+    // Player 1 stands still where ghosts reach; player 2 is kept out of harm's way (always just hit, so nothing lands).
+    const tick = () => {
+      now += FRAME; z.beginPresence(); z.present(1, 0, 0, 6);
+      const m = z.present(2, 21, 0, 0);
+      if (m) m.invulnUntil = z.state.now + 60000;
+      z.advance(now);
+    };
+    while (now < T0 + 600000 && !(me() && me().seg === 0)) tick();
+    const downAt = z.state.now, round = z.state.round;
+    for (let i = 0; i < 2400 && z.state.state === ST.ACTIVE; i++) tick();
+    const stayed = me().seg === 0 && z.state.now - downAt > 30000 || z.state.state !== ST.ACTIVE;
+    if (z.state.state === ST.ACTIVE) z.debug.next();
+    for (let i = 0; i < 20 && z.state.state === ST.ACTIVE; i++) tick();
+    const back = me().seg === G.CONFIG.PLAYER_SEGMENTS && !(z.state.now < me().frozenUntil) && !!mate();
+    // The sixth round gives way straight to the boss: one gone down in it is back for the boss's fight.
+    z.jump(ST.ACTIVE, 6);
+    for (let i = 0; i < 24000 && !(me().seg === 0) && z.state.state === ST.ACTIVE; i++) tick();
+    const downIn6 = me().seg === 0 && z.state.round === 6;
+    z.debug.next();
+    for (let i = 0; i < 20 && z.state.state === ST.ACTIVE; i++) tick();
+    const boss = z.state.state === ST.BOSS && me().seg === G.CONFIG.PLAYER_SEGMENTS && !(z.state.now < me().frozenUntil);
+    record("ghost hunt: a player gone down stays down for the rest of the round and is back whole when it ends, the sixth's into the boss's fight",
+      round >= 1 && stayed && back && downIn6 && boss, JSON.stringify({ round, stayed, back, downIn6, boss, seg: me().seg, state: z.state.state }));
+  }
+  {
+    const lost = begin(3), states = new Set();
+    play(lost, 0, 3600000, { shoot: false, watch: (s) => states.add(s.state.state) });
+    const defeat = states.has(ST.DEFEAT) && !states.has(ST.VICTORY) && lost.state.state === ST.IDLE;
+    const empty = begin(5);
+    let outcome = 0;
+    // They gather and the walls rise; then everyone leaves the arena.
+    play(empty, 0, 1000);
+    play(empty, 1000, 3600000, { here: 0, watch: (s) => { if (s.state.state === ST.DAWN) outcome = s.state.outcome; } });
+    // A pause holds the hunt's clock and everything in it, even with nobody left, until PAUSE_MAX_MS lets it go on.
+    const held = begin(5);
+    play(held, 0, 40000);
+    const paused = held.pause(true, T0 + 40000), stood = JSON.stringify(held.ghosts.map((g) => [g.on, g.x, g.z])), heldAt = held.state.now, heldState = held.state.state;
+    play(held, 40000, 40000 + G.CONFIG.PAUSE_MAX_MS - 1000, { here: 0 });
+    const still = held.state.paused && held.state.now === heldAt && held.state.state === heldState && JSON.stringify(held.ghosts.map((g) => [g.on, g.x, g.z])) === stood;
+    let heldOutcome = 0;
+    play(held, 40000 + G.CONFIG.PAUSE_MAX_MS - 1000, 3600000, { here: 0, watch: (s) => { if (s.state.state === ST.DAWN) heldOutcome = s.state.outcome; } });
+    record("ghost hunt: every player frozen is defeat, an arena left empty ends the hunt, and a pause holds it still only until its limit",
+      defeat && outcome === G.OUTCOME.ABANDON && empty.state.state === ST.IDLE && paused && still && heldOutcome === G.OUTCOME.ABANDON && held.state.state === ST.IDLE,
+      JSON.stringify({ states: [...states], outcome, paused, still, heldOutcome }));
+  }
+};
 const donationClientChecks = async () => {
   const sockets = [], timers = [], received = [], seen = [], requests = [];
   const context = { window: { setTimeout: fn => { const t = { fn }; timers.push(t); return t; }, clearTimeout: () => {} },
@@ -5831,6 +6049,31 @@ const raceBench = { name: "race bench", why: "regression: Oogas never drawn into
   })()`);
   record("race bench: every Ooga's body hangs under its racer, and only the field is shown", r.built === CAST && r.bench === CAST - r.field && r.bench > 0 && r.detached.length === 0 && r.shownOff === 0 && r.hiddenOn === 0, JSON.stringify(r));
 } };
+// A signed-in contributor drives only their own Ooga on the island, so each game holds them to it on entering. The
+// account is set on the page's own `BL.net.state`, as /api/me leaves it before a scene opens; signing out clears it,
+// and the next visit hands the choice back. The signed-in visit comes from the arcade, the other from the island, so
+// the exit names each. `read` returns what the game shows; `held` judges it.
+const ownOoga = (id, read, held) => ({ name: `${id} own ooga`, why: "rule: a signed-in visitor with an Ooga plays only it, signing out hands the choice back, and the exit names where it goes", run: async (b) => {
+  const exit = `document.querySelector('nav[data-scene="${id}"] .leave').textContent`;
+  let own, signedIn, signedOut;
+  try {
+    own = await b.evaluate(`(() => { const list = window.BL.contributors.activeRoster, c = window.BL.characters.all().find((c) => c.handle !== list[0].name && list.some((r) => r.name === c.handle)); window.BL.net.state.me = { id: 1, login: c.github || c.handle, display: c.handle }; return { handle: c.handle, display: window.BL.characters.displayOf(c.handle) }; })()`);
+    await tourGo(b, "arcade");
+    await tourGo(b, id);
+    signedIn = { ...await b.evaluate(read), exit: await b.evaluate(exit) };
+  } finally {
+    await b.evaluate(`window.BL.net.state.me = null`);
+  }
+  await tourGo(b, "hub");
+  await tourGo(b, id);
+  signedOut = { ...await b.evaluate(read), exit: await b.evaluate(exit) };
+  record(`${id} own ooga: a signed-in visitor plays their own Ooga and nothing else, signing out hands the choice back, and the exit says Back to arcade from a cabinet and Back to the island from the island`, held(own, signedIn, signedOut) && signedIn.exit === "Back to arcade" && signedOut.exit === "Back to the island", JSON.stringify({ own, signedIn, signedOut }));
+} });
+const dropOwn = ownOoga("drop", `({ who: document.querySelector('#drop-oogas [aria-pressed="true"]').dataset.racer, rows: [...document.querySelectorAll("#drop-oogas li")].filter((li) => !li.hidden).length, help: !document.getElementById("drop-pick-ooga").hidden })`,
+  (own, i, o) => i.who === own.handle && i.rows === 1 && !i.help && o.rows === CAST && o.help);
+const orbitOwn = ownOoga("orbit", `({ who: document.getElementById("orbit-pilot-name").textContent, locked: document.getElementById("orbit-pilot").disabled })`,
+  (own, i, o) => i.who === own.display && i.locked && !o.locked);
+const mineOwn = ownOoga("mine", `({ who: window.__ooga.mine.crew.crew[0].name })`, (own, i) => i.who === own.handle);
 const raceMirror = { name: "race mirror", why: "rule: a gold cup opens the mirror tracks, and steering stays true on them", run: async (b) => {
   // The autopilot's cup before this can win gold against a field of fifteen, so the save starts without a
   // cup, as a fresh visitor's does (in memory and in storage alike), and a race lets the garage read it.
@@ -9604,9 +9847,12 @@ const factoryGreeter = { name: "factory greeter", why: "rule: the guide notices 
     // Keep the visitor on the floor the tour measures from, beside it. Existing floor checks independently prove
     // the widest visitor can reach these stairs, bridges and landings.
     const follow = () => { a.root.position.x = s.anchor.x + 1.6; a.root.position.z = s.anchor.z + 0.6; a.root.position.y = s.anchor.y + a.baseY; };
+    // A stop's next line comes once her bubble has been up long enough to read, and a bubble's clock runs in the
+    // frame's overlay pass, so each step draws the overlay as a frame does.
     let elapsed = 0;
+    const step = () => { g.update(0.04, elapsed += 0.04); BL.scenes.factory.overlay(0.04); };
     for (const id of Object.keys(BL.factoryGreeter.TOURS)) {
-      for (let i = 0; i < 3000 && !(s.phase === "work" && s.stage !== "fly"); i++) g.update(0.04, elapsed += 0.04);
+      for (let i = 0; i < 3000 && !(s.phase === "work" && s.stage !== "fly"); i++) step();
       const q = g.root.position;
       a.root.position.x = q.x + 1.2; a.root.position.z = q.z; a.root.position.y = q.y - 1.6 + a.baseY;
       g.greet();
@@ -9614,7 +9860,7 @@ const factoryGreeter = { name: "factory greeter", why: "rule: the guide notices 
       choices.find(button => button.textContent === BL.factoryGreeter.TOURS[id].title).click();
       const stops = new Set(), lines = new Set(); let returned = false;
       for (let i = 0; i < 18000; i++) {
-        follow(); g.update(0.04, elapsed += 0.04);
+        follow(); step();
         if (s.phase === "talk") stops.add(s.waypoint);
         lines.add(s.spoken);
         if (s.phase === "work") { returned = true; break; }
@@ -10121,8 +10367,68 @@ const factoryCooker = { name: "factory cooker", why: "rule: a tip in the factory
   })()`);
   record("factory cooker: a burst of tips past the cooker's pools is counted at once, stays inside the pools, adds no nodes, rides no line, and still sends every banana out", burst.level === burst.n && burst.cubes <= burst.cap.cubes && burst.bananas <= burst.cap.bananas && burst.grew === 0 && burst.routed === 0 && burst.out === burst.n, JSON.stringify(burst));
 } };
+// Kortik poked as a player pokes him: Space from beside his stool and a click on him, then the escalation they work
+// up to, through his sword drawn on them to the katana on the board.
+const factoryKortik = { name: "kortik pokes", why: "rule: Space beside Kortik's stool (the act button reads POKE there, and not a few metres off) and a click on him poke him; five pokes draw his sword, the third poke he then ignores brings his katana down on the board even with another poke after it, and he sits back down square to it with the sword home", run: async (b) => {
+  const stand = (out, along = 0) => b.evaluate(`(() => {
+    const B = __ooga, a = B.cavemen.get("portlandhodl"), F = BL.factoryModels, seat = F.kortikAt(${along}, 0, F.KORTIK.seat + ${out});
+    if (B.crew.player !== a) B.pilot.possess(a);
+    B.pilot.navigate({ position: { x: seat[0], y: F.LAYOUT.kortik.y, z: seat[2] }, yaw: -Math.PI / 2, pitch: 0, dist: 6 });
+    for (let i = 0; i < 20; i++) B.advance(1 / 30, 1 / 30);
+    return { label: document.getElementById("act").textContent, anger: B.factory.kortik.anger, feet: +(a.root.position.y - a.baseY).toFixed(2) };
+  })()`);
+  const anger = () => b.evaluate(`(() => { __ooga.advance(0.2, 1 / 30); return __ooga.factory.kortik.anger; })()`);
+  const near = await stand(1.6);
+  await b.key(" ");
+  const poked = await anger();
+  const far = await stand(4);
+  await b.key(" ");
+  const farAfter = await anger();
+  // A click on his head, from a free view of the deck with the Ooga stood aside out of the line.
+  await stand(3.5, 2.4);
+  const aim = await b.evaluate(`(() => {
+    const B = __ooga, K = B.factory.kortik, P = B.pilot, o = P.orbit;
+    P.release();
+    const h = K.kortik.parts.head.world;
+    o.target.x = o.tx = h[12]; o.target.y = o.ty = h[13]; o.target.z = o.tz = h[14]; o.yaw = o.tYaw = Math.PI / 2 - 0.35; o.pitch = o.tPitch = 0.1; o.dist = o.tDist = 5;
+    for (let i = 0; i < 20; i++) B.advance(1 / 30, 1 / 30);
+    const w = K.kortik.parts.head.world, s = B.project(w[12], w[13] + 0.25, w[14], {}), hit = s && B.input.pick(s.x, s.y);
+    return { x: s ? s.x : -1, y: s ? s.y : -1, kind: hit ? hit.owner.kind : null, anger: K.anger };
+  })()`);
+  await b.click(aim.x, aim.y);
+  await b.sleep(300);
+  const clicked = await anger();
+  const fit = await b.evaluate(`(() => {
+    const B = __ooga, K = B.factory.kortik, k = K.kortik, P = k.parts, seatY = BL.kortikModels.BOARD.seat.y, step = () => B.advance(1 / 30, 1 / 30);
+    const drawn = () => Math.hypot(P.sword.position.x - P.katana.position.x, P.sword.position.y - P.katana.position.y, P.sword.position.z - P.katana.position.z) > 0.2;
+    const said = () => { const bubble = B.fx.speech(k); return bubble ? bubble.rows.join(" ") : ""; };
+    while (K.anger < 5) K.poke();
+    const angry = K.anger;
+    let threatened = false, threat = false;
+    for (let t = 0; t < 20 && !threatened; t += 1 / 30) { step(); threatened = K.threatened; }
+    for (let t = 0; t < 1; t += 1 / 30) { step(); threat ||= drawn(); }
+    // Four quick pokes while he is still holding the sword out: the fourth lands after the third has made him snap.
+    for (let i = 0; i < 4; i++) { K.poke(); for (let t = 0; t < 0.2; t += 1 / 30) { step(); threat ||= drawn(); } }
+    let enough = false, forced = false, sat = false;
+    for (let t = 0; t < 40 && !(forced && sat); t += 1 / 30) {
+      step();
+      const line = said();
+      enough ||= line === "ENOUGH!";
+      forced ||= line === "Force-closed.";
+      sat = forced && k.root.position.y < seatY + 0.05 && !drawn();
+    }
+    for (let t = 0; t < 3; t += 1 / 30) step();
+    const off = Math.atan2(Math.sin(k.root.rotation.y - Math.PI), Math.cos(k.root.rotation.y - Math.PI));
+    return { angry, threatened, threat, enough, forced, sat, off: +off.toFixed(3), home: !drawn() };
+  })()`);
+  record("kortik pokes: Space beside his stool pokes him and the act button reads POKE there; four metres off it is the Ooga's own and leaves him be",
+    near.label === "POKE" && poked === near.anger + 1 && far.label !== "POKE" && farAfter === far.anger, JSON.stringify({ near, poked, far, farAfter }));
+  record("kortik pokes: a click on him picks him and pokes him", aim.kind === "kortik" && clicked === aim.anger + 1, JSON.stringify({ aim, clicked }));
+  record("kortik pokes: five pokes draw his sword, the third he ignores brings the katana down on the board and a fourth straight after does not call it off, and he sits back down square to it with the sword home",
+    fit.angry === 5 && fit.threatened && fit.threat && fit.enough && fit.forced && fit.sat && Math.abs(fit.off) < 0.05 && fit.home, JSON.stringify(fit));
+} };
 // Everywhere the widest Ooga on the roster can walk from the balcony, by the factory's own step rule on a
-// quarter-metre grid: both ends of every stair, every line's deck and its peer tunnel's porch, the switchboard, the
+// quarter-metre grid: both ends of every stair, every line's deck and its peer tunnel's porch, the switchboard, Kortik's deck, the
 // right-wall platform with the rebalancer, treasury and banana cooker, the donation kiosk in the right wall, the
 // watchtower, landing, galleries and the forge floor; and the platform walked end to end on its own deck from the
 // cooker's stair. It runs on the island, where the whole roster is built.
@@ -10153,7 +10459,7 @@ const factoryFloor = { name: "factory floor", why: "regression: stairs landed ag
     const reachedIn = (x0, x1, z0, z1, y) => cells.some(([x, z, h]) => x >= x0 && x <= x1 && z >= z0 && z <= z1 && Math.abs(h - y) < 0.3);
     const near = (x, z, y) => reachedIn(x - 0.6, x + 0.6, z - 0.6, z + 0.6, y), missing = [];
     L.stairs.forEach(([ax, ay, az, bx, by, bz], n) => { if (!near(ax, az, ay)) missing.push("stair " + n + " foot"); if (!near(bx, bz, by)) missing.push("stair " + n + " head"); });
-    const decks = { A: L.bays[0], B: L.bays[1], C: L.bays[2], D: L.bays[3], switchboard: L.switchboard, platform: L.platform, rebalancer: L.rebalancer, treasury: L.treasury, cooker: L.cooker, watchtower: L.lookout, lighthouse: L.lookoutDeck, landing: L.landing, gallery1: L.galleries[0], gallery2: L.galleries[1] };
+    const decks = { A: L.bays[0], B: L.bays[1], C: L.bays[2], D: L.bays[3], switchboard: L.switchboard, kortik: L.kortik, platform: L.platform, rebalancer: L.rebalancer, treasury: L.treasury, cooker: L.cooker, watchtower: L.lookout, lighthouse: L.lookoutDeck, landing: L.landing, gallery1: L.galleries[0], gallery2: L.galleries[1] };
     for (const [name, d] of Object.entries(decks)) if (!reachedIn(d.x - d.w / 2, d.x + d.w / 2, d.z - d.d / 2, d.z + d.d / 2, d.y)) missing.push(name);
     const spots = [["rebalancer operator lane", L.rebalancer, M.REB.operator], ["treasury operator", L.treasury, M.TRE.operator]];
     for (const [name, d, [x, z]] of spots) if (!near(d.x + x, d.z + z, d.y)) missing.push(name);
@@ -10174,7 +10480,7 @@ const factoryFloor = { name: "factory floor", why: "regression: stairs landed ag
     if (!near(L.stairway[0], L.stairway[2] - 1, 0)) missing.push("forge floor");
     return { who, radius: +R.toFixed(2), missing, cells: cells.length, deck: deck.size };
   })()`);
-  record("factory floor: from the balcony the widest Ooga on the roster reaches both ends of every stair, every line's deck, each peer tunnel's shield, the switchboard, the right-wall platform with the rebalancer's operator lane and the treasury (walking the platform's length from the cooker's stair), the donation kiosk in the right wall, the watchtower, landing, galleries and the forge", r.missing.length === 0 && r.radius > 0.6 && r.cells > 20000, JSON.stringify(r));
+  record("factory floor: from the balcony the widest Ooga on the roster reaches both ends of every stair, every line's deck, each peer tunnel's shield, the switchboard, Kortik's deck, the right-wall platform with the rebalancer's operator lane and the treasury (walking the platform's length from the cooker's stair), the donation kiosk in the right wall, the watchtower, landing, galleries and the forge", r.missing.length === 0 && r.radius > 0.6 && r.cells > 20000, JSON.stringify(r));
 } };
 // The way in and out: from the island through the 2 o'clock mouth's shield, back out past the balcony, and Escape.
 const factoryEntrance = { name: "factory entrance", why: "regression: flying above the mouth entered the factory and reaching its front wall away from the doorway exited; real doorway crossings must still keep the same Ooga", run: async (b) => {
@@ -10449,7 +10755,7 @@ const arcadePlay = { name: "arcade play", why: "rule: a cabinet starts its game,
   await b.evaluate(`(() => { const B = window.__ooga, a = B.cavemen.get("portlandhodl"), s = window.BL.arcadeModels.CABINETS[0].play; if (B.crew.player !== a) B.pilot.possess(a); a.root.position.x = s.x; a.root.position.z = s.z; B.advance(0.2, 1 / 60); })()`);
   await b.key(" ");
   const played = await untilPage(b, 'B.scene === "race" && !B.transitioning', 15000);
-  await b.evaluate(`(() => { const go = document.querySelector('[data-intro="race"] [data-action="intro-go"]'); if (go && go.offsetParent) go.click(); document.querySelector('nav[data-scene="race"] .leave').click(); })()`);
+  const raced = await b.evaluate(`(() => { const go = document.querySelector('[data-intro="race"] [data-action="intro-go"]'); if (go && go.offsetParent) go.click(); const leave = document.querySelector('nav[data-scene="race"] .leave'), seen = { racer: window.__ooga.racers.player.name, exit: leave.textContent }; leave.click(); return seen; })()`);
   await untilPage(b, 'B.scene === "arcade" && !B.transitioning', 15000);
   const back = await b.evaluate(`(() => { const B = window.__ooga, p = B.pilot.player, s = window.BL.arcadeModels.CABINETS[0].play; return { scene: B.scene, who: p && p.traits.name, off: p ? Math.hypot(p.root.position.x - s.x, p.root.position.z - s.z) : null }; })()`);
   await b.key("Escape");
@@ -10457,7 +10763,7 @@ const arcadePlay = { name: "arcade play", why: "rule: a cabinet starts its game,
   await b.key("Escape");
   await untilPage(b, 'B.scene === "hub" && !B.transitioning', 15000);
   const out = await b.evaluate(`(() => { const B = window.__ooga, p = B.pilot.player; return { scene: B.scene, who: p && p.traits.name }; })()`);
-  record("arcade play: Space at the Rally cabinet starts Ooga Rally, leaving the race returns the same Ooga to that cabinet, and Escape detaches before returning to the island still detached", played && back.scene === "arcade" && back.who === "portlandhodl" && back.off < 0.5 && detached.scene === "arcade" && !detached.driving && out.scene === "hub" && !out.who, JSON.stringify({ played, back, detached, out }));
+  record("arcade play: Space at the Rally cabinet starts Ooga Rally with the same Ooga racing and its exit back to arcade, leaving the race returns that Ooga to the cabinet, and Escape detaches before returning to the island still detached", played && raced.racer === "portlandhodl" && raced.exit === "Back to arcade" && back.scene === "arcade" && back.who === "portlandhodl" && back.off < 0.5 && detached.scene === "arcade" && !detached.driving && out.scene === "hub" && !out.who, JSON.stringify({ played, raced, back, detached, out }));
 } };
 const arcadeMachine = { name: "arcade machine", why: "rule: Space at a carnival machine opens its game, and leaving the game brings the same Ooga back to that machine", run: async (b) => {
   await b.evaluate(`(() => { const B = window.__ooga, st = B.arcade.stations.find((s) => s.kind === "machine" && s.game.kind === "skee"), p = B.pilot.player.root.position; p.x = st.play.x; p.z = st.play.z; B.advance(0.2, 1 / 60); })()`);
@@ -14148,10 +14454,10 @@ scene("race", { label:"optional rig link fallback",url:hubPage(src),steps:[{name
   } finally {await b.evaluate('(()=>{const f=__rigFault;f.gl.createProgram=f.create;f.gl.getProgramParameter=f.parameter;delete window.__rigFault;})()');}
 }}]});
 scene("race", { query: "rain=0&draw=0", steps: [raceStart, raceOwn, raceBench, { name: "race tracks", why: "regression: the 12-slot grid spawned a free banana on Banana Bay", run: async (b) => { await b.evaluate(`window.__ooga.race.toGarage()`); await raceTracks[1](b); } }, raceRigs, raceRigContext, racePause, play("race", "a whole cup under the autopilot: one drawn field of fifteen runs every race and finishes in order, the cup medal and every track's best are saved", cupRun), raceMirror, raceAgain, trip("race")] });
-scene("drop", { steps: [dropStart, dropSteering, play("drop", "a jump lands on the target, scores its own medal and is saved as the best", dropRun), dropCrash, trip("drop")] });
-scene("orbit", { steps: [{ name: "orbit flow", why: "regression: the spacewalk air bonus was missing from the flight log", run: orbitFlow }, orbitSteering, orbitMissed, orbitEscape, trip("orbit")] });
-scene("mine", { steps: [mineResume, trip("mine"), mineControls] });
-scene("factory", { query: "character=portlandhodl", steps: [factoryWalking, factoryGreeter, factoryLadders, factoryRailingJump, factoryWeapons, factoryForward, factoryForge, factoryShields, trip("factory")] });
+scene("drop", { steps: [dropStart, dropSteering, play("drop", "a jump lands on the target, scores its own medal and is saved as the best", dropRun), dropCrash, trip("drop"), dropOwn] });
+scene("orbit", { steps: [{ name: "orbit flow", why: "regression: the spacewalk air bonus was missing from the flight log", run: orbitFlow }, orbitSteering, orbitMissed, orbitEscape, trip("orbit"), orbitOwn] });
+scene("mine", { steps: [mineResume, trip("mine"), mineControls, mineOwn] });
+scene("factory", { query: "character=portlandhodl", steps: [factoryWalking, factoryGreeter, factoryLadders, factoryRailingJump, factoryWeapons, factoryForward, factoryForge, factoryShields, factoryKortik, trip("factory")] });
 scene("factory", { label: "cooker", query: "character=portlandhodl", steps: [donation("factory", { stat: "cooker.out", seconds: 14, where: "the cooker sends its bananas up through the ceiling tube" }), donationDetails, factoryCooker, trip("factory")] });
 scene("factory", { label: "entrance", url: hubPage(src, "character=portlandhodl"), steps: [factoryFloor, factoryEntrance] });
 scene("factory", { label: "canvas2d", query: "canvas2d=1&character=portlandhodl", steps: [factoryCanvas, factoryGreeter] });
@@ -17478,7 +17784,7 @@ record("character visibility source bakes: ownership wrappers share exact immuta
   factoryChecks(BL);
   const clearance = claimClearanceProof();
   record("hub footprint clearance: conservative rejection preserves circular boundaries, live reservations and exceptional numbers", clearance.failures === 0 && clearance.cases >= 4000, JSON.stringify(clearance));
-  await characterChecks(); await contributorActivityChecks(); await mempoolFeedChecks(); await debugActivityStatusChecks(); await soloDebugChecks(); await adaptiveQualityChecks(); await chainSnapshotChecks(); await dsbSharedDataChecks(); await timechainDataChecks(); await timechainRoomChecks(); await timechainBlockChecks(); await weatherStepChecks(); await poolLayoutChecks(); await gameRulesChecks(); await donationClientChecks(); await poolWildlifeChecks(); await totemFeedChecks();
+  await characterChecks(); await contributorActivityChecks(); await mempoolFeedChecks(); await debugActivityStatusChecks(); await soloDebugChecks(); await adaptiveQualityChecks(); await chainSnapshotChecks(); await dsbSharedDataChecks(); await timechainDataChecks(); await timechainRoomChecks(); await timechainBlockChecks(); await weatherStepChecks(); await poolLayoutChecks(); await gameRulesChecks(); await ghostHuntChecks(); await donationClientChecks(); await poolWildlifeChecks(); await totemFeedChecks();
 
   // Scene state built directly instead of booted; seed 1 matches scene-hub.js.
   // Sealed cave guides need the hub's seal nodes, so probes reading them stay in the browser tier.

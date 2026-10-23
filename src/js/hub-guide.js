@@ -41,6 +41,7 @@
     done: "That's the island! Off you go, and come find me any time.",
     newsDone: "That's what's new! Have fun out there.",
     cancelled: "All good. Back to work!",
+    newsKortik: "New in the Factory: Kortik's Switchboard, where a grumpy samurai routes Lightning by hand. Don't poke him!",
     newsSphereRooms: "The Timechain Sphere has nine rooms now. Pick one at the keypad by its doors!",
     newsBca: "New at 10 o'clock: B.C.A., Banana Certified Accounting. Suited gorillas count the bananas!",
     newsMainland: "You can tip from right here now, no trip to the Factory. Your bananas fly out of its roof tube onto the pile!",
@@ -78,6 +79,7 @@
   // and her line. A new feature worth showing a returning visitor is one entry here, added at the top: a visitor's news
   // is everything listed above the newest entry they were last offered.
   const NEWS = [
+    { date: "2026-10-22", at: "factory", line: "newsKortik" },
     { date: "2026-10-19", at: "timechain", line: "newsSphereRooms" },
     { date: "2026-10-18", at: "bca", line: "newsBca" },
     { date: "2026-10-17", at: "pile", line: "newsMainland" },
@@ -430,7 +432,24 @@
       if (!e.repeat) forward();
     };
     window.addEventListener("keydown", captureKey, true);
+    // HALLOWEEN: the ghost hunt borrows her (ghost-game.js): while lent she drops whatever she was doing and `driver(rig,
+    // dt)` flies her; given back, she goes back to work.
+    let lender = null;
+    const lend = (driver) => {
+      if (driver && !lender) {
+        if (state.holding) release();
+        rig.hush();
+        rig.mode = 0; rig.aims = null;
+        show("lent");
+      } else if (!driver && lender) {
+        rig.root.visible = true;
+        rig.mode = 0;
+        toWork();
+      }
+      lender = driver;
+    };
     const update = (dt, elapsed) => {
+      if (lender) { lender(rig, dt); rig.update(dt, elapsed); return; } // HALLOWEEN
       const actor = visitor();
       if (state.still && (state.phase === "work" || state.phase === "notice" || state.phase === "approach")) watchStill(dt);
       // A greeting she started is dropped, without a word, when the visitor gets going first; one they asked for by a
@@ -534,7 +553,7 @@
       window.addEventListener("keydown", captureKey, true);
     };
     const dispose = () => { suspend(); rig.dispose(); };
-    return { root: rig.root, state, update, escape, tap, suspend, resume, dispose, liveGeometry: rig.liveGeometry, get holding() { return state.holding; }, get speech() { return rig.speech; } };
+    return { root: rig.root, state, update, escape, tap, suspend, resume, dispose, liveGeometry: rig.liveGeometry, lend /* HALLOWEEN */, get holding() { return state.holding; }, get speech() { return rig.speech; } };
   };
   BL.hubGuide = { create, NAME, LINES, STOPS, NEWS, freshAfter, legsOf };
 })();

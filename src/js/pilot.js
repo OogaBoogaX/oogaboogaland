@@ -968,7 +968,8 @@
       if (reticle.dataset.occluded !== "false") reticle.dataset.occluded = "false";
     };
     const autoTarget = (owner, node) => !!(owner && (owner.kind === "caveman" || owner.kind === "room-sign"
-      || owner.kind === "prop" && AUTO_AIM_PROPS.has(owner.prop)) || node && node.mirror);
+      || owner.kind === "prop" && AUTO_AIM_PROPS.has(owner.prop)
+      || owner.kind === "halloween" && owner.role !== "herald" && owner.active) || node && node.mirror); // HALLOWEEN: halloween
     const centerTarget = (hit) => {
       const owner = hit.owner, node = hit.node;
       if (!owner || !node) return;

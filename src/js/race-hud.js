@@ -50,19 +50,15 @@
       if (onPick) onPick(kind, key);
     };
     // A signed-in visitor with an Ooga races it, as they drive only it on the island: their row stands alone
-    // in the Ooga column (moved last, so it keeps no divider) and the help stops offering a pick. `null`
-    // brings every row back in roster order. Only a change of name touches the list.
+    // in the Ooga column and the help stops offering a pick; `null` brings every row back. Only a change of
+    // name touches the list.
     let lockedTo;
     const lockRacer = (name) => {
       if (name === lockedTo) return;
       lockedTo = name;
-      for (const [key, b] of buttons.racer) {
-        b.parentElement.hidden = !!name && key !== name;
-        el.racers.append(b.parentElement);
-      }
+      BL.hud.holdRow(el.racers, buttons.racer, name);
       el.pickOoga.hidden = !!name;
       if (!name) return;
-      el.racers.append(buttons.racer.get(name).parentElement);
       selection.racer = name;
       mark("racer");
     };

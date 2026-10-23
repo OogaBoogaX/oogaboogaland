@@ -12,7 +12,9 @@
   const BL = window.BL = window.BL || {};
   const TIMEOUT_MS = 20000;
   // How each group shows it has arrived: the module that runs last in it.
-  const PRESENT = { "terrain-cache": () => !!BL.terrainCache, kiosk: () => typeof BL.factoryKiosk?.create === "function", "lab-wallpaper": () => !!BL.labWallpaper?.src, canvas: () => !!BL.canvasRenderer, timechain: () => !!BL.timechainInterior, dsb: () => !!BL.dsbCollision, arcade: () => !!BL.carnivalAudio, poker: () => !!BL.pokerHud, drop: () => !!BL.dropAudio };
+  const PRESENT = { "terrain-cache": () => !!BL.terrainCache, kiosk: () => typeof BL.factoryKiosk?.create === "function", "lab-wallpaper": () => !!BL.labWallpaper?.src, canvas: () => !!BL.canvasRenderer, timechain: () => !!BL.timechainInterior, dsb: () => !!BL.dsbCollision, arcade: () => !!BL.carnivalAudio, poker: () => !!BL.pokerHud, drop: () => !!BL.dropAudio,
+    // HALLOWEEN: the hub's ghost hunt, and each track of its playlist.
+    halloween: () => !!BL.halloween, ...Object.fromEntries(["boss", "colt", "martial", "nightmare", "synthed"].map((k) => [`halloween-track-${k}`, () => !!(BL.ghostMusic && BL.ghostMusic[k])])) };
   // Only scene implementation groups depend on a base group; no base group depends on a scene shell.
   // The race/mine/orbit predicates arrive with their independent module extraction; otherwise those modules are inline.
   const SCENE_BASE = { "factory-scene": "kiosk", "arcade-scene": "arcade", "race-scene": "race", "drop-scene": "drop", "mine-scene": "mine", "orbit-scene": "orbit" };
