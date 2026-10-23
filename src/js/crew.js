@@ -467,7 +467,7 @@
     };
     contributors.roster.forEach((contributor, i) => {
       if (ctx.playerName ? contributor.name !== ctx.playerName : !contributors.activeRoster.includes(contributor)) return;
-      const cave = models.caveman(contributors.traitsFor(contributor.name));
+      const cave = ctx.characterModel ? ctx.characterModel(contributor.name) : models.caveman(contributors.traitsFor(contributor.name));
       const h = cave.traits.height;
       let health = world.health.get(contributor.name);
       if (!health) { health = { value: HEALTH_MAX, delay: 0, stunned: false, recovering: false }; world.health.set(contributor.name, health); }
