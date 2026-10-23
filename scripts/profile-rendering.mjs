@@ -55,7 +55,14 @@ try {
   }
   environment = await b.evaluate(`(() => { const gl = document.getElementById("scene").getContext("webgl2"), e = gl.getExtension("WEBGL_debug_renderer_info"); return { userAgent: navigator.userAgent, gpu: e && gl.getParameter(e.UNMASKED_RENDERER_WEBGL), dpr: devicePixelRatio, memory: navigator.deviceMemory, scene: __ooga.scene }; })()`);
   for (const tier of (process.env.PROFILE_TIERS || "high,medium,low").split(",")) {
-    await b.evaluate(`(() => { __ooga.renderer.setQuality(${JSON.stringify(tier)}); __ooga.pilot.goPreset(${JSON.stringify(process.env.PROFILE_VIEW || "pile")}); })()`);
+    await b.evaluate(`(() => {
+      const B = __ooga, view = ${JSON.stringify(process.env.PROFILE_VIEW || "pile")}; B.renderer.setQuality(${JSON.stringify(tier)});
+      if (view === "mirror-close" || view === "board-close") {
+        const node = view === "mirror-close" ? B.mirrorCave.node : B.jumbotron.node, w = node.world;
+        const x = w[12], y = w[13], z = w[14];
+        B.pilot.navigate({ position: { x, y, z }, target: { x, y: y + (view === "board-close" ? 0 : .1), z }, yaw: Math.atan2(w[8], w[10]), pitch: .05, dist: view === "board-close" ? 7 : 6 });
+      } else if (!B.pilot.goPreset(view)) { if (view !== "pile") throw Error("Unknown camera preset: " + view); }
+    })()`);
     await b.sleep(2000);
     const result = await b.evaluate(`new Promise(resolve => {
       const state = __renderProbe, frames = [], duration = ${Number(process.env.PROFILE_SECONDS) || 5} * 1000;

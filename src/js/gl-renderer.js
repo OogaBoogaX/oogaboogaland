@@ -1658,7 +1658,8 @@ void main() {
     // A reflector needs a geometry of its own, which keys its capture. `reflectorPass` is the record a capture leaves
     // out (null in the eye's pass, which draws every reflector itself).
     const reflectorNodes = [], reflectorTargets = new Map();
-    let reflectorTurn = 0, reflectorPass = null;
+    let reflectorTurn = 0, reflectorPass = null, reflectorFrame = 0;
+    let reducedCapture = false;
     // Glass (`geometry.glass`, its see-through alpha) draws after everything opaque and the sky, blended and leaving
     // the depth alone, back faces first so a tube shows its far wall through its near one. `glassPass` is set while it
     // draws; every other pass leaves glass out.
@@ -1859,7 +1860,7 @@ void main() {
     };
     const reflectorTarget = (geometry) => {
       let t = reflectorTargets.get(geometry);
-      if (!t) reflectorTargets.set(geometry, t = { fb: null, tex: null, depth: null, size: 0, renderWidth: 0, renderHeight: 0, viewProj: new Float32Array(16), valid: false, area: 0, record: null });
+      if (!t) reflectorTargets.set(geometry, t = { fb: null, tex: null, depth: null, size: 0, renderWidth: 0, renderHeight: 0, viewProj: new Float32Array(16), valid: false, area: 0, screenWidth: 0, screenHeight: 0, record: null });
       return t;
     };
     // One square allocation per reflector at the tier's mirror size, as the mirror keeps.
@@ -2144,12 +2145,12 @@ void main() {
       records.clear();
       activeRecords.length = 0;
     };
-    const bindInstanceAttribs = (ibo) => {
+    const bindInstanceAttribs = (ibo, first = 0) => {
       gl.bindBuffer(gl.ARRAY_BUFFER, ibo);
       for (let i = 0; i < 5; i++) {
         const loc = 3 + i;
         gl.enableVertexAttribArray(loc);
-        gl.vertexAttribPointer(loc, 4, gl.FLOAT, false, INSTANCE_FLOATS * 4, i * 16);
+        gl.vertexAttribPointer(loc, 4, gl.FLOAT, false, INSTANCE_FLOATS * 4, first * INSTANCE_FLOATS * 4 + i * 16);
         gl.vertexAttribDivisor(loc, 1);
       }
     };
@@ -2691,6 +2692,8 @@ void main() {
       }
       const area = (Math.min(1, MIRROR_RECT[2]) - Math.max(-1, MIRROR_RECT[0])) * width * 0.5 * (Math.min(1, MIRROR_RECT[3]) - Math.max(-1, MIRROR_RECT[1])) * height * 0.5;
       if (area < 16) return own && skipMirrorPass("negligible");
+      if (qualityName === "medium" && ((Math.min(1, MIRROR_RECT[2]) - Math.max(-1, MIRROR_RECT[0])) * width * 0.5 < 150
+          || (Math.min(1, MIRROR_RECT[3]) - Math.max(-1, MIRROR_RECT[1])) * height * 0.5 < 150)) return own && skipMirrorPass("quality-size");
       reflectMirrorPoint(mirrorEye, camera.position, center, normal);
       reflectMirrorPoint(mirrorTarget, camera.target, center, normal);
       const up = camera.up || UP, upDot = up.x * normal[0] + up.y * normal[1] + up.z * normal[2];
@@ -2755,10 +2758,15 @@ void main() {
       return true;
     };
     // How many pixels of the eye's view a reflector's glass covers, facing it; 0 when it faces away or is off screen.
-    const reflectorArea = (node, camera) => {
+    const reflectorArea = (node, camera, target = null) => {
+      if (target) target.screenWidth = target.screenHeight = 0;
       const w = node.world, nlen = Math.hypot(w[8], w[9], w[10]) || 1;
       if (((camera.position.x - w[12]) * w[8] + (camera.position.y - w[13]) * w[9] + (camera.position.z - w[14]) * w[10]) / nlen <= MIRROR_EPSILON) return 0;
       if (!mirrorRect(node, viewProj) || MIRROR_RECT[2] < -1 || MIRROR_RECT[0] > 1 || MIRROR_RECT[3] < -1 || MIRROR_RECT[1] > 1) return 0;
+      if (target) {
+        target.screenWidth = (Math.min(1, MIRROR_RECT[2]) - Math.max(-1, MIRROR_RECT[0])) * width * 0.5;
+        target.screenHeight = (Math.min(1, MIRROR_RECT[3]) - Math.max(-1, MIRROR_RECT[1])) * height * 0.5;
+      }
       return (Math.min(1, MIRROR_RECT[2]) - Math.max(-1, MIRROR_RECT[0])) * width * 0.5 * (Math.min(1, MIRROR_RECT[3]) - Math.max(-1, MIRROR_RECT[1])) * height * 0.5;
     };
     const prepareEnvironmentCamera = (camera, face) => {
@@ -2925,12 +2933,49 @@ void main() {
     // The camera pass draws only the in-frustum front of each record; shadow and mirror draw all.
     // 1 draws only the records the plain variant can shade, -1 only the others, 0 all.
     let plainFilter = 0;
+    // A medium reflection keeps the large physical world. Camera and shadow order stay untouched: selected
+    // instance runs read the existing buffer through a temporary base offset, restored before another pass.
+    const captureInstanceVisible = (rec, index) => {
+      if (!rec.batch) {
+        const s = rec.spheres, o = index * 4;
+        const radius = s[o + 3] - CULL_MARGIN - (rec.geometry.lakeWaves ? 0.18 : 0);
+        return radius >= 1.25 && slotInFrustum(s, o, MIRROR_FRUSTUM);
+      }
+      const b = boundsOf(rec.geometry), d = rec.batch.instanceData, o = index * INSTANCE_FLOATS;
+      const x = d[o] * b.center[0] + d[o + 4] * b.center[1] + d[o + 8] * b.center[2] + d[o + 12];
+      const y = d[o + 1] * b.center[0] + d[o + 5] * b.center[1] + d[o + 9] * b.center[2] + d[o + 13];
+      const z = d[o + 2] * b.center[0] + d[o + 6] * b.center[1] + d[o + 10] * b.center[2] + d[o + 14];
+      const scale = Math.max(d[o] * d[o] + d[o + 1] * d[o + 1] + d[o + 2] * d[o + 2],
+        d[o + 4] * d[o + 4] + d[o + 5] * d[o + 5] + d[o + 6] * d[o + 6],
+        d[o + 8] * d[o + 8] + d[o + 9] * d[o + 9] + d[o + 10] * d[o + 10]);
+      const radius = b.radius * Math.sqrt(scale);
+      return radius >= 1.25 && sphereInFrustum(x, y, z, radius + CULL_MARGIN, MIRROR_FRUSTUM);
+    };
+    const drawCaptureRuns = (part, rec, first, count, instances) => {
+      try {
+        let start = -1;
+        for (let i = 0; i <= instances; i++) {
+          const visible = i < instances && captureInstanceVisible(rec, i);
+          if (visible && start < 0) start = i;
+          if (!visible && start >= 0) {
+            bindInstanceAttribs(rec.ibo, start);
+            // Indexed parts arrive with the open GPU-packing PR; CPU geometry and uploads remain unchanged here.
+            if (part.index) gl.drawElementsInstanced(gl.TRIANGLES, count, part.index, first * part.indexSize, i - start);
+            else gl.drawArraysInstanced(gl.TRIANGLES, first, count, i - start);
+            start = -1;
+          }
+        }
+      } finally {
+        bindInstanceAttribs(rec.ibo);
+      }
+    };
     const drawParts = (kind, useProgram, excludeMirror = false, cull = false, matrixStage = 0) => {
       // The depth pre-pass's and the plain variant's programs take every per-draw setting the mesh program does.
       const meshPass = useProgram === "mesh" || useProgram === "depth" || useProgram === "plain";
       for (let i = 0; i < activeRecords.length; i++) {
         const rec = activeRecords[i], g = rec.geometry, program = programs[useProgram];
         if (g.mirrorRippleOnly) continue;
+        if (reducedCapture && (g.sway || g.foliageVisibility === false || g.imageSurface || g.projective)) continue;
         const part = rec[kind], n = rec.batch && rec.batch.drawInstanceCount !== undefined ? rec.drawCount : cull ? rec.drawCount : rec.count;
         if (!part || !n) continue;
         let first = 0, count = part.count;
@@ -2947,7 +2992,12 @@ void main() {
         if (kind === "mesh" && useProgram === "shadow" && g.castShadow === false) continue;
         if (useProgram === "shadow" ? !rec.lightVisible || shadowSubset && rec.shadowStatic !== (shadowSubset === 1) : !cull && !rec.mirrorVisible) continue;
         if (excludeMirror && (rec === mirror.record || g.mirrorSource)) continue;
-        if (g.reflector && (reflectorPass === null || rec === reflectorPass)) continue;
+        if (g.reflector && (reflectorPass === null || rec === reflectorPass)) {
+          // Uncaptured lower-tier panes retain their authored grey-blue face instead of disappearing.
+          const fallback = reflectorPass === null && qualityName !== "high"
+            && (qualityName === "low" || !reflectorTargets.get(g)?.valid);
+          if (!fallback) continue;
+        }
         if (meshPass && !g.glass !== !glassPass) continue;
         // A record drawn by another stage's pass drops out before any per-record uniform moves.
         const stage = kind === "mesh" && meshPass ? g.matrixRevealBacking ? 1 : g.matrixGlyph ? 2 : g.glassOpacity ? 3 : 0 : 0;
@@ -3115,6 +3165,12 @@ void main() {
           gl.enable(gl.POLYGON_OFFSET_FILL);
           gl.polygonOffset(0, -4);
         }
+        if (reducedCapture) {
+          gl.bindVertexArray(part.vao);
+          drawCaptureRuns(part, rec, first, count, n);
+          if (offset) gl.disable(gl.POLYGON_OFFSET_FILL);
+          continue;
+        }
         gl.bindVertexArray(part.vao);
         gl.drawArraysInstanced(gl.TRIANGLES, first, count, n);
         if (offset) gl.disable(gl.POLYGON_OFFSET_FILL);
@@ -3198,6 +3254,9 @@ void main() {
       gl.uniform4fv(pg.mesh.u.uMatrixPermanentAperture, matrix && matrix.permanentAperture || DEFAULT_MATRIX_APERTURE);
       gl.uniform1f(pg.mesh.u.uMatrixLivingGlobal, matrix ? matrix.livingGlobal ?? 1 : 1);
       pg.mesh.matrixNone = !matrix;
+      const previousReducedCapture = reducedCapture;
+      reducedCapture = qualityName === "medium";
+      try {
       drawParts("mesh", "mesh", true);
       if (skyOn) drawSky(mirrorInvViewProj, mirrorEye.y);
       drawGlass(false);
@@ -3216,7 +3275,10 @@ void main() {
       gl.disable(gl.CULL_FACE);
       drawParts("line", "line", true);
       gl.enable(gl.CULL_FACE);
-      reflectorPass = null;
+      } finally {
+        reducedCapture = previousReducedCapture;
+        reflectorPass = null;
+      }
       if (target !== mirror) {
         target.viewProj.set(mirrorViewProj);
         target.valid = true;
@@ -3242,7 +3304,7 @@ void main() {
       const rec = mirror.record, part = rec && rec.mesh, pg = mirror.program;
       mirrorDebug.ripples = 0;
       mirrorDebug.bodyContacts = mirrorDebug.bodyWaves = 0;
-      const pane = !mirror.portal && mirror.frontFacing && part && mirror.tex && mirror.programReady && mirror.captureValid;
+      const pane = qualityName !== "low" && !mirror.portal && mirror.frontFacing && part && mirror.tex && mirror.programReady && mirror.captureValid;
       if (!mirror.node) return;
       if (pane) {
         gl.useProgram(pg.prog);
@@ -3334,7 +3396,7 @@ void main() {
     // Each reflector facing the eye draws its own last capture, through the matrix it was captured with, and its
     // ripples in its crest tint.
     const drawReflectors = (camera) => {
-      if (!reflectorNodes.length || !mirror.programReady) return;
+      if (qualityName === "low" || !reflectorNodes.length || !mirror.programReady) return;
       const pg = mirror.program;
       gl.useProgram(pg.prog);
       gl.uniform1f(pg.u.uClipMaxY, cutawayMaxY);
@@ -3685,6 +3747,9 @@ void main() {
         updateMirrorSide(camera);
         if (mirror.portal) {
           skipMirrorPass("portal-open");
+        } else if (qualityName === "low") {
+          // The ordinary material remains visible; low spends no scene pass on the pane.
+          skipMirrorPass("quality-low");
         } else if (prepareMirrorCamera(camera)) {
           // The last pane the camera drew lost every pixel to depth (rock, a cave wall): its capture is unseen, and the
           // pane keeps the one it has until a query finds it showing again.
@@ -3696,7 +3761,7 @@ void main() {
           else if (mirror.occluded && mirror.captureValid) skipMirrorPass("occluded");
           // A mirror under a twenty-fifth of the view re-captures on the tier's cadence: the whole scene's draws for a
           // few hundred pixels, where a frame-old reflection does not show. Nearer, it captures every frame.
-          else if (mirror.captureValid && mirror.frame++ % settings.mirrorCadence && mirror.renderWidth * mirror.renderHeight * 25 < pw * ph) skipMirrorPass("cadence");
+          else if (mirror.captureValid && mirror.frame++ % settings.mirrorCadence && (qualityName === "medium" || mirror.renderWidth * mirror.renderHeight * 25 < pw * ph)) skipMirrorPass("cadence");
           else renderMirrorCapture(clear, sky, ground, direct, directStrength, ambientFloor, diffuseFloor, shadowStrength, shadowFloor, shadowBias, lx, ly, lz, sh, lights, nLights, skyOn, fogColor, fogA, fogB, matrix, spotLight);
         }
         if (mirror.shards && ensureShardProgram()) {
@@ -3709,13 +3774,16 @@ void main() {
           }
         }
       }
-      if (reflectorNodes.length && ensureMirrorProgram()) {
-        // The reflector covering most of the view captures every frame, and one other in turn.
+      if (qualityName !== "low" && reflectorNodes.length && ensureMirrorProgram()
+          && (qualityName === "high" || reflectorFrame++ % settings.mirrorCadence === 0)) {
+        // High preserves best plus one every frame. Medium captures on its cadence and only for readable panes.
         const n = reflectorNodes.length;
         let best = -1, bestArea = 16;
         for (let i = 0; i < n; i++) {
           const t = reflectorTarget(reflectorNodes[i].geometry);
-          t.area = reflectorArea(reflectorNodes[i], camera);
+          t.area = reflectorArea(reflectorNodes[i], camera, qualityName === "medium" ? t : null);
+          // On-screen CSS dimensions, not the capped texture dimensions or area alone.
+          if (qualityName === "medium" && (t.screenWidth < 150 || t.screenHeight < 150)) t.area = 0;
           if (t.area > bestArea) { bestArea = t.area; best = i; }
         }
         // One just come into view with nothing captured yet goes first.

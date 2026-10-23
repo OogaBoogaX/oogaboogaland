@@ -13,3 +13,13 @@ Low and medium disable the prepass on every GPU. High retains the named-Apple-si
 | Low |60.00|60.00|620.4|619.9|
 
 Default M1 behavior was already off, so these results correctly show no default gain. A separate medium `prepass=1` run submits about908 main-target draws/frame; ordinary medium submits about479. Both deliver60FPS on this rig. This proves the override works on the available GPU; **Intel/NVIDIA/AMD/Android hardware acceptance remains unmeasured**. Three-tier screenshots were inspected: no new depth artifacts. Open PR267 GPU packing and193 video patches still apply independently; neither feature was copied.
+
+## 2.2 Reflection capture
+
+The small129×96 hub capture in the real baseline is the main mirror, not `reflectorNodes` (Factory/Bifrost). Changing only the named loop left the measured hub work unchanged. The same tier policy now covers both paths: low keeps authored pane materials without captures; medium needs at least150×150 CSS pixels and uses cadence2 plus large, reflection-frustum-visible instances, excluding sway/foliage, image surfaces and projective geometry. Existing instance buffers are reused through contiguous run offsets and restored in `finally`. High retains its previous capture set and cadence.
+
+At pile, the before medium reflection submitted up to2,170,341 triangles on150/301 frames; low up to2,168,889 on101/301 frames. After, both submit **zero** capture frames because the pane is below threshold. High still captures every frame with up to2,170,461 triangles (before2,170,497), and all tiers remain60FPS. The clear-pane low/medium appearance is an intentional quality difference. Three-tier images are retained next to the raw runs.
+
+At a close, readable mirror, medium captures146/291 frames with **496,533 peak triangles per capture**, versus the old full-set work of roughly2.17million at the other view. The different cameras preclude treating those as a controlled percentage improvement. The required250,000 budget is **still unmet**; the large terrain/prop meshes survive the reduction. This is carried forward for geometry work, not averaged with the skipped cadence frames. Close-view measured FPS58.01 includes one>33ms frame; it does not establish the60FPS target there.
+
+The original terrain already uses greedy meshing by material, direction, Matrix/cave and cutaway metadata. Task2.4's claim that faces are unmerged is false in this checkout. Removing the path/window cell boundaries would break authored curved cutaways. Further reduction needs a separate coarse render representation, rather than another greedy pass over identical inputs.
