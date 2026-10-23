@@ -139,6 +139,10 @@ export const parseClientMessage = (text) => {
     }
     return pose;
   }
+  if (msg.t === "equipment") {
+    return Number.isInteger(msg.tool) && msg.tool>=0 && msg.tool<16 && Number.isInteger(msg.slot) && msg.slot>=0 && msg.slot<=2
+      ? {t:"equipment",tool:msg.tool,slot:msg.slot} : null;
+  }
   if (msg.t === "body") {
     if (msg.name === null) return { t: "body", name: null };
     return typeof msg.name === "string" && BODY_NAME.test(msg.name) ? { t: "body", name: msg.name } : null;
