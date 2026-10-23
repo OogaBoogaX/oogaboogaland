@@ -12,16 +12,20 @@
   const BL = window.BL = window.BL || {};
   const TIMEOUT_MS = 20000;
   // How each group shows it has arrived: the module that runs last in it.
-  const PRESENT = { timechain: () => !!BL.timechainInterior, dsb: () => !!BL.dsbCollision, arcade: () => !!BL.carnivalAudio, poker: () => !!BL.pokerHud, drop: () => !!BL.dropAudio,
+  const PRESENT = { kiosk: () => typeof BL.factoryKiosk?.create === "function", "lab-wallpaper": () => !!BL.labWallpaper?.src, canvas: () => !!BL.canvasRenderer, timechain: () => !!BL.timechainInterior, dsb: () => !!BL.dsbCollision, arcade: () => !!BL.carnivalAudio, poker: () => !!BL.pokerHud, drop: () => !!BL.dropAudio,
     // HALLOWEEN: the hub's ghost hunt, and each track of its playlist.
     halloween: () => !!BL.halloween, ...Object.fromEntries(["boss", "colt", "martial", "nightmare", "synthed"].map((k) => [`halloween-track-${k}`, () => !!(BL.ghostMusic && BL.ghostMusic[k])])) };
+  // Only scene implementation groups depend on a base group; no base group depends on a scene shell.
+  // The race/mine/orbit predicates arrive with their independent module extraction; otherwise those modules are inline.
+  const SCENE_BASE = { "factory-scene": "kiosk", "arcade-scene": "arcade", "race-scene": "race", "drop-scene": "drop", "mine-scene": "mine", "orbit-scene": "orbit" };
   const loading = new Map();
   const load = (group) => {
     if (PRESENT[group]()) return null;
     if (loading.has(group)) return loading.get(group);
     const src = BL.deferredScripts && BL.deferredScripts[group];
     if (!src) return Promise.reject(new Error(`No ${group} code on this page`));
-    const promise = new Promise((resolve, reject) => {
+    const base = SCENE_BASE[group], prerequisite = base && typeof PRESENT[base] === "function" ? load(base) : null;
+    const start = () => new Promise((resolve, reject) => {
       const script = document.createElement("script");
       const finish = (error) => {
         clearTimeout(timer);
@@ -39,8 +43,26 @@
       script.src = src;
       document.head.appendChild(script);
     });
+    const promise = prerequisite ? prerequisite.then(start, (error) => { loading.delete(group); throw error; }) : start();
     loading.set(group, promise);
     return promise;
   };
-  BL.deferred = { load, present: (group) => PRESENT[group](), get pending() { return loading.size; } };
+  // A hosted scene keeps its shell's identity while its implementation arrives: the director may already hold it.
+  // Portable builds evaluate the same modules inline and fill these shells before boot, so they still fetch nothing.
+  const scene = (id, definition = null) => {
+    const scenes = BL.scenes = BL.scenes || {}, target = scenes[id] || (scenes[id] = { id });
+    if (definition) Object.defineProperties(target, Object.getOwnPropertyDescriptors(definition));
+    else {
+      const group = `${id}-scene`;
+      PRESENT[group] = () => typeof target.enter === "function";
+      const prepare = (place, ctx, scope) => {
+        const loading = load(group);
+        const prepared = () => target.prepare !== prepare ? BL.models.withScope(scope || id, () => target.prepare(place, ctx, scope)) : null;
+        return loading ? loading.then(prepared) : prepared();
+      };
+      target.prepare = prepare;
+    }
+    return target;
+  };
+  BL.deferred = { load, scene, present: (group) => PRESENT[group](), get pending() { return loading.size; } };
 })();

@@ -25,7 +25,9 @@ export function externalizeModules(html, out, deferred, block) {
     });
     // Script evaluation can finish while another scene is active. Eager builders belong to the requested group;
     // later asynchronous build batches scope themselves explicitly. Standalone data-bundle tools have no models.
-    parts.unshift(`(window.BL.models?.withScope || ((_scope, build) => build()))(${JSON.stringify(group)}, () => {`);
+    // A scene implementation is a separate fetch group, but its eager builders still belong to the scene's owner.
+    const scope = group.endsWith("-scene") ? group.slice(0, -6) : group;
+    parts.unshift(`(window.BL.models?.withScope || ((_scope, build) => build()))(${JSON.stringify(scope)}, () => {`);
     parts.push("});");
     const bundle = `${parts.join("\n\n")}\n`, name = `${group}-${hash(bundle, "hex").slice(0, 16)}.js`;
     writeFileSync(join(out, "js", name), bundle);

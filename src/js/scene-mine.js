@@ -2342,14 +2342,14 @@
     };
   };
 
-  const mineScene = {
+  const mineScene = BL.deferred.scene("mine", {
     id: "mine", enter, update, overlay, onDonation, onKey, onLootCleared: () => {}, renderOpts: RENDER_OPTS,
     leave, stats, liveGeometry,
     root: null, camera: null, input: null, debug: null, agent: null, agentControls: null,
     get inMotion() {
       return fx ? fx.inMotion : false;
     }
-  };
+  });
   BL.scenes = BL.scenes || {};
   BL.scenes.mine = mineScene;
 })();

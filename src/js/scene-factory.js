@@ -2239,7 +2239,7 @@
     return { visibleNodes: nodes, allNodes: all(root), tweens: tweenCount(), targets: input.targetCount, ...fx.stats(), ...(remotes ? remotes.stats() : {}), feed: feed ? { ...feed.counts } : null, cooker: scene ? cookerStats(scene) : null };
   };
 
-  const factoryScene = {
+  const factoryScene = BL.deferred.scene("factory", {
     // Voice zone: the Factory group, which its tunnel on the island shares (`factory`).
     voiceZone: "factory.hall",
     micKey: true,
@@ -2248,6 +2248,10 @@
     get inMotion() {
       return !!scene;
     }
+  });
+  factoryScene.prepare = () => {
+    const loading = BL.deferred.load("kiosk");
+    return loading ? loading.then(() => null) : null;
   };
   BL.scenes = BL.scenes || {};
   BL.scenes.factory = factoryScene;

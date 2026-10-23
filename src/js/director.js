@@ -1,6 +1,6 @@
-(() => {
+(async () => {
   "use strict";
-  const { scene, models, donations, glRenderer, canvasRenderer, game: gameMod, pile: pileMod, router: routerMod, scenes } = window.BL;
+  const { scene, models, donations, glRenderer, game: gameMod, pile: pileMod, router: routerMod, scenes } = window.BL;
   // The optional build-time Oogatron snapshot loads before the director.
   // Activity uses each contributor's timestamp, never the snapshot build time.
   if (window.BL.jumbotronData) window.BL.contributors.applySnapshot(window.BL.jumbotronData);
@@ -67,7 +67,21 @@
       sceneCanvas = fresh;
     }
   }
-  if (!renderer) renderer = canvasRenderer.createRenderer(sceneCanvas);
+  if (!renderer) {
+    try {
+      const ready = window.BL.deferred.load("canvas");
+      if (ready) await ready;
+      renderer = window.BL.canvasRenderer.createRenderer(sceneCanvas);
+    } catch {
+      overlayObserver.disconnect();
+      curtain.querySelector(".curtain-spinner").remove();
+      const retry = document.createElement("button"), saying = $("curtain-saying");
+      retry.type = "button"; retry.className = "link"; retry.textContent = "Try again";
+      retry.addEventListener("click", () => location.reload(), { once: true });
+      saying.textContent = "The island could not open. "; saying.appendChild(retry);
+      return;
+    }
+  }
   mark("renderer");
   const showQuality = () => {
     qualityLabel.textContent = `${renderer.kind} · ${renderer.quality}`;

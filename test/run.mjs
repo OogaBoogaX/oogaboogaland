@@ -4866,10 +4866,10 @@ const gameRulesChecks = async () => {
     record("tickets: a spend refuses when the tickets fall short or the cost is no whole number above nothing, spending nothing, and one that goes through is saved", short && malformed && spent, JSON.stringify({ short, malformed, spent }));
   }
   {
-    // The jackpot wheel, from arcade-models.js on the builders it loads with: the house wins slowly, and every
+    // The jackpot wheel, from arcade-models.js and its scene half on the builders they load with: the house wins slowly, and every
     // wedge, from a turn at rest and one far round after many spins, stops under the clapper wherever in it the spin
     // aims, after its whole turns and less than one more.
-    for (const name of ["scene", "models", "contributor-identities", "activity-repos", "jumbotron", "hub-models", "arcade-models"]) runInNewContext(await readFile(new URL(`../src/js/${name}.js`, import.meta.url), "utf8"), context);
+    for (const name of ["scene", "models", "contributor-identities", "activity-repos", "jumbotron", "hub-models", "arcade-models", "arcade-scene-models"]) runInNewContext(await readFile(new URL(`../src/js/${name}.js`, import.meta.url), "utf8"), context);
     const { WHEEL_VALUES: V, WHEEL_COST: cost, wheelAt, wheelStop } = BL.arcadeModels;
     const ev = V.reduce((s, v) => s + v, 0) / V.length, jackpot = Math.max(...V), missed = [];
     for (const from of [0, -0.3, -1234.567]) for (let k = 0; k < V.length; k++) for (const at of [0.2, 0.5, 0.8]) {
@@ -5221,7 +5221,7 @@ const donationClientChecks = async () => {
   let now = Date.now(), detailsOpen = false;
   const kioskContext = { window: { BL: { jumbotron: { text: { GLYPH_W: 5, GLYPH_H: 7, TRACKING: 1 } }, qr: { encode: () => ({ size: 1, modules: [1] }) }, donations: D } },
     document: { createElement: () => ({ getContext: () => ({}) }) }, Date: class extends Date { static now() { return now; } } };
-  runInNewContext(await readFile(new URL("../src/js/factory-kiosk.js", import.meta.url), "utf8"), kioskContext);
+  for (const name of ["factory-kiosk-core", "factory-kiosk"]) runInNewContext(await readFile(new URL(`../src/js/${name}.js`, import.meta.url), "utf8"), kioskContext);
   const F = kioskContext.window.BL.factoryKiosk.create({ real: true, link: () => "/lightning", bananasFor: () => 1,
     invoice: async () => ({ request: "request", invoice: { id: "invoice", bolt11: "lntbs1", expires: now / 1000 + 10 }, bananas: { exact: 0.25, rounded: 0 }, rate: null }),
     open: () => true, testNetwork: () => "signet", account: () => ({ backend: true, me: null }), release: () => {},
@@ -5430,6 +5430,8 @@ const donationClientChecks = async () => {
   K.game = { bananasFor: () => 1 };
   K.chain = { snapshot: { priceUsd: 100000 } };
   K.net = { state: { backend: true, me: null }, login() {} };
+  // The kiosk is already loaded here, as it is inline in the portable page: no chunk to wait for.
+  K.deferred = { load: () => null };
   K.donations = { real: true, state: { open: true }, testNetwork: "signet", sanitize: D.sanitize, carried: (sats, message, bar = 1000) => D.carried(sats, message, bar),
     HANDLE_MAX: D.HANDLE_MAX, MESSAGE_MAX: D.MESSAGE_MAX, MESSAGE_MIN_SATS: 1000, messageMinSats: 1000,
     invoice: async options => { invoices.push(options); return { request: "request", invoice: { id: "popup", bolt11: "lntbs1", expires: now / 1000 + 900 }, bananas: { exact: 0.25, rounded: 0 }, rate: null }; },
@@ -6007,6 +6009,8 @@ const hostedSite = async () => {
 };
 // A refused bundle is logged by the browser as a failed resource; that line is the fixture's, not the page's.
 const dropRefusals = (b) => { for (let i = b.logs.length - 1; i >= 0; i--) if (b.logs[i].includes("status of 503")) b.logs.splice(i, 1); };
+// One group's file exactly: `drop` is not `drop-scene`, which shares its prefix.
+const chunkOf = (group) => (path) => new RegExp(`^/js/${group}-[0-9a-f]{16}\\.js$`).test(path);
 const orbitHosted = { name: "orbit hosted", why: "regression: Ooga Orbit read Ooga Drop's models at load, which a hosted page had deferred, so it threw on entry, cold and after a Drop visit", run: async (b, site) => {
   const cold = await b.evaluate(`({ scene: __ooga.scene, frames: __ooga.renderedFrames, models: !!BL.dropModels, diver: !!BL.skydiver })`);
   await b.evaluate(`__ooga.go("drop")`);
@@ -6015,13 +6019,13 @@ const orbitHosted = { name: "orbit hosted", why: "regression: Ooga Orbit read Oo
   const orbit = await untilPage(b, 'B.scene === "orbit" && !B.transitioning', 15000);
   const after = await b.evaluate(`({ scene: __ooga.scene, frames: __ooga.renderedFrames })`);
   record("orbit hosted: a cold /oogaorbit on the hosted page boots and draws with Drop's diver still unloaded, and Orbit opens again after a Drop visit", cold.scene === "orbit" && cold.frames > 2 && cold.models && !cold.diver
-    && drop && orbit && after.scene === "orbit" && site.fetched.filter(p => p.startsWith("/js/drop-")).length === 1, JSON.stringify({ cold, drop, orbit, after, fetched: site.fetched }));
+    && drop && orbit && after.scene === "orbit" && site.fetched.filter(chunkOf("drop")).length === 1 && site.fetched.filter(chunkOf("drop-scene")).length === 1, JSON.stringify({ cold, drop, orbit, after, fetched: site.fetched }));
 } };
 const arcadeHostedDrop = { name: "arcade hosted drop cabinet", why: "regression: a refused Ooga Drop download left the arcade's departure flags set, so no cabinet opened again and its Leave did nothing until a reload, also when Leave was pressed during the fade back", run: async (b, site) => {
   await b.evaluate(`(() => { const B = window.__ooga, a = B.cavemen.get("portlandhodl"), s = window.BL.arcadeModels.CABINETS[1].play; if (B.crew.player !== a) B.pilot.possess(a); a.root.position.x = s.x; a.root.position.z = s.z; B.advance(0.2, 1 / 60); })()`);
   site.refused.push("/js/drop-");
   await b.key(" ");
-  for (let t = 0; t < 15000 && !site.fetched.some(p => p.startsWith("/js/drop-")); t += 50) await b.sleep(50);
+  for (let t = 0; t < 15000 && !site.fetched.some(chunkOf("drop")); t += 50) await b.sleep(50);
   // Leave, pressed while the view fades back in (after the refusal's toast), is refused with the transition still running.
   const pressed = await b.evaluate(`new Promise(resolve => { const t0 = performance.now(), tick = () => {
     if (__ooga.transitioning && document.getElementById("toast").textContent.includes("could not be opened")) { document.querySelector('nav[data-scene="arcade"] .leave').click(); resolve(__ooga.transitioning); }
@@ -6031,7 +6035,7 @@ const arcadeHostedDrop = { name: "arcade hosted drop cabinet", why: "regression:
   dropRefusals(b);
   await b.key(" ");
   const opened = await untilPage(b, 'B.scene === "drop" && !B.transitioning', 15000);
-  const asked = site.fetched.filter(p => p.startsWith("/js/drop-")).length;
+  const asked = site.fetched.filter(chunkOf("drop")).length;
   record("arcade hosted: a refused Ooga Drop download fades back to the arcade, Leave pressed during that fade is refused without locking the hall, and Space at the same cabinet asks again and opens the game", pressed === true && refused && opened && asked === 2, JSON.stringify({ pressed, refused, opened, asked, fetched: site.fetched }));
 } };
 for (const [id, step, path] of [["orbit", orbitHosted, "/oogaorbit"], ["arcade", arcadeHostedDrop, "/oogaarcade"]]) {
@@ -18448,13 +18452,20 @@ record("character visibility source bakes: ownership wrappers share exact immuta
   // Every module the source page loads, deferred groups included: they are inline in the source tree and portable page.
   const order = [...readFileSync(join(root, "src/index.html"), "utf8").matchAll(/<script src="js\/([^"]+)"(?: data-defer="[a-z-]+")?><\/script>/g)].map((m) => m[1]);
   const skipped = [];
+  // The director boots in an async IIFE, so its failure in this DOM-less loader arrives as a rejection, not a throw.
+  let loading = "";
+  const rejected = (err) => skipped.push(`${loading}: ${String(err?.message).slice(0, 120)}`);
+  process.on("unhandledRejection", rejected);
   for (const file of order) {
+    loading = file;
     try {
       new Function(readFileSync(join(root, "src/js", file), "utf8"))();
     } catch (err) {
       skipped.push(`${file}: ${String(err.message).slice(0, 120)}`);
     }
+    await new Promise(setImmediate);
   }
+  process.off("unhandledRejection", rejected);
   const BL = globalThis.BL;
   tessCacheChecks(BL);
   variantCacheChecks(BL);
