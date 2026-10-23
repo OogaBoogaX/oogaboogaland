@@ -393,109 +393,145 @@
   // hoops.
   const CURTAINS = [[-1, -11.9, 1.45], [-1, -16.4, 4.3], [-1, -20.3, 4.6], [1, -11.9, 1.45], [1, -17.1, 4.3], [1, -20.3, 4.6]];
   const CREEPERS = [[-1, 2.3, 0.2], [1, -8.5, 0.2], [1, -1.1, 0.2], [-1, -22.4, MEZZ.y], [1, -22.4, MEZZ.y]];const PEEKS = [[-1, -19.6], [1, -19.6], [1, 0.45]];
-  const hall = cached(() => {
+  const hall = BL.models.cachedSteps(function* (slice = null) {
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
     const rand = mulberry32(3303), timber = [], OUT = HALL.front + 4;
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
     const W = HALL.halfW * 2, D = HALL.front - HALL.back, WAIN = 1.3;
     // The packed earth, on out through the tunnel. Its painted skins are drawn on the xy plane (y there is -z in the
     // hall) and `laid` flat `y` up: darker earth in big soft patches, each tone its own height, more sand and grit
     // where no flagstones cover it, a scatter of pebbles there, and a teal glow under each cluster of mushrooms or
     // crystals, all under the flagstones' feet.
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
     const parts = [
       box({ w: W, h: 0.1, d: D, color: EARTH[0], emissive: 0.03, offset: { y: -0.05, z: (HALL.front + HALL.back) / 2 } }),
       box({ w: HALL.door * 2 + 1, h: 0.1, d: OUT - HALL.front, color: EARTH[0], emissive: 0.03, offset: { y: -0.05, z: (HALL.front + OUT) / 2 } })
     ];
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
     const laid = (g, y) => parts.push(moved(turnedX(g, -Math.PI / 2), 0, y, 0));
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
     const onWalk = (x, z) => WALKS.some(([x0, x1, z0, z1]) => x > x0 && x < x1 && z > z0 && z < z1);
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
     const frand = mulberry32(3310), soil = geometry(), grit = geometry(), pebbles = geometry();
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
     const blot = (x, y, r, color, z) => {
       const pts = [];
       for (let j = 0; j < 11; j++) { const t = j / 11 * Math.PI * 2; pts.push([x + Math.cos(t) * r * (0.8 + frand() * 0.2), y + Math.sin(t) * r * (0.6 + frand() * 0.15)]); }
       daubPoly(soil, pts, color, 0.03, z);
     };
-    for (let k = 0; k < 42; k++) blot((frand() - 0.5) * (W - 1.5), -(HALL.back + 0.8 + frand() * (D - 1.6)), 0.9 + frand() * 1.5, EARTH[1 + k % 3], 0.0008 * (1 + k % 3));
-    for (let k = 0, n = 0; k < 80 && n < 24; k++) {
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
+    for (let k = 0; k < 42; k++) { if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; } blot((frand() - 0.5) * (W - 1.5), -(HALL.back + 0.8 + frand() * (D - 1.6)), 0.9 + frand() * 1.5, EARTH[1 + k % 3], 0.0008 * (1 + k % 3)); }
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
+    for (let k = 0, n = 0; k < 80 && n < 24; k++) { if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
       const x = (frand() - 0.5) * (W - 2), z = HALL.back + 1 + frand() * (D - 2), r = 0.5 + frand() * 0.9;
       if (onWalk(x, z) || Math.hypot(x - STAGE.x, z - STAGE.z) < STAGE.r + 2.3) continue;
       blot(x, -z, r, SAND[n % 2], 0.0031 + (n % 2) * 0.0006);
       n++;
     }
-    for (let k = 0; k < 930; k++) {
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
+    for (let k = 0; k < 930; k++) { if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
       const x = (frand() - 0.5) * (W - 0.6), z = HALL.back + 0.3 + frand() * (D - 0.6), r = 0.025 + frand() * 0.045, a = frand() * 6.3;
       if (onWalk(x, z)) continue;
       daubPoly(grit, [0, 2.1, 4.2].map((t) => [x + Math.cos(a + t) * r, -z + Math.sin(a + t) * r]), k % 3 ? "#9c8060" : "#3c2a1c", 0.03, 0.0048);
     }
-    for (let k = 0, n = 0; k < 210 && n < 72; k++) {
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
+    for (let k = 0, n = 0; k < 210 && n < 72; k++) { if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
       const x = (frand() - 0.5) * (W - 1.4), z = HALL.back + 0.7 + frand() * (D - 1.4), r = 0.06 + frand() * 0.1, a = frand() * 6.3;
       if (onWalk(x, z) || Math.hypot(x - STAGE.x, z - STAGE.z) < STAGE.r + 2.4) continue;
       flagstone(pebbles, Array.from({ length: 6 }, (_, j) => [x + Math.cos(a + j * 1.05) * r * (0.85 + frand() * 0.15), z + Math.sin(a + j * 1.05) * r * (0.7 + frand() * 0.15)]), FLAGS[n % 4], 0.012 + r * 0.12);
       n++;
     }
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
     parts.push(pebbles);
-    for (const [wall, s, what] of FOOT) if (/shroom|crystal/.test(what)) {
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
+    for (const [wall, s, what] of FOOT) { if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; } if (/shroom|crystal/.test(what)) {
       const [x, , z] = onWall(wall, s, 0, 0.3), { r } = WALLS[wall];
       daubDot(grit, x, -z, 0.3 + Math.abs(r[0]) * 0.35, 0.3 + Math.abs(r[2]) * 0.35, "#2e6e66", 0.25, 0, 0.0043, 12);
-    }
+    } }
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
     laid(soil, 0);
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
     laid(grit, 0);
     // The flagstones: seeds on a jittered grid wherever a walk runs, two courses round the stage cut at its foot by
     // unseen seeds under it, and unseen seeds round the medallion and the jackpot wheel's footing so the paving stops
     // at their kerbs. About one stone in five carries a mark, but no coconut lies where the skee-ball lanes' or the air
     // hockey tables' players look (`VIEWS`: [frame, the eye's z and the far z in it, as the games' cameras see the
     // floor]).
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
     const prand = mulberry32(3320), seeds = [], stones = geometry(), marks = geometry();
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
     const fx = LAYOUT.wheel.x, fz = LAYOUT.wheel.z + WHEEL_FOOT.z, offFoot = (x, z) => Math.hypot(x - fx, z - fz) > WHEEL_FOOT.r + 0.35;
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
     const VIEWS = [...LAYOUT.skee.map((p) => [p, 2.3, -16]), ...LAYOUT.frames.hockey.map((p) => [p, 0.55, -8])];
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
     const inView = (x, z) => VIEWS.some(([p, eye, far]) => {
       const dx = x - p.x, dz = z - p.z, c = Math.cos(p.turn), s = Math.sin(p.turn), lx = dx * c - dz * s, lz = dx * s + dz * c;
       return lz < eye && lz > far && Math.abs(lx) < eye - lz + 0.8;
     });
-    for (let z = HALL.back + 0.5; z < OUT; z += 1.1) for (let x = -HALL.halfW + 0.5; x < HALL.halfW; x += 1.1) {
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
+    for (let z = HALL.back + 0.5; z < OUT; z += 1.1) { if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; } for (let x = -HALL.halfW + 0.5; x < HALL.halfW; x += 1.1) { if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
       const sx = x + (prand() - 0.5) * 0.5, sz = z + (prand() - 0.5) * 0.5;
       if (onWalk(sx, sz) && Math.hypot(sx - STAGE.x, sz - STAGE.z) > STAGE.r + 2.5 && Math.hypot(sx, sz - MEDALLION.z) > MEDALLION.r + 0.45 && offFoot(sx, sz)) seeds.push([sx, sz, true]);
-    }
-    for (const [r, n, real] of [[STAGE.r - 0.45, 30, false], [STAGE.r + 0.6, 30, true], [STAGE.r + 1.7, 37, true]]) for (let k = 0; k < n; k++) {
+    } }
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
+    for (const [r, n, real] of [[STAGE.r - 0.45, 30, false], [STAGE.r + 0.6, 30, true], [STAGE.r + 1.7, 37, true]]) { if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; } for (let k = 0; k < n; k++) { if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
       const a = (k + (real ? (prand() - 0.5) * 0.3 : 0)) / n * Math.PI * 2, x = STAGE.x + Math.cos(a) * r, z = STAGE.z + Math.sin(a) * r;
       seeds.push([x, z, real && offFoot(x, z)]);
-    }
-    for (let k = 0; k < 28; k++) { const a = k / 28 * Math.PI * 2; seeds.push([Math.cos(a) * (MEDALLION.r - 0.42), MEDALLION.z + Math.sin(a) * (MEDALLION.r - 0.42), false]); }
-    for (let k = 0; k < 12; k++) { const a = k / 12 * Math.PI * 2; seeds.push([fx + Math.cos(a) * (WHEEL_FOOT.r - 0.3), fz + Math.sin(a) * (WHEEL_FOOT.r - 0.3), false]); }
+    } }
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
+    for (let k = 0; k < 28; k++) { if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; } const a = k / 28 * Math.PI * 2; seeds.push([Math.cos(a) * (MEDALLION.r - 0.42), MEDALLION.z + Math.sin(a) * (MEDALLION.r - 0.42), false]); }
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
+    for (let k = 0; k < 12; k++) { if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; } const a = k / 12 * Math.PI * 2; seeds.push([fx + Math.cos(a) * (WHEEL_FOOT.r - 0.3), fz + Math.sin(a) * (WHEEL_FOOT.r - 0.3), false]); }
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
     paving(seeds, 0.78).forEach(({ poly, x, z, r }, k) => {
       flagstone(stones, poly, FLAGS[Math.floor(prand() * FLAGS.length)], FLAG_Y);
       if (prand() < 0.22 && (k % SCRAWLS.length !== 4 || !inView(x, z))) SCRAWLS[k % SCRAWLS.length](marks, x, -z, r, (prand() - 0.5) * 1.2, 0.1);
     });
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
     laid(marks, FLAG_Y + 0.001);
     // The medallion: OOGA laid in river pebbles on a disc of packed earth, the carved signs' blocky letters a pebble to
     // each cell a fifth of a metre across, each pebble a rounded stone of seven to nine sides set a little off its
     // cell, turned its own way, a darker rim round its pale top, in bone and pale ochre; a few dark pebbles pressed
     // into the earth round them; and a kerb of eighteen bevelled stones round it all.
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
     const MZ = MEDALLION.z, IN = MEDALLION.r - 0.28, CELL = 0.19, trand = mulberry32(3330), earth = geometry();
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
     const letter = (col, row) => col >= 0 && col < 15 && row >= 0 && row < 5 && col % 4 < 3 && BL.hubModels.SIGN_GLYPHS["OOGA"[col >> 2]][row][col % 4] === "1";
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
     const pebble = (x, z, r, tone, e) => {
       const n = 7 + Math.floor(trand() * 3), turn = trand() * 3, squash = 0.78 + trand() * 0.18;
       daubDot(earth, x, -z, r, r * squash, tint(tone, 0.68), e * 0.5, turn, 0.0012, n);
       daubDot(earth, x - r * 0.06, -z + r * 0.06, r * 0.8, r * squash * 0.78, tone, e, turn, 0.0024, n);
     };
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
     daubDot(earth, 0, -MZ, IN + 0.03, IN + 0.03, EARTH[3], 0.03, 0, 0, 36);
-    for (let row = 0; row < 5; row++) for (let col = 0; col < 15; col++) if (letter(col, row)) {
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
+    for (let row = 0; row < 5; row++) { if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; } for (let col = 0; col < 15; col++) { if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; } if (letter(col, row)) {
       pebble((col - 7) * CELL + (trand() - 0.5) * 0.04, MZ + (row - 2) * CELL + (trand() - 0.5) * 0.04, 0.088 + trand() * 0.018, trand() < 0.6 ? BONE : "#e8c890", 0.2);
-    }
-    for (let k = 0, n = 0; k < 120 && n < 26; k++) {
+    } } }
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
+    for (let k = 0, n = 0; k < 120 && n < 26; k++) { if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
       const a = trand() * Math.PI * 2, d = Math.sqrt(trand()) * (IN - 0.12), x = Math.cos(a) * d, z = Math.sin(a) * d, col = Math.round(x / CELL + 7), row = Math.round(z / CELL + 2);
       if ([-1, 0, 1].some((dc) => [-1, 0, 1].some((dr) => letter(col + dc, row + dr)))) continue;
       pebble(x, MZ + z, 0.035 + trand() * 0.025, FLAGS[3 - (n % 2) * 2], 0.03);
       n++;
     }
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
     laid(earth, 0.0046);
-    for (let k = 0; k < 18; k++) {
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
+    for (let k = 0; k < 18; k++) { if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
       const at2 = (t, r) => [Math.cos(t) * r, MZ + Math.sin(t) * r], a0 = (k + 0.03) / 18 * Math.PI * 2, a1 = (k + 0.97) / 18 * Math.PI * 2;
       flagstone(stones, [at2(a0, MEDALLION.r), at2((a0 + a1) / 2, MEDALLION.r), at2(a1, MEDALLION.r), at2(a1, IN + 0.04), at2(a0, IN + 0.04)], FLAGS[k % 2 ? 1 : 2], FLAG_Y + 0.001);
     }
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
     parts.push(stones);
     // The reed mats, woven in a twill: rows of reeds `ROW` wide along each mat, every row passing over two cross
     // strands and under the next two, a strand further along than the row before, so the weave runs in diagonals;
     // where a row dips under, the cross strands show over it. The rows in the three reed tones, the cross strands a
     // shade darker, a thin dark backing between them; a binding down each long side and a ragged fringe of loose ends.
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
     const mats = geometry(), mrand = mulberry32(3360), ROW = 0.1, PICK = 0.11;
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
     MATS.forEach(([x0, x1, z0, z1], m) => {
       const long = x1 - x0 >= z1 - z0, P = (l, w) => long ? [l, -w] : [w, -l], [l0, l1, w0, w1] = long ? [x0, x1, z0, z1] : [z0, z1, x0, x1];
       const band = (a, b, c, d, color, z) => daubPoly(mats, [P(a, c), P(b, c), P(b, d), P(a, d)], color, 0.03, z);
@@ -516,16 +552,22 @@
         daubPoly(mats, [P(l + s * 0.01, w - half), P(l + s * len, w + lean), P(l + s * 0.01, w + half)], REEDS[Math.floor(mrand() * 3)], 0.03, 0.001);
       }
     });
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
     laid(mats, MAT_Y);
     // The hides, fur up along their turn: the leopard and the tiger from the hide kit, and the mammoth's pelt.
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
     RUGS.forEach(([kind, x, z, L, Wd, turnA], k) => {
       const pelt = kind === "mammoth" ? mammothPelt(L, Wd, 3341) : hide(L, Wd, kind, 3342 + k);
       parts.push(moved(turnedY(turnedX(pelt, -Math.PI / 2), turnA), x, HIDE_Y, z));
     });
     // A trail of Ooga footprints in charcoal, in from the tunnel toward the medallion.
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
     const steps = geometry();
-    for (let k = 0; k < 9; k++) MARK.foot(steps, 0.45 + (k % 2 ? 0.17 : -0.17), k * 0.6 - 9.3, 0.3, k % 2 ? 0.08 : -0.08, EARTH_BLACK, 0);
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
+    for (let k = 0; k < 9; k++) { if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; } MARK.foot(steps, 0.45 + (k % 2 ? 0.17 : -0.17), k * 0.6 - 9.3, 0.3, k % 2 ? 0.08 : -0.08, EARTH_BLACK, 0); }
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
     laid(steps, FLAG_Y + 0.0015);
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
     const floor = merge(...parts);
     // The walls, then the ceiling: rock cells a metre square laid in blocks of one, two, four or six (bigger
     // overhead), each set back up to a fifth of a metre, turned and tipped a little and bulging at its middle, none
@@ -533,8 +575,10 @@
     // one tone under each painting, and nothing where the doorway opens. The front and back walls' end blocks run on
     // into the corners. `relief` keeps how far the rock stands into the hall at each cell's middle, so what grows on
     // it hugs it. Then the paintings, each drawn round its panel's middle and stood on its wall a hair proud of it.
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
     const crag = geometry(), relief = new Map(), cellOf = (wall, s, y) => `${wall}${Math.floor(s)}:${Math.floor(y)}`, reliefAt = (wall, s, y) => relief.get(cellOf(wall, s, y)) || 0;
-    for (const wall of ["B", "F", "L", "R"]) {
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
+    for (const wall of ["B", "F", "L", "R"]) { if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
       const { r, n } = WALLS[wall], side = wall === "L" || wall === "R", s0 = side ? HALL.back : -HALL.halfW, cols = side ? D : W;
       const painted = (i, j) => PAINTINGS.some(([w, a0, a1, y0, y1]) => w === wall && s0 + i + 0.5 > a0 && s0 + i + 0.5 < a1 && j + 0.5 > y0 && j + 0.5 < y1);
       const door = (i, j) => wall === "F" && Math.abs(s0 + i + 0.5) < HALL.door && j < HALL.doorH;
@@ -550,7 +594,9 @@
     }
     // Paint on rock catches the firelight rather than giving it: the earth colours glow a little, chalk least, the
     // mammoth hunt (the first, the hero) a little more, and every fill is worn thin in patches (`speckle`).
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
     const flat = [], chalk = hexToRgb(EARTH_CHALK).join();
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
     PAINTINGS.forEach(([wall, a0, a1, y0, y1, paint], i) => {
       const art = geometry(), { r, n } = WALLS[wall], e = i ? 0.16 : 0.26;
       stone(crag, onWall(wall, (a0 + a1) / 2, (y0 + y1) / 2, 0), r, UP, n, a1 - a0, y1 - y0, 0.9, 0.08, 0, "#4b3f36");
@@ -559,6 +605,7 @@
       speckle(art, a1 - a0, y1 - y0, mulberry32(707 + i), e);
       flat.push(moved(turnedY(art, TO_WALL[wall]), ...onWall(wall, (a0 + a1) / 2, (y0 + y1) / 2, 0.012)));
     });
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
     layBlocks(W + 1, D + 1, CEILING_BLOCKS, rand, () => true, (i, j, w, h) => {
       const turn = (rand() - 0.5) * 0.1, cs = Math.cos(turn), sn = Math.sin(turn);
       stone(crag, [i + w / 2 - HALL.halfW - 0.5, HALL.h - rand() * 0.06, j + h / 2 + HALL.back - 0.5], [cs, (rand() - 0.5) * 0.06, sn], [-sn, (rand() - 0.5) * 0.06, cs], [0, -1, 0], w + LAP, h + LAP, 0.5, 0.22, 0.1 + rand() * 0.08, CEILING[Math.floor(rand() * 3)]);
@@ -566,7 +613,9 @@
     // The trunks (`POSTS`): each a bark log from the floor up into the rock, tapering as it climbs and bowed along the
     // wall as `trunkAt` runs, bound in rope over the palisade, a stub or two of branch sawn off it well over head
     // height, clear of the torches' brackets; its fork into the rock is grown below.
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
     const J = BL.hubModels, stub = mulberry32(3306);
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
     POSTS.forEach(([s], k) => {
       const r = BOWS[k][2], trunk = J.log(0, -0.02, 0, 0, HALL.h + 0.05, 0, r, "#5a3c22"), v = trunk.verts, [lx, , lz] = trunkAt(k, 1.66);
       for (let i = 0; i < v.length; i += 3) {
@@ -580,15 +629,18 @@
         timber.push(J.log(x, y, z, x - s * l * 0.8, y + l * 0.55, z + dz * l, 0.07, "#5a3c22"));
       }
     });
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
     const block = (x, y, z, w, d) => flat.push(box({ w, h: 1, d, color: STONE[Math.floor(rand() * 3)], offset: { x, y: y + 0.5, z } }));
     // The way out: a short rock tunnel past the doorway, two timber sets across it (bark log posts under a log lintel
     // bound to them with rope), the flagstones on under them, and the jungle outside at its far end.
-    for (let z = HALL.front + 0.5; z < OUT; z++) {
-      for (let y = 0; y < HALL.doorH + 1; y++) for (const s of [-1, 1]) block(s * (HALL.door + 0.5), y, z, 1, 1);
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
+    for (let z = HALL.front + 0.5; z < OUT; z++) { if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
+      for (let y = 0; y < HALL.doorH + 1; y++) { if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; } for (const s of [-1, 1]) { if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; } block(s * (HALL.door + 0.5), y, z, 1, 1); } }
       block(0, HALL.doorH, z, HALL.door * 2, 1);
     }
-    for (const z of [HALL.front + 0.8, HALL.front + 2.6]) {
-      for (const s of [-1, 1]) {
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
+    for (const z of [HALL.front + 0.8, HALL.front + 2.6]) { if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
+      for (const s of [-1, 1]) { if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
         timber.push(J.log(s * (HALL.door - 0.19), -0.02, z, s * (HALL.door - 0.17), HALL.doorH - 0.1, z, 0.16, "#5a3c22"));
         timber.push(J.lashing(s * (HALL.door - 0.18), HALL.doorH - 0.4, z, 0, 1, 0, 0.16), J.lashing(s * (HALL.door - 0.18), HALL.doorH - 0.145, z, 1, 0, 0, 0.17));
       }
@@ -598,10 +650,15 @@
     // glow over the horizon in bands, a far line of treetops, a palm leaning in from one side with its fronds hanging
     // and big leaves at the foot of the view, all dark against the light. Drawn on the xy plane, turned to face the
     // hall at the tunnel's end.
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
     const view = geometry(), vw = HALL.door, vh = HALL.doorH, SKY = ["#e6cf98", "#f7e0aa", "#f0d6a0", "#e2cc9c", "#d0c49c", "#bab89a"];
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
     SKY.forEach((c, k) => daubPoly(view, [[-vw, vh * k / 6], [vw, vh * k / 6], [vw, vh * (k + 1) / 6], [-vw, vh * (k + 1) / 6]], c, 0.8 - k * 0.05));
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
     daubPoly(view, [[-vw, 0], [vw, 0], [vw, 0.95], [-vw, 0.95]], "#4e6238", 0.3, 0.01);
-    for (let k = 0; k < 9; k++) daubDot(view, -vw + k * vw / 4 + ((k * 7) % 3 - 1) * 0.12, 0.95 + (k % 3) * 0.08, 0.34 + (k * 5 % 4) * 0.06, 0.26 + (k * 3 % 4) * 0.05, k % 2 ? "#4e6238" : "#456034", 0.3, 0, 0.01, 12);
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
+    for (let k = 0; k < 9; k++) { if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; } daubDot(view, -vw + k * vw / 4 + ((k * 7) % 3 - 1) * 0.12, 0.95 + (k % 3) * 0.08, 0.34 + (k * 5 % 4) * 0.06, 0.26 + (k * 3 % 4) * 0.05, k % 2 ? "#4e6238" : "#456034", 0.3, 0, 0.01, 12); }
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
     const palm = (x, lean, h, s) => {
       const top = [x + lean, h];
       daubTaper(view, Array.from({ length: 7 }, (_, k) => { const t = k / 6; return [x + lean * t * t, h * t]; }), (t) => (0.2 - 0.08 * t) * s, "#35291c", 0.18, 0.02);
@@ -611,24 +668,31 @@
         daubTaper(view, pts, (t) => 0.2 * s * Math.sin(Math.PI * Math.min(1, t * 1.1)) ** 0.7, k % 2 ? "#243c1c" : "#2c4620", 0.2, 0.025 + k * 0.0005);
       }
     };
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
     palm(1.5, -0.8, 3.05, 1);
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
     palm(-1.9, 0.35, 2.25, 0.7);
-    for (const [x, a, len, w] of [[-2.6, 0.9, 1.5, 0.42], [-2.2, 1.25, 1.1, 0.34], [2.6, 2.3, 1.4, 0.4], [2.1, 1.95, 1.0, 0.32], [0.3, 1.45, 0.8, 0.3]]) {
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
+    for (const [x, a, len, w] of [[-2.6, 0.9, 1.5, 0.42], [-2.2, 1.25, 1.1, 0.34], [2.6, 2.3, 1.4, 0.4], [2.1, 1.95, 1.0, 0.32], [0.3, 1.45, 0.8, 0.3]]) { if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
       const pts = Array.from({ length: 7 }, (_, j) => { const t = j / 6; return [x + Math.cos(a) * len * t, Math.sin(a) * len * t - len * 0.25 * t * t]; });
       daubTaper(view, pts, (t) => w * Math.sin(Math.PI * Math.min(1, t * 1.05)) ** 0.6, "#1e3218", 0.14, 0.03);
     }
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
     const outside = unshadowed(moved(turnedY(view, Math.PI), 0, 0, OUT - 0.02));
     // The jungle, grown into the timber's own mesh. The swags run `X` either side of the hall's middle and `TIE` high
     // from anchor to anchor along each side wall, a trunk where it passes `TIE` or a root out of the rock (`HOOKS`),
     // dipping `SAG` of each span between them; a curtain starts on the swag above it and eases back to the wall as it
     // falls.
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
     const { withJungle, liana, sagPoints, sprig, garland, puff, flatInto } = BL.hubModels, leaf = mulberry32(3304), X = HALL.halfW - 0.55, TIE = HALL.h - 1.5, SAG = 0.22;
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
     const anchors = [-1, 1].map((s) => {
       const out = [], add = (z) => { const i = out.findIndex((q) => q > z); out.splice(i < 0 ? out.length : i, 0, z); };
       POSTS.forEach(([ps], k) => { if (ps === s) add(trunkAt(k, TIE)[2]); });
       for (const [hs, z] of HOOKS) if (hs === s) add(z);
       return out;
     });
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
     const swagAt = (s, z) => {
       const a = anchors[(s + 1) / 2];
       let k = 0;
@@ -636,6 +700,7 @@
       const span = a[k + 1] - a[k];
       return TIE - Math.sin(Math.min(1, Math.max(0, (z - a[k]) / span)) * Math.PI) * SAG * span;
     };
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
     const timberJungle = withJungle(shaded(timber), (g) => {
       for (const s of [-1, 1]) {
         const a = anchors[(s + 1) / 2], swag = [];
@@ -810,12 +875,15 @@
   // belly carved in a band of triangles, one a face all pointing up like a row of teeth, so none reads as a face.
   const GOURD = [[0, 0], [0.09, 0.008], [0.16, 0.045], [0.195, 0.1], [0.2, 0.16], [0.185, 0.22], [0.15, 0.275], [0.1, 0.315], [0.075, 0.35], [0.085, 0.43], [0.075, 0.5], [0.042, 0.55], [0, 0.565]];
   const GOURD_S = 1.3;const GOURD_BAND = 3;
-  const lanterns = cached(() => {
+  const lanterns = BL.models.cachedSteps(function* (slice = null) {
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
     const J = BL.hubModels, round = [], flat = [], glow = [], flames = [], lights = [], kinds = [], footprints = [], ties = [], leaf = mulberry32(1707);
     // Its light `lift` over the flame, and `out` in front of it along +z where a fire against the back wall spills.
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
     const fire = (x, y, z, size, kind, lift, out = 0) => { flames.push([x, y, z, size]); lights.push(x, y + lift, z + out); kinds.push(kind); };
     // A woven cup of radius r on a pole's head at (x, y, z): the basket in two close straw tones narrowing onto the
     // pole, its rope rim and the dark pitch the flame stands on. Returns the flame's foot.
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
     const cup = (x, y, z, r) => {
       const basket = lathe({ profile: [[r * 0.4, 0], [r * 0.72, r * 0.45], [r * 0.98, r * 1.15], [r * 1.08, r * 1.5]], segments: 10, color: "#b88a3e" }), weave = hexToRgb("#9f7634");
       basket.faces.forEach((f, k) => { if ((k + Math.floor(k / 10)) % 2) f.color = weave; });
@@ -823,31 +891,35 @@
       round.push(moved(lathe({ profile: [[r * 1.02, r * 1.36], [0, r * 1.44]], segments: 10, color: "#1c120c" }), x, y, z));
       return y + r * 1.38;
     };
-    for (const [s, z] of POST_TORCHES) {
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
+    for (const [s, z] of POST_TORCHES) { if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
       const post = s * (HALL.halfW - 0.49), foot = s * (HALL.halfW - 0.66), head = s * (HALL.halfW - 0.84);
       round.push(J.bamboo(foot, 2.25, z, head, 3.45, z, 0.045));
-      for (const y of [2.5, 3.1]) {
+      for (const y of [2.5, 3.1]) { if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
         const px = foot + (head - foot) * (y - 2.25) / 1.2;
         flat.push(bevelBox({ w: Math.abs(post - px) + 0.1, h: 0.09, d: 0.14, color: TIMBER_DK, bevel: 0.02, offset: { x: (post + px) / 2, y, z } }));
         if (y > 3) round.push(J.lashing(px, y, z, head - foot, 1.2, 0, 0.045));
       }
       fire(head, cup(head, 3.45, z, 0.1), z, 1, 0, 0.3);
     }
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
     const backRow = Math.min(...MEZZ_POSTS.map(([, z]) => z));
-    for (const bx of LAYOUT.darts) for (const [px, pz] of MEZZ_POSTS) {
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
+    for (const bx of LAYOUT.darts) { if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; } for (const [px, pz] of MEZZ_POSTS) { if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
       if (pz !== backRow || Math.abs(px - bx) > 2) continue;
       const s = Math.sign(bx - px), z = pz + 0.24, head = [px + s * 0.12, 2.1, z + 0.14];
       round.push(J.bamboo(px + s * 0.02, 1.4, z, ...head, 0.04));
-      for (const y of [1.48, 1.66]) round.push(J.lashing(px, y, pz, 0, 1, 0, 0.24));
+      for (const y of [1.48, 1.66]) { if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; } round.push(J.lashing(px, y, pz, 0, 1, 0, 0.24)); }
       fire(head[0], cup(...head, 0.09), head[2], 1, 0, 0.3, 0.35);
       footprints.push([px + s * 0.05, pz + 0.41, 0.17, 0]);
-    }
-    for (const [x, y0, z, t, rise] of TIKIS) {
+    } }
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
+    for (const [x, y0, z, t, rise] of TIKIS) { if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
       round.push(moved(turn([[0.22, 0], [0.22, 0.07], [0.15, 0.12], [0, 0.12]], 12, STONE[2]), x, y0, z));
       round.push(J.log(x, y0 + 0.08, z, x, y0 + 1.6 + rise, z, 0.08, "#5a3a22"));
       const y = y0 + rise;
       round.push(J.log(x, y + 1.58, z, x, y + 2.14, z, 0.125, "#7a5030"));
-      for (const h of [1.64, 2.07]) round.push(moved(torus(0.128, 0.022, "#b8402e", 0, 12, 4), x, y + h, z));
+      for (const h of [1.64, 2.07]) { if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; } round.push(moved(torus(0.128, 0.022, "#b8402e", 0, 12, 4), x, y + h, z)); }
       // The face, carved toward +z and turned to `t`: a heavy brow over two bone eyes striped in red earth, the nose,
       // and a grin of bone teeth.
       const eyes = [-1, 1].flatMap((sx) => [
@@ -866,12 +938,13 @@
       fire(x, cup(x, y + 2.14, z, 0.13), z, 1.15, 0, 0.35);
       footprints.push([x, z, 0.22, y0]);
     }
-    for (const [x, y, z] of BOWLS) {
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
+    for (const [x, y, z] of BOWLS) { if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
       round.push(moved(turn([[0.34, 0], [0.34, 0.09], [0.27, 0.15], [0.23, 0.3], [0.22, 0.5], [0.27, 0.58], [0.31, 0.64], [0, 0.66]], 12, STONE[1]), x, y, z));
       round.push(moved(torus(0.232, 0.026, "#b8402e", 0, 12, 4), x, y + 0.4, z));
       round.push(moved(turn([[0.2, 0.64], [0.38, 0.7], [0.47, 0.82], [0.49, 0.9], [0.44, 0.93], [0.4, 0.86], [0, 0.82]], 14, "#7a6a58"), x, y, z));
       glow.push(moved(lathe({ profile: [[0.41, 0.84], [0.26, 0.9], [0, 0.92]], segments: 14, color: "#ff7a28", emissive: 1 }), x, y, z));
-      for (let k = 0; k < 3; k++) {
+      for (let k = 0; k < 3; k++) { if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
         const a = k * 2.1 + 0.4, c = Math.cos(a), sn = Math.sin(a);
         round.push(along(lathe({ profile: [[0, 0], [0.035, 0], [0.035, 0.56], [0, 0.56]], segments: 6, color: "#2a1c14" }), x - c * 0.3, y + 0.9, z - sn * 0.3, c, 0.14, sn));
       }
@@ -880,11 +953,14 @@
     }
     // The gourds: the shell's faces two-tone in ribs and lit a little from within, as a gourd glows round its fire,
     // and where the carving cuts one, that face's triangle (the rest of the face kept round it) moves to the holes.
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
     const S = GOURD_S, segs = 8, skin = hexToRgb("#c68a3e"), rib = hexToRgb("#a86f2c"), neck = hexToRgb("#946026"), lit = hexToRgb("#ffbe48");
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
     const radiusAt = (h) => {
       for (let k = 1; k < GOURD.length; k++) if (GOURD[k][1] >= h) { const [r0, h0] = GOURD[k - 1], [r1, h1] = GOURD[k]; return r0 + (r1 - r0) * (h - h0) / (h1 - h0); }
       return 0;
     };
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
     LAYOUT.lanterns.forEach(([x, z, dy]) => {
       const y = LANTERN_Y + dy, shell = lathe({ profile: GOURD.map(([r, h]) => [r * S, h * S]), segments: segs, color: "#c68a3e" }), v = shell.verts, kept = [], holes = geometry();
       const mid = (a, b) => { v.push((v[a * 3] + v[b * 3]) / 2, (v[a * 3 + 1] + v[b * 3 + 1]) / 2, (v[a * 3 + 2] + v[b * 3 + 2]) / 2); return v.length / 3 - 1; };
@@ -904,6 +980,7 @@
       lights.push(x, y + 0.25, z);
       kinds.push(2);
     });
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
     const frame = J.withJungle(shaded(round, flat), (g) => {
       // Each gourd's vine down from the rock to its stopper, leaves where it leaves the rock, and its sling: three
       // strands of rope from the collar at its neck down round its belly to meet under it.
@@ -946,12 +1023,15 @@
     }
     return geo;
   };
-  const ceiling = cached(() => {
+  const ceiling = BL.models.cachedSteps(function* (slice = null) {
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
     const J = BL.hubModels, M = MAMMOTH_AT, round = [], mammoth = [], bones = [], rand = mulberry32(1110), leaf = mulberry32(1111), roots = [];
     // A point in the mammoth's frame, in the hall.
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
     const at = (x, y, z) => [M.x + z, M.y + y, M.z - x];
     // An ellipsoid in the mammoth's frame at (x, y, z), radii rx, ry, rz, tipped `tilt` about x, in `segs` segments
     // (the small ones fewer).
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
     const blob = (x, y, z, rx, ry, rz, color = BONE, tilt = 0, segs = 10) => {
       const n = segs > 7 ? 6 : 4, g = lathe({ profile: Array.from({ length: n + 1 }, (_, k) => [Math.sin(k / n * Math.PI), -Math.cos(k / n * Math.PI)]), segments: segs, color });
       for (let i = 0; i < g.verts.length; i += 3) { g.verts[i] *= rx; g.verts[i + 1] *= ry; g.verts[i + 2] *= rz; }
@@ -959,6 +1039,7 @@
     };
     // A bone through `pts` in the mammoth's frame, r0 thick at its first point and r1 at its last, a knob at each end
     // of a limb bone.
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
     const bone = (pts, r0, r1, knobs = false) => {
       bones.push([pts.map((p) => at(...p)), r0, r1]);
       if (knobs) for (const p of [pts[0], pts[pts.length - 1]]) blob(...p, r0 * 1.45, r0 * 1.45, r0 * 1.45, BONE, 0, 7);
@@ -966,41 +1047,54 @@
     // The skull: the cranium under its high dome, the face below it holding the tusks' sheaths, the trunk socket high
     // in the face in a rim of bone, the eye sockets under their brows and the cheek bones, the jaw hung open under
     // them, and the tusks.
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
     blob(0, 0.12, 2.55, 0.5, 0.62, 0.52, BONE, -0.25);
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
     blob(0, 0.7, 2.36, 0.37, 0.42, 0.38, BONE, -0.5);
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
     blob(0, -0.42, 2.92, 0.42, 0.5, 0.34, BONE, 0.3);
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
     blob(0, 0.18, 3.02, 0.15, 0.19, 0.08, "#3a2c20", 0, 8);
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
     mammoth.push(moved(turnedX(torus(0.17, 0.045, BONE, 0, 12, 5), Math.PI / 2), 0, 0.18, 3.04));
-    for (const sx of [-1, 1]) {
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
+    for (const sx of [-1, 1]) { if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
       blob(sx * 0.43, 0.08, 2.8, 0.08, 0.13, 0.13, "#3a2c20", 0, 7);
       blob(sx * 0.4, 0.26, 2.78, 0.1, 0.07, 0.17, BONE, 0, 7);
       bone([[sx * 0.42, -0.08, 2.98], [sx * 0.47, -0.13, 2.68], [sx * 0.41, -0.1, 2.36]], 0.05, 0.045);
       bone([[sx * 0.2, -0.5, 3], [sx * 0.25, -0.82, 3.12]], 0.17, 0.16);
       mammoth.push(moved(turnedY(turnedZ(mammothTusk(3.5, 0.15, 1.2, 3.8), sx * 0.4), sx * 0.26), sx * 0.25, -0.82, 3.12));
     }
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
     bone([[-0.3, -0.3, 2.28], [-0.27, -0.66, 2.45], [-0.13, -0.8, 2.62], [0.13, -0.8, 2.62], [0.27, -0.66, 2.45], [0.3, -0.3, 2.28]], 0.085, 0.085);
     // The spine: a cord from the tail's tip to the skull strung with a vertebra every fifth of a metre, smaller down
     // the tail, with a spine standing up from each along the back, tallest over the shoulders' hump.
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
     bone(MAMMOTH_SPINE.map(([z, y]) => [0, y, z]), 0.035, 0.06);
-    for (let z = -3.15; z < 2.1; z += 0.2) {
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
+    for (let z = -3.15; z < 2.1; z += 0.2) { if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
       const y = spineAt(z), dy = spineAt(z + 0.05) - spineAt(z - 0.05), r = z < -2.45 ? 0.05 + (z + 3.15) * 0.07 : 0.11;
       mammoth.push(along(lathe({ profile: [[0, -0.07], [r * 0.9, -0.065], [r, 0], [r * 0.9, 0.065], [0, 0.07]], segments: 8, color: BONE }), 0, y, z, 0, dy, 0.1));
       if (z > -2.5 && z < 1.95) { const h = 0.12 + 0.48 * Math.exp(-(((z - 0.8) / 1.0) ** 2)); bone([[0, y + 0.05, z], [0, y + 0.05 + h, z - 0.1]], 0.045, 0.02); }
     }
     // Ten pairs of ribs, the middle ones longest, sweeping back a little as they curve down to leave the belly open.
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
     [0.78, 0.9, 0.97, 1, 1, 0.98, 0.94, 0.87, 0.79, 0.7].forEach((f, k) => {
       const z = 1.5 - k * 0.31, y = spineAt(z) - 0.04;
       for (const sx of [-1, 1]) bone([[sx * 0.08, y, z], [sx * 0.34, y - 0.02, z - 0.03], [sx * 0.7 * f, y - 0.32 * f, z - 0.08], [sx * 0.82 * f, y - 0.78 * f, z - 0.14], [sx * 0.7 * f, y - 1.2 * f, z - 0.19], [sx * 0.4 * f, y - 1.42 * f, z - 0.21]], 0.055, 0.03);
     });
     // Shoulder blades and hip bones, then the legs, each a bone to the elbow or knee and another to the foot, walking.
-    for (const sx of [-1, 1]) { blob(sx * 0.76, 0.3, 1.2, 0.07, 0.42, 0.26, BONE, 0.3); blob(sx * 0.5, -0.14, -2.15, 0.09, 0.36, 0.3, BONE, -0.35); }
-    for (const [sx, x, hz, hy, kz, fz, knee, fy] of [[-1, 0.72, 1.25, -0.2, 1.42, 1.3, -1.12, -1.9], [1, 0.72, 1.25, -0.2, 1.02, 0.84, -1.1, -1.86], [-1, 0.52, -2.15, -0.38, -1.95, -2.1, -1.12, -1.84], [1, 0.52, -2.15, -0.38, -2.42, -2.6, -1.1, -1.8]]) {
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
+    for (const sx of [-1, 1]) { if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; } blob(sx * 0.76, 0.3, 1.2, 0.07, 0.42, 0.26, BONE, 0.3); blob(sx * 0.5, -0.14, -2.15, 0.09, 0.36, 0.3, BONE, -0.35); }
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
+    for (const [sx, x, hz, hy, kz, fz, knee, fy] of [[-1, 0.72, 1.25, -0.2, 1.42, 1.3, -1.12, -1.9], [1, 0.72, 1.25, -0.2, 1.02, 0.84, -1.1, -1.86], [-1, 0.52, -2.15, -0.38, -1.95, -2.1, -1.12, -1.84], [1, 0.52, -2.15, -0.38, -2.42, -2.6, -1.1, -1.8]]) { if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
       bone([[sx * x, hy, hz], [sx * (x - 0.02), knee, kz]], 0.085, 0.075, true);
       bone([[sx * (x - 0.02), knee, kz], [sx * (x - 0.04), fy, fz]], 0.075, 0.06, true);
       blob(sx * (x - 0.04), fy - 0.12, fz + 0.06, 0.15, 0.07, 0.18, BONE, 0, 8);
-      for (const tx of [-0.08, 0, 0.08]) blob(sx * (x - 0.04) + tx, fy - 0.13, fz + 0.23, 0.05, 0.045, 0.05, BONE, 0, 5);
+      for (const tx of [-0.08, 0, 0.08]) { if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; } blob(sx * (x - 0.04) + tx, fy - 0.13, fz + 0.23, 0.05, 0.045, 0.05, BONE, 0, 5); }
     }
     // The skeleton, built head to +z, turned side-on into the hall.
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
     round.push(moved(turnedY(merge(...mammoth), Math.PI / 2), M.x, M.y, M.z));
     // The ceiling, row by row across the hall (`rows`), where nothing else hangs: big clusters of stalactites
     // dripping off a swelling in the rock, one great drip 1.2 to 2 m long with two to four smaller ones leaning out
@@ -1008,13 +1102,17 @@
     // the doorway), and every third one grown through by roots that wind down round it and hang on past its tip.
     // Placed from `rand`, each at least `r` clear of the spots, the gourds' vines, the bunting and the hall of fame's
     // lianas.
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
     const rows = [], F = LAYOUT.fame, fameTies = [-1, 1].map((s) => [F.x + Math.cos(F.turn) * s * 1.65, F.z - Math.sin(F.turn) * s * 1.65]);
-    for (let z = BAY_Z; z < HALL.front; z += 3.4) rows.push(z);
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
+    for (let z = BAY_Z; z < HALL.front; z += 3.4) { if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; } rows.push(z); }
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
     const clear = (x, z, r) => Math.abs(x) < HALL.halfW - 0.9 - r && !(x > M.x - 3.7 - r && x < M.x + 5.6 + r && Math.abs(z - M.z) < 4.3)
       && SPOTS.every(([sx, sz]) => Math.hypot(x - sx, z - sz) > r + 0.9) && LAYOUT.lanterns.every(([lx, lz]) => Math.hypot(x - lx, z - lz) > r + 0.6)
       && fameTies.every(([fx, fz]) => Math.hypot(x - fx, z - fz) > r + 0.7) && PENNANT_LINES.every((pz) => Math.abs(z - pz) > r + 0.45);
     // A drip `len` long from the rock at (x, z), `r` thick where it leaves it: swelling a little before it tapers to a
     // rounded point, pale at the tip, leaning out `lx` along x and `lz` along z; a `big` one rounder and smoother.
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
     const stalactite = (x, z, len, r, lx, lz, big) => {
       const tone = STALACTITE[Math.floor(rand() * STALACTITE.length)];
       const profile = big ? [[0, -len], [r * 0.14, -len * 0.97], [r * 0.3, -len * 0.88], [r * 0.52, -len * 0.7], [r * 0.72, -len * 0.47], [r * 0.88, -len * 0.25], [r, -len * 0.08], [r * 1.25, 0.04]]
@@ -1022,6 +1120,7 @@
       const g = lathe({ profile, segments: big ? 8 : 6, color: (t) => t < 0.2 ? "#c2ae92" : tone });
       round.push(moved(turnedZ(turnedX(g, -lz), lx), x, HALL.h + 0.02, z));
     };
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
     const cluster = (x, z, len, grown) => {
       const R = 0.5 + len * 0.16, r = 0.22 + len * 0.08, n = 2 + Math.floor(rand() * 3);
       round.push(moved(lathe({ profile: [[0, -0.3], [R * 0.5, -0.26], [R * 0.85, -0.14], [R * 1.05, 0.04]], segments: 10, color: STALACTITE[2] }), x, HALL.h + 0.02, z));
@@ -1032,7 +1131,9 @@
       }
       if (grown) roots.push([x, z, len, r]);
     };
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
     let count = 0;
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
     [HALL.back + 0.75, ...rows.slice(1).map((z, k) => (z + rows[k]) / 2)].forEach((bz, b) => {
       for (let k = 0; k < 5; k++) {
         const x = (k - 2) * 6.8 + (rand() - 0.5) * 1.8, z = bz + (k % 2 ? 0.85 : -0.85) * (b ? 1 : 0.2) + (rand() - 0.5) * 0.3;
@@ -1041,12 +1142,14 @@
       }
     });
     // Glowing teal crystals, sparingly, in four clusters up by the side walls.
-    for (const [x, z] of [[-16.3, -20], [16.3, -13.2], [-16.3, 0.9], [16.4, 4.1]]) {
-      for (let k = 0; k < 5; k++) {
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
+    for (const [x, z] of [[-16.3, -20], [16.3, -13.2], [-16.3, 0.9], [16.4, 4.1]]) { if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
+      for (let k = 0; k < 5; k++) { if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
         const len = 0.22 + rand() * 0.3, g = lathe({ profile: [[0, -len], [0.05, -len * 0.75], [0.05, 0]], segments: 6, color: k % 2 ? "#3fe0d0" : "#6ff0e0", emissive: 0.85 });
         round.push(moved(turnedZ(turnedX(g, (rand() - 0.5) * 1.1), (rand() - 0.5) * 1.1), x + (rand() - 0.5) * 0.4, HALL.h + 0.02, z + (rand() - 0.5) * 0.4));
       }
     }
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
     const geo = J.withJungle(shaded(round), (g) => {
       for (const [pts, r0, r1] of bones) J.liana(g, pts, r0, r1, BONE);
       // The lianas it hangs by, a pair from the rock either side of its back to the top of its skull, its shoulders
@@ -1072,6 +1175,7 @@
         J.sprig(g, x, HALL.h - 0.28, z, 0, -1, 0, 5, 0.3, leaf, MOSS);
       }
     });
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
     geo.castShadow = false;
     return geo;
   });
@@ -1090,10 +1194,12 @@
     geo.faces.forEach((f, k) => { f.emissive = k < 24 ? 1 : 0; });
     return geo;
   };
-  const stage = cached(() => {
+  const stage = BL.models.cachedSteps(function* (slice = null) {
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
     const { r, inner, low, high } = STAGE, round = [], flat = [], lit = [], J = BL.hubModels, rand = mulberry32(6060);
     // Bark round a riser from y0 to y1 at radius rad, flaring `flare` out at its foot, in n furrowed ribs: every other
     // ring of vertices stands proud and every other face is a furrow's dark.
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
     const bark = (rad, y0, y1, flare, n) => {
       const geo = turn([[rad + flare, y0], [rad + flare * 0.35, y0 + (y1 - y0) * 0.4], [rad + 0.01, y1 - 0.025], [rad - 0.03, y1]], n, STUMP.bark), v = geo.verts, dark = hexToRgb(STUMP.furrow);
       for (let k = 0; k < v.length; k += 3) { const f = Math.round(Math.atan2(v[k + 2], v[k]) / (Math.PI * 2 / n)) & 1 ? 1.012 : 0.992; v[k] *= f; v[k + 2] *= f; }
@@ -1102,6 +1208,7 @@
     };
     // A sawn face: the ring from ro in to ri at y, pushed a little out of round (most at the middle of a face `rim`
     // across, none at its edge or heart) the way growth rings run; none when `rim` is 0.
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
     const cut = (ro, ri, y, color, rim) => {
       const geo = lathe({ profile: [[ro, y], [ri, y]], segments: 40, color }), v = geo.verts;
       if (rim) for (let k = 0; k < v.length; k += 3) {
@@ -1112,51 +1219,71 @@
       }
       return geo;
     };
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
     round.push(bark(r, 0, low, 0.14, 64), bark(inner, low, high, 0.05, 56));
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
     round.push(moved(torus(r - 0.01, 0.045, STUMP.lip, 0, 44, 5), 0, low - 0.005, 0), moved(torus(inner - 0.01, 0.045, STUMP.lip, 0, 40, 5), 0, high - 0.005, 0));
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
     round.push(cut(r - 0.03, inner + 0.16, low + 0.002, STUMP.sap, 0), cut(inner + 0.16, inner + 0.13, low + 0.002, STUMP.late, 0), cut(inner + 0.13, inner, low + 0.002, tint(STUMP.sap, 0.9), 0));
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
     let ro = inner - 0.03;
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
     round.push(cut(ro, ro - 0.24, high + 0.002, STUMP.sap, inner));
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
     ro -= 0.24;
-    for (let k = 0; ro > 0.35; k++) {
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
+    for (let k = 0; ro > 0.35; k++) { if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
       const w = 0.17 + (k * 7 % 5) * 0.035, ri = Math.max(0.2, ro - 0.03 - w);
       round.push(cut(ro, ro - 0.03, high + 0.002, STUMP.late, inner), cut(ro - 0.03, ri, high + 0.002, STUMP.heart[k & 1], inner));
       ro = ri;
     }
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
     round.push(cut(ro, 0, high + 0.002, STUMP.core, inner));
     // The checks: dark splits running out from near the heart, each a long thin kite on the top.
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
     const checks = geometry(), dark = hexToRgb(STUMP.check);
-    for (const [a, r0, r1, w] of [[0.9, 0.3, 2.4, 0.06], [2.8, 0.45, 1.9, 0.05], [4.3, 0.25, 2.8, 0.07], [5.4, 0.9, 1.6, 0.04]]) {
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
+    for (const [a, r0, r1, w] of [[0.9, 0.3, 2.4, 0.06], [2.8, 0.45, 1.9, 0.05], [4.3, 0.25, 2.8, 0.07], [5.4, 0.9, 1.6, 0.04]]) { if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
       const sx = Math.sin(a), cz = Math.cos(a), y = high + 0.005, at = (d, side) => pushVert(checks, sx * d + cz * side, y, cz * d - sx * side);
       face(checks, [at(r0, 0), at(r1, -w), at(r1 * 1.07, 0), at(r1, w)], dark);
     }
-    for (const f of checks.faces) {
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
+    for (const f of checks.faces) { if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
       const v = checks.verts, [p, q, s] = f.i.map((k) => k * 3);
       if ((v[q + 2] - v[p + 2]) * (v[s] - v[p]) - (v[q] - v[p]) * (v[s + 2] - v[p + 2]) < 0) f.i.reverse();
     }
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
     flat.push(checks);
     // The Oogas' marks daubed flush into the sawn top, lit as dimly as the floor's: round its front rim, clear of the
     // cabinets' arc, charcoal handprints, fingers out, with ochre dots between them, and a red-earth sun spiral at
     // the heart. Drawn as the floor's paint is, on the xy plane (y there is -z), and laid a hair over the top.
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
     const marks = geometry(), R = inner - 0.36;
-    for (let k = 0; k <= 12; k++) {
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
+    for (let k = 0; k <= 12; k++) { if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
       const a = (k - 6) * 0.2, s = Math.sin(a), c = Math.cos(a);
-      if (k % 2) for (const [dr, dt] of [[0, -0.08], [0.08, 0.05], [-0.08, 0.05]]) daubDot(marks, s * (R + dr) + c * dt, s * dt - c * (R + dr), 0.045, 0.045, EARTH_OCHRE, 0.06, 0, 0, 8);
+      if (k % 2) for (const [dr, dt] of [[0, -0.08], [0.08, 0.05], [-0.08, 0.05]]) { if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; } daubDot(marks, s * (R + dr) + c * dt, s * dt - c * (R + dr), 0.045, 0.045, EARTH_OCHRE, 0.06, 0, 0, 8); }
       else daubHand(marks, s * (R - 0.17), -c * (R - 0.17), 0.34, a + Math.PI, EARTH_BLACK, 0.06);
     }
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
     daubSpiral(marks, 0, 0, 0.45, 0.06, EARTH_RED, 0.06);
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
     flat.push(moved(turnedX(marks, -Math.PI / 2), 0, high + 0.0032, 0));
     // The light: clusters of three shelf fungi up the bark, amber caps over pale gills, and three clumps of teal
     // mushrooms among the roots behind, clear of the fire bowls there.
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
     const fungus = (x, y, z, size) => moved(lathe({ profile: [[0, -0.004], [size, 0], [size * 0.9, size * 0.2], [size * 0.55, size * 0.34], [0, size * 0.38]], segments: 9, color: (t) => t < 0.2 ? "#ffe0a0" : "#ff9a3a", emissive: 1 }), x, y, z);
-    for (let k = 0; k < 10; k++) {
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
+    for (let k = 0; k < 10; k++) { if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
       const a = 0.7 + k * (Math.PI * 2 - 1.4) / 9 + (rand() - 0.5) * 0.2, up = k % 2, rad = up ? inner + 0.01 : r + 0.05, y = up ? low + 0.09 : 0.09;
-      for (let j = 0; j < 3; j++) { const b = a + (j - 1) * 0.17 / rad; lit.push(fungus(Math.sin(b) * rad, y + (j - 1) * 0.035, Math.cos(b) * rad, [0.1, 0.13, 0.08][j])); }
+      for (let j = 0; j < 3; j++) { if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; } const b = a + (j - 1) * 0.17 / rad; lit.push(fungus(Math.sin(b) * rad, y + (j - 1) * 0.035, Math.cos(b) * rad, [0.1, 0.13, 0.08][j])); }
     }
-    for (const [a, d] of [[2.5, 5.05], [3.78, 4.9], [4.26, 5.1]]) for (let j = 0; j < 3; j++) {
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
+    for (const [a, d] of [[2.5, 5.05], [3.78, 4.9], [4.26, 5.1]]) { if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; } for (let j = 0; j < 3; j++) { if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
       const b = a + (j - 1) * 0.06, e = d + (j % 2) * 0.12, h = [0.16, 0.24, 0.12][j], x = Math.sin(b) * e, z = Math.cos(b) * e, s = [0.05, 0.065, 0.04][j];
       lit.push(moved(turn([[0.016, 0], [0.012, h], [0, h]], 6, "#cfe8e0", 0.3), x, 0, z), moved(lathe({ profile: [[0, h - 0.01], [s, h - 0.004], [s * 0.9, h + s * 0.35], [s * 0.5, h + s * 0.7], [0, h + s * 0.8]], segments: 8, color: "#46e0d0", emissive: 1 }), x, 0, z));
-    }
+    } }
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
     const body = J.withJungle(shaded(round, flat), (g) => {
       // Roots out from the foot of the bark over the floor, tapering as they sink into it, a moss cushion on some and
       // a fern in each gap between them; none straight back, where the floor stays bare to the jackpot wheel's footing.
@@ -1209,15 +1336,21 @@
   // and the stairs. A leafy garland swags along the rail from post to post and another along the fascia between the
   // posts inside the stairs, both with their leaves hanging out over the hall, and a coconut sits on each of the
   // rail's end posts where the stairs land.
-  const mezzanine = cached(() => {
+  const mezzanine = BL.models.cachedSteps(function* (slice = null) {
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
     const { z0, z1, y, stairs, stairW } = MEZZ, W = HALL.halfW * 2 - 0.1, D = z1 - z0, cz = (z0 + z1) / 2;
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
     const J = BL.hubModels, rand = mulberry32(2030), drand = mulberry32(2031), BARKS = ["#5c3f25", "#6b4a2b", "#553a22"];
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
     const end = stairs[1][0] - stairW / 2, n = Math.max(1, Math.round(end * 2 / 1.5)), rx = (k) => -end + k * 2 * end / n, zr = z1 - 0.1, front = z1 - 0.17;
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
     const round = [J.log(-W / 2, y - 0.36, front, W / 2, y - 0.36, front, 0.2, "#5c3f25"), J.log(-W / 2, y - 0.38, z0 + 0.22, W / 2, y - 0.38, z0 + 0.22, 0.2, "#553a22"), ...[-1, 1].map((s) => moved(nut("husk", 0.09), s * end, y + 1.18, zr))];
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
     const rows = Math.floor(D / 0.4);
-    for (let j = 0; j < rows; j++) {
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
+    for (let j = 0; j < rows; j++) { if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
       const z = z0 + D / rows * (j + 0.5);
-      for (let x = -W / 2, k = 0; x < W / 2; k++) {
+      for (let x = -W / 2, k = 0; x < W / 2; k++) { if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
         let x1 = x + (k ? 6 + drand() * 4 : 2 + drand() * 5);
         if (x1 > W / 2 - 1.2) x1 = W / 2;
         round.push(halfLog(x + 0.012, y, z, x1 - 0.012, z, D / rows / 2 - 0.012, BARKS[(j + k) % 3]));
@@ -1227,34 +1360,42 @@
     // The stairs: two log stringers up each and a half log across it for every tread, flat face up where the tread's
     // top is, with a bamboo handrail up each side, on a post at the foot and one halfway (and one at the head against
     // the wall, where no deck rail meets it), a rope slung under it (grown below).
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
     const ropes = [];
-    for (const [fx, fz, hx, hz] of stairs) {
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
+    for (const [fx, fz, hx, hz] of stairs) { if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
       const steps = Math.max(3, Math.round(y / 0.32)), len = Math.hypot(hx - fx, hz - fz), px = -(hz - fz) / len, pz = (hx - fx) / len;
-      for (const s of [-1, 1]) {
+      for (const s of [-1, 1]) { if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
         const ox = px * s * (stairW / 2 - 0.12), oz = pz * s * (stairW / 2 - 0.12);
         round.push(J.log(fx + ox, -0.12, fz + oz, hx + ox, y - 0.12, hz + oz, 0.13, "#5a3c22"));
       }
-      for (let i = 0; i < steps; i++) {
+      for (let i = 0; i < steps; i++) { if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
         const t = (i + 0.5) / steps, x = fx + (hx - fx) * t, z = fz + (hz - fz) * t;
         round.push(halfLog(x - px * stairW / 2, y * t + 0.13, z - pz * stairW / 2, x + px * stairW / 2, z + pz * stairW / 2, 0.17, BARKS[i % 3]));
       }
-      for (const s of [-1, 1]) {
+      for (const s of [-1, 1]) { if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
         const ox = px * s * (stairW / 2 + 0.05), oz = pz * s * (stairW / 2 + 0.05), at = (t, h) => [fx + (hx - fx) * t + ox, y * t + h, fz + (hz - fz) * t + oz];
-        for (const t of s === Math.sign(fx) ? [0, 0.5, 1] : [0, 0.5]) round.push(bambooRun(...at(t, 0), ...at(t, 0.99), 0.06, t ? "#cdb06a" : "#b8a04a"));
+        for (const t of s === Math.sign(fx) ? [0, 0.5, 1] : [0, 0.5]) { if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; } round.push(bambooRun(...at(t, 0), ...at(t, 0.99), 0.06, t ? "#cdb06a" : "#b8a04a")); }
         round.push(bambooRun(...at(0, 1.04), ...at(1, 1.04), 0.055, "#b8a04a"));
         ropes.push([at(0, 0.52), at(0.5, 0.52), at(1, 0.52)]);
       }
     }
-    for (const [x, z] of MEZZ_POSTS) {
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
+    for (const [x, z] of MEZZ_POSTS) { if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
       const k = 0.85 + rand() * 0.3;
       round.push(moved(turnedY(lathe({ profile: [[0, 0], [0.27 * k, 0], [0.31 * k, 0.1], [0.27 * k, 0.22], [0.15 * k, 0.3], [0, 0.32]], segments: 7, color: STONE[Math.floor(rand() * 3)] }), rand() * 6.3), x, 0, z));
       round.push(J.log(x, 0.2, z, x, y - 0.5, z, 0.2, "#5a3c22"));
       if (z > cz) round.push(J.lashing(x, 2.02, z, 0, 1, 0, 0.2));
     }
-    for (let k = 0; k <= n; k++) round.push(bambooRun(rx(k), y, zr, rx(k), y + 0.99, zr, 0.06, k % 2 ? "#cdb06a" : "#b8a04a"));
-    for (let k = 0; k < n; k += 4) round.push(bambooRun(rx(k) - (k ? 0 : 0.08), y + 1.04, zr, rx(Math.min(n, k + 4)) + (k + 4 < n ? 0 : 0.08), y + 1.04, zr, 0.055, "#b8a04a"));
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
+    for (let k = 0; k <= n; k++) { if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; } round.push(bambooRun(rx(k), y, zr, rx(k), y + 0.99, zr, 0.06, k % 2 ? "#cdb06a" : "#b8a04a")); }
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
+    for (let k = 0; k < n; k += 4) { if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; } round.push(bambooRun(rx(k) - (k ? 0 : 0.08), y + 1.04, zr, rx(Math.min(n, k + 4)) + (k + 4 < n ? 0 : 0.08), y + 1.04, zr, 0.055, "#b8a04a")); }
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
     const { withJungle, garland, sagPoints, sprig, liana } = J, leaf = mulberry32(2029);
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
     const cols = MEZZ_POSTS.filter(([x, z]) => z > cz && Math.abs(x) < end).map(([x]) => x);
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
     const body = withJungle(shaded(round), (g) => {
       const rail = [], face = [];
       for (let k = 0; k < n; k++) {
@@ -1293,30 +1434,35 @@
   const WHEEL_ART = [[1, "banana"], [5, "hand"], [12, "coconut"], [16, "banana"]];
   // Where the hoop is lashed, as angles round it; pods hang from the first two, at its sides.
   const WHEEL_TIES = [0, Math.PI, Math.PI * 1.25, Math.PI * 1.75];
-  const wheel = cached(() => {
+  const wheel = BL.models.cachedSteps(function* (slice = null) {
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
     const R = LAYOUT.wheel.r, n = WHEEL_VALUES.length, face = [], round = [], flat = [], bulbs = [[], [], []], paint = geometry(), P = R * 0.86, IN = 0.37, hand = mulberry32(2026);
     // The millstone, its front at z 0.02; the paint and the grooves lie a hair proud of it.
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
     face.push(turnedX(turn([[0, -0.1], [R - 0.03, -0.1], [R + 0.01, -0.06], [R + 0.01, 0], [R - 0.03, 0.02], [0, 0.02]], 40, "#6e655c"), Math.PI / 2));
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
     const polar = (a, d) => [Math.cos(a) * d, Math.sin(a) * d], wobble = (s) => (hand() - 0.5) * s;
     // A daub of paint on the outline `pts`, fanned from its middle so a wobbling edge stays whole.
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
     const daub = (pts, z, color, e) => {
       const rgb = hexToRgb(color), ids = ccw(pts).map(([x, y]) => pushVert(paint, x, y, z));
       const c = pushVert(paint, pts.reduce((s, p) => s + p[0], 0) / pts.length, pts.reduce((s, p) => s + p[1], 0) / pts.length, z);
       for (let k = 0; k < ids.length; k++) paint.faces.push({ i: [c, ids[k], ids[(k + 1) % ids.length]], color: rgb, emissive: e });
     };
-    for (let k = 0; k < n; k++) {
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
+    for (let k = 0; k < n; k++) { if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
       const a0 = k / n * Math.PI * 2, a1 = (k + 1) / n * Math.PI * 2, mid = (a0 + a1) / 2, jackpot = WHEEL_VALUES[k] >= WHEEL_COST * 10, color = jackpot ? "#e0a238" : WHEEL_PAINT[k % WHEEL_PAINT.length];
       const [cr, cg, cb] = hexToRgb(color), light = cr * 0.3 + cg * 0.59 + cb * 0.11 > 110, ink = jackpot ? "#6a1c10" : light ? "#1c1410" : BONE;
       // The wedge's outline: out along one side a finger short of the groove, round the outer edge and back, each
       // point pushed a little off true as a hand paints.
       const pts = [], lo = IN + 0.03, hi = P - 0.02;
-      for (let j = 0; j <= 4; j++) { const r = lo + (hi - lo) * j / 4 + wobble(0.012); pts.push(polar(a0 + (0.026 + wobble(0.02)) / r, r)); }
-      for (let j = 1; j < 5; j++) pts.push(polar(a0 + (a1 - a0) * j / 5, hi + wobble(0.032)));
-      for (let j = 4; j >= 0; j--) { const r = lo + (hi - lo) * j / 4 + wobble(0.012); pts.push(polar(a1 - (0.026 + wobble(0.02)) / r, r)); }
+      for (let j = 0; j <= 4; j++) { if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; } const r = lo + (hi - lo) * j / 4 + wobble(0.012); pts.push(polar(a0 + (0.026 + wobble(0.02)) / r, r)); }
+      for (let j = 1; j < 5; j++) { if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; } pts.push(polar(a0 + (a1 - a0) * j / 5, hi + wobble(0.032))); }
+      for (let j = 4; j >= 0; j--) { if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; } const r = lo + (hi - lo) * j / 4 + wobble(0.012); pts.push(polar(a1 - (0.026 + wobble(0.02)) / r, r)); }
       pts.push(polar(mid, lo + wobble(0.01)));
       daub(pts, 0.022, color, jackpot ? 0.25 : 0.05);
       // The stone showing through in specks.
-      for (let j = 0; j < 6; j++) {
+      for (let j = 0; j < 6; j++) { if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
         const r = lo + 0.06 + hand() * (hi - lo - 0.12), a = a0 + (0.04 + hand() * (r * (a1 - a0) - 0.08)) / r, s = 0.008 + hand() * 0.014;
         daubDot(paint, ...polar(a, r), s, s * (0.6 + hand() * 0.4), hand() < 0.5 ? "#6e655c" : "#7e756a", 0, hand() * 3, 0.0224, 6);
       }
@@ -1328,35 +1474,55 @@
       const art = WHEEL_ART.find(([w]) => w === k);
       if (art) face.push(moved(turnedZ(pictograph(PICTOS[art[1]], 0.11, light ? [EARTH_BLACK, EARTH_RED, EARTH_CHALK] : [EARTH_CHALK, EARTH_OCHRE, EARTH_BLACK], 0.12), mid - Math.PI / 2), ...polar(mid, 0.58), 0.0229));
     }
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
     face.push(paint);
     // The back, facing -z: a sun spiral in ochre in a ring of red and chalk handprints and ochre dots.
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
     const back = geometry();
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
     daubSpiral(back, 0, 0, 0.5, 0.09, EARTH_OCHRE, 0.12);
-    for (let k = 0; k < 6; k++) { const t = (k + 0.5) / 6 * Math.PI * 2; daubHand(back, Math.cos(t) * 1.02, Math.sin(t) * 1.02, 0.36, t - Math.PI / 2, k % 2 ? EARTH_CHALK : EARTH_RED, 0.12); }
-    for (let k = 0; k < 18; k++) { const t = k / 18 * Math.PI * 2; daubDot(back, Math.cos(t) * 1.34, Math.sin(t) * 1.34, 0.04, 0.04, EARTH_OCHRE, 0.12, 0, 0, 6); }
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
+    for (let k = 0; k < 6; k++) { if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; } const t = (k + 0.5) / 6 * Math.PI * 2; daubHand(back, Math.cos(t) * 1.02, Math.sin(t) * 1.02, 0.36, t - Math.PI / 2, k % 2 ? EARTH_CHALK : EARTH_RED, 0.12); }
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
+    for (let k = 0; k < 18; k++) { if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; } const t = k / 18 * Math.PI * 2; daubDot(back, Math.cos(t) * 1.34, Math.sin(t) * 1.34, 0.04, 0.04, EARTH_OCHRE, 0.12, 0, 0, 6); }
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
     face.push(moved(turnedY(back, Math.PI), 0, 0, -0.104));
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
     const hub = shaded([turnedX(turn([[0.34, 0], [0.34, 0.05], [0.26, 0.09], [0.12, 0.14], [0, 0.15]], 20, "#7a7066"), Math.PI / 2), turnedX(torus(0.3, 0.03, BONE, 0, 20, 6), Math.PI / 2)]);
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
     face.push(moved(hub, 0, 0, 0.02), moved(turnedZ(scaled(BL.models.bananaGeometry(), 1.2), 0.5), 0, -0.05, 0.19));
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
     round.push(turnedX(turn([[R + 0.24, -0.12], [R + 0.26, 0], [R + 0.24, 0.12], [R + 0.02, 0.12], [R + 0.02, -0.12]], 56, TIMBER_DK), Math.PI / 2));
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
     round.push(turnedX(torus(R + 0.25, 0.03, ROPE, 0, 56, 6), Math.PI / 2));
     // The lashings round the hoop, and a cluster of pods hanging under each side one, each its own size and tilt.
-    for (const a of WHEEL_TIES) round.push(BL.hubModels.lashing(...polar(a, R + 0.14), 0, -Math.sin(a), Math.cos(a), 0, 0.17));
-    for (const s of [1, -1]) [[0, -0.05, 0.02, 2.2], [0.06, 0, -0.02, 1.8], [-0.05, 0.02, 0.05, 1.6]].forEach(([dx, dy, dz, size], j) => {
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
+    for (const a of WHEEL_TIES) { if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; } round.push(BL.hubModels.lashing(...polar(a, R + 0.14), 0, -Math.sin(a), Math.cos(a), 0, 0.17)); }
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
+    for (const s of [1, -1]) { if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; } [[0, -0.05, 0.02, 2.2], [0.06, 0, -0.02, 1.8], [-0.05, 0.02, 0.05, 1.6]].forEach(([dx, dy, dz, size], j) => {
       bulbs[j].push(moved(turnedZ(seedPod(size > 2 ? "#ff8a36" : "#ffb44a", size), s * (dx * 2 + wobble(0.2))), s * (R + 0.34 + dx), -0.26 + dy, 0.14 + dz));
-    });
+    }); }
     // The clapper: a bone tusk hanging from a timber bracket on the rim's top, its tip curled toward the pegs.
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
     flat.push(bevelBox({ w: 0.3, h: 0.1, d: 0.2, color: TIMBER_DK, bevel: 0.02, offset: { y: R + 0.3, z: 0.1 } }));
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
     round.push(moved(turnedZ(boneTusk(0.3, 0.04, 0.9), Math.PI), 0, R + 0.29, 0.08));
     // The pedestal on its own footing on the floor (`WHEEL_FOOT`): a broad stone slab under a stone drum, a log totem
     // up from it with a tiki face at eye height between two bone bands, bound in rope under the yoke that holds the rim.
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
     const y = LAYOUT.wheel.y, J = BL.hubModels, face0 = -y + 1.6, rand = mulberry32(4040), fr = WHEEL_FOOT.r, fz = WHEEL_FOOT.z;
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
     round.push(moved(turn([[fr, 0], [fr, 0.1], [fr - 0.05, 0.15], [fr - 0.12, 0.17], [fr - 0.12, 0.52], [fr - 0.2, 0.6], [0.2, 0.64], [0, 0.64]], 16, "#5e554c"), 0, -y, fz));
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
     round.push(J.log(0, -y + 0.6, fz, 0, -R + 0.05, fz, 0.2), J.lashing(0, -R - 0.32, fz, 0, 1, 0, 0.2));
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
     round.push(moved(torus(0.215, 0.03, BONE, 0, 16, 5), 0, face0 - 0.39, fz), moved(torus(0.215, 0.03, BONE, 0, 16, 5), 0, face0 + 0.43, fz));
-    for (const sx of [-1, 1]) {
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
+    for (const sx of [-1, 1]) { if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
       round.push(moved(turnedX(turn([[0.06, 0], [0.06, 0.02], [0, 0.03]], 12, BONE), Math.PI / 2), sx * 0.085, face0 + 0.05, 0));
       round.push(moved(turnedX(turn([[0.028, 0], [0.028, 0.012], [0, 0.018]], 10, "#1c1410"), Math.PI / 2), sx * 0.085, face0 + 0.05, 0.022));
     }
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
     flat.push(
       bevelBox({ w: 0.34, h: 0.52, d: 0.2, color: TIMBER_LT, bevel: 0.04, offset: { y: face0, z: -0.1 } }),
       bevelBox({ w: 0.38, h: 0.07, d: 0.06, color: TIMBER_DK, bevel: 0.02, offset: { y: face0 + 0.14, z: 0.01 } }),
@@ -1364,16 +1530,21 @@
       box({ w: 0.24, h: 0.08, d: 0.03, color: "#1c1410", offset: { y: face0 - 0.15, z: 0.005 } }),
       ...[-0.07, 0, 0.07].map((x) => box({ w: 0.04, h: 0.045, d: 0.02, color: BONE, offset: { x, y: face0 - 0.13, z: 0.02 } }))
     );
-    for (const sx of [-1, 1]) flat.push(beam(sx * 0.12, -R - 0.05, -0.25, sx * 0.4, -R * 0.55, -0.14, 0.1, TIMBER));
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
+    for (const sx of [-1, 1]) { if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; } flat.push(beam(sx * 0.12, -R - 0.05, -0.25, sx * 0.4, -R * 0.55, -0.14, 0.1, TIMBER)); }
     // BIG SPIN in gold on the hoop's front round its top, BIG left of the clapper's bracket and SPIN right of it, each
     // word brushed flat and bent along the rim, its letters standing out from the middle.
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
     const onRim = (s, mid) => {
       const g = brushWord(geometry(), s, 0, 0, 0.15, 0.03, "#f2c46a", 0.4), v = g.verts, rho = R + 0.14;
       for (let i = 0; i < v.length; i += 3) { const a = mid - v[i] / rho, d = rho + v[i + 1]; v[i] = Math.cos(a) * d; v[i + 1] = Math.sin(a) * d; v[i + 2] += 0.125; }
       return g;
     };
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
     flat.push(onRim("BIG", Math.PI / 2 + 0.24), onRim("SPIN", Math.PI / 2 - 0.28));
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
     const lit = bulbs.map((pods) => unshadowed(merge(...pods)));
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
     const frame = J.withJungle(shaded(round, flat), (g) => {
       for (const [x, z, dx, dz] of [[-0.46, 0.1, -0.6, 0.5], [0.46, 0.1, 0.6, 0.5], [0, -0.48, 0, -1]]) J.sprig(g, x, -y + 0.15, fz + z, dx, 1, dz, 4, 0.28, rand);
       // Leaves bunched behind each side lashing over its pods, reaching out from the hoop well below its top.
@@ -2253,39 +2424,59 @@
   // (`MENU_X`) so the hall's wall post at x -0.4 stands clear beside it. `lit` is what glows (the oven's fire and
   // embers) and `glass` the flames licking out of the oven's mouth.
   const MENU = ["OOGA SNACKS", "BANANA SPLIT 5", "COCONUT MILK 3", "GRUB STICK 2", "FIRE BANANA 4"];const MENU_X = 1.1;
-  const snackBar = cached(() => {
+  const snackBar = BL.models.cachedSteps(function* (slice = null) {
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
     const { withJungle, liana, sprig, bamboo, lashing, log } = BL.hubModels, parts = [], round = [], w = 4.2, leaf = mulberry32(57);
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
     parts.push(bevelBox({ w, h: 1.05, d: 0.8, color: TIMBER_DK, bevel: 0.04, offset: { y: 0.52 } }));
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
     parts.push(bevelBox({ w: w + 0.2, h: 0.1, d: 1, color: TIMBER_LT, bevel: 0.03, offset: { y: 1.1 } }));
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
     round.push(log(-w / 2 - 0.1, 1.1, 0.47, w / 2 + 0.1, 1.1, 0.47, 0.056, "#5a3e24"));
-    for (let k = 0; k < 5; k++) round.push(bambooRun(0.08 - w / 2, 0.1 + k * 0.2, 0.475, w / 2 - 0.08, 0.1 + k * 0.2, 0.475, 0.075, k % 2 ? "#cdb06a" : "#b8a04a"));
-    for (const sx of [-1, 1]) round.push(bamboo(sx * (w / 2 + 0.03), 0, 0.45, sx * (w / 2 + 0.03), 1.05, 0.45, 0.08));
-    for (const x of [-1.3, 0, 1.3]) round.push(log(x, 0, 1, x, 0.7, 1, 0.19));
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
+    for (let k = 0; k < 5; k++) { if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; } round.push(bambooRun(0.08 - w / 2, 0.1 + k * 0.2, 0.475, w / 2 - 0.08, 0.1 + k * 0.2, 0.475, 0.075, k % 2 ? "#cdb06a" : "#b8a04a")); }
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
+    for (const sx of [-1, 1]) { if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; } round.push(bamboo(sx * (w / 2 + 0.03), 0, 0.45, sx * (w / 2 + 0.03), 1.05, 0.45, 0.08)); }
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
+    for (const x of [-1.3, 0, 1.3]) { if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; } round.push(log(x, 0, 1, x, 0.7, 1, 0.19)); }
     // The roof: a dark reed mat from the back wall under the menu board out past the counter, resting on a lintel and
     // two poles, its top at `roofY(z)`, under the fronds (grown below).
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
     const roofY = (z) => 2.69 - 0.22 * (z + 1.62);
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
     parts.push(moved(turnedX(bevelBox({ w: w + 0.24, h: 0.05, d: 2.48, color: "#4e3a22", bevel: 0.02 }), 0.2166), 0, roofY(-0.41) - 0.026, -0.41));
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
     round.push(bambooRun(-2.22, 2.1, 0.64, 2.22, 2.1, 0.64, 0.055));
-    for (const sx of [-1, 1]) round.push(bamboo(sx * 2.14, 0, 0.64, sx * 2.14, 2.1, 0.64, 0.06), lashing(sx * 2.14, 2.1, 0.64, 0, 1, 0, 0.06));
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
+    for (const sx of [-1, 1]) { if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; } round.push(bamboo(sx * 2.14, 0, 0.64, sx * 2.14, 2.1, 0.64, 0.06), lashing(sx * 2.14, 2.1, 0.64, 0, 1, 0, 0.06)); }
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
     parts.push(bevelBox({ w, h: 0.08, d: 0.4, color: TIMBER, bevel: 0.02, offset: { y: 1.62, z: -1.3 } }), bevelBox({ w, h: 0.08, d: 0.4, color: TIMBER, bevel: 0.02, offset: { y: 2.12, z: -1.3 } }));
     // Gourds and clay pots along the shelves, and the churn on the counter.
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
     const rand = mulberry32(55);
-    for (let k = 0; k < 9; k++) {
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
+    for (let k = 0; k < 9; k++) { if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
       const gourd = rand() < 0.55, tone = Math.floor(rand() * 3);
       const profile = gourd ? [[0.07, 0], [0.085, 0.05], [0.07, 0.11], [0.034, 0.14], [0.045, 0.18], [0.03, 0.22], [0, 0.23]] : [[0.06, 0], [0.09, 0.06], [0.085, 0.13], [0.05, 0.18], [0.06, 0.2], [0, 0.2]];
       round.push(moved(turn(profile, 10, gourd ? ["#b8a040", "#9a8a3a", "#c8a84a"][tone] : ["#a8542e", "#8e4a2a", "#b86a3a"][tone]), -w / 2 + 0.3 + k * 0.45, k % 2 ? 1.66 : 2.16, -1.3));
     }
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
     parts.push(moved(lathe({ profile: [[0.1, 0], [0.1, 0.12], [0.08, 0.14], [0.09, 0.4], [0, 0.42]], segments: 12, color: TIMBER_LT }), 1.4, 1.15, -0.1));
     // The menu: a stone slab on the back wall in a frame of four canes lashed at its corners, the bar's name brushed
     // in ochre over the dishes in chalk, each dish's pictograph beside it (a banana, a coconut, a grub on a stick and a
     // flame).
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
     parts.push(bevelBox({ w: 2.4, h: 1.75, d: 0.1, color: "#5d5650", bevel: 0.05, offset: { x: MENU_X, y: 3.7, z: -1.56 } }), box({ w: 2.2, h: 1.55, d: 0.02, color: "#4e463f", offset: { x: MENU_X, y: 3.7, z: -1.5 } }));
-    for (const y of [2.87, 4.51]) round.push(bambooRun(MENU_X - 1.2, y, -1.47, MENU_X + 1.2, y, -1.47, 0.045));
-    for (const sx of [-1, 1]) {
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
+    for (const y of [2.87, 4.51]) { if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; } round.push(bambooRun(MENU_X - 1.2, y, -1.47, MENU_X + 1.2, y, -1.47, 0.045)); }
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
+    for (const sx of [-1, 1]) { if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
       round.push(bambooRun(MENU_X + sx * 1.145, 2.79, -1.47, MENU_X + sx * 1.145, 4.59, -1.47, 0.045));
-      for (const y of [2.87, 4.51]) round.push(lashing(MENU_X + sx * 1.145, y, -1.47, 0, 1, 0, 0.045));
+      for (const y of [2.87, 4.51]) { if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; } round.push(lashing(MENU_X + sx * 1.145, y, -1.47, 0, 1, 0, 0.045)); }
     }
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
     const menu = brushWord(geometry(), MENU[0], MENU_X, 4.29, 0.19, 0.032, EARTH_OCHRE, 0.35, -1.487), mz = -1.487;
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
     MENU.slice(1).forEach((s, k) => {
       const y = 4.21 - (k + 1) * 0.24, ix = MENU_X - 0.86;
       brushWord(menu, s, MENU_X + 0.14, y, 0.13, 0.022, EARTH_CHALK, 0.3, mz);
@@ -2299,41 +2490,65 @@
         MARK.flame(menu, ix, y - 0.075, 0.1, EARTH_OCHRE, 0.35, mz + 0.004);
       }
     });
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
     parts.push(menu);
     // The oven on its hearth slab: a dome of mottled stones with a stub of a flue, its mouth a dark stone arch round
     // the fire's glow with embers on its floor and flames licking out, and firewood stacked by it.
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
     const ov = { x: -1.3, y: 1.21, z: -0.05 }, mix = mulberry32(81), stones = ["#7a6e62", "#6b5f54", "#877a6c", "#5e534a"].map(hexToRgb), fire = [], flames = [];
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
     parts.push(bevelBox({ w: 0.9, h: 0.06, d: 0.66, color: "#5d5650", bevel: 0.02, offset: { x: ov.x, y: ov.y - 0.03, z: ov.z } }));
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
     const dome = turn([[0.34, 0], [0.345, 0.08], [0.32, 0.2], [0.26, 0.31], [0.17, 0.39], [0.08, 0.43], [0.08, 0.49], [0.05, 0.49], [0, 0.45]], 14, "#000000");
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
     dome.faces.forEach((f) => { f.color = stones[Math.floor(mix() * 4)]; });
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
     round.push(moved(dome, ov.x, ov.y, ov.z));
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
     const ARCH = [[-0.14, 0], [0.14, 0], [0.14, 0.12], [0.1, 0.19], [0, 0.22], [-0.1, 0.19], [-0.14, 0.12]];
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
     parts.push(moved(prism(ARCH, 0.07, "#1a100a"), ov.x, ov.y, ov.z + 0.305));
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
     fire.push(moved(prism(ARCH.map(([x, y]) => [x * 0.72, y * 0.72]), 0.01, "#ff7a1e", 0.9), ov.x, ov.y + 0.005, ov.z + 0.343));
-    for (let k = 0; k < 6; k++) fire.push(glowing(moved(ball(0.022 + mix() * 0.012, k % 2 ? "#ffb347" : "#ff5a1e", 6), ov.x + (k - 2.5) * 0.04, ov.y + 0.02, ov.z + 0.35 + (k % 3) * 0.012), 1));
-    for (let k = 0; k < 3; k++) flames.push(moved(turnedX(turn([[0, 0], [0.05 - k % 2 * 0.012, 0.04], [0.04 - k % 2 * 0.01, 0.1], [0, 0.2 - k % 2 * 0.05]], 8, k % 2 ? "#ffd27a" : "#ff9a2e", 1), 0.35), ov.x + (k - 1) * 0.06, ov.y + 0.03, ov.z + 0.36));
-    for (const [x, y, z] of [[-0.66, 1.19, -0.12], [-0.66, 1.19, -0.02], [-0.66, 1.26, -0.07]]) round.push(log(x - 0.16, y, z, x + 0.16, y, z, 0.04));
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
+    for (let k = 0; k < 6; k++) { if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; } fire.push(glowing(moved(ball(0.022 + mix() * 0.012, k % 2 ? "#ffb347" : "#ff5a1e", 6), ov.x + (k - 2.5) * 0.04, ov.y + 0.02, ov.z + 0.35 + (k % 3) * 0.012), 1)); }
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
+    for (let k = 0; k < 3; k++) { if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; } flames.push(moved(turnedX(turn([[0, 0], [0.05 - k % 2 * 0.012, 0.04], [0.04 - k % 2 * 0.01, 0.1], [0, 0.2 - k % 2 * 0.05]], 8, k % 2 ? "#ffd27a" : "#ff9a2e", 1), 0.35), ov.x + (k - 1) * 0.06, ov.y + 0.03, ov.z + 0.36)); }
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
+    for (const [x, y, z] of [[-0.66, 1.19, -0.12], [-0.66, 1.19, -0.02], [-0.66, 1.26, -0.07]]) { if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; } round.push(log(x - 0.16, y, z, x + 0.16, y, z, 0.04)); }
     // The keg: a hollow log on its side on two stone chocks, bound with rope, three bamboo spouts out of its front.
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
     round.push(log(0.12, 1.39, -0.18, 0.68, 1.39, -0.18, 0.22, "#5a3a22"), lashing(0.2, 1.39, -0.18, 1, 0, 0, 0.22), lashing(0.6, 1.39, -0.18, 1, 0, 0, 0.22));
-    for (const x of [0.2, 0.6]) parts.push(bevelBox({ w: 0.1, h: 0.08, d: 0.3, color: "#6b625a", bevel: 0.02, offset: { x, y: 1.19, z: -0.18 } }));
-    for (const x of [0.28, 0.4, 0.52]) round.push(bamboo(x, 1.3, 0.01, x, 1.3, 0.12, 0.016, "#cdb06a"));
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
+    for (const x of [0.2, 0.6]) { if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; } parts.push(bevelBox({ w: 0.1, h: 0.08, d: 0.3, color: "#6b625a", bevel: 0.02, offset: { x, y: 1.19, z: -0.18 } })); }
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
+    for (const x of [0.28, 0.4, 0.52]) { if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; } round.push(bamboo(x, 1.3, 0.01, x, 1.3, 0.12, 0.016, "#cdb06a")); }
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
     const banana = BL.models.bananaGeometry();
-    for (let k = 0; k < 5; k++) parts.push(moved(turnedY(turnedZ(scaled(banana, 0.7), 0.3 + k * 0.12), k * 0.35), -0.35 + k * 0.03, 1.2, 0.1 + (k % 2) * 0.05));
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
+    for (let k = 0; k < 5; k++) { if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; } parts.push(moved(turnedY(turnedZ(scaled(banana, 0.7), 0.3 + k * 0.12), k * 0.35), -0.35 + k * 0.03, 1.2, 0.1 + (k % 2) * 0.05)); }
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
     [[0.95, 0.25], [1.32, 0.32], [1.75, 0.2]].forEach(([x, z], k) => {
       round.push(moved(nut("young", 0.075), x, 1.225, z));
       parts.push(moved(turnedZ(box({ w: 0.014, h: 0.22, d: 0.014, color: k % 2 ? "#cdb06a" : "#b8a04a" }), 0.3 - k * 0.25), x + 0.02, 1.37, z));
     });
     // A gourd hung on a cord by each pole.
-    for (const sx of [-1, 1]) round.push(moved(turn([[0, 0], [0.08, 0.05], [0.095, 0.12], [0.07, 0.19], [0.035, 0.23], [0.045, 0.28], [0.02, 0.33], [0, 0.34]], 10, sx < 0 ? "#b8a040" : "#c8a84a"), sx * 1.85, 1.6, 0.64));
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
+    for (const sx of [-1, 1]) { if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; } round.push(moved(turn([[0, 0], [0.08, 0.05], [0.095, 0.12], [0.07, 0.19], [0.035, 0.23], [0.045, 0.28], [0.02, 0.33], [0, 0.34]], 10, sx < 0 ? "#b8a040" : "#c8a84a"), sx * 1.85, 1.6, 0.64)); }
     // The carved sign the scene hangs over the menu (`SIGN`), hung the Oogas' way: rope bound over its plates, a bone
     // peg driven into the rock over each binding, and a liana down from each peg to its binding (grown below).
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
     const SIGN = { x: 1.1, y: 5, z: -1.5, w: 1.8 }, sign = BL.hubModels.caveSign("Snacks", "banana"), sb = BL.scene.boundsOf(sign), sk = SIGN.w / (sb.max[0] - sb.min[0]);
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
     parts.push(...signBinding("Snacks", "banana", SIGN.w, SIGN.x, SIGN.y, SIGN.z));
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
     const hangs = [-1, 1].map((sx) => [SIGN.x + sx * (sign.signWidth / 2 - 0.17) * sk, SIGN.y + (sign.signHeight / 2 + 0.03) * sk, SIGN.z + (sb.max[2] + sb.min[2]) / 2 * sk]);
-    for (const [x] of hangs) round.push(moved(turnedX(turn([[0, 0], [0.026, 0], [0.034, 0.02], [0.022, 0.045], [0.022, 0.37], [0.034, 0.395], [0.026, 0.42], [0, 0.42]], 8, BONE), Math.PI / 2), x, SIGN.y + 0.85, SIGN.z - 0.45));
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
+    for (const [x] of hangs) { if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; } round.push(moved(turnedX(turn([[0, 0], [0.026, 0], [0.034, 0.02], [0.022, 0.045], [0.022, 0.37], [0.034, 0.395], [0.026, 0.42], [0, 0.42]], 8, BONE), Math.PI / 2), x, SIGN.y + 0.85, SIGN.z - 0.45)); }
     // A liana winds up each pole, leaves hanging in from its top and big ones rising at its foot; the fronds lie over
     // the mat from the roof's middle (low enough to keep the menu's rows in sight) and reach out over its eave, their
     // tips above a walker's head.
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
     const body = withJungle(shaded(round, parts), (g) => {
       [[-1.8, 0.25, -0.5], [-1.1, -0.15, -0.62], [-0.4, 0.2, -0.45], [0.3, -0.2, -0.6], [1, 0.15, -0.48], [1.7, -0.25, -0.58]].forEach(([x, lean, z], k) =>
         bananaLeaf(g, x, roofY(z) + 0.06, z, { yaw: Math.PI + lean, up: 0.05, down: -0.3, len: 1.6 + (k % 3) * 0.1, broad: 0.46, tone: BANANA_LEAF_TONES[k % 3], tear: k % 2 ? 3 : -4 }));
@@ -2559,23 +2774,34 @@
   // awning from the wall's top down to the lintel, its fur up toward the hall, clear over the tickets board. A gourd
   // lantern hangs from each end of the lintel, the fire in it glowing through its skin and a ring of carved holes, and
   // a liana climbs the wall's end.
-  const prizeCounter = cached(() => {
+  const prizeCounter = BL.models.cachedSteps(function* (slice = null) {
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
     const { withJungle, liana, sprig, bamboo, lashing, log } = BL.hubModels, parts = [], round = [], lit = [], skin = [], w = 4.2, leaf = mulberry32(72);
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
     parts.push(bevelBox({ w, h: 1, d: 0.8, color: TIMBER_DK, bevel: 0.04, offset: { y: 0.5 } }), bevelBox({ w: w + 0.2, h: 0.08, d: 0.9, color: TIMBER_LT, bevel: 0.03, offset: { y: 1.04 } }));
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
     round.push(moved(hide(w - 0.2, 0.7, "tiger", 7101), 0, 0.52, 0.405), log(-w / 2 - 0.1, 1.04, 0.43, w / 2 + 0.1, 1.04, 0.43, 0.05, "#5a3e24"));
-    for (const y of [0.14, 0.9]) round.push(bambooRun(0.08 - w / 2, y, 0.44, w / 2 - 0.08, y, 0.44, 0.06));
-    for (const sx of [-1, 1]) round.push(bamboo(sx * (w / 2 + 0.02), 0, 0.43, sx * (w / 2 + 0.02), 1, 0.43, 0.07));
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
+    for (const y of [0.14, 0.9]) { if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; } round.push(bambooRun(0.08 - w / 2, y, 0.44, w / 2 - 0.08, y, 0.44, 0.06)); }
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
+    for (const sx of [-1, 1]) { if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; } round.push(bamboo(sx * (w / 2 + 0.02), 0, 0.43, sx * (w / 2 + 0.02), 1, 0.43, 0.07)); }
     // The mat shelf: reeds laid side by side and tied across near their ends.
-    for (let k = 0; k < 12; k++) parts.push(bevelBox({ w: w - 0.16, h: 0.026, d: 0.05, color: k % 3 === 1 ? "#b8914a" : "#c9a45a", bevel: 0.012, offset: { y: 1.447, z: -0.275 + k * 0.05 } }));
-    for (const sx of [-1, 1]) parts.push(box({ w: 0.03, h: 0.03, d: 0.62, color: "#7a5a32", offset: { x: sx * 1.85, y: 1.447 } }));
-    for (const sx of [-1, 1]) {
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
+    for (let k = 0; k < 12; k++) { if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; } parts.push(bevelBox({ w: w - 0.16, h: 0.026, d: 0.05, color: k % 3 === 1 ? "#b8914a" : "#c9a45a", bevel: 0.012, offset: { y: 1.447, z: -0.275 + k * 0.05 } })); }
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
+    for (const sx of [-1, 1]) { if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; } parts.push(box({ w: 0.03, h: 0.03, d: 0.62, color: "#7a5a32", offset: { x: sx * 1.85, y: 1.447 } })); }
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
+    for (const sx of [-1, 1]) { if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
       const x = sx * (w / 2 - 0.12);
       round.push(log(x, 1.08, -0.28, x, 1.5, -0.28, 0.035), log(x, 1.08, 0.28, x, 3.25, 0.28, 0.045), lashing(x, 1.44, 0.28, 0, 1, 0, 0.045), lashing(x, 3.2, 0.28, 0, 1, 0, 0.045));
     }
     // The back wall, its log tops uneven, and its shelves.
-    for (let k = 0; k < 11; k++) { const x = -2.1 + k * 0.42; round.push(log(x, 0, -1.2, x, 3.66 + (k * 7 % 3) * 0.06, -1.2, 0.21, k % 2 ? "#5a3e24" : "#6b4a2b")); }
-    for (const y of [2.2, 3.0]) parts.push(bevelBox({ w: w, h: 0.07, d: 0.4, color: TIMBER_LT, bevel: 0.02, offset: { y, z: -0.9 } }));
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
+    for (let k = 0; k < 11; k++) { if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; } const x = -2.1 + k * 0.42; round.push(log(x, 0, -1.2, x, 3.66 + (k * 7 % 3) * 0.06, -1.2, 0.21, k % 2 ? "#5a3e24" : "#6b4a2b")); }
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
+    for (const y of [2.2, 3.0]) { if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; } parts.push(bevelBox({ w: w, h: 0.07, d: 0.4, color: TIMBER_LT, bevel: 0.02, offset: { y, z: -0.9 } })); }
     // A copy of prize i with its lowest point on the shelf top at `top` (`moved` moves in place; the prizes are cached).
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
     const seat = (i, x, top, z) => {
       const g = merge(prize(i));
       let low = Infinity;
@@ -2586,21 +2812,26 @@
     // counter before the mat shelf, the crown in the mat shelf's middle between the gorilla and the shell charm; and
     // again on the back shelves, all left of the tickets board the scene hangs there (x 0.63 to 1.77), but for the
     // crown, whose feathers would reach into the logs.
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
     [[[-1.44, 1.09, 0.33], [-1.6, 3.035]], [[1.44, 1.09, 0.33], [-1.55, 2.235]], [[0, 1.09, 0.33], [-0.95, 3.035]], [[1.1, 1.46, 0], [-0.3, 3.035]], [[-1.1, 1.46, 0], [-0.55, 2.235]], [[0, 1.46, 0]]].forEach(([front, back], i) => {
       parts.push(seat(i, ...front));
       if (back) parts.push(seat(i, back[0], back[1], -0.9));
     });
     // The awning, its fur side up where the hall sees it, sagging a little between the wall and the lintel; and rope
     // bound over the plates of the carved sign the scene hangs over it.
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
     round.push(moved(turnedX(hide(w + 0.5, 1.56, "leopard", 7102, { sag: 0.08 }), -1.222), 0, 3.46, -0.44), log(-2.35, 3.2, 0.28, 2.35, 3.2, 0.28, 0.05, "#5a3e24"));
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
     parts.push(...signBinding("Prizes", "banana", 1.8, 0, 4.1, -1));
     // The lanterns: each gourd's skin (`glass`), the ring of holes carved round its belly and the flame inside.
-    for (const sx of [-1, 1]) {
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
+    for (const sx of [-1, 1]) { if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
       const x = sx * 2.22, y = 2.58;
       skin.push(moved(turn([[0, 0], [0.09, 0.05], [0.11, 0.13], [0.08, 0.21], [0.04, 0.25], [0.05, 0.3], [0, 0.32]], 10, "#e8a040", 0.55), x, y, 0.28));
-      for (let k = 0; k < 7; k++) { const a = k / 7 * Math.PI * 2; lit.push(along(glowing(lathe({ profile: [[0.018, 0], [0, 0.002]], segments: 5, color: "#ffd27a" }), 1), x + Math.cos(a) * 0.112, y + 0.13, 0.28 + Math.sin(a) * 0.112, Math.cos(a), 0, Math.sin(a))); }
+      for (let k = 0; k < 7; k++) { if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; } const a = k / 7 * Math.PI * 2; lit.push(along(glowing(lathe({ profile: [[0.018, 0], [0, 0.002]], segments: 5, color: "#ffd27a" }), 1), x + Math.cos(a) * 0.112, y + 0.13, 0.28 + Math.sin(a) * 0.112, Math.cos(a), 0, Math.sin(a))); }
       lit.push(moved(turn([[0, 0], [0.035, 0.03], [0.03, 0.07], [0, 0.12]], 6, "#ffb347", 1), x, y + 0.05, 0.28));
     }
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
     const body = withJungle(shaded(round, parts), (g) => {
       const vine = [];
       for (let k = 0; k <= 10; k++) vine.push([-2.1 + Math.sin(k * 1.3) * 0.05, 1 + k * 0.26, -0.96 + Math.cos(k * 1.3) * 0.02]);
@@ -3025,31 +3256,35 @@
     geo.faces.forEach((f, k) => { const p = Math.floor(k / 8); f.color = p === 0 || p === 4 ? BILLET[0] : p === 2 ? tones[k % 2] : BILLET[1]; });
     return geo;
   };
-  const ropes = cached(() => {
+  const ropes = BL.models.cachedSteps(function* (slice = null) {
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
     const { withJungle, liana, sprig, bamboo } = BL.hubModels, round = [], leaf = mulberry32(33), wood = mulberry32(35);
-    for (const [x0, z0, x1, z1] of LAYOUT.ropes) for (const t of [0, 0.5, 1]) {
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
+    for (const [x0, z0, x1, z1] of LAYOUT.ropes) { if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; } for (const t of [0, 0.5, 1]) { if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
       const x = x0 + (x1 - x0) * t, z = z0 + (z1 - z0) * t;
       round.push(moved(turn([[0.14, 0], [0.14, 0.03], [0.1, 0.07], [0, 0.075]], 12, "#6a625a"), x, 0, z), bamboo(x, 0.05, z, x, 0.9, z, 0.035), moved(nut("husk", 0.065), x, 0.95, z));
-    }
+    } }
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
     const straw = ["#b88a3e", "#a67c38", "#c49a4a"].map(hexToRgb);
-    for (const [x, y, z, t, kind] of LAYOUT.stores) {
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
+    for (const [x, y, z, t, kind] of LAYOUT.stores) { if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
       const local = [];
-      if (kind === "wood") for (const [bz, by] of [[-BUNDLE_R, BUNDLE_R], [BUNDLE_R, BUNDLE_R], [0, 0.44]]) {
-        for (let k = 0; k < 7; k++) {
+      if (kind === "wood") for (const [bz, by] of [[-BUNDLE_R, BUNDLE_R], [BUNDLE_R, BUNDLE_R], [0, 0.44]]) { if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
+        for (let k = 0; k < 7; k++) { if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
           const a = -Math.PI / 2 + k * Math.PI / 3, d = k ? WOOD_R * 2 : 0, ly = by + Math.sin(a) * d, lz = bz + Math.cos(a) * d, jut = (wood() - 0.5) * 0.08;
           local.push(along(billet(0.68 + (wood() - 0.5) * 0.04, WOOD_R * (0.94 + wood() * 0.1), k % 3 ? "#6b4a2b" : "#5a3e24"), -0.34 + jut, ly, lz, 1, 0, 0));
         }
-        for (const lx of [-0.2, 0.2]) local.push(moved(turnedZ(torus(BUNDLE_R + 0.004, 0.014, ROPE, 0, 10, 3), Math.PI / 2), lx, by, bz));
+        for (const lx of [-0.2, 0.2]) { if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; } local.push(moved(turnedZ(torus(BUNDLE_R + 0.004, 0.014, ROPE, 0, 10, 3), Math.PI / 2), lx, by, bz)); }
       } else {
         const basket = lathe({ profile: [[0, 0], [0.2, 0], [0.24, 0.03], [0.265, 0.12], [0.28, 0.25], [0.285, 0.38], [0.305, 0.4], [0.285, 0.42], [0.26, 0.4], [0, 0.35]], segments: 16, color: "#000000" });
         basket.faces.forEach((f, k) => { const p = Math.floor(k / 16); f.color = straw[p > 1 && p < 6 ? ((p + k) % 4 < 2 ? 0 : 1) : p < 8 ? 2 : 1]; });
         local.push(basket);
-        for (let k = 0; k < 7; k++) {
+        for (let k = 0; k < 7; k++) { if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
           const a = k * 1.26, r = k < 5 ? 0.15 : 0.06, up = k < 5 ? 0.4 : 0.52;
           local.push(moved(turnedX(turnedY(nut("husk", 0.095), a * 2.3), (wood() - 0.5) * 0.8), Math.sin(a) * r, up, Math.cos(a) * r));
         }
       }
-      for (const part of local) round.push(moved(turnedY(part, t), x, y, z));
+      for (const part of local) { if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; } round.push(moved(turnedY(part, t), x, y, z)); }
     }
     return withJungle(shaded(round), (g) => {
       for (const [x0, z0, x1, z1] of LAYOUT.ropes) {
@@ -3384,24 +3619,30 @@
   // hangs on a liana through the mammoth's open ribs from its back with a collar of leaves where it ties on, turned
   // slowly by the scene; `ball` is the rattle and `chain` the vine, its lashing and its leaves.
   const RATTLE = { ring: 0.34, apex: 0.36, tones: ["#c68a3e", "#b8a040", "#a86f2c"] };
-  const discoBall = cached(() => {
+  const discoBall = BL.models.cachedSteps(function* (slice = null) {
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
     const { ring, apex, tones } = RATTLE, J = BL.hubModels, rand = mulberry32(809), round = [torus(ring, 0.03, BONE, 0, 20, 6)], cords = [];
     // A gourd hung from its neck at the origin, `s` times the lanterns' gourd, its faces ribbed a shade apart.
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
     const gourd = (s, tone) => {
       const geo = lathe({ profile: GOURD.map(([r, h]) => [r * s, (h - GOURD[GOURD.length - 1][1]) * s]), segments: 8, color: tone }), rib = hexToRgb(tint(tone, 0.82));
       geo.faces.forEach((f, k) => { if (k % 2) f.color = rib; });
       return geo;
     };
-    for (let k = 0; k < 6; k++) {
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
+    for (let k = 0; k < 6; k++) { if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
       const a = k / 6 * Math.PI * 2, x = Math.cos(a) * ring, z = Math.sin(a) * ring, drop = 0.1 + (k % 3) * 0.05;
       round.push(moved(gourd(0.36 + (k % 2) * 0.06, tones[k % 3]), x, -drop, z));
       cords.push([[x, 0, z], [x, 0.01 - drop, z]]);
       const sx = Math.cos(a + Math.PI / 6) * ring, sz = Math.sin(a + Math.PI / 6) * ring;
       cords.push([[sx, 0, sz], [sx, -0.3, sz]]);
-      for (const y of [-0.13, -0.28]) round.push(moved(turnedY(turnedX(seashell(), Math.PI - 1.2), rand() * 6.3), sx, y, sz));
+      for (const y of [-0.13, -0.28]) { if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; } round.push(moved(turnedY(turnedX(seashell(), Math.PI - 1.2), rand() * 6.3), sx, y, sz)); }
     }
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
     round.push(moved(gourd(0.62, tones[0]), 0, -0.14, 0), moved(torus(0.128, 0.013, EARTH_RED, 0, 12, 4), 0, -0.39, 0));
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
     cords.push([[0, apex, 0], [0, -0.13, 0]]);
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
     const ball = J.withJungle(shaded(round), (g) => {
       for (const pts of cords) J.liana(g, pts, 0.008, 0.008, ROPE);
       for (let k = 0; k < 3; k++) {
@@ -3410,6 +3651,7 @@
         J.pointedLeaf(g, 0, -0.48, 0, s * 0.25 / l, -1 / l, c * 0.25 / l, c * 0.35, 0, -s * 0.35, s, 0, c, 0.22, ...FEATHERS[k]);
       }
     });
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
     const top = MAMMOTH_AT.y + spineAt(LAYOUT.disco.x - MAMMOTH_AT.x) - 0.04 - LAYOUT.disco.y, leaf = mulberry32(808);
     return {
       ball,
@@ -3424,10 +3666,13 @@
   // a hide skin stretched over its mouth and a spiral painted on it in red earth, a rope hoop round the skin and rope
   // lacing zigzagging from it back down the log, hung on two lianas from the rock above it, leaves bunched where they
   // leave the rock.
-  const speakers = cached(() => {
+  const speakers = BL.models.cachedSteps(function* (slice = null) {
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
     const { withJungle, liana, sprig, log } = BL.hubModels, round = [], flat = [], ties = [], laces = [], leaf = mulberry32(3131);
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
     const toFront = (geo) => turnedX(geo, Math.PI / 2);
-    for (const z of [-10.7, -3.9, 2.9]) for (const sx of [-1, 1]) {
+    if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
+    for (const z of [-10.7, -3.9, 2.9]) { if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; } for (const sx of [-1, 1]) { if (slice && performance.now() >= slice.until) { yield; slice.until = performance.now() + slice.budget; }
       const x = sx * (HALL.halfW - 0.75), y = HALL.h - 2.6, lean = 0.35, turnY = sx < 0 ? Math.PI / 2 : -Math.PI / 2;
       const place = (geo) => moved(turnedY(turnedX(geo, lean), turnY), x, y, z);
       // A point on the drum, in the hall, as `place` stands a part.
@@ -3440,7 +3685,7 @@
       flat.push(place(moved(pictograph(PICTOS.spiral, 0.2, ["#b8452a", "#b8452a", "#b8452a"], 0), 0, 0, 0.365)));
       laces.push(Array.from({ length: 11 }, (_, k) => { const a = k / 10 * Math.PI * 2; return put([Math.cos(a) * 0.318, Math.sin(a) * 0.318, k % 2 ? -0.2 : 0.33]); }));
       ties.push([x, y + 0.22, z, sx]);
-    }
+    } }
     return withJungle(shaded(round, flat), (g) => {
       for (const pts of laces) liana(g, pts, 0.011, 0.011, "#c9a36a");
       for (const [x, y, z, sx] of ties) {
@@ -3976,7 +4221,13 @@
     geo.faces.forEach((f, k) => { f.color = VINE_ROPE[(Math.floor(k / 6) + k % 6) % 3]; });
     return smooth(geo);
   });
+  const buildSteps = function* () {
+    const slice = { until: 0, budget: BL.buildTasks.SLICE_MS };
+    for (const build of [hall, lanterns, ceiling, stage, mezzanine, wheel, snackBar, prizeCounter, ropes, discoBall, speakers]) yield* build.steps(slice);
+    return null;
+  };
   Object.assign(BL.arcadeModels, {
+    buildSteps,
     spotCan, spotRods, wheelAt, wheelStop, lanterns, ceiling, stage, mezzanine, wheel, clawMachine, claw, pinball, pinAt, airHockey, hockeyPieces, changer, ropes, retroFrames, retroStart, retroLine, ride, rideBeat, poolRing, dartSight, boardPost, pinFlipper, pinLight, pinTooth, pinRamp, clawMark, poolTable, poolBall, poolCue, poolDot, dartBoard, dart, dartOche, clawBooth, clawPrize, ticketStrip, fameBoard, fameFrame, prizeShelf, pennants, discoBall, speakers, tableProps, trashBin, ticketBucket, directory, wornPatch, backDoor, chainLink, prize, prizeCounter, staffHat, staffVest, staffProp, bulbFrame, zoneSign, posterFrame, posterArt, table, planterPot, hall, signFrame, attractStart, bestLine, digit, board, skeeLane, skeeDot, hoopMachine, hoop, coconutShy, coconut, shyVine, coconutBall, balls, meter, arrow, snackBar
   });
 })();

@@ -214,7 +214,7 @@
     const next = scenes[id];
     if (!next) throw new Error(`Unknown scene "${id}"`);
     if (transition) return false;
-    transition = { next, place, out: true, t: 0, instant, ready: true, redirect: null, failed: null };
+    transition = { next, place, out: true, t: 0, instant, ready: true, redirect: null, failed: null, controller: new AbortController() };
     if (next.prepare) {
       try { settle(transition, models.withScope(next.id, () => next.prepare(place, ctx, next.id))); }
       catch (error) { transition.failed = error; }
@@ -319,14 +319,42 @@
     window.BL.hud.toast("That place could not be opened · try again");
     router.abandon();
   };
+  // Pure model construction happens before leaving the complete old visit. Only a finished cache is published;
+  // no partial HUD, input, crew, or network state belongs to a scene that has not been entered.
+  const buildLanding = (t) => {
+    if (t.failed || t.buildStarted) return t.ready;
+    t.buildStarted = true;
+    const { next, place } = landing(t);
+    if (!next.buildSteps) return true;
+    t.building = true;
+    t.ready = false;
+    const buildCtx = { ...ctx, place, from: active.id, signal: t.controller.signal };
+    let steps;
+    try { steps = models.withScope(next.id, () => next.buildSteps(buildCtx)); }
+    catch (error) { t.failed = error; t.ready = true; t.building = false; return true; }
+    window.BL.buildTasks.run(steps, next.id, t.controller.signal).then(() => {
+      t.ready = true;
+      t.building = false;
+    }, error => {
+      t.failed = error;
+      t.ready = true;
+      t.building = false;
+      if (destroyed) { models.release(next.id, []); return; }
+      const keep = [active.id];
+      if (scenes.hub.retained && active.id !== "hub") keep.push("hub");
+      models.release(next.id, keep, liveGeometry());
+    });
+    return false;
+  };
   const settled = () => {
     const failed = transition.failed;
+    transition.controller.abort();
     transition = null;
     if (failed && active && active.stay) active.stay();
   };
   const stepTransition = (dt) => {
     if (transition.instant) {
-      if (!transition.ready) return;
+      if (!transition.ready || !buildLanding(transition)) { fade = 1; return; }
       if (transition.failed) abandon();
       else { const { next, place } = landing(transition); swap(next, place); }
       settled();
@@ -336,7 +364,7 @@
     transition.t += dt;
     if (transition.out) {
       fade = Math.min(1, transition.t / FADE);
-      if (fade < 1 || !transition.ready) return;
+      if (fade < 1 || !transition.ready || !buildLanding(transition)) return;
       if (transition.failed) abandon();
       else { const { next, place } = landing(transition); swap(next, place); }
       transition.out = false;
@@ -384,8 +412,8 @@
     showQuality();
   };
   // Boot time is a device probe no browser can refuse: Safari masks GPU strings, where thresholds matter most.
-  // BOOT_MEDIUM / BOOT_LOW measure building the first scene. Recalibrated 2026-09-24 against the hub as it now
-  // is: an M4 Max builds it in about 2.35 s, so the old 2200 started every machine at medium. The same ratio to
+  // BOOT_MEDIUM / BOOT_LOW measure synchronous CPU across prepare, construction slices and enter, without await
+  // delays. Recalibrated 2026-09-24 against the hub as it now is: an M4 Max builds it in about 2.35 s, so the old 2200 started every machine at medium. The same ratio to
   // that fast build is kept, and the frame-interval auto-tier still steps a slow device down while it plays.
   const BOOT_MEDIUM = 3600, BOOT_LOW = 5400;
   const tierFromBoot = (ms) => {
@@ -419,6 +447,8 @@
   const step = (dt, now) => {
     elapsed += dt;
     if (transition) stepTransition(dt);
+    // Hold the fully black frame while resumable pure builders run; the old visit keeps its graph and controls.
+    if (transition && transition.building) { drawFade(); return; }
     sceneTime += dt;
     // In real mode the API owns the pile, so every browser shows the same one: its last count less what has been
     // eaten since it arrived, in whole bananas.
@@ -683,15 +713,17 @@
   // Building the first scene holds the main thread with nothing painted yet.
   // Run boot from a task after the first frame so the leaf curtain is on screen, not the previous page.
   let destroyed = false;
+  const bootBuildController = new AbortController();
   const boot = async () => {
     // A signed-in newcomer must join before crew construction, including direct routes.
     // net.start is bounded; an unavailable backend leaves the static island usable.
     await accountReady;
     if (destroyed) return;
+    const constructionCPU = window.BL.buildTasks.cpu;
     let first = Object.hasOwn(scenes, sceneId) ? scenes[sceneId] : scenes[Object.keys(scenes)[0]], place = routed && routed.place;
     if (first.prepare) {
       try {
-        const redirect = await models.withScope(first.id, () => first.prepare(place, ctx, first.id));
+        const redirect = await window.BL.buildTasks.measure(() => models.withScope(first.id, () => first.prepare(place, ctx, first.id)));
         if (redirect) ({ next: first, place } = landing({ redirect }));
       } catch {
         first = scenes[Object.keys(scenes)[0]];
@@ -700,10 +732,22 @@
       }
       if (destroyed) return;
     }
-    const built = performance.now();
-    enter(first, place);
+    if (first.buildSteps) {
+      try {
+        const steps = window.BL.buildTasks.measure(() => models.withScope(first.id, () => first.buildSteps({ ...ctx, place, signal: bootBuildController.signal })));
+        await window.BL.buildTasks.run(steps, first.id, bootBuildController.signal);
+      } catch {
+        if (destroyed) return;
+        models.release(first.id, []);
+        first = scenes[Object.keys(scenes)[0]];
+        place = null;
+        window.BL.hud.toast("That place could not be opened · here is the island");
+      }
+      if (destroyed) return;
+    }
+    window.BL.buildTasks.measure(() => enter(first, place));
     mark("ready");
-    tierFromBoot(performance.now() - built);
+    tierFromBoot(window.BL.buildTasks.cpu - constructionCPU);
     raf = window.requestAnimationFrame(frame);
   };
   window.requestAnimationFrame(() => window.setTimeout(boot, 0));
@@ -760,6 +804,8 @@
   }
   const destroy = () => {
     destroyed = true;
+    bootBuildController.abort();
+    transition?.controller.abort();
     window.cancelAnimationFrame(raf);
     window.clearInterval(housekeepTimer);
     overlayObserver.disconnect();
