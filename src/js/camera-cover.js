@@ -91,6 +91,7 @@
     let surfacePoints = new Float32Array(0), surfaceCorners = new Uint8Array(0), surfaceNext = new Int32Array(0);
     const view = mat4.create(), triangle = new Float64Array(9), clipped = new Float64Array(12);
     const actorView = new Float64Array(16), projected = new Float64Array(8);
+    let actorVertices = new Float64Array(0);
     let actorDepth = new Float32Array(0), clipActor = false, actorMinX = 0, actorMinY = 0, actorMaxX = -1, actorMaxY = -1;
     let actorColumns = new Int32Array(0);
     // Search the small silhouette band nearest-first. Stable distance order
@@ -685,14 +686,25 @@
         actorView[c * 4 + r] = view[r] * world[c * 4] + view[4 + r] * world[c * 4 + 1]
           + view[8 + r] * world[c * 4 + 2] + view[12 + r] * world[c * 4 + 3];
       }
+      // Indexed wall cues share vertices across faces. Transform each position
+      // once into a reusable buffer before clipping its triangles.
+      if (geometry) {
+        const v = geometry.verts;
+        if (actorVertices.length < v.length) actorVertices = new Float64Array(v.length);
+        for (let i = 0; i < v.length; i += 3) {
+          actorVertices[i] = actorView[0] * v[i] + actorView[4] * v[i + 1] + actorView[8] * v[i + 2] + actorView[12];
+          actorVertices[i + 1] = actorView[1] * v[i] + actorView[5] * v[i + 1] + actorView[9] * v[i + 2] + actorView[13];
+          actorVertices[i + 2] = actorView[2] * v[i] + actorView[6] * v[i + 1] + actorView[10] * v[i + 2] + actorView[14];
+        }
+      }
       if (geometry) for (const face of geometry.faces) {
         // Triangles clip to at most four corners, so the scratch space stays fixed.
         for (let fan = 1; fan + 1 < face.i.length; fan++) {
           for (let n = 0; n < 3; n++) {
-            const i = face.i[n === 0 ? 0 : fan + n - 1] * 3, v = geometry.verts;
-            triangle[n * 3] = actorView[0] * v[i] + actorView[4] * v[i + 1] + actorView[8] * v[i + 2] + actorView[12];
-            triangle[n * 3 + 1] = actorView[1] * v[i] + actorView[5] * v[i + 1] + actorView[9] * v[i + 2] + actorView[13];
-            triangle[n * 3 + 2] = actorView[2] * v[i] + actorView[6] * v[i + 1] + actorView[10] * v[i + 2] + actorView[14];
+            const i = face.i[n === 0 ? 0 : fan + n - 1] * 3;
+            triangle[n * 3] = actorVertices[i];
+            triangle[n * 3 + 1] = actorVertices[i + 1];
+            triangle[n * 3 + 2] = actorVertices[i + 2];
           }
           let count = 0;
           for (let n = 0; n < 3; n++) {
@@ -808,6 +820,7 @@
       mask.width = mask.height = rim.width = rim.height = stone.width = stone.height = concealed.width = concealed.height = concealedRim.width = concealedRim.height = visible.width = visible.height = apertureMask.width = apertureMask.height = wallLayer.width = wallLayer.height = 1;
       wallContexts.fill(null); wallCached = false; state.glyphInterior = false;
       glyphMaterial = textureMaterial = null;
+      actorVertices = new Float64Array(0);
       actorDepth = new Float32Array(0); actorColumns = new Int32Array(0); clipActor = false;
     };
     return { draw, dispose, state };

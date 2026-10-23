@@ -61,6 +61,7 @@
       for (let i = 1; i+1 < clipped.length; i++) out.faces.push({...face,i:[base,base+i,base+i+1]});
     }
     if (!hasNormals) delete out.normals;
+    if (geo.cueGeometry) out.cueGeometry = sheathedGrip(geo.cueGeometry, top);
     return out;
   };
   const sliotar = () => {
