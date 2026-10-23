@@ -47,6 +47,23 @@
     loading.set(group, promise);
     return promise;
   };
+  const prefetching = new Set(), retryAt = new Map(), sceneGroups = Object.create(null);
+  // Hover/proximity can recur every frame. Attach just one completion handler, and back off optional failures;
+  // a deliberate prepare still retries immediately through load().
+  const prefetch = (group) => {
+    if (typeof PRESENT[group] !== "function" || document.hidden || PRESENT[group]() || prefetching.has(group) || Date.now() < (retryAt.get(group) || 0)) return;
+    prefetching.add(group);
+    const loading = load(group);
+    if (loading) loading.then(() => { prefetching.delete(group); retryAt.delete(group); }, () => {
+      prefetching.delete(group); retryAt.set(group, Date.now() + 60000);
+    });
+    else prefetching.delete(group);
+  };
+  const prefetchScene = (id) => {
+    const groups = sceneGroups[id];
+    if (groups) for (let i = 0; i < groups.length; i++) prefetch(groups[i]);
+    else prefetch(id);
+  };
   // A hosted scene keeps its shell's identity while its implementation arrives: the director may already hold it.
   // Portable builds evaluate the same modules inline and fill these shells before boot, so they still fetch nothing.
   const scene = (id, definition = null) => {
@@ -54,6 +71,7 @@
     if (definition) Object.defineProperties(target, Object.getOwnPropertyDescriptors(definition));
     else {
       const group = `${id}-scene`;
+      sceneGroups[id] = [group, id];
       PRESENT[group] = () => typeof target.enter === "function";
       const prepare = (place, ctx, scope) => {
         const loading = load(group);
@@ -64,5 +82,5 @@
     }
     return target;
   };
-  BL.deferred = { load, scene, present: (group) => PRESENT[group](), get pending() { return loading.size; } };
+  BL.deferred = { load, scene, prefetch, prefetchScene, present: (group) => PRESENT[group](), get pending() { return loading.size; } };
 })();

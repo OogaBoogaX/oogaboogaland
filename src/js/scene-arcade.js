@@ -1637,6 +1637,7 @@
   };
 
   const enter = (ctx) => {
+    prefetchAt = 0;
     ({ renderer, game, world, go, agentPlay } = ctx);
     canvasEl = ctx.canvas;
     window.addEventListener("keydown", armsKeys, { capture: true, signal: ctx.signal });
@@ -1676,6 +1677,7 @@
     };
     Object.assign(hooks, {
       onHover: (hit, p) => {
+        if (hit?.owner.kind === "cabinet" && GAMES[hit.owner.game]) BL.deferred.prefetchScene(GAMES[hit.owner.game].id);
         if (hit) hud.tooltip.show(tipFor(hit), p.x, p.y);
         else hud.tooltip.hide();
       },
@@ -1844,7 +1846,16 @@
 
   // Per frame, allocation-free: the walker and camera, the screens' loops, the carnival, the staff, the prompt at a
   // station, the lamps nearest the view, and the way out.
+  let prefetchAt = 0;
   const update = (dt, elapsed) => {
+    if (elapsed >= prefetchAt) {
+      prefetchAt = elapsed + 0.25;
+      const p = pilot.player ? pilot.player.root.position : camera.position;
+      for (let i = 0; i < live.length; i++) {
+        const c = live[i], dx = p.x - c.x, dy = p.y - c.y, dz = p.z - c.z;
+        if (GAMES[c.game] && dx * dx + dy * dy + dz * dz <= 225) BL.deferred.prefetchScene(GAMES[c.game].id);
+      }
+    }
     pilot.readInput(dt);
     if (people) people.update(dt, elapsed);
     pilot.update(dt);

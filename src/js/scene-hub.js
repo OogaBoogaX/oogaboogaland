@@ -6138,6 +6138,7 @@
     hud.tooltip.show(owner.sequence.label, screen.x, screen.y, null, false, true);
   };
   const showHoverTooltip = (hit, p) => {
+    if (hit && (hit.owner.kind === "cave" || hit.owner.kind === "cave-sign")) BL.deferred.prefetchScene(hit.owner.slot.scene);
     pileHovered = hit?.owner.kind === "pile";
     if (!pileHovered) hud.setPileValueVisible(false);
     poolBlockHovered = hit?.owner.kind === "poolblock" ? hit.owner : null;
@@ -8116,8 +8117,25 @@
     const repo = BL.totemFeed.REPOS[o.totem], url = BL.totemFeed.state.repos[o.totem].url;
     window.open(url || `https://github.com/${repo.repo}/pulls?q=is%3Apr+is%3Amerged`, "_blank", "noopener,noreferrer");
   };
+  let prefetchAt = 0;
   const update = (dt, elapsed) => {
     if (ghosts) ghosts.unshake(camera); // HALLOWEEN: last frame's quake comes off before anything reads the camera
+    // Four cheap proximity reads a second, without building a visit or changing its actor/account state.
+    if (elapsed >= prefetchAt) {
+      prefetchAt = elapsed + 0.25;
+      const p = pilot.player ? pilot.player.root.position : camera.position;
+      for (let i = 0; i < caves.slots.length; i++) {
+        const slot = caves.slots[i];
+        if (!slot.scene || slot.status !== "open") continue;
+        for (let j = 0; j < island.mouths.length; j++) {
+          const mouth = island.mouths[j];
+          if (mouth.id !== slot.id) continue;
+          const dx = p.x - mouth.x, dy = p.y - mouth.floorY, dz = p.z - mouth.z;
+          if (dx * dx + dy * dy + dz * dz <= 225) BL.deferred.prefetchScene(slot.scene);
+          break;
+        }
+      }
+    }
     if (lawn && lawn.version !== island.path.version) layLawn();
     if (life) { life.gulls.update(elapsed); life.shore.update(elapsed); life.boats.update(elapsed); }
     now = elapsed;
@@ -10815,6 +10833,7 @@
     updatePoolEffectsActivity();
   };
   const enter = (ctx) => {
+    prefetchAt = 0;
     reuseHub = ctx.hubPolicy === "keep";
     if (heldHub) { resumeHub(ctx); return; }
     ({ renderer, game, world, go, lootEnabled, testBananas } = ctx);
