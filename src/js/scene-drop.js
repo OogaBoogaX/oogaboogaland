@@ -1106,6 +1106,12 @@
   };
   Object.assign(dropScene, { enter, update, overlay, onDonation, onKey, onLootCleared, leave, stats, liveGeometry });
   BL.scenes = BL.scenes || {};
-  dropScene.prepare = () => { const loading = BL.deferred.load("drop"); return loading ? loading.then(() => null) : null; };
+  dropScene.prepare = async (_place, ctx) => {
+    const loading = BL.deferred.load("drop");
+    if (loading) await loading;
+    // The bare island is the cold visit's largest build; enter then adopts the completed, scene-owned cache entry.
+    await BL.buildTasks.run(terrain.islandSteps({ seed: SEED }), "drop", ctx.signal);
+    return null;
+  };
   BL.scenes.drop = dropScene;
 })();

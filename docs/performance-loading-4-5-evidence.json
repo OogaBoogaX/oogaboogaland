@@ -1,0 +1,170 @@
+{
+ "base": "d1daefa",
+ "method": "scripts/profile-residency.mjs <label> factory,hub,arcade,hub,drop,hub,dsb,hub,bifrost,hub --no-gc --tasks --reuse; ARM64 Chrome, hubcache=keep; ms is go() to settled, task is the longest task in the transition",
+ "transitions": {
+  "factory": {
+   "before": [
+    [
+     938,
+     548
+    ],
+    [
+     955,
+     551
+    ]
+   ],
+   "final": [
+    [
+     950,
+     433
+    ],
+    [
+     962,
+     462
+    ]
+   ]
+  },
+  "arcade": {
+   "before": [
+    [
+     854,
+     456
+    ],
+    [
+     889,
+     494
+    ]
+   ],
+   "final": [
+    [
+     875,
+     396
+    ],
+    [
+     857,
+     364
+    ]
+   ]
+  },
+  "drop": {
+   "before": [
+    [
+     1671,
+     1298
+    ],
+    [
+     1671,
+     1276
+    ]
+   ],
+   "final": [
+    [
+     2104,
+     123
+    ],
+    [
+     2072,
+     123
+    ]
+   ]
+  },
+  "dsb": {
+   "before": [
+    [
+     1244,
+     857
+    ],
+    [
+     1259,
+     867
+    ]
+   ],
+   "final": [
+    [
+     1244,
+     853
+    ],
+    [
+     1258,
+     857
+    ]
+   ]
+  },
+  "bifrost": {
+   "before": [
+    [
+     518,
+     365
+    ],
+    [
+     503,
+     351
+    ]
+   ],
+   "final": [
+    [
+     512,
+     354
+    ],
+    [
+     503,
+     361
+    ]
+   ]
+  }
+ },
+ "sliceBudget": {
+  "8ms": {
+   "dropEntryMs": [
+    2722,
+    2837
+   ],
+   "dropLongestTask": [
+    124,
+    136
+   ]
+  },
+  "40ms": {
+   "dropEntryMs": [
+    2104,
+    2072
+   ],
+   "dropLongestTask": [
+    123,
+    123
+   ]
+  },
+  "dropCpuVsWall": {
+   "8ms": {
+    "wall": 2649,
+    "cpu": 1514
+   },
+   "40ms": {
+    "wall": 2236,
+    "cpu": 1609
+   }
+  }
+ },
+ "coldHubReadyMs": {
+  "before": [
+   4394,
+   4496
+  ],
+  "after": [
+   4490,
+   4481,
+   4501
+  ]
+ },
+ "droppedFromHandoff": "ooga-task-4-5-worlds.patch (DSB geography and Bifrost model slicing): DSB suite 769/770 on a clean export fell to 728/748 with it; Bifrost's longest task did not change",
+ "suites": {
+  "unit": "269/269",
+  "drop": "282/282",
+  "orbit": "290/290",
+  "arcade": "281/281",
+  "bifrost": "290/290",
+  "factory without the STOP greeter": "312/312",
+  "lab, race, mine": "pass",
+  "dsb steps that failed with the worlds patch": "493/493 after removing it"
+ }
+}

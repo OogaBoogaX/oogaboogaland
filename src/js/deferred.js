@@ -73,7 +73,7 @@
       PRESENT[group] = () => typeof target.enter === "function";
       const prepare = (place, ctx, scope) => {
         const loading = load(group);
-        const prepared = () => target.prepare !== prepare ? BL.models.withScope(scope || id, () => target.prepare(place, ctx, scope)) : null;
+        const prepared = () => target.prepare !== prepare ? BL.buildTasks.measure(() => BL.models.withScope(scope || id, () => target.prepare(place, ctx, scope))) : null;
         return loading ? loading.then(prepared) : prepared();
       };
       target.prepare = prepare;

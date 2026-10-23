@@ -1994,7 +1994,7 @@
   const arcadeScene = BL.deferred.scene("arcade", {
     // Voice zone: the Arcade group, which its mouth on the island shares (`arcade`).
     voiceZone: "arcade.hall",
-    id: "arcade", enter, update, overlay, onDonation, onKey, onLootCleared, renderOpts: RENDER_OPTS, stay, leave, stats, liveGeometry,
+    id: "arcade", buildSteps: () => AM.buildSteps(), enter, update, overlay, onDonation, onKey, onLootCleared, renderOpts: RENDER_OPTS, stay, leave, stats, liveGeometry,
     root: null, camera: null, input: null, debug: null, agent: null, agentView: null, agentControls: null, agentHandoff: null,
     get inMotion() {
       return false;

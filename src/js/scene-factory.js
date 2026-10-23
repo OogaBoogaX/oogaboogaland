@@ -2146,7 +2146,7 @@
     // Voice zone: the Factory group, which its tunnel on the island shares (`factory`).
     voiceZone: "factory.hall",
     micKey: true,
-    id: "factory", enter, update, overlay, onDonation, previewDonation, onSeen, onKey, onLootCleared, renderOpts: RENDER_OPTS, leave, stats, liveGeometry,
+    id: "factory", buildSteps: () => FM.buildSteps(), enter, update, overlay, onDonation, previewDonation, onSeen, onKey, onLootCleared, renderOpts: RENDER_OPTS, leave, stats, liveGeometry,
     root: null, camera: null, input: null, debug: null, agent: null, agentView: null, agentControls: null, agentHandoff: null,
     get inMotion() {
       return !!scene;
