@@ -16,7 +16,7 @@
     declined: "No problem! Come find me if you want a tour.",
     gather: "Tours start at the balcony. Follow me!",
     menu: "Four tours! Pick one.",
-    follow: "Follow me! Lines, the core, the switchboard.",
+    follow: "Follow me! Lines, the core, the routing console.",
     channels: "Lines are channels to peers. A payment can hop node to node.",
     core: "The core is this node. It forwards payments; it mines nothing.",
     outcomes: "Settled means it went through. Failed means it did not — never why.",
@@ -62,11 +62,17 @@
     summary: "Summaries describe activity. Not diagnosis, not balances.",
     noSummary: "No summary supplied. We invent no counts.",
     healthDone: "State and signal answer different questions. Tour done!",
+    kortik: "Next door, Kortik routes all this by hand. Don't poke him!",
     done: "That is forwarding! Back to work — come find me anytime.",
     warning: "Still coming? I'll hover here.",
     abandoned: "Lost my visitor! Back to work.",
-    cancelled: "All good. Back to work!"
+    cancelled: "All good. Back to work!",
+    // Her answers when Kortik shouts for her across the hall.
+    kortikUseful: "I AM useful! I give tours.",
+    kortikHand: "Says the samurai who routes by hand!",
+    kortikAutomate: "Have you tried automating it, Kortik?"
   };
+  const RETORTS = ["kortikUseful", "kortikHand", "kortikAutomate"];
   // Her flight. Clear-air waypoints over the hall and the legs between them, every leg at least 0.8 m from any surface
   // the hall draws (the factory suite measures it). A work site is a waypoint she hovers at, with the point on its
   // station her beam lands on. She is found working at a site near the front, so she reaches the balcony quickly.
@@ -104,7 +110,7 @@
     [-4.8, 0, 9], [-6.5, 0, 8.5], [-4.8, 0, 9], [-4.8, 0, 7.5],
     [-4.8, 5, 1.3], [-4.8, 5, 0.1], [-4.8, 5, 1.3], [-4.8, 0, 7.5], [-7, 0, 8.5]
   ];
-  const STOPS = { 6: ["channels"], 10: ["core", "privacy"], 13: ["outcomes", "observation", "source", "history", "done"] };
+  const STOPS = { 6: ["channels"], 10: ["core", "privacy"], 13: ["outcomes", "observation", "source", "history", "kortik", "done"] };
   const CHANNEL_ROUTE = [
     ...ROUTE.slice(0, 5), [-4.8, 0, 9], [-4.8, 0, 5.8], [-4.8, 0, 7.5],
     [-4.8, 5, 1.3], [-4.8, 5, 0.1], [-5.6, 5, -1.6], [-6.1, 5, -3.9],
@@ -619,7 +625,13 @@
       panel.remove(); stop.remove();
       state.lastEvent = null;
     };
-    return { root: rig.root, state, update, greet, act, actLabel, useNear, escape, dispose, liveGeometry: rig.liveGeometry, light: rig.light };
+    // Kortik shouting for her: at work, she answers back; leading a tour or with a visitor, she has better things to do.
+    const retort = () => {
+      if (state.phase !== "work" || state.tour) return false;
+      say(RETORTS[Math.floor(Math.random() * RETORTS.length)]);
+      return true;
+    };
+    return { root: rig.root, state, update, greet, act, actLabel, useNear, escape, retort, dispose, liveGeometry: rig.liveGeometry, light: rig.light };
   };
   // The flight's data, for the factory suite's clearance check.
   const FLIGHT = { AIR, LEGS, WORK, LEAD, RADIUS: BL.tess.RADIUS };
