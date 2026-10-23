@@ -9,6 +9,17 @@ historical fallback and does not pretend that its old commits just happened.
 `ooga=` fixtures override them when requested; `seedDebugActivity()` remains a
 test helper for repeatable activity windows.
 
+On hub arrival, working Oogas start beside the banana pile and chilling Oogas
+gather around the campfire, filling clear places in the inner ring before using
+outer rings. Sleeping Oogas get separate HQ and basement beds, newest activity
+first; the longest-inactive sleepers overflow into separate rainforest sleeping
+spots, taken in one fixed order (the Nth overflow sleeper takes the Nth spot) and
+searched once a page only as far as sleepers need them. The search uses the
+rainforest's original scenery transforms, so passing players and shaking trees
+cannot change the cached order. Each visit keeps its own bed reservations. A signed-in visitor
+arrives awake beside the pile regardless of activity, without changing their
+contribution timestamps.
+
 Roster activity labels use yellow **clankin**, orange **chillin**, and gray **sleepin**.
 A separate dot before the name is green when `cave.humanControlled` is true and gray
 when offline. The tooltip dot keeps its existing behavior: green for human presence,

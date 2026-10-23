@@ -51,6 +51,7 @@
   const GATE_VIEW = { yaw: 0, pitch: 0.32, dist: 18, target: { x: 0, y: 0, z: -(RADIUS - 2) } };
   const mouthView = (m) => ({ yaw: m.ry, pitch: 0.3, dist: 18, target: { x: m.x, y: 1.5, z: m.z } });
   const NAVIGATION = { position: { x: 0, y: 0, z: 0 }, target: { x: 0, y: 0, z: 0 }, yaw: 0, pitch: 0, dist: 6 };
+  const PILE_ARRIVAL_SEARCH = { next: 0, angle: 0 };
   const NAVIGATION_OFFSETS = [0, -0.75, 0.75, -1.5, 1.5];
   const NAVIGATION_SIDES = [0, -0.75, 0.75, -1.5, 1.5, -2.25, 2.25, -3, 3];
   const NAVIGATION_DEPTHS = [0, 1.5, -1.5, 3, -3, 4.5, -4.5], NAVIGATION_SAME_DEPTH = [0];
@@ -1764,10 +1765,15 @@
     fireHazards.push({ node: flame, pit, x: p.x, y: pit.position.y, z: p.z, avoidRadius: FIRE_AVOID_RADIUS });
     addLamp(flame, LAMP.fire, p.x, 0.6, p.z, true, 3, "firepit").always = true;
     claim(p.x, p.z, 1.4);
-    for (let i = 0; i < FIRE_SEATS; i++) {
-      const a = (i + 0.5) / FIRE_SEATS * Math.PI * 2;
-      const x = p.x + Math.cos(a) * FIRE_SEAT_RADIUS, z = p.z + Math.sin(a) * FIRE_SEAT_RADIUS;
-      fireSeats.push({ x, z, ry: Math.atan2(p.x - x, p.z - z), sit: true });
+    // Spare concentric rings let the whole chilling roster arrive together.
+    // Keep the original six seats first; ordinary strolls still use that ring.
+    for (let ring = 1; fireSeats.length < Math.max(FIRE_SEATS, contributors.activeRoster.length * 3); ring++) {
+      const count = FIRE_SEATS * ring, radius = FIRE_SEAT_RADIUS * ring;
+      for (let i = 0; i < count; i++) {
+        const a = (i + 0.5) / count * Math.PI * 2;
+        const x = p.x + Math.cos(a) * radius, z = p.z + Math.sin(a) * radius;
+        fireSeats.push({ x, z, ry: Math.atan2(p.x - x, p.z - z), sit: true });
+      }
     }
     return p;
   };
@@ -2778,16 +2784,23 @@
     const worldZ = (lx, lz) => place.z - lx * sin + lz * cos;
     const localX = (wx, wz) => (wx - place.x) * cos - (wz - place.z) * sin;
     const localZ = (wx, wz) => (wx - place.x) * sin + (wz - place.z) * cos;
-    const atNode = (kind, node, radius) => addProp(kind, node, worldX(node.position.x, node.position.z), worldZ(node.position.x, node.position.z), radius);
+    // Sleeping anchors use the planted scenery's original collision transforms, even while a tapped tree shakes.
+    const sleepSolids = BL.solidProps.create();
+    const atNode = (kind, node, radius) => {
+      const owner = addProp(kind, node, worldX(node.position.x, node.position.z), worldZ(node.position.x, node.position.z), radius);
+      if (SOLID_PROPS.has(kind)) sleepSolids.add(node);
+      return owner;
+    };
     addChild(root, site.node);
     placed.push(site.node);
     // Capped in a cut view only when the walker the view follows is on this island or about to be.
     addTerrainSection(site.ground.geometry.cutawaySource, site.node, place.y).when = () => Math.hypot(cutawayX - place.x, cutawayZ - place.z) < S.reach + 40;
     // The body, the smooth floors laid over its steps, the lake's membrane and the plank crossings are all walked on.
-    for (const node of [site.ground, site.floor, site.membrane, ...site.crossings]) solids.add(node);
+    for (const node of [site.ground, site.floor, site.membrane, ...site.crossings]) { solids.add(node); sleepSolids.add(node); }
     site.floor.sightHidden = true;
     for (const node of site.crossings) node.sightHidden = true;
     addProp("poolbridge", site.bridge, worldX(0, place.bridgeLocalZ + S.span / 2), worldZ(0, place.bridgeLocalZ + S.span / 2), S.width);
+    sleepSolids.add(site.bridge);
     addLamp(site.bridge, LAMP.lantern, worldX(0, place.bridgeLocalZ), place.y + 3.4, worldZ(0, place.bridgeLocalZ), false, 0, "poolbridge:lanterns").nightOnly = true;
     atNode("poolsign", site.sign, site.sign.geometry.signWidth * 0.55);
     signDetails.push({
@@ -3234,7 +3247,10 @@
     const boxSolid = boxIn(L.boxSolid), boxClear = boxIn(L.boxClear);
     // What is walked on here rather than walked round: the bridge and the island's own ground in all its pieces.
     const walked = new Set([site.bridge, site.ground, site.floor, site.membrane, ...site.crossings]);
-    return { site, place, centre, groundAt, rainAt, rainHit, wake, worldX, worldZ, localX, localZ, cos, sin, claimGround, wildlife, water, paintings, overAt, coveredAt, billboardOccludes, sightClear, solidAt, rockMaterialAt, boxSolid, boxClear, floatAt, afloat, walked, layout: L, preview };
+    // Sync once; later searches must not observe visitors, tree animations or this visit's visibility changes.
+    sleepSolids.sync();
+    const sleepClear = (x, y, z) => sleepSolids.segmentClear(x, y, z, x, y, z, 0.15, 1.5);
+    return { site, place, centre, groundAt, rainAt, rainHit, wake, worldX, worldZ, localX, localZ, cos, sin, claimGround, wildlife, water, paintings, overAt, coveredAt, billboardOccludes, sightClear, solidAt, rockMaterialAt, boxSolid, boxClear, floatAt, afloat, walked, sleepClear, layout: L, preview };
   };
   // Where the gorillas sleep while their Oogas do: the banana-leaf beds of the Mempool island's nests, and the dry
   // way to each from the home island, as x, z pairs: up the approach stair, over the bridge, across the court,
@@ -3868,9 +3884,9 @@
     return false;
   };
   const freeSeat = () => {
-    const start = Math.floor(Math.random() * fireSeats.length);
-    for (let i = 0; i < fireSeats.length; i++) {
-      const s = fireSeats[(start + i) % fireSeats.length];
+    const start = Math.floor(Math.random() * FIRE_SEATS);
+    for (let i = 0; i < FIRE_SEATS; i++) {
+      const s = fireSeats[(start + i) % FIRE_SEATS];
       if (!seatTaken(s)) return s;
     }
     return null;
@@ -3879,9 +3895,37 @@
     const feet = island.surfaceAt(s.x, s.z), height = cave ? cave.bodyHeight : 1.5;
     return !npcRampRoofAt(s.x, feet, s.z) && !npcClosedCaveAt(s.x, s.z, feet, height) && !npcPileAt(s.x, feet, s.z, height) && !npcWorkZoneAt(cave, s.x, feet, s.z) && npcFireClear(s.x, feet, s.z, s.x, feet, s.z, height) && walkable(s.x, s.z, s.x, s.z, feet, height, cave);
   };
-  const wanderSpot = (out, cave = null) => {
+  const settleFireSeat = (cave) => {
+    const radius = Math.max(PLAYER_RADIUS, cave.bodyRadius), height = cave.bodyHeight;
+    const outside = remotes?.actors();
+    seats: for (const s of fireSeats) {
+      // Idle chillers leave the pile's work ring; never seat them where they must immediately move.
+      if (Math.hypot(s.x, s.z) < island.path.debug.ringOuterRadius + 1.5
+        || island.surfaceAt(s.x, s.z) !== 0 || seatTaken(s) || !npcWanderPointClear(s, cave)
+        || !physicalClearAt(s.x, 1e-5, s.z, radius, height, cave)
+        || !propSegmentClear(s.x, 1e-5, s.z, s.x, 1e-5, s.z, radius, height, cave)) continue;
+      for (const other of crew.list) {
+        if (other === cave) continue;
+        // Workers later in roster order already own their loading slots.
+        if (other.state === "away" && other.slot && crew.stateOf(other) === "working"
+          && Math.hypot(s.x - other.slot.x, s.z - other.slot.z) < radius + other.bodyRadius + 0.15) continue seats;
+        if (!other.root.visible) continue;
+        const p = other.root.position, feet = p.y - other.baseY;
+        if (feet < height && feet + other.bodyHeight > 0
+          && Math.hypot(s.x - p.x, s.z - p.z) < radius + other.bodyRadius + 0.15) continue seats;
+      }
+      if (outside) for (const p of outside) {
+        if (p.y < height && p.y + p.height > 0
+          && Math.hypot(s.x - p.x, s.z - p.z) < radius + p.radius + 0.15) continue seats;
+      }
+      return s;
+    }
+    return null;
+  };
+  const wanderSpot = (out, cave = null, settle = false) => {
     const chilling = cave?.state === "chilling";
-    let s = (chilling && Math.random() < 0.6 || RENDER_OPTS.stars > NIGHT && Math.random() < FIRE_SEAT_CHANCE) ? freeSeat() : null;
+    let s = settle && chilling ? settleFireSeat(cave)
+      : (chilling && Math.random() < 0.6 || RENDER_OPTS.stars > NIGHT && Math.random() < FIRE_SEAT_CHANCE) ? freeSeat() : null;
     if (s && !npcWanderPointClear(s, cave)) s = null;
     if (!s && chilling) {
       const start = Math.floor(Math.random() * chillSpots.length);
@@ -3931,15 +3975,16 @@
     }
     return Number.isFinite(nearest);
   };
-  const pileRespawnSpot = (cave, out) => {
+  const pileRespawnSpot = (cave, out, initial = false, search = null) => {
     const inner = Math.max(5, altar.platformRadius + 1.3), outer = inner + 3;
     const radius = Math.max(PLAYER_RADIUS, cave?.bodyRadius || 0), height = cave?.bodyHeight || 1.6;
-    const start = Math.random() * Math.PI * 2;
+    const start = search ? search.angle : initial ? 0 : Math.random() * Math.PI * 2;
     const outside = remotes?.actors();
-    // Fresh random arrivals, then a bounded scan of three rings if crowded.
+    // Fresh random arrivals, then a bounded scan of three rings if crowded. Initial workers fill
+    // deterministic rings from the inside out, with three more rings for the whole roster.
     // Never fall back to a cave, work slot or the Ooga's old wandering point.
-    candidates: for (let attempt = 0; attempt < 192; attempt++) {
-      const scan = attempt - 48;
+    candidates: for (let attempt = search ? search.next : 0; attempt < (initial ? 288 : 192); attempt++) {
+      const scan = initial ? attempt : attempt - 48;
       const angle = scan < 0 ? Math.random() * Math.PI * 2 : start + (scan % 48) * Math.PI / 24;
       const distance = scan < 0 ? Math.sqrt(lerp(inner * inner, outer * outer, Math.random()))
         : inner + 0.5 + Math.floor(scan / 48);
@@ -3953,14 +3998,26 @@
       }
       if (outside) for (let i = 0; i < outside.length; i++) {
         const p = outside[i];
-        if (p.y < height && p.y + REMOTE_BODY_HEIGHT > 0
-          && Math.hypot(p.x - x, p.z - z) < radius + PLAYER_RADIUS + 0.15) continue candidates;
+        if (p.y < height && p.y + p.height > 0
+          && Math.hypot(p.x - x, p.z - z) < radius + p.radius + 0.15) continue candidates;
+      }
+      // A welcome or pose can arrive before the displayed remote pool updates.
+      // Reserve the room's current positions as well as the interpolated bodies.
+      if (BL.net.remotes) for (const p of BL.net.remotes.values()) {
+        if (!p.body || !BL.remotePlayers.onIsland(p.zone)) continue;
+        const owner = crew.cavemen.get(p.bodyName || BL.net.bodyName(p.body)), gorilla = p.bodyKind === "gorilla";
+        const rig = gorilla && owner && clankers?.list[owner.index]?.gorilla;
+        const peerRadius = gorilla ? Math.max(BL.clankers.WALK_RADIUS, rig ? rig.bodyRadius + 0.1 : 0) : owner?.bodyRadius || PLAYER_RADIUS;
+        const peerHeight = gorilla ? Math.max(BL.clankers.WALK_HEIGHT, rig ? rig.bodyHeight : 0) : owner?.bodyHeight || REMOTE_BODY_HEIGHT;
+        if (p.y < height && p.y + peerHeight > 0
+          && Math.hypot(p.x - x, p.z - z) < radius + peerRadius + 0.15) continue candidates;
       }
       if (clankers) for (let i = 0; i < clankers.list.length; i++) {
         const entry = clankers.list[i];
         if (entry.active && !clankerBodySegmentClear(entry, x, 1e-5, z, x, 1e-5, z, radius, height)) continue candidates;
       }
       out.x = x; out.y = 0; out.z = z;
+      if (search) search.next = attempt + 1;
       return true;
     }
     return false;
@@ -7440,8 +7497,13 @@
     // Mouth approaches and the Bifrost stair foot need room on both axes:
     // a wide body can overlap the whole arrival row but fit farther forward.
     const depths = name === "lab" || name === "mirror" || name === "factory" || name === "bca" || name === "bifrost" ? NAVIGATION_DEPTHS : NAVIGATION_SAME_DEPTH;
-    arrivals: for (const depth of depths) for (const offset of NAVIGATION_SIDES) {
-      if (randomPile) { if (!pileRespawnSpot(player, p)) continue; }
+    if (randomPile) { PILE_ARRIVAL_SEARCH.next = 0; PILE_ARRIVAL_SEARCH.angle = Math.random() * Math.PI * 2; }
+    const arrivals = randomPile ? 192 : depths.length * NAVIGATION_SIDES.length;
+    for (let arrival = 0; arrival < arrivals; arrival++) {
+      const depth = randomPile ? 0 : depths[Math.floor(arrival / NAVIGATION_SIDES.length)], offset = NAVIGATION_SIDES[arrival % NAVIGATION_SIDES.length];
+      // Keep searching when a clear body point has a blocked camera: each pile candidate is tried
+      // once, through the whole bounded ring scan, instead of restarting a few random samples.
+      if (randomPile) { if (!pileRespawnSpot(player, p, false, PILE_ARRIVAL_SEARCH)) break; }
       else {
         p.x = x + Math.cos(yaw) * offset + Math.sin(yaw) * depth;
         p.z = z - Math.sin(yaw) * offset + Math.cos(yaw) * depth;
@@ -7500,7 +7562,7 @@
       setVec(CAMERA_PREVIOUS, eyeX, eyeY, eyeZ);
       if (!travel) setVec(camera.position, eyeX, eyeY, eyeZ);
       found = true;
-      break arrivals;
+      break;
     }
     if (!found) {
       const refusal = "That arrival is blocked. Choose another destination.";
@@ -8646,7 +8708,6 @@
   const RELEASE_WORDS = { "owner-here": "Its owner arrived and took their Ooga back", taken: "Someone else is already driving that Ooga", "not-yours": "Contributors drive only their own Ooga" };
   // The account or the room changed: an Ooga driven here that is no longer this visitor's to drive is let go.
   const onAccountChange = () => {
-    claimOwnOoga();
     const driven = crew.player, released = BL.net.state.released;
     const gorilla = clankerPlay && clankerPlay.player;
     if (gorilla) {
@@ -8654,33 +8715,58 @@
       if (!refusal && released && released.name === gorilla.netBody) refusal = "That gorilla is no longer yours to drive";
       BL.net.state.released = null;
       if (refusal) { clankerPlay.release(); hud.toast(refusal); }
+      claimOwnOoga();
       return;
     }
-    if (!driven) return;
+    if (!driven) { claimOwnOoga(); return; }
     crew.refreshRosterRow(driven);
     let refusal = BL.net.mayDrive(driven.traits.name, false);
     if (!refusal && released && released.name === driven.traits.name) refusal = RELEASE_WORDS[released.reason] || "That Ooga is not yours to drive";
     BL.net.state.released = null;
-    if (!refusal) return;
+    if (!refusal) { claimOwnOoga(); return; }
     pilot.release(true);
     hud.toast(refusal);
+    claimOwnOoga();
   };
-  // A signed-in contributor drives their own Ooga: once a visit, as soon as the account is known, unless
-  // the visitor already drives another. Letting go keeps it let go until the next visit.
+  // A signed-in contributor arrives awake beside the pile, whatever their activity: once a visit,
+  // as soon as the account is known. Returning actors keep their exit; letting go stays detached.
   const claimOwnOoga = () => {
     const me = BL.net.state.me;
-    if (ownOogaClaimed || !me) return;
+    if (ownOogaClaimed || !me) return false;
     const character = BL.net.ownCharacter();
     const cave = character && crew.cavemen.get(character.handle);
-    if (!cave || pilot.player || clankerPlay && clankerPlay.active) {
+    if (!cave) return false;
+    if (pilot.player && pilot.player !== cave || clankerPlay && clankerPlay.active) {
       ownOogaClaimed = true;
-      return;
+      return false;
     }
     // Another tab of this account drives it: its remote copy has sent this one away.
-    if (crew.stateOf(cave) === "away") return;
+    if (cave.remoteControlled || mayDriveOoga(cave)) return false;
+    // An account retry can identify the Ooga already held at the Sphere's keypad.
+    // Keep that doorway interaction and its view; a fresh sign-in has no held actor.
+    if (pilot.player === cave && timechainIsland?.gate?.busy) {
+      ownOogaClaimed = true;
+      return true;
+    }
+    const previousOverride = pilot.player === cave ? cave.controlOverride : cave.override;
+    if (crew.stateOf(cave) === "away") {
+      cave.override = "chilling";
+      crew.refreshStates(true);
+    }
+    if (!pilot.possess(cave)) {
+      cave.override = previousOverride;
+      crew.refreshStates(true);
+      return false;
+    }
+    cave.controlOverride = previousOverride;
+    // Respawn navigation also releases a sleeper's bed, clears motion and resets a saved underground eye.
+    if (navigate("pile", true, false) !== true) {
+      pilot.release(true);
+      return false;
+    }
     ownOogaClaimed = true;
-    pilot.possess(cave);
-    if (crew.player === cave) hud.toast(`Welcome back, ${BL.characters.displayOf(character.handle)}: this Ooga is yours`);
+    hud.toast(`Welcome back, ${BL.characters.displayOf(character.handle)}: this Ooga is yours`);
+    return true;
   };
   // GAME MODE: an island event (the ghost hunt today, others to come) clears the island for play and holds the
   // scenery still while it runs: every gorilla nobody drives goes away (clankers' `setAway`), the trees stop swaying
@@ -11128,6 +11214,7 @@
     shared.npcCaveRoofAt = npcCaveRoofAt;
     shared.npcRecoverySpot = npcRecoverySpot;
     shared.respawnSpot = pileRespawnSpot;
+    shared.initialWorkSpot = (cave, out) => pileRespawnSpot(cave, out, true) || npcRecoverySpot(cave, out);
     shared.shoulderObstacleActive = solids.isActive;
     shared.shoulderObstacle = (cave, fx, fz, reach, out) => {
       const p = cave.root.position;
@@ -11252,8 +11339,12 @@
       surfaceAt: (x, z, y) => island.supportAt(x, z, y, 1e-6, null, PLAYER_RADIUS)
     });
     const sleepNavigation = headquarters.sleepNavigation = BL.headquartersSleep.create({ island, beds: bedrolls, walkable: sleepRouteClear, surfaceRoute: shared.npcPaths.route });
-    shared.outdoorBedrolls = headquarters.outdoorBeds = BL.headquartersSleep.outdoorBeds(mempoolIsland,
-      (x, y, z) => physicalClearAt(x, y, z, 0.15, 1.5, null) && propSegmentClear(x, y, z, x, y, z, 0.15, 1.5, null));
+    // Overflow sleepers take the rainforest's fixed anchors in order, searched once a page and only as far as needed.
+    // Only scenery belongs in this cached search: a passing Ooga must not permanently change the anchor order.
+    const forest = BL.headquartersSleep.outdoor(mempoolIsland,
+      (x, y, z) => island.clearAt(x, y, z, 0.15, 1.5) && mempoolIsland.sleepClear(x, y, z), island);
+    shared.outdoorBedrolls = headquarters.outdoorBeds = forest.beds;
+    shared.moreOutdoorBedrolls = forest.more;
     const sleepRouteFrom = { x: 0, y: 0, z: 0 };
     // An Ooga stood up on its mattress plans from the floor under it: the planner joins a start to its graph along the
     // island's floor both ways, and that floor never climbs back onto a bed, so a start on one would never join.
@@ -11628,8 +11719,10 @@
     });
     crew.refreshStates(true);
     unsubscribeActivity = contributors.subscribe(() => crew.refreshStates());
-    let initialCharacter = ctx.from === null && !pilot.loginViewRestored && preloadedCharacter ? contributors.activeRoster.find((entry) => entry.name.toLowerCase() === preloadedCharacter) : null;
-    if (ctx.from === null && !pilot.loginViewRestored && (preloadedJetpackWear || preloadedEquipment) && !params.has("character") && !initialCharacter) initialCharacter = contributors.activeRoster.find((entry) => crew.stateOf(crew.cavemen.get(entry.name)) === "working") || contributors.activeRoster[0];
+    // Sign-in returns to the bare page; a routed hub place (a shared link, the Sphere's keypad) is still honoured.
+    const signedInArrival = ctx.from === null && (!ctx.place || ctx.place === "donate") && !!BL.net.ownCharacter();
+    let initialCharacter = ctx.from === null && !signedInArrival && !pilot.loginViewRestored && preloadedCharacter ? contributors.activeRoster.find((entry) => entry.name.toLowerCase() === preloadedCharacter) : null;
+    if (ctx.from === null && !signedInArrival && !pilot.loginViewRestored && (preloadedJetpackWear || preloadedEquipment) && !params.has("character") && !initialCharacter) initialCharacter = contributors.activeRoster.find((entry) => crew.stateOf(crew.cavemen.get(entry.name)) === "working") || contributors.activeRoster[0];
     const initialGorilla = initialCharacter && preloadedGorilla ? crew.cavemen.get(initialCharacter.name) : null;
     // The Ooga that went into DSB, the Lightning Factory, ₿IFRÖST or Ooga Arcade comes back out as the one played.
     const handsBack = ctx.from === "dsb" || ctx.from === "factory" || ctx.from === "bifrost" || ctx.from === "arcade" || ctx.from === "lab" || ctx.from === "timechain";
@@ -11652,7 +11745,7 @@
       if (returningCharacter && ctx.from === "factory") crew.selectWeapon(cave.weapon.selectedSlot, cave);
       if (initialCharacter) crew.configureWeapon(cave, preloadedWeapon, preloadedAmmo);
     }
-    ownOogaClaimed = !!world.pilotDetached;
+    ownOogaClaimed = !!world.pilotDetached || !!(returningCharacter && BL.net.state.me);
     world.pilotDetached = false;
     claimOwnOoga();
     unsubscribeAccount = BL.net.subscribe(onAccountChange);
@@ -11667,7 +11760,7 @@
     if (returningCharacter && sphereExit && pilot.player) timechainIsland.gate.arrive(sphereExit);
     else if (returningCharacter) navigate(ctx.from === "factory" || ctx.from === "bifrost" || ctx.from === "arcade" ? ctx.from : ctx.from === "timechain" ? "timechain" : "pile", false, false);
     else if (ctx.from === "bifrost" && !routedPlace) navigate("bifrost", false, false);
-    else if (!pilot.loginViewRestored && !crew.sleeping && !initialGorilla && (routedPlace || preloadedView || initialCharacter || initialFirstPerson)) navigate(routedPlace || preloadedView || "pile", false, false);
+    else if (!signedInArrival && !pilot.loginViewRestored && !crew.sleeping && !initialGorilla && (routedPlace || preloadedView || initialCharacter || initialFirstPerson)) navigate(routedPlace || preloadedView || "pile", false, false);
     if (donate) hud.openFeed();
     if (initialCharacter && !initialGorilla && preloadedJetpack) {
       grantJetpack(pilot.player, preloadedJetpackWear);
@@ -11933,7 +12026,7 @@
       syncMirrorDamage(true);
     }
     pilot.update(0);
-    if (ctx.from === null && !initialGorilla && !pilot.loginViewRestored) restorePositionDebug();
+    if (ctx.from === null && !signedInArrival && !initialGorilla && !pilot.loginViewRestored) restorePositionDebug();
     if (initialGorilla) {
       const entry = clankers.list.find(entry => entry.owner === initialGorilla);
       if (clankerPlay.possess(entry, true)) {

@@ -397,11 +397,10 @@
     return rechecking;
   };
 
-  // Sign-in is a full navigation through GitHub; the Worker brings the visitor back to this path.
+  // Sign-in is a full navigation through GitHub, then a fresh arrival beside the hub's pile.
   const login = () => {
     if (!state.backend) return;
-    if (BL.pilot && BL.pilot.saveLoginView) BL.pilot.saveLoginView();
-    location.assign(`/auth/login?next=${encodeURIComponent(location.pathname + location.search)}`);
+    location.assign("/auth/login?next=%2F");
   };
 
   const logout = async () => {
