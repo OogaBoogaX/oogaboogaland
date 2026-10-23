@@ -9,7 +9,7 @@
     const handle = document.getElementById("donation-handle"), message = document.getElementById("donation-message"), closeButton = document.getElementById("donation-close");
     const status = document.getElementById("donation-details-status");
     const context = canvas.getContext("2d"), donations = BL.donations, help = dialog.querySelector(".help");
-    let flow = null, fieldFlow = null, frame = 0, previous = 0, clock = 0, saveTimer = 0, simulated = false, onClose = null;
+    let flow = null, fieldFlow = null, frame = 0, previous = 0, clock = 0, saveTimer = 0, simulated = false, onClose = null, opening = 0;
     let historyOpen = false, historyAll = false, historyIndex = -1, historyPrefix = "";
     const historyMatches = [];
     // What is typed, for the kiosk to draw: both fields' text, which has the focus, its selection and the message's
@@ -228,6 +228,7 @@
     // The caret and the focus move without input: the screen follows them.
     for (const type of ["keyup", "select", "focusin", "focusout"]) fields.addEventListener(type, track);
     const close = () => {
+      opening++;
       cancelAnimationFrame(frame); frame = 0;
       if (flow) flow.stop();
       flow = null;
@@ -246,8 +247,7 @@
       flow.animate(context, clock);
       frame = requestAnimationFrame(draw);
     };
-    const open = (demo = false) => {
-      if (dialog.open) return;
+    const start = (demo = false) => {
       simulated = demo;
       // The page's own /donate address: a path where the router serves paths, a hash from disk or a named file.
       const link = BL.router && !BL.router.served ? `${location.href.split("#")[0]}#/donate` : `${location.origin}/donate`;
@@ -281,10 +281,27 @@
       flow.start();
       flow.key({ key: "Enter" });
       if (document.pointerLockElement) document.exitPointerLock();
-      dialog.showModal();
+      if (!dialog.open) dialog.showModal();
       canvas.focus({ preventScroll: true });
       previous = performance.now(); clock = 0;
       frame = requestAnimationFrame(draw);
+    };
+    const open = (demo = false) => {
+      if (dialog.open) return;
+      const loading = BL.deferred.load("kiosk");
+      if (!loading) { start(demo); return; }
+      const requested = ++opening;
+      simulated = demo;
+      help.textContent = "Opening donation screen…";
+      context.clearRect(0, 0, canvas.width, canvas.height);
+      if (document.pointerLockElement) document.exitPointerLock();
+      dialog.showModal();
+      canvas.focus({ preventScroll: true });
+      loading.then(() => {
+        if (opening === requested && dialog.open) start(demo);
+      }, () => {
+        if (opening === requested && dialog.open) help.textContent = "The donation screen could not be loaded. Close it and try again.";
+      });
     };
     const key = (event) => {
       if (event.target === message || event.target === handle || event.metaKey || event.ctrlKey || event.altKey || event.isComposing || event.key === "Tab") return;

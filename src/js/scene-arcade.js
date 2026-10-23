@@ -1980,7 +1980,7 @@
     return { visibleNodes: nodes, allNodes: all(root), tweens: tweenCount(), targets: input.targetCount, ...fx.stats(), ...(remotes ? remotes.stats() : {}) };
   };
 
-  const arcadeScene = {
+  const arcadeScene = BL.deferred.scene("arcade", {
     // Voice zone: the Arcade group, which its mouth on the island shares (`arcade`).
     voiceZone: "arcade.hall",
     id: "arcade", enter, update, overlay, onDonation, onKey, onLootCleared, renderOpts: RENDER_OPTS, stay, leave, stats, liveGeometry,
@@ -1988,7 +1988,7 @@
     get inMotion() {
       return false;
     }
-  };
+  });
   arcadeScene.prepare = () => { const loading = BL.deferred.load("arcade"); return loading ? loading.then(() => null) : null; };
   BL.scenes = BL.scenes || {};
   BL.scenes.arcade = arcadeScene;

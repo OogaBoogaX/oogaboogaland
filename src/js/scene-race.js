@@ -78,12 +78,12 @@
   // roster after this file loads.
   const cup = { active: false, round: 0, done: false, points: null };
   const nearestTorches = new Float32Array(LIGHT_CAPACITY * 2);
-  const raceScene = {
+  const raceScene = BL.deferred.scene("race", {
     id: "race", renderOpts: null, root: null, camera: null, input: null, debug: null, agent: null, agentControls: null,
     get inMotion() {
       return phase === "countdown" || phase === "racing" || fx.inMotion;
     }
-  };
+  });
 
   const buildTrack = (id) => {
     if (track) {

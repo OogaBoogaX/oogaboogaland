@@ -121,12 +121,12 @@
   const planeState = { t: 0, speed: 0, yaw: 0, pitch: 0, roll: 0, angle: 0, alt: 0, vx: 0, vy: 0, vz: 0 };
   let jumpAngle = 0;
   const jumpT = ROLL_T + CLIMB_T;
-  const dropScene = {
+  const dropScene = BL.deferred.scene("drop", {
     id: "drop", renderOpts: RENDER_OPTS, root: null, camera: null, input: null, debug: null, agent: null, agentControls: null,
     get inMotion() {
       return phase === "climb" || phase === "air" || phase === "down" || phase === "lost" || fx.inMotion;
     }
-  };
+  });
 
   // Position along the climb at time t, written into out.
   const pathAt = (t, out) => {

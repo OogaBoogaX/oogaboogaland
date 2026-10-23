@@ -1,7 +1,7 @@
 (() => {
   "use strict";
   const BL = window.BL = window.BL || {};
-  const { canvasRenderer } = BL;
+  const { iconRenderer: iconRendererMod } = BL;
   const { formatLarge } = BL.game;
   const { createNode, addChild, createCamera, boundsOf } = BL.scene;
   const STATE_LABELS = { working: "clank", chilling: "chill", sleeping: "sleep", away: "away", online: "online" };
@@ -172,7 +172,7 @@
   const ICON_PX = 48;
   const renderIcon = (item) => {
     const canvas = document.createElement("canvas");
-    const iconRenderer = canvasRenderer.createRenderer(canvas, { width: ICON_PX, height: ICON_PX, transparent: true });
+    const iconRenderer = iconRendererMod.createRenderer(canvas, { width: ICON_PX, height: ICON_PX, transparent: true });
     const iconRoot = createNode();
     const node = item.buildNode();
     const bounds = boundsOf(node.geometry);
@@ -191,7 +191,7 @@
   // Draw the carried item's actual geometry, including likenesses and skins.
   // This owns only temporary icon nodes; the character's item is never reparented.
   const renderPrimaryIcon = (canvas, geometry, tall = false) => {
-    const renderer = canvasRenderer.createRenderer(canvas, { width: ICON_PX, height: ICON_PX, transparent: true });
+    const renderer = iconRendererMod.createRenderer(canvas, { width: ICON_PX, height: ICON_PX, transparent: true });
     const root = createNode(), pivot = createNode(), item = createNode({ geometry });
     const bounds = boundsOf(geometry), fit = (tall ? 0.52 : 0.67) / Math.max(bounds.radius, 0.05);
     item.scale.x = item.scale.y = item.scale.z = fit;
@@ -217,7 +217,7 @@
     return copy;
   };
   const renderFaceIcon = (canvas, cave, gorilla = null) => {
-    const renderer = canvasRenderer.createRenderer(canvas, { width: ICON_PX, height: ICON_PX, transparent: true });
+    const renderer = iconRendererMod.createRenderer(canvas, { width: ICON_PX, height: ICON_PX, transparent: true });
     const source = gorilla ? gorilla.parts.head : cave.parts.head, geometry = gorilla ? source.geometry : cave.portraitHead;
     const root = createNode(), head = copyPortraitNode(source, source, geometry);
     const bounds = boundsOf(geometry), fit = (!gorilla && cave.traits.gasMask ? 0.68 : 0.78) / Math.max(bounds.radius, 0.05);
