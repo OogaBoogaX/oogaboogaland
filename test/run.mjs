@@ -10296,6 +10296,44 @@ const variantCacheChecks = BL => {
     JSON.stringify({ kept, rebuilt, keptNext, releasedNext }));
 };
 
+// Regression: private model Maps and historical hub reads survived scene release.
+const modelResidencyChecks = BL => {
+  const M = BL.models, map = M.scopedMap(), a = {}, b = {}, key = {};
+  M.setScope("arcade"); map.set("hub", a).set(key, b).set("__proto__", 3).set(NaN, 4);
+  M.setScope("hub"); const shared = map.get("hub") === a;
+  M.release("arcade", ["hub"]);
+  const perKey = map.size === 1 && map.get("hub") === a && !map.has(key);
+  map.clear();
+  M.setScope("writer"); map.set(key, b).set("__proto__", 3).set(NaN, 4).set("empty", undefined);
+  M.setScope("reader");
+  const values = [...map.values()], entries = [...map], receiver = {}, seen = [];
+  let bound = true;
+  map.forEach(function(value, name, self) { bound &&= this === receiver && self === map; seen.push([name, value]); }, receiver);
+  M.release("writer", ["reader"]);
+  const native = map.size === 4 && values.length === 4 && entries.length === 4 && seen.length === 4 && bound
+    && map.get(key) === b && map.get("__proto__") === 3 && map.get(NaN) === 4 && map.has("empty")
+    && map.delete("empty") && !map.delete("empty");
+  map.clear(); M.assertReleased("reader");
+  record("keyed model caches: one hub key does not pin scene keys, and iteration, object/NaN keys, undefined values, deletion and clearing keep Map semantics", shared && perKey && native && map.size === 0,
+    JSON.stringify({ shared, perKey, native, size: map.size }));
+  const mesh = () => ({ verts: [], faces: [] }), main = M.cached(mesh), data = M.cached(() => ({ limit: 8, verts: 8, faces: 6 }));
+  const photo = M.cached(() => {
+    const value = { parts: [mesh()] }; value.cycle = value;
+    Object.defineProperty(value, "verts", { enumerable: true, get() { throw new Error("Cache eviction evaluated a builder"); } });
+    return value;
+  });
+  M.setScope("hub"); const live = main(), pure = data(), old = photo();
+  M.setScope("bifrost"); photo();
+  const wrapper = { ...live, projective: true };
+  M.setScope("hub"); M.release("bifrost", ["hub"], new Set([wrapper]));
+  const kept = main() === live && data() === pure, dropped = photo() !== old;
+  M.setScope("unreleased"); const unowned = M.cached(mesh); unowned();
+  let caught = false; try { M.assertReleased("unreleased"); } catch { caught = true; }
+  M.release("unreleased", []); M.assertReleased("unreleased"); M.release("hub", []); M.setScope(null);
+  record("model residency: a fresh hub retains arrays shared by a projective wrapper and data, releases a historical photograph's cyclic payload without invoking getters, and the debug guard catches an unreleased scene", kept && dropped && caught,
+    JSON.stringify({ kept, dropped, caught }));
+};
+
 // Rule: a room id is validated at every boundary, and the three sizes are one design whose doorway, arrival, button and
 // chairs keep human size while the architecture scales and the table grows to seat 4, 8 and 12.
 const timechainRoomChecks = async () => {
@@ -16850,6 +16888,7 @@ record("character visibility source bakes: ownership wrappers share exact immuta
   const BL = globalThis.BL;
   tessCacheChecks(BL);
   variantCacheChecks(BL);
+  modelResidencyChecks(BL);
   if(ARGS.includes("water-baseline")){
     if(!process.env.DSB_BASELINE)throw Error("Provide the unmodified checkpoint source directory");
     for(const name of ["dsb-geography.js","dsb-olympus.js","dsb-water.js"])new Function(readFileSync(join(process.env.DSB_BASELINE,name),"utf8"))();

@@ -345,8 +345,8 @@
   // frees their GPU side. A hand-rolled cache joins with `track(drop)` and calls `use()` on every read.
   const scopedCaches = new Set();
   let cacheScope = null;
-  const track = (drop) => {
-    const entry = { scenes: new Set(), last: undefined, drop, use: () => {
+  const track = (drop, peek = null) => {
+    const entry = { scenes: new Set(), last: undefined, drop, peek, use: () => {
       if (entry.last === cacheScope) return;
       entry.last = cacheScope;
       if (cacheScope !== null) entry.scenes.add(cacheScope);
@@ -368,15 +368,91 @@
     try { return build(arg); }
     finally { cacheScope = previous; }
   };
-  const release = (id, keep) => {
+  // Each keyed payload has its own owners, as variants do. Iteration counts as a read too; clearing a key removes
+  // its tracking entry, so the registry does not grow with one-off sign labels, room themes or colours.
+  class ScopedMap extends Map {
+    #owners = new Map();
+    constructor(values) {
+      super();
+      if (values) for (const [key, value] of values) this.set(key, value);
+    }
+    get(key) { this.#owners.get(key)?.use(); return super.get(key); }
+    has(key) { this.#owners.get(key)?.use(); return super.has(key); }
+    set(key, value) {
+      let owner = this.#owners.get(key);
+      if (!owner) {
+        owner = track(() => { Map.prototype.delete.call(this, key); this.#owners.delete(key); }, () => Map.prototype.get.call(this, key));
+        this.#owners.set(key, owner);
+      }
+      owner.use();
+      return super.set(key, value);
+    }
+    delete(key) {
+      const owner = this.#owners.get(key);
+      if (!owner) return false;
+      owner.clear();
+      return true;
+    }
+    clear() { for (const owner of this.#owners.values()) owner.clear(); }
+    *entries() { for (const entry of super.entries()) { this.#owners.get(entry[0]).use(); yield entry; } }
+    *values() { for (const key of super.keys()) { this.#owners.get(key).use(); yield super.get(key); } }
+    [Symbol.iterator]() { return this.entries(); }
+    forEach(fn, receiver) { super.forEach((value, key) => { this.#owners.get(key).use(); fn.call(receiver, value, key, this); }); }
+  }
+  const scopedMap = (values) => new ScopedMap(values);
+  // A past hub read must not pin meshes absent from the newly built hub. Inspect payload containers, never their
+  // vertex/face arrays or lazy accessors; the scratch releases every reference even when a payload is cyclic.
+  const cacheProbe = [], cacheSeen = new Set();
+  const liveCache = (value, live, arrays) => {
+    let meshes = false;
+    cacheProbe.push(value);
+    try {
+      while (cacheProbe.length) {
+        const part = cacheProbe.pop();
+        if (!part || typeof part !== "object" || cacheSeen.has(part)) continue;
+        cacheSeen.add(part);
+        const verts = Object.getOwnPropertyDescriptor(part, "verts"), faces = Object.getOwnPropertyDescriptor(part, "faces");
+        if ((Array.isArray(verts?.value) || ArrayBuffer.isView(verts?.value)) && Array.isArray(faces?.value)) {
+          meshes = true;
+          if (live.has(part) || arrays.has(verts.value) || arrays.has(faces.value)) return 1;
+        } else if (part instanceof Map) {
+          for (const child of Map.prototype.values.call(part)) cacheProbe.push(child);
+        } else if (Array.isArray(part)) {
+          for (let i = 0; i < part.length; i++) if (part[i] && typeof part[i] === "object") cacheProbe.push(part[i]);
+        } else if (!ArrayBuffer.isView(part)) {
+          for (const key of Object.keys(part)) {
+            const child = Object.getOwnPropertyDescriptor(part, key).value;
+            if (child && typeof child === "object") cacheProbe.push(child);
+          }
+        }
+      }
+      return meshes ? 2 : 0;
+    } finally { cacheProbe.length = 0; cacheSeen.clear(); }
+  };
+  const release = (id, keep, live = null) => {
+    const returned = live && cacheScope === "hub", arrays = returned ? new Set() : null;
+    // Projective windows wrap a mesh without copying its arrays. Their source is live too, even when only the wrapper
+    // is a node's geometry; retain that cache rather than rebuilding a second copy beside the live window.
+    if (returned) for (const mesh of live) {
+      if (!mesh || typeof mesh !== "object") continue;
+      const verts = Object.getOwnPropertyDescriptor(mesh, "verts"), faces = Object.getOwnPropertyDescriptor(mesh, "faces");
+      if (verts?.value) arrays.add(verts.value);
+      if (faces?.value) arrays.add(faces.value);
+    }
     for (const entry of scopedCaches) {
-      if (!entry.scenes.has(id) || keep.some((k) => entry.scenes.has(k))) continue;
+      if (!entry.scenes.has(id) && !(returned && entry.scenes.has("hub"))) continue;
+      if (keep.some(k => entry.scenes.has(k))) {
+        if (!returned || !entry.peek || liveCache(entry.peek(), live, arrays) !== 2) continue;
+      }
       entry.clear();
     }
   };
+  const assertReleased = (id) => {
+    for (const entry of scopedCaches) if (entry.scenes.size === 1 && entry.scenes.has(id)) throw new Error(`${id}: scene-only model cache survived release`);
+  };
   const cached = (build) => {
     let value = null;
-    const entry = track(() => { value = null; });
+    const entry = track(() => { value = null; }, () => value);
     const read = () => { entry.use(); return value || (value = build()); };
     // Owners with a shorter lifetime than their scene scope can release the same tracked entry explicitly.
     read.clear = entry.clear;
@@ -386,7 +462,7 @@
     const cache = [], entries = [];
     return (i = 0) => {
       // One hub cabinet must not make every cabinet built by the Arcade a hub resident.
-      const entry = entries[i] || (entries[i] = track(() => { cache[i] = null; }));
+      const entry = entries[i] || (entries[i] = track(() => { cache[i] = null; }, () => cache[i]));
       entry.use();
       return cache[i] || (cache[i] = build(i));
     };
@@ -498,7 +574,7 @@
     geo.pileFaceSize = faceSize;
     return geo;
   };
-  const particleCache = new Map();
+  const particleCache = scopedMap();
   const particleGeometry = (color, size = 0.07, emissive = 1) => {
     const key = `${color}/${size}/${emissive}`;
     let geo = particleCache.get(key);
@@ -967,7 +1043,7 @@
   };
   // Traits hash from the handle, so one handle always builds the same voxels.
   // Callers get fresh nodes over shared geometry: one build per contributor, GPU records survive a scene swap.
-  const cavemen = new Map();
+  const cavemen = scopedMap();
   const cloneNode = (node, copies) => {
     const copy = createNode({ ...node, position: { ...node.position }, rotation: { ...node.rotation }, scale: { ...node.scale }, parent: null, children: [], world: new Float32Array(node.world), local: new Float32Array(node.local) });
     if (node.quaternion) copy.quaternion = new Float32Array(node.quaternion);
@@ -1322,7 +1398,7 @@
     })
   ];
   const TIER_COLORS = { common: "#9aa0a6", rare: "#6f9fca", epic: "#b16fd6", legendary: "#d8892b" };
-  const crateCache = new Map();
+  const crateCache = scopedMap();
   const crate = (tier) => {
     let geos = crateCache.get(tier);
     if (!geos) {
@@ -1343,7 +1419,7 @@
     addChild(node, createNode({ geometry: geos.body }), lid);
     return { node, lid };
   };
-  const swagCache = new Map();
+  const swagCache = scopedMap();
   const swagGeo = (id, build) => {
     let geo = swagCache.get(id);
     if (!geo) {
@@ -1622,5 +1698,5 @@
     }
     glass.push(box({ w: W, h: tall, d: W, color: tint, emissive: 1, offset: { x, y: mid, z } }));
   };
-  BL.models = { beam, forwardLathe, turn, shaded, torus, along, chain, railParts, columnParts, deckGrid, deckPosts, deckParts, stairParts, lanternParts, LANTERN_GLASS, geometry, pushVert, face, cutCylinder, voxCoords, box, bevelBox, panel, lathe, glassVessel, attachGlassShell, tube, ring, polyline, merge, forward, moved, turnedX, turnedY, turnedZ, prism, cached, variants, track, setScope, withScope, release, noShadow, makeVox, voxelGeometry, voxelFaces, banana, bananaGeometry, bananaTileGeometry, bananaPileCoreGeometry, bananaPileRadiusScale, bananaPileHeightOffset, BANANA_AMMO_SCALE, BANANA_PILE_PROFILE, particleGeometry, spareMagazine, caveman, CLUB_PALETTE, GOLD_CLUB_PALETTE, labRoom, buildableGeos, crate, die, dieRotationFor, SWAG, TIER_COLORS };
+  BL.models = { beam, forwardLathe, turn, shaded, torus, along, chain, railParts, columnParts, deckGrid, deckPosts, deckParts, stairParts, lanternParts, LANTERN_GLASS, geometry, pushVert, face, cutCylinder, voxCoords, box, bevelBox, panel, lathe, glassVessel, attachGlassShell, tube, ring, polyline, merge, forward, moved, turnedX, turnedY, turnedZ, prism, cached, variants, scopedMap, track, setScope, withScope, release, assertReleased, noShadow, makeVox, voxelGeometry, voxelFaces, banana, bananaGeometry, bananaTileGeometry, bananaPileCoreGeometry, bananaPileRadiusScale, bananaPileHeightOffset, BANANA_AMMO_SCALE, BANANA_PILE_PROFILE, particleGeometry, spareMagazine, caveman, CLUB_PALETTE, GOLD_CLUB_PALETTE, labRoom, buildableGeos, crate, die, dieRotationFor, SWAG, TIER_COLORS };
 })();

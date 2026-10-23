@@ -1,8 +1,8 @@
 // Factory props extend the shared dressing kit, with one immutable mesh per kind.
 (() => {
   "use strict";
-  const BL=window.BL,M=BL.models,cache=new Map(),portraits=new Map();
-  const signs=new Map(),extra={"#":["101","111","101","111","101"],"$":["011","110","011","110","010"],"_":["000","000","000","000","111"]};
+  const BL=window.BL,M=BL.models,cache=BL.models.scopedMap(),portraits=BL.models.scopedMap();
+  const signs=BL.models.scopedMap(),extra={"#":["101","111","101","111","101"],"$":["011","110","011","110","010"],"_":["000","000","000","000","111"]};
   BL.memeFactorySign=(parent,text,x,y,z,size,color)=>{
     const key=text+color;let geometry=signs.get(key);
     if(!geometry){geometry={verts:[],faces:[],lines:[],castShadow:false};const width=(text.length*4-1)*.16,ink=BL.math.hexToRgb(color);

@@ -1,6 +1,8 @@
 // Forced-GC floors and native DOM/listener counts on the staged hosted build, one focused Chrome at a time.
 // Run build:site first, then node scripts/profile-residency.mjs <label> <scene[:place],...> [--rest] [--snapshots].
 // --rest exercises the real gorilla rest-site query before leaving the hub; it installs no retaining hooks.
+// --no-gc --tasks measures transition tasks without profiler/freeze overhead; its heap readings are not floors.
+// PROFILE_QUERY adds URL parameters for A/B flags; --reuse records whether the original hub root comes back.
 // Heap backing storage is reported separately from usedSize. Snapshots stay under untracked/performance/.
 import { createServer } from "node:http";
 import { readFileSync, writeFileSync, mkdirSync, openSync, writeSync, closeSync } from "node:fs";
@@ -10,6 +12,7 @@ import { launch, dispose } from "../test/browser.mjs";
 import { createHash } from "node:crypto";
 const laps = Number(process.env.HUB_LAPS) || 0;
 const root = fileURLToPath(new URL("../", import.meta.url)), label = process.argv[2] || "baseline", sequence = laps ? Array.from({ length: laps }, () => ["factory", "hub"]).flat() : (process.argv[3] || "factory").split(","), snapshots = process.argv.includes("--snapshots"), rest = process.argv.includes("--rest");
+const forcedGC = !process.argv.includes("--no-gc");
 const out = join(root, "untracked/performance"); mkdirSync(out, { recursive: true });
 const types = { ".html": "text/html", ".js": "text/javascript", ".css": "text/css", ".jpg": "image/jpeg", ".png": "image/png", ".mp3": "audio/mpeg" };
 const server = createServer((req, res) => {
@@ -21,14 +24,14 @@ await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
 const base = `http://127.0.0.1:${server.address().port}`, rows = [], travels = [];
 let b, completed = false, failure = null, environment = null;
 const measure = async (tag) => {
-  await b.focus(false); await b.send("Page.setWebLifecycleState", { state: "frozen" });
+  if (forcedGC) { await b.focus(false); await b.send("Page.setWebLifecycleState", { state: "frozen" }); }
   try {
-    for (let i = 0; i < 3; i++) await b.send("HeapProfiler.collectGarbage");
+    if (forcedGC) for (let i = 0; i < 3; i++) await b.send("HeapProfiler.collectGarbage");
     const usage = (await b.send("Runtime.getHeapUsage")).result, dom = (await b.send("Memory.getDOMCounters")).result;
     const scene = await b.evaluate(`(() => {
       const B = __ooga, tess = B.scene === "factory" ? B.factory.greeter : null, meshes = new Set();
       if (tess) tess.liveGeometry(meshes);
-      return { scene: B.scene, quality: B.renderer.quality, gl: B.renderer.stats, frames: B.renderedFrames, timing: B.timing,
+      return { scene: B.scene, hubRootReused: window.__residencyHub && B.scene === "hub" ? window.__residencyHub.deref() === BL.scenes.hub.root : null, quality: B.renderer.quality, gl: B.renderer.stats, frames: B.renderedFrames, timing: B.timing,
         tess: tess ? { meshes: meshes.size, faces: [...meshes].reduce((sum, mesh) => sum + mesh.faces.length, 0) } : null,
         arcade: window.__residencyCabinets ? { cabinets: window.__residencyCabinets.filter(ref => !!ref.deref()).length,
           frameSets: window.__residencyFrames.filter(ref => !!ref.deref()).length } : null,
@@ -69,30 +72,33 @@ const measure = async (tag) => {
     }
     const row = { tag, ...scene, usage, dom, detached, listeners };
     rows.push(row); console.log(JSON.stringify({ ...row, listeners: listeners ? listeners.length : null, detached: detached ? { ...detached, rootNames: undefined } : null }));
-    if (snapshots && tag !== "boot" && (!process.env.SNAPSHOT_TAG || process.env.SNAPSHOT_TAG === tag)) {
+    if (snapshots && (!process.env.SNAPSHOT_TAG || process.env.SNAPSHOT_TAG.split(",").includes(tag))) {
       const path = join(out, `${label}-${tag}.heapsnapshot`), fd = openSync(path, "w");
       b.on("HeapProfiler.addHeapSnapshotChunk", ({ chunk }) => writeSync(fd, chunk));
       try { await b.send("HeapProfiler.takeHeapSnapshot", { reportProgress: false }); }
       finally { b.on("HeapProfiler.addHeapSnapshotChunk", null); closeSync(fd); }
       console.log(JSON.stringify({ snapshot: path }));
     }
-  } finally { await b.send("Page.setWebLifecycleState", { state: "active" }); await b.focus(true); await b.send("Page.bringToFront"); }
+  } finally { if (forcedGC) { await b.send("Page.setWebLifecycleState", { state: "active" }); await b.focus(true); await b.send("Page.bringToFront"); } }
 };
 try {
   b = await launch({ w: 1440, h: 900, perf: true });
-  await b.focus(true); await b.send("HeapProfiler.enable");
-  await b.open(`${base}/?debug=1&nosim=1&net=0&chain=0&hour=12&day=80&bananas=1000${rest ? "&gorillamove=1" : ""}`);
+  await b.focus(true); if (forcedGC) await b.send("HeapProfiler.enable");
+  const url = new URL(`${base}/?debug=1&nosim=1&net=0&chain=0&hour=12&day=80&bananas=1000${rest ? "&gorillamove=1" : ""}`);
+  for (const [key, value] of new URLSearchParams(process.env.PROFILE_QUERY || "")) url.searchParams.set(key, value);
+  await b.open(url.href);
   const ready = await b.evaluate(`new Promise((resolve) => { const start = performance.now(); const tick = () => { if (window.__ooga?.renderedFrames >= 5 && !document.getElementById("curtain")) resolve(true); else if(performance.now() - start > 30000) resolve(false); else setTimeout(tick, 50); }; tick(); })`);
   if (!ready) throw Error("Hub did not become ready: " + b.logs.join(" | "));
   if (process.argv.includes("--tasks")) await b.evaluate(`(() => {
-    window.__residencyTasks = { max: 0, count: 0 };
-    new PerformanceObserver(list => { const s = window.__residencyTasks; for (const e of list.getEntries()) { s.max = Math.max(s.max, e.duration); s.count++; } }).observe({ type: "longtask" });
+    window.__residencyTasks = { max: 0, count: 0, start: performance.now() };
+    new PerformanceObserver(list => { const s = window.__residencyTasks; for (const e of list.getEntries()) if (e.startTime >= s.start) { s.max = Math.max(s.max, e.duration); s.count++; } }).observe({ type: "longtask" });
   })()`);
   environment = await b.evaluate(`(() => { const gl = document.getElementById("scene").getContext("webgl2"), ext = gl && gl.getExtension("WEBGL_debug_renderer_info"); return {
     agent: navigator.userAgent, memory: navigator.deviceMemory ?? null, dpr: devicePixelRatio,
     gpu: ext ? gl.getParameter(ext.UNMASKED_RENDERER_WEBGL) : null }; })()`);
   await b.evaluate(`__ooga.renderer.setQuality("high"); __ooga.pilot.goPreset("pile")`);
   await b.sleep(3000);
+  if (process.argv.includes("--reuse")) await b.evaluate(`window.__residencyHub = new WeakRef(BL.scenes.hub.root)`);
   if (process.argv.includes("--dom")) await b.evaluate(`(() => {
     const B = __ooga;
     for (let i = 0; i < 3; i++) B.game.recordDonation({ id: "residency-donor-" + i, sats: 1000 + i, handle: "donor-" + i, message: "", at: Date.now() });
@@ -124,7 +130,7 @@ try {
   }
   for (let i = 0; i < sequence.length; i++) {
     const [id, place] = sequence[i].split(":");
-    if (process.argv.includes("--tasks")) await b.evaluate(`Object.assign(window.__residencyTasks, { max: 0, count: 0 })`);
+    if (process.argv.includes("--tasks")) await b.evaluate(`Object.assign(window.__residencyTasks, { max: 0, count: 0, start: performance.now() })`);
     const result = await b.evaluate(`new Promise((resolve, reject) => { const start = performance.now(); if(!__ooga.go(${JSON.stringify(id)}, ${JSON.stringify(place || null)})) { reject(Error("Transition refused")); return; } const tick = () => { if (__ooga.scene === ${JSON.stringify(id)} && !__ooga.transitioning) resolve(performance.now() - start); else if(performance.now() - start > 90000) reject(Error("Transition timed out: " + __ooga.scene + " / " + __ooga.transitioning + " / frames " + __ooga.renderedFrames)); else requestAnimationFrame(tick); }; requestAnimationFrame(tick); })`);
     const travel = { scene: id, ms: result }; travels.push(travel); console.log(JSON.stringify({ travel: id, ms: result }));
     await b.sleep(2500);
@@ -157,7 +163,7 @@ try {
   }
   completed = true;
 } catch (error) { failure = error.message; throw error; } finally {
-  const evidence = { label, completed, failure, environment, at: new Date().toISOString(), pageSha256: createHash("sha256").update(readFileSync(join(root, "_site/index.html"))).digest("hex"), rows, travels, logs: b?.logs || [] };
+  const evidence = { label, completed, failure, environment, forcedGC, query: process.env.PROFILE_QUERY || "", at: new Date().toISOString(), pageSha256: createHash("sha256").update(readFileSync(join(root, "_site/index.html"))).digest("hex"), rows, travels, logs: b?.logs || [] };
   writeFileSync(join(out, `${label}.json`), JSON.stringify(evidence, null, 2) + "\n");
   console.log(JSON.stringify({ logs: evidence.logs }));
   if (b) b.close(); await dispose(); await new Promise(resolve => server.close(resolve));

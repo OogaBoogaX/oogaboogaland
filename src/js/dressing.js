@@ -1083,7 +1083,9 @@
   // from its foot), the crown's (centred at `crownY`), two sets of arcs to flicker between, and the gauge's needle,
   // pointing up from `pivot`, in kit cells from the gauge's origin. The band and crown are centred on their middles.
   let coilParts = null;
+  const coilScope = BL.models.track(() => { coilParts = null; }, () => coilParts);
   const coilRig = () => {
+    coilScope.use();
     if (coilParts) return coilParts;
     const glow = (v) => set().put("coilCharge", 0, 0, 0, 0, v).build().glow;
     const bands = [];
@@ -1098,7 +1100,9 @@
   // Dust in lamplight: a fixed field of glowing motes that drifts and wraps round a moving centre (the view's
   // target), so there is always air to see near the camera and no mote is ever created or dropped. One draw.
   let moteGeometry = null;
+  const moteScope = BL.models.track(() => { moteGeometry = null; }, () => moteGeometry);
   const motes = ({ count = 220, span = 14, low = 0.4, high = 5 } = {}) => {
+    moteScope.use();
     if (!moteGeometry) moteGeometry = noShadow(BL.models.box({ w: 0.035, h: 0.035, d: 0.035, color: "#ffe2a8", emissive: 0.8 }));
     const rand = mulberry32(911), data = new Float32Array(count * 20);
     const bx = new Float32Array(count), by = new Float32Array(count), bz = new Float32Array(count), ph = new Float32Array(count);
@@ -1308,8 +1312,10 @@
     data[o + 8] = s * sz; data[o + 9] = 0; data[o + 10] = c * sz; data[o + 11] = 0;
     data[o + 12] = x; data[o + 13] = y; data[o + 14] = z; data[o + 15] = 1;
   };
-  let gullGeometry = null, boatGeometry = [];
+  let gullGeometry = null;
+  const gullScope = BL.models.track(() => { gullGeometry = null; }, () => gullGeometry), boatGeometry = BL.models.scopedMap();
   const flock = ({ count = 18, cx = 0, cz = 0, radius = [26, 60], height = [14, 34], seed = 5, scale = 1.6 } = {}) => {
+    gullScope.use();
     if (!gullGeometry) gullGeometry = noShadow(set().put("gull", 0, 0, 0).build().solid);
     const node = instanceField(gullGeometry, count), rand = mulberry32(seed), data = node.instanceData;
     const r = new Float32Array(count), h = new Float32Array(count), w = new Float32Array(count), p = new Float32Array(count), f = new Float32Array(count);
@@ -1332,13 +1338,13 @@
   const fleet = ({ sea = -70, spots = [], seed = 9 } = {}) => {
     const nodes = [], rand = mulberry32(seed);
     // Each variant bakes to a logs-and-mast mesh and its sail: two shared geometries (no glow layer).
-    for (let v = 0; v < 3; v++) if (!boatGeometry[v]) {
+    for (let v = 0; v < 3; v++) if (!boatGeometry.has(v)) {
       const baked = set().put("boat", 0, 0, 0, 0, v).build();
-      boatGeometry[v] = [baked.solid, baked.hang, baked.glow].filter(Boolean).map(noShadow);
+      boatGeometry.set(v, [baked.solid, baked.hang, baked.glow].filter(Boolean).map(noShadow));
     }
     const boats = spots.map(([r, a, s], i) => {
       const node = BL.scene.createNode({ scale: { x: s, y: s * 0.85, z: s }, sightHidden: true });
-      for (const geometry of boatGeometry[i % 3]) BL.scene.addChild(node, BL.scene.createNode({ geometry, sightHidden: true }));
+      for (const geometry of boatGeometry.get(i % 3)) BL.scene.addChild(node, BL.scene.createNode({ geometry, sightHidden: true }));
       const seated = (i & 1) === 0;
       const passenger = BL.models.caveman(BL.contributors.traitsFor(`boat-ooga-${i % 2}`));
       const figure = passenger.root, size = 1 / s, deck = 3 * U;
@@ -1374,7 +1380,7 @@
     return { nodes, update };
   };
   // Shared static Studio furnishings: one merged mesh per kind, instanced by the renderer.
-  const studioCache=new Map();
+  const studioCache=BL.models.scopedMap();
   const studio=kind=>{
     if(studioCache.has(kind))return studioCache.get(kind);
     const bits=[],b=(c,x,y,z,w,h,d,e=0)=>bits.push(BL.models.box({w,h,d,color:c,emissive:e,offset:{x,y,z}}));

@@ -54,7 +54,9 @@
   // its roof and across its width with MARGIN into the stone. Made once for the page, and again only if the portal
   // stands somewhere else, so every visit draws the same geometries and one clip slab.
   let clipped = null;
+  const clippedScope = BL.models.track(() => { clipped = null; }, () => clipped);
   const clippedFor = (portal) => {
+    clippedScope.use();
     const { x, z, ry, floorY, room } = portal;
     if (clipped && clipped.x === x && clipped.z === z && clipped.ry === ry && clipped.floorY === floorY && clipped.w === room.w && clipped.h === room.h) return clipped;
     const stand = BM.gateWindow(), sr = Math.sin(ry), cr = Math.cos(ry), half = room.w / 2 + MARGIN;

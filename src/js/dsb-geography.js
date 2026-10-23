@@ -48,7 +48,7 @@
   // Every lot's centre and half-size, for the stone courts the terrain paints around them.
   const PLOTS=[...properties,...hillside].map(q=>[q[1],q[2],Math.max(q[3],q[4])/2]).concat([[-61,27,5.5],[-48,25,3.5],[-35,26,4],[-68,38,3]]);
   let cached;
-  const scoped = M.track(() => { cached = undefined; });
+  const scoped = M.track(() => { cached = undefined; }, () => cached);
   const build = () => {
     scoped.use();
     if(!cached) {

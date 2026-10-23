@@ -285,8 +285,12 @@
     if (DEBUG && tweenCount()) throw new Error(`${tweenCount()} tweens survived clearTweens`);
     enter(next, place);
     // The builder caches only the scene just left used go too; the island's stay, since every route passes through it.
-    if (leaving.id !== "hub") window.BL.models.release(leaving.id, ["hub", next.id]);
-    renderer.releaseUnused(liveGeometry());
+    const retained = liveGeometry();
+    if (leaving.id !== "hub") {
+      models.release(leaving.id, ["hub", next.id], retained);
+      if (DEBUG && leaving.id !== next.id) models.assertReleased(leaving.id);
+    }
+    renderer.releaseUnused(retained);
     if (DEBUG && renderer.stats.records > live.size) throw new Error(`${next.id}: ${renderer.stats.records} GPU records for ${live.size} live geometries`);
   };
   // Where a settled transition lands: its own scene, or where its preparation redirected it.
