@@ -1076,6 +1076,21 @@
     markCharacter(root);
     headOpen.characterPart = headClosed.characterPart = portraitHead.characterPart = true;
     if (tint) for (const twin of tint.keys()) twin.characterPart = true;
+    // Only this builder's completed voxel bakes are immutable here. Dress hooks and both colourways finish
+    // first; separately authored weapons, equipment and other geometry stay in their original representation.
+    if (BL.compactGeometry?.enabled) {
+      const live = new Set([headOpen, headClosed, portraitHead]);
+      const visit = (node) => {
+        if (node.geometry) live.add(node.geometry);
+        for (const child of node.children) visit(child);
+      };
+      visit(root);
+      for (const bake of bakes) if (live.has(bake.geo)) {
+        BL.compactGeometry.pack(bake.geo, { immutable: true, renderOnly: true, precision: 64 });
+        const twin = tint?.get(bake.geo);
+        if (twin) BL.compactGeometry.pack(twin, { immutable: true, renderOnly: true, precision: 64 });
+      }
+    }
     return { root, parts, traits, headOffset: 1.1 * h, headOpen, headClosed, portraitHead, skins, clubRest, clubCarry, tint, gunHeadBounds: BL.scene.boundsOf(headOpen) };
   };
   // Traits hash from the handle, so one handle always builds the same voxels.
@@ -1757,6 +1772,11 @@
     far.imageSurface = { canvas: null, version: 1, atlas: true, atlasMin: lo, atlasMax: hi, source: medium,
       rect: [lo[0], lo[1], hi[0] - lo[0], hi[1] - lo[1]], background: [0, 0, 0] };
     high.foliageLods = { owner: high, medium, far };
+    if (BL.compactGeometry?.enabled) {
+      // These final render meshes are immutable; the separate walking shell stays in its original form.
+      // Keep authored double coordinates exactly so averaged normals and outline planes stay identical.
+      for (const geometry of [high, medium, far]) BL.compactGeometry.pack(geometry, { immutable: true, renderOnly: true, precision: 64 });
+    }
     return high;
   };
   const paintFoliageAtlas = (surface) => {
@@ -1764,18 +1784,20 @@
     const tile = 128, canvas = document.createElement("canvas"), geo = surface.source;
     canvas.width = tile * 3; canvas.height = tile;
     const ctx = canvas.getContext("2d"), order = new Uint32Array(geo.faces.length), depths = new Float32Array(geo.faces.length);
+    const cursor = BL.compactGeometry?.storageOf(geo) ? BL.compactGeometry.createCursor(geo) : null;
+    const faceAt = index => cursor ? BL.compactGeometry.readFace(geo, index, cursor) : geo.faces[index];
     const lo = surface.atlasMin, hi = surface.atlasMax, axes = [[0, 1, 2], [2, 1, 0], [0, 2, 1]];
     for (let view = 0; view < 3; view++) {
       const [u, v, depth] = axes[view], sx = (tile - 2) / Math.max(1e-6, hi[u] - lo[u]), sy = (tile - 2) / Math.max(1e-6, hi[v] - lo[v]);
       for (let i = 0; i < geo.faces.length; i++) {
-        const ids = geo.faces[i].i;
-        let sum = 0; for (const index of ids) sum += geo.verts[index * 3 + depth];
+        const ids = faceAt(i).i;
+        let sum = 0; for (let k = 0; k < ids.length; k++) sum += geo.verts[ids[k] * 3 + depth];
         order[i] = i; depths[i] = sum / ids.length;
       }
       order.sort((a, b) => depths[a] - depths[b]);
       ctx.save(); ctx.beginPath(); ctx.rect(view * tile + 1, 1, tile - 2, tile - 2); ctx.clip();
-      for (const index of order) {
-        const face = geo.faces[index], color = face.color;
+      for (let n = 0; n < order.length; n++) {
+        const face = faceAt(order[n]), color = face.color;
         ctx.beginPath();
         for (let i = 0; i < face.i.length; i++) {
           const at = face.i[i] * 3, x = view * tile + 1 + (geo.verts[at + u] - lo[u]) * sx, y = 1 + (hi[v] - geo.verts[at + v]) * sy;

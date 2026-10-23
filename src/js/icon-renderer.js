@@ -5,6 +5,14 @@
   const BL = window.BL;
   const { mat4, lerp, sortByKey, sortScratch } = BL.math;
   const { updateWorld, traverseVisible, hiddenFromCamera, hiddenFromCutaway } = BL.scene;
+  // Compact character bakes are read through one synchronous cursor each, never their legacy face views.
+  const compactCursors = new WeakMap();
+  const readFace = (geometry, index) => {
+    if (!geometry.compactGeometry) return geometry.faces[index];
+    let cursor = compactCursors.get(geometry);
+    if (!cursor) { cursor = BL.compactGeometry.createCursor(geometry); compactCursors.set(geometry, cursor); }
+    return BL.compactGeometry.readFace(geometry, index, cursor);
+  };
   const createRenderer = (canvas, { width, height }) => {
     const ctx = canvas.getContext("2d"), dpr = Math.min(window.devicePixelRatio || 1, 2);
     canvas.width = Math.max(1, Math.round(width * dpr));
@@ -70,8 +78,8 @@
       const { verts, faces, lines } = node.geometry, w = node.world, f = lastF;
       const ember = Math.min(1, node.ember || 0), scorch = 1 - Math.min(1, node.scorch || 0) * 0.88;
       const materialGlow = ember > 0 ? 0 : node.glow;
-      if (faces) for (const face of faces) {
-        const idx = face.i, count = idx.length;
+      if (faces) for (let index = 0; index < faces.length; index++) {
+        const face = readFace(node.geometry, index), idx = face.i, count = idx.length;
         let nx = 0, ny = 0, nz = 0;
         for (let k = 0; k < count; k++) {
           const b = idx[k] * 3;
