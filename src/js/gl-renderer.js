@@ -25,8 +25,8 @@
   const POINT_LIGHT_CAPACITY = 32;
   const QUALITY = {
     high: { dpr: 1.5, msaa: 2, shadow: 2048, bloom: true, shafts: true, mirror: 1024, mirrorCadence: 1, prepass: true, environment: 128, environmentCadence: 1, lights: 32 },
-    medium: { dpr: 1.25, msaa: 2, shadow: 1024, bloom: true, shafts: true, mirror: 768, mirrorCadence: 2, prepass: true, environment: 96, environmentCadence: 2, lights: 20 },
-    low: { dpr: 1, msaa: 0, shadow: 512, bloom: false, shafts: false, mirror: 512, mirrorCadence: 3, prepass: true, environment: 64, environmentCadence: 4, lights: 10 }
+    medium: { dpr: 1.25, msaa: 2, shadow: 1024, bloom: true, shafts: true, mirror: 768, mirrorCadence: 2, prepass: false, environment: 96, environmentCadence: 2, lights: 20 },
+    low: { dpr: 1, msaa: 0, shadow: 512, bloom: false, shafts: false, mirror: 512, mirrorCadence: 3, prepass: false, environment: 64, environmentCadence: 4, lights: 10 }
   };
   const INSTANCE_FLOATS = 20;
   const NO_OBJECT_CLIP = new Float32Array([0, 0, 0, -1]);
@@ -1552,6 +1552,8 @@ void main() {
     const real = unmasked();
     return real != null && APPLE_SILICON.test(String(real));
   };
+  const depthPrepassEnabled = (settings, tileBased, override, rigMode) => !rigMode
+    && (override === "1" || override !== "0" && settings.prepass && !tileBased);
   const isSupported = () => {
     try {
       const probe = document.createElement("canvas");
@@ -1569,6 +1571,8 @@ void main() {
     const DRAW_BOTH = [gl.COLOR_ATTACHMENT0, gl.COLOR_ATTACHMENT1];
     let settings = QUALITY[quality] || QUALITY.high;
     let qualityName = QUALITY[quality] ? quality : "high";
+    // The explicit A/B override applies on every GPU and tier; rigs retain their own programs.
+    const prepassOverride = new URLSearchParams(location.search).get("prepass");
     // Firefox names the GPU in RENDERER (and warns about the debug extension); Chrome and Safari mask it there and
     // answer through the extension.
     const tileBased = tileBasedGpu(gl.getParameter(gl.RENDERER), () => {
@@ -3813,7 +3817,7 @@ void main() {
       // Depth first, then the opaque pass shades under EQUAL with depth writes off: the same vertex shader, invariant,
       // so the depths match, and with no write a shader that may discard keeps the early depth test (written, the
       // driver tests late and shades every hidden fragment). Each pixel is shaded once. Rigs keep their own programs.
-      const prepass = settings.prepass && !rigMode && !tileBased;
+      const prepass = depthPrepassEnabled(settings, tileBased, prepassOverride, rigMode);
       if (prepass) {
         const dp = pg.depth;
         gl.useProgram(dp.prog);

@@ -16181,8 +16181,15 @@ const tileGpuChecks = async () => {
     ["WebKit WebGL", unmasked("Apple GPU"), false],
     ["WebKit WebGL", unmasked(null), false]
   ].map(([renderer, info, expected]) => ({ renderer, expected, got: tileBasedGpu(renderer, info) }));
-  record("tile-based GPU: only a named Apple silicon GPU skips the depth prepass; Intel, AMD, Safari's generic \"Apple GPU\" and a missing debug extension keep it",
-    rows.every(row => row.got === row.expected) && asked === 7, JSON.stringify(rows.filter(row => row.got !== row.expected)));
+  const enabled = new Function(`${helper}; return depthPrepassEnabled;`)();
+  const policy = [
+    [false, false, null, false, false], [false, true, null, false, false],
+    [true, false, null, false, true], [true, true, null, false, false],
+    [true, false, "0", false, false], [false, true, "1", false, true],
+    [true, false, "1", true, false]
+  ].map(([prepass, tile, override, rig, expected]) => ({ prepass, tile, override, rig, expected, got: enabled({ prepass }, tile, override, rig) }));
+  record("tile-based GPU: named Apple silicon skips high prepass, lower tiers skip it on every GPU, explicit overrides apply and rigs retain their own path",
+    rows.every(row => row.got === row.expected) && asked === 7 && policy.every(row => row.got === row.expected), JSON.stringify({ classification: rows.filter(row => row.got !== row.expected), policy }));
 };
 const raceRigChecks = async () => {
   const context = { window: {}, location: { search: "?debug=1&rain=0" }, URLSearchParams, crypto: webcrypto };
