@@ -1676,6 +1676,9 @@ void main() {
     // turns, one a frame, so a scene pays two reflection passes at most; one waiting its turn shows its last capture.
     // A reflector needs a geometry of its own, which keys its capture. `reflectorPass` is the record a capture leaves
     // out (null in the eye's pass, which draws every reflector itself).
+    // Changing ordinary records share six upload regions: world and beforeView poses can each consume one.
+    // Stable records keep their own buffer, so a stationary prop never joins the per-frame copy.
+    const instanceStream = { buffer: null, data: null, capacity: 0, slot: 0, trimFrame: -1, trimSince: -1 };
     const reflectorNodes = [], reflectorTargets = new Map();
     let reflectorTurn = 0, reflectorPass = null, reflectorFrame = 0;
     let reducedCapture = false;
@@ -2141,6 +2144,12 @@ void main() {
       res.shadow = { tex: work.tex, fb: work.fb, staticTex: baked.tex, staticFb: baked.fb, size };
       shadowStaticValid = false;
     };
+    const destroyInstanceStream = () => {
+      if (instanceStream.buffer) gl.deleteBuffer(instanceStream.buffer);
+      instanceStream.buffer = instanceStream.data = null;
+      instanceStream.capacity = instanceStream.slot = 0;
+      instanceStream.trimFrame = instanceStream.trimSince = -1;
+    };
     const deleteRecord = (rec) => {
       if (rec.active) {
         const index = activeRecords.indexOf(rec);
@@ -2161,21 +2170,99 @@ void main() {
       rec.rippleBodyState = null;
       rec.nodes.length = 0;
       rec.batch = null;
-      rec.data = null;
+      rec.data = rec.instanceBuffer = null;
     };
     const destroyRecords = () => {
       for (const rec of records.values()) deleteRecord(rec);
       records.clear();
       activeRecords.length = 0;
+      destroyInstanceStream();
     };
-    const bindInstanceAttribs = (ibo, first = 0) => {
+    const bindInstanceAttribs = (ibo, first = 0, setup = true) => {
       gl.bindBuffer(gl.ARRAY_BUFFER, ibo);
       for (let i = 0; i < 5; i++) {
         const loc = 3 + i;
-        gl.enableVertexAttribArray(loc);
+        if (setup) gl.enableVertexAttribArray(loc);
         gl.vertexAttribPointer(loc, 4, gl.FLOAT, false, INSTANCE_FLOATS * 4, first * INSTANCE_FLOATS * 4 + i * 16);
-        gl.vertexAttribDivisor(loc, 1);
+        if (setup) gl.vertexAttribDivisor(loc, 1);
       }
+    };
+    const bindRecordInstances = (rec, buffer, first = 0) => {
+      if (rec.instanceBuffer === buffer && rec.instanceFirst === first) return;
+      if (rec.mesh) { gl.bindVertexArray(rec.mesh.vao); bindInstanceAttribs(buffer, first, false); }
+      if (rec.line) { gl.bindVertexArray(rec.line.vao); bindInstanceAttribs(buffer, first, false); }
+      gl.bindVertexArray(null);
+      rec.instanceBuffer = buffer;
+      rec.instanceFirst = first;
+    };
+    const flushInstanceStream = () => {
+      let need = 0, total = 0;
+      for (let i = 0; i < activeRecords.length; i++) {
+        const rec = activeRecords[i];
+        if (!rec.streaming) continue;
+        total += rec.count * INSTANCE_FLOATS;
+        if (rec.streamFrame !== shadowFrame) need += rec.count * INSTANCE_FLOATS;
+      }
+      const stream = instanceStream, minimum = INSTANCE_FLOATS * 256;
+      let trim = false;
+      if (stream.trimFrame !== shadowFrame) {
+        stream.trimFrame = shadowFrame;
+        // Count the whole live stream, including world-pose batches already flushed before beforeView.
+        // A sustained fourfold gap releases startup peaks; empty scene transitions do not churn storage.
+        if (total > 0 && stream.capacity > minimum && total < stream.capacity / 4) {
+          const now = performance.now();
+          if (stream.trimSince < 0) stream.trimSince = now;
+          else trim = now - stream.trimSince >= 4000;
+        } else stream.trimSince = -1;
+      }
+      if (!need && !trim) return;
+      if (stream.capacity < need || trim) {
+        // Replacing storage also invalidates unchanged records already flushed for the world pose this frame.
+        need = total;
+        for (let i = 0; i < activeRecords.length; i++) if (activeRecords[i].streaming) activeRecords[i].streamFrame = -1;
+        stream.capacity = trim ? Math.max(minimum, Math.ceil(total * 1.25 / INSTANCE_FLOATS) * INSTANCE_FLOATS) : Math.max(need, stream.capacity * 2, minimum);
+        stream.trimSince = -1;
+        stream.data = new Float32Array(stream.capacity);
+        if (!stream.buffer) stream.buffer = gl.createBuffer();
+        gl.bindBuffer(gl.ARRAY_BUFFER, stream.buffer);
+        gl.bufferData(gl.ARRAY_BUFFER, stream.capacity * 4 * 6, gl.STREAM_DRAW);
+        stream.slot = 0;
+      }
+      const offset = stream.slot * stream.capacity;
+      let written = 0;
+      for (let i = 0; i < activeRecords.length; i++) {
+        const rec = activeRecords[i];
+        if (!rec.streaming || rec.streamFrame === shadowFrame) continue;
+        const count = rec.count * INSTANCE_FLOATS, source = rec.batch ? rec.batch.instanceData : rec.data;
+        // Borrow batch storage only during this copy; no alias survives a frame or overwrites the caller's array.
+        // Copy only live floats without allocating a subarray view for every record.
+        for (let k = 0; k < count; k++) stream.data[written + k] = source[k];
+        rec.streamFirst = (offset + written) / INSTANCE_FLOATS;
+        written += count;
+      }
+      gl.bindBuffer(gl.ARRAY_BUFFER, stream.buffer);
+      gl.bufferSubData(gl.ARRAY_BUFFER, offset * 4, stream.data, 0, need);
+      for (let i = 0; i < activeRecords.length; i++) {
+        const rec = activeRecords[i];
+        if (!rec.streaming || rec.streamFrame === shadowFrame) continue;
+        const first = rec.streamFirst;
+        rec.streamFrame = shadowFrame;
+        if (shadowFrame - rec.instanceChanged >= SHADOW_SETTLE) {
+          // Settled records leave the stream. Copy its fresh span on the GPU, including after an inactive visit;
+          // no CPU upload per record and no dependency on an older ring region still holding its contents.
+          if (!rec.batch && rec.capacity < rec.data.length) {
+            gl.bindBuffer(gl.ARRAY_BUFFER, rec.ibo);
+            gl.bufferData(gl.ARRAY_BUFFER, rec.data.length * 4, gl.DYNAMIC_DRAW);
+            rec.capacity = rec.data.length;
+          }
+          gl.bindBuffer(gl.COPY_READ_BUFFER, stream.buffer);
+          gl.bindBuffer(gl.COPY_WRITE_BUFFER, rec.ibo);
+          gl.copyBufferSubData(gl.COPY_READ_BUFFER, gl.COPY_WRITE_BUFFER, first * INSTANCE_FLOATS * 4, 0, rec.count * INSTANCE_FLOATS * 4);
+          rec.streaming = false;
+          bindRecordInstances(rec, rec.ibo);
+        } else bindRecordInstances(rec, stream.buffer, first);
+      }
+      stream.slot = (stream.slot + 1) % 6;
     };
     const makePart = (data, floatsPerVertex, layout, ibo) => {
       const vao = gl.createVertexArray();
@@ -2346,7 +2433,7 @@ void main() {
       let rec = records.get(geometry);
       if (!rec) {
         const ibo = gl.createBuffer();
-        rec = { geometry, ibo, capacity: 0, mesh: geometry.meshRig ? buildRigPart(geometry.meshRig, ibo) : buildMeshPart(geometry, ibo), line: buildLinePart(geometry, ibo), nodes: [], spheres: new Float64Array(4), count: 0, drawCount: 0, cameraHiddenCount: 0, active: false, data: null, batch: null, batchVersion: -1, lightVisible: true, mirrorVisible: true, living: false, imageTexture: null, rippleBodyTexture: null, rippleBodyState: null, rippleBodyVersion: -1, shadowChanged: 0, shadowSettle: SHADOW_SETTLE, shadowCount: -1, shadowClip: NaN, shadowStatic: false, shadowBake: -1 };
+        rec = { geometry, ibo, instanceBuffer: ibo, instanceFirst: 0, instanceChanged: 0, instanceCount: 0, streaming: false, streamFirst: 0, streamFrame: -1, capacity: 0, mesh: geometry.meshRig ? buildRigPart(geometry.meshRig, ibo) : buildMeshPart(geometry, ibo), line: buildLinePart(geometry, ibo), nodes: [], spheres: new Float64Array(4), count: 0, drawCount: 0, cameraHiddenCount: 0, active: false, data: null, batch: null, batchVersion: -1, lightVisible: true, mirrorVisible: true, living: false, imageTexture: null, rippleBodyTexture: null, rippleBodyState: null, rippleBodyVersion: -1, shadowChanged: 0, shadowSettle: SHADOW_SETTLE, shadowCount: -1, shadowClip: NaN, shadowStatic: false, shadowBake: -1 };
         records.set(geometry, rec);
       }
       return rec;
@@ -2573,10 +2660,12 @@ void main() {
     const uploadInstances = (rec) => {
       const need = rec.count * INSTANCE_FLOATS;
       if (rec.batch) {
-        // A reserved pool that has never held an instance owns no GPU memory until it does;
-        // empty cave batches cost nothing until the wave arrives.
-        if (!need && !rec.capacity) return;
-        // Fixed-capacity systems reserve their bounded upload once; variable batches grow geometrically.
+        const initial = !rec.capacity;
+        // A geometry reused as a batch must not leave an ordinary instance cache to masquerade as its GPU data.
+        rec.data = null;
+        // A reserved pool that has never held an instance owns no GPU memory until it does.
+        if (!need && initial) { rec.streaming = false; return; }
+        // Preserve fixed reservations and the existing geometric variable-capacity policy independently of streaming.
         const cap = rec.batch.fixedInstanceCapacity ? rec.batch.instanceData.length : Math.min(rec.batch.instanceData.length, Math.max(need, rec.capacity * 2));
         if (rec.capacity < cap) {
           gl.bindBuffer(gl.ARRAY_BUFFER, rec.ibo);
@@ -2584,26 +2673,33 @@ void main() {
           rec.capacity = cap;
           rec.batchVersion = -1;
         }
-        if (rec.batchVersion !== rec.batch.instanceVersion) {
-          // WebGL treats a zero source length as "the rest of the array": empty cave batches must not upload their
-          // whole reserved pool on restore.
-          if (need > 0) {
+        if (rec.batchVersion !== rec.batch.instanceVersion || rec.instanceCount !== rec.count) {
+          rec.instanceChanged = rec.shadowChanged = shadowFrame;
+          rec.streamFrame = -1;
+          rec.streaming = need > 0 && !initial;
+          // First use is a private static upload. Subsequent changing versions/counts share one live stream span.
+          // Never pass zero length: WebGL interprets it as the remainder of the reserved source array.
+          if (need > 0 && initial) {
             gl.bindBuffer(gl.ARRAY_BUFFER, rec.ibo);
             gl.bufferSubData(gl.ARRAY_BUFFER, 0, rec.batch.instanceData, 0, need);
           }
           rec.batchVersion = rec.batch.instanceVersion;
+          rec.instanceCount = rec.count;
           rec.living = false;
           for (let o = 18; o < need && !rec.living; o += INSTANCE_FLOATS) rec.living = isLiving(rec.batch.instanceData[o]);
-          rec.shadowChanged = shadowFrame;
         }
+        if (!need) rec.streaming = false;
+        if (!rec.streaming) bindRecordInstances(rec, rec.ibo);
         return;
       }
+      rec.batchVersion = -1;
       if (!rec.data || rec.data.length < need) {
         rec.data = new Float32Array(Math.max(need, (rec.data ? rec.data.length : 0) * 2, INSTANCE_FLOATS));
       }
-      // The buffer mirrors rec.data exactly, so an unchanged block (static props, resting crew) needs no upload.
+      // Keep the existing changed-span comparison: transforms also feed shadowStatic, while glow/mode changes
+      // require an instance upload without invalidating a static shadow.
       const d = rec.data;
-      // One moving node in a shared record uploads only its own span.
+      // Detect changed blocks before the shared stream copies the complete record for all passes.
       let lo = need, hi = 0, moved = false, living = false;
       for (let i = 0; i < rec.count; i++) {
         const n = rec.nodes[i], w = n.world;
@@ -2633,13 +2729,17 @@ void main() {
       rec.living = living;
       // Shadow depth reads only the transform, so glow and mode changes leave a caster static.
       if (moved) rec.shadowChanged = shadowFrame;
-      if (rec.capacity < d.length) {
+      const changed = hi > lo || rec.instanceCount !== rec.count;
+      rec.instanceCount = rec.count;
+      if (changed) { rec.instanceChanged = shadowFrame; rec.streamFrame = -1; }
+      if (!rec.capacity && !rec.streaming) {
         gl.bindBuffer(gl.ARRAY_BUFFER, rec.ibo);
         gl.bufferData(gl.ARRAY_BUFFER, d, gl.DYNAMIC_DRAW);
         rec.capacity = d.length;
-      } else if (hi > lo) {
-        gl.bindBuffer(gl.ARRAY_BUFFER, rec.ibo);
-        gl.bufferSubData(gl.ARRAY_BUFFER, lo * 4, d, lo, hi - lo);
+      } else if (changed || rec.streaming) {
+        // A dirty record joins one shared upload instead of issuing its own bufferSubData. Keep it there until
+        // its full instance data (including glow and camera ordering) has settled for the shadow settle window.
+        rec.streaming = true;
       }
     };
     const uploadRigInstances = (rec) => { updateRig(rec); uploadInstances(rec); };
@@ -2853,12 +2953,14 @@ void main() {
     const onLost = (e) => {
       e.preventDefault();
       lost = true;
+      destroyInstanceStream();
       imageTextures = rippleBodyTextures = 0;
       for (const rec of records.values()) { rec.imageTexture = rec.rippleBodyTexture = rec.rippleBodyState = null; }
       forgetMirror();
     };
     const onRestored = () => {
       dsbGPU=null;
+      destroyInstanceStream();
       records.clear();
       activeRecords.length = 0;
       res.fbo = null;
@@ -3024,7 +3126,7 @@ void main() {
           const visible = i < instances && captureInstanceVisible(rec, i);
           if (visible && start < 0) start = i;
           if (!visible && start >= 0) {
-            bindInstanceAttribs(rec.ibo, start);
+            bindInstanceAttribs(rec.instanceBuffer, rec.instanceFirst + start, false);
             // Indexed parts arrive with the open GPU-packing PR; CPU geometry and uploads remain unchanged here.
             if (part.index) gl.drawElementsInstanced(gl.TRIANGLES, count, part.index, first * part.indexSize, i - start);
             else gl.drawArraysInstanced(gl.TRIANGLES, first, count, i - start);
@@ -3032,7 +3134,7 @@ void main() {
           }
         }
       } finally {
-        bindInstanceAttribs(rec.ibo);
+        bindInstanceAttribs(rec.instanceBuffer, rec.instanceFirst, false);
       }
     };
     const drawParts = (kind, useProgram, excludeMirror = false, cull = false, matrixStage = 0) => {
@@ -3764,6 +3866,7 @@ void main() {
         uploadForRender(rec);
         rec.livingClear = rec.living && livingClear(rec, matrix);
       }
+      flushInstanceStream();
       // A matrix that moved since last frame (a following shadow centre) draws everything as before; a steady one
       // bakes the static casters once, then each frame copies them in and draws only the moving ones.
       let steady = true, baked = shadowStaticValid;
@@ -3895,6 +3998,7 @@ void main() {
             }
           }
           for (const rec of activeRecords) uploadForRender(rec);
+          flushInstanceStream();
         } finally {
           opts.afterView?.();
           updateWorld(viewActor.root, viewActor.root.parent?.world || null);
@@ -4148,6 +4252,7 @@ void main() {
       if (!rec) return;
       deleteRecord(rec);
       records.delete(geometry);
+      if (!records.size) destroyInstanceStream();
     };
     init();
     return {
@@ -4159,6 +4264,8 @@ void main() {
       ray,
       setQuality,
       releaseGeometry,
+      // Owners of bounded, alternating meshes may prepare every variant before their first visible swap.
+      prepareGeometry: (geometry) => { if (lost || !pollPrograms()) return false; recordFor(geometry); return true; },
       createRig: createRendererRig,
       releaseUnused,
       dispose,
@@ -4168,7 +4275,7 @@ void main() {
       get stats() {
         let shadowFinite = true;
         for (let i = 0; i < 16; i++) if (!Number.isFinite(lightViewProj[i])) shadowFinite = false;
-        return { waterTextures: dsbGPU?2:0, records: records.size, active: activeRecords.length, mirrorResources: mirrorDebug.resources, imageTextures, rippleBodyTextures, shadowResources: res.shadow ? 4 : 0, shadowSize: res.shadow ? res.shadow.size : 0, shadowPassCount, shadowFinite, shadowDraws, shadowStatic: shadowStaticValid ? shadowBakedCount : 0, shadowStaticRebuilds, culled, drawn, suppressed, rippleSurfaces, rippleWaves };
+        return { instanceStreamCPUBytes: instanceStream.data ? instanceStream.data.byteLength : 0, instanceStreamGPUBytes: instanceStream.buffer ? instanceStream.capacity * 4 * 6 : 0, waterTextures: dsbGPU?2:0, records: records.size, active: activeRecords.length, mirrorResources: mirrorDebug.resources, imageTextures, rippleBodyTextures, shadowResources: res.shadow ? 4 : 0, shadowSize: res.shadow ? res.shadow.size : 0, shadowPassCount, shadowFinite, shadowDraws, shadowStatic: shadowStaticValid ? shadowBakedCount : 0, shadowStaticRebuilds, culled, drawn, suppressed, rippleSurfaces, rippleWaves };
       },
       get mirror() {
         return mirrorDebug;

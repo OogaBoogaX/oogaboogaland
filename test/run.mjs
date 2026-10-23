@@ -6774,6 +6774,40 @@ const hubJumbotron = { name: "hub jumbotron", why: "rule: the island rotation st
     const surfaceNode = j.node.children.find(node => node.geometry?.imageSurface?.canvas);
     const surfaceGeometry = surfaceNode?.geometry, surfaceCanvas = surfaceGeometry?.imageSurface.canvas;
     const initialRevision = surfaceGeometry?.imageSurface.version;
+    const chrome = j.node.children.find(node => node !== surfaceNode), variants = chrome.children.map(node => node.geometry);
+    const owned = variants.length === j.count && new Set(variants).size === j.count
+      && chrome.children.every(node => node.visible === false && node.geometry);
+    const gl = B.renderer.kind === "webgl2" ? document.getElementById("scene").getContext("webgl2") : null;
+    const create = gl?.createBuffer, remove = gl?.deleteBuffer;
+    let cycleCreates = 0, cycleDeletes = 0, rewarm = false;
+    if (gl) {
+      gl.createBuffer = function(...args) { cycleCreates++; return create.apply(this, args); };
+      gl.deleteBuffer = function(...args) { cycleDeletes++; return remove.apply(this, args); };
+    }
+    let cycleStable;
+    try {
+      for (let round = 0; round < 3; round++) for (let i = 0; i < j.count; i++) {
+        j.goToView(i); j.update(0, B.renderer);
+        B.renderer.render(BL.scenes.hub.root, B.camera, B.renderOpts);
+      }
+      cycleStable = owned && cycleCreates === 0 && cycleDeletes === 0
+        && chrome.children.every((node, i) => node.geometry === variants[i]);
+      // Deliberate GPU pruning models a released visit or lost record. The unchanged selected index must rewarm
+      // every exact alternative, and preparing or selecting those alternatives again must remain idempotent.
+      const records = B.renderer.stats.records;
+      for (const geometry of variants) B.renderer.releaseGeometry(geometry);
+      const pruned = B.renderer.stats.records;
+      j.update(0, B.renderer);
+      const warmedCreates = cycleCreates, warmedDeletes = cycleDeletes;
+      rewarm = !gl || (pruned === records - variants.length && B.renderer.stats.records === records && warmedCreates > 0);
+      for (const geometry of variants) B.renderer.prepareGeometry(geometry);
+      for (let i = 0; i < j.count; i++) { j.goToView(i); j.update(0, B.renderer); }
+      rewarm &&= cycleCreates === warmedCreates && cycleDeletes === warmedDeletes;
+      j.goToView(0); j.update(0, B.renderer);
+      B.renderer.render(BL.scenes.hub.root, B.camera, B.renderOpts);
+    } finally {
+      if (gl) { gl.createBuffer = create; gl.deleteBuffer = remove; }
+    }
     let bufferCreates = 0, bufferDeletes = 0;
     const captions = [];
     for (let i = 0; i < j.count; i++) { captions.push(j.caption); j.nextView(); }
@@ -6814,13 +6848,13 @@ const hubJumbotron = { name: "hub jumbotron", why: "rule: the island rotation st
       && reader.filters.users.length === 1 && reader.filters.users[0] === owner;
     reader.dispose(); restored.dispose(); j.refreshData(data);
     return { count: j.count, captions, wrapped, differs: plain !== drafted,
-      filtered, ownerOnly, restoredOwner, bufferCreates, bufferDeletes,
+      filtered, ownerOnly, restoredOwner, bufferCreates, bufferDeletes, cycleStable, rewarm,
       stable: !!surfaceGeometry && surfaceNode.geometry === surfaceGeometry && surfaceGeometry.imageSurface.canvas === surfaceCanvas
         && surfaceGeometry.imageSurface.version > initialRevision };
   })()`);
   const orgBoards = ["commits", "prs", "reviews", "comments", "issues"].map((t) => "org · " + t);
   record("hub jumbotron: the island rotates org activity, readers filter repositories, and attributed users appear once with saved alias selections restored", r.count === 7 && r.captions[0] === "Recent activity" && r.captions[1] === "Org totals" && orgBoards.every((c, i) => r.captions[2 + i] === c) && r.wrapped === "Recent activity" && r.filtered && r.ownerOnly && r.restoredOwner, JSON.stringify(r));
-  record("hub jumbotron: a draft PR changes the ticker through a stable canvas surface without creating or deleting GPU buffers", r.differs && r.stable && r.bufferCreates === 0 && r.bufferDeletes === 0, JSON.stringify({ differs: r.differs, stable: r.stable, bufferCreates: r.bufferCreates, bufferDeletes: r.bufferDeletes }));
+  record("hub jumbotron: a draft PR changes the stable canvas ticker and exact chrome cycles without GPU buffer churn, including after records are pruned", r.differs && r.stable && r.bufferCreates === 0 && r.bufferDeletes === 0 && r.cycleStable && r.rewarm, JSON.stringify({ differs: r.differs, stable: r.stable, bufferCreates: r.bufferCreates, bufferDeletes: r.bufferDeletes, cycleStable: r.cycleStable, rewarm: r.rewarm }));
 } };
 const oogatronPopups = { name: "oogatron popups", why: "rule: Oogatron windows keep their displays apart during mouse or touch drags and remember their independent controls and layout after reload", run: async (b) => {
   const mobile = await b.evaluate("matchMedia('(pointer: coarse)').matches"), mode = mobile ? "phone" : "desktop";
@@ -15269,23 +15303,55 @@ const waterGolden = W => {
 // alias a renderer record. Exercise the real collector/uploader against a byte-bounded GL sink;
 // shader compilation and pixels remain the separate, mandatory WebGL browser checkpoint.
 const waterUploadProbe = (BL, W) => {
-  const buffers=new Map(),bindings=new Map(),errors=[],uploads=new Map(),listeners=new Set();let serial=0,tier="",draws=0;
+  const buffers=new Map(),bindings=new Map(),attributes=new Map(),errors=[],uploads=new Map(),listeners=new Set();
+  const fields=new Map(),fieldBuffers=new Map(),vaoFields=new Map(),fieldVaos=new Map(),bits=new Map();let serial=0,tier="",draws=0,vao=null;
+  const associate=(v,data)=>{vaoFields.set(v,data);let list=fieldVaos.get(data);if(!list)fieldVaos.set(data,list=new Set());list.add(v);};
+  const exactSpan=(v,data,count,start=0)=>{
+    const expected=bits.get(data),attrs=attributes.get(v);if(!expected||!attrs||start+count>data.length/20)return false;
+    for(let loc=3;loc<=7;loc++){
+      const a=attrs.get(loc),storage=a&&buffers.get(a.buffer);if(!storage?.words)return false;
+      for(let i=0;i<count;i++)for(let j=0;j<4;j++)if(storage.words[(a.offset+i*a.stride)/4+j]!==expected[(start+i)*20+(loc-3)*4+j])return false;
+    }
+    return true;
+  };
+  const draw=count=>{
+    draws++;if(!count)return;
+    for(const a of attributes.get(vao)?.values()||[])if(a.offset+(count-1)*a.stride+a.size*4>buffers.get(a.buffer)?.size)errors.push({tier,drawCount:count,offset:a.offset,stride:a.stride,capacity:buffers.get(a.buffer)?.size});
+    const data=vaoFields.get(vao),field=data&&fields.get(data);
+    if(field){let found=false;for(let first=0;!found&&first+count<=field.instanceCount;first++)found=exactSpan(vao,data,count,first);if(!found)errors.push({tier,drawData:true,count,live:field.instanceCount});}
+  };
   const api={
     getExtension:()=>null,getProgramParameter:()=>true,getParameter:()=>4,
-    createBuffer:()=>{const b={id:++serial};buffers.set(b,0);return b;},
+    createBuffer:()=>{const b={id:++serial};buffers.set(b,{size:0,bytes:null,words:null});return b;},
     bindBuffer:(target,b)=>bindings.set(target,b),
-    bufferData:(target,data)=>buffers.set(bindings.get(target),typeof data==="number"?data:data.byteLength),
-    bufferSubData:(target,offset,data,start=0,length=0)=>{
-      const count=length||data.length-start,capacity=buffers.get(bindings.get(target)),end=offset+count*data.BYTES_PER_ELEMENT;
-      if(start<0||count<0||start+count>data.length||end>capacity)errors.push({tier,source:data.length,start,length:count,capacity,offset});
-      uploads.set(data,{count,capacity});
+    bufferData:(target,data,usage)=>{
+      const size=typeof data==="number"?data:data.byteLength,storage={size,bytes:null,words:null};
+      // Instance storage needs real contents; static vertex buffers need only their byte-bound here.
+      if(usage===gl.DYNAMIC_DRAW||usage===gl.STREAM_DRAW){storage.bytes=new Uint8Array(size);storage.words=new Uint32Array(storage.bytes.buffer);if(typeof data!=="number")storage.bytes.set(new Uint8Array(data.buffer,data.byteOffset,data.byteLength));}
+      buffers.set(bindings.get(target),storage);
     },
-    deleteBuffer:b=>buffers.delete(b),drawArraysInstanced:()=>draws++
+    bufferSubData:(target,offset,data,start=0,length=0)=>{
+      const count=length||data.length-start,handle=bindings.get(target),storage=buffers.get(handle),capacity=storage.size,end=offset+count*data.BYTES_PER_ELEMENT;
+      if(start<0||count<0||start+count>data.length||end>capacity)errors.push({tier,source:data.length,start,length:count,capacity,offset});
+      else{if(!storage.bytes){storage.bytes=new Uint8Array(capacity);storage.words=new Uint32Array(storage.bytes.buffer);}storage.bytes.set(new Uint8Array(data.buffer,data.byteOffset+start*data.BYTES_PER_ELEMENT,count*data.BYTES_PER_ELEMENT),offset);}
+      uploads.set(data,{count,capacity});
+      // First private uploads identify a field's VAOs. Later shared uploads must still fetch that exact field.
+      if(fields.has(data)){fieldBuffers.set(data,handle);for(const [v,attrs]of attributes)if(attrs.get(3)?.buffer===handle)associate(v,data);}
+    },
+    copyBufferSubData:(read,write,from,to,size)=>{
+      const source=buffers.get(bindings.get(read)),target=buffers.get(bindings.get(write)),capacity=target.size;
+      if(from<0||to<0||size<0||from+size>source.size||to+size>capacity||size&&!source.bytes)errors.push({tier,copySize:size,from,to,source:source.size,capacity});
+      else if(size){if(!target.bytes){target.bytes=new Uint8Array(capacity);target.words=new Uint32Array(target.bytes.buffer);}target.bytes.set(source.bytes.subarray(from,from+size),to);}
+    },
+    bindVertexArray:v=>{vao=v;if(v&&!attributes.has(v))attributes.set(v,new Map());},
+    vertexAttribPointer:(loc,size,type,normalized,stride,offset)=>{if(loc>=3&&loc<=7)attributes.get(vao).set(loc,{buffer:bindings.get(gl.ARRAY_BUFFER),size,stride,offset});},
+    deleteVertexArray:v=>{const data=vaoFields.get(v);if(data)fieldVaos.get(data).delete(v);vaoFields.delete(v);attributes.delete(v);},deleteBuffer:b=>buffers.delete(b),
+    drawArraysInstanced:(mode,first,count,instances)=>draw(instances),drawElementsInstanced:(mode,count,type,offset,instances)=>draw(instances)
   };
   const gl=new Proxy(api,{get:(o,k)=>k in o?o[k]:o[k]=/^[A-Z0-9_]+$/.test(k)?++serial:k.startsWith("create")||k==="getUniformLocation"?()=>({id:++serial}):()=>{}});
   const canvas={clientWidth:64,clientHeight:64,getContext:()=>gl,addEventListener:k=>listeners.add(k),removeEventListener:k=>listeners.delete(k)};
   const R=BL.glRenderer.createRenderer(canvas),opts={...BL.scenes.dsb.renderOpts,dsbWater:W.water},rows=[];
-  const arrays=new Map();BL.scene.traverseVisible(W.root,n=>{if(n.instanceData)arrays.set(n,n.instanceData);});
+  const arrays=new Map();BL.scene.traverseVisible(W.root,n=>{if(n.instanceData){arrays.set(n,n.instanceData);fields.set(n.instanceData,n);bits.set(n.instanceData,new Uint32Array(n.instanceData.buffer,n.instanceData.byteOffset,n.instanceData.length));}});
   for(tier of ["high","medium","low","high"]){
     W.renderer.quality=tier;R.setQuality(tier);
     for(const [x,y,z] of [[20,8,83],[-40,25,-8],[0,110,1]]){
@@ -15294,7 +15360,15 @@ const waterUploadProbe = (BL, W) => {
       let exclusive=true,bounded=true;
       for(const nodes of owners.values())for(const n of nodes)if(n.instanceData){exclusive&&=nodes.length===1;bounded&&=Number.isInteger(n.instanceCount)&&n.instanceCount>=0&&n.instanceCount*20<=n.instanceData.length&&n.instanceData===arrays.get(n)&&n.instanceData.every(Number.isFinite);}
       uploads.clear();const drawn=R.render(W.root,W.camera,opts);
-      let exact=true;for(const [n,data] of arrays)if(uploads.has(data)){const upload=uploads.get(data);exact&&=upload.count===n.instanceCount*20&&upload.capacity===data.byteLength;}
+      let exact=true;
+      for(const [n,data]of arrays){
+        if(uploads.has(data)){const upload=uploads.get(data);exact&&=upload.count===n.instanceCount*20&&upload.capacity===data.byteLength;}
+        if(n.instanceCount&&owners.get(n.geometry)?.includes(n)){
+          const privateBuffer=fieldBuffers.get(data),vaos=fieldVaos.get(data);
+          exact&&=!!privateBuffer&&buffers.get(privateBuffer)?.size===data.byteLength&&!!vaos?.size;
+          for(const v of vaos||[])exact&&=exactSpan(v,data,n.instanceCount);
+        }
+      }
       rows.push({tier,x,y,z,exclusive,bounded,drawn,exact});
     }
   }
@@ -15392,7 +15466,7 @@ const waterChecks = BL => {
   for(let i=0;i<3;i++){const next=BL.dsbWaterInteraction.create(W);next.update(.02,i,A);lifecycle&&=next.group.children.length===nodes&&next.stats.active<=24;next.dispose();lifecycle&&=next.group.children.length===0&&W.root.children.length===children-1;}
   record("DSB water lifecycle: indoor gating and repeat disposal/re-entry clear impulses without growing nodes",lifecycle);
   const upload=waterUploadProbe(BL,W);
-  record("DSB WebGL uploads: independent dressing fields own their records across tiers, views and disposal",upload.rows.every(r=>r.exclusive&&r.bounded&&r.drawn&&r.exact)&&!upload.errors.length&&upload.draws>0&&upload.released&&!upload.buffers&&!upload.listeners,JSON.stringify(upload));
+  record("DSB WebGL uploads: dressing records and instance offsets remain bounded across tiers, views and disposal",upload.rows.every(r=>r.exclusive&&r.bounded&&r.drawn&&r.exact)&&!upload.errors.length&&upload.draws>0&&upload.released&&!upload.buffers&&!upload.listeners,JSON.stringify(upload));
   W.dispose();
 };
 // Recorded from f578f9cda6e77468049b5e000e3002ce9711809b before applying the water extension.
@@ -16302,7 +16376,7 @@ const raceRigChecks = async () => {
   const extract = (name, next) => rendererSource.slice(rendererSource.indexOf(`    const ${name} =`), rendererSource.indexOf(next, rendererSource.indexOf(`    const ${name} =`))).trim();
   const cachedRig = {}, cachedGeometry = { meshRig: cachedRig }, cacheRecords = new Map([[cachedGeometry, {}]]), uniformCalls = [];
   const cacheMesh = { rig: cachedRig, u: { uRigCount: "mesh-count" } }, cacheShadow = { rig: cachedRig, u: { uRigCount: "shadow-count" } };
-  const cacheContext = { rigPrograms: { mesh: cacheMesh, shadow: cacheShadow }, programs: { mesh: cacheMesh, shadow: cacheShadow }, records: cacheRecords, res: { programs: { mesh: cacheMesh, shadow: cacheShadow } }, destroyReflector() {}, deleteRecord() {}, gl: { uniform1i: (...args) => uniformCalls.push(args) }, geometry: cachedGeometry };
+  const cacheContext = { rigPrograms: { mesh: cacheMesh, shadow: cacheShadow }, programs: { mesh: cacheMesh, shadow: cacheShadow }, records: cacheRecords, res: { programs: { mesh: cacheMesh, shadow: cacheShadow } }, destroyReflector() {}, deleteRecord() {}, destroyInstanceStream() {}, gl: { uniform1i: (...args) => uniformCalls.push(args) }, geometry: cachedGeometry };
   runInNewContext(`${extract("releaseGeometry", "    init();")}
 ${extract("applyRig", "    const uploadInstances =")}
 releaseGeometry(geometry); applyRig(res.programs.mesh, { geometry: {} }, 1); applyRig(res.programs.shadow, { geometry: {} }, 2);`, cacheContext);

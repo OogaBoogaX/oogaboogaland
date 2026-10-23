@@ -658,12 +658,14 @@
     const chromeNode = createNode({ geometry: null });
     addChild(node, chromeNode);
     let chromeCount = -1, chromeCurrent = -1;
-
-    const swapGeometry = (target, geometry, renderer) => {
-      const old = target.geometry;
-      if (old === geometry) return;
-      target.geometry = geometry;
-      if (old && renderer && renderer.releaseGeometry) renderer.releaseGeometry(old);
+    const chromeVariants = [];
+    const releaseChrome = (renderer) => {
+      for (let i = 0; i < chromeVariants.length; i++) {
+        if (renderer?.releaseGeometry) renderer.releaseGeometry(chromeVariants[i]);
+        chromeNode.children[i].geometry = null;
+      }
+      chromeVariants.length = chromeNode.children.length = 0;
+      chromeNode.geometry = null; chromeCount = chromeCurrent = -1;
     };
     // Counts every repaint of the board, so a copy of it (the hub's close-up) knows when to redraw.
     let version = 0;
@@ -680,10 +682,22 @@
     const refreshChrome = (renderer) => {
       const count = cycle().length;
       const current = cycleIndex % count;
-      if (count === chromeCount && current === chromeCurrent) return;
-      chromeCount = count;
+      if (count !== chromeCount) {
+        releaseChrome(renderer);
+        for (let i = 0; i < count; i++) {
+          const geometry = chromeGeometryFrom(count, i, curved);
+          chromeVariants.push(geometry);
+          // Ownership only: hidden alternatives stay live through scene parking and GPU pruning.
+          addChild(chromeNode, createNode({ geometry, visible: false }));
+        }
+        chromeCount = count;
+      }
+      // Prepare once, and idempotently again after a context restore or a scene's GPU pruning. Cycling must never
+      // create/delete buffers in a settled frame; the seven exact curved variants keep their authored normals.
+      if (renderer?.prepareGeometry) for (let i = 0; i < chromeVariants.length; i++) renderer.prepareGeometry(chromeVariants[i]);
+      if (current === chromeCurrent) return;
       chromeCurrent = current;
-      swapGeometry(chromeNode, chromeGeometryFrom(count, current, curved), renderer);
+      chromeNode.geometry = chromeVariants[current];
     };
 
     // A world ray -> board pixel, or null off the screen: invert the cabinet's
@@ -943,9 +957,9 @@
         if (renderer && renderer.releaseGeometry) {
           if (screenBacking.geometry) renderer.releaseGeometry(screenBacking.geometry);
           if (screenNode.geometry) renderer.releaseGeometry(screenNode.geometry);
-          if (chromeNode.geometry) renderer.releaseGeometry(chromeNode.geometry);
           if (node.geometry) renderer.releaseGeometry(node.geometry);
         }
+        releaseChrome(renderer);
         screenBacking.geometry = null;
         worldCanvas.width = worldCanvas.height = 0;
         screenNode.geometry = null;
