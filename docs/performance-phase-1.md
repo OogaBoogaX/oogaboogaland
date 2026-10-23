@@ -152,3 +152,11 @@ The final floor falls 11.91 MiB, but the ≤15 MB growth criterion remains unmet
 Validation: 267/267 unit checks cover key ownership, Map semantics, cyclic payloads, getter safety, shared projective arrays and the release guard. The ten-scene hosted DEBUG tour and the focused snapshot control complete with clean consoles. The director permits a new room under the same scene ID to retain that new visit's caches. All changed JavaScript parses and the hosted build completes. #265 and #267 still apply; #193's only patch-context overlap remains the previously checked DSB listener options. No geometry builder or visual output changes. Full shared-scene acceptance is pending the hub-policy change.
 
 The focused snapshots contain 2,286 → 2,184 geometry objects. Their V8 self-size buckets show code +4.32 MiB, strings +1.12 MiB and native storage +12.00 MiB, offset by arrays −8.24 MiB, ordinary objects −3.34 MiB and numbers −1.59 MiB. These are bucket totals, not dominator-retained sizes. The largest geometry paths lead to the live hub island, cutaways and shared hub kits; this control does not establish the cause of every byte remaining after the longer tour. The raw snapshots and detailed retaining paths remain untracked.
+
+## 1.7 prerequisite — Character palettes survive cache release
+
+Full hub release exposed a latent rebuild bug in `2140data` and `ibrihamturay-coder`. Each character kept one module-level set of palette slot numbers, even though every model build starts a new palette. The rebuilt hub contained 12 visible geometries with 1,037 faces whose colour was undefined, and WebGL failed while uploading them. The failing run is not acceptance evidence.
+
+Each character now keeps its slots and colourway pairs in a WeakMap keyed by the model-build context. Hooks within that build share the same slots, and a later build registers its colours again. The geometry builders, RGB values and both colourways are unchanged.
+
+The existing character check now releases each template and rebuilds all 46 characters, validating every face in both colourways. Before the fix it fails only for the two robots (266/267); afterward all 267 checks pass, with zero invalid palette faces. The policy visit check also explicitly renders the returned hub. The repeated hosted release-mode round trip now paints and finishes with a clean console.

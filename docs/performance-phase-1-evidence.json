@@ -9175,5 +9175,24 @@
       },
       "geometryCount": 2184
     }
+  },
+  "paletteRebuild": {
+    "before": {
+      "invalidVisibleGeometries": 12,
+      "invalidVisibleFaces": 1037,
+      "affectedCharacters": [
+        "2140data",
+        "ibrihamturay-coder"
+      ],
+      "unitPassed": 266,
+      "unitTotal": 267
+    },
+    "after": {
+      "invalidFacesAcrossAllCharactersAndColourways": 0,
+      "characters": 46,
+      "unitPassed": 267,
+      "unitTotal": 267
+    },
+    "method": "Extended existing character check rebuilds every template after scoped release. Hosted release-mode return now also renders; the original failed run and detailed invalid geometry paths remain untracked."
   }
 }

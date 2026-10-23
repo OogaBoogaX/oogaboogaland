@@ -3902,20 +3902,29 @@ const characterChecks = async () => {
   for (const name of CONTRIBUTOR_SOURCES) runInNewContext(await readFile(new URL(`../src/js/${name}.js`, import.meta.url), "utf8"), context);
   const BL = context.window.BL, all = BL.characters.all(), hooks = ["torso", "club", "gear", "skull", "crown", "eyes", "mark", "hatY", "headgear", "extras", "tint"];
   const rows = all.map((c) => {
+    BL.models.setScope("character-rebuild");
     const traits = BL.contributors.traitsFor(c.handle), m = BL.models.caveman(traits);
     // A second colourway has to pair every voxel part both ways, heads included,
     // so crew.js changes the whole body and a second change puts it back.
     const parts = ["legR", "legL", "torso", "armR", "armL", "head"].map((key) => m.parts[key].geometry).concat([m.headOpen, m.headClosed]);
     const tint = !c.dress || !c.dress.tint ? !m.tint
       : !!m.tint && parts.every((geo) => m.tint.has(geo) && m.tint.get(m.tint.get(geo)) === geo && m.tint.get(geo).faces.length === geo.faces.length);
-    return { handle: c.handle, joined: c.joined > 1.7e9 && c.joined < 4e9, built: m.headOpen.faces.length > 0 && m.headClosed.faces.length > 0 && m.headOpen !== m.headClosed,
+    // Complete cache release rebuilds a palette; character hooks must not reuse slots from the previous build.
+    BL.models.release("character-rebuild", []);
+    const rebuilt = BL.models.caveman(BL.contributors.traitsFor(c.handle)), geometries = new Set([rebuilt.headOpen, rebuilt.headClosed, rebuilt.portraitHead]);
+    const visit = node => { if (node.geometry) geometries.add(node.geometry); for (const child of node.children) visit(child); };
+    visit(rebuilt.root);
+    if (rebuilt.tint) for (const [original, twin] of rebuilt.tint) geometries.add(original).add(twin);
+    const palette = [...geometries].every(geo => geo.faces.every(face => face.color && face.color.length === 3 && face.color.every(Number.isFinite)));
+    BL.models.release("character-rebuild", []); BL.models.setScope(null);
+    return { palette, handle: c.handle, joined: c.joined > 1.7e9 && c.joined < 4e9, built: m.headOpen.faces.length > 0 && m.headClosed.faces.length > 0 && m.headOpen !== m.headClosed,
       parts: ["legR", "legL", "torso", "armR", "armL", "head", "club", "gun"].every((key) => m.parts[key]), hooks: Object.keys(c.dress || {}).every((key) => hooks.includes(key) && typeof c.dress[key] === "function"),
       tint, voice: !c.voice || typeof c.voice.poke === "string" && Array.isArray(c.voice.idle),
       display: c.display === undefined || typeof c.display === "string" && !!c.display.trim() && c.display.length <= 39 };
   });
   const unique = new Set(all.map((c) => c.handle.toLowerCase())).size === all.length;
   const ordered = all.every((c, i) => !i || all[i - 1].joined <= c.joined);
-  record("characters: every src/characters file registers one handle, builds a whole Ooga and uses only known hooks", rows.length === CAST && CAST === BL.contributors.roster.length && unique && ordered && rows.every((r) => r.joined && r.built && r.parts && r.hooks && r.tint && r.voice && r.display), JSON.stringify(rows.filter((r) => !(r.joined && r.built && r.parts && r.hooks && r.tint && r.voice && r.display))));
+  record("characters: every src/characters file registers one handle, builds a whole Ooga and uses only known hooks", rows.length === CAST && CAST === BL.contributors.roster.length && unique && ordered && rows.every((r) => r.joined && r.built && r.parts && r.hooks && r.tint && r.voice && r.display && r.palette), JSON.stringify(rows.filter((r) => !(r.joined && r.built && r.parts && r.hooks && r.tint && r.voice && r.display && r.palette))));
 };
 // The mempool.space feed parser in Node: message shapes as the socket sends them, no socket.
 const mempoolFeedChecks = async () => {

@@ -7,16 +7,18 @@
   // An android in plating with code running over its shell. Every plate colour is
   // registered as a pair, red now and green later: tint() hands models.js the
   // second palette and crew.js changes the whole body between the two.
-  const twins = new Map();
-  let slots = null;
+  // Slot numbers belong to one model build's palette, which can be released between visits.
+  const builds = new WeakMap();
   const colors = (k) => {
-    if (slots) return slots;
+    const previous = builds.get(k);
+    if (previous) return previous.slots;
+    const twins = new Map();
     const pair = (red, green) => {
       const slot = k.color(red);
       twins.set(slot, green);
       return slot;
     };
-    return slots = {
+    const slots = {
       plate: pair("#d2382c", "#1f9a48"),
       light: pair("#f2694f", "#3ad46e"),
       dark: pair("#6e1811", "#0d5227"),
@@ -36,6 +38,8 @@
       loin: k.color("#c8923a"),
       loinSpot: k.color("#4a2f16")
     };
+    builds.set(k, { slots, twins });
+    return slots;
   };
   const glowOf = (C) => ({ [C.core]: 1, [C.glyph]: 0.22, [C.laser]: 1, [C.light]: 0.2 });
   // Code runs over the shell as it does on the Agent: every third column carries
@@ -252,7 +256,10 @@
         return true;
       },
       // The second colourway: the same palette with every registered plate green.
-      tint: (k, palette) => palette.map((rgb, i) => twins.has(i) ? hexToRgb(twins.get(i)) : rgb),
+      tint: (k, palette) => {
+        const twins = builds.get(k).twins;
+        return palette.map((rgb, i) => twins.has(i) ? hexToRgb(twins.get(i)) : rgb);
+      },
       extras(k) {
         const u = k.u, origin = { x: -u, y: 0, z: -u };
         const geometry = voxelGeometry(freeVox(), { unit: u, palette: CHUK_PALETTE, origin });
