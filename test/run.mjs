@@ -4102,6 +4102,63 @@ const mempoolFeedChecks = async () => {
   record("mempool feed: the socket wants blocks, stats and projections and never every transaction, a silent link is dropped and redialled, a hidden tab holds no socket and its return reseeds the tip without a block",
     wants && stalled && hiddenClosed && heldWhileHidden && reseeded, JSON.stringify({ wants, stalled, hiddenClosed, heldWhileHidden, reseeded, asked, liveEvents }));
 };
+// The totems' feed in Node: the Worker's summary as the Worker answers it, and a host without it, no network.
+const totemFeedChecks = async () => {
+  const source = await readFile(new URL("../src/js/totem-feed.js", import.meta.url), "utf8");
+  const settle = () => new Promise((r) => setTimeout(r, 0));
+  const reply = (status, body, headers = {}) => ({ status, ok: status >= 200 && status < 300, headers: { get: (k) => headers[k] ?? null }, json: async () => body });
+  const page = (protocol, answer) => {
+    const asked = [], events = [], ticks = [];
+    const context = { location: { protocol }, document: { hidden: false, addEventListener() {}, removeEventListener() {} },
+      window: { setInterval: (fn) => { ticks.push(fn); return 1; }, clearInterval() {} },
+      fetch: async (url, options = {}) => { asked.push({ url, tag: options.headers?.["if-none-match"] || "" }); return answer(url, asked.length); } };
+    runInNewContext(source, context);
+    const feed = context.window.BL.totemFeed;
+    feed.subscribe((e) => events.push(e));
+    return { feed, asked, events, ticks };
+  };
+  const hour = Date.now() - 3600000, JSON_TYPE = { "content-type": "application/json; charset=utf-8" };
+  let newer = false;
+  const summary = (url) => {
+    const i = Number(/\/api\/totems\/(\d)$/.exec(url)[1]), repo = ["bitcoin/bitcoin", "btcpayserver/btcpayserver", "lightningnetwork/lnd", "ElementsProject/lightning"][i];
+    const number = i === 0 ? (newer ? 43 : 42) : i === 1 ? 7 : 0, mergedAt = number ? hour + (newer ? 60000 : 0) : 0;
+    return { repo, number, mergedAt, etag: `"${i}-${number}-${mergedAt}"` };
+  };
+  const site = page("https:", (url, n) => {
+    const s = summary(url);
+    return n > 4 && !newer ? reply(304, null, { etag: s.etag }) : reply(200, { repo: s.repo, number: s.number, mergedAt: s.mergedAt }, { ...JSON_TYPE, etag: s.etag });
+  });
+  site.feed.start(); await settle();
+  const repos = site.feed.state.repos;
+  const firstQuiet = site.asked.length === 4 && site.asked.every((a, i) => a.url === `/api/totems/${i}` && !a.tag) && site.events.length === 2 && site.events.every((e) => !e.fresh)
+    && repos[0].number === 42 && repos[0].url === "https://github.com/bitcoin/bitcoin/pull/42" && repos[1].number === 7 && repos[2].number === 0 && repos[0].changedAt === hour;
+  site.ticks[0](); await settle();
+  const revalidated = site.asked[4].url === "/api/totems/0" && site.asked[4].tag === '"0-42-' + hour + '"' && site.events.length === 2 && repos[0].number === 42 && site.feed.state.failures === 0;
+  newer = true; for (let i = 0; i < 4; i++) { site.ticks[0](); await settle(); }
+  const fresh = site.events.length === 3 && site.events[2].index === 0 && site.events[2].fresh && repos[0].number === 43;
+  site.feed.dispose();
+  const stamp = new Date(hour).toISOString().slice(0, 19) + "Z";
+  const github = (url) => /\/api\/totems\//.test(url) ? reply(404, null, { "content-type": "text/html" })
+    : reply(200, [{ number: 9, html_url: `https://github.com/${/repos\/(.+)\/pulls/.exec(url)[1]}/pull/9`, updated_at: stamp, merged_at: stamp, base: { ref: "master" } }], JSON_TYPE);
+  const fallback = page("https:", github);
+  fallback.feed.start(); await settle(); fallback.ticks[0](); await settle();
+  const direct = fallback.asked.filter((a) => a.url.startsWith("/api/")).length === 1 && fallback.asked.length === 6 && fallback.asked.slice(1).every((a) => a.url.startsWith("https://api.github.com/repos/"))
+    && fallback.feed.state.repos.every((r) => r.number === 9) && fallback.events.length === 4 && fallback.events.every((e) => !e.fresh);
+  fallback.feed.dispose();
+  // A spent limit on the Worker is Cloudflare's shared budget: that turn reads GitHub itself, and the next asks the Worker again.
+  const limited = page("https:", (url) => /\/api\/totems\//.test(url)
+    ? reply(403, null, { ...JSON_TYPE, "x-ratelimit-remaining": "0", "x-ratelimit-reset": String(Math.ceil(Date.now() / 1000) + 3600) }) : github(url));
+  limited.feed.start(); await settle(); limited.ticks[0](); await settle();
+  const shared = limited.asked[0].url === "/api/totems/0" && limited.asked[1].url.startsWith("https://api.github.com/repos/bitcoin/")
+    && limited.asked.filter((a) => a.url.startsWith("/api/")).length === 5 && limited.feed.state.limitedUntil === 0 && limited.feed.state.repos.every((r) => r.number === 9);
+  limited.feed.dispose();
+  const file = page("file:", github);
+  file.feed.start(); await settle();
+  const fileDirect = file.asked.length === 4 && file.asked.every((a) => a.url.startsWith("https://api.github.com/repos/"));
+  file.feed.dispose();
+  record("totem feed: the Worker's summary lights a totem without celebrating the first reading, its 304 keeps it, a newer merge is fresh, and a static host, a file page or a spent Worker limit reads GitHub itself",
+    firstQuiet && revalidated && fresh && direct && shared && fileDirect, JSON.stringify({ firstQuiet, revalidated, fresh, direct, shared, fileDirect, asked: site.asked.length, events: site.events, failures: site.feed.state.failures }));
+};
 // The chain snapshot in Node: real payload shapes from both providers, one code path, no sockets.
 const chainSnapshotChecks = async () => {
   const source = await readFile(new URL("../src/js/chain.js", import.meta.url), "utf8"), math = await readFile(new URL("../src/js/math.js", import.meta.url), "utf8");
@@ -17399,7 +17456,7 @@ record("character visibility source bakes: ownership wrappers share exact immuta
   factoryChecks(BL);
   const clearance = claimClearanceProof();
   record("hub footprint clearance: conservative rejection preserves circular boundaries, live reservations and exceptional numbers", clearance.failures === 0 && clearance.cases >= 4000, JSON.stringify(clearance));
-  await characterChecks(); await contributorActivityChecks(); await mempoolFeedChecks(); await debugActivityStatusChecks(); await soloDebugChecks(); await adaptiveQualityChecks(); await chainSnapshotChecks(); await dsbSharedDataChecks(); await timechainDataChecks(); await timechainRoomChecks(); await timechainBlockChecks(); await weatherStepChecks(); await poolLayoutChecks(); await gameRulesChecks(); await donationClientChecks(); await poolWildlifeChecks();
+  await characterChecks(); await contributorActivityChecks(); await mempoolFeedChecks(); await debugActivityStatusChecks(); await soloDebugChecks(); await adaptiveQualityChecks(); await chainSnapshotChecks(); await dsbSharedDataChecks(); await timechainDataChecks(); await timechainRoomChecks(); await timechainBlockChecks(); await weatherStepChecks(); await poolLayoutChecks(); await gameRulesChecks(); await donationClientChecks(); await poolWildlifeChecks(); await totemFeedChecks();
 
   // Scene state built directly instead of booted; seed 1 matches scene-hub.js.
   // Sealed cave guides need the hub's seal nodes, so probes reading them stay in the browser tier.
