@@ -3041,6 +3041,42 @@ void main() {
       }
       return (Math.min(1, MIRROR_RECT[2]) - Math.max(-1, MIRROR_RECT[0])) * width * 0.5 * (Math.min(1, MIRROR_RECT[3]) - Math.max(-1, MIRROR_RECT[1])) * height * 0.5;
     };
+    // Shard records retain a camera-visible prefix. Test their actual transformed vertices rather than the
+    // collection sphere's extra metre; a sliver outside the viewport must not spend a whole scene capture.
+    const shardCaptureVisible = (rec, index) => {
+      const batch = rec.batch, world = batch ? batch.instanceData : rec.nodes[index].world;
+      const o = batch ? index * INSTANCE_FLOATS : 0, verts = rec.geometry.verts;
+      let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity, behind = false, outside = 63;
+      for (let i = 0; i < verts.length; i += 3) {
+        const x = world[o]*verts[i]+world[o+4]*verts[i+1]+world[o+8]*verts[i+2]+world[o+12];
+        const y = world[o+1]*verts[i]+world[o+5]*verts[i+1]+world[o+9]*verts[i+2]+world[o+13];
+        const z = world[o+2]*verts[i]+world[o+6]*verts[i+1]+world[o+10]*verts[i+2]+world[o+14];
+        const cx = viewProj[0]*x+viewProj[4]*y+viewProj[8]*z+viewProj[12];
+        const cy = viewProj[1]*x+viewProj[5]*y+viewProj[9]*z+viewProj[13];
+        const cz = viewProj[2]*x+viewProj[6]*y+viewProj[10]*z+viewProj[14];
+        const cw = viewProj[3]*x+viewProj[7]*y+viewProj[11]*z+viewProj[15];
+        outside &= (cx < -cw ? 1 : 0) | (cx > cw ? 2 : 0) | (cy < -cw ? 4 : 0)
+          | (cy > cw ? 8 : 0) | (cz < -cw ? 16 : 0) | (cz > cw ? 32 : 0);
+        if (cw <= MIRROR_EPSILON) { behind = true; continue; }
+        const px = cx/cw, py = cy/cw;
+        minX = Math.min(minX,px); maxX = Math.max(maxX,px);
+        minY = Math.min(minY,py); maxY = Math.max(maxY,py);
+      }
+      if (outside || minX === Infinity) return false;
+      // Crossing the eye can cover the viewport even while surviving corners lie outside it.
+      if (behind) return true;
+      const w = (Math.min(1,maxX)-Math.max(-1,minX))*width*0.5;
+      const h = (Math.min(1,maxY)-Math.max(-1,minY))*height*0.5;
+      return w > 0 && h > 0 && Math.max(w,h) >= 8;
+    };
+    const environmentCaptureVisible = () => {
+      for (let i = 0; i < activeRecords.length; i++) {
+        const rec = activeRecords[i];
+        if (!rec.geometry.mirrorSource || !rec.mesh || !rec.drawCount || rec.offscreen) continue;
+        for (let k = 0; k < rec.drawCount; k++) if (shardCaptureVisible(rec,k)) return true;
+      }
+      return false;
+    };
     const prepareEnvironmentCamera = (camera, face) => {
       const world = mirror.node.world, at = face * 6;
       // One fixed probe beside the glass is shared by all pooled panels. Their
@@ -3312,7 +3348,8 @@ void main() {
         if (cull && rec.offscreen) continue;
         if (kind === "mesh" && useProgram === "shadow" && g.castShadow === false) continue;
         if (useProgram === "shadow" ? !rec.lightVisible || shadowSubset && rec.shadowStatic !== (shadowSubset === 1) : !cull && !rec.mirrorVisible) continue;
-        if (excludeMirror && (rec === mirror.record || g.mirrorSource)) continue;
+        if (excludeMirror && (rec === mirror.record || g.mirrorSource && (!cull || environment.ready && environment.tex))) continue;
+        // Tiny first-use shards keep their authored material until a readable shard initializes the shared cube.
         if (g.reflector && (reflectorPass === null || rec === reflectorPass)) {
           // Uncaptured lower-tier panes retain their authored grey-blue face instead of disappearing.
           const fallback = reflectorPass === null && qualityName !== "high"
@@ -3591,7 +3628,7 @@ void main() {
       gl.uniform1f(pg.mesh.u.uMatrixLivingGlobal, matrix ? matrix.livingGlobal ?? 1 : 1);
       pg.mesh.matrixNone = !matrix;
       const previousReducedCapture = reducedCapture;
-      reducedCapture = qualityName === "medium";
+      reducedCapture = cube || qualityName === "medium";
       try {
       drawParts("mesh", "mesh", true);
       if (skyOn) drawSky(mirrorInvViewProj, mirrorEye.y);
@@ -4106,7 +4143,7 @@ void main() {
           else if (mirror.captureValid && mirror.frame++ % settings.mirrorCadence && (qualityName === "medium" || mirror.renderWidth * mirror.renderHeight * 25 < pw * ph)) skipMirrorPass("cadence");
           else renderMirrorCapture(clear, sky, ground, direct, directStrength, ambientFloor, diffuseFloor, shadowStrength, shadowFloor, shadowBias, lx, ly, lz, sh, lights, nLights, skyOn, fogColor, fogA, fogB, matrix, spotLight);
         }
-        if (mirror.shards && ensureShardProgram()) {
+        if (mirror.shards && environmentCaptureVisible() && ensureShardProgram()) {
           ensureEnvironment(clear);
           if (environment.valid !== 63 || environment.frame++ % settings.environmentCadence === 0) {
             const face = environment.next;
