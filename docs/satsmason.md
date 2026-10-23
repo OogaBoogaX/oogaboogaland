@@ -26,10 +26,10 @@ The next performance work belongs in the shared visibility/edge-filter path and 
 
 This integrates onto upstream rock 786ab4c1ce362dbbe753cf9902d62972d0d9e221 in the genuine fork SatsMason/oogaboogaland-contribution. The original SatsMason/oogaboogaland development PR #2 is preserved. The new chisel reference and model cost 10 + 50 Tripo credits, bringing the recorded overall spend, including rejected generations, to 735 of the authorised 1,000; 265 remain.
 
-Character automation extracts only src/characters/*.js and requires human review. This declaration depends on shared asset/build/equipment support, which that extraction would omit. Maintainers must agree to the prerequisites or a split submission; acceptance is not assured and automation policy is unchanged.
+Character intake copied the exact `src/characters/SatsMason.js` source from commit `d15bfc27c0d1339e8b953e70c007d3e29217ca2b` into upstream PR #198 for manual review. The copied path was then restored to the #279 base as requested. PR #198 now owns the character declaration; PR #279 retains the shared asset, build and equipment support it requires. Maintainers must review the dependency between them; acceptance is not assured and automation policy is unchanged.
 
 An earlier approval review rejected the expanded test runner because its input exceeded the review budget. An adapted derivative was briefly uploaded and subsequently restored to the exact upstream version. All added checks stay local; do not publish that derivative without resolving the restriction.
 
-Keep PR #279 draft while performance and integration direction remain unresolved. Preserve rock. No merge, deployment or production change without the owner's explicit approval.
+PR #279 is ready for integration review while performance remains disclosed as unresolved. Preserve rock. No merge, deployment or production change without the owner's explicit approval.
 
 ![Pocketed waist apron and clear BTC chest](satsmason-front.png)
