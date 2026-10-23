@@ -340,6 +340,21 @@ in vec2 vPortalUV;
 in vec4 vPortalView;
 ${PORTAL_LIQUID_GLSL}
 in vec3 vLocal;
+// Revisioned canvases retain ordinary surface lighting, emission, fog and Matrix behavior.
+uniform float uCanvasSurface;
+uniform sampler2D uCanvasImage;
+uniform vec4 uCanvasRect;
+uniform vec3 uCanvasCurve;
+uniform vec3 uCanvasBackground;
+uniform vec2 uCanvasScale;
+vec4 canvasColor() {
+  vec2 local = vLocal.xy;
+  if (uCanvasCurve.x > 0.0) local = vec2(atan(vLocal.x, uCanvasCurve.x - vLocal.z) * uCanvasCurve.x - uCanvasCurve.y, vLocal.y - uCanvasCurve.z);
+  vec2 uv = (local - uCanvasRect.xy) / uCanvasRect.zw;
+  vec4 color = texture(uCanvasImage, vec2(uv.x, 1.0 - uv.y) * uCanvasScale);
+  color.rgb = mix(uCanvasBackground, color.rgb, color.a);
+  return color;
+}
 in vec3 vLocalNormal;
 in float vMatrixSurface;
 flat in float vMatrixCave;
@@ -769,6 +784,7 @@ float matrixPermanentAt(vec3 point, float caveIndex) {
 }
 // Every cut a fragment takes, also the whole of the depth pre-pass's shader, so both passes keep the same pixels.
 bool clipped() {
+  if (uCanvasSurface > 0.5 && canvasColor().a <= 0.0) return true;
   vWorld = uProjective > 0.5 ? vWorldH.xyz / vWorldH.w : vWorldH.xyz;
   if (vWorld.y < uClipMinY || dot(uObjectClip, vec4(vWorld, 1.0)) > 0.0 || abs(dot(uObjectSlab.xyz, vWorld) + uObjectSlab.w) > 1.0 || abs(dot(uObjectSlab2.xyz, vWorld) + uObjectSlab2.w) > 1.0 || cutaway(vWorld, vSmokeOpacity)) return true;
   if (uLakeOcclude.w > 0.0 && uEye.y > uLakeOcclude.y && vWorld.y < uLakeOcclude.y) {
@@ -818,6 +834,7 @@ void main() {
 #endif
   vec3 n = normalize(vNormal);
   vec3 base = vColor.rgb;
+  if (uCanvasSurface > 0.5) base *= canvasColor().rgb;
   // Mode 5 keeps its own palette in the Matrix; clouds are mode 4.
   float nativeMode = step(4.5, vParams.z);
   float cloud = step(3.5, vParams.z) * (1.0 - nativeMode);
@@ -1022,7 +1039,7 @@ void main() {
   const ORDINARY_MESH_FS = derive(MESH_FS, ["flat in vec4 vVoxel;", "uniform vec4 uVoxel;"], [/\bvVoxel\b/g, "uVoxel"]);
   // The camera's depth pre-pass: the mesh shader's cuts and nothing else, the rest compiled away.
   const DEPTH_MESH_FS = ORDINARY_MESH_FS.slice(0, ORDINARY_MESH_FS.indexOf("void main() {")) + "void main() {\n  if (clipped()) discard;\n}";
-  const MESH_UNIFORMS = ["uRigCount", "uRigPass", "uRigMatrices", "uRigParams", "uRigVoxels", "uRigVisibility", "uViewProj", "uLightViewProj", "uEye", "uViewDirection", "uLightDir", "uSky", "uGround", "uSun", "uDirectStrength", "uAmbientFloor", "uDiffuseFloor", "uShadowStrength", "uShadowFloor", "uShadowBias", "uShadow", "uShadowTexel", "uLights", "uLightCount", "uSpotLight", "uFog", "uFogRange", "uMatrixParams", "uMatrixOrigin", "uMatrixGlyph", "uMatrixCave", "uMatrixCaves", "uMatrixCaveBounds", "uMatrixCaveNear", "uMatrixPermanentCave", "uMatrixPermanentPlane", "uMatrixPermanentAperture", "uMatrixLivingGlobal", "uMatrixGlyphTex", "uMatrixSamples", "uClipMinY", "uClipMaxY", "uObjectClip", "uObjectSlab", "uObjectSlab2", "uProjective", "uMatrixGlyphOpacity", "uGlassOpacity", "uVoxel", "uWindTime", "uSway", "uSwing", "uGlass", "uLightBeam", "uLakeWaveCount", "uLakeWaves", "uLakeSurface", "uLakeSuction", "uLakeFlowEnabled", "uLakeFlowU", "uLakeFlowV", "uLakeCharge", "uLakeChargeRise", "uLakeChargeCenter", "uLakeOcclude", "uLakeWaveEnd", "uLakeBodyShape", "uLakeBodyBend", "uDSBSurface", "uDSBDepth", "uDSBEnvironment"];
+  const MESH_UNIFORMS = ["uRigCount", "uRigPass", "uRigMatrices", "uRigParams", "uRigVoxels", "uRigVisibility", "uViewProj", "uLightViewProj", "uEye", "uViewDirection", "uLightDir", "uSky", "uGround", "uSun", "uDirectStrength", "uAmbientFloor", "uDiffuseFloor", "uShadowStrength", "uShadowFloor", "uShadowBias", "uShadow", "uShadowTexel", "uLights", "uLightCount", "uSpotLight", "uFog", "uFogRange", "uMatrixParams", "uMatrixOrigin", "uMatrixGlyph", "uMatrixCave", "uMatrixCaves", "uMatrixCaveBounds", "uMatrixCaveNear", "uMatrixPermanentCave", "uMatrixPermanentPlane", "uMatrixPermanentAperture", "uMatrixLivingGlobal", "uMatrixGlyphTex", "uMatrixSamples", "uClipMinY", "uClipMaxY", "uObjectClip", "uObjectSlab", "uObjectSlab2", "uProjective", "uMatrixGlyphOpacity", "uGlassOpacity", "uVoxel", "uWindTime", "uSway", "uSwing", "uGlass", "uLightBeam", "uLakeWaveCount", "uLakeWaves", "uLakeSurface", "uLakeSuction", "uLakeFlowEnabled", "uLakeFlowU", "uLakeFlowV", "uLakeCharge", "uLakeChargeRise", "uLakeChargeCenter", "uLakeOcclude", "uLakeWaveEnd", "uLakeBodyShape", "uLakeBodyBend", "uDSBSurface", "uDSBDepth", "uDSBEnvironment", "uCanvasSurface", "uCanvasImage", "uCanvasRect", "uCanvasCurve", "uCanvasBackground", "uCanvasScale"];
   const ORDINARY_SHADOW_VS = derive(SHADOW_VS, [RIG_GLSL, ""], ["rigMatrix(mat4(aM0, aM1, aM2, aM3))", "mat4(aM0, aM1, aM2, aM3)"],
     ["layout(location=6) in vec4 aM3;\n\n", "layout(location=6) in vec4 aM3;\n"]);
   const LINE_VS = `#version 300 es
@@ -1648,6 +1665,8 @@ void main() {
     let dsbGPU=null;
     // PROTOTYPE: a scene at sea level can switch off the hub's dropped haze horizon (`hazeDrop: 0`).
     let skyHaze=1;
+    const canvasSurfaces = new WeakMap();
+    let canvasSurfaceSerial = 0;
     const res = { programs: {}, fbo: null, shadow: null, bloom: null, quadVao: null, matrixTexture: null };
     const mirror = { node: null, record: null, geometry: null, program: null, programReady: false, fb: null, tex: null, depth: null, width: 0, height: 0, renderWidth: 0, renderHeight: 0, capturedWidth: 0, capturedHeight: 0, portal: false, reveal: 0, frontFacing: false, walkThrough: false, captureValid: false, bodyTex: null, bodyState: null, bodyVersion: -1, shards: 0, query: null, queryPending: false, occluded: false, frame: 0 };
     const environment = { program: null, ready: false, fb: null, tex: null, depth: null, size: 0, next: 0, valid: 0, frame: 0, origin: new Float32Array(3) };
@@ -1702,6 +1721,10 @@ void main() {
         gl.useProgram(p.prog);
         gl.uniform1f(p.u.uGlass, 1);
         p.glass = 1;
+      }
+      if (p.u.uCanvasImage) {
+        gl.useProgram(p.prog);
+        gl.uniform1i(p.u.uCanvasImage, 6);
       }
       // Active water samplers must never alias the shadow sampler's unit 0, even outside DSB.
       // Linking also runs after context restoration and for the optional rig programs.
@@ -2881,6 +2904,49 @@ void main() {
         program.cutCount = count;
       }
     };
+    // One owned texture per canvas surface. Painting changes its revision; geometry and GPU buffers stay put.
+    const bindCanvasSurface = (rec, program) => {
+      const surface = rec.geometry.imageSurface, canvas = surface?.canvas;
+      let identity = canvas ? canvasSurfaces.get(surface) : 0;
+      if (canvas && !identity) { identity = ++canvasSurfaceSerial; canvasSurfaces.set(surface, identity); }
+      if (program.canvasSurfaceId !== identity || canvas && program.canvasSurfaceVersion !== surface.version) {
+        gl.uniform1f(program.u.uCanvasSurface, canvas ? 1 : 0);
+        // Keep only a number: an idle depth program must never retain a departed scene's canvas.
+        program.canvasSurfaceId = identity;
+        program.canvasSurfaceVersion = canvas ? surface.version : -1;
+        if (canvas) {
+          gl.uniform4fv(program.u.uCanvasRect, surface.rect);
+          gl.uniform2f(program.u.uCanvasScale, (surface.width || canvas.width) / canvas.width, (surface.height || canvas.height) / canvas.height);
+          const bg = surface.background;
+          gl.uniform3f(program.u.uCanvasBackground, bg ? bg[0] / 255 : 0, bg ? bg[1] / 255 : 0, bg ? bg[2] / 255 : 0);
+          if (surface.curve) gl.uniform3fv(program.u.uCanvasCurve, surface.curve);
+          else gl.uniform3f(program.u.uCanvasCurve, 0, 0, 0);
+        }
+      }
+      if (!canvas) return;
+      gl.activeTexture(gl.TEXTURE6);
+      if (!rec.imageTexture) {
+        rec.imageTexture = gl.createTexture();
+        imageTextures++;
+        gl.bindTexture(gl.TEXTURE_2D, rec.imageTexture);
+        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, canvas);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+        rec.canvasWidth = canvas.width; rec.canvasHeight = canvas.height; rec.canvasVersion = surface.version;
+      } else {
+        gl.bindTexture(gl.TEXTURE_2D, rec.imageTexture);
+        if (rec.canvasWidth !== canvas.width || rec.canvasHeight !== canvas.height) {
+          gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, canvas);
+          rec.canvasWidth = canvas.width; rec.canvasHeight = canvas.height; rec.canvasVersion = surface.version;
+        } else if (rec.canvasVersion !== surface.version) {
+          gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, gl.RGBA, gl.UNSIGNED_BYTE, canvas);
+          rec.canvasVersion = surface.version;
+        }
+      }
+      gl.activeTexture(gl.TEXTURE0);
+    };
     const drawImageSurface = (rec, count, cameraPass, resume) => {
       const surface = rec.geometry.imageSurface, image = surface.asset.load(), p = programs.image;
       gl.activeTexture(gl.TEXTURE6);
@@ -3023,7 +3089,8 @@ void main() {
         if (rigMode && kind === "mesh") applyRig(program, rec, useProgram === "shadow" ? 2 : cull ? 1 : 3);
         if (useProgram === "shadow") shadowDraws++;
         if (kind === "mesh" && meshPass) {
-          if (g.imageSurface) { drawImageSurface(rec, n, cull, program); continue; }
+          if (g.imageSurface && !g.imageSurface.canvas) { drawImageSurface(rec, n, cull, program); continue; }
+          bindCanvasSurface(rec, program);
           const mesh = program, glyph = stage === 1 ? 3 : stage === 2 ? 1 : g.matrixLocalGlyphSurface ? 2 : 0, cave = g.matrixCave || 0;
           if (glyph !== mesh.matrixGlyph) {
             gl.uniform1f(mesh.u.uMatrixGlyph, glyph);
@@ -3551,6 +3618,10 @@ void main() {
       rigMode = !!meshRigs && !!rigPrograms && !rigFailure;
       if (rigMode && !pollRigPrograms()) { if (rigFailure) rigMode = false; else return false; }
       programs = rigMode ? rigPrograms : res.programs;
+      // A previous surface may have been released since the last frame. Keep the active canvas sampler complete.
+      gl.activeTexture(gl.TEXTURE6);
+      gl.bindTexture(gl.TEXTURE_2D, res.matrixTexture);
+      gl.activeTexture(gl.TEXTURE0);
       collectForRender = rigMode ? collectRig : collect;
       cullForRender = rigMode ? writeRigCullSphere : writeCullSphere;
       uploadForRender = rigMode ? uploadRigInstances : uploadInstances;

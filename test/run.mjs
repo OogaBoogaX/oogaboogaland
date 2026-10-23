@@ -6726,12 +6726,32 @@ const hubJumbotron = { name: "hub jumbotron", why: "rule: the island rotation st
   const r = await b.evaluate(`(() => {
     const B = window.__ooga, j = B.jumbotron, data = window.BL.jumbotronData;
     j.goToView(0);
+    j.update(0, B.renderer);
+    B.renderer.render(BL.scenes.hub.root, B.camera, B.renderOpts);
+    const surfaceNode = j.node.children.find(node => node.geometry?.imageSurface?.canvas);
+    const surfaceGeometry = surfaceNode?.geometry, surfaceCanvas = surfaceGeometry?.imageSurface.canvas;
+    const initialRevision = surfaceGeometry?.imageSurface.version;
+    let bufferCreates = 0, bufferDeletes = 0;
     const captions = [];
     for (let i = 0; i < j.count; i++) { captions.push(j.caption); j.nextView(); }
     const wrapped = j.caption;
     // Same single-row feed twice, the pr flagged draft and not: the ticker's type column must differ.
     const feed = (draft) => ({ ...data, recent: [{ login: data.contributors[0].login, repo: data.repos[0].name, type: "pr", occurred_at: data.meta.generated_at, draft }] });
-    const column = () => { j.setView("recent"); B.advance(0.2, 1 / 30); return j.canvas.getContext("2d").getImageData(126, 12, 60, 92).data.join(); };
+    const column = () => {
+      const gl = B.renderer.kind === "webgl2" ? document.getElementById("scene").getContext("webgl2") : null;
+      const create = gl?.createBuffer, remove = gl?.deleteBuffer;
+      if (gl) {
+        gl.createBuffer = function(...args) { bufferCreates++; return create.apply(this, args); };
+        gl.deleteBuffer = function(...args) { bufferDeletes++; return remove.apply(this, args); };
+      }
+      try {
+        j.setView("recent"); j.update(0, B.renderer);
+        B.renderer.render(BL.scenes.hub.root, B.camera, B.renderOpts);
+      } finally {
+        if (gl) { gl.createBuffer = create; gl.deleteBuffer = remove; }
+      }
+      return j.canvas.getContext("2d").getImageData(126, 12, 60, 92).data.join();
+    };
     j.refreshData(feed(false));
     const plain = column();
     j.refreshData(feed(true));
@@ -6751,11 +6771,13 @@ const hubJumbotron = { name: "hub jumbotron", why: "rule: the island rotation st
       && reader.filters.users.length === 1 && reader.filters.users[0] === owner;
     reader.dispose(); restored.dispose(); j.refreshData(data);
     return { count: j.count, captions, wrapped, differs: plain !== drafted,
-      filtered, ownerOnly, restoredOwner };
+      filtered, ownerOnly, restoredOwner, bufferCreates, bufferDeletes,
+      stable: !!surfaceGeometry && surfaceNode.geometry === surfaceGeometry && surfaceGeometry.imageSurface.canvas === surfaceCanvas
+        && surfaceGeometry.imageSurface.version > initialRevision };
   })()`);
   const orgBoards = ["commits", "prs", "reviews", "comments", "issues"].map((t) => "org · " + t);
   record("hub jumbotron: the island rotates org activity, readers filter repositories, and attributed users appear once with saved alias selections restored", r.count === 7 && r.captions[0] === "Recent activity" && r.captions[1] === "Org totals" && orgBoards.every((c, i) => r.captions[2 + i] === c) && r.wrapped === "Recent activity" && r.filtered && r.ownerOnly && r.restoredOwner, JSON.stringify(r));
-  record("hub jumbotron: a draft PR draws a different ticker row than the same PR undrafted", r.differs, JSON.stringify({ differs: r.differs }));
+  record("hub jumbotron: a draft PR changes the ticker through a stable canvas surface without creating or deleting GPU buffers", r.differs && r.stable && r.bufferCreates === 0 && r.bufferDeletes === 0, JSON.stringify({ differs: r.differs, stable: r.stable, bufferCreates: r.bufferCreates, bufferDeletes: r.bufferDeletes }));
 } };
 const oogatronPopups = { name: "oogatron popups", why: "rule: Oogatron windows keep their displays apart during mouse or touch drags and remember their independent controls and layout after reload", run: async (b) => {
   const mobile = await b.evaluate("matchMedia('(pointer: coarse)').matches"), mode = mobile ? "phone" : "desktop";
@@ -16229,8 +16251,8 @@ const raceRigChecks = async () => {
     // bytes the depth-only and plain variants derive from, plus the untouched shadow path.
     "6bed3532a26c98c3e5a9218674dbe75c789324168104f6b0eb7fb5c88872a012",
     // 487d99ac909f added uObjectSlab2 for the Factory roof bore; removing its
-    // declaration and clipping predicate restores the previous b82d02f4 hash.
-    "f5f71f7931156d9329b39a13997433e2146fa367cee44e5ceb44ace6038a2be3",
+    // declaration plus the new canvas sampling restores the previous b82d02f4 baseline (was f5f71f79).
+    "c98cc70d4421dc879f1d45eeab7397aeae2022db23fbb4295ee0bad712178345",
     "37030f053de422aa157f017ceedef0812ed57a17c9e1b2af4aab017c0b645364"
   ];
   record("race rig strategy: ordinary mesh, fragment and shadow shader bytes retain the pre-rig fast path", ordinaryHashes.every((hash, i) => hash === expectedOrdinaryHashes[i]), JSON.stringify(ordinaryHashes));
@@ -16759,8 +16781,8 @@ const rigFailureIsolationProof = async () => {
     const context = {
       failure: null, rigFailure: null, rigProgramsReady: false, rigMode: false, parallel: null,
       finishProgram() { linkAttempts++; if (linkFails) throw new Error("Program link failed: uniform pressure"); },
-      gl: { getProgramParameter: () => true },
-      rigPrograms: { mesh: {}, shadow: {} }, res: { programs: "ordinary" }, programs: null,
+      gl: { getProgramParameter: () => true, activeTexture() {}, bindTexture() {} },
+      rigPrograms: { mesh: {}, shadow: {} }, res: { programs: "ordinary", matrixTexture: {} }, programs: null,
       collect: "cpu", collectRig: "rig", writeCullSphere: "cpu-cull", writeRigCullSphere: "rig-cull",
       uploadInstances: "cpu-upload", uploadRigInstances: "rig-upload",
       meshRigs: true, collectForRender: null, cullForRender: null, uploadForRender: null,

@@ -13,8 +13,8 @@
 // shared board dialog (`hud.openBoard`), and pages only from the rails; `prevView`, `goToView` and
 // `boardToWorld` do the rest, and any manual change restarts the auto-rotate timer. `canvas`,
 // `version`, `index`, `count`, `caption` and `goToView` are all that dialog reads.
-// `refreshData` accepts a live payload and the screen geometry it replaces is released, so the
-// board stays bounded; the module itself never fetches.
+// `refreshData` accepts a live payload; a stable curved surface samples the repainted canvas, so refreshes
+// change one texture revision without rebuilding meshes. The module itself never fetches.
 //
 // Its 5x7 `FONT` (exported under `text`) is the page's other shared alphabet: the board and the
 // Mempool cave's wall panels both set from it, and an unknown character draws as a box.
@@ -188,14 +188,17 @@
     };
   };
 
+  const WORLD_CANVASES = new WeakMap();
   const clearBoard = (ctx, resolution = 1) => {
-    if (ctx.canvas.width !== BOARD_W * resolution || ctx.canvas.height !== BOARD_H * resolution) {
+    const worldCanvas = WORLD_CANVASES.get(ctx.canvas);
+    if (worldCanvas) worldCanvas.resolution = resolution;
+    if (!worldCanvas && (ctx.canvas.width !== BOARD_W * resolution || ctx.canvas.height !== BOARD_H * resolution)) {
       ctx.canvas.width = BOARD_W * resolution;
       ctx.canvas.height = BOARD_H * resolution;
     }
+    if (worldCanvas) { ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height); }
     ctx.setTransform(resolution, 0, 0, resolution, 0, 0);
-    ctx.fillStyle = PALETTE.screenBg;
-    ctx.fillRect(0, 0, BOARD_W, BOARD_H);
+    if (!worldCanvas) { ctx.fillStyle = PALETTE.screenBg; ctx.fillRect(0, 0, BOARD_W, BOARD_H); }
   };
   const header = (ctx, title, right) => {
     // Repo names can outrun the board (25 glyphs > 192px beside the week label),
@@ -460,33 +463,9 @@
   };
 
   const screenGeometryFrom = (ctx, curved) => {
-    const geo = { verts: [], faces: [], lines: [] };
-    const width = ctx.canvas.width, height = ctx.canvas.height;
-    const pxW = SW / width, pxH = SH / height;
-    // Face colors are 0-255 like models.js hexToRgb; the renderer normalizes at upload.
-    pushQuad(geo, -SW / 2, SW / 2, -SH / 2, SH / 2, SCREEN_Z, [10, 12, 10], 0.35, curved, FX);
-    const data = ctx.getImageData(0, 0, width, height).data;
-    // Skip background (10,12,10) and the scanline tint (19,25,18): it would shimmer at distance.
-    const skip = (r, g, b) => (r === 10 && g === 12 && b === 10) || (r === 19 && g === 25 && b === 18);
-    for (let y = 0; y < height; y++) {
-      const wy0 = SH / 2 - (y + 1) * pxH, wy1 = SH / 2 - y * pxH;
-      const row = y * width;
-      let x = 0;
-      while (x < width) {
-        const i = (row + x) * 4;
-        const r = data[i], g = data[i + 1], b = data[i + 2];
-        if (skip(r, g, b)) { x++; continue; }
-        let run = x + 1;
-        while (run < width) {
-          const j = (row + run) * 4;
-          if (data[j] !== r || data[j + 1] !== g || data[j + 2] !== b) break;
-          run++;
-        }
-        pushQuad(geo, -SW / 2 + x * pxW, -SW / 2 + run * pxW, wy0, wy1, CONTENT_Z, [r, g, b], 0.9, curved, FX);
-        x = run;
-      }
-    }
-    geo.castShadow = false; // Thousands of tiny quads have no business in the shadow pass.
+    const geo = { verts: [], faces: [], lines: [], castShadow: false };
+    pushQuad(geo, -SW / 2, SW / 2, -SH / 2, SH / 2, CONTENT_Z, [255, 255, 255], 0.9, curved, FX);
+    geo.imageSurface = { canvas: ctx.canvas, version: 0, rect: [-SW / 2, -SH / 2, SW, SH], background: [10, 12, 10], tessellated: curved };
     return geo;
   };
 
@@ -548,8 +527,12 @@
     const canvas = document.createElement("canvas");
     canvas.width = BOARD_W;
     canvas.height = BOARD_H;
-    // willReadFrequently: each refresh reads the board back; without it Chrome warns and console-clean checks trip.
+    // Popup readers and the pixel-content regression inspect this opaque public board canvas.
     const ctx = canvas.getContext("2d", { alpha: false, willReadFrequently: true });
+    const worldCanvas = document.createElement("canvas");
+    worldCanvas.width = BOARD_W * 5; worldCanvas.height = BOARD_H * 5;
+    WORLD_CANVASES.set(worldCanvas, { resolution: 1 });
+    const worldContext = worldCanvas.getContext("2d");
 
     let model = null;
     try {
@@ -566,13 +549,6 @@
     let lastSwitchAt = 0;
     let resetRotation = false;
     let dirty = true;
-    // One full slide cycle of built screens: a rotation back reuses the quads instead of re-scanning
-    // the 1200x540 bitmap and re-uploading. swapGeometry still releases the outgoing screen's GPU
-    // record; a re-attached entry's is rebuilt on demand, and dispose releases every cached entry.
-    const CACHED_SCREENS = 8;
-    const geometryCache = new Map();
-    // Bumped with every accepted live payload, so a cached screen can never outlive its data.
-    let dataGeneration = 0;
     // All canvases use one minute-aligned age sample, even when painted at different times or paused on RECENT.
     let recentNow = Math.floor(Date.now() / 60000) * 60000;
     // World->local for board taps, cached: the cabinet never moves once placed.
@@ -655,14 +631,14 @@
         recent: source.recent.filter((row) => (!repos || repos.has(row.repo)) && (!users || users.has(row.login)) && (!types || types.has(row.type))) };
     };
 
-    const renderBoard = () => {
+    const renderBoard = (target = ctx) => {
       if (!model) {
-        clearBoard(ctx);
-        drawText(ctx, "OOGATRON", 62, 44, PALETTE.accent, 2);
-        drawText(ctx, "AWAITING DATA", 57, 60, PALETTE.dim, 1);
+        clearBoard(target);
+        drawText(target, "OOGATRON", 62, 44, PALETTE.accent, 2);
+        drawText(target, "AWAITING DATA", 57, 60, PALETTE.dim, 1);
         return;
       }
-      (VIEWS[view.name] || VIEWS.totals)(ctx, model, view.params, recentNow);
+      (VIEWS[view.name] || VIEWS.totals)(target, model, view.params, recentNow);
     };
 
     const node = createNode({
@@ -672,7 +648,11 @@
       geometry: curved ? curvedCabinetGeometry() : cabinetGeometry()
     });
     // Drawn at board size then scaled in to clear the rails; z is left alone.
-    const screenNode = createNode({ geometry: null, scale: { x: FX, y: FY, z: 1 } });
+    const screenNode = createNode({ geometry: screenGeometryFrom(worldContext, curved), scale: { x: FX, y: FY, z: 1 } });
+    const backing = { verts: [], faces: [], lines: [], castShadow: false };
+    pushQuad(backing, -SW / 2, SW / 2, -SH / 2, SH / 2, SCREEN_Z, [10, 12, 10], 0.35, curved, FX);
+    const screenBacking = createNode({ geometry: backing });
+    addChild(screenNode, screenBacking);
     addChild(node, screenNode);
     // The navigation chrome lives on the wood frame, unscaled cabinet space.
     const chromeNode = createNode({ geometry: null });
@@ -689,16 +669,11 @@
     let version = 0;
     const refresh = (renderer) => {
       renderBoard();
-      // A slide's pixels are fixed by its view, its params, the data generation and the curved flag;
-      // the recent slide's ages also follow the minute-aligned clock, so its key carries it.
-      const key = `${view.name}|${JSON.stringify(view.params)}|${dataGeneration}|${curved}|${view.name === "recent" ? recentNow : 0}`;
-      let geometry = geometryCache.get(key);
-      if (!geometry) {
-        geometry = screenGeometryFrom(ctx, curved);
-        if (geometryCache.size >= CACHED_SCREENS) geometryCache.delete(geometryCache.keys().next().value);
-        geometryCache.set(key, geometry);
-      }
-      swapGeometry(screenNode, geometry, renderer);
+      renderBoard(worldContext);
+      const surface = screenNode.geometry.imageSurface;
+      const resolution = WORLD_CANVASES.get(worldCanvas).resolution;
+      surface.width = BOARD_W * resolution; surface.height = BOARD_H * resolution;
+      surface.version++;
       dirty = false;
       version++;
     };
@@ -940,7 +915,6 @@
         }
         model = next;
         cycleViews = buildCycle(model);
-        dataGeneration++;
         // A repo view whose repo vanished falls back inside renderRepo.
         dirty = true;
         return true;
@@ -967,13 +941,13 @@
       },
       dispose(renderer) {
         if (renderer && renderer.releaseGeometry) {
-          // releaseGeometry is idempotent; the attached screen is one of the cached entries.
-          for (const geometry of geometryCache.values()) renderer.releaseGeometry(geometry);
+          if (screenBacking.geometry) renderer.releaseGeometry(screenBacking.geometry);
           if (screenNode.geometry) renderer.releaseGeometry(screenNode.geometry);
           if (chromeNode.geometry) renderer.releaseGeometry(chromeNode.geometry);
           if (node.geometry) renderer.releaseGeometry(node.geometry);
         }
-        geometryCache.clear();
+        screenBacking.geometry = null;
+        worldCanvas.width = worldCanvas.height = 0;
         screenNode.geometry = null;
         chromeNode.geometry = null;
         node.geometry = null;

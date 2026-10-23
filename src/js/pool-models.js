@@ -12,8 +12,8 @@
 // walked on as a thin closed shell so nothing falls through it into the chamber), `crossing` is the plank bridge
 // that carries the ring path over a channel, and `nestBed` is a clearing's banana-leaf beds.
 //
-// `carve` cuts headline type from `hubModels.SIGN_GLYPHS` and `panelFrom` merges a canvas of the jumbotron's 5x7
-// font into bounded quads, which is how the chamber's wall paintings are set. `chainBoard`/`CHAIN_BOARD`
+// `carve` cuts headline type from `hubModels.SIGN_GLYPHS`; `panelFrom` retains a transparent canvas on one
+// stable surface for the jumbotron's 5x7 font, which is how the chamber's wall paintings are set. `chainBoard`/`CHAIN_BOARD`
 // is the curved stats board on the lake's far shore, whose panel follows the same arc, and `infoSign` the
 // weather key beside it. The plants, rocks, animals and bridge are cartoon geometry from the hub's kit (`leafy`,
 // `puff`, `limb`, `flatInto`), one cached build each shared by every copy; the solid ones keep their first block
@@ -1248,42 +1248,31 @@
     return cursor;
   };
 
-  // A dense wall panel: the jumbotron's 5x7 font rendered into a canvas, then run-length merged into
-  // quads exactly as the big board does, so a wall of numbers is a few hundred faces and no texture.
-  const panelFrom = (ctx, w, h, px, py, background) => {
-    const geo = { verts: [], faces: [], lines: [] };
-    const data = ctx.getImageData(0, 0, w, h).data;
-    const bg = background;
-    const push = (x0, x1, y0, y1, color) => {
-      const base = geo.verts.length / 3;
-      geo.verts.push(x0, y0, 0, x1, y0, 0, x1, y1, 0, x0, y1, 0);
-      geo.faces.push({ i: [base, base + 1, base + 2, base + 3], color, emissive: 0.85 });
-    };
-    for (let y = 0; y < h; y++) {
-      const wy0 = (h - y - 1) * py, wy1 = (h - y) * py, row = y * w;
-      let x = 0;
-      while (x < w) {
-        const i = (row + x) * 4, r = data[i], g = data[i + 1], b = data[i + 2];
-        if (r === bg[0] && g === bg[1] && b === bg[2]) { x++; continue; }
-        let run = x + 1;
-        while (run < w) {
-          const j = (row + run) * 4;
-          if (data[j] !== r || data[j + 1] !== g || data[j + 2] !== b) break;
-          run++;
-        }
-        push(x * px, run * px, wy0, wy1, [r, g, b]);
-        x = run;
-      }
+  // One canvas-backed panel. Callers repaint transparent pixels and pass the existing geometry on a refresh.
+  // Each panel owns its canvas even when two boards use the same scratch painter.
+  const panelFrom = (ctx, w, h, px, py, background, previous = null) => {
+    const geo = previous || { verts: [0, 0, 0, w * px, 0, 0, w * px, h * py, 0, 0, h * py, 0],
+      faces: [{ i: [0, 1, 2, 3], color: [255, 255, 255], emissive: 0.85 }], lines: [], castShadow: false };
+    if (!geo.imageSurface) {
+      const canvas = document.createElement("canvas");
+      canvas.width = w; canvas.height = h;
+      geo.imageSurface = { canvas, context: canvas.getContext("2d"), version: 0, rect: [0, 0, w * px, h * py], background, tessellated: false };
     }
-    geo.castShadow = false;
+    const surface = geo.imageSurface;
+    surface.context.clearRect(0, 0, w, h);
+    surface.context.drawImage(ctx.canvas, 0, 0, w, h, 0, 0, w, h);
+    surface.version++;
     return geo;
   };
 
-  // Live numbers sit just proud of the slate and bend with it, including the run-merged glyph faces.
-  const chainPanel = (ctx, w, h, background) => {
-    const B = CHAIN_BOARD;
-    return curveChainBoard(panelFrom(ctx, w, h, B.px, B.px, background),
-      -w * B.px / 2, B.y + (B.h - h * B.px) / 2, B.d / 2 + 0.02);
+  // Live numbers keep the same circular arc and a stable UV mapping back to their unbent canvas.
+  const chainPanel = (ctx, w, h, background, previous = null) => {
+    const B = CHAIN_BOARD, ox = -w * B.px / 2, oy = B.y + (B.h - h * B.px) / 2;
+    if (previous) return panelFrom(ctx, w, h, B.px, B.px, background, previous);
+    const geo = curveChainBoard(panelFrom(ctx, w, h, B.px, B.px, background), ox, oy, B.d / 2 + 0.02);
+    geo.imageSurface.curve = [B.r, ox, oy];
+    geo.imageSurface.tessellated = true;
+    return geo;
   };
 
   // The island as one group: its body, the smooth floors, the bridge, the lake's membrane, the plank crossings,

@@ -2836,8 +2836,8 @@
       const canvas = document.createElement("canvas");
       canvas.width = CHAIN_PANEL_W;
       canvas.height = CHAIN_PANEL_H;
-      // willReadFrequently: every refresh reads the panel back, and without it Chrome warns.
-      chainSign = { node: panelNode, ctx2d: canvas.getContext("2d", { alpha: false, willReadFrequently: true }), printed: "", index: 0, switchAt: NaN, nextRefresh: 0 };
+      // Transparent pixels leave the curved slate visible between the retained surface's letters.
+      chainSign = { node: panelNode, ctx2d: canvas.getContext("2d"), printed: "", index: 0, switchAt: NaN, nextRefresh: 0 };
     }
     // Fire: the two torches of the court either side of the mouth, then one down each stretch of the descent on the
     // wall clear of its waterfalls, and four round the chamber between the paintings. The ones under the ground burn
@@ -6049,8 +6049,7 @@
     if (printed === chainSign.printed) return;
     chainSign.printed = printed;
     const c2 = chainSign.ctx2d, text = BL.jumbotron.text;
-    c2.fillStyle = `rgb(${CHAIN_PANEL_BG[0]},${CHAIN_PANEL_BG[1]},${CHAIN_PANEL_BG[2]})`;
-    c2.fillRect(0, 0, CHAIN_PANEL_W, CHAIN_PANEL_H);
+    c2.clearRect(0, 0, CHAIN_PANEL_W, CHAIN_PANEL_H);
     if (!index) {
       let y = 4;
       for (const [label, value, color] of rows) {
@@ -6067,8 +6066,7 @@
       if (under) drawMetric(c2, under, CHAIN_PANEL_W / 2, 54, "#9b8f7a", 2);
     }
     const node = chainSign.node;
-    if (node.geometry) renderer.releaseGeometry(node.geometry);
-    node.geometry = poolModels.chainPanel(c2, CHAIN_PANEL_W, CHAIN_PANEL_H, CHAIN_PANEL_BG);
+    node.geometry = poolModels.chainPanel(c2, CHAIN_PANEL_W, CHAIN_PANEL_H, CHAIN_PANEL_BG, node.geometry);
   };
   const updateChainSign = (elapsed) => {
     if (!chainSign) return;
