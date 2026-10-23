@@ -8929,6 +8929,7 @@
       BL.net.sendPose(p.x, p.y, p.z, gorilla.heading, g);
       BL.net.setHealth(gorilla.health.value / gorilla.health.max * 100, gorilla.health.value <= 0);
     } else {
+      BL.net.sendEquipment(driven.toolIndex || 0,driven.weapon.equipped?2:driven.tools && driven.weapon.toolHolstered?0:1);
       BL.net.sendPose(p.x, p.y - driven.baseY, p.z, driven.root.rotation.y);
       BL.net.setHealth(driven.health.value, driven.health.stunned);
     }

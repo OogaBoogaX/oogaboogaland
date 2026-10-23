@@ -195,6 +195,7 @@
       out[o + 98] = cave.work.site;
       out[o + 99] = cave.work.plannedSite;
       out[o + 100] = cave.tintState || 0;
+      out[o + 101] = cave.toolIndex || 0;
       out[o + 1] = flags;
     };
     const encode = () => {
@@ -369,6 +370,11 @@
       cave.stunBirds.visible = (flags & F_STUNNED) !== 0;
       if (cave.stunBirds.visible) cave.stunBirds.rotation.y += dt * 4;
       crew.setTint(cave, t[o + 100]);
+      if(cave.tools) {
+        const index=t[o+101];
+        if(Number.isInteger(index) && cave.tools[index] && cave.toolIndex!==index) {BL.models.setTool(cave,index);moved=true;}
+        BL.models.poseTools(cave,p.club.visible);
+      }
       // The work the gorillas read: state, phase, the cave worked and the one planned.
       const state = STATES[t[o + 96]], phase = PHASES[t[o + 97]];
       if (state !== undefined) cave.state = state;

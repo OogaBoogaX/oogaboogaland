@@ -1512,7 +1512,7 @@
       }
     };
     const aimKey = (e) => {
-      if (externalControl || e.metaKey || e.ctrlKey || e.altKey) return;
+      if (externalControl || e.metaKey || e.ctrlKey || e.altKey || e.target.closest?.("input, textarea, select, dialog")) return;
       if (e.key === "Tab") {
         if (!e.repeat) {
           const captured = armed() && (softAimFocused || !lockCancelled && (lockPending || document.pointerLockElement === canvas));
@@ -1860,9 +1860,11 @@
         crew.releaseSwing(primaryButtonCave, true);
         primaryButtonCave = null;
       }
+      if(hud.setToolbelt) hud.setToolbelt(cave && cave.tools,
+        cave && cave.tools ? weapon.toolHolstered || weapon.equipped ? "holster" : cave.tools[cave.toolIndex].id : "",ready && !cave.health.stunned);
       const reload = secondaryReady && weapon.equipped && crew.canReload(cave);
       const meleeCharge = weapon && weapon.meleeHeld ? weapon.meleeCharge : 0;
-      hud.setPrimary(primaryReady, !!weapon && !weapon.equipped, primaryReady ? cave.parts.club.geometry : null,
+      hud.setPrimary(primaryReady, !!weapon && !weapon.equipped && !(cave.tools && weapon.toolHolstered), primaryReady ? cave.parts.club.geometry : null,
         meleeCharge, !!weapon && weapon.meleeHeld,
         weapon ? crew.meleePower(cave, meleeCharge) : 1, !!weapon && weapon.aiming, cave ? cave.traits.name : "");
       hud.setWeapon(secondaryReady, !!weapon && weapon.equipped, weapon ? weapon.ammo : 0, !!weapon && weapon.reloading, reload, !!weapon && weapon.unlimited);
@@ -1896,8 +1898,16 @@
       const cave = player();
       if (!active || !cave || cave.grabbedBy || crew.sleeping) return false;
       resumePose();
+      if (action.startsWith("weapon-tool:")) {
+        const id=action.slice(12);
+        if(crew.selectTool(id,cave)) {
+          ads=false;syncAim();syncWeaponHud();
+          hud.hint(id==="holster" ? "Tools stowed · choose from your toolbelt to draw" : `${cave.tools[cave.toolIndex].label} equipped · use the melee control to strike`);
+        }
+        return true;
+      }
       if (action === "weapon-primary" || action === "weapon-primary-down") {
-        const alreadyHeld = !cave.weapon.equipped;
+        const alreadyHeld = cave.tools ? cave.weapon.primaryEquipped : !cave.weapon.equipped;
         if (!cave.weapon.primaryEquipped) {
           crew.selectWeapon(1, cave);
           syncAim();
