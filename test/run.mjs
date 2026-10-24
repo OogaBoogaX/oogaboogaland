@@ -6224,21 +6224,23 @@ const hostedSite = async () => {
   for (const [, src, group] of readFileSync(join(root, "src/index.html"), "utf8").matchAll(/<script src="([^"]+)" data-defer="([a-z-]+)"><\/script>/g)) deferred.set(group, [...(deferred.get(group) || []), src]);
   // A module's block in the built page runs from its marker to the next module's.
   const block = (src) => { const start = html.indexOf(`// ---- ${src} ----\n`); return html.slice(start, html.indexOf("\n\n// ---- ", start + 1)); };
-  const page = externalizeModules(html, out, deferred, block), refused = [], fetched = [];
+  // `gone` answers 404, as a chunk a later deploy replaced does.
+  const page = externalizeModules(html, out, deferred, block), refused = [], gone = [], fetched = [];
   const server = createServer((req, res) => {
     const path = req.url.split("?")[0];
     if (!path.startsWith("/js/")) { res.setHeader("content-type", "text/html; charset=utf-8"); return res.end(page); }
     fetched.push(path);
     if (refused.some(prefix => path.startsWith(prefix))) { res.writeHead(503); return res.end(); }
+    if (gone.some(prefix => path.startsWith(prefix))) { res.writeHead(404); return res.end(); }
     res.setHeader("content-type", "text/javascript");
     res.end(readFileSync(join(out, path)));
   });
   await new Promise((resolve, reject) => { server.once("error", reject); server.listen(0, "127.0.0.1", resolve); });
-  return { origin: `http://127.0.0.1:${server.address().port}`, refused, fetched,
+  return { origin: `http://127.0.0.1:${server.address().port}`, refused, gone, fetched,
     close: async () => { await new Promise(resolve => server.close(resolve)); rmSync(out, { recursive: true, force: true }); } };
 };
 // A refused bundle is logged by the browser as a failed resource; that line is the fixture's, not the page's.
-const dropRefusals = (b) => { for (let i = b.logs.length - 1; i >= 0; i--) if (b.logs[i].includes("status of 503")) b.logs.splice(i, 1); };
+const dropRefusals = (b) => { for (let i = b.logs.length - 1; i >= 0; i--) if (/status of (?:503|404)/.test(b.logs[i])) b.logs.splice(i, 1); };
 // One group's file exactly: `drop` is not `drop-scene`, which shares its prefix.
 const chunkOf = (group) => (path) => new RegExp(`^/js/${group}-[0-9a-f]{16}\\.js$`).test(path);
 const orbitHosted = { name: "orbit hosted", why: "regression: Ooga Orbit read Ooga Drop's models at load, which a hosted page had deferred, so it threw on entry, cold and after a Drop visit", run: async (b, site) => {
@@ -6291,11 +6293,23 @@ const factoryHostedShield = { name: "factory hosted shield", refuse: "/js/factor
   const entered = await untilPage(b, 'B.scene === "factory" && !B.transitioning', 15000);
   record("factory hosted: a refused factory download sends the Ooga back once, driving, until it steps out of the shield, and walking back in opens the hall", notified && refused.asked >= 1 && refused.asked <= 2 && refused.scene === "hub" && !refused.transitioning && refused.driving && entered && asked() > refused.asked, JSON.stringify({ notified, refused, entered, fetched: site.fetched }));
 } };
-for (const [id, step, path] of [["orbit", orbitHosted, "/oogaorbit"], ["arcade", arcadeHostedDrop, "/oogaarcade"], ["factory", factoryHostedShield, "/"]]) {
+// After a deploy the tab's chunks are gone: the page says so once and offers a reload, never "try again".
+const orbitHostedDeploy = { name: "orbit hosted deploy", gone: "/js/drop", why: "regression: after a deploy replaced the chunks, an open tab asked again and again for its old chunk and said try again, which could never work", run: async (b, site) => {
+  await b.evaluate(`__ooga.go("drop")`);
+  const offered = await untilPage(b, 'B.scene === "orbit" && !B.transitioning && document.getElementById("toast").textContent.includes("was updated")', 15000);
+  await b.sleep(4000);
+  const toast = await b.evaluate(`(() => { const t = document.getElementById("toast"), r = t.querySelector("button"); return { text: t.textContent, reload: !!r && r.textContent === "Reload", shown: t.classList.contains("show") && !t.hidden, pointer: getComputedStyle(t).pointerEvents, stale: BL.deferred.stale, scene: __ooga.scene }; })()`);
+  const heads = site.fetched.filter(chunkOf("drop")).length;
+  dropRefusals(b);
+  record("orbit hosted deploy: a chunk a deploy removed leaves the visitor where they were with a lasting \"Ooga Booga Land was updated · Reload\" offer",
+    offered && toast.reload && toast.shown && toast.pointer === "auto" && toast.stale && toast.scene === "orbit" && heads >= 1 && heads <= 2, JSON.stringify({ offered, toast, heads, fetched: site.fetched }));
+} };
+for (const [id, step, path] of [["orbit", orbitHosted, "/oogaorbit"], ["orbit", orbitHostedDeploy, "/oogaorbit"], ["arcade", arcadeHostedDrop, "/oogaarcade"], ["factory", factoryHostedShield, "/"]]) {
   if (ONLY && !onlyMatches(step.name)) continue;
-  tasks.push({ name: `${id} hosted`, scene: id, perf: false, run: async () => {
+  tasks.push({ name: `${id} hosted${step.gone ? " deploy" : ""}`, scene: id, perf: false, run: async () => {
     const site = await hostedSite();
     if (step.refuse) site.refused.push(step.refuse);
+    if (step.gone) site.gone.push(step.gone);
     try { await fold(`${site.origin}${path}?debug=1&nosim=1&net=0&hour=12&day=80&character=portlandhodl`, [[step.name, (b) => step.run(b, site)]]); }
     finally { await site.close(); }
   } });
