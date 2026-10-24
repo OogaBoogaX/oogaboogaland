@@ -15410,7 +15410,10 @@ const pokerTrip = (() => {
 // mirror does not ask again while the Ooga stands on it, and stepping off and back on goes through.
 const pokerExitRecovery = { name: "poker exit recovery", why: "regression: a refused way out to ₿IFRÖST left the poker room's leaving flag set, so neither its Return button nor its mirror worked again until a reload", run: async b => {
   await b.evaluate(`(() => { const go = document.querySelector('[data-intro="poker"] .game-intro-go'); if (go && go.offsetParent) go.click();
-    const load = BL.deferred.load; window.__pokerLoads = 0; BL.deferred.load = group => { if (group !== "dsb") return load(group); if (++window.__pokerLoads > 2) { BL.deferred.load = load; return load(group); } return Promise.reject(new Error("503")); }; })()`);
+    // ₿IFRÖST opens with stand-ins and loads its destinations after arrival, so nothing it fetches can refuse the way in;
+    // a prepare that rejects twice takes the director's real refusal path, as an unreachable chunk would.
+    const bifrost = BL.scenes.bifrost; window.__pokerLoads = 0;
+    bifrost.prepare = () => { if (++window.__pokerLoads > 2) { delete bifrost.prepare; return null; } return Promise.reject(new Error("503")); }; })()`);
   const settle = `(() => { const B = __ooga; for (let i = 0; i < 60 && B.transitioning; i++) B.advance(1 / 30, 1 / 30); return { scene: B.scene, transitioning: B.transitioning, loads: window.__pokerLoads }; })()`;
   await b.evaluate(`document.querySelector('[data-poker-action="exit"]').click()`);
   const button = await b.evaluate(settle);
