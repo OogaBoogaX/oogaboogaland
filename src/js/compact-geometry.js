@@ -49,21 +49,27 @@
     }
     return out;
   };
-  const legacyFace = (data, index) => {
-    let face = data.legacy.get(index);
-    if (face) return face;
-    const i = Object.freeze(Array.from(data.indices.subarray(data.offsets[index], data.offsets[index + 1])));
+  const plainFace = (data, index) => {
     const extra = data.colorExtras.get(index);
-    const color = Object.freeze(extra ? Array.from(extra) : Array.from(data.colors.subarray(index * 3, index * 3 + 3)));
-    face = { i, color };
+    const face = { i: Array.from(data.indices.subarray(data.offsets[index], data.offsets[index + 1])),
+      color: extra ? Array.from(extra) : Array.from(data.colors.subarray(index * 3, index * 3 + 3)) };
     for (const column of data.columns) {
       const code = column.codes[index];
       if (code) face[column.key] = column.values[code - 1];
     }
-    Object.freeze(face);
+    return face;
+  };
+  const legacyFace = (data, index) => {
+    let face = data.legacy.get(index);
+    if (face) return face;
+    face = plainFace(data, index);
+    Object.freeze(face.i); Object.freeze(face.color); Object.freeze(face);
     data.legacy.set(index, face);
     return face;
   };
+  // A builder copying a packed mesh's faces into a new one (`merge`, a track's sector bake) takes fresh plain records,
+  // which leave its legacy cache empty; an unpacked mesh's faces come back as they are.
+  const copyFace = (geometry, index) => { const data = storageOf(geometry); return data ? plainFace(data, index) : geometry.faces[index]; };
   // Keep Array.isArray, numeric access and Array prototype readers during migration. Only an unsupported reader
   // asks for a persistent face view; each index materializes once, so repeated access creates nothing further.
   // Renderer and visibility readers use cursors and leave this bounded compatibility cache empty.
@@ -151,11 +157,12 @@
     // Publish atomically after validation, releasing the source face objects and double arrays. Lines, normals,
     // and every geometry-level sidecar stay with their owner. No closure above captures the old arrays.
     data.faces = legacyFaces(data);
-    geometry.verts = positions;
-    geometry.faces = data.faces;
+    // Reassigning either throws (every module is strict); the typed positions themselves cannot refuse a write.
+    Object.defineProperty(geometry, "verts", { value: positions, enumerable: true, writable: false, configurable: false });
+    Object.defineProperty(geometry, "faces", { value: data.faces, enumerable: true, writable: false, configurable: false });
     geometry.compactGeometry = data;
     return geometry;
   };
   const NEGATIVE_ZERO = Object.freeze({});
-  BL.compactGeometry = { enabled, pack, storageOf, createCursor, readFace };
+  BL.compactGeometry = { enabled, pack, storageOf, createCursor, readFace, copyFace };
 })();

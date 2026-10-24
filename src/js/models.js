@@ -239,7 +239,12 @@
       // Index walk, not a spread: a large geometry would overflow the stack.
       const v = geo.verts;
       for (let i = 0; i < v.length; i++) out.verts.push(v[i]);
-      for (const f of geo.faces) out.faces.push({ ...f, i: f.i.map((i) => i + shift) });
+      // A packed part gives fresh face records, so merging it never fills its legacy face cache.
+      const packed = BL.compactGeometry?.storageOf(geo);
+      for (let n = 0, count = packed ? packed.count : geo.faces.length; n < count; n++) {
+        const f = packed ? BL.compactGeometry.copyFace(geo, n) : geo.faces[n];
+        out.faces.push({ ...f, i: f.i.map((i) => i + shift) });
+      }
       for (const l of geo.lines) out.lines.push({ ...l, i: l.i.map((i) => i + shift) });
     }
     return out;

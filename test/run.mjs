@@ -18064,6 +18064,12 @@ const visibilitySourceBakeProof = () => {
     check(meshOf(packedAlias)===actual && data.legacy.size===0,'Compact source alias materialized legacy faces or failed to share');
     const borrowed={...packed,verts:original.verts,faces:original.faces};
     check(C.storageOf(borrowed)===null && C.readFace(borrowed,0,cursor)===original.faces[0],'Borrowed marker overrode replacement geometry');
+    // A builder copying faces (merge, a track's sector bake) gets fresh records and leaves the legacy cache empty.
+    const copied=C.copyFace(packed,0);
+    check(data.legacy.size===0 && copied!==C.copyFace(packed,0) && !Object.isFrozen(copied) && copied.metadata===metadata && copied.color[3]===-1 && copied.i.join()==="0,1,2",'Copied compact faces filled the legacy cache or lost data');
+    let refused=0;
+    for (const key of ["faces","verts"]) try { (()=>{"use strict"; packed[key]=[];})(); } catch { refused++; }
+    check(refused===2 && C.storageOf(packed)===data,'Reassigning a packed mesh did not throw');
     const legacy=packed.faces[0];
     check(packed.faces[0]===legacy && Object.isFrozen(legacy) && Object.isFrozen(legacy.i) && legacy.color[3]===-1 && data.legacy.size===1,'Legacy compact access is not stable and bounded');
     return { cases, failures: 0, wrapperVisits: 100, sharedSourceBVHs: 1 };
