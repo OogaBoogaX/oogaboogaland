@@ -449,7 +449,12 @@
       leaving = false;
       world.sphereExit = null;
       if (shared) BL.net.setZone(room.zone);
-      if (guide.stage) { doors.want = 0; finishGuide(); }
+      if (guide.stage) {
+        // The vestibule is walkable only while guided: return inside before closing the doors and giving control back.
+        arrive(L.doorStep);
+        doors.want = 0;
+        finishGuide();
+      }
     };
     const exitPose = () => {
       const p = camera.position, t = camera.target, dx = t.x - p.x, dy = t.y - p.y, dz = t.z - p.z;

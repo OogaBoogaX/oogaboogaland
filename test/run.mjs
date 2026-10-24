@@ -12263,6 +12263,38 @@ const timechainRoomChecks = async () => {
     rows.every(r => r.radius === 9 * r.s && Math.abs(r.wall - 5.4 * r.s) < 1e-9 && Math.abs(r.screenW - 3 * r.s) < 1e-9 && r.heading === Math.PI && r.symmetric && r.front && r.doorBehind && r.screensReach < 1.4
       && r.arrivalClear && r.buttonReach && r.tableSolid && r.doorShut && r.doorGuided && r.wallSolid && r.guided && r.gear && r.chairs)
       && rows.map(r => r.seats).join() === "4,8,12" && ["door", "arrival", "button", "table"].every(same), JSON.stringify(rows));
+  // Regression: a rejected hub build released guided control in the vestibule, outside ordinary room collision.
+  // Exercise only the production recovery methods; no doorway animation or scene crossing runs in this fixture.
+  const interior = await readFile(new URL("../src/js/timechain-interior.js", import.meta.url), "utf8");
+  const methods = [["arrive", "guide"], ["finishGuide", "runGuide"], ["stay", "exitPose"]].map(([name, next]) => {
+    const start = interior.indexOf(`    const ${name} =`);
+    return interior.slice(start, interior.indexOf(`    const ${next} =`, start));
+  }).join("\n");
+  const recovery = [];
+  for (const scale of R.SCALES) for (const shared of [false, true]) for (const walking of [false, true]) {
+    const L = R.layout(scale), calls = [], guide = { stage: walking ? "out" : null }, doors = { want: walking ? 1 : 0 }, zones = [];
+    let destination = null, insideBeforeRelease = false, releasedInside = false;
+    const fixture = {
+      L, shared, guide, doors, room: R.get(R.SCALES.indexOf(scale) * 3 + 1), world: { sphereExit: {} }, leaving: true, guided: walking, COARSE: false,
+      BL: { net: { setZone: zone => zones.push(zone) } }, hud: { hint() {} },
+      people: { steer(...axes) { calls.push("stop"); if (axes.some(Boolean)) throw new Error("recovery kept walking"); } },
+      pilot: {
+        navigate(value) { destination = value; calls.push("arrive"); insideBeforeRelease = fixture.guided && guide.stage === "out" && doors.want === 1; },
+        setActive(on) { calls.push("active"); releasedInside = on && !fixture.guided && guide.stage === null && doors.want === 0; }
+      }
+    };
+    runInNewContext(`${methods}\nstay();`, fixture);
+    const p = destination && destination.position;
+    recovery.push({ scale, shared, walking,
+      restored: !fixture.leaving && fixture.world.sphereExit === null && zones.join() === (shared ? fixture.room.zone : ""),
+      recovered: walking ? insideBeforeRelease && releasedInside && calls.join() === "arrive,stop,active"
+        && p.x === L.doorStep.x && p.z === L.doorStep.z && p.y === 0 && destination.yaw === 0
+        && R.clearAt(L, p.x, p.z, 0.45) && R.clearAt(L, p.x, p.z - 0.2, 0.45)
+        : !destination && calls.length === 0 && guide.stage === null && doors.want === 0
+    });
+  }
+  record("timechain recovery: a rejected guided departure returns inside facing the room before closing doors and releasing control, while ordinary departures keep their pose",
+    recovery.every(row => row.restored && row.recovered), JSON.stringify(recovery));
   // These were untracked per-size Maps and eager module constants, retained even after a preview was cancelled.
   for (const name of ["math", "scene", "models", "jumbotron", "timechain-room-models"])
     runInNewContext(await readFile(join(root, "src/js/" + name + ".js"), "utf8"), context);
