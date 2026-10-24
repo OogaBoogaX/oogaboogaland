@@ -1,25 +1,34 @@
 {
   "version": 1,
   "lane": "manual",
-  "openedOn": "2026-10-08",
-  "round": "54573fc9687811278e451d116f73762d8d98b838",
+  "openedOn": "2026-10-24",
+  "round": "7245ec34d9912921396b227e46a0401db82cc06c",
   "entries": [
     {
-      "pr": 185,
-      "head": "ac29ff9bc7cb264fc98db5a6f19aaf770e02f306",
-      "author": "hotpixelgroup",
-      "path": "src/characters/hotpixelgroup.js",
-      "base": "3b50564ba59f433e7e8142dc0ac66aa87ad24a2a",
-      "hash": "d91e740f3fb27a9d5e3bff524457285326841b48dfa298cd8eb62d307fccd4fe",
+      "pr": 215,
+      "head": "7cff982927c9d8e5a51bacadb41c43e099c3fa19",
+      "author": "johnstackton21m",
+      "path": "src/characters/johnstackton21m.js",
+      "base": null,
+      "hash": "d49aa270603513fd46e6754baf559d37965295158b3b362b694a3972ead1e937",
       "lane": "manual"
     },
     {
-      "pr": 190,
-      "head": "781cfd99d6060d7da25aa0283ab329706861f6f4",
-      "author": "l0n0",
-      "path": "src/characters/l0n0.js",
+      "pr": 266,
+      "head": "6bb69c5a881ed0a80f8a4e5c56be4a737da3da89",
+      "author": "stacktoshi",
+      "path": "src/characters/stacktoshi.js",
       "base": null,
-      "hash": "33972940a39d4b97d95cf6cc596c250e81b50b7188ee65b7e43e30c9c5b7326d",
+      "hash": "35ca6e3aa66625bf3556889f32d162e7b3ef0091606bc78589b847312d33e4ab",
+      "lane": "manual"
+    },
+    {
+      "pr": 271,
+      "head": "4c9a0701e53bc8f179dacef076293cdad11d9b9d",
+      "author": "LiranCohen",
+      "path": "src/characters/itsLiran.js",
+      "base": null,
+      "hash": "5fa0f3725a7d21ac7f8ea029252485bc1772ebec8c503bc90c2d5d0ef74c6a26",
       "lane": "manual"
     }
   ]

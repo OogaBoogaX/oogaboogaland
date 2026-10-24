@@ -383,6 +383,16 @@
   const laserBurst = cached(() => noShadow(merge(
     box({ w: 0.035, h: 0.035, d: 1, color: "#fff4d6", emissive: 1 }),
     box({ w: 0.1, h: 0.1, d: 0.92, color: "#ff7a14", emissive: 1 }))));
+  // The hunters' upgraded rifle rounds (ghost-sim.js `WEAPON`): a bolt of laser a white-hot core in its colour's glow,
+  // `LASER_BOLT` long along z and centred, `straight` so the crew flies it along its line, never tumbling as a rock.
+  const LASER_BOLT = 1.6;
+  const laserBolt = variants((i) => {
+    const geo = noShadow(merge(
+      box({ w: 0.04, h: 0.04, d: LASER_BOLT, color: ["#fffbe0", "#f0ffe8", "#fff0ee"][i], emissive: 1 }),
+      box({ w: 0.11, h: 0.11, d: LASER_BOLT * 0.94, color: ["#ffd21a", "#3dff5a", "#ff2a1a"][i], emissive: 1 })));
+    geo.straight = true;
+    return geo;
+  });
   // The lightning drop: a white-hot zigzag bolt, one unit tall and centred, its two halves convex prisms.
   const lightningBolt = cached(() => noShadow(merge(
     prism([[-0.14, 0.06], [0.08, 0.06], [0.3, 0.5], [0.06, 0.5]], 0.12, "#ffffff", 1),
@@ -478,5 +488,5 @@
   });
   const shockwave = cached(() => noShadow(ring({ r: 1, thickness: 0.05, segments: 40, color: "#7dff9a", emissive: 1 })));
 
-  BL.ghostModels = { TIERS, MODE, DROPS, prepare, ghost, viewOf, drop, glowDisc, ringOf, beamOf, scorch, bolt, bubble, wallGeometry, orb, beam, zap, soul, rock, laserBurst, lightningBolt, monkey, elixir, picture, skeletonParts, gravestone, GRAVE_TOP, shockwave };
+  BL.ghostModels = { TIERS, MODE, DROPS, prepare, ghost, viewOf, drop, glowDisc, ringOf, beamOf, scorch, bolt, bubble, wallGeometry, orb, beam, zap, soul, rock, laserBurst, laserBolt, lightningBolt, monkey, elixir, picture, skeletonParts, gravestone, GRAVE_TOP, shockwave };
 })();
